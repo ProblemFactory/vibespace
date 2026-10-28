@@ -116,7 +116,7 @@ export const ROWS = [
   // lane jobs-memory-bound, acceptance round 5 (the ruling: what a task LEAVES running is stopped at its end): on a rung without a
   // scope, the processes of the wrapper's OWN process group (pgrp = its pid, read off a fresh /proc scan in the same pass, each
   // with its starttime) — the engine's stop of what a service KEPT goes through src/proc-identity.js (no row of its own)
-  ['data/bin/job-wrapper.js', "for (const [pid] of left) { try { process.kill(pid, 'SIGTERM'); } catch { } }", 'scan', 'const left = groupLeft\\(\\);', 'what a task left in the wrapper\'s own process group at its end — stopped (a fresh /proc scan, same pass)'],
+  ['data/bin/job-wrapper.js', "if (termed.has(termKey(p)) || !same(p)) return; termed.set(termKey(p), Date.now()); try { process.kill(p[0], 'SIGTERM'); } catch { } };", 'starttime', '!same\\(p\\)', 'what the job left — its group\'s at an end or a stop, a stopped service\'s escapees (round 7: termOnce, once each) — every row from a fresh /proc scan, its start re-read on the line'],
   ['data/bin/job-wrapper.js', "for (const [pid] of still) { try { process.kill(pid, 'SIGKILL'); } catch { } }", 'scan', 'const still = groupLeft\\(\\);', 'the same group re-scanned once its grace is out — by force (the scan the line above)', 2],
 ];
 // the persisted pids — each record and what its signal proves (a record with no starttime cannot be signalled by proof)

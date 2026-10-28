@@ -14,12 +14,15 @@
 //            ㉒ a stop drains the group the way an end does (a pod's rung); ㉓ the record says what it could not see (setsid);
 //            ㉔ the clear scans the group at clear time; ㉕ the keeper is known by its PID; ㉖ a record past its bound says so;
 //            ㉗ a boot's reap past its bound is retried (a real scope); ㉘ a kept scope's stop under a held read SIGTERMs blind;
-//            ㉙ every start of a service waits for what is pending
+//            ㉙ every start of a service waits for what is pending; ROUND 7: ⑭ driven by STATE (the wrapper's own «stop:» line,
+//            a 1 s grace — never a sleep); ㉟ a stop's intent written before its signal; ㊱ what left the group gets its own grace
 //   §4 REAL  the park law through the engine's own doors (a boot replay counts like a run; a restart resets it — a service, a cron)
 //   §5 REAL  the boot's judge over a fake cgroup (the instance's OOM count rose; a rolling update; a SIGKILL from outside)
 // RED on ef0012b5 (round 5): ㉑ the new run killed at the first stop's grace, labelled; ㉒ the deaf member survived the stop,
 // unsaid; ㉓ nothing said, nothing kept; ㉔ the late child ran on; ㉕ the impostor taken for the keeper; ㉖ 6 of 70 survived; ㉗ the
-// boot's reap dropped; ㉘ no SIGTERM, «10 s after its SIGTERM» said; ㉙ started beside the old scope. Earlier rounds: the report.
+// boot's reap dropped; ㉘ no SIGTERM, «10 s after its SIGTERM» said; ㉙ started beside the old scope. RED on 336761e5 (round 6):
+// ⑭ waits for a «stop:» line no wrapper writes; ㉟ kept, no `cleared`; ㊱ the escapee's SIGTERM and SIGKILL 17 ms apart; its own
+// copy of ⑭ (a 50 ms sleep into a 0.15 s window) red in 4 of 5 pairs started 0.25 s apart. Earlier rounds: the report.
 // Load: each job allocates ≤ 512 MB once (most far less, the cgroup legs stop at 256 MB), no busy loop; the legs run at once;
 // scratch dataDirs under os.tmpdir(), one per leg.
 import fs from 'node:fs';
@@ -652,31 +655,33 @@ leg('§3 REAL ⑬ a service\'s REPLAY awaits the reap of its predecessor\'s scop
   stopEngine(E);
 });
 
-leg('§3 REAL ⑭ one flag, one meaning — a job SIGKILLed ALONE mid-stop killed no scope: what it left is still drained, the end written on an empty scope, its words say which kill', async (ok) => {
+leg('§3 REAL ⑭ one flag, one meaning — a job SIGKILLed ALONE mid-stop killed no scope: what it left is still drained, the end written on an empty scope, its words say which kill (round 7: driven by STATE — the kill lands once the wrapper is SEEN holding the stop, inside a 1 s grace; 336761e5 slept 50 ms into a 0.15 s window: red under a second copy 0.25 s apart, 5 of 5)', async (ok) => {
   if (!userSystemd) { skip++; ok.say('  - SKIP the two-facts leg: no user systemd with a memory controller answers here'); return; }
-  const one = async (argv) => {
-    const E = engineIn(scratch())({ memorySample: { stopMs: 150 } });
+  const one = async (argv, procs) => {
+    const E = engineIn(scratch())({ memorySample: { stopMs: 1000 } });
     E._graceMs = () => 5000; // this leg reads the WRAPPER's drain: the engine's own kill step stays out of its window
     const j = E.jobs.get(E.create({ kind: 'task', name: 'killed-alone', cmd: { argv }, memoryMb: 256, owner }, caller).job.id);
     await running(E, j);
     const b = readJson(path.join(ctlOf(j), 'bound.json')) || {}, st = E._readStamp(j);
-    await sleep(30); // its child started
+    await until(() => procsOfCg(b.cgroup).length >= procs, 3000, 5); // the job and what it started, in its scope
     const main = Number(fs.readFileSync(`/proc/${st.pid}/task/${st.pid}/children`, 'utf8').trim().split(/\s+/)[0]);
+    const t0 = Date.now();
     E.stop(j);
-    await sleep(50);
+    const heard = await until(() => fs.readFileSync(lastRun(j).log, 'utf8').includes('[job-wrapper] stop: SIGTERM'), 3000, 5); // the wrapper HOLDS the stop — its own line
+    const gap = Date.now() - t0;
     try { process.kill(main, 'SIGKILL'); } catch { } // an agent's kill -9 of the job alone, mid-stop
     let atExit = null;
-    await until(() => { if (fs.existsSync(exitOf(j))) { atExit = procsOfCg(b.cgroup); return true; } return false; }, 5000, 5); // (b8d2a3a0 writes it ~3.3 s in)
+    await until(() => { if (fs.existsSync(exitOf(j))) { atExit = procsOfCg(b.cgroup); return true; } return false; }, 5000, 5);
     const ex = readJson(exitOf(j)) || {};
     killScopeOf(b.unit);
     await until(() => !E._verifyAlive(st), 2000, 10);
     stopEngine(E);
-    return { ex, atExit: atExit || ['?'] };
+    return { ex, atExit: atExit || ['?'], gap, heard };
   };
-  const [A, B] = await Promise.all([one(['sh', '-c', 'trap "" TERM; (exec sleep 9) & exec sleep 9']), one(['sh', '-c', 'trap "" TERM; exec sleep 9'])]);
-  ok(A.ex.signal === 'SIGKILL' && A.ex.scopeEmpty === true && !A.atExit.length && A.ex.forced === 'stopped by force: 1 process was still in its scope 0.15 s after the stop — its scope was killed',
-    `its child deaf to the stop is still drained — the end written on an EMPTY scope (cgroup.procs at exit.json: [${A.atExit.join(' ')}]), «${A.ex.forced || 'no force'}» (b8d2a3a0: written while the child ran, «it did not end on SIGTERM — its scope was killed»)`, { ex: A.ex, atExit: A.atExit });
-  ok(B.ex.signal === 'SIGKILL' && !B.ex.forced && B.ex.scopeEmpty === true && !B.atExit.length, `nothing left: no «by force» — we killed nothing (b8d2a3a0: «${'it did not end on SIGTERM — its scope was killed'}» for a kill that was not ours)`, B.ex);
+  const [A, B] = await Promise.all([one(['sh', '-c', 'trap "" TERM; (exec sleep 9) & exec sleep 9'], 2), one(['sh', '-c', 'trap "" TERM; exec sleep 9'], 1)]);
+  ok(A.heard && A.ex.signal === 'SIGKILL' && A.ex.scopeEmpty === true && !A.atExit.length && A.ex.forced === 'stopped by force: 1 process was still in its scope 1 s after the stop — its scope was killed',
+    `its child deaf to the stop is still drained — the end written on an EMPTY scope (cgroup.procs at exit.json: [${A.atExit.join(' ')}]), «${A.ex.forced || 'no force'}»; the kill ${A.gap} ms after the stop, once the wrapper said it holds it (b8d2a3a0: written while the child ran, «it did not end on SIGTERM — its scope was killed»)`, { ex: A.ex, atExit: A.atExit, gap: A.gap, heard: A.heard });
+  ok(B.heard && B.ex.signal === 'SIGKILL' && !B.ex.forced && B.ex.scopeEmpty === true && !B.atExit.length, `nothing left: no «by force» — we killed nothing (the kill ${B.gap} ms after the stop; b8d2a3a0: «${'it did not end on SIGTERM — its scope was killed'}» for a kill that was not ours)`, { ex: B.ex, gap: B.gap });
 });
 
 
@@ -885,6 +890,53 @@ leg('§3 REAL ㉙ EVERY START OF A SERVICE WAITS FOR WHAT IS PENDING — the own
   await running(E, j);
   E.stop(j); await ended(E, j); await E._sweep();
   for (const u of [b1.unit, b2.unit]) killScopeOf(u);
+  stopEngine(E);
+});
+
+// ── ROUND 7 ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
+leg('§3 REAL ㉟ A STOP\'S INTENT IS WRITTEN BEFORE ITS SIGNAL — a pod\'s service whose job ends on its SIGTERM before the wrapper\'s own handler runs (the job\'s signal first, the wrapper\'s 0.1 s later): what it left is still stopped with it and said (336761e5: kept, no `cleared` — ㉒ in 1 pair of 12)', async (ok) => {
+  if (!realOf('prlimit')) { skip++; ok.say('  - SKIP the stop-intent leg: no prlimit here'); return; }
+  const DEAF = ['sh', '-c', '(trap "" TERM; exec sleep 30) >/dev/null 2>&1 & echo "left $!"; echo ready; exec sleep 30'];
+  const E = engineIn(scratch())({ memoryRungs: ['rlimit-data'], memorySample: { stopMs: 300 } });
+  const j = E.jobs.get(E.create({ kind: 'service', name: 'intent', cmd: { argv: DEAF }, restart: 'never', memoryMb: 1024, owner }, caller).job.id);
+  await until(() => ready(j), 4000, 10);
+  const pid = leftPids(j)[0], st = E._readStamp(j);
+  const main = Number(fs.readFileSync(`/proc/${st.pid}/task/${st.pid}/children`, 'utf8').trim().split(/\s+/)[0]);
+  // THE RACE, made certain: the engine's SIGTERM reaches the job first, the wrapper's group 0.1 s later — the wrapper handles its
+  // child's end before its own handler runs (the order a busy box gives at random)
+  const kg = E._killGroup.bind(E);
+  E._killGroup = (jj, sig) => { if (jj !== j || sig !== 'SIGTERM') return kg(jj, sig); try { process.kill(main, 'SIGTERM'); } catch { } setTimeout(() => kg(jj, sig), 100); return true; };
+  E.stop(j);
+  await ended(E, j);
+  const survived = alive(pid), ex = readJson(exitOf(j)) || {};
+  await E._sweep();
+  const snap = E.snapshot(j);
+  ok(!survived && ex.stop === 'SIGTERM' && ex.left && ex.left.kept === true && ex.left.cleared > 0 && /^it left 1 process running — stopped at \d\d:\d\d$/.test(snap.run.endWords || '') && j.state === 'down',
+    `the wrapper knew the stop from its intent: what the service left is stopped WITH it at the grace — exit.json left ${JSON.stringify(ex.left && { ...ex.left, pids: undefined })}, «${snap.run.endWords}» (336761e5: kept, no cleared — «kept» until the engine's own clear a tick and a grace later)`, { survived, stop: ex.stop, left: ex.left, end: snap.run.endWords });
+  try { process.kill(-st.pid, 'SIGKILL'); } catch { } try { process.kill(pid, 'SIGKILL'); } catch { }
+  stopEngine(E);
+});
+
+leg('§3 REAL ㊱ WHAT LEFT THE GROUP GETS ITS OWN GRACE — a pod\'s service whose main is deaf to the stop: its setsid process hears the SIGTERM with the main and ends a grace later (336761e5: SIGTERM and SIGKILL back to back once the main was killed)', async (ok) => {
+  if (!realOf('prlimit') || !realOf('setsid')) { skip++; ok.say('  - SKIP the escapee-grace leg: no prlimit or setsid here'); return; }
+  const dir = scratch(), termF = path.join(dir, 'esc.term'), pidF = path.join(dir, 'esc.pid');
+  // the escapee starts BEFORE the main ignores TERM (a signal ignored on entry cannot be trapped); it notes its SIGTERM and runs on
+  const ESC = `setsid sh -c 'echo $$ > ${pidF}; trap "date +%s%N > ${termF}" TERM; while :; do sleep 30 & wait $!; done' >/dev/null 2>&1 </dev/null &`;
+  const E = engineIn(dir)({ memoryRungs: ['rlimit-data'], memorySample: { stopMs: 400 } });
+  E._graceMs = () => 5000; // the wrapper's grace is read here: the engine's own kill step stays out of it
+  const j = E.jobs.get(E.create({ kind: 'service', name: 'deaf-main', cmd: { argv: ['sh', '-c', `${ESC} trap "" TERM; echo ready; exec sleep 30`] }, restart: 'never', memoryMb: 1024, owner }, caller).job.id);
+  await until(() => ready(j) && fs.existsSync(pidF), 4000, 10);
+  const esc = Number(fs.readFileSync(pidF, 'utf8')), st = E._readStamp(j);
+  const t0 = Date.now();
+  E.stop(j);
+  let deadAt = 0;
+  await until(() => { if (!alive(esc)) { deadAt = Date.now(); return true; } return false; }, 4000, 5);
+  const termAt = (() => { try { return Math.round(Number(fs.readFileSync(termF, 'utf8').trim()) / 1e6); } catch { return 0; } })();
+  await ended(E, j); await E._sweep();
+  const grace = termAt && deadAt ? deadAt - termAt : -1, ex = readJson(exitOf(j)) || {};
+  ok(grace >= 360 && termAt - t0 < 300 && ex.left && ex.left.cleared > 0 && ex.left.escaped >= 1,
+    `its SIGTERM ${termAt - t0} ms after the stop (with the main), its end ${deadAt - t0} ms — ${grace} ms between its two signals, the stop's grace 0.4 s (336761e5: ~0 — both once the main was killed at the grace)`, { termIn: termAt - t0, deadIn: deadAt - t0, grace, left: ex.left && { ...ex.left, pids: undefined } });
+  try { process.kill(esc, 'SIGKILL'); } catch { } try { process.kill(-st.pid, 'SIGKILL'); } catch { }
   stopEngine(E);
 });
 

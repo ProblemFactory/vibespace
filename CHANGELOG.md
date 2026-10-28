@@ -11,7 +11,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 ### Changed
 - A job out of memory twice in a row waits for you instead of restarting blindly, so on a cluster it no longer takes the whole instance down again and again.
 - On a computer or cluster with its own memory limit, a job's limit stays below it, and its card says when it was lowered.
-- Stopping a background job now ends everything it started; its properties keep the limit you set and show the one in force beside it.
+- Stopping a background job now ends everything it started. On a cluster, a task's detached process is only named; one that also clears its environment is unseen.
+- A job's properties keep the memory limit you set and show the one in force beside it.
 - A finished background task's leftover processes are stopped and its card says so; on a cluster, one that detaches itself is only named. A stopped job gets 10 s.
 - A background service's leftover processes keep running until it stops or starts again, including the restart after a VibeSpace update.
 

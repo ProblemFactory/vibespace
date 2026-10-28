@@ -18,12 +18,17 @@
 //            NOT FINISH IS ALWAYS RETRIED — the boot's, a replay's wait — and one that never answers is said once; ⑯ two
 //            outcomes, two words (a scope gone is not a kernel without cgroup.kill); ⑰ a pass waits ONE read (judged first,
 //            the deferred reaps retried at once); ⑱ an OOM the exit record names beats a stop pressed after it; ⑲ a kill
-//            timer belongs to its run; the cap as the engine states it (uncapped or capped — run both), the properties
+//            timer belongs to its run; ROUND 7: ㉚ the ladder is driven every tick (a timed-out task's wedged wrapper); ㉛ a
+//            reap only for a wrapper proven gone; ㉜ one deadline a reap (the waits counted, no clock); ㉝ three causes, three
+//            words; ㉞ nothing stopped is never «stopped at»; the cap as the engine states it (uncapped or capped — run both)
 //   §6       the doors where the job is — and the one road of the park law (src/jobs.js counts every end in ONE place)
 // RED on 6428c67e (the base): no rung, no named end, no park. RED on 0259f1ea / 8a2727c8 / 222f7f5d / b8d2a3a0: see the lane's
 // report (rounds 1–5). RED on ef0012b5 (round 5): the boot's reap past its read's bound is dropped (⑮), a gone scope is said
 // «no cgroup.kill» (⑯), a pass awaits each scope in series (⑰), a stop after the exit record erases its OOM (⑱), a stop's kill
-// timer SIGKILLs the next run and labels it (⑲), the «kept» words outlive the clearing (§1).
+// timer SIGKILLs the next run and labels it (⑲), the «kept» words outlive the clearing (§1). RED on 336761e5 (round 6): the
+// timeout's step armed once — [SIGTERM, scope], «up» for ever (㉚); a live service's scope killed blind at a boot that could not
+// read its pid.json (㉛); a retry pass waits two bounds (㉜); «did not answer» for a refused kill and for survivors (㉝);
+// «stopped at» for what had already ended (㉞); the advice twice on the card (§1).
 // Load: none — no process is started; scratch dataDirs under os.tmpdir(), removed at the end.
 import fs from 'node:fs';
 import os from 'node:os';
@@ -147,11 +152,19 @@ console.log('§1 PURE — THE LADDER, the size verdict, the rung record, the nam
     && lw({ n: 1, kept: true, cleared: at }) === 'it left 1 process running — stopped at 14:05',
   'round 6 words: what left its group «1 process left its group — not stopped; run it as a service job»; «(64 of 70 recorded)»; once stopped, «it left 1 process running — stopped at 14:05»', [lw({ n: 0, escaped: 1 }), lw({ n: 1, kept: true, cleared: at })]);
   ok(ew({ left: { n: 1, kept: true, cleared: at } }) === 'it left 1 process running — stopped at 14:05' && rlw({ left: { n: 1, kept: true, cleared: at } }, t) === 'left 1 running — stopped at 14:05'
-    && rlw({ left: { n: 0, escaped: 2 } }, t) === '2 left its group — not stopped; run it as a service job' && rlw({ left: { n: 1, escaped: 1 } }, t) === 'left 1 running — stopped; to keep a daemon, run it as a service job · 1 left its group — not stopped; run it as a service job',
+    && rlw({ left: { n: 0, escaped: 2 } }, t) === '2 left its group — not stopped; run it as a service job' && rlw({ left: { n: 1, escaped: 1 } }, t) === 'left 1 running — stopped · 1 left its group — not stopped; run it as a service job',
   'after the stop that stopped what a service kept, `show` / `poll` and the card say WHEN — never «kept» (ef0012b5: «left 1 running — kept…» until the next run); what left the group is said on the card', [ew({ left: { n: 1, kept: true, cleared: at } }), rlw({ left: { n: 1, kept: true, cleared: at } }, t)]);
   ok(JSON.stringify(lr({ n: 0, escaped: 2 })) === '{"n":0,"escaped":2}' && lr({ n: 0 }) === null && JSON.stringify(lr({ n: 70, kept: true, pids: [[123, 4]], recorded: 64, cleared: at })) === JSON.stringify({ n: 70, kept: true, pids: [[123, 4]], boot: '', recorded: 64, cleared: at }) && !('cleared' in (lr({ n: 1, force: true, cleared: at }) || {})) && !('recorded' in (lr({ n: 2, kept: true, recorded: 1 }) || {})),
     'exit.json `left`, sanitized: an escapee-only record; the rows it names of more; WHEN a stopped service\'s were stopped (a kept record\'s only); a `recorded` with no rows is none');
-  ok(typeof JW.leftWords === 'function' && [{ n: 0, escaped: 1 }, { n: 2, force: true, escaped: 3 }, { n: 70, kept: true, pids: [[2, 1]], recorded: 64, escaped: 2 }, { n: 1, kept: true, cleared: at }].every((l) => WF('leftWords')(l) === lw(l)), 'round 6: the job\'s own log line says the new words the SAME way (the twins, pinned over every new shape)');
+  ok(typeof JW.leftWords === 'function' && [{ n: 0, escaped: 1 }, { n: 2, force: true, escaped: 3 }, { n: 70, kept: true, pids: [[2, 1]], recorded: 64, escaped: 2 }, { n: 1, kept: true, cleared: at }, { n: 2, kept: true, gone: at }].every((l) => WF('leftWords')(l) === lw(l)), 'round 6: the job\'s own log line says the new words the SAME way (the twins, pinned over every new shape — round 7: «had already ended» too)');
+  // ROUND 7 — the card says «run it as a service job» ONCE beside what left the group (336761e5: twice); what a service kept that
+  // had already ended on its own is said so — never «stopped at» (nothing was signalled)
+  const once = rlw({ left: { n: 2, force: true, escaped: 1 } }, t);
+  ok(once === 'left 2 running — stopped by force · 1 left its group — not stopped; run it as a service job' && once.split('run it as a service job').length === 2 && lw({ n: 2, force: true, escaped: 1 }).split('run it as a service job').length === 2,
+    `round 7: the advice ONCE on the card — «${once}» (336761e5: «…; to keep a daemon, run it as a service job · …; run it as a service job»)`, once);
+  ok(lw({ n: 1, kept: true, gone: at }) === 'it left 1 process running — it had already ended by 14:05' && lw({ n: 2, kept: true, gone: at }) === 'it left 2 processes running — they had already ended by 14:05' && rlw({ left: { n: 1, kept: true, gone: at } }, t) === 'left 1 running — had already ended by 14:05'
+    && lr({ n: 1, kept: true, pids: [[2, 1]], gone: at }).gone === at && !lr({ n: 1, kept: true, pids: [[2, 1]], cleared: at, gone: at }).gone,
+    'round 7: what had already ended on its own — «it left 1 process running — it had already ended by 14:05» (show / poll, the card); the record keeps `gone`, never beside `cleared`', [lw({ n: 1, kept: true, gone: at }), rlw({ left: { n: 1, kept: true, gone: at } }, t)]);
   // the words exist in every language the card speaks (the i18n tables carry each key)
   const keys = ['stopped: used more than {size}', 'parked: out of memory twice — raise its bound or fix the job', 'killed: the instance ran out of memory', 'unbounded — this host cannot enforce a bound', '{name}: parked — out of memory twice. Raise its bound or fix the job, then start it again', 'Memory bound of a background job (MB)', 'capped by the instance’s {size} limit',
     'capped by the user slice’s {size} limit', 'capped by {name}’s {size} limit', 'effective {size}', 'the instance’s limit {size}', 'the user slice’s limit {size}', '{name}’s limit {size}',
@@ -238,10 +251,11 @@ const NO_LIMIT = (() => { const d = tmp('vs-jobs-mem-nolimit-'); fs.writeFileSyn
 const BOOT = (() => { try { return fs.readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim(); } catch { return ''; } })();
 // a pid no process can have (past pid_max): a wrapper that is gone, without starting one to watch it die
 const DEAD = (() => { try { return Number(fs.readFileSync('/proc/sys/kernel/pid_max', 'utf8').trim()) + 1; } catch { return 4194305; } })();
-const engine = (dir, extra = {}) => {
+const engine = (dir, extra = {}, before = () => { }) => {
   const E = new JobManager({ dataDir: dir, broadcast: () => { }, notifyUser: (n) => said.push(n), log: (...a) => logs.push(a.join(' ')), memoryUnitPrefix: 'jobs-memory-bound-fast', memoryLimitDir: NO_LIMIT, ...extra });
   E.spawned = [];
   E._spawn = (job, trigger) => { E.spawned.push({ id: job.id, trigger }); job.runs.push({ startedAt: Date.now(), trigger, log: '' }); job.state = 'starting'; }; // never a process: the start, recorded
+  before(E); // a stub the boot itself must meet
   E.init();
   for (const t of E._timers) clearInterval(t); // the suite drives the sweep itself
   E._timers = []; engines.push(E);
@@ -263,8 +277,8 @@ fs.promises.readFile = function (p, ...a) {
 };
 fs.promises.writeFile = function (p, ...a) {
   const f = faultOf(p);
-  const go = () => realWrite.call(fs.promises, p, ...a).then((v) => { if (String(p).endsWith('cgroup.kill') && FAULTS.has(path.basename(path.dirname(String(p))))) fs.writeFileSync(path.join(path.dirname(String(p)), 'cgroup.procs'), ''); return v; });
-  return f && f.writeHang ? never() : f && f.writeMs ? sleep(f.writeMs).then(go) : go();
+  const go = () => realWrite.call(fs.promises, p, ...a).then((v) => { if (String(p).endsWith('cgroup.kill') && FAULTS.has(path.basename(path.dirname(String(p)))) && !(f && f.survive)) fs.writeFileSync(path.join(path.dirname(String(p)), 'cgroup.procs'), ''); return v; });
+  return f && f.writeHang ? never() : f && f.writeGate ? f.writeGate.then(go) : f && f.writeMs ? sleep(f.writeMs).then(go) : go();
 };
 // a scope of the fake tree: <root>/fake.slice/<unit>, holding `pids` (never a real process: past pid_max), with a cgroup.kill
 // unless `nokill` (a kernel before 5.14); its bound.json names it the way a wrapper's does
@@ -328,7 +342,8 @@ leg('§3 IN-PROCESS ⑮ A REAP THAT DID NOT FINISH IS ALWAYS RETRIED — the boo
   const A = fakeScope(root, 'boot-exit'), B = fakeScope(root, 'boot-noexit'), C = fakeScope(root, 'never'), D = fakeScope(root, 'replay');
   // the hub's boot meets a busy threadpool: these scopes' reads AND writes are held (past the read's bound, 0.005 s here); C's
   // never answer at all
-  for (const s of [A, B, D]) Object.assign(FAULTS.get(s.unit), { readMs: 20, writeMs: s === D ? 30 : 20 }); // D's kill lands past its replay's wait
+  for (const s of [A, B]) Object.assign(FAULTS.get(s.unit), { readMs: 20, writeMs: 20 });
+  let openD; Object.assign(FAULTS.get(D.unit), { readMs: 20, writeGate: new Promise((r) => { openD = r; }) }); // D's kill lands once its replay started — by state, never a race of delays (the legs run at once)
   Object.assign(FAULTS.get(C.unit), { readHang: true, writeHang: true });
   const jobs = [
     deadJob(dir, 'jb-bootexit', { scope: A, exit: { code: 0, signal: null, endedAt: Date.now() - 30000 } }), // a task judged from its exit record
@@ -341,6 +356,7 @@ leg('§3 IN-PROCESS ⑮ A REAP THAT DID NOT FINISH IS ALWAYS RETRIED — the boo
   const [a, b, c, d] = jobs.map((j) => E.jobs.get(j.id));
   await until(() => E.spawned.length === 1, 1000, 5); // the replay: past its wait, «starts anyway»
   const atSpawn = { pending: [...E._reapLater.keys()].map((r) => [a, b, c, d].find((j) => j.runs.includes(r)).id).sort(), dProcs: D.procs() };
+  openD(); // the threadpool lets D's kill through — late: still ours
   ok(lastRun(a).cause === 'ok' && a.state === 'done' && lastRun(b).cause === 'env-restart' && E.spawned.length === 1 && E.spawned[0].trigger === 'boot' && journal(E, d, /its last run's scope did not answer in 0\.005 s — its next run starts anyway \(the reap is retried\)/),
     'the boot judges what it finds (done; env-restart) without its reads; the replay waits out its bound, then starts — said', { a: lastRun(a).cause, b: lastRun(b).cause, spawned: E.spawned });
   ok(JSON.stringify(atSpawn.pending) === JSON.stringify(['jb-bootexit', 'jb-bootnever', 'jb-bootnoex', 'jb-bootrepl']), `every reap that did not finish ENQUEUED ITSELF — the boot's, and the one the replay waited on: ${atSpawn.pending.join(', ') || 'none'} (ef0012b5: none — the boot's answers dropped, the replay's given up)`, atSpawn);
@@ -351,7 +367,7 @@ leg('§3 IN-PROCESS ⑮ A REAP THAT DID NOT FINISH IS ALWAYS RETRIED — the boo
   ok([A, B, D].every((s) => !s.procs().length) && [a, b, d].every((j) => j.runs[0].forced === W1 && journal(E, j, new RegExp(W1))),
     `the next tick finishes them — the scopes empty (each one's kill, written blind past the read's bound, landed late: still OURS, said), each run says «${W1}» (ef0012b5: [${atSpawn.dProcs.join(' ')}] kept running, nothing said)`, [a, b, d].map((j) => j.runs[0].forced));
   await E._sweep(); await E._sweep(); await E._sweep(); // C never answers: tries 2, 3 — then said, dropped; a fourth tick says nothing
-  const cSaid = E.events.filter((e) => e.jobId === c.id && /did not answer in 3 tries — not reaped: systemctl --user kill --signal=KILL jobs-memory-bound-fast-never-/.test(e.what || ''));
+  const cSaid = E.events.filter((e) => e.jobId === c.id && /its scope did not answer a read in 3 tries — not reaped: systemctl --user kill --signal=KILL jobs-memory-bound-fast-never-/.test(e.what || ''));
   ok(cSaid.length === 1 && E._reapLater.size === 0 && C.procs().length === 1, `a scope that never answers is retried a bounded number of times, then said ONCE — «${(cSaid[0] || {}).what || 'nothing'}» (ef0012b5: never retried; round 5's sweep retried for ever at 2 s a pass, unsaid)`, { said: cSaid.length, pending: E._reapLater.size });
   stopEngine(E);
 });
@@ -426,6 +442,100 @@ leg('§3 IN-PROCESS ⑲ A KILL TIMER BELONGS TO ITS RUN — a stop\'s kill step 
   stopEngine(E);
 });
 
+// ── ROUND 7 ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
+leg('§3 IN-PROCESS ㉚ THE LADDER IS DRIVEN EVERY TICK — a timed-out task whose wrapper is wedged after its scope\'s kill: SIGTERM, the scope, then its wrapper with its group; the run ends «timeout» (336761e5: the step armed once — [SIGTERM, scope], «up» for ever)', async (ok) => {
+  const dir = tmp('vs-jobs-mem-'), root = tmp('vs-jobs-mem-cg-'), S = fakeScope(root, 'ladder');
+  const E = engine(dir, { cgroupRoot: root, wedgeMs: 25 }); // WEDGE_MS 3 s, 0.025 s here
+  const job = deadJob(dir, 'jb-ladder01', { scope: S, extra: { timeoutMs: 1000 } }); E.jobs.set(job.id, job); // started 60 s ago: past its time limit
+  const kills = [];
+  let wedged = true; // its wrapper: alive and wedged (it never writes its end) until its group is killed
+  E._verifyAlive = (st) => !!st && wedged;
+  E._killGroup = (j, sig) => { kills.push(`group:${sig}`); if (sig === 'SIGKILL') wedged = false; return true; };
+  const ks = E._killScope.bind(E); E._killScope = (s, o) => { kills.push('scope'); return ks(s, o); };
+  E._killStepMs = () => 10; // the grace's seam (10 s, a second more on every rung)
+  await E._sweep();                 // its time limit: SIGTERM, once
+  await sleep(15); await E._sweep(); // a step later: its scope
+  await E._sweep(); await E._sweep(); // inside the wedge step: nothing more
+  const before = [...kills];
+  await sleep(28); await E._sweep(); // its wrapper still there 0.025 s on: with its group
+  await E._sweep();                 // its wrapper gone: the run judged
+  const run = job.runs[0];
+  ok(before[0] === 'group:SIGTERM' && kills.filter((k) => k === 'group:SIGTERM').length === 1, `rung 1: its SIGTERM, once — ${JSON.stringify(kills)}`, kills);
+  ok(JSON.stringify(before) === JSON.stringify(['group:SIGTERM', 'scope']) && !S.procs().length, `rung 2: its scope killed ONCE, a kill step after the SIGTERM — ticks inside the wedge step write nothing more (${JSON.stringify(before)})`, before);
+  ok(kills[kills.length - 1] === 'group:SIGKILL' && run.cause === 'timeout' && job.state === 'failed' && /stopped by force: it did not end on SIGTERM in 10 s — its scope was killed, then its wrapper \(still there 0\.025 s later\) with its process group/.test(run.forced || ''),
+    `rung 3: a wrapper still there a wedge step later is killed with its group, every tick until it is gone — the run ends «${run.cause}», «${run.forced}» (336761e5: [group:SIGTERM, scope] and «up» for ever)`, { kills, cause: run.cause, state: job.state, forced: run.forced });
+  stopEngine(E);
+});
+
+leg('§3 IN-PROCESS ㉛ A REAP ONLY FOR A WRAPPER PROVEN GONE — its pid.json unreadable at a boot whose read of the scope hangs: nothing killed, said; once read alive, nothing reaped and no run beside it (336761e5: the live service\'s scope killed blind)', async (ok) => {
+  const dir = tmp('vs-jobs-mem-'), root = tmp('vs-jobs-mem-cg-'), S = fakeScope(root, 'unproven');
+  Object.assign(FAULTS.get(S.unit), { readHang: true }); // a busy threadpool: its read never answers
+  const job = deadJob(dir, 'jb-unprov01', { kind: 'service', scope: S });
+  const ctl = path.dirname(job.runs[0].log), pj = path.join(ctl, 'pid.json');
+  fs.renameSync(pj, pj + '.away'); // the stamp unreadable at the boot (no /proc proof either way)
+  fs.writeFileSync(path.join(dir, 'jobs.json'), JSON.stringify([job]));
+  const killed = [];
+  const E = engine(dir, { reapReadMs: 5, reapConfirmMs: 10, cgroupRoot: root, memorySample: { stopMs: 400 } }, (E0) => { const ks = E0._killScope.bind(E0); E0._killScope = (s, o) => { killed.push(s.unit); return ks(s, o); }; E0._killGroup = () => false; });
+  const j = E.jobs.get(job.id);
+  await sleep(20);
+  const W = /^cannot prove its wrapper is gone \(pid\.json unreadable\) — its scope is not reaped; if it is gone: systemctl --user kill --signal=KILL jobs-memory-bound-fast-unproven-\d+\.scope$/;
+  ok(!killed.length && S.procs().length === 1 && E.events.filter((e) => e.jobId === j.id && W.test(e.what || '')).length === 1, `the boot proves nothing — its scope keeps its process, no kill written, said once: «${(E.events.find((e) => e.jobId === j.id && /cannot prove/.test(e.what || '')) || {}).what || 'nothing'}» (336761e5: «its wrapper was gone and its scope did not answer a read» — killed)`, { killed, procs: S.procs() });
+  const me = { ...JSON.parse(fs.readFileSync(pj + '.away', 'utf8')), pid: process.pid, starttime: Number(fs.readFileSync('/proc/self/stat', 'utf8').split(') ')[1].split(' ')[19]) };
+  fs.writeFileSync(pj, JSON.stringify(me)); // read again: its wrapper RUNS (a live identity)
+  await until(() => journal(E, j, /not started beside it/), 300, 5);
+  ok(!killed.length && S.procs().length === 1 && !E.spawned.length && journal(E, j, /its wrapper is running after all \(its pid\.json read again\) — nothing reaped/) && journal(E, j, /^its last run's wrapper still runs \(pid \d+\) — not started beside it \(boot\)/),
+    'read alive: nothing reaped and its replay never starts a run beside it — both said', { killed, spawned: E.spawned });
+  stopEngine(E);
+});
+
+leg('§3 IN-PROCESS ㉜ ONE DEADLINE PER REAP — a retry pass over hung reads and kill writes waits ONE budget per reap: the kill still in flight is inspected, never awaited again (no clock: the waits counted; 336761e5: two in series — 4 s a pass at the 2 s bound)', async (ok) => {
+  const dir = tmp('vs-jobs-mem-'), root = tmp('vs-jobs-mem-cg-');
+  const hung = [1, 2, 3].map((i) => fakeScope(root, `deadline${i}`));
+  for (const s of hung) Object.assign(FAULTS.get(s.unit), { readHang: true, writeHang: true });
+  const E = engine(dir, { reapReadMs: 8, reapConfirmMs: 10, cgroupRoot: root });
+  for (const [i, s] of hung.entries()) { const j = deadJob(dir, `jb-deadln${i + 1}`, { scope: s, exit: { code: 0, signal: null, endedAt: Date.now() } }); E.jobs.set(j.id, j); }
+  await E._sweep();
+  await until(() => E._reapLater.size === 3, 500, 5); // pass 1's reaps: each read past its bound, each kill written blind (still hung)
+  const w = E._within.bind(E), waits = [];
+  E._within = (p, ms) => { const rec = { ms, gaveUp: false }; waits.push(rec); return w(p, ms).then((x) => { if (x === null) rec.gaveUp = true; return x; }); };
+  await E._sweep(); // the retry pass
+  const gaveUp = waits.filter((x) => x.gaveUp), most = Math.max(...waits.map((x) => x.ms));
+  ok(gaveUp.length === 3 && waits.length === 3 && most <= 8, `the retry pass: ${waits.length} bounded waits for 3 reaps, each within ONE budget (≤ ${most} ms of 8) — the kill in flight inspected, not awaited (336761e5: 6 — the read, then the kill again: two bounds a pass)`, waits);
+  stopEngine(E);
+});
+
+leg('§3 IN-PROCESS ㉝ THREE CAUSES, THREE WORDS — a dropped reap says why: no read answered, its kill refused (the errno), processes that survived its kill (the count) (336761e5: «did not answer» for all three)', async (ok) => {
+  const dir = tmp('vs-jobs-mem-'), root = tmp('vs-jobs-mem-cg-');
+  const R = fakeScope(root, 'refused', { nokill: true }), V = fakeScope(root, 'survived', { pids: [DEAD + 1, DEAD + 2] });
+  fs.mkdirSync(path.join(R.dir, 'cgroup.kill')); // a write to it is REFUSED (EISDIR) — its reads answer every time
+  FAULTS.get(V.unit).survive = true;               // its kill lands, its processes stay (a D-state process survives cgroup.kill)
+  const E = engine(dir, { reapReadMs: 40, reapConfirmMs: 20, reapTries: 2, cgroupRoot: root }); // a read answers well inside its bound (node 22 too)
+  const r = deadJob(dir, 'jb-refused1', { scope: R, exit: { code: 0, signal: null, endedAt: Date.now() } }), v = deadJob(dir, 'jb-survive1', { scope: V, exit: { code: 0, signal: null, endedAt: Date.now() } });
+  E.jobs.set(r.id, r); E.jobs.set(v.id, v);
+  for (let i = 0; i < 4; i++) { await E._sweep(); await until(() => !E._reaping || (!E._reaping.has(r.runs[0]) && !E._reaping.has(v.runs[0])), 200, 5); }
+  const said = (j) => (E.events.filter((e) => e.jobId === j.id && /not reaped/.test(e.what || '')).map((e) => e.what));
+  ok(said(r).length === 1 && /^its wrapper was gone and its scope still held 1 process — its kill was refused \(EISDIR\) in 2 tries — not reaped: systemctl --user kill --signal=KILL jobs-memory-bound-fast-refused-\d+\.scope$/.test(said(r)[0]), `a refused kill: «${said(r)[0]}»`, said(r));
+  ok(said(v).length === 1 && /^its wrapper was gone and 2 processes survived its kill in 2 tries — not reaped: /.test(said(v)[0]) && V.procs().length === 2, `processes that survived its kill: «${said(v)[0]}» (the unanswered read: ⑮ — «did not answer a read in 3 tries»)`, said(v));
+  stopEngine(E);
+});
+
+leg('§3 IN-PROCESS ㉞ NOTHING STOPPED IS NEVER «STOPPED AT» — what a service kept had already ended on its own: said so, no `cleared`; the scan\'s bound and what it could not read are said (336761e5: «stopped at HH:MM», nothing signalled)', async (ok) => {
+  const dir = tmp('vs-jobs-mem-'), E = engine(dir, { memorySample: { stopMs: 5 } });
+  const j = deadJob(dir, 'jb-alreadyg', { kind: 'service', state: 'down', exit: null });
+  j.runs[0].endedAt = Date.now() - 1000; j.runs[0].cause = 'ok';
+  j.runs[0].left = { n: 1, kept: true, pids: [[DEAD, 12345]], boot: BOOT }; // its daemon exited on its own since its run's end
+  E.jobs.set(j.id, j);
+  const PI = require('../src/proc-identity.js'), real = PI.membersOf;
+  PI.membersOf = () => Object.assign([], { scan: { scanned: 3000, total: 3100, unreadable: 2, cut: true } }); // the scan hit its bound
+  try { E.stop(j); await until(() => j.runs[0].left.gone || j.runs[0].left.cleared, 300, 5); } finally { PI.membersOf = real; }
+  const l = j.runs[0].left, snap = E.snapshot(j), card = LF('runLeftWords')({ left: snap.run.left }, (s, v) => s.replace(/\{(\w+)\}/g, (_, k) => (v || {})[k]));
+  ok(!l.cleared && l.gone > 0 && /^it left 1 process running — it had already ended by \d\d:\d\d$/.test(snap.run.endWords || '') && /^left 1 running — had already ended by \d\d:\d\d$/.test(card) && !E.events.some((e) => e.jobId === j.id && /^stopped what/.test(e.what || '')),
+    `nothing was running: «${snap.run.endWords}» / card «${card}» — no «stopped at», no journal line claiming a stop (336761e5: «stopped at HH:MM»)`, { left: l, end: snap.run.endWords, card });
+  ok(journal(E, j, /^what its last run left running had already ended — nothing stopped \(its mark searched in 3000 of 3100 processes — the scan's bound, 2 unreadable\)$/), 'the scan says its bound and what it could not read — never a silent skip', E.events.filter((e) => e.jobId === j.id).map((e) => e.what));
+  ok(!E._pending(j, j.runs[0]), 'and nothing is pending for its next start');
+  stopEngine(E);
+});
+
 leg('§3 IN-PROCESS — the cap as the engine states it, and the properties (the ladder\'s answer, the cap said)', async (ok) => {
   // the engine's own read, without the seam: the tightest memory.max of its cgroup and every ancestor (env.sh's scope carries
   // 24 GiB, a CI runner none) — the suite's own walk of /proc/self/cgroup
@@ -472,7 +582,7 @@ try {
     // its own rung and child is read by a proof's timer
     ok(/const GATE_KEEP = 'read -r go <&3 \|\| exit 125; \( \(trap "" TERM INT HUP; read -r ack <&3\) <\/dev\/null >\/dev\/null 2>&1 & echo "keeper \$!" >&3 \); exec "\$@" 3<&-';/.test(WRAPPER_SRC) && /const isKeeper = \(pid\) => !!keeper && Number\(pid\) === keeper\.pid/.test(WRAPPER_SRC) && !/\/cmdline`/.test(WRAPPER_SRC) && !/GATE_HOLD/.test(WRAPPER_SRC) && /r\.timer = setTimeout\(\(\) => prove\(r, c, deadline\), 10\)/.test(WRAPPER_SRC) && !/setTimeout\(\(\) => prove\(deadline\)/.test(WRAPPER_SRC),
       'the wrapper: the job is exec\'d on every rung (the < 253 keeper double-forked beside it, deaf to a stop — round 6: known by the PID its gate says, never its command line); a proof\'s timer is bound to its rung and its child');
-    ok(/const hadProc = force && scope \? this\._escalate\(job, scope, undefined, run\) : this\._killGroup\(job, force \? 'SIGKILL' : 'SIGTERM'\);/.test(jobs) && /this\._escalate\(job, this\._runScope\(job, run\), undefined, run\); \/\/ round 4/.test(jobs) && /else if \(run && !this\._reapLater\.has\(run\)\) this\._reapLater\.set\(run, \{ job, tries: 0 \}\);/.test(jobs) && jobs.split("setTimeout(() => this._killGroup(job, 'SIGKILL')").length === 1,
+    ok(/const hadProc = force && scope \? this\._escalate\(job, scope, undefined, run\) : force \? this\._killGroup\(job, 'SIGKILL'\) : this\._termRun\(job, run\);/.test(jobs) && /this\._escalate\(job, this\._runScope\(job, run\), undefined, run\); \/\/ round 4/.test(jobs) && /else if \(run && !this\._reapLater\.has\(run\)\) this\._reapLater\.set\(run, \{ job, tries: 0 \}\);/.test(jobs) && jobs.split("setTimeout(() => this._killGroup(job, 'SIGKILL')").length === 1,
       'src/jobs.js: every kill step goes through _escalate (the scope on the cgroup rung, whether or not its wrapper lives); a dead wrapper\'s scope is reaped — round 6: a reap that did not finish enqueues itself');
     // ROUND 6: a kill timer belongs to its run — armed for it, fired only while it runs, disarmed by the next spawn; every start
     // of a service goes through _startAfter

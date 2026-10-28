@@ -77,6 +77,7 @@ function leftWords(l) {
   const n = l.n || 0, es = (k) => (k === 1 ? '' : 'es');
   const hhmm = (ms) => { const d = new Date(ms); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
   if (l.cleared) return `it left ${n} process${es(n)} running — stopped at ${hhmm(l.cleared)}`;
+  if (l.gone) return `it left ${n} process${es(n)} running — ${n === 1 ? 'it' : 'they'} had already ended by ${hhmm(l.gone)}`;
   if (l.kept) return `it left ${n} process${es(n)} running — kept: a service's own until it is stopped or started again${l.escaped ? ` (${l.escaped} outside its group)` : ''}${l.recorded ? ` (${l.recorded} of ${n} recorded)` : ''}`;
   const esc = l.escaped ? `${l.escaped} process${es(l.escaped)} left its group — not stopped` : '';
   if (!n) return `${esc}; run it as a service job`;
@@ -544,19 +545,36 @@ async function forceScope(why) {
   await scopeKill('SIGKILL');
   if (procsOf(scopeDir).length) { try { fs.writeFileSync(path.join(scopeDir, 'cgroup.kill'), '1'); } catch { } } // no manager answered: the kernel's own
 }
-for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) {
-  process.on(sig, () => {
-    if (stopping) return;
-    stopping = sig; stopAt = Date.now();
-    try { child.kill(sig); } catch { }
-    if (!scoped()) { // round 6: a rung without a scope — the job's group is OURS to end at the grace, said (drainGroup takes what
-      // the job left in it); the engine's kill step is a backstop for a wrapper that cannot (a second later)
-      const t = setTimeout(() => { if (exited) return; if (!forced) forced = `it did not end on ${sig} in ${stopMs / 1000} s — its process group was killed`; try { child.kill('SIGKILL'); } catch { } }, stopMs); t.unref?.();
-      return;
-    }
-    scopeKill(sig);
-    const t = setTimeout(() => { if (!exited) forceScope(`it did not end on ${sig} in ${stopMs / 1000} s — its scope was killed`); }, stopMs); t.unref?.();
-  });
+// round 7: what OUR SIGTERM reached and when (`pid:start` → ms) — each process's grace runs from its own SIGTERM; a row of a fresh
+// /proc scan, its start re-read at the act (same)
+const termed = new Map();
+const termKey = ([pid, st]) => `${pid}:${st}`;
+const termOnce = (p) => { if (termed.has(termKey(p)) || !same(p)) return; termed.set(termKey(p), Date.now()); try { process.kill(p[0], 'SIGTERM'); } catch { } };
+// THE STOP — the engine's signal to our group, or (round 7) ITS INTENT: stop.json beside pid.json, written before it signals. The
+// child's end and our own handler land at once, in either order: a wrapper that handles the end first still knows a stop is in
+// flight (a service's leftovers stopped with it — never kept, unsaid: heavy ㉒, 1 pair in 12). Said in the job's log
+function onStop(sig, at) {
+  if (stopping) return;
+  stopping = sig; stopAt = at;
+  try { fs.writeSync(logFd, Buffer.from(`\n[job-wrapper] stop: ${sig} — ${stopMs / 1000} s to end\n`)); } catch { }
+  try { child.kill(sig); } catch { }
+  const left = Math.max(0, at + stopMs - Date.now());
+  if (!scoped()) { // round 6: a rung without a scope — the job's group is OURS to end at the grace, said (drainGroup takes what
+    // the job left in it); the engine's kill step is a backstop for a wrapper that cannot (a second later). Round 7: the group
+    // heard the stop with us (the engine signals it) — its grace runs from the stop; a SERVICE's processes that left the group
+    // (its mark) hear it NOW, with the main — round 6 signalled them only once the main ended, against what was left of the grace
+    for (const p of groupLeft()) if (!termed.has(termKey(p))) termed.set(termKey(p), at);
+    if (keeps) for (const p of escapedOf()) termOnce(p);
+    const t = setTimeout(() => { if (exited) return; if (!forced) forced = `it did not end on ${sig} in ${stopMs / 1000} s — its process group was killed`; try { child.kill('SIGKILL'); } catch { } }, left); t.unref?.();
+    return;
+  }
+  scopeKill(sig);
+  const t = setTimeout(() => { if (!exited) forceScope(`it did not end on ${sig} in ${stopMs / 1000} s — its scope was killed`); }, left); t.unref?.();
+}
+for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => onStop(sig, Date.now()));
+/** the engine's stop intent for THIS run (its ctl dir), or null */
+function stopIntent() {
+  try { const s = JSON.parse(fs.readFileSync(path.join(ctlDir, 'stop.json'), 'utf8')); return { sig: /^SIG[A-Z]{2,6}$/.test(s.sig) ? s.sig : 'SIGTERM', at: Number(s.at) > 0 && Number(s.at) <= Date.now() ? Number(s.at) : Date.now() }; } catch { return null; }
 }
 // THE END IS WRITTEN ONCE THE SCOPE IS EMPTY (the cgroup rung): the keeper is let go (its events read), then — round 5, the
 // ruling of 2026-10-27 (a job's scope IS the job) — at a natural end what still runs in the scope is what the job LEFT: a
@@ -626,8 +644,10 @@ async function drainGroup() {
   if (keeps && !stopping) return { left: { n, ...kept } }; // kept: named by identity for the engine (its stop, park, removal, next start)
   if (!n) return { left: { n: 0, escaped: out.length } }; // a task's that left its group: said, not stopped
   if (mine) left.push(...out);
-  for (const [pid] of left) { try { process.kill(pid, 'SIGTERM'); } catch { } }
-  const deadline = (stopping ? stopAt : Date.now()) + stopMs; // after a stop the grace is the stop's own
+  // round 7: EACH ONE'S GRACE FROM ITS OWN SIGTERM — the group's and a stopped service's escapees' from the stop (onStop), what
+  // our SIGTERM reaches only now from now (a deaf main SIGKILLed at the grace left an escapee SIGTERM and SIGKILL back to back)
+  for (const p of left) termOnce(p);
+  const deadline = Math.max(0, ...left.map((p) => termed.get(termKey(p)) || 0)) + stopMs; // (one gone before its SIGTERM waits for nothing)
   let live = left.filter(same);
   while (live.length && Date.now() < deadline) { await nap(25); live = live.filter(same); }
   const still = groupLeft(); // the group once more: what was forked meanwhile too
@@ -641,6 +661,7 @@ async function drainGroup() {
 async function ended(code, signal) {
   if (exited) return;
   exited = true;
+  if (!stopping) { const s = stopIntent(); if (s) onStop(s.sig, s.at); } // round 7: the stop in flight, whatever ran first
   if (ansTimer) clearInterval(ansTimer);
   if (pressureTimer) clearInterval(pressureTimer);
   if (pressureOn) { try { fs.unlinkSync(pressurePath); } catch { } } // the run ended under its own wrapper: the exit record speaks

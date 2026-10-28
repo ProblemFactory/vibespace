@@ -291,17 +291,20 @@ function leftRecord(l) {
   const pids = l.kept && Array.isArray(l.pids) ? l.pids.filter((p) => Array.isArray(p) && Number.isInteger(p[0]) && p[0] > 1 && Number.isFinite(p[1])).slice(0, 64).map((p) => [p[0], p[1]]) : [];
   const n = Math.min(l.n, 9999), recorded = pids.length && Number.isInteger(l.recorded) && l.recorded < n ? l.recorded : 0;
   const cleared = l.kept && Number.isFinite(l.cleared) && l.cleared > 0 ? l.cleared : 0;
-  return { n, ...(l.kept ? { kept: true } : l.force ? { force: true } : {}), ...(escaped ? { escaped } : {}), ...(pids.length ? { pids, boot: typeof l.boot === 'string' ? clip(l.boot, 64) : '' } : {}), ...(recorded ? { recorded } : {}), ...(cleared ? { cleared } : {}) };
+  const gone = l.kept && !cleared && Number.isFinite(l.gone) && l.gone > 0 ? l.gone : 0;
+  return { n, ...(l.kept ? { kept: true } : l.force ? { force: true } : {}), ...(escaped ? { escaped } : {}), ...(pids.length ? { pids, boot: typeof l.boot === 'string' ? clip(l.boot, 64) : '' } : {}), ...(recorded ? { recorded } : {}), ...(cleared ? { cleared } : {}), ...(gone ? { gone } : {}) };
 }
 /** «the job left 1 process running — it was stopped; to keep a daemon, run it as a service job» · «… stopped by force …» ·
  *  «it left 1 process running — kept: a service's own until it is stopped or started again» · round 6: «1 process left its
  *  group — not stopped; run it as a service job» (a task's setsid escapee) · «… (64 of 70 recorded)» · once the engine stopped
- *  what a service kept (`cleared`, its instant): «it left 1 process running — stopped at 14:05» (the hub's clock).
+ *  what a service kept (`cleared`, its instant): «it left 1 process running — stopped at 14:05» (the hub's clock); round 7: once
+ *  it found nothing of it still running (`gone` — nothing was signalled): «… — it had already ended by 14:05».
  *  data/bin/job-wrapper.js says the same in the job's log — a suite pins the twins equal */
 function leftWords(l) {
   const n = l.n || 0, es = (k) => (k === 1 ? '' : 'es');
   const hhmm = (ms) => { const d = new Date(ms); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
   if (l.cleared) return `it left ${n} process${es(n)} running — stopped at ${hhmm(l.cleared)}`;
+  if (l.gone) return `it left ${n} process${es(n)} running — ${n === 1 ? 'it' : 'they'} had already ended by ${hhmm(l.gone)}`;
   if (l.kept) return `it left ${n} process${es(n)} running — kept: a service's own until it is stopped or started again${l.escaped ? ` (${l.escaped} outside its group)` : ''}${l.recorded ? ` (${l.recorded} of ${n} recorded)` : ''}`;
   const esc = l.escaped ? `${l.escaped} process${es(l.escaped)} left its group — not stopped` : '';
   if (!n) return `${esc}; run it as a service job`;
