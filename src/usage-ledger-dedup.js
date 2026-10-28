@@ -152,6 +152,37 @@ function eachLine(file, from, to, fn, { step = STEP_BYTES, limit = Infinity } = 
   } finally { fs.closeSync(fd); }
 }
 
+/** r8 (lane ledger-dedup-law): eachLine on the ASYNC road (fs.promises — libuv's pool, never the main thread: a hold's
+ *  read-back and its drain) — every whole line from `from` to the end of the file, read in `step`-byte slices (a line
+ *  longer than a slice is read whole, up to LINE_MAX; bytes with no newline past it are no line) → {end, lineEnd, eof}:
+ *  `lineEnd` = the place after the last whole line, `end` = where a next read starts (the file's end once `eof` — a torn
+ *  tail included; else `lineEnd`). `limit`: stop at the first line end past `from + limit` (a drain's slice). A file that
+ *  does not exist → {end: from, lineEnd: from, eof: true, missing: true}. `fn(buf, a, b, offset)` as eachLine's. */
+async function eachLineAsync(file, from, fn, { step = STEP_BYTES, limit = Infinity } = {}) {
+  let fh;
+  try { fh = await fs.promises.open(file, 'r'); } catch (e) { if (e && e.code === 'ENOENT') return { end: from, lineEnd: from, eof: true, missing: true }; throw e; }
+  try {
+    let buf = Buffer.alloc(step), pos = from, lineEnd = from, carry = 0; // buf[0, carry) = an unfinished line read at `pos`
+    for (;;) {
+      if (carry === buf.length) {
+        if (buf.length >= LINE_MAX) { pos += carry; carry = 0; } // a MiB with no newline is no row: stepped over
+        else { const b2 = Buffer.alloc(Math.min(LINE_MAX, buf.length * 2)); buf.copy(b2, 0, 0, carry); buf = b2; }
+      }
+      const { bytesRead } = await fh.read(buf, carry, buf.length - carry, pos + carry);
+      if (bytesRead <= 0) return { end: pos + carry, lineEnd, eof: true };
+      const n = carry + bytesRead, last = buf.subarray(0, n).lastIndexOf(10);
+      if (last < 0) { carry = n; continue; }
+      for (let p = 0; p <= last;) { const nl = buf.indexOf(10, p); if (nl > p) fn(buf, p, nl, pos + p); p = nl + 1; }
+      lineEnd = pos + last + 1;
+      carry = n - (last + 1);
+      if (carry) buf.copy(buf, 0, last + 1, n);
+      pos = lineEnd;
+      if (lineEnd - from >= limit) return { end: lineEnd, lineEnd, eof: false };
+      if (buf.length > step && carry < step) { const b2 = Buffer.alloc(step); buf.copy(b2, 0, 0, carry); buf = b2; }
+    }
+  } finally { await fh.close().catch(() => { }); }
+}
+
 /** A tmp file written in batches of ≥ `step` bytes → { keep(buf, a, b), flush(), bytes, close() }. */
 function writerOf(file, step) {
   const fd = fs.openSync(file, 'w');
@@ -340,4 +371,4 @@ function runStepped(gen, { sliceMs = SLICE_MS, next = (fn) => setImmediate(fn), 
 /** Drive a generator to its end in the calling turn (a suite; a tool on a stopped instance). */
 function runNow(gen) { let r; do { r = gen.next(); } while (!r.done); return r.value; }
 
-module.exports = { shapeOf, dedupSteps, runStepped, runNow, ridAt, eachLine, hostOfRid, STEP_BYTES, LINE_MAX, SAMPLES, SAMPLE_BYTES, MAX_IDS, SLICE_MS, TMP_SUFFIX, SHARD_RE };
+module.exports = { shapeOf, dedupSteps, runStepped, runNow, ridAt, eachLine, eachLineAsync, hostOfRid, STEP_BYTES, LINE_MAX, SAMPLES, SAMPLE_BYTES, MAX_IDS, SLICE_MS, TMP_SUFFIX, SHARD_RE };

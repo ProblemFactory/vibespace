@@ -1344,12 +1344,16 @@ class HostManager {
     // rung (it stays armed — a lapsed push heals through it). Capability-
     // gated; old daemons just keep the pull path.
     try {
-      let held = false; // a chunk of this push (≤ 500 events each; the LAST carries the seq) was not made durable
+      let held = false, landing = []; // a chunk of this push (≤ 500 events each; the LAST carries the seq) was not made durable; r8: the chunks still landing
       dm.watchUsageEvents?.((m) => {
         try {
           const text = (m.batch || []).join('\n');
           let r = this.onUsageEvents?.(id, text);
+          // lane ledger-dedup-law r8: a held month's rows land on the hold's async road — the seq is acked once EVERY chunk of
+          // its push has (the daemon walks again from its committed cursor: an ack is never ahead of what landed)
+          if (r && typeof r.then === 'function') { landing.push(r); r = true; }
           if (r === false) held = true;
+          if (m.seq != null && landing.length) { const seq = m.seq, ok = !held, w = landing; held = false; landing = []; Promise.all(w).then((rs) => { if (ok && rs.every((x) => x !== false)) dm.ackUsageEvents(seq); }, () => { }); return; }
           if (m.seq != null) { if (held) r = false; held = false; }
           if (m.seq != null) {
             // ingest is synchronous today (ingestRemoteEvents appends + fsyncs
@@ -2392,7 +2396,8 @@ class HostManager {
     const ingest = (text, { cursors = null, since = null } = {}) => {
       if (!ledger) return text;
       const r = text ? ledger.ingestRemoteEvents(id, (h && h.name) || id, text, { cursors, since }) : { added: 0, appended: 0, duplicates: 0 };
-      return since ? { ...r, since } : r;
+      const out = (x) => (since ? { ...x, since } : x);
+      return r && typeof r.then === 'function' ? r.then(out) : out(r); // lane ledger-dedup-law r8: a held month's rows land on the hold's async road — awaited
     };
     if (!this._usageHarvestAt) this._usageHarvestAt = new Map();
     const last = this._usageHarvestAt.get(id) || 0;

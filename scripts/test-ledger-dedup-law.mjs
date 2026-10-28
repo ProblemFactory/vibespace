@@ -28,10 +28,15 @@ const leg = async (name, fn) => { const t0 = performance.now(); try { await fn()
 const tick = () => new Promise((r) => setImmediate(r));
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ldl-'));
 const MiB = 1024 * 1024, GiB = 1024 * MiB;
-const quiet = (fn) => { const w = console.warn, l = console.log, said = []; console.warn = (...a) => said.push(a.join(' ')); console.log = (...a) => said.push(a.join(' ')); try { return [fn(), said]; } finally { console.warn = w; console.log = l; } };
+// r8: an ingest that goes to a hold answers once its hold's ASYNC road did (a promise) — quiet() awaits it and settles every
+// UsageHistory's road (holdsSettled; absent on a tree whose hold is synchronous — then nothing)
+const quiet = async (fn) => { const w = console.warn, l = console.log, said = []; console.warn = (...a) => said.push(a.join(' ')); console.log = (...a) => said.push(a.join(' ')); try { const v = await fn(); await settle(); return [v, said]; } finally { console.warn = w; console.log = l; } };
 const quietAsync = async (fn) => { const w = console.warn, l = console.log, said = []; console.warn = (...a) => said.push(a.join(' ')); console.log = (...a) => said.push(a.join(' ')); try { return [await fn(), said]; } finally { console.warn = w; console.log = l; } };
 
-const { UsageHistory } = require(REPO + '/src/usage-history.js');
+const { UsageHistory: UsageHistory0 } = require(REPO + '/src/usage-history.js');
+const ALL_UH = []; // r8: every UsageHistory a leg builds — settle() waits for its hold road
+class UsageHistory extends UsageHistory0 { constructor(...a) { super(...a); ALL_UH.push(this); } }
+const settle = async () => { for (const u of ALL_UH) if (typeof u.holdsSettled === 'function') await u.holdsSettled(); };
 const T0 = Date.UTC(2026, 9, 22, 23, 0, 0, 195); // the window every harvest re-sent
 const SHARD = 'events-2026-10.ndjson';
 const dirOf = (name) => { const d = path.join(tmp, name); fs.mkdirSync(path.join(d, 'usage-history'), { recursive: true }); return d; };
@@ -150,7 +155,7 @@ function asker(name, { userTodos = null } = {}) {
   const timers = [];
   const a = ASK.create({ hosts, userTodos: todos, log: () => { }, now: () => clock.t, instanceKind: 'cluster', settingOf: () => undefined, timers: { set: (fn, ms) => { const h = { fn, ms, live: true }; timers.push(h); return h; }, clear: (h) => { if (h) h.live = false; } } });
   const fire = () => { for (const h of timers.splice(0)) if (h.live) { h.live = false; h.fn(); } };
-  const hubItems = () => todos._state.items.filter((i) => i.action && i.action.type === 'hub-act-ask');
+  const hubItems = () => todos._state.items.filter((i) => i.action && (i.action.type === 'hub-act-ask' || i.action.type === 'hub-act-standing')); // r8: a standing item has its own type
   return { d, hosts, hid, clock, todos, asker: a, fire, hubItems };
 }
 const HARVEST_WRITE = { op: 'fs-op', action: 'write', path: '/home/u/.vibespace/usage-cursor.json.tmp', size: 1785031, by: 'system:usage-harvest' };
@@ -208,20 +213,22 @@ await leg('④', async () => {
   const uh = newUh(d), said = []; let remedy = null;
   uh.onShape = (e) => said.push(e);
   uh.dedupShard = (f, o) => { remedy = { f: path.basename(f), why: o && o.why }; const p = new Promise(() => { }); if (uh._dedupJobs) uh._dedupJobs.set(f, p); return p; }; // the remedy is asked (in flight, as the real one registers); its 3 GiB pass is ⑦'s to prove
-  const [r] = quiet(() => uh.ingestRemoteEvents('host-m', 'M', batchOf(0, 50)));
+  const [r] = await quiet(() => uh.ingestRemoteEvents('host-m', 'M', batchOf(0, 50)));
   ok(r.paused && r.appended === 0 && size(sh) === 3 * GiB, `④ a 3 GiB shard: ${size(sh) - 3 * GiB} B appended, the machine's ingest PAUSED (the base appended the batch)`, r);
   const pz = (uh.ingestPaused?.() || [])[0];
   ok(said.length === 1 && said[0].kind === 'paused' && pz && pz.host === 'host-m' && pz.shard === SHARD && pz.why === 'size' && remedy && remedy.f === SHARD, '④ said ONCE (onShape: paused — what, how big, which machine) + the remedy started (the shard\'s streaming dedup)', { said, pz, remedy });
   const w = LSN && LSN.noticeOf(said[0] || {});
   // r4 (a pause is ONE month's, its rows HELD at the hub): the words name the month held, and how many of its events
   ok(w && /Usage of M for 2026-10 is held/.test(w.text) && /3\.00 GiB/.test(w.detail) && /events-2026-10/.test(w.detail) && /Which machine: M/.test(w.detail) && /50 events of 2026-10 held/.test(w.detail) && /What to do/.test(w.detail), '④ the notice names what (the file), how big, which machine, what is held (50 events of 2026-10), what happens now and what to do', w && [w.text, w.detail]);
-  const [r2] = quiet(() => uh.ingestRemoteEvents('host-m', 'M', batchOf(0, 50)));
+  const [r2] = await quiet(() => uh.ingestRemoteEvents('host-m', 'M', batchOf(0, 50)));
   // r4 re-derived: it PINNED «held 100 events on the device» (the same 50 refused twice); it PINS NOW the same 50 held ONCE
   // at the hub (the re-send is 50 duplicates), so nothing new to say
   ok(r2.paused && r2.paused.held === 50 && r2.duplicates === 50 && said.length === 1, '④ a second batch (the same 50 re-sent): still paused, held ONCE at the hub (50 held, 50 duplicates), not said again');
   fs.truncateSync(sh, small); // back in shape (what the dedup leaves)
-  const [r3] = quiet(() => uh.ingestRemoteEvents('host-m', 'M', batchOf(100, 50)));
-  ok(r3.appended === 50 && said.length === 2 && said[1].kind === 'resumed' && !(uh.ingestPaused?.() || []).length, '④ back in shape ⇒ recorded again (50 appended), said (resumed), the pause gone from the Usage window\'s state', { r3, said: said.map((e) => e.kind) });
+  const [r3] = await quiet(() => uh.ingestRemoteEvents('host-m', 'M', batchOf(100, 50)));
+  // r8: the drain runs on the hold's async road — the batch is queued in the hold behind it (held 50, acked) and recorded in
+  // order once it ends (the tail below); r7 drained a small hold inline and appended the batch after it (appended 50)
+  ok((r3.appended === 50 || (r3.held === 50 && r3.ack)) && said.length === 2 && said[1].kind === 'resumed' && !(uh.ingestPaused?.() || []).length, `④ back in shape ⇒ recorded again (${r3.appended ? `${r3.appended} appended` : `${r3.held} held behind the drain, acked`}), said (resumed), the pause gone from the Usage window's state`, { r3, said: said.map((e) => e.kind) });
   const tail = fs.readFileSync(sh, 'utf-8').split('\n').filter(Boolean).slice(3).map((l) => JSON.parse(l).rid);
   const want = [...Array.from({ length: 47 }, (_, k) => 3 + k), ...Array.from({ length: 50 }, (_, k) => 100 + k)].map((i) => 'h:host-m:req_' + String(i).padStart(8, '0'));
   ok(tail.join() === want.join(), `④ r4: the 50 events held while paused are in the ledger first, in order — the 3 it already held (req 0–2) cost 0 bytes, the ledger law — then the batch that found it in shape (${tail.length} rows after the 3)`, tail.slice(0, 2).concat(tail.slice(45, 49)));
@@ -230,7 +237,7 @@ await leg('④', async () => {
   for (let k = 0; k < 3; k++) for (let i = 0; i < 400; i++) rows.push(row(i));
   fs.writeFileSync(shardOf(d2), rows.join('\n') + '\n');
   const u2 = newUh(d2); u2.shapeRatioMinBytes = 0; u2.dedupShard = () => new Promise(() => { });
-  const [r4] = quiet(() => u2.ingestRemoteEvents('host-m', 'M', batchOf(5000, 5)));
+  const [r4] = await quiet(() => u2.ingestRemoteEvents('host-m', 'M', batchOf(5000, 5)));
   ok(r4.paused && r4.paused.why === 'ratio' && r4.paused.ratio >= 2.9, `④ a shard ~3× its distinct rows ⇒ paused (why ratio, ${r4.paused && r4.paused.ratio}×)`, r4);
 });
 
@@ -273,10 +280,10 @@ await leg('⑥', async () => {
   Buffer.alloc = function (n, ...a) { if (n > peak) peak = n; return real.call(this, n, ...a); };
   let n1 = -1;
   const uh = newUh(d);
-  try { [n1] = quiet(() => uh._loadEvents().length); } finally { Buffer.alloc = real; }
+  try { [n1] = await quiet(() => uh._loadEvents().length); } finally { Buffer.alloc = real; }
   ok(n1 === 5 && peak <= MiB, `⑥ a 300 MiB sparse tail: the sync load reads it a step at a time — peak allocation ${(peak / MiB).toFixed(2)} MiB ≤ the 1 MiB step (the base: one 300 MiB allocation), ${n1} rows loaded`, { n1, peak });
   fs.appendFileSync(sh, row(5) + '\n'); uh._evCache.checkedAt = 0;
-  const [n2] = quiet(() => uh._loadEvents().length);
+  const [n2] = await quiet(() => uh._loadEvents().length);
   ok(n2 === 6, `⑥ a row appended past the zeros is read (the zero run glued to its start is stripped): ${n2} rows`);
   // a sync reader never takes a BIG warm over: it answers from the rows loaded so far and says so; an async one waits
   const d2 = dirOf('f6-warm'), lines = [];
@@ -332,7 +339,7 @@ await leg('⑦', async () => {
   ok(r2.drive && r2.drive.steps > 10 && r2.drive.maxStepMs < 250, `⑦ stepped: ${r2.drive && r2.drive.steps} steps, the longest ${r2.drive && r2.drive.maxStepMs} ms (< 250 — the boot law)`, r2.drive);
   // through the runner: the boot goes on at once ("started"), the ledger records it when it ENDS
   fs.writeFileSync(sh, windows.join('\n') + '\n');
-  const [res3] = quiet(() => M.runLocalMigrations({ only: ['2026-10-usage-ledger-dedup'] }));
+  const [res3] = await quiet(() => M.runLocalMigrations({ only: ['2026-10-usage-ledger-dedup'] }));
   const st0 = res3 && res3[0] && res3[0].status;
   const ledger = () => { try { return JSON.parse(fs.readFileSync(path.join(d, 'migrations.json'), 'utf8')); } catch { return {}; } };
   const at0 = !!(ledger().applied || {})['2026-10-usage-ledger-dedup'];

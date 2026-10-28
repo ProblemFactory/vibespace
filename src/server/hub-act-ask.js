@@ -39,6 +39,11 @@
  * read of the store it holds, synchronous); `check()` consults the stored decision of a subject it holds no entry for; and
  * the store never reopens a decided item (src/user-todos.js: `resolvedFact.decidedBy: 'person'` — decided is final, a
  * re-ask after a Deny is refused by the Deny, never a new filing).
+ * r8: THE STANDING ITEM IS NOT A DECISION ROW — it files with its OWN action.type (`hub-act-standing`; the 60 s cards stay
+ * `hub-act-ask`): a decision row (lane wake-approve-card's registry — a person's two verbs end it, nothing else) is a
+ * card whose answer is final; the standing item is a subject's standing state — counted in place, closed by its ✓
+ * (seen), by itself (no longer asked, allowed by another road) and reopened while still refused — so the decision-row
+ * law never applies to it, and a re-file after the owner's Deny meets the Deny (`decided`), never a second item.
  */
 const crypto = require('crypto');
 const P = require('../hub-act-policy.js');
@@ -46,6 +51,7 @@ const E = require('../exit-reach.js');
 const DA = require('../device-acts.js');
 
 const ACTION_TYPE = 'hub-act-ask';
+const STANDING_TYPE = 'hub-act-standing'; // r8: a background subject's ONE standing item (never a card — no decision row)
 const INBOX_KEY = 'machines'; // the tray's jump lands on Manage Agents → Machines (device-alerts' key)
 const RECENT_MAX = 512, SETTLED_MAX = 256;
 const STANDING_WRITE_MS = 60e3;            // a standing item's count is re-worded at most this often (the exact count lives here)
@@ -258,8 +264,8 @@ function create({ hosts, userTodos = null, log = () => {}, now = () => Date.now(
   // straight back to done (verify-r6 W2)
   if (userTodos && typeof userTodos.onStatus === 'function') {
     userTodos.onStatus((it, { status, by }) => {
-      if (!it || !it.action || it.action.type !== ACTION_TYPE) return;
-      if (it.action.standing) {
+      if (!it || !it.action || (it.action.type !== ACTION_TYPE && it.action.type !== STANDING_TYPE)) return;
+      if (it.action.type === STANDING_TYPE) {
         // lane ledger-dedup-law F3: the owner closed (or reopened) a standing item — never our own resolution
         if (selfClosing) return;
         const st = [...standing.values()].find((x) => x.askId === it.action.askId);
@@ -277,8 +283,8 @@ function create({ hosts, userTodos = null, log = () => {}, now = () => Date.now(
   }
   // ── r5: THE STORED DECISION — the standing subjects the item store holds, read at CONSTRUCTION (below) ──
   /** A standing item the owner DENIED (its resolvedFact says so, and nothing re-stamped it since) — r3's rule. */
-  const deniedItem = (i) => i && i.status !== 'open' && !i.clearedAt && i.resolvedBy === 'denied' && i.resolvedFact && i.resolvedFact.denied === true && i.action && i.action.type === ACTION_TYPE && i.action.standing;
-  const openItem = (i) => i && i.status === 'open' && !i.clearedAt && i.action && i.action.type === ACTION_TYPE && i.action.standing;
+  const deniedItem = (i) => i && i.status !== 'open' && !i.clearedAt && i.resolvedBy === 'denied' && i.resolvedFact && i.resolvedFact.denied === true && i.action && i.action.type === STANDING_TYPE;
+  const openItem = (i) => i && i.status === 'open' && !i.clearedAt && i.action && i.action.type === STANDING_TYPE;
   /** One stored standing item → its subject's entry again (open: counting; denied: refused at once) | null (not one). */
   function restoreItem(it) {
     const a = it && it.action;
@@ -312,8 +318,8 @@ function create({ hosts, userTodos = null, log = () => {}, now = () => Date.now(
     try {
       const snap = userTodos.snapshot?.() || {};
       for (const it of snap.open || []) {
-        if (!it || !it.action || it.action.type !== ACTION_TYPE || asks.has(it.action.askId)) continue;
-        if (it.action.standing && it.action.hostId && P.KINDS.includes(it.action.kind)) {
+        if (!it || !it.action || (it.action.type !== ACTION_TYPE && it.action.type !== STANDING_TYPE) || asks.has(it.action.askId)) continue;
+        if (it.action.type === STANDING_TYPE && it.action.hostId && P.KINDS.includes(it.action.kind)) {
           // lane ledger-dedup-law F3: a standing item from before the restart is its subject's again (no new card for the
           // next life) — r2: then RE-JUDGED below (the list, the setting, the machine, the silence), never kept blindly;
           // r5: read already at construction — the subject's entry names THIS item, any other one of it is a second
@@ -399,7 +405,7 @@ function create({ hosts, userTodos = null, log = () => {}, now = () => Date.now(
     try {
       const it = userTodos.add(INBOX_KEY, {
         origin: 'machines', text: w.text, detail: w.detail, i18n: w.i18n, urgency: 'high', kind: 'action', by: 'agent', sessionName: 'Machines',
-        action: { type: ACTION_TYPE, askId: st.askId, hostId: String(st.hostId).slice(0, 160), machine: String(st.machine).slice(0, 80), kind: st.kind, standing: true, by: String(st.by).slice(0, 160), consequence: st.consequence, count: st.count, firstAt: st.firstAt, lastAt: st.lastAt },
+        action: { type: STANDING_TYPE, askId: st.askId, hostId: String(st.hostId).slice(0, 160), machine: String(st.machine).slice(0, 80), kind: st.kind, standing: true, by: String(st.by).slice(0, 160), consequence: st.consequence, count: st.count, firstAt: st.firstAt, lastAt: st.lastAt },
       });
       st.todoId = (it && it.id) || st.todoId; st.writtenAt = t; st.fileError = null;
       if (it && it.decided) return 'decided'; // r5: the store never reopens a decided item — the Deny stands
@@ -425,7 +431,7 @@ function create({ hosts, userTodos = null, log = () => {}, now = () => Date.now(
   function list() { return [...asks.values()].map((k) => ({ askId: k.askId, hostId: k.hostId, machine: k.machine, kind: k.kind, by: k.by, summary: k.summary, waiting: k.waiters.length, askedAt: k.askedAt, expiresAt: k.askedAt + P.ASK_TTL_MS })); }
   // r5: the stored decisions are readable BEFORE the first act — never only 3 s later, at the boot reconcile
   try { restoreStanding(); } catch (e) { log(`hub-act asks could not read the stored decisions: ${e.message}`); }
-  return { check, verdict, answer, reconcile, reevaluate, onMachineGone, onPolicyChanged, policyFor, list, standingList, get instanceKind() { return kindNow(); }, ACTION_TYPE, INBOX_KEY };
+  return { check, verdict, answer, reconcile, reevaluate, onMachineGone, onPolicyChanged, policyFor, list, standingList, get instanceKind() { return kindNow(); }, ACTION_TYPE, STANDING_TYPE, INBOX_KEY };
 }
 
 /**
@@ -451,4 +457,4 @@ function wire({ hosts, userTodos, exitProxy, settingOf, activeSessions, env = pr
   return asker;
 }
 
-module.exports = { create, wire, ACTION_TYPE, INBOX_KEY, STANDING_WRITE_MS, STANDING_REMIND_MS, STANDING_SILENT_MS, STANDING_SWEEP_MS, standingIdOf };
+module.exports = { create, wire, ACTION_TYPE, STANDING_TYPE, INBOX_KEY, STANDING_WRITE_MS, STANDING_REMIND_MS, STANDING_SILENT_MS, STANDING_SWEEP_MS, standingIdOf };

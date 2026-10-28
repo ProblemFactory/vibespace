@@ -175,7 +175,7 @@ function world({ instanceKind = 'cluster', hub = null, setting = 'auto', store =
   });
   hosts.hubActs = asker;
   const link = fakeDm(hosts.actGateFor(hid));
-  const cards = () => (userTodos.snapshot?.().open || []).filter((i) => i.action && i.action.type === 'hub-act-ask');
+  const cards = () => (userTodos.snapshot?.().open || []).filter((i) => i.action && (i.action.type === 'hub-act-ask' || i.action.type === 'hub-act-standing')); // lane ledger-dedup-law r8: a standing item has its own type
   const fire = () => { for (const h of timers.splice(0)) if (h.live) { h.live = false; h.fn(); } };
   return { hosts, hid, userTodos, asker, clock, fire, cards, ...link };
 }
@@ -441,7 +441,7 @@ console.log('— ⑥ the card in the For-you row');
   ok(/ut-exit-allow ut-hub-once/.test(html) && /ut-exit-allow ut-hub-always/.test(html) && /ut-exit-deny ut-hub-deny/.test(html), 'Allow once and Always are armed like every Allow (press-arm: .ut-exit-allow)');
   const done = R.renderRow({ item: { id: 'ut-h', text: w.text, detail: w.detail, status: 'done', resolvedAt: Date.now(), action: { type: 'hub-act-ask', askId: 'a1' }, createdAt: Date.now() }, resolved: true }, ctx).innerHTML;
   ok(!/data-answer="once"/.test(done), 'a resolved card offers no answer');
-  ok(require('../src/inbox-reply.js').ANSWER_ACTION_TYPES.includes('hub-act-ask') && /\{ type: 'hub-act-ask', identity: 'askId',/.test(read('src/foryou-actions.js')), 'a typed reply never answers it (its buttons do); one item per ask (THE For-you action registry\'s row)');
+  ok(require('../src/inbox-reply.js').ANSWER_ACTION_TYPES.includes('hub-act-ask') && (/'hub-act-ask': 'askId'/.test(read('src/user-todos.js')) || (() => { try { return require('../src/foryou-actions.js').ACTION_IDENTITY['hub-act-ask'] === 'askId'; } catch { return false; } })()) /* lane ledger-dedup-law r8: the merge with wake-approve-card — the registry's row */, 'a typed reply never answers it (its buttons do); one item per ask');
   ok(/const hubAsk = !resolved && i\.action && \(i\.action\.type === 'hub-act-ask'/.test(read('src/lib/inbox-window-layout.js')) && /'hub-once', \.\.\.\(hubAsk\.type === 'vault-grant-ask' \? \['grant-8h'\] : hubAsk\.type === 'vault-run-ask' \? \(hubAsk\.always \? \['shape-always'\] : \[\]\) : \[hubAsk\.type === 'automation-ask' \? 'auto-always' : hubAsk\.type === 'pool-cross-provider' \? 'pool-always' : 'hub-always'\]\), 'hub-deny'/.test(read('src/lib/inbox-window-layout.js')) && /if \(a === 'hub-once' \|\| a === 'hub-always' \|\| a === 'hub-deny'/.test(read('src/lib/inbox-window.js')), /* design q-046: an automation ask shares the three buttons (its Always grants the key) */ 'the For-you window answers it too (its three buttons, the same arm)');
 }
 

@@ -350,7 +350,7 @@ export function inboxModel(app) {
       showToast(w, { type: 'error' });
       return false;
     }
-    if (rec && rec.action && rec.action.type === 'hub-act-ask') {
+    if (rec && rec.action && (rec.action.type === 'hub-act-ask' || rec.action.type === 'hub-act-standing')) { // lane ledger-dedup-law r8: a standing item answers through the same door
       // lane hub-act-ask (design q-042 D4): THE person's answer to a hub act held on a cluster instance (cookie route; any
       // bearer is refused human_only) — once / always (the machine's Hub automation list → Always allow, every kind) / deny.
       // The server resolves the item; a failure is said, never swallowed.

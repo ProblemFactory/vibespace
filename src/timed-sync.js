@@ -13,6 +13,10 @@
 // Per name: a FIXED-BUCKET histogram (BUCKETS_MS = upper bounds, one more bucket for everything slower), n, sum, max,
 // a window since the last `takeWindow()` (the 5-min telemetry report), and a 60-slot ring of per-minute maxima — the
 // System window's "slowest store writes (last hour)" without keeping a sample.
+// ARMED BEFORE THE CALL (lane ledger-dedup-law r8): a sample is recorded only once its call returns, so a call that hangs
+// (an NFS data dir that stopped answering) is never one. The name is armed before the call (`armed()`, while on) and the
+// sync fs witness (src/server/sync-fs-witness.js) mirrors it into its live slot: its watchdog THREAD names a call still in
+// flight past its LIVE_MS — «… in appendFileSync(…) (usage-shards.write) …» — while it holds, never after.
 
 const BUCKETS_MS = Object.freeze([1, 2, 5, 10, 20, 50, 100, 200, 500, 1000, 2000, 5000]);
 const HOUR_MS = 3600000;
@@ -38,7 +42,8 @@ const STORES = Object.freeze({
   'usage-cursors.write': row('write', 'usage-history/_cursors', 'src/usage-history.js', ['_writeCursors']),
   'usage-cursors.read': row('read', 'usage-history/_cursors', 'src/usage-history.js'),
   'usage-host-cursors.write': row('write', 'usage-history/_host-cursors/<host>', 'src/usage-history.js', ['_writeHostCursor']), // lane ledger-dedup-law F2: the hub keeps each machine's usage cursor
-  'usage-held.write': row('write', 'usage-history/_held/<month>~<host>.<seq>', 'src/usage-history.js', ['_holdWrite', '_dropCompact']), // lane ledger-dedup-law r4: a paused month's rows, held beside the ledger; r7: every append of a hold's file (its rows, its set's lines) is `_holdWrite`, the set's rewrite `_dropCompact`
+  // lane ledger-dedup-law r8: no `usage-held.write` row — a hold's every write runs on its ASYNC road (src/usage-history.js
+  // `_holdIO` says one that waits, at the time); r4–r7 timed its appends here (`_holdWrite`, `_dropCompact`)
   'otel-truth.write': row('write', 'usage-history/otel-truth', 'src/server/otel-ingest.js', ['create']),
   'otel-truth.append': row('write', 'usage-history/otel-truth', 'src/server/otel-ingest.js', ['create']),
   'otel-truth.read': row('read', 'usage-history/otel-truth', 'src/server/otel-ingest.js'),
@@ -48,6 +53,7 @@ const NAMES = Object.freeze(Object.keys(STORES));
 
 let on = false;
 let unknown = 0;
+let current = null; // the name a synchronous call is being made for (armed before it; a nested call restores its caller's)
 const stats = new Map(); // name → { n, sum, max, buckets, win: {n, max, buckets}, minutes: [{m, max, n}] × 60 }
 
 function bucketOf(ms) {
@@ -74,12 +80,16 @@ function record(name, ms, at = Date.now()) {
   return true;
 }
 
-/** THE WRAPPER: runs fn synchronously and returns (or throws) what it does; when on, its duration is recorded. */
+/** THE WRAPPER: runs fn synchronously and returns (or throws) what it does; when on, its duration is recorded. Its name
+ *  is armed for the call's whole span while on (`armed()` — the witness's live line; the server turns it on at boot). */
 function timedSync(name, fn) {
   if (!on) return fn();
+  const was = current; current = name;
   const t0 = performance.now();
-  try { return fn(); } finally { record(name, performance.now() - t0); }
+  try { return fn(); } finally { record(name, performance.now() - t0); current = was; }
 }
+/** The name armed now (the call in flight is made for it) | null. */
+function armed() { return current; }
 
 /** The slowest names of one kind over the last `windowMs` (max of the per-minute maxima), slowest first. */
 function slowest({ now = Date.now(), windowMs = HOUR_MS, kind = 'write', limit = 3 } = {}) {
@@ -118,4 +128,4 @@ function unknownCount() { return unknown; }
 /** Suites only: forget every sample. */
 function reset() { stats.clear(); unknown = 0; }
 
-module.exports = { timedSync, record, enable, enabled, slowest, snapshot, takeWindow, unknownCount, reset, bucketOf, STORES, NAMES, BUCKETS_MS };
+module.exports = { timedSync, armed, record, enable, enabled, slowest, snapshot, takeWindow, unknownCount, reset, bucketOf, STORES, NAMES, BUCKETS_MS };

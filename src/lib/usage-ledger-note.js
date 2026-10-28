@@ -19,6 +19,8 @@ export const LEDGER_NOTE_WORDS = {
   // r4: a pause is ONE month's (its other months are recorded as usual) — what is held, the bound, what was dropped past it
   pausedHeld: '{held} events of {machine} for {month} held until its file is back in shape (at most {bound}; then recorded, in order) — its other months are recorded as usual',
   pausedDropped: 'Past the bound, the {dropped} oldest held events of {machine} for {month} were dropped — counted, never recorded',
+  // r8: a count the hold could not check against the ledger (rows read back after a restart …) says so — checked at its end
+  pausedDroppedMaybe: 'Past the bound, the {dropped} oldest held events of {machine} for {month} were dropped — counted; some may already be recorded (checked once its file is back in shape)',
   // r5: a month back in shape stays held until its held events are in the ledger (a resume follows the drain)
   pausedDraining: 'Usage of {machine} for {month} is held: its file is back in shape — its {held} held events are being recorded, in order',
   pausedDrainFailed: 'Usage of {machine} for {month} is held: {held} held events could not be recorded ({error}) — retrying at its next harvest',
@@ -39,7 +41,7 @@ export function ledgerNote(d, now = Date.now()) {
     const vars = { machine: String(p.hostName || p.host || ''), month, shard: String(p.shard || ''), size: `${((Number(p.size) || 0) / 2 ** 30).toFixed(2)} GiB`, error: String((dr && dr.code) || r.code || r.error || '').slice(0, 120), time: r.nextAt ? hhmm(r.nextAt) : '', held: String(Number(p.held) || 0), dropped: String(Number(p.dropped) || 0), bound: `${Math.round((Number(p.holdMax) || 64 * 2 ** 20) / 2 ** 20)} MiB` };
     out.push({ kind: 'paused', words, vars });
     if (Number(p.held) > 0 && !draining) out.push({ kind: 'paused', words: LEDGER_NOTE_WORDS.pausedHeld, vars }); // a drain's row says what is held
-    if (Number(p.dropped) > 0) out.push({ kind: 'paused', words: LEDGER_NOTE_WORDS.pausedDropped, vars });
+    if (Number(p.dropped) > 0) out.push({ kind: 'paused', words: p.unchecked ? LEDGER_NOTE_WORDS.pausedDroppedMaybe : LEDGER_NOTE_WORDS.pausedDropped, vars });
   }
   return out;
 }

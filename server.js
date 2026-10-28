@@ -1233,12 +1233,12 @@ hosts.onSessionEvents = (hostId, m) => {
 hosts.onUsageEvents = (hostId, text) => {
   if (!text) return true;
   const h = hosts.get(hostId);
+  const done = (r) => {
+    if (r.added > 0) { try { for (const [ik] of usageIdentityGroups()) usageEstimator.invalidate(ik); } catch { } try { kickPoolEval(); } catch { } }
+    return usageAckOf(r); // lane ledger-dedup-law r5: THE ACK is durability — every row appended or held (a pause alone never withholds it); deferred or a month's hold unwritten ⇒ unacked, the device keeps the batch
+  };
   const r = usageHistory.ingestRemoteEvents(hostId, h?.name || hostId, text);
-  if (r.added > 0) {
-    try { for (const [ik] of usageIdentityGroups()) usageEstimator.invalidate(ik); } catch { }
-    try { kickPoolEval(); } catch { }
-  }
-  return usageAckOf(r); // lane ledger-dedup-law r5: THE ACK is durability — every row appended or held (a pause alone never withholds it); deferred or a month's hold unwritten ⇒ unacked, the device keeps the batch
+  return r && typeof r.then === 'function' ? r.then(done, () => false) : done(r); // r8: a held month lands on the hold's async road — the ack waits for it
 };
 {
   const dirtyTimers = new Map();

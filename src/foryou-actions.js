@@ -56,6 +56,9 @@ const ROWS = Object.freeze([
   // ── machines ──
   { type: 'exit-run-ask', identity: 'askId', producer: 'src/exit-proxy.js', waits: true, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-exit', 'run / push / pull', 'wait'), scope: 'conversation' },
   { type: 'hub-act-ask', identity: 'askId', producer: 'src/server/hub-act-ask.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'approval', scope: 'group' },
+  // lane ledger-dedup-law r8: a background subject's ONE standing item — its own type (never a 60 s card), answered like a held
+  // hub act (the row's Allow once / Always / Deny, the hub-act door)
+  { type: 'hub-act-standing', identity: 'askId', producer: 'src/server/hub-act-ask.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'approval', scope: 'group' },
   // ── vault ──
   { type: 'automation-ask', identity: 'askId', producer: 'src/server/automation-engine.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-api', 'an automation key\'s first use', 'own'), scope: 'conversation' },
   { type: 'vault-run-ask', identity: 'askId', producer: 'src/server/vault-run-door.js', waits: false, answer: 'buttons', card: 'row', handled: true, chat: true, kind: 'approval', cli: C('vibespace-vault', 'run', 'wait'), scope: 'conversation' },

@@ -34,6 +34,7 @@ const path = require('path');
 const MPC = require('../mount-path-class.js');
 const SP = require('../storage-path.js');
 const LB = require('./loop-blame.js');
+const TS = require('../timed-sync.js'); // lane ledger-dedup-law r8: the store a call is made for, armed before it (timedSync)
 
 const RING_KEEP = 32;
 const RING_MS = 50;
@@ -48,7 +49,7 @@ const TWO_PATH = new Set(['renameSync', 'copyFileSync', 'cpSync', 'linkSync', 's
 const FD_FNS = new Set(['readSync', 'writeSync', 'closeSync', 'fstatSync', 'fsyncSync', 'fdatasyncSync', 'ftruncateSync', 'futimesSync', 'fchmodSync', 'fchownSync', 'readvSync', 'writevSync']);
 const REFUSAL = 'refused: a synchronous fs call on a storage mount from the main thread';
 
-// the live slot's SharedArrayBuffer: Int32 [0 seq, 1 fn index, 2 path bytes, 3 heartbeat, 4 in flight] · Float64 startedAt · path
+// the live slot's SharedArrayBuffer: Int32 [0 seq, 1 fn index, 2 path bytes, 3 heartbeat, 4 in flight, 5 store index + 1] · Float64 startedAt · path
 const SLOT_INTS = 8, SLOT_PATH = 1024;
 const slotBytes = () => SLOT_INTS * 4 + 8 + SLOT_PATH;
 
@@ -63,7 +64,7 @@ function callWords(e) {
     : e.mount.kind === 'storage' ? `under storage mount «${e.mount.root}»`
     : e.mount.kind === 'home' ? `under the network mount «${e.mount.root}» this instance lives on (witnessed, never refused)`
     : `under the network mount «${e.mount.root}» (witnessed, never refused)`;
-  return `${e.fn}(${e.path}) ${e.ms} ms${e.failed ? ' (it failed)' : ''}, ${where}${e.caller ? ` ← ${e.caller}` : ''}`;
+  return `${e.fn}(${e.path})${e.store ? ` (${e.store})` : ''} ${e.ms} ms${e.failed ? ' (it failed)' : ''}, ${where}${e.caller ? ` ← ${e.caller}` : ''}`;
 }
 /** PURE: the canary's line for a held loop. */
 function heldLine(loopMs, e) {
@@ -111,10 +112,12 @@ function create({ rootDir = null, dataDir = null, home = os.homedir(), cwd = pro
   const fnIndex = new Map(FNS.map((f, i) => [f, i]));
   const enc = new TextEncoder();
   const bump = (k) => Atomics.store(I, k, I[k] + 1);   // this thread is the slot's ONE writer (a seqlock: odd = being written)
-  const liveBegin = (fn, p) => {
+  const storeIndex = new Map(TS.NAMES.map((n, i) => [n, i]));
+  const liveBegin = (fn, p, store) => {
     bump(0);
     I[1] = fnIndex.has(fn) ? fnIndex.get(fn) : -1;
     I[2] = typeof p === 'string' ? enc.encodeInto(p, P).written : 0;
+    I[5] = store && storeIndex.has(store) ? storeIndex.get(store) + 1 : 0;
     T[0] = now();
     bump(0);
     Atomics.store(I, 4, 1);
@@ -144,8 +147,8 @@ function create({ rootDir = null, dataDir = null, home = os.homedir(), cwd = pro
           if (r && (!hit || (r.kind === 'storage' && hit.kind !== 'storage'))) { hit = r; hp = p; }
         }
         const p0 = hp !== null ? hp : pathsOf(fn, args, self)[0];
-        cur = { fn, path: shown(p0), root: hit };
-        liveBegin(fn, cur.path);
+        cur = { fn, path: shown(p0), root: hit, store: TS.armed() };
+        liveBegin(fn, cur.path, cur.store);
         if (!hit || hit.kind !== 'storage' || !isArmed) return;
         const site = siteOf();
         const mount = hit.root;   // the mount point names the storage (never a record's own name in a journal line)
@@ -182,7 +185,7 @@ function create({ rootDir = null, dataDir = null, home = os.homedir(), cwd = pro
         counts.slow++;
         const stack = new Error().stack;
         const mount = c && c.root ? { root: c.root.root, name: c.root.name || null, kind: c.root.kind, id: c.root.id || null } : null;
-        const e = { fn, path: c ? c.path : shown(args[0]), ms: Math.round(ms), at, failed: !!failed, class: mount ? 'mount' : 'local', mount,
+        const e = { fn, path: c ? c.path : shown(args[0]), ...(c && c.store ? { store: c.store } : {}), ms: Math.round(ms), at, failed: !!failed, class: mount ? 'mount' : 'local', mount,
           caller: LB.callerOf(stack, rootDir), stack: mount ? hubFrames(stack, rootDir) : null, said: false };
         ring.push(e); if (ring.length > RING_KEEP) ring.splice(0, ring.length - RING_KEEP);
         if (ms >= heldMs) {
@@ -210,7 +213,7 @@ function create({ rootDir = null, dataDir = null, home = os.homedir(), cwd = pro
       beat = setInterval(() => bump(3), 1000); beat.unref?.();
       try {
         const { Worker } = require('worker_threads');
-        worker = new Worker(path.join(__dirname, 'sync-fs-witness-worker.js'), { workerData: { sab, fns: FNS, pid: process.pid, liveMs, rootDir }, env: process.env, stdout: false, stderr: false });
+        worker = new Worker(path.join(__dirname, 'sync-fs-witness-worker.js'), { workerData: { sab, fns: FNS, stores: TS.NAMES, pid: process.pid, liveMs, rootDir }, env: process.env, stdout: false, stderr: false });
         require('../worker-memory').trackWorker('sync-fs-witness', worker);
         worker.on('message', (m) => { if (m && m.ev === 'memory') return; });   // the census's answer; the watchdog says nothing else
         worker.on('error', (e) => { try { log.warn?.(`[sync-fs] the watchdog thread stopped — ${e && e.message}; the witness keeps its post-mortem`); } catch { } });
