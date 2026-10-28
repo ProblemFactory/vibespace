@@ -4605,7 +4605,7 @@ console.log('§81 no suite names a fixed loopback endpoint (scratch.mjs deadPort
 // then; a depth-1 checkout SKIPs that leg by name). The census itself lives in scripts/claude-md-retire.mjs.
 console.log('§82 CLAUDE.md is an index of ≤ 100 000 bytes; the moved per-file / per-incident lines live in the kb INDEX heads:');
 {
-  const CLAUDE_MD_MAX_BYTES = 42240;   // ratchet: 37 491 measured after the move (scripts/measure-claude-md.mjs) + 10 % = 41 240; + 420 (lane grants-unify: ONE routing-table row «A GRANT — who may use a resource», the size law's allowed kind); + 300 (lane engine-plugin: ONE routing-table row «A browser ENGINE plugin», the same allowed kind); + 280 (lane vault-totp-add: ONE routing-table row «A VAULT ENTRY KIND», the same allowed kind — 273 bytes)
+  const CLAUDE_MD_MAX_BYTES = 42560;   // ratchet: 37 491 measured after the move (scripts/measure-claude-md.mjs) + 10 % = 41 240; + 420 (lane grants-unify: ONE routing-table row «A GRANT — who may use a resource», the size law's allowed kind); + 300 (lane engine-plugin: ONE routing-table row «A browser ENGINE plugin», the same allowed kind); + 280 (lane vault-totp-add: ONE routing-table row «A VAULT ENTRY KIND», the same allowed kind — 273 bytes) + 320 (lane human-cli via int361: ONE routing-table row «The PERSON'S CLI», the size law's allowed kind — the lane brief kept CLAUDE.md for the integrator)
   const h82 = (s) => crypto.createHash('sha256').update(s).digest('hex').slice(0, 10);
   const fx82 = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/claude-md-moved.json'), 'utf8'));
   const region82 = regionMoved, census82 = (block, lines) => censusMoved(fx82, block, lines);
