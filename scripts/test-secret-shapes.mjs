@@ -121,8 +121,18 @@ console.log('§3 THE BELT’S MASKABLE-ENTRY ENUMERATION — host: / file: are n
   // round 22: in the GENERIC name-based pass, a BARE value a parser TYPES as a boolean / number / null under a secret-named key is NOT a secret — it stays; a quoted string or a real token stays REDACTED (fail-closed). RED on a51611f2 (which redacted `false`/`5`/`null` by name).
   const typed = S.redactSecrets('{"use_auth":false,"token":"abc123def456ghi","count":5,"ttl":null,"enabled":true,"ratio":-2.5}').text;
   ok(typed === '{"use_auth":false,"token":"«redacted»","count":5,"ttl":null,"enabled":true,"ratio":-2.5}', 'round 22: a boolean / number / null under a secret-named key stays (not a secret); a quoted string value under one is still redacted', typed);
-  const yaml = S.redactSecrets('password: false\nsecret: 42\napi_key: hunter2hunter2').text;
-  ok(yaml === 'password: false\nsecret: 42\napi_key: «redacted»', 'round 22: the typed rule holds for YAML too — a bool / number stays, a real value is redacted', yaml);
+  const yaml = S.redactSecrets('config:\n  password: false\n  secret: 42\n  api_key: hunter2hunter2').text;
+  ok(yaml === 'config:\n  password: false\n  secret: 42\n  api_key: «redacted»', 'round 22/25: the typed rule holds for an INDENTED YAML mapping — a bool / number stays, a real value is redacted', yaml);
+  // round 25 (item 4, refuted-but-real; RED on a1f79c42): the typed skip is ONLY inside a PROVABLE document — a lone `NAME: value`, an HTTP header or prose redacts a numeric secret WHOLE (daade1a7 did; r22's `:`-wide skip leaked it); a JSON quoted key and an INDENTED YAML mapping still keep a typed bool / number
+  const belt = (t) => S.redactSecrets(t).text;
+  ok(belt('DB_PASSWORD: 84726193') === 'DB_PASSWORD: «redacted»'
+    && belt('> X-Api-Key: 8472619384726193') === '> X-Api-Key: «redacted»'
+    && belt('the wifi password: 84726193') === 'the wifi password: «redacted»'
+    && belt('Authorization: 8472619384726193') === 'Authorization: «redacted»'
+    && belt('password: 84726193') === 'password: «redacted»'
+    && belt('{"password": 84726193}') === '{"password": 84726193}'
+    && belt('  password: 84726193') === '  password: 84726193',
+    'round 25 (item 4): a numeric secret on a header / prose / lone `NAME: value` line is redacted WHOLE; a JSON quoted key ({"password": 5}) and an indented YAML mapping (  password: …) still keep a typed value', { header: belt('> X-Api-Key: 8472619384726193'), lone: belt('password: 84726193'), json: belt('{"password": 84726193}'), indented: belt('  password: 84726193') });
   const quotedFalse = S.redactSecrets('{"key":"false"}').text;
   ok(quotedFalse === '{"key":"«redacted»"}', 'round 22 (fail-closed): a QUOTED "false" is a string the parser cannot type as a boolean — it stays redacted (a secret may spell itself anything)', quotedFalse);
 }

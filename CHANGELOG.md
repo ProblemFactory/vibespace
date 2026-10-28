@@ -2,6 +2,20 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.361 — 2026-10-28
+
+### Added
+- A run approval you don't answer in time no longer disappears: for a day it stays as a card you can still allow once or deny.
+
+### Changed
+- A run approval card now lays out what runs, which stored secret it uses, where it is sent and why, instead of one long paragraph.
+
+### Fixed
+- A run's output is shown in full again: only the secret values it used are hidden, the tool's own fields are kept, and nothing is cut off.
+- A password that is only digits is hidden like any other secret, whether it sits in a settings line or a connection string.
+- A run approval card names the site a command's own configuration file would reach, even when a setting inside the file carries it.
+- A run approval card reads a web address the way the command's tool does, so a crafted address cannot show one site while the command reaches another.
+
 ## 2.369.360 — 2026-10-27
 
 ### Added

@@ -471,7 +471,39 @@ async function newShapeCards(doorMod) {
     ok(allow.ok && allow.outcome === 'late-allowed', 'round 23 #6: the late card for `curl …/api/stat` is allowed once (a pass for THIS exact command)');
     const diff = await runAnswered(xw, CURL('DELETE-everything'), { answer: 'deny' });   // the ASK path (deny) — nothing spawns
     ok(!!diff.card && !diff.card.action.late && diff.r.code === 'ask_denied', 'round 23 (MAJOR #6, RED on 4ff55fb4): a DIFFERENT command of the SAME shape (`…/api/DELETE-everything`) draws its OWN live card — the pass is keyed on the EXACT command (exactKeyOf), never the shape alone (4ff55fb4 let the DELETE run by:late on a pass minted for stat)', [!!diff.card, diff.r.code]);
+
     ok(xw.door._lateOnce.size === 1, 'round 23 #6: the pass for `…/api/stat` is UNTOUCHED by the different-command run (it is still there for its own exact command)', xw.door._lateOnce.size);
+  }
+
+  // round 25 (minor 6b): a near-identical rerun's card NAMES the ONE difference from the last late-allowed command (facts.whyAgain — a CODE the client renders). RED on a1f79c42: the rerun drew a card but named no reason. A capturing store keeps `facts` (this tree's real store drops an unknown field, r20).
+  {
+    const items = new Map(); let n = 0; const subs = [];
+    const store = {
+      add: (k, v) => { const id = 'b' + (++n); items.set(id, { id, status: 'open', ...v }); return { id }; },
+      get: (id) => { const it = items.get(id); return it ? { ...it } : null; },
+      setStatus: (id, st, by) => { const it = items.get(id); if (it) { it.status = st; subs.forEach((f) => { try { f({ ...it }, { status: st, by }); } catch {} }); } },
+      resolveAnswered: (ids, outcome, fact) => { for (const id of ids) { const it = items.get(id); if (it) { it.status = 'done'; it.resolvedBy = outcome; it.resolvedFact = fact; } } },
+      reshapeItems: (fn) => { for (const it of items.values()) { try { fn(it); } catch {} } },
+      snapshot: () => ({ open: [...items.values()].filter((x) => x.status === 'open').map((x) => ({ ...x })) }),
+      onStatus: (f) => subs.push(f),
+    };
+    const bw = await world({ instance: 'cluster', askMs: 60 });
+    const bd = bw.mk(DOOR, { userTodos: store });
+    bd.setRunnable({ id: 'mounts:m1#secretKey', on: true, reauthed: true });   // open the entry for runs (the capStore door shares the vault with world)
+    const other = path.join(bw.dir, 'elsewhere'); fs.mkdirSync(other, { recursive: true });
+    const A = ['--env', 'T=vault://mounts/m1/secretKey', '--', 'curl', '-s', 'https://api.example.com/api/stat'];
+    const openAsk = () => store.snapshot().open.find((x) => x.action && x.action.type === 'vault-run-ask');
+    let dA = false; const pA = bd.run({ caller: bw.caller, args: A, cwd: bw.work }).then((r) => (dA = true, r));
+    for (let i = 0; i < 400 && !openAsk(); i++) await sleep(5);
+    await pA;   // askMs 60 ⇒ A is refused ask_expired and its card goes `late`
+    const late = store.snapshot().open.find((x) => x.action && x.action.late);
+    bd.answer(late.action.askId, { answer: 'once' });   // mint a pass for A's EXACT command (carrying A's parts)
+    let dB = false; const pB = bd.run({ caller: bw.caller, args: A, cwd: other }).then((r) => (dB = true, r));   // the SAME command in a DIFFERENT folder (same shape key, different exact)
+    let cb = null; for (let i = 0; i < 400 && !cb; i++) { cb = store.snapshot().open.find((x) => x.action && x.action.type === 'vault-run-ask' && !x.action.late && x.facts); if (!cb) await sleep(5); }
+    if (cb) bd.answer(cb.action.askId, { answer: 'deny' });
+    await pB;
+    const wa = cb && cb.facts && cb.facts.whyAgain;
+    ok(!!cb && !!wa && wa.code === 'folder', 'round 25 (minor 6b): the SAME command rerun in a DIFFERENT folder draws a card whose facts.whyAgain names the one difference (folder) — a1f79c42 drew the card but named no reason', { card: !!cb, whyAgain: wa });
   }
 
   // round 23 (MAJOR #5): the settled late record read by wake-approve-card 2a5e9ce8's own reader (copied) — a late allow stamps «allowed:late», a deny «denied by person», the vault's 24 h / lock stamp NOTHING (decidedBy ≠ person)
@@ -500,7 +532,8 @@ async function newShapeCards(doorMod) {
     const gc = cardsOf(gw)[0];
     live = false;
     const ans = gd.answer(gc.action.askId, { answer: 'once' });
-    ok(ans.ok === false && ans.code === 'conversation_gone' && gd._lateOnce.size === 0, 'round 23 (MINOR): a late «allow once» for an ENDED conversation mints NO pass — conversation_gone (answerLate now checks liveOf, as the live path does)', ans);
+    const goneRec = gw.userTodos.get(gc.id);
+    ok(ans.ok === false && ans.code === 'conversation_gone' && gd._lateOnce.size === 0 && goneRec.status === 'done' && goneRec.resolvedBy === 'conversation-gone' && goneRec.resolvedFact && goneRec.resolvedFact.decidedBy === null, 'round 23 + round 25 (minor 6c): a late «allow once» for an ENDED conversation mints NO pass (conversation_gone) AND the item settles resolvedBy="conversation-gone" + decidedBy null — the end wake-approve-card reads, not "denied" (a1f79c42: settled "denied")', { ans, by: goneRec.resolvedBy, fact: goneRec.resolvedFact });
   }
 
   // the card closed by another door — the gate's words, again on a LOCAL instance

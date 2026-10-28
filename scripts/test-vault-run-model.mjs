@@ -292,8 +292,16 @@ console.log('④ THE SHAPE KEY — tool + flags + hosts + entries (decision ④)
     const ghBad = GOGH.filter(([spec, want]) => V.repoHostOf(spec) !== want);
     ok(!ghBad.length, "round 19 (item 3): repoHostOf = go-gh's repository.Parse (cli/go-gh pkg/repository/repository_test.go vectors) with Go url.Parse's LAST-@ rule — OWNER/REPO ⇒ default host, HOST/OWNER/REPO ⇒ host, scp-like git@HOST:O/R, ssh/git/https URLs (port dropped, www. stripped), and x@ghe:1@evil ⇒ evil.test (NOT the first-@ ghe)", ghBad.map(([spec, w]) => [spec, 'got ' + V.repoHostOf(spec), 'want ' + w])); }
   // round 19 (item 4): the curl config-directive table is DERIVED from `curl --help all` and PINNED here — a curl that adds a file-reading / data-@file / url / name=content@file / route option this row does NOT cover is RED BY NAME (version-sensitive, like the gh grammar census).
-  { const curlRow = V.knownToolOf('curl'); let help = null; try { help = cp.execFileSync('curl', ['--help', 'all'], { encoding: 'utf8', timeout: 15000 }); } catch {}
+  { const curlRow = V.knownToolOf('curl'); const CURL_PINNED = '8.18.0';
+    // round 25 (item 3, claim-run 1): ONE option table serves argv and the config reader — every curl flag argv keys as a routing / redirecting VALUE (row.keyed) is covered by a config directive category. RED on a1f79c42: `dns-servers` and `interface` are keyed in argv but in NO config set, so a `-K` template `dns-servers = 127.0.0.1` / `interface = lo` offered «always». Reads the ROW (version-independent), not a hand list of names.
+    const cfgCats = new Set([].concat(curlRow.configFileKeys || [], curlRow.configDataKeys || [], curlRow.configAtNameKeys || [], curlRow.configCookieKeys || [], curlRow.configNetrcKeys || [], curlRow.configRouteKeys || [], curlRow.configRedirectKeys || [], curlRow.configFormKeys || []));
+    const cShort = curlRow.configShort || {};
+    const uncovered = (curlRow.keyed || []).map((f) => f.replace(/^-+/, '')).map((f) => (f.length === 1 ? (cShort[f] || f) : f)).filter((f) => !cfgCats.has(f));
+    ok(!uncovered.length, 'round 25 (item 3): every curl flag argv keys as a routing / redirecting value (row.keyed) is covered by a config directive category — ONE option table serves argv and the config reader (RED on a1f79c42: dns-servers / interface keyed in argv, in no config set)', uncovered);
+    let help = null; try { help = cp.execFileSync('curl', ['--help', 'all'], { encoding: 'utf8', timeout: 15000 }); } catch {}
+    const ver = (/curl ([0-9.]+)/.exec((() => { try { return cp.execFileSync('curl', ['--version'], { encoding: 'utf8' }); } catch { return ''; } })()) || [])[1] || '?';
     if (!help) { if (process.env.CI || process.env.GITHUB_ACTIONS) ok(false, 'curl directive census REQUIRED on the gate but curl is not runnable'); else console.log('  – curl directive census SKIPPED — curl not runnable here'); }
+    else if (ver !== CURL_PINNED) { console.log(`  – curl directive census SKIPPED — curl ${ver} ≠ pinned ${CURL_PINNED} (a new curl's options are re-reviewed deliberately, then the pin is bumped — off-gate SKIP, RED on CI if the box's curl drifts)`); }
     else { const covered = new Set([].concat(curlRow.configFileKeys || [], curlRow.configDataKeys || [], curlRow.configAtNameKeys || [], curlRow.configCookieKeys || [], curlRow.configNetrcKeys || [], curlRow.configRouteKeys || [], curlRow.configRedirectKeys || [], curlRow.configFormKeys || [])), shortMap = curlRow.configShort || {}, miss = [];
       for (const line of help.split('\n')) { const m = /^\s+(?:-([A-Za-z]), )?--([a-z0-9][a-z0-9.-]*)(?:\s+<([^>]+)>)?/.exec(line); if (!m) continue; const short = m[1], long = m[2], arg = (m[3] || '').toLowerCase(); let cat = null;
         if (/\b(file|filename|dir)\b/.test(arg) || /^cert|^certificate|\bkey$|cert\[/.test(arg)) cat = 'file';
@@ -306,7 +314,6 @@ console.log('④ THE SHAPE KEY — tool + flags + hosts + entries (decision ④)
         else if (arg === 'data|filename') cat = 'cookie';
         else if (['location', 'location-trusted', 'proto-redir', 'netrc', 'netrc-optional'].includes(long)) cat = 'special';
         if (!cat) continue; if (!covered.has(long)) miss.push([long, arg || '(bool)', cat]); else if (short && shortMap[short] !== long) miss.push(['-' + short + ' (short of ' + long + ')', 'short-map']); }
-      const ver = (/curl ([0-9.]+)/.exec(cp.execFileSync('curl', ['--version'], { encoding: 'utf8' })) || [])[1] || '?';
       ok(!miss.length, `round 19 (item 4): every curl ${ver} file-reading / data-@file / url / name=content@file / route directive (both spellings) is covered by the curl row — a new curl option is RED BY NAME (the derived, pinned census)`, miss); } }
 }
 
@@ -1220,6 +1227,34 @@ console.log('⑫ THE CARD FACTS — cardFactsOf (lane vault-agent-own r20): stru
   ok(eq(ui.routeHosts, ['127.0.0.1:9']) && ui.userinfo === true && eq(fr.routeHosts, ['127.0.0.1:9']) && eq(pl.routeHosts, ['good.example.test'])
     && V.urlParse('ssh://git@code.example.test/o/r').host === 'code.example.test',
     'round 24 (no over-blinding): a http userinfo URL still reads the host past the LAST @ (127.0.0.1, url_userinfo), a `#@` reads 127.0.0.1 (the fragment is not the host), a plain host and an ssh git@ userinfo are unchanged — the re-parse backstop self-normalises case / default-port / a trailing dot', { ui, fr, pl });
+
+  // round 25 (item 1, CONFIRMED 0.93; proxy-hash-probe, wire-proven curl 8.18 on loopback): every route value is read by the ONE parser (routeHostOne → urlParse), NO hand regex — a proxy / preproxy / socks* `#@` / `?@` value names the host curl DIALS (before the #/?) not the host after the LAST @; an IPv6 connect-to names [::1]. RED on a1f79c42: the hand regex named own.example (after @) while curl dialled evil.test, and the connect-to colon-split named «[»
+  { const cr = (k, v) => V.cfgRouteHosts(k, v);
+    ok(eq(cr('proxy', 'evil.test#@own.example:3128'), { hosts: ['evil.test'] })
+      && eq(cr('proxy', 'evil.test?@own.example:3128'), { hosts: ['evil.test'] })
+      && eq(cr('preproxy', 'socks5://evil.test#@own.example:3128'), { hosts: ['evil.test'] })
+      && eq(cr('proxy1.0', 'evil.test:3128'), { hosts: ['evil.test'] })
+      && eq(cr('connect-to', '::[2001:db8::1]:443'), { hosts: ['[2001:db8::1]'] })
+      && eq(cr('proxy', ':3128'), { blind: true }),
+      'round 25 (item 1, RED on a1f79c42): a proxy / socks `#@`/`?@` value names the host curl DIALS (evil.test) not own.example (after the last @); an IPv6 connect-to names the bracketed host not «[» — every route value through the ONE parser, no hand regex', { hashAt: cr('proxy', 'evil.test#@own.example:3128'), ipv6: cr('connect-to', '::[2001:db8::1]:443') }); }
+
+  // round 25 (item 2, refuted-but-real, wire-proven curl 8.18; wire-single-slash): a scheme-shaped token that is NOT canonical scheme:// (http:/HOST one slash, http:HOST) is never a bare host — curl dials a host PAST the scheme word; the reader blinds it (RED on a1f79c42: targetOf read «http» as the host and cfgRouteHosts read «http:», so a pass for that false host leaked a minted value to a DIFFERENT host with no card). A host:port (evil.test:8080) is NOT scheme-shaped (a digit follows the colon) — still read
+  { ok(eq(V.targetOf('http:/evil.test/x'), { unread: true })
+      && eq(V.targetOf('http:evil.test'), { unread: true })
+      && eq(V.targetOf('https:/evil.test/x'), { unread: true })
+      && eq(V.cfgRouteHosts('url', 'http:/evil.test/x'), { blind: true })
+      && eq(V.cfgRouteHosts('url', 'https:/evil.test/x'), { blind: true })
+      && eq(V.targetOf('evil.test:8080/x'), { host: 'evil.test:8080' })
+      && eq(V.targetOf('https://good.example.test/x'), {}),
+      'round 25 (item 2, RED on a1f79c42): a one-slash http:/HOST or a bare http:HOST is unread/blind (curl dials a host past «http»); the config twin blinds too; a host:port (evil.test:8080) is still read, a canonical https:// is still read', { slash: V.targetOf('http:/evil.test/x'), cfg: V.cfgRouteHosts('url', 'http:/evil.test/x'), hostport: V.targetOf('evil.test:8080/x') }); }
+
+  // round 25 (item 6a): every clipped facts string carries its *Cut marker AND its *Full fold — a 2100-char plain-env value (RED on a1f79c42: clipped to exactly CARD_STRING_MAX with no marker, no fold ⇒ the wake store names nothing; the truncation was invisible)
+  { const big = 'x'.repeat(2100);
+    const sp = V.planOf({ argv: ['curl', '-s', 'https://api.ok.example/x'], env: [['T', M1], ['API_BASE', big]] });
+    const f6 = V.cardFactsOf(sp, V.shapeOf(sp), '/home/u', { who: 'a', home: '/home/u', entries: {} });
+    const ev = f6.env.find((e) => e.name === 'API_BASE');
+    ok(!!ev && ev.value.length === V.CARD_STRING_MAX && ev.valueCut === true && Array.isArray(ev.valueFull) && ev.valueFull.join('') === big && ev.valueFull.every((c) => c.length <= V.CARD_STRING_MAX),
+      'round 25 (item 6a): a 2100-char plain-env value is clipped to CARD_STRING_MAX with valueCut + a valueFull fold that reassembles it (the directive / secret name/entry/ref ride the same clipFold) — a1f79c42 clipped silently and the store named nothing', { vlen: ev && ev.value.length, cut: ev && ev.valueCut, chunks: ev && ev.valueFull && ev.valueFull.length }); }
 
   // round 23 (MAJOR #4): every facts string is bounded to CARD_STRING_MAX, a long command rides cmdFull chunks (the client store refuses a string > 2000 ⇒ ask_unfiled on 4ff55fb4, where facts.cmd was head.cmd up to 4096)
   const bigCmd = 'curl -s -d ' + 'x'.repeat(2400) + ' https://api.ok.example/v1/items';
