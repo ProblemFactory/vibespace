@@ -12,6 +12,13 @@ const CC = (() => {
 if (!CC) { console.error('vibespace-job: refused — this CLI\'s call helper (cli-call.js) is missing beside it, so it could not bound its wait; nothing was sent — ask the user to reinstall the agent tools (Manage agents → the machine → Install)'); process.exit(2); }
 CC.cliStart({ tool: 'vibespace-job', flags: ['--call-timeout'] });
 'use strict';
+// lane job-notify-user r3: THE For-you urgency set is the store's own — FOR_YOU_URGENCIES in src/agent-cli-text.js (the
+// store reads and exports the same constant; its boot-time copy agent-cli-text.js rides beside this file on a host).
+// null = an install without it: no prompt check (the hub's store still refuses at the fire, and the journal says it)
+const FOR_YOU_URGENCIES = (() => {
+  try { return (require('node:fs').existsSync(require('node:path').join(__dirname, '..', '..', 'server.js')) ? require('../../src/agent-cli-text.js') : require('./agent-cli-text.js')).FOR_YOU_URGENCIES || null; } catch { }
+  try { return require('./agent-cli-text.js').FOR_YOU_URGENCIES || null; } catch { return null; }
+})();
 const API = process.env.VIBESPACE_API;
 const SESS = process.env.VIBESPACE_SESSION_TOKEN;
 const JOBT = process.env.VIBESPACE_JOB_TOKEN;
@@ -66,17 +73,23 @@ function pubLine(j) {
   if (j.publishState === 'failed') return `public URL: NOT published — ${j.publishWhy || j.publishError || 'publish failed'}${j.publishSince ? ' — since ' + atWords(j, 'publishSince') + (j.publishAttempts ? ` (${j.publishAttempts} attempt${j.publishAttempts === 1 ? '' : 's'})` : '') : ''}${j.lastPublicUrl ? ' (was ' + j.lastPublicUrl + ')' : ''}`;
   return `public URL: none while ${j.state}${j.lastPublicUrl ? ' — the next start publishes ' + j.lastPublicUrl + ' again' : ''}`;
 }
-// lane job-notify-user r2: the For-you copy the store REFUSED (the journal's newest user-inbox line), in its words — a
-// poll / show must not read as delivered what never landed in the user's tray
+// lane job-notify-user r2 → r3: the For-you copies the store REFUSED — EVERY copy the engine files (a task's end, an ask, a
+// park, a missed time, a notify fire: the journal line's `copy` names it), each one's newest user-inbox line, in its words —
+// a poll / show must not read as delivered what never landed in the user's tray
+const COPY_WORDS = { end: 'the end copy', ask: 'the ask', parked: 'the park notice', missed: 'the missed-time notice', fire: 'the fire copy' };
 function forYouLine(j) {
-  const fy = [...(j.notifyLog || [])].reverse().find((e) => e && e.lane === 'user-inbox');
-  return fy && !fy.ok ? `for you: the last copy was NOT filed — ${fy.reason || 'the For you tray refused it'}` : '';
+  const fyLast = new Map();
+  for (const fy of j.notifyLog || []) if (fy && fy.lane === 'user-inbox') fyLast.set(fy.copy || 'fire', fy);
+  const fyRefused = [...fyLast.values()].filter((fy) => !fy.ok);
+  return fyRefused.length ? 'for you: ' + fyRefused.map((fy) => `${COPY_WORDS[fy.copy || 'fire'] || 'a copy'} was NOT filed — ${fy.reason || 'the For you tray refused it'}`).join('; ') : '';
 }
 function printJob(j, tailLines) {
   const run = j.run || {};
   const dur_ = run.startedAt ? (run.endedAt ? ` ran ${hum(run.endedAt - run.startedAt)}` : ` up ${hum(Date.now() - run.startedAt)}`) : '';
   console.log(`${j.id} ${j.name} [${j.kind}] state=${j.state}${run.exit !== null && run.exit !== undefined ? ' exit=' + run.exit : ''}${run.cause ? ' cause=' + run.cause : ''}${dur_}${j.nextFireAt ? ' next=' + hum(j.nextFireAt - Date.now()) : ''}${j.progress ? '\nprogress: ' + j.progress : ''}`);
   if (j.context && j.context.payload) console.log('context: ' + j.context.payload);
+  // lane job-notify-user r3: a notify cron's reminder, as the snapshot keeps it
+  if (j.actionText) console.log('text: ' + j.actionText);
   if (pubLine(j)) console.log(pubLine(j));
   if (forYouLine(j)) console.log(forYouLine(j));
   if (j.answers && j.answers.length) console.log('answers: ' + JSON.stringify(j.answers[j.answers.length - 1]));
@@ -93,10 +106,12 @@ create:  vibespace-job run "CMD" --name NAME [--context "brief (echoed at poll, 
            [--every 30m | --cron "41 9 * * *" | --at "+5m"|"2026-09-05 06:00"]        ← schedule (spawns CMD; bare datetime = SERVER-LOCAL tz — prefer relative "+5m"/"+1h30m" or ISO with Z)
              (--notify-user: when the task ends — scheduled, every fire's run — a copy lands in the user's For you tray; default off;
               refused with --keep-up: a service never tells at its end. Set at creation — to change it, rm and recreate; it is not
-              "notify <id> on|off", which says whether YOUR conversation is told. Asks, missed times and parks always reach the user)
-         vibespace-job notify-cron --name X (--every 12h|--cron "..."|--at "...") --text "..." [--urgency low|normal|high] [--notify-user]
-             (fires wake YOUR conversation; --notify-user ALSO copies the text to the user's For you tray — default off, the text is
-              usually your own reminder; another --urgency is refused)
+              "notify <id> on|off", which says whether YOUR conversation is told. Without it the user still gets a job's asks — and
+              a service's park — in For you; a missed fire is caught up when the server is back, never a notice)
+         vibespace-job notify-cron --name X (--every 12h|--cron "..."|--at "...") --text "..." [--urgency low|normal|high|urgent] [--notify-user]
+             (fires wake YOUR conversation with the whole text; --notify-user ALSO copies it to the user's For you tray — default
+              off, the text is usually your own reminder; that copy and a subscriber's pass the secret mask; --urgency is the
+              tray's own set, read only with --notify-user)
 docs:    vibespace-job docs   — the FULL manual (notify/subscribe/announce/panels/patterns), read anytime
 read:    vibespace-job list [--mine|--subscribed|--archived] · vibespace-job poll <id|name> [--wait 100] [--tail 40]
            (finished one-shots are ARCHIVED after a day — done — or a week after somebody acknowledged a failure;
@@ -163,10 +178,11 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
       // echo/printf command has no purpose BEYOND its output ⇒ default
       // notifyOk=true for that shape (an explicit --notify-ok flag, or
       // --notify off, still wins).
-      // lane job-notify-user r2: a refusal the user would meet LATER is said at the prompt, nothing created — the For you
-      // store takes low|normal|high (a notify cron's other urgency was dropped at its fire), and a service never tells at
-      // its end (no engine path reads the flag there; its parks file For you whatever the flag)
-      if (isNotify && flags.urgency !== undefined && !['low', 'normal', 'high'].includes(flags.urgency)) { console.error('--urgency must be low, normal or high — the For you tray takes no other; nothing was created'); process.exit(1); }
+      // lane job-notify-user r2: a refusal the user would meet LATER is said at the prompt, nothing created — an urgency
+      // outside the For you store's own set (r3: THE set the store exports, FOR_YOU_URGENCIES — r2 kept its own
+      // low|normal|high and refused 'urgent' with a false reason; checked only with --notify-user, the one copy that reads
+      // it), and a service never tells at its end (no engine path reads the flag there; its parks file For you whatever the flag)
+      if (isNotify && flags['notify-user'] && flags.urgency !== undefined && FOR_YOU_URGENCIES && !FOR_YOU_URGENCIES.includes(flags.urgency)) { console.error(`--urgency must be one of ${FOR_YOU_URGENCIES.join('/')} — the For you tray's own set; nothing was created`); process.exit(1); }
       if (body.kind === 'service' && flags['notify-user']) { console.error('--notify-user is refused with --keep-up: a service never tells the user at its end (a park always does) — drop the flag; nothing was created'); process.exit(1); }
       let echoReminder = false;
       if (isNotify) body.action = { type: 'notify', text: readArg(flags.text || ''), urgency: flags.urgency || 'normal' };
@@ -242,6 +258,8 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
       console.log(`${j.id} [${j.kind}] ${j.state} — ${j.name}${j.mine ? '  (yours)' : ''}${j.archived ? '  (ARCHIVED ' + (j.archivedWhy || '') + ')' : ''}`);
       if (j.cmd) console.log(`cmd: ${JSON.stringify(j.cmd.argv)}${j.cmd.cwd ? ' @ ' + j.cmd.cwd : ''}${j.cmd.envKeys.length ? ' env:[' + j.cmd.envKeys.join(',') + ']' : ''}${j.envFrom.length ? ' envFrom:[' + j.envFrom.join(',') + ']' : ''}`);
       if (j.schedule) console.log(`schedule: ${JSON.stringify(j.schedule)} catchUp=${j.catchUp}${j.nextFireAt ? ' next=' + atWords(j, 'nextFireAt') : ''}`);
+      // lane job-notify-user r3: a notify cron's reminder (the snapshot kept none)
+      if (j.actionText) console.log('text: ' + j.actionText);
       console.log(`params: restart=${j.restart} timeout=${j.timeoutMs || '—'} until=${j.untilOutput || '—'} singleInstance=${j.singleInstance} stopWithOwner=${j.stopWithOwner} notifyOk=${j.notifyOk} notifyUser=${j.kind === 'service' ? 'n/a (a service never tells at its end)' : j.notifyUser}`);
       if (forYouLine(j)) console.log(forYouLine(j));
       console.log(`access: view=${j.access.view} control=${j.access.control}${j.access.lockedBy ? ' (locked by user)' : ''} · notify=${j.notify}${j.lastNotify ? ' last=' + j.lastNotify.lane + (j.lastNotify.ok ? '✓' : '✗') : ''} · subscribers=${j.subscribersCount}${j.mySubscription ? ' (you' + (j.mySubscription.filter ? ', filter=' + j.mySubscription.filter : '') + ')' : ''}`);

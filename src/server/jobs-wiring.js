@@ -20,7 +20,7 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
     // status-bar chip read it off the same frame (`jm` is bound lazily: the
     // constructor never broadcasts)
     broadcast: (type, payload) => broadcastAll({ type, ...payload, held: jm.heldDigest() }),
-    notifyUser: ({ text, urgency, jobId, jobName, ownerCid }) => {
+    notifyUser: ({ words, fact = null, urgency, jobId, jobName, ownerCid }) => {
       // ATTRIBUTION = the AGENT CONVERSATION that owns the job (owner verdict
       // 2.357.0: an ask hanging off a background-task entity is 反直觉 — the
       // user thinks in terms of the agent they were talking to, and 2.348.1's
@@ -40,12 +40,16 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
         if (ownerCid && activeSessions) for (const s of activeSessions.values()) {
           if ((s.claudeSessionId || s.backendSessionId) === ownerCid) { sessName = s.name || null; break; }
         }
-        // origin 'jobs' is an AGENT-WORDS origin (src/inbox-origin.js): the store belts the job's name and its text
+        // origin 'jobs' is an AGENT-FIELDS origin (src/inbox-origin.js, lane job-notify-user r3): the engine's sentence is a
+        // TEMPLATE (`words` = {key, params}) whose fields are the agent's (the job's NAME, a notify cron's --text) — the
+        // store belts each field on its own and fills the template, never the sentence; the group label is the owner
+        // conversation's own name (the person's fact, whole) + the job's name (`jobName`, a field the store belts);
+        // `fact` = which copy of the job it is (the resolver's key and the re-file match, never the words)
         const it = userTodos.add(sessKey, {
           origin: 'jobs', // B-328d
-          text, urgency: urgency || 'normal', by: 'agent', jobId,
-          detail: (jobId ? `Background job ${jobId}` : '') + (ownerCid && jobName ? ` · via ${jobName}` : ''),
-          sessionName: ownerCid ? (sessName ? `${sessName} · ${jobName || 'job'}` : (jobName || 'background job')) : (jobName || 'background job'),
+          i18n: { text: words, ...(jobId ? { detail: [ownerCid && jobName ? { key: 'Background job {id} · via {name}', params: { id: jobId, name: jobName } } : { key: 'Background job {id}', params: { id: jobId } }] } : {}) },
+          urgency: urgency || 'normal', by: 'agent', jobId, jobFact: jobId ? fact : null,
+          sessionName: ownerCid && sessName ? sessName : null, jobName: jobName || (ownerCid && sessName ? 'job' : 'background job'),
         });
         return { ok: true, id: (it && it.id) || null };
       } catch (e) {
@@ -65,10 +69,10 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
       let sessName = null;
       if (activeSessions) for (const s of activeSessions.values()) { if ((s.claudeSessionId || s.backendSessionId) === cid) { sessName = s.name || null; break; } }
       const names = (Array.isArray(jobs) ? jobs : []).map((x) => String(x).slice(0, 60)).join(', ');
+      // lane job-notify-user r3: the words ARE the structure (an AGENT-FIELDS origin files no composed text — the store
+      // fills the template; `jobs`, the job names the stash already carries belted, is a field belted on its own again)
       userTodos.add(`claude:${cid}`, {
         origin: 'jobs', kind: 'notice', urgency: 'low', by: 'agent',
-        text: `Background Work notifications for this conversation were dropped — ${cap} were already waiting, the most it keeps`,
-        detail: `${n} dropped, never delivered (from: ${names}). The ${cap} still waiting reach the agent with its next turn; the Background Work panel lists them.`,
         sessionName: sessName ? `${sessName} · Background Work` : 'Background Work',
         i18n: {
           text: { key: 'Background Work notifications for this conversation were dropped — {cap} were already waiting, the most it keeps', params: { cap } },

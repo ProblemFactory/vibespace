@@ -21,7 +21,9 @@ const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-jobs-'));
 fs.mkdirSync(path.join(dir, 'bin'), { recursive: true });
 fs.copyFileSync(new URL('../data/bin/job-wrapper.js', import.meta.url), path.join(dir, 'bin', 'job-wrapper.js'));
 const notifications = [];
-const deps = { dataDir: dir, broadcast: () => { }, notifyUser: (n) => notifications.push(n), log: () => { } };
+// a For-you copy as the store fills it (lane job-notify-user r3: the engine hands a template + fields — `words` — never a sentence)
+const saidCopy = (n) => ({ ...n, text: n && n.words ? String(n.words.key).replace(/\{(\w+)\}/g, (m, k) => (n.words.params && n.words.params[k] !== undefined ? String(n.words.params[k]) : m)) : n && n.text });
+const deps = { dataDir: dir, broadcast: () => { }, notifyUser: (n) => notifications.push(saidCopy(n)), log: () => { } };
 const caller = { conversationId: 'conv-T', sessionId: 'sess-T', sessionCreatedAt: 1, groups: new Set(['T-g']) };
 const owner = { conversation: { backend: 'claude', id: 'conv-T' }, sessionId: 'sess-T', sessionCreatedAt: 1, createdBy: 'agent', groupsSnapshot: ['T-g'] };
 
@@ -808,7 +810,7 @@ setInterval(() => { }, 1000);
       fs.mkdirSync(path.dirname(bin), { recursive: true });
       fs.writeFileSync(bin, WRAP);
       const w = { D, bin, told: [], inbox: [], engines: [] };
-      w.deps = { dataDir: D, broadcast() { }, log() { }, notifyGlobal: () => true, notifyUser: (n) => w.inbox.push(n), deliverToConversation: async (cid, text) => { w.told.push(text); return { ok: true, lane: 'message' }; } };
+      w.deps = { dataDir: D, broadcast() { }, log() { }, notifyGlobal: () => true, notifyUser: (n) => w.inbox.push(saidCopy(n)), deliverToConversation: async (cid, text) => { w.told.push(text); return { ok: true, lane: 'message' }; } };
       w.boot = () => { try { fs.rmSync(path.join(D, 'jobs.lock'), { force: true }); } catch { } const X = new JM(w.deps); X.init(); for (const t of X._timers || []) clearInterval(t); w.engines.push(X); return X; };
       w.wrapper = (src, mtimeMs) => { fs.writeFileSync(bin, src); if (mtimeMs) fs.utimesSync(bin, new Date(), new Date(mtimeMs)); };
       w.end = () => { for (const X of w.engines) { try { for (const j of X.jobs.values()) if (['up', 'starting'].includes(j.state)) X.stop(j); } catch { } try { X.shutdown(); } catch { } } };

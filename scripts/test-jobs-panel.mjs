@@ -49,6 +49,7 @@ const fx = makeFixture(T0);
 fx.jobs.find((j) => j.id === fx.ids.cron).notifyUser = true;   // lane job-notify-user: the cron made with --notify-user (a task without)
 fx.jobs.find((j) => j.id === fx.ids.service).notifyUser = true;   // r2: a service the agent POSTed with the flag — nothing tells at its end, so no row
 { const c = fx.jobs.find((j) => j.id === fx.ids.cron); fx.ids.notifyCron = 'jb-0ffe01'; fx.jobs.push({ ...c, id: fx.ids.notifyCron, name: 'standup-note', action: { type: 'notify', text: 'Standup notes are due at 10:00', urgency: 'normal' }, notifyUser: true, runs: [] }); }   // r2: a notify-cron made with --notify-user
+{ const c = fx.jobs.find((j) => j.id === fx.ids.cron); fx.ids.atNone = 'jb-0ffe02'; fx.jobs.push({ ...c, id: fx.ids.atNone, name: 'deadline-note', schedule: { at: T0 + 3600e3 }, catchUp: 'none', action: { type: 'notify', text: 'The filing deadline is today', urgency: 'high' }, notifyUser: false, runs: [] }); }   // r3: an --at notify cron with catch-up OFF (the API's; the CLI never sends it)
 const strip = (o) => JSON.parse(JSON.stringify(o, (k, v) => (k.startsWith('_') ? undefined : v)));
 const dataDir = path.join(wt, 'data');
 fs.mkdirSync(dataDir, { recursive: true });
@@ -166,7 +167,8 @@ try {
   check('…while its siblings keep their defaults', rail2 && rail2.groups.filter((g) => g.attn && g.key !== victim).every((g) => g.expanded === 'true'));
   check('a reload fetches the archive ZERO times until the row is clicked again', (await archiveFetches()) === 0);
   // lane job-notify-user: a job's detail says whether it ALSO tells you in For you, as what the flag DOES for its kind (r2:
-  // a service has no such row — nothing tells at its end), and beside it, for every kind, what always reaches you
+  // a service has no such row — nothing tells at its end), and beside it what reaches you whatever the flag — only what the
+  // engine does for THAT kind (r3: «Asks, missed times and parks always reach you» was drawn on every kind)
   const forYouRow = async (id) => {
     const card = `document.querySelector('.rail-panel-jobs .jobs-card[data-job=' + ${JSON.stringify(JSON.stringify(id))} + ']')`;
     await p.evalJs(`${card}.click(); true`);
@@ -175,12 +177,13 @@ try {
     await p.evalJs(`${card}.click(); true`);
     return { fu, aw };
   };
-  const ALWAYS = 'Asks, missed times and parks always reach you in For you';
-  const fyCron = await forYouRow(fx.ids.cron), fyNote = await forYouRow(fx.ids.notifyCron), fyTask = await forYouRow(fx.ids.running), fySvc = await forYouRow(fx.ids.service);
+  const CAUGHT = 'A missed time is caught up when the server is back — never a notice';
+  const fyCron = await forYouRow(fx.ids.cron), fyNote = await forYouRow(fx.ids.notifyCron), fyTask = await forYouRow(fx.ids.running), fySvc = await forYouRow(fx.ids.service), fyAt = await forYouRow(fx.ids.atNone);
   check('a job\'s detail says what --notify-user DOES for its kind: the scheduled run made with it «when each run ends: yes», the notify-cron «when it fires: yes», a task without it «when it ends: no»',
     fyCron.fu === 'Tells you in For you when each run ends: yes' && fyNote.fu === 'Tells you in For you when it fires: yes' && fyTask.fu === 'Tells you in For you when it ends: no', { fyCron, fyNote, fyTask });
   check('…a service has NO such row (nothing tells at its end), even one stored with the flag', fySvc.fu === null, fySvc);
-  check('…and every kind says what always reaches you, whatever the flag', [fyCron, fyNote, fyTask, fySvc].every((r) => r.aw === ALWAYS), { fyCron, fyNote, fyTask, fySvc });
+  check('…and each kind says only what reaches you for THAT kind: a task its asks, a service its asks and a park, a scheduled run each run\'s asks and a caught-up missed time, a notify cron a caught-up missed time — an --at one with catch-up off a missed-time notice',
+    fyTask.aw === 'Its asks reach you in For you' && fySvc.aw === 'Its asks and a park reach you in For you' && fyCron.aw === "Each run's asks reach you in For you · " + CAUGHT && fyNote.aw === CAUGHT && fyAt.aw === 'A missed time reaches you in For you', { fyCron, fyNote, fyTask, fySvc, fyAt });
 
   // ── 375×667: the window fallback (no rail on mobile) ──
   await p.cdp('Emulation.setDeviceMetricsOverride', { width: 375, height: 667, deviceScaleFactor: 2, mobile: true });

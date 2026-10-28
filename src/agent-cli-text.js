@@ -187,4 +187,10 @@ function searchSaid(kind, { q = '', saved = null, hiddenMatch = false } = {}) {
   }
 }
 
-module.exports = { STRAY_EXIT, chars, trimOnce, takeDoors, readDoor, textOf, positionals, strayRefusal, sentLine, oneText, searchSaid, SEARCH_HIDDEN_TEXT, SEARCH_SHARE_DOOR };
+/** THE FOR-YOU URGENCIES (lane job-notify-user r3): the ONE set the For-you store takes (src/user-todos.js reads and
+ *  exports it as URGENCIES) and every agent CLI offers — vibespace-ask --urgency, vibespace-job notify-cron --urgency. It
+ *  rides here because this file ships beside the CLIs on a host with no checkout (a CLI cannot require the store); the
+ *  r2 CLI kept its own low|normal|high and refused the store's 'urgent' with a reason that was false. */
+const FOR_YOU_URGENCIES = Object.freeze(['low', 'normal', 'high', 'urgent']);
+
+module.exports = { FOR_YOU_URGENCIES, STRAY_EXIT, chars, trimOnce, takeDoors, readDoor, textOf, positionals, strayRefusal, sentLine, oneText, searchSaid, SEARCH_HIDDEN_TEXT, SEARCH_SHARE_DOOR };

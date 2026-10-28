@@ -7,7 +7,8 @@
 //       plain run and a scheduled run (--at / --every) carry ONE top-level `notifyUser: true` with --notify-user, false
 //       without it (the controls); a scheduled run ALSO carries the compatibility copy inside its task (r2: an engine ≤
 //       2.369.360 builds the run from `{...a.task}`), and the store keeps one field. Refused AT THE PROMPT, nothing
-//       sent: --notify-user on a service (nothing tells at a service's end) and an --urgency the For you tray refuses.
+//       sent: --notify-user on a service (nothing tells at a service's end) and an --urgency outside the For you store's
+//       own set (r3: THE set the store exports — 'urgent' is created and filed; the check reads it only with --notify-user).
 //   (2) THE BODY CENSUS — every flag the usage's create block prints, and every flag the run / notify-cron branch reads,
 //       has a PIN (the invocation, the field it lands in, the value — checked in the POST body AND in the spec the real
 //       route hands the engine). A flag without one is red BY NAME — there is no «not on the wire» row to declare (r2:
@@ -20,13 +21,19 @@
 //       with the flag. Controls: a jobs.js copy without the parent→child hand-over leaves the scheduled child silent; an
 //       engine with 2.369.360's two lines (no hand-over, the nested copy stored) still tells the user — through the
 //       compatibility copy, and a CLI without it leaves that child silent.
-//   (4) THE ROAD TO A PERSON (r2) — the REAL src/server/jobs-wiring.js over a REAL For-you store (UserTodoManager): the
-//       agent's --text reaches the tray and the owner message MASKED (a secret-named KV and a token shape — fakes built
-//       at runtime); a copy the store REFUSES (an urgency outside its set, the conversation at its open cap) is
-//       journaled `user-inbox ✗ — why`, never ✓, and `poll` / `show` say it. Control: a jobs.js copy whose fire skips
-//       the belt carries the raw secret to the owner message.
+//   (4) THE ROAD TO A PERSON (r2 → r3) — the REAL src/server/jobs-wiring.js over a REAL For-you store (UserTodoManager):
+//       the agent's --text reaches the tray MASKED as a FIELD (a secret-named KV and a token shape — fakes built at
+//       runtime) and a SUBSCRIBER's message masked, while the owner conversation that WROTE it gets it whole (r3: a text
+//       returns to its author); a job NAMED with a secret word keeps the product's sentences whole (the end, the ask, the
+//       park, the missed time — r2's whole-sentence belt ate their words), done and failed are two items, the answered
+//       ask closes (the resolver keys on a fact). EVERY copy the store REFUSES (an urgency outside its set; the
+//       conversation at its open cap: a notify fire, a task's end, an ask, a park, a missed time) is journaled
+//       `user-inbox ✗ — why`, never ✓, and `poll` / `show` say which copy. Control: a jobs.js copy whose fire skips the
+//       subscriber's belt carries the raw secret to the subscriber.
 //   (5) SHOW — `vibespace-job show` prints notifyUser=true|false on its params line, beside notifyOk; a service prints
-//       notifyUser=n/a; the create echo names the user's copy beside auto-notify. The panel's words for it have zh + ja.
+//       notifyUser=n/a; the create echo names the user's copy beside auto-notify; a notify cron's show / poll print its
+//       reminder (whole for the author). The panel's words have zh + ja, and the always-line says, per kind, only what
+//       the engine does for that kind (r3: the panel's own expression over real snapshots, beside the engine's acts).
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -42,7 +49,8 @@ const CLI = path.join(REPO, 'data/bin/vibespace-job');
 const { JobManager } = require('../src/jobs.js');
 const AR = require('../src/agent-routes.js');
 const JW = require('../src/server/jobs-wiring.js');
-const { UserTodoManager } = require('../src/user-todos.js');
+const { UserTodoManager, URGENCIES } = require('../src/user-todos.js');
+const M = require('../src/job-model.js');
 
 let pass = 0, fail = 0;
 const ok = (c, name, extra) => { if (c) { pass++; console.log(`  ✓ ${name}`); } else { fail++; console.log(`  ✗ ${name}${extra !== undefined ? `\n      ${String(extra).slice(0, 700)}` : ''}`); } };
@@ -55,6 +63,8 @@ const KVMAT = crypto.randomBytes(16).toString('hex');
 const SHAPEMAT = crypto.randomBytes(20).toString('hex');
 const SECRET_TEXT = `rotate the deploy key: token=${KVMAT} then push with ${['gh', 'p', '_'].join('') + SHAPEMAT}`;
 const leaks = (s) => String(s).includes(KVMAT) || String(s).includes(SHAPEMAT);
+// a For-you copy as the store fills it (lane job-notify-user r3: the engine hands a template + fields, never a sentence)
+const said = (n) => (n && n.text != null ? n.text : n && n.words ? String(n.words.key).replace(/\{(\w+)\}/g, (m, k) => (n.words.params && n.words.params[k] !== undefined ? String(n.words.params[k]) : m)) : '');
 
 // a PATCHED COPY of a src module in the scratch dir, its relative requires pointed back at the real tree (the controls)
 let patchN = 0;
@@ -89,20 +99,21 @@ const REAL = engine(JobManager, 'real');
 // CONTROL engine: the parent→child hand-over cut (the line this lane added) — a scheduled child no longer hears its parent
 const HAND = '      child.notifyUser = M.notifyUserOf(job);\n';
 const STORE = 'action: M.storedAction(spec.action),';
-const SAID = '      this._notifyOwner(job, { what: this._agentWords(a.text || job.name) });\n';
-const HANDS = once('src/jobs.js', HAND), STORES = once('src/jobs.js', STORE), SAIDS = once('src/jobs.js', SAID);
+const SAID = '      this._notifyOwner(job, { what: a.text || job.name, agentWhat: true });\n';   // r3: the author gets its own words whole
+const SUBBELT = '      const subEv = ev && ev.agentWhat ? { ...ev, what: this._agentWords(ev.what) } : ev;\n';   // …a subscriber, belted
+const HANDS = once('src/jobs.js', HAND), STORES = once('src/jobs.js', STORE), SAIDS = once('src/jobs.js', SAID) && once('src/jobs.js', SUBBELT);
 const NOHAND = engine(HANDS ? loadPatched('src/jobs.js', [[HAND, '']]).JobManager : JobManager, 'no-handover');
 // 2.369.360's engine in the two lines that matter here: no hand-over, the action stored as sent (its run = `{...a.task}`)
 const OLD = engine(HANDS && STORES ? loadPatched('src/jobs.js', [[HAND, ''], [STORE, 'action: spec.action || null,']]).JobManager : JobManager, 'old-engine');
-// CONTROL engine: the fire's belt skipped — the owner message carries the agent's words as typed
-const NOBELT = engine(SAIDS ? loadPatched('src/jobs.js', [[SAID, '      this._notifyOwner(job, { what: a.text || job.name });\n']]).JobManager : JobManager, 'no-belt');
+// CONTROL engine: the subscriber's belt skipped — a subscriber's copy carries the agent's words as typed
+const NOBELT = engine(SAIDS ? loadPatched('src/jobs.js', [[SUBBELT, '      const subEv = ev;\n']]).JobManager : JobManager, 'no-belt');
 // THE ROAD TO A PERSON: the real wiring (its notifyUser dep files For you) over a real store
 const WDIR = path.join(tmp, 'wired'); fs.mkdirSync(WDIR);
 const todos = new UserTodoManager({ dataDir: WDIR, expirySweepMs: 0 });
 const WTOLD = [];
 
 // ── the sessions (one conversation per leg: the engine's 30 s per-conversation floor never joins two legs) ──
-const LEGS = ['census', 'nc1', 'nc0', 'at1', 'at0', 'ev1', 'tk1', 'tk0', 'ctl', 'old1', 'oldm', 'mask', 'nobelt', 'urg', 'full', 'svc0', 'svc1'];
+const LEGS = ['census', 'nc1', 'nc0', 'at1', 'at0', 'ev1', 'tk1', 'tk0', 'ctl', 'old1', 'oldm', 'mask', 'nobelt', 'urg', 'full', 'svc0', 'svc1', 'sub', 'urgu', 'urgn', 'named'];
 const cidOf = (leg) => `c0ffee00-0000-4000-8000-${String(LEGS.indexOf(leg)).padStart(12, '0')}`;
 const SESS = new Map(LEGS.map((leg) => [`w-${leg}`, { claudeSessionId: cidOf(leg), backend: 'claude', name: leg, mode: 'chat', cwd: CWD, agentToken: `vsst_${leg}`, createdAt: 1 }]));
 const wiring = JW.create({
@@ -112,7 +123,7 @@ const wiring = JW.create({
 });
 const WIRED = { jm: wiring.jm, told: WTOLD };
 stubSpawn(WIRED.jm);
-const ENGINE_OF = { census: CENSUS, ctl: NOHAND, old1: OLD, oldm: OLD, mask: WIRED, urg: WIRED, full: WIRED, nobelt: NOBELT };
+const ENGINE_OF = { census: CENSUS, ctl: NOHAND, old1: OLD, oldm: OLD, mask: WIRED, urg: WIRED, full: WIRED, nobelt: NOBELT, urgu: WIRED, named: WIRED };
 for (let i = 0; i < 20; i++) todos.add(`claude:${cidOf('full')}`, { text: `an earlier ask ${i}`, origin: 'agent' });   // the conversation at its open cap
 const rts = {};
 const ap = { get: (p, h) => { rts[`GET ${p}`] = h; }, post: (p, h) => { rts[`POST ${p}`] = h; }, put() { }, delete() { }, use() { } };
@@ -214,7 +225,7 @@ const NU = "        notifyUser: !!flags['notify-user'],\n";
 const COPY = "        if (schedule) body.action = { type: 'spawn-task', task: { ...task, notifyUser: body.notifyUser } };\n";
 ok(SRC.split(NU).length === 2, 'the CLI writes notifyUser ONCE at the top, in the body every shape shares');
 ok(SRC.split(COPY).length === 2, 'the CLI adds the compatibility copy ONCE, to a scheduled run\'s task (the control below cuts it)');
-ok(HANDS && STORES && SAIDS, 'src/jobs.js hands a cron child its parent\'s setting at every fire, stores the action without the nested copy, and belts the fire\'s words — ONCE each (the controls cut them)');
+ok(HANDS && STORES && SAIDS, 'src/jobs.js hands a cron child its parent\'s setting at every fire, stores the action without the nested copy, gives the fire\'s words to their author whole and belts a subscriber\'s copy — ONCE each (the controls cut them)');
 const DROPPED = mutCli('mut', SRC.replace(NU, ''));
 const NOCOPY = mutCli('mut-nocopy', SRC.replace(COPY, "        if (schedule) body.action = { type: 'spawn-task', task };\n"));
 const [urgRaw, svcRaw] = await Promise.all([
@@ -226,6 +237,8 @@ const R = await all({
   dropped: cli(['notify-cron', '--name', 'census-nc-dropped', '--at', '+5m', '--text', 'x', '--notify-user'], { bin: DROPPED }),
   urgc: cli(['notify-cron', '--name', 'urgc', '--at', '+5m', '--text', 'x', '--urgency', 'critical', '--notify-user']),
   svcn: cli(['run', 'sleep 60', '--name', 'svcn', '--keep-up', '--notify-user']),
+  urgu: cli(['notify-cron', '--name', 'urgu', '--at', '+5m', '--text', 'deploy window', '--urgency', 'urgent', '--notify-user'], { leg: 'urgu' }),
+  urgn: cli(['notify-cron', '--name', 'urgn', '--at', '+5m', '--text', 'a note to self', '--urgency', 'critical'], { leg: 'urgn' }),
   nc1: cli(['notify-cron', '--name', 'nc1', '--at', '+5m', '--text', 'reminder for the user NC1', '--notify-user'], { leg: 'nc1' }),
   nc0: cli(['notify-cron', '--name', 'nc0', '--at', '+5m', '--text', 'reminder for me NC0'], { leg: 'nc0' }),
   at1: cli(['run', 'true', '--name', 'at1', '--at', '+5m', '--notify-user'], { leg: 'at1' }),
@@ -258,7 +271,11 @@ ok(bodyOf('tk1') && bodyOf('tk1').notifyUser === true && bodyOf('tk0') && bodyOf
 {
   const s1 = jobOf(REAL, 'at1');
   ok(s1 && s1.notifyUser === true && s1.action && s1.action.task && !('notifyUser' in s1.action.task), 'the STORE keeps one field: the cron record holds notifyUser at the top, its task none (create drops the copy)', JSON.stringify(s1 && { top: s1.notifyUser, task: s1.action && s1.action.task }));
-  ok(/^--urgency must be low, normal or high/.test(R.urgc.err) && !bodyOf('urgc'), 'notify-cron --urgency critical is refused AT THE PROMPT by name, nothing sent (the For you tray takes low|normal|high)', R.urgc.err);
+  ok(/^--urgency must be one of low\/normal\/high\/urgent — the For you tray's own set; nothing was created$/m.test(R.urgc.err) && !bodyOf('urgc'), 'notify-cron --urgency critical --notify-user is refused AT THE PROMPT by name, nothing sent — in the store\'s own set', R.urgc.err);
+  ok(R.urgu.code === 0 && bodyOf('urgu') && bodyOf('urgu').action.urgency === 'urgent', 'notify-cron --urgency urgent --notify-user is CREATED (r2 refused the store\'s own \'urgent\' with a false reason)', R.urgu.err || JSON.stringify(bodyOf('urgu')));
+  ok(R.urgn.code === 0 && bodyOf('urgn'), '…and without --notify-user the urgency is never read, so it is never checked (created)', R.urgn.err);
+  const CT = require('../src/agent-cli-text.js');
+  ok(CT.FOR_YOU_URGENCIES === URGENCIES && /require\('\.\.\/\.\.\/src\/agent-cli-text\.js'\)/.test(SRC) && /require\('\.\/agent-cli-text\.js'\)/.test(SRC) && !/\['low', 'normal', 'high'\]/.test(SRC), 'the CLI\'s set IS the store\'s set — ONE constant (src/agent-cli-text.js FOR_YOU_URGENCIES, the store\'s URGENCIES), read in both layouts, no literal of its own', URGENCIES.join('/'));
   ok(/^--notify-user is refused with --keep-up/.test(R.svcn.err) && !bodyOf('svcn'), 'run --keep-up --notify-user is refused by name, nothing sent: a service never tells the user at its end', R.svcn.err);
   const dead = wire.filter((w) => 'env' in w.body || 'cwd' in w.body).map((w) => w.body.name);
   ok(!dead.length && !/flags\.env\b/.test(SRC), 'no body carries the dead `env` / top-level `cwd` (the route maps neither) and the CLI reads no --env', dead.join(','));
@@ -285,15 +302,17 @@ ok(!lost.length, `every pin lands: ${Object.keys(PINS).length} flags in the POST
 }
 
 console.log('(3) FIRE — through the real route into the engine: the user\'s For you copy and the owner conversation');
+const snapOf = (E, n) => { const j = jobOf(E, n); return j ? E.jm.snapshot(j) : { kind: null }; };
 const endRun = (E, job) => { const run = job.runs[job.runs.length - 1]; E.jm._finalizeRun(job, run, { code: 0, endedAt: Date.now() }, 'sweep'); };
-const FIRES = [[REAL, ['nc1', 'nc0', 'at1', 'at0', 'ev1']], [NOHAND, ['ctl']], [OLD, ['old1', 'oldm']], [WIRED, ['mask', 'urg', 'full']], [NOBELT, ['nobelt']]];
+const FIRES = [[REAL, ['nc1', 'nc0', 'at1', 'at0', 'ev1']], [NOHAND, ['ctl']], [OLD, ['old1', 'oldm']], [WIRED, ['mask', 'urg', 'full', 'urgu']], [NOBELT, ['nobelt']]];
 for (const [E, names] of FIRES) for (const n of names) { const j = jobOf(E, n); if (j) j.nextFireAt = Date.now() - 1000; }
+for (const [E, n] of [[WIRED, 'mask'], [NOBELT, 'nobelt']]) { const j = jobOf(E, n); if (j) j.subscribers = [{ conversationId: cidOf('sub') }]; }   // ANOTHER conversation subscribed (r3)
 for (const [E] of FIRES) await E.jm._cronTick();
 await new Promise((r) => setTimeout(r, 30));   // the owner lane's delivery settles on its promise
 const lanes = (j) => (j && j.notifyLog || []).filter((e) => e.ok).map((e) => e.lane).sort().join(',');
 {
   const j1 = jobOf(REAL, 'nc1'), j0 = jobOf(REAL, 'nc0');
-  ok(j1 && REAL.inbox.some((n) => n.jobId === j1.id && n.text === 'reminder for the user NC1'), 'notify-cron --notify-user fires ⇒ deps.notifyUser gets the text (the For you copy)', JSON.stringify(REAL.inbox));
+  ok(j1 && REAL.inbox.some((n) => n.jobId === j1.id && said(n) === 'reminder for the user NC1' && n.fact === 'fire' && n.words.key === '{text}'), 'notify-cron --notify-user fires ⇒ deps.notifyUser gets the text as a FIELD (the For you copy: {text}, fact fire)', JSON.stringify(REAL.inbox));
   ok(j1 && REAL.told.some((t) => t.cid === cidOf('nc1') && t.text.includes('reminder for the user NC1')), '…AND the owner conversation is messaged', JSON.stringify(REAL.told.map((t) => t.cid)));
   ok(lanes(j1) === 'message,user-inbox', '…both lanes journaled', JSON.stringify(j1 && j1.notifyLog));
   ok(j0 && !REAL.inbox.some((n) => n.jobId === j0.id) && REAL.told.some((t) => t.cid === cidOf('nc0')) && lanes(j0) === 'message', 'CONTROL: without the flag the fire messages the conversation ONLY (option A, 2.363.1)', JSON.stringify(j0 && j0.notifyLog));
@@ -301,45 +320,88 @@ const lanes = (j) => (j && j.notifyLog || []).filter((e) => e.ok).map((e) => e.l
   const c1 = a1 && childOf(REAL, a1), c0 = a0 && childOf(REAL, a0), ce = e1 && childOf(REAL, e1);
   ok(c1 && c0 && ce, 'each scheduled run\'s fire made its child (spawn stubbed)', `${!!c1} ${!!c0} ${!!ce}`);
   for (const c of [c1, c0, ce]) if (c) endRun(REAL, c);
-  ok(c1 && REAL.inbox.some((n) => n.jobId === c1.id && /^Task at1 run: done \(ok\)$/.test(n.text)), 'a scheduled run --at … --notify-user: its child\'s end tells the user', JSON.stringify(REAL.inbox.map((n) => n.text)));
-  ok(ce && REAL.inbox.some((n) => n.jobId === ce.id), '…and --every … --notify-user the same', JSON.stringify(REAL.inbox.map((n) => n.text)));
+  ok(c1 && REAL.inbox.some((n) => n.jobId === c1.id && /^Task at1 run: done \(ok\)$/.test(said(n)) && n.fact === 'end:done:ok'), 'a scheduled run --at … --notify-user: its child\'s end tells the user', JSON.stringify(REAL.inbox.map(said)));
+  ok(ce && REAL.inbox.some((n) => n.jobId === ce.id), '…and --every … --notify-user the same', JSON.stringify(REAL.inbox.map(said)));
   ok(c0 && !REAL.inbox.some((n) => n.jobId === c0.id), 'CONTROL: a scheduled run without the flag: the child ends silently for the user');
   const t1 = jobOf(REAL, 'tk1'), t0 = jobOf(REAL, 'tk0');
   for (const t of [t1, t0]) if (t) endRun(REAL, t);
-  ok(t1 && t0 && REAL.inbox.some((n) => n.jobId === t1.id && /^Task tk1: done \(ok\)$/.test(n.text)) && !REAL.inbox.some((n) => n.jobId === t0.id), 'a plain run: told at its end with the flag, not without', JSON.stringify(REAL.inbox.map((n) => n.text)));
+  ok(t1 && t0 && REAL.inbox.some((n) => n.jobId === t1.id && /^Task tk1: done \(ok\)$/.test(said(n))) && !REAL.inbox.some((n) => n.jobId === t0.id), 'a plain run: told at its end with the flag, not without', JSON.stringify(REAL.inbox.map(said)));
   const k = jobOf(NOHAND, 'ctl'), kc = k && childOf(NOHAND, k);
   if (kc) endRun(NOHAND, kc);
   ok(k && k.notifyUser === true && kc && !NOHAND.inbox.some((n) => n.jobId === kc.id), 'CONTROL: a jobs.js copy without the parent→child hand-over leaves the scheduled child silent (the leg above would go red)', JSON.stringify(NOHAND.inbox));
   const o1 = jobOf(OLD, 'old1'), om = jobOf(OLD, 'oldm'), oc1 = o1 && childOf(OLD, o1), ocm = om && childOf(OLD, om);
   for (const c of [oc1, ocm]) if (c) endRun(OLD, c);
-  ok(oc1 && OLD.inbox.some((n) => n.jobId === oc1.id && /^Task old1 run: done \(ok\)$/.test(n.text)), 'an engine with 2.369.360\'s two lines (no hand-over, the action stored as sent): the scheduled child STILL tells the user — the compatibility copy', JSON.stringify(OLD.inbox.map((n) => n.text)));
-  ok(ocm && !OLD.inbox.some((n) => n.jobId === ocm.id), 'CONTROL: a CLI without the copy (514a962c) on that engine: the child ends silently for the user', JSON.stringify(OLD.inbox.map((n) => n.text)));
+  ok(oc1 && OLD.inbox.some((n) => n.jobId === oc1.id && /^Task old1 run: done \(ok\)$/.test(said(n))), 'an engine with 2.369.360\'s two lines (no hand-over, the action stored as sent): the scheduled child STILL tells the user — the compatibility copy', JSON.stringify(OLD.inbox.map(said)));
+  ok(ocm && !OLD.inbox.some((n) => n.jobId === ocm.id), 'CONTROL: a CLI without the copy (514a962c) on that engine: the child ends silently for the user', JSON.stringify(OLD.inbox.map(said)));
 }
 
-console.log('(4) THE ROAD TO A PERSON — the real jobs wiring over a real For-you store: masked words, an honest journal');
+console.log('(4) THE ROAD TO A PERSON — the real jobs wiring over a real For-you store: the agent\'s words as FIELDS, the author\'s own whole, an honest journal for every copy');
 {
   todos.flush();
   const items = () => { const s = todos.snapshot(); return [...s.open, ...s.resolved]; };
-  const jm = jobOf(WIRED, 'mask'), ju = jobOf(WIRED, 'urg'), jf = jobOf(WIRED, 'full');
+  const jm = jobOf(WIRED, 'mask'), ju = jobOf(WIRED, 'urg'), jf = jobOf(WIRED, 'full'), jg = jobOf(WIRED, 'urgu');
   const itm = items().filter((i) => jm && i.jobId === jm.id);
-  ok(itm.length === 1 && !leaks(itm[0].text) && /«redacted»/.test(itm[0].text) && itm[0].text.startsWith('rotate the deploy key:'), 'the agent\'s --text lands in For you MASKED (a secret-named KV, a token shape — the words around them kept)', JSON.stringify(itm.map((i) => i.text)));
-  const wm = WTOLD.filter((t) => t.cid === cidOf('mask'));
-  ok(wm.length === 1 && !leaks(wm[0].text) && /«redacted»/.test(wm[0].text), '…and the owner conversation\'s message carries the same masked words', JSON.stringify(wm.map((t) => t.text.slice(0, 160))));
-  ok(!leaks(fs.readFileSync(path.join(WDIR, 'user-todos.json'), 'utf8')) && !leaks(JSON.stringify(WIRED.jm.snapshot(jm))), '…no raw secret in the For you store on disk, nor in the job\'s snapshot (its journal)');
-  ok(lanes(jm) === 'message,user-inbox', '…and the journal says both landed (✓ is the store\'s own answer)', JSON.stringify(jm && jm.notifyLog));
+  ok(itm.length === 1 && !leaks(itm[0].text) && /«redacted»/.test(itm[0].text) && itm[0].text.startsWith('rotate the deploy key:') && itm[0].jobFact === 'fire', 'the agent\'s --text lands in For you MASKED as a field (a secret-named KV, a token shape — the words around them kept; fact fire)', JSON.stringify(itm.map((i) => [i.text, i.jobFact])));
+  const wm = WTOLD.filter((t) => t.cid === cidOf('mask')), ws = WTOLD.filter((t) => t.cid === cidOf('sub'));
+  ok(wm.length === 1 && wm[0].text.includes(SECRET_TEXT), 'the AUTHOR — the owner conversation that wrote the --text — gets it WHOLE (r2 belted its own reminder: «Renew the auth token: «redacted»»)', JSON.stringify(wm.map((t) => t.text.slice(0, 200))));
+  ok(ws.length === 1 && !leaks(ws[0].text) && /«redacted»/.test(ws[0].text) && ws[0].text.includes('rotate the deploy key:'), '…while a SUBSCRIBER (another conversation) gets it belted', JSON.stringify(ws.map((t) => t.text.slice(0, 200))));
+  ok(!leaks(fs.readFileSync(path.join(WDIR, 'user-todos.json'), 'utf8')) && !leaks(JSON.stringify(jm.notifyLog)) && !leaks(JSON.stringify(WIRED.jm.snapshot(jm))) && leaks(WIRED.jm.snapshot(jm, { author: true }).actionText), '…no raw secret in the For you store on disk, the journal, or the snapshot the panel and another lineage read — its AUTHOR\'s snapshot keeps the reminder whole');
+  ok(lanes(jm) === 'message,message,user-inbox' && (jm.notifyLog || []).filter((e) => e.lane === 'message' && e.ok && e.sub).length === 1, '…and the journal says all three landed — For you, the owner, the subscriber (✓ is each lane\'s own answer)', JSON.stringify(jm && jm.notifyLog));
   const ctl = todos.add(`claude:${cidOf('mask')}`, { text: SECRET_TEXT, origin: 'agent' });
   ok(ctl && !leaks(ctl.text) && /«redacted»/.test(ctl.text), 'CONTROL (unchanged): the same words as a vibespace-ask come out masked', ctl && ctl.text);
-  const nb = NOBELT.told.filter((t) => t.cid === cidOf('nobelt'));
-  ok(nb.length === 1 && leaks(nb[0].text), 'CONTROL: a jobs.js copy whose fire skips the belt carries the raw secret to the owner message (the belt is load-bearing)', JSON.stringify(nb.map((t) => leaks(t.text))));
+  const nb = NOBELT.told.filter((t) => t.cid === cidOf('sub'));
+  ok(nb.length === 1 && leaks(nb[0].text), 'CONTROL: a jobs.js copy whose fire skips the subscriber\'s belt carries the raw secret to the subscriber (the belt is load-bearing)', JSON.stringify(nb.map((t) => leaks(t.text))));
+  const gi = items().find((i) => jg && i.jobId === jg.id);
+  ok(gi && gi.urgency === 'urgent' && gi.text === 'deploy window', 'notify-cron --urgency urgent --notify-user: the fire files it at «urgent» (the store\'s own set)', JSON.stringify(gi && { u: gi.urgency, t: gi.text }));
   const fyOf = (j) => [...(j && j.notifyLog || [])].reverse().find((e) => e.lane === 'user-inbox');
   const fu = fyOf(ju), ff = fyOf(jf);
-  ok(fu && fu.ok === false && /^urgency must be one of /.test(fu.reason) && !items().some((i) => i.jobId === ju.id), 'a copy the store refuses (the agent\'s own POST, urgency «critical») is journaled user-inbox ✗ with the store\'s why — never ✓', JSON.stringify(ju && ju.notifyLog));
+  ok(fu && fu.ok === false && fu.copy === 'fire' && /^urgency must be one of /.test(fu.reason) && !items().some((i) => i.jobId === ju.id), 'a copy the store refuses (the agent\'s own POST, urgency «critical») is journaled user-inbox ✗ with the store\'s why — never ✓', JSON.stringify(ju && ju.notifyLog));
   ok(ff && ff.ok === false && ff.reason === 'For you is full (20 open)' && !items().some((i) => i.jobId === jf.id), '…and so is one refused at the conversation\'s open cap: «For you is full (20 open)»', JSON.stringify(jf && jf.notifyLog));
   ok(lanes(ju).includes('message') && lanes(jf).includes('message'), '…while the owner conversation is still messaged (the refusal is the For you lane\'s alone)', `${lanes(ju)} / ${lanes(jf)}`);
-  const [pu, pf, pm, su] = await Promise.all([cli(['poll', ju.id], { leg: 'urg' }), cli(['poll', jf.id], { leg: 'full' }), cli(['poll', jm.id], { leg: 'mask' }), cli(['show', ju.id], { leg: 'urg' })]);
-  ok(/^for you: the last copy was NOT filed — urgency must be one of /m.test(pu.out) && /^for you: the last copy was NOT filed — For you is full \(20 open\)$/m.test(pf.out), 'the agent\'s poll says the copy was NOT filed, in the store\'s words', `${pu.out} | ${pf.out}`);
-  ok(/^for you: the last copy was NOT filed — urgency must be one of /m.test(su.out), '…and so does show', su.out);
-  ok(!/^for you:/m.test(pm.out), 'CONTROL: a copy that landed adds no such line to the poll', pm.out);
+  // EVERY copy the engine files is journaled the same way (r3 — r2 journaled the notify fire only): at the same open cap, a
+  // task's end, an ask, a park, a missed time — each through the ONE door (src/jobs.js _forYou)
+  const mk = async (body) => { const r = await post('full', body); return r.j && r.j.job ? WIRED.jm.jobs.get(r.j.job.id) : null; };
+  const [te, ta, ts, tm] = await Promise.all([
+    mk({ kind: 'task', name: 'cap-end', cmd: { argv: ['true'], cwd: CWD }, notifyUser: true }),
+    mk({ kind: 'task', name: 'cap-ask', cmd: { argv: ['true'], cwd: CWD } }),
+    mk({ kind: 'service', name: 'cap-park', cmd: { argv: ['sh', '-c', 'sleep 60'], cwd: CWD } }),
+    mk({ kind: 'cron', name: 'cap-missed', schedule: { at: T0 + 3600e3 }, catchUp: 'none', action: { type: 'notify', text: 'standup' } }),
+  ]);
+  const park = (j) => { j.supervise = { consecutiveFails: M.SUPERVISE.failCap - 1 }; const run = j.runs[j.runs.length - 1]; run.startedAt = Date.now() - 1000; WIRED.jm._finalizeRun(j, run, { code: 1, endedAt: Date.now() }, 'sweep'); };
+  if (te) endRun(WIRED, te);
+  if (ta) WIRED.jm.ask(ta, { title: 'pick', blocks: [{ type: 'buttons', options: ['ok'] }] });
+  if (ts) park(ts);
+  if (tm) { tm.nextFireAt = Date.now() - 600e3; await WIRED.jm._cronTick(); }
+  const capped = [[te, 'end'], [ta, 'ask'], [ts, 'parked'], [tm, 'missed']].map(([j, c]) => { const e = fyOf(j); return { c, ok: !!(j && e && e.ok === false && e.copy === c && e.reason === 'For you is full (20 open)' && !items().some((i) => i.jobId === j.id)), e }; });
+  ok(capped.every((x) => x.ok), 'EVERY copy refused at the cap is journaled user-inbox ✗ with the store\'s why, naming the copy — a task\'s end, an ask, a park, a missed time (r2: silent, no line)', JSON.stringify(capped));
+  const [pu, pf, pm, su, pe, pa] = await Promise.all([cli(['poll', ju.id], { leg: 'urg' }), cli(['poll', jf.id], { leg: 'full' }), cli(['poll', jm.id], { leg: 'mask' }), cli(['show', ju.id], { leg: 'urg' }), cli(['poll', te && te.id], { leg: 'full' }), cli(['show', ta && ta.id], { leg: 'full' })]);
+  ok(/^for you: the fire copy was NOT filed — urgency must be one of /m.test(pu.out) && /^for you: the fire copy was NOT filed — For you is full \(20 open\)$/m.test(pf.out), 'the agent\'s poll says the copy was NOT filed, in the store\'s words', `${pu.out} | ${pf.out}`);
+  ok(/^for you: the fire copy was NOT filed — urgency must be one of /m.test(su.out), '…and so does show', su.out);
+  ok(/^for you: the end copy was NOT filed — For you is full \(20 open\)$/m.test(pe.out) && /^for you: the ask was NOT filed — For you is full \(20 open\)$/m.test(pa.out), '…for every copy, by name (the end copy\'s poll, the ask\'s show)', `${pe.out} | ${pa.out}`);
+  ok(!/^for you:/m.test(pm.out) && pm.out.includes('text: ' + SECRET_TEXT), 'CONTROL: a copy that landed adds no such line to the poll — and the AUTHOR\'s poll prints its reminder whole (the snapshot keeps it)', pm.out);
+  // A JOB NAMED WITH A SECRET WORD (r3, accept-r2 confirmed 0–2): the mask covers the agent's words as FIELDS, never the
+  // product's sentence — r2's whole-sentence belt read «Task refresh-token: done (ok)» as `token: …`, merged the failure into
+  // the success, and ate «needs» from «rotate-db-password needs your input» (the answered ask stayed open for good)
+  const mkn = async (body) => { const r = await post('named', body); return r.j && r.j.job ? WIRED.jm.jobs.get(r.j.job.id) : null; };
+  const [nr, np, ns, nm] = await Promise.all([
+    mkn({ kind: 'task', name: 'refresh-token', cmd: { argv: ['true'], cwd: CWD }, notifyUser: true }),
+    mkn({ kind: 'task', name: 'rotate-db-password', cmd: { argv: ['true'], cwd: CWD } }),
+    mkn({ kind: 'service', name: 'db-password', cmd: { argv: ['sh', '-c', 'sleep 60'], cwd: CWD } }),
+    mkn({ kind: 'cron', name: 'api-password', schedule: { at: T0 + 3600e3 }, catchUp: 'none', action: { type: 'notify', text: 'standup' } }),
+  ]);
+  if (nr) { endRun(WIRED, nr); WIRED.jm._spawn(nr, 'manual'); const run = nr.runs[nr.runs.length - 1]; WIRED.jm._finalizeRun(nr, run, { code: 1, endedAt: Date.now() }, 'sweep'); }
+  if (np) WIRED.jm.ask(np, { title: 'pick', blocks: [{ type: 'buttons', options: ['ok'] }] });
+  if (ns) park(ns);
+  if (nm) { nm.nextFireAt = Date.now() - 600e3; await WIRED.jm._cronTick(); }
+  const of = (j) => items().filter((i) => j && i.jobId === j.id).map((i) => i.text).sort();
+  const four = { end: of(nr), ask: of(np), park: of(ns), missed: of(nm) };
+  ok(same(four.end, ['Task refresh-token: done (ok)', 'Task refresh-token: failed (error)']), 'a job NAMED refresh-token: «Task refresh-token: done (ok)» and «…: failed (error)» — the outcome whole, TWO items (the dedupe key is the job + its outcome, never the words)', JSON.stringify(four.end));
+  ok(same(four.ask, ['rotate-db-password needs your input']) && same(four.park, [`Service db-password crash-looped and was parked — vibespace-job start ${ns && ns.id} to retry`]) && same(four.missed, ['Scheduled job api-password MISSED its time (server was down)']), 'the ask, the park and the missed time of jobs named …-password keep the product\'s sentence whole', JSON.stringify(four));
+  const ans = np && WIRED.jm.answerPanel(np, { button: 'ok', version: np.interaction.pending.version });
+  const askItem = items().find((i) => np && i.jobId === np.id);
+  ok(ans && ans.ok && askItem && askItem.status === 'done' && askItem.jobFact === 'ask', 'the answered ask CLOSES — the resolver keys on the item\'s fact (jobFact ask), never on its words', JSON.stringify(askItem && { s: askItem.status, f: askItem.jobFact }));
+  const refused = (o) => { try { todos.add(`claude:${cidOf('named')}`, { origin: 'jobs', i18n: { text: { key: '{name} x', params: { name: 'n' } } }, ...o }); return null; } catch (e) { return e.message; } };
+  ok(/^jobFact must be a short kebab word/.test(refused({ jobId: 'jb-0000beef', jobFact: 'Bad Fact!' }) || '') && /only a Background Work item with its jobId/.test(refused({ jobFact: 'ask' }) || '') && refused({ jobId: 'jb-0000beef', jobFact: 'parked-memory' }) === null, 'the store\'s fact is a short kebab word (a new copy names its own) or end:<state>:<cause>, only with its jobId — anything else is refused by name');
 }
 
 console.log('(5) SHOW — the params line says what the flag does; the create echo names the user\'s copy; the panel\'s words have zh + ja');
@@ -361,13 +423,32 @@ console.log('(5) SHOW — the params line says what the flag does; the create ec
   ok(aj('nc1') === 'notify' && aj('at1') === 'spawn-task' && aj('tk1') === null, 'the snapshot names a cron\'s action TYPE — the panel\'s «when it fires» (notify) vs «when each run ends» (a scheduled run) reads it', `${aj('nc1')} ${aj('at1')} ${aj('tk1')}`);
   const PANEL = fs.readFileSync(path.join(REPO, 'src/lib/jobs-panel.js'), 'utf8');
   const blk = PANEL.slice(PANEL.indexOf('lane job-notify-user: whether the job ALSO'), PANEL.indexOf('delivery journal (2.361.5'));
-  const keys = [...blk.matchAll(/(?<![\w.])t\('([^']+)'\)/g)].map((m) => m[1]);
+  const keys = [...blk.matchAll(/(?<![\w.])t\((['"])((?:(?!\1)[^\\])+)\1\)/g)].map((m) => m[2]);   // a key with an apostrophe is double-quoted
   const dict = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
   const ZH = dict('src/lib/i18n-zh.js'), JA = dict('src/lib/i18n-ja.js');
   const valueOf = (src, k) => { const m = new RegExp(`^  ${JSON.stringify(k).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}: ("(?:[^"\\\\]|\\\\.)*"),$`, 'm').exec(src); return m ? JSON.parse(m[1]) : null; };
   const missing = keys.flatMap((k) => [['zh', ZH], ['ja', JA]].filter(([, src]) => { const v = valueOf(src, k); return !v || v === k; }).map(([l]) => `${l}: ${k}`));
   ok(/job\.actionType === 'notify'/.test(blk) && !/job\.action\b(?!Type)/.test(blk), 'the row reads the snapshot\'s actionType (a client job carries no `action` — r2\'s shot caught «each run» on a notify cron)');
-  ok(keys.length === 7 && !missing.length, `the For-you row's ${keys.length} sentences each have a zh AND a ja entry (i18n-check counts parity, not these keys)`, missing.join(' | ') || keys.join(' | '));
+  ok(keys.length === 11 && !missing.length, `the For-you row's ${keys.length} sentences each have a zh AND a ja entry (i18n-check counts parity, not these keys)`, missing.join(' | ') || keys.join(' | '));
+  // THE ALWAYS-LINE SAYS ONLY WHAT THE ENGINE DOES FOR THAT KIND (r3, accept-r2 unverified 3/6: «Asks, missed times and parks
+  // always reach you» was drawn on every kind — a park exists only for a service, a notify cron never asks, and a missed fire
+  // files a notice only for an --at time with catch-up off): the panel's OWN expression run over real snapshots, beside
+  // what the engine did for each kind above (the ask and the park filed, the missed --at notice) and here (a caught-up fire)
+  const expr = blk.slice(blk.indexOf('    const missed = '), blk.indexOf("    const aw = document.createElement('div')"));
+  const alwaysOf = new Function('job', 't', expr + '\n    return always;');
+  const cu = await post('named', { kind: 'cron', name: 'caught-up', schedule: { at: T0 + 3600e3 }, action: { type: 'notify', text: 'a caught-up reminder' }, notifyUser: false });
+  const jc = cu.j && cu.j.job && WIRED.jm.jobs.get(cu.j.job.id);
+  if (jc) { jc.nextFireAt = Date.now() - 600e3; await WIRED.jm._cronTick(); await new Promise((r) => setTimeout(r, 20)); }
+  const fy = (j) => { const s0 = todos.snapshot(); return [...s0.open, ...s0.resolved].filter((i) => j && i.jobId === j.id); };
+  const KINDS = [
+    ['a task', snapOf(REAL, 'tk1'), 'Its asks reach you in For you', fy(jobOf(WIRED, 'rotate-db-password')).some((i) => i.jobFact === 'ask')],
+    ['a service', snapOf(REAL, 'svc0'), 'Its asks and a park reach you in For you', fy(jobOf(WIRED, 'db-password')).some((i) => i.jobFact === 'parked')],
+    ['a scheduled run', snapOf(REAL, 'at1'), "Each run's asks reach you in For you · A missed time is caught up when the server is back — never a notice", true],
+    ['a notify cron (the CLI\'s: catch-up on)', snapOf(WIRED, 'caught-up'), 'A missed time is caught up when the server is back — never a notice', !!jc && jc.state === 'done' && !fy(jc).length && (jc.notifyLog || []).some((e) => e.lane === 'message' || e.lane === 'stash')],   // fired late to the agent (the conversation's 30 s floor stashes it), nothing in For you
+    ['an --at notify cron with catch-up off', snapOf(WIRED, 'api-password'), 'A missed time reaches you in For you', fy(jobOf(WIRED, 'api-password')).some((i) => i.jobFact === 'missed')],
+  ];
+  const wrong = KINDS.map(([k, snap, want, engineDid]) => (alwaysOf(snap, (x) => x) === want && engineDid ? null : `${k}: «${alwaysOf(snap, (x) => x)}» (engine: ${engineDid})`)).filter(Boolean);
+  ok(!wrong.length, 'the always-line, per kind, says only what the engine does for THAT kind — a task\'s asks; a service\'s asks and park; a cron\'s caught-up missed fire (never a notice) unless an --at time has catch-up off', wrong.join(' | '));
 }
 
 // ── teardown: the engines' stores flush synchronously; nothing outlives the scratch dir ──

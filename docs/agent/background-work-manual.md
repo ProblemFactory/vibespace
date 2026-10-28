@@ -54,22 +54,34 @@ separate setting — not audience 1's auto-notify:
   scheduled `run --every/--cron/--at … --notify-user` tells them when each
   fire's run ends; a `notify-cron` copies its text at every fire. A service
   (`--keep-up`) never tells at its end, so the CLI refuses the flag there.
-- Whatever the flag: an ask (panel), a missed `--at` time and a parked
-  service always reach the user's For you tray.
+- Whatever the flag, what else reaches the user's For you tray depends on
+  the kind: a job's ask (panel) — any job that runs a process; a service's
+  park; a missed time only for an `--at` cron made with catch-up off. The CLI
+  never turns catch-up off, so a missed fire is run late when the server is
+  back, never a notice.
 - It is set at creation only. To change it, `rm` and recreate the job.
   `vibespace-job notify <id> on|off` is a different setting: it decides
   whether YOUR conversation is told (audience 1).
 - `vibespace-job show` prints `notifyUser=true|false` (`n/a` for a
   service); the create output names the copy on a line beside `auto-notify:`.
-- The words pass the agent-output belt before they reach anyone: a
-  `token=…` or a token-shaped value in your `--text` (or your job's name)
-  arrives as `«redacted»`, in the For you copy and in your own message alike.
-- `--urgency` takes `low|normal|high`; anything else is refused when you
-  create the job.
-- A copy the tray refuses is recorded as refused: the Delivery log shows
+- The For you copy passes the agent-output belt FIELD BY FIELD: a
+  `token=…` or a token-shaped value in your `--text` or in your job's name
+  arrives as `«redacted»`, while the product's own words around them (the
+  outcome, «needs your input») stay whole. Your own conversation gets your
+  `--text` back WHOLE (you wrote it); a subscriber — another conversation —
+  gets it belted, and its `--filter` matches the belted words it receives.
+  The job's name is belted wherever it is shown: For you, the chat card's
+  label, the message header.
+- `--urgency` takes the For you tray's own set, `low|normal|high|urgent`.
+  With `--notify-user`, anything else is refused when you create the job;
+  without it the urgency is never read.
+- Every copy the tray refuses — a fire's, a task's end, an ask, a park, a
+  missed time — is recorded as refused: the Delivery log shows
   `user-inbox ✗ — For you is full (20 open)` (your conversation already has
-  20 open items), and `poll` / `show` print `for you: the last copy was NOT
-  filed — …`.
+  20 open items), and `poll` / `show` print `for you: the end copy was NOT
+  filed — …`, naming the copy.
+- `show` and `poll` of a notify cron print its `text:` (whole for the
+  conversation that made it).
 - Reminders created with `--notify-user` before 2.369.361 stored no flag
   (`show` prints `notifyUser=false` for them). Recreate them.
 - A device's own `vibespace-job` (in its `~/.vibespace/bin`) stays the old

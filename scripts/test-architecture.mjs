@@ -5052,17 +5052,36 @@ console.log('\n§84 a suite ends what it made (B-60d2)');
   const jw93 = read('data/bin/job-wrapper.js');
   ok(/secret-shapes\.js/.test(jw93) && /child\.stdout\.on\('data', \(b\) => writeLog\(maskChunk\(b\)\)\)/.test(jw93),
     '§93 the detached job wrapper masks the child output through the shape census (shapes only — no engine in a wrapper process)');
-  // THE JOBS ROAD (lane job-notify-user r2): src/server/jobs-wiring.js files a job's For-you copy with origin 'jobs' — an
-  // AGENT-WORDS origin the store belts (src/inbox-origin.js AGENT_WORDS_ORIGINS); the store keys its belt on that set
-  const ut93 = read('src/user-todos.js'), io93 = read('src/inbox-origin.js'), jw93w = read('src/server/jobs-wiring.js');
-  const words93 = (src) => { const m = /const AGENT_WORDS_ORIGINS = Object\.freeze\(\[([^\]]*)\]\)/.exec(src); return m ? [...m[1].matchAll(/'([a-z]+)'/g)].map((x) => x[1]) : []; };
-  const jobsRoad93 = (io, ut) => words93(io).includes('jobs') && /const agentWords = AGENT_WORDS_ORIGINS\.includes\(origin\);/.test(ut) && /\(agentWords \? belt\.maskForSink\(text\.trim\(\)/.test(ut);
-  ok(/origin: 'jobs'/.test(jw93w) && jobsRoad93(io93, ut93), '§93 the jobs road: jobs-wiring files origin \'jobs\', an agent-words origin the store belts (text, detail, label, params)');
+  // THE JOBS ROAD (lane job-notify-user r2 → r3): src/server/jobs-wiring.js files a job's For-you copy with origin 'jobs' — an
+  // AGENT-FIELDS origin (src/inbox-origin.js AGENT_FIELDS_ORIGINS): the store belts each FIELD (the i18n params, the label's
+  // job name) on its own and never the product's sentence (r2 belted the whole text: «Task refresh-token: «redacted»»)
+  const ut93 = read('src/user-todos.js'), io93 = read('src/inbox-origin.js'), jw93w = read('src/server/jobs-wiring.js'), jb93 = read('src/jobs.js');
+  const set93 = (src, name) => { const m = new RegExp(`const ${name} = Object\\.freeze\\(\\[([^\\]]*)\\]\\)`).exec(src); return m ? [...m[1].matchAll(/'([a-z]+)'/g)].map((x) => x[1]) : []; };
+  const jobsRoad93 = (io, ut) => set93(io, 'AGENT_FIELDS_ORIGINS').includes('jobs') && !set93(io, 'AGENT_WORDS_ORIGINS').includes('jobs')
+    && /const agentFields = AGENT_FIELDS_ORIGINS\.includes\(origin\);/.test(ut) && /normalizeI18n\(\(normalizeI18n\(i18n\), maskI18nParams\(i18n, beltOf\)\)\)/.test(ut)
+    && /beltOf\(jobName\.trim\(\)\.slice\(0, 200\)\)/.test(ut) && /\(agentWords \? beltOf\(text\.trim\(\)\) : text\.trim\(\)\)/.test(ut);
+  ok(/origin: 'jobs'/.test(jw93w) && jobsRoad93(io93, ut93), '§93 the jobs road: jobs-wiring files origin \'jobs\', an agent-FIELDS origin — the store belts each field (the params, the label\'s job name), never the sentence');
+  // THE MESSAGE ROAD (r3, claim r2-0 (b)): the job's NAME is belted on every copy of a job's message — the chat card's label
+  // (fromName), the retry meta, the stash, the header (src/jobs.js _jobLabel) — and a SUBSCRIBER's copy of the agent's --text
+  // is belted (its author's is whole)
+  const msgRoad93 = (jb) => /_jobLabel\(job\) \{ return this\._agentWords\(/.test(jb) && /fromName: 'Background Work · ' \+ this\._jobLabel\(job\)/.test(jb)
+    && /jobName: this\._jobLabel\(job\), ev:/.test(jb) && /jobName: stale \? CLEARED_TEXT : this\._jobLabel\(job\)/.test(jb) && /M\.renderOwnerNotify\(job, ev, \{ name \}\)/.test(jb)
+    && /const subEv = ev && ev\.agentWhat \? \{ \.\.\.ev, what: this\._agentWords\(ev\.what\) \} : ev;/.test(jb);
+  ok(msgRoad93(jb93), '§93 the message road: the job\'s NAME belted on every copy (the label, the header, the retry meta, the stash), a subscriber\'s copy of the --text belted');
+  // EVERY FILER BY ORIGIN (r3, claim r2-0 (a)): the six callers above are counted by name — a second filer of a FIELDS origin
+  // (a planted src/server/ghost-jobs.js) stayed green; the filers of origin 'jobs' are a closed set too
+  const FILERS93 = { 'src/server/jobs-wiring.js': 2 };
+  const filers93 = (files) => { const got = {}; for (const [f, src] of files) for (const l of src.split('\n')) if (!/^\s*(\/\/|\*)/.test(l) && /origin:\s*'jobs'/.test(l)) got[f] = (got[f] || 0) + 1; return JSON.stringify(got) === JSON.stringify(FILERS93) ? [] : Object.keys(got).filter((f) => got[f] !== FILERS93[f]).concat(Object.keys(FILERS93).filter((f) => !got[f])); };
+  const files93 = srcFiles93.map((f) => [f, read(f)]);
+  const bad93 = filers93(files93);
+  ok(!bad93.length, `§93 the filers of origin 'jobs' are EXACTLY src/server/jobs-wiring.js ×2 (notifyUser + noticeDropped)${bad93.length ? ' — got: ' + bad93.join(', ') : ''}`);
   const c93 = [
     ['a caller with its belt stripped', /\.maskForSink\s*\(/.test(read('src/user-todos.js').replace(/belt\.maskForSink\(([^,]+),[^)]*\)/g, '$1'))],
     ['a seventh, unlisted caller', JSON.stringify([...callers93, 'src/ghost.js'].sort()) === JSON.stringify(EXPECTED93)],
-    ['the jobs origin dropped from the agent-words set', jobsRoad93(io93.replace("Object.freeze(['agent', 'jobs'])", "Object.freeze(['agent'])"), ut93)],
-    ['the store belting origin \'agent\' only (514a962c)', jobsRoad93(io93, ut93.replace('const agentWords = AGENT_WORDS_ORIGINS.includes(origin);', "const agentWords = origin === 'agent';"))],
+    ['the jobs origin dropped from the agent-fields set', jobsRoad93(io93.replace("const AGENT_FIELDS_ORIGINS = Object.freeze(['jobs']);", 'const AGENT_FIELDS_ORIGINS = Object.freeze([]);'), ut93)],
+    ['the store belting the WHOLE sentence of a fields item (fcf105a5)', jobsRoad93(io93, ut93.replace('(agentWords ? beltOf(text.trim()) : text.trim())', '(agentWords || agentFields ? beltOf(text.trim()) : text.trim())'))],
+    ['the chat card\'s label carrying the raw name (514a962c)', msgRoad93(jb93.replace("fromName: 'Background Work · ' + this._jobLabel(job)", "fromName: 'Background Work · ' + (job.name || job.id)"))],
+    ['a second filer with origin \'jobs\' (src/server/ghost-jobs.js)', !filers93([...files93, ['src/server/ghost-jobs.js', "userTodos.add('jobs', { origin: 'jobs', text: 'x' });\n"]]).length],
   ];
   ok(c93.every(([, v]) => v === false), `§93 CONTROLS: ${c93.map(([n, v]) => `${n} (${v ? 'WRONG' : 'RED'})`).join(', ')}`);
 }

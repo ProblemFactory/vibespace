@@ -27,7 +27,7 @@ const path = require('path');
 const { timedSync } = require('./timed-sync.js'); // PURE: the store-write clock (design 011 lane 1, store-timing)
 const crypto = require('crypto');
 const { normalizeOptions, REPLY_MAX } = require('./inbox-reply.js'); // PURE: the option-chip rule the route, the CLI and the panel share (design-user-inbox-reply D3a)
-const { normalizeOrigin, AGENT_WORDS_ORIGINS } = require('./inbox-origin.js'); // PURE: the closed set of PRODUCERS an item names (B-328d) — the Notices area groups by it; a filing that names none is REFUSED (r2)
+const { normalizeOrigin, AGENT_WORDS_ORIGINS, AGENT_FIELDS_ORIGINS } = require('./inbox-origin.js'); // PURE: the closed set of PRODUCERS an item names (B-328d) — the Notices area groups by it; a filing that names none is REFUSED (r2)
 const belt = require('./agent-output-belt.js'); // lane agent-output-sinks: the sink belt — a For-you item's text / detail never carries a credential in the clear
 const { applyClear } = require('./record-clear.js'); // PURE: "Clear content…" (2026-09-28) — what a clear replaces; this store holds the door (clearItems)
 
@@ -58,10 +58,31 @@ function normalizeI18n(x) {
   return out;
 }
 
-/** lane job-notify-user r2: an agent's item's i18n STRING params through `mask` (the keys are the producer's English) */
+/** lane job-notify-user r2: an agent's item's i18n STRING params through `mask` (the keys are the producer's English) —
+ *  r3: each param ON ITS OWN (a field), never the sentence the key is */
 function maskI18nParams(x, mask) {
   const line = (l) => (l && l.params ? { ...l, params: Object.fromEntries(Object.entries(l.params).map(([k, v]) => [k, typeof v === 'string' ? mask(v) : v])) } : l);
   return { ...x, text: line(x.text), ...(x.detail ? { detail: x.detail.map(line) } : {}) };
+}
+/** lane job-notify-user r3: a `{key, params}` line filled the way the client's t() fills it (src/lib/i18n.js — `{name}`
+ *  ⇒ the param, an unknown one kept) — the English text of an AGENT_FIELDS item is its template filled with its fields */
+function fillWords(l) {
+  return String(l.key).replace(/\{(\w+)\}/g, (m, k) => { const v = l.params ? l.params[k] : undefined; return v === undefined ? m : v && typeof v === 'object' ? String(v.key) : String(v); });   // a WORDS param says its English key
+}
+// A JOB ITEM'S IDENTITY IS A FACT (lane job-notify-user r3), never its words: `jobFact` names WHICH copy of WHICH job
+// (jobId) an item is — a short kebab word the producer declares ('ask': the job posted a panel, and resolveByJob closes
+// it when the panel is answered, expires or is withdrawn; 'fire': a notify cron's copy; 'missed': an --at time missed
+// with catch-up off; 'parked': a service parked after its crash loop; a new copy names its own), or 'end:<state>:<cause>'
+// (a task's end — done and failed are two facts, two items). The
+// re-file match of an item carrying one is (sessionKey, jobId, jobFact), never the text: the r2 belt masked «Task
+// refresh-token: done (ok)» and «…: failed (exit)» to ONE text and the failure merged into the success; and the resolver
+// read /needs your input/, which «rotate-db-password «redacted» your input» no longer said.
+const JOB_FACT_RE = /^(?:[a-z][a-z-]{0,31}|end:[a-z_-]{1,24}:[a-z0-9._()-]{1,48})$/;
+function normalizeJobFact(f, jobId, origin) {
+  if (f == null) return null;
+  if (typeof f !== 'string' || !JOB_FACT_RE.test(f)) throw new Error(`jobFact must be a short kebab word naming the copy (ask, fire, missed, parked, …) or end:<state>:<cause> (got ${String(f).slice(0, 40)})`);
+  if (!jobId || origin !== 'jobs') throw new Error("jobFact: only a Background Work item with its jobId names one (origin 'jobs')");
+  return f;
 }
 
 /** lane decision-inbox-rank (the LLM plugin's INBOX v2): the board's FACTS of an item as the store keeps them —
@@ -183,7 +204,7 @@ function normalizeOpen(x, plugin) {
 
 // THE MERGE RULE (lane chat-needs-you-card, amendment 1): derived from THE For-you action registry — a row's `identity`
 const { ACTION_IDENTITY } = require('./foryou-actions.js');
-const URGENCIES = ['low', 'normal', 'high', 'urgent'];
+const { FOR_YOU_URGENCIES: URGENCIES } = require('./agent-cli-text.js'); // lane job-notify-user r3: THE one set — the agent CLIs read the same constant (it ships beside them)
 const KINDS = ['action', 'notice']; // 2.369.118: action = needs the user (default); notice = for their information (own section, grey count)
 const STATUSES = ['open', 'done', 'dismissed'];
 // THE SIZE OF AN ITEM (2026-09-27, the For-you window's verify round — the owner's
@@ -270,6 +291,12 @@ class UserTodoManager {
       if (parsed && Array.isArray(parsed.items)) this._state = parsed;
       this._lastWritten = JSON.stringify(this._state, null, 2);
     } catch { /* fresh */ }
+    // THE ONE LEGACY RUNG (lane job-notify-user r3): a job's ask filed before 2.369.361 carries no `jobFact` — the only
+    // place the store reads its sentence, once, at load (an engine ≤ .360 filed «<name> needs your input» whole): it takes
+    // the fact, so the resolver keys on the fact alone and the panel answered after the upgrade still closes it
+    for (const it of this._state.items) {
+      if (it && it.origin === 'jobs' && it.jobId && it.jobFact == null && it.status === 'open' && !it.clearedAt && typeof it.text === 'string' && / needs your input$/.test(it.text)) it.jobFact = 'ask';
+    }
     // EXPIRY (2.369.152, "SPEND NOTICES LIVED FOREVER AS ACTIONS"): a notice
     // about a WINDOW (this hour's / today's unattended-turn budget, a 6 h
     // refusal) carries the window's end as `expiresAt` and dies with it. The
@@ -456,13 +483,28 @@ class UserTodoManager {
 
   get(id) { return this._state.items.find((i) => i.id === id) || null; }
 
-  add(sessionKey, { text, detail, urgency, by = 'agent', sessionName = null, jobId = null, kind = null, i18n = null, expiresAt = null, action = null, options = null, origin = null, card = null, artifacts = null, cwd = null, hostId = null, openCap = null, plugin = null, open = null, about = null } = {}) {
+  add(sessionKey, { text, detail, urgency, by = 'agent', sessionName = null, jobId = null, kind = null, i18n = null, expiresAt = null, action = null, options = null, origin = null, card = null, artifacts = null, cwd = null, hostId = null, openCap = null, plugin = null, open = null, about = null, jobName = null, jobFact = null } = {}) {
     const _dataDir = path.dirname(this._file);   // agent-output-sinks: the belt finds the vault from here
-    // agent-output-sinks: belt an AGENT's own words — the origins in AGENT_WORDS_ORIGINS (lane job-notify-user r2: `jobs` too —
-    // a job's name, a notify cron's --text); never a system producer's notice (vault / spend / channels / machines / …)
+    // agent-output-sinks: belt an AGENT's own words — never a system producer's notice (vault / spend / channels / machines / …).
+    // Two shapes (src/inbox-origin.js): AGENT_WORDS_ORIGINS — the whole text and detail are the agent's (vibespace-ask);
+    // AGENT_FIELDS_ORIGINS — the PRODUCT's sentence with the agent's words as FIELDS (lane job-notify-user r3: a job's NAME,
+    // a notify cron's --text). A fields item files its words as i18n {key, params}: each string param is belted ON ITS OWN
+    // and the text / detail are the template filled with them — the product's words (an outcome, «needs your input») are
+    // never belted. Its group label is the person's fact (the conversation's own name, whole) + the job's NAME (`jobName`,
+    // a field, belted). A conversation's own name is never belted under either shape (r3: the r2 label belt masked it).
     const agentWords = AGENT_WORDS_ORIGINS.includes(origin);
-    const rawText = typeof text === 'string' ? (agentWords ? belt.maskForSink(text.trim(), { dataDir: _dataDir }) : text.trim()) : '';
-    if (agentWords && typeof sessionName === 'string' && sessionName) sessionName = belt.maskForSink(sessionName, { dataDir: _dataDir });   // the tray's group label: jobs-wiring files the job's NAME there
+    const agentFields = AGENT_FIELDS_ORIGINS.includes(origin);
+    const beltOf = (s) => belt.maskForSink(s, { dataDir: _dataDir });
+    if (agentFields) {
+      if (text != null || detail != null) throw new Error(`origin '${origin}' files its words as i18n {key, params} — the store composes the text and detail (each field belted on its own, never the sentence)`);
+      // the shape is refused by name first; each param is belted BEFORE the clamp (a token across the 600-char cut is masked whole)
+      i18n = i18n == null ? null : normalizeI18n((normalizeI18n(i18n), maskI18nParams(i18n, beltOf)));
+      if (!i18n) throw new Error(`origin '${origin}' files its words as i18n {key, params} — the text's template is required`);
+      text = fillWords(i18n.text);
+      detail = i18n.detail && i18n.detail.length ? i18n.detail.map(fillWords).join('\n') : null;
+      if (typeof jobName === 'string' && jobName.trim()) sessionName = [typeof sessionName === 'string' && sessionName ? sessionName : null, beltOf(jobName.trim().slice(0, 200))].filter(Boolean).join(' · ');
+    } else if (jobName != null) throw new Error("jobName: only a Background Work item names one (origin 'jobs')");
+    const rawText = typeof text === 'string' ? (agentWords ? beltOf(text.trim()) : text.trim()) : '';
     text = rawText.slice(0, TEXT_MAX);
     const textCut = rawText.length > TEXT_MAX ? TEXT_MAX : 0; // the cap it hit, named on the return
     // EXPIRY (2.369.152): optional; only a future ms epoch counts (validExpiry)
@@ -474,8 +516,10 @@ class UserTodoManager {
     // CLIENT words with its own t() — `text`, `detail` LINES and the `source`
     // name — so a zh/ja inbox does not read "Channels: Proposals awaiting
     // approval in …". Validated here; a malformed shape is refused by name.
+    // lane job-notify-user r2: an agent's item's params are its words too (a fields item's were belted above, each on its own) —
+    // r3: belted BEFORE the clamp, the shape refused by name first
+    if (agentWords && i18n != null) { normalizeI18n(i18n); i18n = maskI18nParams(i18n, beltOf); }
     i18n = normalizeI18n(i18n);
-    if (agentWords && i18n) i18n = maskI18nParams(i18n, (s) => belt.maskForSink(s, { dataDir: _dataDir }));   // lane job-notify-user r2: a param can carry the agent's words (the dropped-notice's job names)
     action = normalizeAction(action); // a server producer's decision payload (reset credit, §5), or null
     card = normalizeCard(card); // a server producer's view of the item (design 009: an app install's one card), or null
     options = normalizeOptions(options); // option chips (vibespace-ask --options "A|B|C"): ≤6 distinct labels ≤40 chars, else THROWS by name — or null
@@ -504,13 +548,14 @@ class UserTodoManager {
       if (this._pluginGate && !this._pluginGate(plugin)) throw new Error(`plugin ${plugin} does not declare 'reminders' — it cannot file For-you items`);
     } else if (plugin != null) throw new Error("plugin: only a plugin's item names one (origin 'plugin')");
     open = normalizeOpen(open, origin === 'plugin' ? plugin : null);
+    jobFact = normalizeJobFact(jobFact, jobId, origin); // lane job-notify-user r3: which copy of which job — the resolver's key and the re-file match
     if (urgency != null && !URGENCIES.includes(urgency)) throw Object.assign(new Error(`urgency must be one of ${URGENCIES.join('/')}`), { code: 'urgency' });   // the code: a producer journals the refusal by name (lane job-notify-user r2)
     // KIND (2.369.118, owner: spend notices are DISTRACTING beside real asks):
     // 'action' = the user must do something (default, every older item);
     // 'notice' = for their information only — its own section in the popup,
     // never in the red badge. A PRODUCER declares it; nothing infers it.
     if (kind != null && !KINDS.includes(kind)) throw new Error(`kind must be one of ${KINDS.join('/')}`);
-    const rawDetail = typeof detail === 'string' ? (agentWords ? belt.maskForSink(detail.trim(), { dataDir: _dataDir }) : detail.trim()) : '';   // agent-output-sinks: an agent's words only (AGENT_WORDS_ORIGINS)
+    const rawDetail = typeof detail === 'string' ? (agentWords ? beltOf(detail.trim()) : detail.trim()) : '';   // agent-output-sinks: an agent's words only (AGENT_WORDS_ORIGINS; a fields item's detail was composed from belted fields)
     detail = rawDetail ? rawDetail.slice(0, DETAIL_MAX) : null;
     const detailCut = rawDetail.length > DETAIL_MAX ? DETAIL_MAX : 0;
     // the cut is named on the RETURNED record only (the ledger never carries it)
@@ -538,7 +583,10 @@ class UserTodoManager {
       const idKey = ACTION_IDENTITY[action.type];
       return !idKey || i.action[idKey] === action[idKey];
     };
-    const existing = this._state.items.find((i) => i.sessionKey === sessionKey && i.text === text && sameFiling(i) && !i.clearedAt);
+    // lane job-notify-user r3: an item that names its job's fact re-files by the FACT (jobId + jobFact), never by its
+    // text; one that names none never merges into one that does (a job's copy is the job's)
+    const sameWords = (i) => (jobFact ? i.jobId === jobId && i.jobFact === jobFact : i.text === text && !i.jobFact);
+    const existing = this._state.items.find((i) => i.sessionKey === sessionKey && sameWords(i) && sameFiling(i) && !i.clearedAt);
     const openCount = this._state.items.filter((i) => i.sessionKey === sessionKey && i.status === 'open').length;
     // a SERVER producer whose open items its own domain bounds (one per account row) may raise the per-key cap; the agent
     // route never passes it (lane oat-identity-fix-r2, L1)
@@ -593,6 +641,7 @@ class UserTodoManager {
       status: 'open', by,
       sessionName: sessionName || null, // display fallback frozen at file time
       jobId: jobId || null, // Background Work origin (2.348.1): lets the inbox jump STRAIGHT to the job's panel
+      ...(jobFact ? { jobFact } : {}), // lane job-notify-user r3: which copy of the job it is (ask / fire / missed / parked / end:<state>:<cause>)
       i18n, // the words as structure, or null (an agent's own item is its own words)
       action, // what the item's button does ({type, …facts}), or null — a server producer's only
       ...(card ? { card } : {}), // design 009: the producer's VIEW the client draws the item from (an app install's one card)
@@ -621,9 +670,10 @@ class UserTodoManager {
     const went = [];
     for (const it of this._state.items) {
       if (it.status !== 'open' || it.jobId !== jobId) continue;
-      // the ask is told apart by its words — a CLEARED item has none (verify r3: an answered / expired /
-      // withdrawn panel must still close the job's cleared ask item, else it stays open with the sentence)
-      if (onlyAsk && !it.clearedAt && !/needs your input/.test(it.text)) continue;
+      // the ask is told apart by its FACT (lane job-notify-user r3 — never its words: a name like rotate-db-password made
+      // the r2 belt eat «needs», and the answered ask stayed open for good) — a CLEARED item keeps none of its words
+      // (verify r3: an answered / expired / withdrawn panel must still close the job's cleared ask item)
+      if (onlyAsk && !it.clearedAt && it.jobFact !== 'ask') continue;
       it.status = 'done'; it.resolvedAt = this._now(); it.resolvedBy = 'agent';
       n++; went.push(it);
     }
@@ -827,4 +877,4 @@ class UserTodoManager {
   }
 }
 
-module.exports = { UserTodoManager, EXPIRY_SWEEP_MS, RESOLVED_TAIL, RESOLVED_RECENT_MS, RESOLVED_SNAPSHOT_MAX, TEXT_MAX, DETAIL_MAX, DETAIL_PREVIEW, ARTIFACTS_MAX, previewOf, validExpiry, normalizeAction, normalizeArtifacts };
+module.exports = { UserTodoManager, URGENCIES, EXPIRY_SWEEP_MS, RESOLVED_TAIL, RESOLVED_RECENT_MS, RESOLVED_SNAPSHOT_MAX, TEXT_MAX, DETAIL_MAX, DETAIL_PREVIEW, ARTIFACTS_MAX, previewOf, validExpiry, normalizeAction, normalizeArtifacts };

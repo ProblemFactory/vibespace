@@ -224,11 +224,15 @@ console.log('§3 the JOB LOG — the real job-wrapper masks a fake child’s out
 }
 
 // ---------------------------------------------------------------------------
-// lane job-notify-user r2: THE JOBS ROAD TO A PERSON — --notify-user made it the documented way to reach the owner's tray,
-// and a notify cron's --text (`token=…`) landed there raw: src/server/jobs-wiring.js files with origin 'jobs', and the store
-// belted only origin 'agent'. Now `jobs` is an AGENT-WORDS origin (src/inbox-origin.js) and the fire belts its words for
-// the owner message too (src/jobs.js) — the real wiring over a real store, a job's NAME as well as its text
-console.log('§3b the JOBS ROAD — the real jobs wiring: a job\'s For-you copy and its owner message are belted');
+// lane job-notify-user r2 → r3: THE JOBS ROAD TO A PERSON — --notify-user made it the documented way to reach the owner's
+// tray, and a notify cron's --text (`token=…`) landed there raw (r2: the store belted only origin 'agent'). r3: the mask
+// covers the AGENT's words as FIELDS, never the product's sentence — `jobs` is an AGENT-FIELDS origin (src/inbox-origin.js):
+// the engine files a template + fields (src/job-model.js FOR_YOU_WORDS), the store belts each field on its own (r2 belted
+// the whole sentence: a job named refresh-token read «Task refresh-token: «redacted»», the outcome gone). On the message
+// road the job's NAME is belted on every copy (the header, the chat card's label, the stash, the retry meta), the agent's
+// own --text returns to its AUTHOR whole, and a SUBSCRIBER (another conversation) gets it belted. The real wiring over a
+// real store; a raw PIECE (12 characters of the material) is the needle — the header cuts a name at 40 characters
+console.log('§3b the JOBS ROAD — the real jobs wiring: the agent\'s words as FIELDS (For you, a subscriber, every label), the author\'s own reminder whole');
 {
   const JW = r('src/server/jobs-wiring.js');
   const dj = scratch('aos-jobs-road');
@@ -236,30 +240,46 @@ console.log('§3b the JOBS ROAD — the real jobs wiring: a job\'s For-you copy 
   const tj = new UserTodoManager({ dataDir: dj, onChange: () => {} });
   const told = [];
   const w = JW.create({ app: { get() {}, post() {}, put() {}, delete() {}, patch() {}, use() {} }, dataDir: dj, broadcastAll() {}, userTodos: tj, log() {}, serverSetting: () => undefined, taskGroups: null, activeSessions: new Map(),
-    deliver: { peerReachable: () => true, deliverToConversation: async (cid, text) => { told.push(text); return { ok: true, lane: 'message' }; }, onRetry() {}, registerStashJudge() {} } });
+    deliver: { peerReachable: () => true, deliverToConversation: async (cid, text, opts) => { told.push({ cid, text, fromName: opts && opts.fromName, meta: opts && opts.retry && opts.retry.meta }); return { ok: true, lane: 'message' }; }, onRetry() {}, registerStashJudge() {} } });
   const E = w.jm;
   E.init(); for (const t of E._timers || []) clearInterval(t);
   E._spawn = (job, trigger) => { job.runs = job.runs || []; job.runs.push({ startedAt: Date.now(), trigger }); job.state = 'up'; };
   const owner = { conversation: { id: 'conv-road' }, sessionId: 'sess-road', sessionCreatedAt: 1, createdBy: 'agent', groupsSnapshot: [] };
   const caller = { conversationId: 'conv-road', sessionId: 'sess-road', sessionCreatedAt: 1, groups: new Set() };
-  const nc = E.jobs.get(E.create({ kind: 'cron', name: 'road-nc', schedule: { at: Date.now() + 3600e3 }, action: { type: 'notify', text: 'deploy ' + MARKER + ' ' + SHAPE + ' ' + KV }, notifyUser: true, owner }, caller).job.id);
+  const piece = (h) => leaks(h, SHAPEMAT.slice(0, 12)) || leaks(h, KVMAT.slice(0, 12));
+  const TEXT = 'deploy ' + MARKER + ' ' + SHAPE + ' ' + KV;
+  const nc = E.jobs.get(E.create({ kind: 'cron', name: 'road-nc', schedule: { at: Date.now() + 3600e3 }, action: { type: 'notify', text: TEXT }, notifyUser: true, owner }, caller).job.id);
+  nc.subscribers = [{ conversationId: 'conv-sub' }];
   nc.nextFireAt = Date.now() - 1000;
   await E._cronTick(); await new Promise((res) => setTimeout(res, 30));
   const tk = E.jobs.get(E.create({ kind: 'task', name: 'road ' + SHAPE, cmd: { argv: ['true'] }, notifyUser: true, owner }, caller).job.id);
   E._finalizeRun(tk, tk.runs[tk.runs.length - 1], { code: 0, endedAt: Date.now() }, 'sweep');
-  tj._flush();
+  const rt = E.jobs.get(E.create({ kind: 'task', name: 'refresh-token', cmd: { argv: ['true'] }, notifyUser: true, owner }, caller).job.id);
+  E._finalizeRun(rt, rt.runs[rt.runs.length - 1], { code: 0, endedAt: Date.now() }, 'sweep');
+  await new Promise((res) => setTimeout(res, 30));
+  tj._flush(); E._save();
   const f = readFileIn(dj, 'user-todos.json');
-  ok(tj.snapshot().open.filter((i) => i.origin === 'jobs').length === 2 && !leaks(f, SHAPEMAT) && !leaks(f, KVMAT) && leaks(f, '«redacted»') && leaks(f, MARKER), 'user-todos.json: a job\'s two For-you copies (a notify cron\'s --text, a task\'s NAME) carry no raw secret, the marker survives');
-  ok(told.length >= 1 && told.every((t) => !leaks(t, SHAPEMAT) && !leaks(t, KVMAT)) && told.some((t) => leaks(t, '«redacted»')), 'the owner conversation\'s message of that fire carries the masked words too');
+  const items = tj.snapshot().open.filter((i) => i.origin === 'jobs');
+  ok(items.length === 3 && !piece(f) && leaks(f, '«redacted»') && leaks(f, MARKER), 'user-todos.json: a job\'s For-you copies (a notify cron\'s --text, a task\'s NAME in the sentence and the label) carry no raw piece, the marker survives');
+  const rtItem = items.find((i) => i.jobId === rt.id);
+  ok(rtItem && rtItem.text === 'Task refresh-token: done (ok)' && /· refresh-token$|^refresh-token$/.test(rtItem.sessionName || ''), 'a job NAMED with a secret word keeps the product\'s sentence whole — «Task refresh-token: done (ok)» (r2: «Task refresh-token: «redacted»»)', rtItem && [rtItem.text, rtItem.sessionName]);
+  const toOwner = told.filter((x) => x.cid === 'conv-road'), toSub = told.filter((x) => x.cid === 'conv-sub');
+  ok(toOwner.some((x) => leaks(x.text, TEXT)), 'the AUTHOR gets its own reminder WHOLE — the owner conversation that wrote the --text (the belt protects a person and other agents, never the author from itself)', toOwner.map((x) => x.text.slice(0, 160)));
+  ok(toSub.length === 1 && !piece(toSub[0].text) && leaks(toSub[0].text, MARKER) && leaks(toSub[0].text, '«redacted»'), 'a SUBSCRIBER (another conversation) gets it belted, the marker kept', toSub.map((x) => x.text.slice(0, 160)));
+  // the NAME's copies only — the owner's retry meta / stash TEXT is its own reminder (whole, above); the two task ends land
+  // inside the owner's 30 s floor, so their message is the STASH entry (its jobName — the label the drain and the spill print)
+  const stashNames = [...E.pendingNotifs.values()].flat().map((n) => n.jobName);
+  const labels = told.map((x) => [x.fromName, x.meta && x.meta.jobName, x.text.split('):')[0]]).flat().concat(stashNames).filter(Boolean);
+  ok(told.length >= 2 && stashNames.length >= 1 && !labels.some(piece) && labels.some((l) => /road-ghp_«redacted»/.test(l)), 'the job\'s NAME is belted on every message-road copy — the chat card\'s label (fromName), the header, the retry meta, the stash (claim r2-0 (b): it reached the chat raw)', labels);
   try { E.shutdown(); } catch { }
 }
 {
-  // THE ORIGIN CENSUS: every For-you origin is classified — the agent's words (belted) or a producer's own sentence; the
-  // belted ones ARE the store's set (a new origin is a decision, red by name until it is made)
-  const { INBOX_ORIGINS, AGENT_WORDS_ORIGINS } = r('src/inbox-origin.js');
+  // THE ORIGIN CENSUS: every For-you origin is classified — the agent's WHOLE words, the agent's words as FIELDS in the
+  // product's sentence, or a producer's own sentence; each class IS the store's set (a new origin is a decision, red by name)
+  const { INBOX_ORIGINS, AGENT_WORDS_ORIGINS, AGENT_FIELDS_ORIGINS } = r('src/inbox-origin.js');
   const ORIGIN_CLASS = {
-    agent: 'agent words: vibespace-ask — the agent\'s own item',
-    jobs: 'agent words: a job\'s NAME and a notify cron\'s --text (src/server/jobs-wiring.js, lane job-notify-user r2)',
+    agent: 'agent words: vibespace-ask — the agent\'s own item (its text, detail, params; never its conversation\'s name)',
+    jobs: 'agent fields: a job\'s NAME and a notify cron\'s --text as fields of the product\'s sentence (src/server/jobs-wiring.js, lane job-notify-user r3)',
     spend: 'producer: the spend engine\'s sentence (a cap, a total)', login: 'producer: a login-expiry notice', pool: 'producer: the account pool\'s notice',
     channels: 'producer: a channel card drawn from the call\'s facts (vibespace-channels\' own lane and its redaction)', browser: 'producer: a browser login / profile notice',
     machines: 'producer: exit-proxy\'s approval card — its detail is the command a person reads above Allow (exit-reach.js\'s law, not this belt)',
@@ -267,9 +287,34 @@ console.log('§3b the JOBS ROAD — the real jobs wiring: a job\'s For-you copy 
   };
   const unclassified = (origins) => origins.filter((o) => !(o in ORIGIN_CLASS));
   ok(unclassified([...INBOX_ORIGINS]).length === 0, `every For-you origin is classified (${INBOX_ORIGINS.length})${unclassified([...INBOX_ORIGINS]).length ? ' — unclassified: ' + unclassified([...INBOX_ORIGINS]).join(', ') : ''}`);
-  const words = Object.entries(ORIGIN_CLASS).filter(([, v]) => v.startsWith('agent words')).map(([k]) => k).sort();
-  ok(JSON.stringify(words) === JSON.stringify([...AGENT_WORDS_ORIGINS].sort()), `the store belts EXACTLY the agent-words origins (${words.join(', ')})`);
+  const cls = (c) => Object.entries(ORIGIN_CLASS).filter(([, v]) => v.startsWith(c)).map(([k]) => k).sort();
+  ok(JSON.stringify(cls('agent words')) === JSON.stringify([...AGENT_WORDS_ORIGINS].sort()) && JSON.stringify(cls('agent fields')) === JSON.stringify([...AGENT_FIELDS_ORIGINS].sort()), `the store belts EXACTLY these — whole words (${cls('agent words').join(', ')}), fields (${cls('agent fields').join(', ')})`);
   ok(unclassified([...INBOX_ORIGINS, 'ghost']).join() === 'ghost', 'CONTROL: one more origin the census does not know is RED by name');
+  // …EXTENDED TO THE WRITERS (lane job-notify-user r3, claim r2-0 (a)): a filer of a FIELDS origin outside the listed set is red
+  // by name — a planted second filer with origin 'jobs' stayed green under §93 (it counts the belt's callers, not the filers)
+  const FIELDS_FILERS = { 'src/server/jobs-wiring.js': 2 };   // notifyUser (every copy the engine files) + noticeDropped
+  const files = {};
+  const walk = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const rel = path.posix.join(d, e.name); if (e.isDirectory()) walk(rel); else if (e.name.endsWith('.js')) files[rel] = fs.readFileSync(path.join(REPO, rel), 'utf8'); } };
+  walk('src'); files['server.js'] = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
+  const filers = (fs0) => {
+    const out = {}, bad = [];
+    const re = new RegExp(String.raw`origin:\s*['"](${AGENT_FIELDS_ORIGINS.join('|')})['"]`, 'g');
+    for (const [rel, src] of Object.entries(fs0)) {
+      const lines = src.split('\n');
+      lines.forEach((l, i) => { if (/^\s*(\/\/|\*)/.test(l)) return; for (const m of l.matchAll(re)) { out[rel] = (out[rel] || 0) + 1; if (!(rel in FIELDS_FILERS)) bad.push(`${rel}:${i + 1} files origin '${m[1]}' (an agent-fields origin) — not one of the listed filers`); } });
+    }
+    for (const [rel, n] of Object.entries(FIELDS_FILERS)) if ((out[rel] || 0) !== n) bad.push(`${rel} files ${out[rel] || 0} agent-fields item(s), the census lists ${n}`);
+    return bad;
+  };
+  const tree = filers(files);
+  ok(tree.length === 0, `every filer of an agent-fields origin is a listed one (${Object.entries(FIELDS_FILERS).map(([k, n]) => k.replace(/^src\//, '') + ' ×' + n).join(', ')})${tree.length ? ' — ' + tree.join('; ') : ''}`);
+  const ghost = filers({ ...files, 'src/server/ghost-jobs.js': "function f(userTodos) {\n  userTodos.add('jobs', { origin: 'jobs', text: 'x' });\n}\n" });
+  ok(ghost.length === 1 && /^src\/server\/ghost-jobs\.js:2 files origin 'jobs'/.test(ghost[0]), 'CONTROL: a planted second filer with origin \'jobs\' (src/server/ghost-jobs.js) is RED by name', ghost);
+  // …and the store refuses what such a filer would file: a fields item with a composed sentence (never belted whole)
+  const dg = scratch('aos-ghost'); fs.mkdirSync(dg, { recursive: true });
+  const tg = new UserTodoManager({ dataDir: dg, onChange: () => {} });
+  let gerr = ''; try { tg.add('jobs', { origin: 'jobs', text: 'Task x ' + SHAPE + ': done (ok)' }); } catch (e) { gerr = e.message; }
+  ok(/files its words as i18n \{key, params\}/.test(gerr) && tg.snapshot().open.length === 0, 'the store REFUSES a jobs filing with a composed text (fail closed: the fields are what it belts)', gerr);
 }
 
 // ---------------------------------------------------------------------------
@@ -279,30 +324,39 @@ console.log('§4 MUTANT 1 — a writer with its belt stripped LEAKS the sentinel
   const abs = path.join(REPO, 'src/user-todos.js');
   let src = fs.readFileSync(abs, 'utf8');
   const before = src;
-  src = src.replace('belt.maskForSink(text.trim(), { dataDir: _dataDir })', 'text.trim()')
-           .replace('belt.maskForSink(detail.trim(), { dataDir: _dataDir })', 'detail.trim()');
+  src = src.replace('beltOf(text.trim())', 'text.trim()').replace('beltOf(detail.trim())', 'detail.trim()');
   ok(src !== before, 'MUTANT 1 setup: the belt calls were found and removed from a user-todos copy');
-  const m = new Module(abs); m.filename = abs; m.paths = Module._nodeModulePaths(path.dirname(abs));
-  m._compile(src, abs);
+  const load = (code, tag) => { const m = new Module(abs); m.filename = abs; m.paths = Module._nodeModulePaths(path.dirname(abs)); m._compile(code, abs); return m.exports; };
   const dirM = scratch('aos-mutant');
   fs.mkdirSync(dirM, { recursive: true });
   SB.registerVault(dirM, { state: () => 'unlocked', secretNames: () => [{ name: 'apikey:' + LIVEID, at: 1 }], secretGet: () => ({ ok: true, value: Buffer.from(LIVEVAL, 'utf8') }) });
-  const mut = new m.exports.UserTodoManager({ dataDir: dirM, onChange: () => {} });
+  const mut = new (load(src)).UserTodoManager({ dataDir: dirM, onChange: () => {} });
   mut.add('sess-m', { text: 'ask ' + SHAPE, detail: 'd ' + KV, origin: 'agent' });
   mut._flush();
   const fM = (() => { try { return fs.readFileSync(path.join(dirM, 'user-todos.json'), 'utf8'); } catch { return ''; } })();
   ok(leaks(fM, SHAPEMAT) || leaks(fM, KVMAT), 'MUTANT 1: the belt-stripped writer LEAKS the sentinel (so the real belt is what stops it)');
-  // MUTANT 4 (lane job-notify-user r2): 514a962c's rule — only origin 'agent' belted — LEAKS a job's For-you copy
-  const src4 = before.replace('const agentWords = AGENT_WORDS_ORIGINS.includes(origin);', "const agentWords = origin === 'agent';");
-  ok(src4 !== before, 'MUTANT 4 setup: the agent-words rule was found and narrowed to origin \'agent\' in a user-todos copy');
-  const m4 = new Module(abs); m4.filename = abs; m4.paths = Module._nodeModulePaths(path.dirname(abs));
-  m4._compile(src4, abs);
+  // MUTANT 4 (lane job-notify-user r2 → r3): the FIELDS belt stripped — the params and the label's job name unbelted — LEAKS a
+  // job's name into For you (so the per-field belt is what stops it)
+  const FIELDS = 'i18n = i18n == null ? null : normalizeI18n((normalizeI18n(i18n), maskI18nParams(i18n, beltOf)));';
+  const LABEL = 'beltOf(jobName.trim().slice(0, 200))';
+  const src4 = before.replace(FIELDS, 'i18n = normalizeI18n(i18n);').replace(LABEL, 'jobName.trim().slice(0, 200)');
+  ok(before.split(FIELDS).length === 2 && before.split(LABEL).length === 2 && src4 !== before, 'MUTANT 4 setup: the per-field belt (params + the label\'s job name) was found once each and stripped in a user-todos copy');
   const dir4 = scratch('aos-mutant-jobs');
   fs.mkdirSync(dir4, { recursive: true });
-  const mut4 = new m4.exports.UserTodoManager({ dataDir: dir4, onChange: () => {} });
-  mut4.add('claude:conv-m4', { origin: 'jobs', by: 'agent', text: 'Task road ' + SHAPE + ': done (ok)', detail: 'via ' + KV });
+  const JOBWORDS = { i18n: { text: { key: 'Task {name}: {state} ({cause})', params: { name: 'road ' + SHAPE, state: 'done', cause: 'ok' } } }, jobId: 'jb-m4', jobFact: 'end:done:ok', jobName: 'road ' + SHAPE };
+  const mut4 = new (load(src4)).UserTodoManager({ dataDir: dir4, onChange: () => {} });
+  mut4.add('claude:conv-m4', { origin: 'jobs', by: 'agent', ...JOBWORDS });
   mut4._flush();
-  ok(leaks(readFileIn(dir4, 'user-todos.json'), SHAPEMAT), 'MUTANT 4: a store that belts only origin \'agent\' LEAKS a job\'s name into For you (so the agent-words set is what stops it)');
+  ok(leaks(readFileIn(dir4, 'user-todos.json'), SHAPEMAT), 'MUTANT 4: a store whose fields belt is stripped LEAKS a job\'s name into For you (so the per-field belt is what stops it)');
+  // MUTANT 5 (r3): the r2 rule — the WHOLE composed sentence belted — swallows the product's words after a secret-named job's
+  // name (the fields rule keeps them; the leg above proves the sentence survives on the real store)
+  const WHOLE = "const rawText = typeof text === 'string' ? (agentWords ? beltOf(text.trim()) : text.trim()) : '';";
+  const src5 = before.replace(WHOLE, "const rawText = typeof text === 'string' ? (agentWords || agentFields ? beltOf(text.trim()) : text.trim()) : '';");
+  ok(before.split(WHOLE).length === 2, 'MUTANT 5 setup: the whole-text rule was found once and widened to the fields origin in a user-todos copy');
+  const dir5 = scratch('aos-mutant-whole'); fs.mkdirSync(dir5, { recursive: true });
+  const mut5 = new (load(src5)).UserTodoManager({ dataDir: dir5, onChange: () => {} });
+  const m5 = mut5.add('claude:conv-m5', { origin: 'jobs', by: 'agent', i18n: { text: { key: 'Task {name}: {state} ({cause})', params: { name: 'refresh-token', state: 'done', cause: 'ok' } } }, jobId: 'jb-m5', jobFact: 'end:done:ok' });
+  ok(m5.text !== 'Task refresh-token: done (ok)' && /redacted/.test(m5.text), 'MUTANT 5: the r2 whole-sentence belt eats the outcome of a job named refresh-token (so belting FIELDS is what keeps the product\'s words)', m5.text);
 }
 
 // ---------------------------------------------------------------------------

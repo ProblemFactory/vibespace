@@ -366,7 +366,10 @@ async function expandDetail(app, el, j, refresh) {
   }
   // lane job-notify-user: whether the job ALSO puts a copy in your For you tray (`--notify-user`) — the snapshot's
   // one-reader answer, said as what the flag DOES for this kind (r2: «yes» for a service was false — nothing tells at a
-  // service's end, so a service has no such row); beside it, for every kind, what reaches you whatever the flag
+  // service's end, so a service has no such row); beside it, what reaches you whatever the flag — only what the engine
+  // does for THAT kind (r3: «Asks, missed times and parks always reach you» was drawn on every kind, but a park exists
+  // only for a service, a notify cron never asks, and a missed fire files a notice only for an --at time with catch-up
+  // off — the CLI never turns it off, so a missed fire is caught up when the server is back, never a notice)
   {
     const yes = !!job.notifyUser;
     const when = job.kind === 'service' ? null
@@ -374,8 +377,12 @@ async function expandDetail(app, el, j, refresh) {
         : job.actionType === 'notify' ? (yes ? t('Tells you in For you when it fires: yes') : t('Tells you in For you when it fires: no'))
           : (yes ? t('Tells you in For you when each run ends: yes') : t('Tells you in For you when each run ends: no'));
     if (when) { const fu = document.createElement('div'); fu.className = 'jobs-meta jobs-notify-user'; fu.textContent = when; d.appendChild(fu); }
+    const missed = job.kind !== 'cron' ? null : job.schedule && job.schedule.at && job.catchUp === 'none' ? t('A missed time reaches you in For you') : t('A missed time is caught up when the server is back — never a notice');
+    const always = job.kind === 'task' ? t('Its asks reach you in For you')
+      : job.kind === 'service' ? t('Its asks and a park reach you in For you')
+        : job.actionType === 'notify' ? missed : t("Each run's asks reach you in For you") + ' · ' + missed;
     const aw = document.createElement('div'); aw.className = 'jobs-meta jobs-notify-always';
-    aw.textContent = t('Asks, missed times and parks always reach you in For you');
+    aw.textContent = always;
     d.appendChild(aw);
   }
   // delivery journal (2.361.5, owner ask): every delivery ATTEMPT with lane +

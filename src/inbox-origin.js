@@ -50,13 +50,22 @@
  */
 
 const INBOX_ORIGINS = Object.freeze(['spend', 'login', 'pool', 'jobs', 'channels', 'browser', 'machines', 'vault', 'apps', 'plugin', 'agent', 'server']);
-// THE ORIGINS WHOSE WORDS AN AGENT CHOSE (lane job-notify-user r2): the store passes their text, detail and i18n params
-// through the agent-output belt before they land — `agent` (vibespace-ask: the agent's own item) and `jobs` (a job's
-// NAME and a notify cron's --text are the agent's; --notify-user made that the documented road to a person, and a
-// `token=…` in it reached the tray raw). Keyed on the origin, never on `by`: add()'s `by` defaults to 'agent', so every
-// producer that names none would be belted, exit-proxy's approval command (the detail a person reads above Allow) too.
-// A new origin is a decision: scripts/test-agent-output-sinks.mjs classifies every one (agent words or a system notice).
-const AGENT_WORDS_ORIGINS = Object.freeze(['agent', 'jobs']);
+// THE ORIGINS WHOSE WORDS AN AGENT CHOSE (lane job-notify-user r2 → r3). Two shapes, never one:
+//  · AGENT_WORDS_ORIGINS — the WHOLE item is the agent's words: `agent` (vibespace-ask). The store passes its text, detail
+//    and i18n params through the agent-output belt. Its group label (sessionName) is the CONVERSATION's own name — the
+//    person's fact, read raw in the sidebar — and is never belted (r3: the r2 belt masked «Session: refactor the store»).
+//  · AGENT_FIELDS_ORIGINS — the item is the PRODUCT's sentence with the agent's words as FIELDS in it: `jobs` (a job's
+//    NAME and a notify cron's --text). It files its words as structure (i18n {key, params}); the store belts each string
+//    param ON ITS OWN, composes the text and detail from the template, and belts the `jobName` field it adds to the
+//    group label — never the whole text (r3: the r2 whole-text belt read «Task refresh-token: done (ok)» as `token: …`
+//    and swallowed the outcome; «rotate-db-password needs your input» lost «needs», so the ask never closed). A 'jobs'
+//    filing without its template is REFUSED by name.
+// Keyed on the origin, never on `by`: add()'s `by` defaults to 'agent', so every producer that names none would be
+// belted, exit-proxy's approval command (the detail a person reads above Allow) too. A new origin is a decision:
+// scripts/test-agent-output-sinks.mjs classifies every one (whole words, fields, or a system notice) and names every
+// filer of a fields origin (a second filer outside the listed set is red by name).
+const AGENT_WORDS_ORIGINS = Object.freeze(['agent']);
+const AGENT_FIELDS_ORIGINS = Object.freeze(['jobs']);
 
 // The group / chip words — English t() keys (the panel words them per device;
 // i18nKey is the extraction marker scripts/i18n-extract.mjs reads).
@@ -88,4 +97,4 @@ function normalizeOrigin(x) {
   return x;
 }
 
-module.exports = { INBOX_ORIGINS, AGENT_WORDS_ORIGINS, ORIGIN_LABELS, normalizeOrigin };
+module.exports = { INBOX_ORIGINS, AGENT_WORDS_ORIGINS, AGENT_FIELDS_ORIGINS, ORIGIN_LABELS, normalizeOrigin };

@@ -173,7 +173,7 @@ class JobManager {
       // engine failure must be LOUD but never block the server (§5 failure isolation)
       this.initError = e.message;
       this.d.log('[jobs] ENGINE INIT FAILED (subsystem down until next boot):', e.message);
-      try { this.d.notifyUser({ text: `Background Work engine failed to start: ${e.message}`, urgency: 'high' }); } catch { }
+      try { this.d.notifyUser({ words: { key: 'Background Work engine failed to start: {error}', params: { error: String(e.message) } }, urgency: 'high' }); } catch { }
     }
   }
   shutdown() { try { if (this._dirty) this._save(); } catch { } try { if (!this.readOnly) fs.unlinkSync(this.lockFile); } catch { } }
@@ -201,7 +201,7 @@ class JobManager {
             this.jobs.set(id, { id, kind: 'task', name: id, state: 'unverified', note: 'recovered from corrupt store — resolve before reuse', owner: {}, access: { view: 'all', control: 'session' }, runs: [] });
           }
         } catch { }
-        try { this.d.notifyUser({ text: 'Background Work store was corrupt — records recovered as unverified; resolve them in the Jobs panel', urgency: 'high' }); } catch { }
+        try { this.d.notifyUser({ words: { key: 'Background Work store was corrupt — records recovered as unverified; resolve them in the Jobs panel' }, urgency: 'high' }); } catch { }
       }
     }
   }
@@ -377,7 +377,7 @@ class JobManager {
     const archHits = arch.filter(family);
     // the names every derived copy is FILED UNDER (the ladder's stash heads a job's message
     // 'Background Work · <name>') — read before the record loses them
-    const namesBefore = new Set([...liveHits, ...archHits].map((j) => j.name).filter(Boolean));
+    const namesBefore = new Set([...liveHits, ...archHits].flatMap((j) => (j.name ? [j.name, this._jobLabel(j)] : [])));   // the ladder stash's label carries the BELTED name (lane job-notify-user r3) — an older entry the raw one
     const nameBefore = new Map([...liveHits, ...archHits].map((j) => [j.id, j.name]));
     for (const id of want) if (!this.jobs.has(id) && !arch.some((r) => r.id === id)) out.unknown.push(id);
     const verdictOf = (j) => { const v = allow ? allow(j) : { ok: true }; return v && v.ok ? null : (v || { code: 'not_yours' }); };
@@ -576,13 +576,22 @@ class JobManager {
       // subscriber can ask for only /SpaceX/ lines; non-matching events are
       // simply not that subscriber's (no stash either).
       const parent = job.cronParent ? this.jobs.get(job.cronParent) : null;
-      const notifText = M.renderOwnerNotify(job, ev);
+      // PER RECIPIENT, PER FIELD (lane job-notify-user r3): the job's NAME is belted on every copy; the agent's own --text
+      // (`agentWhat`) returns to its AUTHOR whole — the owner conversation wrote it, and the belt protects a person and
+      // other agents, never the author from itself (r2 belted it: «Renew the auth token: run the refresh script» arrived
+      // as «Renew the auth token: «redacted»») — while a SUBSCRIBER (another conversation) gets it belted, and the
+      // context the owner attached too. A subscriber's --filter matches the words it will receive (the belted copy).
+      const name = this._jobLabel(job);
+      const notifText = M.renderOwnerNotify(job, ev, { name });
+      const subEv = ev && ev.agentWhat ? { ...ev, what: this._agentWords(ev.what) } : ev;
+      const ctx0 = !job.context ? '' : typeof job.context === 'string' ? job.context : (job.context.payload || '');
+      const subText = M.renderOwnerNotify(job, subEv, { name, context: ctx0 ? this._agentWords(ctx0) : '' });
       const seenSubs = new Set();
       for (const sub of [...(job.subscribers || []), ...((parent && parent.subscribers) || [])]) {
         if (!sub.conversationId || sub.conversationId === cid || seenSubs.has(sub.conversationId)) continue;
         seenSubs.add(sub.conversationId);
-        if (!M.filterMatches(sub.filter, notifText)) continue;
-        this._deliverTo(sub.conversationId, job, ev, { subscriber: true, text: notifText });
+        if (!M.filterMatches(sub.filter, subText)) continue;
+        this._deliverTo(sub.conversationId, job, subEv, { subscriber: true, text: subText });
       }
       if (!cid) return; // user-created or lineage-less job — user lanes (inbox/panel) already cover it
       // THE OWNER'S OWN FILTER (lane job-notice-dedupe, fb-a001be4917): the owner conversation subscribed to its own job with a
@@ -592,14 +601,14 @@ class JobManager {
       if (own && !M.filterMatches(own.filter, notifText)) { this._notifyLogPush(job, { lane: 'filtered', ok: false, reason: 'your own subscription filter' }); return; }
       const eff = M.notifyEffective(this._notifyOverrideOf(job), this.d.groupNotifyFor ? this.d.groupNotifyFor(job) : null, this.d.notifyGlobal ? this.d.notifyGlobal() : true);
       if (!eff.on) { job.lastNotify = { ts: now(), lane: 'off', ok: false, source: eff.source }; this._notifyLogPush(job, { lane: 'off', ok: false, reason: 'auto-notify off (' + eff.source + ')' }); return; }
-      this._deliverTo(cid, job, ev, {});
+      this._deliverTo(cid, job, ev, { text: notifText });
     } catch (e) { this.d.log('[jobs] owner notify failed:', e.message); }
   }
   /** one delivery attempt to ONE conversation (owner or subscriber): flood
    *  floor → socket post → stash fallback. Subscriber deliveries never stamp
    *  the job's lastNotify (that field narrates the OWNER lane). */
   _deliverTo(cid, job, ev, { subscriber, text: preText } = {}) {
-    const text = preText || M.renderOwnerNotify(job, ev);
+    const text = preText || M.renderOwnerNotify(job, ev, { name: this._jobLabel(job) });
     // engine-side flood floor (the CLI also rate-limits + dedupes): ≥30s
     // between SOCKET posts per conversation, identical text 10min. A floored
     // DISTINCT event is STASHED, not dropped (2.344.1 review catch); only an
@@ -648,9 +657,9 @@ class JobManager {
     // THE RETRY PARK (lane notify-retry): a transient miss on a LIVE pid is parked by the ladder for this producer —
     // the meta is what this engine needs to book the outcome later (the job, the event, the raw text's digest for
     // the floor), with or without the job record still in the registry
-    const retry = { producer: 'jobs', meta: { jobId: job.id, jobName: job.name || job.id, ev: { what: (ev && ev.what) || job.state, at: (ev && ev.at) || now() }, subscriber: !!subscriber } };
+    const retry = { producer: 'jobs', meta: { jobId: job.id, jobName: this._jobLabel(job), ev: { what: (ev && ev.what) || job.state, at: (ev && ev.at) || now() }, subscriber: !!subscriber } };   // the NAME belted (lane job-notify-user r3)
     const deliver = this.d.deliverToConversation
-      ? this.d.deliverToConversation(cid, text, { fromName: 'Background Work · ' + (job.name || job.id), kind: 'notification', spendReason: 'job-notification', retry })
+      ? this.d.deliverToConversation(cid, text, { fromName: 'Background Work · ' + this._jobLabel(job), kind: 'notification', spendReason: 'job-notification', retry })
       : Promise.resolve({ ok: false, reason: 'no delivery lane wired' });
     Promise.resolve(deliver).then((r) => {
       if (r && r.ok) {
@@ -740,7 +749,7 @@ class JobManager {
     // a delivery that was IN FLIGHT when the owner cleared the job stashes here afterwards with the words it
     // captured before the clear (verify r3): an event born before the clear is held as the sentence
     const stale = job.clearedAt && !((ev && ev.at) > Math.max(job.clearedAt, job.reclearedAt || 0));   // …born before the LATEST clear (verify r4: a second clear of an `already` record keeps the first clearedAt)
-    q.push({ jobId: job.id, jobName: stale ? CLEARED_TEXT : job.name, text: stale ? CLEARED_TEXT : ((ev && ev.what) || job.state), ts: now(), urgency: job.state === 'failed' ? 'normal' : 'low', held: held || heldOf(null, reason) });
+    q.push({ jobId: job.id, jobName: stale ? CLEARED_TEXT : this._jobLabel(job), text: stale ? CLEARED_TEXT : ((ev && ev.what) || job.state), ts: now(), urgency: job.state === 'failed' ? 'normal' : 'low', held: held || heldOf(null, reason) });
     const dropped = capUnclaimedNotifs(q); // per-conversation cap; a may-have-landed copy first, then the oldest UNCLAIMED (a claimed one is being handed over — verify r4)
     const n = dropped.length;
     if (n) this.d.log(`[jobs] ${cid}: ${n} oldest waiting notification(s) fell off the ${NOTIF_STASH_CAP}-entry cap (${dropped.map((e) => `${e.jobId} ${new Date(Number(e.ts) || 0).toISOString()}${e.held && e.held.maybeDelivered ? ' — a may-have-landed copy, gave way first' : ''}`).join('; ')}) — never delivered (channel-jump verify r6: an eviction is said)`);
@@ -1155,10 +1164,29 @@ class JobManager {
       this._touch(job);
     } catch { }
   }
-  /** an AGENT's own words bound for a person (a notify cron's --text) through THE ONE BELT (src/agent-output-belt.js) —
-   *  required lazily (only a notify fire pays for it); never throws */
+  /** ONE agent-written FIELD (a job's NAME, a notify cron's --text, the context) bound for a person or another agent through
+   *  THE ONE BELT (src/agent-output-belt.js) — a field on its own, never a sentence it sits in (lane job-notify-user r3);
+   *  required lazily; never throws */
   _agentWords(s) {
     try { return require('./agent-output-belt.js').maskForSink(String(s == null ? '' : s), { dataDir: this.d.dataDir }); } catch { return String(s == null ? '' : s); }
+  }
+  /** the job's NAME as every message-road copy carries it (lane job-notify-user r3 — the header, the chat card's label,
+   *  the stash, the retry meta): belted on its own (claim r2-0 (b): `deploy ghp_…` reached the chat raw) */
+  _jobLabel(job) { return this._agentWords((job && (job.name || job.id)) || ''); }
+  /** THE ONE FOR-YOU COPY (lane job-notify-user r3): every copy this engine files for the user — a task's end, an ask, a
+   *  park, a missed time, a notify fire — goes through here. The sentence is the product's template and the job's NAME
+   *  and the agent's --text are its FIELDS (M.forYouCopy: the store belts each on its own, never the sentence); `fact` is
+   *  which copy it is (the store resolves and re-files by it, never by the words). The store's verdict is journaled for
+   *  EVERY copy — r2 journaled the notify fire only, and a refused end copy / ask / park / missed copy was dropped with no
+   *  line and no poll line: `user-inbox ✗ — why`, never a ✓ for a copy that did not land; a dep that answers nothing is
+   *  taken at its word. `copy` names which one (poll / show say it). */
+  _forYou(job, c) {
+    let v;
+    try { v = this.d.notifyUser({ words: c.words, fact: c.fact, urgency: c.urgency, jobId: job.id, jobName: job.name, ownerCid: job.owner?.conversation?.id || null }); } catch (e) { v = { ok: false, why: e.message }; }
+    const copy = c.fact.split(':')[0];
+    if (v && typeof v === 'object' && v.ok === false) this._notifyLogPush(job, { lane: 'user-inbox', ok: false, reason: String(v.why || 'the For you store refused it').slice(0, 200), copy });
+    else this._notifyLogPush(job, { lane: 'user-inbox', ok: true, copy });
+    return v;
   }
   _secretsFor(job) {
     if (!job.envFrom || !job.envFrom.length) return {};
@@ -1261,7 +1289,7 @@ class JobManager {
         job.state = 'failed';
         this._teardownPublish(job);
         this._touch(job, { what: `parked after ${M.SUPERVISE.failCap} crashes (exit ${run.exit})` });
-        try { this.d.notifyUser({ text: `Service ${job.name} crash-looped and was parked — vibespace-job start ${job.id} to retry`, urgency: 'normal', jobId: job.id, jobName: job.name, ownerCid: job.owner?.conversation?.id || null }); } catch { }
+        this._forYou(job, M.forYouCopy(job, 'parked'));
         this._notifyOwner(job, { what: `parked after ${M.SUPERVISE.failCap} crashes (exit ${run.exit}) — start it again once fixed` });
       } else if (dec.restartInMs) {
         job.state = 'down'; this._touch(job);
@@ -1286,7 +1314,7 @@ class JobManager {
         : run.cause === 'wrapper-mismatch' ? `failed: it never started — data/bin/job-wrapper.js speaks another protocol than this server (restart VibeSpace to finish its update)`
           : `${job.state} exit=${run.exit ?? '—'} ${run.cause} (${Math.round((run.endedAt - run.startedAt) / 60000)}m)`;
       this._touch(job, routineCronOk ? null : { what: evText });
-      if (M.notifyUserOf(job) && !windowEnd) { try { this.d.notifyUser({ text: `Task ${job.name}: ${job.state} (${run.cause})`, urgency: job.state === 'failed' ? 'normal' : 'low', jobId: job.id, jobName: job.name, ownerCid: job.owner?.conversation?.id || null }); } catch { } }
+      if (M.notifyUserOf(job) && !windowEnd) this._forYou(job, M.forYouCopy(job, 'end', { cause: run.cause }));
       // owner auto-notify honors the same quiet-success law: routine scheduled
       // success never messages anyone; agent-stopped ('interrupted') skips too
       // — the owner just did it and a message would echo their own action.
@@ -1406,7 +1434,7 @@ class JobManager {
             // past, so the owner notify re-fired every dedupe window)
             job.state = 'missed'; job.desiredUp = false; job.nextFireAt = null;
             this._touch(job, { what: 'missed its {at} time while the server was down' });
-            try { this.d.notifyUser({ text: `Scheduled job ${job.name} MISSED its time (server was down)`, urgency: 'high', jobId: job.id, jobName: job.name, ownerCid: job.owner?.conversation?.id || null }); } catch { }
+            this._forYou(job, M.forYouCopy(job, 'missed'));
             this._notifyOwner(job, { what: 'MISSED its scheduled {at} time (server was down) — reschedule if it still matters' });
             continue;
           }
@@ -1431,22 +1459,15 @@ class JobManager {
       // user's inbox spammed agent-facing instructions at the human
       // (inc-mt27t0bg follow-up report). The agent decides what the user
       // needs and relays via chat/vibespace-ask.
-      // lane job-notify-user r2: the agent's words pass the agent-output belt before EITHER lane carries them — the
-      // For-you copy, the owner (and subscriber) message, its stash and its retry meta all hold the masked words (read
-      // at each sink, `a.text` in place: test-record-clear-census follows the field to both)
-      if (M.notifyUserOf(job)) {
-        // THE STORE'S VERDICT is the journal (r2): a refused copy (an urgency outside the store's set, For you full) is
-        // `user-inbox ✗ — why`, never a ✓ for a copy that did not land; a dep that answers nothing is taken at its word
-        let v;
-        try { v = this.d.notifyUser({ text: this._agentWords(a.text || job.name), urgency: a.urgency || 'normal', jobId: job.id, jobName: job.name, ownerCid: job.owner?.conversation?.id || null }); } catch (e) { v = { ok: false, why: e.message }; }
-        if (v && typeof v === 'object' && v.ok === false) this._notifyLogPush(job, { lane: 'user-inbox', ok: false, reason: String(v.why || 'the For you store refused it').slice(0, 200) });
-        else this._notifyLogPush(job, { lane: 'user-inbox', ok: true });
-      }
+      // lane job-notify-user r3: the agent's --text is a FIELD — the For-you copy files it as the template's {text} (the store
+      // belts it on its own), and the owner conversation that WROTE it gets it whole while a subscriber gets it belted
+      // (_notifyOwner: `agentWhat`); `a.text` is read in place at each sink (test-record-clear-census follows the field)
+      if (M.notifyUserOf(job)) this._forYou(job, M.forYouCopy(job, 'fire', { text: a.text, urgency: a.urgency }));
       // THE 设备运维大师 gap (2.361.5): a notify action only reached the USER
       // inbox — the agent that scheduled its own reminder was never messaged
       // (an agent-created dated obligation woke nobody). Owner-conversation
       // delivery rides the same toggles/rate-floor/stash as every job event.
-      this._notifyOwner(job, { what: this._agentWords(a.text || job.name) });
+      this._notifyOwner(job, { what: a.text || job.name, agentWhat: true });
       this._event(job, 'cron fired: notify');
     } else if (a.type === 'spawn-task') {
       // ONE persistent child per cron (2.343.3, owner report: every fire used
@@ -1581,7 +1602,7 @@ class JobManager {
     job.interaction.pending = { panel, version, postedAt: now(), timeoutS: panel.timeoutS || 1800 };
     if (job.kind === 'task' && ['up', 'starting'].includes(job.state)) job.state = 'awaiting-user';
     this._touch(job, { what: 'needs your input — open its panel', verb: 'answers' });
-    try { this.d.notifyUser({ text: `${job.name} needs your input`, urgency: 'normal', jobId: job.id, jobName: job.name, ownerCid: job.owner?.conversation?.id || null, kind: 'job-interact' }); } catch { }
+    this._forYou(job, M.forYouCopy(job, 'ask'));
     this._notifyOwner(job, { what: 'posted an interaction panel and is awaiting an answer' });
     this._save();
     return { ok: true, version };
@@ -1626,7 +1647,7 @@ class JobManager {
       map.set(jobId, list);
     });
   }
-  snapshot(job, { tail = 0 } = {}) {
+  snapshot(job, { tail = 0, author = false } = {}) {
     const run = job.runs && job.runs[job.runs.length - 1];
     const out = {
       id: job.id, kind: job.kind, name: job.name, note: job.note, state: job.state, publishedUrl: job.publishedUrl || null,
@@ -1646,6 +1667,10 @@ class JobManager {
       // a cron's action TYPE (an enum: 'notify' | 'spawn-task' | null) — the panel words what --notify-user does per kind
       // (lane job-notify-user r2: the snapshot carried no action, so a notify cron read «when each run ends»)
       actionType: (job.action && typeof job.action.type === 'string' && job.action.type) || null,
+      // a notify cron's --text, bounded (lane job-notify-user r3: show / poll print the reminder — the snapshot kept none, so an
+      // agent whose message was cut could not recover it): WHOLE for its AUTHOR (`author` — the agent route's owner lineage),
+      // belted for everyone else (the panel's frames, another lineage's show — and a line piece there, M.agentJobView)
+      actionText: job.action && job.action.type === 'notify' && typeof job.action.text === 'string' ? (author ? job.action.text : this._agentWords(job.action.text)).slice(0, 500) : null,
       // a cron PARENT's run carries its own timeout / until inside the embedded task (verdict r1 F5: show printed «—»)
       envFrom: job.envFrom || [], restart: job.restart || null, timeoutMs: job.timeoutMs || M.spawnTaskOf(job).timeoutMs || null,
       // B-644d: a cron PARENT's fires run its embedded spawn-task, whose notifyOk the child inherits — the parent's own
