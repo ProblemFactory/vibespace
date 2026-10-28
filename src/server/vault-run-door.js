@@ -311,6 +311,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   const lateOnce = new Map();    // lane vault-agent-own r20b: pair → { until, entries, askId } — a LATE «allow once» (the owner answered after the 60 s); the agent's NEXT run of this shape passes once with no card, consumed then (memory only, a lock ends it — beside shortAlways)
   const lateAsks = new Map();    // askId → lq — an EXPIRED run card the owner may still answer (allow once / deny) for 24 h (the agent's run already returned ask_expired)
   const latePair = new Map();    // pair → askId — the one open late card for a (conversation, shape), so a second run re-asks it, never a second card
+  const lateByShape = new Map();  // round 23: `${sessionKey}\n${shapeId}` → askId — the restart fallback for the one-card bound (reconcile has the item's sessionKey + action.shapeId but not the live pair key)
   const runs = new Set();      // the children running now
   // lane vault-manual-and-lock: an agent's REQUESTS (one For-you ask each, open until answered or the lock) and the GRANT ROWS
   // their answers write (memory only — the «always» rows' shape + once + purpose; a lock ends them all)
@@ -475,7 +476,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     try { q.resolve({ outcome, askId: q.askId }); } catch { }
     return true;
   }
-  function ask({ caller, run, shape, key, detail, facts = null, signal, always = null }) {
+  function ask({ caller, run, shape, key, exactKey = null, detail, facts = null, signal, always = null }) {
     const pair = pairOf(caller.conversationId, key);
     if (byPair.has(pair) && asks.has(byPair.get(pair))) return Promise.resolve({ outcome: 'pending', askId: byPair.get(pair) });
     if (signal && signal.aborted) return Promise.resolve({ outcome: 'gone', askId: null });
@@ -485,7 +486,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       const tpls = (run.files || []).filter((f) => f.template != null && typeof f.text === 'string');   // round 17 (item 1): the template(s) the card renders IN FULL — their hash + byte count ride the «always» row for lane vault-use-grants (matching stays byte-exact via the shape key, which carries the template text)
       const templateHash = tpls.length ? crypto.createHash('sha256').update(JSON.stringify(tpls.map((f) => [f.name, f.text]))).digest('hex') : null;
       const templateBytes = tpls.length ? tpls.reduce((n, f) => n + Buffer.byteLength(f.text, 'utf8'), 0) : null;
-      const q = { askId, pair, conv: caller.conversationId, sessionKey: caller.sessionKey, who, key, always: always == null ? !!shape.always : !!always, detail, entries: run.refs.map((r) => r.id), head: cmdText(run.argv).slice(0, 80), facts, askedAt: now(), todoId: null, timer: null, resolve, templateHash, templateBytes };
+      const q = { askId, pair, conv: caller.conversationId, sessionKey: caller.sessionKey, who, key, exactKey, always: always == null ? !!shape.always : !!always, detail, entries: run.refs.map((r) => r.id), head: cmdText(run.argv).slice(0, 80), facts, askedAt: now(), todoId: null, timer: null, resolve, templateHash, templateBytes };
       asks.set(askId, q); byPair.set(pair, askId);
       if (userTodos) {
         try {
@@ -557,7 +558,10 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     });
   }
   // ── LATE CARDS (lane vault-agent-own r20b; the owner's ruling A: a late «allow once» still counts) ──
-  function lateItemFact(outcome, by) { return { outcome, late: true, decidedBy: by && by !== 'vault' ? by : null, decidedAt: now() }; }
+  // round 23 (MAJOR): the record the client reads — resolvedBy = the OUTCOME word ('allowed'+late / 'denied' / 'expired' / 'vault_locked'),
+  // resolvedFact { late:true, decidedBy:'person' when a person answered (allow/deny) else null (the vault's 24 h / a lock) }. wake-approve-card
+  // 2a5e9ce8 keys `by === 'allowed' && fact.late ? 'allowed:late' : by` and shows the person stamp only when decidedBy === 'person'.
+  function lateItemFact(by) { const person = !!by && by !== 'vault' && by !== 'system'; return { late: true, decidedBy: person ? 'person' : null, decidedAt: now(), ...(person ? { by: String(by).slice(0, 40) } : {}) }; }
   function reshapeLate(todoId, askId, { lateAt, shapeId, until }) {
     if (!(todoId && userTodos && typeof userTodos.reshapeItems === 'function')) return;
     try { userTodos.reshapeItems((it) => { if (it.id !== todoId || !it.action || it.action.type !== ACTION_TYPE || it.action.askId !== askId) return false; if (!(it.status === 'open' || it.resolvedBy === 'expired')) return false; it.status = 'open'; it.resolvedAt = null; it.resolvedBy = null; it.action = { ...it.action, late: true, lateAt, shapeId }; it.expiresAt = until; return true; }); } catch { }   // the item stays OPEN as a late card; it reclaims itself if a store-expiry sweep settled it in the 60 s race (never an owner dismissal — that settled the q and cleared this timer first)
@@ -568,8 +572,9 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     asks.delete(q.askId); if (byPair.get(q.pair) === q.askId) byPair.delete(q.pair);
     try { timers.clear(q.timer); } catch { }
     const lateAt = now(), until = lateAt + LATE_TTL_MS, shapeId = shapeIdOf(q.key);
-    const lq = { askId: q.askId, pair: q.pair, conv: q.conv, key: q.key, entries: q.entries, who: q.who, head: q.head, detail: q.detail, todoId: q.todoId, shapeId, lateAt, until, timer: null };
+    const lq = { askId: q.askId, pair: q.pair, conv: q.conv, key: q.key, exactKey: q.exactKey, entries: q.entries, who: q.who, head: q.head, detail: q.detail, todoId: q.todoId, sessionKey: q.sessionKey, shapeId, lateAt, until, timer: null };
     lateAsks.set(q.askId, lq); latePair.set(q.pair, q.askId);
+    lateByShape.set(`${q.sessionKey || 'vault'}\n${shapeId}`, q.askId);   // round 23: index by (session, shape) so a re-run after a RESTART finds the one open late card (the one-card bound), not a second
     lq.timer = timers.set(() => removeLate(lq, 'expired', 'vault'), LATE_TTL_MS); lq.timer?.unref?.();
     reshapeLate(q.todoId, q.askId, { lateAt, shapeId, until });
     log(`${q.who}: the run card for \`${q.head}\` got no answer in 60 s — kept as a late card (allow = one run) for 24 h`);
@@ -578,14 +583,12 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   function removeLate(lq, outcome, by = 'user') {
     if (!lateAsks.has(lq.askId)) return false;
     lateAsks.delete(lq.askId); if (latePair.get(lq.pair) === lq.askId) latePair.delete(lq.pair);
+    const sk = `${lq.sessionKey || 'vault'}\n${lq.shapeId}`; if (lateByShape.get(sk) === lq.askId) lateByShape.delete(sk);
     try { timers.clear(lq.timer); } catch { }
-    if (outcome && lq.todoId && userTodos) { try { const it = userTodos.get?.(lq.todoId); if (it && it.status === 'open') { if (typeof userTodos.resolveAnswered === 'function') userTodos.resolveAnswered([lq.todoId], by, lateItemFact(outcome, by)); else userTodos.setStatus(lq.todoId, 'done', outcome); } } catch { } }
+    if (outcome && lq.todoId && userTodos) { try { const it = userTodos.get?.(lq.todoId); if (it && it.status === 'open') { if (typeof userTodos.resolveAnswered === 'function') userTodos.resolveAnswered([lq.todoId], outcome, lateItemFact(by)); else userTodos.setStatus(lq.todoId, 'done', outcome); } } catch { } }
     return true;
   }
-  function restartLate(lq) {   // a second run of the same shape while the late card is open: the ONE card is asked again, its 24 h countdown restarts (no second card)
-    lq.lateAt = now(); lq.until = lq.lateAt + LATE_TTL_MS;
-    try { timers.clear(lq.timer); } catch { }
-    lq.timer = timers.set(() => removeLate(lq, 'expired', 'vault'), LATE_TTL_MS); lq.timer?.unref?.();
+  function restartLate(lq) {   // round 23: a second run while the late card is open does NOT extend the 24 h — it counts from the FIRST expiry (an agent retrying can't keep the card alive forever). The ONE card is simply re-asked (ask_pending); its timer and expiresAt are left as they are.
     reshapeLate(lq.todoId, lq.askId, { lateAt: lq.lateAt, shapeId: lq.shapeId, until: lq.until });
   }
   function consumeLate(pair) { lateOnce.delete(pair); }
@@ -594,18 +597,22 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     if (!['once', 'deny'].includes(a)) return { ok: false, code: a === 'always' ? 'always_not_offered' : 'bad_answer' };
     if (vaultState() !== 'unlocked') { removeLate(lq, 'vault_locked', 'vault'); return { ok: false, code: 'vault_locked' }; }
     if (lq.todoId && userTodos && typeof userTodos.get === 'function') { let it = null; try { it = userTodos.get(lq.todoId); } catch { } if (!(it && it.status === 'open' && it.action && it.action.type === ACTION_TYPE && it.action.askId === lq.askId && it.action.late && String(it.detail || '') === String(lq.detail || ''))) { removeLate(lq, null); return { ok: false, code: 'ask_changed' }; } }   // the belt: still the open late card for this ask, its detail the very text shown
+    if (lq.conv && !liveOf(lq.conv)) { removeLate(lq, 'denied', 'vault'); return { ok: false, code: 'conversation_gone' }; }   // round 23: the asking conversation ended — a late answer mints nothing (as the live path refuses conversation_gone)
     if (a === 'deny') { removeLate(lq, 'denied', by); return { ok: true, outcome: 'denied' }; }
-    if (lq.pair && lq.key) lateOnce.set(lq.pair, { until: now() + LATE_TTL_MS, entries: lq.entries || [], askId: lq.askId });   // the one-run pass; a reregistered-after-restart lq has no key (its shape is gone) so no pass is minted — the next run shows a fresh card (fails safe, never over-permits)
-    removeLate(lq, 'late-allowed', by);
+    if (lq.pair && lq.key) lateOnce.set(lq.pair, { until: now() + LATE_TTL_MS, entries: lq.entries || [], askId: lq.askId, exactKey: lq.exactKey || null, by: String(by).slice(0, 40) });   // round 23: the one-run pass carries the EXACT command's digest — the next run spends it only if its digest matches (never a different command of the same shape). A reregistered-after-restart lq has no key (its shape is gone) ⇒ no pass minted — the next run shows a fresh card (fails safe, never over-permits)
+    removeLate(lq, 'allowed', by);
     audit('vault-run-late-answer', { by: String(by).slice(0, 40), conv: lq.conv, shapeId: lq.shapeId, outcome: 'allowed', minted: !!(lq.pair && lq.key) });
     return { ok: true, outcome: 'late-allowed', ...(lq.pair && lq.key ? {} : { note: 'the card survived a restart; the next run shows a fresh card' }) };
   }
   function reregisterLate(it) {   // boot reconcile keeps a late card: re-register a minimal in-memory ask so the owner may still deny it or it expires at 24 h (a late allow cannot mint a pass without the shape key, which died with the old process — it fails safe)
     const askId = String(it.action.askId || ''); if (!askId || lateAsks.has(askId)) return;
     const until = (typeof it.expiresAt === 'number' && it.expiresAt > now()) ? it.expiresAt : now() + LATE_TTL_MS;
-    const lq = { askId, pair: null, conv: null, key: null, entries: [], who: it.sessionName || '', head: '', detail: String(it.detail || ''), todoId: it.id, shapeId: String(it.action.shapeId || ''), lateAt: Number(it.action.lateAt) || now(), until, timer: null };
-    lateAsks.set(askId, lq);
+    const sessionKey = it.sessionKey || 'vault', shapeId = String(it.action.shapeId || '');
+    const lq = { askId, pair: null, conv: null, key: null, exactKey: null, entries: [], who: it.sessionName || '', head: '', detail: String(it.detail || ''), todoId: it.id, sessionKey, shapeId, lateAt: Number(it.action.lateAt) || now(), until, timer: null, restartLost: true };
+    lateAsks.set(askId, lq); lateByShape.set(`${sessionKey}\n${shapeId}`, askId);   // round 23: the ONE-card bound holds across a restart — a re-run of this shape re-asks THIS card (ask_pending), never a second
     lq.timer = timers.set(() => removeLate(lq, 'expired', 'vault'), Math.max(1, until - now())); lq.timer?.unref?.();
+    // round 23: a restart dropped the card's shape key, so a late allow cannot mint a pass (fails safe — the next run shows a fresh card). SAY it on the card (action.restartLost) so the owner is not surprised that «allow» did not let the waiting run through.
+    try { if (userTodos && typeof userTodos.reshapeItems === 'function') userTodos.reshapeItems((x) => { if (x.id !== it.id || !x.action || x.action.type !== ACTION_TYPE || String(x.action.askId || '') !== askId) return false; x.action = { ...x.action, restartLost: true }; return true; }); } catch { }
   }
   /** Boot: a LIVE card a previous process filed can never be answered (the run it held died with it); a LATE card is KEPT (the owner may still allow one run). */
   function reconcile() {
@@ -619,6 +626,10 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     return n;
   }
   const shapeIdOf = (key) => crypto.createHash('sha256').update(String(key)).digest('hex').slice(0, 16);
+  // round 23 (MAJOR, over-permit): the EXACT command a late «allow once» pass is for — the card promised «its next run of THIS command»,
+  // not every run of the shape (the shape key abstracts positionals, so curl …/api/stat and curl …/api/DELETE-everything share it). This
+  // digest pins the literal argv + the folder + the plain env + the entry set; the next run spends the pass only if its digest matches.
+  const exactKeyOf = (spec, place) => crypto.createHash('sha256').update(JSON.stringify([cmdText(spec.argv), String(place == null ? '' : place), (spec.plainEnv || []).map((e) => `${e.name}=${e.value}`).sort(), (spec.refs || []).map((r) => r.ref).sort()])).digest('hex').slice(0, 32);
 
   // ── THE REQUEST AND ITS GRANT (lane vault-manual-and-lock — design q-043 D4: `vibespace-vault request <entry> --for "<why>"`) ──
   /** THIS conversation as the use law spells it (its `conv` — the session's registered id; a mint's scope) — the run's own
@@ -1023,9 +1034,12 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     // verdict re-reads the vault state, and we re-check the state + the signal BY NAME (a lock ⇒ vault_locked, a gone caller ⇒
     // caller_gone — nothing spawned, never spawn-then-stop). The open fd is handed to spawnRun (it exec's the SAME inode) or
     // closed here on any early return (the finally).
-    let toolFd = null, fdHandedOff = false;
+    let toolFd = null, fdHandedOff = false, lateConsumed = null;
     const closeTool = () => { if (toolFd != null) { try { fs.closeSync(toolFd); } catch { } toolFd = null; } };
     const lg0 = lockGen;
+    // round 23 (MINOR, your own r16 rule): a late «allow once» pass is spent at the verdict; if the run is then REFUSED (too_many_runs /
+    // caller_gone / a BURNED code — nothing ran), give it back (never across a lock: the epoch moved / the vault re-locked ⇒ the pass ended).
+    const giveBackLate = () => { if (lateConsumed && lockGen === lg0 && vaultState() === 'unlocked' && lateConsumed.lp.until > now()) { lateOnce.set(lateConsumed.pair, lateConsumed.lp); lateConsumed = null; } };
     try {
       if (sealedTool) {
         // round 15 (BLOCKER): a KNOWN credential tool (gh) runs with a minted value ONLY when SEALED — its realpath chain is
@@ -1056,11 +1070,12 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
         if (gitOnSeal === false) gitOnSeal = probeGit(sealedDirs);
         if (gitOnSeal === false) { note('git_not_on_seal', { ...head, tool: toolName }); return named('git_not_on_seal'); }
       }
+      const ek = exactKeyOf(spec, place);
       let verdict = VR.runVerdict({ state: vaultState(), plan: spec, shape, entries, granted, remembered, seen: seen.has(pair), instance: instanceKind(), policy: policy(), passes: passes(), now: now() });
-      if (!verdict.ok && verdict.ask) {   // lane vault-agent-own r20b: a late «allow once» pass runs this shape ONCE with no card (consumed); an open late card for this shape re-asks the one card
+      if (!verdict.ok && verdict.ask) {   // lane vault-agent-own r20b/r23: a late «allow once» pass runs this EXACT command ONCE with no card (consumed); an open late card re-asks the one card
         const lp = lateOnce.get(pair);
-        if (lp && lp.until > now()) { consumeLate(pair); audit('vault-run-late-allow', { ...head, shapeId: shapeIdOf(key) }); verdict = { ok: true, by: 'late' }; }
-        else { if (lp) consumeLate(pair); const lid = latePair.get(pair); if (lid && lateAsks.has(lid)) { restartLate(lateAsks.get(lid)); note('ask_pending', { ...head, askId: lid }); return named('ask_pending'); } }
+        if (lp && lp.until > now() && lp.exactKey === ek) { consumeLate(pair); lateConsumed = { pair, lp }; audit('vault-run-late-allow', { ...head, shapeId: shapeIdOf(key), conv: caller.conversationId, askId: lp.askId, by: lp.by || null }); verdict = { ok: true, by: 'late' }; }   // round 23: the pass is for THIS command (the digest must match — never another `/api/DELETE-everything` of the same shape); the audit carries the person, the conversation and the askId
+        else { if (lp && lp.until <= now()) consumeLate(pair); const lid = latePair.get(pair) || lateByShape.get(`${caller.sessionKey || 'vault'}\n${shapeId}`); if (lid && lateAsks.has(lid)) { restartLate(lateAsks.get(lid)); note('ask_pending', { ...head, askId: lid }); return named('ask_pending'); } }   // round 23: an expired pass is cleared, a non-matching one kept; the one-card bound holds across a restart (lateByShape)
       }
       let askId = null, asked = null;
       if (!verdict.ok && verdict.ask) {
@@ -1070,8 +1085,8 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
         const shown = detailOf(spec, shape, place, { facts: entries, why: verdict.why || [], away: verdict.away || [] });   // lane vault-agent-own: + who stored each entry, why it asks
         if (shown.length > DETAIL_MAX) return named('card_too_long');
         // lane vault-agent-own r20 (the owner «这个卡片的可读性很差»): the SAME run as STRUCTURED FACTS (codes, never prose) the client renders in the viewer's language — rides the ask record beside `detail`; `detail` stays byte-unchanged for older clients
-        const facts = VR.cardFactsOf(spec, shape, place, { who: String(caller.name || caller.sessionKey || caller.conversationId).slice(0, 80), home, cmd: head.cmd, entries: nameById });
-        const a = await ask({ caller, run: spec, shape, key, detail: shown, facts, signal, always: verdict.offers.includes('always') });
+        const facts = VR.cardFactsOf(spec, shape, place, { who: String(caller.name || caller.sessionKey || caller.conversationId), home, cmd: cmdText(spec.argv), entries: nameById, refsInfo: entries, away: verdict.away || [], notOwn: (verdict.why || []).includes('not-own') });   // round 23: who is bounded IN the model (a marker, never a lone surrogate); cmd is the RAW command (a $VAULT ref is a placeholder — the value masker finds nothing to mask; the agent's own `-d password=…` the child receives is shown, where the name belt used to hide it); refsInfo/away/notOwn carry the reason CODES
+        const a = await ask({ caller, run: spec, shape, key, exactKey: ek, detail: shown, facts, signal, always: verdict.offers.includes('always') });
         asked = a.outcome; askId = a.askId;
         if (asked === 'pending') { note('ask_pending', { ...head, askId }); return named('ask_pending'); }
         const outcome = { gone: 'caller_gone', unfiled: 'ask_unfiled', denied: 'ask_denied', expired: 'ask_expired', changed: 'ask_changed', vault_locked: 'vault_locked' }[asked];
@@ -1085,8 +1100,8 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
         if (verdict.ok) verdict = { ok: true, by: asked === 'always' ? 'always' : 'once' };
       }
       if (!verdict.ok) { if (verdict.code === 'vault_locked') { try { vault.blocked(VB.actorName(caller.name, 'a conversation'), 'vibespace-vault run'); } catch { } } note(verdict.code, { ...head, askId }); return verdict; }
-      if (signal && signal.aborted) { note('caller_gone', head); return named('caller_gone'); }
-      if (callerRuns(caller.conversationId) >= RUNS_PER_CALLER || runs.size >= RUNS_MAX) return named('too_many_runs');
+      if (signal && signal.aborted) { giveBackLate(); note('caller_gone', head); return named('caller_gone'); }
+      if (callerRuns(caller.conversationId) >= RUNS_PER_CALLER || runs.size >= RUNS_MAX) { giveBackLate(); return named('too_many_runs'); }
       // A ONCE-GRANT IS SPENT BEFORE THE RUN (a grant never runs twice): still the very row the verdict read — a lock, the switch
       // or another run of this conversation took it meanwhile ⇒ nothing runs
       const spent = [];
@@ -1099,7 +1114,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       // / spawn_failed), but NEVER across a lock (the epoch moved, or the vault is no longer unlocked): a lock ends every grant
       // (vault_locked is not in BURNED; onLocked cleared them), so restoreOnce must not bring a spent once-grant back after one.
       const BURNED = new Set(['entry_unknown', 'entry_too_short_to_mask', 'spawn_failed', 'run_path_unsafe', 'git_not_on_seal', 'tool_not_sealed']);
-      const restoreOnce = (r) => { if (lockGen === lg0 && vaultState() === 'unlocked' && r && r.ok === false && BURNED.has(r.code)) for (const a of spent) if (a.g.until > now()) grants.set(a.pair, a.g); return r; };
+      const restoreOnce = (r) => { if (lockGen === lg0 && vaultState() === 'unlocked' && r && r.ok === false && BURNED.has(r.code)) { for (const a of spent) if (a.g.until > now()) grants.set(a.pair, a.g); giveBackLate(); } return r; };   // round 23: a BURNED refusal after the spend gives the late pass back too (nothing ran)
       if (sealedTool && toolFd != null && !toolSealed(spec.tool, toolFd)) { note('tool_not_sealed', { ...head, tool: toolName, why: 'ownership changed between the hash and the spawn' }); return restoreOnce(named('tool_not_sealed', { tool: toolName, words: "the tool's ownership changed between the hub's check and the run — a root-owned program became writable before it could start, so it was not run; nothing ran" })); }   // round 15: tool_changed's one remaining case — a sealed tool whose fstat ownership moved before the exec; round 16 (MINOR): a refusal AFTER the spend restores the once-grant (nothing ran), and the words say THIS path's cause
       fdHandedOff = true;
       const out = spawnRun({ caller, spec, shape, head, verdict, askId, place, base, signal, t0, note, receipt: runReceipt, toolFd, closeTool, toolName });
@@ -1243,7 +1258,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     askingLine();
     lockGen++;   // round 14: the lock epoch moves — restoreOnce never brings a spent once-grant back across it
     for (const lq of [...lateAsks.values()]) removeLate(lq, 'vault_locked', 'vault');   // lane vault-agent-own r20b: an open late card settles vault_locked, its pass ends
-    lateOnce.clear();
+    lateOnce.clear(); lateByShape.clear();
     seen.clear(); shortAlways.clear(); grants.clear(); hostPasses.clear(); db = null; dbEpoch = -1;   // … and every grant ends (once / 8 hours) — and every host pass (lane vault-agent-own)
   }
   if (typeof vault.onLock === 'function') vault.onLock((why) => onLocked(why));

@@ -35,7 +35,7 @@ vibespace-vault uses                your grants, your open requests, your own us
 
 ## When a run card goes unanswered
 
-If the user does not answer your run card within its minute, your `vibespace-vault run` is refused `ask_expired` — but the card does **not** disappear. It stays in their For you tray as a *late* card for 24 hours, and if they allow it late, **your next run of the same command passes once** with no new card (then it is spent — run it again and a fresh card appears). So on `ask_expired`, do not re-file a `vibespace-ask` or nag in chat: do other work and simply run the same command again later — a late allow will let that next run through. A late deny, a lock, or the 24 hours ends it.
+If the user does not answer your run card within its minute, your `vibespace-vault run` is refused `ask_expired` — but the card does **not** disappear. It stays in their For you tray as a *late* card for 24 hours, and if they allow it late, **your next run of that exact command passes once** with no new card (round 23: the pass is for THAT command — a different command, even of the same program, draws its own card); then it is spent — run it again and a fresh card appears. So on `ask_expired`, do not re-file a `vibespace-ask` or nag in chat: do other work and simply run the same command again later — a late allow will let that next run through. A late deny, a lock, or the 24 hours ends it.
 
 ## When the vault is locked
 
@@ -129,7 +129,7 @@ back the output with the value blanked to `[vault:<store>/<row>/<field>]`.
 - **It runs on this instance**, in your folder (the project, the temp folder or ~/Downloads), 120 s by default
   (`--timeout`, ≤ 600 s), output ≤ 2 MiB; the exit code is the command's. When it ends, anything it left running ends
   too. A remote conversation and `--on` are not here yet (`device_road_later`).
-- **The output scrubber replaces the VALUES you injected, never a field by its name, and never cuts the output** (round 21): it blanks each injected value and its common encodings (raw, base64, hex, URL, JSON-escaped, UTF-16, …) to `[vault:<store>/<row>/<field>]` wherever they appear — a JSON field the tool returns that happens to be named `key` / `auth` / `token` is the tool's own data and is left alone (it is not a secret unless its VALUE is one you injected), and the whole output arrives (a value cut off by the 2 MiB bound shows a `[vault:…]` placeholder at the end, never a dropped byte).
+- **The output scrubber replaces the VALUES you injected, never a field by its name, and never cuts the output** (round 21): it blanks each injected value and its common encodings (raw, base64, hex, URL, JSON-escaped, UTF-16, …) to `[vault:<store>/<row>/<field>]` wherever they appear — a JSON field the tool returns that happens to be named `key` / `auth` / `token` is the tool's own data and is left alone (it is not a secret unless its VALUE is one you injected), and the whole output arrives (a value cut off by the 2 MiB bound, a timeout or a lock shows a `[vault:…]` placeholder only over the trailing bytes that could be a half value — clean output at a cut arrives clean, never a dropped byte; round 23).
 - **The scrubber is a sieve, not a wall**: the output is scrubbed of the value's common spellings; a command that
   re-encodes it can still show it — the owner sees the whole command before it runs. (The spellings: itself, base64,
   base32, URL-encoded, JSON-, HTML- or backslash-escaped, hex, UTF-16, quoted-printable, coloured or wrapped. A part of a

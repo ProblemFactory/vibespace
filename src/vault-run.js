@@ -331,7 +331,7 @@ const CURL_VALUE_FLAGS = ['-A', '--user-agent', '-b', '--cookie', '-c', '--cooki
 const WGET_VALUE_FLAGS = ['-O', '--output-document', '-o', '--output-file', '-a', '--append-output', '-P', '--directory-prefix', '-U', '--user-agent', '--header', '--user', '--password', '--http-user', '--http-password', '--post-data', '--post-file', '--body-data', '--body-file', '--method', '-t', '--tries', '-T', '--timeout', '--load-cookies', '--save-cookies', '--ca-certificate', '--certificate', '--private-key', '-w', '--wait', '-Q', '--quota', '--limit-rate', '-l', '--level', '-A', '--accept', '-R', '--reject', '-D', '--domains', '--exclude-domains', '-e', '--execute', '-B', '--base', '--bind-address', '--config', '-i', '--input-file'];
 const HTTPIE_VALUE_FLAGS = ['-a', '--auth', '-A', '--auth-type', '-o', '--output', '--session', '--session-read-only', '--cert', '--cert-key', '--cert-key-pass', '--ciphers', '--ssl', '--timeout', '--max-redirects', '--boundary', '--format-options', '-p', '--print', '-P', '--history-print', '--pretty', '-s', '--style', '--response-charset', '--response-mime', '--default-scheme', '--verify', '--proxy', '--raw'];
 const KNOWN_TOOLS = Object.freeze([
-  { name: 'curl', proxyEnv: true, bareHosts: 'all', globs: true, urlFlags: ['--url'], blindPrefixes: ['--expand-'], valueFlags: ['-x', '--proxy', '--preproxy', '--resolve', '--connect-to', '--socks4', '--socks4a', '--socks5', '--socks5-hostname', '--doh-url', '-K', '--config', ...CURL_VALUE_FLAGS], keyed: ['-x', '--proxy', '--preproxy', '--resolve', '--connect-to', '--socks4', '--socks4a', '--socks5', '--socks5-hostname', '--doh-url', '--unix-socket', '--abstract-unix-socket', '--dns-servers', '--alt-svc', '--interface'], configFlags: ['-K', '--config'], fileFlags: ['--cacert', '--capath', '-E', '--cert', '--key', '--netrc-file', '--hsts', '--etag-save', '--etag-compare'], configFileKeys: ['alt-svc', 'cacert', 'capath', 'cert', 'config', 'cookie-jar', 'crlfile', 'dump-header', 'egd-file', 'etag-compare', 'etag-save', 'hsts', 'key', 'knownhosts', 'libcurl', 'netrc-file', 'output', 'output-dir', 'proxy-cacert', 'proxy-capath', 'proxy-cert', 'proxy-crlfile', 'proxy-key', 'pubkey', 'random-file', 'ssl-sessions', 'stderr', 'trace', 'trace-ascii', 'upload-file'], configDataKeys: ['data', 'data-ascii', 'data-binary', 'header', 'json', 'proxy-header', 'write-out'], configAtNameKeys: ['data-urlencode', 'url-query', 'variable'], configCookieKeys: ['cookie'], configNetrcKeys: ['netrc', 'netrc-optional'], configRouteKeys: ['connect-to', 'doh-url', 'ipfs-gateway', 'preproxy', 'proxy', 'resolve', 'socks4', 'socks4a', 'socks5', 'socks5-hostname', 'url'], configRedirectKeys: ['location', 'location-trusted', 'proto-redir'], configFormKeys: ['form'], configExpandPrefix: 'expand-', configShort: { K: 'config', E: 'cert', b: 'cookie', d: 'data', c: 'cookie-jar', D: 'dump-header', o: 'output', T: 'upload-file', H: 'header', F: 'form', w: 'write-out', x: 'proxy', n: 'netrc', L: 'location' } },   // round 19 (item 4): DERIVED from `curl --help all` (every <file>/<dir>/<data>@/<name=content>@/<url>@ option, both spellings; the short map pins -K/-E/-b/-d/…) and PINNED by the census in test-vault-run-model (a curl that adds a file-reading option → red by name); route directives (url/connect-to/resolve/proxy) are ROUTE HOSTS, location/proto-redir → noAlways redirect, a {{var}} host → blind   // round 3: a flag that redirects the connection off the URL's host (--alt-svc / --interface) is keyed; a value that is an agent-writable FILE (cert / ca / netrc / hsts cache) is a config class — blind unless it is the vault's own $VAULT_FILE
+  { name: 'curl', proxyEnv: true, bareHosts: 'all', globs: true, urlFlags: ['--url'], blindPrefixes: ['--expand-'], valueFlags: ['-x', '--proxy', '--preproxy', '--resolve', '--connect-to', '--socks4', '--socks4a', '--socks5', '--socks5-hostname', '--doh-url', '-K', '--config', ...CURL_VALUE_FLAGS], keyed: ['-x', '--proxy', '--preproxy', '--resolve', '--connect-to', '--socks4', '--socks4a', '--socks5', '--socks5-hostname', '--doh-url', '--unix-socket', '--abstract-unix-socket', '--dns-servers', '--alt-svc', '--interface'], configFlags: ['-K', '--config'], fileFlags: ['--cacert', '--capath', '-E', '--cert', '--key', '--netrc-file', '--hsts', '--etag-save', '--etag-compare'], configFileKeys: ['alt-svc', 'cacert', 'capath', 'cert', 'config', 'cookie-jar', 'crlfile', 'dump-header', 'egd-file', 'etag-compare', 'etag-save', 'hsts', 'key', 'knownhosts', 'libcurl', 'netrc-file', 'output', 'output-dir', 'proxy-cacert', 'proxy-capath', 'proxy-cert', 'proxy-crlfile', 'proxy-key', 'pubkey', 'random-file', 'ssl-sessions', 'stderr', 'trace', 'trace-ascii', 'upload-file'], configDataKeys: ['data', 'data-ascii', 'data-binary', 'header', 'json', 'proxy-header', 'write-out'], configAtNameKeys: ['data-urlencode', 'url-query', 'variable'], configCookieKeys: ['cookie'], configNetrcKeys: ['netrc', 'netrc-optional'], configRouteKeys: ['abstract-unix-socket', 'connect-to', 'doh-url', 'ipfs-gateway', 'preproxy', 'proxy', 'proxy1.0', 'resolve', 'socks4', 'socks4a', 'socks5', 'socks5-hostname', 'unix-socket', 'url'], configRedirectKeys: ['location', 'location-trusted', 'proto-redir'], configFormKeys: ['form'], configExpandPrefix: 'expand-', configShort: { K: 'config', E: 'cert', b: 'cookie', d: 'data', c: 'cookie-jar', D: 'dump-header', o: 'output', T: 'upload-file', H: 'header', F: 'form', w: 'write-out', x: 'proxy', n: 'netrc', L: 'location' } },   // round 19 (item 4): DERIVED from `curl --help all` (every <file>/<dir>/<data>@/<name=content>@/<url>@ option, both spellings; the short map pins -K/-E/-b/-d/…) and PINNED by the census in test-vault-run-model (a curl that adds a file-reading option → red by name); route directives (url/connect-to/resolve/proxy) are ROUTE HOSTS, location/proto-redir → noAlways redirect, a {{var}} host → blind   // round 3: a flag that redirects the connection off the URL's host (--alt-svc / --interface) is keyed; a value that is an agent-writable FILE (cert / ca / netrc / hsts cache) is a config class — blind unless it is the vault's own $VAULT_FILE
   { name: 'wget', proxyEnv: true, bareHosts: 'all', prefixOpts: true, valueFlags: WGET_VALUE_FLAGS, keyed: ['-e', '--execute', '-B', '--base', '--bind-address', '--use-askpass'], configFlags: ['--config', '-i', '--input-file', '--input-metalink'], fileFlags: ['--ca-certificate', '--certificate', '--private-key', '--load-cookies', '--save-cookies'] },   // round 3 (m2): --input-metalink fetches every URL in its file (like -i); a cert / cookie file the agent writes is a config class
   { name: 'http', aka: ['https', 'httpie'], proxyEnv: true, bareHosts: 'first', valueFlags: HTTPIE_VALUE_FLAGS, keyed: ['--proxy'] },
   { name: 'gh', hosts: ['api.github.com', 'github.com'], hostEnv: ['GH_HOST'], sub: 2, proxyEnv: true, valueFlags: ['-R', '--repo', '--hostname'], hostFlags: ['--hostname'], repoFlags: ['-R', '--repo'], repoEnv: ['GH_REPO'], urlArgSubs: [['api']], freeText: true, blindSubs: [['repo', 'clone'], ['repo', 'fork'], ['repo', 'sync'], ['pr', 'checkout'], ['extension', 'install'], ['extension', 'upgrade']], blindFlagSubs: [{ sub: ['pr', 'merge'], longs: ['--delete-branch'], shorts: ['-d'] }, { sub: ['repo', 'create'], longs: ['--push', '--clone'], shorts: ['-c'] }], needFlagSubs: [{ sub: ['pr', 'create'], need: ['--head', '-H'], repo: true }], runSeal: { configDirEnv: 'GH_CONFIG_DIR', hostEnv: 'GH_HOST', credRef: 'GH_TOKEN', credEnvOther: 'GH_ENTERPRISE_TOKEN', childEnv: { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_TERMINAL_PROMPT: '0' } }, grammarVersion: '2.102.0', toolSha256: '7469124f706944133d6a169691dd1c6c3511b12e85878d255e044e2948df4c9b', envAllow: ["GH_REPO","GH_FORCE_TTY","NO_COLOR","CLICOLOR","TERM","LANG","TZ"], envAllowRe: ["^LC_[A-Z]+$"], envHijack: ["BROWSER","EDITOR","GH_BROWSER","GH_EDITOR","GH_PAGER","GH_PATH","GIT_EDITOR","PAGER","VISUAL"], grammar: {
@@ -527,7 +527,7 @@ function materialize(run, { valueOf, pathOf }) {
 // words only); a URL the WHATWG parser REJECTS (an out-of-range port, a non-DNS name, a label > 63 / a name > 253, an empty host, a
 // `{{var}}`) is a BLIND authority — bad_host at the door, never a dropped host (Go/curl would still dial it). The divergence corpus is
 // a DOOR-level fuzz leg (whole argv words → routeHosts / userinfo / blind, compared to new URL, Go's trace and curl's %{url.host}).
-const URL_FIND_RE = /\b([a-z][a-z0-9+.-]{0,31}):\/\/\S+/gi;   // LOCATES a scheme://… token up to whitespace; the host is read by urlParse, never this regex
+const URL_FIND_RE = /\b([a-z][a-z0-9+.-]{0,31}):\/\/[^ \t\n\r\f\v]+/gi;   // round 23 (the refuted finding, real + pre-existing): the token runs to ASCII whitespace ONLY — JS's \S stops at U+00A0/U+3000/U+2028/… so `http://own-host\u3000@evil` was read as own-host (no userinfo, not blind) while curl dials evil; a non-ASCII space now stays IN the token ⇒ urlParse rejects it (bad_host) / blindAuthority blinds it. The host is read by urlParse, never this regex
 const URL_TRAIL = /[),;!'"<>`]+$/;   // drop trailing prose terminators (a standalone argv token has none); the attack bytes are always mid-token (…<byte>@host/path), so a trailing strip never reopens the hole
 const normHost = (h, port = null) => { const x = String(h || '').toLowerCase().replace(/\.$/, ''); return x && x.length <= 253 && !/[{}]/.test(x) && !x.split('.').some((l) => l.length > 63) ? (port ? `${x}:${port}` : x) : null; };   // round 19 (item 1): a name > 253 chars or a label > 63 is not valid DNS (gh/curl still CONTACT it) — fail-CLOSED to bad_host; a `{{var}}` is never a host
 const GRAM_DEPTH = new WeakMap();   // round 7 (5b): the lead depth is the grammar's longest key (repo autolink create = 3 words), memoised per frozen grammar — never the constant row.sub (= 2, for blindSubs)
@@ -590,7 +590,7 @@ function urlUserinfo(text) {
   return false;
 }
 // lane vault-agent-own (round 2) — the hosts the table did not read and the tool still goes to
-const URL_AUTHORITY_RE = /\b([a-z][a-z0-9+.-]{0,31}):\/\/([^\/?#\s'"]*)/gi;   // scheme through the authority (up to the path / query / fragment)
+const URL_AUTHORITY_RE = /\b([a-z][a-z0-9+.-]{0,31}):\/\/([^\/?#'"\t\n\r\f\v ]*)/gi;   // round 23 (the refuted finding): scheme through the authority, ending at `/?#'"` or ASCII whitespace ONLY — a non-ASCII whitespace (U+00A0/U+3000/…) stays in the authority so blindAuthority's non-ASCII test blinds it (JS's \s stopped the capture before it and read the host in front)
 /** round 2b (HIGH-1): curl and wget percent-decode the host, IDNA-map a non-ASCII host and read userinfo PAST a backslash —
  *  so `good.com%2eevil.com`, `good.com。evil.com`, `good.com\@evil.com` all reach evil.com while URL_RE reads good.com. An
  *  authority that holds a `%`, a `\` or a non-ASCII byte cannot be trusted ⇒ the shape is BLIND (its real host is unknown). */
@@ -699,13 +699,16 @@ function cfgBareOrUrl(v) {
 /** a curl route directive's value → { hosts } | { blind:true } (a {{var}} host, made at run time) | { file:true } (url = @file). */
 function cfgRouteHosts(key, v) {
   const t = String(v).trim();
+  if (!t) return { hosts: [] };
   if (/\{\{|\}\}/.test(t)) return { blind: true };
-  if (key === 'url') return t[0] === '@' ? { file: true } : { hosts: cfgBareOrUrl(t) };
-  if (key === 'doh-url' || key === 'ipfs-gateway') return { hosts: cfgBareOrUrl(t) };
-  if (key === 'connect-to') { const f = t.split(':'); const h = normHost((f[2] || '').trim()); return { hosts: h ? [h] : [] }; }   // HOST1:PORT1:HOST2:PORT2 — curl connects to HOST2
-  if (key === 'resolve') { const f = t.replace(/^\+/, '').split(':'); const h = normHost((f[0] || '').trim()), a = normHost((f.slice(2).join(':') || '').replace(/^\[|\]$/g, '').trim()); return { hosts: [h, a].filter(Boolean) }; }
-  const m = /^(?:[a-z][a-z0-9+.-]{0,31}:\/\/)?(?:[^@/]*@)?([^/:]+)/i.exec(t);   // proxy / preproxy / socks: [protocol://]host[:port]
-  const h = m ? normHost(m[1]) : null; return { hosts: h ? [h] : [] };
+  if (key === 'unix-socket' || key === 'abstract-unix-socket') return { blind: true };   // round 23 (MAJOR): a local socket path routes the connection off every named host and cannot be named — BLIND (named, «always» withheld), the same law argv's --unix-socket blinds
+  let hosts;
+  if (key === 'url') { if (t[0] === '@') return { file: true }; hosts = cfgBareOrUrl(t); }
+  else if (key === 'doh-url' || key === 'ipfs-gateway') hosts = cfgBareOrUrl(t);
+  else if (key === 'connect-to') { const f = t.split(':'); const h = normHost((f[2] || '').trim()); hosts = h ? [h] : []; }   // HOST1:PORT1:HOST2:PORT2 — curl connects to HOST2
+  else if (key === 'resolve') { const f = t.replace(/^\+/, '').split(':'); const h = normHost((f[0] || '').trim()), a = normHost((f.slice(2).join(':') || '').replace(/^\[|\]$/g, '').trim()); hosts = [h, a].filter(Boolean); }
+  else { const m = /^(?:[a-z][a-z0-9+.-]{0,31}:\/\/)?(?:[^@/]*@)?([^/:]+)/i.exec(t); const h = m ? normHost(m[1]) : null; hosts = h ? [h] : []; }   // proxy / preproxy / proxy1.0 / socks: [protocol://]host[:port]
+  return hosts.length ? { hosts } : { blind: true };   // round 23 (MAJOR, reopens r19 item 1 in the config reader): a NON-empty route token whose host the WHATWG parser / normHost REJECTS (url = https://evil.test.123, a 64-char label, proxy = :3128) is a BLIND authority — named, «always» withheld, never a DROPPED host (curl would still dial it: the loopback proxy saw CONNECT evil.test.123 first)
 }
 /** round 18/19 (item 3/4): a curl config TEMPLATE the card shows in full can NEST another agent-writable file, ROUTE the connection
  *  off the URL's host, REDIRECT, or make the destination at run time. Parsed with curl's own grammar (parseCfgLine). Returns
@@ -865,6 +868,25 @@ const MASKING = Object.freeze(['common-encodings']);
 const CARD_SHAPES = Object.freeze(['tool', 'line']);
 const CARD_FACTS_CODES = Object.freeze({ always: ALWAYS_WHY, hosts: HOSTS_WHY, masking: MASKING, shape: CARD_SHAPES });   // one export lane wake-approve-card's test pins its code words against
 
+// round 23 (MAJOR, bounds): the client card store (lane wake-approve-card) walks `facts` and REFUSES any string over this many
+// UTF-16 units (and the whole ≤ 24 KB, depth ≤ 4). Every facts string is clipped to this, surrogate-safe, with a `*Cut` marker;
+// the WHOLE value rides a chunked fold (`cmdFull` / `textFull`, each chunk ≤ this) the client reassembles — so a 2 485-char
+// command (ask_unfiled on 4ff55fb4, where facts.cmd was head.cmd up to 4096) files, and «always» never rests on a template the
+// owner cannot read. The bound + the fold are written in /var/tmp/vibespace-lanes/vault-card-contract.md and told to wake's lane.
+const CARD_STRING_MAX = 2000;
+/** Clip to ≤ max UTF-16 units, never splitting a surrogate pair → { text, cut }. */
+function clipStr(sx, max = CARD_STRING_MAX) {
+  const str = String(sx == null ? '' : sx);
+  if (str.length <= max) return { text: str, cut: false };
+  let end = max; const c = str.charCodeAt(end - 1); if (c >= 0xd800 && c <= 0xdbff) end -= 1;
+  return { text: str.slice(0, end), cut: true };
+}
+/** The whole value in ≤ max-unit chunks (the fold the client reassembles), surrogate-safe. */
+function chunkStr(sx, max = CARD_STRING_MAX) {
+  const str = String(sx == null ? '' : sx); const out = [];
+  for (let i = 0; i < str.length;) { let end = Math.min(i + max, str.length); const c = str.charCodeAt(end - 1); if (end < str.length && c >= 0xd800 && c <= 0xdbff) end -= 1; out.push(str.slice(i, end)); i = end; }
+  return out.length ? out : [''];
+}
 /** A ref the door could NOT name ⇒ a short, non-telling id «<field>:<6 hex>» (never the URI — the row name may itself be
  *  telling). PURE (no crypto import keeps this module PURE → PURE): a 32-bit FNV-1a over the ref id. */
 function shortRefId(ref) {
@@ -916,28 +938,48 @@ function hostsWhyOf(shape) {
 }
 
 /**
- * PURE. The owner's run card as STRUCTURED FACTS (codes, never prose) — the record's `facts` field, rendered by the client in
- * the viewer's language. `spec` = planOf, `shape` = shapeOf(spec), `cwd` = the run folder (absolute). `names` = the door's
- * resolved display strings { who, home, cmd, entries }: `who` the conversation's name, `home` the home dir (paths show relative
- * to it as `~`), `cmd` the ALREADY-REDACTED command (the same bytes head.cmd carries), `entries` a { <ref.id>: <the Vault
- * window's name> } map (a ref the door could not name falls to shortRefId). → EXACTLY the contract object (the fixture).
+ * PURE. The owner's run card as STRUCTURED FACTS (codes, never prose) — the record's `facts` field (v2), rendered by the client
+ * in the viewer's language. `spec` = planOf, `shape` = shapeOf(spec), `cwd` = the run folder (absolute). `names` = the door's
+ * resolved display strings and reasons { who, home, cmd, entries, refsInfo, away, notOwn }: `who` the conversation's name;
+ * `home` the home dir (paths show relative as `~`); `cmd` the command that RUNS (round 23 MAJOR: the RAW argv — a $VAULT ref is a
+ * placeholder, nothing to mask; NOT head.cmd, whose name-belt hid the agent's own `-d password=…` the child receives); `entries`
+ * a { <ref.id>: <Vault-window name> } map (a ref the door could not name falls to shortRefId); `refsInfo` the per-ref facts
+ * [{ id, own, prov, forHost, open }]; `away` the verdict's [{ id, ref, forHost, host, unknown, keep }] (a minted value minted for
+ * X, this run sends it to Y); `notOwn` another conversation stored it. The facts carry EVERYTHING the approval rests on — each
+ * shown template's TEXT, the plain env the child gets, the reasons as CODES — so a facts client (which never shows `detail`) shows
+ * the same card. Every string is bounded to CARD_STRING_MAX, a longer one cut (marker) with the whole value in a chunked fold.
+ * → EXACTLY the contract object (the fixture).
  */
 function cardFactsOf(spec, shape, cwd, names = {}) {
-  const home = names.home || '', ent = names.entries || {};
-  const secrets = (spec.refs || []).map((r) => ({ name: ent[r.id] || shortRefId(r), entry: String(r.entry), ref: r.ref, as: injectionOfRef(spec, r) }));
+  const home = names.home || '', ent = names.entries || {}, info = {};
+  for (const e of names.refsInfo || []) info[e.id] = e;
+  const away = names.away || [], awayOfId = (id) => away.find((a) => a.id === id) || null;
+  const secrets = (spec.refs || []).map((r) => {
+    const i = info[r.id] || {}, aw = awayOfId(r.id);
+    return {
+      name: clipStr(ent[r.id] || shortRefId(r)).text, entry: clipStr(String(r.entry)).text, ref: clipStr(r.ref).text, as: injectionOfRef(spec, r),
+      own: !!i.own, provenance: i.own ? (i.prov === 'minted' ? 'minted' : 'stored') : (i.open ? 'granted' : null),   // whose entry it is, as a CODE
+      forHost: i.forHost || null,                                                                                     // the host a minted value was minted FOR
+      sendsTo: aw ? (aw.unknown ? null : aw.host || null) : null,                                                     // the host this run would SEND it to (null = unknown)
+    };
+  });
+  const cmdRaw = String(names.cmd == null ? '' : names.cmd), cmdC = clipStr(cmdRaw), whoC = clipStr(names.who);
   const known = (shape.routeHosts || []).length > 0;
   const templates = (spec.files || []).filter((f) => f.template != null && typeof f.text === 'string')
-    .map((f) => { const b = bytesOf(f.text); return { label: f.name || null, bytes: b, shown: b <= TEMPLATE_CARD_MAX }; });
+    .map((f) => { const text = String(f.text), b = bytesOf(text), shown = b <= TEMPLATE_CARD_MAX, c = clipStr(text); return { label: f.name || null, bytes: b, shown, text: shown ? c.text : '', ...(shown && c.cut ? { textFull: chunkStr(text) } : {}) }; });   // a shown template's TEXT rides the card (chunked when long); an over-bound one (> TEMPLATE_CARD_MAX ⇒ card_too_long, never a card) carries no text, shown:false
+  const env = (spec.plainEnv || []).map((e) => ({ name: clipStr(e.name).text, value: clipStr(e.value).text }));   // the plain (non-secret) env the child gets, with values; secret env is in secrets[].as.kind==='env'
   return {
-    v: 1,
-    who: String(names.who == null ? '' : names.who),
-    tool: { name: baseName(spec.tool), path: homeRel(spec.tool, home), writable: !!spec.programWritable },
-    cmd: String(names.cmd == null ? '' : names.cmd),
-    folder: homeRel(cwd, home),
+    v: 2,
+    who: whoC.text, ...(whoC.cut ? { whoCut: true } : {}),
+    tool: { name: baseName(spec.tool), path: clipStr(homeRel(spec.tool, home)).text, writable: !!spec.programWritable },
+    cmd: cmdC.text, ...(cmdC.cut ? { cmdCut: true, cmdFull: chunkStr(cmdRaw) } : {}),
+    folder: clipStr(homeRel(cwd, home)).text,
     secrets,
+    env,
     hosts: known ? { known: true, list: [...shape.routeHosts] } : { known: false, list: [], why: hostsWhyOf(shape) },
     shape: shape.kind === 'tool' ? 'tool' : 'line',
-    always: { offered: !!shape.always, why: shape.always ? null : alwaysWhyOf(shape), directive: shape.configReads || null },
+    always: { offered: !!shape.always, why: shape.always ? null : alwaysWhyOf(shape), directive: shape.configReads ? clipStr(String(shape.configReads)).text : null },
+    reason: (away.length || names.notOwn) ? { notOwn: !!names.notOwn, away: away.map((a) => ({ ref: clipStr(a.ref || '').text, forHost: a.forHost || null, host: a.unknown ? null : a.host || null, unknown: !!a.unknown, keep: !!a.keep })) } : null,
     templates,
     masking: 'common-encodings',
   };
@@ -1334,21 +1376,36 @@ function createRunMasker(secrets, streams = ['out', 'err']) {
     held = next;
     return out;
   }
-  // round 21 (fb-93219e801a, «never drop a byte»): on a CUT (the 2 MiB bound / a timeout / a lock / the caller gone) the held tail
-  // was DROPPED for good — a value begun in the last (W) characters might be only half there, and flushed raw its half would leak.
-  // Now the tail is FLUSHED but SCRUBBED: step(true) masks every COMPLETE value in it, then maskTail masks the longest trailing
-  // run that is a non-empty PREFIX of some value's encoding (the only thing a cut can leave half) with that value's placeholder —
-  // so nothing is dropped and no half value passes. A normal end has no partial (the stream is whole), so `cut` leaves it alone.
-  const CUT_PH = placeholderOf({ label: '\u2026' });   // the cut tail's placeholder «[vault:\u2026]» — an uncertain window, not any one value
+  // round 21/23 (fb-93219e801a, «never drop a byte»): on a CUT (the 2 MiB bound / a timeout / a lock / the caller gone) the held tail
+  // was DROPPED for good — a value begun near the end might be only half there, and flushed raw its half would leak. Now the CERTAIN
+  // prefix is flushed with step(true) (every COMPLETE value masked), and ONLY the trailing run that could be a HALF value is replaced
+  // with ONE placeholder: cutTailStart finds the earliest offset a value could be beginning and running off the end — a raw form half
+  // present (base64/hex/percent/json/utf16/the raw value itself), a VIEW-decoded value half present (a complete-token decode whose tail
+  // is a value prefix), or a trailing INCOMPLETE view token (a `&`/`\`/`=`/ESC run that may not have closed). A tail that is none of
+  // these is flushed CLEAN and counts NO hit (round 23: the old code replaced the WHOLE held window — up to W, unbounded over blank
+  // lines / colour codes — and counted a scrubbed hit where no value was). A normal end has no partial, so `cut` leaves it alone.
+  const CUT_PH = placeholderOf({ label: '\u2026' });   // the cut tail's placeholder «[vault:\u2026]» — the uncertain trailing window, not any one value
+  function cutTailStart(buf) {
+    const L = buf.length;
+    if (!L) return L;
+    const isPrefix = (sfx) => { if (!sfx) return false; for (const t of texts) if (t.length > sfx.length && t.startsWith(sfx)) return true; return false; };   // a NON-EMPTY proper prefix of some spelled form
+    const prefixStart = (str) => { const n = str.length; for (let q = Math.max(0, n - W); q < n; q++) if (isPrefix(str.slice(q))) return q; return n; };   // earliest offset whose suffix-to-the-end is a value prefix (W bounds the search)
+    let start = prefixStart(buf);                                  // a raw / encoded form half present at the tail
+    for (const vw of VIEWS) {
+      for (let q = Math.max(0, L - vw.max + 1); q < L; q++) if (vw.triggers.includes(buf[q])) { if (q < start) start = q; break; }   // a trailing INCOMPLETE view token (its first trigger within the last vw.max-1 chars) — its decode is unknown ⇒ uncertain from there
+      const r = readView(vw, buf, L, false);
+      if (r) { const ps = prefixStart(r.sk); if (ps < r.sk.length) { const raw = r.at[ps]; if (raw != null && raw < start) start = raw; } }   // a complete-token VIEW decode whose tail is a value prefix — mapped back to a raw offset
+    }
+    return start;
+  }
   function endStep(cut) {
     if (!cut || !re) return step(true);   // a COMPLETE stream (or no secrets): flush all, every complete match masked — no partial to fear
-    // a CUT (an incomplete stream): the pushes already flushed everything SAFE; the held tail (\u2264 W per stream) is the window where a
-    // value could be HALF present in ANY form (raw or a decoded view), so it cannot be flushed raw (a half value would leak) nor dropped
-    // silently (\u00abnever drop a byte\u00bb). It is emitted as ONE placeholder per stream \u2014 scrubbed as far as it can be told.
-    const out = {}; for (const k of names) out[k] = '';
     const own = new Map(); for (const [k, x] of held) own.set(k, (own.get(k) || '') + x);
-    for (const [k, x] of own) if (x) { out[k] = CUT_PH; st.hits++; st.bytes += bytesOf(x); }
+    const keepFrom = new Map(); for (const [k, x] of own) keepFrom.set(k, cutTailStart(x));
     held = [];
+    for (const [k, x] of own) { const sIdx = keepFrom.get(k); if (sIdx > 0) held.push([k, x.slice(0, sIdx)]); }   // the CERTAIN prefix (no trailing partial) — step(true) masks its complete values and flushes the rest clean
+    const out = step(true);
+    for (const [k, x] of own) { const sIdx = keepFrom.get(k); if (sIdx < x.length) { out[k] = (out[k] || '') + CUT_PH; st.hits++; st.bytes += bytesOf(x.slice(sIdx)); } }   // ONLY the uncertain trailing window becomes a placeholder (and counts one hit); a clean tail adds nothing
     return out;
   }
   return {
@@ -1376,6 +1433,6 @@ module.exports = {
   INJECTIONS, injectionOf, ENV_HIJACK, ENV_CONFIG, envRefusedOf,
   TOOL_ROWS, SHELLS, INTERPRETERS, KNOWN_TOOLS, toolNameOf, knownToolOf, refusedTool, toolKindOf, targetOf, conninfoHosts, urlHosts, urlParse, configNestedFile,
   RUN_FLAGS, parseRunArgs, timeoutOf, planOf, materialize,
-  shapeOf, shapeKeyOf, cardFactsOf, ALWAYS_WHY, HOSTS_WHY, MASKING, CARD_SHAPES, CARD_FACTS_CODES, OWN_DOORS, RUNNABLE_STORES, ownDoorOf, awayOf, runVerdict,
+  shapeOf, shapeKeyOf, cardFactsOf, CARD_STRING_MAX, ALWAYS_WHY, HOSTS_WHY, MASKING, CARD_SHAPES, CARD_FACTS_CODES, OWN_DOORS, RUNNABLE_STORES, ownDoorOf, awayOf, runVerdict,
   FORMS, FORM_ROWS, VIEWS, formsOf, createMasker, createRunMasker, maskText,
 };

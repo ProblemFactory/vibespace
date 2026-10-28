@@ -103,7 +103,7 @@ const [mode, arg] = process.argv.slice(2);
     return;
   }
   if (mode === 'ran') { fs.writeFileSync(arg, 'ran'); return; }
-  if (mode === 'json') { const v = process.env.T, b = Buffer.from(v); process.stdout.write('{"meta":{"rc":"ok"},"key":"6a358d5d88b53304a7bc8213","use_auth":false,"site":"HQ","auth":"' + b.toString('base64') + '","raw":"' + v + '","ok":true}\\n'); return; }
+  if (mode === 'json') { const v = process.env.T, b = Buffer.from(v); process.stdout.write('{"meta":{"rc":"ok"},"key":"deadbeefcafef00dba5eba11","use_auth":false,"site":"HQ","auth":"' + b.toString('base64') + '","raw":"' + v + '","ok":true}\\n'); return; }
   if (mode === 'split') { const v = process.env.T, h = v.length >> 1; process.stdout.write('<' + v.slice(0, h)); await sleep(40); process.stderr.write(v.slice(h) + '>\\n'); await sleep(40); process.stdout.write(' tail\\n'); return; }   // ONE value, half on each pipe
   if (mode === 'edge2') { process.stdout.write('x'.repeat(2 * 1024 * 1024 - 60) + [...process.env.T].map((c) => '&#' + c.codePointAt(0) + ';').join('') + 'y'.repeat(4096)); return; }   // a LONG new form across the 2 MiB cut
   if (mode === 'edge3') { process.stdout.write(Buffer.concat([Buffer.from('x'.repeat(2 * 1024 * 1024 - 40)), Buffer.from(process.env.T, 'utf16le'), Buffer.from('y'.repeat(4096))])); return; }
@@ -440,7 +440,7 @@ async function newShapeCards(doorMod) {
   ok(ew.door.answer(lateCard.action.askId, { answer: 'always', reauthed: true }).code === 'always_not_offered', 'round 20b: a late card offers no «always» (allow once / deny only)');
   const la = ew.door.answer(lateCard.action.askId, { answer: 'once' });
   const settledLate = ew.userTodos.get(lateCard.id);
-  ok(la.ok && la.outcome === 'late-allowed' && !cardsOf(ew).length && settledLate.status === 'done' && settledLate.resolvedFact && settledLate.resolvedFact.outcome === 'late-allowed' && settledLate.resolvedFact.late === true, 'round 20b: a late «allow once» settles the card done with resolvedFact {outcome: late-allowed, late:true} (the client reads it) — one card gone', [la, settledLate.resolvedFact]);
+  ok(la.ok && la.outcome === 'late-allowed' && !cardsOf(ew).length && settledLate.status === 'done' && settledLate.resolvedBy === 'allowed' && settledLate.resolvedFact && settledLate.resolvedFact.late === true && settledLate.resolvedFact.decidedBy === 'person', 'round 23 (MAJOR #5): a late «allow once» settles resolvedBy="allowed" + resolvedFact {late:true, decidedBy:"person"} — the SHAPE wake-approve-card 2a5e9ce8 reads (on 4ff55fb4 it was resolvedBy="user", outcome in resolvedFact ⇒ the client rendered «settled»)', [la, settledLate.resolvedBy, settledLate.resolvedFact]);
   const otherShape = await runAnswered(ew, ENV('env', 'a-different-shape'), { answer: 'deny' });
   ok(!!otherShape.card && !otherShape.card.action.late && otherShape.r.code === 'ask_denied', 'round 20b: a DIFFERENT shape still asks (its own card) — the late pass is for the one shape', [!!otherShape.card, otherShape.r.code]);
   const pass1 = await runAnswered(ew, ENV('env'), { answer: null });
@@ -456,7 +456,53 @@ async function newShapeCards(doorMod) {
   await sleep(5);
   const sec = await sw.door.run({ caller: sw.caller, args: ENV('env'), cwd: sw.work });
   const lc2 = cardsOf(sw)[0];
-  ok(sec.code === 'ask_pending' && cardsOf(sw).length === 1 && lc2.id === lc.id && lc2.action.lateAt >= at0, 'round 20b: a second run of the same shape while the late card is open ⇒ ask_pending, the ONE card stays (no second card), its 24 h countdown restarts', [sec.code, cardsOf(sw).length, lc2.action.lateAt >= at0]);
+  ok(sec.code === 'ask_pending' && cardsOf(sw).length === 1 && lc2.id === lc.id && lc2.action.lateAt === at0, 'round 23: a second run while the late card is open ⇒ ask_pending, the ONE card stays (no second card), and its 24 h does NOT extend — it counts from the FIRST expiry (an agent retrying cannot keep the card alive forever)', [sec.code, cardsOf(sw).length, lc2.action.lateAt === at0]);
+
+  // round 23 (MAJOR #6, the CONFIRMED over-permit): a late «allow once» is for THIS EXACT command — a DIFFERENT command of the SAME shape draws its own card
+  {
+    const xw = await world({ instance: 'cluster', askMs: 60 }); openRow(xw);
+    const CURL = (seg) => ['--env', 'T=vault://mounts/m1/secretKey', '--', 'curl', '-s', 'https://api.example.com/api/' + seg];
+    const statKey = VR.shapeKeyOf(VR.shapeOf(VR.planOf({ argv: ['curl', '-s', 'https://api.example.com/api/stat'], env: [['T', 'vault://mounts/m1/secretKey']] })));
+    const delKey = VR.shapeKeyOf(VR.shapeOf(VR.planOf({ argv: ['curl', '-s', 'https://api.example.com/api/DELETE-everything'], env: [['T', 'vault://mounts/m1/secretKey']] })));
+    ok(statKey === delKey, 'round 23 #6 (the premise): `curl …/api/stat` and `curl …/api/DELETE-everything` share ONE shape key — the shape abstracts the path, so a shape-keyed pass over-permits', [statKey === delKey]);
+    const e1 = await runAnswered(xw, CURL('stat'), { answer: null }); await e1.r;   // the card for …/api/stat → no answer → late
+    const c1 = cardsOf(xw)[0];
+    const allow = xw.door.answer(c1.action.askId, { answer: 'once' });
+    ok(allow.ok && allow.outcome === 'late-allowed', 'round 23 #6: the late card for `curl …/api/stat` is allowed once (a pass for THIS exact command)');
+    const diff = await runAnswered(xw, CURL('DELETE-everything'), { answer: 'deny' });   // the ASK path (deny) — nothing spawns
+    ok(!!diff.card && !diff.card.action.late && diff.r.code === 'ask_denied', 'round 23 (MAJOR #6, RED on 4ff55fb4): a DIFFERENT command of the SAME shape (`…/api/DELETE-everything`) draws its OWN live card — the pass is keyed on the EXACT command (exactKeyOf), never the shape alone (4ff55fb4 let the DELETE run by:late on a pass minted for stat)', [!!diff.card, diff.r.code]);
+    ok(xw.door._lateOnce.size === 1, 'round 23 #6: the pass for `…/api/stat` is UNTOUCHED by the different-command run (it is still there for its own exact command)', xw.door._lateOnce.size);
+  }
+
+  // round 23 (MAJOR #5): the settled late record read by wake-approve-card 2a5e9ce8's own reader (copied) — a late allow stamps «allowed:late», a deny «denied by person», the vault's 24 h / lock stamp NOTHING (decidedBy ≠ person)
+  {
+    const wakeStamp = (rec) => { const by = rec.resolvedBy, fact = rec.resolvedFact; if (!fact || fact.decidedBy !== 'person') return null; return by === 'allowed' && fact.late === true ? 'allowed:late' : by; };
+    const aw = await world({ instance: 'cluster', askMs: 60 }); openRow(aw);
+    const ae = await runAnswered(aw, ENV('env'), { answer: null }); await ae.r;
+    const ac = cardsOf(aw)[0];
+    aw.door.answer(ac.action.askId, { answer: 'once' });
+    const allowedRec = aw.userTodos.get(ac.id);
+    const dw = await world({ instance: 'cluster', askMs: 60 }); openRow(dw);
+    const de = await runAnswered(dw, ENV('env'), { answer: null }); await de.r;
+    const dc = cardsOf(dw)[0];
+    dw.door.answer(dc.action.askId, { answer: 'deny' });
+    const deniedRec = dw.userTodos.get(dc.id);
+    ok(wakeStamp(allowedRec) === 'allowed:late' && wakeStamp(deniedRec) === 'denied' && wakeStamp({ resolvedBy: 'expired', resolvedFact: { late: true, decidedBy: null } }) === null && wakeStamp({ resolvedBy: 'vault_locked', resolvedFact: { late: true, decidedBy: null } }) === null,
+      'round 23 (MAJOR #5): fed to wake-approve-card 2a5e9ce8’s reader, a late allow stamps «allowed:late», a late deny «denied», and the vault’s 24 h / lock stamp NOTHING (decidedBy ≠ person) — the two lanes cannot drift', [wakeStamp(allowedRec), wakeStamp(deniedRec)]);
+  }
+
+  // round 23 (MINOR): a late «allow once» for an ENDED conversation mints NO pass — conversation_gone (as the live path refuses)
+  {
+    const gw = await world({ askMs: 60 }); let live = true;
+    const gd = gw.mk(DOOR, { liveOf: () => live });
+    openRow(gw);
+    const ge = await runAnswered(gw, ENV('env'), { answer: null, door: gd }); await ge.r;
+    const gc = cardsOf(gw)[0];
+    live = false;
+    const ans = gd.answer(gc.action.askId, { answer: 'once' });
+    ok(ans.ok === false && ans.code === 'conversation_gone' && gd._lateOnce.size === 0, 'round 23 (MINOR): a late «allow once» for an ENDED conversation mints NO pass — conversation_gone (answerLate now checks liveOf, as the live path does)', ans);
+  }
+
   // the card closed by another door — the gate's words, again on a LOCAL instance
   const lw = await world();
   openRow(lw);
@@ -481,10 +527,11 @@ console.log('⑫ THE CARD FACTS (lane vault-agent-own r20; the owner «这个卡
   while (!it && Date.now() - t0 < 3000) { it = added.find((x) => x.action && x.action.type === 'vault-run-ask'); if (!it) await sleep(5); }
   const f = it && it.facts;
   ac.abort(); await p.catch(() => {});
-  ok(!!f && f.v === 1 && f.who === 'Lane X' && f.tool.name === 'curl' && f.tool.writable === false && typeof f.cmd === 'string' && f.cmd.includes('curl')
+  ok(!!f && f.v === 2 && f.who === 'Lane X' && f.tool.name === 'curl' && f.tool.writable === false && typeof f.cmd === 'string' && f.cmd.includes('curl') && f.cmd.includes('https://api.example.com/v1/items')
     && f.shape === 'tool' && f.masking === 'common-encodings' && f.hosts.known === true && EQ(f.hosts.list, ['api.example.com']) && f.always.offered === true && f.always.why === null && f.always.directive === null
-    && f.secrets.length === 1 && f.secrets[0].entry === 'm1' && f.secrets[0].name === 'my bucket' && f.secrets[0].ref === 'vault://mounts/m1/secretKey' && EQ(f.secrets[0].as, { kind: 'env', name: 'T' }),
-    'the door hands userTodos.add a structured `facts` (v1) beside `detail`: who, tool (name/path/writable), the redacted command, the secret\'s { kind, name } by its Vault-window name, hosts known, «always» offered, masking — codes, never prose', f);
+    && Array.isArray(f.env) && f.reason && f.reason.notOwn === true && f.reason.away.length === 0
+    && f.secrets.length === 1 && f.secrets[0].entry === 'm1' && f.secrets[0].name === 'my bucket' && f.secrets[0].ref === 'vault://mounts/m1/secretKey' && EQ(f.secrets[0].as, { kind: 'env', name: 'T' }) && f.secrets[0].provenance === 'granted' && f.secrets[0].sendsTo === null,
+    'round 23: the door hands userTodos.add a structured `facts` (v2) beside `detail`: who, tool, the RAW command (the agent\'s own bytes shown, value-based), the secret\'s { kind, name }+provenance, plain env, reason, hosts, «always», masking — codes, never prose', f);
   ok(!!f && !leaks(JSON.stringify(f), VALUE).length, 'the facts carry no byte of the value — a reference, a display name and a host are not the secret');
   ok(!!f && (f.always.why === null || VR.ALWAYS_WHY.includes(f.always.why)) && (f.hosts.known || VR.HOSTS_WHY.includes(f.hosts.why)) && VR.MASKING.includes(f.masking) && VR.CARD_SHAPES.includes(f.shape) && f.secrets.every((x) => ['env', 'file', 'stdin', 'arg'].includes(x.as.kind)),
     'every code the door emits is a member of its exported table (the keys wake-approve-card r7 must carry: always.why ∈ ALWAYS_WHY, hosts.why ∈ HOSTS_WHY, masking ∈ MASKING, shape ∈ CARD_SHAPES, as.kind ∈ env/file/stdin/arg)');
@@ -504,7 +551,7 @@ console.log('⑬ THE LATE CARD past its life — the 24 h end (said), the lock, 
   ok(!!card && card.action.late, 'the card went late');
   const t = Date.now(); while (Date.now() - t < 400) { const it = w.userTodos.get(card.id); if (it.status !== 'open') break; await sleep(10); }
   const done = w.userTodos.get(card.id);
-  ok(done.status === 'done' && done.resolvedFact && done.resolvedFact.outcome === 'expired' && !w.door._lateAsks.size, 'round 20b: a late card unanswered for 24 h settles done «expired» (said, not silently removed) and the in-memory late ask is gone', { status: done.status, fact: done.resolvedFact });
+  ok(done.status === 'done' && done.resolvedBy === 'expired' && done.resolvedFact && done.resolvedFact.late === true && done.resolvedFact.decidedBy === null && !w.door._lateAsks.size, 'round 23 (MAJOR #5): a late card unanswered for 24 h settles resolvedBy="expired" + resolvedFact {late:true, decidedBy:null} (the vault, not a person) and the in-memory late ask is gone', { status: done.status, by: done.resolvedBy, fact: done.resolvedFact });
 
   // a late DENY settles the card denied; the next run asks (no pass)
   const wd = await world({ instance: 'cluster', askMs: 40 }); openRow(wd);
@@ -524,7 +571,7 @@ console.log('⑬ THE LATE CARD past its life — the 24 h end (said), the lock, 
   ok(wl.door._lateAsks.size === 1 && wl.door._lateOnce.size === 1 && openLate.action.askId === a2.card.action.askId, 'one unanswered late card + one late pass');
   wl.door.onLocked('test');
   const lockedItem = wl.userTodos.get(openLate.id);
-  ok(!wl.door._lateAsks.size && !wl.door._lateOnce.size && lockedItem.status === 'done' && lockedItem.resolvedFact && lockedItem.resolvedFact.outcome === 'vault_locked', 'round 20b: a LOCK ends every late pass and settles every open late card vault_locked (as it does shortAlways)', { lateAsks: wl.door._lateAsks.size, lateOnce: wl.door._lateOnce.size, status: lockedItem.status, fact: lockedItem.resolvedFact });
+  ok(!wl.door._lateAsks.size && !wl.door._lateOnce.size && lockedItem.status === 'done' && lockedItem.resolvedBy === 'vault_locked' && lockedItem.resolvedFact && lockedItem.resolvedFact.late === true && lockedItem.resolvedFact.decidedBy === null, 'round 23 (MAJOR #5): a LOCK settles every open late card resolvedBy="vault_locked" + resolvedFact {late:true, decidedBy:null} and ends every late pass (as it does shortAlways)', { lateAsks: wl.door._lateAsks.size, lateOnce: wl.door._lateOnce.size, by: lockedItem.resolvedBy, fact: lockedItem.resolvedFact });
 
   // the BOOT reconcile KEEPS a late card (the owner may still allow one run); a LIVE card a dead process left is settled ask-expired
   const wr = await world({ instance: 'cluster', askMs: 40 }); openRow(wr);
@@ -542,7 +589,7 @@ console.log('⑭ THE RUN OUTPUT IS VALUE-ONLY (lane vault-agent-own r21; fb-9321
   const w = await world(); openRow(w);
   const j = await runAnswered(w, ENV('json'), { answer: 'once' });
   const out = (await j.r).stdout || '';
-  ok(/"key":"6a358d5d88b53304a7bc8213"/.test(out) && /"use_auth":false/.test(out) && /"ok":true\}/.test(out) && out.trim().endsWith('}'), 'round 21: the tool\'s OWN fields named key / use_auth survive and the one-line JSON is WHOLE (ends "ok":true}) — the value scrubber never name-redacts, never swallows (54f757df redacted key/auth by name and cut the JSON to 1008 bytes)', out.slice(0, 160));
+  ok(/"key":"deadbeefcafef00dba5eba11"/.test(out) && /"use_auth":false/.test(out) && /"ok":true\}/.test(out) && out.trim().endsWith('}'), 'round 21: the tool\'s OWN fields named key / use_auth survive and the one-line JSON is WHOLE (ends "ok":true}) — the value scrubber never name-redacts, never swallows (54f757df redacted key/auth by name and cut the JSON to 1008 bytes)', out.slice(0, 160));
   ok(/"auth":"\[vault:/.test(out) && /"raw":"\[vault:/.test(out) && !leaks(out, VALUE).length, 'round 21: the INJECTED value (raw AND base64) is redacted to [vault:…] in both fields — the value scrubber masks the values and their encodings, nothing of the value leaks', out.slice(0, 200));
 
   // the held-tail flush on a CUT (the value across the 2 MiB bound): the tail is FLUSHED scrubbed (tailDropped false now), the value never leaks
