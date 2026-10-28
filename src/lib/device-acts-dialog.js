@@ -70,7 +70,7 @@ export async function openDeviceActsDialog(app, { hostId, name = '' } = {}) {
   }) : null;
   const unhook = () => { try { off?.(); } catch { } };
   const title = (m) => t('Activity on {machine}', { machine: m || hostId });
-  const { body, close, dialog, raised } = createModalShell({ id: 'device-acts-dialog', key: hostId, title: title(name), dialogClass: 'exit-runs-dialog device-acts-dialog', bodyClass: 'exit-runs-body', escapeToClose: true, onClose: unhook, kind: 'form' });
+  const { body, close, dialog, raised, ready } = createModalShell({ id: 'device-acts-dialog', key: hostId, title: title(name), dialogClass: 'exit-runs-dialog device-acts-dialog', bodyClass: 'exit-runs-body', escapeToClose: true, onClose: unhook, kind: 'form' });
   if (raised) return null;   // raised: the same subject's form, as it was
   const note = el('p', 'agents-note exit-runs-note', t('The last 50 things this VibeSpace did on {machine}, newest first, each with who asked; a row opens its output head.', { machine: name || hostId }));
   const bar = el('div', 'device-acts-filter');
@@ -124,6 +124,6 @@ export async function openDeviceActsDialog(app, { hostId, name = '' } = {}) {
   body.textContent = t('Loading…');
   pick.onchange = () => { kind = pick.value; queued.length = 0; load(); };
   const drawn = await (async () => { body.textContent = ''; body.append(note, bar, list, empty); return load(); })();
-  if (!drawn) { unhook(); return null; }
+  if (!drawn || !(await ready)) { unhook(); return null; }   // r4: a queued form opens when the open one's ask lets it — null: the person kept that one
   return { close, upsert: (r) => upsert && upsert(r), rows };
 }

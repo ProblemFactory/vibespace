@@ -376,7 +376,7 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
       if (r && r.code === 'adopt_form_changed' && fromSession && (r.now === 'keep' || r.now === 'empty')) {
         showToast(createRefusalWords(r, t), { type: 'warn', duration: 8000 });
         st.handoff = true; shell.close();
-        openNewProfileDialog(app, { label: nameInput.value, fromSession: { ...fromSession, adoptKeeps: r.now === 'keep' }, onCreated, onDismissed, opener: 'system' });   // (a SERVER's answer re-opens it — never the keys from a field the person moved on to; lane dialog-yield r3)
+        openNewProfileDialog(app, { label: nameInput.value, fromSession: { ...fromSession, adoptKeeps: r.now === 'keep' }, onCreated, onDismissed, opener: 'person' });   // (the person's Create press re-opens it: in front, as it was — r3's 'system' put it behind their window; a field they moved on to and type in keeps its keys through typedLast; lane dialog-yield r4)
         return;
       }
       say(createRefusalWords(r, t) || buildRefusalWords(r, t) || (t('Could not create the profile') + ' — ' + ((r && r.error) || t('server unreachable'))));
@@ -394,7 +394,7 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
   nameInput.addEventListener('keydown', (e) => { if (enterSubmits(e)) { e.preventDefault(); doCreate(); } });
   drawProviders(); drawMachines(); drawBuilds(); drawClones();
   loadFacts();
-  setTimeout(() => { try { nameInput.focus(); nameInput.select(); } catch { /* none */ } }, 0);
+  shell.ready.then((s) => { if (s) setTimeout(() => { try { nameInput.focus(); nameInput.select(); } catch { /* none */ } }, 0); });   // once it opens (r4: a queued form waits behind the open one's ask)
   const handle = { shell, picker, create: doCreate, close: () => shell.close(), state: () => ({ provider: st.provider, host: st.host, adopt, build: st.buildKey }) };
   shell.overlay._newProfile = handle;
   return handle;

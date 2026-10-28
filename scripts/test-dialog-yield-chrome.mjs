@@ -39,6 +39,10 @@
 // so · ㉘ Browse… over a 2.5 s listing ⇒ its sheet on top, again ⇒ raised · ㉙ a system form 1403 ms after a press in New Session
 // ⇒ behind · ㉚ typing, then a system form ⇒ behind, «abcdef» · ㉛ an iframe and a scroller re-hosted ⇒ loaded once, still at 150 ·
 // ㉜ the keyboard up ⇒ Save above it · ㉝ Reach & policy re-opened ⇒ handlers +0. On c3ed5f0a ㉑–㉝ are RED.
+// Round 4 (acceptance r3): ㉞ Set up box2 asked again beside a running box1 ⇒ box2's RAISED (two set-ups, handlers +0) · ㉟ a
+// QUEUED «Models — B» (the real dialog) ⇒ Discard ⇒ drawn, its caller answered · ㊱ two mount forms' «mount point» fields (one
+// field id) ⇒ two pickers, the second's pick in its own field · ㊲ Remove gimp then Remove inkscape ⇒ the inkscape plan · ㊳ New Session (the static sheet) on the phone with
+// the keyboard up ⇒ its header at the top. On 981f70d6 ㉞–㊳ are RED.
 // On 6428c67e (the base — run the file on a `git archive` copy) ①–⑤ and ⑦ are RED; ⑥ and ⑧ hold on both. On da9545e8 (round 1)
 // the round-2 legs are RED (⑪–⑳, ⑨'s way back, ⑤'s system opener).
 // PNGs: DIALOG_YIELD_PNG_DIR (default: the scratch root) <prefix>-<leg>.png, prefix = DIALOG_YIELD_SHOT_PREFIX (default 'run').
@@ -118,7 +122,7 @@ for (const f of ['src', 'public', 'server.js', 'package.json', 'data/bin']) fs.c
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 fs.writeFileSync(path.join(wt, 'src/lib/build-version.js'), `export const BUILD_VERSION = ${J(require(path.join(repo, 'package.json')).version)};\n`);
 execSync('npx esbuild src/client.js --bundle --outfile=public/bundle.js --format=iife --platform=browser --target=es2020 --loader:.css=css', { cwd: wt, stdio: 'ignore' });
-execSync('npx esbuild --bundle --format=iife --global-name=__dyProbe --platform=browser --target=es2020 --outfile=public/dy-probe.js', { cwd: wt, stdio: ['pipe', 'ignore', 'ignore'], input: "export { showConfirmDialog } from './src/lib/utils.js'; export { showTokenOnce, showPairCodeOnce } from './src/lib/channel-webhook.js'; export { showReachDialog } from './src/lib/channel-reach-editor.js';" }); // (r3: the real webhook token / code dialogs and Reach & policy — sheets of the probe's own shell)
+execSync('npx esbuild --bundle --format=iife --global-name=__dyProbe --platform=browser --target=es2020 --outfile=public/dy-probe.js', { cwd: wt, stdio: ['pipe', 'ignore', 'ignore'], input: "export { showConfirmDialog } from './src/lib/utils.js'; export { showTokenOnce, showPairCodeOnce } from './src/lib/channel-webhook.js'; export { showReachDialog } from './src/lib/channel-reach-editor.js'; export { openAccountModelsDialog } from './src/lib/account-models.js'; export { pathField } from './src/lib/path-field.js'; export { showInstallDialog } from './src/lib/desktop-app-launcher.js';" }); // (r3: the real webhook token / code dialogs and Reach & policy — sheets of the probe's own shell; r4: the real Models dialog, path field and install form)
 
 const port = await freePort();
 const home = scratchHome('dialog-yield-home', fs); homes.push(home);
@@ -898,6 +902,105 @@ await step('㉝', async () => {
   const h3 = await evalJs('app.ws.globalHandlers.length');
   check('㉝ Reach & policy re-opened for the same conversation ⇒ RAISED (one dialog) and the broadcast handlers +0; closed ⇒ back to where they were (c3ed5f0a: +1 per re-open, re-fetching into a detached body)', h1 > h0 && h2 === h1 && roots === 1 && h3 === h0, { h0, h1, h2, h3, roots });
   await evalJs(`(() => { window.fetch = window.__dyReFetch; delete window.__dyReFetch; return true; })()`);
+});
+
+// ── ㉞ (r4) a form opened BESIDE an undismissable one is found by its key: Set up box1 running, Set up box2 beside it, Set up box2 again ⇒ box2's RAISED (two set-ups, handlers +0) ──
+await step('㉞', async () => {
+  const setups = `[...document.querySelectorAll('.dialog-form, .dialog-overlay')].filter((r) => r.isConnected && /^Set up /.test(r.querySelector(':scope > .dialog > .dialog-header h3')?.textContent || '')).map((r) => r.id + '=' + r.querySelector(':scope > .dialog > .dialog-header h3').textContent)`;
+  const h0 = await evalJs('app.ws.globalHandlers.length');
+  await evalJs(`(() => { app.sidebar._showBootstrapDialog({ id: 'h-dy1', name: 'box1' }); return true; })()`);
+  await waitFor(`!!${byTitle('Set up box1')}?.querySelector('.bs-start')`, 10000);
+  await waitFor(`app.ws.globalHandlers.length > ${h0}`, 6000);
+  await evalJs(`(() => { app.sidebar._showBootstrapDialog({ id: 'h-dy2', name: 'box2' }); return true; })()`);
+  await waitFor(`!!${byTitle('Set up box2')}?.querySelector('.bs-start')`, 10000);
+  await waitFor(`app.ws.globalHandlers.length > ${h0 + 1}`, 6000);
+  const h1 = await evalJs('app.ws.globalHandlers.length');
+  await evalJs(`(() => { app.sidebar._showBootstrapDialog({ id: 'h-dy2', name: 'box2' }); return true; })()`);
+  await sleep(1200);
+  const r = await evalJs(`({ setups: ${setups}, h2: app.ws.globalHandlers.length, front: (() => { const w = app.wm.windows.get(app.wm.activeWindowId); return w ? w.title : null; })() })`);
+  await shot('34-beside-raised');
+  check('㉞ Set up box1 running, Set up box2 beside it, then Set up box2 AGAIN ⇒ box2\'s set-up RAISED — two set-up forms, its live-log handler not doubled (981f70d6: a third «host-setup-dialog-3», a second Start and handler for box2)', r.setups.length === 2 && r.setups.filter((x) => /=Set up box2$/.test(x)).length === 1 && r.h2 === h1, { h0, h1, ...r });
+  await closeForms(); await sleep(400);
+});
+
+// ── ㉟ (r4) a QUEUED form's caller is told: «Models — A» with an edit, then «Models — B» (the real openAccountModelsDialog) ⇒ A asks; Discard ⇒ B OPENS DRAWN (its models), its caller answered ──
+await step('㉟', async () => {
+  await evalJs(`(() => { window.__dyAmFetch = window.fetch; window.fetch = (u, o) => { const s = String((u && u.url) || u); const m = /\\/api\\/accounts\\/(acct-[AB])\\/models$/.exec(s); if (m && (!o || !o.method || o.method === 'GET')) { const id = m[1].slice(5); return Promise.resolve(new Response(JSON.stringify({ provider: { id: 'p-' + id, kind: 'self-hosted', label: 'Self-hosted or other', models: [{ id: 'model-' + id, label: 'model-' + id, context: 200000, caps: [] }], modelsSource: 'configured', aliases: {} }, editable: true }), { status: 200, headers: { 'Content-Type': 'application/json' } })); } return window.__dyAmFetch(u, o); }; return true; })()`);
+  await evalJs(`(() => { __dyProbe.openAccountModelsDialog({ accountId: 'acct-A', name: 'A' }); return true; })()`);
+  await waitFor(`!!document.querySelector('#account-models-dialog input.am-id')`, 8000);
+  await tagIn(`document.getElementById('account-models-dialog')`, 'input.am-id', 'am-a');
+  await realClick('[data-dy="am-a"]'); await typeText('-edited');
+  await evalJs(`(() => { window.__dyAmB = 'pending'; __dyProbe.openAccountModelsDialog({ accountId: 'acct-B', name: 'B' }).then((v) => { window.__dyAmB = v === null ? 'null' : typeof v; }); return true; })()`);
+  await sleep(700);
+  const asked = await evalJs(`!!document.querySelector('#account-models-dialog .dialog-unsaved-discard')`);
+  if (asked) { await tagIn(`document.getElementById('account-models-dialog')`, '.dialog-unsaved-discard', 'am-disc'); await realClick('[data-dy="am-disc"]'); }
+  await sleep(1000);
+  const r = await evalJs(`({ asked: ${asked}, roots: [...document.querySelectorAll('#account-models-dialog')].map((o) => ({ title: o.querySelector('h3')?.textContent, ids: [...o.querySelectorAll('input.am-id')].map((i) => i.value), loading: /Loading…/.test(o.querySelector('.dialog-body')?.textContent || '') })), caller: window.__dyAmB })`);
+  await shot('35-queued-drawn');
+  check('㉟ «Models — A» edited, then «Models — B» ⇒ A asks; Discard ⇒ B opens DRAWN (model-B) and its caller is answered (981f70d6: B stuck on «Loading…», the call returned null)', r.asked && r.roots.length === 1 && r.roots[0].title === 'Models — B' && r.roots[0].ids.join() === 'model-B' && !r.roots[0].loading && r.caller === 'object', r);
+  await closeForms(); await evalJs(`(() => { document.querySelectorAll('#account-models-dialog').forEach((o) => o.remove()); return true; })()`); await sleep(300);   // (the probe bundle's own shell draws sheets: closeForms never sees them)
+  await evalJs(`(() => { window.fetch = window.__dyAmFetch; delete window.__dyAmFetch; return true; })()`);
+});
+
+// ── ㊱ (r4) a picker's key is the field INSTANCE: two mount forms open at once, each with its 'mounts:mountpoint' field (Share a folder onto box1 · Mount a folder from box1), Browse… on each ⇒ two pickers; the second one's pick lands in ITS field ──
+await step('㊱', async () => {
+  await evalJs(`(() => { window.__dyMpFetch = window.fetch; window.fetch = (u, o) => { const s = String((u && u.url) || u); if (/\\/api\\/hosts\\/h-dy\\/dir-complete/.test(s)) return Promise.resolve(new Response(JSON.stringify({ listing: { home: '/home/u', machine: 'h-dy', dirs: { '~': { kids: ['work'] }, '~/work': { kids: [] } }, links: {}, localized: {}, mounts: [] } }), { headers: { 'Content-Type': 'application/json' } })); return window.__dyMpFetch(u, o); }; return true; })()`);
+  const h = `{ id: 'h-dy', name: 'box1', transport: 'ssh', user: 'me' }`;
+  const SHARE = 'Share a folder onto "box1"', PULL = 'Mount a folder from "box1" into this VibeSpace';
+  await evalJs(`(() => { app.sidebar._showHostMountDialog(${h}); app.sidebar._showMachinePullDialog(${h}); return true; })()`);
+  await waitFor(`!!${byTitle(SHARE)}?.querySelector('.pf-pick') && !!${byTitle(PULL)}?.querySelector('.pf-pick')`, 10000);
+  const mp = (title) => `${byTitle(title)}?.querySelector('input[placeholder^="default: ~/vibespace-"]')`;
+  await evalJs(`(() => { const a = ${mp(SHARE)}, b = ${mp(PULL)}; a.closest('.path-field').querySelector('.pf-pick').dataset.dy = 'mp-a'; b.closest('.path-field').querySelector('.pf-pick').dataset.dy = 'mp-b'; return true; })()`);
+  const front = (title) => evalJs(`(() => { const r = ${byTitle(title)}; const w = r && r.closest('.window'); for (const x of app.wm.windows.values()) if (x.element === w) app.wm.revealWindow(x.id); return true; })()`);
+  let firstOpened = false;
+  for (let i = 0; i < 2 && !firstOpened; i++) { await front(SHARE); await sleep(400); await realClick('[data-dy="mp-a"]'); firstOpened = await waitFor(`document.querySelectorAll('.dialog.pf-picker').length >= 1`, 8000); }
+  check('㊱ (control) the first form\'s Browse… opens its picker', firstOpened);
+  await sleep(500);
+  await front(PULL); await sleep(300);
+  await realClick('[data-dy="mp-b"]');
+  await sleep(1200);
+  const n2 = await evalJs(`document.querySelectorAll('.dialog.pf-picker').length`);
+  // the picker in front is the one the second Browse… opened (or, on 981f70d6, the first one raised by it): its «go» picks
+  await evalJs(`(() => { const w = app.wm.windows.get(app.wm.activeWindowId); const go = w && w.element.querySelector('.pf-picker [data-act="go"]'); if (go) go.dataset.dy = 'go-b'; return !!go; })()`);
+  await shot('36-two-pickers');
+  await realClick('[data-dy="go-b"]');
+  await sleep(800);
+  const r = await evalJs(`({ pickers: ${n2}, share: ${mp(SHARE)}?.value ?? null, pull: ${mp(PULL)}?.value ?? null })`);
+  check('㊱ two mount forms open at once, each with its «mount point» field (the same field id \'mounts:mountpoint\') ⇒ Browse… on each opens ITS picker (two), and the second one\'s pick lands in ITS field — the first untouched (981f70d6: the second Browse… raised the first picker, the pick went into the other form — Task Detail\'s rows the same)', r.pickers === 2 && !!r.pull && !r.share, r);
+  await closeForms(); await sleep(300);
+  await evalJs(`(() => { window.fetch = window.__dyMpFetch; delete window.__dyMpFetch; return true; })()`);
+});
+
+// ── ㊲ (r4) an app request's key is the request: Remove gimp, then Remove inkscape (the real showInstallDialog) ⇒ the inkscape plan, asked and shown ──
+await step('㊲', async () => {
+  await evalJs(`(() => { window.__dyInsFetch = window.fetch; window.__dyPlans = []; window.fetch = (u, o) => { const s = String((u && u.url) || u); if (/\\/api\\/apps\\/plan$/.test(s)) { const b = JSON.parse((o && o.body) || '{}'); window.__dyPlans.push(b.request && b.request.entryId); return Promise.resolve(new Response(JSON.stringify({ plan: { ok: true, canRun: true, commands: ['sudo apt-get remove -y ' + (b.request && b.request.entryId)] }, request: b.request, digest: 'd-' + (b.request && b.request.entryId) }), { status: 200, headers: { 'Content-Type': 'application/json' } })); } return window.__dyInsFetch(u, o); }; return true; })()`);
+  await evalJs(`__dyProbe.showInstallDialog({ hostId: 'local', label: null }, { what: 'app', request: { kind: 'remove', entryId: 'gimp' } }).then(() => true)`);
+  await sleep(500);
+  await evalJs(`__dyProbe.showInstallDialog({ hostId: 'local', label: null }, { what: 'app', request: { kind: 'remove', entryId: 'inkscape' } }).then(() => true)`);
+  await sleep(800);
+  const r = await evalJs(`({ shown: [...document.querySelectorAll('[id^="desktop-install-dialog"]')].map((o) => ({ title: o.querySelector('h3')?.textContent, commands: o.querySelector('.desktop-install-pre')?.textContent })), plans: window.__dyPlans })`);
+  await shot('37-install-inkscape');
+  check('㊲ Remove gimp, then Remove inkscape ⇒ the inkscape plan is asked for and shown — its Remove runs apt-get remove inkscape (981f70d6: «Remove gimp» raised, the inkscape plan never fetched)', r.shown.length === 1 && /inkscape/.test(r.shown[0].title || '') && /remove -y inkscape/.test(r.shown[0].commands || '') && r.plans.join() === 'gimp,inkscape', r);
+  await closeForms(); await evalJs(`(() => { document.querySelectorAll('[id^="desktop-install-dialog"]').forEach((o) => o.remove()); return true; })()`); await sleep(300);   // (the probe's own sheets)
+  await evalJs(`(() => { window.fetch = window.__dyInsFetch; delete window.__dyInsFetch; return true; })()`);
+});
+
+// ── ㊳ (r4) the phone keyboard rule is the yield law's: New Session (the STATIC sheet) at 390 × 844 with the keyboard up ⇒ its header stays on screen at the top ──
+await step('㊳', async () => {
+  await cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+  await sleep(900);
+  await evalJs(`(() => { app.showNewSessionDialog(); return true; })()`);
+  await waitFor(`!document.getElementById('dialog-overlay').classList.contains('hidden') && !!document.querySelector('#dialog-new-session .ns-head')`, 8000);
+  await sleep(500);
+  const before = await evalJs(`(() => { const h = document.querySelector('#dialog-new-session .ns-head').getBoundingClientRect(); return [Math.round(h.top), Math.round(h.bottom)]; })()`);
+  await evalJs(`(() => { Object.defineProperty(window.visualViewport, 'height', { configurable: true, get: () => 400 }); window.visualViewport.dispatchEvent(new Event('resize')); return true; })()`);
+  await sleep(700);
+  const r = await evalJs(`(() => { const h = document.querySelector('#dialog-new-session .ns-head').getBoundingClientRect(); return { kbOpen: document.documentElement.classList.contains('vs-kb-open'), head: [Math.round(h.top), Math.round(h.bottom)] }; })()`);
+  await shot('38-newsession-keyboard');
+  check('㊳ New Session (the static sheet) on the phone with the keyboard up ⇒ its header stays at the top, on screen (981f70d6: −172..−78 — the sheets\' keyboard rule shrank the static overlay)', r.kbOpen && r.head[0] >= 0 && r.head[0] <= 4 && r.head[1] > r.head[0], { before, ...r });
+  await evalJs(`(() => { delete window.visualViewport.height; window.visualViewport.dispatchEvent(new Event('resize')); app.hideDialogs(); return true; })()`);
+  await cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
+  await sleep(800);
 });
 
 // ── ⑲ the welcome never counts a form: the last chat closed with a form open, then the form — the empty desktop shows its welcome ──

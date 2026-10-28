@@ -79,6 +79,18 @@ export function announceModal(overlay) {
 //     agent's browser hands the raised form the keys).
 //   • «FROM THE LAYER» IS A FACT CAPTURED AT THE PRESS: `from` = pressToken() read in the handler before any await (path-field's
 //     Browse… over a 2 s remote listing); without one, the press of the current task. No clock.
+// Round 4 (acceptance r3 — measured in headless Chrome against the real modules):
+//   • A KEY NAMES ONE SUBJECT: a field's picker is keyed by the field INSTANCE (every Task Detail row passed the same field id
+//     and Browse… on row B raised row A's picker), an app request by the request (Remove inkscape raised «Remove gimp»).
+//   • THE FAMILY: every form open under an id — the one at the id and every one BESIDE it, a queued one too — is registered
+//     under the id and found by its key (PURE reopenVerdict over the family): Set up box2 asked again raises box2's, never a
+//     third window. `beside: true` = two subjects are two forms (Properties of X and of Y, two rows' pickers, two published
+//     pages — forms that had no id before round 3 stood side by side, and still do).
+//   • A QUEUED FORM'S CALLER IS TOLD: the shell answers `asked: true` and `ready` (→ the shell when it opens, null when the
+//     person kept the old one), and `live()` is THE liveness predicate — true while it waits, false once it ended or was
+//     dropped. A detached body's isConnected is no liveness check: «Models — B» read itself closed during the ask and
+//     opened on «Loading…» for ever (§103 reds an isConnected read on the shell's own elements, and a queueable caller that
+//     never reads `ready`).
 // The shape returned is the same: `overlay` = the root holding the id (a form's: .dialog-form inside its window, whose
 // .remove() closes the window — a caller's overlay.remove() keeps working).
 let formHost = null, formTitleSeq = 0, formIdSeq = 0, freshSeq = 0;
@@ -99,29 +111,33 @@ function typedWatch(scope) {
   scope.addEventListener('focusin', (e) => { const f = e.target; if (fieldOf(f) && !was.has(f)) was.set(f, fieldValue(f)); }, true);
   return { dirty: () => typedVerdict([...was].filter(([f]) => f.isConnected).map(([f, w]) => ({ was: w, now: fieldValue(f) }))) };
 }
-/** a form opened BESIDE an undismissable one of the same id: the next free id */
-const besideId = (id) => { let n = 2; while (document.getElementById(`${id}-${n}`)) n++; return `${id}-${n}`; };
+/** THE FAMILY (round 4): id → the shells open under it (the one at the id, every one beside it, a queued one) — found by key */
+const families = new Map();
+const familyOf = (id) => { const fam = (families.get(id) || []).filter((s) => s.live()); if (fam.length) families.set(id, fam); else families.delete(id); return fam; };
+/** the id a new member of the family takes: the id itself when free, else the next free `<id>-<n>` (a queued member holds its own) */
+const freeId = (id, fam) => { const taken = (x) => fam.some((s) => s.domId === x) || (document.getElementById(x) && fam.some((s) => s.overlay === document.getElementById(x))); if (!taken(id)) return id; let n = 2; while (taken(`${id}-${n}`) || document.getElementById(`${id}-${n}`)) n++; return `${id}-${n}`; };
 export function createModalShell(opts = {}) {
-  const { kind, key = null, opener = 'person' } = opts;
+  const { kind, key = null, opener = 'person', beside = false } = opts;
   let { id } = opts;
   if (kind !== 'decision' && kind !== 'form') { try { console.warn(`[createModalShell] ${id || opts.title}: kind must be 'decision' or 'form' (test-architecture §103) — drawn as a decision`); } catch { /* a console is a courtesy */ } }
   if (kind === 'form' && !id) id = `form-${++formIdSeq}`;   // never a shared constant (round 3 — §103 reds a form call without its own id)
   const from = opts.from || (kind === 'form' ? pressToken() : null);   // the press of THIS task, when the caller carried none
-  if (id) {
-    const old = document.getElementById(id), sh = old && old._shell;
-    if (sh && kind === 'form' && sh.kind === 'form' && sh.live()) {
-      const v = reopenVerdict({ openKey: sh.key, nextKey: key, undismissable: sh.undismissable });
-      if (v === 'raise') return sh.raise({ opener: opener === 'system' ? 'system' : 'person', onClose: opts.onClose });
-      if (v === 'beside') id = besideId(id);
-      else {
-        sh.door();
-        if (sh.live()) { const q = buildShell({ ...opts, id, from }, true); sh.queue(q); return q.api; }   // asked: opens when the door closes it
-      }
-    } else if (old) old.remove();
+  const base = kind === 'form' ? id : null;   // the family it joins (round 4)
+  if (base) {
+    const fam = familyOf(base);
+    const { verdict, at } = reopenVerdict({ open: fam.map((s) => ({ key: s.key, undismissable: s.undismissable })), nextKey: key, beside: !!beside });
+    if (verdict === 'raise') return fam[at].raise({ opener: opener === 'system' ? 'system' : 'person', onClose: opts.onClose });
+    if (verdict === 'door') {
+      const sh = fam[at];
+      sh.door();
+      if (sh.live()) { const q = buildShell({ ...opts, id: sh.domId, base, from }, true); sh.queue(q); return q.api; }   // asked: it opens in that one's place when its door closes it
+    }
+    id = freeId(base, familyOf(base));
   }
-  return buildShell({ ...opts, id, from }, false).api;
+  if (id) { const old = document.getElementById(id); if (old && !(old._shell && old._shell.live() && old._shell.base)) old.remove(); }   // a decision's singleton dedup (and a dead root left under the id)
+  return buildShell({ ...opts, id, base, from }, false).api;
 }
-function buildShell({ kind, id, key = null, title = '', dialogClass = '', bodyClass = '', minWidth = null, closeOnBackdrop = true, escapeToClose = false, onClose = null, unsaved = null, onEscape = null, opener = 'person', from = null, undismissable = false } = {}, deferred = false) {
+function buildShell({ kind, id, base = null, key = null, title = '', dialogClass = '', bodyClass = '', minWidth = null, closeOnBackdrop = true, escapeToClose = false, onClose = null, unsaved = null, onEscape = null, opener = 'person', from = null, undismissable = false } = {}, deferred = false) {
   const hosted = kind === 'form' && !!formHost;   // a form the host draws (else the sheet: a page without app.js)
   let fh = null;
   const overlay = document.createElement('div');
@@ -211,10 +227,14 @@ function buildShell({ kind, id, key = null, title = '', dialogClass = '', bodyCl
     overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !e.isComposing) { e.stopPropagation(); escDoor(e); } });
   }
   const noop = () => {};
+  const live = () => !gone && (!mounted || overlay.isConnected);
   const api = {
     overlay, dialog, body, closeBtn, close, dismiss,
     markSaved: guard ? guard.markSaved : noop, markDirty: guard ? guard.markDirty : noop, isDirty: guard ? guard.isDirty : () => false,
     raised: false, asked: deferred, ready,
+    /** THE liveness predicate (round 4): true while it is open or QUEUED (its detached body is no «closed» — never read
+     *  isConnected on the shell's own elements), false once it ended or the person kept the form it waited for */
+    live: () => live(),
     /** where it landed: 'front' | 'behind' | 'sheet' (null while queued) — a caller's «busy» latch clears unless 'front' / 'sheet' */
     get placed() { return !mounted ? null : fh ? fh.placed() : 'sheet'; },
   };
@@ -235,11 +255,12 @@ function buildShell({ kind, id, key = null, title = '', dialogClass = '', bodyCl
   };
   // what a second open of this id finds: the same KEY is raised, another one asks this one's door first (round 3)
   overlay._shell = {
-    kind, key, title,
+    kind, key, title, base, domId: id, overlay,
     undismissable: kind === 'form' && undismissableVerdict({ undismissable, escapeToClose: !!escapeToClose, closeOnBackdrop, onEscape: typeof onEscape === 'function' }),
-    live: () => !gone && overlay.isConnected,
+    live,
     raise: ({ opener: by = 'person', onClose: also = null } = {}) => {
       if (also) closers.push(also);
+      if (!mounted) return { ...api, raised: true };   // the same subject is QUEUED already: the same wait (asked, its ready)
       if (fh) fh.raise({ opener: by }); else { try { overlay.focus({ preventScroll: true }); } catch { } }
       announceModal(overlay);   // a raise is an open to the keys' judge (round 3: the raised form's field was reclaimed by a driving live view)
       return { ...api, raised: true, asked: false, ready: Promise.resolve(api) };
@@ -247,6 +268,7 @@ function buildShell({ kind, id, key = null, title = '', dialogClass = '', bodyCl
     door: () => { if (guard) guard.dismiss(); else if (typed && typed.dirty()) softAsk(); else close(); },
     queue: (q) => { if (queued) queued.drop(); queued = q; },
   };
+  if (base) families.set(base, [...(families.get(base) || []), overlay._shell]);   // found by its key from now on — beside or queued too
   if (!deferred) mount();
   return {
     api,

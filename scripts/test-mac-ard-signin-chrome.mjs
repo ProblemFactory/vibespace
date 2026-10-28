@@ -390,7 +390,7 @@ if (baseView) {
 console.log('§7 the launcher hands its own close to the machine\'s dialog (the Apps dialog closes with it)');
 {
   const src = fs.readFileSync(path.join(REPO, 'src/lib/desktop-app-launcher.js'), 'utf8');
-  ok(/showMachineDesktopDialog\(app, m, \{[^}]*closeOpener: close,/.test(src) && /const \{ overlay, body, close(?:, raised)? \} = createModalShell\(\{ id: 'desktop-launch-dialog'/.test(src), 'desktop-app-launcher.js passes the Apps dialog\'s close as closeOpener');
+  ok(/showMachineDesktopDialog\(app, m, \{[^}]*closeOpener: close,/.test(src) && /const \{ overlay, body, close(?:, raised)?(?:, ready, live)? \} = createModalShell\(\{ id: 'desktop-launch-dialog'/.test(src), 'desktop-app-launcher.js passes the Apps dialog\'s close as closeOpener');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

@@ -269,7 +269,7 @@ console.log('§8 the dialog: installed list + filter + keyed rows + Examples / R
   globalThis.document = { createElement: (t) => new N(t) };
   globalThis.localStorage = { getItem: (k) => (k in ls ? ls[k] : null), setItem: (k, v) => { ls[k] = String(v); } };
   globalThis.__toasts = [];
-  globalThis.__shell = () => { const body = new N('div'); ROOT.append(body); return { body, close: () => body.remove() }; };
+  globalThis.__shell = () => { const body = new N('div'); ROOT.append(body); const sh = { body, close: () => body.remove(), live: () => !!body.isConnected }; sh.ready = Promise.resolve(sh); return sh; };   // (lane dialog-yield r4: the shell answers live() / ready)
   let answer = null; const asked = [];
   globalThis.__fetch = async (u) => { asked.push(u); return typeof answer === 'function' ? answer(u) : answer; };
   const mod = { exports: {} }; new Function('module', 'exports', 'require', out.outputFiles[0].text)(mod, mod.exports, require);

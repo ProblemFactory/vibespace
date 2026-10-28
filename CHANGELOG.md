@@ -24,6 +24,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A published page's dialog shows its link and buttons again; if the page cannot be re-checked it says so and keeps your Unpublish.
 - On a phone, a dialog's buttons stay above the on-screen keyboard.
 - The vault's password dialogs and a machine's sign-in no longer block the chat.
+- When a window of the same kind has unsaved changes, opening another one asks first; Discard opens the one you asked for, with its content.
 
 ## 2.369.360 — 2026-10-27
 

@@ -122,7 +122,7 @@ export function showSecretPasteDialog(model, item, { words = '', detail = '' } =
   const box = secretBoxEl(item);
   const press = async (answer) => { if (await submitSecretBox(model, item, box, answer)) close(); };
   const fieldOf = () => box.querySelector('input.ut-secret-input');
-  const { dialog, body, close, raised } = createModalShell({ id: 'vault-paste-dialog', key: item && item.id, title: t('Paste a secret into the vault'), dialogClass: 'vault-paste-dialog', escapeToClose: true,
+  const { dialog, body, close, raised } = createModalShell({ id: 'vault-paste-dialog', key: item && item.id, beside: true, title: t('Paste a secret into the vault'), dialogClass: 'vault-paste-dialog', escapeToClose: true,
     unsaved: { isDirty: () => !!(fieldOf() && fieldOf().value), save: () => press('store'), discard: () => { const f = fieldOf(); if (f) f.value = ''; } }, kind: 'form' });
   if (raised) return null;   // raised: the same subject's form, as it was   // a pasted value never vanishes without a word — nor stays in a closed dialog
   body.append(mk('div', 'vault-paste-words', words), mk('div', 'ut-proposal-plan vault-paste-plan', detail), box);

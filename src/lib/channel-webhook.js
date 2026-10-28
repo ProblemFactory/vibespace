@@ -295,7 +295,7 @@ export function showCallersDialog(app, slug, { adapterId = 'webhook', title = ''
   off = app && app.ws && typeof app.ws.onGlobal === 'function'
     ? app.ws.onGlobal((msg) => { if (msg && msg.type === 'channels-updated' && (!msg.partial || (Array.isArray(msg.changedKeys) && msg.changedKeys.includes(key)))) load(); }) : null;
   load();
-  if (register) setTimeout(() => name.focus(), 0);
+  if (register) m.ready.then((s) => { if (s) setTimeout(() => name.focus(), 0); });   // once it opens (r4: a queued form waits behind the open one's ask)
 }
 
 /** lane webhook-pair-join (B-5ee0; the owner via 主开发 2026-10-14: "a code that can only come from curl is no door"): the

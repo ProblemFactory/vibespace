@@ -514,7 +514,7 @@ function showSearchDialog(app, a, { q: initial = '', convId = null, convTitle = 
   let scope = convId ? { convId: String(convId), title: String(convTitle || convId) } : null;
   const titleText = () => (scope ? t('Search: {q} — {conversation}', { q: initial, conversation: scope.title }) : scope === null && (convId || group) ? t('Search: {q}', { q: initial })
     : accounts.length === 1 ? t('Search messages — {label}', { label: accounts[0].label || accounts[0].id }) : t('Search messages…'));
-  const { dialog, body, close, raised } = createModalShell({ id: 'chan-search-dialog', key: `${a.id}:${convId || ''}`, title: titleText(), dialogClass: 'chan-dialog chan-search', escapeToClose: true, kind: 'form' });
+  const { dialog, body, close, raised, ready } = createModalShell({ id: 'chan-search-dialog', key: `${a.id}:${convId || ''}`, title: titleText(), dialogClass: 'chan-dialog chan-search', escapeToClose: true, kind: 'form' });
   if (raised) return null;   // raised: the same subject's form, as it was
   const row = document.createElement('div');
   row.className = 'chan-search-row';
@@ -750,7 +750,7 @@ function showSearchDialog(app, a, { q: initial = '', convId = null, convTitle = 
   go.onclick = run;
   input.addEventListener('keydown', (e) => { if (enterSubmits(e)) { e.preventDefault(); if (!e.repeat) run(); } });
   if (initial) { input.value = initial; run('open'); }   // the panel's "Search messages for …" / an agent's row: the saved copy + the memo (lane vendor-search-memo)
-  setTimeout(() => input.focus(), 30);
+  ready.then((s) => { if (s) setTimeout(() => input.focus(), 30); });   // once it opens (r4: a queued form waits behind the open one's ask)
 }
 
 /** .212 THE AGENT'S SEARCH, AS RESULTS (`app.openChannelSearch` — the card's search row and its tail; lane

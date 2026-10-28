@@ -90,17 +90,27 @@ export function typedLastVerdict({ typedAt = null, pressAt = null, now = 0, with
  *  over; the moment neither holds it re-hosts as its window ('window'), what was typed kept. */
 export function sheetHomeVerdict({ phone = false, blocked = false } = {}) { return phone || blocked ? 'sheet' : 'window'; }
 /** THE SAME FORM AGAIN (PURE): a form whose id is open. Its IDENTITY is the caller's fact — the id plus the KEY it declares
- *  (the subject the content is about: the caller, the entry, the document, the conversation, the profile; null ≡ null = a
- *  single-subject form), NEVER its title (round 3 — acceptance r2: Rotate… twice raised the dialog showing the token that had
- *  been rotated away, and tok_TWO went into a detached shell). The same key ⇒ RAISED, never replaced: what was typed, its
- *  handlers and its guard stay ('raise' — the caller gets the LIVE shell, `raised: true`); another key ⇒ the open one's own
- *  door first ('door' — closed ⇒ the new one opens; asked ⇒ the new one opens when it closes, never if the person keeps it);
- *  an open form that declared itself UNDISMISSABLE (a running set-up: no Escape, no backdrop) is never closed by a
- *  neighbour's open ⇒ 'beside' (the new one opens next to it). */
-export function reopenVerdict({ openKey = null, nextKey = null, undismissable = false } = {}) {
+ *  (the subject the content is about: the caller, the entry, the document, the conversation, the profile, the request, the
+ *  field INSTANCE; null ≡ null = a single-subject form), NEVER its title (round 3 — acceptance r2: Rotate… twice raised the
+ *  dialog showing the token that had been rotated away, and tok_TWO went into a detached shell).
+ *  Round 4 (acceptance r3): THE FAMILY — every form open under the id, the one AT the id and every one opened BESIDE it
+ *  (`<id>-2`, …, a queued one too), is found by its key: a beside copy was never compared, and Set up box2 asked again
+ *  opened a third window. `open` lists them in order ({ key, undismissable }); the answer is { verdict, at }:
+ *    'raise' at the one with the same key — never replaced: what was typed, its handlers and its guard stay (the caller gets
+ *            the LIVE shell, `raised: true`);
+ *    'open'   nothing is open under the id;
+ *    'beside' the CALL says two subjects are two forms (`beside: true` — Properties of X and of Y, two rows' pickers), or
+ *            every open one declared itself UNDISMISSABLE (a running set-up is never closed by a neighbour's open);
+ *    'door' at the first one the person can dismiss — its own door first (closed ⇒ the new one opens; asked ⇒ the new one
+ *            is QUEUED: it opens when that one closes, never if the person keeps it). */
+export function reopenVerdict({ open = [], nextKey = null, beside = false } = {}) {
   const k = (x) => (x === undefined || x === null ? null : String(x));
-  if (k(openKey) === k(nextKey)) return 'raise';
-  return undismissable ? 'beside' : 'door';
+  const same = open.findIndex((o) => k(o && o.key) === k(nextKey));
+  if (same >= 0) return { verdict: 'raise', at: same };
+  if (!open.length) return { verdict: 'open', at: -1 };
+  if (beside) return { verdict: 'beside', at: -1 };
+  const door = open.findIndex((o) => !(o && o.undismissable));
+  return door >= 0 ? { verdict: 'door', at: door } : { verdict: 'beside', at: -1 };
 }
 /** IT CANNOT BE DISMISSED (PURE): the caller said so (`undismissable: true`) or turned off every door the person has —
  *  no Escape (and no ask-first hook), no backdrop press. */

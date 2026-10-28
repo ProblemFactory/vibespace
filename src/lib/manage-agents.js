@@ -847,7 +847,7 @@ export function installManageAgents(App, ctx = {}) {
     // lane dialog-unsaved-guard: a token PASTED and not saved ⇒ ✕ / Esc / the backdrop asks; Discard clears it from the page
     // (a minted token waits on the hub — a reopened dialog shows its phase again — so the mint asks nothing here)
     const pasted = () => body.querySelector('#oat-paste');
-    const { overlay, body, close: shut, dismiss, raised } = createModalShell({ id: 'oat-dialog', key: id, title: t('Long-lived token — {name}', { name }), minWidth: 'min(460px, 92vw)', onClose: () => { gone = true; off?.(); clearTimeout(closeTimer); try { rawScr?.destroy(); } catch { } rawScr = null; },
+    const { overlay, body, close: shut, dismiss, raised, ready } = createModalShell({ id: 'oat-dialog', key: id, title: t('Long-lived token — {name}', { name }), minWidth: 'min(460px, 92vw)', onClose: () => { gone = true; off?.(); clearTimeout(closeTimer); try { rawScr?.destroy(); } catch { } rawScr = null; },
       unsaved: { isDirty: () => !!(pasted() && pasted().value.trim()), save: () => savePasted(), discard: () => { if (pasted()) pasted().value = ''; } },
       escapeToClose: true, onEscape: () => oatEscape(), kind: 'form' });
     if (raised) return null;   // raised: the same subject's form, as it was
@@ -1044,8 +1044,9 @@ export function installManageAgents(App, ctx = {}) {
     };
     render(null);
     // a reopened dialog (this client or another) picks up a sign-in still
-    // RUNNING; a finished one is history, not a phase to show again
-    mintApi('').then((r) => { if (r?.mint && !mint && !['saved', 'failed', 'cancelled'].includes(r.mint.phase)) render(r.mint); }).catch(() => { });
+    // RUNNING; a finished one is history, not a phase to show again — read when it OPENS (r4: a queued dialog waits behind
+    // another account's ask; the broadcast below keeps it current meanwhile)
+    ready.then((s) => s && mintApi('').then((r) => { if (r?.mint && !mint && !['saved', 'failed', 'cancelled'].includes(r.mint.phase)) render(r.mint); })).catch(() => { });
     const savePasted = async () => {
       const tok = body.querySelector('#oat-paste').value.trim();
       if (!tok) { showToast(t('Paste the sk-ant-oat01-… token first'), { type: 'error' }); return false; }

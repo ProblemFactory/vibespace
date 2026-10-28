@@ -351,13 +351,13 @@ export function openWindowStream(app, m, row, { fp16 = false, openDesktop = null
  *  it; lane stream-window-fixes) says so, with 「停止」. `onOpen()` = the opener (the machine's dialog) steps aside. */
 export async function openWindowPicker(app, m, { fp16 = false, openDesktop = null, onOpen = null } = {}) {
   const machine = nameOf(m);
-  const shell = createModalShell({ id: 'machine-window-picker', key: m && m.hostId, title: t('Stream one window of {machine}', { machine }), dialogClass: 'machine-window-picker', escapeToClose: true, kind: 'form' });
+  const shell = createModalShell({ id: 'machine-window-picker', key: m && m.hostId, beside: true, title: t('Stream one window of {machine}', { machine }), dialogClass: 'machine-window-picker', escapeToClose: true, kind: 'form' });
   if (shell.raised) return null;   // raised: the same subject's form, as it was
   const note = el('p', null, t('Listing the windows open on {machine}…', { machine })); note.className = 'machine-apps-note';
   const list = el('div'); list.className = 'machine-apps-list'; list.hidden = true;
   shell.body.append(note, list);
   const r = await fetchJson(`${STREAM_BASE}/windows?host=${encodeURIComponent(m.hostId)}`).catch(() => null);
-  if (!shell.overlay.isConnected) return;
+  if (!shell.live()) return;   // r4: THE liveness predicate — never the root's isConnected
   if (!r || r.error || r.ok === false) { note.classList.add('is-bad'); note.textContent = windowStreamText((r && r.code) || 'list_failed', { machine, why: (r && (r.error || r.code)) || t('no answer') }); return; }
   const rows = Array.isArray(r.windows) ? r.windows : [];
   note.textContent = rows.length ? t('Only the window you pick is sent — the rest of {machine}’s screen is not', { machine }) : t('No application window is open on {machine}', { machine });

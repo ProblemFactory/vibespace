@@ -20,13 +20,15 @@ const errText = (e, k) => (e.code === 'id-pattern' && k ? `${t(MODEL_ERRORS[e.co
 export async function openAccountModelsDialog({ accountId, name = '', onTest = null, onClose = null } = {}) {
   // lane dialog-unsaved-guard: a model typed / removed / a capability ticked and not saved ⇒ ✕ / Esc / the backdrop asks
   const guard = { dirty: () => false, save: async () => true };
-  const { body, close, raised } = createModalShell({ id: 'account-models-dialog', key: accountId, title: t('Models — {name}', { name }), minWidth: 'min(660px, 94vw)', escapeToClose: true, onClose,
+  const { body, close, raised, ready, live } = createModalShell({ id: 'account-models-dialog', key: accountId, title: t('Models — {name}', { name }), minWidth: 'min(660px, 94vw)', escapeToClose: true, onClose,
     unsaved: { isDirty: () => guard.dirty(), save: () => guard.save() }, kind: 'form' });
   if (raised) return null;   // raised: the same subject's form, as it was
   body.classList.add('am-body');
   body.textContent = t('Loading…');
   const r = await fetchJson(`/api/accounts/${encodeURIComponent(accountId)}/models`);
-  if (!body.isConnected) return null;
+  // lane dialog-yield r4: QUEUED behind another account's open Models (its ask) — the content lands when this one opens; null =
+  // the person kept that one, or closed this one while it loaded (a detached body is no «closed»: B opened on «Loading…» for ever)
+  if (!(await ready) || !live()) return null;
   if (!r || r.error || !r.provider) {
     body.textContent = r && r.provider === null ? t('This account’s harness has no model provider') : t('Could not read the models — {reason}', { reason: (r && r.error) || t('server unreachable') });
     return null;
@@ -133,7 +135,7 @@ export async function openAccountModelsDialog({ accountId, name = '', onTest = n
       refresh.dataset.busy = '1';
       const ans = await fetchJson(`/api/providers/${encodeURIComponent(st.provider.id)}/models/refresh`, { method: 'POST' });
       delete refresh.dataset.busy;
-      if (!body.isConnected) return;
+      if (!live()) return;
       if (ans && ans.ok && ans.provider) { fromProvider(ans.provider); base = drawn(); draw(); showToast(t('The provider listed {n} model(s)', { n: ans.listed })); return; }
       showToast(ans && REFRESH_WORDS[ans.code] ? t(REFRESH_WORDS[ans.code], { s: Math.ceil((ans.retryAfterMs || 0) / 1000), status: ans.status || '' }) : t('Could not read the models — {reason}', { reason: (ans && ans.error) || t('server unreachable') }), { type: 'error' });
       return;
@@ -159,7 +161,7 @@ export async function openAccountModelsDialog({ accountId, name = '', onTest = n
     const v = validateModels(st.provider.kind, input);
     if (!v.ok) { st.errors = v.errors; showErrors(); return v.errors.map((x) => errText(x, k())).join(' · ') || false; }
     const ans = await fetchJson(`/api/accounts/${encodeURIComponent(accountId)}/models`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input) });
-    if (!body.isConnected) return true;
+    if (!live()) return true;
     if (ans && ans.ok && ans.provider) { fromProvider(ans.provider); base = drawn(); draw(); showToast(t('Saved')); return true; }
     st.errors = ans && Array.isArray(ans.errors) && ans.errors.length ? ans.errors : [{ code: (ans && ans.error) || t('server unreachable') }];
     showErrors();

@@ -180,6 +180,6 @@ export async function openWhoDialog(app, profileId, { onSaved = null, label = ''
     shell.close();
     try { onSaved?.(r); } catch (e) { console.warn('[browser] who-can-use onSaved', e); }
   }
-  setTimeout(() => { try { picker.focus(); } catch { /* none */ } }, 0);
+  shell.ready.then((s) => { if (s) setTimeout(() => { try { picker.focus(); } catch { /* none */ } }, 0); });   // once it opens (r4: a queued form waits behind the open one's ask)
   return { shell, picker, view, save: doSave, close: () => shell.close() };
 }

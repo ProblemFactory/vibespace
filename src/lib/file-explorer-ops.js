@@ -534,7 +534,7 @@ export function installExplorerOps(FileExplorer) {
     const fp = name ? this.currentPath + '/' + name : this.currentPath;
     // Open INSTANTLY with placeholders; a recursive-size du on a big tree can
     // take many seconds and a click with no response reads as broken.
-    const { overlay, body, close: done, raised } = createModalShell({ id: 'file-props-dialog', key: fp, title: t('Properties'), escapeToClose: true, kind: 'form' });
+    const { overlay, body, close: done, raised } = createModalShell({ id: 'file-props-dialog', key: fp, beside: true, title: t('Properties'), escapeToClose: true, kind: 'form' });
     if (raised) return;   // raised: the same subject's form, as it was
     overlay.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); done(); } });
     const rows = [
@@ -599,7 +599,7 @@ export function installExplorerOps(FileExplorer) {
   // path-mount semantics (default private = login-only; public = anyone).
   async _publishPageDialog(fullPath, name) {
     const existing = (await fetch(`/api/pages/by-path?path=${encodeURIComponent(fullPath)}`).then((r) => r.json()).catch(() => null))?.page || null;
-    const { body, close, raised } = createModalShell({ id: 'publish-page-dialog', key: fullPath, title: existing ? t('Published page') : t('Publish page'), escapeToClose: true, minWidth: '420px', kind: 'form' });
+    const { body, close, raised } = createModalShell({ id: 'publish-page-dialog', key: fullPath, beside: true, title: existing ? t('Published page') : t('Publish page'), escapeToClose: true, minWidth: '420px', kind: 'form' });
     if (raised) return null;   // raised: the same subject's form, as it was
     // (declared BEFORE the markup reads it — lane dialog-yield r3: below it, a published file's dialog threw «Cannot access
     // 'absUrl' before initialization» and stood EMPTY, pre-existing since the published-URL row)
@@ -649,7 +649,7 @@ export function installExplorerOps(FileExplorer) {
       }
       if (!r?.page) { showToast(t('Publish failed: {err}', { err: r?.error || t('server unreachable') }), { type: 'error' }); return; }
       close();
-      const { body: b2, close: c2, raised } = createModalShell({ id: 'page-published-dialog', key: freshKey('published'), title: t('Page published'), escapeToClose: true, minWidth: '420px', kind: 'form' });
+      const { body: b2, close: c2, raised } = createModalShell({ id: 'page-published-dialog', key: freshKey('published'), beside: true, title: t('Page published'), escapeToClose: true, minWidth: '420px', kind: 'form' });
       if (raised) return;   // raised: the same subject's form, as it was
       b2.innerHTML = `
         <div style="font-size:12px;word-break:break-all;margin-bottom:6px">${esc(absUrl(r.page.url))}</div>

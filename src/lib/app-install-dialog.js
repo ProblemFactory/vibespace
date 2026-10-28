@@ -385,7 +385,7 @@ export function renderAppsSection(app, root, { host = 'local', machine = null, o
 
 /** "Install an app…" — search this machine's package sources, pick one, see THE plan. */
 export function openAppSearch(app, m, { onDone = null } = {}) {
-  const { body, close, raised } = createModalShell({ id: 'app-search-dialog', key: m.hostId, title: t('Install an app on {machine}', { machine: machineInSentence(m) }), dialogClass: 'desktop-install app-search', escapeToClose: true, kind: 'form' });
+  const { body, close, raised, ready } = createModalShell({ id: 'app-search-dialog', key: m.hostId, title: t('Install an app on {machine}', { machine: machineInSentence(m) }), dialogClass: 'desktop-install app-search', escapeToClose: true, kind: 'form' });
   if (raised) return null;   // raised: the same subject's form, as it was
   const intro = el('p', 'app-search-intro', t('Search the package sources of {machine}. Nothing is installed until you read its plan and press Install.', { machine: machineInSentence(m) }));
   const form = el('form', 'app-search-form');
@@ -415,14 +415,14 @@ export function openAppSearch(app, m, { onDone = null } = {}) {
     if (exact && !r.results.some((x) => x.package === words)) { const b = el('button', 'app-search-result app-search-exact'); b.type = 'button'; b.append(el('span', 'app-search-pkg', words), el('span', 'app-search-sum', t('Plan this exact package name'))); b.onclick = () => pick(words); results.appendChild(b); }
     for (const x of r.results) { const b = el('button', 'app-search-result'); b.type = 'button'; b.dataset.pkg = x.package; b.append(el('span', 'app-search-pkg', x.package), el('span', 'app-search-sum', x.summary)); b.onclick = () => pick(x.package); results.appendChild(b); }
   };
-  setTimeout(() => input.focus({ preventScroll: true }), 0);
+  ready.then((s) => { if (s) setTimeout(() => input.focus({ preventScroll: true }), 0); });   // once it opens (r4: a queued form waits behind the open one's ask)
   return { close };
 }
 
 /** "Install from a .deb file…" (owner D4) — a .deb ON THAT MACHINE by its path: THE plan (dpkg-deb -I + the
  *  simulation), the same approval, and the file copied into the machine's package cache with its sha256. */
 export function openDebInstall(app, m, { onDone = null, path = '' } = {}) {
-  const { body, close, raised } = createModalShell({ id: 'app-deb-dialog', key: m.hostId, title: t('Install a .deb file on {machine}', { machine: machineInSentence(m) }), dialogClass: 'desktop-install app-deb', escapeToClose: true, kind: 'form' });
+  const { body, close, raised, ready } = createModalShell({ id: 'app-deb-dialog', key: m.hostId, title: t('Install a .deb file on {machine}', { machine: machineInSentence(m) }), dialogClass: 'desktop-install app-deb', escapeToClose: true, kind: 'form' });
   if (raised) return null;   // raised: the same subject's form, as it was
   body.appendChild(el('p', 'app-search-intro', t('The .deb file’s full path on {machine} — in Files, right-click a .deb file and choose “Install this package…”, or type its path. Its plan shows what it installs and whether it runs its own install scripts.', { machine: machineInSentence(m) })));
   const form = el('form', 'app-search-form');
@@ -438,14 +438,14 @@ export function openDebInstall(app, m, { onDone = null, path = '' } = {}) {
     close();
     showInstallDialog(m, { what: 'app', request: { kind: 'deb', debPath: p }, onDone });
   };
-  setTimeout(() => input.focus({ preventScroll: true }), 0);
+  ready.then((s) => { if (s) setTimeout(() => input.focus({ preventScroll: true }), 0); });   // once it opens (r4: a queued form waits behind the open one's ask)
   return { close };
 }
 
 /** "Add a package source…" (owner D4) — a third-party apt source is its OWN plan: its https address and its signing
  *  key's fingerprint, approved before any package comes from it. */
 export function openSourceDialog(app, m, { onDone = null } = {}) {
-  const { body, close, raised } = createModalShell({ id: 'app-source-dialog', key: m.hostId, title: t('Add a package source to {machine}', { machine: machineInSentence(m) }), dialogClass: 'desktop-install app-source', escapeToClose: true, kind: 'form' });
+  const { body, close, raised, ready } = createModalShell({ id: 'app-source-dialog', key: m.hostId, title: t('Add a package source to {machine}', { machine: machineInSentence(m) }), dialogClass: 'desktop-install app-source', escapeToClose: true, kind: 'form' });
   if (raised) return null;   // raised: the same subject's form, as it was
   body.appendChild(el('p', 'app-search-intro', t('A publisher’s own apt repository (for example a browser or an editor vendor). Its key is fetched and its fingerprint shown before anything is added.')));
   const form = el('form', 'app-source-form');
@@ -465,7 +465,7 @@ export function openSourceDialog(app, m, { onDone = null } = {}) {
     close();
     showInstallDialog(m, { what: 'app', request: { kind: 'source', source }, onDone });
   };
-  setTimeout(() => nm.focus({ preventScroll: true }), 0);
+  ready.then((s) => { if (s) setTimeout(() => nm.focus({ preventScroll: true }), 0); });   // once it opens (r4: a queued form waits behind the open one's ask)
   return { close };
 }
 
@@ -474,7 +474,7 @@ export function openSourceDialog(app, m, { onDone = null } = {}) {
  *  composes it) and it is named by those words.
  *  It can only PROPOSE; the user approves in For you or here. It is marked as a helper (not a standing conversation). */
 export function openAgentHelp(app, m, { request: carried = '' } = {}) {
-  const { body, close, raised } = createModalShell({ id: 'app-help-dialog', key: m.hostId, title: t('Let an agent help install an app'), dialogClass: 'desktop-install app-help', escapeToClose: true, kind: 'form' });
+  const { body, close, raised, ready } = createModalShell({ id: 'app-help-dialog', key: m.hostId, title: t('Let an agent help install an app'), dialogClass: 'desktop-install app-help', escapeToClose: true, kind: 'form' });
   if (raised) return null;   // raised: the same subject's form, as it was
   body.appendChild(el('p', 'app-search-intro', t('Starts a temporary helper conversation that knows how to install apps on {machine}. It can only propose an install — you approve it in For you. Close it when it says done.', { machine: machineInSentence(m) })));
   const form = el('form', 'app-search-form');
@@ -499,7 +499,7 @@ export function openAgentHelp(app, m, { request: carried = '' } = {}) {
         if (!h || h.error) showToast(t('The helper started, but it could not be marked as a helper: {why}', { why: (h && h.error) || t('server unreachable') }), { type: 'error' });
       } });
   };
-  setTimeout(() => input.focus({ preventScroll: true }), 0);
+  ready.then((s) => { if (s) setTimeout(() => input.focus({ preventScroll: true }), 0); });   // once it opens (r4: a queued form waits behind the open one's ask)
   return { close };
 }
 

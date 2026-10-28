@@ -91,18 +91,20 @@ function askCredentials(m, types, auth, sign = null) {
   // a raise that answered the second with null read as «sign-in cancelled»)
   const k = `${(m && (m.hostId || m.id)) || ''}|${(Array.isArray(types) ? types : []).join(',')}`;
   const was = asking.get(k);
-  if (was && was.overlay && was.overlay.isConnected) { createModalShell({ id: 'machine-desktop-signin', key: k, kind: 'form' }); return was.p; }   // (the same id + key: the open one raised)
-  if (was) { asking.delete(k); was.finish(null); }   // its form was removed without an answer (a window torn down): that ask ends, a fresh one opens
-  let finish = null, shellRoot = null;
+  // r4: the ask's form is judged by its shell's live() — never its root's isConnected: a QUEUED sign-in (behind another form's
+  // ask) has a detached root, and the second ask ended the first one with null («sign-in cancelled») while its form waited
+  if (was && was.live && was.live()) return createModalShell({ id: 'machine-desktop-signin', key: k, kind: 'form' }).ready.then(() => was.p);   // (the same id + key: the open — or queued — one raised; the one answer the person gives)
+  if (was) { asking.delete(k); was.finish(null); }   // its form ended without an answer (a window torn down): that ask ends, a fresh one opens
+  let finish = null, shellLive = null;
   const p = new Promise((resolve) => {
     let done = false;
     finish = (v) => { if (!done) { done = true; resolve(v); } };
     const machine = nameOf(m);
     const wantUser = Array.isArray(types) && types.includes('username');
     const s = sign || {};
-    const { body, close, raised, overlay } = createModalShell({ id: 'machine-desktop-signin', key: k, title: t('Sign in to {machine}', { machine }), dialogClass: 'machine-desktop-signin', escapeToClose: true, onClose: () => finish(null), kind: 'form' });   // a FORM (lane dialog-yield r3: the desktop that asked waits for it — the chat does not)
+    const { body, close, raised, live, ready } = createModalShell({ id: 'machine-desktop-signin', key: k, title: t('Sign in to {machine}', { machine }), dialogClass: 'machine-desktop-signin', escapeToClose: true, onClose: () => finish(null), kind: 'form' });   // a FORM (lane dialog-yield r3: the desktop that asked waits for it — the chat does not)
     if (raised) return;   // (never: `asking` answers a second ask first)
-    shellRoot = overlay;
+    shellLive = live;
     const form = document.createElement('form');
     const words = (kept) => (auth === 'ard'
       ? (kept ? t('{machine} asks for your Mac user name and password. VibeSpace seals them in the vault and signs in by itself while the vault is unlocked.', { machine }) : t('{machine} asks for your Mac user name and password. VibeSpace does not keep them.', { machine }))
@@ -130,9 +132,9 @@ function askCredentials(m, types, auth, sign = null) {
     form.append(row);
     form.onsubmit = (e) => { e.preventDefault(); const v = { password: pass.value, ...(user ? { username: user.value } : {}), ...(keep && keep.checked ? { remember: true } : {}) }; pass.value = ''; finish(v); close(); };
     body.append(form);
-    setTimeout(() => (user || pass).focus(), 0);
+    ready.then((sh) => { if (sh) setTimeout(() => (user || pass).focus(), 0); });   // once it opens (a queued form waits behind the open one's ask)
   });
-  const entry = { p, finish, overlay: shellRoot };
+  const entry = { p, finish, live: shellLive };
   asking.set(k, entry);
   p.then(() => { if (asking.get(k) === entry) asking.delete(k); });
   return p;
@@ -887,7 +889,7 @@ function installedList(m, { onPick }) {
 export function showMachineDesktopDialog(app, m0, { install = null, recheck = null, closeOpener = null } = {}) {
   let m = m0;
   const machine = nameOf(m);
-  const { body, close: closeDialog, raised } = createModalShell({ id: 'machine-desktop-dialog', key: m0 && (m0.hostId || m0.id), title: t('{machine} — its desktop', { machine }), dialogClass: 'machine-desktop-dialog', escapeToClose: true, kind: 'form' });
+  const { body, close: closeDialog, raised, live } = createModalShell({ id: 'machine-desktop-dialog', key: m0 && (m0.hostId || m0.id), title: t('{machine} — its desktop', { machine }), dialogClass: 'machine-desktop-dialog', escapeToClose: true, kind: 'form' });
   if (raised) return null;   // raised: the same subject's form, as it was
   // inc-mv51w0ow-crw3 (owner: "选择打开桌面之后不会自动关闭无关对话框直接展示桌面连接窗口"): a press that opens a window closes
   // this dialog AND the one it was opened from (the Apps dialog, `closeOpener`) — the window is what the person asked to see
@@ -920,21 +922,21 @@ export function showMachineDesktopDialog(app, m0, { install = null, recheck = nu
   body.append(state, acts, ...(mic ? [mic.el] : []), ...(sound ? [sound.el] : []), scope, runHead, apps.el, presets, runRow, el('p', NOTE, t('It starts on {machine}’s desktop as you — the exact command is shown before it runs.', { machine })));
   let asked = 0; // the newest listing asked (an older answer never overwrites a newer one)
   let signin = null; // lane desktop-vnc-remember: the hub's word on this machine's remembered sign-in (GET …/signins)
-  const readSignin = async () => { const r = await fetchJson(`/api/desktop/machine-desktop/signins?host=${encodeURIComponent(m.hostId)}`); if (!body.isConnected) return; signin = r && !r.error ? r.signin : null; render(); };
+  const readSignin = async () => { const r = await fetchJson(`/api/desktop/machine-desktop/signins?host=${encodeURIComponent(m.hostId)}`); if (!live()) return; signin = r && !r.error ? r.signin : null; render(); };
   const listApps = async (fresh) => {
     const mine = ++asked;
     apps.set({ ...apps.get(), loading: true });
     const url = `/api/desktop/machine-desktop/apps?host=${encodeURIComponent(m.hostId)}`;
     let r = await fetchJson(`${url}${fresh ? '&fresh=1' : ''}`);
-    if (mine !== asked || !body.isConnected) return;
+    if (mine !== asked || !live()) return;
     // lane desktop-picker-instant: the list the machine gave last is drawn AT ONCE (`listing` — it is listing again: 391–446 apps
     // took 5–20 s on the owner's Windows box); the follow-up waits for the new list
-    if (r && r.listing && Array.isArray(r.rows)) { apps.set({ ...r, loading: true }); r = await fetchJson(`${url}&wait=1`); if (mine !== asked || !body.isConnected) return; }
+    if (r && r.listing && Array.isArray(r.rows)) { apps.set({ ...r, loading: true }); r = await fetchJson(`${url}&wait=1`); if (mine !== asked || !live()) return; }
     apps.set(r && Array.isArray(r.rows) ? r : { rows: apps.get().rows || [], code: (r && r.code) || 'list_failed', error: (r && r.error) || t('server unreachable') }); // a list answer may carry a code (an old agent, offline) — its rows are still the list
   };
   const check = async () => {
     const listed = listApps(true);
-    if (recheck) { const next = await recheck(m.hostId); if (next && body.isConnected) { m = next; render(); } }
+    if (recheck) { const next = await recheck(m.hostId); if (next && live()) { m = next; render(); } }
     await listed;
   };
   function render() {
@@ -962,7 +964,7 @@ export function showMachineDesktopDialog(app, m0, { install = null, recheck = nu
   }
   async function run({ window: own = false } = {}) {
     const line = input.value;
-    if (own) { winBtn.disabled = true; const r = await runAsAppWindow(app, m, line); winBtn.disabled = false; if (r) toWindow(); else if (body.isConnected) render(); return; } // the app's window is what the person wants to see now
+    if (own) { winBtn.disabled = true; const r = await runAsAppWindow(app, m, line); winBtn.disabled = false; if (r) toWindow(); else if (live()) render(); return; } // the app's window is what the person wants to see now
     const plan = desktopRunPlan(m.setup, line); // the hub judges it again (the same PURE rule)
     if (!plan.ok) { showToast(desktopRefusalText({ code: plan.code, error: plan.error }, m), { type: 'error' }); return; }
     if (!(await confirmRun(m, line))) return;
@@ -971,7 +973,7 @@ export function showMachineDesktopDialog(app, m0, { install = null, recheck = nu
     runBtn.disabled = false;
     if (!r || r.error) { showToast(desktopRefusalText(r, m), { type: 'error' }); return; }
     saveRun(m.hostId, line);
-    if (body.isConnected) render();
+    if (live()) render();
     showToast(t('Started on {machine}: {cmd}', { machine, cmd: r.shown }));
   }
   /** lane remoteapp-r1a: the line's program (src/remoteapp.js remoteappProgramOf) as a RemoteApp of this machine — the hub
@@ -992,7 +994,7 @@ export function showMachineDesktopDialog(app, m0, { install = null, recheck = nu
     if (!r || r.error) { showToast((r && r.error) || t('server unreachable'), { type: 'error' }); return; }
     signin = r.signin || null;
     showToast(t('{machine}’s sign-in forgotten', { machine }));
-    if (body.isConnected) render();
+    if (live()) render();
   }
   input.onkeydown = (e) => { if (enterSubmits(e)) { e.preventDefault(); run({ window: asWindow() }); } };
   render();
@@ -1002,7 +1004,7 @@ export function showMachineDesktopDialog(app, m0, { install = null, recheck = nu
   // lane desktop-picker-instant: a listing that landed elsewhere (the machine's hello, another window's Check again) is announced —
   // a newer list is read again (from the hub's store: nothing is asked of the machine)
   const offListed = app.ws && typeof app.ws.onGlobal === 'function' ? app.ws.onGlobal((msg) => {
-    if (!body.isConnected) { try { offListed?.(); } catch { /* gone */ } return; }
+    if (!live()) { try { offListed?.(); } catch { /* gone */ } return; }
     if (msg && msg.type === 'desktop-installed-updated' && msg.hostId === m.hostId && (msg.listedAt || 0) > (apps.get().listedAt || 0) && !apps.get().loading) listApps(false);
   }) : null;
 }

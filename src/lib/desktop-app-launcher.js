@@ -460,7 +460,7 @@ export function adoptWitnessText(w, row = {}) {
 }
 export async function showAdoptDialog(row, { host = 'local', onDone = null } = {}) {
   const app = catalogLabel(row);
-  const { body, close, raised } = createModalShell({ id: 'desktop-adopt-dialog', key: `${host}:${row && row.id}`, title: t('Add {app} to VibeSpace', { app }), dialogClass: 'desktop-adopt', escapeToClose: true, kind: 'form' });
+  const { body, close, raised, ready, live } = createModalShell({ id: 'desktop-adopt-dialog', key: `${host}:${row && row.id}`, title: t('Add {app} to VibeSpace', { app }), dialogClass: 'desktop-adopt', escapeToClose: true, kind: 'form' });
   if (raised) return null;   // raised: the same subject's form, as it was
   body.innerHTML = `
     <p class="desktop-adopt-witness"></p>
@@ -492,7 +492,7 @@ export async function showAdoptDialog(row, { host = 'local', onDone = null } = {
   const wit = $('.desktop-adopt-witness'); wit.textContent = t('Reading what this machine says about {app}…', { app });
   const q = `seenId=${encodeURIComponent(row.id)}${host && host !== 'local' ? `&host=${encodeURIComponent(host)}` : ''}`;
   const pre = await fetchJson(`/api/desktop/apps/adopt-prefill?${q}`);
-  if (!body.isConnected) return null;
+  if (!(await ready) || !live()) return null;   // r4: queued behind another app's open Add (its ask) — the prefill lands when this one opens (a detached body is no «closed»)
   if (!pre || pre.error || pre.ok === false) { wit.textContent = (pre && pre.error) || t('Could not read what this machine says about {app}', { app }); wit.classList.add('is-bad'); }
   else wit.textContent = adoptWitnessText(pre.witness, row);
   labelIn.value = String((pre && pre.label) || app);
@@ -548,7 +548,7 @@ export async function removeRegistered(row, { forget = false, onDone = null } = 
   if (!ok) return null;
   const r = await fetchJson(`/api/desktop/apps/${encodeURIComponent(row.id)}/${forget ? 'forget' : 'remove'}`, POST_JSON({}));
   if (!r || r.ok === false || r.error) {
-    const { body, raised } = createModalShell({ id: 'desktop-remove-failed', key: row && row.id, title: t('Could not remove {app}', { app }), dialogClass: 'desktop-adopt', escapeToClose: true, kind: 'form' });
+    const { body, raised } = createModalShell({ id: 'desktop-remove-failed', key: `${row && row.id}:${forget ? 'forget' : 'remove'}`, title: t('Could not remove {app}', { app }), dialogClass: 'desktop-adopt', escapeToClose: true, kind: 'form' });
     if (raised) return null;   // raised: the same subject's form, as it was
     const said = r && r.code === 'no_recipe' ? t('{app} has no remove recipe — use Forget', { app }) : r && r.code === 'needs_root' ? t('Its remove recipe needs administrator rights — VibeSpace runs recipes as you only') : t('The remove recipe failed');
     const p = document.createElement('p'); p.className = 'desktop-adopt-witness is-bad'; p.textContent = [said, r && r.error].filter(Boolean).join(' — ');
@@ -632,6 +632,15 @@ export function micPlanRows(plan) {
  *  refresh | adopt | source-remove, …}) or `proposalId` (an agent's proposal, opened from For you) — THE SAME component:
  *  the plan from POST /api/apps/plan (its facts above the commands: packages, sizes, a source's key fingerprint, how it
  *  comes back after a rebuild), the run from POST /api/apps/install (the same NDJSON, the same one-slot rule). */
+/** THE SUBJECT OF AN INSTALL FORM (lane dialog-yield r4 — PURE): the machine, what, and for an app the REQUEST itself (its verb
+ *  and its app, every field — Remove gimp ≠ Remove inkscape ≠ apt install gimp) or the agent's proposal. Keyed by the machine and
+ *  `what` alone, every app request was ONE subject: Remove on inkscape raised the open «Remove gimp» plan and its Remove ran
+ *  `apt-get remove gimp` (measured in headless Chrome on 981f70d6 — the inkscape plan was never asked for). */
+export function installSubjectKey(m, { what = 'xpra', request = null, proposalId = null } = {}) {
+  const canon = (v) => (v && typeof v === 'object' ? (Array.isArray(v) ? `[${v.map(canon).join(',')}]` : `{${Object.keys(v).sort().map((k) => `${k}:${canon(v[k])}`).join(',')}}`) : JSON.stringify(v === undefined ? null : v));
+  const subject = what !== 'app' ? '' : proposalId ? `proposal:${proposalId}` : canon(request);
+  return `${(m && m.hostId) || 'local'}:${what}${subject ? ':' + subject : ''}`;
+}
 export async function showInstallDialog(m, { what = 'xpra', onDone = null, request = null, proposalId = null } = {}) {
   const xp = what === 'xpra';
   const isApp = what === 'app';
@@ -640,7 +649,7 @@ export async function showInstallDialog(m, { what = 'xpra', onDone = null, reque
   const spec = xp || isApp || tv || vm ? null : installSpecFor(what);
   const appLabel = spec ? spec.label : 'LibreOffice';
   const name = xp ? machineName(m) : machineInSentence(m); // xpra's words exactly as before; a LibreOffice install names the machine inside its sentences
-  const { body: ib, close: iclose, raised } = createModalShell({ id: 'desktop-install-dialog', key: `${m && m.hostId}:${what}`, title: vm ? (vmRemove ? t('Remove the virtual microphone from {machine}', { machine: name }) : t('Install a virtual microphone on {machine}', { machine: name })) : tv ? t('Install TightVNC Server on {machine}', { machine: name }) : isApp ? appDialogTitle(request || { kind: 'apt', packages: [] }, name) : xp ? t('Install xpra on {machine}', { machine: name }) : what === FONTS_ID ? t('Install the Calibri / Cambria look-alike fonts on {machine}', { machine: name }) : t('Install LibreOffice on {machine}', { machine: name }), dialogClass: 'desktop-install', escapeToClose: true, kind: 'form' });
+  const { body: ib, close: iclose, raised } = createModalShell({ id: 'desktop-install-dialog', key: installSubjectKey(m, { what, request, proposalId }), title: vm ? (vmRemove ? t('Remove the virtual microphone from {machine}', { machine: name }) : t('Install a virtual microphone on {machine}', { machine: name })) : tv ? t('Install TightVNC Server on {machine}', { machine: name }) : isApp ? appDialogTitle(request || { kind: 'apt', packages: [] }, name) : xp ? t('Install xpra on {machine}', { machine: name }) : what === FONTS_ID ? t('Install the Calibri / Cambria look-alike fonts on {machine}', { machine: name }) : t('Install LibreOffice on {machine}', { machine: name }), dialogClass: 'desktop-install', escapeToClose: true, kind: 'form' });
   if (raised) return;   // raised: the same subject's form, as it was
   ib.classList.add('desktop-install-body');
   if (isApp) ib.classList.add('desktop-install-app');
@@ -751,7 +760,7 @@ const patchUserState = (patch) => fetch('/api/user-state', { method: 'PATCH', he
 export async function showLaunchDialog(app, opts = {}) {
   const doc = opts && opts.file && typeof opts.file === 'object' && opts.file.path ? opts.file : null;
   const refusal = doc && opts.refusal && opts.refusal.code ? opts.refusal : null;
-  const { overlay, body, close, raised } = createModalShell({ id: 'desktop-launch-dialog', key: doc ? `doc:${doc.host || ''}:${doc.path}` : 'apps', title: doc ? t('Open with LibreOffice') : t('Apps'), dialogClass: 'desktop-launch', escapeToClose: true, kind: 'form' });
+  const { overlay, body, close, raised, ready, live } = createModalShell({ id: 'desktop-launch-dialog', key: doc ? `doc:${doc.host || ''}:${doc.path}` : 'apps', title: doc ? t('Open with LibreOffice') : t('Apps'), dialogClass: 'desktop-launch', escapeToClose: true, kind: 'form' });
   if (raised) return null;   // raised: the same subject's form, as it was
   body.setAttribute('aria-busy', 'true'); // ANSWERING until its last step below (both reads in, the disclosure decided, the focus given) — a screen reader waits, and so can a suite
   // design 009 §B3: apps first — the head row (machines + "Install an app…"), Running, Apps, Browsers, Your installed
@@ -865,13 +874,13 @@ export async function showLaunchDialog(app, opts = {}) {
     if (doc) return;
     appsSecEl.hidden = true;
     const asked = host;
-    Promise.resolve(answered).finally(() => { if (asked === host && overlay.isConnected) appsSecEl.hidden = false; });
+    Promise.resolve(answered).finally(() => { if (asked === host && live()) appsSecEl.hidden = false; });
   };
   const mountApps = () => {
     if (doc) return;
     try { appsSec?.dispose(); } catch { }
     const elx = body.querySelector('.desktop-launch-apps');
-    if (elx) appsSec = renderAppsSection(app, elx, { host, machine: machineOf(host), onChange: () => { if (overlay.isConnected) refresh(); }, onState: renderBanner });
+    if (elx) appsSec = renderAppsSection(app, elx, { host, machine: machineOf(host), onChange: () => { if (live()) refresh(); }, onState: renderBanner });
   };
   // design 009 §C: Layer 1's ONE banner — an interrupted install, at the top of the dialog (PURE appsBannerModel)
   function renderBanner(st) {
@@ -881,10 +890,10 @@ export async function showLaunchDialog(app, opts = {}) {
     if (!b) return;
     const said = document.createElement('span'); said.className = 'desktop-launch-banner-text'; said.textContent = b.text;
     const go = document.createElement('button'); go.type = 'button'; go.className = 'btn-create desktop-launch-banner-go'; go.textContent = b.label;
-    go.onclick = () => showInstallDialog(machineOf(host), { what: 'app', request: b.request, onDone: () => { if (overlay.isConnected) { refresh(); appsSec?.refresh(); } } });
+    go.onclick = () => showInstallDialog(machineOf(host), { what: 'app', request: b.request, onDone: () => { if (live()) { refresh(); appsSec?.refresh(); } } });
     bannerEl.append(said, go);
   }
-  installAppBtn.onclick = () => openAppSearch(app, machineOf(host), { onDone: () => { if (overlay.isConnected) { refresh(); appsSec?.refresh(); } } });
+  installAppBtn.onclick = () => openAppSearch(app, machineOf(host), { onDone: () => { if (live()) { refresh(); appsSec?.refresh(); } } });
   const docMachineName = () => (doc ? (doc.hostLabel || machineInSentence(machineOf(doc.host || 'local'))) : '');
   let data = null;
   let recents = [];
@@ -939,8 +948,8 @@ export async function showLaunchDialog(app, opts = {}) {
       launching.add(row.id); render();
       const r = await launch({ appId: row.id, variant: x.id }, null);
       if (!r) { launching.delete(row.id); render(); }
-    } else if (x.kind === 'adopt') showAdoptDialog(row, { host, onDone: () => { if (overlay.isConnected) refresh(); } });
-    else if (x.kind === 'remove' || x.kind === 'forget') removeRegistered(row, { forget: x.kind === 'forget', onDone: async () => { if (!overlay.isConnected) return null; await refresh(); return data; } });
+    } else if (x.kind === 'adopt') showAdoptDialog(row, { host, onDone: () => { if (live()) refresh(); } });
+    else if (x.kind === 'remove' || x.kind === 'forget') removeRegistered(row, { forget: x.kind === 'forget', onDone: async () => { if (!live()) return null; await refresh(); return data; } });
     else { const line = runLine(row); const ok = await copyText(line); showToast(ok === false ? line : t('Command copied: {cmd}', { cmd: line }), ok === false ? { type: 'error' } : undefined); } // F3: with its env / cwd
   };
   const cardMenuControl = (row) => {
@@ -1011,7 +1020,7 @@ export async function showLaunchDialog(app, opts = {}) {
     if (v === '') { sizeTouched = false; sizeChoice = 'pane'; renderSize(); paintSizeCards(); return; }
     if (v !== 'custom') { setSize(v); return; }
     const p = await askCustomSize(sizeCustom);
-    if (!overlay.isConnected) return;
+    if (!live()) return;
     if (p) { sizeCustom = p; setSize(`${p.w}x${p.h}`); } else renderSize(); // cancelled: the select shows what still applies
   };
   renderSize();
@@ -1089,7 +1098,7 @@ export async function showLaunchDialog(app, opts = {}) {
       b.title = (!b.disabled ? machineName(m) : `${machineName(m)} — ${why}`) + (probe && m.code !== 'checking' ? `\n${probe}` : '');
       b.onclick = () => {
         // design 014 D1: a Windows / macOS row opens ITS DESKTOP's dialog — the app catalog stays on the machine it shows
-        if (m.desktop && !b.disabled) { showMachineDesktopDialog(app, m, { install: (mm, o) => showInstallDialog(mm, o), closeOpener: close, recheck: async (id) => { const ms = await recheckMachines(id); if (!ms) return null; if (overlay.isConnected) { machines = ms; renderMachines(); } return ms.find((x) => x.hostId === id) || null; } }); return; }
+        if (m.desktop && !b.disabled) { showMachineDesktopDialog(app, m, { install: (mm, o) => showInstallDialog(mm, o), closeOpener: close, recheck: async (id) => { const ms = await recheckMachines(id); if (!ms) return null; if (live()) { machines = ms; renderMachines(); } return ms.find((x) => x.hostId === id) || null; } }); return; }
         if (b.disabled || host === m.hostId) return; host = m.hostId; data = data ? { apps: data.apps } : null; listError = null; renderMachines(); render(); holdApps(refresh()); mountApps(); };
       if (at === b) at = b.nextElementSibling; else machinesEl.insertBefore(b, at); // in order: a row already in place is never moved
     }
@@ -1103,7 +1112,7 @@ export async function showLaunchDialog(app, opts = {}) {
     const b = document.createElement('button'); b.type = 'button'; b.className = 'file-tool-btn desktop-launch-install-btn';
     b.textContent = t('Install xpra on {machine}…', { machine: machineName(m) });
     b.title = t('Shows the install plan first — nothing runs until you confirm');
-    b.onclick = () => showInstallDialog(m, { onDone: () => { if (overlay.isConnected) refresh(); } });
+    b.onclick = () => showInstallDialog(m, { onDone: () => { if (live()) refresh(); } });
     installEl.appendChild(b);
   };
   // ── running ── (§7.9 verify: its OWN renderer, rebuilt only when what it shows changed — the 5 s tick's
@@ -1124,7 +1133,7 @@ export async function showLaunchDialog(app, opts = {}) {
     render();
   };
   overlay.addEventListener('pointerdown', () => { pressing = true; }, true);
-  overlay.addEventListener('pointerup', () => { pressing = false; if (cardsOwed) { cardsOwed = false; setTimeout(() => { if (overlay.isConnected) cardsFollow(); }, 0); } }, true);
+  overlay.addEventListener('pointerup', () => { pressing = false; if (cardsOwed) { cardsOwed = false; setTimeout(() => { if (live()) cardsFollow(); }, 0); } }, true);
   const renderRunning = () => {
     const capUsed = data?.cap?.used ?? 0, cap = data?.cap?.cap ?? 0;
     if (!doc && cardKey !== null && cardSig(data && data.apps) !== cardKey) { cardsFollow(); return; } // lane app-launch-singleton: the set moved — the cards (and these rows) follow
@@ -1191,7 +1200,7 @@ export async function showLaunchDialog(app, opts = {}) {
         const ib = document.createElement('button'); ib.type = 'button'; ib.className = 'file-tool-btn desktop-launch-office-install';
         ib.textContent = officeInstallLabel(machineInSentence(machineOf(host)));
         ib.title = t('Shows the install plan first — nothing runs until you confirm');
-        ib.onclick = () => showInstallDialog(machineOf(host), { what: row.id, onDone: () => { if (overlay.isConnected) refresh(); } });
+        ib.onclick = () => showInstallDialog(machineOf(host), { what: row.id, onDone: () => { if (live()) refresh(); } });
         box.append(said, ib);
         regEl.appendChild(box);
         continue;
@@ -1272,7 +1281,7 @@ export async function showLaunchDialog(app, opts = {}) {
         const ib = document.createElement('button'); ib.type = 'button'; ib.className = 'desktop-launch-card-install';
         ib.textContent = t('Install…'); ib.title = officeInstallLabel(machineInSentence(machineOf(host)));
         ib.setAttribute('aria-label', ib.title);
-        ib.onclick = (e) => { e.stopPropagation(); showInstallDialog(machineOf(host), { what: row.id, onDone: () => { if (overlay.isConnected) refresh(); } }); };
+        ib.onclick = (e) => { e.stopPropagation(); showInstallDialog(machineOf(host), { what: row.id, onDone: () => { if (live()) refresh(); } }); };
         wrap.appendChild(ib);
       }
       if (running) { // lane app-launch-singleton (the reporter's addendum): EVERY live instance, an agent's too — where, who, Open, Close
@@ -1346,7 +1355,7 @@ export async function showLaunchDialog(app, opts = {}) {
   };
   filterIn.oninput = () => render();
   const recheckBtn = $('.desktop-launch-seen-recheck');
-  recheckBtn.onclick = async () => { rechecking = true; render({ seenOnly: true }); try { await refresh({ recheck: true }); } finally { rechecking = false; if (overlay.isConnected) render({ seenOnly: true }); } }; // the spinner in the group head, the rest usable
+  recheckBtn.onclick = async () => { rechecking = true; render({ seenOnly: true }); try { await refresh({ recheck: true }); } finally { rechecking = false; if (live()) render({ seenOnly: true }); } }; // the spinner in the group head, the rest usable
   $('.desktop-launch-seen-show').onclick = () => { showSystem = !showSystem; patchUserState({ [SHOW_SYSTEM_KEY]: showSystem }); render({ seenOnly: true }); };
   runBtn.onclick = () => {
     const exec = execIn.value.trim();
@@ -1358,9 +1367,9 @@ export async function showLaunchDialog(app, opts = {}) {
   execIn.addEventListener('keydown', (e) => { if (enterSubmits(e)) runBtn.click(); });
   argsIn.addEventListener('keydown', (e) => { if (enterSubmits(e)) runBtn.click(); });
 
-  const off = app.ws.onGlobal((m) => { if (m.type === 'desktop-apps-updated' && overlay.isConnected) { if (data) { data.apps = m.apps; renderRunning(); } } }); // the Running rows only — never the catalog under the user's pointer
-  const offApps = app.ws.onGlobal((m) => { if (m.type === 'apps-updated' && overlay.isConnected && (m.host || 'local') === host) refresh(); }); // Layer 0: an app installed / removed / put back — the catalog's rows follow
-  const offSeen = app.ws.onGlobal((m) => { if (m.type === 'desktop-apps-witness' && overlay.isConnected && (m.host || 'local') === host && Array.isArray(m.rows)) seenPatch(m.rows, m.witness); }); // lane apps-dialog-fast: the listing landed — the group only
+  const off = app.ws.onGlobal((m) => { if (m.type === 'desktop-apps-updated' && live()) { if (data) { data.apps = m.apps; renderRunning(); } } }); // the Running rows only — never the catalog under the user's pointer
+  const offApps = app.ws.onGlobal((m) => { if (m.type === 'apps-updated' && live() && (m.host || 'local') === host) refresh(); }); // Layer 0: an app installed / removed / put back — the catalog's rows follow
+  const offSeen = app.ws.onGlobal((m) => { if (m.type === 'desktop-apps-witness' && live() && (m.host || 'local') === host && Array.isArray(m.rows)) seenPatch(m.rows, m.witness); }); // lane apps-dialog-fast: the listing landed — the group only
   // ── P10 (design-agent-browser-v2 §6.6 / D27 (b)): the user's side of the
   // OTHER window class — the switch's state and, per window an agent holds on
   // their real desktop, a Pause / Resume that rides the same takeover verdicts
@@ -1389,12 +1398,12 @@ export async function showLaunchDialog(app, opts = {}) {
       row.appendChild(btn); deskEl.appendChild(row);
     }
   };
-  const offDesk = app.ws.onGlobal((m) => { if (m.type === 'window-leases-updated' && overlay.isConnected) renderDesk(); });
+  const offDesk = app.ws.onGlobal((m) => { if (m.type === 'window-leases-updated' && live()) renderDesk(); });
   renderDesk();
   // lane D: a default scale chosen here, in a window's Scale ▸ or on another client re-renders the cards
   wireAppPrefs(app);
-  const offPrefs = onAppPrefs(() => { if (overlay.isConnected) render(); });
-  const obs = new MutationObserver(() => { if (!overlay.isConnected) { try { off?.(); } catch {} try { offApps?.(); } catch {} try { offSeen?.(); } catch {} try { appsSec?.dispose(); } catch {} try { offDesk?.(); } catch {} try { offPrefs?.(); } catch {} try { offMachines?.(); } catch {} obs.disconnect(); } });
+  const offPrefs = onAppPrefs(() => { if (live()) render(); });
+  const obs = new MutationObserver(() => { if (!live()) { try { off?.(); } catch {} try { offApps?.(); } catch {} try { offSeen?.(); } catch {} try { appsSec?.dispose(); } catch {} try { offDesk?.(); } catch {} try { offPrefs?.(); } catch {} try { offMachines?.(); } catch {} obs.disconnect(); } });
   obs.observe(document.body, { childList: true });
 
   render();
@@ -1402,7 +1411,7 @@ export async function showLaunchDialog(app, opts = {}) {
   // decide the disclosure ONCE: the persisted preference, or forced open by an
   // empty catalog (nothing else to click — not persisted)
   // lane desktop-picker-instant: the hub's last known rows AT ONCE; a probe that lands later patches its row
-  const offMachines = watchMachines(app, (ms) => { if (!overlay.isConnected) return; machines = ms; renderMachines(); }, (r) => { if (r && r.error && overlay.isConnected) showToast(r.error, { type: 'error' }); });
+  const offMachines = watchMachines(app, (ms) => { if (!live()) return; machines = ms; renderMachines(); }, (r) => { if (r && r.error && live()) showToast(r.error, { type: 'error' }); });
   renderMachines();
   mountApps();
   const opened = Promise.all([fetchJson('/api/user-state'), refresh()]);
@@ -1410,8 +1419,10 @@ export async function showLaunchDialog(app, opts = {}) {
   const [state, first] = await opened;
   if (state && Array.isArray(state[RECENTS_KEY])) { recents = state[RECENTS_KEY].slice(0, RECENTS_MAX); render(); }
   setAdvanced(doc ? false : advancedOpenFor(state, !!first?.registryEmpty)); // §7.9: a document never opens "Advanced"
-  setTimeout(() => {
-    if (!overlay.isConnected) return;
+  // lane dialog-yield r4: its liveness is the shell's live() (every observer above: a queued launcher's overlay is detached — its
+  // body-childList observer read that as «closed» and unsubscribed every follower before it opened); the focus waits for the open
+  if (await ready) setTimeout(() => {
+    if (!live()) return;
     if (advancedOpen) focusQuiet(execIn);
     else focusQuiet(regEl.querySelector('.desktop-launch-card:not(:disabled)') || regEl.querySelector('.desktop-launch-office-install') || advToggle);
     body.removeAttribute('aria-busy'); // ANSWERED (lane int347: the one signal of it — a card re-render drops the focus, so the focus is none)

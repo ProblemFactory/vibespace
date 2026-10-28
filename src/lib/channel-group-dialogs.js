@@ -143,7 +143,7 @@ export async function showGroupMembersDialog(app, { group = null } = {}) {
     // the UI action chained after the write does NOT wait for the broadcast echo
     if (!invite && r.group && r.group.id) app.openChannel(GROUP_ADAPTER_ID, r.group.id);
   };
-  setTimeout(() => (nameInput || ctx).focus({ preventScroll: true }), 0);
+  shell.ready.then((s) => { if (s) setTimeout(() => (nameInput || ctx).focus({ preventScroll: true }), 0); });   // once it opens (r4: a queued form waits behind the open one's ask)
 }
 
 export async function renameGroup(group) {

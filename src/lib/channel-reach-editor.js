@@ -204,7 +204,7 @@ export async function showReachDialog(app, conv0) {
   // the picker's roster listener (and its open popover) end WITH the dialog (verify round 2)
   let who = null;
   let off = () => {};   // this open's broadcast handler — released WITH its form (lane dialog-yield r3: keyed on the shell, never on a document id)
-  const { body, close, raised } = createModalShell({ id: 'chan-reach-dialog', key: `${conv0.adapterId}/${conv0.id}`, title: t('Reach & policy — {title}', { title: conv.title || conv.id }), dialogClass: 'chan-dialog chan-reach', bodyClass: 'chan-flow-body', escapeToClose: true, onClose: () => { if (who) who.close(); off(); }, kind: 'form' });
+  const { body, close, raised, live } = createModalShell({ id: 'chan-reach-dialog', key: `${conv0.adapterId}/${conv0.id}`, title: t('Reach & policy — {title}', { title: conv.title || conv.id }), dialogClass: 'chan-dialog chan-reach', bodyClass: 'chan-flow-body', escapeToClose: true, onClose: () => { if (who) who.close(); off(); }, kind: 'form' });
   if (raised) return;   // raised: the same subject's form, as it was
   let current = conv;
   // "Grant reach to…": ONE picker for the dialog's life (a repaint re-appends it — never re-created, a
@@ -306,9 +306,9 @@ export async function showReachDialog(app, conv0) {
   const key = `${conv.adapterId}/${conv.id}`;
   const onBroadcast = (msg) => {
     if (msg.type !== 'channels-updated') return;
-    if (!body.isConnected) { off(); return; }
+    if (!live()) { off(); return; }   // r4: THE liveness predicate — a queued form's body is detached, not closed (it unsubscribed itself and opened deaf)
     if (msg.partial && !(Array.isArray(msg.changedKeys) && msg.changedKeys.includes(key))) return;
-    fetchJson(base).then((r) => { if (r && !r.error && r.conversation && body.isConnected) { current = r.conversation; draw(); } }).catch(() => {});
+    fetchJson(base).then((r) => { if (r && !r.error && r.conversation && live()) { current = r.conversation; draw(); } }).catch(() => {});
   };
   app.ws.onGlobal(onBroadcast);
   off = () => { off = () => {}; try { app.ws.offGlobal(onBroadcast); } catch { /* the socket is gone */ } };

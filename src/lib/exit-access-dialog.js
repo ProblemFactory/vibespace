@@ -105,13 +105,14 @@ async function fetchView(hostId) {
 export async function openExitAccessDialog(app, { hostId, name = '' } = {}) {
   // lane dialog-unsaved-guard: who / commands / the hub's answer changed and not saved ⇒ ✕ / Esc / the backdrop asks
   let dirtyNow = () => false; let saveNow = async () => true;
-  const { body, close, dialog, raised } = createModalShell({ id: 'exit-access-dialog', key: hostId, title: t('Who can use {machine}?', { machine: name || hostId }), dialogClass: 'exit-access-dialog', bodyClass: 'exit-access-body', escapeToClose: true,
+  const { body, close, dialog, raised, ready } = createModalShell({ id: 'exit-access-dialog', key: hostId, title: t('Who can use {machine}?', { machine: name || hostId }), dialogClass: 'exit-access-dialog', bodyClass: 'exit-access-body', escapeToClose: true,
     unsaved: { isDirty: () => dirtyNow(), save: () => saveNow() }, kind: 'form' });
   if (raised) return null;   // raised: the same subject's form, as it was
   body.textContent = t('Loading…');
   let data;
   try { data = await fetchView(hostId); }
   catch (e) { body.textContent = e.message || t('Could not change who can use it'); showToast(codeWords(e.code, { error: e.message }), { type: 'error' }); return; }
+  if (!(await ready)) return null;   // r4: queued behind another machine's open form (its ask) — drawn when it opens; null: the person kept that one
   const machine = (data.machine && data.machine.name) || name || hostId;
   const hdr = dialog.querySelector('.dialog-header h3'); if (hdr) hdr.textContent = t('Who can use {machine}?', { machine });
   draw(data);

@@ -531,8 +531,8 @@ console.log('— ⑥ Download another build…: the two list parsers, THE compat
     ok(said.size > 45 && !miss.length, `${lang}: every sentence of the picker (${said.size}) has its entry`, miss);
   }
   const dg = read('src/lib/browser-build-dialog.js'), np = read('src/lib/browser-new-profile.js');
-  ok(/if \(r\.kind === 'download'\) \{ list\.appendChild\(downloadRow\(r, \(\) => openPicker\(\)\)\); continue; \}/.test(dg) && /openBuildDialog\(app, id, \{ label, onDone, pick: v, opener: 'system' \}\)/.test(dg) && /if \(r\.kind === 'download'\) \{ order\.push\(row \|\| downloadRow\(r, openBuildPicker\)\); continue; \}/.test(np) && /st\.buildDownload = r && !r\.error \? r\.download \|\| null : null;/.test(np),
-    'wiring: Change build… opens the picker in the dialog and comes back with the new build picked (the finished download re-opens it: the system\'s open — lane dialog-yield r3); New profile…\'s build section opens it in place');
+  ok(/if \(r\.kind === 'download'\) \{ list\.appendChild\(downloadRow\(r, \(\) => openPicker\(\)\)\); continue; \}/.test(dg) && /openBuildDialog\(app, id, \{ label, onDone, pick: v, opener: 'person' \}\)/.test(dg) && /if \(r\.kind === 'download'\) \{ order\.push\(row \|\| downloadRow\(r, openBuildPicker\)\); continue; \}/.test(np) && /st\.buildDownload = r && !r\.error \? r\.download \|\| null : null;/.test(np),
+    'wiring: Change build… opens the picker in the dialog and comes back with the new build picked (the person\'s finished download re-opens it in front — opener \'person\', lane dialog-yield r4); New profile…\'s build section opens it in place');
 }
 
 // ═══ ⑤ controls ═══════════════════════════════════════════════════════════════

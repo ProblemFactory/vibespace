@@ -212,11 +212,13 @@ export function showTotpAddDialog({ refresh = () => {} } = {}) {
   const wipe = () => {
     st.closed = true; st.shown = null;
     clearInterval(st.tick); st.tick = null;
-    link.value = ''; seed.value = ''; digitsEl.textContent = '';
+    try { link.value = ''; seed.value = ''; digitsEl.textContent = ''; } catch { /* a raised re-open built no fields of its own */ }
   };
-  const { dialog, body, close } = createModalShell({ id: 'vault-totp-add', title: t('Add a two-step code'), dialogClass: 'vault-dialog-box vault-totp-add-dialog', escapeToClose: true,
+  // one subject: one two-step code being added (lane dialog-yield r4 — a FORM; master's call had no kind, §103 RED on the rebase)
+  const { dialog, body, close, raised } = createModalShell({ id: 'vault-totp-add', kind: 'form', title: t('Add a two-step code'), dialogClass: 'vault-dialog-box vault-totp-add-dialog', escapeToClose: true,
     onClose: () => wipe(),
     unsaved: { isDirty: () => !st.saved && !!(link.value || seed.value), save: () => doSave(), discard: () => wipe() } });
+  if (raised) return;   // raised: the one being added, as it was
   const field = (label, ...controls) => { const l = el('label', 'vault-secret-field'); l.append(el('span', 'vault-secret-label', label), ...controls); return l; };
   const masked = (cls, ph) => {
     const i = el('input', `vault-pw ${cls}`);

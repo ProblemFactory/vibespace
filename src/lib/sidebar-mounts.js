@@ -1140,7 +1140,7 @@ export function installSidebarMounts(Sidebar) {
     // server here over the device link. Detected ports + a manual box; each
     // becomes http://127.0.0.1:<localPort> opened in the embedded browser.
     async _showPortsDialog(h) {
-      const { body, close, raised } = createModalShell({ id: 'ports-dialog', key: h.id, title: tr('Forward a port from "{name}"', { name: h.name }), bodyClass: 'mounts-dialog-body', escapeToClose: true, kind: 'form' });
+      const { body, close, raised, ready, live } = createModalShell({ id: 'ports-dialog', key: h.id, title: tr('Forward a port from "{name}"', { name: h.name }), bodyClass: 'mounts-dialog-body', escapeToClose: true, kind: 'form' });
       if (raised) return null;   // raised: the same subject's form, as it was
       // The forward binds on THIS SERVER's loopback (the browser can't reach
       // it directly), so "Open" routes through the embedded browser's proxy
@@ -1148,11 +1148,12 @@ export function installSidebarMounts(Sidebar) {
       const openForward = (url) => { if (url) { this.app.openBrowser?.(url, { proxy: true }); close(); } };
       // is a relay (public URLs) available on this instance? — the declared capability, never a plugin id
       const frpOk = await pluginProvides('relay');
+      if (!(await ready)) return null;   // r4: queued behind another machine's open Ports (its ask) — drawn when it opens; null: the person kept that one
       const render = async () => {
         // live refresh hook: the machine-ports-new broadcast re-renders an
         // OPEN dialog for this machine; self-clears once the dialog is gone
         this._portsDialogRefresh = (hid) => {
-          if (!body.isConnected) { this._portsDialogRefresh = null; return; }
+          if (!live()) { this._portsDialogRefresh = null; return; }   // r4: THE liveness predicate (never the body's isConnected)
           if (hid === h.id) render().catch(() => {});
         };
         body.innerHTML = `<p class="empty-hint" style="margin:0 0 8px">${escHtml(tr('A service listening on this machine’s 127.0.0.1 becomes reachable here (opened through the app’s proxy). Runs over the device link — no public exposure.'))}</p>`;
@@ -1631,7 +1632,7 @@ export function installSidebarMounts(Sidebar) {
     // need this — Add machine installs the agent over ssh at first use.
     async _showDevicePairDialog(h = null) {
       const existing = !!(h && h.deviceId);
-      const { body, close, raised } = createModalShell({ id: 'device-pair-dialog', key: h ? h.id : 'new', title: existing ? tr('Pairing command — "{name}"', { name: h.name }) : tr('Pair a device'), bodyClass: 'device-pair-body', escapeToClose: true, kind: 'form' });
+      const { body, close, raised, ready, live } = createModalShell({ id: 'device-pair-dialog', key: h ? h.id : 'new', title: existing ? tr('Pairing command — "{name}"', { name: h.name }) : tr('Pair a device'), bodyClass: 'device-pair-body', escapeToClose: true, kind: 'form' });
       if (raised) return;   // raised: the same subject's form, as it was
       if (existing) {
         // the sheet's head: the device's dial state, so the user sees whether the OLD command ever worked
@@ -1736,9 +1737,9 @@ export function installSidebarMounts(Sidebar) {
       if (inp) inp.addEventListener('input', syncName);
       // verify-r5 A1: the note follows the machine list while the dialog is open — a second window pairing this name, or
       // the device coming online, changes what Create does (the note was judged once, at the keystroke)
-      const nameTick = inp ? setInterval(() => { if (!body.isConnected || !inp.isConnected) { clearInterval(nameTick); return; } syncName('tick'); }, 1000) : null;
+      const nameTick = inp ? setInterval(() => { if (!live() || !body.contains(inp)) { clearInterval(nameTick); return; } syncName('tick'); }, 1000) : null;   // r4: live() — a queued sheet's body is detached, not closed (its field still in it)
       body.append(pickHost, hint, err, actions);
-      if (inp) setTimeout(() => inp.focus(), 50);
+      if (inp) ready.then((s) => { if (s) setTimeout(() => inp.focus(), 50); });   // once it opens (r4: a queued form waits behind the open one's ask)
       let picker = null;
       try {
         const a = await api(`/api/device/dial-addresses?device=${encodeURIComponent(existing ? h.deviceId : 'DEVICE')}`);
@@ -1845,7 +1846,7 @@ export function installSidebarMounts(Sidebar) {
     async _showBootstrapDialog(h) {
       let off = null; // assigned after the handler registers — close() can run first (TDZ trap)
       // No backdrop close: a stray click mid-bootstrap must not dismiss the progress view.
-      const { overlay, body, close, raised } = createModalShell({ id: 'host-setup-dialog', key: h.id, undismissable: true,   // a running set-up is never closed by a neighbour's open (round 3)
+      const { overlay, body, close, raised, live } = createModalShell({ id: 'host-setup-dialog', key: h.id, undismissable: true,   // a running set-up is never closed by a neighbour's open (round 3)
         title: `Set up ${h.name}`, minWidth: '400px',
         closeOnBackdrop: false, escapeToClose: false, onClose: () => off?.(), kind: 'form', // (no Escape either: the set-up runs on — its ✕ is the one door)
       });
@@ -1872,7 +1873,7 @@ export function installSidebarMounts(Sidebar) {
       const handler = (msg) => {
         // Overlay can be removed by paths that never call close() (another
         // dialog's dedup overlay.remove()) — self-unregister on first message.
-        if (!overlay.isConnected) { this.app.ws.offGlobal(handler); return; }
+        if (!live()) { this.app.ws.offGlobal(handler); return; }   // r4: THE liveness predicate
         if (msg.type !== 'host-bootstrap' || msg.hostId !== h.id) return;
         if (msg.kind === 'step' && msg.key) { state[msg.key] = msg.status; paint(); }
         else if (msg.kind === 'log' && msg.line) appendLog(msg.line);
@@ -2383,7 +2384,7 @@ export function installSidebarMounts(Sidebar) {
       try { cfg = await api(`/api/mounts/${m.id}/config`, { headers: revealHeaders() }); }
       catch (e) { showToast(e.message || tr('Failed to load connection'), { type: 'error' }); return; }
       const name = cfg.name || m.name;
-      const { body, close, raised } = createModalShell({ id: 'mount-edit-dialog', key: m.id, title: `${tr('Edit')} "${name}"`, bodyClass: 'mounts-dialog-body', escapeToClose: true, unsaved: { save: () => form.onsubmit({ preventDefault() {} }) }, kind: 'form' });
+      const { body, close, raised, ready, live } = createModalShell({ id: 'mount-edit-dialog', key: m.id, title: `${tr('Edit')} "${name}"`, bodyClass: 'mounts-dialog-body', escapeToClose: true, unsaved: { save: () => form.onsubmit({ preventDefault() {} }) }, kind: 'form' });
       if (raised) return null;   // raised: the same subject's form, as it was
       const form = document.createElement('form');
       form.className = 'mounts-form';
@@ -2391,6 +2392,7 @@ export function installSidebarMounts(Sidebar) {
       if (this._providerRow(cfg.type).presets) {   // the row's OAuth client may be an instance preset
         try { editPresets = (await api('/api/mounts/drive-defaults')).presets || []; } catch {}
       }
+      if (!(await ready) || !live()) return null;   // r4: queued behind another mount's open Edit (its ask) — its fields land when it opens; null: kept / closed
       const fields = [['name', tr('Name'), '', name], ...this._mountEditFields(cfg, editPresets)];
       const maskedKeys = maskVaultFields(fields, cfg);   // lane vault-contents-window r2
       // Mount point: empty = default location — m.path shows the current/default

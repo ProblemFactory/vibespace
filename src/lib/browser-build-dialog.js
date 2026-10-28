@@ -74,7 +74,7 @@ export async function openBuildDialog(app, profileId, { label = '', onDone = nul
   footer.append(cancel, change);
   shell.dialog.append(notes, footer);
   // lane chrome-builds-download: the picker opens IN this dialog (the rows step aside); a finished download reopens Change build… with the new build picked
-  const openPicker = () => { st.picker = pickerInDialog(body, [footer, notes], { profileId: id, onDownloaded: (v) => { shell.close(); openBuildDialog(app, id, { label, onDone, pick: v, opener: 'system' }); } }); };   // (a finished DOWNLOAD re-opens it — the system's open: never the keys of a person typing elsewhere; lane dialog-yield r3)
+  const openPicker = () => { st.picker = pickerInDialog(body, [footer, notes], { profileId: id, onDownloaded: (v) => { shell.close(); openBuildDialog(app, id, { label, onDone, pick: v, opener: 'person' }); } }); };   // (the person's own download, watched in this dialog, re-opens it in front — r3's 'system' put it behind; typedLast still keeps a field they moved on to; lane dialog-yield r4)
   async function doChange() {
     if (st.busy) return;
     const choice = choiceOfRow(st.picked, pathInput ? pathInput.value : '');
