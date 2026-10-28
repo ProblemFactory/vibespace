@@ -277,6 +277,26 @@ try {
   await A.evalJs(`(() => { const it = [...document.querySelectorAll('#user-todos-popup .ut-item')].find((e) => /approved by the policy judge/.test(e.textContent)); const t = it && it.querySelector('.ut-text'); if (t) t.click(); return !!t; })()`);
   const row = await A.until(`(() => { const r = ${LIST_ROW(LABEL)}; const p = r && r.querySelector('.vw-use-policy'); return p ? p.textContent : null; })()`, { timeout: 10000 });
   check('its door opens the entry\'s row, which says the policy (and that the judge is off on this hub — its setting is the owner\'s)', /Policy for the judge: «only 192\.168\.1\.1, read-only status calls to read the WAN status» — the judge is off/.test(String(row)), row);
+
+  console.log('⑧ OFF greys the grant chip «paused», in three languages (round 3 MINOR — LOOK at the shots)');
+  const useId = REF.replace(/^vault:\/\/secrets\/(secret:[0-9a-f]{10})\/secret$/, 'secrets:$1#secret');
+  const offR = await A.api('POST', '/api/vault/runnable', { id: useId, on: false });
+  check('the owner turns the entry OFF (a narrowing — a click, no password)', offR.status === 200 && offR.json && offR.json.open === false, offR.json);
+  for (const [lang, file] of [['en', 'vug-7-paused-en.png'], ['zh', 'vug-8-paused-zh.png'], ['ja', 'vug-9-paused-ja.png']]) {
+    await A.evalJs(`localStorage.setItem('vibespace.lang', ${JSON.stringify(lang)}); true`);   // language is a per-device localStorage choice (src/lib/i18n.js)
+    await A.cdp('Page.navigate', { url: URL });
+    await A.until(`!!(window.app && app.replayOpenSpec)`, { timeout: 30000 });
+    await A.until(`!document.getElementById('loading-screen')`, { timeout: 30000 });
+    if (await A.evalJs(`!!document.getElementById('vault-unlock-dialog')`)) { await A.api('POST', '/api/vault/unlock', { password: SECOND }); await sleep(300); }
+    await A.evalJs(`app.replayOpenSpec({ action: 'openVault' })`);
+    await A.until(`!!(${LIST_ROW(LABEL)})`, { timeout: 15000 });
+    await sleep(400);
+    const st = await A.evalJs(`(() => { const r = ${LIST_ROW(LABEL)}; const chips = r && r.querySelector('.vw-use-chips'); const note = r && r.querySelector('.vw-use-paused-note'); return { chip: !!(r && r.querySelector('.vw-use-chip')), paused: !!(chips && chips.classList.contains('vw-use-paused')), note: note ? note.textContent : null }; })()`);
+    await A.shot(file);
+    if (lang === 'en') check('OFF ⇒ the grant chips are greyed «paused» and the paused note appears (en)', !!st && st.chip && st.paused === true && /Paused while the entry is off/.test(String(st.note)), st);
+    else check(`the paused note renders in ${lang} (a real string, not the English key)`, !!st && st.paused === true && !!st.note && !/Paused while the entry is off/.test(String(st.note)), st);
+  }
+  await A.evalJs(`localStorage.setItem('vibespace.lang', 'auto'); true`);
 } catch (e) {
   check('the run did not throw', false, e && e.stack);
 } finally {

@@ -444,6 +444,13 @@ const ROWS = [
     c: [decl('the ONE writer of the record is the run door (recordApproval); the policy is written only by setPolicy behind 验证是你')],
     d: [decl('the words are the door\'s own i18n lines (the time, «inside your policy (p)», the command head with its references — never a value, never vendor prose)')],
     gate: [['scripts/test-vault-use-grants.mjs', 'THE RECORD where a run card']] },
+  { id: 'vault-store-refused', surface: 'lane vault-use-grants round 3 (MAJOR item 2) — the For-you notice «The vault-run store could not be trusted — agent runs are closed and standing approvals are paused» (the marked store failed its mark: a tamper / replay / deletion); nothing is answered, it tells the owner to re-mark by setting a switch in the Vault window',
+    doors: [['A', 'src/server/vault-run-door.js', /^vault-store-refused$/]],
+    a: [decl('nothing is answered on the item: it is a fail-closed WARNING. While the store is refused every entry is closed for runs AND every standing grant is paused; the owner recovers by setting any switch (which re-marks the store)')],
+    b: [decl('no narrowing/widening — the pause is automatic (fail closed); an owner write re-marks and lifts it')],
+    c: [decl('the ONE writer of the notice is the run door (noteRefused, filed once per distinct failure); the store is marked by the vault (vault.macOf)')],
+    d: [decl('the words are the door\'s own i18n lines (the failure reason — never a value, never the store\'s contents)')],
+    gate: [['scripts/test-vault-use-grants.mjs', 'a For-you row']] },
   // lane browser-probe-transient (B-0b8c): the browser-version notice's Check again — a probe, not an approval
   { id: 'browser-floor-check', surface: 'lane browser-probe-transient — the For-you notice «Could not read the agent-browser version after N tries…» and its Check again',
     doors: [['A', 'src/server/browser-keeper.js', /^browser-floor-check$/]],

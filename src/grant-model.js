@@ -101,7 +101,7 @@ const ENTRY_FIELDS = Object.freeze({
   'channel-api': Object.freeze({ tier: Object.freeze(['none', 'read', 'write-ask', 'write-auto', 'write-all']), perDay: 'count' }),
   window: Object.freeze({ origin: Object.freeze(['user', 'request', 'self-open']) }),
   'group-visibility': Object.freeze({ level: Object.freeze(['visible', 'messageable']) }),
-  'vault-use': Object.freeze({ hosts: 'hosts', until: 'time' }),   // lane vault-use-grants
+  'vault-use': Object.freeze({ hosts: 'hosts', until: 'time', tool: 'tool', mac: 'mac' }),   // lane vault-use-grants (round 3: `tool` scopes a wildcard default to its CLI; `mac` is the vault's HMAC so a forged row is dropped)
 });
 /** lane vault-use-grants: ONE destination a vault-use entry may name — EVERY shape the run card can name (round 2 MAJOR):
  *  a host name (one label like `router` or many like `api.example.com`), an IPv4 / IPv6 address (IPv6 bracketed or bare),
@@ -109,9 +109,32 @@ const ENTRY_FIELDS = Object.freeze({
  *  `@entry` («the hosts the entry was stored for», resolved at use time). Never «any host» — no `*` alone, no `*.<TLD>`. A
  *  bare label (`com`, `lan`) is a HOST NAME, not a wildcard: it covers ONLY itself (src/vault-use-grant.js `hostCovers`
  *  requires a dot before it may match subdomains — a single label can never stand for everything under it). */
-const _L = '[a-z0-9](?:[a-z0-9-]{0,62})';
+const _L = '[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?';   // round 3 (MINOR): a DNS label never starts or ends with a hyphen (`bad-.com` refused)
 const HOST_TOKEN_RE = new RegExp(`^(?:@entry|(?:${_L}(?:\\.${_L})*\\.?|\\*(?:\\.${_L}){2,}|\\[[0-9a-f:.]{2,45}\\])(?::\\d{1,5})?|[0-9a-f]{0,4}(?::[0-9a-f]{0,4}){2,7})$`, 'i');
 const HOSTS_MAX = 16;
+// lane vault-use-grants round 3 (item 5): the small public-suffix list (the top multi-label registry boundaries). A
+// wildcard whose BASE is one of these (`*.co.uk`) spans unrelated parties, so it is refused; the full PSL stays backlog. A
+// wildcard over a MULTI-TENANT registrable domain (`*.amazonaws.com`, `*.github.io`) is allowed but said in words on the card.
+const PUBLIC_SUFFIXES = new Set(['co.uk', 'org.uk', 'gov.uk', 'ac.uk', 'me.uk', 'ltd.uk', 'plc.uk', 'net.uk', 'sch.uk', 'com.au', 'net.au', 'org.au', 'edu.au', 'gov.au', 'id.au', 'co.nz', 'net.nz', 'org.nz', 'govt.nz', 'co.jp', 'ne.jp', 'or.jp', 'go.jp', 'ac.jp', 'co.za', 'org.za', 'com.br', 'net.br', 'gov.br', 'com.cn', 'net.cn', 'org.cn', 'gov.cn', 'com.mx', 'com.sg', 'com.hk', 'co.in', 'co.kr', 'com.tr', 'co.il']);
+const ipv4ok = (h) => !/^\d{1,3}(?:\.\d{1,3}){3}$/.test(h) || h.split('.').every((o) => Number(o) <= 255);   // round 3 (MINOR): a dotted-quad's octets are ≤ 255 (1.2.3.999 refused)
+/** A single host token is valid: the shape grammar + a port in 1..65535 + IPv4 octets ≤ 255 + a wildcard base that is
+ *  neither numeric nor a public suffix (round 3, item 5 + ports MINOR). → the normalized token | null. */
+function hostTokenOk(h) {
+  if (h === '@entry') return '@entry';
+  if (h.length > 253 || !HOST_TOKEN_RE.test(h)) return null;
+  const m = /:(\d{1,5})$/.exec(h.replace(/^\[.*\]/, ''));   // a :port (not inside IPv6 brackets)
+  if (m) { const p = Number(m[1]); if (!(p >= 1 && p <= 65535)) return null; }
+  const n = h.replace(/\.$/, '').replace(/^\[(.*)\]$/, '$1');
+  const bare = n.replace(/:(\d{1,5})$/, '').replace(/^\[(.*)\]$/, '$1');
+  if (!ipv4ok(bare)) return null;
+  if (bare.startsWith('*.')) {
+    const base = bare.slice(2);
+    const labels = base.split('.');
+    if (/^\d+$/.test(labels[labels.length - 1])) return null;   // a wildcard never ends in a numeric label (never an address: *.1.1, *.168.1.1)
+    if (PUBLIC_SUFFIXES.has(base)) return null;                 // a wildcard over a public suffix is refused
+  }
+  return n;
+}
 /** A `hosts` value → its normal list (lower-cased, a trailing dot and IPv6 brackets dropped, deduplicated, ≤ HOSTS_MAX) |
  *  null when it is not a non-empty list of host tokens (the entry is then refused at a write, dropped at a read). */
 function hostListOf(v) {
@@ -119,8 +142,8 @@ function hostListOf(v) {
   const out = [];
   for (const x of v) {
     const h = String(x == null ? '' : x).trim().toLowerCase();
-    if (h.length > 253 || !HOST_TOKEN_RE.test(h)) return null;
-    const n = h === '@entry' ? h : h.replace(/\.$/, '').replace(/^\[(.*)\]$/, '$1');
+    const n = hostTokenOk(h);
+    if (n === null) return null;
     if (n && !out.includes(n)) out.push(n);
   }
   return out.length ? out : null;
@@ -159,6 +182,8 @@ function normEntry(e, door) {
     if (e[f] === undefined || e[f] === null) continue;
     if (allowed === 'count') { const n = Math.floor(Number(e[f])); if (!(n > 0) || n > 100000) return null; out[f] = n; continue; }
     if (allowed === 'hosts') { const h = hostListOf(e[f]); if (!h) return null; out[f] = h; continue; }   // lane vault-use-grants
+    if (allowed === 'tool') { const t = String(e[f]).toLowerCase(); if (!/^[a-z0-9][a-z0-9.+-]{0,39}$/.test(t)) return null; out[f] = t; continue; }   // lane vault-use-grants round 3: the CLI a wildcard default is granted to
+    if (allowed === 'mac') { if (!/^[0-9a-f]{64}$/.test(String(e[f]))) return null; out[f] = String(e[f]); continue; }   // lane vault-use-grants round 3: the vault's HMAC over the canonical member
     if (allowed === 'time') { const n = Math.floor(Number(e[f])); if (!(n > 0) || n > 8.64e15) return null; out[f] = n; continue; }
     if (!allowed.includes(e[f])) return null;
     out[f] = e[f];

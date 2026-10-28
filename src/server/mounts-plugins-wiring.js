@@ -123,7 +123,7 @@ const vaultRun = require('./vault-run-door.js').create({ dataDir: path.join(root
   // lane vault-use-grants (R4, default OFF): the policy judge = the ONE decisions caller (decision-engine judge, use vault-use-policy —
   // its gates: the LLM plugin, the key, the day's money); the owner's policy rides the question, the card's facts the input
   policyOn: () => serverSetting('vault.policyJudge') === true,
-  policyJudge: (parts, { policy, memo }) => decisionEngine.judge('vault-use-policy', parts, { questions: [require('../decision-model.js').vaultPolicyQuestion(policy)], memo, perHour: 30 }),   // round 2 (claim 2): a per-hour bound beside the daily budget — a burst of distinct commands cannot run the vendor unbounded
+  policyJudge: (parts, { policy, memo }) => decisionEngine.judge('vault-use-policy', parts, { questions: [require('../decision-model.js').vaultPolicyQuestion(policy)], memo }),   // round 3 (MAJOR item 6): `memo` is ALWAYS null (the door's marked policyApproved is the sole memo, never the engine's unmarked decision-memo.json), and the per-hour bound is the door's OWN counter (the engine's `perHour` was SHARED with every other use)
   agentEnv: () => require('../agent-env.js').agentEnv(process.env, { drop: require('../harness-env.js').agentCredentialEnvNames(require('../harnesses').list()) }),
   instanceKind: () => require('../hub-act-policy.js').instanceKindOf(process.env, { presetsDir: (() => { try { return require('./cluster-presets.js').sharedPresets().dir || null; } catch { return null; } })() }),
   liveOf: (cid) => { for (const s of activeSessions.values()) if (s && cid && (s.backendSessionId || s.claudeSessionId) === cid) return true; return false; } });

@@ -259,10 +259,18 @@ const INTERPRETERS = Object.freeze(['node', 'nodejs', 'deno', 'bun', 'python', '
 // ── THE KNOWN TOOLS (§8.4 — P1 vault-run-egress fences the `proxyEnv` ones) ──
 const SSH_VALUE_FLAGS = ['-b', '-c', '-D', '-E', '-e', '-F', '-I', '-i', '-J', '-L', '-l', '-m', '-O', '-o', '-p', '-P', '-Q', '-R', '-S', '-W', '-w', '-B'];
 const SSH_KEYED = ['-o', '-F', '-J', '-W', '-L', '-R', '-D', '-S'];   // lane vault-run-door: where the connection goes / what it runs (ProxyCommand) — the value is the shape
+// lane vault-use-grants round 3 (BLOCKER item 1 + MAJOR item 4): the argument-taking flags of each URL tool, DERIVED from
+// `<tool> --help all` — so a flag's VALUE (-o out.json, --cacert ca.pem, -T file, -d data, -H header) is NEVER read as a
+// positional host (round 2's dotted-positional rule stored `router.pem` as a granted host). `--url` is DELIBERATELY left
+// out so a schemeless `--url evil.example` stays a positional the target reader resolves. THE SEAM: these are
+// vault-agent-own r19's CURL_VALUE_FLAGS / WGET_VALUE_FLAGS / HTTPIE_VALUE_FLAGS verbatim (train-C merges to ONE grammar).
+const CURL_VALUE_FLAGS = ['-A', '--user-agent', '-b', '--cookie', '-c', '--cookie-jar', '-C', '--continue-at', '-d', '--data', '--data-ascii', '--data-binary', '--data-raw', '--data-urlencode', '--json', '-D', '--dump-header', '-e', '--referer', '-E', '--cert', '--cert-type', '--key', '--key-type', '--cacert', '--capath', '--ciphers', '-F', '--form', '--form-string', '-H', '--header', '-m', '--max-time', '--connect-timeout', '-o', '--output', '--output-dir', '-r', '--range', '-T', '--upload-file', '-u', '--user', '-U', '--proxy-user', '-w', '--write-out', '-X', '--request', '-y', '--speed-time', '-Y', '--speed-limit', '-z', '--time-cond', '--retry', '--retry-delay', '--retry-max-time', '--limit-rate', '--max-filesize', '--max-redirs', '--oauth2-bearer', '--aws-sigv4', '--interface', '--local-port', '-Q', '--quote', '--stderr', '--trace', '--trace-ascii', '--pinnedpubkey', '--pass', '--proto', '--proto-redir', '--variable', '--url-query', '--netrc-file', '--hsts', '--etag-save', '--etag-compare', '--unix-socket', '--abstract-unix-socket', '--dns-servers', '--alt-svc'];
+const WGET_VALUE_FLAGS = ['-O', '--output-document', '-o', '--output-file', '-a', '--append-output', '-P', '--directory-prefix', '-U', '--user-agent', '--header', '--user', '--password', '--http-user', '--http-password', '--post-data', '--post-file', '--body-data', '--body-file', '--method', '-t', '--tries', '-T', '--timeout', '--load-cookies', '--save-cookies', '--ca-certificate', '--certificate', '--private-key', '-w', '--wait', '-Q', '--quota', '--limit-rate', '-l', '--level', '-A', '--accept', '-R', '--reject', '-D', '--domains', '--exclude-domains', '-e', '--execute', '-B', '--base', '--bind-address', '--config', '-i', '--input-file'];
+const HTTPIE_VALUE_FLAGS = ['-a', '--auth', '-A', '--auth-type', '-o', '--output', '--session', '--session-read-only', '--cert', '--cert-key', '--cert-key-pass', '--ciphers', '--ssl', '--timeout', '--max-redirects', '--boundary', '--format-options', '-p', '--print', '-P', '--history-print', '--pretty', '-s', '--style', '--response-charset', '--response-mime', '--default-scheme', '--verify', '--raw', '--proxy'];
 const KNOWN_TOOLS = Object.freeze([
-  { name: 'curl', proxyEnv: true, valueFlags: ['-x', '--proxy', '--preproxy', '--resolve', '--connect-to', '--socks4', '--socks4a', '--socks5', '--socks5-hostname', '--doh-url', '-K', '--config'], keyed: ['-x', '--proxy', '--preproxy', '--resolve', '--connect-to', '--socks4', '--socks4a', '--socks5', '--socks5-hostname', '--doh-url'], configFlags: ['-K', '--config'] },
-  { name: 'wget', proxyEnv: true },
-  { name: 'http', aka: ['https', 'httpie'], proxyEnv: true },
+  { name: 'curl', proxyEnv: true, valueFlags: ['-x', '--proxy', '--preproxy', '--proxy1.0', '--resolve', '--connect-to', '--socks4', '--socks4a', '--socks5', '--socks5-hostname', '--doh-url', '-K', '--config', ...CURL_VALUE_FLAGS], keyed: ['-x', '--proxy', '--preproxy', '--proxy1.0', '--resolve', '--connect-to', '--socks4', '--socks4a', '--socks5', '--socks5-hostname', '--doh-url', '--unix-socket', '--abstract-unix-socket', '--dns-servers', '--alt-svc'], configFlags: ['-K', '--config'] },   // round 3: --proxy1.0 routes like -x; --unix-socket / --abstract-unix-socket / --dns-servers / --alt-svc are destinations a grant can never name ⇒ opaque
+  { name: 'wget', proxyEnv: true, valueFlags: WGET_VALUE_FLAGS, keyed: ['-e', '--execute'], configFlags: ['--config', '-i', '--input-file'] },   // round 3: `-e http_proxy=…` sets a proxy ⇒ opaque
+  { name: 'http', aka: ['https', 'httpie'], proxyEnv: true, valueFlags: HTTPIE_VALUE_FLAGS, keyed: ['--proxy'] },
   { name: 'gh', hosts: ['api.github.com', 'github.com'], hostEnv: ['GH_HOST'], sub: 2, proxyEnv: true, valueFlags: ['-R', '--repo', '--hostname'] },
   { name: 'git', sub: 1, scpLike: true, proxyEnv: true, valueFlags: ['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--config-env'], keyed: ['-c', '--config-env'] },
   { name: 'aws', hosts: ['*.amazonaws.com'], sub: 2, proxyEnv: true, valueFlags: ['--profile', '--region', '--output'] },
@@ -411,20 +419,42 @@ function materialize(run, { valueOf, pathOf }) {
 }
 
 // ── THE SHAPE KEY (decision ④) ──
-const URL_RE = /\b([a-z][a-z0-9+.-]{0,31}):\/\/(?:[^@\s\/?#'"]{0,256}@)?(\[[0-9a-f:.]+\]|[A-Za-z0-9.-]+)(?::(\d{1,5}))?/gi;
-const normHost = (h, port = null) => { const x = String(h || '').toLowerCase().replace(/\.$/, ''); return x && x.length <= 253 ? (port ? `${x}:${port}` : x) : null; };
-function urlHosts(text) { const out = []; let m; URL_RE.lastIndex = 0; while ((m = URL_RE.exec(String(text)))) if (m[1].toLowerCase() !== 'vault') out.push(normHost(m[2], m[3])); return out.filter(Boolean); }
+// lane vault-use-grants round 3 (BLOCKER): a URL's host is what the WHATWG URL parser (`new URL`) says — NOT a character
+// class. The old `[A-Za-z0-9.-]+` stopped at `_` `~` `|` and non-ASCII, so `https://example.com_.evil.net/` read as
+// example.com and a grant for example.com admitted it (the real curl sent Host: example.com_.evil.net). THE SEAM: this is
+// vault-agent-own r19's `urlParse` — at train-C import it; do not keep a second reader. URL_FIND_RE only LOCATES a token.
+const URL_FIND_RE = /\b([a-z][a-z0-9+.-]{0,31}):\/\/\S+/gi;   // scheme://… up to whitespace; the host is read by urlParse
+const URL_TRAIL = /[)\]>.,;'"]+$/;   // trailing punctuation the locator swept up
+const normHost = (h, port = null) => { const x = String(h || '').toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, ''); return x && x.length <= 253 && !/[{}]/.test(x) && !x.split('.').some((l) => l.length > 63) ? (port ? `${x}:${port}` : x) : null; };   // a name > 253 or a label > 63 is not valid DNS; a `{{var}}` is never a host (fail closed)
+/** A scheme://… token → { host, port?, userinfo, bad } by the WHATWG parser. (The seam: vault-agent-own r19's urlParse.) */
+function urlParse(token) {
+  let u; try { u = new URL(String(token)); } catch { return { bad: true }; }
+  const h = normHost(u.hostname, u.port || null);
+  if (!h) return { bad: true };
+  return { host: h, userinfo: !!(u.username || u.password) };
+}
+function urlHosts(text) {
+  const out = []; let m; URL_FIND_RE.lastIndex = 0;
+  while ((m = URL_FIND_RE.exec(String(text)))) { if (m[1].toLowerCase() === 'vault') continue; const r = urlParse(m[0].replace(URL_TRAIL, '')); if (r.host) out.push(r.host); }
+  return out;
+}
 const HOSTNAME = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$|^localhost$/i;
 
-// ── THE RUN'S DESTINATIONS (lane vault-use-grants round 2, BLOCKER) — THE SEAM ──
+// ── THE RUN'S DESTINATIONS (lane vault-use-grants round 2 BLOCKER, round 3 completes it) — THE SEAM ──
 // `shape.hosts` is what the card NAMES (every URL / host-flag / scp target / default). Where the value actually GOES is a
-// wider question: curl's routing flags (-x/--proxy/--connect-to/--resolve/--socks*), ssh's -o ProxyCommand / -J / -W, git's
-// -c, rsync's -e, and a proxy environment variable all send it to a host that never enters `shape.hosts`. `routeHostsOf`
-// reads those too (the SAME reader a card and a grant must share), and returns `opaque:true` when a routing input cannot be
-// resolved to a concrete host (ProxyCommand, a proxy env var, an unparseable value) — the door then asks (fail closed).
-// INTEGRATION SEAM: lane vault-agent-own adds `shape.routeHosts` (every host gh CONTACTS). At train-C merge, the two become
-// ONE: this reader's curl/ssh/git/rsync routing parse folds into that `routeHosts`, and `destinationsOf` reads the field.
-// Until then this is the one function to swap — do not grow a second host grammar beside it.
+// wider question: curl's routing flags (-x/--proxy/--proxy1.0/--connect-to/--resolve/--socks*), ssh's -o ProxyCommand /
+// LocalCommand / -J / -W, git's -c, rsync's -e, wget's -e http_proxy=, a bare positional (curl localhost:9999/x), a numeric
+// address (2130706433), a unix socket, an ssh config alias, and a proxy env var all send it to a host that never enters
+// `shape.hosts`. `routeTargetsOf` reads those too (the SAME reader a card and a grant share); it returns `opaque:true` when a
+// routing input cannot be resolved to a concrete host (ProxyCommand, a unix socket, a non-dotted-quad numeric address, a
+// proxy env var, a config alias) — the door then asks (fail closed). Attached short values (`-xHOST`, `-oProxyCommand=…`)
+// are read by shapeOf's getopt (`shortSplit`), so they reach `keyed` here.
+// INTEGRATION SEAM: vault-agent-own r19 builds a LOCAL `const routeHosts = new Set()` inside its shapeOf and emits a
+// `shape.routeHosts` field (gh's routing inputs). This lane emits the SAME field `shape.routeHosts` + `routeOpaque`, but its
+// builder is a MODULE function — named `routeTargetsOf` (round 3 MINOR) so the merge cannot silently keep r19's local Set in
+// place of this reader. At train-C the two fold into ONE `shape.routeHosts`/`routeOpaque`; `destinationsOf` reads the field.
+// See docs/kb-bugfix-invariants.md «### Round 3 — As-built integration note».
+const SSH_LOCAL_O = new Set(['proxycommand', 'localcommand', 'knownhostscommand', 'permitlocalcommand', 'match']);   // ssh -o keys that run a LOCAL command / redirect — where it goes cannot be told (fail closed)
 /** An authority (no scheme) → { host, port } (userinfo dropped at the LAST `@`, IPv6 brackets handled). */
 function splitAuthority(a) {
   let s = String(a == null ? '' : a).trim();
@@ -435,24 +465,42 @@ function splitAuthority(a) {
   return { host: p.length > 2 ? s : p[0], port: null };   // > 2 colons = a bare IPv6 literal
 }
 const schemeOff = (s) => String(s == null ? '' : s).replace(/^[a-z][a-z0-9+.-]{0,31}:\/\//i, '');
-/** A routing value that names a host → normHost (with its port), or null + sets opaque when it is a word, not a host. */
-function routeHosts(row, kind, hosts, keyed, positionals, plainEnv) {
+const BARE_RE = /^(?:[^\s@\/\\?#]*@)?(\[[0-9a-f:.]+\]|[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?)?(?::(\d{0,5}))?(?:[\/?#]\S*)?$/i;
+/** A URL tool's bare positional → { host } | { unread:true } (a glob {a,b}/[1-9], or a NUMERIC address not in dotted-quad
+ *  form — 2130706433 / 0x7f000001 / 127.1 — which the shape cannot list, so it is blind) | {} (not a target). */
+function targetOf(a) {
+  const s = String(a);
+  if (/[{}]|\[(?![0-9a-f:.]+\])/i.test(s)) return { unread: true };   // curl glob
+  if (/^[a-z][a-z0-9+.-]{0,31}:\/\//i.test(s)) return urlHosts(s).length ? {} : { unread: true };
+  const m = BARE_RE.exec(s);
+  if (!m || (!m[1] && m[2] == null)) return { unread: true };
+  if (!m[1]) return { host: normHost('localhost', m[2] || null) };   // `:3000` = localhost:3000
+  if (/^[\d.]+$/.test(m[1]) && !/^\d{1,3}(?:\.\d{1,3}){3}$/.test(m[1])) return { unread: true };   // a numeric address not dotted-quad ⇒ blind (fail closed)
+  return { host: normHost(m[1], m[2] || null) };
+}
+const httpieTarget = (ps) => (ps.length >= 2 && /^[A-Za-z]+$/.test(ps[0]) ? ps.slice(1, 2) : ps.slice(0, 1));   // `http [METHOD] URL` — the URL, never the method
+/** The hosts the run will CONTACT: `shape.hosts` + every routing/proxy/bare target; `opaque` when one cannot be resolved. */
+function routeTargetsOf(row, kind, hosts, keyed, positionals, plainEnv) {
   const out = new Set(hosts), add = (h, port = null) => { const n = normHost(h, port); if (n) out.add(n); };
   let opaque = false;
   if (!(row && kind === 'tool')) { for (const h of hosts) out.add(h); return { hosts: [...out].filter(Boolean), opaque }; }
   if (row.proxyEnv) for (const e of plainEnv || []) if (/^(?:https?|all|ftp)_proxy$/i.test(e.name) && String(e.value || '').trim()) opaque = true;   // a proxy env var intercepts every request — where it goes cannot be told
   for (const kv of keyed || []) {
     const i = kv.indexOf('='); const flag = kv.slice(0, i), val = kv.slice(i + 1);
-    if (flag === '-x' || flag === '--proxy' || flag === '--preproxy' || /^--socks[45]/.test(flag)) { const a = splitAuthority(schemeOff(val)); if (a.host) add(a.host, a.port); else if (val.trim()) opaque = true; }
-    else if (flag === '--connect-to') { const f = val.split(':'); if (f[2]) add(f[2], /^\d{1,5}$/.test(f[3] || '') ? f[3] : null); }   // HOST1:PORT1:HOST2:PORT2 → connects to HOST2
+    if (flag === '-x' || flag === '--proxy' || flag === '--preproxy' || flag === '--proxy1.0' || /^--socks[45]/.test(flag)) { const a = splitAuthority(schemeOff(val)); if (a.host) add(a.host, a.port); else if (val.trim()) opaque = true; }
+    else if (flag === '--connect-to') { const f = val.split(':'); if (f[2]) add(f[2], /^\d{1,5}$/.test(f[3] || '') ? f[3] : null); else if (val.trim()) opaque = true; }   // HOST1:PORT1:HOST2:PORT2 → connects to HOST2
     else if (flag === '--resolve') { const m = /^\+?[^:]+:\d+:(.+)$/.exec(val); if (m) for (const addr of m[1].split(',')) { const a = splitAuthority(addr.trim()); if (a.host) add(a.host); } }   // HOST:PORT:ADDR[,ADDR] → routes to ADDR
-    else if (flag === '--doh-url') { urlHosts(val).forEach((h) => out.add(h)); }
-    else if (flag === '-o') { const e = val.indexOf('='), ve = val.indexOf(' '), c = e < 0 ? ve : ve < 0 ? e : Math.min(e, ve); const k = (c < 0 ? val : val.slice(0, c)).trim().toLowerCase(), rest = c < 0 ? '' : val.slice(c + 1).trim(); if (k === 'proxycommand') opaque = true; else if (k === 'proxyjump' || k === 'hostname') for (const h of rest.split(/[,\s]+/)) { const a = splitAuthority(h); if (a.host) add(a.host, a.port); } }   // ssh -o
+    else if (flag === '--doh-url') { const hs = urlHosts(val); if (hs.length) hs.forEach((h) => out.add(h)); else if (val.trim()) opaque = true; }
+    else if (flag === '--unix-socket' || flag === '--abstract-unix-socket' || flag === '--dns-servers' || flag === '--alt-svc') { if (val.trim() || flag.includes('unix')) opaque = true; }   // a local socket / an attacker-chosen resolver / an alt route — a destination the grant can never name
+    else if (flag === '-e' || flag === '--execute' || flag === '--rsh') { if (row.name === 'rsync' || /proxy/i.test(val)) opaque = true; }   // wget -e http_proxy= / rsync -e <remote shell>
+    else if (flag === '-o') { const e = val.indexOf('='), ve = val.indexOf(' '), c = e < 0 ? ve : ve < 0 ? e : Math.min(e, ve); const k = (c < 0 ? val : val.slice(0, c)).trim().toLowerCase(), rest = c < 0 ? '' : val.slice(c + 1).trim(); if (SSH_LOCAL_O.has(k)) opaque = true; else if (k === 'proxyjump' || k === 'hostname') for (const h of rest.split(/[,\s]+/)) { const a = splitAuthority(h); if (a.host) add(a.host, a.port); } }   // ssh -o
     else if (flag === '-J') { for (const h of val.split(',')) { const a = splitAuthority(h.trim()); if (a.host) add(a.host, a.port); } }   // ssh jump host(s)
     else if (flag === '-W') { const a = splitAuthority(val); if (a.host) add(a.host, a.port); }   // ssh -W host:port
-    else if (flag === '-c' || flag === '--config-env' || flag === '-e' || flag === '--rsh' || flag === '-D' || flag === '-S' || flag === '-L' || flag === '-R') opaque = true;   // git config / a remote-shell command / a forward can redirect where it goes
+    else if (flag === '-c' || flag === '--config-env' || flag === '-D' || flag === '-S' || flag === '-L' || flag === '-R') opaque = true;   // git config / a forward can redirect where it goes
   }
-  if (/^(?:curl|wget|http|https|httpie)$/.test(row.name)) for (const p of positionals) { const bare = schemeOff(p).replace(/^\/+/, ''); const m = /^([a-z0-9](?:[a-z0-9-]{0,62})(?:\.[a-z0-9](?:[a-z0-9-]{0,62}))+)(?::(\d{1,5}))?(?:[\/?#]|$)/i.exec(bare); if (m && !/^[a-z][a-z0-9+.-]{0,31}:\/\//i.test(p)) add(m[1], m[2] || null); }   // a bare host positional (curl evil.example/x) is a destination
+  if (/^(?:curl|wget)$/.test(row.name)) for (const p of positionals) { const t = targetOf(p); if (t.host) add(t.host); else if (t.unread) opaque = true; }   // every bare positional is a destination; a glob / numeric address is blind
+  else if (/^(?:http|https|httpie)$/.test(row.name)) for (const p of httpieTarget(positionals)) { const t = targetOf(p); if (t.host) add(t.host); else if (t.unread) opaque = true; }
+  if ((row.sshTarget || row.scpLike) && positionals.length) { const m = /^(?:[\w.+-]+@)?([A-Za-z0-9.-]{1,253})(?::|$)/.exec(positionals[0]); if (m && !/\./.test(m[1]) && !/^localhost$/i.test(m[1])) opaque = true; }   // a single-label ssh/scp target can be a ~/.ssh/config alias whose HostName is unseen (fail closed)
   return { hosts: [...out].filter(Boolean), opaque };
 }
 /** THE reader the card and the grant share: { hosts, opaque } — the hosts the run will CONTACT. (The seam above.) */
@@ -465,29 +513,36 @@ function argClassOf(a) {
   if (/[\/\\]|^[.~]/.test(a)) return '<path>';
   return '<word>';
 }
+/** getopt's short-flag cluster: the first letter that takes a value takes the rest of the word (`-xHOST`, `-sxHOST`,
+ *  `-oProxyCommand=…`) or the next word (lane vault-use-grants round 3, BLOCKER — an attached value never dodged routeTargetsOf). */
+function shortSplit(a, takes) { for (let i = 1; i < a.length; i++) { const f = '-' + a[i]; if (takes.includes(f)) { let v = i + 1 < a.length ? a.slice(i + 1) : null; if (v && v[0] === '=') v = v.slice(1); return { f, head: a.slice(0, i + 1), v }; } } return null; }
 /** planOf's answer (`run`) → its SHAPE: { v, tool, name, kind, sub, flags, args, hosts, entries, injection, env (NAME=value), keyed,
  *  templates, on, script, known, proxyEnv, always, noAlways, argvExposed }. `always` = «always» may be offered for it. */
 function shapeOf(run) {
   const row = run.row, kind = run.kind, argv = run.argv;
   const flags = new Set(), sub = [], args = [], positionals = [], keyed = [];
-  let script = null, afterDashes = false, valueNext = false, keyNext = null, configFile = false;
+  let script = null, afterDashes = false, valueNext = null, configFile = false;
   const isKeyed = (f) => !!(row && (row.keyed || []).includes(f));
+  const takes = row ? [...(row.valueFlags || []), ...(row.hostFlags || []), ...(row.configFlags || []), ...(row.keyed || [])] : [];   // every flag that consumes a value — so an attached short value (`-xHOST`) is read, and a value flag's value (`-o out.json`) is never a positional host (round 3, item 4)
   if (kind !== 'tool') script = JSON.stringify(argv.slice(1));
   else for (const a of argv.slice(1)) {
     if (!afterDashes && a === '--') { afterDashes = true; flags.add('--'); continue; }
     if (!afterDashes && a.length > 1 && a[0] === '-') {
-      const eq = a.startsWith('--') ? a.indexOf('=') : -1, f = eq > 0 ? a.slice(0, eq) : a;
+      const eq = a.startsWith('--') ? a.indexOf('=') : -1;
+      const cl = a[1] !== '-' && a.length > 2 && !takes.includes(a) ? shortSplit(a, takes) : null;   // -xHOST / -sxHOST / -oProxyCommand=…
+      const f = eq > 0 ? a.slice(0, eq) : cl ? cl.f : a;
+      const v = eq > 0 ? a.slice(eq + 1) : cl ? cl.v : null;
       if (row && (row.configFlags || []).includes(f)) configFile = true;
-      if (eq > 0) { flags.add(a.slice(0, eq + 1)); if (isKeyed(f)) keyed.push(`${f}=${a.slice(eq + 1)}`); else args.push(argClassOf(a.slice(eq + 1))); } else flags.add(a);
-      valueNext = eq < 0 && !!(row && (row.valueFlags || []).concat(row.hostFlags || []).includes(a));
-      keyNext = valueNext && isKeyed(a) ? a : null;
+      if (v != null) { flags.add(eq > 0 ? a.slice(0, eq + 1) : cl.head); if (isKeyed(f)) keyed.push(`${f}=${v}`); else args.push(argClassOf(v)); } else flags.add(cl ? cl.head : a);
+      valueNext = v == null && (takes.includes(a) || takes.includes(f) || cl) ? f : null;
       continue;
     }
-    const wasValue = valueNext; valueNext = false;
-    if (wasValue && keyNext) { keyed.push(`${keyNext}=${a}`); keyNext = null; continue; }   // a routing flag's value IS the shape (ssh -o ProxyCommand=…)
-    if (!wasValue && row && row.sub && sub.length < row.sub && !positionals.length && /^[a-z][a-z0-9-]{0,40}$/.test(a)) { sub.push(a); continue; }
+    const wasValue = valueNext; valueNext = null;
+    if (wasValue && isKeyed(wasValue)) { keyed.push(`${wasValue}=${a}`); continue; }   // a routing flag's value IS the shape (ssh -o ProxyCommand=…)
+    if (wasValue) { args.push(argClassOf(a)); continue; }   // a value flag's value is NOT a positional (round 3, item 4)
+    if (row && row.sub && sub.length < row.sub && !positionals.length && /^[a-z][a-z0-9-]{0,40}$/.test(a)) { sub.push(a); continue; }
     args.push(argClassOf(a));
-    if (!wasValue) positionals.push(a);
+    positionals.push(a);
   }
   // THE HOSTS: every URL anywhere (the command, the plain env values, the templates) + the row's own rules; its defaults when none
   const hosts = new Set([...argv.slice(1), ...run.plainEnv.map((e) => e.value), ...run.files.map((f) => f.text || '')].flatMap(urlHosts));
@@ -504,7 +559,7 @@ function shapeOf(run) {
   const known = !!row && kind === 'tool';
   // lane vault-use-grants round 2 (BLOCKER): the DESTINATIONS the run contacts (routing flags, proxies, bare positionals) —
   // a superset of `hosts`; `routeOpaque` when a routing input cannot be resolved (ProxyCommand, a proxy env var) ⇒ no «always».
-  const dest = routeHosts(row, kind, [...hosts], keyed, positionals, run.plainEnv);
+  const dest = routeTargetsOf(row, kind, [...hosts], keyed, positionals, run.plainEnv);
   const noAlways = kind !== 'tool' ? kind : !known || !hosts.size ? 'unknown-destination' : dest.opaque ? 'opaque-route' : row.runsProject ? 'runs-project-code' : configFile ? 'config-file' : run.programWritable ? 'program-writable' : null;
   return {
     v: SHAPE_V, tool: run.tool, name: run.name, kind, sub, flags: [...flags].sort(), args, hosts: [...hosts].sort(),
@@ -902,6 +957,6 @@ module.exports = {
   INJECTIONS, injectionOf, ENV_HIJACK, ENV_CONFIG, envRefusedOf,
   TOOL_ROWS, SHELLS, INTERPRETERS, KNOWN_TOOLS, toolNameOf, knownToolOf, refusedTool, toolKindOf,
   RUN_FLAGS, parseRunArgs, timeoutOf, planOf, materialize,
-  shapeOf, shapeKeyOf, destinationsOf, routeHosts, splitAuthority, OWN_DOORS, RUNNABLE_STORES, ownDoorOf, runVerdict,
+  shapeOf, shapeKeyOf, destinationsOf, routeTargetsOf, targetOf, urlParse, splitAuthority, OWN_DOORS, RUNNABLE_STORES, ownDoorOf, runVerdict,
   FORMS, FORM_ROWS, VIEWS, formsOf, createMasker, createRunMasker, maskText,
 };

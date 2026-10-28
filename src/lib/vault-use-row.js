@@ -24,7 +24,14 @@ const ENTRY_HOSTS = '@entry';
 const ENDS = [['keep', 0], ['none', null], ['8h', 8 * 3600e3], ['30d', 30 * 86400e3], ['90d', 90 * 86400e3]];
 const endWord = (id) => ({ keep: t('As each has it now'), none: t('No end'), '8h': t('8 hours'), '30d': t('30 days'), '90d': t('90 days') })[id];
 const dateOf = (ms) => { try { return new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }); } catch { return ''; } };
-const hostsWord = (hosts, entryHosts) => (hosts || []).map((h) => (h === ENTRY_HOSTS ? t('the hosts it was stored for ({hosts})', { hosts: (entryHosts || []).join(', ') || t('none') }) : h)).join(', ');
+// round 3 (item 5): a WILDCARD host is said in words — and a multi-tenant base (where unrelated parties share the domain) warns
+const MULTI_TENANT = /^(?:amazonaws\.com|googleapis\.com|github\.io|gitlab\.io|herokuapp\.com|cloudfront\.net|blob\.core\.windows\.net|azurewebsites\.net|web\.app|pages\.dev|workers\.dev|vercel\.app|netlify\.app|appspot\.com|firebaseapp\.com)$/i;
+const oneHostWord = (h, entryHosts) => {
+  if (h === ENTRY_HOSTS) return t('the hosts it was stored for ({hosts})', { hosts: (entryHosts || []).join(', ') || t('none') });
+  if (String(h).startsWith('*.')) { const base = String(h).slice(2); return MULTI_TENANT.test(base) ? t('every {host} host (incl. other customers’ endpoints)', { host: h }) : t('every {host} host', { host: h }); }
+  return h;
+};
+const hostsWord = (hosts, entryHosts) => (hosts || []).map((h) => oneHostWord(h, entryHosts)).join(', ');
 
 /** A member's name: its stored name, the live roster's, else its id (never markup — textContent only). */
 function nameOf(m, app) {

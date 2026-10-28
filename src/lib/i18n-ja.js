@@ -11055,7 +11055,9 @@ export default {
   "Who may use it could not be read — it is refused as it is (never read wider). Save it again to repair it.": "「誰が使えるか」を読み取れません——そのまま拒否します（広く解釈しません）。保存し直すと直ります。", // lane vault-use-grants
   "Used with no card by:": "カードなしで使用：", // lane vault-use-grants
   "used {n}×": "{n} 回使用", // lane vault-use-grants
-  "Paused while the entry is off — turn «Usable by agent runs» on to restore these.": "項目がオフの間は停止中——「エージェント実行で使用可」をオンにすると復元します。", // lane vault-use-grants
+  "Paused while the entry is off — turn «Usable by agent runs» on to restore these.": "項目がオフの間は停止中——「エージェントの実行で使用可」をオンにすると復元します。", // lane vault-use-grants (round 3: スイッチ名と同一表記)
+  "every {host} host": "{host} のすべてのホスト", // lane vault-use-grants (round 3)
+  "every {host} host (incl. other customers’ endpoints)": "{host} のすべてのホスト（他の顧客のエンドポイントを含む）", // lane vault-use-grants (round 3)
   "until {when}": "{when} まで", // lane vault-use-grants
   "Take this back": "取り消す", // lane vault-use-grants
   "except {name}": "{name} を除く", // lane vault-use-grants

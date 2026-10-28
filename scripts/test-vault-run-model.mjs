@@ -246,7 +246,7 @@ console.log('④b THE SHAPE KEY carries where the secret goes (lane vault-run-do
   const naBad = NA.filter(([argv, why]) => S(argv).noAlways !== why || S(argv).always);
   ok(!naBad.length && S(['curl', 'https://a.example'], { programWritable: true }).noAlways === 'program-writable' && S(['curl', 'https://a.example']).always === true, 'no «always» for a tool that runs the project\'s code, reads a config file the card cannot show, or a program an agent could have written', naBad.map((x) => [x[0][0], S(x[0]).noAlways]));
   const SRC = fs.readFileSync(path.join(REPO, 'src/vault-run.js'), 'utf8');
-  ok(/const URL_RE = \/\\b\(\[a-z\]\[a-z0-9\+\.-\]\{0,31\}\):/.test(SRC) && !/\[a-z0-9\+\.-\]\*:\\\/\\\//.test(SRC) && S(['curl', 'https://a.example'], { env: [['T', M1], ['P', 'a.'.repeat(32768)]] }).always, 'the URL scan\'s scheme is BOUNDED ({0,31}): an unbounded one walked a 64 KiB «a.a.a…» value quadratically (measured 335 ms at 32 KiB, minutes at a megabyte — the review)');
+  ok(/const URL_FIND_RE = \/\\b\(\[a-z\]\[a-z0-9\+\.-\]\{0,31\}\):\\\/\\\/\\S\+\/gi;/.test(SRC) && !/\[a-z0-9\+\.-\]\*:\\\/\\\//.test(SRC) && S(['curl', 'https://a.example'], { env: [['T', M1], ['P', 'a.'.repeat(32768)]] }).always, 'the URL LOCATOR\'s scheme is BOUNDED ({0,31}) and it runs to whitespace (the host is read by urlParse / new URL — round 3): an unbounded scheme walked a 64 KiB «a.a.a…» value quadratically (measured 335 ms at 32 KiB, minutes at a megabyte — the review)');
 }
 
 console.log('⑤ THE VERDICT — entry × conversation × shape × time');

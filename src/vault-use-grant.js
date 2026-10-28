@@ -53,15 +53,20 @@ function splitHostPort(s) {
   return { host: x, port: null };   // no port, or a bare IPv6 literal (> 1 colon)
 }
 /** Does grant host `g` cover run host `h`? A `:port` on the grant is specific (it must match); then: the same host, a
- *  `*.domain` wildcard over `h`, or (both DNS names) `h` a subdomain of `g`. An address covers only itself. */
+ *  `*.domain` wildcard over `h`, or (both DNS names) `h` a subdomain of `g`. An address covers only itself, and NO wildcard
+ *  ever covers an address (round 3, item 5: `*.0.1` must not cover 127.0.0.1 — the agent's own listener). */
 function hostCovers(g, h) {
   const G = splitHostPort(g), H = splitHostPort(h);
   if (!G.host || !H.host) return false;
   if (G.port && G.port !== H.port) return false;   // a grant naming a port is exact on the port
-  if (G.host.startsWith('*.')) { const base = G.host.slice(2); return H.host === base || H.host.endsWith(`.${base}`); }
+  if (G.host.startsWith('*.')) { const base = G.host.slice(2); return !isAddress(H.host) && !isAddress(base) && (H.host === base || H.host.endsWith(`.${base}`)); }
   if (G.host === H.host) return true;
   return !isAddress(G.host) && !isAddress(H.host) && G.host.includes('.') && H.host.endsWith(`.${G.host}`);
 }
+/** A grant host covers a run host FOR THIS TOOL: a WILDCARD default (`*.amazonaws.com`) is granted to the member's own CLI
+ *  only (round 3, item 5 — so an «Always» on `aws` never lets `curl` reach execute-api.amazonaws.com); a concrete host is
+ *  not tool-scoped. `memberTool` null (an old grant / a typed host) ⇒ a wildcard still scopes nothing. */
+const coversForTool = (g, h, memberTool, runTool) => hostCovers(g, h) && (!String(g).startsWith('*.') || !memberTool || memberTool === runTool);
 /** A run's hosts in the one spelling (lower case, no trailing dot, no IPv6 brackets) — what the shape says (src/vault-run.js). */
 const runHostsOf = (hosts) => [...new Set((Array.isArray(hosts) ? hosts : []).map((h) => String(h == null ? '' : h).trim().toLowerCase().replace(/\.$/, '').replace(/^\[(.*)\]$/, '$1')).filter(Boolean))];
 /** An entry's hosts as they stand at use time: `@entry` → the entry's own hosts (GM.hostListOf's spelling). */
@@ -71,13 +76,14 @@ function effectiveHosts(list, entryHosts = []) {
   for (const h of Array.isArray(list) ? list : []) for (const x of h === ENTRY_HOSTS ? own : [h]) if (!out.includes(x)) out.push(x);
   return out;
 }
-/** The run hosts `hosts` (an entry's effective list) does NOT cover — [] when it covers every one. */
-const missingHosts = (hosts, run) => runHostsOf(run).filter((h) => !(hosts || []).some((g) => hostCovers(g, h)));
+/** The run hosts `hosts` (an entry's effective list) does NOT cover — [] when it covers every one. `tool` scopes a wildcard
+ *  default to its CLI (round 3, item 5). */
+const missingHosts = (hosts, run, memberTool = null, runTool = null) => runHostsOf(run).filter((h) => !(hosts || []).some((g) => coversForTool(g, h, memberTool, runTool)));
 const live = (e, now) => !(e && Number(e.until) > 0 && Number(e.until) <= now);
-const memberOf = (hit, entryHosts) => (hit ? { id: grantIdOf(hit.row.resource, GM.principalKey(hit.entry)), via: hit.entry.kind, principal: GM.principalKey(hit.entry), hosts: effectiveHosts(hit.entry.hosts, entryHosts), declared: (hit.entry.hosts || []).slice(), until: Number(hit.entry.until) > 0 ? Number(hit.entry.until) : null } : null);
+const memberOf = (hit, entryHosts) => (hit ? { id: grantIdOf(hit.row.resource, GM.principalKey(hit.entry)), via: hit.entry.kind, principal: GM.principalKey(hit.entry), hosts: effectiveHosts(hit.entry.hosts, entryHosts), declared: (hit.entry.hosts || []).slice(), tool: hit.entry.tool || null, until: Number(hit.entry.until) > 0 ? Number(hit.entry.until) : null } : null);
 
-/** THE VERDICT of one use of one entry (see the head). `run` = { hosts, destinationKnown, entryHosts, now }. */
-function useVerdict(rows, facts = {}, { hosts = [], destinationKnown = false, entryHosts = [], now = 0 } = {}) {
+/** THE VERDICT of one use of one entry (see the head). `run` = { hosts, destinationKnown, entryHosts, tool, now }. */
+function useVerdict(rows, facts = {}, { hosts = [], destinationKnown = false, entryHosts = [], tool = null, now = 0 } = {}) {
   const v = GM.admits(rows, facts);
   if (!v.ok) return { ok: false, code: v.code, ...(v.entry ? { except: GM.principalKey(v.entry) } : {}) };
   const alive = v.hits.filter((h) => live(h.entry, now));
@@ -85,7 +91,7 @@ function useVerdict(rows, facts = {}, { hosts = [], destinationKnown = false, en
   const run = runHostsOf(hosts);
   let best = null, bestMissing = null;
   for (const h of alive) {   // admits' hits: the most specific first (its own › a group's › everyone)
-    const miss = missingHosts(effectiveHosts(h.entry.hosts, entryHosts), run);
+    const miss = missingHosts(effectiveHosts(h.entry.hosts, entryHosts), run, h.entry.tool || null, tool);
     if (destinationKnown === true && run.length && !miss.length) return { ok: true, id: grantIdOf(h.row.resource, GM.principalKey(h.entry)), via: h.entry.kind, entry: h.entry, hosts: effectiveHosts(h.entry.hosts, entryHosts) };
     if (!best || miss.length < bestMissing.length) { best = h; bestMissing = miss; }
   }
@@ -102,7 +108,7 @@ const rowLists = (row) => { const p = row ? GM.publicRow(row) : { to: [], except
  *  end). A member already there keeps its entry, its hosts gain the new ones (∪) and its end becomes the later of the two
  *  (no end wins); it leaves `except`. → { ok: true, to, except, widened, added } | { ok: false, code } (`unknown_shape`:
  *  the row cannot be read — nothing is read wider; `bad_principal`; `hosts_required`; `too_many_hosts`). */
-function withMember(row, principal, { hosts = [], until = null } = {}) {
+function withMember(row, principal, { hosts = [], until = null, tool = null } = {}) {
   const cur = rowLists(row);
   if (!cur) return { ok: false, code: 'unknown_shape' };
   const b = GM.bareOf(principal), key = b && GM.principalKey(b);
@@ -110,6 +116,7 @@ function withMember(row, principal, { hosts = [], until = null } = {}) {
   const add = GM.hostListOf(Array.isArray(hosts) ? hosts : []);
   if (!add) return { ok: false, code: 'hosts_required' };
   const end = Number(until) > 0 ? Math.floor(Number(until)) : null;
+  const tl = tool ? String(tool).toLowerCase() : null;   // round 3 (item 5): the CLI a wildcard default is scoped to
   const i = cur.to.findIndex((e) => GM.principalKey(e) === key);
   const to = cur.to.slice();
   let widened = false;
@@ -122,10 +129,12 @@ function withMember(row, principal, { hosts = [], until = null } = {}) {
     if (nextEnd !== wasEnd) widened = true;
     const next = { ...was, hosts: merged };
     if (nextEnd == null) delete next.until; else next.until = nextEnd;
+    if (tl && was.tool !== tl) { next.tool = tl; widened = true; } else if (tl) next.tool = tl;   // a differing/added tool widens
     to[i] = next;
   } else {
     const e = { ...b, ...(principal.name ? { name: String(principal.name) } : {}), hosts: add };
     if (end != null) e.until = end;
+    if (tl) e.tool = tl;
     to.push(e);
   }
   return { ok: true, to, except: cur.except.filter((x) => GM.principalKey(x) !== key), widened, added: i < 0 };
@@ -167,7 +176,7 @@ function publicGrants(row, { now = 0 } = {}) {
   if (!p) return { to: [], except: [] };
   if (p.unknown) return { unknown: true, why: p.why, to: [], except: [] };
   return {
-    to: (p.to || []).map((e) => ({ ...e, id: grantIdOf(p.resource, GM.principalKey(e)), principal: GM.principalKey(e), hosts: (e.hosts || []).slice(), until: Number(e.until) > 0 ? Number(e.until) : null, expired: !live(e, now) })),
+    to: (p.to || []).map((e) => ({ ...e, id: grantIdOf(p.resource, GM.principalKey(e)), principal: GM.principalKey(e), hosts: (e.hosts || []).slice(), tool: e.tool || null, until: Number(e.until) > 0 ? Number(e.until) : null, expired: !live(e, now) })),
     except: p.except || [],
   };
 }

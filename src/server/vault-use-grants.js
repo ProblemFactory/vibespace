@@ -18,6 +18,7 @@
  * Every landed write notifies the Vault window (`vault.contentsChanged` — the engine's ONE notify): every open window patches
  * the row's chips in place. test-architecture §97: the reader is src/vault-use-grant.js, every writer below calls the store.
  */
+const crypto = require('crypto');
 const GM = require('../grant-model.js');
 const U = require('../vault-use-grant.js');
 const GS = require('./grants-store.js');
@@ -55,8 +56,19 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
   const okId = (id) => GM.resourceShapeOk(U.DOOR, String(id || ''));
   const landed = (w, extra = {}) => { if (w && w.ok) { said(); return { ok: true, ...extra }; } return named((w && w.code) || 'not_written', w && w.error ? { error: w.error } : {}); };
 
-  /** The rows of one entry (the run door's facts). */
-  const rowsOf = (id) => store().rowsFor(U.DOOR, String(id));
+  // lane vault-use-grants round 3 (item 7): a vault-use member is a STANDING no-card grant, and data/grants.json is UNMARKED
+  // (an agent shares the hub's uid). So the ONE writer STAMPS each member with the vault's HMAC over its canonical facts
+  // (`vault.macOf('vault-use', …)` — the DEK the owner's second password unwraps), and the ONE reader admits only a member
+  // whose mac verifies. A row an agent forged into grants.json carries no valid mac and is dropped (fail closed).
+  const canonMember = (id, e) => JSON.stringify([String(id), GM.principalKey(GM.bareOf(e)) || '', (e.hosts || []).map(String).slice().sort(), Number(e.until) > 0 ? Math.floor(Number(e.until)) : null, e.tool ? String(e.tool).toLowerCase() : null]);
+  const macFor = (id, e) => { try { return vault && typeof vault.macOf === 'function' ? vault.macOf('vault-use', canonMember(id, e)) : null; } catch { return null; } };
+  const stamp = (id, to) => (Array.isArray(to) ? to : []).map((e) => { const m = macFor(id, e); const { mac, ...rest } = e; return m ? { ...rest, mac: m } : rest; });   // re-stamp every member (a widen changed its facts); drop a stale mac if the vault is locked
+  const verifyMember = (id, e) => { const want = macFor(id, e); const got = e && typeof e.mac === 'string' && /^[0-9a-f]{64}$/.test(e.mac) ? e.mac : null; if (!want || !got) return false; try { return crypto.timingSafeEqual(Buffer.from(got, 'hex'), Buffer.from(want, 'hex')); } catch { return false; } };
+  const verifiedRow = (row) => (row ? { ...row, to: (row.to || []).filter((e) => verifyMember(row.resource, e)) } : row);
+  const verifiedRows = (rows) => (Array.isArray(rows) ? rows.map(verifiedRow) : []);
+
+  /** The rows of one entry (the run door's facts), unverified members dropped. */
+  const rowsOf = (id) => verifiedRows(store().rowsFor(U.DOOR, String(id)));
   /** THE QUESTION before a card: may THIS caller use entry `id` for this run with no card? (U.useVerdict) */
   const verdictFor = (id, facts = {}, run = {}) => U.useVerdict(rowsOf(id), facts, { ...run, now: now() });
 
@@ -69,16 +81,16 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
     const was = rowOf(id);
     if (widens(was, v.row) && !reauthed) return named('reveal_needs_password');
     const g = store();
-    const w = v.row.to.length || v.row.except.length ? g.set(U.DOOR, String(id), { to: v.row.to, except: v.row.except }, by) : g.remove(U.DOOR, String(id), by);
+    const w = v.row.to.length || v.row.except.length ? g.set(U.DOOR, String(id), { to: stamp(id, v.row.to), except: v.row.except }, by) : g.remove(U.DOOR, String(id), by);
     return landed(w, { id: String(id), members: v.row.to.length });
   }
-  /** ONE member added or widened (the card's «Always», the request default, the carry). */
-  function addMember(id, principal, { hosts = [], until = null } = {}, { by = 'user' } = {}) {
+  /** ONE member added or widened (the card's «Always», the request default, the carry). `tool` scopes a wildcard default. */
+  function addMember(id, principal, { hosts = [], until = null, tool = null } = {}, { by = 'user' } = {}) {
     if (!okId(id)) return named('bad_resource');
-    const plan = U.withMember(rowOf(id), principal, { hosts, until });
+    const plan = U.withMember(verifiedRow(rowOf(id)), principal, { hosts, until, tool });
     if (!plan.ok) return named(plan.code);
     const g = store();
-    const w = g.set(U.DOOR, String(id), { to: plan.to, except: plan.except }, by);
+    const w = g.set(U.DOOR, String(id), { to: stamp(id, plan.to), except: plan.except }, by);
     return landed(w, { id: String(id), grant: U.grantIdOf(String(id), GM.principalKey(GM.bareOf(principal))), widened: plan.widened, added: plan.added });
   }
   /** ONE member out (a click: a narrowing). */
@@ -111,7 +123,7 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
   }
   /** The row as the window draws it (+ «used N× by M conversations» per member, from `counts` = VU.countsOf's entry row). */
   function publicFor(id, counts = null) {
-    const p = U.publicGrants(rowOf(id), { now: now() });
+    const p = U.publicGrants(verifiedRow(rowOf(id)), { now: now() });
     const by = (counts && counts.grants) || {};
     return { ...p, to: p.to.map((e) => ({ ...e, uses: (by[e.id] && by[e.id].uses) || 0, convs: (by[e.id] && by[e.id].convs) || 0 })) };
   }
@@ -119,7 +131,7 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
   function heldBy(facts = {}) {
     const out = [];
     for (const row of store().rowsOfDoor(U.DOOR)) {
-      const v = U.useVerdict([row], facts, { destinationKnown: false, now: now() });
+      const v = U.useVerdict([verifiedRow(row)], facts, { destinationKnown: false, now: now() });
       if (U.holds(v)) out.push({ id: row.resource, grant: v.member.id, hosts: v.member.hosts, until: v.member.until });
     }
     return out;

@@ -732,7 +732,7 @@ console.log('㉒ THE JUDGED ROAD (lane judged-watch-state, B-f42e) — ONE verdi
 console.log('㉓ use vault-use-policy (lane vault-use-grants R4, default OFF) — its row, its ONE question, its memo, its gates, its ONE judge site');
 {
   const plan = M.inputPlan('vault-use-policy');
-  ok(M.USES.includes('vault-use-policy') && plan.wakePath === false && plan.batch === 1 && eq(plan.fixed, []) && eq(plan.variable.map((x) => x.name), ['command', 'program', 'hosts', 'templates', 'purpose', 'entry']) && eq(plan.memo, ['use', 'id', 'policy']), 'the row: off the wake path, one record a call, the CARD\'s facts as parts (command · program · hosts · templates · purpose · entry), the memo = the run\'s shape + the policy', plan);
+  ok(M.USES.includes('vault-use-policy') && plan.wakePath === false && plan.batch === 1 && eq(plan.fixed, []) && eq(plan.variable.map((x) => x.name), ['command', 'program', 'hosts', 'templates', 'purpose', 'entry', 'env', 'folder']) && eq(plan.memo, ['use', 'id', 'policy']), 'the row: off the wake path, one record a call, the CARD\'s facts as parts (command · program · hosts · templates · purpose · entry · env · folder — round 3: env + folder are on the card too), the memo = the run\'s shape + the policy', plan);
   const KEY2 = ['sk-ant-api03-', 'Q'.repeat(60)].join('');   // built at runtime (the tree's secret scan reads literals)
   const q = M.vaultPolicyQuestion(`only 192.168.1.1 — the key is ${KEY2}`);
   const sent = M.scrubQuestions([q])[0];

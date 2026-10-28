@@ -11057,6 +11057,8 @@ export default {
   "Used with no card by:": "无需卡片即可使用：", // lane vault-use-grants
   "used {n}×": "已用 {n} 次", // lane vault-use-grants
   "Paused while the entry is off — turn «Usable by agent runs» on to restore these.": "该条目已关闭，授权暂停——打开「可供 agent 运行使用」即可恢复。", // lane vault-use-grants
+  "every {host} host": "{host} 下的每个主机", // lane vault-use-grants (round 3)
+  "every {host} host (incl. other customers’ endpoints)": "{host} 下的每个主机（含其他客户的端点）", // lane vault-use-grants (round 3)
   "until {when}": "至 {when}", // lane vault-use-grants
   "Take this back": "收回", // lane vault-use-grants
   "except {name}": "除了 {name}", // lane vault-use-grants
