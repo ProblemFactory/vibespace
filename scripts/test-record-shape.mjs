@@ -424,6 +424,16 @@ console.log('§4 the BINARY ORACLE — the installed claude\'s zod union vs the 
       if (!writer && !/inherited_asks_settled/.test(text)) console.log('    inherited_asks_settled: not in this build (SHAPE_SINCE ' + R.SHAPE_SINCE['system/inherited_asks_settled'] + ')');
       else oracleOk(`inherited_asks_settled is written only behind reportKept, and every reportKept the bundle computes is gated on isRemoteTransport() (${gates.length} site${gates.length === 1 ? '' : 's'}: ${gates.map((g) => g.slice(0, 70)).join(' · ')}) — the stdio stream-json the wrapper speaks never carries it; the record's own words: «A cloud worker's report, before its first turn, of which asks it inherited and keeps»`, writer && words && gates.length >= 1 && gates.every((g) => /\.isRemoteTransport\(\)&&/.test(g)) && /isRemoteTransport\(\)\{return!1\}/.test(text), { writer, words, gates });
     }
+    // THE INIT'S CLIENT UUIDS (lane claude-steer-inject r5): the bundle's own init writer adds user_message_uuids
+    // (`e.subtype==="init"?<fn>(e,n):e` over `{...e,user_message_uuids:r.user_message_uuids}`) — where it is, the corpus row must be
+    {
+      const I = '[\\w$]+';
+      // anchored on the literal (a regex over the whole bundle costs a second): the writer, then the init dispatch beside it
+      const near = []; for (let at = text.indexOf('.user_message_uuids}}catch'); at >= 0 && near.length < 8; at = text.indexOf('.user_message_uuids}}catch', at + 1)) near.push(text.slice(Math.max(0, at - 160), at + 260));
+      const initUuids = near.some((w) => new RegExp('\\{\\.\\.\\.' + I + ',user_message_uuids:' + I + '\\.user_message_uuids\\}').test(w) && new RegExp(I + '\\.subtype==="init"\\?' + I + '\\(' + I + ',' + I + '\\):' + I + '\\}').test(w));
+      if (!initUuids) console.log('    init.user_message_uuids: no init writer in this build (the row is keyed to ' + R.INIT_UUIDS_MEASURED.join(' / ') + ')');
+      else oracleOk('this build\'s init writer adds user_message_uuids (a stamped frame\'s uuid) — the registry declares it on system/init (' + (R.INIT_UUIDS_MEASURED.includes(installed) ? 'MEASURED on ' + installed : 'a build the row was not run on: ' + installed) + ')', R.SHAPES['claude:stream:system/init'].ignored.has('user_message_uuids'));
+    }
     text = '';
     oracleOk('the extractor found the union\'s anchor in the installed bundle (a new spelling fails HERE, by name)', !exErr, exErr);
     const keys = Object.keys(union);
@@ -785,20 +795,55 @@ console.log('§4e the PINNED dumps (lane cli-2-1-288-records, B-e05e): every bui
     const MM12 = rsSrc12.split(FILL12).length === 2 && mmSrc12.split(REQ7).length === 2 ? require(M12.write('src/message-manager.js', mmSrc12.replace(REQ7, 'require(' + JSON.stringify(M12.write('src/record-shape.js', rsSrc12.replace(FILL12, '/* FIELDS_312 not filled (control) */'), 'no-312')) + ')'), 'mm-no-312')) : null;
     const ctl12 = MM12 && live12(MM12);
     ok('RED CONTROL: the same stdout on a copy without FIELDS_312 (the 7df30f96 tree on 2.1.312) ⇒ the card is back in EVERY conversation — ONE drift card on result naming model_usage_since_last_result alone, CLI 2.1.312, and its ledger row', !!ctl12 && ctl12.every((c) => c.cards === 1 && c.shapes === 'result' && c.fields === 'model_usage_since_last_result' && c.cli === '2.1.312' && c.rows === 1), ctl12);
+    // A RECORD THE PRODUCT'S OWN INPUT CAUSES IS DECLARED WITH THE INPUT (lane claude-steer-inject r5): r4's chat wrapper stamps a uuid
+    // on every mid-turn frame (the copy's witness), and the CLI then names the turn's consumed client uuids on its init —
+    // `system/init.user_message_uuids`, declared upstream on assistant / result / stream_event only. Undeclared, it drew an
+    // «added kind» chip + a drift-ledger row on every stamped frame (6 of 7 scenarios at 6334e9a8). The fixtures ARE the wrapper's
+    // buffer (scripts/fixtures/claude-cli/<v>-stamped.jsonl: the real chat-wrapper + the real CLI against a loopback mock, a frame
+    // handed into a text turn and run as its own turn, a frame held and drained; ids and paths replaced), fed record by record to
+    // the LIVE normalizer exactly as the server parses the wrapper's stdout (the buffer-only copy lines skipped — never on stdout).
+    const stampedOf = (v) => { try { return read('scripts/fixtures/claude-cli/' + v + '-stamped.jsonl').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return null; } };
+    const liveStamped = (MMx, recs) => {
+      const live = recs.filter((r) => !r.webui_copy);
+      const convs = [...new Set(live.map((r) => r.session_id).filter(Boolean))];
+      return convs.map((conv) => {
+        const x = MMx === MM ? createMessageManager('claude', conv) : new MMx.MessageManager(conv);
+        for (const r of live.filter((y) => !y.session_id || y.session_id === conv)) x.processLive(JSON.parse(JSON.stringify(r)));
+        const cards = driftCards(x);
+        return { added: x.addedKinds().map((k) => k.kind + ':' + k.name).join(), cards: cards.length, fields: cards.flatMap((m) => m.content[0].fields).join(), rows: ledgerOf(conv, MMx).length };
+      });
+    };
+    const rsSrcU = read('src/record-shape.js'), mmSrcU = read('src/message-manager.js');
+    const ROW_U = '    user_message_uuids: INIT_UUIDS_NOTE,\n';
+    const MU = mutantCopies('record-init-uuids', REPO);
+    const MMU = rsSrcU.split(ROW_U).length === 2 && mmSrcU.split(REQ7).length === 2 ? require(MU.write('src/message-manager.js', mmSrcU.replace(REQ7, 'require(' + JSON.stringify(MU.write('src/record-shape.js', rsSrcU.replace(ROW_U, ''), 'no-init-uuids')) + ')'), 'mm-no-init-uuids')) : null;
+    ok('init.user_message_uuids is a CORPUS row (undeclared on init upstream), keyed by the builds it was MEASURED on (' + R.INIT_UUIDS_MEASURED.join(', ') + '), its reason naming the stamp that causes it — never known (nothing reads it)', R.INIT_UUIDS_MEASURED.includes('2.1.308') && R.INIT_UUIDS_MEASURED.includes('2.1.312') && R.SHAPES['claude:stream:system/init'].ignored.has('user_message_uuids') && !R.SHAPES['claude:stream:system/init'].known.has('user_message_uuids') && /MEASURED on 2\.1\.308 and 2\.1\.312/.test(R.SHAPES['claude:stream:system/init'].ignored.get('user_message_uuids')) && /stamps a uuid/.test(R.SHAPES['claude:stream:system/init'].ignored.get('user_message_uuids')) && !!MMU);
+    for (const v of R.INIT_UUIDS_MEASURED) {
+      const recs = stampedOf(v);
+      const inits = (recs || []).filter((r) => r.type === 'system' && r.subtype === 'init' && Array.isArray(r.user_message_uuids));
+      const copies = (recs || []).filter((r) => r.webui_copy);
+      ok(v + ': the wrapper\'s buffer of a STAMPED run (scripts/fixtures/claude-cli/' + v + '-stamped.jsonl) — every init names ' + v + ', and the init of each turn that took a stamped frame says user_message_uuids = that frame\'s stamp (the copy\'s cliUuid)', !!recs && inits.length >= 2 && recs.filter((r) => r.subtype === 'init').every((r) => r.claude_code_version === v) && copies.length >= 2 && copies.every((c) => inits.some((i) => i.user_message_uuids.includes(c.cliUuid))), { inits: inits.length, copies: copies.map((c) => c.cliUuid) });
+      const real = recs ? liveStamped(MM, recs) : [];
+      ok(v + ': the LIVE normalizer over that buffer ⇒ no «added kind», no drift card, no ledger row (' + real.length + ' conversations)', real.length >= 2 && real.every((c) => !c.added && c.cards === 0 && c.rows === 0), real);
+      const ctl = recs && MMU ? liveStamped(MMU, recs) : null;
+      ok('RED CONTROL ' + v + ': the same buffer on a copy without the init row (the 6334e9a8 registry) ⇒ the «added kind» chip + ONE drift card on system/init naming user_message_uuids + its ledger row, in every conversation', !!ctl && ctl.every((c) => /fields:system\/init/.test(c.added) && c.cards === 1 && c.fields === 'user_message_uuids' && c.rows === 1), ctl);
+    }
     // THE STAND-IN (scripts/fixtures/claude-stand-in-cli.cjs's shape, version-keyed by $STAND_IN_CLI_VERSION): a 2.1.312 stand-in writes
     // the measured 2.1.312 result (model_usage_since_last_result on every result), a 2.1.308 one the 2.1.308 result — both clean
     const standIn = (ver) => new Promise((resolve) => {
       const c = spawn(process.execPath, [path.join(REPO, 'scripts/fixtures/claude-stand-in-cli.cjs')], { stdio: ['pipe', 'pipe', 'ignore'], env: { PATH: process.env.PATH, ...(ver ? { STAND_IN_CLI_VERSION: ver } : {}) } });
       let buf = '';
       const recs = [];
-      const done = () => { clearTimeout(t); try { c.kill(); } catch { } resolve({ init: (recs.find((x) => x.subtype === 'init') || {}).claude_code_version, results: recs.filter((x) => x.type === 'result'), drift: recs.map((x) => R.unknownFields('claude', 'stream', x)).filter(Boolean) }); };
+      const done = () => { clearTimeout(t); try { c.kill(); } catch { } resolve({ init: (recs.find((x) => x.subtype === 'init') || {}).claude_code_version, uuids: (recs.find((x) => x.subtype === 'init') || {}).user_message_uuids || null, results: recs.filter((x) => x.type === 'result'), drift: recs.map((x) => R.unknownFields('claude', 'stream', x)).filter(Boolean) }); };
       const t = setTimeout(done, 5000);
       c.stdout.setEncoding('utf8');
       c.stdout.on('data', (d) => { buf += d; let i; while ((i = buf.indexOf('\n')) >= 0) { const l = buf.slice(0, i); buf = buf.slice(i + 1); try { recs.push(JSON.parse(l)); } catch { } if (recs.some((x) => x.type === 'result')) return done(); } });
-      c.stdin.write(JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'hello' }] } }) + '\n');
+      c.stdin.write(JSON.stringify({ type: 'user', uuid: STAMP, message: { role: 'user', content: [{ type: 'text', text: 'hello' }] } }) + '\n');
     });
+    const STAMP = '7e57a000-0000-4000-8000-00000000057a';
     const [si12, si08] = await Promise.all([standIn(null), standIn('2.1.308')]);
     ok('the stand-in CLI is version-keyed: by default it IS 2.1.312 (init claude_code_version 2.1.312, every result carries model_usage_since_last_result); STAND_IN_CLI_VERSION=2.1.308 writes the 2.1.308 result (no such field); both clean under the declarations', si12.init === '2.1.312' && si12.results.length >= 1 && si12.results.every((x) => x.model_usage_since_last_result && typeof x.model_usage_since_last_result === 'object') && si08.init === '2.1.308' && si08.results.length >= 1 && si08.results.every((x) => !('model_usage_since_last_result' in x)) && si12.drift.length === 0 && si08.drift.length === 0, { si12: { init: si12.init, results: si12.results.length, drift: si12.drift }, si08: { init: si08.init, results: si08.results.length } });
+    ok('…and a STAMPED frame (r5): both versions\' init names it in user_message_uuids (the writer is in 2.1.307 on) — clean under the declarations', JSON.stringify(si12.uuids) === JSON.stringify([STAMP]) && JSON.stringify(si08.uuids) === JSON.stringify([STAMP]) && si12.drift.length === 0 && si08.drift.length === 0, { si12: si12.uuids, si08: si08.uuids });
   }
 }
 

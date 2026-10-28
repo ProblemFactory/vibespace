@@ -297,6 +297,35 @@ function syntheticUsage(raw) {
 // the source up to the first `])`.
 const TERMINAL_TASK_STATUS = new Set(['completed', 'failed', 'stopped', 'killed']);
 
+/** How many leading blocks of a batched user record (from `off`) are THIS copy's (lane claude-steer-inject r5) — its blocks
+ *  in order: each text trim-equal (the CLI joins a batch with a newline), a picture's place a picture or the CLI's line
+ *  about it; 0 unless at least one of its words matched (a copy is never claimed by a picture's place alone). */
+function copyPrefixLen(copy, rec, off) {
+  if (!Array.isArray(copy) || !copy.length || off + copy.length > rec.length) return 0;
+  const said = new Set(copy.filter((b) => b && b.type === 'text').map((b) => String(b.text || '').trim()));
+  let words = 0;
+  for (let i = 0; i < copy.length; i++) {
+    const k = copy[i], r = rec[off + i];
+    if (!k || !r) return 0;
+    if (k.type === 'text') { if (r.type !== 'text' || String(r.text || '').trim() !== String(k.text || '').trim()) return 0; words++; }
+    else if (k.type === 'image') { if (!(r.type === 'image' || (r.type === 'text' && !said.has(String(r.text || '').trim())))) return 0; }
+    else return 0;
+  }
+  return words ? copy.length : 0;
+}
+/** The bubble a claimed copy draws (lane claude-steer-inject r5): the copy's blocks — a picture whose kept file is gone
+ *  replaced by the record's picture at its place — then a picture only the record holds, then every line of the record the
+ *  copy does not say (the CLI's words about the message: a picture it could not process). */
+function claimedContent(copy, rec) {
+  const said = new Set(copy.filter((b) => b && b.type === 'text').map((b) => String(b.text || '').trim()));
+  const pics = rec.filter((b) => b && b.type === 'image' && !b.gone);
+  let p = 0;
+  const out = copy.map((b) => (b && b.type === 'image' ? ((pics[p] && b.gone) ? { ...pics[p++] } : (p++, b)) : b));
+  for (; p < pics.length; p++) out.push({ ...pics[p] });
+  for (const b of rec) if (b && b.type === 'text' && String(b.text || '').trim() && !said.has(String(b.text).trim())) out.push({ ...b });
+  return out;
+}
+
 class MessageManager extends MessageWindow {
   // Injected by the server once the settings SyncStore exists (the normalizer
   // can't reach server state directly). null in tests → defaults apply.
@@ -318,10 +347,11 @@ class MessageManager extends MessageWindow {
     // THE WRAPPER'S QUEUE (2.369.354, lane claude-wrapper-queue): data/bin/chat-wrapper.js HOLDS a frame sent mid-turn
     // and says so on the acp/codex wire — queued_input / queue_changed / queue_op_result / queue_dropped, top-level lines
     this.userMessageIds = new Map();      // webui msgId → message id (the bubble a queue row belongs to)
-    this._webuiCopies = new Map();        // msgId → {cliUuid, id, types}: a wrapper's copy of a mid-turn frame — claimed by the CLI's record of it
+    this._webuiCopies = new Map();        // msgId → {cliUuid, id}: a wrapper's copy of a mid-turn frame — claimed by the CLI's record of it (in send order: a batch is claimed in it)
     this._queue = [];                     // the wrapper's promptQueue, as published
     this._queuedMsgIds = new Set();       // bubbles currently wearing a 'queued' chip
     this._queuePublished = false;         // has this wrapper ever published a queue? (in-band capability signal)
+    this._settling = null;                // {until, hook} while a window the CLI owes a turn holds the queue (`queue_settle`, r5)
     this._queueVerbs = null;              // …and the verb list that publication named
     // A HELPER's own view (`sub-<tool_use_id>` / `sub-agent-<id>`, lane S1): its
     // asks attach to its own tool cards; the PARENT's normalizer instead hangs a
@@ -846,6 +876,7 @@ class MessageManager extends MessageWindow {
       case 'queue_op_result': return this._processQueueOpResult(raw, emit);
       case 'queue_dropped': return this._processQueueDropped(raw, emit); // Stop's put-back (the base's one method)
       case 'input_handover': return this._processInputHandover(raw, emit); // 2.369.361: a frame handed to the running turn
+      case 'queue_settle': return this._processQueueSettle(raw, emit); // r5: the held frames wait on a window the CLI owes a turn
       // the transcript's persisted PR pointer {prNumber, prUrl, prRepository} =
       // the same fact as system/code_change_published (design-unknown-records)
       case 'pr-link': return this._processCodeChange({ provider: null, url: raw.prUrl, repo: raw.prRepository, identifier: raw.prNumber != null ? String(raw.prNumber) : null, action: null }, emit);
@@ -1605,22 +1636,36 @@ class MessageManager extends MessageWindow {
    *  restart) — found by its WITNESS (acceptance r4): the uuid the wrapper stamped on the frame, which the CLI keeps as
    *  its user record's `uuid` and as a queued_command attachment's `source_uuid` (measured on 2.1.312). Claimed once —
    *  never a second bubble — at ANY distance (a held frame drained after a 60-call turn is still the same message), and
-   *  never by its words. A record RICHER than the copy (a block kind the copy lacks: a frame over 256 KB is copied as its
-   *  words alone, the CLI's record keeps the image) is what is drawn: the copy's bubble takes the record's blocks, so the
-   *  screenshot is never hidden behind its own copy. Never a copy Stop put back (removed / stopped: it never ran). */
+   *  never by its words. What is drawn is the person's message AND what the CLI says of it (claimedContent, r5): the copy's
+   *  pictures (kept by reference), a picture the copy no longer keeps taken from the record, a picture only the record has
+   *  (an older build's words-only copy), and the record's own words the copy lacks — the CLI's «[Image could not be
+   *  processed …]» lines are its fact of what the model got, never hidden behind the copy. Never a copy Stop put back
+   *  (removed / stopped: it never ran). */
   _claimWebuiCopy(content, uuid, emit) {
     if (!uuid || !this._webuiCopies.size) return false;
+    let hit = null;
+    for (const [msgId, c] of this._webuiCopies) if (c.cliUuid && c.cliUuid === String(uuid)) { hit = msgId; break; }
+    if (!hit) return false;
+    // A BATCH IS CLAIMED AS A BATCH (acceptance r5): frames the CLI ran together as ONE turn are ONE user record under the
+    // LAST frame's uuid, the earlier frames' blocks first, in order. Each earlier copy still waiting for its record claims
+    // its own blocks off the front (its words, trim-equal; a picture's place), so the batch is never drawn twice.
+    const rec = (content || []).map((b) => ({ ...b }));
+    const parts = [];
+    let off = 0;
     for (const [msgId, c] of this._webuiCopies) {
-      if (!c.cliUuid || c.cliUuid !== String(uuid)) continue;
-      this._webuiCopies.delete(msgId);
-      const has = new Set(c.types);
-      if ((content || []).some((b) => b && b.type && !has.has(b.type))) {
-        const msg = this.messageIndex.get(c.id);
-        if (msg) { msg.content = content.map((b) => ({ ...b })); if (emit) this._emit({ op: 'edit', id: msg.id, fields: { content: msg.content } }); }
-      }
-      return true;
+      if (msgId === hit) break;
+      const n = copyPrefixLen(this.messageIndex.get(c.id)?.content, rec, off);
+      if (n) { parts.push([msgId, rec.slice(off, off + n)]); off += n; }
     }
-    return false;
+    parts.push([hit, rec.slice(off)]);
+    for (const [msgId, blocks] of parts) {
+      const msg = this.messageIndex.get(this._webuiCopies.get(msgId).id);
+      this._webuiCopies.delete(msgId);
+      if (!msg) continue;
+      const drawn = claimedContent(msg.content || [], blocks);
+      if (JSON.stringify(drawn) !== JSON.stringify(msg.content)) { msg.content = drawn; if (emit) this._emit({ op: 'edit', id: msg.id, fields: { content: msg.content } }); }
+    }
+    return true;
   }
 
   /** Stamp the queue chip on the bubble a held message belongs to; false when there is no such bubble (the acp / codex
@@ -1632,10 +1677,13 @@ class MessageManager extends MessageWindow {
     if (!msg) return false;
     // a frame Stop put back (or the person removed) never ran: no later record of the CLI is ITS record
     if (state === 'removed' || state === 'stopped') this._webuiCopies.delete(String(msgId));
-    if (msg.queueState === state) return true;
+    const settling = state === 'queued' ? this._settling : null;
+    const settleMoved = (msg.settling || null) !== settling;
+    if (msg.queueState === state && !settleMoved) return true;
     msg.queueState = state;
+    if (settleMoved) msg.settling = settling;
     if (state === 'queued') this._queuedMsgIds.add(String(msgId)); else this._queuedMsgIds.delete(String(msgId));
-    if (emit) this._emit({ op: 'edit', id: msg.id, fields: { queueState: state } });
+    if (emit) this._emit({ op: 'edit', id: msg.id, fields: { queueState: state, ...(settleMoved ? { settling } : {}) } });
     return true;
   }
 
@@ -1650,6 +1698,28 @@ class MessageManager extends MessageWindow {
     const state = { handed: 'handed', landed: 'steered', 'own-turn': null, kept: 'kept' }[raw.state];
     if (state === undefined) return;
     for (const msgId of Array.isArray(raw.msg_ids) ? raw.msg_ids : []) this._stampQueueChip(msgId, state, emit);
+  }
+
+  /** `queue_settle` (lane claude-steer-inject r5, THE BACKSTOP SPEAKS — the deadline-card law): while a window in which the CLI
+   *  owes a turn is open (a Stop's follow-up, a turn it owes for handed frames) the frames held behind it are not simply
+   *  «Queued»: their chip says «held — the turn is settling» and counts down to the backstop (`until`, epoch ms; null while
+   *  a prompt hook pauses it). 'settled' clears it; 'backstop' clears it and says, once, that the turn did not answer in
+   *  time and the held messages go now. */
+  _processQueueSettle(raw, emit) {
+    const st = raw.state;
+    if (st !== 'settling' && st !== 'settled' && st !== 'backstop') return;
+    this._settling = st === 'settling' ? { until: Number(raw.until) || null, ...(raw.hook ? { hook: true } : {}) } : null;
+    for (const msgId of this._queuedMsgIds) {
+      const msg = this.messageIndex.get(this.userMessageIds.get(msgId));
+      if (!msg) continue;
+      msg.settling = this._settling;
+      if (emit) this._emit({ op: 'edit', id: msg.id, fields: { queueState: msg.queueState, settling: msg.settling } });
+    }
+    if (st === 'backstop' && (Array.isArray(raw.msg_ids) ? raw.msg_ids.length : 0)) {
+      const secs = Math.round((Number(raw.ms) || 30000) / 1000);
+      const msg = this._create({ role: 'system', content: [{ type: 'system_info', text: `The turn did not answer in ${secs} s — the held messages are delivered now`, seconds: secs }], noticeKind: 'queue-backstop' });
+      if (emit) this._emit({ op: 'create', message: msg });
+    }
   }
 
   /** `queued_input` — the chip on the bubble IS the notice; the card is the fallback for a held frame with no bubble. */
@@ -1827,6 +1897,9 @@ class MessageManager extends MessageWindow {
 
       const normalizedContent = textBlocks.map(b => {
         if (b.type === 'text') return { type: 'text', text: b.text || '' };
+        // a copy's picture whose kept file is gone (lane claude-steer-inject r5, src/session-store.js resolveKept): a reference
+        // the renderer draws as a placeholder that says so
+        if (b.type === 'image' && b.source?.type === 'kept') return { type: 'image', mediaType: b.source.media_type || 'image/png', data: '', gone: true, ...(b.source.bytes ? { bytes: b.source.bytes } : {}) };
         if (b.type === 'image') return { type: 'image', mediaType: b.source?.media_type || 'image/png', data: b.source?.data || '' };
         return null;
       }).filter(Boolean);
@@ -1880,11 +1953,15 @@ class MessageManager extends MessageWindow {
       // a little later (the turn they ran as, a held frame drained, a kept frame's interrupted follow-up) claims the copy.
       if (raw._fromWebui && raw.msgId && this.userMessageIds.has(String(raw.msgId)) && (raw.webui_copy || this._webuiCopies.has(String(raw.msgId)))) return;
       if (!raw._fromWebui && !raw.origin && this._claimWebuiCopy(normalizedContent, raw.uuid, emit)) return;
-      this.turnIndex++;
+      // AN isMeta RECORD IS NEVER THE PERSON'S MESSAGE (lane claude-steer-inject r5, both CLI builds): the CLI's own companion
+      // lines to the model — «[Image source: /tmp/…]» beside a pasted picture — drew an extra «You» bubble after every
+      // restart. A dim note, no turn of its own; a record the person typed (promptSource / ours) or one with an origin stays itself.
+      const metaNote = raw.isMeta === true && !raw.origin && !raw.promptSource && !raw._fromWebui;
+      if (!metaNote) this.turnIndex++;
       // Use original msgId if present (for dedup with client-side local preview)
       const msg = this._create({ role: 'user', status: 'complete', content: normalizedContent, turnIndex: this.turnIndex });
       if (raw.webui_copy && raw._fromWebui && raw.msgId) {
-        this._webuiCopies.set(String(raw.msgId), { cliUuid: typeof raw.cliUuid === 'string' && raw.cliUuid ? raw.cliUuid : null, id: msg.id, types: [...new Set(normalizedContent.map((b) => b.type))] });
+        this._webuiCopies.set(String(raw.msgId), { cliUuid: typeof raw.cliUuid === 'string' && raw.cliUuid ? raw.cliUuid : null, id: msg.id });
         if (this._webuiCopies.size > 32) this._webuiCopies.delete(this._webuiCopies.keys().next().value);
       }
       // Provenance for the notification classifier: promptSource = the CLI's
@@ -1927,7 +2004,7 @@ class MessageManager extends MessageWindow {
       }
       else if (raw.originKind === 'auto-resume') { msg.originKind = 'auto-resume'; msg.typed = false; if (typeof raw.originNote === 'string' && raw.originNote) msg.originNote = raw.originNote; } // VibeSpace's own continue prompt (auto-resume) — labelled, never a "you typed this" bubble (2.369.32)
       else if (raw.promptSource || raw._fromWebui) msg.typed = true;
-      if (raw.isSynthetic) msg.synthetic = true;
+      if (raw.isSynthetic || metaNote) msg.synthetic = true;
       // THE BUBBLE'S IDENTITY (2.369.354): a frame the wrapper holds names this msgId in its queue row — stamped ON the
       // message (the client joins its chip by it; a server-only map is not an identity it can see), the acp/codex stamp
       if (raw._fromWebui && raw.msgId) { msg.webuiMsgId = String(raw.msgId); this.userMessageIds.set(String(raw.msgId), msg.id); }
@@ -2445,6 +2522,16 @@ const KNOWN_IGNORED_RECORD_TYPES = new Set([
   // transcript bookkeeping (JSONL-only rows the CLI writes beside the conversation)
   'last-prompt', 'custom-title', 'agent-name', 'permission-mode', 'mode', 'atis-latch', // (pr-link is ROUTED since 2026-09-21 — the same fact as system/code_change_published)
   'file-history-snapshot', 'file-history-delta', 'cost-state', 'summary', 'progress',
+  // the CLI's REQUEST REPLAY rows (lane claude-steer-inject r5, read off the strings of 2.1.288–2.1.312 and MEASURED in every
+  // 2.1.308 / 2.1.312 transcript of a loopback-mock run): each API request the CLI sends is written as `api-request` (its
+  // params, by hash) + `api-request-shape` (the system prompt and tools, once per hash) + `api-request-blob` (each message,
+  // once per hash) so the CLI can replay it. Gated by CLAUDE_CODE_ELEGANT_MEADOW / the tengu_elegant_meadow flag — default
+  // OFF through 2.1.296, ON since 2.1.307 — JSONL only, never on stdout. A copy of the request, never a conversation row.
+  'api-request', 'api-request-shape', 'api-request-blob',
+  // `tools-used` {tools:[names]} (2.1.312 — the strings of 2.1.308 have no writer; MEASURED in every 2.1.312 transcript that
+  // ran a tool): the names of the tools the session has used, re-written when the set grows (tengu_silly_shore, default on).
+  // The tool cards are the chat's record of what ran.
+  'tools-used',
   // the /design canvas session's own bookkeeping (corpus-verified 2026-09-22 by a read-only grep:
   // ONE 2.1.238 transcript, 60 rows — artifact-autoreact-ledger 52 / frame-link 5 /
   // artifact-comment-monitor 3). Each names artifacts or a canvas frame by id + url and carries no

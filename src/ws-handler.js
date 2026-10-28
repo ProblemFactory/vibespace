@@ -370,6 +370,7 @@ function registerWsHandler(wss, ctx) {
       // Clean up wrapper buffer files
       try { fs.unlinkSync(path.join(BUFFERS_DIR, data.sessionId + '.json')); } catch {}
       try { fs.unlinkSync(path.join(BUFFERS_DIR, data.sessionId + '.buf')); } catch {}
+      try { fs.rmSync(path.join(BUFFERS_DIR, data.sessionId + '.img'), { recursive: true, force: true }); } catch {} // the copies' kept pictures (lane claude-steer-inject r5) go with the buffer
       // Per-session agentd attach cfg (0600 — vsht_ host token + full
       // spawn command) accumulated forever (audit #16/#53). The path is
       // derivable, so a restart-restored session (in-memory field lost)
@@ -748,7 +749,7 @@ function registerWsHandler(wss, ctx) {
           // two SEND refusals answer this socket (code 'input-rejected' — a send
           // refusal, never an attach failure: inc-mt2arppw); no live session / not a
           // chat session stay a silent no-op, exactly as before the extraction.
-          // `steer` = the person's door (2.369.361): hand it to the running turn — only `true` counts
+          // `steer` = the person's door (.361): hand it to the running turn — only `true` counts
           const r = sendUserInput(data.sessionId, data.text, { msgId: data.msgId, origin: 'ws', steer: data.steer === true });
           if (!r.ok && (r.code === 'input_rejected' || r.code === 'too_large')) {
             try { ws.send(JSON.stringify({ type: 'error', code: 'input-rejected', sessionId: data.sessionId, error: r.error, message: r.error })); } catch { }

@@ -7,7 +7,7 @@ import { metric, track } from './telemetry-client.js';
 import { stripAnsi } from './highlight.js';
 import { ChatMinimap } from './chat-minimap.js';
 import { ChatSearch } from './chat-search.js';
-import { ChatRenderers, toolDisplayName, formatSleepRemaining, isCompactSummaryText } from './chat-renderers.js';
+import { ChatRenderers, toolDisplayName, formatSleepRemaining, formatSettleRemaining, isCompactSummaryText } from './chat-renderers.js';
 import { fmtElapsed } from './subagent-card.js'; // lane agy-subagent-cards: a running subagent card's elapsed time
 import { ChatInput } from './chat-input.js';
 import { ChatStatusBar } from './chat-status-bar.js';
@@ -1157,6 +1157,8 @@ class ChatView {
         const now = Date.now();
         // lane agy-subagent-cards: a RUNNING subagent card's elapsed time counts the same way (a finished card has no data-sub-since)
         for (const el of this._container?.querySelectorAll?.('.chat-sub-elapsed[data-sub-since]') || []) el.textContent = fmtElapsed(now - (Number(el.dataset.subSince) || now));
+        // lane claude-steer-inject r5: a held message's «settling» chip counts down to the window's backstop
+        for (const el of this._container?.querySelectorAll?.('.chat-settle-remaining[data-settle-until]') || []) el.textContent = formatSettleRemaining((Number(el.dataset.settleUntil) || 0) - now);
         const els = this._container?.querySelectorAll?.('.chat-sleep-remaining[data-sleep-until]');
         if (!els || !els.length) return;
         for (const el of els) el.textContent = formatSleepRemaining((Number(el.dataset.sleepUntil) || 0) - now);
@@ -4231,7 +4233,7 @@ class ChatView {
 
     // Queue chip: a cheap in-place swap. A full re-render here would rebuild
     // the whole bubble (markdown, images, fold state) for a one-word badge.
-    if ('queueState' in fields) {
+    if ('queueState' in fields || 'settling' in fields) {
       const el = this._elements.get(id);
       if (el) ChatRenderers.applyQueueChip(el, msg, this._queueChipSteer(msg));
     }

@@ -46,7 +46,19 @@
 // every turn first runs a UserPromptSubmit hook for that long — a follow-up and an owed turn too, BEFORE their init — and
 // with CLAUDE_CODE_EMIT_USER_PROMPT_SUBMIT_HOOK_EVENTS=1 (what the adapter sets) it says so: system/hook_started, then
 // hook_response (`success`, or `cancelled` when an interrupt arrives during the hook — the turn's init still follows, and
-// a second interrupt there ends it, as the real CLI does).
+// a second interrupt there ends it, as the real CLI does). The hook WORDS are keyed on the VERSION too (acceptance r5): 2.1.308's
+// binary does not know the env switch (measured: it never says them), so STAND_IN_CLI_VERSION=2.1.308 runs the hook in silence.
+// A TURN'S INIT NAMES THE CLIENT UUIDS IT CONSUMED (acceptance r5, measured on 2.1.308 and 2.1.312; the writer is in the strings
+// of 2.1.307 on): a frame carrying a `uuid` (the wrapper stamps every mid-turn frame) makes the init of the turn that takes it say
+// `user_message_uuids` — a batch names each frame's, in order; the batch's own uuid is its LAST frame's (the CLI writes ONE user
+// record under it). STAND_IN_CLI_VERSION below 2.1.307 writes neither.
+// WHAT AN INTERRUPT IN THE HOOK DOES TO THE CONVERSATION (acceptance r5, measured on 2.1.312 — measure/r4-312/res-hook-*): the
+// hook is cancelled and the init still follows, but the frame the CLI held is DROPPED from the conversation (no user record,
+// the next request lacks it) — $STAND_IN_DELIVERED gets {how:'dropped'}; a follow-up interrupted on its INIT keeps it
+// ({how:'kept'}: it stays in the conversation, the next request carries it).
+//   $STAND_IN_PROMPT_HOOK_WEDGED=1  a FOLLOW-UP's prompt hook (the turn the CLI starts for what it held at an interrupt) says
+//                      hook_started and then NOTHING, ever (a lost hook_response — the shape a window must end by name); an
+//                      interrupt during it is answered and changes nothing
 // Used by scripts/test-queue-putback.mjs §6, scripts/test-queue-steer.mjs ⑯ and scripts/test-claude-steer-chrome.mjs.
 // Never a vendor call: no network at all.
 const fs = require('fs');
@@ -62,7 +74,10 @@ const CLI_VERSION = process.env.STAND_IN_CLI_VERSION || '2.1.312';
 const atLeast = (v) => { const a = CLI_VERSION.split('.').map(Number), b = v.split('.').map(Number); for (let i = 0; i < 3; i++) if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) > (b[i] || 0); return true; };
 const SINCE_LAST = atLeast('2.1.312'); // the per-result usage delta 2.1.312 writes on every result
 const PROMPT_HOOK_MS = Number(process.env.STAND_IN_PROMPT_HOOK_MS || 0);
-const SAYS_HOOKS = process.env.CLAUDE_CODE_EMIT_USER_PROMPT_SUBMIT_HOOK_EVENTS === '1';
+const HOOK_WEDGED = process.env.STAND_IN_PROMPT_HOOK_WEDGED === '1';
+const SAYS_HOOKS = atLeast('2.1.312') && process.env.CLAUDE_CODE_EMIT_USER_PROMPT_SUBMIT_HOOK_EVENTS === '1';
+const INIT_UUIDS = atLeast('2.1.307');
+const uuidsOf = (f) => (f && Array.isArray(f._uuids) ? f._uuids : (f && typeof f.uuid === 'string' ? [f.uuid] : []));
 let hookSeq = 0;
 const hookWord = (subtype, id, outcome) => { if (SAYS_HOOKS) out({ type: 'system', subtype, hook_id: id, hook_name: 'UserPromptSubmit', hook_event: 'UserPromptSubmit', ...(outcome ? { output: '', stdout: '', stderr: '', exit_code: outcome === 'success' ? 0 : undefined, outcome } : {}), session_id: SID }); };
 const argv = process.argv.slice(2);
@@ -85,7 +100,8 @@ function nextFollow() {
   const batch = [];
   while (queued.length && !isCommand(queued[0])) batch.push(queued.shift());
   if (batch.length === 1) return batch[0];
-  return { type: 'user', message: { role: 'user', content: batch.map((f) => ({ type: 'text', text: textOf(f) })) } };
+  const uuids = batch.flatMap(uuidsOf);
+  return { type: 'user', message: { role: 'user', content: batch.map((f) => ({ type: 'text', text: textOf(f) })) }, _uuids: uuids, ...(uuids.length ? { uuid: uuids[uuids.length - 1] } : {}) };
 }
 function end(subtype) {
   if (!busy) return;
@@ -96,6 +112,7 @@ function end(subtype) {
     out({ type: 'user', session_id: SID, parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'text', text: '[Request interrupted by user for tool use]' }] } });
   } else if (interrupted && (busy.follow || busy.post)) {
     out({ type: 'user', session_id: SID, parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'text', text: '[Request interrupted by user]' }] } });
+    if (busy.follow && !busy.dropped) delivered('kept', busy.text);
   }
   out({ type: 'result', subtype, is_error: interrupted, result: busy.text, session_id: SID, duration_ms: 1, total_cost_usd: 0, ...(SINCE_LAST ? { model_usage_since_last_result: {} } : {}) });
   busy = null;
@@ -111,6 +128,7 @@ function start(f, { follow = false } = {}) {
     busy = { text: textOf(f), timer: null, follow, hook: id, frame: f };
     setState('running');
     hookWord('hook_started', id);
+    if (HOOK_WEDGED && follow) return; // never a response, never an init
     busy.timer = setTimeout(() => { const b = busy; b.hook = null; hookWord('hook_response', id, 'success'); begin(b.frame, { follow: b.follow }); }, PROMPT_HOOK_MS);
     return;
   }
@@ -120,10 +138,13 @@ function start(f, { follow = false } = {}) {
  *  interrupt can end (2.1.312: hook_response «cancelled», then init). */
 function cancelHook() {
   const b = busy;
+  if (HOOK_WEDGED && b.follow) return;
   clearTimeout(b.timer);
   hookWord('hook_response', b.hook, 'cancelled');
   b.hook = null;
+  if (b.follow) delivered('dropped', b.text); // the frame the CLI held is gone from the conversation (measured)
   begin(b.frame, { follow: true });
+  if (b.follow) busy.dropped = true;
 }
 function begin(f, { follow = false } = {}) {
   const text = textOf(f);
@@ -138,7 +159,8 @@ function begin(f, { follow = false } = {}) {
       if (busy) queued.push(note); else start(note);
     }, HELPER_MS);
   }
-  out({ type: 'system', subtype: 'init', session_id: SID, model: 'claude-sonnet-4-5', cwd: process.cwd(), tools: [], permissionMode: 'default', claude_code_version: CLI_VERSION });
+  const uuids = INIT_UUIDS ? uuidsOf(f) : [];
+  out({ type: 'system', subtype: 'init', session_id: SID, model: 'claude-sonnet-4-5', cwd: process.cwd(), tools: [], permissionMode: 'default', claude_code_version: CLI_VERSION, ...(uuids.length ? { user_message_uuids: uuids } : {}) });
   const say = (t) => out({ type: 'assistant', session_id: SID, parent_tool_use_id: null, message: { id: 'msg_stand_in_' + Date.now(), role: 'assistant', model: 'claude-sonnet-4-5', content: [{ type: 'text', text: t }] } });
   if (/TOOL-/.test(text) && !follow) {
     const toolId = 'toolu_stand_in_' + turnSeq;

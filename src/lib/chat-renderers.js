@@ -372,6 +372,11 @@ export function imageMediaHtml({ path = '', host = null, mediaType = '', bytes =
   return `<details class="chat-diff chat-media"${open ? ' open' : ''}><summary class="chat-diff-summary">${UI_ICONS.image} ${escHtml(label)}${metaHtml}</summary><div class="chat-media-body"><img class="chat-img chat-tool-img" loading="lazy" src="${escHtml(src)}" alt="${escHtml(label)}"><span class="chat-media-missing">${escHtml(t('Image not available on this machine'))}</span></div></details>`;
 }
 
+// Seconds left on a held message's settle chip (lane claude-steer-inject r5) — «12 s»; ChatView's ticker rewrites it.
+export function formatSettleRemaining(ms) {
+  return t('{n} s', { n: Math.max(0, Math.ceil((Number(ms) || 0) / 1000)) });
+}
+
 // Time REMAINING on a live `sleep` card, mm:ss (h:mm:ss past an hour) — the
 // countdown ChatView's one-second ticker rewrites in place. Deliberately NOT
 // the same function as the normalizer's `slept 30s`: that one formats a TOTAL
@@ -762,6 +767,9 @@ class ChatRenderers {
       if (b.type === 'text') return `<div class="chat-text">${this.renderMarkdown(b.text)}</div>`;   // P2-15: its line breaks are chat.css's pre-wrap, never a <br> (the AX budget)
       // harness-supplied inline image (ACP/claude user attachment): same media
       // wrapper + zoom as the tool cards; the data: URL stays (small, no path on disk)
+      // a picture the copy of a mid-turn message named whose kept file is gone (lane claude-steer-inject r5): the placeholder
+      // SAYS so — never nothing, never a broken image
+      if (b.type === 'image' && b.gone) return `<div class="chat-media chat-media-gone">${UI_ICONS.image} <span>${escHtml(t('Picture no longer kept'))}</span>${b.bytes ? ` <span class="chat-media-meta">${escHtml(t('{n} KB', { n: Math.max(1, Math.round(b.bytes / 1024)) }))}</span>` : ''}</div>`;
       if (b.type === 'image') return imageMediaHtml({ dataUrl: `data:${b.mediaType || 'image/png'};base64,${b.data}`, mediaType: b.mediaType || 'image/png', name: t('Image') });
       return '';
     }).join('');
@@ -820,10 +828,16 @@ class ChatRenderers {
     chip.type = 'button';
     chip.dataset.queueState = state;
     const icon = state === 'queued' ? UI_ICONS.clock : state === 'steered' || state === 'handed' ? UI_ICONS.bolt : state === 'stopped' || state === 'kept' ? UI_ICONS.reply : UI_ICONS.close;
-    const label = state === 'queued' ? t('Queued') : state === 'steered' ? t('Steered') : state === 'stopped' ? t('Started, then stopped')
+    // HELD WHILE THE TURN SETTLES (lane claude-steer-inject r5, the deadline-card law): a window in which the CLI owes a turn
+    // holds it — the chip says so and counts down to the backstop (ChatView's one-second ticker rewrites the seconds)
+    const settling = state === 'queued' && msg?.settling ? msg.settling : null;
+    const label = settling ? t('Held — the turn is settling') : state === 'queued' ? t('Queued') : state === 'steered' ? t('Steered') : state === 'stopped' ? t('Started, then stopped')
       : state === 'handed' ? t('Handed to the turn') : state === 'kept' ? t('Stays with the stopped turn') : t('Removed');
-    chip.innerHTML = `${icon}<span>${escHtml(label)}</span>`;
-    chip.title = state === 'queued'
+    const until = settling && Number(settling.until) > 0 ? Number(settling.until) : 0;
+    chip.innerHTML = `${icon}<span>${escHtml(label)}</span>${until ? ` <span class="chat-settle-remaining" data-settle-until="${until}">${escHtml(formatSettleRemaining(until - Date.now()))}</span>` : ''}`;
+    chip.title = settling
+      ? (settling.hook ? t('The stopped turn is running its prompt hook — this message waits until the turn settles') : t('The stopped turn is settling — this message waits for it; if the turn does not answer in time it is delivered then'))
+      : state === 'queued'
       ? t('Waiting behind the running turn — steering it injects it now, at the agent’s next reply')
       : state === 'steered' ? t('Injected into the running turn')
         : state === 'stopped' ? t('It had already started when Stop cut it off — its words are back in the input box')
@@ -1856,6 +1870,13 @@ class ChatRenderers {
       const branch = b.branch ? ` <span class="chat-status-dim">· ${escHtml(b.branch)}</span>` : '';
       const link = b.url && /^https?:\/\//i.test(b.url) ? `<a class="chat-code-change-link" href="${escHtml(b.url)}" target="_blank" rel="noopener noreferrer">${escHtml(b.url)}</a>` : '';
       el.innerHTML = `<span class="chat-system-text">${UI_ICONS.pullRequest || ''} <b>${escHtml(head)}</b>${action}${repo}${branch}</span>${link ? `<div class="chat-code-change-url">${link}</div>` : ''}`;
+      return { el, sideEffect: null };
+    }
+    // THE BACKSTOP SPOKE (lane claude-steer-inject r5): a window the CLI owed a turn never answered — the held messages go now
+    if (msg.noticeKind === 'queue-backstop') {
+      const el = document.createElement('div');
+      el.className = 'chat-msg chat-msg-system chat-system-notification';
+      el.innerHTML = `<span class="chat-system-text">${escHtml(t('The turn did not answer in {n} s — the held messages are delivered now', { n: Number(msg.content?.[0]?.seconds) || 30 }))}</span>`;
       return { el, sideEffect: null };
     }
     // Model auto-fallback notice: the server bakes an English sentence (it

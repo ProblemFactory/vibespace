@@ -10,7 +10,12 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 ### Fixed
 - A message you send while a Claude reply runs stays in the chat after the server restarts, with its label and its pictures; it used to disappear.
 - When Claude runs a message it was holding as a turn of its own, the chat shows the turn running and its Stop button.
-- After the Claude CLI updates itself, chats no longer show a red unknown-event card.
+- If Claude could not read a picture you sent, the chat now shows its note beside the picture.
+- After a restart, messages Claude ran together are shown once each, and its notes about pictures no longer appear as yours.
+- A message waiting while a stopped Claude turn settles says so with a countdown, and a note says when it is sent.
+- Pressing Stop again while a stopped turn settles no longer loses the message the first Stop kept.
+- Alt+Enter in the expanded editor, or with Enter set to a new line, types a new line.
+- After a restart, the status bar no longer counts the Claude CLI's own request records as new record kinds.
 
 ## 2.369.360 — 2026-10-27
 

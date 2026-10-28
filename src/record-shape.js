@@ -241,8 +241,21 @@ const SHAPES = {
 // (workflow_progress feeds the live Workflow card). They live in each shape's `ignored` map, the one
 // field map that carries a reason, so `known` stays exactly the binary's own declaration (the oracle
 // diffs the two) and the negative control (§5: empty every `ignored`) has something to flip.
+// init.user_message_uuids (lane claude-steer-inject r5) — the CLI's own init writer adds `user_message_uuids` (the turn's
+// consumed client uuids, `{...init, user_message_uuids: fields().user_message_uuids}`) whenever a user message it took carried
+// a `uuid`: the writer is in the strings of 2.1.307, 2.1.308 and 2.1.312 (2.1.296 has none), and it was MEASURED on the two
+// builds below (the wrapper's stamped frame against a loopback mock). The zod union declares the field on assistant / result /
+// stream_event, never on init — so a corpus row, keyed by the builds that were run.
+const INIT_UUIDS_MEASURED = Object.freeze(['2.1.308', '2.1.312']);
+const INIT_UUIDS_NOTE = 'the client uuids of the user messages this turn consumed, in order (undeclared on init upstream; MEASURED on '
+  + INIT_UUIDS_MEASURED.join(' and ') + ') — written because the chat wrapper stamps a uuid on every mid-turn frame (the copy\'s witness); the copy is claimed by the CLI\'s user record and attachment, never by this list';
 const CORPUS_KNOWN = Object.freeze({
-  'claude:stream:system/init': { messaging_socket_path: 'the CLI\'s cross-session inbox socket (2.1.2xx); undeclared upstream, present on every live init frame' },
+  'claude:stream:system/init': {
+    messaging_socket_path: 'the CLI\'s cross-session inbox socket (2.1.2xx); undeclared upstream, present on every live init frame',
+    // THE PRODUCT'S OWN INPUT CAUSES IT (lane claude-steer-inject r5): the chat wrapper stamps a `uuid` on every mid-turn frame
+    // the person sends (the witness, r4), and the CLI then names the client uuids its turn consumed on that turn's init
+    user_message_uuids: INIT_UUIDS_NOTE,
+  },
   'claude:stream:system/task_started': { owned_by_subagent: 'a task launched by a sub-agent (22/83 live records); undeclared upstream' },
   'claude:stream:system/task_progress': { workflow_progress: 'the live Workflow tree (phases + agents) VibeSpace renders since 2.369.118; undeclared upstream' },
   'claude:stream:user': { isReplay: 'the CLI\'s replay marker on resumed records (1/404 live)' },
@@ -708,4 +721,4 @@ function unknownFieldsSample(record) {
 const SCHEMA_CLI_VERSIONS = Object.freeze(['2.1.281', '2.1.288', '2.1.296', '2.1.306', '2.1.307', '2.1.308', '2.1.312']);
 const SCHEMA_CLI_VERSION = SCHEMA_CLI_VERSIONS[SCHEMA_CLI_VERSIONS.length - 1];
 
-module.exports = { SCHEMA_CLI_VERSION, SCHEMA_CLI_VERSIONS, FIELDS_288, FIELDS_296, FIELDS_306, FIELDS_307, FIELDS_312, ATTACHMENT_PAYLOADS, WORKFLOW_PROGRESS_ITEMS, ZOD_NON_RECORDS, SHAPE_SINCE, SHAPES, ENVELOPES, OURS, isOurs, CONTENT_BLOCK_TYPES, CORPUS_KNOWN, DECLARED_UPSTREAM_UNSEEN, CORPUS_ONLY_SUBTYPES, carrierOf, shapeKeyOf, unknownFields, redactRecord, unknownFieldsSample, isSecretKey, keySegments };
+module.exports = { SCHEMA_CLI_VERSION, SCHEMA_CLI_VERSIONS, FIELDS_288, FIELDS_296, FIELDS_306, FIELDS_307, FIELDS_312, ATTACHMENT_PAYLOADS, WORKFLOW_PROGRESS_ITEMS, ZOD_NON_RECORDS, SHAPE_SINCE, SHAPES, ENVELOPES, OURS, isOurs, CONTENT_BLOCK_TYPES, CORPUS_KNOWN, INIT_UUIDS_MEASURED, DECLARED_UPSTREAM_UNSEEN, CORPUS_ONLY_SUBTYPES, carrierOf, shapeKeyOf, unknownFields, redactRecord, unknownFieldsSample, isSecretKey, keySegments };

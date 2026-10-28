@@ -6,7 +6,8 @@
 //
 // A THROWAWAY server in a git worktree (own data/, a scratch HOME) + headless chrome over raw CDP (test-chat-hygiene-ui's
 // skeleton). A stub `claude` 2.1.309 (a build this release has not registered) runs behind the REAL chat-wrapper through
-// the REAL create path: turn 1 plays a long answer with Bash cards, `api-request-blob` / `api-request` records and a
+// the REAL create path: turn 1 plays a long answer with Bash cards, two record kinds no pinned build writes (the studies saw `api-request-blob` /
+// `api-request` — lane claude-steer-inject r5 registered those, so the fixture's kinds are invented ones) and a
 // result that grew a field no pinned build declares (the studies saw `model_usage_since_last_result` grow — 2.1.312 registered
 // it, int360 — so the fixture's grown field is an invented one); turns 2–3 answer one line (the minimap
 // needs three turns); turn 4 asks three permissions like the CLI (`control_request can_use_tool`): a pip install + reads,
@@ -101,7 +102,7 @@ const A = (id, content, extra = {}) => ({ type: 'assistant', message: { id, type
 const PLAY1 = [];
 for (let i = 0; i < 36; i++) {
   PLAY1.push(A('msg_t' + i, [{ type: 'text', text: `Paragraph ${i}: ` + 'The numbers in the draft were checked against the cap table and the compute bills. '.repeat(4) }]));
-  if (i % 3 === 0) { PLAY1.push({ type: 'api-request-blob', request_id: 'req_' + i, blob: 'x'.repeat(120) }); PLAY1.push({ type: 'api-request', request_id: 'req_' + i, model: 'claude-sonnet-5-5' }); }
+  if (i % 3 === 0) { PLAY1.push({ type: 'later-build-blob', request_id: 'req_' + i, blob: 'x'.repeat(120) }); PLAY1.push({ type: 'later-build-request', request_id: 'req_' + i, model: 'claude-sonnet-5-5' }); }
   if (i % 4 === 1) {
     PLAY1.push(A('msg_b' + i, [{ type: 'tool_use', id: 'toolu_b' + i, name: 'Bash', input: { command: `for d in a b c; do echo $d ${i}; done`, description: 'Loop' } }]));
     PLAY1.push({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_b' + i, content: 'a\nb\nc' }] } });
@@ -270,7 +271,7 @@ try {
       chip: chip ? chip.textContent : null, title: chip ? chip.title : '', color: cs ? cs.color : null, red }; })()`);
   check('zero failed ops while the turn streamed (every live unknown record used to throw: the create op said `msg`)', c1.fails === 0, c1);
   check('no «Unknown event» / «New fields on a known record» card and none of their words in the chat', c1.unknown === 0 && !c1.words, c1);
-  check('ONE chip in the status bar says «3 record kinds this version added — Diagnostics» (api-request-blob, api-request, the grown result)', c1.chip === '3 record kinds this version added — Diagnostics' && /api-request-blob/.test(c1.title) && /result: new fields/.test(c1.title), c1);
+  check('ONE chip in the status bar says «3 record kinds this version added — Diagnostics» (two invented record kinds, the grown result)', c1.chip === '3 record kinds this version added — Diagnostics' && /later-build-blob/.test(c1.title) && /result: new fields/.test(c1.title), c1);
   check('…quiet: never the red of an error', !!c1.color && c1.color !== c1.red, c1);
   await png('1-turn-and-bar');
   await evalJs(`document.querySelector('.chat-view .chat-status-kinds')?.click(); true`);

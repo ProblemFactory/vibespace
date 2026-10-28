@@ -103,11 +103,15 @@ await guard('§2 the composer', () => {
   // idle in the expanded composer and with chat.enterSends off, where the key had always been a newline)
   const { EnterGuard } = ENTER;
   const key = () => { const ev = { key: 'Enter', altKey: true, ctrlKey: false, metaKey: false, shiftKey: false, prevented: false }; ev.preventDefault = () => { ev.prevented = true; }; return ev; };
-  const chord = (over) => { const c = mkCI(live(cl, NEW), { _enterGuard: new EnterGuard(), _getTouchEnterSends: () => false, _showImeHint() { }, ...over }); const ev = key(); const did = c.ci._altEnter(ev); return { did, prevented: ev.prevented, frames: c.frames }; };
+  const chord = (over) => { const c = mkCI(live(cl, NEW), { _enterGuard: new EnterGuard(), _getTouchEnterSends: () => false, _showImeHint() { }, ...over }); const ev = key(); const did = c.ci._altEnter(ev); return { did, prevented: ev.prevented, frames: c.frames, value: c.ci._textarea.value, events: c.ci._textarea.events || [] }; };
   const run = chord({ _isStreaming: true }), runX = chord({ _isStreaming: true, _expanded: true, _textarea: { value: 'words for the agent', style: {}, classList: { remove() { } }, parentElement: null }, _shortcutHint: {} });
   ok(run.did === 'hold' && run.prevented && run.frames.length === 1 && !('steer' in run.frames[0]) && runX.did === 'hold' && runX.frames.length === 1, 'Alt+Enter while a turn runs HOLDS — in the expanded composer too (an unstamped frame the wrapper keeps)', { run, runX });
-  const idleX = chord({ _isStreaming: false, _expanded: true }), idleOff = chord({ _isStreaming: false, _getEnterSends: () => false });
-  ok(idleX.did === 'newline' && !idleX.prevented && idleX.frames.length === 0 && idleOff.did === 'newline' && !idleOff.prevented && idleOff.frames.length === 0, 'Alt+Enter at IDLE in the expanded composer / with chat.enterSends off: a NEWLINE (the textarea\'s default — nothing sent, nothing prevented)', { idleX, idleOff });
+  // r5: a newline TYPED — Chrome inserts nothing for Alt+Enter (the reviewers' bare textarea; the product's composer in
+  // test-claude-steer-chrome ⑲), so leaving it to the textarea's default made it a dead key
+  const ab = () => ({ value: 'ab', selectionStart: 1, selectionEnd: 1, style: {}, events: [], dispatchEvent(e) { this.events.push(e.type); return true; } });
+  const idleX = chord({ _isStreaming: false, _expanded: true, _textarea: ab() }), idleOff = chord({ _isStreaming: false, _getEnterSends: () => false, _textarea: ab() });
+  ok(idleX.did === 'newline' && idleX.prevented && idleX.frames.length === 0 && idleX.value === 'a\nb' && idleX.events.join() === 'input'
+    && idleOff.did === 'newline' && idleOff.prevented && idleOff.frames.length === 0 && idleOff.value === 'a\nb', 'Alt+Enter at IDLE in the expanded composer / with chat.enterSends off: a NEWLINE TYPED at the caret (+ an input event) — nothing sent, never a dead key', { idleX, idleOff });
   const idle = chord({ _isStreaming: false });
   ok(idle.did === 'send' && idle.prevented && idle.frames.length === 1 && !('steer' in idle.frames[0]), 'Alt+Enter at idle where Enter sends: a send, UNSTAMPED — so a tab whose flag lags behind a running turn still has it HELD by the wrapper (r2)', idle);
   ok(mkCI(live(cl, NEW), { _isStreaming: false }).ci.holdChordActs === false && mkCI(live(cl, NEW)).ci.holdChordActs === true && mkCI(live(cl, W354)).ci.holdChordActs === false, 'holdChordActs = the door exists AND a turn runs');

@@ -58,6 +58,7 @@ const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const STAND_IN = path.join(REPO, 'scripts/fixtures/claude-stand-in-cli.cjs');
 const INPROC = path.join(REPO, 'scripts/fixtures/claude-inproc-cli.cjs');
 const RACE = path.join(REPO, 'scripts/fixtures/claude-race-cli.cjs');
+const CLOCK = path.join(REPO, 'scripts/fixtures/clock-scale.cjs'); // r5: the wrapper's clock ×$CLOCK_SCALE (its bounds END in a leg)
 const BASE = '6428c67e';
 let pass = 0, fail = 0, skipped = 0;
 const ok = (c, name, detail) => { if (c) { pass++; console.log('  ✓ ' + name); } else { fail++; console.log('  ✗ ' + name + (detail !== undefined ? ' — ' + (typeof detail === 'string' ? detail : JSON.stringify(detail)).slice(0, 1400) : '')); } return !!c; };
@@ -67,6 +68,7 @@ const until = async (fn, ms = 10000, step = 40) => { const end = Date.now() + ms
 const S = JSON.stringify;
 const { ClaudeCodeAdapter } = require(path.join(REPO, 'src/adapters/claude-code.js'));
 const ad = new ClaudeCodeAdapter({ buffersDir: os.tmpdir() });
+const { createMessageManager } = require(path.join(REPO, 'src/normalizers.js')); // r5 ⑲: the person's view of the wrapper's records
 const SHOTS = process.env.VS_STEER_SHOTS || '';
 if (SHOTS) fs.mkdirSync(SHOTS, { recursive: true });
 // THIS SUITE'S TEARDOWN RUNS FIRST AT EXIT (r2 hygiene): registered before any scratch dir is minted — scratch.mjs removes
@@ -96,15 +98,15 @@ let baseSrc = null;
 try { baseSrc = execFileSync('git', ['-C', REPO, 'show', `${BASE}:data/bin/chat-wrapper.js`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); } catch { baseSrc = null; }
 const BASE_WRAPPER = baseSrc ? wrapperCopy('base', baseSrc) : null;
 const LANE_WRAPPER = path.join(REPO, 'data/bin/chat-wrapper.js');
-async function boot(wrapperPath, label, { toolMs = 1500, env = {}, inproc = false, race = false } = {}) {
+async function boot(wrapperPath, label, { toolMs = 1500, env = {}, inproc = false, race = false, clock = 0 } = {}) {
   const dir = fs.mkdtempSync(path.join(scratchRoot, label + '-'));
   const cap = path.join(dir, 'cli-got.jsonl'), dlv = path.join(dir, 'delivered.jsonl'), inOut = path.join(dir, 'inproc.jsonl'), raceOut = path.join(dir, 'race.jsonl');
   // ⑭ the in-process CLI (scripts/fixtures/claude-inproc-cli.cjs) is preloaded INTO the wrapper's own process — and ⑮ the
   // riding race's scripted CLI (scripts/fixtures/claude-race-cli.cjs) the same way
   const argv = inproc ? ['-r', INPROC, wrapperPath, path.join(dir, 's.buf'), path.join(dir, 's.json'), 'inproc-claude']
     : race ? ['-r', RACE, wrapperPath, path.join(dir, 's.buf'), path.join(dir, 's.json'), 'race-claude']
-    : [wrapperPath, path.join(dir, 's.buf'), path.join(dir, 's.json'), process.execPath, STAND_IN];
-  const w = spawn(process.execPath, argv, { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, STUB_CAPTURE: cap, STAND_IN_DELIVERED: dlv, INPROC_OUT: inOut, RACE_OUT: raceOut, STAND_IN_LONG_MS: String(toolMs), VIBESPACE_SKIP_AGENT_HOOKS: '1', ...env } });
+    : [...(clock ? ['-r', CLOCK] : []), wrapperPath, path.join(dir, 's.buf'), path.join(dir, 's.json'), process.execPath, STAND_IN];
+  const w = spawn(process.execPath, argv, { stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, STUB_CAPTURE: cap, STAND_IN_DELIVERED: dlv, INPROC_OUT: inOut, RACE_OUT: raceOut, STAND_IN_LONG_MS: String(toolMs), ...(clock ? { CLOCK_SCALE: String(clock) } : {}), VIBESPACE_SKIP_AGENT_HOOKS: '1', ...env } });
   atExit.push(() => { try { w.kill('SIGKILL'); } catch { } }); // a signal mid-run ends it too (its stand-in exits on stdin's end)
   const recs = []; let lb = '';
   w.stdout.setEncoding('utf8');
@@ -429,6 +431,60 @@ async function legEditCopy(wp) {
   await h.kill();
   return { copies: copies.map((c) => ({ text: (c.message?.content || []).map((b) => b.text).join(''), cliUuid: c.cliUuid || null })), sentUuid: sent.uuid || null };
 }
+/** ⑲ (r5) EVERY WINDOW HAS A NAMED END — and THE BACKSTOP SPEAKS: after a Stop that found B held by the CLI, the follow-up's
+ *  prompt hook says hook_started and then NOTHING (a lost hook_response). The pause ends at its bound («the prompt hook never
+ *  answered»), the window falls to its 30 s backstop, and D — sent inside the window, held — is said to be «held — the turn is
+ *  settling» (queue_settle: paused by the hook, then counting down to the backstop) and, at the backstop, «the turn did not
+ *  answer in 30 s — delivered now». 6334e9a8: held for ever (48 s and counting; a second Stop did not free it). The wrapper's
+ *  clock runs ×50 here (scripts/fixtures/clock-scale.cjs): its 15 s bound is 0.3 s, its 30 s backstop 0.6 s. */
+async function legHookWedged(wp, label) {
+  const h = await boot(wp, label, { toolMs: 1200, clock: 50, env: { STAND_IN_PROMPT_HOOK_MS: '200', STAND_IN_PROMPT_HOOK_WEDGED: '1', CLAUDE_CODE_EMIT_USER_PROMPT_SUBMIT_HOOK_EVENTS: '1' } });
+  h.say('TOOL-A run the slow command', 'm-a');
+  await until(h.toolUse, 4000);
+  h.say('B handed mid tool', 'm-b', { steer: true });
+  await sleep(150);
+  h.stop();
+  await until(() => h.recs.some((r) => r.type === 'result' && r.is_error), 3000);
+  await sleep(100);
+  h.say('D sent inside the window', 'm-d');
+  await until(() => h.got().some((f) => f.type === 'user' && S(f).includes('D sent inside the window')), 4000);
+  await sleep(200);
+  const lg = h.log();
+  const out = { dHeld: h.queued('m-d'), dReached: h.got().some((f) => f.type === 'user' && S(f).includes('D sent inside the window')),
+    neverAnswered: (lg.match(/the prompt hook never answered[^\n]*/) || [''])[0], backstop: (lg.match(/backstop: [^\n]*/) || [''])[0],
+    settle: h.recs.filter((r) => r.type === 'queue_settle').map((r) => ({ state: r.state, until: r.until == null ? null : typeof r.until, hook: !!r.hook, ids: r.msg_ids })) };
+  // the person's view, from the wrapper's records: D's bubble (the server's own record of the send) through the live normalizer
+  const mm = createMessageManager('claude', 'w-wedged');
+  mm.processLive({ type: 'user', _fromWebui: true, msgId: 'm-d', message: { role: 'user', content: [{ type: 'text', text: 'D sent inside the window' }] }, timestamp: new Date().toISOString() });
+  const chips = [];
+  for (const r of h.recs) { mm.processLive(JSON.parse(S(r))); const b = mm.messages.find((m) => m.webuiMsgId === 'm-d'); if (r.type === 'queue_settle') chips.push({ after: r.state, chip: b?.queueState || null, settling: b?.settling ? (b.settling.until ? 'until' : 'paused') : null }); }
+  out.chips = chips;
+  out.notice = mm.messages.filter((m) => m.noticeKind === 'queue-backstop').map((m) => m.content[0].text);
+  await h.kill();
+  return out;
+}
+/** ⑳ (r5) A SECOND STOP INSIDE THE WINDOW IS HELD: Stop, and 100 ms later Stop again while the follow-up's 1.5 s prompt hook
+ *  runs. Written raw, the second interrupt cancels the hook and the CLI DROPS the frame it held (measured on 2.1.312: no user
+ *  record, the next request lacks it — the stand-in models it) while the record says «kept». Held, it is THE one interrupt on
+ *  the follow-up's init: the frame stays in the conversation. */
+async function legSecondStop(wp, label) {
+  const h = await boot(wp, label, { toolMs: 1200, env: { STAND_IN_PROMPT_HOOK_MS: '1500', CLAUDE_CODE_EMIT_USER_PROMPT_SUBMIT_HOOK_EVENTS: '1' } });
+  h.say('TOOL-A run the slow command', 'm-a');
+  await until(h.toolUse, 5000);
+  h.say('B handed mid tool', 'm-b', { steer: true });
+  await sleep(150);
+  h.stop();
+  // the hook's own lines are the wrapper's (never teed): its log says when the follow-up's prompt hook started
+  await until(() => /running a follow-up turn's prompt hook/.test(h.log()), 2000);
+  await sleep(100);
+  h.write(S({ type: 'control_request', request_id: 'person-stop-2', request: { subtype: 'interrupt' } }));
+  await until(() => /stop settled/.test(h.log()), 6000);
+  await sleep(300);
+  const ints = h.got().filter((f) => f.type === 'control_request' && f.request?.subtype === 'interrupt').map((f) => f.request_id.replace(/-\d+-\d+$/, ''));
+  const out = { kept: h.delivered().filter((d) => d.how === 'kept').map((d) => d.text), dropped: h.delivered().filter((d) => d.how === 'dropped').map((d) => d.text), interrupts: ints, drops: h.drops() };
+  await h.kill();
+  return out;
+}
 /** ⑭ (r2) the follow-up interrupt leaves IN THE SAME TICK as the init line's parse (the in-process CLI looks at once). */
 async function legSameTick(wp, label) {
   const h = await boot(wp, label, { inproc: true });
@@ -463,6 +519,9 @@ const LANE_SRC = fs.readFileSync(LANE_WRAPPER, 'utf8');
 const r2Clock = LANE_SRC.includes('const OWED_BACKSTOP_MS = 30000;') && LANE_SRC.includes("if (msg.type === 'system' && msg.hook_event === 'UserPromptSubmit' && !msg.parent_tool_use_id")
   ? wrapperCopy('r2-clock', LANE_SRC.replace('const OWED_BACKSTOP_MS = 30000;', 'const OWED_BACKSTOP_MS = 2000;').replace("if (msg.type === 'system' && msg.hook_event === 'UserPromptSubmit' && !msg.parent_tool_use_id", "if (false && msg.type === 'system' && msg.hook_event === 'UserPromptSubmit' && !msg.parent_tool_use_id"))
   : null;
+// r5's RED controls: the 6334e9a8 rules, replayed — a prompt-hook pause with no bound, a second Stop written raw
+const noHookBound = LANE_SRC.includes('const PRODUCT_PROMPT_HOOK_MS = 10000 + 5000;') ? wrapperCopy('no-hook-bound', LANE_SRC.replace('const PRODUCT_PROMPT_HOOK_MS = 10000 + 5000;', 'const PRODUCT_PROMPT_HOOK_MS = 1e9;').replace('const OWN_PROMPT_HOOK_MS = 600000 + 5000;', 'const OWN_PROMPT_HOOK_MS = 1e9;')) : null;
+const rawSecondStop = LANE_SRC.includes(" && holdSecondStop(line)) continue;") ? wrapperCopy('raw-second-stop', LANE_SRC.replace(" && holdSecondStop(line)) continue;", " && false) continue;")) : null;
 const leg = (p) => p.catch((e) => ({ threw: String(e && e.message || e) }));
 const [race, hookStop, hookStopNoEmit, hookStopCtl, hookOwed, hookOwedCtl, editCopy] = await Promise.all([
   leg(legRace(LANE_WRAPPER, 'race')),
@@ -472,6 +531,12 @@ const [race, hookStop, hookStopNoEmit, hookStopCtl, hookOwed, hookOwedCtl, editC
   leg(legHookOwed(LANE_WRAPPER, 'hookowed')),
   r2Clock ? leg(legHookOwed(r2Clock, 'hookowed-ctl')) : null,
   leg(legEditCopy(LANE_WRAPPER)),
+]);
+const [wedged, wedgedCtl, secondStop, secondStopCtl] = await Promise.all([
+  leg(legHookWedged(LANE_WRAPPER, 'wedged')),
+  noHookBound ? leg(legHookWedged(noHookBound, 'wedged-ctl')) : null,
+  leg(legSecondStop(LANE_WRAPPER, 'second-stop')),
+  rawSecondStop ? leg(legSecondStop(rawSecondStop, 'second-stop-ctl')) : null,
 ]);
 const [noState, late0, lateAfter, split, ride, ownStop, origin, bound, sameTick, sameTickCtl] = await Promise.all([
   leg(legNoState(LANE_WRAPPER)),
@@ -539,6 +604,13 @@ if (hookStopCtl) ok(hookStopCtl.answeredB && hookStopCtl.follows === 0 && hookSt
 ok(!hookOwed.rodeB?.length && S(hookOwed.turns) === S(['LONG-A a text turn', 'TOOL-B handed, owed its own turn', 'C held until the turn ends']) && hookOwed.cHeld, '⑰ an OWED turn under a 2.5 s prompt hook: C (Alt+Enter) stays held until B\'s own turn ENDS — it never rides B\'s tool result, it runs as a turn of its own', hookOwed);
 if (hookOwedCtl) ok(S(hookOwedCtl.rodeB) === S(['C held until the turn ends']), '⑰ RED CONTROL: the r2 rule drained C inside B\'s hook — it rode B\'s tool result (the hold became a hand-over)', hookOwedCtl);
 ok(editCopy.copies?.length === 1 && editCopy.copies[0].text === 'E please run the tests locally, NOT on staging' && !!editCopy.sentUuid && editCopy.copies[0].cliUuid === editCopy.sentUuid, '⑱ an EDITED held frame: its ONE buffer copy says the latest words (7df30f96 kept the never-sent original) and names the uuid the wrapper stamped on the frame the CLI got — its witness', editCopy);
+// ── ACCEPTANCE r5 ──
+ok(/the prompt hook never answered: 1 UserPromptSubmit hook\(s\) said started and no hook_response in 15 s \(the product's hook: its registered 10 s timeout \+ 5 s\)/.test(wedged.neverAnswered || '') && /^backstop: /.test(wedged.backstop || '') && wedged.dHeld && wedged.dReached, '⑲ (r5) a prompt hook that never answers: the pause ENDS at its bound and SAYS so («the prompt hook never answered» — the product\'s 10 s timeout + 5 s), the window falls to its 30 s backstop and D, held inside it, goes', wedged);
+ok(S(wedged.settle) === S([{ state: 'settling', until: null, hook: true, ids: undefined }, { state: 'settling', until: 'number', hook: false, ids: undefined }, { state: 'backstop', until: null, hook: false, ids: ['m-d'] }])
+  && S(wedged.chips) === S([{ after: 'settling', chip: 'queued', settling: 'paused' }, { after: 'settling', chip: 'queued', settling: 'until' }, { after: 'backstop', chip: 'queued', settling: null }]) && S(wedged.notice) === S(['The turn did not answer in 30 s — the held messages are delivered now']), '⑲ …THE BACKSTOP SPEAKS: D\'s chip says «held — the turn is settling» (paused while the hook runs, then counting down to the backstop), and at the backstop ONE notice says «the turn did not answer in 30 s — the held messages are delivered now»', wedged);
+if (wedgedCtl) ok(wedgedCtl.dHeld && !wedgedCtl.dReached && !wedgedCtl.neverAnswered && !wedgedCtl.backstop, '⑲ RED CONTROL: the pause with no bound (6334e9a8) — D is still held when the leg gives up, nothing said', wedgedCtl);
+ok(S(secondStop.kept) === S(['B handed mid tool']) && !secondStop.dropped?.length && secondStop.interrupts?.[secondStop.interrupts.length - 1] === 'person-stop-2' && !secondStop.interrupts.some((x) => /^vs-stop-follow/.test(x)) && S(secondStop.drops?.map((d) => d.keptIds)) === S([['m-b']]), '⑳ (r5) a second Stop inside the follow-up\'s prompt hook is HELD and becomes THE one interrupt on its init: B stays in the conversation, as the record says («kept»)', secondStop);
+if (secondStopCtl) ok(S(secondStopCtl.dropped) === S(['B handed mid tool']) && S(secondStopCtl.drops?.map((d) => d.keptIds)) === S([['m-b']]), '⑳ RED CONTROL: written raw (6334e9a8) it cancels the hook and the CLI DROPS B — while the record still says «kept»', secondStopCtl);
 ok(sameTick.inproc?.length === 1 && sameTick.inproc[0].sameTick === true && !sameTick.answered, '⑭ the follow-up interrupt is written IN THE SAME TICK as the init line\'s parse (the in-process CLI saw it before init() returned)', sameTick);
 ok(sameTickCtl.inproc?.length === 1 && sameTickCtl.inproc[0].sameTick === false, '⑭ CONTROL: a copy that writes it 25 ms late (a timer between) is caught — the pin can say no', sameTickCtl);
 
@@ -1144,6 +1216,28 @@ else {
     await sleep(600);
     const eAfter = await bubbles('v1', 'PHONE-E');
     ok(S(eAfter.map((b) => b.chip)) === S([null]) && delivered().some((d) => d.how === 'turn' && d.text === 'PHONE-E held with the button'), '⑧ …and when the turn ended it ran — still one bubble', eAfter);
+    // ⑨ (r5) THE IDLE CHORD ON THE PRODUCT'S COMPOSER — at idle, where Enter is a newline (the expanded editor; chat.enterSends
+    // off), Alt+Enter TYPES one at the caret, nothing is sent. Chrome inserts nothing for the chord itself: 6334e9a8 left it to
+    // the textarea's default, and the key was dead (the reviewers' bare textarea, here on the real composer)
+    await waitTurnEnd('v1', 20000);
+    const idleChord = async (mode) => {
+      const prep = await ev(`(() => { const ci = window.__v1._chatInput; const t = ci._textarea;
+        const btn = document.querySelector('[data-steer-leg="v1"] .chat-expand-btn');
+        if ((${S(mode)} === 'expanded') !== !!ci._expanded && btn) btn.click();
+        if (${S(mode)} === 'enterSends-off') { ci.__ges = ci.__ges || ci._getEnterSends; ci._getEnterSends = () => false; }
+        t.value = 'IDLE-' + ${S(mode)} + '-a|b'; t.focus(); const at = t.value.indexOf('|'); t.setSelectionRange(at, at + 1);
+        return { expanded: !!ci._expanded, enterSends: ci._getEnterSends() !== false, streaming: !!ci._isStreaming, focused: document.activeElement === t }; })()`);
+      await key('Enter', 1);
+      await sleep(1500);
+      const after = await ev(`(() => { const ci = window.__v1._chatInput; const t = ci._textarea; const v = t.value;
+        if (ci.__ges) { ci._getEnterSends = ci.__ges; delete ci.__ges; }
+        if (ci._expanded) document.querySelector('[data-steer-leg="v1"] .chat-expand-btn')?.click();
+        t.value = ''; return { value: v, caret: t.selectionStart }; })()`);
+      return { mode, prep, value: after.value, sent: cliGot('IDLE-' + mode) };
+    };
+    const ix = await idleChord('expanded'), io = await idleChord('enterSends-off');
+    ok(ix.prep.expanded && !ix.prep.streaming && ix.value === 'IDLE-expanded-a\nb' && !ix.sent
+      && !io.prep.enterSends && !io.prep.streaming && io.value === 'IDLE-enterSends-off-a\nb' && !io.sent, '⑨ (r5) at IDLE on the product\'s composer — the expanded editor and chat.enterSends off: Alt+Enter TYPES a newline at the caret (replacing the selection), nothing reaches the CLI — never a dead key', { ix, io });
   }
 
   // ④ the OLD wrapper's session: its hello names no steer

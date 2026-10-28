@@ -180,7 +180,7 @@ export const ROWS = [
   ['src/server/window-targets-engine.js', 'own-tree', 4, null, DATA],
   ['src/server/wrapper-files.js', 'own-tree', 6, null, PROC], // ci358-reds round 2 +2: the boot's age sweep (readdir + stat of BUFFERS_DIR), moved out of server.js
   ['src/session-status.js', 'own-tree', 1, null, DATA],
-  ['src/session-store.js', 'own-tree', 27, null, `${CLI}; lane hub-fuse-sync-guard −2: the project-dir decode's three probes are ONE (probeCandidate: never below a storage mount)`],
+  ['src/session-store.js', 'own-tree', 29, null, `${CLI}; lane hub-fuse-sync-guard −2: the project-dir decode's three probes are ONE (probeCandidate: never below a storage mount); lane claude-steer-inject r5 +2: resolveKept stats + reads a restart copy's kept picture beside the wrapper's buffer (data/session-buffers/<id>.img — the instance's own tree, ≤ 32 MB a file)`],
   ['src/slot-transitions.js', 'own-tree', 4, null, DATA],
   ['src/sock-path.js', 'own-tree', 4, null, DATA],
   ['src/ssh-key.js', 'own-tree', 1, null, DATA],

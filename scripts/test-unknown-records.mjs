@@ -59,7 +59,10 @@ console.log('§2 history renders the same cards (the fall-back is a renderer, no
   const consumerTypes = [...consumer.matchAll(/msg\.type === '([a-z_]+)'/g)].map((m) => m[1]).filter((t) => !['system', 'assistant', 'user', 'result', 'control_response', 'attachment'].includes(t));
   const missing = consumerTypes.filter((t) => !MM.KNOWN_IGNORED_RECORD_TYPES.has(t));
   ok(`every top-level type the SERVER consumer handles is on the normalizer's known-ignored list (${consumerTypes.length} checked)`, missing.length === 0, missing);
-  const transcriptTypes = ['queue-operation', 'last-prompt', 'custom-title', 'agent-name', 'permission-mode', 'mode', 'atis-latch', 'file-history-snapshot', 'file-history-delta', 'cost-state', 'summary', 'progress'];
+  const transcriptTypes = ['queue-operation', 'last-prompt', 'custom-title', 'agent-name', 'permission-mode', 'mode', 'atis-latch', 'file-history-snapshot', 'file-history-delta', 'cost-state', 'summary', 'progress',
+    // the request-replay rows + tools-used (lane claude-steer-inject r5: MEASURED in every 2.1.308 / 2.1.312 transcript — counted as
+    // an unknown kind on every restart until declared)
+    'api-request', 'api-request-shape', 'api-request-blob', 'tools-used'];
   const mm2 = createMessageManager('claude', 'test-unknown-3');
   mm2.convertHistory(transcriptTypes.map((type) => ({ type, uuid: 'u-' + type })));
   ok('the transcript\'s own bookkeeping rows never become cards on a rebuild (declared ignored)', cards(mm2).length === 0);
@@ -390,7 +393,9 @@ console.log('§10 lane classifier-stop-card: system/informational is HANDLED on 
   ok('CONTROL: without the handler the notice is the red Unknown-event card again (the owner\'s report)', cards(a).length === 1 && cards(a)[0].content[0].name === 'informational' && stops(a).length === 0, a.messages.map((m) => m.noticeKind));
   const noFold = require(M.write('src/message-manager.js', mmSrc.replace(fold, '        if (false) {'), 'no-fold'));
   const b = hist(noFold, [txAsk('n0'), txNotice('n1'), txNudge('n2')]);
-  ok('CONTROL: without the fold the history nudge is a user message ("You") and a second turn', users(b).length === 2 && b.turnIndex === 2 && users(b)[1].typed !== true, { users: users(b).length, turn: b.turnIndex });
+  // (re-derived, lane claude-steer-inject r5: an isMeta record is never the person's message nor a turn of its own — so without the
+  // fold the nudge is a dim note OUTSIDE the stop card; before r5 it was the owner's «You» bubble and a second turn)
+  ok('CONTROL: without the fold the history nudge is NOT in the stop card — a note of its own outside it', users(b).length === 2 && users(b)[1].synthetic === true && users(b)[1].typed !== true && !JSON.stringify(stops(b)).includes(NUDGE.slice(0, 40)), { users: users(b).length, turn: b.turnIndex });
   const ssCopy = M.write('src/safety-stop.js', read('src/safety-stop.js').replace("'s safeguards stopped the response above · continuing once with that noted\", '≤2.1.280'", "'s safeguards stopped the response above\", '≤2.1.280'"), 'row-drift');
   const rowDrift = require(M.write('src/message-manager.js', mmSrc.replace("require('./safety-stop.js')", `require(${JSON.stringify(ssCopy)})`), 'on-row-drift'));
   const c = live(rowDrift, [stAsk('o0'), stNotice('o1')]);

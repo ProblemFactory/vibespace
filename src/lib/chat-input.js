@@ -706,14 +706,31 @@ export class ChatInput {
    *  ACTS. While this composer sees a turn running it holds; at idle it falls through to the composer's own law — a newline
    *  where Enter is a newline (the expanded composer, chat.enterSends off: the textarea's default), a send only where Enter
    *  sends — and that send carries NO hand-over stamp (a tab whose streaming flag lags may be looking at a running turn:
-   *  the wrapper then holds it, acceptance r2). */
+   *  the wrapper then holds it, acceptance r2). A NEWLINE IS TYPED, never left to the textarea (acceptance r5): Chrome
+   *  inserts nothing for Alt+Enter (measured on the product's composer — the textarea's default is a dead key there), so
+   *  where Enter is a newline the chord inserts one itself. */
   _altEnter(e) {
     if (this.steerChordAllowed) { e.preventDefault(); if (this._onSteerChord) this._onSteerChord(); else this.steerNow(); return 'steer'; }
     if (this.holdChordActs) { e.preventDefault(); if (this._onHoldChord) this._onHoldChord(); else this.holdNow(); return 'hold'; }
     const act = this._enterGuard.enter(e, { expanded: this._expanded, touch: this._isTouch(), touchEnterSends: this._getTouchEnterSends(), enterSends: this._getEnterSends() !== false });
     if (act === 'send') { e.preventDefault(); this._send({ hold: true }); }
+    else if (act === 'newline') { e.preventDefault(); this._typeNewline(); }
     else if (act === 'ime-swallow') { e.preventDefault(); this._showImeHint(); }
     return act;
+  }
+
+  /** A newline at the caret, typed: the focused box's own insertText (its Ctrl+Z undoes it), else a range edit + `input`
+   *  (the autosize and the draft follow either way). */
+  _typeNewline() {
+    const ta = this._textarea;
+    if (!ta) return;
+    const doc = globalThis.document;
+    if (doc && doc.activeElement === ta && typeof doc.execCommand === 'function' && doc.execCommand('insertText', false, '\n')) return;
+    const a = typeof ta.selectionStart === 'number' ? ta.selectionStart : String(ta.value || '').length;
+    const b = typeof ta.selectionEnd === 'number' ? ta.selectionEnd : a;
+    if (typeof ta.setRangeText === 'function') ta.setRangeText('\n', a, b, 'end');
+    else { const v = String(ta.value || ''); ta.value = v.slice(0, a) + '\n' + v.slice(b); ta.selectionStart = ta.selectionEnd = a + 1; }
+    try { ta.dispatchEvent(new Event('input', { bubbles: true })); } catch { }
   }
 
   /** THE HOLD DOOR'S ACTION: the ordinary send WITHOUT the hand-over stamp — the wrapper keeps a frame that arrives
