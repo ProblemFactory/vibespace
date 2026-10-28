@@ -32,6 +32,13 @@
 // sheet and re-hosts as its window when the confirm closes; ⑱ role="dialog" named by its title, no aria-modal; ⑳ 900 × 480 —
 // the whole window inside the workspace, the body scrolls, the foot reachable; ⑨ back at 1280 the sheet is its window again;
 // ⑲ the welcome never counts a form.
+// ROUND 3 (acceptance r2 of c3ed5f0a): ㉑ Rotate… twice ⇒ the new token; a code re-minted ⇒ shown · ㉒ the switcher pA then pB ⇒
+// pB in front, pB again raised, one handler · ㉓ the Agents manager twice ⇒ its refresh hook live · ㉔ a dirty form's door asks,
+// Discard ⇒ the asked form opens, Keep editing ⇒ never (said); the real Connect storage + Add remote machine side by side · ㉕ a
+// running Set up is never closed by a neighbour · ㉖ a select that applied is no draft · ㉗ Publish page's failed re-read says
+// so · ㉘ Browse… over a 2.5 s listing ⇒ its sheet on top, again ⇒ raised · ㉙ a system form 1403 ms after a press in New Session
+// ⇒ behind · ㉚ typing, then a system form ⇒ behind, «abcdef» · ㉛ an iframe and a scroller re-hosted ⇒ loaded once, still at 150 ·
+// ㉜ the keyboard up ⇒ Save above it · ㉝ Reach & policy re-opened ⇒ handlers +0. On c3ed5f0a ㉑–㉝ are RED.
 // On 6428c67e (the base — run the file on a `git archive` copy) ①–⑤ and ⑦ are RED; ⑥ and ⑧ hold on both. On da9545e8 (round 1)
 // the round-2 legs are RED (⑪–⑳, ⑨'s way back, ⑤'s system opener).
 // PNGs: DIALOG_YIELD_PNG_DIR (default: the scratch root) <prefix>-<leg>.png, prefix = DIALOG_YIELD_SHOT_PREFIX (default 'run').
@@ -111,7 +118,7 @@ for (const f of ['src', 'public', 'server.js', 'package.json', 'data/bin']) fs.c
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 fs.writeFileSync(path.join(wt, 'src/lib/build-version.js'), `export const BUILD_VERSION = ${J(require(path.join(repo, 'package.json')).version)};\n`);
 execSync('npx esbuild src/client.js --bundle --outfile=public/bundle.js --format=iife --platform=browser --target=es2020 --loader:.css=css', { cwd: wt, stdio: 'ignore' });
-execSync('npx esbuild --bundle --format=iife --global-name=__dyProbe --platform=browser --target=es2020 --outfile=public/dy-probe.js', { cwd: wt, stdio: ['pipe', 'ignore', 'ignore'], input: "export { showConfirmDialog } from './src/lib/utils.js';" });
+execSync('npx esbuild --bundle --format=iife --global-name=__dyProbe --platform=browser --target=es2020 --outfile=public/dy-probe.js', { cwd: wt, stdio: ['pipe', 'ignore', 'ignore'], input: "export { showConfirmDialog } from './src/lib/utils.js'; export { showTokenOnce, showPairCodeOnce } from './src/lib/channel-webhook.js'; export { showReachDialog } from './src/lib/channel-reach-editor.js';" }); // (r3: the real webhook token / code dialogs and Reach & policy — sheets of the probe's own shell)
 
 const port = await freePort();
 const home = scratchHome('dialog-yield-home', fs); homes.push(home);
@@ -163,7 +170,8 @@ const key = async (k, code, vk) => {
 const ESC = () => key('Escape', 'Escape', 27);
 const typeText = async (text) => { await cdp('Input.insertText', { text }); await sleep(200); };
 /** one leg: a throw is a NAMED ✗ with where it threw, and the walk goes on */
-const step = async (name, fn) => { try { await fn(); } catch (e) { check(`${name}: the leg ran to its end`, false, String((e && e.stack) || e).split('\n').slice(0, 4).join(' | ')); } };
+const ONLY = String(process.env.DY_ONLY || '').split(',').filter(Boolean);   // (a debugging walk of named legs: DY_ONLY=㉗,㉘)
+const step = async (name, fn) => { if (ONLY.length && !ONLY.includes(name)) return; try { await fn(); } catch (e) { check(`${name}: the leg ran to its end`, false, String((e && e.stack) || e).split('\n').slice(0, 4).join(' | ')); } };
 
 await cdp('Runtime.enable'); await cdp('Page.enable');
 await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE }); // §47: a returning user — no first-run wizard
@@ -502,7 +510,7 @@ await step('⑮', async () => {
   const h3 = await evalJs('app.ws.globalHandlers.length');
   check('⑮ …a form whose open registers a broadcast handler, opened twice: ONE window and ONE handler (the second open\'s released at once); closed: back where it was', h1 === h0 + 1 && h2.n === h1 && h2.wins === 1 && h3 === h0, { h0, h1, h2, h3 });
   // a GUARDED form opened again keeps what was typed AND its guard
-  const mk = `(() => { const sh = __dy.api().createModalShell({ id: 'guarded', title: 'A guarded form', kind: 'form', escapeToClose: true, unsaved: { isDirty: () => !!document.querySelector('#plugin-dyprobe-guarded .g-in')?.value, save: async () => true } }); sh.body.innerHTML = '<label>Name <input class="g-in"></label>'; return true; })()`;
+  const mk = `(() => { const sh = __dy.api().createModalShell({ id: 'guarded', title: 'A guarded form', kind: 'form', escapeToClose: true, unsaved: { isDirty: () => !!document.querySelector('#plugin-dyprobe-guarded .g-in')?.value, save: async () => true } }); if (!sh.raised) sh.body.innerHTML = '<label>Name <input class="g-in"></label>'; return true; })()`; // (a re-open is RAISED: its caller reads \`raised\` and draws nothing — r3)
   await evalJs(mk);
   await waitFor(`!!document.querySelector('#plugin-dyprobe-guarded .g-in')`, 5000);
   await realClick('#plugin-dyprobe-guarded .g-in'); await typeText('AAA');
@@ -640,6 +648,256 @@ await step('⑨', async () => {
   await sleep(300);
   const gone = await evalJs(`!document.getElementById('plugin-install-dialog')`);
   check('⑨ …and its ✕ path (the root\'s remove) closes the sheet', gone);
+});
+
+// ════ ROUND 3 (acceptance r2 of c3ed5f0a) — a form's identity is its caller's KEY; a caller never gets a detached shell; «from a
+// layer» is captured at the press; an undismissable form is never closed by a neighbour (each leg RED on c3ed5f0a) ════
+const formsOpen = () => evalJs(`[...document.querySelectorAll('.dialog-form, .dialog-overlay.form-sheet')].filter((r) => r.isConnected).map((r) => ({ id: r.id, h3: r.querySelector('.dialog-header h3')?.textContent || '', sheet: r.classList.contains('form-sheet'), win: !!r.closest('.window') }))`);
+const closeForms = () => evalJs(`(() => { for (const w of [...app.wm.windows.values()]) if (w.type === 'form') { w.onCloseRequest = null; app.wm.closeWindow(w.id); } document.querySelectorAll('.dialog-overlay.form-sheet').forEach((e) => e.remove()); return true; })()`);
+const tagIn = (rootExpr, sel, name) => evalJs(`(() => { document.querySelectorAll('[data-dy="${name}"]').forEach((x) => { delete x.dataset.dy; }); const r = ${rootExpr}; const e = r && r.querySelector(${J(sel)}); if (!e) return false; e.dataset.dy = ${J(name)}; return true; })()`);
+const byTitle = (t) => `[...document.querySelectorAll('.dialog-form, .dialog-overlay')].find((r) => r.isConnected && r.querySelector(':scope > .dialog > .dialog-header h3')?.textContent === ${J(t)})`;
+
+// ── ㉑ Rotate… twice on one caller ⇒ the NEW token is drawn; a pairing code re-minted after «Expired» ⇒ the new code (the real showTokenOnce / showPairCodeOnce) ──
+await step('㉑', async () => {
+  const r = await evalJs(`(async () => {
+    const tick = () => new Promise((res) => setTimeout(res, 80));
+    const shown = () => [...document.querySelectorAll('[data-wh-token]')].filter((c) => c.isConnected).map((c) => c.textContent);
+    __dyProbe.showTokenOnce({ caller: { name: 'bot', auth: 'bearer', id: 'c1' }, token: 'tok_ONE', rotated: true }); await tick();
+    const first = shown();
+    __dyProbe.showTokenOnce({ caller: { name: 'bot', auth: 'bearer', id: 'c1' }, token: 'tok_TWO', rotated: true }); await tick();
+    const second = shown(), roots = document.querySelectorAll('#chan-wh-token').length;
+    __dyProbe.showPairCodeOnce({ code: 'vswp_OLD', expiresAt: Date.now() - 1000, path: 'inbox' }); await tick();
+    const pc1 = { code: document.querySelector('[data-wh-pair-code]')?.textContent, clock: document.querySelector('[data-wh-pair-clock]')?.dataset.whPairClock };
+    __dyProbe.showPairCodeOnce({ code: 'vswp_NEW', expiresAt: Date.now() + 600000, path: 'inbox' }); await tick();
+    const pc2 = { codes: [...document.querySelectorAll('[data-wh-pair-code]')].filter((c) => c.isConnected).map((c) => c.textContent), clock: document.querySelector('[data-wh-pair-clock]')?.dataset.whPairClock, roots: document.querySelectorAll('#chan-wh-paircode').length };
+    for (const id of ['chan-wh-token', 'chan-wh-paircode']) document.querySelector('#' + id + ' .dialog-close')?.click();
+    await tick();
+    return { first, second, roots, pc1, pc2, left: document.querySelectorAll('#chan-wh-token, #chan-wh-paircode').length };
+  })()`);
+  check('㉑ Rotate… twice on one caller ⇒ ONE dialog showing the NEW token (tok_TWO) — never the one rotated away (c3ed5f0a: tok_ONE, tok_TWO into a detached shell)', J(r.first) === J(['tok_ONE']) && J(r.second) === J(['tok_TWO']) && r.roots === 1, r);
+  check('㉑ …a pairing code re-minted after «Expired — make a new code» ⇒ the new code shown, its clock running (c3ed5f0a: «—», expired)', r.pc1.clock === 'expired' && J(r.pc2.codes) === J(['vswp_NEW']) && r.pc2.clock === 'running' && r.pc2.roots === 1 && r.left === 0, r);
+});
+
+// ── ㉒ the Browser switcher for pA, then pB (the title says «Browser» for both) ⇒ pB's switcher in front; pB again ⇒ raised, one handler ──
+await step('㉒', async () => {
+  const r = await evalJs(`(async () => {
+    const wait = () => new Promise((res) => setTimeout(res, 400));
+    const h0 = app.ws.globalHandlers.length;
+    const a = app.openBrowserSwitcher({ profileId: 'pA' }); await wait();
+    const h1 = app.ws.globalHandlers.length;
+    const b = app.openBrowserSwitcher({ profileId: 'pB' }); await wait();
+    const h2 = app.ws.globalHandlers.length;
+    const root = document.getElementById('browser-switcher-dialog');
+    const bLive = !!b && !!b.overlay && b.overlay === root && root.isConnected;
+    const w = root && root.closest('.window');
+    const b2 = app.openBrowserSwitcher({ profileId: 'pB' }); await wait();
+    const h3 = app.ws.globalHandlers.length;
+    return { h0, h1, h2, h3, aClosed: a.state().closed, bClosed: b.state().closed, bLive, front: !!w && w.classList.contains('window-active'), same: !!b2 && b2.overlay === root, roots: document.querySelectorAll('#browser-switcher-dialog').length };
+  })()`);
+  check('㉒ the switcher for pA, then for pB ⇒ pB\'s switcher is the one open and in front, pA\'s closed through its door (c3ed5f0a: pA raised, pB\'s handle closed)', !r.bClosed && r.aClosed && r.bLive && r.front && r.roots === 1, r);
+  check('㉒ …pB again ⇒ RAISED (its handle back, one window) and the broadcast handlers stay ONE per open switcher', r.same && r.h1 === r.h0 + 1 && r.h2 === r.h1 && r.h3 === r.h2, r);
+  await closeForms(); await sleep(300);
+});
+
+// ── ㉓ the Agents manager opened twice ⇒ raised, its refresh hook bound to the LIVE body ──
+await step('㉓', async () => {
+  await evalJs(`(() => { app._showAgentsDialog({ forceModal: true }); return true; })()`);
+  await waitFor(`!!document.getElementById('agents-dialog-overlay')`, 10000);
+  await sleep(800);
+  await evalJs(`(() => { app._showAgentsDialog({ forceModal: true }); return true; })()`);
+  await sleep(800);
+  const r = await evalJs(`({ hook: app._agentsRefreshHook ? app._agentsRefreshHook() : null, roots: document.querySelectorAll('#agents-dialog-overlay').length, forms: [...app.wm.windows.values()].filter((w) => w.type === 'form').length })`);
+  check('㉓ the Agents manager opened twice ⇒ ONE manager, raised, and _agentsRefreshHook() answers true — it refreshes the live one (c3ed5f0a: false, bound to a detached body)', r.hook === true && r.roots === 1 && r.forms === 1, r);
+  await closeForms(); await sleep(300);
+});
+
+// ── ㉔ another subject under the same id while the open one is DIRTY ⇒ its door asks; Discard ⇒ the asked form OPENS; Keep editing ⇒ it never does (said: its onClose, ready null) ──
+await step('㉔', async () => {
+  const openA = async () => {
+    await evalJs(`(() => { const sh = __dy.api().createModalShell({ id: 'q', key: 'A', title: 'Notes', kind: 'form', escapeToClose: true }); sh.body.innerHTML = '<label>Note <input class="dy-q-in"></label>'; return true; })()`);
+    await waitFor(`!!document.querySelector('#plugin-dyprobe-q .dy-q-in')`, 5000);
+    await realClick('#plugin-dyprobe-q .dy-q-in'); await typeText('draft');
+  };
+  const openB = () => evalJs(`(() => { window.__dyQB = 'open'; window.__dyQReady = 'pending'; const b = __dy.api().createModalShell({ id: 'q', key: 'B', title: 'Notes', kind: 'form', escapeToClose: true, onClose: () => { window.__dyQB = 'closed'; } }); b.body.innerHTML = '<p class="dy-q-b">B\\'s content</p>'; if (b.ready) b.ready.then((x) => { window.__dyQReady = x ? 'open' : 'null'; }); return { asked: !!b.asked, raised: !!b.raised }; })()`);
+  await openA();
+  const asked = await openB();
+  await sleep(400);
+  const a1 = await evalJs(`({ ask: !!document.querySelector('#plugin-dyprobe-q .dialog-unsaved'), bShown: !!document.querySelector('.dy-q-b')?.isConnected })`);
+  if (a1.ask) await realClick('#plugin-dyprobe-q .dialog-unsaved-discard');
+  await sleep(600);
+  const d = await evalJs(`({ bShown: !!document.querySelector('.dy-q-b')?.isConnected, bWin: !!document.querySelector('.dy-q-b')?.closest('.window'), aGone: !document.querySelector('.dy-q-in'), ready: window.__dyQReady, roots: document.querySelectorAll('#plugin-dyprobe-q').length })`);
+  check('㉔ another subject under the id while the open one is dirty ⇒ its door ASKS first, the new one waits (asked)', asked.asked && !asked.raised && a1.ask && !a1.bShown, { asked, a1 });
+  check('㉔ …Discard ⇒ the form the person asked for OPENS with its content (c3ed5f0a: dropped — no form left)', d.bShown && d.bWin && d.aGone && d.ready === 'open' && d.roots === 1, d);
+  await closeForms(); await sleep(300);
+  await openA();
+  await openB();
+  await sleep(400);
+  const k0 = await evalJs(`!!document.querySelector('#plugin-dyprobe-q .dialog-unsaved')`);
+  if (k0) await realClick('#plugin-dyprobe-q .dialog-unsaved-keep');
+  await sleep(500);
+  const k = await evalJs(`({ bShown: !!document.querySelector('.dy-q-b')?.isConnected, b: window.__dyQB, ready: window.__dyQReady, kept: document.querySelector('.dy-q-in')?.value || null })`);
+  check('㉔ …Keep editing ⇒ the asked form never opens, and that is SAID to its caller (its onClose ran, ready → null); the draft stays', k0 && !k.bShown && k.b === 'closed' && k.ready === 'null' && k.kept === 'draft', { k0, ...k });
+  await closeForms(); await sleep(300);
+  // the real pair: a dirty «Connect storage», then «Add remote machine» — each its own id now: both open, nothing asked, nothing lost
+  await evalJs(`(() => { app.sidebar._showAddMountDialog(); return true; })()`);
+  await waitFor(`!!${byTitle('Connect storage')}?.querySelector('input[placeholder="my-mount"]')`, 10000);
+  await tagIn(byTitle('Connect storage'), 'input[placeholder="my-mount"]', 'cs-name');
+  await realClick('[data-dy="cs-name"]'); await typeText('nas1');
+  await evalJs(`(() => { app.sidebar._showAddHostDialog({ key: { exists: true } }); return true; })()`);
+  await sleep(800);
+  const p1 = await evalJs(`({ ask: !!document.querySelector('.dialog-unsaved'), titles: [...document.querySelectorAll('.dialog-form, .dialog-overlay')].filter((r) => r.isConnected).map((r) => r.querySelector('.dialog-header h3')?.textContent) })`);
+  if (p1.ask) { await evalJs(`(() => { const b = document.querySelector('.dialog-unsaved-discard'); if (b) b.dataset.dy = 'disc'; return true; })()`); await realClick('[data-dy="disc"]'); await sleep(700); }
+  const p2 = await evalJs(`({ titles: [...document.querySelectorAll('.dialog-form, .dialog-overlay')].filter((r) => r.isConnected).map((r) => r.querySelector('.dialog-header h3')?.textContent), name: ${byTitle('Connect storage')}?.querySelector('input[placeholder="my-mount"]')?.value || null })`);
+  check('㉔ the real pair — a dirty «Connect storage», then «Add remote machine» ⇒ Add remote machine is open, Connect storage beside it with «nas1» (c3ed5f0a: one shared id — asked, and after Discard nothing open)', p2.titles.includes('Add remote machine') && p2.titles.includes('Connect storage') && p2.name === 'nas1' && !p1.ask, { p1, p2 });
+  await closeForms(); await sleep(300);
+});
+
+// ── ㉕ a running «Set up <machine>» (no Escape, no backdrop) is never closed by a neighbour: Connect storage opens BESIDE it, its live-log handler kept ──
+await step('㉕', async () => {
+  const h0 = await evalJs('app.ws.globalHandlers.length');
+  await evalJs(`(() => { app.sidebar._showBootstrapDialog({ id: 'h-dy', name: 'box1' }); return true; })()`);
+  const shown = await waitFor(`!!${byTitle('Set up box1')}?.querySelector('.bs-start')`, 10000);
+  await waitFor(`app.ws.globalHandlers.length > ${h0}`, 6000);   // (its live-log handler registers after the view is drawn)
+  const h1 = await evalJs('app.ws.globalHandlers.length');
+  await evalJs(`(() => { app.sidebar._showAddMountDialog(); return true; })()`);
+  await waitFor(`!!${byTitle('Connect storage')}`, 10000);
+  await sleep(600);
+  const r = await evalJs(`({ setup: !!${byTitle('Set up box1')}, storage: !!${byTitle('Connect storage')}, h2: app.ws.globalHandlers.length })`);
+  check('㉕ «Set up box1» running, then «Connect storage» ⇒ BOTH open and the set-up\'s live-log handler kept (c3ed5f0a: the shared id\'s door closed the set-up, handlers 28 → 27)', shown && r.setup && r.storage && h1 === h0 + 1 && r.h2 === h1, { shown, h0, h1, ...r });
+  await closeForms(); await sleep(400);
+});
+
+// ── ㉖ a select that applies at once is no draft: Escape closes, nothing asked (the vault Filter's Sort) ──
+await step('㉖', async () => {
+  await evalJs(`(() => { const sh = __dy.api().createModalShell({ id: 'filt', title: 'Filter', kind: 'form', escapeToClose: true }); sh.body.innerHTML = '<label>Sort <select class="dy-f-sel"><option value="name">Name</option><option value="recent">Recent</option></select></label>'; window.__dySort = null; sh.body.querySelector('.dy-f-sel').onchange = (e) => { window.__dySort = e.target.value; }; return true; })()`);
+  await waitFor(`!!document.querySelector('#plugin-dyprobe-filt .dy-f-sel')`, 5000);
+  await evalJs(`(() => { const s = document.querySelector('#plugin-dyprobe-filt .dy-f-sel'); s.focus(); s.value = 'recent'; s.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);   // (the pick, applied at once)
+  await ESC(); await sleep(400);
+  const r = await evalJs(`({ open: !!document.getElementById('plugin-dyprobe-filt'), ask: !!document.querySelector('#plugin-dyprobe-filt .dialog-unsaved'), sort: window.__dySort })`);
+  check('㉖ a select that applied at once (the vault Filter\'s Sort) + Escape ⇒ the form closes, nothing asked (c3ed5f0a: «You have unsaved changes»)', !r.open && !r.ask && r.sort === 'recent', r);
+  await closeForms(); await sleep(300);
+});
+
+// ── ㉗ Publish page: the re-read at the answer FAILED (a 502) ⇒ «could not re-check — try again», the person's Unpublish still theirs ──
+await step('㉗', async () => {
+  await evalJs(`(() => { window.__dyPubFetch = window.fetch; window.__dyPubFail = false; window.__dyDel = 0; window.fetch = (u, o) => { const s = String((u && u.url) || u); if (/\\/api\\/pages\\/by-path/.test(s)) { window.__dyPubN = (window.__dyPubN || 0) + 1; return !window.__dyPubFail ? Promise.resolve(new Response(JSON.stringify({ page: { id: 'pg1', url: '/p/pg1', name: 'notes', public: false } }), { headers: { 'Content-Type': 'application/json' } })) : Promise.resolve(new Response('<html><body>502 Bad Gateway</body></html>', { status: 502, headers: { 'Content-Type': 'text/html' } })); } if (/\\/api\\/pages\\/pg1/.test(s) && o && o.method === 'DELETE') { window.__dyDel++; return Promise.resolve(new Response(JSON.stringify({ ok: true }))); } return window.__dyPubFetch(u, o); }; window.__dyFx = app.openFileExplorer(${J(CWD)}); window.__dyFx._explorer._publishPageDialog(${J(CWD + '/notes.html')}, 'notes.html'); return true; })()`);
+  const drawn = await waitFor(`!!document.querySelector('#pp-unpub')`, 8000);
+  const d0 = await evalJs(`({ n: window.__dyPubN || 0, h3: document.querySelector('#publish-page-dialog .dialog-header h3')?.textContent || null, text: (document.getElementById('publish-page-dialog')?.innerText || '').slice(0, 160), html: (document.getElementById('publish-page-dialog')?.innerHTML || '').slice(0, 400) })`);
+  d0.errors = pageErrors.slice(-3).map((x) => String(x).slice(0, 300));
+  await sleep(400);
+  await evalJs(`(() => { window.__dyPubFail = true; return true; })()`);   // the hub hiccups now: the re-read at the answer gets a 502 (the explorer reads by-path itself — armed only now)
+  await realClick('#pp-unpub');
+  await sleep(1000);
+  const r = await evalJs(`({ unpub: !!document.querySelector('#pp-unpub'), title: document.querySelector('#pp-unpub')?.closest('.dialog')?.querySelector('.dialog-header h3')?.textContent || null, said: document.body.innerText.includes('Could not re-check this page'), false: document.body.innerText.includes('unpublished elsewhere'), deleted: window.__dyDel, fx: !!window.__dyFx, ex: !!window.__dyFx?._explorer, root: !!document.getElementById('publish-page-dialog'), forms: [...document.querySelectorAll('.dialog-form')].map((f) => f.id), n: window.__dyPubN || 0 })`);
+  r.drawn = drawn; r.d0 = d0;
+  check('㉗ Publish page, the re-read at Unpublish gets a 502 ⇒ «Could not re-check this page — try again», the form still the Published page with its Unpublish, nothing deleted (c3ed5f0a: «unpublished elsewhere», the form redrawn as Publish page)', r.said && !r.false && r.unpub && r.deleted === 0, r);
+  await evalJs(`(() => { window.fetch = window.__dyPubFetch; delete window.__dyPubFetch; const w = window.__dyFx; if (w) app.wm.closeWindow(w.id); return true; })()`);
+  await closeForms(); await sleep(400);
+});
+
+// ── ㉘ «from the layer» is captured AT THE PRESS: Browse… in New Session over a remote listing that takes 2.5 s ⇒ the picker is its sheet ON TOP; Browse… again ⇒ raised ──
+await step('㉘', async () => {
+  await evalJs(`(() => { window.__dyNsFetch = window.fetch; window.fetch = (u, o) => { const s = String((u && u.url) || u); if (/\\/api\\/hosts\\/hx\\/dir-complete/.test(s)) { (window.__dyDc ||= []).push(Math.round(performance.now())); return new Promise((res) => setTimeout(() => res(new Response(JSON.stringify({ listing: { home: '/home/u', machine: 'hx', dirs: { '~': { kids: ['work'] }, '~/work': { kids: [] } }, links: {}, localized: {}, mounts: [] } }), { headers: { 'Content-Type': 'application/json' } })), 3000)); } return window.__dyNsFetch(u, o); }; app.showNewSessionDialog(); return true; })()`);
+  await waitFor(`!document.getElementById('dialog-overlay').classList.contains('hidden') && !!document.querySelector('#dialog-new-session .pf-pick')`, 8000);
+  await evalJs(`(() => { const s = document.getElementById('input-host'); if (![...s.options].some((o) => o.value === 'hx')) { const o = document.createElement('option'); o.value = 'hx'; o.textContent = 'box-x'; s.appendChild(o); } s.value = 'hx'; s.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+  await sleep(1500);   // (the machine list lands and sets the select again — the person's pick comes after it)
+  const hostSet = await evalJs(`(() => { const s = document.getElementById('input-host'); if (![...s.options].some((o) => o.value === 'hx')) { const o = document.createElement('option'); o.value = 'hx'; o.textContent = 'box-x'; s.appendChild(o); } s.value = 'hx'; s.dispatchEvent(new Event('change', { bubbles: true })); return s.value; })()`);
+  await sleep(300);
+  await evalJs(`(() => { window.__dyPickAt = 0; window.__dyPickerAt = 0; document.addEventListener('pointerdown', () => { window.__dyPickAt = Math.round(performance.now()); }, { capture: true, once: true }); new MutationObserver((_, mo) => { if (document.querySelector('.dialog.pf-picker')) { window.__dyPickerAt = Math.round(performance.now()); mo.disconnect(); } }).observe(document.body, { childList: true, subtree: true }); return true; })()`);
+  await realClick('#dialog-new-session .pf-pick');
+  const appeared = await waitFor(`!!document.querySelector('.dialog.pf-picker')`, 10000);
+  await sleep(500);
+  const g = await evalJs(`(() => { const d = document.querySelector('.dialog.pf-picker'); if (!d) return { picker: false }; const r = d.getBoundingClientRect(), h = document.elementFromPoint(r.left + r.width / 2, r.top + Math.min(r.height / 2, 60)); return { picker: true, sheet: d.parentElement.classList.contains('form-sheet'), onTop: !!h && !!h.closest('.pf-picker'), focusIn: d.contains(document.activeElement), afterPress: window.__dyPickerAt && window.__dyPickAt ? window.__dyPickerAt - window.__dyPickAt : null, listings: (window.__dyDc || []).map((t) => t - window.__dyPickAt), host: document.getElementById('input-host').value }; })()`);
+  g.hostSet = hostSet;
+  await shot('28-browse-late');
+  check(`㉘ Browse… in New Session over a 3 s remote listing (the picker opened ${g.afterPress} ms after the press) ⇒ it is its SHEET on top, under the pointer (c3ed5f0a: a window BEHIND the New Session sheet, unreachable)`, appeared && g.picker && g.afterPress > 1500 && g.sheet && g.onTop, g);
+  await evalJs(`(() => { document.querySelector('#dialog-new-session .pf-pick').click(); return true; })()`);   // the button again (its press is under the sheet: the act itself)
+  await sleep(600);
+  const a = await evalJs(`({ pickers: document.querySelectorAll('.dialog.pf-picker').length, onTop: (() => { const d = document.querySelector('.dialog.pf-picker'); if (!d) return false; const r = d.getBoundingClientRect(), h = document.elementFromPoint(r.left + r.width / 2, r.top + Math.min(r.height / 2, 60)); return !!h && !!h.closest('.pf-picker'); })() })`);
+  check('㉘ …Browse… again ⇒ the open picker raised (ONE picker, on top) — never a dead button', a.pickers === 1 && a.onTop, a);
+  await evalJs(`(() => { document.querySelector('.dialog.pf-picker .dialog-close')?.click(); return true; })()`);
+  await sleep(400);
+});
+
+// ── ㉙ a SYSTEM form 1403 ms after a press inside the New Session sheet ⇒ behind (never a sheet over it); ㉚ typing in its name field, then a system form ⇒ behind, the keys stay in the field ──
+await step('㉙', async () => {
+  await evalJs(`(() => { window.__dyPressAt = 0; document.addEventListener('pointerdown', () => { window.__dyPressAt = performance.now(); }, { capture: true, once: true }); return true; })()`);
+  await realClick('#dialog-new-session label');
+  const dt = await evalJs(`new Promise((res) => { const wait = Math.max(0, 1403 - (performance.now() - window.__dyPressAt)); setTimeout(() => { const sh = __dy.api().createModalShell({ id: 'sys1', title: 'From the system', kind: 'form', opener: 'system', escapeToClose: true }); sh.body.innerHTML = '<p>news</p>'; res(Math.round(performance.now() - window.__dyPressAt)); }, wait); })`);
+  await sleep(400);
+  const r = await evalJs(`(() => { const f = document.getElementById('plugin-dyprobe-sys1'); const ns = document.getElementById('dialog-new-session'); const r2 = ns.getBoundingClientRect(); const h = document.elementFromPoint(r2.left + r2.width / 2, r2.top + 30); return { sheet: !!f?.classList.contains('form-sheet'), win: !!f?.closest('.window'), nsOnTop: !!h && !!h.closest('#dialog-new-session') }; })()`);
+  check(`㉙ a SYSTEM form ${dt} ms after a press inside the New Session sheet ⇒ BEHIND it (a window), never a sheet over it (c3ed5f0a: a sheet covering New Session)`, dt >= 1300 && !r.sheet && r.win && r.nsOnTop, { dt, ...r });
+  await closeForms(); await sleep(300);
+});
+await step('㉚', async () => {
+  await realClick('#input-session-name'); await evalJs(`(() => { const i = document.getElementById('input-session-name'); i.value = ''; return true; })()`);
+  await typeText('abc');
+  await evalJs(`(() => { const sh = __dy.api().createModalShell({ id: 'sys2', title: 'Also from the system', kind: 'form', opener: 'system', escapeToClose: true }); sh.body.innerHTML = '<p>news</p>'; return true; })()`);
+  await sleep(120);
+  await typeText('def');
+  await sleep(300);
+  const r = await evalJs(`(() => { const f = document.getElementById('plugin-dyprobe-sys2'); return { sheet: !!f?.classList.contains('form-sheet'), win: !!f?.closest('.window'), value: document.getElementById('input-session-name').value, focus: document.activeElement?.id || document.activeElement?.className || null }; })()`);
+  await shot('30-typing-system');
+  check('㉚ typing in New Session\'s name field, then a SYSTEM form ⇒ behind (no sheet over the field), the keys stay in the field: «abcdef» (c3ed5f0a: a sheet covered the field being typed in)', !r.sheet && r.win && r.value === 'abcdef' && r.focus === 'input-session-name', r);
+  await closeForms();
+  await evalJs(`(() => { if (window.__dyNsFetch) { window.fetch = window.__dyNsFetch; delete window.__dyNsFetch; } app.hideDialogs?.(); return true; })()`);
+  await sleep(500);
+});
+
+// ── ㉛ a re-host MOVES the element: a form holding an iframe and a scrolled list, across desktop → phone → desktop ⇒ the iframe loaded ONCE, the list where it was ──
+await step('㉛', async () => {
+  await evalJs(`(() => { window.__dyLoads = 0; const sh = __dy.api().createModalShell({ id: 'frm', title: 'A page and a list', kind: 'form', escapeToClose: true }); sh.body.innerHTML = '<div class="dy-scr" style="height: 120px; overflow: auto; flex: none"><div style="height: 900px">rows</div></div>'; const f = document.createElement('iframe'); f.className = 'dy-if'; f.style.height = '80px'; f.addEventListener('load', () => { window.__dyLoads++; }); f.srcdoc = '<p>a page</p>'; sh.body.appendChild(f); return true; })()`);
+  await waitFor(`window.__dyLoads === 1 && !!document.getElementById('plugin-dyprobe-frm')?.closest('.window')`, 8000);
+  await sleep(300);
+  await evalJs(`(() => { document.querySelector('#plugin-dyprobe-frm .dy-scr').scrollTop = 150; return true; })()`);
+  await cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+  await waitFor(`!!document.getElementById('plugin-dyprobe-frm')?.classList.contains('dialog-overlay')`, 8000);
+  await sleep(700);
+  const ph = await evalJs(`({ loads: window.__dyLoads, scroll: document.querySelector('#plugin-dyprobe-frm .dy-scr')?.scrollTop, sheet: !!document.getElementById('plugin-dyprobe-frm')?.classList.contains('form-sheet') })`);
+  await cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
+  await waitFor(`!!document.getElementById('plugin-dyprobe-frm')?.closest('.window')`, 10000);
+  await sleep(800);
+  const dk = await evalJs(`({ loads: window.__dyLoads, scroll: document.querySelector('#plugin-dyprobe-frm .dy-scr')?.scrollTop, win: !!document.getElementById('plugin-dyprobe-frm')?.closest('.window') })`);
+  check('㉛ a form holding an iframe and a scrolled list, desktop → phone → desktop ⇒ re-hosted each way, the iframe loaded ONCE and the list still at 150 (c3ed5f0a: loads 1 → 2 → 3, scrollTop 150 → 0)', ph.sheet && dk.win && ph.loads === 1 && dk.loads === 1 && Math.round(ph.scroll) === 150 && Math.round(dk.scroll) === 150, { ph, dk });
+  await closeForms(); await sleep(300);
+});
+
+// ── ㉜ the phone (390 × 844) with the on-screen keyboard up (a 400 px visual viewport) ⇒ a sheet's foot (Save) stays above it ──
+await step('㉜', async () => {
+  await cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+  await sleep(900);
+  await evalJs(`(() => { const sh = __dy.api().createModalShell({ id: 'kb', title: 'A form on the phone', kind: 'form', escapeToClose: true }); sh.body.innerHTML = '<label>Name <input class="dy-kb-in"></label><div style="height: 520px; flex: none">a long list</div>'; const foot = document.createElement('div'); foot.className = 'dialog-footer'; const go = document.createElement('button'); go.className = 'btn-create dy-kb-go'; go.textContent = 'Save'; foot.append(go); sh.dialog.appendChild(foot); return true; })()`);
+  await waitFor(`!!document.getElementById('plugin-dyprobe-kb')?.classList.contains('dialog-overlay')`, 8000);
+  await sleep(400);
+  const before = await evalJs(`Math.round(document.querySelector('#plugin-dyprobe-kb .dy-kb-go').getBoundingClientRect().bottom)`);
+  await evalJs(`(() => { Object.defineProperty(window.visualViewport, 'height', { configurable: true, get: () => 400 }); window.visualViewport.dispatchEvent(new Event('resize')); return true; })()`);
+  await sleep(700);
+  const r = await evalJs(`(() => { const go = document.querySelector('#plugin-dyprobe-kb .dy-kb-go'), b = go.getBoundingClientRect(); return { kbOpen: document.documentElement.classList.contains('vs-kb-open'), inset: getComputedStyle(document.documentElement).getPropertyValue('--kb-inset').trim(), top: Math.round(b.top), bottom: Math.round(b.bottom) }; })()`);
+  await shot('32-keyboard');
+  check('㉜ the phone with a 400 px visual viewport (the keyboard up) ⇒ the sheet\'s Save stays above the keyboard (c3ed5f0a: 744–770, under it)', r.kbOpen && r.bottom <= 400 && r.top >= 0, { before, ...r });
+  await evalJs(`(() => { delete window.visualViewport.height; window.visualViewport.dispatchEvent(new Event('resize')); return true; })()`);
+  await closeForms();
+  await cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
+  await sleep(800);
+});
+
+// ── ㉝ Reach & policy re-opened for the same conversation ⇒ RAISED, its broadcast handlers +0 (the real showReachDialog) ──
+await step('㉝', async () => {
+  await evalJs(`(() => { window.__dyReFetch = window.fetch; window.fetch = (u, o) => { const s = String((u && u.url) || u); if (/\\/api\\/channels\\/lark\\/c-dy(\\?|$)/.test(s) && (!o || !o.method || o.method === 'GET')) return Promise.resolve(new Response(JSON.stringify({ conversation: { adapterId: 'lark', id: 'c-dy', title: 'ops', policy: null, reach: { entries: [], requests: [] } } }), { headers: { 'Content-Type': 'application/json' } })); return window.__dyReFetch(u, o); }; return true; })()`);
+  const h0 = await evalJs('app.ws.globalHandlers.length');
+  await evalJs(`(() => { __dyProbe.showReachDialog(app, { adapterId: 'lark', id: 'c-dy', title: 'ops' }); return true; })()`);
+  await waitFor(`!!document.getElementById('chan-reach-dialog')`, 8000);
+  await sleep(500);
+  const h1 = await evalJs('app.ws.globalHandlers.length');
+  await evalJs(`(() => { __dyProbe.showReachDialog(app, { adapterId: 'lark', id: 'c-dy', title: 'ops' }); return true; })()`);
+  await sleep(800);
+  const h2 = await evalJs('app.ws.globalHandlers.length');
+  const roots = await evalJs(`document.querySelectorAll('#chan-reach-dialog').length`);
+  await evalJs(`(() => { document.querySelector('#chan-reach-dialog .dialog-close')?.click(); return true; })()`);
+  await sleep(500);
+  const h3 = await evalJs('app.ws.globalHandlers.length');
+  check('㉝ Reach & policy re-opened for the same conversation ⇒ RAISED (one dialog) and the broadcast handlers +0; closed ⇒ back to where they were (c3ed5f0a: +1 per re-open, re-fetching into a detached body)', h1 > h0 && h2 === h1 && roots === 1 && h3 === h0, { h0, h1, h2, h3, roots });
+  await evalJs(`(() => { window.fetch = window.__dyReFetch; delete window.__dyReFetch; return true; })()`);
 });
 
 // ── ⑲ the welcome never counts a form: the last chat closed with a form open, then the form — the empty desktop shows its welcome ──

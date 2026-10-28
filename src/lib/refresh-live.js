@@ -53,7 +53,9 @@ export function openRefreshLive(app) {
     let done = false;
     let voice = null;
     const finish = (v) => { if (done) return; done = true; try { voice && voice.destroy(); } catch { } resolve(v); };
-    const { overlay, dialog, body, close } = createModalShell({ id: 'refresh-live-dialog', title: t('Refresh all live sessions'), dialogClass: 'refresh-live-dialog', escapeToClose: true, onClose: () => finish(null), kind: 'form' });
+    // one subject: every live session at once — one refresh at a time
+    const { overlay, dialog, body, close, raised } = createModalShell({ id: 'refresh-live-dialog', title: t('Refresh all live sessions'), dialogClass: 'refresh-live-dialog', escapeToClose: true, onClose: () => finish(null), kind: 'form' });
+    if (raised) return null;   // raised: the same subject's form, as it was
     const p = (cls, text) => { const e = document.createElement('p'); e.className = cls; e.textContent = text; return e; };
     const n = probe.queue.length, m = probe.skipped.length;
     body.append(p('dialog-hint refresh-live-count', n

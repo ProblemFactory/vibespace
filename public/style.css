@@ -1740,6 +1740,11 @@ html:not(.voice-absent) .voice-field-grip > textarea { padding-right: 44px; }
   z-index: 99998; display: flex; align-items: center; justify-content: center;
 }
 .dialog-overlay.hidden { display: none; }
+/* lane dialog-yield r3: a SHEET'S FOOT STAYS ABOVE THE ON-SCREEN KEYBOARD — the overlay ends where the keyboard begins (--kb-inset,
+   src/lib/keyboard-inset.js: the inset the composer already reads) and the dialog fits what is left, its body scrolls (measured on
+   c3ed5f0a at 390 × 844 with a 400 px visual viewport: Save stood at 744–770, under the keyboard) */
+html.vs-kb-open .dialog-overlay { bottom: calc(var(--kb-inset, 0px) / var(--ui-scale, 1)); }
+html.vs-kb-open .dialog-overlay > .dialog { max-height: calc(min(80vh, 100vh - var(--kb-inset, 0px) - 16px) / var(--ui-scale, 1)); }
 .dialog label.hidden { display: none; } /* e.g. #custom-model-row toggle */
 .dialog {
   background: var(--bg-dialog); border: 1px solid var(--border);

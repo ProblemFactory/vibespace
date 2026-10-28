@@ -596,7 +596,9 @@ export function openVaultWindow(app, { syncId, focus = null } = {}) {
   onlyShown.onclick = () => { st.revealOnly = !st.revealOnly; syncFilters(); place(); };
   /** 筛选… (a phone): the same filters in a modal — each press applies at once (the list behind it follows). */
   filterB.onclick = () => {
-    const { dialog, body: mb, close } = createModalShell({ id: 'vault-filter-dialog', title: t('Filter'), dialogClass: 'vault-dialog-box vw-filter-dialog', minWidth: 'min(340px, 92vw)', escapeToClose: true, kind: 'form' });
+    // one subject: the vault list’s one filter
+    const { dialog, body: mb, close, raised } = createModalShell({ id: 'vault-filter-dialog', title: t('Filter'), dialogClass: 'vault-dialog-box vw-filter-dialog', minWidth: 'min(340px, 92vw)', escapeToClose: true, kind: 'form' });
+    if (raised) return null;   // raised: the same subject's form, as it was
     const mk = (label, on, fn, cls) => { const b = vwEl('button', `vw-chip ${cls}${on ? ' on' : ''}`, label); b.type = 'button'; b.setAttribute('aria-pressed', on ? 'true' : 'false'); b.onclick = () => { fn(); const now = b.classList.toggle('on'); b.setAttribute('aria-pressed', now ? 'true' : 'false'); }; return b; };
     const sortRow = vwEl('div', 'vw-fsec');
     const sel2 = vwEl('select', 'vw-sort vw-chip');

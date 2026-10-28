@@ -105,8 +105,9 @@ async function fetchView(hostId) {
 export async function openExitAccessDialog(app, { hostId, name = '' } = {}) {
   // lane dialog-unsaved-guard: who / commands / the hub's answer changed and not saved ⇒ ✕ / Esc / the backdrop asks
   let dirtyNow = () => false; let saveNow = async () => true;
-  const { body, close, dialog } = createModalShell({ id: 'exit-access-dialog', title: t('Who can use {machine}?', { machine: name || hostId }), dialogClass: 'exit-access-dialog', bodyClass: 'exit-access-body', escapeToClose: true,
+  const { body, close, dialog, raised } = createModalShell({ id: 'exit-access-dialog', key: hostId, title: t('Who can use {machine}?', { machine: name || hostId }), dialogClass: 'exit-access-dialog', bodyClass: 'exit-access-body', escapeToClose: true,
     unsaved: { isDirty: () => dirtyNow(), save: () => saveNow() }, kind: 'form' });
+  if (raised) return null;   // raised: the same subject's form, as it was
   body.textContent = t('Loading…');
   let data;
   try { data = await fetchView(hostId); }

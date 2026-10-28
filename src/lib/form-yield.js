@@ -27,6 +27,28 @@ export function isPersonDialog(el) { if (!el || el.nodeType !== 1) return false;
 export function isFormRoot(el) { return !!el && el.nodeType === 1 && classesOf(el).includes('dialog-form'); }
 /** The dialog root `el` stands in (itself included), else null. */
 export function personDialogOf(el) { try { return el && typeof el.closest === 'function' ? el.closest(DIALOG_ROOTS) : null; } catch { return null; } }
+/** WHAT A FORM FLOATS IS THE FORM'S (round 3 — acceptance r2: a press on the path field's suggestion list, a child of
+ *  <body>, dropped the form's hold and 'me/proj⏎' went into the agent's page). OWNERSHIP IS DECLARED, never guessed: the ONE
+ *  helpers that float an element (path-field's list, createPopover, showContextMenu, the pickers) stamp it from the element
+ *  that opened it — `data-owner-form` = the id of the dialog root that anchor stands in (nothing when it stands in none). */
+export function ownFloat(floatEl, anchorEl) {
+  try {
+    if (!floatEl || floatEl.nodeType !== 1) return null;
+    const root = anchorEl && anchorEl.nodeType === 1 ? (ownerFormOf(anchorEl) || personDialogOf(anchorEl)) : null;
+    if (root && root.id) floatEl.setAttribute('data-owner-form', root.id); else floatEl.removeAttribute('data-owner-form');
+    return root && root.id ? root : null;
+  } catch { return null; }
+}
+/** …and THE ONE READER: the dialog root that owns `el` (a floated piece, or anything inside one), else null — keyboard-yield
+ *  asks it before it calls a press «outside the form». (test-architecture §103 reds a `data-owner-form` read elsewhere.) */
+export function ownerFormOf(el) {
+  try {
+    const f = el && typeof el.closest === 'function' ? el.closest('[data-owner-form]') : null;
+    if (!f) return null;
+    const root = (f.ownerDocument || document).getElementById(f.getAttribute('data-owner-form'));
+    return root && isPersonDialog(root) && root.isConnected ? root : null;
+  } catch { return null; }
+}
 /** Does a FORM window hold the person's work now — the focus inside it, or its window the active one? (a decision holds while
  *  it is open: it covers everything) — a session's late focus and the live view's hold ask it */
 export function formHoldsNow(root, active = null) {
@@ -38,18 +60,21 @@ export function formHoldsNow(root, active = null) {
   } catch { return false; }
 }
 
-/** WHERE IT STANDS (PURE): 'sheet' on the phone tier; while a BLOCKING layer is up a form opened FROM it (the person's act
- *  inside that layer — the static New Session sheet's folder picker, the tour's sign-in) is its sheet above it, and any other
- *  form waits 'behind', a window UNDER the layer (the decision keeps its keys and its buttons — round 2: a sheet stacked over
- *  a danger confirm covered its Delete, and stayed a blocking sheet after the confirm closed); else a window — in 'front'
+/** WHERE IT STANDS (PURE): 'sheet' on the phone tier; while a BLOCKING layer is up a form the PERSON opened FROM it (their
+ *  press inside that layer — the static New Session sheet's folder picker, the tour's sign-in) is its sheet above it, and any
+ *  other form waits 'behind', a window UNDER the layer (the decision keeps its keys and its buttons — round 2: a sheet stacked
+ *  over a danger confirm covered its Delete, and stayed a blocking sheet after the confirm closed); else a window — in 'front'
  *  when the PERSON opened it, 'behind' the focused window when the system did. «Opened by the person» is the CALLER's fact
  *  (`opener: 'person' | 'system'` at createModalShell — round 2: the browser's user activation lasts ~5 s and a popup spends
  *  it, so the Voice sheet re-opened after «Connect with Fish Audio» landed behind), and whatever the caller says a form never
  *  takes the keys from a field the person was TYPING in (`typedLast`: the person's last act was text typed into a field,
- *  within a second, no press since — 'hello wor' / 'ld' measured on da9545e8). */
+ *  within a second, no press since — 'hello wor' / 'ld' measured on da9545e8) — under a layer too.
+ *  Round 3 (acceptance r2): «from the layer» is a FACT CAPTURED AT THE PRESS (`fromLayer` = the press token the call carries
+ *  landed inside a blocking layer — form-window.js), never a clock at the open: Browse… over a 2 s remote listing opened its
+ *  picker BEHIND the New Session sheet, and a system form 1403 ms after a press inside it covered the field being typed in. */
 export function formOpenVerdict({ phone = false, blocked = false, fromLayer = false, opener = 'person', typedLast = false } = {}) {
   if (phone) return 'sheet';
-  if (blocked) return fromLayer ? 'sheet' : 'behind';
+  if (blocked) return fromLayer && opener !== 'system' && !typedLast ? 'sheet' : 'behind';
   if (typedLast || opener === 'system') return 'behind';
   return 'front';
 }
@@ -64,11 +89,24 @@ export function typedLastVerdict({ typedAt = null, pressAt = null, now = 0, with
 /** A SHEET'S HOME (PURE): a form's sheet exists only while what made it does — the phone tier, or a blocking layer it stands
  *  over; the moment neither holds it re-hosts as its window ('window'), what was typed kept. */
 export function sheetHomeVerdict({ phone = false, blocked = false } = {}) { return phone || blocked ? 'sheet' : 'window'; }
-/** THE SAME FORM AGAIN (PURE): a form whose id is open — the same form (its title) is RAISED, never replaced: what was typed,
- *  its handlers and its guard stay ('raise'); another form under a shared id asks the open one's own door first ('door' —
- *  its guard asks when dirty; it closes ⇒ the new one opens, it stays ⇒ it is raised). Round 2: the dedup closed the old
- *  window WITHOUT its onClose and dropped what was typed — a second press on the opener is ordinary use now. */
-export function reopenVerdict({ openTitle = '', nextTitle = '' } = {}) { return String(openTitle || '') === String(nextTitle || '') ? 'raise' : 'door'; }
+/** THE SAME FORM AGAIN (PURE): a form whose id is open. Its IDENTITY is the caller's fact — the id plus the KEY it declares
+ *  (the subject the content is about: the caller, the entry, the document, the conversation, the profile; null ≡ null = a
+ *  single-subject form), NEVER its title (round 3 — acceptance r2: Rotate… twice raised the dialog showing the token that had
+ *  been rotated away, and tok_TWO went into a detached shell). The same key ⇒ RAISED, never replaced: what was typed, its
+ *  handlers and its guard stay ('raise' — the caller gets the LIVE shell, `raised: true`); another key ⇒ the open one's own
+ *  door first ('door' — closed ⇒ the new one opens; asked ⇒ the new one opens when it closes, never if the person keeps it);
+ *  an open form that declared itself UNDISMISSABLE (a running set-up: no Escape, no backdrop) is never closed by a
+ *  neighbour's open ⇒ 'beside' (the new one opens next to it). */
+export function reopenVerdict({ openKey = null, nextKey = null, undismissable = false } = {}) {
+  const k = (x) => (x === undefined || x === null ? null : String(x));
+  if (k(openKey) === k(nextKey)) return 'raise';
+  return undismissable ? 'beside' : 'door';
+}
+/** IT CANNOT BE DISMISSED (PURE): the caller said so (`undismissable: true`) or turned off every door the person has —
+ *  no Escape (and no ask-first hook), no backdrop press. */
+export function undismissableVerdict({ undismissable = false, escapeToClose = false, closeOnBackdrop = true, onEscape = false } = {}) {
+  return !!undismissable || (!escapeToClose && !onEscape && closeOnBackdrop === false);
+}
 /** ONE ESCAPE (PURE) — a form has ONE Escape door, the shell's, and it honours the call: 'none' (the site opted out — no
  *  escapeToClose, no onEscape), 'kept' (the caller's ask-first hook answered false: it asks or keeps itself), 'guard' (its
  *  unsaved guard decides — Escape = the ✕: it asks when dirty), 'ask' (no guard, but something was typed: the shell asks

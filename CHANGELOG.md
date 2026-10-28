@@ -17,6 +17,13 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A form no longer stays stuck over the screen after a confirmation closes, or after the window goes from phone width back to desktop.
 - A form that opens while you are typing in the chat waits behind it.
 - New background job… has its Create button again, and the Agents window asks before closing over unsaved instructions.
+- Rotating a webhook token twice, or making a new pairing code, shows the new one instead of the one that no longer works.
+- While you drive an agent's browser, picking a suggestion or a menu item in a form keeps your typing in the form.
+- The folder button in New Session opens its picker on top, even when a remote machine is slow to list its folders.
+- Opening another storage or machine form no longer closes a machine's set-up while it runs.
+- A published page's dialog shows its link and buttons again; if the page cannot be re-checked it says so and keeps your Unpublish.
+- On a phone, a dialog's buttons stay above the on-screen keyboard.
+- The vault's password dialogs and a machine's sign-in no longer block the chat.
 
 ## 2.369.360 — 2026-10-27
 

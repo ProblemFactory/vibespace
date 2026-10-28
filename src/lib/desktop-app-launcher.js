@@ -460,7 +460,8 @@ export function adoptWitnessText(w, row = {}) {
 }
 export async function showAdoptDialog(row, { host = 'local', onDone = null } = {}) {
   const app = catalogLabel(row);
-  const { body, close } = createModalShell({ id: 'desktop-adopt-dialog', title: t('Add {app} to VibeSpace', { app }), dialogClass: 'desktop-adopt', escapeToClose: true, kind: 'form' });
+  const { body, close, raised } = createModalShell({ id: 'desktop-adopt-dialog', key: `${host}:${row && row.id}`, title: t('Add {app} to VibeSpace', { app }), dialogClass: 'desktop-adopt', escapeToClose: true, kind: 'form' });
+  if (raised) return null;   // raised: the same subject's form, as it was
   body.innerHTML = `
     <p class="desktop-adopt-witness"></p>
     <div class="desktop-adopt-field" data-field="label"><label><span>${escHtml(t('Label'))}</span><input type="text" class="desktop-adopt-label" autocomplete="off" spellcheck="false" maxlength="80"></label><div class="desktop-adopt-err"></div></div>
@@ -547,7 +548,8 @@ export async function removeRegistered(row, { forget = false, onDone = null } = 
   if (!ok) return null;
   const r = await fetchJson(`/api/desktop/apps/${encodeURIComponent(row.id)}/${forget ? 'forget' : 'remove'}`, POST_JSON({}));
   if (!r || r.ok === false || r.error) {
-    const { body } = createModalShell({ id: 'desktop-remove-failed', title: t('Could not remove {app}', { app }), dialogClass: 'desktop-adopt', escapeToClose: true, kind: 'form' });
+    const { body, raised } = createModalShell({ id: 'desktop-remove-failed', key: row && row.id, title: t('Could not remove {app}', { app }), dialogClass: 'desktop-adopt', escapeToClose: true, kind: 'form' });
+    if (raised) return null;   // raised: the same subject's form, as it was
     const said = r && r.code === 'no_recipe' ? t('{app} has no remove recipe — use Forget', { app }) : r && r.code === 'needs_root' ? t('Its remove recipe needs administrator rights — VibeSpace runs recipes as you only') : t('The remove recipe failed');
     const p = document.createElement('p'); p.className = 'desktop-adopt-witness is-bad'; p.textContent = [said, r && r.error].filter(Boolean).join(' — ');
     body.appendChild(p);
@@ -638,7 +640,8 @@ export async function showInstallDialog(m, { what = 'xpra', onDone = null, reque
   const spec = xp || isApp || tv || vm ? null : installSpecFor(what);
   const appLabel = spec ? spec.label : 'LibreOffice';
   const name = xp ? machineName(m) : machineInSentence(m); // xpra's words exactly as before; a LibreOffice install names the machine inside its sentences
-  const { body: ib, close: iclose } = createModalShell({ id: 'desktop-install-dialog', title: vm ? (vmRemove ? t('Remove the virtual microphone from {machine}', { machine: name }) : t('Install a virtual microphone on {machine}', { machine: name })) : tv ? t('Install TightVNC Server on {machine}', { machine: name }) : isApp ? appDialogTitle(request || { kind: 'apt', packages: [] }, name) : xp ? t('Install xpra on {machine}', { machine: name }) : what === FONTS_ID ? t('Install the Calibri / Cambria look-alike fonts on {machine}', { machine: name }) : t('Install LibreOffice on {machine}', { machine: name }), dialogClass: 'desktop-install', escapeToClose: true, kind: 'form' });
+  const { body: ib, close: iclose, raised } = createModalShell({ id: 'desktop-install-dialog', key: `${m && m.hostId}:${what}`, title: vm ? (vmRemove ? t('Remove the virtual microphone from {machine}', { machine: name }) : t('Install a virtual microphone on {machine}', { machine: name })) : tv ? t('Install TightVNC Server on {machine}', { machine: name }) : isApp ? appDialogTitle(request || { kind: 'apt', packages: [] }, name) : xp ? t('Install xpra on {machine}', { machine: name }) : what === FONTS_ID ? t('Install the Calibri / Cambria look-alike fonts on {machine}', { machine: name }) : t('Install LibreOffice on {machine}', { machine: name }), dialogClass: 'desktop-install', escapeToClose: true, kind: 'form' });
+  if (raised) return;   // raised: the same subject's form, as it was
   ib.classList.add('desktop-install-body');
   if (isApp) ib.classList.add('desktop-install-app');
   const note = document.createElement('div'); note.className = 'desktop-install-note'; note.textContent = t('Reading what {machine} runs…', { machine: name });
@@ -748,7 +751,8 @@ const patchUserState = (patch) => fetch('/api/user-state', { method: 'PATCH', he
 export async function showLaunchDialog(app, opts = {}) {
   const doc = opts && opts.file && typeof opts.file === 'object' && opts.file.path ? opts.file : null;
   const refusal = doc && opts.refusal && opts.refusal.code ? opts.refusal : null;
-  const { overlay, body, close } = createModalShell({ id: 'desktop-launch-dialog', title: doc ? t('Open with LibreOffice') : t('Apps'), dialogClass: 'desktop-launch', escapeToClose: true, kind: 'form' });
+  const { overlay, body, close, raised } = createModalShell({ id: 'desktop-launch-dialog', key: doc ? `doc:${doc.host || ''}:${doc.path}` : 'apps', title: doc ? t('Open with LibreOffice') : t('Apps'), dialogClass: 'desktop-launch', escapeToClose: true, kind: 'form' });
+  if (raised) return null;   // raised: the same subject's form, as it was
   body.setAttribute('aria-busy', 'true'); // ANSWERING until its last step below (both reads in, the disclosure decided, the focus given) — a screen reader waits, and so can a suite
   // design 009 §B3: apps first — the head row (machines + "Install an app…"), Running, Apps, Browsers, Your installed
   // apps, Advanced; the intro, the sharing default, the backend's line and the real-desktop line live in the FOOTER

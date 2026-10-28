@@ -627,7 +627,7 @@ export function installSidebarMounts(Sidebar) {
       // integrations lane: the channel accounts' re-authorize is the SAME
       // dialog); the three storage calls are its parameters
       const prov = this._oauthProviderNames(m);
-      return reauthDialog({
+      return reauthDialog({ key: m.id,   // (its id: the module's own — one re-authorize per mount, keyed)
         title: tr('Re-authorize "{name}"', { name: m.name }),
         hint: tr('{provider} reported the saved sign-in as expired or revoked. Sign in again to mint a fresh token — nothing else about the mount changes.', { provider: prov.signin }),
         signinLabel: tr('Sign in with {provider}', { provider: prov.signin }),
@@ -683,7 +683,7 @@ export function installSidebarMounts(Sidebar) {
       const preset = presets.find((p) => p.key === sw.client.clientPreset);
       const clientName = sw.client.clientId || (preset ? tr('Preset: {name}', { name: preset.label }) : tr('(custom / built-in client)'));
       const base = rule.authBase;
-      return reauthDialog({
+      return reauthDialog({ key: `${m.id}:client-switch`,   // (the plain re-authorize's id; another subject — a sign-in under the NEW client: an open plain one goes through its door)
         title: tr('Re-authorize "{name}"', { name: m.name }),
         hint: tr('The OAuth client changed to {client}. A token only works with the client that minted it — sign in with {provider} again to finish the switch. Until then the connection keeps its current client and sign-in.', { client: clientName, provider: prov.signin }),
         signinLabel: tr('Sign in with {provider}', { provider: prov.signin }),
@@ -722,7 +722,7 @@ export function installSidebarMounts(Sidebar) {
         try { await api(`/api/mounts/${r.id}/mount`, { method: 'POST' }); }
         catch (e) { showToast(e.message || tr('Created, but connecting failed — check the path'), { type: 'error' }); }
         close(); this._renderMounts();
-      });
+      }, { id: 'mount-submount-dialog', key: cred.id });
       // Shared-drive picker over the PARENT's stored credentials (id-based)
       if (this._hasWidget(cred.type, 'shared-drives')) this._wireSharedDrivePicker(this._lastMountsDialog, cred.id);
     },
@@ -877,7 +877,8 @@ export function installSidebarMounts(Sidebar) {
       // lane win-input-elevated: a Windows device at normal rights ⇒ the door to raise it (the owner runs the consent-prompted
       // re-registration). Shown iff we KNOW it is Windows and NOT elevated; never for a Mac/Linux device (elevation is Windows-only).
       if (winDev && !deviceElevated) actions.append(ibtn(MI.bolt, tr('Run as administrator…'), async () => {
-        const { body, close } = createModalShell({ id: 'device-elevate-dialog', title: tr('Run "{name}"’s device agent as administrator', { name: h.name }), bodyClass: 'mounts-dialog-body', escapeToClose: true, kind: 'form' });
+        const { body, close, raised } = createModalShell({ id: 'device-elevate-dialog', key: h.id, title: tr('Run "{name}"’s device agent as administrator', { name: h.name }), bodyClass: 'mounts-dialog-body', escapeToClose: true, kind: 'form' });
+        if (raised) return;   // raised: the same subject's form, as it was
         const p1 = document.createElement('p'); p1.className = 'agents-note';
         p1.textContent = tr('When the device agent runs as administrator, agents can type into windows you opened as administrator — and you choose which, in the allow list. VibeSpace never elevates on its own; Windows asks you to confirm.');
         const p2 = document.createElement('p'); p2.className = 'agents-note';
@@ -1084,7 +1085,7 @@ export function installSidebarMounts(Sidebar) {
         const via = r.via === 'tunnel' ? tr('over the device tunnel') : tr('over the public address');
         showToast(tr('Mounted at {mp} on {name} ({via})', { mp: r.mountpoint, name: h.name, via }));
         this._renderMounts?.();
-      });
+      }, { id: 'mount-onto-dialog', key: (folder && folder.path) || folder });
     },
 
     _showHostMountDialog(h, prefillFolder) {
@@ -1099,7 +1100,7 @@ export function installSidebarMounts(Sidebar) {
         const via = r.via === 'tunnel' ? tr('over the device tunnel') : tr('over the public address');
         showToast(tr('Mounted at {mp} on {name} ({via})', { mp: r.mountpoint, name: h.name, via }));
         this._renderMounts();
-      });
+      }, { id: 'share-onto-dialog', key: h.id });
     },
 
     // The PULL direction on any machine row (B-f3e8 — ONE dialog for ssh and
@@ -1132,14 +1133,15 @@ export function installSidebarMounts(Sidebar) {
         close();
         showToast(tr('Mounted at {mp} (read-only, over the device link)', { mp: r.mountpoint }));
         this._renderMounts();
-      });
+      }, { id: 'mount-from-dialog', key: h.id });
     },
 
     // Port forwarding (B-0b60 tunnel path): expose a machine's loopback dev
     // server here over the device link. Detected ports + a manual box; each
     // becomes http://127.0.0.1:<localPort> opened in the embedded browser.
     async _showPortsDialog(h) {
-      const { body, close } = createModalShell({ id: 'ports-dialog', title: tr('Forward a port from "{name}"', { name: h.name }), bodyClass: 'mounts-dialog-body', escapeToClose: true, kind: 'form' });
+      const { body, close, raised } = createModalShell({ id: 'ports-dialog', key: h.id, title: tr('Forward a port from "{name}"', { name: h.name }), bodyClass: 'mounts-dialog-body', escapeToClose: true, kind: 'form' });
+      if (raised) return null;   // raised: the same subject's form, as it was
       // The forward binds on THIS SERVER's loopback (the browser can't reach
       // it directly), so "Open" routes through the embedded browser's proxy
       // (node-unblocker on the server → the server's loopback → the tunnel).
@@ -1292,6 +1294,7 @@ export function installSidebarMounts(Sidebar) {
       return new Promise((resolve) => {
         let settled = false;
         const done = (v) => { if (!settled) { settled = true; resolve(v); } };
+        // one subject: the private-key step of the one machine being added
         this._mountsDialog(tr('Private key'), [], tr('Use this key'), async (_, ctx) => {
           const val = ta.value || '';
           if (!val.trim()) throw new Error(tr('Paste or upload the key first'));
@@ -1306,7 +1309,7 @@ export function installSidebarMounts(Sidebar) {
           // FIRST settle wins).
           done({ privateKey: val, keyPassphrase: passIn.value || '' });
           ctx.close();
-        }, { onClose: () => done(null), id: 'mounts-key-dialog' });
+        }, { id: 'mounts-privkey-dialog', onClose: () => done(null), id: 'mounts-key-dialog' });
 
         const ov = document.getElementById('mounts-key-dialog');
         const body = ov.querySelector('.dialog-body');
@@ -1397,6 +1400,7 @@ export function installSidebarMounts(Sidebar) {
     },
 
     _showAddHostDialog(hd) {
+      // one subject: one machine being added
       this._mountsDialog('Add remote machine', [
         { key: 'name', label: 'Name', placeholder: 'gpu-01', hint: 'Any label you like — how this machine shows in your lists.' },
         { key: 'user', label: 'Username on that machine', placeholder: 'ubuntu' },
@@ -1427,6 +1431,7 @@ export function installSidebarMounts(Sidebar) {
             k = r.key;
             // surface the public key so the user can install it on the target
             await new Promise((done) => {
+              // one subject: the public key just generated for the one machine being added
               this._mountsDialog('Public key generated', [], 'Done', async (_, ctx) => { ctx.close(); done(); }, { id: 'mounts-key-dialog' });
               const ov = document.getElementById('mounts-key-dialog');
               const body = ov.querySelector('.dialog-body');
@@ -1480,7 +1485,7 @@ export function installSidebarMounts(Sidebar) {
          if (!err.isConnected) { showToast(e.message || tr('Failed'), { type: 'error' }); return; }
          throw e; // dialog still on screen — let it render the error inline
        }
-      });
+      }, { id: 'host-add-dialog' });
     },
 
 
@@ -1626,7 +1631,8 @@ export function installSidebarMounts(Sidebar) {
     // need this — Add machine installs the agent over ssh at first use.
     async _showDevicePairDialog(h = null) {
       const existing = !!(h && h.deviceId);
-      const { body, close } = createModalShell({ id: 'device-pair-dialog', title: existing ? tr('Pairing command — "{name}"', { name: h.name }) : tr('Pair a device'), bodyClass: 'device-pair-body', escapeToClose: true, kind: 'form' });
+      const { body, close, raised } = createModalShell({ id: 'device-pair-dialog', key: h ? h.id : 'new', title: existing ? tr('Pairing command — "{name}"', { name: h.name }) : tr('Pair a device'), bodyClass: 'device-pair-body', escapeToClose: true, kind: 'form' });
+      if (raised) return;   // raised: the same subject's form, as it was
       if (existing) {
         // the sheet's head: the device's dial state, so the user sees whether the OLD command ever worked
         const stp = document.createElement('p');
@@ -1787,7 +1793,8 @@ export function installSidebarMounts(Sidebar) {
 
     // B-6640: upgrade an ssh machine to a dial-out device (or roll it back).
     async _showGraduateDialog(h) {
-      const { body, close } = createModalShell({ id: 'mounts-dialog-overlay', title: h.graduated ? tr('Dial-out — "{name}"', { name: h.name }) : tr('Upgrade "{name}" to dial-out', { name: h.name }), bodyClass: 'mounts-dialog-body', escapeToClose: true, kind: 'form' });
+      const { body, close, raised } = createModalShell({ id: 'dialout-dialog', key: h.id, title: h.graduated ? tr('Dial-out — "{name}"', { name: h.name }) : tr('Upgrade "{name}" to dial-out', { name: h.name }), bodyClass: 'mounts-dialog-body', escapeToClose: true, kind: 'form' });
+      if (raised) return;   // raised: the same subject's form, as it was
       if (h.graduated) {
         const st = document.createElement('div'); st.className = 'tiny'; st.style.marginBottom = '10px';
         st.innerHTML = h.dialLive
@@ -1838,10 +1845,11 @@ export function installSidebarMounts(Sidebar) {
     async _showBootstrapDialog(h) {
       let off = null; // assigned after the handler registers — close() can run first (TDZ trap)
       // No backdrop close: a stray click mid-bootstrap must not dismiss the progress view.
-      const { overlay, body, close } = createModalShell({
-        id: 'mounts-dialog-overlay', title: `Set up ${h.name}`, minWidth: '400px',
+      const { overlay, body, close, raised } = createModalShell({ id: 'host-setup-dialog', key: h.id, undismissable: true,   // a running set-up is never closed by a neighbour's open (round 3)
+        title: `Set up ${h.name}`, minWidth: '400px',
         closeOnBackdrop: false, escapeToClose: false, onClose: () => off?.(), kind: 'form', // (no Escape either: the set-up runs on — its ✕ is the one door)
       });
+      if (raised) return;   // raised: the same subject's form, as it was
       body.innerHTML = `<div class="bs-steps"></div>
         <details class="bs-log-wrap"><summary>Log</summary><pre class="bs-log"></pre></details>
         <div class="dialog-actions"><button class="btn-create bs-start">Start</button></div>`;
@@ -1929,7 +1937,9 @@ export function installSidebarMounts(Sidebar) {
     },
 
     _showRcloneConfDialog() {
-      const { body, close } = createModalShell({ id: 'mounts-dialog-overlay', title: tr('Import rclone config'), escapeToClose: true, kind: 'form' });
+      // one subject: one rclone config pasted at a time
+      const { body, close, raised } = createModalShell({ id: 'rclone-import-dialog', title: tr('Import rclone config'), escapeToClose: true, kind: 'form' });
+      if (raised) return;   // raised: the same subject's form, as it was
       const hint = document.createElement('div');
       hint.className = 'mounts-field-hint';
       hint.textContent = tr('Paste the contents of your rclone.conf (from `rclone config file` — usually ~/.config/rclone/rclone.conf). Every remote inside it becomes a mount you can pick.');
@@ -1993,6 +2003,7 @@ export function installSidebarMounts(Sidebar) {
     },
 
     _showImportShareDialog() {
+      // one subject: one share link pasted at a time
       this._mountsDialog(tr('Import share link'), [
         { key: 'link', label: tr('Share link'), placeholder: 'vibespace-share:v1:…' },
         { key: 'name', label: tr('Display name (optional)'), placeholder: 'team-dataset', hint: tr('What to call this folder in your file list.') },
@@ -2001,7 +2012,7 @@ export function installSidebarMounts(Sidebar) {
         const r = await api('/api/mounts/import', { method: 'POST', body: JSON.stringify({ link: v.link, name: v.name || undefined }), headers: { 'Content-Type': 'application/json' } });
         if (!await this._connectNewMount(r.id, close)) return;
         close(); showToast(tr('Share imported')); this._renderMounts();
-      });
+      }, { id: 'share-import-dialog' });
     },
 
     async _showAddMountDialog() {
@@ -2010,6 +2021,7 @@ export function installSidebarMounts(Sidebar) {
       let presets = [];
       try { presets = (await api('/api/mounts/drive-defaults')).presets || []; } catch {}
 
+      // one subject: one storage being connected
       this._mountsDialog(tr('Connect storage'), [
         { key: 'type', label: tr('Source type'), type: 'select', options: rows.filter((r) => r.pickLabel).sort((a, b) => (a.pick || 0) - (b.pick || 0)).map((r) => [r.id, tr(r.pickLabel)]) },
         { key: 'name', label: tr('Name'), placeholder: 'my-mount' },
@@ -2044,7 +2056,7 @@ export function installSidebarMounts(Sidebar) {
         const r = await api('/api/mounts', { method: 'POST', body: JSON.stringify(v), headers: { 'Content-Type': 'application/json' } });
         if (!await this._connectNewMount(r.id, close)) return;
         close(); showToast(tr('Storage connected')); this._renderMounts();
-      });
+      }, { id: 'mount-add-dialog' });
       const ctx = this._lastMountsDialog;
       if (!ctx) return;
       // each row's widgets in row order (client.widgets): a host prefill, a guided OAuth connect, a picker
@@ -2310,6 +2322,7 @@ export function installSidebarMounts(Sidebar) {
     // Mint a scoped WebDAV mount token so another VibeSpace can mount a folder
     // of THIS instance (the "VibeSpace互挂" bridge).
     _showBridgeShareDialog(prefillRoot) {
+      // one subject: one local folder being shared
       this._mountsDialog(tr('Share a local folder'), [
         { key: 'name', label: tr('Label'), placeholder: 'shared-with-bob' },
         { key: 'root', label: tr('Folder to share (absolute path on this machine)'), placeholder: '/home/me/project', autocomplete: 'local', value: prefillRoot || '' },
@@ -2334,7 +2347,7 @@ export function installSidebarMounts(Sidebar) {
         actions.className = 'dialog-actions';
         actions.appendChild(copyBtn);
         body.appendChild(actions);
-      });
+      }, { id: 'share-local-dialog' });
     },
 
     // Mint an S3 share link FROM a specific mount (uses that mount's own creds).
@@ -2370,7 +2383,8 @@ export function installSidebarMounts(Sidebar) {
       try { cfg = await api(`/api/mounts/${m.id}/config`, { headers: revealHeaders() }); }
       catch (e) { showToast(e.message || tr('Failed to load connection'), { type: 'error' }); return; }
       const name = cfg.name || m.name;
-      const { body, close } = createModalShell({ id: 'mount-edit-dialog', title: `${tr('Edit')} "${name}"`, bodyClass: 'mounts-dialog-body', escapeToClose: true, unsaved: { save: () => form.onsubmit({ preventDefault() {} }) }, kind: 'form' });
+      const { body, close, raised } = createModalShell({ id: 'mount-edit-dialog', key: m.id, title: `${tr('Edit')} "${name}"`, bodyClass: 'mounts-dialog-body', escapeToClose: true, unsaved: { save: () => form.onsubmit({ preventDefault() {} }) }, kind: 'form' });
+      if (raised) return null;   // raised: the same subject's form, as it was
       const form = document.createElement('form');
       form.className = 'mounts-form';
       let editPresets = [];
@@ -2538,7 +2552,7 @@ export function installSidebarMounts(Sidebar) {
         actions.className = 'dialog-actions';
         actions.appendChild(copyBtn);
         body.appendChild(actions);
-      });
+      }, { id: 'share-from-dialog', key: m.id });
     },
 
     // Direct CephFS subtree share (My storage): mints a path-scoped cephx key
@@ -2561,7 +2575,7 @@ export function installSidebarMounts(Sidebar) {
         actions.className = 'dialog-actions';
         actions.appendChild(copyBtn);
         body.appendChild(actions);
-      });
+      }, { id: 'share-from-direct-dialog', key: m.id });
     },
   });
 }

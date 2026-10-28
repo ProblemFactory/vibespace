@@ -139,8 +139,9 @@ export function totpExtras(row, data, { refresh, signal, show } = {}) {
  *  run counts as not granted); unchecking takes a grant back. */
 export function showTotpGrantPicker(entry, data, { refresh } = {}) {
   // lane dialog-unsaved-guard: a tick changed and not saved ⇒ ✕ / Esc / the backdrop asks
-  const { body, close } = createModalShell({ id: 'vault-totp-grant', title: t('Grant the code of "{name}" to', { name: entry.name }), dialogClass: 'vault-dialog-box vw-ak-dialog', escapeToClose: true,
+  const { body, close, raised } = createModalShell({ id: 'vault-totp-grant', key: entry.id, title: t('Grant the code of "{name}" to', { name: entry.name }), dialogClass: 'vault-dialog-box vw-ak-dialog', escapeToClose: true,
     unsaved: { isDirty: () => boxes.some((b) => b.checked !== had.has(b.value)), save: () => doSave() }, kind: 'form' });
+  if (raised) return null;   // raised: the same subject's form, as it was
   const subjects = (data && data.subjects) || { sessions: [], groups: [] };
   const had = new Map(entry.grants.filter((g) => g.live !== false).map((g) => [g.subject, g.id]));
   const boxes = [];

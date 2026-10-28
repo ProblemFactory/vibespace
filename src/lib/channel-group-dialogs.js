@@ -80,7 +80,8 @@ export async function showGroupMembersDialog(app, { group = null } = {}) {
   const roster = await loadRoster(app);
   if (!roster) return;
   const existing = invite ? (group.members || []).map((m) => m.member) : [];
-  const shell = createModalShell({ id: 'chan-group-new-dialog', title: invite ? t('Invite to {name}', { name: group.name }) : t('New group'), dialogClass: 'chan-dialog chan-group-new', escapeToClose: true, kind: 'form' });
+  const shell = createModalShell({ id: 'chan-group-new-dialog', key: group ? group.id : 'new', title: invite ? t('Invite to {name}', { name: group.name }) : t('New group'), dialogClass: 'chan-dialog chan-group-new', escapeToClose: true, kind: 'form' });
+  if (shell.raised) return;   // raised: the same subject's form, as it was
   const { body, close } = shell;
   let nameInput = null;
   if (!invite) {
@@ -164,7 +165,8 @@ export async function archiveGroup(group) {
  */
 export function showGroupDetail(app, group0) {
   let group = group0;
-  const shell = createModalShell({ id: 'chan-group-dialog', title: t('Group — {name}', { name: group.name }), dialogClass: 'chan-dialog chan-group-detail', escapeToClose: true, onClose: () => off(), kind: 'form' });
+  const shell = createModalShell({ id: 'chan-group-dialog', key: group0 && group0.id, title: t('Group — {name}', { name: group.name }), dialogClass: 'chan-dialog chan-group-detail', escapeToClose: true, onClose: () => off(), kind: 'form' });
+  if (shell.raised) return null;   // raised: the same subject's form, as it was
   const { body, close } = shell;
   const h3 = shell.dialog.querySelector('.dialog-header h3');
   function draw() {

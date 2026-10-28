@@ -221,13 +221,14 @@ const VAULT_DOOR_EVENT = 'vs-vault-door';
 /** THE UNLOCK MODAL — right after the page loads while the vault is locked. lane vault-locked-loud: 「稍后」, Esc and ✕ close it
  *  and set THIS lock's ask aside for the tab (the strip, the chip and the ⚙ mark stay); `then` runs once it closes, whichever
  *  way (the ⚙ press: the menu after the dialog). */
-export function showUnlock({ then = null } = {}) {
-  if (document.getElementById('vault-unlock-dialog')) return;   // one modal (the door may be pressed while it is open)
+export function showUnlock({ then = null, opener = 'person' } = {}) {
   const onClose = () => {
     if (facts && facts.state === 'locked') dismissLock(facts);   // closed while still locked = set aside (an unlock is not)
     if (typeof then === 'function') setTimeout(then, 0);   // after the closing press: the menu's outside-click never sees it
   };
-  const { dialog, body, close } = createModalShell({ id: 'vault-unlock-dialog', title: t('Unlock the vault'), dialogClass: 'vault-dialog-box', minWidth: 'min(420px, 92vw)', closeOnBackdrop: false, escapeToClose: true, onClose, kind: 'decision' }); // decision: the product is locked until answered; the caller awaits (the vault's password)
+  // one subject: the one vault, unlocked once
+  const { dialog, body, close, raised } = createModalShell({ id: 'vault-unlock-dialog', opener, title: t('Unlock the vault'), dialogClass: 'vault-dialog-box', minWidth: 'min(420px, 92vw)', closeOnBackdrop: false, escapeToClose: true, onClose, kind: 'form' });   // a FORM (lane dialog-yield r3 — 带填空的对话框不阻塞聊天: only stored credentials wait for it, the chat does not)
+  if (raised) return;   // one unlock (the door pressed while it is open raises it; `then` runs when it closes)
   body.appendChild(el('p', 'vault-text', t('The credentials VibeSpace stores (accounts, mounts, channels, integrations, app logins, passkeys, the links to paired machines, the relay and voice sign-ins) stay locked until you enter the second password — after every restart and every lock.')));
   const pw = pwInput('vault-unlock-pw', t('Second password'));
   const err = el('div', 'vault-err'); err.setAttribute('role', 'alert');
@@ -262,7 +263,9 @@ export function unlockFirst(open) {
 /** THE SETUP MODAL — the second password, twice, with the plain warning. `nag` = the ask a stored secret raised (「稍后」 snoozes
  *  it for 3 days on this device — localStorage `vs-vault-later`, the epoch ms the chrome suites' scratch hubs preset too). */
 export function showSetup({ nag = false } = {}) {
-  const { dialog, body, close } = createModalShell({ id: 'vault-setup-dialog', title: t('Set a second password'), dialogClass: 'vault-dialog-box', minWidth: 'min(460px, 92vw)', closeOnBackdrop: false, kind: 'decision' }); // decision: the product is locked until answered; the caller awaits (the vault's first password, twice) — the owner may overrule at integration
+  // one subject: the vault's one second password, set once
+  const { dialog, body, close, raised } = createModalShell({ id: 'vault-setup-dialog', title: t('Set a second password'), dialogClass: 'vault-dialog-box', minWidth: 'min(460px, 92vw)', closeOnBackdrop: false, kind: 'form' });   // a FORM (r3: 「稍后」 puts it off — nothing waits on it but the secrets it will guard)
+  if (raised) return;   // the second password being set, as it was
   if (nag) body.appendChild(el('p', 'vault-text vault-why', t('A credential was just stored here — a second password keeps it sealed.')));
   body.appendChild(el('p', 'vault-text', t('Every credential VibeSpace stores is sealed in a vault that only this second password opens. After every restart, the first sign-in asks for it; until then nothing stored can be read.')));
   body.appendChild(el('p', 'vault-warn', t('There is no recovery: forget it and the stored credentials are gone — you would connect every account again. An export of the credentials is not part of this version.')));
@@ -291,7 +294,9 @@ export function showSetup({ nag = false } = {}) {
 
 /** 修改第二密码… (the Vault window's header, locked or unlocked — the change rewraps under the old password either way). */
 export function showChange() {
-  const { dialog, body, close } = createModalShell({ id: 'vault-change-dialog', title: t('Change the second password'), dialogClass: 'vault-dialog-box', minWidth: 'min(440px, 92vw)', escapeToClose: true, kind: 'decision' }); // decision: the vault's password changes before anything else reads it; the caller awaits — the owner may overrule at integration
+  // one subject: the vault's one second password, changed
+  const { dialog, body, close, raised } = createModalShell({ id: 'vault-change-dialog', title: t('Change the second password'), dialogClass: 'vault-dialog-box', minWidth: 'min(440px, 92vw)', escapeToClose: true, kind: 'form' });   // a FORM (r3: the change rewraps the vault server-side — nothing else waits on this dialog)
+  if (raised) return;   // the change being typed, as it was
   const o = pwInput('vault-old-pw', t('Current second password'));
   const a = pwInput('vault-new-pw', t('New second password'), 'new-password');
   const b = pwInput('vault-new-pw2', t('Repeat the second password'), 'new-password');
@@ -340,7 +345,7 @@ function onVaultState(f, on = 'broadcast') {
   if (on === 'broadcast' && !wasWaiting && f && f.state === 'not_set_up' && f.secretWaiting) maybeNagVault();
   // lane vault-locked-loud: THE table decides — a load / reconnect asks unless this tab set THIS lock aside; a broadcast asks
   // only for a new boot (the relock-door rule above)
-  if (vaultLoudState({ facts: f, dismissed: dismissedLock(), on, seen }).dialog) showUnlock();
+  if (vaultLoudState({ facts: f, dismissed: dismissedLock(), on, seen }).dialog) showUnlock({ opener: 'system' });   // (a load / a broadcast asks: the system's open — it waits behind, the strip and the chip say it; lane dialog-yield r3)
 }
 
 /** Boot: read the state, follow the broadcast, and ask for the second password while locked. */

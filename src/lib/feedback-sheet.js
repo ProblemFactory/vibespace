@@ -78,7 +78,9 @@ function paintRow(node, r, act) {
 
 /** Open the sheet. Resolves with its handle once drawn. */
 async function openFeedbackSheet() {
-  const { body, close } = createModalShell({ id: 'feedback-sheet', title: t('Agent feedback'), dialogClass: 'fb-dialog', bodyClass: 'fb-body', escapeToClose: true, onClose: () => watchers.delete(watch), kind: 'form' });
+  // one subject: the agents’ one feedback list
+  const { body, close, raised } = createModalShell({ id: 'feedback-sheet', title: t('Agent feedback'), dialogClass: 'fb-dialog', bodyClass: 'fb-body', escapeToClose: true, onClose: () => watchers.delete(watch), kind: 'form' });
+  if (raised) return null;   // raised: the same subject's form, as it was
   const sheet = body.closest(SHEET_ROOTS); if (sheet) sheet.dataset.popover = '1'; // the global Esc protocol: the SHEET (the phone tier) is ours — Esc closes it first; a form window closes on an Escape inside it (lane dialog-yield)
   body.textContent = t('Loading…');
   let watch = () => { };

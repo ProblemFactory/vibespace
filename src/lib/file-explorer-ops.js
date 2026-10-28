@@ -1,4 +1,4 @@
-import { showToast, showInputDialog, showConfirmDialog, copyText, formatSize, createModalShell, attachPopoverClose, absUrl as absUrlShared } from './utils.js';
+import { showToast, showInputDialog, showConfirmDialog, copyText, formatSize, createModalShell, freshKey, attachPopoverClose, absUrl as absUrlShared } from './utils.js';
 import { t } from './i18n.js';
 import { startFileDownload } from './file-download.js';
 import { isOfficeFile } from '../office-open.js'; // §7.9: which files offer "Open with LibreOffice" (the PURE table)
@@ -534,7 +534,8 @@ export function installExplorerOps(FileExplorer) {
     const fp = name ? this.currentPath + '/' + name : this.currentPath;
     // Open INSTANTLY with placeholders; a recursive-size du on a big tree can
     // take many seconds and a click with no response reads as broken.
-    const { overlay, body, close: done } = createModalShell({ title: t('Properties'), escapeToClose: true, kind: 'form' });
+    const { overlay, body, close: done, raised } = createModalShell({ id: 'file-props-dialog', key: fp, title: t('Properties'), escapeToClose: true, kind: 'form' });
+    if (raised) return;   // raised: the same subject's form, as it was
     overlay.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); done(); } });
     const rows = [
       ['Name', fp.split('/').pop() || '/'],
@@ -598,7 +599,11 @@ export function installExplorerOps(FileExplorer) {
   // path-mount semantics (default private = login-only; public = anyone).
   async _publishPageDialog(fullPath, name) {
     const existing = (await fetch(`/api/pages/by-path?path=${encodeURIComponent(fullPath)}`).then((r) => r.json()).catch(() => null))?.page || null;
-    const { body, close } = createModalShell({ title: existing ? t('Published page') : t('Publish page'), escapeToClose: true, minWidth: '420px', kind: 'form' });
+    const { body, close, raised } = createModalShell({ id: 'publish-page-dialog', key: fullPath, title: existing ? t('Published page') : t('Publish page'), escapeToClose: true, minWidth: '420px', kind: 'form' });
+    if (raised) return null;   // raised: the same subject's form, as it was
+    // (declared BEFORE the markup reads it — lane dialog-yield r3: below it, a published file's dialog threw «Cannot access
+    // 'absUrl' before initialization» and stood EMPTY, pre-existing since the published-URL row)
+    const absUrl = (u) => absUrlShared(u); // instance public URL when mapped, else this browser's origin
     const esc = (x) => String(x || '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
     body.innerHTML = `
       <label style="display:block;margin-bottom:8px">${t('Page name')}<input class="dialog-input" id="pp-name" value="${esc(existing?.name || name.replace(/\.html?$/i, ''))}"></label>
@@ -610,7 +615,6 @@ export function installExplorerOps(FileExplorer) {
       </div>`;
     // server URLs are relative when no public URL is configured — join with
     // this browser's origin so Copy link is always shareable (review-caught)
-    const absUrl = (u) => absUrlShared(u); // instance public URL when mapped, else this browser's origin
     const openPage = (url) => this.app.openBrowser ? this.app.openBrowser(absUrl(url)) : window.open(absUrl(url), '_blank');
     if (existing) {
       body.querySelector('#pp-copy').onclick = () => { copyText(absUrl(existing.url)); showToast(t('Link copied')); };
@@ -624,8 +628,12 @@ export function installExplorerOps(FileExplorer) {
     }
     /** RE-READ at the answer (lane dialog-yield r2): the form stays open beside the work — published or unpublished elsewhere
      *  meanwhile ⇒ refused with words naming it, and the form drawn again as it is now (never a Republish over a page gone) */
+    //  (r3: a re-read that FAILED — the network, a 5xx page that is no JSON — is no news about the page: it says it could not
+    //  re-check and the person's press stays theirs to repeat; c3ed5f0a called a 502 «unpublished elsewhere» and dropped the Unpublish)
     const changed = async () => {
-      const now = (await fetch(`/api/pages/by-path?path=${encodeURIComponent(fullPath)}`).then((r) => r.json()).catch(() => null))?.page || null;
+      const read = await fetch(`/api/pages/by-path?path=${encodeURIComponent(fullPath)}`).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+      if (!read || typeof read !== 'object' || !('page' in read)) { showToast(t('Could not re-check this page — try again'), { type: 'error', duration: 6000 }); return true; }
+      const now = read.page || null;
       if ((now?.id || null) === (existing?.id || null)) return false;
       showToast(now ? t('This file was published elsewhere while the dialog was open — it shows as it is now') : t('This page was unpublished elsewhere while the dialog was open — it shows as it is now'), { type: 'warn', duration: 6000 });
       close(); this._publishPageDialog(fullPath, name);
@@ -641,7 +649,8 @@ export function installExplorerOps(FileExplorer) {
       }
       if (!r?.page) { showToast(t('Publish failed: {err}', { err: r?.error || t('server unreachable') }), { type: 'error' }); return; }
       close();
-      const { body: b2, close: c2 } = createModalShell({ title: t('Page published'), escapeToClose: true, minWidth: '420px', kind: 'form' });
+      const { body: b2, close: c2, raised } = createModalShell({ id: 'page-published-dialog', key: freshKey('published'), title: t('Page published'), escapeToClose: true, minWidth: '420px', kind: 'form' });
+      if (raised) return;   // raised: the same subject's form, as it was
       b2.innerHTML = `
         <div style="font-size:12px;word-break:break-all;margin-bottom:6px">${esc(absUrl(r.page.url))}</div>
         <div style="font-size:11px;opacity:.7;margin-bottom:10px">${r.page.public ? t('Public — anyone with the link can view (no login)') : t('Private — viewers need a VibeSpace login')}</div>

@@ -619,7 +619,9 @@ export function installManageAgents(App, ctx = {}) {
   // its raw screen; `onClose` tells the opener (the tour re-checks its cards).
   _openSignInCard({ rawFirst = false, onClose = null } = {}) {
     let card = null;
-    const { body, close } = createModalShell({ id: 'signin-dialog', title: t('Sign in with Claude'), minWidth: rawFirst ? 'min(640px, 94vw)' : 'min(460px, 92vw)', escapeToClose: true, onClose: () => { try { card?.destroy(); } catch { } try { onClose?.(); } catch { } }, kind: 'form' });
+    // one subject: the one Claude sign-in card (a live run is joined, never a second)
+    const { body, close, raised } = createModalShell({ id: 'signin-dialog', title: t('Sign in with Claude'), minWidth: rawFirst ? 'min(640px, 94vw)' : 'min(460px, 92vw)', escapeToClose: true, onClose: () => { try { card?.destroy(); } catch { } try { onClose?.(); } catch { } }, kind: 'form' });
+    if (raised) return;   // raised: the same subject's form, as it was
     const host = document.createElement('div');
     body.appendChild(host);
     card = new SignInCard({ ws: this.ws, hasWaiting: () => false, rawFirst, onConnected: () => { try { this.refresh?.(); } catch { } setTimeout(() => { try { close(); } catch { } }, 1500); } });
@@ -845,9 +847,10 @@ export function installManageAgents(App, ctx = {}) {
     // lane dialog-unsaved-guard: a token PASTED and not saved ⇒ ✕ / Esc / the backdrop asks; Discard clears it from the page
     // (a minted token waits on the hub — a reopened dialog shows its phase again — so the mint asks nothing here)
     const pasted = () => body.querySelector('#oat-paste');
-    const { overlay, body, close: shut, dismiss } = createModalShell({ id: 'oat-dialog', title: t('Long-lived token — {name}', { name }), minWidth: 'min(460px, 92vw)', onClose: () => { gone = true; off?.(); clearTimeout(closeTimer); try { rawScr?.destroy(); } catch { } rawScr = null; },
+    const { overlay, body, close: shut, dismiss, raised } = createModalShell({ id: 'oat-dialog', key: id, title: t('Long-lived token — {name}', { name }), minWidth: 'min(460px, 92vw)', onClose: () => { gone = true; off?.(); clearTimeout(closeTimer); try { rawScr?.destroy(); } catch { } rawScr = null; },
       unsaved: { isDirty: () => !!(pasted() && pasted().value.trim()), save: () => savePasted(), discard: () => { if (pasted()) pasted().value = ''; } },
       escapeToClose: true, onEscape: () => oatEscape(), kind: 'form' });
+    if (raised) return null;   // raised: the same subject's form, as it was
     const live = () => mint && !['saved', 'failed', 'cancelled'].includes(mint.phase);
     // 改绑 (lane oat-identity-postcheck): the rows the token may move to — Claude subscriptions holding no live token
     const rebindTo = (oatForeign(a) || oatIdentityAsk(a) || oatUnverified(a)) ? (this._accounts?.accounts || []).filter((x) => x && x.id !== id && x.type === 'subscription' && !x.pooled && (x.backend || 'claude') === (a.backend || 'claude') && !(x.oat && x.oatDaysLeft > 0)) : [];
@@ -1298,8 +1301,9 @@ export function installManageAgents(App, ctx = {}) {
     const subs = (list?.accounts || []).filter((x) => x.type === 'subscription' && (x.backend || 'claude') === be && !x.pooled);
     const fresh = (list?.accounts || []).find((x) => x.id === poolId) || a || {};
     // lane dialog-unsaved-guard: members / placement / order changed and not saved ⇒ ✕ / Esc / the backdrop asks
-    const { body, close } = createModalShell({ id: 'pool-members-dialog', title: t('Pool members — {name}', { name: a?.name || '' }), minWidth: '460px', escapeToClose: true,
+    const { body, close, raised } = createModalShell({ id: 'pool-members-dialog', key: poolId, title: t('Pool members — {name}', { name: a?.name || '' }), minWidth: '460px', escapeToClose: true,
       unsaved: { isDirty: () => JSON.stringify(st) !== st0, save: () => save() }, kind: 'form' });
+    if (raised) return null;   // raised: the same subject's form, as it was
     const explicit = Array.isArray(fresh.members) && fresh.members.length ? fresh.members : null;
     // the dialog's own state; nothing is saved until Save (the one act — gather — is immediate)
     const st = {
@@ -1432,7 +1436,7 @@ export function installManageAgents(App, ctx = {}) {
       // Refresh the open Agents surface in place, else reopen it (the wizard
       // pattern). Since 2.245.0 the surface stacks EVERY machine's section, so
       // there's no machine selection to force — a plain refresh shows it.
-      if (!this._agentsRefreshHook?.()) this._showAgentsDialog();
+      if (!this._agentsRefreshHook?.()) this._showAgentsDialog({ opener: 'system' });   // (a login the WATCH noticed re-opens it: the system's open — lane dialog-yield r3)
     };
     this._hostLoginWatch = setInterval(async () => {
       // Silent give-up is the failure mode here (the user was told VibeSpace
@@ -2048,7 +2052,7 @@ export function installManageAgents(App, ctx = {}) {
   },
 
 
-  _showAgentsDialog({ container, forceModal, onClose } = {}) {
+  _showAgentsDialog({ container, forceModal, onClose, opener = 'person' } = {}) {
     // rail mode: render into the sidebar panel instead of a modal (one source).
     // Skip _railGo when the agents panel is ALREADY active — its re-click
     // semantics COLLAPSE the sidebar (the usage popup's "Full overview" door
@@ -2064,10 +2068,14 @@ export function installManageAgents(App, ctx = {}) {
     // backdrop asks (every other row here acts at once); the fold registers its own test and Save below
     const adv = { dirty: () => false, save: () => true };
     const shell = container ? { body: container, close: () => {} } : createModalShell({
+      // one subject: the one Agents manager (every machine's section on one surface)
       id: 'agents-dialog-overlay', title: t('Agents'), dialogClass: 'agents-dialog',
-      bodyClass: 'agents-dialog-body', escapeToClose: true, onClose,
+      bodyClass: 'agents-dialog-body', escapeToClose: true, onClose, opener,
       unsaved: { isDirty: () => adv.dirty(), save: () => adv.save() }, kind: 'form',
     });
+    // lane dialog-yield r3: the manager opened again is RAISED — its refresh hook and its countdown tick stay bound to the live
+    // body (c3ed5f0a bound them to a detached one: _agentsRefreshHook answered false and the visible manager stopped refreshing)
+    if (shell.raised) { this._agentsRefreshHook?.(); return; }
     // rail panel: carry the SAME body class so one stylesheet (incl. the
     // container queries) serves modal and panel — the panel's narrow-width
     // crush came from modal-scoped rules never applying there

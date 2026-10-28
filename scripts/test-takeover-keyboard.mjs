@@ -66,22 +66,26 @@ function makeDom() {
   class El {
     constructor(tag, { cls = '', type, ce = false, tabindex = null } = {}) {
       this.nodeType = 1; this.tagName = String(tag).toUpperCase(); this.className = cls; this.type = type; this._ce = ce;
-      this.tabIndex = tabindex; this.readOnly = false; this.disabled = false; this.value = ''; this.parent = null; this.children = []; this.listeners = []; this.style = {};
+      this.tabIndex = tabindex; this.readOnly = false; this.disabled = false; this.value = ''; this.parent = null; this.children = []; this.listeners = []; this.style = {}; this.attrs = new Map(); this.id = '';
     }
+    // lane dialog-yield r3: attributes (a float's declared owner, `data-owner-form`) and its document
+    setAttribute(k, v) { this.attrs.set(k, String(v)); } getAttribute(k) { return this.attrs.has(k) ? this.attrs.get(k) : null; } removeAttribute(k) { this.attrs.delete(k); }
+    get ownerDocument() { return doc; }
     get isContentEditable() { let n = this; while (n && n.nodeType === 1) { if (n._ce) return true; n = n.parent; } return false; }
     append(...cs) { for (const c of cs) { c.parent = this; this.children.push(c); } notify(this, 'childList'); return this; }
     /** lane dialog-keys: Chrome's removal — the focused element inside goes with it and the focus falls to <body> WITHOUT a blur */
     remove() { const p = this.parent; if (!p) return; const i = p.children.indexOf(this); if (i >= 0) p.children.splice(i, 1); this.parent = null; if (doc.activeElement && this.contains(doc.activeElement)) doc.activeElement = body; notify(p, 'childList'); }
     get classList() { const self = this; const list = () => String(self.className || '').split(/\s+/).filter(Boolean); return { contains: (c) => list().includes(c), add: (c) => { if (!list().includes(c)) { self.className = [...list(), c].join(' '); notify(self, 'attributes'); } }, remove: (c) => { if (list().includes(c)) { self.className = list().filter((x) => x !== c).join(' '); notify(self, 'attributes'); } } }; }
     contains(o) { let n = o; while (n) { if (n === this) return true; n = n.parent; } return false; }
-    closest(sel) { const wants = String(sel).split(',').map((x) => x.trim()); let n = this; while (n && n.nodeType === 1) { const cls = String(n.className).split(/\s+/); if (wants.some((w) => (w.startsWith('.') ? cls.includes(w.slice(1)) : n.tagName === w.toUpperCase()))) return n; n = n.parent; } return null; } // a list of classes (verify r2: INPUT_HOSTS) or tags (verify r4: `label`)
+    closest(sel) { const wants = String(sel).split(',').map((x) => x.trim()); let n = this; while (n && n.nodeType === 1) { const cls = String(n.className).split(/\s+/); if (wants.some((w) => (w.startsWith('.') ? cls.includes(w.slice(1)) : w.startsWith('[') ? n.attrs.has(w.slice(1, -1)) : n.tagName === w.toUpperCase()))) return n; n = n.parent; } return null; } // a list of classes (verify r2: INPUT_HOSTS) or tags (verify r4: `label`)
     addEventListener(type, fn, opts) { addL(this, type, fn, opts); }
     get focusable() { return ['TEXTAREA', 'INPUT', 'BUTTON', 'SELECT', 'IFRAME', 'SUMMARY'].includes(this.tagName) || this._ce || this.tabIndex != null; } // verify r3: a <select> and a frame take the focus of a press too; verify r4: a <summary>
     get isConnected() { let n = this; while (n) { if (n === doc) return true; n = n.parent; } return false; }
     checkVisibility() { let n = this; while (n && n.nodeType === 1) { if (n._hidden) return false; n = n.parent; } return true; } // verify r2: a hider (another desktop) on an ancestor
     focus() { doc.focus(this); } // a PROGRAMMATIC focus (a script's .focus())
   }
-  const doc = { nodeType: 9, parent: null, listeners: [], activeElement: null, addEventListener(type, fn, opts) { addL(doc, type, fn, opts); } };
+  const doc = { nodeType: 9, parent: null, listeners: [], activeElement: null, addEventListener(type, fn, opts) { addL(doc, type, fn, opts); },
+    getElementById(id) { const walk = (n) => { if (n.id === id) return n; for (const c of n.children || []) { const r = walk(c); if (r) return r; } return null; }; return doc.body ? walk(doc.body) : null; } };
   const body = new El('body'); body.parent = doc; doc.body = body; doc.activeElement = body;
   function dispatch(target, type, init = {}) {
     const ev = { type, target, isTrusted: init.isTrusted === true, pointerType: init.pointerType || 'mouse', detail: init.detail, key: init.key, defaultPrevented: false, stopped: false, immediate: false, // (lane dialog-keys: a CustomEvent's detail, a keydown's key)
@@ -278,10 +282,11 @@ async function scenarios(KY) {
      *  focused a tick later) and showInputDialog (its box focused a tick later; Enter ⇒ the value, Escape ⇒ null on the box);
      *  a press on OK / Cancel answers it (the mini's click = the release). `focusOwn: false` = a createModalShell dialog that
      *  focuses nothing itself; `select` = a <select> in it; `m.open` / `m.answer` = the promise's fate. */
+    let modalN = 0;
     const modal = ({ input = false, focusOwn = true, select = false, form = false, behind = false } = {}) => {
       // lane dialog-yield r2: `form` = createModalShell's kind 'form' on the desktop tier — its root (.dialog-form) in a WINDOW of
       // its own (.window-form, the active window unless `behind`: a system's open), announced alike; its close removes the window
-      const ov = new El('div', { cls: form ? 'dialog-form' : 'dialog-overlay' }); const dlg = new El('div', { cls: 'dialog' });
+      const ov = new El('div', { cls: form ? 'dialog-form' : 'dialog-overlay' }); const dlg = new El('div', { cls: 'dialog' }); ov.id = `modal-${++modalN}`; // (every form has its own id — lane dialog-yield r3)
       const win = form ? new El('div', { cls: 'window window-form' + (behind ? '' : ' window-active') }) : null;
       const box = input ? new El('input', { cls: 'dialog-input', type: 'text' }) : null; const sel = select ? new El('select', { cls: 'dialog-select' }) : null;
       const cancel = new El('button', { cls: 'btn-cancel' }); const okb = new El('button', { cls: 'btn-create' });
@@ -840,6 +845,80 @@ async function scenarios(KY) {
     r.ok = r.held === false && r.focus === 'sink' && r.box === '' && r.page === 'pw' && r.takes === 0;
     return r;
   });
+  // lane dialog-yield r3 (acceptance r2's MAJOR 2, 0.88 / 0.88): «INSIDE THE FORM» = its window OR WHAT IT FLOATS. The path
+  // field's suggestion list hangs on <body> (path-field.js placeList) stamped with its form (`data-owner-form`, ownFloat): a press
+  // on a suggestion keeps the form's hold — the pick, its field re-focused, then 'me/proj⏎' all land in the FORM (Enter answers
+  // it), the page gets nothing. On c3ed5f0a the press dropped the hold, the caret went to the sink and the keys — Enter
+  // included — into the agent's page. A press on the live view after it still gives the keys back (the control).
+  out.dialogFormFloat = await world(async ({ V: [A], D, press, type, at, modal }) => {
+    A.takeover(); await flush();
+    let m = null; const item = menuItem(D, () => { m = modal({ input: true, form: true }); });
+    await press(item); await flush(); await flush();
+    type('/ho');
+    const list = new D.El('div', { cls: 'pf-list pf-float' }); const row = new D.El('div', { cls: 'pf-item' }); list.append(row); D.body.append(list);
+    list.setAttribute('data-owner-form', m.ov.id);   // what ownFloat(list, field) stamps (the ONE helpers declare the owner)
+    list.addEventListener('mousedown', (e) => e.preventDefault());   // path-field: a press in its list never blurs the field
+    row.addEventListener('pointerup', () => { m.box.value = '/home/'; m.box.focus(); });   // the pick, then input.focus()
+    await press(row); await flush(); await flush();
+    const afterPick = { held: A.ky.dialogHolds, focus: at(), owner: KO.keyboardOwner() && KO.keyboardOwner().id, reclaims: A.st.reclaims };
+    type('me/proj');
+    const typed = { box: m.box.value, page: A.st.page };
+    type('\n'); await flush();
+    const answered = { open: m.open, answer: m.answer, page: A.st.page };
+    const r = { afterPick, typed, answered };
+    r.ok = afterPick.held === true && afterPick.focus === 'dialog-input' && !afterPick.owner && afterPick.reclaims === 0 && typed.box === '/home/me/proj' && typed.page === '' && answered.open === false && answered.answer === '/home/me/proj' && answered.page === '';
+    return r;
+  });
+  // …a POPOVER (createPopover / showContextMenu / a picker) opened from inside the form is the form's too; a press on the live view
+  // afterwards gives the keys back (the control: a window still yields)
+  out.dialogFormPopover = await world(async ({ V: [A], D, press, type, at, modal }) => {
+    A.takeover(); await flush();
+    let m = null; const item = menuItem(D, () => { m = modal({ input: true, form: true }); });
+    await press(item); await flush(); await flush();
+    type('ab');
+    const pop = new D.El('div', { cls: 'pp-pop' }); const opt = new D.El('button', { cls: 'pp-row' }); pop.append(opt); D.body.append(pop);
+    pop.setAttribute('data-owner-form', m.ov.id);   // createPopover(anchor inside the form) → ownFloat
+    opt.addEventListener('pointerup', () => { pop.remove(); m.box.focus(); });
+    await press(opt); await flush(); await flush();
+    const afterPop = { held: A.ky.dialogHolds, focus: at() };
+    type('cd');
+    await press(A.img); await flush(); await flush();
+    const out1 = { held: A.ky.dialogHolds, focus: at(), owner: KO.keyboardOwner() && KO.keyboardOwner().id };
+    type('ef');
+    const r = { afterPop, out1, box: m.box.value, page: A.st.page };
+    r.ok = afterPop.held === true && afterPop.focus === 'dialog-input' && r.box === 'abcd' && out1.held === false && out1.focus === 'sink' && out1.owner === A.id && r.page === 'ef';
+    return r;
+  });
+  // …and a float NOBODY declared (a list from outside every form) is outside: its press gives the keys back like any press out
+  out.dialogFormFloatUnowned = await world(async ({ V: [A], D, press, type, at, modal }) => {
+    A.takeover(); await flush();
+    let m = null; const item = menuItem(D, () => { m = modal({ input: true, form: true }); });
+    await press(item); await flush(); await flush();
+    const list = new D.El('div', { cls: 'pf-list pf-float' }); const row = new D.El('div', { cls: 'pf-item' }); list.append(row); D.body.append(list);
+    await press(row); await flush(); await flush();
+    type('zz');
+    const r = { held: A.ky.dialogHolds, box: m.box.value, page: A.st.page };
+    r.ok = r.held === false && r.box === '' && r.page === 'zz';
+    return r;
+  });
+  // r3 MINOR (a raise is an announce): the same form opened again while driving is RAISED — the shell ANNOUNCES the raise like an
+  // open (utils.js _shell.raise → announceModal), so the judge hands it the keys and its field's caret stays: 'secret' in the box.
+  // (The judge's half; the shell's half — c3ed5f0a returned before announcing — is test-browser-live-input's raise leg.)
+  out.dialogFormRaise = await world(async ({ V: [A], D, doc, press, type, at, modal }) => {
+    A.takeover(); await flush();
+    let m = null; const item = menuItem(D, () => { m = modal({ input: true, form: true }); });
+    await press(item); await flush(); await flush();
+    type('ab');
+    await press(A.img); await flush(); await flush();   // back to the page: the form stays open, its window no longer the active one
+    m.win.classList.remove('window-active');
+    const again = menuItem(D, () => { m.win.classList.add('window-active'); D.dispatch(doc, 'vs-modal-open', { detail: { overlay: m.ov } }); setTimeout(() => m.box.focus(), 0); });
+    await press(again); await flush(); await flush();
+    const raised = { held: A.ky.dialogHolds, focus: at(), reclaims: A.st.reclaims };
+    type('secret');
+    const r = { raised, box: m.box.value, page: A.st.page };
+    r.ok = raised.held === true && raised.focus === 'dialog-input' && raised.reclaims === 0 && r.box === 'absecret' && r.page === '';
+    return r;
+  });
   // (2) THE PASSWORD GUARD: a confirm that opens BY ITSELF (a broadcast, a timer — nothing pressed) while "pw" is typed into the
   // page is TAKEN BACK (the caret stays in the sink, its Enter is the page's, it stays open) and SAID once; an input dialog
   // opening by itself a second later gets none of the typing and is not said again (one rate limit)
@@ -1283,8 +1362,9 @@ console.log('§2 patched-copy controls: each rule removed turns exactly its scen
 const M = mutantCopies('tkbd', REPO);
 const KYSRC = fs.readFileSync(path.join(REPO, 'src/lib/keyboard-yield.js'), 'utf8');
 const CONTROLS = [
-  { tag: 'form-overlay-only', why: 'lane dialog-yield r2 pre-fix (da9545e8): the judge knows the overlay alone — a form root is no dialog', from: 'export function isModalOverlay(el) { return isPersonDialog(el); }', to: "export function isModalOverlay(el) { return !!el && el.nodeType === 1 && String(el.className || '').split(/\\s+/).includes('dialog-overlay'); }", red: ['dialogForm', 'dialogFormPressOut'] },
-  { tag: 'form-hold-sticky', why: 'lane dialog-yield r2: a press outside a held form never gives its keys back (a window held like a backdrop)', from: "        s.holds = s.holds.filter((h) => !formOf(h));\n", to: '', red: ['dialogFormPressOut'] },
+  { tag: 'form-overlay-only', why: 'lane dialog-yield r2 pre-fix (da9545e8): the judge knows the overlay alone — a form root is no dialog', from: 'export function isModalOverlay(el) { return isPersonDialog(el); }', to: "export function isModalOverlay(el) { return !!el && el.nodeType === 1 && String(el.className || '').split(/\\s+/).includes('dialog-overlay'); }", red: ['dialogForm', 'dialogFormFloat', 'dialogFormPopover', 'dialogFormPressOut', 'dialogFormRaise'] },
+  { tag: 'form-hold-sticky', why: 'lane dialog-yield r2: a press outside a held form never gives its keys back (a window held like a backdrop)', from: "        s.holds = s.holds.filter((h) => !formOf(h));\n", to: '', red: ['dialogFormFloatUnowned', 'dialogFormPopover', 'dialogFormPressOut'] },
+  { tag: 'float-unowned', why: 'lane dialog-yield r3 pre-fix (c3ed5f0a): what a form floats is outside it — a press on its suggestion list drops the hold', from: "import { isPersonDialog, isFormRoot, formHoldsNow, ownerFormOf, FORM_ROOTS } from './form-yield.js';", to: "import { isPersonDialog, isFormRoot, formHoldsNow, FORM_ROOTS } from './form-yield.js'; const ownerFormOf = () => null;", red: ['dialogFormFloat', 'dialogFormPopover'] },
   { tag: 'no-press', why: 'the yield ignores the press (every focus reclaimed — userW\'s bug)', from: 'const u = userPressFocus({ press: p, sameInput: !!p && sameInput(p.target, el), focusAt: now() }), byUserPress = u.byUserPress;', to: 'const u = userPressFocus({ press: p, sameInput: !!p && sameInput(p.target, el), focusAt: now() }), byUserPress = false;', red: ['userW', 'picture', 'bar', 'terminal', 'touch', 'twoViews', 'handback', 'follow', 'ownTab', 'hiddenTab', 'h1PressHidden', 'h1Reconnect', 'n1Xpra', 'n1Vnc', 'n1Stream', 'q1Cue', 'homeGone', 'widgetYielded', 'textSearch', 'textCm', 'labelPress', 'focusStorm', 'twoViewsEnd', 'socketWhileYielded', 'streamWhileYielded', 'dialogYielded', 'dialogConfirmOverYieldHidden', 'textPassword'] }, // (verify r4: every scenario that needs the yield; lane dialog-keys: a dialog opened FROM a yield)
   { tag: 'any-input', why: 'a same-input check that matches anything (the password guard gone)', from: 'export function sameInput(pressed, focused) {\n  if (!pressed || !focused) return false;', to: 'export function sameInput(pressed, focused) {\n  return true;', red: ['elsewhereThenScript', 'alreadyFocusedGuard', 'q1Cue', 'helperCopy', 'cueRecreated', 'dialogFormBehind'] }, // (verify r3: the copy fallback's scratch box would take the keys too; lane dialog-keys: a dialog is judged at its OPEN by the opener, never by the same-input rule — no dialog leg here) (a press INSIDE the view is never remembered — pictureThenScript stays green by that rule, not this one)
   { tag: 'no-restamp', why: 'the touch tap\'s release does not re-stamp the press', from: '      if (s.press && e.target === s.press.target && e.isTrusted === true) s.press.at = now();\n', to: '', red: ['touch'] },
@@ -1320,7 +1400,7 @@ const CONTROLS = [
   { tag: 'n1-no-video', why: 'the .299 integration pre-fix: the stream\'s <video> is not a place keys go', from: 'export function isKeyboardSurface(el) { return isPictureCanvas(el) || isStreamVideo(el); }', to: 'export function isKeyboardSurface(el) { return isPictureCanvas(el); }', red: ['n1Stream'] },
   { tag: 'n1-no-surface', why: 'verify r2 N1 pre-fix: noVNC\'s canvas is not a place keys go', from: "  try { return !!el && el.nodeType === 1 && el.tagName === 'CANVAS' && typeof el.closest === 'function' && !!el.closest('.picture-shell'); } catch { return false; }", to: '  return false;', red: ['n1Vnc', 'n1Script'] },
   // lane dialog-keys: a dialog the user's own act opened takes the keys; one that opens by itself never does
-  { tag: 'dialog-no-rule', why: 'lane dialog-keys pre-fix: every modal judged as opening by itself (taken back, said) — Enter reaches the page', from: 'const v = dialogVerdict({ owns: driving(), yielded: s.yielded, held, byUserPress: o.byUserPress, opener: \'app\' });', to: 'const v = dialogVerdict({ owns: driving(), yielded: s.yielded, held, byUserPress: false, opener: \'app\' });', red: ['dialogUserPress', 'dialogYielded', 'dialogNested', 'dialogScriptClose', 'dialogTwoViews', 'dialogAppKey', 'dialogChain', 'dialogFocusless', 'dialogSelect', 'dialogStatic', 'dialogBackGone', 'dialogSelfOverHeld', 'dialogThreeMiddleGone', 'dialogTouchHeld', 'dialogConfirmOverYieldHidden', 'dialogOneActOneDialog', 'dialogPassword', 'dialogForm', 'dialogFormPressOut'] },
+  { tag: 'dialog-no-rule', why: 'lane dialog-keys pre-fix: every modal judged as opening by itself (taken back, said) — Enter reaches the page', from: 'const v = dialogVerdict({ owns: driving(), yielded: s.yielded, held, byUserPress: o.byUserPress, opener: \'app\' });', to: 'const v = dialogVerdict({ owns: driving(), yielded: s.yielded, held, byUserPress: false, opener: \'app\' });', red: ['dialogUserPress', 'dialogYielded', 'dialogNested', 'dialogScriptClose', 'dialogTwoViews', 'dialogAppKey', 'dialogChain', 'dialogFocusless', 'dialogSelect', 'dialogStatic', 'dialogBackGone', 'dialogSelfOverHeld', 'dialogThreeMiddleGone', 'dialogTouchHeld', 'dialogConfirmOverYieldHidden', 'dialogOneActOneDialog', 'dialogPassword', 'dialogForm', 'dialogFormPressOut', 'dialogFormFloat', 'dialogFormPopover', 'dialogFormRaise'] },
   { tag: 'dialog-trust-any', why: 'lane dialog-keys: a synthetic press counts as the opener (the isTrusted check gone)', from: 's.opener = { at: now(), trusted: e.isTrusted === true, picture: onPicture(e.target) };', to: 's.opener = { at: now(), trusted: true, picture: onPicture(e.target) };', red: ['dialogSynthetic'] },
   { tag: 'dialog-app-key-any', why: 'lane dialog-keys: a synthetic key counts as the app\'s', from: '    onAppKey(e) { if (e && e.isTrusted === true)', to: '    onAppKey(e) { if (e)', red: ['dialogAppKey'] },
   { tag: 'dialog-no-picture', why: 'lane dialog-keys: a press on the picture (the page\'s) counts as the opener', from: 'const onPicture = (el) => { try { const pic = typeof picture === \'function\' ? picture() : picture; return !!el && !!pic && (el === pic || pic.contains(el)); } catch { return false; } };', to: 'const onPicture = () => false;', red: ['dialogPicture'] },
@@ -1381,6 +1461,10 @@ ok(R.controlSummary.ok, 'verify r4 (the census\'s control row): a <summary> togg
 ok(R.dialogForm.ok, 'lane dialog-yield r2 (THE ONE PREDICATE): a FORM the person opens while driving (its own window, .dialog-form) TAKES the keys like the overlay did — its box focused, «secret» lands in it and never in the page, Escape is the form\'s, its close gives the keys back to the page (on da9545e8: judged null, reclaimed, «secret» to the page)', J(R.dialogForm));
 ok(R.dialogFormPressOut.ok, 'lane dialog-yield r2: a form is a WINDOW — a press on the live view gives the keys to the page (the form stays open), a press into its field takes them for the form again; each keeps what was typed there', J(R.dialogFormPressOut));
 ok(R.dialogFormBehind.ok, 'lane dialog-yield r2: a form the SYSTEM opened behind (not the active window) holds nothing — its own focus is taken back, the page keeps the keys', J(R.dialogFormBehind));
+ok(R.dialogFormFloat.ok, 'lane dialog-yield r3 (acceptance r2 MAJOR 2): «inside the form» = its window OR what it floats — a press on the path field\'s suggestion list (on <body>, stamped data-owner-form) keeps the form\'s hold: the pick, then \'me/proj⏎\' land in the FORM (Enter answers it), the page gets nothing (c3ed5f0a: the hold dropped, \'me/proj⏎\' into the agent\'s page)', J(R.dialogFormFloat));
+ok(R.dialogFormPopover.ok, 'lane dialog-yield r3: a popover opened from inside the form (createPopover / a picker) is the form\'s — its press keeps the hold; a press on the live view afterwards gives the keys back (the control)', J(R.dialogFormPopover));
+ok(R.dialogFormFloatUnowned.ok, 'lane dialog-yield r3: a float no form declared is outside — its press gives the keys back like any press out (ownership is declared, never guessed)', J(R.dialogFormFloatUnowned));
+ok(R.dialogFormRaise.ok, 'lane dialog-yield r3 (a raise is an announce): the same form re-opened while driving and ANNOUNCED takes the keys — its caret stays, \'secret\' in the box (the shell\'s half: test-browser-live-input)', J(R.dialogFormRaise));
 ok(R.dialogUserPress.ok, 'lane dialog-keys (THE RULE): Take over, a real press on a menu\'s Delete opens the confirm — it TAKES the keys (its own focus on OK stays, the chip says "in the dialog", nobody owns, Shift held in the page let go); Enter ANSWERS it and the page gets nothing; its close gives the keys back to the page ("x"), nothing said, the takeover went on', J(R.dialogUserPress));
 ok(R.dialogScript.ok, 'lane dialog-keys (THE PASSWORD GUARD): a confirm that opens BY ITSELF while "pw" is typed into the page is TAKEN BACK (its Enter is the page\'s, it stays open) and SAID once; an input dialog opening by itself a second later gets none of the typing, not said again', J(R.dialogScript));
 ok(R.dialogSynthetic.ok, 'lane dialog-keys (a script cannot fake the opener): a SYNTHETIC press (isTrusted false) that opens the confirm is not the user\'s — taken back and said, its Enter the page\'s', J(R.dialogSynthetic));
@@ -1397,7 +1481,7 @@ ok(R.dialogFocusless.ok, 'lane dialog-keys: a dialog he opened that focuses noth
 ok(R.dialogSelect.ok, 'lane dialog-keys: a <select> in a dialog he opened keeps the focus of his press (nothing takes it back while the dialog holds), its key never reaches the page; a press on OK answers it and the keys go back to the page', J(R.dialogSelect));
 ok(R.dialogStatic.ok, 'lane dialog-keys: the STATIC overlay (#dialog-overlay: shown by its class and announced, closed by the class) — its box takes "/w", hidden it gives the keys back to the page ("z")', J(R.dialogStatic));
 ok(R.dialogPageBar.ok, 'lane dialog-keys: the agent\'s PAGE dialog on the live view\'s own bar is no app modal — announced or not, never taken; the view keeps the keys', J(R.dialogPageBar));
-ok(Object.values(R).every((r) => r.ok) && Object.keys(R).length === 77, `…and the real module passes all ${Object.keys(R).length} scenarios under the same harness`);
+ok(Object.values(R).every((r) => r.ok) && Object.keys(R).length === 81, `…and the real module passes all ${Object.keys(R).length} scenarios under the same harness`);
 for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: CONTROLS.length, label: '§2 ' })) ok(r.pass, r.name, r.detail);
 
 // ═══ §3 WIRING PINS ═══════════════════════════════════════════════════════════
@@ -1497,9 +1581,9 @@ ok(miss.length === 0 && zh.includes('"键盘在对话框 — 点画面继续操�
 { // lane dialog-keys: THE ANNOUNCEMENT + the view's dialog wiring — the same acts as this harness's world (read off the real files)
   const body = (text, head) => { const i = text.indexOf(head); return i < 0 ? '' : text.slice(i, text.indexOf('\n  }\n', i) + 4); };
   const U = src('src/lib/utils.js'), AP = src('src/lib/app.js');
-  const shell = U.slice(U.indexOf('export function createModalShell('), U.indexOf('\n}\n', U.indexOf('export function createModalShell(')));
+  const shell = U.slice(U.indexOf('export function createModalShell('), U.indexOf('\n}\n', U.indexOf('function buildShell(')));   // (r3: the shell is createModalShell + its buildShell)
   ok(/export const MODAL_OPEN_EVENT = 'vs-modal-open';/.test(U) && /export function announceModal\(overlay\) \{\n  try \{ document\.dispatchEvent\(new CustomEvent\(MODAL_OPEN_EVENT, \{ detail: \{ overlay \} \}\)\); \}/.test(U)
-    && /\n  if \(fh\) fh\.adopt\(overlay\);[^\n]*\n  else \{ overlay\.className = 'dialog-overlay'; overlay\.style\.zIndex = '99998'; document\.body\.appendChild\(overlay\); \}\n  announceModal\(overlay\);/.test(shell), // lane dialog-yield: a form's root goes where its host puts it (its window or its sheet), a decision's onto <body> — announced alike
+    && /\n    if \(fh\) fh\.adopt\(overlay\);[^\n]*\n    else if \(hosted\) \{ gone = true; return; \}\n    else \{ overlay\.className = 'dialog-overlay'; overlay\.style\.zIndex = '99998'; document\.body\.appendChild\(overlay\); \}\n    announceModal\(overlay\);/.test(shell) && /if \(fh\) fh\.raise\(\{ opener: by \}\);[^\n]*\n\s*announceModal\(overlay\);/.test(shell), // lane dialog-yield: a form's root goes where its host puts it (its window or its sheet), a decision's onto <body> — announced alike
     'utils.js: createModalShell ANNOUNCES its overlay right after the append (the opening act\'s own task, before the caller focuses anything in it); the event carries the overlay only — no evidence of its own, so a forged one hands nothing the keys');
   const sd = body(AP, '  _showDialog(id) {');
   ok(/document\.getElementById\(id\)\.classList\.remove\('hidden'\);\n    announceModal\(overlay\);/.test(sd) && /hideDialogs\(\) \{ document\.getElementById\('dialog-overlay'\)\.classList\.add\('hidden'\);/.test(AP) && /import \{[^}]*\bannounceModal \} from '\.\/utils\.js';/.test(AP),

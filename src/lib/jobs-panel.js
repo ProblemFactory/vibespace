@@ -391,7 +391,9 @@ async function expandDetail(app, el, j, refresh) {
 }
 
 function openCreateDialog(app, onDone) {
-  const { body, dialog, close } = createModalShell({ title: t('New background job'), minWidth: 440, escapeToClose: true, kind: 'form' });
+  // one subject: one new job being written
+  const { body, dialog, close, raised } = createModalShell({ id: 'job-new-dialog', title: t('New background job'), minWidth: 440, escapeToClose: true, kind: 'form' });
+  if (raised) return null;   // raised: the same subject's form, as it was
   const f = {};
   const field = (label, el) => { const w = document.createElement('div'); w.className = 'jobs-form-row'; const l = document.createElement('label'); l.textContent = label; w.append(l, el); body.appendChild(w); return el; };
   const inp = (ph = '') => { const i = document.createElement('input'); i.placeholder = ph; return i; };

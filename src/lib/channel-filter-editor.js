@@ -300,6 +300,9 @@ function patternEditor(body, pat, onChange) {
 function refocus(btn) {
   try { if (btn && btn.isConnected && (document.activeElement === document.body || !personDialogOf(btn)?.contains(document.activeElement))) btn.focus({ preventScroll: true }); } catch {}
 }
+/** a grain's SUBJECT (lane dialog-yield r3 — a form's identity is its key): a conversation, an account, one rule of it — the
+ *  grant dialog re-opened for another target is another form (a GRANT edited on the wrong conversation, measured on c3ed5f0a) */
+const grainKeyOf = (target) => !target ? '' : target.kind === 'conversation' ? `conversation:${target.conv && target.conv.adapterId}/${target.conv && target.conv.id}` : `${target.kind}:${target.adapter && target.adapter.id}:${target.id || ''}`;
 export async function showGrantAccessDialog(app, target) {
   const st = await grainState(target);
   if (!st) return;
@@ -307,8 +310,9 @@ export async function showGrantAccessDialog(app, target) {
   // the picker's roster listener ends WITH the dialog (verify round 2: it used to live until the next broadcast)
   let part = null;
   // lane dialog-unsaved-guard: ✕ / Esc / the backdrop with a row changed asks (grantAccessBody says what changed)
-  const { body, close } = createModalShell({ id: 'chan-access-dialog', title: t('Who may read and act here?'), dialogClass: 'chan-dialog chan-assign chan-access', escapeToClose: true, onClose: () => { if (part) part.picker.close(); },
+  const { body, close, raised } = createModalShell({ id: 'chan-access-dialog', key: grainKeyOf(target), title: t('Who may read and act here?'), dialogClass: 'chan-dialog chan-assign chan-access', escapeToClose: true, onClose: () => { if (part) part.picker.close(); },
     unsaved: { isDirty: () => !!part && part.isDirty(), save: () => part && part.save() }, kind: 'form' });
+  if (raised) return;   // raised: the same subject's form, as it was
   part = grantAccessBody(app, st, body, { close, target });
 }
 /** THE GRANT ACCESS BODY (lane account-policy-door): the ONE renderer of a grain's access rows — Grant access… draws
@@ -1014,8 +1018,9 @@ export async function showNotifyDialog(app, target) {
   // without a word): ✕ / Esc / the backdrop with a notification changed asks Save / Discard / Keep editing
   let dirtyNow = () => false;
   let saveNow = async () => true;
-  const { body, close } = createModalShell({ id: 'chan-notify-dialog', title: grainTitle(st, 'notify'), dialogClass: 'chan-dialog chan-assign chan-notify', escapeToClose: true,
+  const { body, close, raised } = createModalShell({ id: 'chan-notify-dialog', key: grainKeyOf(target), title: grainTitle(st, 'notify'), dialogClass: 'chan-dialog chan-assign chan-notify', escapeToClose: true,
     unsaved: { isDirty: () => dirtyNow(), save: () => saveNow() }, kind: 'form' });
+  if (raised) return null;   // raised: the same subject's form, as it was
   const principals = st.access.map((r) => ({ value: pkOf(r.principal), label: principalText(r.principal), kind: r.principal.kind, id: r.principal.id, name: r.principal.name || null, authority: r.authority }));
   for (const r of st.eligibleAbove || []) if (r && r.principal && !principals.some((x) => x.value === pkOf(r.principal))) principals.push({ value: pkOf(r.principal), label: `${principalText(r.principal)} ${r.via === 'pattern' ? t('(rule)') : r.via === 'grant' ? t('(approved request)') : t('(account)')}`, kind: r.principal.kind, id: r.principal.id, name: r.principal.name || null, authority: null });
   // lane notify-rules-r2 (owner inc-muxt96t5-pk42): a group that holds access reaches its MEMBER SESSIONS — each is

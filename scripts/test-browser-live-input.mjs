@@ -1244,6 +1244,22 @@ async function r3Legs(W, { S, pid, tag }) {
     await P.type('pg');
     await until(async () => ((await q("return (document.querySelector('#plugin-install-dialog .plugin-install-value')?.value || '').includes('pg') ? true : null;")) || page() !== bf ? true : null), LANDED_MS, 50);
     o.formTyped = { value: await q("return document.querySelector('#plugin-install-dialog .plugin-install-value')?.value || '';"), page: page(), b: bf };
+    // lane dialog-yield r3 (acceptance r2 MAJOR 2): «inside the form» = its window OR WHAT IT FLOATS — a list on <body> stamped with its
+    // form (data-owner-form, what path-field's list / createPopover / a picker carry): his press on a row there (the pick writes the
+    // field and re-focuses it, path-field's way) keeps the form's keys — "me" lands in the field, the page gets nothing. On c3ed5f0a
+    // the press dropped the hold: the caret went to the sink and "me" into the agent's page
+    {
+      const v0 = await view(); const bfl = page();
+      await q(`const f = document.getElementById('plugin-install-dialog'); const box = f.querySelector('.plugin-install-value'); const list = document.createElement('div'); list.className = 'pf-list pf-float dy-float'; list.setAttribute('data-owner-form', 'plugin-install-dialog'); Object.assign(list.style, { position: 'fixed', left: '40px', top: '40px', width: '220px', zIndex: '100000', background: '#222', padding: '6px' }); const row = document.createElement('div'); row.className = 'pf-item'; row.textContent = '/home/'; row.style.padding = '8px'; list.append(row); document.body.append(list); list.addEventListener('mousedown', (e) => e.preventDefault()); list.addEventListener('click', () => { box.value = '/home/'; box.dispatchEvent(new Event('input', { bubbles: true })); box.focus(); }); return 1;`);
+      o.floatPress = await P.clickEl("return document.querySelector('.dy-float .pf-item');");
+      await sleep(400);
+      const v1 = await view();
+      o.floatHeld = { held: v1.dialogHeld, owns: v1.owns, active: await q("const a = document.activeElement; return a ? (a.className || a.tagName) : null;"), takes: v1.dialogTakes - v0.dialogTakes };
+      await P.type('me');
+      await until(async () => ((await q("return (document.querySelector('#plugin-install-dialog .plugin-install-value')?.value || '').endsWith('me') ? true : null;")) || page() !== bfl ? true : null), LANDED_MS, 50);
+      o.floatTyped = { value: await q("return document.querySelector('#plugin-install-dialog .plugin-install-value')?.value || '';"), page: page(), b: bfl };
+      await q("document.querySelector('.dy-float')?.remove(); return 1;");
+    }
     await P.key('Escape', { code: 'Escape', vk: 27 });
     await until(async () => ((await q("return document.querySelector('#plugin-install-dialog .dialog-unsaved') ? true : null;")) || !(await q("return !!document.querySelector('#plugin-install-dialog');")) ? true : null), 3000, 50);
     o.formEsc = { asked: await q("return !!document.querySelector('#plugin-install-dialog .dialog-unsaved');"), open: await q("return !!document.querySelector('#plugin-install-dialog');"), page: page(), b: bf };
@@ -1254,6 +1270,29 @@ async function r3Legs(W, { S, pid, tag }) {
     await P.click(sid, 200, 140); await W.innerUntil(tag, (r) => r.act === 'b', LANDED_MS); const bk2 = page();
     await P.type('fk'); await W.innerUntil(tag, (r) => r.b === bk2 + 'fk', LANDED_MS);
     o.formAfter = { page: page(), b: bk2, owns: (await view()).owns };
+    // lane dialog-yield r3 (a raise is an announce): Install plugin… pressed AGAIN while its form is open behind (he went back to the
+    // page) RAISES it — the shell announces the raise like an open, the live view hands it the keys: "cd" lands in its field after
+    // "ab", the page gets nothing. On c3ed5f0a the raise skipped the announcement — the field's caret was reclaimed, "cd" to the page
+    {
+      await until(async () => ((await view()).owns ? true : null), LANDED_MS, 50);
+      o.raiseOpen = await P.clickEl(INSTALL);
+      await until(() => q("const a = document.activeElement; return a && a.closest && a.closest('#plugin-install-dialog') && a.tagName === 'INPUT' ? true : null;"), 3000, 50);
+      await P.type('ab');
+      await until(() => q("return (document.querySelector('#plugin-install-dialog .plugin-install-value')?.value || '').includes('ab') ? true : null;"), LANDED_MS, 50);
+      await P.click(sid, 200, 140); await W.innerUntil(tag, (r) => r.act === 'b', LANDED_MS);
+      await until(async () => ((await view()).owns ? true : null), LANDED_MS, 50);
+      const r0 = await view(); const brs = page();
+      o.raisePress = await P.clickEl(INSTALL);
+      await until(() => q("const a = document.activeElement; return a && a.closest && a.closest('#plugin-install-dialog') && a.tagName === 'INPUT' ? true : null;"), 3000, 50);
+      await sleep(300);
+      const r1 = await view();
+      o.raised = { windows: await q("return [...window.app.wm.windows.values()].filter((w) => w.type === 'form').length;"), held: r1.dialogHeld, owns: r1.owns, takes: r1.dialogTakes - r0.dialogTakes, active: await q("const a = document.activeElement; return a ? (a.className || a.tagName) : null;") };
+      await P.type('cd');
+      await until(async () => ((await q("return (document.querySelector('#plugin-install-dialog .plugin-install-value')?.value || '').includes('cd') ? true : null;")) || page() !== brs ? true : null), LANDED_MS, 50);
+      o.raiseTyped = { value: await q("return document.querySelector('#plugin-install-dialog .plugin-install-value')?.value || '';"), page: page(), b: brs };
+      await q("const f = document.getElementById('plugin-install-dialog'); if (f) { const w = f.closest('.window'); for (const x of window.app.wm.windows.values()) if (x.element === w) { x.onCloseRequest = null; window.app.wm.closeWindow(x.id); } } return 1;"); await sleep(300);
+      await until(async () => ((await view()).owns ? true : null), LANDED_MS, 50);
+    }
     await q(`const sb = window.app.sidebar, was = ${JSON.stringify(railBefore || {})}; if (!was.open) sb.toggle(false); else if (was.tab && was.tab !== sb._activeTab) sb._railGo(was.tab); return 1;`); await sleep(400); // the sidebar as it was (the rail panel folded again)
   }
   // ── the census: THE CHANNEL COMPOSER (the fake adapters' named seam: fake-poll · Ops) — a real press yields, "ch" lands ──
@@ -1463,6 +1502,10 @@ if (want('r3')) {
   ok(r.formPanel && r.formPress && r.formPress.ok && r.formOpen.form && r.formOpen.takes === 1 && r.formOpen.held && !r.formOpen.owns && /plugin-install-value/.test(String(r.formOpen.active))
     && /pg/.test(r.formTyped.value) && r.formTyped.page === r.formTyped.b && r.formEsc.asked && r.formEsc.open && r.formEsc.page === r.formEsc.b && r.formDiscard && r.formDiscard.ok && r.formAfter.page === r.formAfter.b + 'fk' && r.formAfter.owns,
     `lane dialog-yield r2 (THE ONE PREDICATE, in chrome): a FORM his press opened while he drives (Install plugin…, a window of its own) TAKES the keys like the confirm — its field focused ("${r.formOpen && r.formOpen.chip}"), "pg" lands in it (${JSON.stringify(r.formTyped && r.formTyped.value)}) and never in the page; Escape is the form's (it asks about what was typed); Discard closes it and "fk" reaches the page again`, JSON.stringify({ panel: r.formPanel, press: r.formPress, open: r.formOpen, typed: r.formTyped, esc: r.formEsc, discard: r.formDiscard, after: r.formAfter }));
+  ok(r.floatPress && r.floatPress.ok && r.floatHeld.held && !r.floatHeld.owns && /plugin-install-value/.test(String(r.floatHeld.active)) && r.floatTyped.value === '/home/me' && r.floatTyped.page === r.floatTyped.b,
+    `lane dialog-yield r3 (WHAT A FORM FLOATS IS THE FORM'S, in chrome): his press on a list the form floated on <body> (stamped data-owner-form, path-field's way) keeps the form's keys — "me" lands in its field (${JSON.stringify(r.floatTyped && r.floatTyped.value)}), the page keeps ${JSON.stringify(r.floatTyped && r.floatTyped.b)} (c3ed5f0a: the hold dropped, "me" into the agent's page)`, JSON.stringify({ press: r.floatPress, held: r.floatHeld, typed: r.floatTyped }));
+  ok(r.raiseOpen && r.raiseOpen.ok && r.raisePress && r.raisePress.ok && r.raised.windows === 1 && r.raised.held && !r.raised.owns && /plugin-install-value/.test(String(r.raised.active)) && /abcd/.test(r.raiseTyped.value) && r.raiseTyped.page === r.raiseTyped.b,
+    `lane dialog-yield r3 (A RAISE IS AN ANNOUNCE, in chrome): Install plugin… pressed again while its form waits behind RAISES it — one window, the keys its (${JSON.stringify(r.raised)}): "cd" after "ab" in its field (${JSON.stringify(r.raiseTyped && r.raiseTyped.value)}), the page keeps ${JSON.stringify(r.raiseTyped && r.raiseTyped.b)} (c3ed5f0a: the raise unannounced, its caret reclaimed, "cd" to the page)`, JSON.stringify({ open: r.raiseOpen, press: r.raisePress, raised: r.raised, typed: r.raiseTyped }));
   ok(r.chanUp && r.chanPress && r.chanPress.ok && r.chan.active === true && r.chan.view.yielded && !r.chan.view.owns && r.chanTyped.value === 'ch' && r.chanTyped.page === r.chanTyped.b0,
     `the census (text row): THE CHANNEL COMPOSER (fake-poll · Ops) — a real press YIELDS to it ("${r.chan && r.chan.view.chip}"), "ch" lands there, the page keeps ${JSON.stringify(r.chanTyped && r.chanTyped.b0)}`, JSON.stringify({ up: r.chanUp, press: r.chanPress, chan: r.chan, typed: r.chanTyped }));
   ok(r.listComposer.ok && r.listYielded.yielded && r.listYielded.composer === 'l1' && r.listPress.ok && r.list.yielded && r.list.where === 'none' && r.list.chip === 'Keyboard is not in a text box — click one to type there, or the picture to use the page' && r.listTyped.view.composer === 'l1' && r.listTyped.page === r.listTyped.b,

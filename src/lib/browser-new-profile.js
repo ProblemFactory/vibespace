@@ -32,13 +32,14 @@ const jsonPost = (body) => ({ method: 'POST', headers: { 'Content-Type': 'applic
  * POST goes to the adopt route with its id, and on the per-conversation-directory rung (`browserVariant === 'C'`) the
  * browser and machine are the conversation's own (said, not offered). Returns the handle (the heavy suite drives it).
  */
-export function openNewProfileDialog(app, { label = '', fromSession = null, onCreated = null, onDismissed = null } = {}) {
+export function openNewProfileDialog(app, { label = '', fromSession = null, onCreated = null, onDismissed = null, opener = 'person' } = {}) {
   const adopt = adoptFormOf(fromSession); // verify r1 (F7): the server's plan (the picker asked it), never the rung's guess
   const st = { cloneKey: 'none', cloneSources: null, cloneFor: undefined, providers: [], install: null, machines: [{ hostId: 'local' }], hostRows: null, provider: 'chromium', host: null, busy: false, closed: false, created: false, handoff: false, builds: { pending: true }, buildsFor: undefined, buildKey: 'default', buildHint: null };
   const names = nameHelpers(app);
   const sb = (app && app.sidebar) || {};
-  const shell = createModalShell({ id: DIALOG_ID, title: adopt ? t('New persistent profile') : t('New profile'), dialogClass: 'bwho-dialog bnew-dialog', bodyClass: 'bwho-body bnew-body', escapeToClose: true,
+  const shell = createModalShell({ id: DIALOG_ID, key: fromSession ? `adopt:${fromSession.webuiId}` : 'new', opener, title: adopt ? t('New persistent profile') : t('New profile'), dialogClass: 'bwho-dialog bnew-dialog', bodyClass: 'bwho-body bnew-body', escapeToClose: true,
     onClose: () => { st.closed = true; try { picker.close(); } catch { /* none */ } try { app.ws?.offGlobal?.(onGlobal); } catch { /* none */ } if (!st.created && !st.handoff) { try { onDismissed?.(); } catch { /* none */ } } }, kind: 'form' }); // (verify r3: a handoff to the reopened dialog is no dismissal)
+  if (shell.raised) return shell.overlay._newProfile || { shell, close: () => shell.close() };   // raised: the same conversation's (or the plain) New profile, as it was
   const body = shell.body;
 
   // ── the name ──
@@ -375,7 +376,7 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
       if (r && r.code === 'adopt_form_changed' && fromSession && (r.now === 'keep' || r.now === 'empty')) {
         showToast(createRefusalWords(r, t), { type: 'warn', duration: 8000 });
         st.handoff = true; shell.close();
-        openNewProfileDialog(app, { label: nameInput.value, fromSession: { ...fromSession, adoptKeeps: r.now === 'keep' }, onCreated, onDismissed });
+        openNewProfileDialog(app, { label: nameInput.value, fromSession: { ...fromSession, adoptKeeps: r.now === 'keep' }, onCreated, onDismissed, opener: 'system' });   // (a SERVER's answer re-opens it — never the keys from a field the person moved on to; lane dialog-yield r3)
         return;
       }
       say(createRefusalWords(r, t) || buildRefusalWords(r, t) || (t('Could not create the profile') + ' — ' + ((r && r.error) || t('server unreachable'))));
@@ -394,5 +395,7 @@ export function openNewProfileDialog(app, { label = '', fromSession = null, onCr
   drawProviders(); drawMachines(); drawBuilds(); drawClones();
   loadFacts();
   setTimeout(() => { try { nameInput.focus(); nameInput.select(); } catch { /* none */ } }, 0);
-  return { shell, picker, create: doCreate, close: () => shell.close(), state: () => ({ provider: st.provider, host: st.host, adopt, build: st.buildKey }) };
+  const handle = { shell, picker, create: doCreate, close: () => shell.close(), state: () => ({ provider: st.provider, host: st.host, adopt, build: st.buildKey }) };
+  shell.overlay._newProfile = handle;
+  return handle;
 }

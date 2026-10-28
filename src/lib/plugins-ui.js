@@ -2,7 +2,7 @@
 // login / status for host-level plugins (first: Tailscale). Modeled on the
 // Manage-Agents visual language; the login flow mirrors guided Drive OAuth
 // (server captures the auth URL, user opens it, we poll status until Running).
-import { createModalShell, fetchJson, showToast, showConfirmDialog, showContextMenu, escHtml, copyText } from './utils.js';
+import { createModalShell, freshKey, fetchJson, showToast, showConfirmDialog, showContextMenu, escHtml, copyText } from './utils.js';
 import { BACKEND_META } from './agent-meta.js';
 import { t } from './i18n.js';
 import { renderVoiceSheet } from './voice-plugin-card.js'; // the Voice row's 「待处理 N」 sheet: Connect + the proposal cards
@@ -54,7 +54,8 @@ function relayFact(r) {
 /** the relay chip's sheet: the identity, its names, the line(s) for the relay admin, the doors */
 function relaySheet(p, api, rerender) {
   const r = p.relay || {};
-  const { body, close } = createModalShell({ id: 'relay-identity', title: t('Relay identity'), bodyClass: 'mounts-dialog-body', escapeToClose: true, kind: 'form' });
+  const { body, close, raised } = createModalShell({ id: 'relay-identity', key: p && p.id, title: t('Relay identity'), bodyClass: 'mounts-dialog-body', escapeToClose: true, kind: 'form' });
+  if (raised) return;   // raised: the same subject's form, as it was
   const knockWords = r.retired ? t('no longer sent — it left this instance') : { on: t('sent while the relay\'s grace lasts'), locked: t('waits for the vault (sent once it is unlocked)'), off: t('no longer sent — the relay takes this instance\'s own token alone'), none: t('none') }[r.knock] || '';
   const names = [...(r.prefixes || []).map((x) => x + '…'), ...(r.subdomains || [])].join(' · ');
   const lines = Array.isArray(r.lines) ? r.lines : [];
@@ -144,7 +145,9 @@ export function installPluginsUI(App) {
   async openPluginsDialog({ container } = {}) {
     // rail mode: render into the sidebar panel instead of a modal (one source)
     if (!container && !this.isMobile && this.sidebar?._railEl) { this.sidebar.toggle?.(true); this.sidebar._railGo?.('plugins'); return; }
+    // one subject: the one Plugins manager
     const shell = container ? { body: container, close: () => {} } : createModalShell({ id: 'plugins-dialog', title: t('Plugins'), bodyClass: 'mounts-dialog-body', escapeToClose: true, kind: 'form' });
+    if (shell.raised) return;   // raised: the open manager, as it was
     // rail panel: same body class as the modal so one stylesheet serves both
     if (container) container.classList.add('mounts-dialog-body');
     const { body, close } = shell;
@@ -374,7 +377,8 @@ export function installPluginsUI(App) {
   /** the Voice row's chip: Connect with Fish Audio + the proposal cards (an action surface, not settings); `pasteKey` (lane
    *  dropline-connect-door) = the other door — the integration card the plugin row NAMES (`p.integration`), focused */
   _voiceSheet(p, rerender, { focus = null } = {}) {
-    const { body, close } = createModalShell({ id: 'voice-sheet', title: p.label, bodyClass: 'mounts-dialog-body', escapeToClose: true, opener: 'person', kind: 'form' }); // (the person's: re-opened by its own Connect flow once the sign-in tab answers — in front, lane dialog-yield r2)
+    const { body, close, raised } = createModalShell({ id: 'voice-sheet', key: p && p.id, title: p.label, bodyClass: 'mounts-dialog-body', escapeToClose: true, opener: 'person', kind: 'form' });
+    if (raised) return;   // raised: the same subject's form, as it was // (the person's: re-opened by its own Connect flow once the sign-in tab answers — in front, lane dialog-yield r2)
     const pasteKey = p.integration ? () => { close(); this.openIntegration?.(p.integration); } : null;
     // `focus` (lane foryou-plugin-notices: a For-you reminder's door) = the proposal to land on + its words chosen — the first draw only
     renderVoiceSheet(body, () => { close(); rerender(); this._voiceSheet(p, rerender); }, { pasteKey, focus });
@@ -386,7 +390,8 @@ export function installPluginsUI(App) {
     if (res.done) { showToast(t('Already connected')); rerender(); return; }
     if (res.pending) { showToast(t('Waiting for the sign-in page…')); return; }
     if (!res.authUrl) return;
-    const { body, close } = createModalShell({ id: 'tailscale-login', title: t('Log in…'), escapeToClose: true, kind: 'form' });
+    const { body, close, raised } = createModalShell({ id: 'tailscale-login', key: freshKey('login'), title: t('Log in…'), escapeToClose: true, kind: 'form' });
+    if (raised) return null;   // raised: the same subject's form, as it was
     body.innerHTML = `<div class="mounts-field-hint">${escHtml(t('Open this link, approve the device, then come back — the status updates by itself:'))}</div>
       <div class="plugin-auth-url"><a href="${escHtml(res.authUrl)}" target="_blank" rel="noopener">${escHtml(res.authUrl)}</a>
       <button class="mounts-btn plugin-copy">${escHtml(t('Copy'))}</button></div>`;
@@ -437,7 +442,9 @@ export function installPluginsUI(App) {
   /** Install dialog (Plugin Ph4): path / git / .vsp upload / GitHub release →
    *  POST /api/plugins/install. Errors reach the user verbatim (inline + toast). */
   _pluginInstallDialog(onDone) {
-    const { body, close } = createModalShell({ id: 'plugin-install-dialog', title: t('Install plugin'), minWidth: '460px', escapeToClose: true, kind: 'form' });
+    // one subject: one plugin being installed
+    const { body, close, raised } = createModalShell({ id: 'plugin-install-dialog', title: t('Install plugin'), minWidth: '460px', escapeToClose: true, kind: 'form' });
+    if (raised) return null;   // raised: the same subject's form, as it was
     const SOURCES = [
       { value: 'path', label: t('Local folder path'), placeholder: '/path/to/plugin (holds vibespace-plugin.json)' },
       { value: 'git', label: t('Git repository URL'), placeholder: 'https://github.com/owner/plugin.git#main' },

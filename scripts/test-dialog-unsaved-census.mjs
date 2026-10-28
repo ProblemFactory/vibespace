@@ -156,7 +156,7 @@ if (isMain) {
   console.log('— ② the controls');
   const NOTIFY = 'src/lib/channel-filter-editor.js';
   const src = fs.readFileSync(path.join(REPO, NOTIFY), 'utf8');
-  const cut = src.replace("unsaved: { isDirty: () => dirtyNow(), save: () => saveNow() }, kind: 'form' });\n  const principals", "unsavedX: { isDirty: () => dirtyNow(), save: () => saveNow() }, kind: 'form' });\n  const principals"); // lane dialog-yield: the call declares its kind (a form)
+  const cut = src.replace("unsaved: { isDirty: () => dirtyNow(), save: () => saveNow() }, kind: 'form' });\n  if (raised) return null;", "unsavedX: { isDirty: () => dirtyNow(), save: () => saveNow() }, kind: 'form' });\n  if (raised) return null;"); // (r3: the call reads `raised` next) // lane dialog-yield: the call declares its kind (a form)
   ok(cut !== src, 'mutant: Notify… loses `unsaved`');
   const m1 = censusSaveDialogs({ files: [NOTIFY], override: { [NOTIFY]: cut } });
   ok(m1.bad.some((x) => x.fn === 'showNotifyDialog' && x.decl === 'missing'), 'Notify… without `unsaved:` ⇒ RED (missing)', m1.bad);
@@ -200,7 +200,7 @@ if (isMain) {
   ok(pinned(U).length === 0, "✕, the backdrop and both Escapes call the guard's dismiss (never `close` straight)", pinned(U));
   const mut = U.replace('closeBtn.onclick = () => dismiss();', 'closeBtn.onclick = close;');
   ok(mut !== U && pinned(mut).includes('✕'), 'MUTANT ✕ straight to close ⇒ the pin is RED');
-  ok(/unsaved = null, onEscape = null, opener = 'person' \} = \{\}\) \{/.test(U) && /function unsavedGuard\(/.test(U), 'createModalShell takes `unsaved` and owns the ONE guard (unsavedGuard)');
+  ok(/unsaved = null, onEscape = null, opener = 'person', from = null, undismissable = false \} = \{\}, deferred = false\) \{/.test(U) && /function unsavedGuard\(/.test(U), 'createModalShell takes `unsaved` and owns the ONE guard (unsavedGuard)');
 
   console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);
   process.exit(fail ? 1 : 0);

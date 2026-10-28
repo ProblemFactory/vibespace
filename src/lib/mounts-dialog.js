@@ -187,10 +187,13 @@ function copyLine(value) {
 // that awaits a Promise from this dialog, or cancelling it hangs the
 // awaiting flow forever. Callers must make their resolve idempotent
 // (close() runs on the submit path too).
-// opts.id (lane dialog-yield r2): a sub-step that stands beside its opener (the key paste of Add remote machine) — a form is
-// never replaced under a shared id.
+// opts.id — EVERY caller names its own (lane dialog-yield r3: ~17 forms shared the default 'mounts-dialog-overlay', and opening
+// Connect storage closed the running «Set up <machine>» through the shared id's door); opts.key = the subject (the machine, the
+// mount, the account). The same id + key opened again is RAISED and its ctx comes back.
 export function mountsDialog(title, fields, submitLabel, onSubmit, opts = {}) {
-  const { body, close } = createModalShell({ id: opts.id || 'mounts-dialog-overlay', title, onClose: opts.onClose, escapeToClose: true, kind: 'form' });
+  const shell = createModalShell({ id: opts.id, key: opts.key, title, onClose: opts.onClose, escapeToClose: true, kind: 'form' });
+  if (shell.raised) return shell.overlay._mountsCtx || { body: shell.body, close: shell.close, raised: true };
+  const { body, close } = shell;
   const { inputs, applyConds, hasWhen } = renderFields(body, fields);
   const err = document.createElement('div');
   err.className = 'cfg-err';
@@ -216,6 +219,7 @@ export function mountsDialog(title, fields, submitLabel, onSubmit, opts = {}) {
     } catch (e) { err.textContent = e.message || 'Failed'; submit.disabled = false; }
   };
   const ctx = { close, inputs, body, applyConds: hasWhen ? applyConds : () => {} };
+  shell.overlay._mountsCtx = ctx;   // what a re-open of this form hands back
   return ctx;
 }
 
@@ -534,8 +538,9 @@ export function wireStepPaste(ctx, { tokenKey, configPage, start, callback, whyT
 // → `{token}`, and `finish(token, {close})` applies the new sign-in. `fields`
 // (optional) render through `renderFields` between the hint and the button —
 // the channel accounts' OAuth-client select.
-export function reauthDialog({ id = 'mount-reauth-dialog', title, hint: hintText, signinLabel, provider, fields = null, start, status: statusOf, callback, finish: apply, savingText = null, pasteHint = null, pasteSecret = false, pastePlaceholder = 'http://127.0.0.1:53682/?state=…&code=…' }) {
-  const { body, close } = createModalShell({ id, title, bodyClass: 'mounts-dialog-body', escapeToClose: true, kind: 'form' });
+export function reauthDialog({ id = 'mount-reauth-dialog', key = null, title, hint: hintText, signinLabel, provider, fields = null, start, status: statusOf, callback, finish: apply, savingText = null, pasteHint = null, pasteSecret = false, pastePlaceholder = 'http://127.0.0.1:53682/?state=…&code=…' }) {
+  const { body, close, raised, overlay } = createModalShell({ id, key, title, bodyClass: 'mounts-dialog-body', escapeToClose: true, kind: 'form' });   // key = the mount / the account re-authorized (lane dialog-yield r3)
+  if (raised) return overlay._reauth || null;   // raised: this sign-in, as it was
   const hint = document.createElement('div');
   hint.className = 'mounts-field-hint';
   hint.textContent = hintText;
@@ -601,5 +606,7 @@ export function reauthDialog({ id = 'mount-reauth-dialog', title, hint: hintText
       btn.disabled = false;
     }
   };
-  return { close, body, inputs: form ? form.inputs : {}, button: btn, status };
+  const ctx = { close, body, inputs: form ? form.inputs : {}, button: btn, status };
+  overlay._reauth = ctx;
+  return ctx;
 }

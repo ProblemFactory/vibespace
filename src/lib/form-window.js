@@ -19,6 +19,12 @@
 //     FROM a blocking layer (the static New Session sheet's folder picker, the tour's sign-in) are its sheet — and the moment
 //     neither holds (the page back at a desktop width, the layer closed) the sheet RE-HOSTS as its window, the same element
 //     with what was typed. A form opened while a blocking layer is up but not from it waits as a window UNDER the layer.
+//   • «FROM THE LAYER» IS CAPTURED AT THE PRESS (round 3): every trusted press records whether it landed inside a blocking
+//     layer (a PRESS TOKEN — pressToken(), carried by the caller across its awaits as createModalShell's `from`; without
+//     one, the press of the current task); no clock — Browse… over a 2 s remote listing opened its picker BEHIND the New
+//     Session sheet at 1.5 s. A re-host MOVES the element (moveBefore where the browser has it: an iframe keeps its page,
+//     the focus stays) and puts every inner scroller back where it was; a form holding an iframe is never re-hosted by
+//     appendChild (it would reload) — it keeps its shape.
 // Every form gets a HANDLE here (its shape — 'sheet' | 'window' — moves; the shell asks the handle, never the shape).
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { setFormHost } from './utils.js';
@@ -34,10 +40,18 @@ const blockedNow = () => { try { return [...document.querySelectorAll(BLOCKING_L
  *  form's sheet over it (the New Session sheet's Browse…, a button the tour shows). The focus alone is no act: a confirm focuses
  *  its own OK, and a form a script opened while it stood must wait under it, not cover its Delete (round 2's attack (a)). */
 const LAYERED = `${BLOCKING_LAYERS}, .form-sheet`;
-let pressAt = null, typedAt = null, pressEl = null, typedEl = null, lastTabAt = 0;
+let pressAt = null, typedAt = null, typedEl = null, lastTabAt = 0;
 const EDIT_KEYS = new Set(['Shift', 'Control', 'Alt', 'Meta', 'CapsLock', 'Backspace', 'Delete', 'Process', 'Dead', 'Compose', 'Unidentified']);
-const fromLayerNow = () => {
-  try { return pressAt != null && Date.now() - pressAt < 1500 && !!pressEl && pressEl.isConnected && typeof pressEl.closest === 'function' && !!pressEl.closest(LAYERED); } catch { return false; }
+/** THE PRESS OF THIS TASK (round 3): a token naming whether the person's press landed inside a blocking layer — judged AT the
+ *  press; it lives for the task that dispatched it (its handler and that handler's microtasks), a caller that awaits first
+ *  carries it itself (utils pressToken → createModalShell `from`) */
+let taskPress = null;
+const notePress = (e) => {
+  let inLayer = false;
+  try { inLayer = !!e.target && typeof e.target.closest === 'function' && !!e.target.closest(LAYERED); } catch { /* no element: no layer */ }
+  const tok = Object.freeze({ at: Date.now(), inLayer });
+  taskPress = tok;
+  setTimeout(() => { if (taskPress === tok) taskPress = null; }, 0);
 };
 const editable = (el) => { try { return !!el && (el.isContentEditable || el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && !/^(button|submit|reset|checkbox|radio|range|color|file|image|hidden)$/i.test(el.type || ''))); } catch { return false; } };
 
@@ -51,11 +65,14 @@ export function installFormHost(app) {
   if (typeof document !== 'undefined') {
     // THE PERSON'S LAST ACT (R5, round 2): a press or a command key vs text typed into a field — a form opened while their last
     // act was typing never takes the keys from that field, whatever its caller says ('hello wor' / 'ld' on da9545e8)
-    document.addEventListener('pointerdown', (e) => { if (e.isTrusted) { pressAt = Date.now(); pressEl = e.target; } }, true);
+    document.addEventListener('pointerdown', (e) => { if (e.isTrusted) { pressAt = Date.now(); notePress(e); } }, true);
+    // (the release is the click's task — a mouse's pointerup and its click, a Space's keyup and its click: the handler that opens a form runs in it)
+    document.addEventListener('pointerup', (e) => { if (e.isTrusted) notePress(e); }, true);
+    document.addEventListener('keyup', (e) => { if (e.isTrusted && e.key === ' ') notePress(e); }, true);   // (Enter clicks at its keydown: noted above)
     // a COMMAND key (a named key that is not an edit — Enter, Tab, Escape, an arrow, F1… — or a chord) is an act like a press
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Tab') lastTabAt = Date.now();
-      if (e.isTrusted && !e.isComposing && e.keyCode !== 229 && ((typeof e.key === 'string' && e.key.length > 1 && !EDIT_KEYS.has(e.key)) || e.ctrlKey || e.metaKey || e.altKey)) { pressAt = Date.now(); pressEl = e.target; }
+      if (e.isTrusted && !e.isComposing && e.keyCode !== 229 && ((typeof e.key === 'string' && e.key.length > 1 && !EDIT_KEYS.has(e.key)) || e.ctrlKey || e.metaKey || e.altKey)) { pressAt = Date.now(); notePress(e); }
     }, true);
     document.addEventListener('input', (e) => { if (e.isTrusted && editable(e.target)) { typedAt = Date.now(); typedEl = e.target; } }, true);
   }
@@ -80,14 +97,16 @@ export function installFormHost(app) {
     for (const el of document.querySelectorAll(BLOCKING_LAYERS)) layerMo.observe(el, { attributes: true, attributeFilter: ['class', 'style', 'hidden'] });
   };
   setFormHost({
-    open({ id = null, title = '', opener = 'person' } = {}) {
+    /** the press of the current task (null outside one) — a caller reads it before its first await */
+    pressToken: () => taskPress,
+    open({ id = null, title = '', opener = 'person', from = null } = {}) {
       const wm = app && app.wm;
       const phone = !wm || phoneNow(), blocked = blockedNow();
       // (the field typed into must still HOLD the keys — a form the person typed in and closed protects nothing)
       const typing = typedLastVerdict({ typedAt, pressAt, now: Date.now() }) && !!typedEl && typedEl.isConnected && document.activeElement === typedEl;
-      const where = formOpenVerdict({ phone, blocked, fromLayer: blocked && fromLayerNow(), opener, typedLast: typing });
+      const where = formOpenVerdict({ phone, blocked, fromLayer: blocked && !!(from && from.inLayer), opener, typedLast: typing });
       let mode = where === 'sheet' ? 'sheet' : 'window';
-      let win = null, bound = null, root = null, ro = null, mo = null, grow = null, placed = false, backTo = null, nth = 0, gone = false, lastFocus = null;
+      let win = null, bound = null, root = null, ro = null, mo = null, grow = null, placed = false, backTo = null, nth = 0, gone = false, lastFocus = null, landed = where;
       const unwatch = () => { try { ro?.disconnect(); mo?.disconnect(); grow?.disconnect(); } catch { } ro = mo = grow = null; };
       const fit = () => {
         if (mode !== 'window' || !win || !root) return;
@@ -117,6 +136,7 @@ export function installFormHost(app) {
         nth = [...wm.windows.values()].filter((w) => w.type === 'form' && !w.isMinimized && !w._hiddenByDesktop).length;
         backTo = wm.activeWindowId;   // the window it was opened over — the active one again when it closes (a person pressing into the form re-names it)
         const quiet = place === 'behind';   // no act of the person opened it: the automatic open's quiet (test-artifacts-auto-open's pass-through spelling)
+        landed = quiet ? 'behind' : 'front';
         win = wm.createWindow({ title: String(title || ''), type: 'form', width: 480, height: 320, ...(quiet ? { quiet: true } : {}) });
         win.element.classList.add('window-form');
         if (id) win.element.dataset.form = id;
@@ -143,9 +163,20 @@ export function installFormHost(app) {
         fit();
         requestAnimationFrame(() => fit());
       };
-      /** move the root and keep the caret where it was (a moved element loses the focus) */
-      const carry = (into) => { const a = document.activeElement, had = !!a && root.contains(a); into.appendChild(root); if (had && a.isConnected) { try { a.focus({ preventScroll: true }); } catch { } } };
-      const asSheet = () => { root.className = 'dialog-overlay form-sheet'; root.style.zIndex = '99998'; const d = root.querySelector(':scope > .dialog'); if (d) d.style.maxHeight = ''; carry(document.body); watchLayers(); };   // (a sheet's dialog is the stylesheet's again)
+      /** MOVE the root (round 3 — the keyed-row law): moveBefore where the browser has it (an iframe keeps its page, the focus
+       *  stays), and every inner scroller back where it was (measured on c3ed5f0a: scrollTop 150 → 0, the iframe loaded 3×) */
+      const carry = (into) => {
+        const a = document.activeElement, had = !!a && root.contains(a);
+        const kept = [];
+        if (root.isConnected) for (const el of [root, ...root.querySelectorAll('*')]) if (el.scrollTop || el.scrollLeft) kept.push([el, el.scrollTop, el.scrollLeft]);
+        if (typeof into.moveBefore === 'function' && root.isConnected && into.isConnected) { try { into.moveBefore(root, null); } catch { into.appendChild(root); } } else into.appendChild(root);
+        if (had && a.isConnected && document.activeElement !== a) { try { a.focus({ preventScroll: true }); } catch { } }
+        const back = () => { for (const [el, top, left] of kept) if (el.isConnected) { el.scrollTop = top; el.scrollLeft = left; } };
+        if (kept.length) { back(); requestAnimationFrame(back); }
+      };
+      /** may it move? an iframe moved by appendChild reloads its page — where the browser cannot move it whole, it keeps its shape */
+      const movable = () => { try { return typeof Element.prototype.moveBefore === 'function' || !root.querySelector('iframe'); } catch { return true; } };
+      const asSheet = () => { root.className = 'dialog-overlay form-sheet'; root.style.zIndex = '99998'; landed = 'sheet'; const d = root.querySelector(':scope > .dialog'); if (d) d.style.maxHeight = ''; carry(document.body); watchLayers(); };   // (a sheet's dialog is the stylesheet's again)
       const asWindow = () => { root.className = 'dialog-form'; root.style.zIndex = ''; delete root.dataset.popover; carry(win.content); };   // (a window is no popover: a sheet's [data-popover] — feedback-sheet's phone Esc — goes)
       if (mode === 'window') makeWindow(where);
       const handle = {
@@ -159,7 +190,7 @@ export function installFormHost(app) {
         /** the crossing into the phone tier: the form's own root becomes the sheet (the overlay, z 99998, its head and ✕ shown
          *  again — the same element keeps its id, its listeners, the guard and what was typed); its window closes quietly */
         toSheet() {
-          if (mode !== 'window' || !root || !root.isConnected || gone) return;
+          if (mode !== 'window' || !root || !root.isConnected || gone || !movable()) return;
           mode = 'sheet'; unwatch();
           const w = win; win = null;
           asSheet();
@@ -168,7 +199,7 @@ export function installFormHost(app) {
         /** a sheet whose home is gone (the page back at a desktop width, the layer it stood over closed) becomes its window again —
          *  in front when the person is in it, else behind */
         toWindow() {
-          if (mode !== 'sheet' || !root || !root.isConnected || gone || !wm) return;
+          if (mode !== 'sheet' || !root || !root.isConnected || gone || !wm || !movable()) return;
           const inside = root.contains(document.activeElement);
           mode = 'window';
           makeWindow(inside ? 'front' : 'behind');
@@ -210,6 +241,8 @@ export function installFormHost(app) {
           if (back && !back.isMinimized && !back._hiddenByDesktop) wm.focusWindow(backTo);
         },
         active() { return mode === 'sheet' || (!!win && wm.activeWindowId === win.id); },
+        /** where it landed: 'front' | 'behind' | 'sheet' */
+        placed() { return mode === 'sheet' ? 'sheet' : landed; },
         get content() { return mode === 'window' && win ? win.content : document.body; },
         get winId() { return win ? win.id : null; },
       };

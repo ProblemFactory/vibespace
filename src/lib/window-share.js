@@ -341,7 +341,8 @@ function failText(r, fallback) {
 /** "Share with agent…" (D2 after launch, D7 the mode). */
 export async function openShareDialog(app, id, { label = '' } = {}) {
   const base = `/api/desktop/apps/${encodeURIComponent(id)}/reach`;
-  const { body, close, overlay, dialog } = createModalShell({ id: 'window-share-dialog', title: t('Share {app} with agents', { app: label || t('Desktop app') }), dialogClass: 'wshare-dialog', escapeToClose: true, kind: 'form' });
+  const { body, close, overlay, dialog, raised } = createModalShell({ id: 'window-share-dialog', key: id, title: t('Share {app} with agents', { app: label || t('Desktop app') }), dialogClass: 'wshare-dialog', escapeToClose: true, kind: 'form' });
+  if (raised) return null;   // raised: the same subject's form, as it was
   // the house footer (utils' _modalShell shape): a secondary action left of the primary one
   const footer = el('div', 'dialog-footer');
   const ask = el('button', 'btn-cancel', t('Ask an agent to take control…')); ask.type = 'button';
@@ -412,7 +413,8 @@ export async function openShareDialog(app, id, { label = '' } = {}) {
 export async function openAskDialog(app, id, { label = '' } = {}) {
   const view = await fetchJson(`/api/desktop/apps/${encodeURIComponent(id)}/reach`);
   if (!view || view.error) { showToast(failText(view, t('Could not read this window')), { type: 'error' }); return null; }
-  const { body, close, dialog } = createModalShell({ id: 'window-ask-dialog', title: t('Ask an agent to take control of {app}', { app: label || t('Desktop app') }), dialogClass: 'wshare-dialog', escapeToClose: true, kind: 'form' });
+  const { body, close, dialog, raised } = createModalShell({ id: 'window-ask-dialog', key: id, title: t('Ask an agent to take control of {app}', { app: label || t('Desktop app') }), dialogClass: 'wshare-dialog', escapeToClose: true, kind: 'form' });
+  if (raised) return null;   // raised: the same subject's form, as it was
   const footer = el('div', 'dialog-footer');
   dialog.appendChild(footer);
   const model = pickerModel({ ...rosterOf(app), record: view });

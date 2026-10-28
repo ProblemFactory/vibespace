@@ -1249,7 +1249,9 @@ class App {
   // this dialog streams its log, survives the service restart by polling
   // /api/version, and reloads the page once the new version answers.
   async _runSelfUpdate() {
-    const { body } = createModalShell({ id: 'self-update-dialog', title: t('Updating VibeSpace'), escapeToClose: false, kind: 'form' }); // (no Escape: the update runs on — the page reloads by itself when it is up)
+    // one subject: the update this hub runs — one at a time
+    const { body, raised } = createModalShell({ id: 'self-update-dialog', title: t('Updating VibeSpace'), escapeToClose: false, kind: 'form' });
+    if (raised) return;   // raised: the same subject's form, as it was // (no Escape: the update runs on — the page reloads by itself when it is up)
     body.innerHTML = `
       <div class="selfupd-phase"><span class="upload-active-spinner" aria-hidden="true"></span><span class="su-msg">${escHtml(t('Starting update…'))}</span></div>
       <pre class="selfupd-log"></pre>

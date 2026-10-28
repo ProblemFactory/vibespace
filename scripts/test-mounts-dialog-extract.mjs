@@ -137,11 +137,11 @@ const setSel = (key, v) => { const el = s._lastMountsDialog.inputs[key]; el.valu
       if (scenario === 'connect-onedrive-consent') {
         setSel('type', 'onedrive');
         await sleep(30); // the block's visibility follows its token field through a MutationObserver
-        const wraps = [...document.querySelectorAll('#mounts-dialog-overlay .mounts-drive-connect')].filter((w) => w.style.display !== 'none');
+        const wraps = [...document.querySelectorAll('.dialog-overlay .mounts-drive-connect')].filter((w) => w.style.display !== 'none');
         wraps.find((w) => /OneDrive/.test(w.querySelector('button').textContent)).querySelector('button').click();
-        for (let i = 0; i < 50 && !document.querySelector('#mounts-dialog-overlay .mounts-oauth-link'); i++) await sleep(20);
+        for (let i = 0; i < 50 && !document.querySelector('.dialog-overlay .mounts-oauth-link'); i++) await sleep(20);
       }
-      if (scenario === 'connect-s3-advanced') { setSel('type', 's3'); document.querySelector('#mounts-dialog-overlay details.mounts-advanced').open = true; }
+      if (scenario === 'connect-s3-advanced') { setSel('type', 's3'); document.querySelector('.dialog-overlay details.mounts-advanced').open = true; }
     }
     if (scenario === 'add-child-drive') s._showAddChildDialog({ id: 'c1', name: 'team-drive', type: 'drive' });
     if (scenario === 'import-share') s._showImportShareDialog();
@@ -208,8 +208,12 @@ const setSel = (key, v) => { const el = s._lastMountsDialog.inputs[key]; el.valu
     }
     window.__pathInputs = pathInputs;
     const dlg = scenario === 'edit-switch-drive-inflight' ? document.getElementById('mount-reauth-dialog')
-      : scenario.startsWith('edit-') ? document.getElementById('mount-edit-dialog') : (document.getElementById('mounts-dialog-overlay') || document.getElementById('mount-reauth-dialog'));
-    window.__state = { html: dlg?.outerHTML || null, after, calls: window.__calls, pathInputs: window.__pathInputs, fieldDrawn: !!window.__pathFieldSeen };
+      : scenario.startsWith('edit-') ? document.getElementById('mount-edit-dialog') : (document.querySelector('body > .dialog-overlay') || document.getElementById('mount-reauth-dialog'));
+    // (lane dialog-yield r3: every storage form names its OWN id now — Connect storage 'mount-add-dialog', New submount
+    // 'mount-submount-dialog', Import share link 'share-import-dialog' — where the pre-extraction blocks used the shared
+    // 'mounts-dialog-overlay'; the root's id is the caller's, not what the dialog DRAWS: it is set aside before the compare)
+    const html = dlg ? dlg.outerHTML.replace(' id="' + dlg.id + '"', ' id="(set by the caller)"') : null;
+    window.__state = { html, after, calls: window.__calls, pathInputs: window.__pathInputs, fieldDrawn: !!window.__pathFieldSeen };
   } catch (e) { window.__state = { error: e.message + ' | ' + e.stack }; }
 })();
 `);

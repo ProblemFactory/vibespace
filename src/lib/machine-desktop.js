@@ -84,14 +84,25 @@ export function desktopRefusalText(r, m) {
  *  「记住这台机器的登录」 (lane desktop-vnc-remember: then the sentence says so). `sign` = the hub's word on this machine
  *  (GET …/signins: `refused` — the remembered one did not work, the tick stays on · `locked` — the vault is: no tick, it is
  *  said · `can` — the hub can sign in to this machine itself: only then is the tick offered). → creds (+ remember) | null */
+const asking = new Map();   // the sign-ins on screen, by machine + what they ask: an ask while its form is open shares its answer
 function askCredentials(m, types, auth, sign = null) {
-  return new Promise((resolve) => {
+  // lane dialog-yield r3: the machine asks again while its sign-in form is open (noVNC's credentialsrequired can fire twice) —
+  // the form is raised and BOTH askers get the one answer the person gives (c3ed5f0a replaced the form: the first ask hung;
+  // a raise that answered the second with null read as «sign-in cancelled»)
+  const k = `${(m && (m.hostId || m.id)) || ''}|${(Array.isArray(types) ? types : []).join(',')}`;
+  const was = asking.get(k);
+  if (was && was.overlay && was.overlay.isConnected) { createModalShell({ id: 'machine-desktop-signin', key: k, kind: 'form' }); return was.p; }   // (the same id + key: the open one raised)
+  if (was) { asking.delete(k); was.finish(null); }   // its form was removed without an answer (a window torn down): that ask ends, a fresh one opens
+  let finish = null, shellRoot = null;
+  const p = new Promise((resolve) => {
     let done = false;
-    const finish = (v) => { if (!done) { done = true; resolve(v); } };
+    finish = (v) => { if (!done) { done = true; resolve(v); } };
     const machine = nameOf(m);
     const wantUser = Array.isArray(types) && types.includes('username');
     const s = sign || {};
-    const { body, close } = createModalShell({ id: 'machine-desktop-signin', title: t('Sign in to {machine}', { machine }), dialogClass: 'machine-desktop-signin', escapeToClose: true, onClose: () => finish(null), kind: 'decision' }); // decision: the machine's sign-in the caller awaits before it connects — one password, answered before anything goes on
+    const { body, close, raised, overlay } = createModalShell({ id: 'machine-desktop-signin', key: k, title: t('Sign in to {machine}', { machine }), dialogClass: 'machine-desktop-signin', escapeToClose: true, onClose: () => finish(null), kind: 'form' });   // a FORM (lane dialog-yield r3: the desktop that asked waits for it — the chat does not)
+    if (raised) return;   // (never: `asking` answers a second ask first)
+    shellRoot = overlay;
     const form = document.createElement('form');
     const words = (kept) => (auth === 'ard'
       ? (kept ? t('{machine} asks for your Mac user name and password. VibeSpace seals them in the vault and signs in by itself while the vault is unlocked.', { machine }) : t('{machine} asks for your Mac user name and password. VibeSpace does not keep them.', { machine }))
@@ -121,6 +132,10 @@ function askCredentials(m, types, auth, sign = null) {
     body.append(form);
     setTimeout(() => (user || pass).focus(), 0);
   });
+  const entry = { p, finish, overlay: shellRoot };
+  asking.set(k, entry);
+  p.then(() => { if (asking.get(k) === entry) asking.delete(k); });
+  return p;
 }
 /** lane desktop-vnc-remember: the sign-in the machine just TOOK, sent to the hub ONCE to be sealed (the answer is the row's
  *  state, never the sign-in) — the toast says it was remembered, or why not. */
@@ -872,7 +887,8 @@ function installedList(m, { onPick }) {
 export function showMachineDesktopDialog(app, m0, { install = null, recheck = null, closeOpener = null } = {}) {
   let m = m0;
   const machine = nameOf(m);
-  const { body, close: closeDialog } = createModalShell({ id: 'machine-desktop-dialog', title: t('{machine} — its desktop', { machine }), dialogClass: 'machine-desktop-dialog', escapeToClose: true, kind: 'form' });
+  const { body, close: closeDialog, raised } = createModalShell({ id: 'machine-desktop-dialog', key: m0 && (m0.hostId || m0.id), title: t('{machine} — its desktop', { machine }), dialogClass: 'machine-desktop-dialog', escapeToClose: true, kind: 'form' });
+  if (raised) return null;   // raised: the same subject's form, as it was
   // inc-mv51w0ow-crw3 (owner: "选择打开桌面之后不会自动关闭无关对话框直接展示桌面连接窗口"): a press that opens a window closes
   // this dialog AND the one it was opened from (the Apps dialog, `closeOpener`) — the window is what the person asked to see
   const toWindow = () => { closeDialog(); try { closeOpener?.(); } catch { /* the opener is gone already */ } };

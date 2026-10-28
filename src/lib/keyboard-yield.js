@@ -45,7 +45,7 @@
 // reclaim, a press in the view → resumed, xterm's host, a synthetic press, two views) + test-browser-live-input ⑥.
 import { focusVerdict, userPressFocus, yieldAfter, keyboardTransition, reclaimCue, yieldHomeVerdict } from '../browser-takeover.js';
 import { dialogOpener, dialogVerdict, dialogReturn, dialogReclaimCue } from '../browser-takeover.js'; // lane dialog-keys: a dialog the user's own act opened takes the keys
-import { isPersonDialog, isFormRoot, formHoldsNow, FORM_ROOTS } from './form-yield.js'; // lane dialog-yield r2: THE ONE answer to «did the person open a dialog?» — a decision's overlay AND a form's root (PURE)
+import { isPersonDialog, isFormRoot, formHoldsNow, ownerFormOf, FORM_ROOTS } from './form-yield.js'; // lane dialog-yield r2: THE ONE answer to «did the person open a dialog?» — a decision's overlay AND a form's root (PURE)
 
 /** An element a caret can live in — the thing a takeover may not let the keyboard fall into by itself (moved here from
  *  browser-live-window.js, lane J r2: ONE definition for the view and this module). */
@@ -171,12 +171,13 @@ export function createKeyboardYield({ root, sink, drives, mine = () => false, no
   // took the keys [{overlay, back}] (newest last); `base` = where the keys were before the first ({to: 'sink'|'yield', el})
   const s = { yielded: false, kind: null, press: null, last: null, cue: null, lastCueAt: null, drove: null, opener: null, holds: [], base: null, dialogWhy: null, home: null }; // (`home` = the text box the keys were yielded to — a dialog opened from a yield gives them back there)
   const inView = (el) => { try { return !!el && !!root && (el === root || root.contains(el)); } catch { return false; } };
-  /** lane dialog-yield r2: the FORM root whose WINDOW holds `el` (its title bar too — a press on its ✕ is a press on the form) */
+  /** lane dialog-yield r2: the FORM root whose WINDOW holds `el` (its title bar too — a press on its ✕ is a press on the form) —
+   *  r3: or that OWNS it (a list, a popover, a menu the form floated on <body> — ownerFormOf, declared by the helper that floated it) */
   const formRootOf = (el) => {
     try {
       if (!el || typeof el.closest !== 'function') return null;
       const w = el.closest('.window-form');
-      const r = el.closest(FORM_ROOTS) || (w && typeof w.querySelector === 'function' ? w.querySelector(FORM_ROOTS) : null);
+      const r = el.closest(FORM_ROOTS) || (w && typeof w.querySelector === 'function' ? w.querySelector(FORM_ROOTS) : null) || ownerFormOf(el);
       return r && isFormRoot(r) ? r : null;
     } catch { return null; }
   };
@@ -202,7 +203,9 @@ export function createKeyboardYield({ root, sink, drives, mine = () => false, no
       // OUTSIDE its window (the live view, the chat, another window) gives the keys back to the rules below (the view re-claims
       // on a press on it, a text box pressed yields), a trusted press INSIDE an open form's window takes them for it again
       const formOf = (h) => isFormRoot(h.overlay);
-      const inHeld = (ov) => { try { const w = isFormRoot(ov) && typeof ov.closest === 'function' ? ov.closest('.window') || ov : ov; return !!e.target && (w === e.target || w.contains(e.target)); } catch { return false; } };
+      // (r3: «inside the form» = its window OR what it floats — the path field's suggestion list on <body>: a press there dropped
+      // the hold and 'me/proj⏎' went into the agent's page)
+      const inHeld = (ov) => { try { const w = isFormRoot(ov) && typeof ov.closest === 'function' ? ov.closest('.window') || ov : ov; return !!e.target && (w === e.target || w.contains(e.target) || ownerFormOf(e.target) === ov); } catch { return false; } };
       // (a press inside ANY held dialog — a confirm the form opened over itself — keeps the whole stack: it is the person's work)
       if (s.holds.some(formOf) && !s.holds.some((h) => inHeld(h.overlay))) {
         s.holds = s.holds.filter((h) => !formOf(h));

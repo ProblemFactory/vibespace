@@ -704,7 +704,8 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
    *  document at the answer and names what changed): the address + the link's text, prefilled when editing; Enter applies,
    *  Esc (the shell's door: it asks when something was typed) / Cancel ⇒ null. */
   const linkDialog = (title, href, text) => new Promise((resolve) => {
-    const sh = createModalShell({ title, dialogClass: 'doc-link-dialog', onClose: () => resolve(null), escapeToClose: true, kind: 'form' });
+    const sh = createModalShell({ id: 'doc-link-dialog', key: `${host}:${path}`, title, dialogClass: 'doc-link-dialog', onClose: () => resolve(null), escapeToClose: true, kind: 'form' });
+    if (sh.raised) return;   // raised: the same subject's form, as it was
     const field = (label, value, placeholder) => { const w = mk('label', null, label), i = mk('input'); i.type = 'text'; i.value = value || ''; i.placeholder = placeholder; w.appendChild(i); sh.body.appendChild(w); return i; };
     const hrefIn = field(t('Link address'), href, 'https://'), textIn = field(t('Link text'), text, '');
     hrefIn.className = 'doc-link-href'; textIn.className = 'doc-link-text';
@@ -963,7 +964,11 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
     const acts = mk('div', 'doc-note-acts'); const cancel = mk('button', null, t('Cancel')); const add = mk('button', 'doc-note-add', t('Add'));
     acts.append(cancel, add); box.append(qq, voiceField(ta, attachDictation(ta)), acts);
     let close;
-    if (isPhone()) { const sh = createModalShell({ title: t('Add comment'), escapeToClose: true, dialogClass: 'doc-note-sheet', kind: 'form' }); sh.body.appendChild(box); close = () => sh.close(); }
+    if (isPhone()) {
+      const sh = createModalShell({ id: 'doc-comment-sheet', key: `${host}:${path}`, title: t('Add comment'), escapeToClose: true, dialogClass: 'doc-note-sheet', kind: 'form' });
+      if (sh.raised) return;   // raised: the comment being written on this document, as it was
+      sh.body.appendChild(box); close = () => sh.close();
+    }
     else { const p = createPopover(pane, 'doc-note-pop', { position: 'cursor', x: c.left, y: c.bottom + 4 }); p.appendChild(box); close = () => p.remove(); }
     cancel.addEventListener('click', () => close());
     add.addEventListener('click', () => {

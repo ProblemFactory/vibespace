@@ -28,7 +28,8 @@
 //     it remembers its last folder per field
 //   · never offered unasked: the instance's own checkout, its data dir, dot-folders (typed explicitly they still resolve)
 import { t } from './i18n.js';
-import { escHtml, fetchJson, createModalShell, onOutsidePress } from './utils.js';
+import { escHtml, fetchJson, createModalShell, onOutsidePress, pressToken } from './utils.js';
+import { ownFloat } from './form-yield.js'; // PURE (lane dialog-yield r3): the floated list is the form's — a press on it keeps the form's keys
 import { FILE_ICONS, UI_ICONS } from './icons.js';
 import { getFileIcon } from './file-types.js';
 import { imeOwnsKey } from './chat-enter-keys.js';
@@ -422,7 +423,7 @@ export function pathField(input, opts = {}) {
   function placeList() {
     if (!st.open || list.hidden) return;
     if (isPhone()) { if (list.parentNode !== wrap) wrap.insertBefore(list, under); list.classList.remove('pf-float'); list.style.cssText = ''; return; }
-    if (list.parentNode !== document.body) document.body.appendChild(list);
+    if (list.parentNode !== document.body) { document.body.appendChild(list); ownFloat(list, wrap); }
     list.classList.add('pf-float');
     const a = row.getBoundingClientRect();
     const w = Math.max(a.width, 360);
@@ -661,7 +662,11 @@ export function pathField(input, opts = {}) {
     if (d && d.listing) { mergeListing(W.L, d.listing); W.L.machine = h || null; if (d.self) W.self = d.self; }
   }
   async function openPicker() {
-    if (st.picking) return;
+    // lane dialog-yield r3: THE PRESS THAT ASKED, read before any await — a remote machine's home listing takes seconds, and
+    // the picker opened over the New Session sheet is still the person's (it was opened BEHIND it at 1.5 s, unreachable)
+    const from = pressToken();
+    if (st.picker && st.picker.overlay.isConnected) { createModalShell({ kind: 'form', id: 'path-picker', key: fid, from }); return; }   // open already: Browse… raises it (the same id and key)
+    if (st.picking) return;   // its listing is on its way: this press is the same ask
     st.picking = true; close();
     const h = hk(); const W = world(h);
     if (!W.L.home) await (h ? ask('', { force: true }) : localHome());
@@ -673,7 +678,10 @@ export function pathField(input, opts = {}) {
     if (!K.sel) K.sel = (inputsNow().bases[0] || { path: '~' }).path;
     for (let q = K.sel; q && q.includes('/'); q = parentOf(q)) K.open.add(q);
     K.open.add(K.sel);
-    const shell = createModalShell({ title: kind === 'file' ? t('Pick a file or folder') : t('Pick a folder'), dialogClass: 'pf-picker', escapeToClose: true, onClose: () => { st.picking = false; input.focus(); }, kind: 'form' });
+    const shell = createModalShell({ id: 'path-picker', key: fid, from, title: kind === 'file' ? t('Pick a file or folder') : t('Pick a folder'), dialogClass: 'pf-picker', escapeToClose: true, onClose: () => { st.picking = false; st.picker = null; input.focus(); }, kind: 'form' });
+    if (shell.raised) { st.picking = false; return; }   // (this field's picker opened meanwhile: it is raised, its tree as it was)
+    st.picker = shell;
+    if (shell.placed === 'behind') st.picking = false;   // not where the person can reach it: the latch never leaves a dead Browse… (a press raises it)
     const { body, dialog } = shell;
     if (h) dialog.querySelector('.dialog-header h3').append(Object.assign(document.createElement('span'), { className: 'pf-pk-sub', textContent: ' · ' + hostName(h) }));
     body.innerHTML = `<div class="pf-pk-main"><div class="pf-pk-left"><div class="pf-pk-search">${UI_ICONS.search}<input type="text" class="pf-pk-q" placeholder="${escHtml(t('Search folders (a few letters anywhere in the path)'))}" autocomplete="off" spellcheck="false"></div><div class="pf-pk-tree"></div></div><div class="pf-pk-right"></div></div><div class="dialog-footer pf-pk-foot"></div>`;

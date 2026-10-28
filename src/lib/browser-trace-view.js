@@ -182,7 +182,8 @@ export function drawOverlay(pane, img, entry, which) {
 export function openTraceEntryDialog(app, entry, list = null) {
   const entries = Array.isArray(list) && list.length ? list : [entry];
   let index = Math.max(0, entries.findIndex((e) => e && e.id === entry.id));
-  const shell = createModalShell({ id: 'browser-trace-entry-dialog', title: t('Browser action'), dialogClass: 'browser-trace-dialog', minWidth: '520px', escapeToClose: true, kind: 'form' });
+  const shell = createModalShell({ id: 'browser-trace-entry-dialog', key: entry && entry.id, title: t('Browser action'), dialogClass: 'browser-trace-dialog', minWidth: '520px', escapeToClose: true, kind: 'form' });
+  if (shell.raised) return null;   // raised: the same subject's form, as it was
   const { body, overlay, close } = shell;
   const head = el('div', 'browser-trace-dialog-head');
   const prev = el('button', 'file-tool-btn', '←'); prev.title = t('Previous action');
