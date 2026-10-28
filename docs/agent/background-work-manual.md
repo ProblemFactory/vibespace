@@ -225,7 +225,7 @@ conversation's browser trace as the job's. Concretely:
 - In-session continuation ("keep going until X") → `/goal`
 - Must OUTLIVE the conversation → THIS
 - Harness cron → never (dies with the session); dated obligations → `--at`
-- Reminders for YOURSELF (dated obligations) → `notify-cron` (each fire wakes YOUR conversation; since 2.363.1 the user's inbox is NOT copied unless you add `--notify-user` — the fire text is usually agent-facing, so relay to the user yourself via chat/vibespace-ask when warranted)
+- Reminders for YOURSELF (dated obligations) → `notify-cron` (each fire wakes YOUR conversation; since 2.363.1 the user's For you tray is NOT copied unless you add `--notify-user` (the scheduled `run … --notify-user` shape too: each fire's run tells the user when it ends; `vibespace-job show` prints `notifyUser=true|false`) — the fire text is usually agent-facing, so relay to the user yourself via chat/vibespace-ask when warranted)
 - Simple user forms → Interaction Panels (§5) before building a web page (§6)
 
 ## The full teaching behind the session intro's pointer line

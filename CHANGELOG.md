@@ -2,6 +2,12 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.361 — 2026-10-28
+
+### Fixed
+- A background reminder made with --notify-user now really puts a copy in your For you when it fires; before, the option was lost and only the agent was woken.
+- vibespace-job show and a job's details in Background Work now say whether the job also tells you in For you.
+
 ## 2.369.360 — 2026-10-27
 
 ### Added

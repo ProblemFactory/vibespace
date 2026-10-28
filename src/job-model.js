@@ -325,6 +325,16 @@ function notifyEffective(job, groupNotify, globalOn) {
   if (groupNotify === false) return { on: false, source: 'group' };
   return { on: globalOn !== false, source: 'global' };
 }
+// lane job-notify-user: does this record's work ALSO copy the user's For you tray (`--notify-user`)? THE ONE READER — a
+// notify cron's fire, a task's end, a cron child (handed its parent's answer at every fire), the snapshot `show` and the
+// Jobs panel print. The CLI sends ONE top-level field for every shape; a scheduled run made by an older CLI (2.369.360
+// and before) carried it only inside its embedded spawn-task (action.task.notifyUser) — still read here, never written.
+function notifyUserOf(rec) {
+  if (!rec || typeof rec !== 'object') return false;
+  if (rec.notifyUser) return true;
+  const a = rec.action;
+  return !!(a && typeof a === 'object' && a.type === 'spawn-task' && a.task && typeof a.task === 'object' && a.task.notifyUser);
+}
 
 // The message text posted into the owner conversation's inbox socket. The
 // CLI delivers it verbatim as an inbound peer message, so the text itself
@@ -582,6 +592,6 @@ module.exports = {
   SUPERVISE, onServiceExit, resolveName,
   renderJobsDigest, renderJobsUpdate, fitDigest, jobLine,
   validatePanel, validateAnswers, nextInteractionSeq, answerVersionVerdict, CONTEXT_PAYLOAD_CAP, clip,
-  notifyEffective, renderOwnerNotify, renderNotifStash,
+  notifyEffective, notifyUserOf, renderOwnerNotify, renderNotifStash,
   agentJobView,
 };

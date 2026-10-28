@@ -1281,7 +1281,7 @@ class JobManager {
         : run.cause === 'wrapper-mismatch' ? `failed: it never started — data/bin/job-wrapper.js speaks another protocol than this server (restart VibeSpace to finish its update)`
           : `${job.state} exit=${run.exit ?? '—'} ${run.cause} (${Math.round((run.endedAt - run.startedAt) / 60000)}m)`;
       this._touch(job, routineCronOk ? null : { what: evText });
-      if (job.notifyUser && !windowEnd) { try { this.d.notifyUser({ text: `Task ${job.name}: ${job.state} (${run.cause})`, urgency: job.state === 'failed' ? 'normal' : 'low', jobId: job.id, jobName: job.name, ownerCid: job.owner?.conversation?.id || null }); } catch { } }
+      if (M.notifyUserOf(job) && !windowEnd) { try { this.d.notifyUser({ text: `Task ${job.name}: ${job.state} (${run.cause})`, urgency: job.state === 'failed' ? 'normal' : 'low', jobId: job.id, jobName: job.name, ownerCid: job.owner?.conversation?.id || null }); } catch { } }
       // owner auto-notify honors the same quiet-success law: routine scheduled
       // success never messages anyone; agent-stopped ('interrupted') skips too
       // — the owner just did it and a message would echo their own action.
@@ -1426,7 +1426,7 @@ class JobManager {
       // user's inbox spammed agent-facing instructions at the human
       // (inc-mt27t0bg follow-up report). The agent decides what the user
       // needs and relays via chat/vibespace-ask.
-      if (job.notifyUser) {
+      if (M.notifyUserOf(job)) {
         try {
           this.d.notifyUser({ text: a.text || job.name, urgency: a.urgency || 'normal', jobId: job.id, jobName: job.name, ownerCid: job.owner?.conversation?.id || null });
           this._notifyLogPush(job, { lane: 'user-inbox', ok: true });
@@ -1452,6 +1452,9 @@ class JobManager {
         child = { ...a.task, id: rid(), kind: 'task', name: `${job.name} run`, owner: job.owner, access: job.access, state: 'starting', runs: [], createdAt: now(), cronParent: job.id };
         this.jobs.set(child.id, child);
       }
+      // lane job-notify-user: the For-you copy is the PARENT's setting (`run --every/--cron/--at … --notify-user` sends it
+      // top-level, like notify-cron) — handed to the child at every fire, so the run's end tells the user what `show` says
+      child.notifyUser = M.notifyUserOf(job);
       delete child._untilCursor; delete child._untilHit; // fresh run, fresh scan
       this._spawn(child, trigger);
     }
@@ -1502,7 +1505,7 @@ class JobManager {
       cmd: spec.cmd, envFrom: spec.envFrom || [], restart: spec.restart || 'on-failure',
       health: spec.health || null, ports: spec.ports || [], publish: !!spec.publish,
       singleInstance: spec.singleInstance !== false, timeoutMs: spec.timeoutMs || null,
-      untilOutput: spec.untilOutput || null, stdinOpen: !!spec.stdinOpen, notifyUser: !!spec.notifyUser,
+      untilOutput: spec.untilOutput || null, stdinOpen: !!spec.stdinOpen, notifyUser: M.notifyUserOf(spec), // lane job-notify-user: the one reader
       notify: spec.notify === 'on' || spec.notify === 'off' ? spec.notify : undefined, // owner auto-notify override; undefined = inherit group/global
       notifyOk: !!spec.notifyOk, // scheduled successes opt INTO events+notify (quiet-success is only the default)
       schedule: spec.schedule || null, catchUp: spec.catchUp || 'once', action: spec.action || null,
@@ -1632,8 +1635,9 @@ class JobManager {
       cmd: job.cmd ? { argv: job.cmd.argv, cwd: job.cmd.cwd || null, envKeys: Object.keys(job.cmd.env || {}) } : null,
       envFrom: job.envFrom || [], restart: job.restart || null, timeoutMs: job.timeoutMs || null,
       // B-644d: a cron PARENT's fires run its embedded spawn-task, whose notifyOk the child inherits — the parent's own
-      // field is never read (`vibespace-job run --at … --notify-ok` showed notifyOk=false for fires that notify)
-      untilOutput: job.untilOutput || null, notifyUser: !!job.notifyUser, notifyOk: !!job.notifyOk || !!(job.action && job.action.type === 'spawn-task' && job.action.task && job.action.task.notifyOk),
+      // field is never read (`vibespace-job run --at … --notify-ok` showed notifyOk=false for fires that notify);
+      // notifyUser is the one reader's answer (lane job-notify-user: `show` printed nothing about the For-you copy)
+      untilOutput: job.untilOutput || null, notifyUser: M.notifyUserOf(job), notifyOk: !!job.notifyOk || !!(job.action && job.action.type === 'spawn-task' && job.action.task && job.action.task.notifyOk),
       catchUp: job.catchUp || null, stopWithOwner: !!job.stopWithOwner, singleInstance: job.singleInstance !== false,
       run: run ? { startedAt: run.startedAt, endedAt: run.endedAt || null, exit: run.exit ?? null, cause: run.cause || null, trigger: run.trigger, lastLine: run.lastLine || '' } : null,
       runsCount: (job.runs || []).length,

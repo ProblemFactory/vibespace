@@ -364,6 +364,13 @@ async function expandDetail(app, el, j, refresh) {
     nr.textContent = t('Auto-notify') + ': ' + lastTxt + ov;
     d.appendChild(nr);
   }
+  // lane job-notify-user: whether the job ALSO puts a copy in your For you tray (`--notify-user`) — the snapshot's
+  // one-reader answer (a cron's own setting; its run inherits it), said in words
+  {
+    const fu = document.createElement('div'); fu.className = 'jobs-meta jobs-notify-user';
+    fu.textContent = job.notifyUser ? t('Also tells you in For you: yes') : t('Also tells you in For you: no');
+    d.appendChild(fu);
+  }
   // delivery journal (2.361.5, owner ask): every delivery ATTEMPT with lane +
   // outcome — the monitoring view for "did my reminder actually reach anyone".
   if (Array.isArray(job.notifyLog) && job.notifyLog.length) {

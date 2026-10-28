@@ -2908,6 +2908,8 @@ export default {
   "failed": "失败",
   "forced OFF for this job": "此任务强制关闭",
   "forced ON for this job": "此任务强制开启",
+  "Also tells you in For you: yes": "同时抄送一份到「待你处理」：是",
+  "Also tells you in For you: no": "同时抄送一份到「待你处理」：否",
   "global setting": "全局设置",
   "group “{name}”": "组“{name}”",
   "messaged the owner conversation {ago}": "{ago}已给所属对话发消息",

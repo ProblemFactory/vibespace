@@ -180,6 +180,39 @@ try {
   await C._cronTick();
   ok(notifications.some((n) => n.text === '给用户的提醒ABC'), '--notify-user notify-cron DOES copy the user inbox');
   ok((jcU.notifyLog || []).some((e) => e.lane === 'user-inbox' && e.ok) && (jcU.notifyLog || []).some((e) => e.lane === 'message' && e.ok), 'opt-in journal records BOTH lanes', JSON.stringify(jcU.notifyLog));
+  // lane job-notify-user: the legs above hand the engine a top-level field the CLI never wrote (notify-cron sent no
+  // notifyUser at all; a scheduled run hid it inside action.task). Here the body is the REAL CLI's, captured against a
+  // loopback recorder (a drift in its builder reds here; test-jobs-cli-body pins every flag + the route's hop), and a
+  // scheduled run's fire spawns a REAL child: with --notify-user its end tells the user and the cron's record says so;
+  // without it, silent; a body from an older CLI (the flag only inside action.task) is still honoured.
+  {
+    const http = await import('node:http');
+    const got = [];
+    const rec = http.createServer((q, s2) => { let raw = ''; q.on('data', (c) => { raw += c; }); q.on('end', () => {
+      const b = JSON.parse(raw || '{}'); got.push(b);
+      s2.writeHead(200, { 'content-type': 'application/json' }); s2.end(JSON.stringify({ success: true, job: { id: 'jb-rec', name: b.name, kind: b.kind }, notify: null }));
+    }); });
+    await new Promise((r) => rec.listen(0, '127.0.0.1', r));
+    const cliBody = (argv) => new Promise((resolve) => {
+      const p = spawn(process.execPath, [new URL('../data/bin/vibespace-job', import.meta.url).pathname, ...argv], { cwd: dir, env: { PATH: process.env.PATH, HOME: dir, VIBESPACE_API: `http://127.0.0.1:${rec.address().port}`, VIBESPACE_SESSION_TOKEN: 'vsst_rec' } });
+      p.on('close', () => resolve(got.find((b) => b.name === argv[argv.indexOf('--name') + 1])));
+    });
+    const [bYes, bNo] = await Promise.all([cliBody(['run', 'true', '--name', 'cli-at-user', '--at', '+1h', '--notify-user']), cliBody(['run', 'true', '--name', 'cli-at-plain', '--at', '+1h'])]);
+    rec.close();
+    ok(bYes && bYes.notifyUser === true && bYes.action && bYes.action.type === 'spawn-task' && !('notifyUser' in bYes.action.task) && bNo && bNo.notifyUser === false,
+      'the CLI\'s scheduled-run body: ONE top-level notifyUser (true with --notify-user, false without), none inside the task', JSON.stringify([bYes, bNo]));
+    const legacy = bYes && { ...bYes, name: 'cli-at-legacy', notifyUser: undefined, action: { ...bYes.action, task: { ...bYes.action.task, notifyUser: true } } };
+    const made = [bYes, bNo, legacy].filter(Boolean).map((b) => C.jobs.get(C.create({ ...b, owner }, caller).job.id));
+    for (const j of made) j.nextFireAt = Date.now() - 1000;
+    const before = notifications.length;
+    await C._cronTick();
+    const kids = made.map((j) => [...C.jobs.values()].find((x) => x.cronParent === j.id));
+    ok(await until(() => kids.every((k) => k && ['done', 'failed'].includes(k.state))), 'each scheduled run\'s fire spawned a REAL child that ended', kids.map((k) => k && k.state).join(','));
+    const toldFor = (k) => !!k && notifications.slice(before).some((n) => n.jobId === k.id && /: done \(ok\)$/.test(n.text));
+    ok(toldFor(kids[0]) && C.snapshot(made[0]).notifyUser === true, 'run --at … --notify-user (the CLI\'s body): the child\'s end tells the user, and the cron\'s own record says notifyUser=true', JSON.stringify(notifications.slice(before)));
+    ok(!toldFor(kids[1]) && C.snapshot(made[1]).notifyUser === false, 'CONTROL: without the flag the child ends silently for the user, notifyUser=false');
+    ok(toldFor(kids[2]) && C.snapshot(made[2]).notifyUser === true, 'an older CLI\'s body (the flag only inside action.task) is still honoured — and shown', JSON.stringify(made[2] && C.snapshot(made[2]).notifyUser));
+  }
 
   // preview honesty
   C.d.peerReachable = () => false;

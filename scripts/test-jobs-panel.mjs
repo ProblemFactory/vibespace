@@ -46,6 +46,7 @@ execSync('npm run build', { cwd: wt, stdio: 'ignore' });
 // ── the fixture, seeded BEFORE the first boot ──
 const T0 = Date.now();
 const fx = makeFixture(T0);
+fx.jobs.find((j) => j.id === fx.ids.cron).notifyUser = true;   // lane job-notify-user: the cron made with --notify-user (the service without)
 const strip = (o) => JSON.parse(JSON.stringify(o, (k, v) => (k.startsWith('_') ? undefined : v)));
 const dataDir = path.join(wt, 'data');
 fs.mkdirSync(dataDir, { recursive: true });
@@ -162,6 +163,16 @@ try {
   check('after a RELOAD the collapsed group stays collapsed (the persisted fold outranks the default)', again && again.expanded === 'false' && again.cards === 0, again);
   check('…while its siblings keep their defaults', rail2 && rail2.groups.filter((g) => g.attn && g.key !== victim).every((g) => g.expanded === 'true'));
   check('a reload fetches the archive ZERO times until the row is clicked again', (await archiveFetches()) === 0);
+  // lane job-notify-user: a job's detail says whether it ALSO tells you in For you (one row, through t())
+  const forYouRow = async (id) => {
+    const card = `document.querySelector('.rail-panel-jobs .jobs-card[data-job=' + ${JSON.stringify(JSON.stringify(id))} + ']')`;
+    await p.evalJs(`${card}.click(); true`);
+    const txt = await until(() => p.evalJs(`${card}?.querySelector('.jobs-notify-user')?.textContent || null`), 10000, 200);
+    await p.evalJs(`${card}.click(); true`);
+    return txt;
+  };
+  const fyYes = await forYouRow(fx.ids.cron), fyNo = await forYouRow(fx.ids.service);
+  check('a job\'s detail says whether it also tells you in For you: the cron made with --notify-user «yes», the service «no»', fyYes === 'Also tells you in For you: yes' && fyNo === 'Also tells you in For you: no', { fyYes, fyNo });
 
   // ── 375×667: the window fallback (no rail on mobile) ──
   await p.cdp('Emulation.setDeviceMetricsOverride', { width: 375, height: 667, deviceScaleFactor: 2, mobile: true });

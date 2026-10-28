@@ -2907,6 +2907,8 @@ export default {
   "When a background job owned by one of this group's conversations finishes, fails, or asks for input, message that conversation (Claude Code cross-session messaging; stashed for resume when it is closed). \"Inherit\" follows the global Integration setting.": "このグループの会話が所有するバックグラウンドジョブが完了・失敗・入力要求した時、その会話へメッセージを送ります（Claude Code クロスセッションメッセージ；会話が閉じている間は再開まで保管）。「継承」はグローバルの連携設定に従います。",
   "failed": "失敗",
   "forced OFF for this job": "このジョブでは強制オフ",
+  "Also tells you in For you: yes": "「あなた宛て」にも届ける：はい",
+  "Also tells you in For you: no": "「あなた宛て」にも届ける：いいえ",
   "forced ON for this job": "このジョブでは強制オン",
   "global setting": "グローバル設定",
   "group “{name}”": "グループ「{name}」",
