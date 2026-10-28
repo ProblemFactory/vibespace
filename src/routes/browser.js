@@ -2153,6 +2153,7 @@ router.post('/api/agent/browser/login', async (req, res) => {
     const text = require('../peer-text.js').toAgentText(BL.loginText(r), { max: BL.TEXT_MAX });
     if (!r.ok) return res.status(STATUS[r.code] || 409).json({ error: text, code: r.code, ...(r.grant ? { grant: r.grant } : {}) });
     try { ctx.traceDialogAct?.({ sessionId: f.sessionId, profileId: t.ephemeral ? null : t.profileId, action: 'login', dialog: { type: 'login', message: r.origin } }); } catch (e) { console.warn('[browser-login] the trace row was not written — ' + (e && e.message)); }
+    if (r.step) { const j0 = res.json.bind(res); res.json = (b) => j0(b && typeof b === 'object' ? { ...b, step: r.step } : b); }
     res.json({ ok: true, mode: r.mode, origin: r.origin, user: r.user, filled: r.filled, submitted: !!r.submitted, receipt: r.receipt || null, text });
   } catch (e) { fail(res, e); }
 });

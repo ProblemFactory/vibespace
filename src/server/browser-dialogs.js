@@ -83,8 +83,9 @@ let WS = null; try { WS = require('ws').WebSocket; } catch { WS = null; }
 let SFm = null, PTm = null;
 const SF = () => SFm || (SFm = require('../browser-surfaces.js'));
 const PT = () => PTm || (PTm = require('../peer-text.js'));
-let BLm = null;
+let BLm = null, LFm = null;
 const BL = () => BLm || (BLm = require('../browser-login.js')); // lane browser-login: lazily (two passkey suites copy this file beside three modules only)
+const LF = () => LFm || (LFm = require('./browser-login-fill.js')); // lane vault-login-chrome: hub-side Chrome login form inspection + CDP fill
 // lane passkey-sink: the PURE passkey signer — asked only on a kernel with `webauthn` (required at first use, like SF / PT)
 let WAm = null;
 const WA = () => WAm || (WAm = require('../webauthn-sign.js'));
@@ -2199,25 +2200,38 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     for (const e of w.targets.values()) if (inScope(scope, e.targetId)) for (const f of e.forms || []) out.push({ id: f.id, targetId: e.targetId, kind: f.kind, origin: f.pageOrigin, fields: f.fields.map((x) => x.type) });
     return out;
   }
-  /** THE `login` DOOR: the conversation's own tabs' forms (+ a held http-auth surface) → the logins module's plan → the kernel
-   *  fills (or the surface is answered) → ONE use line → the agent's answer: what was filled, never a value. */
+  /** THE `login` DOOR: the conversation's own tabs' forms (+ a held http-auth surface; or on standard Chrome, hub-side read-only
+   *  DOM inspection via `src/server/browser-login-fill.js`) → the logins module's plan → the kernel or hub fills (or the surface is
+   *  answered) → ONE use line → the agent's answer: what was filled, never a value. */
   async function fillLogin({ profileId, browserKey = '', sessionId = null, ephemeral = false } = {}, { origin = null, user = null, newUser = null, generate = false, submit = false, facts = {}, conv = null, actor = null } = {}) {
     const pid = String(profileId || ''); const w = watches.get(pid);
     if (!logins) return { ok: false, code: 'not_watched', error: 'VibeSpace keeps no web logins on this server' };
     if (!w || w.state !== 'open') return { ok: false, code: 'not_watched', error: 'VibeSpace is not watching this browser' };
-    if (!loginSinks(w)) return { ok: false, code: 'login_no_form', error: 'this browser does not report login forms (standard Chrome) — only the custom browser kernel does; the owner can sign in by hand in the live view' };
+    if (w.kernel && !loginSinks(w)) return { ok: false, code: 'login_no_form', error: 'this browser does not report login forms (standard Chrome) — only the custom browser kernel does; the owner can sign in by hand in the live view' };
     const scope = scopeFor({ profileId: pid, browserKey, sessionId, ephemeral });
     const forms = [];
-    for (const e of w.targets.values()) if (inScope(scope, e.targetId)) for (const f of e.forms || []) forms.push(f);
-    for (const rec of w.surf.values()) if (rec.kind === 'http-auth' && inScope(scope, rec.targetId)) { const f = BL().formOfSurface(SF().blockAt(rec, { now: now() }), { now: rec.openedAt || 0 }); if (f) forms.push({ ...f, targetId: rec.targetId }); }
+    if (w.kernel) {
+      for (const e of w.targets.values()) if (inScope(scope, e.targetId)) for (const f of e.forms || []) forms.push(f);
+      for (const rec of w.surf.values()) if (rec.kind === 'http-auth' && inScope(scope, rec.targetId)) { const f = BL().formOfSurface(SF().blockAt(rec, { now: now() }), { now: rec.openedAt || 0 }); if (f) forms.push({ ...f, targetId: rec.targetId }); }
+    } else {
+      for (const e of w.targets.values()) {
+        if (!inScope(scope, e.targetId) || !e.sid) continue;
+        const f = await LF().inspectTabLoginForm({ call: (m, p) => call(w, m, p, e.sid), targetId: e.targetId, now: now() });
+        if (f) forms.push(f);
+      }
+    }
     forms.sort((a, b) => (a.at || 0) - (b.at || 0));
     const plan = logins.planFill({ forms, origin, user, newUser, generate, facts, conv, actor });
     if (!plan.ok) return plan;
     const e = w.targets.get(String(plan.form.targetId || ''));
-    let r = null, kerr = null;
+    let r = null, kerr = null, chromeStep = null;
     if (!e || !e.sid) kerr = 'not_attached';
     else if (plan.form.surface) { const rec = w.surf.get(plan.form.id); const a = rec ? await answerSurfaceOn(w, rec, { answerId: plan.form.answerId, values: plan.values, by: 'agent' }) : { ok: false, code: 'no_dialog' }; if (!a.ok) kerr = a.code === 'surface_stale' ? 'stale_origin' : a.code; }
-    else {
+    else if (!w.kernel) {
+      const cf = await LF().fillVaultLogin({ call: (m, p) => call(w, m, p, e.sid), origin: plan.origin, loginId: plan.name, step: plan.form.step, values: plan.values, form: plan.form, submit: !!submit });
+      if (!cf || !cf.ok) kerr = (cf && cf.code) || 'eval_failed';
+      else chromeStep = cf.step || plan.form.step || null;
+    } else {
       r = await call(w, 'VibeSpace.fillCredential', { surfaceId: plan.form.id, values: plan.values, expectedOrigin: plan.origin, submit: !!submit }, e.sid);
       kerr = !r || r.timeout ? 'timeout' : r.error ? (String((r.error.data && r.error.data.code) || '').match(/^[a-z_]{3,40}$/) ? r.error.data.code : (String(r.error.message || '').match(/\b(stale_origin|invalid_values|no_such_surface|eval_failed)\b/) || [])[1] || 'eval_failed') : r.result && r.result.ok === false ? String(r.result.code || 'eval_failed') : null;
     }
@@ -2225,7 +2239,10 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     const u = logins.noteFill(plan, { conv, actor, outcome: kerr ? 'login_failed' : 'ok' });
     if (kerr) return { ok: false, code: kerr === 'stale_origin' ? 'login_phishing' : 'login_failed', error: kerr === 'stale_origin' ? `the page is no longer ${plan.origin} (the kernel checked it again) — nothing was filled` : kerr === 'not_attached' ? 'VibeSpace is not attached to that tab — nothing was filled' : `the browser did not fill the form (${String(kerr).slice(0, 40)})${plan.mode === 'login' ? '' : ' — the new login stays in the vault, pending, so no password is lost'}` };
     if (!plan.form.surface) e.filled = { formId: plan.form.id, name: plan.name, mode: plan.mode, at: now(), conv, actor };
-    return { ok: true, mode: plan.mode, origin: plan.origin, user: plan.user, filled: plan.filled, submitted: !!submit || !!plan.form.surface, receipt: u && u.receipt, otpMissing: !!plan.otpMissing, ...(plan.length ? { length: plan.length } : {}) };
+    if (!w.kernel && submit && (plan.mode === 'signup' || plan.mode === 'change')) {
+      try { const sr = logins.submitted({ origin: plan.origin, usernameHint: plan.user, password: null, outcome: 'navigated', by: 'agent', name: plan.name, conv, convName: actor, profileId: w.profileId }); emit({ kind: 'login-saved', profileId: w.profileId, targetId: e.targetId, state: sr ? sr.state : 'none', name: (sr && sr.name) || null }); } catch { /* */ }
+    }
+    return { ok: true, mode: plan.mode, origin: plan.origin, user: plan.user, filled: plan.filled, ...(chromeStep ? { step: chromeStep } : {}), submitted: !!submit || !!plan.form.surface, receipt: u && u.receipt, otpMissing: !!plan.otpMissing, ...(plan.length ? { length: plan.length } : {}) };
   }
   /** The kernel road's facts for one browser (the routes' `surfaces` answer, the suites): null = not asked yet. */
   function kernelFactOf(profileId) { const w = watches.get(String(profileId || '')); return w ? w.kernel : kernelOf.has(String(profileId || '')) ? kernelOf.get(String(profileId || '')) : null; }

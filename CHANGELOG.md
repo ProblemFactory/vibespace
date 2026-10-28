@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.360 — 2026-10-28
+
+### Added
+- On standard Chrome, the agent signs in with the logins kept in your vault — one-step, multi-step and two-step — without ever seeing a password.
+
 ## 2.369.359 — 2026-10-26
 
 ### Fixed

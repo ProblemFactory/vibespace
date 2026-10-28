@@ -303,6 +303,7 @@
   "test-usage-pace": 24,
   "test-usage-scan-op": 5397,
   "test-usage-scan-subagents": 90,
+  "test-vault-login-chrome": 3400,
   "test-vault-paste-chrome": 22000,
   "test-vendor-bypass-chrome": 1637,
   "test-viewer-download-chrome": 45633,

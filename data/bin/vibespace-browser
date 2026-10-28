@@ -1285,7 +1285,7 @@ async function runOursPage(cls, { r, head, profileId, wantsJson }) {
       if (a.code === 'browser_interrupted') console.error('  the user drives this browser — its forms are theirs now; wait for the handback');
       process.exit(1);
     }
-    if (wantsJson) console.log(JSON.stringify({ success: true, data: { mode: a.mode || 'login', origin: a.origin || null, user: a.user || null, filled: a.filled || [], submitted: !!a.submitted, receipt: a.receipt || null }, error: null }));
+    if (wantsJson) console.log(JSON.stringify({ success: true, data: { mode: a.mode || 'login', origin: a.origin || null, user: a.user || null, filled: a.filled || [], ...(a.step ? { step: a.step } : {}), submitted: !!a.submitted, receipt: a.receipt || null }, error: null }));
     else console.log(a.text || 'done');
     process.exit(0);
   }
