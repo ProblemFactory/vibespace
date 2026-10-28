@@ -527,6 +527,7 @@ function materialize(run, { valueOf, pathOf }) {
 // words only); a URL the WHATWG parser REJECTS (an out-of-range port, a non-DNS name, a label > 63 / a name > 253, an empty host, a
 // `{{var}}`) is a BLIND authority — bad_host at the door, never a dropped host (Go/curl would still dial it). The divergence corpus is
 // a DOOR-level fuzz leg (whole argv words → routeHosts / userinfo / blind, compared to new URL, Go's trace and curl's %{url.host}).
+const AUTHORITY_UNSAFE = /[\\%\u0000-\u0020\u007f]|[^\u0000-\u007f]/;   // round 24 (the ONE parser must agree with the TOOL, not the WHATWG spec; vault-use-grants r3, wire-proven curl 8.18 + a loopback listener): a byte the tool (curl / wget / git / go-gh) KEEPS in a URL authority but the WHATWG `new URL()` strips, IDNA-maps or re-reads — a `\` (WHATWG turns it into `/` so the real host hides after it as curl's userinfo), a percent-escape, any control / space (WHATWG strips an embedded tab / newline), DEL, or a non-ASCII byte. The reader is NOT certain where the tool connects ⇒ the authority is BLIND (bad_host), never a guessed host
 const URL_FIND_RE = /\b([a-z][a-z0-9+.-]{0,31}):\/\/[^ \t\n\r\f\v]+/gi;   // round 23 (the refuted finding, real + pre-existing): the token runs to ASCII whitespace ONLY — JS's \S stops at U+00A0/U+3000/U+2028/… so `http://own-host\u3000@evil` was read as own-host (no userinfo, not blind) while curl dials evil; a non-ASCII space now stays IN the token ⇒ urlParse rejects it (bad_host) / blindAuthority blinds it. The host is read by urlParse, never this regex
 const URL_TRAIL = /[),;!'"<>`]+$/;   // drop trailing prose terminators (a standalone argv token has none); the attack bytes are always mid-token (…<byte>@host/path), so a trailing strip never reopens the hole
 const normHost = (h, port = null) => { const x = String(h || '').toLowerCase().replace(/\.$/, ''); return x && x.length <= 253 && !/[{}]/.test(x) && !x.split('.').some((l) => l.length > 63) ? (port ? `${x}:${port}` : x) : null; };   // round 19 (item 1): a name > 253 chars or a label > 63 is not valid DNS (gh/curl still CONTACT it) — fail-CLOSED to bad_host; a `{{var}}` is never a host
@@ -552,7 +553,16 @@ const repoHostOf = (raw) => {
  *  empty host, a `{{var}}`). The one authority on a URL's host — no regex reads it; a rejected token is a BLIND authority (bad_host),
  *  never a dropped host (Go/curl would still dial it). */
 function urlParse(token) {
-  let u; try { u = new URL(String(token)); } catch { return { bad: true }; }
+  const t = String(token);
+  let u; try { u = new URL(t); } catch { return { bad: true }; }
+  const i = t.indexOf('://');
+  if (i >= 0) {
+    const raw = /^[^/?#]*/.exec(t.slice(i + 3))[0];   // round 24: the authority the TOOL reads — to the first / ? #, NOT stopping at a `\` (that non-stop IS the divergence)
+    if (AUTHORITY_UNSAFE.test(raw)) return { bad: true };   // round 24: a byte curl keeps but WHATWG strips / IDNA-maps / re-reads ⇒ the host cannot be told
+    const at = raw.lastIndexOf('@'); let re;   // userinfo ends at the LAST @ (curl and WHATWG agree); re-parse the raw host-part ALONE and require new URL settled on the SAME host — both sides self-normalise case / a default port / a trailing dot, so this fires ONLY when the authority BOUNDARY moved (the `\@`, the un-decoded run WHATWG re-read elsewhere): a structural divergence, never a benign normalisation
+    try { re = new URL(u.protocol + '//' + raw.slice(at + 1)); } catch { return { bad: true }; }
+    if (re.host !== u.host) return { bad: true };
+  }
   const h = normHost(u.hostname, u.port || null);   // the WHATWG host is read PAST the userinfo (`https://ghe'@evil.test` ⇒ evil.test), so a route still sees the real host
   return h ? { host: h, userinfo: u.username !== '' || u.password !== '' } : { bad: true };   // userinfo = a credential-carrying URL (url_userinfo, http/https only); a non-http scheme (postgresql://user@h, ssh://git@h) carries a legit username and its host is read
 }
@@ -693,7 +703,8 @@ function parseCfgLine(raw) {
 function cfgBareOrUrl(v) {
   const t = String(v).trim();
   if (/^[a-z][a-z0-9+.-]{0,31}:\/\//i.test(t)) return urlHosts(t);
-  const h = normHost(t.split(/[\/?#]/)[0].replace(/^[^@]*@/, ''));
+  const hp = t.split(/[\/?#]/)[0].replace(/^[^@]*@/, '');
+  const h = AUTHORITY_UNSAFE.test(hp) ? null : normHost(hp);   // round 24: a `\` / % / space / non-ASCII in a scheme-less config host ⇒ blind (the same law urlParse keeps for scheme URLs)
   return h ? [h] : [];
 }
 /** a curl route directive's value → { hosts } | { blind:true } (a {{var}} host, made at run time) | { file:true } (url = @file). */
@@ -702,6 +713,7 @@ function cfgRouteHosts(key, v) {
   if (!t) return { hosts: [] };
   if (/\{\{|\}\}/.test(t)) return { blind: true };
   if (key === 'unix-socket' || key === 'abstract-unix-socket') return { blind: true };   // round 23 (MAJOR): a local socket path routes the connection off every named host and cannot be named — BLIND (named, «always» withheld), the same law argv's --unix-socket blinds
+  if (key !== 'url' && key !== 'doh-url' && key !== 'ipfs-gateway' && AUTHORITY_UNSAFE.test(t)) return { blind: true };   // round 24: a connect-to / resolve / proxy target holding a byte curl and the parser read differently ⇒ blind (url / doh-url / ipfs-gateway route through cfgBareOrUrl → urlParse, which keeps the law)
   let hosts;
   if (key === 'url') { if (t[0] === '@') return { file: true }; hosts = cfgBareOrUrl(t); }
   else if (key === 'doh-url' || key === 'ipfs-gateway') hosts = cfgBareOrUrl(t);

