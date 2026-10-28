@@ -191,7 +191,7 @@ check('inc-mudv05ja WIRING: the runs observer classifies through foldPassMode; t
   /if \(list && foldPassMode\(records\) === 'raf'\) \{/.test(cv) && !/records\.every\(\(r\) =>\s*r\.type === 'childList' && r\.removedNodes\.length === 0/.test(cv)
   && /for \(const c of RUN_CLASSES\) if \(oldEl\.classList\?\.contains\(c\)\) newEl\.classList\.add\(c\);/.test(cv)
   && /if \(i >= 0\) run\.members\[i\] = newEl;/.test(cv)
-  && /const wasRendered = oldEl\.offsetParent != null;[\s\S]{0,120}oldEl\.replaceWith\(newEl\);\n\s*if \(wasRendered\) this\._reserveFreshHeights\(\[newEl\], \{ live: true \}\);/.test(cv)
+  && /const wasRendered = oldEl\.offsetParent != null;[\s\S]{0,120}oldEl\.replaceWith\(newEl\);[\s\S]{0,240}?if \(wasRendered\) this\._reserveFreshHeights\(\[newEl\], \{ live: true \}\);/.test(cv)   // int360: the needs-you focus hand-back (chat-needs-you-card) sits between the swap and the reserve — the ORDER stays pinned
   && /if \(!this\._loadingHistory\) \{[\s\S]{0,700}this\._reserveFreshHeights\(\[el\], \{ live: true \}\);\n\s*this\._total\+\+;/.test(cv));
 check('inc-mudv05ja WIRING: the pin writes only with somewhere to go and ends on convergence or an A-B-A height; a Workflow taskInfo edit schedules the in-place patch (no swap on the heartbeat)',
   /if \(sh - list\.scrollTop - list\.clientHeight > 1\) \{\n\s*this\._traceExpect\('fsb'\);\n\s*list\.scrollTop = sh;/.test(cv)
