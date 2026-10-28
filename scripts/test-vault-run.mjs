@@ -440,6 +440,36 @@ async function newShapeCards(doorMod) {
   ok((await l1).code === 'ask_denied' && !fs.existsSync(path.join(lw.work, 'ran.txt')), 'the card closed by another door (dismissed) on a local instance: nothing ran (the child never started)');
 }
 
+console.log('⑫ THE CARD FACTS (lane vault-agent-own r20; the owner «这个卡片的可读性很差») — the door hands the For-you record a structured `facts` (codes, never prose); `detail` stays as today');
+{
+  const w = await world(); openRow(w);
+  const EQ = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const CURLARGS = ['--env', 'T=vault://mounts/m1/secretKey', '--', 'curl', '-s', 'https://api.example.com/v1/items'];
+  // a capturing For-you store: it records the RAW item the door hands add() (this tree's real store drops an unknown `facts`
+  // field — lane wake-approve-card's user-todos.js keeps it — so the door's wiring is proven here, not via the stored item)
+  const added = [];
+  const capStub = { add: (k, v) => { added.push(v); return { id: 'cap-' + added.length }; }, get: () => null, setStatus: () => {}, snapshot: () => ({ open: [] }), onStatus: () => {} };
+  const capDoor = w.mk(DOOR, { userTodos: capStub });
+  const ac = new AbortController();
+  const p = capDoor.run({ caller: w.caller, args: CURLARGS, cwd: w.work, signal: ac.signal });
+  let it = null; const t0 = Date.now();
+  while (!it && Date.now() - t0 < 3000) { it = added.find((x) => x.action && x.action.type === 'vault-run-ask'); if (!it) await sleep(5); }
+  const f = it && it.facts;
+  ac.abort(); await p.catch(() => {});
+  ok(!!f && f.v === 1 && f.who === 'Lane X' && f.tool.name === 'curl' && f.tool.writable === false && typeof f.cmd === 'string' && f.cmd.includes('curl')
+    && f.shape === 'tool' && f.masking === 'common-encodings' && f.hosts.known === true && EQ(f.hosts.list, ['api.example.com']) && f.always.offered === true && f.always.why === null && f.always.directive === null
+    && f.secrets.length === 1 && f.secrets[0].entry === 'm1' && f.secrets[0].name === 'my bucket' && f.secrets[0].ref === 'vault://mounts/m1/secretKey' && EQ(f.secrets[0].as, { kind: 'env', name: 'T' }),
+    'the door hands userTodos.add a structured `facts` (v1) beside `detail`: who, tool (name/path/writable), the redacted command, the secret\'s { kind, name } by its Vault-window name, hosts known, «always» offered, masking — codes, never prose', f);
+  ok(!!f && !leaks(JSON.stringify(f), VALUE).length, 'the facts carry no byte of the value — a reference, a display name and a host are not the secret');
+  ok(!!f && (f.always.why === null || VR.ALWAYS_WHY.includes(f.always.why)) && (f.hosts.known || VR.HOSTS_WHY.includes(f.hosts.why)) && VR.MASKING.includes(f.masking) && VR.CARD_SHAPES.includes(f.shape) && f.secrets.every((x) => ['env', 'file', 'stdin', 'arg'].includes(x.as.kind)),
+    'every code the door emits is a member of its exported table (the keys wake-approve-card r7 must carry: always.why ∈ ALWAYS_WHY, hosts.why ∈ HOSTS_WHY, masking ∈ MASKING, shape ∈ CARD_SHAPES, as.kind ∈ env/file/stdin/arg)');
+  // DETAIL UNCHANGED (the control): the real For-you record keeps today's prose `detail` byte-for-byte — a change to detail (e.g. replacing it with `facts`) fails here and in ③; facts is ADDITIVE
+  const real = await runAnswered(w, CURLARGS, { answer: 'deny' });
+  const rc = real.card;
+  ok(!!rc && /^curl /.test(rc.detail.split('\n')[0]) && /Hosts: api\.example\.com/.test(rc.detail) && /the tool \+ its flags \+ the hosts \+ the secrets; positional arguments may change/.test(rc.detail) && /Folder: /.test(rc.detail),
+    'detail stays as today for older clients: the For-you record keeps the full prose `detail` (the command, the hosts, the shape, the folder) unchanged — facts is an ADDITIVE field, never a replacement', rc && rc.detail);
+}
+
 console.log('④ THE LOCK — a lock mid-run ends the child within its bound; the answer is vault_locked');
 {
   const w = await world({ killGraceMs: 400 });

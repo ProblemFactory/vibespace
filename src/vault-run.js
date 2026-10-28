@@ -851,6 +851,98 @@ function shapeOf(run) {
 /** THE KEY a remembered «always» is stored under — everything decision ④ says, nothing positional. */
 const shapeKeyOf = (s) => `${SHAPE_V}:${JSON.stringify([s.tool, s.sub, s.flags, s.args, s.hosts, s.entries, s.injection, s.env, s.templates, s.on, s.script, s.keyed])}`;
 
+// ── THE CARD'S FACTS (lane vault-agent-own r20; the owner 2026-10-27 «这个卡片的可读性很差») ──
+// The run card was an English prose wall on a Chinese UI. `cardFactsOf` writes ONE STRUCTURED field the client (wake-approve-card
+// r7) renders in the viewer's language — CODES from closed tables, never sentences (a value is never prose; test-architecture's
+// i18n road is red for a code with no en/zh/ja key on the client). `detail` (today's prose) stays on the record for older clients
+// and is never shown beside `facts`. PURE: every door-resolved display string (the conversation's name, the home dir to make
+// paths relative, the already-redacted command, each entry's Vault-window name) is handed in as `names` — this module reads no
+// store. The CLOSED tables below are the whole vocabulary of each `why`; the fixture scripts/fixtures/vault-run-card-facts.json
+// (3 variants) is written FROM cardFactsOf and shared byte-for-byte with lane wake-approve-card (int-C diff-checks it).
+const ALWAYS_WHY = Object.freeze(['destination-unknown', 'program-writable', 'config-reads', 'card-too-long', 'redirect', 'brace-var', 'opaque-route', 'agent-template']);
+const HOSTS_WHY = Object.freeze(['tool-names-none', 'opaque', 'config-driven']);
+const MASKING = Object.freeze(['common-encodings']);
+const CARD_SHAPES = Object.freeze(['tool', 'line']);
+const CARD_FACTS_CODES = Object.freeze({ always: ALWAYS_WHY, hosts: HOSTS_WHY, masking: MASKING, shape: CARD_SHAPES });   // one export lane wake-approve-card's test pins its code words against
+
+/** A ref the door could NOT name ⇒ a short, non-telling id «<field>:<6 hex>» (never the URI — the row name may itself be
+ *  telling). PURE (no crypto import keeps this module PURE → PURE): a 32-bit FNV-1a over the ref id. */
+function shortRefId(ref) {
+  let h = 0x811c9dc5; const s = String((ref && ref.id) || '');
+  for (let i = 0; i < s.length; i++) { h = Math.imul(h ^ s.charCodeAt(i), 0x01000193); }
+  return `${(ref && ref.field) || 'ref'}:${(h >>> 0).toString(16).padStart(8, '0').slice(0, 6)}`;
+}
+const homeRel = (p, home) => { const x = String(p == null ? '' : p), h = String(home || ''); return h && (x === h || x.startsWith(h + '/')) ? '~' + x.slice(h.length) : x; };
+const baseName = (p) => String(p == null ? '' : p).replace(/\/+$/, '').split('/').pop() || String(p == null ? '' : p);
+
+/** How ONE ref reaches the child, as { kind: 'env'|'file'|'stdin'|'arg', name }: env:<NAME> · file:<placeholder NAME, or null
+ *  for an inline $VAULT_FILE> · stdin · arg (bare on the command line) · a template file that EMBEDS it ($VAULT{…}) ⇒ file with
+ *  the template's NAME. The same categories run.injection carries, read back PER reference. */
+function injectionOfRef(spec, ref) {
+  const e = (spec.env || []).find((x) => x.ref === ref.ref); if (e) return { kind: 'env', name: e.name };
+  const f = (spec.files || []).find((x) => x.ref === ref.ref); if (f) return { kind: 'file', name: f.name || null };
+  if (spec.stdin === ref.ref) return { kind: 'stdin', name: null };
+  const tf = (spec.files || []).find((x) => x.template != null && typeof x.text === 'string' && scanRefs(x.text).refs.some((z) => z.id === ref.id));
+  if (tf) return { kind: 'file', name: tf.name || null };
+  return { kind: 'arg', name: null };
+}
+
+/** Why «always» is withheld, as a CODE in ALWAYS_WHY. A shown config template that nests a directive names WHY by the directive
+ *  kind (a redirect, a {{var}}, an opaque route, else a plain nested read); otherwise the shape's `noAlways` maps in. */
+function alwaysWhyOf(shape) {
+  if (shape.always) return null;
+  const cr = shape.configReads ? String(shape.configReads) : '';
+  if (cr) {
+    const key = cr.split(/\s+/)[0];
+    if (['location', 'location-trusted', 'proto-redir'].includes(key)) return 'redirect';
+    if (/\{\{/.test(cr)) return 'brace-var';
+    if (['url', 'connect-to', 'resolve', 'proxy', 'preproxy', 'socks4', 'socks4a', 'socks5', 'socks5-hostname', 'doh-url', 'ipfs-gateway'].includes(key)) return 'opaque-route';
+    return 'config-reads';
+  }
+  switch (shape.noAlways) {
+    case 'unknown-destination': return 'destination-unknown';
+    case 'program-writable': return 'program-writable';
+    case 'runs-project-code': return 'program-writable';   // the code that runs is not fixed either — the same promise «always» cannot make
+    case 'config-file': return 'config-reads';
+    default: return 'destination-unknown';                  // a non-'tool' kind (a shell / an interpreter): where it sends cannot be told
+  }
+}
+
+/** Why the destination is unknown, as a CODE in HOSTS_WHY — read only when routeHosts is empty. */
+function hostsWhyOf(shape) {
+  if (shape.configReads || shape.noAlways === 'config-file') return 'config-driven';   // a config file names the host we cannot read
+  if (shape.noAlways === 'runs-project-code') return 'opaque';                          // its own code / its project config routes (git insteadOf, an rclone remote)
+  return 'tool-names-none';                                                             // nothing in the command named a routing host
+}
+
+/**
+ * PURE. The owner's run card as STRUCTURED FACTS (codes, never prose) — the record's `facts` field, rendered by the client in
+ * the viewer's language. `spec` = planOf, `shape` = shapeOf(spec), `cwd` = the run folder (absolute). `names` = the door's
+ * resolved display strings { who, home, cmd, entries }: `who` the conversation's name, `home` the home dir (paths show relative
+ * to it as `~`), `cmd` the ALREADY-REDACTED command (the same bytes head.cmd carries), `entries` a { <ref.id>: <the Vault
+ * window's name> } map (a ref the door could not name falls to shortRefId). → EXACTLY the contract object (the fixture).
+ */
+function cardFactsOf(spec, shape, cwd, names = {}) {
+  const home = names.home || '', ent = names.entries || {};
+  const secrets = (spec.refs || []).map((r) => ({ name: ent[r.id] || shortRefId(r), entry: String(r.entry), ref: r.ref, as: injectionOfRef(spec, r) }));
+  const known = (shape.routeHosts || []).length > 0;
+  const templates = (spec.files || []).filter((f) => f.template != null && typeof f.text === 'string')
+    .map((f) => { const b = bytesOf(f.text); return { label: f.name || null, bytes: b, shown: b <= TEMPLATE_CARD_MAX }; });
+  return {
+    v: 1,
+    who: String(names.who == null ? '' : names.who),
+    tool: { name: baseName(spec.tool), path: homeRel(spec.tool, home), writable: !!spec.programWritable },
+    cmd: String(names.cmd == null ? '' : names.cmd),
+    folder: homeRel(cwd, home),
+    secrets,
+    hosts: known ? { known: true, list: [...shape.routeHosts] } : { known: false, list: [], why: hostsWhyOf(shape) },
+    shape: shape.kind === 'tool' ? 'tool' : 'line',
+    always: { offered: !!shape.always, why: shape.always ? null : alwaysWhyOf(shape), directive: shape.configReads || null },
+    templates,
+    masking: 'common-encodings',
+  };
+}
+
 // ── WHICH ENTRIES A RUN MAY NEVER REFERENCE (each has its own door; the owner opens the rest one by one) ──
 const OWN_DOORS = Object.freeze([
   Object.freeze({ store: 'accounts', door: 'the account pool — a conversation on that account already runs with it' }),
@@ -1267,6 +1359,6 @@ module.exports = {
   INJECTIONS, injectionOf, ENV_HIJACK, ENV_CONFIG, envRefusedOf,
   TOOL_ROWS, SHELLS, INTERPRETERS, KNOWN_TOOLS, toolNameOf, knownToolOf, refusedTool, toolKindOf, targetOf, conninfoHosts, urlHosts, urlParse, configNestedFile,
   RUN_FLAGS, parseRunArgs, timeoutOf, planOf, materialize,
-  shapeOf, shapeKeyOf, OWN_DOORS, RUNNABLE_STORES, ownDoorOf, awayOf, runVerdict,
+  shapeOf, shapeKeyOf, cardFactsOf, ALWAYS_WHY, HOSTS_WHY, MASKING, CARD_SHAPES, CARD_FACTS_CODES, OWN_DOORS, RUNNABLE_STORES, ownDoorOf, awayOf, runVerdict,
   FORMS, FORM_ROWS, VIEWS, formsOf, createMasker, createRunMasker, maskText,
 };

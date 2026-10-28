@@ -42,6 +42,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import cp from 'node:child_process';
+import { buildFixture, FIXTURE_TEXT } from './make-vault-run-card-facts.mjs';
 import * as I18N from './i18n-check.mjs';
 import zlib from 'node:zlib';
 import { StringDecoder } from 'node:string_decoder';
@@ -1118,6 +1119,69 @@ console.log('⑦ THE CLI\'S WORDS — parseRunArgs');
   ok(V.CMD_MAX === 4096 && V.TEMPLATE_MAX === 65536 && V.TIMEOUT_DEFAULT_S === 120 && V.TIMEOUT_MAX_S === 600 && V.OUTPUT_MAX_BYTES === 2 * 1024 * 1024 && V.ASK_TTL_MS === 60000 && V.MIN_MASK_BYTES === 8 && V.SCHEME === 'vault://', 'the bounds the door reads: the command ≤ 4 096 bytes, a template ≤ 64 KiB, 120 s by default and ≤ 600 s, 2 MiB of output, a 60 s card, 8 bytes the shortest value');
 }
 
+console.log('⑫ THE CARD FACTS — cardFactsOf (lane vault-agent-own r20): structured CODES, never prose; the fixture; the fallback id');
+{
+  const HOME = '/home/user';
+  const F = (req, cwd, names) => { const p = V.planOf(req); if (!p.ok) throw new Error('plan ' + p.code); return V.cardFactsOf(p, V.shapeOf(p), cwd, { home: HOME, ...names }); };
+
+  // the owner's unifi-api.sh shape: an agent-writable program, two env secrets, NO host it declares ⇒ hosts unknown / tool-names-none, «always» withheld / destination-unknown, paths home-relative
+  const v1 = F({ argv: ['./office-net/unifi-api.sh', 'PUT', '/proxy/x', '/tmp/w.json'], env: [['UNIFI_USER', 'vault://secrets/unifi-account/username'], ['UNIFI_PASS', 'vault://secrets/unifi-account/password']], resolved: HOME + '/workspace/ops/office-net/unifi-api.sh', programWritable: true },
+    HOME + '/workspace/ops', { who: '设备管理', cmd: './office-net/unifi-api.sh PUT /proxy/x /tmp/w.json', entries: { 'secrets:unifi-account#username': 'UniFi 账号 · 用户名', 'secrets:unifi-account#password': 'UniFi 账号 · 密码' } });
+  ok(v1.v === 1 && v1.who === '设备管理' && v1.tool.name === 'unifi-api.sh' && v1.tool.path === '~/workspace/ops/office-net/unifi-api.sh' && v1.tool.writable === true && v1.folder === '~/workspace/ops'
+    && v1.shape === 'tool' && v1.masking === 'common-encodings'
+    && v1.hosts.known === false && v1.hosts.list.length === 0 && v1.hosts.why === 'tool-names-none'
+    && v1.always.offered === false && v1.always.why === 'destination-unknown' && v1.always.directive === null
+    && v1.secrets.length === 2 && v1.secrets[0].name === 'UniFi 账号 · 用户名' && v1.secrets[0].entry === 'unifi-account' && v1.secrets[0].ref === 'vault://secrets/unifi-account/username' && eq(v1.secrets[0].as, { kind: 'env', name: 'UNIFI_USER' }) && eq(v1.secrets[1].as, { kind: 'env', name: 'UNIFI_PASS' })
+    && v1.templates.length === 0,
+    'cardFactsOf (owner\'s unifi shape): home-relative tool.path/folder, writable program, two env secrets with their { kind, name }, hosts tool-names-none, «always» destination-unknown, masking common-encodings', v1);
+
+  // a known tool naming a host (psql -h), one env secret ⇒ hosts known, «always» offered, no template
+  const v2 = F({ argv: ['psql', '-h', 'db.example.com', '-U', 'svc', '-c', 'select 1'], env: [['PGPASSWORD', 'vault://secrets/prod-db/password']], resolved: '/usr/bin/psql', programWritable: false },
+    HOME + '/workspace/ops', { who: '运维', cmd: "psql -h db.example.com -U svc -c 'select 1'", entries: { 'secrets:prod-db#password': '生产数据库 · 密码' } });
+  ok(v2.hosts.known === true && eq(v2.hosts.list, ['db.example.com']) && v2.hosts.why === undefined && v2.always.offered === true && v2.always.why === null && v2.tool.path === '/usr/bin/psql' && v2.tool.writable === false && eq(v2.secrets[0].as, { kind: 'env', name: 'PGPASSWORD' }),
+    'cardFactsOf (psql -h db): hosts known (the routing host), «always» offered, tool outside home shown absolute, not writable', v2);
+
+  // a $VAULT_FILE config template that nests a read ⇒ «always» withheld / config-reads (naming the directive), host config-driven, the secret injected via the template file
+  const v3 = F({ argv: ['curl', '-sS', '-K', '$VAULT_FILE{B}'], file: [['B', '@b.cfg']], templates: { 'b.cfg': 'config ./more.cfg\nheader = "X-Auth: $VAULT{secrets/api-token/token}"\n' }, resolved: '/usr/bin/curl', programWritable: false },
+    HOME + '/workspace/ops', { who: '运维', cmd: 'curl -sS -K $VAULT_FILE{B}', entries: { 'secrets:api-token#token': 'API 令牌' } });
+  ok(v3.hosts.known === false && v3.hosts.why === 'config-driven' && v3.always.offered === false && v3.always.why === 'config-reads' && v3.always.directive === 'config ./more.cfg' && eq(v3.secrets[0].as, { kind: 'file', name: 'B' }) && v3.templates.length === 1 && v3.templates[0].label === 'B' && v3.templates[0].shown === true && typeof v3.templates[0].bytes === 'number',
+    'cardFactsOf (curl -K @cfg that nests a read): hosts config-driven, «always» config-reads naming the directive, the secret injected via the template file, the template listed (shown)', v3);
+
+  // the CODE MAPPINGS the fixture does not exercise — every why is a member of its closed table; a shell ⇒ shape 'line'
+  const mapWhy = (noAlways, configReads, always) => V.cardFactsOf({ refs: [], env: [], files: [], tool: '/x' }, { kind: 'tool', routeHosts: ['h'], always, noAlways, configReads }, '/c', {}).always.why;
+  ok(mapWhy('program-writable', null, false) === 'program-writable' && mapWhy('runs-project-code', null, false) === 'program-writable' && mapWhy('unknown-destination', null, false) === 'destination-unknown'
+    && mapWhy(null, 'location', false) === 'redirect' && mapWhy(null, 'proto-redir foo', false) === 'redirect' && mapWhy(null, 'url https://{{H}}/x', false) === 'brace-var' && mapWhy(null, 'connect-to ::evil:443', false) === 'opaque-route' && mapWhy(null, 'config ./b.cfg', false) === 'config-reads'
+    && V.cardFactsOf({ refs: [], env: [], files: [], tool: '/bin/bash' }, { kind: 'shell', routeHosts: [], always: false, noAlways: 'shell' }, '/c', {}).shape === 'line'
+    && V.cardFactsOf({ refs: [], env: [], files: [], tool: '/x' }, { kind: 'tool', routeHosts: [], always: false, noAlways: 'runs-project-code' }, '/c', {}).hosts.why === 'opaque',
+    'the code mappings: program-writable / runs-project-code→program-writable, unknown-destination→destination-unknown; a nested directive → redirect / brace-var / opaque-route / config-reads; a shell → shape line; runs-project-code → hosts opaque');
+
+  // the fallback id: a ref the door could not name ⇒ «<field>:<6 hex>», NEVER the URI (the row name may be telling)
+  const vf = F({ argv: ['curl', 'https://api.example.com/x'], env: [['T', 'vault://secrets/office-wifi-admin/password']], resolved: '/usr/bin/curl', programWritable: false }, HOME, { who: 'x', cmd: 'curl https://api.example.com/x', entries: {} });
+  ok(/^password:[0-9a-f]{6}$/.test(vf.secrets[0].name) && !vf.secrets[0].name.includes('vault://') && !vf.secrets[0].name.includes('office-wifi-admin'),
+    'an unnamed ref falls to a short, non-telling id «<field>:<6 hex>» — never the URI, never the row name', vf.secrets[0].name);
+
+  // the CLOSED tables are the whole vocabulary; CARD_FACTS_CODES aggregates them (lane wake-approve-card pins its words against this export)
+  ok(eq([...V.ALWAYS_WHY].sort(), ['agent-template', 'brace-var', 'card-too-long', 'config-reads', 'destination-unknown', 'opaque-route', 'program-writable', 'redirect']) && eq([...V.HOSTS_WHY].sort(), ['config-driven', 'opaque', 'tool-names-none']) && eq([...V.MASKING], ['common-encodings']) && eq([...V.CARD_SHAPES], ['tool', 'line'])
+    && V.CARD_FACTS_CODES.always === V.ALWAYS_WHY && V.CARD_FACTS_CODES.hosts === V.HOSTS_WHY && V.CARD_FACTS_CODES.masking === V.MASKING && V.CARD_FACTS_CODES.shape === V.CARD_SHAPES,
+    'the closed code tables (ALWAYS_WHY ×8, HOSTS_WHY ×3, MASKING ×1, CARD_SHAPES ×2) + the CARD_FACTS_CODES aggregate — the whole vocabulary of each `why` (every code needs en/zh/ja on the client; test-architecture\'s i18n road is red for one without)');
+
+  // THE i18n ROAD (my half, until the client keys land in wake-approve-card r7): every CODE in the fixture is a member of its exported table — a code with no table entry is a code the client could not key
+  const fx = buildFixture();
+  const inTable = (code, table) => code == null || table.includes(code);
+  const offenders = [];
+  for (const { name, facts } of fx.variants) {
+    if (!inTable(facts.always.why, V.ALWAYS_WHY)) offenders.push([name, 'always.why', facts.always.why]);
+    if (facts.hosts.known === false && !inTable(facts.hosts.why, V.HOSTS_WHY)) offenders.push([name, 'hosts.why', facts.hosts.why]);
+    if (!inTable(facts.masking, V.MASKING)) offenders.push([name, 'masking', facts.masking]);
+    if (!inTable(facts.shape, V.CARD_SHAPES)) offenders.push([name, 'shape', facts.shape]);
+    for (const sec of facts.secrets) if (!['env', 'file', 'stdin', 'arg'].includes(sec.as.kind)) offenders.push([name, 'as.kind', sec.as.kind]);
+  }
+  ok(!offenders.length && eq(fx.codes.always_why, [...V.ALWAYS_WHY]) && eq(fx.codes.hosts_why, [...V.HOSTS_WHY]), 'EVERY code the fixture carries is a member of its exported table (the keys wake-approve-card r7 must provide: always.why ∈ ALWAYS_WHY, hosts.why ∈ HOSTS_WHY, masking ∈ MASKING, shape ∈ CARD_SHAPES, as.kind ∈ env/file/stdin/arg) — the fixture echoes the exports', offenders);
+
+  // no byte of a value, and facts is plain JSON data (no prose to translate): every string is a code, a name, a ref or a host — not a sentence the client cannot key
+  ok(FIXTURE_TEXT().endsWith('\n') && JSON.stringify(buildFixture()) === JSON.stringify(JSON.parse(FIXTURE_TEXT())), 'the fixture round-trips as plain JSON (JSON.stringify(x, null, 2) + newline) — int-C diffs these bytes against lane wake-approve-card');
+}
+
 console.log('⑧ MUTANTS — patched copies of src/vault-run.js must go RED');
 {
   const dir = scratchDir('vault-run-model');
@@ -1127,6 +1191,12 @@ console.log('⑧ MUTANTS — patched copies of src/vault-run.js must go RED');
   const mutant = (name, from, to) => { const n = real.split(from).length - 1; const f = path.join(dir, 'src', `vault-run-${name}.js`); fs.writeFileSync(f, real.replace(from, to)); return { hit: n === 1, M: require(f) }; };
   const argvLeg = (Vm) => ['curl', 'gh', 'terraform'].filter((t) => Vm.planOf({ argv: [t, `--token=${M1}`] }).code !== 'argv_refused');
   const printLeg = (Vm) => ['cat', 'echo', 'printenv', 'head', 'tee'].filter((t) => Vm.planOf({ argv: [t, '$VAULT_FILE{mounts/m1/secretKey}'] }).code !== 'tool_prints_secrets');
+  // the round-20 facts leg: a code a variant emits must be a member of its exported table (the mutant emits one that is not)
+  const factsLeg = (M) => { const out = []; const HOME = '/home/user';
+    const f1 = M.cardFactsOf(M.planOf({ argv: ['./x.sh'], env: [['A', 'vault://secrets/e/f']], resolved: HOME + '/w/x.sh', programWritable: true }), M.shapeOf(M.planOf({ argv: ['./x.sh'], env: [['A', 'vault://secrets/e/f']], resolved: HOME + '/w/x.sh', programWritable: true })), HOME + '/w', { home: HOME });
+    if (f1.hosts.known === false && !M.HOSTS_WHY.includes(f1.hosts.why)) out.push(['hosts.why', f1.hosts.why]);
+    if (!f1.always.offered && f1.always.why != null && !M.ALWAYS_WHY.includes(f1.always.why)) out.push(['always.why', f1.always.why]);
+    return out; };
   const LEGS = [
     ['the scrubber without base64', '\n    ...base64Forms(bytes),\n', '\n    ...[],\n', (Vm) => (Vm === V ? once('scrub', () => scrubLeaks(V)) : scrubLeaks(Vm)).filter(([, n]) => /base64|Basic/.test(n) && !/^wrap: /.test(n))],
     ['argv allowed by default', 'const argvOpen = !!allowArgv && !!(row && row.argvOnly);', 'const argvOpen = true;', argvLeg],
@@ -1195,6 +1265,9 @@ console.log('⑧ MUTANTS — patched copies of src/vault-run.js must go RED');
     ['an EMPTY value flag is counted PRESENT (round 11 MAJOR 3 — vals drops the empty)', ".map(([, v]) => v).filter((v) => v !== '');", '.map(([, v]) => v);', ownRoad],
     ['the off-host credential env (GH_ENTERPRISE_TOKEN) is NOT refused (round 11 BLOCKER)', 'GH_ENTERPRISE_TOKEN|GITHUB_ENTERPRISE_TOKEN', 'GH_NOPE_TOKEN_X', ownRoad],
     ['the agent-chosen CA env (SSL_CERT_FILE) is NOT refused (round 11 BLOCKER)', 'SSL_CERT_FILE|SSL_CERT_DIR|GIT_SSL_CAINFO|CURL_CA_BUNDLE', 'SSL_NOPE_FILE_X', ownRoad],
+    // ROUND 20 — the closed code tables are load-bearing: a `why` outside its table is a code the client cannot key
+    ['a hosts `why` outside HOSTS_WHY is emitted (round 20 — the closed table)', "return 'tool-names-none';", "return 'made-up-host-why';", factsLeg],
+    ['an `always` `why` outside ALWAYS_WHY is emitted (round 20 — the closed table)', "case 'unknown-destination': return 'destination-unknown';", "case 'unknown-destination': return 'made-up-always-why';", factsLeg],
   ];
   const cleanLeg = new Map();   // the clean leg(V) is the SAME every mutant (V never changes) — run it ONCE per leg function (ownRoad is one reference, ~50 mutants), not ~50× (round 6 speedup; the scrubber legs memoise through once() already)
   for (const [name, from, to, leg] of LEGS) {

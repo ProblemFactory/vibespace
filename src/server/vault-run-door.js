@@ -471,7 +471,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     try { q.resolve({ outcome, askId: q.askId }); } catch { }
     return true;
   }
-  function ask({ caller, run, shape, key, detail, signal, always = null }) {
+  function ask({ caller, run, shape, key, detail, facts = null, signal, always = null }) {
     const pair = pairOf(caller.conversationId, key);
     if (byPair.has(pair) && asks.has(byPair.get(pair))) return Promise.resolve({ outcome: 'pending', askId: byPair.get(pair) });
     if (signal && signal.aborted) return Promise.resolve({ outcome: 'gone', askId: null });
@@ -481,7 +481,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       const tpls = (run.files || []).filter((f) => f.template != null && typeof f.text === 'string');   // round 17 (item 1): the template(s) the card renders IN FULL — their hash + byte count ride the «always» row for lane vault-use-grants (matching stays byte-exact via the shape key, which carries the template text)
       const templateHash = tpls.length ? crypto.createHash('sha256').update(JSON.stringify(tpls.map((f) => [f.name, f.text]))).digest('hex') : null;
       const templateBytes = tpls.length ? tpls.reduce((n, f) => n + Buffer.byteLength(f.text, 'utf8'), 0) : null;
-      const q = { askId, pair, conv: caller.conversationId, sessionKey: caller.sessionKey, who, key, always: always == null ? !!shape.always : !!always, detail, entries: run.refs.map((r) => r.id), head: cmdText(run.argv).slice(0, 80), askedAt: now(), todoId: null, timer: null, resolve, templateHash, templateBytes };
+      const q = { askId, pair, conv: caller.conversationId, sessionKey: caller.sessionKey, who, key, always: always == null ? !!shape.always : !!always, detail, entries: run.refs.map((r) => r.id), head: cmdText(run.argv).slice(0, 80), facts, askedAt: now(), todoId: null, timer: null, resolve, templateHash, templateBytes };
       asks.set(askId, q); byPair.set(pair, askId);
       if (userTodos) {
         try {
@@ -491,6 +491,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
             detail,   // THE WHOLE RUN as the owner approves it — the command (references, never a value), the secrets, how, the hosts, the folder
             i18n: { text: { key: '{who} wants to run a command with a stored secret', params: { who } } },
             action: { type: 'vault-run-ask', askId, always: q.always, tool: String(shape.name || '').slice(0, 40) },   // = ACTION_TYPE (spelled for the approval census's grep)
+            ...(facts ? { facts } : {}),   // lane vault-agent-own r20: the structured card (lane wake-approve-card's user-todos.js keeps `facts` and renders it with t() keys; this tree's store drops it until then, and the record keeps today's `detail`)
           });
           q.todoId = it && it.id;
         } catch (e) {
@@ -935,10 +936,11 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     if (foreign) { note('use_not_granted', { ...head, ref: foreign.ref }); return named('use_not_granted', { ref: foreign.ref }); }
     // THE FACTS the verdict reads: each entry's row (exists), its switch (open), its class (the engine's check) and its length
     const d = load();
-    const entries = [];
+    const entries = [], nameById = {};   // lane vault-agent-own r20: each ref's Vault-window name (its row label) for cardFactsOf — a ref with no row falls to the model's shortRefId
     const admitted = [];   // a GRANT that opened a closed entry (lane vault-manual-and-lock) — a once-grant is spent before the run starts
     for (const r of spec.refs) {
       const row = rowOf(r), c = classOf(r, row);
+      if (row && row.label != null) nameById[r.id] = String(row.label);
       if (!c.runnable) { note('entry_has_its_own_door', { ...head, ref: r.ref }); return named('entry_has_its_own_door', { ref: r.ref, door: c.door, words: `${VR.WORDS.entry_has_its_own_door}: ${c.door}` }); }
       const own = !!row && VR.ownsAgentEntry(r, caller), pv = (own && row.provenance) || {};   // lane vault-agent-own: an entry it made itself — open to it by construction
       const sw = !!(row && d && d.runnable.has(r.id)), g = row && !own ? grantOf(scope, r.id) : null;
@@ -1004,7 +1006,9 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
         if (callerRuns(caller.conversationId) >= RUNS_PER_CALLER || runs.size >= RUNS_MAX) return named('too_many_runs');
         const shown = detailOf(spec, shape, place, { facts: entries, why: verdict.why || [], away: verdict.away || [] });   // lane vault-agent-own: + who stored each entry, why it asks
         if (shown.length > DETAIL_MAX) return named('card_too_long');
-        const a = await ask({ caller, run: spec, shape, key, detail: shown, signal, always: verdict.offers.includes('always') });
+        // lane vault-agent-own r20 (the owner «这个卡片的可读性很差»): the SAME run as STRUCTURED FACTS (codes, never prose) the client renders in the viewer's language — rides the ask record beside `detail`; `detail` stays byte-unchanged for older clients
+        const facts = VR.cardFactsOf(spec, shape, place, { who: String(caller.name || caller.sessionKey || caller.conversationId).slice(0, 80), home, cmd: head.cmd, entries: nameById });
+        const a = await ask({ caller, run: spec, shape, key, detail: shown, facts, signal, always: verdict.offers.includes('always') });
         asked = a.outcome; askId = a.askId;
         if (asked === 'pending') { note('ask_pending', { ...head, askId }); return named('ask_pending'); }
         const outcome = { gone: 'caller_gone', unfiled: 'ask_unfiled', denied: 'ask_denied', expired: 'ask_expired', changed: 'ask_changed', vault_locked: 'vault_locked' }[asked];
