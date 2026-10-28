@@ -26,12 +26,12 @@ const endWord = (id) => ({ keep: t('As each has it now'), none: t('No end'), '8h
 const dateOf = (ms) => { try { return new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }); } catch { return ''; } };
 // round 3 (item 5): a WILDCARD host is said in words — and a multi-tenant base (where unrelated parties share the domain) warns
 const MULTI_TENANT = /^(?:amazonaws\.com|googleapis\.com|github\.io|gitlab\.io|herokuapp\.com|cloudfront\.net|blob\.core\.windows\.net|azurewebsites\.net|web\.app|pages\.dev|workers\.dev|vercel\.app|netlify\.app|appspot\.com|firebaseapp\.com)$/i;
-const oneHostWord = (h, entryHosts) => {
+const oneHostWord = (h, entryHosts, tool = null) => {
   if (h === ENTRY_HOSTS) return t('the hosts it was stored for ({hosts})', { hosts: (entryHosts || []).join(', ') || t('none') });
-  if (String(h).startsWith('*.')) { const base = String(h).slice(2); return MULTI_TENANT.test(base) ? t('every {host} host (incl. other customers’ endpoints)', { host: h }) : t('every {host} host', { host: h }); }
+  if (String(h).startsWith('*.')) { const base = String(h).slice(2); const w = MULTI_TENANT.test(base) ? t('every {host} host (incl. other customers’ endpoints)', { host: h }) : t('every {host} host', { host: h }); return tool ? t('{hostword} (via {tool})', { hostword: w, tool }) : w; }   // round 4 (item 3): a wildcard carries the ONE CLI that minted it — shown per host
   return h;
 };
-const hostsWord = (hosts, entryHosts) => (hosts || []).map((h) => oneHostWord(h, entryHosts)).join(', ');
+const hostsWord = (hosts, entryHosts, toolFor = null) => (hosts || []).map((h) => oneHostWord(h, entryHosts, toolFor && toolFor[h])).join(', ');
 
 /** A member's name: its stored name, the live roster's, else its id (never markup — textContent only). */
 function nameOf(m, app) {
@@ -70,7 +70,7 @@ export function useExtras(row, { app = null, refresh = () => {} } = {}) {
         const chip = el('span', `vw-ak-chip vw-use-chip${m.expired ? ' vw-use-expired' : ''}`);
         chip.dataset.grant = m.id || '';
         chip.dataset.principal = m.principal || '';
-        const bits = [nameOf(m, app), hostsWord(m.hosts, u.entryHosts)];
+        const bits = [nameOf(m, app), hostsWord(m.hosts, u.entryHosts, m.toolFor)];
         if (m.uses) bits.push(t('used {n}×', { n: m.uses }));
         if (m.expired) bits.push(t('expired'));
         else if (m.until) bits.push(t('until {when}', { when: dateOf(m.until) }));

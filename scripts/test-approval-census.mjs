@@ -451,6 +451,13 @@ const ROWS = [
     c: [decl('the ONE writer of the notice is the run door (noteRefused, filed once per distinct failure); the store is marked by the vault (vault.macOf)')],
     d: [decl('the words are the door\'s own i18n lines (the failure reason — never a value, never the store\'s contents)')],
     gate: [['scripts/test-vault-use-grants.mjs', 'a For-you row']] },
+  { id: 'vault-grant-stale', surface: 'lane vault-use-grants round 4 (MAJOR item 4) — the For-you notice «A stored value’s sharing could not be trusted — a grant was dropped and paused» (a vault-use member in data/grants.json whose mac no longer verifies: a forged, widened-`except`, or replayed older row); nothing is answered, it tells the owner to set who may use it again in the Vault window',
+    doors: [['A', 'src/server/vault-run-door.js', /^vault-grant-stale$/]],
+    a: [decl('nothing is answered on the item: it is a fail-closed WARNING. The dropped grant is paused (the reader admits only a verified member); the owner recovers by setting who may use the entry again (a fresh owner write re-stamps + bumps the generation)')],
+    b: [decl('no narrowing/widening — the drop is automatic (fail closed); an owner write re-grants and lifts it')],
+    c: [decl('the ONE writer of the notice is the run door (noteGrantStale), called by the grants writer’s onStale once per resource; the member is marked by the vault (vault.macOf) over the whole row + a generation')],
+    d: [decl('the words name only the resource id (which stored value) — never a value, never the forged row’s contents')],
+    gate: [['scripts/test-vault-use-grants.mjs', 'grant_stale']] },
   // lane browser-probe-transient (B-0b8c): the browser-version notice's Check again — a probe, not an approval
   { id: 'browser-floor-check', surface: 'lane browser-probe-transient — the For-you notice «Could not read the agent-browser version after N tries…» and its Check again',
     doors: [['A', 'src/server/browser-keeper.js', /^browser-floor-check$/]],

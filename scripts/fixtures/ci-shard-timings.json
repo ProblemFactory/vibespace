@@ -307,6 +307,7 @@
   "test-usage-scan-subagents": 90,
   "test-vault-paste-chrome": 22000,
   "test-vault-totp-add-chrome": 30000,
+  "test-vault-run-wire": 5000,
   "test-vault-use-grants-chrome": 14000,
   "test-vendor-bypass-chrome": 1637,
   "test-viewer-download-chrome": 45633,

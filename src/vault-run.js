@@ -426,9 +426,22 @@ function materialize(run, { valueOf, pathOf }) {
 const URL_FIND_RE = /\b([a-z][a-z0-9+.-]{0,31}):\/\/\S+/gi;   // scheme://… up to whitespace; the host is read by urlParse
 const URL_TRAIL = /[)\]>.,;'"]+$/;   // trailing punctuation the locator swept up
 const normHost = (h, port = null) => { const x = String(h || '').toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, ''); return x && x.length <= 253 && !/[{}]/.test(x) && !x.split('.').some((l) => l.length > 63) ? (port ? `${x}:${port}` : x) : null; };   // a name > 253 or a label > 63 is not valid DNS; a `{{var}}` is never a host (fail closed)
-/** A scheme://… token → { host, port?, userinfo, bad } by the WHATWG parser. (The seam: vault-agent-own r19's urlParse.) */
+// lane vault-use-grants round 4 (BLOCKER): WHATWG «special schemes» treat `\` as `/`, so `new URL()` ends the authority
+// at a backslash — but curl / wget keep `host\` as USERINFO and connect to the host after the `@`. The reader must never try
+// to out-parse the tool: for a special scheme it reads a host ONLY from a CLEAN authority (a bare host[:port]); a `\`, a
+// userinfo `@`, a `%`-escape, whitespace or a non-ASCII byte in the authority makes curl route where new URL() does not —
+// the token is OPAQUE (the card, no «Always»). The seam: vault-agent-own r23's urlParse gets the SAME rule (its r24 addendum).
+const SPECIAL_SCHEME = /^(?:https?|ftp|ftps|ws|wss|gopher):$/i;
+/** A scheme://… token → { host, port?, userinfo } | { bad } (unparseable) | { opaque } (parses, but the tool may route
+ *  elsewhere than new URL() reads — a special-scheme authority that is not a clean host). (Seam: vault-agent-own r23 urlParse.) */
 function urlParse(token) {
-  let u; try { u = new URL(String(token)); } catch { return { bad: true }; }
+  const t = String(token);
+  let u; try { u = new URL(t); } catch { return { bad: true }; }
+  if (SPECIAL_SCHEME.test(u.protocol)) {
+    const m = /^[a-z][a-z0-9+.-]{0,31}:\/\/([^/?#]*)/i.exec(t);   // the RAW authority — up to the first ASCII `/`, `?` or `#` (NOT `\`)
+    const rawAuth = m ? m[1] : '';
+    if (/[\\@%]/.test(rawAuth) || /[^\x21-\x7e]/.test(rawAuth)) return { opaque: true };   // `\` / userinfo `@` / `%`-escape / space / non-ASCII ⇒ new URL() and curl disagree ⇒ fail closed
+  }
   const h = normHost(u.hostname, u.port || null);
   if (!h) return { bad: true };
   return { host: h, userinfo: !!(u.username || u.password) };
@@ -437,6 +450,13 @@ function urlHosts(text) {
   const out = []; let m; URL_FIND_RE.lastIndex = 0;
   while ((m = URL_FIND_RE.exec(String(text)))) { if (m[1].toLowerCase() === 'vault') continue; const r = urlParse(m[0].replace(URL_TRAIL, '')); if (r.host) out.push(r.host); }
   return out;
+}
+/** Does any scheme://… token in `text` parse to an OPAQUE destination (a special-scheme authority the reader cannot be
+ *  certain the tool routes to — the backslash/userinfo family)? (lane vault-use-grants round 4, BLOCKER.) */
+function urlOpaque(text) {
+  let m; URL_FIND_RE.lastIndex = 0;
+  while ((m = URL_FIND_RE.exec(String(text)))) { if (m[1].toLowerCase() === 'vault') continue; if (urlParse(m[0].replace(URL_TRAIL, '')).opaque) return true; }
+  return false;
 }
 const HOSTNAME = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$|^localhost$/i;
 
@@ -455,6 +475,11 @@ const HOSTNAME = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$|^loca
 // place of this reader. At train-C the two fold into ONE `shape.routeHosts`/`routeOpaque`; `destinationsOf` reads the field.
 // See docs/kb-bugfix-invariants.md «### Round 3 — As-built integration note».
 const SSH_LOCAL_O = new Set(['proxycommand', 'localcommand', 'knownhostscommand', 'permitlocalcommand', 'match']);   // ssh -o keys that run a LOCAL command / redirect — where it goes cannot be told (fail closed)
+// lane vault-use-grants round 4 (MINOR item 6): wget `-e CMD` runs ONE .wgetrc command. Only a REVIEWED, pinned set of
+// NON-routing / non-credential / non-file-redirect commands is safe to let a grant stand for; every other command (input,
+// *_proxy, use_proxy, post_file, load_cookies, base, certificate, private_key, header, referer, user, password, ask_password,
+// use_askpass, span_hosts, …) adds a destination or carries a credential the card never named ⇒ OPAQUE.
+const WGET_SAFE_E = new Set(['robots', 'timestamping', 'quiet', 'verbose', 'server_response', 'tries', 'timeout', 'dns_timeout', 'connect_timeout', 'read_timeout', 'wait', 'waitretry', 'random_wait', 'retry_connrefused', 'progress', 'show_progress', 'check_certificate', 'content_disposition', 'adjust_extension', 'continue', 'no_clobber']);
 /** An authority (no scheme) → { host, port } (userinfo dropped at the LAST `@`, IPv6 brackets handled). */
 function splitAuthority(a) {
   let s = String(a == null ? '' : a).trim();
@@ -492,7 +517,7 @@ function routeTargetsOf(row, kind, hosts, keyed, positionals, plainEnv) {
     else if (flag === '--resolve') { const m = /^\+?[^:]+:\d+:(.+)$/.exec(val); if (m) for (const addr of m[1].split(',')) { const a = splitAuthority(addr.trim()); if (a.host) add(a.host); } }   // HOST:PORT:ADDR[,ADDR] → routes to ADDR
     else if (flag === '--doh-url') { const hs = urlHosts(val); if (hs.length) hs.forEach((h) => out.add(h)); else if (val.trim()) opaque = true; }
     else if (flag === '--unix-socket' || flag === '--abstract-unix-socket' || flag === '--dns-servers' || flag === '--alt-svc') { if (val.trim() || flag.includes('unix')) opaque = true; }   // a local socket / an attacker-chosen resolver / an alt route — a destination the grant can never name
-    else if (flag === '-e' || flag === '--execute' || flag === '--rsh') { if (row.name === 'rsync' || /proxy/i.test(val)) opaque = true; }   // wget -e http_proxy= / rsync -e <remote shell>
+    else if (flag === '-e' || flag === '--execute' || flag === '--rsh') { if (row.name === 'rsync') opaque = true; else if (!WGET_SAFE_E.has(String(val).split('=')[0].trim().toLowerCase())) opaque = true; }   // rsync -e <remote shell>; wget -e <.wgetrc cmd> opaque unless a reviewed non-routing command (round 4: -e input=FILE leaked)
     else if (flag === '-o') { const e = val.indexOf('='), ve = val.indexOf(' '), c = e < 0 ? ve : ve < 0 ? e : Math.min(e, ve); const k = (c < 0 ? val : val.slice(0, c)).trim().toLowerCase(), rest = c < 0 ? '' : val.slice(c + 1).trim(); if (SSH_LOCAL_O.has(k)) opaque = true; else if (k === 'proxyjump' || k === 'hostname') for (const h of rest.split(/[,\s]+/)) { const a = splitAuthority(h); if (a.host) add(a.host, a.port); } }   // ssh -o
     else if (flag === '-J') { for (const h of val.split(',')) { const a = splitAuthority(h.trim()); if (a.host) add(a.host, a.port); } }   // ssh jump host(s)
     else if (flag === '-W') { const a = splitAuthority(val); if (a.host) add(a.host, a.port); }   // ssh -W host:port
@@ -500,7 +525,11 @@ function routeTargetsOf(row, kind, hosts, keyed, positionals, plainEnv) {
   }
   if (/^(?:curl|wget)$/.test(row.name)) for (const p of positionals) { const t = targetOf(p); if (t.host) add(t.host); else if (t.unread) opaque = true; }   // every bare positional is a destination; a glob / numeric address is blind
   else if (/^(?:http|https|httpie)$/.test(row.name)) for (const p of httpieTarget(positionals)) { const t = targetOf(p); if (t.host) add(t.host); else if (t.unread) opaque = true; }
-  if ((row.sshTarget || row.scpLike) && positionals.length) { const m = /^(?:[\w.+-]+@)?([A-Za-z0-9.-]{1,253})(?::|$)/.exec(positionals[0]); if (m && !/\./.test(m[1]) && !/^localhost$/i.test(m[1])) opaque = true; }   // a single-label ssh/scp target can be a ~/.ssh/config alias whose HostName is unseen (fail closed)
+  // lane vault-use-grants round 4 (MAJOR item 2): the single-label-alias rule applies ONLY to the positional that IS a
+  // target — for ssh the `[user@]host` positional; for scp / rsync / git a positional that is scp-like BY SHAPE (`host:` with
+  // NO `://`). A scheme URL (`https://github.com/o/r`) is read by urlParse, and a local path (`backup`, no `:`) is never a host.
+  if (row.sshTarget && positionals.length) { const m = /^(?:[\w.+-]+@)?([A-Za-z0-9.-]{1,253})$/.exec(positionals[0]); if (m && !/\./.test(m[1]) && !/^localhost$/i.test(m[1])) opaque = true; }
+  if (row.scpLike) for (const p of (row.name === 'git' ? positionals.slice(0, 1) : positionals)) { if (/:\/\//.test(p)) continue; const m = /^(?:[\w.+-]+@)?([A-Za-z0-9.-]{1,253}):/.exec(p); if (m && !/\./.test(m[1]) && !/^localhost$/i.test(m[1]) && !/^[A-Za-z]$/.test(m[1])) opaque = true; }   // git: only the REMOTE (positionals[0]); the rest are refspecs (HEAD:main), never hosts
   return { hosts: [...out].filter(Boolean), opaque };
 }
 /** THE reader the card and the grant share: { hosts, opaque } — the hosts the run will CONTACT. (The seam above.) */
@@ -548,7 +577,7 @@ function shapeOf(run) {
   const hosts = new Set([...argv.slice(1), ...run.plainEnv.map((e) => e.value), ...run.files.map((f) => f.text || '')].flatMap(urlHosts));
   if (row && kind === 'tool') {
     const all = argv.slice(1);
-    if (row.scpLike) for (const a of positionals) { const m = /^(?:[\w.+-]+@)?([A-Za-z0-9.-]{2,253}):(?!\/\/)/.exec(a); if (m && !/^[A-Za-z]$/.test(m[1])) hosts.add(normHost(m[1])); }
+    if (row.scpLike) for (const a of (row.name === 'git' ? positionals.slice(0, 1) : positionals)) { const m = /^(?:[\w.+-]+@)?([A-Za-z0-9.-]{2,253}):(?!\/\/)/.exec(a); if (m && !/^[A-Za-z]$/.test(m[1])) hosts.add(normHost(m[1])); }   // git: only the REMOTE (a refspec HEAD:main is never a host)
     if (row.sshTarget && positionals.length) { const m = /^(?:[\w.+-]+@)?([A-Za-z0-9.-]{1,253})$/.exec(positionals[0]); if (m) hosts.add(normHost(m[1])); }
     if (row.hostFlags) all.forEach((a, i) => { const eq = a.indexOf('='); if (row.hostFlags.includes(a) && all[i + 1]) hosts.add(normHost(all[i + 1])); else if (eq > 0 && row.hostFlags.includes(a.slice(0, eq))) hosts.add(normHost(a.slice(eq + 1))); });
     if (row.registry) for (const a of positionals) { const h = a.split('/')[0]; if (HOSTNAME.test(h.replace(/:\d+$/, ''))) hosts.add(normHost(h)); }
@@ -560,7 +589,8 @@ function shapeOf(run) {
   // lane vault-use-grants round 2 (BLOCKER): the DESTINATIONS the run contacts (routing flags, proxies, bare positionals) —
   // a superset of `hosts`; `routeOpaque` when a routing input cannot be resolved (ProxyCommand, a proxy env var) ⇒ no «always».
   const dest = routeTargetsOf(row, kind, [...hosts], keyed, positionals, run.plainEnv);
-  const noAlways = kind !== 'tool' ? kind : !known || !hosts.size ? 'unknown-destination' : dest.opaque ? 'opaque-route' : row.runsProject ? 'runs-project-code' : configFile ? 'config-file' : run.programWritable ? 'program-writable' : null;
+  if (known && argv.slice(1).some((a) => urlOpaque(a))) dest.opaque = true;   // round 4 (BLOCKER): a URL token in the command whose host the reader cannot be certain of (the backslash/userinfo family) ⇒ opaque
+  const noAlways = kind !== 'tool' ? kind : !known ? 'unknown-destination' : dest.opaque ? 'opaque-route' : !hosts.size ? 'unknown-destination' : row.runsProject ? 'runs-project-code' : configFile ? 'config-file' : run.programWritable ? 'program-writable' : null;
   return {
     v: SHAPE_V, tool: run.tool, name: run.name, kind, sub, flags: [...flags].sort(), args, hosts: [...hosts].sort(),
     routeHosts: dest.hosts.slice().sort(), routeOpaque: dest.opaque,

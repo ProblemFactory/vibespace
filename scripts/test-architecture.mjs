@@ -4515,6 +4515,7 @@ console.log('§81 no suite names a fixed loopback endpoint (scratch.mjs deadPort
     'test-port-forward.mjs': [[22, 3000, 5173, 8080, 49999], 'ss / lsof output text the sweep parses'],
     'test-slack-relay.mjs': [[3000], 'the redirect-URL classifier table — ' + PURE],
     'test-vault-use-grants.mjs': [[5432], 'a host-with-port example in the grant host-grammar list — ' + PURE],
+    'test-vault-run-model.mjs': [[7001], 'a loopback authority EXAMPLE in the round-4 backslash / userinfo opaque assertion (a port after an escaped @) — ' + PURE],
   };
   const judge81 = (files, exempt) => {
     const red = [], rows = [], used = new Set();

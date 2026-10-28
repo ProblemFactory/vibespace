@@ -104,7 +104,7 @@ async function pageOf(t) {
   const centerOf = (sel) => evalJs(`(() => { const el = document.querySelector(${JSON.stringify(sel)}); if (!el) return null; el.scrollIntoView({ block: 'center' }); const r = el.getBoundingClientRect(); const x = r.left + r.width / 2, y = r.top + r.height / 2; const hit = document.elementFromPoint(x, y); return { x, y, w: r.width, h: r.height, hits: !!hit && (hit === el || el.contains(hit)) }; })()`);
   const realClick = async (sel) => { const p = await centerOf(sel); if (!p || !p.hits) return p || false; await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: p.x, y: p.y }); await sleep(100); await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: p.x, y: p.y, button: 'left', clickCount: 1 }); await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: p.x, y: p.y, button: 'left', clickCount: 1 }); return true; };
   const api = (method, p, body) => evalJs(`fetch(${JSON.stringify(p)}, { method: ${JSON.stringify(method)}, headers: { 'Content-Type': 'application/json' }${body ? `, body: ${JSON.stringify(JSON.stringify(body))}` : ''} }).then(async (r) => ({ status: r.status, json: await r.json().catch(() => ({})) }))`);
-  const shot = async (name) => { if (!SHOTS) return; try { const r = await cdp('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(SHOTS, name), Buffer.from(r.data, 'base64')); } catch { } };
+  const shot = async (name) => { if (!SHOTS) return; try { await cdp('Page.bringToFront'); } catch { } try { const r = await cdp('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(SHOTS, name), Buffer.from(r.data, 'base64')); } catch { } };   // round 4 (MINOR): bring the page to the FRONT first — a hidden page A (after page B opened via /json/new) stalled Page.captureScreenshot 1.5–3.5 min
   await cdp('Page.enable');
   await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
   return { cdp, evalJs, until, realClick, api, shot };
@@ -292,6 +292,8 @@ try {
     await A.until(`!!(${LIST_ROW(LABEL)})`, { timeout: 15000 });
     await sleep(400);
     const st = await A.evalJs(`(() => { const r = ${LIST_ROW(LABEL)}; const chips = r && r.querySelector('.vw-use-chips'); const note = r && r.querySelector('.vw-use-paused-note'); return { chip: !!(r && r.querySelector('.vw-use-chip')), paused: !!(chips && chips.classList.contains('vw-use-paused')), note: note ? note.textContent : null }; })()`);
+    await A.evalJs(`(() => { const r = ${LIST_ROW(LABEL)}; const n = r && (r.querySelector('.vw-use-paused-note') || r.querySelector('.vw-use-chips')); if (n) n.scrollIntoView({ block: 'center' }); return true; })()`);   // round 4 (MINOR): the paused chip + note sit BELOW the fold — scroll them into view so the shot is real evidence
+    await sleep(150);
     await A.shot(file);
     if (lang === 'en') check('OFF ⇒ the grant chips are greyed «paused» and the paused note appears (en)', !!st && st.chip && st.paused === true && /Paused while the entry is off/.test(String(st.note)), st);
     else check(`the paused note renders in ${lang} (a real string, not the English key)`, !!st && st.paused === true && !!st.note && !/Paused while the entry is off/.test(String(st.note)), st);

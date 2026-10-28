@@ -312,6 +312,7 @@ const ROWS = [
   ["src/server/vault-run-door.js", "create > spawnRun", 4, "local-only", "mkdtemp under runRoot() = $XDG_RUNTIME_DIR or os.tmpdir() (create's default; the wiring passes none), then .owner and f<slot> inside that 0700 dir"],
   ["src/server/vault-run-door.js", "create > sweep", 2, "local-only", "boot readdir/lstat of runRoot() ($XDG_RUNTIME_DIR or os.tmpdir()) for the door's own vs-vault-run-* dirs"],
   ["src/server/vault-totp.js", "writeJsonAtomic", 3, "local-only", "only caller writeGrants passes FILE = <dataDir>/vault-grants.json (the vault's data dir)."],
+  ["src/server/vault-use-grants.js", "*", 4, "local-only", "data/vault-use-marks.json (the round-4 vault-use generation sidecar) — writeJsonAtomic's mkdir/write/rename of the constant MARK_FILE = <dataDir>/vault-use-marks.json, and loadGen's readFileSync of it; dataDir = <checkout>/data from mounts-plugins-wiring"],
   ["src/server/voice-teach-engine.js", "*", 1, "local-only", "ledgerFile = <checkout>/data/voice-suggestions.json (mounts-plugins-wiring)"],
   ["src/server/window-targets-engine.js", "*", 5, "local-only", "lease/reach stores and screenshots under dataDir=<checkout>/data (window-live-wiring): window-shots/<handle>-<ts>-<pid>.png"],
   ["src/server/wrapper-files.js", "*", 6, "local-only", "BUFFERS_DIR (data/buffers) sidecar/buf pair, or the buf path a dtach master wrapper argv names, read from /proc/<pid>/cmdline; + the boot's 30 s age sweep of BUFFERS_DIR (sweepAgedWrapperFiles: readdir / stat / unlink, moved out of server.js by ci358-reds round 2)"],

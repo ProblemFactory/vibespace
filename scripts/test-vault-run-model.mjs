@@ -192,7 +192,7 @@ console.log('④ THE SHAPE KEY — tool + flags + hosts + entries (decision ④)
   // THE HOSTS
   const H = (argv, extra = {}) => { const p = V.planOf({ argv, env: [['T', M1]], ...extra }); if (!p.ok) throw new Error(JSON.stringify(p)); return V.shapeOf(p).hosts.join(' '); };
   const HOSTS = [
-    [['curl', 'https://API.example.com/x'], 'api.example.com'], [['curl', 'https://h.example:8443/x', 'http://u:p@other.example/'], 'h.example:8443 other.example'],
+    [['curl', 'https://API.example.com/x'], 'api.example.com'], [['curl', 'https://h.example:8443/x', 'http://u:p@other.example/'], 'h.example:8443'],   // round 4 (BLOCKER): an http(s) userinfo `@` authority is OPAQUE (new URL and curl may disagree) — the clean host is read, the userinfo URL contributes none
     [['git', 'clone', 'git@github.com:org/repo.git'], 'github.com'], [['git', 'push', 'https://gitlab.example.com/x.git'], 'gitlab.example.com'],
     [['ssh', '-i', '$VAULT_FILE{mounts/m2/secretKey}', '-p', '2222', 'deploy@host.example', 'uptime'], 'host.example'],
     [['scp', '-i', '$VAULT_FILE{mounts/m2/secretKey}', 'f.txt', 'u@h.example:/tmp/'], 'h.example'],
@@ -211,6 +211,15 @@ console.log('④ THE SHAPE KEY — tool + flags + hosts + entries (decision ④)
   ok(!aw.length, '«always» is offered only for a KNOWN tool that names its host — never a tool outside the table, one naming no host, a shell or an interpreter (destination unknown / the script is the program)', aw.map(([a, w]) => [a.join(' '), w, A(a)]));
   const pr = V.shapeOf(V.planOf({ argv: ['curl', 'https://api.example.com'], env: [['T', M1]] }));
   ok(pr.proxyEnv === true && V.shapeOf(V.planOf({ argv: ['psql', '-h', 'db.x'], env: [['PGPASSWORD', M1]] })).proxyEnv === false, 'the shape says whether the tool honours the proxy env (P1 vault-run-egress fences on it)');
+  // round 4 (BLOCKER + MAJOR item 2): a special-scheme URL whose authority is not a clean host (a `\` before `@`, a userinfo
+  // `@`, a space) is OPAQUE — new URL() and the real curl may route to different hosts; a CLEAN git-over-https URL is not.
+  const RO = (argv) => V.shapeOf(V.planOf({ argv, env: [['T', M1]] })).routeOpaque;
+  ok(RO(['curl', 'http://127.0.0.5:9\\@127.0.0.1:7001/x']) === true && RO(['curl', 'https://u:p@other.example/']) === true
+    && RO(['curl', 'https://api.example.com/x']) === false
+    && RO(['git', 'ls-remote', 'https://github.com/o/r']) === false && RO(['git', 'clone', 'https://github.com/o/r']) === false && RO(['git', 'push', 'https://github.com/o/r.git', 'HEAD:main']) === false
+    && RO(['scp', 'backup', 'root@192.168.1.1:/x']) === false,
+    'the backslash-before-@ and userinfo authorities are opaque (the card); a clean git-over-https URL and `scp backup host:/x` are not (routine granted runs draw no card)',
+    { bs: RO(['curl', 'http://127.0.0.5:9\\@127.0.0.1:7001/x']), gitls: RO(['git', 'ls-remote', 'https://github.com/o/r']), scp: RO(['scp', 'backup', 'root@192.168.1.1:/x']) });
 }
 
 console.log('①b AN AGENT\'S OWN ENTRY (lane vault-run-door × lane vault-mint-put) — vault://agent:<scope>/<name>');

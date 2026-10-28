@@ -101,7 +101,7 @@ const ENTRY_FIELDS = Object.freeze({
   'channel-api': Object.freeze({ tier: Object.freeze(['none', 'read', 'write-ask', 'write-auto', 'write-all']), perDay: 'count' }),
   window: Object.freeze({ origin: Object.freeze(['user', 'request', 'self-open']) }),
   'group-visibility': Object.freeze({ level: Object.freeze(['visible', 'messageable']) }),
-  'vault-use': Object.freeze({ hosts: 'hosts', until: 'time', tool: 'tool', mac: 'mac' }),   // lane vault-use-grants (round 3: `tool` scopes a wildcard default to its CLI; `mac` is the vault's HMAC so a forged row is dropped)
+  'vault-use': Object.freeze({ hosts: 'hosts', until: 'time', tool: 'tool', toolFor: 'toolmap', mac: 'mac' }),   // lane vault-use-grants (round 3: `tool` scopes a wildcard default to its CLI; round 4 item 3: `toolFor` scopes PER HOST — a wildcard row carries the tool that minted it, never rewritten by a later «Always» from another CLI; `mac` is the vault's HMAC so a forged row is dropped)
 });
 /** lane vault-use-grants: ONE destination a vault-use entry may name — EVERY shape the run card can name (round 2 MAJOR):
  *  a host name (one label like `router` or many like `api.example.com`), an IPv4 / IPv6 address (IPv6 bracketed or bare),
@@ -183,6 +183,7 @@ function normEntry(e, door) {
     if (allowed === 'count') { const n = Math.floor(Number(e[f])); if (!(n > 0) || n > 100000) return null; out[f] = n; continue; }
     if (allowed === 'hosts') { const h = hostListOf(e[f]); if (!h) return null; out[f] = h; continue; }   // lane vault-use-grants
     if (allowed === 'tool') { const t = String(e[f]).toLowerCase(); if (!/^[a-z0-9][a-z0-9.+-]{0,39}$/.test(t)) return null; out[f] = t; continue; }   // lane vault-use-grants round 3: the CLI a wildcard default is granted to
+    if (allowed === 'toolmap') { const v = e[f]; if (!v || typeof v !== 'object' || Array.isArray(v)) return null; const keys = Object.keys(v); if (keys.length > HOSTS_MAX) return null; const m = {}; for (const k of keys) { const hk = hostTokenOk(String(k).trim().toLowerCase()); const tv = String(v[k]).toLowerCase(); if (hk === null || hk === '@entry' || !/^[a-z0-9][a-z0-9.+-]{0,39}$/.test(tv)) return null; m[hk] = tv; } if (Object.keys(m).length) out[f] = m; continue; }   // lane vault-use-grants round 4 item 3: host → the CLI that minted its wildcard grant
     if (allowed === 'mac') { if (!/^[0-9a-f]{64}$/.test(String(e[f]))) return null; out[f] = String(e[f]); continue; }   // lane vault-use-grants round 3: the vault's HMAC over the canonical member
     if (allowed === 'time') { const n = Math.floor(Number(e[f])); if (!(n > 0) || n > 8.64e15) return null; out[f] = n; continue; }
     if (!allowed.includes(e[f])) return null;

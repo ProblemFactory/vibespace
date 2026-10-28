@@ -143,6 +143,7 @@ const ROWS = {
   'src/dial-session-bridge.js': [['the vault is locked', 'carried', 'the dial bridge\'s session-error fallback (the status bar recognises it)', { via: 'src/lib/chat-status-bar.js' }]],
   'src/session-schema.js': [['WAITS for the vault', 'label', 'a session field\'s note for engineers (the schema census) — nobody reads it in the product']],
   'src/server/vault-run-door.js': [['the vault locked (', 'log', 'the run door\'s journal line when a lock stops a run — the agent\'s answer is vault_locked\'s words']],
+  'src/server/vault-use-grants.js': [['the vault is locked — unlock it (验证是你) to change who may use a stored value', 'label', 'the Vault window\'s «谁可以用…» picker save (POST /api/vault/use-grants) answered while the person is at the door — a field verdict (round 4 item 4: a locked vault refuses the write by name, never a mac:null row), not a background refusal']],
 };
 const SEVEN = [
   ['the strip', 'src/lib/vault-unlock.js', 'The vault is locked — {n} waiting on it'],

@@ -191,7 +191,11 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
       // lane vault-use-grants: THE DEFAULT GRANT the card said — the conversation that asked × the hosts it named (the setting read
       // again now: switched off since ⇒ the 8-hour run grant below, as a request without hosts)
       if (q.grant && q.target.hosts && q.target.hosts.length && grantsAsker()) {
-        try { const g = useGrants.addMember(`secrets:${entry}#${P.ENTRY_FIELD}`, { kind: 'conversation', key: q.conv, name: who }, { hosts: q.target.hosts }, { by: 'request' }); if (g && g.ok) standing = { hosts: q.target.hosts.slice(), grant: g.grant }; else log(`${q.requestId}: the default grant was not written (${g && g.code})`); } catch (e) { log(`${q.requestId}: the default grant could not be written: ${e.message}`); }
+        try { const id = `secrets:${entry}#${P.ENTRY_FIELD}`; const g = useGrants.addMember(id, { kind: 'conversation', key: q.conv, name: who }, { hosts: q.target.hosts }, { by: 'request' }); if (g && g.ok) { standing = { hosts: q.target.hosts.slice(), grant: g.grant };
+          // round 4 (item 4): a grant is honoured only when the entry is switched ON (the allow-list). The owner filled this
+          // request to let the asker USE the new secret for those hosts with no card, so enable runs for it (their 验证是你 filled it).
+          if (vaultRun && typeof vaultRun.setRunnable === 'function') { try { vaultRun.setRunnable({ id, on: true, reauthed: true, by: 'request' }); } catch (e) { log(`${q.requestId}: the entry was granted but not switched on (${e.message})`); } }
+        } else log(`${q.requestId}: the default grant was not written (${g && g.code})`); } catch (e) { log(`${q.requestId}: the default grant could not be written: ${e.message}`); }
       }
       if (!standing && vaultRun && typeof vaultRun.grantPasted === 'function') { try { const g = vaultRun.grantPasted({ scope: q.scope, ref, purpose: q.purpose, by, requestId: id }); if (g && g.ok) grantHours = g.hours; } catch (e) { log(`${q.requestId}: the run grant could not be written: ${e.message}`); } }
     }
