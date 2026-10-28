@@ -512,7 +512,8 @@ function authWatcher(app, id, base) {
   };
   const unsub = app.ws.onGlobal(on);
   if (typeof app.ws.onStateChange === 'function') app.ws.onStateChange(onState);
-  return { state: () => answer, off: () => { try { if (typeof unsub === 'function') unsub(); else app.ws.offGlobal(on); } catch {} try { if (typeof app.ws.offStateChange === 'function') app.ws.offStateChange(onState); } catch {} } };
+  let live = true;   // r3: `off()` runs once, whoever calls it first (the finish, a re-start, the dialog's close)
+  return { state: () => answer, off: () => { if (!live) return; live = false; try { if (typeof unsub === 'function') unsub(); else app.ws.offGlobal(on); } catch {} try { if (typeof app.ws.offStateChange === 'function') app.ws.offStateChange(onState); } catch {} } };
 }
 
 // ── CONNECT AN ACCOUNT (§2.5, §8.1 #11: type-first, one dialog for every type) ──
@@ -618,6 +619,7 @@ export async function showReauthAccountDialog(app, a, { kinds = null, preselect 
     },
     status: async () => (watcher ? watcher.state() : {}),
     cancel: () => post(`/api/channels/adapters/${enc(a.id)}/auth/cancel`, {}), askFirst: showConfirmDialog,   // lane lark-refresh-stall r2: Escape on a running sign-in asks first
+    onClose: () => { if (watcher) { watcher.off(); watcher = null; } },   // r3: a dialog that closes takes its watcher's listeners with it
     callback: async (url) => { await post(`/api/channels/adapters/${enc(a.id)}/auth/finish`, { url }); return { token: a.id }; },
     finish: async (_token, { close }) => {
       if (watcher) watcher.off();

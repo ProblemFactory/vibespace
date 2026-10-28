@@ -819,7 +819,19 @@ const p2 = await newPage();
   ok(await p1.evaljs(WAIT_DLG('reauth')), '(r) Re-authorize on the new account opens');
   const reR = await p1.evaljs(`(() => { const s = ${DLG('reauth')}.querySelector(':scope > select'); return { value: s.value, options: [...s.options].map((o) => o.textContent) }; })()`);
   ok(reR.value === 'custom' && reR.options.includes(MOUNT_OPTION) && reR.options[reR.options.length - 1] === 'Custom (own client id/secret)', `(r) the Re-authorize select offers the storage option too (the account's own custom client selected) (${JSON.stringify(reR)})`);
+  // lane lark-refresh-stall r3 (acceptance r2, the listener-lifecycle law): a dialog closed by ✕ WHILE its sign-in runs takes
+  // its watcher's socket listeners with it (r2's reconnect listener read the accounts on every reconnect for each dismissed
+  // dialog until the consent's own end; while a consent runs the ⋯ offers no second Re-authorize)
+  const wsCounts = `({ state: app.ws._stateListeners.length, global: app.ws.globalHandlers.length, open: !!document.querySelector('#chan-reauth-dialog') })`;
+  const lc0 = await p1.evaljs(wsCounts);
+  await p1.evaljs(`${DLG('reauth')}.querySelector(':scope > .mounts-btn-primary').click(); 1`);
+  const lcUrl = await p1.evaljs(consentUrlIn('#chan-reauth-dialog .mounts-oauth-link input'));
+  const lc1 = await p1.evaljs(wsCounts);
   await p1.evaljs(`document.querySelector('#chan-reauth-dialog .dialog-close').click(); 1`);
+  await sleep(300);
+  const lc2 = await p1.evaljs(wsCounts);
+  ok(!!lcUrl && lc1.state === lc0.state + 1 && lc1.global === lc0.global + 1 && !lc2.open && lc2.state === lc0.state && lc2.global === lc0.global,
+    `r3: a re-authorize closed by ✕ while its sign-in runs leaves NONE of its watcher's listeners (state/global: before ${lc0.state}/${lc0.global}, running ${lc1.state}/${lc1.global}, closed ${lc2.state}/${lc2.global}; 9221575b kept both)`);
   const cfgR = await api('GET', '/api/channels/oauth/mount-clients?kind=gmail');
   ok(cfgR.status === 200 && cfgR.json.clients.some((x) => x.mountId === MOUNT_ID) && !cfgR.text.includes(MOUNT_CSEC) && !cfgR.text.includes(MOUNT_CID), '(r) the list route answers the mount without its secret or its whole id');
   ok(!(await api('GET', '/api/channels')).text.includes(MOUNT_CSEC) && !(await p2.evaljs(`document.body.innerHTML.includes(${JSON.stringify(MOUNT_CSEC)})`)), '(r) nor does the digest or the other client');

@@ -532,7 +532,7 @@ export function wireStepPaste(ctx, { tokenKey, configPage, start, callback, whyT
 // → `{token}`, and `finish(token, {close})` applies the new sign-in. `fields`
 // (optional) render through `renderFields` between the hint and the button —
 // the channel accounts' OAuth-client select.
-export function reauthDialog({ id = 'mount-reauth-dialog', title, hint: hintText, signinLabel, provider, fields = null, start, status: statusOf, callback, finish: apply, cancel = null, askFirst = null, savingText = null, pasteHint = null, pasteSecret = false, pastePlaceholder = 'http://127.0.0.1:53682/?state=…&code=…' }) {
+export function reauthDialog({ id = 'mount-reauth-dialog', title, hint: hintText, signinLabel, provider, fields = null, start, status: statusOf, callback, finish: apply, cancel = null, askFirst = null, onClose = null, savingText = null, pasteHint = null, pasteSecret = false, pastePlaceholder = 'http://127.0.0.1:53682/?state=…&code=…' }) {
   // lane lark-refresh-stall r2 (the dialog-yield seam): Escape on a sign-in that is RUNNING asks «Cancel the sign-in?» (the
   // caller's `askFirst` — the decision dialog) before it ends it, and cancels the consent when told yes — nothing running, or
   // no `askFirst` handed in: the shell's own door
@@ -546,7 +546,10 @@ export function reauthDialog({ id = 'mount-reauth-dialog', title, hint: hintText
     })();
     return false;
   };
-  const { body, close } = createModalShell({ id, title, bodyClass: 'mounts-dialog-body', escapeToClose: true, onEscape: () => escapeAsk() });
+  // r3 (acceptance r2, the listener-lifecycle law): every close — ✕, the backdrop, Escape, the dialog's own finish — stops the
+  // poll and hands the caller's `onClose` its teardown (a running sign-in's watcher listens to the socket until it is told)
+  const closed = () => { stopPoll(); if (typeof onClose === 'function') { try { onClose(); } catch { /* the dialog is gone either way */ } } };
+  const { body, close } = createModalShell({ id, title, bodyClass: 'mounts-dialog-body', onClose: closed, escapeToClose: true, onEscape: () => escapeAsk() });
   const hint = document.createElement('div');
   hint.className = 'mounts-field-hint';
   hint.textContent = hintText;

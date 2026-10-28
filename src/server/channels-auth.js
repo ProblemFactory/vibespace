@@ -642,7 +642,7 @@ function create(engineCtx) {
     await refreshAuth(e);
     e.failures = 0; e.nextAt = 0; e.rateStrikes = 0; e.backoffKind = null;
     await retractFailure(rec);
-    if (rec.signinDead) await landSignin(rec);   // lane lark-refresh-stall R5 r2: as at the record's own door (onAuthDone) — «signed in — verifying»
+    if (rec.signinDead || rec.signinVerifying) await landSignin(rec);   // lane lark-refresh-stall R5 r2: as at the record's own door (onAuthDone) — «signed in — verifying» (r3: a verifying record re-dated)
     await rejudgeConvCaps(rec, 're-authorized');   // inc-muk9jj0j-rel3: every conversation, BEFORE the one whole digest
     if (!engineCtx.stopped) notify([]);
     if (!engineCtx.stopped) pass(rec.id, { force: true }).catch((err) => log.warn('[channels] pass after re-authorize failed:', err && err.message));
@@ -952,7 +952,7 @@ function create(engineCtx) {
     // and the item is resolved now, «works again» is said only after a request with the new token answered, and a refusal
     // of that first request turns the row red ONCE with its own cause, `since` = this landing (speakSignin)
     if (!(r && r.ok) && rec.signinDead) await speakSignin(rec, 'consent-unfinished', { reassert: true, vendorWords: String((r && r.error) || '') });
-    if (r && r.ok && rec.signinDead) await landSignin(rec);
+    if (r && r.ok && (rec.signinDead || rec.signinVerifying)) await landSignin(rec);   // r3: a landing on a verifying record re-dates it (C3)
     // inc-muk9jj0j-rel3: A CONSENT CHANGES WHAT EVERY CONVERSATION MAY DO — re-judged HERE, at the write, for the whole
     // account (the pass below visits only what is due), then ONE whole digest carries the fresh verdicts
     if (r && r.ok) await rejudgeConvCaps(rec, 'connected');

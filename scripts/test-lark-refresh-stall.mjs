@@ -14,6 +14,8 @@
 //   B  the endpoint spends the token and CUTS the socket during the hold ⇒ a LOST answer, recorded; ONE retry of the old
 //      token ⇒ 20064 ⇒ `refresh-lost` naming the stall (never `revoked-elsewhere`) — the log, the item, the row
 //   X  (r2) a consent's single-use CODE exchanged across the same hold ⇒ the answer is read, its lifetime from the send
+//   E  (r3) a request at the live bound's EDGE (2 s bound, 1 s of it run when the hold begins), answered DURING the hold ⇒
+//      the late tick that crosses the bound defers its abort past the poll phase: the answer is READ (9221575b aborted it)
 //   C  CONTROL: a real revoke elsewhere (20064, no lost answer before it) still says `revoked-elsewhere`
 // Then the pieces without a hold: the live-time bound and its tick edges on a fake clock (R1), a lost answer / a request
 // that never left by the request's own `sent` fact / a dropped bearer never handed back / a lifetime from the send (R2),
@@ -21,7 +23,8 @@
 // VERIFIES (R5 r2).
 //
 // RED on 6428c67e and on 60e29ad0 (run this file inside a `git archive` copy): the base dies `revoked-elsewhere`; 60e29ad0
-// fails the r2 legs (the tick edges, the sent flag, the dropped bearer, the exchange, the words, the verifying landing).
+// fails the r2 legs (the tick edges, the sent flag, the dropped bearer, the exchange, the words, the verifying landing);
+// 9221575b fails the r3 legs (the edge's answer aborted, the dead waiters, the locked vault, the witness window, C3).
 import fs from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
@@ -62,7 +65,8 @@ const R20064 = { code: 20064, error: 'invalid_grant', error_description: 'The re
 const jsonRes = (body, status = 200) => ({ ok: status >= 200 && status < 300, status, headers: new Map(), json: async () => body });
 
 // ── the fake Lark token endpoint, OFF the main thread ────────────────────
-// sab[0] = token POSTs received, sab[1] = the main loop is held now, sab[2] = answers / cuts made while it was held
+// sab[0] = token POSTs received, sab[1] = the main loop is held now, sab[2] = answers / cuts made while it was held,
+// sab[3] = r3's edge request (+1 when it arrives, +10 when it is answered while the loop is held)
 const sab = new Int32Array(new SharedArrayBuffer(16));
 const WORKER = `
 const http = require('node:http');
@@ -81,6 +85,13 @@ const srv = http.createServer((req, res) => {
   req.on('data', (c) => { raw += c; });
   req.on('end', async () => {
     const u = req.url;
+    if (u.startsWith('/edge')) {
+      Atomics.add(sab, 3, 1); Atomics.notify(sab, 3);
+      for (let i = 0; i < 3000 && Atomics.load(sab, 1) !== 1; i++) await nap(5);
+      await nap(300);
+      if (Atomics.load(sab, 1) === 1) Atomics.add(sab, 3, 10);
+      return send(res, 200, { code: 0, edge: 'read' });
+    }
     if (u.startsWith('/open-apis/authen/v2/oauth/token')) {
       const body = JSON.parse(raw || '{}');
       const rt = String(body.refresh_token || body.code || '');   // a refresh by its token, a consent's exchange by its code
@@ -101,6 +112,7 @@ const srv = http.createServer((req, res) => {
     if (u.startsWith('/open-apis/auth/v3/tenant_access_token')) return send(res, 200, { code: 0, msg: 'ok', tenant_access_token: 't-stall', expire: 7200 });
     if (u.startsWith('/open-apis/authen/v1/user_info')) return send(res, 200, { code: 0, msg: 'success', data: { open_id: 'ou_X', name: 'Owner X', union_id: 'on_X' } });
     if (/u-bad/.test(String(req.headers.authorization || ''))) return send(res, 200, { code: 99991663, msg: 'Invalid access token for authorization. Please make a request with token attached.' });
+    if (/u-5xx/.test(String(req.headers.authorization || ''))) return send(res, 503, { code: 500, msg: 'internal error' });
     return send(res, 200, { code: 0, msg: 'success', data: { items: [], has_more: false, page_token: '' } });
   });
 });
@@ -140,7 +152,9 @@ console.log('\n① a refresh (and a consent\'s code exchange) in flight across a
   const lines = [];
   const log = { log: (s) => lines.push(String(s)), warn: (s) => lines.push(String(s)), error: (s) => lines.push(String(s)) };
   const registry = CH.createChannelRegistry();
-  registry.register({ ...lark.adapter, create: (rec, deps) => lark.adapter.create(rec, { ...deps, log, tokens: TOK[rec.id], resolveIntegration: () => CRED, fetch: viaLoopback }) });
+  const witCalls = [];   // r3: what the hub's witness was asked — the stall's length AND the hold's own windows
+  registry.register({ ...lark.adapter, create: (rec, deps) => lark.adapter.create(rec, { ...deps, log, tokens: TOK[rec.id], resolveIntegration: () => CRED, fetch: viaLoopback,
+    loopWitness: (ms, ws) => { witCalls.push({ id: rec.id, ms, ws: ws || null }); return has(deps.loopWitness) ? deps.loopWitness(ms, ws) : null; } }) });
   const userTodos = new UserTodoManager({ dataDir: dir, expirySweepMs: 0 });
   const eng = ENG.create({ dataDir: dir, registry, env: {}, broadcast: () => {}, log, userTodos, serverSetting: () => undefined });
   // X: a consent whose code is exchanged across the hold (the adapter's own exchange, handed to the consent machine)
@@ -158,15 +172,33 @@ console.log('\n① a refresh (and a consent\'s code exchange) in flight across a
     const pX = consentOpts && has(consentOpts.exchange) ? consentOpts.exchange({ code: 'code-X', redirectUri: 'http://127.0.0.1:9/lark/cb' }).then((r) => ({ r }), (e) => ({ e })) : Promise.resolve({ e: new Error('no exchange') });
     for (let i = 0; i < 400 && Atomics.load(sab, 0) < 3; i++) await Atomics.waitAsync(sab, 0, Atomics.load(sab, 0), 50).value;
     const leftBefore = Atomics.load(sab, 0);
+    // E (r3): the live bound's EDGE on a real socket — a 2 s bound (1 s ticks), the hold begins after ONE tick has run, the
+    // answer goes into the socket during the hold; the first tick after it is late and crosses the bound
+    const e0 = performance.now();
+    const clkE = lark.liveDeadline(2000);
+    const pE = globalThis.fetch(`http://127.0.0.1:${PORT}/edge`, { method: 'POST', body: '{}', headers: { 'content-type': 'application/json' }, signal: clkE.signal })
+      .then(async (r) => { const d = await r.json(); clkE.end(); return { d }; }, (e) => { clkE.end(); return { e }; });
+    for (let i = 0; i < 400 && Atomics.load(sab, 3) < 1; i++) await Atomics.waitAsync(sab, 3, Atomics.load(sab, 3), 50).value;
+    while (performance.now() - e0 < 1400) await sleep(20);
     const wallBefore = Date.now();
-    // THE HELD LOOP — the one synchronous wait of this suite (Atomics.wait, the thread sleeps; 21.5 s > the old 20 s timer)
-    Atomics.store(sab, 1, 1);
-    const h0 = performance.now();
-    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 21500);
-    const heldFor = performance.now() - h0;
-    Atomics.store(sab, 1, 0);
-    const [, , x] = await Promise.all([pA, pB, pX]);
+    // THE HELD LOOP — the one synchronous wait of this suite (Atomics.wait, the thread sleeps; 21.5 s > the old 20 s timer),
+    // run inside a POLL-phase callback (an fs completion — the incident's shape: the next turn runs its timers first)
+    let h0 = 0, heldFor = 0, edgeAt = 0;
+    await new Promise((res) => fs.stat(REPO, () => {
+      edgeAt = Math.round(performance.now() - e0);
+      Atomics.store(sab, 1, 1);
+      h0 = performance.now();
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 21500);
+      heldFor = performance.now() - h0;
+      Atomics.store(sab, 1, 0);
+      res();
+    }));
+    const [, , x, eRes] = await Promise.all([pA, pB, pX, pE]);
     ok(leftBefore >= 3 && heldFor >= 21000 && Atomics.load(sab, 2) === 3, `the two refresh POSTs and the consent's exchange had LEFT before the hold (${leftBefore}), the loop was held ${Math.round(heldFor)} ms, and the endpoint answered A + X and cut B while it was held (${Atomics.load(sab, 2)} of 3)`);
+    // E (r3): the answer already in the socket is READ before any abort — the crossing tick came late (after the hold), its
+    // abort waits past the poll phase (r2 aborted in the timers phase: the rotated token of the incident, lost at the edge)
+    ok(eRes && eRes.d && eRes.d.edge === 'read' && Atomics.load(sab, 3) === 11 && edgeAt >= 1050 && edgeAt <= 1950,
+      `E (r3): a request at the live bound's EDGE (2 s bound, the hold began ${edgeAt} ms in — one tick run), answered DURING the hold, is READ after it (${eRes && eRes.e ? `aborted: ${String((eRes.e.cause && eRes.e.cause.message) || eRes.e.message).slice(0, 100)}` : 'answered'}; sab[3] ${Atomics.load(sab, 3)})`);
     // the engine's next pass of each (the base's retry road), then C — a refusal with no lost answer before it
     await eng.pass('la', { force: true }); await eng.pass('lb', { force: true });
     await eng.pass('lc', { force: true });
@@ -207,6 +239,11 @@ console.log('\n① a refresh (and a consent\'s code exchange) in flight across a
     const lostLine = lines.find((s) => /the token refresh's answer was lost after the request left .*the hub's loop was held 2\d s while it waited/.test(s));
     ok(!!logB && !!lostLine && !/disk/.test(logB + lostLine), `the hub log names the cause code and the stall (and no witness word it never measured): «${(logB || '').slice(0, 160)}» · «${(lostLine || '').slice(0, 160)}»`);
     ok(!lines.some((s) => /lb: the sign-in expired \(revoked-elsewhere/.test(s)), 'B is never logged `revoked-elsewhere`');
+    // r3 (acceptance r2): the witness judges the HOLD's own window — the span the request's live clock measured — never the
+    // instant the loss is recorded (up to 20 s of live waiting can lie between them)
+    const wB = witCalls.find((c) => c.id === 'lb') || null;
+    const spanB = wB && Array.isArray(wB.ws) ? wB.ws.find((w) => w.to - w.from >= 21000 && Math.abs(w.from - wallBefore) <= 1500) : null;
+    ok(!!spanB, `r3: B's witness was handed the hold's own window (${wB ? JSON.stringify({ ms: wB.ms, ws: wB.ws && wB.ws.map((w) => ({ from: w.from - wallBefore, len: w.to - w.from })) }) : 'never asked'} — from relative to the hold's start)`);
 
     // C: CONTROL — no lost answer precedes the 20064 ⇒ revoked-elsewhere, as before
     const dC = rec('lc').signinDead || {};
@@ -242,27 +279,42 @@ console.log('\n② R1: the refresh is bounded by LIVE loop time, never by a time
     ok(e.end() === 0 && !e.signal.aborted, 'a request answered in time: end() = 0 held, never aborted (the interval is cleared)');
     // r2 (acceptance r1's fake-clock drive): the tick accounting's two edges, driven tick by tick (a captured interval, a fake
     // monotonic clock — no real hold): a gap ≥ 1.5 ticks counts its EXCESS as held, and the bound fires on the first tick past
-    // 20 s LIVE even when that tick came late
-    const drive = (gaps) => {
-      let cb = null, mono2 = 0, wall = 0, at = null;
-      const si = globalThis.setInterval, ci = globalThis.clearInterval;
+    // 20 s LIVE even when that tick came late. r3: each turn runs as libuv does — timers (the tick), poll (an answer that
+    // waited in the socket: the request ends its clock), check (the immediates: a deferred abort)
+    const drive = (gaps, answerOn = -1) => {
+      let cb = null, mono2 = 0, wall = 0, at = null, read = null;
+      const imm = [];
+      const si = globalThis.setInterval, ci = globalThis.clearInterval, sim = globalThis.setImmediate;
       globalThis.setInterval = (f) => { cb = f; return { unref() {}, fake: true }; };
       globalThis.clearInterval = (h) => { if (h && h.fake) cb = null; else ci(h); };
+      globalThis.setImmediate = (f, ...a) => { imm.push(() => f(...a)); return {}; };
       try {
-        const dl = LD(20000, { tickMs: 1000, mono: () => mono2 });
-        for (let i = 0; i < gaps.length && at === null; i++) { mono2 += gaps[i]; wall += gaps[i]; if (cb) cb(); if (dl.signal.aborted) at = wall; }
-        return { at, held: dl.end(), wall };
-      } finally { globalThis.setInterval = si; globalThis.clearInterval = ci; }
+        const dl = LD(20000, { tickMs: 1000, mono: () => mono2, wall: () => 1_800_000_000_000 + wall });
+        for (let i = 0; i < gaps.length && at === null && read === null; i++) {
+          mono2 += gaps[i]; wall += gaps[i];
+          if (cb) cb();
+          if (i === answerOn && !dl.signal.aborted) { dl.end(); read = wall; }
+          for (const f of imm.splice(0)) f();
+          if (dl.signal.aborted) at = wall;
+        }
+        return { at, read, held: dl.end(), wall, windows: has(dl.windows) ? dl.windows() : null };
+      } finally { globalThis.setInterval = si; globalThis.clearInterval = ci; globalThis.setImmediate = sim; }
     };
     const rep = (n, v) => Array.from({ length: n }, () => v);
     const a5 = drive(rep(40, 1500));
     ok(a5.at === 30000 && a5.held === 10000, `a loop held 0.5 s of every 1.5 s turn: 20 s of running time is 30 s of wall — a vendor answering at 25 s is never cut off (fired at ${a5.at} ms, held ${a5.held} ms; r1 fired at 21 000 with held 0)`);
     const a2 = drive(rep(601, 2100));
-    ok(a2.at === 42000, `a loop held EVERY turn (601 × 2.1 s): the bound still fires — on the 20th late tick (${a2.at} ms; r1 never fired in 21 min)`);
+    ok(a2.at === 42000, `a loop held EVERY turn (601 × 2.1 s), nothing in the socket: the bound still fires — in the 20th turn, after its poll phase (${a2.at} ms; r1 never fired in 21 min)`);
     const g = drive([500, 5368840, ...rep(40, 1000)]);
     ok(g.at === 5368840 + 500 + 19000 && g.held === 5367840, `the canary's 5 368 840 ms hold moves the bound by ONE tick — the poll after it reads the socket first (fired ${g.at - 5368840 - 500} ms after the hold, held ${g.held} ms)`);
-    const late = drive([...rep(19, 1000), 5000]);
-    ok(late.at === 24000, `a tick that comes LATE past 20 s of running time fires (at ${late.at} ms — r1 waited for an un-held tick)`);
+    const late = drive([...rep(19, 1000), 5000, 1000]);
+    ok(late.at === 24000, `a tick that comes LATE past 20 s of running time, nothing in the socket: the abort fires in that same turn, after its poll phase (at ${late.at} ms — r1 waited for an un-held tick)`);
+    // r3 (acceptance r2: r2 aborted in the TIMERS phase, before the poll read an answer that came during the hold)
+    ok(JSON.stringify(late.windows) === JSON.stringify([{ from: 1_800_000_000_000 + 19000, to: 1_800_000_000_000 + 24000 }]), `r3: the live clock says WHERE the loop was held — the late gap's own wall span (${JSON.stringify(late.windows)}) — the window the witness judges`);
+    const lateRead = drive([...rep(19, 1000), 5000, 1000], 19);
+    ok(lateRead.read === 24000 && lateRead.at === null && lateRead.held === 4000, `r3: the same late crossing tick with an answer IN THE SOCKET — the answer is READ, no abort (read at ${lateRead.read} ms, aborted at ${lateRead.at}, held ${lateRead.held} ms; 9221575b aborted at 24 000)`);
+    const shortRead = drive([...rep(19, 1000), 1200, 1000], 19);
+    ok(shortRead.read === 20200 && shortRead.at === null, `r3: a short hold (1.2 s, counted as running) that crosses the bound with an answer in the socket — read, never aborted (read at ${shortRead.read}, aborted at ${shortRead.at}; r1 and r2 aborted it)`);
   }
   const src = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf-8');
   const refresh = src.slice(src.indexOf('  async function refreshAccessToken('), src.indexOf('  function bearerNow('));
@@ -412,6 +464,33 @@ console.log('\n③ R2: a lost answer is an UNKNOWN outcome — recorded, tried o
   ok(r3.e2 === null && r3.tok.refresh_token === 'ur-r' && !r3.tok.refreshLostAt && r3.posts === 2, `a lost answer whose ONE retry succeeds: the rotated token, the lost fact gone (${r3.tok.refresh_token}, ${r3.posts} POSTs)`);
 }
 
+// ── ③b r3: a vault LOCKED while the refresh is in flight is named as locked — never «disconnected» (acceptance r2) ──
+console.log('\n③b r3: a vault locked mid-refresh is `vault-locked` by name; a token the vendor rotated under the lock is kept for the unlock');
+{
+  const lockStore = (t) => { const st = { token: t, locked: false }; return { st, read: () => (st.locked ? { token: null, why: 'vault-locked' } : { token: st.token, why: st.token ? null : 'never-authenticated' }),
+    write: async (x, meta = {}) => { if (st.locked) throw new Error('the vault is locked'); if (meta.supersedes !== undefined && String((st.token && st.token.refresh_token) || '') !== String(meta.supersedes || '')) return { superseded: true }; st.token = x; return { written: true }; }, clear: async () => { st.token = null; } }; };
+  const held = () => ({ access_token: 'u-held', expiresAt: Date.now() + 10 * 60e3, refresh_token: 'ur-1', refreshExpiresAt: Date.now() + 86400e3, scopes: ['im:message'], openId: 'ou_v' });
+  const mkV = (tokens, answer, pace = async () => {}) => { const reg = CH.createChannelRegistry(); reg.register(lark.adapter); const posts = [];
+    const a = reg.create('lark', { id: 'lv' }, { fetch: async (url, init) => { const body = init && init.body ? JSON.parse(init.body) : null; if (body && body.grant_type === 'refresh_token') { posts.push(body.refresh_token); return answer(body.refresh_token); } return jsonRes({ code: 404 }, 404); }, tokens, resolveIntegration: () => CRED, log: quiet, pace, meter: () => {} });
+    return { a, posts }; };
+  const tryB = async (a) => { try { return { bearer: await a.apiBearer() }; } catch (e) { return { code: e.code, detail: e.detail || null }; } };
+  const t5 = lockStore(held());
+  const v5 = mkV(t5, () => { t5.st.locked = true; return jsonRes({ code: 500, msg: 'internal' }, 503); });
+  const r5 = await tryB(v5.a);
+  ok(r5.code === 'vault-locked' && !(r5.detail && r5.detail.tokenDropped), `a lock lands during the refresh POST, then a 503: the request hears \`vault-locked\` by name (${JSON.stringify(r5)}; 9221575b: auth-expired, tokenDropped, why disconnected)`);
+  const tS = lockStore(held()); const spent = new Set();
+  const vS = mkV(tS, (rt) => { if (spent.has(rt)) return jsonRes(R20064, 400); spent.add(rt); tS.st.locked = true; return jsonRes({ code: 0, access_token: 'u-rot', refresh_token: 'ur-rot', expires_in: 7200, refresh_token_expires_in: 604800 }); });
+  const rS = await tryB(vS.a);
+  tS.st.locked = false;
+  const rS2 = await tryB(vS.a);
+  ok(rS.code === 'vault-locked' && rS2.bearer === 'u-rot' && vS.posts.length === 1 && tS.st.token && tS.st.token.refresh_token === 'ur-rot' && !tS.st.token.invalidGrantAt,
+    `the vendor ROTATED the token as the lock landed: vault-locked now, the rotated token written at the first read after the unlock — ONE POST, no 20064 (${JSON.stringify(rS)} → ${JSON.stringify(rS2)}, POSTs ${vS.posts.length}, store ${tS.st.token && tS.st.token.refresh_token}; 9221575b discarded it and the spent token met 20064)`);
+  const tP = lockStore(held());
+  const vP = mkV(tP, () => jsonRes({ code: 404 }, 404), async () => { tP.st.locked = true; });
+  const rP = await tryB(vP.a);
+  ok(rP.code === 'vault-locked' && vP.posts.length === 0, `a lock during the refresh's pace: vault-locked, nothing sent (${JSON.stringify(rP)}, POSTs ${vP.posts.length})`);
+}
+
 // ── ④ R3: the margin and the pass's own renew — past the back-off gate (r2) ──
 console.log('\n④ R3: the refresh runs early — a 15-min margin, renewed by the pass itself');
 {
@@ -464,14 +543,57 @@ console.log('\n④ R3: the refresh runs early — a 15-min margin, renewed by th
     // the hub's witness of a stall, handed to every adapter: loop-blame's slow sync fs calls over that window
     ok(has(wit), 'r2: the engine hands its adapters the stall witness (`loopWitness`)');
     if (has(wit)) {
-      ok(wit(21500) === null, '…which names nothing when no slow sync fs call fell in the window (this suite\'s hold was a wait)');
-      LoopBlame.note({ at: Date.now() - 21000, ms: 20900, fn: 'readFileSync', path: '/mnt/nas/x.jsonl', bytes: null, caller: 'src/x.js:1' });
-      ok(wit(21500) === 'disk', '…and names the disk when the slow sync fs calls it timed cover the stall');
+      const nw = Date.now(), hold = [{ from: nw - 22500, to: nw - 1000 }];
+      ok(wit(21500, hold) === null, '…which names nothing when no slow sync fs call fell in the window (this suite\'s hold was a wait)');
+      LoopBlame.note({ at: nw - 22000, ms: 20900, fn: 'readFileSync', path: '/mnt/nas/x.jsonl', bytes: null, caller: 'src/x.js:1' });
+      ok(wit(21500, hold) === 'disk', '…and names the disk when the slow sync fs calls it timed cover the stall');
+      ok(wit(21500) === null && wit(21500, [{ from: nw - 90000, to: nw - 68500 }]) === null, 'r3: …only inside the HOLD\'s own window — no window, or a hold elsewhere, names nothing (9221575b judged the instant of the call)');
     }
   } finally { try { eng.stop(); } catch { } try { userTodos.stop(); } catch { } }
   const m4 = mk(30e3);
   const r4 = m4.a.auth && has(m4.a.auth.renew) ? await m4.a.auth.renew() : undefined;
   ok(r4 === false && m4.seen.length === 0, `r2: never in the bearer's last minute — the request's own refresh is the one try there (${r4}, ${m4.seen.length} requests)`);
+}
+
+// ── ④b r3: renew()'s dead refusal answers the pass's waiters; a vault locked under a call counts no failure (acceptance r2) ──
+console.log('\n④b r3: a dead refusal at the renew answers the waiting requests with the dead sign-in; one press, one step');
+{
+  const dir = path.join(ROOT, 'renew-dead');
+  fs.mkdirSync(path.join(dir, 'channels'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: [{ ...acctRec('rd', 'u', 'rd', 'Renewing'), options: {} }, { ...acctRec('rp', 'u', 'rd', 'Pressed'), options: {} }, { ...acctRec('vl', 'u', 'rd', 'Locking'), options: {} }] }, null, 1));
+  const fake = require(path.join(REPO, 'src/channels/fake.js'));
+  const m = fake.makeFakeAdapter({ kind: 'rd', receive: 'poll', sendAs: ['user'] });
+  let clock = Date.now(); const now = () => clock;
+  const dead = new Set(), locked = new Set(), hist = {};
+  const DEAD = () => new CH.ChannelError('auth-expired', 'lark token refresh: The refresh token has been revoked. (20064)', { retryable: false, detail: { cause: 'revoked-elsewhere' } });
+  const registry = CH.createChannelRegistry();
+  registry.register({ kind: 'rd', caps: m.caps, create(rec, deps) {
+    const impl = m.create(rec, deps); const h = impl.history;
+    impl.history = async (...a) => { hist[rec.id] = (hist[rec.id] || 0) + 1; if (dead.has(rec.id)) throw DEAD(); if (locked.has(rec.id)) throw CH.notConnectedError('Locking', 'vault-locked'); return h.apply(impl, a); };
+    impl.auth = { ...(impl.auth || {}), async state() { return { state: 'connected', expiresAt: null, scopes: ['x'], why: null }; }, async renew() { if (dead.has(rec.id)) throw DEAD(); return false; } };
+    return impl;
+  } });
+  const userTodos = new UserTodoManager({ dataDir: dir, expirySweepMs: 0 });
+  const eng = ENG.create({ dataDir: dir, registry, env: {}, broadcast: () => {}, log: quiet, userTodos, serverSetting: () => undefined, now });
+  const rec = (id) => eng.adapterRecords().adapters.find((x) => x.id === id) || {};
+  try {
+    for (const id of ['rd', 'rp', 'vl']) { await eng.pass(id, { force: true }); await eng.pass(id, { force: true }); }
+    clock += 10 * 60e3;
+    dead.add('rd'); dead.add('rp');
+    const h0 = hist.rd || 0;
+    const ar = await tryAsync(() => eng.refresh('rd', 'rd-ops', { origin: 'agent' }));
+    ok(ar && ar.code === 'auth-expired' && rec('rd').consecutiveFailures === 1 && (hist.rd || 0) === h0 && rec('rd').signinDead,
+      `an agent's refresh whose pass met the dead refusal at the renew hears the DEAD sign-in (code ${ar && ar.code}; 9221575b: backoff, «retried in 30 s»), one failure (${rec('rd').consecutiveFailures}), no second pass (history ${h0} → ${hist.rd || 0})`);
+    const p0 = hist.rp || 0;
+    const pr = await tryAsync(() => eng.refresh('rp', 'rd-ops', { origin: 'refresh' }));
+    ok(pr && pr.code === 'auth-expired' && rec('rp').consecutiveFailures === 1 && (hist.rp || 0) === p0,
+      `the owner's ONE press climbs ONE step (failures ${rec('rp').consecutiveFailures}; 9221575b: 2 — a second pass ran the request; history ${p0} → ${hist.rp || 0})`);
+    locked.add('vl');
+    const vr = await tryAsync(() => eng.refresh('vl', 'rd-ops', { origin: 'agent' }));
+    const vr2 = await tryAsync(() => eng.refresh('vl', 'rd-ops', { origin: 'agent' }));
+    ok(vr && vr.code === 'vault-locked' && vr2 && vr2.code === 'vault-locked' && rec('vl').consecutiveFailures === 0 && !(rec('vl').lastPass && rec('vl').lastPass.code === 'vault-locked'),
+      `a vault locked under the vendor call counts NO failure — the agent hears vault-locked twice, no back-off (${vr && vr.code}, ${vr2 && vr2.code}; failures ${rec('vl').consecutiveFailures}; 9221575b: 1 and «backoff»)`);
+  } finally { try { eng.stop(); } catch { } try { userTodos.stop(); } catch { } }
 }
 
 // ── ⑤ R4: the words — measured only, the length first, units, vendor-free; the For-you store keeps or refuses by name ──
@@ -494,13 +616,28 @@ console.log('\n⑤ R4: the words name the MEASURED stall');
   ok(disk === '登录失效 — 需要重新授权 · hub 在刷新令牌时被 NAS/磁盘读写卡住了 89 分钟，一次性刷新令牌已被用掉', `r2: the witness named the disk ⇒ the words say it (no parentheses): «${disk}»`);
   const W = has(CC.stallWitnessOf) ? CC.stallWitnessOf : () => 'n/a';
   const at = 1_800_000_000_000;
-  ok(W([{ at: at - 21000, ms: 20000 }], { heldMs: 21500, at }) === 'disk' && W([{ at: at - 21000, ms: 831 }], { heldMs: 12777, at }) === null && W([], { heldMs: 21500, at }) === null,
+  ok(W([{ at: at - 21000, ms: 20000 }], { heldMs: 21500, windows: [{ from: at - 22500, to: at }] }) === 'disk' && W([{ at: at - 21000, ms: 831 }], { heldMs: 12777, windows: [{ from: at - 13777, to: at }] }) === null && W([], { heldMs: 21500, windows: [{ from: at - 22500, to: at }] }) === null,
     'r2: the witness: slow sync fs calls covering ≥ half the stall ⇒ disk; the incident minute\'s 831 ms writeFileSync in a 12.8 s hold ⇒ nothing (on-CPU); none ⇒ nothing');
+  // r3 (acceptance r2's two shapes): judged on the HOLD's own window, never the instant the loss was recorded
+  const T0w = 1_700_000_000_000;
+  const ringB = []; for (let t = T0w + 5000; t < T0w + 20000; t += 700) ringB.push({ at: t, ms: 400 });
+  ok(W([{ at: T0w, ms: 30000 }], { heldMs: 29000, windows: [{ from: T0w, to: T0w + 30000 }] }) === 'disk' && W(ringB, { heldMs: 4000, windows: [{ from: T0w, to: T0w + 5000 }] }) === null && W([{ at: T0w, ms: 30000 }], { heldMs: 29000 }) === null,
+    'r3: (a) a 30 s sync fs hold says disk whenever its loss is recorded; (b) a 5 s CPU hold with sync reads in the live wait AFTER it names nothing; no window ⇒ nothing');
   // every stall key: vendor-free and parenthesis-free in every language (the item's {kind} names the vendor; the item's own
   // parentheses wrap the cause — one level)
   const keys = [...['seconds', 'minutes', 'hours', 'days'].flatMap((u) => [CC.signinCauseText('refresh-lost', { heldMs: { seconds: 5e3, minutes: 5 * 60e3, hours: 5 * 3600e3, days: 5 * 86400e3 }[u], heldWhy: null, t: (k) => k }), CC.signinCauseText('refresh-lost', { heldMs: { seconds: 5e3, minutes: 5 * 60e3, hours: 5 * 3600e3, days: 5 * 86400e3 }[u], heldWhy: 'disk', t: (k) => k })]), CC.signinCauseText('refresh-lost', { heldMs: 0, t: (k) => k }), CC.signinCauseText('refused-at-first-use', { t: (k) => k })];
-  const dirty = keys.filter((k) => !k || [k, zh[k], ja[k]].some((v) => typeof v !== 'string' || /飞书|Lark|[（()）]/.test(v)));
+  // r3 (acceptance r2: a Latin «Feishu» planted in the zh hours key passed — the regex knew 飞书 and Lark only, while the ja
+  // dictionary itself spells the vendor «Feishu»): every spelling, any case; the dictionaries' own vendor words are {kind}
+  // values (the item names the vendor through the account's label) — exempt BY KEY, never by the regex missing a spelling
+  const VENDOR_RE = /飞书|lark|feishu|[（()）]/i;
+  const KIND_KEYS = ['Feishu'];
+  const census = (zhD, jaD) => keys.filter((k) => !k || [k, zhD[k], jaD[k]].some((v) => typeof v !== 'string' || VENDOR_RE.test(v)));
+  const dirty = census(zh, ja);
   ok(keys.length === 10 && new Set(keys).size === 10 && !dirty.length, `r2: the ${keys.length} cause keys carry zh + ja, no vendor name, no parentheses in any language`, JSON.stringify(dirty));
+  const hoursKey = CC.signinCauseText('refresh-lost', { heldMs: 5 * 3600e3, heldWhy: null, t: (k) => k });
+  const planted = census({ ...zh, [hoursKey]: `${zh[hoursKey]} Feishu` }, ja);
+  ok(planted.length === 1 && planted[0] === hoursKey, `r3: the census knows the Latin spelling — «Feishu» planted in the zh hours key is named (${JSON.stringify(planted)})`);
+  ok(KIND_KEYS.every((k) => !keys.includes(k) && VENDOR_RE.test(zh[k]) && VENDOR_RE.test(ja[k])), `r3: the dictionaries' own vendor words (zh «${zh.Feishu}», ja «${ja.Feishu}») are {kind} values — exempt by KEY (none is a cause key), and the census regex would name them`);
   const acts = fs.readFileSync(path.join(REPO, 'src/lib/user-todos-actions.js'), 'utf-8');
   ok(acts.includes("typeof v.key === 'string' ? t(v.key, v.params || undefined) : v"), 'the For-you renderer (`said`) fills a words-param with its own params — the rule this suite renders by');
   const ut = new UserTodoManager({ dataDir: path.join(ROOT, 'todos'), expirySweepMs: 0 });
@@ -521,23 +658,23 @@ console.log('\n⑥ R5: a consent that lands on a dead sign-in is «signed in —
 {
   const dir = path.join(ROOT, 'land');
   fs.mkdirSync(path.join(dir, 'channels'), { recursive: true });
-  fs.writeFileSync(path.join(dir, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: [acctRec('ld', 'Owner D'), acctRec('lg', 'Owner G')] }, null, 1));
-  const TOK = { ld: mkTokens(tokenOf('ur-D', 15e3)), lg: mkTokens(tokenOf('ur-G', 15e3)) };
-  await planRt('ur-D', 'revoked'); await planRt('ur-G', 'revoked');
+  fs.writeFileSync(path.join(dir, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: [acctRec('ld', 'Owner D'), acctRec('lg', 'Owner G'), acctRec('lt', 'Owner T')] }, null, 1));
+  const TOK = { ld: mkTokens(tokenOf('ur-D', 15e3)), lg: mkTokens(tokenOf('ur-G', 15e3)), lt: mkTokens(tokenOf('ur-T', 15e3)) };
+  await planRt('ur-D', 'revoked'); await planRt('ur-G', 'revoked'); await planRt('ur-T', 'revoked');
   const lines = []; const T0 = performance.now(); const ms = () => Math.round(performance.now() - T0);
   const log = { log: (s) => lines.push(`${ms()} ${s}`), warn: (s) => lines.push(`${ms()} ${s}`), error: (s) => lines.push(`${ms()} ${s}`) };
   const depsOf = {};
   const registry = CH.createChannelRegistry();
   registry.register({ ...lark.adapter, create: (rec, deps) => { depsOf[rec.id] = deps; return lark.adapter.create(rec, { ...deps, log, tokens: TOK[rec.id], resolveIntegration: () => CRED, fetch: viaLoopback }); } });
   const userTodos = new UserTodoManager({ dataDir: dir, expirySweepMs: 0 });
-  const frames = { ld: [], lg: [] };
+  const frames = { ld: [], lg: [], lt: [] };
   const eng = ENG.create({ dataDir: dir, registry, env: {}, log, userTodos, serverSetting: () => undefined,
     broadcast: (m) => { if (m && m.type === 'channels-updated' && m.digest && m.digest.adapters) for (const a of m.digest.adapters) if (frames[a.id]) frames[a.id].push({ t: ms(), item: (itemOf(a.id) || {}).status || null, authState: a.authState, authVerifying: a.authVerifying === true, authCause: a.authCause, authSince: a.authSince, line: CC.signinLineText(a, { t: tOf(zh) }) }); } });
   const rec = (id) => eng.adapterRecords().adapters.find((r) => r.id === id) || {};
   const itemOf = (id) => (userTodos._state.items || []).find((i) => i.action && i.action.type === 'channel-reauth' && i.action.adapterId === id) || null;
   const settle = async (id, f) => { for (let i = 0; i < 200 && !f(rec(id)); i++) await sleep(25); await sleep(200); };
   try {
-    await eng.pass('ld', { force: true }); await eng.pass('lg', { force: true });
+    await eng.pass('ld', { force: true }); await eng.pass('lg', { force: true }); await eng.pass('lt', { force: true });
     ok(rec('ld').signinDead && rec('lg').signinDead && itemOf('ld') && itemOf('ld').status === 'open', 'setup: both sign-ins dead (20064), their items open');
     const land = async (id, token) => {
       TOK[id].st.token = token;
@@ -571,6 +708,22 @@ console.log('\n⑥ R5: a consent that lands on a dead sign-in is «signed in —
     const iLand = logG.findIndex((s) => /a new sign-in landed — verifying/.test(s)), iWorks = logG.findIndex((s) => /the sign-in works again \(the first requests with the new sign-in went through\)/.test(s));
     ok(JSON.stringify(fG) === JSON.stringify(['verifying', 'ok']) && iLand >= 0 && iWorks > iLand && rec('lg').lastPass && rec('lg').lastPass.ok === true,
       `a NEW token that works: verifying → ok after its pass answered, «works again» said then (${fG.join(' → ')}; ${JSON.stringify(logG.map((s) => s.slice(0, 90)))})`);
+    // T (r3, acceptance r2 C3): a THIRD landing during the verifying window — L2's first request answered 503 (still verifying),
+    // then L3 lands and the vendor refuses ITS first request: the verdict is L3's — `since` = L3's landing, the log names L3
+    const tok3 = (at, rt) => ({ access_token: at, expiresAt: Date.now() + 2 * 3600e3, refresh_token: rt, refreshExpiresAt: Date.now() + 7 * 86400e3, scopes: ['im:message'], openId: 'ou_ur-T', name: 'Owner ur-T', brand: 'feishu' });
+    const t2 = await land('lt', tok3('u-5xx-T2', 'ur-T2'));
+    await settle('lt', (r) => r.signinVerifying && r.lastPass && r.lastPass.ok === false);
+    const sinceL2 = Number((frames.lt[t2.nF] || {}).authSince) || null;
+    const midT = { verifying: !!rec('lt').signinVerifying, dead: !!rec('lt').signinDead, code: rec('lt').lastPass && rec('lt').lastPass.code };
+    await sleep(1100);
+    const t3 = await land('lt', tok3('u-bad-T3', 'ur-T3'));
+    const sinceL3 = Number((frames.lt[t3.nF] || {}).authSince) || null;
+    await settle('lt', (r) => r.signinDead);
+    const dT = rec('lt').signinDead || {};
+    const logT = lines.slice(t3.nL).map((s) => s.replace(/^\d+ /, '')).filter((s) => /lt:/.test(s));
+    ok(midT.verifying && !midT.dead && sinceL2 && sinceL3 && sinceL3 - sinceL2 >= 1000 && Number(dT.since) === sinceL3 && dT.cause === 'refused-at-first-use'
+      && logT.some((s) => s.includes(`the new sign-in (landed ${new Date(sinceL3).toISOString()}) was refused at its first request`)) && !logT.some((s) => s.includes(new Date(sinceL2).toISOString()) && /was refused/.test(s)),
+      `r3 C3: a third landing while the second verifies (its first request 503: ${JSON.stringify(midT)}) — L3's refusal is L3's verdict: since = L3's landing (${dT.since}; L2 ${sinceL2}, L3 ${sinceL3}; 9221575b: L2), the log names L3: ${JSON.stringify(logT.map((s) => s.slice(0, 120)))}`);
   } finally { try { eng.stop(); } catch { } try { userTodos.stop(); } catch { } }
   // the re-authorize dialog: a landing missed while the socket was down is read ONCE on reconnect; Escape on a running
   // sign-in asks first (the dialog-yield seam) — source facts here, the chrome leg in test-integrations-ui (l)
@@ -578,6 +731,7 @@ console.log('\n⑥ R5: a consent that lands on a dead sign-in is «signed in —
   ok(/app\.ws\.onStateChange\(onState\)/.test(dlg) && /fetchJson\('\/api\/channels\?scope=accounts'\)\.then\(\(d\) => \{ if \(d && Array\.isArray\(d\.adapters\)\) judge/.test(dlg), 'r2: the dialog\'s watcher re-reads the account ONCE on every reconnect (a landing broadcast missed while the socket was down)');
   const md = fs.readFileSync(path.join(REPO, 'src/lib/mounts-dialog.js'), 'utf-8');
   ok(/escapeToClose: true, onEscape: \(\) => escapeAsk\(\) \}\)/.test(md) && /tr\('Cancel the sign-in\?'\)/.test(md) && /askFirst: showConfirmDialog/.test(dlg), 'r2: the re-authorize dialog\'s Escape on a RUNNING sign-in asks «Cancel the sign-in?» (onEscape, the OAT shape)');
+  ok(/onClose: closed, escapeToClose: true/.test(md) && /onClose: \(\) => \{ if \(watcher\) \{ watcher\.off\(\); watcher = null; \} \}/.test(dlg), 'r3: every close of the dialog (✕, backdrop, Escape, its finish) tears its watcher down — the chrome count in test-integrations-ui (r)');
 }
 
 await worker.terminate();

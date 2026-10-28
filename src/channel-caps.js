@@ -525,14 +525,19 @@ const SIGNIN_CAUSES = Object.freeze(['refresh-refused', 'revoked-elsewhere', 'to
  *  window: 'disk' = the slow synchronous fs calls loop-blame timed cover at least half of it. Nothing else is a cause word
  *  (CPU work, a GC, an unwrapped wait are not told apart — the words then say the length alone). */
 const STALL_WITNESSES = Object.freeze(['disk']);
-/** PURE: the witness of a stall `heldMs` long that ended at `at` — `calls` = loop-blame's slow sync fs calls `{at, ms}` (wall
- *  clock) near that window. 'disk' when they cover at least half of it, else null. */
-function stallWitnessOf(calls, { heldMs = 0, at = 0 } = {}) {
-  const ms = num(heldMs), end = num(at);
-  if (ms === null || ms < 1000 || end === null || !Array.isArray(calls)) return null;
-  const from = end - ms - 2000;
+/** PURE: the witness of a stall `heldMs` long — `calls` = loop-blame's slow sync fs calls `{at, ms}` (wall clock), `windows` =
+ *  the HOLD's own spans `[{from, to}]` (wall clock) the request's live clock measured. 'disk' when the calls cover at least
+ *  half of the stall INSIDE those spans, else null; no span ⇒ null (r3, acceptance r2: a window anchored at the instant the
+ *  loss was recorded missed a disk hold 19 s before it, and credited a CPU hold to the disk reads of the live wait after it). */
+function stallWitnessOf(calls, { heldMs = 0, windows = null } = {}) {
+  const ms = num(heldMs);
+  if (ms === null || ms < 1000 || !Array.isArray(calls) || !Array.isArray(windows)) return null;
   let covered = 0;
-  for (const c of calls) { const a = num(c && c.at), d = num(c && c.ms); if (a !== null && d !== null) covered += Math.max(0, Math.min(a + d, end) - Math.max(a, from)); }
+  for (const w of windows) {
+    const from = num(w && w.from), to = num(w && w.to);
+    if (from === null || to === null || to <= from) continue;
+    for (const c of calls) { const a = num(c && c.at), d = num(c && c.ms); if (a !== null && d !== null) covered += Math.max(0, Math.min(a + d, to) - Math.max(a, from)); }
+  }
   return covered >= ms / 2 ? 'disk' : null;
 }
 /** PURE: a dead sign-in failure's stall facts for `speakSignin` — `{heldMs, heldWhy}` (both null when it names none). */
