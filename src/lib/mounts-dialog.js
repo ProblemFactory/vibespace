@@ -532,8 +532,21 @@ export function wireStepPaste(ctx, { tokenKey, configPage, start, callback, whyT
 // → `{token}`, and `finish(token, {close})` applies the new sign-in. `fields`
 // (optional) render through `renderFields` between the hint and the button —
 // the channel accounts' OAuth-client select.
-export function reauthDialog({ id = 'mount-reauth-dialog', title, hint: hintText, signinLabel, provider, fields = null, start, status: statusOf, callback, finish: apply, savingText = null, pasteHint = null, pasteSecret = false, pastePlaceholder = 'http://127.0.0.1:53682/?state=…&code=…' }) {
-  const { body, close } = createModalShell({ id, title, bodyClass: 'mounts-dialog-body', escapeToClose: true });
+export function reauthDialog({ id = 'mount-reauth-dialog', title, hint: hintText, signinLabel, provider, fields = null, start, status: statusOf, callback, finish: apply, cancel = null, askFirst = null, savingText = null, pasteHint = null, pasteSecret = false, pastePlaceholder = 'http://127.0.0.1:53682/?state=…&code=…' }) {
+  // lane lark-refresh-stall r2 (the dialog-yield seam): Escape on a sign-in that is RUNNING asks «Cancel the sign-in?» (the
+  // caller's `askFirst` — the decision dialog) before it ends it, and cancels the consent when told yes — nothing running, or
+  // no `askFirst` handed in: the shell's own door
+  const escapeAsk = () => {
+    if (!poll || typeof askFirst !== 'function') return true;
+    (async () => {
+      if (!(await askFirst({ title: tr('Cancel the sign-in?'), message: tr('The sign-in for “{name}” is still running. Cancel it?', { name: provider || title }), danger: true }))) return;
+      stopPoll();
+      if (typeof cancel === 'function') { try { await cancel(); } catch { /* the consent machine ends it at its own time */ } }
+      close();
+    })();
+    return false;
+  };
+  const { body, close } = createModalShell({ id, title, bodyClass: 'mounts-dialog-body', escapeToClose: true, onEscape: () => escapeAsk() });
   const hint = document.createElement('div');
   hint.className = 'mounts-field-hint';
   hint.textContent = hintText;

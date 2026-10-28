@@ -259,6 +259,9 @@ function errLine(app, a, sentence, kinds) {
 function signinLine(app, a, kinds, { verb = true } = {}) {
   const text = chanCaps.signinLineText(a, { t, when: (ms) => rowTime(ms) });
   if (!text) return null;
+  // lane lark-refresh-stall r2: a consent landed on a dead sign-in — «Signed in — verifying…» until its first request answers
+  // (green: the red line and the item went with the landing; a refusal of that request turns it red ONCE with its own cause)
+  if (a.authState === 'ok' && a.authVerifying === true) { const n = noteLine('chan-sec-note', text); n.dataset.chanVerifying = a.id; return n; }
   const el = document.createElement('div');
   el.className = 'chan-sec-reauth';
   el.dataset.chanReauth = a.id;

@@ -494,14 +494,25 @@ function flowNotice(flow) {
  *  dialog open 77 s after his consent landed. */
 function authWatcher(app, id, base) {
   let answer = {};
-  const on = (msg) => {
-    if (!msg || msg.type !== 'channels-updated' || !msg.digest) return;
-    const end = consentEndOf((msg.digest.adapters || []).find((x) => x.id === id), base);
+  const judge = (row) => {
+    const end = consentEndOf(row, base);
     if (!end) return;
     answer = end.fail ? { fail: tr('The consent flow ended: {error}', { error: end.fail }) } : { token: id, running: false, user: end.user };
   };
+  const on = (msg) => {
+    if (!msg || msg.type !== 'channels-updated' || !msg.digest) return;
+    judge((msg.digest.adapters || []).find((x) => x.id === id));
+  };
+  // lane lark-refresh-stall r2 (acceptance r1): a landing broadcast sent while the socket was DOWN never arrives — the dialog
+  // waited for the next channels-updated; on every reconnect the account's row is read ONCE (the window's accounts scope —
+  // never the panel's first read)
+  const onState = (up) => {
+    if (!up || answer.token || answer.fail) return;
+    fetchJson('/api/channels?scope=accounts').then((d) => { if (d && Array.isArray(d.adapters)) judge(d.adapters.find((x) => x.id === id)); }).catch(() => {});
+  };
   const unsub = app.ws.onGlobal(on);
-  return { state: () => answer, off: () => { try { if (typeof unsub === 'function') unsub(); else app.ws.offGlobal(on); } catch {} } };
+  if (typeof app.ws.onStateChange === 'function') app.ws.onStateChange(onState);
+  return { state: () => answer, off: () => { try { if (typeof unsub === 'function') unsub(); else app.ws.offGlobal(on); } catch {} try { if (typeof app.ws.offStateChange === 'function') app.ws.offStateChange(onState); } catch {} } };
 }
 
 // ── CONNECT AN ACCOUNT (§2.5, §8.1 #11: type-first, one dialog for every type) ──
@@ -606,6 +617,7 @@ export async function showReauthAccountDialog(app, a, { kinds = null, preselect 
       return go(null);
     },
     status: async () => (watcher ? watcher.state() : {}),
+    cancel: () => post(`/api/channels/adapters/${enc(a.id)}/auth/cancel`, {}), askFirst: showConfirmDialog,   // lane lark-refresh-stall r2: Escape on a running sign-in asks first
     callback: async (url) => { await post(`/api/channels/adapters/${enc(a.id)}/auth/finish`, { url }); return { token: a.id }; },
     finish: async (_token, { close }) => {
       if (watcher) watcher.off();

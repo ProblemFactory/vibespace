@@ -170,12 +170,13 @@ ph.close();
 
 console.log('§7 lane lark-refresh-stall: a Lark sign-in lost to a hub stall says the TRUE cause and the stall — never «another VibeSpace»');
 {
-  // the owner's hub 2026-10-27: an 89.5-min NFS hold, then 20064 — the row said «你的账号在另一个 VibeSpace 上登录了这个应用»
-  const LOST = acct('lark:a', 'lark', 'Lark / 飞书', { auth: { state: 'expired', why: 'refresh-refused', user: 'Carol' }, authState: 'expired', authCause: 'refresh-lost', authHeldMs: 89.5 * 60e3, authSince: at0714, lastPass: { at: NOW - 60e3, ok: false, code: 'auth-expired', error: 'lark token refresh: The refresh token has been revoked. (20064)' } });
+  // the owner's hub 2026-10-27: the canary measured a 5 368 840 ms hold (17:47:09 → 19:16:38), then 20064 — the row said
+  // «你的账号在另一个 VibeSpace 上登录了这个应用» (r2: the fixture is the MEASURED number)
+  const LOST = acct('lark:a', 'lark', 'Lark / 飞书', { auth: { state: 'expired', why: 'refresh-refused', user: 'Carol' }, authState: 'expired', authCause: 'refresh-lost', authHeldMs: 5368840, authSince: at0714, lastPass: { at: NOW - 60e3, ok: false, code: 'auth-expired', error: 'lark token refresh: The refresh token has been revoked. (20064)' } });
   adapters = [DEAD, PENDING, LOST];
   const lp = await page(1100, 900, 'b=after.js');
   const L = (await lp.ev(SECS)).secs['lark:a'] || {};
-  ok(typeof L.line === 'string' && L.line.startsWith('登录失效') && L.line.includes('hub 在刷新令牌时卡住了 90 分钟（NAS/磁盘），飞书的一次性刷新令牌已被用掉') && !/另一个 VibeSpace/.test(L.line), `⑦ the Lark row's red line names the stall (zh): «${L.line}»`, JSON.stringify(L));
+  ok(typeof L.line === 'string' && L.line.startsWith('登录失效') && L.line.includes('hub 在刷新令牌时卡住了 89 分钟，一次性刷新令牌已被用掉') && !/另一个 VibeSpace/.test(L.line) && !/[（(]/.test(L.line) && !/飞书|Lark/.test(L.line), `⑦ the Lark row's red line names the MEASURED stall (zh, r2: 89 min, no unmeasured cause word, no parentheses, no vendor name): «${L.line}»`, JSON.stringify(L));
   await lp.shot('lark-refresh-lost.png');
   lp.close();
   adapters = [DEAD, PENDING, LIVE];

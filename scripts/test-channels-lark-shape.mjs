@@ -2044,8 +2044,8 @@ console.log('\n⑪b lane lark-minutes-scopes: 妙记 in the consent; every permi
     // pass the shape, so a wide scope leaves «listed» only ABSENT from the answer or typed WITHOUT user — each one, either way,
     // drew the row on a re-authorize whose token held it (2.369.358); now none does, and a first sign-in keeps the row
     { const olT = OL.createOAuthLoopback({ now, log: quiet, fixedCallbackUrl: `http://127.0.0.1:${await freePort()}/lark/cb` });
-      const beginWith = async (L0, held, rows) => {
-        const tk = mkTokens(); if (held) tk.st.token = { scopes: held.slice(), openId: 'ou_owner' };
+      const beginWith = async (L0, held, rows, extra = {}) => {
+        const tk = mkTokens(); if (held) tk.st.token = { scopes: held.slice(), openId: 'ou_owner', ...extra };
         const x = L0.create({ id: 'lt', options: {} }, { oauth: olT, resolveIntegration: () => CRED, tokens: tk, fetch: vendorOf(() => rows).fetchFn, now, log: quiet });
         const flow = await x.auth.begin();
         olT.cancel(flow.flowId, 'cancelled');
@@ -2064,11 +2064,21 @@ console.log('\n⑪b lane lark-minutes-scopes: 妙记 in the consent; every permi
         // CONTROL — a lark copy whose «lacking» ignores the held token (2.369.358): the token HOLDING X draws the row (the owner's screen)
         const MR = mutantCopies('chan-lark-heldlack', REPO);
         const srcR = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf-8');
-        const HELD = " && !heldNow.has(x)) };";
+        const HELD = " && !heldLive.has(x)) };";
         ok(srcR.split(HELD).length === 2, 'CONTROL setup: the held token\'s subtraction is spelled once in the consent\'s source');
         const m = await beginWith(require(MR.write('src/channels/lark.js', srcR.replace(HELD, ') };'), 'heldlack')), FLOOR, rowsWithout(X, 'omit'));
         ok(JSON.stringify(m.lacking) === JSON.stringify([X]) && rowFor(m).show === true, `CONTROL — «lacking» without the held token: a re-authorize whose token HOLDS ${X} draws the row — the R2 assert above would be red`);
         for (const r of copiesCensus(MR.files, MR.dir, REPO, { minCopies: 1, label: 'chan-lark-heldlack: ' })) ok(r.pass, r.name, r.detail);
+        // lane lark-refresh-stall r2 (acceptance r1's narrow mutant: 10 of the 11 held, the list omits the 11th ⇒ the row said «the
+        // 11» and its press dropped 10 HELD scopes): the row names only what the list lacks and the press drops only that; and a
+        // DEAD sign-in's token (a refused grant) is no evidence — its list is never subtracted (a scope the app's admin disabled
+        // since stays lacking, the narrowing door stays)
+        const p10 = await beginWith(lark, FLOOR.filter((y) => y !== X), rowsWithout(X, 'omit'));
+        ok(JSON.stringify(p10.lacking) === JSON.stringify([X]) && rowFor(p10).show === true && JSON.stringify(p10.nextNarrow) === JSON.stringify([X]),
+          `r2 — 10 of the 11 held, the list omits the 11th: the row names ONLY ${X} and its press drops only it (nextNarrow ${JSON.stringify(p10.nextNarrow)})`);
+        const pd = await beginWith(lark, FLOOR, rowsWithout(X, 'omit'), { invalidGrantAt: now() - 60e3, invalidGrantCause: 'revoked-elsewhere' });
+        ok(JSON.stringify(pd.lacking) === JSON.stringify([X]) && rowFor(pd).show === true && JSON.stringify(pd.nextNarrow) === JSON.stringify([X]),
+          `r2 — a DEAD sign-in's token listing ${X} is not counted: the list's gap stays lacking, the row stays (only it dropped)`);
       } finally { olT.stopAll(); } }
     // CONTROLS on the engine (one copy, two lines out): landings that keep the refused pass (2.369.358) ⇒ the first row says
     // «expired» — the pre-lane watcher (`auth.state === 'connected'`) answered nothing on it and waited for the pass; a start

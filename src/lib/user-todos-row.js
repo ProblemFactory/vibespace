@@ -247,7 +247,10 @@ function partsOf(entry, ctx) {
   const notice = !!entry.notice && !resolved;
   const tail = !!entry.tail;
   // a CLEARED item ("Clear content…", 2026-09-28): its words are the cleared sentence (ctx.wordsOf) — dimmed, in its place
-  const cls = 'ut-item' + (notice ? ' ut-item-notice' : '') + (resolved ? ' ut-item-resolved' : '') + (resolved && !tail ? ' ut-item-inplace' : '') + (i && i.clearedAt ? ' ut-item-cleared' : '');
+  // lane lark-refresh-stall r2 (acceptance r1's shots: desktop cut «…飞书的一…», phone 390 «…卡住了 8…» — the number itself): a row
+  // whose words carry a CAUSE (`{cause}` — a words param: a dead sign-in's) WRAPS whole, folded or not
+  const wraps = !!(i && !i.clearedAt && i.i18n && i.i18n.text && i.i18n.text.params && i.i18n.text.params.cause && typeof i.i18n.text.params.cause === 'object');
+  const cls = 'ut-item' + (notice ? ' ut-item-notice' : '') + (resolved ? ' ut-item-resolved' : '') + (resolved && !tail ? ' ut-item-inplace' : '') + (i && i.clearedAt ? ' ut-item-cleared' : '') + (wraps ? ' ut-item-wraps' : '');
   const card = isAppCard(i) ? i.card : null; // design 009: an app install's ONE card (a cleared item has none left)
   const lang = typeof ctx.lang === 'function' ? ctx.lang() : (ctx.lang || 'en');
   const words = card ? cardWords(card, t, lang).title : ctx.wordsOf(i);

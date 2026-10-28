@@ -723,19 +723,35 @@ const p2 = await newPage();
   const url3 = await p1.evaljs(consentUrlIn('#chan-reauth-dialog .mounts-oauth-link input'));
   ok(!!url3 && new URL(url3).searchParams.get('client_id') === CUSTOM_ID, 'the re-authorize consent runs under the account\'s own client, with the cross-browser link row');
   ok(await p1.evaljs(`!!document.querySelector('#chan-reauth-dialog input[placeholder^="http://127.0.0.1"]')`), 'and the paste-back box');
+  // lane lark-refresh-stall r2 (acceptance r1: the dialog's watcher listened to broadcasts only — a landing broadcast sent
+  // while its socket was DOWN never arrived, and the dialog waited for the next channels-updated): THIS tab's socket drops
+  // across the landing (its reconnect held), the second tab's stays up
+  await p1.evaljs(`(() => { app.ws.__heldConnect = app.ws.connect; app.ws.connect = () => {}; app.ws.ws.close(); return 1; })()`);
+  ok(await p1.evaljs(`(async () => { for (let i = 0; i < 100; i++) { if (app.ws.ws && app.ws.ws.readyState === 3) return true; await new Promise((r) => setTimeout(r, 20)); } return false; })()`), 'r2 setup: the initiating tab\'s socket is DOWN (its reconnect held) while the consent lands');
   ok((await followConsent(url3)) === 200, 'the redirect lands on the loopback');
-  ok(await p1.evaljs(`(async () => { for (let i = 0; i < 80; i++) { if (!document.querySelector('#chan-reauth-dialog')) return true; await new Promise((r) => setTimeout(r, 100)); } return false; })()`), 'the dialog closes when the new sign-in LANDS — the pass after it still held (lane lark-signin-dialog; 2.369.358 kept «sign-in page opened» until that pass ended)');
+  let landed = null;
+  for (let i = 0; i < 80 && !landed; i++) { const a = (await accounts()).find((x) => x.id === B.id) || {}; if (a.authState === 'ok') landed = a; else await sleep(100); }
+  ok(!!landed && landed.authVerifying === true && !(landed.lastPass && landed.lastPass.ok === true), `the landing reached the server: the account is «signed in — verifying» (authState ${landed && landed.authState}, authVerifying ${landed && landed.authVerifying}), the pass after it still held`);
+  // lane lark-refresh-stall R5 (the owner's hub 2026-10-27 on 2.369.358: his consent landed 20:57:33, the row kept «登录失效 —
+  // 需要重新授权 · …» until a pass went through at 21:02:03) → r2: the dead row leaves WITH the landing's broadcast as «Signed in —
+  // verifying…» (green, no verb) — in the second tab ≤ 2 s, no reload, the pass after the landing still held
+  const verifying = (pg) => pg.evaljs(`(async () => { const t0 = performance.now(); for (let i = 0; i < 20; i++) { const c = ${card(B.id)}; const v = c && c.querySelector('[data-chan-verifying]'); if (c && !c.querySelector('.chan-sec-reauth') && v && v.textContent === 'Signed in — verifying with its first request…') return Math.round(performance.now() - t0); await new Promise((r) => setTimeout(r, 100)); } return -1; })()`);
+  const g2 = await verifying(p2);
+  ok(g2 >= 0, `R5: the dead row leaves WITH the landing — a second tab says «Signed in — verifying with its first request…» in ${g2} ms (≤ 2 s, no reload; r1 said nothing until the pass)`);
+  ok(await p1.evaljs(`!!document.querySelector('#chan-reauth-dialog')`), 'r2: …while the initiating tab (its socket down) has not heard it — its dialog is still open');
+  const back = Date.now();
+  // the socket comes back, and its channels-updated frames are held for 6 s (no broadcast after the reconnect reaches this
+  // tab — whatever the hub sends next): only the dialog's own re-read on the reconnect can end it
+  await p1.evaljs(`(() => { const real = app.ws.__heldConnect; delete app.ws.__heldConnect; const until = Date.now() + 6000; app.ws.connect = function () { real.call(this); const s = this.ws; const om = s.onmessage; s.onmessage = (e) => { try { const d = JSON.parse(e.data); if (d && d.type === 'channels-updated' && Date.now() < until) return; } catch { } return om.call(s, e); }; }; app.ws.connect(); return 1; })()`);
+  const closedIn = await p1.evaljs(`(async () => { const t0 = performance.now(); for (let i = 0; i < 80; i++) { if (!document.querySelector('#chan-reauth-dialog')) return Math.round(performance.now() - t0); await new Promise((r) => setTimeout(r, 50)); } return -1; })()`);
+  ok(closedIn >= 0 && closedIn <= 4000, `r2: on the reconnect the dialog's watcher reads the account ONCE — the dialog closes ${closedIn} ms after the socket came back, no broadcast reaching it (≤ 4 s; r1 waited for the next channels-updated) (lane lark-signin-dialog: the landing ends it, never the pass)`);
   const lp1 = ((await accounts()).find((a) => a.id === B.id) || {}).lastPass || null;
   ok(!(lp1 && lp1.ok === true), `…closed BEFORE the pass after the landing finished (lastPass ${JSON.stringify(lp1)}) — the dialog never waits on the account's health`);
-  // lane lark-refresh-stall R5 (the owner's hub 2026-10-27 on 2.369.358: his consent landed 20:57:33, the row kept «登录失效 —
-  // 需要重新授权 · …» until a pass went through at 21:02:03): the dead sign-in leaves WITH the landing's broadcast — this tab and
-  // the second, ≤ 2 s after the dialog closed, no reload, the pass after the landing still held
-  const gone = (pg) => pg.evaljs(`(async () => { const t0 = performance.now(); for (let i = 0; i < 20; i++) { const c = ${card(B.id)}; if (c && !c.querySelector('.chan-sec-reauth')) return Math.round(performance.now() - t0); await new Promise((r) => setTimeout(r, 100)); } return -1; })()`);
-  const g1 = await gone(p1), g2 = await gone(p2);
+  const g1 = await verifying(p1);
   const st5 = (await accounts()).find((a) => a.id === B.id) || {};
-  ok(g1 >= 0 && g2 >= 0 && st5.authState === 'ok' && !(st5.lastPass && st5.lastPass.ok === true), `R5: the dead row leaves WITH the landing — this tab ${g1} ms, a second tab ${g2} ms (≤ 2 s, no reload), the account's authState ${st5.authState}, the pass after it still held (lastPass ${JSON.stringify(st5.lastPass || null)})`);
+  ok(g1 >= 0 && st5.authState === 'ok' && st5.authVerifying === true && !(st5.lastPass && st5.lastPass.ok === true), `R5: this tab too (its panel re-read on the reconnect) — «Signed in — verifying…» ${g1} ms after the dialog closed, the account still verifying (lastPass ${JSON.stringify(st5.lastPass || null)}), ${Date.now() - back} ms after the socket came back`);
   stubMode({ email: 'ben@example.test', refresh: 'ok', expiresIn: 3600 });   // the held pass goes on
-  ok(await p1.evaljs(panelWait(`() => { const c = ${card(B.id)}; return !!(c && !c.querySelector('.mounts-errline') && !c.querySelector('.chan-sec-reauth') && c.querySelector('.chan-sec-health')); }`)), 'the card heals (lane channel-reauth-visible: the red line too — the good pass after the consent retracts it): the error line is gone, the health line is back');
+  ok(await p1.evaljs(panelWait(`() => { const c = ${card(B.id)}; return !!(c && !c.querySelector('.mounts-errline') && !c.querySelector('.chan-sec-reauth') && !c.querySelector('[data-chan-verifying]') && c.querySelector('.chan-sec-health')); }`)), 'the card heals (lane channel-reauth-visible: the red line too — the good pass after the consent retracts it; r2: and the verifying word goes with the first pass that answered): the error line is gone, the health line is back');
 
   // (m) Edit on the custom account prefills the SECRET (D3)
   await p1.evaljs(`${card(B.id)}.querySelector('.chan-sec-head .mounts-icon-btn').click(); 1`);

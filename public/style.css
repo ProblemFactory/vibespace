@@ -1487,6 +1487,9 @@ html[data-vc="compact"] .drawer-foryou svg { width: 18px; height: 18px; flex: no
 @keyframes ut-pulse { 50% { opacity: 0.35; } }
 .ut-body { flex: 1; min-width: 0; }
 .ut-text { font-size: 11px; color: var(--text); line-height: 1.4; overflow-wrap: anywhere; } /* a path / an id has no spaces — it wraps, never runs out of the popover (owner 2026-09-25 排版) */
+/* lane lark-refresh-stall r2: a row whose words carry a CAUSE (a dead sign-in's: «…卡住了 89 分钟…») wraps whole — no clamp in any
+   surface (the popup's two lines, the phone's one) ever cuts the number the person needs */
+:is(#user-todos-popup, #phone-home, .ut-mini-popover, body) .ut-item.ut-item-wraps:not(.ut-open) > .ut-body > .ut-text { display: block !important; -webkit-line-clamp: unset !important; line-clamp: none !important; overflow: visible !important; }
 .ut-detail { font-size: 10px; color: var(--text-secondary); white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 2px; line-height: 1.4; max-height: 120px; overflow-y: auto; }
 .ut-tabs { display: flex; gap: 4px; margin-bottom: 8px; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
 .ut-tab, .iw-tab {

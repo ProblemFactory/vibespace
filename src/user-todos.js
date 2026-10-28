@@ -31,6 +31,8 @@ const { normalizeOrigin } = require('./inbox-origin.js'); // PURE: the closed se
 const belt = require('./agent-output-belt.js'); // lane agent-output-sinks: the sink belt — a For-you item's text / detail never carries a credential in the clear
 const { applyClear } = require('./record-clear.js'); // PURE: "Clear content…" (2026-09-28) — what a clear replaces; this store holds the door (clearItems)
 
+/** lane lark-refresh-stall: the params a WORDS param may carry (each a string or a finite number) — more is refused by name. */
+const NESTED_PARAMS_MAX = 8;
 /** `{text:{key,params}, detail?:[{key,params}…], source?:{key}}` → the same,
  *  clamped, or null; a shape that is not that throws by name. Params are
  *  strings/numbers only (they are interpolated into a sentence, never HTML) —
@@ -39,12 +41,21 @@ const { applyClear } = require('./record-clear.js'); // PURE: "Clear content…"
 function normalizeI18n(x) {
   if (x == null) return null;
   if (typeof x !== 'object' || Array.isArray(x)) throw new Error('i18n must be an object');
-  // lane lark-refresh-stall: a WORDS param (`{key}`) may carry its own scalar params (a dead sign-in's cause names the stall's length)
-  const nestedParams = (p) => {
-    if (!p || typeof p !== 'object' || Array.isArray(p)) return {};
+  // lane lark-refresh-stall: a WORDS param (`{key}`) may carry its own scalar params (a dead sign-in's cause names the stall's
+  // length) — r2: at most NESTED_PARAMS_MAX, each a string or a finite number; any other shape is REFUSED by name (the
+  // producer says it and files its words without them — never a sentence with a «{minutes}» left in it)
+  const nestedParams = (p, what) => {
+    if (p == null) return {};
+    if (typeof p !== 'object' || Array.isArray(p)) throw new Error(`i18n.${what}.params must be an object of strings / numbers`);
+    const ents = Object.entries(p);
+    if (ents.length > NESTED_PARAMS_MAX) throw new Error(`i18n.${what}.params carries ${ents.length} params — at most ${NESTED_PARAMS_MAX}`);
     const o = {};
-    for (const [k, v] of Object.entries(p).slice(0, 8)) { if (typeof v === 'string') o[k] = v.slice(0, 200); else if (typeof v === 'number' && Number.isFinite(v)) o[k] = v; }
-    return Object.keys(o).length ? { params: o } : {};
+    for (const [k, v] of ents) {
+      if (typeof v === 'string') o[k] = v.slice(0, 200);
+      else if (typeof v === 'number' && Number.isFinite(v)) o[k] = v;
+      else throw new Error(`i18n.${what}.params.${k} must be a string or a finite number (${Array.isArray(v) ? 'an array' : v === null ? 'null' : typeof v} refused)`);
+    }
+    return ents.length ? { params: o } : {};
   };
   const line = (l, what) => {
     if (!l || typeof l !== 'object' || typeof l.key !== 'string' || !l.key.trim()) throw new Error(`i18n.${what} needs a key`);
@@ -52,7 +63,7 @@ function normalizeI18n(x) {
     if (l.params != null) {
       if (typeof l.params !== 'object' || Array.isArray(l.params)) throw new Error(`i18n.${what}.params must be an object`);
       out.params = {};
-      for (const [k, v] of Object.entries(l.params)) { if (typeof v === 'string') out.params[k] = v.slice(0, 600); else if (typeof v === 'number' && Number.isFinite(v)) out.params[k] = v; else if (v && typeof v === 'object' && !Array.isArray(v) && typeof v.key === 'string' && v.key.trim()) out.params[k] = { key: v.key.slice(0, 400), ...nestedParams(v.params) }; }
+      for (const [k, v] of Object.entries(l.params)) { if (typeof v === 'string') out.params[k] = v.slice(0, 600); else if (typeof v === 'number' && Number.isFinite(v)) out.params[k] = v; else if (v && typeof v === 'object' && !Array.isArray(v) && typeof v.key === 'string' && v.key.trim()) out.params[k] = { key: v.key.slice(0, 400), ...nestedParams(v.params, `${what}.params.${k}`) }; }
     }
     return out;
   };

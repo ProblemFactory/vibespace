@@ -2822,9 +2822,17 @@ the failure this design argues against.
   (a NAS, a disk) never aborts it over an answer already received. An answer
   truly lost after the request left is recorded; the same refresh token is
   tried once, and if Lark then refuses it the account says «hub 在刷新令牌时卡住了
-  N 分钟（NAS/磁盘），飞书的一次性刷新令牌已被用掉» (cause `refresh-lost`) in the
-  hub's log, the For-you item and the red line — never «another VibeSpace».
-  A re-authorize that lands ends the red line in its own broadcast, every tab.
+  89 分钟，一次性刷新令牌已被用掉» (cause `refresh-lost`) in the hub's log, the
+  For-you item and the red line — never «another VibeSpace». The words say
+  only what was measured: the stall's length first (seconds, minutes, hours,
+  days), «被 NAS/磁盘读写» only when the hub's own witness timed slow disk calls
+  over that window, no vendor name in the cause; a For-you row with a cause
+  wraps whole. The consent's own code exchange has the same bound. A re-authorize
+  that lands turns the red line into «已登录 — 正在验证» in its own broadcast,
+  every tab (a dialog whose socket was down reads it on the reconnect); the
+  first request that answers ends it, a refusal turns it red once with its own
+  cause. A Disconnect while a refresh is in flight never hands the dropped
+  bearer back.
 
 ### Communication panel — P1b: the push lane (2026-09-16; design §6.4, fence 11, decisions 18 + 20)
 
