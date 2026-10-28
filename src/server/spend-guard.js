@@ -74,7 +74,7 @@ function noticeExpiry(about, now = Date.now()) {
  *        inbox is created further down the boot (TDZ otherwise).
  * @param deps.log                console.log
  */
-function create({ dataDir, serverSetting = () => undefined, identityOf = null, readCacheFor = null, credentialStateOf = null, getUserTodos = () => null, log = () => { } } = {}) {
+function create({ dataDir, serverSetting = () => undefined, identityOf = null, readCacheFor = null, credentialStateOf = null, getUserTodos = () => null, log = () => { }, schedule = (fn, ms) => { const t = setTimeout(fn, ms); if (t && t.unref) t.unref(); return t; }, unschedule = (t) => clearTimeout(t) } = {}) {
   const file = path.join(dataDir, 'spend-budget.json');
   let state = A.emptyBudget();
   let nudge = {};   // sessionKey -> {at, n, everSeenStatus} (the Stop nudge's PERSISTED cooldown)
@@ -95,7 +95,16 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
       if (raw.nudge && typeof raw.nudge === 'object') nudge = raw.nudge;
     }
   } catch { }
-  const spoke = new Map();   // journal dedup: `${reason}|${key}|${why}` -> {at, more} (`more` = refusals the window swallowed)
+  const spoke = new Map();   // journal dedup: `${reason}|${key}|${why}` -> {at, more, line, timer} (`more` = refusals the window swallowed)
+  // r2 (measured: five refusals in a minute ⇒ ONE line, and with no later refusal the other four were never journaled):
+  // a window that SWALLOWED refusals is FLUSHED when it ends — one bounded timer per signature, armed at the first
+  // swallowed refusal for the window's end, unref'd; a refusal after the end still carries the count on its own line
+  const flushSpoke = (sig) => {
+    const sp = spoke.get(sig);
+    if (!sp) return;
+    if (sp.timer) { try { unschedule(sp.timer); } catch { } sp.timer = null; }
+    if (sp.more > 0) { log(`${sp.line} — (+${sp.more} more in the last 5 min)`); sp.more = 0; }
+  };
   let chargesUnhinted = 0;   // charges that made this module resolve the identity itself (see identityFor)
   let lastUnhintedLog = 0;
   let pending = [];          // the live HOLDS (see the header) — in memory only
@@ -236,16 +245,24 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     if (v.ok) return v;
     const sig = `${reason}|${key || '?'}|${v.why}`;
     const last = spoke.get(sig) || { at: 0, more: 0 };
-    const text = A.refusalText(v, { sessionName });
+    // r2: THE NOTICE NAMES THE CONVERSATION — the delivery ladder passes the session, not its name (its refusals said
+    // «in» nothing); the name the session carries is the conversation the owner reads
+    const convName = sessionName || (session && typeof session.name === 'string' && session.name) || null;
+    const text = A.refusalText(v, { sessionName: convName });
     // THE LINE NAMES THE CONVERSATION and SAYS WHAT IT COLLAPSED (lane owner-press-attended: userW's five refused presses
     // showed as three lines «for a session» — the ladder passes the cid, the 5-min dedupe hid two with no word)
     if (now - last.at > REFUSE_LOG_MS) {
-      spoke.set(sig, { at: now, more: 0 });
-      if (spoke.size > 400) spoke.clear();
+      if (last.timer) { try { unschedule(last.timer); } catch { } }
+      if (spoke.size >= 400) { for (const k of [...spoke.keys()]) flushSpoke(k); spoke.clear(); }
       const who = sessionId || (cid ? `conversation ${cid}` : 'a session');
       const more = last.more > 0 ? ` (+${last.more} more in the 5 min after the previous line)` : '';
-      log(`[spend] refused ${reason} for ${who} on ${identity ? identity.name : 'an unknown identity'} — ${v.why}: ${v.detail}${more}`);
-    } else last.more++;
+      const line = `[spend] refused ${reason} for ${who} on ${identity ? identity.name : 'an unknown identity'} — ${v.why}`;
+      spoke.set(sig, { at: now, more: 0, line, timer: null });
+      log(`${line}: ${v.detail}${more}`);
+    } else {
+      last.more++;
+      if (!last.timer && spoke.get(sig) === last) last.timer = schedule(() => { const sp = spoke.get(sig); if (sp) sp.timer = null; flushSpoke(sig); }, Math.max(1, last.at + REFUSE_LOG_MS - now));
+    }
     try { global.__vsEvent?.('spend-refused', `${reason}:${v.why}`); } catch { }
     // NO SILENT FAILURES: a refused automatic turn is a promise the product
     // stops keeping, so the user is told once per (identity, why) per 6h. The
@@ -260,7 +277,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
         + `(instance ${v.counts.instanceDay}/${v.limits.perInstanceDay}).\n\n`
         + 'These ceilings bound every turn VibeSpace starts without you — the auto-continue after a usage limit, the Stop bookkeeping nudge, '
         + 'Background Work notifications and messages from other sessions. Adjust them in Settings → Spending, or act on the account named above.',
-        v.why === 'overage-in-use' ? 'high' : 'normal', noticeExpiry('refusal', now), A.refusalI18n(v));
+        v.why === 'overage-in-use' ? 'high' : 'normal', noticeExpiry('refusal', now), A.refusalI18n(v, { sessionName: convName }));
       if (filed) { state.notices[inboxSig] = now; persist(); }
     }
     return v;

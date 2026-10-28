@@ -57,7 +57,7 @@ function refuseAgentMountChoice(req, res) {
 // ATTENDED doors (a press the spend ceiling neither refuses nor counts, src/spend-authorizer.js `attended`) — so the refusal
 // covers EVERY bearer (vsst_, jbt_ and an automation key's vsak_; `pressBearer`); the owner's page rides the cookie.
 // test-architecture §49 reads every wake-capable route here for it.
-const { pressBearer } = require('../write-origin.js');
+const { pressBearer, pressOf } = require('../write-origin.js');   // r2: pressOf = the PRESS a person's door mints (attended turns ride it)
 const PRESS_IS_OWNERS = 'a press that wakes an agent is the user\'s — a bearer token (an agent, a job, an automation key) cannot make one';
 function refuseAgentBearer(req, res, what = 'an account\'s configuration is the owner\'s — an agent token may not read it') {
   if (!isAgentBearer(req) && !pressBearer(req.headers)) return false;
@@ -1139,8 +1139,9 @@ router.post('/api/channels/:adapterId/:convId/propose', async (req, res) => {
   try {
     if (refuseAgentBearer(req, res, PRESS_IS_OWNERS)) return;
     forHost(req);
+    const press = pressOf(req);
     const b = req.body || {};
-    answer3(res, await engine().propose({ kind: 'user' }, req.params.adapterId, req.params.convId, { text: b.text, replyTo: b.replyTo, why: b.why, attachments: b.attachments, ...(b.inThread !== undefined ? { inThread: b.inThread } : {}), ...(b.placement !== undefined ? { placement: b.placement } : {}), ...(b.replyAll !== undefined ? { replyAll: b.replyAll } : {}) }, wakeGuards(b)));
+    answer3(res, await engine().propose({ kind: 'user' }, req.params.adapterId, req.params.convId, { pressed: press, text: b.text, replyTo: b.replyTo, why: b.why, attachments: b.attachments, ...(b.inThread !== undefined ? { inThread: b.inThread } : {}), ...(b.placement !== undefined ? { placement: b.placement } : {}), ...(b.replyAll !== undefined ? { replyAll: b.replyAll } : {}) }, wakeGuards(b)));
   } catch (e) { fail(res, e); }
 });
 /** THE OWNER'S OWN MESSAGE (design §22, 2.369.159): the composer's Send on
@@ -1153,8 +1154,9 @@ router.post('/api/channels/:adapterId/:convId/send', async (req, res) => {
   try {
     forHost(req);
     if (refuseAgentBearer(req, res, OWN_SEND_IS_OWNERS)) return;
+    const press = pressOf(req);
     const b = req.body || {};
-    answer3(res, await engine().propose({ kind: 'user' }, req.params.adapterId, req.params.convId, { direct: true, text: b.text, replyTo: b.replyTo, attachments: b.attachments, ...(b.inThread !== undefined ? { inThread: b.inThread } : {}), ...(b.placement !== undefined ? { placement: b.placement } : {}), ...(b.replyAll !== undefined ? { replyAll: b.replyAll } : {}) }, wakeGuards(b)));
+    answer3(res, await engine().propose({ kind: 'user' }, req.params.adapterId, req.params.convId, { direct: true, pressed: press, text: b.text, replyTo: b.replyTo, attachments: b.attachments, ...(b.inThread !== undefined ? { inThread: b.inThread } : {}), ...(b.placement !== undefined ? { placement: b.placement } : {}), ...(b.replyAll !== undefined ? { replyAll: b.replyAll } : {}) }, wakeGuards(b)));
   } catch (e) { fail(res, e); }
 });
 /** APPROVE (`{text?}` = approve with an edit) — the unconditional convCaps
@@ -1182,21 +1184,23 @@ router.post('/api/channels/outbox/:id/approve', async (req, res) => {
   try {
     if (refuseAgentBearer(req, res, PRESS_IS_OWNERS)) return;
     forHost(req);
+    const press = pressOf(req);
     const b = req.body || {};
     const d = deliverOf(b);
     if (!d.ok) return answer3(res, d);
     if (typeof b.shown !== 'string' || !b.shown) return answer3(res, { ok: false, code: 'bad-request', why: 'shown-required', error: 'shown is required — the digest of the card being approved (reload the page if this tab is from before the update)' });
-    answer3(res, await engine().approve(req.params.id, { text: typeof b.text === 'string' ? b.text : null, by: 'user', deliver: d.deliver, shown: b.shown, withoutFiles: b.withoutFiles === true, ...wakeGuards(b) }));
+    answer3(res, await engine().approve(req.params.id, { text: typeof b.text === 'string' ? b.text : null, by: 'user', deliver: d.deliver, shown: b.shown, withoutFiles: b.withoutFiles === true, ...wakeGuards(b), pressed: press }));
   } catch (e) { fail(res, e); }
 });
 router.post('/api/channels/outbox/:id/reject', async (req, res) => {
   try {
     if (refuseAgentBearer(req, res, PRESS_IS_OWNERS)) return;
     forHost(req);
+    const press = pressOf(req);
     const b = req.body || {};
     const d = deliverOf(b);
     if (!d.ok) return answer3(res, d);
-    answer3(res, await engine().reject(req.params.id, { reason: b.reason ? String(b.reason) : null, by: 'user', deliver: d.deliver, ...wakeGuards(b) }));
+    answer3(res, await engine().reject(req.params.id, { reason: b.reason ? String(b.reason) : null, by: 'user', deliver: d.deliver, ...wakeGuards(b), pressed: press }));
   } catch (e) { fail(res, e); }
 });
 /** RECONCILE (§9.4, P4): a PERSON asks whether a LOST send landed — the only
@@ -1310,22 +1314,24 @@ router.post('/api/channel-groups', async (req, res) => {
   try {
     if (refuseAgentBearer(req, res, PRESS_IS_OWNERS)) return;
     forHost(req);
+    const press = pressOf(req);
     const b = req.body || {};
     const ge = groupsEngine();
-    groupReply(res, await ge.create({ by: OWNER, name: b.name, members: Array.isArray(b.members) ? b.members.map(String) : [], context: b.context || '', quiet: b.quiet === true, consent: ownerConsent(b), mayWake: ownerPacer(ge) }));
+    groupReply(res, await ge.create({ by: OWNER, pressed: press, name: b.name, members: Array.isArray(b.members) ? b.members.map(String) : [], context: b.context || '', quiet: b.quiet === true, consent: ownerConsent(b), mayWake: ownerPacer(ge) }));
   } catch (e) { fail(res, e); }
 });
 router.post('/api/channel-groups/:id/:verb', async (req, res) => {
   try {
     if (refuseAgentBearer(req, res, PRESS_IS_OWNERS)) return;
     forHost(req);
+    const press = pressOf(req);
     const b = req.body || {};
     const ge = groupsEngine();
     const group = req.params.id;
     let r;
     switch (req.params.verb) {
-      case 'post': r = await ge.post({ group, from: OWNER, text: b.text, wake: b.wake === true, consent: ownerConsent(b), mayWake: ownerPacer(ge), mentions: Array.isArray(b.mentions) ? b.mentions.slice(0, 64) : [] }); break;   // B-ff04: the @-picker's places, by id   // the owner's own words go DIRECTLY (§22.5), never through the outbox
-      case 'invite': r = await ge.invite({ by: OWNER, group, members: Array.isArray(b.members) ? b.members.map(String) : [], context: b.context || '', quiet: b.quiet === true, consent: ownerConsent(b), mayWake: ownerPacer(ge) }); break;
+      case 'post': r = await ge.post({ group, from: OWNER, pressed: press, text: b.text, wake: b.wake === true, consent: ownerConsent(b), mayWake: ownerPacer(ge), mentions: Array.isArray(b.mentions) ? b.mentions.slice(0, 64) : [] }); break;   // B-ff04: the @-picker's places, by id   // the owner's own words go DIRECTLY (§22.5), never through the outbox
+      case 'invite': r = await ge.invite({ by: OWNER, group, pressed: press, members: Array.isArray(b.members) ? b.members.map(String) : [], context: b.context || '', quiet: b.quiet === true, consent: ownerConsent(b), mayWake: ownerPacer(ge) }); break;
       case 'kick': r = await ge.kick({ by: OWNER, group, member: b.member }); break;
       case 'rename': r = await ge.rename({ by: OWNER, group, name: b.name }); break;
       case 'archive': r = await ge.archive({ by: OWNER, group }); break;

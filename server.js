@@ -1086,7 +1086,11 @@ app.get('/api/user-todos', (req, res) => res.json({ todos: userTodos.snapshot() 
 require('./src/routes/user-todos-reply.js').registerResolveManyRoute(app, { userTodos }); // "Mark all seen" (POST /api/user-todos/resolve-many, owner-only) — registered BEFORE the :id route below, which would otherwise read `resolve-many` as an item id
 require('./src/routes/user-todos-reply.js').registerItemReadRoute(app, { userTodos }); // GET /api/user-todos/:id — ONE item whole (the snapshot previews a resolved item's detail at 300 chars; the For-you window fetches the rest here)
 app.post('/api/user-todos/:id', (req, res) => { // User actions from the panel: done / dismissed / open (reopen)
-  try { res.json({ success: true, item: userTodos.setStatus(req.params.id, req.body?.status, 'user') }); }
+  // lane owner-press-attended r2 (the 15th door): the ✓ on a takeover request's item hands the browser back — an ATTENDED
+  // turn — so this door refuses EVERY bearer first, and the person's press rides the status to its listeners
+  if (require('./src/write-origin.js').pressBearer(req.headers)) return res.status(403).json({ error: 'the For-you item\'s ✓ is the user\'s — a bearer token (an agent, a job, an automation key) cannot press it', code: 'agent_forbidden' });
+  const press = require('./src/write-origin.js').pressOf(req);
+  try { res.json({ success: true, item: userTodos.setStatus(req.params.id, req.body?.status, 'user', { pressed: press }) }); }
   catch (e) { res.status(400).json({ error: e.message }); }
 });
 // ── Agent-facing routes ── (extracted to src/agent-routes.js in the 2.92.0 split)

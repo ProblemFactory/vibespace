@@ -1601,7 +1601,9 @@ handback** (setting `browser.takeoverIdleMs`, default 10 min, 0 = never, floor
 30 s) and the holder's window closing (`viewer-left`) flip the lease, update
 the live view and the card, file ONE "For you" item (idle only) and deliver
 NOTHING — `browser.announceIdleHandback` (default OFF) routes them through the
-same reason and the same ceiling. Taking over delivers nothing (the typed
+ladder under their OWN gated reason `browser-handback-idle` (counted, refusable —
+nobody pressed anything; lane owner-press-attended: the explicit hand-back is the
+ATTENDED `browser-handback`, and only with its door's press). Taking over delivers nothing (the typed
 refusal tells the agent, free). **Taking over INTERRUPTS (the owner's ruling,
 2026-09-27 — "直接打断所有脚本和agent操作，告知agent发生了打断，交还时提醒它重新运行"; design
 §6.2.2):** on a shared (mediated) browser every call the agent has in flight is

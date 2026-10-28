@@ -717,8 +717,10 @@ const SETTINGS_SCHEMA = {
     // §4.3.1's zero-spend default: an idle handback is nobody's action, so by
     // default it delivers NOTHING into the conversation (the lease flips, the
     // live view and the card update, one "For you" item is filed, the notice
-    // rides your next message). ON routes it through the same declared
-    // reason and the same unattended-spend ceiling as the explicit handback.
+    // rides your next message). ON routes it through the ladder under its OWN
+    // declared reason, `browser-handback-idle`, which the unattended-spend
+    // ceiling counts and may refuse (lane owner-press-attended: the explicit
+    // handback is the ATTENDED `browser-handback` — a person pressed it).
     type: 'boolean', default: false,
     label: t('Announce an idle handback into the conversation (billed turn)'),
     description: t('OFF (default): when your takeover lapses on its own, the agent is told nothing until its next browser command succeeds or you send your next message — no billed turn is opened by a timer. ON: the lapse is announced into the conversation like an explicit Hand back (a turn the agent is billed for), under the same unattended-spend ceiling (Settings → Spending).'),

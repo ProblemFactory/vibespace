@@ -16,10 +16,15 @@ class SettingsManager {
     // at 00:40, his 00:47 press was refused, the file was written at 00:48:01; nothing on the panel said "not saved").
     // Per path: `_dirty` = changed since the last save went out (the 500 ms debounce), `_inflight` = carried by the POST
     // on its way, `_failed` = that POST did not land. `_server` = the values the SERVER last confirmed (load / refetch /
-    // a broadcast / a save it answered) — what it USES, before any echo. `_live` = the server's own echo of its last
-    // save (`{spend: budgetLimits}` — the numbers its spend guard reads, a clamp included).
+    // a broadcast / a save it answered) — what it USES, before any echo. `_live` = the server's CONFIRMED `{spend:
+    // budgetLimits}` (the numbers its spend guard reads, a clamp included): this tab's POST echo is OPTIMISTIC only until
+    // the next server state — a settings-updated broadcast REPLACES it with the `spend` it carries (the 2.309.0 cache
+    // law: the invalidation pushes the RESULT), a refetch / load clears it (r2: a tab kept «in force now: 50» after
+    // another device raised the cap to 100). `_inflight`: path → the seq of the LATEST POST carrying it — the latest
+    // outcome is the row's (r2: a failed save kept «Not saved» after a later save landed).
     this._dirty = new Set();
-    this._inflight = new Set();
+    this._inflight = new Map();
+    this._saveSeq = 0;
     this._failed = new Set();
     this._saved = new Set();
     this._saveListeners = new Set();
@@ -27,8 +32,9 @@ class SettingsManager {
     this._live = null;
   }
 
-  /** lane owner-press-attended: a path's save state — 'pending' (typed, the debounce has not fired) | 'saving' (the POST
-   *  is on its way) | 'failed' (it did not land) | 'saved' (the server has it — said once, then 'idle') | 'idle'. */
+  /** lane owner-press-attended: a path's save state — 'pending' (committed, the debounce has not fired) | 'saving' (the
+   *  POST is on its way) | 'failed' (the LATEST POST carrying it did not land) | 'saved' (the server has it — it stays
+   *  until the next edit) | 'idle'. */
   saveStateOf(path) {
     if (this._dirty.has(path)) return 'pending';
     if (this._inflight.has(path)) return 'saving';
@@ -41,8 +47,10 @@ class SettingsManager {
   _emitSave(paths) { for (const p of paths) { const st = this.saveStateOf(p); for (const fn of [...this._saveListeners]) { try { fn(p, st); } catch (e) { console.error(`Settings save listener error [${p}]:`, e); } } } }
   /** The value the SERVER holds for a path (its last confirmed snapshot; the schema default when it holds none). */
   serverValue(path) { return path in this._server ? this._server[path] : SETTINGS_SCHEMA[path]?.default; }
-  /** The server's echo of its last save (`{spend}`), or null before one. */
+  /** The server's confirmed `{spend}` (its POST echo, or the one a broadcast carried), or null when none is current. */
   liveEcho() { return this._live; }
+  /** r2: the server's state moved — every number row's mark redraws (the in-force number is the server's, not ours) */
+  _emitAllMarks() { this._emitSave(Object.keys(SETTINGS_SCHEMA).filter((p) => SETTINGS_SCHEMA[p] && SETTINGS_SCHEMA[p].type === 'number')); }
 
   /** Load settings from server, fall back to localStorage. Returns a promise. */
   async load() {
@@ -51,6 +59,7 @@ class SettingsManager {
       if (res.ok) {
         this._values = await res.json();
         this._server = { ...this._values };
+        this._live = null;
       } else {
         this._loadFromLocalStorage();
       }
@@ -75,6 +84,8 @@ class SettingsManager {
       if (!res.ok) return;
       const fresh = await res.json();
       this._server = { ...fresh };
+      this._live = null;   // r2: a refetch is the server's state — our last echo is no longer the source
+      this._emitAllMarks();
       for (const [path, val] of Object.entries(fresh)) {
         if (JSON.stringify(this._values[path]) !== JSON.stringify(val)) {
           const old = this._values[path];
@@ -156,8 +167,9 @@ class SettingsManager {
     if (this._listeners[path]) this._listeners[path].delete(callback);
   }
 
-  /** Apply state from server (WebSocket broadcast). */
-  applyRemote(data) {
+  /** Apply state from server (WebSocket broadcast). `spend` = the server's recomputed in-force numbers the broadcast
+   *  carries (r2) — they REPLACE this tab's echo; a broadcast without them clears it (budgetLimits over `data` speaks). */
+  applyRemote(data, { spend = null } = {}) {
     // Echo-revert guard: the server broadcasts settings-updated to ALL clients
     // including the SENDER (HTTP POST — no ws to exclude). With a local edit
     // still pending save, applying the incoming (stale) snapshot reverts it —
@@ -168,6 +180,8 @@ class SettingsManager {
     const old = { ...this._values };
     this._values = data;
     this._server = { ...(data || {}) };
+    this._live = spend && typeof spend === 'object' ? { spend } : null;
+    this._emitAllMarks();
     // localStorage backup
     try { localStorage.setItem('webui-settings', JSON.stringify(this._values)); } catch {}
     // Notify changed paths
@@ -226,8 +240,9 @@ class SettingsManager {
     try { localStorage.setItem('webui-settings', JSON.stringify(data)); } catch {}
     // lane owner-press-attended: what this POST carries is 'saving' until the server answers
     const carried = [...this._dirty];
+    const mySeq = ++this._saveSeq;
     this._dirty.clear();
-    for (const p of carried) this._inflight.add(p);
+    for (const p of carried) this._inflight.set(p, mySeq);
     this._emitSave(carried);
     let landed = false;
     // Write to server
@@ -246,7 +261,12 @@ class SettingsManager {
       }
     } catch {} finally {
       if (this._saveTimer === myTimer) this._saveTimer = null;
-      for (const p of carried) { this._inflight.delete(p); if (landed) this._saved.add(p); else this._failed.add(p); }
+      // the LATEST POST carrying a path decides its state (r2): an older POST's outcome never overwrites a newer one's
+      for (const p of carried) {
+        if (this._inflight.get(p) !== mySeq) continue;
+        this._inflight.delete(p);
+        if (landed) { this._failed.delete(p); this._saved.add(p); } else { this._saved.delete(p); this._failed.add(p); }
+      }
       this._emitSave(carried);
     }
   }

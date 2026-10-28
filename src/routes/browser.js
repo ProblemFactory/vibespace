@@ -638,7 +638,7 @@ const USE_IS_USERS = 'who may use a profile is the user\'s choice (Agent browser
 const ADOPT_IS_USERS = 'a persistent profile made from a conversation\'s browser is the user\'s act (the picker\'s "New persistent profile…") — an agent token may not adopt a conversation\'s kept browser, its own or another\'s; an agent\'s `new --adopt` is the door for a folder of its own'; // verify r3 (Y4)
 const BUILDS_DOWNLOAD_IS_USERS = 'downloading or removing a Chrome build is the user\'s act (Agent browser panel → Change build… → Download another build…) — an agent token may not do it, nor read Google\'s lists through VibeSpace; `vibespace-browser providers` lists the builds this machine has';
 const RESTART_IS_USERS = 'restarting a browser is the user\'s act — an agent token may not do it; tell the user which page is not responding';
-const { pressBearer } = require('../write-origin.js');
+const { pressBearer, pressOf } = require('../write-origin.js');
 // lane owner-press-attended: every route here that refuses an agent is the USER's alone — and several are ATTENDED doors (a
 // hand-back, a takeover's Done, a proposal's Approve: presses the spend ceiling neither refuses nor counts) — so the refusal
 // covers EVERY bearer (vsst_, jbt_ and an automation key's vsak_; `pressBearer`), never only the two agent prefixes
@@ -1087,7 +1087,7 @@ router.post('/api/browser/handback', (req, res) => {
     // no named target and nothing taken on the default: hand back whichever of this conversation's browsers IS taken
     if (!req.body?.profile && !(k.inputStateFor(f.browserKey, t.profileId).input === 'user')) { const held = k.inputsFor(f.browserKey).find((s) => s.input === 'user'); if (held) t = { ok: true, profileId: held.profileId }; }
     // r6 A-F9: `expectWakes` = the count the pressing surface SHOWED (checked by the keeper; absent = not checked)
-    const r = k.handback({ browserKey: f.browserKey, profileId: t.profileId, viewerId: null, cause: 'explicit', url: '', sessionId: f.sessionId, ...(Number.isInteger(req.body?.expectWakes) ? { expectWakes: req.body.expectWakes } : {}) });
+    const r = k.handback({ browserKey: f.browserKey, profileId: t.profileId, viewerId: null, cause: 'explicit', url: '', sessionId: f.sessionId, ...(Number.isInteger(req.body?.expectWakes) ? { expectWakes: req.body.expectWakes } : {}), pressed: pressOf(req) });   // r2: the person's PRESS (attended only with it)
     if (!r.ok) return failVerdict(res, r);
     res.json({ ok: true, cause: r.cause, heldMs: r.heldMs, profileId: t.profileId, input: k.inputSummaryFor(f.browserKey) });
   } catch (e) { fail(res, e); }
@@ -1113,11 +1113,11 @@ router.post('/api/browser/takeovers/:id/done', (req, res) => {
     if (!rec) return res.status(404).json({ error: `no takeover request ${id}`, code: 'not_found' });
     if (!TQ.isOpen(rec)) return res.status(409).json({ error: `that request is already ${rec.state}`, code: 'closed', request: TQ.viewOf(rec) });
     if (rec.state === 'taken' && k.inputStateFor(rec.browserKey, rec.profileId).input === 'user') {
-      const r = k.handback({ browserKey: rec.browserKey, profileId: rec.profileId, viewerId: null, cause: 'explicit', url: '', sessionId: rec.sessionId || null });
+      const r = k.handback({ browserKey: rec.browserKey, profileId: rec.profileId, viewerId: null, cause: 'explicit', url: '', sessionId: rec.sessionId || null, pressed: pressOf(req) });
       if (!r.ok) return failVerdict(res, r);
       return res.json({ ok: true, how: 'handback', request: TQ.viewOf(k.takeoverRequest(id)) });
     }
-    const r = k.resolveTakeoverRequest(id, 'done');
+    const r = k.resolveTakeoverRequest(id, 'done', { pressed: pressOf(req) });
     if (!r.ok) return failVerdict(res, r);
     res.json({ ok: true, how: 'done', request: TQ.viewOf(r.request) });
   } catch (e) { fail(res, e); }

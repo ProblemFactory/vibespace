@@ -12,6 +12,7 @@ const caps = require('../channel-caps.js');
 const F = require('../channel-filter.js');
 const CR = require('../channel-ref.js');
 const P = require('../channel-policy.js');
+const { isPress } = require('../write-origin.js');   // lane owner-press-attended r2: an attended receipt / send rides the door's PRESS (`pressed`)
 const ACL = require('../channel-acl.js');
 const Drain = require('../channel-drain.js');
 const OF = require('../channel-outbox-files.js');
@@ -228,10 +229,12 @@ function create(engineCtx) {
    */
   const STASH_ABOUT_KEYS_MAX = 64;
   const msgAclAccount = (adapterId) => { const rec = adapterRecords().adapters.find((r) => r.id === adapterId) || null; try { return !!(rec && registry.get(rec.kind).reach === 'msg-acl'); } catch { return false; } };
-  const stashAbout = ({ keys = [], account = null, cid = null, groups = null } = {}) => {
+  // `wake` (lane owner-press-attended r2): the entry IS a refused wake's block — the one a hand-over may answer the
+  // conversation's «last wake held» with (a recall note or a judged-skip line about the same key is not)
+  const stashAbout = ({ keys = [], account = null, cid = null, groups = null, wake = false } = {}) => {
     let g = groups;
     if (!Array.isArray(g)) g = cid ? groupsOfSession(String(cid)) : [];
-    return { keys: [...new Set((keys || []).filter(Boolean).map(String))].slice(0, STASH_ABOUT_KEYS_MAX), ...(account ? { account: String(account) } : {}), groups: g.map(String).slice(0, 50) };
+    return { keys: [...new Set((keys || []).filter(Boolean).map(String))].slice(0, STASH_ABOUT_KEYS_MAX), ...(account ? { account: String(account) } : {}), groups: g.map(String).slice(0, 50), ...(wake === true ? { wake: true } : {}) };
   };
   // `memo` = ONE read of one queue (the ladder hands a fresh Map per pass): the live session is looked up once, and a
   // (groups, key) verdict is asked once — a 30-entry stash read is one roster lookup + one reach per distinct key
@@ -675,7 +678,7 @@ function create(engineCtx) {
       await markCollect(created.id, guards, decision);   // lane channel-direct-send-sync: a DIRECT send whose caller waits to read the receipt inline (a review proposal is never held)
       if (decision.mode === 'direct') {
         await transition(created.id, 'sending', 'policy', (p) => { p.approvedBy = 'policy'; });
-        await sendNow(created.id);
+        await sendNow(created.id, { pressed: input && input.pressed });   // r2: the owner's own send carries its door's press
         wakeRefundIfUnsent(gate, guards, convId, created.id);
       }
     } catch (err) {
@@ -1010,7 +1013,7 @@ function create(engineCtx) {
     for (const n of fresh.plain) { if (old.has(n)) keep(n); else out.plain.push(n); }
     return { ok: true, prepared: out };
   }
-  async function approve(id, { text = null, by = 'user', consent = null, mayWake = null, deliver = null, shown = null, withoutFiles = false } = {}) {
+  async function approve(id, { text = null, by = 'user', consent = null, mayWake = null, deliver = null, shown = null, withoutFiles = false, pressed = null } = {}) {
     const p0 = store.outbox.snapshot().proposals[id];
     if (!p0) return { ok: false, code: 'not-found', error: 'no such proposal' };
     if (p0.state !== 'awaiting-approval') return { ok: false, code: 'bad-state', error: `proposal is ${p0.state}, not awaiting approval`, state: p0.state };
@@ -1074,7 +1077,7 @@ function create(engineCtx) {
       });
       const p1 = store.outbox.snapshot().proposals[id];
       auditOutbox(p1, 'refused-at-approval', { code: 'send-not-available', why });
-      await receipt(id);
+      await receipt(id, { pressed });
       await pointerSync(p1.key);
       notifyOutbox([id]); notify(p1.convId ? [p1.convId] : []);
       log.log(`[channels] outbox ${id}: approval refused — ${why}`);
@@ -1097,7 +1100,7 @@ function create(engineCtx) {
       const tr = await transition(id, 'sending', by, (p) => { if (leftOut) p.filesLeftOut = leftOut; p.approvedBy = by; if (edited) { p.text = text; p.edited = true; if (prepared) p.prepared = prepared; } stampReceiptChoice(p, receiptChoice); });
       if (!tr.ok) { wakeRefundIfUnsent(gate, { mayWake }, p0.convId, id); return { ok: false, code: 'bad-state', error: tr.why }; }
       auditOutbox(store.outbox.snapshot().proposals[id], 'approve');
-      await sendNow(id);
+      await sendNow(id, { pressed });
     } catch (err) {
       wakeRefundIfUnsent(gate, { mayWake }, p0.convId, id, { threw: true });
       throw err;
@@ -1136,7 +1139,7 @@ function create(engineCtx) {
     if (rc.paced) p.receiptChoicePaced = rc.paced;
   }
 
-  async function reject(id, { reason = null, by = 'user', deliver = null, consent = null, mayWake = null } = {}) {
+  async function reject(id, { reason = null, by = 'user', deliver = null, consent = null, mayWake = null, pressed = null } = {}) {
     const p00 = store.outbox.snapshot().proposals[id];
     const rch = receiptChoiceFor(p00, deliver);
     // a rejection the decider wants the agent to hear NOW is a wake — its echo first (nothing moves on a refusal)
@@ -1149,7 +1152,7 @@ function create(engineCtx) {
     if (!tr.ok) return { ok: false, code: 'bad-state', error: tr.why, state: (store.outbox.snapshot().proposals[id] || {}).state || null };
     const p = store.outbox.snapshot().proposals[id];
     auditOutbox(p, 'reject', { reason: p.reason });
-    await receipt(id);
+    await receipt(id, { pressed });
     await pointerSync(p.key);
     notifyOutbox([id]); notify(p.convId ? [p.convId] : []);
     return { ok: true, proposal: proposalView(store.outbox.snapshot().proposals[id]) };
@@ -1333,7 +1336,7 @@ function create(engineCtx) {
    * mid-flight — the registry marks it `detail.threw`) is `unknown`, which
    * this engine NEVER retries by itself.
    */
-  async function sendNow(id) {
+  async function sendNow(id, { pressed = null } = {}) {
     const p = store.outbox.snapshot().proposals[id];
     if (!p || p.state !== 'sending') return { ok: false, why: p ? `state ${p.state}` : 'no such proposal' };
     if (p.kind === 'reaction') return sendReactionNow(id, p);
@@ -1375,7 +1378,7 @@ function create(engineCtx) {
       else if (fv && !fv.ok) r = { ok: false, code: 'attachment-changed', retryable: false, detail: { reason: `${fv.why} — nothing was sent` } };
       else {
         sendLeft.add(id);   // only a request that is really handed to the adapter may have LEFT (r4's refund rule)
-        try { r = p.compose ? await e.adapter.compose({ to: p.compose.to, cc: p.compose.cc, subject: p.compose.subject, text: wire, idemKey: p.id, as: p.sendAs, onHandle, ...files }) : await e.adapter.send(p.convId, { text: wire, replyTo: p.replyTo, idemKey: p.id, as: p.sendAs, onHandle, placement: P.placementOf(p), ...(anchor ? { replyAnchor: anchor } : {}), ...files, byUser: P.userDecidedSend(p), ...(p.prepared ? { prepared: p.prepared } : {}), ...(p.replyEnvelope ? { envelope: p.replyEnvelope } : {}) }); }
+        try { r = p.compose ? await e.adapter.compose({ to: p.compose.to, cc: p.compose.cc, subject: p.compose.subject, text: wire, idemKey: p.id, as: p.sendAs, onHandle, ...files }) : await e.adapter.send(p.convId, { text: wire, replyTo: p.replyTo, idemKey: p.id, as: p.sendAs, onHandle, placement: P.placementOf(p), ...(anchor ? { replyAnchor: anchor } : {}), ...files, byUser: P.userDecidedSend(p), pressed, ...(p.prepared ? { prepared: p.prepared } : {}), ...(p.replyEnvelope ? { envelope: p.replyEnvelope } : {}) }); }
         catch (err) {
           r = err && typeof err.toJSON === 'function' ? err.toJSON() : { ok: false, code: (err && err.code) || 'vendor-error', retryable: false, detail: { threw: true, message: (err && err.message) || String(err) } };
           if (err && err.message && !r.message) r.message = err.message;
@@ -1443,7 +1446,7 @@ function create(engineCtx) {
     if (to === 'sent') await noteSentBy(p1);
     if (to === 'sent') await speakPartial(p1);
     if (to === 'unknown') await speakUnknown(p1);
-    else await receipt(id);
+    else await receipt(id, { pressed });
     await pointerSync(p1.key);
     notifyOutbox([id]); notify(p1.convId ? [p1.convId] : []);
     log.log(`[channels] outbox ${id} → ${p1.adapterId}/${p1.convId || (p1.compose ? `(new: ${(p1.compose.to || []).join(', ')})` : '')}: ${to}${p1.reason ? ` — ${p1.reason}` : ''}`);
@@ -2022,7 +2025,7 @@ function create(engineCtx) {
     const fresh = store.outbox.snapshot().proposals[id];
     return { ok: true, collected: !already, messaged: already, receiptText: renderReceiptText(fresh, fresh.receipt), proposal: agentProposalView(ctx, fresh) };
   }
-  async function receipt(id) {
+  async function receipt(id, { pressed = null } = {}) {
     const p = store.outbox.snapshot().proposals[id];
     if (!p) return null;
     const rc = P.receiptFor(p);
@@ -2046,11 +2049,11 @@ function create(engineCtx) {
       log.log(`[channels] receipt ${id} → ${cid}: held for the drafting CLI to read inline (${Math.round(collectWindowMs() / 1000)}s window)`);
       return rc;
     }
-    return billedWake({ conv: key || `proposal:${id}`, scopeOf: null }, () => receiptNow(id, p, rc, cid, rec, key));
+    return billedWake({ conv: key || `proposal:${id}`, scopeOf: null }, () => receiptNow(id, p, rc, cid, rec, key, { pressed }));
   }
   /** The receipt's delivery, inside its serial section: the verdict, the ONE
    *  wake row reserved on the proposal before the ladder, the outcome after. */
-  async function receiptNow(id, p, rc, cid, rec, key) {
+  async function receiptNow(id, p, rc, cid, rec, key, { pressed = null } = {}) {
     const en = key ? store.index.peek(key) : null;
     const tR = now();
     let live = null;
@@ -2080,8 +2083,9 @@ function create(engineCtx) {
     if (!deliver || typeof deliver.deliverToConversation !== 'function') r = { ok: false, reason: 'no delivery ladder wired', refused: 'unwired' };
     else {
       // lane owner-press-attended: the decider's «… and wake the agent now» is its OWN, attended reason (one per proposal,
-      // the row above reserved it); the next-turn receipt keeps `channel-receipt` — its free-lane prediction may fail
-      try { r = await deliver.deliverToConversation(cid, text, { kind: 'notification', ...(wake ? { noWake: false, spendReason: 'outbox-wake-now' } : { noWake: true, spendReason: 'channel-receipt' }), fromName, cardText, ...(channel ? { channel } : {}) }); }
+      // the row above reserved it) — r2: only on its door's PRESS (`pressed`); a wake nobody pressed now (a receipt fired
+      // later) is the gated `channel-receipt` wake; the next-turn receipt keeps `channel-receipt` (its free-lane prediction may fail)
+      try { r = await deliver.deliverToConversation(cid, text, { kind: 'notification', ...(wake && isPress(pressed) ? { noWake: false, spendReason: 'outbox-wake-now' } : { noWake: !wake, spendReason: 'channel-receipt' }), fromName, cardText, ...(channel ? { channel } : {}) }); }
       catch (err) { r = { ok: false, reason: `ladder threw: ${(err && err.message) || err}`, refused: 'error' }; }
       if (!(r && r.ok) && typeof deliver.stashFor === 'function') {
         // lane channel-direct-send-sync: WHY the hub held it (for the drain's heading, not "unreachable") — a turn

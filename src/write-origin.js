@@ -93,4 +93,23 @@ function pageVerdict(headers = {}, own = '') {
 const PRESS_BEARER_RE = /^Bearer\s+\S/i;
 function pressBearer(headers) { return PRESS_BEARER_RE.test(String((headers && headers.authorization) || '')); }
 
-module.exports = { crossSiteVerdict, pageVerdict, ownOriginOf, normOrigin, WRITES, pressBearer };
+/** lane owner-press-attended r2: THE PRESS — what makes a turn ATTENDED. The acceptance measured a header-less `curl`
+ *  (no bearer, no Origin, no Sec-Fetch-Site) pressing «Hand over now» free and unstamped with sign-in OFF: `crossSiteVerdict`
+ *  lets a browser-less write through by design. So an attended turn needs a PRESS, and only a door mints one —
+ *  `pressOf(req)`: no bearer AND the STRICT page verdict (`pageVerdict`: a person on THIS instance's own page). The door
+ *  hands it down with its engine call as `pressed`; every attended site selects its attended reason only on
+ *  `isPress(pressed)` (else its gated twin). The value is an IDENTITY no JSON can forge — a body, an agent's payload, a
+ *  record re-read from disk never carries one (`toJSON` drops it) — so the ONLY road to an attended turn is a door that
+ *  minted it. scripts/test-spend-paths.mjs §2b derives the doors from the `pressOf(` calls, walks every `pressed` hop
+ *  from each attended site back to them, and reads each door for its bearer refusal. (A script that FORGES browser
+ *  headers is a person to this check — with sign-in OFF anything local can also rewrite the settings; the line this
+ *  draws is that nothing makes a free turn by leaving a header OUT.) */
+const PRESS = Object.freeze({ toJSON: () => undefined });
+function pressOf(req) {
+  const h = (req && req.headers) || {};
+  if (pressBearer(h)) return null;
+  return pageVerdict(h, ownOriginOf(h, { encrypted: !!(req && req.socket && req.socket.encrypted) })).ok ? PRESS : null;
+}
+const isPress = (x) => x === PRESS;
+
+module.exports = { crossSiteVerdict, pageVerdict, ownOriginOf, normOrigin, WRITES, pressBearer, pressOf, isPress };

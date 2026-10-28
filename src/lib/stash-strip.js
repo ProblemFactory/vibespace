@@ -32,7 +32,9 @@ export function handOverRefusalText(r, { now = Date.now() } = {}) { return handO
 function showRefusal(r) {
   const w = handOverRefusalWords(r, t, { now: Date.now(), locale: deviceLocale() });
   const settings = globalThis.app && globalThis.app._settingsUI;
-  const action = w.door === 'spending' && settings && typeof settings.open === 'function' ? { label: t('Open Settings → Spending'), run: () => settings.open({ category: t('Spending') }) } : null;
+  const app = globalThis.app;
+  const action = w.door === 'spending' && settings && typeof settings.open === 'function' ? { label: t('Open Settings → Spending'), run: () => settings.open({ category: t('Spending') }) }
+    : w.door === 'usage' && app && typeof app.openUsage === 'function' ? { label: t('Open Usage'), run: () => app.openUsage() } : null;   // r2: a signed-out or unnamed account's door is the Usage window
   showToast(w.text, { type: r && r.code === 'nothing_waiting' ? 'info' : 'error', ...(action ? { action, duration: 12000 } : {}) });
 }
 

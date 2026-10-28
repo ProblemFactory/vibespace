@@ -119,14 +119,30 @@ function dayStartClock() {
   const A = 'fake-poll', C = 'fake-poll-ops';
   await eng.pass(A, { force: true });
   const lastWake = () => { const e = eng.store.index.snapshot().conversations[`${A}/${C}`]; const w = (e && e.stats && e.stats.wakes) || []; return { n: w.length, lw: w[w.length - 1] || null }; };
-  await eng.store.index.update(() => { const e = eng.store.index.entry(A, C, { create: false }); e.stats = e.stats || {}; e.stats.wakes = [...(e.stats.wakes || []), { at: Date.now(), ok: false, lane: 'stash', why: 'the spend ceiling held it', refused: 'spend' }]; });
+  const refusedFor = (cid) => eng.store.index.update(() => { const e = eng.store.index.entry(A, C, { create: false }); e.stats = e.stats || {}; e.stats.wakes = [...(e.stats.wakes || []), { at: Date.now(), cid, ok: false, lane: 'stash', why: 'the spend ceiling held it', refused: 'spend' }]; });
+  // r2 (accept-r1, measured): agent A's hand-over of a RECALL NOTE about C cleared C's held tag while agent B's refused wake
+  // still waited — the tag clears only for the wake row's OWN conversation, and only by the refused wake's OWN block
+  await refusedFor('cid-b');
+  const vb0 = eng.conversationView(A, C);
+  const byA = await eng.noteHandedOver('cid-a', [{ source: 'channel', kind: 'notification', text: 'a recall note about C', about: { keys: [`${A}/${C}`] } }, { source: 'channel', kind: 'notification', text: 'a held block for A', about: { keys: [`${A}/${C}`], wake: true } }]);
+  const vb1 = eng.conversationView(A, C);
+  ok(vb0 && vb0.held === true && byA.length === 0 && vb1 && vb1.held === true && !lastWake().lw.handedOverAt,
+    'r2 TWO AGENTS: B\'s wake on C was refused; A\'s hand-over of a recall note about C (and even of a wake block of its own) clears NOTHING — C still reads «last wake held»', JSON.stringify({ byA, held: vb1 && vb1.held }));
+  const byB = await eng.noteHandedOver('cid-b', [{ source: 'channel', kind: 'notification', text: 'a recall note about C', about: { keys: [`${A}/${C}`] } }]);
+  ok(byB.length === 0 && eng.conversationView(A, C).held === true, 'r2 …and B\'s hand-over of a note that is NOT the refused wake\'s block clears nothing either');
+  const byB2 = await eng.noteHandedOver('cid-b', [{ source: 'channel', kind: 'notification', text: 'the held block', about: { keys: [`${A}/${C}`], wake: true } }]);
+  ok(JSON.stringify(byB2) === JSON.stringify([`${A}/${C}`]) && eng.conversationView(A, C).held === false && lastWake().lw.handedOverTo === 'cid-b', 'r2 …B\'s hand-over of ITS refused wake\'s own block clears it (the row\'s own conversation, the wake\'s own block)');
+  const esrc = engineSource(REPO);
+  ok((esrc.match(/cid: target\.cid, wake: true \}\) \}\); stashed = true;/g) || []).length === 2 && !/REV_NOTE_FROM, text: inertFrames\(text\), about: stashAbout\(\{[^}]*wake: true/.test(esrc) && !/'Channels · judged rules'[^\n]*wake: true/.test(esrc),
+    'r2 the two refused-wake stash writers (the wake, the scope digest) mark their block `about.wake`; the recall note and the judged-skip line do not');
+  await refusedFor('cid-x');
   const v0 = eng.conversationView(A, C), w0 = lastWake();
-  const stamped = await eng.noteHandedOver('cid-x', [{ source: 'channel', kind: 'notification', text: 'a held block', about: { keys: [`${A}/${C}`] } }, { source: 'agent', kind: 'peer', text: 'a peer', about: { keys: [`${A}/elsewhere`] } }]);
+  const stamped = await eng.noteHandedOver('cid-x', [{ source: 'channel', kind: 'notification', text: 'a held block', about: { keys: [`${A}/${C}`], wake: true } }, { source: 'agent', kind: 'peer', text: 'a peer', about: { keys: [`${A}/elsewhere`] } }]);
   const v1 = eng.conversationView(A, C), w1 = lastWake();
   ok(v0 && v0.held === true && v1 && v1.held === false && JSON.stringify(stamped) === JSON.stringify([`${A}/${C}`]) && w1.n === w0.n && w1.lw.ok === false && w1.lw.handedOverAt > 0 && w1.lw.handedOverTo === 'cid-x',
     'R4 a refused wake reads «last wake held»; the hand-over that DELIVERED its block clears it — the wake row stamped handedOverAt (still ok:false, no row added), a non-channel entry ignored',
     JSON.stringify({ v0: v0 && v0.held, v1: v1 && v1.held, stamped, w0, w1 }));
-  const again = await eng.noteHandedOver('cid-y', [{ source: 'channel', about: { keys: [`${A}/${C}`] } }]);
+  const again = await eng.noteHandedOver('cid-x', [{ source: 'channel', about: { keys: [`${A}/${C}`], wake: true } }]);
   ok(again.length === 0 && lastWake().lw.handedOverTo === 'cid-x', 'R4 …a second hand-over stamps nothing (the first one is the fact)');
   const src0 = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
   const sh = src0('src/server/stash-handover.js');
@@ -1705,9 +1721,9 @@ const esrc2 = engineSource(REPO);
   // ── (h) THE DOOR: the receipt still enters only through `billedWake` (the census ⑫ below reads the shipped
   // bytes); this copy starts it OUTSIDE the door — ⑫'s bypass control reddens on it
   {
-    const LINE = '    return billedWake({ conv: key || `proposal:${id}`, scopeOf: null }, () => receiptNow(id, p, rc, cid, rec, key));';
+    const LINE = '    return billedWake({ conv: key || `proposal:${id}`, scopeOf: null }, () => receiptNow(id, p, rc, cid, rec, key, { pressed }));';   // r2 (lane owner-press-attended): + the decider's press
     ok(esrc2.split(LINE).length === 2, 'the receipt door line is present once (the control patches exactly it)');
-    const cp = patchPath('src/server', 'channels-engine'); writeCopy(cp, esrc2.replace(LINE, '    return receiptNow(id, p, rc, cid, rec, key);'));
+    const cp = patchPath('src/server', 'channels-engine'); writeCopy(cp, esrc2.replace(LINE, '    return receiptNow(id, p, rc, cid, rec, key, { pressed });'));
     BYPASS_COPY = cp;
     const e = mk(require(cp), 'r4-receipt-bypass');
     await e.pass(A, { force: true });

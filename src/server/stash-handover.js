@@ -80,7 +80,7 @@ const { toAgentText: agentText } = require('../peer-text.js');   // THE belt on 
 const FROM_NAME = 'VibeSpace notices';
 
 const isAgentBearer = (req) => /^Bearer\s+(vsst_|jbt_)/i.test(String((req.headers && req.headers.authorization) || ''));
-const { pressBearer } = require('../write-origin.js');   // lane owner-press-attended: the hand-over is an ATTENDED door — no bearer of any kind
+const { pressBearer, pressOf, isPress } = require('../write-origin.js');   // lane owner-press-attended: the hand-over is an ATTENDED door — no bearer of any kind
 const HANDOVER_MAX_ENTRIES = 30;       // conversation-deliver's STASH_CAP — every entry in one message
 const HANDOVER_MAX_BYTES = 12 * 1024;
 /** How long a delivered hand-over's originals are remembered for a frame that comes back. The wrapper's DELIVERY
@@ -280,7 +280,7 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
   }
   if (forget()) persistDelivered();
   /** Hand the whole stash over now — ONE message through the ladder, reason `stash-handover`. */
-  async function handOver(webuiId, { auto = false } = {}) {
+  async function handOver(webuiId, { auto = false, pressed = null } = {}) {
     const s = activeSessions && activeSessions.get(String(webuiId));
     if (!s) return { ok: false, code: 'no_session', error: 'no such live session' };
     const cid = cidOf(s);
@@ -292,10 +292,10 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
     const rec = { id, at: now(), p: null };
     inflight.set(cid, rec);
     changed();   // the fact says `inFlight` to every client
-    rec.p = handOverNow(s, cid, id, { auto });
+    rec.p = handOverNow(s, cid, id, { auto, pressed });
     try { return await rec.p; } finally { if (inflight.get(cid) === rec) inflight.delete(cid); changed(); }
   }
-  async function handOverNow(s, cid, id, { auto = false } = {}) {
+  async function handOverNow(s, cid, id, { auto = false, pressed = null } = {}) {
     const d = getDeliver();
     if (!d || typeof d.deliverToConversation !== 'function') return { ok: false, code: 'unavailable', error: 'the delivery ladder is not wired on this instance' };
     const jm = jobsReady();
@@ -329,8 +329,9 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
         ? `VibeSpace delivers the ${n} notice(s) that did not fit your previous prompt's context (hand-over ${id}):\n\n${text}`
         : `The user handed over the ${n} notice(s) that were waiting for your next turn (hand-over ${id}):\n\n${text}`;
       const cardText = S.handoverCardText(n, text, { why });   // 2026-09-28: the card carries the notices behind an expander (handoverFacts), not the count alone; R4: its head says why they waited
+      // r2: the ATTENDED reason only on the door's press (write-origin isPress) — a hand-over nobody pressed is the gated twin
       try {
-        r = auto
+        r = !isPress(pressed)
           ? await d.deliverToConversation(cid, frame, { kind: 'notification', spendReason: 'stash-retry', fromName: FROM_NAME, cardText })
           : await d.deliverToConversation(cid, frame, { kind: 'notification', spendReason: 'stash-handover', fromName: FROM_NAME, cardText });
       } catch (e) { r = { ok: false, reason: (e && e.message) || String(e) }; }
@@ -475,7 +476,11 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
     app.post('/api/sessions/:id/stash/hand-over', async (req, res) => {
       try {
         if (pressBearer(req.headers)) return res.status(403).json({ error: 'the user’s hand-over — not an agent route', code: 'agent_forbidden' });
-        const r = await handOver(String(req.params.id));
+        // r2: AN ATTENDED DOOR IS A PERSON'S DOOR — the press is minted for a person on this page only; a header-less script is
+        // refused by name (its only effect here would be the press)
+        const press = pressOf(req);
+        if (!press) return res.status(403).json({ error: 'the hand-over is a press on this instance’s own page — a request with no page (a script) cannot make one', code: 'not_a_person' });
+        const r = await handOver(String(req.params.id), { pressed: press });
         if (!r.ok) {
           noteRefusal(String(req.params.id), r);
           if (r.retryAfter) res.setHeader('Retry-After', String(Math.max(1, Math.ceil(Number(r.retryAfter) / 1000) || 1)));

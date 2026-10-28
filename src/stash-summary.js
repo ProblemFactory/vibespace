@@ -250,28 +250,37 @@ function clockAt(at, { now = Date.now(), locale = undefined, timeZone = undefine
 }
 /** PURE. A REFUSED HAND-OVER IN WORDS, WITH ITS DOOR (lane owner-press-attended — the strip's toast said only «the spending
  *  ceiling…»: no account, no cap, no time, no door, and he pressed five times). Reads the route's 429 body (`identity`,
- *  `cap`, `retryAfter`, `why`) → `{text, door}`; `door: 'spending'` = a setting decides it (Settings → Spending). A body
+ *  `cap`, `retryAfter`, `why`) → `{text, door}`; `door: 'spending'` = a setting decides it (Settings → Spending), `'usage'`
+ *  = the account's sign-in does (the Usage window). A body
  *  without the facts (an older hub) keeps the old sentence. The press itself is ATTENDED since this lane, so a cap refusal
  *  reaches here only from an older hub; overage, a signed-out account and the other codes still do. */
 function handOverRefusalWords(r, t, { now = Date.now(), locale = undefined, timeZone = undefined } = {}) {
   const code = r && r.code;
   if (code === 'spend_refused') {
+    // r2: ONE row per `why`, the same table as the For-you notice (spend-authorizer REFUSAL_WORDS): a cap set to 0 is
+    // «switched off», a signed-out account's door is the Usage window, a body with no identity never says «the limit
+    // is reached» unless the refusal WAS a cap; an instant already past is said «free now — press again» (computed here,
+    // at the toast, from the epoch — never «(in 1 min)» for a time gone)
     const why = r.why || null;
     const account = (r.identity && (r.identity.name || r.identity.key)) || null;
     const cap = r.cap === null || r.cap === undefined || !Number.isFinite(Number(r.cap)) ? null : Number(r.cap);
     const at = Number(r.retryAfter) > 0 ? Number(r.retryAfter) : 0;
-    const mins = at ? Math.max(1, Math.ceil((at - now) / 60000)) : 0;
+    const gone = at > 0 && at <= now;
+    const mins = at && !gone ? Math.max(1, Math.ceil((at - now) / 60000)) : 0;
     const wait = mins < 90 ? t('{n} min', { n: mins }) : mins % 60 ? t('{h} h {m} min', { h: Math.floor(mins / 60), m: mins % 60 }) : t('{h} h', { h: mins / 60 });
     const p = { account, cap, time: at ? clockAt(at, { now, locale, timeZone }) : '', wait };
     const capped = why === 'hour-cap' || why === 'day-cap' || why === 'instance-cap';
-    if (capped && cap === 0) return { text: t('Not handed over — the limit for turns nobody typed is set to 0. The notices keep waiting.'), door: 'spending' };
-    if (why === 'hour-cap' && account && cap !== null) return { text: at ? t('Not handed over — {account} has used its {cap} turns nobody typed this hour; the next frees at {time} (in {wait}). The notices keep waiting.', p) : t('Not handed over — {account} has used its {cap} turns nobody typed this hour. The notices keep waiting.', p), door: 'spending' };
-    if (why === 'day-cap' && account && cap !== null) return { text: at ? t('Not handed over — {account} has used its {cap} turns nobody typed in 24 hours; the next frees at {time} (in {wait}). The notices keep waiting.', p) : t('Not handed over — {account} has used its {cap} turns nobody typed in 24 hours. The notices keep waiting.', p), door: 'spending' };
-    if (why === 'instance-cap' && cap !== null) return { text: at ? t('Not handed over — this instance has used its {cap} turns nobody typed in 24 hours; the next frees at {time} (in {wait}). The notices keep waiting.', p) : t('Not handed over — this instance has used its {cap} turns nobody typed in 24 hours. The notices keep waiting.', p), door: 'spending' };
-    if (why === 'overage-in-use' && account) return { text: t('Not handed over — {account} is billing paid overage, and VibeSpace refuses the turns it starts by itself while it does. The notices keep waiting.', p), door: 'spending' };
-    if (why === 'identity-cannot-serve' && account) return { text: t('Not handed over — {account} cannot sign requests right now (its sign-in expired or was removed). The notices keep waiting.', p), door: null };
-    if (why === 'spend-control-reached' && account) return { text: t('Not handed over — {account} has reached its spend control, so its requests are refused. The notices keep waiting.', p), door: null };
-    return { text: t('Not handed over — the limit for turns nobody typed is reached; the notices keep waiting for the next turn'), door: capped ? 'spending' : null };
+    if (capped && cap === 0) return { text: why !== 'instance-cap' && account ? t('Not handed over — turns nobody typed are switched off for {account}. The notices keep waiting.', p) : t('Not handed over — turns nobody typed are switched off for this instance. The notices keep waiting.'), door: 'spending' };
+    if (why === 'hour-cap' && account && cap !== null) return { text: gone ? t('Not handed over — {account} has used its {cap} turns nobody typed this hour; the next is free now — press again. The notices keep waiting.', p) : at ? t('Not handed over — {account} has used its {cap} turns nobody typed this hour; the next frees at {time} (in {wait}). The notices keep waiting.', p) : t('Not handed over — {account} has used its {cap} turns nobody typed this hour. The notices keep waiting.', p), door: 'spending' };
+    if (why === 'day-cap' && account && cap !== null) return { text: gone ? t('Not handed over — {account} has used its {cap} turns nobody typed in 24 hours; the next is free now — press again. The notices keep waiting.', p) : at ? t('Not handed over — {account} has used its {cap} turns nobody typed in 24 hours; the next frees at {time} (in {wait}). The notices keep waiting.', p) : t('Not handed over — {account} has used its {cap} turns nobody typed in 24 hours. The notices keep waiting.', p), door: 'spending' };
+    if (why === 'instance-cap' && cap !== null) return { text: gone ? t('Not handed over — this instance has used its {cap} turns nobody typed in 24 hours; the next is free now — press again. The notices keep waiting.', p) : at ? t('Not handed over — this instance has used its {cap} turns nobody typed in 24 hours; the next frees at {time} (in {wait}). The notices keep waiting.', p) : t('Not handed over — this instance has used its {cap} turns nobody typed in 24 hours. The notices keep waiting.', p), door: 'spending' };
+    if (capped) return { text: t('Not handed over — the limit for turns nobody typed is reached; the notices keep waiting for the next turn'), door: 'spending' };
+    if (why === 'overage-in-use') return { text: account ? t('Not handed over — {account} is billing paid overage, and VibeSpace refuses the turns it starts by itself while it does. The notices keep waiting.', p) : t('Not handed over — the account this turn would bill is on paid overage, and VibeSpace refuses the turns it starts by itself while it is. The notices keep waiting.'), door: 'spending' };
+    if (why === 'identity-cannot-serve') return { text: account ? t('Not handed over — {account} cannot sign requests right now (its sign-in expired or was removed). The notices keep waiting.', p) : t('Not handed over — the account this turn would bill cannot sign requests right now (its sign-in expired or was removed). The notices keep waiting.'), door: 'usage' };
+    if (why === 'spend-control-reached') return { text: account ? t('Not handed over — {account} has reached its spend control, so its requests are refused. The notices keep waiting.', p) : t('Not handed over — the account this turn would bill has reached its spend control, so its requests are refused. The notices keep waiting.'), door: null };
+    if (why === 'identity-unknown') return { text: t('Not handed over — VibeSpace could not tell which account this turn would bill. The notices keep waiting.'), door: 'usage' };
+    if (why) return { text: t('Not handed over — the spend ceiling refused this turn ({why}). The notices keep waiting.', { why: String(why).slice(0, 60) }), door: null };
+    return { text: t('Not handed over — the limit for turns nobody typed is reached; the notices keep waiting for the next turn'), door: 'spending' };   // an older hub's body: no `why` at all
   }
   if (code === 'unreachable') return { text: t('Not handed over — the agent could not be reached; the notices keep waiting for its next turn'), door: null };
   if (code === 'in_flight') return { text: t('A hand-over for this agent is already in progress'), door: null };

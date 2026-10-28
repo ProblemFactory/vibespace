@@ -7,7 +7,9 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 ### Fixed
 - Your own presses of Hand over now, Wake now and Hand back are no longer refused by, or counted against, the limit on turns nobody typed.
 - A refused hand-over now names the account, its limit and the local time it frees up, with a button to Settings → Spending.
-- A number you type in Settings is saved without leaving the field, and its row says «Not saved yet» until it is.
+- A number you type in Settings is saved when you press Enter or leave the field, never half-typed; its row says «Not saved yet», «Saving…», then «Saved».
+- The Spending notice in For you says what was held and where, in your language and time zone, and «now» once the next turn is free.
+- A turn held because an account is signed out now points to the Usage window instead of the spending limits.
 
 ## 2.369.360 — 2026-10-27
 

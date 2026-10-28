@@ -76,6 +76,7 @@
  * `vibespace-window`, and nothing queued there acts on a page.
  */
 const T = require('../browser-takeover.js');
+const { isPress } = require('../write-origin.js');   // lane owner-press-attended r2: an explicit handback is attended only on its door's press
 const TQ = require('../browser-takeover-request.js'); // lane browser-takeover-queue: the request record — its For-you item and its words
 const INT = require('../browser-interrupt.js'); // lane browser-admin 2a: the relaunch's words (Change build…)
 const { addressableId } = require('../claude-lock-capture.js');   // verify r6 (lane channel-withdraw): the ONE own-id predicate
@@ -109,10 +110,10 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
   /** THE ONE BILLED SITE of this module — through the gated ladder, under the declared reason (§4.3.1). `noWake` (lane
    *  browser-propose: an approved switch is TOLD, never a wake) = deliver only where it costs nothing — a notification
    *  steered into a turn already running — else the ladder refuses `no-wake` and the caller stashes for the next turn. */
-  function viaLadder(cid, text, { noWake = false, idle = false } = {}) {
+  function viaLadder(cid, text, { noWake = false, idle = false, pressed = null } = {}) {
     // lane owner-press-attended: the person's click is `browser-handback` (attended); the idle / viewer-left announcement
     // (nobody's action, browser.announceIdleHandback ON) is its gated twin — the verdict names which (T.announceVerdict)
-    const paid = idle ? { spendReason: 'browser-handback-idle' } : { spendReason: 'browser-handback' };
+    const paid = idle || !isPress(pressed) ? { spendReason: 'browser-handback-idle' } : { spendReason: 'browser-handback' };   // r2: attended only on the door's PRESS
     return deliver.deliverToConversation(cid, text, { kind: 'notification', ...paid, fromName: FROM_NAME, cardText: text, ...(noWake ? { noWake: true } : {}) }); // the LITERAL is what the census reads; it equals T.SPEND_REASON (pinned by the suite)
   }
   function queueNotice(sess, n) {
@@ -164,7 +165,7 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
       return out;
     }
     let r = null;
-    try { r = await viaLadder(cid, text, { idle: verdict.reason === T.IDLE_SPEND_REASON }); } catch (e) { r = { ok: false, reason: 'delivery threw: ' + (e && e.message) }; }
+    try { r = await viaLadder(cid, text, { idle: verdict.reason === T.IDLE_SPEND_REASON, pressed: ev && ev.pressed }); } catch (e) { r = { ok: false, reason: 'delivery threw: ' + (e && e.message) }; }
     if (r && r.ok) {
       out.delivered = true;
       log.log?.(`[browser] handback (${cause}) for ${sess.id}: announced into the conversation (${r.via || r.mode || 'delivered'})`);
@@ -451,13 +452,13 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
     try { userTodos.setStatus(rec.itemId, 'done', TQ.resolvedByOf(rec)); return true; } catch (e) { log.warn?.(`[browser] takeover request ${rec.id}: its For-you item was not resolved — ${e && e.message}`); return false; }
   }
   /** The person's Done WITHOUT a takeover reaches the agent ONCE (a wake: they pressed it; the stash when refused). */
-  async function tellDone(rec) {
+  async function tellDone(rec, { pressed = null } = {}) {
     const sess = sessionFor(rec.sessionId, rec.browserKey);
     const text = TQ.doneText(rec);
     const cid = sess ? conversationIdOf(sess.s) : null;
     if (!sess || !cid || !deliver || typeof deliver.deliverToConversation !== 'function') { if (sess) queueNotice(sess, { kind: 'browser-handback', cause: 'explicit', text, at: Date.now() }); return { told: sess ? 'noticed' : 'failed' }; }
     let r = null;
-    try { r = await viaLadder(cid, text); } catch (e) { r = { ok: false, reason: 'delivery threw: ' + (e && e.message) }; }
+    try { r = await viaLadder(cid, text, { pressed }); } catch (e) { r = { ok: false, reason: 'delivery threw: ' + (e && e.message) }; }
     if (r && r.ok) return { told: 'delivered' };
     try { if (typeof deliver.stashFor === 'function') { deliver.stashFor(cid, { source: 'agent', kind: 'notification', fromName: FROM_NAME, text }); return { told: 'stashed' }; } } catch (e) { log.warn?.(`[browser] takeover request ${rec.id}: the Done was not stashed — ${e && e.message}`); }
     return { told: queueNotice(sess, { kind: 'browser-handback', cause: 'explicit', text, at: Date.now() }) ? 'noticed' : 'failed' };
@@ -468,19 +469,19 @@ function create({ keeper = null, deliver = null, serverSetting = () => undefined
     if (ev.kind === 'asked' || ev.kind === 'reasserted' || ev.kind === 'parked') { fileRequestItem(rec); return; }
     if (rec.state === 'done' || rec.state === 'withdrawn') {
       resolveRequestItem(rec);
-      if (rec.how === 'done') tellDone(rec).then((o) => log.log?.(`[browser] takeover request ${rec.id}: marked done by the person — the agent ${o.told === 'delivered' ? 'is told now' : o.told === 'stashed' ? 'is told with its next turn' : o.told === 'noticed' ? 'reads it at its next turn' : 'could not be told'}`)).catch(() => { });
+      if (rec.how === 'done') tellDone(rec, { pressed: ev.pressed }).then((o) => log.log?.(`[browser] takeover request ${rec.id}: marked done by the person — the agent ${o.told === 'delivered' ? 'is told now' : o.told === 'stashed' ? 'is told with its next turn' : o.told === 'noticed' ? 'reads it at its next turn' : 'could not be told'}`)).catch(() => { });
     }
   }
   /** The item left 'open' by one of ITS doors while the request still stands: a reply reopens it (and wakes the agent's
    *  wait); a dismissal / a batch «Mark all seen» parks the request (band 4, still listed); the ✓ is the person's Done. */
-  function onItemStatus(it, { status, by, batch } = {}) {
+  function onItemStatus(it, { status, by, batch, pressed = null } = {}) {
     if (!isRequestItem(it) || status === 'open' || !keeper || typeof keeper.takeoverRequest !== 'function') return;
     const rec = keeper.takeoverRequest(it.action.requestId);
     if (!rec || !TQ.isOpen(rec)) return;
     if (by === 'reply') { try { userTodos.setStatus(it.id, 'open', 'system'); } catch { /* gone */ } keeper.noteRequestItem(rec.id, { replied: true }); return; }
     if (status === 'done' && by === 'user' && !batch) {
-      if (rec.state === 'taken' && keeper.inputStateFor(rec.browserKey, rec.profileId).input === 'user') { const r = keeper.handback({ browserKey: rec.browserKey, profileId: rec.profileId, viewerId: null, cause: 'explicit', url: '', sessionId: rec.sessionId || null }); if (r && r.ok) return; }
-      keeper.resolveTakeoverRequest(rec.id, 'done');
+      if (rec.state === 'taken' && keeper.inputStateFor(rec.browserKey, rec.profileId).input === 'user') { const r = keeper.handback({ browserKey: rec.browserKey, profileId: rec.profileId, viewerId: null, cause: 'explicit', url: '', sessionId: rec.sessionId || null, pressed }); if (r && r.ok) return; }
+      keeper.resolveTakeoverRequest(rec.id, 'done', { pressed });
       return;
     }
     keeper.noteRequestItem(rec.id, { parked: true }); // the 'parked' event re-files it at band 4 (the same item, reopened)

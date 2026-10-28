@@ -393,17 +393,20 @@ console.log('§12 browser.idlePaintFreeze: the row\'s default is src/browser-idl
   for (const r of copiesCensus(M12.files, M12.dir, REPO, { minCopies: 1 })) ok(r.pass, r.name, r.detail);
 }
 
-// §13 lane owner-press-attended (R3) — A TYPED NUMBER IS LIVE WITHIN THE DEBOUNCE, AND THE ROW SAYS SO. userW (2026-10-28)
-// typed 200 into Settings → Spending at 00:40 PT; his 00:47:34 press was refused; the file was written at 00:48:01. The
-// 6428c67e field committed on `change` (blur / Enter) only and the row showed nothing. The REAL SettingsManager (fetch +
-// localStorage stood in, the POST answered with the server's own budgetLimits echo) and the REAL bindNumberField over an
-// input-like object, keys typed 100 ms apart with NO blur — on a VIRTUAL clock (setTimeout swapped for this block): the
-// store's own 500 ms debounce is what is measured, deterministically, at no wall time.
-console.log('§13 a typed number is saved within the debounce (no blur), its row says «Not saved yet» → «Saving…» → «Saved», a Spending row says the number in force');
+// §13 lane owner-press-attended (R3, r2) — A HALF-TYPED NUMBER NEVER REACHES THE SERVER, AND THE ROW SAYS WHAT IS SAVED.
+// userW (2026-10-28) typed 200 into Settings → Spending at 00:40 PT; his 00:47:34 press was refused; the file was written
+// at 00:48:01 — the row showed nothing. r1 made every keystroke commit; the acceptance MEASURED (accept-r1 MAJOR) that a
+// 500 ms pause after the first digit POSTed it — claude.transcriptRetentionDays «730» wrote cleanupPeriodDays=7 on the
+// spot, a prefix under a row's min was stored AT the min. So the field commits on `change` (Enter / blur) only, exactly as
+// the base did, and the WORDS ride `input`: «Not saved yet — press Enter or leave the field» → «Saving…» → «Saved · in
+// force now: N» (it stays until the next edit). The REAL SettingsManager (fetch + localStorage stood in, the POST answered
+// with the server's own budgetLimits echo) and the REAL bindNumberField over an input-like object, on a VIRTUAL clock
+// (setTimeout swapped for this block): the store's own 500 ms debounce, deterministically, at no wall time.
+console.log('§13 a typed number is saved on Enter / blur only, its row says «Not saved yet — press Enter…» → «Saving…» → «Saved», a Spending row says the server\'s number in force');
 {
   const { SettingsManager } = await import('../src/lib/settings.js');
   const SA = (await import('node:module')).createRequire(import.meta.url)(path.join(REPO, 'src/spend-authorizer.js'));
-  const PATH = 'spend.unattendedPerIdentityHour', DAY = 'spend.unattendedPerIdentityDay';
+  const PATH = 'spend.unattendedPerIdentityHour', DAY = 'spend.unattendedPerIdentityDay', KEEP = 'claude.transcriptRetentionDays', HOT = 'channels.pollHotSec';
   const saved = { setTimeout: globalThis.setTimeout, clearTimeout: globalThis.clearTimeout, fetch: globalThis.fetch, localStorage: globalThis.localStorage };
   const vt = { now: 0, q: [], id: 0 };
   const flush = async () => { for (let i = 0; i < 6; i++) await new Promise((r) => setImmediate(r)); };
@@ -416,63 +419,124 @@ console.log('§13 a typed number is saved within the debounce (no blur), its row
   globalThis.clearTimeout = (id) => { vt.q = vt.q.filter((x) => x.id !== id); };
   globalThis.localStorage = { getItem() { return null; }, setItem() { } };
   const posts = [];
+  let slow = null, server = {};
   globalThis.fetch = async (url, o = {}) => {
     if (o.method === 'POST') {
       const body = JSON.parse(o.body);
       if (body[PATH] === 40) throw new Error('offline');   // the failing leg's value
+      if (body[PATH] === 41) return new Promise((res, rej) => { slow = { res, rej }; });   // the slow-hub leg: held, then failed
       posts.push({ at: vt.now, body });
+      server = { ...body };
       return { ok: true, json: async () => ({ success: true, spend: SA.budgetLimits((k) => body[k]) }) };   // routes/persistence.js's echo
     }
-    return { ok: true, json: async () => ({}) };
+    return { ok: true, json: async () => ({ ...server }) };
   };
   try {
-    const type = async (bind, keys, p = PATH) => {
+    const type = async (bind, keys, p = PATH, { pauseAfterFirst = 0, blur = false } = {}) => {
       const sm = new SettingsManager();
-      const states = [];
+      const states = [], typed = [];
       sm.onSaveState((q, st) => { if (q === p) states.push(st); });
-      const input = { value: '30', oninput: null, onchange: null };
+      const input = { value: String(S.SETTINGS_SCHEMA[p].default), oninput: null, onchange: null };
       const bound = [];
-      bind(input, sm, bound, p);
+      bind(input, sm, bound, p, typed);
       posts.length = 0;
       let last = 0;
-      for (const v of keys) { input.value = v; if (input.oninput) input.oninput(); last = vt.now; await advance(100); }
-      await advance(600 - (vt.now - last));   // 600 ms after the last keystroke
-      return { sm, states, input, bound, last, posts: posts.slice() };
+      for (const [i, v] of keys.entries()) { input.value = v; if (input.oninput) input.oninput(); last = vt.now; await advance(i === 0 && pauseAfterFirst ? pauseAfterFirst : 100); }
+      await advance(700);
+      const beforeChange = posts.slice();
+      if (blur && input.onchange) { input.onchange(); await advance(700); }
+      return { sm, states, typed, input, bound, last, beforeChange, posts: posts.slice() };
     };
-    const real = (input, sm, bound, p) => V.bindNumberField(input, { schema: S.SETTINGS_SCHEMA[p], path: p, settings: sm, clamp: (n) => S.clampToSchema(S.SETTINGS_SCHEMA[p], n), onBound: (c) => bound.push(c) });
-    // the 6428c67e field, as it was written: one `onchange` (blur / Enter), nothing on `input`
-    const before = (input, sm, bound, p) => { input.onchange = () => { const num = parseFloat(input.value); if (Number.isFinite(num)) sm.set(p, S.clampToSchema(S.SETTINGS_SCHEMA[p], num).value); }; };
-    const g = await type(real, ['2', '20', '200']);
+    const real = (input, sm, bound, p, typed) => V.bindNumberField(input, { schema: S.SETTINGS_SCHEMA[p], path: p, settings: sm, clamp: (n) => S.clampToSchema(S.SETTINGS_SCHEMA[p], n), onBound: (c) => bound.push(c), onTyping: (x) => typed.push(x) });
+    // the r1 field (b8d2d98e), as it was written: EVERY keystroke committed through the store (the acceptance's RED)
+    const r1 = (input, sm, bound, p) => { const commit = (final) => { const num = parseFloat(input.value); if (!Number.isFinite(num)) return; const c = S.clampToSchema(S.SETTINGS_SCHEMA[p], num); if (JSON.stringify(sm.get(p)) !== JSON.stringify(c.value)) sm.set(p, c.value); if (final && c.bound) input.value = c.value; }; input.oninput = () => commit(false); input.onchange = () => commit(true); };
+    // the transcript-deletion road: «730» typed with a 700 ms pause after the «7», never blurred
+    const k1 = await type(real, ['7', '73', '730'], KEEP, { pauseAfterFirst: 700 });
+    const k0 = await type(r1, ['7', '73', '730'], KEEP, { pauseAfterFirst: 700 });
+    ok(k1.beforeChange.length === 0 && k1.sm.get(KEEP) === S.SETTINGS_SCHEMA[KEEP].default && k1.typed[k1.typed.length - 1] === true,
+      'r2 «730» typed into claude.transcriptRetentionDays with a 700 ms pause after the «7» and NO Enter / blur ⇒ 0 POSTs (the store unchanged; the row says «not saved yet»)', JSON.stringify(k1.beforeChange.map((x) => x.body[KEEP])));
+    ok(k0.beforeChange.some((x) => x.body[KEEP] === 7), 'r2 CONTROL (the r1 field, every keystroke committed): the same typing POSTs cleanupPeriodDays 7 — the acceptance\'s transcript-deletion road', JSON.stringify(k0.beforeChange.map((x) => x.body[KEEP])));
+    const g = await type(real, ['2', '20', '200'], PATH, { blur: true });
     const hit = g.posts.find((x) => x.body[PATH] === 200);
-    ok(!!hit && hit.at - g.last <= 600 && g.posts.length === 1, `R3 typed 200 WITHOUT a blur ⇒ saved ${hit ? hit.at - g.last : '∞'} ms after the last keystroke (≤ 600 — the store's own 500 ms debounce), ONE POST for three keystrokes`, JSON.stringify(g.posts));
-    ok(g.states.includes('pending') && g.states.includes('saving') && g.states[g.states.length - 1] === 'saved' && g.sm.saveStateOf(PATH) === 'saved',
-      'R3 …its save state ran pending → saving → saved (what the row\'s mark draws)', JSON.stringify(g.states));
+    ok(g.beforeChange.length === 0 && !!hit && g.posts.length === 1, 'r2 typed 200 then Enter / blur ⇒ ONE POST (200), after the change and only then', JSON.stringify(g.posts.map((x) => x.body[PATH])));
+    ok(g.typed[0] === true && g.typed[g.typed.length - 1] === false && g.states.includes('pending') && g.states.includes('saving') && g.states[g.states.length - 1] === 'saved' && g.sm.saveStateOf(PATH) === 'saved',
+      'r2 …the row ran typed (the field differs, nothing stored) → pending → saving → saved', JSON.stringify({ typed: g.typed, states: g.states }));
+    await advance(10000);
+    const still = g.sm.saveStateOf(PATH);
+    g.sm.set(PATH, 201);
+    const pendingAfterEdit = g.sm.saveStateOf(PATH);
+    await advance(700);   // let that edit's own POST go before the next leg counts
+    ok(still === 'saved' && pendingAfterEdit === 'pending', 'r2 «Saved» STAYS (10 s later still saved) until the next edit makes it pending', still);
     const inForce = V.inForceOf(PATH, { live: g.sm.liveEcho(), server: (k) => g.sm.serverValue(k), budgetLimits: SA.budgetLimits });
-    ok(inForce === 200 && V.saveMarkWords('saved', tEn, { inForce }) === 'Saved · in force now: 200' && V.saveMarkWords('pending', tEn, { inForce: 30 }) === 'Not saved yet — in force now: 30'
-      && V.saveMarkWords('saving', tEn) === 'Saving…' && V.saveMarkWords('idle', tEn) === '' && V.saveMarkWords('pending', tZh) === '未保存' && V.saveMarkWords('saved', tJa, { inForce: 200 }) === '保存しました · 現在有効：200',
-      'R3 …the mark says it in words (en / zh / ja), a Spending row with the number the SERVER echoed (200)', String(inForce));
-    const b = await type(before, ['2', '20', '200']);
-    ok(b.posts.length === 0 && b.sm.get(PATH) === 30, 'R3 CONTROL (the 6428c67e field): the same typing with no blur saves NOTHING in 600 ms — the value is not live (userW\'s 00:47:34 press)', JSON.stringify(b.posts));
-    b.input.onchange(); await advance(600);
-    ok(posts.some((x) => x.body[PATH] === 200), 'R3 …only the blur / Enter saved it (the pre-fix contract)');
-    const c = await type(real, ['3', '30', '3000'], DAY);
-    ok(c.posts.length === 1 && c.posts[0].body[DAY] === 2000 && c.input.value === '3000' && c.bound.length === 0, 'R3 a value over the maximum is STORED clamped (2000) while the field keeps what is being typed (3000)', JSON.stringify({ posts: c.posts.map((x) => x.body), field: c.input.value }));
-    c.input.onchange();
-    ok(c.input.value === 2000 && c.bound.length === 1 && c.bound[0].bound === 'max', 'R3 …the blur writes the clamp back into the field and SAYS it (the R2-verify toast)', JSON.stringify({ field: c.input.value, bound: c.bound }));
-    const f = await type(real, ['4', '40']);
+    ok(inForce === 200 && V.saveMarkWords('saved', tEn, { inForce }) === 'Saved · in force now: 200' && V.saveMarkWords('typed', tEn, { inForce: 30 }) === 'Not saved yet — press Enter or leave the field · in force now: 30'
+      && V.saveMarkWords('typed', tEn) === 'Not saved yet — press Enter or leave the field' && V.saveMarkWords('pending', tEn) === 'Saving…' && V.saveMarkWords('saving', tEn) === 'Saving…' && V.saveMarkWords('idle', tEn) === ''
+      && V.saveMarkWords('typed', tZh) === '未保存——按回车或离开输入框即可保存' && V.saveMarkWords('saved', tJa, { inForce: 200 }) === '保存しました · 現在有効：200',
+      'r2 …the mark says it in words (en / zh / ja), a Spending row with the number the SERVER echoed (200)', String(inForce));
+    // the clamp happens at the change only: a prefix under the min is never stored at the min, a value over the max is
+    const h = await type(real, ['1', '12', '120'], HOT, { pauseAfterFirst: 700, blur: true });
+    const h0 = await type(r1, ['1', '12', '120'], HOT, { pauseAfterFirst: 700 });
+    ok(h.beforeChange.length === 0 && h.posts.length === 1 && h.posts[0].body[HOT] === 120 && h.bound.length === 0, 'r2 «120» into channels.pollHotSec (min 10) with a pause after the «1» ⇒ nothing until the change, then 120 — never 10', JSON.stringify(h.posts.map((x) => x.body[HOT])));
+    ok(h0.beforeChange.some((x) => x.body[HOT] === 10), 'r2 CONTROL (the r1 field): the «1» was stored AT the min (10) during the pause', JSON.stringify(h0.beforeChange.map((x) => x.body[HOT])));
+    const c = await type(real, ['3', '30', '3000'], DAY, { blur: true });
+    ok(c.beforeChange.length === 0 && c.posts.length === 1 && c.posts[0].body[DAY] === 2000 && c.input.value === 2000 && c.bound.length === 1 && c.bound[0].bound === 'max',
+      'r2 a value over the maximum is clamped AT THE CHANGE: stored 2000, written back into the field and SAID (the R2-verify toast: «kept at the maximum»)', JSON.stringify({ posts: c.posts.map((x) => x.body), field: c.input.value }));
+    const f = await type(real, ['4', '40'], PATH, { blur: true });
     ok(f.sm.saveStateOf(PATH) === 'failed' && /^Not saved — the server did not answer/.test(V.saveMarkWords('failed', tEn)), 'R3 a save that does not land reads «Not saved — the server did not answer…» (never «Saved»)', f.sm.saveStateOf(PATH));
+    // the slow hub (accept-r1 settings-marks leg 2): 41's POST is still out when 42 is saved; 42 lands, THEN 41 fails
+    {
+      const sm = new SettingsManager();
+      sm.set(PATH, 41); await advance(600);
+      sm.set(PATH, 42); await advance(600);
+      const mid = sm.saveStateOf(PATH);
+      slow.rej(new Error('slow hub')); await advance(10);
+      ok(mid === 'saved' && sm.saveStateOf(PATH) === 'saved' && server[PATH] === 42, 'r2 a failed save never outlives a LATER save that landed: 41 out, 42 saved, 41 fails ⇒ the row still reads «Saved» (the latest POST\'s outcome is the row\'s)', JSON.stringify({ mid, now: sm.saveStateOf(PATH), server: server[PATH] }));
+    }
+    {
+      const sm = new SettingsManager();
+      sm.set(PATH, 41); await advance(600);
+      slow.rej(new Error('slow hub')); await advance(10);
+      const mid = sm.saveStateOf(PATH);
+      sm.set(PATH, 42); await advance(600);
+      ok(mid === 'failed' && sm.saveStateOf(PATH) === 'saved', 'r2 …and a save that lands AFTER a failure clears it: «Not saved» → «Saved»', JSON.stringify({ mid, now: sm.saveStateOf(PATH) }));
+    }
+    // the in-force number has ONE source (accept-r1 MINOR, the two-tab leg): tab A saved 50, tab B saves 80 ⇒ A's row says 80
+    {
+      const A1 = new SettingsManager(), B1 = new SettingsManager();
+      const marks = [];
+      A1.onSaveState((q) => { if (q === PATH) marks.push(V.saveMarkWords(A1.saveStateOf(PATH), tEn, { inForce: V.inForceOf(PATH, { live: A1.liveEcho(), server: (k) => A1.serverValue(k), budgetLimits: SA.budgetLimits }) })); });
+      A1.set(PATH, 50); await advance(600);
+      const a50 = marks[marks.length - 1];
+      B1.set(PATH, 80); await advance(600);
+      const echoB = B1.liveEcho();
+      A1.applyRemote({ ...server }, { spend: echoB && echoB.spend });   // the settings-updated broadcast carries the server's recomputed `spend`
+      const a80 = marks[marks.length - 1];
+      A1.applyRemote({ ...server, [PATH]: 100 });   // an older hub's broadcast (no `spend`) — the echo is dropped, budgetLimits over its values speaks
+      const a100 = V.inForceOf(PATH, { live: A1.liveEcho(), server: (k) => A1.serverValue(k), budgetLimits: SA.budgetLimits });
+      server = { ...server, [PATH]: 120 };
+      await A1.refetch();
+      const a120 = V.inForceOf(PATH, { live: A1.liveEcho(), server: (k) => A1.serverValue(k), budgetLimits: SA.budgetLimits });
+      ok(a50 === 'Saved · in force now: 50' && a80 === 'Saved · in force now: 80' && a100 === 100 && a120 === 120,
+        'r2 the in-force number has ONE source: tab A saved 50, tab B saved 80 ⇒ A\'s row REDRAWS to «in force now: 80» on the broadcast; a broadcast with no `spend` and a reconnect refetch drop A\'s own echo (100, 120)', JSON.stringify({ a50, a80, a100, a120 }));
+    }
     const sm5 = new SettingsManager();
     sm5._server = { [PATH]: 500 };   // a hand edit above the clamp (the server reads it, budgetLimits clamps it at CAP_MAX)
     const clamp = V.inForceOf(PATH, { live: null, server: (k) => sm5.serverValue(k), budgetLimits: SA.budgetLimits });
     ok(clamp === SA.CAP_MAX.perIdentityHour && V.inForceOf('chat.compactMode', { server: () => true, budgetLimits: SA.budgetLimits }) === null, `R3 a Spending row says the number the server USES — a stored 500 reads in force ${clamp} (CAP_MAX); a row the spend guard does not read says none`);
+    // NO ROW COMMITS ON INPUT: every plain number row of the schema, typed into with the real binding — the store is never written
+    const rows = Object.keys(S.SETTINGS_SCHEMA).filter((k) => S.SETTINGS_SCHEMA[k].type === 'number' && !S.SETTINGS_SCHEMA[k].slider && !S.SETTINGS_SCHEMA[k].store);
+    let writes = 0;
+    for (const k of rows) { const inp = { value: '', oninput: null, onchange: null }; V.bindNumberField(inp, { schema: S.SETTINGS_SCHEMA[k], path: k, settings: { get: () => S.SETTINGS_SCHEMA[k].default, set: () => { writes++; } }, clamp: (n) => S.clampToSchema(S.SETTINGS_SCHEMA[k], n) }); for (const v of ['1', '12', '123']) { inp.value = v; inp.oninput(); } }
+    ok(rows.length >= 50 && writes === 0, `r2 NO number row commits on input: ${rows.length} rows typed into, ${writes} store writes (a live-commit road does not exist for a typed number)`);
   } finally {
     Object.assign(globalThis, saved);
   }
   const ui = read('src/lib/settings-ui.js');
-  ok(/bindNumberField\(input, \{/.test(ui) && /if \(schema\.type === 'number' && !schema\.slider && !schema\.store\) controlWrap\.appendChild\(this\._saveMark\(path\)\);/.test(ui) && /saveMarkWords\(st, t, \{ inForce \}\)/.test(ui),
-    'R3 wiring: the Settings number field is bound by bindNumberField and every number row carries the save mark');
-  ok(/res\.json\(\{ success: true, \.\.\.\(spend \? \{ spend \} : \{\}\) \}\);/.test(read('src/routes/persistence.js')) && /budgetLimits\(\(k\) => cur\[k\]\)/.test(read('src/routes/persistence.js')),
-    'R3 wiring: POST /api/settings echoes the spend guard\'s own budgetLimits over the cache it just wrote');
+  ok(/bindNumberField\(input, \{/.test(ui) && /onTyping: \(typed\) => this\._markTyped\(path, typed\)/.test(ui) && /if \(schema\.type === 'number' && !schema\.slider && !schema\.store\) controlWrap\.appendChild\(this\._saveMark\(path\)\);/.test(ui) && /saveMarkWords\(st, t, \{ inForce \}\)/.test(ui),
+    'R3 wiring: the Settings number field is bound by bindNumberField (its typing marks the row), and every number row carries the save mark');
+  const per = read('src/routes/persistence.js');
+  ok(/const spend = writeSettings\(data\);\n\s+res\.json\(\{ success: true, \.\.\.\(spend \? \{ spend \} : \{\}\) \}\);/.test(per) && /broadcast\(\{ type: 'settings-updated', settings: data, \.\.\.\(spend \? \{ spend \} : \{\}\) \}\);/.test(per)
+    && /this\.settings\.applyRemote\(msg\.settings, \{ spend: msg\.spend \|\| null \}\);/.test(read('src/lib/app.js')),
+    'r2 wiring: the ONE settings writer computes the in-force `spend` once — the POST echoes it AND the settings-updated broadcast carries it to every tab');
 }
 
 console.log(`\ntest-settings-view: ${pass} passed, ${fail} failed`);

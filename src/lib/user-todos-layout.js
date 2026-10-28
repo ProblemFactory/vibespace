@@ -74,6 +74,28 @@
 import { replyVerdict, REPLY_HIDDEN_CODES } from '../inbox-reply.js';
 import { rowOf, needsMe, placeOf, badgeRows, bandInfo, policyOf } from '../attention-model.js'; // PURE: THE attention list (lane foryou-folds, design q-044) — the tray's bands, cap and folds; `policy` = the owner's (src/attention-model.js settingsPolicy, lane attention-predicate-shared)
 import { INBOX_ORIGINS, ORIGIN_LABELS } from '../inbox-origin.js';
+import { clockAt } from '../stash-summary.js'; // PURE: an instant in the viewer's zone (lane owner-press-attended)
+
+/** PURE. THE WORDS OF ONE i18n LINE (`{key, params}`) — the ONE renderer every For-you surface uses (user-todos-actions'
+ *  said()) and the suites read (lane owner-press-attended r2: test-spend-paths §10 reads a spend notice RENDERED, never
+ *  its English source). A param is a string / number, or WORDS (`{key}` — said in this language before the sentence is
+ *  filled, a verb's own words, lane vault-key-row-compact), or an INSTANT (`{at}` — the clock in the viewer's zone), or
+ *  an INSTANT CLAUSE (`{at, key, gone}` — `key` filled with that clock while the instant is ahead, `gone` once it has
+ *  passed: «the next is free now», computed HERE at render; the stored epoch never changes). */
+export function saidLine(l, t, { now = Date.now(), locale = undefined, timeZone = undefined } = {}) {
+  const word = (v) => {
+    if (!v || typeof v !== 'object') return v;
+    if (Number.isFinite(v.at) && typeof v.key === 'string') return v.at > now ? t(v.key, { time: clockAt(v.at, { now, locale, timeZone }) }) : t(typeof v.gone === 'string' && v.gone ? v.gone : v.key, { time: clockAt(v.at, { now, locale, timeZone }) });
+    if (typeof v.key === 'string') return t(v.key);
+    if (Number.isFinite(v.at)) return clockAt(v.at, { now, locale, timeZone });
+    return v;
+  };
+  return String(t(l.key, Object.fromEntries(Object.entries((l && l.params) || {}).map(([k, v]) => [k, word(v)])))).trim();
+}
+/** PURE. An item's sentence: its i18n words when it filed them, else its own text (an agent's ask). */
+export function itemTextOf(i, said) { return i && i.i18n && i.i18n.text ? said(i.i18n.text) : (i && i.text) || ''; }
+/** PURE. An item's detail as LINES: its i18n lines when it filed them, else its stored detail split on newlines. */
+export function itemDetailLinesOf(i, said) { return i && i.i18n && Array.isArray(i.i18n.detail) && i.i18n.detail.length ? i.i18n.detail.map(said) : String((i && i.detail) || '').split('\n').filter(Boolean); }
 
 /**
  * WHERE THE TRAY IS (lane S3, naive-user study 2: the assistant said "I've

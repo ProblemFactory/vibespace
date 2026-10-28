@@ -90,6 +90,8 @@ const T = require('../src/browser-takeover.js');
 const S = require('../src/browser-stream.js');
 const B = require('../src/browser-profiles.js');
 const K = require('../src/server/browser-keeper.js');
+// lane owner-press-attended r2: an explicit handback is ATTENDED only with the PRESS its door minted (src/write-origin.js pressOf)
+const PRESS = require('../src/write-origin.js').pressOf({ headers: { 'sec-fetch-site': 'same-origin' } });
 const BS = require('../src/server/browser-stream.js');
 const H = require('../src/server/browser-handback.js');
 const A = require('../src/spend-authorizer.js');
@@ -381,7 +383,7 @@ keeper.onConfirmation((ev) => confEvents.push(ev));
   clock += 3600_000; await keeper.tick();
   ok(keeper.inputStateFor(KEY_A, p.id).input === 'user', 'with the window at 0 an hour idle never lapses');
   settings['browser.takeoverIdleMs'] = 30000;
-  const hb = keeper.handback({ browserKey: KEY_A, profileId: p.id, viewerId: null, cause: 'explicit', url: 'https://x.test/done', sessionId: 'sess-1' });
+  const hb = keeper.handback({ browserKey: KEY_A, profileId: p.id, viewerId: null, cause: 'explicit', pressed: PRESS, url: 'https://x.test/done', sessionId: 'sess-1' });
   ok(hb.ok && hb.cause === 'explicit' && !hb.byHolder && keeper.inputStateFor(KEY_A, p.id).input === 'agent', 'an explicit handback by a non-holder (the card) is accepted and says so');
   ok(keeper.handback({ browserKey: KEY_A, profileId: p.id }).code === 'not_taken', 'a second handback is not_taken');
   // LANE H VERIFY r2 L8: an AGENT's detach while the USER drives is REFUSED by name (browser_paused) — it would end the
@@ -513,7 +515,7 @@ console.log('— ③ the announcer: three moments, one billed site, a refusal lo
   const settings2 = { 'browser.announceIdleHandback': false };
   const ann = H.create({ keeper, deliver, serverSetting: (k) => settings2[k], userTodos: { add: (key, item) => inbox.push({ key, item }) }, activeSessions: active, sessionKeyFor: (s, id) => 'key:' + id, notice: (id, s, n) => notices.push({ id, n }), log: { log() { }, warn() { } } });
   const ev = (cause, extra = {}) => ({ kind: 'handback', browserKey: KEY_A, profileId: null, sessionId: 'sess-1', cause, url: 'https://x.test/after', heldMs: 4000, ...extra });
-  const r1 = await ann.announce(ev('explicit'));
+  const r1 = await ann.announce(ev('explicit', { pressed: PRESS }));
   ok(r1.delivered && delivered.length === 1 && delivered[0].cid === 'conv-1' && delivered[0].opts.spendReason === 'browser-handback' && delivered[0].opts.kind === 'notification' && /Current URL: https:\/\/x\.test\/after/.test(delivered[0].text) && notices.length === 0 && inbox.length === 0, 'EXPLICIT ⇒ delivered ONCE through the ladder under browser-handback, kind notification, the URL in the text — no notice, no inbox item');
   const r2 = await ann.announce(ev('idle'));
   ok(!r2.delivered && delivered.length === 1 && r2.inbox && inbox.length === 1 && /lapsed/.test(inbox[0].item.text) && inbox[0].key === 'key:sess-1' && r2.noticed && notices.length === 1 && notices[0].n.kind === 'browser-handback' && notices[0].n.cause === 'idle', 'IDLE (default) ⇒ nothing delivered, ONE inbox item under the session\'s key, the zero-spend notice queued');
@@ -526,23 +528,23 @@ console.log('— ③ the announcer: three moments, one billed site, a refusal lo
   ok(r4.delivered && delivered.length === 2 && delivered[1].opts.spendReason === 'browser-handback-idle' && /lapsed/.test(delivered[1].text) && inbox.length === 2, 'IDLE with browser.announceIdleHandback ON ⇒ delivered under its own gated reason browser-handback-idle (the inbox item is still filed)');
   settings2['browser.announceIdleHandback'] = false;
   refuse = true;
-  const r5 = await ann.announce(ev('explicit'));
+  const r5 = await ann.announce(ev('explicit', { pressed: PRESS }));
   ok(!r5.delivered && r5.stashed && stashed.length === 1 && stashed[0].cid === 'conv-1' && /Current URL/.test(stashed[0].env.text) && !r5.noticed && notices.length === 3 && /spend budget/.test(r5.why), 'a REFUSED delivery loses nothing: stashed on the ladder\'s own stash (the words ride the next prompt), the reason journalled — and NO second carrier (the owner\'s ruling, 2026-09-27: one handback per cycle; the notice rode the same prompt and the agent read it twice)');
   {
     const noStash = H.create({ keeper, deliver: { deliverToConversation: deliver.deliverToConversation }, serverSetting: (k) => settings2[k], activeSessions: active, sessionKeyFor: (s, id) => 'key:' + id, notice: (id, s, n) => notices.push({ id, n }), log: { log() { }, warn() { } } });
-    const r5b = await noStash.announce(ev('explicit'));
+    const r5b = await noStash.announce(ev('explicit', { pressed: PRESS }));
     ok(!r5b.delivered && !r5b.stashed && r5b.noticed && notices.length === 4, '…a refused delivery the stash cannot take (no stash on this ladder) is carried by the zero-spend notice instead — never lost');
   }
   refuse = false;
-  const r6 = await ann.announce(ev('explicit', { sessionId: 'sess-noid', browserKey: KEY_B }));
+  const r6 = await ann.announce(ev('explicit', { sessionId: 'sess-noid', browserKey: KEY_B, pressed: PRESS }));
   ok(!r6.delivered && r6.noticed && /no id yet/.test(r6.why) && delivered.length === 4, 'a conversation with no id yet gets the notice (nothing to deliver into), never a throw — the ladder saw r1, r4, the REFUSED r5 and r5b, nothing more');
-  ok(!(await ann.announce(ev('explicit', { sessionId: 'sess-gone', browserKey: 'bk-deadbeef' }))).delivered, 'no live session ⇒ nothing delivered');
+  ok(!(await ann.announce(ev('explicit', { sessionId: 'sess-gone', browserKey: 'bk-deadbeef', pressed: PRESS }))).delivered, 'no live session ⇒ nothing delivered');
   // lane channel-withdraw verify r6: a PENDING FORK carries its parent's conversation id — a handback delivered by that id
   // would open a billed turn on the PARENT; it gets the notice (its next message), like a conversation with no id yet
   {
     active.set('sess-fork', { _browserKey: 'bk-f0f0f0f0', claudeSessionId: 'conv-1', backendSessionId: 'conv-1', name: 'one (fork)', _forkRequested: true, _forkSourceId: 'conv-1' });
     const nBefore = delivered.length, notBefore = notices.length;
-    const rf = await ann.announce(ev('explicit', { sessionId: 'sess-fork', browserKey: 'bk-f0f0f0f0' }));
+    const rf = await ann.announce(ev('explicit', { sessionId: 'sess-fork', browserKey: 'bk-f0f0f0f0', pressed: PRESS }));
     ok(!rf.delivered && rf.noticed && /no id yet/.test(rf.why) && delivered.length === nBefore && notices.length === notBefore + 1 && notices.at(-1).id === 'sess-fork', 'a pending fork\'s handback is never delivered by its PARENT\'s conversation id — the zero-spend notice rides the fork\'s own next message');
     const { mutantCopies: mcF, copiesCensus: ccF } = await import('./mutant-copy.mjs');
     const MF = mcF('takeover-fork-r6', REPO);
@@ -552,7 +554,7 @@ console.log('— ③ the announcer: three moments, one billed site, a refusal lo
     const Hc = MF.load('src/server/browser-handback.js', hsrc.replace(CID, "  const conversationIdOf = (s) => (s && (s.backendSessionId || s.claudeSessionId)) || null;"), 'handback-rawcid');
     const deliveredC = [];
     const annC = Hc.create({ keeper, deliver: { deliverToConversation: async (cid, text, opts) => { deliveredC.push({ cid, opts }); return { ok: true }; }, stashFor: () => ({ stored: true }) }, serverSetting: (k) => settings2[k], activeSessions: active, sessionKeyFor: (s, id) => 'key:' + id, notice: () => {}, log: { log() { }, warn() { } } });
-    const rfc = await annC.announce(ev('explicit', { sessionId: 'sess-fork', browserKey: 'bk-f0f0f0f0' }));
+    const rfc = await annC.announce(ev('explicit', { sessionId: 'sess-fork', browserKey: 'bk-f0f0f0f0', pressed: PRESS }));
     ok(rfc.delivered && deliveredC.length === 1 && deliveredC[0].cid === 'conv-1' && deliveredC[0].opts.spendReason === 'browser-handback', 'CONTROL: the raw-id copy delivers the fork\'s handback into the PARENT\'s conversation (a billed turn on the wrong session) — the leg would go red');
     for (const r of ccF(MF.files, MF.dir, REPO, { minCopies: 1, label: 'r6 fork handback ' })) ok(r.pass, r.name + (r.pass ? '' : ' — ' + r.detail));
     active.delete('sess-fork');
@@ -572,7 +574,7 @@ console.log('— ③ the announcer: three moments, one billed site, a refusal lo
   ann2.install();
   const n0 = delivered.length;
   keeper.takeover({ browserKey: KEY_A, profileId: null, viewerId: 31, sessionId: 'sess-1' });
-  keeper.handback({ browserKey: KEY_A, profileId: null, cause: 'explicit', url: 'https://x.test/wired', sessionId: 'sess-1' });
+  keeper.handback({ browserKey: KEY_A, profileId: null, cause: 'explicit', pressed: PRESS, url: 'https://x.test/wired', sessionId: 'sess-1' });
   await until(() => delivered.length === n0 + 1, 2000);
   ok(delivered.length === n0 + 1 && /wired/.test(delivered[n0].text), 'WIRING: the keeper\'s handback event reaches the announcer\'s ladder call');
   ann2.shutdown();
@@ -842,7 +844,7 @@ console.log('— ⑤ the routes in-process and ⑥ the shipped CLI\'s refusal');
   const dz = await post('/api/agent/browser/detach', {}, { Authorization: 'Bearer ' + TOKEN });
   const cliD = await runCli(['detach']);
   ok(dz.status === 409 && dz.json.code === 'browser_paused' && cliD.status === 1 && /\[browser_paused\]/.test(cliD.stderr) && keeper.leasesFor(KEY_A).some((l) => l.profileId === p.id) && keeper.inputStateFor(KEY_A, p.id).input === 'user', 'r2 L8: the agent\'s detach route answers 409 browser_paused and `vibespace-browser detach` exits 1 printing it — the lease and the takeover stand', JSON.stringify({ dz: dz.status, code: dz.json.code, cli: cliD.status, se: cliD.stderr.slice(0, 300) }));
-  keeper.handback({ browserKey: KEY_A, profileId: p.id, cause: 'explicit' });
+  keeper.handback({ browserKey: KEY_A, profileId: p.id, cause: 'explicit', pressed: PRESS });
   const cli2 = await runCli(['watch']);
   ok(cli2.status === 0 && /browser_paused/.test(cli2.stdout) && /Take over/.test(cli2.stdout) && /INTERRUPTS/.test(cli2.stdout) && /browser_interrupted/.test(cli2.stdout) && /what to re-run/.test(cli2.stdout), '`watch` explains the takeover contract to the agent — a takeover INTERRUPTS (browser_interrupted), the handback names what to re-run');
   // ⑧ END TO END (the owner's ruling, 2026-09-27 — "告知agent发生了打断"): a verb RUNNING when the user takes over ends
@@ -852,7 +854,7 @@ console.log('— ⑤ the routes in-process and ⑥ the shipped CLI\'s refusal');
   keeper.takeover({ browserKey: KEY_A, profileId: p.id, viewerId: 43, sessionId: 'sess-1' });
   const w = await cliW;
   ok(w.status === 1 && /The user took over your window of this browser — your operation was interrupted\. Wait for the handback, then run it again\. \[browser_interrupted\]/.test(w.stderr) && /taken over at:/.test(w.stderr) && /the user still drives/.test(w.stderr) && /not shared instance-wide/.test(w.stderr) && /"waited":1500/.test(w.stdout), '⑧ E2E: `vibespace-browser wait 1500` running when the user takes over prints THE sentence [browser_interrupted], when, that they still drive, that nothing stood between it and the page (it ran to its end) — and exits 1 like any refusal', JSON.stringify({ st: w.status, se: w.stderr.slice(0, 700), so: w.stdout.slice(0, 200) }));
-  keeper.handback({ browserKey: KEY_A, profileId: p.id, cause: 'explicit' });
+  keeper.handback({ browserKey: KEY_A, profileId: p.id, cause: 'explicit', pressed: PRESS });
   clock += 1000; // (the keeper's injected clock: this command resolves AFTER that takeover)
   const w2 = await runCli(['wait', '10']);
   ok(w2.status === 0 && !/browser_interrupted/.test(w2.stderr), '⑧ …a verb nobody interrupted exits 0 and says nothing of it (a takeover BEFORE its /resolve is not an interruption of it)', w2.stderr.slice(0, 300));
@@ -1402,10 +1404,10 @@ console.log('— ⑧ the owner\'s ruling: in flight = PURE(trace, instant); one 
   keeper.resolveFor({ browserKey: KEY_A, verb: 'click' });
   keeper.takeover({ browserKey: KEY_A, profileId: p8.id, viewerId: 82, sessionId: 'sess-1', holderAlive: false });
   ok(ev8.filter((e) => e.kind === 'takeover').length === 2 && ev8.filter((e) => e.kind === 'takeover')[1].interruption.fresh === false && keeper.interruptionOf(KEY_A, p8.id).n === 2, '⑧ a second viewer\'s takeover before the handback: not fresh, still 2 (no double count)');
-  const hb8 = keeper.handback({ browserKey: KEY_A, profileId: p8.id, cause: 'explicit', url: 'https://x.test/8', sessionId: 'sess-1' });
+  const hb8 = keeper.handback({ browserKey: KEY_A, profileId: p8.id, cause: 'explicit', pressed: PRESS, url: 'https://x.test/8', sessionId: 'sess-1' });
   ok(hb8.rerun.join() === 'fill,eval,click' && ev8.find((e) => e.kind === 'handback').rerun.join() === 'fill,eval,click' && keeper.interruptionOf(KEY_A, p8.id) === null, '⑧ the handback carries the re-run list (what was cut + what was refused) and closes the cycle');
   keeper.takeover({ browserKey: KEY_A, profileId: p8.id, viewerId: 83, sessionId: 'sess-1' });
-  const hb8b = keeper.handback({ browserKey: KEY_A, profileId: p8.id, cause: 'explicit', sessionId: 'sess-1' });
+  const hb8b = keeper.handback({ browserKey: KEY_A, profileId: p8.id, cause: 'explicit', pressed: PRESS, sessionId: 'sess-1' });
   ok(hb8b.rerun.length === 0 && ev8.filter((e) => e.kind === 'takeover')[2].interruption.fresh === true && ev8.filter((e) => e.kind === 'takeover')[2].interruption.n === 0, '⑧ the next cycle starts fresh: nothing in flight (the old operations are not re-counted), nothing to re-run');
   unsub8();
   ok(clock === t8, '(the injected clock did not move)');
@@ -1421,13 +1423,13 @@ console.log('— ⑧ the owner\'s ruling: in flight = PURE(trace, instant); one 
   ok(cards.length === 1 && cards[0].cid === 'conv-8' && cards[0].card.fromName === H.FROM_NAME && cards[0].card.kind === 'notification' && /^The user took over the shared window of the "Work" browser \(your tab is in it\); 1 operation was interrupted: fill\. /.test(cards[0].card.text) && delivered.length === 0, '⑧ the takeover TELLS: ONE conversation card per cycle (the second viewer\'s takeover says nothing more), VibeSpace\'s sender, kind notification — and NOTHING is delivered (no billed turn)', JSON.stringify(cards));
   ok(notices.filter((x) => x.n.kind === 'browser-takeover').length === 1 && notices[0].n.verbs.join() === 'fill' && notices[0].id === 'sess-1', '⑧ …and ONE zero-spend `browser-takeover` notice the agent reads at its next turn');
   keeper.resolveFor({ browserKey: KEY_A, verb: 'snapshot' });
-  keeper.handback({ browserKey: KEY_A, profileId: p8.id, cause: 'explicit', url: 'https://x.test/done', sessionId: 'sess-1' });
+  keeper.handback({ browserKey: KEY_A, profileId: p8.id, cause: 'explicit', pressed: PRESS, url: 'https://x.test/done', sessionId: 'sess-1' });
   await until(() => delivered.length === 1, 2000);
   ok(delivered.length === 1 && delivered[0].opts.spendReason === 'browser-handback' && delivered[0].opts.kind === 'notification' && delivered[0].text.endsWith('Re-run what was interrupted: fill, snapshot — read the page first; refs from before the takeover are stale.') && (delivered[0].text.match(/Re-run what was interrupted/g) || []).length === 1, '⑧ the EXPLICIT handback is delivered ONCE under browser-handback (the spend site unchanged) and ends with ONE re-run reminder: what was cut, then what was refused', delivered[0] && delivered[0].text);
   // a cycle with NOTHING in flight and nothing refused: the handback is byte-identical to before
   keeper.takeover({ browserKey: KEY_A, profileId: p8.id, viewerId: 86, sessionId: 'sess-1' });
   ok(cards.length === 2 && /nothing of yours was running there/.test(cards[1].card.text), '⑧ a takeover with nothing in flight still tells (a card saying nothing was running)');
-  keeper.handback({ browserKey: KEY_A, profileId: p8.id, cause: 'explicit', url: 'https://x.test/idle', sessionId: 'sess-1' });
+  keeper.handback({ browserKey: KEY_A, profileId: p8.id, cause: 'explicit', pressed: PRESS, url: 'https://x.test/idle', sessionId: 'sess-1' });
   await until(() => delivered.length === 2, 2000);
   ok(delivered.length === 2 && delivered[1].text === T.handbackText({ cause: 'explicit', label: 'Work', url: 'https://x.test/idle', heldMs: 0, shared: true }) && !/Re-run/.test(delivered[1].text), '⑧ …and its handback carries NO re-run sentence (byte-identical to the pre-ruling words; verify r2 ⑦: of the shared window this lease is in)', delivered[1] && delivered[1].text);
   // idle: the For-you item and the notice carry the list
@@ -1525,10 +1527,10 @@ console.log('— ⑨ verify r6: every conversation leased on the taken browser i
   // NOTHING back (the channels expectWakes precedent)
   const w9 = k9.handbackWakesFor(KEY_S1, shared.id);
   const ev9n = ev9.length;
-  const stale9 = k9.handback({ browserKey: KEY_S1, profileId: shared.id, viewerId: 912, cause: 'explicit', url: 'https://x/one', sessionId: 'sess-91', expectWakes: 1 });
+  const stale9 = k9.handback({ browserKey: KEY_S1, profileId: shared.id, viewerId: 912, cause: 'explicit', pressed: PRESS, url: 'https://x/one', sessionId: 'sess-91', expectWakes: 1 });
   await sleep(40);
   ok(w9 === 3 && !stale9.ok && stale9.code === 'wake_count_changed' && stale9.wakes === 3 && [KEY_S1, KEY_S2, KEY_S3, KEY_S4].every((k) => k9.inputStateFor(k, shared.id).input === 'user') && ev9.length === ev9n && delivered9.length === 0, 'r6 A-F9: handbackWakesFor says 3 (S1 + S2 + S4 — S3 had nothing); a Hand back whose control said 1 is refused wake_count_changed {wakes: 3} — nobody handed back, nothing delivered', JSON.stringify({ w9, stale9 }));
-  const hb1 = k9.handback({ browserKey: KEY_S1, profileId: shared.id, viewerId: 912, cause: 'explicit', url: 'https://x/one', sessionId: 'sess-91', expectWakes: w9 });
+  const hb1 = k9.handback({ browserKey: KEY_S1, profileId: shared.id, viewerId: 912, cause: 'explicit', pressed: PRESS, url: 'https://x/one', sessionId: 'sess-91', expectWakes: w9 });
   await until(() => delivered9.length === 3, 2000);
   ok(hb1.ok && delivered9.length === w9, 'r6 A-F9: the press carrying the count it showed hands back — and the announcer delivered EXACTLY that many billed turns (the count is the announcer\'s own rule)', JSON.stringify({ w9, delivered: delivered9.map((d) => d.cid) }));
   const d2 = delivered9.find((d) => d.cid === 'conv-92'), d1 = delivered9.find((d) => d.cid === 'conv-91');
@@ -1539,25 +1541,25 @@ console.log('— ⑨ verify r6: every conversation leased on the taken browser i
   ok(hb2 && hb2.cause === 'explicit' && hb2.sessionId === 'sess-92' && hb2.rerun.join() === 'fill,click', '⑨ the sibling\'s handback event carries its own session and re-run list');
   // an ephemeral key has no siblings; a `stop` of the profile hands every state back once
   ok(k9.takeover({ browserKey: KEY_S1, profileId: null, viewerId: 950, sessionId: 'sess-91' }).ok && k9.inputStateFor(KEY_S2, shared.id).input === 'agent', '⑨ a takeover of the conversation\'s EPHEMERAL browser takes no sibling (an ephemeral record is one conversation\'s)');
-  k9.handback({ browserKey: KEY_S1, profileId: null, viewerId: 950, cause: 'explicit', sessionId: 'sess-91' });
+  k9.handback({ browserKey: KEY_S1, profileId: null, viewerId: 950, cause: 'explicit', pressed: PRESS, sessionId: 'sess-91' });
   // THE AUDIT JOIN (r5's fix, r6 pinned): a verb whose audit lands AFTER the handback joins nothing (order A) — the CLI's own
   // line says control is back; one whose audit lands while the user drives AGAIN joins that OPEN cycle (order B) — the CLI's
   // line said "wait for the handback (it names what to re-run)", so it does, once; the same audit repeated names it once
   {
     const since = clock; clock += 5;
     k9.takeover({ browserKey: KEY_S1, profileId: shared.id, viewerId: 960, sessionId: 'sess-91' }); clock += 5;
-    const h1 = k9.handback({ browserKey: KEY_S1, profileId: shared.id, viewerId: 960, cause: 'explicit', sessionId: 'sess-91' }); clock += 2000;
+    const h1 = k9.handback({ browserKey: KEY_S1, profileId: shared.id, viewerId: 960, cause: 'explicit', pressed: PRESS, sessionId: 'sess-91' }); clock += 2000;
     const auA = k9.interruptionFor({ browserKey: KEY_S1, profileId: shared.id, since, verb: 'fill' }); clock += 1000;
     k9.takeover({ browserKey: KEY_S1, profileId: shared.id, viewerId: 961, sessionId: 'sess-91' }); clock += 5;
-    const h2 = k9.handback({ browserKey: KEY_S1, profileId: shared.id, viewerId: 961, cause: 'explicit', sessionId: 'sess-91' }); clock += 5;
+    const h2 = k9.handback({ browserKey: KEY_S1, profileId: shared.id, viewerId: 961, cause: 'explicit', pressed: PRESS, sessionId: 'sess-91' }); clock += 5;
     ok(auA && auA.handedBackAt > 0 && h1.rerun.length === 0 && h2.rerun.length === 0, '⑨ order A: the audit says interrupted + handed back; it joins NEITHER the closed cycle nor the next one');
     const since2 = clock; clock += 5;
     k9.takeover({ browserKey: KEY_S1, profileId: shared.id, viewerId: 962, sessionId: 'sess-91' }); clock += 5;
-    const h3 = k9.handback({ browserKey: KEY_S1, profileId: shared.id, viewerId: 962, cause: 'explicit', sessionId: 'sess-91' }); clock += 1000;
+    const h3 = k9.handback({ browserKey: KEY_S1, profileId: shared.id, viewerId: 962, cause: 'explicit', pressed: PRESS, sessionId: 'sess-91' }); clock += 1000;
     k9.takeover({ browserKey: KEY_S1, profileId: shared.id, viewerId: 963, sessionId: 'sess-91' }); clock += 5;
     const auB = k9.interruptionFor({ browserKey: KEY_S1, profileId: shared.id, since: since2, verb: 'fill' });
     const auB2 = k9.interruptionFor({ browserKey: KEY_S1, profileId: shared.id, since: since2, verb: 'fill' }); clock += 5;
-    const h4 = k9.handback({ browserKey: KEY_S1, profileId: shared.id, viewerId: 963, cause: 'explicit', sessionId: 'sess-91' }); clock += 5;
+    const h4 = k9.handback({ browserKey: KEY_S1, profileId: shared.id, viewerId: 963, cause: 'explicit', pressed: PRESS, sessionId: 'sess-91' }); clock += 5;
     ok(auB && auB.input === 'user' && auB.handedBackAt === 0 && auB2 && h3.rerun.length === 0 && h4.rerun.join() === 'fill', '⑨ order B: an audit landing while the user drives AGAIN joins that OPEN cycle (the CLI said the handback names it) — once, even audited twice');
   }
   // `terminated` in the view: one per CDP session that had an aborted SCRIPT call (the mediator's plan) — the toast's "a script running in the page was stopped"
@@ -1579,7 +1581,7 @@ console.log('— ⑨ verify r6: every conversation leased on the taken browser i
     const t1b = k9.takeover({ browserKey: KEY_S1, profileId: shared.id, viewerId: 922, sessionId: 'sess-91', viewerAlive: (id) => id !== 921 });
     ok(t1b.ok && [...holdersOf()].join() === '922' && cards9.length === cardsBefore, '⑨ r7: a holder whose socket is gone never blocks — the new viewer re-seizes the browser WHOLE (S2, S3, S4 move with S1 to 922), no second card (the same takeover goes on)', JSON.stringify({ holders: [...holdersOf()], cards: cards9.length - cardsBefore }));
     delivered9.length = 0; notices9.length = 0;
-    const hb = k9.handback({ browserKey: KEY_S1, profileId: shared.id, viewerId: 922, cause: 'explicit', sessionId: 'sess-91' });
+    const hb = k9.handback({ browserKey: KEY_S1, profileId: shared.id, viewerId: 922, cause: 'explicit', pressed: PRESS, sessionId: 'sess-91' });
     await sleep(80);
     ok(hb.ok && holdersOf().size === 0, '⑨ r7: …and one handback releases all four');
     // (c) THE SPEND RULE (PURE): a sibling's mirrored handback with nothing of its own to re-run is a zero-spend notice, never a billed wake
@@ -1752,7 +1754,7 @@ console.log('— ⑩ r6 A-F8 / A-F9: the pre-fix rule in a patched copy makes ea
     kx.takeover({ browserKey: 'bk-000000a1', profileId: sx.id, viewerId: 1001, sessionId: 'sess-a1' });
     kx.resolveFor({ browserKey: 'bk-000000a2', verb: 'click' }); // the sibling's agent is refused while the user drives ⇒ it has something to re-run
     const wakes = kx.handbackWakesFor('bk-000000a1', sx.id);
-    const r = kx.handback({ browserKey: 'bk-000000a1', profileId: sx.id, viewerId: 1001, cause: 'explicit', sessionId: 'sess-a1', expectWakes: 1 });
+    const r = kx.handback({ browserKey: 'bk-000000a1', profileId: sx.id, viewerId: 1001, cause: 'explicit', pressed: PRESS, sessionId: 'sess-a1', expectWakes: 1 });
     const out = { wakes, ok: r.ok, code: r.code || null, input: kx.inputStateFor('bk-000000a1', sx.id).input };
     await kx.stop(sx.id).catch(() => { }); kx.shutdown(); return out;
   };
@@ -1764,7 +1766,7 @@ console.log('— ⑩ r6 A-F8 / A-F9: the pre-fix rule in a patched copy makes ea
   // WIRING PINS: the bridge pairs the command with its result and hands the keeper's view (never the raw parse) to the viewers;
   // the live view sends the digest of the row it drew and the count its button said
   const bs = fs.readFileSync(path.join(REPO, 'src/server/browser-stream.js'), 'utf8'), lw = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
-  ok(/T\.confirmationFromUpstream\(msg, now\(\), \{ command: /.test(bs) && /if \(!unsubConfirm && view && !view\.conflict\) broadcast\(relay, view\)/.test(bs) && /else if \(ev\.kind === 'conflict'\) broadcast\(r, \{ type: 'confirmation-conflict'/.test(bs) && /shown: v\.shown/.test(bs) && /handbackFor\(relay, viewer\.id, 'explicit', v\.expectWakes\)/.test(bs), 'WIRING PIN (r6): the bridge pairs command → result, broadcasts only the keeper\'s first-written view, says a conflict as its own record, passes the digest and the count through');
+  ok(/T\.confirmationFromUpstream\(msg, now\(\), \{ command: /.test(bs) && /if \(!unsubConfirm && view && !view\.conflict\) broadcast\(relay, view\)/.test(bs) && /else if \(ev\.kind === 'conflict'\) broadcast\(r, \{ type: 'confirmation-conflict'/.test(bs) && /shown: v\.shown/.test(bs) && /handbackFor\(relay, viewer\.id, 'explicit', v\.expectWakes, viewer\.pressed\)/.test(bs), 'WIRING PIN (r6): the bridge pairs command → result, broadcasts only the keeper\'s first-written view, says a conflict as its own record, passes the digest and the count through');
   ok(/send\(\{ type: 'confirm', id, decision, shown: confirmationDigest\(c\) \}\)/.test(lw) && /st\.confirmSlots = confirmSlots\(/.test(lw) && !/confirms\.innerHTML = ''/.test(lw) && /expectWakes: st\.wakes/.test(lw) && /t\('Hand back \(wakes \{n\}\)'/.test(lw), 'WIRING PIN (r6): the live view confirms with the digest of the row it drew, keeps KEYED slots (no whole-card rebuild), and its Hand back carries and says the count');
   for (const r of copiesCensus(M10.files, M10.dir, REPO, { minCopies: 4, label: '⑩ ' })) ok(r.pass, r.name, r.detail);
 }
@@ -1910,7 +1912,7 @@ console.log('— ⑪ the agent\'s own set viewport: the answer line (applied / p
   // the user drives: browser_paused + the page's size (their pane rules), nothing ran
   keeper.takeover({ browserKey: KEY_B, profileId: pV.id, viewerId: 77, sessionId: 'sess-vp' });
   const c4e = await runCli(['set', 'viewport', '800', '600']);
-  keeper.handback({ browserKey: KEY_B, profileId: pV.id, cause: 'explicit' });
+  keeper.handback({ browserKey: KEY_B, profileId: pV.id, cause: 'explicit', pressed: PRESS });
   clock += 1000; // (the keeper's injected clock: the next command resolves AFTER that takeover — ⑧'s rule)
   ok(c4e.status === 1 && /\[browser_paused\]/.test(c4e.stderr) && c4e.stdout.split('\n').includes('viewport: 1024x768 — the user drives this browser and their pane rules its size, your 800x600 did not apply') && sized(800, 600) === 0,
     'E2E the user drives: refused [browser_paused] AND the answer says the page\'s size — their pane rules it; nothing ran', `${c4e.status} ${c4e.stdout.slice(-200)} ${c4e.stderr.slice(-300)}`);

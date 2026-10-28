@@ -102,6 +102,7 @@ const { WebSocketServer, WebSocket } = require('ws');
 const KA = require('../ws-keepalive.js'); // lane stream-ping: the ONE keepalive rule every *-stream.js bridge arms
 const S = require('../browser-stream.js');
 const T = require('../browser-takeover.js');
+const { pressBearer, pressOf } = require('../write-origin.js');   // lane owner-press-attended r2: the live view's Hand back is a person's door
 const FIT = require('../browser-fit.js');
 const crypto = require('crypto'); // lane browser-x-in-window: the X picture's ticket (a per-viewer secret)
 const WIN = require('../browser-windows.js'); // lane browser-windows (U3/U0b): a background tab is said and polled; a watched tab's frames // lane S4: the pane → page viewport rules, the agent-set flag, the fresh-frame clocks
@@ -338,12 +339,12 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     if (browse && /^Bearer\s+(vsst_|jbt_)/i.test(String((req.headers && req.headers.authorization) || ''))) { socket.write('HTTP/1.1 403 Forbidden\r\n\r\n'); socket.destroy(); return; }
     wss.handleUpgrade(req, socket, head, (ws) => {
       // BROWSE YOURSELF (B-6ae8): a third query shape — the user's own browsing window (cookie auth as above)
-      const go = browse ? attachHumanViewer(ws, { key: browse, fresh }) : attachViewer(ws, { sessionId, profileRef, agent: /^Bearer\s+(vsst_|jbt_)/i.test(String((req.headers && req.headers.authorization) || '')) }); // lane browser-x-in-window: an agent's token never gets the X picture's ticket
+      const go = browse ? attachHumanViewer(ws, { key: browse, fresh }) : attachViewer(ws, { sessionId, profileRef, agent: /^Bearer\s+(vsst_|jbt_)/i.test(String((req.headers && req.headers.authorization) || '')), bearer: pressBearer(req.headers), pressed: pressOf(req) }); // lane browser-x-in-window: an agent's token never gets the X picture's ticket
       go.catch((e) => { log.warn?.(`[browser-live] viewer attach failed: ${e && e.message}`); refuse(ws, 'internal', String(e && e.message)); });
     });
   }
 
-  async function attachViewer(ws, { sessionId, profileRef, agent = false }) {
+  async function attachViewer(ws, { sessionId, profileRef, agent = false, bearer = false, pressed = null }) {
     const f = sessionFacts(sessionId);
     if (!f) return refuse(ws, 'not-found', `no such live session ${JSON.stringify(sessionId)}`);
     if (f.host) return refuse(ws, 'unsupported-host', `the live view is local-only in this release — session ${sessionId} runs on host ${JSON.stringify(f.host)}`);
@@ -354,7 +355,7 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     const key = relayKeyFor(sessionId, target);
     let relay = relays.get(key);
     if (!relay) { relay = createRelay(key, sessionId, target); relays.set(key, relay); }
-    const viewer = { id: nextViewerId++, ws, maxFps: S.MAX_FPS_DEFAULT, lastFrameAt: 0, sent: 0, dropped: 0, since: now(), sentSeq: 0, trailTimer: null, watch: null, watchSeq: 0, agent: !!agent }; // lane browser-x-in-window: + whether an agent's token opened it
+    const viewer = { id: nextViewerId++, ws, maxFps: S.MAX_FPS_DEFAULT, lastFrameAt: 0, sent: 0, dropped: 0, since: now(), sentSeq: 0, trailTimer: null, watch: null, watchSeq: 0, agent: !!agent, bearer: !!bearer, pressed }; // lane owner-press-attended r2: + a bearer opened it / the person's PRESS minted at the handshake — lane browser-x-in-window: + whether an agent's token opened it
     relay.viewers.set(viewer.id, viewer);
     armBg(relay); // lane browser-windows (U0b): a view of a tab that paints nothing is never silent
     noteViewers(relay);
@@ -610,11 +611,11 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
     if (keeper && typeof keeper.handbackWakesFor === 'function') { try { return Number(keeper.handbackWakesFor(relay.browserKey, relay.target.profileId || null)) || 0; } catch { return 1; } }
     return 1;
   }
-  function handbackFor(relay, viewerId, cause, expectWakes) {
+  function handbackFor(relay, viewerId, cause, expectWakes, pressed = null) {
     const url = lastUrlOf(relay);
     if (isHuman(relay)) { flushActs(relay, true); return keeper && typeof keeper.humanRelease === 'function' ? keeper.humanRelease({ key: relay.target.key, viewerId, cause, url }) : { ok: false, code: 'unavailable', error: 'not available' }; } // BROWSE YOURSELF: his window lets go — he goes away (his tab kept)
     if (keeper && typeof keeper.handback === 'function') {
-      const r = keeper.handback({ browserKey: relay.browserKey, profileId: relay.target.profileId || null, viewerId, cause, url, sessionId: relay.sessionId, expectWakes });
+      const r = keeper.handback({ browserKey: relay.browserKey, profileId: relay.target.profileId || null, viewerId, cause, url, sessionId: relay.sessionId, expectWakes, pressed });
       if (r.ok && !unsubInput) applyInputState(relay, r.state, cause);
       return r;
     }
@@ -1451,7 +1452,10 @@ function create({ keeper = null, activeSessions, requestAuthed, log = console, n
       return;
     }
     if (v.kind === 'handback') {
-      const r = handbackFor(relay, viewer.id, 'explicit', v.expectWakes);
+      // lane owner-press-attended r2 (the live view is an attended door): a view a BEARER opened never presses Hand back (an
+      // explicit handback is an attended turn); the person's press minted at the handshake rides it
+      if (viewer.bearer) { send(viewer.ws, { type: 'refused', code: 'agent_forbidden', error: 'Hand back is the user\'s press — a view opened with a bearer token cannot make it', mode: relay.mode }); return; }
+      const r = handbackFor(relay, viewer.id, 'explicit', v.expectWakes, viewer.pressed);
       if (!r.ok) send(viewer.ws, { type: 'refused', code: r.code || 'not_taken', error: r.error || 'refused', mode: relay.mode, ...(Number.isInteger(r.wakes) ? { wakes: r.wakes } : {}) }); // r6 A-F9: wake_count_changed carries the count now
       else send(viewer.ws, { type: 'mode-ack', ok: true, mode: relay.mode, mine: false, heldMs: r.heldMs || 0 });
       return;

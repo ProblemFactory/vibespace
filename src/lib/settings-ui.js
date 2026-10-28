@@ -482,9 +482,17 @@ class SettingsUI {
     });
     return mark;
   }
+  /** r2: a number typed and not yet committed (Enter / leaving the field) — the FIELD's state, the store holds nothing */
+  _markTyped(path, typed) {
+    if (!this._typed) this._typed = new Set();
+    if (typed === this._typed.has(path)) return;
+    if (typed) this._typed.add(path); else this._typed.delete(path);
+    const c = this._content;
+    if (c && c.isConnected) for (const m of c.querySelectorAll('.settings-save-mark')) if (m.dataset.path === path) this._drawSaveMark(m, path);
+  }
   _drawSaveMark(mark, path) {
     const S = this.settings;
-    const st = typeof S.saveStateOf === 'function' ? S.saveStateOf(path) : 'idle';
+    const st = this._typed && this._typed.has(path) ? 'typed' : typeof S.saveStateOf === 'function' ? S.saveStateOf(path) : 'idle';
     const inForce = inForceOf(path, { live: typeof S.liveEcho === 'function' ? S.liveEcho() : null, server: (k) => (typeof S.serverValue === 'function' ? S.serverValue(k) : S.get(k)), budgetLimits });
     const text = saveMarkWords(st, t, { inForce });
     if (mark.textContent !== text) mark.textContent = text;
@@ -861,11 +869,13 @@ class SettingsUI {
       if (schema.step !== undefined) input.step = schema.step;
       // Empty/invalid input must not store NaN (it persisted as null and broke numeric consumers like taskbar sizing) —
       // the `change` reverts it to the default. OUT OF RANGE IS SAID, never stored as typed (lane R2 verify, 2026-09-26):
-      // the row's own bounds, written back into the field. lane owner-press-attended: it commits on every KEYSTROKE (the
-      // store's 500 ms debounce), and the row's mark (`_saveMark`) says «Not saved yet» until the server has it.
+      // the row's own bounds, written back into the field. lane owner-press-attended (r2): it commits on `change` only — a
+      // half-typed number never reaches the server — and the row's mark (`_saveMark`) says «Not saved yet — press Enter or
+      // leave the field» while the field differs from the store, «Saving…», then «Saved» once the server has it.
       bindNumberField(input, {
         schema, path, settings: this.settings,
         clamp: (num) => clampToSchema(schema, num),
+        onTyping: (typed) => this._markTyped(path, typed),   // r2: the field differs from the store — said, never stored
         onBound: (c) => showToast(c.bound === 'max' ? t('{label}: kept at the maximum, {value}', { label: schema.label || path, value: c.value }) : t('{label}: raised to the minimum, {value}', { label: schema.label || path, value: c.value })),
         onCommit: () => row.classList.toggle('modified', this.settings.isModified(path)),
       });

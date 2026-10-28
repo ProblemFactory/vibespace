@@ -460,27 +460,37 @@ console.log('⑪ NOTICES BY ORIGIN (B-328d) — the closed producer set, the leg
         const idir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ut-instant-'));
         const icasts = [];
         const m4 = new UserTodoManager({ dataDir: idir, onChange: (snap) => icasts.push(snap), expirySweepMs: 0 });
-        const sp = m4.add('accounts', { text: SA.refusalText(v), kind: 'notice', origin: 'spend', i18n: SA.refusalI18n(v) });
+        const sp = m4.add('accounts', { text: SA.refusalText(v, { sessionName: 'build-bot' }), kind: 'notice', origin: 'spend', i18n: SA.refusalI18n(v, { sessionName: 'build-bot' }) });
         const lastI = icasts[icasts.length - 1];
-        ok(sp.i18n.text.params.time.at === at && sp.i18n.text.params.account === 'acct-1' && sp.i18n.text.params.cap === 30 && /\{time\}/.test(sp.i18n.text.key)
-          && lastI && lastI.open.some((i) => i.id === sp.id && i.i18n.text.params.time.at === at),
-          'R2 the spend refusal\'s INSTANT param ({time: {at}}) is kept by the store and carried by the broadcast', JSON.stringify(sp.i18n));
+        // r2: the next free slot is an INSTANT CLAUSE `{at, key, gone}` (the client says «free now» once it has passed)
+        const nx = sp.i18n.text.params.next;
+        ok(nx && nx.at === at && nx.key === 'The next frees at {time}.' && nx.gone === 'The next is free now.' && sp.i18n.text.params.account === 'acct-1' && sp.i18n.text.params.cap === 30 && sp.i18n.text.params.conversation === 'build-bot' && /\{next\}/.test(sp.i18n.text.key)
+          && lastI && lastI.open.some((i) => i.id === sp.id && i.i18n.text.params.next && i.i18n.text.params.next.at === at && i.i18n.text.params.next.gone === 'The next is free now.'),
+          'R2 the spend refusal\'s INSTANT CLAUSE ({next: {at, key, gone}}) is kept by the store and carried by the broadcast — with the conversation, the account and the cap', JSON.stringify(sp.i18n));
         ok(/Next allowed after 2026-10-28T08:21:33Z\./.test(sp.text) && !/\b(AM|PM)\b/.test(sp.text), 'R2 …and its English line (the dedupe key, the journal\'s words) names the instant in UTC — never a hub-zone clock', sp.text);
-        const bad = m4.add('accounts', { text: 'a malformed instant', kind: 'notice', origin: 'spend', i18n: { text: { key: 'at {time}', params: { time: { at: 'soon' }, neg: { at: -5 } } } } });
-        ok(!('time' in (bad.i18n.text.params || {})) && !('neg' in (bad.i18n.text.params || {})), 'R2 …an instant that is not a positive finite epoch is no param (dropped, never a string the client prints)', JSON.stringify(bad.i18n));
+        const bad = m4.add('accounts', { text: 'a malformed instant', kind: 'notice', origin: 'spend', i18n: { text: { key: 'at {time}', params: { time: { at: 'soon' }, neg: { at: -5 }, cl: { at: -1, key: 'x {time}' }, nokey: { at: at, key: '' } } } } });
+        ok(!['time', 'neg', 'cl', 'nokey'].some((k) => k in (bad.i18n.text.params || {}) && !(k === 'nokey' && bad.i18n.text.params.nokey.at === at && !('key' in bad.i18n.text.params.nokey))), 'R2 …an instant that is not a positive finite epoch is no param (dropped, never a string the client prints); a clause with an empty key keeps only its instant', JSON.stringify(bad.i18n));
         m4.stop();
         fs.rmSync(idir, { recursive: true, force: true });
         const SS0 = req(path.join(ROOT, 'src/stash-summary.js'));
         const now = Date.parse('2026-10-28T07:47:34Z');
         ok(SS0.clockAt(at, { now, locale: 'en-US', timeZone: 'America/Los_Angeles' }) === '01:21 AM' && SS0.clockAt(at, { now, locale: 'en-GB', timeZone: 'UTC' }) === '08:21',
           'R2 the client\'s rendering (PURE clockAt): the same epoch is 01:21 AM for a PT viewer and 08:21 for a UTC one');
-        ok(/Number\.isFinite\(v\.at\) \? clockAt\(v\.at, \{ locale: deviceLocale\(\) \}\)/.test(fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-actions.js'), 'utf8')),
-          'R2 the For-you words (user-todos-actions said()) render an {at} param through clockAt in the device\'s locale and zone');
+        // r2: THE ONE RENDERER (user-todos-layout saidLine — user-todos-actions' said() IS it): the clause follows the clock
+        const LY = await import(path.join(ROOT, 'src/lib/user-todos-layout.js'));
+        const tt = (k, p0) => String(k).replace(/\{(\w+)\}/g, (m, x) => (p0 && p0[x] !== undefined ? String(p0[x]) : m));
+        const ahead = LY.saidLine(sp.i18n.text, tt, { now, locale: 'en-US', timeZone: 'America/Los_Angeles' });
+        const gone = LY.saidLine(sp.i18n.text, tt, { now: at + 7.5 * 60e3, locale: 'en-US', timeZone: 'America/Los_Angeles' });
+        ok(/The next frees at 01:21 AM\.$/.test(ahead) && /The next is free now\.$/.test(gone) && !/01:21/.test(gone),
+          'R2 the clause is said at RENDER: «The next frees at 01:21 AM.» while ahead, «The next is free now.» once 7.5 min past (the stored epoch unchanged)', JSON.stringify({ ahead, gone }));
+        ok(/const said = \(l\) => saidLine\(l, t, \{ locale: deviceLocale\(\) \}\);/.test(fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-actions.js'), 'utf8'))
+          && /if \(Number\.isFinite\(v\.at\)\) return clockAt\(v\.at, \{ now, locale, timeZone \}\);/.test(fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-layout.js'), 'utf8')),
+          'R2 the For-you words (user-todos-actions said()) ARE saidLine — an {at} param through clockAt in the device\'s locale and zone');
         const zh = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-ja.js'), 'utf8');
-        const keys = new Set();
-        for (const why of ['hour-cap', 'day-cap', 'instance-cap', 'overage-in-use', 'identity-cannot-serve']) for (const ra of [at, 0]) { const w = SA.refusalI18n({ ...v, why, retryAfter: ra }); keys.add(w.text.key); for (const d of w.detail || []) keys.add(d.key); }
+        const keys = new Set([...Object.values(SA.REFUSAL_WORDS).flat(), ...Object.values(SA.NEXT_WORDS).flatMap((x) => [x.key, x.gone]), ...Object.values(SA.LINE_WORDS), ...Object.values(SA.DOOR_WORDS), ...Object.values(SA.SPEND_REASONS).map((r) => r.what)]);
+        for (const why of ['hour-cap', 'day-cap', 'instance-cap', 'overage-in-use', 'identity-cannot-serve', 'spend-control-reached', 'identity-unknown', 'unknown-reason', 'weird']) for (const ra of [at, 0]) for (const sn of ['build-bot', null]) { const w = SA.refusalI18n({ ...v, why, retryAfter: ra, producers: { 'job-notification': 2, unknown: 1 } }, { sessionName: sn }); keys.add(w.text.key); for (const d of w.detail || []) keys.add(d.key); }
         const missing = [...keys].filter((k) => !zh.includes(JSON.stringify(k) + ':') || !ja.includes(JSON.stringify(k) + ':'));
-        ok(keys.size === 9 && missing.length === 0, `R2 every sentence refusalI18n can file (${keys.size}) is in the zh and ja dictionaries`, missing.join(' | '));
+        ok(keys.size >= 56 && missing.length === 0, `R2 every sentence refusalI18n can file — its rows, clauses, lines, doors and every producer's words (${keys.size}) — is in the zh and ja dictionaries`, missing.join(' | '));
       }
       // r2 (verifier, pre-existing): stop() is the manager's last act — a debounced
       // write pending at stop() is flushed NOW; its 500 ms timer used to outlive

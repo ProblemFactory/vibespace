@@ -3592,7 +3592,10 @@ function create(deps = {}) {
    *  that wake stamped `handedOverAt`. Returns the keys it stamped. */
   async function noteHandedOver(cid, entries) {
     const keys = new Set();
-    for (const e of Array.isArray(entries) ? entries : []) if (e && e.source === 'channel' && e.about && Array.isArray(e.about.keys)) for (const k of e.about.keys) if (typeof k === 'string' && k.includes('/')) keys.add(k);
+    // r2 (measured: agent A's hand-over of a recall note about C cleared C's held tag while agent B's refused wake still
+    // waited): only a REFUSED WAKE'S OWN BLOCK (`about.wake`, filed by the two refused-wake stash writers) counts, and only
+    // for the wake row whose OWN target is this conversation (`w.cid === cid`) and which was stashed (`lane: 'stash'`)
+    for (const e of Array.isArray(entries) ? entries : []) if (e && e.source === 'channel' && e.about && e.about.wake === true && Array.isArray(e.about.keys)) for (const k of e.about.keys) if (typeof k === 'string' && k.includes('/')) keys.add(k);
     if (!keys.size || engineCtx.stopped) return [];
     const t = Date.now();
     const stamped = [];
@@ -3601,7 +3604,7 @@ function create(deps = {}) {
         const at = k.indexOf('/');
         const e2 = store.index.entry(k.slice(0, at), k.slice(at + 1), { create: false });
         const w = e2 && e2.stats && Array.isArray(e2.stats.wakes) && e2.stats.wakes.length ? e2.stats.wakes[e2.stats.wakes.length - 1] : null;
-        if (w && w.ok === false && !w.handedOverAt) { w.handedOverAt = t; w.handedOverTo = String(cid || '') || null; stamped.push(k); }
+        if (w && w.ok === false && !w.handedOverAt && w.lane === 'stash' && cid && w.cid === String(cid)) { w.handedOverAt = t; w.handedOverTo = String(cid); stamped.push(k); }
       }
     });
     if (stamped.length) notify(stamped);
@@ -7832,7 +7835,7 @@ function create(deps = {}) {
       const targetGone = !ok && still.watched && still.targetGone;   // r3: the member died — the hits stay pending for the group's next digest
       if (!ok && !stillWatched) log.log(`[channels] scope digest ${sKey}: ${pk} lost its notification while the digest was in flight — the refused block is not stashed`);
       if (targetGone) log.log(`[channels] scope digest ${sKey}: ${target.cid} left group ${pk} while the digest was in flight — ${n} hit(s) held for the group's next digest`);
-      if (!ok && stillWatched && !targetGone && deliver && typeof deliver.stashFor === 'function') { try { const st = deliver.stashFor(target.cid, { source: 'channel', kind: 'notification', fromName, text, about: stashAbout({ keys: held.map((h) => h.key), cid: target.cid }) }); stashed = true; if (st && st.stored === false) log.warn(`[channels] ${target.cid}: ${st.why}`); } catch (err) { log.warn(`[channels] stash failed: ${(err && err.message) || err}`); } }
+      if (!ok && stillWatched && !targetGone && deliver && typeof deliver.stashFor === 'function') { try { const st = deliver.stashFor(target.cid, { source: 'channel', kind: 'notification', fromName, text, about: stashAbout({ keys: held.map((h) => h.key), cid: target.cid, wake: true }) }); stashed = true; if (st && st.stored === false) log.warn(`[channels] ${target.cid}: ${st.why}`); } catch (err) { log.warn(`[channels] stash failed: ${(err && err.message) || err}`); } }
       const words = ok ? { why: null, refused: null } : refusalWords(still, r, 'digest');
       const wk = { ...wk0, ok, lane: ok ? (r.lane || 'message') : (stashed ? 'stash' : 'none'), why: words.why, refused: words.refused };
       try { await store.index.update((ix) => {
@@ -8184,7 +8187,7 @@ function create(deps = {}) {
     if (!ok && stillWatched && !targetGone && deliver && typeof deliver.stashFor === 'function') {
       // The ladder's own durable stash: drained into the agent's next
       // context injection (renderMsgStash), so a refusal loses nothing.
-      try { const st = deliver.stashFor(target.cid, { source: 'channel', kind: 'notification', fromName, text, about: stashAbout({ keys: [`${rec.id}/${convId}`], cid: target.cid }) }); stashed = true; if (st && st.stored === false) log.warn(`[channels] ${target.cid}: ${st.why}`); } catch (err) { log.warn(`[channels] stash failed: ${(err && err.message) || err}`); }
+      try { const st = deliver.stashFor(target.cid, { source: 'channel', kind: 'notification', fromName, text, about: stashAbout({ keys: [`${rec.id}/${convId}`], cid: target.cid, wake: true }) }); stashed = true; if (st && st.stored === false) log.warn(`[channels] ${target.cid}: ${st.why}`); } catch (err) { log.warn(`[channels] stash failed: ${(err && err.message) || err}`); }
     }
     if ((ok || stashed) && batch && batch.got) { const g0 = batch.got.get(target.cid) || new Set(); for (const h of hits) if (h.record && h.record.id) g0.add(h.record.id); batch.got.set(target.cid, g0); }
     const words = ok ? { why: null, refused: null } : refusalWords(still, r, 'wake');

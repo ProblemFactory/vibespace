@@ -69,6 +69,7 @@
  *                `wake()` (spendReason peer-message — no new producer).
  */
 const crypto = require('crypto');
+const { isPress } = require('../write-origin.js');   // lane owner-press-attended r2: the owner's wake is attended only on its door's press
 const OF = require('./owner-facts.js'); // lane agent-context-owner-facts (B-7960): a time the owner or an agent reads is in the owner's zone, named
 const G = require('../channel-groups.js');
 const GC = require('../group-card.js');
@@ -446,17 +447,17 @@ function create({
   /** ONE wake = the member's pending report delivered NOW, down THE ladder.
    *  The authorizer inside decides; a refusal is journaled and the message
    *  stays for the next report (never stashed — it would arrive twice). */
-  async function wake(gid, member, rec, why, awaitAt = null) {
+  async function wake(gid, member, rec, why, awaitAt = null, { pressed = null } = {}) {
     const g = getGroup(gid);
     if (!g) return { ok: false, reason: 'group gone' };
     const flight = gid + '|' + member;
     wakesInFlight.set(flight, (wakesInFlight.get(flight) || 0) + 1);
-    try { return await wakeOnce(g, gid, member, rec, why, awaitAt); } finally {
+    try { return await wakeOnce(g, gid, member, rec, why, awaitAt, { pressed }); } finally {
       const n = (wakesInFlight.get(flight) || 1) - 1;
       if (n > 0) wakesInFlight.set(flight, n); else wakesInFlight.delete(flight);
     }
   }
-  async function wakeOnce(g, gid, member, rec, why, awaitAt = null) {
+  async function wakeOnce(g, gid, member, rec, why, awaitAt = null, { pressed = null } = {}) {
     const lead = `${why === 'await' || why === 'both' ? G.awaitLead(awaitAt, why) : WAKE_LEAD[why] || 'You were woken'} — group messages (vibespace-msg):`;
     const rep = G.reportFor(g, readLog(gid), member, { budget: WAKE_BUDGET, lead });
     if (!rep || rep.fits === false) return { ok: false, reason: rep ? 'the report does not fit a wake' : 'nothing to deliver' };
@@ -470,8 +471,9 @@ function create({
         const wc = wakeCardOf(rep, rec);
         // lane owner-press-attended: the USER's own post (G.OWNER — only routes/channels.js's cookie-only owner routes
         // author it, the wake count echoed back first) is an ATTENDED turn; an agent's post stays peer-message. Both
-        // literals spelled (the spend census reads them); ONE ladder site.
-        const paid = self ? { spendReason: 'owner-group-wake' } : { spendReason: 'peer-message' };
+        // literals spelled (the spend census reads them); ONE ladder site. r2: and only with its door's PRESS (`pressed`,
+        // write-origin isPress) — an owner record woken later by nobody's press (a timer) is peer-message
+        const paid = self && isPress(pressed) ? { spendReason: 'owner-group-wake' } : { spendReason: 'peer-message' };
         r = await deliver.deliverToConversation(member, rep.text, { kind: 'peer', ...paid, fromName: `${displayName(g, rec.author.id)} · ${g.name}`, cardText: wc.text, group: { id: g.id, name: g.name, at: rec.at, from: self ? null : displayName(g, rec.author.id), self, via: 'wake', ...wc.authors } });
       } catch (e) { r = { ok: false, reason: 'delivery threw: ' + (e && e.message) }; }
     }
@@ -535,7 +537,7 @@ function create({
    *  invite would cause — an @mention and `--wake` are one act, paced alike.
    *  A floored wake is a refusal like the authorizer's: not billed, journaled,
    *  the message rides that member's next report. */
-  async function wakeAll(gid, rec, candidates, mayWake = null) {
+  async function wakeAll(gid, rec, candidates, mayWake = null, { pressed = null } = {}) {
     const woke = [], refused = [], later = [];
     const g0 = getGroup(gid);
     for (const m of candidates) {
@@ -550,7 +552,7 @@ function create({
         refused.push({ member: m, name, why: v.why, reason, refused: 'rate-floor' });
         continue;
       }
-      const r = await wake(gid, m, rec, v.why);
+      const r = await wake(gid, m, rec, v.why, null, { pressed });
       if (r.ok) woke.push({ member: m, name, why: v.why, lane: r.lane });
       else {
         // not billed ⇒ the pace slot goes back (r2: a refused wake used to
@@ -567,7 +569,7 @@ function create({
    *  resolved within `by`'s reach (atomic: one miss refuses the whole call);
    *  each invitee gets the invite record (with the context) and is woken as
    *  an invite unless `quiet`. */
-  async function createGroup({ by, name, members = [], context = '', quiet = false, mayWake = null, consent = null } = {}) {
+  async function createGroup({ by, name, members = [], context = '', quiet = false, mayWake = null, consent = null, pressed = null } = {}) {
     if (!(by === G.OWNER || G.isCid(by))) return { ok: false, code: 'bad-member', error: 'this session has no conversation id yet — send after its first turn' };
     const resolved = [];
     for (const ref of members) {
@@ -597,7 +599,7 @@ function create({
     announce([res.group.id], recs);
     const invites = recs.filter((x) => x.raw.kind === 'invite');
     let woke = [], refused = [];
-    for (const rec of invites) { const w = await wakeAll(res.group.id, rec, [rec.raw.member], mayWake); woke = woke.concat(w.woke); refused = refused.concat(w.refused); }
+    for (const rec of invites) { const w = await wakeAll(res.group.id, rec, [rec.raw.member], mayWake, { pressed }); woke = woke.concat(w.woke); refused = refused.concat(w.refused); }
     return { ok: true, group: view(getGroup(res.group.id)), woke, refused, quiet: !!quiet };
   }
   function inviteText(g, by, cid, ctx) {
@@ -606,7 +608,7 @@ function create({
 
   /** Invite into an existing group (members only; reach checked; a duplicate
    *  is a no-op WITH a word; N invitees = N wakes unless `quiet`). */
-  async function invite({ by, group: ref, members = [], context = '', quiet = false, mayWake = null, consent = null } = {}) {
+  async function invite({ by, group: ref, members = [], context = '', quiet = false, mayWake = null, consent = null, pressed = null } = {}) {
     const rg = resolveGroup(ref, by);
     if (!rg.ok) return rg;
     const resolved = [];
@@ -639,7 +641,7 @@ function create({
     if (!res.ok) return res;
     if (recs.length) announce([res.group.id], recs);
     let woke = [], refused = [];
-    for (const rec of recs) { const w = await wakeAll(res.group.id, rec, [rec.raw.member], mayWake); woke = woke.concat(w.woke); refused = refused.concat(w.refused); }
+    for (const rec of recs) { const w = await wakeAll(res.group.id, rec, [rec.raw.member], mayWake, { pressed }); woke = woke.concat(w.woke); refused = refused.concat(w.refused); }
     return { ok: true, group: view(getGroup(res.group.id)), added: recs.map((r) => displayName(res.group, r.raw.member)), already, woke, refused, quiet: !!quiet };
   }
 
@@ -729,7 +731,7 @@ function create({
    *  words do not already @ is written in front; `mentions` = the places the
    *  owner's @-picker chose by id; `wake:true` (`--wake`) @mentions every OTHER
    *  member — an explicit act, each one a billed turn through the ladder. */
-  async function post({ group: ref, from, text, wake: wakeEveryone = false, mayWake = null, consent = null, at: atRefs = [], mentions: picked = [], awaitReply: awaits = false } = {}) {
+  async function post({ group: ref, from, text, wake: wakeEveryone = false, mayWake = null, consent = null, at: atRefs = [], mentions: picked = [], awaitReply: awaits = false, pressed = null } = {}) {
     const body = String(text == null ? '' : text);
     if (!body.trim()) return { ok: false, code: 'bad-request', error: 'an empty message' };
     if (Buffer.byteLength(body, 'utf-8') > TEXT_MAX) return { ok: false, code: 'bad-request', error: 'message too large (16KB cap) — write a file and send its path instead' };
@@ -778,8 +780,8 @@ function create({
     if (!res.ok) return res;
     announce([res.group.id], [rec]);
     const others = res.group.members.map((m) => m.member).filter((m) => m !== from);
-    const w = await wakeAll(res.group.id, rec, others, mayWake);
-    const aw = await awaitWakes(res.group.id, rec, w, mayWake, !!wakeEveryone);
+    const w = await wakeAll(res.group.id, rec, others, mayWake, { pressed });
+    const aw = await awaitWakes(res.group.id, rec, w, mayWake, !!wakeEveryone, { pressed });
     return { ok: true, group: view(getGroup(res.group.id)), message: rec, woke: w.woke, refused: w.refused, later: w.later, awaited: aw };
   }
   /** an await entry is kept a day past its `until` (read's clause), then dropped on the next write */
@@ -793,7 +795,7 @@ function create({
    *  `answeredAt` by the first reply whatever the verdict, `wokeAt` when a wake carried it (one already made by
    *  wakeAll — a mention / always / --wake — CONSUMES it: never a second billed turn), `heldAt` when the ladder or the
    *  pace refused (the reply waits for next-turn, said on the record's line). */
-  async function awaitWakes(gid, rec, w, mayWake, replyWake) {
+  async function awaitWakes(gid, rec, w, mayWake, replyWake, { pressed = null } = {}) {
     const g0 = getGroup(gid);
     const from = rec.author && rec.author.id;
     if (!g0 || !g0.awaits || !from) return [];
@@ -814,7 +816,7 @@ function create({
         if (made) Object.assign(patch, { wokeAt: now(), why: v.why });
         else {
           const pace = typeof mayWake === 'function' ? mayWake(asker) : true;
-          const r = pace === true ? await wake(gid, asker, rec, v.why, e.at) : { ok: false, reason: (pace && pace.reason) || 'rate floor', refused: 'rate-floor' };
+          const r = pace === true ? await wake(gid, asker, rec, v.why, e.at, { pressed }) : { ok: false, reason: (pace && pace.reason) || 'rate floor', refused: 'rate-floor' };
           if (r.ok) Object.assign(patch, { wokeAt: now(), why: v.why });
           else {
             if (pace === true && typeof mayWake === 'function' && typeof mayWake.refund === 'function') { try { mayWake.refund(asker); } catch { } }
