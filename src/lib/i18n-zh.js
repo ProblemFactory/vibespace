@@ -11074,6 +11074,8 @@ export default {
   "left {n} running — stopped": "留下 {n} 个进程 — 已停止",
   "left {n} running — stopped by force": "留下 {n} 个进程 — 已强制停止",
   "{n} left its group — not stopped; run it as a service job": "{n} 个进程脱离了它的进程组 — 未停止；请作为服务作业运行",
+  "{n} got less than the full grace": "其中 {n} 个没有得到完整的宽限期",
+  "{name}: cannot prove the previous run is gone ({why}) — not restarted; if it is gone: {ifGone}, then start it again; if it runs: it keeps running": "{name}：无法证明上一次运行已经结束（{why}）— 未重新启动；如果它已结束：{ifGone}，然后再启动它；如果它还在运行：它会继续运行",
   "parked: out of memory twice — raise its bound or fix the job": "已停住：连续两次内存超限 — 提高它的上限或修好这个任务",
   "stopped: used more than {size}": "已停止：内存超限（用了超过 {size}）",
   "killed: the instance ran out of memory": "被终止：整个实例的内存耗尽",

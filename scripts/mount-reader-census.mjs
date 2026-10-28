@@ -67,7 +67,7 @@ export const ROWS = [
   ['src/peer-messaging.js', 'own-tree', 4, null, `${CLI}; lane peer-registry-identity +1: the registration's inbox socket (statSync isSocket — the CLI's own runtime-dir socket, never a mount)`],
   ['src/plugins.js', 'own-tree', 1, null, DATA],
   ['src/port-forward.js', 'own-tree', 4, null, PROC],
-  ['src/proc-identity.js', 'own-tree', 9, null, `${PROC}; lane jobs-memory-bound round 6 +2 (membersOf — a recorded run's processes at clear time): the /proc listing and a process's environ (the job's mark) — procfs, never a mount`],
+  ['src/proc-identity.js', 'own-tree', 11, null, `${PROC}; lane jobs-memory-bound round 6 +2 (membersOf — a recorded run's processes at clear time): the /proc listing and a process's environ (the job's mark) — procfs, never a mount; round 8 +2: a candidate's <pid>/task/<pid>/children and an unreadable environ's <pid>/status (its owner) — procfs`],
   ['src/proc-listen.js', 'own-tree', 4, null, PROC],
   ['src/quota-model-migrate.js', 'own-tree', 2, null, CLI],
   ['src/rate-limit-capture.js', 'own-tree', 2, null, CLI], // lane oat-identity-fix-r3 −1: the `.window-` sidecar read moved to its ONE reader (src/window-stamp.js)

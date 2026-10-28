@@ -11073,6 +11073,8 @@ export default {
   "left {n} running — stopped": "{n} 個のプロセスが残存 — 停止しました",
   "left {n} running — stopped by force": "{n} 個のプロセスが残存 — 強制停止しました",
   "{n} left its group — not stopped; run it as a service job": "{n} 個のプロセスがプロセスグループを離れました — 停止していません。サービスジョブとして実行してください",
+  "{n} got less than the full grace": "うち {n} 個は猶予を全部は得られませんでした",
+  "{name}: cannot prove the previous run is gone ({why}) — not restarted; if it is gone: {ifGone}, then start it again; if it runs: it keeps running": "{name}：前回の実行が終わったことを証明できません（{why}）— 再起動しません。終わっているなら：{ifGone} のあと、もう一度開始してください。動いているなら：そのまま動き続けます",
   "parked: out of memory twice — raise its bound or fix the job": "停止中：2 回続けてメモリ上限超過 — 上限を上げるかジョブを直してください",
   "stopped: used more than {size}": "停止：メモリ上限超過（{size} を超えて使用）",
   "killed: the instance ran out of memory": "強制終了：インスタンス全体のメモリ不足",

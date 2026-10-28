@@ -15,16 +15,21 @@
 //            ㉔ the clear scans the group at clear time; ㉕ the keeper is known by its PID; ㉖ a record past its bound says so;
 //            ㉗ a boot's reap past its bound is retried (a real scope); ㉘ a kept scope's stop under a held read SIGTERMs blind;
 //            ㉙ every start of a service waits for what is pending; ROUND 7: ⑭ driven by STATE (the wrapper's own «stop:» line,
-//            a 1 s grace — never a sleep); ㉟ a stop's intent written before its signal; ㊱ what left the group gets its own grace
+//            a 1 s grace — never a sleep); ㉟ a stop's intent written before its signal; ROUND 8: ㊱ A STOP HAS ONE CLOCK (at
+//            the production ratio — the wrapper's grace = the engine's, 0.4 s, 2 s and 10 s at once: the wrapper's end comes
+//            before the engine's kill step); ㊶ who signalled whom (a wrapper signalled alone, an intent nobody delivered);
+//            ㊷ UNKNOWN blocks a spawn (a live service whose pid.json the next boot can never read)
 //   §4 REAL  the park law through the engine's own doors (a boot replay counts like a run; a restart resets it — a service, a cron)
 //   §5 REAL  the boot's judge over a fake cgroup (the instance's OOM count rose; a rolling update; a SIGKILL from outside)
 // RED on ef0012b5 (round 5): ㉑ the new run killed at the first stop's grace, labelled; ㉒ the deaf member survived the stop,
 // unsaid; ㉓ nothing said, nothing kept; ㉔ the late child ran on; ㉕ the impostor taken for the keeper; ㉖ 6 of 70 survived; ㉗ the
 // boot's reap dropped; ㉘ no SIGTERM, «10 s after its SIGTERM» said; ㉙ started beside the old scope. RED on 336761e5 (round 6):
 // ⑭ waits for a «stop:» line no wrapper writes; ㉟ kept, no `cleared`; ㊱ the escapee's SIGTERM and SIGKILL 17 ms apart; its own
-// copy of ⑭ (a 50 ms sleep into a 0.15 s window) red in 4 of 5 pairs started 0.25 s apart. Earlier rounds: the report.
-// Load: each job allocates ≤ 512 MB once (most far less, the cgroup legs stop at 256 MB), no busy loop; the legs run at once;
-// scratch dataDirs under os.tmpdir(), one per leg.
+// copy of ⑭ (a 50 ms sleep into a 0.15 s window) red in 4 of 5 pairs started 0.25 s apart. RED on e7147b71 (round 7): ㊱ at 2 s
+// and 10 s the engine killed the wrapper mid-drain (no exit.json, the escapee alive); ㊶ the helper never heard a SIGTERM (killed
+// at the grace under words claiming one); ㊷ a second run beside the live one. Earlier rounds: the report.
+// Load: each job allocates ≤ 512 MB once (most far less, the cgroup legs stop at 256 MB), no busy loop; the legs run at once
+// (the longest: ㊱'s 10 s grace — the production one — about 11 s); scratch dataDirs under os.tmpdir(), one per leg.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -917,27 +922,84 @@ leg('§3 REAL ㉟ A STOP\'S INTENT IS WRITTEN BEFORE ITS SIGNAL — a pod\'s ser
   stopEngine(E);
 });
 
-leg('§3 REAL ㊱ WHAT LEFT THE GROUP GETS ITS OWN GRACE — a pod\'s service whose main is deaf to the stop: its setsid process hears the SIGTERM with the main and ends a grace later (336761e5: SIGTERM and SIGKILL back to back once the main was killed)', async (ok) => {
-  if (!realOf('prlimit') || !realOf('setsid')) { skip++; ok.say('  - SKIP the escapee-grace leg: no prlimit or setsid here'); return; }
-  const dir = scratch(), termF = path.join(dir, 'esc.term'), pidF = path.join(dir, 'esc.pid');
-  // the escapee starts BEFORE the main ignores TERM (a signal ignored on entry cannot be trapped); it notes its SIGTERM and runs on
-  const ESC = `setsid sh -c 'echo $$ > ${pidF}; trap "date +%s%N > ${termF}" TERM; while :; do sleep 30 & wait $!; done' >/dev/null 2>&1 </dev/null &`;
-  const E = engineIn(dir)({ memoryRungs: ['rlimit-data'], memorySample: { stopMs: 400 } });
-  E._graceMs = () => 5000; // the wrapper's grace is read here: the engine's own kill step stays out of it
-  const j = E.jobs.get(E.create({ kind: 'service', name: 'deaf-main', cmd: { argv: ['sh', '-c', `${ESC} trap "" TERM; echo ready; exec sleep 30`] }, restart: 'never', memoryMb: 1024, owner }, caller).job.id);
-  await until(() => ready(j) && fs.existsSync(pidF), 4000, 10);
-  const esc = Number(fs.readFileSync(pidF, 'utf8')), st = E._readStamp(j);
-  const t0 = Date.now();
-  E.stop(j);
-  let deadAt = 0;
-  await until(() => { if (!alive(esc)) { deadAt = Date.now(); return true; } return false; }, 4000, 5);
-  const termAt = (() => { try { return Math.round(Number(fs.readFileSync(termF, 'utf8').trim()) / 1e6); } catch { return 0; } })();
-  await ended(E, j); await E._sweep();
-  const grace = termAt && deadAt ? deadAt - termAt : -1, ex = readJson(exitOf(j)) || {};
-  ok(grace >= 360 && termAt - t0 < 300 && ex.left && ex.left.cleared > 0 && ex.left.escaped >= 1,
-    `its SIGTERM ${termAt - t0} ms after the stop (with the main), its end ${deadAt - t0} ms — ${grace} ms between its two signals, the stop's grace 0.4 s (336761e5: ~0 — both once the main was killed at the grace)`, { termIn: termAt - t0, deadIn: deadAt - t0, grace, left: ex.left && { ...ex.left, pids: undefined } });
-  try { process.kill(esc, 'SIGKILL'); } catch { } try { process.kill(-st.pid, 'SIGKILL'); } catch { }
-  stopEngine(E);
+leg('§3 REAL ㊱ A STOP HAS ONE CLOCK — a pod\'s service whose main is deaf to the stop and whose setsid process forks again on its SIGTERM, at the PRODUCTION ratio (the wrapper\'s grace IS the engine\'s, its kill step a second later — no override; 0.4 s, 2 s and 10 s at once): the setsid process hears the stop with the main, what it forks after gets only what is LEFT of the grace and is said, and the wrapper ends — exit.json written, all of it dead — before the engine\'s kill step (e7147b71: a fresh grace at the drain ran to twice the grace, the engine killed the wrapper mid-drain — no exit.json, the escapee alive for ever; 336761e5: SIGTERM and SIGKILL back to back)', async (ok) => {
+  if (!realOf('prlimit') || !realOf('setsid')) { skip++; ok.say('  - SKIP the one-clock leg: no prlimit or setsid here'); return; }
+  const one = async (grace) => {
+    const dir = scratch(), termF = path.join(dir, 'esc.term'), pidF = path.join(dir, 'esc.pid');
+    // the escapee starts BEFORE the main ignores TERM (a signal ignored on entry cannot be trapped); it notes each SIGTERM and forks on
+    const ESC = `setsid sh -c 'echo $$ > ${pidF}; trap "date +%s%N >> ${termF}" TERM; while :; do sleep 30 & wait $!; done' >/dev/null 2>&1 </dev/null &`;
+    const E = engineIn(dir)({ memoryRungs: ['rlimit-data'], memorySample: { stopMs: grace } }); // ONE grace: the wrapper's and the engine's
+    const j = E.jobs.get(E.create({ kind: 'service', name: `deaf-main-${grace}`, cmd: { argv: ['sh', '-c', `${ESC} trap "" TERM; echo ready; exec sleep 60`] }, restart: 'never', memoryMb: 1024, owner }, caller).job.id);
+    await until(() => ready(j) && fs.existsSync(pidF), 4000, 10);
+    const esc = Number(fs.readFileSync(pidF, 'utf8')), st = E._readStamp(j), step = E._killStepMs();
+    const t0 = Date.now();
+    E.stop(j);
+    let deadAt = 0, exitAt = 0, goneAt = 0;
+    while (Date.now() - t0 < grace + 3000) { // the sweep ticks (the engine's ladder) — until the wrapper is gone and the kill step passed
+      await sleep(Math.min(250, grace / 4));
+      if (!deadAt && !alive(esc)) deadAt = Date.now();
+      if (!exitAt && fs.existsSync(exitOf(j))) exitAt = Date.now();
+      if (!goneAt && !alive(st.pid)) goneAt = Date.now();
+      await E._sweep();
+      if (goneAt && Date.now() - t0 > step + 300) break;
+    }
+    const terms = (() => { try { return fs.readFileSync(termF, 'utf8').trim().split('\n').map((l) => Math.round(Number(l) / 1e6)); } catch { return []; } })();
+    const ex = readJson(exitOf(j)) || {}, snap = E.snapshot(j), escAlive = alive(esc);
+    try { process.kill(esc, 'SIGKILL'); } catch { } try { process.kill(-st.pid, 'SIGKILL'); } catch { }
+    stopEngine(E);
+    return { grace, step, termIn: terms.length ? terms[0] - t0 : -1, deadIn: deadAt ? deadAt - t0 : -1, exitIn: exitAt ? exitAt - t0 : -1, goneIn: goneAt ? goneAt - t0 : -1, escAlive, stopBy: ex.stopBy || null, left: ex.left ? { ...ex.left, pids: undefined } : null, end: (snap.run && snap.run.endWords) || '' };
+  };
+  for (const r of await Promise.all([400, 2000, 10000].map(one))) {
+    ok(r.exitIn > 0 && r.exitIn < r.step && r.goneIn > 0 && r.goneIn < r.step && !r.escAlive && r.termIn >= 0 && r.termIn < 300 && r.deadIn >= r.grace * 0.9 && r.deadIn < r.step && r.stopBy === 'engine' && !!r.left && r.left.cleared > 0 && r.left.escaped >= 1 && r.left.short >= 1 && r.left.short < r.left.n && /\(\d+ process(es)? got less than the full grace\)$/.test(r.end),
+      `grace ${r.grace / 1000} s, the engine's kill step at ${r.step / 1000} s: the escapee's SIGTERM ${r.termIn} ms after the stop (with the main), its end ${r.deadIn} ms; exit.json at ${r.exitIn} ms, the wrapper gone at ${r.goneIn} ms — before the step; «${r.end}» (e7147b71 at 2 s and 10 s: no exit.json, the escapee alive at the end)`, r);
+  }
+});
+
+leg('§3 REAL ㊶ WHO SIGNALLED WHOM — a pod\'s task whose helper ends cleanly on SIGTERM: its WRAPPER signalled alone (an agent\'s `kill <wrapper pid>`) sends the SIGTERM on to its group; the engine\'s intent with no signal after it (a stop nobody delivered) is delivered by the wrapper; exit.json and the job\'s log say who (e7147b71: the members marked «sent SIGTERM», nothing sent — killed at the grace under words claiming a SIGTERM)', async (ok) => {
+  if (!realOf('prlimit')) { skip++; ok.say('  - SKIP the who-signalled leg: no prlimit here'); return; }
+  const one = async (how) => {
+    const dir = scratch(), termF = path.join(dir, 'member.term'), pidF = path.join(dir, 'member.pid');
+    const MEMBER = `sh -c 'echo $$ > ${pidF}; trap "date +%s%N > ${termF}; exit 0" TERM; while :; do sleep 0.1; done' &`;
+    const E = engineIn(dir)({ memoryRungs: ['rlimit-data'], memorySample: { stopMs: 2000 } });
+    const j = E.jobs.get(E.create({ kind: 'task', name: `who-${how}`, cmd: { argv: ['sh', '-c', `${MEMBER} echo ready; ${how === 'alone' ? 'exec sleep 30' : 'sleep 0.5'}`] }, memoryMb: 1024, owner }, caller).job.id);
+    await until(() => ready(j) && fs.existsSync(pidF), 4000, 10);
+    const member = Number(fs.readFileSync(pidF, 'utf8')), st = E._readStamp(j), t0 = Date.now();
+    if (how === 'alone') process.kill(st.pid, 'SIGTERM'); // the wrapper ALONE — never its group
+    else fs.writeFileSync(path.join(ctlOf(j), 'stop.json'), JSON.stringify({ sig: 'SIGTERM', at: t0 })); // the engine's intent; its signal never left
+    let goneAt = 0;
+    await until(() => { if (!alive(member)) { goneAt = Date.now(); return true; } return false; }, 4000, 5);
+    await until(() => fs.existsSync(exitOf(j)) && !alive(st.pid), 4000, 10);
+    const termAt = (() => { try { return Math.round(Number(fs.readFileSync(termF, 'utf8').trim()) / 1e6); } catch { return 0; } })();
+    const ex = readJson(exitOf(j)) || {}, said = (fs.readFileSync(lastRun(j).log, 'utf8').match(/\[job-wrapper\] stop: [^\n]*/) || [''])[0];
+    try { process.kill(member, 'SIGKILL'); } catch { } try { process.kill(-st.pid, 'SIGKILL'); } catch { }
+    stopEngine(E);
+    return { how, heardIn: termAt ? termAt - t0 : -1, goneIn: goneAt ? goneAt - t0 : -1, stopBy: ex.stopBy || null, left: ex.left || null, forced: ex.forced || null, said };
+  };
+  const [A, I] = await Promise.all([one('alone'), one('intent')]);
+  ok(A.heardIn >= 0 && A.heardIn < 300 && A.goneIn >= 0 && A.goneIn < 600 && A.stopBy === 'signal' && !A.forced && !(A.left && A.left.force) && /\(a signal to the wrapper alone — the wrapper signals its group\)$/.test(A.said),
+    `the wrapper signalled alone: its helper heard SIGTERM ${A.heardIn} ms after and ended cleanly — «${A.said}», stopBy ${A.stopBy}, nothing by force (e7147b71: no SIGTERM ever, killed at the grace — «… after its SIGTERM — killed»)`, A);
+  ok(I.heardIn >= 0 && I.heardIn < 1500 && I.stopBy === 'intent' && !I.forced && !(I.left && I.left.force) && /\(the engine's stop never reached its group — the wrapper signals it\)$/.test(I.said),
+    `an intent with no signal after it: the wrapper delivers it — the helper heard SIGTERM ${I.heardIn} ms after the intent (the job ended at 0.5 s; a signal waited for ≤ 0.5 s), stopBy ${I.stopBy} (e7147b71: marked, never sent — killed at the grace)`, I);
+});
+
+leg('§3 REAL ㊷ UNKNOWN BLOCKS A SPAWN — a live service on the cgroup rung whose pid.json the next boot can never read: its replay never starts beside it, said, ONE For-you notice; its scope keeps its process (e7147b71: «did not answer» of a scope that answered — two wrappers, two scopes)', async (ok) => {
+  if (!userSystemd) { skip++; ok.say('  - SKIP the unknown-blocks leg: no user systemd with a memory controller answers here'); return; }
+  const dir = scratch(), mk = () => engineIn(dir)({ reapReadMs: 50, reapTries: 3, reapConfirmMs: 50, memorySample: { stopMs: 500 } });
+  const E = mk();
+  const j = E.jobs.get(E.create({ kind: 'service', name: 'live-unread', cmd: { argv: ['sh', '-c', 'echo ready; exec sleep 60'] }, memoryMb: 256, restart: 'never', owner }, caller).job.id);
+  await running(E, j);
+  const b = readJson(path.join(ctlOf(j), 'bound.json')) || {}, st = E._readStamp(j), pj = path.join(ctlOf(j), 'pid.json');
+  E.shutdown(); // the hub goes; the service runs on
+  fs.renameSync(pj, pj + '.away'); // the next boot cannot read it — and never will
+  const E2 = mk(), j2 = E2.jobs.get(j.id);
+  for (let i = 0; i < 12; i++) { await E2._sweep(); await sleep(100); }
+  const notes = said.filter((n) => n.jobId === j.id && /cannot prove the previous run is gone/.test(n.text || '')), procs = procsOfCg(b.cgroup);
+  const words = E2.events.filter((e) => e.jobId === j.id && /^cannot prove the previous run is gone \(pid\.json unreadable\) — not restarted; if it is gone: systemctl --user kill --signal=KILL /.test(e.what || '')).length;
+  ok(j2.runs.length === 1 && E2._verifyAlive(st) && procs.length >= 1 && words === 1 && notes.length === 1 && !E2.events.some((e) => e.jobId === j.id && /did not answer/.test(e.what || '')),
+    `the live run stays the only one (runs ${j2.runs.length}, its wrapper alive, its scope ${procs.length} process${procs.length === 1 ? '' : 'es'}); said once, ONE notice (e7147b71: a second run, trigger boot — two scopes)`, { runs: j2.runs.length, procs, words, notes: notes.length });
+  try { process.kill(-st.pid, 'SIGKILL'); } catch { }
+  killScopeOf(b.unit);
+  stopEngine(E2);
 });
 
 try {

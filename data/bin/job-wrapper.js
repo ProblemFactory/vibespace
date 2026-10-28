@@ -76,12 +76,13 @@ function scopeEventsEnd(atGo, atEnd) {
 function leftWords(l) {
   const n = l.n || 0, es = (k) => (k === 1 ? '' : 'es');
   const hhmm = (ms) => { const d = new Date(ms); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
-  if (l.cleared) return `it left ${n} process${es(n)} running — stopped at ${hhmm(l.cleared)}`;
+  const sh = l.short ? ` (${l.short} process${es(l.short)} got less than the full grace)` : ''; // round 8: first seen after the stop
+  if (l.cleared) return `it left ${n} process${es(n)} running — stopped at ${hhmm(l.cleared)}${sh}`;
   if (l.gone) return `it left ${n} process${es(n)} running — ${n === 1 ? 'it' : 'they'} had already ended by ${hhmm(l.gone)}`;
   if (l.kept) return `it left ${n} process${es(n)} running — kept: a service's own until it is stopped or started again${l.escaped ? ` (${l.escaped} outside its group)` : ''}${l.recorded ? ` (${l.recorded} of ${n} recorded)` : ''}`;
   const esc = l.escaped ? `${l.escaped} process${es(l.escaped)} left its group — not stopped` : '';
   if (!n) return `${esc}; run it as a service job`;
-  return `the job left ${n} process${es(n)} running — ${n === 1 ? 'it was' : 'they were'} stopped${l.force ? ' by force' : ''}${esc ? `; ${esc}; run it as a service job` : '; to keep a daemon, run it as a service job'}`;
+  return `the job left ${n} process${es(n)} running — ${n === 1 ? 'it was' : 'they were'} stopped${l.force ? ' by force' : ''}${sh}${esc ? `; ${esc}; run it as a service job` : '; to keep a daemon, run it as a service job'}`;
 }
 if (!process.argv[2] && require.main !== module) { module.exports = { allocationRefused, systemdMajor, scopeResultEnd, scopeEventsEnd, capOf, sharedAncestors, leftWords }; return; }
 
@@ -550,20 +551,31 @@ async function forceScope(why) {
 const termed = new Map();
 const termKey = ([pid, st]) => `${pid}:${st}`;
 const termOnce = (p) => { if (termed.has(termKey(p)) || !same(p)) return; termed.set(termKey(p), Date.now()); try { process.kill(p[0], 'SIGTERM'); } catch { } };
+const killNow = (p) => { if (!same(p)) return false; try { process.kill(p[0], 'SIGKILL'); return true; } catch { return false; } }; // round 8: by force, its start re-read
+// round 8: WHO SIGNALLED WHOM — the engine writes its intent (stop.json), THEN signals our whole group (we are in it): a signal our
+// handler hears beside a FRESH intent is the engine's, and every member heard it with us; a signal with no fresh intent is ours
+// ALONE (an agent's `kill <wrapper pid>`, a SIGINT or SIGHUP to us) — round 7 marked the members «sent SIGTERM» and sent nothing,
+// so a member that ends cleanly on SIGTERM was killed at the grace under words claiming one; an intent with no signal after it
+// (a stop before our stamp, an engine gone between the two) is a stop nobody delivered — we deliver it. Said in the job's log and
+// in exit.json (`stopBy`: engine | signal | intent)
+const INTENT_FRESH_MS = 2000;
+let stopBy = '', heard = null;
 // THE STOP — the engine's signal to our group, or (round 7) ITS INTENT: stop.json beside pid.json, written before it signals. The
 // child's end and our own handler land at once, in either order: a wrapper that handles the end first still knows a stop is in
 // flight (a service's leftovers stopped with it — never kept, unsaid: heavy ㉒, 1 pair in 12). Said in the job's log
-function onStop(sig, at) {
+function onStop(sig, at, by) {
   if (stopping) return;
-  stopping = sig; stopAt = at;
-  try { fs.writeSync(logFd, Buffer.from(`\n[job-wrapper] stop: ${sig} — ${stopMs / 1000} s to end\n`)); } catch { }
-  try { child.kill(sig); } catch { }
+  stopping = sig; stopAt = at; stopBy = by;
+  const who = by === 'engine' ? 'the engine signalled its process group' : by === 'intent' ? "the engine's stop never reached its group — the wrapper signals it" : 'a signal to the wrapper alone — the wrapper signals its group';
+  try { fs.writeSync(logFd, Buffer.from(`\n[job-wrapper] stop: ${sig} — ${stopMs / 1000} s to end (${who})\n`)); } catch { }
+  if (by !== 'engine') { try { child.kill(sig); } catch { } } // the engine's reached it with us
   const left = Math.max(0, at + stopMs - Date.now());
   if (!scoped()) { // round 6: a rung without a scope — the job's group is OURS to end at the grace, said (drainGroup takes what
     // the job left in it); the engine's kill step is a backstop for a wrapper that cannot (a second later). Round 7: the group
     // heard the stop with us (the engine signals it) — its grace runs from the stop; a SERVICE's processes that left the group
     // (its mark) hear it NOW, with the main — round 6 signalled them only once the main ended, against what was left of the grace
-    for (const p of groupLeft()) if (!termed.has(termKey(p))) termed.set(termKey(p), at);
+    // round 8: only the ENGINE's signal reached them — any other stop, our own SIGTERM to each (the base's)
+    for (const p of groupLeft()) { if (by !== 'engine') termOnce(p); else if (!termed.has(termKey(p))) termed.set(termKey(p), at); }
     if (keeps) for (const p of escapedOf()) termOnce(p);
     const t = setTimeout(() => { if (exited) return; if (!forced) forced = `it did not end on ${sig} in ${stopMs / 1000} s — its process group was killed`; try { child.kill('SIGKILL'); } catch { } }, left); t.unref?.();
     return;
@@ -571,7 +583,11 @@ function onStop(sig, at) {
   scopeKill(sig);
   const t = setTimeout(() => { if (!exited) forceScope(`it did not end on ${sig} in ${stopMs / 1000} s — its scope was killed`); }, left); t.unref?.();
 }
-for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => onStop(sig, Date.now()));
+for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => {
+  const s = stopIntent(), engine = !!s && Date.now() - s.at <= INTENT_FRESH_MS; // round 8: the engine's — its clock is the intent's
+  onStop(sig, engine ? s.at : Date.now(), engine ? 'engine' : 'signal');
+  if (heard) heard();
+});
 /** the engine's stop intent for THIS run (its ctl dir), or null */
 function stopIntent() {
   try { const s = JSON.parse(fs.readFileSync(path.join(ctlDir, 'stop.json'), 'utf8')); return { sig: /^SIG[A-Z]{2,6}$/.test(s.sig) ? s.sig : 'SIGTERM', at: Number(s.at) > 0 && Number(s.at) <= Date.now() ? Number(s.at) : Date.now() }; } catch { return null; }
@@ -644,24 +660,43 @@ async function drainGroup() {
   if (keeps && !stopping) return { left: { n, ...kept } }; // kept: named by identity for the engine (its stop, park, removal, next start)
   if (!n) return { left: { n: 0, escaped: out.length } }; // a task's that left its group: said, not stopped
   if (mine) left.push(...out);
-  // round 7: EACH ONE'S GRACE FROM ITS OWN SIGTERM — the group's and a stopped service's escapees' from the stop (onStop), what
-  // our SIGTERM reaches only now from now (a deaf main SIGKILLed at the grace left an escapee SIGTERM and SIGKILL back to back)
+  // round 7: what our SIGTERM reaches only now hears it now (the group's and a stopped service's escapees' heard it at the stop).
+  // Round 8: A STOP HAS ONE CLOCK — its grace runs from the stop, for every process: one first seen at the drain gets what is LEFT
+  // of it, never a fresh grace (round 7's per-process deadline ran to twice the grace, past the engine's kill step a second after
+  // it: the engine killed us mid-drain — no exit.json, a stopped service's escapee alive for ever, unsaid). The engine's step is
+  // the backstop; our end comes first. A natural end's leftovers (no stop): the grace from their SIGTERM, now
   for (const p of left) termOnce(p);
-  const deadline = Math.max(0, ...left.map((p) => termed.get(termKey(p)) || 0)) + stopMs; // (one gone before its SIGTERM waits for nothing)
+  const deadline = stopping ? stopAt + stopMs : Math.max(0, ...left.map((p) => termed.get(termKey(p)) || 0)) + stopMs;
   let live = left.filter(same);
   while (live.length && Date.now() < deadline) { await nap(25); live = live.filter(same); }
-  const still = groupLeft(); // the group once more: what was forked meanwhile too
-  if (mine) still.push(...out.filter(same));
-  for (const [pid] of still) { try { process.kill(pid, 'SIGKILL'); } catch { } }
-  if (still.length && !forced) forced = `${still.length} process${still.length === 1 ? '' : 'es'} it left ${still.length === 1 ? 'was' : 'were'} still running ${stopMs / 1000} s after its SIGTERM — killed`;
-  if (mine) return { left: { n, ...kept, cleared: Date.now() } }; // recorded the way an end records them — and stopped with it
-  return { left: { n, ...(still.length ? { force: true } : {}), ...(out.length ? { escaped: out.length } : {}) } };
+  // by force: the group once more and a stopped service's marked processes — rescanned until a pass finds none (one that forks on
+  // its SIGTERM leaves no child behind), at most three passes
+  const killed = new Set();
+  for (let pass = 0; pass < 3; pass++) {
+    const more = [...groupLeft(), ...(mine ? escapedOf() : [])].filter((p) => !killed.has(termKey(p)));
+    if (!more.length) break;
+    for (const p of more) if (killNow(p)) killed.add(termKey(p));
+  }
+  const still = killed.size, tol = Math.min(1000, stopMs / 10);
+  // what got less than the full grace: our SIGTERM came after the stop (it may have ended on it — its grace was cut all the same),
+  // or none came before its kill
+  const short = stopping ? [...termed.values()].filter((at) => at - stopAt > tol).length + [...killed].filter((k) => !termed.has(k)).length : 0;
+  if (still && !forced) forced = `${still} process${still === 1 ? '' : 'es'} it left ${still === 1 ? 'was' : 'were'} still running ${stopMs / 1000} s after ${stopping ? 'the stop' : 'its SIGTERM'} — killed`;
+  const seen = new Set(rows.map(termKey)), all = n + [...killed].filter((k) => !seen.has(k)).length; // forked while it drained: counted with the rest
+  if (mine) return { left: { n: all, ...kept, ...(all > kept.pids.length && !kept.recorded ? { recorded: kept.pids.length } : {}), cleared: Date.now(), ...(short ? { short } : {}) } }; // recorded the way an end records them — and stopped with it
+  return { left: { n: all, ...(still ? { force: true } : {}), ...(out.length ? { escaped: out.length } : {}), ...(short ? { short } : {}) } };
 }
 
 async function ended(code, signal) {
   if (exited) return;
   exited = true;
-  if (!stopping) { const s = stopIntent(); if (s) onStop(s.sig, s.at); } // round 7: the stop in flight, whatever ran first
+  // round 7: the stop in flight, whatever ran first. Round 8: the intent is a stop the engine MEANT — its group signal reaches us
+  // too: waited a little; heard ⇒ the engine's (our handler said so); not heard ⇒ nobody delivered it — we do, the grace from now
+  if (!stopping) {
+    const s = stopIntent();
+    if (s) { await new Promise((res) => { heard = res; setTimeout(res, Math.min(500, stopMs / 2)); }); heard = null; } // (a held timer: nothing else keeps us alive now)
+    if (s && !stopping) onStop(s.sig, Date.now(), 'intent');
+  }
   if (ansTimer) clearInterval(ansTimer);
   if (pressureTimer) clearInterval(pressureTimer);
   if (pressureOn) { try { fs.unlinkSync(pressurePath); } catch { } } // the run ended under its own wrapper: the exit record speaks
@@ -671,7 +706,7 @@ async function ended(code, signal) {
     : memory.cause === 'oom' ? ` — killed: out of memory (${memory.how})` : '';
   const end = drained.left ? ` — ${leftWords(drained.left)}` : forced ? ` — stopped by force: ${forced}` : '';
   try { fs.writeSync(logFd, Buffer.from(`\n[job-wrapper] exit code=${code} signal=${signal || ''}${named}${end}\n`)); } catch { }
-  writeExit({ code, signal: signal || null, endedAt: Date.now(), memory, ...(stopping ? { stop: stopping } : {}), ...(forced ? { forced: `stopped by force: ${forced}` } : {}), ...(drained.left ? { left: drained.left } : {}), ...(scoped() ? { scopeEmpty: drained.scopeEmpty } : {}) });
+  writeExit({ code, signal: signal || null, endedAt: Date.now(), memory, ...(stopping ? { stop: stopping, stopBy } : {}), ...(forced ? { forced: `stopped by force: ${forced}` } : {}), ...(drained.left ? { left: drained.left } : {}), ...(scoped() ? { scopeEmpty: drained.scopeEmpty } : {}) });
   process.exit(code === null ? 143 : code);
 }
 launch();

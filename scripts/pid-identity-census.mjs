@@ -117,7 +117,7 @@ export const ROWS = [
   // scope, the processes of the wrapper's OWN process group (pgrp = its pid, read off a fresh /proc scan in the same pass, each
   // with its starttime) — the engine's stop of what a service KEPT goes through src/proc-identity.js (no row of its own)
   ['data/bin/job-wrapper.js', "if (termed.has(termKey(p)) || !same(p)) return; termed.set(termKey(p), Date.now()); try { process.kill(p[0], 'SIGTERM'); } catch { } };", 'starttime', '!same\\(p\\)', 'what the job left — its group\'s at an end or a stop, a stopped service\'s escapees (round 7: termOnce, once each) — every row from a fresh /proc scan, its start re-read on the line'],
-  ['data/bin/job-wrapper.js', "for (const [pid] of still) { try { process.kill(pid, 'SIGKILL'); } catch { } }", 'scan', 'const still = groupLeft\\(\\);', 'the same group re-scanned once its grace is out — by force (the scan the line above)', 2],
+  ['data/bin/job-wrapper.js', "const killNow = (p) => { if (!same(p)) return false; try { process.kill(p[0], 'SIGKILL'); return true; } catch { return false; } };", 'starttime', '!same\\(p\\)', 'what is still there once the stop\'s ONE clock is out (round 8: the group and a stopped service\'s marked processes rescanned until a pass finds none) — by force, each row from a fresh /proc scan, its start re-read on the line'],
 ];
 // the persisted pids — each record and what its signal proves (a record with no starttime cannot be signalled by proof)
 export const RECORDS = [

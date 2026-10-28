@@ -1077,6 +1077,8 @@ class JobManager {
   _wrapperUnproven(stamp) {
     if (!stamp) return 'pid.json unreadable';
     if (!stamp.pid || !stamp.bootId || !Number.isFinite(Number(stamp.starttime))) return 'pid.json incomplete';
+    // round 8: a start of 0 is none (the wrapper's own read of it failed) — proof only that NO process holds its pid now
+    if (!(Number(stamp.starttime) > 0)) return stamp.bootId === bootId() && PI.stateOf(stamp.pid) ? 'pid.json incomplete' : '';
     if (stamp.bootId !== bootId()) return '';
     const a = PI.aliveIdentity(stamp);
     return a === false ? '' : a === true ? 'alive' : '/proc cannot read it';
@@ -1107,6 +1109,14 @@ class JobManager {
     const unproven = this._wrapperUnproven(this._ctlJson(job, run, 'pid.json'));
     if (unproven === 'alive') { if (st.unprovenSaid) this._touch(job, { what: 'its wrapper is running after all (its pid.json read again) — nothing reaped' }); delete run._reap; return true; }
     if (unproven) {
+      // round 8: its scope read EMPTY (or gone) — nothing of the run runs (the job IS its scope: a person's systemctl kill, or it
+      // ended): nothing to reap, and no doubt left for its next start (_runDoubt)
+      const pids = await this._scopeProcs(scope);
+      if (pids && !pids.length) {
+        run._scopeEmpty = true;
+        if (st.unprovenSaid) this._touch(job, { what: `its scope is empty — nothing of its last run runs (its wrapper is still not proven gone: ${unproven})` });
+        delete run._reap; return true;
+      }
       st.last = { why: 'unproven' };
       if (!st.unprovenSaid) {
         st.unprovenSaid = true;
@@ -1215,8 +1225,9 @@ class JobManager {
       const scan = () => {
         if (!st || st.bootId !== PI.bootIdOf()) return [];
         const anchored = recorded.some((id) => PI.aliveIdentity(id) === true);
-        const found = PI.membersOf({ pgid: anchored ? st.pid : 0, since: Number(st.starttime) || 0, mark: `VIBESPACE_JOB_ID=${job.id}` });
-        seen = found.scan || seen; // round 7: what the bounded scan could not read, said
+        // round 8: the job's own candidates first (what the record names, and their children), the bound on the rest
+        const found = PI.membersOf({ pgid: anchored ? st.pid : 0, since: Number(st.starttime) || 0, mark: `VIBESPACE_JOB_ID=${job.id}`, first: recorded.map((id) => id.pid) });
+        if (found.scan) seen = { ...found.scan, cut: !!(found.scan.cut || (seen && seen.cut)) }; // round 7: what it could not read, said
         return found;
       };
       term(recorded); term(scan());
@@ -1228,8 +1239,18 @@ class JobManager {
       n = sent.size;
       if (live.length) { force = true; for (const id of live) PI.signalIdentity(id, 'SIGKILL'); }
     }
-    // round 7: `cleared` only when something was stopped — what had already ended on its own is said so, never «stopped at»
-    const scanned = seen && (seen.cut || seen.unreadable) ? ` (its mark ${seen.cut ? `searched in ${seen.scanned} of ${seen.total} processes — the scan's bound` : `searched in ${seen.scanned} processes`}${seen.unreadable ? `, ${seen.unreadable} unreadable` : ''})` : '';
+    // round 7: `cleared` only when something was stopped — what had already ended on its own is said so, never «stopped at».
+    // Round 8: A CUT SCAN PROVES NOTHING — «none found» in part of /proc is no «none left»: neither `gone` nor `cleared`, the next
+    // start held (_pending) and said once; a later attempt scans again (what this one stopped is counted on). What could not be
+    // read is said by its owner — «of other users» only when there are any
+    run._clearSent = (run._clearSent || 0) + n; n = run._clearSent;
+    if (seen && seen.cut) {
+      const what = `could not check ${seen.total - seen.scanned} of ${seen.total} processes for what its last run left running${n ? ` (${n} found and stopped)` : ''} — not restarted`;
+      if (!run._cutSaid) { run._cutSaid = true; this.d.log(`[jobs] ${job.id} ${what}`); this._touch(job, { what }); }
+      return;
+    }
+    const others = (seen && seen.others) || 0, ours = seen ? Math.max(0, (seen.unreadable || 0) - others) : 0;
+    const scanned = others || ours ? ` (its mark searched in ${seen.scanned} processes; unreadable: ${[others ? `${others} of other users` : '', ours ? `${ours} of ours, not dumpable` : ''].filter(Boolean).join(', ')})` : '';
     this._dirty = true;
     if (!n) {
       l.gone = now();
@@ -1252,9 +1273,9 @@ class JobManager {
   _startAfter(job, trigger, should) {
     if (job._starting) return job._starting;
     const run = job.runs && job.runs[job.runs.length - 1];
-    const go = () => { if (should() && this.jobs.get(job.id) === job && !this._besideLive(job, trigger)) this._spawn(job, trigger); };
+    const go = () => { if (should() && this.jobs.get(job.id) === job && !this._besideLive(job, trigger) && !this._doubtBlocks(job, run, trigger)) this._spawn(job, trigger); };
     if (!this._pending(job, run)) { go(); return Promise.resolve(); }
-    const p = job._starting = this._clearBefore(job, run).then(() => { delete job._starting; try { go(); } catch (e) { this.d.log(`[jobs] ${trigger} start of ${job.id} refused:`, e.message); } });
+    const p = job._starting = this._clearBefore(job, run, trigger).then((clear) => { delete job._starting; if (!clear) return; try { go(); } catch (e) { this.d.log(`[jobs] ${trigger} start of ${job.id} refused:`, e.message); } });
     return p;
   }
   /** round 7: its last run's wrapper STILL RUNS (a boot that could not read its pid.json judged that run ended) — never a run
@@ -1266,10 +1287,57 @@ class JobManager {
     if (job._besideSaid !== stamp.pid) { job._besideSaid = stamp.pid; this.d.log(`[jobs] ${job.id} ${what}`); this._touch(job, { what }); }
     return true;
   }
+  /** round 8: UNKNOWN — the run's wrapper proven neither gone nor alive (its pid.json unreadable or incomplete, /proc cannot read
+   *  it): '' or why. A run that wrote its end (exit.json), whose scope was read empty (nothing of it runs — the job IS its
+   *  scope), or whose doubt a person's stop ended (`doubtOver`) is no doubt; a wrapper proven ALIVE is _besideLive's */
+  _runDoubt(job, run) {
+    if (!run || !run.endedAt || run.doubtOver || run._scopeEmpty) return '';
+    if (this._readExit(job, run)) return '';
+    const why = this._wrapperUnproven(this._ctlJson(job, run, 'pid.json'));
+    return why === 'alive' ? '' : why;
+  }
+  /** round 8: UNKNOWN BLOCKS A SPAWN — the boot's replay, the restart policy, a person's start: never a run beside a run that
+   *  may still run (r7's _besideLive read the same unreadable stamp and answered «not live»: two wrappers, two scopes). Said
+   *  once per run, and ONE For-you notice per run (kept on the run: a later boot files none). A doubt ends only by a look that
+   *  CAN read the stamp (a boot, a start), the run's scope read empty (the person's systemctl kill), or the person's stop */
+  _doubtBlocks(job, run, trigger) {
+    const why = this._runDoubt(job, run);
+    if (!why) return false;
+    const scope = this._runScope(job, run);
+    const ifGone = scope ? `systemctl --user kill --signal=KILL ${scope.unit} (or vibespace-job stop ${job.id})` : `vibespace-job stop ${job.id}`;
+    const what = `cannot prove the previous run is gone (${why}) — not restarted; if it is gone: ${ifGone}, then start it again; if it runs: it keeps running`;
+    if (run._doubtSaid !== why) { run._doubtSaid = why; this.d.log(`[jobs] ${job.id} ${what} (${trigger})`); this._touch(job, { what }); }
+    if (!run.doubtNoticed) {
+      run.doubtNoticed = now(); this._dirty = true;
+      try { this.d.notifyUser({ text: `${job.name}: ${what}`, urgency: 'normal', jobId: job.id, jobName: job.name, ownerCid: job.owner?.conversation?.id || null, i18n: { text: { key: '{name}: cannot prove the previous run is gone ({why}) — not restarted; if it is gone: {ifGone}, then start it again; if it runs: it keeps running', params: { name: job.name, why, ifGone } } } }); } catch { }
+    }
+    return true;
+  }
+  /** round 8: A PERSON'S STOP ENDS A DOUBT — what of the previous run can be named is stopped: its scope (killed), the processes
+   *  carrying the job's mark (its wrapper among them: it then drains its own group) — SIGTERM, the grace, then by force; the
+   *  doubt is over only when the mark's scan finished (a cut one proves nothing), and said */
+  async _stopDoubt(job, run) {
+    const scope = this._runScope(job, run);
+    const killed = scope && scope.dir ? await this._within(this._killScope(scope), this.d.reapReadMs ?? REAP_READ_MS) : null;
+    const found = PI.membersOf({ mark: `VIBESPACE_JOB_ID=${job.id}` }), scan = found.scan || {};
+    for (const id of found) PI.signalIdentity(id, 'SIGTERM');
+    const until = now() + this._graceMs();
+    let live = [...found];
+    while (live.length && now() < until) { await pause(50); live = live.filter((id) => PI.aliveIdentity(id) === true); }
+    for (const id of live) PI.signalIdentity(id, 'SIGKILL');
+    const n = found.length, es = (k) => (k === 1 ? '' : 'es');
+    const did = `${killed === 'killed' ? 'its scope killed, ' : ''}${n} process${es(n)} carrying its mark stopped${live.length ? ` (${live.length} by force)` : ''}`;
+    if (scan.cut) { const what = `stopped by its owner — ${did}; could not check ${scan.total - scan.scanned} of ${scan.total} processes: the previous run is still not proven gone`; this.d.log(`[jobs] ${job.id} ${what}`); this._touch(job, { what }); return; }
+    run.doubtOver = { by: 'stop', at: now() };
+    const what = `stopped by its owner — the previous run was not proven gone: ${did}; it may start again`;
+    this.d.log(`[jobs] ${job.id} ${what}`); this._touch(job, { what });
+  }
   /** what a service's next start waits for (round 6): processes its last run KEPT and not yet stopped; a reap of its scope in
-   *  flight or deferred; a scope its wrapper did not measure empty (no exit.json `scopeEmpty` — a wrapper that died) */
+   *  flight or deferred; a scope its wrapper did not measure empty (no exit.json `scopeEmpty` — a wrapper that died); round 8:
+   *  a run that may still run (_runDoubt) */
   _pending(job, run) {
     if (!run || !run.endedAt) return false;
+    if (this._runDoubt(job, run)) return true;
     if (run.left && run.left.kept && !run.left.cleared && !run.left.gone) return true;
     if (!this._runScope(job, run)) return false; // no scope: nothing of it to reap (a pod's rung starts at once)
     if (this._reapLater.has(run) || (this._reaping && this._reaping.has(run))) return true;
@@ -1277,16 +1345,24 @@ class JobManager {
     const exit = this._readExit(job, run);
     return !(exit && exit.scopeEmpty === true);
   }
-  async _clearBefore(job, run) {
-    await this._clearKept(job, run);
+  /** true: the start may go; false: it may not (round 8 — a run that may still run, what it kept not proven ended), said */
+  async _clearBefore(job, run, trigger) {
     const until = now() + this._graceMs();
-    while (!(await this._reapScope(job, run))) { // round 6: a reap that does not finish here stays enqueued — a later tick reaps it
+    for (;;) {
+      await this._clearKept(job, run);
+      const l = run.left, kept = !!(l && l.kept && !l.cleared && !l.gone); // round 8: a cut scan holds it (said by the clear)
+      const reaped = await this._reapScope(job, run); // round 6: a reap that does not finish here stays enqueued — a later tick reaps it
+      if (!kept && reaped && !this._runDoubt(job, run)) return true;
       if (now() >= until) {
-        const what = `its last run's scope did not answer in ${this._graceMs() / 1000} s — its next run starts anyway (the reap is retried)`;
+        if (this._doubtBlocks(job, run, trigger)) return false; // round 8: never «did not answer» for a scope that answered
+        if (kept) return false;
+        const last = (run._reap && run._reap.last) || { why: 'unread' }; // round 8: the cause the last attempt met, worded
+        const why = last.why === 'refused' ? `its scope's kill was refused (${last.code})` : last.why === 'survived' ? `${last.n} process${last.n === 1 ? '' : 'es'} survived its scope's kill` : `its last run's scope did not answer a read`;
+        const what = `${why} in ${this._graceMs() / 1000} s — its next run starts anyway (the reap is retried)`;
         this.d.log(`[jobs] ${job.id} ${what}`); this._touch(job, { what });
-        return;
+        return true;
       }
-      await pause(50);
+      await pause(Math.min(50, Math.max(1, until - now()))); // never past its grace
     }
   }
 
@@ -2066,6 +2142,7 @@ class JobManager {
     if ((hadProc || scope) && !force && this._runLive(job, run)) this._armKillStep(job, run, scope);
     // round 5 (the ruling): a service whose last run ENDED keeping what it left — its stop stops them, said
     if (run && run.endedAt) this._clearKept(job, run).catch(() => { });
+    if (run && run.endedAt && this._runDoubt(job, run)) this._stopDoubt(job, run).catch(() => { }); // round 8: the person's word ends a doubt
     if (!hadProc && job.kind === 'cron') { job.state = 'down'; }
     this._touch(job);
     this._save();
@@ -2090,9 +2167,10 @@ class JobManager {
       const vet = M.vetSpec(job);
       if (!vet.ok) { this._refuseRun(job, vet, 'manual'); return { error: vet.error }; }
       if (this._besideLive(job, 'manual')) return { error: `${job.id}'s last run is still running — stop it first` }; // round 7
+      const last = job.runs && job.runs[job.runs.length - 1], doubt = this._runDoubt(job, last); // round 8: checked first, never beside it
       try { this._startAfter(job, 'manual', () => job.desiredUp && !['up', 'starting'].includes(job.state)); } catch (e) { return { error: e.message }; }
       this._save();
-      return ['up', 'starting'].includes(job.state) ? { ok: true } : { ok: true, after: 'what its last run left running is stopped first' };
+      return ['up', 'starting'].includes(job.state) ? { ok: true } : { ok: true, after: doubt ? `its previous run cannot be proven gone (${doubt}) — it starts only once it is (its events say)` : 'what its last run left running is stopped first' };
     }
     try { this._spawn(job, 'manual'); } catch (e) { return { error: e.message }; } // B-f8c7: the run-time vet's refusal is an answer
     this._save();
@@ -2217,7 +2295,7 @@ class JobManager {
       ...(() => { const m = M.memoryMbOf(job.kind === 'cron' && job.action && job.action.task ? job.action.task : job, this._memoryCtx()); return { memoryMb: m.mb, memoryAskedMb: m.askedMb !== undefined ? m.askedMb : m.mb, memorySource: m.source, memoryCap: m.cap || null }; })(), // round 4: the NEXT run's (a live run's own rides its memoryBound.cap)
       memoryBound: run && run.memoryBound ? { ...run.memoryBound, words: M.boundWords(run.memoryBound) } : null, oomEnds: (job.supervise && job.supervise.oomEnds) || 0, // round 5: the record's words (an unbounded scope is never «0 MB»)
       parkedFor: (job.supervise && job.supervise.parkedAt && job.supervise.parkedFor) || null,
-      run: run ? { startedAt: run.startedAt, endedAt: run.endedAt || null, exit: run.exit ?? null, cause: run.cause || null, trigger: run.trigger, lastLine: run.lastLine || '', ...(run.left ? { left: { n: run.left.n, kept: !!run.left.kept, force: !!run.left.force, cleared: run.left.cleared || 0, gone: run.left.gone || 0, escaped: run.left.escaped || 0 } } : {}), ...(M.runEndWords(run) ? { endWords: M.runEndWords(run) } : {}) } : null, // round 5: what it left running / the kill we made
+      run: run ? { startedAt: run.startedAt, endedAt: run.endedAt || null, exit: run.exit ?? null, cause: run.cause || null, trigger: run.trigger, lastLine: run.lastLine || '', ...(run.left ? { left: { n: run.left.n, kept: !!run.left.kept, force: !!run.left.force, cleared: run.left.cleared || 0, gone: run.left.gone || 0, escaped: run.left.escaped || 0, short: run.left.short || 0 } } : {}), ...(M.runEndWords(run) ? { endWords: M.runEndWords(run) } : {}) } : null, // round 5: what it left running / the kill we made
       runsCount: (job.runs || []).length,
       // triage (§13): the server computes the acknowledgement over the FULL
       // record (the journal above is truncated to 8) — clients read, never derive

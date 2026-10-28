@@ -249,14 +249,15 @@ export function runLeftWords(run, t) {
   const l = run && run.left;
   if (!l || !(l.n > 0 || l.escaped > 0)) return '';
   const hhmm = (ms) => { const d = new Date(ms); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
-  if (l.cleared) return t('left {n} running — stopped at {time}', { n: l.n, time: hhmm(l.cleared) });
+  const sh = l.short > 0 ? ` · ${t('{n} got less than the full grace', { n: l.short })}` : ''; // round 8: first seen after the stop
+  if (l.cleared) return t('left {n} running — stopped at {time}', { n: l.n, time: hhmm(l.cleared) }) + sh;
   if (l.gone) return t('left {n} running — had already ended by {time}', { n: l.n, time: hhmm(l.gone) }); // round 7: nothing was stopped
   if (l.kept) return t('left {n} running — kept: the service’s until it stops or starts again', { n: l.n });
   const esc = l.escaped > 0 ? t('{n} left its group — not stopped; run it as a service job', { n: l.escaped }) : '';
   if (!(l.n > 0)) return esc;
   // round 7: the advice once — beside what left its group, the stopped ones are said plain
-  if (esc) return `${l.force ? t('left {n} running — stopped by force', { n: l.n }) : t('left {n} running — stopped', { n: l.n })} · ${esc}`;
-  return l.force ? t('left {n} running — stopped by force; to keep a daemon, run it as a service job', { n: l.n }) : t('left {n} running — stopped; to keep a daemon, run it as a service job', { n: l.n });
+  if (esc) return `${l.force ? t('left {n} running — stopped by force', { n: l.n }) : t('left {n} running — stopped', { n: l.n })}${sh} · ${esc}`;
+  return (l.force ? t('left {n} running — stopped by force; to keep a daemon, run it as a service job', { n: l.n }) : t('left {n} running — stopped; to keep a daemon, run it as a service job', { n: l.n })) + sh;
 }
 /** the NAMED end the card says beside the state — the park first (it is why the job no longer runs) */
 export function memoryEndWords(j, t) {

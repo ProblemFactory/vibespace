@@ -15,6 +15,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A job's properties keep the memory limit you set and show the one in force beside it.
 - A finished background task's leftover processes are stopped and its card says so; on a cluster, one that detaches itself is only named. A stopped job gets 10 s.
 - A background service's leftover processes keep running until it stops or starts again, including the restart after a VibeSpace update.
+- If VibeSpace can't prove a service's last run has ended, it won't start a second copy beside it; For you says how to check, and stopping it ends the wait.
 
 ## 2.369.360 — 2026-10-27
 
