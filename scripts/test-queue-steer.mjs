@@ -1199,7 +1199,8 @@ console.log('— wiring + docs pins');
     ok('the claude chat-wrapper serves queue-op AND queue-resync, never forwarding either to the CLI', /if \(parsed\.type === 'queue-op'\) \{ handleQueueOp\(parsed\); continue; \}/.test(clw) && /if \(parsed\.type === 'queue-resync'\) \{ publishQueue\(\); continue; \}/.test(clw));
     // (acceptance r2, lane claude-steer-inject: the advert STARTS as the .354 three and gains the steer pair at the CLI's
     // first state word — proveState writes the sidecar at once; a CLI that says none never advertises the hand-over)
-    ok('…and adverts inputQueue + its verb list + queueResync in the sidecar it writes', /caps: \{ frameFile: true, inputQueue: true, queueVerbs: CLAUDE_HOLD_VERBS, queueResync: true \}/.test(clw) && /const CLAUDE_QUEUE_VERBS = \['remove', 'steer', 'steer-all', 'reorder', 'edit'\];/.test(clw) && /const CLAUDE_HOLD_VERBS = \['remove', 'reorder', 'edit'\];/.test(clw) && /function proveState\(\) \{\n\s+stateProven = true;\n\s+meta\.caps\.queueVerbs = CLAUDE_QUEUE_VERBS;/.test(clw));
+    // int361 (主开发's seam, claude-steer × human-cli): the caps carry human-cli r2's `receipts: true` beside the hold verbs
+    ok('…and adverts inputQueue + its verb list + queueResync (+ human-cli\'s receipts) in the sidecar it writes', /caps: \{ frameFile: true, inputQueue: true, queueVerbs: CLAUDE_HOLD_VERBS, queueResync: true, receipts: true \}/.test(clw) && /const CLAUDE_QUEUE_VERBS = \['remove', 'steer', 'steer-all', 'reorder', 'edit'\];/.test(clw) && /const CLAUDE_HOLD_VERBS = \['remove', 'reorder', 'edit'\];/.test(clw) && /function proveState\(\) \{\n\s+stateProven = true;\n\s+meta\.caps\.queueVerbs = CLAUDE_QUEUE_VERBS;/.test(clw));
   }
   ok('the ACP unknown-verb message lists queue-op (the wrapper tells the truth about what it serves)', /chat-input\/interrupt\/queue-op\//.test(aw));
   // DISTINCT phrases per file (a loose grep matched 'queue-operation' in an
