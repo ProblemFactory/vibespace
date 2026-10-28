@@ -1122,6 +1122,17 @@ function pressCensus(override = {}) {
     if (!h || (h.type !== 'CallExpression' && h.type !== 'NewExpression')) kept.push(`${p.f}:${srcOf[p.f].slice(0, p.n.start).split('\n').length} kept in a ${h ? h.type : 'module'}`);
   }
   for (const a of assigns) if (pressFile.has(a.f) || walked.has(a.f)) kept.push(`${a.f}:${srcOf[a.f].slice(0, a.n.start).split('\n').length} .pressed = …`);
+  // (2c) r4 — A PRESS IS NEVER REPLAYED (accept-r3 claim 0, gap 2: a timer the callee arms INSIDE the door's chain,
+  // re-posting the same press an hour later, stayed attended — the chain carries a press with no limit on time). A press
+  // handed on inside a timer's call — setTimeout / setInterval / setImmediate / an injected `schedule`, by an arrow or a
+  // .bind — is a REPLAY the code chose, never the person's act: red by name, over the same press universe. (An await, a
+  // .then, a listener stay the act: a serial wake behind a slow member is the one act finishing late.)
+  const TIMER_RE = /^(setTimeout|setInterval|setImmediate|schedule)$/;
+  const timerOf = (parents) => { for (let i = parents.length - 1; i >= 0; i--) { const n = parents[i]; if ((n.type === 'CallExpression' || n.type === 'NewExpression') && TIMER_RE.test(calleeName(n) || '')) return calleeName(n); } return null; };
+  const replayed = [];
+  const lineOf = (f, n) => srcOf[f].slice(0, n.start).split('\n').length;
+  for (const p of props) if ((pressFile.has(p.f) || walked.has(p.f)) && ['pass', 'mint'].includes(pressKind(p.n.value))) { const t = timerOf(p.parents); if (t) replayed.push(`${p.f}:${lineOf(p.f, p.n)} a press handed on inside ${t}(…)`); }
+  for (const fn of funcs.filter((x) => x.pp && x.pp.mode === 'positional' && x.name)) for (const c of calls.filter((x) => x.name === fn.name && (x.member || x.f === fn.f) && (pressFile.has(x.f) || walked.has(x.f)))) { const a = c.n.arguments[fn.pp.i]; const t = a && ['pass', 'mint'].includes(pressKind(a)) ? timerOf(c.parents) : null; if (t) replayed.push(`${c.f}:${lineOf(c.f, c.n)} ${fn.name}(…) hands a press on inside ${t}(…)`); }
   // (4) every door refuses every bearer before it mints
   const doorVerdicts = [];
   for (const [k, d] of doors) {
@@ -1154,7 +1165,7 @@ function pressCensus(override = {}) {
   }
   const reachedDoors = new Set(Object.values(walks).flatMap((x) => [...x]));
   const strayMints = mints.map((m) => noteDoor(m.f, m.parents, m.n)).filter((k) => !reachedDoors.has(k));
-  return { files, sites, fenced, taint, kept, doors: doorVerdicts, walks, holes: [...new Set(holes)], strayMints: [...new Set(strayMints)], carriers: carriers.length, bad };
+  return { files, sites, fenced, taint, kept, replayed, doors: doorVerdicts, walks, holes: [...new Set(holes)], strayMints: [...new Set(strayMints)], carriers: carriers.length, bad };
 }
 {
   const attended = ATT;
@@ -1179,6 +1190,7 @@ function pressCensus(override = {}) {
   ok('§2b every attended site is SELECTED on the press — its attended branch unreachable without isPress(pressed)', PC.fenced.length > 0 && PC.fenced.every((s) => s.how), JSON.stringify(PC.fenced.filter((s) => !s.how).map((s) => `${s.reason}@${s.f}:${s.line}`)));
   ok('§2b TAINT: every `pressed` anywhere is minted by a door (pressOf) or handed on — never built from a body, a record or a literal', PC.taint.length === 0, PC.taint.join(' | '));
   ok('§2b r3 THE PRESS IS NEVER KEPT: every press rides a call\'s argument down ONE request\'s chain — no record, viewer or table holds one, no `.pressed =`', PC.kept.length === 0, PC.kept.join(' | '));
+  ok('§2b r4 A PRESS IS NEVER REPLAYED: no press is handed on inside a timer (setTimeout / setInterval / setImmediate / schedule) — a replay later is never the person\'s act', PC.replayed.length === 0, PC.replayed.join(' | '));
   ok('§2b THE WALK: every attended site reaches its doors along the press hops, with no unreadable hop', PC.holes.length === 0 && Object.values(PC.walks).every((x) => x.size > 0), PC.holes.join(' | '));
   ok('§2b THE FENCE: every DERIVED door refuses EVERY bearer before it mints the press (' + PC.doors.length + ' doors)', PC.doors.length >= 14 && PC.doors.every((d) => d.ok), JSON.stringify(PC.doors.filter((d) => !d.ok)));
   ok('§2b every press a door mints reaches an attended site (no decorative press)', PC.strayMints.length === 0, PC.strayMints.join(' | '));
@@ -1245,6 +1257,12 @@ function pressCensus(override = {}) {
   const m8 = pressCensus({ 'src/server/browser-stream.js': bsR2 });
   ok('§2b r3 CONTROL: e03ad393\'s live view (the HANDSHAKE\'s press kept on `viewer.pressed`, handed to every later Hand back) reads KEPT — and its door is no longer a per-message mint',
     bsR2 !== bs && (bsR2.match(/viewer\.pressed\)/g) || []).length === 1 && m8.kept.some((k) => /browser-stream\.js/.test(k)) && m8.doors.some((d) => /browser-stream/.test(d.f) && !d.ok), JSON.stringify({ kept: m8.kept, doors: m8.doors.filter((d) => /browser-stream/.test(d.f)) }));
+  // r4 CONTROL (accept-r3 claim 0, gap 2 — the acceptor's plant P7): the group door's press re-posted an hour later from a
+  // timer armed IN the request's chain, and the same press bound into a setImmediate — each red BY NAME
+  const p7 = ch.replace("    switch (req.params.verb) {\n      case 'post':", "    if (req.params.verb === 'post' && press) setTimeout(() => ge.post({ group, from: OWNER, pressed: press, text: String(b.text || ''), consent: ownerConsent(b) }), 3600e3);\n    if (req.params.verb === 'post' && press) setImmediate(ge.post.bind(ge, { group, from: OWNER, pressed: press, text: 'again', consent: ownerConsent(b) }));\n    switch (req.params.verb) {\n      case 'post':");
+  const m9 = pressCensus({ 'src/routes/channels.js': p7 });
+  ok('§2b r4 CONTROL: a press re-posted from a timer armed in the door\'s own chain (the acceptor\'s P7, an hour later) and one bound into a setImmediate each read REPLAYED, by name',
+    p7 !== ch && m9.replayed.length - PC.replayed.length === 2 && m9.replayed.some((x) => /channels\.js:\d+ .*setTimeout/.test(x)) && m9.replayed.some((x) => /channels\.js:\d+ .*setImmediate/.test(x)), JSON.stringify(m9.replayed));
   // THE ACCEPTED BLIND SPOT, NAMED (accept-r2 claim 1 (c)): a COMPUTED name — `WO['press' + 'Of']`, `o['press' + 'ed']` —
   // is no identifier the AST walk can follow; the grep beside it reads every server file for that spelling. (The brief's
   // `press\s*\+|\[['"]press` also matches four innocent lines — «Impress + the», `['press-allow'`, «press+release»,
@@ -1256,7 +1274,7 @@ function pressCensus(override = {}) {
   const named = Object.entries(planted).filter(([, src]) => COMPUTED_PRESS_RE.test(src)).map(([f]) => f);
   ok('§2b r3 CONTROL: the grep is red BY NAME for each computed spelling (' + named.join(', ') + ') and silent on the four innocent lines',
     named.length === 3 && !['LibreOffice Writer / Calc / Impress + the Start Center', "Object.freeze(['press-allow', 'press-deny'])", 'emits `button-action` press+release pairs', "Object.freeze(['press', 'granted'])"].some((x) => COMPUTED_PRESS_RE.test(x)));
-  console.log(`    the census's cost: ${ms} ms over the tree, ${Date.now() - t1} ms for 9 patched copies (one file re-read each)`);
+  console.log(`    the census's cost: ${ms} ms over the tree, ${Date.now() - t1} ms for 10 patched copies (one file re-read each)`);
   const emptyWalks = Object.entries(PC.walks).filter(([, x]) => x.size === 0).map(([k]) => k);
   if (emptyWalks.length) console.log('    walks that reached no door: ' + emptyWalks.join(', '));
   // THE PURE LAW over the measured ledger: 30 stamps this hour (peer-message), the default cap 30
@@ -3251,6 +3269,30 @@ console.log('\n§10r the For-you spend notice, rendered in en / zh / ja: every f
     const nw = SSm.handOverRefusalWords({ code: 'spend_refused' }, T.en, { now });
     ok('§10r r3 a hand-over refused with NO why is not a cap — the toast says the check refused without saying why, never «the limit … is reached», and names no Spending door',
       !/limit/.test(nw.text) && /without saying why/.test(nw.text) && nw.door === null, JSON.stringify(nw));
+    // (f) r4 (accept-r3 confirmed 0): THE AUTHORIZER THROWS — the REAL hand-over door over the REAL ladder whose authorizer
+    // throws: the 429 body's `error` is SAID in the toast (quoted, en / zh / ja), and the log lines the toast names are the
+    // ones WRITTEN («[deliver] spend authorizer threw …», «[stash] hand-over refused … spend_refused …»); no «[spend]» line
+    {
+      const express = require(path.join(REPO, 'node_modules/express'));
+      const http = require('node:http');
+      const logs = [], logFn = (...a) => logs.push(a.map(String).join(' '));
+      const ladder = require(path.join(REPO, 'src/server/conversation-deliver.js')).create({ dataDir: tmpdir('vs-spr4-'), peerMsg: {}, getHosts: () => [], getConvIndex: () => null, serverSetting: () => undefined, activeSessions: new Map(), emitPeerCard: () => { }, authorizeSpend: () => { throw new Error('settings store unreadable'); }, noteSpend: () => { }, releaseSpend: () => { }, log: logFn });
+      const entry = { from: 'peer', text: 'a waiting note' };
+      const d = { deliverToConversation: (...a) => ladder.deliverToConversation(...a), stashEntries: () => [entry] };
+      const app = express(); app.use(express.json());
+      require(path.join(REPO, 'src/server/stash-handover.js')).create({ activeSessions: new Map([['s1', { backendSessionId: 'cid-r4' }]]), getDeliver: () => d, renderMsgStash: () => ({ text: 'a waiting note', shown: [entry], rest: [] }), renderNotifStash: () => '', log: { log: logFn, warn() { } } }).register(app);
+      const srv = await new Promise((res) => { const s = app.listen(0, '127.0.0.1', () => res(s)); });
+      const body = await new Promise((res) => { const rq = http.request({ host: '127.0.0.1', port: srv.address().port, path: '/api/sessions/s1/stash/hand-over', method: 'POST', headers: { 'content-type': 'application/json', 'sec-fetch-site': 'same-origin' } }, (rs) => { let b = ''; rs.on('data', (c) => { b += c; }); rs.on('end', () => { let j = null; try { j = JSON.parse(b); } catch { } res({ status: rs.statusCode, ...(j || {}) }); }); }); rq.end('{}'); });
+      await new Promise((r) => srv.close(r));
+      const said = { en: SSm.handOverRefusalWords(body, T.en, { now }).text, zh: SSm.handOverRefusalWords(body, T.zh, { now }).text, ja: SSm.handOverRefusalWords(body, T.ja, { now }).text };
+      ok('§10r r4 THE AUTHORIZER THROWS at the real door: 429 spend_refused with no why — the toast SAYS the reply\'s error, quoted (en / zh / ja), names [stash] and [deliver], never [spend]',
+        body.status === 429 && body.code === 'spend_refused' && body.why === null && body.error === 'spend authorizer failed: settings store unreadable'
+          && said.en.includes('“' + body.error + '”') && ['zh', 'ja'].every((l) => said[l].includes(body.error) && !/MISSING/.test(said[l])) && Object.values(said).every((x) => /\[stash\]/.test(x) && /\[deliver\]/.test(x) && !/\[spend\]/.test(x)),
+        JSON.stringify({ body, said }));
+      ok('§10r r4 …and every log line the toast names IS written: «[deliver] spend authorizer threw …» and «[stash] hand-over refused for conversation cid-r4 — spend_refused: spend authorizer failed: …»; no «[spend]» line exists for a throw',
+        logs.some((l) => /^\[deliver\] spend authorizer threw .*settings store unreadable/.test(l)) && logs.some((l) => /^\[stash\] hand-over refused for conversation cid-r4 — spend_refused: spend authorizer failed: settings store unreadable/.test(l)) && !logs.some((l) => /^\[spend\]/.test(l)),
+        JSON.stringify(logs));
+    }
   }
 }
 

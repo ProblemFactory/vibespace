@@ -251,9 +251,10 @@ function clockAt(at, { now = Date.now(), locale = undefined, timeZone = undefine
 /** PURE. A REFUSED HAND-OVER IN WORDS, WITH ITS DOOR (lane owner-press-attended — the strip's toast said only «the spending
  *  ceiling…»: no account, no cap, no time, no door, and he pressed five times). Reads the route's 429 body (`identity`,
  *  `cap`, `retryAfter`, `why`) → `{text, door}`; `door: 'spending'` = a setting decides it (Settings → Spending), `'usage'`
- *  = the account's sign-in does (the Usage window). A body
- *  without the facts (an older hub) keeps the old sentence. The press itself is ATTENDED since this lane, so a cap refusal
- *  reaches here only from an older hub; overage, a signed-out account and the other codes still do. */
+ *  = the account's sign-in does (the Usage window). A cap `why` without its facts (an older hub) keeps the old cap
+ *  sentence; a body with NO `why` (the authorizer itself failed) says the reply's `error` and the log lines written for it
+ *  (r4). The press itself is ATTENDED since this lane, so a cap refusal reaches here only from an older hub; overage, a
+ *  signed-out account and the other codes still do. */
 function handOverRefusalWords(r, t, { now = Date.now(), locale = undefined, timeZone = undefined } = {}) {
   const code = r && r.code;
   if (code === 'spend_refused') {
@@ -281,8 +282,14 @@ function handOverRefusalWords(r, t, { now = Date.now(), locale = undefined, time
     if (why === 'identity-unknown') return { text: t('Not handed over — VibeSpace could not tell which account this turn would bill. The notices keep waiting.'), door: 'usage' };
     if (why) return { text: t('Not handed over — the spend ceiling refused this turn ({why}). The notices keep waiting.', { why: String(why).slice(0, 60) }), door: null };
     // r3 (accept-r2 claim 0): a refusal with NO `why` is not a cap — the current hub sends one when the authorizer itself
-    // threw (conversation-deliver fails closed with refused:'spend' and no why); never «the limit is reached» for it
-    return { text: t('Not handed over — the spend check refused this turn without saying why (it fails closed when it cannot decide). The notices keep waiting; the hub log’s [spend] lines name the reason.'), door: null };
+    // threw (conversation-deliver fails closed with refused:'spend' and no why); never «the limit is reached» for it.
+    // r4 (accept-r3 confirmed 0): A TOAST NAMES WHAT IT HAS — the reply's `error` (what failed) is SAID, quoted and clipped
+    // (a t() param; the toast is textContent, never HTML), and the log pointer names the lines that ARE written for it
+    // (conversation-deliver's «[deliver] spend authorizer threw …», stash-handover's «[stash] hand-over refused …»); never
+    // «[spend]» — spend-guard writes that only for a refusal it DECIDED. A body with no `error` points at no line at all.
+    const reason = String((r && r.error) || '').replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, 200);
+    if (reason) return { text: t('Not handed over — the spend check failed and refused this turn: “{reason}” (it fails closed when it cannot decide). The notices keep waiting; the hub log’s [stash] and [deliver] lines record it.', { reason }), door: null };
+    return { text: t('Not handed over — the spend check refused this turn without saying why (it fails closed when it cannot decide). The notices keep waiting.'), door: null };
   }
   if (code === 'unreachable') return { text: t('Not handed over — the agent could not be reached; the notices keep waiting for its next turn'), door: null };
   if (code === 'in_flight') return { text: t('A hand-over for this agent is already in progress'), door: null };

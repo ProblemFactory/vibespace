@@ -1,5 +1,8 @@
 /**
- * THE SAME-ORIGIN RULE FOR COOKIE WRITES (lane owner-write-origin, B-6b2b — rel249 verify #7) — PURE, imports nothing.
+ * THE SAME-ORIGIN RULE FOR COOKIE WRITES (lane owner-write-origin, B-6b2b — rel249 verify #7) + THE PRESS SCOPE (lane
+ * owner-press-attended r3) — the ONE verdict + the press scope; imports node:async_hooks; stateful per request (the
+ * `PRESS_SCOPE` AsyncLocalStorage, the `MINTED` WeakSet, a sequence; `pressOf` enters the press into the caller's chain —
+ * call it ONCE per request, at the door: a second mint in one chain replaces the first).
  *
  * The owner's browser holds the instance's authority in a cookie (or, on a local instance with no sign-in, in its
  * network position). A page on ANOTHER site can make that browser send a write — a form POST, a no-cors fetch, a

@@ -1,6 +1,6 @@
 /**
- * user-todos-layout.js — PURE (imports nothing, DOM-free): the "For you"
- * popup's row ORDER while it is open.
+ * user-todos-layout.js — PURE (DOM-free; imports only PURE modules — inbox-reply, attention-model, inbox-origin,
+ * stash-summary, spend-authorizer): the "For you" popup's row ORDER while it is open.
  *
  * inc-mtw02kbq-kj96 (owner, 2026-09-10): "inbox里点击对勾后改变了这个对话的
  * 消息数量会导致位置变化，当我想连续点击时造成误点". Every ✓ triggers a

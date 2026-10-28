@@ -455,11 +455,12 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
   // R4 (lane owner-press-attended — userW's five presses left three journal lines, and a refusal that was not the spend
   // ceiling left none): a PRESS the hand-over refused for any other reason is said ONCE per (conversation, code) per
   // 5 min in the journal — with how many the window swallowed — and counted in telemetry every time, like the spend one
-  // (that one is spend-guard's: `[spend] refused …`, event `spend-refused`)
+  // (that one is spend-guard's: `[spend] refused …`, event `spend-refused`). r4 (accept-r3 confirmed 0): a spend refusal
+  // with NO `why` is the authorizer's own failure — spend-guard wrote no line for it, so this one does (the toast names it)
   const REFUSAL_LOG_MS = 5 * 60 * 1000;
   const refusalSpoke = new Map();   // `${cid}|${code}` -> {at, more}
   function noteRefusal(webuiId, r) {
-    if (!r || r.ok || r.code === 'spend_refused') return;
+    if (!r || r.ok || (r.code === 'spend_refused' && r.why)) return;
     try { global.__vsEvent?.('stash-handover-refused', String(r.code || 'failed')); } catch { }
     const s = activeSessions && activeSessions.get(String(webuiId));
     const conv = cidOf(s) || String(webuiId);

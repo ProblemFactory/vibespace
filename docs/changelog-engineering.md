@@ -29,6 +29,13 @@ This file is the engineers' record of every release: the lanes, the verification
 - **Minors:** the notice adds the in-flight line, the overage evidence instant (`overageSeenAt`), identity-unknown's instance count; the why-less toast no longer claims a limit; a keyless clause says NEXT_WORDS (renderer `CLAUSE_DEFAULTS`); «And N more» carries `more` and both Copy buttons say the record (`recordOf` / `itemRecordLinesOf`; the store keeps `more`, ≤ 24); lark-refresh-stall's nested WORDS params carried (saidLine + the store's `nestedParams`, byte-identical lines) with the leg in test-user-todos-layout. test-stash-strip's stated 6.5 s vs measured ~16 s is pre-existing drift (the base too) — the coordinator's backlog line, not restated here.
 - Gates: see the lane report (repro/r3: every RED control on e03ad393 vs r3).
 
+### owner-press-attended r4 — acceptance round 4 (the r3 delta verdict: 3 MINORS + the two leftover gaps; on top of 40ec6038, no squash)
+- **A toast names what it has:** the hand-over refused with no `why` (the spend authorizer itself threw) said «the hub log's [spend] lines name the reason» — no [spend] line is written for a throw, and the 429's `error` was dropped. The toast now SAYS the `error` (quoted, control characters out, ≤ 200 chars; the toast is textContent) and points at «[stash] and [deliver]»: conversation-deliver writes «[deliver] spend authorizer threw …», and stash-handover's `noteRefusal` now journals a why-less `spend_refused` (spend-guard wrote nothing for it). A body with no `error` points at no line.
+- **The Approve bullet says what shipped:** no released version told the agent at a full cap (2.369.360 refused it), so the English bullet loses «again» (zh / ja never had it).
+- **A header says what its module is:** src/write-origin.js is «the ONE verdict + the press scope; imports node:async_hooks; stateful per request» (header, kb INDEX + essay; test-architecture keeps it SHARED — it was never PURE in the suite); src/lib/user-todos-layout.js's «imports nothing» over five imports is corrected; test-architecture 4b reds a header that says «imports nothing» over a require / import.
+- **The two leftover gaps:** a press handed on inside a timer (setTimeout / setInterval / setImmediate / `schedule`) is red BY NAME in test-spend-paths §2b (REPLAYED; the acceptor's P7 hour-later replay passed 427/427 on 40ec6038); Node 22's keep-alive store leak needs a KEPT press, which TAINT / THE WALK already refuse by name — written in the kb essay.
+- Gates: see the lane report (repro/r4: every RED control on 40ec6038 vs r4).
+
 ## 2.369.360 — 2026-10-27
 
 ### ci358-reds (items 7 + 8 and round 2 — c083607d → 5bdb59fb; the .358 mirror's two fast-tier races)

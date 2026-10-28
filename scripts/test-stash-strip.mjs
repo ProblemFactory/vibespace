@@ -394,8 +394,15 @@ globalThis.document = { createElement: (t) => new El(t) };   // what the strip b
     const pre = S.handOverRefusalWords({ code: 'spend_refused' }, tEn, { now });
     // r3 (accept-r2 claim 0): a body with NO why is not a cap (the hub sends one when the authorizer itself threw) — it
     // says the check refused without saying why, never the pre-fix «the limit … is reached», and names no Spending door
-    ok(pre.text === 'Not handed over — the spend check refused this turn without saying why (it fails closed when it cannot decide). The notices keep waiting; the hub log’s [spend] lines name the reason.' && pre.door === null && !/acct-1|30|01:21|limit/.test(pre.text),
-      'R2 CONTROL: a fact-less body (no why — the authorizer threw) names no account, no cap, no time — r3: and no limit «reached», no Spending door', pre.text);
+    ok(pre.text === 'Not handed over — the spend check refused this turn without saying why (it fails closed when it cannot decide). The notices keep waiting.' && pre.door === null && !/acct-1|30|01:21|limit|\[/.test(pre.text),
+      'R2 CONTROL: a fact-less body (no why — the authorizer threw) names no account, no cap, no time — r3: and no limit «reached», no Spending door — r4: with no `error` either, it points at no log line', pre.text);
+    // r4 (accept-r3 confirmed 0): the body the current hub sends when the authorizer THREW (no why, its `error` says what
+    // failed) — the toast SAYS that error, quoted, and names the log lines written for it ([stash] / [deliver]), never [spend]
+    const threw = S.handOverRefusalWords({ ok: false, code: 'spend_refused', id: 'h1', error: 'spend authorizer failed: settings store unreadable', why: null, retryAfter: 0, identity: null, cap: null }, tEn, { now });
+    ok(threw.text === 'Not handed over — the spend check failed and refused this turn: “spend authorizer failed: settings store unreadable” (it fails closed when it cannot decide). The notices keep waiting; the hub log’s [stash] and [deliver] lines record it.' && threw.door === null && !/\[spend\]/.test(threw.text),
+      'r4 the authorizer threw: the reply\'s `error` is SAID (quoted) and the pointer names the [stash] / [deliver] lines written for it — never a [spend] line nobody writes', threw.text);
+    const ctl = S.handOverRefusalWords({ code: 'spend_refused', error: 'x\u0007\n'.repeat(3) + 'y'.repeat(400) }, tEn, { now });
+    ok(!/[\u0000-\u001f]/.test(ctl.text) && /“x x x y{190,200}”/.test(ctl.text), 'r4 …the reason is belted: control characters become spaces, 200 characters at most', ctl.text);
     const day = S.handOverRefusalWords({ ...body, why: 'day-cap', cap: 200, retryAfter: Date.parse('2026-10-29T07:00:00Z') }, tEn, { now, locale: 'en-US', timeZone: 'America/Los_Angeles' });
     const inst = S.handOverRefusalWords({ ...body, why: 'instance-cap', cap: 800, identity: null }, tEn, { now, locale: 'en-US', timeZone: 'America/Los_Angeles' });
     const over = S.handOverRefusalWords({ ...body, why: 'overage-in-use', cap: null, retryAfter: 0 }, tEn, { now });
