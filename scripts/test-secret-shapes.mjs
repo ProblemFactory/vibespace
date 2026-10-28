@@ -101,7 +101,7 @@ console.log('§3 THE BELT’S MASKABLE-ENTRY ENUMERATION — host: / file: are n
   const S = r('src/secret-shapes.js');
   // round 21 (B-5a9a): the generic R2 bare value stops at `,` `}` `]` `)` (and the line end) so a one-line JSON / a trailing flag is never SWALLOWED whole
   const j = S.redactSecrets('{"use_auth":false,"token":"abc123def456ghi","ok":true,"n":5}').text;
-  ok(j === '{"use_auth":«redacted»,"token":"«redacted»","ok":true,"n":5}', 'R2 keeps a one-line JSON WHOLE: a bare value (use_auth:false) stops at the `,`, the quoted token is redacted, and the following keys + the closing `}` survive (B-5a9a: the swallow is gone)', j);
+  ok(j === '{"use_auth":false,"token":"«redacted»","ok":true,"n":5}', 'R2 keeps a one-line JSON WHOLE: the quoted token is redacted while the typed values (use_auth:false, ok:true, n:5 — round 22) and the closing `}` survive (B-5a9a: the swallow is gone)', j);
   const brace = S.redactSecrets('{"password":hunter2hunter2}').text;
   ok(brace === '{"password":«redacted»}', 'R2 bare value stops at `}` — the object close survives (B-5a9a: not swallowed to the line end)', brace);
   const msg = S.redactSecrets('password=hunter2hunter2, then restart the box').text;
@@ -110,6 +110,13 @@ console.log('§3 THE BELT’S MASKABLE-ENTRY ENUMERATION — host: / file: are n
   ok(brk === '[password=«redacted»]', 'R2 bare value stops at `]` too — the bracket close survives', brk);
   const bearer = S.redactSecrets('Authorization: Bearer abc123def456ghijkl and more').text;
   ok(bearer === 'Authorization: «redacted»', 'a space is still NOT a delimiter — the whole line-tail after an auth name is redacted (R2 hides more, never less; the `Bearer <token> and more` goes to the line end)', bearer);
+  // round 22: in the GENERIC name-based pass, a BARE value a parser TYPES as a boolean / number / null under a secret-named key is NOT a secret — it stays; a quoted string or a real token stays REDACTED (fail-closed). RED on a51611f2 (which redacted `false`/`5`/`null` by name).
+  const typed = S.redactSecrets('{"use_auth":false,"token":"abc123def456ghi","count":5,"ttl":null,"enabled":true,"ratio":-2.5}').text;
+  ok(typed === '{"use_auth":false,"token":"«redacted»","count":5,"ttl":null,"enabled":true,"ratio":-2.5}', 'round 22: a boolean / number / null under a secret-named key stays (not a secret); a quoted string value under one is still redacted', typed);
+  const yaml = S.redactSecrets('password: false\nsecret: 42\napi_key: hunter2hunter2').text;
+  ok(yaml === 'password: false\nsecret: 42\napi_key: «redacted»', 'round 22: the typed rule holds for YAML too — a bool / number stays, a real value is redacted', yaml);
+  const quotedFalse = S.redactSecrets('{"key":"false"}').text;
+  ok(quotedFalse === '{"key":"«redacted»"}', 'round 22 (fail-closed): a QUOTED "false" is a string the parser cannot type as a boolean — it stays redacted (a secret may spell itself anything)', quotedFalse);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

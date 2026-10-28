@@ -128,7 +128,7 @@ function redactContinuations(text) {
     if (/^private-lines$/i.test(name)) {
       const cnt = parseInt(val, 10); if (!(cnt > 0)) continue;
       const end = Math.min(lines.length, i + 1 + Math.min(cnt, 100000));
-      if (end > i + 1 && !(end === i + 2 && lines[i + 1].trim() === REDACTED)) { lines.splice(i + 1, end - (i + 1), REDACTED); n++; }
+      if (end > i + 1 && !(end === i + 2 && lines[i + 1].trim() === REDACTED)) { lines[i] = lines[i].replace(/\d+(?=\s*$)/, REDACTED); lines.splice(i + 1, end - (i + 1), REDACTED); n++; }   // round 22: R2b redacts the COUNT here too — else the typed-value rule leaves `Private-Lines: 2` and a second pass re-reads the count and eats the MAC line (idempotency); a re-read sees «redacted» ⇒ parseInt NaN ⇒ skip
       continue;
     }
     if (!secretName(name) || (val !== '' && val !== REDACTED && !BLOCK_VAL.test(val) && !openQuote(val))) continue;
@@ -184,6 +184,8 @@ function redactKv(text) {
     const trimmed = val.trimEnd();
     const inner = q ? trimmed.slice(1, trimmed.length > 1 && trimmed.endsWith(q) ? -1 : undefined) : trimmed;
     if (!inner || inner === REDACTED) { KV_HEAD.lastIndex = headEnd; continue; }
+    // round 22: a BARE value a JSON/YAML parser types as a boolean / number / null is NOT a secret (a secret is never `false` or `5` or `null`) — it stays; every OTHER value stays redacted, fail-closed («short» is never a reason, a string the parser cannot type is a secret). Only the GENERIC pass reaches here — the run's own output is value-based since r21.
+    if (!q && /^(?:true|false|null|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)$/i.test(inner)) { KV_HEAD.lastIndex = valEnd; continue; }
     n++;
     out += text.slice(last, headEnd) + (q ? q + REDACTED + q : REDACTED) + val.slice(trimmed.length);
     last = valEnd; KV_HEAD.lastIndex = valEnd;
