@@ -11043,6 +11043,7 @@ export default {
   "This conversation is waiting for you: {all} — click to go to it": "这个对话在等你：{all} — 点击跳到它",
   "This conversation is waiting for you: {all} — click to list them, choose one to go to it": "这个对话在等你：{all} — 点击列出全部，选一个就跳到它",
   "Docked here — asked before this conversation's record was kept": "停靠在末尾 — 提问早于本对话现存的记录",
+  "The record that filed it is not drawn in this chat": "提出它的那条记录在此对话中没有显示",
   "Docked here — it was asked further up the conversation": "停靠在末尾 — 它是在对话更上面提出的",
   "{n} waiting — the status bar lists them all": "共 {n} 个在等你 — 点状态栏查看全部",
   "Waiting for you — newest first": "等你操作 — 最新的在上",

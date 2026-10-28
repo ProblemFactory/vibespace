@@ -1520,7 +1520,8 @@ console.log('㉕ THE DOOR LANDS (lane needs-card-tail R5 — the owner 2026-10-2
     if (!/app\.resumeSession\([^;]*\); landOnFiling\(item\); \}/.test(jb)) bad.push('the resume of a stopped conversation does not land through landOnFiling');
     if ((jb.match(/landOnFiling\(item\)/g) || []).length !== 2 || (jb.match(OPEN_RE) || []).length !== 4) bad.push(`jump opens ${(jb.match(OPEN_RE) || []).length} ways, lands ${(jb.match(/landOnFiling\(item\)/g) || []).length} (want 4 opens: window · re-attach · tmux · resume — 2 landings)`);
     const lf = bodyRange(src, 'landOnFiling');
-    if (!lf || !/v\.landOnItem\(item\)/.test(src.slice(lf[0], lf[1]))) bad.push('landOnFiling does not hand the item to the chat view\'s ONE landing (landOnItem)');
+    if (!lf || !/v\.landOnItem\(item, \{ since \}\)/.test(src.slice(lf[0], lf[1]))) bad.push('landOnFiling does not hand the item to the chat view\'s ONE landing (landOnItem)');
+    else if (!/const gen = \+\+doorGen, since = Date\.now\(\);/.test(src.slice(lf[0], lf[1])) || !/if \(gen !== doorGen\) return;/.test(src.slice(lf[0], lf[1]))) bad.push('landOnFiling carries no generation — an older door press still waiting for its view lands over a newer one (r2: the displacement law)');
     return bad;
   };
   const files = Object.fromEntries(SURF.map((rel) => [rel, read(rel)]));
@@ -1535,8 +1536,10 @@ console.log('㉕ THE DOOR LANDS (lane needs-card-tail R5 — the owner 2026-10-2
     ok(census(planted).some((p) => p === `src/lib/inbox-window.js:${line} opens a conversation (goToWindow) outside model.jump — a door that does not land`), `RED: a second door planted in the For-you window is named by file:line (src/lib/inbox-window.js:${line})`); }
   { const cut = files['src/lib/user-todos-actions.js'].replace('} else landOnFiling(item); // lane needs-card-tail (R5)', '} // lane needs-card-tail (R5)');
     ok(landing(cut).some((p) => /goToWindow · attachSession\) does not land/.test(p)), 'RED: jump\'s window open without the landing (the base\'s shape) is named'); }
-  { const cut = files['src/lib/user-todos-actions.js'].replace('if (loaded && ((v._messages && v._messages.length) || v._total > 0)) { v.landOnItem(item)', 'if (loaded && ((v._messages && v._messages.length) || v._total > 0)) { v.jumpToBottom(item)');
+  { const cut = files['src/lib/user-todos-actions.js'].replace('if (loaded && ((v._messages && v._messages.length) || v._total > 0)) { v.landOnItem(item, { since })', 'if (loaded && ((v._messages && v._messages.length) || v._total > 0)) { v.jumpToBottom(item)');
     ok(landing(cut).some((p) => /does not hand the item to the chat view/.test(p)), 'RED: a landing that does not reach the chat view\'s ONE landing is named'); }
+  { const cut = files['src/lib/user-todos-actions.js'].replace('      if (gen !== doorGen) return;\n', '');
+    ok(landing(cut).some((p) => /carries no generation/.test(p)), 'RED (r2, the displacement law): a door whose wait for its view never yields to a newer press is named'); }
   // the doors themselves call jump (the tray row's Chat door + its conversation name, the mini row, the For-you window's name)
   const P = files['src/lib/user-todos-panel.js'], IW = files['src/lib/inbox-window.js'];
   ok(/if \(e\.target\.closest\('\.ut-go'\)\) \{ const rec = byId\(id\); if \(rec\) jump\(rec\.sessionKey, rec\); return; \}/.test(P) && /if \(e\.target\.closest\('\.ut-sess'\) \|\| \(rec && model\.isDoor\(rec\.sessionKey, rec\)\)\) \{ if \(rec\) jump\(rec\.sessionKey, rec\); return; \}/.test(P) && /if \(e\.target\.closest\('\.iw-sess'\)\) \{ const it = model\.byId\(c\.id\); if \(it\) model\.jump\(it\.sessionKey, it\); return; \}/.test(IW), 'the doors: the tray / phone row\'s Chat door (.ut-go) and its conversation name (.ut-sess), the For-you window\'s name (.iw-sess) — each is model.jump');

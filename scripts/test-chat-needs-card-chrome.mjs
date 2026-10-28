@@ -51,8 +51,13 @@
 //     the age kept) and choosing the oldest loads the window up to it and opens its card in its tool card; the docked ask
 //     answered elsewhere ⇒ the dock and the chip move in the same frame; the tray row's door lands on the record that filed
 //     it; an ask with no record docks at the end saying why; a reader who scrolled is never moved by a broadcast, a press lands.
+//     ROUND 2 (each RED on 9de5c902): ⑭ three asks over ~900 records — 4 wheels up (an older page loaded) the dock stays under
+//     the LAST displayed record, and is there back at the bottom; the chip's walk (the oldest, then one filed BELOW that window)
+//     lands at its record; a slow landing (2.5 s pages) never overrules the newer press; the DOCKED ask answered on another
+//     client moves a scrolled reader 0 px; the door of an answered ask whose record is folded opens the run and lands on it.
 //   SHOTS (desktop 1280 + phone 375): the watch request card, the ask with its chips, a resolved card, the accordion; ⑬'s
-//     desktop-1280-tail / phone-390-tail / desktop-1280-chip-list / -chip-landed / -door-landed / -no-record-docked.
+//     desktop-1280-tail / phone-390-tail / desktop-1280-chip-list / -chip-landed / -door-landed / -no-record-docked; ⑭'s
+//     desktop-1280-r2-after-4-wheels / -back-at-bottom / -below-window / -race / -folded-door.
 // Requires google-chrome (SKIP without) and a fresh `npm run build`. Run: node scripts/test-chat-needs-card-chrome.mjs [--shots <dir>]
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -1024,6 +1029,99 @@ try {
     check(`R5 …a PRESS on its tray row's door does: the view lands on the record that filed it («${c1 && c1.cmd}»), its card open, whole in view`, !!c1 && /Stress question 74/.test(c1.cmd) && c1.open && c1.inView, c1);
   } catch (e) { fail++; console.log('  ✗ ⑬ threw: ' + (e?.message || e)); }
   lap('⑬ done');
+
+  // ── ⑭ THE TAIL, ROUND 2 (lane needs-card-tail r2 — the r1 verdict on 9de5c902; its harnesses acc-r1-below-window /
+  // acc-r1-race / make-fold-leg / the claim run's 4-wheels + back-at-bottom + the two-client swap, folded into ONE
+  // conversation: three asks spread over ~900 records) ──
+  console.log('⑭ THE TAIL r2 — the dock stays at the END once older history loads; a landing reads DOWN as well as up; a stale landing never moves the reader; the docked ask answered elsewhere moves no reader; a landing unfolds what it lands on');
+  try {
+    for (const it of (await api()).open) await A.evalJs(`fetch('/api/user-todos/' + encodeURIComponent(${J(it.id)}), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'done' }) }).then((r) => r.status)`);
+    const sid = await newConv('r2'); await sleep(600);
+    let bsid = '', total = 0;
+    const page = async (offset, limit) => { try { return await (await fetch(`${ORIGIN}/api/session-messages?backend=claude&backendSessionId=${encodeURIComponent(bsid)}&cwd=${encodeURIComponent(WORK)}&offset=${offset}&limit=${limit}`)).json(); } catch { return {}; } };
+    const grown = async (n) => { for (let i = 0; i < 200; i++) { total = (await page(0, 1)).total || 0; if (total >= n) return total; await sleep(200); } return total; };
+    const q = [];
+    for (const n of [81, 82, 83]) {
+      sayTo(sid, `an ask do:q${n}`);
+      const it = (await byText(new RegExp(`^Stress question ${n}:`), 1))[0];
+      q.push(it);
+      if (it && !bsid) bsid = it.sessionKey.slice(it.sessionKey.indexOf(':') + 1);
+      await sleep(2600); // the history that follows is stamped past the filing (placementOf's SKEW_MS)
+      const before = (await page(0, 1)).total || 0;
+      sayTo(sid, 'a long history do:fill150');
+      await grown(before + 300);
+    }
+    const all = (await page(0, total)).messages || [];
+    const where = q.map((it) => (it ? all.findIndex((m) => m.role === 'tool' && JSON.stringify(m.content || '').includes(it.id)) : -1));
+    check(`setup: three asks spread over ${total} records — their records at ${where.join(' · ')}`, q.every(Boolean) && total >= 900 && where.every((k) => k >= 0) && where[1] > 250 && where[2] > 550 && where[2] < total - 250, { total, where });
+    const ids = q.map((it) => it && it.id);
+    const DOMQ = `(() => { const v = ${VIEW}, l = v._messageList; const kids = [...l.querySelectorAll(':scope > .chat-msg:not(.chat-gap-msg)')], lastKid = kids[kids.length - 1]; const cards = [...l.querySelectorAll(':scope > * > .cn-cards > .cn-card.cn-open')]; const lr = l.getBoundingClientRect(), chip = document.querySelector('.chat-status-foryou');
+      return { ws: v._windowStart, we: v._windowEnd, total: v._total, pinned: v._pinned, gap: Math.round(l.scrollHeight - l.clientHeight - l.scrollTop), nDom: kids.length, chip: chip ? chip.textContent.trim() : '',
+        cards: cards.map((c) => { const h = c.closest('.chat-msg'), r = c.getBoundingClientRect(); return { id: c.dataset.item, docked: c.classList.contains('cn-docked'), host: (h?.dataset.msgId || '').replace(/^.*:(m|t):/, '$1:'), hostDomIdx: kids.indexOf(h), atDomEnd: h === lastKid, dock: (c.querySelector('.cn-dock') || {}).textContent || '', shown: c.getClientRects().length > 0 && r.height > 0, inView: r.bottom > lr.top && r.top < lr.bottom }; }) }; })()`;
+    const wheel = async (n, dy) => { const lc = await A.evalJs(`(() => { const r = ${VIEW}._messageList.getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()`); for (let i = 0; i < n; i++) { await A.cdp('Input.dispatchMouseEvent', { type: 'mouseWheel', x: lc.x, y: lc.y, deltaX: 0, deltaY: dy }); await sleep(120); } await sleep(2500); };
+    const atTailN = (n) => A.waitFor(`(() => { const v = ${VIEW}, c = document.querySelector('.chat-status-foryou'); return !!v && v._total >= ${total} && v._windowEnd >= v._total && !!c && new RegExp('· ${n} ').test(c.textContent + ' '); })()`, 20000);
+    const docked = (w) => w.cards.filter((c) => c.docked);
+    // #1 THE END IS THE DISPLAY ORDER'S: at the tail, then one older page loaded by the reader's own wheel, then back down
+    await toConv(A, sid, [], 1280, 800, false); await atTailN(3); await sleep(1500);
+    const w0 = await A.evalJs(DOMQ);
+    check(`#1 at the tail (records ${w0.ws}–${w0.we} of ${w0.total}) ONE card docked under the last record — the newest ask`, docked(w0).length === 1 && docked(w0)[0].id === ids[2] && docked(w0)[0].atDomEnd, w0);
+    await wheel(4, -240);
+    const w1 = await A.evalJs(DOMQ);
+    await A.shot('desktop-1280-r2-after-4-wheels.png');
+    check(`#1 (RED on 9de5c902: drawn under the older page's last record, mid-history, «· 3 waiting» with filler below it) the reader scrolled up 4 wheels — older history loaded (records ${w1.ws}–${w1.we}) — and the docked card stands at the END: under the LAST displayed record, never mid-history`, w1.ws < w0.ws && docked(w1).length === 1 && docked(w1).every((c) => c.atDomEnd), w1);
+    for (let k = 0; k < 14; k++) { await wheel(1, 400); const g = await A.evalJs(DOMQ); if (g.gap <= 2) break; }
+    await sleep(1500);
+    const w2 = await A.evalJs(DOMQ);
+    await A.shot('desktop-1280-r2-back-at-bottom.png');
+    check(`#1 (RED on 9de5c902: no card at the end while the chip says «· 3 questions») back down at the bottom the docked card is there — under the last record, in view; the chip «${w2.chip}»`, w2.gap <= 2 && docked(w2).length === 1 && docked(w2)[0].atDomEnd && docked(w2)[0].inView && /· 3 /.test(w2.chip + ' '), w2);
+    // #2 A LANDING READS BOTH WAYS: the walk the chip invites — the oldest (the window loads at the top), then one filed BELOW
+    const ST = (id) => `(() => { const v = ${VIEW}, c = document.querySelector('.cn-card[data-item="' + ${J(id)} + '"]'); const raw = c && c.closest('.chat-msg')?._rawMsg; const lr = v._messageList.getBoundingClientRect(), r = c ? c.getBoundingClientRect() : null; return { ws: v._windowStart, we: v._windowEnd, total: v._total, card: !!c, docked: !!c && c.classList.contains('cn-docked'), dock: c ? (c.querySelector('.cn-dock') || {}).textContent || '' : '', cmd: raw && raw.content && raw.content[0] && raw.content[0].input ? String(raw.content[0].input.command || '').slice(0, 40) : '', inView: !!r && r.height > 0 && r.top >= lr.top - 1 && r.bottom <= lr.bottom + 1 }; })()`;
+    const pick = async (id) => {
+      await A.press('.chat-status-foryou', { touch: false }); await sleep(400);
+      await A.waitFor(`!!document.querySelector('.chat-needs-list .chat-needs-pick[data-item="${id}"]')`, 5000);
+      await A.press(`.chat-needs-list .chat-needs-pick[data-item="${id}"]`, { touch: false });
+    };
+    const choose = async (id, n) => { await pick(id); await A.waitFor(`(() => { const x = ${ST(id)}; return x.card && x.inView && (/question ${n}/.test(x.cmd) || x.docked); })()`, 15000).catch(() => {}); await sleep(1200); return A.evalJs(ST(id)); };
+    const s1 = await choose(ids[0], 81);
+    check(`#2 the oldest (q81) lands at its record — the window loaded up to it (records ${s1.ws}–${s1.we})`, s1.card && !s1.docked && /question 81/.test(s1.cmd) && s1.ws === 0, s1);
+    const s2 = await choose(ids[2], 83);
+    await A.shot('desktop-1280-r2-below-window.png');
+    check(`#2 (RED on 9de5c902: docked at the live end with «asked before this conversation's record was kept») from that window, q83 — its record BELOW it, at ${where[2]} — lands AT its record (records ${s2.ws}–${s2.we})`, s2.card && !s2.docked && /question 83/.test(s2.cmd) && s2.ws <= where[2] && s2.we > where[2], s2);
+    const s3 = await choose(ids[1], 82);
+    check(`#2 …and q82 (its record at ${where[1]}, ABOVE that window) lands at its record (records ${s3.ws}–${s3.we})`, s3.card && !s3.docked && /question 82/.test(s3.cmd) && s3.ws <= where[1] && s3.we > where[1], s3);
+    // #3 THE DISPLACEMENT LAW: q82 on screen; a slow page read (2.5 s each — a remote transcript), q81 pressed (its read
+    // upward in flight), then q82 — the person's latest choice
+    await A.evalJs(`(() => { const v = ${VIEW}; v.__slowFetch = v._fetchMessages; v._fetchMessages = (o, l) => new Promise((r) => setTimeout(r, 2500)).then(() => v.__slowFetch.call(v, o, l)); return 1; })()`);
+    await pick(ids[0]); await sleep(300);
+    await pick(ids[1]); await sleep(1500);
+    const r1 = await A.evalJs(ST(ids[1]));
+    await sleep(9000);
+    const r2 = await A.evalJs(ST(ids[1])), r81 = await A.evalJs(ST(ids[0]));
+    await A.evalJs(`(() => { const v = ${VIEW}; if (v.__slowFetch) { v._fetchMessages = v.__slowFetch; delete v.__slowFetch; } return 1; })()`);
+    await A.shot('desktop-1280-r2-race.png');
+    check(`#3 (RED on 9de5c902: 9 s later the stale q81 landing dragged the view to records 0–50) the LATEST press stands — q82 in view (records ${r2.ws}–${r2.we}), the older landing's read finished and moved nothing`, r1.card && r1.inView && r2.card && r2.inView && /question 82/.test(r2.cmd) && r2.ws === r1.ws, { r1, r2, r81 });
+    // minor THE DOCKED ASK ANSWERED ELSEWHERE MOVES NO READER: the tail, 4 wheels up, q83 (docked) answered by another client
+    await toConv(A, sid, [], 1280, 800, false); await atTailN(3); await sleep(1500);
+    await wheel(4, -240);
+    const READ = (id) => `(() => { const v = ${VIEW}, l = v._messageList, lr = l.getBoundingClientRect(), mid = lr.top + lr.height / 2; const m = ${J(id)} ? [...l.querySelectorAll(':scope > .chat-msg')].find((x) => x.dataset.msgId === ${J(id)}) : [...l.querySelectorAll(':scope > .chat-msg')].find((x) => { const r = x.getBoundingClientRect(); return r.height > 0 && r.bottom > mid; }); return { st: Math.round(l.scrollTop), pinned: v._pinned, id: m ? m.dataset.msgId : null, top: m ? Math.round(m.getBoundingClientRect().top * 10) / 10 : null }; })()`;
+    const b0 = await A.evalJs(READ(null)), d0 = await A.evalJs(DOMQ);
+    const stc = await A.evalJs(`fetch('/api/user-todos/' + encodeURIComponent(${J(ids[2])}), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'done' }) }).then((r) => r.status)`);
+    await A.waitFor(`/· 2 /.test((document.querySelector('.chat-status-foryou') || {}).textContent + ' ')`, 8000); await sleep(1500);
+    const b1 = await A.evalJs(READ(b0.id)), d1 = await A.evalJs(DOMQ);
+    check(`minor (RED on 9de5c902: 87 px — the misplaced dock above the reader shrank) the DOCKED ask answered on another client (POST ${stc}, the chip «${d1.chip}») moves the scrolled reader 0 px (${b0.id} at ${b0.top} → ${b1.top}); the dock went to the next newest, still at the end`, stc === 200 && !!b0.id && !b0.pinned && b1.id === b0.id && Math.round(Math.abs(b0.top - b1.top)) === 0 && docked(d1).length === 1 && docked(d1)[0].id === ids[1] && docked(d1)[0].atDomEnd, { b0, b1, d0, d1 });
+    // #4 A LANDING UNFOLDS WHAT IT LANDS ON: q83 answered — its quiet record sits in its Bash card, folded by default; the
+    // For-you door (model.jump → landOnFiling → landOnItem) from the bottom
+    for (let k = 0; k < 14; k++) { await wheel(1, 400); const g = await A.evalJs(DOMQ); if (g.gap <= 2) break; }
+    const FOLD = `(() => { const v = ${VIEW}, c = document.querySelector('.cn-card[data-item="' + ${J(ids[2])} + '"]'); const host = c && c.closest('.chat-msg'); const l = v._messageList, lr = l.getBoundingClientRect(); const r = c ? c.getBoundingClientRect() : null;
+      return { card: !!c, cls: c ? c.className : '', rects: c ? c.getClientRects().length : -1, hostFolded: !!host && host.classList.contains('chat-run-collapsed'), hostDisplay: host ? getComputedStyle(host).display : null, inView: !!r && r.height > 0 && r.bottom > lr.top && r.top < lr.bottom, st: Math.round(l.scrollTop), ws: v._windowStart, we: v._windowEnd }; })()`;
+    await A.evalJs(`(() => { const it = app._inboxModel.byId(${J(ids[2])}); app._inboxModel.jump(it.sessionKey, it); return 1; })()`);
+    await A.waitFor(`(() => { const x = ${FOLD}; return x.card && x.ws <= ${where[2]} && x.we > ${where[2]}; })()`, 15000).catch(() => {});
+    await sleep(1600);
+    const f1 = await A.evalJs(FOLD);
+    await A.shot('desktop-1280-r2-folded-door.png');
+    check(`#4 (RED on 9de5c902: «card» returned, the record display:none, the list run to scrollTop 0) the For-you door of the ANSWERED q83 (its record folded in a closed run) opens the run and lands on it — its quiet record visible, in view (records ${f1.ws}–${f1.we}, scrollTop ${f1.st})`, f1.card && /cn-done/.test(f1.cls) && f1.rects > 0 && !f1.hostFolded && f1.hostDisplay !== 'none' && f1.inView, f1);
+  } catch (e) { fail++; console.log('  ✗ ⑭ threw: ' + (e?.message || e)); }
+  lap('⑭ done');
 
   check('the shots are written (desktop 1280 + phone 375)', ['desktop-1280-watch-request.png', 'desktop-1280-ask-chips.png', 'desktop-1280-resolved.png', 'phone-375-watch-request.png', 'phone-375-ask-chips.png', 'phone-375-resolved.png', 'phone-375-accordion.png', 'phone-375-accordion-opened.png', 'desktop-1280-accordion.png'].every((f) => fs.existsSync(path.join(SHOTS, f))));
   check('no page error', pageErrors.length === 0, pageErrors.slice(0, 5));

@@ -327,7 +327,7 @@ ok(/const needs = oldEl\.querySelector\?\.\(':scope > \.cn-cards'\);[\s\S]{0,200
 ok(/if \(hasPendingHelperAsk\(m\)\) return null;\n(?:[^\n]*\n){2}\s+if \(el\.querySelector\(':scope > \.cn-cards > :is\(\.cn-card\.cn-open, \.cn-card\.cn-kept\)'\)\) return null;/.test(CV) && /card\.classList\.add\('cn-kept'\);/.test(CARD), 'a run never folds a record holding a card that waits — nor one whose answered card keeps a box in use (S1\'s rule beside it)');
 ok(/onJumpToNeed: \(id\) => \{ \(id \? this\._needsCards\?\.land\(id\) : this\._needsCards\?\.jumpToNewest\(\)\)\?\.catch\?\.\(\(\) => \{\}\); \}/.test(CV) && /chip\('foryou', `chat-status-foryou/.test(BAR) && /const needsChip = e\.target\.closest\('\.chat-status-foryou\.chat-status-clickable'\);\n\s+if \(needsChip\) \{\n\s+e\.stopPropagation\(\);\n\s+const rows = this\._needRows \|\| \[\];\n\s+if \(rows\.length < 2\) \{ this\._onJumpToNeed\?\.\(rows\.length \? rows\[0\]\.id : null\); return; \}/.test(BAR) && /b\.onclick = \(ev\) => \{ ev\.stopPropagation\(\); list\.remove\(\); this\._onJumpToNeed\?\.\(r\.id\); \};/.test(BAR), 'the chip: drawn from setNeeds — THE INDEX (lane needs-card-tail): one ask ⇒ its click lands it, several ⇒ its list (newest first), a row lands that one through the cards\' ONE landing');
 // acceptance round 2 (P3): ONE SOURCE — the chip's words are the open cards this pass drew, never the store's list beside them
-ok(/view\._statusBar\?\.setNeeds\?\.\(this\._chipOf\(plan\)\);/.test(CARD) && !/\bshown\b/.test(CARD.slice(CARD.indexOf('  _pass() {'), CARD.indexOf('  _create(e) {'))) && /const w = chipWords\(plan\.waiting, t\);/.test(CARD) && /const plan = tailPlan\(open, transcript, \{ rendered: \(id\) => this\._onScreen\(id\), atEnd, pick: this\._dockPick \}\);/.test(CARD), 'ONE PASS (lane needs-card-tail — was «the chip counts the cards drawn»): the chip lists EVERY open ask (PURE tailPlan\'s waiting — the cards are a subset now) from the same pass that draws the cards (a filing ⇒ N+1 and its card, an answer ⇒ N and the dock moved, in one frame)');
+ok(/view\._statusBar\?\.setNeeds\?\.\(this\._chipOf\(plan\)\);/.test(CARD) && !/\bshown\b/.test(CARD.slice(CARD.indexOf('  _pass('), CARD.indexOf('  _create(e) {'))) && /const w = chipWords\(plan\.waiting, t\);/.test(CARD) && /const plan = tailPlan\(open, transcript, \{ rendered: drawn, atEnd, pick: this\._dockPick \}\);/.test(CARD), 'ONE PASS (lane needs-card-tail — was «the chip counts the cards drawn»): the chip lists EVERY open ask (PURE tailPlan\'s waiting — the cards are a subset now) from the same pass that draws the cards (a filing ⇒ N+1 and its card, an answer ⇒ N and the dock moved, in one frame)');
 ok(/try \{ if \(!card\) card = this\._create\(e\); else this\._patch\(card, e\); \} catch \(err\) \{ console\.warn\('\[chat-needs\] a card failed to draw:'[^}]*continue; \}/.test(CARD), 'ONE card that throws is said and skipped — the pass still reaches the chip');
 // acceptance round 2 (P2): THE ACCORDION — one open slot (the person's pick while it waits, else the newest; a filing takes it back)
 ok(/const fresh = open\.filter\(\(e\) => !this\._seen\.has\(e\.item\.id\)\);\n\s+if \(fresh\.length\) this\._slot = newestOf\(fresh\)\.item\.id;\n\s+this\._seen = new Set\(open\.map\(\(e\) => e\.item\.id\)\);\n\s+const openSlot = this\._slot;/.test(CARD) && /fold: x\.item\.id !== openSlot/.test(CARD) && /card\.classList\.toggle\('cn-fold', fold\);/.test(CARD) && /row\.classList\.toggle\('ut-open', !fold\);/.test(CARD) && /const fold = !!e\.fold && !boxInUse\(card\.querySelector\('\.ut-reply'\)\);/.test(CARD) && /card\.addEventListener\('click', \(ev\) => \{\n\s+if \(unfold\(ev\) \|\| card\._openedAt == null/.test(CARD), 'THE ACCORDION: ONE open card (the slot: a FILING\'s newest id, a tap, the chip), the rest folded rows whose whole row opens them; a reply box in use is never folded');
@@ -356,7 +356,7 @@ ok(/if \(!document\.hidden\) raf = requestAnimationFrame\(run\);\n\s+const tm = 
 { const rn = CARD.slice(CARD.indexOf('  render({ hold'), CARD.indexOf('  _lend(list'));
   ok(/probe\.observe\(view\._messageList, \{ subtree: true, childList: true, characterData: true, attributes: true, attributeOldValue: true \}\);/.test(rn) && /if \(!wroteAny\(recs\)\) return;\n\s+this\._roomCheck\(\);[^\n]*\n(?:\s*\/\/[^\n]*\n)?\s+this\.app\.foryouRows\?\.arm\?\.\(view\._messageList\);/.test(rn) && /for \(const \[el, m\] of was\) for \(const \[a, v\] of m\) if \(el\.getAttribute\(a\) !== v\) return true;/.test(CARD), 'R4 #3 a pass that changed no card (its own DOM writes recorded — none) reads NO layout: no stamp, no follow; a pass that changed one stamps THIS list\'s armed buttons');
   ok(/reconcile: \(container, entries\) => reconcileRows\(container, entries, null, miniCtx, \{ arm: false \}\),/.test(PANEL) && /if \(arm\) armExitButtons\(\);/.test(PANEL) && /const armExitButtons = \(root = document\) => \{\n\s+const now = performance\.now\(\);\n\s+for \(const b of root\.querySelectorAll\(/.test(PANEL) && /arm: \(root\) => armExitButtons\(root\),/.test(PANEL), 'R4 #3 …the card\'s reconcile stamps nothing (every card\'s patch re-stamped every Allow of the PAGE, a rect per hit); the tray\'s own passes keep their stamp'); }
-{ const ps = CARD.slice(CARD.indexOf('  _pass() {'), CARD.indexOf('    const transcript = '));
+{ const ps = CARD.slice(CARD.indexOf('  _pass('), CARD.indexOf('    const transcript = '));
   ok(/if \(listed\.has\(c\.dataset\.item\) \|\| !c\._item \|\| !boxInUse\(c\.querySelector\('\.ut-reply'\)\)\) continue;\n\s+done\.push\(\{ item: todos\.resolved\.find\(\(i\) => i\.id === c\.dataset\.item\) \|\| todos\.open\.find\(\(i\) => i\.id === c\.dataset\.item\) \|\| c\._item,/.test(ps) && ps.indexOf('done.push({ item: todos.resolved.find') < ps.indexOf('if (!open.length && !done.length)') && /card\._item = e\.item;/.test(CARD), 'R4 #4 a card whose box is in use stays IN the pass — drawn from the snapshot\'s copy (a clear rewrites it there), else from its own last one once the resolved tail dropped it — so it is patched, never frozen'); }
 // acceptance round 5 — the refusal keyed on the MEASURED landing, the reveal capped, the borrowed room's ONE road back, the kb lines
 { const oc = CARD.slice(CARD.indexOf('  openCard(id'), CARD.indexOf('  jumpToNewest()'));
@@ -494,15 +494,224 @@ console.log('⑩ THE TAIL — a card whose record is not on screen is not stacke
   for (const f of ['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js']) { const s = read(f); const miss = keysNew.filter((k) => !s.includes(JSON.stringify(k) + ':')); ok(!miss.length, `R4 ${f}: the dock line, the chip's list and its titles are worded`, miss); }
   // THE WIRING (source pins): the pass draws from the plan; the dock line; ONE landing for the chip AND every For-you door
   const CARD10 = read('src/lib/chat-needs-card.js'), CV10 = read('src/lib/chat-view.js'), UTA = read('src/lib/user-todos-actions.js'), CSS10 = read('public/chat.css');
-  const ps = CARD10.slice(CARD10.indexOf('  _pass() {'), CARD10.indexOf('  _onScreen(id) {'));
+  const ps = CARD10.slice(CARD10.indexOf('  _pass('), CARD10.indexOf('  _onScreen(id) {'));
   ok(/const atEnd = !view\._teleported && !\(view\._windowEnd < view\._total\);/.test(ps) && /else if \(plan\.at\.has\(e\.item\.id\)\) el = view\._elements\.get\(plan\.at\.get\(e\.item\.id\)\);\n\s+else if \(plan\.dock === e\.item\.id && lastId != null\) \{/.test(ps) && !/!e\.resolved && lastId != null\) el = view\._elements\.get\(lastId\)/.test(ps), 'R1 the pass: a card at its record (plan.at), ONE at the end (plan.dock), none for the rest — the base\'s «any open card without a rendered anchor ⇒ the end» is gone');
-  ok(/if \(this\._dockPick != null && !plan\.loose\.includes\(this\._dockPick\)\) this\._dockPick = null;/.test(ps) && /e\.dock = \{ n: open\.length, noRecord: this\._noRecord\.has\(e\.item\.id\) \|\| !\(view\._windowStart > 0\) \};/.test(ps), 'R2/R3 the pick holds the dock only while it waits with no record on screen; the dock knows how many wait and whether it has a record at all');
+  ok(/if \(this\._dockPick != null && !plan\.loose\.includes\(this\._dockPick\)\) \{ this\._dockPick = null; this\._dockNoRecord = false; \}/.test(ps) && /e\.dock = \{ n: open\.length, noRecord: \(this\._dockPick === e\.item\.id && this\._dockNoRecord\) \|\| !\(view\._windowStart > 0\) \};/.test(ps), 'R2/R3 the pick holds the dock only while it waits with no record on screen; the dock knows how many wait and whether it has a record at all (r2: judged by THIS landing\'s read, never a set kept for the view\'s life)');
   ok(/const where = e\.dock\.noRecord \? t\('Docked here — asked before this conversation\\'s record was kept'\) : t\('Docked here — it was asked further up the conversation'\);/.test(CARD10) && /const words = e\.dock\.n > 1 \? `\$\{where\} · \$\{t\('\{n\} waiting — the status bar lists them all', \{ n: e\.dock\.n \}\)\}` : where;/.test(CARD10) && /\.cn-card\.cn-fold > \.cn-head \{ display: none; \}/.test(CSS10) && !/\.cn-card\.cn-fold > \.cn-dock \{ display: none/.test(CSS10), 'R4 the docked card says it is docked — where it was asked (or that it has no record), how many wait, where (the status bar) — open or folded (the fold hides the head, never the dock line)');
-  const land = CARD10.slice(CARD10.indexOf('  async land(x) {'), CARD10.indexOf('  _show(el) {'));
-  ok(land.indexOf('const now = here();') > 0 && land.indexOf('await this._anchorIndex(item)') > land.indexOf('const now = here();') && /await view\.jumpToIndex\(idx, \{ land: \(\) => \{ landed = here\(\); \} \}\);/.test(land) && /this\._dockPick = item\.id;/.test(land) && /else if \(idx === -1\) this\._noRecord\.add\(item\.id\);/.test(land), 'R2 THE ONE LANDING: its card / record in the window ⇒ there; above it ⇒ the read upward + jumpToIndex (the road S1\'s chip takes), then there; no record ⇒ the dock at the end, saying why');
-  ok(/return filingIndex\(item, readPage, \{ start: view\._windowStart \|\| 0, after: /.test(CARD10) && /if \(land\) land\(relIdx >= 0 && relIdx < allMsgs\.length \? allMsgs\[relIdx\] : null\);\n\s+else if \(relIdx >= 0 && relIdx < allMsgs\.length\) \{/.test(CV10) && /landOnItem\(item\) \{ return this\._needsCards \? this\._needsCards\.land\(item\) : Promise\.resolve\(null\); \}/.test(CV10), '…the read upward is PURE filingIndex over the view\'s own page read; jumpToIndex hands its landing to the cards; the view\'s landOnItem is that landing');
-  ok(/\} else landOnFiling\(item\); \/\/ lane needs-card-tail \(R5\)/.test(UTA) && /app\.resumeSession\(s\.sessionId, s\.cwd, displayName\(s\), \{ backend: s\.backend, hostId: s\.hostId \|\| s\.host \|\| undefined \}\); landOnFiling\(item\); \}/.test(UTA) && /if \(loaded && \(\(v\._messages && v\._messages\.length\) \|\| v\._total > 0\)\) \{ v\.landOnItem\(item\)\.catch\(\(\) => \{\}\); return; \}/.test(UTA), 'R5 every For-you door (model.jump — the tray row, its name, the Chat door, the For-you window, the phone\'s page) lands through the SAME landing once the view stands (an open window, a re-attach, a resume)');
+  const land = CARD10.slice(CARD10.indexOf('  async land(x'), CARD10.indexOf('  _show(el) {'));
+  ok(land.indexOf('const now = here();') > 0 && land.indexOf('await this._anchorIndex(item)') > land.indexOf('const now = here();') && /await ours\(view\.jumpToIndex\(idx, \{ land: \(\) => \{ if \(!gone\(\)\) landed = here\(\); \}, stale: gone \}\)\);/.test(land) && /this\._dockPick = item\.id;\n\s+this\._dockNoRecord = idx === -1;/.test(land) && !/_noRecord\b/.test(CARD10), 'R2 THE ONE LANDING: its card / record in the window ⇒ there; outside it ⇒ the read toward it + jumpToIndex (the road S1\'s chip takes), then there; no record ⇒ the dock at the end, saying why');
+  ok(/return filingIndex\(item, readPage, \{ start, end: Number\.isFinite\(view\._windowEnd\) \? view\._windowEnd : null, total: Number\.isFinite\(view\._total\) \? view\._total : null, rows: this\._records\(\) \}\);/.test(CARD10) && /if \(land\) land\(relIdx >= 0 && relIdx < allMsgs\.length \? allMsgs\[relIdx\] : null\);\n\s+else if \(relIdx >= 0 && relIdx < allMsgs\.length\) \{/.test(CV10) && /landOnItem\(item, opts\) \{ return this\._needsCards \? this\._needsCards\.land\(item, opts\) : Promise\.resolve\(null\); \}/.test(CV10), '…the read is PURE filingIndex over the view\'s own page read (the window, its end, the conversation\'s count); jumpToIndex hands its landing to the cards; the view\'s landOnItem is that landing');
+  ok(/\} else landOnFiling\(item\); \/\/ lane needs-card-tail \(R5\)/.test(UTA) && /app\.resumeSession\(s\.sessionId, s\.cwd, displayName\(s\), \{ backend: s\.backend, hostId: s\.hostId \|\| s\.host \|\| undefined \}\); landOnFiling\(item\); \}/.test(UTA) && /if \(loaded && \(\(v\._messages && v\._messages\.length\) \|\| v\._total > 0\)\) \{ v\.landOnItem\(item, \{ since \}\)\.catch\(\(\) => \{\}\); return; \}/.test(UTA), 'R5 every For-you door (model.jump — the tray row, its name, the Chat door, the For-you window, the phone\'s page) lands through the SAME landing once the view stands (an open window, a re-attach, a resume)');
   ok(!/\bjumpToNewest\(\)\s*\{[^}]*querySelectorAll/.test(CARD10) && /return open\.length \? this\.land\(open\[open\.length - 1\]\.item\) : Promise\.resolve\(null\);/.test(CARD10), 'the chip with no row chosen lands the newest through the same landing (no second jump)');
+}
+
+// ── ⑩b THE TAIL, ROUND 2 (lane needs-card-tail r2 — the r1 verdict on 9de5c902) ────────────────────────────────────────
+// the END is the display order's last record; a landing reads in BOTH directions; a stale landing never moves the reader; a
+// landing unfolds what it lands on; a page boundary is never «no record»; a record drawn as nothing hands its card to the
+// nearest drawn one. The PURE half first, then THE REAL PASS AND THE REAL LANDING (an esbuild bundle of
+// src/lib/chat-needs-card.js, its DOM-side imports stubbed) over a fake view and a few-selector fake DOM — the verdict's
+// mutant M3 (the base's «every loose card at the end» line restored after the dock) was caught only by the heavy ⑬.
+console.log('⑩b THE TAIL r2 — the end is the display order\'s; the landing reads both ways, never stale, unfolds; a page edge is no «no record»; the REAL pass + landing over a fake view');
+{
+  const NOW = Date.UTC(2026, 9, 28, 12, 0, 0), M = 60e3;
+  const find = CN.filingIndex, tailPlan = CN.tailPlan;
+  const lean = (k, ts, o = {}) => ({ id: `r${k}`, ts, role: 'assistant', tool: null, cmd: '', out: '', ...o });
+  // THE PAGE BOUNDARY (the verdict's page-boundary.cjs): the CLI call that filed it at 199, «Filed it for you» at 200 —
+  // 0.5 s later, inside the 2 s skew margin — and the window starts at 400 ⇒ the page read upward OPENS on record 200
+  { const T0 = NOW - 700 * M, at = T0 + 199 * M + 300;
+    const R = Array.from({ length: 600 }, (_, i) => lean(i, i <= 199 ? T0 + i * M : at + 500 + (i - 200) * M));
+    R[199] = lean(199, T0 + 199 * M, { role: 'tool', tool: 'Bash', cmd: 'vibespace-ask "Ship it?" --options yes|no', out: 'Filed for you: a question (ut-pageedge01)' });
+    const edge = { ...FIX['agents: an ask'], id: 'ut-pageedge01', text: 'Ship it?', createdAt: at };
+    const rp = async (o, l) => R.slice(o, o + l);
+    eq(await find(edge, rp, { start: 400, end: 600, total: 600, rows: R.slice(400), after: R.slice(400, 440) }), 199, 'RED-able (r2 minor — 9de5c902: −1, «no record» for good): the record after the filing opens a page within the skew margin ⇒ the page above is read too — record 199, the CLI call that filed it');
+    eq(await find(edge, rp, { start: 401, end: 600, total: 600, rows: R.slice(401), after: R.slice(401, 441) }), 199, '…and one record later (the control the verdict ran) the same');
+  }
+  // BELOW A MID-HISTORY WINDOW (the verdict's below-window.cjs): 310 records, the window 100..150 (a landing, a search, the
+  // minimap), the ask filed at record 200's time — the read goes DOWN from the window's end
+  { const T1 = NOW - 400 * M;
+    const B = Array.from({ length: 310 }, (_, i) => lean(i, T1 + i * M, i % 3 ? {} : { role: 'tool', tool: 'Bash', cmd: 'git status' }));
+    const below = { ...FIX['agents: an ask'], id: 'ut-belowwin1', text: 'q?', createdAt: B[200].ts + 1000 };
+    const reads = [], rp = async (o, l) => { reads.push([o, l]); return B.slice(o, o + l); };
+    eq(await find(below, rp, { start: 100, end: 150, total: 310, rows: B.slice(100, 150), after: B.slice(100, 140) }), 200, 'RED-able (r2 #2 — 9de5c902: −1, the ask docked with «asked before this conversation\'s record was kept»): an ask filed BELOW the window ⇒ read DOWN from its end: record 200');
+    eq(reads, [[150, 160]], '…a page at a time toward it (the window\'s end to the first record past the filing)');
+    reads.length = 0;
+    eq(await find(below, rp, { start: 100, after: B.slice(100, 140) }), null, 'RED-able (9de5c902: −1): nothing read lies past the filing ⇒ UNKNOWN (null) — «no record» is said only when the conversation\'s first record is read and lies after the filing');
+    eq(await find({ ...below, createdAt: B[0].ts - 3 * 3600e3 }, rp, { start: 100, end: 150, total: 310, rows: B.slice(100, 150) }), -1, '…which is still −1 (filed before the conversation\'s first record)');
+    eq(await find({ ...below, createdAt: B[120].ts + 500 }, async () => { throw new Error('no read'); }, { start: 100, end: 150, total: 310, rows: B.slice(100, 150) }), 120, 'an ask filed INSIDE the window is found there with no read at all');
+  }
+  // A RECORD DRAWN AS NOTHING (a hidden unknown-record notice: loaded, no element) — its card stands at the nearest drawn
+  // record after it, the end of what is loaded if none
+  { const HW = Array.from({ length: 20 }, (_, k) => lean(k, NOW - 20 * M + k * M));
+    const hid = new Set(['r12', 'r19']), drawnH = (id) => !hid.has(id) && HW.some((r) => r.id === id);
+    const ask = (id, ts) => ({ item: { ...FIX['agents: an ask'], id, text: id, createdAt: ts }, kind: 'question' });
+    const ph = tailPlan([ask('ut-hidden0003', NOW - 50 * 3600e3), ask('ut-hidden0001', HW[12].ts + 500), ask('ut-hidden0002', HW[19].ts + 500)], HW, { rendered: drawnH });
+    ok(ph.at.get('ut-hidden0001') === 'r13' && ph.at.get('ut-hidden0002') === 'r18' && ph.dock === 'ut-hidden0003', 'RED-able (r2 minor — 9de5c902: both loose, the newest docked «further up», the other a chip row only): a card whose record is loaded but drawn as nothing stands at the nearest DRAWN record after it (r13), the end of what is loaded if none (r18); the dock is the ask with no record here', { at: [...ph.at], dock: ph.dock });
+    const drawnAt = typeof CN.drawnAt === 'function' ? CN.drawnAt : () => undefined;
+    eq([drawnAt(HW, 'r12', drawnH), drawnAt(HW, 'r19', drawnH), drawnAt(HW, 'r5', drawnH), drawnAt(HW, 'r99', drawnH)], ['r13', 'r18', 'r5', null], 'drawnAt: the record itself when drawn; else the next drawn; else the last drawn; a record not loaded ⇒ null');
+  }
+
+  // ── THE REAL PASS AND THE REAL LANDING over a fake view ──
+  const esbuild = require(path.join(ROOT, 'node_modules/esbuild'));
+  const STUBS = {
+    './i18n.js': "export const t = (s, p) => String(s).replace(/\\{(\\w+)\\}/g, (_, k) => (p && p[k] != null ? p[k] : ''));",
+    './utils.js': 'export const escHtml = (s) => String(s); export const showToast = (m) => { (globalThis.__cnToasts ||= []).push(m); };',
+    './press-arm.js': 'export const pressVerdict = () => ({ ok: true });',
+    './icons.js': 'export const UI_ICONS = {};',
+    './user-todos-actions.js': 'export const inboxModel = (app) => app.__model;',
+    './user-todos-row.js': 'export const agoText = () => "ago"; export const boxInUse = () => false;',
+  };
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'needs-tail-bundle-'));
+  let NeedsCards = null;
+  try {
+    await esbuild.build({ entryPoints: [path.join(ROOT, 'src/lib/chat-needs-card.js')], bundle: true, format: 'esm', platform: 'node', outfile: path.join(tmp, 'cn.mjs'), logLevel: 'silent',
+      plugins: [{ name: 'stub', setup(b) { b.onResolve({ filter: /^\.\/(i18n|utils|press-arm|icons|user-todos-actions|user-todos-row)\.js$/ }, (a) => ({ path: a.path, namespace: 'stub' })); b.onLoad({ filter: /.*/, namespace: 'stub' }, (a) => ({ contents: STUBS[a.path], loader: 'js' })); } }] });
+    ({ NeedsCards } = await import(path.join(tmp, 'cn.mjs')));
+  } catch (e) { console.log('    (bundle: ' + (e && e.message) + ')'); }
+  finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+  ok(typeof NeedsCards === 'function', 'the real NeedsCards bundles (src/lib/chat-needs-card.js, DOM-side imports stubbed)');
+  // a few-selector fake DOM: what the pass, the landing and the reveal touch
+  const DOC = { children: [], parentNode: null };
+  class El {
+    constructor() { this.children = []; this.parentNode = null; this.dataset = {}; this.style = {}; this._cls = new Set(); this._box = true; const s = this;
+      this.classList = { add: (...c) => c.forEach((x) => s._cls.add(x)), remove: (...c) => c.forEach((x) => s._cls.delete(x)), contains: (c) => s._cls.has(c), toggle: (c, on) => { const v = on === undefined ? !s._cls.has(c) : !!on; if (v) s._cls.add(c); else s._cls.delete(c); return v; } }; }
+    get className() { return [...this._cls].join(' '); }
+    set className(v) { this._cls = new Set(String(v).split(/\s+/).filter(Boolean)); }
+    get isConnected() { let n = this; while (n.parentNode) n = n.parentNode; return n === DOC; }
+    get firstElementChild() { return this.children[0] || null; }
+    get lastElementChild() { return this.children[this.children.length - 1] || null; }
+    get nextElementSibling() { const p = this.parentNode; return p ? p.children[p.children.indexOf(this) + 1] || null : null; }
+    append(c) { if (c.parentNode) c.remove(); c.parentNode = this; this.children.push(c); }
+    insertBefore(c, ref) { if (c.parentNode) c.remove(); c.parentNode = this; const i = ref ? this.children.indexOf(ref) : -1; if (i < 0) this.children.push(c); else this.children.splice(i, 0, c); return c; }
+    remove() { const p = this.parentNode; if (p) { p.children.splice(p.children.indexOf(this), 1); this.parentNode = null; } }
+    matches(sel) { return sel.split('.').filter(Boolean).every((c) => this._cls.has(c)); }
+    closest(sel) { for (let n = this; n && n !== DOC; n = n.parentNode) if (n.matches && n.matches(sel)) return n; return null; }
+    querySelectorAll(sel) {
+      if (!sel.startsWith(':scope')) { const out = [], walk = (n) => { for (const c of n.children) { if (c.matches(sel)) out.push(c); walk(c); } }; walk(this); return out; }
+      let cur = [this];
+      for (const p of sel.slice(6).split('>').map((x) => x.trim()).filter(Boolean)) cur = cur.flatMap((n) => n.children.filter((c) => p === '*' || c.matches(p)));
+      return cur;
+    }
+    querySelector(sel) { return this.querySelectorAll(sel)[0] || null; }
+    getClientRects() { for (let n = this; n && n !== DOC; n = n.parentNode) if (!n._box) return []; return [{}]; }
+    getBoundingClientRect() { return { top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0 }; }
+    getAttribute() { return null; }
+    addEventListener() { }
+  }
+  globalThis.document = globalThis.document || { createElement: () => new El(), hidden: false };
+  const ME10 = 'claude:5f1c0a', KEYS10 = [ME10];
+  const tool = (k, ts, cmd, out = '') => ({ id: `c${k}`, ts, role: 'tool', toolName: 'Bash', content: [{ type: 'tool_use', input: { command: cmd }, output: out }] });
+  const text = (k, ts) => ({ id: `c${k}`, ts, role: 'assistant', toolName: null, content: [{ type: 'text', text: 'x' }] });
+  /** a conversation of `n` records a minute apart; `asks` = record index → the ask its vibespace-ask call filed */
+  const conv = (n, askAt = []) => Array.from({ length: n }, (_, k) => (askAt.includes(k) ? tool(k, NOW - (n - k) * M, `vibespace-ask "the ask at ${k}"`) : text(k, NOW - (n - k) * M)));
+  const askOf = (C, k, o = {}) => ({ id: `ut-ask${String(k).padStart(7, '0')}`, status: 'open', kind: 'action', urgency: 'normal', sessionKey: ME10, origin: 'agent', by: 'agent', text: `the ask at ${k}`, createdAt: C[k].ts + 1200, ...o });
+  const deferred = () => { let open; const p = new Promise((r) => { open = r; }); return { p, open }; };
+  function fakeView(C, items, s, e, { hidden = new Set(), resolved = [] } = {}) {
+    const list = new El(); DOC.children.push(list); list.parentNode = DOC;
+    const v = { _messageList: list, _elements: new Map(), _messages: [], _total: C.length, _teleported: false, _pinned: true, log: [], chip: null, gate: null, _lastNavAt: 0, _lastPositionAt: 0 };
+    v.app = { __model: { loaded: true, todos: { open: items, resolved }, wordsOf: (i) => i.text, byId: (id) => items.find((i) => i.id === id) }, foryouRows: null };
+    v._statusBar = { setNeeds: (w) => { v.chip = w; } };
+    v.setWindow = (a, b) => { for (const c of list.children) c.parentNode = null; list.children = []; v._elements.clear(); v._windowStart = a; v._windowEnd = b; v._messages = C.slice(a, b); for (const m of v._messages) { if (hidden.has(m.id)) continue; const el = new El(); el.classList.add('chat-msg'); el.dataset.msgId = m.id; list.append(el); v._elements.set(m.id, el); } };
+    v.setWindow(s, e);
+    v._fetchMessages = async (o, l) => { v.log.push(`fetch(${o},${l})`); if (v.gate) await v.gate.p; return C.slice(o, o + l); };
+    v.jumpToIndex = async (idx, { land = null, stale = null } = {}) => { v.log.push(`jumpToIndex(${idx})`); v._lastNavAt = Date.now(); await (v.gate ? v.gate.p : null); /* the real one awaits its page read before it asks */ if (stale && stale()) { v.log.push('stale'); return; } const a = Math.max(0, idx - 20); v.setWindow(a, Math.min(C.length, a + 50)); if (land) land(null); };
+    v.jumpToBottom = async () => { v.log.push('jumpToBottom'); v._lastNavAt = Date.now(); v.setWindow(C.length - 50, C.length); };
+    v._noteUserNav = () => { v._lastNavAt = Date.now(); };
+    v._navigatedSince = (t) => Math.max(v._lastNavAt || 0, v._lastPositionAt || 0) > t;
+    v._setPinned = (p) => { v._pinned = !!p; };
+    v._scrollElStable = (el) => v.log.push(`show(${(el.closest('chat-msg') || {}).dataset?.msgId}${el.getClientRects().length ? '' : ' — NO BOX'})`);
+    v._scrollToBottom = () => v.log.push('scrollToBottom');
+    v.revealRecord = (el) => { v.log.push('reveal'); el._box = true; return true; };
+    v._updateRuns = () => { };
+    return v;
+  }
+  const cardsOf = (v) => v._messageList.querySelectorAll(':scope > * > .cn-cards > .cn-card').map((c) => ({ id: c.dataset.item, at: c.parentNode.parentNode.dataset.msgId, docked: c.classList.contains('cn-docked') }));
+  const cardsFor = (v) => {
+    const nc = new NeedsCards(v);
+    nc.keys = () => KEYS10;
+    nc.render = function ({ hold = false } = {}) { this._pass({ hold }); };
+    nc._create = function (e) { const c = new El(); c.dataset.item = e.item.id; this._patch(c, e); return c; };
+    nc._patch = (c, e) => { c.className = `cn-card ${e.resolved ? 'cn-done' : 'cn-open'}${e.fold ? ' cn-fold' : ''}${e.dock ? ' cn-docked' : ''}`; c._item = e.item; c._dock = e.dock || null; };
+    return nc;
+  };
+  if (NeedsCards) {
+    // M3: the owner's six — their records far above a tail window — through the REAL pass: ONE card, at the last record
+    { const C = conv(300), six = [3, 9, 20, 41, 60, 77].map((k) => askOf(C, k));
+      const v = fakeView(C, six, 250, 300), nc = cardsFor(v); nc._pass();
+      const cs = cardsOf(v);
+      ok(cs.length === 1 && cs[0].at === 'c299' && cs[0].docked && cs[0].id === six[5].id && v.chip && v.chip.n === 6 && v.chip.rows.length === 6, 'RED-able (r2 minor — the verdict\'s mutant M3, «every loose card at the end» restored after the dock): the REAL pass over the owner\'s six ⇒ ONE card, docked under the last record, the newest; the chip lists six', cs); }
+    // THE END IS THE DISPLAY ORDER'S: an older page loaded above the window (its records pushed AFTER the window's in the
+    // insertion order, the order the view used to keep) — the dock stays under the LAST DISPLAYED record
+    { const C = conv(300), three = [3, 9, 20].map((k) => askOf(C, k));
+      const v = fakeView(C, three, 200, 300);
+      v._messages = [...C.slice(250, 300), ...C.slice(200, 250)]; // insertion order: the tail, then the page above it
+      v.loadedRecords = () => C.slice(200, 300);                  // the view's ordered accessor
+      const nc = cardsFor(v); nc._pass();
+      const cs = cardsOf(v);
+      ok(cs.length === 1 && cs[0].at === 'c299', 'RED-able (r2 #1 — 9de5c902: under c249, the older page\'s last record, mid-history): one page of older history loaded ⇒ the dock under the LAST DISPLAYED record (c299) — the cards read the view\'s ordered records, never the insertion order', cs); }
+    // A RECORD DRAWN AS NOTHING, through the real pass: the ask filed at the hidden record 290 stands at 291; the older one docks
+    { const C = conv(300), a = askOf(C, 3), b = { ...askOf(C, 290), id: 'ut-askhidden' };
+      const v = fakeView(C, [a, b], 250, 300, { hidden: new Set(['c290']) }), nc = cardsFor(v); nc._pass();
+      const cs = cardsOf(v);
+      ok(cs.some((c) => c.id === 'ut-askhidden' && c.at === 'c291' && !c.docked) && cs.some((c) => c.id === a.id && c.at === 'c299' && c.docked), 'RED-able (r2 minor — 9de5c902: the hidden-anchored ask docked «further up», the other a chip row only): a card whose record is drawn as nothing stands at the next drawn record (c291); the ask with no record here takes the dock', cs); }
+    // BOTH DIRECTIONS, through the real landing: the chip's walk — the oldest first (the window loads at 0..50), then the next
+    { const C = conv(310, [10, 150]), A10 = askOf(C, 10), A150 = askOf(C, 150);
+      const v = fakeView(C, [A10, A150], 0, 50), nc = cardsFor(v);
+      const res = await nc.land(A150.id);
+      ok(res === 'card' && v.log.includes('jumpToIndex(150)') && v.log.includes('show(c150)') && !v.log.includes('jumpToBottom'), 'RED-able (r2 #2 — 9de5c902: «dock · jumpToBottom», «asked before this conversation\'s record was kept»): from a window loaded at the top (0..50), an ask filed BELOW it lands AT its record — read down, the window loaded there', { res, log: v.log });
+      const v2 = fakeView(C, [A10, A150], 20, 70), nc2 = cardsFor(v2);
+      const res2 = await nc2.land(A150.id);
+      ok(res2 === 'card' && v2.log.includes('jumpToIndex(150)') && v2.log.includes('show(c150)'), '…and from a window loaded mid-history (20..70)', { res: res2, log: v2.log });
+      const v3 = fakeView(C, [A10, A150], 260, 310), nc3 = cardsFor(v3);
+      const res3 = await nc3.land(A10.id);
+      ok(res3 === 'card' && v3.log.includes('jumpToIndex(10)') && v3.log.includes('show(c10)'), '…and upward from the tail (the control: r1\'s road unchanged)', { res: res3, log: v3.log }); }
+    // THE DISPLACEMENT LAW, through the real landing: a slow read (its page held), then a NEWER press / the reader's own move
+    { const C = conv(310, [10, 290]), A10 = askOf(C, 10), A290 = askOf(C, 290);
+      const v = fakeView(C, [A10, A290], 260, 310), nc = cardsFor(v);
+      v.gate = deferred();
+      const first = nc.land(A10.id);           // press 1: its read upward waits
+      await new Promise((r) => setTimeout(r, 5));
+      v.gate.open(); v.gate = null;            // (the newer press below reads nothing)
+      const g2 = deferred(); v.gate = g2;      // hold press 1's next page
+      const second = await nc.land(A290.id);   // press 2, the person's latest choice: its card on screen
+      g2.open(); v.gate = null;
+      const r1 = await first;
+      ok(second === 'card' && r1 === null && !v.log.includes('jumpToIndex(10)') && v._windowStart === 260 && cardsOf(v).some((c) => c.id === A290.id && c.at === 'c290'), 'RED-able (r2 #3 — 9de5c902: the stale read finished and jumpToIndex(10) dragged the view to 0..50): the LATEST press stands — the older landing\'s read may finish, its jump never fires', { second, r1, log: v.log, ws: v._windowStart });
+      const v2 = fakeView(C, [A10, A290], 260, 310), nc2 = cardsFor(v2);
+      const g = deferred(); v2.gate = g;
+      const p = nc2.land(A10.id);
+      await new Promise((r) => setTimeout(r, 5));
+      v2._lastPositionAt = Date.now() + 5;    // the reader's own wheel, while the read is out
+      g.open(); v2.gate = null;
+      const r2 = await p;
+      ok(r2 === null && !v2.log.includes('jumpToIndex(10)') && v2._windowStart === 260, '…and the reader\'s own move (a wheel) while the read is out cancels it the same way', { r2, log: v2.log });
+      const v3 = fakeView(C, [A10, A290], 260, 310), nc3 = cardsFor(v3);
+      const r3 = await nc3.land(A10.id, { since: Date.now() - 1000 }).then((x) => x, () => 'threw');
+      v3._lastPositionAt = 0;
+      const v4 = fakeView(C, [A10, A290], 260, 310), nc4 = cardsFor(v4); v4._lastPositionAt = Date.now();
+      const r4 = await nc4.land(A10.id, { since: Date.now() - 1000 });
+      ok(r3 === 'card' && r4 === null && !v4.log.length, '…a For-you door\'s press time: a move the reader made after it (while the window opened) cancels the landing before it starts', { r3, r4, log: v4.log }); }
+    // A LANDING UNFOLDS WHAT IT LANDS ON (the r1 reviewer's resolved door): the quiet record of an answered ask, its record
+    // folded in a closed run (no box)
+    { const C = conv(300, [280]), done = { ...askOf(C, 280), status: 'done', resolvedBy: 'allowed' };
+      const v = fakeView(C, [], 250, 300, { resolved: [done] });
+      v._elements.get('c280')._box = false;    // the run fold: display:none
+      const nc = cardsFor(v);
+      const res = await nc.land(done.id);
+      ok(res === 'card' && v.log.indexOf('reveal') >= 0 && v.log.indexOf('reveal') < v.log.indexOf('show(c280)') && v._elements.get('c280').getClientRects().length > 0, 'RED-able (r2 #4 — 9de5c902: landed on a box-less record, «card» with nothing visible): the door of an answered ask whose record is folded OPENS the run, then lands', { res, log: v.log });
+      const v2 = fakeView(C, [], 250, 300, { resolved: [done] });
+      v2._elements.get('c280')._box = false; v2.revealRecord = (el) => { v2.log.push('reveal'); return false; }; // a record that stays without a box
+      const nc2 = cardsFor(v2);
+      const res2 = await nc2.land(done.id);
+      ok(res2 !== 'card' && !v2.log.some((l) => /NO BOX/.test(l)), '…a target that still has no box is never landed on (9de5c902 scrolled to it: the list ran to scrollTop 0)', { res: res2, log: v2.log }); }
+  }
+  // THE WIRING (source pins)
+  const CV = read('src/lib/chat-view.js'), CARD = read('src/lib/chat-needs-card.js'), UTA = read('src/lib/user-todos-actions.js');
+  const xt = CV.slice(CV.indexOf('  async _extendTop('), CV.indexOf('  async _extendBottom('));
+  ok(/this\._messageList\.insertBefore\(frag, ref\);\n\s+this\._loadingHistory = false;\n(?:\s+\/\/[^\n]*\n)+\s+if \(msgs\.length && Array\.isArray\(this\._messages\)\) \{ const slab = new Set\(msgs\.map\(\(m\) => m\.id\)\); this\._messages = \[\.\.\.this\._messages\.filter\(\(m\) => slab\.has\(m\.id\)\), \.\.\.this\._messages\.filter\(\(m\) => !slab\.has\(m\.id\)\)\]; \}/.test(xt) && /loadedRecords\(\) \{ return this\._messages \|\| \[\]; \}/.test(CV) && /typeof v\.loadedRecords === 'function' \? v\.loadedRecords\(\) : v\._messages/.test(CARD), 'r2 #1 chat-view OWNS THE ORDER: a page of older history goes FIRST in its records (it is drawn above the window); loadedRecords() is the order the cards read');
+  ok(/if \(stale && stale\(\)\) \{ this\._trace\('jumpToIndex:stale'/.test(CV) && /const gone = \(\) => gen !== this\._landGen \|\| !!view\._disposed \|\| !!view\._navigatedSince\?\.\(mark\);/.test(CARD) && /const gen = \+\+doorGen, since = Date\.now\(\);/.test(UTA), 'r2 #3 the displacement law: a landing\'s generation, the reader\'s own move and a dispose cancel it (jumpToIndex asks `stale` once its page is read); a door\'s newer press drops an older one');
+  ok(/if \(host && !host\.getClientRects\(\)\.length\) view\.revealRecord\?\.\(host\);\n\s+if \(!el\.getClientRects\(\)\.length\) return false;/.test(CARD) && /revealRecord\(el\) \{\n\s+if \(!el \|\| !el\.isConnected\) return false;\n\s+const run = this\._runs\?\.find\(\(r\) => !r\.open && r\.members\?\.includes\(el\)\);\n\s+if \(run\) this\._setRunOpen\(run, true\);/.test(CV), 'r2 #4 a landing unfolds the run that holds its record (chat-view revealRecord — a deliberate open); a target with no box is never landed on');
+  ok(/const keep = sig !== this\._placeSig && !hold && !view\._pinned \? this\._readerLine\(\) : null;/.test(CARD) && (CARD.match(/this\._keepReader\(keep\);/g) || []).length === 2, 'r2 minor the reader-position law for a swap: a pass that moves a card while the reader is scrolled away keeps the reader\'s top record where it stood (read only when the placement changed)');
+  for (const f of ['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js']) ok(read(f).includes(JSON.stringify('The record that filed it is not drawn in this chat') + ':'), `r2 ${f}: «the record is not drawn» is worded`);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

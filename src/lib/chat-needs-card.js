@@ -63,7 +63,7 @@ import { pressVerdict } from './press-arm.js'; // round 4 (#1): what an open mov
 import { UI_ICONS } from './icons.js';
 import { inboxModel } from './user-todos-actions.js';
 import { agoText, boxInUse } from './user-todos-row.js';
-import { needsOf, recordsOf, placementOf, tailPlan, filingIndex, chipWords, settledWords, KIND_WORDS } from '../foryou-actions.js'; // PURE: THE For-you action registry — which items, where, the words
+import { needsOf, recordsOf, placementOf, tailPlan, drawnAt, filingIndex, chipWords, settledWords, KIND_WORDS } from '../foryou-actions.js'; // PURE: THE For-you action registry — which items, where, the words
 
 /** A chat record as the PURE placement reads it: {id, ts, role, tool, cmd (a Bash call's command), out (its result)}. */
 export function leanRecord(m) {
@@ -104,7 +104,16 @@ export class NeedsCards {
     this._seen = new Set(); // the open ids the last pass saw — an id not in it is a FILING (it takes the open slot)
     this._slot = null;      // THE ACCORDION's open slot: the id of the one open card (a resolved id ⇒ every card folded)
     this._dockPick = null;  // THE TAIL's dock when the person landed an ask with no record there (else the newest loose one)
-    this._noRecord = new Set(); // asks proven to have no record in this conversation (the read upward reached its first one)
+    this._dockNoRecord = false; // …and that landing's read reached the conversation's first record: it has none (judged per landing, r2)
+    this._landGen = 0;      // THE DISPLACEMENT LAW (r2): the newest landing's generation — an older one never moves the reader
+    this._placeSig = '';    // what the last pass placed where — a pass that moves no card reads no layout
+  }
+
+  /** The loaded records in DISPLAY order, lean (the view's ordered accessor — _messages' insertion order put an older page's
+   *  last record at the end, r2). */
+  _records() {
+    const v = this.view;
+    return (typeof v.loadedRecords === 'function' ? v.loadedRecords() : v._messages || []).map(leanRecord);
   }
 
   /** Subscribe for the VIEW's life: its own controller, aborted by the window's (`signal`) or by the view's dispose (stop) —
@@ -167,7 +176,7 @@ export class NeedsCards {
     const probe = this._probe || (this._probe = new MutationObserver(() => { }));
     probe.observe(view._messageList, { subtree: true, childList: true, characterData: true, attributes: true, attributeOldValue: true });
     let placed = 0, recs = [];
-    try { placed = this._pass(); } finally { recs = probe.takeRecords(); probe.disconnect(); }
+    try { placed = this._pass({ hold }); } finally { recs = probe.takeRecords(); probe.disconnect(); }
     if (!wroteAny(recs)) return;
     this._roomCheck(); // the room a hold borrowed: its card folded, resolved or gone ⇒ given back (round 5, #3)
     // what the pass showed or hid moved the Allows below it: re-stamped where they now are — THIS list's (press-arm)
@@ -251,7 +260,7 @@ export class NeedsCards {
   }
 
   /** The pass's DOM work → how many cards it placed. */
-  _pass() {
+  _pass({ hold = false } = {}) {
     const view = this.view;
     const model = inboxModel(this.app);
     const keys = model.loaded ? this.keys() : null;
@@ -268,20 +277,28 @@ export class NeedsCards {
     }
     // the common case — nothing of this conversation's: no transcript walk on every appended record, only what is left to clear
     if (!open.length && !done.length) {
-      for (const c of view._messageList.querySelectorAll(':scope > * > .cn-cards')) if (!boxInUse(c.querySelector('.ut-reply'))) c.remove();
+      const drop = [...view._messageList.querySelectorAll(':scope > * > .cn-cards')].filter((c) => !boxInUse(c.querySelector('.ut-reply')));
+      const keep = drop.length && !hold && !view._pinned ? this._readerLine() : null;
+      for (const c of drop) c.remove();
       view._statusBar?.setNeeds?.(null);
       this._seen.clear(); // nothing waits: whatever is filed next is a filing
+      this._placeSig = '';
       if (this._openIds) { this._openIds = ''; try { view._updateRuns?.(); } catch { } }
+      this._keepReader(keep);
       return 0;
     }
-    const transcript = (view._messages || []).map(leanRecord);
-    const lastId = transcript.length ? transcript[transcript.length - 1].id : null;
+    // THE END is the DISPLAY order's last DRAWN record (r2 — the insertion order's last was an older page's, mid-history; a
+    // record drawn as nothing at the end left the dock nowhere)
+    const transcript = this._records();
+    const drawn = (id) => this._onScreen(id);
+    let lastId = null;
+    for (let k = transcript.length - 1; k >= 0 && lastId == null; k--) if (drawn(transcript[k].id)) lastId = transcript[k].id;
     // THE TAIL (lane needs-card-tail — the base docked EVERY card whose record was not on screen: six old asks stacked under
     // the newest message): a card whose record is on screen stands there; of the rest at most ONE docks at the END (the
     // person's pick, else the newest) and only in a window that reaches the live end; every one is in the chip
     const atEnd = !view._teleported && !(view._windowEnd < view._total);
-    const plan = tailPlan(open, transcript, { rendered: (id) => this._onScreen(id), atEnd, pick: this._dockPick });
-    if (this._dockPick != null && !plan.loose.includes(this._dockPick)) this._dockPick = null; // the pick answered, or its record on screen: the newest docks again
+    const plan = tailPlan(open, transcript, { rendered: drawn, atEnd, pick: this._dockPick });
+    if (this._dockPick != null && !plan.loose.includes(this._dockPick)) { this._dockPick = null; this._dockNoRecord = false; } // the pick answered, or its record on screen: the newest docks again
     // THE ACCORDION: the open slot moves on a FILING only — an id this view has not seen waiting (the newest of them; a
     // view's first pass sees every one as new); a resolution never moves it (round 3, #3)
     const fresh = open.filter((e) => !this._seen.has(e.item.id));
@@ -293,12 +310,13 @@ export class NeedsCards {
     const want = new Map(); // anchor element → [{item, kind, resolved, dock}]
     for (const e of [...open.map((x) => ({ ...x, resolved: false, fold: x.item.id !== openSlot })), ...done.map((x) => ({ ...x, resolved: true }))]) {
       let el = null;
-      if (e.resolved) { const p = placementOf(e.item, transcript, { resolved: true, more: !atEnd }); el = p.at != null ? view._elements.get(p.at) : null; }
+      if (e.resolved) { const p = placementOf(e.item, transcript, { resolved: true, more: !atEnd }); const at = drawnAt(transcript, p.at, drawn); el = at != null ? view._elements.get(at) : null; }
       else if (plan.at.has(e.item.id)) el = view._elements.get(plan.at.get(e.item.id));
       else if (plan.dock === e.item.id && lastId != null) {
         el = view._elements.get(lastId);
-        // no record at all: what is loaded starts at the conversation's first record (or the read upward reached it)
-        e.dock = { n: open.length, noRecord: this._noRecord.has(e.item.id) || !(view._windowStart > 0) };
+        // no record at all: the whole conversation is loaded (a tail window from its first record), or THIS landing's read
+        // reached the first record — judged per landing, never kept (r2: a set of «no record» ids lived for the view's life)
+        e.dock = { n: open.length, noRecord: (this._dockPick === e.item.id && this._dockNoRecord) || !(view._windowStart > 0) };
       }
       if (!el || !el.isConnected || el.parentNode !== view._messageList) continue;
       if (!want.has(el)) want.set(el, []);
@@ -307,6 +325,13 @@ export class NeedsCards {
     // the cards on screen now, by item id
     const have = new Map();
     for (const c of view._messageList.querySelectorAll(':scope > * > .cn-cards > .cn-card')) have.set(c.dataset.item, c);
+    // THE READER STAYS WHERE THEY ARE (r2 — the reader-position law for a swap: the docked ask answered from another client
+    // moved a scrolled reader 87 px): a pass that moves, adds, removes or re-states a card while the reader is scrolled away
+    // (not following the tail, not a landing's own pass) keeps the reader's top record where it stood — read only when the
+    // placement changed, so a pass that changes no card still reads no layout
+    const sig = [...want].map(([el, es]) => `${el.dataset.msgId}=${es.map((e) => `${e.item.id}:${e.resolved ? 'r' + (e.item.status || '') : e.fold ? 'f' : 'o'}${e.dock ? ':d' + e.dock.n + (e.dock.noRecord ? 'x' : '') : ''}`).join(',')}`).join('|') + '#' + [...have.keys()].join(',');
+    const keep = sig !== this._placeSig && !hold && !view._pinned ? this._readerLine() : null;
+    this._placeSig = sig;
     const placed = new Set();
     for (const [el, entries] of want) {
       let holder = el.querySelector(':scope > .cn-cards');
@@ -339,7 +364,26 @@ export class NeedsCards {
       this._openIds = openIds;
       try { view._updateRuns?.(); } catch { }
     }
+    this._keepReader(keep);
     return placed.size;
+  }
+
+  /** …and puts it back where it stood (absolute: whatever the browser's own scroll anchoring already did). */
+  _keepReader(keep) {
+    if (!keep || !keep.el.isConnected || !keep.el.getClientRects().length) return;
+    const d = keep.el.getBoundingClientRect().top - keep.top;
+    if (Math.abs(d) >= 1) { this.view._traceExpect?.('needsKeep'); this.view._messageList.scrollTop += d; }
+  }
+
+  /** The reader's top record — the first record whose bottom is below the list's top edge — and where it stands. */
+  _readerLine() {
+    const list = this.view._messageList, top = list.getBoundingClientRect().top;
+    for (const el of list.children) {
+      if (!el.classList.contains('chat-msg') || !el.getClientRects().length) continue;
+      const r = el.getBoundingClientRect();
+      if (r.bottom > top) return { el, top: r.top };
+    }
+    return null;
   }
 
   /** Is the record `id` on screen (its element in this list)? */
@@ -547,47 +591,75 @@ export class NeedsCards {
    *   ④ no record at all (filed before the conversation's first record) → an open card takes the dock at the END (the live
    *     end loaded first) and its dock line says why; anything else lands at the end.
    *  A press is intent (the view's door, _noteUserNav): no resume re-tail or bottom-follow overrules it — and nothing but a
-   *  press calls it (a broadcast never moves a reader). → 'card' | 'record' | 'dock' | 'end' | null */
-  async land(x) {
+   *  press calls it (a broadcast never moves a reader).
+   *  THE DISPLACEMENT LAW (r2 — a slow read upward finished after a newer press and dragged the view to the stale target):
+   *  every landing carries a generation; a newer landing, the reader's own move (a wheel, a key, a drag, the minimap, a
+   *  search, a jump) or the view's dispose cancels it — its read may finish, its jump never fires. `since` = a door's press
+   *  time: a move made while its window opened cancels it the same way. → 'card' | 'record' | 'dock' | 'end' | null */
+  async land(x, { since = null } = {}) {
     const view = this.view;
     if (view._disposed || !view._messageList) return null;
     const model = inboxModel(this.app), todos = model.todos || { open: [], resolved: [] };
     const id = typeof x === 'string' ? x : x && x.id;
     const item = [...(todos.open || []), ...(todos.resolved || [])].find((i) => i && i.id === id) || (x && typeof x === 'object' ? x : null);
     if (!item) return null;
+    if (since != null && view._navigatedSince?.(since)) return null;
+    const gen = this._landGen = (this._landGen || 0) + 1;
     view._noteUserNav?.('needsLand');
+    let mark = Date.now();
+    const gone = () => gen !== this._landGen || !!view._disposed || !!view._navigatedSince?.(mark);
+    const ours = (p) => { mark = Date.now(); return p; }; // this landing's own jump stamps the view's navigation as it starts
     const keys = this.keys() || [];
     const isCard = item.status === 'open' && needsOf([item], keys).length > 0;
     if (isCard) this._slot = item.id; // the accordion: the landed one is THE open card
-    // ① / ② what is loaded
+    // ① / ② what is loaded — a record drawn as nothing stands for the nearest drawn record after it (r2)
     const here = () => {
       this.render({ hold: true });
       const card = this._cardOf(item.id);
-      if (card && !card.classList.contains('cn-docked')) return this._show(card) && 'card';
+      if (card && !card.classList.contains('cn-docked')) return this._show(card) ? 'card' : null;
+      const rows = this._records();
       const atEnd = !view._teleported && !(view._windowEnd < view._total);
-      const p = placementOf(item, (view._messages || []).map(leanRecord), { resolved: true, more: !atEnd });
-      return p.at != null && this._onScreen(p.at) ? this._show(view._elements.get(p.at)) && 'record' : null;
+      const p = placementOf(item, rows, { resolved: true, more: !atEnd });
+      const at = drawnAt(rows, p.at, (rid) => this._onScreen(rid));
+      return at != null && this._show(view._elements.get(at)) ? 'record' : null;
     };
     const now = here();
     if (now) return now;
-    // ③ above what is loaded
-    if (view._windowStart > 0 && view._canPaginate !== false && typeof view.jumpToIndex === 'function') {
-      const idx = await this._anchorIndex(item);
-      if (view._disposed) return null;
-      if (idx != null && idx >= 0) {
+    // a seek slab has no index space: the live end first
+    if (view._teleported && typeof view.jumpToBottom === 'function') {
+      await ours(view.jumpToBottom());
+      if (gone()) return null;
+      const t2 = here();
+      if (t2) return t2;
+    }
+    // ③ its record outside what is loaded: the history read TOWARD it — up or down (r2: only upward, and an ask filed BELOW
+    //   a window loaded mid-history was called «no record») — and the window loaded there (jumpToIndex, S1's road)
+    let idx = null;
+    if (view._canPaginate !== false && typeof view.jumpToIndex === 'function') {
+      idx = await this._anchorIndex(item);
+      if (gone()) return null;
+      const inWindow = idx != null && idx >= (view._windowStart || 0) && idx < (view._windowEnd || 0);
+      if (idx != null && idx >= 0 && !inWindow) {
         let landed = null;
-        await view.jumpToIndex(idx, { land: () => { landed = here(); } });
+        await ours(view.jumpToIndex(idx, { land: () => { if (!gone()) landed = here(); }, stale: gone }));
         if (landed) return landed;
-      } else if (idx === -1) this._noRecord.add(item.id);
-    } else if (!(view._windowStart > 0)) this._noRecord.add(item.id);
-    // ④ no record: the dock at the live end (an open card), else the end
-    if (view._teleported || view._windowEnd < view._total) await view.jumpToBottom?.();
-    if (view._disposed) return null;
+        if (gone()) return null;
+      } else if (inWindow) showToast(t('The record that filed it is not drawn in this chat'), { type: 'info' }); // loaded, drawn as nothing (r2)
+    }
+    // ④ no record (−1: filed before the conversation's first record — a fact of THIS read), or not drawn, or unknown: an
+    //   open card takes the dock at the END (the live end loaded first) and its dock line says which; anything else, the end
+    if (view._teleported || view._windowEnd < view._total) {
+      await ours(view.jumpToBottom?.());
+      if (gone()) return null;
+      const t3 = here();
+      if (t3) return t3;
+    }
     if (isCard) {
       this._dockPick = item.id;
+      this._dockNoRecord = idx === -1;
       this.render({ hold: true });
       const card = this._cardOf(item.id);
-      if (card) return this._show(card) && 'dock';
+      if (card) return this._show(card) ? 'dock' : null;
     }
     view._scrollToBottom?.();
     return 'end';
@@ -601,6 +673,10 @@ export class NeedsCards {
     view._noteUserNav?.('jumpToAsk');
     view._setPinned(false, 'jumpToAsk');
     const host = el.closest('.chat-msg');
+    // A LANDING UNFOLDS WHAT IT LANDS ON (r2 — a resolved ask's record sat in a closed run, display:none, and the list ran to
+    // scrollTop 0): the run that holds it opened; a target with no box is never landed on
+    if (host && !host.getClientRects().length) view.revealRecord?.(host);
+    if (!el.getClientRects().length) return false;
     if (host) host.style.contentVisibility = 'visible';
     view._scrollElStable ? view._scrollElStable(el, { fit: true }) : el.scrollIntoView({ block: 'center' });
     el.classList.remove('chat-ask-flash'); void el.offsetWidth; el.classList.add('chat-ask-flash');
@@ -608,8 +684,9 @@ export class NeedsCards {
     return true;
   }
 
-  /** THE LANDING's read upward: the history ABOVE the loaded window through the view's own page read (the road its
-   *  page-up takes) → the server index of the record that filed `item`, -1 = none, null = could not read (PURE filingIndex). */
+  /** THE LANDING's read: the history outside the loaded window, toward the filing — up or down — through the view's own page
+   *  read (the road its paging takes) → the server index of the record that filed `item`, -1 = none (the conversation's
+   *  first record is after it), null = unknown (PURE filingIndex). */
   _anchorIndex(item) {
     const view = this.view;
     if (typeof view._fetchMessages !== 'function') return Promise.resolve(null);
@@ -618,6 +695,7 @@ export class NeedsCards {
       if (view._disposed) throw new Error('the view is gone');
       return (msgs || []).map(leanRecord);
     };
-    return filingIndex(item, readPage, { start: view._windowStart || 0, after: (view._messages || []).slice(0, 40).map(leanRecord) });
+    const start = view._windowStart || 0;
+    return filingIndex(item, readPage, { start, end: Number.isFinite(view._windowEnd) ? view._windowEnd : null, total: Number.isFinite(view._total) ? view._total : null, rows: this._records() });
   }
 }

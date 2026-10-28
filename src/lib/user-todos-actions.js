@@ -94,17 +94,21 @@ export function inboxModel(app) {
    *  lands at the record that filed it (chat-view.js landOnItem → chat-needs-card.js land: its card opened there, the
    *  history loaded up to it, else the dock at the end). A door is a PRESS — nothing else calls it, so a broadcast never
    *  moves a reader. scripts/test-user-todos-layout.mjs's door census: every conversation open from a For-you row is in
-   *  `jump`, and each lands through here. */
+   *  `jump`, and each lands through here. THE DISPLACEMENT LAW (r2): a newer door press drops an older one still waiting
+   *  for its view, and the press time goes with the landing (a move the reader made while the window opened cancels it). */
+  let doorGen = 0;
   const landOnFiling = (item) => {
     if (!item || !item.id) return;
     const keys = [item.sessionKey, item.about].filter((k) => typeof k === 'string' && k);
+    const gen = ++doorGen, since = Date.now();
     let n = 0;
     const tryLand = () => {
+      if (gen !== doorGen) return;
       for (const [winId, v] of app.sessions || []) {
         if (!v || v._disposed || typeof v.landOnItem !== 'function') continue;
         const wk = app.foryouRows?.keysForWin?.(winId) || [];
         if (!wk.some((k) => keys.includes(k))) continue;
-        if (loaded && ((v._messages && v._messages.length) || v._total > 0)) { v.landOnItem(item).catch(() => {}); return; }
+        if (loaded && ((v._messages && v._messages.length) || v._total > 0)) { v.landOnItem(item, { since }).catch(() => {}); return; }
       }
       if (++n < 40) setTimeout(tryLand, 250);
     };

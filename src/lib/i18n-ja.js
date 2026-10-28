@@ -11042,6 +11042,7 @@ export default {
   "This conversation is waiting for you: {all} — click to go to it": "この会話はあなたを待っています：{all} — クリックでそこへ移動します",
   "This conversation is waiting for you: {all} — click to list them, choose one to go to it": "この会話はあなたを待っています：{all} — クリックで一覧、選ぶとそこへ移動します",
   "Docked here — asked before this conversation's record was kept": "末尾に固定 — この会話の記録が残る前に尋ねられたものです",
+  "The record that filed it is not drawn in this chat": "これを出した記録はこのチャットに表示されていません",
   "Docked here — it was asked further up the conversation": "末尾に固定 — 会話のもっと上で尋ねられたものです",
   "{n} waiting — the status bar lists them all": "全 {n} 件が待っています — ステータスバーに一覧があります",
   "Waiting for you — newest first": "あなた待ち — 新しい順",

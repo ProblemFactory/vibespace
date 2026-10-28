@@ -236,7 +236,8 @@ function tailPlan(open, transcript, { rendered = () => true, atEnd = true, pick 
   const at = new Map(), loose = [];
   for (const e of list) {
     const p = placementOf(e.item, rows, { more: !atEnd });
-    if (p.how !== 'end' && p.at != null && rendered(p.at)) at.set(e.item.id, p.at);
+    const el = p.how !== 'end' && p.at != null ? drawnAt(rows, p.at, rendered) : null;
+    if (el != null) at.set(e.item.id, el);
     else loose.push(e);
   }
   const newest = loose.reduce((a, e) => (!a || (Number(e.item.createdAt) || 0) >= (Number(a.item.createdAt) || 0) ? e : a), null);
@@ -244,29 +245,76 @@ function tailPlan(open, transcript, { rendered = () => true, atEnd = true, pick 
   return { at, dock, waiting: [...list].reverse().sort((a, b) => byCreated(b, a)), loose: loose.map((e) => e.item.id) };
 }
 
-/** THE LANDING's read upward (lane needs-card-tail — R2: a chip row, R5: a For-you door, whose ask was filed above what the
- *  chat has loaded): the history ABOVE a window (`start` = the index of its first record, `after` = its first lean records)
- *  read a page at a time from the window's top by `readPage(offset, limit)` → lean records, to the page holding the filing
- *  → the index of the record that filed `item` (placementOf over that page + the records that follow it: the result naming
- *  it comes after its call), -1 = none (the filing is older than the conversation's first record — filed before what its
- *  record holds), null = could not read (a page failed, or more than `pages` pages). */
-async function filingIndex(item, readPage, { start = 0, after = [], page = 200, pages = 60 } = {}) {
-  const at = Number(item && item.createdAt) || 0;
+/** A card's anchor that is LOADED but drawn as nothing (a hidden unknown-record notice — chat-view keeps the record and
+ *  draws no element) stands at the nearest DRAWN record after it — the end of what is loaded if none (lane needs-card-tail
+ *  r2: such a card vanished into the chip, or docked saying «further up» though it was filed at the end).
+ *  `rows` = the loaded records in DISPLAY order, `rendered(id)` = is that record drawn → a drawn record id | null */
+function drawnAt(rows, id, rendered = () => true) {
+  if (id == null) return null;
+  if (rendered(id)) return id;
+  const k = rows.findIndex((r) => r && r.id === id);
+  if (k < 0) return null;
+  for (let j = k + 1; j < rows.length; j++) if (rows[j] && rendered(rows[j].id)) return rows[j].id;
+  for (let j = k - 1; j >= 0; j--) if (rows[j] && rendered(rows[j].id)) return rows[j].id; // nothing drawn after it: the end
+  return null;
+}
+
+const tsOf = (r) => Number(r && r.ts) || 0;
+/** THE LANDING's read (lane needs-card-tail — R2: a chip row, R5: a For-you door, whose ask was filed outside what the chat
+ *  has loaded): where in the WHOLE conversation is the record that filed `item`? The loaded window (`rows` = its lean records
+ *  in display order, `start`/`end` = its first record's index and the one past its last, `total` = the conversation's count)
+ *  first; else the history read a page at a time by `readPage(offset, limit)` → lean records, TOWARD the filing (round 2: a
+ *  landing read only upward, and an ask filed BELOW a window loaded mid-history — after any landing, search or minimap jump
+ *  — was called «no record»):
+ *    DOWN from the window's end — nothing loaded lies past the filing and the conversation goes on;
+ *    UP from its top — the window starts after the conversation's first record (a page whose first record is inside the 2 s
+ *       skew margin is not the filing's: the page above is read too — round 2, a record opening a page made a −1).
+ *  → the index of the record that filed it (placementOf over what was read + the records around it); −1 = NO RECORD, a fact
+ *  only when the conversation's first record is read and lies after the filing (filed before what its record holds); null =
+ *  unknown (a page failed, more than `pages` pages, or nothing read lies past the filing) — never claimed «no record». */
+async function filingIndex(item, readPage, { start = 0, end = null, total = null, rows = null, after = [], page = 200, pages = 60 } = {}) {
+  const at = tsOf(item && { ts: item.createdAt });
   if (!at || typeof readPage !== 'function') return null;
-  let end = Number(start) || 0, next = Array.isArray(after) ? after.slice(0, 40) : [];
-  for (let n = 0; end > 0 && n < pages; n++) {
-    const from = Math.max(0, end - page);
-    let rows;
-    try { rows = await readPage(from, end - from); } catch { return null; }
-    if (!Array.isArray(rows) || !rows.length) return null;
-    const first = rows.find((r) => r && Number(r.ts));
-    if (from > 0 && first && Number(first.ts) > at + SKEW_MS) { next = rows.slice(0, 40); end = from; continue; } // the whole page came after the filing
-    const seg = [...rows, ...next]; // contiguous: the page, then the records that follow it
-    const p = placementOf(item, seg, { resolved: true, more: true });
-    const k = p.at != null ? seg.findIndex((r) => r && r.id === p.at) : -1;
-    return k < 0 ? -1 : from + k;
+  const win = Array.isArray(rows) ? rows.filter((r) => r && r.id != null) : Array.isArray(after) ? after.slice(0, 40) : [];
+  const s0 = Math.max(0, Number(start) || 0), e0 = end == null ? s0 + win.length : Math.max(s0, Number(end) || 0);
+  const t0 = total == null ? e0 : Math.max(e0, Number(total) || 0);
+  const past = (list) => list.some((r) => tsOf(r) > at + SKEW_MS);
+  const hit = (seg, base, more) => { const p = placementOf(item, seg, { resolved: true, more }); const k = p.at != null ? seg.findIndex((r) => r && r.id === p.at) : -1; return k < 0 ? null : base + k; };
+  // the window itself (a record drawn as nothing is still a record: its index is known)
+  if (Array.isArray(rows)) { const k = hit(win, s0, e0 < t0); if (k != null) return k; }
+  // DOWN: the filing lies after what is loaded
+  if (e0 < t0 && !past(win)) {
+    const ctx = win.slice(-200), base = e0 - ctx.length, got = [];
+    let from = e0, found = false, ended = false;
+    for (let n = 0; from < t0 && n < pages; n++) {
+      let rs;
+      try { rs = await readPage(from, Math.min(page, t0 - from)); } catch { return null; }
+      if (!Array.isArray(rs)) return null;
+      if (!rs.length) { ended = true; break; } // the conversation ends sooner than it was counted
+      got.push(...rs); from += rs.length;
+      if (past(rs)) { found = true; break; } // a record past the filing (+ the skew margin): the filing lies inside what was read
+    }
+    if (!found && !ended && from < t0) return null; // out of pages
+    return hit([...ctx, ...got], base, found && from < t0); // found, or the conversation's end reached (the filing at its very end)
   }
-  return end > 0 ? null : -1;
+  // UP: the filing lies before what is loaded
+  let top = s0, next = win.slice(0, 40);
+  for (let n = 0; top > 0 && n < pages; n++) {
+    const from = Math.max(0, top - page);
+    let rs;
+    try { rs = await readPage(from, top - from); } catch { return null; }
+    if (!Array.isArray(rs) || !rs.length) return null;
+    const first = rs.find((r) => tsOf(r));
+    top = from;
+    if (from > 0 && first && tsOf(first) > at + SKEW_MS) { next = rs.slice(0, 40); continue; } // the whole page came after the filing
+    if (from > 0 && first && tsOf(first) > at - SKEW_MS) { next = [...rs, ...next]; continue; } // its first record inside the skew margin: the page above too
+    const seg = [...rs, ...next]; // contiguous: the page, then the records that follow it
+    const k = hit(seg, from, true);
+    if (k != null) return k;
+    return from === 0 && past(seg) ? -1 : null;
+  }
+  if (top > 0) return null;
+  return past(win) ? -1 : null; // the window starts at the first record and lies after the filing
 }
 
 /** The default formatter (the suite and the hub pass none): English with `{param}` filled — the client passes its `t`. */
@@ -343,4 +391,4 @@ function filedLine(x, id, tray = null) {
   return fmt(FILED[s.at], { what: fmt(ONE[KINDS.includes(s.kind) ? s.kind : 'check']), tray: where, on: s.on || 'its own card in this conversation' }) + (id ? ` (${id})` : '');
 }
 
-module.exports = { ROWS, ROW_OF, ANSWERS, CARDS, ACTION_IDENTITY, WAIT_ACTIONS, CARD_ACTION_TYPES, ANSWER_ACTION_TYPES, KINDS, KIND_WORDS: ONE, SURFACES, BY_TYPE, BY_ORIGIN, IDENTITY_FIELDS, SKEW_MS, FILED_WINDOW_MS, needOf, needsOf, recordsOf, placementOf, tailPlan, filingIndex, chipWords, settledWords, surfaceOf, FILED, filedLine };
+module.exports = { ROWS, ROW_OF, ANSWERS, CARDS, ACTION_IDENTITY, WAIT_ACTIONS, CARD_ACTION_TYPES, ANSWER_ACTION_TYPES, KINDS, KIND_WORDS: ONE, SURFACES, BY_TYPE, BY_ORIGIN, IDENTITY_FIELDS, SKEW_MS, FILED_WINDOW_MS, needOf, needsOf, recordsOf, placementOf, tailPlan, drawnAt, filingIndex, chipWords, settledWords, surfaceOf, FILED, filedLine };

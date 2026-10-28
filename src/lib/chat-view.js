@@ -2826,6 +2826,10 @@ class ChatView {
         const ref = (firstEl && firstEl.parentNode === this._messageList) ? firstEl : this._messageList.firstChild;
         this._messageList.insertBefore(frag, ref);
         this._loadingHistory = false;
+        // THE LOADED RECORDS STAY IN DISPLAY ORDER (lane needs-card-tail r2): the slab is drawn ABOVE the window, so its
+        // records go FIRST in _messages too — pushed after it, the older page's last record read as the chat's end (the
+        // docked needs card stood mid-history under it); loadedRecords() is the order every reader takes
+        if (msgs.length && Array.isArray(this._messages)) { const slab = new Set(msgs.map((m) => m.id)); this._messages = [...this._messages.filter((m) => slab.has(m.id)), ...this._messages.filter((m) => !slab.has(m.id))]; }
         this._windowStart = newStart;
         // MEASURED heights for the fresh slab (inc-mubvu3a4-x8sb): the anchor
         // restore below and the trim's zone read real geometry, not the 80 px
@@ -3668,8 +3672,9 @@ class ChatView {
   noteHistoryInFlight(on) { this._historyInFlight = !!on; }
 
   // Jump to a specific message index: replace window entirely. `land` (lane needs-card-tail — the needs cards' landing):
-  // called with the target element in place of the default landing (its own element, a card inside it, landed whole)
-  async jumpToIndex(targetIdx, { land = null } = {}) {
+  // called with the target element in place of the default landing (its own element, a card inside it, landed whole);
+  // `stale` (r2 — a stale landing never moves the reader): asked once the page is read — true ⇒ nothing is replaced
+  async jumpToIndex(targetIdx, { land = null, stale = null } = {}) {
     this._noteUserNav('jumpToIndex');   // a chosen destination — the resume re-tail must never overrule it
     this._trace('jumpToIndex', { idx: targetIdx });
     this._traceExpect('jumpToIndex');
@@ -3682,11 +3687,13 @@ class ChatView {
     const endLoad = this._beginHistoryLoad(t('Loading messages…'));
     try { msgs = await this._fetchMessages(start, end - start); }
     catch (e) {
+      if (stale && stale()) return;
       this._showHistoryStatus(t('Couldn\'t load that part of the conversation'), {
         kind: 'error', retry: () => this.jumpToIndex(targetIdx),
       });
       return;
     } finally { endLoad(); }
+    if (stale && stale()) { this._trace('jumpToIndex:stale', { idx: targetIdx }); return; } // a newer press / the reader's own move came first
 
     // Clear and rebuild DOM
     this._messageList.querySelectorAll('.chat-msg, .chat-msg-system').forEach(el => el.remove());
@@ -5527,7 +5534,21 @@ class ChatView {
 
   /** lane needs-card-tail (R5): a For-you door to this conversation lands `item` at the record that filed it — THE ONE
    *  LANDING (chat-needs-card.js land: its card opened there, the history loaded up to it, or the dock at the end). */
-  landOnItem(item) { return this._needsCards ? this._needsCards.land(item) : Promise.resolve(null); }
+  landOnItem(item, opts) { return this._needsCards ? this._needsCards.land(item, opts) : Promise.resolve(null); }
+
+  /** THE LOADED RECORDS IN DISPLAY ORDER (lane needs-card-tail r2): the window's records first to last as the list draws them
+   *  (a record drawn as nothing keeps its place) — the last one is the END. _extendTop keeps _messages in this order. */
+  loadedRecords() { return this._messages || []; }
+
+  /** A LANDING'S TARGET IS DRAWN (lane needs-card-tail r2 — a For-you door landed on a record folded in a closed run,
+   *  display:none, and the list ran to scrollTop 0): the run that holds the record `el` opened, as a deliberate open (the
+   *  peer card's Show does the same) → is it drawn now (a box) */
+  revealRecord(el) {
+    if (!el || !el.isConnected) return false;
+    const run = this._runs?.find((r) => !r.open && r.members?.includes(el));
+    if (run) this._setRunOpen(run, true);
+    return el.getClientRects().length > 0;
+  }
 
   /** THE WAITING CHIP's click (lane S1): go to the ask the user must answer — the first one, or
    *  `requestId` — scrolled to the middle and flashed. A card outside the rendered window is paged in
