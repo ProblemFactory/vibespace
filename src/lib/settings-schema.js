@@ -896,14 +896,15 @@ const SETTINGS_SCHEMA = {
     description: t('The id or label of a browser profile (Browser panel / vibespace-browser profiles) that new sessions are pinned to when nothing more specific applies. Empty (default): sessions browse an ephemeral browser and keep no logins. A session\'s own choice, its conversation\'s earlier pin and its Task Group\'s default all outrank this.'),
     category: t('Agent browser'), liveApply: true,
   },
-  // lane vault-use-grants (the owner 2026-10-27 「每个密码请求都要我同意太麻烦了！」): an agent's paste request that names its hosts
-  // (`vibespace-vault request … --host <h>`) GRANTS the conversation that asked — it may use what it asked for, for those
-  // hosts, with no card each time (the request box says so before the paste; the Vault window's «Who may use it…» changes it).
-  // Read by src/server/vault-paste-door.js at the request AND at the paste. OFF: 8 hours of runs, each new shape asking first.
+  // lane vault-use-grants (the owner 2026-10-27 「每个密码请求都要我同意太麻烦了！」; round 6): an agent's paste request that names its
+  // hosts (`vibespace-vault request … --host <h>`) and this setting ON ⇒ the paste opens an 8-HOUR run grant to the REQUESTING
+  // conversation for those hosts (a new kind of command still shows its card; a vault lock ends it; the entry switch is NOT
+  // flipped). Read by src/server/vault-paste-door.js at the request AND at the paste. OFF: the paste grants nothing — the
+  // receipt tells the agent to request the secret and the owner opens the entry in the Vault window.
   'vault.requestGrantsRequester': {
     type: 'boolean', default: true,
     label: t('A pasted secret may be used by the conversation that asked for it'),
-    description: t('When an agent asks you to paste a secret and names the hosts it is for, the conversation that asked may use it for those hosts without a card each time — the request box says so before you paste, and the Vault window\'s «Who may use it…» changes it or takes it back. OFF: it may use it for 8 hours, and every new kind of command asks you first.'),
+    description: t('When an agent asks you to paste a secret and names the hosts it is for, the conversation that asked may use it in commands to those hosts for 8 hours — a new kind of command still shows you its card first, and locking the vault ends it. The entry\'s own «Usable by agent runs» switch is untouched. OFF: a paste grants nothing — the agent\'s receipt tells it to request the secret, and you open the entry in the Vault window.'),
     category: t('Integration'), liveApply: true,
   },
   // lane vault-use-grants (R4): THE POLICY JUDGE — an entry's policy (its 「Who may use it…」) lets the decision API approve a run the

@@ -475,6 +475,12 @@ const HOSTNAME = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$|^loca
 // place of this reader. At train-C the two fold into ONE `shape.routeHosts`/`routeOpaque`; `destinationsOf` reads the field.
 // See docs/kb-bugfix-invariants.md «### Round 3 — As-built integration note».
 const SSH_LOCAL_O = new Set(['proxycommand', 'localcommand', 'knownhostscommand', 'permitlocalcommand', 'match']);   // ssh -o keys that run a LOCAL command / redirect — where it goes cannot be told (fail closed)
+// lane vault-use-grants round 6 (BLOCKER item 1): the `-o` keys whose VALUE is a host the ssh family resolves through
+// ~/.ssh/config (from `ssh -G`'s keywords) — subject to the alias law, read by the ONE reader `addSshHost`. `-J` and `-W`
+// are short spellings of the same destination family (`ssh -G -J router` prints `proxyjump router`, identical to
+// `-o ProxyJump=router`). A missed spelling is a missing ROW here (or a short flag routed to addSshHost), never a branch
+// that forgot the alias check — so a single-label jump host can no longer slip past with `always:true`.
+const SSH_HOST_OPTS = new Set(['proxyjump', 'hostname']);
 // lane vault-use-grants round 4 (MINOR item 6): wget `-e CMD` runs ONE .wgetrc command. Only a REVIEWED, pinned set of
 // NON-routing / non-credential / non-file-redirect commands is safe to let a grant stand for; every other command (input,
 // *_proxy, use_proxy, post_file, load_cookies, base, certificate, private_key, header, referer, user, password, ask_password,
@@ -499,14 +505,14 @@ const CURL_SCHEMES = new Set(['dict', 'file', 'ftp', 'ftps', 'gopher', 'gophers'
 // EVERY spelling — bare `host`, `user@host`, `host:path`, `ssh://`, `scp://`, `sftp://`, `git+ssh://`, `-o HostName=`, `-F`.
 // A host that is not a dotted name / an address / localhost is an ALIAS the agent can redefine ⇒ OPAQUE (the card, no «always»).
 const SSH_SCHEME = /^(?:ssh|sftp|scp|git\+ssh|ssh\+git|svn\+ssh)$/i;
-const sshAlias = (h) => { const x = String(h || '').toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, ''); return !!x && x !== 'localhost' && !/[.:]/.test(x) && !/^[a-z]$/.test(x); };   // a single label (no dot = not a dotted name, no colon = not a bare IPv6), not localhost, not a one-letter drive
+const sshAlias = (h) => { const x = String(h || '').toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, ''); return !!x && x !== 'localhost' && !/[.:]/.test(x); };   // round 6 item 2: a single label (no dot = not a dotted name, no colon = not a bare IPv6), not localhost — a ONE-LETTER host is an alias too (a drive letter is a LOCAL `X:path`, read only in the scpLike branch below, NEVER a host)
 /** The host of an ssh-family target positional, in EVERY spelling (scheme URI → new URL; `host:path` → before the first `:`;
  *  bare `[user@]host`), or null if the positional is not a target (a local path, a refspec). */
 function sshTargetHost(p, row) {
   const s = String(p);
   const sm = /^([a-z][a-z0-9+.-]*):\/\//i.exec(s);
   if (sm) { if (!SSH_SCHEME.test(sm[1])) return null; try { return new URL(s).hostname || null; } catch { return null; } }   // only SSH-transport schemes resolve through ~/.ssh/config — http(s)/git:// do not
-  if (row.scpLike) { const m = /^(?:[\w.+-]+@)?(\[[0-9a-f:.]+\]|[A-Za-z0-9.-]{1,253}):(?!\/\/)/i.exec(s); if (m) return m[1]; }
+  if (row.scpLike) { const m = /^(?:[\w.+-]+@)?(\[[0-9a-f:.]+\]|[A-Za-z0-9.-]{1,253}):(?!\/\/)/i.exec(s); if (m) return /^[A-Za-z]$/.test(m[1]) ? null : m[1]; }   // round 6 item 2: a single-letter `X:path` is a LOCAL drive (`C:\x`), never a host — the drive-letter exemption lives HERE, not in sshAlias
   if (row.sshTarget) { const m = /^(?:[\w.+-]+@)?([A-Za-z0-9.-]{1,253})$/.exec(s); if (m) return m[1]; }
   return null;
 }
@@ -533,6 +539,9 @@ const httpieTarget = (ps) => (ps.length >= 2 && /^[A-Za-z]+$/.test(ps[0]) ? ps.s
 function routeTargetsOf(row, kind, hosts, keyed, positionals, plainEnv) {
   const out = new Set(hosts), add = (h, port = null) => { const n = normHost(h, port); if (n) out.add(n); };
   let opaque = false;
+  // round 6 (BLOCKER item 1): the ONE reader every host-bearing ssh option goes through — it adds the destination AND
+  // applies the alias law, so a jump host (`-J`), a `-W host`, an `-o ProxyJump=`/`-o HostName=` all fail closed on an alias.
+  const addSshHost = (h) => { const a = splitAuthority(String(h).trim()); if (a.host) { add(a.host, a.port); if (sshAlias(a.host)) opaque = true; } };
   if (!(row && kind === 'tool')) { for (const h of hosts) out.add(h); return { hosts: [...out].filter(Boolean), opaque }; }
   if (row.proxyEnv) for (const e of plainEnv || []) if (/^(?:https?|all|ftp)_proxy$/i.test(e.name) && String(e.value || '').trim()) opaque = true;   // a proxy env var intercepts every request — where it goes cannot be told
   for (const kv of keyed || []) {
@@ -543,9 +552,9 @@ function routeTargetsOf(row, kind, hosts, keyed, positionals, plainEnv) {
     else if (flag === '--doh-url') { const hs = urlHosts(val); if (hs.length) hs.forEach((h) => out.add(h)); else if (val.trim()) opaque = true; }
     else if (flag === '--unix-socket' || flag === '--abstract-unix-socket' || flag === '--dns-servers' || flag === '--alt-svc') { if (val.trim() || flag.includes('unix')) opaque = true; }   // a local socket / an attacker-chosen resolver / an alt route — a destination the grant can never name
     else if (flag === '-e' || flag === '--execute' || flag === '--rsh') { if (row.name === 'rsync') opaque = true; else if (!WGET_SAFE_E.has(String(val).split('=')[0].trim().toLowerCase())) opaque = true; }   // rsync -e <remote shell>; wget -e <.wgetrc cmd> opaque unless a reviewed non-routing command (round 4: -e input=FILE leaked)
-    else if (flag === '-o') { const e = val.indexOf('='), ve = val.indexOf(' '), c = e < 0 ? ve : ve < 0 ? e : Math.min(e, ve); const k = (c < 0 ? val : val.slice(0, c)).trim().toLowerCase(), rest = c < 0 ? '' : val.slice(c + 1).trim(); if (SSH_LOCAL_O.has(k)) opaque = true; else if (k === 'proxyjump' || k === 'hostname') for (const h of rest.split(/[,\s]+/)) { const a = splitAuthority(h); if (a.host) { add(a.host, a.port); if (sshAlias(a.host)) opaque = true; } } }   // ssh -o; round 5 item 1: an `-o HostName=` carrying a single-label alias is subject to the alias law (`-F <config>` stays `config-file` — it withholds «always»; a remap of a dotted host through a config is the acknowledged ~/.ssh/config gap, open on both trees)
-    else if (flag === '-J') { for (const h of val.split(',')) { const a = splitAuthority(h.trim()); if (a.host) add(a.host, a.port); } }   // ssh jump host(s)
-    else if (flag === '-W') { const a = splitAuthority(val); if (a.host) add(a.host, a.port); }   // ssh -W host:port
+    else if (flag === '-o') { const e = val.indexOf('='), ve = val.indexOf(' '), c = e < 0 ? ve : ve < 0 ? e : Math.min(e, ve); const k = (c < 0 ? val : val.slice(0, c)).trim().toLowerCase(), rest = c < 0 ? '' : val.slice(c + 1).trim(); if (SSH_LOCAL_O.has(k)) opaque = true; else if (SSH_HOST_OPTS.has(k)) for (const h of rest.split(/[,\s]+/)) addSshHost(h); }   // ssh -o; round 5/6: an `-o HostName=`/`-o ProxyJump=` carrying a single-label alias is subject to the alias law via addSshHost (`-F <config>` stays `config-file` — it withholds «always»; a remap of a dotted host through a config is the acknowledged ~/.ssh/config gap, open on both trees)
+    else if (flag === '-J') { for (const h of val.split(',')) addSshHost(h); }   // round 6 item 1: a jump host is `-o ProxyJump=` by another spelling — the SAME alias law (addSshHost)
+    else if (flag === '-W') { addSshHost(val); }   // ssh -W host:port — the forwarded destination, under the alias law too
     else if (flag === '-c' || flag === '--config-env' || flag === '-D' || flag === '-S' || flag === '-L' || flag === '-R') opaque = true;   // git config / a forward can redirect where it goes
   }
   if (/^(?:curl|wget)$/.test(row.name)) for (const p of positionals) { const t = targetOf(p); if (t.host) add(t.host); else if (t.unread) opaque = true; }   // every bare positional is a destination; a glob / numeric address is blind

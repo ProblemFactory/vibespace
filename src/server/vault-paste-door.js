@@ -14,19 +14,21 @@
  *   · THE WRITERS: a registry field ⇒ the integration store's setIntegration (trimmed and validated there by the field's
  *     own `validate`, sealed, its masked view broadcast — a refusal names the field and the rule, never the value); a free
  *     entry ⇒ the engine's secretPut under `secret:<10 hex>` (the label, the kind and a note naming who asked and why
- *     ride beside the box) — and the conversation that asked may use that NEW entry in runs for 8 hours (the run door's
- *     grantPasted: a lock ends it, each new command shape still shows its card). A LOCKED vault ⇒ `vault_locked` by name,
+ *     ride beside the box) — and, with the setting below on, the conversation that asked may use that NEW entry in runs for 8
+ *     hours (the run door's grantPasted: a lock ends it, each new command shape still shows its card). A LOCKED vault ⇒ `vault_locked` by name,
  *     nothing written, the item stays (the box says it, 解锁… inline); NOT SET UP ⇒ a free entry `vault_not_set_up` (a
  *     field still goes to its store, which keeps its key beside its data until the vault is set up).
  *   · THE VALUE is a request body field the route took OFF the body before this door saw it: handed to the writer, then
  *     dropped — never on the item, the audit, a log line, a broadcast, an answer or the receipt.
  *   · THE USE LAW: a stored paste is a `vault-use` of its entry for the conversation that asked (door `paste`, its purpose,
  *     a receipt) — `vibespace-vault uses` reads it back; the agent's receipt names the same receipt.
- *   · THE DEFAULT GRANT (lane vault-use-grants): a new entry's request that names its hosts (`--host`) — and the setting
- *     `vault.requestGrantsRequester` on (default) — says on its card that the conversation that asked will be allowed to use
- *     it for those hosts; the paste writes that vault-use grant (src/server/vault-use-grants.js, by 'request') and the entry
- *     records the hosts and who asked (the Vault window's search, its «filled by you · asked for by …» origin). The setting
- *     is read again at the paste: switched off meanwhile ⇒ no grant (the 8-hour run grant of before, as without hosts).
+ *   · THE 8-HOUR GRANT (lane vault-use-grants round 6): a new entry's request that names its hosts (`--host`) — and the setting
+ *     `vault.requestGrantsRequester` on (default) — says on its card that the conversation that asked may use it in commands to
+ *     those hosts for 8 HOURS; the paste opens that run grant (the run door's grantPasted) to the REQUESTING conversation ONLY —
+ *     a new kind of command still shows its card, a vault lock ends it, and the entry's own «Usable by agent runs» switch is
+ *     untouched — and records the hosts and who asked (the Vault window's «filled by you · asked for by …» origin). The setting
+ *     is read again at the paste: switched OFF meanwhile ⇒ NOTHING is granted — the receipt tells the agent to request the
+ *     secret and the owner opens the entry in the Vault window.
  *   · BOUNDS: 4 open requests per conversation and 64 on the hub (then too_many_requests); the same conversation × place
  *     while one is open ⇒ its id again (already: 'open'); after a refusal the same place is quiet for 10 minutes
  *     (request_quiet — the agent was told so in its receipt).
@@ -171,7 +173,7 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     if (!q.target) { settle(q, 'refused', { why: 'gone' }); return named('ask_unknown'); }   // its place left the registry since it was filed
     const st = vault.state();
     const who = VB.actorName(q.who, 'a conversation');
-    let entry = null, ref = null, grantHours = null, standing = null;
+    let entry = null, ref = null, grantHours = null;
     if (q.target.kind === 'field') {
       if (st === 'locked') return named('vault_locked');   // the box says it, 解锁… inline — nothing written, the item stays
       if (!integrations || typeof integrations.setIntegration !== 'function') return named('store_failed');
@@ -200,7 +202,7 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
     let receipt = null;
     try { receipt = (vault.noteUse(entry, { by: 'agent', door: 'paste', conv: q.scope }, { outcome: 'ok', purpose: q.purpose, actor: who }) || {}).receipt || null; } catch { /* the store answered: the use line is the audit's */ }
     audit('vault-secret-stored', { by: String(by).slice(0, 40), conv: q.scope, requestId: id, place: q.target.kind === 'field' ? P.intoOf(q.target) : entry, receipt });
-    settle(q, 'stored', { ref, grantHours, receipt, standing });
+    settle(q, 'stored', { ref, grantHours, receipt });
     return { ok: true, outcome: 'stored', ...(q.target.kind === 'field' ? { into: P.intoOf(q.target) } : { entry, ref }) };
   }
 

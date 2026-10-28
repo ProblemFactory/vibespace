@@ -480,6 +480,8 @@ function registerRunRoutes(app, { run, activeSessions, getJobs, contents, who, p
   app.post('/api/vault/use-policy', person((req) => { const [page] = take(req, 'page'); const b = req.body || {}; return run.setPolicy({ id: String(b.id || ''), text: typeof b.text === 'string' ? b.text : '', reauthed: reauthedOf(req, page), by: 'user' }); }));
   app.post('/api/vault/use-policy/revoke', person((req) => { const b = req.body || {}; return run.revokeApprovals({ id: String(b.id || ''), by: 'user' }); }));
   app.post('/api/vault/use-grants/revoke', person((req) => { const b = req.body || {}; const ug = run.useGrants; if (!ug) return { ok: false, code: 'no_use_grants' }; return ug.revoke(String(b.id || ''), String(b.principal || ''), { by: 'user' }); }));
+  // lane vault-use-grants round 6 (MAJOR item 4): un-pause ONE member the owner's OFF paused — a widening, so it needs this page's 验证是你 window.
+  app.post('/api/vault/use-grants/resume', person((req) => { const [page] = take(req, 'page'); const b = req.body || {}; return run.resumeGrant({ id: String(b.id || ''), principal: String(b.principal || ''), reauthed: reauthedOf(req, page), by: 'user' }); }));
   app.post('/api/vault/request/asks/:askId', person((req) => { const [page] = take(req, 'page'); const b = req.body || {}; return run.answerRequest(String(req.params.askId), { answer: b.answer, reauthed: b.answer !== 'deny' && reauthedOf(req, page), by: 'user' }); }));   // lane vault-manual-and-lock: once | 8h need this page's 验证是你 (a grant opens the entry as the switch does); deny is a click
 }
 

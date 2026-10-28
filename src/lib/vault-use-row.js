@@ -62,20 +62,28 @@ export function useExtras(row, { app = null, refresh = () => {} } = {}) {
     if (!u) return;
     if (u.unknown) { host.append(el('div', 'vw-use-bad', t('Who may use it could not be read — it is refused as it is (never read wider). Save it again to repair it.'))); return; }
     const live = (u.to || []).filter(Boolean);
-    const paused = live.length && !!(r && r.run && r.run.paused);   // round 2 MAJOR: the entry was turned OFF — its grants are kept but suspended
+    const paused = live.length && !!((r && r.run && r.run.paused) || u.unverified);   // round 2 MAJOR: the entry was turned OFF — its grants are kept but suspended; round 6 (MINOR item 6): a locked vault cannot verify — the chips are greyed, listed «unverified», never as held grants
     if (live.length) {
       const chips = el('div', `vw-ak-grants vw-use-chips${paused ? ' vw-use-paused' : ''}`);
       chips.append(el('span', 'vw-ak-to vw-use-to', t('Used with no card by:')));
       for (const m of live) {
-        const chip = el('span', `vw-ak-chip vw-use-chip${m.expired ? ' vw-use-expired' : ''}`);
+        const pausedM = !!m.paused;   // round 6 (MAJOR item 4): the owner's OFF paused THIS member; a per-conversation «Always» opened the switch but left it paused
+        const chip = el('span', `vw-ak-chip vw-use-chip${m.expired ? ' vw-use-expired' : ''}${pausedM ? ' vw-use-chip-paused' : ''}`);
         chip.dataset.grant = m.id || '';
         chip.dataset.principal = m.principal || '';
         const bits = [nameOf(m, app), hostsWord(m.hosts, u.entryHosts, m.toolFor)];
         if (m.uses) bits.push(t('used {n}×', { n: m.uses }));
         if (m.expired) bits.push(t('expired'));
         else if (m.until) bits.push(t('until {when}', { when: dateOf(m.until) }));
+        if (pausedM) bits.push(t('paused by you on {when}', { when: dateOf(m.paused) }));
         chip.append(el('span', 'vw-use-words', bits.join(' · ')));
         chip.title = `${m.id || ''}${m.convs > 1 ? ' · ' + t('{n} conversations', { n: m.convs }) : ''}`;
+        if (pausedM) {   // un-pause ONE member — a widening, so it asks for the second password (验证是你)
+          const rs = el('button', 'vw-ak-x vw-use-resume', '↻');
+          rs.type = 'button'; rs.title = t('Un-pause this — let it be used again'); rs.setAttribute('aria-label', rs.title);
+          rs.onclick = async () => { const send = () => post('/api/vault/use-grants/resume', { id: r.id, principal: m.principal }, revealLeftMs() ? revealHeaders() : {}); let res = await send(); if (res && res.code === 'reveal_needs_password') { forgetReveal(); if (!(await askRevealPassword())) return; res = await send(); } if (!res || !res.ok) showToast(t('Not done — {reason}', { reason: res ? revealWords(res) : t('server unreachable') }), { type: 'error' }); refresh?.(); };
+          chip.append(rs);
+        }
         const x = el('button', 'vw-ak-x vw-use-x', '✕');
         x.type = 'button'; x.title = t('Take this back'); x.setAttribute('aria-label', x.title);
         x.onclick = async () => { const res = await post('/api/vault/use-grants/revoke', { id: r.id, principal: m.principal }); if (!res || !res.ok) showToast(t('Not done — {reason}', { reason: res ? revealWords(res) : t('server unreachable') }), { type: 'error' }); refresh?.(); };
@@ -84,7 +92,8 @@ export function useExtras(row, { app = null, refresh = () => {} } = {}) {
       }
       for (const x of u.except || []) chips.append(el('span', 'vw-ak-chip vw-use-chip vw-use-except', t('except {name}', { name: nameOf(x, app) })));
       host.append(chips);
-      if (paused) host.append(el('div', 'vw-use-paused-note', t('Paused while the entry is off — turn «Usable by agent runs» on to restore these.')));
+      if (u.unverified) host.append(el('div', 'vw-use-paused-note', t('Unverified until you unlock the vault — not in use until then.')));
+      else if (paused) host.append(el('div', 'vw-use-paused-note', t('Paused while the entry is off — turn «Usable by agent runs» on to restore these.')));
     }
     if (u.used && u.used.uses) host.append(el('div', 'vw-ak-used vw-use-count', t('used {n}× by {m} conversations', { n: u.used.uses, m: u.used.convs })));
     if (u.policy) host.append(el('div', 'vw-ak-used vw-use-policy', u.judge === 'on' ? t('Policy for the judge: «{text}»', { text: u.policy.text }) : t('Policy for the judge: «{text}» — the judge is off (Settings ▸ Integration)', { text: u.policy.text })));

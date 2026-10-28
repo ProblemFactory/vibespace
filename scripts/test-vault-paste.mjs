@@ -362,7 +362,7 @@ async function runRoad(name, { door, routes } = {}) {
   const P0 = require.cache[path.join(REPO, 'src/vault-paste.js')];
   const keep = P0.exports; P0.exports = pasteMutant;
   let m2;
-  try { m2 = await runRoad('m-receipt', { door: mutant('src/server/vault-paste-door.js', "settle(q, 'stored', { ref, grantHours, receipt, standing });", "settle(q, 'stored', { ref, grantHours, receipt, standing, value: vv.value });") }); } finally { P0.exports = keep; }
+  try { m2 = await runRoad('m-receipt', { door: mutant('src/server/vault-paste-door.js', "settle(q, 'stored', { ref, grantHours, receipt });", "settle(q, 'stored', { ref, grantHours, receipt, value: vv.value });") }); } finally { P0.exports = keep; }
   ok(m2.hits.length > 0 && m2.hits.some((h) => /stash/.test(h)), 'MUTANT the receipt carries the value ⇒ the sweep is RED (the stash)', m2.hits.slice(0, 2));
   const m3 = await runRoad('m-echo', { routes: mutant('src/routes/vault.js', "app.post('/api/vault/secret-requests/:id/answer', person((req) => { const [value] = take(req, 'value'); const b = req.body || {}; return paste.answer(String(req.params.id), { answer: b.answer, value, by: 'user' }); }));", "app.post('/api/vault/secret-requests/:id/answer', person((req) => { const b = req.body || {}; const r = paste.answer(String(req.params.id), { answer: b.answer, value: b.value, by: 'user' }); return r.ok ? { ...r, echo: b } : r; }));") });
   ok(m3.hits.length > 0 && m3.hits.some((h) => /answer/.test(h)), 'MUTANT the route keeps the value on the body and echoes it ⇒ the sweep is RED (an answer)', m3.hits.slice(0, 2));

@@ -118,9 +118,10 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
   const verifiedRow = (row) => {
     if (!row) return row;
     // lane vault-use-grants round 5 (MINOR, item 6): a LOCKED vault cannot compute a mac (vault.macOf → null). That is «cannot
-    // verify now», NOT «every member forged»: keep the members (the door refuses the run with vault_locked anyway) and file NO
-    // stale alarm. Only a COMPUTED mismatch (below, with an unlocked vault) is a forged / widened / replayed row.
-    if (!unlocked()) return row;
+    // verify now», NOT «every member forged»: file NO stale alarm (only a COMPUTED mismatch below is forged / widened / replayed).
+    // round 6 (MINOR item 6): a member that CANNOT be verified is never a HELD grant — while locked yield NO verified members
+    // (heldBy / useVerdict list none, runs stay refused with vault_locked); publicFor shows them «unverified until unlocked».
+    if (!unlocked()) return { ...row, to: [], unverifiedLocked: true };
     loadGen();
     const xc = exceptCanon(row.except), gen = genByRes[row.resource] || 0;
     const to = (row.to || []).filter((e) => verifyMember(row.resource, e, xc, gen));
@@ -204,7 +205,11 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
   }
   /** The row as the window draws it (+ «used N× by M conversations» per member, from `counts` = VU.countsOf's entry row). */
   function publicFor(id, counts = null) {
-    const p = U.publicGrants(verifiedRow(rowOf(id)), { now: now() });
+    const raw = rowOf(id);
+    // round 6 (MINOR item 6): while locked the members cannot be verified — list them «unverified until unlocked» (names/hosts,
+    // never the value, never as a held grant), so a hand-written data/grants.json member is not shown as a real grant.
+    if (raw && !unlocked()) { const p = U.publicGrants(raw, { now: now() }); return { ...p, unverified: true, to: (p.to || []).map((e) => ({ ...e, uses: 0, convs: 0 })) }; }
+    const p = U.publicGrants(verifiedRow(raw), { now: now() });
     const by = (counts && counts.grants) || {};
     return { ...p, to: p.to.map((e) => ({ ...e, uses: (by[e.id] && by[e.id].uses) || 0, convs: (by[e.id] && by[e.id].convs) || 0 })) };
   }

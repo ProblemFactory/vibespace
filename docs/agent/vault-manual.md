@@ -91,10 +91,12 @@ once it is unlocked). You never see the value. The same place asked twice while 
 open per conversation. `vibespace-vault uses` lists your paste boxes still waiting.
 
 **Name where you will use it** — `--host 192.168.1.1` (host names or addresses, comma-separated, at most 8; never a
-wildcard): the request box then tells the user that THIS conversation will be allowed to use the new entry for those hosts
-without a card each time (unless they turned that off), and after the paste your receipt says so. Commands to those hosts
-then run with no card; another host still shows them its card. `vibespace-vault list` shows such an entry as yours «with
-no card for <hosts>».
+wildcard): the request box then tells the user that THIS conversation may use the new entry in commands to those hosts for
+**8 hours** (unless they turned that off), and after the paste your receipt says so. Within those 8 hours, commands to those
+hosts run — a new KIND of command still shows its card, another host still shows its card, and a vault lock ends the grant.
+A paste always makes a NEW entry (the same label gives a new id). If the user turned the setting off, the paste grants
+nothing: your receipt tells you to `request` the secret, and the user opens the entry in the Vault window. `vibespace-vault
+list` shows an entry you may use as yours «with no card for <hosts>».
 
 ## Using a stored secret in a command — `run`
 

@@ -101,7 +101,7 @@ async function main() {
     ['[::ffff:127.0.0.1] mapped (control)', CURL, (p) => ['-s', '-m', '2', '-q', '-g', '--data', '@' + VALFILE, `http://[::ffff:127.0.0.1]:${p}/m`], 'control'],
     ['backslash before @ (round4 BLOCKER: granted\\@listener)', CURL, (p) => ['-s', '-m', '2', '-q', '--data', '@' + VALFILE, `http://127.0.0.5:9\\@127.0.0.1:${p}/bs`], 'leak-closed'],
     ['userinfo @ (round4)', CURL, (p) => ['-s', '-m', '2', '-q', '--data', '@' + VALFILE, `http://u:p@127.0.0.1:${p}/ui`], 'leak-closed'],
-    ['trailing-dot host (round4)', CURL, (p) => ['-s', '-m', '2', '-q', '--data', '@' + VALFILE, `http://127.0.0.1.:${p}/dot`], 'named-or-opaque'],
+    ['trailing-dot host (round4)', CURL, (p) => ['-s', '-m', '2', '-q', '--data', '@' + VALFILE, `http://127.0.0.1.:${p}/dot`], 'reader-lan'],
     // round 5 item 5: a scheme-shaped token the bare reader would read as the SCHEME WORD
     ['one-slash http:/HOST (round5)', CURL, (p) => ['-s', '-m', '2', '-q', '--data', '@' + VALFILE, `http:/127.0.0.1:${p}/one`], 'blind'],
     ['one-slash ftp:/HOST (round5)', CURL, (p) => ['-s', '-m', '1', '-q', '-T', VALFILE, `ftp:/127.0.0.1:${p}/one`], 'blind'],
@@ -128,7 +128,13 @@ async function main() {
     if (kind === 'control') {
       ok(!!hit && (named || reader.opaque), `${label}: the tool REACHED the listener AND the reader names it`, { reached: !!hit, readerHosts: reader.hosts, opaque: reader.opaque });
     } else if (kind === 'named-or-opaque') {
-      ok(!hit || named || reader.opaque, `${label}: the reader names the peer the tool reached, or is opaque`, { reached: !!hit, host: hit && hit.host, readerHosts: reader.hosts, opaque: reader.opaque });
+      // round 6 (MINOR item 6): these rows (the --resolve / --connect-to / -x controls, the trailing-dot, the r5 proxy #@/?@
+      // attacks) DO reach the listener in this environment — ASSERT the reach, so a no-spawn mutant cannot pass them on `!hit`.
+      ok(!!hit && (named || reader.opaque), `${label}: the tool REACHED the listener AND the reader names it or is opaque`, { reached: !!hit, host: hit && hit.host, readerHosts: reader.hosts, opaque: reader.opaque });
+    } else if (kind === 'reader-lan') {
+      // round 6 (MINOR item 6): a READER-property row (the reader must name the LAN peer with the trailing dot stripped, or be
+      // opaque) — NOT reach-gated: curl 8.18 may refuse to connect to a trailing-dot IP, so this proves the reader, not the wire.
+      ok(readerNames(reader, P) || reader.opaque, `${label}: the reader names the LAN peer (trailing dot stripped) or is opaque`, { reached: !!hit, readerHosts: reader.hosts, opaque: reader.opaque });
     } else if (kind === 'leak-closed' || kind === 'blind') {
       ok(reader.opaque, `${label}: the reader is OPAQUE (the card — the tool ${hit ? `reached 127.0.0.1:${P}` : 'routed off here'}; no silent by: grant)`, { reached: !!hit, leaked: hit && hit.leaked, readerHosts: reader.hosts, opaque: reader.opaque });
     } else if (kind === 'config') {
@@ -136,6 +142,22 @@ async function main() {
       // directive host is vault-agent-own r23's cfgRouteHosts (BLIND, not dropped), adopted at int-C — noted in the As-built.
       ok(!!hit && !reader.always && !readerNames(reader, P), `${label}: the tool reached the listener via the config's url; the reader WITHHOLDS «always» (${reader.noAlways}) and does not name that url — no silent by: grant of a new shape (int-C / r23 cfgRouteHosts reads the config's url host)`, { reached: !!hit, noAlways: reader.noAlways, always: reader.always });
     }
+  }
+
+  // round 6 (MINOR item 6): THE NO-SPAWN MUTANT — with the tool never run, NOTHING reaches the listener, so EVERY reach-gated
+  // row (control + named-or-opaque) must go RED. r5 passed 17/25 under this mutant because the named-or-opaque rows passed on
+  // `!hit`; now each asserts the reach, so a census that stopped connecting can never go green silently.
+  {
+    let vacuous = 0;
+    for (const [, tool, mk, kind] of rows) {
+      if (kind !== 'control' && kind !== 'named-or-opaque') continue;
+      const argv = mk(P);
+      const hit = await reached(L, async () => {});   // NO SPAWN — nothing connects
+      const reader = readerDest([path.basename(tool), ...argv]);
+      const named = hit ? readerNames(reader, P) : false;
+      if (!!hit && (named || reader.opaque)) vacuous++;   // the SAME predicate the control/named-or-opaque branches use
+    }
+    ok(vacuous === 0, 'NO-SPAWN MUTANT: with the tool never run, every reach-gated row goes RED — no control passes vacuously on !hit (r5: 17/25 green)', { vacuous });
   }
 
   // (c) the REAL git over a loopback listener (http smart-transport) — a clean granted run is NAMED; the backslash/userinfo

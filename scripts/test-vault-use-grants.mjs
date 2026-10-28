@@ -392,7 +392,7 @@ console.log('⑩ CONTROLS — patched copies, each RED on its leg');
 {
   const M = mutantCopies('vault-use-grants', REPO);
   const DSRC = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8');
-  const cut = "if (!verdict.ok && verdict.ask && !refused && spec.refs.length && spec.refs.every((r) => !!(d && d.runnable.has(r.id)) && (standing.get(r.id) || {}).ok === true)) {";
+  const cut = "if (!verdict.ok && verdict.ask && !refused && spec.refs.length && spec.refs.every((r) => !!(d && d.runnable.has(r.id)) && (standing.get(r.id) || {}).ok === true && !(d.paused && d.paused[r.id] && d.paused[r.id][(standing.get(r.id) || {}).id]))) {";
   ok(DSRC.split(cut).length === 2, 'the short-circuit line is there once (the control below patches it)');
   const noShort = M.load('src/server/vault-run-door.js', DSRC.replace(cut, 'if (false) {'), 'noshort');
   const w1 = await world({ doorMod: noShort });
@@ -885,6 +885,51 @@ console.log('㉙ ROUND 5 (MINOR) — the mac is over the CLEANED name; a refused
   await w3.vault.unlock(PW);
   ok(!w3.staleRows.includes(e3.id), 'a READ while the vault is LOCKED files NO «forged» alarm (a mac that cannot be computed is «cannot verify now», not a mismatch)', { stale: w3.staleRows.slice() });
   ok(!del.ok && del.code === 'vault_locked' && w3.useGrants.rowsOf(e3.id).length === 1, 'deleting an entry that has a grant while LOCKED is refused BY NAME — never an entry gone with a dangling grant row', { del: del.code, rows: w3.useGrants.rowsOf(e3.id).length });
+}
+
+console.log('㉚ ROUND 6 (MAJOR item 4) — «Always» resumes nothing the owner paused (a per-member pause + an un-pause)');
+{
+  const w = await world();
+  const e = entryOf(w);
+  const A = w.caller('cid-asker-1', 'Home network'), D = w.caller('cid-other-2', 'Other lane');
+  w.useGrants.addMember(e.id, { kind: 'conversation', key: 'cid-asker-1', name: 'Home network' }, { hosts: ['192.168.1.1'] });
+  w.door.setRunnable({ id: e.id, on: true, reauthed: true });
+  const a1 = await runAnswered(w, CURL(e.ref, 'https://192.168.1.1/x'), { caller: A });
+  ok(a1.r.ok && a1.r.by === 'grant', 'A runs by:grant while the switch is ON', { by: a1.r.by });
+  w.door.setRunnable({ id: e.id, on: false });   // the owner turns the entry OFF ⇒ A's grant is PAUSED (per member)
+  const a2 = await runAnswered(w, CURL(e.ref, 'https://192.168.1.1/x'), { caller: A });
+  ok(!a2.r.ok && a2.r.by !== 'grant', 'OFF ⇒ A refused (the switch is off, A paused)', { code: a2.r.code, by: a2.r.by });
+  w.door.grantPasted({ scope: 'cid-other-2', ref: e.ref, purpose: 'log in', by: 'user', requestId: 'req-d' });   // D asked + the owner allowed 8h (the request road) ⇒ the entry is runnable for D
+  const dAns = await runAnswered(w, CURL(e.ref, 'https://10.0.0.5/y'), { answer: 'always', reauthed: true, ttl: '30d', caller: D });
+  ok(dAns.card && dAns.a && dAns.a.ok && dAns.r.by === 'always', 'D presses «Always» (验证是你) ⇒ it runs, the switch opens in the same act', { by: dAns.r.by, a: dAns.a });
+  ok(w.door.rowFacts({ id: e.id, store: 'secrets', entry: e.name, field: 'secret' }).open === true, 'the entry switch is ON after D «Always»');
+  const a3 = await runAnswered(w, CURL(e.ref, 'https://192.168.1.1/x'), { caller: A });
+  ok(!a3.r.ok && a3.r.by !== 'grant', 'AFTER D «Always»: A STAYS PAUSED — never by:grant (on aac3d381 A ran by:grant with no card)', { code: a3.r.code, by: a3.r.by });
+  const facPaused = w.door.rowFacts({ id: e.id, store: 'secrets', entry: e.name, field: 'secret' }).use;
+  ok((facPaused.to || []).some((m) => m.principal === 'conversation:cid-asker-1' && m.paused), 'the Vault window marks A «paused by you» (the entry is ON, the member paused)', (facPaused.to || []).map((m) => [m.principal, !!m.paused]));
+  const rz = w.door.resumeGrant({ id: e.id, principal: 'conversation:cid-asker-1', reauthed: true });
+  ok(rz.ok && rz.resumed, 'the owner un-pauses A in the Vault window (验证是你) — resumeGrant', rz);
+  const a4 = await runAnswered(w, CURL(e.ref, 'https://192.168.1.1/x'), { caller: A });
+  ok(a4.r.ok && a4.r.by === 'grant', '… A runs by:grant again; D\'s member was never touched', { by: a4.r.by });
+  const rzClick = w.door.resumeGrant({ id: e.id, principal: 'conversation:cid-asker-1' });   // a click alone (no 验证是你) ⇒ refused by name (a widening)
+  ok(!rzClick.ok && rzClick.code === 'reveal_needs_password', 'un-pausing on a click alone ⇒ reveal_needs_password (a widening)', rzClick);
+}
+
+console.log('㉛ ROUND 6 (MINOR item 6) — a LOCKED read lists members «unverified», never as a held grant; «Always» while locked writes nothing');
+{
+  const w = await world();
+  const e = entryOf(w);
+  w.useGrants.addMember(e.id, { kind: 'conversation', key: 'cid-asker-1', name: 'Home network' }, { hosts: ['192.168.1.1'] });
+  w.door.setRunnable({ id: e.id, on: true, reauthed: true });
+  w.vault.lock();
+  const pub = w.useGrants.publicFor(e.id);
+  ok(pub.unverified === true && (pub.to || []).length === 1, 'while LOCKED publicFor lists the member flagged `unverified` (the window says «unverified until unlocked»)', { unverified: pub.unverified, to: (pub.to || []).length });
+  const held = w.useGrants.heldBy({ conversationKeys: ['cid-asker-1'], groupIds: [] });
+  ok(held.length === 0, 'while LOCKED heldBy lists NO held grant (a hand-written grants.json member cannot be verified ⇒ never «held»)', held);
+  const alw = await runAnswered(w, CURL(e.ref, 'https://192.168.1.1/x'), { answer: 'always', reauthed: true });
+  ok(!alw.r.ok && (alw.r.code === 'vault_locked' || !alw.card), '«Always» while the vault is LOCKED ⇒ vault_locked, nothing runs', { code: alw.r.code, card: !!alw.card });
+  await w.vault.unlock(PW);
+  ok(w.useGrants.rowsOf(e.id)[0] && w.useGrants.rowsOf(e.id)[0].to.length === 1 && !w.door.rowFacts({ id: e.id, store: 'secrets', entry: e.name, field: 'secret' }).open === false, 'after unlock the member is intact and verified (the locked read changed nothing)', w.useGrants.rowsOf(e.id)[0] && w.useGrants.rowsOf(e.id)[0].to.length);
 }
 
 console.log(fail ? `\n${pass} passed, ${fail} failed` : `\nALL PASS (${pass})`);

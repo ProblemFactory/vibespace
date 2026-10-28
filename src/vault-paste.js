@@ -19,11 +19,12 @@
  *     POST body only, straight to the writer, and is never kept anywhere else).
  *   · THE RECEIPT — at the agent's next turn: what was stored, where, and for what — never the value; or that the owner
  *     refused it (the 拒绝 press, or the item leaving the tray by ✓ / ✕ without a paste), with how long not to ask again.
- *   · THE HOSTS AND THE DEFAULT GRANT (lane vault-use-grants, the owner 2026-10-27 「每个密码请求都要我同意太麻烦了！」): a new entry's
- *     request may name the hosts it is for (`--host 192.168.1.1,router.lan` — host names / addresses, ≤ 8, never a
- *     wildcard). With them, and the setting `vault.requestGrantsRequester` on (default), the card SAYS that the conversation
- *     that asked will be allowed to use it for those hosts (the agent asked for it, the owner types it — one card he would
- *     otherwise press «Always» on), and the paste writes that vault-use grant; the receipt tells the agent.
+ *   · THE HOSTS AND THE 8-HOUR GRANT (lane vault-use-grants, the owner 2026-10-27 「每个密码请求都要我同意太麻烦了！」; round 6): a new
+ *     entry's request may name the hosts it is for (`--host 192.168.1.1,router.lan` — host names / addresses, ≤ 8, never a
+ *     wildcard). With them, and the setting `vault.requestGrantsRequester` on (default), the card SAYS the conversation that
+ *     asked may use it in commands to those hosts for 8 HOURS (a new kind of command still shows a card; a vault lock ends it;
+ *     the entry's own switch is untouched), and the paste opens that run grant to the requesting conversation only; the receipt
+ *     tells the agent. With the setting OFF the paste grants nothing — the receipt tells the agent to request the secret.
  */
 const IR = require('./integration-registry.js');
 const HC = require('./hidden-chars.js');
@@ -209,9 +210,9 @@ function receiptText(o = {}) {
   if (o.outcome === 'stored') {
     const rc = o.receipt ? ` Receipt ${piece(o.receipt, 32)}.` : '';
     if (t.kind === 'field') return `${head}: STORED — «${piece(o.words)}» is saved in ${piece(intoOf(t), 200)} (${piece(t.rowLabel, 80)} › ${piece(t.fieldLabel, 80)}) for: ${piece(o.purpose)}. VibeSpace uses it there itself; you never see the value — never ask for it in the chat.${rc}`;
-    // lane vault-use-grants: the default grant landed ⇒ a STANDING approval for the hosts the request named
-    const standing = o.standing && Array.isArray(o.standing.hosts) && o.standing.hosts.length ? `The user allowed this conversation to use it for ${piece(o.standing.hosts.join(', '), 300)} without asking (a standing approval they can change in the Vault window): vibespace-vault run --env NAME=${piece(o.ref, 120)} -- <command>. Another host still shows them its card.` : null;
-    const use = standing || (o.grantHours ? `This conversation may use it in a command for ${Number(o.grantHours)} hours (a vault lock ends it; a new kind of command still shows the user its card): vibespace-vault run --env NAME=${piece(o.ref, 120)} -- <command>.` : `To use it in a command, ask for it: vibespace-vault request ${piece(o.ref, 120)} --for "<what you will run>".`);
+    // lane vault-use-grants round 6: the paste opens ONLY an 8-hour run grant (grantHours) to the requesting conversation — the
+    // r4 standing host-scoped member is gone; OFF ⇒ no grant, the receipt tells the agent to `request` it. (A vault lock ends it.)
+    const use = o.grantHours ? `This conversation may use it in a command for ${Number(o.grantHours)} hours (a vault lock ends it, so a hub restart does too; a new kind of command still shows the user its card): vibespace-vault run --env NAME=${piece(o.ref, 120)} -- <command>.` : `To use it in a command, ask for it: vibespace-vault request ${piece(o.ref, 120)} --for "<what you will run>".`;
     return `${head}: STORED — «${piece(t.label, 80)}» (${KIND_WORDS[t.entryKind] || 'Secret'}) is the vault entry ${piece(o.ref, 120)} for: ${piece(o.purpose)}. You never see the value. ${use}${rc}`;
   }
   if (o.outcome === 'withdrawn') return `${head}: WITHDRAWN — the user locked the vault, which ends every open request («${piece(o.words)}»). Nothing was stored. Ask again once the vault is unlocked (vibespace-vault status says so) — do not ask the user to unlock it.`;

@@ -80,8 +80,8 @@ export function inboxModel(app) {
   const said = (l) => t(l.key, Object.fromEntries(Object.entries(l.params || {}).map(([k, v]) => [k, v && typeof v === 'object' && typeof v.key === 'string' ? t(v.key) : v])));
   const wordsOf = (i) => (isCleared(i) ? clearedText() : i && i.card && i.card.kind === 'api-call' && i.card.head ? titleWords(i.card.head, { t, lang: resolveLang() }) : i && i.i18n && i.i18n.text ? said(i.i18n.text) : (i && i.text) || '');
   /** The detail as LINES (the Vault window's band: its first line is a use failure's cause, the rest sit under one fold). */
-  const detailLinesOf = (i) => (isCleared(i) ? [] : i && i.i18n && Array.isArray(i.i18n.detail) && i.i18n.detail.length ? i.i18n.detail.map(said) : String((i && i.detail) || '').split('\n').filter(Boolean));
-  const detailOf = (i) => (isCleared(i) ? '' : i && i.i18n && Array.isArray(i.i18n.detail) && i.i18n.detail.length ? detailLinesOf(i).join('\n') : (i && i.detail) || '');
+  const detailLinesOf = (i) => (isCleared(i) ? [] : i && i.i18n && Array.isArray(i.i18n.detail) && i.i18n.detail.length ? i.i18n.detail.map(said) : String((i && i.detail) || '').split('\n').filter(Boolean).map((l) => t(l)));   // lane vault-use-grants round 6 (MINOR item 3): a plain-detail line is run through t() — a FIXED line that carries a dict entry (the vault «Always» switch line, zh + ja) shows in the owner's language; a dynamic line (a command, a host) has no entry and falls back to itself
+  const detailOf = (i) => (isCleared(i) ? '' : i && i.i18n && Array.isArray(i.i18n.detail) && i.i18n.detail.length ? detailLinesOf(i).join('\n') : String((i && i.detail) || '').split('\n').map((l) => (l ? t(l) : l)).join('\n'));
   const nameFor = (key, items) => {
     const s = sessionFor(key);
     const spoken = items.find((i) => i.i18n && i.i18n.source && i.i18n.source.key);

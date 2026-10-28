@@ -9885,6 +9885,7 @@ export default {
   "Extra Antigravity CLI args appended when starting an Antigravity session.": "Antigravity セッションの起動時に追加する Antigravity CLI 引数。",
   "Default (Antigravity’s own setting)": "既定（Antigravity 自身の設定）",
   "{who} wants to run a command with a stored secret": "{who} が保管庫のシークレットを使ってコマンドを実行しようとしています", // lane vault-run-door
+  "«Always» (with the second password) also turns on «Usable by agent runs» for this entry — it opens it for THIS conversation; any grants you paused stay paused.": "「常に許可」（本人確認が必要）を押すと、この項目の「エージェントの実行で使用可」もオンになります——開くのはこの会話だけで、あなたが一時停止した他の許可は停止したままです。", // lane vault-run-door
   "Always for this shape": "この形は常に許可", // lane vault-run-door
   "The same tool, flags, hosts and secrets run without asking for 30 days — asks for the second password first": "同じツール・フラグ・ホスト・シークレットなら 30 日間確認せずに実行します — 先に第二パスワードを確認します", // lane vault-run-door
   "Allowed for this shape for 30 days": "この形を 30 日間許可しました", // lane vault-run-door
@@ -11056,6 +11057,9 @@ export default {
   "Used with no card by:": "カードなしで使用：", // lane vault-use-grants
   "used {n}×": "{n} 回使用", // lane vault-use-grants
   "Paused while the entry is off — turn «Usable by agent runs» on to restore these.": "項目がオフの間は停止中——「エージェントの実行で使用可」をオンにすると復元します。", // lane vault-use-grants (round 3: スイッチ名と同一表記)
+  "paused by you on {when}": "{when} にあなたが一時停止", // lane vault-use-grants (round 6)
+  "Unverified until you unlock the vault — not in use until then.": "保管庫のロックを解除するまで検証できません——それまでは使用されません。", // lane vault-use-grants (round 6)
+  "Un-pause this — let it be used again": "一時停止を解除——再び使用可にする", // lane vault-use-grants (round 6)
   "every {host} host": "{host} のすべてのホスト", // lane vault-use-grants (round 3)
   "every {host} host (incl. other customers’ endpoints)": "{host} のすべてのホスト（他の顧客のエンドポイントを含む）", // lane vault-use-grants (round 3)
   "until {when}": "{when} まで", // lane vault-use-grants
@@ -11093,7 +11097,7 @@ export default {
   "A standing approval: this conversation runs commands with these secrets for these hosts without asking for 30 days — the Vault window lists it and takes it back; asks for the second password first": "常設の許可：この会話は 30 日間、このホスト向けならこれらの秘密でコマンドを確認なしに実行できます——保管庫ウィンドウに表示され、取り消せます。先に第二パスワードを求めます", // lane vault-use-grants
   "For: {hosts} — the conversation that asked is not allowed to use it until you allow it on its row in the Vault window («Who may use it…»).": "用途：{hosts}——保管庫ウィンドウのその行（「誰が使えるか…」）で許可するまで、依頼した会話は使えません。", // lane vault-use-grants
   "A pasted secret may be used by the conversation that asked for it": "貼り付けた秘密を、依頼した会話が使えるようにする", // lane vault-use-grants
-  "When an agent asks you to paste a secret and names the hosts it is for, the conversation that asked may use it for those hosts without a card each time — the request box says so before you paste, and the Vault window's «Who may use it…» changes it or takes it back. OFF: it may use it for 8 hours, and every new kind of command asks you first.": "エージェントが秘密の貼り付けを依頼し、使うホストを指定した場合、依頼した会話はそのホスト向けに毎回カードなしで使えます——貼り付ける前に依頼ボックスがそう伝え、保管庫ウィンドウの「誰が使えるか…」で変更・取り消しできます。オフ：8 時間だけ使え、新しい種類のコマンドは毎回先に確認します。", // lane vault-use-grants
+  "When an agent asks you to paste a secret and names the hosts it is for, the conversation that asked may use it in commands to those hosts for 8 hours — a new kind of command still shows you its card first, and locking the vault ends it. The entry's own «Usable by agent runs» switch is untouched. OFF: a paste grants nothing — the agent's receipt tells it to request the secret, and you open the entry in the Vault window.": "エージェントが秘密の貼り付けを依頼し、使うホストを指定した場合、依頼した会話は 8 時間だけそのホスト向けのコマンドで使えます——新しい種類のコマンドは毎回先にカードを表示し、保管庫をロックすると終了します。項目自身の「エージェントの実行で使用可」スイッチは変わりません。オフ：貼り付けても何も付与されません——エージェントの受領メッセージが秘密の請求を促し、あなたが保管庫ウィンドウで項目を開きます。", // lane vault-use-grants
   "Policy for the judge: «{text}»": "判定用ポリシー：「{text}」", // lane vault-use-grants
   "Policy for the judge: «{text}» — the judge is off (Settings ▸ Integration)": "判定用ポリシー：「{text}」——ポリシー判定はオフです（設定 ▸ 連携）", // lane vault-use-grants
   "Approved by the policy judge {n}× · last {time}": "ポリシー判定が {n} 回承認 · 最終 {time}", // lane vault-use-grants

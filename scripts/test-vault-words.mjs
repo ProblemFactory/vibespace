@@ -52,6 +52,7 @@ const ROWS = {
     ['the vault is locked — unlock it, then save', 'label', 'the owner\'s own save doors (网站登录… in the Vault window, the save-login card\'s Save) answer it as a field verdict while the person is at the door — not a background refusal', { count: 2 }]],
   'src/lib/vault-login-row.js': [['The vault is locked (vault_locked) — unlock it, then save', 'label', 'the 网站登录… dialog\'s save-time verdict line (the same words as the paste box\'s) — a field verdict while the person is in the dialog, not a background refusal']],
   'src/lib/vault-totp-row.js': [['The vault is locked — unlock it first, then preview again', 'label', '添加… ▸ 两步验证…\'s preview-time verdict line (lane vault-totp-add) — 「解锁…」 beside the words is the door; a field verdict while the person is in the dialog, not a background refusal']],
+  'src/lib/vault-use-row.js': [['Unverified until you unlock the vault — not in use until then', 'label', 'the «谁可以用…» row\'s locked-read note (lane vault-use-grants r6) — while the vault is locked the chips are greyed and the members listed «unverified», shown as a field-side note while the person is at the Vault window (the run door still refuses with vault_locked and its own words); not a background refusal the two-facts rule governs']],
   // int331 seam — sites from lanes that landed after this census's base (.326): relay status words, the provider-config save verdict,
   // and the 使用失败 For-you card's count/hint detail — all LABELS/status, not the tool-refusal sentences the two-facts rule (decision 5) targets
   'src/model-providers.js': [

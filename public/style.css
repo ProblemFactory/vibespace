@@ -8803,6 +8803,8 @@ button.vw-chip { cursor: pointer; }
 .vw-use-except { color: var(--text-dim); }
 .vw-use-paused { opacity: 0.5; }
 .vw-use-paused-note { color: var(--text-dim); font-size: max(0.85em, 12px); margin-top: 2px; }   /* round 3 (MINOR): never shrink the note below a readable floor on a narrow phone */
+.vw-use-chip-paused { opacity: 0.55; }   /* round 6 (MAJOR item 4): ONE member the owner paused (the entry may be ON for another conversation) — greyed, with ↻ to un-pause */
+.vw-use-resume { margin-left: 2px; }
 .vw-nomatch-all { margin-left: 8px; }
 .vw-use-approved { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .vw-use-policy-in { width: 100%; box-sizing: border-box; resize: vertical; font: inherit; }

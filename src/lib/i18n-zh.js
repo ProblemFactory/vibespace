@@ -9886,6 +9886,7 @@ export default {
   "Extra Antigravity CLI args appended when starting an Antigravity session.": "启动 Antigravity 会话时追加的 Antigravity CLI 参数。",
   "Default (Antigravity’s own setting)": "默认（Antigravity 自己的设置）",
   "{who} wants to run a command with a stored secret": "{who} 想用保险库里的密钥运行一条命令", // lane vault-run-door
+  "«Always» (with the second password) also turns on «Usable by agent runs» for this entry — it opens it for THIS conversation; any grants you paused stay paused.": "按「总是允许」（需验证是你）也会为此条目打开「可供 agent 运行使用」——它只为当前这个对话打开；你暂停的其他授权仍保持暂停。", // lane vault-run-door
   "Always for this shape": "此形状总是", // lane vault-run-door
   "The same tool, flags, hosts and secrets run without asking for 30 days — asks for the second password first": "同一工具、旗标、主机与密钥 30 天内不再问——先要再输一次第二密码", // lane vault-run-door
   "Allowed for this shape for 30 days": "此形状 30 天内总是允许", // lane vault-run-door
@@ -11057,6 +11058,9 @@ export default {
   "Used with no card by:": "无需卡片即可使用：", // lane vault-use-grants
   "used {n}×": "已用 {n} 次", // lane vault-use-grants
   "Paused while the entry is off — turn «Usable by agent runs» on to restore these.": "该条目已关闭，授权暂停——打开「可供 agent 运行使用」即可恢复。", // lane vault-use-grants
+  "paused by you on {when}": "你于 {when} 暂停", // lane vault-use-grants (round 6)
+  "Unverified until you unlock the vault — not in use until then.": "在你解锁保险库之前无法验证——在此之前不生效。", // lane vault-use-grants (round 6)
+  "Un-pause this — let it be used again": "取消暂停——让它重新可用", // lane vault-use-grants (round 6)
   "every {host} host": "{host} 下的每个主机", // lane vault-use-grants (round 3)
   "every {host} host (incl. other customers’ endpoints)": "{host} 下的每个主机（含其他客户的端点）", // lane vault-use-grants (round 3)
   "until {when}": "至 {when}", // lane vault-use-grants
@@ -11094,7 +11098,7 @@ export default {
   "A standing approval: this conversation runs commands with these secrets for these hosts without asking for 30 days — the Vault window lists it and takes it back; asks for the second password first": "长期授权：这个对话 30 天内对这些主机使用这些秘密运行命令无需再问——保险库窗口列出它，也可收回；先要输入第二密码", // lane vault-use-grants
   "For: {hosts} — the conversation that asked is not allowed to use it until you allow it on its row in the Vault window («Who may use it…»).": "用于：{hosts}——在你于保险库窗口该行（「谁可以用…」）允许之前，发起请求的对话不能使用它。", // lane vault-use-grants
   "A pasted secret may be used by the conversation that asked for it": "你粘贴的秘密可由请求它的对话使用", // lane vault-use-grants
-  "When an agent asks you to paste a secret and names the hosts it is for, the conversation that asked may use it for those hosts without a card each time — the request box says so before you paste, and the Vault window's «Who may use it…» changes it or takes it back. OFF: it may use it for 8 hours, and every new kind of command asks you first.": "当 agent 请你粘贴一个秘密并写明用于哪些主机时，发起请求的对话可以在这些主机上使用它而不再每次弹卡片——粘贴前请求框会说明这一点，保险库窗口的「谁可以用…」可以修改或收回。关闭：它只能用 8 小时，且每种新命令都会先问你。", // lane vault-use-grants
+  "When an agent asks you to paste a secret and names the hosts it is for, the conversation that asked may use it in commands to those hosts for 8 hours — a new kind of command still shows you its card first, and locking the vault ends it. The entry's own «Usable by agent runs» switch is untouched. OFF: a paste grants nothing — the agent's receipt tells it to request the secret, and you open the entry in the Vault window.": "当 agent 请你粘贴一个秘密并写明用于哪些主机时，发起请求的对话可以在接下来 8 小时内用它向这些主机发命令——每种新命令仍会先给你看卡片，锁定保险库即结束。条目自己的「可供 agent 运行使用」开关不受影响。关闭：粘贴不授予任何权限——agent 的回执会让它去请求该秘密，由你在保险库窗口打开此条目。", // lane vault-use-grants
   "Policy for the judge: «{text}»": "裁决策略：「{text}」", // lane vault-use-grants
   "Policy for the judge: «{text}» — the judge is off (Settings ▸ Integration)": "裁决策略：「{text}」——策略裁决已关闭（设置 ▸ 集成）", // lane vault-use-grants
   "Approved by the policy judge {n}× · last {time}": "策略裁决已批准 {n} 次 · 最近 {time}", // lane vault-use-grants

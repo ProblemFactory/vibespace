@@ -226,6 +226,17 @@ console.log('④ THE SHAPE KEY — tool + flags + hosts + entries (decision ④)
     ['ssh ssh://router', 'scp backup scp://router/x', 'git clone ssh://router/repo'].map((c) => [c, RO(c.split(' '))]));
   ok(RO(['git', 'clone', 'ssh://git@github.com/o/r']) === false && RO(['ssh', 'git@github.com', 'x']) === false && RO(['git', 'clone', 'https://router/r']) === false,
     'a DOTTED ssh host / a single-label HTTPS host (not ssh) is NOT an alias — no over-blinding of git-https or a dotted ssh target');
+  // round 6 (BLOCKER item 1): a jump host `-J`/`-W` is an alias in EVERY spelling too (r5 fixed only `-o ProxyJump=`)
+  ok(['ssh -J router box.example', 'ssh -Jrouter box.example', 'ssh -J user@router:22 box.example', 'scp -J router f box.example:/x', 'sftp -J router box.example', 'ssh -W router:22 jump.example'].every((c) => RO(c.split(' ')) === true)
+    && RO(['ssh', '-J', 'jump.example', 'box.example']) === false,
+    'ssh -J / -W: a single-label jump host is OPAQUE (every host-bearing ssh option goes through ONE alias reader); a DOTTED -J host is not',
+    ['ssh -J router box.example', 'scp -J router f box.example:/x', 'sftp -J router box.example'].map((c) => [c, RO(c.split(' '))]));
+  // round 6 (MAJOR item 2): a ONE-LETTER host is an alias; the drive-letter exemption lives ONLY in the scpLike `X:path` reader
+  const RH = (argv) => V.shapeOf(V.planOf({ argv, env: [['T', M1]] })).routeHosts;
+  ok(RO(['ssh', 'r', 'true']) === true && RO(['sftp', 'r']) === true && RO(['ssh', 'ssh://r', 'true']) === true && RO(['ssh', '-o', 'HostName=r', 'box.example', 'true']) === true && RO(['ssh', '-J', 'r', 'box.example', 'true']) === true && RO(['ssh', 'rr', 'true']) === true
+    && !RH(['scp', 'file', 'C:\\x']).includes('c') && RO(['scp', 'file', 'C:\\x']) === false,
+    'a one-letter ssh/sftp host (and -o HostName / -J) is an alias (opaque); a one-letter `C:\\x` is a LOCAL drive, never a host',
+    { sshr: RO(['ssh', 'r', 'true']), drive: RH(['scp', 'file', 'C:\\x']) });
   // round 5 (MAJOR item 5): a scheme-shaped token is never a bare host; a proxy value's authority is cut at the first # / ?
   ok(RO(['curl', 'http:/127.0.0.1:80/x']) === true && RO(['curl', 'ftp:ftp']) === true && RO(['curl', 'smtp:/127.0.0.1/x']) === true && RO(['curl', 'localhost:9999/x']) === false,
     'a one-slash `S:/HOST` and a bare `S:HOST` for a known scheme are BLIND; `localhost:9999` (not a scheme) is read as a host');
