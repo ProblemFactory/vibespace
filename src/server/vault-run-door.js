@@ -151,6 +151,7 @@ const PI = require('../proc-identity.js');   // a run folder's hub: its identity
 const VUG = require('../vault-use-grant.js');   // lane vault-use-grants: PURE — a standing approval's verdict and the card's words
 const DM = require('../decision-model.js');   // lane vault-use-grants (R4): PURE — the policy's spelling, its question, the threshold
 
+const SETROW_RAW = new WeakMap();   // lane vault-use-grants round 9: useGrants instance → its UNWRAPPED setRow, so a second door built over the same instance (a test's `mk()`) re-uses the one wrapper and gets the true raw writer for its rollback — held OFF the instance in a WeakMap (an underscore-prefixed property assignment on it would read as a session field to the test-session-schema census)
 const ACTION_TYPE = 'vault-run-ask';
 const REQUEST_TYPE = 'vault-grant-ask';      // lane vault-manual-and-lock: an agent's request for an entry (its For-you ask)
 const PURPOSE_MAX = 200;                     // the request's purpose, in the agent's own words (one line)
@@ -409,12 +410,16 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   // is marked is always the capped form and the reader reproduces it byte-for-byte — a write that is unbounded while the reader
   // slices wiped the whole store (the mark stopped verifying) in round 2. Each list drops the OLDEST past its cap.
   const AP_MAX = 256, REVOKE_MAX = 512, ENTRY_MAX = 256;
-  const bodyOf = (d) => JSON.stringify({ v: 1, gen: Number(d.gen) || 0, runnable: [...d.runnable].sort(), ...(d.suspended && d.suspended.size ? { suspended: [...d.suspended].sort() } : {}), always: d.always.slice().sort((a, b) => (a.conv + a.key).localeCompare(b.conv + b.key)),
+  // round 9 (MINOR): ONE bound for `runnable` AND `opened`. r7 sliced `opened` to ENTRY_MAX but wrote `runnable` UNCAPPED, so an
+  // entry past the cap reloaded as ON with no `opened` record = OWNER-opened = every member usable (fail OPEN — the opposite of
+  // the audit's «fail closed»). Now `runnable` is capped too and `opened` holds ONLY kept-runnable entries: an entry past the cap
+  // drops from BOTH ⇒ reloads OFF (the owner re-opens) — a paused member is never silently un-paused by a restart.
+  const bodyOf = (d) => { const runSorted = [...d.runnable].sort().slice(0, ENTRY_MAX); const runSet = new Set(runSorted); return JSON.stringify({ v: 1, gen: Number(d.gen) || 0, runnable: runSorted, ...(d.suspended && d.suspended.size ? { suspended: [...d.suspended].sort().slice(0, ENTRY_MAX) } : {}), always: d.always.slice().sort((a, b) => (a.conv + a.key).localeCompare(b.conv + b.key)),
     ...(d.policies && Object.keys(d.policies).length ? { policies: Object.fromEntries(Object.keys(d.policies).sort().slice(0, ENTRY_MAX).map((k) => [k, d.policies[k]])) } : {}),   // lane vault-use-grants (R4): only when there is one — a body without them is marked as before
     ...(d.policyRevoked && d.policyRevoked.length ? { policyRevoked: d.policyRevoked.slice().sort((a, b) => (a.conv + a.key).localeCompare(b.conv + b.key)).slice(0, REVOKE_MAX) } : {}),
     ...(d.policyApproved && Object.keys(d.policyApproved).length ? { policyApproved: Object.fromEntries(Object.keys(d.policyApproved).sort().slice(0, ENTRY_MAX).map((k) => [k, { n: Number(d.policyApproved[k].n) || 0, lastAt: Number(d.policyApproved[k].lastAt) || 0, shapes: (d.policyApproved[k].shapes || []).slice(-AP_MAX).map((s) => ({ conv: s.conv, key: s.key, ...(s.shape ? { shape: s.shape } : {}) })), items: (d.policyApproved[k].items || []).slice(-AP_MAX) }])) } : {}),   // lane vault-use-grants round 2 (MAJOR): the judge's approvals ride the marked store so a Revoke survives a restart — ONE canonical key order AND cap so save and load serialize identically (the mark verifies); `shape` = the coarse shape key the Revoke covers (round 3)
     ...(d.policyHours && Object.keys(d.policyHours).length ? { policyHours: Object.fromEntries(Object.keys(d.policyHours).sort().slice(0, HOUR_MAX).map((k) => [k, (d.policyHours[k] || []).map((t) => Math.floor(Number(t)) || 0).slice(-POLICY_PER_HOUR)])) } : {}),   // round 4 (item 5): the per-hour judge COUNTER rides the marked store too — a restart inside the hour does not reset it (an in-memory counter is a free bypass by restart); same canonical order + cap so the mark verifies
-    ...(d.opened && Object.keys(d.opened).length ? { opened: Object.fromEntries(Object.keys(d.opened).sort().slice(0, ENTRY_MAX).map((k) => [k, { at: Math.floor(Number(d.opened[k] && d.opened[k].at)) || 0, resumed: Object.fromEntries(Object.keys((d.opened[k] && d.opened[k].resumed) || {}).sort().slice(0, AP_MAX).map((g) => [g, Math.floor(Number(d.opened[k].resumed[g])) || 0])) }])) } : {}) });   // round 7 (MAJOR item 2): HOW each ON entry is open — `opened[id]` exists ONLY when a PRESS («Always» for one conversation) flipped the switch; it holds the RESUMED grant-ids (the card's own + each ↻ + a member the owner adds while open). Its absence while ON = the owner opened it (every member usable). What is STORED is the RESUMED set, so a cap drop PAUSES (fail closed) — never un-pauses. Rides the mark; same canonical order + cap so it verifies.
+    ...(d.opened && Object.keys(d.opened).length ? { opened: Object.fromEntries(Object.keys(d.opened).filter((k) => runSet.has(k)).sort().slice(0, ENTRY_MAX).map((k) => [k, { at: Math.floor(Number(d.opened[k] && d.opened[k].at)) || 0, resumed: Object.fromEntries(Object.keys((d.opened[k] && d.opened[k].resumed) || {}).sort().slice(0, AP_MAX).map((g) => [g, Math.floor(Number(d.opened[k].resumed[g])) || 0])) }])) } : {}) }); };   // round 7 (MAJOR item 2): HOW each ON entry is open — `opened[id]` exists ONLY when a PRESS («Always» for one conversation) flipped the switch; it holds the RESUMED grant-ids (the card's own + each ↻ + a member the owner adds while open). Its absence while ON = the owner opened it (every member usable). What is STORED is the RESUMED set, so a cap drop PAUSES (fail closed) — never un-pauses. round 9: ONLY a kept-runnable entry rides (an entry dropped from the capped `runnable` drops its press marker too — it reloads OFF, never ON-without-a-marker). Rides the mark; same canonical order + cap so it verifies.
   const okPolicy = (x) => x && typeof x === 'object' && typeof x.text === 'string' && x.text.length > 0 && x.text.length <= DM.VAULT_POLICY_MAX;
   const policiesOf = (raw) => { const out = {}; if (raw && typeof raw === 'object' && !Array.isArray(raw)) for (const [k, x] of Object.entries(raw).slice(0, ENTRY_MAX)) if (VI.parseRef(k) && okPolicy(x)) out[k] = { text: x.text, at: Number(x.at) || null, by: String(x.by || 'user').slice(0, 40) }; return out; };
   const revokedOf = (raw) => (Array.isArray(raw) ? raw : []).filter((x) => x && typeof x.conv === 'string' && typeof x.key === 'string').slice(0, REVOKE_MAX).map((x) => ({ conv: x.conv, key: x.key }));
@@ -440,6 +445,25 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   /** Add ONE grant-id to an entry's RESUMED set (the shared core of resumeGrant and «Always»'s per-member un-pause). A no-op
    *  unless the entry is press-opened (a manual-ON entry needs no mark; an OFF entry is held by the switch). */
   const resumeMember = (key, gid) => { const d = load(); if (!d || !pressOpened(d, key)) return { ok: true, resumed: false }; if (d.opened[key].resumed && d.opened[key].resumed[gid]) return { ok: true, resumed: false }; const opened = { ...d.opened, [key]: { at: d.opened[key].at, resumed: { ...(d.opened[key].resumed || {}), [gid]: now() } } }; const r = save({ runnable: d.runnable, always: d.always, opened }); return r.ok ? { ok: true, resumed: true } : r; };
+  // lane vault-use-grants round 9 (MAJOR item 4): the owner's OWN writer — the 「谁可以用…」 picker Save, proven with 验证是你 —
+  // RESUMES every member it leaves on a PRESS-opened entry (one another conversation's «Always» holds open). A member the owner
+  // adds while open-by-press is the OWNER's act: born resumed, said in the window as runnable, run by:grant — on the base it
+  // ran; the inverted model wrongly paused it and credited the owner with a pause («paused by you»). An AGENT's request
+  // (addMember, the «Always» / request path) does NOT resume. We wrap the ONE writer so every caller agrees (the route AND a
+  // test that holds the same useGrants instance); the door's own «Always» rollback uses `rawSetRow` (the UNWRAPPED writer — it
+  // restores a prior row, it must never resume). Idempotent via the module WeakMap SETROW_RAW (NOT an underscore-prefixed
+  // property on useGrants — such a write reads as a session field to the census): the TRUE raw writer is stashed first, so a second
+  // door over the same useGrants (a test's `mk()`) does not double-wrap and every door's rollback gets the real raw (the resume
+  // closure reads the SHARED store through `load`, so the first door's wrapper serves every door correctly).
+  const rawSetRow = useGrants && typeof useGrants.setRow === 'function' ? (SETROW_RAW.get(useGrants) || useGrants.setRow.bind(useGrants)) : null;
+  if (rawSetRow && !SETROW_RAW.has(useGrants)) {
+    SETROW_RAW.set(useGrants, rawSetRow);
+    useGrants.setRow = (id, row, opts = {}) => {
+      const r = rawSetRow(id, row, opts);
+      if (r && r.ok) { try { const d = load(); if (d && pressOpened(d, id)) { const pub = useGrants.publicFor(id); for (const m of (pub && pub.to) || []) if (m && m.id) resumeMember(id, m.id); } } catch { } }   // the owner's act over the whole row — the members it wrote are born resumed
+      return r;
+    };
+  }
   const hourWin = (d, hk) => ((d && d.policyHours && d.policyHours[hk]) || []).filter((t) => t > now() - 3600e3);
   /** BOOK a judge call synchronously (no check-then-write race): over the limit ⇒ { ok:false }; else persist +now() and return its token. */
   // round 5 (MINOR, item 6): prune EXPIRED pairs (every timestamp older than the hour) FIRST, so the HOUR_MAX=64 cap never
@@ -521,7 +545,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     // round 7 (MAJOR item 2, bound invariant): if a stored RESUMED set would be truncated, NAME it — the dropped marks fail
     // CLOSED (those members become paused on the next read), never an un-pause, so a cap is safe but never silent.
     for (const k of Object.keys(next.opened || {})) { const n = Object.keys((next.opened[k] && next.opened[k].resumed) || {}).length; if (n > AP_MAX) audit('vault-run-pause-bound', { store: STORE_FILE, entry: k, resumed: n, cap: AP_MAX, dropped: n - AP_MAX, effect: 'the marks past the cap fail closed (those members stay paused)' }); }
-    if (Object.keys(next.opened || {}).length > ENTRY_MAX) audit('vault-run-pause-bound', { store: STORE_FILE, entries: Object.keys(next.opened).length, cap: ENTRY_MAX, effect: 'the entries past the cap fail closed' });
+    if ((next.runnable ? next.runnable.size : 0) > ENTRY_MAX || Object.keys(next.opened || {}).length > ENTRY_MAX) audit('vault-run-pause-bound', { store: STORE_FILE, runnable: next.runnable ? next.runnable.size : 0, opened: Object.keys(next.opened || {}).length, cap: ENTRY_MAX, effect: 'the entries past the cap turn OFF on reload (every member paused — fail closed)' });   // round 9: the cap is on runnable AND opened together, so an entry past it reloads OFF — the words are now true
     const mark = vault.macOf(MARK_LABEL, bodyOf(next));
     if (!mark) return named('vault_locked');
     try { writeJsonAtomic(FILE, { ...JSON.parse(bodyOf(next)), mark }); } catch (e) { return named('failed', { why: `data/${STORE_FILE} could not be written (${e.code || e.message})` }); }
@@ -840,29 +864,36 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       // (round 7 item 2: a PRESS opens it — only this card's member is resumed, so the grants the owner paused stay paused).
       const ms = VR.ALWAYS_TTLS[ttl], until = ms == null ? null : now() + ms;
       if (!q.hosts.length) return { ok: false, code: 'always_not_offered' };
-      // round 7 (MAJOR item 3): «Always» is ALL-OR-NOTHING across the card's entries. JUDGE every entry FIRST (exists &
+      // round 7/9 (MAJOR item 3): «Always» is ALL-OR-NOTHING across the card's entries. JUDGE every entry FIRST (exists &
       // runnable) — a deleted / own-door entry (the two-entry card where #2 was dropped while it waited) draws its refusal and
-      // writes NOTHING. Then WRITE, remembering the prior switch state; if a flip or a member write fails partway (a patched
-      // flip, too_many at the 257th), RESTORE every switch and REVOKE the members written in this act — no half-open widening.
+      // writes NOTHING. Then SNAPSHOT every member the act will touch (the whole row of each entry) BEFORE the first write.
+      // If a flip or a member write fails partway (a patched flip, too_many at the host/member cap), RESTORE the SNAPSHOT:
+      // every row back to its exact prior members (a WIDENED existing member narrowed back, not just an ADDED one revoked —
+      // r7 revoked only `added` members, so a conversation that already had a member on #1 kept the widening when #2 refused and
+      // ran to the new host by:grant though the card was DENIED), every switch back to its prior state, AND the restore is
+      // PUSHED to open Vault windows exactly as the flip was (r7's bare save() told no window, so #2 showed ON while OFF on disk).
       for (const id of q.entries) { const ref = VI.parseRef(id), row = ref && rowOf(ref), c = ref && classOf(ref, row); if (!row || !c || !c.runnable) { settle(q, 'denied', 'entry_unknown'); return c && !c.runnable ? named('entry_has_its_own_door', { door: c.door }) : named('entry_unknown'); } }
       const d0 = load();
       const prior = { runnable: new Set(d0.runnable), suspended: new Set(d0.suspended), opened: d0.opened || {} };
-      const made = []; let failCode = null;
+      const rowSnap = new Map();   // entry id → its whole prior row { to, except } (the members the act may widen or add)
+      for (const id of q.entries) { try { const p = useGrants.publicFor(id); rowSnap.set(id, { to: (p && p.to) || [], except: (p && p.except) || [] }); } catch { rowSnap.set(id, { to: [], except: [] }); } }
+      const touched = [], madeGrants = []; let failCode = null;
       for (const id of q.entries) {
+        touched.push(id);
         const sr = setRunnable({ id, on: true, reauthed: true, by: String(by).slice(0, 40), keepPaused: true });
         if (!sr.ok) { failCode = sr.code; break; }
         const w = useGrants.addMember(id, { kind: 'conversation', key: q.conv, name: q.who }, { hosts: q.hosts, until, tool: q.tool }, { by: String(by).slice(0, 40) });
         if (!w.ok) { failCode = w.code; break; }
-        const mem = ((useGrants.publicFor(id) || {}).to || []).find((m) => m.id === w.grant);
-        made.push({ id, grant: w.grant, added: w.added, principal: mem ? mem.principal : null });
+        madeGrants.push(w.grant);
         resumeMember(id, w.grant);   // round 7 (MAJOR item 2): resume ONLY this card's member — the owner's OTHER paused grants on this entry stay paused
       }
       if (failCode) {
-        try { const dn = load(); save({ runnable: prior.runnable, suspended: prior.suspended, always: dn ? dn.always : [], opened: prior.opened }); } catch { }   // every switch back to its prior state
-        for (const m of made) { if (m.added && m.principal) { try { useGrants.revoke(m.id, m.principal, { by: String(by).slice(0, 40) }); } catch { } } }   // the members written in THIS act out again
+        for (const id of touched) { const s = rowSnap.get(id); if (s && rawSetRow) { try { rawSetRow(id, { to: s.to, except: s.except }, { by: String(by).slice(0, 40), reauthed: true }); } catch { } } }   // every row back to its prior members — a narrowing, so it never needs 验证是你; the raw writer, so the restore does not RESUME
+        try { save({ runnable: prior.runnable, suspended: prior.suspended, always: (load() || {}).always || [], opened: prior.opened }); } catch { }   // every switch + every press marker back to its prior state
+        try { vault.contentsChanged && vault.contentsChanged('switch'); } catch { }   // PUSH the restore like the flip was pushed — open Vault windows show the switch as it is on disk
         settle(q, 'denied', failCode); return { ok: false, code: failCode };
       }
-      audit('vault-run-always', { by: String(by).slice(0, 40), conv: q.conv, shapeId: shapeIdOf(q.key), ttl, until, grants: made.map((m) => m.grant), hosts: q.hosts });
+      audit('vault-run-always', { by: String(by).slice(0, 40), conv: q.conv, shapeId: shapeIdOf(q.key), ttl, until, grants: madeGrants, hosts: q.hosts });
     } else if (a === 'always') {
       const ms = VR.ALWAYS_TTLS[ttl], until = ms == null ? null : now() + ms;
       // r6: the «always» row remembers its card's record (`todoId`) — its END is written there (a switch OFF, a lock, its time)
@@ -1367,16 +1398,11 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     // lane vault-use-grants: THE STANDING APPROVAL of each entry for THIS caller and THIS run's hosts (the grant door's PURE verdict —
     // a Task Group's members read now); a member that does not cover the run is named on the card
     const standing = new Map();
-    // int361 — 主开发's ruling (C): DESTINATION KNOWLEDGE is not «always» ELIGIBILITY. A keyed routing flag whose hosts the reader
-    // READS (--connect-to's HOST2, -x's proxy + the URL host, --resolve's address) withholds «always» (vault-agent-own: the shape's
-    // destination varies) yet is a KNOWN destination set — a grant naming every host in it covers the run (vault-use-grants since r2);
-    // a flag whose destination cannot be read (--unix-socket, ProxyCommand, a proxy env) is opaque for both roads.
-    const destKnown = !!shape.always || (shape.noAlways === 'opaque-route' && !dest.opaque && dest.hosts.length > 0);
     if (useGrants) {
       let uf = null;
       try { uf = useFacts(caller) || {}; } catch { uf = { groupsUnreadable: true }; }
       const facts = { ...uf, conversationKeys: [...new Set([caller.conversationId, ...(Array.isArray(uf.conversationKeys) ? uf.conversationKeys : [])].filter(Boolean).map(String))], groupIds: Array.isArray(uf.groupIds) ? uf.groupIds : [], groupsUnreadable: !!uf.groupsUnreadable };
-      for (const r of spec.refs) { const row = rowOf(r); if (row) { try { standing.set(r.id, useGrants.verdictFor(r.id, facts, { hosts: dest.hosts, destinationKnown: destKnown, entryHosts: row.hosts || [], tool: shape.name })); } catch { /* unreadable: no standing approval */ } } }   // round 3 (item 5): `tool` scopes a wildcard default to its CLI
+      for (const r of spec.refs) { const row = rowOf(r); if (row) { try { standing.set(r.id, useGrants.verdictFor(r.id, facts, { hosts: dest.hosts, destinationKnown: !!shape.destKnown, entryHosts: row.hosts || [], tool: shape.name })); } catch { /* unreadable: no standing approval */ } } }   // round 3 (item 5): `tool` scopes a wildcard default to its CLI; round 9 (seam ruling C): a standing grant covers the run when the reader READ every destination (`destKnown`), NOT when «always» would be offered (`shape.always`) — the two are decoupled so a keyed routing flag whose host is read is still coverable by a grant naming it
     }
     // THE FACTS the verdict reads: each entry's row (exists), its switch (open), its class (the engine's check) and its length
     const d = load();
@@ -1470,10 +1496,17 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       // HOSTS the request named (the Settings words «may use it in commands to those hosts for 8 hours» now match the code). A run
       // whose destinations are not ALL covered — another host, an opaque route, or a paste that named no hosts — draws its card.
       const hostCovered = (hosts, h) => hosts.some((gh) => gh === h || (gh.startsWith('*.') && (h === gh.slice(2) || h.endsWith(gh.slice(1)))));   // a paste --host may be a literal or a `*.suffix` wildcard
-      // round 7/8 (MINOR): read the paste grant from `grantOf` (the conv × entry grant), NOT `admitted` — `admitted` requires the
-      // switch to be OFF (`g && !sw`), so once a per-conversation «Always» press-opened the switch toward ANOTHER host, the paste
-      // grant stopped admitting its OWN named hosts. The 8-hour host-scoped grant stands independent of the switch state.
-      if (!verdict.ok && verdict.ask && !refused && !dest.opaque && dest.hosts.length && spec.refs.length && spec.refs.every((r) => { const g = grantOf(scope, r.id); return g && Array.isArray(g.hosts) && g.hosts.length && dest.hosts.every((h) => hostCovered(g.hosts, h)); })) {
+      // round 9 (BLOCKER item 1 + seam ruling C): the paste grant is a STANDING grant with a host scope — it goes through the SAME
+      // destination gate as the standing path, `shape.destKnown`: the reader READ every destination of a KNOWN tool (nothing
+      // opaque, the arg set complete, not an interpreter / shell / unknown tool / config-file / program-writable / runs-project).
+      // A command whose destination cannot be READ never runs by ANY grant — it draws its card, exactly as on the base. (r7 keyed
+      // this only on `!dest.opaque` + the hosts covered, so `python3 exfil.py https://host/`, `sh …`, `mytool …`, `make …`,
+      // `curl -K cfg …` all ran by:grant with the secret in their env and NO card for 8 hours — a regression this closes.) Gated on
+      // `destKnown`, NOT `shape.always`: the two are decoupled (ruling C) so a keyed routing flag whose host is READ, which withholds
+      // «always», is still coverable by a grant naming that host — the grant road asks «can the reader name every host», not «always».
+      // round 7/8: read the paste grant from `grantOf` (the conv × entry grant), NOT `admitted`, so a per-conversation «Always»
+      // press that opened the switch toward ANOTHER host does not stop the paste grant admitting its OWN named hosts.
+      if (!verdict.ok && verdict.ask && !refused && shape.destKnown && !dest.opaque && dest.hosts.length && spec.refs.length && spec.refs.every((r) => { const g = grantOf(scope, r.id); return g && Array.isArray(g.hosts) && g.hosts.length && dest.hosts.every((h) => hostCovered(g.hosts, h)); })) {
         verdict = { ok: true, by: 'grant' };
       }
       // lane vault-use-grants (R4): THE POLICY JUDGE (vault.policyJudge, default OFF) — a run that would ask, every entry with a policy,
