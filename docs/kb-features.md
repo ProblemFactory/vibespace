@@ -840,7 +840,7 @@ impossible rather than a review promise.
   restart are each drawn once, whichever runs first — a message still held is
   never taken for part of another message's record; messages Claude ran
   together are matched by the uuids its turn names, never by their words.
-  **Acceptance r9 (the same .361):** a restart inside the 2 s before the
+  **Acceptance r9 (the same .362):** a restart inside the 2 s before the
   wrapper saved its buffer still draws each message once — when the turn's
   first line is lost, Claude's own record says which messages it ran
   together, and on an older Claude the order they were handed over says it.
