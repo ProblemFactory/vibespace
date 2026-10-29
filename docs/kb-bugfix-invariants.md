@@ -805,6 +805,7 @@
 - (2026-10-28) ROW B'S BROWSE… RAISED ROW A'S PICKER; A QUEUED FORM OPENED DEAD; A BESIDE FORM WAS NEVER FOUND (dialog-yield r4). 不变量 = a key names one subject; every open form is found by its key; a queued form's caller awaits ready, its liveness is live() ⇒ kb-bugfix-invariants.md
 - (2026-10-28) THE DESIGN SHEETS FLOATED A KEYBOARD ABOVE THE KEYBOARD; «bar» RAISED foo'S SEARCH; A QUEUED FORM HUNG ON A REMOVE (dialog-yield r5). 不变量 = a key names every input its caller prefills; every road that ends a form answers what waits on it ⇒ kb-bugfix-invariants.md
 - (2026-10-29) A SECOND LINK ASK EDITED THE FIRST LINK; THE SHEET HUNG ON A FILTER; AN EMPTY BOX KEPT THE ADDED PATH (dialog-yield r6). 不变量 = a key names its inputs through every road a value takes; a containing block is declared, never a side effect ⇒ kb-bugfix-invariants.md
+- (2026-10-29) THE ADD BOX CLOSED ITS LIST UNDER THE PERSON; A DELETED PATH CAME BACK (dialog-yield r7). 不变量 = a repaint keeps the field the person is IN (one predicate, inUse()); an emptied box drops its words; a census names its blind spots ⇒ kb-bugfix-invariants.md
 - (2026-10-27) FOR 89 MINUTES NOBODY COULD LIST OR REACH A SESSION (the hub froze on a stalled NFS data/; every door went through it). 不变量 = the person's CLI reads the machine's own index + the kernel, touches a mount only in a bounded child, never waits on the hub (human-cli) ⇒ kb-bugfix-invariants
 - (2026-10-27) A CLAUDE MESSAGE SENT MID-TURN COULD ONLY WAIT (the owner on .359). 不变量 = a message sent during a turn is the person's to queue or to inject where its CLI's words back it; Stop is a window the CLI's words close, every pause with a named end; one record per frame ⇒ kb-bugfix-invariants
 - (2026-10-28) THE WITNESS STAMP DREW A «NEW FIELDS» CHIP ON EVERY TURN IT FED; THE RESTART COPY CUT OR INLINED ITS PICTURES (claude-steer-inject r5). 不变量 = a record the product's own input causes is declared when the input is built; a copy is a reference, never the bytes ⇒ kb-bugfix-invariants
@@ -1098,7 +1099,6 @@ The fence grows with each: test-jobs-cli-body 51 (a 2.369.360-shaped engine, the
 
 **不变量.** The continue says what the reset time was and was not; a standing rule rides every turn's injection; VibeSpace's continue is the only signal — a time the CLI prints is one account's fact, never the agent's schedule.
 
-- (2026-10-29) THE ADD BOX CLOSED ITS LIST UNDER THE PERSON; A DELETED PATH CAME BACK (dialog-yield r7). 不变量 = a repaint keeps the field the person is IN (one predicate, inUse()); an emptied box drops its words; a census names its blind spots ⇒ kb-bugfix-invariants.md
 
 ## THE BOX'S CLAUDE SELF-UPDATED TO 2.1.312 AND EVERY CLAUDE CONVERSATION'S RESULT GREW A «NEW FIELDS» CARD (lane claude-steer-inject r3 = cli-2-1-312-records, 2026-10-27 — the CLI updated itself at 18:44 PT; picked onto .360 by int360 without the steer rounds)
 
