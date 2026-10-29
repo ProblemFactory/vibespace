@@ -262,7 +262,7 @@ console.log('§7 the real engine: quotaVerdictFor, beforeAutoResumeFire, fallbac
   const REAL = require(ENGINE);
   // (lane pool-silent-members acceptance r3: the pre-fire gate's LAST CHECK — the link's member on the reading at the fire —
   // now holds the patched copy's continue on its own, a belt below the verdict: the copy takes it out too)
-  const NO_VERDICT = patched('eng-no-verdict.js', [["      if (memberLapsed(li)) return { id: m.id, name: m.name || m.id, v: { ...v, usable: false, blockedUntil: 0, reason: 'subscription inactive — it rejoins once it answers again' } }; // verify r1 ①\n", ''], ['      if (lv && lv.usable === false) {', '      if (false) {']]);
+  const NO_VERDICT = patched('eng-no-verdict.js', [["      if (memberLapsed(li)) return { id: m.id, name: m.name || m.id, v: { ...v, usable: false, blockedUntil: 0, reason: 'subscription inactive — it rejoins once it answers again' } }; // verify r1 ①\n", ''], ['    const lv = pooled && !v.held ? linkHold(session, scope, model, v, at) : null;', '    const lv = null;']]);
   const NO_FALLBACK = patched('eng-no-fallback.js', [[", readLogin: poolReadLogin() }); // a lapsed member last (verify r1 ④)", ' });']]);
   const NO_DIRECT = patched('eng-no-direct.js', [["    if (a && a.type === 'subscription' && !session.host) {\n", "    if (false) {\n"]]);
   const { captureRateLimitEvent, parseRateLimitEvent } = require(path.join(REPO, 'src/rate-limit-capture.js'));

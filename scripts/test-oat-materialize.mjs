@@ -953,7 +953,7 @@ console.log('§7 VERIFY R1 — each finding of pool-oat-verify (4c1be7e0e REFUTE
     const o = am10.createSubscription({ name: 'Oat only' }).id; put(am10, o, login(NOW, { dead: true })); await so(am10, o, OAT);
     const l = am10.createSubscription({ name: 'Login' }).id; const lv = login(NOW); put(am10, l, lv);
     ok(am10.readSubCreds(o).oatFile === true && am10.usageToken(o) === null && am10.usageToken(l) === lv.claudeAiOauth.accessToken, 'F10: usageToken never hands out a materialized oat (inference-only; the ⟳ / identity-group reads refuse an oat-only row as before — no token ⇒ no request) — a live login\'s access token still reads', { oat: am10.usageToken(o) === OAT ? 'OAT' : am10.usageToken(o) });
-    const mF10 = mutantStore({ acc: [['    return info.oatFile || !usageBearerOk(info.accessToken) ? null : info.accessToken;', '    return info.accessToken || null;']] }); // (acceptance r3: the usage bearer law)
+    const mF10 = mutantStore({ acc: [['    return info.oatFile || !usageBearerOk({ accessToken: info.accessToken, refreshToken: info.refreshable }) ? null : info.accessToken;', '    return info.accessToken || null;']] }); // (acceptance r3: the usage bearer law)
     if (mF10) { const amM = f10(mF10); await nv(amM, '2.1.296'); const x = amM.createSubscription({ name: 'X' }).id; put(amM, x, login(NOW, { dead: true })); await so(amM, x, OAT); ok(amM.usageToken(x) === OAT, 'RED control (F10): the r1 reader hands the oat to the usage call — the leg above catches it'); } else ok(false, 'F10 anchor present');
   }
 

@@ -288,9 +288,9 @@ const L = require(path.join(REPO, 'src/server/usage-probe-log.js'));
       probeUsageForAccountKey: async () => false, onMemberReadingFresh: () => ({}), CLAUDE_CMD: bin,
     });
     const EMAIL = 'fold' + '@example.invalid'; // built at runtime: no address-shaped literal in the tree
-    const GTOK = ['GLOBAL', 'fake', 'login'].join('-'); // the machine login's FAKE token, built at runtime
+    const GTOK = ['sk', 'ant', 'oat01'].join('-') + '-GLOBAL-fake-login'; // the machine login's FAKE token, built at runtime — in the CLI's own shape (acceptance r4: an sk-ant-oat01- access token beside its sk-ant-ort01- refresh token is a LOGIN)
     const home = mkd(`vs-probelog-home-${process.pid}-`); fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
-    const globalLogin = (on) => { const f = path.join(home, '.claude', '.credentials.json'); if (on) fs.writeFileSync(f, JSON.stringify({ claudeAiOauth: { accessToken: GTOK, expiresAt: Date.now() + 36e5 } })); else fs.rmSync(f, { force: true }); };
+    const globalLogin = (on) => { const f = path.join(home, '.claude', '.credentials.json'); if (on) fs.writeFileSync(f, JSON.stringify({ claudeAiOauth: { accessToken: GTOK, refreshToken: ['sk', 'ant', 'ort01'].join('-') + '-GLOBAL-fake-refresh', expiresAt: Date.now() + 36e5 } })); else fs.rmSync(f, { force: true }); };
     fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({ oauthAccount: { emailAddress: EMAIL } }));
     const calls = [], realReq = https.request, realHome = process.env.HOME;
     https.request = (url, opts, cb) => {

@@ -74,6 +74,52 @@ ck('every state carries the same four keys (no shape drift between branches)', [
   loginState(creds({ accessToken: '', refreshTokenExpiresAt: NOW - H, scopes: ['x'] }), NOW), loginState(creds({ ...LIVE, refreshTokenExpiresAt: NOW - H }), NOW),
 ].every((s) => ['state', 'refreshExpiresAt', 'accessExpiresAt', 'msLeft'].every((k) => k in s)));
 
+// ── THE USAGE BEARER LAW BY SHAPE (lane pool-silent-members acceptance r4, the blocker — repro/accept-r3/
+// skeptic-r3a-bearer-law-login.mjs): r3 told a long-lived token by its prefix (/^sk-ant-oat\d{2}-/), and the access token
+// EVERY `claude login` writes carries it too (sk-ant-oat01-… beside an sk-ant-ort01-… refresh token) — every real login read
+// as long-lived; this suite's LIVE fixture ('sk-ant-oat-x', no digits) slipped past. A long-lived token is an access token
+// with NO refresh token beside it. The fixtures carry the vendor's REAL shapes, FAKE tokens built at runtime
+console.log('— §1a the usage bearer law, by shape');
+{
+  const OAT = ['sk', 'ant', 'oat01'].join('-'), ORT = ['sk', 'ant', 'ort01'].join('-');
+  const loginRec = { accessToken: `${OAT}-FAKE-login-${'a'.repeat(40)}`, refreshToken: `${ORT}-FAKE-login-r`, expiresAt: Date.now() + 8 * H, scopes: ['user:inference', 'user:profile'], subscriptionType: 'max' };
+  const setupRec = { accessToken: `${OAT}-FAKE-setup-${'b'.repeat(40)}`, expiresAt: Date.now() + 300 * 24 * H, scopes: ['user:inference'], subscriptionType: 'max' };
+  const shapes = (le, AM) => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-bearer-shape-'));
+    try {
+      const am = new AM({ dataDir: dir, platform: 'linux' });
+      const put = (name, rec) => { const id = am.createSubscription({ name }).id; fs.writeFileSync(path.join(am.subDir(id), '.credentials.json'), JSON.stringify({ claudeAiOauth: rec }), { mode: 0o600 }); return id; };
+      const l = put('acct-1', loginRec), s = put('acct-2', setupRec);
+      return { loginOk: le.usageBearerOk(loginRec), loginTok: am.usageToken(l) === loginRec.accessToken, loginRef: am.usageTokenRefusal(l), setupOk: le.usageBearerOk(setupRec), setupTok: am.usageToken(s), setupRef: am.usageTokenRefusal(s) };
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  };
+  const LOGIN_LEG = 'THE BEARER LAW BY SHAPE: a claude login (an sk-ant-oat01- access token WITH its sk-ant-ort01- refresh token beside it) IS a usage bearer — usageBearerOk true, accounts.usageToken hands its access token, no refusal';
+  const SETUP_LEG = 'THE BEARER LAW BY SHAPE: a claude setup-token (an sk-ant-oat01- access token, NO refresh token) is never one — usageBearerOk false, usageToken null, refused BY NAME «long-lived»';
+  const loginHolds = (g) => g.loginOk === true && g.loginTok === true && g.loginRef === null;
+  const setupHolds = (g) => g.setupOk === false && g.setupTok === null && g.setupRef === 'long-lived';
+  const g = shapes(LE, R('src/accounts.js').AccountManager);
+  ck(LOGIN_LEG, loginHolds(g));
+  ck(SETUP_LEG, setupHolds(g));
+  // RED CONTROL: r3's prefix rule planted back into a copy of login-expiry (the accounts store re-required on it) — the
+  // LOGIN leg goes red by name, the setup leg stays green (the prefix rule refused both)
+  const lePath = require.resolve(path.join(REPO, 'src/login-expiry.js')), accPath = require.resolve(path.join(REPO, 'src/accounts.js'));
+  const leSrc = fs.readFileSync(lePath, 'utf8');
+  const anchor = "function usageBearerOk(o) { return !!o && typeof o === 'object' && typeof o.accessToken === 'string' && o.accessToken !== '' && !!o.refreshToken; }";
+  ck('§1a RED control: the shape rule anchor is present', leSrc.includes(anchor));
+  if (leSrc.includes(anchor)) {
+    const Module = require('node:module');
+    const m = new Module(lePath, null); m.filename = lePath; m.paths = Module._nodeModulePaths(path.dirname(lePath));
+    m._compile(leSrc.replace(anchor, "function usageBearerOk(o) { const t = o && typeof o === 'object' ? o.accessToken : o; return typeof t === 'string' && t !== '' && !/^sk-ant-oat\\d{2}-/.test(t); }"), lePath);
+    m.loaded = true;
+    const keepLe = require.cache[lePath], keepAcc = require.cache[accPath];
+    let r = null;
+    try { require.cache[lePath] = m; delete require.cache[accPath]; r = shapes(m.exports, require(accPath).AccountManager); } finally { require.cache[lePath] = keepLe; require.cache[accPath] = keepAcc; }
+    const red = [[LOGIN_LEG, loginHolds(r)], [SETUP_LEG, setupHolds(r)]].filter(([, held]) => !held).map(([n]) => n);
+    console.log('    prefix rule planted back: red = ' + JSON.stringify(red.map((n) => n.slice(0, 48))) + ' ' + JSON.stringify({ loginOk: r.loginOk, loginTok: r.loginTok, loginRef: r.loginRef }));
+    ck('§1a RED control: with the prefix rule planted back the LOGIN leg is red by name (usageToken null, refused «long-lived») — and only it', red.length === 1 && red[0] === LOGIN_LEG);
+  }
+}
+
 console.log('— §1b predicates');
 const stFor = (msLeft) => loginState(creds({ ...LIVE, refreshTokenExpiresAt: NOW + msLeft }), NOW);
 ck('usable: ok / expiring / near / UNKNOWN all serve; expired + logged-out do not', [

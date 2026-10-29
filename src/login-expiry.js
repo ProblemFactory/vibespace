@@ -116,10 +116,15 @@ function oatFileOf(creds) {
 // CLI's own login token — the one `claude login` wrote beside its refresh token. A long-lived token (`claude setup-token`'s
 // sk-ant-oat…) is never one, OURS (oatFileOf) or a file we did not write: it is an inference credential, and the CLI
 // itself never reads usage with it (2.1.312 prints no quota lines for a folder-token login) — a request shape the vendor
-// never sees from its own client is the shape §ban-safety exists to stop
-const LONG_LIVED_TOKEN_RE = /^sk-ant-oat\d{2}-/;
-/** May `token` be the Bearer of a direct usage read? A non-empty string that is not a long-lived token. */
-function usageBearerOk(token) { return typeof token === 'string' && token !== '' && !LONG_LIVED_TOKEN_RE.test(token); }
+// never sees from its own client is the shape §ban-safety exists to stop.
+// THE SHAPE, NEVER THE PREFIX (acceptance r4, the blocker — repro/accept-r3/skeptic-r3a-bearer-law-login.mjs): r3 told the
+// two kinds apart by `/^sk-ant-oat\d{2}-/`, and the access token EVERY `claude login` writes carries that prefix too
+// (sk-ant-oat01-… beside an sk-ant-ort01-… refresh token) — every real login read as long-lived and the whole ladder went
+// silently null. The prefix is the vendor's, shared by both kinds; a long-lived token is an access token with NO refresh
+// token beside it — oatFileOf's rule
+/** May this oauth record's (claudeAiOauth: {accessToken, refreshToken}) access token be the Bearer of a direct usage read?
+ *  A LOGIN's: a non-empty access token WITH its refresh token beside it — never one alone (a long-lived token). */
+function usageBearerOk(o) { return !!o && typeof o === 'object' && typeof o.accessToken === 'string' && o.accessToken !== '' && !!o.refreshToken; }
 /** OURS for row `id`: our materialized file (oatFileOf) whose mark names this row. */
 function oatFileOurs(creds, id) {
   if (!id || !oatFileOf(creds)) return false;
@@ -493,7 +498,7 @@ function materializeVerdict(member, now = Date.now()) {
 }
 
 module.exports = {
-  OAT_FILE_MARK, oatFileOf, oatFileOurs, LONG_LIVED_TOKEN_RE, usageBearerOk, credsRestOf, oatFileMerge, oatFileCurrent, oatShapeOf, oatFileBody, materializeVerdict,
+  OAT_FILE_MARK, oatFileOf, oatFileOurs, usageBearerOk, credsRestOf, oatFileMerge, oatFileCurrent, oatShapeOf, oatFileBody, materializeVerdict,
   EXPIRING_MS, NEAR_MS, WARN_STAGES, STAGE_MS, DEAD_STATES, STALE_GRACE_MS, SHORT_SESSION_MS, OAT_ONLY,
   loginState, withOat, ledgerExp, loginUsable, loginSwitchTarget, loginRank, loginBlockReason,
   loginAgeText, loginBucketLabel, loginBlockedPhrase, loginBlockedText, loginWallPhrase,

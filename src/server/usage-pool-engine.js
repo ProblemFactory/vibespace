@@ -3236,8 +3236,11 @@ async function refreshCodexForPerson({ key = null, sessionId = null, timeoutMs =
 // dispatcher above (official client makes the fetch — §ban-safety intact).
 const _wallVerifyAt = new Map(); // scope → last blocked-entry verification probe (10min floor)
 const WALL_PROBE_BACKOFF = [0, 1800000, 3600000, 7200000];
-function scheduleWallProbe(session, scope, model, attempt) {
+// `once` (acceptance r4, reproduced: repro/accept-r3/skeptic-r3a-gate-lastcheck.mjs — 81 panel probes, the 30-min rung never
+// ran): a GATE arms the ladder only when none is pending — every 30 s gate cleared and re-set it, so it never fired
+function scheduleWallProbe(session, scope, model, attempt, { once = false } = {}) {
   const id = session._webuiId;
+  if (once && session._wallProbeTimer) return;
   if (attempt >= WALL_PROBE_BACKOFF.length) { console.log(`[wall] ${id}: no reset time after ${attempt} probes — giving up (manual resume needed)`); return; }
   try { clearTimeout(session._wallProbeTimer); } catch { }
   session._wallProbeTimer = setTimeout(async () => {
@@ -3250,6 +3253,10 @@ function scheduleWallProbe(session, scope, model, attempt) {
       if (target) await probeQuotaForKey(target, { session }).catch(() => { }); // caps-routed: never a claude spawn for a codex identity
       const v = quotaVerdictFor(scope, { model, session });
       const ar = getAutoResume();
+      // the fire's last check, asked here too (acceptance r4): a pool usable only through a member the link did not move
+      // to is no «usable again» — that near-arm re-ran the gate into the same hold. The link's member decides
+      const lv = v.usable === true ? linkHold(session, scope, model, v, Date.now()) : null;
+      if (lv) { if (lv.blockedUntil > Date.now()) { ar?.armIfEnabled?.(id, session, lv.blockedUntil, lv.reason, { cause: armCauseFor(lv, null, null, 0) }); return; } scheduleWallProbe(session, scope, model, attempt + 1); return; }
       if (v.usable === true) { ar?.armIfEnabled?.(id, session, Date.now() + 45000, 'account usable again'); return; }
       if (v.blockedUntil > Date.now()) { ar?.armIfEnabled?.(id, session, v.blockedUntil, v.reason, { cause: armCauseFor(v, null, null, 0) }); return; }
       scheduleWallProbe(session, scope, model, attempt + 1);
@@ -3277,8 +3284,24 @@ function preFireProbe(target, session) {
   rec.done = run.catch(() => { }).finally(() => { rec.pending = false; });
   return rec.done;
 }
+// ONE GATE PER TURN, CHAINED (acceptance r4): N immediates queued in one turn all run in ONE check phase, back to back —
+// the 60 gates' prefixes were still one 30 ms block. Each gate's turn is queued only after the previous one ran, so the
+// loop (timers, I/O) breathes between gates; the chain waits for TURNS, never for a gate's probe
+let _gateTurn = Promise.resolve();
+function gateTurn() { const t = _gateTurn.then(() => new Promise((r) => setImmediate(r))); _gateTurn = t; return t; }
+/** THE FIRE'S LAST CHECK (acceptance r3/r4): the link's member when the pool's verdict names ANOTHER member the link did
+ *  not move to — its own verdict on the same reading at the same instant if it cannot serve, else null. */
+function linkHold(session, scope, model, v, at) {
+  const on = sessionBillingMember(session, scope).id;
+  const lv = on && on !== v.viaId ? quotaVerdictFor(scope, { model, session, now: at, only: on }) : null;
+  return lv && lv.usable === false ? lv : null;
+}
 async function beforeAutoResumeFire(id, session) {
   try {
+    // ONE GATE PER TURN (acceptance r4, the burst — repro/accept-r3/skeptic-r3a-gate-burst-fs.mjs): a tick fires every due
+    // conversation's gate in ONE macrotask (60 conversations × 14 members: 500–600 ms of decisions in the tick, base and r3
+    // alike), and every gate awaiting one probe resumed in ONE microtask drain — each gate now decides in its own turn
+    await gateTurn();
     // ONE CLOCK (lane pool-silent-members R4, inc-mvsjhna7 13:01:00): the switch and the verdict below judge the SAME
     // instant — the switch read a fractional clock and the verdict a floored one, so at reset + grace the switch moved
     // every conversation onto the member whose window had just landed while the verdict dropped that member
@@ -3297,6 +3320,7 @@ async function beforeAutoResumeFire(id, session) {
     // a new cost on a path that fires in bursts. The RE-VERDICT below always
     // runs — only the spawn is throttled.
     if (target) await preFireProbe(target, session);
+    if (target) await gateTurn(); // …and after the shared probe, each in its own turn again (above)
     // THE FRESH READING DECIDES — IN EVERY GATE (acceptance r2 + r3, reproduced: repro/r2/engine-r2.mjs gate,
     // repro/accept-r2/skeptic-gate-two-trace.mjs): the switch above judged the member it moved to on its CACHE; when the
     // reading after the probe (this gate's own, or the one it awaited) says that member cannot serve after all, the pool
@@ -3307,7 +3331,15 @@ async function beforeAutoResumeFire(id, session) {
     if (pooled) {
       at = Date.now();
       const tv = quotaVerdictFor(target, { model, session, now: at });
-      if (tv && tv.usable !== true) maybePoolAutoSwitch(session, { now: at, force: true });
+      // ONE RE-DECISION PER POOL PER READING (acceptance r4, reproduced: repro/accept-r3/skeptic-r3a-gate-burst-fs.mjs — 60
+      // conversations × 14 members: 60 forced pool evaluations back to back, a 371 ms stall): every gate awaiting one
+      // probe resumes in the same drain, and the first one's forced evaluation already decided the whole pool on that
+      // reading — the rest read its result (the pool's links, the verdict below), they never re-run it
+      const rec = _preFireProbe.get(target);
+      if (tv && tv.usable !== true && !(rec && rec.redecided && rec.redecided.has(scope))) {
+        if (rec) (rec.redecided || (rec.redecided = new Set())).add(scope);
+        maybePoolAutoSwitch(session, { now: at, force: true });
+      }
     }
     const v = quotaVerdictFor(scope, { model, session, now: at });
     // a HELD process (r4) is continued only on a POSITIVE answer about the login
@@ -3323,14 +3355,19 @@ async function beforeAutoResumeFire(id, session) {
     // into the member the conversation's link still names when the switch could not move it (a dwell, a pin, an engine
     // mark) — that member, judged on the same reading at the same instant, must not be spent; else the continue is held
     // and said, and the wall probe re-asks
-    if (pooled && !v.held) {
+    // A HOLD IS A DECISION WITH A TIME (acceptance r4, reproduced: repro/accept-r3/skeptic-r3a-gate-lastcheck.mjs — r3 held
+    // WITHOUT re-arming: the arm stayed due, every 30 s tick re-gated, 81 panel probes and 240 journal lines in 2 h): the
+    // hold re-arms ONCE at the link member's known usable instant and is said once; a tick whose arm is not due runs no
+    // gate and no probe; with no instant known, the pool's wall probe is armed once (never cleared by a gate) and its
+    // reading — or any reading that opens the wall — fires the arm then
+    const lv = pooled && !v.held ? linkHold(session, scope, model, v, at) : null;
+    if (lv) {
       const on = sessionBillingMember(session, scope).id;
-      const lv = on && on !== v.viaId ? quotaVerdictFor(scope, { model, session, now: at, only: on }) : null;
-      if (lv && lv.usable === false) {
-        console.log(`[auto-resume] ${id}: continue held at the fire — ${nameOf(on)}, the member its link names, cannot serve (${String(lv.reason || '').slice(0, 300)}); the pool's verdict names ${v.via || '?'}, and the link did not move there`);
-        scheduleWallProbe(session, scope, model, 1);
-        return false;
-      }
+      const timed = lv.blockedUntil > Date.now();
+      console.log(`[auto-resume] ${id}: continue held at the fire — ${nameOf(on)}, the member its link names, cannot serve (${String(lv.reason || '').slice(0, 300)}); the pool's verdict names ${v.via || '?'}, and the link did not move there — ${timed ? 're-armed for ' + new Date(lv.blockedUntil).toISOString() : 'the wall probe re-asks'}`);
+      if (timed) getAutoResume()?.armIfEnabled?.(id, session, lv.blockedUntil, 're-armed at fire: ' + lv.reason, { cause: armCauseFor(lv, null, null, 0) });
+      else scheduleWallProbe(session, scope, model, 1, { once: true });
+      return false;
     }
     return true;
   } catch (e) {
