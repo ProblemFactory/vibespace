@@ -5,7 +5,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 ## 2.369.361 — 2026-10-28
 
 ### Fixed
-- You can approve an agent's proposed reaction, or its taking back of your message, again — since 2.369.197 Approve was refused with a wrong tip to reload.
+- You can now approve a reaction an agent proposes, or its taking back of a message you sent — until now these cards refused Approve with a wrong tip to reload.
 
 ## 2.369.360 — 2026-10-27
 
