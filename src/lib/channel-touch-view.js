@@ -30,11 +30,15 @@
 //     run's one-line strip a chip never goes below its READABLE MINIMUM (glyph +
 //     account + 12 characters of the title, measured): what does not fit folds
 //     into "+N more", and "+N more" expands into ROWS — one ResizeObserver per
-//     view re-fits a strip when its width changes. Round 2: a lone call that
-//     could have run the CLI (a script, an interpreter, a helper by its TOOL
-//     NAME) is the cause; a turn is the transcript's (T.opensTurn — a steer
-//     typed mid-turn belongs to its turn); every width is measured in CSS px
-//     (a rect ÷ the zoom it is drawn at — the UI scale × the chat's font
+//     view re-fits a strip when its width changes. A lone call that could have
+//     run the CLI (a script, an interpreter, a helper by its TOOL NAME) is the
+//     cause; a call's text is its command read through agentCommandText (a
+//     codex argv is its `-c` script) and the binder hears whether its work
+//     outlives the card (`run_in_background`, the task notification's end); a
+//     turn is the normalizer's (T.opensTurn over each record: a steer or a hub
+//     card that entered a running turn never starts one; a note row starts one
+//     only when it is the turn's first record); every width is measured in CSS
+//     px (a rect ÷ the zoom it is drawn at — the UI scale × the chat's font
 //     scale); the fold control is never clipped (chip 0 gives its name first).
 //  ② THE CHIP: this turn's touches (at or after the turn's start — the
 //     server's, or the newest live user message) → the status bar's keyed
@@ -51,7 +55,7 @@
 import { fetchJson, showToast } from './utils.js';
 import { t } from './i18n.js';
 import { icon, el } from './channel-chrome.js';
-import { toolCommandText } from '../browser-trace.js';
+import { agentCommandText } from '../agent-tool-rules.js';   // r3: THE unwrapper — codex's argv `["bash","-lc","…"]` is its script, never a re-joined string
 import * as T from '../channel-touch.js';
 import { showApiAccessDialog } from './channel-api-dialog.js';   // B-2198
 import { chatApiCards } from './channel-api-card-view.js';   // B-2198 part 2: the proposal's card at its call row
@@ -83,19 +87,28 @@ function callKind(cardEl) {
   const m = cardEl && cardEl._rawMsg;
   const b = m && m.content && m.content[0];
   const input = b && b.input;
-  return T.callKindOf({ name: (b && (b.toolName || b.name)) || (m && m.toolName) || '', collapseKind: m && m.collapseKind, command: input && typeof input === 'object' ? toolCommandText(input) : '' });
+  return T.callKindOf({ name: (b && (b.toolName || b.name)) || (m && m.toolName) || '', collapseKind: m && m.collapseKind, command: input && typeof input === 'object' ? agentCommandText(input) : '' });
 }
 /** A VibeSpace note row's key (its message id — never a tool id). */
 const noteKey = (n) => (n && n.dataset && n.dataset.msgId ? `note:${n.dataset.msgId}` : '');
 const isNote = (n) => !!(n && n.classList && n.classList.contains('chat-vs-note'));
 
-/** What a card's call RAN (its command, or an agent call's prompt) — the evidence `bindToCall` prefers. */
+/** What a card's call RAN (its command — an argv's script, read from the argv — or an agent call's prompt) — the evidence
+ *  `bindToCall` prefers. */
 function callText(cardEl) {
   const m = cardEl && cardEl._rawMsg;
   const b = m && m.content && m.content[0];
   const input = b && b.input;
   if (!input || typeof input !== 'object') return '';
-  return toolCommandText(input) || String(input.prompt || input.description || '');
+  return agentCommandText(input) || String(input.prompt || input.description || '');
+}
+/** r3: does a card's work OUTLIVE the card (Bash / an Agent with `run_in_background`)? — and the instant its end was seen
+ *  (the task notification that names it closes the card's task: `taskInfo.endedAt`), 0 while unseen. */
+function callBackground(cardEl) {
+  const m = cardEl && cardEl._rawMsg;
+  const input = m && m.content && m.content[0] && m.content[0].input;
+  const ti = m && m.taskInfo;
+  return { background: !!(input && typeof input === 'object' && input.run_in_background === true), bgEnd: ti && ti.status !== 'running' ? Number(ti.endedAt) || 0 : 0 };
 }
 
 export function createChannelTouchView(view) {
@@ -135,7 +148,7 @@ export function createChannelTouchView(view) {
         const v = Number(n.dataset.ts);
         if (v > start) { end = v; break; }
       }
-      return { id: c.dataset.toolId, start, end, text: callText(c), kind: callKind(c), el: c };
+      return { id: c.dataset.toolId, start, end, text: callText(c), kind: callKind(c), ...callBackground(c), el: c };
     });
   }
   /** lane touch-chip-cause: the VibeSpace note rows (where a touch no call caused hangs) and the instants TURNS start (a
@@ -155,7 +168,8 @@ export function createChannelTouchView(view) {
       if (!el.classList || !el.classList.contains('chat-msg')) continue;
       const m = (el.dataset.msgId && byId.get(el.dataset.msgId)) || el._rawMsg;
       if (!m) continue;
-      if (!isNote(el) && T.opensTurn(m, prev)) { const v = Number(el.dataset.ts) || 0; if (v > 0) out.push(v); }
+      // a note row opens a turn only when it is the turn's FIRST record (r3: `turnStart` — a held message's delivery)
+      if ((!isNote(el) || m.turnStart === true) && T.opensTurn(m, prev)) { const v = Number(el.dataset.ts) || 0; if (v > 0) out.push(v); }
       prev = m;
     }
     return out;

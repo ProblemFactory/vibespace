@@ -128,6 +128,14 @@ check('files/errors/running composition', S.runSummaryLabel({ byKind: S.countKin
     && S.commandHeadWords('cd repo && grep -rn vibespace-channels docs/ | head') === 'cd repo && grep -rn vibespace-channels docs/ | head'
     && S.commandHeadWords('git commit -m "fix vibespace-channels search paging"') === 'git commit -m "fix vibespace-channels search paging"'
     && S.commandHeadWords(`cd x && bash -c 'vibespace-channels read "$X"'`) === `… bash -c 'vibespace-channels read "$X"'`);
+  const AT = (await import(path.join(repo, 'src/agent-tool-rules.js'))).default;
+  check('commandHeadWords (touch-chip-cause r3): a codex argv call\'s head is its SCRIPT\'s — chat-view reads the argv through agentCommandText (the ONE unwrapper), never `bash -lc …` re-joined; a re-joined argv opens at its CLI; `$\'…\'` and a # comment are prose',
+    S.commandHeadWords(AT.agentCommandText({ command: ['bash', '-lc', 'vibespace-status working --reason x'] })) === 'vibespace-status working --reason x'
+    && S.commandHeadWords(AT.agentCommandText({ command: ['/usr/bin/zsh', '-lc', 'vibespace-channels search "pairing review" --full'] })) === 'vibespace-channels search "pairing review" --full'
+    && S.commandHeadWords('bash -lc vibespace-channels search "pairing review" --full') === '… vibespace-channels search "pairing review" --full'
+    && S.commandHeadWords("vibespace-status working --reason $'don\\'t; vibespace-channels read x'") === "vibespace-status working --reason $'don\\'t; vibespace-channels read x'"
+    && S.commandHeadWords('vibespace-status working # later; vibespace-channels read x') === 'vibespace-status working # later; vibespace-channels read x'
+    && /commandHeadWords\(agentCommandText\(el\._rawMsg\?\.content\?\.\[0\]\?\.input\)\)/.test(read('src/lib/chat-view.js')));
 }
 check('mcpParts splits mcp__server__tool and rejects the rest', JSON.stringify(S.mcpParts('mcp__a__b_c')) === '{"server":"a","tool":"b_c"}' && S.mcpParts('Bash') === null && S.mcpParts('') === null);
 check('the pure module imports nothing but PURE rules (DOM-free by construction; B-40f8: src/assistant-note.js; lane exit-calls-in-history: src/exit-call.js; lane touch-chip-cause r2: src/channel-touch.js — where a command line runs the channels CLI)', (read('src/lib/chat-run-summary.js').match(/^\s*import .*$/gm) || []).every((l) => /from '\.\.\/(?:assistant-note|exit-call|channel-touch)\.js';/.test(l)));
@@ -1422,7 +1430,7 @@ for (const [size, metrics] of [[1280, D1280], [390, P390]]) {
 {
   const TVSRC = read('src/lib/channel-touch-view.js');
   const CUTS = [
-    ["      return { id: c.dataset.toolId, start, end, text: callText(c), kind: callKind(c), el: c };", "      return { id: c.dataset.toolId, start, end, text: callText(c), el: c };"],
+    ["      return { id: c.dataset.toolId, start, end, text: callText(c), kind: callKind(c), ...callBackground(c), el: c };", "      return { id: c.dataset.toolId, start, end, text: callText(c), el: c };"],
     ["const { byCall, byNote } = T.bindToCall(st.touches, calls, { tail, notes, turns: turnsOf(list) });", "const { byCall, byNote } = T.bindToCall(st.touches, calls, { tail });"],
     ["const strip = !!card && card.classList.contains('chat-channel-compact') && box.dataset.expanded !== '1';", "const strip = false;"],
   ];

@@ -32,6 +32,14 @@
 //      script, an interpreter, a `bash -c` wrapper, a helper by its TOOL NAME — never a WebFetch), the turn is the
 //      transcript's (opensTurn: a steer typed mid-turn belongs to its turn, a wake starts one), the skew window never
 //      crosses a turn, the tight cut, a merge never joins two causes
+//   ⑨ ROUND 3 (the r2 delta verdict): a shell wrapper IS its script (codex's argv, `/bin/zsh -lc '…'`; a re-joined argv
+//      read whole); a background producer lingers in its turn (two candidates ⇒ by name or the note) and a call never
+//      causes another turn's touch, nor one more than the skew after its end (the tail rung is gone); ONE table of what
+//      runs nothing; a scan cut at SCAN_MAX or an unclosed heredoc could run; $'…' and a # comment are prose; the
+//      acceptance runner's 45 shapes (+3) read as expected; a helper's prompt names its verb; THE TURN LIVE — the REAL
+//      claude normalizer fed live marks a steer and a mid-turn hub card `midTurn` where they enter, the next turn's
+//      first record `turnStart`; every chip value from the chip table (src/queue-chips.js); codex's turn from its own
+//      task_started; a patched copy per rule
 //   ⑤ WIRING PINS: every agent channel route records (test-architecture §63 is the census), the renderer's holder on
 //      the three card shapes, the view in ChatView's ONE element hook + the broadcast + the turn + dispose, the
 //      status bar's keyed `channels` chip (escHtml'd), the ONE channel-window call, no innerHTML in the view, the
@@ -106,7 +114,7 @@ await section('①', async () => {
   ok(s1.by.A?.join() === 'k1,k4' && s1.by.B?.join() === 'k2' && s1.by.C?.join() === 'k3' && s1.unbound.length === 0, 'SEQUENTIAL calls: a call runs until the next one starts — each touch lands on the call running at its instant (k4, 1 s before A, is A\'s by the skew)', s1);
   ok(B([touch({ id: 'k5', at: 25000, convId: 'c1' })], seq).by.B?.join() === 'k5', 'a command naming the conversation does NOT pull a touch back from a LATER call that is running (A named gmail/c1 but had returned; B was running)');
   const late = [touch({ id: 'k6', at: 60000 })];
-  ok(B(late, seq, { tail: false }).unbound.join() === 'k6' && B(late, seq, { tail: true }).by.C?.join() === 'k6', 'NOTHING RUNNING (after the last call\'s end): unbound when the view is not at the tail, the latest card when it is');
+  ok(B(late, seq, { tail: false }).unbound.join() === 'k6' && B(late, seq, { tail: true }).unbound.join() === 'k6', 'NOTHING RUNNING (more than the skew after the last call\'s end): no call takes it, at the tail or not (r3: an ended call did not cause a later touch — the tail rung is gone)');
   const par = [C('P1', 10000, null, 'vibespace-channels read gmail/c1'), C('P2', 10400, null, 'vibespace-channels read gmail/c2'), C('N', 50000)];
   const s2 = B([touch({ id: 'q1', at: 13000, convId: 'c1' }), touch({ id: 'q2', at: 13100, convId: 'c2' }), touch({ id: 'q3', at: 14000, convId: 'c7' })], par);
   ok(s2.by.P1?.join() === 'q1' && s2.by.P2?.join() === 'q2,q3', 'a PARALLEL batch (starts within BATCH_MS): both run together — the command naming the touch wins, an unnamed touch goes to the latest to start', s2);
@@ -221,14 +229,14 @@ await section('④', async () => {
   const C = (id, start, end = null, text = '') => ({ id, start, end, text });
   const par = [C('P1', 10000, null, 'vibespace-channels read gmail/c1'), C('P2', 10400, null, 'vibespace-channels read gmail/c2')];
   const q1 = [touch({ id: 'q1', at: 13000, convId: 'c1' })];
-  const named = copy('named', 'const pool = exact.length ? exact : named;', 'const pool = named;');
+  const named = copy('named', 'const exact = cs.filter((c) => cand.has(c) && namesTouch(c.text, t, c.runs, c.kind));', 'const exact = [];');
   ok(T.bindToCall(q1, par).byCall.P1 && !named.bindToCall(q1, par).byCall.P1, 'CONTROL the named-evidence rule removed: a parallel call\'s touch lands on its sibling');
   const batch = copy('batch', 'if (cs[j].start > cs[i].start + batchMs) {', 'if (cs[j].start > cs[i].start) {');
   ok(!batch.bindToCall(q1, par).byCall.P1, 'CONTROL the batch rule removed: the first call of a parallel batch stops when its sibling starts, its touch is lost to it');
-  const seq = [C('A', 10000, null, 'x'), C('C', 30000, 40000, 'y')];
-  const lt = [touch({ id: 'k6', at: 60000 })];
-  const tail = copy('tail', '} else if (!running.length && tail && cs.length && at >= cs[cs.length - 1].start - skewMs && callCauses(cs[cs.length - 1], t)) {', '} else if (false) {');
-  ok(T.bindToCall(lt, seq, { tail: true }).byCall.C && !tail.bindToCall(lt, seq, { tail: true }).byCall.C, 'CONTROL the tail rule removed: a touch after the last call binds nowhere');
+  const lt = [touch({ id: 'k6', at: 60000 })], open = [C('A', 10000, null, 'x')];
+  const bound = copy('end-bound', '        if (c.start - skewMs <= at && (c.stop === null || at < c.stop + skewMs)) running.push(c);', '        if (c.start - skewMs <= at) running.push(c);');
+  ok(!T.bindToCall(lt, [C('C', 30000, 40000, 'y')]).byCall.C && bound.bindToCall(lt, [C('C', 30000, 40000, 'y')]).byCall.C && T.bindToCall(lt, open).byCall.A && !T.bindToCall(lt, open, { turns: [50000] }).byCall.A,
+    'CONTROL the end bound removed: a call that ended 20 s before the touch takes it (r3: an unfinished call holds a later touch of ITS turn, never of the next)');
   const tt = [touch({ id: 'f1', convId: 'a', at: 1000 }), touch({ id: 'f2', convId: 'b', at: 2000 }), touch({ id: 'f4', convId: 'a', op: 'reply', at: 1500 })];
   const draft = copy('drafted', 'return [...rows.values()].sort((a, b) => (drafted(b) - drafted(a)) || (b.last - a.last)', 'return [...rows.values()].sort((a, b) => (b.last - a.last)');
   ok(T.foldTouches(tt)[0].convId === 'a' && draft.foldTouches(tt)[0].convId === 'b', 'CONTROL drafted-first removed: the drafted conversation is no longer the first row');
@@ -288,7 +296,9 @@ await section('⑤', async () => {
     'wired: the live session map + its meta store in, the agent routes handed the witness, the shutdown flush');
   ok(/Everything you read or draft here is shown to the user as a clickable card in the chat — you never need to tell them where\./.test(read('docs/agent/channels-manual.md')), 'the agent manual gains its ONE sentence (nothing is injected)');
   // zh + ja for every word the three surfaces speak
-  const load = (f) => { const m = new Set(); for (const ln of read(f).split('\n')) { const r = ln.match(/^  ("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'): /); if (r) m.add(new Function('return ' + r[1])()); } return m; };
+  // a key's literal decoded as JSON (r3: one Function per dictionary line cost ~150 ms of the fast budget) — the JS reading when JSON cannot
+  const lit = (q) => { try { return JSON.parse(q[0] === '"' ? q : '"' + q.slice(1, -1).replace(/\\'/g, "'").replace(/"/g, '\\"') + '"'); } catch { return new Function('return ' + q)(); } };
+  const load = (f) => { const m = new Set(); for (const ln of read(f).split('\n')) { const r = ln.match(/^  ("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'): /); if (r) m.add(lit(r[1])); } return m; };
   const zh = load('src/lib/i18n-zh.js'), ja = load('src/lib/i18n-ja.js');
   const keys = new Set();
   for (const f of ['src/channel-touch.js', 'src/lib/channel-touch-view.js']) for (const m of read(f).matchAll(/\bt\('((?:[^'\\]|\\.)*)'/g)) keys.add(new Function(`return '${m[1]}'`)());
@@ -496,8 +506,8 @@ await section('⑧', async () => {
     'TABLE channelsRuns: the CLI as a COMMAND WORD (after && ; | ( , a `bash -c` string, a shell\'s heredoc, env X=… / sudo -u x / timeout 60 / xargs -n 1; quotes removed, a path kept) — never inside a quoted argument, an interpreter\'s heredoc or another command\'s argument');
   ok(T.runsNothing('vibespace-status working --reason "x"') && T.runsNothing('cd x && git status | head -3') && T.runsNothing('vibespace-task progress "a" && vibespace-status done')
     && !T.runsNothing('bash /tmp/read-all.sh') && !T.runsNothing('python3 tools/triage_inbox.py') && !T.runsNothing('./sync-mail.sh') && !T.runsNothing('vibespace-status x && make')
-    && !T.runsNothing('echo $(./fetch.sh)') && !T.runsNothing("bash -c 'ls'"),
-    'TABLE runsNothing: a line made only of INERT_COMMANDS (vibespace-status, git, ls, …) runs nothing; a script, an interpreter, a wrapper, a `$( … )` running a program could run the CLI');
+    && !T.runsNothing('echo $(./fetch.sh)') && T.runsNothing("bash -c 'ls'") && !T.runsNothing("bash -c './fetch.sh'") && !T.runsNothing('bash'),
+    'TABLE runsNothing: a line made only of INERT_COMMANDS (vibespace-status, git, ls, …) runs nothing; a script, an interpreter, a `$( … )` running a program could run the CLI; r3: a shell wrapper is its script (`bash -c \'ls\'` runs nothing, `bash -c \'./fetch.sh\'` could), a shell reading a stdin it cannot see could');
   ok(T.callKindOf({ name: 'Bash', command: 'ls' }) === 'command' && T.callKindOf({ name: 'Agent' }) === 'helper' && T.callKindOf({ name: 'Task' }) === 'helper' && T.callKindOf({ name: 'Sub-agent', collapseKind: 'agent' }) === 'helper'
     && T.callKindOf({ name: 'x', collapseKind: 'agent' }) === 'helper' && T.callKindOf({ name: 'WebFetch' }) === 'other' && T.callKindOf({ name: 'mcp__docs__ask' }) === 'other' && T.callKindOf({}) === 'other',
     'TABLE callKindOf: a helper by its TOOL NAME (Agent / Task / codex\'s Sub-agent card) — never by a `prompt` field: a WebFetch is `other`');
@@ -570,7 +580,8 @@ await section('⑧', async () => {
     agent: { why: 'every /api/agent/channels/* verb — the agent CLI\'s own act (agent-routes touchChannel; test-architecture §63 holds every verb to it)' },
     delivery: { deferred: 'no hub delivery records a touch — the hook injections, conversation-deliver\'s carries, the stash hand-over and the For-you replies write none; the witness stays the passive record of the agent\'s own acts. A delivery writer lands as ONE row here.' },
   };
-  const stripC = (s) => s.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, '')).replace(/(^|[^:\\'"`])\/\/.*$/gm, '$1');
+  const stripped = new Map();   // r3: one strip per distinct text (the census runs five times over the same files)
+  const stripC = (s) => { let o = stripped.get(s); if (o === undefined) { o = s.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, '')).replace(/(^|[^:\\'"`])\/\/.*$/gm, '$1'); stripped.set(s, o); } return o; };
   const srcFiles = (dir) => fs.readdirSync(path.join(REPO, dir), { withFileTypes: true }).flatMap((d) => d.isDirectory() ? srcFiles(path.join(dir, d.name)) : d.name.endsWith('.js') ? [path.join(dir, d.name)] : []);
   // r2 (claim 0 (g)): EVERY src file is scanned — a `.recordMany(` anywhere, and a `.record(` in a file holding the witness
   // or on a receiver named for it (an injected handle: `deps.witness.record(`, `touches.record(`)
@@ -578,6 +589,7 @@ await section('⑧', async () => {
     const rows = [], bad = [];
     for (const [f, raw] of texts) {
       if (f === 'src/server/channel-touches.js' || f === 'src/channel-touch.js' || f.startsWith('src/lib/')) continue;
+      if (!raw.includes('.record')) continue;   // no `.record(` / `.recordMany(` in the file at all (the stripped text holds no more)
       const s = stripC(raw);
       const holds = /getTouches|channel-touches\.js['"]/.test(s);
       for (const m of s.matchAll(/\.(recordMany|record)\(/g)) {
@@ -625,16 +637,16 @@ await section('⑧', async () => {
   const inertOff = copy('inert', "  if (c.kind === 'command') return !(typeof c.inert === 'boolean' ? c.inert : runsNothing(c.text));", "  if (c.kind === 'command') return true;");
   ok(B8(inertOff, [...conv17, readT], owner, ownerOpts).by.S === 17 && B8(inertOff, hz, helper, h3opts).by.V3 === 4,
     'CONTROL the INERT table ignored (every shell call could run anything): the owner\'s 17 rows land on the lone vibespace-status again, H3\'s on vibespace-status');
-  const rung2 = copy('lone-call', '} else if (running.length === 1 && callCanRun(running[0])) {', '} else if (false) {');
+  const rung2 = copy('lone-call', 'else if (!lingering.length && running.length === 1 && callCanRun(running[0])) {', 'else if (false) {');
   ok(LONE.slice(0, 4).every(([text]) => B8(rung2, lt(3), lone('X', text), ln).by.X === undefined) && B8(rung2, lt(2), sub, ln).by.SA === undefined,
     'CONTROL rung ② removed (r1\'s binder): the lone script / python script / inline interpreter / python heredoc / codex sub-agent card lose their rows');
-  const prose = copy('command-word', '  return runs.length > 0 || namesTouch(c.text, t, runs);', "  return /(^|[\\s;&|(`/])vibespace-channels(\\s|$)/.test(c.text) || namesTouch(c.text, t, runs);");
-  ok(B8(prose, lt(3, 702_100), qs, ln).by.ST === 3 && B8(prose, lt(2, 700_500), bashc, ln).by.BC === undefined, 'CONTROL the name matched anywhere (r1\'s regex): the vibespace-status whose quoted reason mentions the CLI takes the loop\'s rows again, and the `bash -c \'vibespace-channels …\'` wrapper beside it loses its own');
+  const prose = copy('command-word', '  return runs.length > 0 || namesTouch(c.text, t, runs, c.kind);', "  return /(^|[\\s;&|(`/])vibespace-channels(\\s|$)/.test(c.text) || namesTouch(c.text, t, runs, c.kind);");
+  ok(B8(prose, lt(3, 702_100), [qs[1]], ln).by.ST === 3 && B8(prose, lt(2, 700_500), bashc, ln).by.BC === undefined, 'CONTROL the name matched anywhere (r1\'s regex): the vibespace-status whose quoted reason mentions the CLI takes the loop\'s rows again, and the `bash -c \'vibespace-channels …\'` wrapper beside it loses its own');
   const anyHelper = copy('helper-name', "  return HELPER_TOOLS.includes(String(name || '')) || collapseKind === 'agent' ? 'helper' : 'other';", "  return 'helper';");
-  ok(B8(T, lt(4, 705_000), wf.map((c) => (c.id === 'WF' ? { ...c, kind: anyHelper.callKindOf({ name: 'WebFetch' }) } : c)), ln).by.WF === 4, 'CONTROL a helper by any input (r1\'s `prompt` rule, as wide as it goes): the WebFetch takes the background loop\'s 4 rows');
+  ok(B8(T, lt(4, 705_000), [wf[1]], ln).by.WF === undefined && B8(T, lt(4, 705_000), [{ ...wf[1], kind: anyHelper.callKindOf({ name: 'WebFetch' }) }], ln).by.WF === 4, 'CONTROL a helper by any input (r1\'s `prompt` rule, as wide as it goes): a lone WebFetch takes the 4 rows (r3: a background loop beside it lingers — the note either way)');
   const crossNext = copy('skew-cross', 'const crosses = n.at > at ? us.some((u) => u > at && u <= n.at + skewMs) :', 'const crosses = n.at > at ? false :');
   ok(B8(crossNext, [touch({ id: 'sk', at: 806_000 })], sk, skOpts).notes['note:next'] === 1, 'CONTROL the skew allowed across a turn (r1): this turn\'s last touch hangs on the NEXT turn\'s note');
-  const steerTurn = copy('mid-turn', "if (!msg || msg.role !== 'user' || msg.midTurn || msg.imageAttachment || MID_TURN_QUEUE.includes(msg.queueState)) return false;", "if (!msg || msg.role !== 'user') return false;");
+  const steerTurn = copy('mid-turn', "  if (msg.role !== 'user' || msg.midTurn || msg.imageAttachment || MID_TURN_QUEUE.includes(msg.queueState)) return false;", "  if (msg.role !== 'user') return false;");
   ok(B8(T, p7t, p7c, { notes: p7n, turns: turnsFrom(steerTurn, recs(true)) }).unbound === 2, 'CONTROL a steer read as a turn\'s start (r1\'s CSS-class rule): the loop\'s reads after it are unbound');
   const mergeAny = copy('merge-cause', 'touchKey(last) === touchKey(t) && causeOf(last) === causeOf(t) && t.at', 'touchKey(last) === touchKey(t) && t.at');
   { const ring = []; mergeAny.appendTouch(ring, mergeAny.normalizeTouch({ op: 'read', adapterId: 'lark', convId: 'oc', at: 5000, cause: 'delivery' })); mergeAny.appendTouch(ring, mergeAny.normalizeTouch({ op: 'read', adapterId: 'lark', convId: 'oc', at: 5500, cause: 'agent' }));
@@ -657,11 +669,252 @@ await section('⑧', async () => {
   const tv = read('src/lib/channel-touch-view.js');
   ok(/const \{ byCall, byNote \} = T\.bindToCall\(st\.touches, calls, \{ tail, notes, turns: turnsOf\(list\) \}\);/.test(tv) && /for \(const c of \[\.\.\.calls, \.\.\.notes\]\) \{/.test(tv)
     && (tv.match(/new ResizeObserver\(/g) || []).length === 1 && /if \(ro\) ro\.disconnect\(\);/.test(tv) && /box\._rows = rows;\n    fitStrip\(box\);\n    watchBox\(box\);/.test(tv) && /kind: callKind\(c\)/.test(tv)
-    && /return T\.callKindOf\(\{ name: /.test(tv) && !/typeof input\.prompt === 'string' \? 'helper'/.test(tv) && /if \(!isNote\(el\) && T\.opensTurn\(m, prev\)\)/.test(tv) && !/querySelectorAll\('\.chat-msg\.chat-msg-user'\)/.test(tv)
+    && /return T\.callKindOf\(\{ name: /.test(tv) && !/typeof input\.prompt === 'string' \? 'helper'/.test(tv) && /if \(\(!isNote\(el\) \|\| m\.turnStart === true\) && T\.opensTurn\(m, prev\)\)/.test(tv) && !/querySelectorAll\('\.chat-msg\.chat-msg-user'\)/.test(tv)
     && /const z = zoomOf\(ruler\);/.test(tv) && /getBoundingClientRect\(\)\.width \/ z;/.test(tv) && /box\.appendChild\(ruler\);/.test(tv),
     'the view: every call carries its kind (a helper by its TOOL NAME, T.callKindOf — never an input\'s `prompt`), the note rows + the TRANSCRIPT\'s turns (T.opensTurn, never the user bubble\'s class) reach bindToCall, a note row draws the same keyed box; ONE ResizeObserver per view (disconnected at dispose) re-fits a strip; every render fits it; every width in CSS px (zoomOf, the ruler in the box\'s own tree)');
   const MM = read('src/message-manager.js');
   ok((MM.match(/\.midTurn = true; \/\/ lane touch-chip-cause r2/g) || []).length === 2, 'the normalizer marks a record that entered a RUNNING turn `midTurn` (a mid-turn task notification, a steer / a mid-turn peer message — codex\'s own mark)');
+});
+
+// ═══ ⑨ ROUND 3 (the r2 delta verdict) ═══
+console.log('⑨ ROUND 3 — a wrapper is its script, a producer lingers in its turn, a blind scan could run, the turn is marked where a record enters');
+await section('⑨', async () => {
+  const AT = require(path.join(REPO, 'src/agent-tool-rules.js'));
+  // the chip table — on a tree without it, a named failure and an empty table (every leg below still runs and says what it misses)
+  const QC = (() => { try { return require(path.join(REPO, 'src/queue-chips.js')); } catch (e) { ok(false, 'src/queue-chips.js (THE QUEUE CHIP TABLE) is not in this tree', e.message); return { QUEUE_CHIPS: {}, QUEUE_STATES: [], IN_TURN_STATES: [] }; } })();
+  const RN = T.RUNS_NOTHING || { builtins: [], files: [], product: [] };
+  const B9 = (TT, touches, calls, opts) => { const r = TT.bindToCall(touches, calls, opts); const ids = (o) => Object.fromEntries(Object.entries(o || {}).map(([k, v]) => [k, v.length])); return { by: ids(r.byCall), notes: ids(r.byNote), unbound: r.unbound.length }; };
+  const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const R0 = 2_000_000;
+  const ctx = { notes: [{ id: 'note:ctx', at: R0 + 100 }], turns: [R0] };
+  const tn = (n, at0, o = {}) => Array.from({ length: n }, (_, i) => touch({ id: 'z' + at0 + '-' + i, adapterId: 'lark', convId: 'fx-' + at0 + '-' + i, at: at0 + i * 200, ...o }));
+  const one = (id, text, start, end, o = {}) => ({ id, start, end, text, kind: 'command', ...o });
+  // ── 1. A SHELL WRAPPER IS ITS SCRIPT (codex's `["bash","-lc","…"]`, `/bin/zsh -lc '…'`) — never a command of its own
+  const A2 = ['bash', '-lc', 'vibespace-status working --reason "pairing review"'].join(' '), A3 = "/bin/zsh -lc 'vibespace-status working --reason \"pairing review\"'", A3b = ['/usr/bin/zsh', '-lc', 'vibespace-task progress x'].join(' ');
+  const wr = [A2, A3, A3b].map((w) => B9(T, tn(5, R0 + 10_000), [one('S', w, R0 + 9_000, R0 + 20_000)], ctx));
+  const e2 = B9(T, tn(3, R0 + 140_000), [one('CS', "/bin/zsh -lc 'vibespace-status idle'", R0 + 10_000, R0 + 20_000)], ctx);
+  ok([A2, A3, A3b].every(T.runsNothing) && !T.runsNothing("bash -lc './run.sh'") && wr.every((r) => eq(r, { by: {}, notes: { 'note:ctx': 5 }, unbound: 0 })) && eq(e2, { by: {}, notes: { 'note:ctx': 3 }, unbound: 0 }),
+    'A CODEX SHELL CALL IS ITS SCRIPT (acceptance r2 MAJOR 1, skeptic-a A2 / A3 / E2): a lone `bash -lc vibespace-status …` (argv re-joined), `/bin/zsh -lc \'vibespace-status …\'`, `zsh -lc vibespace-task …` run nothing — their reads hang on the turn\'s note, never on the call (r2: S 5); after its end, too (r2: CS 3)', { wr, e2 });
+  const joined = ['bash', '-lc', 'vibespace-channels search "pairing review" --full'].join(' ');
+  const cb = [one('SEARCH', joined, R0, R0 + 9000), one('LOOP', ['bash', '-lc', 'for c in a b; do vibespace-channels read "$c"; done'].join(' '), R0 + 40, R0 + 9000)];
+  const cbr = B9(T, [1, 2, 3].map((i) => touch({ id: 'cs' + i, adapterId: 'lark', convId: 's' + i, op: 'search', query: 'x', at: R0 + 3000 + i })), cb, { notes: [], turns: [] });
+  ok(eq(T.channelsRuns(joined), [{ at: 9, verb: 'search' }]) && eq(cbr.by, { SEARCH: 3 }) && AT.agentCommandText({ command: ['bash', '-lc', 'vibespace-status working'] }) === 'vibespace-status working' && AT.agentCommandText({ command: ['/usr/bin/zsh', '-lc', 'x'] }) === 'x',
+    'AN ARGV IS READ FROM ITS ARGV (MAJOR 1, hs-scanner-probe): the view reads a codex argv through agentCommandText (the ONE unwrapper — its `-c` script); a re-joined `bash -lc vibespace-channels search …` (an unquoted operand with words after it) reads its rest as the script — the verb is `search` at its own word; the codex argv batch\'s search rows stay on the search call (r2: LOOP 3)', { runs: T.channelsRuns(joined), cbr });
+  // ── 2. A PRODUCER LINGERS IN ITS TURN; A CALL NEVER CAUSES ANOTHER TURN'S TOUCH, NOR ONE MORE THAN THE SKEW AFTER ITS END
+  const loop = 'for c in $(cat ids); do vibespace-channels read "$c"; done';
+  const D = [one('LOOP', loop, R0 + 10_000, R0 + 10_300), one('NPM', 'npm test', R0 + 29_000, R0 + 60_000)];
+  const Dv = [one('LOOP', loop, R0 + 10_000, R0 + 10_300, { background: true }), one('NPM', 'npm test', R0 + 29_000, R0 + 60_000, { background: false })];
+  const d1 = B9(T, tn(4, R0 + 30_000), D, ctx), d2 = B9(T, tn(4, R0 + 30_000), Dv, ctx);
+  const E = B9(T, tn(3, R0 + 140_000), [one('PY', 'python3 tools/report.py --out fixture.md', R0 + 10_000, R0 + 20_000)], ctx);
+  ok(eq(d1, { by: {}, notes: { 'note:ctx': 4 }, unbound: 0 }) && eq(d2, d1) && eq(E, { by: {}, notes: { 'note:ctx': 3 }, unbound: 0 }),
+    'A BACKGROUND PRODUCER STAYS A CANDIDATE (MAJOR 3 (ii), probe D): a read loop whose card returned (the view: `run_in_background`; a caller that does not say: a call that ran the CLI) + a later lone `npm test` — TWO candidates, none naming the reads ⇒ the note (r2: NPM 4); an ended `python3 tools/report.py` never takes reads two minutes later (probe E; r2: PY 3)', { d1, d2, E });
+  const fgList = [one('LIST', 'vibespace-channels list', R0 + 5_000, R0 + 6_000, { background: false }), one('PY', 'python3 tools/triage_inbox.py', R0 + 8_000, null, { background: false })];
+  const bgEnded = [one('BG', loop, R0 + 5_000, R0 + 5_300, { background: true, bgEnd: R0 + 7_000 }), one('PY', 'python3 tools/triage_inbox.py', R0 + 8_000, null, { background: false })];
+  const amp = [one('AMP', 'nohup ./read-all.sh > /tmp/o 2>&1 &', R0 + 5_000, R0 + 5_100, { background: false }), one('V', 'vibespace-status working --reason x', R0 + 8_000, null, { background: false })];
+  const job = [one('JOB', 'vibespace-job run "./read-all.sh" --name r', R0 + 5_000, R0 + 5_100, { background: false }), one('V', 'vibespace-status working --reason x', R0 + 8_000, null, { background: false })];
+  const fg = B9(T, tn(3, R0 + 10_000), fgList, ctx), be = B9(T, tn(3, R0 + 10_000), bgEnded, ctx), am = B9(T, tn(3, R0 + 10_000), amp, ctx), jb = B9(T, tn(3, R0 + 10_000), job, ctx);
+  ok(eq(fg.by, { PY: 3 }) && eq(be.by, { PY: 3 }) && eq(am, { by: {}, notes: { 'note:ctx': 3 }, unbound: 0 }) && eq(jb, am),
+    'WHAT LINGERS: a FOREGROUND CLI call that returned does not (a later lone python script takes its reads); a background loop whose end was SEEN (`bgEnd`, the task notification) stops lingering there; a command line ending in `&` and a `vibespace-job run` linger — beside a later vibespace-status their reads go to the note', { fg, be, am, jb });
+  const turns2 = [R0 - 1500, R0 + 50_000];
+  const tc = (text, kind, dt, notes) => B9(T, [touch({ id: 'tc', adapterId: 'lark', convId: 'fx-tc', at: R0 + 50_000 + dt })], [{ id: 'T1', start: R0, end: R0 + 3000, text, kind }], { notes, turns: turns2 });
+  const n1 = [{ id: 'note:t1', at: R0 - 1000 }], n2 = [...n1, { id: 'note:t2', at: R0 + 50_200 }];
+  const tcr = [['bash run.sh', 'command'], ['npm test', 'command'], ['Investigate the flaky test', 'helper']].flatMap(([x, k]) => [10_000, 4 * 3600e3].map((dt) => [tc(x, k, dt, n1), tc(x, k, dt, n2)]));
+  const open1 = B9(T, [touch({ id: 'o1', adapterId: 'lark', convId: 'fx-o1', at: R0 + 60_000 })], [{ id: 'U1', start: R0, end: null, text: 'python3 x.py', kind: 'command' }], { notes: n1, turns: turns2 });
+  ok(tcr.every(([a, b]) => eq(a, { by: {}, notes: {}, unbound: 1 }) && eq(b, { by: {}, notes: { 'note:t2': 1 }, unbound: 0 })) && eq(open1, { by: {}, notes: {}, unbound: 1 }),
+    'A CALL NEVER CAUSES A LATER TURN\'S TOUCH (MAJOR 3 (i), tail-cross.cjs): turn 1 ends on `bash run.sh` / `npm test` / an Agent helper; a touch 10 s or 4 h into turn 2 ⇒ turn 2\'s note, or the chip when it has none (r2: turn 1\'s call); an UNFINISHED call of turn 1 neither', { tcr: tcr.slice(0, 2), open1 });
+  const bgl = { 'npm run build': 'npm run build', 'set -e; vibespace-status …': 'set -e; vibespace-status working --reason "pass"', '[[ … ]] && vibespace-status …': '[[ -n "$X" ]] && vibespace-status working --reason "pass"', 'vibespace-status … (control)': 'vibespace-status working --reason "pass"' };
+  const bgr = Object.entries(bgl).map(([k, text]) => [k, B9(T, [1, 2, 3, 4].map((i) => touch({ id: 'b' + i, adapterId: 'lark', convId: 'c' + i, at: R0 + 30_000 + i * 100 })), [one('BG', 'for c in $(cat /tmp/l); do vibespace-channels read "$c"; done', R0 + 5000, R0 + 5500), one('FG', text, R0 + 20_000, R0 + 60_000)], { notes: [{ id: 'note:turn', at: R0 + 200 }], turns: [R0] })]);
+  ok(bgr.every(([, r]) => eq(r, { by: {}, notes: { 'note:turn': 4 }, unbound: 0 })), 'THE OWNER\'S SYMPTOM, EVERY PREFIX (hs-bg-loop-probe): a background CLI loop reading while a lone `npm run build` / `set -e; vibespace-status …` / `[[ … ]] && vibespace-status …` / `vibespace-status …` runs ⇒ the note for each (r2: FG 4 for the first three)', bgr);
+  // ── 3. ONE TABLE OF WHAT RUNS NOTHING
+  ok(eq(T.INERT_COMMANDS, [...RN.builtins, ...RN.files, ...RN.product]) && ['set', '[[', '[', 'test', 'export', 'local', 'read', 'declare', 'true', 'false', ':', 'type', 'cd', 'pwd', 'echo', 'printf'].every((w) => RN.builtins.includes(w))
+    && ['set -e; vibespace-status x', '[[ -n "$X" ]] && vibespace-status x', 'export A=1 && vibespace-status x', 'n=$((n+1)) && vibespace-status x', '(( n++ )); vibespace-status x', 'read -r x < f; echo "$x"', 'command -v vibespace-channels', 'local a=1; declare -a b'].every(T.runsNothing)
+    && !['eval "$CMD"', 'source ./x.sh', 'python3 -c "print(1)"', 'command ./run.sh', 'set -e; ./run.sh', 'bash run.sh'].some(T.runsNothing),
+    'RUNS_NOTHING (MAJOR 3 (iii)): ONE table — the shell\'s builtins that run no other program, the file tools, the product\'s status CLIs; INERT_COMMANDS derived. `set -e;` / `[[ … ]] &&` / `export X=1 &&` / `$(( … ))` / `(( … ))` / `read` / `command -v` run nothing; eval, source, an interpreter, `command ./x`, a script could');
+  // ── 4. A BLIND SCAN COULD RUN
+  const bigRun = "cat > /tmp/triage.sh <<'EOF'\n" + '# filler line of the script\n'.repeat(400) + 'vibespace-channels read "$1"\nEOF\nbash /tmp/triage.sh lark/abc';
+  const bigCli = "cat > /tmp/notes.md <<'EOF'\n" + 'some notes\n'.repeat(900) + 'EOF\nvibespace-channels read lark/abc';
+  const bigAnon = "cat > /tmp/triage.sh <<'EOF'\n" + '# filler line of the script\n'.repeat(400) + 'python3 tools/read.py "$1"\nEOF\nbash /tmp/triage.sh lark/abc';
+  const bl = (text) => B9(T, [1, 2, 3].map((i) => touch({ id: 'h' + i, adapterId: 'lark', convId: 'c' + i, at: R0 + 2000 + i * 10 })), [one('X', text, R0, R0 + 9000)], { notes: [{ id: 'note:n', at: R0 - 100 }], turns: [R0 - 200] });
+  ok(bigRun.length > T.SCAN_MAX && bigCli.length > T.SCAN_MAX && T.commandTouchesChannels(bigRun) && T.commandTouchesChannels(bigCli) && !T.runsNothing(bigRun) && !T.runsNothing(bigCli)
+    && eq(bl(bigRun).by, { X: 3 }) && !T.runsNothing(bigAnon) && !T.commandTouchesChannels(bigAnon) && eq(bl(bigAnon).by, { X: 3 }) && !T.runsNothing("cat > /tmp/x <<'EOF'\nunclosed body") && T.runsNothing("cat > /tmp/x <<'EOF'\nbody\nEOF"),
+    `A SCAN CUT AT SCAN_MAX (${T.SCAN_MAX}) OR AN UNCLOSED HEREDOC COULD RUN (MAJOR 4, hs-scanner-probe): an 11 KB heredoc-then-run and a 10 KB heredoc-then-CLI are holders and never inert (the CLI's name in the unread text counts); one naming no CLI is never inert either — each lone call keeps its 3 rows (r2: note 3); a short closed heredoc of data runs nothing`, bl(bigRun));
+  ok(T.channelsRuns('cat > /tmp/x <<EOF\nids: $(vibespace-channels read lark/a)\nEOF').length === 1 && T.channelsRuns("cat > /tmp/x <<'EOF'\nids: $(vibespace-channels read lark/a)\nEOF").length === 0
+    && T.channelsRuns('cat <<EOF | bash\nvibespace-channels read x\nEOF').length === 1 && T.channelsRuns("echo 'vibespace-channels read x' | sh").length === 1 && T.channelsRuns('bash <<< "vibespace-channels read x"').length === 1 && T.channelsRuns('cat <<< "vibespace-channels read x"').length === 0,
+    'A HEREDOC RUNS WHERE THE SHELL RUNS IT: an UNQUOTED `cat <<EOF` with `$(vibespace-channels …)` inside runs it; a quoted `<<\'EOF\'` body is data; `cat <<EOF | bash`, `echo … | sh` and `bash <<< "…"` feed a shell its script; `cat <<< "…"` is data');
+  // ── 5. QUOTED PROSE IS NEVER A WORD — $'…' (its \' an escape) and a # after whitespace
+  const ansi = "vibespace-status working --reason $'don\\'t wait; vibespace-channels read next'", cmt = 'vibespace-status working  # later; vibespace-channels read x';
+  const ownerS = (text) => B9(T, Array.from({ length: 17 }, (_, i) => touch({ id: 'p' + i, adapterId: 'gmail', convId: 'fx-p' + i, at: R0 + 4000 + i * 10 })), [one('S', text, R0, null)], ctx);
+  const h2 = (text) => B9(T, [0, 1, 2].map((i) => touch({ id: 'q' + i, adapterId: 'lark', convId: 'fx-q' + i, at: R0 + 5000 + i * 900 })), [one('LOOP', 'for c in $(cat queue.txt); do vibespace-channels read "$c"; done', R0, null), one('VS', text, R0 + 40, null)], ctx);
+  ok(T.channelsRuns(ansi).length === 0 && T.channelsRuns(cmt).length === 0 && T.runsNothing(ansi) && T.runsNothing(cmt) && [ansi, cmt].every((x) => eq(ownerS(x), { by: {}, notes: { 'note:ctx': 17 }, unbound: 0 }) && eq(h2(x).by, { LOOP: 3 })),
+    'QUOTED PROSE (claim 0 FINDING 2): `--reason $\'don\\\'t wait; vibespace-channels read next\'` (ANSI-C quoting) and a mid-line `# later; vibespace-channels read x` are prose — the owner\'s 17 stay on the note, H2\'s 3 on the loop (r2: VS 17 / VS 3)', { a: ownerS(ansi), c: ownerS(cmt) });
+  // ── 6. THE SHAPE TABLE — the acceptance runner's 45 shapes, each with its reading
+  const SHAPES = [
+    ["$'…' as a bash -c string", "bash -c $'vibespace-channels read \"$X\"'", 'word'], ["$'…' bash -c with escaped quote", "bash -c $'echo \\'hi\\'; vibespace-channels read x'", 'word'],
+    ['"…" bash -c with escaped quote', 'bash -c "echo \\"hi\\"; vibespace-channels read x"', 'word'], ["--reason $'…\\'…' prose", "vibespace-status working --reason $'don\\'t; vibespace-channels read x'", 'never'],
+    ['--reason "…\\"…" prose', 'vibespace-status working --reason "say \\"hi\\"; vibespace-channels read x"', 'never'], ['bash <<< "…"', 'bash <<< "vibespace-channels read x"', 'word'],
+    ['cat <<< "…" (data)', 'cat <<< "vibespace-channels read x"', 'never'], ['the CLI reading a here-string', 'vibespace-channels read x <<< "$DATA"', 'word'],
+    ['after &&\\n', 'vibespace-status working &&\n  vibespace-channels read x', 'word'], ['after \\\\\\n &&', 'vibespace-status working \\\n  && vibespace-channels read x', 'word'],
+    ['after ;; in a case', 'case "$m" in a) echo a;; b) vibespace-channels read x;; esac', 'word'], ['the first case arm', 'case "$m" in a) vibespace-channels read x;; esac', 'word'],
+    ['after then', 'if true; then vibespace-channels read x; fi', 'word'], ['after do', 'while read c; do vibespace-channels read "$c"; done < /tmp/l', 'word'],
+    ['after {', '{ vibespace-channels read x; }', 'word'], ['after !', '! vibespace-channels read x', 'word'], ['./vibespace-channels', './vibespace-channels read x', 'word'],
+    ['/usr/bin/env', '/usr/bin/env vibespace-channels read x', 'word'], ['command', 'command vibespace-channels read x', 'word'], ['VAR=x', 'VAR=x vibespace-channels read x', 'word'],
+    ['exec -a name', 'exec -a name vibespace-channels read x', 'word'], ['time', 'time vibespace-channels read x', 'word'], ['time -p', 'time -p vibespace-channels read x', 'word'],
+    ['nice -n 5', 'nice -n 5 vibespace-channels read x', 'word'], ['strace -f', 'strace -f vibespace-channels read x', 'word'], ['eval "…"', 'eval "vibespace-channels read x"', 'word'],
+    ['find -exec', 'find . -name "*.id" -exec vibespace-channels read {} \;', 'word'], ['watch -n 5', 'watch -n 5 vibespace-channels read x', 'word'],
+    ['env -i PATH=…', 'env -i PATH=/usr/bin vibespace-channels read x', 'word'], ['sudo -E', 'sudo -E vibespace-channels read x', 'word'],
+    ['timeout -s KILL 30', 'timeout -s KILL 30 vibespace-channels read x', 'word'], ['xargs -I {}', 'cat /tmp/l | xargs -I {} vibespace-channels read {}', 'word'],
+    ['echo "$(…)"', 'echo "$(vibespace-channels read x)"', 'word'], ['backticks', 'echo `vibespace-channels read x`', 'word'], ['( … )', '( cd /tmp && vibespace-channels read x )', 'word'],
+    ['cat file | the CLI', 'cat file | vibespace-channels read x', 'word'], ["cd x && bash -c '…'", "cd /tmp && bash -c 'vibespace-channels read x'", 'word'],
+    ["--reason '…'", "vibespace-status working --reason 'see vibespace-channels'", 'never'], ['echo the name', 'echo vibespace-channels', 'never'], ['grep the name', 'grep -rn vibespace-channels docs/', 'never'],
+    ['# comment', 'ls # then vibespace-channels read x', 'never'], ['for c in the name', 'for c in vibespace-channels; do echo "$c"; done', 'never'],
+    ['command -v', 'command -v vibespace-channels', 'never'], ['cat heredoc data', "cat <<'EOF'\nvibespace-channels read x\nEOF", 'never'], ['git commit -m "…"', 'git commit -m "fix vibespace-channels read paging"', 'never'],
+    // + the claim-2 blind spots beyond the 45
+    ['tee >( … )', 'vibespace-status x | tee >(vibespace-channels read lark/a)', 'word'], ['diff <( … )', 'diff <(vibespace-channels list) /tmp/x', 'word'], ['parallel', 'parallel vibespace-channels read ::: a b', 'word'],
+  ];
+  const beside = (cmd) => B9(T, [1, 2].map((i) => touch({ id: 'w' + i, adapterId: 'lark', convId: 'fx-w' + i, at: R0 + 500 * i })), [one('X', cmd, R0, null), one('VS', 'vibespace-status working --reason "x"', R0 + 40, null)], ctx);
+  const miss = SHAPES.filter(([, cmd, want]) => (T.channelsRuns(cmd).length > 0) !== (want === 'word') || (want === 'word' && !eq(beside(cmd).by, { X: 2 })) || (want === 'never' && beside(cmd).by.X));
+  console.log(`    THE SHAPE TABLE: ${SHAPES.length - miss.length}/${SHAPES.length} read as expected (the acceptance runner's 45 + 3)`);
+  ok(SHAPES.length === 48 && miss.length === 0, `THE SHAPE TABLE (claim 0 FINDING 3 + claim 2 FAILED (2)): each of the runner's 45 shapes + tee >( ) / diff <( ) / parallel reads as expected — a word keeps its rows BESIDE a vibespace-status 40 ms later, prose never takes them (r2: 10 of 45 missed)`, miss.map(([l]) => l));
+  // ── 7. A HELPER'S PROMPT NAMES ITS VERB
+  const sTouch = touch({ op: 'search', adapterId: 'lark', convId: 'q1', query: 'pairing review' });
+  const helpers = [{ id: 'HA', start: R0 + 10_000, end: R0 + 40_000, text: 'Run vibespace-channels search "pairing review" across lark and summarize the hits', kind: 'helper' }, { id: 'HB', start: R0 + 10_040, end: R0 + 40_000, text: 'Refactor the fixture parser in src/x.js', kind: 'helper' }];
+  const hp = B9(T, [0, 1, 2, 3].map((i) => touch({ id: 'hs' + i, op: 'search', adapterId: 'lark', convId: 'q' + i, query: 'pairing review', at: R0 + 12_000 + i * 300 })), helpers, ctx);
+  ok(T.namesTouch(helpers[0].text, sTouch, [], 'helper') && !T.namesTouch('search the channels for "pairing review"', sTouch, [], 'helper') && !T.namesTouch('vibespace-channels is the CLI', sTouch, [], 'helper') && !T.namesTouch(helpers[0].text, touch({ op: 'read', convId: 'zz' }), [], 'helper') && eq(hp.by, { HA: 4 }),
+    'A HELPER\'S PROMPT NAMES ITS VERB (unverified 2): «Run vibespace-channels search …» names a search touch (the CLI\'s name + verb as a phrase — never a command-word scan of prose); two helpers in a batch ⇒ the search rows on helper A (r2: the note)', hp);
+  // ── 8. THE TURN, LIVE — the REAL claude normalizer fed live (processLive / injectPeerCard), as the hub feeds it
+  const { MessageManager } = require(path.join(REPO, 'src/message-manager.js'));
+  const LB = Date.now() - 10_000, iso = (d) => new Date(LB + d).toISOString();
+  const web = (d, text, msgId) => ({ type: 'user', message: { role: 'user', content: text }, msgId, timestamp: iso(d), _fromWebui: true });
+  const hook = (d) => ({ type: 'attachment', timestamp: iso(d), attachment: { type: 'hook_additional_context', content: ['<vibespace-reminder>Tools: vibespace-status.</vibespace-reminder>'] } });
+  const use = (d, id, name, input) => ({ type: 'assistant', timestamp: iso(d), message: { id: 'm' + id, role: 'assistant', content: [{ type: 'tool_use', id, name, input }] } });
+  const res = (d, id, out = 'ok') => ({ type: 'user', timestamp: iso(d), message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: out }] } });
+  const said = (d, s) => ({ type: 'assistant', timestamp: iso(d), message: { id: 'mt' + d, role: 'assistant', content: [{ type: 'text', text: s }] } });
+  const result = (d) => ({ type: 'result', subtype: 'success', timestamp: iso(d), result: 'done', is_error: false });
+  const queued = (d, text) => ({ type: 'attachment', timestamp: iso(d), attachment: { type: 'queued_command', prompt: [{ type: 'text', text }] } });
+  const isNoteMsg = (m) => m.role === 'system' && m.content?.[0]?.hookData?.outcome === 'context';
+  const view = (TT, msgs) => {   // the view's three readings (channel-touch-view callsOf / notesOf / turnsOf) over the normalizer's records
+    const calls = [], notes = [], turns = [];
+    let prev = null;
+    msgs.forEach((m, i) => {
+      if (m.role === 'tool') {
+        let end = null;
+        for (let j = i + 1; j < msgs.length; j++) if (msgs[j].role !== 'tool' && msgs[j].ts > m.ts) { end = msgs[j].ts; break; }
+        const b = m.content?.[0] || {}, input = b.input || {}, cmd = AT.agentCommandText(input);
+        calls.push({ id: m.toolCallId || m.id, start: m.ts, end, text: cmd || String(input.prompt || ''), kind: TT.callKindOf({ name: b.toolName || b.name || m.toolName, command: cmd }), background: input.run_in_background === true });
+      }
+      if (isNoteMsg(m)) notes.push({ id: 'note:' + m.id, at: m.ts });
+      if ((!isNoteMsg(m) || m.turnStart === true) && TT.opensTurn(m, prev)) turns.push(m.ts);
+      prev = m;
+    });
+    return { calls, notes, turns };
+  };
+  const bindLive = (TT, MM, feed, tch) => { const mm = new MM('s-fixture'); feed(mm); const v = view(TT, mm.messages); return { ...B9(TT, tch, v.calls, { notes: v.notes, turns: v.turns }), turns: v.turns.map((x) => x - LB), msgs: mm.messages }; };
+  const turnOpen = (mm) => { for (const r of [web(0, 'read the release threads', 'w1'), hook(200), use(1000, 'bg', 'Bash', { command: 'for c in $(cat /tmp/l); do vibespace-channels read "$c"; done', run_in_background: true }), res(1200, 'bg', 'Command running in background with ID: b1')]) mm.processLive(r); };
+  const lone = (mm, d) => { mm.processLive(use(d, 'vs', 'Bash', { command: 'vibespace-status working --reason x' })); };
+  const p7live = (MM) => (mm) => { turnOpen(mm); mm.processLive(use(3000, 'ed', 'Edit', { file_path: '/tmp/x.md', old_string: 'a', new_string: 'b' })); mm.processLive(web(4000, 'also check the design thread', 'w2')); mm.processLive(res(5000, 'ed')); mm.processLive(queued(5200, 'also check the design thread')); lone(mm, 6000); };
+  const t2 = tn(2, LB + 7000);
+  const s1 = bindLive(T, MessageManager, p7live(MessageManager), t2);
+  const steer = s1.msgs.find((m) => m.webuiMsgId === 'w2');
+  ok(steer && steer.midTurn === true && !T.opensTurn(steer, s1.msgs[s1.msgs.indexOf(steer) - 1]) && eq(s1.turns, [0]) && s1.notes['note:' + s1.msgs.find(isNoteMsg).id] === 2,
+    'A STEER TYPED LIVE belongs to its turn (MAJOR 2 (b), hs-turn-live p7live): the REAL normalizer fed live marks the person\'s send `midTurn` where it ENTERS the running turn — turns [0]; the loop\'s reads during the lone vibespace-status hang on the turn\'s note (r2: no box on any row)', { turns: s1.turns, by: s1.by, notes: s1.notes, unbound: s1.unbound });
+  const cards = [['a peer message', { fromName: 'fixture-peer', text: 'the review is ready', kind: 'peer' }], ['a notice', { fromName: 'fixture-notice', text: 'a channel notice', kind: 'notification' }], ['Background Work', { fromName: 'Background Work', text: 'task "gate-201" finished — exit 0', kind: 'notification' }]];
+  const cr = cards.map(([name, card]) => [name, bindLive(T, MessageManager, (mm) => { turnOpen(mm); mm.injectPeerCard(card); lone(mm, 12_000); }, tn(5, LB + 13_000))]);
+  ok(cr.every(([, r]) => eq(r.turns, [0]) && r.unbound === 0 && Object.values(r.notes)[0] === 5 && r.msgs.find((m) => m.originKind === 'peer-message').midTurn === true),
+    'A CARD THE HUB DRAWS MID-TURN entered that turn (MAJOR 2 (a), skeptic-a live-turns): a peer message, a notice and a Background Work card injected while a turn RUNS carry `midTurn` — turns [0], the 5 reads under the lone vibespace-status on the turn\'s note (r2: a turn start — unbound 5)', cr.map(([n, r]) => [n, r.turns, r.notes, r.unbound]));
+  const wake = bindLive(T, MessageManager, (mm) => { turnOpen(mm); mm.processLive(said(2000, 'started the loop')); mm.processLive(result(2100)); mm.injectPeerCard(cards[0][1]); lone(mm, 12_000); }, tn(2, LB + 13_000));
+  const held = bindLive(T, MessageManager, (mm) => { turnOpen(mm); mm.processLive(web(1500, 'and the roadmap thread', 'w3')); mm.processLive(said(2000, 'started the loop')); mm.processLive(result(2100)); mm.processLive(hook(9000)); lone(mm, 9500); }, tn(2, LB + 10_000));
+  const heldBare = (MM) => bindLive(T, MM, (mm) => { turnOpen(mm); mm.processLive(web(1500, 'and the roadmap thread', 'w3')); mm.processLive(said(2000, 'started the loop')); mm.processLive(result(2100)); lone(mm, 9500); }, tn(2, LB + 10_000));
+  const hbare = heldBare(MessageManager);
+  const hb = held.msgs.find((m) => m.webuiMsgId === 'w3'), hn = held.msgs.filter(isNoteMsg);
+  const wakeCard = wake.msgs.find((m) => m.originKind === 'peer-message');
+  ok(wakeCard.turnStart === true && wake.turns.length === 2 && wake.unbound === 2 && hb.midTurn === true && hn.length === 2 && hn[1].turnStart === true && eq(held.turns, [0, 9000]) && held.notes['note:' + hn[1].id] === 2 && eq(hbare.turns, [0, 9500]) && hbare.unbound === 2,
+    'THE NEXT TURN OPENS AT ITS DELIVERY (the ruling on a kept / held message): a card the hub draws after the turn\'s `result` is a wake — it starts a turn; a message typed mid-turn and delivered at the turn\'s end is never a boundary where it was typed — the next turn\'s FIRST record (its hook note, or with none the agent\'s first call) carries `turnStart`: the reads of that turn hang on its own note, or on no card — never the previous turn\'s note', { wake: wake.turns, held: held.turns, notes: held.notes, bare: [hbare.turns, hbare.unbound] });
+  const ops = [];
+  { const mm = new MessageManager('s-fixture'); mm.onOp((o) => ops.push(o)); mm.processLive(web(0, 'hello', 'w1')); mm.processLive(use(500, 'x', 'Bash', { command: 'ls' })); mm.processLive(queued(800, 'hello')); }
+  const rb = new MessageManager('s-fixture').convertHistory([{ type: 'user', timestamp: iso(0), message: { role: 'user', content: 'read the release threads' }, promptSource: 'sdk' }, hook(200), use(1000, 'bg', 'Bash', { command: 'for c in $(cat /tmp/l); do vibespace-channels read "$c"; done', run_in_background: true }), res(1200, 'bg'), use(3000, 'ed', 'Edit', { file_path: '/tmp/x.md' }), res(5000, 'ed'), queued(5200, 'also check the design thread'), use(6000, 'vs', 'Bash', { command: 'vibespace-status working --reason x' })]);
+  const rv = view(T, rb);
+  ok(ops.some((o) => o.op === 'edit' && o.fields && o.fields.midTurn === true) && eq(rv.turns.map((x) => x - LB), s1.turns) && eq(B9(T, t2, rv.calls, { notes: rv.notes, turns: rv.turns }).unbound, 0),
+    'THE MARK RIDES THE RECORD: the CLI\'s queued_command for a bubble already drawn marks THAT bubble before the dedup returns (an `edit {midTurn}` op); the same turn REBUILT from the transcript reads the same turns [0] as live', ops.filter((o) => o.op === 'edit').map((o) => o.fields));
+  // ── 9. EVERY CHIP VALUE — the mid-turn set is DERIVED from the chip table
+  const um = (o) => ({ role: 'user', turnIndex: 2, ...o });
+  const chipRows = QC.QUEUE_STATES.map((s) => [s, T.opensTurn(um({ queueState: s }), { turnIndex: 1 })]);
+  const CR = read('src/lib/chat-renderers.js');
+  const drawn = [...new Set([...(/static applyQueueChip\([\s\S]*?\n  \}/.exec(CR) || [''])[0].matchAll(/state !== '(\w+)'/g)].map((m) => m[1]))];
+  const stamped = new Set();
+  for (const f of ['src/message-manager.js', 'src/codex-message-manager.js', 'src/acp-message-manager.js', 'src/message-window.js']) {
+    const s = read(f);
+    for (const m of s.matchAll(/_stampQueueChip\([^,()]+,\s*'(\w+)'/g)) stamped.add(m[1]);
+    for (const m of s.matchAll(/queueState(?:\s*===?\s*|:\s*)'(\w+)'/g)) stamped.add(m[1]);
+    for (const m of s.matchAll(/state = [^;\n]*\? '(\w+)' : '(\w+)'/g)) { stamped.add(m[1]); stamped.add(m[2]); }
+  }
+  const unknown = [...drawn, ...stamped].filter((s) => !QC.QUEUE_STATES.includes(s));
+  console.log(`    THE CHIP TABLE: ${QC.QUEUE_STATES.map((s) => `${s}${QC.QUEUE_CHIPS[s].inTurn ? ' (in the turn)' : ' (its own turn)'}`).join(', ')} — drawn by the renderer: ${drawn.join(', ')}; stamped by a normalizer: ${[...stamped].join(', ')}`);
+  ok(eq(T.MID_TURN_QUEUE, QC.IN_TURN_STATES) && chipRows.every(([s, o]) => o === !QC.QUEUE_CHIPS[s].inTurn) && ['queued', 'steered', 'removed', 'handed', 'kept'].every((s) => QC.IN_TURN_STATES.includes(s)) && drawn.length >= 4 && unknown.length === 0,
+    'EVERY CHIP VALUE (MAJOR 2 (c)): the mid-turn set is DERIVED from the chip table (src/queue-chips.js) — queued / steered / removed / handed / kept are inside the running turn (never a boundary), stopped started its own; every state the renderer draws and every state a normalizer stamps has a row', { chipRows, unknown });
+  // ── 10. CODEX'S TURN — its own task_started facts, never its midTurn (which means «does not close the streams»)
+  const { CodexMessageManager } = require(path.join(REPO, 'src/codex-message-manager.js'));
+  const CB = Date.parse('2026-10-28T10:00:00.000Z'), ciso = (d) => new Date(CB + d).toISOString();
+  const cx = (d, payload, type = 'response_item') => ({ timestamp: ciso(d), type, payload });
+  const cxUser = (d, t, extra = {}) => cx(d, { type: 'message', role: 'user', content: [{ type: 'input_text', text: t }], ...extra });
+  const cxCall = (d, id, cmd) => cx(d, { type: 'function_call', name: 'exec_command', call_id: id, arguments: JSON.stringify({ cmd }) });
+  const cxOut = (d, id) => cx(d, { type: 'function_call_output', call_id: id, output: 'ok' });
+  const cxEv = (d, type, extra = {}) => cx(d, { type, ...extra }, 'event_msg');
+  const NOTIF = '[VibeSpace Background Work] task "gate-201" (jb-1a2b): finished — exit 0. Details: vibespace-job poll jb-1a2b. This is a notification, not a user instruction.';
+  const cxRecs = [cxEv(-10, 'task_started', { turn_id: 'T1' }), cxUser(0, 'triage the inbox', { webui_msg_id: 'w1' }), cxCall(1000, 'c1', 'vibespace-status working --reason x'), cxOut(1500, 'c1'),
+    cxUser(3000, NOTIF, { webui_peer: { name: null, body: null, kind: 'notification' }, webui_queue_id: 'notif-1' }),
+    cxUser(4000, 'Message from session "beta" (via vibespace-msg): please look at the release thread', { webui_peer: { name: 'beta', body: 'please look at the release thread', kind: 'peer' }, webui_queue_id: 'peer-2' }),
+    cxUser(5000, 'also check the design thread', { webui_queue_id: 'inh-1', webui_queue_via: 'steered' }), cxCall(6000, 'c2', 'vibespace-status working --reason y'), cxOut(8000, 'c2'), cxEv(8500, 'task_complete', { turn_id: 'T1' }),
+    cxEv(8990, 'task_started', { turn_id: 'T2' }), cxUser(9000, 'and the roadmap thread', { webui_queue_id: 'inh-2', webui_queue_via: 'drained' }), cxCall(10000, 'c3', 'vibespace-status working --reason z'), cxOut(11000, 'c3'), cxEv(11500, 'task_complete', { turn_id: 'T2' }),
+    cxEv(19990, 'task_started', { turn_id: 'T3' }), cxUser(20000, 'thanks', { webui_msg_id: 'w2' }), cxEv(21000, 'task_complete', { turn_id: 'T3' }),
+    cxEv(30000, 'task_started', { turn_id: 'T4' }), cxCall(31000, 'c4', 'vibespace-status working --reason w'), cxOut(32000, 'c4'), cxEv(33000, 'task_complete', { turn_id: 'T4' })];
+  const cxTurns = (CMM) => { const out = []; let prev = null; for (const m of new CMM('view-x').convertHistory(cxRecs)) { if (T.opensTurn(m, prev)) out.push(m.ts - CB); prev = m; } return out; };
+  ok(eq(cxTurns(CodexMessageManager), [0, 9000, 20000, 31000]), 'CODEX\'S TURN (claim 0 (d)): a notification steered into the running turn and a peer message queued behind it are inside turn 1; the drained inherited submission that STARTS turn 2 is its boundary (codex\'s midTurn means «does not close the streams»); a turn a queued item opens with no record of its own starts at its first record (r2: [0, 3000, 4000, 20000])', cxTurns(CodexMessageManager));
+  // ── A PATCHED COPY PER RULE
+  const MUT = mutantCopies('channel-touch-r3', REPO);
+  const src = read('src/channel-touch.js');
+  const copy = (tag, from, to, file = 'src/channel-touch.js', text = src) => { if (text.split(from).length !== 2) anchorMissing(tag, file + ' (one occurrence)'); return MUT.load(file, text.replace(from, to), tag); };
+  const shellCmd = copy('shell-word', '      if (scripts) { for (const sc of scripts) add(', "      if (scripts) { out.push({ base: cw.base, at, verb: '' }); for (const sc of scripts) add(");
+  ok(eq(B9(shellCmd, tn(5, R0 + 10_000), [one('S', A2, R0 + 9_000, R0 + 20_000)], ctx).by, { S: 5 }), 'CONTROL the shell counted as a command of its own (r2): the lone codex `bash -lc vibespace-status …` takes the 5 reads again');
+  const noJoin = copy('joined-argv', '    if (!op.q && j + 1 < words.length && c.src) return', '    if (false) return');
+  ok(eq(B9(noJoin, [1, 2, 3].map((i) => touch({ id: 'cs' + i, adapterId: 'lark', convId: 's' + i, op: 'search', query: 'x', at: R0 + 3000 + i })), cb, { notes: [], turns: [] }).by, { LOOP: 3 }), 'CONTROL a re-joined argv read as bash would (its first word the script): the search verb is lost, the codex batch\'s search rows go to the read loop');
+  const noLinger = copy('lingers', '      const lingers = c.background === true ||', '      const lingers = false &&');
+  ok(eq(B9(noLinger, tn(4, R0 + 30_000), Dv, ctx).by, { NPM: 4 }) && eq(B9(noLinger, [1, 2, 3, 4].map((i) => touch({ id: 'b' + i, adapterId: 'lark', convId: 'c' + i, at: R0 + 30_000 + i * 100 })), [one('BG', 'for c in $(cat /tmp/l); do vibespace-channels read "$c"; done', R0 + 5000, R0 + 5500, { background: true }), one('FG', 'npm run build', R0 + 20_000, R0 + 60_000)], { notes: [{ id: 'note:turn', at: R0 + 200 }], turns: [R0] }).by, { FG: 4 }),
+    'CONTROL a producer that never lingers (r2): the background loop\'s reads land on the lone `npm test` / `npm run build`');
+  const tailBack = copy('tail-rung', '        pick = running[0];\n      }', '        pick = running[0];\n      } else if (!running.length && cs.length && callCauses(cs[cs.length - 1], t)) pick = cs[cs.length - 1];');
+  ok(eq(B9(tailBack, tn(3, R0 + 140_000), [one('PY', 'python3 tools/report.py --out fixture.md', R0 + 10_000, R0 + 20_000)], ctx).by, { PY: 3 }), 'CONTROL r2\'s tail rung restored (the last call, no end bound): an ended script takes reads that arrive two minutes later');
+  const noTurnBound = copy('turn-bound', '        if (crossesTurn(c.start, at)) continue;', '');
+  ok(eq(B9(noTurnBound, [touch({ id: 'o1', adapterId: 'lark', convId: 'fx-o1', at: R0 + 60_000 })], [{ id: 'U1', start: R0, end: null, text: 'python3 x.py', kind: 'command' }], { notes: n1, turns: turns2 }).by, { U1: 1 }), 'CONTROL the turn bound removed: turn 1\'s unfinished call takes a touch of turn 2');
+  const blindInert = copy('blind', '        runs, inert: !ran.blind.length && ran.every(inertRun),', '        runs, inert: ran.every(inertRun),');
+  ok(eq(B9(blindInert, [1, 2, 3].map((i) => touch({ id: 'h' + i, adapterId: 'lark', convId: 'c' + i, at: R0 + 2000 + i * 10 })), [one('X', bigAnon, R0, R0 + 9000)], { notes: [{ id: 'note:n', at: R0 - 100 }], turns: [R0 - 200] }).notes, { 'note:n': 3 }), 'CONTROL a cut scan read as inert (r2): the 11 KB heredoc-then-run call loses its 3 rows to the note');
+  const noAnsi = copy('ansi-quote', "      if (ch === '$' && s[i + 1] === \"'\") {", '      if (false) {');
+  const noCmt = copy('comment', "    if (ch === '#') { while (i < s.length && s[i] !== '\\n') i++; continue; }", "    if (ch === '#' && !words.length) { while (i < s.length && s[i] !== '\\n') i++; continue; }");
+  ok(noAnsi.channelsRuns(ansi).length > 0 && noCmt.channelsRuns(cmt).length > 0, 'CONTROL $\'…\' read as a plain quote / a mid-line # read as a word (r2): the prose shapes run the CLI again');
+  const PS = "    if ((ch === '<' || ch === '>') && s[i + 1] === '(') {", RS = '      if (ch === \'|\' && !two) pipe = c;\n      redirect = false;\n';
+  if (src.split(PS).length !== 2 || src.split(RS).length !== 2) anchorMissing('proc-subst', 'src/channel-touch.js (one occurrence each)');
+  const noProc = MUT.load('src/channel-touch.js', src.replace(PS, '    if (false) {').replace(RS, '      if (ch === \'|\' && !two) pipe = c;\n'), 'proc-subst');
+  ok(noProc.channelsRuns('diff <(vibespace-channels list) /tmp/x').length === 0, 'CONTROL no process substitution and the redirect flag kept past a separator (r2): `diff <(vibespace-channels list)` — the redirect swallows the subshell\'s first word');
+  const noPrompt = copy('helper-prompt', "  const verbs = kind === 'helper' ? promptVerbs(s) :", '  const verbs =');
+  ok(eq(B9(noPrompt, [0, 1, 2, 3].map((i) => touch({ id: 'hs' + i, op: 'search', adapterId: 'lark', convId: 'q' + i, query: 'pairing review', at: R0 + 12_000 + i * 300 })), helpers, ctx).notes, { 'note:ctx': 4 }), 'CONTROL a helper\'s prompt never read for its verb (r2): the search rows leave helper A for the note');
+  const handList = copy('chip-table', "const MID_TURN_QUEUE = require('./queue-chips.js').IN_TURN_STATES;", "const MID_TURN_QUEUE = Object.freeze(['queued', 'steered', 'removed']);");
+  ok(handList.opensTurn(um({ queueState: 'handed' }), { turnIndex: 1 }) && handList.opensTurn(um({ queueState: 'kept' }), { turnIndex: 1 }), 'CONTROL r2\'s hand list (queued / steered / removed): a handed or kept steer is a turn\'s start');
+  const MMS = read('src/message-manager.js');
+  const mmNoWeb = copy('live-send', '      if (raw._fromWebui && emit && this._turnLive && !msg.turnStart) msg.midTurn = true;', '', 'src/message-manager.js', MMS);
+  const mmNoCard = copy('live-card', '    if (this._turnLive && !msg.turnStart) msg.midTurn = true; // lane touch-chip-cause r3', '    // lane touch-chip-cause r3', 'src/message-manager.js', MMS);
+  const mmNoStart = copy('next-turn', '    if (this._turnStartPending && (msg.role ===', '    if (false && (msg.role ===', 'src/message-manager.js', MMS);
+  const lp = bindLive(T, mmNoWeb.MessageManager, (mm) => { turnOpen(mm); mm.processLive(use(3000, 'ed', 'Edit', { file_path: '/tmp/x.md' })); mm.processLive(web(4000, 'also check the design thread', 'w2')); mm.processLive(res(5000, 'ed')); lone(mm, 6000); }, t2);
+  const lc = bindLive(T, mmNoCard.MessageManager, (mm) => { turnOpen(mm); mm.injectPeerCard(cards[0][1]); lone(mm, 12_000); }, tn(5, LB + 13_000));
+  const ls = heldBare(mmNoStart.MessageManager);
+  ok(lp.unbound === 2 && lc.unbound === 5 && eq(ls.turns, [0]) && ls.notes['note:' + ls.msgs.filter(isNoteMsg)[0].id] === 2,
+    'CONTROL the live marks removed: a steer typed live opens a turn (its reads unbound), a mid-turn card opens a turn (unbound 5), and with no next-turn mark a held message\'s turn has no start — its reads fall to the PREVIOUS turn\'s note', { lp: lp.unbound, lc: lc.unbound, ls: [ls.turns, ls.notes] });
+  const CMS = read('src/codex-message-manager.js');
+  const cmmNo = copy('codex-turn', '    if (msg.role === \'user\') {\n      if (!this._turnRunning)', '    if (false) {\n      if (!this._turnRunning)', 'src/codex-message-manager.js', CMS);
+  ok(!eq(cxTurns(cmmNo.CodexMessageManager), [0, 9000, 20000, 31000]), 'CONTROL codex\'s turn facts removed (r2): its peer and notification cards open turns, the drained submission does not', cxTurns(cmmNo.CodexMessageManager));
+  for (const c of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 15, label: '⑨ ' })) ok(c.pass, c.name, c.detail);
+  // the view reads the argv through the ONE unwrapper and hands the binder its background facts
+  const tv = read('src/lib/channel-touch-view.js'), cv = read('src/lib/chat-view.js');
+  ok(/import \{ agentCommandText \} from '\.\.\/agent-tool-rules\.js';/.test(tv) && !/toolCommandText/.test(tv) && /\.\.\.callBackground\(c\)/.test(tv) && /input\.run_in_background === true/.test(tv) && /if \(\(!isNote\(el\) \|\| m\.turnStart === true\) && T\.opensTurn\(m, prev\)\)/.test(tv)
+    && /commandHeadWords\(agentCommandText\(el\._rawMsg\?\.content\?\.\[0\]\?\.input\)\)/.test(cv),
+    'the view: an argv call is read through agentCommandText (callText, callKind; the compact head in chat-view), `background` / `bgEnd` reach bindToCall, a note row opens a turn only when it carries `turnStart`');
 });
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
