@@ -39,19 +39,26 @@
  *    helper, a command line ending in `&`, a `vibespace-job run`; to its turn's end or its seen end) — each of the
  *    touch's OWN turn (a call never causes another turn's touch). THE LADDER: ① a candidate whose command (a helper:
  *    its prompt, the CLI's name + verb as a phrase) NAMES the touch — its conversation, its proposal, its verb — the
- *    latest; else, nothing lingering, a running call that runs `vibespace-channels` as a COMMAND WORD (`channelsRuns`
- *    — never the name in quoted prose `--reason "… vibespace-channels read …"` / `$'…'`, a comment, a quoted heredoc
- *    or another command's argument), the latest; ② else exactly ONE candidate, running, when it could have run
- *    anything (`callCanRun`: a shell call not made only of RUNS_NOTHING — a script, an interpreter, a shell's script
- *    file; a helper by its TOOL NAME, HELPER_TOOLS); ③ else (a producer lingering beside a foreground stranger,
+ *    latest; else a candidate — running or lingering alike — that runs `vibespace-channels` as a COMMAND WORD
+ *    (`channelsRuns` — never the name in quoted prose `--reason "… vibespace-channels read …"` / `$'…'`, a comment, a
+ *    heredoc's data, blind text or another command's argument): ONE such call keeps its rows against any stranger;
+ *    several, one of them a background producer, ⇒ ③ (never the latest); ② else exactly ONE candidate that could have
+ *    produced it — every running call counts, a lingering one only when it could run — when it could have run anything
+ *    (`callCanRun`: a shell call not made only of RUNS_NOTHING — a script, an interpreter, a shell's script file; a
+ *    helper by its TOOL NAME, HELPER_TOOLS); ③ else (a producer that could run lingering beside a foreground stranger,
  *    several running none naming it, or a lone call that runs nothing) the turn's VibeSpace NOTE row (`notes` —
  *    «VibeSpace gave the assistant its task context»), never silently on a neighbour; ④ no note in the touch's turn
  *    (`turns` — the instants turns start, `opensTurn`: the harness's own turn facts — a record that entered a running
- *    turn never starts one; the skew window never crosses one) ⇒ unbound, the chip still lists it. A `delivery`
- *    touch always takes ③/④. THE SCANNER (`shellCommands` / `commandsRun`) reads enough shell to tell a command word
- *    from prose: a shell wrapper IS its script (`bash -c`, a re-joined codex argv read whole, a heredoc / here-string
- *    / pipe it reads), wrappers and script runners (eval, watch, parallel, find -exec) reach their operand; what it
- *    cannot read (past SCAN_MAX, an unclosed heredoc) could run, and the CLI's name there counts.
+ *    turn never starts one, nor the CLI's compaction summary; the skew window never crosses one; a call that opens
+ *    its turn is inside it for the skew) ⇒ unbound, the chip still lists it. A `delivery` touch always takes ③/④.
+ *    A call LINGERS (its work outlives its card) when the normalizer says so (`producerOf`: run_in_background, the
+ *    harness backgrounded it — until the end every close road writes) or its line sends work to the background the
+ *    line does not end itself (`&` with no `wait` / `kill` / killing `trap` after it, a `vibespace-job run`).
+ *    THE SCANNER (`shellCommands` / `commandsRun`) reads enough shell to tell a command word from prose: a shell
+ *    wrapper IS its script (`bash -c`, a re-joined codex argv read whole, a heredoc / here-string / pipe it reads),
+ *    wrappers and script runners (eval, watch, parallel, find -exec, `env -S`) reach their operand; a heredoc's body
+ *    is read to its delimiter line (inside a `$( … )` span too); what it cannot read (shell past SCAN_MAX, an unclosed
+ *    heredoc) could run — never a run of the CLI.
  *  - `foldTouches` / `foldView`: one ROW per conversation — the ops counted
  *    (read = messages read, search = hits, reply / compose / refresh /
  *    request / status = calls), replied or composed first, then by the last
@@ -118,6 +125,8 @@ const INERT_COMMANDS = Object.freeze([...RUNS_NOTHING.builtins, ...RUNS_NOTHING.
  *  (src/queue-chips.js, the harness contract the renderer draws): a bubble wearing one never starts a turn where it was
  *  typed. */
 const MID_TURN_QUEUE = require('./queue-chips.js').IN_TURN_STATES;
+/** r4: the CLI's compaction summary (the user-role record it writes after a compaction) — THE chat's own rule */
+const { isCompactSummaryText } = require('./assistant-note.js');
 /** lane touch-chip-cause: a chip in a one-line strip keeps the account and at least this many code points of its title
  *  (the owner's screenshot: ten chips squeezed to «Lar…» / «Gm…»). */
 const READABLE_TITLE_CHARS = 12;
@@ -241,7 +250,7 @@ const DATA_HEADS = new Set(['for', 'case', 'select', 'function']);
 /** wrappers that run their operand as a command — the options that take an argument (skipped with it). r3: + command
  *  (`command -v` / `-V` is a LOOKUP — it runs nothing), exec -a, time -p (the shell's keyword and /usr/bin/time), strace,
  *  ltrace, ionice */
-const WRAPPERS = new Map([['exec', ['-a']], ['env', ['-u', '-C', '-S']], ['sudo', ['-u', '-g', '-C', '-D', '-h', '-p', '-r', '-t', '-U']], ['doas', ['-u']],
+const WRAPPERS = new Map([['exec', ['-a']], ['env', ['-u', '-C']], ['sudo', ['-u', '-g', '-C', '-D', '-h', '-p', '-r', '-t', '-U']], ['doas', ['-u']],
   ['nohup', []], ['timeout', ['-s', '-k']], ['xargs', ['-n', '-P', '-I', '-L', '-s', '-d', '-E', '-a']], ['nice', ['-n']], ['stdbuf', ['-i', '-o', '-e']], ['setsid', []],
   ['command', []], ['time', ['-f', '-o', '--format', '--output']], ['strace', ['-e', '-o', '-p', '-s', '-u', '-E', '-P', '-X', '-a', '-b', '-I', '-O', '-S', '-U']],
   ['ltrace', ['-e', '-o', '-p', '-s', '-u', '-a', '-n', '-A', '-D', '-F', '-l', '-w', '-x', '-L']], ['ionice', ['-c', '-n', '-p']]]);
@@ -253,21 +262,97 @@ const SCRIPT_RUNNERS = new Map([['eval', []], ['watch', ['-n', '--interval']],
 /** r3: `find … -exec CMD … ;` — the actions whose operand is a command */
 const FIND_RUNS = new Set(['-exec', '-execdir', '-ok', '-okdir']);
 const ASSIGN_RE = /^[A-Za-z_][A-Za-z0-9_]*=/;
-/** The scanner reads this many characters as shell; anything after (and an unclosed heredoc's body) is BLIND text — r3:
- *  never inert, and the CLI's name in it counts (fail toward «could run», never toward «runs nothing»). */
+/** r4: `env -S '…'` / `--split-string=…` — the option's argument IS a command line (split on spaces), never an option
+ *  argument to skip */
+const ENV_SPLIT = Object.freeze(['-S', '--split-string']);
+/** The scanner reads this many characters of SHELL; anything after (and an unclosed heredoc's body) is BLIND text —
+ *  never inert (it could run), never a run of the CLI (r4: a call that could not be READ never proves a command word).
+ *  r4: a heredoc's BODY is no shell — it is read to its delimiter line whatever its length and never counts here. */
 const SCAN_MAX = 8192;
-/** the CLI's NAME in blind text (a cut-off scan, an unclosed heredoc) — and its verb */
-const CLI_NAME_RE = /(^|[\s;&|(`'"=/])vibespace-channels(?:\s+([A-Za-z][\w-]*))?/g;
+/** r4: the words of a compound command — a group opened by one is closed by its pair; the group is ONE command of the
+ *  list around it (`( … ) &`, `{ …; } &`, `for … done &`, `if … fi &` send every command of it to the background) */
+const GROUP_OPEN = new Map([['{', '}'], ['for', 'done'], ['while', 'done'], ['until', 'done'], ['select', 'done'], ['if', 'fi'], ['case', 'esac']]);
+const GROUP_CLOSE = new Set(['}', 'done', 'fi', 'esac']);
+/** r4: the forms of a FILE tool (RUNS_NOTHING) that RUN a program — `git rebase -x CMD`, `git bisect run CMD`, `git
+ *  submodule foreach CMD`, `git -c alias.x='!CMD'`, `rg --pre CMD`, `sort --compress-program=CMD`: could run (unread), never
+ *  inert. A git HOOK (pre-commit …) is not read — a named blind spot. */
+const RUNS_A_COMMAND = new Map(Object.entries({
+  git: (ws) => {
+    let k = 0;
+    for (; k < ws.length; k++) {   // git's own options: `-c name=value` / `-C dir` take one
+      if (ws[k] === '-c' && /^alias\.[^=]*=\s*!/.test(ws[k + 1] || '')) return true;
+      if (ws[k] === '-c' || ws[k] === '-C') { k++; continue; }
+      if (!ws[k].startsWith('-')) break;
+    }
+    const sub = ws[k], rest = ws.slice(k + 1);
+    return (sub === 'rebase' && rest.some((w) => /^(-x|--exec)(=|$)/.test(w))) || (sub === 'bisect' && rest[0] === 'run') || (sub === 'submodule' && rest.includes('foreach'));
+  },
+  rg: (ws) => ws.some((w) => /^--pre(=|$)/.test(w)),
+  sort: (ws) => ws.some((w) => /^--compress-program(=|$)/.test(w)),
+}));
+/** r4: the commands with which a line ENDS its own background jobs — `a & b & wait`, `srv & …; kill $PID`, `trap 'kill …'
+ *  EXIT`: a job the same call waits for or kills does not outlive the card */
+const REAPERS = Object.freeze(['wait', 'kill']);
+const REAP_RE = new RegExp(`(^|[\\s;&|(])(${REAPERS.join('|')})(?![\\w-])`);
 
-/** The closing index of a `$(` / `${` / backtick span opening at `i` (quotes inside honoured), or the end. */
-function spanEnd(s, i, open, close) {
-  let depth = 0;
+/** r4: a heredoc's DELIMITER word at `i` (just past `<<` / `<<-` and blanks) — quotes and escapes removed: `{delim,
+ *  quoted, end}`. */
+function heredocDelim(s, i) {
+  let d = '', q = false;
+  while (i < s.length && !' \t\r\n;&|()<>'.includes(s[i])) {
+    const ch = s[i];
+    if (ch === "'") { const k = s.indexOf("'", i + 1); const e = k < 0 ? s.length : k; d += s.slice(i + 1, e); i = e + 1; q = true; continue; }
+    if (ch === '"') { let k = i + 1; for (; k < s.length && s[k] !== '"'; k++) { if (s[k] === '\\') k++; d += s[k] || ''; } i = k + 1; q = true; continue; }
+    if (ch === '\\') { d += s[i + 1] || ''; i += 2; q = true; continue; }
+    d += ch;
+    i++;
+  }
+  return { delim: d, quoted: q, end: i };
+}
+/** r4: the index just past a heredoc's BODY that starts at `i` (the line after its `<<` line): its lines up to the
+ *  delimiter line (leading tabs stripped for `<<-`) — `{end, closed, body}`; unclosed, the body runs to the text's end. */
+function heredocBody(s, i, h) {
+  const lines = [];
+  while (i < s.length) {
+    let j = s.indexOf('\n', i);
+    if (j < 0) j = s.length;
+    const line = s.slice(i, j);
+    i = j + 1;
+    if ((h.strip ? line.replace(/^\t+/, '') : line) === h.delim) return { end: Math.min(i, s.length), closed: true, body: lines.join('\n') };
+    lines.push(line);
+  }
+  return { end: s.length, closed: false, body: lines.join('\n') };
+}
+/** The closing index of a `$(` / `${` / backtick span opening at `i` (quotes inside honoured), or the end. r4: a heredoc
+ *  inside a `$( … )` span (Claude Code's own `git commit -m "$(cat <<'EOF' … EOF\n)"`) is skipped to its delimiter line —
+ *  a `)` / quote in its body never closes anything; `(( … ))` inside is arithmetic (its `<<` a shift). */
+function spanEnd(s, i, open, close, docs = open === '(') {
+  let depth = 0, pending = [];
   for (let j = i; j < s.length; j++) {
     const ch = s[j];
     if (ch === '\\') { j++; continue; }
+    if (docs && ch === '\n' && pending.length) {
+      let k = j + 1;
+      for (const h of pending) { const b = heredocBody(s, k, h); if (!b.closed) return s.length; k = b.end; }
+      pending = [];
+      j = k - 1;
+      continue;
+    }
     if (ch === "'" && open !== '`') { const k = s.indexOf("'", j + 1); if (k < 0) return s.length; j = k; continue; }
     if (ch === '"' && open !== '`') { for (j++; j < s.length && s[j] !== '"'; j++) if (s[j] === '\\') j++; continue; }
     if (open === '`') { if (ch === '`' && j > i) return j; continue; }
+    if (docs && ch === '<' && s[j + 1] === '<') {
+      if (s[j + 2] === '<') { j += 2; continue; }   // a here-string
+      let k = j + 2;
+      const strip = s[k] === '-';
+      if (strip) k++;
+      while (s[k] === ' ' || s[k] === '\t') k++;
+      const d = heredocDelim(s, k);
+      if (d.delim) pending.push({ delim: d.delim, strip });
+      j = Math.max(j + 1, d.end - 1);
+      continue;
+    }
+    if (ch === '(' && s[j + 1] === '(' && j > i) { j = spanEnd(s, j, '(', ')', false); continue; }   // `(( … ))` / `$(( … ))` inside
     if (ch === open) depth++;
     else if (ch === close && --depth === 0) return j;
   }
@@ -281,16 +366,30 @@ function spanEnd(s, i, open, close) {
  *  `pipeFrom` is this one); a `$( … )` / backtick / `<( … )` / `>( … )` span is a command line of its own (its commands'
  *  `owner` = the word holding it); `(( … ))` / `$(( … ))` is arithmetic, no command; a heredoc's lines are kept on the
  *  command that reads them (`words.heredocs`; an UNQUOTED heredoc's `$( … )` runs — scanned), a here-string on
- *  `words.herestrings`; a # comment (at a word's start) and a redirection's target are no words. PURE, bounded: SCAN_MAX
- *  characters, nesting 4 — the rest (and an unclosed heredoc's body) is returned as `blind` text. */
+ *  `words.herestrings`; a # comment (at a word's start) and a redirection's target are no words; r4: a single `&` sends
+ *  its whole AND-OR LIST to the background, as bash does — every command of `a | b &`, `cd x && ./run.sh &` and of a
+ *  compound command (`( … ) &`, `{ …; } &`, `for … done &`, `if … fi &`) is `bg`.
+ *  PURE, bounded: SCAN_MAX characters of shell (a heredoc's body is read to its delimiter line and never counts), nesting
+ *  4 — the rest (and an unclosed heredoc's body) is returned as `blind` text. */
 function shellCommands(src, owner = null, depth = 0, offset = 0) {
-  const all = String(src || '');
-  const s = all.length > SCAN_MAX ? all.slice(0, SCAN_MAX) : all;
+  const s = String(src || '');
   const out = [];
-  out.blind = all.length > SCAN_MAX ? [all.slice(SCAN_MAX)] : [];
+  out.blind = [];
   if (depth > 4) { out.blind.push(s); return out; }
-  let words = [], pending = [], redirect = false, pipe = null;
+  // r4: `list` = the index of the first command of the AND-OR LIST being read (a `;`, a newline or a single `&` starts the
+  // next); a compound command open here is ONE command of the list around it — {close: the word (or `)`) that closes it,
+  // outer: that list}
+  let words = [], pending = [], redirect = false, pipe = null, skipped = 0, list = 0;
+  const groups = [];
   const end = () => { const c = words.length ? { words, owner, src: s, pipeFrom: pipe } : null; if (c) out.push(c); words = []; pipe = null; return c; };
+  // the group a closer ends — `)` only the innermost `(` (a `case` pattern's `)` closes nothing); a word, its own opener
+  const closeGroup = (close) => {
+    const k = close === ')' ? (groups.length && groups[groups.length - 1].close === ')' ? groups.length - 1 : -1) : groups.map((g) => g.close).lastIndexOf(close);
+    if (k < 0) return null;
+    const g = groups[k];
+    groups.length = k;
+    return g;
+  };
   const nested = (body, at) => { const r = shellCommands(body, owner === null ? offset + at : owner, depth + 1); for (const c of r) out.push(c); for (const b of r.blind) out.blind.push(b); };
   // the command substitutions an UNQUOTED heredoc's body runs (`$( … )`, backticks — never `$(( … ))` arithmetic)
   const substitutions = (body, at) => {
@@ -318,7 +417,7 @@ function shellCommands(src, owner = null, depth = 0, offset = 0) {
         let j = i + 1;
         for (; j < s.length && s[j] !== '"'; j++) {
           if (s[j] === '\\') { v += s[j + 1] || ''; j++; continue; }
-          if (s[j] === '$' && s[j + 1] === '(' && s[j + 2] === '(') { j = spanEnd(s, j + 1, '(', ')'); v += '$(())'; continue; }
+          if (s[j] === '$' && s[j + 1] === '(' && s[j + 2] === '(') { j = spanEnd(s, j + 1, '(', ')', false); v += '$(())'; continue; }
           if (s[j] === '$' && s[j + 1] === '(') { const e = spanEnd(s, j + 1, '(', ')'); nested(s.slice(j + 2, e), at); v += '$()'; j = e; continue; }
           if (s[j] === '`') { const e = spanEnd(s, j, '`', '`'); nested(s.slice(j + 1, e), at); v += '$()'; j = e; continue; }
           v += s[j];
@@ -326,7 +425,7 @@ function shellCommands(src, owner = null, depth = 0, offset = 0) {
         i = j + 1; q = true;
         continue;
       }
-      if (ch === '$' && s[i + 1] === '(' && s[i + 2] === '(') { const e = spanEnd(s, i + 1, '(', ')'); v += '$(())'; i = e + 1; continue; }
+      if (ch === '$' && s[i + 1] === '(' && s[i + 2] === '(') { const e = spanEnd(s, i + 1, '(', ')', false); v += '$(())'; i = e + 1; continue; }
       if (ch === '$' && s[i + 1] === '(') { const e = spanEnd(s, i + 1, '(', ')'); nested(s.slice(i + 2, e), at); v += '$()'; i = e + 1; continue; }
       if (ch === '$' && s[i + 1] === '{') { const e = spanEnd(s, i + 1, '{', '}'); v += s.slice(i, e + 1); i = e + 1; continue; }
       if (ch === '`') { const e = spanEnd(s, i, '`', '`'); nested(s.slice(i + 1, e), at); v += '$()'; i = e + 1; continue; }
@@ -336,41 +435,37 @@ function shellCommands(src, owner = null, depth = 0, offset = 0) {
     return { v, at, end: i, q };
   };
   let i = 0;
-  while (i < s.length) {
+  while (i < s.length && i - skipped < SCAN_MAX) {
     const ch = s[i];
     if (ch === '\n') {
       end();
       i++;
-      for (const h of pending) {   // the heredoc's lines: up to the delimiter line
-        const lines = [];
-        let closed = false;
-        while (i < s.length) {
-          let j = s.indexOf('\n', i);
-          if (j < 0) j = s.length;
-          const line = s.slice(i, j);
-          i = j + 1;
-          if ((h.strip ? line.replace(/^\t+/, '') : line) === h.delim) { closed = true; break; }
-          lines.push(line);
-        }
-        const body = lines.join('\n');
-        (h.words.heredocs || (h.words.heredocs = [])).push(body);
-        if (!closed) out.blind.push(body);   // an UNCLOSED heredoc (or one the cut ended) — its body is blind text
-        else if (!h.quoted) substitutions(body, h.at);
+      for (const h of pending) {   // the heredoc's lines: up to the delimiter line, whatever their length (r4: no shell)
+        const b = heredocBody(s, i, h);
+        skipped += b.end - i;
+        i = b.end;
+        (h.words.heredocs || (h.words.heredocs = [])).push(b.body);
+        if (!b.closed) out.blind.push(b.body);   // an UNCLOSED heredoc — its body is blind text
+        else if (!h.quoted) substitutions(b.body, h.at);
       }
       pending = [];
+      list = out.length;
       continue;
     }
     if (ch === ' ' || ch === '\t' || ch === '\r') { i++; continue; }
     if (ch === '\\' && s[i + 1] === '\n') { i += 2; continue; }
     if (ch === '#') { while (i < s.length && s[i] !== '\n') i++; continue; }   // a word's start: a comment to the line's end
     if (ch === '&' && s[i + 1] === '>') { i += s[i + 2] === '>' ? 3 : 2; redirect = true; continue; }
-    if (ch === '(' && s[i + 1] === '(' && !words.length) { i = spanEnd(s, i, '(', ')') + 1; continue; }   // `(( … ))` arithmetic
+    if (ch === '(' && s[i + 1] === '(' && !words.length) { i = spanEnd(s, i, '(', ')', false) + 1; continue; }   // `(( … ))` arithmetic
     if (ch === '|' && s[i + 1] === '&') { pipe = end(); redirect = false; i += 2; continue; }   // `|&`: a pipe (stderr too)
     if (';&|()'.includes(ch)) {
       const two = (ch === '&' || ch === '|' || ch === ';') && s[i + 1] === ch;
       const c = end();
-      if (c && ch === '&' && !two) c.words.bg = true;   // `cmd &` — sent to the background
+      if (ch === '&' && !two) for (let k = list; k < out.length; k++) out[k].words.bg = true;   // `… &` — its whole and-or list to the background
       if (ch === '|' && !two) pipe = c;
+      if (ch === ')') { const g = closeGroup(')'); if (g) list = g.outer; }
+      else if (ch === '(') { groups.push({ close: ')', outer: list }); list = out.length; }
+      else if (ch === ';' || (ch === '&' && !two)) list = out.length;
       redirect = false;
       i += two ? 2 : 1;
       continue;
@@ -406,17 +501,23 @@ function shellCommands(src, owner = null, depth = 0, offset = 0) {
     i = w.end > i ? w.end : i + 1;
     if (redirect) { redirect = false; continue; }
     if (/^\d+$/.test(w.v) && (s[i] === '<' || s[i] === '>')) continue;   // a file descriptor before a redirection
+    if (!w.q && words.every((x) => OPENERS.has(x.v))) {   // r4: a compound command's own words, where a command word stands
+      if (GROUP_OPEN.has(w.v)) groups.push({ close: GROUP_OPEN.get(w.v), outer: list });
+      else if (GROUP_CLOSE.has(w.v)) { const g = closeGroup(w.v); if (g) list = g.outer; }
+    }
     words.push(w);
   }
   end();
+  if (i < s.length) out.blind.push(s.slice(i));   // the shell past SCAN_MAX — blind
   for (const h of pending) { (h.words.heredocs || (h.words.heredocs = [])).push(''); out.blind.push(''); }   // a heredoc with no line after it
   return out;
 }
 
 /** One simple command's COMMAND WORD — `{base, k}` (base = the word after its last `/`): leading assignments, openers
  *  (do / then / ! / { …) and wrappers with their options (env X=1, sudo -u x, timeout 60, xargs -n1, nohup, exec -a n,
- *  command, time -p, strace -f …) skipped; `lookup` for `command -v` / `-V` (it runs nothing); null when there is none, or
- *  when the command is a construct whose words are data (`for c in …`). */
+ *  command, time -p, strace -f …) skipped; `lookup` for `command -v` / `-V` (it runs nothing); r4: `split` = the command
+ *  line of `env -S '…'` / `--split-string=…` (its words follow it); null when there is none, or when the command is a
+ *  construct whose words are data (`for c in …`). */
 function commandWord(words) {
   let k = 0;
   while (k < words.length) {
@@ -432,6 +533,10 @@ function commandWord(words) {
     while (k < words.length) {
       const o = words[k].v;
       if (o === '--') { k++; break; }
+      if (base === 'env' && (ENV_SPLIT.includes(o) || /^(-S.|--split-string=)/.test(o))) {   // r4: its argument is a command line
+        const glued = o.startsWith('--split-string=') ? o.slice(15) : o.startsWith('-S') && o.length > 2 ? o.slice(2) : null;
+        return { base, k, split: glued !== null ? glued : words[k + 1] ? words[k + 1].v : '', rest: k + (glued !== null ? 1 : 2) };
+      }
       if (o.length > 1 && o[0] === '-') { k += opts.includes(o) ? 2 : 1; continue; }
       if (positional) { positional--; k++; continue; }
       break;
@@ -475,8 +580,9 @@ function shellScripts(c, words, k) {
 
 /** Every simple command a command line RUNS — its own, its `$( … )` / `<( … )` spans, a shell's `-c` string / heredoc /
  *  here-string / piped script (r3: the shell is its script, never a command of its own), a script runner's script (eval /
- *  watch / parallel), a `find -exec`'s command (each nested one owned by the word that runs it): `[{base, at, verb,
- *  bg?, lookup?}]` + `blind` (text the scan could not read: a cut-off tail, an unclosed heredoc). PURE. */
+ *  watch / parallel), a `find -exec`'s command, r4: `env -S`'s command line (each nested one owned by the word that runs
+ *  it): `[{base, at, verb, bg?, lookup?, execs?}]` (`execs`: a file tool's form that runs a program, RUNS_A_COMMAND) +
+ *  `blind` (text the scan could not read: a cut-off tail, an unclosed heredoc). PURE. */
 function commandsRun(cmd, owner = null, depth = 0, offset = 0) {
   const cmds = shellCommands(cmd, owner, depth, offset);
   const out = [];
@@ -484,6 +590,7 @@ function commandsRun(cmd, owner = null, depth = 0, offset = 0) {
   const add = (list, bg) => { for (const x of list) out.push(bg ? { ...x, bg: true } : x); for (const b of list.blind) out.blind.push(b); };
   const run = (c, words, cw, at, bg) => {
     if (cw.lookup) { out.push({ base: cw.base, at, verb: '', lookup: true }); return; }
+    if (cw.split !== undefined && depth < 4) { add(commandsRun([cw.split, ...words.slice(cw.rest).map((w) => w.v)].join(' '), at, depth + 1), bg); return; }
     if (SHELLS.has(cw.base) && depth < 4) {
       const scripts = shellScripts(c, words, cw.k);
       if (scripts) { for (const sc of scripts) add(sc.joined && c.owner === null ? commandsRun(sc.text, null, depth + 1, offset + sc.at) : commandsRun(sc.text, at, depth + 1), bg); return; }
@@ -496,7 +603,8 @@ function commandsRun(cmd, owner = null, depth = 0, offset = 0) {
       while (e < words.length && !(cw.base === 'parallel' && /^:::/.test(words[e].v))) e++;
       if (e > j) { add(commandsRun(words.slice(j, e).map((w) => w.v).join(' '), at, depth + 1), bg); return; }
     }
-    out.push({ base: cw.base, at, verb: words[cw.k + 1] ? words[cw.k + 1].v : '', ...(bg ? { bg: true } : {}) });
+    const execs = RUNS_A_COMMAND.has(cw.base) && RUNS_A_COMMAND.get(cw.base)(words.slice(cw.k + 1).map((w) => w.v));
+    out.push({ base: cw.base, at, verb: words[cw.k + 1] ? words[cw.k + 1].v : '', ...(bg ? { bg: true } : {}), ...(execs ? { execs: true } : {}) });
     if (cw.base === 'find') {
       for (let j = cw.k + 1; j < words.length; j++) {
         if (!FIND_RUNS.has(words[j].v)) continue;
@@ -515,13 +623,9 @@ function commandsRun(cmd, owner = null, depth = 0, offset = 0) {
   return out;
 }
 
-/** The CLI's runs in a commandsRun result — its command words, then its NAME in blind text (`unseen`: a cut-off scan
- *  never proves the name is prose). */
-function cliRuns(ran) {
-  const out = ran.filter((x) => x.base === CLI).map(({ at, verb }) => ({ at, verb }));
-  for (const b of ran.blind) for (const m of b.matchAll(CLI_NAME_RE)) out.push({ at: -1, verb: m[2] || '', unseen: true });
-  return out;
-}
+/** The CLI's runs in a commandsRun result — its COMMAND WORDS only (r4: its name in blind text is never a run — the
+ *  blind text makes the call «could run», rung ②, never rung ①). */
+function cliRuns(ran) { return ran.filter((x) => x.base === CLI).map(({ at, verb }) => ({ at, verb })); }
 
 /** lane touch-chip-cause r2: WHERE A COMMAND LINE RUNS THE CHANNELS CLI — `[{at, verb}]`, the CLI as a COMMAND WORD
  *  (the line's start, after ; && || | ( `$(` `<(` a newline, then / do, after a wrapper — env X=… / sudo … / exec -a n /
@@ -529,19 +633,23 @@ function cliRuns(ran) {
  *  quotes removed, a path before the name kept): `at` = the index of the word that runs it (for a quoted `bash -c` string,
  *  the shell's word; a re-joined argv's script, its own word), `verb` = its first argument. The name inside a quoted
  *  argument (`--reason "… vibespace-channels read …"`, `$'…'`), a comment, a quoted heredoc's data or another command's
- *  argument (`grep vibespace-channels`) is prose; in BLIND text (r3: past SCAN_MAX, an unclosed heredoc) the name counts
- *  (`unseen`, `at` -1). PURE. */
+ *  argument (`grep vibespace-channels`) is prose; r4: so is the name in BLIND text (past SCAN_MAX, an unclosed heredoc) —
+ *  that text makes the call «could run», never a run. PURE. */
 function channelsRuns(cmd) { return cliRuns(commandsRun(cmd)); }
 
 /** Does a shell call run the agent's channels CLI? (the renderer's holder gate — harness-neutral: the command TEXT, the
  *  CLI as a command word since round 2). */
 function commandTouchesChannels(cmd) { return channelsRuns(cmd).length > 0; }
 
-/** r3: does one run (of commandsRun) run NOTHING ELSE? — a lookup (`command -v`), or a word of RUNS_NOTHING. */
-const inertRun = (x) => !!x.lookup || INERT_COMMANDS.includes(x.base);
-/** r3: does a command line send work to the BACKGROUND that outlives the call — a non-inert command ended by `&`, or a
- *  `vibespace-job run` / `start`? */
-const backgrounds = (ran) => ran.some((x) => (x.bg && !inertRun(x)) || (x.base === 'vibespace-job' && (x.verb === 'run' || x.verb === 'start')));
+/** r3: does one run (of commandsRun) run NOTHING ELSE? — a lookup (`command -v`), or a word of RUNS_NOTHING (r4: not in
+ *  a form that runs a program, RUNS_A_COMMAND). */
+const inertRun = (x) => !x.execs && (!!x.lookup || INERT_COMMANDS.includes(x.base));
+/** r4: does the line itself END the background job of run `i` — a `wait` / `kill` after it, or a `trap` whose script
+ *  kills or waits? */
+const reaped = (ran, i) => ran.some((y, j) => (j > i && REAPERS.includes(y.base)) || (y.base === 'trap' && REAP_RE.test(y.verb)));
+/** r3: does a command line send work to the BACKGROUND that outlives the call — a non-inert command ended by `&` (r4: a
+ *  group's commands too) that the line does not end itself, or a `vibespace-job run` / `start`? */
+const backgrounds = (ran) => ran.some((x, i) => (x.bg && !inertRun(x) && !reaped(ran, i)) || (x.base === 'vibespace-job' && (x.verb === 'run' || x.verb === 'start')));
 
 /** lane touch-chip-cause r2: a command line every command word of which RUNS NOTHING ELSE (RUNS_NOTHING) — it could not
  *  have run the CLI. An empty line runs nothing; r3: a line with BLIND text (cut off, an unclosed heredoc) could run. */
@@ -594,6 +702,19 @@ function callCanRun(c) {
 /** COULD THIS CALL HAVE CAUSED THIS TOUCH? (either rung) */
 function callCauses(c, t) { return callNames(c, t) || callCanRun(c); }
 
+/** lane touch-chip-cause r4: THE PRODUCER FACT a rendered call carries into bindToCall — read off the NORMALIZER's record
+ *  of its card, never guessed by the view: its work outlives the card (`background`) when its input says
+ *  `run_in_background` or the harness backgrounded it (`taskInfo.backgrounded` — 2.1.312 backgrounds an Agent whose input
+ *  says nothing); `bgEnd` = the instant its end was seen (`taskInfo.endedAt`, written on every close road the CLI has),
+ *  0 while it runs. PURE. */
+function producerOf({ input = null, taskInfo = null } = {}) {
+  const ti = taskInfo && typeof taskInfo === 'object' ? taskInfo : null;
+  return {
+    background: !!(input && typeof input === 'object' && input.run_in_background === true) || !!(ti && ti.backgrounded === true),
+    bgEnd: ti && ti.status !== 'running' ? num(ti.endedAt) : 0,
+  };
+}
+
 /** lane touch-chip-cause r2: DOES THIS RECORD START A TURN? — the HARNESS's own turn facts first (r3): `turnStart` true
  *  = the record that began a turn (codex: the first record after `task_started`; claude live: the first record after a
  *  turn's `result` — a held message's DELIVERY, whatever record it is), false = it entered a running turn. Else the
@@ -601,9 +722,11 @@ function callCauses(c, t) { return callNames(c, t) || callCanRun(c); }
  *  it) — the person's message that opened it, a wake, a peer message delivered while idle. Never a record that entered
  *  a RUNNING turn — `midTurn` (marked where it ENTERS: a steer typed while the agent worked, a card the hub drew mid-turn,
  *  the transcript's queued_command), a queue chip that waits inside the turn (MID_TURN_QUEUE, derived from the chip
- *  table) — nor an attached page image. The view leaves a VibeSpace note row out unless it carries `turnStart`. */
+ *  table) — nor an attached page image, nor (r4) the CLI's compaction summary. The view leaves a VibeSpace note row out
+ *  unless it carries `turnStart`. */
 function opensTurn(msg, prev) {
   if (!msg) return false;
+  if (msg.role === 'user' && isCompactSummaryText((msg.content || []).map((b) => (b && b.text) || '').join(''))) return false;   // r4: the CLI wrote it — the turn goes on
   if (typeof msg.turnStart === 'boolean') return msg.turnStart;
   if (msg.role !== 'user' || msg.midTurn || msg.imageAttachment || MID_TURN_QUEUE.includes(msg.queueState)) return false;
   return !(prev && Number.isFinite(prev.turnIndex) && Number.isFinite(msg.turnIndex) && prev.turnIndex === msg.turnIndex);
@@ -651,8 +774,9 @@ function bindToCall(touches, calls, { notes = [], turns = [], skewMs = SKEW_MS, 
   // moment after this turn's last touch is not its note; a note may precede its own turn's start by the skew)
   const ns = (Array.isArray(notes) ? notes : []).map((n) => ({ id: String(n && n.id), at: num(n && n.at) })).filter((n) => n.id && n.at > 0).sort((a, b) => a.at - b.at);
   const us = (Array.isArray(turns) ? turns : []).map(num).filter((v) => v > 0);
-  // r3: a call never causes a touch of ANOTHER turn — a turn starts between the call's start and the touch
-  const crossesTurn = (from, to) => { const lo = Math.min(from, to), hi = Math.max(from, to); return us.some((u) => u > lo && u <= hi); };
+  // r3: a call never causes a touch of ANOTHER turn — a turn starts between the call's start and the touch; r4: a call that
+  // OPENS its turn (the turn's start is its own) is inside it for the skew before it too
+  const crossesTurn = (c, at) => { const lo = Math.min(c.start, at), hi = Math.max(c.start, at); return us.some((u) => u > lo && u <= hi && !(u === c.start && at < c.start)); };
   const noteFor = (at) => {
     for (let k = ns.length - 1; k >= 0; k--) {
       const n = ns[k];
@@ -676,25 +800,25 @@ function bindToCall(touches, calls, { notes = [], turns = [], skewMs = SKEW_MS, 
       // the touch's own turn
       const running = [], lingering = [];
       for (const c of cs) {
-        if (crossesTurn(c.start, at)) continue;
+        if (crossesTurn(c, at)) continue;
         if (c.start - skewMs <= at && (c.stop === null || at < c.stop + skewMs)) running.push(c);
         else if (c.lingers && c.start <= at && (c.bgEnd === null || at < c.bgEnd + skewMs)) lingering.push(c);
       }
       // ① a candidate whose command (a helper: its prompt) NAMES the touch — its conversation, its proposal, its verb —
-      // the latest; else, nothing lingering: a RUNNING call that runs the CLI as a command word (a caller's kindless call:
-      // the time rules alone), the latest
+      // the latest; else a candidate that runs the CLI as a command word (a caller's kindless call: the time rules alone)
+      // — r4: running or lingering alike; ONE such call keeps its rows against any stranger, running or lingering; several,
+      // one of them a background producer (it outlives its card): by name or the note, never the latest
       const cand = new Set([...running, ...lingering]);
       const exact = cs.filter((c) => cand.has(c) && namesTouch(c.text, t, c.runs, c.kind));
-      const named = lingering.length ? [] : running.filter((c) => callNames(c, t));
+      const named = cs.filter((c) => cand.has(c) && callNames(c, t));
+      // ② the ONE candidate that could have produced it — every running call counts (one that runs nothing too: several
+      // running ⇒ the note), a lingering call only when it could run (a helper, a script: one that runs nothing never vetoes)
+      const could = [...running, ...lingering.filter(callCanRun)];
       if (exact.length) pick = exact[exact.length - 1];
-      else if (named.length) pick = named[named.length - 1];
-      else if (!lingering.length && running.length === 1 && callCanRun(running[0])) {
-        // ② the ONE candidate — a LONE running call that could have run anything (a script, an interpreter, a wrapper, a
-        // helper), nothing lingering beside it
-        pick = running[0];
-      }
-      // ③ several candidates and none naming it (a background producer + a foreground stranger), or a lone call that runs
-      // nothing: the note row below; ④ no note in the turn: the chip
+      else if (named.length === 1 || (named.length > 1 && !named.some((c) => c.lingers))) pick = named[named.length - 1];
+      else if (!named.length && could.length === 1 && callCanRun(could[0])) pick = could[0];
+      // ③ several candidates and none naming it (a background producer + a foreground stranger, two producers that run the
+      // CLI), or a lone call that runs nothing: the note row below; ④ no note in the turn: the chip
     }
     if (pick) { (byCall[pick.id] || (byCall[pick.id] = [])).push(t); continue; }
     const note = noteFor(at);
@@ -920,7 +1044,7 @@ module.exports = {
   OPS, DRAFT_OPS, FILED_OPS, RING_MAX, MERGE_MS, SKEW_MS, BATCH_MS, FOLD_SHOWN, SEARCH_MAX_CONVS, SEARCH_HITS_MAX, QUERY_MAX, TITLE_MAX, LABEL_MAX, TOUCH_PLACEMENTS,
   CAUSES, CALL_KINDS, READABLE_TITLE_CHARS, causeOf, callCauses, readableCut,
   HELPER_TOOLS, INERT_COMMANDS, MID_TURN_QUEUE, TIGHT_NAME_CHARS, shellCommands, channelsRuns, runsNothing, callKindOf, callNames, callCanRun, opensTurn, tightCut,
-  RUNS_NOTHING, SCAN_MAX, WRAPPERS, SCRIPT_RUNNERS, commandsRun,
+  RUNS_NOTHING, SCAN_MAX, WRAPPERS, SCRIPT_RUNNERS, commandsRun, RUNS_A_COMMAND, REAPERS, producerOf,
   touchKey, normalizeTouch, appendTouch, upsertTouch, commandTouchesChannels, namesTouch, bindToCall, foldTouches, filedProposals, foldView, rowWords, replyWords, rowName,
   GLYPHS, glyphFor, chipView, chipText, sessionSummary, touchedByWords, agoText, searchTouches, hitRefs, openVerdict, tailVerdict,
 };

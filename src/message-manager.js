@@ -708,12 +708,14 @@ class MessageManager extends MessageWindow {
     }
     return msg;
   }
-  /** …and a queued_command record (the CLI took a message INTO its running turn) marks the bubble already drawn for it —
-   *  the one the attachment's dedup returns on (the same 12-record window, the same words) — before that return. */
+  /** …and a queued_command record (the CLI took a message INTO its running turn) marks the bubble it DELIVERED — r4: the
+   *  one the person's live send drew (it carries the send's `webuiMsgId`, the queue's identity) for these words, in the
+   *  attachment's dedup window, before that dedup returns; never a record rebuilt from the transcript (a rebuild has no
+   *  live send: an earlier opener with the same words — «continue» — stays its turn's start). */
   _enteredTurn(text, emit) {
     for (let i = this.messages.length - 1, seen = 0; i >= 0 && seen < 12; i--, seen++) {
       const m = this.messages[i];
-      if (m.role !== 'user' || (m[PEER_RECORDED] || (m.content || []).map((b) => b.text || '').join('')) !== text) continue;
+      if (m.role !== 'user' || !m.webuiMsgId || (m[PEER_RECORDED] || (m.content || []).map((b) => b.text || '').join('')) !== text) continue;
       if (!m.midTurn && !m.turnStart) { m.midTurn = true; if (emit) this._emit({ op: 'edit', id: m.id, fields: { midTurn: true } }); }
       return;
     }
@@ -1262,13 +1264,11 @@ class MessageManager extends MessageWindow {
           // member for a record or two around its own phase changes; a level close
           // is a GUESS, and the set is stronger evidence than the guess — reopen.
           if (m.taskInfo.status === 'finished' && m.taskInfo.closedBy === 'level') {
-            m.taskInfo.status = 'running'; delete m.taskInfo.closedBy;
+            m.taskInfo.status = 'running'; delete m.taskInfo.closedBy; delete m.taskInfo.endedAt; // lane touch-chip-cause r4: it runs again — no end seen
             if (emit) this._emit({ op: 'edit', id: m.id, fields: { taskInfo: m.taskInfo } });
           }
         } else if (m.taskInfo.status === 'running' && m.taskInfo.backgrounded === true) {
-          m.taskInfo.status = 'finished';
-          m.taskInfo.closedBy = 'level';
-          if (emit) this._emit({ op: 'edit', id: m.id, fields: { taskInfo: m.taskInfo } });
+          this._taskEnded(m, 'finished', 'level', emit);
         }
       }
       if (emit) this._emit({ op: 'meta', subtype: 'background-tasks', data: { tasks: set } });
@@ -1281,11 +1281,7 @@ class MessageManager extends MessageWindow {
     if (raw.subtype === 'task_updated' && raw.task_id != null && raw.patch && typeof raw.patch === 'object') {
       const st = typeof raw.patch.status === 'string' ? raw.patch.status.slice(0, 24) : null;
       const m = this._taskMsgFor(null, raw.task_id);
-      if (m?.taskInfo && st && st !== 'running' && st !== 'pending' && (m.taskInfo.status === 'running' || m.taskInfo.closedBy === 'level')) {
-        m.taskInfo.status = st;
-        m.taskInfo.closedBy = 'task_updated';
-        if (emit) this._emit({ op: 'edit', id: m.id, fields: { taskInfo: m.taskInfo } });
-      }
+      if (m?.taskInfo && st && st !== 'running' && st !== 'pending' && (m.taskInfo.status === 'running' || m.taskInfo.closedBy === 'level')) this._taskEnded(m, st, 'task_updated', emit);
       return;
     }
     // A CODE CHANGE WENT OUT FOR REVIEW (`system`/`code_change_published`,
@@ -1330,6 +1326,7 @@ class MessageManager extends MessageWindow {
         const next = { ...(prior || {}), id: raw.task_id, type: (prior && prior.type) || normalizeTaskType(raw.task_type), description: raw.description || (prior && prior.description) || '', status: 'running', backgrounded: raw.is_backgrounded === true || !!(prior && prior.backgrounded === true) };
         if (prior && prior.id != null && /^wf_/.test(String(prior.id)) && String(prior.id) !== String(raw.task_id) && !next.runId) next.runId = String(prior.id);
         delete next.closedBy;
+        delete next.endedAt; // lane touch-chip-cause r4: it runs — no end seen
         // the task's own record says it is alive — WHEN (lane Q verify, 2026-09-26)
         { const at = this._taskRecordAt(emit); if (at) next.aliveAt = at; }
         existing.taskInfo = next;
@@ -1339,7 +1336,7 @@ class MessageManager extends MessageWindow {
       } else if (raw.subtype === 'task_progress') {
         if (existing.taskInfo) {
           // progress IS liveness: a card the level set closed softly is running (2.369.147)
-          if (existing.taskInfo.status === 'finished' && existing.taskInfo.closedBy === 'level') { existing.taskInfo.status = 'running'; delete existing.taskInfo.closedBy; }
+          if (existing.taskInfo.status === 'finished' && existing.taskInfo.closedBy === 'level') { existing.taskInfo.status = 'running'; delete existing.taskInfo.closedBy; delete existing.taskInfo.endedAt; }
           // …and WHEN it was alive (lane Q verify, 2026-09-26): /api/workflow counts
           // the tree as proof of life only while this is fresh (src/workflow-disk.js
           // treeAlive) — a replayed record keeps its own arrival time, so a run that
@@ -1367,10 +1364,7 @@ class MessageManager extends MessageWindow {
           // the record's own status when it is a declared terminal value (failed /
           // stopped / killed); anything else closes as completed, as before. This
           // is the real outcome — it overwrites a level-set guess (`finished`).
-          const st = typeof raw.status === 'string' && TERMINAL_TASK_STATUS.has(raw.status) ? raw.status : 'completed';
-          existing.taskInfo.status = st;
-          existing.taskInfo.closedBy = 'notification';
-          if (emit) this._emit({ op: 'edit', id: existing.id, fields: { taskInfo: existing.taskInfo } });
+          this._taskEnded(existing, typeof raw.status === 'string' && TERMINAL_TASK_STATUS.has(raw.status) ? raw.status : 'completed', 'notification', emit);
         }
       }
     }
@@ -1445,6 +1439,22 @@ class MessageManager extends MessageWindow {
     this._emit({ op: 'meta', subtype: 'slash-commands', data: { commands: names, terminal: strList(terminal, 100) || [] } });
   }
 
+  /** lane touch-chip-cause r4: THE ONE END WRITER of a task card — every close road the CLI has (the background set's level
+   *  close, `task_updated`, `task_notification`, the transcript's <task-notification>, a re-launch) closes through here: its
+   *  status, who closed it, and the instant its end was SEEN (`endedAt` — the live record's arrival, a replayed record's
+   *  own arrival, a converted transcript record's stamp; unknown ⇒ none). The first end seen stands; a reopen clears it.
+   *  The channel binder reads it (producerOf): a background producer stops being a touch's candidate there. */
+  _taskEnded(m, status, closedBy, emit) {
+    const ti = m.taskInfo;
+    ti.status = status;
+    if (closedBy) ti.closedBy = closedBy;
+    if (!(Number(ti.endedAt) > 0)) {
+      const at = this._replayAt != null ? this._replayAt : (emit ? Date.now() : this._currentTs);
+      if (Number(at) > 0) ti.endedAt = Number(at);
+    }
+    if (emit) this._emit({ op: 'edit', id: m.id, fields: { taskInfo: ti } });
+  }
+
   /** Close the task a <task-notification> payload names (status + summary).
    *  ONE closer for every transport the notification rides: the idle-wake
    *  user record, the mid-turn queued_command attachment, and the
@@ -1464,12 +1474,9 @@ class MessageManager extends MessageWindow {
     // a level-set close (`finished`, closedBy 'level') is a guess the real outcome overwrites
     if (taskMsg?.taskInfo && (taskMsg.taskInfo.status === 'running' || taskMsg.taskInfo.closedBy === 'level')) {
       const st = (stMatch ? stMatch[1].trim() : 'completed').toLowerCase();
-      taskMsg.taskInfo.status = st === 'completed' ? 'completed' : (st || 'completed');
-      taskMsg.taskInfo.closedBy = 'notification';
-      taskMsg.taskInfo.endedAt = this._currentTs || Date.now(); // lane touch-chip-cause r3: the instant its end was SEEN — a background producer stops being a channel touch's candidate here
       const smMatch = contentStr.match(/<summary>([\s\S]*?)<\/summary>/);
       if (smMatch) taskMsg.taskInfo.summary = smMatch[1].trim().slice(0, 200);
-      if (emit) this._emit({ op: 'edit', id: taskMsg.id, fields: { taskInfo: taskMsg.taskInfo } });
+      this._taskEnded(taskMsg, st === 'completed' ? 'completed' : (st || 'completed'), 'notification', emit);
     }
   }
 
@@ -1766,10 +1773,7 @@ class MessageManager extends MessageWindow {
           const prevId = syn.id && this.taskMsgByTaskId.get(String(syn.id));
           if (prevId && prevId !== existing.id) {
             const prev = this.messageIndex.get(prevId);
-            if (prev?.taskInfo?.status === 'running') {
-              prev.taskInfo.status = 'completed';
-              if (emit) this._emit({ op: 'edit', id: prev.id, fields: { taskInfo: prev.taskInfo } });
-            }
+            if (prev?.taskInfo?.status === 'running') this._taskEnded(prev, 'completed', null, emit);
           }
           existing.taskInfo = { ...syn, status: 'running', backgrounded: true }; // the ack text says "in background" — a member of the level set
           this.taskMsgByToolUse.set(toolUseId, existing.id);
