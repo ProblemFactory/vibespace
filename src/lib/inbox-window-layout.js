@@ -159,7 +159,7 @@ const URGENCIES = ['low', 'normal', 'high', 'urgent'];
  *   session's display name), origin ({origin, label} — the producer, label an
  *   English t() key), notice (bool), resolved (bool — the entry's view, which
  *   may lead the item's own status by a broadcast), reply ({show, enabled,
- *   why, code} — replyButtonState), ago(ts), expires(ts), resolvedBy(by),
+ *   why, code} — replyButtonState), ago(ts), expires(ts), resolvedBy(by), endCode(item) (r8),
  *   detailState ('whole' | 'loading' | 'failed' — a resolved item's snapshot
  *   carries a 300-char preview; the window loads the rest) + loadError.
  * Returns {id, sessionKey, title, detail, name, urgency, notice, resolved,
@@ -181,8 +181,10 @@ export function itemView(item, ctx = {}) {
   const meta = [];
   if (resolved) {
     const by = typeof ctx.resolvedBy === 'function' ? ctx.resolvedBy(i.resolvedBy, i) : '';
-    meta.push({ kind: 'status', text: i.status === 'dismissed' ? t('dismissed') : t('done') });
+    meta.push({ kind: 'status', text: typeof ctx.statusWords === 'function' ? ctx.statusWords(i) : i.status === 'dismissed' ? t('dismissed') : t('done') }); // r3: a hidden pointer's words (the caller's)
     if (by) meta.push({ kind: 'by', text: by });
+    const code = typeof ctx.endCode === 'function' ? ctx.endCode(i) : ''; // r8: an end the client cannot classify — its code beside «outcome unknown» (monospace)
+    if (code) meta.push({ kind: 'code', text: code });
   } else {
     meta.push({ kind: notice ? 'notice' : 'urgency', text: notice ? t('notice') : t(urgency) });
   }
@@ -212,7 +214,7 @@ export function itemView(item, ctx = {}) {
   // lane-pairing ⑥: an exit's "ask me each time" item is answered HERE — Allow / Deny first (never a producer button)
   const exitAsk = !resolved && i.action && i.action.type === 'exit-run-ask' && i.action.askId ? { askId: i.action.askId, cmd: String(i.action.cmd || '') } : null;
   // lane hub-act-ask: a hub act held on a cluster instance — Allow once / Always on this machine / Deny, first
-    const hubAsk = !resolved && i.action && (i.action.type === 'hub-act-ask' || i.action.type === 'automation-ask' || i.action.type === 'pool-cross-provider' || i.action.type === 'vault-run-ask' || i.action.type === 'vault-grant-ask') && i.action.askId ? { askId: String(i.action.askId), type: i.action.type, always: i.action.always !== false, groups: String(i.action.groups || '').split(' ').filter(Boolean) } : null;   // lane key-instance-scope: an automation card's Task Groups (its 这些岗位的会话 choice) // lane vault-run-door: an agent's run held on its card (no «always» for a shell / an interpreter / an unknown destination) // q-053 P0b: a pool's cross-provider card too (Always = this pool) // design q-046: a held automation call answers the same three ways
+    const hubAsk = !resolved && i.action && (i.action.type === 'hub-act-ask' || i.action.type === 'automation-ask' || i.action.type === 'pool-cross-provider' || i.action.type === 'vault-run-ask' || i.action.type === 'vault-grant-ask') && i.action.askId ? { askId: String(i.action.askId), type: i.action.type, always: i.action.always !== false && !i.action.late, lost: !!(i.action.late && i.action.restartLost === true), groups: String(i.action.groups || '').split(' ').filter(Boolean) } : null;   // lane key-instance-scope: an automation card's Task Groups (its 这些岗位的会话 choice) // lane vault-run-door: an agent's run held on its card (no «always» for a shell / an interpreter / an unknown destination) // q-053 P0b: a pool's cross-provider card too (Always = this pool) // design q-046: a held automation call answers the same three ways // lane wake-approve-card r8: a LATE card (`action.late`) never «always» — its door refuses it
   // lane vault-paste-request: an agent's request for a secret — Paste and save… (THE box, as a dialog) / Refuse, first
   const secretAsk = !resolved && i.action && i.action.type === 'secret-request' && i.action.requestId ? { requestId: String(i.action.requestId) } : null;
   // lane browser-propose: the agent's browser proposal is answered HERE too — Approve / Reject first (the plan is the detail)
@@ -232,6 +234,12 @@ export function itemView(item, ctx = {}) {
   // lane controls-that-lie: an ask that names a GRANT carries the grant — «Let this conversation use …», first (it DOES it)
   const grantAsk = !resolved && !i.clearedAt && i.action && i.action.type === 'browser-grant' && i.action.profileId ? { profileId: String(i.action.profileId), label: String(i.action.label || i.action.profileId) } : null;
   const actions = resolved ? ['reopen', 'copy'] : [...(grantAsk ? ['browser-grant'] : []), ...(appNoteAsk ? ['desktop-app-show'] : []), ...(restartAsk ? ['browser-restart'] : []), ...(floorAsk ? ['browser-floor-check'] : []), ...(reauthAsk ? ['channel-reauth'] : []), ...(exitAsk ? ['exit-allow', 'exit-deny'] : []), ...(hubAsk ? ['hub-once', ...(hubAsk.type === 'vault-grant-ask' ? ['grant-8h'] : hubAsk.type === 'vault-run-ask' ? (hubAsk.always ? ['shape-always'] : []) : [hubAsk.type === 'automation-ask' ? 'auto-always' : hubAsk.type === 'pool-cross-provider' ? 'pool-always' : 'hub-always']), 'hub-deny'] : []), ...(secretAsk ? ['secret-paste', 'secret-deny'] : []), ...(proposal ? ['proposal-approve', 'proposal-reject'] : []), ...(appAsk ? ['app-install', 'app-reject'] : []), ...(reply.show ? ['reply'] : []), 'done', 'dismiss', 'copy', ...(producer ? ['producer'] : [])];
+  if (hubAsk && hubAsk.lost) actions.splice(actions.indexOf('hub-once'), 1);   // lane wake-approve-card r8: a LATE run card after a restart (vault-agent-own r23 `restartLost`) — an Allow would mint nothing: 拒绝 alone
+  // lane wake-approve-card r2: A DECISION ROW HAS TWO VERBS — `ctx.closers` (the caller asks the registry's closersOf; this file
+  // imports nothing): false / [] draws no Mark done / Dismiss beside its Approve / Deny, and no Reopen once it is decided;
+  // r3: ['hide'] = A POINTER — its Dismiss is «Hide» (no Mark done; nothing once hidden — it comes back by itself)
+  const closers = Array.isArray(ctx.closers) ? ctx.closers : ctx.closers === false ? [] : null;
+  const verbs = !closers ? actions : actions.flatMap((a) => (a !== 'done' && a !== 'dismiss' && a !== 'reopen' ? [a] : closers.includes(a) ? [a] : a === 'dismiss' && closers.includes('hide') ? ['hide'] : []));
   const title = String(ctx.words != null ? ctx.words : (i.text || ''));
   const detail = String(ctx.detail != null ? ctx.detail : (i.detail || ''));
   const replied = i.reply && typeof i.reply.text === 'string' && i.reply.text ? i.reply.text : null;
@@ -245,6 +253,6 @@ export function itemView(item, ctx = {}) {
   return {
     id: i.id || null, sessionKey: i.sessionKey || null, title, detail, name: String(ctx.name || ''),
     urgency: resolved || notice ? '' : urgency, notice, resolved, status: resolved ? (i.status === 'dismissed' ? 'dismissed' : 'done') : 'open',
-    meta, replied, options, reply, actions: cardActs || actions, producer, exitAsk, hubAsk, proposal, appAsk, restartAsk, grantAsk, copy, cut,
+    meta, replied, options, reply, actions: cardActs || verbs, producer, exitAsk, hubAsk, proposal, appAsk, restartAsk, grantAsk, copy, cut,
   };
 }

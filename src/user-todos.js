@@ -156,9 +156,9 @@ function normalizeAction(x) {
  *  plain keys, strings ≤ 2 000 chars, finite numbers, booleans, null, arrays ≤ 64, depth ≤ 4, ≤ 24 KB as JSON; a value
  *  inside those bounds is kept EXACTLY (the card's Install sends a digest of what the client drew — src/app-card.js).
  *  A shape outside them THROWS by name. null = none. */
-function normalizeCard(x) {
+function normalizeCard(x, name = 'card') {
   if (x == null) return null;
-  if (typeof x !== 'object' || Array.isArray(x)) throw new Error('card must be an object');
+  if (typeof x !== 'object' || Array.isArray(x)) throw new Error(`${name} must be an object`);
   const walk = (v, depth, at) => {
     if (v === null || typeof v === 'boolean') return v;
     if (typeof v === 'number') { if (!Number.isFinite(v)) throw new Error(`${at} must be finite`); return v; }
@@ -176,10 +176,79 @@ function normalizeCard(x) {
     }
     return out;
   };
-  const out = walk(x, 0, 'card');
-  if (JSON.stringify(out).length > 24000) throw new Error('card is larger than 24 KB');
+  const out = walk(x, 0, name);
+  if (JSON.stringify(out).length > 24000) throw new Error(`${name} is larger than 24 KB`);
   return out;
 }
+/** lane wake-approve-card r7 (the owner: «这个卡片的可读性很差» — the vault-run card was an English prose wall): a producer's
+ *  FACTS about what it asks (vault-run-door's `cardFactsOf` — {v, who, tool, cmd, folder, secrets, hosts, shape, always,
+ *  templates, masking}; every reason a CODE, never a sentence). The client words them with its own t()
+ *  (src/foryou-actions.js runCardOf); `detail` stays the old clients' prose.
+ *  A STORE CLIPS AND SAYS, NEVER THROWS (r8 — the acceptance: the card walk threw on a string over 2 000 characters, the door
+ *  turned the throw into `ask_unfiled`, and a 2 973-character command got NO card and failed). The ONE bound (THE registry's
+ *  RUN_CMD_BODY_MAX / RUN_CMD_MAX = vault-agent-own r23's CARD_STRING_MAX; the shared contract): every string ≤ 2 000. The
+ *  command keeps the door's shape (r23 `facts` v2): `cmd` = its first 2 000 units, `cmdCut: true`, the WHOLE in `cmdFull` —
+ *  chunks of ≤ 2 000 the client reassembles (≤ RUN_CMD_MAX in all); a producer that sent a longer `cmd` (an older door) is
+ *  folded the same way here. Any other string past 2 000 keeps its start + «…»; a list past 64, an object past 32 fields, a
+ *  part nested past 4 is cut — each cut NAMED in the facts' `cut` (≤ 16 paths, the fold says it) and on the returned record
+ *  (`factsCut`). Idempotent: facts inside the bound (the door's own) are kept EXACTLY. A whole past 24 KB, or no object at
+ *  all, is dropped (the card draws the prose `detail`, as before r7) — still filed. → {facts | null, cut: [paths]}. */
+const clipText = (v, max) => {
+  if (v.length <= max) return v;
+  let n = max - 1;
+  if (/[\ud800-\udbff]/.test(v[n - 1])) n--;   // never half a surrogate pair
+  return v.slice(0, n) + '…';
+};
+/** The first `max` units (no marker — the door's own clip) / the whole in ≤ `max` chunks; both surrogate-safe. */
+const headOf = (v, max) => { let n = Math.min(max, v.length); if (n < v.length && /[\ud800-\udbff]/.test(v[n - 1])) n--; return v.slice(0, n); };
+const chunksOf = (v, max) => { const out = []; for (let i = 0; i < v.length;) { const c = headOf(v.slice(i), max); out.push(c); i += c.length || max; } return out.length ? out : ['']; };
+function normalizeCardFacts(x) {
+  if (x == null) return { facts: null, cut: [], fresh: [] };
+  // r9 (a store says when it DROPS — the acceptance: a facts object past 24 KB was dropped with `factsCut` on the return only,
+  // said nowhere; the card fell back to prose): a dropped whole files a STUB that says why ({dropped, cut: ['facts']} — no
+  // `v`, so no client draws it as facts); the card draws «事实太大，未保存 — 只显示文字» (foryou-actions factsDroppedWords)
+  if (typeof x !== 'object' || Array.isArray(x)) return { facts: { dropped: 'not-an-object', cut: ['facts'] }, cut: ['facts'], fresh: ['facts'] };
+  if (typeof x.dropped === 'string' && FACTS_DROPPED.includes(x.dropped) && x.v === undefined) return { facts: { dropped: x.dropped, cut: ['facts'] }, cut: ['facts'], fresh: [] };   // a re-filed stub: the same stub
+  const cut = (Array.isArray(x.cut) ? x.cut : []).filter((p) => typeof p === 'string' && p).map((p) => p.slice(0, 80)).slice(0, 16);   // the door's own cuts stay said
+  const fresh = [];
+  const said = (at) => { if (cut.length < 16 && !cut.includes(at)) { cut.push(at); fresh.push(at); } };
+  const keyPath = (at, k) => { const w = String(k).replace(/[^\w.-]/g, '?').slice(0, 40) || '?'; return at ? `${at}.${w}` : w; };   // r9: a dropped key is NAMED (was the parent's path: «» at the top)
+  const walk = (v, depth, at) => {
+    if (v === null || typeof v === 'boolean') return v;
+    if (typeof v === 'number') { if (Number.isFinite(v)) return v; said(at); return null; }
+    if (typeof v === 'string') { if (v.length > RUN_CMD_BODY_MAX) said(at); return clipText(v, RUN_CMD_BODY_MAX); }
+    if (depth >= 4 || typeof v !== 'object') { said(at); return null; }
+    if (Array.isArray(v)) { if (v.length > 64) said(at); return v.slice(0, 64).map((y, k) => walk(y, depth + 1, `${at}[${k}]`)); }
+    const out = {};
+    let n = 0;
+    for (const [k, y] of Object.entries(v)) {
+      if (y === undefined) continue;
+      if (!/^[a-zA-Z][a-zA-Z0-9]{0,40}$/.test(k) || ++n > 32) { said(keyPath(at, k)); continue; }
+      out[k] = walk(y, depth + 1, at ? `${at}.${k}` : k);
+    }
+    return out;
+  };
+  // THE COMMAND: its whole is the door's fold (`cmdFull` chunks — r23; a string from an older shape), else `cmd` itself
+  const { cmd, cmdFull } = x;
+  const parts = Array.isArray(cmdFull) ? cmdFull.filter((c) => typeof c === 'string') : typeof cmdFull === 'string' ? [cmdFull] : [];
+  const whole = parts.length ? parts.join('') : typeof cmd === 'string' ? cmd : null;
+  if (whole == null && cmd != null) said('cmd');   // r9: a command that is no text is dropped AND named (was: silently gone, the card had no command box and still offered 允许一次)
+  if (whole != null && whole.length > RUN_CMD_MAX) said('cmdFull');
+  const command = whole == null ? {} : whole.length > RUN_CMD_BODY_MAX ? { cmd: headOf(whole, RUN_CMD_BODY_MAX), cmdCut: true, cmdFull: chunksOf(headOf(whole, RUN_CMD_MAX), RUN_CMD_BODY_MAX) } : { cmd: whole };
+  const top = { ...x };   // the producer's key order kept (its facts come back byte-identical when inside the bound)
+  for (const k of ['cmdCut', 'cmdFull', 'cut']) delete top[k];
+  if (!('cmd' in top) && whole != null) top.cmd = '';
+  const out = {};
+  for (const [k, v] of Object.entries(walk('cmd' in top ? { ...top, cmd: null } : top, 0, ''))) { if (k === 'cmd') Object.assign(out, command); else out[k] = v; }   // r9: no `cmd` placeholder on facts that carry none (it was cut as a 33rd field)
+  if (cut.length) out.cut = cut;
+  if (JSON.stringify(out).length > 24000) return { facts: { dropped: 'too-large', cut: ['facts'] }, cut: ['facts'], fresh: ['facts'] };
+  return { facts: out, cut, fresh };
+}
+/** Why a facts whole was dropped (the stub's `dropped`): past 24 KB, or not an object. */
+const FACTS_DROPPED = ['too-large', 'not-an-object'];
+const i18nKey = (s) => s;   // marks an English sentence as a dictionary key (the i18n check reads it)
+/** r9: the set-aside notice's group key (a For-you notice of the store itself — one per boot that set a file aside). */
+const SET_ASIDE_KEY = 'for-you-store';
 
 // THE DOOR (lane foryou-plugin-notices, owner 2026-10-19 on Dropline's 「建议加入词库」 rows: 「这个部分点击应该要自动跳转」): where a
 // click on the item's BODY takes the owner — declared by the producer at filing, validated like `action`:
@@ -231,6 +300,40 @@ function normalizeOpen(x, plugin) {
 
 // THE MERGE RULE (lane chat-needs-you-card, amendment 1): derived from THE For-you action registry — a row's `identity`
 const { ACTION_IDENTITY } = require('./foryou-actions.js');
+const { isDecisionRow, endsOf, OUTCOME_ENDS, RUN_CMD_BODY_MAX, RUN_CMD_MAX } = require('./foryou-actions.js');   // lane wake-approve-card r2: THE registry's decision rows (r3: each row's own ends; r8: a producer's outcome-in-the-fact settle, the run card's ONE bound)
+const { isPointer, isHidden, HIDDEN_BY } = require('./foryou-actions.js');   // lane wake-approve-card r3: THE registry's pointers
+/** A DECISION ROW HAS TWO VERBS (lane wake-approve-card, acceptance round 2 — the registry's DECISION_ROWS: a `decide:
+ *  'person'` row that draws its own verbs — the wake request; r3: the vault's run ask and paste request, the hub-act ask). Its item leaves 'open' only by
+ *  its decision (`allowed` / `denied` / `always` / `stored`, the person door's engine) or its own end (`expired`, a held ask's
+ *  `ask-expired` / `ask-over`… — the row's `ends`); a generic close — the ✓ / ✕ a stale page still draws, a script, «Mark all seen», a reply —
+ *  is refused BY NAME (`decision_row`), and a decided one is final (`decision_final`: never reopened, never re-stamped). Was:
+ *  ✓ Mark done beside Approve DENIED a wake request silently, its record read «✓ done», and the 6 s Undo reopened a request
+ *  that was over. → null (lawful) | {code, error}. */
+function decisionRefusal(item, status, by) {
+  if (!isDecisionRow(item)) return null;
+  if (item.status !== 'open') return status === item.status && by === item.resolvedBy ? null : { code: 'decision_final', error: `${item.id} was decided (${item.resolvedBy || item.status}) — a decision is final; the agent can ask again` };
+  if (status !== 'open' && !endsOf(item).includes(by)) return { code: 'decision_row', error: `${item.id} is a decision — only its own verbs end it (nothing else closes it)` };
+  return null;
+}
+const decisionError = (no) => Object.assign(new Error(no.error), { code: no.code });
+/** r8 (the acceptance, with vault-agent-own 4ff55fb4's real door): a decision row's producer that settles with the PERSON or
+ *  'vault' as `by` and the outcome in `fact.outcome` ('late-allowed' / 'denied' / 'expired' / 'vault_locked') was skipped
+ *  here in silence — the late card stayed open with its buttons after the one-run pass was granted. Until it writes the ruled
+ *  shape (resolvedBy = the outcome word) its outcome IS the end (THE registry's OUTCOME_ENDS — the client reads such a record
+ *  the same way: foryou-actions endOf), `late` kept on the fact. Anything else: `by` as given (the law judges it). */
+function outcomeEnd(item, by, fact) {
+  if (!isDecisionRow(item) || endsOf(item).includes(by)) return by;
+  const o = fact && typeof fact.outcome === 'string' && Object.prototype.hasOwnProperty.call(OUTCOME_ENDS, fact.outcome) ? OUTCOME_ENDS[fact.outcome] : null;
+  return o && endsOf(item).includes(o) ? o : by;
+}
+/** A POINTER HIDES, NEVER DECIDES (lane wake-approve-card, acceptance round 3 — the registry's `closer: 'hide'` rows: an
+ *  access request's item, the Outbox's pointer). The PERSON's close of one (`by` 'user': the ✕ Hide, the ✓ a stale page still
+ *  draws, «Mark all seen») is written as a HIDE — status 'dismissed', `resolvedBy: 'hidden'` («hidden — nothing was decided»),
+ *  never «✓ done»; the question it points at is untouched (still open where it lives). A producer's own close (its
+ *  retraction, its answer) is its own. Was: ✓ on an rq- item recorded «✓ done» with the request open. → {status, by}. */
+function hideOf(item, status, by) {
+  return status !== 'open' && by === 'user' && isPointer(item) ? { status: 'dismissed', by: HIDDEN_BY } : { status, by };
+}
 const { FOR_YOU_URGENCIES: URGENCIES } = require('./agent-cli-text.js'); // lane job-notify-user r3: THE one set — the agent CLIs read the same constant (it ships beside them)
 const KINDS = ['action', 'notice']; // 2.369.118: action = needs the user (default); notice = for their information (own section, grey count)
 const STATUSES = ['open', 'done', 'dismissed'];
@@ -313,11 +416,21 @@ class UserTodoManager {
     this._pluginGate = null; // lane foryou-plugin-notices: setPluginGate(fn) — does plugin <id> declare 'reminders'? (the server's; null = shape rules only)
     this._state = { items: [] };
     this._writeTimer = null; this._dirty = false; this._lastWritten = null;
+    // r9 (THE ATOMIC-WRITE + NO-SILENT-FAILURE LAWS — the acceptance: a truncated user-todos.json started the store FRESH with
+    // nothing said, and a held decision lost its card): a MISSING file is an empty store; one that exists but cannot be read,
+    // parsed, or has the wrong shape is SET ASIDE beside itself exactly as the channel store's index.json is
+    // (`user-todos.json.corrupt-<ts>`, its bytes kept, never unlinked), with ONE named log line and ONE For-you notice naming
+    // where the bytes are (filed below, once the store is up); the channels engine's boot reconcile files a held decision's
+    // card again from its request row.
+    let setAside = null;
     try {
-      const parsed = timedSync('user-todos.read', () => JSON.parse(fs.readFileSync(this._file, 'utf-8')));
-      if (parsed && Array.isArray(parsed.items)) this._state = parsed;
-      this._lastWritten = JSON.stringify(this._state, null, 2);
-    } catch { /* fresh */ }
+      const text = timedSync('user-todos.read', () => fs.readFileSync(this._file, 'utf-8'));
+      let parsed = null, why = null;
+      try { parsed = JSON.parse(text); } catch (e) { why = `corrupt JSON (${String((e && e.message) || e).slice(0, 80)})`; }
+      if (!why && !(parsed && Array.isArray(parsed.items))) why = 'not the expected shape';
+      if (why) setAside = this._setAside(why);
+      else { this._state = parsed; this._lastWritten = JSON.stringify(this._state, null, 2); }
+    } catch (e) { if (!(e && e.code === 'ENOENT')) setAside = this._setAside(`unreadable (${(e && e.code) || (e && e.message)})`); }
     // THE ONE LEGACY RUNG (lane job-notify-user r3): a job's ask filed before 2.369.361 carries no `jobFact` — the only
     // place the store reads its sentence, once, at load (an engine ≤ .360 filed «<name> needs your input» whole): it takes
     // the fact, so the resolver keys on the fact alone and the panel answered after the upgrade still closes it
@@ -332,11 +445,40 @@ class UserTodoManager {
     // interval — the store's OWN timer, because server.js has no shared sweep
     // cadence other stores hook into (each keeper runs its own).
     this._expiryTimer = null;
+    if (setAside) this._fileSetAside(setAside);
     this.expireDue();
     if (expirySweepMs > 0) {
       this._expiryTimer = setInterval(() => { try { this.expireDue(); } catch { } }, expirySweepMs);
       if (this._expiryTimer.unref) this._expiryTimer.unref();
     }
+  }
+
+  /** r9: the unreadable file RENAMED beside itself (a copy when the rename cannot be done) → {why, to | null}. */
+  _setAside(why) {
+    const dir = path.dirname(this._file);
+    const to = `user-todos.json.corrupt-${new Date(this._now()).toISOString().replace(/[:.]/g, '-')}`;
+    try { fs.renameSync(this._file, path.join(dir, to)); }
+    catch (e) {
+      try { fs.copyFileSync(this._file, path.join(dir, to)); }
+      catch (e2) { console.warn(`[user-todos] user-todos.json is ${why} and could NOT be set aside (${(e2 && e2.code) || (e2 && e2.message)}) — the next save replaces it`); return { why, to: null }; }
+    }
+    console.warn(`[user-todos] user-todos.json was ${why} — set aside as ${to} (its bytes kept, never overwritten); For you starts empty`);
+    return { why, to };
+  }
+  /** r9: ONE notice naming where the set-aside bytes are (said where the owner looks — never a log line only). */
+  _fileSetAside({ why, to }) {
+    try {
+      this.add(SET_ASIDE_KEY, {
+        origin: 'server', kind: 'notice', urgency: 'high', by: 'system', sessionName: 'For you',
+        text: to ? `For you could not read its saved list and set it aside as ${to} — the list started empty` : `For you could not read its saved list and could NOT set it aside — the next save replaces it`,
+        detail: `user-todos.json was ${why}.\n${to ? `Its bytes are kept as data/${to} — nothing was deleted. A held channel decision is filed again from its request; other open items are not in the new list.` : 'It could not be renamed or copied.'}`,
+        i18n: {
+          text: to ? { key: i18nKey('For you could not read its saved list and set it aside as {where} — the list started empty'), params: { where: to } } : { key: i18nKey('For you could not read its saved list and could NOT set it aside — the next save replaces it') },
+          detail: [{ key: i18nKey('Nothing was deleted. Fix the JSON and move it back while the server is stopped, or keep the new store and delete the copy once you no longer need it.') }],
+          source: { key: i18nKey('For you') },
+        },
+      });
+    } catch (e) { console.warn(`[user-todos] the set-aside notice could not be filed: ${(e && e.message) || e}`); }
   }
 
   /** The manager's last act (suites, a migration's private manager): the
@@ -512,7 +654,7 @@ class UserTodoManager {
 
   get(id) { return this._state.items.find((i) => i.id === id) || null; }
 
-  add(sessionKey, { text, detail, urgency, by = 'agent', sessionName = null, jobId = null, kind = null, i18n = null, expiresAt = null, action = null, options = null, origin = null, card = null, artifacts = null, cwd = null, hostId = null, openCap = null, plugin = null, open = null, about = null, jobName = null, jobFact = null } = {}) {
+  add(sessionKey, { text, detail, urgency, by = 'agent', sessionName = null, jobId = null, kind = null, i18n = null, expiresAt = null, action = null, options = null, origin = null, card = null, facts = null, artifacts = null, cwd = null, hostId = null, openCap = null, plugin = null, open = null, about = null, jobName = null, jobFact = null } = {}) {
     const _dataDir = path.dirname(this._file);   // agent-output-sinks: the belt finds the vault from here
     // agent-output-sinks: belt an AGENT's own words — never a system producer's notice (vault / spend / channels / machines / …).
     // Two shapes (src/inbox-origin.js): AGENT_WORDS_ORIGINS — the whole text and detail are the agent's (vibespace-ask);
@@ -551,6 +693,9 @@ class UserTodoManager {
     i18n = normalizeI18n(i18n);
     action = normalizeAction(action); // a server producer's decision payload (reset credit, §5), or null
     card = normalizeCard(card); // a server producer's view of the item (design 009: an app install's one card), or null
+    const fx = normalizeCardFacts(facts); // r7: a producer's facts the client words (the vault-run card), or null — r8: clipped and named, never a throw
+    facts = fx.facts;
+    if (fx.fresh.length) console.warn(`[user-todos] ${String(sessionKey).slice(0, 80)}: ${fx.fresh.includes('facts') ? `the card's facts were ${facts && facts.dropped === 'not-an-object' ? 'not an object' : 'larger than 24 KB'} — dropped, the card shows its text only` : `the card's facts were cut — named in its fold: ${fx.fresh.join(', ')}`} (r9: every drop named on the card and here)`);
     options = normalizeOptions(options); // option chips (vibespace-ask --options "A|B|C"): ≤6 distinct labels ≤40 chars, else THROWS by name — or null
     const arts = normalizeArtifacts(artifacts); // lane foryou-attachments: vibespace-ask --artifact — ≤8 rows, the cut named, a bad shape THROWS by name
     artifacts = arts.artifacts;
@@ -588,7 +733,7 @@ class UserTodoManager {
     detail = rawDetail ? rawDetail.slice(0, DETAIL_MAX) : null;
     const detailCut = rawDetail.length > DETAIL_MAX ? DETAIL_MAX : 0;
     // the cut is named on the RETURNED record only (the ledger never carries it)
-    const named = (o) => (arts.cut ? { ...o, artifactsCut: arts.cut } : o); // lane foryou-attachments: the attachments' cap, named the same way
+    const named = (o) => (arts.cut || fx.cut.length ? { ...o, ...(arts.cut ? { artifactsCut: arts.cut } : {}), ...(fx.cut.length ? { factsCut: fx.cut } : {}) } : o); // lane foryou-attachments: the attachments' cap, named the same way (r8: the facts' cuts too)
     const cut = (o) => (textCut || detailCut ? { ...named(o), ...(textCut ? { textCut } : {}), ...(detailCut ? { detailCut } : {}) } : named(o));
     // Idempotent BY TEXT across ALL statuses: re-filing an open question
     // refreshes it; re-filing a RESOLVED/DISMISSED one REOPENS the same item
@@ -615,7 +760,7 @@ class UserTodoManager {
     // lane job-notify-user r3: an item that names its job's fact re-files by the FACT (jobId + jobFact), never by its
     // text; one that names none never merges into one that does (a job's copy is the job's)
     const sameWords = (i) => (jobFact ? i.jobId === jobId && i.jobFact === jobFact : i.text === text && !i.jobFact);
-    const existing = this._state.items.find((i) => i.sessionKey === sessionKey && sameWords(i) && sameFiling(i) && !i.clearedAt);
+    const existing = this._state.items.find((i) => i.sessionKey === sessionKey && sameWords(i) && sameFiling(i) && !i.clearedAt && !(i.status !== 'open' && isDecisionRow(i)));
     const openCount = this._state.items.filter((i) => i.sessionKey === sessionKey && i.status === 'open').length;
     // a SERVER producer whose open items its own domain bounds (one per account row) may raise the per-key cap; the agent
     // route never passes it (lane oat-identity-fix-r2, L1)
@@ -649,6 +794,7 @@ class UserTodoManager {
       if (i18n && JSON.stringify(i18n) !== JSON.stringify(existing.i18n || null)) { existing.i18n = i18n; changed = true; }
       if (action && JSON.stringify(action) !== JSON.stringify(existing.action || null)) { existing.action = action; changed = true; }
       if (card && JSON.stringify(card) !== JSON.stringify(existing.card || null)) { existing.card = card; changed = true; }
+      if (facts && JSON.stringify(facts) !== JSON.stringify(existing.facts || null)) { existing.facts = facts; changed = true; }
       if (options && JSON.stringify(options) !== JSON.stringify(existing.options || null)) { existing.options = options; changed = true; } // a re-file WITH options replaces them; one without keeps the old set
       if (artifacts && JSON.stringify(artifacts) !== JSON.stringify(existing.artifacts || null)) { existing.artifacts = artifacts; changed = true; } // lane foryou-attachments: the same rule as options
       if (cwd && cwd !== existing.cwd) { existing.cwd = cwd; changed = true; }
@@ -674,6 +820,7 @@ class UserTodoManager {
       i18n, // the words as structure, or null (an agent's own item is its own words)
       action, // what the item's button does ({type, …facts}), or null — a server producer's only
       ...(card ? { card } : {}), // design 009: the producer's VIEW the client draws the item from (an app install's one card)
+      ...(facts ? { facts } : {}), // r7: the producer's FACTS the client words (the vault-run card) — `detail` stays the old clients' prose
       expiresAt, // ms epoch the item dies at (resolved 'expired' by expireDue), or null = lasting
       options, // the one-click answers (≤6 labels), or null — a chip's reply IS its label (design-user-inbox-reply D3a)
       ...(artifacts ? { artifacts } : {}), // lane foryou-attachments: what the agent asks the owner to open (chips → the one artifact door)
@@ -698,7 +845,7 @@ class UserTodoManager {
     let n = 0;
     const went = [];
     for (const it of this._state.items) {
-      if (it.status !== 'open' || it.jobId !== jobId) continue;
+      if (it.status !== 'open' || it.jobId !== jobId || decisionRefusal(it, 'done', 'agent')) continue;
       // the ask is told apart by its FACT (lane job-notify-user r3 — never its words: a name like rotate-db-password made
       // the r2 belt eat «needs», and the answered ask stayed open for good) — a CLEARED item keeps none of its words
       // (verify r3: an answered / expired / withdrawn panel must still close the job's cleared ask item)
@@ -728,6 +875,9 @@ class UserTodoManager {
     if (!STATUSES.includes(status)) throw new Error(`status must be one of ${STATUSES.join('/')}`);
     const item = this._state.items.find((i) => i.id === id);
     if (!item) throw new Error('item not found');
+    const no = decisionRefusal(item, status, by);   // lane wake-approve-card r2: a decision row's two verbs only, and final
+    if (no) throw decisionError(no);
+    ({ status, by } = hideOf(item, status, by));   // r3: a pointer's close by the person is a hide
     const wasOpen = item.status === 'open';
     item.status = status;
     // a reopen is the user saying it still matters: it no longer expires
@@ -748,23 +898,27 @@ class UserTodoManager {
    *  never a throw — the rest of the batch still applies. ONE save + ONE
    *  broadcast for the whole batch (N setStatus calls would push N snapshots to
    *  every client). An invalid status throws by name before anything changes.
-   *  @returns {{changed: string[], unknown: string[]}} */
+   *  A DECISION ROW is passed by (lane wake-approve-card r2): it stays until decided or expired — its id is listed in
+   *  `decisions` (the page says «N decisions left for you»), never closed by a bulk verb.
+   *  @returns {{changed: string[], unknown: string[], decisions: string[]}} */
   setStatusMany(ids, status, by = 'user') {
     if (!STATUSES.includes(status)) throw new Error(`status must be one of ${STATUSES.join('/')}`);
-    const changed = [], unknown = [], went = [];
+    const changed = [], unknown = [], went = [], decisions = [];
     const now = this._now();
     for (const id of new Set(Array.isArray(ids) ? ids : [])) {
       const item = this._state.items.find((i) => i.id === id);
       if (!item) { unknown.push(id); continue; }
+      if (decisionRefusal(item, status, by)) { if (item.status === 'open') decisions.push(id); continue; }
+      const h = hideOf(item, status, by);   // r3: «Mark all seen» HIDES a pointer (never «done»)
       const wasOpen = item.status === 'open';
-      item.status = status;
-      if (status === 'open') { item.resolvedAt = null; item.resolvedBy = null; item.expiresAt = null; if (!wasOpen) delete item.judged; } // F2: a reopen is judged again
-      else { item.resolvedAt = now; item.resolvedBy = by; }
+      item.status = h.status;
+      if (h.status === 'open') { item.resolvedAt = null; item.resolvedBy = null; item.expiresAt = null; if (!wasOpen) delete item.judged; } // F2: a reopen is judged again
+      else { item.resolvedAt = now; item.resolvedBy = h.by; }
       changed.push(id);
       if (wasOpen && status !== 'open') went.push(item);
     }
     if (changed.length) { this._save(); this._notify(); this._emitStatus(went, by, true); }
-    return { changed, unknown };
+    return { changed, unknown, decisions };
   }
 
   /** «Mark all read» on the notices (lane inbox-fyi-mark-all, the owner 2026-10-22: a notice asks nothing, so confirming
@@ -796,17 +950,41 @@ class UserTodoManager {
    *  exactly as it is. ONE save + ONE broadcast; the status listeners hear it as they hear setStatus.
    *  @returns the ids resolved */
   resolveAnswered(ids, by, fact = null) {
-    const went = [], now = this._now();
+    const went = [], restamped = [], now = this._now();
     for (const id of new Set(Array.isArray(ids) ? ids : [])) {
       const item = this._state.items.find((i) => i.id === id);
-      if (!item || item.status !== 'open') continue;
-      item.status = 'done'; item.resolvedAt = now; item.resolvedBy = by;
-      if (fact) item.resolvedFact = { ...fact };
-      went.push(item);
+      // lane wake-approve-card r3: a HIDDEN pointer was never answered — its producer's answer still lands on it (the
+      // record then says what was decided, «approved by you · 09:41»), without a second leave-'open' event
+      const hidden = !!item && isHidden(item);
+      const end = item ? outcomeEnd(item, by, fact) : by;   // r8: a producer's outcome-in-the-fact settle, written as the ruled word
+      if (!item || (item.status !== 'open' && !hidden)) continue;
+      const no = decisionRefusal(item, 'done', end);
+      if (no) { console.warn(`[user-todos] ${id}: a producer's settle (${String(by)}${fact && fact.outcome ? ` / ${String(fact.outcome)}` : ''}) is not one of its row's ends — the item stays open (${no.code})`); continue; }   // r8: said, never silent
+      item.status = 'done'; item.resolvedAt = now; item.resolvedBy = end;
+      if (fact) item.resolvedFact = end !== by ? { ...fact, ...(fact.outcome === 'late-allowed' ? { late: true } : {}) } : { ...fact };
+      (hidden ? restamped : went).push(item);
     }
-    if (went.length) { this._save(); this._notify(); this._emitStatus(went, by); }
-    return went.map((i) => i.id);
+    if (went.length || restamped.length) { this._save(); this._notify(); if (went.length) this._emitStatus(went, by); }
+    return [...went, ...restamped].map((i) => i.id);
   }
+
+  /** lane wake-approve-card r6 (主开发: «a card's state follows the grant's life»): what happened AFTER a decision to what it
+   *  GRANTED — its END (`{endedAt, endedBy}`: a lock, a revoke, its one use, its time, a restart) — merged into the record's
+   *  `resolvedFact`; the decision itself (status, resolvedBy, decidedBy / decidedAt) is never touched, and the first end
+   *  stands. ONE save + ONE broadcast. → whether it was written. */
+  noteFact(id, patch) {
+    const it = this.get(id);
+    const endedAt = Number(patch && patch.endedAt);
+    if (!it || it.status === 'open' || !Number.isFinite(endedAt) || endedAt <= 0) return false;
+    const f = it.resolvedFact && typeof it.resolvedFact === 'object' ? it.resolvedFact : {};
+    if (f.endedAt) return false;
+    it.resolvedFact = { ...f, endedAt, endedBy: String((patch && patch.endedBy) || 'ended').slice(0, 20) };
+    this._save(); this._notify();
+    return true;
+  }
+  /** r6: the RESOLVED items of one action type (copies) — a producer reconciling the facts of what it decided (the vault's
+   *  grants at boot: the grant rows are memory, a restart ended them). */
+  resolvedOf(type) { return this._state.items.filter((i) => i.status !== 'open' && i.action && i.action.type === type).map((i) => ({ ...i })); }
 
   /** The user REPLIED to this item from the inbox and the reply reached the
    *  session (src/routes/user-todos-reply.js calls this only after the send
@@ -818,7 +996,7 @@ class UserTodoManager {
     const item = this._state.items.find((i) => i.id === id);
     if (!item) throw new Error('item not found');
     item.reply = { text: String(text == null ? '' : text).slice(0, REPLY_MAX), at: now };
-    const wasOpen = item.status === 'open';
+    const wasOpen = item.status === 'open' && !decisionRefusal(item, 'done', 'reply');   // lane wake-approve-card r2: a typed reply never decides
     if (wasOpen) { item.status = 'done'; item.resolvedAt = now; item.resolvedBy = 'reply'; }
     this._save(); this._notify();
     if (wasOpen) this._emitStatus([item], 'reply');

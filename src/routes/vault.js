@@ -411,7 +411,7 @@ function registerPasteRoutes(app, { paste, activeSessions, person, take }) {
     if (!r || !r.ok) return refusal(res, r || { code: 'unfiled' });
     return res.json({ ok: true, requestId: r.requestId, target: r.target, ...(r.already ? { already: r.already } : { filed: CN.filedLine('secret-request', r.requestId, OF.tray()) }), tray: OF.tray() });
   });
-  app.post('/api/vault/secret-requests/:id/answer', person((req) => { const [value] = take(req, 'value'); const b = req.body || {}; return paste.answer(String(req.params.id), { answer: b.answer, value, by: 'user' }); }));
+  app.post('/api/vault/secret-requests/:id/answer', person((req) => { const [value] = take(req, 'value'); const b = req.body || {}; return paste.answer(String(req.params.id), { answer: b.answer, value, by: 'user', person: true }); }));   // lane wake-approve-card r3: `person` — THE person verdict was asked (the record says «stored · 09:41»)
   app.post('/api/vault/secrets', person((req) => { const [value] = take(req, 'value'); const b = req.body || {}; return paste.addEntry({ label: b.label, note: b.note, kind: b.kind, value, by: 'user' }); }));
   app.delete('/api/vault/secrets/:id', person((req) => paste.dropEntry(String(req.params.id), { by: 'user' })));
 }
@@ -506,7 +506,7 @@ function registerRunRoutes(app, { run, activeSessions, getJobs, contents, who, p
   const whoOf = (req) => { try { return who(req) || 'sign-in-off'; } catch { return 'sign-in-off'; } };
   const reauthedOf = (req, page) => !!(contents && contents.windowFacts(whoOf(req), typeof page === 'string' ? page : pageHeader(req)).open);
   app.post('/api/vault/runnable', person((req) => { const [page] = take(req, 'page'); const b = req.body || {}; return run.setRunnable({ id: b.id, on: b.on === true, reauthed: b.on === true && reauthedOf(req, page), by: 'user' }); }));
-  app.post('/api/vault/run/asks/:askId', person((req) => { const [page] = take(req, 'page'); const b = req.body || {}; if (b.answer === 'once' && whoOf(req) === 'sign-in-off' && !reauthedOf(req, page)) return { ok: false, code: 'reveal_needs_password' }; return run.answer(String(req.params.askId), { answer: b.answer, ttl: b.ttl || undefined, reauthed: b.answer === 'always' && reauthedOf(req, page), by: 'user' }); }));
+  app.post('/api/vault/run/asks/:askId', person((req) => { const [page] = take(req, 'page'); const b = req.body || {}; if (b.answer === 'once' && whoOf(req) === 'sign-in-off' && !reauthedOf(req, page)) return { ok: false, code: 'reveal_needs_password' }; return run.answer(String(req.params.askId), { answer: b.answer, ttl: b.ttl || undefined, reauthed: b.answer === 'always' && reauthedOf(req, page), by: 'user', person: true }); }));   // r3: «allowed by you · 09:41»
   // lane vault-use-grants: «谁可以用…» — the entry's vault-use row (给谁 / 除了, each member its hosts and its end): a save that WIDENS
   // (a new member, a new host, a later end, an exception taken away) needs THIS page's 验证是你 window; a narrowing and ✕ are clicks
   app.post('/api/vault/use-grants', person((req) => { const [page] = take(req, 'page'); const b = req.body || {}; const ug = run.useGrants; if (!ug) return { ok: false, code: 'no_use_grants' }; return ug.setRow(String(b.id || ''), { to: Array.isArray(b.to) ? b.to : [], except: Array.isArray(b.except) ? b.except : [] }, { by: 'user', reauthed: reauthedOf(req, page) }); }));
@@ -517,7 +517,7 @@ function registerRunRoutes(app, { run, activeSessions, getJobs, contents, who, p
   app.post('/api/vault/use-grants/revoke', person((req) => { const b = req.body || {}; const ug = run.useGrants; if (!ug) return { ok: false, code: 'no_use_grants' }; return ug.revoke(String(b.id || ''), String(b.principal || ''), { by: 'user' }); }));
   // lane vault-use-grants round 6 (MAJOR item 4): un-pause ONE member the owner's OFF paused — a widening, so it needs this page's 验证是你 window.
   app.post('/api/vault/use-grants/resume', person((req) => { const [page] = take(req, 'page'); const b = req.body || {}; return run.resumeGrant({ id: String(b.id || ''), principal: String(b.principal || ''), reauthed: reauthedOf(req, page), by: 'user' }); }));
-  app.post('/api/vault/request/asks/:askId', person((req) => { const [page] = take(req, 'page'); const b = req.body || {}; return run.answerRequest(String(req.params.askId), { answer: b.answer, reauthed: b.answer !== 'deny' && reauthedOf(req, page), by: 'user' }); }));   // lane vault-manual-and-lock: once | 8h need this page's 验证是你 (a grant opens the entry as the switch does); deny is a click
+  app.post('/api/vault/request/asks/:askId', person((req) => { const [page] = take(req, 'page'); const b = req.body || {}; return run.answerRequest(String(req.params.askId), { answer: b.answer, reauthed: b.answer !== 'deny' && reauthedOf(req, page), by: 'user', person: true }); }));   // r4: `person` — the record says «allowed by you for 8 h · HH:MM»   // lane vault-manual-and-lock: once | 8h need this page's 验证是你 (a grant opens the entry as the switch does); deny is a click
 }
 
 /** A page's reveal secret off a GET (X-Vault-Page) — the POST doors take it off the body. */

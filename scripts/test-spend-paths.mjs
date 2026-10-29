@@ -3361,18 +3361,19 @@ console.log('\n§10c a next-turn watch\'s stored hits ride the free stash at boo
   console.log('    road census rows: ' + c.rows.map((r) => `${r.kind}:${r.fn || ''}@${r.line}${r.road ? '→road@' + r.road : ''}`).join(' · '));
   ok('§10c the census finds the four readers that start a delivery from stored hits (the boot flush, the scope digest, the boot scheduler, the carry), each asking the road after its read', JSON.stringify(starts.map((r) => r.fn).sort()) === JSON.stringify([...STARTS].sort()) && starts.every((r) => r.road), JSON.stringify(starts));
   ok('§10c the one reader that only CARRIES stored hits is the named row (wakeNow)', c.rows.filter((r) => r.kind === 'carries').map((r) => r.fn).join() === Object.keys(CARRIES).join());
-  ok('§10c every pending-row writer names its road (keepPending, wakeNow\'s re-hold), and the next-turn door parks on the next-turn road (2 sites)', c.rows.filter((r) => r.kind === 'writer').length === 2 && c.rows.filter((r) => r.kind === 'next-turn-park').length === 2);
+  ok('§10c every pending-row writer names its road (keepPending, wakeNow\'s re-hold, releaseAside — lane wake-approve-card r8: a held decision\'s Deliver puts its hits back, each on the road it was parked on), and the next-turn door parks on the next-turn road (2 sites)', c.rows.filter((r) => r.kind === 'writer').length === 3 && c.rows.filter((r) => r.kind === 'writer').some((r) => r.fn === 'releaseAside') && c.rows.filter((r) => r.kind === 'next-turn-park').length === 2);
   ok('§10c THE CENSUS: no stored hit starts a delivery without its road', c.violations.length === 0, JSON.stringify(c.violations));
   const ROAD_LINE = "        if (pendingRoadOf(item.watcher, pend) === 'next-turn') { results.push(await stashPending(rec, convId, item, p, pend)); continue; }\n";
   const SCOPE_ROAD = "        if (pendingRoadOf(item.watcher, pend) !== 'wake') continue;";
   const BOOT_ROAD = " && pendingRoadOf(item.watcher, pend) === 'wake') {";
+  const BOOT_ROAD2 = "if (pendingRoadOf(item.watcher, pend) !== 'wake') { armBoot(";   // lane wake-approve-card r6: the scheduler's conversation branch reads the road too (a next-turn road is never asked about its age)
   const WAKE_PUSH = "e2.pending.push({ record: h.record, why: h.why || [], at: t, road: 'wake', for: pk });";
   const STASH_PARK = "if (!fromPending) await keepPending(rec, convId, hits, 0, pk, 'next-turn');";
-  ok('§10c the controls\' anchors are present once each', [ROAD_LINE, SCOPE_ROAD, BOOT_ROAD, WAKE_PUSH, STASH_PARK].every((a) => esrc.split(a).length === 2));
+  ok('§10c the controls\' anchors are present once each', [ROAD_LINE, SCOPE_ROAD, BOOT_ROAD, BOOT_ROAD2, WAKE_PUSH, STASH_PARK].every((a) => esrc.split(a).length === 2));
   const red = (mut, re, what) => { const v = roadCensus(mut).violations; ok(`§10c CONTROL: ${what} is RED (${v.join('; ')})`, v.some((x) => re.test(x))); };
   red(esrc.replace(ROAD_LINE, ''), /in flushPending\(\) .* no road check/, 'the boot flush without its road check');
   red(esrc.replace(SCOPE_ROAD, ''), /in flushScopeNow\(\) .* no road check/, 'the scope digest without its road check');
-  red(esrc.replace(BOOT_ROAD, ') {'), /in scheduleBootPending\(\) .* no road check/, 'the boot scheduler without its road check');
+  red(esrc.replace(BOOT_ROAD, ') {').replace(BOOT_ROAD2, 'if (false) { armBoot('), /in scheduleBootPending\(\) .* no road check/, 'the boot scheduler without its road checks');
   red(esrc.replace('  function tick() {', "  async function flushAgain(rec, convId, pk) {\n    const en = store.index.peek(`${rec.id}/${convId}`), eff = wakeEffOf(en), pend = pendingOf(en, pk, eff);\n    return billedWake({ conv: `${rec.id}/${convId}` }, () => wakeNow(rec, convId, pend.hits, { fromPending: pend, pk }));\n  }\n  function tick() {"), /in flushAgain\(\) .* no road check/, 'a planted second door that bills stored hits');
   red(esrc.replace(WAKE_PUSH, "e2.pending.push({ record: h.record, why: h.why || [], at: t, for: pk });"), /names no road/, 'a pending row written without its road');
   red(esrc.replace(STASH_PARK, 'if (!fromPending) await keepPending(rec, convId, hits, 0, pk);'), /without the next-turn road/, 'the next-turn door parking on the default (wake) road');

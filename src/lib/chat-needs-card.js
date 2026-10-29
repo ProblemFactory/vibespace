@@ -62,8 +62,8 @@ import { escHtml, showToast } from './utils.js';
 import { pressVerdict } from './press-arm.js'; // round 4 (#1): what an open moved under the pointer answers nothing for ARM_MS
 import { UI_ICONS } from './icons.js';
 import { inboxModel } from './user-todos-actions.js';
-import { agoText, boxInUse } from './user-todos-row.js';
-import { needsOf, recordsOf, placementOf, tailPlan, drawnAt, filingIndex, chipWords, settledWords, KIND_WORDS } from '../foryou-actions.js'; // PURE: THE For-you action registry — which items, where, the words
+import { agoText, boxInUse, endCodeOf } from './user-todos-row.js';
+import { needsOf, recordsOf, placementOf, tailPlan, drawnAt, filingIndex, chipWords, settledWords, KIND_WORDS, decidedStamp, decisionCard, VIEWER_ROLE } from '../foryou-actions.js'; // PURE: THE For-you action registry — which items, where, the words
 
 /** A chat record as the PURE placement reads it: {id, ts, role, tool, cmd (a Bash call's command), out (its result)}. */
 export function leanRecord(m) {
@@ -116,6 +116,11 @@ export class NeedsCards {
   _records() {
     const v = this.view;
     return (typeof v.loadedRecords === 'function' ? v.loadedRecords() : v._messages || []).map(leanRecord);
+    // WHO IS LOOKING (lane wake-approve-card — an IDENTITY fact, never this view's: the owner decides from every view they
+    // open, history and sub-agent viewers included). THE one place a card asks it: the registry's VIEWER_ROLE today; the
+    // day an instance gains a non-owner viewer (VIEWERS' deferred row) it is answered here, and its cards read «waiting
+    // for the owner» with no buttons (decisionCard's false branch)
+    this._role = () => VIEWER_ROLE;
   }
 
   /** Subscribe for the VIEW's life: its own controller, aborted by the window's (`signal`) or by the view's dispose (stop) —
@@ -464,10 +469,14 @@ export class NeedsCards {
     const model = inboxModel(this.app);
     if (e.resolved) {
       const words = model.wordsOf(e.item);
-      const sig = `done\u0000${e.item.status}\u0000${e.item.resolvedBy || ''}\u0000${words}`;
-      const verb = settledWords(e.item, t, kind);
-      const ago = agoText(e.item.resolvedAt || e.item.createdAt, t);
-      const line = `<span class="cn-line-mark" aria-hidden="true">${e.item.status === 'dismissed' ? '✕' : '✓'}</span><span class="cn-line-verb">${escHtml(verb)}</span><span class="cn-line-ago"> · ${escHtml(ago)}</span><span class="cn-line-words"> — ${escHtml(words)}</span>`;
+      // lane wake-approve-card: a decision only a person's click makes says WHO and WHEN — «approved by you · 09:41» (the
+      // tray row's words, decidedStamp); every other record keeps «approved · 2 min ago»
+      const stamp = decidedStamp(e.item, { t });
+      const sig = `done\u0000${e.item.status}\u0000${e.item.resolvedBy || ''}\u0000${stamp ? stamp.text : ''}\u0000${words}`;   // r6: a grant's life (ended / revoked) redraws the line
+      const verb = stamp ? stamp.verb : settledWords(e.item, t, kind);
+      const ago = stamp ? stamp.time : agoText(e.item.resolvedAt || e.item.createdAt, t);
+      const code = endCodeOf(e.item); // r8: an end this client cannot classify — «outcome unknown · <code>», never «done»
+      const line = `<span class="cn-line-mark" aria-hidden="true">${code ? '?' : e.item.status === 'dismissed' || (stamp && stamp.denied) ? '✕' : '✓'}</span><span class="cn-line-verb">${escHtml(verb)}</span>${code ? ` · <code class="ut-end-code">${escHtml(code)}</code>` : ''}<span class="cn-line-ago"> · ${escHtml(ago)}</span><span class="cn-line-words"> — ${escHtml(words)}</span>`;
       // THE row's keep rule (round 3, #4 — an answer from another client wiped the lines being typed here): a box in use
       // stays — the quiet line above it, the row resolved AROUND it (patchRow keeps a box in use); it folds on leaving
       const rows = card.querySelector(':scope > .cn-rows');
@@ -488,6 +497,20 @@ export class NeedsCards {
       }
       return;
     }
+    // lane wake-approve-card: a viewer who may NOT decide (decisionCard's 'waiting-owner' — no role has it today, the
+    // registry's VIEWERS) reads who decides, the item's words, and NO verb: never the row (its buttons)
+    const dc = decisionCard(e.item, { role: this._role(), t });
+    if (dc.state === 'waiting-owner') {
+      const words = model.wordsOf(e.item);
+      card.classList.add('cn-wait');
+      if (card.dataset.sig !== `wait\u0000${words}`) {
+        this.app.foryouRows?.stash?.(card);
+        card.dataset.sig = `wait\u0000${words}`;
+        card.innerHTML = `<div class="cn-head"><span class="cn-icon" aria-hidden="true">${UI_ICONS.inbox}</span><span class="cn-head-words">${escHtml(dc.waiting)}</span></div><div class="cn-wait-words">${escHtml(words)}</div>`;
+      }
+      return;
+    }
+    if (card.dataset.sig && card.dataset.sig.startsWith('wait\u0000')) { delete card.dataset.sig; card.replaceChildren(); }
     let head = card.querySelector(':scope > .cn-head');
     let rows = card.querySelector(':scope > .cn-rows');
     card.querySelector(':scope > .cn-line')?.remove(); // a quiet line (a reopen; a card kept for its box) leaves — the row stays

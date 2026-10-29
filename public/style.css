@@ -5161,10 +5161,12 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
   :is(#user-todos-popup, #phone-home) .ut-item:not(.ut-open) > .ut-body > .ut-meta .ut-sess { display: inline; min-height: 0; padding-block: 0; }
   :is(#user-todos-popup, #phone-home, .cn-card.cn-fold) .ut-item:not(.ut-open) > .ut-body > :is(.ut-text, .ut-meta),
   :is(#user-todos-popup, #phone-home, .cn-card.cn-fold) .ut-item:not(.ut-open) > .ut-body > :is(.ut-text, .ut-meta) * { pointer-events: none; }
+  :is(#user-todos-popup, #phone-home, .cn-card.cn-fold) .ut-item:not(.ut-open) > .ut-body > .ut-deadline { display: block !important; pointer-events: none; } /* r7 addendum: a FOLDED row keeps its deadline line (the hide rule above has the same weight — the later wins) — the tap still opens the row */
   :is(#user-todos-popup, #phone-home) .ut-item > .ut-body > .ut-go { display: inline-flex; position: absolute; top: 4px; right: 0; min-width: 52px; min-height: 44px; padding: 3px 4px; flex-direction: column; align-items: center; justify-content: center; gap: 2px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-window); color: var(--accent); cursor: pointer; }
   :is(#user-todos-popup, #phone-home) .ut-item > .ut-body > .ut-go svg { width: 18px; height: 18px; }
   :is(#user-todos-popup, #phone-home) .ut-item > .ut-body > .ut-go::after { content: attr(data-label); font-size: 14px; line-height: 1.1; white-space: nowrap; }
   :is(#user-todos-popup, #phone-home) .ut-item > .ut-body:has(> .ut-go) > :is(.ut-text, .ut-meta) { margin-right: 60px; }
+  :is(#user-todos-popup, #phone-home) .ut-item:not(.ut-open) > .ut-body:has(> .ut-go) > .ut-deadline { margin-right: 60px; } /* r8 (the acceptance's 390 shots): a folded row's deadline line keeps clear of the Chat door too — «它下次运行» lost «次运行» under it */
   /* THE OPEN ROW (acceptance round 2): the door keeps the QUESTION LINE as its row — the question | the door, centred on the
      question's first line — and everything else runs full width BELOW the door's bottom edge (the detail box never under it) */
   :is(#user-todos-popup, #phone-home) .ut-item.ut-open > .ut-body:has(> .ut-go) { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 8px; }
@@ -8138,9 +8140,46 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
 .ut-api-chip { display: inline-block; padding: 0 6px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--attn-text) 50%, var(--border)); color: var(--attn-text); background: color-mix(in srgb, var(--attn-text) 8%, transparent); font-size: 10px; line-height: 15px; white-space: nowrap; } /* lane card-grammar-exceptions: a raw-API proposal's policy, a chip */
 .ut-api-tech .ut-detail { font-family: var(--font-mono, monospace); word-break: break-all; }
 .ut-proposal-plan { font-size: 11px; color: var(--text); margin-top: 3px; white-space: pre-line; overflow-wrap: anywhere; user-select: text; } /* lane browser-propose: what Approve runs, the card's words line for line, ABOVE the buttons (never folded) */
+/* lane wake-approve-card r7 — THE RUN CARD'S FACTS (the owner: «这个卡片的可读性很差»): the command in its OWN box (it wraps inside
+   it — a hex id never widens the card), ≤ 4 fact rows (the deciding one first, in the warning accent), the answers with the
+   «Always» hint beside them, the technical lines folded. Theme vars only. */
+.ut-run { margin-top: 4px; min-width: 0; }
+.ut-run-cmd { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 11px; color: var(--text); background: var(--bg-input); border-radius: var(--radius-sm); padding: 4px 6px; margin: 0; max-width: 100%; box-sizing: border-box; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-all; user-select: text; }
+.ut-run-facts, .ut-run-tech { display: grid; grid-template-columns: max-content minmax(0, 1fr); column-gap: 8px; row-gap: 3px; margin-top: 6px; font-size: 11px; line-height: 1.45; }
+.ut-run-row { display: contents; }
+.ut-run-lbl { color: var(--text-secondary); white-space: nowrap; }
+.ut-run-val { color: var(--text); min-width: 0; overflow-wrap: anywhere; }
+.ut-run-line { display: block; }
+.ut-run-mono, .ut-run-code { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 0.95em; }
+.ut-run-code { background: var(--bg-input); border-radius: var(--radius-sm); padding: 0 3px; }
+.ut-run-aside { color: var(--text-secondary); margin-inline-start: 0.3em; }
+.ut-run-warn > .ut-run-lbl, .ut-run-warn > .ut-run-val { color: var(--warn-text); font-weight: 600; }
+.ut-run-answer { align-items: center; flex-wrap: wrap; }
+.ut-run-hint { flex: 1 1 16em; min-width: 0; font-size: 11px; color: var(--text-secondary); } /* beside the answers at a desk; its own line under them on a phone */
+.ut-run-fold { margin-top: 6px; }
+.ut-run-fold > summary { font-size: 11px; color: var(--text-secondary); cursor: pointer; }
+.ut-run-tech { margin-top: 4px; }
+.iw-actions .ut-run-hint { align-self: center; font-size: 12px; }
+.iw-detail .ut-run { white-space: normal; } /* the pane's words keep their line breaks; the card's own boxes say how they wrap */
+.iw-detail .ut-run-cmd { font-size: 12px; padding: 6px 8px; }
+.iw-detail .ut-run-facts, .iw-detail .ut-run-tech { font-size: 12px; }
+/* r7 addendum — A CARD WITH A DEADLINE SHOWS IT: the time left by the SERVER's clock under the question (the page ticker moves
+   it), the warning accent under 15 s; past it «time is up … waiting for the server» or the late answer's words — the answers
+   always stay (r8: only the producer's settle withdraws them, never this device's clock) */
+.ut-deadline { margin-top: 2px; font-size: 11px; color: var(--text-secondary); font-variant-numeric: tabular-nums; }
+.ut-deadline-warn { color: var(--warn-text); font-weight: 600; }
+.ut-deadline[data-state="late"] { color: var(--bad-text); }
+.iw-deadline { margin-top: 6px; font-size: 12px; }
+.ut-run-cut { margin: 2px 0 4px; font-size: 11px; color: var(--warn-text); } /* r8: the body's command is a cut — the whole is in the fold */
+.ut-run-cmd-full { max-height: 16em; overflow: auto; margin: 0; } /* r8: the fold's whole command (≤ 4 096 characters) scrolls inside its box */
+.ut-end-code, .iw-meta-code { font-family: var(--font-mono, ui-monospace, Menlo, Consolas, monospace); font-size: 0.95em; } /* r8: an end this client cannot classify — its code, typed */
 .ut-action-proposal { width: auto; padding: 0 8px; font-size: 11px; font-weight: 600; border-radius: var(--radius-sm); } /* lane browser-propose: a WORDED button on the 24 px .ut-act icon box — its own width (the exit ask's rule) */
 .ut-proposal-answer .ut-action-proposal { height: 24px; min-width: 64px; }
 .ut-proposal-answer .ut-proposal-approve { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+/* lane wake-approve-card: a decision only a person's click makes (a wake request) — Approve ✓ / Deny ✕, the icon beside the word, in the button's own colour */
+.ut-proposal-answer .ut-action-proposal:has(> .ut-decide-ico) { display: inline-flex; align-items: center; justify-content: center; gap: 4px; }
+.ut-decide-ico { display: inline-flex; flex: none; }
+.ut-decide-ico svg { width: 12px; height: 12px; display: block; }
 .ut-action-grant { width: auto; padding: 0 8px; font-size: 11px; font-weight: 600; border-radius: var(--radius-sm); } /* lane controls-that-lie: the GRANT an ask names — a WORDED button on the 24 px .ut-act icon box, its own width (the exit ask's rule); a long profile label wraps */
 .ut-grant-answer .ut-action-grant { height: auto; min-height: 24px; min-width: 64px; white-space: normal; overflow-wrap: anywhere; text-align: start; background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
 /* lane vault-paste-request: an agent's request for a secret — the MASKED paste box under its words (the field, 存入保险库, 拒绝)
@@ -8151,6 +8190,7 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
 .ut-secret .ut-act { width: auto; height: 26px; padding: 0 10px; font-size: 11px; font-weight: 600; border-radius: var(--radius-sm); flex: none; }
 .ut-secret .ut-secret-save { color: var(--accent-fg); background: var(--accent); border-color: var(--accent); }
 .ut-secret .ut-secret-deny { color: var(--text); border: 1px solid var(--border); }
+.ut-secret-note { margin-top: 3px; font-size: 11px; color: var(--text-dim); }   /* lane wake-approve-card r3: «wrong label — ask again» */
 .ut-secret-state { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 4px; font-size: 11px; color: var(--attn-text); }
 .ut-secret-state button { font-size: 11px; padding: 2px 8px; border-radius: var(--radius-sm); border: 1px solid var(--border); background: transparent; color: var(--text); cursor: pointer; }
 .vault-paste-dialog .dialog-body { display: flex; flex-direction: column; gap: 8px; max-width: 520px; }

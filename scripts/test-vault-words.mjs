@@ -56,6 +56,14 @@ const ROWS = {
   'src/lib/user-todos-row.js': [['closed when the vault locked — run it again after the unlock', 'label', 'the resolvedByText word on a run card the lock SETTLED (lane vault-use-grants r7) — a past-tense resolution label on a CLOSED For-you item, telling the owner the card closed and to re-run after the unlock; the live unlock door is the vault strip / the lock\'s own For-you item, and the agent re-running draws the normal vault_locked notice — not a background refusal the two-facts rule governs']],
   // int331 seam — sites from lanes that landed after this census's base (.326): relay status words, the provider-config save verdict,
   // and the 使用失败 For-you card's count/hint detail — all LABELS/status, not the tool-refusal sentences the two-facts rule (decision 5) targets
+  // lane wake-approve-card r8: a DECIDED card's end in words — a vault ask the lock settled (resolvedBy 'vault_locked') reads its
+  // outcome on its record; the lock itself is told by the vault's own For-you item and strip (their rows), so this is a LABEL
+  'src/foryou-actions.js': [
+    ['the vault locked before it was answered', 'label', 'a settled card\'s outcome words (settledWords — resolvedBy vault_locked): the record of an ask the lock ended, never a refusal sentence; the lock\'s own For-you item says who was told and where to unlock'],
+  ],
+  'src/lib/user-todos-row.js': [
+    ['the vault locked before it was answered', 'label', 'the same outcome words on the tray row / the For-you window (resolvedByText) — a record\'s end, the lock told by its own item'],
+  ],
   'src/model-providers.js': [
     ['Unlock the vault first', 'label', 'the provider-config dialog\'s own save-time verdict shown while the person is in the dialog (lane provider-record) — a field verdict, not a background tool refusal (the two-facts rule is for refusals)'],
   ],

@@ -110,7 +110,7 @@ export function joinPathText(ck, slug, { t = tDevice } = {}) {
   return t('A new path {path} is made here for {from}\'s calls', { from, path });
 }
 /** THE NAMED REFUSALS — the route's `code` → one sentence (an unknown code: the server's own words) */
-export const PAIR_REFUSALS = Object.freeze(['bad-code', 'caller-token', 'expired', 'https-required', 'bad-url', 'no-instance-url', 'code-used', 'code-unknown', 'rate-limited', 'pair-refused']);
+export const PAIR_REFUSALS = Object.freeze(['bad-code', 'caller-token', 'expired', 'https-required', 'bad-url', 'no-instance-url', 'code-used', 'code-unknown', 'rate-limited', 'pair-wake-held', 'pair-refused']);
 export function joinWhyText(r, { from = '', t = tDevice } = {}) {
   const who = fromOf(from, t);
   switch (r && r.code) {
@@ -123,6 +123,7 @@ export function joinWhyText(r, { from = '', t = tDevice } = {}) {
     case 'code-used': return t('{from} says this code was already used — ask {from} for a new one', { from: who });
     case 'code-unknown': return t('{from} does not know this code — it expired there, a newer code replaced it, or it was altered; ask for a new one', { from: who });
     case 'rate-limited': return t('{from} is refusing calls from this address for now — try again in a few minutes', { from: who });
+    case 'pair-wake-held': return t('{from}\'s path now wakes an agent — a code not made on its owner\'s page is refused there; ask {from} for a new code from their page', { from: who });   // lane wake-approve-card r6: the gate judges at completion
     default: return t('The pairing did not complete: {why}', { why: (r && r.error) || t('no answer') });
   }
 }

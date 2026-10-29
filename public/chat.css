@@ -624,6 +624,8 @@
 .cn-head { display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; color: var(--yellow); margin-bottom: 2px; }
 .cn-head .cn-icon svg { width: 14px; height: 14px; display: block; flex-shrink: 0; }
 .cn-head-also { margin-left: auto; font-weight: 400; font-size: 11px; color: var(--text-dim); white-space: nowrap; }
+/* lane wake-approve-card: a viewer who may not decide reads the item's words under «waiting for the owner» — no verb */
+.cn-wait-words { font-size: 13px; color: var(--text); overflow-wrap: anywhere; }
 .cn-card .ut-item { padding: 2px 0; cursor: default; }
 .cn-card .ut-item:hover { background: none; }
 .cn-card .ut-dot { margin-top: 6px; }

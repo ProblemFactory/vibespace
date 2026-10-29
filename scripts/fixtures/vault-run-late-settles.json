@@ -1,0 +1,107 @@
+{
+  "v": 1,
+  "_": "THE LATE RUN CARD'S SETTLES — the open late card as vault-agent-own's door reshapes it (`item`), and each settle its door writes through userTodos.resolveAnswered(ids, by, fact), recorded by lane wake-approve-card r8 driving the REAL doors through its store (times fixed): `by` + `fact` = 4ff55fb4 (r20b — the outcome in the fact, by the person or 'vault'), `ruled` = 0cc421d4 (r23 — resolvedBy IS the outcome word, decidedBy 'person' on a person's answer). lane wake-approve-card owns these bytes; its store and its reader take BOTH shapes (test-wake-approve-card ⑯); int-C diffs this file in both lanes.",
+  "item": {
+    "id": "ut-5573b9fd91",
+    "sessionKey": "claude:conv-1",
+    "text": "ops watch wants to run a command with a stored secret",
+    "status": "open",
+    "kind": "action",
+    "origin": "vault",
+    "createdAt": 1793165540000,
+    "expiresAt": 1793252000000,
+    "action": {
+      "type": "vault-run-ask",
+      "askId": "23c6f1981d1c88e3f15fbd2f00d07895",
+      "always": false,
+      "tool": "unifi-api.sh",
+      "late": true,
+      "lateAt": 1793165600000,
+      "shapeId": "f0baf4f4d68d4a67"
+    }
+  },
+  "settles": [
+    {
+      "name": "late-allow",
+      "door": "4ff55fb4",
+      "by": "user",
+      "fact": {
+        "outcome": "late-allowed",
+        "late": true,
+        "decidedBy": "user",
+        "decidedAt": 1793165601000
+      },
+      "ruled": {
+        "door": "0cc421d4",
+        "by": "allowed",
+        "fact": {
+          "late": true,
+          "decidedBy": "person",
+          "decidedAt": 1793165601000,
+          "by": "user"
+        }
+      }
+    },
+    {
+      "name": "late-deny",
+      "door": "4ff55fb4",
+      "by": "user",
+      "fact": {
+        "outcome": "denied",
+        "late": true,
+        "decidedBy": "user",
+        "decidedAt": 1793165602000
+      },
+      "ruled": {
+        "door": "0cc421d4",
+        "by": "denied",
+        "fact": {
+          "late": true,
+          "decidedBy": "person",
+          "decidedAt": 1793165602000,
+          "by": "user"
+        }
+      }
+    },
+    {
+      "name": "late-24h-end",
+      "door": "4ff55fb4",
+      "by": "vault",
+      "fact": {
+        "outcome": "expired",
+        "late": true,
+        "decidedBy": null,
+        "decidedAt": 1793165603000
+      },
+      "ruled": {
+        "door": "0cc421d4",
+        "by": "expired",
+        "fact": {
+          "late": true,
+          "decidedBy": null,
+          "decidedAt": 1793165603000
+        }
+      }
+    },
+    {
+      "name": "late-lock",
+      "door": "4ff55fb4",
+      "by": "vault",
+      "fact": {
+        "outcome": "vault_locked",
+        "late": true,
+        "decidedBy": null,
+        "decidedAt": 1793165604000
+      },
+      "ruled": {
+        "door": "0cc421d4",
+        "by": "vault_locked",
+        "fact": {
+          "late": true,
+          "decidedBy": null,
+          "decidedAt": 1793165604000
+        }
+      }
+    }
+  ]
+}

@@ -355,6 +355,24 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   const hubIdentity = (() => { try { return PI.identityOf(process.pid); } catch { return null; } })();   // written into every run folder (the boot sweep's proof)
   const vaultState = () => { try { return vault.state(); } catch { return 'locked'; } };
   const audit = (event, line) => { try { vault.audit(event, line); } catch (e) { log(`the audit line could not be written (${e.message})`); } };
+  /** A GRANT'S END IS WRITTEN ON ITS RECORD (lane wake-approve-card r6 — 主开发: «a card's state follows the grant's life»; the
+   *  record was a decision log that never fell: «allowed by you for 8 h · 09:38» at +9 h, +3 d and after a lock). The use check
+   *  reads the grant rows below (memory: `until`, a lock clears them); the request's For-you record carries the grant's facts
+   *  (`resolvedFact.grantedFor`, `until`) and, here, its END — a lock ('lock'), the entry's switch OFF ('revoked'), a
+   *  once-grant's run ('used'), its 8 hours ('time'), a restart (the vault locks at each start: 'restart') — through the
+   *  store's noteFact (the first end stands). The card, the tray and the window read it through foryou-actions grantLifeOf. */
+  const endTimers = new Map();   // pair → the timer that ends the grant at its `until`
+  function grantEnded(g, endedBy, t = now()) {
+    if (!g || !g.todoId || !userTodos || typeof userTodos.noteFact !== 'function') return;
+    try { userTodos.noteFact(g.todoId, { endedAt: endedBy === 'time' ? g.until : Math.min(t, Number(g.until) || t), endedBy }); } catch { }
+  }
+  function armGrantEnd(pair, g, onEnd = () => { if (grants.get(pair) === g) grants.delete(pair); }) {
+    const old = endTimers.get(pair);
+    if (old) { try { timers.clear(old); } catch { } }
+    const h = timers.set(() => { endTimers.delete(pair); onEnd(); grantEnded(g, 'time'); }, Math.max(0, Number(g.until) - now()));   // ≤ 8 hours (a 30-day «always» is read by its `until` — no timer that long)
+    try { h && h.unref && h.unref(); } catch { }
+    endTimers.set(pair, h);
+  }
 
   // ── THE TOOL DRIFT STORE (round 15, NOT marked — nothing secret): the first-seen {path,dev,ino,size,mtime,sha256} of each
   // SEALED tool. The SEAL (root ownership) is the content fence; this store is a RECORD, never a gate. A later run whose bytes
@@ -468,7 +486,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     let next = { gen: lastGen, runnable: new Set(), suspended: new Set(), always: [], policies: {}, policyRevoked: [], policyApproved: {}, policyHours: {}, opened: {} };
     if (raw && !why) {
       try {
-        const cand = { gen: Number.isSafeInteger(raw.gen) && raw.gen >= 0 ? raw.gen : -1, runnable: new Set((Array.isArray(raw.runnable) ? raw.runnable : []).filter((id) => typeof id === 'string' && VI.parseRef(id))), suspended: new Set((Array.isArray(raw.suspended) ? raw.suspended : []).filter((id) => typeof id === 'string' && VI.parseRef(id))), always: (Array.isArray(raw.always) ? raw.always : []).filter(okAlways).map((a) => ({ conv: a.conv, key: a.key, until: a.until, entries: a.entries.filter((x) => typeof x === 'string').slice(0, 64), at: Number(a.at) || null, by: String(a.by || 'user').slice(0, 40), ...(typeof a.templateHash === 'string' ? { templateHash: a.templateHash, templateBytes: Number(a.templateBytes) || 0 } : {}) })), policies: policiesOf(raw.policies), policyRevoked: revokedOf(raw.policyRevoked), policyApproved: approvedOf(raw.policyApproved), policyHours: hoursOf(raw.policyHours), opened: openedOf(raw.opened) };
+        const cand = { gen: Number.isSafeInteger(raw.gen) && raw.gen >= 0 ? raw.gen : -1, runnable: new Set((Array.isArray(raw.runnable) ? raw.runnable : []).filter((id) => typeof id === 'string' && VI.parseRef(id))), suspended: new Set((Array.isArray(raw.suspended) ? raw.suspended : []).filter((id) => typeof id === 'string' && VI.parseRef(id))), always: (Array.isArray(raw.always) ? raw.always : []).filter(okAlways).map((a) => ({ conv: a.conv, key: a.key, until: a.until, entries: a.entries.filter((x) => typeof x === 'string').slice(0, 64), at: Number(a.at) || null, by: String(a.by || 'user').slice(0, 40), ...(typeof a.templateHash === 'string' ? { templateHash: a.templateHash, templateBytes: Number(a.templateBytes) || 0 } : {}), ...(typeof a.todoId === 'string' && /^ut-[\w-]{1,40}$/.test(a.todoId) ? { todoId: a.todoId } : {}) })), policies: policiesOf(raw.policies), policyRevoked: revokedOf(raw.policyRevoked), policyApproved: approvedOf(raw.policyApproved), policyHours: hoursOf(raw.policyHours), opened: openedOf(raw.opened) };
         const want = vault.macOf(MARK_LABEL, bodyOf(cand));
         const got = typeof raw.mark === 'string' && /^[0-9a-f]{64}$/.test(raw.mark) ? raw.mark : null;   // the review: a non-hex mark threw in timingSafeEqual
         if (!(want && got && cand.gen >= 0 && crypto.timingSafeEqual(Buffer.from(got, 'hex'), Buffer.from(want, 'hex')))) why = 'its mark does not verify';
@@ -579,7 +597,8 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     }
     // OFF takes back every «always» and seen shape that names this entry (the review: an «always» outlived its switch)
     const always = on ? d.always : d.always.filter((a) => !a.entries.includes(key));
-    if (!on) { for (const [p, x] of shortAlways) if (x.entries.includes(key)) shortAlways.delete(p); for (const [p, x] of seen) if (x.entries.includes(key)) seen.delete(p); for (const [p, x] of grants) if (x.entries.includes(key)) grants.delete(p); }   // + the grants (lane vault-manual-and-lock: OFF = closed for every conversation)
+    if (!on) for (const a of d.always) if (a.entries.includes(key)) grantEnded(a, 'revoked');   // r6: each «always» record says «revoked»
+    if (!on) { for (const [p, x] of shortAlways) if (x.entries.includes(key)) { shortAlways.delete(p); grantEnded(x, 'revoked'); } for (const [p, x] of seen) if (x.entries.includes(key)) seen.delete(p); for (const [p, x] of grants) if (x.entries.includes(key)) { grants.delete(p); grantEnded(x, 'revoked'); } }   // + the grants (lane vault-manual-and-lock: OFF = closed for every conversation; r6: each grant's record says «revoked»)
     const r = save({ runnable, suspended, always, opened });
     if (!r.ok) return r;
     audit('vault-run-switch', { by: String(by).slice(0, 40), store: ref.store, entry: ref.entry, field: ref.field, open: !!on });
@@ -745,14 +764,16 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
 
   // ── THE CARD (exit-proxy's ask: one per conversation × shape, 60 s, the item and the ask ONE state) ──
   const pairOf = (conv, key) => `${conv}\n${key}`;
-  function settle(q, outcome, why = outcome) {
+  /** `fact` (lane wake-approve-card r3): the PERSON's mark — the answer came through THE person verdict (src/routes/vault.js
+   *  `person`), so the item's record says «allowed by you · 09:41» (resolvedFact {decidedBy: 'person', decidedAt}). */
+  function settle(q, outcome, why = outcome, fact = null) {
     if (!asks.has(q.askId)) return false;
     asks.delete(q.askId);
     if (byPair.get(q.pair) === q.askId) byPair.delete(q.pair);
     settled.set(q.askId, outcome === 'expired' ? 'expired' : 'settled');
     while (settled.size > SETTLED_MAX) settled.delete(settled.keys().next().value);
     try { timers.clear(q.timer); } catch { }
-    if (q.todoId && userTodos) { try { const it = userTodos.get?.(q.todoId); if (it && it.status === 'open') userTodos.setStatus(q.todoId, 'done', outcome === 'expired' ? 'ask-expired' : why === 'gone' ? 'ask-over' : outcome === 'changed' ? 'ask-changed' : outcome); } catch { } }
+    if (q.todoId && userTodos) { try { const it = userTodos.get?.(q.todoId); const by = outcome === 'expired' ? 'ask-expired' : why === 'gone' ? 'ask-over' : outcome === 'changed' ? 'ask-changed' : outcome; if (it && it.status === 'open') { if (fact && typeof userTodos.resolveAnswered === 'function') userTodos.resolveAnswered([q.todoId], by, fact); else userTodos.setStatus(q.todoId, 'done', by); } } catch { } }
     log(`${q.who}: the run card for \`${q.head}\` ${outcome === 'expired' ? 'got no answer in 60 s' : outcome}`);
     try { q.resolve({ outcome, askId: q.askId }); } catch { }
     return true;
@@ -793,13 +814,14 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     });
   }
   /** A PERSON's answer (src/routes/vault.js: people only; «always» needs this page's 验证是你 window — `reauthed`). */
-  function answer(askId, { answer: a, ttl = VR.ALWAYS_DEFAULT, reauthed = false, by = 'user' } = {}) {
+  function answer(askId, { answer: a, ttl = VR.ALWAYS_DEFAULT, reauthed = false, by = 'user', person = false } = {}) {
     const id = String(askId || '');
     const q = asks.get(id);
+    const mark = () => (person ? { decidedBy: 'person', decidedAt: now() } : null);   // r3: the person verdict's mark (the route's `person`)
     if (!q) { const lq = lateAsks.get(id); if (lq) return answerLate(lq, { answer: a, reauthed, by }); return { ok: false, code: settled.get(id) === 'expired' ? 'ask_expired' : settled.has(id) ? 'ask_settled' : 'ask_unknown' }; }
     if (now() - q.askedAt >= VR.ASK_TTL_MS) { goLate(q); const lq = lateAsks.get(id); if (lq) return answerLate(lq, { answer: a, reauthed, by }); return { ok: false, code: 'ask_expired' }; }   // lane vault-agent-own r20b: a live card answered in the 60 s→go-late race is answered as the late card it just became
     if (!['once', 'always', 'deny'].includes(a)) return { ok: false, code: 'bad_answer' };
-    if (a === 'deny') { settle(q, 'denied', 'answered'); return { ok: true, outcome: 'denied' }; }   // `outcome` (the route lays the vault's facts — its `state` — over the answer)
+    if (a === 'deny') { settle(q, 'denied', 'answered', mark()); return { ok: true, outcome: 'denied' }; }   // `outcome` (the route lays the vault's facts — its `state` — over the answer)
     if (a === 'always' && !q.always) return { ok: false, code: 'always_not_offered' };
     if (a === 'always' && !Object.prototype.hasOwnProperty.call(VR.ALWAYS_TTLS, ttl)) return { ok: false, code: 'bad_answer' };
     if (a === 'always' && !reauthed) return { ok: false, code: 'reveal_needs_password' };
@@ -843,17 +865,19 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       audit('vault-run-always', { by: String(by).slice(0, 40), conv: q.conv, shapeId: shapeIdOf(q.key), ttl, until, grants: made.map((m) => m.grant), hosts: q.hosts });
     } else if (a === 'always') {
       const ms = VR.ALWAYS_TTLS[ttl], until = ms == null ? null : now() + ms;
-      if (ttl === '8h') shortAlways.set(q.pair, { until, entries: q.entries });
+      // r6: the «always» row remembers its card's record (`todoId`) — its END is written there (a switch OFF, a lock, its time)
+      if (ttl === '8h') { const g = { until, entries: q.entries, todoId: q.todoId || null }; shortAlways.set(q.pair, g); armGrantEnd(`always\n${q.pair}`, g, () => { if (shortAlways.get(q.pair) === g) shortAlways.delete(q.pair); }); }
       else {
         const d = load();
         if (!d) { settle(q, 'vault_locked'); return { ok: false, code: 'vault_locked' }; }
-        const r = save({ runnable: d.runnable, always: [...d.always.filter((x) => !(x.conv === q.conv && x.key === q.key)), { conv: q.conv, key: q.key, until, entries: q.entries, at: now(), by: String(by).slice(0, 40), ...(q.templateHash ? { templateHash: q.templateHash, templateBytes: q.templateBytes } : {}) }] });
+        const r = save({ runnable: d.runnable, always: [...d.always.filter((x) => !(x.conv === q.conv && x.key === q.key)), { conv: q.conv, key: q.key, until, entries: q.entries, at: now(), by: String(by).slice(0, 40), ...(q.templateHash ? { templateHash: q.templateHash, templateBytes: q.templateBytes } : {}), ...(q.todoId ? { todoId: q.todoId } : {}) }] });
         if (!r.ok) { settle(q, 'denied', r.code); return r; }
       }
       audit('vault-run-always', { by: String(by).slice(0, 40), conv: q.conv, shapeId: shapeIdOf(q.key), ttl, until });
     }
     seen.set(q.pair, { at: now(), entries: q.entries });
-    settle(q, a === 'always' ? 'always' : 'allowed', 'answered');
+    // r6: an «always» record carries its grant's facts (`alwaysFor` = the ttl, `until`) — its card follows the grant's life
+    settle(q, a === 'always' ? 'always' : 'allowed', 'answered', a === 'always' ? { ...(mark() || {}), alwaysFor: ttl, until: VR.ALWAYS_TTLS[ttl] == null ? null : now() + VR.ALWAYS_TTLS[ttl] } : mark());
     return { ok: true, outcome: a === 'always' ? 'always' : 'allowed', ...(a === 'always' ? { ttl } : {}) };
   }
   // THE ITEM AND THE ASK ARE ONE STATE: the item leaving 'open' by another door settles the ask refused; a reopen of an ask that is over goes back to done
@@ -960,7 +984,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   function grantOf(scope, id) {
     const p = pairOf(scope, id), g = grants.get(p);
     if (!g) return null;
-    if (!(g.until > now())) { grants.delete(p); return null; }
+    if (!(g.until > now())) { grants.delete(p); grantEnded(g, 'time'); return null; }
     return g;
   }
   const requestWords = (r) => [
@@ -970,13 +994,15 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     { key: 'To let every conversation use it, turn on «Usable by agent runs» on its row in ⚙ System ▸ Vault….' },
   ];
   const fill = (l) => l.key.replace(/\{(\w+)\}/g, (m, k) => (l.params && l.params[k] != null ? String(l.params[k]) : m));
-  function settleRequest(q, outcome, why = outcome) {
+  /** `fact` (r4): the PERSON's mark — the answer came through THE person verdict (src/routes/vault.js `person`), so the item's
+   *  record says «allowed by you for 8 h · 09:41» (resolvedFact {decidedBy: 'person', decidedAt}). */
+  function settleRequest(q, outcome, why = outcome, fact = null) {
     if (!requests.has(q.askId)) return false;
     requests.delete(q.askId);
     if (reqByPair.get(q.pair) === q.askId) reqByPair.delete(q.pair);
     settled.set(q.askId, 'settled');
     while (settled.size > SETTLED_MAX) settled.delete(settled.keys().next().value);
-    if (q.todoId && userTodos) { try { const it = userTodos.get?.(q.todoId); if (it && it.status === 'open') userTodos.setStatus(q.todoId, 'done', outcome === 'vault_locked' ? 'vault_locked' : outcome === 'changed' ? 'ask-changed' : outcome); } catch { } }
+    if (q.todoId && userTodos) { try { const it = userTodos.get?.(q.todoId); const by = outcome === 'vault_locked' ? 'vault_locked' : outcome === 'changed' ? 'ask-changed' : outcome; if (it && it.status === 'open') { if (fact && typeof userTodos.resolveAnswered === 'function') userTodos.resolveAnswered([q.todoId], by, fact); else userTodos.setStatus(q.todoId, 'done', by); } } catch { } }
     if (outcome === 'denied') { reqQuiet.set(q.pair, now() + REQUEST_QUIET_MS); for (const [p, u] of reqQuiet) if (!(u > now())) reqQuiet.delete(p); }
     log(`${q.who}: the request for ${q.ref} ${outcome}${why !== outcome ? ` (${why})` : ''}`);
     askingLine();
@@ -1072,13 +1098,14 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
    *  closed entry for a conversation — the per-row switch's job — so it needs the switch's 验证是你 (`reauthed`: this page's
    *  window, the second password again; the review: a click alone is a header a local process can forge on a hub with no
    *  sign-in); Deny stays a click. */
-  function answerRequest(askId, { answer: a, reauthed = false, by = 'user' } = {}) {
+  function answerRequest(askId, { answer: a, reauthed = false, by = 'user', person = false } = {}) {
     const id = String(askId || '');
     const q = requests.get(id);
     if (!q) return { ok: false, code: settled.has(id) ? 'ask_settled' : 'ask_unknown' };
     if (!GRANT_ANSWERS.includes(a)) return { ok: false, code: 'bad_grant_answer' };
     const said = { by: String(by).slice(0, 40), conv: q.scope, entry: q.ref, askId: q.askId };
-    if (a === 'deny') { settleRequest(q, 'denied', 'answered'); audit('vault-grant', { ...said, answer: 'deny' }); return { ok: true, outcome: 'denied' }; }
+    const mark = () => (person ? { decidedBy: 'person', decidedAt: now() } : null);   // r4: the person verdict's mark (the route's `person`)
+    if (a === 'deny') { settleRequest(q, 'denied', 'answered', mark()); audit('vault-grant', { ...said, answer: 'deny' }); return { ok: true, outcome: 'denied' }; }
     if (vaultState() !== 'unlocked') { settleRequest(q, 'vault_locked'); return { ok: false, code: 'vault_locked' }; }
     if (!reauthed) return { ok: false, code: 'reveal_needs_password' };   // the card stays up
     // THE BELT (as the run card's): a grant is for what the owner was SHOWN — the item still open, this request's, its very detail
@@ -1092,10 +1119,19 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     if (!row) { settleRequest(q, 'denied', 'entry gone'); return { ok: false, code: 'entry_unknown' }; }
     if (!classOf(ref, row).runnable) { settleRequest(q, 'denied', 'its own door'); return { ok: false, code: 'entry_has_its_own_door' }; }
     const t = now(), until = t + GRANT_MS;
-    grants.set(q.pair, { conv: q.scope, key: null, entries: [q.id], until, once: a === 'once', at: t, by: said.by, askId: q.askId, purpose: q.purpose });
+    const prev = grants.get(q.pair);
+    if (prev) grantEnded(prev, 'replaced', t);
+    const g = { conv: q.scope, key: null, entries: [q.id], until, once: a === 'once', at: t, by: said.by, askId: q.askId, purpose: q.purpose, todoId: q.todoId || null };
+    grants.set(q.pair, g);
+    armGrantEnd(q.pair, g);
     audit('vault-grant', { ...said, answer: a, until });
-    settleRequest(q, 'granted', 'answered');
-    return { ok: true, outcome: a === 'once' ? 'granted-once' : 'granted', until };
+    // r4: the item says which of its verbs. r6 (主开发: «an answer never carries a value an old reader cannot name»): the
+    // record stays `granted` — what every reader knows (r5's `granted-8h` read RAW in an old tray) — its facts ADDITIVE
+    // (`grantedFor` 'once' | '8h', `until`: the new reader says the duration, an old one «allowed»); the answer's `outcome`
+    // stays the one the production client toasts (`granted-once` / `granted`) + the same `grantedFor`
+    const grantedFor = a === 'once' ? 'once' : '8h';
+    settleRequest(q, 'granted', 'answered', { ...(mark() || {}), grantedFor, until });
+    return { ok: true, outcome: a === 'once' ? 'granted-once' : 'granted', grantedFor, until };
   }
   /** lane vault-paste-request: THE PASTE IS THE GRANT — the owner pasted a NEW free entry into For you in answer to THIS
    *  conversation's request (its purpose on the card, src/server/vault-paste-door.js): the conversation may use that one
@@ -1119,7 +1155,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     const scope = scopeOf(caller);
     if (!scope) return named('unauthorized');
     const t = now(), mine = [];
-    for (const [p, g] of grants) { if (!(g.until > t)) { grants.delete(p); continue; } if (g.conv === scope) mine.push(g); }
+    for (const [p, g] of grants) { if (!(g.until > t)) { grants.delete(p); grantEnded(g, 'time'); continue; } if (g.conv === scope) mine.push(g); }
     const refOfId = (id) => { const r = VI.parseRef(id); const x = r && VR.refFor(r.store, r.entry, r.field); return x ? x.ref : null; };
     return {
       ok: true,
@@ -1497,7 +1533,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       // / spawn_failed), but NEVER across a lock (the epoch moved, or the vault is no longer unlocked): a lock ends every grant
       // (vault_locked is not in BURNED; onLocked cleared them), so restoreOnce must not bring a spent once-grant back after one.
       const BURNED = new Set(['entry_unknown', 'entry_too_short_to_mask', 'spawn_failed', 'run_path_unsafe', 'git_not_on_seal', 'tool_not_sealed']);
-      const restoreOnce = (r) => { if (lockGen === lg0 && vaultState() === 'unlocked' && r && r.ok === false && BURNED.has(r.code)) { for (const a of spent) if (a.g.until > now()) grants.set(a.pair, a.g); giveBackLate(); } return r; };   // round 23: a BURNED refusal after the spend gives the late pass back too (nothing ran)
+      const restoreOnce = (r) => { const burned = r && r.ok === false && BURNED.has(r.code); if (burned && lockGen === lg0 && vaultState() === 'unlocked') { for (const a of spent) if (a.g.until > now()) grants.set(a.pair, a.g); giveBackLate(); } else if (!burned) for (const a of spent) grantEnded(a.g, 'used'); return r; };   // wake-approve-card r6 (int361 over vault-agent-own's lock epoch): a once-grant that RAN ends on its record («allowed once · ended HH:MM»); a burned one is restored (never across a lock)   // round 23: a BURNED refusal after the spend gives the late pass back too (nothing ran)
       if (sealedTool && toolFd != null && !toolSealed(spec.tool, toolFd)) { note('tool_not_sealed', { ...head, tool: toolName, why: 'ownership changed between the hash and the spawn' }); return restoreOnce(named('tool_not_sealed', { tool: toolName, words: "the tool's ownership changed between the hub's check and the run — a root-owned program became writable before it could start, so it was not run; nothing ran" })); }   // round 15: tool_changed's one remaining case — a sealed tool whose fstat ownership moved before the exec; round 16 (MINOR): a refusal AFTER the spend restores the once-grant (nothing ran), and the words say THIS path's cause
       fdHandedOff = true;
       const out = spawnRun({ caller, spec, shape, head, verdict, askId, place, base, signal, t0, note, receipt: runReceipt, toolFd, closeTool, toolName });
@@ -1642,9 +1678,19 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     lockGen++;   // round 14: the lock epoch moves — restoreOnce never brings a spent once-grant back across it
     for (const lq of [...lateAsks.values()]) removeLate(lq, 'vault_locked', 'vault');   // lane vault-agent-own r20b: an open late card settles vault_locked, its pass ends
     lateOnce.clear(); lateByShape.clear();
+    for (const g of grants.values()) grantEnded(g, 'lock');   // r6: each grant's record says it ended («allowed for 8 hours · ended HH:MM»)
+    for (const g of shortAlways.values()) grantEnded(g, 'lock');   // … and each 8-hour «always» (memory: a lock ends it)
+    for (const h of endTimers.values()) { try { timers.clear(h); } catch { } }
+    endTimers.clear();
     seen.clear(); shortAlways.clear(); grants.clear(); hostPasses.clear(); db = null; dbEpoch = -1;   // … and every grant ends (once / 8 hours) — and every host pass (lane vault-agent-own)
   }
   if (typeof vault.onLock === 'function') vault.onLock((why) => onLocked(why));
+  // r6: A RESTART ENDS EVERY GRANT (the grant rows are memory; the vault locks at each start) — a record that still reads live
+  // (its `until` ahead, no end written: the hub stopped inside its 8 hours) says so now
+  if (userTodos && typeof userTodos.resolvedOf === 'function' && typeof userTodos.noteFact === 'function') {
+    try { const t0 = now(); for (const it of userTodos.resolvedOf(REQUEST_TYPE)) { const f = it.resolvedFact || {}; if (it.resolvedBy === 'granted' && Number(f.until) > t0 && !f.endedAt) userTodos.noteFact(it.id, { endedAt: t0, endedBy: 'restart' }); } } catch { }
+    try { const t0 = now(); for (const it of userTodos.resolvedOf(ACTION_TYPE)) { const f = it.resolvedFact || {}; if (it.resolvedBy === 'always' && f.alwaysFor === '8h' && Number(f.until) > t0 && !f.endedAt) userTodos.noteFact(it.id, { endedAt: t0, endedBy: 'restart' }); } } catch { }   // an 8-hour «always» is memory too
+  }
 
   /** Boot: a run directory a previous process left (it died with its child) — shredded. → how many. */
   function sweep() {

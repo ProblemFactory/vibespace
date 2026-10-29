@@ -23,6 +23,7 @@ function create({ app, rootDir, AGENT_BIN_DIR, activeSessions, auth, wss, WS_OPE
 const E = require('../exit-reach.js');
 const bearerOf = (req) => String((req.headers && req.headers.authorization) || '').replace(/^Bearer\s+/i, '') || String((req.body && req.body.token) || '');
 const isAnyBearer = (req) => /^Bearer\s+\S/i.test(String((req.headers && req.headers.authorization) || '')) || typeof (req.body && req.body.token) === 'string';
+const { personVerdict } = require('../routes/vault.js');   // lane wake-approve-card r3: THE person verdict (the hub-act ask's door — one verdict, never a local copy)
 /** The live conversation behind a vsst_ token → [webuiId, session] | null. */
 function exitAgentEntry(req) {
   const token = bearerOf(req);
@@ -218,10 +219,13 @@ app.get('/api/hub-acts/asks', (req, res) => {
   if (isAnyBearer(req)) return res.status(403).json({ error: 'only the user answers these', code: 'human_only' });
   res.json({ asks: hosts.hubActs ? hosts.hubActs.list() : [] });
 });
+// lane wake-approve-card r3: a hub-act ask is a `decide: 'person'` row — THE person verdict (src/routes/vault.js: any bearer ⇒
+// human_only, not this page ⇒ cross_site) is asked BEFORE the asker answers; the answer carries its mark («allowed by you · 09:41»)
 app.post('/api/hub-acts/asks/:askId', async (req, res) => {
-  if (isAnyBearer(req)) return res.status(403).json({ error: 'only the user answers this — an agent cannot approve a hub act', code: 'human_only' });
+  const who = personVerdict(req);
+  if (!who.ok) return res.status(403).json({ error: who.code === 'human_only' ? 'only the user answers this — an agent cannot approve a hub act' : 'only this instance\'s own page answers this', code: who.code });
   if (!hosts.hubActs) return res.status(503).json({ error: 'hub-act asks are not wired on this server', code: 'no_asks' });
-  try { res.json(await hosts.hubActs.answer(req.params.askId, { answer: (req.body || {}).answer, by: 'user', answeredBy: DAU.byOfReq(req) })); }
+  try { res.json(await hosts.hubActs.answer(req.params.askId, { answer: (req.body || {}).answer, by: 'user', answeredBy: DAU.byOfReq(req), person: true })); }
   catch (e) { cookieFail(res, e); }
 });
 setTimeout(() => { try { hosts.sweepJsonlCache(); } catch {} }, 60000); // orphaned/stale remote-transcript cache

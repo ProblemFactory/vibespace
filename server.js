@@ -1075,14 +1075,14 @@ const userTodos = new UserTodoManager({
   dataDir: path.join(__dirname, 'data'),
   onWriteError: (e, file, o) => fdGauge.reportWriteError(e, file, o), // session-status's twin (lane-dead-bridge)
   onChange: (todos) => {
-    const json = JSON.stringify({ type: 'user-todos-updated', todos });
+    const json = JSON.stringify({ type: 'user-todos-updated', todos: { ...todos, now: Date.now() } }); // lane wake-approve-card r8: the snapshot says the HUB's time (a card's countdown counts by it — src/lib/user-todos-row.js noteHubClock)
     wss.clients.forEach(c => { if (c.readyState === WS_OPEN) { try { c.send(json); } catch {} } });
   },
 });
 require('./src/server/helper-asks').install({ userTodos, sessionKeyFor: (s, id) => sessionStatusKey(s, id), activeSessions, persistAskedAt: (s, map) => { if (s && s.sockName) writeSessionMeta(s.sockName, { ...(readSessionMeta(s.sockName) || {}), helperAskedAt: map }); } }); require('./src/server/main-asks').install({ userTodos, sessionKeyFor: (s, id) => sessionStatusKey(s, id), activeSessions, readAskedAt: (s) => (s && s.sockName ? (readSessionMeta(s.sockName) || {}).mainAskedAt : null), persistAskedAt: (s, map) => { if (s && s.sockName) writeSessionMeta(s.sockName, { ...(readSessionMeta(s.sockName) || {}), mainAskedAt: map }); } }); // lane S1: a helper's ask unanswered for 60 s ⇒ ONE For-you item, resolved when it is answered; lane parked-ask-inbox: a conversation's OWN ask the same (main-asks)
 require('./src/server/unexpected-exit').install({ userTodos, sessionKeyFor: (s, id) => sessionStatusKey(s, id), activeSessions, clients: () => wss.clients, buffersDir: BUFFERS_DIR }); // B-f698: an unexpected exit while working is resumed ONCE by itself (one client asked) + one For-you item
 const loginExpiryWatch = require('./src/server/login-expiry-watch.js').create({ accounts, userTodos, dataDir: path.join(__dirname, 'data'), log: (...a) => console.log(...a) }); loginExpiryWatch.start(); // PASSIVE (file reads only, §ban-safety): warns the inbox at 24h/1h/expired before a subscription's LOGIN SESSION dies AND retracts those warnings once the member is re-logged in — see src/login-expiry.js. The handle is kept so the accounts login routes can sweep it IMMEDIATELY on a successful login (up to 5 min of staring at the item you just fixed is the reported defect)
-app.get('/api/user-todos', (req, res) => res.json({ todos: userTodos.snapshot() }));
+app.get('/api/user-todos', (req, res) => res.json({ todos: { ...userTodos.snapshot(), now: Date.now() } })); // r8: + the hub's clock
 require('./src/routes/user-todos-reply.js').registerResolveManyRoute(app, { userTodos }); // "Mark all seen" (POST /api/user-todos/resolve-many, owner-only) — registered BEFORE the :id route below, which would otherwise read `resolve-many` as an item id
 require('./src/routes/user-todos-reply.js').registerItemReadRoute(app, { userTodos }); // GET /api/user-todos/:id — ONE item whole (the snapshot previews a resolved item's detail at 300 chars; the For-you window fetches the rest here)
 app.post('/api/user-todos/:id', (req, res) => { // User actions from the panel: done / dismissed / open (reopen)
@@ -1091,7 +1091,7 @@ app.post('/api/user-todos/:id', (req, res) => { // User actions from the panel: 
   if (require('./src/write-origin.js').pressBearer(req.headers)) return res.status(403).json({ error: 'the For-you item\'s ✓ is the user\'s — a bearer token (an agent, a job, an automation key) cannot press it', code: 'agent_forbidden' });
   const press = require('./src/write-origin.js').pressOf(req);
   try { res.json({ success: true, item: userTodos.setStatus(req.params.id, req.body?.status, 'user', { pressed: press }) }); }
-  catch (e) { res.status(400).json({ error: e.message }); }
+  catch (e) { const decision = e && (e.code === 'decision_row' || e.code === 'decision_final'); res.status(decision ? 409 : 400).json({ error: e.message, ...(decision ? { code: e.code } : {}) }); } // lane wake-approve-card r2: a decision row's two verbs only — refused by name
 });
 // ── Agent-facing routes ── (extracted to src/agent-routes.js in the 2.92.0 split)
 const { setupAgentRoutes } = require('./src/agent-routes');

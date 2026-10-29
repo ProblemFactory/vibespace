@@ -242,7 +242,7 @@ try {
   const cs = (await raw('GET', '/api/channels/webhook/paths')).j.paths.find((x) => x.hookUrl === '/hook/deploys').callers;
   const ID1 = cs.find((c) => c.name === 'CI deploy-bot').id, ID2 = cs.find((c) => c.name === 'Monitor').id;
   const acc = await raw('PUT', '/api/channels/webhook/deploys/access', { body: { access: [{ principal: { kind: 'agent', id: AG.cid, name: AG.name }, authority: 'send' }] } });
-  const wat = await raw('PUT', '/api/channels/webhook/deploys/watchers', { body: { watchers: [{ principal: { kind: 'agent', id: AG.cid, name: AG.name }, notify: 'wake', mode: 'filtered', filter: { match: 'any', rules: [{ kind: 'fact', key: 'event', value: 'deploy.failed' }] } }] } });
+  const wat = await raw('PUT', '/api/channels/webhook/deploys/watchers', { headers: { 'Sec-Fetch-Site': 'same-origin' /* the owner's page — lane wake-approve-card r2 */ }, body: { watchers: [{ principal: { kind: 'agent', id: AG.cid, name: AG.name }, notify: 'wake', mode: 'filtered', filter: { match: 'any', rules: [{ kind: 'fact', key: 'event', value: 'deploy.failed' }] } }] } });
   ok(acc.status === 200 && wat.status === 200, 'FIXTURE: alpha holds send access and a `fact event == deploy.failed` notification', [acc.t.slice(0, 160), wat.t.slice(0, 200)]);
   const f0 = frames().length;
   const b1 = JSON.stringify({ text: 'deploy failed on db1', event: 'deploy.failed', who: 'ci-runner' });

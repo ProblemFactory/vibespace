@@ -57,7 +57,7 @@ const PRODUCERS = {
   'src/server/usage-pool-engine.js': { origin: 'pool', scope: 'mixed', types: ['reset-credit', 'pool-cross-provider'] },
   'src/server/jobs-wiring.js': { origin: 'jobs', scope: 'conversation', types: [], why: 'a job\'s ask is answered in its own form (jobId) — no card' },
   'src/server/channels-engine.js': { origin: 'channels', scope: 'group', types: ['channel-reauth'] },
-  'src/server/channels-access.js': { origin: 'channels', scope: 'about', types: ['open-channel', 'channel-watch-request'] },
+  'src/server/channels-access.js': { origin: 'channels', scope: 'about', types: ['open-channel', 'channel-watch-request', 'channel-held-digest'] },   // r6: a held digest's decision (no `about` — the owner's tray)
   'src/server/channels-outbound.js': { origin: 'channels', scope: 'group', types: ['open-channel'], why: 'a reply / reaction / recall proposal is its own card in the chat (channel-touch-view chatProposalCards)' },
   'src/server/channel-api-cards.js': { origin: 'channels', scope: 'group', types: ['channel-api-proposal'] },
   'src/server/browser-handback.js': { origin: 'browser', scope: 'conversation', types: ['browser-takeover'] },
@@ -78,6 +78,7 @@ const PRODUCERS = {
   'src/server/engine-distribution.js': { origin: 'plugin', scope: 'group', types: [], why: 'int360 seam (lane engine-distribution, after this census\'s base): a kernel / cluster plugin that could not be put in place' },
   'src/server/voice-teach-engine.js': { origin: 'plugin', scope: 'group', types: [] },
   'src/server/csp-reports.js': { origin: 'server', scope: 'group', types: [] },
+  'src/user-todos.js': { origin: 'server', scope: 'group', types: [] },   // lane wake-approve-card r9: the store's own set-aside notice
   'src/server/tls.js': { origin: 'server', scope: 'group', types: [] },
   'src/server/desktop-app-keeper.js': { origin: 'server', scope: 'group', types: ['desktop-app-notify'] },
   'src/server/mount-health-watch.js': { origin: 'server', scope: 'group', types: [] },
@@ -313,7 +314,7 @@ console.log('⑦ the store keeps `about` — the conversation an item filed unde
   const AR = read('src/agent-routes.js');
   ok(/sessionKey: \(\(\) => \{ try \{ return sessionStatusKey\(s, id\); \} catch \{ return `webui:\$\{id\}`; \} \}\)\(\),/.test(AR), 'the channels principal carries the conversation\'s own key (sessionStatusKey) — the engine stamps `about` from it');
   ok((SRC.access.match(/about: ctx\.sessionKey \|\| null,/g) || []).length === 2, 'channels-access stamps `about: ctx.sessionKey` on the access request AND the watch request');
-  ok((SRC.access.match(/userTodos\.setStatus\(req0?\.todoId, 'done', approve \? 'allowed' : 'denied'\)/g) || []).length === 2, 'a decided watch / access request resolves `allowed` / `denied` (the card\'s record says which — it read «automatically»)');
+  ok((SRC.access.match(/userTodos\.resolveAnswered\(\[req0?\.todoId\], approve \? 'allowed' : 'denied', person \? \{ decidedBy: 'person', decidedAt: t \} : null\)/g) || []).length === 2, 'a decided watch / access request resolves `allowed` / `denied` (the card\'s record says which — it read «automatically»; lane wake-approve-card r2: with the person verdict\'s mark when the decide route asked it)');
 }
 
 // ── ⑧ THE WIRING ─────────────────────────────────────────────────────────────────────────────────────────────────────

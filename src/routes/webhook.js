@@ -34,6 +34,8 @@ const WH = require('../channels/webhook.js');
 const WP = require('../webhook-pair.js');
 const EF = require('../egress-fence.js');
 const { bearerOf } = require('../channels/index.js');
+const { wakeRefused, wakeHeld } = require('./channels.js');   // lane wake-approve-card r5: THE wake gate (one gate, never a local copy) — r6: and its held verdict, for the cookie-free completion
+const { personVerdict } = require('./vault.js');   // r6: THE person verdict — a pairing code remembers whether a person minted it
 
 const router = express.Router();
 const ADAPTER_ID = WH.kind;
@@ -230,8 +232,10 @@ router.post('/api/channels/webhook/:slug/pair', async (req, res) => {
   const rb = await new Promise((resolve) => { pairParser(req, res, (err) => resolve(err ? { err } : { body: Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0) })); });
   if (rb.err) return answer(res, 'unauthorized');
   try {
+    let held = null;   // r6: judged AFTER the frame proved the code (an unproven frame hears nothing), BEFORE the one write
     const v = WP.complete({ slug, headers: req.headers, body: rb.body, now: D.now(), pending: p, allowPrivate: allowPrivate() },
-      { hmacHex: WH.hmacHex, safeEqual, write: (f) => st.pair(slug, { id: callerId, name: f.name, token: p.token, outToken: f.token, outCaller: f.caller, replyUrl: f.hookUrl }) });
+      { hmacHex: WH.hmacHex, safeEqual, write: (f) => { held = heldAtCompletion(p, slug); if (!held) st.pair(slug, { id: callerId, name: f.name, token: p.token, outToken: f.token, outCaller: f.caller, replyUrl: f.hookUrl }); } });
+    if (v.ok && held) return res.status(403).set('Cache-Control', 'no-store').json({ ok: false, code: 'pair-wake-held', error: held });
     if (!v.ok && v.answer === 'spent') return res.status(409).set('Cache-Control', 'no-store').json({ ok: false, code: 'code-used', error: 'this pairing code was already used — ask for a new one' });
     if (!v.ok) return v.answer === 'unauthorized' ? answer(res, 'unauthorized') : res.status(400).set('Cache-Control', 'no-store').json({ ok: false, code: v.why, error: v.error });
     try { pending.spend(slug, callerId, D.now()); } catch (e) { console.warn('[webhook] pair-pending spend:', e && e.message); }
@@ -244,6 +248,28 @@ router.post('/api/channels/webhook/:slug/pair', async (req, res) => {
 // ── THE OWNER'S VERBS (cookie routes; an agent's bearer is refused by name first) ─────────────────────────────────────
 const OWNERS = 'a webhook path and its callers are the owner\'s — an agent token may not read or change them (propose with vibespace-ask)';
 function owner(req, res) { if (!isAgentBearer(req)) return true; res.status(403).json({ ok: false, code: 'agent-forbidden', error: OWNERS }); return false; }
+/** lane wake-approve-card r5 (主开发: «a webhook path that holds a wake is a wake grain»): THE PATH a verb writes, off its URL
+ *  (`slug` = the path a verb names past its URL — the join's, read from the code; null = a path not made yet). Its options
+ *  (disabled, ipAllow, the per-path wake budget) and its callers decide which events its conversation gets, and its
+ *  facts (title, participants, kind) are what a rule matches — the engine's `wakeHeldAt` says whether a wake reaches it
+ *  (its conversation, the account, any rule of the account); held ⇒ THE person verdict (src/routes/channels.js wakeRefused —
+ *  `owner()` alone let a bare curl on a sign-in-off instance, or an automation key, re-enable a held path). */
+const pathGrain = (req, slug = req.params.slug) => ({ adapterId: ADAPTER_ID, grain: { kind: 'path', convId: slug ? String(slug) : null } });
+const pathRefused = (req, res, slug) => wakeRefused(req, res, slug === undefined ? pathGrain(req) : pathGrain(req, slug));   // r6: the gate's engine is the one wiring's
+/** r6 (主开发: «a gate judges at completion»): THE COMPLETION's own question — the path AS IT IS NOW. A code is the authority of
+ *  the cookie-free completion; one a person minted on the owner's page (`p.person`, THE person verdict at mint) completes
+ *  whatever the path holds; one minted otherwise (an automation key, a bare curl on a sign-in-off instance — possible while the
+ *  path held no wake) is refused once the path holds one, naming it (the owner re-mints from the page). → null | the words. */
+function heldAtCompletion(p, slug) {
+  if (p && p.person === true) return null;
+  const h = wakeHeld(pathGrain({ params: {} }, slug));
+  if (!(h && h.held)) return null;
+  // r8 (a refusal to a peer carries a CODE, never the hub's names — the acceptance: this 403 told the REMOTE side the hub's
+  // agent names, conversation titles and rule patterns): the code + one fixed sentence; the owner's journal names the wake
+  console.warn(`[webhook] ${slug}: a pairing completion refused — the path now holds a wake (${String(h.names || h.why || 'a wake').slice(0, 300)}); the code was not minted on the owner's page`);
+  return PAIR_WAKE_HELD;
+}
+const PAIR_WAKE_HELD = 'this path now holds a wake — a pairing code not minted on its owner\'s page is refused at completion; its owner mints a new code from the page';
 const json = express.json({ limit: '64kb' });
 const bad = (res, status, error, code = 'bad-request') => res.status(status).json({ ok: false, code, error });
 function pathOptions(b, prev = {}) {
@@ -276,6 +302,7 @@ const pathView = (st, slug) => ({ ...st.path(slug), options: optionsOf(slug), ca
 router.get('/api/channels/webhook/paths', (req, res) => { if (!owner(req, res)) return; const st = store(); if (!st) return bad(res, 503, 'channels unavailable', 'unavailable'); res.set('Cache-Control', 'no-store').json({ ok: true, paths: st.paths().map((s) => pathView(st, s)) }); });
 router.post('/api/channels/webhook/paths', json, async (req, res) => {
   if (!owner(req, res)) return;
+  if (pathRefused(req, res)) return;   // r5: a NEW path's events reach the account's wake / a rule's (no slug yet: the grains above it)
   try {
     const st = store(); if (!st) return bad(res, 503, 'channels unavailable', 'unavailable');
     const b = req.body || {}; const slug = String(b.slug || '');
@@ -290,6 +317,7 @@ router.post('/api/channels/webhook/paths', json, async (req, res) => {
 });
 router.put('/api/channels/webhook/paths/:slug', json, async (req, res) => {
   if (!owner(req, res)) return;
+  if (pathRefused(req, res)) return;   // r5: disabled / ipAllow / wakesPerHour / title — what a held wake fires on
   try {
     const st = store(); const slug = String(req.params.slug || '');
     if (!st || !st.path(slug)) return bad(res, 404, `no path ${slug.slice(0, 64)}`, 'not-found');
@@ -316,6 +344,7 @@ router.post('/api/channels/webhook/paths/:slug/send', json, async (req, res) => 
 /** REGISTER — mint → atomic write → the token in THIS answer and nowhere else (a failed write answers 500, no token). */
 router.post('/api/channels/webhook/paths/:slug/callers', json, async (req, res) => {
   if (!owner(req, res)) return;
+  if (pathRefused(req, res)) return;   // r5: a new caller = new events a held wake fires on
   try {
     const st = store(); const slug = String(req.params.slug || '');
     if (!st || !st.path(slug)) return bad(res, 404, `no path ${slug.slice(0, 64)}`, 'not-found');
@@ -328,6 +357,7 @@ router.post('/api/channels/webhook/paths/:slug/callers', json, async (req, res) 
 });
 router.post('/api/channels/webhook/paths/:slug/callers/:id/:verb', json, async (req, res) => {
   if (!owner(req, res)) return;
+  if (pathRefused(req, res)) return;   // r5: rotate / revoke / delivery — who may post the events a held wake fires on
   try {
     const st = store(); const slug = String(req.params.slug || ''); const id = String(req.params.id || '');
     if (!st || !st.path(slug)) return bad(res, 404, `no path ${slug.slice(0, 64)}`, 'not-found');
@@ -348,6 +378,7 @@ router.post('/api/channels/webhook/paths/:slug/callers/:id/:verb', json, async (
  *  minutes keeps it valid (lane webhook-pair-join). */
 router.post('/api/channels/webhook/paths/:slug/pair-code', json, (req, res) => {
   if (!owner(req, res)) return;
+  if (pathRefused(req, res)) return;   // r5: the code IS the authority of the completion (/:slug/pair) that writes a caller
   try {
     const st = store(); const slug = String(req.params.slug || '');
     if (!st || !st.path(slug)) return bad(res, 404, `no path ${slug.slice(0, 64)}`, 'not-found');
@@ -364,7 +395,7 @@ router.post('/api/channels/webhook/paths/:slug/pair-code', json, (req, res) => {
     } else callerId = st.freshId(slug);
     const t = D.now();
     const token = PT.mintToken('webhook');
-    const row = pending.put({ slug, callerId, token, nonce: crypto.randomBytes(16).toString('hex'), repair: b.callerId !== undefined, name: String(b.name || st.path(slug).replyName).slice(0, 80) }, t);
+    const row = pending.put({ slug, callerId, token, nonce: crypto.randomBytes(16).toString('hex'), repair: b.callerId !== undefined, name: String(b.name || st.path(slug).replyName).slice(0, 80), person: personVerdict(req).ok === true }, t);   // r6: the code remembers a person minted it (its completion's authority on a held path)
     const code = WP.encodeCode({ hook: hv.url, caller: callerId, token, nonce: row.nonce, exp: row.exp, name: row.name });
     res.set('Cache-Control', 'no-store').json({ ok: true, code, callerId, hookUrl: hv.url, expiresAt: row.exp, repair: row.repair, shownOnce: true });
   } catch (e) { bad(res, 500, (e && e.message) || 'failed', 'failed'); }
@@ -376,6 +407,7 @@ function joinRefusal(r, from) {
   if (r.status === 409 && named === 'code-used') return { code: 'code-used', error: `${from} says this code was already used — nothing was written; ask for a new code` };
   if (r.status === 401) return { code: 'code-unknown', error: `${from} does not know this code (expired there, replaced by a newer code, or altered) — nothing was written; ask for a new code` };
   if (r.status === 429) return { code: 'rate-limited', error: `${from} is refusing calls from this address for now — try again in a few minutes` };
+  if (r.status === 403 && named === 'pair-wake-held') return { code: 'pair-wake-held', error: `${from}'s path now holds a wake — a code not minted on its owner's page is refused there; nothing was written — ask its owner for a new code from their page` };   // r6
   return { code: 'pair-refused', error: `the other side refused the pairing (${r.status ? `HTTP ${r.status}` : r.error || r.code || 'unreachable'}) — nothing was written; ask for a new code` };
 }
 /** JOIN (B's owner, §12): paste A's code — judged here, the token B issues to A minted, the completion frame POSTed to A's
@@ -401,15 +433,24 @@ router.post('/api/channels/webhook/join', json, async (req, res) => {
     const had = st.path(slug);
     const existing = had ? st.callersRaw(slug).find((c) => c.kind === 'peer' && !c.revokedAt && c.delivery && c.delivery.replyUrl === av.url) : null;
     if (b.check === true) return res.set('Cache-Control', 'no-store').json({ ok: true, check: true, from: cv.name, host: new URL(av.url).host, theirPath: av.slug, slug, exists: !!had, repair: !!existing, expiresAt: cv.exp });
+    // r5: the path this join makes or re-pairs (its slug read from the code) — a peer's events reach its wakes. Judged here,
+    // before anything is posted (a held path never asks the other side), and AGAIN at the write below (r9).
+    if (pathRefused(req, res, slug)) return;
     const myId = existing ? existing.id : had ? st.freshId(slug) : `c-${crypto.randomBytes(4).toString('hex')}`;
     const token = PT.mintToken('webhook');
     const body = WP.frameOf({ nonce: cv.nonce, hookUrl: mine.url, caller: myId, token, name: b.name || (had ? had.replyName : WH.REPLY_NAME_DEFAULT) });
     const r = await EF.fenceFetch(av.pairUrl, { method: 'POST', body, headers: WP.frameHeaders({ slug: av.slug, callerId: cv.caller, token: cv.token, body, now: t }, { hmacHex: WH.hmacHex }), allowPrivate: allowPrivate() });
     if (!r.ok) { const no = joinRefusal(r, cv.name); return bad(res, 502, no.error, no.code); }
-    if (!had) { const ov = pathOptions({}); st.putPath(slug, { title: String(b.title || cv.name || slug), replyName: ov.options.replyName, disabled: false, ipAllow: [] }); await syncRow(slug, ov.options); }
+    // r9 (the acceptance: r8 dropped r6's second judgement — a wake approved on this path while the frame was out completed a
+    // pairing no person allowed): the hold is judged AT THE WRITE, the path as it is now, and the path + the peer are written
+    // in the same turn with no await between (the row sync follows). A refusal here leaves the other side's half: it is
+    // refused at every event (an unknown caller here) and the journal says so.
+    if (pathRefused(req, res, slug)) { console.warn(`[webhook] ${slug}: a join refused AT THE WRITE — a wake reached this path while the frame was out; the other side completed its half and holds a pairing this side never wrote (its events are refused here) — revoke it there`); return; }
+    const ov = had ? null : pathOptions({});
+    if (ov) st.putPath(slug, { title: String(b.title || cv.name || slug), replyName: ov.options.replyName, disabled: false, ipAllow: [] });
     const caller = st.pair(slug, { id: myId, name: cv.name, token, outToken: cv.token, outCaller: cv.caller, replyUrl: av.url });
     memos.forget(myId);
-    await syncRow(slug, null);
+    await syncRow(slug, ov ? ov.options : null);
     res.set('Cache-Control', 'no-store').json({ ok: true, path: pathView(st, slug), caller, repaired: !!existing });
   } catch (e) { bad(res, 500, (e && e.message) || 'failed', 'failed'); }
 });

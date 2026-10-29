@@ -41,13 +41,16 @@ export function secretBoxEl(item) {
   const save = btn(t('Save to vault'), 'ut-act ut-secret-save');
   const deny = btn(t('Refuse'), 'ut-act ut-secret-deny');
   row.append(input, save, deny);
+  // lane wake-approve-card r3 (主开发: a FORM card — «wrong label — ask again»): the request names a place the AGENT chose; a wrong
+  // one is refused here and the agent asks again with the right one (the refusal reaches it on its next turn)
+  const note = mk('div', 'ut-secret-note', t('Wrong name or kind? Refuse — the agent can ask again with the right one.'));
   const state = mk('div', 'ut-secret-state');
   state.setAttribute('role', 'status');
   const words = mk('span', 'ut-secret-words');
   const unlock = btn(t('Unlock…'), 'ut-secret-unlock');
   const setup = btn(t('Set a second password…'), 'ut-secret-setup');
   state.append(words, unlock, setup);
-  box.append(row, state);
+  box.append(row, note, state);
   applySecretBox(box);
   return box;
 }

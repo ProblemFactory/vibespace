@@ -531,7 +531,7 @@ ok(watcher === false, 'CONTROL: the Message watcher section (never folded) is op
   const ids = convs.filter((c) => c.adapterId === 'fake-poll' && /-room-\d+$/.test(c.id)).map((c) => c.id).sort((a, b) => Number(a.split('-').pop()) - Number(b.split('-').pop()));
   const assigned = ids.slice(0, 5), readByBeta = ids.slice(5, 8), awaitingId = ids[8];
   // each PUT is the CONVERSATION grain (its own route) — listed on its own; a rule / account grain would list a row only once a wake was delivered or held (D4, 2026-09-27; test-channels-focus ①②⑤, test-channels-aggregate-ui ⑤)
-  for (const id of assigned) { const r = await api('PUT', `/api/channels/fake-poll/${id}/assignment`, { assignment: { principal: { kind: 'agent', id: AGENTS[0].cid, name: 'alpha' }, mode: 'all', notify: 'digest', digestMinutes: 60 } }); ok(r.status === 200, `FIXTURE: ${id} handed to alpha`, JSON.stringify(r.body).slice(0, 200)); }
+  for (const id of assigned) { const r = await api('PUT', `/api/channels/fake-poll/${id}/assignment`, { assignment: { principal: { kind: 'agent', id: AGENTS[0].cid, name: 'alpha' }, mode: 'all', notify: 'digest', digestMinutes: 60 } }, { 'Sec-Fetch-Site': 'same-origin' /* the owner's page — lane wake-approve-card r2 */ }); ok(r.status === 200, `FIXTURE: ${id} handed to alpha`, JSON.stringify(r.body).slice(0, 200)); }
   for (const id of readByBeta) {
     await api('PUT', `/api/channels/fake-poll/${id}/reach`, { principal: { kind: 'agent', id: AGENTS[1].cid, name: 'beta' }, level: 'visible' });
     const rd = await api('GET', `/api/agent/channels/read?conv=${encodeURIComponent('fake-poll/' + id)}`, undefined, { Authorization: 'Bearer ' + AGENTS[1].token });

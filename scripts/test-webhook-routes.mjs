@@ -87,7 +87,7 @@ const raw = (method, p, { headers = {}, body = null } = {}) => new Promise((reso
   req.on('error', (e) => resolve({ status: 0, t: String(e.code), j: null }));
   if (b !== null) req.write(b); req.end();
 });
-const owner = (method, p, body = null) => raw(method, p, { headers: { Cookie: `vs_token=${COOKIE}` }, body });
+const owner = (method, p, body = null) => raw(method, p, { headers: { Cookie: `vs_token=${COOKIE}`, 'Sec-Fetch-Site': 'same-origin' }, body });   // the owner's page (lane wake-approve-card r2: a wake row is a person's on this page)
 const agent = (method, p, body = null) => raw(method, p, { headers: { Authorization: 'Bearer ' + AG.token }, body });
 const hmacHex = (k, t) => crypto.createHmac('sha256', k).update(t).digest('hex');
 const signed = (slug, b, tok, id, extra = {}) => { const t = String(Math.floor(Date.now() / 1000)); return { 'Content-Type': 'application/json', 'X-Webhook-Caller': id, 'X-Webhook-Timestamp': t, 'X-Webhook-Signature': 'v1=' + hmacHex(tok, WA.signatureBase(t, '/hook/' + slug, b)), ...extra }; };

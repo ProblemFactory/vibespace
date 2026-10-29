@@ -808,12 +808,12 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
   // src/channel-watch-spec.js (judged by the dialog's own validators; a refusal prints their words + [code]); this file
   // ships to other machines and parses nothing but `--spec @file` (the file is here). `--show` / `watches` read back.
   // lane judged-watch-state: a judged rule's row carries its road (`judged`, the server's words) on the line under it
-  const watchLine = (w) => `${w.how}, on ${w.what}, at most ${w.dailyWakeCap}/day${w.expiresAt ? `, until ${new Date(w.expiresAt).toISOString().slice(0, 16).replace('T', ' ')} UTC` : ''} — ${w.setBy === 'agent' ? 'set by you (unwatch removes it)' : `set by the user${w.as === 'group' ? ` for your group ${w.group}` : w.as === 'everyone' ? ' for all agents' : ' for you'} — yours to read, theirs to change`}${w.judged ? `\n    ${w.judged}` : ''}`;
+  const watchLine = (w) => `${w.how}, on ${w.what}, at most ${w.dailyWakeCap}/day${w.expiresAt ? `, until ${new Date(w.expiresAt).toISOString().slice(0, 16).replace('T', ' ')} UTC` : ''} — ${w.setBy === 'agent' ? 'set by you (unwatch removes it)' : `set by the user${w.as === 'group' ? ` for your group ${w.group}` : w.as === 'everyone' ? ' for all agents' : ' for you'} — yours to read, theirs to change`}${w.inert ? `\n    ${w.inert}` : ''}${w.judged ? `\n    ${w.judged}` : ''}`;   // lane wake-approve-card r6: an inert row says so
   if (verb === 'watches') {
     const r = await call('GET', '/api/agent/channels/watches');
     const ws = r.watches || [];
     if (!ws.length) console.log('nothing notifies you — `vibespace-channels watch <conv|account>` sets your own (next-turn: free)');
-    for (const w of ws) console.log(`${w.grain === 'pattern' ? `(a rule the user set) ${w.title}` : `${w.target} — ${w.title}${w.grain === 'account' ? ' (the whole account)' : ''}`}\n    ${watchLine(w)}`);
+    for (const w of ws) console.log(`${w.grain === 'pattern' ? `(a rule the user set) ${w.title}` : `${w.target} — ${w.title || 'a conversation you can no longer read'}${w.grain === 'account' ? ' (the whole account)' : ''}`}\n    ${watchLine(w)}`);
     if (r.more) console.log(`(${r.more} more)`);
     for (const q of r.requests || []) console.log(`waiting for the user: ${q.target} — ${q.how}, on ${q.what} (request ${q.id})`);
     return;
@@ -828,7 +828,7 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
       console.log(`${r.target} — ${r.title}${r.grain === 'account' ? ' (the whole account)' : ''}`);
       if (!(r.rows || []).length) console.log('    nothing here notifies you');
       for (const w of r.rows || []) console.log(`    ${watchLine(w)}`);
-      if (r.request) console.log(`    waiting for the user: ${r.request.how}, on ${r.request.what} (request ${r.request.id})`);
+      if (r.request) console.log(`    waiting for the user: ${r.request.how}, on ${r.request.what} (request ${r.request.id}${r.request.expiresAt ? `, expires unanswered ${new Date(r.request.expiresAt).toISOString().slice(0, 16).replace('T', ' ')} UTC` : ''})`);   // lane wake-approve-card r3: a wake ask has a lifetime
       if (r.removedByUser) console.log(`    the user removed your own notification here (${new Date(r.removedByUser.at).toISOString().slice(0, 16).replace('T', ' ')} UTC) — theirs to restore; a --mode wake ask goes to them`);
       return;
     }
@@ -842,7 +842,7 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
     if (r.already && r.setBy === 'user') console.log(r.note);
     else if (r.proposed && r.already) console.log(`a wake request of yours for ${target} is already waiting for the user (${r.request.id}); they decide.`);
     // lane chat-needs-you-card: THE line to quote is the hub's (`filed` — the card in this conversation + the tray); an older hub says the tray only
-    else if (r.proposed && r.filed) { console.log(`requested — a wake or a digest is a billed turn, so the user approves it (at most ${r.dailyWakeCap} wakes a day); until then nothing wakes you.`); console.log(r.filed); }
+    else if (r.proposed && r.filed) { console.log(`requested — a wake or a digest is a billed turn, so the user approves it (at most ${r.dailyWakeCap} wakes a day); until then nothing wakes you.${r.expiresAt ? ` Unanswered, it expires ${new Date(r.expiresAt).toISOString().slice(0, 16).replace('T', ' ')} UTC — then you can ask again.` : ''}`); console.log(r.filed); }   // lane wake-approve-card r3: its lifetime
     else if (r.proposed) console.log(`requested — a wake or a digest is a billed turn, so the user approves it: their For-you tray shows what Approve writes (at most ${r.dailyWakeCap} wakes a day). Until then nothing wakes you (request ${r.request.id}).`);
     else console.log(`watching ${r.target}${r.title ? ` (${r.title})` : ''} — ${on} rides your NEXT turn (free; nothing wakes you)${r.replaced ? '; your earlier watch here was replaced' : ''}. Read back: vibespace-channels watch --show ${r.target} · undo: vibespace-channels unwatch ${r.target}`);
     if (r.judged) console.log(r.judged);   // lane judged-watch-state: the answer's LAST line — the judged rule's road (saved either way; exit 0)
@@ -933,7 +933,7 @@ const policyWords = (p) => `${p && p.mode === 'direct' ? 'direct' : 'review'}${p
     if (!conv || !why) { console.error('usage: vibespace-channels request <conv> "why"'); process.exit(1); }
     const r = await call('POST', '/api/agent/channels/request', { conv, why });
     if (r.already && r.level) console.log(r.via === 'everyone' ? `already allowed — the user gave every agent access to ${conv} (All agents); no request was filed.` : `you can already see ${conv} (${r.level}).`);
-    else if (r.already) console.log(`a request of yours is already open for ${conv} (${r.request.id}); the user decides.`);
+    else if (r.already) console.log(`a request of yours is already open for ${conv} (${r.request.id}); the user decides.${r.resurfaced ? ' The user had hidden its item — it is back in their For-you tray.' : ''}`);   // lane wake-approve-card r3: a hidden pointer comes back on a re-ask
     else if (r.filed) { console.log(`requested — the user sees "${why}" and decides; approval grants YOU visibility on this ONE conversation.`); console.log(r.filed); }   // lane chat-needs-you-card: the hub's line (the card + the tray)
     else console.log(`requested — the user sees "${why}" in their For-you inbox and decides; approval grants YOU visibility on this ONE conversation (request ${r.request.id}).`);
     if (!r.already) console.log('  ' + TX.sentLine(r, why));   // lane cli-one-text-arg

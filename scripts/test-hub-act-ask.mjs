@@ -31,6 +31,7 @@ const P = require('../src/hub-act-policy.js');
 const E = require('../src/exit-reach.js');
 const DA = require('../src/device-acts.js');
 const ASK = require('../src/server/hub-act-ask.js');
+const FA = require('../src/foryou-actions.js');   // lane wake-approve-card r3: THE registry's chat cards (needsOf)
 const { DeviceManager } = require('../src/agentd/client.js');
 const { HostManager } = require('../src/hosts.js');
 const { UserTodoManager } = require('../src/user-todos.js');
@@ -273,9 +274,23 @@ console.log('— ④ THE ONE SEND POINT (a fake daemon link, the real asker and 
   await settle();
   const c = w.cards()[0];
   ok(c && !c.detail.includes('s3cret') && /\.tok · 6 B/.test(c.detail), 'a placed secret\'s card says the path and size — never the bytes', c && c.detail);
-  w.userTodos.setStatus(c.id, 'done', 'user');
+  // lane wake-approve-card r3: A DECISION ROW HAS ITS OWN VERBS — a generic close (✓ / ✕ / Mark all seen) is refused BY NAME;
+  // the ask stands until its own Deny (or its 60 s) ends it, and the item and the ask stay ONE state
+  let closed = null; try { w.userTodos.setStatus(c.id, 'done', 'user'); } catch (x) { closed = x.code; }
+  ok(closed === 'decision_row' && w.userTodos.get(c.id).status === 'open' && w.asker.list().length === 1, 'the card closed by another door (its ✓) ⇒ refused BY NAME (decision_row) — the ask still stands, answerable by its own verbs only', closed);
+  await w.asker.answer(c.action.askId, { answer: 'deny', by: 'user', person: true }).catch(() => null);   // (a tree whose ✓ settled it already: answered)
   const e = await p.catch((x) => x);
-  ok(e.code === 'hub_act_denied' && w.sent.filter((m) => m.op === 'place-secret').length === 0, 'the card closed by another door (its ✓) ⇒ the act refused — the item and the ask are ONE state', e && e.code);
+  const rec = w.userTodos.get(c.id);
+  ok(e.code === 'hub_act_denied' && w.sent.filter((m) => m.op === 'place-secret').length === 0 && rec.status === 'done' && rec.resolvedBy === 'denied' && rec.resolvedFact && rec.resolvedFact.decidedBy === 'person', 'its own Deny (the person\'s, through THE person verdict) ⇒ the act refused, the record «denied» with the person\'s mark — the item and the ask are ONE state', { code: e && e.code, rec: rec && { s: rec.status, by: rec.resolvedBy, f: rec.resolvedFact } });
+}
+{
+  // RED CONTROL (lane wake-approve-card r3): an asker wired as the base wired it (no `aboutOf`) — the agent's card names no
+  // conversation: tray-only, its chat draws nothing (what the owner saw)
+  const w = world();
+  const p = w.dm.runCmd('ls', [], { by: 'agent:claude:c1' }); await settle();
+  const c = w.cards()[0];
+  ok(c && !c.about && FA.needsOf(w.userTodos.snapshot().open, ['claude:c1']).length === 0, 'RED CONTROL: an asker without aboutOf (the base) — the agent\'s card names no conversation ⇒ tray-only, its chat draws nothing', c && c.about);
+  w.fire(); await codeOf(p);
 }
 {
   const store = { add: () => { throw new Error('this conversation already has 20 open items'); }, onStatus: () => { }, snapshot: () => ({ open: [] }) };
@@ -377,6 +392,9 @@ console.log('— ⑤ the routes');
     ok(v0.access.hub.mode === 'default' && v0.hub.policy === 'ask' && v0.hub.source === 'instance' && v0.hub.instanceKind === 'cluster' && v0.hub.stored === null && Array.isArray(v0.hub.asks), 'the dialog\'s GET: the list not set, what applies (ask — this cluster instance\'s default) and why', v0.hub);
     const p = link.dm.runCmd('ls', [], { by: 'agent:claude:c1' }); await settle();
     const askId = asker.list()[0].askId;
+    // lane wake-approve-card r3 (the owner: «这个索要通知在聊天框里完全没有»): an AGENT's act is a card in the conversation that asked
+    const filedIt = (userTodos.snapshot().open || []).find((i) => i.action && i.action.askId === askId);
+    ok(filedIt && filedIt.about === 'claude:c1' && filedIt.sessionKey === ASK.INBOX_KEY && FA.needsOf(userTodos.snapshot().open, ['claude:c1']).some((e) => e.item.id === filedIt.id), 'wire()\'s asker files an AGENT\'s act ABOUT the conversation that asked (`about` = its live session\'s key, claude:c1) — a card in its chat; the tray\'s Machines group as before', filedIt && { about: filedIt.about, key: filedIt.sessionKey });
     const v1 = await (await fetch(`${base}/api/hosts/${hid}/exit-access`)).json();
     ok(v1.hub.asks.length === 1 && v1.hub.asks[0].kind === 'run' && v1.hub.asks[0].waiting === 1, 'the GET counts the cards that are up');
     const b = await post(`/api/hub-acts/asks/${askId}`, { answer: 'once' }, { Authorization: 'Bearer vsst_testtoken1' });
@@ -384,10 +402,14 @@ console.log('— ⑤ the routes');
     ok(b.status === 403 && (await b.json()).code === 'human_only' && bj.status === 403, 'a bearer (vsst_ / jbt_) answering ⇒ 403 human_only — an agent never approves an act');
     const g = await fetch(`${base}/api/hub-acts/asks`, { headers: { Authorization: 'Bearer vsst_testtoken1' } });
     ok(g.status === 403, 'the list of cards is the user\'s too');
-    const y = await post(`/api/hub-acts/asks/${askId}`, { answer: 'once' });
+    // lane wake-approve-card r3: the door asks THE person verdict (src/routes/vault.js) — a cookie write that is not this page ⇒ cross_site
+    const yx = await post(`/api/hub-acts/asks/${askId}`, { answer: 'once' });
+    ok(yx.status === 403 && (await yx.json()).code === 'cross_site' && asker.list().length === 1, 'a write that is not this instance\'s page (a bare curl) ⇒ 403 cross_site — the card still up (THE person verdict, as the vault\'s doors)');
+    const PAGE = { 'Sec-Fetch-Site': 'same-origin' };
+    const y = yx.status === 200 ? yx : await post(`/api/hub-acts/asks/${askId}`, { answer: 'once' }, PAGE);   // (a tree whose door took the bare write: that WAS the answer)
     const yj = await y.json();
     ok(y.status === 200 && yj.state === 'allowed' && await codeOf(p) === 'sent' && link.lines.at(-1).answeredBy === 'human:local', 'the person\'s Allow once (cookie) ⇒ it runs; who answered = the sign-in\'s handle (human:local without one)', yj);
-    const y2 = await post(`/api/hub-acts/asks/${askId}`, { answer: 'deny' }), y3 = await post('/api/hub-acts/asks/0000', { answer: 'deny' });
+    const y2 = await post(`/api/hub-acts/asks/${askId}`, { answer: 'deny' }, PAGE), y3 = await post('/api/hub-acts/asks/0000', { answer: 'deny' }, PAGE);
     ok(y2.status === 409 && (await y2.json()).code === 'ask_settled' && y3.status === 404 && (await y3.json()).code === 'ask_unknown', 'answered again ⇒ 409 ask_settled; unknown ⇒ 404 ask_unknown');
     const pw = link.dm.runCmd('ls', [], { by: 'system:writer-sweep' }); await settle();
     const ph = await fetch(`${base}/api/hosts/${hid}/exit-access`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ hub: { mode: 'everyone' } }) });

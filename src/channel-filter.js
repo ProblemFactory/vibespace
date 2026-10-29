@@ -182,6 +182,22 @@ const MAX_ACCESS_ROWS = 16;
 // verify r1 F2 (lane channel-agent-watch): what ONE agent may hold of its own — rows across every grain, and wake asks waiting
 const MAX_AGENT_WATCHES = 20;
 const MAX_OPEN_WATCH_REQUESTS = 2;
+// lane wake-approve-card r3 (主开发: «a wake ask has a lifetime»): an ask nobody answered for 7 days EXPIRES — the request
+// `expired` (nothing written; the agent can ask again), its item closed as expired, the bound above freed
+const WATCH_REQUEST_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+/** A HELD DELIVERY SAYS ITS AGE OR ASKS (lane wake-approve-card r6 — 主开发: a boot on old data delivered every digest the old
+ *  reader had held — hits possibly MONTHS old — with no click, labelled «in the last 60 min»): hits a watcher's delivery
+ *  waited on longer than HELD_AGE_WINDOWS of its window (a digest's `digestMinutes`; a wake's 60 min ⇒ a day) are not
+ *  delivered at a boot by themselves — the owner decides (deliver / discard). */
+const HELD_AGE_WINDOWS = 24;
+const heldWindowMinutes = (w) => (w && w.notify === 'digest' && Number(w.digestMinutes) > 0 ? Number(w.digestMinutes) : 60);
+/** Too old to deliver by itself? `oldestAt` = the oldest held hit's parking time (no time ⇒ its age is unknown ⇒ too old). */
+function heldTooOld(w, oldestAt, t) {
+  const at = Number(oldestAt);
+  return !(Number.isFinite(at) && at > 0) || Number(t) - at > HELD_AGE_WINDOWS * heldWindowMinutes(w) * 60e3;
+}
+/** A block's span in words: «held since 2026-07-14 09:38 UTC» (the oldest hit's parking time) — an agent's text. */
+const heldSinceWords = (at) => { const d = new Date(Number(at)); return Number.isFinite(d.getTime()) ? `held since ${d.toISOString().slice(0, 16).replace('T', ' ')} UTC` : 'held for an unknown time'; };
 const MAX_WATCHER_ROWS = 16;
 /** The CONVERSATION-level rule set a pattern is made of — a closed set APART
  *  from the message-level `RULE_KINDS` (a pattern chooses conversations, a
@@ -1282,6 +1298,21 @@ function splitAssignment(a0) {
  * Rows without a valid principal are dropped.
  */
 function grainOf(rec, legacy = undefined, { inherited = [] } = {}) {
+  const { access, watchers } = grainRowsOf(rec, legacy);
+  // R4 verify r2 (2026-09-27): THE INVARIANT HOLDS AT READ, NOT ONLY AT WRITE.
+  // A notification row whose principal holds no access row at this grain (a
+  // hand-edited store, a copy from another version — every product write
+  // keeps the two lists in ONE update) is INERT: never woken, never listed,
+  // never a ledger. `validateWatchers` refuses it by name at write time; the
+  // engine's boot census names the rows this drops.
+  // lane channel-agent-watch W3: "access" = this grain's rows OR the ones above it (`inherited`, the caller's: the
+  // account, a matching rule, a visible grant) — the same rule `validateWatchers` writes by
+  const keys = eligibleKeys({ access, inherited });
+  return { access, watchers: watchers.filter((w) => eligibleFor(keys, w.principal, w)) };
+}
+/** A grain's rows AS STORED (the legacy lift merged, rows without a valid principal dropped) — every notification row,
+ *  active or inert; `grainOf` judges them, `grainAsFired` keeps both halves. */
+function grainRowsOf(rec, legacy = undefined) {
   const r = rec && typeof rec === 'object' ? rec : {};
   const ok = (x) => x && typeof x === 'object' && !!principalKey(x.principal);
   const access = Array.isArray(r.access) ? r.access.filter(ok) : [];
@@ -1293,16 +1324,24 @@ function grainOf(rec, legacy = undefined, { inherited = [] } = {}) {
     if (!access.some((x) => principalKey(x.principal) === k)) access.push(sp.access);
     if (!watchers.some((x) => principalKey(x.principal) === k)) watchers.push(sp.watcher);
   }
-  // R4 verify r2 (2026-09-27): THE INVARIANT HOLDS AT READ, NOT ONLY AT WRITE.
-  // A notification row whose principal holds no access row at this grain (a
-  // hand-edited store, a copy from another version — every product write
-  // keeps the two lists in ONE update) is INERT: never woken, never listed,
-  // never a ledger. `validateWatchers` refuses it by name at write time; the
-  // engine's boot census names the rows this drops.
-  // lane channel-agent-watch W3: "access" = this grain's rows OR the ones above it (`inherited`, the caller's: the
-  // account, a matching rule, a visible grant) — the same rule `validateWatchers` writes by
+  return { access, watchers };
+}
+/**
+ * THE GRAIN AS THE ENGINE FIRES ON IT (lane wake-approve-card, acceptance round 5 — 主开发: «"held" is read by the SAME
+ * reader that fires; a stored wake row is held whether active or inert»). ONE reader for one grain, the one
+ * `effectiveGrants` walks: `kind` 'account' is read with the account-scope grants (`accountKeys`), 'pattern' (a rule) with
+ * the ACCOUNT's access rows + those grants (`account` = the account's record), 'conversation' with everything above it
+ * (`above`). → `{access, watchers, stored, inert}`: `watchers` = the rows in effect (a principal with access here or
+ * above), `stored` = EVERY notification row stored on the grain, `inert` = stored − in effect (never woken now — a write
+ * that gives its principal access again makes it live). The engine's «held» (wakeHeldAt), its grain writer (setGrain)
+ * and the dialogs' lists read a grain through this — never a narrower view that drops a row.
+ */
+function grainAsFired(kind, rec, { accountKeys = [], account = null, above = [] } = {}) {
+  const inherited = kind === 'account' ? accountKeys : kind === 'pattern' ? [...grainRowsOf(account).access, ...accountKeys] : above;
+  const { access, watchers: stored } = grainRowsOf(rec);
   const keys = eligibleKeys({ access, inherited });
-  return { access, watchers: watchers.filter((w) => eligibleFor(keys, w.principal, w)) };
+  const watchers = stored.filter((w) => eligibleFor(keys, w.principal, w));
+  return { access, watchers, stored, inert: stored.filter((w) => !watchers.includes(w)) };
 }
 
 /**
@@ -1516,16 +1555,17 @@ function effectiveGrants({ conversation = null, patterns = [], account = null } 
   // grants, `accountKeys`), then a matching rule's, then (for the conversation) every visible grant that reaches it
   // (`grantKeys`: an approved request, a hand-written grant, the account's) — so a notification set on one chat for an
   // agent that holds the whole account is in effect, never dropped as "no access at this grain"
-  const accountG = grainOf(account, undefined, { inherited: accountKeys });
+  // lane wake-approve-card r5: every grain read through grainAsFired — the one reader «held» and the grain writer read by
+  const accountG = grainAsFired('account', account, { accountKeys });
   const ranked = (Array.isArray(patterns) ? patterns : []).filter((x) => x && x.pattern)
     .slice().sort((a, b) => (Number(a.createdAt) || 0) - (Number(b.createdAt) || 0) || String(a.id).localeCompare(String(b.id)));
   const matched = [];
   for (const pa of ranked) {
     const m = matchConversation(pa.pattern, facts);
-    if (m.hit) matched.push({ source: 'pattern', patternId: pa.id || null, why: m.why, g: grainOf(pa, undefined, { inherited: [...accountG.access, ...accountKeys] }) });
+    if (m.hit) matched.push({ source: 'pattern', patternId: pa.id || null, why: m.why, g: grainAsFired('pattern', pa, { account, accountKeys }) });
   }
   const above = [...accountG.access, ...accountKeys, ...matched.flatMap((x) => x.g.access), ...grantKeys];
-  const grains = [{ source: 'conversation', patternId: null, why: [], g: grainOf(conversation, undefined, { inherited: above }) }, ...matched,
+  const grains = [{ source: 'conversation', patternId: null, why: [], g: grainAsFired('conversation', conversation, { above }) }, ...matched,
     { source: 'account', patternId: null, why: [], g: accountG }];
   const access = [], watchers = [];
   const seenA = new Set(), seenW = new Set();
@@ -1783,11 +1823,12 @@ function othersLine(others) {
  * budget; what does not fit is COUNTED, never silently dropped.
  * `groups` = `[{title, convId, hits:[{record, why}], elided?}]`.
  */
-function renderScopeDigestBlock({ adapterLabel = 'channel', scopeLabel = '', groups = [], windowMinutes = DEFAULT_DIGEST_MINUTES, elidedConversations = 0, others = null } = {}, { perConversation = 3, maxChars = 200, budget = BLOCK_MAX_BYTES } = {}) {
+function renderScopeDigestBlock({ adapterLabel = 'channel', scopeLabel = '', groups = [], windowMinutes = DEFAULT_DIGEST_MINUTES, elidedConversations = 0, others = null, since = null } = {}, { perConversation = 3, maxChars = 200, budget = BLOCK_MAX_BYTES } = {}) {
   const list = (Array.isArray(groups) ? groups : []).filter((g) => g && Array.isArray(g.hits) && g.hits.length);
   const msgs = list.reduce((n, g) => n + g.hits.length + (Number(g.elided) || 0), 0);
   const convs = list.length + (Number(elidedConversations) || 0);
-  const head = `### Channel digest — ${safeInline(adapterLabel, 60)} · ${convs} conversation${convs === 1 ? '' : 's'}, ${msgs} message${msgs === 1 ? '' : 's'} in the last ${Math.round(Number(windowMinutes) || 0)} min`;
+  // r6: the TRUE span — hits held past the window (a boot's leftovers, a refused window's) say since when, never «the last N min»
+  const head = `### Channel digest — ${safeInline(adapterLabel, 60)} · ${convs} conversation${convs === 1 ? '' : 's'}, ${msgs} message${msgs === 1 ? '' : 's'} ${since ? (typeof since === 'string' ? safeInline(since, 80) : heldSinceWords(since)) : `in the last ${Math.round(Number(windowMinutes) || 0)} min`}`;
   const lines = [head];
   if (scopeLabel) lines.push(`you are watching ${safeInline(scopeLabel, 160)}`);
   const ol = othersLine(others);
@@ -1815,10 +1856,10 @@ function renderScopeDigestBlock({ adapterLabel = 'channel', scopeLabel = '', gro
 }
 
 /** The digest: many hits, ONE turn. Same budget, same neutering. */
-function renderDigestBlock({ adapterLabel = 'channel', title = '', convId = '', hits = [], elided = 0, windowMinutes = DEFAULT_DIGEST_MINUTES } = {}, opts = {}) {
+function renderDigestBlock({ adapterLabel = 'channel', title = '', convId = '', hits = [], elided = 0, windowMinutes = DEFAULT_DIGEST_MINUTES, since = null } = {}, opts = {}) {
   const list = (Array.isArray(hits) ? hits : []).filter((h) => h && h.record);
   const total = list.length + (Number(elided) || 0);
-  const head = `### Channel digest — ${safeInline(adapterLabel, 60)} · ${safeInline(title || convId, 120)} — ${total} message${total === 1 ? '' : 's'} in the last ${Math.round(Number(windowMinutes) || 0)} min`;
+  const head = `### Channel digest — ${safeInline(adapterLabel, 60)} · ${safeInline(title || convId, 120)} — ${total} message${total === 1 ? '' : 's'} ${since ? (typeof since === 'string' ? safeInline(since, 80) : heldSinceWords(since)) : `in the last ${Math.round(Number(windowMinutes) || 0)} min`}`;   // r6: the true span (the engine's words: the owner's zone, named)
   const inner = renderWakeBlock({ adapterLabel, title, convId, hits: list, elided, coalesced: null, replyHint: true }, opts);
   return head + '\n' + inner.split('\n').slice(1).join('\n');
 }
@@ -1843,9 +1884,9 @@ module.exports = {
   // R4 (2026-09-27): access and notification — two lists per grain, access first
   // lane everyone-principal: ALL AGENTS — the principal, and the watcher fan-out (a ledger per running conversation)
   EVERYONE_ID, fanTargetOf, fanOfKey, fanStatsOf, fanWatcher, fanOutWatchers, ledgerRowsOf, pruneFan,
-  MAX_ACCESS_ROWS, MAX_WATCHER_ROWS, MAX_AGENT_WATCHES, MAX_OPEN_WATCH_REQUESTS, principalKey, validateAccessRow, validateAccess, validateWatcher, validateWatchers,
+  MAX_ACCESS_ROWS, MAX_WATCHER_ROWS, MAX_AGENT_WATCHES, MAX_OPEN_WATCH_REQUESTS, WATCH_REQUEST_TTL_MS, HELD_AGE_WINDOWS, heldWindowMinutes, heldTooOld, heldSinceWords, principalKey, validateAccessRow, validateAccess, validateWatcher, validateWatchers,
   // lane channel-agent-watch: the delivery choice, who wrote a row, and THE eligibility rule (access over the grain and its ancestors)
   DELIVERY_MODES, WATCH_ORIGINS, deliveryModeOf, watchOriginOf, eligibleKeys, eligibleFor,
   memberVia, memberStill, REGEX_MAX, REGEX_FLAGS, REGEX_TEXT_MAX, REGEX_REFUSALS, regexVerdict, regexText, regexSpan,
-  splitAssignment, grainOf, grainStamp, grainBaseVerdict, liftGrainRecord, LEGACY_ASSIGNMENT_FIELDS, effectiveGrants, effectiveAccess, effectiveWatchers, rowNames, expectedWakesTotal, othersLine,
+  splitAssignment, grainOf, grainRowsOf, grainAsFired, grainStamp, grainBaseVerdict, liftGrainRecord, LEGACY_ASSIGNMENT_FIELDS, effectiveGrants, effectiveAccess, effectiveWatchers, rowNames, expectedWakesTotal, othersLine,
 };

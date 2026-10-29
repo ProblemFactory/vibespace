@@ -30,13 +30,14 @@
 //          replyState(item) → {show, enabled, why}, optionsOf(item) → [label] (the chips: the agent's options, else
 //          its detail's parsed — lane foryou-honest, PURE src/ask-options.js), mini?}
 import { escHtml } from './utils.js';
-import { tc } from './i18n.js'; // lane foryou-honest: «Dismiss» in the For-you sense (忽略 — the plain key is a dialog's «close»)
+import { tc, t as tr } from './i18n.js'; // lane foryou-honest: «Dismiss» in the For-you sense (忽略 — the plain key is a dialog's «close»); r7: the deadline ticker's words (no ctx at a tick)
 import { UI_ICONS } from './icons.js';
 import { getFileIcon } from './file-types.js';
 import { REACH_CHOICES, reachWord, reachTitle } from './automation-reach.js'; // lane key-instance-scope: the first-use card's reach choices (one spelling with the For-you window and the Vault window)
 import { linkedHtml, segmentText } from './foryou-links.js'; // PURE (lane foryou-attachments): THE links in an item's words — one grammar with the chat
 import { cardWords, progressWords } from './app-card-model.js'; // design 009: THE words of an app install's one card (PURE)
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
+import { decidedStamp, PERSON_DECIDES, closersOf, isHidden, expiryWords, isDecisionRow, grantWords, verbsOf, runCardOf, factsDroppedWords, deadlineOf, endOf, ruledOf } from '../foryou-actions.js'; // PURE (lane wake-approve-card): THE decided stamp «approved by you · 09:41» — one spelling with the chat card; r3: the closers a row draws, a pointer's hide, a wake ask's lifetime
 import { isSecretAsk, secretBoxEl } from './vault-paste-box.js'; // lane vault-paste-request: an agent's request for a secret — its masked paste box (kept across repaints, like the reply box)
 
 /** "3min ago" / "2h ago" / a date — words by the caller's t(). */
@@ -52,27 +53,62 @@ export function expiresText(ts, t) {
   if (!(typeof ts === 'number' && Number.isFinite(ts))) return '';
   const m = Math.ceil((ts - Date.now()) / 60000);
   if (m <= 0) return '';
-  return m < 60 ? t('expires in {n} min', { n: m }) : t('expires in {n} h', { n: Math.round(m / 60) });
+  return m < 60 ? t('expires in {n} min', { n: m }) : m < 24 * 60 ? t('expires in {n} h', { n: Math.round(m / 60) }) : t('expires in {n} d', { n: Math.round(m / 1440) }); // r3: a lifetime in days
+}
+/** The END a row says under its age: a notice's window (expiresText), an open decision row's lifetime (lane wake-approve-card
+ *  r3 — THE registry's expiryWords: «expires in 7 d»), nothing for any other item. */
+export function itemExpiryText(i, t, notice = false) {
+  if (notice) return expiresText(i && i.expiresAt, t);
+  return expiryWords(i, { t }) || '';
+}
+/** The status word of a resolved row — «done» / «dismissed», and a POINTER the person hid «hidden — nothing was decided»
+ *  (lane wake-approve-card r3: never «done»: hiding decides nothing). */
+export function statusWords(i, t) {
+  if (isHidden(i)) return t('hidden — nothing was decided');
+  if (i && i.resolvedBy === 'ask-expired' && i.action) return t('timed out — the agent\'s command was refused (it may ask again)'); // r7 addendum: an ask nobody answered in time keeps its place, its outcome said (never «done»)
+  const end = endOf(i);
+  if (end && end.unknown) return t('outcome unknown'); // r8: a decision row's end this client cannot classify — its code beside it (endCodeOf), never «done»
+  return i && i.status === 'dismissed' ? t('dismissed') : t('done');
+}
+/** r8: the code of an end this client cannot classify (THE registry's endOf) — drawn monospace beside «outcome unknown»; '' else. */
+export function endCodeOf(i) {
+  const end = endOf(i);
+  return end && end.unknown ? end.unknown : '';
 }
 /** Who resolved it, in words ('expired' = the store's sweep, 'reply' = the
  *  user's own inbox reply, design-user-inbox-reply D1.4). `item` = the
  *  resolved item, for a resolution worded with its fact ('resumed'). */
 export function resolvedByText(by, t, item = null) {
+  // lane wake-approve-card: a decision only a person's click makes (a `decide: 'person'` row — a wake request, a reach request)
+  // reads as the chat card's record does: «approved by you · 09:41» / «denied by you · 09:41» — the tray, the mini inbox and
+  // the For-you window all word a resolved row here
+  const stamp = item ? decidedStamp(item, { t }) : null;
+  if (stamp) return stamp.text;
+  const end = item ? endOf(item) : null;
+  if (end && end.unknown) return ''; // r8: statusWords says «outcome unknown», endCodeOf draws its code — never the raw word here
+  if (end && end.mapped) { item = ruledOf(item); by = item.resolvedBy; } // r8: a producer's outcome-in-the-fact settle reads as the ruled one
   if (by === 'agent') return t('by the agent');
   if (by === 'system') return t('automatically');
-  if (by === 'expired') return t('expired');
+  if (by === 'expired') return item && isDecisionRow(item) ? t('expired · the agent can ask again') : t('expired'); // r3: a wake ask's END (its lifetime) — the card's words
   if (by === 'reply') return t('by your reply');
   if (by === 'handed-back') return t('handed back'); // lane browser-takeover-queue: a takeover request answered by the handback
   // lane-pairing ⑥: an exit's "ask me each time" item is resolved BY its outcome
+  if (by === 'allowed' && item && item.resolvedFact && item.resolvedFact.late === true) return t('let through once · waiting for it to run again'); // r8: a late Allow without the person mark
   if (by === 'allowed') return t('allowed');
   if (by === 'denied') return t('denied');
+  if (by === 'vault_locked') return t('the vault locked before it was answered'); // r8: never the raw word
   if (by === 'revoked') return t('access removed');
-  if (by === 'ask-expired') return t('expired (no answer in 60 s)');
+  if (by === 'ask-expired') return item && item.action ? '' : t('expired'); // r7 addendum: the status word says it all (statusWords — «timed out — the agent's command was refused …»)
   if (by === 'ask-changed') return t('not run — it changed after it was shown'); // verify-r6 W1
   if (by === 'ask-over') return t('this request is over — the agent can ask again'); // verify-r6 W2: a reopened ask that is over
   if (by === 'vault_locked') return t('closed when the vault locked — run it again after the unlock'); // lane vault-use-grants round 7 (MINOR): a run card the lock settled SAYS so where the owner looks — never a dead card, never a silent close
+  if (by === 'hidden') return ''; // r3: a hidden pointer's status word says it all (statusWords) — nothing was decided
   if (by === 'conversation-gone') return t('the conversation ended before you answered');
   if (by === 'stored') return t('saved to the vault'); // lane vault-paste-request: a paste request answered by its paste
+  if (by === 'delivered') return t('delivered'); // r6: a held digest the owner released (Deliver)
+  if (by === 'discarded' && item && item.resolvedFact && item.resolvedFact.why === 'watch-removed') return t('the rule they were held for was removed — {n} messages discarded', { n: Number(item.resolvedFact.n) || 0 }); // r9: no watcher left to deliver to
+  if (by === 'discarded') return t('discarded — nothing was sent'); // …or dropped (Discard)
+  if (by === 'granted') { const gw = item ? grantWords(item, { t }) : null; return gw ? gw.text : t('allowed'); } // r4: an agent's request for a stored secret (vault-grant-ask) answered — r6: the duration its record carries (none ⇒ «allowed») and the grant's life (ended / revoked), THE reader foryou-actions grantWords
   // B-2198 part 2: a raw-API proposal's item is answered BY its outcome (the card's words: Ran · 200 · 1.2 KB / Rejected by you)
   if (by === 'channel-api' && item && item.resolvedFact && item.resolvedFact.apiOutcome) return t(item.resolvedFact.apiOutcome.key, item.resolvedFact.apiOutcome.params || {});
   // lane exit-item-heal: an unexpected-exit item answered by the conversation running again (its new session's start, this device's clock)
@@ -130,7 +166,7 @@ const HUB_ANSWERS = ['once', 'always', 'deny'];
   const HELD_ASKS = ['hub-act-ask', 'automation-ask', 'pool-cross-provider', 'vault-run-ask', 'vault-grant-ask']; // q-053 P0b (decision ①): a pool's move to ANOTHER provider waits for the owner — 允许一次 / 这个池一直允许 / 拒绝
   const GRANT_ANSWERS = ['once', '8h', 'deny']; // lane vault-manual-and-lock (design q-043 D4): 允许一次 (its next run) / 8 小时 (every run, 8 h) / 拒绝; it waits for nobody, never expires (a lock withdraws it)
   const hubAnswerWord = (a, t, type = 'hub-act-ask') => (a === 'once' ? t('Allow once') : a === '8h' ? t('For 8 hours') : a === 'always' ? (type === 'automation-ask' ? t('Always for this conversation') : type === 'pool-cross-provider' ? t('Always for this pool') : type === 'vault-run-ask' ? t('Always let this conversation use it (these hosts)') : t('Always on this machine')) : t('Deny'));
-  const heldAnswers = (i) => (i.action.type === 'vault-grant-ask' ? GRANT_ANSWERS : HUB_ANSWERS.filter((a) => a !== 'always' || !(i.action.type === 'vault-run-ask' && i.action.always === false)));
+  const heldAnswers = (i) => (i.action.type === 'vault-grant-ask' ? GRANT_ANSWERS : HUB_ANSWERS.filter((a) => a !== 'always' || (!(i.action.type === 'vault-run-ask' && i.action.always === false) && !(i.action.type === 'vault-run-ask' && i.action.late)))).filter((a) => a === 'deny' || !(i.action.type === 'vault-run-ask' && i.action.late && i.action.restartLost === true)); // r8: a LATE run card offers 允许一次 / 拒绝 only — its door refuses «Always» (a card never offers what its door refuses); after a restart (r23's restartLost) an Allow would mint nothing — 拒绝 alone, the line says why
 // lane vault-scrub-forms (q-043 verify M1): a RUN card says what the scrubbing does not promise — the owner reads the command
 // lane key-instance-scope: an AUTOMATION card offers the grant's REACH beside its answers — 只有它开的会话 (the default) · 这些岗位的会话
 // (only when the caller is in one: action.groups) · 整个 VibeSpace (red, its title says it reaches the owner's own conversations too);
@@ -143,11 +179,76 @@ const reachPickHtml = (i, t) => {
     + '</div>';
 };
 const hubAskHtml = (i, t, detail) => (i && i.action && HELD_ASKS.includes(i.action.type)
-  ? `<div class="ut-proposal-plan">${escHtml(detail || '')}</div>`
+  ? runCardOf(i, { t }) ? runFactsHtml(i, t) // r7: the run card's FACTS, worded here (a record without them: its prose, below — unchanged)
+  : (factsDroppedWords(i, { t }) ? `<div class="ut-run-cut ut-facts-dropped">${escHtml(factsDroppedWords(i, { t }))}</div>` : '') // r9: facts the store dropped — said above the text
+    + `<div class="ut-proposal-plan">${escHtml(detail || '')}</div>`
     + (i.action.type === 'vault-run-ask' ? `<div class="ut-exit-note">${escHtml(t('The output is scrubbed of the secret\'s common spellings; a command that re-encodes it can still show it — read the whole command before you allow it.'))}</div>` : '')
     + (i.action.type === 'automation-ask' && i.action.askId ? reachPickHtml(i, t) : '')
     + (i.action.askId ? `<div class="ut-exit-answer ut-hub-answer">${heldAnswers(i).map((a) => `<button type="button" class="ut-act ut-action-exit ut-exit-${a === 'deny' ? 'deny' : 'allow'} ut-hub-${a}" data-answer="${a}">${escHtml(hubAnswerWord(a, t, i.action.type))}</button>`).join('')}</div>` : '')
   : '');
+
+/** THE RUN CARD (lane wake-approve-card r7 — the owner: «这个卡片的可读性很差»): `item.facts` worded through THE model
+ *  (foryou-actions runCardOf) — the command in its own box (it wraps INSIDE the box, never the card), ≤ 4 fact rows with the
+ *  deciding one first and marked, the answers with the «Always» hint beside them (why it is not offered), the technical
+ *  lines in a «Technical details» fold. Every value escaped (a name, a path and the command are an agent's or a peer's
+ *  words); a code the model has no words for is drawn monospace. `buttons: false` = the For-you window's pane and a
+ *  record's fold (the window's answers live in its action row — the hint beside them, as text nodes). */
+const segHtml = (parts) => parts.map((x) => (x.code != null ? `<code class="ut-run-code">${escHtml(x.code)}</code>` : x.mono != null ? `<span class="ut-run-mono">${escHtml(x.mono)}</span>` : x.aside != null ? `<span class="ut-run-aside">${escHtml(x.aside)}</span>` : escHtml(x.text || ''))).join('');
+const linesHtml = (lines) => lines.map((l) => `<span class="ut-run-line">${segHtml(l)}</span>`).join('');
+const runHintHtml = (v) => (v && v.always.hint ? `<span class="ut-run-hint">${segHtml(v.always.hint)}</span>` : '');
+export function runFactsHtml(i, t, { buttons = true } = {}) {
+  const v = runCardOf(i, { t });
+  if (!v) return '';
+  const rows = v.rows.map((r) => `<div class="ut-run-row${r.warn ? ' ut-run-warn' : ''}" data-fact="${r.key}"><span class="ut-run-lbl">${escHtml(r.label)}</span><span class="ut-run-val">${linesHtml(r.lines)}</span></div>`).join('');
+  const answers = buttons && i.action.askId ? heldAnswers(i) : [];
+  const row = answers.length ? `<div class="ut-exit-answer ut-hub-answer ut-run-answer">${answers.map((a) => `<button type="button" class="ut-act ut-action-exit ut-exit-${a === 'deny' ? 'deny' : 'allow'} ut-hub-${a}" data-answer="${a}">${escHtml(hubAnswerWord(a, t, i.action.type))}</button>`).join('')}${answers.includes('always') ? '' : runHintHtml(v)}</div>` : '';
+  const fold = v.fold.length ? `<details class="ut-detail-exp ut-run-fold"><summary>${escHtml(t('Technical details'))}</summary><div class="ut-run-tech">${v.fold.map((f) => `<div class="ut-run-row"><span class="ut-run-lbl">${escHtml(f.label)}</span><span class="ut-run-val">${f.cmd != null ? `<pre class="ut-run-cmd ut-run-cmd-full">${escHtml(f.cmd)}</pre>` : linesHtml(f.lines)}</span></div>`).join('')}</div></details>` : '';
+  const cut = v.cut ? `<div class="ut-run-cut">${escHtml(v.cut.text)}</div>` : ''; // r8: a command longer than the body's bound says it is a cut (the whole: the fold)
+  return `<div class="ut-run"><pre class="ut-run-cmd">${escHtml(v.cmd)}</pre>${cut}<div class="ut-run-facts">${rows}</div>${row}${fold}</div>`;
+}
+
+/** A CARD WITH A DEADLINE SHOWS IT (r7 addendum): THE model's line (foryou-actions deadlineOf) under the question — «valid for
+ *  60 sec · 42 sec left by the server's clock», the warning accent under 15 s, then «time is up by the server's clock —
+ *  waiting for the server» (its answers KEPT — r8: only the producer's settle withdraws them) or, on a card its producer
+ *  marked late, the late answer's words (the run card: its two buttons stay). The tray row, the chat card (the same row) and
+ *  the For-you window draw it; ONE page ticker re-reads every such line once a second (tickDeadlines).
+ *  A CLOCK IS THE HUB'S (r8): every For-you broadcast and snapshot carries the server's `now`; noteHubClock keeps this tab's
+ *  offset from it and hubNow() is the time every line counts by — never the device's own clock against hub stamps. */
+let hubOffset = 0, hubKnown = false;
+export function noteHubClock(serverNow, at = Date.now()) {
+  const n = Number(serverNow);
+  if (Number.isFinite(n) && n > 0) { hubOffset = n - at; hubKnown = true; }
+  return hubOffset;
+}
+export const hubNow = (at = Date.now()) => at + hubOffset;
+/** r9: whose clock hubNow() is — 'hub' once a snapshot said the server's `now`, else 'device' (an older hub sends none: the
+ *  line then says «by this device's clock», never «by the server's»). */
+export const hubClock = () => (hubKnown ? 'hub' : 'device');
+const deadlineAttrs = (i, d) => `data-deadline-at="${d.at}" data-deadline-from="${d.from}"${i.action && i.action.late ? ' data-deadline-late="1"' : ''}${i.action && i.action.late && i.action.restartLost === true ? ' data-deadline-lost="1"' : ''}`;
+export const deadlineHtml = (i, t, d = deadlineOf(i, { t, now: hubNow(), clock: hubClock() })) => { return d ? `<div class="ut-deadline${d.warn ? ' ut-deadline-warn' : ''}" data-state="${d.state}" ${deadlineAttrs(i, d)}>${escHtml(d.text)}</div>` : ''; };
+/** THE DEADLINE TICKER: ONE interval for the page, armed when a line is drawn, re-reading every `[data-deadline-at]` still in
+ *  the document through deadlineOf at the HUB's time — its words, its accent, its state. It never touches an answer (r8). It
+ *  stops itself when no line is counting: a row taken out of the document takes its line with it — nothing per row to tear
+ *  down (the listener-lifecycle law). → the number of lines still counting. */
+let deadlineTimer = null;
+export function tickDeadlines(root = document, now = hubNow()) {
+  let counting = 0;
+  for (const el of root.querySelectorAll('[data-deadline-at]')) {
+    const late = el.dataset.deadlineLate === '1', lost = el.dataset.deadlineLost === '1';
+    const d = deadlineOf({ status: 'open', kind: 'action', expiresAt: Number(el.dataset.deadlineAt), createdAt: Number(el.dataset.deadlineFrom), action: { type: 'deadline', ...(late ? { late: true } : {}), ...(lost ? { restartLost: true } : {}) } }, { t: tr, now, clock: hubClock() });
+    if (!d) continue;
+    if (el.textContent !== d.text) el.textContent = d.text;
+    el.classList.toggle('ut-deadline-warn', d.warn);
+    if (el.dataset.state !== d.state) el.dataset.state = d.state;
+    if (d.state === 'live') counting++;
+  }
+  return counting;
+}
+export function armDeadlines() {
+  if (deadlineTimer || typeof document === 'undefined' || typeof setInterval !== 'function') return;
+  deadlineTimer = setInterval(() => { let n = 0; try { n = tickDeadlines(document); } catch { n = 0; } if (!n) { clearInterval(deadlineTimer); deadlineTimer = null; } }, 1000);   // a page that cannot be read stops it too
+  if (deadlineTimer && typeof deadlineTimer.unref === 'function') deadlineTimer.unref();   // never what keeps a node test alive
+}
 
 /** lane vault-paste-request: an agent's REQUEST FOR A SECRET — its words (what, what for, where it goes, what the paste does)
  *  shown whole ABOVE its paste box (the exit-ask lesson: never folded below the answer); the box itself is DOM nodes the
@@ -157,7 +258,7 @@ const secretAskHtml = (i, t, detail) => (isSecretAsk(i) ? `<div class="ut-propos
 /** lane browser-propose (2026-09-30): the agent's PROPOSAL, answered where it appears — its words (the card's, line for
  *  line: what Approve runs) ABOVE Approve / Reject, never folded (the exit-ask lesson: a folded detail below the button
  *  read as the whole story). ONE primary (Approve), a quiet Reject; open items only. */
-const PROPOSAL_ACTIONS = ['browser-proposal', 'channel-watch-request', 'channel-api-proposal'];   // B-2198 part 2: a raw-API proposal too   // lane channel-agent-watch: an agent's wake request is answered the same way
+const PROPOSAL_ACTIONS = ['browser-proposal', 'channel-watch-request', 'channel-api-proposal', 'channel-held-digest'];   // r6: a held digest's Deliver / Discard   // B-2198 part 2: a raw-API proposal too   // lane channel-agent-watch: an agent's wake request is answered the same way
 /** lane passkey-ui: a PASSKEY card (`pk-…`) answers with ITS choices (register: Allow once / Not now; sign-in: Allow once /
  *  Always allow / Not now / Never) — the words above them say what the agent may do after; the first = the primary. */
 const PK_CHOICES = ['once', 'always', 'no', 'never'];
@@ -187,7 +288,10 @@ const saveLoginAskHtml = (i, t, detail) => `<div class="ut-proposal-plan">${escH
   + `<button type="button" class="ut-act ut-action-proposal ut-proposal-reject" data-answer="reject">${escHtml(t('Not now'))}</button></div>`;
 const proposalAskHtml = (i, t, detail) => (i && i.action && i.action.type === 'save-login' && /^sl-[0-9a-f]{8}$/.test(String(i.action.id || '')) ? saveLoginAskHtml(i, t, detail) : i && i.action && i.action.type === 'browser-surface' && i.action.id ? surfaceAskHtml(i, t, detail) : i && i.action && i.action.type === 'browser-proposal' && /^pk-[0-9a-f]{8}$/.test(String(i.action.id || '')) ? passkeyAskHtml(i, t, detail) : i && i.action && PROPOSAL_ACTIONS.includes(i.action.type)
   ? `<div class="ut-proposal-plan">${apiChipHtml(apiCardOf(i), t)}${escHtml(detail || '')}</div>${apiTechHtml(apiCardOf(i), t)}`
-    + (i.action.id ? `<div class="ut-exit-answer ut-proposal-answer"><button type="button" class="ut-act ut-action-proposal ut-proposal-approve" data-answer="approve" title="${escHtml(t('Runs exactly what this card says'))}">${escHtml(t('Approve'))}</button><button type="button" class="ut-act ut-action-proposal ut-proposal-reject" data-answer="reject">${escHtml(t('Reject'))}</button></div>` : '') : '');
+    + (i.action.id ? `<div class="ut-exit-answer ut-proposal-answer"><button type="button" class="ut-act ut-action-proposal ut-proposal-approve" data-answer="approve" title="${escHtml(t(verbsOf(i.action.type) ? verbsOf(i.action.type).title : 'Runs exactly what this card says'))}">${decideIcon(i, 'check')}${escHtml(t(verbsOf(i.action.type) ? verbsOf(i.action.type).approve : 'Approve'))}</button><button type="button" class="ut-act ut-action-proposal ut-proposal-reject" data-answer="reject">${decideIcon(i, 'close')}${escHtml(verbsOf(i.action.type) ? t(verbsOf(i.action.type).reject) : PERSON_DECIDES.includes(i.action.type) ? t('Deny') : t('Reject'))}</button></div>` : '') : '');   // r6: a row's own verbs (THE registry's `verbs` — a held digest's Deliver / Discard)
+/** lane wake-approve-card: a decision only a person's click makes (a wake request) wears its verb's icon beside its word —
+ *  Approve ✓ / Deny ✕, theme-coloured (currentColor); every other proposal's buttons stay words. */
+const decideIcon = (i, k) => (i && i.action && PERSON_DECIDES.includes(i.action.type) ? `<span class="ut-decide-ico" aria-hidden="true">${UI_ICONS[k]}</span>` : '');
 
 /** Layer 0 apps (docs/design-app-persistence.zh.md §3.1): an agent's install PROPOSAL, answered where it appears — Install…
  *  opens THE install dialog on the proposal (its fresh plan: every command, the packages, the sizes — nothing runs before
@@ -248,10 +352,12 @@ function partsOf(entry, ctx) {
   const notice = !!entry.notice && !resolved;
   const tail = !!entry.tail;
   // a CLEARED item ("Clear content…", 2026-09-28): its words are the cleared sentence (ctx.wordsOf) — dimmed, in its place
+  const dline = resolved ? null : deadlineOf(i, { t, now: hubNow(), clock: hubClock() }); // r7 addendum: its deadline — r8: at the HUB's time; it never withdraws an answer (the producer's settle does)
   const cls = 'ut-item' + (notice ? ' ut-item-notice' : '') + (resolved ? ' ut-item-resolved' : '') + (resolved && !tail ? ' ut-item-inplace' : '') + (i && i.clearedAt ? ' ut-item-cleared' : '');
   const card = isAppCard(i) ? i.card : null; // design 009: an app install's ONE card (a cleared item has none left)
   const lang = typeof ctx.lang === 'function' ? ctx.lang() : (ctx.lang || 'en');
-  const words = card ? cardWords(card, t, lang).title : ctx.wordsOf(i);
+  const run = card ? null : runCardOf(i, { t }); // r7: the run card's facts — its headline is the row's question
+  const words = card ? cardWords(card, t, lang).title : run ? run.headline : ctx.wordsOf(i);
   const detail = ctx.detailOf(i);
   const rs = !resolved && ctx.replyState ? ctx.replyState(i) : { show: false };
   const dot = resolved
@@ -260,8 +366,9 @@ function partsOf(entry, ctx) {
   // Detail rides behind a collapsed expander (up to 2000 chars of agent context).
   // (an exit ask's detail IS its command — shown whole above its Allow / Deny, never again folded below them)
   const detailHtml = detail && !(i.action && i.action.type === 'exit-run-ask') ? `<details class="ut-detail-exp"><summary>${escHtml(t('detail'))}</summary><div class="ut-detail">${wordsHtml(detail)}</div></details>` : '';
+  const detailOrFacts = run ? `<details class="ut-detail-exp"><summary>${escHtml(t('detail'))}</summary><div class="ut-detail">${runFactsHtml(i, t, { buttons: false })}</div></details>` : detailHtml; // r7: a record with facts never shows the prose (old clients' words)
   // lane browser-propose: an open proposal's words are shown whole ABOVE its Approve (proposalAskHtml) — never folded again below
-  const detailFold = i && i.action && (i.action.type === 'browser-proposal' || i.action.type === 'channel-api-proposal' || HELD_ASKS.includes(i.action.type) || isSecretAsk(i)) && !resolved ? '' : detailHtml; // lane hub-act-ask: shown whole above its answers (design q-046: an automation ask too; lane vault-paste-request: a paste request's words above its box)
+  const detailFold = i && i.action && (i.action.type === 'browser-proposal' || i.action.type === 'channel-api-proposal' || HELD_ASKS.includes(i.action.type) || isSecretAsk(i)) && !resolved ? '' : detailOrFacts; // lane hub-act-ask: shown whole above its answers (design q-046: an automation ask too; lane vault-paste-request: a paste request's words above its box)
   // OPTION CHIPS (design-user-inbox-reply D3a): one click = a reply whose text
   // IS the label. Addressed by INDEX — the label never rides an attribute.
   // lane foryou-honest (P2-3): the chips are ctx.optionsOf's — the agent's options, else its detail's «A …；B …» parsed
@@ -274,11 +381,11 @@ function partsOf(entry, ctx) {
     const replied = i.reply && typeof i.reply.text === 'string' && i.reply.text
       ? ' · ' + escHtml(t('You replied: {text}', { text: i.reply.text.length > REPLY_SNIPPET ? i.reply.text.slice(0, REPLY_SNIPPET) + '…' : i.reply.text })) : '';
     meta = (tail ? `<span class="ut-sess" title="${escHtml(t('Go to this session'))}">${escHtml(ctx.nameFor(i.sessionKey, [i]))}</span> · ` : '')
-      + escHtml(i.status === 'dismissed' ? t('dismissed') : t('done'))
-      + (by ? ' · ' + escHtml(by) : '') + replied
+      + escHtml(statusWords(i, t)) // r3: a hidden pointer reads «hidden — nothing was decided», never «done»
+      + (by ? ' · ' + escHtml(by) : '') + (endCodeOf(i) ? ` · <code class="ut-end-code">${escHtml(endCodeOf(i))}</code>` : '') + replied // r8: an end this client cannot classify — its code, typed
       + (tail ? `<span class="ut-age"> · ${escHtml(agoText(i.resolvedAt || i.createdAt, t))}</span>` : '');
   } else {
-    const exp = notice ? expiresText(i.expiresAt, t) : '';
+    const exp = itemExpiryText(i, t, notice); // a notice's window; r3: a wake ask's lifetime («expires in 7 d»)
     // lane foryou-folds: a row of the tray's attention list (`entry.band`) names its conversation — the bands are flat, no
     // group head — with THE running dot of a real session in front (D1.7: the panel patches it live, never the row)
     const dot = entry.band && typeof i.sessionKey === 'string' && i.sessionKey.includes(':') ? `<span class="ut-live-dot" data-key="${escHtml(i.sessionKey)}" role="img"></span>` : '';
@@ -292,20 +399,28 @@ function partsOf(entry, ctx) {
   // opens it in place — and THIS trailing door keeps the conversation one tap away (a mouse never sees it: style.css); a row
   // RESOLVED in its band slot keeps it (acceptance round 2: nothing left to open — its door is its way to the conversation)
   const go = notice || entry.band ? `<button type="button" class="ut-go" title="${escHtml(t('Go to this session'))}" aria-label="${escHtml(t('Go to this session'))}" data-label="${escHtml(tc('inbox', 'Chat'))}">${UI_ICONS.chat}</button>` : '';
-  const body = `${go}<div class="ut-text">${card ? escHtml(words) : wordsHtml(words)}</div>${askChipsHtml(i, t)}${card ? appCardHtml(i, t, { lang, resolved }) : !resolved ? exitAskHtml(i, t) + hubAskHtml(i, t, detail) + proposalAskHtml(i, t, detail) + appAskHtml(i, t) + grantAskHtml(i, t) + secretAskHtml(i, t, detail) + reconnectHtml(i, t) : ''}${card ? '' : detailFold}${opts}<div class="ut-meta">${meta}</div>`;
+  const deadline = dline ? deadlineHtml(i, t, dline) : ''; // r7 addendum: the time left, under the question
+  const body = `${go}<div class="ut-text">${card ? escHtml(words) : wordsHtml(words)}</div>${deadline}${askChipsHtml(i, t)}${card ? appCardHtml(i, t, { lang, resolved }) : !resolved ? exitAskHtml(i, t) + hubAskHtml(i, t, detail) + proposalAskHtml(i, t, detail) + appAskHtml(i, t) + grantAskHtml(i, t) + secretAskHtml(i, t, detail) + reconnectHtml(i, t) : ''}${card ? '' : detailFold}${opts}<div class="ut-meta">${meta}</div>`;
   // ⤢ = THE For-you window ON this item (design-user-inbox-reply §9: long text at full width, reply / done there)
   // lane foryou-honest (the touch scale): every verb carries its WORD in data-label — a touch screen draws it under the icon
   // (style.css's touch block, ::after — never the button's text, so a title / aria / textContent reader is unchanged)
   const view = `<button class="ut-act ut-view" title="${escHtml(t('Open in the For-you window'))}" aria-label="${escHtml(t('Open in the For-you window'))}" data-label="${escHtml(t('Open'))}">⤢</button>`;
   // design 009: a card's Reply / Mark done / Ignore / Copy / Clear content… live behind its ⋯ (two buttons on its face)
   const more = `<button type="button" class="ut-act ut-more" title="${escHtml(t('More'))}" aria-label="${escHtml(t('More'))}" data-label="${escHtml(t('More'))}">⋯</button>`;
+  // lane wake-approve-card r2: A DECISION ROW HAS TWO VERBS (foryou-actions closersOf) — its Approve / Deny above, no ✓ / ✕
+  // beside them (a generic close was a silent Deny), and no ↺ once decided (a decision is final); r3: A POINTER HIDES — ONE
+  // ✕ «Hide» (no ✓: a pointer is never «done»; hiding decides nothing) and no ↺ once hidden (it comes back by itself)
+  const closers = closersOf(i, resolved);
   const actions = resolved
-    ? `<span class="ut-actions">${view}<button class="ut-act ut-reopen" title="${escHtml(t('Reopen'))}" data-label="${escHtml(t('Reopen'))}">↺</button></span>`
+    ? `<span class="ut-actions">${view}${closers.includes('reopen') ? `<button class="ut-act ut-reopen" title="${escHtml(t('Reopen'))}" data-label="${escHtml(t('Reopen'))}">↺</button>` : ''}</span>`
     : card ? `<span class="ut-actions">${view}${more}</span>`
     : `<span class="ut-actions">${actionBtnHtml(i, t)}${reauthBtnHtml(i, t)}${takeoverBtnHtml(i, t)}${rs.show ? `<button type="button" class="ut-act ut-reply-btn" title="${escHtml(t('Reply'))}" data-label="${escHtml(t('Reply'))}">${UI_ICONS.reply}</button>` : ''}${view}`
-      + `<button class="ut-act ut-done" title="${escHtml(i.open && i.open.done ? t(i.open.done) : t('Handled — mark done'))}" data-label="${escHtml(t('Mark done'))}">✓</button>` // lane foryou-plugin-notices: a door's `done` = what this ✓ does (the plugin applies it)
-      + `<button class="ut-act ut-dismiss" title="${escHtml(t('Dismiss (not going to act on this)'))}" data-label="${escHtml(tc('inbox', 'Dismiss'))}">✕</button></span>`;
-  return { cls, dot, body, actions, sig: cls + '\u0000' + dot + '\u0000' + body + '\u0000' + actions };
+      + (closers.includes('done') ? `<button class="ut-act ut-done" title="${escHtml(i.open && i.open.done ? t(i.open.done) : t('Handled — mark done'))}" data-label="${escHtml(t('Mark done'))}">✓</button>` : '') // lane foryou-plugin-notices: a door's `done` = what this ✓ does (the plugin applies it)
+      + (closers.includes('dismiss') ? `<button class="ut-act ut-dismiss" title="${escHtml(t('Dismiss (not going to act on this)'))}" data-label="${escHtml(tc('inbox', 'Dismiss'))}">✕</button>` : '')
+      + (closers.includes('hide') ? `<button class="ut-act ut-dismiss ut-hide" title="${escHtml(t('Hide — decides nothing; what it points at stays open in the conversation'))}" data-label="${escHtml(t('Hide'))}">✕</button>` : '') + '</span>';
+  // the deadline line's words, accent and state move every second (the ticker's) — the signature reads its facts only
+  const sigBody = deadline ? body.replace(deadline, deadline.replace(/>[^<]*<\/div>$/, '></div>').replace(/ ut-deadline-warn| data-state="[^"]*"/g, '')) : body;
+  return { cls, dot, body, actions, deadline: !!deadline, sig: cls + '\u0000' + dot + '\u0000' + sigBody + '\u0000' + actions };
 }
 
 /** The reply box (design-user-inbox-reply D3b): Enter sends, Shift+Enter is a
@@ -456,6 +571,7 @@ export function renderRow(entry, ctx) {
   el.innerHTML = p.dot + `<div class="ut-body">${p.actions}${p.body}</div>`;
   if (!entry.resolved && isSecretAsk(entry.item)) el.querySelector(':scope > .ut-body').append(secretBoxEl(entry.item));   // lane vault-paste-request: the paste box (DOM nodes)
   el.dataset.sig = p.sig;
+  if (p.deadline) armDeadlines(); // r7 addendum: the line counts down from now
   applyLive(el, entry.item, ctx);
   return el;
 }
@@ -469,6 +585,7 @@ export function patchRow(el, entry, ctx) {
   const p = partsOf(entry, ctx);
   if (el.dataset.sig !== p.sig) {
     const detailOpen = !!el.querySelector(':scope > .ut-body > .ut-detail-exp[open]');
+    const runOpen = !!el.querySelector('.ut-run-fold[open]'); // r7: an open «Technical details» stays open through a repaint
     const reachPicked = (el.querySelector('.ut-ak-reach input:checked') || {}).value || null;   // lane key-instance-scope: a re-render keeps the owner's pick
     let body = el.querySelector(':scope > .ut-body');
     const box = body && body.querySelector(':scope > .ut-reply');
@@ -496,9 +613,11 @@ export function patchRow(el, entry, ctx) {
     }
     if (!keepS && !entry.resolved && isSecretAsk(entry.item)) body.append(secretBoxEl(entry.item));
     if (detailOpen) { const d = body.querySelector(':scope > .ut-detail-exp'); if (d) d.open = true; }
+    if (runOpen) { const d = body.querySelector('.ut-run-fold'); if (d) d.open = true; }
     if (reachPicked) { const r = body.querySelector(`.ut-ak-reach input[value="${reachPicked}"]`); if (r) r.checked = true; }
     el.dataset.sig = p.sig;
   }
+  if (p.deadline) armDeadlines();
   applyLive(el, entry.item, ctx);
   return el;
 }

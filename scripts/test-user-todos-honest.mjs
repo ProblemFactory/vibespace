@@ -279,7 +279,8 @@ console.log('⑥ THE WIRING — every door counts honestly, the row marks, the w
   // + acceptance round 2 (the accordion in the chat): a FOLDED card (.cn-card.cn-fold) is the sheet's folded row — the accordion's
   // own rules, never a bare .cn-card in them (the open card keeps the whole row)
   ok(/\.cn-card :is\(button, \[role="button"\], summary, textarea/.test(blk) && (blk.match(/:is\(#user-todos-popup, \.ut-mini-popover, \.cn-card, #phone-home\)/g) || []).length >= 15 && !/:is\(#user-todos-popup, #phone-home(?:, \.cn-card\.cn-fold)?\)[^{,]*\.cn-card/.test(blk)
-    && (blk.match(/:is\(#user-todos-popup, #phone-home, \.cn-card\.cn-fold\) \.ut-item:not\(\.ut-open\)/g) || []).length === 5 && !/:is\(#user-todos-popup, #phone-home, \.cn-card(?!\.cn-fold)/.test(blk),
+    && (blk.match(/:is\(#user-todos-popup, #phone-home, \.cn-card\.cn-fold\) \.ut-item:not\(\.ut-open\)/g) || []).length === 6 &&   // + lane wake-approve-card r7: a folded row keeps its deadline line («60 秒内有效 · 还剩 42 秒»)
+     !/:is\(#user-todos-popup, #phone-home, \.cn-card(?!\.cn-fold)/.test(blk),
     'the chat\'s needs card takes THE touch scale beside the mini inbox (16 px words, 44 px targets, the detail fold a row) — and the sheet\'s folded row only when FOLDED (.cn-card.cn-fold: the accordion in the chat, acceptance round 2)');
   { const CARD = read('src/lib/chat-needs-card.js'), P2 = read('src/lib/user-todos-panel.js');
     ok(/reconcile: \(container, entries\) => reconcileRows\(container, entries, null, miniCtx, \{ arm: false \}\)/.test(P2) && /const reconcileRows = \(container, entries, head = null, ctx = rowCtx, \{ arm = true \} = \{\}\) => \{\s*reconcileKeyed\(container, entries, \{[\s\S]{0,160}create: \(e\) => renderRow\(e, ctx\), patch: \(row, e\) => patchRow\(row, e, ctx\)/.test(P2) && /this\.app\.foryouRows\?\.reconcile\(rows, \[\{ item: e\.item \}\]\);/.test(CARD) && !/innerHTML = [^;]*ut-text/.test(CARD),

@@ -455,7 +455,8 @@ export function grantAccessBody(app, st, body, { close, target, notify = true, r
         : await put(st.accessUrl, { access, except, base: st.stamp }, 'PUT', again);
       if (!r) return;
       const names = access.map((a) => principalText(a.principal)).join(', ');
-      showToast(access.length ? t('Access saved: {list} — nobody is woken unless you add a notification (Notify…)', { list: names }) : t('Access removed'));
+      const woke = r.wakes && Array.isArray(r.wakes.reactivated) ? r.wakes.reactivated.length : 0;   // r9 (DEFECT 2 — the acceptance: a re-grant that re-activated 2 wakes toasted «nobody is woken»): the write's own answer, read
+      showToast(!access.length ? t('Access removed') : woke ? t('Access saved: {list} — this re-activated {n} wake(s) (a billed turn each time one fires)', { list: names, n: woke }) : t('Access saved: {list} — nobody is woken unless you add a notification (Notify…)', { list: names }));
       base = drawn();
       close();
       return true;
