@@ -183,15 +183,46 @@ export async function takeCspReports(match, { ms = 5000, step = 100, want = 1 } 
  *  of PROBE_KEY_FIELDS (`sample` = the payload's handler text, the browser's ≤ 40-character cut; `source` = the code that
  *  set it; `document` = the app page) and a line must match every one exactly; a key that names fewer throws (it would
  *  take somebody else's report). Called once the reports have landed (a report-uri post takes ~0.4 s): the matching
- *  lines are taken out of this suite's file → { taken, ok } — `ok` = none (a browser that does not report it, Chrome
- *  154) or EXACTLY one. A line that differs in any field is not taken: the suite's legs and the teardown name it, red.
+ *  lines are taken out of this suite's file → { taken, ok, kind, noticed } — `ok` = none (a browser that does not report
+ *  it, Chrome 154) or EXACTLY one; `kind` / `noticed` = the hub's verdict on the taken line (lane csp-mermaid-sites r2:
+ *  the take alone took a NOTICED line as gladly as the sanitizer's — the suite judges them, probeVerdictFault below).
+ *  A line that differs in any field is not taken: the suite's legs and the teardown name it, red.
  *  Never a wider policy, never a dropped probe, never a leg skipped by the browser's version. */
 export const PROBE_KEY_FIELDS = Object.freeze(['directive', 'blocked', 'sample', 'source', 'document']);
 export async function takeProbeCspReport(key, { ms = 0 } = {}) {
   const missing = PROBE_KEY_FIELDS.filter((k) => typeof key?.[k] !== 'string' || !key[k]);
   if (missing.length) throw new Error(`takeProbeCspReport: the key names no ${missing.join(' / ')} — a probe's report is keyed by its own payload`);
   const taken = await takeCspReports((r) => PROBE_KEY_FIELDS.every((k) => r[k] === key[k]), { ms, want: 1 });
-  return { taken, ok: taken.length <= 1 };
+  return { taken, ok: taken.length <= 1, kind: taken[0] ? taken[0].kind || null : null, noticed: !!(taken[0] && taken[0].noticed) };
+}
+/** THE HUB'S VERDICT ON A PROBE THE SANITIZER DROPPED (lane csp-mermaid-sites r2 — merged beside the take, the real-browser
+ *  leg passed whether the hub judged the probe's report the sanitizer's or filed the For-you notice). A browser that
+ *  reports a dropped inline handler (Chrome ≥ REPORTS_DROPPED_HANDLER) files EXACTLY the probe's one line, and the hub
+ *  judged it the sanitizer's parse: kind `sanitizer-parse`, no notice, no page-security notice in For you, and the count
+ *  Diagnostics shows (GET /api/csp-reports — lines) +1 for the sanitizer, +0 for the app page; an older one files none and
+ *  counts none. `probe` = takeProbeCspReport's answer, `major` = the browser's, `forYou` = the hub's open For-you items
+ *  keyed `csp-report`, `count` = { before, after } (the summary before the probe was drawn and once its report landed).
+ *  → '' when so, else what is wrong, in words (the leg prints it, red by name). */
+export const REPORTS_DROPPED_HANDLER = 156;
+export function probeVerdictFault(probe, { major, forYou = [], count = null } = {}) {
+  const n = probe && Array.isArray(probe.taken) ? probe.taken.length : 0, p0 = n ? probe.taken[0] : null, out = [];
+  const reports = Number(major) >= REPORTS_DROPPED_HANDLER;
+  if (reports && n !== 1) out.push(`Chrome ${major} reports a dropped inline handler, and ${n} line(s) of the probe's arrived (want exactly 1)`);
+  if (!reports && n !== 0) out.push(`Chrome ${major} reports no dropped inline handler, yet ${n} line(s) of the probe's arrived`);
+  if (p0 && probe.kind !== 'sanitizer-parse') {
+    let table = null; try { table = require('../src/app-csp.js').PARSE_SCRIPTS; } catch { }
+    const script = (() => { try { return new URL(p0.source).pathname; } catch { return p0.source; } })();
+    out.push(`the hub judged the probe's report the APP page's (kind ${probe.kind || 'none'}), not the sanitizer's parse — set by ${p0.source} at ${p0.line}:${p0.column}; ${table && table.includes(script) ? `${script} is in app-csp PARSE_SCRIPTS, so its parse site is not where the browser reported it` : `${script} is NOT in app-csp PARSE_SCRIPTS (${JSON.stringify(table)}): the CSP judge does not know this sanitizer`}`);
+  }
+  if (p0 && probe.noticed) out.push('the hub filed a For-you notice for it');
+  const notices = (forYou || []).filter((x) => x && x.status !== 'done' && x.status !== 'dismissed');
+  if (notices.length) out.push(`For you holds ${notices.length} page-security notice(s): ${notices.map((x) => `«${x.text}»`).join(' ')}`);
+  if (count) {
+    const d = (side) => (count.after?.[side]?.lines ?? NaN) - (count.before?.[side]?.lines ?? NaN);
+    const want = reports ? 1 : 0;
+    if (d('sanitizer') !== want || d('app') !== 0) out.push(`the count Diagnostics shows moved sanitizer +${d('sanitizer')} / app page +${d('app')} (want +${want} / +0)`);
+  }
+  return out.join('; ');
 }
 /** WHAT a report line names, in words (lane chrome-156-drift — the runner's line «script-src-attr inline, line 1 column
  *  101, source ""» named no element): the directive, the code's own SAMPLE (src/app-csp.js 'report-sample'; a suite's hub

@@ -18,10 +18,13 @@
 //      (MUTANT: the signature cut to the call ⇒ the docx viewer's too, RED); a hostile .md's and an agent's markdown's
 //      reports there ⇒ ONE `sanitizer-parse` line, its own count, NO notice; the CONTROL — the same attribute set by our own
 //      code (file-viewer's innerHTML) — a line and the notice; no sample / another origin / another script / another build /
-//      no bundle ⇒ what a report always was; a hostile MAIL never reaches the parse with a handler (mail-frame step 1);
+//      no bundle ⇒ what a report always was; the CONTROL at the parse site's own LINE, another column ⇒ the app's (a judge
+//      comparing the line alone is red); a hostile MAIL never reaches the parse with a handler (mail-frame step 1);
 //      ⑥c a suite's sanitizer line is printed, never a failure
 //      ⑥d a suite's OWN probe (scratch.mjs takeProbeCspReport, lane ci-mirror-hygiene): its report is taken by its payload
-//      — 156 one, 154 none; a line differing in any field still fails the suite (MUTANT: keyed by directive alone ⇒ RED)
+//      — 156 one, 154 none; a line differing in any field still fails the suite (MUTANT: keyed by directive alone ⇒ RED);
+//      THE HUB'S VERDICT on the taken line (probeVerdictFault, lane csp-mermaid-sites r2): the sanitizer's, no notice,
+//      For you empty, the count +1 ⇒ the suite passes; the line NOTICED on a tree with the table ⇒ RED by name
 //   ③ the route: a fake report lands as ONE line; the duplicate is still one line + ONE notice; the same pair on another
 //      line is a second line and no second notice; a restart re-writes and re-notices nothing; a report from a FRAME the
 //      page made (document about / blob / data) is a line and NO notice (主开发's ruling 2) — the count tells them apart
@@ -32,7 +35,11 @@
 //      notice again); mermaid.js's site pinned on its symbol map; the test-chat-mermaid-chrome ⑦ label's report AT it ⇒ the
 //      sanitizer's line, no notice; the CONTROL — the same directive from mermaid.js at ANOTHER line ⇒ the app's line and
 //      its notice; another build / the bundle's stamp / the bundle's site named in mermaid.js (and the reverse) / no
-//      mermaid.js on disk ⇒ the notice — each script by its own `?v=` and its own sites
+//      mermaid.js on disk ⇒ the notice — each script by its own `?v=` and its own sites. r2: the CONTROL at the parse
+//      site's own LINE, another column ⇒ the app's; a stale tab's import redirected to the file's own stamp ⇒ the report
+//      from there is the sanitizer's; both scripts at ONE stamp through ONE sink ⇒ each judged by its own sites; A HUB THAT
+//      MET THE BUG (the old judge's line + its notice in the real For-you store) ⇒ its first boot re-judges the line, closes
+//      the notice, says so once; the next boot says nothing; the pair files again for a real report
 //   ④ bounds: a 10 MB body ⇒ 413 and nothing lands; not a report type ⇒ 415; the 61st post a minute from one address ⇒ 429;
 //      (a repeat is never paced); past 1 MB the file rotates to .1; ≤ 10 new pairs a day file
 //   ⑤ the app page (server.js's index route, verbatim): the report-only header with the pinned directives; the ENFORCING
@@ -346,6 +353,27 @@ console.log('③d a handler the sanitizer\'s inert parse set and dropped is `san
     ok(l.length === 2 && l[0].kind === C.KIND_SANITIZER && !l[1].kind && H.added.length === 1, `the release build (${builds.release.site.join(':')}): its own parse site is the sanitizer's; the suites' position on it is not (a notice)`, l);
     await H.close();
   }
+  /** a position on the parse site's OWN line, another column — DOMPurify's nearest own write there (innerHTML /
+   *  setAttribute), else the next column: what a judge comparing the line alone would call the sanitizer's */
+  const sameLine = (js, [l0, c0]) => {
+    const re = /\r\n?|[\n\u2028\u2029]/g; let start = 0;
+    for (let l = 1; l < l0; l++) { const m = re.exec(js); if (!m) break; start = m.index + m[0].length; }
+    re.lastIndex = start; const end = re.exec(js), line = js.slice(start, end ? end.index : js.length);
+    const cols = [...allAt(line, '.innerHTML', 1), ...allAt(line, '.setAttribute(', 1)].map((i) => i + 1).filter((c) => c !== c0);
+    cols.sort((a, b) => Math.abs(a - c0) - Math.abs(b - c0));
+    return [l0, cols.length ? cols[0] : c0 + 1];
+  };
+  // THE COLUMN (lane csp-mermaid-sites r2 — every control above sits on ANOTHER line, so a judge comparing the line alone
+  // passed them all): the same handler at the parse site's own line, another column ⇒ the app's line and its notice
+  {
+    const V3 = String(Math.floor(fs.statSync(BUNDLE).mtimeMs)), at = sameLine(builds.release.js, builds.release.site);
+    const DL = path.join(ROOT, 'sanitizer', 'column', 'data'); fs.mkdirSync(DL, { recursive: true });
+    const H = await hub({ dir: DL, publicDir: PUB });
+    await post(H, handler('window.__pwned=14', at, { 'source-file': `${ORIGIN}/bundle.js?v=${V3}` }));
+    const l = linesOf(path.join(DL, SINK.FILE));
+    ok(at[0] === builds.release.site[0] && at[1] !== builds.release.site[1] && l.length === 1 && !l[0].kind && l[0].noticed === true && H.added.length === 1, `CONTROL — the release bundle's parse LINE at another column (${at.join(':')}, the site ${builds.release.site.join(':')}) ⇒ the app's line and its notice`, { at, l });
+    await H.close();
+  }
 
   // ── ③e EVERY SANITIZER THE APP SHIPS (lane csp-mermaid-sites) ──
   // The diagram library bundles its OWN DOMPurify (public/mermaid.js — src/lib/mermaid-render.js imports it lazily, stamped
@@ -419,6 +447,7 @@ console.log('③d a handler the sanitizer\'s inert parse set and dropped is `san
     const LABEL = 'window.__pwned=1'; // the handler of test-chat-mermaid-chrome ⑦'s probe label
     // a handler mermaid's OWN code would set elsewhere: one of its innerHTML writes, on another line than the parse
     const mOther = posOf(mer.js, allAt(mer.js, '.innerHTML', 1)).find(([l]) => l !== mSite[0]);
+    const mSame = sameLine(mer.js, mSite); // …and on the parse's own line, another column (r2)
     const PROBE = handler(LABEL, mSite, from('/mermaid.js', VM));
     const [pr] = C.reportsOf(JSON.stringify(PROBE), { site: true });
     ok(VB !== VM && mOther && pr && pr.site && pr.site.script === '/mermaid.js' && pr.site.v === VM && pr.site.line === mSite[0] && pr.site.column === mSite[1] && !('sample' in pr), 'reportOf(…, { site: true }) names WHICH script set it — /mermaid.js, its own ?v= (not the bundle\'s), line, column — and still no sample', { pr, VB, VM, mOther });
@@ -436,12 +465,21 @@ console.log('③d a handler the sanitizer\'s inert parse set and dropped is `san
     const CASES = [
       ['the hostile diagram label\'s report AT mermaid.js\'s own parse site ⇒ the SANITIZER\'s: one `sanitizer-parse` line, NO For-you notice, counted apart', PROBE, SANITIZER],
       ['CONTROL — the same directive and handler from mermaid.js at ANOTHER line (one of its own innerHTML writes) ⇒ the app\'s: a line and its For-you notice', handler(LABEL, mOther, from('/mermaid.js', VM)), APP],
+      [`CONTROL — the same directive and handler from mermaid.js at the parse site's own LINE, another column (${mSame.join(':')}, the site ${mSite.join(':')}) ⇒ the app's: a line and its For-you notice`, handler(LABEL, mSame, from('/mermaid.js', VM)), (j) => mSame[0] === mSite[0] && mSame[1] !== mSite[1] && APP(j)],
       ['mermaid.js on ANOTHER build (its ?v= is not the file on disk) ⇒ not read: the notice', handler(LABEL, mSite, from('/mermaid.js', '1')), (j) => APP(j) && j.stats.otherBuild === 1],
       ['mermaid.js stamped with the BUNDLE\'s ?v= ⇒ another build of mermaid.js (each script by its own stamp): the notice', handler(LABEL, mSite, from('/mermaid.js', VB)), (j) => APP(j) && j.stats.otherBuild === 1],
       ['the bundle\'s parse site named in mermaid.js ⇒ not mermaid\'s (each script its own sites, never a union): the notice', handler(LABEL, bSite, from('/mermaid.js', VM)), APP],
       ['mermaid.js\'s parse site named in the bundle ⇒ not the bundle\'s: the notice', handler(LABEL, mSite, from('/bundle.js', VB)), APP],
       ['the bundle\'s own parse site beside mermaid.js on disk ⇒ still the sanitizer\'s', handler(LABEL, bSite, from('/bundle.js', VB)), SANITIZER],
     ];
+    // a STALE TAB (r2): its /mermaid.js address was stamped when its page loaded; the file on disk is newer — the import is
+    // redirected to the file's own stamp (static-public ownStamp), the address a report then names ⇒ the sanitizer's
+    const SP = require(path.join(REPO, 'src/server/static-public.js'));
+    const to = typeof SP.ownStamp === 'function' ? SP.ownStamp(PUB, { method: 'GET', path: '/mermaid.js', query: { v: '1' } }) : null;
+    CASES.push([`a stale tab's import of /mermaid.js?v=1 is redirected to the file's own stamp (${to}) — the stamp the sink reads — and the report from there ⇒ the sanitizer's`, handler(LABEL, mSite, { 'source-file': `${ORIGIN}${to}` }), (j) => to === `/mermaid.js?v=${VM}` && SANITIZER(j)]);
+    // the shape Chrome 156 posts (measured, r2 — repro/r2/redirect-probe.mjs under the app's own policy): source-file with
+    // NO query, for a classic script, a module and a redirected module alike ⇒ no stamp to read: the file on disk is judged
+    CASES.push(['the report as Chrome 156 posts it — source-file /mermaid.js with no ?v= (Chrome drops the query) ⇒ judged against the file on disk: the sanitizer\'s', handler(LABEL, mSite, { 'source-file': `${ORIGIN}/mermaid.js` }), SANITIZER]);
     for (const [why, body, want] of CASES) { const j = await judge(body); ok(want(j), why, j); }
     {
       // no mermaid.js on disk (a public/ with the bundle only): its report keeps the notice, the bundle's is still judged
@@ -450,6 +488,23 @@ console.log('③d a handler the sanitizer\'s inert parse set and dropped is `san
       const VB2 = String(Math.floor(fs.statSync(path.join(P2, 'bundle.js')).mtimeMs));
       const a = await judge(PROBE, { publicDir: P2 }), b = await judge(handler(LABEL, bSite, from('/bundle.js', VB2)), { publicDir: P2 });
       ok(APP(a) && SANITIZER(b), 'no mermaid.js on disk ⇒ its report is what it always was (a line + its notice); the bundle beside it is still judged', { a, b });
+    }
+    {
+      // THE PER-SCRIPT CACHE (r2 — each case above is a fresh hub, the two stamps an hour apart, so ONE slot keyed by the
+      // stamp alone passed them all): both scripts at the SAME stamp, through ONE sink, in turn — each by its own sites
+      const P3 = path.join(ROOT, 'mermaid', 'same-stamp', 'public'); fs.mkdirSync(P3, { recursive: true });
+      const b3 = path.join(P3, 'bundle.js'), m3 = path.join(P3, 'mermaid.js');
+      fs.copyFileSync(BUNDLE, b3); fs.copyFileSync(MJS, m3);
+      const tS = new Date(Math.floor(Date.now() / 1000) * 1000); fs.utimesSync(b3, tS, tS); fs.utimesSync(m3, tS, tS);
+      const VS = String(Math.floor(fs.statSync(b3).mtimeMs));
+      const D = path.join(ROOT, 'mermaid', 'same-stamp', 'data'); fs.mkdirSync(D, { recursive: true });
+      const H = await hub({ dir: D, publicDir: P3 });
+      const seq = [['mermaid.js\'s parse', mSite, '/mermaid.js', 'S'], ['the bundle\'s parse', bSite, '/bundle.js', 'S'], ['mermaid.js\'s site named in the bundle', mSite, '/bundle.js', 'A'], ['the bundle\'s site named in mermaid.js', bSite, '/mermaid.js', 'A'], ['mermaid.js\'s parse again', mSite, '/mermaid.js', 'S']];
+      let got = '';
+      for (const [, at, script] of seq) { const s0 = H.sink.stats().sanitizer; await post(H, handler(LABEL, at, from(script, VS))); got += H.sink.stats().sanitizer > s0 ? 'S' : 'A'; }
+      const want = seq.map((x) => x[3]).join('');
+      ok(String(Math.floor(fs.statSync(m3).mtimeMs)) === VS && got === want && H.added.length === 1, `both scripts at ONE stamp (?v=${VS}) through ONE sink: ${seq.map((x, i) => `${x[0]} ⇒ ${got[i] === 'S' ? 'the sanitizer\'s' : 'the app\'s'}`).join(' · ')} — each script by its own sites (one entry per script, never per stamp)`, { got, want, notices: H.added.length });
+      await H.close();
     }
     {
       // THE PLANTED REMOVAL: /mermaid.js cut from the table ⇒ the census names it, and behind the REAL sink's code the
@@ -464,6 +519,40 @@ console.log('③d a handler the sanitizer\'s inert parse set and dropped is `san
       const MS = load(path.join(MD, 'server', 'csp-reports.js'), readRepo('src/server/csp-reports.js')); // its require('../app-csp.js') = the mutant
       const j = await judge(PROBE, { sinkModule: MS });
       ok(APP(j), 'MUTANT (/mermaid.js cut from the table) ⇒ RED: behind the real sink\'s code the hostile diagram\'s report files a For-you notice again', j);
+    }
+    {
+      // A HUB THAT MET THE BUG (r2 — the upgrade): .351–.361's judge (the table without /mermaid.js — the planted removal's
+      // sink above) took the probe as the app page's: its line `noticed`, its notice open in the REAL For-you store; the
+      // first boot of this judge over the same data/ re-judges it — the line the sanitizer's, the notice closed, said ONCE
+      const { UserTodoManager } = require(path.join(REPO, 'src/user-todos.js'));
+      const DU = path.join(ROOT, 'upgrade', 'data'); fs.mkdirSync(DU, { recursive: true });
+      const FU = path.join(DU, SINK.FILE);
+      const store = new UserTodoManager({ dataDir: DU, expirySweepMs: 0 });
+      const open = () => store.idsWhere((i) => i.sessionKey === SINK.NOTICE_KEY && i.status === 'open').length;
+      const said = [];
+      const at = (o = {}) => ({ dir: DU, publicDir: PUB, getUserTodos: () => store, log: { log: (s) => said.push(String(s)), warn: (s) => said.push(String(s)) }, ...o });
+      const OLD = load(path.join(ROOT, 'mutant-table', 'src', 'server', 'csp-reports.js'), readRepo('src/server/csp-reports.js'));
+      const H0 = await hub(at({ sinkModule: OLD }));
+      await post(H0, PROBE); await post(H0, handler(LABEL, mOther, from('/mermaid.js', VM)));
+      await H0.close();
+      const was = linesOf(FU);
+      ok(was.length === 2 && was.every((l) => !l.kind) && was[0].noticed === true && !was[1].noticed && open() === 1, 'the hub on the OLD judge: the probe\'s line the app page\'s, noticed, its notice open in For you (and an app line on another line of mermaid.js)', { was, open: open() });
+      said.length = 0;
+      const H1 = await hub(at());
+      const r1 = typeof H1.sink.rejudge === 'function' ? await H1.sink.rejudge() : { lines: 0, closed: 0, why: 'the sink has no re-judge' }, now1 = linesOf(FU), s1 = H1.sink.summary();
+      ok(r1.lines === 1 && r1.closed === 1 && now1.length === 2 && now1[0].kind === C.KIND_SANITIZER && !now1[0].noticed && !!now1[0].rejudged && !now1[1].kind && open() === 0 && s1.app.lines === 1 && s1.sanitizer.lines === 1 && said.filter((s) => /re-judged/.test(s)).length === 1,
+        'THE UPGRADE\'S FIRST BOOT: the probe\'s line re-judged the sanitizer\'s (`rejudged`, no `noticed`), its For-you notice CLOSED, Diagnostics\' «on the app page» down by it and the sanitizer\'s up; the other line stays the app page\'s; said once', { r1, now1, s1, said, open: open() });
+      await post(H1, PROBE);
+      ok(linesOf(FU).length === 2 && open() === 0, 'the same probe again ⇒ the sanitizer\'s, a duplicate: no line, no notice', { lines: linesOf(FU), open: open() });
+      await H1.close();
+      said.length = 0;
+      const H2 = await hub(at());
+      const r2 = typeof H2.sink.rejudge === 'function' ? await H2.sink.rejudge() : { lines: 0, closed: 0, why: 'the sink has no re-judge' };
+      ok(r2.lines === 0 && !said.some((s) => /re-judged/.test(s)) && H2.sink.summary().sanitizer.lines === 1 && H2.sink.summary().app.lines === 1, 'the NEXT boot: nothing to re-judge, nothing said (said ONCE)', { r2, said });
+      await post(H2, handler(LABEL, mSame, from('/mermaid.js', VM)));
+      ok(open() === 1, 'the pair is free again: a real app-page report (mermaid.js\'s parse line, another column) files its notice', open());
+      await H2.close();
+      store.stop();
     }
   }
 }
@@ -651,21 +740,34 @@ console.log('⑥d a suite\'s own probe: its report is taken by its payload (take
   const SCR = path.join(REPO, 'scripts', 'scratch.mjs'), O = 'http://127.0.0.1:1';
   const KEY = { directive: 'script-src-attr', blocked: 'inline', sample: 'window.__pwned=1', source: `${O}/mermaid.js`, document: `${O}/` };
   const PROBE = { at: 'x', ...KEY, line: 2, column: 10038, disposition: 'report', noticed: true };
-  const child = (name, lines, key = KEY, scr = SCR) => {
+  const SAN = (({ noticed, ...l }) => ({ ...l, kind: 'sanitizer-parse' }))(PROBE); // the hub's verdict since csp-mermaid-sites
+  const child = (name, lines, key = KEY, scr = SCR, judge = null) => {
     const f = path.join(dir, name);
     fs.writeFileSync(f, `const S = await import(${JSON.stringify(scr)});\n`
       + `const file = process.env[S.CSP_REPORTS_ENV];\n`
       + `const fs = await import('node:fs'); const path = await import('node:path'); fs.mkdirSync(path.dirname(file), { recursive: true });\n`
       + `for (const l of ${JSON.stringify(lines)}) fs.appendFileSync(file, JSON.stringify(l) + '\\n');\n`
-      + `try { const t = await S.takeProbeCspReport(${JSON.stringify(key)}); console.log('TAKE ' + JSON.stringify({ n: t.taken.length, ok: t.ok, samples: t.taken.map((r) => r.sample) })); } catch (e) { console.log('THREW ' + e.message); }\n`
+      + `try { const t = await S.takeProbeCspReport(${JSON.stringify(key)}); console.log('TAKE ' + JSON.stringify({ n: t.taken.length, ok: t.ok, kind: t.kind, noticed: t.noticed, samples: t.taken.map((r) => r.sample) }));`
+      + (judge ? ` const f = S.probeVerdictFault(t, ${JSON.stringify(judge)}); if (f) { console.log('FAULT ' + f); process.exit(1); }` : '') + ` } catch (e) { console.log('THREW ' + e.message); }\n`
       + `console.log('ALL PASS (1)'); process.exit(0);\n`);
     const r = spawnSync(process.execPath, [f], { encoding: 'utf8', env: { ...process.env, VIBESPACE_CSP_REPORTS_FILE: '' } });
     const take = (/^TAKE (.+)$/m.exec(r.stdout) || [])[1];
-    return { rc: r.status, take: take ? JSON.parse(take) : null, threw: (/^THREW (.+)$/m.exec(r.stdout) || [])[1] || null, out: r.stdout + r.stderr };
+    return { rc: r.status, take: take ? JSON.parse(take) : null, threw: (/^THREW (.+)$/m.exec(r.stdout) || [])[1] || null, fault: (/^FAULT (.+)$/m.exec(r.stdout) || [])[1] || null, out: r.stdout + r.stderr };
   };
-  const p156 = child('test-csp-child-probe-156.mjs', [PROBE]), p154 = child('test-csp-child-probe-154.mjs', []);
-  ok(p156.rc === 0 && p156.take?.n === 1 && p156.take.ok && !/CSP: the app page reported/.test(p156.out), 'a browser that reports the probe\'s dropped handler (Chrome 156): its ONE line is taken by the payload and the suite passes', p156);
-  ok(p154.rc === 0 && p154.take?.n === 0 && p154.take.ok, 'a browser that reports nothing (Chrome 154): nothing taken and ok — the leg is never skipped by a version', p154);
+  const Z = { sanitizer: { lines: 0 }, app: { lines: 0 } }, S1 = { sanitizer: { lines: 1 }, app: { lines: 0 } };
+  const J156 = { major: 156, forYou: [], count: { before: Z, after: S1 } }, J154 = { major: 154, forYou: [], count: { before: Z, after: Z } };
+  const p156 = child('test-csp-child-probe-156.mjs', [SAN], KEY, SCR, J156), p154 = child('test-csp-child-probe-154.mjs', [], KEY, SCR, J154);
+  ok(p156.rc === 0 && p156.take?.n === 1 && p156.take.ok && p156.take.kind === 'sanitizer-parse' && p156.take.noticed === false && !p156.fault && !/CSP: the app page reported/.test(p156.out), 'a browser that reports the probe\'s dropped handler (Chrome 156): its ONE line is taken by the payload, THE HUB\'S VERDICT the sanitizer\'s (kind sanitizer-parse, no notice, For you empty, the count +1) — the suite passes', p156);
+  ok(p154.rc === 0 && p154.take?.n === 0 && p154.take.ok && !p154.fault, 'a browser that reports nothing (Chrome 154): nothing taken, nothing counted, ok — the leg is never skipped by a version', p154);
+  // THE r1 PIN, TURNED (lane csp-mermaid-sites r2 — it said a NOTICED probe line passes): the hub filed the probe's report as
+  // the app page's, on a tree whose table names /mermaid.js ⇒ RED by name — the verdict, the notice, For you, the count
+  const pn = child('test-csp-child-probe-156-noticed.mjs', [PROBE], KEY, SCR, { major: 156, forYou: [{ text: 'The page security policy would block script-src-attr: inline', status: 'open' }], count: { before: Z, after: { sanitizer: { lines: 0 }, app: { lines: 1 } } } });
+  ok(pn.rc === 1 && pn.take?.n === 1 && pn.take.noticed === true && /the hub judged the probe's report the APP page's \(kind none\)/.test(pn.fault || '') && /\/mermaid\.js is in app-csp PARSE_SCRIPTS/.test(pn.fault || '') && /filed a For-you notice/.test(pn.fault || '') && /For you holds 1 page-security notice/.test(pn.fault || '') && /sanitizer \+0 \/ app page \+1/.test(pn.fault || '') && C.PARSE_SCRIPTS.includes('/mermaid.js'),
+    'the probe\'s line NOTICED (the hub judged it the app page\'s) on a tree with the table ⇒ RED by name: «' + (pn.fault || '').slice(0, 160) + '…»', pn.fault || pn);
+  const { probeVerdictFault } = await import(SCR);
+  const V = (taken, o) => (typeof probeVerdictFault !== 'function' ? 'scratch.mjs has no probeVerdictFault' : probeVerdictFault({ taken, ok: taken.length <= 1, kind: taken[0] ? taken[0].kind || null : null, noticed: !!(taken[0] && taken[0].noticed) }, o));
+  ok(/arrived \(want exactly 1\)/.test(V([], J156)) && /reports no dropped inline handler, yet 1/.test(V([SAN], J154)) && /moved sanitizer \+0 \/ app page \+0 \(want \+1 \/ \+0\)/.test(V([SAN], { ...J156, count: { before: Z, after: Z } })) && !V([SAN], J156) && !V([], J154),
+    'probeVerdictFault: Chrome 156 with no probe line, 154 with one, the count not +1 ⇒ each named; the sanitizer\'s line on 156 and none on 154 ⇒ \'\'');
   const near = [{ ...PROBE, sample: 'window.__pwned=2', line: 3 }, { ...PROBE, source: `${O}/bundle.js`, line: 4 }, { ...PROBE, document: 'about', line: 5 }];
   const other = child('test-csp-child-probe-other.mjs', [PROBE, ...near]);
   ok(other.rc === 1 && other.take?.n === 1 && /CSP: the app page reported 3 thing/.test(other.out) && /«window\.__pwned=2»/.test(other.out) && /code in http:\/\/127\.0\.0\.1:1\/bundle\.js/.test(other.out),
@@ -926,13 +1028,13 @@ console.log('⑨ the source map beside the bundle is served to nobody (lane vaul
     const dir = path.join(ROOT, 'static-' + Math.random().toString(16).slice(2)); fs.mkdirSync(path.join(dir, 'public'), { recursive: true });
     fs.writeFileSync(path.join(dir, 'public', 'index.html'), '<!doctype html><html><head><link rel="stylesheet" href="/style.css"></head><body><script src="/bundle.js"></script></body></html>');
     fs.writeFileSync(path.join(dir, 'public', 'style.css'), 'b{}'); fs.writeFileSync(path.join(dir, 'public', 'bundle.js'), 'var x=1;');
-    fs.writeFileSync(path.join(dir, 'public', 'bundle.js.map'), MAP_BYTES);
+    fs.writeFileSync(path.join(dir, 'public', 'bundle.js.map'), MAP_BYTES); fs.writeFileSync(path.join(dir, 'public', 'mermaid.js'), 'export default 1;');
     const app = express();
     const req = (m) => (m === './src/server/static-public.js' ? mod : require(m.startsWith('./') ? path.join(REPO, m) : m));
     new Function('app', 'require', 'path', 'fs', '__dirname', 'cspReports', `${indexRoute}\n${staticLine}`)(app, req, path, fs, dir, { header: () => ['X-Probe', '1'] });
     app.get('/dav/notes.map', (q, r) => r.type('text').send('a later route keeps its own .map path'));
     const srv = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
-    return { port: srv.address().port, close: () => new Promise((c) => srv.close(c)) };
+    return { port: srv.address().port, dir, close: () => new Promise((c) => srv.close(c)) };
   };
   const P = await serve(SP);
   const js = await get(P.port, '/bundle.js'), css = await get(P.port, '/style.css'), page = await get(P.port, '/');
@@ -943,6 +1045,14 @@ console.log('⑨ the source map beside the bundle is served to nobody (lane vaul
   const later = await get(P.port, '/dav/notes.map');
   ok(later.status === 200 && /keeps its own/.test(later.text), 'a later route\'s own .map path still answers (a WebDAV file, a proxied page)', later.status);
   ok(page.status === 200 && /bundle\.js\?v=\d+/.test(page.text) && !/\.map/.test(page.text), 'the page names the bundle with its ?v= stamp and no map', page.text.slice(0, 200));
+  // A SCRIPT WITH A SANITIZER IS SERVED UNDER ITS OWN STAMP (lane csp-mermaid-sites r2): a `?v=` naming another build ⇒ a
+  // redirect to the file's own — the index route's stamp — so the address a CSP report names is the bytes that ran
+  const own = (/bundle\.js\?v=(\d+)/.exec(page.text) || [])[1], mown = String(Math.floor(fs.statSync(path.join(P.dir, 'public', 'mermaid.js')).mtimeMs));
+  const r9 = {};
+  for (const [k, p] of [['stale', '/mermaid.js?v=1'], ['fresh', `/mermaid.js?v=${mown}`], ['bare', '/mermaid.js'], ['bstale', '/bundle.js?v=1'], ['bfresh', `/bundle.js?v=${own}`], ['css', '/style.css?v=1']]) { const r = await get(P.port, p); r9[k] = { status: r.status, location: r.headers && r.headers.location, cache: r.headers && r.headers['cache-control'], text: r.text.slice(0, 40) }; }
+  ok(r9.stale.status === 302 && r9.stale.location === `/mermaid.js?v=${mown}` && /no-store/.test(r9.stale.cache || '') && r9.bstale.status === 302 && r9.bstale.location === `/bundle.js?v=${own}`
+    && r9.fresh.status === 200 && r9.fresh.text === 'export default 1;' && r9.bare.status === 200 && r9.bfresh.status === 200 && r9.css.status === 200,
+    `a script with a sanitizer under ANOTHER build's ?v= ⇒ 302 to its own, no-store (/mermaid.js?v=1 → ${r9.stale.location}; /bundle.js?v=1 → the index route's ?v=); its own ?v=, no ?v=, another file (style.css?v=1) ⇒ served as before`, r9);
   await P.close();
   const cut = fs.readFileSync(SP_PATH, 'utf8').replace('return (req, res, next) => (buildOnly(req.path) ? next() : serve(req, res, next));', 'return serve;');
   const M = await serve(load(SP_PATH, cut));

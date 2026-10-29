@@ -151,8 +151,8 @@ const PARSE_SCRIPTS = Object.freeze(['/bundle.js', '/mermaid.js']);
 
 /** WHERE a sanitizer-parse CANDIDATE was set, or null: a script-src-attr `inline` report whose sample is a handler's code,
  *  set by one of the page's own PARSE_SCRIPTS (same origin as the document) at a line and column → { script, v, line,
- *  column } (`script` = its served path, `v` = the build the page loaded, its `?v=`, or null). Numbers and a table row
- *  only — the sink reads THAT script there; never stored. */
+ *  column } (`script` = its served path, `v` = the build its address names, its `?v=`, or null — Chrome 156 posts no
+ *  query). Numbers and a table row only — the sink reads THAT script there; never stored. */
 function siteOf(r, directive, blocked) {
   if (directive !== 'script-src-attr' || blocked !== 'inline' || !clean(r['script-sample'] ?? r.sample)) return null;
   const line = numOf(r['line-number'] ?? r.lineNumber), column = numOf(r['column-number'] ?? r.columnNumber);

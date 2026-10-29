@@ -5,7 +5,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 ## 2.369.362 — 2026-10-29
 
 ### Fixed
-- A diagram with a hostile label no longer files a security notice in For you on newer Chrome — the sanitizer's own check is recognised as such.
+- A diagram with a hostile label no longer files a security notice in For you on newer Chrome, and a notice an earlier version filed for it is closed.
 
 ## 2.369.361 — 2026-10-29
 
