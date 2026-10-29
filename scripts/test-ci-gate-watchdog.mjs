@@ -131,7 +131,7 @@ await new Promise(() => {});
   ]);
   const file = path.join(hangDir, 'fedcba98.test-planted-watchdog.1.hang.json'), tail = nw.lines[1] || '';
   console.log([nw.lines[0].trim(), ...tail.split('\n').filter((l) => /WATCHDOG|\[watchdog\]|\[hang\]/.test(l))].map((l) => '      ' + l).join('\n'));
-  ok(!nw.ok && nw.ms < 4000 && !/ETIMEDOUT|SIGUSR2|SIGTERM/.test(nw.lines[0]) && nw.lines[0].endsWith(` — hang report (the suite's own watchdog): ${file}`) && nw.hangReport === file,
+  ok(!nw.ok && nw.ms < 4000 && !/ETIMEDOUT|SIGUSR2|SIGTERM/.test(nw.lines[0]) && nw.lines[0].trim().split('\n')[0].endsWith(` — hang report (the suite's own watchdog): ${file}`) && nw.hangReport === file,
     `the planted hang ends at ITS clock (${nw.ms} ms of a 4 s row, exit 1 — the gate never asked, no SIGUSR2) and the ✗ row names the report the suite wrote`);
   ok(/✗ WATCHDOG at 3\.\d s \(the gate's budget 4\.0 s − 0\.4 s\) — in ② planted: an until that never resolves, \d\.\d s into it/.test(tail) && tail.includes('[watchdog] its last line: · waiting for an answer nobody sends') && tail.includes('[watchdog] waiting on: the planted answer'),
     'its output ends with the leg it was in (②, not the first leg), its last line, and what it waited on');

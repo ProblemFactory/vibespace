@@ -62,6 +62,20 @@ jobs:
         env:
           # claude setup-token secret; absent on fork PRs → chat E2E SKIPs
           VIBESPACE_CI_OAT: ${{ secrets.VIBESPACE_CI_OAT }}
+      # A RED FAST SUITE IS READ, NOT GUESSED AT (lane ci-mirror-hygiene, 2.369.362): 2.369.361's fast job said
+      # «test-pool-auto 4 FAILED (667 passed)» and named no leg — its ✗ lines sat above the 40 lines a row keeps, and
+      # this job uploaded nothing. ci.mjs now prints every ✗ line of a red suite before its tail and keeps the suite's
+      # whole output in data/ci-fast/fail-logs/ (a hang report's digest in it); it ships like the heavy shards' fail
+      # logs, failure only (test-ci-gate §2i).
+      - name: Upload the failed fast suite's whole log (failure only)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        timeout-minutes: 5
+        with:
+          name: ci-fast-fail-logs-${{ github.sha }}
+          path: data/ci-fast/fail-logs/*.log
+          if-no-files-found: ignore
+          retention-days: 7
   # HOSTED HALF ONLY (lane ci-aidev-desktop-batch, design q-038 step ①,
   # 2026-10-14): `--host=hosted` runs the heavy suites a hosted runner CAN run
   # (scripts/ci.mjs HOSTS — derived from the programs each suite's code names);

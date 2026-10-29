@@ -17,7 +17,8 @@
 //     SVG through the real sanitizer vs DOMPurify's plain SVG profile (a blank tab): what each keeps
 //   ⑧ the editor's Markdown preview of a .md with the same flowchart draws it · ⑨ the file viewer's markdown (by URL) too
 //   ⑩ the light theme re-draws the cards light · ⑪ a diagram naming a picture on another host is NOT drawn and fetches
-//     nothing · ⑫ every request the page made went to the hub (mermaid.js once, stamped ?v=) · zero CSP reports (scratch.mjs)
+//     nothing · ⑫ every request the page made went to the hub (mermaid.js once, stamped ?v=) · zero CSP reports (scratch.mjs) but
+//     ⑦'s own: a browser that reports a dropped inline handler (Chrome ≥ 156) files the probe's — expected by its payload
 // PNGs: $VIBESPACE_CMM_PNG_DIR/{chat-dark,chat-source,chat-failed,chat-light,editor-preview,zoom-window}.png
 import { spawn, execSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -25,7 +26,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { freePorts, scratch, scratchHome, fixtureSid, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, evalInBlankTab, CSP_REPORTS_FILE } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, fixtureSid, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, evalInBlankTab, CSP_REPORTS_FILE, takeProbeCspReport } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const WebSocket = require(path.join(repo, 'node_modules', 'ws'));
@@ -52,6 +53,7 @@ const FLOW = 'flowchart TD\n  A[Start] --> B{Is it?}\n  B -->|Yes| C[OK]\n  C --
 const LABELS = ['Start', 'Is it?', 'OK', 'Rethink', 'End', 'Done'];
 const BAD = 'flowchart TD\n  A --> B\n  B --> [oops\n  C --> D';
 const PROBE = '%%{init: {"flowchart": {"htmlLabels": true}, "htmlLabels": true, "securityLevel": "loose", "themeCSS": "body{display:none}"}}%%\nflowchart LR\n  A["<img src=x onerror=window.__pwned=1>"] --> B[b]\n  B --> C["<a href=\'javascript:window.__pwned=2\'>c</a>"]\n  click A "javascript:window.__pwned=3"\n  click B call alert(1)\n  click C href "javascript:window.__pwned=4"';
+const PROBE_HANDLER = /onerror=([^>"]+)>/.exec(PROBE)[1]; // the label's handler — what a browser that reports a dropped one samples (⑫)
 const PICTURE = 'flowchart LR\n  A@{ img: "https://pictures.example.invalid/x.png", label: "pic", pos: "t", w: 60, h: 60 } --> B[next]';
 const fence = (code, lead = 'Here is the flow:') => `${lead}\n\n\`\`\`mermaid\n${code}\n\`\`\`\n\nThat is all.`;
 
@@ -333,8 +335,17 @@ try {
   const mjs = requests.filter((u) => /\/mermaid\.js(\?|$)/.test(u));
   check(`all ${requests.length} requests the page made went to the scratch hub (data:/blob: aside)`, off.length === 0, off.slice(0, 8));
   check('mermaid.js was requested ONCE, at its stamped address', mjs.length === 1 && /\/mermaid\.js\?v=\d+$/.test(mjs[0]), mjs);
+  // ⑦'S OWN PROBE IS NOT THE APP'S (lane ci-mirror-hygiene, 2.369.362 — the mirror's Chrome 156 ran this suite red on
+  // 2.369.361, both tries): mermaid's sanitizer parses the probe's label in an inert document, and since Chrome 156 the
+  // handler it drops is reported when its attribute is SET — nothing ran (⑦ «no handler ran»). That ONE report is
+  // expected, keyed by the probe's payload (scripts/scratch.mjs takeProbeCspReport): Chrome 154 files none, 156 exactly
+  // it; any other line stays for the next leg and the teardown, red by name.
+  const browser = await fetch(`http://127.0.0.1:${CDP_PORT}/json/version`).then((r) => r.json()).then((v) => v.Browser, () => 'this browser');
+  const probe = await takeProbeCspReport({ directive: 'script-src-attr', blocked: 'inline', sample: PROBE_HANDLER.slice(0, 40), source: `${ORIGIN}/mermaid.js`, document: `${ORIGIN}/` });
+  const p0 = probe.taken[0];
+  check(`⑦'s own probe: ${browser} ${p0 ? `reported its dropped handler — EXPECTED, taken (script-src-attr inline «${p0.sample}», set by ${p0.source} at ${p0.line}:${p0.column}; the hub ${p0.noticed ? 'filed it as a notice' : 'filed no notice'}${p0.kind ? `, kind ${p0.kind}` : ''})` : 'reported nothing for it (it reports no dropped handler)'}`, probe.ok, probe.taken);
   let csp = []; try { csp = fs.readFileSync(CSP_REPORTS_FILE, 'utf8').split('\n').filter(Boolean); } catch { }
-  check('the app page reported nothing to its CSP (script-src \'self\': every script came from this origin)', csp.length === 0, csp.slice(0, 4));
+  check('the app page reported nothing ELSE to its CSP (script-src \'self\': every script came from this origin)', csp.length === 0, csp.slice(0, 4));
   check('no uncaught page error', pageErrors.length === 0, pageErrors.slice(0, 3));
 } catch (e) {
   failed++; console.error('  ✗ the suite threw: ' + (e && e.stack || e));

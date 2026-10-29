@@ -679,6 +679,77 @@ console.log('\n§2h every setup step is bounded; the fonts have one road (script
   ok(refused.every(({ r }) => r.status === 2 && /usage: ci-fonts\.sh \[--system\]/.test(r.stderr)), `the road takes only [--system] (${refused.map(({ a, r }) => `[${a.join(' ')}] ${r.status}`).join(', ')})`);
 }
 
+// ── §2i A RED NAMES ITS LEGS (lane ci-mirror-hygiene, 2.369.362: 2.369.361's mirror fast job printed «test-pool-auto
+// 4 FAILED (667 passed)» and no leg — its ✗ lines sat above the 40 lines a row keeps, the fast job uploaded nothing, and
+// the cause, the depth-1 clone, took an hour of guessing) ──
+// A red suite's ✗ entry carries every ✗ line of its output BEFORE the tail (≤ FAIL_LINES_MAX, the count said), inside
+// lines[0] like the hang digest — lines[1] / lines[2] stay the tail / stderr the rerun ledger reads; the fast tier keeps
+// the red suite's whole output in FAST_FAIL_LOGS and ci.yml's fast job uploads it: after the suites, failure only, the
+// heavy shards' retention (§2h bounds it). Planted suites run for real through runSuiteAsync; the workflow is read with
+// §2h's parser and its controls are mutant copies of ci.yml.
+console.log('\n§2i a red names its legs: every ✗ line before the tail; the fast job ships its fail logs');
+{
+  const CI = await import('./ci.mjs');
+  const root = mktmp('legs'), sha = 'c0ffee0123456789';
+  fs.mkdirSync(path.join(root, 'scripts'), { recursive: true });
+  const say = (lines) => lines.map((l) => `console.log(${JSON.stringify(l)});`).join('\n') + '\nprocess.exit(1);\n';
+  const ticks = (n, tag) => Array.from({ length: n }, (_, i) => `  ✓ ${tag} ${i + 1}`);
+  const N = CI.FAIL_LINES_MAX + 5;
+  // the runner's shape (one ✗ far above the 40-line tail, one inside it); more ✗ lines than the bound; a crash with none
+  fs.writeFileSync(path.join(root, 'scripts', 'test-planted-legs.mjs'), say(['§1 planted', '  ✗ leg one — far above the tail', ...ticks(60, 'a'), '  ✗ leg two — inside the tail', ...ticks(5, 'b'), '', '2 FAILED']));
+  fs.writeFileSync(path.join(root, 'scripts', 'test-planted-many.mjs'), say([...Array.from({ length: N }, (_, i) => `  ✗ leg ${i + 1}`), '', `${N} FAILED`]));
+  fs.writeFileSync(path.join(root, 'scripts', 'test-planted-crash.mjs'), "console.log('§1 planted');\nthrow new Error('planted: no verdict');\n");
+  const [legs, many, crash] = await Promise.all(['test-planted-legs', 'test-planted-many', 'test-planted-crash'].map((name, i) => CI.runSuiteAsync({ name, tier: 'fast', budgetMs: 8000 }, { root, sha, lane: i + 1 })));
+  const head = legs.lines[0];
+  okd(!legs.ok && !legs.lines[1].includes('leg one') && legs.lines[1].includes('  ✗ leg two'), 'PREMISE: the 40-line tail alone names leg two and NOT leg one (2.369.361\'s row)', legs.lines[1]);
+  okd(/\n {2}\[ci\] its ✗ lines: 2 \(/.test(head) && head.endsWith('\n  ✗ leg one — far above the tail\n  ✗ leg two — inside the tail'),
+    'a red suite\'s ✗ entry says its ✗ lines (2) and prints every one, in its order, before the tail', head);
+  okd(legs.lines[1].includes('2 FAILED') && !/\[ci\] its ✗ lines/.test(legs.lines[1] + legs.lines[2]), 'lines[1] / lines[2] stay the tail / stderr the rerun ledger reads', legs.lines[1]);
+  const mh = many.lines[0];
+  okd(mh.includes(`[ci] its ✗ lines: ${N} — the first ${CI.FAIL_LINES_MAX} (`) && mh.includes(`\n  ✗ leg ${CI.FAIL_LINES_MAX}\n`) && !mh.includes(`  ✗ leg ${CI.FAIL_LINES_MAX + 1}`) && mh.endsWith(`\n  [ci] … ${N - CI.FAIL_LINES_MAX} more ✗ line(s) not shown`),
+    `bounded: ${N} ✗ lines ⇒ the first ${CI.FAIL_LINES_MAX} + «${N - CI.FAIL_LINES_MAX} more», the count said`, mh);
+  okd(!crash.ok && crash.lines[0].trim().split('\n').length === 1, 'a red with no ✗ line (a crash) adds nothing to its row — the tail and stderr are what it has', crash.lines[0]);
+  // its whole output is kept where ci.yml uploads it from
+  const dir = path.join(root, ...CI.FAST_FAIL_LOGS.split('/')), said = [];
+  const f = CI.writeFailLog(dir, sha, { name: 'test-planted-legs' }, legs, 1, { log: (l) => said.push(l) });
+  okd(f === path.join(dir, 'c0ffee01.test-planted-legs.1.log') && fs.readFileSync(f, 'utf-8') === legs.full && legs.full.includes('leg one') && said.join('\n') === `  [ci] the whole output of test-planted-legs (try 1): ${f}` && CI.writeFailLog(dir, sha, { name: 'test-planted-green' }, { ok: true }, 1, { log: () => {} }) === null,
+    `its whole output is kept: ${CI.FAST_FAIL_LOGS}/<sha8>.<suite>.<try>.log, said on its own line (a green suite keeps none)`, f);
+  const SRC = fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf-8');
+  ok(/const hangDir = fastFailDir\(\);/.test(SRC) && /\n {10}red = s\.name;\n {10}writeFailLog\(hangDir, sha, s, r, 1\);/.test(SRC),
+    'WIRING: the fast tier keeps its red suite\'s whole output in FAST_FAIL_LOGS (its hang reports beside it)');
+  // ci.yml: the fast job uploads FAST_FAIL_LOGS on a red, as the heavy shards upload theirs
+  const uploadOf = (yml) => {
+    const bad = [], jobs = jobsOf(yml), fast = jobs.find((j) => j.job === 'fast'), heavy = jobs.find((j) => j.job === 'heavy-shards');
+    if (!fast || !heavy) return { bad: [`no ${fast ? 'heavy-shards' : 'fast'} job`] };
+    const isUpload = (st) => /^actions\/upload-artifact@v\d+$/.test(st.action || '');
+    const field = (st, k) => (new RegExp(`^\\s*${k}:\\s*(.+?)\\s*$`, 'm').exec(st.text) || [])[1] ?? null;
+    const suite = fast.findIndex((st) => st.run === 'node scripts/ci.mjs'), at = fast.findIndex((st) => isUpload(st) && st.text.split('\n').some((l) => l.trim() === `path: ${CI.FAST_FAIL_LOGS}/*.log`));
+    const hu = heavy.find((st) => isUpload(st) && /data\/ci-heavy\/fail-logs\/\*\.log/.test(st.text));
+    if (suite < 0) bad.push('the fast job runs no plain `node scripts/ci.mjs`');
+    if (at < 0) { bad.push(`the fast job uploads no ${CI.FAST_FAIL_LOGS}/*.log`); return { bad }; }
+    const up = fast[at];
+    if (at < suite) bad.push('the fast job\'s upload runs before its suites');
+    if (field(up, 'if') !== 'failure()') bad.push(`the fast job's upload is not failure-only (if: ${field(up, 'if')})`);
+    if (!hu) bad.push('the heavy shards upload no data/ci-heavy/fail-logs/*.log (no retention to match)');
+    else if (field(up, 'retention-days') !== field(hu, 'retention-days')) bad.push(`the fast job keeps its fail logs ${field(up, 'retention-days')} day(s), the heavy shards ${field(hu, 'retention-days')}`);
+    return { bad, days: field(up, 'retention-days') };
+  };
+  const yml = fs.readFileSync(path.join(REPO, '.github', 'workflows', 'ci.yml'), 'utf-8'), v = uploadOf(yml);
+  okd(!v.bad.length, `ci.yml's fast job uploads ${CI.FAST_FAIL_LOGS}/*.log after its suites — failure only, the heavy shards' retention${v.days ? ` (${v.days} days)` : ''}`, v.bad.join('\n'));
+  const UP = /( {6}- name: Upload the failed fast suite[^\n]*\n(?: {8}.*\n)+)/;
+  const MUTANTS = [
+    ['the upload step gone', (t) => t.replace(UP, ''), /the fast job uploads no data\/ci-fast\/fail-logs\/\*\.log/],
+    ['the heavy tier\'s dir uploaded instead', (t) => t.replace(`path: ${CI.FAST_FAIL_LOGS}/*.log`, 'path: data/ci-heavy/fail-logs/*.log'), /the fast job uploads no data\/ci-fast\/fail-logs\/\*\.log/],
+    ['not failure-only', (t) => t.replace(UP, (m) => m.replace('        if: failure()\n', '')), /not failure-only \(if: null\)/],
+    ['kept 1 day', (t) => t.replace(UP, (m) => m.replace('retention-days: 7', 'retention-days: 1')), /keeps its fail logs 1 day\(s\), the heavy shards 7/],
+    ['before the suites', (t) => t.replace(UP, '').replace('      - run: node scripts/ci.mjs\n', (m) => UP.exec(t)[1] + m), /the fast job's upload runs before its suites/],
+  ];
+  const reds = MUTANTS.map(([label, edit, why]) => { const t = edit(yml), m = uploadOf(t); return { label, applied: t !== yml, red: m.bad.some((b) => why.test(b)), bad: m.bad }; });
+  const missed = reds.filter((r) => !r.applied || !r.red);
+  okd(!missed.length, `CONTROL: ${reds.length} mutant copies of ci.yml each go RED for their own reason (${reds.map((r) => r.label).join(' · ')})`,
+    missed.map((r) => `${r.label}: ${r.applied ? 'GREEN — ' + JSON.stringify(r.bad) : 'the edit did not apply'}`).join('\n'));
+}
+
 } finally {
   for (const d of tmpDirs) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
 }
