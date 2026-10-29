@@ -1367,11 +1367,16 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     // lane vault-use-grants: THE STANDING APPROVAL of each entry for THIS caller and THIS run's hosts (the grant door's PURE verdict —
     // a Task Group's members read now); a member that does not cover the run is named on the card
     const standing = new Map();
+    // int361 — 主开发's ruling (C): DESTINATION KNOWLEDGE is not «always» ELIGIBILITY. A keyed routing flag whose hosts the reader
+    // READS (--connect-to's HOST2, -x's proxy + the URL host, --resolve's address) withholds «always» (vault-agent-own: the shape's
+    // destination varies) yet is a KNOWN destination set — a grant naming every host in it covers the run (vault-use-grants since r2);
+    // a flag whose destination cannot be read (--unix-socket, ProxyCommand, a proxy env) is opaque for both roads.
+    const destKnown = !!shape.always || (shape.noAlways === 'opaque-route' && !dest.opaque && dest.hosts.length > 0);
     if (useGrants) {
       let uf = null;
       try { uf = useFacts(caller) || {}; } catch { uf = { groupsUnreadable: true }; }
       const facts = { ...uf, conversationKeys: [...new Set([caller.conversationId, ...(Array.isArray(uf.conversationKeys) ? uf.conversationKeys : [])].filter(Boolean).map(String))], groupIds: Array.isArray(uf.groupIds) ? uf.groupIds : [], groupsUnreadable: !!uf.groupsUnreadable };
-      for (const r of spec.refs) { const row = rowOf(r); if (row) { try { standing.set(r.id, useGrants.verdictFor(r.id, facts, { hosts: dest.hosts, destinationKnown: !!shape.always, entryHosts: row.hosts || [], tool: shape.name })); } catch { /* unreadable: no standing approval */ } } }   // round 3 (item 5): `tool` scopes a wildcard default to its CLI
+      for (const r of spec.refs) { const row = rowOf(r); if (row) { try { standing.set(r.id, useGrants.verdictFor(r.id, facts, { hosts: dest.hosts, destinationKnown: destKnown, entryHosts: row.hosts || [], tool: shape.name })); } catch { /* unreadable: no standing approval */ } } }   // round 3 (item 5): `tool` scopes a wildcard default to its CLI
     }
     // THE FACTS the verdict reads: each entry's row (exists), its switch (open), its class (the engine's check) and its length
     const d = load();
