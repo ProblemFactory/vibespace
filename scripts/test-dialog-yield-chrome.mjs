@@ -53,6 +53,9 @@
 // Round 6 (acceptance r5): ㊻ the doc editor's Link asked on «design notes», then (its form open) on «tracker» ⇒ two forms, the
 // second edits tracker · ㊼ the design sheets with the overlay's backdrop-filter gone ⇒ still on the keyboard (their containing
 // block declared) · ㊽ «+ Add a path…» after an add ⇒ the empty-box hint; a kept row painted as the world is now. On 0ae9fbcb ㊻–㊽ are RED.
+// Round 7 (acceptance r6): ㊾ «+ Add a path…» across a repaint from another client ⇒ the EMPTY box the person clicked into keeps its
+// list open (the same element) — and, its list closed by Escape, its caret; a box emptied after an add that did not apply stays
+// empty, no «Not applied» line. On f2c3b9c2 ㊾ is RED.
 // On 6428c67e (the base — run the file on a `git archive` copy) ①–⑤ and ⑦ are RED; ⑥ and ⑧ hold on both. On da9545e8 (round 1)
 // the round-2 legs are RED (⑪–⑳, ⑨'s way back, ⑤'s system opener).
 // PNGs: DIALOG_YIELD_PNG_DIR (default: the scratch root) <prefix>-<leg>.png, prefix = DIALOG_YIELD_SHOT_PREFIX (default 'run').
@@ -1280,6 +1283,44 @@ await step('㊽', async () => {
   console.log('  ㊽ ' + J({ under0, underTyped, after }));
   check('㊽ «+ Add a path…» typed ~/dy-addB, Enter, the row added (the tasks-updated repaint ran) ⇒ the add box is EMPTY, focused, its line the empty-box hint again (0ae9fbcb: the kept field kept «= ~/dy-addB ✓ 1 file» under an empty box, state ok)', /dy-addB/.test(underTyped) && after.value === '' && after.focused && after.under === under0 && after.state !== 'ok', { under0, underTyped, after });
   check('㊽ the kept row A is painted against the world as it is now — it never says its existing folder «does not exist» after the repaint (0ae9fbcb: the kept field was never repainted)', after.rowA !== null && !/does not exist/.test(after.rowA), after);
+  await evalJs(`(() => { for (const w of [...app.wm.windows.values()]) if (w.element.querySelector('.ctx-path-input')) app.wm.closeWindow(w.id); return true; })()`); await sleep(400);
+  await fetch(`${origin}/api/tasks/${tid}`, { method: 'DELETE' });
+});
+
+// ── ㊾ (r7) «+ Add a path…» across a repaint from ANOTHER client: the empty box the person is in keeps its list open; one they
+// emptied after an add that did not apply stays empty (f2c3b9c2 rebuilt the first, refilled the second from its stale words) ──
+await step('㊾', async () => {
+  fs.mkdirSync(path.join(home, 'dy-r7A'), { recursive: true });
+  const mk = await (await fetch(`${origin}/api/tasks`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: J({ title: 'DY add r7' }) })).json();
+  const tid = mk && mk.task && mk.task.id;
+  await (await fetch(`${origin}/api/tasks/${tid}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: J({ ctx: [{ path: path.join(home, 'dy-r7A'), note: '', tell: null, tags: [], share: null }] }) })).json();
+  await waitFor(`!!app.sidebar._taskById(${J(tid)}) && (app.sidebar._taskById(${J(tid)}).ctx || []).length === 1`, 10000);
+  await evalJs(`(() => { app.openTaskDetail(${J(tid)}, { tab: 'settings' }); return true; })()`);
+  await waitFor(`document.querySelectorAll('.ctx-row[data-row] .ctx-path-input').length === 1 && !!document.querySelector('.ctx-add-input')`, 10000);
+  await sleep(900);
+  const read = `(() => { const i = document.querySelector('.ctx-add-input'); if (!i) return null; const w = i.closest('.ctx-add'); const lists = [...document.querySelectorAll('.pf-list')].filter((l) => !l.hidden && l.getClientRects().length); return { value: i.value, focused: document.activeElement === i, expanded: i.getAttribute('aria-expanded'), lists: lists.length, warn: w ? [...w.querySelectorAll('.ctx-warn')].map((x) => x.textContent).join(' | ') : null, same: i.dataset.dyOld === '1' }; })()`;
+  const mark = () => evalJs(`(() => { const i = document.querySelector('.ctx-add-input'); i.dataset.dyOld = '1'; i.dataset.dy = 'dy-add7'; return true; })()`);
+  const repaint = async (tag) => { await (await fetch(`${origin}/api/tasks/${tid}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: J({ objective: tag }) })).json(); const ok = await waitFor(`(document.querySelector('.task-detail-objective') || {}).value === ${J(tag)}`, 10000); await sleep(900); return ok; };
+  // (a) a press into the EMPTY box (its list opens), then another client edits the description
+  await mark(); await realClick('[data-dy="dy-add7"]'); await sleep(1500);
+  const a1 = await evalJs(read); const rpA = await repaint('dy r7 repaint a'); const a2 = await evalJs(read);
+  await shot('49a-add-list-open-after-repaint');
+  // (a') Escape closes the list, the caret stays in the empty box — another client's edit again
+  await mark(); await key('Escape', 'Escape', 27); await sleep(500);   // (marked again: this check stands on its own, whatever (a) did)
+  const c1 = await evalJs(read); const rpC = await repaint('dy r7 repaint c'); const c2 = await evalJs(read);
+  // (b) an add that does not apply (Enter on a path that is not there), the box emptied and left, then another client's edit
+  await evalJs(`(() => { document.activeElement && document.activeElement.blur && document.activeElement.blur(); return true; })()`); await sleep(600);
+  await mark(); await realClick('[data-dy="dy-add7"]'); await typeText(path.join(home, 'dy-r7-nope')); await sleep(1500);
+  await key('Enter', 'Enter', 13); await sleep(1800);
+  const b1 = await evalJs(read);
+  await evalJs(`(() => { const i = document.querySelector('.ctx-add-input'); i.focus(); i.select(); return true; })()`); await key('Backspace', 'Backspace', 8); await sleep(500);
+  await evalJs(`(() => { const l = [...document.querySelectorAll('.task-detail-label')].find((x) => x.getClientRects().length); l.dataset.dy = 'dy-label7'; return true; })()`); await realClick('[data-dy="dy-label7"]'); await sleep(1500);
+  const b2 = await evalJs(read); const rpB = await repaint('dy r7 repaint b'); const b3 = await evalJs(read);
+  await shot('49b-add-emptied-after-repaint');
+  console.log('  ㊾ ' + J({ a1, rpA, a2, c1, rpC, c2, b1, b2, rpB, b3 }));
+  check('㊾ the EMPTY «+ Add a path…» box the person pressed into — its suggestion list open — is the same element across a repaint from another client, the caret in it, the list still open (f2c3b9c2: a new element, the list closed under the person)', rpA && a1 && a1.expanded === 'true' && a1.lists >= 1 && a2 && a2.same && a2.focused && a2.expanded === 'true' && a2.lists >= 1, { a1, a2 });
+  check('㊾ the empty box with the caret in it, its list closed by Escape, is the same element across another client\'s edit, the caret still in it (the active element is read before the body is emptied)', rpC && c1 && c1.same && c1.focused && c1.expanded === 'false' && c2 && c2.same && c2.focused, { c1, c2 });
+  check('㊾ a box the person EMPTIED after an add that did not apply stays empty across a repaint, no «Not applied» line under it (f2c3b9c2: refilled with the deleted path, «Not applied … was not found»)', rpB && b1 && /dy-r7-nope/.test(b1.value) && b2 && b2.value === '' && b3 && b3.value === '' && !b3.warn, { b1, b2, b3 });
   await evalJs(`(() => { for (const w of [...app.wm.windows.values()]) if (w.element.querySelector('.ctx-path-input')) app.wm.closeWindow(w.id); return true; })()`); await sleep(400);
   await fetch(`${origin}/api/tasks/${tid}`, { method: 'DELETE' });
 });

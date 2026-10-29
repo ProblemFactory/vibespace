@@ -24,6 +24,7 @@ export async function openBuildDialog(app, profileId, { label = '', onDone = nul
   const name = String(view.label || label || id);
   const local = !view.host;
   const st = { busy: false, closed: false, picked: null, confirm: false, picker: null };
+  // not the subject: pick — a preselection in THIS profile's build list (the form's own reopen after a download, which closes itself first); a form the person opened for the profile meanwhile is theirs, raised as it is
   const shell = createModalShell({ id: DIALOG_ID, key: profileId, opener, title: t('Chrome build for {label}', { label: name }), dialogClass: 'bwho-dialog bbuild-dialog', bodyClass: 'bwho-body bbuild-body', escapeToClose: true, onClose: () => { st.closed = true; if (st.picker) st.picker.stop(); }, kind: 'form' });
   if (shell.raised) return null;   // raised: the same subject's form, as it was
   shell.dialog.dataset.profileId = id;

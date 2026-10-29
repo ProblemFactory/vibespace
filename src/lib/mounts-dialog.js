@@ -563,6 +563,7 @@ export function reauthDialog({ id = 'mount-reauth-dialog', key = null, title, hi
   const stopPoll = () => { clearInterval(poll); poll = null; };
   const closed = () => { stopPoll(); if (typeof onClose === 'function') { try { onClose(); } catch { /* the dialog is gone either way */ } } };
   // not the subject: fields — the caller's key names them (the mount / the account its OAuth-client select belongs to)
+  // not the subject: start — the caller's sign-in call; the consent link it answers is this form's work after a press (the caller's key names whom it signs in)
   const { body, close, raised, overlay } = createModalShell({ id, key, title, bodyClass: 'mounts-dialog-body', kind: 'form', onClose: closed, escapeToClose: true, onEscape: () => escapeAsk() });   // key = the mount / the account re-authorized (lane dialog-yield r3); kind 'form' + lark-refresh-stall's onClose / Escape-asks (int361: 主开发's option order)
   if (raised) return overlay._reauth || null;   // raised: this sign-in, as it was
   const hint = document.createElement('div');

@@ -805,7 +805,12 @@ export function pathField(input, opts = {}) {
   paint();   // the chips row waits for refresh() (a field is built while the page boots — no fetch then)
   const setDerived = (text, { note = '', commit: c = false } = {}) => set(text, { commit: c, how: 'derived', derived: { note } });
   const picking = () => !!(st.picking || (st.picker && st.picker.live()));   // its picker open, or its listing on the way (lane dialog-yield r6: a repaint keeps such a field)
-  const handle = { el: wrap, input, value: () => st.committed, verdict: () => { emitState(); return st.verdict; }, commit: () => commit('api'), set, setDerived, refresh, open, close, ensure, destroy, picking };
+  // lane dialog-yield r7: the person is IN the field — its box focused (or a press in its list / line / picker), its list open,
+  // words typed in it, or its picker open. A caller that repaints keeps such a field (r6 kept only the typed or picking one: an
+  // EMPTY box with its suggestion list open was rebuilt under the person and the list closed). `ae` = the active element as the
+  // caller read it before it emptied its body (emptying it moves the focus out of the box)
+  const inUse = (ae = document.activeElement) => !st.destroyed && !!(inside(ae) || st.open || input.value.trim() || picking());
+  const handle = { el: wrap, input, value: () => st.committed, verdict: () => { emitState(); return st.verdict; }, commit: () => commit('api'), set, setDerived, refresh, open, close, ensure, destroy, picking, inUse };
   input._pathField = handle;
   return handle;
 }
