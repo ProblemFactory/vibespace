@@ -20,9 +20,14 @@
 //   ⑨ (r8) THE POOL HOLDS ONLY FRAMES THAT RAN: a copy still held claims nothing and is claimed by nothing (the same words
 //     held twice, the later one run first ⇒ each once); a stamped copy joins only by its stamp, a stampless one (an older
 //     build) by its FULL words once it was handed — never a prefix
-//   FOUR MUTANTS, red BY NAME (scratch copies, never src/): copyPrefixLen → 0 (the batch drawn twice), resolveRecord
+//   ⑩ (r9) THE REAL MERGE: the store reads the CLI's transcript (a scratch HOME) — the batch's init (stdout only, the
+//     wrapper's buffer) lands BEFORE the record it names; a hub restart inside the wrapper's persist window (no init)
+//     still draws each frame ONCE, by the next witness: the record's own `mergedSendUuids` (2.1.308 / 2.1.312), else the
+//     hand-over order (2.1.296: no stamps named anywhere)
+//   SIX MUTANTS, red BY NAME (scratch copies, never src/): copyPrefixLen → 0 (the batch drawn twice), resolveRecord
 //   dropped from the store's merge (every kept picture a placeholder), dropFiles a no-op (the .img files leak), every copy
-//   pooled by its words (r7's road: a still-held copy drawn twice).
+//   pooled by its words (r7's road: a still-held copy drawn twice), the merge holding a stdout-only init for the NEXT
+//   matched record (the init after its batch), the init as the one road (r8: a lost init ⇒ the earlier frame twice).
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -193,7 +198,65 @@ ok(view(lHeld).filter((v) => v.msgId === 'm-la').length === 1 && /LEG-A/.test(vi
 const lPre = await restart([lg('m-la', 'LEG-A legacy'), lHit, handed('m-la')].join('\n'), { jsonl: [recL] });
 ok(view(lPre).filter((v) => v.msgId === 'm-la').length === 1 && view(lPre).find((v) => v.msgId === 'm-la')?.text === 'LEG-A legacy', 'a copy without a stamp whose words only BEGIN a block of the record: never a prefix — not claimed', view(lPre));
 
-console.log('THE FOUR MUTANTS (scratch copies, never src/), each red BY NAME');
+console.log('⑩ (r9) the real merge — the init before its batch; a lost init, the next witness');
+// THE CLI'S OWN TRANSCRIPT, in the shapes measured (r8 / acceptance r8: two stamped frames C, D written during a text turn,
+// run as ONE record under D's uuid): 2.1.312 — `[C\n, D]`, the record names C in `mergedSendUuids`, the init names [C, D];
+// 2.1.296 — `[C, D]`, no `mergedSendUuids`, an init that names no stamps. The wrapper's buffer is what chat-wrapper.js
+// writes: the CLI's stdout (the assistant rows carry the transcript's uuid + message.id — the merge's anchors), the copy
+// lines, the hand-over records.
+const HOME0 = process.env.HOME, home = path.join(dir, 'home-r9');
+process.env.HOME = home; // the store finds a transcript under os.homedir() — read at each call
+const work = path.join(dir, 'work-r9');
+const projDir = path.join(home, '.claude', 'projects', work.replace(/[/._]/g, '-'));
+fs.mkdirSync(projDir, { recursive: true }); fs.mkdirSync(work, { recursive: true });
+let csidN = 0;
+const T = (s) => new Date(Date.now() - 60000 + s * 1000).toISOString();
+const uC = '5e551000-0000-4000-8000-0000000009c3', uD = '5e551000-0000-4000-8000-0000000009d4', uA = '5e551000-0000-4000-8000-0000000009a1', uB = '5e551000-0000-4000-8000-0000000009b2';
+const tUser = (uuid, blocks, s, extra = {}) => ({ type: 'user', uuid, parentUuid: null, timestamp: T(s), promptId: 'p-' + uuid.slice(-3), message: { role: 'user', content: blocks.map((text) => ({ type: 'text', text })) }, ...extra });
+const tAsst = (mid, s) => ({ type: 'assistant', uuid: '5e551000-0000-4000-8000-00000000a' + mid.slice(-3), timestamp: T(s), message: { id: mid, type: 'message', role: 'assistant', model: 'claude-sonnet-4-5', content: [{ type: 'text', text: 'reply ' + mid }] } });
+const sOut = (r) => JSON.stringify({ type: 'assistant', session_id: 'cli', uuid: r.uuid, parent_tool_use_id: null, message: r.message });
+const sResult = JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: '', num_turns: 1 });
+const sInit = (...u) => JSON.stringify({ type: 'system', subtype: 'init', session_id: 'cli', ...(u.length ? { user_message_uuids: u } : {}) });
+const ownTurn = JSON.stringify({ type: 'input_handover', state: 'own-turn', msg_ids: ['m-c', 'm-d'] });
+function batchRun(build) {
+  const aA = tAsst('msg_r9_aaa', 2), aB = tAsst('msg_r9_bbb', 9), aCD = tAsst('msg_r9_ccd', 12);
+  const recD = build === 312 ? tUser(uD, ['MARK-C first\n', 'MARK-D second'], 10, { mergedSendUuids: [uC] }) : tUser(uD, ['MARK-C first', 'MARK-D second'], 10);
+  const jsonl = [tUser(uA, ['MARK-A a plain turn'], 1), aA, tUser(uB, ['LONG-B a long text turn'], 3), aB, recD, aCD];
+  const umu = (...u) => (build === 312 ? u : []);
+  const head = [sInit(...umu(uA)), sOut(aA), sResult, sInit(...umu(uB)), copyLine('m-c', uC, [{ type: 'text', text: 'MARK-C first' }], 1), handed('m-c'), copyLine('m-d', uD, [{ type: 'text', text: 'MARK-D second' }], 2), handed('m-d')];
+  const rest = [sOut(aB), sResult, ownTurn, sInit(...umu(uC, uD)), sOut(aCD), sResult];
+  return { jsonl, head, rest };
+}
+/** THE REAL MERGE: the transcript written where the CLI writes it, the buffer as the wrapper persisted it; the store
+ *  merges the two (its parse, its anchors), the normalizer draws the result. */
+async function realMerge(jsonl, lines, { SSx = SS } = {}) {
+  const csid = `5e551000-0000-4000-8000-${String(++csidN).padStart(12, '0')}`;
+  fs.writeFileSync(path.join(projDir, csid + '.jsonl'), jsonl.map((r) => JSON.stringify(r)).join('\n') + '\n');
+  const buffer = lines.join('\n') + '\n';
+  const session = { buffer, cwd: work, claudeSessionId: csid, backend: 'claude', _keptFiles: await KC.preload(dir, ID, buffer) };
+  const raw = new SSx.SessionMessages(session, ID, { buffersDir: dir }).raw();
+  const mm = createMessageManager('claude', ID);
+  mm.convertHistory(raw);
+  const initAt = raw.findIndex((r) => r.type === 'system' && r.subtype === 'init' && (r.user_message_uuids || []).includes(uD));
+  return { raw, v: view(mm.messages.filter((m) => m.role === 'user')), initAt, recAt: raw.findIndex((r) => r.type === 'user' && r.uuid === uD), fromJsonl: raw.filter((r) => r.promptId).length };
+}
+const once = (v) => v.filter((x) => /MARK-C/.test(x.text)).length === 1 && v.find((x) => x.msgId === 'm-c')?.text === 'MARK-C first' && v.find((x) => x.msgId === 'm-d')?.text === 'MARK-D second';
+const b312 = batchRun(312), b296 = batchRun(296);
+const full = await realMerge(b312.jsonl, [...b312.head, ...b312.rest]);
+ok(full.fromJsonl === 3 && full.initAt > 0 && full.recAt > 0 && full.initAt < full.recAt, `the store's merge puts the batch's init (buffer only) BEFORE the CLI's record it names (init ${full.initAt} < record ${full.recAt})`, full.raw.map((r) => r.type + (r.subtype ? '/' + r.subtype : '') + (r.uuid ? ':' + r.uuid.slice(-3) : '')));
+ok(once(full.v), '2.1.312, everything persisted: C and D each drawn ONCE (the init names [C, D])', full.v);
+const lag = await realMerge(b312.jsonl, b312.head);
+ok(lag.initAt < 0 && once(lag.v), '2.1.312, the persist window lost (the file cut after hand-over D — no init): each ONCE (the record\'s mergedSendUuids)', lag.v);
+const lagBare = await realMerge(b312.jsonl, b312.head.filter((l) => !/"input_handover"/.test(l)));
+ok(once(lagBare.v), '…and with no hand-over record either: the record\'s own witness alone draws each ONCE', lagBare.v);
+const f296 = await realMerge(b296.jsonl, [...b296.head, ...b296.rest]);
+ok(once(f296.v), '2.1.296 (no stamps named anywhere), everything persisted: each ONCE (the hand-over order)', f296.v);
+const lag296 = await realMerge(b296.jsonl, b296.head);
+ok(once(lag296.v), '2.1.296, the persist window lost: each ONCE (the hand-over order)', lag296.v);
+const held296 = await realMerge(b296.jsonl, b296.head.filter((l) => !/"input_handover"/.test(l)));
+ok(held296.v.find((x) => x.msgId === 'm-c')?.text === 'MARK-C first' && held296.v.filter((x) => /MARK-C/.test(x.text)).length === 2, '2.1.296 with the hand-over records lost too (no witness at all): never claimed by words — the known boundary (C shown twice, never lost)', held296.v);
+
+console.log('THE SIX MUTANTS (scratch copies, never src/), each red BY NAME');
 const M = mutantCopies('kept-copies', REPO);
 const mmSrc = read('src/message-manager.js');
 const PREFIX = 'function copyPrefixLen(copy, rec, off) {';
@@ -204,7 +267,7 @@ mx.convertHistory([...new SS.SessionMessages({ buffer: bcBuf, cwd: dir, backend:
 const mxv = view(mx.messages.filter((m) => m.role === 'user'));
 ok(mmSrc.includes(PREFIX) && mxv.filter((v) => /IMG-B/.test(v.text)).length === 2, 'MUTANT copyPrefixLen → 0: RED — B drawn TWICE (its own bubble + inside C\'s)', mxv);
 // r7's road: every other copy pooled, matched by its words — the still-held H1 taken by H2's leading words, then drawn again
-const POOLED = '(c.cliUuid ? named.includes(c.cliUuid) : c.ran === true)';
+const POOLED = '(named && c.cliUuid ? named.includes(c.cliUuid) : c.ran > 0)';
 const MMw = require(M.write('src/message-manager.js', mmSrc.replace(POOLED, 'true'), 'words-pool'));
 const mw = new MMw.MessageManager(ID);
 mw.convertHistory([...new SS.SessionMessages({ buffer: pBuf, cwd: dir, backend: 'claude', _keptFiles: await KC.preload(dir, ID, pBuf) }, ID, { buffersDir: dir }).raw(), recP2, { type: 'system', subtype: 'init', session_id: 'cli-sess-kept', user_message_uuids: ['u-p1'] }, recP1]);
@@ -222,6 +285,23 @@ const KCx = require(M.write('src/kept-copies.js', kcSrc.replace(DROP, DROP + ' r
 const leakLine = copyLine('m-l', 'u-l', [{ type: 'text', text: 'leak' }, img('L')], 1);
 KCx.dropFiles(kd, KCx.namesToDrop(leakLine, []));
 ok(kcSrc.includes(DROP) && fs.existsSync(path.join(kd, KC.namesIn(leakLine)[0])), 'MUTANT dropFiles a no-op: RED — a settled copy\'s .img file LEAKS', KC.namesIn(leakLine));
+
+// (r9) the merge holds a stdout-only init for the NEXT matched record (an anchor rule that reads «a turn's head rides its
+// first transcript record» — the acceptance's order-preserving mutant): the init lands after the batch it names
+const HOLD_A = '      if (hit !== undefined) { if (hit > anchor) anchor = hit; continue; } // in JSONL — advances the position cursor';
+const HOLD_C = '      const list = inserts.get(anchor) || inserts.set(anchor, []).get(anchor);\n      list.push(msg);\n      anyInsert = true;\n    }\n';
+const holdSrc = ssSrc.replace('    let anyInsert = false;\n', '    let anyInsert = false;\n    let pend = [];\n')
+  .replace(HOLD_A, '      if (hit !== undefined) { if (hit > anchor) anchor = hit; if (pend.length) { (inserts.get(anchor) || inserts.set(anchor, []).get(anchor)).push(...pend); pend = []; anyInsert = true; } continue; }')
+  .replace(HOLD_C, "      if (pend.length || (msg.type === 'system' && msg.subtype === 'init')) { pend.push(msg); continue; }\n" + HOLD_C + '    if (pend.length) { (inserts.get(anchor) || inserts.set(anchor, []).get(anchor)).push(...pend); anyInsert = true; }\n');
+const heldInit = await realMerge(b312.jsonl, [...b312.head, ...b312.rest], { SSx: require(M.write('src/session-store.js', holdSrc, 'init-held')) });
+ok(ssSrc.includes(HOLD_A) && ssSrc.includes(HOLD_C) && holdSrc !== ssSrc && heldInit.initAt > heldInit.recAt, `MUTANT the merge holds the init for the next matched record: RED — the init lands AFTER its batch's record (init ${heldInit.initAt} > record ${heldInit.recAt})`, heldInit.raw.map((r) => r.type + (r.uuid ? ':' + r.uuid.slice(-3) : '')));
+// (r9) the init as the ONE road (r8): a batch whose init the hub never read has no witness — the earlier frame drawn twice
+const ONE_ROAD = ': Array.isArray(merged) && merged.length ? merged.map(String) : null;';
+const MMo = require(M.write('src/message-manager.js', mmSrc.replace(ONE_ROAD, ': [];'), 'one-road'));
+const sOne = async (b) => { const csid = `5e551000-0000-4000-8000-${String(++csidN).padStart(12, '0')}`; fs.writeFileSync(path.join(projDir, csid + '.jsonl'), b.jsonl.map((r) => JSON.stringify(r)).join('\n') + '\n'); const buffer = b.head.join('\n') + '\n'; const mo = new MMo.MessageManager(ID); mo.convertHistory(new SS.SessionMessages({ buffer, cwd: work, claudeSessionId: csid, backend: 'claude', _keptFiles: await KC.preload(dir, ID, buffer) }, ID, { buffersDir: dir }).raw()); return view(mo.messages.filter((m) => m.role === 'user')); };
+const one312 = await sOne(b312), one296 = await sOne(b296);
+ok(mmSrc.includes(ONE_ROAD) && one312.filter((x) => /MARK-C/.test(x.text)).length === 2 && one296.filter((x) => /MARK-C/.test(x.text)).length === 2, 'MUTANT the init as the one road: RED — a restart inside the persist window draws C TWICE (2.1.312 and 2.1.296)', { one312, one296 });
+process.env.HOME = HOME0;
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

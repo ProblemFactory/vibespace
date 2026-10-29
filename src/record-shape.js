@@ -248,7 +248,7 @@ const SHAPES = {
 // stream_event, never on init — so a corpus row, keyed by the builds that were run.
 const INIT_UUIDS_MEASURED = Object.freeze(['2.1.308', '2.1.312']);
 const INIT_UUIDS_NOTE = 'the client uuids of the user messages this turn consumed, in order (undeclared on init upstream; MEASURED on '
-  + INIT_UUIDS_MEASURED.join(' and ') + ') — written because the chat wrapper stamps a uuid on every mid-turn frame (the copy\'s witness); the copy is claimed by the CLI\'s user record and attachment, never by this list';
+  + INIT_UUIDS_MEASURED.join(' and ') + ') — written because the chat wrapper stamps a uuid on every mid-turn frame (the copy\'s witness); a copy is claimed by the CLI\'s user record or attachment under its stamp, and this list is the FIRST witness of who ran in a merged batch (src/message-manager.js _claimWebuiCopy — then the record\'s mergedSendUuids, then the hand-over order)';
 const CORPUS_KNOWN = Object.freeze({
   'claude:stream:system/init': {
     messaging_socket_path: 'the CLI\'s cross-session inbox socket (2.1.2xx); undeclared upstream, present on every live init frame',
