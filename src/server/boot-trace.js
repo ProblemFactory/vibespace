@@ -44,7 +44,7 @@ function start({ dataDir, env = process.env, now = () => performance.now(), wind
   try { if (dataDir) require('./sync-fs-witness.js').create({ rootDir: path.dirname(dataDir), dataDir }).start(); } catch (e) { console.warn('[sync-fs] the witness did not start —', e && e.message); }
   if (one) return one;
   const startAt = now(), steps = [], spans = [], gaps = [], ops = [], notes = [];
-  let label = null, sticky = null, last = startAt, mainMs = null, mainEndAt = null, listenAt = null, closed = false, resolveDone;
+  let label = null, sticky = null, last = startAt, mainMs = null, mainEndAt = null, listenAt = null, closed = false, resolveDone, turns = 0;
   const done = new Promise((r) => { resolveDone = r; });
   const eld = monitorEventLoopDelay({ resolution: 20 }); eld.enable();
   const tick = () => {
@@ -54,12 +54,12 @@ function start({ dataDir, env = process.env, now = () => performance.now(), wind
       last = mainEndAt ?? t;
     }
     const gap = t - last - TICK_MS;
-    if (gap >= HOLD_MS) gaps.push({ at: Math.round(last), ms: Math.round(gap), label: label || sticky });
-    last = t; sticky = null;
+    if (gap >= HOLD_MS) gaps.push({ at: Math.round(last), ms: Math.round(gap), label: label || sticky, t0: last, t1: t }); // r11: t0/t1 the hold's exact span (the window its sites are credited in)
+    last = t; sticky = null; turns++;
     if (t - startAt >= windowMs) close();
   };
   const timer = setInterval(tick, TICK_MS); if (timer.unref) timer.unref();
-  const unwrap = env.VIBESPACE_BOOT_TRACE === '1' ? wrapSync({ ops, now }) : () => { };
+  const unwrap = env.VIBESPACE_BOOT_TRACE === '1' ? wrapSync({ ops, now, turn: () => turns }) : () => { };
   const nameOf = (g) => {
     if (g.label) return g.label;
     const overlap = (x) => Math.max(0, Math.min(g.at + g.ms, x.at + x.ms) - Math.max(g.at, x.at));
@@ -68,13 +68,11 @@ function start({ dataDir, env = process.env, now = () => performance.now(), wind
     const sp = spans.filter((x) => x.at <= g.at && (x.ms == null || g.at <= x.at + x.ms)).sort((a, b) => b.at - a.at)[0];
     return sp ? sp.name : null;
   };
-  const sitesOf = (g) => {
-    const by = new Map();
-    for (const o of ops) if (o.at >= g.at - 1 && o.at < g.at + g.ms && !o.nested) { const k = `${o.op} ${o.site}`; by.set(k, (by.get(k) || 0) + o.ms); }
-    return [...by].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([k, ms]) => ({ ms: Math.round(ms), what: k }));
-  };
+  // a hold is the span between two turns of the clock: [last, t]. r11: the exact span (r10 used the rounded [at - 1, at +
+  // ms + TICK_MS]: two holds in a row overlapped by 1 ms and an op there was credited to both)
+  const holdSites = (g) => sitesOf(ops, g.t1 != null ? { at: g.t0, ms: g.t1 - g.t0 } : { at: g.at - 1, ms: g.ms + TICK_MS + 1 });
   function report() {
-    const holds = gaps.slice().sort((a, b) => b.ms - a.ms).slice(0, KEEP).map((g) => ({ at: g.at, ms: g.ms, name: nameOf(g), ...(ops.length ? { sites: sitesOf(g) } : {}) }));
+    const holds = gaps.slice().sort((a, b) => b.ms - a.ms).slice(0, KEEP).map((g) => ({ at: g.at, ms: g.ms, name: nameOf(g), ...(ops.length ? { sites: holdSites(g) } : {}) }));
     return { pid: process.pid, startedAt: Math.round(performance.timeOrigin + startAt), startAt: Math.round(startAt), mainMs, listenAt: listenAt == null ? null : Math.round(listenAt), windowMs, closed, traced: env.VIBESPACE_BOOT_TRACE === '1',
       maxHoldMs: gaps.reduce((m, g) => Math.max(m, g.ms), 0), eldMaxMs: Math.round(eld.max / 1e6), holds, steps: steps.map((s) => ({ name: s.name, at: Math.round(s.at), ms: Math.round(s.ms) })), spans: spans.map((s) => ({ name: s.name, at: Math.round(s.at), ms: s.ms == null ? null : Math.round(s.ms), ...(s.facts || {}) })), notes: notes.slice() };
   }
@@ -106,23 +104,94 @@ function start({ dataDir, env = process.env, now = () => performance.now(), wind
   return one;
 }
 
-/** VIBESPACE_BOOT_TRACE=1: every sync fs / child call + every ≥ 1 MB JSON.parse, timed with its first repo frame. Returns the unwrap. */
-function wrapSync({ ops, now }) {
+/** VIBESPACE_BOOT_TRACE=1: every sync fs / child call + every ≥ 1 MB JSON.parse, timed with its first repo frame. Returns the unwrap.
+ *  Lane ledger-dedup-law r9: A SITE IS NAMED BY ITS CALLS, never by a 1 ms floor — every call is kept, a run of calls at one
+ *  site (each starting ≤ 1 ms after the one before ended) folded into one op (`n` calls, their summed ms): a hold made of
+ *  many short calls (the ledger warm's sync tail read, TAIL_STEP_BYTES slices under 1 ms each since e11e1f61) named no
+ *  site at all. Bounded: OPS_MAX ops, the rest counted (`dropped`).
+ *  r10: A FOLD NEVER CROSSES A HOLD — an op is closed when the loop turns (`turn()`, the boot clock's tick count: a hold is
+ *  the span between two ticks, so an op lies inside one) or once it spans FOLD_MS (the bound when no clock turns — a pure
+ *  run); r9 folded a run across holds into ONE op credited whole to the first (300 ms of a 240 ms hold, the next `sites: []`).
+ *  A run is keyed by (depth, call, its path / fd) — each its own open op, so a call made INSIDE another (readFileSync's
+ *  openSync + readSync) and a second file read in turn no longer break every run; the stack is captured ONCE per op, at its
+ *  first call (a call that joins an open op is timed, never walked).
+ *  r11: A FOLD KEY NAMES THE SITE — every call's site is taken (its frames as CallSite objects, no text formatted; the first
+ *  in the repo outside the tracer, its line formatted ONCE per code location) and a run is keyed by (depth, call, SITE,
+ *  path / fd): a fold joins only the same site's calls (r10 keyed it without the site: a second site's calls on the same
+ *  path or a reused fd within 1 ms joined the first site's op, and the second was never named). A string argument longer
+ *  than ARG_KEY_MAX (a ≥ 1 MB JSON.parse text) keys its run by its length + a digest, never by itself, and is shown as its
+ *  size (r10 kept every big text parsed in a turn in its key: 4 → 166 MiB over 40 parses of 2 MiB). */
+const OPS_MAX = 200000;
+const FOLD_MS = HOLD_MS / 2;
+const OPEN_MAX = 1024;   // open runs kept per turn (distinct depth × call × site × path); past it they are closed
+const SITES_MAX = 4096;  // r11: call sites remembered (each one's line, formatted once)
+const ARG_KEY_MAX = 512; // r11: a longer string argument keys its run by its length + a digest
+/** r11: a long string's stand-in — its length + an FNV digest of 64 chars spread over it (numbers: a slice would keep the
+ *  whole text alive). */
+const digestOf = (x) => { let h = 2166136261; const step = Math.max(1, Math.floor(x.length / 64)); for (let i = 0; i < x.length; i += step) h = Math.imul(h ^ x.charCodeAt(i), 16777619); return `${x.length}~${(h >>> 0).toString(36)}`; };
+/** The ms each site spent INSIDE a window w = {at, ms} — PURE over wrapSync's ops: an op's calls are spread over its span and
+ *  credited by OVERLAP (an op that began before the window or ends after it gives it only its share), never by where it
+ *  began; a call made inside another traced call (`nested`) is its caller's time. Top `top`, longest first. */
+function sitesOf(ops, w, top = 3) {
+  const by = new Map(), a0 = w.at, a1 = w.at + w.ms;
+  for (const o of ops) {
+    if (o.nested) continue;
+    const b0 = o.at, b1 = o.at + (o.span || 0);
+    const share = b1 > b0 ? o.ms * Math.max(0, Math.min(a1, b1) - Math.max(a0, b0)) / (b1 - b0) : (b0 >= a0 && b0 < a1 ? o.ms : 0);
+    if (share > 0) { const k = `${o.op} ${o.site}`; by.set(k, (by.get(k) || 0) + share); }
+  }
+  return [...by].sort((a, b) => b[1] - a[1]).slice(0, top).map(([k, ms]) => ({ ms: Math.round(ms), what: k }));
+}
+function wrapSync({ ops, now, turn = () => 0 }) {
   const root = path.join(__dirname, '..', '..') + path.sep, undo = [];
-  let depth = 0;
-  const site = () => {
-    const lim = Error.stackTraceLimit; Error.stackTraceLimit = 12; const o = {}; Error.captureStackTrace(o, site); Error.stackTraceLimit = lim;
-    const fr = String(o.stack).split('\n').slice(1).map((l) => l.trim()).filter((l) => l.includes(root) && !l.includes('node_modules') && !l.includes('boot-trace.js'));
-    return fr.length ? fr[0].replace(/^at /, '').split(root).join('') : '?';
+  let depth = 0, openTurn = null;
+  const open = new Map(); // site line → (`${depth} ${call} ${path | fd}` → the op its next call may join) — this turn only
+  let openN = 0;
+  const sites = new Map(); // r11: a caller's code location — its file → (its position → its site line); each line formatted once
+  let sitesN = 0;
+  const repoFile = new Map(); // a frame's file name → is it a repo file outside node_modules and the tracer (judged once)
+  // the first repo frame of the `limit` frames above the traced call `w` → its line (formatted once per location) | null
+  const siteIn = (w, limit) => {
+    const lim = Error.stackTraceLimit, prep = Error.prepareStackTrace;
+    let cs = null;
+    try { Error.stackTraceLimit = limit; Error.prepareStackTrace = (_, frames) => frames; const o = {}; Error.captureStackTrace(o, w); cs = o.stack; } finally { Error.prepareStackTrace = prep; Error.stackTraceLimit = lim; }
+    for (const c of Array.isArray(cs) ? cs : []) {
+      const f = (c.getFileName && c.getFileName()) || '';
+      let mine = repoFile.get(f);
+      if (mine === undefined) { mine = typeof f === 'string' && f.includes(root) && !f.includes('node_modules') && !f.includes('boot-trace.js'); if (repoFile.size < SITES_MAX) repoFile.set(f, mine); }
+      if (!mine) continue;
+      const pos = typeof c.getPosition === 'function' ? c.getPosition() : c.getLineNumber() * 1e5 + c.getColumnNumber();
+      let byPos = sites.get(f), line = byPos && byPos.get(pos);
+      if (line === undefined) {
+        line = String(c).replace(/^at /, '').split(root).join('');
+        if (sitesN < SITES_MAX) { if (!byPos) sites.set(f, byPos = new Map()); byPos.set(pos, line); sitesN++; }
+      }
+      return line;
+    }
+    return null;
   };
+  // the caller's own frame first (a repo file's own call — one frame), the walk of 12 when it is not the repo's
+  const site = (w) => siteIn(w, 1) ?? siteIn(w, 12) ?? '?';
   const wrap = (obj, name, label, keep = () => true) => {
     const orig = obj[name];
     if (typeof orig !== 'function') return;
-    obj[name] = function (...a) {
+    const w = obj[name] = function (...a) {
       const t0 = now(); depth++;
       try { return orig.apply(this, a); } finally {
         depth--; const ms = now() - t0;
-        if (ms >= 1 && keep(a)) { let what = ''; try { what = typeof a[0] === 'string' ? a[0].split(root).join('').slice(0, 120) : ''; } catch { } ops.push({ op: label, at: t0, ms, site: `${site()}${what ? ' ' + what : ''}`, nested: depth > 0 }); }
+        if (keep(a)) {
+          const tn = turn(); if (tn !== openTurn || openN > OPEN_MAX) { open.clear(); openN = 0; openTurn = tn; } // the loop turned: every run is closed
+          const x = a[0], s = site(w), long = typeof x === 'string' && x.length > ARG_KEY_MAX;
+          const arg = typeof x === 'string' ? (long ? digestOf(x) : x) : typeof x === 'number' ? '#' + x : '', key = `${depth} ${label} ${arg}`;
+          let at = open.get(s); if (!at) open.set(s, at = new Map());
+          const o = at.get(key);
+          if (o && t0 - (o.at + o.span) <= 1 && t0 + ms - o.at <= FOLD_MS) { o.ms += ms; o.n++; o.span = t0 + ms - o.at; }
+          else if (ops.length < OPS_MAX) {
+            let what = ''; try { what = typeof x !== 'string' ? '' : label === 'JSON.parse' ? `${Math.round(x.length / 1024)} KiB` : long ? `${x.length} chars` : x.split(root).join('').slice(0, 120); } catch { }
+            const op = { op: label, at: t0, ms, span: ms, n: 1, site: `${s}${what ? ' ' + what : ''}`, nested: depth > 0 };
+            ops.push(op); at.set(key, op); openN++;
+          } else ops.dropped = (ops.dropped || 0) + 1;
+        }
       }
     };
     undo.push(() => { obj[name] = orig; });
@@ -134,4 +203,4 @@ function wrapSync({ ops, now }) {
   return () => { for (const u of undo.splice(0)) u(); };
 }
 
-module.exports = { start, wrapSync, TICK_MS, HOLD_MS, WINDOW_MS };
+module.exports = { start, wrapSync, sitesOf, TICK_MS, HOLD_MS, WINDOW_MS, FOLD_MS, ARG_KEY_MAX };

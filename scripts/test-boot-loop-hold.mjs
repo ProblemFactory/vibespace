@@ -18,6 +18,7 @@
 //     shape's rows in > 100 slices), and the server's own boot clock (GET /api/boot-trace) agrees with this one.
 //   ③ RED CONTROL: the same boot with VIBESPACE_BOOT_TRACE_SYNC=1 (the warm the old way, in one tick) is red by the
 //     same judge — and VIBESPACE_BOOT_TRACE=1 names the hold: the step (usage-ledger-warm) and its sync sites.
+//     (lane ledger-dedup-law r10) + a TWO-HOLD control: short calls across two holds — each credited its own share, named.
 //   ⑤ A PROBE THAT CANNOT BE REAPED IS AN ANSWER (B-92a4, lane boot-probes-unkillable): the same boot with a fake `fuser`
 //     + `pgrep` on PATH that ignore TERM and never answer about a restore socket (the NFS D-state stand-in) ⇒ the listener
 //     opens within the probe cap + 5 s of the probes' start, the span names the N unanswered, every session is restored
@@ -183,6 +184,19 @@ await stop();
 check(`the same judge (law + the same-box control) is RED on the old warm: ${gapWords(j2.top, (rep2 && rep2.holds) || [])}`, !j2.ok && j2.over.length > 0, j2);
 const named = rep2 && (rep2.holds || []).find((h) => h.name === 'usage-ledger-warm');
 check('…the server names the hold: the step usage-ledger-warm, and the tracer its sync sites in src/usage-history.js', !!named && named.ms >= LAW_MS && (named.sites || []).some((x) => /usage-history\.js/.test(x.what)), named || (rep2 && rep2.holds));
+// lane ledger-dedup-law r10: THE TWO-HOLD CONTROL — the control above warms in ONE tick (one hold), so a fold that crossed holds
+// stayed green there; a stepped warm is many holds of short calls. 600 calls of 0.5 ms, 0.3 ms apart, across two 240 ms holds
+// (the loop turning between them, a fake clock): each hold is credited only its own share (by overlap, the op closed when the
+// loop turned) and names its site — r9 folded the run into ONE op credited 300 ms to the first hold, the second «sites: []»
+{
+  const BT = require(path.join(repo, 'src/server/boot-trace.js')), f = path.join(repo, 'package.json'), orig = fs.existsSync;
+  let clock = 0, turnNo = 0; const ops = [];
+  fs.existsSync = function (...a) { clock += 0.5; return orig.apply(this, a); };
+  const undo = BT.wrapSync({ ops, now: () => clock, turn: () => turnNo });
+  try { for (let k = 0; k < 600; k++) { clock += 0.3; if (k === 300) turnNo++; fs.existsSync(f); } } finally { undo(); fs.existsSync = orig; }
+  const two = [{ at: 0, ms: 240 }, { at: 240, ms: 240 }].map((g) => { const sites = typeof BT.sitesOf === 'function' ? BT.sitesOf(ops, g) : []; return { ...g, credited: sites.reduce((n, x) => n + x.ms, 0), named: sites.some((x) => /test-boot-loop-hold\.mjs/.test(x.what)) }; });
+  check(`…the two-hold control: 600 short calls across two 240 ms holds — hold 1 credited ${two[0].credited} ms, hold 2 ${two[1].credited} ms, each naming its site (a fold never crosses a hold)`, two.every((g) => g.named && g.credited > 0 && g.credited <= g.ms), { two, ops: ops.length });
+}
 
 // ── boots 3 + 4: THE RESTORE'S PROBES CANNOT BE REAPED (B-92a4) ──
 console.log('⑤ a fake fuser + pgrep that ignore TERM and never answer about a restore socket (the NFS D-state stand-in)');

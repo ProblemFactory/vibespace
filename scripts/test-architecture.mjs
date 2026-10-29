@@ -650,6 +650,9 @@ for (const [edge] of EXCEPTIONS) {
 {
   const svFiles = allFilesFor9().filter((f) => !f.startsWith('src/lib/'));
   const broken = [];
+  // lane ledger-dedup-law r11: ONE class across two files — UsageHistory's hold road (src/usage-hold-road.js) joins its
+  // prototype at the first instance (`holdRoadInstall`): each file's calls may be the other's methods, and only those
+  const PARTS9 = { 'src/usage-history.js': ['src/usage-hold-road.js'], 'src/usage-hold-road.js': ['src/usage-history.js'] };
   for (const f of svFiles) {
     const s9 = read(f);
     // A class that `extends` a relatively-required base (src/message-window.js,
@@ -664,7 +667,8 @@ for (const [edge] of EXCEPTIONS) {
     for (const name of called) {
       const woCalls = s9.replace(new RegExp(`this\\.${name}\\(`, 'g'), '');
       const defined = new RegExp(`(^|\\s|\\*)${name}\\s*\\(`, 'm').test(woCalls) /* `*_x(` = a generator method (B-1319's load pass) */ || new RegExp(`this\\.${name}\\s*=`).test(s9) || new RegExp(`${name}\\s*:`).test(s9)
-        || inherited.some((b) => new RegExp(`(^|\\s)${name}\\s*\\(`, 'm').test(b.replace(new RegExp(`this\\.${name}\\(`, 'g'), '')));
+        || inherited.some((b) => new RegExp(`(^|\\s)${name}\\s*\\(`, 'm').test(b.replace(new RegExp(`this\\.${name}\\(`, 'g'), '')))
+        || (PARTS9[f] || []).some((b) => new RegExp(`^  (?:async )?${name}\\s*\\(`, 'm').test(read(b)));
       if (!defined) broken.push(`${f}: this.${name}() called but never defined`);
     }
   }
@@ -4055,6 +4059,13 @@ console.log('\nclock-judge census: every clock read beside a complexity claim is
   const withOld = censusOf([...CLOCK_JUDGES, { name: 'test-peer-parsers', why: 'regex-heavy rows: ③ judged linear by hrtime ratios (the pre-.242 row)' }]), lessFirst = censusOf(CLOCK_JUDGES.slice(1));
   ok(!found.some((x) => x.name === 'test-peer-parsers') && withOld.stale.join() === 'test-peer-parsers' && lessFirst.unlisted.join() === CLOCK_JUDGES[0].name && !censusOf(CLOCK_JUDGES).stale.length, `CONTROL: a listed row whose suite reads no clock beside a claim (test-peer-parsers' old ratio row) is STALE ⇒ red; ${CLOCK_JUDGES[0].name} dropped from the list is UNLISTED ⇒ red`, JSON.stringify({ withOld, lessFirst }));
   ok(cut > 0 && clockJudgeLines(thread).length === 0 && clockJudgeLines(mutant).length > 0 && !listed.has('test-channel-thread'), `CONTROL: test-channel-thread with its old hrtime ratio restored is found (lines ${clockJudgeLines(mutant).join(',')}) and is not on the list ⇒ red; as committed (WORK) it is not found`);
+  // WORD-BOUNDARY CONTROL (lane ledger-dedup-law r2: test-ledger-dedup-law's informational ms print sat 6 lines from the word
+  // MIGRATIONS, whose letters hold R-A-T-I-O — the census read it as a ratio judge and the committed tree's build went red):
+  // a word CONTAINING the letters is no complexity claim; the word on its own (or in SNAKE_CASE) still is
+  const CLK = ['performance', 'now()'].join('.'); // never the clock word itself here: this suite is censused too
+  const inWord = `const t0 = ${CLK};\nconst m = M.MIGRATIONS.find((x) => x.id);\nok(m, 'the row exists (INTEGRATIONS too)');\n`;
+  const ownWord = `const t0 = ${CLK};\nok(b < a * SHAPE_RATIO, 'b grows like a');\n`, ownWord2 = `const t0 = ${CLK};\nok(RATIO > 2, 'x');\n`;
+  ok(clockJudgeLines(inWord).length === 0 && clockJudgeLines(ownWord).length === 1 && clockJudgeLines(ownWord2).length === 1, `CONTROL: a word containing RATIO (MIGRATIONS, INTEGRATIONS) beside a clock read is no ratio judge (${clockJudgeLines(inWord).length} found); SHAPE_RATIO / RATIO on their own still are (${clockJudgeLines(ownWord).length}, ${clockJudgeLines(ownWord2).length})`);
 }
 
 // §76 A PRIVATE BUS NEVER SHARES THE OWNER'S RUNTIME DIR (lane xpra-control-judge, 2026-10-04). Apps on a private

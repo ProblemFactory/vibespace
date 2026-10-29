@@ -204,6 +204,7 @@ await compare('append');
 console.log('§3 the readers\' census');
 const READERS = {
   'src/usage-history.js': 'owner — the hot rows, the cold columns, the streamed cold rows',
+  'src/usage-hold-road.js': 'owner — UsageHistory\'s hold road (lane ledger-dedup-law r11: its methods, moved out of usage-history.js): the drain appends a held month into the hot rows',
   'src/usage-anchors.js': 'columns — costBetweenMulti reads ts/acct/be/host/atype/model/tokens through _events + the _evCountUpTo version',
   'src/server/usage-pool-engine.js': 'columns — the 7-day dark taint reads host/acct/atype through _events',
   'src/usage-estimator.js': 'ids — ledgerKnowsId; the _evCache sets only for a ledger stub without it',
@@ -216,7 +217,7 @@ function census(files) {
     lines.forEach((l, i) => {
       if (!NEEDLE.test(l) || /^\s*(\/\/|\*)/.test(l)) return;
       if (!READERS[f]) reds.push(`${f}:${i + 1} reads the ledger cache and is not a census row`);
-      if (/_evCache\??\.events\b/.test(l) && f !== 'src/usage-history.js') reds.push(`${f}:${i + 1} reads the resident array (rows past the window are not there)`);
+      if (/_evCache\??\.events\b/.test(l) && f !== 'src/usage-history.js' && f !== 'src/usage-hold-road.js') reds.push(`${f}:${i + 1} reads the resident array (rows past the window are not there)`);
       if ((f === 'server.js' || f.startsWith('src/server/')) && /\.(?:aggregate|rows)\(|_allRows\(/.test(l)) reds.push(`${f}:${i + 1} a sync cold read on the server loop (use aggregateAsync)`);
     });
   }
@@ -516,7 +517,7 @@ let month30Prep = null, month30Run = null;
     const mig = fl['src/server/migrations.js'] || '', srv = fl['server.js'] || '';
     const reloads = /usageHistory\.reloadEvents\?\.\(\)/.test(srv);
     for (const [f, txt] of Object.entries(fl)) {
-      if (!(f.startsWith('src/') || (f.startsWith('scripts/') && !/^scripts\/test-/.test(f))) || f === 'src/usage-history.js' || FIXTURE_WRITERS.includes(f) || !writes(txt)) continue; // scripts/test-* write their own fixture ledgers (and boot-shape.mjs the boot gate's, into a scratch tree — B-1319; usage-shape-fixture.mjs the Usage suites', into the caller's scratch dataDir — B-f95d ②)
+      if (!(f.startsWith('src/') || (f.startsWith('scripts/') && !/^scripts\/test-/.test(f))) || f === 'src/usage-history.js' || f === 'src/usage-hold-road.js' /* r11: its hold road, the same owner */ || FIXTURE_WRITERS.includes(f) || !writes(txt)) continue; // scripts/test-* write their own fixture ledgers (and boot-shape.mjs the boot gate's, into a scratch tree — B-1319; usage-shape-fixture.mjs the Usage suites', into the caller's scratch dataDir — B-f95d ②)
       if (/usage-index|telemetry|otel|usage-routes|usage-index-model|usage-cold/.test(f)) continue; // read or own other files
       const base = path.basename(f, '.js');
       if (!(mig.includes(base) && reloads)) bad.push(`${f} rewrites ledger shards outside the ONE invalidation (a migration + server.js reloadEvents)`);

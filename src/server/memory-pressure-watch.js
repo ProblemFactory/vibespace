@@ -14,6 +14,7 @@ const fs = require('fs');
 const path = require('path');
 const { execFile } = require('child_process');
 const MP = require('../memory-pressure.js');
+const SI = require('../sysinfo.js'); // lane ledger-dedup-law F5: THE command-line reader (cmdlineHead) — the shared module, never a second one here
 
 const INBOX_KEY = 'memory-pressure';
 const OWN_CHROME_SCAN_MS = 5 * 60 * 1000;
@@ -95,6 +96,16 @@ function create({ activeSessions, BUFFERS_DIR, getUserTodos, getSessionStatus, s
     }
     return marks;
   }
+  /** F5: an unknown group among the largest names its largest process and its tree's root by command line (≤ 120 chars,
+   *  secrets redacted — sysinfo's reader). */
+  async function nameStrangers(groups) {
+    for (const g of groups.slice(0, MP.TOP_GROUPS)) {
+      if (g.kind !== 'unknown') continue;
+      try { g.topCmd = await SI.cmdlineHead(g.topPid); } catch { g.topCmd = null; }
+      try { g.rootCmd = g.rootPid !== g.topPid ? await SI.cmdlineHead(g.rootPid) : null; } catch { g.rootCmd = null; }
+    }
+    return groups;
+  }
   async function groupsNow({ pss = true } = {}) {
     let procs = await psTable();
     if (pss) procs = await withPss(procs);
@@ -109,6 +120,7 @@ function create({ activeSessions, BUFFERS_DIR, getUserTodos, getSessionStatus, s
 
   async function open(pct, mem) {
     const [{ groups }, tmpfs, roots] = await Promise.all([groupsNow(), tmpfsOf('/tmp'), tmpRoots('/tmp')]);
+    await nameStrangers(groups);
     const it = MP.pressureItem({ pct, used: mem.used, limit: mem.limit, groups, tmpfs, roots });
     const todos = getUserTodos && getUserTodos();
     if (todos) {

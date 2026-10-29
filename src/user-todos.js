@@ -335,6 +335,9 @@ function hideOf(item, status, by) {
   return status !== 'open' && by === 'user' && isPointer(item) ? { status: 'dismissed', by: HIDDEN_BY } : { status, by };
 }
 const { FOR_YOU_URGENCIES: URGENCIES } = require('./agent-cli-text.js'); // lane job-notify-user r3: THE one set — the agent CLIs read the same constant (it ships beside them)
+/** lane ledger-dedup-law r5: an item's resolution is no longer a person's decision once another door re-stamps or reopens it
+ *  (its ✓, Mark all seen, a producer's own re-stamp) — the fact stays for its words, the mark goes (add() reopens it again). */
+function undecide(item) { if (item.resolvedFact && item.resolvedFact.decidedBy) { const f = { ...item.resolvedFact }; delete f.decidedBy; item.resolvedFact = f; } }
 const KINDS = ['action', 'notice']; // 2.369.118: action = needs the user (default); notice = for their information (own section, grey count)
 const STATUSES = ['open', 'done', 'dismissed'];
 // THE SIZE OF AN ITEM (2026-09-27, the For-you window's verify round — the owner's
@@ -384,7 +387,11 @@ function previewOf(item) {
   return { ...item, detail: item.detail.slice(0, DETAIL_PREVIEW), detailTruncated: true, ...(card ? { card } : {}) };
 }
 const MAX_OPEN_PER_SESSION = 20; // an agent looping on add must not flood the inbox
-const MAX_ITEMS = 1000;          // total ledger cap — oldest RESOLVED pruned first
+const MAX_ITEMS = 1000;          // total ledger cap — oldest RESOLVED pruned first (an EXPIRED one before any other: EXPIRED_BY)
+// lane ledger-dedup-law F3 (B-7f9e: 958 expired hub-act cards held 958 of a fleet owner's 1000 slots and evicted the items
+// he had answered): at the cap an item that ended UNANSWERED (its producer's end — the expiry sweep, an ask that ran out or
+// was over) goes before any item a person resolved, oldest first in each; an OPEN item is never evicted
+const EXPIRED_BY = new Set(['expired', 'ask-expired', 'ask-over', 'no-longer-asked']); // r2: a standing item its subject stopped asking ended unanswered too
 const RESOLVED_TAIL = 15;                    // the snapshot's resolved tail: always the newest 15…
 const RESOLVED_RECENT_MS = 60 * 60 * 1000;   // …plus every item resolved within the last hour (an open popup's in-place rows, chunk 4)…
 const RESOLVED_SNAPSHOT_MAX = 250;           // …never more than this (one resolve-many is ≤ 200 ids)
@@ -406,8 +413,9 @@ class UserTodoManager {
    *  engine runs on, so a filing's createdAt and the engine's `now` agree at any
    *  wall-clock time (test-decision-inbox's ONE CLOCK census: no other wall-clock read in the class);
    *  the default reads the global per call, so a suite that swaps it still steers the store */
-  constructor({ dataDir, onChange, expirySweepMs = EXPIRY_SWEEP_MS, onWriteError = null, now = () => Date.now() }) {
+  constructor({ dataDir, onChange, expirySweepMs = EXPIRY_SWEEP_MS, onWriteError = null, maxItems = MAX_ITEMS, now = () => Date.now() }) {
     this._now = now;
+    this._maxItems = Number.isInteger(maxItems) && maxItems > 0 ? maxItems : MAX_ITEMS; // the total cap (a suite's seam)
     this._file = path.join(dataDir, 'user-todos.json');
     this._onChange = onChange || (() => {});
     this._onWriteError = typeof onWriteError === 'function' ? onWriteError : null; // lane-dead-bridge: session-status's twin — a failed background write is named, never a crash
@@ -542,11 +550,13 @@ class UserTodoManager {
   }
 
   _save() {
-    // Prune: drop oldest resolved items past the cap (open items never pruned).
-    if (this._state.items.length > MAX_ITEMS) {
+    // Prune: drop resolved items past the cap (open items never pruned) — the ones that ended unanswered first (EXPIRED_BY),
+    // then the rest, oldest first in each
+    if (this._state.items.length > this._maxItems) {
+      const age = (i) => i.resolvedAt || i.createdAt || 0, lapsed = (i) => (EXPIRED_BY.has(i.resolvedBy) ? 0 : 1);
       const resolved = this._state.items.filter((i) => i.status !== 'open')
-        .sort((a, b) => (a.resolvedAt || a.createdAt || 0) - (b.resolvedAt || b.createdAt || 0));
-      const drop = new Set(resolved.slice(0, this._state.items.length - MAX_ITEMS).map((i) => i.id));
+        .sort((a, b) => (lapsed(a) - lapsed(b)) || (age(a) - age(b)));
+      const drop = new Set(resolved.slice(0, this._state.items.length - this._maxItems).map((i) => i.id));
       if (drop.size) this._state.items = this._state.items.filter((i) => !drop.has(i.id));
     }
     this._dirty = true;
@@ -654,7 +664,7 @@ class UserTodoManager {
 
   get(id) { return this._state.items.find((i) => i.id === id) || null; }
 
-  add(sessionKey, { text, detail, urgency, by = 'agent', sessionName = null, jobId = null, kind = null, i18n = null, expiresAt = null, action = null, options = null, origin = null, card = null, facts = null, artifacts = null, cwd = null, hostId = null, openCap = null, plugin = null, open = null, about = null, jobName = null, jobFact = null } = {}) {
+  add(sessionKey, { text, detail, urgency, by = 'agent', sessionName = null, jobId = null, kind = null, i18n = null, expiresAt = null, action = null, options = null, origin = null, card = null, facts = null, artifacts = null, cwd = null, hostId = null, openCap = null, plugin = null, open = null, about = null, jobName = null, jobFact = null, itemKey = null } = {}) {
     const _dataDir = path.dirname(this._file);   // agent-output-sinks: the belt finds the vault from here
     // agent-output-sinks: belt an AGENT's own words — never a system producer's notice (vault / spend / channels / machines / …).
     // Two shapes (src/inbox-origin.js): AGENT_WORDS_ORIGINS — the whole text and detail are the agent's (vibespace-ask);
@@ -759,13 +769,24 @@ class UserTodoManager {
     };
     // lane job-notify-user r3: an item that names its job's fact re-files by the FACT (jobId + jobFact), never by its
     // text; one that names none never merges into one that does (a job's copy is the job's)
-    const sameWords = (i) => (jobFact ? i.jobId === jobId && i.jobFact === jobFact : i.text === text && !i.jobFact);
-    const existing = this._state.items.find((i) => i.sessionKey === sessionKey && sameWords(i) && sameFiling(i) && !i.clearedAt && !(i.status !== 'open' && isDecisionRow(i)));
+    // lane ledger-dedup-law r6: A SERVER PRODUCER'S IDENTITY — an item filed with an `itemKey` (the growth alarm's (host id,
+    // file)) is matched by (sessionKey, itemKey) alone, never by its words, and its id is derived from it (`_idOfKey`).
+    // int361 (主开发's seam (a)): ONE identity predicate — by itemKey when the filing has one, else by jobId + jobFact when it
+    // has a fact, else by text among items with neither key; every branch excludes a cleared item and a DECIDED decision row
+    // (lane wake-approve-card r2: a re-file is a new question beside it, never its reopen)
+    itemKey = typeof itemKey === 'string' && itemKey ? itemKey.slice(0, 300) : null;
+    const sameWords = (i) => (itemKey ? i.itemKey === itemKey : jobFact ? i.jobId === jobId && i.jobFact === jobFact && !i.itemKey : i.text === text && !i.jobFact && !i.itemKey);
+    const existing = this._state.items.find((i) => i.sessionKey === sessionKey && sameWords(i) && (itemKey || sameFiling(i)) && !i.clearedAt && !(i.status !== 'open' && isDecisionRow(i)));
     const openCount = this._state.items.filter((i) => i.sessionKey === sessionKey && i.status === 'open').length;
     // a SERVER producer whose open items its own domain bounds (one per account row) may raise the per-key cap; the agent
     // route never passes it (lane oat-identity-fix-r2, L1)
-    const maxOpen = Number(openCap) > MAX_OPEN_PER_SESSION ? Math.min(Number(openCap), MAX_ITEMS) : MAX_OPEN_PER_SESSION;
+    const maxOpen = Number(openCap) > MAX_OPEN_PER_SESSION ? Math.min(Number(openCap), this._maxItems) : MAX_OPEN_PER_SESSION;
     if (existing) {
+      // lane ledger-dedup-law r5: A DECISION IS FINAL — an item a PERSON decided (its producer's answer door wrote
+      // `resolvedFact.decidedBy: 'person'` with the resolution, and no door re-stamped or reopened it since) is never
+      // reopened by a re-file: a re-ask after a Deny is refused by the Deny, never a new filing (a hub act's re-file
+      // reopened its denied item 3 s before the boot read the Deny back). Returned as it is, `decided: true`.
+      if (existing.status !== 'open' && existing.resolvedFact && existing.resolvedFact.decidedBy === 'person') return cut({ ...existing, existing: true, decided: true });
       let changed = false;
       // lane decision-inbox-rank: an agent filing the SAME words (text, and the same detail or none) of an item still open
       // is a RE-ASK — counted (the tray's judge reads "re-asked N times"; the 48 h decay restarts at the last one); new
@@ -788,6 +809,7 @@ class UserTodoManager {
         existing.expiresAt = expiresAt; changed = true;
       }
       if (reask) { existing.reasks = (Number(existing.reasks) || 0) + 1; existing.reaskedAt = this._now(); changed = true; }
+      if (itemKey && text !== existing.text) { existing.text = text; delete existing.judged; changed = true; } // r6: a keyed item's words are not its identity
       if (detail && detail !== existing.detail) { existing.detail = detail; delete existing.judged; changed = true; } // F2: new words, no old verdict
       if (urgency && urgency !== existing.urgency) { existing.urgency = urgency; changed = true; }
       if (kind && kind !== existing.kind) { existing.kind = kind; changed = true; }
@@ -809,7 +831,8 @@ class UserTodoManager {
     }
     if (openCount >= maxOpen) throw Object.assign(new Error(`this session already has ${openCount} open items — resolve some before adding more`), { code: 'full', open: openCount });
     const item = {
-      id: 'ut-' + crypto.randomBytes(5).toString('hex'),
+      id: itemKey ? this._idOfKey(sessionKey, itemKey) : 'ut-' + crypto.randomBytes(5).toString('hex'),
+      ...(itemKey ? { itemKey } : {}), // r6: the producer's identity (a re-file of the same key is this item, whatever it says)
       sessionKey, text, detail,
       urgency: urgency || 'normal',
       kind: kind || 'action',
@@ -880,6 +903,7 @@ class UserTodoManager {
     ({ status, by } = hideOf(item, status, by));   // r3: a pointer's close by the person is a hide
     const wasOpen = item.status === 'open';
     item.status = status;
+    undecide(item); // r5: what resolves the item now is this door, not the person's decision
     // a reopen is the user saying it still matters: it no longer expires
     if (status === 'open') { item.resolvedAt = null; item.resolvedBy = null; item.expiresAt = null; if (!wasOpen) delete item.judged; } // F2: a reopen is judged again
     else { item.resolvedAt = this._now(); item.resolvedBy = by; }
@@ -912,6 +936,7 @@ class UserTodoManager {
       const h = hideOf(item, status, by);   // r3: «Mark all seen» HIDES a pointer (never «done»)
       const wasOpen = item.status === 'open';
       item.status = h.status;
+      undecide(item); // lane ledger-dedup-law r5: as setStatus
       if (h.status === 'open') { item.resolvedAt = null; item.resolvedBy = null; item.expiresAt = null; if (!wasOpen) delete item.judged; } // F2: a reopen is judged again
       else { item.resolvedAt = now; item.resolvedBy = h.by; }
       changed.push(id);
@@ -1067,6 +1092,15 @@ class UserTodoManager {
     // decision, rare, and small: ONE synchronous write (the stash's own rule, 2026-09-27 verify r3/r5).
     if (out.cleared.length) { this._save(); this.flush(); this._notify(); }
     return out;
+  }
+
+  /** r6: a keyed item's id — derived from (sessionKey, itemKey), the same shape as a minted one; the next derivation when an
+   *  item holds it already (a CLEARED item of the same key keeps its id). */
+  _idOfKey(sessionKey, itemKey) {
+    for (let n = 0; ; n++) {
+      const id = 'ut-' + crypto.createHash('sha256').update(`${sessionKey}\n${itemKey}${n ? `\n${n}` : ''}`).digest('hex').slice(0, 10);
+      if (!this._state.items.some((i) => i.id === id)) return id;
+    }
   }
 
   /** The ids of every item `pred` selects (a cleared JOB's items: `jobId` in the set). */

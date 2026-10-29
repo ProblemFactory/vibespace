@@ -227,7 +227,7 @@ function quotaBackendFor(key, session) {
 }
 const { quotaVerdict, THRESH: VERDICT_THRESH, lapseCleared, serveAfterFailure, SERVE_LAPSED, memberLapsed, readingFingerprint } = require('../account-pool-auto.js'); // THE account-usability verdict (2.369.0, owner-designed)
 const { loginUsable, loginBucketLabel, loginAgeText, loginWallPhrase } = require('../login-expiry.js'); // PURE: is this member's LOGIN SESSION still alive (2026-09-07)
-const { UsageEstimator, overlayCache: estOverlayCache, predictCalib, sweepAnchorGroup, CLAUDE_MAX_PRIOR_FULL_USD } = require('../usage-estimator.js');
+const { UsageEstimator, overlayCache: estOverlayCache, predictCalib, sweepAnchorGroup, wholeLedgerGate, CLAUDE_MAX_PRIOR_FULL_USD } = require('../usage-estimator.js');
 const usageAnchors = new UsageAnchors({ dataDir: path.join(rootDir, 'data') });
 // READ-ONLY view of the transition ledger. The single WRITER is accounts.js
 // (every re-point goes through ensureSessionPoolLink / setPoolTarget — spawn,
@@ -342,7 +342,7 @@ function darkSources() {
       if (hosts.linkState(src) === 'offline') list.push({ host: src, lastEventTs: ts });
     }
   } catch { }
-  _darkMemo = { at: Date.now(), list };
+  _darkMemo = { at: _wholeLedger.loading() ? 0 : Date.now(), list }; // lane ledger-dedup-law r2: a list read off a partial ledger is never kept
   return list;
 }
 // Which accounts a dark source taints: those with ledger events from that
@@ -431,7 +431,14 @@ async function pushSealedOrders(poolId) {
   _sealedOrdersSent.set(poolId, j);
 }
 
-function sweepUsageAnchors() {
+// lane ledger-dedup-law r2 — NO MONEY DECISION FROM A PARTIAL LEDGER (usage-estimator `wholeLedgerGate`): the sweep waits for
+// the boot warm, the automatic pool decision is skipped while it loads and every auto pool is decided again at its end
+const _wholeLedger = wholeLedgerGate({
+  ledger: usageHistory, log: (m) => console.log(`[usage-pool] ${m}`),
+  onWhole: () => { try { for (const a of (accounts.list().accounts || [])) { const full = accounts.get(a.id); if (full?.type === 'pooled' && full.auto) { try { maybePoolAutoSwitchForPool(a.id); } catch { } } } } catch { } },
+});
+function sweepUsageAnchors() { return _wholeLedger.run(sweepUsageAnchorsNow); }
+function sweepUsageAnchorsNow() {
   // GROUPED BY IDENTITY (2.263.0): recording per cache-file double-anchored
   // org-merged logins (__global__ + named sub interleaved in one identity
   // file, each record's costSince missing the sibling account's spend — real
@@ -6848,6 +6855,7 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
     if (!poolId) return;
     const a = accounts.get(poolId);
     if (!a || a.type !== 'pooled' || !a.auto) return;
+    if (_wholeLedger.holds()) return; // lane ledger-dedup-law r2: the estimate + dark-host pessimism below would read half the ledger — decided again at the warm's end
     const now = Date.now();
     // `force` is the new-member wake (onMemberReadingFresh, and its login half
     // when the login's read did not answer) and NOTHING else:

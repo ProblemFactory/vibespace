@@ -5,7 +5,8 @@
  * own loop, so while the main thread is held it can still say so — straight to the journal (fd 2, one write(2) per line:
  * console.* in a worker is relayed through the main thread, which is the thread that is held):
  *   · a call in flight ≥ liveMs → «[sync-fs] the main thread has waited N s in statSync(/…/NAS/x) — the kernel:
- *     request_wait_answer in newfstatat» — again every REPEAT_MS while the same call holds;
+ *     request_wait_answer in newfstatat» — again every REPEAT_MS while the same call holds; lane ledger-dedup-law r8: with
+ *     the store it is made for when a timedSync armed one («… in appendFileSync(…) (usage-shards.write) — …»);
  *   · the heartbeat stale ≥ liveMs with NO call in flight → «… held N s outside any synchronous fs call» (JavaScript on
  *     the CPU, a child the main thread waits on, a native call — the kernel's answer says which).
  * The kernel's answer is the main thread's /proc/self/task/<pid>/wchan + syscall: procfs, never a mount.
@@ -23,7 +24,7 @@ const SYSCALLS = { 0: 'read', 1: 'write', 2: 'open', 3: 'close', 4: 'stat', 5: '
   89: 'readlink', 90: 'chmod', 202: 'futex', 217: 'getdents64', 230: 'clock_nanosleep', 232: 'epoll_wait', 254: 'inotify_add_watch', 257: 'openat', 258: 'mkdirat',
   262: 'newfstatat', 263: 'unlinkat', 264: 'renameat', 267: 'readlinkat', 269: 'faccessat', 271: 'ppoll', 281: 'epoll_pwait', 316: 'renameat2', 332: 'statx', 439: 'faccessat2' };
 
-const { sab, fns = [], pid, liveMs = 10000 } = workerData || {};
+const { sab, fns = [], stores = [], pid, liveMs = 10000 } = workerData || {};
 const I = new Int32Array(sab, 0, SLOT_INTS), T = new Float64Array(sab, SLOT_INTS * 4, 1), P = new Uint8Array(sab, SLOT_INTS * 4 + 8, SLOT_PATH);
 const dec = new TextDecoder();
 
@@ -51,14 +52,14 @@ function check(now = Date.now()) {
   const flying = Atomics.load(I, 4) === 1;
   if (flying) {
     const s1 = Atomics.load(I, 0);
-    const fn = fns[I[1]] || '?', len = Math.min(SLOT_PATH, Math.max(0, I[2])), startedAt = T[0];
+    const fn = fns[I[1]] || '?', len = Math.min(SLOT_PATH, Math.max(0, I[2])), startedAt = T[0], store = I[5] > 0 ? stores[I[5] - 1] || '' : '';
     const p = len ? dec.decode(P.slice(0, len)) : '';
     const s2 = Atomics.load(I, 0);
     if (s1 !== s2 || s1 % 2 || Atomics.load(I, 4) !== 1) return null; // the slot moved under the read: the next tick
     const held = now - startedAt;
     if (held < liveMs || (s1 === saidSeq && now - saidAt < REPEAT_MS)) return null;
     saidSeq = s1; saidAt = now;
-    const line = `[sync-fs] the main thread has waited ${Math.round(held / 1000)} s in ${fn}(${p}) — the kernel: ${kernel()}`;
+    const line = `[sync-fs] the main thread has waited ${Math.round(held / 1000)} s in ${fn}(${p})${store ? ` (${store})` : ''} — the kernel: ${kernel()}`;
     say(line); return line;
   }
   const stale = now - beatAt;

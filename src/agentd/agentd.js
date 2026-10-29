@@ -151,13 +151,23 @@ const FS_ACTIONS = {
 // the cursor itself: the server commits it over the device link only after
 // the count-gated transfer fully landed (two-phase — closes the loss window
 // the shipped script's flush-then-persist model had on relayed paths). ──
+// lane ledger-dedup-law F2: `--cursors-stdin` = the HUB keeps this machine's usage cursor and hands it in on stdin (the
+// walker's own cursor map, as of the last batch the hub made durable) — the device's cursor file is neither read nor
+// written; the manifest says `__cursorsFrom__: 'hub'` so the hub knows its cursor was the one walked from.
 if (process.argv.includes('--usage-scan-child')) {
   try {
     const { runUsageWalk } = require('./../usage-walker.js');
     const cfArg = process.argv[process.argv.indexOf('--usage-scan-child') + 1];
-    const r = runUsageWalk(cfArg && !cfArg.startsWith('-') ? { cursorFile: cfArg } : {});
+    const opts = cfArg && !cfArg.startsWith('-') ? { cursorFile: cfArg } : {};
+    let fromHub = false;
+    if (process.argv.includes('--cursors-stdin')) {
+      const j = JSON.parse(require('fs').readFileSync(0, 'utf-8') || 'null');
+      if (!j || typeof j !== 'object' || Array.isArray(j)) throw new Error('usage-scan: the hub cursor on stdin is not an object');
+      opts.cursors = j; fromHub = true;
+    }
+    const r = runUsageWalk(opts);
     process.stdout.on('error', () => process.exit(1));
-    const lines = r.events.concat(JSON.stringify({ __cursors__: r.cursors, __cursorFile__: r.cursorFile }));
+    const lines = r.events.concat(JSON.stringify({ __cursors__: r.cursors, __cursorFile__: r.cursorFile, ...(fromHub ? { __cursorsFrom__: 'hub' } : {}) }));
     process.stdout.write(lines.join('\n') + '\n', () => process.exit(0));
   } catch (e) { console.error(e.message); process.exit(1); }
   return;
@@ -1864,7 +1874,7 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
           // per-op capability gating (three-tier design): consumers check the
           // capability, NEVER parse daemonVersion — unknown ops on an old
           // daemon get no reply and hang the request until its timeout
-          capabilities: ['probe', 'transcript-op', 'usage-scan', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders', 'sysinfo', 'design-fs', 'session-events', 'proc-list', 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'browser-end-daemon', 'desktop-serve', 'window-track', 'window-pin', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream', 'desktop-apps-list', 'display-facts', 'remoteapp-facts', 'stream-offer', 'input-events', 'stream-facts', 'stream-screen', 'stream-mac', 'stream-window', 'stream-windows', 'settings-open', 'desktop-grab', 'desktop-input', 'stream-mic', 'stream-audio'],
+          capabilities: ['probe', 'transcript-op', 'usage-scan', 'usage-scan-hub-cursor', 'discovery-claims', 'place-secret', 'quota-refresh', 'usage-events', 'pool-orders', 'sysinfo', 'design-fs', 'session-events', 'proc-list', 'peer-post', 'opencode-serve', 'browser-serve', 'browser-builds', 'browser-remove', 'browser-end-daemon', 'desktop-serve', 'window-track', 'window-pin', 'dial-status', 'run-shell', 'app-install', 'fs-portable', 'fs-write-stream', 'desktop-apps-list', 'display-facts', 'remoteapp-facts', 'stream-offer', 'input-events', 'stream-facts', 'stream-screen', 'stream-mac', 'stream-window', 'stream-windows', 'settings-open', 'desktop-grab', 'desktop-input', 'stream-mic', 'stream-audio'],
         }));
         return;
       }
@@ -2725,6 +2735,7 @@ function serveConnection(sock, { dialed = false, onAuthed = null } = {}) {
       if (msg.op === 'usage-scan') {
         const args = [__filename, '--usage-scan-child'];
         if (msg.cursorFile) args.push(String(msg.cursorFile));
+        if (msg.hubCursor && msg.stdin64) args.push('--cursors-stdin'); // lane ledger-dedup-law F2: the hub's cursor rides stdin
         startStreamChild(msg, process.execPath, args);
         return;
       }

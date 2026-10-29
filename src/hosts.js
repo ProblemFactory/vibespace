@@ -1344,17 +1344,28 @@ class HostManager {
     // rung (it stays armed — a lapsed push heals through it). Capability-
     // gated; old daemons just keep the pull path.
     try {
+      let held = false, landing = []; // a chunk of this push (≤ 500 events each; the LAST carries the seq) was not made durable; r8: the chunks still landing
       dm.watchUsageEvents?.((m) => {
         try {
           const text = (m.batch || []).join('\n');
-          const r = this.onUsageEvents?.(id, text);
+          let r = this.onUsageEvents?.(id, text);
+          // lane ledger-dedup-law r8: a held month's rows land on the hold's async road — the seq is acked once EVERY chunk of
+          // its push has (the daemon walks again from its committed cursor: an ack is never ahead of what landed)
+          if (r && typeof r.then === 'function') { landing.push(r); r = true; }
+          if (r === false) held = true;
+          if (m.seq != null && landing.length) { const seq = m.seq, ok = !held, w = landing; held = false; landing = []; Promise.all(w).then((rs) => { if (ok && rs.every((x) => x !== false)) dm.ackUsageEvents(seq); }, () => { }); return; }
+          if (m.seq != null) { if (held) r = false; held = false; }
           if (m.seq != null) {
             // ingest is synchronous today (ingestRemoteEvents appends + fsyncs
             // via appendFileSync) — ack only on success; a throw above leaves
-            // the batch unacked and it re-emits
+            // the batch unacked and it re-emits. `false` = not every row was
+            // made durable (lane ledger-dedup-law r5: usage-history `ackOf`,
+            // the harvest road's own verdict — deferred, or a month's hold
+            // unwritten; a pause alone acks: its rows are held): unacked,
+            // the device keeps the batch
             if (r !== false) dm.ackUsageEvents(m.seq);
           }
-        } catch { /* unacked → re-emitted → rid dedup absorbs */ }
+        } catch { held = m.seq == null; /* unacked → re-emitted → the write-time dedup keeps none of it twice */ }
       }).catch(() => { });
     } catch { }
   }
@@ -2372,9 +2383,22 @@ class HostManager {
    *  Ships the scanner over ssh STDIN (never argv) and runs it; the remote
    *  keeps its own byte cursors (~/.vibespace/usage-cursor.json), so after the
    *  first full pass each harvest returns only NEW events. Throttled 15min per
-   *  host unless forced. Returns the raw NDJSON text ('' when throttled). */
-  async harvestUsage(id, { force = false, scannerPath, minIntervalMs } = {}) {
+   *  host unless forced. Returns the raw NDJSON text ('' when throttled).
+   *  `ledger` (lane ledger-dedup-law F2 — every server caller passes the UsageHistory): the harvest INGESTS itself and
+   *  answers the ingest's `{added, appended, duplicates, since, …}` (`{added: 0, throttled: true}` when throttled). On the
+   *  device road THE HUB KEEPS THE CURSOR: the device walks from the hub's copy (`ledger.hostCursorOf`) and the hub's
+   *  durable ingest is the commit — the device's cursor file is never written, so nothing of VibeSpace's own upkeep waits
+   *  at the hub-act gate (a cluster instance held that `files` act for an owner who never answered, and every harvest
+   *  re-sent the whole window). An older daemon that cannot take the hub's cursor walks from its own, the ledger drops
+   *  what it already holds (0 bytes) and this says `since-unsupported` once per machine. */
+  async harvestUsage(id, { force = false, scannerPath, minIntervalMs, ledger = null } = {}) {
     const h = this.get(id);
+    const ingest = (text, { cursors = null, since = null } = {}) => {
+      if (!ledger) return text;
+      const r = text ? ledger.ingestRemoteEvents(id, (h && h.name) || id, text, { cursors, since }) : { added: 0, appended: 0, duplicates: 0 };
+      const out = (x) => (since ? { ...x, since } : x);
+      return r && typeof r.then === 'function' ? r.then(out) : out(r); // lane ledger-dedup-law r8: a held month's rows land on the hold's async road — awaited
+    };
     if (!this._usageHarvestAt) this._usageHarvestAt = new Map();
     const last = this._usageHarvestAt.get(id) || 0;
     // minIntervalMs: the event-driven cadence (a remote session's turn just
@@ -2382,41 +2406,47 @@ class HostManager {
     // 15). The 15-min default remains the idle/背景 cadence. Still one ssh/
     // device round trip per call — never sub-minute.
     const gate = Math.max(60 * 1000, minIntervalMs ?? 15 * 60 * 1000);
-    if (!force && Date.now() - last < gate) return '';
+    if (!force && Date.now() - last < gate) return ledger ? { added: 0, throttled: true } : '';
     this._usageHarvestAt.set(id, Date.now());
     const script = fs.readFileSync(scannerPath, 'utf-8');
     // CS data-plane: ship+run the scanner through the daemon (streaming exec —
     // NDJSON output can be huge). Same cursor semantics; legacy ssh fallback.
     if (this.dataPlaneOn?.() || h.transport === 'dial') {
+      let got = null; // what the device road answered: {text, cursors?, since?} — ingested AFTER the transport's own try
       try {
         const dm = await this.deviceBounded(id);
         // R4 `usage.scan`: the walker is BUNDLED in the daemon (≥2.286.0) —
-        // no per-harvest script ship, and the cursor commits over the device
-        // link ONLY after the count-gated transfer fully landed server-side
-        // (two-phase: a link death mid-transfer leaves the cursor put, the
-        // next harvest re-emits, rid dedup absorbs — the script's
-        // flush-then-persist model lost that window's events forever on
-        // relayed paths). Older daemon / op failure → script-ship fallback.
+        // no per-harvest script ship. TWO-PHASE, THE HUB'S SIDE (lane
+        // ledger-dedup-law F2): the cursor moves only after the count-gated
+        // transfer fully landed AND the ingest made it durable — and it moves
+        // HERE, in the hub's copy beside the ledger, never by a write on the
+        // device (a link death mid-transfer leaves it put; the next harvest
+        // walks from the same place). Older daemon / op failure → script-ship
+        // fallback.
+        let r = null;
         try {
-          const r = await dm.usageScan();
-          if (r.cursors && r.cursorFile) {
-            try {
-              await dm.fsWrite(r.cursorFile + '.tmp', JSON.stringify(r.cursors), { by: 'system:usage-harvest' });
-              await dm.fsRename(r.cursorFile + '.tmp', r.cursorFile, { by: 'system:usage-harvest' });
-            } catch (e4) { console.warn('[usage] cursor commit failed (next harvest re-emits):', e4.message); }
-          }
-          return r.ndjson;
+          const hub = ledger && typeof ledger.hostCursorOf === 'function' ? ledger.hostCursorOf(id) : null;
+          r = await dm.usageScan({ hubCursor: hub ? hub.cursors : null });
         } catch (e3) {
           if (!/lacks usage-scan/.test(e3.message || '')) console.warn('[usage] usage-scan op failed, falling back to script ship:', e3.message);
         }
-        const home = (await dm.runCmd('sh', ['-c', 'echo "$HOME"'], { by: 'system:usage-harvest' })).stdout.trim();
-        const scanPath = home + '/.vibespace/bin/vibespace-usage-scan';
-        await dm.fsWrite(scanPath, script, { by: 'system:usage-harvest' }); // fsWrite mkdirs the parent
-        const chunks = [];
-        const { code, error } = await dm.runStream('node', [scanPath], { onData: (b) => chunks.push(b), by: 'system:usage-harvest' });
-        if (error) throw new Error(error);
-        if (code !== 0) throw new Error('scanner exit ' + code);
-        return Buffer.concat(chunks).toString('utf-8');
+        if (r) {
+          if (r.since === 'unsupported') {
+            if (!this._sinceSaid) this._sinceSaid = new Set();
+            if (!this._sinceSaid.has(id)) { this._sinceSaid.add(id); console.warn(`[usage] ${(h && h.name) || id}: since-unsupported — its device agent cannot walk from the hub's cursor (an older daemon): each harvest re-reads the window since the device's own cursor and the ledger keeps none of it twice (0 bytes), until the device agent is updated`); }
+          }
+          got = { text: r.ndjson, cursors: r.cursors || null, since: r.since || 'device' };
+        }
+        if (!got) { // an older daemon (no usage-scan op) / the op failed: ship the scanner (it keeps its own cursor on the device)
+          const home = (await dm.runCmd('sh', ['-c', 'echo "$HOME"'], { by: 'system:usage-harvest' })).stdout.trim();
+          const scanPath = home + '/.vibespace/bin/vibespace-usage-scan';
+          await dm.fsWrite(scanPath, script, { by: 'system:usage-harvest' }); // fsWrite mkdirs the parent
+          const chunks = [];
+          const { code, error } = await dm.runStream('node', [scanPath], { onData: (b) => chunks.push(b), by: 'system:usage-harvest' });
+          if (error) throw new Error(error);
+          if (code !== 0) throw new Error('scanner exit ' + code);
+          got = { text: Buffer.concat(chunks).toString('utf-8') };
+        }
       } catch (e2) {
         // DIAL has no ssh fallback (sshArgs throws 'is a dial-out device'),
         // and the ssh path would MISDIAGNOSE the device-link failure as a
@@ -2426,13 +2456,15 @@ class HostManager {
         if (h.transport === 'dial') { this._usageHarvestAt.set(id, 0); throw e2; }
         /* ssh host: fall through to the legacy ssh path below */
       }
+      // the ingest is the hub's own (an ingest that throws is never a reason to walk the machine again by another road)
+      if (got) return ingest(got.text, got);
     }
     return new Promise((resolve, reject) => {
       const child = execFile('ssh', [...this.sshArgs(h, { multiplex: true }), '--',
         'umask 077; mkdir -p "$HOME/.vibespace/bin"; cat > "$HOME/.vibespace/bin/vibespace-usage-scan"; ' + REMOTE_PRELUDE + 'node "$HOME/.vibespace/bin/vibespace-usage-scan"'],
         { env: this.sshEnv(), timeout: 180000, maxBuffer: 128 * 1024 * 1024 }, (err, stdout, stderr) => {
           if (err) { this._usageHarvestAt.set(id, 0); return reject(sshRefusal(h, err, stderr, fed) || new Error((stderr || err.message || '').toString().slice(0, 200))); }
-          resolve(stdout.toString());
+          try { resolve(ingest(stdout.toString())); } catch (e) { reject(e); }
         });
       const fed = feedStdin(child, script);
     });

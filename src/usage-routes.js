@@ -476,9 +476,7 @@ app.post('/api/usage-stats/harvest-hosts', async (req, res) => {
     const want = req.body?.host ? [req.body.host] : hosts.list().map((h) => h.id);
     for (const id of want) {
       try {
-        const h = hosts.get(id);
-        const text = await hosts.harvestUsage(id, { force: !!req.body?.force, scannerPath });
-        out[id] = text ? usageHistory.ingestRemoteEvents(id, h.name, text) : { added: 0, throttled: !text };
+        out[id] = await hosts.harvestUsage(id, { force: !!req.body?.force, scannerPath, ledger: usageHistory }); // lane ledger-dedup-law F2: {added, appended, duplicates, since} | {added: 0, throttled}
       } catch (e) { out[id] = { error: String(e.message || e).slice(0, 160) }; }
     }
   } finally { _harvestLease = 0; }

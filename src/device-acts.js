@@ -44,8 +44,8 @@ const BY_KINDS = Object.freeze(['human', 'agent', 'job', 'system']);
 const BY_RE = /^(human|agent|job|system):[A-Za-z0-9][A-Za-z0-9._:@/+-]{0,159}$/;
 // lane hub-act-ask: what the ask said about an act (its line's `ask`) — asked and allowed once / always, denied, unanswered in
 // 60 s, not filed (For you refused the card), the machine's list is Never, refused in a background subject's quiet window,
-// the gate could not judge it
-const ASK_OUTCOMES = Object.freeze(['allowed', 'always', 'denied', 'expired', 'unfiled', 'never', 'quiet', 'error']);
+// the gate could not judge it; refused at once and counted on a background subject's standing item (lane ledger-dedup-law F3)
+const ASK_OUTCOMES = Object.freeze(['allowed', 'always', 'denied', 'expired', 'unfiled', 'never', 'quiet', 'error', 'standing']);
 const askOf = (a) => (ASK_OUTCOMES.includes(a) ? a : null);
 
 // THE TABLE. A key is an op, or `op:action` for the ops whose action decides (fs-op, design-fs, desktop-serve,

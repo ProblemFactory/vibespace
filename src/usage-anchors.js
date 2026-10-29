@@ -158,9 +158,14 @@ function _memoPut(m, key, val) {
   m.map.set(key, val);
   m.keys.push(key);
 }
+// A PARTIAL LEDGER IS SAID (lane ledger-dedup-law r2 — the acceptance read 840 of 20 000 requests, $5.92 of $140.90, from
+// a boot warm half done, and nothing said so): while the ledger is still loading past its takeover bound the rows walked
+// here are only part of it — the answer carries `partial: true` and is never memoized; no caller writes a learned rate,
+// records an anchor's costSince or moves a conversation on it (usage-estimator `wholeLedgerGate`, UsageEstimator).
 function costBetweenMulti(usageHistory, accountIds, fromMs, toMs) {
   const want = new Set((accountIds || []).map((a) => a || '__global__'));
-  const versioned = typeof usageHistory?._evCountUpTo === 'function' && typeof usageHistory?.pricingToken === 'function';
+  let loading = null; try { loading = typeof usageHistory?.ledgerLoading === 'function' ? usageHistory.ledgerLoading() : null; } catch { loading = null; }
+  const versioned = !loading && typeof usageHistory?._evCountUpTo === 'function' && typeof usageHistory?.pricingToken === 'function';
   const memo = versioned ? _memoFor(usageHistory) : null;
   const memoKey = versioned ? `${[...want].sort().join(',')}|${fromMs}|${toMs}|${usageHistory._evCountUpTo(toMs || Infinity)}|${usageHistory.pricingToken()}|${usageHistory.ledgerGen || 0}` : null; // ledgerGen (B-9428 r4): a rewritten ledger with the same counts never serves the old dollars
   if (memoKey) { const hit = memo.map.get(memoKey); if (hit) return { ...hit, byFamily: { ...hit.byFamily }, byClass: { ...hit.byClass } }; }
@@ -206,6 +211,7 @@ function costBetweenMulti(usageHistory, accountIds, fromMs, toMs) {
   for (const k of Object.keys(out.byFamily)) out.byFamily[k] = Math.round(out.byFamily[k] * 10000) / 10000;
   for (const k of Object.keys(out.byClass)) out.byClass[k] = Math.round(out.byClass[k] * 10000) / 10000;
   if (memoKey) _memoPut(memo, memoKey, { ...out, byFamily: { ...out.byFamily }, byClass: { ...out.byClass } });
+  if (loading) out.partial = true;
   return out;
 }
 

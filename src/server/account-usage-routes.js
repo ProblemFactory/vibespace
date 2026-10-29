@@ -217,6 +217,10 @@ app.get('/api/usage-stats', async (req, res) => {
     // the shadow comparison (design 011 L1), posted in this same synchronous
     // step so the index answers over exactly the appends this answer saw; it
     // settles off the response and feeds nothing
+    // lane ledger-dedup-law F4: a machine whose usage is NOT being recorded (its shard out of shape) is said in the window —
+    // a state the answer carries, never only a console line
+    const paused = usageHistory.ingestPaused?.() || [];
+    if (paused.length) answer = { ...answer, ingestPaused: paused };
     usageIndex.compare(answer, { from, to, backend, accounts, hostFilter, pivots });
     res.json(onlyPivots ? pivotsOnly(answer) : answer);
   } catch (e) { res.status(500).json({ error: e.message }); }

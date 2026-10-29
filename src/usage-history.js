@@ -173,6 +173,26 @@ const SCAN_BUDGET_BYTES = 1024 * 1024;
 const WARM_SLICE_BYTES = SCAN_BUDGET_BYTES; // the boot warm's slice (B-1319): the same MiB a walk tick takes
 const TRIM_BATCH_ROWS = 16384; // …and its window slide, rows moved cold per step (~17 ms here)
 const PROBE_BYTES = 64; // the append-only proof: the last bytes before a shard's old end (B-9428 r3)
+// lane ledger-dedup-law (B-7f9e) — the latent twin of the 23.8 GiB shard: the SYNC load read a shard's whole unread tail in
+// ONE Buffer.alloc(to - from) (a first load of a 24 GiB tail = 24 GB), and a reader that took the stepped warm over parsed
+// the rest in its own tick. The sync path now reads the same MiB slices the warm does (it still never yields); no ledger row
+// is near a MiB, so bytes with no newline within LINE_MAX_BYTES are no row (skipped, said once per shard); a reader finishes
+// a pending warm itself only while ≤ TAKEOVER_MAX_BYTES are left (≈ 8 steps: inside the boot law's 250 ms) — past it the
+// async readers wait for the warm and the sync ones answer from the rows loaded so far, naming it (`ledgerLoading()`).
+const TAIL_STEP_BYTES = WARM_SLICE_BYTES;
+const LINE_MAX_BYTES = TAIL_STEP_BYTES;
+const TAKEOVER_MAX_BYTES = 8 * WARM_SLICE_BYTES;
+// r3: EVERY state a paused shard's remedy can be in — the notice (src/server/ledger-shape-notice.js D_NOW) and the Usage
+// window (src/lib/usage-ledger-note.js) each have a row for every one (test-ledger-whole-law ⑨ walks this list)
+const REMEDY_STATES = Object.freeze(['running', 'judging', 'failed', 'not-rewritten', 'insufficient', 'proven-over', 'ids', 'none']);
+/** THE ACK (r5) — ONE verdict for every road that commits a device's cursor: the live push's ack (server.js
+ *  `hosts.onUsageEvents`) and the harvest's hub-kept cursor (`ingestRemoteEvents`). A batch is acked when EVERY row of it is
+ *  durable — appended, one the ledger or its hold already had, or HELD beside its month's file: a pause alone never
+ *  withholds it (r4's answer said `paused` whenever ANY month was out of shape, and the push road acked only without it —
+ *  the incident's re-send loop on the main road). Never acked: a batch deferred (an index or a hold still loading — the
+ *  device keeps it, bounded by the deferral) or one with a month whose hold could not be written (`holdFailed` names the
+ *  months; the device sends the batch again, the rest of it costs zero bytes). PURE. */
+function ackOf(r) { return !!(r && typeof r === 'object' && !r.deferred && !r.error && !(Array.isArray(r.holdFailed) && r.holdFailed.length)); }
 function probeHolds(fp, at, probe) {
   if (!probe || !probe.length) return true;
   let fd; try { fd = fs.openSync(fp, 'r'); } catch { return false; }
@@ -221,6 +241,7 @@ class UsageHistory {
   // which holds the yield shut to prove no reader sees a half-walked ledger.
   constructor({ dataDir, homeDir = os.homedir(), resolveAccount = () => null,
     scanBudgetBytes = SCAN_BUDGET_BYTES, scanYield = () => new Promise((r) => setImmediate(() => setImmediate(r))), paused = () => false }) {
+    holdRoadInstall(); // r11: the hold road (src/usage-hold-road.js) joins the prototype with the first instance — below the class
     this._scanBudgetBytes = scanBudgetBytes;
     this._scanYield = scanYield;
     // lane fuse-canary-notice (B-b327): `paused(roots)` = the mount-health gate (src/server/mount-health-watch.js) —
@@ -258,6 +279,18 @@ class UsageHistory {
     this._pricing = this._loadPricing();
     this._scanning = false;
     this._lastScan = 0;
+    // lane ledger-dedup-law: F1's per-shard rid index, F4's sampled shapes + paused shards (r4: host × month), the dedup jobs
+    // in flight, the holds of the paused months (r4), F2's hub-kept device cursors (one file per machine beside the ledger),
+    // the duplicates journal's per-host counts
+    this._ingestIx = new Map(); this._shapes = new Map(); this._pausedShards = new Map(); this._proven = new Map(); this._dedupJobs = new Map(); this._remedies = new Map(); this._judging = new Map(); this._judgeKick = new Map();
+    this._holds = new Map(); this._heldList = null; this._holdGens = new Map(); this._dropFiles = new Map(); // r6: the newest hold generation of each (month, host); the set files listed
+    this._diskFiles = new Set(); this._listFail = null; this._listing = null; this._inflight = new Set(); // r8: the segment files on disk; the listing's failure state; the hold road's promises in flight
+    this._readFail = new Map(); this._lines = new Map(); // r9: each hold's failed read-back (its state, `_readFailed`); a line many batches meet, said once a minute
+    this._retries = new Map(); // r11: an act tried again at most once a window, on its own clock (`_retryPaced`)
+    this._hostCursors = new Map(); this._dupLog = new Map();
+    this.hostCursorsDir = path.join(this.dir, '_host-cursors');
+    this.heldDir = path.join(this.dir, '_held');
+    this.onShape = null; // (event) — {kind: 'paused' | 'resumed' | 'dedup', …}: server.js files / resolves the named notice
   }
 
   // ── Account attribution log (append-only, PERMANENT) ────────────────────────
@@ -634,10 +667,21 @@ class UsageHistory {
   /** Remote-host events (2.127.0): ingest the NDJSON a host-side
    *  vibespace-usage-scan run returned. Attribution is baked per host
    *  (acct 'host-<id>', atype 'host') so remote usage NEVER mixes with local
-   *  accounts; rid is namespaced per host and the read-time Set dedup absorbs
-   *  re-emitted events (remote cursor loss / interrupted transfer). Appends to
-   *  the SAME monthly shards, so aggregation/window filters just work. */
-  ingestRemoteEvents(hostId, hostName, text) {
+   *  accounts; rid is namespaced per host. Appends to the SAME monthly shards,
+   *  so aggregation/window filters just work.
+   *  THE LEDGER LAW (lane ledger-dedup-law F1, B-7f9e): a re-emission costs ZERO bytes — an event whose rid the target
+   *  shard already holds (the ingest's own rid index, `_ingestIndex`) or that the batch already carried is counted as a
+   *  duplicate and never appended (the read-time dedup absorbed it, while a never-committed device cursor re-sent the same
+   *  window at every harvest and the shard grew 23.8 GiB). → `{added, appended, duplicates, held?, paused?, pausedMonths?,
+   *  holdFailed?, ack}` (`added` = `appended`, the callers' old field; r4: `held` = this batch's rows of a month out of
+   *  shape, HELD beside the ledger — that month paused (`paused` = the first such month's record, `pausedMonths` every one,
+   *  r5), every other month appended; r5: `holdFailed` = [{month, shard, error}] — a month whose hold could not be written;
+   *  `ack` = `ackOf` of this answer) | `{…, deferred, ack: false}` (a big shard's index or a big hold still loading in steps
+   *  — nothing appended; the device keeps the events). `cursors` (F2): the device cursor this batch was read from —
+   *  committed beside the ledger AFTER the appends and the holds (the hub's durable ingest IS the commit) when the batch is
+   *  ACKED (r5: the push road's verdict, the same function). Write order: hold → ledger → cursor — crash-safe (a crash
+   *  between two re-sends rows that cost zero bytes), not fsync-durable (the project's appends never fsync). */
+  ingestRemoteEvents(hostId, hostName, text, { cursors = null, since = null } = {}) {
     let added = 0;
     const shardBuffers = {};
     for (const line of String(text || '').split('\n')) {
@@ -692,17 +736,31 @@ class UsageHistory {
         tier: e.tier || null,
       };
       const shard = this._shardFor(ev.ts);
-      (shardBuffers[shard] = shardBuffers[shard] || []).push(JSON.stringify(ev));
+      (shardBuffers[shard] = shardBuffers[shard] || []).push({ rid: ev.rid, ts: ev.ts, line: JSON.stringify(ev) });
       added++;
     }
-    for (const [shard, lines] of Object.entries(shardBuffers)) {
-      if (lines.length) { const text = lines.join('\n') + '\n'; timedSync('usage-shards.write', () => fs.appendFileSync(shard, text)); this._pushIndex(shard, text); if (this._evCache) this._evCache.checkedAt = 0; } // our own append ⇒ next _loadEvents re-checks (2.369.36 throttle)
+    return this._ingestBatch(hostId, hostName, shardBuffers, added, { cursors, since });
+  }
+  _appendRemote(shardBuffers, shards) {
+    let appended = 0, duplicates = 0, lastTs = 0, lastRid = null;
+    const batch = new Set();
+    for (const shard of shards) {
+      const ix = this._ingestIx.get(shard), keep = [];
+      for (const e of shardBuffers[shard]) {
+        if (ix.rids.has(e.rid) || batch.has(e.rid)) { duplicates++; continue; }
+        batch.add(e.rid); keep.push(e);
+        if (e.ts >= lastTs) { lastTs = e.ts; lastRid = e.rid; }
+      }
+      if (!keep.length) continue;
+      const text = keep.map((e) => e.line).join('\n') + '\n';
+      timedSync('usage-shards.write', () => fs.appendFileSync(shard, text)); this._pushIndex(shard, text); if (this._evCache) this._evCache.checkedAt = 0; // our own append ⇒ next _loadEvents re-checks (2.369.36 throttle)
+      for (const e of keep) ix.rids.add(e.rid); ix.rows = (ix.rows || 0) + keep.length; // the index knows what it appended (and where the shard ends now)
+      try { const st = fs.statSync(shard); if (!ix.ino) ix.ino = st.ino; if (st.ino === ix.ino) ix.size = st.size; } catch { }
+      appended += keep.length;
     }
-    return { added };
+    return { appended, duplicates, lastTs, lastRid };
   }
 
-  /** The usage index (design 011 L1 — a SHADOW that feeds nothing) attaches
-   *  here; its owner is src/server/usage-index.js. */
   setIndex(index) { this._index = index || null; }
 
   // THE PUSH (design 011 §2, the invariant "a query sees every append made
@@ -887,9 +945,14 @@ class UsageHistory {
   // in the slab's sorted hash indexes (r2: dedup and ledgerKnowsId regardless of ts).
   _loadEvents() {
     // a reader during the stepped boot warm (B-1319, warmStepped): it takes the warm's pass over and finishes it HERE,
-    // in its own tick — a money reader never answers from half a ledger
+    // in its own tick — a money reader never answers from half a ledger. Lane ledger-dedup-law (the latent twin): only
+    // while ≤ TAKEOVER_MAX_BYTES are left (≈ 8 steps, inside the boot law) — past it the warm keeps its pass, the async
+    // readers wait for it (warmSettled) and a sync one answers from the rows loaded so far, named (`ledgerLoading()`)
     const p = this._evCache && this._evCache.pending;
-    if (p) { this._evCache.pending = null; for (let r = p.next(); !r.done; r = p.next()); }
+    if (p) {
+      if (this._pendingLeft() > this._takeoverMax()) return this._evCache.events;
+      this._evCache.pending = null; for (let r = p.next(); !r.done; r = p.next());
+    }
     const steps = this._loadSteps(); for (let r = steps.next(); !r.done; r = steps.next()); // chunkBytes Infinity: never yields
     return this._evCache.events;
   }
@@ -931,13 +994,21 @@ class UsageHistory {
         if (!c.walking && (c.cutoff === -Infinity || Date.now() - this._ledgerWindowMs() > c.cutoff + 3600e3)) this._trimHot();
         for (const k of Object.keys(c.cold.idx)) c.cold.idx[k].settle();
       }
-      // the shard's new bytes: the whole tail in ONE read on the sync path (as always); `chunkBytes` at a time on the
-      // stepped path — a slice with no whole line in it is widened (a line longer than the slice)
-      for (let from = consumed, span = chunkBytes; from < st.size;) {
-        const to = Math.min(st.size, from + span);
-        const end = this._consumeRange(c, fn, fp, st, from, to, consumed, pass);
-        if (end === from) { if (to >= st.size) break; span *= 2; continue; }
-        from = end; span = chunkBytes;
+      // the shard's new bytes, a slice at a time on BOTH paths (lane ledger-dedup-law: the sync path read the whole tail in
+      // one allocation — a 24 GiB first load = 24 GB): `chunkBytes` on the stepped warm, TAIL_STEP_BYTES on the sync one
+      // (which still never yields). A slice with no whole line in it is a row longer than a slice (read once, its own
+      // bytes, ≤ LINE_MAX_BYTES), an unfinished last row (it waits for its newline), or bytes that are no row at all
+      // (no newline within LINE_MAX_BYTES: skipped, said once per shard)
+      for (let from = consumed, step = stepped ? chunkBytes : TAIL_STEP_BYTES; from < st.size;) {
+        const to = Math.min(st.size, from + step);
+        let end = this._consumeRange(c, fn, fp, st, from, to, consumed, pass);
+        if (end === from) {
+          const nl = this._nextNewline(fp, to, Math.min(st.size, from + LINE_MAX_BYTES));
+          if (nl >= 0) end = this._consumeRange(c, fn, fp, st, from, nl + 1, consumed, pass);
+          else if (st.size - from > LINE_MAX_BYTES) end = this._skipRange(c, fn, fp, st, from, from + LINE_MAX_BYTES, consumed);
+          if (end === from) break; // an unfinished last row (or bytes that moved under the read): the next pass reads on from here
+        }
+        from = end;
         if (stepped) yield;
       }
     }
@@ -969,6 +1040,7 @@ class UsageHistory {
     if (sh === undefined) { sh = c.shards.length; c.shards.push(fn); c.shardIx.set(fn, sh); }
     for (let at = 0; at <= lastNl;) {
       const nl = buf.indexOf(10, at);
+      while (at < nl && buf[at] === 0) at++; // a zero-filled gap (a sparse / crash-truncated tail) glued to a row's start
       if (nl > at) {
         const line = buf.toString('utf8', at, nl);
         let ev = null; try { ev = JSON.parse(line); } catch { }
@@ -981,7 +1053,48 @@ class UsageHistory {
     c.marks.set(fn, { ino: st.ino, mtimeMs: st.mtimeMs, probe: p0 >= from ? Buffer.from(buf.subarray(p0 - from, lastNl + 1)) : readBytesSync(fp, p0, end) });
     return end;
   }
-  /** The hot rows' ts order (stable on equal ts) — `_sortedEvents` and the load pass's eager sort. */
+  /** Bytes with no newline within LINE_MAX_BYTES (a sparse or zero-filled region — no ledger row is near a MiB): the shard's
+   *  place + append-proof move past them unread, said once per shard. → the new place. */
+  _skipRange(c, fn, fp, st, from, end, passFrom) {
+    const p0 = Math.max(passFrom, end - PROBE_BYTES);
+    c.consumed.set(fn, end);
+    c.marks.set(fn, { ino: st.ino, mtimeMs: st.mtimeMs, probe: readBytesSync(fp, p0, end) });
+    c.skipped = (c.skipped || 0) + (end - from);
+    if (!c.skipSaid) c.skipSaid = new Set();
+    if (!c.skipSaid.has(fn)) { c.skipSaid.add(fn); console.warn(`[usage] ${fn}: ${end - from} bytes at offset ${from} hold no ledger row (no line end within ${LINE_MAX_BYTES} bytes) — skipped; the rows around them are read`); }
+    return end;
+  }
+  /** The first newline in [from, to) of a file, read a step at a time into ONE buffer (never the span at once); -1 = none. */
+  _nextNewline(fp, from, to) {
+    if (to <= from) return -1;
+    const buf = Buffer.alloc(Math.min(TAIL_STEP_BYTES, to - from));
+    let fd; try { fd = fs.openSync(fp, 'r'); } catch { return -1; }
+    try {
+      for (let pos = from; pos < to;) {
+        const n = fs.readSync(fd, buf, 0, Math.min(buf.length, to - pos), pos);
+        if (n <= 0) return -1;
+        const i = buf.subarray(0, n).indexOf(10);
+        if (i >= 0) return pos + i;
+        pos += n;
+      }
+      return -1;
+    } finally { fs.closeSync(fd); }
+  }
+  /** The ledger's bytes not loaded yet (every shard's size past its place) — the takeover's bound. Never throws. */
+  _unreadBytes() {
+    const c = this._evCache;
+    let left = 0;
+    try { for (const f of fs.readdirSync(this.dir)) { if (!/^events-\d{4}-\d{2}\.ndjson$/.test(f)) continue; try { left += Math.max(0, fs.statSync(path.join(this.dir, f)).size - ((c && c.consumed.get(f)) || 0)); } catch { } } } catch { }
+    return left;
+  }
+  _takeoverMax() { return this.takeoverMaxBytes || TAKEOVER_MAX_BYTES; }
+  /** The bytes a pending warm has left (re-read at most once a second — the estimator calls a sync reader per anchor pair). */
+  _pendingLeft() {
+    const c = this._evCache;
+    if (!c || !c.pending) return 0;
+    if (!c.loading || Date.now() - c.loading.at >= 1000) c.loading = { bytesLeft: this._unreadBytes(), at: Date.now() };
+    return c.loading.bytesLeft;
+  }
   _sortHot(c) { c.sorted = c.events.slice().sort((a, b) => (a.ts || 0) - (b.ts || 0)); c.sortedLen = c.events.length; }
   /** One parsed line → hot (1), cold (2) or dropped (0, a duplicate rid — the FIRST copy wins, whatever its
    *  ts; r3 verify #4/#15: a cold hash hit is a candidate, the rid STRING at its place decides). */
@@ -1160,12 +1273,29 @@ class UsageHistory {
   /** THE BOOT WARM OFF THE LOOP (B-1319, measured 2026-10-13: warm() parsed the whole ledger in ONE tick — 3.5 s on a
    *  production-shaped 400 MB ledger in a lane, the 7.45 s "main loop held" canary 8 s after a production boot). The same
    *  load pass (`_loadSteps`), `chunkBytes` per tick, the cold columns settled after it a step at a time; `next` hands the
-   *  loop back between steps. A reader that comes during it (`_loadEvents`) finishes the pass itself, and a cache dropped
-   *  under it (a reload, a rewrite) ends it — the next reader loads afresh. Resolves {slices, rows}; never rejects. */
+   *  loop back between steps. A reader that comes during it (`_loadEvents`) finishes the pass itself while what is left is
+   *  ≤ TAKEOVER_MAX_BYTES; a reload under it (a shard deduped or rewritten before the first whole load) RESTARTS it from the
+   *  files as they are now, stepped (lane ledger-dedup-law r2); a cache another door replaced whole ends it. Resolves
+   *  {slices, rows, restarts}; never rejects. */
   warmStepped({ chunkBytes = WARM_SLICE_BYTES, trimBatch = TRIM_BATCH_ROWS, next = (fn) => setImmediate(fn) } = {}) {
-    return new Promise((resolve) => {
-      let gen = null, cur = null, slices = 0, phase = 'load', keys = null;
-      const done = () => { if (cur && cur.pending === gen) cur.pending = null; const c = this._evCache; resolve({ slices, rows: c ? c.events.length + c.cold.n : 0 }); };
+    return (this._warmP = new Promise((resolve) => {
+      let gen = null, cur = null, slices = 0, phase = 'load', keys = null, restarts = 0;
+      const done = () => { if (this._warmRestart === restart) this._warmRestart = null; if (cur && cur.pending === gen) cur.pending = null; const c = this._evCache; resolve({ slices, rows: c ? c.events.length + c.cold.n : 0, restarts }); };
+      // lane ledger-dedup-law r2 (a dedup that ended mid-warm KILLED it — `_rebuildInWorker` nulled the half-built cache, this
+      // warm saw it gone and ended, and the next reader parsed the whole ledger in its own tick): the door hands a reload under
+      // this warm HERE — the half-built cache dropped, the pass started again from the files as they are now (its first slice
+      // in this call, the rest a step per turn); the promise (whenWarm, every waiting reader) stays pending until it ends
+      const restart = (why) => {
+        try { if (gen) gen.return(); } catch { }
+        restarts++; phase = 'load'; // the door dropped the half-built cache: the new pass makes its own
+        gen = this._loadSteps(chunkBytes, trimBatch);
+        const r = gen.next(); slices++;
+        cur = this._evCache;
+        if (cur && !r.done) cur.pending = gen;
+        else if (cur) { phase = 'settle'; keys = ['', ...Object.keys(cur.cold.idx)]; }
+        console.log(`[usage] the ledger's boot warm restarts (${why}) — stepped, from the files as they are now`);
+      };
+      this._warmRestart = restart;
       const step = () => {
         try {
           if (gen && this._evCache !== cur) { try { gen.return(); } catch { } return done(); }
@@ -1184,7 +1314,7 @@ class UsageHistory {
         } catch { return done(); }
       };
       step();
-    });
+    }));
   }
 
   // THE LEDGER REBUILD OFF THE LOOP (B-748f, the never-block law; memory-residency verify r3 #4): a rebuild parsed the whole
@@ -1198,7 +1328,7 @@ class UsageHistory {
   _rebuildInWorker(why, c = this._evCache) {
     if (!c) return false; // nothing loaded: the first load reads the ledger as it is
     if (c !== this._evCache) return true; // a rebuilt cache already replaced the one that was asked about
-    if (!c.whole) { this._evCache = null; return false; }
+    if (!c.whole) { this._evCache = null; if (c.pending && this._warmRestart) this._warmRestart(why); return false; } // lane ledger-dedup-law r2: under the boot warm ⇒ the warm restarts (stepped), never a reader's full load
     if (!c.stale) c.stale = why;
     this._requestRebuild(why).catch(() => { }); // a failure is said once, by the job
     return true;
@@ -1292,6 +1422,7 @@ class UsageHistory {
     if (!rid) return null;
     try { this.scan(); } catch { } // throttled incremental — freshens just-streamed messages
     await this.scanSettled(); // the walk yields (perf ⑥): answer from the SETTLED ledger
+    await this._waitBigWarm(); // lane ledger-dedup-law: a big warm in flight is waited for, never taken over
     const evs = this._loadEvents();
     for (let i = evs.length - 1; i >= 0; i--) if (evs[i].rid === rid) return evs[i];
     const old = await this._coldFind(rid, (ev) => ev.rid === rid); // B-9428: a row older than the window
@@ -1317,6 +1448,7 @@ class UsageHistory {
     if (!mid) return null;
     try { this.scan(); } catch { }
     await this.scanSettled();
+    await this._waitBigWarm();
     const evs = this._loadEvents();
     const suf = ':' + mid;
     for (let i = evs.length - 1; i >= 0; i--) {
@@ -1420,6 +1552,8 @@ class UsageHistory {
    *  out-of-memory / the deadline ⇒ an error every waiter gets (verify #1/#2). The queue holds ≤ 4 distinct
    *  folds (a 5th is refused) and a request that went away leaves it (verify #14). */
   aggregateAsync(opts = {}, { signal = null } = {}) {
+    const big = this._waitBigWarm(); // lane ledger-dedup-law: never a half ledger, never a takeover past the bound — wait for the warm
+    if (big) return big.then(() => this.aggregateAsync(opts, { signal }));
     this._loadEvents();
     const c = this._evCache;
     const hotOnly = !c.cold.n || (opts.from && opts.from >= c.cutoff);
@@ -1663,4 +1797,23 @@ class UsageHistory {
   }
 }
 
-module.exports = { UsageHistory, DEFAULT_PRICING, PRICE_ROW_FIELDS, SUPERSEDED_DEFAULTS, priceAt };
+// THE HOLD ROAD JOINS THE PROTOTYPE WITH THE FIRST INSTANCE (lane ledger-dedup-law r11 — test-cache-bounds §30 flaked 13 of
+// 34 at 3c8c0501: the usage fold worker requires this file, which had grown 1 666 → 3 006 lines with the hold road and
+// required usage-ledger-dedup.js, and the worker's baseline heap grew 0.32 MB toward §30's 30 MB soft cap). The hold road's
+// methods live in src/usage-hold-road.js (moved verbatim); the constructor puts them on UsageHistory.prototype the first
+// time the process makes an instance. The fold worker never makes one (Object.create(UsageHistory.prototype): _aggRow,
+// _packWhole — none of them reaches a road method), so it loads neither the road nor the dedup. A name the prototype
+// already has is left as it is (one definition: scripts/test-ledger-dedup-law.mjs ⑧ pins that the two files share none, and
+// that the worker loads neither file).
+let holdRoadIn = false;
+function holdRoadInstall() {
+  if (holdRoadIn) return;
+  holdRoadIn = true;
+  const R = require('./usage-hold-road.js').UsageHoldRoad.prototype;
+  for (const n of Object.getOwnPropertyNames(R)) if (n !== 'constructor' && !Object.prototype.hasOwnProperty.call(UsageHistory.prototype, n)) Object.defineProperty(UsageHistory.prototype, n, Object.getOwnPropertyDescriptor(R, n));
+}
+
+
+module.exports = { UsageHistory, DEFAULT_PRICING, PRICE_ROW_FIELDS, SUPERSEDED_DEFAULTS, priceAt, REMEDY_STATES, ackOf };
+// the module-level names the hold road (src/usage-hold-road.js) reads — internal, for that file only
+module.exports.holdRoadScope = { timedSync, WARM_SLICE_BYTES, REMEDY_STATES, ackOf, LIVE };
