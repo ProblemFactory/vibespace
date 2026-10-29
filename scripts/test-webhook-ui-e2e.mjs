@@ -270,7 +270,14 @@ try {
   await p1.evaljs(`document.querySelectorAll('.dialog-overlay, .dialog-form').forEach((o) => o.remove()); true`);
 
   console.log('§6 a spent budget says the engine\'s words');
-  const put = await raw('PUT', '/api/channels/webhook/paths/deploys', { body: { wakesPerHour: 1 } });
+  // lane wake-approve-card r10 (int361's heavy red): the path now HOLDS a wake (alpha's fact rule, §5), so what it fires on is
+  // the owner's to change on the instance's page (r5's pathRefused) — a bare PUT from no page is refused BY NAME, naming that
+  // door; the legitimate road is the owner's page itself: a same-origin fetch from p1 (Chrome sets Sec-Fetch-Site itself)
+  const bare = await raw('PUT', '/api/channels/webhook/paths/deploys', { body: { wakesPerHour: 1 } });
+  const kept = (await raw('GET', '/api/channels/webhook/paths')).j.paths.find((x) => x.hookUrl === '/hook/deploys');
+  ok(bare.status === 403 && bare.j && bare.j.code === 'cross_site' && bare.j.wakeHeld === true && /changed on this instance's own page/.test(bare.j.error || '') && kept && kept.options.wakesPerHour === 6,
+    'a bare PUT of a path that holds a wake is refused BY NAME (403 cross_site), naming its door — the instance\'s own page; the budget stays 6', [bare.status, bare.j && bare.j.code, (bare.j && bare.j.error || '').slice(0, 160), kept && kept.options.wakesPerHour]);
+  const put = await p1.evaljs(`fetch('/api/channels/webhook/paths/deploys', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ wakesPerHour: 1 }) }).then((r) => ({ status: r.status }))`);
   const b3 = JSON.stringify({ text: 'deploy failed again', event: 'deploy.failed' });
   await raw('POST', '/hook/deploys', { headers: signed('deploys', b3, tokens[0], ID1, { 'Idempotency-Key': 'df-2' }), body: b3 });
   const spent = await p1.until(`(() => { const b = document.querySelector('[data-wh-budget="spent"]'); return b ? b.textContent : null; })()`, 20000);

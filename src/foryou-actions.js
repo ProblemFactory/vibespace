@@ -436,6 +436,7 @@ function settledWords(item, t = fmt, kind = null) {
   if (by === 'granted') { const gw = grantWords(item, { t }); return gw ? gw.text : t('allowed'); }   // r4: an agent's request for a stored secret, answered — r6: the duration its record carries (none ⇒ «allowed») and the grant's LIFE (ended / revoked)
   if (by === 'delivered') return t('delivered');   // r6: a held digest the owner released
   if (by === 'discarded' && item && item.resolvedFact && item.resolvedFact.why === 'watch-removed') return t('the rule they were held for was removed — {n} messages discarded', { n: Number(item.resolvedFact.n) || 0 });   // r9: no watcher left to deliver to — the store ended it, said
+  if (by === 'discarded' && item && item.resolvedFact && item.resolvedFact.why === 'access-removed') return t('the access they were held under was removed — {n} messages discarded', { n: Number(item.resolvedFact.n) || 0 });   // r10: its row stands, inert — the grant it lived by was revoked
   if (by === 'discarded') return t('discarded — nothing was sent');
   if (by === 'expired' && item && item.action && item.action.type === 'channel-held-digest') return t('expired — discarded, nothing was sent');   // r6: its end discards
   if (by === 'ask-expired' && item && item.action) return t(DEADLINE_WORDS['timed-out']);   // r7 addendum: a held ask nobody answered in time (a command: exit / run / hub act / automation) keeps its place with its outcome

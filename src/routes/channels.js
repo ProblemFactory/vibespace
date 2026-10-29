@@ -1193,7 +1193,7 @@ function answer3(res, r) {
   if (r && r.ok) return res.json(r);
   const code = (r && r.code) || 'error';
   const status = code === 'not-found' ? 404
-    : code === 'send-not-available' || code === 'bad-state' || code === 'reconcile-not-available' || code === 'wake-count-mismatch' || code === 'changed-since-shown' || code === 'topic-forbidden' || code === 'expired' || code === 'placement-not-offered' ? 409   // r4: `expired` = a wake ask past its end (its `expiredAt` rides the answer)
+    : code === 'send-not-available' || code === 'bad-state' || code === 'reconcile-not-available' || code === 'wake-count-mismatch' || code === 'changed-since-shown' || code === 'topic-forbidden' || code === 'not-in-effect' || code === 'rule-gone' || code === 'expired' || code === 'placement-not-offered' ? 409   // r4: `expired` = a wake ask past its end (its `expiredAt` rides the answer)
     : code === 'rate-floor' ? 429
     : code === 'bad-proposal' || code === 'bad-policy' || code === 'bad-grant' || code === 'bad-request' ? 400
     : code === 'failed' || code === 'unknown' ? 502 : 500;
