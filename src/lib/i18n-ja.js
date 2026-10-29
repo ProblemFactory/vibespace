@@ -2927,6 +2927,7 @@ export default {
   "Background job {id}": "バックグラウンドジョブ {id}",
   "Background Work engine failed to start: {error}": "バックグラウンド作業エンジンの起動に失敗しました：{error}",
   "Background Work store was corrupt — records recovered as unverified; resolve them in the Jobs panel": "バックグラウンド作業のストアが破損していました — 記録は未確認として復元されました。ジョブパネルで解決してください",
+  "Background job {name} has a notice for you — open it in the Jobs panel": "バックグラウンドジョブ {name} からあなたへの通知があります — ジョブパネルで開いてください",
   "forced ON for this job": "このジョブでは強制オン",
   "global setting": "グローバル設定",
   "group “{name}”": "グループ「{name}」",

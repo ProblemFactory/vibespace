@@ -188,10 +188,15 @@ function resolveName(wanted, visibleNames) {
 // ── injection renderers (prototype-validated 2026-08-17) ──────────────────
 const GLYPH = { 'awaiting-user': '✋', failed: '✖', unverified: '?', missed: '✖', up: '●', starting: '◌', down: '○', scheduled: '⏰', interrupted: '⚠', done: '✔' };
 const ORDER = { 'awaiting-user': 0, failed: 1, unverified: 1, missed: 1, up: 2, starting: 2, down: 3, scheduled: 4, interrupted: 5, done: 6 };
+// A RECORD NEVER CROSSES INTO A RENDERER RAW (lane job-notify-user r6, accept-r5 confirmed 0): the digest's ROWS are the
+// engine's (src/jobs.js digestFor: {id, kind, state, ageHint, label}) — `label` is the ONE accessor's (jm.labelOf: belted on
+// the WHOLE name, then cut here — the cut never precedes the mask). r5 handed this renderer the record and it cut `j.name` to
+// 24 chars: every conversation allowed to VIEW the job read a token's head raw in its SessionStart context. A row with no
+// label says its id. test-architecture §93 THE RENDERER ROWS names every render* / *Line / *Row a record reaches.
 function jobLine(j) {
   const verb = j.state === 'awaiting-user' ? 'answers' : 'poll';
   const age = j.ageHint ? ' ' + j.ageHint : '';
-  return `${GLYPH[j.state] || '·'} ${j.id} ${j.kind} ${j.state}${age} — ${agentPiece(j.name, 24)} — vibespace-job ${verb} ${j.id}`;
+  return `${GLYPH[j.state] || '·'} ${j.id} ${j.kind} ${j.state}${age} — ${agentPiece(j.label != null ? j.label : j.id, 24)} — vibespace-job ${verb} ${j.id}`;
 }
 function renderJobsDigest(visible, { budget = 600 } = {}) {
   if (!visible.length) return '';
@@ -362,10 +367,11 @@ function storedAction(action) {
 // must carry provenance + the poll pointer (there is no card metadata on
 // this lane). ≤1KB always; context payload echo is clipped hard.
 // lane job-notify-user r3: `name` / `context` = the FIELDS as this recipient receives them — the engine passes the job's
-// NAME belted (every copy) and, for a SUBSCRIBER, the context belted (src/jobs.js _notifyOwner); absent = the record's own
+// NAME belted (every copy) and, for a SUBSCRIBER, the context belted (src/jobs.js _notifyOwner); absent context = the record's
+// own. r6: absent NAME = the job's id — a renderer never reads a record's name (THE RENDERER ROWS, test-architecture §93)
 function renderOwnerNotify(job, ev, { contextHead = 300, name = null, context = null } = {}) {
   const what = ev && ev.what ? ev.what : job.state;
-  let out = `[VibeSpace Background Work] ${job.kind} "${agentPiece(name != null ? name : job.name, 40)}" (${job.id}): ${agentPiece(what, 200)}.`;
+  let out = `[VibeSpace Background Work] ${job.kind} "${agentPiece(name != null ? name : job.id, 40)}" (${job.id}): ${agentPiece(what, 200)}.`;
   // context is stored as {payload} in production (a bare string only in old
   // fixtures) — the 2.345.0 live E2E caught the typeof-string check silently
   // dropping every real payload (fixture-shape class, in our own test)
@@ -388,15 +394,21 @@ const FOR_YOU_WORDS = Object.freeze({
   // the ENGINE's own notices (no job: never a fact, never a field of an agent's) — through the same door (r4: every engine filing)
   'engine-failed': 'Background Work engine failed to start: {error}',
   'store-corrupt': 'Background Work store was corrupt — records recovered as unverified; resolve them in the Jobs panel',
+  // THE STRAY'S OWN WORDS (r6, accept-r5 confirmed 1): a filing that skipped the one door is journaled and logged with its caller
+  // (src/jobs.js _forYouStray) and the person gets THIS copy — never the stray's own shape (r5 carried it through unchanged)
+  stray: 'Background job {name} has a notice for you — open it in the Jobs panel',
 });
 /** PURE. One For-you copy of `job` → {fact, words: {key, params}, urgency}: `fact` is WHICH copy (the store's resolver
  *  key and re-file match — src/user-todos.js jobFact): 'ask' | 'fire' | 'missed' | 'parked' | 'end:<state>:<cause>' (a
  *  done and a failed end are two facts, two items). `text` = a notify fire's --text (the job's name when it has none).
  *  r4: a kind it does not know answers a NAMED refusal ({fact: null, refused, copy}) — never null (claim r3-2 minor 7:
- *  `_forYou(job, null)` threw a TypeError into _finalizeRun); `error` = the engine-failed notice's field. r5: 'stray' is
- *  no copy — it carries a filing that skipped the door (`shape`, the stray door's own) THROUGH the one door unchanged, so
- *  the store refuses it in its own words and _forYou is the only line that reaches the dep. */
-function forYouCopy(job, kind, { text = null, cause = null, urgency = null, error = null, shape = null } = {}) {
+ *  `_forYou(job, null)` threw a TypeError into _finalizeRun); `error` = the engine-failed notice's field. r6 (accept-r5
+ *  confirmed 1): 'stray' is the stray door's copy — its OWN fixed words + its fact, nothing a caller hands in; a `shape` (r5
+ *  carried any shape it was given THROUGH the one door: `_forYou(job, M.forYouCopy(job, 'stray', { shape }))` filed a
+ *  hand-built copy journaled as a real one) is REFUSED by name, for every kind. */
+function forYouCopy(job, kind, opts = {}) {
+  const { text = null, cause = null, urgency = null, error = null } = opts || {};
+  if (opts && typeof opts === 'object' && Object.prototype.hasOwnProperty.call(opts, 'shape')) return { fact: null, words: null, urgency: null, copy: String(kind).slice(0, 24) === 'stray' ? 'stray' : 'shaped', refused: `a For-you copy carries the engine's own words — a shape handed to forYouCopy is refused (a filing outside the one door is journaled with its caller, never laundered through it)` };
   const name = String((job && (job.name || job.id)) || 'job');
   const tok = (v, n) => String(v == null || v === '' ? 'unknown' : v).toLowerCase().replace(/[^a-z0-9._()-]/g, '-').slice(0, n);
   if (kind === 'end') return { fact: `end:${tok(job.state, 24).replace(/[^a-z_-]/g, '-')}:${tok(cause, 48)}`, words: { key: FOR_YOU_WORDS.end, params: { name, state: String(job.state), cause: String(cause) } }, urgency: job.state === 'failed' ? 'normal' : 'low' };
@@ -406,7 +418,7 @@ function forYouCopy(job, kind, { text = null, cause = null, urgency = null, erro
   if (kind === 'fire') return { fact: 'fire', words: { key: FOR_YOU_WORDS.fire, params: { text: String(text || name) } }, urgency: urgency || 'normal' };
   if (kind === 'engine-failed') return { fact: 'engine-failed', words: { key: FOR_YOU_WORDS['engine-failed'], params: { error: String(error) } }, urgency: 'high' };
   if (kind === 'store-corrupt') return { fact: 'store-corrupt', words: { key: FOR_YOU_WORDS['store-corrupt'] }, urgency: 'high' };
-  if (kind === 'stray') { const a = shape && typeof shape === 'object' ? shape : {}; return { fact: null, words: null, urgency: null, copy: (typeof a.fact === 'string' && a.fact && a.fact.split(':')[0]) || 'stray', stray: a }; }
+  if (kind === 'stray') return { fact: 'stray', words: { key: FOR_YOU_WORDS.stray, params: { name } }, urgency: 'normal' };
   return { fact: null, words: null, urgency: null, copy: tok(kind, 24), refused: `no For-you copy of kind «${String(kind).slice(0, 24)}» — the copies are ${Object.keys(FOR_YOU_WORDS).join(', ')}` };
 }
 

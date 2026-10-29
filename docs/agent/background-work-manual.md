@@ -76,7 +76,9 @@ separate setting — not audience 1's auto-notify:
   card and the ask window's title, the Ports panel (the forward and the
   scan list), the Artifacts service row and its chat card, the agent
   browser's job label, the vault's and feedback's asker, another
-  conversation's `list` / `show` and its update lines. A `notify-cron` made without `--text`
+  conversation's `list` / `show` and its update lines, and the «Background
+  jobs visible to this session» list every conversation that can see the
+  job — yours too — gets when it starts or resumes. A `notify-cron` made without `--text`
   sends that same belted name as its message. Your own `list` / `show` /
   `poll` and the create output print the name as you typed it.
 - `--urgency` takes the For you tray's own set, `low|normal|high|urgent`.

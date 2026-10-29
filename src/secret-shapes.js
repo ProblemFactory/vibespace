@@ -190,8 +190,10 @@ function redactKv(text) {
 }
 // R3: an HTTP credential
 const HTTP_RE = /\b(bearer[ \t]+)[A-Za-z0-9_\-.=+/]{6,65536}|\b(basic[ \t]+)[A-Za-z0-9+/]{16,65536}={0,2}/gi;   // verify r2 F2: a run is consumed WHOLE (a 6 KB bearer kept its tail past 4096)
-// R4: a known prefix (the prefix stays)
-const PREFIX_RE = /\b(?:gh[pousr]_[A-Za-z0-9]{20,255}|github_pat_[A-Za-z0-9_]{20,255}|sk-[A-Za-z0-9_\-]{16,255}|(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,255}|xoxe[.\-][A-Za-z0-9.+/=_\-]{10,512}|xox[abprs]-[A-Za-z0-9\-]{10,512}|(?:AKIA|ASIA)[0-9A-Z]{16}|AIza[0-9A-Za-z_\-]{35}|glpat-[A-Za-z0-9_\-]{20,255}|npm_[A-Za-z0-9]{36}|hf_[A-Za-z0-9]{20,255}|vs(?:st|mt|wh)_[A-Za-z0-9_\-]{8,255}|vswp_[A-Za-z0-9_\-]{8,2048}|jbt_[A-Za-z0-9_\-]{8,255})(?![A-Za-z0-9_\-])/g;
+// R4: a known prefix (the prefix stays). Lane job-notify-user r6: a family whose material is letters and digits ONLY (gh[pousr]_,
+// sk_ / rk_ live / test, AKIA / ASIA, npm_, hf_) ends where its letters end — a `-` / `_` after it is the text's, not the token's (a job
+// named «<token> deploy» is stored `<token>-deploy`, and the old common tail left it whole); the other families' material holds `-` / `_`
+const PREFIX_RE = /\b(?:(?:gh[pousr]_[A-Za-z0-9]{20,255}|(?:sk|rk)_(?:live|test)_[A-Za-z0-9]{16,255}|(?:AKIA|ASIA)[0-9A-Z]{16}|npm_[A-Za-z0-9]{36}|hf_[A-Za-z0-9]{20,255})(?![A-Za-z0-9])|(?:github_pat_[A-Za-z0-9_]{20,255}|sk-[A-Za-z0-9_\-]{16,255}|xoxe[.\-][A-Za-z0-9.+/=_\-]{10,512}|xox[abprs]-[A-Za-z0-9\-]{10,512}|AIza[0-9A-Za-z_\-]{35}|glpat-[A-Za-z0-9_\-]{20,255}|vs(?:st|mt|wh)_[A-Za-z0-9_\-]{8,255}|vswp_[A-Za-z0-9_\-]{8,2048}|jbt_[A-Za-z0-9_\-]{8,255})(?![A-Za-z0-9_\-]))/g;
 const PREFIX_HEAD = /^(github_pat_|gh[pousr]_|sk-|(?:sk|rk)_(?:live|test)_|xoxe[.\-]|xox[abprs]-|AKIA|ASIA|AIza|glpat-|npm_|hf_|vsst_|vsmt_|vswh_|vswp_|jbt_)/;
 // verify r4 F3 (the regex census): the JWT was PREFIX_RE's one unbounded alternative, `\beyJ[A-Za-z0-9_\-]{8,}\.eyJ…\.…` — its run class holds
 // `-`, a non-word character that re-opens `\b` INSIDE the run: `-eyJ-eyJ-eyJ…` is a start at every `eyJ` and every start walks the run to its

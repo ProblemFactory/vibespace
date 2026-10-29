@@ -31,6 +31,32 @@ function writeJsonAtomic(file, obj) {
 /** The per-conversation notification cap (30): the oldest UNCLAIMED entries fall off; an entry stamped `ho` is being
  *  handed over and leaves by that hand-over's own drain (channel-jump verify r4 — the ladder's store has the same
  *  rule, conversation-deliver `capUnclaimed`). The store may exceed the cap by the claimed count while one is in flight. */
+// THE FOR-YOU DEP, OFF THE OBJECT GRAPH (lane job-notify-user r6, accept-r5 unverified 2): the store's dep lives HERE — a
+// module WeakMap keyed by the engine — never on the engine or on `this.d`: r5 kept it on `this._forYouDep` and made `this.d`
+// an Object.create(deps), so `Object.getPrototypeOf(this.d).notifyUser` reached the raw dep with no journal line. The ONE
+// set is the constructor's, the ONE get is _forYou's (test-architecture §93 THE DOOR CENSUS).
+const FOR_YOU_DEPS = new WeakMap();
+/** the engine's view of its deps: every dep read LIVE off `deps` (a wiring or a suite sets one after the engine is built),
+ *  the For-you dep answered by the stray door — and NO road back to `deps` (no prototype link, no own copy of notifyUser:
+ *  a Proxy's target and handler are unreachable). A write lands on the view (a suite's stub shadows a dep, as before). */
+function depsView(deps, own) {
+  const mine = Object.assign(Object.create(null), own);
+  return new Proxy(mine, {
+    get: (t, k) => (k in t ? t[k] : k === 'notifyUser' ? undefined : deps[k]),
+    has: (t, k) => k in t || (k !== 'notifyUser' && k in deps),
+  });
+}
+/** the frame that called `fn` (V8 call sites) — `src/jobs.js:1345 _finalizeRun` — for the stray door's log line */
+function callerOf(fn) {
+  const keep = Error.prepareStackTrace, lim = Error.stackTraceLimit;
+  try {
+    Error.stackTraceLimit = 1; Error.prepareStackTrace = (_, cs) => cs;
+    const o = {}; Error.captureStackTrace(o, fn);
+    const c = Array.isArray(o.stack) ? o.stack[0] : null; if (!c) return 'a caller with no frame of its own';
+    const f = String(c.getFileName() || ''), abs = f.startsWith('file://') ? require('url').fileURLToPath(f) : f;
+    return `${abs ? path.relative(path.join(__dirname, '..'), abs) : '(no file)'}:${c.getLineNumber()}${c.getFunctionName() ? ' ' + c.getFunctionName() : ''}`;
+  } catch { return 'a caller the engine cannot name'; } finally { Error.prepareStackTrace = keep; Error.stackTraceLimit = lim; }
+}
 const NOTIF_STASH_CAP = 30;
 const FLOOR_DROP_WINDOW_MS = 60 * 60 * 1000;   // verify r4: a floor witness from the future is dropped once; a second within this window is re-based (the clock keeps going back)
 /** B-dfb4 (the product decision, notify-retry verify r4): an eviction is SAID to the owner — a For-you notice (origin
@@ -124,8 +150,10 @@ class JobManager {
     // 0 items, no line, poll silent). test-architecture §93 names every line that reaches the dep (THE DOOR CENSUS) in every
     // file that can hold it (src/, server.js, data/bin) and every scope — r5: this ONE line is the constructor's whole share
     // (r4 exempted the whole constructor: a closure made here over deps.notifyUser was a second door the census never saw).
-    this._forYouDep = typeof deps.notifyUser === 'function' ? deps.notifyUser : null;
-    this.d = Object.assign(Object.create(deps), { notifyUser: (a) => this._forYouStray(a) });
+    // r6: the dep is held OFF the object graph (FOR_YOU_DEPS) and `this.d` has no road back to `deps` (depsView)
+    FOR_YOU_DEPS.set(this, typeof deps.notifyUser === 'function' ? deps.notifyUser : null);
+    const stray = (a) => this._forYouStray(a, callerOf(stray));
+    this.d = depsView(deps, { notifyUser: stray });
     this._labelMemo = new Map();   // name → its belted label (the belt reads the vault; a list snapshot asks for every name)
     this.file = path.join(deps.dataDir, 'jobs.json');
     this.notifsFile = path.join(deps.dataDir, 'job-notifications.json');
@@ -967,7 +995,7 @@ class JobManager {
     // Viewers see events PASSIVELY at their next injection only (owner call
     // 2.348.0: acceptable because it never wakes anyone and the renderer
     // coalesces per-job announce floods — see renderJobsUpdate).
-    this.events.push({ ts: now(), jobId: job.id, name: this.labelOf(job), what, verb });   // r4: the NAME belted (the injected digest — another conversation reads it)
+    this.events.push({ ts: now(), jobId: job.id, name: this.labelOf(job), what, verb });   // r4: the NAME belted (the update lines — another conversation reads it)
     if (this.events.length > 400) this.events.splice(0, this.events.length - 400);
   }
 
@@ -1182,7 +1210,7 @@ class JobManager {
   /** THE ONE ACCESSOR of a job's PERSON-FACING NAME (lane job-notify-user r5, accept-r4 confirmed 0 + refuted 0): the name
    *  belted on its own — every message-road copy (r3: the header, the chat card's label, the stash, the retry meta), and
    *  (r4) wherever a PERSON or ANOTHER conversation reads it: the snapshot a non-author reads (the Jobs panel's card title,
-   *  the ask window's title and so the taskbar, another lineage's view), the events ring (the injected digest), the Ports
+   *  the ask window's title and so the taskbar, another lineage's view), the events ring (the update lines), the injected digest's rows (digestFor, r6), the Ports
    *  label — and (r5) EVERY holder of a record outside this engine asks HERE (M.labelVia(jm): the Ports scan row, the
    *  Artifacts service row and its chat card, the browser's job label and its strip row, the vault's asker, feedback's
    *  session, the memory-pressure roots, the live view's tab); r4 belted the forward label and left its scan row one line
@@ -1209,20 +1237,25 @@ class JobManager {
   _forYou(job, c) {
     // r4: EVERY engine filing comes through here — a job's copies and the engine's own notices (`job` null: no journal, the
     // log says a refusal); a copy forYouCopy does not know is refused BY NAME (claim r3-2 minor 7: a TypeError into _finalizeRun)
-    // r5: the ONE line that reaches the dep — a stray filing (M.forYouCopy 'stray': the stray door's own shape) comes here too
-    if (!c || (!c.stray && (!c.words || !c.fact))) return this._forYouVerdict(job, { ok: false, why: (c && c.refused) || 'no such For-you copy' }, (c && c.copy) || 'unknown');
+    // r5: the ONE line that reaches the dep. r6: a copy is the engine's words + its fact, nothing else — a SHAPED copy (a
+    // hand-built one handed through M.forYouCopy) is refused by name and said in the log with its caller, like a stray
+    if (!c || !c.words || !c.fact) {
+      if (c && c.refused && (c.copy === 'stray' || c.copy === 'shaped')) this.d.log(`[jobs] a For-you filing outside the one door (src/jobs.js _forYou) — caller ${callerOf(JobManager.prototype._forYou)}${job ? ' — job ' + job.id : ''}: ${c.refused}`);
+      return this._forYouVerdict(job, { ok: false, why: (c && c.refused) || 'no such For-you copy' }, (c && c.copy) || 'unknown');
+    }
+    const forYouDep = FOR_YOU_DEPS.get(this) || null;
     let v;
-    try { v = this._forYouDep ? this._forYouDep(c.stray || { words: c.words, fact: c.fact, urgency: c.urgency, ...(job ? { jobId: job.id, jobName: job.name, ownerCid: job.owner?.conversation?.id || null } : {}) }) : { ok: false, why: 'no For-you store is wired' }; } catch (e) { v = { ok: false, why: e.message }; }
-    return this._forYouVerdict(job, v, c.stray ? c.copy : c.fact.split(':')[0]);
+    try { v = forYouDep ? forYouDep({ words: c.words, fact: c.fact, urgency: c.urgency, ...(job ? { jobId: job.id, jobName: job.name, ownerCid: job.owner?.conversation?.id || null } : {}) }) : { ok: false, why: 'no For-you store is wired' }; } catch (e) { v = { ok: false, why: e.message }; }
+    return this._forYouVerdict(job, v, c.fact.split(':')[0]);
   }
-  /** THE STRAY DOOR (r4): `this.d.notifyUser(...)` called from anywhere but _forYou — filed with its OWN shape (the wiring
-   *  passes it through, so a composed text is refused in the store's own words), journaled on the job it names (copy =
-   *  its fact, else `stray`) and said in the server log. Nothing a stray filing gets refused is ever swallowed. r5: it files
-   *  THROUGH _forYou (the dep has one door — the stray door is a journal, not a second road to the store). */
-  _forYouStray(a) {
+  /** THE STRAY DOOR (r4): `this.d.notifyUser(...)` called from anywhere but _forYou — said in the server log WITH ITS CALLER
+   *  and journaled on the job it names (copy `stray`). r5: it files THROUGH _forYou. r6 (accept-r5 confirmed 1): it files the
+   *  stray copy — the engine's OWN words + the fact `stray` — never the stray's shape (r5 carried any shape through the one
+   *  door, so `M.forYouCopy(job, 'stray', { shape })` laundered a hand-built copy as a real one). */
+  _forYouStray(a, caller = 'a caller the engine cannot name') {
     const job = a && a.jobId ? this.jobs.get(a.jobId) || null : null;
-    this.d.log(`[jobs] a For-you filing outside the one door (src/jobs.js _forYou)${job ? ' — job ' + job.id : ''}`);
-    return this._forYou(job, M.forYouCopy(job, 'stray', { shape: a }));
+    this.d.log(`[jobs] a For-you filing outside the one door (src/jobs.js _forYou) — caller ${caller}${job ? ' — job ' + job.id : ''}: filed as the stray copy, its own words are not filed`);
+    return this._forYou(job, M.forYouCopy(job, 'stray'));
   }
   /** a For-you copy's VERDICT: journaled on its job (`user-inbox ✓|✗ — why`, `copy` names which; a dep that answers nothing
    *  is taken at its word), and kept on the record as the LAST verdict per copy (`forYouLast` — r4, claim r3-1 (c): the
@@ -1787,8 +1820,11 @@ class JobManager {
   // injection surfaces (agent-routes): caller-filtered, budgeted in the model
   digestFor(caller, existingBytes) {
     const vis = M.visibleJobs([...this.jobs.values()], caller).filter((j) => j.state !== 'done' || now() - ((j.runs || [])[j.runs?.length - 1]?.endedAt || 0) < 86400e3);
-    const withAge = vis.map((j) => ({ ...j, ageHint: this._ageHint(j) }));
-    return M.fitDigest(existingBytes, M.renderJobsDigest(withAge), { count: vis.length });
+    // r6 (accept-r5 confirmed 0): a RECORD never crosses into the renderer — each ROW is built here, its name the ONE accessor's
+    // (labelOf belts the WHOLE name; the renderer cuts the label — the cut never precedes the mask). r5 spread the record
+    // (`{ ...j, ageHint }`) and jobLine cut `j.name` to 24: another conversation's SessionStart context read a token's head raw
+    const rows = vis.map((j) => ({ id: j.id, kind: j.kind, state: j.state, ageHint: this._ageHint(j), label: this.labelOf(j) }));
+    return M.fitDigest(existingBytes, M.renderJobsDigest(rows), { count: vis.length });
   }
   updatesFor(caller, sinceTs) {
     const visIds = new Set(M.visibleJobs([...this.jobs.values()], caller).map((j) => j.id));
