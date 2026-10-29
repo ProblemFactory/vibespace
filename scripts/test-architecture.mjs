@@ -639,6 +639,9 @@ for (const [edge] of EXCEPTIONS) {
 {
   const svFiles = allFilesFor9().filter((f) => !f.startsWith('src/lib/'));
   const broken = [];
+  // lane ledger-dedup-law r11: ONE class across two files — UsageHistory's hold road (src/usage-hold-road.js) joins its
+  // prototype at the first instance (`holdRoadInstall`): each file's calls may be the other's methods, and only those
+  const PARTS9 = { 'src/usage-history.js': ['src/usage-hold-road.js'], 'src/usage-hold-road.js': ['src/usage-history.js'] };
   for (const f of svFiles) {
     const s9 = read(f);
     // A class that `extends` a relatively-required base (src/message-window.js,
@@ -653,7 +656,8 @@ for (const [edge] of EXCEPTIONS) {
     for (const name of called) {
       const woCalls = s9.replace(new RegExp(`this\\.${name}\\(`, 'g'), '');
       const defined = new RegExp(`(^|\\s|\\*)${name}\\s*\\(`, 'm').test(woCalls) /* `*_x(` = a generator method (B-1319's load pass) */ || new RegExp(`this\\.${name}\\s*=`).test(s9) || new RegExp(`${name}\\s*:`).test(s9)
-        || inherited.some((b) => new RegExp(`(^|\\s)${name}\\s*\\(`, 'm').test(b.replace(new RegExp(`this\\.${name}\\(`, 'g'), '')));
+        || inherited.some((b) => new RegExp(`(^|\\s)${name}\\s*\\(`, 'm').test(b.replace(new RegExp(`this\\.${name}\\(`, 'g'), '')))
+        || (PARTS9[f] || []).some((b) => new RegExp(`^  (?:async )?${name}\\s*\\(`, 'm').test(read(b)));
       if (!defined) broken.push(`${f}: this.${name}() called but never defined`);
     }
   }

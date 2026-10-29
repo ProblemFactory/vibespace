@@ -13,6 +13,7 @@
 //   ⑥ the latent twin — a 300 MiB sparse tail ⇒ the reader's peak allocation ≤ the step; a sync reader never takes a big
 //     warm over
 //   ⑦ M the one-shot migration — a 3× fixture ⇒ ⅓ the size, the same totals before and after; a restart mid-way resumes
+//   ⑧ (r11) the usage fold worker requires only what it folds — never the hold road (src/usage-hold-road.js) nor the dedup
 // Sparse files only (fs.truncateSync — no disk, no load).
 import fs from 'node:fs';
 import os from 'node:os';
@@ -348,6 +349,41 @@ await leg('⑦', async () => {
   for (let i = 0; i < 2000 && !(ledger().applied || {})['2026-10-usage-ledger-dedup']; i++) await new Promise((r) => setTimeout(r, 5));
   const rec = ledger();
   ok(st0 === 'started' && !at0 && rec.applied && rec.applied['2026-10-usage-ledger-dedup'] && rec.reports['2026-10-usage-ledger-dedup'].deduped === 1 && size(sh) === uniqueBytes, `⑦ through the runner: the boot goes on at once (${st0}), recorded only when it ends (ledger: applied + its report)`, { st0, at0, report: rec.reports && rec.reports['2026-10-usage-ledger-dedup'] });
+});
+
+// ── ⑧ (r11 — test-cache-bounds §30 red 13 of 34 at 3c8c0501: the usage fold worker requires usage-history.js, which had grown
+// to 3 006 lines with the hold road and required the dedup; its baseline heap +0.32 MB against §30's 30 MB soft cap):
+// THE FOLD WORKER REQUIRES ONLY WHAT IT FOLDS — the hold road (src/usage-hold-road.js) and the dedup are loaded by the first
+// UsageHistory constructed, never by the worker; the two files define no method twice; nothing the worker reaches is the road's ──
+await leg('⑧', async () => {
+  const { Worker } = require('node:worker_threads');
+  const H = fs.readFileSync(path.join(REPO, 'src/usage-history.js'), 'utf8'), roadFile = path.join(REPO, 'src/usage-hold-road.js');
+  const R = fs.existsSync(roadFile) ? fs.readFileSync(roadFile, 'utf8') : '';
+  const methods = (text) => { const out = new Map(), heads = [...text.matchAll(/^  (?:async )?([A-Za-z_$][\w$]*)\s*\(.*\)\s*\{/gm)]; heads.forEach((m, i) => out.set(m[1], text.slice(m.index, i + 1 < heads.length ? heads[i + 1].index : text.length))); return out; };
+  const hm = methods(H), rm = methods(R);
+  const both = [...rm.keys()].filter((n) => hm.has(n) && n !== 'constructor');
+  const seen = new Set(), todo = ['_aggBegin', '_aggRow', '_aggEnd', '_packWhole'];
+  while (todo.length) { const n = todo.pop(); if (seen.has(n) || !hm.has(n)) { if (rm.has(n)) seen.add(n); continue; } seen.add(n); for (const m of hm.get(n).matchAll(/this\.([A-Za-z_$][\w$]*)/g)) todo.push(m[1]); }
+  const reachedRoad = [...seen].filter((n) => rm.has(n));
+  // the worker, as usage-history.js starts it — every module it loads recorded; a rebuild and a fold asked of it
+  const d = path.join(tmp, 'w8'); fs.mkdirSync(d, { recursive: true });
+  const src = `const M = require('module'), { parentPort } = require('worker_threads'), seen = new Set(), o = M._load;
+M._load = function (r, p, ...x) { try { seen.add(M._resolveFilename(r, p)); } catch { } return o.call(this, r, p, ...x); };
+parentPort.on('message', (m) => { if (m && m.op === 'loaded?') parentPort.postMessage({ ev: 'loaded', files: [...seen] }); });
+require(${JSON.stringify(path.join(REPO, 'src/usage-cold-worker.js'))});`;
+  const w = new Worker(src, { eval: true });
+  const ask = (msg, ev) => new Promise((res) => { const t = setTimeout(() => res({ ev: 'timeout' }), 10000); const on = (m) => { if (m && (m.id === msg.id || (ev && m.ev === ev))) { clearTimeout(t); w.off('message', on); res(m); } }; w.on('message', on); w.postMessage(msg); });
+  let rb, fold, files = [];
+  try {
+    rb = await ask({ op: 'rebuild', id: 1, dir: d, windowMs: 40 * 864e5, hotMaxBytes: MiB, coldMaxBytes: MiB });
+    fold = await ask({ op: 'fold', id: 2, query: { from: 0, to: Date.now() }, walk: { dir: d, shards: [], groups: [] }, hot: { tss: new Float64Array(0), locs: new Float64Array(0), rh: new Uint32Array(0) }, pricing: {}, rowBudget: 1000, capMb: 0 });
+    ({ files = [] } = await ask({ op: 'loaded?' }, 'loaded'));
+  } finally { await w.terminate(); }
+  const rel = files.map((f) => path.relative(REPO, f)).filter((f) => f.startsWith('src/'));
+  const loadedRoad = rel.filter((f) => f === 'src/usage-hold-road.js' || f === 'src/usage-ledger-dedup.js');
+  ok(R && rm.size > 50 && !both.length && !reachedRoad.length && rb && rb.ev === 'done' && fold && fold.ev === 'done' && rel.includes('src/usage-history.js') && !loadedRoad.length,
+    `⑧ the usage fold worker (a rebuild ${rb && rb.ev}, a fold ${fold && fold.ev}) loads ${rel.length} src modules — usage-history.js, ${loadedRoad.length ? 'AND ' + loadedRoad.join(' + ') : 'not the hold road (' + rm.size + ' methods) nor the dedup'}; the two files define ${both.length} method(s) twice; the worker's reach (${seen.size} methods) holds ${reachedRoad.length} of the road's (3c8c0501: no road — the worker loads usage-ledger-dedup.js with the 3 006-line usage-history.js)`,
+    { both, reachedRoad, rel, rb: rb && rb.ev, fold: fold && (fold.error || fold.ev) });
 });
 
 fs.rmSync(tmp, { recursive: true, force: true });

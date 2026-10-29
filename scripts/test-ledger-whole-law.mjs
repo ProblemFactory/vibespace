@@ -91,6 +91,11 @@
 //     count is tried again once a minute and a window's count is flushed at its end; nothing is unlinked unread (an older
 //     generation's set is said, as «Earlier»); a row that fits is never pushed out by the rows that arrived with the
 //     drain; the tracer's fold never crosses a hold
+// ROUND 11 (the acceptance of 3c8c0501 — ㉒ fails on 3c8c0501; the hold road moved to src/usage-hold-road.js first):
+//   ㉒ a retry is a retry (the unsaid count tried once a window on its own clock while the machine sends; a line only with a
+//     try); one generation bound; every counter comes down on every road (a pass that throws); a set file that is no set
+//     file is unread (kept and said); a fold key names the site; a long text keys its run by a digest, never itself
+//   ㉑ (6) re-pinned: the window's end TRIES (r10 said «tried again» there and tried nothing)
 // In-process, no server; sparse files for every big shape (fs.truncateSync / a write at an offset — no disk, no load).
 import fs from 'node:fs';
 import os from 'node:os';
@@ -109,6 +114,9 @@ const turn = (fn) => { const t0 = performance.now(); const v = fn(); return [v, 
 const tick = () => new Promise((r) => setImmediate(r));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ldw-'));
+// r11: the scratch goes on EVERY exit (a leg that left the event loop with its top-level await unsettled exits 13 and never
+// reached the last line: two /tmp/vs-ldw-* dirs of round 10's work stayed behind)
+process.on('exit', () => { try { fs.rmSync(tmp, { recursive: true, force: true }); } catch { } });
 const KiB = 1024, MiB = 1024 * KiB, GiB = 1024 * MiB;
 // r8: an ingest that goes to a hold answers once its hold's ASYNC road did (a promise) — quiet() awaits it and settles every
 // UsageHistory's road (holdsSettled; absent on a tree whose hold is synchronous — then nothing)
@@ -1632,7 +1640,7 @@ await leg('⑳', async () => {
       `⑳ (9) the standing item files as a notice (${filed ? 'kind notice' : 'kind action'}) and ${answered} answer list(s) name its type — no Allow once / Always / Deny drawn (3c4fa614: kind action, 4 answer lists — rendered with the 60 s card's three answers)`, { filed, answered });
   }
 });
-console.log('㉑ F4 A NOTICE CLOSES WHEN WHAT IT NAMES IS READ · A NOTICE NAMES A REAL FILE · EVERY WAIT IS SAID · EVERY DEFERRED ANSWER PACES · A COUNT IS SAID EVEN WHEN NOTHING COMES BACK · NOTHING IS UNLINKED UNREAD · A ROW THAT FITS IS NEVER PUSHED OUT · A FOLD NEVER CROSSES A HOLD (round 10)');
+console.log('㉑ F4 A NOTICE CLOSES WHEN WHAT IT NAMES IS READ · A NOTICE NAMES A REAL FILE · EVERY WAIT IS SAID · EVERY DEFERRED ANSWER CARRIES retryAfter · A COUNT IS SAID EVEN WHEN NOTHING COMES BACK · NOTHING IS UNLINKED UNREAD · A ROW THAT FITS IS NEVER PUSHED OUT · A FOLD NEVER CROSSES A HOLD (round 10)');
 await leg('㉑', async () => {
   const NOV = 800000;
   const seams = (uh) => { uh.shapeMaxBytes = 64 * KiB; uh.holdMaxBytes = 4 * KiB; uh.holdSegBytes = 1 * KiB; uh.dedupShard = (f) => { const p = new Promise(() => { }); uh._dedupJobs.set(f, p); return p; }; return uh; };
@@ -1654,7 +1662,7 @@ await leg('㉑', async () => {
   const said = (W, host) => { const n = W.notices().find((i) => i.i18n && i.i18n.text && i.i18n.text.params && i.i18n.text.params.host === host && !String(i.itemKey || '').startsWith('hold-read')); return n ? { status: n.status, dropped: Number((/the (\d+) oldest held events|: (\d+) held events were dropped/.exec(n.detail + ' ' + n.text) || []).slice(1).find(Boolean) || 0), earlier: Number((/Earlier: (\d+) held events/.exec(n.detail) || [])[1] || 0) } : null; };
   const realOpen = fs.promises.open;
   const race = (p, ms) => Promise.race([Promise.resolve(p).then((r) => ({ r })), sleep(ms).then(() => ({ timeout: true }))]);
-  const die = (uh) => { for (const h of uh._holds.values()) h.io = new Promise(() => { }); uh._holds.clear(); const i = ALL_UH.indexOf(uh); if (i >= 0) ALL_UH.splice(i, 1); if (uh._inflight) uh._inflight.clear(); uh.onShape = null; for (const f of (uh._readFail || new Map()).values()) clearTimeout(f.timer); for (const s of (uh._lines || new Map()).values()) if (s && s.timer) clearTimeout(s.timer); };
+  const die = (uh) => { for (const h of uh._holds.values()) h.io = new Promise(() => { }); uh._holds.clear(); const i = ALL_UH.indexOf(uh); if (i >= 0) ALL_UH.splice(i, 1); if (uh._inflight) uh._inflight.clear(); uh.onShape = null; for (const f of (uh._readFail || new Map()).values()) clearTimeout(f.timer); for (const s of (uh._lines || new Map()).values()) if (s && s.timer) clearTimeout(s.timer); for (const s of (uh._retries || new Map()).values()) if (s && s.timer) clearTimeout(s.timer); };
   /** the segment's open refused (EACCES, with its path — as the OS says it) → undo */
   const deny = (file) => { fs.promises.open = function (f, ...a) { if (String(f) === file) return Promise.reject(Object.assign(new Error(`EACCES: permission denied, open '${file}'`), { code: 'EACCES', path: file })); return realOpen.call(this, f, ...a); }; return () => { fs.promises.open = realOpen; }; };
   /** the segment opens; a call of its FileHandle (`read`: rejected EIO with NO path, as FileHandle.read says it; `close`: hangs
@@ -1739,7 +1747,7 @@ await leg('㉑', async () => {
       { waited, r: r && r.r });
   }
 
-  // ── 4. EVERY DEFERRED ANSWER PACES (claim 0 (d)): a read-back in flight, 9 October batches — 8 wait, the 9th is refused at
+  // ── 4. EVERY DEFERRED ANSWER CARRIES retryAfter (claim 0 (d)): a read-back in flight, 9 October batches — 8 wait, the 9th is refused at
   // once (`hold-busy`), the 8 answered `hold-slow` at the bound — and each carries `retryAfter` ──
   {
     const host = 'host-x', W = await held4('w21d', host), seg = segOf(W, host), g = gate(seg);
@@ -1801,10 +1809,13 @@ await leg('㉑', async () => {
       for (let k = 1; k <= 4; k++) { const [, l] = await quiet(() => L1.uh.ingestRemoteEvents(host, 'X', batchOf(NOV + k, 1))); all = all.concat(l); }
       const again = evs.length - first;
       const [, lf] = await quiet(() => sleep(900)); all = all.concat(lf);
+      const atEnd = evs.length - first - again;
       const flushLine = all.filter((l) => /not on disk in their notice yet/.test(l));
-      ok(first === 1 && again === 1 && flushLine.length === 2 && /\(3 more ingest\(s\) since the last try\)/.test(flushLine[1] || ''),
-        `㉑ (6) the store refusing every write: the end's count sent ${first}×, then ${again}× over 4 more ingests (once a minute); its lines: ${flushLine.length} — «…${(flushLine[1] || '—').slice(-48)}» at the window's end (7f4df6a9: sent at every ingest — 4 more, a wire line each)`,
-        { first, again, evs, flushLine });
+      // PINNED (r10): the window's end said «(3 more ingest(s) since the last try)» and sent nothing. PINS NOW (r11, a retry is
+      // a retry): the window's end TRIES — the count sent again, its line said by that try
+      ok(first === 1 && again === 1 && atEnd === 1 && flushLine.length === 2 && /— tried again now;/.test(flushLine[0] || '') && /\(3 ingest\(s\) since the last try did not try\)/.test(flushLine[1] || ''),
+        `㉑ (6) the store refusing every write: the end's count sent ${first}×, then ${again}× over 4 more ingests (once a window), ${atEnd}× at the window's end; its lines: ${flushLine.length} — «…${(flushLine[1] || '—').slice(-56)}» (7f4df6a9: sent at every ingest — 4 more, a wire line each; 3c8c0501: 0× at the window's end, its line claiming a try)`,
+        { first, again, atEnd, evs, flushLine });
     } finally { t.flush = realFlush; t._save = realSave; die(L1.uh); }
   }
 
@@ -1882,6 +1893,191 @@ await leg('㉑', async () => {
     ok(good(a) && good(b) && nested <= 10,
       `㉑ (10) the tracer: two 240 ms holds of short calls — hold 1 ${a[0].ms} ms, hold 2 ${a[1].ms} ms (the loop turning between them: ${b[0].ms} + ${b[1].ms}), each naming its site; 1000 readFileSync at one site fold into ${nested} op(s) (7f4df6a9: ONE op of 600 calls — hold 1 credited 300 ms of its 240, hold 2 «sites: []»; 1000 ops, one per read)`,
       { a, b, nested });
+  }
+});
+await leg('㉒', async () => {
+  console.log('㉒ A RETRY IS A RETRY · ONE GENERATION BOUND · EVERY COUNTER COMES DOWN ON EVERY ROAD · A SET FILE THAT IS NO SET FILE IS UNREAD · A FOLD KEY NAMES THE SITE · A LONG TEXT KEYS ITS RUN BY A DIGEST');
+  const NOV = 800000;
+  const seams = (uh) => { uh.shapeMaxBytes = 64 * KiB; uh.holdMaxBytes = 4 * KiB; uh.holdSegBytes = 1 * KiB; uh.dedupShard = (f) => { const p = new Promise(() => { }); uh._dedupJobs.set(f, p); return p; }; return uh; };
+  const world = (name) => {
+    const d = dirOf(name), sh = shardOf(d);
+    fs.writeFileSync(sh, Array.from({ length: 400 }, (_, i) => row(i)).join('\n') + '\n');
+    const todos = new UserTodoManager({ dataDir: d, expirySweepMs: 0 });
+    const W = { d, sh, nov: path.join(d, 'usage-history', 'events-2026-11.ndjson'), heldDir: path.join(d, 'usage-history', '_held') };
+    W.todos = () => todos;
+    W.notices = () => todos._state.items.filter((i) => i.sessionKey === 'usage-ledger');
+    W.life = (inShape = false) => { const uh = seams(newUh(d)); if (inShape) uh.shapeMaxBytes = 2 * GiB; const wired = LSN.wire({ usageHistory: uh, userTodos: todos, log: () => { }, reconcileAfterMs: null }); return { uh, wired }; };
+    W.heldFiles = (host) => (fs.existsSync(W.heldDir) ? fs.readdirSync(W.heldDir).filter((f) => f.includes(`~${host}.`)).sort() : []);
+    return W;
+  };
+  const lines = (ids) => ids.map((i) => remote(i)).join('\n') + '\n';
+  const said = (W, host) => { const n = W.notices().find((i) => i.i18n && i.i18n.text && i.i18n.text.params && i.i18n.text.params.host === host && !String(i.itemKey || '').startsWith('hold-read')); return n ? { status: n.status, dropped: Number((/the (\d+) oldest held events|: (\d+) held events were dropped/.exec(n.detail + ' ' + n.text) || []).slice(1).find(Boolean) || 0), earlier: Number((/Earlier: (\d+) held events/.exec(n.detail) || [])[1] || 0) } : null; };
+  const die = (uh) => { for (const h of uh._holds.values()) h.io = new Promise(() => { }); uh._holds.clear(); const i = ALL_UH.indexOf(uh); if (i >= 0) ALL_UH.splice(i, 1); if (uh._inflight) uh._inflight.clear(); uh.onShape = null; for (const f of (uh._readFail || new Map()).values()) clearTimeout(f.timer); for (const m of [uh._lines, uh._retries]) for (const s of (m || new Map()).values()) if (s && s.timer) clearTimeout(s.timer); };
+  /** the console of `fn` kept while it runs AND while the timers it armed fire (`ms` after it) — no settle: the legs below
+   *  watch a road that goes on */
+  const watch = async (fn) => { const w = console.warn, l = console.log, out = []; console.warn = (...a) => out.push(a.join(' ')); console.log = (...a) => out.push(a.join(' ')); try { return [await fn(), out]; } finally { console.warn = w; console.log = l; } };
+
+  // ── 1. A RETRY IS A RETRY (MAJOR, skep10-unsaid-starve): 15 held + 33 dropped, back in shape, the store refusing writes —
+  // the end cannot put its count on disk; then the store works again and the machine sends every 100 ms (the window 300 ms) ──
+  {
+    const W = world('w22a'), host = 'host-x', L1 = W.life(), t = W.todos(), realFlush = t.flush, realSave = t._save;
+    const evs = [];
+    let ended = null, tRecover = 0, out = [], sends = 0, unsaid = true, files = [];
+    try {
+      await quiet(() => L1.uh.ingestRemoteEvents(host, 'X', lines(Array.from({ length: 48 }, (_, k) => 9300 + k))));
+      t.flush = () => { throw Object.assign(new Error('EROFS: read-only file system'), { code: 'EROFS' }); }; t._save = () => { };
+      const on = L1.uh.onShape; L1.uh.onShape = (ev) => { if (ev && (ev.kind === 'dropped' || ev.kind === 'resumed')) evs.push({ kind: ev.kind, at: Date.now() }); return on(ev); };
+      L1.uh.shapeMaxBytes = 2 * GiB; L1.uh.sayAgainMs = 300;
+      [, out] = await watch(async () => {
+        await L1.uh.ingestRemoteEvents(host, 'X', batchOf(NOV, 1)); await settle(); // the drain's end: the store refuses ⇒ unsaid
+        await L1.uh.ingestRemoteEvents(host, 'X', batchOf(NOV + 1, 1)); await settle(); // the first try again: refused again
+        t.flush = realFlush; t._save = realSave; tRecover = Date.now(); // the store works again
+        const before = evs.length;
+        for (let k = 0; k < 20; k++) {
+          await L1.uh.ingestRemoteEvents(host, 'X', batchOf(NOV + 2 + k, 1)); await sleep(100);
+          const h = [...L1.uh._holds.values()].find((x) => x.base === 'events-2026-10');
+          if (ended === null && !(h && h.unsaid)) ended = Date.now() - tRecover;
+        }
+        await settle();
+        sends = evs.length - before;
+        const h = [...L1.uh._holds.values()].find((x) => x.base === 'events-2026-10'); unsaid = !!(h && h.unsaid);
+        files = W.heldFiles(host);
+      });
+    } finally { t.flush = realFlush; t._save = realSave; die(L1.uh); }
+    const tries = out.filter((l) => /not on disk in their notice yet/.test(l));
+    ok(sends >= 1 && !unsaid && files.length === 0 && ended !== null && ended <= 300 + 250 && tries.length >= 1 && tries.every((l) => /— tried again now;/.test(l)),
+      `㉒ (1) the store back while the machine sends every 100 ms (window 300 ms): the count sent ${sends}× during the ingests, the hold ended ${ended} ms after the store came back, its set file ${files.length ? 'KEPT' : 'gone'}; ${tries.length} «tried again» line(s), each said by a try (3c8c0501: sent 0×, the hold unsaid for as long as the machine sends, «tried again at most once a minute (3 more ingest(s) since the last try)» 7× with no try)`,
+      { sends, unsaid, files, ended, tries: tries.map((l) => l.slice(-110)) });
+  }
+
+  // ── 2. THE RETRY'S OWN CLOCK (r11-retry-cadence): a call every 50 ms for 1 s, the window 200 ms — a try at least once a
+  // window, a line only with a try (on a tree without `_retryPaced`: r10's road, `_sayAgain`'s answer) ──
+  {
+    const uh = newUh(dirOf('w22b')); uh.sayAgainMs = 200;
+    const t0 = Date.now(), acted = [];
+    const act = () => { acted.push(Date.now() - t0); return true; }, words = (n) => `the try${n ? ` (${n} call(s) since the last try did not try)` : ''}`;
+    const call = typeof uh._retryPaced === 'function' ? () => uh._retryPaced('k', act, words) : () => { if (uh._sayAgain('k', words)) act(); };
+    const [, out] = await watch(async () => { for (let k = 0; k < 20; k++) { call(); await sleep(50); } await sleep(260); });
+    die(uh);
+    const gaps = acted.slice(1).map((x, i) => x - acted[i]), maxGap = gaps.length ? Math.max(...gaps) : Infinity;
+    ok(acted.length >= 5 && maxGap <= 200 + 60 && out.length === acted.length,
+      `㉒ (2) 20 calls 50 ms apart, the window 200 ms: ${acted.length} tries, the longest gap ${maxGap} ms, ${out.length} line(s) for ${acted.length} tries (3c8c0501: one try at the first call, then «(N more since the last try)» lines every window with no try)`,
+      { acted, out: out.slice(0, 8) });
+  }
+
+  // ── 3. ONE BOUND (skep10-gen-max): a notice item naming generation HOLD_GEN_MAX (1e9) — the month's next hold is REFUSED by
+  // name, nothing acked into a file the listing skips; 999 999 998 (control) mints the last generation, read back at a restart ──
+  {
+    const life = async (name, seen) => {
+      const W = world(name), host = 'host-x', L = W.life();
+      L.uh.holdGenSeen(host, 'events-2026-10.ndjson', seen);
+      const [r, out] = await quiet(() => L.uh.ingestRemoteEvents(host, 'X', lines([9300, 9301, 9302, 9303, 9304])));
+      const files = W.heldFiles(host);
+      die(L.uh);
+      const L2 = W.life(); L2.uh.restoreHolds(); await settle();
+      const back = (L2.uh.holdsNow().find((x) => x.host === host) || {}).held || 0;
+      die(L2.uh);
+      return { ack: r.ack, err: (r.holdFailed || []).map((x) => x.error).join(','), files, back, said: out.some((l) => /could not be held \(hold-gen-max\)/.test(l)) };
+    };
+    const a = await life('w22c', 1e9), b = await life('w22c2', 999999998);
+    ok(!a.ack && a.err === 'hold-gen-max' && a.files.length === 0 && a.said && b.ack && b.files.length >= 1 && b.files.every((x) => x.includes('.999999999')) && b.back === 5,
+      `㉒ (3) a stored generation 1e9: the next hold ${a.ack ? 'ACKED' : 'refused'} (${a.err || '—'}${a.said ? ', said' : ''}), ${a.files.length} file(s) written; 999 999 998: acked, ${b.files.join(',')}, ${b.back} read back at a restart (3c8c0501: acked, held 5 in events-2026-10~host-x.1000000001000000.ndjson — the next boot's listing skips it, 0 read back)`,
+      { a, b });
+  }
+
+  // ── 4. EVERY COUNTER COMES DOWN ON EVERY ROAD (probe-waitleak): October's hold read back in flight, November's ledger append
+  // throwing ENOSPC — 8 batches of [October, November] throw; then a 9th, October alone ──
+  {
+    const W = world('w22d'), host = 'host-x', L1 = W.life();
+    await quiet(() => L1.uh.ingestRemoteEvents(host, 'X', lines([9300, 9301, 9302, 9303])));
+    die(L1.uh);
+    const seg = path.join(W.heldDir, W.heldFiles(host).find((f) => f.endsWith('.ndjson')));
+    const realOpen = fs.promises.open, realAppend = fs.appendFileSync, held = [];
+    let threw = 0, waiting = -1, ends = -1, ninth = null;
+    try {
+      fs.promises.open = function (f, ...a) { if (String(f) === seg) return new Promise((res, rej) => held.push(() => realOpen.call(this, f, ...a).then(res, rej))); return realOpen.call(this, f, ...a); };
+      fs.appendFileSync = function (f, ...a) { if (String(f) === W.nov) throw Object.assign(new Error('ENOSPC: no space left on device, write'), { code: 'ENOSPC' }); return realAppend.call(this, f, ...a); };
+      const L2 = W.life(); L2.uh.holdAnswerMs = 300; L2.uh.restoreHolds();
+      await watch(async () => {
+        for (let k = 0; k < 8; k++) { try { const r = L2.uh.ingestRemoteEvents(host, 'X', lines([9310 + k, NOV + k])); if (r && r.then) r.catch(() => { }); } catch (e) { if (e && e.code === 'ENOSPC') threw++; } }
+        const h = L2.uh._holds.get(`events-2026-10~${host}`); waiting = h ? h.waiting : -1; ends = h && h.waitEnds ? h.waitEnds.length : -1;
+        fs.appendFileSync = realAppend;
+        const r9 = L2.uh.ingestRemoteEvents(host, 'X', lines([9330]));
+        await sleep(20); for (const r of held.splice(0)) r();
+        ninth = await Promise.resolve(r9);
+      });
+      die(L2.uh);
+    } finally { fs.promises.open = realOpen; fs.appendFileSync = realAppend; for (const r of held.splice(0)) r(); }
+    const busy = !!(ninth && (ninth.holdFailed || []).some((x) => x.error === 'hold-busy'));
+    ok(threw === 8 && waiting === 0 && ends === 0 && !busy,
+      `㉒ (4) 8 batches whose November append threw ENOSPC while their October waited for its read-back: the hold counts ${waiting} waiting, ${ends} bound(s) after them; the 9th October batch ${ninth ? (ninth.ack ? 'acked' : (ninth.holdFailed || []).map((x) => x.error).join(',') || 'unacked') : '—'} (3c8c0501: 8 waiting for ever, the 9th refused hold-busy with nobody waiting)`,
+      { threw, waiting, ends, ninth: ninth && { ack: ninth.ack, holdFailed: ninth.holdFailed } });
+  }
+
+  // ── 5. A SET FILE THAT IS NO SET FILE IS UNREAD (claim 0 (f)): a boot with generation 2's set (5) and generation 0's — garbage
+  // (binary bytes; {"gone":"33"}), a torn last line, a hole a crash left (NUL bytes) ──
+  {
+    const host = 'host-x', base = `events-2026-10~${host}`, gone = (n, from) => JSON.stringify({ gone: Array.from({ length: n }, (_, k) => hidOf(from + k, host)) }) + '\n';
+    const cases = [
+      ['binary bytes', Buffer.from([0, 1, 2, 0xff, 0xfe, 0x7b, 0x7b, 0x7b, 10, 0x67, 0x61, 0x72, 10])],
+      ['«gone» no list', '{"gone":"33"}\n{"gone":33}\n'],
+      ['a torn last line', gone(10, 9000) + '{"gone":["' + hidOf(9050, host) + '","h:ho'],
+      ['a hole before a line', Buffer.concat([Buffer.alloc(16), Buffer.from(gone(7, 9100))])],
+    ];
+    const got = {};
+    for (const [name, body] of cases) {
+      const W = world('w22e-' + name.replace(/\W+/g, '-')); fs.mkdirSync(W.heldDir, { recursive: true });
+      fs.writeFileSync(path.join(W.heldDir, `${base}.0.dropped`), body); fs.writeFileSync(path.join(W.heldDir, `${base}.2.dropped`), gone(5, 9200));
+      const L = W.life(true);
+      const [, out] = await watch(async () => { L.wired.reconcile(); await sleep(80); await settle(); });
+      const n = said(W, host);
+      got[name] = { kept: W.heldFiles(host).includes(`${base}.0.dropped`), unread: out.some((l) => /generation 0 could not be read \(set-garbage/.test(l)), torn: out.some((l) => /generation 0 ends in a torn line/.test(l)), dropped: n && n.dropped, earlier: n && n.earlier };
+      die(L.uh);
+    }
+    const g = (k) => got[k] || {};
+    ok(g('binary bytes').kept && g('binary bytes').unread && g('«gone» no list').kept && g('«gone» no list').unread
+      && !g('a torn last line').kept && g('a torn last line').torn && g('a torn last line').earlier === 10 && g('a hole before a line').earlier === 7 && !g('a hole before a line').kept
+      && Object.values(got).every((x) => x.dropped === 5),
+      `㉒ (5) a set file that is no set file: binary bytes ${g('binary bytes').kept ? 'kept' : 'UNLINKED'}${g('binary bytes').unread ? ' + said unread' : ''}, {"gone":"33"} ${g('«gone» no list').kept ? 'kept' : 'UNLINKED'}${g('«gone» no list').unread ? ' + said unread' : ''}; a torn last line: «Earlier: ${g('a torn last line').earlier}»${g('a torn last line').torn ? ', said torn' : ''}; a hole before a line: «Earlier: ${g('a hole before a line').earlier}» (3c8c0501: the garbage read as 0 and UNLINKED, nothing said; the line after a hole never read — «Earlier: 0»)`,
+      got);
+  }
+
+  // ── 6. A FOLD KEY NAMES THE SITE (skep10-tracer-two-sites, refute10-tracer-fd-reuse — pure, a fake clock): two sites
+  // alternating statSync on one path; a reader after another on a reused fd ──
+  {
+    const BT = require(REPO + '/src/server/boot-trace.js'), f = path.join(REPO, 'package.json'), here = /test-ledger-whole-law\.mjs:(\d+)/;
+    let clock = 0; const ops = [], orig = fs.statSync;
+    fs.statSync = function (...a) { clock += 0.4; return orig.apply(this, a); };
+    let undo = BT.wrapSync({ ops, now: () => clock, turn: () => 0 });
+    const siteA = () => fs.statSync(f);
+    const siteB = () => fs.statSync(f);
+    try { for (let k = 0; k < 100; k++) { clock += 0.1; siteA(); clock += 0.1; siteB(); } } finally { undo(); fs.statSync = orig; }
+    const by = {}; for (const s of BT.sitesOf(ops, { at: 0, ms: 200 }, 5)) { const m = here.exec(s.what); if (m) by[m[1]] = (by[m[1]] || 0) + s.ms; }
+    const ops2 = []; let c2 = 0; const realRead = fs.readSync;
+    undo = BT.wrapSync({ ops: ops2, now: () => (c2 += 0.2), turn: () => 0 });
+    const readerA = (p) => { const fd = fs.openSync(p, 'r'), b = Buffer.alloc(16); try { for (let i = 0; i < 20; i++) fs.readSync(fd, b, 0, 16, 0); } finally { fs.closeSync(fd); } return fd; };
+    const readerB = (p) => { const fd = fs.openSync(p, 'r'), b = Buffer.alloc(16); try { for (let i = 0; i < 20; i++) fs.readSync(fd, b, 0, 16, 0); } finally { fs.closeSync(fd); } return fd; };
+    let fds; try { fds = [readerA(f), readerB(path.join(REPO, 'src/server/boot-trace.js'))]; } finally { undo(); fs.readSync = realRead; }
+    const reads = ops2.filter((o) => o.op === 'fs.readSync').map((o) => ({ n: o.n, line: (here.exec(o.site) || [])[1] }));
+    const lines2 = Object.keys(by);
+    ok(lines2.length === 2 && Object.values(by).every((ms) => ms >= 30 && ms <= 50) && fds[0] === fds[1] && new Set(reads.map((r) => r.line)).size === 2 && reads.reduce((a, r) => a + r.n, 0) === 40,
+      `㉒ (6) the tracer: two sites alternating statSync on one path — ${lines2.length} site(s) named (${Object.entries(by).map(([l, ms]) => `line ${l} ${ms} ms`).join(', ')}); two readers on a reused fd (#${fds[0]}, #${fds[1]}) — ${reads.length} op(s) at ${new Set(reads.map((r) => r.line)).size} site(s) (3c8c0501: one site, credited all 80 ms — the second never named; the second reader's 20 reads folded into the first's op)`,
+      { by, reads, fds });
+  }
+
+  // ── 7. A LONG TEXT KEYS ITS RUN BY A DIGEST (probe-tracer-json-key3): 40 JSON.parse of 2 MiB texts in ONE turn, traced ──
+  {
+    const BT = require(REPO + '/src/server/boot-trace.js');
+    const v8m = require('v8'), vm = require('vm'); v8m.setFlagsFromString('--expose_gc'); const gc = vm.runInNewContext('gc');
+    const mb = () => process.memoryUsage().heapUsed / MiB;
+    let clock = 0; const ops = [];
+    const undo = BT.wrapSync({ ops, now: () => (clock += 0.01), turn: () => 0 });
+    let base, inTurn;
+    try { gc(); base = mb(); for (let k = 0; k < 40; k++) { const s = JSON.stringify({ k, pad: 'x'.repeat(2 * MiB) }); JSON.parse(s); } gc(); inTurn = mb(); } finally { undo(); }
+    const shown = ops.filter((o) => o.op === 'JSON.parse').map((o) => o.site.length);
+    ok(inTurn - base < 32 && shown.every((n) => n < 400),
+      `㉒ (7) the tracer: 40 JSON.parse of 2 MiB in one turn — the heap ${Math.round(base)} → ${Math.round(inTurn)} MiB within the turn, ${shown.length} op(s), the longest site ${Math.max(0, ...shown)} chars (3c8c0501: 4 → 166 MiB — each text kept in its run's key)`,
+      { base, inTurn, shown });
   }
 });
 fs.rmSync(tmp, { recursive: true, force: true }); // after the last leg (r8: ⑲ ran after it and left its scratch behind)
