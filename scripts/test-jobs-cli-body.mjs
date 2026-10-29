@@ -46,6 +46,7 @@ import { fileURLToPath } from 'node:url';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CLI = path.join(REPO, 'data/bin/vibespace-job');
+const ASK = path.join(REPO, 'data/bin/vibespace-ask');   // r4: the other agent CLI that offers --urgency (THE one set)
 const { JobManager } = require('../src/jobs.js');
 const AR = require('../src/agent-routes.js');
 const JW = require('../src/server/jobs-wiring.js');
@@ -99,7 +100,7 @@ const REAL = engine(JobManager, 'real');
 // CONTROL engine: the parent→child hand-over cut (the line this lane added) — a scheduled child no longer hears its parent
 const HAND = '      child.notifyUser = M.notifyUserOf(job);\n';
 const STORE = 'action: M.storedAction(spec.action),';
-const SAID = '      this._notifyOwner(job, { what: a.text || job.name, agentWhat: true });\n';   // r3: the author gets its own words whole
+const SAID = '      this._notifyOwner(job, a.text ? { what: a.text, agentWhat: true } : { what: this._jobLabel(job) });\n';   // r3: the author gets its own words whole (r4: no --text ⇒ the label the header carries)
 const SUBBELT = '      const subEv = ev && ev.agentWhat ? { ...ev, what: this._agentWords(ev.what) } : ev;\n';   // …a subscriber, belted
 const HANDS = once('src/jobs.js', HAND), STORES = once('src/jobs.js', STORE), SAIDS = once('src/jobs.js', SAID) && once('src/jobs.js', SUBBELT);
 const NOHAND = engine(HANDS ? loadPatched('src/jobs.js', [[HAND, '']]).JobManager : JobManager, 'no-handover');
@@ -137,7 +138,7 @@ AR.setupAgentRoutes({
 });
 
 // ── the loopback server: records every POST body, then answers through the REAL route ──
-const wire = [];
+const wire = [], askWire = [];
 const server = http.createServer((req, res) => {
   let raw = '';
   req.on('data', (c) => { raw += c; });
@@ -147,6 +148,7 @@ const server = http.createServer((req, res) => {
     let body = {};
     try { body = raw ? JSON.parse(raw) : {}; } catch { }
     if (req.method === 'POST' && u.pathname === '/api/agent/jobs') wire.push({ token, body: JSON.parse(raw || '{}') });
+    if (req.method === 'POST' && u.pathname === '/api/agent/user-todo') { askWire.push(body); res.writeHead(200, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ success: true, item: { id: 'ut-0000000000', text: String(body.text || ''), urgency: body.urgency || 'normal', status: 'open' } })); }   // r4: vibespace-ask's body (a recorder, no store)
     const m = /^\/api\/agent\/jobs\/([^/]+)$/.exec(u.pathname);
     const key = u.pathname === '/api/agent/jobs' ? `${req.method} /api/agent/jobs` : m && req.method === 'GET' ? 'GET /api/agent/jobs/:ref' : null;
     let code = 200, sent = false;
@@ -254,8 +256,13 @@ const R = await all({
   nobelt: cli(['notify-cron', '--name', 'nobelt', '--at', '+5m', '--text', SECRET_TEXT], { leg: 'nobelt' }),
   full: cli(['notify-cron', '--name', 'full', '--at', '+5m', '--text', 'please renew the cert', '--notify-user'], { leg: 'full' }),
   svc0: cli(['run', 'sleep 60', '--name', 'svc0', '--keep-up'], { leg: 'svc0' }),
+  askc: cli(['renew the cert?', '--urgency', 'critical'], { bin: ASK }),
+  asku: cli(['renew the cert now?', '--urgency', 'urgent'], { bin: ASK }),
 });
-const CENSUS_RUNS = [...Object.keys(INV).map((k) => `inv:${k}`), 'dropped'], REFUSED = ['urgc', 'svcn'];
+const SHOW_IDS = Object.fromEntries(['nc1', 'nc0', 'at1', 'at0'].map((n) => [n, ([...REAL.jm.jobs.values()].find((j) => j.name === n && !j.cronParent) || {}).id]));
+const SHOW_SVC = ['svc0', 'svc1'].map((n) => [...REAL.jm.jobs.values()].find((j) => j.name === n && !j.cronParent));
+const SHOWS = Promise.all([...Object.entries(SHOW_IDS).map(([n, id]) => cli(['show', id], { leg: n })), cli(['show', SHOW_SVC[0] && SHOW_SVC[0].id], { leg: 'svc0' }), cli(['show', SHOW_SVC[1] && SHOW_SVC[1].id], { leg: 'svc1' })]);
+const CENSUS_RUNS = [...Object.keys(INV).map((k) => `inv:${k}`), 'dropped'], REFUSED = ['urgc', 'svcn', 'askc'];
 const cliBad = Object.entries(R).filter(([k, r]) => (CENSUS_RUNS.includes(k) ? !/census: recorded, not created/.test(r.err) : REFUSED.includes(k) ? r.code !== 1 : r.code !== 0));
 ok(!cliBad.length && urgRaw.status === 200 && svcRaw.status === 200, `every CLI call reached the route (${Object.keys(R).length} calls: the census ones refused after recording, two refused at the prompt, the fire legs created) + the agent's own two POSTs`, cliBad.map(([k, r]) => `${k}: ${r.code} ${r.err}`).join(' | ') + ` ${urgRaw.status} ${svcRaw.status}`);
 
@@ -277,6 +284,11 @@ ok(bodyOf('tk1') && bodyOf('tk1').notifyUser === true && bodyOf('tk0') && bodyOf
   ok(R.urgn.code === 0 && bodyOf('urgn'), '…and without --notify-user the urgency is never read, so it is never checked (created)', R.urgn.err);
   const CT = require('../src/agent-cli-text.js');
   ok(CT.FOR_YOU_URGENCIES === URGENCIES && /require\('\.\.\/\.\.\/src\/agent-cli-text\.js'\)/.test(SRC) && /require\('\.\/agent-cli-text\.js'\)/.test(SRC) && !/\['low', 'normal', 'high'\]/.test(SRC), 'the CLI\'s set IS the store\'s set — ONE constant (src/agent-cli-text.js FOR_YOU_URGENCIES, the store\'s URGENCIES), read in both layouts, no literal of its own', URGENCIES.join('/'));
+  const ASKSRC = fs.readFileSync(ASK, 'utf8');
+  const usageSet = (src) => [...src.matchAll(/--urgency (low(?:\|[a-z]+)+)/g)].map((m) => m[1]);
+  ok(/URGENCIES = \(TX && TX\.FOR_YOU_URGENCIES\) \|\| null;/.test(ASKSRC) && !/\['low', 'normal', 'high'/.test(ASKSRC) && [...usageSet(SRC), ...usageSet(ASKSRC)].length >= 2 && [...usageSet(SRC), ...usageSet(ASKSRC)].every((u) => u === URGENCIES.join('|')),
+    'BOTH agent CLIs offer the store\'s ONE set (r4: vibespace-ask kept its own list) — vibespace-ask reads FOR_YOU_URGENCIES off agent-cli-text, and each usage line prints exactly that set', JSON.stringify([...usageSet(SRC), ...usageSet(ASKSRC)]));
+  ok(/^vibespace-ask: unknown urgency "critical" \(valid: low\/normal\/high\/urgent\)$/m.test(R.askc.err) && askWire.length === 1 && askWire[0].add && askWire[0].add.urgency === 'urgent' && R.asku.code === 0, '…and at the prompt: vibespace-ask --urgency critical is refused naming the set, --urgency urgent is filed', `${R.askc.err} | ${JSON.stringify(askWire)}`);
   ok(/^--notify-user is refused with --keep-up/.test(R.svcn.err) && !bodyOf('svcn'), 'run --keep-up --notify-user is refused by name, nothing sent: a service never tells the user at its end', R.svcn.err);
   const dead = wire.filter((w) => 'env' in w.body || 'cwd' in w.body).map((w) => w.body.name);
   ok(!dead.length && !/flags\.env\b/.test(SRC), 'no body carries the dead `env` / top-level `cwd` (the route maps neither) and the CLI reads no --env', dead.join(','));
@@ -375,10 +387,19 @@ console.log('(4) THE ROAD TO A PERSON — the real jobs wiring over a real For-y
   if (tm) { tm.nextFireAt = Date.now() - 600e3; await WIRED.jm._cronTick(); }
   const capped = [[te, 'end'], [ta, 'ask'], [ts, 'parked'], [tm, 'missed']].map(([j, c]) => { const e = fyOf(j); return { c, ok: !!(j && e && e.ok === false && e.copy === c && e.reason === 'For you is full (20 open)' && !items().some((i) => i.jobId === j.id)), e }; });
   ok(capped.every((x) => x.ok), 'EVERY copy refused at the cap is journaled user-inbox ✗ with the store\'s why, naming the copy — a task\'s end, an ask, a park, a missed time (r2: silent, no line)', JSON.stringify(capped));
-  const [pu, pf, pm, su, pe, pa] = await Promise.all([cli(['poll', ju.id], { leg: 'urg' }), cli(['poll', jf.id], { leg: 'full' }), cli(['poll', jm.id], { leg: 'mask' }), cli(['show', ju.id], { leg: 'urg' }), cli(['poll', te && te.id], { leg: 'full' }), cli(['show', ta && ta.id], { leg: 'full' })]);
-  ok(/^for you: the fire copy was NOT filed — urgency must be one of /m.test(pu.out) && /^for you: the fire copy was NOT filed — For you is full \(20 open\)$/m.test(pf.out), 'the agent\'s poll says the copy was NOT filed, in the store\'s words', `${pu.out} | ${pf.out}`);
+  // r4: a scheduled run whose end copy is refused (its CRON is what the agent polls), and the ask's verdict pushed out of the window
+  const tr = await mk({ kind: 'cron', name: 'cap-run', schedule: { everyMs: 3600e3 }, notifyUser: true, action: { type: 'spawn-task', task: { kind: 'task', cmd: { argv: ['true'], cwd: CWD } } } });
+  if (tr) WIRED.jm._fireCron(tr, 'cron');
+  const trc = tr && childOf(WIRED, tr);
+  if (trc) WIRED.jm._finalizeRun(trc, trc.runs[trc.runs.length - 1], { code: 1, endedAt: Date.now() }, 'sweep');
+  if (ta) for (let i = 0; i < 9; i++) WIRED.jm._notifyLogPush(ta, { lane: 'message', ok: true, to: 'owner' });
+  const [pu, pf, pm, su, pe, pa, pr] = await Promise.all([cli(['poll', ju.id], { leg: 'urg' }), cli(['poll', jf.id], { leg: 'full' }), cli(['poll', jm.id], { leg: 'mask' }), cli(['show', ju.id], { leg: 'urg' }), cli(['poll', te && te.id], { leg: 'full' }), cli(['show', ta && ta.id], { leg: 'full' }), cli(['poll', tr && tr.id], { leg: 'full' })]);
+  const NR = ' \\(a refused copy is not retried — free For you and run it again\\)$';   // r4: poll / show say it is never retried
+  ok(/^for you: the fire copy was NOT filed — urgency must be one of /m.test(pu.out) && new RegExp('^for you: the fire copy was NOT filed — For you is full \\(20 open\\)' + NR, 'm').test(pf.out), 'the agent\'s poll says the copy was NOT filed, in the store\'s words — and that it is not retried', `${pu.out} | ${pf.out}`);
   ok(/^for you: the fire copy was NOT filed — urgency must be one of /m.test(su.out), '…and so does show', su.out);
-  ok(/^for you: the end copy was NOT filed — For you is full \(20 open\)$/m.test(pe.out) && /^for you: the ask was NOT filed — For you is full \(20 open\)$/m.test(pa.out), '…for every copy, by name (the end copy\'s poll, the ask\'s show)', `${pe.out} | ${pa.out}`);
+  ok(new RegExp('^for you: the end copy was NOT filed — For you is full \\(20 open\\)' + NR, 'm').test(pe.out) && new RegExp('^for you: the ask was NOT filed — For you is full \\(20 open\\)' + NR, 'm').test(pa.out), '…for every copy, by name (the end copy\'s poll, the ask\'s show)', `${pe.out} | ${pa.out}`);
+  ok(ta && !(WIRED.jm.snapshot(ta).notifyLog || []).some((e) => e.lane === 'user-inbox'), '…the ask\'s show says it PAST the journal\'s window: 9 later lines pushed its verdict out of the snapshot\'s 8, the record keeps the last verdict per copy (r4: the refusal left poll while the ask stayed unfiled)', JSON.stringify(ta && WIRED.jm.snapshot(ta).forYouLast));
+  ok(tr && new RegExp(`^for you: the end copy of run ${trc && trc.id} was NOT filed — For you is full \\(20 open\\)` + NR, 'm').test(pr.out), 'a SCHEDULED run\'s refused end copy: `poll <the cron id>` — the id the agent holds — says it, naming the run (r4: journaled on the hidden child only)', pr.out);
   ok(!/^for you:/m.test(pm.out) && pm.out.includes('text: ' + SECRET_TEXT), 'CONTROL: a copy that landed adds no such line to the poll — and the AUTHOR\'s poll prints its reminder whole (the snapshot keeps it)', pm.out);
   // A JOB NAMED WITH A SECRET WORD (r3, accept-r2 confirmed 0–2): the mask covers the agent's words as FIELDS, never the
   // product's sentence — r2's whole-sentence belt read «Task refresh-token: done (ok)» as `token: …`, merged the failure into
@@ -407,9 +428,8 @@ console.log('(4) THE ROAD TO A PERSON — the real jobs wiring over a real For-y
 
 console.log('(5) SHOW — the params line says what the flag does; the create echo names the user\'s copy; the panel\'s words have zh + ja');
 {
-  const ids = Object.fromEntries(['nc1', 'nc0', 'at1', 'at0'].map((n) => [n, (jobOf(REAL, n) || {}).id]));
-  const s0 = jobOf(REAL, 'svc0'), s1 = jobOf(REAL, 'svc1');
-  const shows = await Promise.all([...Object.entries(ids).map(([n, id]) => cli(['show', id], { leg: n })), cli(['show', s0 && s0.id], { leg: 'svc0' }), cli(['show', s1 && s1.id], { leg: 'svc1' })]);
+  const ids = SHOW_IDS, s1 = SHOW_SVC[1];
+  const shows = await SHOWS;   // started beside wave 2 (r4: the fast tier's clock)
   const line = (r) => (/^params: .*$/m.exec(r.out) || [''])[0];
   const want = ['true', 'false', 'true', 'false', 'n/a \\(a service never tells at its end\\)', 'n/a \\(a service never tells at its end\\)'];
   const names = [...Object.keys(ids), 'svc0', 'svc1'];
@@ -424,7 +444,7 @@ console.log('(5) SHOW — the params line says what the flag does; the create ec
   ok(aj('nc1') === 'notify' && aj('at1') === 'spawn-task' && aj('tk1') === null, 'the snapshot names a cron\'s action TYPE — the panel\'s «when it fires» (notify) vs «when each run ends» (a scheduled run) reads it', `${aj('nc1')} ${aj('at1')} ${aj('tk1')}`);
   const PANEL = fs.readFileSync(path.join(REPO, 'src/lib/jobs-panel.js'), 'utf8');
   const blk = PANEL.slice(PANEL.indexOf('lane job-notify-user: whether the job ALSO'), PANEL.indexOf('delivery journal (2.361.5'));
-  const keys = [...blk.matchAll(/(?<![\w.])t\((['"])((?:(?!\1)[^\\])+)\1\)/g)].map((m) => m[2]);   // a key with an apostrophe is double-quoted
+  const keys = [...new Set([...blk.matchAll(/(?<![\w.])t\((['"])((?:(?!\1)[^\\])+)\1\)/g)].map((m) => m[2]))];   // a key with an apostrophe is double-quoted (r4: unique — the never-restart service reuses the task's line)
   const dict = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
   const ZH = dict('src/lib/i18n-zh.js'), JA = dict('src/lib/i18n-ja.js');
   const valueOf = (src, k) => { const m = new RegExp(`^  ${JSON.stringify(k).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}: ("(?:[^"\\\\]|\\\\.)*"),$`, 'm').exec(src); return m ? JSON.parse(m[1]) : null; };
@@ -444,6 +464,7 @@ console.log('(5) SHOW — the params line says what the flag does; the create ec
   const KINDS = [
     ['a task', snapOf(REAL, 'tk1'), 'Its asks reach you in For you', fy(jobOf(WIRED, 'rotate-db-password')).some((i) => i.jobFact === 'ask')],
     ['a service', snapOf(REAL, 'svc0'), 'Its asks and a park reach you in For you', fy(jobOf(WIRED, 'db-password')).some((i) => i.jobFact === 'parked')],
+    ['a service with --restart never (it never parks — r4, claim r3-1 FINDING 1)', REAL.jm.snapshot(REAL.jm.jobs.get(REAL.jm.create({ kind: 'service', name: 'svc-never', restart: 'never', cmd: { argv: ['sh', '-c', 'sleep 60'], cwd: CWD } }, { conversationId: cidOf('svc0'), isUser: false }).job.id)), 'Its asks reach you in For you', M.onServiceExit({ kind: 'service', restart: 'never', desiredUp: true, supervise: { consecutiveFails: 99 } }, { uptimeMs: 10, now: Date.now() }).stay === true],
     ['a scheduled run', snapOf(REAL, 'at1'), "Each run's asks reach you in For you · A missed time is caught up when the server is back — never a notice", true],
     ['a notify cron (the CLI\'s: catch-up on)', snapOf(WIRED, 'caught-up'), 'A missed time is caught up when the server is back — never a notice', !!jc && jc.state === 'done' && !fy(jc).length && (jc.notifyLog || []).some((e) => e.lane === 'message' || e.lane === 'stash')],   // fired late to the agent (the conversation's 30 s floor stashes it), nothing in For you
     ['an --at notify cron with catch-up off', snapOf(WIRED, 'api-password'), 'A missed time reaches you in For you', fy(jobOf(WIRED, 'api-password')).some((i) => i.jobFact === 'missed')],

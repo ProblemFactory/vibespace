@@ -76,12 +76,15 @@ function pubLine(j) {
 // lane job-notify-user r2 → r3: the For-you copies the store REFUSED — EVERY copy the engine files (a task's end, an ask, a
 // park, a missed time, a notify fire: the journal line's `copy` names it), each one's newest user-inbox line, in its words —
 // a poll / show must not read as delivered what never landed in the user's tray
-const COPY_WORDS = { end: 'the end copy', ask: 'the ask', parked: 'the park notice', missed: 'the missed-time notice', fire: 'the fire copy' };
+const COPY_WORDS = { end: 'the end copy', ask: 'the ask', parked: 'the park notice', missed: 'the missed-time notice', fire: 'the fire copy', stray: 'a copy filed outside the one door', unknown: 'a copy of an unknown kind' };
+// r4: the record's LAST verdict per copy (`forYouLast` — kept past the journal's 8-line window, and a cron's carries its
+// scheduled run's end copy: the id the agent HOLDS says it); an older server's record: its journal. A refused copy is
+// never retried — the line says so
 function forYouLine(j) {
-  const fyLast = new Map();
-  for (const fy of j.notifyLog || []) if (fy && fy.lane === 'user-inbox') fyLast.set(fy.copy || 'fire', fy);
-  const fyRefused = [...fyLast.values()].filter((fy) => !fy.ok);
-  return fyRefused.length ? 'for you: ' + fyRefused.map((fy) => `${COPY_WORDS[fy.copy || 'fire'] || 'a copy'} was NOT filed — ${fy.reason || 'the For you tray refused it'}`).join('; ') : '';
+  const fyLast = new Map(Object.entries(j.forYouLast && typeof j.forYouLast === 'object' ? j.forYouLast : {}));
+  if (!fyLast.size) for (const fy of j.notifyLog || []) if (fy && fy.lane === 'user-inbox') fyLast.set(fy.copy || 'fire', fy);
+  const fyRefused = [...fyLast.entries()].filter(([, fy]) => fy && !fy.ok);
+  return fyRefused.length ? 'for you: ' + fyRefused.map(([fyCopy, fy]) => `${COPY_WORDS[fyCopy] || 'a copy'}${fy.run ? ` of run ${fy.run}` : ''} was NOT filed — ${fy.reason || 'the For you tray refused it'}`).join('; ') + ' (a refused copy is not retried — free For you and run it again)' : '';
 }
 // lane jobs-memory-bound: the job's memory bound, the rung that held its last run (or why none did), its named end and the
 // park — the hub's facts, worded here (this file ships to hosts without a checkout)
@@ -130,7 +133,8 @@ create:  vibespace-job run "CMD" --name NAME [--context "brief (echoed at poll, 
              (--notify-user: when the task ends — scheduled, every fire's run — a copy lands in the user's For you tray; default off;
               refused with --keep-up: a service never tells at its end. Set at creation — to change it, rm and recreate; it is not
               "notify <id> on|off", which says whether YOUR conversation is told. Without it the user still gets a job's asks — and
-              a service's park — in For you; a missed fire is caught up when the server is back, never a notice)
+              a service's park, unless --restart never (it never parks) — in For you; a missed fire is caught up when the server
+              is back, never a notice; a copy For you refused is not retried — poll / show say it)
          vibespace-job notify-cron --name X (--every 12h|--cron "..."|--at "...") --text "..." [--urgency low|normal|high|urgent] [--notify-user]
              (fires wake YOUR conversation with the whole text; --notify-user ALSO copies it to the user's For you tray — default
               off, the text is usually your own reminder; that copy and a subscriber's pass the secret mask; --urgency is the

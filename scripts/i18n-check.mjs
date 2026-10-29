@@ -11,24 +11,29 @@
 // WARN (non-fatal) on: zh/ja key parity gaps, and translations that lose a
 // {param} or an HTML tag present in their key.
 //
-// HARD FAIL on a MISSING For-you NOTICE translation (round 18/19): a userTodos
-// notice carries `i18n: { text: { key: '…' }, detail: [{ key: '…' }] }` in
-// SERVER source — NOT a t() call, so the dict-only lint above never sees it
-// (the r18 drift-notice TEXT key, and the r19 DETAIL paragraph, each a sibling
-// of translated vault keys). THE ROAD (exported + pinned by test-vault-run-model's
-// RED mutants) scans the vault door's literal `key:` AND `detail:` notice keys
-// (single/double/backtick-quoted, a ${…} template skipped) and REQUIRES each as
-// a REAL dict ENTRY in BOTH dicts (a quoted key then `:`, outside a full-line
-// comment — so a prose/comment mention never falsely passes).
+// HARD FAIL on a MISSING For-you NOTICE translation (vault-agent-own round 18/19;
+// lane job-notify-user r4 widens it to the jobs engine): a userTodos notice
+// carries `i18n: { text: { key: '…' }, detail: [{ key: '…' }] }` in SERVER
+// source — NOT a t() call, so the dict-only lint above never sees it (the jobs
+// engine's eight For-you keys shipped with no zh / ja and every gate green).
+// THE ROAD (exported) scans each listed surface's literal `key:` AND `detail:`
+// notice keys (single/double/backtick-quoted, a ${…} template skipped) — and
+// the jobs engine's template TABLE (src/job-model.js FOR_YOU_WORDS, a table of
+// keys, not `key:` literals) — and REQUIRES each as a REAL dict ENTRY in BOTH
+// dicts (a quoted key then `:`, outside a full-line comment — so a prose/comment
+// mention never falsely passes).
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { createRequire } from 'node:module';
 import { dictEntries } from './i18n-extract.mjs';
 
 const lib = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'src', 'lib');
 const DICTS = ['i18n-zh.js', 'i18n-ja.js'].map((f) => path.join(lib, f));
 // the server surfaces whose literal notice keys are FOR the owner (widen as other surfaces adopt the i18n-notice shape)
-const NOTICE_SRC = ['src/server/vault-run-door.js'].map((p) => path.join(path.dirname(fileURLToPath(import.meta.url)), '..', p));
+const NOTICE_SRC = ['src/server/vault-run-door.js', 'src/server/jobs-wiring.js', 'src/jobs.js'].map((p) => path.join(path.dirname(fileURLToPath(import.meta.url)), '..', p));
+// …and the server's key TABLES (each value a key the client words with t()): the jobs engine's For-you templates
+export const noticeKeyTables = () => [{ name: 'src/job-model.js FOR_YOU_WORDS', keys: Object.values(createRequire(import.meta.url)('../src/job-model.js').FOR_YOU_WORDS) }];
 
 /** every `key:` / `detail:` sentence-shaped string literal in server source — single/double/backtick-quoted; a `${…}` template
  *  (a key built at run time) is skipped, a short identifier is skipped. Round 19: `detail:` and backtick quotes are now seen. */
@@ -46,10 +51,12 @@ export function dictHasEntry(dictText, key) {
   const q = String(key).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   return new RegExp('([\'"`])' + q + '\\1\\s*:').test(code);
 }
-/** the notice-key road: srcTexts × their literal notice keys × dicts → every (dict, key) whose translation is MISSING. */
-export function noticeKeyFailures(srcTexts, dicts) {
+/** the notice-key road: srcTexts × their literal notice keys (+ tables' keys, sentence-shaped as the literals are) × dicts →
+ *  every (dict, key) whose translation is MISSING. */
+export function noticeKeyFailures(srcTexts, dicts, tables = []) {
   const out = [];
   for (const src of srcTexts) for (const k of noticeKeyLiterals(src)) for (const d of dicts) if (!dictHasEntry(d.text, k)) out.push({ dict: d.name, key: k });
+  for (const t of tables) for (const k of t.keys) if (typeof k === 'string' && /[{\s]/.test(k) && k.length > 8) for (const d of dicts) if (!dictHasEntry(d.text, k)) out.push({ dict: d.name, key: k, table: t.name });
   return out;
 }
 
@@ -91,12 +98,12 @@ function runCli() {
   for (const k of zh.keys()) if (!ja.has(k)) { warns++; console.warn(`⚠ parity: in zh but missing from ja: ${k.slice(0, 60)}`); }
   for (const k of ja.keys()) if (!zh.has(k)) { warns++; console.warn(`⚠ parity: in ja but missing from zh: ${k.slice(0, 60)}`); }
 
-  // the For-you NOTICE-key road (exported above; pinned by test-vault-run-model)
+  // the For-you NOTICE-key road (exported above; pinned by test-vault-run-model's RED mutants and test-jobs-engine's planted-key controls)
   const srcTexts = NOTICE_SRC.map((f) => fs.readFileSync(f, 'utf8'));
   const dicts = DICTS.map((f) => ({ name: path.basename(f), text: fs.readFileSync(f, 'utf8') }));
-  for (const { dict, key } of noticeKeyFailures(srcTexts, dicts)) {
+  for (const { dict, key, table } of noticeKeyFailures(srcTexts, dicts, noticeKeyTables())) {
     missFail++;
-    console.error(`✗ a For-you notice key is MISSING its translation in ${dict} — ${key.slice(0, 72)}… — a key/detail literal in the vault door needs zh+ja like any chrome string (add it to src/lib/${dict})`);
+    console.error(`✗ a For-you notice key is MISSING its translation in ${dict} — ${key.slice(0, 72)}… — ${table ? `a key in ${table}` : 'a key/detail literal in a server notice surface'} needs zh+ja like any chrome string (add it to src/lib/${dict})`);
   }
 
   if (dupFail || missFail) {

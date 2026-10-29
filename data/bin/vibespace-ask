@@ -50,7 +50,7 @@ const opt = (name) => {
   if (j >= 0) { const v = rawArgs[j].slice(pref.length); rawArgs.splice(j, 1); return v; }
   return undefined;
 };
-const URGENCIES = ['low', 'normal', 'high', 'urgent'];
+const URGENCIES = (TX && TX.FOR_YOU_URGENCIES) || null;   // lane job-notify-user r4: THE store's own set (agent-cli-text FOR_YOU_URGENCIES) — no second list; an install without the module leaves the store to judge
 const urgency = opt('urgency');
 let detail = opt('detail');
 // --options "A|B|C" (2.369.169, design-user-inbox-reply D3a): one-click answers
@@ -169,7 +169,7 @@ async function main() {
   if (cmd === 'add' && (rest.length || DOORS.doors.text)) { // tolerated alias: "vibespace-ask add ..." — agents guess it
     return fileItem(oneText('vibespace-ask add', rest[0], rest.slice(1)));
   }
-  if (urgency && !URGENCIES.includes(urgency)) {
+  if (urgency && URGENCIES && !URGENCIES.includes(urgency)) {
     console.error('vibespace-ask: unknown urgency "' + urgency + '" (valid: ' + URGENCIES.join('/') + ')');
     process.exit(1);
   }

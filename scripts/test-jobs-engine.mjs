@@ -901,6 +901,130 @@ setInterval(() => { }, 1000);
     ok(jn.state === 'failed' && N.told.length === 1 && /: failed exit=75 error /.test(N.told[0]) && N.inbox.length === 1, 'NEGATIVE CONTROL: an engine WITHOUT the window (the ≤ .332 judgment) ⇒ failed exit=75 + a failure notice + the user inbox — the legs above are RED on it', JSON.stringify({ state: jn.state, told: N.told, inbox: N.inbox.length }));
     N.end();
   }
+
+  // ── lane job-notify-user r4: THE ONE FOR-YOU DOOR AT RUN TIME, the record's last verdict, the legacy rung for every copy,
+  // the NAME wherever a person or another conversation reads it, the server keys' i18n road — over the REAL jobs wiring and
+  // a REAL For-you store in this suite's scratch dir (spawns stubbed: no process runs). Heavy by placement (the fast tier's
+  // clock — fixups-r4 §4: these legs do not grow the fast sum).
+  {
+    const M = jobModel;
+    const JW = require('../src/server/jobs-wiring.js');
+    const { UserTodoManager } = require('../src/user-todos.js');
+    const CLISRC = fs.readFileSync(new URL('../data/bin/vibespace-job', import.meta.url), 'utf8');
+    // the CLI's own forYouLine + COPY_WORDS, evaluated over a record (the words poll / show print)
+    const fyLineSrc = CLISRC.slice(CLISRC.indexOf('const COPY_WORDS = '), CLISRC.indexOf('\n}\n', CLISRC.indexOf('function forYouLine(j)')) + 3);
+    const forYouLine = new Function(fyLineSrc + '\nreturn forYouLine;')();
+    const MAT = ['gh', 'p', '_'].join('') + 'Q7w8E9r0T1y2U3i4O5p6A7s8D9f0G1h2J3k4';   // a token SHAPE, built at run time
+    const R4 = path.join(dir, 'r4'); fs.mkdirSync(R4, { recursive: true });
+    const wired = (name, seed) => {
+      const d = path.join(R4, name); fs.mkdirSync(d, { recursive: true });
+      if (seed) fs.writeFileSync(path.join(d, 'user-todos.json'), JSON.stringify({ items: seed }));
+      const todos = new UserTodoManager({ dataDir: d, expirySweepMs: 0 });
+      const told = [], logs = [], labels = [];
+      const w = JW.create({ app: { get() { }, post() { }, put() { }, delete() { }, patch() { }, use() { } }, dataDir: d, broadcastAll() { }, userTodos: todos, log: (...a) => logs.push(a.join(' ')),
+        serverSetting: () => undefined, taskGroups: null, activeSessions: new Map(),
+        deliver: { peerReachable: () => true, deliverToConversation: async (cid, text, meta) => { told.push({ cid, text, meta }); return { ok: true, lane: 'message', peerName: 'owner' }; }, onRetry() { }, registerStashJudge() { } } });
+      const jm = w.jm; jm.init(); for (const t of jm._timers) clearInterval(t);
+      jm._spawn = (job, trigger) => { job.runs = job.runs || []; job.runs.push({ startedAt: Date.now() - 5000, trigger }); job.state = 'up'; };
+      jm.d.getPorts = () => ({ forward: async (host, port, o) => { labels.push(o.label); return { id: 'pf-1' }; }, list: () => [] });
+      jm._portAnswers = async () => false;
+      const items = () => { const s = todos.snapshot(); return [...s.open, ...s.resolved]; };
+      return { jm, todos, told, logs, labels, items, end: () => { try { jm.shutdown(); } catch { } todos.stop(); } };
+    };
+    const CID = 'c0ffee00-0000-4000-8000-0000000000r4'.replace('r4', 'a4');
+    const who = { conversationId: CID, sessionId: 's-r4', sessionCreatedAt: 1, groups: new Set() };
+    const own = { conversation: { backend: 'claude', id: CID }, sessionId: 's-r4', sessionCreatedAt: 1, createdBy: 'agent', groupsSnapshot: [] };
+
+    // (1) THE STRAY DOOR: a direct filing in the pre-r3 shape (accept-r3 legacy-shape-filer / planted-direct-filer, the shape
+    // jobs-memory-bound 887e8d66 files twice) — refused in the STORE's own words and JOURNALED on the job, poll says it
+    {
+      const X = wired('stray');
+      const job = X.jm.jobs.get(X.jm.create({ kind: 'service', name: 'build-x', cmd: { argv: ['sh', '-c', 'sleep 60'] }, owner: own }, who).job.id);
+      let v; try { v = X.jm.d.notifyUser({ text: 'build-x: parked — out of memory twice', urgency: 'normal', jobId: job.id, jobName: job.name, ownerCid: CID }); } catch (e) { v = { threw: e.message }; }
+      const e = (job.notifyLog || []).filter((x) => x.lane === 'user-inbox').pop();
+      ok(v && v.ok === false && /^origin 'jobs' files its words as i18n \{key, params\}/.test(v.why) && e && e.ok === false && e.copy === 'stray' && e.reason === v.why && !X.items().length,
+        'r4 THE STRAY DOOR: a direct `this.d.notifyUser({ text, … })` (the pre-r3 shape) is refused in the store\'s OWN words and journaled on its job — never «i18n.text needs a key» into a swallowed catch', JSON.stringify({ v, e }));
+      ok(/^for you: a copy filed outside the one door was NOT filed — origin 'jobs' files its words as i18n \{key, params\}.* \(a refused copy is not retried — free For you and run it again\)$/.test(forYouLine(X.jm.snapshot(job))) && X.logs.some((l) => /a For-you filing outside the one door/.test(l)),
+        '…and poll / show say it by name (the CLI\'s own forYouLine over the snapshot), and the server log names the door it skipped', forYouLine(X.jm.snapshot(job)));
+      // (2) a kind forYouCopy does not know: a NAMED refusal journaled — never a TypeError into its caller (claim r3-2 minor 7)
+      let u, threw = null; try { u = X.jm._forYou(job, M.forYouCopy(job, 'parked-mem0ry')); } catch (err) { threw = err.message; }
+      const ue = (job.notifyLog || []).filter((x) => x.lane === 'user-inbox').pop();
+      ok(!threw && u && u.ok === false && /^no For-you copy of kind «parked-mem0ry» — the copies are end, ask, parked, missed, fire/.test(u.why) && ue && ue.copy === 'parked-mem0ry' && ue.ok === false, 'r4 an UNKNOWN copy kind answers a named refusal, journaled — never a TypeError', JSON.stringify({ threw, u, ue }));
+      // (3) the engine's own notices come through the same door (no job: filed, never a fact)
+      X.jm._forYou(null, M.forYouCopy(null, 'engine-failed', { error: 'EACCES' }));
+      const en = X.items().find((i) => /^Background Work engine failed to start: EACCES$/.test(i.text));
+      ok(en && en.origin === 'jobs' && !en.jobId && !en.jobFact && en.i18n && en.i18n.text.key === 'Background Work engine failed to start: {error}', 'r4 the engine\'s own notices file through _forYou too (a template + its field; no job, no fact)', JSON.stringify(en));
+      X.end();
+    }
+
+    // (4) THE LEGACY RUNG FOR EVERY COPY (accept-r3 unverified 1 + 4): a ≤ .360 store's open job copies carry no fact — each takes
+    // the fact its own template implies at load, and the next copy of the same job re-files INTO it (r3: an end / park /
+    // missed / fire copy sat beside its first fact-keyed twin — two identical items); a pre-B-328d ask (no origin) closes
+    {
+      const K = `claude:${CID}`, base = { sessionKey: K, urgency: 'normal', kind: 'action', status: 'open', by: 'agent', origin: 'jobs', createdAt: Date.now() - 86400e3, i18n: null, action: null };
+      const L = { end: 'jb-0000e0d0', park: 'jb-0000a0a0', missed: 'jb-0000b0b0', fire: 'jb-0000f0f0', ask: 'jb-0000c0c0', old: 'jb-0000d0d0' };
+      const seed = [
+        { ...base, id: 'ut-legacy0001', jobId: L.end, text: 'Task nightly run: failed (error)' },
+        { ...base, id: 'ut-legacy0002', jobId: L.park, text: `Service db crash-looped and was parked — vibespace-job start ${L.park} to retry` },
+        { ...base, id: 'ut-legacy0003', jobId: L.missed, text: 'Scheduled job standup MISSED its time (server was down)', urgency: 'high' },
+        { ...base, id: 'ut-legacy0004', jobId: L.fire, text: 'renew the cert today' },
+        { ...base, id: 'ut-legacy0005', jobId: L.ask, text: 'deploy needs your input' },
+        { ...base, id: 'ut-legacy0006', jobId: L.old, text: 'build needs your input', origin: undefined },   // pre-B-328d: no origin stored
+        { ...base, id: 'ut-legacy0007', jobId: null, text: 'an agent\'s own ask', origin: 'agent' },
+      ];
+      const X = wired('legacy', seed);
+      const facts = Object.fromEntries(X.items().map((i) => [i.id, i.jobFact || null]));
+      ok(facts['ut-legacy0001'] === 'end:failed:error' && facts['ut-legacy0002'] === 'parked' && facts['ut-legacy0003'] === 'missed' && facts['ut-legacy0004'] === 'fire' && facts['ut-legacy0005'] === 'ask' && facts['ut-legacy0006'] === 'ask' && facts['ut-legacy0007'] === null,
+        'r4 THE LEGACY RUNG: every open ≤ .360 job copy takes the fact its own template implies at load (end:<state>:<cause>, parked, missed, fire, ask — a pre-B-328d ask too); an agent\'s item none', JSON.stringify(facts));
+      const job = (id, name, state, extra = {}) => ({ id, kind: 'task', name, state, owner: own, access: { view: 'session', control: 'session' }, runs: [], notifyUser: true, ...extra });
+      X.jm._forYou(job(L.end, 'nightly run', 'failed'), M.forYouCopy(job(L.end, 'nightly run', 'failed'), 'end', { cause: 'error' }));
+      X.jm._forYou(job(L.park, 'db', 'failed', { kind: 'service' }), M.forYouCopy(job(L.park, 'db', 'failed'), 'parked'));
+      X.jm._forYou(job(L.missed, 'standup', 'missed', { kind: 'cron' }), M.forYouCopy(job(L.missed, 'standup', 'missed'), 'missed'));
+      X.jm._forYou(job(L.fire, 'cert', 'up', { kind: 'cron' }), M.forYouCopy(job(L.fire, 'cert', 'up'), 'fire', { text: 'renew the cert today' }));
+      const per = Object.fromEntries(Object.entries(L).map(([k, id]) => [k, X.items().filter((i) => i.jobId === id && i.status === 'open').length]));
+      ok(per.end === 1 && per.park === 1 && per.missed === 1 && per.fire === 1, 'r4 …and the next copy of each re-files INTO the legacy item — ONE item per job and copy (r3: two identical items after the upgrade)', JSON.stringify(per));
+      ok(X.todos.resolveByJob(L.old) === 1 && X.todos.resolveByJob(L.fire) === 0, 'r4 …a pre-B-328d ask (no stored origin) closes when its panel is answered; a fire copy never does', JSON.stringify(X.items().filter((i) => i.jobId === L.old || i.jobId === L.fire).map((i) => [i.jobFact, i.status])));
+      X.end();
+    }
+
+    // (5) THE NAME WHEREVER A PERSON OR ANOTHER CONVERSATION READS IT (claim r3-1 FINDING 3): a token-shaped job name, belted on
+    // the snapshot a non-author reads (the panel's card title, the ask window's title), another lineage's view, the events ring
+    // and the digest it injects, the Ports label — whole for its author; the record keeps it raw (the author's own fact)
+    {
+      const X = wired('names');
+      const nm = 'deploy-' + MAT;
+      const raw = (s) => String(s).includes(MAT.slice(4, 16));
+      const r = X.jm.create({ kind: 'service', name: nm, cmd: { argv: ['sh', '-c', 'sleep 60'] }, ports: [4555], publish: true, owner: own }, who);
+      const job = X.jm.jobs.get(r.job.id);
+      X.jm._event(job, 'started');
+      await X.jm._ensurePublish(job);
+      const sn = X.jm.snapshot(job), other = jobModel.agentJobView(X.jm.snapshot(job), { mine: false }), dig = X.jm.updatesFor({ ...who, conversationId: 'someone-else', isUser: true }, 0).text;
+      ok(!raw(sn.name) && !raw(other.name) && !raw(X.jm.events[X.jm.events.length - 1].name) && !raw(dig) && X.labels.length === 1 && !raw(X.labels[0]) && /^service: deploy-ghp_«redacted»/.test(X.labels[0]),
+        'r4 a token-shaped job NAME is belted on the snapshot a person reads (card title, ask window), another lineage\'s view, the events ring + the digest it injects, the Ports label', JSON.stringify({ sn: sn.name, other: other.name, label: X.labels[0], dig: dig.slice(0, 160) }));
+      ok(raw(r.job.name) && raw(X.jm.snapshot(job, { author: true }).name) && raw(job.name), '…whole for its AUTHOR (the create echo, its own views) — the record keeps the raw name (the author\'s own fact)', JSON.stringify({ echo: r.job.name.slice(0, 12) }));
+      // (6) a notify cron with no --text: the body the author gets is the same LABEL the header carries (claim r3-2 minor 6)
+      const c = X.jm.jobs.get(X.jm.create({ kind: 'cron', name: 'remind-' + MAT, schedule: { everyMs: 3600e3 }, action: { type: 'notify' }, owner: own }, who).job.id);
+      X.jm._fireCron(c, 'cron');
+      await sleep(30);
+      const t = X.told.filter((x) => x.cid === CID).pop();
+      ok(t && !raw(t.text) && !raw(t.meta && t.meta.fromName) && /: remind-ghp_«redacted»/.test(t.text), 'r4 a notify cron without --text: the author\'s body is the belted LABEL the header and the card carry — never the raw name beside a masked header', JSON.stringify(t && { text: t.text.slice(0, 220), from: t.meta && t.meta.fromName }));
+      X.end();
+    }
+
+    // (7) THE SERVER KEYS' i18n ROAD (scripts/i18n-check.mjs): every key the jobs engine files — the FOR_YOU_WORDS table, the
+    // wiring's {key} literals — has a zh AND a ja entry; a planted bare key (a literal or a table row) is red in both dicts
+    {
+      const I = await import('./i18n-check.mjs');
+      const rd = (p) => fs.readFileSync(new URL('../' + p, import.meta.url), 'utf8');
+      const dicts = ['src/lib/i18n-zh.js', 'src/lib/i18n-ja.js'].map((p) => ({ name: path.basename(p), text: rd(p) }));
+      const srcs = ['src/server/jobs-wiring.js', 'src/jobs.js'].map(rd);
+      const real = I.noticeKeyFailures(srcs, dicts, I.noticeKeyTables());
+      const lit = I.noticeKeyFailures([srcs[0].replace("{ key: 'Background job {id}', params: { id: jobId } }", "{ key: 'Background job {id} planted, never translated', params: { id: jobId } }")], dicts);
+      const tab = I.noticeKeyFailures([], dicts, [{ name: 'planted', keys: [...I.noticeKeyTables()[0].keys, 'Task {name} was planted untranslated'] }]);
+      ok(!real.length && I.noticeKeyTables()[0].keys.length >= 7, `r4 the i18n road: every server key the jobs engine files has zh + ja (${I.noticeKeyTables()[0].keys.length} table keys + the wiring's literals)`, JSON.stringify(real));
+      ok(lit.length === 2 && tab.length === 2 && lit.every((f) => /planted, never translated/.test(f.key)) && tab.every((f) => f.table === 'planted'), 'CONTROL: a planted bare key — a wiring {key} literal or a FOR_YOU_WORDS row — is red in BOTH dicts', JSON.stringify([...lit, ...tab]));
+    }
+  }
 } finally {
   try { const all = JSON.parse(fs.readFileSync(path.join(dir, 'jobs.json'), 'utf-8')); } catch { }
   try { for (const d of fs.readdirSync(path.join(dir, 'job-logs'))) { } } catch { }

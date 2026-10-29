@@ -1579,7 +1579,7 @@ const I_SINKS = [
   ['error', (c) => /^(new )?(Error|TypeError|RangeError)$/.test(c), 'an Error: a route answers `{error: e.message}` (→ a client toast); an uncaught one → telemetry `server-error`'],
   // lane job-notify-user r3: `this._forYou` is the engine's ONE For-you copy door (src/jobs.js) — a copy's fields ride its
   // argument (M.forYouCopy(job, …, { text: a.text })), and the door stamps the job's id on the one notifyUser call (pinned below)
-  ['todo', (c) => /(^|\.)(userTodos|todos)(\(\))?\.add$/.test(c) || /(^|\.)(notifyUser|_forYou)$/.test(c), 'a For-you item — a DERIVED record when made from another record\'s words'],
+  ['todo', (c) => /(^|\.)(userTodos|todos)(\(\))?\.add$/.test(c) || /(^|\.)(notifyUser|_forYou|_forYouDep)$/.test(c), 'a For-you item — a DERIVED record when made from another record\'s words'],   // r4: the door calls the dep it HOLDS (`this._forYouDep`)
   ['activity', (c) => /(^|\.)addProgress$/.test(c), 'an Activity entry'],
   ['status', (c) => /(^|\.)(pushNotice|setByAgent|setByUser|noteEvent)$/.test(c), 'a status entry / a notice queued for the agent\'s next turn'],
   ['peer', (c) => /(^|\.)(deliverToConversation|_notifyOwner|_deliverTo|postToPeer|emitPeerCard|injectPeerCard|feedPeerCard)$/.test(c), 'a delivery into a conversation (the agent\'s context + the chat card drawn for it)'],
@@ -2121,7 +2121,6 @@ const I_SITES = {
   'src/agent-routes.js|activity|req.body.note': ['own', 'the agent\'s own Activity entry'],
   'src/agent-routes.js|activity|req.body.detail': ['own', 'the agent\'s own Activity entry'],
   'src/agentd/agentd.js|peer|msg.text': ['transcript', 'the device posts the delivered text into the CLI\'s inbox'],
-  'src/jobs.js|peer|job.name': ['transcript', 'a job notification delivered into its owner / subscriber conversation (the card label `Background Work · <name>`); a HELD one is the stash the door rewrites'],
   'src/jobs.js|peer|a.text': ['transcript', 'the notify action\'s own text delivered to the owner conversation'],
   'src/jobs.js|todo|job.name': ['cascade', 'a For-you item filed by the job (failed / parked / missed / needs input) carries its jobId — the job\'s clear cascades to it'],
   'src/jobs.js|todo|a.text': ['cascade', 'the notify action\'s For-you item carries the jobId — cleared with the job (r3: the --text rides `_forYou`, the one door)'],
@@ -2204,7 +2203,7 @@ console.log('§I the interpolation census (verify r8): every message that embeds
     ok(al.length >= 25 && defs.size >= 15 && al.every((r) => r.read && r.sink && I_RECV[`${iRel(r.rel)}|${iRecvOf(r.read)}`]), `I verify r9 — THE ONE-LEVEL ALIAS PASS: a text field COPIED into a local (\`const x = rec.<field>\` / \`const { field } = rec\`) and handed to a sink in its block is a read at that sink — ${defs.size} copies, ${al.length} sink reads, every one judged by the receiver + site tables above (a copy into an object's member or through two locals is declared)`, al.length); }
   ok(iAbsent(srcs).length === 0, `I the absent sinks stay absent — ${I_ABSENT.map(([w]) => w).join(', ')}: zero sites`, iAbsent(srcs));
   // the classes' own standing statements: the cascade reaches every item a job filed; the dialog says agents keep what they received
-  ok(read('src/server/record-clear.js').includes('userTodos.idsWhere((i) => i.jobId && gone.has(i.jobId))') && /userTodos\.add\(sessKey, \{\s*origin: 'jobs', \/\/ B-328d\s*i18n: [^\n]*\n\s*urgency: urgency \|\| 'normal', by: 'agent', jobId,/.test(read('src/server/jobs-wiring.js')) && /_forYou\(job, c\) \{\n\s*let v;\n\s*try \{ v = this\.d\.notifyUser\(\{ words: c\.words, fact: c\.fact, urgency: c\.urgency, jobId: job\.id,/.test(read('src/jobs.js')), 'I `cascade`: a job\'s clear cascades to every For-you item carrying its jobId, and the ONE filing door (jobs-wiring notifyUser) stamps it');
+  ok(read('src/server/record-clear.js').includes('userTodos.idsWhere((i) => i.jobId && gone.has(i.jobId))') && /userTodos\.add\(sessKey, \{\s*origin: 'jobs', \/\/ B-328d\s*text, detail,\s*i18n: [^\n]*\n\s*urgency: urgency \|\| 'normal', by: 'agent', jobId,/.test(read('src/server/jobs-wiring.js')) && /_forYou\(job, c\) \{\n(?:\s*\/\/[^\n]*\n)*[^\n]*\n\s*let v;\n\s*try \{ v = this\._forYouDep \? this\._forYouDep\(\{ words: c\.words, fact: c\.fact, urgency: c\.urgency, \.\.\.\(job \? \{ jobId: job\.id,/.test(read('src/jobs.js')), 'I `cascade`: a job\'s clear cascades to every For-you item carrying its jobId, and the ONE filing door (jobs-wiring notifyUser) stamps it');
   ok(read('src/lib/record-clear-ui.js').includes("copies.className = 'dialog-hint rc-copies';"), 'I `transcript`: the confirm dialog says an agent keeps what it already received (.rc-copies, r4 ③)');
   { const rail = read('src/lib/sidebar-rail.js');
     ok(/row\.service = owned\.get\(row\.port\)\.name; row\.serviceJob = owned\.get\(row\.port\)\.id;/.test(read('src/port-forward.js')) && rail.includes("(msg.type === 'jobs-updated' && Array.isArray(msg.cleared))) render();"), 'I verify r8 ④: a Ports scan row carries its service\'s job id, the page\'s scan cache is scrubbed on the clear (the carrier row above) and the panel re-renders');

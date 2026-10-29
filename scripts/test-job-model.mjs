@@ -202,7 +202,19 @@ ok(M.notifyEffective({}, null, undefined).on === true && M.notifyEffective({}, n
   ok(fill(park.words) === 'Service db-password crash-looped and was parked — vibespace-job start jb-0000aaaa to retry' && park.fact === 'parked' && fill(miss.words) === 'Scheduled job api-password MISSED its time (server was down)' && miss.fact === 'missed' && miss.urgency === 'high', 'forYouCopy parked / missed: the product\'s words in the key, the name a field', `${fill(park.words)} | ${fill(miss.words)}`);
   const fire = M.forYouCopy({ ...j, kind: 'cron', name: 'renew' }, 'fire', { text: 'Renew the auth token: run the refresh script', urgency: 'urgent' });
   ok(fire.words.key === '{text}' && fire.words.params.text === 'Renew the auth token: run the refresh script' && fire.fact === 'fire' && fire.urgency === 'urgent' && M.forYouCopy({ ...j, name: 'nm' }, 'fire', {}).words.params.text === 'nm', 'forYouCopy fire: the --text is the WHOLE field (its name when it has none), the urgency the agent\'s', JSON.stringify(fire));
-  ok(Object.values(M.FOR_YOU_WORDS).every((k) => !/refresh|password|token/i.test(k)) && Object.isFrozen(M.FOR_YOU_WORDS) && M.forYouCopy(j, 'nope') === null, 'FOR_YOU_WORDS: five frozen templates, no agent word inside one; an unknown copy ⇒ null');
+  const nope = M.forYouCopy(j, 'nope');
+  ok(Object.values(M.FOR_YOU_WORDS).every((k) => !/refresh|password|token/i.test(k)) && Object.isFrozen(M.FOR_YOU_WORDS) && Object.keys(M.FOR_YOU_WORDS).join() === 'end,ask,parked,missed,fire,engine-failed,store-corrupt,doubt,parked-memory'
+    && nope && nope.fact === null && nope.words === null && nope.copy === 'nope' && /^no For-you copy of kind «nope» — the copies are end, ask, parked, missed, fire, engine-failed, store-corrupt, doubt, parked-memory$/.test(nope.refused),
+    'FOR_YOU_WORDS: five copies + the engine\'s two notices, frozen, no agent word inside one; an unknown copy ⇒ a NAMED refusal (r4: null was a TypeError in _forYou)', JSON.stringify(nope));
+  const ef = M.forYouCopy(null, 'engine-failed', { error: 'EACCES' }), sc = M.forYouCopy(null, 'store-corrupt');
+  ok(ef.fact === 'engine-failed' && fill(ef.words) === 'Background Work engine failed to start: EACCES' && ef.urgency === 'high' && sc.fact === 'store-corrupt' && !sc.words.params, 'forYouCopy: the engine\'s own notices (no job — r4: through the same door)', JSON.stringify([ef, sc]));
+  // THE LEGACY RUNG'S READER (r4): a ≤ .360 copy's fact read back off its own template; any other words under a job id = a fire
+  const LG = [['Task nightly: failed (error)', 'jb-1', 'end:failed:error'], ['Task needs your input: done (ok)', 'jb-1', 'end:done:ok'], ['Task a: b (c): done (exit(1))', 'jb-1', 'end:done:exit(1)'],
+    ['deploy needs your input', 'jb-1', 'ask'], ['Service db crash-looped and was parked — vibespace-job start jb-7 to retry', 'jb-7', 'parked'], ['Service db crash-looped and was parked — vibespace-job start jb-7 to retry', 'jb-8', 'fire'],
+    ['Scheduled job x MISSED its time (server was down)', 'jb-1', 'missed'], ['renew the cert', 'jb-1', 'fire'], ['an agent\'s ask', null, null]];
+  const lgBad = LG.filter(([t, id, f]) => M.legacyCopyFact(t, id) !== f).map(([t, id, f]) => `${t} (${id}) → ${M.legacyCopyFact(t, id)} ≠ ${f}`);
+  ok(!lgBad.length && LG.filter(([, , f]) => f && f.startsWith('end:')).every(([t]) => M.legacyCopyFact(t, 'jb-1') === M.forYouCopy({ state: t.split(': ').pop().split(' ')[0], name: 'x' }, 'end', { cause: t.slice(t.lastIndexOf(' (') + 2, -1) }).fact),
+    'legacyCopyFact: a ≤ .360 copy\'s fact off its own template — end:<state>:<cause> (forYouCopy\'s own derivation), parked (its own job only), missed, ask, else the fire\'s; no job id ⇒ none', lgBad.join(' | '));
   // the message road: the NAME / the context as THIS recipient receives them (the engine belts them; absent = the record's own)
   const nj2 = { id: 'jb-0000bbbb', kind: 'cron', name: 'deploy-ghp_RAW', state: 'up', context: { payload: 'ctx RAW' } };
   const own = M.renderOwnerNotify(nj2, { what: 'w' }), sub = M.renderOwnerNotify(nj2, { what: 'w' }, { name: 'deploy-ghp_«redacted»', context: 'ctx «redacted»' });
