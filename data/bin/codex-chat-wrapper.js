@@ -62,6 +62,7 @@ function safeJsonParse(text, fallback = null) {
 function rejectStdinLine(line) {
   const head = line.slice(0, 48).replace(/\s+/g, ' ');
   log(`stdin line unparseable (${line.length} bytes, starts ${JSON.stringify(head)}) — dropped, NOT sent to codex`);
+  writeRecord({ type: '_stdin_nack', timestamp: Date.now(), reason: 'torn', bytes: line.length }); persistSoon();   // the sender's receipt (lane human-cli r2)
   record('event_msg', {
     type: 'task_failed',
     error: `Your message did not reach codex: the input line was corrupted in transit (${line.length} bytes, unparseable) — please send it again.`,
@@ -455,7 +456,7 @@ const meta = {
   // {readFirst:true}` takes ONE account/rateLimits/read BEFORE the consume, pushes it as `rate_limits_updated
   // {beforeReset, idempotencyKey}` and consumes only on the server's `codex-reset-credit-go {go:true}` — a wrapper
   // without this advert ignores the flag and consumes at once (the server's dialog says which it will do)
-  caps: { peerMessage: true, frameFile: true, threadScoped: true, inputQueue: true, queueVerbs: QUEUE_VERBS_SERVED, responseStyle: true, permissionRules: true, queueResync: true, resetCreditKey: true, resetCreditReadFirst: true },
+  caps: { peerMessage: true, frameFile: true, threadScoped: true, inputQueue: true, queueVerbs: QUEUE_VERBS_SERVED, responseStyle: true, permissionRules: true, queueResync: true, resetCreditKey: true, resetCreditReadFirst: true, receipts: true },
   // The response style (codex Personality) this session actually runs with.
   // '' = the user made no choice ⇒ the key is never sent and ~/.codex/config.toml
   // decides. Reported so Session Properties can name the EFFECTIVE value.
@@ -508,6 +509,11 @@ function persistMeta() {
 
 function schedulePersist() {
   if (!writeTimer) writeTimer = setTimeout(persistBuffer, 1000);
+}
+/** A receipt is waited for (the person's CLI reads the buffer file — lane human-cli r2): the pending persist runs now. */
+function persistSoon() {
+  if (writeTimer) clearTimeout(writeTimer);
+  writeTimer = setTimeout(persistBuffer, 50);
 }
 
 function scheduleMeta() {
@@ -3699,8 +3705,14 @@ async function boot() {
       // bypass a spurious "frame file could not be delivered" error (the
       // first delivery had already consumed the file). Fires BEFORE parsing:
       // the ack means "the pipe is alive", not "the line was valid".
-      try { process.stdout.write(JSON.stringify({ type: '_stdin_ack', timestamp: Date.now() }) + '\n'); } catch {}
       let msg = safeJsonParse(line);
+      // the ack names its frame (lane human-cli r2): `msg_id` = the chat-input's msgId; a frame that asks for a RECEIPT
+      // (`webui_receipt`, the person's CLI — it reads the buffer, never this stream) gets it in the buffer too
+      const receipt = !!(msg && typeof msg === 'object' && msg.webui_receipt === true);
+      if (receipt) delete msg.webui_receipt;
+      const ack = { type: '_stdin_ack', timestamp: Date.now(), ...(msg && typeof msg === 'object' && (msg.msgId || msg.webui_msg_id) ? { msg_id: String(msg.msgId || msg.webui_msg_id) } : {}) };
+      if (receipt) { writeRecord(ack); persistSoon(); }
+      else try { process.stdout.write(JSON.stringify(ack) + '\n'); } catch {}
       if (!msg || typeof msg !== 'object') { rejectStdinLine(line); continue; }
       // Large-frame FILE BYPASS: the payload rides the filesystem, stdin only
       // carries the pointer. Resolved HERE (not inside handleInput) so the file

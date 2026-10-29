@@ -337,7 +337,7 @@ const CLAUDE_STREAM_TYPES = new Set([
   'control_response', 'control_cancel_request', 'tool_progress', 'stream_event', 'summary', // control_cancel_request: the normalizer settles the card it withdraws (a helper stopped mid-ask, lane S1) — listed so the breadcrumb stops crying 'unhandled' (the naive-study log line)
   'rate_limit_event', // handled since 2.289.0 — the set lagged the handler, so the breadcrumb cried 'unhandled' for a handled type (misled the inc-msozeyw2 read)
   'command_lifecycle', 'queued_input', 'queue_changed', 'queue_op_result', 'queue_dropped', // command_lifecycle: handled since 2.369.112 — the turn-start carrier of a harness-delivered peer message (inc-mu6bfv1t-4drq); the four queue records are the WRAPPER's (2.369.354, data/bin/chat-wrapper.js holds a mid-turn frame) — the normalizer reads them, the put-back door reads queue_dropped at its gate
-  'set_in_progress_tool_use_ids', 'compact_progress', 'tombstone', '_stdin_ack', '_remote_state', '_remote_exit', // B3 §2.5/§2.10/§2.11: the run set + compaction stage have readers in claude-stream-json.js, tombstone in the normalizer — listed here or the breadcrumb cries 'unhandled' for handled records (the 2.289.0 mistake). Round 4: the first two have never been observed on our stdout (host callbacks swallow them; the live compaction lane is system/status) and tombstone is unverified — the rows stay because the READER exists, which is what this set is about
+  'set_in_progress_tool_use_ids', 'compact_progress', 'tombstone', '_stdin_ack', '_stdin_nack', '_remote_state', '_remote_exit', // B3 §2.5/§2.10/§2.11: the run set + compaction stage have readers in claude-stream-json.js, tombstone in the normalizer — listed here or the breadcrumb cries 'unhandled' for handled records (the 2.289.0 mistake). Round 4: the first two have never been observed on our stdout (host callbacks swallow them; the live compaction lane is system/status) and tombstone is unverified — the rows stay because the READER exists, which is what this set is about
 ]);
 const _seenStreamTypes = new Set();
 
@@ -1600,7 +1600,7 @@ function activeSessionsPayload() {
 }
 
 function broadcastActiveSessions() { try { channelsWiring.groups.noteRoster(); } catch {} try { convOps.settleBirthGroups(); } catch { } // r3: the session list's ONE notify point — a renamed/ended member re-announces its groups (their views' names are live-roster derived; nothing moved ⇒ nothing sent); lane open-task-binds: a conversation opened INTO a Task Group joins its sessions[] once its own id is adopted (every adoption broadcasts; before convOps exists a caught TDZ)
-  try { exitProxy.rejudgeAll('sessions'); } catch { } // verify-r3 census: a session's own reach facts moved (a fork adopting its id, a codex / ACP thread change, its cwd under the folder rule) — every such writer broadcasts, so the exit re-judge rides this ONE notify point (a boot-time call before exitProxy exists is a caught TDZ)
+  try { exitProxy.rejudgeAll('sessions'); } catch { } try { require('./src/server/local-index.js').note('sessions'); } catch { } // lane human-cli: the person's session index (src/server/local-index.js, the ONE writer) rides this ONE notify point · verify-r3 census: a session's own reach facts moved (a fork adopting its id, a codex / ACP thread change, its cwd under the folder rule) — every such writer broadcasts, so the exit re-judge rides this ONE notify point (a boot-time call before exitProxy exists is a caught TDZ)
   const msg = JSON.stringify({ type: 'active-sessions', sessions: activeSessionsPayload() });
   wss.clients.forEach(client => {
     if (client.readyState === WS_OPEN) {
@@ -1756,7 +1756,7 @@ if (METRICS_PORT > 0) {
 
 probeSockets().finally(() => hub.listen(PORT, HOST, () => { bootTrace.listening(); // B-1319: after the restore's probes (boot-restore probeSockets) — the one-port demux (src/server/tls.js) — listen errors / EADDRINUSE as before
   const ver = require('./package.json').version;
-  console.log(`\n  VibeSpace v${ver} running at http://localhost:${PORT}${hub.bootSuffix()}`); hub.start(); // + " and https://<domain>:PORT" while a certificate is live; start = the boot pass + hourly
+  console.log(`\n  VibeSpace v${ver} running at http://localhost:${PORT}${hub.bootSuffix()}`); hub.start(); try { require('./src/server/local-index.js').configure({ rootDir: __dirname, port: PORT, host: HOST, version: ver, owner: (() => { try { return ownerWriteRefusal(); } catch { return { kind: 'unknown' }; } })(), adapters: adapterRegistry, sessions: () => activeSessions, buffersDir: BUFFERS_DIR, dataDir: path.join(__dirname, 'data'), turnOf: (s) => require('./src/server/turn-facts.js').turnOf(s), log: console }); } catch (e) { console.warn('[local-index] not started: ' + e.message); } // lane human-cli: the person's CLI index on the machine's own disk · + " and https://<domain>:PORT" while a certificate is live; start = the boot pass + hourly
   // PID file for the supervised-restart path (scripts/update.sh in a container:
   // no systemd — the entrypoint respawn loop restarts us when update.sh kills
   // this pid; dtach sessions live in the same PID namespace and survive).
@@ -1876,7 +1876,7 @@ function shutdown() {
   shutdownNow();
 }
 function shutdownNow() {
-  try { spendGuard.flush(); } catch {} // the unattended-spend ledger FIRST (a debounced-only write would hand the next boot a fresh hour — the whole point of persisting it)
+  try { spendGuard.flush(); } catch {} try { require('./src/server/local-index.js').stop(); } catch {} // lane human-cli: the index says the hub STOPPED (a reader tells a clean stop from a crash) · the unattended-spend ledger FIRST (a debounced-only write would hand the next boot a fresh hour — the whole point of persisting it)
   bridgeWatch.endAttachPtys(); // THE teardown of every attach pty — shared with the crash path (lane-dead-bridge)
   // SyncStores + layouts persist on a debounce — flush so changes made within
   // the last couple seconds aren't lost across a restart

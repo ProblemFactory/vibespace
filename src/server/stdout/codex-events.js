@@ -38,7 +38,7 @@ function create({ engine, deliverRef, permissionRulesRef }) {
         if (!line) continue;
         try {
           const msg = JSON.parse(stripAnsi(line).trim());
-          if (msg.type === '_stdin_ack') { session._stdinAckReceived = true; continue; }
+          if (msg.type === '_stdin_ack' || msg.type === '_stdin_nack') { session._stdinAckReceived = true; continue; }
           const payload = msg.payload || {};
           // remote transport state (2.139.0 codex remote chat, B-0588) —
           // rides as an event_msg record from the wrapper; mirror the

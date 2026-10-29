@@ -92,6 +92,7 @@
   "test-channel-agent-watch": 4000,
   "test-wake-approve-card-chrome": 90000,
   "test-wake-approve-card": 2000,
+  "test-human-cli": 26000,
   "test-lark-consent-chain": 8350,
   "test-lark-refresh-stall": 27000,
   "test-channel-revisions-ui": 18790,

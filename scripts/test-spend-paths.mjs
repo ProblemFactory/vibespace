@@ -411,6 +411,7 @@ const ALLOW = [
   { file: 'src/adapters/claude-code.js', prim: 'user-frame', why: 'a FORMATTER: builds the frame, never sends it' },
   { file: 'src/adapters/codex.js', prim: 'user-frame', why: 'a FORMATTER: builds the frame, never sends it' },
   { file: 'src/adapters/acp.js', prim: 'user-frame', why: 'a FORMATTER: builds the frame, never sends it' },
+  { file: 'src/server/local-index.js', prim: 'user-frame', why: "lane human-cli: the person's index writer asks each adapter's formatChatInput ONCE with placeholders (src/local-index.js FRAME_TEXT) to write the row's frame TEMPLATE — it sends nothing; the frame the CLI fills later is the OWNER typing at the machine (data/bin/vibespace refuses inside an agent session — never counted, D6)" },
   { file: 'src/peer-messaging.js', prim: 'cli-inbox', why: 'the PRIMITIVE (unix-socket write). Policy lives at the ladder that calls it — this file has no idea who asked' },
   { file: 'src/agentd/agentd.js', prim: 'cli-inbox', why: 'the DEVICE half of a delivery the hub already authorized (the peer-post op)' },
   { file: 'src/agentd/client.js', prim: 'cli-inbox', why: 'the hub-side RPC stub for that same op' },

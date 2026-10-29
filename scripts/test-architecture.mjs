@@ -2167,7 +2167,7 @@ console.log('§51 no suite writes a patched copy into the tree');
   const ls = String(spawnSync('git', ['ls-files', '-s', 'data/bin'], { cwd: REPO, encoding: 'utf8', env: gitEnvFrom(process.env) }).stdout || '').trim().split('\n').filter(Boolean);
   // the INDEX says what is a tracked tool (data/bin also holds generated and downloaded files)
   const tracked = new Map(ls.map((l) => { const m = /^(\d+) \S+ \d+\t(.+)$/.exec(l); return [path.basename(m[2]), m[1]]; }));
-  const onDisk = fs.readdirSync(path.join(REPO, 'data/bin')).filter((n) => (/^vibespace-/.test(n) || n === 'agent-browser') && tracked.has(n));
+  const onDisk = fs.readdirSync(path.join(REPO, 'data/bin')).filter((n) => (/^vibespace-/.test(n) || n === 'vibespace' || n === 'agent-browser') && tracked.has(n));   // lane human-cli: `vibespace` = the person's CLI
   const execs = onDisk.filter((n) => (fs.statSync(path.join(REPO, 'data/bin', n)).mode & 0o111) !== 0);
   ok(execs.length >= 15 && execs.includes('vibespace-browser'), `§52a census scope is non-vacuous (${execs.length} executable tracked tools)`);
   const missingFrom = (list) => execs.filter((n) => !list.includes(n) && !EXEMPT[n]);
@@ -6081,6 +6081,136 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
     ['src/lib/zz-s1.js', "function openZ() { createModalShell({ id: 'z', kind: 'form' }); }\nexport function watch(app) { setInterval(() => openZ(), 1000); app.ws.onGlobal((m) => openZ({ opener: 'system' })); const done = () => openZ(); setInterval(() => done(), 5); setInterval(() => { b.onclick = () => openZ(); }, 9); }"],
   ]);
   ok(sctl.length === 3 && sctl.filter((r) => !r.system).length === 2 && sctl.filter((r) => r.system).length === 1, `§103 NEGATIVE CONTROL (the system's opens): an open from a setInterval — directly and one local function deep — without opener 'system' is RED; the broadcast's that says it is not (${JSON.stringify(sctl)})`);
+}
+
+// ── §104 (lane human-cli, 2026-10-28 — the 89-minute hub freeze of 2026-10-27): THE PERSON'S SESSION INDEX HAS ONE WRITER
+// AND EVERY SESSION STATE CHANGE REACHES IT. The index (<home>/.vibespace/local/sessions.<rootDigest>.json — what `vibespace ls /
+// attach / chat` read with no hub) is written by src/server/local-index.js only, fed by the session list's ONE notify
+// point (server.js broadcastActiveSessions), a client attach, the boot and the shutdown. A session that enters or leaves
+// the list without reaching that notify point is a session the person cannot find when the hub is gone (the census
+// found one: a daemon pipe session re-opened at boot joined the list silently — boot-restore now broadcasts it).
+//   (a) every activeSessions.set( / .delete( call in src/ + server.js sits in a function that calls broadcastActiveSessions(
+//   (b) the notify point calls the writer's note('sessions'); the attach case notes 'attach'; the boot configures it; the
+//       shutdown stops it — and nothing else requires the writer
+//   (c) the index's file name and folder are spelled in the PURE module only; the CLI never writes, renames or deletes
+//   (d) round 2: the writer's fs CALLEES through any module (driven, not read) — procfs, its own place, its own two install files
+{
+  const acorn = (await import('node:module')).createRequire(import.meta.url)('acorn');
+  const parse = (src) => acorn.parse(src, { ecmaVersion: 'latest', sourceType: 'script', allowHashBang: true, allowReturnOutsideFunction: true, allowAwaitOutsideFunction: true });
+  const visit = (node, fn, anc = []) => { if (!node || typeof node.type !== 'string') return; const a = [...anc, node]; fn(node, a); for (const k of Object.keys(node)) { const v = node[k]; if (Array.isArray(v)) { for (const x of v) if (x && typeof x.type === 'string') visit(x, fn, a); } else if (v && typeof v.type === 'string') visit(v, fn, a); } };
+  /** Every activeSessions.set/delete in `src` whose innermost enclosing function never calls broadcastActiveSessions(. */
+  const silentChanges = (src, file) => {
+    const out = []; let n = 0;
+    visit(parse(src), (node, anc) => {
+      const c = node.type === 'CallExpression' && node.callee;
+      if (!(c && c.type === 'MemberExpression' && c.object.type === 'Identifier' && c.object.name === 'activeSessions' && c.property && ['set', 'delete'].includes(c.property.name))) return;
+      n++;
+      const fnNode = anc.slice().reverse().find((a) => /Function/.test(a.type));
+      if (!fnNode || !src.slice(fnNode.start, fnNode.end).includes('broadcastActiveSessions(')) out.push(`${file}:${src.slice(0, node.start).split('\n').length} ${c.property.name}`);
+    });
+    return { n, out };
+  };
+  const files = ['server.js'];
+  const walkDir = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const r = path.join(d, e.name); if (e.isDirectory()) { if (e.name !== 'lib') walkDir(r); } else if (e.name.endsWith('.js')) files.push(r); } };
+  walkDir('src');
+  let sites = 0; const silent = [];
+  for (const f of files) {
+    const src = fs.readFileSync(path.join(REPO, f), 'utf8');
+    if (!/activeSessions\.(set|delete)\(/.test(src)) continue;
+    const r = silentChanges(src, f); sites += r.n; silent.push(...r.out);
+  }
+  ok(sites >= 8 && silent.length === 0, `§104a every session that enters or leaves the list reaches its ONE notify point (broadcastActiveSessions) — ${sites} set/delete sites${silent.length ? '; SILENT: ' + silent.join(', ') : ''}`);
+  const ctl = silentChanges("function a() { activeSessions.set(id, s); broadcastActiveSessions(); }\nfunction b() { activeSessions.delete(id); }\nfunction c() { x.then(() => { activeSessions.set(id, s); }); broadcastActiveSessions(); }", 'planted.js');
+  ok(ctl.n === 3 && JSON.stringify(ctl.out) === JSON.stringify(['planted.js:2 delete', 'planted.js:3 set']), `§104a CONTROL: a delete with no broadcast and a set in a callback whose function never broadcasts are both named (${JSON.stringify(ctl.out)})`);
+
+  const server = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
+  const fnBody = (src, name) => { let body = null; visit(parse(src), (node) => { if (body == null && node.type === 'FunctionDeclaration' && node.id && node.id.name === name) body = src.slice(node.start, node.end); }); return body || ''; };
+  const notify = fnBody(server, 'broadcastActiveSessions');
+  ok(/require\('\.\/src\/server\/local-index\.js'\)\.note\('sessions'\)/.test(notify), '§104b the session list\'s ONE notify point (server.js broadcastActiveSessions) feeds the index writer: note(\'sessions\')');
+  ok(/require\('\.\/src\/server\/local-index\.js'\)\.stop\(\)/.test(fnBody(server, 'shutdownNow')), '§104b the shutdown tells the index the hub STOPPED (shutdownNow → stop())');
+  ok((server.match(/require\('\.\/src\/server\/local-index\.js'\)\.configure\(/g) || []).length === 1 && /hub\.listen\(PORT, HOST, \(\) => \{[\s\S]{0,1200}local-index\.js'\)\.configure\(\{ rootDir: __dirname/.test(server), '§104b the boot configures it ONCE, at listen (the place decided once, the whole list written)');
+  ok(/local-index\.js'\)\.configure\(\{[^\n]*owner: \(\(\) => \{ try \{ return ownerWriteRefusal\(\); \}/.test(server) && !/local-index\.js'\)\.configure\(\{[^\n]*throwaway: throwawayRoot/.test(server), '§104b WHO IS INSTALLED is the root verdict\'s (src/server-root.js via ownerWriteRefusal — the one rule for every owner-file write): a worktree / temp / SKIP_AGENT_HOOKS hub writes under its own root, never the person\'s HOME');
+  const wsh = fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8');
+  const attachCase = (wsh.split("case 'attach': {")[1] || '').slice(0, 1500);
+  ok(/require\('\.\/server\/local-index\.js'\)\.note\('attach', data\.sessionId\)/.test(attachCase), '§104b a client attach is noted (the row\'s attachedAt) in ws-handler\'s attach case');
+  const requirers = files.concat(['data/bin/vibespace']).filter((f) => /local-index\.js'\)/.test(fs.readFileSync(path.join(REPO, f), 'utf8').replace(/^\s*\/\/.*$/gm, '')) && /server\/local-index\.js'\)/.test(fs.readFileSync(path.join(REPO, f), 'utf8')));
+  ok(JSON.stringify(requirers.sort()) === JSON.stringify(['server.js', 'src/ws-handler.js']), `§104b nothing else drives the ONE writer (${requirers.join(', ')})`);
+
+  const spelled = files.filter((f) => f !== 'src/local-index.js' && /['"`]sessions\.json['"`]|['"`]sessions\.\$\{|\.vibespace\/local\b|'\.vibespace', 'local'|data\/local-index\b/.test(fs.readFileSync(path.join(REPO, f), 'utf8')));
+  ok(spelled.length === 0, `§104c the index's file and folder are spelled ONCE (src/local-index.js indexPlaceOf) — also: ${spelled.join(', ') || 'none'}`);
+  const cli = fs.readFileSync(path.join(REPO, 'data/bin/vibespace'), 'utf8').replace(/^\s*\/\/.*$/gm, '');
+  const writes = cli.match(/\b(writeFileSync|writeFile|appendFileSync|renameSync|unlinkSync|rmSync|rmdirSync|mkdirSync|chmodSync|process\.kill)\(/g) || [];
+  ok(writes.length === 0, `§104c the person's CLI never writes, renames, deletes or kills (${writes.join(', ') || 'none'})`);
+
+  // (d) THE WRITER'S FS CALLEES (lane human-cli round 2 — acceptance r1: a fresh chat's transcript LOCATE, an INDIRECT call
+  // through the harness store, readdirSync'd <checkout>/data/remote-jsonl on the main loop at a heartbeat and held it 35 s
+  // on a stopped bindfs; the sync-fs census reads ONE file's own calls and could not see it). The writer is DRIVEN — the
+  // boot, a note, the heartbeat, the stop — over a scratch home with the REAL harness registry and adapters (a claude chat
+  // whose transcript does not exist yet, a terminal), every fs call it reaches through ANY module recorded with the first
+  // caller outside node's own code (file:line). Allowed, sync: procfs (the hub's own facts) and the place's own path (the
+  // ladder's lstat/readlink of its components, the stop's write). Allowed, async: the place's own path, and the install's
+  // two reads of this hub's own files (once per boot). Anything else is red by file:line. A warm-up cycle first: a module
+  // load (require) is the loader's read, not the writer's.
+  {
+    const req = (await import('node:module')).createRequire(import.meta.url);
+    const fsm = req('fs');
+    const os = req('os');
+    const calls = []; let armed = false;
+    const callerOf = () => {
+      for (const l of new Error().stack.split('\n').slice(3)) {
+        const m = /\((\/[^)]+):(\d+):\d+\)$/.exec(l) || /at (\/[^ ]+):(\d+):\d+$/.exec(l);
+        if (m && !m[1].startsWith('node:') && !m[1].endsWith('test-architecture.mjs')) return `${path.relative(REPO, m[1])}:${m[2]}`;
+      }
+      return '?';
+    };
+    const spy = (obj, kind) => {
+      const saved = [];
+      for (const k of Object.keys(obj)) {
+        if (typeof obj[k] !== 'function' || (kind === 'sync' && !/Sync$/.test(k)) || /^(Dirent|Stats|ReadStream|WriteStream|FileReadStream|FileWriteStream|constants)$/.test(k)) continue;
+        const orig = obj[k];
+        saved.push([k, orig]);
+        obj[k] = function (...a) { if (armed && typeof a[0] !== 'number' && !(a[0] && typeof a[0] === 'object' && !(a[0] instanceof URL))) calls.push({ kind, fn: k, arg: String(a[0]), at: callerOf() }); return orig.apply(this, a); };   // an fd / a handle = inside a call already recorded by its path
+      }
+      return () => { for (const [k, orig] of saved) obj[k] = orig; };
+    };
+    const D = fsm.mkdtempSync(path.join(os.tmpdir(), 'vs-arch-li-'));
+    const home = path.join(D, 'home'), root = path.join(D, 'root');
+    fsm.mkdirSync(path.join(root, 'data', 'bin'), { recursive: true }); fsm.mkdirSync(path.join(root, 'src'), { recursive: true });
+    fsm.writeFileSync(path.join(root, 'data', 'bin', 'vibespace'), '// cli\n'); fsm.writeFileSync(path.join(root, 'src', 'local-index.js'), '// pure\n');
+    const savedHome = process.env.HOME; process.env.HOME = home;
+    const unspy = [spy(fsm, 'sync'), spy(fsm.promises, 'async')];
+    let W = null, place = null, err = null, ctl = [];
+    try {
+      W = req(path.join(REPO, 'src/server/local-index.js'));
+      const { createAdapterRegistry } = req(path.join(REPO, 'src/adapters/index.js'));
+      const live = new Map([['sess-1-1', { mode: 'terminal', backend: 'shell', name: 't', cwd: '/w', socketPath: path.join(root, 'data/sockets/cw-1-1'), createdAt: 1, clients: new Map() }],
+        ['sess-2-2', { mode: 'chat', backend: 'claude', name: 'a fresh chat', cwd: path.join(D, 'cwd'), socketPath: path.join(root, 'data/sockets/cw-2-2'), createdAt: 2, claudeSessionId: 'e2e00000-0000-4000-8000-0000000000aa', clients: new Map() }]]);
+      const cycle = async (harnesses = null) => {
+        W._reset();
+        W.configure({ rootDir: root, port: 1, sessions: () => live, harnesses, buffersDir: path.join(root, 'data/session-buffers'), dataDir: path.join(root, 'data'), home, heartbeatMs: 3600000, adapters: createAdapterRegistry({}), log: { log() { }, warn() { } }, varTmp: path.join(D, 'vt'), xdgRuntimeDir: path.join(D, 'run') });
+        if (W.ready) await W.ready();
+        live.get('sess-2-2').name = 'renamed ' + Date.now(); W.note('sessions'); await W.flush('sessions');
+        await W.flush('heartbeat');
+        place = (W.placeOf() || {}).dir || null;
+        W.stop();
+      };
+      await cycle();                     // the warm-up: every module the writer reaches is loaded now
+      armed = true; await cycle(); armed = false;
+      // the CONTROL: a harness whose path rule LISTS data/ (what r1's locate did) — an indirect call, named by the census
+      const planted = { get: (b) => (b === 'claude' ? { spawn: { conversationIdField: 'claudeSessionId' }, store: { transcriptPathOf: () => { fsm.readdirSync(path.join(root, 'data')); return null; } } } : null) };
+      const real = calls.splice(0, calls.length);
+      armed = true; await cycle(planted); armed = false;
+      ctl = calls.splice(0, calls.length); calls.push(...real);
+    } catch (e) { err = e; } finally { armed = false; for (const u of unspy) u(); process.env.HOME = savedHome; try { W && W._reset(); } catch { } }
+    const underPlace = (p) => !!place && (p === place || p.startsWith(place + '/') || place.startsWith(p + '/'));
+    const installSrc = new Set([path.join(root, 'data', 'bin', 'vibespace'), path.join(root, 'src', 'local-index.js')]);
+    const bad = calls.filter((c) => !(c.kind === 'sync' ? (c.arg.startsWith('/proc/') || underPlace(c.arg)) : (underPlace(c.arg) || (c.fn === 'readFile' && installSrc.has(c.arg)))));
+    const show = (c) => `${c.kind} ${c.fn} ${c.arg.replace(D, '<scratch>').replace(REPO, '<checkout>')} @ ${c.at}`;
+    ok(!err && !!place && calls.length > 0 && bad.length === 0, `§104d the ONE writer's fs callees, through ANY module (the boot, a note, the heartbeat, the stop): only procfs, its own place and its own two install files — ${err ? 'THREW ' + err.message : `${calls.length} calls${bad.length ? '; OUTSIDE: ' + [...new Set(bad.map(show))].slice(0, 6).join(' | ') : ''}`}`);
+    const ctlBad = ctl.filter((c) => c.kind === 'sync' && c.fn === 'readdirSync' && c.arg === path.join(root, 'data'));
+    ok(ctlBad.length > 0 && ctlBad.every((c) => /^src\/server\/local-index\.js:\d+$/.test(c.at)), `§104d CONTROL: a planted harness path rule that lists <checkout>/data is named, with the writer's line that reached it (${ctlBad.map(show).slice(0, 2).join(' | ') || 'not seen'})`);
+    try { fsm.rmSync(D, { recursive: true, force: true }); } catch { }
+  }
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

@@ -1054,7 +1054,7 @@ function registerWsHandler(wss, ctx) {
           // exists" and flip every window read-only while all sessions were
           // alive. This tiny synchronous ack tells the client the server is
           // alive and processing, so it WAITS instead of declaring death.
-          try { ws.send(JSON.stringify({ type: 'attach-ack', sessionId: data.sessionId })); } catch {}
+          try { ws.send(JSON.stringify({ type: 'attach-ack', sessionId: data.sessionId })); } catch {} try { require('./server/local-index.js').note('attach', data.sessionId); } catch {} // lane human-cli: the person's index notes the attach
           // Virtual subagent session: sub-{parentToolUseId} or sub-agent-{agentId}
           if (data.sessionId?.startsWith('sub-')) {
             const subId = data.sessionId;

@@ -99,7 +99,9 @@ try { fs.mkdirSync(path.dirname(metaFile), { recursive: true }); } catch {}
 // before 2.369.354 runs an older wrapper that would forward a `queue-op` line
 // to the CLI verbatim.
 const CLAUDE_QUEUE_VERBS = ['remove', 'reorder', 'edit'];
-const meta = { pid: process.pid, startedAt: Date.now(), mode: 'chat', tasks: {}, todos: [], caps: { frameFile: true, inputQueue: true, queueVerbs: CLAUDE_QUEUE_VERBS, queueResync: true }, queue: [] };
+// receipts (lane human-cli r2): this wrapper acks a frame BY ITS ID, writes that ack into the buffer when the frame asks
+// (`webui_receipt` — the person's CLI never stays attached; it reads the buffer) and refuses a TORN line with `_stdin_nack`
+const meta = { pid: process.pid, startedAt: Date.now(), mode: 'chat', tasks: {}, todos: [], caps: { frameFile: true, inputQueue: true, queueVerbs: CLAUDE_QUEUE_VERBS, queueResync: true, receipts: true }, queue: [] };
 let metaTimer = null;
 
 // replaced, never rewritten in place (ci358-reds item 7): a hub read between writeFileSync's truncate and its bytes saw an
@@ -132,6 +134,11 @@ function persistBuffer() {
 
 function schedulePersist() {
   if (!writeTimer) writeTimer = setTimeout(persistBuffer, 2000);
+}
+/** A receipt is waited for (the person's CLI reads the buffer file): the pending persist runs now, not in 2 s. */
+function persistSoon() {
+  if (writeTimer) clearTimeout(writeTimer);
+  writeTimer = setTimeout(persistBuffer, 50);
 }
 
 let child = null;
@@ -676,6 +683,26 @@ for (const sig of Object.keys(WRAPPER_SIGNO)) process.on(sig, () => onWrapperSig
 // Server writes lines via dtach PTY. Each line is either:
 // - A raw JSON object (already formatted as stream-json input) → pass through
 // - Plain text → wrap as {"type":"user","content":"..."}
+// THE ONE PARSE (lane human-cli r2 — two writers on one socket, the hub's bridge and the person's CLI, interleave their
+// frames at dtach's 8-byte packets: measured 11 of 12 trials, and the plain-text branch below sent the shreds to Claude
+// as a billed turn nobody typed). A line that LOOKS LIKE a frame or a piece of one — it starts with `{`, ends with `}`,
+// or holds a `"key":` — and does not parse is NEVER a user message: refused with `_stdin_nack` (+ a warning the chat
+// shows: both senders are told) — the codex and ACP wrappers' rule since 2.360.0. Only a line with no JSON in it is
+// still taken as typed text.
+const looksLikeFrame = (line) => line[0] === '{' || line.endsWith('}') || /"[\w-]+"\s*:/.test(line);
+/** The ack: the pipe is alive (the server's broken-pty detector) AND, for a frame, WHICH frame — `msg_id` = its
+ *  webui_msg_id / request_id. A frame that asked for a receipt gets the same record in the buffer. */
+function ackLine(id, receipt) {
+  const line = JSON.stringify({ type: '_stdin_ack', timestamp: Date.now(), ...(id ? { msg_id: String(id) } : {}) });
+  if (receipt) { buffer += line + '\n'; persistSoon(); }
+  try { process.stdout.write(line + '\n'); } catch {}
+}
+function nackTorn(line) {
+  log(`stdin line unparseable (${line.length} bytes, starts ${JSON.stringify(line.slice(0, 48).replace(/\s+/g, ' '))}) — refused, NOT sent to claude`);
+  record('_stdin_nack', { timestamp: Date.now(), reason: 'torn', bytes: line.length });
+  record('system', { subtype: 'informational', level: 'warning', content: `A message did not reach Claude: its line arrived corrupted (${line.length} bytes, unparseable — two senders at once, or a dropped byte). Please send it again.` });
+  persistSoon();
+}
 let stdinLineBuf = '';
 try {
   if (process.stdin.isTTY) process.stdin.setRawMode(true);
@@ -685,15 +712,25 @@ try {
     stdinLineBuf += data;
     let nlIdx;
     while ((nlIdx = stdinLineBuf.indexOf('\n')) !== -1) {
-      const line = stdinLineBuf.substring(0, nlIdx).replace(/\r/g, '').trim();
+      let line = stdinLineBuf.substring(0, nlIdx).replace(/\r/g, '').trim();
       stdinLineBuf = stdinLineBuf.substring(nlIdx + 1);
       if (!line) continue;
-      // Immediately ack on stdout so the server knows stdin is alive.
-      // This fires before claude processes the message, so it works
-      // even when the model takes 30+ seconds to respond.
-      try { process.stdout.write(JSON.stringify({ type: '_stdin_ack', timestamp: Date.now() }) + '\n'); } catch {}
+      let parsed = null;
+      try { parsed = JSON.parse(line); } catch { parsed = null; }
+      if (!parsed || typeof parsed !== 'object') {
+        if (looksLikeFrame(line)) { nackTorn(line); continue; }
+        ackLine(null, false);
+        // Plain text — wrap as stream-json user message
+        const wrapped = { type: 'user', message: { role: 'user', content: [{ type: 'text', text: line }] } };
+        submitUser(JSON.stringify(wrapped), wrapped);
+        continue;
+      }
+      // Immediately ack on stdout so the server knows stdin is alive — before claude processes the message, so it works
+      // even when the model takes 30+ seconds to respond. A receipt's key is the CLI's ask, never Claude's: stripped.
+      const receipt = parsed.webui_receipt === true;
+      if (receipt) { delete parsed.webui_receipt; line = JSON.stringify(parsed); }
+      ackLine(parsed.webui_msg_id || parsed.request_id || null, receipt);
       try {
-        const parsed = JSON.parse(line);
         // Permission answers (control_response) exist ONLY on this stdin path —
         // the buffer file tees child STDOUT, so without recording them here a
         // server restart rebuilds history as request-without-answer and an
@@ -746,10 +783,8 @@ try {
         // A user frame: forwarded, or HELD while a turn runs (the prompt queue). Anything else passes through as-is.
         if (parsed.type === 'user') { submitUser(line, parsed); continue; }
         sendChild(line);
-      } catch {
-        // Plain text — wrap as stream-json user message
-        const wrapped = { type: 'user', message: { role: 'user', content: [{ type: 'text', text: line }] } };
-        submitUser(JSON.stringify(wrapped), wrapped);
+      } catch (e) {
+        log(`stdin frame not handled (${e && e.message}) — a parsed frame is never re-sent as text`);
       }
     }
   });

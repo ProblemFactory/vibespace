@@ -378,6 +378,20 @@ function createCliCallCopy() {
   } catch (e) { console.warn('[tools] the agent CLIs\' call helper not copied beside them: ' + e.message); }
 }
 createCliCallCopy();
+// lane human-cli: THE PERSON'S CLI (data/bin/vibespace — a human at a terminal, no hub needed) requires its PURE half
+// (src/local-index.js: the index place, the judge, the table, the dtach packet, the chat frames) by the literal name
+// `vibespace-local-index.js` beside it — copied at every boot, gitignored, in AGENT_TOOLS (a paired device or an ssh host
+// answers «no VibeSpace hub has run here» with it). The hub ALSO installs both onto the machine's own disk
+// (src/server/local-index.js installPersonCli): a CLI under data/ hangs with data/.
+function createLocalIndexCopy() {
+  try {
+    const src = fs.readFileSync(path.join(rootDir, 'src', 'local-index.js'));
+    const dst = path.join(AGENT_BIN_DIR, 'vibespace-local-index.js');
+    let cur = null; try { cur = fs.readFileSync(dst); } catch { cur = null; }
+    if (!cur || !cur.equals(src)) { ensureDir(AGENT_BIN_DIR); fs.writeFileSync(dst + '.tmp', src, { mode: 0o644 }); fs.renameSync(dst + '.tmp', dst); }
+  } catch (e) { console.warn('[tools] the person\'s CLI index rules not copied beside it: ' + e.message); }
+}
+createLocalIndexCopy();
 
 // Idempotent, NON-DESTRUCTIVE hook registration for both harnesses: only our
 // own entry (matched by 'vibespace-hook.mjs') is ever added or updated; every

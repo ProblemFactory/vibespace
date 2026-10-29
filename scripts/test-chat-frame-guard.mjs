@@ -100,6 +100,38 @@ const until = async (fn, ms = 5000) => { const end = Date.now() + ms; while (Dat
   const got2 = capLines();
   ok(got2.length === 2 && got2[1] === SENTINEL, 'shredded frame file DROPPED (child got nothing new before the next line)');
   ok(!fs.existsSync(bad), 'shredded file still cleaned up');
+  // ── THE ONE PARSE + RECEIPTS (lane human-cli r2): two writers on one socket (the hub's bridge + the person's CLI) interleave
+  //    at dtach's 8-byte packets — measured 11 of 12 trials through the real hub, and this wrapper's plain-text branch sent
+  //    the shreds to Claude as a billed turn nobody typed. A torn line is refused (`_stdin_nack` + a warning the chat shows);
+  //    an ack names its frame; a frame that asks (`webui_receipt`: the CLI reads this buffer, never the live stream) gets
+  //    its ack in the buffer, the key stripped before Claude sees the frame.
+  let wout = ''; w.stdout.on('data', (d) => { wout += d; });
+  const bufText = () => (fs.existsSync(buf) ? fs.readFileSync(buf, 'utf8') : '');
+  const n0 = capLines().length;
+  const torn = '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"half a fr{"type":"user","mess';
+  const tail = 'ame"}]},"webui_msg_id":"web-7"}';
+  w.stdin.write(torn + '\n' + tail + '\n');
+  await until(() => (bufText().match(/"_stdin_nack"/g) || []).length >= 2);
+  const nacks = bufText().split('\n').filter((l) => /"_stdin_nack"/.test(l)).map((l) => JSON.parse(l));
+  ok(capLines().length === n0 && nacks.length === 2 && nacks.every((x) => x.reason === 'torn' && x.bytes > 0) && (wout.match(/"_stdin_nack"/g) || []).length === 2,
+    `a TORN line — the first half (starts with «{») AND the tail of the other frame (mid-JSON, ends with «}») — is refused with _stdin_nack (stdout + buffer), NEVER sent to Claude as a user message (${capLines().length - n0} new child line(s), ${nacks.length} nack(s))`);
+  const warns = bufText().split('\n').filter((l) => /"subtype":"informational"/.test(l)).map((l) => JSON.parse(l));
+  ok(warns.length === 2 && warns.every((x) => x.type === 'system' && x.level === 'warning' && /did not reach Claude/.test(x.content) && /send it again/.test(x.content)) && !/half a fr/.test(warns.map((x) => x.content).join('')),
+    'both senders are TOLD: each torn line leaves a warning the chat renders (a system/informational record — the normalizer\'s own notice road), never the payload');
+  w.stdin.write('plain words typed into a raw dtach attach\n');
+  await until(() => capLines().length >= n0 + 1);
+  ok(capLines().length === n0 + 1 && /"text":"plain words typed into a raw dtach attach"/.test(capLines()[n0]), 'a line with NO JSON in it is still taken as typed text (the raw-attach door is unchanged)');
+  const rf = { type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'from the person\'s CLI' }] }, webui_msg_id: 'vs-cli-77', webui_receipt: true };
+  w.stdin.write(JSON.stringify(rf) + '\n');
+  await until(() => capLines().length >= n0 + 2 && /"msg_id":"vs-cli-77"/.test(bufText()));
+  const fwd = capLines()[n0 + 1] || '';
+  ok(/"msg_id":"vs-cli-77"/.test(bufText()) && /"type":"_stdin_ack"[^\n]*"msg_id":"vs-cli-77"/.test(wout) && /from the person's CLI/.test(fwd) && !/webui_receipt/.test(fwd) && /"webui_msg_id":"vs-cli-77"/.test(fwd),
+    `a RECEIPT: the ack names the frame (msg_id) on stdout AND in the buffer; Claude gets the frame without the receipt key (${fwd.slice(0, 120)})`);
+  w.stdin.write(JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'from the web' }] }, webui_msg_id: 'web-8' }) + '\n');
+  await until(() => /"msg_id":"web-8"/.test(wout));
+  await sleep(100);   // a persist that would carry it (the receipt road's is 50 ms)
+  ok(/"type":"_stdin_ack"[^\n]*"msg_id":"web-8"/.test(wout) && !bufText().split('\n').some((l) => /"_stdin_ack"/.test(l) && /web-8/.test(l)), 'a frame that asks for no receipt is acked by id on stdout only (the buffer — the replay road — gains no ack record)');
+  try { ok(JSON.parse(fs.readFileSync(meta, 'utf8')).caps.receipts === true, 'the wrapper advertises caps.receipts (the CLI reads it before it asks for one: an older wrapper is said, never waited on)'); } catch (e) { ok(false, 'the wrapper advertises caps.receipts', e.message); }
   w.kill('SIGKILL');
 }
 
@@ -221,6 +253,15 @@ setInterval(() => {}, 1e3);
   let t2 = [];
   for (let i = 0; i < 30 && t2.length < 2; i++) { await sleep(150); t2 = turns(); }
   ok(t2.length === 2 && t2[1].params.input[0]?.text === 'plain follow-up', 'a normal chat-input after the rejections still starts a turn');
+  // lane human-cli r2: the codex wrapper's receipts — its nack beside the task_failed, an ack naming its frame
+  const cxIn = JSON.parse(ad.formatChatInput('from the person\'s CLI CXR', 'vs-cli-cx').stdinPayload);
+  w.stdin.write(JSON.stringify({ ...cxIn, webui_receipt: true }) + '\n');
+  let t3 = [];
+  for (let i = 0; i < 30 && t3.length < 3; i++) { await sleep(150); t3 = turns(); }
+  await until(() => fs.existsSync(buf) && /"msg_id":"vs-cli-cx"/.test(fs.readFileSync(buf, 'utf8')) && /"_stdin_nack"/.test(fs.readFileSync(buf, 'utf8')), 3000);
+  const cxBuf = fs.existsSync(buf) ? fs.readFileSync(buf, 'utf8') : '';
+  ok(/"type":"_stdin_nack"[^\n]*"reason":"torn"/.test(cxBuf) && /"type":"_stdin_ack"[^\n]*"msg_id":"vs-cli-cx"/.test(cxBuf) && /"msg_id":"m-2"/.test(out) && t3.length === 3 && !JSON.stringify(t3[2]).includes('webui_receipt'),
+    'codex: the torn raw line left a _stdin_nack beside its task_failed; an ack names its frame (stdout), a receipt lands in the buffer; the app-server never sees the receipt key');
   w.kill('SIGKILL');
   fs.rmSync(dir, { recursive: true, force: true });
 }
@@ -307,9 +348,10 @@ setInterval(() => {}, 1e3);
   ok(/if \(msg\.type === '_frame_file'\) \{ msg = loadFrameFile\(msg\);/.test(cw), 'codex-chat-wrapper resolves _frame_file pointers on the stdin path (before the ready gate)');
   ok(/if \(!msg \|\| typeof msg !== 'object'\) \{ rejectStdinLine\(line\); continue; \}/.test(cw) && !/const msg = safeJsonParse\(line\);\n\s*if \(!msg\) continue;/.test(cw), 'NEGATIVE: an unparseable stdin line is no longer a silent continue');
   // the ack has a consumer in EVERY stdout consumer module (S5: src/server/stdout/<protocol>.js, one per declared protocol)
-  const ACK_SRC = "if \\(msg\\.type === '_stdin_ack'\\) \\{ session\\._stdinAckReceived = true; continue; \\}";
+  // lane human-cli r2: a torn line's `_stdin_nack` proves the pipe too (and is no record of anyone's) — consumed beside the ack
+  const ACK_SRC = "if \\(msg\\.type === '_stdin_ack' \\|\\| msg\\.type === '_stdin_nack'\\) \\{ session\\._stdinAckReceived = true; continue; \\}";
   const perProto = Object.fromEntries(['claude-stream-json', 'codex-events', 'acp-events'].map((m) => [m, (fs.readFileSync(path.join(REPO, `src/server/stdout/${m}.js`), 'utf8').match(new RegExp(ACK_SRC, 'g')) || []).length]));
-  ok(perProto['claude-stream-json'] === 1 && perProto['codex-events'] === 1 && perProto['acp-events'] === 1, `each stdout consumer (claude-stream-json / codex-events / acp-events) consumes _stdin_ack exactly once (${JSON.stringify(perProto)})`);
+  ok(perProto['claude-stream-json'] === 1 && perProto['codex-events'] === 1 && perProto['acp-events'] === 1, `each stdout consumer (claude-stream-json / codex-events / acp-events) consumes _stdin_ack (and a torn line's _stdin_nack) exactly once (${JSON.stringify(perProto)})`);
   ok(!new RegExp(ACK_SRC).test(fs.readFileSync(path.join(REPO, 'src/server/session-stdout.js'), 'utf8')), 'session-stdout itself parses no records since S5 (registry dispatch only) — the codex wrapper ack lands in stdout/codex-events.js, not a dead emit');
   fs.rmSync(bufs, { recursive: true, force: true }); fs.rmSync(metaDir, { recursive: true, force: true });
 }

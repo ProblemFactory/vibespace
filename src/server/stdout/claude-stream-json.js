@@ -513,7 +513,7 @@ function create({ activeSessions, engine, CLAUDE_STREAM_TYPES, _seenStreamTypes,
             global.__vsEvent?.('cli-unknown-stream-type', String(msg.type).slice(0, 60));
             console.log(`[claude] new stream record type from the CLI: ${msg.type} (unhandled — see Diagnostics)`);
           }
-          if (msg.type === '_stdin_ack') { session._stdinAckReceived = true; continue; }
+          if (msg.type === '_stdin_ack' || msg.type === '_stdin_nack') { session._stdinAckReceived = true; continue; }   // a nack (a torn line, lane human-cli r2) proves the pipe too; its warning rides a system/informational record
           // Remote transport state from the chat-wrapper (2.125.0): the ssh
           // pipe died and the wrapper is reconnecting to the host-side keeper
           // (the REMOTE session is fine). Surfaced as a status-bar chip; the
