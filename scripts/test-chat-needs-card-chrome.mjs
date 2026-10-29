@@ -1120,8 +1120,39 @@ try {
     const f1 = await A.evalJs(FOLD);
     await A.shot('desktop-1280-r2-folded-door.png');
     check(`#4 (RED on 9de5c902: «card» returned, the record display:none, the list run to scrollTop 0) the For-you door of the ANSWERED q83 (its record folded in a closed run) opens the run and lands on it — its quiet record visible, in view (records ${f1.ws}–${f1.we}, scrollTop ${f1.st})`, f1.card && /cn-done/.test(f1.cls) && f1.rects > 0 && !f1.hostFolded && f1.hostDisplay !== 'none' && f1.inView, f1);
-  } catch (e) { fail++; console.log('  ✗ ⑭ threw: ' + (e?.message || e)); }
-  lap('⑭ done');
+    // ── ⑮ THE TAIL, ROUND 3 (lane needs-card-tail r3 — the r2 delta verdict on ed660f19: the tail road's jumpToBottom took no
+    // `stale` — an older landing's tail fetch replaced the window a newer landing, or the reader's own wheel, had just made).
+    // q84 is filed with no record (no record names it, its createdAt set before the first record — this page's copy, as R5
+    // (b)) ⇒ its landing reads up to record 0 (−1) and takes the TAIL road; the tail page made slow (2.5 s)
+    console.log('⑮ THE TAIL r3 — the tail road obeys the displacement law: an older landing\'s slow tail fetch never replaces the window a newer press (or the reader\'s wheel) made');
+    sayTo(sid, 'an ask do:h84');
+    const q84 = (await byText(/^Stress question 84:/, 1))[0];
+    const firstTs15 = Number((((await page(0, 1)).messages || [])[0] || {}).ts) || 0;
+    const shifted15 = !!q84 && await A.evalJs(`(() => { const m = app._inboxModel, d = Object.getOwnPropertyDescriptor(m, 'todos'); window.__todos15 = d; const get = d.get, id = ${J(q84 ? q84.id : '')}, at = ${firstTs15} - 3600e3;
+      Object.defineProperty(m, 'todos', { configurable: true, get() { const t = get.call(m); for (const i of t.open || []) if (i.id === id) i.createdAt = at; return t; } }); ${VIEW}._needsCards.schedule(); return !!m.todos.open.find((i) => i.id === id && i.createdAt === at); })()`);
+    const t0 = await choose(ids[1], 82); // q82 on screen: a window loaded mid-history
+    // the TAIL page slowed (2.5 s — the read's pages go through the same fetch and stay quick); every landing's road and result written down (the precondition: press 1 TOOK the tail road)
+    const SLOW = (on) => A.evalJs(`(() => { const v = ${VIEW}, nc = v._needsCards; if (${on}) { v.__slowPage = v._fetchMessagePage; v._fetchMessagePage = (o, l) => { if (o + l < v._total) return v.__slowPage.call(v, o, l); window.__roads15.push('tailPage(' + o + ')'); return new Promise((r) => setTimeout(r, 2500)).then(() => v.__slowPage.call(v, o, l)); }; window.__roads15 = []; nc.__land = nc.land; nc.land = (x, o) => { const id = typeof x === 'string' ? x : x && x.id; window.__roads15.push('land:' + id); return nc.__land.call(nc, x, o).then((r) => { window.__roads15.push('landed:' + id + '=' + r); return r; }); }; } else { if (v.__slowPage) { v._fetchMessagePage = v.__slowPage; delete v.__slowPage; } if (nc.__land) { nc.land = nc.__land; delete nc.__land; } } return 1; })()`);
+    const roads15 = () => A.evalJs('(window.__roads15 || []).slice()');
+    await SLOW(true);
+    await pick(q84.id); await sleep(700);     // press 1: its read up to −1 is done, its tail page out (2.5 s)
+    await pick(ids[1]); await sleep(4200);    // press 2, the person's latest choice: q82, on screen — then the tail page returns
+    const t1 = await A.evalJs(ST(ids[1])), ro1 = await roads15();
+    await A.shot('desktop-1280-r3-tail-race.png');
+    check(`#1 precondition: press 1 (q84, no record) TOOK the tail road — its tail page was out when press 2 landed q82 (${ro1.join(' → ')})`, shifted15 && ro1[0] === 'land:' + q84.id && ro1.some((r) => /^tailPage\(/.test(r)) && ro1.indexOf('land:' + ids[1]) > ro1.findIndex((r) => /^tailPage\(/.test(r)), ro1);
+    check(`#1 (RED on ed660f19: the slow tail page came back and rebuilt the window at the live end — q82 gone, pinned) the LATEST press stands: q82 in view in the window it was landed in (records ${t1.ws}–${t1.we} of ${t1.total}); the older landing's tail read finished and replaced nothing`, shifted15 && t0.card && t1.card && t1.inView && /question 82/.test(t1.cmd) && t1.ws === t0.ws && t1.we < t1.total, { t0, t1, roads: ro1 });
+    // …the reader's own wheel while a landing's tail page is out (from a window mid-history again: q82 landed first)
+    const t0b = await choose(ids[1], 82);
+    await pick(q84.id); await sleep(700);
+    await wheel(2, 240);                      // (wheel() waits 2.5 s after its notches: the tail page is back)
+    await sleep(1500);
+    const t2 = await A.evalJs(DOMQ), ro2 = (await roads15()).slice(ro1.length);
+    await A.shot('desktop-1280-r3-tail-wheel.png');
+    check(`#1 (RED on ed660f19: yanked to the live end, pinned) the reader's wheel while the tail page is out ⇒ the page's result is dropped: the window stays mid-history (records ${t2.ws}–${t2.we} of ${t2.total}), not pinned (${ro2.join(' → ')})`, t0b.card && t0b.we < t0b.total && ro2.some((r) => /^tailPage\(/.test(r)) && t2.we < t2.total && !t2.pinned, { t0b, t2, roads: ro2 });
+    await SLOW(false);
+    await A.evalJs(`(() => { const m = app._inboxModel; if (window.__todos15) { Object.defineProperty(m, 'todos', window.__todos15); delete window.__todos15; } ${VIEW}._needsCards.schedule(); return 1; })()`);
+  } catch (e) { fail++; console.log('  ✗ ⑭/⑮ threw: ' + (e?.message || e)); }
+  lap('⑭ ⑮ done');
 
   check('the shots are written (desktop 1280 + phone 375)', ['desktop-1280-watch-request.png', 'desktop-1280-ask-chips.png', 'desktop-1280-resolved.png', 'phone-375-watch-request.png', 'phone-375-ask-chips.png', 'phone-375-resolved.png', 'phone-375-accordion.png', 'phone-375-accordion-opened.png', 'desktop-1280-accordion.png'].every((f) => fs.existsSync(path.join(SHOTS, f))));
   check('no page error', pageErrors.length === 0, pageErrors.slice(0, 5));

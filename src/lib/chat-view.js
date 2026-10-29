@@ -3316,9 +3316,22 @@ class ChatView {
       el.remove();
     };
     let anchored = null;
+    // THE WINDOW'S RECORDS ARE THE WINDOW (lane needs-card-tail r3): a record drawn as nothing has no element to drop, so the
+    // record list is cut where the elements were (display order) — none lingers from the trimmed range (an unknown-record
+    // notice left past the window's end put every ask filed below it on the window's last record) — and the bounds move by
+    // the records cut (by the elements alone they claimed a record the window no longer holds: a hole the next page skipped)
+    const cut = () => {
+      const ms = Array.isArray(this._messages) ? this._messages : [];
+      const ks = []; ms.forEach((m, k) => { if (m && removedIds.has(m.id)) ks.push(k); });
+      if (!ks.length) return n;
+      const held = (m) => !!m && !removedIds.has(m.id) && this._elements.has(m.id); // past the cut and still drawn: kept
+      const kept = side === 'bottom' ? [...ms.slice(0, ks[0]), ...ms.slice(ks[0]).filter(held)] : [...ms.slice(0, ks[ks.length - 1] + 1).filter(held), ...ms.slice(ks[ks.length - 1] + 1)];
+      this._messages = kept;
+      return Math.max(n, ms.length - kept.length);
+    };
     if (side === 'bottom') {
       for (let i = els.length - 1; i >= els.length - n; i--) drop(els[i]);
-      this._windowEnd -= n;
+      this._windowEnd -= cut();
       this._setPinned(false, 'trimBottom'); // the rendered window no longer ends at the live tail (reached only unpinned: a pinned _extendTop never trims — trimSkipPinned)
     } else {
       // Element-anchored ABSOLUTE restore (2.229.1, forensics-confirmed): the
@@ -3335,9 +3348,8 @@ class ChatView {
       // the same anchored section, so the viewport does not move.
       const leavesZero = !this._teleported && this._windowStart === 0;
       anchored = this._withViewportAnchor(() => { for (let i = 0; i < n; i++) drop(els[i]); if (leavesZero) this._dropGapSlab('trimTop', zone); });
-      this._windowStart += n;
+      this._windowStart += cut();
     }
-    if (removedIds.size) this._messages = this._messages.filter(m => !removedIds.has(m.id));
     // DECISION INPUTS (inc-mubvu3a4-x8sb): the height the trim read, what it
     // left behind, the viewport and the zone — `removed` alone could not show
     // a trim eating the landing the grow loop had just made.
@@ -3739,7 +3751,11 @@ class ChatView {
   // Jump to the bottom of the conversation. `user:false` = the resume re-tail
   // calling it on the reader's behalf — it must not stamp a navigation (that
   // would cancel its own bounded series and the unpin gate's evidence).
-  async jumpToBottom({ user = true } = {}) {
+  // `land` / `stale` (lane needs-card-tail r3 — EVERY road a landing takes obeys the displacement law: an older landing's
+  // tail fetch replaced the window a newer landing, or the reader's own wheel, had just made): `stale` is asked once the
+  // tail is read, BEFORE the window is replaced — true ⇒ nothing is replaced (the held live ops apply to the window that
+  // stays); `land` is called once the tail is the view — truthy ⇒ it landed (the needs cards' landing), else the bottom
+  async jumpToBottom({ user = true, land = null, stale = null } = {}) {
     if (user) this._noteUserNav('jumpToBottom');
     const windowSize = 50;
     const known = Number.isFinite(this._total) ? this._total : 0;
@@ -3779,6 +3795,7 @@ class ChatView {
     }
     catch (e) {
       if (call !== this._tailCall) return;   // a newer tail call answers for the view
+      if (stale && stale()) { this._releaseTailHold(hold); return; } // a stale landing's failure is nobody's to say
       this._showHistoryStatus(t('Couldn\'t load the latest messages'), {
         kind: 'error', retry: () => this.jumpToBottom(),
       });
@@ -3786,6 +3803,7 @@ class ChatView {
       return;
     } finally { endLoad(); }
     if (call !== this._tailCall) { this._trace('tailStale', { call, newest: this._tailCall }); return; } // verify r1: superseded
+    if (stale && stale()) { this._trace('jumpToBottom:stale', { start }); this._releaseTailHold(hold); return; } // a newer press / the reader's own move came first: the window stays
 
     this._messageList.querySelectorAll('.chat-msg, .chat-msg-system').forEach(el => el.remove());
     this._resetGapAfterJump();
@@ -3804,6 +3822,7 @@ class ChatView {
     this._setPinned(true, 'jumpToBottom');
     this._releaseTailHold(hold);   // pinned at the tail now: the held echo renders below the slab
     if (this._search?.hasHighlight) this._search.applyHighlightLayer();
+    if (land && land()) return;    // a landing landed at the tail (it scrolled and unpinned itself)
 
     // Temporarily disable content-visibility so the browser computes real heights
     // for all elements, then scroll to bottom, then re-enable
@@ -5547,7 +5566,9 @@ class ChatView {
     if (!el || !el.isConnected) return false;
     const run = this._runs?.find((r) => !r.open && r.members?.includes(el));
     if (run) this._setRunOpen(run, true);
-    return el.getClientRects().length > 0;
+    const drawn = el.getClientRects().length > 0;
+    if (run && !drawn) this._setRunOpen(run, false); // r3: a failed show leaves no mark — a run opened for nothing closes again
+    return drawn;
   }
 
   /** THE WAITING CHIP's click (lane S1): go to the ask the user must answer — the first one, or

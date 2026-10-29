@@ -107,6 +107,8 @@ export class NeedsCards {
     this._dockNoRecord = false; // …and that landing's read reached the conversation's first record: it has none (judged per landing, r2)
     this._landGen = 0;      // THE DISPLACEMENT LAW (r2): the newest landing's generation — an older one never moves the reader
     this._placeSig = '';    // what the last pass placed where — a pass that moves no card reads no layout
+    this._filed = new Map(); // what a landing's read PROVED: an ask → the record that filed it (r3 — a fact of the transcript,
+                             // kept while the ask is listed; «no record» never is)
   }
 
   /** The loaded records in DISPLAY order, lean (the view's ordered accessor — _messages' insertion order put an older page's
@@ -271,6 +273,7 @@ export class NeedsCards {
     // hour, was never patched or removed again): a card whose reply box is in use is drawn from the snapshot's copy (a clear
     // rewrites it there), else from the copy it last drew; once the box is left, the normal removal applies
     const listed = new Set([...open, ...done].map((e) => e.item.id));
+    for (const id of this._filed?.keys() || []) if (!listed.has(id)) this._filed.delete(id);
     for (const c of view._messageList.querySelectorAll(':scope > * > .cn-cards > .cn-card')) {
       if (listed.has(c.dataset.item) || !c._item || !boxInUse(c.querySelector('.ut-reply'))) continue;
       done.push({ item: todos.resolved.find((i) => i.id === c.dataset.item) || todos.open.find((i) => i.id === c.dataset.item) || c._item, kind: c.dataset.kind || 'check' });
@@ -283,6 +286,7 @@ export class NeedsCards {
       view._statusBar?.setNeeds?.(null);
       this._seen.clear(); // nothing waits: whatever is filed next is a filing
       this._placeSig = '';
+      this._filed?.clear();
       if (this._openIds) { this._openIds = ''; try { view._updateRuns?.(); } catch { } }
       this._keepReader(keep);
       return 0;
@@ -297,7 +301,7 @@ export class NeedsCards {
     // the newest message): a card whose record is on screen stands there; of the rest at most ONE docks at the END (the
     // person's pick, else the newest) and only in a window that reaches the live end; every one is in the chip
     const atEnd = !view._teleported && !(view._windowEnd < view._total);
-    const plan = tailPlan(open, transcript, { rendered: drawn, atEnd, pick: this._dockPick });
+    const plan = tailPlan(open, transcript, { rendered: drawn, atEnd, pick: this._dockPick, known: this._filed });
     if (this._dockPick != null && !plan.loose.includes(this._dockPick)) { this._dockPick = null; this._dockNoRecord = false; } // the pick answered, or its record on screen: the newest docks again
     // THE ACCORDION: the open slot moves on a FILING only — an id this view has not seen waiting (the newest of them; a
     // view's first pass sees every one as new); a resolution never moves it (round 3, #3)
@@ -310,7 +314,7 @@ export class NeedsCards {
     const want = new Map(); // anchor element → [{item, kind, resolved, dock}]
     for (const e of [...open.map((x) => ({ ...x, resolved: false, fold: x.item.id !== openSlot })), ...done.map((x) => ({ ...x, resolved: true }))]) {
       let el = null;
-      if (e.resolved) { const p = placementOf(e.item, transcript, { resolved: true, more: !atEnd }); const at = drawnAt(transcript, p.at, drawn); el = at != null ? view._elements.get(at) : null; }
+      if (e.resolved) { const p = placementOf(e.item, transcript, { resolved: true, more: !atEnd }); const at = drawnAt(transcript, p.at != null ? p.at : this._knownAt(e.item.id, transcript), drawn); el = at != null ? view._elements.get(at) : null; }
       else if (plan.at.has(e.item.id)) el = view._elements.get(plan.at.get(e.item.id));
       else if (plan.dock === e.item.id && lastId != null) {
         el = view._elements.get(lastId);
@@ -384,6 +388,12 @@ export class NeedsCards {
       if (r.bottom > top) return { el, top: r.top };
     }
     return null;
+  }
+
+  /** The record a landing's read proved filed `id`, when it is loaded (r3) → its id | null. */
+  _knownAt(id, rows) {
+    const rec = this._filed?.get(id);
+    return rec != null && rows.some((r) => r && r.id === rec) ? rec : null;
   }
 
   /** Is the record `id` on screen (its element in this list)? */
@@ -595,7 +605,13 @@ export class NeedsCards {
    *  THE DISPLACEMENT LAW (r2 — a slow read upward finished after a newer press and dragged the view to the stale target):
    *  every landing carries a generation; a newer landing, the reader's own move (a wheel, a key, a drag, the minimap, a
    *  search, a jump) or the view's dispose cancels it — its read may finish, its jump never fires. `since` = a door's press
-   *  time: a move made while its window opened cancels it the same way. → 'card' | 'record' | 'dock' | 'end' | null */
+   *  time: a move made while its window opened cancels it the same way. EVERY ROAD obeys it (r3 — the tail road's
+   *  jumpToBottom took no `stale`: an older press's tail fetch replaced the window a newer press had landed in): both jumps
+   *  take `{land, stale}` and ask `stale` before the window is replaced; every await is followed by the same guard.
+   *  A RECORD THE READ FINDS IN THE WINDOW IS A HIT (r3 — a window ending inside the skew margin of the filing could not
+   *  place the card alone; the read past it proved the record, and the landing said «not drawn» and took the tail): the card
+   *  stands at that record (`_filed`). A FAILED SHOW LEAVES NO MARK (r3): a target with no box is said («the record is not
+   *  drawn»), the reader left where they are, the pin kept. → 'card' | 'record' | 'dock' | 'end' | null */
   async land(x, { since = null } = {}) {
     const view = this.view;
     if (view._disposed || !view._messageList) return null;
@@ -612,55 +628,72 @@ export class NeedsCards {
     const keys = this.keys() || [];
     const isCard = item.status === 'open' && needsOf([item], keys).length > 0;
     if (isCard) this._slot = item.id; // the accordion: the landed one is THE open card
-    // ① / ② what is loaded — a record drawn as nothing stands for the nearest drawn record after it (r2)
+    let missed = false; // a target found with no box (r3: said once, nothing moved)
+    const show = (el) => { if (this._show(el)) return true; if (el && el.isConnected) missed = true; return false; };
+    const said = () => { showToast(t('The record that filed it is not drawn in this chat'), { type: 'info' }); return null; };
+    // ① / ② what is loaded — a record drawn as nothing stands for the nearest drawn record after it (r2); the record a read
+    //   proved stands for itself (r3)
     const here = () => {
       this.render({ hold: true });
       const card = this._cardOf(item.id);
-      if (card && !card.classList.contains('cn-docked')) return this._show(card) ? 'card' : null;
+      if (card && !card.classList.contains('cn-docked')) return show(card) ? 'card' : null;
       const rows = this._records();
       const atEnd = !view._teleported && !(view._windowEnd < view._total);
       const p = placementOf(item, rows, { resolved: true, more: !atEnd });
-      const at = drawnAt(rows, p.at, (rid) => this._onScreen(rid));
-      return at != null && this._show(view._elements.get(at)) ? 'record' : null;
+      const at = drawnAt(rows, p.at != null ? p.at : this._knownAt(item.id, rows), (rid) => this._onScreen(rid));
+      return at != null && show(view._elements.get(at)) ? 'record' : null;
     };
     const now = here();
     if (now) return now;
+    if (missed) return said();
     // a seek slab has no index space: the live end first
     if (view._teleported && typeof view.jumpToBottom === 'function') {
-      await ours(view.jumpToBottom());
+      let landed = null;
+      await ours(view.jumpToBottom({ land: () => !gone() && !!(landed = here()), stale: gone }));
+      if (landed) return landed;
       if (gone()) return null;
-      const t2 = here();
-      if (t2) return t2;
+      if (missed) return said();
     }
     // ③ its record outside what is loaded: the history read TOWARD it — up or down (r2: only upward, and an ask filed BELOW
     //   a window loaded mid-history was called «no record») — and the window loaded there (jumpToIndex, S1's road)
     let idx = null;
     if (view._canPaginate !== false && typeof view.jumpToIndex === 'function') {
-      idx = await this._anchorIndex(item);
+      let rec = null;
+      idx = await this._anchorIndex(item, (r) => { rec = r; });
       if (gone()) return null;
-      const inWindow = idx != null && idx >= (view._windowStart || 0) && idx < (view._windowEnd || 0);
-      if (idx != null && idx >= 0 && !inWindow) {
+      if (rec && idx >= 0) (this._filed || (this._filed = new Map())).set(item.id, rec.id);
+      if (rec && this._records().some((r) => r.id === rec.id)) { // in the window: a hit, never «not drawn» (r3)
+        const t2 = here();
+        if (t2) return t2;
+        if (missed) return said();
+      } else if (idx != null && idx >= 0) {
         let landed = null;
         await ours(view.jumpToIndex(idx, { land: () => { if (!gone()) landed = here(); }, stale: gone }));
         if (landed) return landed;
         if (gone()) return null;
-      } else if (inWindow) showToast(t('The record that filed it is not drawn in this chat'), { type: 'info' }); // loaded, drawn as nothing (r2)
+        if (missed) return said();
+      }
     }
-    // ④ no record (−1: filed before the conversation's first record — a fact of THIS read), or not drawn, or unknown: an
-    //   open card takes the dock at the END (the live end loaded first) and its dock line says which; anything else, the end
-    if (view._teleported || view._windowEnd < view._total) {
-      await ours(view.jumpToBottom?.());
-      if (gone()) return null;
+    // ④ no record (−1: filed before the conversation's first record — a fact of THIS read), or unknown: an open card takes
+    //   the dock at the END (the live end loaded first) and its dock line says which; anything else, the end
+    const tail = () => {
       const t3 = here();
-      if (t3) return t3;
-    }
-    if (isCard) {
+      if (t3 || !isCard || missed) return t3;
       this._dockPick = item.id;
       this._dockNoRecord = idx === -1;
       this.render({ hold: true });
       const card = this._cardOf(item.id);
-      if (card) return this._show(card) ? 'dock' : null;
+      return card && show(card) ? 'dock' : null;
+    };
+    let tried = false;
+    if (view._teleported || view._windowEnd < view._total) {
+      let landed = null;
+      await ours(view.jumpToBottom?.({ land: () => { if (gone()) return false; tried = true; landed = tail(); return !!landed; }, stale: gone }));
+      if (landed) return landed;
+      if (gone()) return null;
     }
+    if (!tried) { const t4 = tail(); if (t4) return t4; }
+    if (missed) return said();
     view._scrollToBottom?.();
     return 'end';
   }
@@ -669,14 +702,17 @@ export class NeedsCards {
   _show(el) {
     const view = this.view;
     if (!el || !el.isConnected) return false;
+    const host = el.closest('.chat-msg');
+    // A LANDING UNFOLDS WHAT IT LANDS ON (r2 — a resolved ask's record sat in a closed run, display:none, and the list ran to
+    // scrollTop 0): the run that holds it opened; a target with no box is never landed on — and A FAILED SHOW LEAVES NO MARK
+    // (r3 — it stamped the view's navigation and unpinned before this check: the landing's own gone() read the stamp as the
+    // reader's move, said nothing, docked nothing, and a pinned reader stopped following the tail): the press is stamped and
+    // the pin let go only for a show that lands
+    if (host && !host.getClientRects().length) view.revealRecord?.(host);
+    if (!el.getClientRects().length) return false;
     if (el.classList.contains('cn-fold')) { this._slot = el.dataset.item; this.render({ hold: true }); } // the landed card takes the open slot (the accordion; the card is patched in place)
     view._noteUserNav?.('jumpToAsk');
     view._setPinned(false, 'jumpToAsk');
-    const host = el.closest('.chat-msg');
-    // A LANDING UNFOLDS WHAT IT LANDS ON (r2 — a resolved ask's record sat in a closed run, display:none, and the list ran to
-    // scrollTop 0): the run that holds it opened; a target with no box is never landed on
-    if (host && !host.getClientRects().length) view.revealRecord?.(host);
-    if (!el.getClientRects().length) return false;
     if (host) host.style.contentVisibility = 'visible';
     view._scrollElStable ? view._scrollElStable(el, { fit: true }) : el.scrollIntoView({ block: 'center' });
     el.classList.remove('chat-ask-flash'); void el.offsetWidth; el.classList.add('chat-ask-flash');
@@ -686,8 +722,9 @@ export class NeedsCards {
 
   /** THE LANDING's read: the history outside the loaded window, toward the filing — up or down — through the view's own page
    *  read (the road its paging takes) → the server index of the record that filed `item`, -1 = none (the conversation's
-   *  first record is after it), null = unknown (PURE filingIndex). */
-  _anchorIndex(item) {
+   *  first record is after it), null = unknown (PURE filingIndex); `onHit(row)` = the record it names (r3: a hit inside the
+   *  window lands there by its id). */
+  _anchorIndex(item, onHit = null) {
     const view = this.view;
     if (typeof view._fetchMessages !== 'function') return Promise.resolve(null);
     const readPage = async (offset, limit) => {
@@ -696,6 +733,6 @@ export class NeedsCards {
       return (msgs || []).map(leanRecord);
     };
     const start = view._windowStart || 0;
-    return filingIndex(item, readPage, { start, end: Number.isFinite(view._windowEnd) ? view._windowEnd : null, total: Number.isFinite(view._total) ? view._total : null, rows: this._records() });
+    return filingIndex(item, readPage, { start, end: Number.isFinite(view._windowEnd) ? view._windowEnd : null, total: Number.isFinite(view._total) ? view._total : null, rows: this._records(), onHit });
   }
 }

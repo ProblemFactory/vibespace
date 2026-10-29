@@ -314,7 +314,7 @@ ok('every off-list navigation surface stamps: minimap (index + time), search rev
   && /onNav: \(\) => this\._noteUserNav\('search-reveal'\)/.test(cv)
   && /_landOnHeader\(run\) \{[\s\S]{0,400}this\._noteUserNav\('runBar'\);/.test(cv)
   && /async jumpToIndex\(targetIdx(?:, \{ land = null(?:, stale = null)? \} = \{\})?\) \{\s*this\._noteUserNav\('jumpToIndex'\);/.test(cv) // (lane needs-card-tail: its optional `land` — the needs cards' landing — and r2's `stale` never move the stamp off the first line)
-  && /async jumpToBottom\(\{ user = true \} = \{\}\) \{\s*if \(user\) this\._noteUserNav\('jumpToBottom'\);/.test(cv));
+  && /async jumpToBottom\(\{ user = true(?:, land = null, stale = null)? \} = \{\}\) \{\s*if \(user\) this\._noteUserNav\('jumpToBottom'\);/.test(cv)); // (lane needs-card-tail r3: the landing's `land` / `stale` never move the stamp off the first line)
 {
   const sch = fs.readFileSync(path.join(REPO, 'src/lib/chat-search.js'), 'utf8');
   ok('…and ChatSearch actually calls it on a REVEAL (the reveal scrolls the list from outside its own listeners)',
@@ -739,6 +739,32 @@ ok('desktop _showWin resumes the ChatView (the resume settle is armed from there
     const list = fakeList({ st: 0, cards });
     const v = mkView(list);
     ok('a window at the soft target (150 cards, 60,000 px) is not trimmed', v._trimBottom() === 0 && v._trimTop() === 0 && ids(list).length === 150);
+  }
+  // ⑤b THE WINDOW'S RECORDS ARE THE WINDOW (lane needs-card-tail r3 — the r2 delta verdict's stale-tail.mjs): a record drawn
+  //    as nothing (an unknown-record notice: in _messages, no element) inside the trimmed range lingered in loadedRecords()
+  //    past the window's end, and the bounds moved by the elements alone (a record the window no longer holds was claimed).
+  //    The tall window of ② with three element-less records: n100 (kept), n250 and n399 (trimmed at the bottom), and at the
+  //    top n100 (trimmed) and n250 (kept).
+  {
+    const mk = () => {
+      const cards = []; for (let i = 0; i < 400; i++) cards.push({ id: 'c' + i, h: 100 });
+      const list = fakeList({ st: 20000, cards });
+      const recs = []; for (let i = 0; i < 400; i++) { recs.push({ id: 'c' + i }); if (i === 100 || i === 250 || i === 399) recs.push({ id: 'n' + i }); }
+      const v = mkView(list, { _messages: recs, _windowStart: 1000, _windowEnd: 1403 });
+      for (const el of list.children) v._elements.set(el.dataset.msgId, el);
+      return { list, v };
+    };
+    const want = (from, to, nothing) => { const out = []; for (let i = from; i < to; i++) { out.push('c' + i); if (nothing.includes(i)) out.push('n' + i); } return out; };
+    { const { list, v } = mk();
+      const removed = v._trimBottom();
+      const got = v.loadedRecords().map((m) => m.id);
+      ok(`RED-able (ed660f19: n250 and n399 lingered past the window's end, windowEnd 1219): a bottom trim (${removed} cards) cuts the record list where it cut the elements — loadedRecords() is exactly the window's records (c0…c215 + n100), and windowEnd moves by the records cut (1403 → 1217)`,
+        removed === 184 && JSON.stringify(got) === JSON.stringify(want(0, 216, [100])) && v._windowEnd === 1217 && ids(list).length === 216, JSON.stringify({ removed, n: got.length, tail: got.slice(-3), we: v._windowEnd })); }
+    { const { list, v } = mk();
+      const removed = v._trimTop();
+      const got = v.loadedRecords().map((m) => m.id);
+      ok(`RED-able (ed660f19: n100 lingered at the window's top, windowStart 1192): a top trim (${removed} cards) the same — loadedRecords() is c192…c399 + n250 + n399, and windowStart moves by the records cut (1000 → 1193)`,
+        removed === 192 && JSON.stringify(got) === JSON.stringify(want(192, 400, [250, 399])) && v._windowStart === 1193 && ids(list)[0] === 'c192', JSON.stringify({ removed, n: got.length, head: got.slice(0, 2), ws: v._windowStart })); }
   }
   // ⑥ THE PIN PREDICATE: the DOM edge is not the tail.
   {

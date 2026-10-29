@@ -223,6 +223,8 @@ function placementOf(item, transcript, { resolved = false, more = false } = {}) 
  *    `rendered`   (record id) → is that record on screen (the chat's element for it, in its list)
  *    `atEnd`      the loaded window reaches the conversation's live end (false = a window loaded mid-history)
  *    `pick`       the ask the person landed at the end (a chip row whose ask has no record) — it keeps the dock
+ *    `known`      Map(item id → record id): the record a landing's read PROVED filed it (r3 — a window ending inside the skew
+ *                 margin of the filing cannot place it alone; the read past it did) — used when placementOf says 'end'
  *  → { at: Map(item id → record id) — a card whose record IS on screen stands there, unchanged;
  *      dock: item id | null — at most ONE of the rest docks at the end: the person's pick, else the NEWEST of them (the next
  *            newest takes it when that one is answered); none in a window that ends mid-history (its end is not the chat's);
@@ -230,13 +232,15 @@ function placementOf(item, transcript, { resolved = false, more = false } = {}) 
  *      loose: the ids with no record on screen }
  *  The base's rule (an open card's fallback is the end) is one docked card per loose id; scripts/test-conversation-needs.mjs
  *  ⑩ runs the owner's six (RED copy: that rule ⇒ six cards at the end). */
-function tailPlan(open, transcript, { rendered = () => true, atEnd = true, pick = null } = {}) {
+function tailPlan(open, transcript, { rendered = () => true, atEnd = true, pick = null, known = null } = {}) {
   const list = Array.isArray(open) ? open.filter((e) => e && e.item) : [];
   const rows = Array.isArray(transcript) ? transcript : [];
   const at = new Map(), loose = [];
   for (const e of list) {
     const p = placementOf(e.item, rows, { more: !atEnd });
-    const el = p.how !== 'end' && p.at != null ? drawnAt(rows, p.at, rendered) : null;
+    const proved = known && typeof known.get === 'function' ? known.get(e.item.id) : null;
+    const rec = p.how !== 'end' && p.at != null ? p.at : proved != null && rows.some((r) => r && r.id === proved) ? proved : null;
+    const el = rec != null ? drawnAt(rows, rec, rendered) : null;
     if (el != null) at.set(e.item.id, el);
     else loose.push(e);
   }
@@ -271,15 +275,16 @@ const tsOf = (r) => Number(r && r.ts) || 0;
  *       skew margin is not the filing's: the page above is read too — round 2, a record opening a page made a −1).
  *  → the index of the record that filed it (placementOf over what was read + the records around it); −1 = NO RECORD, a fact
  *  only when the conversation's first record is read and lies after the filing (filed before what its record holds); null =
- *  unknown (a page failed, more than `pages` pages, or nothing read lies past the filing) — never claimed «no record». */
-async function filingIndex(item, readPage, { start = 0, end = null, total = null, rows = null, after = [], page = 200, pages = 60 } = {}) {
+ *  unknown (a page failed, more than `pages` pages, or nothing read lies past the filing) — never claimed «no record».
+ *  `onHit(row)` is told the record the index names (r3: the landing lands on a hit inside its window by the record's id). */
+async function filingIndex(item, readPage, { start = 0, end = null, total = null, rows = null, after = [], page = 200, pages = 60, onHit = null } = {}) {
   const at = tsOf(item && { ts: item.createdAt });
   if (!at || typeof readPage !== 'function') return null;
   const win = Array.isArray(rows) ? rows.filter((r) => r && r.id != null) : Array.isArray(after) ? after.slice(0, 40) : [];
   const s0 = Math.max(0, Number(start) || 0), e0 = end == null ? s0 + win.length : Math.max(s0, Number(end) || 0);
   const t0 = total == null ? e0 : Math.max(e0, Number(total) || 0);
   const past = (list) => list.some((r) => tsOf(r) > at + SKEW_MS);
-  const hit = (seg, base, more) => { const p = placementOf(item, seg, { resolved: true, more }); const k = p.at != null ? seg.findIndex((r) => r && r.id === p.at) : -1; return k < 0 ? null : base + k; };
+  const hit = (seg, base, more) => { const p = placementOf(item, seg, { resolved: true, more }); const k = p.at != null ? seg.findIndex((r) => r && r.id === p.at) : -1; if (k < 0) return null; if (typeof onHit === 'function') onHit(seg[k]); return base + k; };
   // the window itself (a record drawn as nothing is still a record: its index is known)
   if (Array.isArray(rows)) { const k = hit(win, s0, e0 < t0); if (k != null) return k; }
   // DOWN: the filing lies after what is loaded
