@@ -226,7 +226,10 @@ const base = { adapterId: 'a', convId: 'c', vendorId: 'v1', at: 1700000000000, t
       'helper-sha256', 'sudoers-sha256',
       // browser engine plugin (2.369.356, lane engine-plugin — classified by lane browser-surfaces, the int356 pick after it):
       // `<dataDir>/plugins-state/<id>/kernel/<platform-arch>/chrome` — the kernel's place in src/server/browser-engines.js's comment.
-      'platform-arch']);
+      'platform-arch',
+      // the vault run reader (lane vault-agent-own r7, classified by int361): gh's usage placeholder `issue transfer <issue> <destination-repo>`
+      // — named in src/vault-run.js's repo-spec comment and test-vault-run-model's round-7 leg comment.
+      'destination-repo']);
     const seen = new Map();
     for (const f of files) {
       let txt; try { txt = fsx.readFileSync(path.join(REPO, f), 'utf-8'); } catch { continue; }
