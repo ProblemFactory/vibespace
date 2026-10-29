@@ -34,7 +34,8 @@
 //     run the CLI (a script, an interpreter, a helper by its TOOL NAME) is the
 //     cause; a call's text is its command read through agentCommandText (a
 //     codex argv is its `-c` script) and the binder hears whether its work
-//     outlives the card (`run_in_background`, the task notification's end); a
+//     outlives the card (the normalizer's fact, T.producerOf: run_in_background
+//     or the harness backgrounded it, the end every close road writes); a
 //     turn is the normalizer's (T.opensTurn over each record: a steer or a hub
 //     card that entered a running turn never starts one; a note row starts one
 //     only when it is the turn's first record); every width is measured in CSS
@@ -102,13 +103,11 @@ function callText(cardEl) {
   if (!input || typeof input !== 'object') return '';
   return agentCommandText(input) || String(input.prompt || input.description || '');
 }
-/** r3: does a card's work OUTLIVE the card (Bash / an Agent with `run_in_background`)? — and the instant its end was seen
- *  (the task notification that names it closes the card's task: `taskInfo.endedAt`), 0 while unseen. */
+/** r3: does a card's work OUTLIVE the card — and the instant its end was seen? r4: the NORMALIZER's fact (T.producerOf:
+ *  `run_in_background`, the harness's `taskInfo.backgrounded`, the end every close road writes — `taskInfo.endedAt`). */
 function callBackground(cardEl) {
   const m = cardEl && cardEl._rawMsg;
-  const input = m && m.content && m.content[0] && m.content[0].input;
-  const ti = m && m.taskInfo;
-  return { background: !!(input && typeof input === 'object' && input.run_in_background === true), bgEnd: ti && ti.status !== 'running' ? Number(ti.endedAt) || 0 : 0 };
+  return T.producerOf({ input: m && m.content && m.content[0] && m.content[0].input, taskInfo: m && m.taskInfo });
 }
 
 export function createChannelTouchView(view) {
