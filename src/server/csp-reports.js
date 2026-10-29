@@ -18,10 +18,12 @@
 //     noticed at any earlier boot never files again (the line that filed it carries `noticed: true`); ≤ 10 new pairs a day
 //     file (a forged flood from a non-browser caller cannot fill the tray — the rest stay lines, and file on a later day).
 //   · THE SANITIZER'S PARSE (lane chrome-156-followups — app-csp THE SANITIZER'S PARSE IS NOT A GAP): a script-src-attr
-//     inline report with a handler's sample, set by this page's own /bundle.js, is read against the bundle ON DISK — the
-//     build its `?v=` names (another build: unread, it keeps its notice) — once per build: the text is read, DOMPurify's
-//     parse sites kept (app-csp purifyParseSites — a handful of numbers), the text dropped. A report AT one is a line of
-//     kind `sanitizer-parse`: no notice, its own count. No bundle, an unreadable one, any other position ⇒ the report is
+//     inline report with a handler's sample, set by one of this page's own scripts that embed a DOMPurify (app-csp
+//     PARSE_SCRIPTS — /bundle.js, and mermaid's own copy in /mermaid.js since lane csp-mermaid-sites), is read against
+//     THAT script ON DISK (public/) — the build its own `?v=` names (another build: unread, it keeps its notice) — once per
+//     script and build: the text is read, DOMPurify's parse sites kept (app-csp purifyParseSites — a handful of numbers),
+//     the text dropped. A report AT one of that script's sites is a line of kind `sanitizer-parse`: no notice, its own
+//     count. No such script on disk, an unreadable one, any other position (another script's site too) ⇒ the report is
 //     what it always was. The sample is read to judge and never written (a chrome suite's file keeps it, as before).
 //   · THE COUNT (主开发's ruling 2): reports since this boot and lines on disk, the app page's apart from the frames' and
 //     the sanitizer's — `GET /api/csp-reports` (behind the sign-in, like every read) answers it; the Diagnostics report
@@ -43,10 +45,10 @@ const NOTICES_PER_DAY = 10;
 const NOTICE_KEY = 'csp-report';
 if (C.REPORT_PATH !== '/api/csp-report') throw new Error('csp-reports: register() writes the report path as a literal — move it with C.REPORT_PATH');
 
-// the app page's bundle, as server.js serves it (public/ beside src/) — `bundle` names another (test-csp-report)
-const BUNDLE = path.join(__dirname, '..', '..', 'public', 'bundle.js');
+// the app page's scripts, as server.js serves them (public/ beside src/) — `publicDir` names another (test-csp-report)
+const PUBLIC = path.join(__dirname, '..', '..', 'public');
 
-function create({ dataDir, file: fileOpt = null, bundle = BUNDLE, getUserTodos = () => null, now = Date.now, log = console, fileMax = FILE_MAX, bodyMax = BODY_MAX, pacePerMin = PACE_PER_MIN, noticesPerDay = NOTICES_PER_DAY } = {}) {
+function create({ dataDir, file: fileOpt = null, publicDir = PUBLIC, getUserTodos = () => null, now = Date.now, log = console, fileMax = FILE_MAX, bodyMax = BODY_MAX, pacePerMin = PACE_PER_MIN, noticesPerDay = NOTICES_PER_DAY } = {}) {
   // `file`: the scratch hubs of a chrome suite write where the suite reads (scripts/scratch.mjs, VIBESPACE_CSP_REPORTS_FILE)
   const file = fileOpt || path.join(dataDir, FILE), rotated = file + '.1';
   const samples = !!fileOpt; // a chrome suite's file keeps the sample (above); a hub's own data/ never
@@ -92,14 +94,17 @@ function create({ dataDir, file: fileOpt = null, bundle = BUNDLE, getUserTodos =
     log.log?.(`[csp] the page reported what the enforced policy would block: ${r.directive} ${r.blocked} (a For-you notice; data/${FILE})`);
     return true;
   }
-  // THE SANITIZER'S PARSE SITES of the bundle on disk: { v, sites: Promise<Set<'line:column'>> } — one read per build
-  let parse = null;
-  async function parseSites() {
-    const v = String(Math.floor((await fs.promises.stat(bundle)).mtimeMs));
-    if (!parse || parse.v !== v) parse = { v, sites: fs.promises.readFile(bundle, 'utf8').then((t) => new Set(C.purifyParseSites(t).map(([l, c]) => `${l}:${c}`)), () => new Set()) };
-    return parse;
+  // THE SANITIZER'S PARSE SITES of each script on disk: script → { v, sites: Promise<Set<'line:column'>> } — one read per
+  // script and build; a script only from app-csp's table (siteOf names no other), its file under public/
+  const parse = new Map();
+  async function parseSites(script) {
+    if (!C.PARSE_SCRIPTS.includes(script)) throw new Error('not a script with a sanitizer');
+    const f = path.join(publicDir, script.slice(1));
+    const v = String(Math.floor((await fs.promises.stat(f)).mtimeMs));
+    if (!parse.has(script) || parse.get(script).v !== v) parse.set(script, { v, sites: fs.promises.readFile(f, 'utf8').then((t) => new Set(C.purifyParseSites(t).map(([l, c]) => `${l}:${c}`)), () => new Set()) });
+    return parse.get(script);
   }
-  /** Reports carrying a `site` (app-csp reportOf, `site: true`) → `kind: 'sanitizer-parse'` where the bundle's code at
+  /** Reports carrying a `site` (app-csp reportOf, `site: true`) → `kind: 'sanitizer-parse'` where THAT script's code at
    *  that position is DOMPurify's parse; `site` is dropped from every report. Never throws. */
   async function classify(reports) {
     for (const r of reports) {
@@ -107,10 +112,10 @@ function create({ dataDir, file: fileOpt = null, bundle = BUNDLE, getUserTodos =
       if (!at) continue;
       delete r.site;
       try {
-        const p = await parseSites();
+        const p = await parseSites(at.script);
         if (at.v && at.v !== p.v) { stats.otherBuild++; continue; }
         if ((await p.sites).has(`${at.line}:${at.column}`)) { r.kind = C.KIND_SANITIZER; stats.sanitizer++; }
-      } catch { /* no bundle on disk: the report keeps its notice */ }
+      } catch { /* no such script on disk: the report keeps its notice */ }
     }
     return reports;
   }

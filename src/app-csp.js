@@ -45,6 +45,14 @@
 //     chrome suites' build; never a column alone). Such a line is counted apart (Diagnostics: «Sanitizer dropped an inline
 //     handler: N»), never a notice, never in the app page's count nor a chrome suite's zero-report teardown; every other
 //     report — the same attribute set by our own code anywhere else — keeps its notice.
+//   · EVERY SANITIZER THE APP SHIPS (lane csp-mermaid-sites): the bundle is not the only script with a DOMPurify — the
+//     diagram library (public/mermaid.js, src/lib/mermaid-render.js imports it lazily, stamped `?v=` like the bundle)
+//     bundles its OWN, which parses a diagram's labels the same inert way; on Chrome 156 a hostile label was reported at
+//     mermaid.js's parse and filed a For-you notice for a diagram sanitized correctly. `PARSE_SCRIPTS` is the ONE table
+//     of the served scripts that embed a DOMPurify; each script's sites are computed from ITS OWN file the build its own
+//     `?v=` names (purifyParseSites — never a hand-written line:column: a rebuild moves it), never another script's.
+//     test-csp-report builds every esbuild step of package.json and pins the table = the scripts whose build carries a
+//     DOMPurify (a row cut, or a new script with one, is red by name).
 // PURE: imports nothing (scripts/test-architecture.mjs PURE set). The sink is src/server/csp-reports.js.
 
 const HEADER = 'Content-Security-Policy-Report-Only';
@@ -135,28 +143,33 @@ const numOf = (v) => (Number.isInteger(Number(v)) && Number(v) >= 0 && Number(v)
 
 /** The kind of a line whose handler the sanitizer's inert parse set (and dropped) — see THE SANITIZER'S PARSE above. */
 const KIND_SANITIZER = 'sanitizer-parse';
-/** The app page's one script (public/index.html; server.js stamps `?v=<mtime>`). */
-const BUNDLE_PATH = '/bundle.js';
+/** THE SERVED SCRIPTS THAT EMBED A DOMPURIFY (lane csp-mermaid-sites — EVERY SANITIZER THE APP SHIPS, above): the app
+ *  page's one script (public/index.html) and the diagram library mermaid bundles with its own (public/mermaid.js) — each
+ *  same origin as the page, stamped `?v=<mtime>` by the index route. Paths only: a script's parse sites are computed from
+ *  its file (the sink, purifyParseSites), never written here. */
+const PARSE_SCRIPTS = Object.freeze(['/bundle.js', '/mermaid.js']);
 
 /** WHERE a sanitizer-parse CANDIDATE was set, or null: a script-src-attr `inline` report whose sample is a handler's code,
- *  set by the page's own /bundle.js (same origin as the document) at a line and column → { v, line, column } (`v` = the
- *  build the page loaded, its `?v=`, or null). Numbers only — the sink reads its bundle there; never stored. */
+ *  set by one of the page's own PARSE_SCRIPTS (same origin as the document) at a line and column → { script, v, line,
+ *  column } (`script` = its served path, `v` = the build the page loaded, its `?v=`, or null). Numbers and a table row
+ *  only — the sink reads THAT script there; never stored. */
 function siteOf(r, directive, blocked) {
   if (directive !== 'script-src-attr' || blocked !== 'inline' || !clean(r['script-sample'] ?? r.sample)) return null;
   const line = numOf(r['line-number'] ?? r.lineNumber), column = numOf(r['column-number'] ?? r.columnNumber);
   if (!line || !column) return null;
   let s, d;
   try { s = new URL(clean(r['source-file'] ?? r.sourceFile, 2048)); d = new URL(clean(r['document-uri'] ?? r.documentURL ?? r.documentUri, 2048)); } catch { return null; }
-  if (!/^https?:$/.test(s.protocol) || s.origin !== d.origin || s.pathname !== BUNDLE_PATH) return null;
+  if (!/^https?:$/.test(s.protocol) || s.origin !== d.origin || !PARSE_SCRIPTS.includes(s.pathname)) return null;
   const v = s.searchParams.get('v');
-  return { v: v && /^\d{1,16}$/.test(v) ? v : null, line, column };
+  return { script: s.pathname, v: v && /^\d{1,16}$/.test(v) ? v : null, line, column };
 }
 
 // DOMPurify's inert parse as a bundle spells it, read at the browser's position (the `parseFromString` it names): the
 // call on two VARIABLES (the payload, the parser's type), then — within a few statements — DOMPurify's own fallback
-// `.createDocument(<namespace>, "template", null)`. The release build (minified) and the chrome suites' build both read
-// so; the docx viewer's and the chart library's parses (a string literal type, no template fallback) never do. A
-// DOMPurify that spells it otherwise matches nothing — its reports keep their notice — and test-csp-report goes red.
+// `.createDocument(<namespace>, "template", null)`. The release build (minified), the chrome suites' build and mermaid's
+// own copy (public/mermaid.js, minified) all read so; the docx viewer's and the chart library's parses (a string literal
+// type, no template fallback) never do. A DOMPurify that spells it otherwise matches nothing — its reports keep their
+// notice — and test-csp-report goes red.
 const PURIFY_PARSE = /^parseFromString\(\s*[\w$]+\s*,\s*[\w$]+\s*\)[^]{0,240}?\.createDocument\(\s*[\w$]+\s*,\s*(["'])template\1\s*,\s*null\s*\)/;
 const PURIFY_WINDOW = 400;
 
@@ -241,6 +254,6 @@ function noticeWords(r) {
 module.exports = {
   HEADER, ENFORCE_HEADER, REPORT_PATH, APP_POLICY, policyString, appPolicy, loginPolicy,
   DIRECTIVES, KEYWORDS, TOKEN_SEGMENT, SAMPLE_MAX, uriOf, reportOf, reportsOf, REPORT_TYPES, isReportType, FRAME_DOCUMENTS, noticeWorthy, lineKey, pairKey,
-  KIND_SANITIZER, BUNDLE_PATH, siteOf, purifyParseSites, sideOf,
+  KIND_SANITIZER, PARSE_SCRIPTS, siteOf, purifyParseSites, sideOf,
   NOTICE_TEXT, NOTICE_DETAIL, noticeWords,
 };
