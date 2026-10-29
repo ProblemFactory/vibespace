@@ -7,10 +7,10 @@
     "sha256": "512eb60f553133611609f4b69b7943720989d52b0302e67da1d6300ff0431568"
    },
    "now": {
-    "bytes": 2174,
-    "sha256": "3af3a48e16f6600dfedab40298f5e2e0ba86f39fe80d0f6d38a660792bbf5080"
+    "bytes": 2616,
+    "sha256": "9bfeae463635a86c931f49557f1b7dc9698fb569ddb58a1886749b8b7a5250e8"
    },
-   "change": "the header counts every paragraph that rendered, vibespace-msg's too (4 → 5 CLIs, 5 → 6 with reach), and the paragraphs follow the registry's one row order (status, ask, task, jobs, channels, msg — task's moved from first to third); same bytes · lane agent-feedback (.301): + the vibespace-feedback paragraph (152 B + its blank line; the header counts one CLI more) · lane agent-context-owner-facts (B-7960 b): the ask paragraph / segment names the tray in the hub's words — its label in the owner's language + its CURRENT place (src/tray-words.js over the chrome settings; here the default: the “For you” tray at the bottom right), never a literal place"
+   "change": "the header counts every paragraph that rendered, vibespace-msg's too (4 → 5 CLIs, 5 → 6 with reach), and the paragraphs follow the registry's one row order (status, ask, task, jobs, channels, msg — task's moved from first to third); same bytes · lane agent-feedback (.301): + the vibespace-feedback paragraph (152 B + its blank line; the header counts one CLI more) · lane agent-context-owner-facts (B-7960 b): the ask paragraph / segment names the tray in the hub's words — its label in the owner's language + its CURRENT place (src/tray-words.js over the chrome settings; here the default: the “For you” tray at the bottom right), never a literal place · lane resume-words (.361): + the USAGE WALLS standing rule after the paragraphs (440 B + its blank line; 376 B with the status toggle closed — it then teaches no vibespace-status)"
   },
   "section · one group · read": {
    "base": {
@@ -18,10 +18,10 @@
     "sha256": "5890537608128f90a0c677925d58e4ebfe0d72242c57b7f3e296097b4887d522"
    },
    "now": {
-    "bytes": 2570,
-    "sha256": "1152901c861114642a2c60934d37ea316b216dd8b56e7d1b6b30adbef5e6f421"
+    "bytes": 3012,
+    "sha256": "1b2ebf8940ca763cf5d6e7132f5ab1eb6f26a9681d30e61150451360208d7d49"
    },
-   "change": "the header counts every paragraph that rendered, vibespace-msg's too (4 → 5 CLIs, 5 → 6 with reach), and the paragraphs follow the registry's one row order (status, ask, task, jobs, channels, msg — task's moved from first to third); same bytes · lane agent-feedback (.301): + the vibespace-feedback paragraph (152 B + its blank line; the header counts one CLI more) · lane agent-context-owner-facts (B-7960 b): the ask paragraph / segment names the tray in the hub's words — its label in the owner's language + its CURRENT place (src/tray-words.js over the chrome settings; here the default: the “For you” tray at the bottom right), never a literal place"
+   "change": "the header counts every paragraph that rendered, vibespace-msg's too (4 → 5 CLIs, 5 → 6 with reach), and the paragraphs follow the registry's one row order (status, ask, task, jobs, channels, msg — task's moved from first to third); same bytes · lane agent-feedback (.301): + the vibespace-feedback paragraph (152 B + its blank line; the header counts one CLI more) · lane agent-context-owner-facts (B-7960 b): the ask paragraph / segment names the tray in the hub's words — its label in the owner's language + its CURRENT place (src/tray-words.js over the chrome settings; here the default: the “For you” tray at the bottom right), never a literal place · lane resume-words (.361): + the USAGE WALLS standing rule after the paragraphs (440 B + its blank line; 376 B with the status toggle closed — it then teaches no vibespace-status)"
   },
   "section · one group · request": {
    "base": {
@@ -29,10 +29,10 @@
     "sha256": "427bd4b717306a57cf7baec9f4852dbe8e2aa01d59a184e713d7a1a6abeb9760"
    },
    "now": {
-    "bytes": 2487,
-    "sha256": "6ba73b3a64e375f05c506996b0e017d517cd2c6bbcb088a456627db6677d8eb9"
+    "bytes": 2929,
+    "sha256": "ee699684f39f7fae681694927670eb63a97c1733d043b8bc071673f65be5deb1"
    },
-   "change": "the header counts every paragraph that rendered, vibespace-msg's too (4 → 5 CLIs, 5 → 6 with reach), and the paragraphs follow the registry's one row order (status, ask, task, jobs, channels, msg — task's moved from first to third); same bytes · lane agent-feedback (.301): + the vibespace-feedback paragraph (152 B + its blank line; the header counts one CLI more) · lane agent-context-owner-facts (B-7960 b): the ask paragraph / segment names the tray in the hub's words — its label in the owner's language + its CURRENT place (src/tray-words.js over the chrome settings; here the default: the “For you” tray at the bottom right), never a literal place"
+   "change": "the header counts every paragraph that rendered, vibespace-msg's too (4 → 5 CLIs, 5 → 6 with reach), and the paragraphs follow the registry's one row order (status, ask, task, jobs, channels, msg — task's moved from first to third); same bytes · lane agent-feedback (.301): + the vibespace-feedback paragraph (152 B + its blank line; the header counts one CLI more) · lane agent-context-owner-facts (B-7960 b): the ask paragraph / segment names the tray in the hub's words — its label in the owner's language + its CURRENT place (src/tray-words.js over the chrome settings; here the default: the “For you” tray at the bottom right), never a literal place · lane resume-words (.361): + the USAGE WALLS standing rule after the paragraphs (440 B + its blank line; 376 B with the status toggle closed — it then teaches no vibespace-status)"
   },
   "section · three groups": {
    "base": {
@@ -40,10 +40,10 @@
     "sha256": "cce70941274cbdf792c6cfb7789f91d06fd9f2b9174b9f944b2e3c1db4b13c52"
    },
    "now": {
-    "bytes": 2313,
-    "sha256": "8eff863b63097db7f5556fab74290df2d38c96ce0c0d891703dbfe4dda26ce57"
+    "bytes": 2755,
+    "sha256": "971611db8b40e6ffa79a1daf7a0f2adb26c5f3663deea6a47395e2ee3ca6f670"
    },
-   "change": "the header counts every paragraph that rendered, vibespace-msg's too (4 → 5 CLIs, 5 → 6 with reach), and the paragraphs follow the registry's one row order (status, ask, task, jobs, channels, msg — task's moved from first to third); same bytes · lane agent-feedback (.301): + the vibespace-feedback paragraph (152 B + its blank line; the header counts one CLI more) · lane agent-context-owner-facts (B-7960 b): the ask paragraph / segment names the tray in the hub's words — its label in the owner's language + its CURRENT place (src/tray-words.js over the chrome settings; here the default: the “For you” tray at the bottom right), never a literal place"
+   "change": "the header counts every paragraph that rendered, vibespace-msg's too (4 → 5 CLIs, 5 → 6 with reach), and the paragraphs follow the registry's one row order (status, ask, task, jobs, channels, msg — task's moved from first to third); same bytes · lane agent-feedback (.301): + the vibespace-feedback paragraph (152 B + its blank line; the header counts one CLI more) · lane agent-context-owner-facts (B-7960 b): the ask paragraph / segment names the tray in the hub's words — its label in the owner's language + its CURRENT place (src/tray-words.js over the chrome settings; here the default: the “For you” tray at the bottom right), never a literal place · lane resume-words (.361): + the USAGE WALLS standing rule after the paragraphs (440 B + its blank line; 376 B with the status toggle closed — it then teaches no vibespace-status)"
   },
   "section · three groups · read": {
    "base": {
@@ -51,10 +51,10 @@
     "sha256": "c722ab16dc8f1c4f227598f9d92494fe30bde5193f74ef875535eb8033e64cab"
    },
    "now": {
-    "bytes": 2709,
-    "sha256": "5e72f674dd57ea33355faf4bdc581f52b434e5211f0430954c7c541013d2f4bc"
+    "bytes": 3151,
+    "sha256": "164d4db6a8bc0fae261f8e77c0afcf18e0bacce9d1814f051c6115d4e9a7ca7c"
    },
-   "change": "the header counts every paragraph that rendered, vibespace-msg's too (4 → 5 CLIs, 5 → 6 with reach), and the paragraphs follow the registry's one row order (status, ask, task, jobs, channels, msg — task's moved from first to third); same bytes · lane agent-feedback (.301): + the vibespace-feedback paragraph (152 B + its blank line; the header counts one CLI more) · lane agent-context-owner-facts (B-7960 b): the ask paragraph / segment names the tray in the hub's words — its label in the owner's language + its CURRENT place (src/tray-words.js over the chrome settings; here the default: the “For you” tray at the bottom right), never a literal place"
+   "change": "the header counts every paragraph that rendered, vibespace-msg's too (4 → 5 CLIs, 5 → 6 with reach), and the paragraphs follow the registry's one row order (status, ask, task, jobs, channels, msg — task's moved from first to third); same bytes · lane agent-feedback (.301): + the vibespace-feedback paragraph (152 B + its blank line; the header counts one CLI more) · lane agent-context-owner-facts (B-7960 b): the ask paragraph / segment names the tray in the hub's words — its label in the owner's language + its CURRENT place (src/tray-words.js over the chrome settings; here the default: the “For you” tray at the bottom right), never a literal place · lane resume-words (.361): + the USAGE WALLS standing rule after the paragraphs (440 B + its blank line; 376 B with the status toggle closed — it then teaches no vibespace-status)"
   },
   "section · three groups · request": {
    "base": {
@@ -62,10 +62,10 @@
     "sha256": "b43b890f7bada2baff628d3b279afedc38aa33dee4fc5666536468e1af20379f"
    },
    "now": {
-    "bytes": 2626,
-    "sha256": "2c9e73dab23a3d7e5ef42763b2dbf16dc8750a7f656a68d418aac70bb17d8619"
+    "bytes": 3068,
+    "sha256": "e277b74896e0fda20eaa60213ed46cc93d83150a44596de022f5474d971d458a"
    },
-   "change": "the header counts every paragraph that rendered, vibespace-msg's too (4 → 5 CLIs, 5 → 6 with reach), and the paragraphs follow the registry's one row order (status, ask, task, jobs, channels, msg — task's moved from first to third); same bytes · lane agent-feedback (.301): + the vibespace-feedback paragraph (152 B + its blank line; the header counts one CLI more) · lane agent-context-owner-facts (B-7960 b): the ask paragraph / segment names the tray in the hub's words — its label in the owner's language + its CURRENT place (src/tray-words.js over the chrome settings; here the default: the “For you” tray at the bottom right), never a literal place"
+   "change": "the header counts every paragraph that rendered, vibespace-msg's too (4 → 5 CLIs, 5 → 6 with reach), and the paragraphs follow the registry's one row order (status, ask, task, jobs, channels, msg — task's moved from first to third); same bytes · lane agent-feedback (.301): + the vibespace-feedback paragraph (152 B + its blank line; the header counts one CLI more) · lane agent-context-owner-facts (B-7960 b): the ask paragraph / segment names the tray in the hub's words — its label in the owner's language + its CURRENT place (src/tray-words.js over the chrome settings; here the default: the “For you” tray at the bottom right), never a literal place · lane resume-words (.361): + the USAGE WALLS standing rule after the paragraphs (440 B + its blank line; 376 B with the status toggle closed — it then teaches no vibespace-status)"
   },
   "section · status only": {
    "base": {
@@ -73,10 +73,10 @@
     "sha256": "3e597ddfa6b75dd327319d7dfa1c2883250bf938f088f9f847b97b9727cba9f2"
    },
    "now": {
-    "bytes": 1158,
-    "sha256": "06b7c802097a3d541f079fb5b1ac51fa2a994269715692e7c824fdcbe92b50d2"
+    "bytes": 1600,
+    "sha256": "a725d18ccc6bb79ec75dcd6f20e754abb907becf7ef33fe1e1f32ebf8b51a6ad"
    },
-   "change": "the header counts every paragraph that rendered, vibespace-msg's too ('one CLI' → '2 CLIs'); same bytes · lane agent-feedback (.301): + the vibespace-feedback paragraph (152 B + its blank line; the header counts one CLI more)"
+   "change": "the header counts every paragraph that rendered, vibespace-msg's too ('one CLI' → '2 CLIs'); same bytes · lane agent-feedback (.301): + the vibespace-feedback paragraph (152 B + its blank line; the header counts one CLI more) · lane resume-words (.361): + the USAGE WALLS standing rule after the paragraphs (440 B + its blank line; 376 B with the status toggle closed — it then teaches no vibespace-status)"
   },
   "section · every toggle off": {
    "base": {

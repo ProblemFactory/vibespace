@@ -4,6 +4,15 @@ This file is the engineers' record of every release: the lanes, the verification
 
 `CHANGELOG.md` (with `CHANGELOG.zh.md` and `CHANGELOG.ja.md`) is the user's: what changed for the person using VibeSpace, one plain line per change, in the interface's language — the rules are in docs/changelog-style.md. From 2.369.199 on, every release also writes its section here, under the same `## <version> — <date>` heading as its user entry and in the same commit, newest first above the verbatim record.
 
+## 2.369.361 — 2026-10-28
+
+### resume-words — the continue says what the CLI's reset time was and was not; a standing rule rides every SessionStart (FIX on 90c995a3 = 2.369.360; the owner 2026-10-29 00:2x PT: «agent 都会优先理解那个 claude 自己的 reset time 作为“用量重置时间”，但实际上 vibespace 通知的时候才是重置的时候»)
+
+- **The incident.** The Screeps conversation hit a WEEKLY wall («resets Oct 30, 9am (America/Los_Angeles)»); the pool switched it to another account at once and sent the continue — but the agent had already read the CLI's line as THE reset, parked backlog B-28b5 «until the usage reset (10-30 9am PT)» and told the owner so: a plan wrong for 33 hours. The continue was the CLI's own sentence alone and said nothing about that time.
+- **The continue (src/server/auto-resume.js).** `CONTINUE_PROMPT` is ONE frozen constant — `switched` (the pool now serves the conversation from `the account "<label>"`; the label through the peer-text belt, `toAgentText` line, ≤ 80) · `lifted` (the wall lifted on the same account) · `facts` (the limit message's reset was ONE account's; that time is NOT when you may continue; THIS message is the continue; un-park work parked "until the reset") · `cli` (the CLI's 2.1.239 sentence, verbatim, still last). `continuePromptFor(note, label2)` assembles it from continueNoticeFor's class at the ONE fire choke point (still exactly one `verb.deliver(`). The product's card keeps its words.
+- **The standing rule (src/agent-cli-registry.js).** `STANDING_RULES` — `usage-walls` (440 B; 376 B with the status toggle closed, which then teaches no vibespace-status) rides the Reporting-back section after the tool paragraphs. CAPS.sessionStart 2 725 → 3 160 (3 151 B measured); measure-prompt-context FIRST_PROMPT_MAX 7 680 → 8 064 (7 977 B at the widest reach; the ≥ 1 KB room under INLINE_CAP unchanged); 7 section render pins re-pinned with the reason. The per-turn reminder line is unchanged (its cap's room is 90 B).
+- **Census.** test-auto-resume 14b (the facts, the order, the belt, the wiring) + the hot pool switch leg names the member it moved to; test-cli-registry ③b (each rule id's facts, every SessionStart shape carries it, CONTROLS: the row removed ⇒ «usage-walls: no standing rule row», its facts gutted ⇒ 6 reds by name); test-harness-contract drives every descriptor's verb and the words arrive unchanged.
+
 ## 2.369.360 — 2026-10-27
 
 ### ci358-reds (items 7 + 8 and round 2 — c083607d → 5bdb59fb; the .358 mirror's two fast-tier races)

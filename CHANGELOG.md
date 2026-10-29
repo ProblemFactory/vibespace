@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.361 — 2026-10-28
+
+### Fixed
+- When the account pool moves a conversation past a usage limit, the agent is told the limit’s “resets at …” was one account’s, not when it may continue.
+
 ## 2.369.360 — 2026-10-27
 
 ### Added
