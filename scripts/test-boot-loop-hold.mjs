@@ -24,6 +24,11 @@
 //     LAW red was the browser census's walk — src/browser-orphans.js, O(daemons² × processes) on a busy box, fixed); the warm
 //     of ④ is named by its calls OR its CPU in src/usage-history.js (r11 read `sites: []` on a slow boot — its reads landed
 //     outside the step and its 3.3 s of parsing made no call); a pure control of the sampler beside the two-hold one.
+//     Lane ledger-dedup-law r14: A HOLD IS NAMED ONLY BY WHAT FILLS IT — the tracer names a hold by a source (calls, CPU
+//     samples) only when it saw at least half the hold or 100 ms of it (else `faint`); a hold the measured boot leaves
+//     unnamed passes only when this suite's own three numbers say the BOX took most of it (held < half the gap), said so;
+//     THE STOPPED CONTROL: a child with the tracer, SIGSTOPped 300 ms (the box — no work of its own) ⇒ that hold UNNAMED, a
+//     300 ms spin in it named (a1d92418: one 1 ms sample named the stopped hold «cpu (program)» — the check could not fail).
 //   ⑤ A PROBE THAT CANNOT BE REAPED IS AN ANSWER (B-92a4, lane boot-probes-unkillable): the same boot with a fake `fuser`
 //     + `pgrep` on PATH that ignore TERM and never answer about a restore socket (the NFS D-state stand-in) ⇒ the listener
 //     opens within the probe cap + 5 s of the probes' start, the span names the N unanswered, every session is restored
@@ -60,7 +65,9 @@ function judge(clock, law = LAW_MS, control = null) {
 }
 /** A gap in words: «listen 226 ms (cpu 223 · run-queue wait 3 · control 0 ⇒ held 223)». */
 const holdName = (h) => (h && (h.name || ((h.sites || [])[0] || {}).what)) || null; // r12: a step / span, else what ran in it
-const gapWords = (g, names = []) => g ? `${holdName(names.find((h) => Math.abs(h.at - g.at) <= 50)) || '—'} ${g.ms} ms (cpu ${g.cpu ?? '?'} · run-queue wait ${g.wait ?? '?'} · control ${g.ctl} ⇒ held ${g.held})` : 'none';
+// r14: an unnamed hold in words — the sites the tracer saw in it too thinly to name it (`faint`), if any
+const holdWords = (h) => holdName(h) || (h && h.faint && h.faint.length ? `unnamed (faint: ${h.faint.map((x) => `${x.ms} ms ${x.what}`).join(', ')})` : null);
+const gapWords = (g, names = []) => g ? `${holdWords(names.find((h) => Math.abs(h.at - g.at) <= 50)) || '—'} ${g.ms} ms (cpu ${g.cpu ?? '?'} · run-queue wait ${g.wait ?? '?'} · control ${g.ctl} ⇒ held ${g.held})` : 'none';
 console.log('① the judge');
 check('a 300 ms gap past the first turn is red', !judge({ first: 900, gaps: [{ at: 2000, ms: 300 }] }).ok);
 check('a 249 ms gap is green; the first turn (the code loading) is never judged', judge({ first: 5000, gaps: [{ at: 2000, ms: 249 }] }).ok);
@@ -174,9 +181,13 @@ const warm1 = span(rep1, 'usage-ledger-warm');
 check('the ledger warm ran in slices and loaded the shape\'s ledger', !!warm1 && warm1.slices > 100 && warm1.rows > shape.rows.ledger * 0.5, warm1);
 check('the OTel stash replay, the identity repair and the restore probes ran off the loop (each a span that ended)', ['otel-replay', 'identity-repair', 'restore-probes'].every((n) => span(rep1, n) && span(rep1, n).ms != null), rep1 && rep1.spans);
 check(`THE LAW: no hold ≥ ${LAW_MS} ms from the first loop turn to the warm's end — the longest gap ${gapWords(j1.top, names1)}; the longest hold ${j1.maxHeld} ms; code loading ${j1.firstMs} ms, not judged; monitorEventLoopDelay max ${c1 && c1.eldMax} ms`, j1.ok, { over: j1.over.map((g) => gapWords(g, names1)), named: names1 });
-// r12: the server names EVERY hold it recorded (≥ 100 ms) — its step / span, or the frames its CPU stood in (the sampler ran)
-const unnamed1 = names1.filter((h) => !holdName(h));
-check(`every hold the server recorded is NAMED — ${names1.map((h) => `${h.ms} ms ${holdName(h) || 'UNNAMED'}`).join(' · ') || 'none ≥ 100 ms'} (the sampler: ${rep1 && rep1.cpu ? `${rep1.cpu.samples} samples${rep1.cpu.error ? ', ' + rep1.cpu.error : ''}` : 'NOT armed'}; 935a9f0b: «— 272 ms», the browser census's walk, unnamed)`, !!rep1 && !!rep1.cpu && rep1.cpu.samples > 0 && !unnamed1.length, { unnamed1, cpu: rep1 && rep1.cpu });
+// r12: the server names EVERY hold it recorded (≥ 100 ms) — its step / span, or the frames its CPU stood in (the sampler ran).
+// r14: named only by what FILLS it (the tracer's rule) — a hold this suite's own clock saw the BOX take most of (held, its
+// ms − max(run-queue wait, the control's stall), under half the gap) may go unnamed, and is said as the box's
+const gapOf1 = (h) => j1.gaps.find((x) => Math.abs(x.at - h.at) <= 50) || null;
+const boxMade = (h) => { const g = gapOf1(h); return !!g && g.held < g.ms / 2; };
+const unnamed1 = names1.filter((h) => !holdName(h) && !boxMade(h));
+check(`every hold the server recorded is NAMED — ${names1.map((h) => `${h.ms} ms ${holdWords(h) || 'UNNAMED'}${!holdName(h) && boxMade(h) ? ` — the box's (wait ${gapOf1(h).wait ?? '?'} · control ${gapOf1(h).ctl} of ${gapOf1(h).ms} ms)` : ''}`).join(' · ') || 'none ≥ 100 ms'} (the sampler: ${rep1 && rep1.cpu ? `${rep1.cpu.samples} samples${rep1.cpu.error ? ', ' + rep1.cpu.error : ''}` : 'NOT armed'}; 935a9f0b: «— 272 ms», the browser census's walk, unnamed)`, !!rep1 && !!rep1.cpu && rep1.cpu.samples > 0 && !unnamed1.length, { unnamed1, cpu: rep1 && rep1.cpu });
 // the server's own clock by the same rule: each of its holds at or over the law is a gap this clock judged the BOX's
 const serverOver = names1.filter((h) => h.ms >= LAW_MS).filter((h) => { const g = j1.gaps.find((x) => Math.abs(x.at - h.at) <= 50); return !g || g.held >= LAW_MS; });
 check(`the server's own boot clock agrees: its longest hold ${rep1 && rep1.maxHoldMs} ms (${serverOver.length ? 'held by the boot' : rep1 && rep1.maxHoldMs >= LAW_MS ? 'the box\'s, by the same three numbers' : 'under the law'}) and its code-loading time is this clock's first turn (±150 ms)`, !!rep1 && !serverOver.length && Math.abs((rep1.mainMs || 0) - (c1 ? c1.first : 0)) <= 150 + (rep1.startAt || 0), rep1 && { mainMs: rep1.mainMs, startAt: rep1.startAt, first: c1 && c1.first, maxHoldMs: rep1.maxHoldMs, serverOver });
@@ -220,6 +231,34 @@ check(`…the server names the hold: the step usage-ledger-warm, and the tracer 
   const got = smp ? smp.sitesIn(w) : [], mine = got.filter((x) => /test-boot-loop-hold\.mjs/.test(x.what)).reduce((n, x) => n + x.ms, 0);
   if (smp) smp.stop();
   check(`…the sampler's control: 300 ms of pure CPU in this file (no sync call) — ${mine} ms named to its frame (${got.map((x) => `${x.ms} ms ${x.what}`).join(' · ') || 'nothing named'})`, mine >= 200, got);
+}
+
+// lane ledger-dedup-law r14: THE STOPPED CONTROL — a hold is named only by what FILLS it. A child runs the tracer with the sampler
+// alone; it is STOPPED 300 ms (SIGSTOP: the box, no work of its own), then spins 300 ms of CPU ⇒ the stopped hold is UNNAMED
+// (what the sampler saw of it said `faint`), the spun one named by its CPU (a1d92418: one 1 ms sample named the stopped hold
+// «cpu (program)» — the acceptance's stop-hold probe, 6 of 6 — so «every hold is NAMED» could not fail)
+{
+  const src = `const BT = require(${JSON.stringify(path.join(repo, 'src/server/boot-trace.js'))}), { performance } = require('perf_hooks');
+const one = BT.start({ dataDir: null, env: { VIBESPACE_BOOT_TRACE_CPU: '1' }, windowMs: 60000 }); setInterval(() => {}, 1000);
+process.stdin.on('data', (d) => { for (const c of String(d).split('\\n')) { if (c === 'spin') { const t = performance.now(); while (performance.now() - t < 300) JSON.parse('{"n":1}'); process.stdout.write('spun\\n'); } if (c === 'report') { process.stdout.write(JSON.stringify(one.report({ cpu: true })) + '\\n'); one.close(); process.exit(0); } } });
+process.stdout.write('ready\\n');`;
+  const child = spawn(process.execPath, ['-e', src], { stdio: ['pipe', 'pipe', 'inherit'] });
+  const end = () => { try { child.kill('SIGKILL'); } catch { } };
+  process.on('exit', end);
+  let out = '';
+  child.stdout.on('data', (d) => { out += d; });
+  const said = (w, ms = 15000) => until(async () => (out.split('\n').includes(w) ? true : null), ms);
+  let rep = null;
+  try {
+    await said('ready'); await sleep(400);
+    child.kill('SIGSTOP'); await sleep(300); child.kill('SIGCONT'); await sleep(400);
+    child.stdin.write('spin\n'); await said('spun'); await sleep(300);
+    child.stdin.write('report\n');
+    await until(async () => { const l = out.split('\n').find((x) => x.startsWith('{')); return l ? (rep = JSON.parse(l)) : null; }, 15000);
+  } catch { } finally { end(); }
+  const big = ((rep && rep.holds) || []).filter((h) => h.ms >= 200).sort((a, b) => a.at - b.at), stopped = big[0] || null, spun = big[1] || null;
+  check(`…the STOPPED control: a child stopped 300 ms (SIGSTOP — the box) holds ${stopped ? stopped.ms : '?'} ms, ${stopped ? holdWords(stopped) || 'unnamed, nothing seen in it' : 'NO HOLD'}${stopped && holdName(stopped) ? ' — NAMED' : ''}; its 300 ms spin holds ${spun ? spun.ms : '?'} ms, named ${spun ? holdName(spun) || 'NOTHING' : '—'} (a1d92418: the stopped hold named «cpu (program)» by one sample)`,
+    !!stopped && !holdName(stopped) && !!spun && !!holdName(spun) && (spun.sites || []).some((x) => /^cpu /.test(x.what)), rep && rep.holds);
 }
 
 // ── boots 3 + 4: THE RESTORE'S PROBES CANNOT BE REAPED (B-92a4) ──

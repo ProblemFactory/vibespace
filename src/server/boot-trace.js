@@ -25,6 +25,10 @@
 // The samples are FOLDED ONCE — at the window's close, or when a report asks (`GET /api/boot-trace?cpu=1`, `report({cpu:
 // true})`): the profiler is never restarted (a start re-logs every compiled function — ~150 ms of the loop on a booted
 // hub; folding at each report made the gate's 250 ms poll a hold of its own). Before the fold a hold names its calls only.
+// Round 14: A HOLD IS NAMED ONLY BY WHAT FILLS IT — each source (the calls, the CPU samples) names a hold when what it saw
+// there is at least half the hold's span or NAME_MIN_MS; below that its sites ride the hold as `faint` (said, never its
+// name). r12 named a hold by ANY site in it: one 1 ms sample of a process the box stopped for 300 ms named the hold
+// «cpu (program)», so «every hold is named» could not fail once the sampler ran.
 // VIBESPACE_BOOT_TRACE_SYNC=1 is the gate's RED control (scripts/test-boot-loop-hold.mjs): the boot's ledger warm runs
 // the old way, in one tick on the loop.
 // NOTES (B-92a4): a boot step's own lines that outlive its span — the restore's probe-pending sessions and the re-probe's
@@ -39,6 +43,7 @@ const WINDOW_MS = 90000;  // past the boot's deferred steps (the ledger warm sta
 const KEEP = 20;          // holds kept in the report, longest first
 const BIG_PARSE = 1 << 20;
 const NOTES_KEEP = 40;
+const NAME_MIN_MS = 100; // r14: a source names a hold when it saw at least this much of it (or half its span)
 
 let one = null;
 
@@ -81,11 +86,16 @@ function start({ dataDir, env = process.env, now = () => performance.now(), wind
   // a hold is the span between two turns of the clock: [last, t]. r11: the exact span (r10 used the rounded [at - 1, at +
   // ms + TICK_MS]: two holds in a row overlapped by 1 ms and an op there was credited to both)
   const holdWin = (g) => (g.t1 != null ? { at: g.t0, ms: g.t1 - g.t0 } : { at: g.at - 1, ms: g.ms + TICK_MS + 1 });
-  // r12: a hold's calls (top 3) and the frames its CPU stood in (top 3, `cpu …`)
-  const holdSites = (g) => [...(ops.length ? sitesOf(ops, holdWin(g)) : []), ...(cpu ? cpu.sitesIn(holdWin(g)) : [])];
+  // r12: a hold's calls (top 3) and the frames its CPU stood in (top 3, `cpu …`). r14: each source NAMES the hold only when
+  // what it saw there fills it (`fills`) — else its sites are the hold's `faint` ones (said, never its name)
+  const holdSites = (g) => {
+    const w = holdWin(g), sites = [], faint = [];
+    for (const all of [ops.length ? sitesOf(ops, w, Infinity) : [], cpu ? cpu.sitesIn(w, Infinity) : []]) (fills(all, w) ? sites : faint).push(...all.slice(0, 3));
+    return { sites, ...(faint.length ? { faint } : {}) };
+  };
   function report({ cpu: foldCpu = false } = {}) {
     if (cpu && (foldCpu || closed)) cpu.drain(false); // r12: folded ONCE, never restarted (a restart re-logs every compiled function)
-    const holds = gaps.slice().sort((a, b) => b.ms - a.ms).slice(0, KEEP).map((g) => ({ at: g.at, ms: g.ms, name: nameOf(g), ...(ops.length || cpu ? { sites: holdSites(g) } : {}) }));
+    const holds = gaps.slice().sort((a, b) => b.ms - a.ms).slice(0, KEEP).map((g) => ({ at: g.at, ms: g.ms, name: nameOf(g), ...(ops.length || cpu ? holdSites(g) : {}) }));
     return { pid: process.pid, startedAt: Math.round(performance.timeOrigin + startAt), startAt: Math.round(startAt), mainMs, listenAt: listenAt == null ? null : Math.round(listenAt), windowMs, closed, traced: env.VIBESPACE_BOOT_TRACE === '1',
       ...(env.VIBESPACE_BOOT_TRACE === '1' ? { ops: ops.length, opsDropped: ops.dropped || 0 } : {}), // r12: the ops kept, and those past OPS_MAX — a hold with `sites: []` says whether its ops were dropped
       ...(cpu ? { cpu: cpu.facts() } : {}), // r12: the sampler's samples (kept, dropped, its interval) — or why it could not run
@@ -119,6 +129,10 @@ function start({ dataDir, env = process.env, now = () => performance.now(), wind
   };
   return one;
 }
+
+/** r14: do a source's sites in window w ({at, ms}) — every one of them, not its top 3 — FILL it: at least half its span or
+ *  NAME_MIN_MS (PURE). One sample, or one short call, in a hold the box made is no name of it. */
+function fills(sites, w) { const ms = sites.reduce((n, x) => n + x.ms, 0); return ms > 0 && (ms >= NAME_MIN_MS || ms >= w.ms / 2); }
 
 /** VIBESPACE_BOOT_TRACE=1: every sync fs / child call + every ≥ 1 MB JSON.parse, timed with its first repo frame. Returns the unwrap.
  *  Lane ledger-dedup-law r9: A SITE IS NAMED BY ITS CALLS, never by a 1 ms floor — every call is kept, a run of calls at one
@@ -277,4 +291,4 @@ function cpuSampler({ now }) {
   };
 }
 
-module.exports = { start, wrapSync, sitesOf, cpuSampler, TICK_MS, HOLD_MS, WINDOW_MS, FOLD_MS, ARG_KEY_MAX, CPU_SAMPLE_US };
+module.exports = { start, wrapSync, sitesOf, cpuSampler, fills, TICK_MS, HOLD_MS, WINDOW_MS, FOLD_MS, ARG_KEY_MAX, CPU_SAMPLE_US, NAME_MIN_MS };
