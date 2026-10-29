@@ -702,9 +702,11 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
   pane.addEventListener('mouseleave', () => linkBar.hover(null), { signal });
   /** The Link dialog (a FORM — lane dialog-yield r2: the document stays editable while it is open; editLink re-reads the
    *  document at the answer and names what changed): the address + the link's text, prefilled when editing; Enter applies,
-   *  Esc (the shell's door: it asks when something was typed) / Cancel ⇒ null. */
-  const linkDialog = (title, href, text) => new Promise((resolve) => {
-    const sh = createModalShell({ id: 'doc-link-dialog', key: `${host}:${path}`, beside: true, title, dialogClass: 'doc-link-dialog', onClose: () => resolve(null), escapeToClose: true, kind: 'form' });
+   *  Esc (the shell's door: it asks when something was typed) / Cancel ⇒ null. r6: its subject is the LINK asked about — where
+   *  it stands (`at`), its address, its text — never the document: a Link ask on a second link while the first one's form was
+   *  open raised the first (its address shown) and Apply rewrote the FIRST link. Two links, two forms beside each other. */
+  const linkDialog = (title, href, text, at) => new Promise((resolve) => {
+    const sh = createModalShell({ id: 'doc-link-dialog', key: JSON.stringify([host, path, at, href, text]), beside: true, title, dialogClass: 'doc-link-dialog', onClose: () => resolve(null), escapeToClose: true, kind: 'form' });
     if (sh.raised) return;   // raised: the same subject's form, as it was
     const field = (label, value, placeholder) => { const w = mk('label', null, label), i = mk('input'); i.type = 'text'; i.value = value || ''; i.placeholder = placeholder; w.appendChild(i); sh.body.appendChild(w); return i; };
     const hrefIn = field(t('Link address'), href, 'https://'), textIn = field(t('Link text'), text, '');
@@ -727,7 +729,7 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
     const link = on ? linkAtPos(st, on.from) : linkAtPos(st, from, to);
     const cur = link ? { link } : { from, to, text: from === to ? '' : st.doc.textBetween(from, to, ' ') };
     linkBar.drop();
-    const ans = await linkDialog(link ? t('Edit link') : t('Link'), link ? link.href : '', link ? link.text : cur.text);
+    const ans = await linkDialog(link ? t('Edit link') : t('Link'), link ? link.href : '', link ? link.text : cur.text, link ? `${link.from}-${link.to}` : `${from}-${to}`);
     if (!ans || !S.ed || S.mode !== 'rich') return;
     // the document moved while the form was open (typed in, reloaded): the place it was asked for is gone — said, never applied elsewhere
     if (S.view.state.doc !== st.doc) { say(t('The document changed while the link was being edited — select the text and press Link again')); return; }
@@ -965,8 +967,9 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
     acts.append(cancel, add); box.append(qq, voiceField(ta, attachDictation(ta)), acts);
     let close;
     if (isPhone()) {
-      const sh = createModalShell({ id: 'doc-comment-sheet', key: `${host}:${path}`, beside: true, title: t('Add comment'), escapeToClose: true, dialogClass: 'doc-note-sheet', kind: 'form' });
-      if (sh.raised) return;   // raised: the comment being written on this document, as it was
+      const sh = createModalShell({ id: 'doc-comment-sheet', key: JSON.stringify([host, path, line, quote]), beside: true,   // r6: the passage commented (its line, its words), never the document
+        title: t('Add comment'), escapeToClose: true, dialogClass: 'doc-note-sheet', kind: 'form' });
+      if (sh.raised) return;   // raised: the comment being written on this passage, as it was
       sh.body.appendChild(box); close = () => sh.close();
     }
     else { const p = createPopover(pane, 'doc-note-pop', { position: 'cursor', x: c.left, y: c.bottom + 4 }); p.appendChild(box); close = () => p.remove(); }

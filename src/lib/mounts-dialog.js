@@ -191,6 +191,7 @@ function copyLine(value) {
 // Connect storage closed the running «Set up <machine>» through the shared id's door); opts.key = the subject (the machine, the
 // mount, the account). The same id + key opened again is RAISED and its ctx comes back.
 export function mountsDialog(title, fields, submitLabel, onSubmit, opts = {}) {
+  // not the subject: fields — the caller's opts.key names them (every mountsDialog call is a census row of its own, r5)
   const shell = createModalShell({ id: opts.id, key: opts.key, title, onClose: opts.onClose, escapeToClose: true, kind: 'form' });
   if (shell.raised) return shell.overlay._mountsCtx || { body: shell.body, close: shell.close, raised: true, asked: shell.asked, ready: shell.ready, live: shell.live };
   const { body, close } = shell;
@@ -541,6 +542,7 @@ export function wireStepPaste(ctx, { tokenKey, configPage, start, callback, whyT
 // (optional) render through `renderFields` between the hint and the button —
 // the channel accounts' OAuth-client select.
 export function reauthDialog({ id = 'mount-reauth-dialog', key = null, title, hint: hintText, signinLabel, provider, fields = null, start, status: statusOf, callback, finish: apply, savingText = null, pasteHint = null, pasteSecret = false, pastePlaceholder = 'http://127.0.0.1:53682/?state=…&code=…' }) {
+  // not the subject: fields — the caller's key names them (the mount / the account its OAuth-client select belongs to)
   const { body, close, raised, overlay } = createModalShell({ id, key, title, bodyClass: 'mounts-dialog-body', escapeToClose: true, kind: 'form' });   // key = the mount / the account re-authorized (lane dialog-yield r3)
   if (raised) return overlay._reauth || null;   // raised: this sign-in, as it was
   const hint = document.createElement('div');

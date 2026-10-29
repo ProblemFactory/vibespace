@@ -31,6 +31,9 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - In a Task Group's Context table, the folder picker keeps working when the group changes on another screen, and says so if its row is removed.
 - A form with unsaved changes comes to the front when it has to ask first, so you can answer.
 - Change build…, reopened after a download, now waits behind the window you moved to.
+- In a document, Link on a second link while the first one's form is open opens that link's own form, and Apply changes the link you asked about.
+- On iPhones with iOS 17 or earlier, the Design window's Comment sheet stays above the keyboard.
+- In a Task Group's Context table, «+ Add a path…» is empty with its hint again after an add, and the rows show their folders as they are now.
 
 ## 2.369.360 — 2026-10-27
 

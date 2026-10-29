@@ -311,7 +311,10 @@ async function capture(page, tag, name, rootSel, { clipSel = rootSel, pad = 0, f
   log(tag, name, m && m.missing ? 'MISSING ' + m.missing : `${m.rect.w}×${m.rect.h}`);
   return m;
 }
-const closeDialogs = (page) => page.evaljs(`(() => { for (const o of document.querySelectorAll('.dialog-overlay')) o.remove(); for (const m of document.querySelectorAll('.context-menu')) m.remove(); return 1; })()`);
+// lane dialog-yield r6: a dialog with fields is a FORM — a window of its own (`.dialog-form`), not an overlay; its root's remove() is
+// its shell's door (r5: the window closes, a form queued under its id opens). Missing them left the rule's «Who may read» form
+// open and dirty, so the conversation's Grant access waited behind its question and every later surface was drawn into the wrong one.
+const closeDialogs = (page) => page.evaljs(`(() => { for (const o of document.querySelectorAll('.dialog-overlay, .dialog-form')) o.remove(); for (const m of document.querySelectorAll('.context-menu')) m.remove(); return 1; })()`);
 const closeAllWindows = (page) => page.evaljs(`(() => { for (const id of [...window.app.wm.windows.keys()]) window.app.wm.closeWindow(id); return 1; })()`);
 /** Click the panel button whose text is the device's words for `key` inside `scope`. */
 const SEC = (adapterId) => `[data-chan-sec="${adapterId}"]`;
@@ -1148,7 +1151,7 @@ async function imPass({ lang, viewport, theme }) {
   await waitFor(page, `(window.app.sidebar._tasks || []).some((g) => g.title === 'Ops triage')`, 40);
   await page.evaljs(`(() => { const s = []; for (const [n, cwd, b] of [['pager-01', '/work/ops/pager', 'claude'], ['pager-02', '/work/ops/pager', 'codex'], ['web-ui', '/work/web/app', 'claude'], ['invoice-sync', '/work/billing/inv', 'claude'], ['release notes', '/work/ops/rel', 'codex'], ['scratch', '/tmp/scratch', 'claude']]) s.push({ id: 'w-' + n, name: n, cwd, backend: b, backendSessionId: 'cid-' + n.replace(/\\s/g, '-'), claudeSessionId: 'cid-' + n.replace(/\\s/g, '-') }); Object.defineProperty(window.app.sidebar, '_webuiSessions', { configurable: true, get: () => s, set: () => {} }); return s.length; })()`);
   const dlgWin = async () => {
-    await page.evaljs(`(() => { for (const o of document.querySelectorAll('.dialog-overlay')) o.remove(); for (const w of [...window.app.wm.windows.values()].filter((x) => x.type === 'channel')) window.app.wm.closeWindow(w.id); const w = window.app.openChannel('fake-poll', 'fake-poll-ops'); for (const e of document.querySelectorAll('[data-shot="win"]')) delete e.dataset.shot; w.element.dataset.shot = 'win'; return w.id; })()`);
+    await page.evaljs(`(() => { for (const o of document.querySelectorAll('.dialog-overlay, .dialog-form')) o.remove(); for (const w of [...window.app.wm.windows.values()].filter((x) => x.type === 'channel')) window.app.wm.closeWindow(w.id); const w = window.app.openChannel('fake-poll', 'fake-poll-ops'); for (const e of document.querySelectorAll('[data-shot="win"]')) delete e.dataset.shot; w.element.dataset.shot = 'win'; return w.id; })()`);
     await waitFor(page, `(() => { const w = [...window.app.wm.windows.values()].find((x) => x.element && x.element.dataset.shot === 'win'); return !!(w && w.content.querySelector('[data-channel-assign]')); })()`, 60);
     await page.evaljs(`(() => { const w = [...window.app.wm.windows.values()].find((x) => x.element && x.element.dataset.shot === 'win'); w.content.querySelector('[data-channel-assign]').click(); return 1; })()`);
   };
@@ -1171,7 +1174,7 @@ async function imPass({ lang, viewport, theme }) {
       await imCapture(page, tag, `${mobile ? 'm-' : ''}dlg-notify-rule`, '#chan-notify-dialog .dialog', IM_DLG_GROUPS);
     } else log(tag, 'the Notify dialog did not open');
   } else log(tag, 'the Grant access dialog did not open');
-  await page.evaljs(`(() => { for (const o of document.querySelectorAll('.dialog-overlay')) o.remove(); return 1; })()`);
+  await page.evaljs(`(() => { for (const o of document.querySelectorAll('.dialog-overlay, .dialog-form')) o.remove(); return 1; })()`);
   // ── B-f467: THE OUTBOX — one row per proposal, then the All view with the first row opened (its full card under it) ──
   await page.evaljs(`(() => { for (const w of [...window.app.wm.windows.values()]) window.app.wm.closeWindow(w.id); const w = window.app.openChannelOutbox(); for (const e of document.querySelectorAll('[data-shot="win"]')) delete e.dataset.shot; w.element.dataset.shot = 'win'; return w.id; })()`);
   if (!(await waitFor(page, `document.querySelectorAll('[data-shot="win"] .chan-outbox-list > .chan-orow').length >= 2`, 40))) log(tag, 'outbox rows not ready');

@@ -1747,7 +1747,9 @@ html:not(.voice-absent) .voice-field-grip > textarea { padding-right: 44px; }
    New Session's full-height phone sheet into a 500 px overlay and centred it — the header at −172..−78, off-screen (measured on
    981f70d6; c3ed5f0a 0..94). r5: a bottom sheet INSIDE such an overlay keeps `bottom: 0` — the overlay's backdrop-filter makes it
    the fixed sheet's containing block and it already ends at the keyboard (r4 added the inset to the design window's sheets
-   too: the Comment composer at −80..156 — its header off the top, a 344 px band of backdrop above the keyboard; bed27111 264..500). */
+   too: the Comment composer at −80..156 — its header off the top, a 344 px band of backdrop above the keyboard; bed27111 264..500).
+   r6: that containing block is DECLARED — the sheets are `position: absolute` in the fixed overlay (below), never a side effect of
+   the filter (Safari before 18 ignores the unprefixed backdrop-filter: the sheet anchored to the viewport, under the keyboard). */
 html.vs-kb-open .dialog-overlay:not(#dialog-overlay) { bottom: calc(var(--kb-inset, 0px) / var(--ui-scale, 1)); }
 html.vs-kb-open .dialog-overlay:not(#dialog-overlay) > .dialog { max-height: calc(min(80vh, 100vh - var(--kb-inset, 0px) - 16px) / var(--ui-scale, 1)); }
 .dialog label.hidden { display: none; } /* e.g. #custom-model-row toggle */
@@ -8320,7 +8322,9 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
   .design-bar > .design-btn, .design-bar > .design-pages { min-height: 44px; min-width: 44px; justify-content: center; }
   .design-bar > .design-stamp { display: none; }
   /* a bottom sheet: the phone's .dialog rule sizes every dialog 95vw !important — the sheet is the screen's width */
-  .dialog-overlay > .dialog.design-sheet, .dialog-overlay > .dialog.design-composer-sheet { position: fixed; left: 0; right: 0; bottom: 0; top: auto; width: 100% !important; max-width: none; min-width: 0 !important; border-radius: var(--radius) var(--radius) 0 0; border-bottom: none; }
+  /* r6 (lane dialog-yield): ABSOLUTE in its fixed overlay — the overlay is the sheet's containing block BY DECLARATION in every engine
+     (as `fixed` it was one only through the overlay's unprefixed backdrop-filter, which Safari before 18 drops: the sheet fell under the keyboard) */
+  .dialog-overlay > .dialog.design-sheet, .dialog-overlay > .dialog.design-composer-sheet { position: absolute; left: 0; right: 0; bottom: 0; top: auto; width: 100% !important; max-width: none; min-width: 0 !important; border-radius: var(--radius) var(--radius) 0 0; border-bottom: none; }
   .design-sheet-row { min-height: 44px; justify-content: center; }
   .design-sheet-page { min-height: 44px; }
   .design-composer-sheet .design-composer-foot button { min-height: 44px; min-width: 88px; }

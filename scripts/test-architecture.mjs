@@ -5680,6 +5680,14 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
 // key helper returning the same key whatever it is given are RED. THE CALLER IS TOLD reads a local async loader the body calls
 // (or an IIFE) as work after the open, and a liveness read by `parentNode` / `parentElement` / `document.contains(<own>)` as
 // one by isConnected.
+// Round 6 (acceptance r5 — the doc editor's Link form, keyed by the DOCUMENT, drew its address and text through a local helper's
+// own parameter, `field(label, value)` ⇒ `i.value = value`; §103 r5 read only `x.value = <param>` and stayed green while a
+// second Link ask raised the first form and Apply rewrote the first link): THE KEY NAMES THE INPUTS THROUGH EVERY ROAD A VALUE
+// TAKES, on both sides — a local or module HELPER's parameter that reaches a field / a load (two helpers deep; an object
+// argument by the members it reads), a destructured opts (`const { label } = opts` ⇒ `opts.label`), an opts member read
+// straight, an alias and an indirection (`const o = opts; const k = o.path; key: k` ⇒ the key names `opts.path` only), a
+// for-of variable. A RECORD named by one of its members carries its own facts (`m.id` names `m.name`); an options BAG
+// (opts / options / o …) is many inputs. Five planted shapes, each GREEN on 0ae9fbcb, are RED by name.
 {
   const lit = (x) => x && x.type === 'Literal' && (x.value === 'form' || x.value === 'decision');
   const DYN = (n) => n && n.type === 'ConditionalExpression' && [n.consequent, n.alternate].every(lit);
@@ -5690,27 +5698,108 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
   const walkOwn = (n, visit, keep = () => false, parent = null) => { if (!n || typeof n.type !== 'string') return; if (parent && /Function/.test(n.type) && !keep(n, parent)) return; visit(n, parent); for (const k of Object.keys(n)) { if (k === 'loc') continue; const c = n[k]; if (Array.isArray(c)) c.forEach((x) => walkOwn(x, visit, keep, n)); else if (c && typeof c.type === 'string') walkOwn(c, visit, keep, n); } };
   const LOAD_RE = /^(fetchJson|fetch|api)$/;
   const idsIn = (x) => { const o = new Set(); walkAll(x, (y, par) => { if (y.type === 'Identifier' && !(par && par.type === 'MemberExpression' && par.property === y && !par.computed) && !(par && par.type === 'Property' && par.key === y && !par.computed)) o.add(y.name); }); return o; };
-  /** r5: THE FORM'S INPUTS — param → how it reaches the form: a field's value, a load (its own body and the handlers it builds); a
-   *  local whose init reads a param carries it. `fieldProps`: a wrapper's field descriptors (`value: p`) count as a field too */
-  const inputsOf = (fnNode, params, roots, fieldProps) => {
-    const taint = new Map();
-    const paramsOf = (x) => { const o = new Set(); for (const nm of idsIn(x)) { if (params.has(nm)) o.add(nm); for (const q of taint.get(nm) || []) o.add(q); } return o; };
-    const locals = []; walkAll(fnNode.body, (y) => { if (y.type === 'VariableDeclarator' && y.id.type === 'Identifier' && y.init && !/Function/.test(y.init.type)) locals.push(y); });
-    for (let pass = 0; pass < 3; pass++) for (const d of locals) { const ps = paramsOf(d.init); if (ps.size) taint.set(d.id.name, new Set([...(taint.get(d.id.name) || []), ...ps])); }
-    const out = new Map(); const add = (x, why) => { for (const q of paramsOf(x)) if (!out.has(q)) out.set(q, why); };
-    for (const root of roots) walkAll(root, (y) => {
-      if (y.type === 'AssignmentExpression' && y.left.type === 'MemberExpression' && !y.left.computed && y.left.property.name === 'value') add(y.right, 'its field shows it');
-      if (fieldProps && y.type === 'Property' && !y.computed && (y.key.name || y.key.value) === 'value') add(y.value, 'its field shows it');
-      if (y.type === 'CallExpression' && y.callee.type === 'Identifier' && LOAD_RE.test(y.callee.name)) for (const a of y.arguments) add(a, 'its load sends it');
+  /** r6: THE ROADS A VALUE TAKES (acceptance r5 — the doc editor's Link form drew its address and text through a local helper's
+   *  OWN parameter, `field(label, value)` ⇒ `i.value = value`, and §103 r5 stayed green: a second Link ask raised the first form
+   *  and Apply rewrote the first link). A SOURCE is a parameter (`p`) or one member of it (`p.m`). A local carries what its init
+   *  reads; a destructured one the member it names (`const { label } = opts` ⇒ `opts.label`); an alias reads as what it aliases
+   *  (`const o = opts; o.label` ⇒ `opts.label`); a for-of variable its list. A guard (`p && p.id`, `p ? … : …`, `!p`) is no
+   *  read of `p`; a name a nested function binds is that function's own. `chain` = the call's enclosing functions (outermost
+   *  first); `tops` = the module's own top-level functions (a helper may live there). */
+  const namesOf = (q, out = []) => { if (!q) return out; if (q.type === 'Identifier') out.push(q.name); else if (q.type === 'ObjectPattern') q.properties.forEach((r) => namesOf(r.type === 'RestElement' ? r.argument : r.value, out)); else if (q.type === 'ArrayPattern') q.elements.forEach((e) => namesOf(e, out)); else if (q.type === 'AssignmentPattern') namesOf(q.left, out); else if (q.type === 'RestElement') namesOf(q.argument, out); return out; };
+  /** walkAll, carrying the names the functions on the way bind (a nested function's parameter is its own, not the form's) */
+  const walkScoped = (n, visit, shadow = new Set(), parent = null) => {
+    if (!n || typeof n.type !== 'string') return;
+    if (/Function/.test(n.type)) { const own = n.params.flatMap((q) => namesOf(q)); if (own.length) shadow = new Set([...shadow, ...own]); }
+    visit(n, parent, shadow);
+    for (const k of Object.keys(n)) { if (k === 'loc') continue; const c = n[k]; if (Array.isArray(c)) c.forEach((x) => walkScoped(x, visit, shadow, n)); else if (c && typeof c.type === 'string') walkScoped(c, visit, shadow, n); }
+  };
+  const roads = (chain, params, tops = new Map()) => {
+    const taint = new Map(), alias = new Map(), decl = [], helpers = new Map();
+    // what is visible at the call: each enclosing function's OWN body (the nearest first), all of the innermost (its handlers)
+    const collect = (n, all, parent) => {
+      if (!n || typeof n.type !== 'string') return;
+      if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && n.init && /Function/.test(n.init.type)) { if (!helpers.has(n.id.name)) helpers.set(n.id.name, n.init); if (!all) return; }
+      else if (n.type === 'FunctionDeclaration' && n.id) { if (!helpers.has(n.id.name)) helpers.set(n.id.name, n); if (!all) return; }
+      else if (/Function/.test(n.type) && !all) return;
+      else if (n.type === 'VariableDeclarator' && n.init) decl.push([n.id, n.init, false]);
+      else if ((n.type === 'ForOfStatement' || n.type === 'ForInStatement') && n.left.type === 'VariableDeclaration') for (const d of n.left.declarations) decl.push([d.id, n.right, true]);
+      for (const k of Object.keys(n)) { if (k === 'loc') continue; const c = n[k]; if (Array.isArray(c)) c.forEach((x) => collect(x, all, n)); else if (c && typeof c.type === 'string') collect(c, all, n); }
+    };
+    for (let i = chain.length - 1; i >= 0; i--) collect(chain[i].body, i === chain.length - 1, chain[i]);
+    const guard = (y, par) => !!par && ((par.type === 'LogicalExpression' && par.operator === '&&' && par.left === y) || (par.type === 'ConditionalExpression' && par.test === y) || (par.type === 'UnaryExpression' && par.operator === '!'));
+    const srcOf = (x, shadow = null) => { const o = new Set(); walkScoped(x, (y, par, sh) => {
+      if (y.type !== 'Identifier' || (par && par.type === 'MemberExpression' && par.property === y && !par.computed) || (par && par.type === 'Property' && par.key === y && !par.computed)) return;
+      if ((shadow && shadow.has(y.name)) || sh.has(y.name)) return;
+      const p = params.has(y.name) ? y.name : alias.get(y.name);
+      if (p) { if (par && par.type === 'MemberExpression' && par.object === y && !par.computed) o.add(`${p}.${par.property.name}`); else if (!guard(y, par)) o.add(p); return; }
+      for (const q of taint.get(y.name) || []) o.add(q);
+    }); return o; };
+    const unwrap = (x) => (x && x.type === 'LogicalExpression' && (x.operator === '||' || x.operator === '??') && x.right.type === 'ObjectExpression' ? x.left : x);
+    const whole = (x) => (x && x.type === 'Identifier' ? (params.has(x.name) ? x.name : alias.get(x.name) || null) : null);
+    const carry = (nm, srcs) => { if (srcs.size && !params.has(nm)) taint.set(nm, new Set([...(taint.get(nm) || []), ...srcs])); };
+    for (let pass = 0; pass < 3; pass++) for (const [id, init0, each] of decl) {
+      const init = unwrap(init0), p = each ? null : whole(init);
+      if (id.type === 'Identifier' && p) { if (!params.has(id.name)) alias.set(id.name, p); }
+      else if (id.type === 'Identifier') { if (!alias.has(id.name)) carry(id.name, srcOf(init)); }
+      else if (id.type === 'ObjectPattern' && p) for (const r of id.properties) { const k = r.type === 'Property' && !r.computed ? (r.key.name || r.key.value) : null; for (const nm of namesOf(r.type === 'RestElement' ? r.argument : r.value)) carry(nm, new Set([k ? `${p}.${k}` : p])); }
+      else { const s = srcOf(init); for (const nm of namesOf(id)) carry(nm, s); }
+    }
+    return { srcOf, helper: (nm) => helpers.get(nm) || tops.get(nm) || null };
+  };
+  const BAG_RE = /^(o|opt|opts|options|params|args|init|prefill|cfg|config|settings)$/;   // r6: a parameter that is a bag of inputs, not a record
+  const opensForm = (h) => { let o = false; walkAll(h.body, (z) => { if (!o && z.type === 'CallExpression' && z.callee.type === 'Identifier' && /^(createModalShell|mountsDialog|_mountsDialog|showInputDialog)$/.test(z.callee.name)) o = true; }); return o; };
+  /** r5 + r6: THE FORM'S INPUTS — source → how it reaches the form: a field's value (`x.value = …`; a wrapper's field `value: …`),
+   *  a load (fetchJson / fetch / api — its own body and the handlers it builds), or a LOCAL HELPER's parameter that does (r6:
+   *  `field(label, href)` where `field` sets `i.value = value` — two helpers deep; one that opens a form of its own is another
+   *  form, the call's own function a re-open). Each through the roads above. */
+  const inputsWith = (R, roots, fieldProps, depth = 0, tops = new Map(), skip = new Set()) => {
+    const out = new Map();
+    const add = (x, why, sh) => { for (const s of R.srcOf(x, sh)) if (!out.has(s)) out.set(s, why); };
+    for (const root of roots) walkScoped(root, (y, par, sh) => {
+      if (y.type === 'AssignmentExpression' && y.left.type === 'MemberExpression' && !y.left.computed && y.left.property.name === 'value') add(y.right, 'its field shows it', sh);
+      if (fieldProps && y.type === 'Property' && !y.computed && (y.key.name || y.key.value) === 'value') add(y.value, 'its field shows it', sh);
+      if (y.type !== 'CallExpression' || y.callee.type !== 'Identifier') return;
+      if (LOAD_RE.test(y.callee.name)) { for (const a of y.arguments) add(a, 'its load sends it', sh); return; }
+      const h = depth < 2 && !sh.has(y.callee.name) ? R.helper(y.callee.name) : null;
+      if (!h || skip.has(h) || opensForm(h)) return;
+      for (const [i, { keys, why }] of helperReach(h, tops, depth, new Set([...skip, h]))) {
+        const a = y.arguments[i]; if (!a) continue;
+        const parts = keys && a.type === 'ObjectExpression' ? a.properties.filter((q) => q.type === 'Property' && !q.computed && keys.has(q.key.name || q.key.value)).map((q) => q.value) : [a];
+        for (const x of parts) add(x, `${why.replace(/, through .*$/, '')}, through \`${y.callee.name}()\``, sh);
+      }
     });
     return out;
   };
-  /** r5: the subject rules of one keyed call → its RED lines (the inputs named; no member of a LIST; no constant helper) */
-  const subjectRules = ({ at, keyText, fn, params, reach, scanned, span, roots, fieldProps }) => {
+  /** a helper's parameter positions that reach a field's value / a load: index → { keys (the members of an object argument it
+   *  reads — `field(body, { label, value })` ⇒ value; null = the whole argument), why } */
+  const helperReach = (h, tops, depth, skip) => {
+    const hp = new Set(h.params.flatMap((q) => namesOf(q)));
+    const got = [...inputsWith(roads([h], hp, tops), [h.body], false, depth + 1, tops, skip)];
+    const out = new Map();
+    h.params.forEach((q0, i) => {
+      const q = q0.type === 'AssignmentPattern' ? q0.left : q0;
+      const names = namesOf(q); const hit = got.filter(([s]) => names.includes(s.split('.')[0])); if (!hit.length) return;
+      let keys = new Set();
+      if (q.type === 'Identifier') { for (const [s] of hit) { const m = s.split('.')[1]; if (!m) { keys = null; break; } keys.add(m); } }
+      else if (q.type === 'ObjectPattern') { for (const r of q.properties) { if (r.type !== 'Property' || r.computed) { keys = null; break; } if (namesOf(r.value).some((nm) => hit.some(([s]) => s.split('.')[0] === nm))) keys.add(r.key.name || r.key.value); } }
+      else keys = null;
+      out.set(i, { keys, why: hit[0][1] });
+    });
+    return out;
+  };
+  /** r5 + r6: the subject rules of one keyed call → its RED lines (the inputs named — through the same roads on both sides; no
+   *  member of a LIST; no constant helper) */
+  const subjectRules = ({ at, keyText, kv, chain, fn, params, scanned, span, roots, fieldProps, tops }) => {
     const red = [];
-    const notSubj = new Set([...span.matchAll(/\/\/\s*not the subject:\s*([A-Za-z_$][\w$]*)/g)].map((m) => m[1]).concat(['app']));   // (`app` — the application handle every form is given — is never a subject)
-    const inputs = inputsOf(fn, params, roots, fieldProps);
-    const dropped = [...inputs].filter(([x]) => !reach.has(x) && !notSubj.has(x));
+    const notSubj = new Set([...span.matchAll(/\/\/\s*not the subject:\s*([A-Za-z_$][\w$.]*)/g)].map((m) => m[1]).concat(['app']));   // (`app` — the application handle every form is given — is never a subject)
+    const R = roads(chain, params, tops);
+    const named = R.srcOf(kv);   // r6: what the key names — a parameter (all of it) or the members it reads
+    // a RECORD named by one of its members carries its own facts (`m.id` names `m.name`, `row.id` its `row.exec`); an options BAG
+    // (opts / options / o …) is many inputs — each member its own (`opts.path` names no `opts.label`)
+    const member = (root) => [...named].some((k) => k.startsWith(root + '.'));
+    const covered = (x) => { const root = x.split('.')[0]; return named.has(x) || named.has(root) || ((x === root || !BAG_RE.test(root)) && member(root)); };
+    const inputs = inputsWith(R, roots, fieldProps, 0, tops, new Set(chain));
+    const dropped = [...inputs].filter(([x]) => !covered(x) && !notSubj.has(x) && !notSubj.has(x.split('.')[0]));
     if (dropped.length) red.push(`${at} — the key «${keyText}» drops ${dropped.map(([x, why]) => `\`${x}\` (${why})`).join(', ')} — two such opens would share one form — name it, or say \`// not the subject: <name> — <why>\``);
     const lists = new Set(); walkAll(fn, (y) => { if (y.type === 'CallExpression' && y.callee.type === 'MemberExpression' && y.callee.object.type === 'Identifier' && y.callee.object.name === 'Array' && y.callee.property.name === 'isArray' && y.arguments[0] && y.arguments[0].type === 'Identifier' && params.has(y.arguments[0].name)) lists.add(y.arguments[0].name); });
     let listRead = null; for (const x of scanned) walkAll(x, (y) => { if (!listRead && y.type === 'MemberExpression' && !y.computed && y.object.type === 'Identifier' && lists.has(y.object.name) && !/^(length|map|filter|join|slice|some|every|find|reduce|forEach|sort|flatMap|concat)$/.test(y.property.name)) listRead = `${y.object.name}.${y.property.name}`; });
@@ -5729,6 +5818,8 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
       const decls = new Map();   // r4: name → every init declared under it in the file (a key resolved through the ones in its scope)
       walkAll(ast, (n) => { if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && n.init) decls.set(n.id.name, [...(decls.get(n.id.name) || []), n]); });
       const topLevel = new Set(); for (const st of ast.body) { const d = st.type === 'ExportNamedDeclaration' ? st.declaration : st; if (d && d.type === 'VariableDeclaration') d.declarations.forEach((x) => topLevel.add(x)); }
+      const topFns = new Map();   // r6: the module's own top-level functions (a helper a form's body calls may live there)
+      for (const st of ast.body) { const d = st.type === 'ExportNamedDeclaration' || st.type === 'ExportDefaultDeclaration' ? st.declaration : st; if (!d) continue; if (d.type === 'FunctionDeclaration' && d.id) topFns.set(d.id.name, d); if (d.type === 'VariableDeclaration') for (const x of d.declarations) if (x.id.type === 'Identifier' && x.init && /Function/.test(x.init.type)) topFns.set(x.id.name, x.init); }
       const localFns = new Map();   // r5: name → its function (a key helper, a loader the body calls)
       walkAll(ast, (y) => { if (y.type === 'FunctionDeclaration' && y.id) localFns.set(y.id.name, y); if (y.type === 'VariableDeclarator' && y.id.type === 'Identifier' && y.init && /Function/.test(y.init.type)) localFns.set(y.id.name, y.init); });
       const fns = [];
@@ -5803,7 +5894,7 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
             const scanned = [kv, ...scannedInits];
             if (allLit(kv)) subjRed.push(`${at} — a literal key names no subject («${keyText}»)`);
             else if (idOption && !minted) subjRed.push(`${at} — the key «${keyText}» is a caller's id option: it names the field's KIND, not its instance (mint the instance's own)`);
-            if (fn && !minted) subjRed.push(...subjectRules({ at, keyText, fn, params, reach, scanned, span, roots: [fn.body], fieldProps: false }));
+            if (fn && !minted) subjRed.push(...subjectRules({ at, keyText, kv, chain: [...fns], fn, params, scanned, span, roots: [fn.body], fieldProps: false, tops: topFns }));
             const helperAt = kv.type === 'Identifier' ? scannedInits.slice(0, 1) : [kv];   // the key itself (or the one local it names)
             if (!minted) for (const x of helperAt) walkAll(x, (y) => {   // a key HELPER that returns the same key whatever it is given (key: keyOf(m))
               if (y.type !== 'CallExpression' || y.callee.type !== 'Identifier' || !localFns.has(y.callee.name)) return;
@@ -5884,7 +5975,7 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
             const look = (x, depth) => walkAll(x, (y, par) => { if (y.type === 'Identifier' && !(par && par.type === 'MemberExpression' && par.property === y && !par.computed) && !(par && par.type === 'Property' && par.key === y && !par.computed)) { reach.add(y.name); if (depth < 3 && !params.has(y.name) && decls.has(y.name) && !seen.has(y.name)) { seen.add(y.name); for (const d of decls.get(y.name)) if (d.start >= fns[0].start && d.end <= fns[0].end) { scanned.push(d.init); look(d.init, depth + 1); } } } });
             look(kp.value, 0);
             const keyText = src.slice(kp.value.start, kp.value.end).replace(/\s+/g, ' ').slice(0, 70);
-            const red = subjectRules({ at, keyText, fn, params, reach, scanned, span, roots: [n.arguments[1], n.arguments[3]].filter(Boolean), fieldProps: true });
+            const red = subjectRules({ at, keyText, kv: kp.value, chain: [...fns], fn, params, scanned, span, roots: [n.arguments[1], n.arguments[3]].filter(Boolean), fieldProps: true, tops: topFns });
             subjRed.push(...red);
             wrapRows.push({ at, id: ip ? src.slice(ip.value.start, ip.value.end).replace(/\s+/g, ' ').slice(0, 40) : '—', key: keyText, subject: [...reach].filter((x) => params.has(x)).join(', ') || keyText, red: red.length });
           }
@@ -6021,7 +6112,7 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
   const keyed = real.rows.filter((r) => (r.kind === 'form' || r.kind === 'dynamic') && r.key && r.key !== 'null');
   console.log(`  THE KEY IS THE SUBJECT (r4) — file:line · id · key · what it names · beside (two subjects, two forms):\n${keyed.map((r) => `    ${short(r)} · ${r.id} · ${r.key} · ${r.subject}${r.beside ? ' · beside' : ''}`).join('\n')}`);
   console.log(`  THE KEY IS THE SUBJECT — the WRAPPER calls (r5: a mountsDialog / _mountsDialog call against its opts.key — its fields' values and its submit's loads) — file:line · id · key · what it names:\n${real.wrapRows.map((r) => `    ${r.at.replace(/^src\/lib\//, '')} · ${r.id} · ${r.key} · ${r.subject}${r.red ? ' · RED' : ''}`).join('\n')}`);
-  ok(real.subjRed.length === 0 && real.wrapRows.length >= 8, `§103 r4 + r5 every key names ONE subject — its INPUTS (${keyed.length} keyed forms + ${real.wrapRows.length} wrapper calls): no literal key, no caller's id option standing for an instance, no member of a LIST, no constant helper; every parameter that reaches a field's value, a load or a wrapper's key named by the key (or said «not the subject»)${real.subjRed.length ? ' — RED: ' + real.subjRed.join(' | ') : ''}`);
+  ok(real.subjRed.length === 0 && real.wrapRows.length >= 8, `§103 r4 + r5 + r6 every key names ONE subject — its INPUTS, through every road a value takes (${keyed.length} keyed forms + ${real.wrapRows.length} wrapper calls): no literal key, no caller's id option standing for an instance, no member of a LIST, no constant helper; every parameter that reaches a field's value, a load or a wrapper's key named by the key (or said «not the subject»)${real.subjRed.length ? ' — RED: ' + real.subjRed.join(' | ') : ''}`);
   const fixedForms = real.rows.filter((r) => r.kind === 'form' && (r.idKind === 'fixed' || r.idKind === 'the caller\'s'));
   const queueable = fixedForms.filter((r) => r.queueable);
   console.log(`  THE CALLER IS TOLD (r4) — ${fixedForms.length} fixed-id forms read \`raised\`; ${queueable.length} QUEUEABLE (keyed, not beside — another subject under the id waits behind the open one's ask) read \`ready\` and judge liveness by live():\n${queueable.map((r) => `    ${short(r)} · ${r.id} · ${r.readsReady ? 'reads ready ✓' : r.after ? `works after the open (${r.after}) — ready ✗` : 'a pure synchronous draw (its content lands in the body that opens)'} · own isConnected ${r.liveReads.length}`).join('\n')}\n  never queued: ${fixedForms.filter((r) => !r.queueable).length} (one subject ${fixedForms.filter((r) => !r.queueable && !r.key).length} · beside ${fixedForms.filter((r) => !r.queueable && r.beside).length} · undismissable ${fixedForms.filter((r) => !r.queueable && r.key && !r.beside && r.never).length} · read-only under their own id ${fixedForms.filter((r) => !r.queueable && r.key && !r.beside && !r.never).length})`);
@@ -6082,6 +6173,24 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
     && r5(ctl5.readyRed, 'zz-r5e.js:1').length === 1 && /await in load\(\)/.test(r5(ctl5.readyRed, 'zz-r5e.js:1')[0]) && !r5(ctl5.readyRed, 'zz-r5e.js:2').length
     && r5(ctl5.liveRed, 'zz-r5f.js:1').length === 2 && ctl5.liveRed.some((x) => /!overlay\.parentNode/.test(x)) && ctl5.liveRed.some((x) => /document\.contains\(body\)/.test(x)) && !ctl5.liveRed.some((x) => /body\.parentNode\.append|parentNode$/.test(x.split(' — ')[0]) && !/!/.test(x.split(' — ')[0])),
     `§103 r5 NEGATIVE CONTROLS (the shapes the acceptance planted GREEN on 37c1b566): a prefilled field value the key drops, a key reading a member of a LIST (a.id), a wrapper's opts.key dropping its field's value (mountsDialog), a key helper returning a constant (keyOf(m)), a nested async loader the body calls (a «pure draw» on 37c1b566) and a liveness by !overlay.parentNode / document.contains(body) are RED by name — each twin that names the input / reads ready, and body.parentNode.append(…), is not (${JSON.stringify({ subj: ctl5.subjRed, ready: ctl5.readyRed, live: ctl5.liveRed })})`);
+  // r6: THE ROADS (acceptance r5 — each shape GREEN on 0ae9fbcb) — RED by name; each twin that names the input, and a RECORD
+  // named by its id showing its own name, are not
+  const ctl6 = census103([
+    ['src/lib/zz-r6a.js', "function a7(host, path, href, text) { const sh = createModalShell({ id: 'r6a', key: `${host}:${path}`, beside: true, title: 'L', kind: 'form' }); if (sh.raised) return; const field = (label, value) => { const i = document.createElement('input'); i.value = value || ''; sh.body.append(i); return i; }; field('A', href); field('T', text); }\nfunction a8(host, path, href, text) { const sh = createModalShell({ id: 'r6a2', key: JSON.stringify([host, path, href, text]), beside: true, title: 'L', kind: 'form' }); if (sh.raised) return; const field = (label, value) => { const i = document.createElement('input'); i.value = value || ''; sh.body.append(i); return i; }; field('A', href); field('T', text); }"],
+    ['src/lib/zz-r6b.js', "function b7(app, opts) { const { path, label } = opts; const { body, raised } = createModalShell({ id: 'r6b', key: path, title: 'B', kind: 'form' }); if (raised) return; const i = document.createElement('input'); i.value = label; body.append(i); }\nfunction b8(app, opts) { const { path, label } = opts; const { body, raised } = createModalShell({ id: 'r6b2', key: `${path}:${label}`, title: 'B', kind: 'form' }); if (raised) return; const i = document.createElement('input'); i.value = label; body.append(i); }"],
+    ['src/lib/zz-r6c.js', "function c7(app, opts = {}) { const { body, raised } = createModalShell({ id: 'r6c', key: opts.path, title: 'C', kind: 'form' }); if (raised) return; const i = document.createElement('input'); i.value = opts.label || ''; body.append(i); }\nfunction c8(app, opts = {}) { const { body, raised } = createModalShell({ id: 'r6c2', key: `${opts.path}:${opts.label}`, title: 'C', kind: 'form' }); if (raised) return; const i = document.createElement('input'); i.value = opts.label || ''; body.append(i); }"],
+    ['src/lib/zz-r6d.js', "function d7(app, opts) { const o = opts; const k = o.path; const { body, raised } = createModalShell({ id: 'r6d', key: k, title: 'D', kind: 'form' }); if (raised) return; const i = document.createElement('input'); i.value = o.label; body.append(i); }\nfunction d8(app, opts) { const o = opts; const k = `${o.path}:${o.label}`; const { body, raised } = createModalShell({ id: 'r6d2', key: k, title: 'D', kind: 'form' }); if (raised) return; const i = document.createElement('input'); i.value = o.label; body.append(i); }"],
+    ['src/lib/zz-r6e.js', "const field = (body, { label, value }) => { const i = document.createElement('input'); i.placeholder = label; i.value = value || ''; body.append(i); return i; };\nfunction e7(app, m, words) { const { body, raised } = createModalShell({ id: 'r6e', key: m.hostId, title: 'E', kind: 'form' }); if (raised) return; field(body, { label: 'W', value: words }); }\nfunction e8(app, m, words) { const { body, raised } = createModalShell({ id: 'r6e2', key: `${m.hostId}:${words}`, title: 'E', kind: 'form' }); if (raised) return; field(body, { label: 'W', value: words }); }"],
+    ['src/lib/zz-r6f.js', "function f7(app, m, row) { const { body, raised } = createModalShell({ id: 'r6f', key: `${m.hostId}:${row && row.id}`, title: 'F', kind: 'form' }); if (raised) return; const i = document.createElement('input'); i.value = `${m.name} · ${row && row.label}`; body.append(i); }"],
+  ]);
+  const r6 = (k) => ctl6.subjRed.filter((b) => b.startsWith('src/lib/' + k + ' '));
+  ok(ctl6.subjRed.length === 5 && r6('zz-r6a.js:1').length === 1 && /drops `href` \(its field shows it, through `field\(\)`\), `text` \(its field shows it, through `field\(\)`\)/.test(r6('zz-r6a.js:1')[0])
+    && r6('zz-r6b.js:1').length === 1 && /drops `opts\.label` \(its field shows it\)/.test(r6('zz-r6b.js:1')[0]) && !/opts\.path/.test(r6('zz-r6b.js:1')[0])
+    && r6('zz-r6c.js:1').length === 1 && /drops `opts\.label` \(its field shows it\)/.test(r6('zz-r6c.js:1')[0])
+    && r6('zz-r6d.js:1').length === 1 && /drops `opts\.label` \(its field shows it\)/.test(r6('zz-r6d.js:1')[0])
+    && r6('zz-r6e.js:2').length === 1 && /drops `words` \(its field shows it, through `field\(\)`\)/.test(r6('zz-r6e.js:2')[0])
+    && !['zz-r6a.js:2', 'zz-r6b.js:2', 'zz-r6c.js:2', 'zz-r6d.js:2', 'zz-r6e.js:3', 'zz-r6f.js:1'].some((k) => r6(k).length),
+    `§103 r6 NEGATIVE CONTROLS (the roads — each GREEN on 0ae9fbcb): a field filled through a local helper's OWN parameter (the doc Link form: field(label, href)), a destructured opts (const { path, label } = opts), an opts member read straight (opts.label), an alias + an indirection (const o = opts; const k = o.path; key: k) and a module helper taking an object (field(body, { value: words })) are RED by name — each twin that names the input, and a RECORD named by its id showing its own name (m.hostId · m.name), are not (${JSON.stringify(ctl6.subjRed)})`);
   const rctl = readers103([
     ['src/lib/zz-r1.js', "const open = document.querySelectorAll('.dialog-overlay');"],
     ['src/lib/zz-r2.js', "if (el.classList.contains('dialog-form')) x();"],
