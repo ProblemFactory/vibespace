@@ -186,6 +186,20 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
   function writeRecord(rec) {
     if (faultAt) faultAt('write-record', '');
     writeAtomic(FILE, JSON.stringify(rec, null, 2) + '\n');
+    contentsChanged('record');
+  }
+  // lane vault-use-grants (the owner 2026-10-27 «我现在完全无法在 vault 里看到刚才建立的密码» — measured: an OPEN Vault window
+  // learnt nothing until it was closed and reopened): THE ONE NOTIFY of a change to what the Vault window lists — the record's
+  // writer above (every sealed entry: a paste, mint / put, a two-step code, a web login, a delete) and every other door whose
+  // rows the window draws (an Integrations field pasted, a run switch, a vault-use grant, a use that opened — they call
+  // `contentsChanged`; another store's own card — an account, a mount — writes its own file and is not one of them yet).
+  // Coalesced to ONE `{type: 'vault-contents', v}` broadcast per turn of the loop; it carries a counter, never a name or a
+  // value — every open window (this tab and every other client) re-reads the list and patches its rows in place.
+  let contentsV = 0, contentsDue = null;
+  function contentsChanged() {
+    if (contentsDue) return;
+    contentsDue = setImmediate(() => { contentsDue = null; contentsV++; try { bcast({ type: 'vault-contents', v: contentsV }); } catch { } });
+    contentsDue.unref?.();
   }
   function readRecordFile() { return JSON.parse(fs.readFileSync(FILE, 'utf8')); }
 
@@ -296,7 +310,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
     return v ? { ok: true, value: v } : { ok: false, code: 'key-malformed' };
   }
   /** Seal `value` under `name` (unlocked only — locked ⇒ refused by name, nothing written). */
-  function secretPut(name, value, { prov = null, actor = null, label = null, note = null, kind = null } = {}) {
+  function secretPut(name, value, { prov = null, actor = null, label = null, note = null, kind = null, hosts = null, askedBy = null } = {}) {
     if (!isSecretName(name)) return { ok: false, code: 'bad-name' };
     if (state() !== 'unlocked') { blocked(VB.HUB, secretVerb(name)); noteSecret(); return { ok: false, code: lockedCode() }; }   // noteSecret: a not-set-up vault refused a store (lane door-day-one-landing)
     const plain = Buffer.isBuffer(value) ? Buffer.from(value) : Buffer.from(String(value == null ? '' : value), 'utf8');
@@ -307,6 +321,11 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
       if (label) box.label = String(label).slice(0, 80);    // lane vault-paste-request: a free entry's label, kind and note (words a person wrote — never a value)
       if (note) box.note = String(note).slice(0, 400);
       if (kind) box.kind = String(kind).slice(0, 16);
+      // lane vault-use-grants: a free entry the owner filled at an agent's REQUEST names the hosts the request named and the
+      // conversation that asked (its id and name — words, never a value): the Vault window's search and origin, the
+      // «the hosts the entry was stored for» of a vault-use grant
+      if (Array.isArray(hosts) && hosts.length) box.hosts = hosts.map((h) => String(h).slice(0, 253)).slice(0, 16);
+      if (askedBy && typeof askedBy === 'object' && askedBy.conv) box.askedBy = { conv: String(askedBy.conv).slice(0, 160), name: String(askedBy.name || '').slice(0, 80) };
       const next = { ...record, entries: { ...record.entries, [name]: box } };
       writeRecord(next); record = next;
       return { ok: true };
@@ -342,7 +361,7 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
   }
   /** int317 + lane vault-mint-put: the secret entries' NAMES, their seal instants, and (agent entries) `prov`/`actor` —
    *  never a box, never a value; the Vault window's «Hub secrets» rows (src/server/vault-contents.js secretSource). */
-  const secretNames = () => (record ? Object.keys(record.entries).filter(isSecretName).sort().map((name) => { const b = record.entries[name] || {}; return { name, at: Number(b.at) || null, prov: b.prov || null, actor: b.actor || null, ...(b.label ? { label: b.label, note: b.note || '', kind: b.kind || null } : b.kind ? { kind: b.kind } : {}) }; }) : []);   // lane vault-paste-request: a free entry's label / note / kind — lane browser-login: a web login's provenance word (`kind` = its source), never a value
+  const secretNames = () => (record ? Object.keys(record.entries).filter(isSecretName).sort().map((name) => { const b = record.entries[name] || {}; return { name, at: Number(b.at) || null, prov: b.prov || null, actor: b.actor || null, ...(b.label ? { label: b.label, note: b.note || '', kind: b.kind || null } : b.kind ? { kind: b.kind } : {}), ...(Array.isArray(b.hosts) ? { hosts: b.hosts.slice() } : {}), ...(b.askedBy ? { askedBy: { ...b.askedBy } } : {}) }; }) : []);   // lane vault-paste-request: a free entry's label / note / kind — lane browser-login: a web login's provenance word (`kind` = its source), never a value
   /** Forget an entry (an unpaired device, a cleared relay token) — needs no DEK, so a locked vault forgets too. */
   function secretDrop(name) {
     if (!isSecretName(name)) return { ok: false, code: 'bad-name' };
@@ -412,10 +431,10 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
     const name = keyNameOf(entry) || String(entry || '');
     const u = VU.useOf(use, now());
     const outcome = VU.outcomeOf(o.outcome);
-    if (outcome === 'ok' || o.used === true) { uses.set(name, u); const sn = o.store ? keyNameOf(o.store) : null; if (sn) uses.set(sn, u); }   // o.used: a run's child had the value, whatever ended it
+    if (outcome === 'ok' || o.used === true) { uses.set(name, u); const sn = o.store ? keyNameOf(o.store) : null; if (sn) uses.set(sn, u); if (u.by !== 'system') contentsChanged('use'); }   // o.used: a run's child had the value, whatever ended it — lane vault-use-grants: a use moves the row's «last used» and its «used N×» (the window is told). Round 2 (claim 1): NEVER notify on the hub's own `by:system` reads — the window's own listing does such a read (app-logins → lawfulKey → noteUse), so a notify there would feed itself an endless re-read loop.
     if (u.by === 'system') return { receipt: null };   // the hub's own read: its «last used» only (a line per store read would drown the file)
     const receipt = VU.RECEIPT_RE.test(String(o.receipt || '')) ? String(o.receipt) : `vr-${crypto.randomBytes(6).toString('hex')}`;
-    if (VU.BEARERS.includes(u.by)) audit('vault-use', VU.useLine({ at: u.at, entry: name, purpose: o.purpose, use: u, actor: o.actor, outcome, receipt, ip: o.ip }));
+    if (VU.BEARERS.includes(u.by)) audit('vault-use', VU.useLine({ at: u.at, entry: name, purpose: o.purpose, use: u, actor: o.actor, outcome, receipt, ip: o.ip, grant: o.grant }));   // lane vault-use-grants: `o.grant` = the vault-use grant that admitted it
     if (VU.counts(outcome)) {
       const f = failures.note({ key: `${u.by}:${u.conv || o.key || o.actor || '-'}`, actor: o.actor, by: u.by, entry: name, door: u.door, outcome, at: u.at });
       if (f.fire) runHooks(failingHooks, 'a failing actor', f.card);
@@ -442,6 +461,26 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
       }
     } catch { text = ''; } finally { if (fd != null) { try { fs.closeSync(fd); } catch { } } }
     return VU.usesOf(text, conv, limit);
+  }
+  /** lane vault-use-grants: THE COUNTS of every entry's uses over the same bounded tail (VU.countsOf — the Vault window's «used
+   *  12× by 3 conversations», per entry and per vault-use grant), read again only when the file moved (size / mtime). */
+  let counted = { sig: null, counts: {} };
+  function useCounts() {
+    let fd = null;
+    try {
+      fd = fs.openSync(path.join(dataDir, AUDIT_FILE), fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0) | (fs.constants.O_NONBLOCK || 0));
+      const st = fs.fstatSync(fd);
+      if (!st.isFile()) return {};
+      const sig = `${st.size}:${st.mtimeMs}`;
+      if (counted.sig === sig) return counted.counts;
+      const n = Math.min(st.size, USES_TAIL), buf = Buffer.alloc(n);
+      let got = 0;
+      while (got < n) { const r = fs.readSync(fd, buf, got, n - got, st.size - n + got); if (!r) break; got += r; }
+      let text = buf.subarray(0, got).toString('utf8');
+      if (st.size > n) text = text.slice(text.indexOf('\n') + 1);
+      counted = { sig, counts: VU.countsOf(text) };
+      return counted.counts;
+    } catch { return {}; } finally { if (fd != null) { try { fs.closeSync(fd); } catch { } } }
   }
   const wrongPassword = (door, ip) => noteUse(VU.VAULT_ENTRY, { by: 'human', door }, { outcome: 'wrong_password', actor: ip ? `someone at ${ip}` : 'someone on this instance', key: ip || '-', ip });
 
@@ -667,7 +706,8 @@ function create({ dataDir, signInPassword = () => false, bcast = () => {}, log =
     // lane vault-contents-window: the Vault window's doors (src/server/vault-contents.js) — the second password again, a
     // store key's last use, a use by a person, and the vault's audit file (one line per reveal — never a value)
     confirm, lastUse: (store) => { const n = keyNameOf(store); return n && uses.has(n) ? { ...uses.get(n) } : null; }, noteUse, audit,
-    usesOf,   // lane vault-manual-and-lock: ONE conversation's own vault-use lines (vibespace-vault uses) — names, codes, receipts   // lane vault-use-law: noteUse = THE ONE WRITER of a use (the window's reveal, a door's use, a refusal)
+    usesOf, useCounts, contentsChanged,   // lane vault-use-grants: the window's use counts; THE ONE NOTIFY of a listed change
+    // lane vault-manual-and-lock: ONE conversation's own vault-use lines (vibespace-vault uses) — names, codes, receipts   // lane vault-use-law: noteUse = THE ONE WRITER of a use (the window's reveal, a door's use, a refusal)
     /** `fn()` after every successful unlock (a boot step that ran while locked — mounts' restore — runs again). */
     onUnlock(fn) { if (typeof fn === 'function') unlockHooks.push(fn); },
     /** r2: `fn()` after a setup and after every unlock (seal what the vault does not hold yet). */

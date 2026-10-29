@@ -233,7 +233,7 @@ try {
   console.log('⑦ RED CONTROL — a mutant paste door that logs the value and files it on an item');
   const doorFile = path.join(wt, 'src/server/vault-paste-door.js');
   const src = fs.readFileSync(doorFile, 'utf8');
-  const anchor = "settle(q, 'stored', { ref, grantHours, receipt });";
+  const anchor = "settle(q, 'stored', { ref, grantHours, receipt, standing });";   // lane vault-use-grants: + the default grant's facts
   check('the mutant\'s anchor is in the door', src.includes(anchor));
   fs.writeFileSync(doorFile, src.replace(anchor, "log('stored ' + vv.value); try { userTodos.add(q.sessionKey || 'vault', { origin: 'vault', kind: 'notice', text: 'stored ' + vv.value }); } catch { } " + anchor));
   await stopServer(); startServer();

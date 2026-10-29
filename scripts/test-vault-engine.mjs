@@ -572,9 +572,9 @@ console.log('P  THE USE LAW (lane vault-use-law — design q-043 D1 / D2 / D7): 
   const Mod = require('module');
   const loadAs = (rel, src) => { const abs = path.join(REPO, rel); const m = new Mod(abs, null); m.filename = abs; m.paths = Mod._nodeModulePaths(path.dirname(abs)); m._compile(src, abs); return m.exports; };
   const ES = fs.readFileSync(path.join(REPO, 'src/server/vault-engine.js'), 'utf8');
-  const from = "audit('vault-use', VU.useLine({ at: u.at, entry: name, purpose: o.purpose, use: u, actor: o.actor, outcome, receipt, ip: o.ip }));";
+  const from = "audit('vault-use', VU.useLine({ at: u.at, entry: name, purpose: o.purpose, use: u, actor: o.actor, outcome, receipt, ip: o.ip, grant: o.grant }));";   // lane vault-use-grants: + the grant that admitted it
   ok(ES.split(from).length === 2, 'the engine mutant\'s anchor is the writer\'s ONE audit call');
-  const VEm = loadAs('src/server/vault-engine.js', ES.replace(from, "audit('vault-use', { ...o, ...VU.useLine({ at: u.at, entry: name, purpose: o.purpose, use: u, actor: o.actor, outcome, receipt, ip: o.ip }) });"));
+  const VEm = loadAs('src/server/vault-engine.js', ES.replace(from, "audit('vault-use', { ...o, ...VU.useLine({ at: u.at, entry: name, purpose: o.purpose, use: u, actor: o.actor, outcome, receipt, ip: o.ip, grant: o.grant }) });"));
   const { dir: dm } = world({ keys: ['.accounts-key'] });
   const em = VEm.create({ dataDir: dm, kdf: CHEAP, log: quiet, idleTimer: false, register: false });
   await em.setup(PW, {});

@@ -898,6 +898,26 @@ const SETTINGS_SCHEMA = {
     description: t('The id or label of a browser profile (Browser panel / vibespace-browser profiles) that new sessions are pinned to when nothing more specific applies. Empty (default): sessions browse an ephemeral browser and keep no logins. A session\'s own choice, its conversation\'s earlier pin and its Task Group\'s default all outrank this.'),
     category: t('Agent browser'), liveApply: true,
   },
+  // lane vault-use-grants (the owner 2026-10-27 「每个密码请求都要我同意太麻烦了！」; round 6/7): an agent's paste request that names its
+  // hosts (`vibespace-vault request … --host <h>`) and this setting ON ⇒ the paste opens an 8-HOUR run grant to the REQUESTING
+  // conversation, HOST-SCOPED to those hosts (round 7 MINOR): a command toward them runs with no card; a command to any other
+  // host (or a request that named no hosts) still draws the card; a vault lock ends it; the entry switch is NOT flipped. Read by
+  // src/server/vault-paste-door.js (it passes the hosts to vault-run-door's grantPasted, which judges them). OFF: the paste
+  // grants nothing — the receipt tells the agent to request the secret and the owner opens the entry in the Vault window.
+  'vault.requestGrantsRequester': {
+    type: 'boolean', default: true,
+    label: t('A pasted secret may be used by the conversation that asked for it'),
+    description: t('When an agent asks you to paste a secret and names the hosts it is for, the conversation that asked may use it in commands to those hosts for 8 hours — they are not asked again. A command to any other host still shows you its card, and a request that named no hosts shows a card for every command. Locking the vault ends the grant, and the entry\'s own «Usable by agent runs» switch is untouched. OFF: a paste grants nothing — the agent\'s receipt tells it to request the secret, and you open the entry in the Vault window.'),
+    category: t('Integration'), liveApply: true,
+  },
+  // lane vault-use-grants (R4): THE POLICY JUDGE — an entry's policy (its 「Who may use it…」) lets the decision API approve a run the
+  // card would ask about (the LLM plugin's key and budget). Default OFF; read at every run (src/server/vault-run-door.js).
+  'vault.policyJudge': {
+    type: 'boolean', default: false,
+    label: t('Let the policy judge approve vault uses'),
+    description: t('An entry may carry your policy («only 192.168.1.1, read-only status calls») in the Vault window\'s «Who may use it…». ON: a run its grants do not cover is judged against that policy by the decision API (the LLM plugin, its key and its daily budget) — approved runs go without a card and are recorded in For you with a Revoke; a no, or a judge that cannot be asked, shows you the card. It never sees a value. OFF (default): every such run asks you.'),
+    category: t('Integration'), liveApply: true,
+  },
   'agents.contextInjection': {
     type: 'boolean', default: true,
     label: t('Inject Task Group context'),

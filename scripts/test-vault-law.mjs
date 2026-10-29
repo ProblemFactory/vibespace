@@ -421,6 +421,8 @@ console.log('⑨ THE USE LAW (lane vault-use-law — design q-043 D1 「用途�
     keyFor: 'hub-only', secretGet: 'hub-only', secretPut: 'hub-only', secretDrop: 'hub-only', secretAdopt: 'hub-only', resumeSeal: 'hub-only', audit: 'hub-only', idleTick: 'hub-only', close: 'hub-only',
     onUnlock: 'hub-only', onOpen: 'hub-only', onLock: 'hub-only', onBlocked: 'hub-only', onFailing: 'hub-only',
     macOf: 'hub-only',
+    useCounts: 'receipt',   // lane vault-use-grants: counts of the vault-use lines per entry / per grant (numbers — never a value)
+    contentsChanged: 'hub-only',   // lane vault-use-grants: THE ONE NOTIFY (a counter broadcast to the owner's pages — never a name or a value)
     usesOf: 'receipt',   // lane vault-manual-and-lock: ONE conversation's own vault-use lines (closed fields — never a value)   // lane vault-run-door: a mark over the run door's own store under a DEK-derived key — the hub's code only
   };
   const SIBLING_KEYS = new Set(['agentMint', 'agentPut']);
@@ -747,7 +749,7 @@ console.log('⑪ lane passkey-sink: A KERNEL PASSKEY SIGNATURE IS A USE — the 
     await new Promise((r) => setTimeout(r, 50));
     const audit = fs.readFileSync(path.join(d, VE.AUDIT_FILE), 'utf8');
     const lines = audit.split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((l) => l.event === 'vault-use' && l.door === 'passkey');
-    ok(lines.length === 2 && lines.every((l) => l.entry === 'browser-passkeys.key' && l.by === 'agent' && l.conv === 'conv-pk-1' && l.outcome === 'ok' && /^vr-[0-9a-f]{12}$/.test(l.receipt) && Object.keys(l).join() === 'at,event,entry,purpose,by,door,conv,actor,outcome,receipt,ip')
+    ok(lines.length === 2 && lines.every((l) => l.entry === 'browser-passkeys.key' && l.by === 'agent' && l.conv === 'conv-pk-1' && l.outcome === 'ok' && /^vr-[0-9a-f]{12}$/.test(l.receipt) && Object.keys(l).join() === 'at,event,entry,purpose,by,door,conv,actor,outcome,receipt,ip,grant')
       && /register a passkey on example\.test/.test(lines[0].purpose) && /sign in to example\.test with a passkey/.test(lines[1].purpose),
       'THE USE LAW: the new key and the signature are ONE vault-use line each (entry browser-passkeys.key, door passkey, the conversation, the purpose, a receipt — the closed key set)', lines);
     const sentinels = [pkcs8, Buffer.from(pkcs8, 'base64').toString('hex'), Buffer.from(pkcs8, 'base64').toString('base64url'), row.keySealed, a2.get.signature];
@@ -815,7 +817,7 @@ console.log('⑫ lane browser-login: A WEB LOGIN IS A VAULT ENTRY, ITS FILL A US
     ok(answers[0].status === 200 && answers[4].status === 200 && answers[2].status === 404 && answers[3].status === 403 && bobPw && k.filledCredentials().length >= 3, 'the route answers a fill, a submitted fill, a signup and two refusals (login_no_entry 404 · login_phishing 403)', answers.map((a) => [a.status, a.text.slice(0, 160)]));
     ok(answers.every((a) => sentinels.every((x) => !a.text.includes(x))), 'THE SENTINEL SWEEP: no answer of the route holds a password (the owner\'s or the one the vault minted) — raw, hex, base64 or base64url');
     const lines = fs.readFileSync(path.join(d, VE.AUDIT_FILE), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((l) => l.event === 'vault-use' && l.door === 'browser-login');
-    ok(lines.length >= 3 && lines.every((l) => /^web-login:https:\/\/shop\.example\.test#/.test(l.entry) && l.by === 'agent' && l.conv === 'conv-wl-1' && Object.keys(l).join() === 'at,event,entry,purpose,by,door,conv,actor,outcome,receipt,ip') && lines.some((l) => l.purpose === 'sign in at https://shop.example.test' && l.outcome === 'ok') && lines.some((l) => /register an account/.test(l.purpose)) && sentinels.every((x) => !fs.readFileSync(path.join(d, VE.AUDIT_FILE), 'utf8').includes(x)),
+    ok(lines.length >= 3 && lines.every((l) => /^web-login:https:\/\/shop\.example\.test#/.test(l.entry) && l.by === 'agent' && l.conv === 'conv-wl-1' && Object.keys(l).join() === 'at,event,entry,purpose,by,door,conv,actor,outcome,receipt,ip,grant') && lines.some((l) => l.purpose === 'sign in at https://shop.example.test' && l.outcome === 'ok') && lines.some((l) => /register an account/.test(l.purpose)) && sentinels.every((x) => !fs.readFileSync(path.join(d, VE.AUDIT_FILE), 'utf8').includes(x)),
       'THE USE LAW: every fill is ONE vault-use line through the engine\'s noteUse (the entry, door browser-login, the conversation, the purpose, a receipt — the closed key set), never a password', lines.map((l) => [l.entry, l.purpose, l.outcome]));
     // MUTANT: a watch copy that answers the values, a route copy that passes the answer on
     const dsrc = read('src/server/browser-dialogs.js'), rsrc = read('src/routes/browser.js');

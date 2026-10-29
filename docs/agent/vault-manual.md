@@ -24,7 +24,7 @@ vibespace-vault run [--env NAME=vault://…]… [--file NAME=vault://…|@<templ
 vibespace-vault list                what you may use in a run: entries the user opened for runs, or granted to you
 vibespace-vault request <vault://…> --for "<purpose>"
                                     ask the user for an entry, with what you will run with it
-vibespace-vault request "<what you need>" --purpose "<why>" [--into <row>.<field> | --kind api-key|password|secret] [--name <label>]
+vibespace-vault request "<what you need>" --purpose "<why>" [--into <row>.<field> | --kind api-key|password|secret] [--name <label>] [--host <h>[,<h>…]]
                                     ask the user to PASTE a secret you do not have — a masked box in their For you tray
 vibespace-vault uses                your grants, your open requests, your own uses (entry, purpose, when, outcome, receipt)
 ```
@@ -90,10 +90,25 @@ paste is the grant), **REFUSED** (do not ask again for 10 minutes), or **WITHDRA
 once it is unlocked). You never see the value. The same place asked twice while one is open answers the same id; at most 4
 open per conversation. `vibespace-vault uses` lists your paste boxes still waiting.
 
+**Name where you will use it** — `--host 192.168.1.1` (host names or addresses, comma-separated, at most 8; never a
+wildcard): the request box then tells the user that THIS conversation may use the new entry in commands to those hosts for
+**8 hours** (unless they turned that off), and after the paste your receipt says so. Within those 8 hours, a command TOWARD
+those hosts runs with no card; a command to ANY OTHER host still shows the user its card, and a vault lock ends the grant.
+Name no host and the grant admits nothing — every command shows the user its card. A paste always makes a NEW entry (the same
+label gives a new id). If the user turned the setting off, the paste grants nothing: your receipt tells you to `request` the
+secret, and the user opens the entry in the Vault window. `vibespace-vault
+list` shows an entry you may use as yours «with no card for <hosts>».
+
 ## Using a stored secret in a command — `run`
 
 You write a **reference** where the value goes; the hub puts the value into the command it starts for you and hands you
 back the output with the value blanked to `[vault:<store>/<row>/<field>]`.
+
+**No card each time** when the user gave this conversation a **standing approval** for the entry and the hosts your command
+reaches (the Vault window's «Who may use it…», or their «Always» on an earlier card — `vibespace-vault list` says «with no
+card for <hosts>»), or — if they turned it on — when their **policy judge** finds the command inside the policy they wrote
+for the entry. The answer then says `by: grant` / `by: policy`. Another host, or a command whose destination cannot be told
+(a shell, an interpreter, a config file), still shows them its card.
 
 - **How the value reaches the command** (never its command line — every user of the machine can read that):
   - `--env GH_TOKEN=vault://…` — an environment variable (the usual way: gh, aws, psql's PGPASSWORD, rclone);

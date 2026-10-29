@@ -1,0 +1,330 @@
+#!/usr/bin/env node
+// WHO MAY USE A STORED SECRET, AND THE WINDOW THAT FINDS IT — IN A REAL PAGE (heavy, chrome — lane vault-use-grants; the owner
+// 2026-10-27: 「我现在完全无法在 vault 里看到刚才建立的密码」 — measured: an OPEN Vault window learnt nothing until reopened — and
+// 「每个密码请求都要我同意太麻烦了！」). A worktree hub WITH a sign-in password, a stub CLI behind the REAL chat wrapper (a live
+// conversation «Home network» with its own session token — the suite plays its agent), a fake `curl` in a read-only folder on
+// the hub's PATH, a real headless Chrome with TWO pages of one sign-in (the WATCHING one and the STORING one):
+//   ① sign in, set the second password from the page, the live conversation and its token
+//   ② THE LIVE LIST (the owner's symptom): the watching page holds the Vault window open with «Unifi» typed — «no match»
+//      NAMES what it searched; the agent asks (`vibespace-vault request … --name "UniFi UCG-Fiber admin (192.168.1.1)"
+//      --host 192.168.1.1`); the STORING page answers it through the request route ⇒ the row appears in the watching window
+//      WITHOUT a reopen (the search box kept, the «N stored values» line follows), its origin «Filled by you · asked for by
+//      Home network»; the request box SAID the default before the paste
+//   ③ NO CARD: the agent's `vibespace-vault run --env T=<ref> -- curl https://192.168.1.1/…` runs at once (the default grant) —
+//      its output scrubbed; the row's chip «Home network · 192.168.1.1 · used 1×» arrives by itself
+//   ④ THE CARD THAT NAMES THE GRANT: a run to 10.0.0.9 files its card — «a standing approval exists … this run is outside it:
+//      10.0.0.9» — denied
+//   ⑤ 「Who may use it…」: THE principal picker (All agents + the live conversation), the hosts, the end; All agents added ⇒
+//      验证是你 first (a widening), then the chip; ✕ takes it back with a click
+//   ⑥ «no match» under a picked purpose («Kept by agents») names it + 「Search all」 ⇒ the row
+//   ⑦ THE POLICY JUDGE'S RECORD (R4; never a vendor): with the hub stopped, the REAL run door over the same data dir and a STUB
+//      judge approves one run (the way the window suite seeds its cards — no test door in the product); the hub boots, and
+//      the approval is where a run card's result is shown today — For you (the chat card chain is not on this base):
+//      «Approved by the policy judge · HH:MM · inside your policy (0.93)»; its door opens the entry's row, which says the policy
+//   --shots <dir> keeps vug-*.png (the search before / after, the picker, the card naming the grant).
+//   RED CONTROL: this suite over the base tree (6428c67e) — ② the row never appears without a reopen; ③–⑥ do not exist.
+// Run: node scripts/test-vault-use-grants-chrome.mjs [--shots <dir>]   (SKIPs without chrome)
+import { execSync, spawn } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
+import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
+const require = createRequire(import.meta.url);
+const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => fs.existsSync(p));
+if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
+const VNC_ENV = await vncEnv();
+const [PORT, CDP_PORT] = await freePorts(2);
+const wt = scratch('vug-wt'), PROFILE = scratch('vug-chrome'), fakeHome = scratch('vug-home'), stubDir = scratch('vug-stub'), fakeBin = scratch('vug-bin');
+const SHOTS = process.argv.includes('--shots') ? path.resolve(process.argv[process.argv.indexOf('--shots') + 1]) : null;
+for (const d of [fakeHome, stubDir, fakeBin, ...(SHOTS ? [SHOTS] : [])]) fs.mkdirSync(d, { recursive: true });
+const CWD = path.join(fakeHome, 'project'); fs.mkdirSync(CWD, { recursive: true });
+let failed = 0, passed = 0;
+const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const SIGN_IN = 'vug-leg-sign-in-7';
+const SECOND = 'vug leg second password';
+const SID = crypto.randomUUID();
+const VALUE = ['unifi', 'admin', 'value', crypto.randomBytes(8).toString('hex')].join('-');
+const LABEL = 'UniFi UCG-Fiber admin (192.168.1.1)';
+
+try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch { }
+execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
+for (const f of ['src', 'public', 'server.js', 'package.json', 'data/bin', 'docs/agent']) execSync(`rm -rf ${wt}/${f} && mkdir -p ${path.dirname(`${wt}/${f}`)} && cp -r ${repo}/${f} ${wt}/${f}`);
+fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
+fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
+// the stub CLI: a live conversation (its init names SID); it answers nothing — the suite plays its agent
+const stubPath = path.join(stubDir, 'claude');
+fs.writeFileSync(stubPath, `#!${process.execPath}
+const fs = require('fs');
+const args = process.argv.slice(2);
+if (args.includes('--version')) { console.log('2.1.281 (Claude Code) stub'); process.exit(0); }
+if (args.includes('--help')) { console.log('Usage: claude [options]'); process.exit(0); }
+fs.writeFileSync(${JSON.stringify(stubDir)} + '/env-' + process.pid + '.json', JSON.stringify(process.env));
+process.stdout.write(JSON.stringify({ type: 'system', subtype: 'init', model: 'claude-fable-5', cwd: ${JSON.stringify(CWD)}, tools: ['Bash'], permissionMode: 'default', claude_code_version: '2.1.281', session_id: ${JSON.stringify(SID)}, uuid: 'u-' + process.pid }) + '\\n');
+process.stdin.on('data', () => {});
+process.stdin.on('end', () => process.exit(0));
+`, { mode: 0o755 });
+// a fake `curl` in a READ-ONLY folder on the hub's PATH (the door's «an agent could have written it» is false)
+fs.writeFileSync(path.join(fakeBin, 'curl'), `#!${process.execPath}\nprocess.stdout.write('curl got ' + process.env.T + ' for ' + process.argv.slice(2).join(' ') + '\\n');\n`, { mode: 0o555 });
+fs.chmodSync(fakeBin, 0o555);
+
+const LOG = path.join(stubDir, 'server.log');
+let srv = null;
+const startServer = () => { const fd = fs.openSync(LOG, 'a'); srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PATH: fakeBin + ':' + process.env.PATH, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: SIGN_IN }, stdio: ['ignore', fd, fd] }); fs.closeSync(fd); };
+const stopServer = async () => { const p = srv; srv = null; if (!p) return; p.kill('SIGTERM'); await new Promise((r) => { const t = setTimeout(() => { try { p.kill('SIGKILL'); } catch { } r(); }, 8000); if (p.exitCode !== null || p.signalCode !== null) { clearTimeout(t); r(); return; } p.once('exit', () => { clearTimeout(t); r(); }); }); };
+const ready = async (ms = 60000) => { const t0 = Date.now(); for (;;) { try { const r = await fetch(`http://127.0.0.1:${PORT}/login`); if (r.status === 200) return true; } catch { } if (Date.now() - t0 > ms) return false; await sleep(300); } };
+const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage',
+  '--window-size=1280,800', '--disable-background-timer-throttling', `--user-data-dir=${PROFILE}`, 'about:blank'], { stdio: 'ignore' });
+let cleaned = false;
+const cleanup = () => {
+  if (cleaned) return; cleaned = true;
+  try { chrome.kill('SIGKILL'); } catch { }
+  try { srv && srv.kill('SIGKILL'); } catch { }
+  for (const r of [wt, fakeHome, stubDir]) { try { endRootedProcesses(r); } catch { } }
+  try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch { }
+  try { fs.chmodSync(fakeBin, 0o755); } catch { }
+  for (const d of [wt, PROFILE, fakeHome, stubDir, fakeBin]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } }
+};
+process.on('exit', cleanup);
+for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });
+
+const WebSocket = require('ws');
+/** ONE page of the browser (its own CDP socket): navigate / eval / wait / click / shot. */
+async function pageOf(t) {
+  const ws = new WebSocket(t.webSocketDebuggerUrl, { maxPayload: 64 * 1024 * 1024 });
+  await new Promise((r) => ws.on('open', r));
+  let seq = 0; const pend = new Map();
+  ws.on('message', (d) => { const m = JSON.parse(d); if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); } });
+  const cdp = (method, params = {}) => new Promise((res, rej) => { const id = ++seq; pend.set(id, (m) => (m.error ? rej(new Error(m.error.message)) : res(m.result))); ws.send(JSON.stringify({ id, method, params })); });
+  const evalJs = async (expr) => { const r = await cdp('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error('page threw: ' + (r.exceptionDetails.exception?.description || r.exceptionDetails.text)); return r.result.value; };
+  const until = async (expr, { timeout = 15000, step = 120 } = {}) => { const t0 = Date.now(); for (;;) { let v = null; try { v = await evalJs(expr); } catch { } if (v) return v; if (Date.now() - t0 > timeout) return v; await sleep(step); } };
+  const centerOf = (sel) => evalJs(`(() => { const el = document.querySelector(${JSON.stringify(sel)}); if (!el) return null; el.scrollIntoView({ block: 'center' }); const r = el.getBoundingClientRect(); const x = r.left + r.width / 2, y = r.top + r.height / 2; const hit = document.elementFromPoint(x, y); return { x, y, w: r.width, h: r.height, hits: !!hit && (hit === el || el.contains(hit)) }; })()`);
+  const realClick = async (sel) => { const p = await centerOf(sel); if (!p || !p.hits) return p || false; await cdp('Input.dispatchMouseEvent', { type: 'mouseMoved', x: p.x, y: p.y }); await sleep(100); await cdp('Input.dispatchMouseEvent', { type: 'mousePressed', x: p.x, y: p.y, button: 'left', clickCount: 1 }); await cdp('Input.dispatchMouseEvent', { type: 'mouseReleased', x: p.x, y: p.y, button: 'left', clickCount: 1 }); return true; };
+  const api = (method, p, body) => evalJs(`fetch(${JSON.stringify(p)}, { method: ${JSON.stringify(method)}, headers: { 'Content-Type': 'application/json' }${body ? `, body: ${JSON.stringify(JSON.stringify(body))}` : ''} }).then(async (r) => ({ status: r.status, json: await r.json().catch(() => ({})) }))`);
+  const shot = async (name) => { if (!SHOTS) return; try { await cdp('Page.bringToFront'); } catch { } try { const r = await cdp('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(SHOTS, name), Buffer.from(r.data, 'base64')); } catch { } };   // round 4 (MINOR): bring the page to the FRONT first — a hidden page A (after page B opened via /json/new) stalled Page.captureScreenshot 1.5–3.5 min
+  await cdp('Page.enable');
+  await cdp('Page.addScriptToEvaluateOnNewDocument', { source: ONBOARDED_SOURCE });
+  return { cdp, evalJs, until, realClick, api, shot };
+}
+const visible = (sel) => `(() => { const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return false; const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; })()`;
+const cli = (bin, args, token, { timeout = 20000 } = {}) => new Promise((resolve) => { const c = spawn(process.execPath, [path.join(wt, 'data', 'bin', bin), ...args], { cwd: CWD, env: { PATH: process.env.PATH, HOME: fakeHome, VIBESPACE_API: `http://127.0.0.1:${PORT}`, VIBESPACE_SESSION_TOKEN: token } }); let out = ''; c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { out += d; }); const k = setTimeout(() => c.kill('SIGKILL'), timeout); c.on('close', (code) => { clearTimeout(k); resolve({ code, out }); }); });
+const ask = async (args, token) => { let r = null; for (let i = 0; i < 40; i++) { r = await cli('vibespace-vault', ['request', ...args], token); if (r.code === 0 || /unknown option/.test(r.out)) break; await sleep(300); } return { ...r, id: (/\((sr-[0-9a-f]{12})\)/.exec(r.out) || [])[1] || null }; };
+const LIST_ROW = (label) => `[...document.querySelectorAll('.vw-list .vw-row')].find((r) => r.isConnected && r.querySelector('.vw-label') && r.querySelector('.vw-label').textContent === ${JSON.stringify(label)})`;
+
+try {
+  let t0 = null;
+  for (let i = 0; i < 80 && !t0; i++) { try { t0 = (await (await fetch(`http://127.0.0.1:${CDP_PORT}/json`)).json()).find((t) => t.type === 'page'); } catch { await sleep(250); } }
+  if (!t0) throw new Error('no chrome page');
+  const A = await pageOf(t0);   // THE WATCHING PAGE
+  startServer();
+  check('the hub boots (sign-in password on, a fake curl on its PATH)', await ready());
+  const URL = `http://127.0.0.1:${PORT}/`;
+
+  console.log('① sign in, the second password, a live conversation');
+  await A.cdp('Page.navigate', { url: URL + 'login' });
+  await A.until(`document.readyState === 'complete'`);
+  check('signed in (the watching page)', (await A.evalJs(`fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: ${JSON.stringify(SIGN_IN)} }) }).then((r) => r.status)`)) === 200);
+  await A.cdp('Page.navigate', { url: URL });
+  check('the app loads', !!(await A.until(`!!(window.app && app.wm && document.getElementById('taskbar-user-todos'))`, { timeout: 30000 })));
+  await A.until(`!document.getElementById('loading-screen')`, { timeout: 30000 });
+  const su = await A.api('POST', '/api/vault/setup', { password: SECOND });
+  check('the second password is set from the page (unlocked)', su.status === 200 && su.json.state === 'unlocked', su);
+  await A.api('POST', '/api/vault/secrets', { label: 'Router guest wifi', kind: 'password', note: '', value: 'guest-wifi-made-up-1234' });
+  const lr = await fetch(`http://127.0.0.1:${PORT}/api/login`, { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: `http://127.0.0.1:${PORT}` }, body: JSON.stringify({ password: SIGN_IN }) });
+  const cookie = String(lr.headers.get('set-cookie') || '').split(';')[0];
+  const ws0 = new WebSocket(`ws://127.0.0.1:${PORT}/ws`, { headers: { Cookie: cookie, Origin: `http://127.0.0.1:${PORT}` } });
+  await new Promise((r, j) => { ws0.on('open', r); ws0.on('error', j); });
+  ws0.send(JSON.stringify({ type: 'create', backend: 'claude', mode: 'chat', cwd: CWD, reqId: 'vug1', sessionName: 'Home network' }));
+  let env = null;
+  for (let i = 0; i < 100 && !env; i++) { for (const f of fs.readdirSync(stubDir).filter((x) => x.startsWith('env-'))) { try { const e = JSON.parse(fs.readFileSync(path.join(stubDir, f), 'utf8')); if (e.VIBESPACE_SESSION_TOKEN) env = e; } catch { } } if (!env) await sleep(250); }
+  const TOKEN = env && env.VIBESPACE_SESSION_TOKEN;
+  check('a live conversation «Home network» through the real spawn path with its own session token', !!TOKEN);
+
+  console.log('② THE LIVE LIST — the watching window finds what the storing page stored, with no reopen');
+  await A.evalJs(`app.replayOpenSpec({ action: 'openVault' })`);
+  check('the watching page holds the Vault window open (one value listed)', !!(await A.until(`!!document.querySelector('.vw-list .vw-row')`, { timeout: 15000 })));
+  await A.evalJs(`(() => { const i = document.querySelector('.vw-search'); i.focus(); i.value = 'Unifi'; i.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+  const empty0 = await A.until(`(() => { const e = [...document.querySelectorAll('.vw-list .vw-empty')].find((x) => x.isConnected); return e ? e.textContent : null; })()`, { timeout: 5000 });
+  check('«Unifi» typed: «no match» NAMES what it searched (names, kinds, purposes, hosts, where they came from, ids)', /No stored value matches “Unifi” — searched: names, kinds, purposes, hosts, where they came from, ids/.test(String(empty0)), empty0);
+  const note0 = await A.evalJs(`(document.querySelector('.vw-note') || document.querySelector('.vault-window .vw-head-note') || {}).textContent || ''`);
+  await A.shot('vug-1-search-before.png');
+  const a1 = await ask(['the UniFi admin password', '--purpose', 'log in to the UniFi gateway to read the WAN status', '--kind', 'password', '--name', LABEL, '--host', '192.168.1.1'], TOKEN);
+  const hostsHere = a1.code === 0;
+  const a1b = hostsHere ? a1 : await ask(['the UniFi admin password', '--purpose', 'log in to the UniFi gateway to read the WAN status', '--kind', 'password', '--name', LABEL], TOKEN);
+  check('the agent asks with the hosts it will use (`--host 192.168.1.1`) ⇒ exit 0, a request id, «for 192.168.1.1»', hostsHere && !!a1.id && /for 192\.168\.1\.1/.test(a1.out), a1.out);
+  const reqId = a1b.id;
+  const todo = async () => (await A.api('GET', '/api/user-todos')).json.todos;
+  const item = ((await todo()).open || []).find((i) => i.action && i.action.requestId === reqId);
+  check('THE REQUEST BOX SAYS THE HOST-SCOPED 8-HOUR GRANT before the paste (round 7 — a paste opens no switch): «It said it needs it for: 192.168.1.1. If you paste it, the conversation that asked may use it in commands to those hosts for 8 hours — a command to any other host still shows you its card … turn on «Usable by agent runs» …»', !!item && /It said it needs it for: 192\.168\.1\.1\. If you paste it, the conversation that asked may use it in commands to those hosts for 8 hours/.test(item.detail) && /a command to any other host still shows you its card/.test(item.detail) && /turn on «Usable by agent runs»/.test(item.detail), item && item.detail);
+  // THE STORING PAGE: a second page of the same sign-in answers the request through the request route
+  const tB = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?about:blank`, { method: 'PUT' })).json();
+  const B = await pageOf(tB);
+  await B.cdp('Page.navigate', { url: URL });
+  await B.until(`!!(window.app && app.wm)`, { timeout: 30000 });
+  const stored = await B.api('POST', `/api/vault/secret-requests/${reqId}/answer`, { answer: 'store', value: VALUE });
+  check('the storing page pastes the value (the request route) ⇒ stored, a `secret:<id>` entry', stored.status === 200 && stored.json.outcome === 'stored' && /^vault:\/\/secrets\/secret:[0-9a-f]{10}\/secret$/.test(stored.json.ref), stored);
+  const REF = stored.json.ref;
+  const at = Date.now();
+  const live = await A.until(`!!(${LIST_ROW(LABEL)})`, { timeout: 6000, step: 100 });
+  const ms = Date.now() - at;
+  check(`THE WATCHING WINDOW shows the stored row WITHOUT a reopen (${ms} ms after the store)`, !!live, { ms });
+  const kept = await A.evalJs(`({ q: document.querySelector('.vw-search').value, note: (document.querySelector('.vw-note') || {}).textContent || '', rows: [...document.querySelectorAll('.vw-list .vw-row')].filter((r) => r.isConnected).length })`);
+  check('… the search box keeps «Unifi», the «N stored values» line follows (1 → 2), only the match shows', kept.q === 'Unifi' && /\b2 stored values\b/.test(kept.note) && kept.rows === 1, { kept, note0 });
+  const prov = await A.evalJs(`(() => { const r = ${LIST_ROW(LABEL)}; return r ? { prov: r.dataset.prov, chip: (r.querySelector('.vw-chip-prov .vw-chip-words') || {}).textContent || '', meta: (r.querySelector('.vw-meta') || {}).textContent || '' } : null; })()`);
+  check('its origin: «Filled by you · asked for by Home network»; its meta names the host', !!prov && prov.prov === 'request' && prov.chip === 'Filled by you · asked for by Home network' && /for 192\.168\.1\.1/.test(prov.meta), prov);
+  await A.shot('vug-2-search-after.png');
+
+  console.log('③ THE HOST-SCOPED 8-HOUR PASTE GRANT (round 7) — a run to the host the request NAMED runs with NO card; a run to ANOTHER host draws the card, where «Always» (验证是你) writes the standing member and opens «Usable by agent runs»');
+  const cards = async () => ((await todo()).open || []).filter((i) => i.action && i.action.type === 'vault-run-ask');
+  // (a) IN SCOPE — a run to 192.168.1.1 (the pasted --host) is admitted with NO card (the owner's 「每个密码请求都要我同意太麻烦了！」)
+  const inScope = await cli('vibespace-vault', ['run', '--env', `T=${REF}`, '--', 'curl', '-sk', 'https://192.168.1.1/api/auth/login'], TOKEN, { timeout: 70000 });
+  check('IN SCOPE: a run to 192.168.1.1 (the pasted --host) runs by:grant with NO card (the host-scoped 8h grant), its output scrubbed', inScope.code === 0 && /^curl got \[vault:secrets\//m.test(inScope.out) && !inScope.out.includes(VALUE) && (await cards()).length === 0, { out: inScope.out.slice(0, 160), openCards: (await cards()).length });
+  // (b) OUT OF SCOPE — a run to 10.0.0.9 (NOT named) draws a card that offers «Always»
+  const runP = cli('vibespace-vault', ['run', '--env', `T=${REF}`, '--', 'curl', '-sk', 'https://10.0.0.9/collect'], TOKEN, { timeout: 70000 });
+  let runCard = null;
+  for (let i = 0; i < 60 && !runCard; i++) { runCard = (await cards())[0] || null; if (!runCard) await sleep(200); }
+  check('OUT OF SCOPE: a run to 10.0.0.9 draws a card that offers «Always» (the paste grant does not cover it)', !!runCard && runCard.action.always === true && /also turns on «Usable by agent runs»/.test(runCard.detail), runCard && runCard.detail);
+  // ANSWER «Always» through the reveal window (验证是你) — open the page secret, then POST with X-Vault-Page. The reliable
+  // path: a run card's button carries a press-guard (lane attention-policy-ui-red) a synthetic click cannot satisfy; the
+  // picker's reveal (⑤) proves the reveal mechanism itself.
+  const rs = await A.api('POST', '/api/vault/reveal-session', { password: SECOND });
+  check('验证是你 — the second password opens the page reveal window', rs.status === 200 && rs.json.ok && typeof rs.json.page === 'string', rs.json);
+  const ans = await A.evalJs(`fetch('/api/vault/run/asks/${runCard.action.askId}', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Vault-Page': ${JSON.stringify(rs.json.page || '')} }, body: JSON.stringify({ answer: 'always', ttl: '30d' }) }).then(async (r) => ({ status: r.status, json: await r.json().catch(() => ({})) }))`);
+  check('«Always» (with 验证是你) ⇒ ok, by:always — the standing member is written and «Usable by agent runs» opened in the same act', ans.status === 200 && ans.json.ok && ans.json.outcome === 'always', ans.json);
+  const r1 = await runP;
+  check('`vibespace-vault run … curl https://10.0.0.9/…` ⇒ ran by:always, its output scrubbed', r1.code === 0 && /^curl got \[vault:secrets\//m.test(r1.out) && !r1.out.includes(VALUE), r1.out);
+  const chip = await A.until(`(() => { const r = ${LIST_ROW(LABEL)}; const c = r && [...r.querySelectorAll('.vw-use-chip')].find((x) => /^Home network/.test(x.textContent)); return c ? c.textContent : null; })()`, { timeout: 8000 });
+  check('the row\'s chip arrives: «Home network · 10.0.0.9 · until …» (the 30-day «Always») (+ ✕)', /^Home network · 10\.0\.0\.9 · (used \d+×|until .+)✕$/.test(String(chip)), chip);
+  // round 7 (MINOR): the ↻ un-pause is a LIVE control inside a greyed paused chip — the CSS dims only .vw-use-words, so the
+  // ↻ renders at full opacity (a greyed control is the one the owner banned). Inject the real class structure and read the
+  // COMPUTED opacity of each: the ↻ must be 1 while the words are 0.55 (the dimming is on a sibling, not an ancestor).
+  const rotOpacity = await A.evalJs(`(() => { const host = document.querySelector('.vw-list') || document.body; const chip = document.createElement('span'); chip.className = 'vw-ak-chip vw-use-chip vw-use-chip-paused'; const w = document.createElement('span'); w.className = 'vw-use-words'; w.textContent = 'Conv A · 192.168.1.1 · paused by you'; chip.appendChild(w); const rot = document.createElement('button'); rot.className = 'vw-ak-x vw-use-resume'; rot.textContent = '↻'; chip.appendChild(rot); host.appendChild(chip); const out = { resume: getComputedStyle(rot).opacity, words: getComputedStyle(w).opacity }; chip.id = 'vw-rot-probe'; return out; })()`);
+  check('the ↻ un-pause is full-opacity (1) inside a paused chip whose WORDS are dimmed (0.55) — not a greyed control', rotOpacity.resume === '1' && rotOpacity.words === '0.55', rotOpacity);
+  await A.shot('vug-7-resume-opacity.png');
+  await A.evalJs(`document.getElementById('vw-rot-probe')?.remove(); true`);
+
+  console.log('④ THE CARD THAT NAMES THE GRANT — a third host, outside the standing member (10.0.0.9)');
+  const pend = cli('vibespace-vault', ['run', '--env', `T=${REF}`, '--', 'curl', 'https://172.16.0.5/collect'], TOKEN, { timeout: 70000 });
+  let card = null;
+  for (let i = 0; i < 60 && !card; i++) { card = (await cards())[0] || null; if (!card) await sleep(200); }
+  check('a run to 172.16.0.5 files its card, naming the standing approval (10.0.0.9) and what is outside it', !!card && /A standing approval exists for this conversation \(vg-[0-9a-f]{8}: 10\.0\.0\.9\) — this run is outside it: 172\.16\.0\.5\./.test(card.detail) && /«Always» widens it to 172\.16\.0\.5/.test(card.detail), card && card.detail);
+  if (card) {
+    await A.realClick('#taskbar-user-todos');
+    await A.until(visible('#user-todos-popup .ut-item'), { timeout: 8000 });
+    await A.evalJs(`(() => { for (const d of document.querySelectorAll('#user-todos-popup details.ut-detail-exp')) d.open = true; return true; })()`);
+    await sleep(300);
+    await A.shot('vug-4-card-names-grant.png');
+    const label = await A.evalJs(`[...document.querySelectorAll('#user-todos-popup button')].map((b) => b.textContent).filter((t) => /Always/.test(t)).join('|')`);
+    check('the card\'s «Always» says what it is: «Always let this conversation use it (these hosts)»', /Always let this conversation use it \(these hosts\)/.test(label), label);
+    const dn = await A.api('POST', `/api/vault/run/asks/${card.action.askId}`, { answer: 'deny' });
+    check('denied', dn.status === 200, dn);
+    await A.evalJs(`document.getElementById('user-todos-popup')?.classList.add('hidden'); true`);
+  }
+  const r2 = await pend;
+  check('… the agent is told ask_denied', r2.code !== 0 && /ask_denied/.test(r2.out), r2.out.slice(0, 300));
+
+  console.log('⑤ 「Who may use it…」 — THE principal picker, the hosts, the end; a widening asks 验证是你 first');
+  const opened = await A.evalJs(`(() => { const r = ${LIST_ROW(LABEL)}; const b = r && r.querySelector('.vw-use-grant'); if (!b) return false; b.click(); return true; })()`);
+  check('the row has 「Who may use it…」 and it opens the dialog', opened && !!(await A.until(visible('#vault-use-grant .pp-root, #vault-use-grant .vw-use-hosts'), { timeout: 5000 })));
+  const dlg = await A.evalJs(`(() => { const d = document.getElementById('vault-use-grant'); if (!d) return null; return { title: (d.querySelector('.dialog-title, h3, .modal-title') || {}).textContent || '', chips: [...d.querySelectorAll('.pp-chip')].map((c) => c.textContent), own: !!d.querySelector('.vw-use-own'), hosts: (d.querySelector('.vw-use-hosts') || {}).value, end: (d.querySelector('.vw-use-end') || {}).value }; })()`);
+  check('the dialog: the conversation that asked already picked, «The hosts it was stored for (192.168.1.1)», the end «as each has it now»', !!dlg && dlg.chips.some((c) => /Home network/.test(c)) && dlg.own === true && dlg.end === 'keep', dlg);
+  await A.evalJs(`(() => { const d = document.getElementById('vault-use-grant'); const box = d.querySelector('.pp-input, input[type=search], .pp-box input'); if (box) { box.focus(); box.dispatchEvent(new Event('focus')); } return true; })()`);
+  await sleep(300);
+  await A.shot('vug-3-picker.png');
+  const pickedAll = await A.evalJs(`(() => { const d = document.getElementById('vault-use-grant'); const row = [...document.querySelectorAll('.pp-row, .pp-item, [role=option]')].find((x) => /All agents/.test(x.textContent)); if (!row) return false; row.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); row.click(); return true; })()`);
+  check('All agents can be picked (the picker\'s first row)', !!pickedAll);
+  await A.evalJs(`(() => { const d = document.getElementById('vault-use-grant'); const c = d.querySelector('.vw-use-own input'); if (c && c.checked) { c.checked = false; c.dispatchEvent(new Event('change')); } const h = d.querySelector('.vw-use-hosts'); h.value = '192.168.1.1'; h.dispatchEvent(new Event('input')); d.querySelector('.vw-use-save').click(); return true; })()`);
+  const pw = await A.until(visible('#vault-reveal-dialog input[type=password], .vault-reveal-dialog input[type=password]'), { timeout: 6000 });
+  check('a WIDENING (All agents) asks 验证是你 first — the second password', !!pw);
+  if (pw) {
+    await A.evalJs(`(() => { const i = document.querySelector('#vault-reveal-dialog input[type=password], .vault-reveal-dialog input[type=password]'); i.focus(); i.value = ${JSON.stringify(SECOND)}; i.dispatchEvent(new Event('input', { bubbles: true })); const go = [...document.querySelectorAll('#vault-reveal-dialog button, .vault-reveal-dialog button')].find((b) => /Confirm|Verify|OK|Show|继续|确认|验证/.test(b.textContent) && !/Cancel/.test(b.textContent)); (go || {}).click?.(); return !!go; })()`);
+  }
+  const allChip = await A.until(`(() => { const r = ${LIST_ROW(LABEL)}; const c = r && [...r.querySelectorAll('.vw-use-chip')].find((x) => /^All agents/.test(x.textContent)); return c ? c.textContent : null; })()`, { timeout: 10000 });
+  check('… saved: the row shows «All agents · 192.168.1.1» beside «Home network»', /^All agents · 192\.168\.1\.1/.test(String(allChip)), allChip);
+  const x = await A.evalJs(`(() => { const r = ${LIST_ROW(LABEL)}; const c = r && [...r.querySelectorAll('.vw-use-chip')].find((x) => /^All agents/.test(x.textContent)); const b = c && c.querySelector('.vw-use-x'); if (!b) return false; b.click(); return true; })()`);
+  const gone = x && await A.until(`(() => { const r = ${LIST_ROW(LABEL)}; return !!r && ![...r.querySelectorAll('.vw-use-chip')].some((x) => /^All agents/.test(x.textContent)) && [...r.querySelectorAll('.vw-use-chip')].some((x) => /^Home network/.test(x.textContent)); })()`, { timeout: 8000 });
+  check('✕ takes All agents back with a click (no password — a narrowing); the asker stays', !!gone);
+
+  console.log('⑥ «no match» under a picked purpose names it — 「Search all」');
+  await A.evalJs(`(() => { const b = document.querySelector('.vw-rail [data-purpose="agents"]'); if (b) b.click(); return !!b; })()`);
+  const e6 = await A.until(`(() => { const e = [...document.querySelectorAll('.vw-list .vw-empty')].find((x) => x.isConnected); return e ? e.textContent : null; })()`, { timeout: 5000 });
+  check('«Kept by agents» picked + «Unifi»: «… in «Kept by agents» — searched: … · 1 match under other purposes» + 「Search all」', /No stored value matches “Unifi” in «Kept by agents» — searched: names, kinds, purposes, hosts, where they came from, ids · 1 match under other purposes/.test(String(e6)) && /Search all/.test(String(e6)), e6);
+  await A.shot('vug-5-no-match-purpose.png');
+  await A.evalJs(`(() => { const b = document.querySelector('.vw-nomatch-all'); if (b) b.click(); return !!b; })()`);
+  check('「Search all」 ⇒ the row', !!(await A.until(`!!(${LIST_ROW(LABEL)})`, { timeout: 5000 })));
+  check('no value in any page: the watching page\'s DOM and inputs', !(await A.evalJs(`document.documentElement.outerHTML + [...document.querySelectorAll('input')].map((i) => i.value).join('')`)).includes(VALUE));
+
+  console.log('⑦ THE POLICY JUDGE\'S RECORD — a stub judge approves one run (the hub stopped), the page shows it in For you');
+  await stopServer();
+  {
+    const r = (m) => require(path.join(wt, m));
+    const DATA = path.join(wt, 'data');
+    const vault = r('src/server/vault-engine.js').create({ dataDir: DATA, log: { log() {}, warn() {} }, idleTimer: false, register: false });
+    const un = await vault.unlock(SECOND);
+    const { UserTodoManager } = r('src/user-todos.js');
+    const ut = new UserTodoManager({ dataDir: DATA, expirySweepMs: 0 });
+    const door = r('src/server/vault-run-door.js').create({ dataDir: DATA, vault, userTodos: ut, sources: { secrets: () => r('src/server/vault-contents.js').secretSource({ vault }) }, instanceKind: () => 'cluster', home: fakeHome,
+      agentEnv: () => ({ ...process.env, PATH: fakeBin + ':' + process.env.PATH }), liveOf: () => true, policyOn: () => true,
+      policyJudge: async () => ({ ok: true, answers: [{ name: 'within_policy', probability: 0.93 }] }) });   // THE STUB — never a vendor
+    const id = REF.replace(/^vault:\/\/secrets\/(secret:[0-9a-f]{10})\/secret$/, 'secrets:$1#secret');
+    door.setRunnable({ id, on: true, reauthed: true });
+    const pol = door.setPolicy({ id, text: 'only 192.168.1.1, read-only status calls to read the WAN status', reauthed: true });
+    const ran = await door.run({ caller: { conversationId: SID, sessionKey: `claude:${SID}`, name: 'Home network', cwd: CWD, scope: SID }, args: ['--env', `T=${REF}`, '--', 'curl', '-sk', 'https://192.168.1.1/api/stat/sites'], cwd: CWD });
+    check('the REAL run door with a stub judge (0.93) runs it with no card — by: policy', un.ok && pol.ok && ran.ok && ran.by === 'policy', { un: un.ok, pol, by: ran.by, code: ran.code });
+    try { ut.flush?.(); } catch { } try { ut.stop?.(); } catch { }
+    try { vault.lock('close', { quiet: true }); } catch { }
+  }
+  startServer();
+  check('the hub boots again', await ready());
+  await A.cdp('Page.navigate', { url: URL });
+  await A.until(`!!(window.app && app.wm && document.getElementById('taskbar-user-todos'))`, { timeout: 30000 });
+  await A.until(`!document.getElementById('loading-screen')`, { timeout: 30000 });
+  if (await A.evalJs(`!!document.getElementById('vault-unlock-dialog')`)) await A.evalJs(`document.getElementById('vault-unlock-dialog').remove(); true`);
+  const ul = await A.api('POST', '/api/vault/unlock', { password: SECOND });
+  check('the vault unlocked from the page', ul.status === 200, ul);
+  const rec = ((await A.api('GET', '/api/user-todos')).json.todos.open || []).find((i) => i.action && i.action.type === 'vault-policy-approved');
+  check('THE RECORD is in For you: «Home network: a command with a stored secret was approved by the policy judge» · «Approved by the policy judge · HH:MM · inside your policy (0.93)»', !!rec && rec.text === 'Home network: a command with a stored secret was approved by the policy judge' && /^Approved by the policy judge · \d\d:\d\d · inside your policy \(0\.93\)/.test(rec.detail) && !rec.detail.includes(VALUE), rec && { text: rec.text, detail: rec.detail });
+  await A.realClick('#taskbar-user-todos');
+  const shown = await A.until(`[...document.querySelectorAll('#user-todos-popup .ut-item')].some((e) => /approved by the policy judge/.test(e.textContent))`, { timeout: 10000 });
+  check('… the tray shows it', !!shown);
+  await A.evalJs(`(() => { const h = document.querySelector('#user-todos-popup .ut-notice-head'); if (h && h.getAttribute('aria-expanded') !== 'true') h.click(); return true; })()`);   // a notice: its fold opened (a grey count closed)
+  await sleep(400);
+  await A.evalJs(`(() => { for (const d of document.querySelectorAll('#user-todos-popup details.ut-detail-exp')) d.open = true; const it = [...document.querySelectorAll('#user-todos-popup .ut-item')].find((e) => /approved by the policy judge/.test(e.textContent)); if (it) it.scrollIntoView({ block: 'start' }); return true; })()`);
+  await sleep(300);
+  check('… among the tray\'s notices, its words drawn (the fold opened)', !!(await A.until(`(() => { const it = [...document.querySelectorAll('#user-todos-popup .ut-item')].find((e) => /approved by the policy judge/.test(e.textContent)); if (!it) return false; const r = it.getBoundingClientRect(); return r.height > 0 && /Approved by the policy judge · \\d\\d:\\d\\d · inside your policy \\(0\\.93\\)/.test(it.textContent); })()`, { timeout: 5000 })));
+  await A.shot('vug-6-policy-approved.png');
+  await A.evalJs(`(() => { const it = [...document.querySelectorAll('#user-todos-popup .ut-item')].find((e) => /approved by the policy judge/.test(e.textContent)); const t = it && it.querySelector('.ut-text'); if (t) t.click(); return !!t; })()`);
+  const row = await A.until(`(() => { const r = ${LIST_ROW(LABEL)}; const p = r && r.querySelector('.vw-use-policy'); return p ? p.textContent : null; })()`, { timeout: 10000 });
+  check('its door opens the entry\'s row, which says the policy (and that the judge is off on this hub — its setting is the owner\'s)', /Policy for the judge: «only 192\.168\.1\.1, read-only status calls to read the WAN status» — the judge is off/.test(String(row)), row);
+
+  console.log('⑧ OFF greys the grant chip «paused», in three languages (round 3 MINOR — LOOK at the shots)');
+  const useId = REF.replace(/^vault:\/\/secrets\/(secret:[0-9a-f]{10})\/secret$/, 'secrets:$1#secret');
+  const offR = await A.api('POST', '/api/vault/runnable', { id: useId, on: false });
+  check('the owner turns the entry OFF (a narrowing — a click, no password)', offR.status === 200 && offR.json && offR.json.open === false, offR.json);
+  for (const [lang, file] of [['en', 'vug-7-paused-en.png'], ['zh', 'vug-8-paused-zh.png'], ['ja', 'vug-9-paused-ja.png']]) {
+    await A.evalJs(`localStorage.setItem('vibespace.lang', ${JSON.stringify(lang)}); true`);   // language is a per-device localStorage choice (src/lib/i18n.js)
+    await A.cdp('Page.navigate', { url: URL });
+    await A.until(`!!(window.app && app.replayOpenSpec)`, { timeout: 30000 });
+    await A.until(`!document.getElementById('loading-screen')`, { timeout: 30000 });
+    if (await A.evalJs(`!!document.getElementById('vault-unlock-dialog')`)) { await A.api('POST', '/api/vault/unlock', { password: SECOND }); await sleep(300); }
+    await A.evalJs(`app.replayOpenSpec({ action: 'openVault' })`);
+    await A.until(`!!(${LIST_ROW(LABEL)})`, { timeout: 15000 });
+    await sleep(400);
+    const st = await A.evalJs(`(() => { const r = ${LIST_ROW(LABEL)}; const chips = r && r.querySelector('.vw-use-chips'); const note = r && r.querySelector('.vw-use-paused-note'); return { chip: !!(r && r.querySelector('.vw-use-chip')), paused: !!(chips && chips.classList.contains('vw-use-paused')), note: note ? note.textContent : null }; })()`);
+    await A.evalJs(`(() => { const r = ${LIST_ROW(LABEL)}; const n = r && (r.querySelector('.vw-use-paused-note') || r.querySelector('.vw-use-chips')); if (n) n.scrollIntoView({ block: 'center' }); return true; })()`);   // round 4 (MINOR): the paused chip + note sit BELOW the fold — scroll them into view so the shot is real evidence
+    await sleep(150);
+    await A.shot(file);
+    if (lang === 'en') check('OFF ⇒ the grant chips are greyed «paused» and the paused note appears (en)', !!st && st.chip && st.paused === true && /Paused while the entry is off/.test(String(st.note)), st);
+    else check(`the paused note renders in ${lang} (a real string, not the English key)`, !!st && st.paused === true && !!st.note && !/Paused while the entry is off/.test(String(st.note)), st);
+  }
+  await A.evalJs(`localStorage.setItem('vibespace.lang', 'auto'); true`);
+} catch (e) {
+  check('the run did not throw', false, e && e.stack);
+} finally {
+  await stopServer();
+}
+console.log(`\n${failed ? '✗' : '✓'} test-vault-use-grants-chrome: ${passed} passed, ${failed} failed`);
+if (failed) { console.log('FAIL'); process.exit(1); } else { console.log(`ALL PASS (${passed})`); process.exit(0); }

@@ -223,8 +223,8 @@ console.log('⑤ A FREE ENTRY — the vault\'s secret:<id>, the asker granted it
   ok(rc.length === 1 && /STORED/.test(rc[0].text) && rc[0].text.includes(r.json.ref) && /vibespace-vault run --env NAME=/.test(rc[0].text) && /8 hours/.test(rc[0].text) && !rc[0].text.includes(S_ENTRY), 'the receipt names the reference and the run line — never the value', rc[0] && rc[0].text);
   const rows = VC.secretSource({ vault: W.vault }).vaultRows();
   const row = VI.rowOf('secrets', rows.find((x) => x.entry === r.json.entry));
-  ok(row && row.label === 'Payments sandbox key' && row.kind === 'api-key' && VI.purposeOf(row) === 'keys' && VI.provenanceOf(row) === 'me' && row.revealable === true && row.doors.delete && row.doors.delete.path === `/api/vault/secrets/${r.json.entry.slice(7)}`,
-    'its Vault-window row: the label, API key, purpose «Passwords & keys», «By you», revealable, its own delete door', row);
+  ok(row && row.label === 'Payments sandbox key' && row.kind === 'api-key' && VI.purposeOf(row) === 'keys' && VI.provenanceOf(row) === 'request' && VI.provenanceFilterOf(row) === 'me' && row.askedBy && row.askedBy.name === 'Lane asker' && row.revealable === true && row.doors.delete && row.doors.delete.path === `/api/vault/secrets/${r.json.entry.slice(7)}`,
+    'its Vault-window row: the label, API key, purpose «Passwords & keys», «Filled by you · asked for by Lane asker» (the 我自己 filter — lane vault-use-grants), revealable, its own delete door', row);
   globalThis.__ENTRY = r.json.entry;
 }
 

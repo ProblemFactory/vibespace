@@ -194,7 +194,7 @@ console.log('⑤ lane browser-login: the browser-login door — its resource sha
   const W = (r) => GM.validateWrite('browser-login', r, { to: [{ kind: 'everyone' }] });
   const good = ['*', 'https://shop.example.test#*', 'https://shop.example.test:8443#alice.k+tag', 'http://localhost#dev', 'https://[::1]#v6'];
   const bad = ['shop.example.test#alice', 'https://shop.example.test', 'https://SHOP.example.test#a', 'https://shop.example.test#Alice', 'https://shop.example.test#a b', 'https://shop.example.test/p#a', '**', 'ftp://x.test#a', 'https://x.test#a#b'];
-  ok(GM.DOORS.includes('browser-login') && GM.DOORS[GM.DOORS.length - 1] === 'browser-login', 'the door is in DOORS (a new door is a value in the enum, never a who-list of its own)');
+  ok(GM.DOORS.includes('browser-login') && GM.DOORS.indexOf('browser-login') === GM.DOORS.indexOf('group-visibility') + 1, 'the door is in DOORS (a new door is a value in the enum, never a who-list of its own)');   // lane vault-use-grants: `vault-use` follows it
   ok(good.every((r) => W(r).ok) && bad.every((r) => W(r).code === 'bad_resource'), 'the write takes <origin>#<user>, <origin>#* and * — and refuses every other shape bad_resource by name', { good: good.map((r) => [r, W(r).ok]), bad: bad.map((r) => [r, W(r).code]) });
   ok(GM.validateWrite('exit', 'Anything Goes:use', { to: [] }).ok && GM.resourceShapeOk('window', 'w-1') && !GM.resourceShapeOk('browser-login', 'w-1'), 'the other doors keep the general id rule (only browser-login has a shape of its own)');
   const odd = { door: 'browser-login', resource: 'shop.example.test#alice', to: [{ kind: 'everyone' }], except: [] };

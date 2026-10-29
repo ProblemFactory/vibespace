@@ -65,13 +65,19 @@
  *    group-visibility      <groupId>     (the group's members shown to outside agents; the entry's `level`)
  *    browser-login         <origin>#<user> | <origin>#* | *   (lane browser-login: who may have a saved web login filled on
  *                          the custom kernel — ONE account, «any account on this site», «any site»; rows of the three ADD;
- *                          the shape is RESOURCE_SHAPES' — a write of any other is `bad_resource`, a read `unknown_shape`) */
-const DOORS = Object.freeze(['browser-profile', 'automation-key-use', 'automation-key-reach', 'channel-reach', 'channel-watch', 'channel-api', 'exit', 'window', 'group-visibility', 'browser-login']);
+ *                          the shape is RESOURCE_SHAPES' — a write of any other is `bad_resource`, a read `unknown_shape`)
+ *    vault-use             <store>:<entry>#<field>   (lane vault-use-grants, the owner 2026-10-27 「每个密码请求都要我同意太麻烦了！」:
+ *                          who may USE a vault entry in `vibespace-vault run` with NO card — the Vault window's row id; each
+ *                          entry its `hosts` (the destinations the use may reach: host names / addresses, or `@entry` = the
+ *                          hosts the entry itself was stored for — never «any host») and an optional `until` (ms); the door's
+ *                          reader is PURE src/vault-use-grant.js, its writer src/server/vault-use-grants.js) */
+const DOORS = Object.freeze(['browser-profile', 'automation-key-use', 'automation-key-reach', 'channel-reach', 'channel-watch', 'channel-api', 'exit', 'window', 'group-visibility', 'browser-login', 'vault-use']);
 /** lane browser-login: a door whose resource has a SHAPE of its own (the rest: any id RESOURCE_RE takes). browser-login: an
  *  origin (scheme + lower-case host + a port, as src/browser-login.js originOf spells it) `#` a lower-cased user name (no white
  *  space, no `#`) or `*`; or `*` alone. */
 const RESOURCE_SHAPES = Object.freeze({
   'browser-login': /^(?:\*|https?:\/\/(?:[a-z0-9-]{1,63}(?:\.[a-z0-9-]{1,63}){0,20}|\[[0-9a-f:.]{2,45}\])(?::\d{1,5})?#(?:\*|[^\s#A-Z\u0000-\u001f\u007f]{1,160}))$/,
+  'vault-use': /^[a-z][a-z-]{0,30}:[^\s\u0000-\u001f\u007f]{1,330}#[\w.:-]{1,60}$/,   // lane vault-use-grants: the Vault window's row id (src/vault-inventory.js refOf)
 });
 const resourceShapeOk = (door, resource) => { const re = RESOURCE_SHAPES[door]; return re ? re.test(str(resource)) : RESOURCE_RE.test(str(resource)); };
 const PRINCIPAL_KINDS = Object.freeze(['everyone', 'group', 'conversation']);
@@ -87,13 +93,67 @@ const RESOURCE_RE = /^[^\u0000-\u001f\u007f]{1,400}$/;
 const cleanName = (s) => (typeof s === 'string' ? s.replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 120) : '');
 const str = (v) => (v === undefined || v === null ? '' : String(v));
 
-/** The door's OWN per-member settings a `to` entry may carry (a closed value set each) — never read by `admits`. */
+/** The door's OWN per-member settings a `to` entry may carry (a closed value set each, or a typed value: `count` a
+ *  positive integer, `hosts` a host list, `time` an instant in ms) — never read by `admits` (a door's own reader reads them
+ *  over admits' hits: vault-use's hosts and expiry, src/vault-use-grant.js). */
 const ENTRY_FIELDS = Object.freeze({
   'channel-reach': Object.freeze({ authority: Object.freeze(['draft', 'send']), level: Object.freeze(['visible', 'requestable']) }),
   'channel-api': Object.freeze({ tier: Object.freeze(['none', 'read', 'write-ask', 'write-auto', 'write-all']), perDay: 'count' }),
   window: Object.freeze({ origin: Object.freeze(['user', 'request', 'self-open']) }),
   'group-visibility': Object.freeze({ level: Object.freeze(['visible', 'messageable']) }),
+  'vault-use': Object.freeze({ hosts: 'hosts', until: 'time', tool: 'tool', toolFor: 'toolmap', mac: 'mac' }),   // lane vault-use-grants (round 3: `tool` scopes a wildcard default to its CLI; round 4 item 3: `toolFor` scopes PER HOST — a wildcard row carries the tool that minted it, never rewritten by a later «Always» from another CLI; `mac` is the vault's HMAC so a forged row is dropped)
 });
+/** lane vault-use-grants: ONE destination a vault-use entry may name — EVERY shape the run card can name (round 2 MAJOR):
+ *  a host name (one label like `router` or many like `api.example.com`), an IPv4 / IPv6 address (IPv6 bracketed or bare),
+ *  any of those with a `:port`, or a `*.domain` wildcard over a registrable domain (`*.amazonaws.com`, never `*.com`); or
+ *  `@entry` («the hosts the entry was stored for», resolved at use time). Never «any host» — no `*` alone, no `*.<TLD>`. A
+ *  bare label (`com`, `lan`) is a HOST NAME, not a wildcard: it covers ONLY itself (src/vault-use-grant.js `hostCovers`
+ *  requires a dot before it may match subdomains — a single label can never stand for everything under it). */
+const _L = '[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?';   // round 3 (MINOR): a DNS label never starts or ends with a hyphen (`bad-.com` refused)
+const HOST_TOKEN_RE = new RegExp(`^(?:@entry|(?:${_L}(?:\\.${_L})*\\.?|\\*(?:\\.${_L}){2,}|\\[[0-9a-f:.]{2,45}\\])(?::\\d{1,5})?|[0-9a-f]{0,4}(?::[0-9a-f]{0,4}){2,7})$`, 'i');
+const HOSTS_MAX = 16;
+// lane vault-use-grants round 3 (item 5): the small public-suffix list (the top multi-label registry boundaries). A
+// wildcard whose BASE is one of these (`*.co.uk`) spans unrelated parties, so it is refused; the full PSL stays backlog. A
+// wildcard over a MULTI-TENANT registrable domain (`*.amazonaws.com`, `*.github.io`) is allowed but said in words on the card.
+const PUBLIC_SUFFIXES = new Set(['co.uk', 'org.uk', 'gov.uk', 'ac.uk', 'me.uk', 'ltd.uk', 'plc.uk', 'net.uk', 'sch.uk', 'com.au', 'net.au', 'org.au', 'edu.au', 'gov.au', 'id.au', 'co.nz', 'net.nz', 'org.nz', 'govt.nz', 'co.jp', 'ne.jp', 'or.jp', 'go.jp', 'ac.jp', 'co.za', 'org.za', 'com.br', 'net.br', 'gov.br', 'com.cn', 'net.cn', 'org.cn', 'gov.cn', 'com.mx', 'com.sg', 'com.hk', 'co.in', 'co.kr', 'com.tr', 'co.il']);
+const ipv4ok = (h) => !/^\d{1,3}(?:\.\d{1,3}){3}$/.test(h) || h.split('.').every((o) => Number(o) <= 255);   // round 3 (MINOR): a dotted-quad's octets are ≤ 255 (1.2.3.999 refused)
+// lane vault-use-grants round 5 (MAJOR item 5): a single-label host spelled like a URL scheme the tools know (curl's
+// Protocols + the ssh family) is NEVER grantable — a command's scheme-shaped token (`ftp:/HOST`, `http://http/`) would read
+// the SCHEME WORD as a host and falsely match such a grant, sending the value where the word, not the owner, points. The
+// grant is refused at mint (`scheme_word_host`); the run always draws the card. (The reader also BLINDS the token — src/vault-run.js.)
+const SCHEME_WORD_HOSTS = new Set(['dict', 'file', 'ftp', 'ftps', 'gopher', 'gophers', 'http', 'https', 'imap', 'imaps', 'ipfs', 'ipns', 'ldap', 'ldaps', 'mqtt', 'pop3', 'pop3s', 'rtmp', 'rtmpe', 'rtmps', 'rtmpt', 'rtmpte', 'rtmpts', 'rtsp', 'scp', 'sftp', 'smb', 'smbs', 'smtp', 'smtps', 'telnet', 'tftp', 'ws', 'wss', 'ssh', 'svn', 'git', 'rsync']);
+/** A single host token is valid: the shape grammar + a port in 1..65535 + IPv4 octets ≤ 255 + a wildcard base that is
+ *  neither numeric nor a public suffix (round 3, item 5 + ports MINOR). → the normalized token | null. */
+function hostTokenOk(h) {
+  if (h === '@entry') return '@entry';
+  if (h.length > 253 || !HOST_TOKEN_RE.test(h)) return null;
+  const m = /:(\d{1,5})$/.exec(h.replace(/^\[.*\]/, ''));   // a :port (not inside IPv6 brackets)
+  if (m) { const p = Number(m[1]); if (!(p >= 1 && p <= 65535)) return null; }
+  const n = h.replace(/\.$/, '').replace(/^\[(.*)\]$/, '$1');
+  const bare = n.replace(/:(\d{1,5})$/, '').replace(/^\[(.*)\]$/, '$1');
+  if (!ipv4ok(bare)) return null;
+  if (bare.startsWith('*.')) {
+    const base = bare.slice(2);
+    const labels = base.split('.');
+    if (/^\d+$/.test(labels[labels.length - 1])) return null;   // a wildcard never ends in a numeric label (never an address: *.1.1, *.168.1.1)
+    if (PUBLIC_SUFFIXES.has(base)) return null;                 // a wildcard over a public suffix is refused
+  }
+  if (!bare.includes('.') && !bare.includes(':') && !bare.startsWith('*') && SCHEME_WORD_HOSTS.has(bare)) return null;   // round 5 item 5: a single label that IS a URL scheme word is not grantable
+  return n;
+}
+/** A `hosts` value → its normal list (lower-cased, a trailing dot and IPv6 brackets dropped, deduplicated, ≤ HOSTS_MAX) |
+ *  null when it is not a non-empty list of host tokens (the entry is then refused at a write, dropped at a read). */
+function hostListOf(v) {
+  if (!Array.isArray(v) || !v.length || v.length > HOSTS_MAX) return null;
+  const out = [];
+  for (const x of v) {
+    const h = String(x == null ? '' : x).trim().toLowerCase();
+    const n = hostTokenOk(h);
+    if (n === null) return null;
+    if (n && !out.includes(n)) out.push(n);
+  }
+  return out.length ? out : null;
+}
 
 // ── principals ──────────────────────────────────────────────────────────────
 /** A principal's identity — `everyone` | `group:<id>` | `conversation:<key>` (the dedup unit, the audit's word). */
@@ -127,6 +187,11 @@ function normEntry(e, door) {
   for (const [f, allowed] of Object.entries(fields)) {
     if (e[f] === undefined || e[f] === null) continue;
     if (allowed === 'count') { const n = Math.floor(Number(e[f])); if (!(n > 0) || n > 100000) return null; out[f] = n; continue; }
+    if (allowed === 'hosts') { const h = hostListOf(e[f]); if (!h) return null; out[f] = h; continue; }   // lane vault-use-grants
+    if (allowed === 'tool') { const t = String(e[f]).toLowerCase(); if (!/^[a-z0-9][a-z0-9.+-]{0,39}$/.test(t)) return null; out[f] = t; continue; }   // lane vault-use-grants round 3: the CLI a wildcard default is granted to
+    if (allowed === 'toolmap') { const v = e[f]; if (!v || typeof v !== 'object' || Array.isArray(v)) return null; const keys = Object.keys(v); if (keys.length > HOSTS_MAX) return null; const m = {}; for (const k of keys) { const hk = hostTokenOk(String(k).trim().toLowerCase()); const tv = String(v[k]).toLowerCase(); if (hk === null || hk === '@entry' || !/^[a-z0-9][a-z0-9.+-]{0,39}$/.test(tv)) return null; m[hk] = tv; } if (Object.keys(m).length) out[f] = m; continue; }   // lane vault-use-grants round 4 item 3: host → the CLI that minted its wildcard grant
+    if (allowed === 'mac') { if (!/^[0-9a-f]{64}$/.test(String(e[f]))) return null; out[f] = String(e[f]); continue; }   // lane vault-use-grants round 3: the vault's HMAC over the canonical member
+    if (allowed === 'time') { const n = Math.floor(Number(e[f])); if (!(n > 0) || n > 8.64e15) return null; out[f] = n; continue; }
     if (!allowed.includes(e[f])) return null;
     out[f] = e[f];
   }
@@ -182,7 +247,7 @@ function validateWrite(door, resource, { to = [], except = [] } = {}, { at = nul
   const no = (code, error) => ({ ok: false, code, error });
   if (!DOORS.includes(door)) return no('unknown_door', `no door "${str(door).slice(0, 40)}" — one of ${DOORS.join(', ')}`);
   if (!RESOURCE_RE.test(str(resource))) return no('bad_resource', 'a resource is a non-empty id (≤ 400 characters, no control characters)');
-  if (!resourceShapeOk(door, resource)) return no('bad_resource', `a ${door} resource is ${door === 'browser-login' ? '<origin>#<user>, <origin>#* or *' : 'of its own shape'}`);   // lane browser-login
+  if (!resourceShapeOk(door, resource)) return no('bad_resource', `a ${door} resource is ${door === 'browser-login' ? '<origin>#<user>, <origin>#* or *' : door === 'vault-use' ? 'a vault entry id <store>:<entry>#<field>' : 'of its own shape'}`);   // lane browser-login
   if (!Array.isArray(to)) return no('bad_row', '`to` must be a list');
   if (!Array.isArray(except)) return no('bad_row', '`except` must be a list');
   if (to.length > LIST_MAX || except.length > LIST_MAX) return no('too_many', `at most ${LIST_MAX} entries in "to" and in "except"`);
@@ -626,7 +691,7 @@ const LEGACY = Object.freeze({
 });
 
 module.exports = {
-  DOORS, PRINCIPAL_KINDS, REFUSALS, WRITE_REFUSALS, LIST_MAX, ENTRY_FIELDS, GROUP_ID_RE, CONVERSATION_KEY_RE, RESOURCE_SHAPES, resourceShapeOk,
+  DOORS, PRINCIPAL_KINDS, REFUSALS, WRITE_REFUSALS, LIST_MAX, ENTRY_FIELDS, GROUP_ID_RE, CONVERSATION_KEY_RE, RESOURCE_SHAPES, resourceShapeOk, HOST_TOKEN_RE, HOSTS_MAX, hostListOf,
   principalKey, bareOf, normEntry, normExcept, normRow, validateWrite, factsOf, admits, hitsOf, sharesGroup, names, namesNow,
   publicRow, rowKey, conversationKeyOf, conversationKeysOf, keyFromSessionKey, keyFromSubject,
   fromSessionPrincipal, fromExitGrant, fromHostExit, browserKeyResolver, fromBrowserOwner, fromWindowRecord, fromSubject, fromAutomationGrant,

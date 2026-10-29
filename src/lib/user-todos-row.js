@@ -70,6 +70,7 @@ export function resolvedByText(by, t, item = null) {
   if (by === 'ask-expired') return t('expired (no answer in 60 s)');
   if (by === 'ask-changed') return t('not run — it changed after it was shown'); // verify-r6 W1
   if (by === 'ask-over') return t('this request is over — the agent can ask again'); // verify-r6 W2: a reopened ask that is over
+  if (by === 'vault_locked') return t('closed when the vault locked — run it again after the unlock'); // lane vault-use-grants round 7 (MINOR): a run card the lock settled SAYS so where the owner looks — never a dead card, never a silent close
   if (by === 'conversation-gone') return t('the conversation ended before you answered');
   if (by === 'stored') return t('saved to the vault'); // lane vault-paste-request: a paste request answered by its paste
   // B-2198 part 2: a raw-API proposal's item is answered BY its outcome (the card's words: Ran · 200 · 1.2 KB / Rejected by you)
@@ -128,7 +129,7 @@ const HUB_ANSWERS = ['once', 'always', 'deny'];
   // interpreter or an unknown destination: `action.always` false) / 拒绝
   const HELD_ASKS = ['hub-act-ask', 'automation-ask', 'pool-cross-provider', 'vault-run-ask', 'vault-grant-ask']; // q-053 P0b (decision ①): a pool's move to ANOTHER provider waits for the owner — 允许一次 / 这个池一直允许 / 拒绝
   const GRANT_ANSWERS = ['once', '8h', 'deny']; // lane vault-manual-and-lock (design q-043 D4): 允许一次 (its next run) / 8 小时 (every run, 8 h) / 拒绝; it waits for nobody, never expires (a lock withdraws it)
-  const hubAnswerWord = (a, t, type = 'hub-act-ask') => (a === 'once' ? t('Allow once') : a === '8h' ? t('For 8 hours') : a === 'always' ? (type === 'automation-ask' ? t('Always for this conversation') : type === 'pool-cross-provider' ? t('Always for this pool') : type === 'vault-run-ask' ? t('Always for this shape') : t('Always on this machine')) : t('Deny'));
+  const hubAnswerWord = (a, t, type = 'hub-act-ask') => (a === 'once' ? t('Allow once') : a === '8h' ? t('For 8 hours') : a === 'always' ? (type === 'automation-ask' ? t('Always for this conversation') : type === 'pool-cross-provider' ? t('Always for this pool') : type === 'vault-run-ask' ? t('Always let this conversation use it (these hosts)') : t('Always on this machine')) : t('Deny'));
   const heldAnswers = (i) => (i.action.type === 'vault-grant-ask' ? GRANT_ANSWERS : HUB_ANSWERS.filter((a) => a !== 'always' || !(i.action.type === 'vault-run-ask' && i.action.always === false)));
 // lane vault-scrub-forms (q-043 verify M1): a RUN card says what the scrubbing does not promise — the owner reads the command
 // lane key-instance-scope: an AUTOMATION card offers the grant's REACH beside its answers — 只有它开的会话 (the default) · 这些岗位的会话

@@ -102,7 +102,13 @@ function secretRowOf(s, { machineName = (k) => k } = {}) {
   // in the Vault window's 「其他密钥或密码…」): its row says the label, the kind and the note a person wrote (never a value)
   const wl = WEB_LOGIN_RE.exec(name);
   if (wl) { const src = Object.prototype.hasOwnProperty.call(LOGIN_SOURCES, s && s.kind) ? s.kind : 'owner'; const p = LOGIN_SOURCES[src]; return { entry: name, field: 'password', kind: 'login', label: `${wl[2]} · ${wl[1].replace(/^https:\/\//, '')}`, detail: p.label, createdAt: at, ...(p.origin ? { origin: p.origin } : {}), ...(src !== 'owner' ? { provenance: { by: 'agent', prov: src, sawPlaintext: p.sawPlaintext, actor: (s && s.actor) || null } } : {}) }; }   // lane browser-login
-  if (FREE_ENTRY_RE.test(name)) return { entry: name, field: 'secret', kind: FREE_KINDS.includes(s && s.kind) ? s.kind : 'secret', label: String((s && s.label) || name.slice(7)), detail: String((s && s.note) || ''), createdAt: at };
+  if (FREE_ENTRY_RE.test(name)) {
+    // lane vault-use-grants: an entry the owner filled at an agent's REQUEST says so — its origin «filled by you · asked for by
+    // <the conversation>» and the hosts the request named (the search finds it by either; a vault-use grant's `@entry`)
+    const asked = s && s.askedBy && typeof s.askedBy === 'object' && s.askedBy.conv ? { conv: clip(s.askedBy.conv, 160), name: clip(s.askedBy.name, 80) } : null;
+    const hosts = Array.isArray(s && s.hosts) ? s.hosts.map((h) => clip(h, 253)).filter(Boolean).slice(0, 16) : [];
+    return { entry: name, field: 'secret', kind: FREE_KINDS.includes(s && s.kind) ? s.kind : 'secret', label: String((s && s.label) || name.slice(7)), detail: String((s && s.note) || ''), createdAt: at, ...(asked ? { origin: 'request', askedBy: asked } : {}), ...(hosts.length ? { hosts } : {}) };
+  }
   const am = AGENT_ENTRY_RE.exec(name);
   if (am) {
     const prov = AGENT_PROV[s && s.prov] ? s.prov : 'stored';   // default-safe: an unknown provenance is treated as 'the agent saw it'
@@ -201,7 +207,7 @@ const BY = Object.freeze(['human', 'agent', 'job', 'system']);
 /** How a value CAME (lane vault-window-v2, design q-047 §3.2) — a closed set a store may list on a row: 'mint' (made by the
  *  hub or an agent, nobody typed it), 'put' (an agent stored a value it had seen — q-043 §9), 'qr' / 'paste' / 'manual'
  *  (a two-step seed the owner scanned, pasted or typed — design §2.1 `source`). Anything else is no origin. */
-const ORIGINS = Object.freeze(['mint', 'put', 'qr', 'paste', 'manual']);
+const ORIGINS = Object.freeze(['mint', 'put', 'qr', 'paste', 'manual', 'request']);   // lane vault-use-grants: 'request' = the owner filled it at an agent's request
 const useOf = (u) => (u && when(u.at) ? { at: when(u.at), by: BY.includes(u.by) ? u.by : 'system' } : null);
 
 /** ONE row from what a store listed — NAMED fields only. `raw` = { entry, field, kind?, label, detail?, createdAt?,
@@ -220,6 +226,9 @@ function rowOf(store, raw, { lastUsed = null } = {}) {
     revealable: revealableOf(store, raw.entry),
     origin: ORIGINS.includes(raw.origin) ? raw.origin : null, expiresAt: when(raw.expiresAt),   // lane vault-window-v2
     provenance: raw.provenance || null,   // lane vault-mint-put: agent entries carry it; the v2 window's chip reads it
+    // lane vault-use-grants: the hosts a request named and the conversation that asked (names — never a value)
+    hosts: Array.isArray(raw.hosts) ? raw.hosts.map((h) => clip(h, 253)).filter(Boolean).slice(0, 16) : [],
+    askedBy: raw.askedBy && typeof raw.askedBy === 'object' && raw.askedBy.conv ? { conv: clip(raw.askedBy.conv, 160), name: clip(raw.askedBy.name, 80) } : null,
   };
 }
 
@@ -239,15 +248,18 @@ function inventoryOf(listed, { uses = {} } = {}) {
 }
 
 /** The page's search: label, detail, entry, field, the kind's words, the store's label, the purpose's and the provenance's
- *  words — every word must match. `wordsOf(row)` = the page's OWN words for the row (its language: the kind, the purpose,
- *  the provenance as it draws them — lane vault-window-v2), added to the English ones. */
+ *  words — every word must match, case-insensitively. `wordsOf(row)` = the page's OWN words for the row (its language: the
+ *  kind, the purpose, the provenance as it draws them — lane vault-window-v2), added to the English ones. lane
+ *  vault-use-grants: + the hosts (a request's named hosts), the requesting conversation's name, the row's id (a
+ *  `secret:1a2b…` prefix finds it) — SEARCHED_FIELDS is what the «no match» line names. */
+const SEARCHED_FIELDS = Object.freeze([i18nKey('names'), i18nKey('kinds'), i18nKey('purposes'), i18nKey('hosts'), i18nKey('where they came from'), i18nKey('ids')]);
 function searchRows(rows, q, { wordsOf = null } = {}) {
   const words = String(q || '').toLowerCase().split(/\s+/).filter(Boolean);
   if (!words.length) return (rows || []).slice();
   return (rows || []).filter((r) => {
     const own = typeof wordsOf === 'function' ? (() => { try { return [].concat(wordsOf(r) || []); } catch { return []; } })() : [];
     const pu = PURPOSES.find((p) => p.id === purposeOf(r)), pv = PROVENANCES.find((p) => p.id === provenanceOf(r));
-    const hay = [r.label, r.detail, r.entry, r.field, KIND_WORDS[r.kind], (storeOf(r.store) || {}).label, pu && pu.label, pv && pv.label, ...own].join(' ').toLowerCase();
+    const hay = [r.label, r.detail, r.entry, r.field, r.id, KIND_WORDS[r.kind], (storeOf(r.store) || {}).label, pu && pu.label, pv && pv.label, ...(Array.isArray(r.hosts) ? r.hosts : []), r.askedBy && r.askedBy.name, ...own].filter((x) => x != null).join(' ').toLowerCase();
     return words.every((w) => hay.includes(w));
   });
 }
@@ -298,6 +310,7 @@ const PROVENANCES = Object.freeze([
   Object.freeze({ id: 'agent-mint', label: i18nKey('Minted by an agent · never shown'), filter: 'agent-mint' }),   // agent 铸造 · 从未显示 (q-043 §9 mint)
   Object.freeze({ id: 'agent-put', label: i18nKey('Stored by an agent · it saw the value'), filter: 'agent-put' }),   // agent 存入 · agent 见过明文 (§9 put)
   Object.freeze({ id: 'system', label: i18nKey('System · never shown'), filter: 'system' }),               // 系统 · 永不显示 (revealable: false)
+  Object.freeze({ id: 'request', label: i18nKey('Filled by you · asked for by {who}'), filter: 'me' }),       // 你填写的 · 应 <对话> 的请求 (lane vault-use-grants)
 ]);
 const PROVENANCE_IDS = Object.freeze(PROVENANCES.map((p) => p.id));
 /** The bar's provenance filter (multi-select; none picked = every row): four choices over the six chips. */
@@ -311,6 +324,7 @@ function provenanceOf(row) {
   if (!row || typeof row !== 'object') return null;
   const entry = String(row.entry == null ? '' : row.entry);
   if (row.origin === 'put') return 'agent-put';
+  if (row.origin === 'request') return 'request';   // lane vault-use-grants: the owner filled it, an agent asked for it
   if (/^agent:/.test(entry)) return 'agent-mint';
   if (row.provenance && row.provenance.prov === 'vault-minted') return 'agent-mint';   // lane browser-login: an agent's registration — the vault made the password, nobody saw it
   if (row.origin === 'qr' || row.origin === 'paste') return 'scan';
@@ -498,7 +512,7 @@ function countdownText(ms) {
 
 module.exports = {
   STORES, STORE_IDS, GROUPS, GROUP_IDS, revealableOf, secretRowOf, AGENT_PROV, storeOf, KINDS, KIND_WORDS, kindOfField, SIZE_CLASSES, sizeClassOf, plainBytesOf, refOf, parseRef, doorsOf, rowOf,
-  inventoryOf, searchRows, SORTS, sortRows, REVEAL_MS, REVEAL_PACE_MAX, REVEAL_PACE_CEILING, REVEAL_PACE_MS, CLIPBOARD_CLEAR_MS, PAGE_RE, revealVerdict, paceVerdict, countdownText,
+  inventoryOf, searchRows, SEARCHED_FIELDS, SORTS, sortRows, REVEAL_MS, REVEAL_PACE_MAX, REVEAL_PACE_CEILING, REVEAL_PACE_MS, CLIPBOARD_CLEAR_MS, PAGE_RE, revealVerdict, paceVerdict, countdownText,
   // lane vault-window-v2 (design q-047 §3): the purposes, the provenance, the state chips, the window's view, the band, the two producers' rules
   ORIGINS, PURPOSES, PURPOSE_IDS, purposeOf, groupByPurpose, PROVENANCES, PROVENANCE_IDS, PROVENANCE_FILTERS, provenanceOf, provenanceFilterOf, EXPIRY_WARN_MS, stateChipsOf, viewOf,
   BAND_MAX, bandItemsOf, bandDoorsOf, USE_FAIL_CAUSES, USE_FAIL_MERGE_MS, USE_FAIL_HEADS, USE_FAIL_LINES, USE_FAIL_REACH_LINES, USE_FAIL_NAMELESS, useFailVerdict, useFailCard, rotateCard,

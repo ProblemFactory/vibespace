@@ -352,7 +352,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     // q-053 P0b (decision ①): a pool's move to another provider — Always lets THIS pool make such a move by itself from now on
     'pool-always': () => actBtn('pool-always', UI_ICONS.check, t('Always for this pool'), t('Lets this pool move a conversation to another provider by itself from now on, with a line in the conversation each time'), 'iw-act-exit'),
     // lane vault-run-door: a held run's «always» = this command SHAPE for this conversation, 30 days — the second password again first
-    'shape-always': () => actBtn('shape-always', UI_ICONS.check, t('Always for this shape'), t('The same tool, flags, hosts and secrets run without asking for 30 days — asks for the second password first'), 'iw-act-exit'),
+    'shape-always': () => actBtn('shape-always', UI_ICONS.check, t('Always let this conversation use it (these hosts)'), t('A standing approval: this conversation runs commands with these secrets for these hosts without asking for 30 days — the Vault window lists it and takes it back; asks for the second password first'), 'iw-act-exit'),   // lane vault-use-grants: «Always» = a vault-use grant
     // lane vault-manual-and-lock: an agent's request for a stored secret — For 8 hours = every run of that conversation with it for 8 hours (a lock ends it)
     // lane vault-paste-request: an agent's request for a secret — Paste… opens THE paste box (the tray's, as a dialog); Refuse tells the agent
     'secret-paste': () => actBtn('secret-paste', UI_ICONS.check, t('Paste and save…'), t('Opens a masked box — what you paste goes straight into the vault; the agent is told only that it is there'), 'iw-act-primary iw-act-exit'),

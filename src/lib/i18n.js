@@ -42,7 +42,9 @@ const LOCALE_TAG = { zh: 'zh-CN', ja: 'ja-JP' };
 export function deviceLocale() { return LOCALE_TAG[resolveLang()]; }
 
 export function t(str, params) {
-  let s = (_dict && _dict[str]) || str;
+  // lane vault-use-grants round 7: look up an OWN key only — a bare `_dict[str]` returns an inherited Object.prototype member
+  // for a string like 'constructor' / 'toString' / 'valueOf' (t('constructor') rendered «function Object() { [native code] }»).
+  let s = (_dict && Object.prototype.hasOwnProperty.call(_dict, str) && _dict[str]) || str;
   if (params) s = s.replace(/\{(\w+)\}/g, (m, k) => (params[k] !== undefined ? String(params[k]) : m));
   return s;
 }
@@ -55,7 +57,8 @@ export function t(str, params) {
  * (that would reintroduce the collision this exists to avoid).
  */
 export function tc(ctx, str, params) {
-  let s = (_dict && _dict[ctx + '::' + str]) || str;
+  const k0 = ctx + '::' + str;
+  let s = (_dict && Object.prototype.hasOwnProperty.call(_dict, k0) && _dict[k0]) || str;
   if (params) s = s.replace(/\{(\w+)\}/g, (m, k) => (params[k] !== undefined ? String(params[k]) : m));
   return s;
 }

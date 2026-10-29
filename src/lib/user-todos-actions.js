@@ -18,6 +18,7 @@
 // `inboxModel(app)` is memoized on the app: the first caller (the panel's
 // install at boot) builds it, the window asks for the same one.
 import { t, resolveLang, deviceLocale } from './i18n.js';
+import { ROW_OF as FORYOU_ROW_OF } from '../foryou-actions.js';   // lane vault-use-grants round 7: the For-you action registry — which items declare `localizeDetail` (a registry read, never a type-literal branch — §78)
 import { fetchJson, showToast } from './utils.js';
 import { replyButtonState, liveDotState, LIVE_DOT_WHY, restoreDetails, badgeWords, saidLine, itemTextOf, itemDetailLinesOf, itemRecordLinesOf } from './user-todos-layout.js'; // PURE: the reply verdict + the running dot (design-user-inbox-reply D1.5/D1.7); restoreDetails = the whole detail this client already saw survives a snapshot that previews it
 import { showInstallDialog, launchDpr, launchUiScale } from './desktop-app-launcher.js';
@@ -82,8 +83,14 @@ export function inboxModel(app) {
   const said = (l) => saidLine(l, t, { locale: deviceLocale() });
   const wordsOf = (i) => (isCleared(i) ? clearedText() : i && i.card && i.card.kind === 'api-call' && i.card.head ? titleWords(i.card.head, { t, lang: resolveLang() }) : itemTextOf(i, said));
   /** The detail as LINES (the Vault window's band: its first line is a use failure's cause, the rest sit under one fold). */
-  const detailLinesOf = (i) => (isCleared(i) ? [] : itemDetailLinesOf(i, said));
-  const detailOf = (i) => (isCleared(i) ? '' : i && i.i18n && Array.isArray(i.i18n.detail) && i.i18n.detail.length ? detailLinesOf(i).join('\n') : (i && i.detail) || '');
+  // lane vault-use-grants round 7: a plain-detail line is run through t() ONLY for an item whose registry row DECLARES
+  // `localizeDetail` (the vault RUN card) — so its one FIXED line (the «Always» switch line, zh + ja) shows in the owner's
+  // language. Every OTHER item's plain detail passes through UNtouched: r6 ran t() over every item's every line, which
+  // translated bare words like "Yes"/"Cancel" and (before t() was hardened) rendered "constructor" as the Object constructor.
+  // The gate is a REGISTRY read (ROW_OF keyed by the action type), not a type-literal branch (§78's id-branch ratchet).
+  const tLine = (i, l) => (l && i && i.action && FORYOU_ROW_OF[i.action.type] && FORYOU_ROW_OF[i.action.type].localizeDetail ? t(l) : l);
+  const detailLinesOf = (i) => (isCleared(i) ? [] : i && i.i18n && Array.isArray(i.i18n.detail) && i.i18n.detail.length ? itemDetailLinesOf(i, said) : itemDetailLinesOf(i, said).map((l) => tLine(i, l)));   // int361: owner-press-attended's ONE line reader + vault-use-grants r7's registry-gated t()
+  const detailOf = (i) => (isCleared(i) ? '' : i && i.i18n && Array.isArray(i.i18n.detail) && i.i18n.detail.length ? detailLinesOf(i).join('\n') : String((i && i.detail) || '').split('\n').map((l) => tLine(i, l)).join('\n'));
   /** lane owner-press-attended r3: the detail as the RECORD a Copy says — a fold («And 6 more producers.») said as the rows it
    *  folds (the fold is for the eye, not the record) */
   const recordOf = (i) => (isCleared(i) ? '' : i && i.i18n && Array.isArray(i.i18n.detail) && i.i18n.detail.length ? itemRecordLinesOf(i, said).join('\n') : (i && i.detail) || '');
@@ -144,7 +151,7 @@ export function inboxModel(app) {
     // lane vault-relock-door: the restart notice's door opens the unlock dialog (its key 'vault' is no session; the body click used to end in "Session not found")
     if (item?.action?.type === 'vault-unlock') { close(); try { window.dispatchEvent(new CustomEvent('vs-vault-door')); } catch { } return; }
     // lane vault-window-v2: a failed use / a rotate suggestion lands on ITS row in the Vault window (the window's 「需要你」 draws the same item)
-    if (item?.action?.type === 'vault-use-failed' || item?.action?.type === 'vault-rotate') { close(); app.replayOpenSpec?.({ action: 'openVault', focus: String(item.action.entry || '') }); return; }
+    if (item?.action?.type === 'vault-use-failed' || item?.action?.type === 'vault-rotate' || item?.action?.type === 'vault-policy-approved' || item?.action?.type === 'vault-store-refused' || item?.action?.type === 'vault-grant-stale') { close(); app.replayOpenSpec?.({ action: 'openVault', focus: String(item.action.entry || '') }); return; }   // + vault-policy-approved (R4): the entry's row (its policy / Revoke); + vault-store-refused / vault-grant-stale (r3–r5): the Vault window, to switch each entry on again
     // lane device-upgrade-stuck: a machine-level item (a device agent whose update failed) lands on Manage Agents → Machines
     if (key === 'machines') { close(); try { localStorage.setItem('vibespace.agentsTab', 'machines'); } catch { } app._showAgentsDialog?.(); return; }
     const s = sessionFor(key);
@@ -226,7 +233,7 @@ export function inboxModel(app) {
    *  conversation became «open the row in place» (lane foryou-honest P3-8). */
   const isDoor = (key, item) => !!(item?.jobId || item?.open?.kind === 'plugin-settings' || key === 'jobs' || key === 'accounts' || key === 'machines'
     || (item?.action?.type === 'open-channel' && item.action.adapterId && item.action.convId)
-    || ['vault-unlock', 'vault-use-failed', 'vault-rotate'].includes(item?.action?.type));
+    || ['vault-unlock', 'vault-use-failed', 'vault-rotate', 'vault-policy-approved', 'vault-store-refused', 'vault-grant-stale'].includes(item?.action?.type));
   /** ✓ / ✕ ON AN ITEM (lane foryou-honest, the stress evaluation's P3-2: one press decided it — no toast, the ↺ two screens
    *  away): the status POST, then ONE toast with Undo for 6 s — the ↺ road (status open) on the same item. */
   const resolveOne = async (id, status) => {
@@ -416,11 +423,11 @@ export function inboxModel(app) {
     }
     if (rec && rec.action && rec.action.type === 'vault-run-ask') {
       // lane vault-run-door (design q-043 §8.3): THE person's answer to an agent's run held on its card (cookie route; any
-      // bearer is refused human_only) — once (this run) / always (this command SHAPE for this conversation, 30 days: the
+      // bearer is refused human_only) — once (this run) / always (lane vault-use-grants: a STANDING APPROVAL — this conversation × the run's HOSTS, 30 days: the
       // second password again — 验证是你 opens FIRST, in the press's own task, never a round trip late) / deny.
       if (answer === 'always' && !revealLeftMs() && !(await askRevealPassword())) return false;
       const r = await fetchJson(`/api/vault/run/asks/${encodeURIComponent(rec.action.askId)}`, { method: 'POST', headers: { 'Content-Type': 'application/json', ...(answer === 'always' ? revealHeaders() : {}) }, body: JSON.stringify({ answer }) });
-      if (r && r.ok) { showToast(r.outcome === 'always' ? t('Allowed for this shape for 30 days') : r.outcome === 'allowed' ? t('allowed') : t('denied')); return true; }   // `outcome` (the vault door lays its facts' `state` over an answer)
+      if (r && r.ok) { showToast(r.outcome === 'always' ? t('A standing approval: this conversation may use it for these hosts for 30 days — the Vault window lists it') : r.outcome === 'allowed' ? t('allowed') : t('denied')); return true; }   // `outcome` (the vault door lays its facts' `state` over an answer) — lane vault-use-grants: «Always» = a vault-use grant
       const code = r && r.code;
       if (code === 'reveal_needs_password') forgetReveal();
       showToast(code === 'ask_settled' ? t('Already answered') : code === 'ask_expired' ? t('Too late — it was refused after 60 s') : code === 'ask_unknown' ? t('That request is gone')

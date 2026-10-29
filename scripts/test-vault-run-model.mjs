@@ -192,7 +192,7 @@ console.log('④ THE SHAPE KEY — tool + flags + hosts + entries (decision ④)
   // THE HOSTS
   const H = (argv, extra = {}) => { const p = V.planOf({ argv, env: [['T', M1]], ...extra }); if (!p.ok) throw new Error(JSON.stringify(p)); return V.shapeOf(p).hosts.join(' '); };
   const HOSTS = [
-    [['curl', 'https://API.example.com/x'], 'api.example.com'], [['curl', 'https://h.example:8443/x', 'http://u:p@other.example/'], 'h.example:8443 other.example'],
+    [['curl', 'https://API.example.com/x'], 'api.example.com'], [['curl', 'https://h.example:8443/x', 'http://u:p@other.example/'], 'h.example:8443'],   // round 4 (BLOCKER): an http(s) userinfo `@` authority is OPAQUE (new URL and curl may disagree) — the clean host is read, the userinfo URL contributes none
     [['git', 'clone', 'git@github.com:org/repo.git'], 'github.com'], [['git', 'push', 'https://gitlab.example.com/x.git'], 'gitlab.example.com'],
     [['ssh', '-i', '$VAULT_FILE{mounts/m2/secretKey}', '-p', '2222', 'deploy@host.example', 'uptime'], 'host.example'],
     [['scp', '-i', '$VAULT_FILE{mounts/m2/secretKey}', 'f.txt', 'u@h.example:/tmp/'], 'h.example'],
@@ -211,6 +211,59 @@ console.log('④ THE SHAPE KEY — tool + flags + hosts + entries (decision ④)
   ok(!aw.length, '«always» is offered only for a KNOWN tool that names its host — never a tool outside the table, one naming no host, a shell or an interpreter (destination unknown / the script is the program)', aw.map(([a, w]) => [a.join(' '), w, A(a)]));
   const pr = V.shapeOf(V.planOf({ argv: ['curl', 'https://api.example.com'], env: [['T', M1]] }));
   ok(pr.proxyEnv === true && V.shapeOf(V.planOf({ argv: ['psql', '-h', 'db.x'], env: [['PGPASSWORD', M1]] })).proxyEnv === false, 'the shape says whether the tool honours the proxy env (P1 vault-run-egress fences on it)');
+  // round 4 (BLOCKER + MAJOR item 2): a special-scheme URL whose authority is not a clean host (a `\` before `@`, a userinfo
+  // `@`, a space) is OPAQUE — new URL() and the real curl may route to different hosts; a CLEAN git-over-https URL is not.
+  const RO = (argv) => V.shapeOf(V.planOf({ argv, env: [['T', M1]] })).routeOpaque;
+  ok(RO(['curl', 'http://127.0.0.5:9\\@127.0.0.1:7001/x']) === true && RO(['curl', 'https://u:p@other.example/']) === true
+    && RO(['curl', 'https://api.example.com/x']) === false
+    && RO(['git', 'ls-remote', 'https://github.com/o/r']) === false && RO(['git', 'clone', 'https://github.com/o/r']) === false && RO(['git', 'push', 'https://github.com/o/r.git', 'HEAD:main']) === false
+    && RO(['scp', 'backup', 'root@192.168.1.1:/x']) === false,
+    'the backslash-before-@ and userinfo authorities are opaque (the card); a clean git-over-https URL and `scp backup host:/x` are not (routine granted runs draw no card)',
+    { bs: RO(['curl', 'http://127.0.0.5:9\\@127.0.0.1:7001/x']), gitls: RO(['git', 'ls-remote', 'https://github.com/o/r']), scp: RO(['scp', 'backup', 'root@192.168.1.1:/x']) });
+  // round 5 (BLOCKER item 1): the ssh family's TARGET host is an alias in EVERY spelling; r4 wrongly exempted every `://` target
+  ok(['ssh ssh://router', 'sftp sftp://router', 'scp backup scp://router/x', 'git clone ssh://router/repo', 'git clone git+ssh://router/repo', 'ssh router', 'scp backup router:/x', 'rsync -a backup router:/x'].every((c) => RO(c.split(' ')) === true),
+    'ssh-family: a single-label alias is OPAQUE in every spelling (bare / host:path / ssh:// / scp:// / sftp:// / git+ssh://)',
+    ['ssh ssh://router', 'scp backup scp://router/x', 'git clone ssh://router/repo'].map((c) => [c, RO(c.split(' '))]));
+  ok(RO(['git', 'clone', 'ssh://git@github.com/o/r']) === false && RO(['ssh', 'git@github.com', 'x']) === false && RO(['git', 'clone', 'https://router/r']) === false,
+    'a DOTTED ssh host / a single-label HTTPS host (not ssh) is NOT an alias — no over-blinding of git-https or a dotted ssh target');
+  // round 6 (BLOCKER item 1): a jump host `-J`/`-W` is an alias in EVERY spelling too (r5 fixed only `-o ProxyJump=`)
+  ok(['ssh -J router box.example', 'ssh -Jrouter box.example', 'ssh -J user@router:22 box.example', 'scp -J router f box.example:/x', 'sftp -J router box.example', 'ssh -W router:22 jump.example'].every((c) => RO(c.split(' ')) === true)
+    && RO(['ssh', '-J', 'jump.example', 'box.example']) === false,
+    'ssh -J / -W: a single-label jump host is OPAQUE (every host-bearing ssh option goes through ONE alias reader); a DOTTED -J host is not',
+    ['ssh -J router box.example', 'scp -J router f box.example:/x', 'sftp -J router box.example'].map((c) => [c, RO(c.split(' '))]));
+  // round 7 (MAJOR item 1b): the DERIVED table — a short ssh flag the reader marks and its `-o` long spelling must agree,
+  // because both read the SAME SSH_OPT_TABLE rows (the oracle `ssh -F /dev/null -G` prints one keyword for `-S x` and
+  // `-o ControlPath=x`). A long spelling the reader forgot would be a MISSING ROW, red here — not a silent by:grant leak.
+  {
+    const G = (argv) => V.shapeOf(V.planOf({ argv, env: [['T', M1]] })).routeOpaque;
+    const miss = [];
+    for (const r of V.SSH_OPT_TABLE) {
+      if (r.mode === 'opaque') { if (!(G(['ssh', r.flag, 'x', 'box.example', 'true']) === true && G(['ssh', '-o', `${r.o}=x`, 'box.example', 'true']) === true && V.SSH_LOCAL_O.has(r.o))) miss.push(`${r.flag}↔${r.o}`); }
+      else { if (!(G(['ssh', r.flag, 'alias', 'box.example', 'true']) === true && G(['ssh', '-o', `${r.o}=alias`, 'box.example', 'true']) === true && V.SSH_HOST_OPTS.has(r.o))) miss.push(`${r.flag}↔${r.o}`); }
+    }
+    ok(miss.length === 0 && V.SSH_OPT_TABLE.length === 5, 'the ssh (short flag ↔ -o long) table is DERIVED: every opaque/host flag agrees with its -o spelling (-S/-L/-R/-D/-J)', { miss, rows: V.SSH_OPT_TABLE.length });
+  }
+  // round 6 (MAJOR item 2): a ONE-LETTER ssh/sftp host is an alias (opaque, every spelling).
+  const RH6 = (argv, extra = {}) => V.shapeOf(V.planOf({ argv, env: [['T', M1]], ...extra })).routeHosts;
+  const ROx = (argv, extra = {}) => V.shapeOf(V.planOf({ argv, env: [['T', M1]], ...extra })).routeOpaque;
+  ok(RO(['ssh', 'r', 'true']) === true && RO(['sftp', 'r']) === true && RO(['ssh', 'ssh://r', 'true']) === true && RO(['ssh', '-o', 'HostName=r', 'box.example', 'true']) === true && RO(['ssh', '-J', 'r', 'box.example', 'true']) === true && RO(['ssh', 'rr', 'true']) === true,
+    'a one-letter ssh/sftp host (and -o HostName / -J) is an alias (opaque)',
+    { sshr: RO(['ssh', 'r', 'true']) });
+  // round 7 (MAJOR item 1c): the drive-letter rule is PLATFORM-KEYED — a one-letter `X:path` is a host on POSIX (the hub),
+  // a LOCAL Windows drive ONLY on a win32 runner, and `u@r:/x` is a remote host on BOTH. (r6's rule, measured wrong on Linux —
+  // Linux scp/rsync have no drive-letter rule and connect to host C/c/x/a — is REVERSED.) Both branches are tested.
+  ok(RH6(['scp', 'file', 'C:\\x']).includes('c') && ROx(['scp', 'file', 'C:\\x']) === true && RH6(['scp', 'file', 'c:/x']).includes('c') && RH6(['rsync', 'a:', 'd']).includes('a') && ROx(['scp', 'f', 'u@r:/x']) === true,
+    'POSIX (the hub): a one-letter `X:path` / `c:/x` / `a:` connects to host X (an alias ⇒ opaque); `u@r:/x` is a remote host',
+    { posix_Cx: RH6(['scp', 'file', 'C:\\x']), posix_opaque: ROx(['scp', 'file', 'C:\\x']) });
+  ok(!RH6(['scp', 'file', 'C:\\x'], { win32: true }).includes('c') && ROx(['scp', 'file', 'C:\\x'], { win32: true }) === false && ROx(['scp', 'f', 'u@r:/x'], { win32: true }) === true,
+    'win32 runner: a bare one-letter `C:\\x` is a LOCAL drive (not a host, not opaque); `u@r:/x` is still a remote host',
+    { win32_Cx: RH6(['scp', 'file', 'C:\\x'], { win32: true }), win32_opaque: ROx(['scp', 'file', 'C:\\x'], { win32: true }) });
+  // round 5 (MAJOR item 5): a scheme-shaped token is never a bare host; a proxy value's authority is cut at the first # / ?
+  ok(RO(['curl', 'http:/127.0.0.1:80/x']) === true && RO(['curl', 'ftp:ftp']) === true && RO(['curl', 'smtp:/127.0.0.1/x']) === true && RO(['curl', 'localhost:9999/x']) === false,
+    'a one-slash `S:/HOST` and a bare `S:HOST` for a known scheme are BLIND; `localhost:9999` (not a scheme) is read as a host');
+  const px = (v) => V.shapeOf(V.planOf({ argv: ['curl', 'http://own.example/x', '-x', v], env: [['T', M1]] })).routeHosts;
+  ok(px('127.0.0.1:3128#@own.example:3129').includes('127.0.0.1:3128') && px('127.0.0.1:3128?@own.example:3129').includes('127.0.0.1:3128') && !px('127.0.0.1:3128#@own.example:3129').includes('own.example:3129'),
+    'a proxy value\'s authority is cut at the first # / ? — curl connects to host:port, not the fragment/query host (round 5 item 5)');
 }
 
 console.log('①b AN AGENT\'S OWN ENTRY (lane vault-run-door × lane vault-mint-put) — vault://agent:<scope>/<name>');
@@ -246,7 +299,7 @@ console.log('④b THE SHAPE KEY carries where the secret goes (lane vault-run-do
   const naBad = NA.filter(([argv, why]) => S(argv).noAlways !== why || S(argv).always);
   ok(!naBad.length && S(['curl', 'https://a.example'], { programWritable: true }).noAlways === 'program-writable' && S(['curl', 'https://a.example']).always === true, 'no «always» for a tool that runs the project\'s code, reads a config file the card cannot show, or a program an agent could have written', naBad.map((x) => [x[0][0], S(x[0]).noAlways]));
   const SRC = fs.readFileSync(path.join(REPO, 'src/vault-run.js'), 'utf8');
-  ok(/const URL_RE = \/\\b\(\[a-z\]\[a-z0-9\+\.-\]\{0,31\}\):/.test(SRC) && !/\[a-z0-9\+\.-\]\*:\\\/\\\//.test(SRC) && S(['curl', 'https://a.example'], { env: [['T', M1], ['P', 'a.'.repeat(32768)]] }).always, 'the URL scan\'s scheme is BOUNDED ({0,31}): an unbounded one walked a 64 KiB «a.a.a…» value quadratically (measured 335 ms at 32 KiB, minutes at a megabyte — the review)');
+  ok(/const URL_FIND_RE = \/\\b\(\[a-z\]\[a-z0-9\+\.-\]\{0,31\}\):\\\/\\\/\\S\+\/gi;/.test(SRC) && !/\[a-z0-9\+\.-\]\*:\\\/\\\//.test(SRC) && S(['curl', 'https://a.example'], { env: [['T', M1], ['P', 'a.'.repeat(32768)]] }).always, 'the URL LOCATOR\'s scheme is BOUNDED ({0,31}) and it runs to whitespace (the host is read by urlParse / new URL — round 3): an unbounded scheme walked a 64 KiB «a.a.a…» value quadratically (measured 335 ms at 32 KiB, minutes at a megabyte — the review)');
 }
 
 console.log('⑤ THE VERDICT — entry × conversation × shape × time');

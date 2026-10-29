@@ -9896,6 +9896,7 @@ export default {
   "Extra Antigravity CLI args appended when starting an Antigravity session.": "Antigravity セッションの起動時に追加する Antigravity CLI 引数。",
   "Default (Antigravity’s own setting)": "既定（Antigravity 自身の設定）",
   "{who} wants to run a command with a stored secret": "{who} が保管庫のシークレットを使ってコマンドを実行しようとしています", // lane vault-run-door
+  "«Always» (with the second password) also turns on «Usable by agent runs» for this entry — it opens it for THIS conversation; any grants you paused stay paused.": "「常に許可」（本人確認が必要）を押すと、この項目の「エージェントの実行で使用可」もオンになります——開くのはこの会話だけで、あなたが一時停止した他の許可は停止したままです。", // lane vault-run-door
   "Always for this shape": "この形は常に許可", // lane vault-run-door
   "The same tool, flags, hosts and secrets run without asking for 30 days — asks for the second password first": "同じツール・フラグ・ホスト・シークレットなら 30 日間確認せずに実行します — 先に第二パスワードを確認します", // lane vault-run-door
   "Allowed for this shape for 30 days": "この形を 30 日間許可しました", // lane vault-run-door
@@ -11149,4 +11150,81 @@ export default {
   "Open Usage": "使用状況 を開く",
   "Not saved yet — press Enter or leave the field": "未保存——Enter を押すか入力欄を離れると保存します",
   "Not saved yet — press Enter or leave the field · in force now: {value}": "未保存——Enter を押すか入力欄を離れると保存します · 現在有効：{value}",
+  "As each has it now": "それぞれ今の設定のまま", // lane vault-use-grants
+  "No end": "期限なし", // lane vault-use-grants
+  "8 hours": "8 時間", // lane vault-use-grants
+  "the hosts it was stored for ({hosts})": "保存時に指定したホスト（{hosts}）", // lane vault-use-grants
+  "Who may use it…": "誰が使えるか…", // lane vault-use-grants
+  "Let a conversation, a Task Group or all agents run commands with it for the hosts you name — no card each time. Another host still asks you.": "会話・タスクグループ・すべてのエージェントに、指定したホストでこれを使ってコマンドを実行させます——毎回カードは出ません。別のホストは引き続き確認します。", // lane vault-use-grants
+  "Who may use it could not be read — it is refused as it is (never read wider). Save it again to repair it.": "「誰が使えるか」を読み取れません——そのまま拒否します（広く解釈しません）。保存し直すと直ります。", // lane vault-use-grants
+  "Used with no card by:": "カードなしで使用：", // lane vault-use-grants
+  "used {n}×": "{n} 回使用", // lane vault-use-grants
+  "Paused while the entry is off — turn «Usable by agent runs» on to restore these.": "項目がオフの間は停止中——「エージェントの実行で使用可」をオンにすると復元します。", // lane vault-use-grants (round 3: スイッチ名と同一表記)
+  "paused by you": "あなたが一時停止しました", // lane vault-use-grants (round 7)
+  "closed when the vault locked — run it again after the unlock": "保管庫をロックしたときに閉じました——解除後にもう一度実行してください", // lane vault-use-grants (round 7)
+  "Unverified until you unlock the vault — not in use until then.": "保管庫のロックを解除するまで検証できません——それまでは使用されません。", // lane vault-use-grants (round 6)
+  "Un-pause this — let it be used again": "一時停止を解除——再び使用可にする", // lane vault-use-grants (round 6)
+  "every {host} host": "{host} のすべてのホスト", // lane vault-use-grants (round 3)
+  "every {host} host (incl. other customers’ endpoints)": "{host} のすべてのホスト（他の顧客のエンドポイントを含む）", // lane vault-use-grants (round 3)
+  "until {when}": "{when} まで", // lane vault-use-grants
+  "Take this back": "取り消す", // lane vault-use-grants
+  "except {name}": "{name} を除く", // lane vault-use-grants
+  "used {n}× by {m} conversations": "{m} 件の会話で {n} 回使用", // lane vault-use-grants
+  "Who may use «{name}»": "「{name}」を誰が使えるか", // lane vault-use-grants
+  "They run commands with it — vibespace-vault run — for the hosts below with no card each time; they never see it. Another host, or a command whose destination cannot be told (a shell, a script), still asks you.": "下のホスト向けなら、毎回カードなしでこれを使ってコマンドを実行できます（vibespace-vault run）。値そのものは見えません。別のホストや、送り先を判断できないコマンド（シェル、スクリプト）は引き続き確認します。", // lane vault-use-grants
+  "Who may use it": "誰が使えるか", // lane vault-use-grants
+  "Who": "誰に", // lane vault-use-grants
+  "For which hosts": "どのホスト向けか", // lane vault-use-grants
+  "The hosts it was stored for ({hosts})": "保存時に指定したホスト（{hosts}）", // lane vault-use-grants
+  "Each keeps its own hosts — or type hosts for all": "それぞれ自分のホストのまま——または全員分のホストを入力", // lane vault-use-grants
+  "Host names or addresses, e.g. 192.168.1.1, router.lan": "ホスト名またはアドレス（例：192.168.1.1、router.lan）", // lane vault-use-grants
+  "Until": "期限", // lane vault-use-grants
+  "Name the hosts it may be used for — a host name or address each (never «any host»)": "使えるホストを指定してください——ホスト名かアドレスを 1 つずつ（「任意のホスト」は不可）", // lane vault-use-grants
+  "Saved — they use it with no card for those hosts": "保存しました——そのホスト向けならカードなしで使えます", // lane vault-use-grants
+  "Saved — nobody uses it without a card": "保存しました——カードなしで使える人はいません", // lane vault-use-grants
+  "A host is a host name or address (no wildcard, no address with a path)": "ホストはホスト名かアドレスです（ワイルドカードやパス付きは不可）", // lane vault-use-grants
+  "You typed it in at an agent's request — the conversation that asked is named": "エージェントの依頼であなたが入力しました——依頼した会話を表示しています", // lane vault-use-grants
+  "Filled by you · asked for by {who}": "あなたが入力 · {who} の依頼", // lane vault-use-grants
+  "for {hosts}": "{hosts} 向け", // lane vault-use-grants
+  "Search all": "すべてを検索", // lane vault-use-grants
+  "No stored value matches “{q}” — searched: {fields}": "「{q}」に一致する保存値はありません——検索対象：{fields}", // lane vault-use-grants
+  "No stored value matches “{q}” in «{purpose}» — searched: {fields}": "「{purpose}」に「{q}」に一致する保存値はありません——検索対象：{fields}", // lane vault-use-grants
+  "{n} match under other purposes": "ほかの用途に {n} 件一致", // lane vault-use-grants
+  "names": "名前", // lane vault-use-grants
+  "kinds": "種類", // lane vault-use-grants
+  "purposes": "用途", // lane vault-use-grants
+  "hosts": "ホスト", // lane vault-use-grants
+  "where they came from": "出どころ", // lane vault-use-grants
+  "ids": "ID", // lane vault-use-grants
+  "Always let this conversation use it (these hosts)": "この会話に常に使わせる（このホスト）", // lane vault-use-grants
+  "A standing approval: this conversation may use it for these hosts for 30 days — the Vault window lists it": "常設の許可：この会話は 30 日間このホスト向けに使えます——保管庫ウィンドウに表示されます", // lane vault-use-grants
+  "A standing approval: this conversation runs commands with these secrets for these hosts without asking for 30 days — the Vault window lists it and takes it back; asks for the second password first": "常設の許可：この会話は 30 日間、このホスト向けならこれらの秘密でコマンドを確認なしに実行できます——保管庫ウィンドウに表示され、取り消せます。先に第二パスワードを求めます", // lane vault-use-grants
+  "For: {hosts} — the conversation that asked is not allowed to use it until you allow it on its row in the Vault window («Who may use it…»).": "用途：{hosts}——保管庫ウィンドウのその行（「誰が使えるか…」）で許可するまで、依頼した会話は使えません。", // lane vault-use-grants
+  "A pasted secret may be used by the conversation that asked for it": "貼り付けた秘密を、依頼した会話が使えるようにする", // lane vault-use-grants
+  "When an agent asks you to paste a secret and names the hosts it is for, the conversation that asked may use it in commands to those hosts for 8 hours — they are not asked again. A command to any other host still shows you its card, and a request that named no hosts shows a card for every command. Locking the vault ends the grant, and the entry's own «Usable by agent runs» switch is untouched. OFF: a paste grants nothing — the agent's receipt tells it to request the secret, and you open the entry in the Vault window.": "エージェントが秘密の貼り付けを依頼し、使うホストを指定した場合、依頼した会話は 8 時間だけそのホスト向けのコマンドで使え、再度は尋ねられません。他のホスト向けのコマンドは引き続きカードを表示し、ホストを指定しなかった依頼では毎コマンドでカードを表示します。保管庫をロックすると付与は終了し、項目自身の「エージェントの実行で使用可」スイッチは変わりません。オフ：貼り付けても何も付与されません——エージェントの受領メッセージが秘密の請求を促し、あなたが保管庫ウィンドウで項目を開きます。", // lane vault-use-grants
+  "Policy for the judge: «{text}»": "判定用ポリシー：「{text}」", // lane vault-use-grants
+  "Policy for the judge: «{text}» — the judge is off (Settings ▸ Integration)": "判定用ポリシー：「{text}」——ポリシー判定はオフです（設定 ▸ 連携）", // lane vault-use-grants
+  "Approved by the policy judge {n}× · last {time}": "ポリシー判定が {n} 回承認 · 最終 {time}", // lane vault-use-grants
+  "The commands the judge approved ask you again next time": "判定が承認したコマンドは次回また確認します", // lane vault-use-grants
+  "Revoked — those commands ask you again": "取り消しました——それらのコマンドはまた確認します", // lane vault-use-grants
+  "Policy for the judge (optional)": "判定用のポリシー（任意）", // lane vault-use-grants
+  "e.g. only 192.168.1.1, read-only status calls to read the WAN status": "例：192.168.1.1 のみ、WAN の状態を読む読み取り専用の呼び出し", // lane vault-use-grants
+  "The policy judge is ON: a run its grants do not cover is judged against these words by the decision API; a yes runs it (recorded in For you), anything else shows you the card. It never sees the value.": "ポリシー判定はオンです：許可でカバーされない実行は decision API がこの文で判定し、承認なら実行（「あなた宛て」に記録）、それ以外はカードを表示します。値は決して見えません。", // lane vault-use-grants
+  "The policy judge is OFF (Settings ▸ Integration ▸ «Let the policy judge approve vault uses») — the words are kept for when you turn it on.": "ポリシー判定はオフです（設定 ▸ 連携 ▸「ポリシー判定に保管庫の使用を承認させる」）——オンにしたときのために保存しておきます。", // lane vault-use-grants
+  "{who}: a command with a stored secret was approved by the policy judge": "{who}：保存された秘密を使うコマンドがポリシー判定で承認されました", // lane vault-use-grants
+  "Approved by the policy judge · {time} · inside your policy ({p})": "ポリシー判定が承認 · {time} · ポリシーの範囲内（{p}）", // lane vault-use-grants
+  "Your policy: {policy}": "あなたのポリシー：{policy}", // lane vault-use-grants
+  "The command: {cmd}": "コマンド：{cmd}", // lane vault-use-grants
+  "Open the entry in the Vault window to see its policy — its Revoke makes this command ask you again next time.": "保管庫ウィンドウでその項目を開くとポリシーを確認できます——そこで取り消すと、このコマンドは次回また確認します。", // lane vault-use-grants
+  "Let the policy judge approve vault uses": "ポリシー判定に保管庫の使用を承認させる", // lane vault-use-grants
+  "An entry may carry your policy («only 192.168.1.1, read-only status calls») in the Vault window's «Who may use it…». ON: a run its grants do not cover is judged against that policy by the decision API (the LLM plugin, its key and its daily budget) — approved runs go without a card and are recorded in For you with a Revoke; a no, or a judge that cannot be asked, shows you the card. It never sees a value. OFF (default): every such run asks you.": "項目には保管庫ウィンドウの「誰が使えるか…」であなたのポリシー（「192.168.1.1 のみ、読み取り専用の状態確認」）を付けられます。オン：許可でカバーされない実行は decision API（LLM プラグイン、そのキーと 1 日の予算）がそのポリシーで判定し、承認された実行はカードなしで進み「あなた宛て」に取り消し付きで記録されます。否決や判定できない場合はカードを表示します。値は決して見えません。オフ（既定）：そうした実行は毎回確認します。", // lane vault-use-grants
+  "Vault policy": "保管庫ポリシー", // lane vault-use-grants
+  "The vault-run store could not be trusted — every entry is off until you switch it on": "実行ストアを信頼できません——各項目はオフになっており、オンに切り替えるまで使えません",
+  "The vault-run store ({why}) could not be trusted — every entry is OFF for agent runs and every standing grant is paused; nothing runs until you switch each entry on again in the Vault window (that re-marks it; a grant is not enough — the switch is the allow-list). No value was given out.": "実行ストア（{why}）を信頼できません——すべての項目が agent 実行に対してオフになり、すべての常設許可が一時停止されました。保管庫ウィンドウで各項目を再度オンにするまで何も実行されません（これで再度マークされます。許可だけでは不十分——スイッチが許可リストです）。値は一切渡されていません。",
+  "A stored value’s sharing could not be trusted — a grant was dropped and paused": "保存された値の共有を信頼できません——許可が 1 件破棄され一時停止されました",
+  "data/grants.json: a sharing grant for {resource} did not match the vault’s mark (a forged, widened or replayed row) and was dropped. Set who may use it again in the Vault window. No value was given out.": "data/grants.json：{resource} の共有許可が保管庫のマークと一致しませんでした（偽造・拡大・リプレイされた行）ので破棄しました。保管庫ウィンドウで誰が使えるかを再設定してください。値は一切渡されていません。",
+  "A wildcard host (like *.example.com) is scoped to the tool that first used it — add it from a run card with «Always», not here": "ワイルドカードのホスト（例：*.example.com）は最初に使ったツールだけに限定されます——ここではなく、実行カードの「常に許可」から追加してください",
+  "It said it needs it for: {hosts}. If you paste it, the conversation that asked may use it in commands to those hosts for 8 hours — a command to any other host still shows you its card; a vault lock ends it. To let it be used without that limit, turn on «Usable by agent runs» on its row in the Vault window.": "それは次の用途に必要と言っています：{hosts}。貼り付けると、依頼した会話は 8 時間だけそのホスト向けのコマンドで使えます——他のホスト向けのコマンドは引き続きカードが表示されます。保管庫をロックすると終了します。時間制限なしで使わせるには、保管庫ウィンドウのその行で「agent の実行で使用可」をオンにしてください。",
+  "If you paste it, the conversation that asked may use it, but every command still shows you its card (it named no hosts); a vault lock ends it. To let it be used without a card, turn on «Usable by agent runs» on its row in the Vault window.": "貼り付けると、依頼した会話は使えますが、どのコマンドでも引き続きカードが表示されます（ホストを指定していません）。保管庫をロックすると終了します。カードなしで使わせるには、保管庫ウィンドウのその行で「agent の実行で使用可」をオンにしてください。",
+  "The conversation that asked is not allowed to use it in runs until you turn on «Usable by agent runs» on its row in the Vault window.": "依頼した会話は、保管庫ウィンドウのその行で「agent の実行で使用可」をオンにするまで、実行では使えません。"
 };

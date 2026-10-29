@@ -64,6 +64,26 @@
  *     the exit code, the time, the scrubbed bytes, and the scrubbed heads of the command and of each stream (≤ 4 KiB) — NEVER
  *     a value, never another conversation's name.
  *
+ *   · A STANDING APPROVAL (lane vault-use-grants, the owner 2026-10-27 「每个密码请求都要我同意太麻烦了！」): the grant door
+ *     `vault-use` (src/vault-use-grant.js over the ONE grant model; written by src/server/vault-use-grants.js) names WHO may use
+ *     an entry, FOR WHICH HOSTS, UNTIL WHEN. It is asked BESIDE the verdict, never inside it: a member of the grant counts the
+ *     entry OPEN for its runs (as the switch does for everyone), and when the verdict would draw a card and EVERY entry of the
+ *     run is admitted for every host the run's shape names (a destination the shape can tell — never a shell, an interpreter,
+ *     a config file, a tool naming no host, a program an agent could have written), the run goes with NO card — its run line
+ *     `allowedBy: 'grant'` + the grants' ids, each use line its grant. Outside the grant's hosts the card is drawn and says so
+ *     («a standing approval exists … this run is outside it: host Y»); its «Always» WRITES the grant (this conversation ×
+ *     these hosts × the TTL — the same row the Vault window's «谁可以用…» edits) and, on a wider host, widens it. The «always»
+ *     rows data/vault-run.json kept before (command shapes) are CARRIED into grants at the first verified read (the store is
+ *     marked: it can be judged only unlocked) — ONE mechanism, not two.
+ *   · THE POLICY JUDGE (R4, default OFF — `vault.policyJudge`): an entry may carry the owner's POLICY (his words: the hosts, the
+ *     verbs, what it is for — kept in this file's marked store, so an agent cannot write one). A run that would draw its card,
+ *     is not admitted by a grant, and whose every entry has a policy is asked of the decision API (`policyJudge` → the ONE
+ *     caller decision-engine `judge('vault-use-policy', …)`) with the CARD's facts — the command (references), the program,
+ *     the hosts, a template's text, what the entry is for — never a value. A probability ≥ the model's threshold runs it
+ *     (`allowedBy: 'policy'`) and files ONE For-you record «approved by the policy judge · HH:MM · why» whose door opens the
+ *     entry's row, where 「Revoke」 makes that command ask again next time; a no, no answer, an error or an unavailable judge
+ *     FALLS BACK TO THE CARD (fail closed — the card says the judge's answer), never to a silent run.
+ *
  * WHAT IT IS NOT — §8.6, THE THREE HOLES, said where the door is:
  *   ① the child runs under the agent's uid: the agent can read /proc/<child>/environ and the 0600 file while the child lives.
  *     Short-lived, env before a file, audited — hygiene and an audit boundary, NOT isolation (q-040's per-run uid closes it;
@@ -88,6 +108,8 @@ const SS = require('../secret-shapes.js');
 const HC = require('../hidden-chars.js');
 const DOOR = require('../mount-door.js');   // B-afc4: a blocked storage path is answered by name, never read (a cwd, a tool, a template)
 const PI = require('../proc-identity.js');   // a run folder's hub: its identity, never a bare pid (the boot sweep)
+const VUG = require('../vault-use-grant.js');   // lane vault-use-grants: PURE — a standing approval's verdict and the card's words
+const DM = require('../decision-model.js');   // lane vault-use-grants (R4): PURE — the policy's spelling, its question, the threshold
 
 const ACTION_TYPE = 'vault-run-ask';
 const REQUEST_TYPE = 'vault-grant-ask';      // lane vault-manual-and-lock: an agent's request for an entry (its For-you ask)
@@ -149,10 +171,15 @@ const NO_ALWAYS = Object.freeze({
   shell: 'a shell\'s whole script is its shape',
   interpreter: 'an interpreter runs a program this card cannot read',
   'unknown-destination': 'where this tool sends what it reads is unknown',
+  'opaque-route': 'where it is routed (a proxy, an ssh ProxyCommand, a config directive) cannot be told from the command',
   'runs-project-code': 'it runs the project\'s own code (package scripts, setup files, a Dockerfile)',
   'config-file': 'it reads a config file this card cannot show',
   'program-writable': 'the program sits where an agent could have written it',
 });
+// lane vault-use-grants round 6 (MINOR item 3 + MAJOR item 4): the run card's «Always» switch line — ONE i18n key (the client
+// localizes every card detail line through t(), zh + ja below), not a hard-coded English+Chinese string. It says «Always»
+// opens the entry for THIS conversation only: the grants the owner paused with an OFF stay paused.
+const ALWAYS_SWITCH_LINE = '«Always» (with the second password) also turns on «Usable by agent runs» for this entry — it opens it for THIS conversation; any grants you paused stay paused.';
 
 // THE ENGINE'S ENTRY-CLASS CHECK (decision ⑤ — the second of two that say no, beside the model's ownDoorOf): the stores whose
 // rows a person may open for runs, by THIS file's own table; every other store's class is named; a sign-in token's kind is
@@ -249,7 +276,9 @@ function redactLong(text) {
 function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () => ({ ...process.env }), instanceKind = () => 'local', policy = () => null,
   liveOf = () => true, runRoot = () => process.env.XDG_RUNTIME_DIR || os.tmpdir(), home = os.homedir(), tmpDir = os.tmpdir(),
   now = () => Date.now(), log = () => {}, spawnImpl = spawn, killGraceMs = KILL_GRACE_MS, pipeGraceMs = PIPE_GRACE_MS,
-  timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (h) => clearTimeout(h) }, randomBytes = crypto.randomBytes } = {}) {
+  timers = { set: (fn, ms) => setTimeout(fn, ms), clear: (h) => clearTimeout(h) }, randomBytes = crypto.randomBytes,
+  useGrants = null, useFacts = () => null,
+  policyJudge = null, policyOn = () => false } = {}) {   // lane vault-use-grants (R4): (parts, {policy, memo}) → the decision engine's judge answer; the switch vault.policyJudge   // lane vault-use-grants: the vault-use writer (src/server/vault-use-grants.js) + a caller's admission facts ({conversationKeys, groupIds, groupsUnreadable})
   if (!dataDir || !vault) throw new TypeError('vault-run-door: dataDir and vault are required');
   const FILE = path.join(dataDir, STORE_FILE);
   const asks = new Map();      // askId → the card up
@@ -271,32 +300,123 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   const audit = (event, line) => { try { vault.audit(event, line); } catch (e) { log(`the audit line could not be written (${e.message})`); } };
 
   // ── THE STORE (marked by the vault) ──
-  const bodyOf = (d) => JSON.stringify({ v: 1, gen: Number(d.gen) || 0, runnable: [...d.runnable].sort(), always: d.always.slice().sort((a, b) => (a.conv + a.key).localeCompare(b.conv + b.key)) });
+  // lane vault-use-grants round 3 (MAJOR item 2): every list the store serializes is CAPPED HERE (the canonical body), so what
+  // is marked is always the capped form and the reader reproduces it byte-for-byte — a write that is unbounded while the reader
+  // slices wiped the whole store (the mark stopped verifying) in round 2. Each list drops the OLDEST past its cap.
+  const AP_MAX = 256, REVOKE_MAX = 512, ENTRY_MAX = 256;
+  const bodyOf = (d) => JSON.stringify({ v: 1, gen: Number(d.gen) || 0, runnable: [...d.runnable].sort(), ...(d.suspended && d.suspended.size ? { suspended: [...d.suspended].sort() } : {}), always: d.always.slice().sort((a, b) => (a.conv + a.key).localeCompare(b.conv + b.key)),
+    ...(d.policies && Object.keys(d.policies).length ? { policies: Object.fromEntries(Object.keys(d.policies).sort().slice(0, ENTRY_MAX).map((k) => [k, d.policies[k]])) } : {}),   // lane vault-use-grants (R4): only when there is one — a body without them is marked as before
+    ...(d.policyRevoked && d.policyRevoked.length ? { policyRevoked: d.policyRevoked.slice().sort((a, b) => (a.conv + a.key).localeCompare(b.conv + b.key)).slice(0, REVOKE_MAX) } : {}),
+    ...(d.policyApproved && Object.keys(d.policyApproved).length ? { policyApproved: Object.fromEntries(Object.keys(d.policyApproved).sort().slice(0, ENTRY_MAX).map((k) => [k, { n: Number(d.policyApproved[k].n) || 0, lastAt: Number(d.policyApproved[k].lastAt) || 0, shapes: (d.policyApproved[k].shapes || []).slice(-AP_MAX).map((s) => ({ conv: s.conv, key: s.key, ...(s.shape ? { shape: s.shape } : {}) })), items: (d.policyApproved[k].items || []).slice(-AP_MAX) }])) } : {}),   // lane vault-use-grants round 2 (MAJOR): the judge's approvals ride the marked store so a Revoke survives a restart — ONE canonical key order AND cap so save and load serialize identically (the mark verifies); `shape` = the coarse shape key the Revoke covers (round 3)
+    ...(d.policyHours && Object.keys(d.policyHours).length ? { policyHours: Object.fromEntries(Object.keys(d.policyHours).sort().slice(0, HOUR_MAX).map((k) => [k, (d.policyHours[k] || []).map((t) => Math.floor(Number(t)) || 0).slice(-POLICY_PER_HOUR)])) } : {}),   // round 4 (item 5): the per-hour judge COUNTER rides the marked store too — a restart inside the hour does not reset it (an in-memory counter is a free bypass by restart); same canonical order + cap so the mark verifies
+    ...(d.opened && Object.keys(d.opened).length ? { opened: Object.fromEntries(Object.keys(d.opened).sort().slice(0, ENTRY_MAX).map((k) => [k, { at: Math.floor(Number(d.opened[k] && d.opened[k].at)) || 0, resumed: Object.fromEntries(Object.keys((d.opened[k] && d.opened[k].resumed) || {}).sort().slice(0, AP_MAX).map((g) => [g, Math.floor(Number(d.opened[k].resumed[g])) || 0])) }])) } : {}) });   // round 7 (MAJOR item 2): HOW each ON entry is open — `opened[id]` exists ONLY when a PRESS («Always» for one conversation) flipped the switch; it holds the RESUMED grant-ids (the card's own + each ↻ + a member the owner adds while open). Its absence while ON = the owner opened it (every member usable). What is STORED is the RESUMED set, so a cap drop PAUSES (fail closed) — never un-pauses. Rides the mark; same canonical order + cap so it verifies.
+  const okPolicy = (x) => x && typeof x === 'object' && typeof x.text === 'string' && x.text.length > 0 && x.text.length <= DM.VAULT_POLICY_MAX;
+  const policiesOf = (raw) => { const out = {}; if (raw && typeof raw === 'object' && !Array.isArray(raw)) for (const [k, x] of Object.entries(raw).slice(0, ENTRY_MAX)) if (VI.parseRef(k) && okPolicy(x)) out[k] = { text: x.text, at: Number(x.at) || null, by: String(x.by || 'user').slice(0, 40) }; return out; };
+  const revokedOf = (raw) => (Array.isArray(raw) ? raw : []).filter((x) => x && typeof x.conv === 'string' && typeof x.key === 'string').slice(0, REVOKE_MAX).map((x) => ({ conv: x.conv, key: x.key }));
+  const approvedOf = (raw) => { const out = {}; if (raw && typeof raw === 'object' && !Array.isArray(raw)) for (const [k, x] of Object.entries(raw).slice(0, ENTRY_MAX)) if (VI.parseRef(k) && x && typeof x === 'object') out[k] = { n: Number(x.n) || 0, lastAt: Number(x.lastAt) || 0, shapes: (Array.isArray(x.shapes) ? x.shapes : []).filter((s) => s && typeof s.conv === 'string' && typeof s.key === 'string').slice(-AP_MAX).map((s) => ({ conv: s.conv, key: s.key, ...(typeof s.shape === 'string' ? { shape: s.shape } : {}) })), items: (Array.isArray(x.items) ? x.items : []).filter((i) => typeof i === 'string').slice(-AP_MAX) }; return out; };   // the SAME field order AND caps as bodyOf emits so the mark verifies on read
   const okAlways = (a) => a && typeof a.conv === 'string' && typeof a.key === 'string' && a.key.startsWith(VR.SHAPE_V + ':') && (a.until === null || Number.isFinite(a.until)) && Array.isArray(a.entries);
   let lastGen = 0;   // the newest generation this hub read or wrote — an older copy is a replay (the review: a saved copy restored)
+  let refusedNoted = null;   // the last `why` filed in For-you — so a refused store is reported once, not every read
+  // round 3 (MAJOR item 6) + round 4 (MAJOR item 5): THIS use's OWN per-hour judge bound (the door's counter, per conversation),
+  // the SECOND fence beside the engine's atomic `perHour: 30` (per caller, restored in the wiring). The counter is BOOKED
+  // synchronously BEFORE the await (reserve; a refused judgment releases its slot) so concurrent runs can never each pass a
+  // check-then-write race, and it rides the MARKED store so a restart inside the hour does not reset it (persisted; the
+  // threat `an in-memory counter is a free bypass by restart`). The window is `conv \n entryIds` → recent judge-call ms.
+  const POLICY_PER_HOUR = 30, HOUR_MAX = 64;
+  const hoursOf = (raw) => { const out = {}; if (raw && typeof raw === 'object' && !Array.isArray(raw)) for (const [k, v] of Object.entries(raw).slice(0, HOUR_MAX)) if (typeof k === 'string' && Array.isArray(v)) out[k] = v.map((t) => Math.floor(Number(t)) || 0).filter((t) => t > 0).slice(-POLICY_PER_HOUR); return out; };
+  // round 6 (MAJOR item 4): the per-member PAUSE marks — { resourceId: { grantId: whenMs } } (a grant the owner's OFF paused).
+  const openedOf = (raw) => { const out = {}; if (raw && typeof raw === 'object' && !Array.isArray(raw)) for (const [k, v] of Object.entries(raw).slice(0, ENTRY_MAX)) if (VI.parseRef(k) && v && typeof v === 'object' && !Array.isArray(v)) { const resumed = {}; const rr = v.resumed && typeof v.resumed === 'object' && !Array.isArray(v.resumed) ? v.resumed : {}; for (const [g, t] of Object.entries(rr).slice(0, AP_MAX)) if (VUG.ID_RE ? VUG.ID_RE.test(g) : typeof g === 'string') resumed[g] = Math.floor(Number(t)) || 0; out[k] = { at: Math.floor(Number(v.at)) || 0, resumed }; } return out; };
+  // round 7 (MAJOR item 2): THE ONE fact the judge, the list (runnableFor) and the window (rowFacts) read — is a member usable
+  // right now? The entry must be ON (`runnable`, the allow-list). `opened[id]` means a PRESS opened it ⇒ only a RESUMED grant-id
+  // is usable; its absence while ON means the OWNER opened it (manual ON ⇒ every member usable). A paused member is NEVER
+  // un-paused by another conversation's press. The window and the judge can never drift because they call THIS.
+  const memberUsable = (d, id, gid) => !!(d && d.runnable.has(id) && (!d.opened || !d.opened[id] || (d.opened[id].resumed && d.opened[id].resumed[gid])));
+  const pressOpened = (d, id) => !!(d && d.opened && d.opened[id]);
+  /** Add ONE grant-id to an entry's RESUMED set (the shared core of resumeGrant and «Always»'s per-member un-pause). A no-op
+   *  unless the entry is press-opened (a manual-ON entry needs no mark; an OFF entry is held by the switch). */
+  const resumeMember = (key, gid) => { const d = load(); if (!d || !pressOpened(d, key)) return { ok: true, resumed: false }; if (d.opened[key].resumed && d.opened[key].resumed[gid]) return { ok: true, resumed: false }; const opened = { ...d.opened, [key]: { at: d.opened[key].at, resumed: { ...(d.opened[key].resumed || {}), [gid]: now() } } }; const r = save({ runnable: d.runnable, always: d.always, opened }); return r.ok ? { ok: true, resumed: true } : r; };
+  const hourWin = (d, hk) => ((d && d.policyHours && d.policyHours[hk]) || []).filter((t) => t > now() - 3600e3);
+  /** BOOK a judge call synchronously (no check-then-write race): over the limit ⇒ { ok:false }; else persist +now() and return its token. */
+  // round 5 (MINOR, item 6): prune EXPIRED pairs (every timestamp older than the hour) FIRST, so the HOUR_MAX=64 cap never
+  // evicts a LIVE conversation×entry pair in favour of a dead one — r4 kept ≤ 64 keys sorted, so after 64 pairs a live pair's
+  // count was lost on a restart and the hour bound reset for it. (bodyOf / hoursOf stay now()-independent so the mark verifies.)
+  const reserveHour = (hk) => { const d = load(); if (!d || d.refused) return { ok: false }; const a = hourWin(d, hk); if (a.length >= POLICY_PER_HOUR) return { ok: false }; const ts = now(); const kept = {}; for (const [k, v] of Object.entries(d.policyHours || {})) { const live = (v || []).filter((t) => t > now() - 3600e3); if (live.length) kept[k] = live; } const r = save({ runnable: d.runnable, always: d.always, policyHours: { ...kept, [hk]: [...a, ts] } }); return r.ok ? { ok: true, ts } : { ok: false }; };
+  /** A refused judgment frees ITS slot (one occurrence of the token) so the hour is not spent on a NO. */
+  const releaseHour = (hk, ts) => { const d = load(); if (!d || d.refused) return; const arr = hourWin(d, hk); const i = arr.indexOf(ts); if (i < 0) return; arr.splice(i, 1); const next = { ...d.policyHours }; if (arr.length) next[hk] = arr; else delete next[hk]; save({ runnable: d.runnable, always: d.always, policyHours: next }); };
+  /** The owner's For-you row when the run store fails closed (round 3, MAJOR item 2): a log line is not enough. */
+  function noteRefused(why) {
+    if (!userTodos || refusedNoted === why) return;
+    refusedNoted = why;
+    try {
+      userTodos.add('vault', {
+        origin: 'vault', kind: 'notice', urgency: 'high', by: 'system', sessionName: 'Vault',
+        text: 'The vault-run store could not be trusted — every entry is off until you switch it on',
+        detail: `data/${STORE_FILE}: ${why}.\nEvery entry is OFF for agent runs and every standing grant is paused — nothing runs until you open the Vault window and switch each entry on again (that re-marks the store; being granted is not enough — the switch is the allow-list). No value was given out.`,
+        i18n: { text: { key: 'The vault-run store could not be trusted — every entry is off until you switch it on' }, detail: [{ key: 'The vault-run store ({why}) could not be trusted — every entry is OFF for agent runs and every standing grant is paused; nothing runs until you switch each entry on again in the Vault window (that re-marks it; a grant is not enough — the switch is the allow-list). No value was given out.', params: { why } }] },
+        action: { type: 'vault-store-refused' },
+      });
+    } catch (e) { log(`the store-refused notice could not be filed (${e.message})`); }
+  }
+  // round 4 (MAJOR item 4): a vault-use member in data/grants.json whose mac no longer verifies (a forged, widened-`except`, or
+  // replayed older row) is dropped by the grants reader — this names it ONCE in the For-you tray (the grants writer's onStale).
+  function noteGrantStale(resource) {
+    if (!userTodos) return;
+    const r = String(resource || '');
+    try {
+      userTodos.add('vault', {
+        origin: 'vault', kind: 'notice', urgency: 'high', by: 'system', sessionName: 'Vault',
+        text: 'A stored value’s sharing could not be trusted — a grant was dropped and paused',
+        detail: `data/grants.json: a «Used with no card by» grant for ${r} did not match the vault’s mark (a forged, widened or replayed row) and was dropped. Open the Vault window and set who may use it again. No value was given out.`,
+        i18n: { text: { key: 'A stored value’s sharing could not be trusted — a grant was dropped and paused' }, detail: [{ key: 'data/grants.json: a sharing grant for {resource} did not match the vault’s mark (a forged, widened or replayed row) and was dropped. Set who may use it again in the Vault window. No value was given out.', params: { resource: r } }] },
+        action: { type: 'vault-grant-stale' },
+      });
+    } catch (e) { log(`the grant-stale notice could not be filed (${e.message})`); }
+  }
   /** The store as the vault vouches for it — null unless unlocked. Read once per unlock (the epoch), kept in memory. */
   function load() {
     if (vaultState() !== 'unlocked') return null;
     if (db && dbEpoch === vault.epoch()) return db;
     let raw = null, why = null;
     try { raw = JSON.parse(readBounded(FILE, STORE_MAX).toString('utf8')); } catch (e) { if (!(e && e.code === 'ENOENT')) why = `unreadable (${e.code || 'not JSON'})`; }
-    let next = { gen: lastGen, runnable: new Set(), always: [] };
+    let next = { gen: lastGen, runnable: new Set(), suspended: new Set(), always: [], policies: {}, policyRevoked: [], policyApproved: {}, policyHours: {}, opened: {} };
     if (raw && !why) {
       try {
-        const cand = { gen: Number.isSafeInteger(raw.gen) && raw.gen >= 0 ? raw.gen : -1, runnable: new Set((Array.isArray(raw.runnable) ? raw.runnable : []).filter((id) => typeof id === 'string' && VI.parseRef(id))), always: (Array.isArray(raw.always) ? raw.always : []).filter(okAlways).map((a) => ({ conv: a.conv, key: a.key, until: a.until, entries: a.entries.filter((x) => typeof x === 'string').slice(0, 64), at: Number(a.at) || null, by: String(a.by || 'user').slice(0, 40) })) };
+        const cand = { gen: Number.isSafeInteger(raw.gen) && raw.gen >= 0 ? raw.gen : -1, runnable: new Set((Array.isArray(raw.runnable) ? raw.runnable : []).filter((id) => typeof id === 'string' && VI.parseRef(id))), suspended: new Set((Array.isArray(raw.suspended) ? raw.suspended : []).filter((id) => typeof id === 'string' && VI.parseRef(id))), always: (Array.isArray(raw.always) ? raw.always : []).filter(okAlways).map((a) => ({ conv: a.conv, key: a.key, until: a.until, entries: a.entries.filter((x) => typeof x === 'string').slice(0, 64), at: Number(a.at) || null, by: String(a.by || 'user').slice(0, 40) })), policies: policiesOf(raw.policies), policyRevoked: revokedOf(raw.policyRevoked), policyApproved: approvedOf(raw.policyApproved), policyHours: hoursOf(raw.policyHours), opened: openedOf(raw.opened) };
         const want = vault.macOf(MARK_LABEL, bodyOf(cand));
         const got = typeof raw.mark === 'string' && /^[0-9a-f]{64}$/.test(raw.mark) ? raw.mark : null;   // the review: a non-hex mark threw in timingSafeEqual
         if (!(want && got && cand.gen >= 0 && crypto.timingSafeEqual(Buffer.from(got, 'hex'), Buffer.from(want, 'hex')))) why = 'its mark does not verify';
         else if (cand.gen < lastGen) why = `an older copy (generation ${cand.gen} < ${lastGen}) — a replay`;
         else { next = cand; lastGen = cand.gen; }
       } catch (e) { why = `its mark could not be judged (${(e && e.code) || 'error'})`; }
+    } else if (!raw && lastGen > 0) why = 'the store is gone (it held the owner\'s switches a moment ago)';   // round 3 (MAJOR item 2): an in-life deletion is not a first boot
+    if (why) {
+      // lane vault-use-grants round 3 (MAJOR item 2): a store that fails its mark is NOT silently «empty» for a DENY-list —
+      // it FAILS CLOSED: every entry is closed for runs AND every standing grant is paused (`refused`) until the owner re-marks
+      // (any owner write re-saves a fresh verified store), the audit line is true, and the owner is told in a For-you row.
+      next.refused = why;
+      audit('vault-run-store-refused', { why: `data/${STORE_FILE}: ${why} — FAIL CLOSED (every entry closed for runs, every standing grant paused until you re-mark)` });
+      log(`data/${STORE_FILE}: ${why} — fail closed`);
+      noteRefused(why);
     }
-    if (why) { audit('vault-run-store-refused', { why: `data/${STORE_FILE}: ${why} — read as empty (every entry closed for runs, no «always» shape)` }); log(`data/${STORE_FILE}: ${why} — read as empty`); }
     db = next; dbEpoch = vault.epoch();
+    if (useGrants && !db.refused && db.always.length) carryAlways();
     return db;
   }
+  /** lane vault-use-grants: THE CARRY — the verified store's «always» rows (command shapes) become vault-use members (each
+   *  entry × the conversation × the shape's hosts × its end), then the store keeps none; ONE audit line says how many. */
+  function carryAlways() {
+    let c = null;
+    try { c = useGrants.carry(db.always); } catch (e) { log(`the «always» rows could not be carried (${e.message}) — they stay in data/${STORE_FILE}`); return; }
+    const r = save({ runnable: db.runnable, always: [] });
+    audit('vault-run-always-carried', { ...c, rows: c.carried + c.expired + c.hostless + c.failed, saved: !!r.ok });
+    log(`data/${STORE_FILE}: ${c.carried} «always» member(s) carried into the vault-use grants (${c.expired} expired, ${c.hostless} with no host)${r.ok ? '' : ' — the store could not be rewritten; carried again at the next read'}`);
+  }
   function save(next0) {
-    const next = { ...next0, gen: Math.max(lastGen, Number(db && db.gen) || 0) + 1 };
+    const next = { suspended: (db && db.suspended) || new Set(), policies: (db && db.policies) || {}, policyRevoked: (db && db.policyRevoked) || [], policyApproved: (db && db.policyApproved) || {}, policyHours: (db && db.policyHours) || {}, opened: (db && db.opened) || {}, ...next0, gen: Math.max(lastGen, Number(db && db.gen) || 0) + 1 };   // lane vault-use-grants (R4): a save that names no policy / per-hour counter keeps them; (round 2) a save that names no `suspended` keeps it; (round 7) a save that names no `opened` keeps it
+    // round 7 (MAJOR item 2, bound invariant): if a stored RESUMED set would be truncated, NAME it — the dropped marks fail
+    // CLOSED (those members become paused on the next read), never an un-pause, so a cap is safe but never silent.
+    for (const k of Object.keys(next.opened || {})) { const n = Object.keys((next.opened[k] && next.opened[k].resumed) || {}).length; if (n > AP_MAX) audit('vault-run-pause-bound', { store: STORE_FILE, entry: k, resumed: n, cap: AP_MAX, dropped: n - AP_MAX, effect: 'the marks past the cap fail closed (those members stay paused)' }); }
+    if (Object.keys(next.opened || {}).length > ENTRY_MAX) audit('vault-run-pause-bound', { store: STORE_FILE, entries: Object.keys(next.opened).length, cap: ENTRY_MAX, effect: 'the entries past the cap fail closed' });
     const mark = vault.macOf(MARK_LABEL, bodyOf(next));
     if (!mark) return named('vault_locked');
     try { writeJsonAtomic(FILE, { ...JSON.parse(bodyOf(next)), mark }); } catch (e) { return named('failed', { why: `data/${STORE_FILE} could not be written (${e.code || e.message})` }); }
@@ -325,10 +445,28 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     const ref = row && VI.parseRef(row.id);
     const c = classOf(ref, row);
     const d = c.runnable ? load() : null;
-    return { can: c.runnable, open: !!(c.runnable && d && d.runnable.has(row.id)) };
+    // lane vault-use-grants: «谁可以用» — the entry's vault-use members (each its hosts, its end, its uses) — never on an agent's
+    // own entry (only its conversation uses it: the door's `granted` rule)
+    const grantable = !!(useGrants && c.runnable && c.cls !== 'agent-entry');
+    let use = null;
+    if (grantable) { try { const r = ref && VR.refFor(ref.store, ref.entry, ref.field); const counts = typeof vault.useCounts === 'function' ? vault.useCounts() : {}; use = { ...useGrants.publicFor(row.id, r ? counts[r.ref] : null), entryHosts: Array.isArray(row.hosts) ? row.hosts : [], used: r && counts[r.ref] ? { uses: counts[r.ref].uses, convs: counts[r.ref].convs } : { uses: 0, convs: 0 } }; } catch { use = { unknown: true, to: [], except: [] }; } }
+    // lane vault-use-grants round 7 (MAJOR item 2): when a PRESS opened the entry (`opened[id]`), every member it did NOT
+    // resume carries `paused: <when the press opened it>` — the window greys that chip and offers an un-pause (↻). An OFF entry
+    // is greyed whole (the entry-level `paused` below, no per-member ↻ — the fix there is the switch); an owner-opened entry
+    // has none paused. The window and the judge read the SAME `opened` fact (`memberUsable`), so they cannot disagree.
+    if (use && !use.unknown && Array.isArray(use.to)) { const op = (d && d.opened && d.opened[row.id]) || null; const onP = !!(c.runnable && d && !d.refused && d.runnable.has(row.id)); if (op && onP) use.to = use.to.map((m) => (m.id && !(op.resumed && op.resumed[m.id]) ? { ...m, paused: op.at || 1 } : m)); }
+    // lane vault-use-grants (R4): the entry's policy (the owner's words), whether the judge is on, what it approved since the boot
+    if (use && !use.unknown) { const pol = d && d.policies && d.policies[row.id]; const ap = d && d.policyApproved && d.policyApproved[row.id]; let on = false; try { on = !!policyOn(); } catch { on = false; } use.policy = pol ? { text: pol.text, at: pol.at } : null; use.judge = on ? 'on' : 'off'; use.approved = ap ? { n: ap.n, lastAt: ap.lastAt } : null; }
+    const onNow = !!(c.runnable && d && !d.refused && d.runnable.has(row.id));
+    const hasGrant = !!(use && !use.unknown && Array.isArray(use.to) && use.to.length);   // round 4 (A7): an entry with a grant that is not switched ON is PAUSED (held) — one state, one note
+    return { can: c.runnable, open: onNow, paused: !!(c.runnable && d && !onNow && (d.refused || (d.suspended && d.suspended.has(row.id)) || hasGrant)), ...(grantable ? { use } : {}) };   // round 2 MAJOR: `paused` = turned OFF; round 3: or the whole store is refused; round 4 (A7): or a grant exists but the switch is not ON (the window greys the chips)
   }
-  /** A PERSON's switch (src/routes/vault.js: people only; ON needs this page's 验证是你 window — `reauthed`). */
-  function setRunnable({ id, on, reauthed = false, by = 'user' } = {}) {
+  /** A PERSON's switch (src/routes/vault.js: people only; ON needs this page's 验证是你 window — `reauthed`). round 7 (MAJOR
+   *  item 2): the model is INVERTED. An OFF ends any press-open session and holds EVERY member (it enumerates nothing, so a
+   *  member added while OFF is held too). A MANUAL ON (the owner's own switch) opens it for EVERYONE — the owner's deliberate
+   *  full restore (test ⑬) — by dropping the `opened` record. «Always» passes `keepPaused`: it opens the switch as a PRESS
+   *  (an `opened` record), so only the members it then RESUMES are usable; the grants the owner paused stay paused. */
+  function setRunnable({ id, on, reauthed = false, by = 'user', keepPaused = false } = {}) {
     const st = vaultState();
     if (st !== 'unlocked') return named(st === 'not_set_up' ? 'vault_not_set_up' : 'vault_locked');
     const key = String(id || ''), ref = VI.parseRef(key);   // `<store>:<entry>#<field>` (src/vault-inventory.js — the row's id)
@@ -339,17 +477,152 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     if (on && !row) return named('entry_unknown');
     if (on && !reauthed) return { ok: false, code: 'reveal_needs_password' };
     const d = load();
-    const was = d.runnable.has(key);
-    if (!!on === was) return { ok: true, id: key, open: was, already: true };
-    const runnable = new Set(d.runnable);
-    if (on) runnable.add(key); else runnable.delete(key);
+    const wasRun = d.runnable.has(key), wasSusp = d.suspended.has(key);
+    if (!!on === wasRun && !on === wasSusp && !(on && !keepPaused && pressOpened(d, key))) return { ok: true, id: key, open: wasRun, already: true };   // a MANUAL ON of a press-opened entry still runs (it converts it to owner-opened)
+    const runnable = new Set(d.runnable), suspended = new Set(d.suspended);
+    let opened = d.opened || {};
+    if (on) {
+      runnable.add(key); suspended.delete(key);
+      if (keepPaused) { if (!opened[key]) opened = { ...opened, [key]: { at: now(), resumed: {} } }; }   // «Always»: a PRESS opens it — only the members it resumes are usable
+      else if (opened[key]) { opened = { ...opened }; delete opened[key]; }   // a MANUAL ON opens it for EVERYONE — the owner's full restore
+    } else {   // an explicit OFF holds EVERY member (round 7: it enumerates none — the inverted model needs no snapshot; a member added while OFF is held too)
+      runnable.delete(key); suspended.add(key);
+      if (opened[key]) { opened = { ...opened }; delete opened[key]; }
+    }
     // OFF takes back every «always» and seen shape that names this entry (the review: an «always» outlived its switch)
     const always = on ? d.always : d.always.filter((a) => !a.entries.includes(key));
     if (!on) { for (const [p, x] of shortAlways) if (x.entries.includes(key)) shortAlways.delete(p); for (const [p, x] of seen) if (x.entries.includes(key)) seen.delete(p); for (const [p, x] of grants) if (x.entries.includes(key)) grants.delete(p); }   // + the grants (lane vault-manual-and-lock: OFF = closed for every conversation)
-    const r = save({ runnable, always });
+    const r = save({ runnable, suspended, always, opened });
     if (!r.ok) return r;
     audit('vault-run-switch', { by: String(by).slice(0, 40), store: ref.store, entry: ref.entry, field: ref.field, open: !!on });
+    try { vault.contentsChanged && vault.contentsChanged('switch'); } catch { }   // lane vault-use-grants: every open Vault window shows the switch
     return { ok: true, id: key, open: !!on };
+  }
+  /** A PERSON's per-member «un-pause» (round 7, item 2): a grant paused under a press-opened entry is RESUMED — a WIDENING, so
+   *  it needs this page's 验证是你 window (`reauthed`). The OTHER paused members stay paused. (A no-op on an owner-opened or OFF
+   *  entry: there is no press session to resume into.) */
+  function resumeGrant({ id, principal, reauthed = false, by = 'user' } = {}) {
+    const st = vaultState();
+    if (st !== 'unlocked') return named(st === 'not_set_up' ? 'vault_not_set_up' : 'vault_locked');
+    const key = String(id || ''), ref = VI.parseRef(key);
+    if (!ref) return named('entry_unknown');
+    if (!reauthed) return { ok: false, code: 'reveal_needs_password' };
+    const gid = VUG.grantIdOf(key, String(principal || ''));
+    const r = resumeMember(key, gid);
+    if (!r.ok) return r;
+    if (r.resumed) { audit('vault-run-resume', { by: String(by).slice(0, 40), store: ref.store, entry: ref.entry, field: ref.field, grant: gid }); try { vault.contentsChanged && vault.contentsChanged('resume'); } catch { } }
+    return { ok: true, id: key, resumed: r.resumed };
+  }
+  // ── THE POLICY (lane vault-use-grants R4) ── approvals persist in the marked store as `policyApproved` (round 2 MAJOR:
+  // a Revoke survives a restart; the row's «approved N×» survives); entry id → { n, lastAt, items: [todoId], shapes: [{conv, key}] }.
+  /** A PERSON's door: the entry's policy (one paragraph, ≤ VAULT_POLICY_MAX). Setting one lets the judge approve uses — a
+   *  widening — so it needs this page's 验证是你 window (`reauthed`); clearing it is a click. */
+  function setPolicy({ id, text = '', reauthed = false, by = 'user' } = {}) {
+    const st = vaultState();
+    if (st !== 'unlocked') return named(st === 'not_set_up' ? 'vault_not_set_up' : 'vault_locked');
+    const key = String(id || ''), ref = VI.parseRef(key);
+    if (!ref) return named('entry_unknown');
+    const row = rowOf(ref), c = classOf(ref, row);
+    if (!row) return named('entry_unknown');
+    if (!c.runnable || c.cls === 'agent-entry') return named('entry_has_its_own_door', { door: c.door || 'its own conversation only', words: `${VR.WORDS.entry_has_its_own_door}: ${c.door || 'its own conversation only'}` });
+    const t = DM.vaultPolicyText(text);
+    if (t && !reauthed) return { ok: false, code: 'reveal_needs_password' };
+    const d = load();
+    const policies = { ...d.policies };
+    if (t) policies[key] = { text: t, at: now(), by: String(by).slice(0, 40) }; else delete policies[key];
+    const r = save({ runnable: d.runnable, always: d.always, policies });
+    if (!r.ok) return r;
+    audit('vault-run-policy', { by: String(by).slice(0, 40), store: ref.store, entry: ref.entry, field: ref.field, set: !!t, chars: t.length });   // the owner's words stay in the store, not the audit
+    try { vault.contentsChanged && vault.contentsChanged('policy'); } catch { }
+    return { ok: true, id: key, policy: t || null };
+  }
+  /** A PERSON's 「Revoke」 (a click — a narrowing): every command the judge approved for this entry asks again next time (the
+   *  conversation × shape pairs go into the marked store); the For-you records of those approvals are closed. */
+  function revokeApprovals({ id, by = 'user' } = {}) {
+    if (vaultState() !== 'unlocked') return named('vault_locked');
+    const key = String(id || ''), d = load(), ap = d && d.policyApproved ? d.policyApproved[key] : null;
+    if (!ap) return { ok: true, revoked: 0 };
+    // round 3 (MAJOR item 3): a Revoke is the owner's word over the whole SHAPE (not the exact command) — so EVERY variant of
+    // a revoked shape draws the card. The revoke list keys on the coarse shape key (`x.shape`, the one recordApproval stored),
+    // deduped, newest-kept; a per-command memo stays exact.
+    const have = new Set(d.policyRevoked.map((x) => `${x.conv}\n${x.key}`));
+    const want = [...new Map(ap.shapes.map((x) => [`${x.conv}\n${x.shape || x.key}`, { conv: x.conv, key: x.shape || x.key }])).values()];
+    const policyRevoked = [...d.policyRevoked, ...want.filter((x) => !have.has(`${x.conv}\n${x.key}`))].slice(-512);
+    const policyApproved = { ...d.policyApproved }; delete policyApproved[key];
+    const r = save({ runnable: d.runnable, always: d.always, policyRevoked, policyApproved });
+    if (!r.ok) return r;
+    if (userTodos) for (const tid of ap.items) { try { const it = userTodos.get?.(tid); if (it && it.status === 'open') userTodos.setStatus(tid, 'done', 'vault'); } catch { } }
+    audit('vault-run-policy-revoked', { by: String(by).slice(0, 40), entry: key, shapes: ap.shapes.length });
+    try { vault.contentsChanged && vault.contentsChanged('policy'); } catch { }
+    return { ok: true, revoked: ap.shapes.length };
+  }
+  /** The EXACT facts the judge is shown for ONE run (the rendered card — program, every argument verbatim, the hosts it
+   *  contacts, each template in full, the purpose, the entry). The memo and the Revoke are keyed on THESE, never the coarse
+   *  shape (round 2 MAJOR: an approved read-only GET must not green-light a DELETE of the same shape). */
+  function policyPartsOf(spec, shape, refs, cwd = '') {
+    const rows = refs.map((r) => rowOf(r)), dst = VR.destinationsOf(shape);
+    return {
+      command: `${cmdText(spec.argv)}\n(the secret${refs.length > 1 ? 's' : ''} ${refs.map((r) => r.ref).join(', ')} given as ${spec.injection.join(', ')} — a reference, never the value)`, program: String(spec.tool || ''), hosts: dst.hosts.length ? dst.hosts.join(', ') : 'unknown — the tool names none',
+      templates: spec.files.filter((f) => f.template != null).map((f) => `${f.name} (@${f.template}):\n${String(f.text)}`).join('\n\n'),
+      purpose: rows.map((x) => (x && x.detail) || '').filter(Boolean).join(' · ') || 'not said', entry: rows.map((x, i) => (x && x.label) || refs[i].ref).join(', '),
+      env: (spec.plainEnv || []).map((e) => `${e.name}=${e.value}`).sort().join(' ') || 'none', folder: String(cwd || ''),   // round 3 (MAJOR item 6): the judge and the key carry EVERY fact the card shows — an added SSLKEYLOGFILE= / CURL_CA_BUNDLE= env, or another folder, is a DIFFERENT judgment
+    };
+  }
+  /** The memo / Revoke key = a digest of the exact facts shown PLUS the policy text — a different method, path, template byte,
+   *  env var, folder or policy ⇒ a different key ⇒ a fresh judgment (never a memo hit). */
+  const judgedKeyOf = (parts, policyText) => crypto.createHash('sha256').update(JSON.stringify([parts.command, parts.program, parts.hosts, parts.templates, parts.purpose, parts.entry, parts.env, parts.folder, String(policyText || '')])).digest('hex').slice(0, 32);
+  /** Ask the judge about ONE run with the CARD's facts (never a value). → { approve, p?, line? } — `line` = what the card says.
+   *  round 3 (MAJOR item 6): memo is ALWAYS null to the engine — the door's OWN marked `policyApproved` is the sole memo, so a
+   *  forged row in the unmarked data/decision-memo.json can never approve a run, and a memo is honoured only with a live judge. */
+  async function judgePolicy({ caller, parts, policies }) {
+    let res = null;
+    try { res = await policyJudge(parts, { policy: policies.join(' / '), memo: null }); }
+    catch (e) { return { approve: false, line: `The policy judge could not be asked (${String((e && e.message) || e).slice(0, 80)}) — so this card asks you.` }; }
+    if (!res || !res.ok) return { approve: false, line: `The policy judge could not be asked (${String((res && (res.why || res.code)) || 'unavailable').slice(0, 80)}) — so this card asks you.` };
+    const a = Array.isArray(res.answers) ? res.answers[0] : null;
+    const p = a && !a.refused && typeof a.probability === 'number' ? a.probability : null;
+    if (p === null) return { approve: false, line: 'The policy judge gave no answer — so this card asks you.' };
+    if (p >= DM.VAULT_POLICY_THRESHOLD) return { approve: true, p };
+    return { approve: false, p, line: `The policy judge did not find it inside your policy (${p.toFixed(2)} < ${DM.VAULT_POLICY_THRESHOLD}) — so this card asks you.` };
+  }
+  /** THE RECORD of an approval: ONE For-you item (its door opens the entry's row — 「Revoke」 there) + the row's line. The
+   *  approval is persisted in the marked store (round 2 MAJOR: the Revoke survives a restart); the record names the policy
+   *  that matched and the judge's probability, every line keyed for zh/ja (round 2 MINOR: {why} had no translation). */
+  function recordApproval({ caller, spec, refs, p, key, shapeKey = '', policy = '' }) {
+    const who = String(caller.name || caller.sessionKey || caller.conversationId).slice(0, 80);
+    const at = now(), hhmm = new Date(at).toTimeString().slice(0, 5);
+    const d = load(); if (!d || d.refused) return;
+    const policyApproved = { ...d.policyApproved };
+    for (const r of refs) {
+      const ap = { n: 0, lastAt: 0, items: [], shapes: [], ...(policyApproved[r.id] || {}) };
+      ap.n++; ap.lastAt = at;
+      if (!ap.shapes.some((x) => x.conv === caller.conversationId && x.key === key)) ap.shapes.push({ conv: caller.conversationId, key, shape: String(shapeKey || '') });
+      if (ap.shapes.length > 256) ap.shapes = ap.shapes.slice(-256);   // round 3 (MAJOR item 2): drop the OLDEST at the WRITE — the same bound the reader keeps, so the mark never breaks
+      if (ap.items.length > 256) ap.items = ap.items.slice(-256);
+      policyApproved[r.id] = ap;
+    }
+    const head = cmdText(spec.argv).slice(0, 200), pstr = typeof p === 'number' ? p.toFixed(2) : '—';
+    const lines = [
+      { key: 'Approved by the policy judge · {time} · inside your policy ({p})', params: { time: hhmm, p: pstr } },
+      { key: 'The command: {cmd}', params: { cmd: head } },
+      { key: 'Your policy: {policy}', params: { policy: String(policy || '').slice(0, 300) } },
+      { key: 'Open the entry in the Vault window to see its policy — its Revoke makes this command ask you again next time.' },
+    ];
+    let tid = null;
+    if (userTodos) {
+      try {
+        const it = userTodos.add(caller.sessionKey || 'vault', {
+          origin: 'vault', kind: 'notice', urgency: 'normal', by: 'agent', sessionName: who,
+          text: `${who}: a command with a stored secret was approved by the policy judge`,
+          detail: lines.map((l) => l.key.replace(/\{(\w+)\}/g, (m, k) => (l.params && l.params[k] != null ? String(l.params[k]) : m))).join('\n'),
+          i18n: { text: { key: '{who}: a command with a stored secret was approved by the policy judge', params: { who } }, detail: lines },
+          action: { type: 'vault-policy-approved', entry: refs[0].entry, id: refs[0].id },   // the door opens the entry's row (its Revoke)
+        });
+        tid = it && it.id;
+      } catch (e) { log(`${who}: the policy judge's approval could not be filed in For you: ${e.message}`); }
+    }
+    if (tid) for (const r of refs) if (!policyApproved[r.id].items.includes(tid)) policyApproved[r.id].items.push(tid);
+    save({ runnable: d.runnable, always: d.always, policyApproved });
   }
   /** What THIS caller may reference (vibespace-vault list): the opened rows — a reference, a label, a kind; never a value —
    *  and (lane vault-manual-and-lock) the entries a grant opened for THIS conversation (`by: 'grant'`, its purpose and end). */
@@ -359,12 +632,20 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     const d = load(), out = [], scope = scopeOf(caller);
     const ids = new Set(d.runnable);
     if (scope) for (const g of grants.values()) if (g.conv === scope && g.until > now()) ids.add(g.entries[0]);
+    // lane vault-use-grants: the entries a STANDING approval lets this conversation use (its hosts — the agent reads where it may go)
+    const held = new Map();
+    if (useGrants && caller.conversationId) { try { const uf = useFacts(caller) || {}; for (const h of useGrants.heldBy({ ...uf, conversationKeys: [...new Set([caller.conversationId, ...(uf.conversationKeys || [])])] })) { held.set(h.id, h); ids.add(h.id); } } catch { /* unreadable: none */ } }
+    const refused = !!(d && d.refused);
     for (const id of [...ids].sort()) {
       const ref = VI.parseRef(id), row = ref && rowOf(ref);
       if (!row || !classOf(ref, row).runnable) continue;
       const r = VR.refFor(ref.store, ref.entry, ref.field);   // the canonical spelling (the review: encodeURIComponent left !'()* raw)
       const g = d.runnable.has(id) || !scope ? null : grantOf(scope, id);
-      out.push({ ref: r ? r.ref : null, store: ref.store, label: row.label, kind: row.kind, field: ref.field, ...(g ? { by: 'grant', once: g.once, until: new Date(g.until).toISOString() } : {}) });
+      const hd = held.get(id);
+      const onNow = !refused && d.runnable.has(id);
+      const memberPaused = !!(hd && onNow && pressOpened(d, id) && !memberUsable(d, id, hd.grant));   // round 7 (MAJOR item 2, invariant iii): the entry is ON by another conversation's PRESS and THIS member was never resumed — the list reads the SAME `opened` fact the judge does, so it can never say «yours to use» while the door refuses it
+      const paused = memberPaused || (!onNow && !g && (refused || !!(d.suspended && d.suspended.has(id)) || !!hd));   // round 3 (A6): say PAUSED for a turned-OFF entry; round 4 (A7 + item 4): a standing grant is PAUSED until the switch is ON (never «yours to use» without it)
+      out.push({ ref: r ? r.ref : null, store: ref.store, label: row.label, kind: row.kind, field: ref.field, ...(paused ? { paused: true } : {}), ...(g ? { by: 'grant', once: g.once, until: new Date(g.until).toISOString() } : hd ? { by: 'standing', grant: hd.grant, hosts: hd.hosts, paused, ...(hd.until ? { until: new Date(hd.until).toISOString() } : {}) } : {}) });
     }
     return { ok: true, entries: out.filter((x) => x.ref) };
   }
@@ -390,7 +671,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     return new Promise((resolve) => {
       const askId = randomBytes(16).toString('hex');
       const who = String(caller.name || caller.sessionKey || caller.conversationId).slice(0, 80);
-      const q = { askId, pair, conv: caller.conversationId, sessionKey: caller.sessionKey, who, key, always: !!shape.always, detail, entries: run.refs.map((r) => r.id), head: cmdText(run.argv).slice(0, 80), askedAt: now(), todoId: null, timer: null, resolve };
+      const q = { askId, pair, conv: caller.conversationId, sessionKey: caller.sessionKey, who, key, always: !!shape.always, detail, entries: run.refs.map((r) => r.id), head: cmdText(run.argv).slice(0, 80), askedAt: now(), todoId: null, timer: null, resolve, hosts: VR.destinationsOf(shape).hosts.slice(), tool: shape.name || null };   // hosts: lane vault-use-grants («Always» = a grant for the run's DESTINATIONS — round 2 BLOCKER); tool: round 3 (item 5) scopes a wildcard default to its CLI
       asks.set(askId, q); byPair.set(pair, askId);
       if (userTodos) {
         try {
@@ -398,7 +679,8 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
             origin: 'vault', urgency: 'urgent', kind: 'action', by: 'agent', sessionName: who, expiresAt: q.askedAt + VR.ASK_TTL_MS,
             text: `${who} wants to run a command with a stored secret`,
             detail,   // THE WHOLE RUN as the owner approves it — the command (references, never a value), the secrets, how, the hosts, the folder
-            i18n: { text: { key: '{who} wants to run a command with a stored secret', params: { who } } },
+            i18n: { text: { key: '{who} wants to run a command with a stored secret', params: { who } } },   // round 6 (MINOR item 3): the whole run detail stays a plain string (its lines are mostly dynamic — command, hosts, folder); the client localizes each line through t(), so the fixed «Always» switch line (zh + ja below) shows in the owner's language
+
             action: { type: 'vault-run-ask', askId, always: !!shape.always, tool: String(shape.name || '').slice(0, 40) },   // = ACTION_TYPE (spelled for the approval census's grep)
           });
           q.todoId = it && it.id;
@@ -433,7 +715,37 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       if (!shown) { settle(q, 'changed', 'item-changed'); return { ok: false, code: 'ask_changed' }; }
     }
     if (!liveOf(q.conv)) { settle(q, 'denied', 'gone'); return { ok: false, code: 'conversation_gone' }; }
-    if (a === 'always') {
+    if (a === 'always' && useGrants) {
+      // lane vault-use-grants: «Always» = A STANDING APPROVAL — THIS conversation × THESE hosts × the TTL, one vault-use member per
+      // entry of the run (added, or WIDENED to this run's hosts) through the ONE writer; the Vault window lists it, ✕ takes it back.
+      // The switch flips in the SAME act (r5 item 3: a vault-use member stands only when the switch is ON), carrying `keepPaused`
+      // (round 7 item 2: a PRESS opens it — only this card's member is resumed, so the grants the owner paused stay paused).
+      const ms = VR.ALWAYS_TTLS[ttl], until = ms == null ? null : now() + ms;
+      if (!q.hosts.length) return { ok: false, code: 'always_not_offered' };
+      // round 7 (MAJOR item 3): «Always» is ALL-OR-NOTHING across the card's entries. JUDGE every entry FIRST (exists &
+      // runnable) — a deleted / own-door entry (the two-entry card where #2 was dropped while it waited) draws its refusal and
+      // writes NOTHING. Then WRITE, remembering the prior switch state; if a flip or a member write fails partway (a patched
+      // flip, too_many at the 257th), RESTORE every switch and REVOKE the members written in this act — no half-open widening.
+      for (const id of q.entries) { const ref = VI.parseRef(id), row = ref && rowOf(ref), c = ref && classOf(ref, row); if (!row || !c || !c.runnable) { settle(q, 'denied', 'entry_unknown'); return c && !c.runnable ? named('entry_has_its_own_door', { door: c.door }) : named('entry_unknown'); } }
+      const d0 = load();
+      const prior = { runnable: new Set(d0.runnable), suspended: new Set(d0.suspended), opened: d0.opened || {} };
+      const made = []; let failCode = null;
+      for (const id of q.entries) {
+        const sr = setRunnable({ id, on: true, reauthed: true, by: String(by).slice(0, 40), keepPaused: true });
+        if (!sr.ok) { failCode = sr.code; break; }
+        const w = useGrants.addMember(id, { kind: 'conversation', key: q.conv, name: q.who }, { hosts: q.hosts, until, tool: q.tool }, { by: String(by).slice(0, 40) });
+        if (!w.ok) { failCode = w.code; break; }
+        const mem = ((useGrants.publicFor(id) || {}).to || []).find((m) => m.id === w.grant);
+        made.push({ id, grant: w.grant, added: w.added, principal: mem ? mem.principal : null });
+        resumeMember(id, w.grant);   // round 7 (MAJOR item 2): resume ONLY this card's member — the owner's OTHER paused grants on this entry stay paused
+      }
+      if (failCode) {
+        try { const dn = load(); save({ runnable: prior.runnable, suspended: prior.suspended, always: dn ? dn.always : [], opened: prior.opened }); } catch { }   // every switch back to its prior state
+        for (const m of made) { if (m.added && m.principal) { try { useGrants.revoke(m.id, m.principal, { by: String(by).slice(0, 40) }); } catch { } } }   // the members written in THIS act out again
+        settle(q, 'denied', failCode); return { ok: false, code: failCode };
+      }
+      audit('vault-run-always', { by: String(by).slice(0, 40), conv: q.conv, shapeId: shapeIdOf(q.key), ttl, until, grants: made.map((m) => m.grant), hosts: q.hosts });
+    } else if (a === 'always') {
       const ms = VR.ALWAYS_TTLS[ttl], until = ms == null ? null : now() + ms;
       if (ttl === '8h') shortAlways.set(q.pair, { until, entries: q.entries });
       else {
@@ -619,14 +931,15 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
    *  entry in runs for GRANT_MS (a lock ends it; each new command shape still draws its run card). No 验证是你: the entry did
    *  not exist before the paste — a press forged on a hub with no sign-in grants only the value it supplied itself, never a
    *  secret the owner had stored. → { ok, until, hours } | a named refusal. */
-  function grantPasted({ scope = '', ref = '', purpose = '', by = 'user', requestId = null } = {}) {
+  function grantPasted({ scope = '', ref = '', purpose = '', hosts = [], by = 'user', requestId = null } = {}) {
     const r = VR.parseRef(String(ref || ''));
     if (!scope || !r || !VR.isFreeEntry(r.store, r.entry, r.field)) return named('bad_reference');
     if (vaultState() !== 'unlocked') return named('vault_locked');
     const t = now(), until = t + GRANT_MS;
-    grants.set(pairOf(String(scope), r.id), { conv: String(scope), key: null, entries: [r.id], until, once: false, at: t, by: String(by).slice(0, 40), askId: null, purpose: String(purpose || '').slice(0, PURPOSE_MAX) });
-    audit('vault-grant', { by: String(by).slice(0, 40), conv: String(scope), entry: r.ref, answer: 'pasted', requestId, until });
-    return { ok: true, until, hours: GRANT_MS / 3600e3 };
+    const gh = [...new Set((Array.isArray(hosts) ? hosts : []).map((h) => VR.normHost(h)).filter(Boolean))].slice(0, 64);   // round 7 (MINOR): the grant carries the HOSTS the request named (normalized the same way the reader normalizes a run's destinations) — it admits a run with no card only toward them (a run elsewhere draws its card; no hosts ⇒ every command cards)
+    grants.set(pairOf(String(scope), r.id), { conv: String(scope), key: null, entries: [r.id], until, once: false, hosts: gh, at: t, by: String(by).slice(0, 40), askId: null, purpose: String(purpose || '').slice(0, PURPOSE_MAX) });
+    audit('vault-grant', { by: String(by).slice(0, 40), conv: String(scope), entry: r.ref, answer: 'pasted', hosts: gh, requestId, until });
+    return { ok: true, until, hours: GRANT_MS / 3600e3, hosts: gh };
   }
   /** `vibespace-vault uses` (design D4): THIS conversation's grants, its open requests and its own use lines (the engine reads
    *  the audit file's tail) — references, purposes, times, outcomes, receipts; never a value, never another conversation's. */
@@ -695,7 +1008,8 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     L.push(`Secrets: ${run.refs.map((r) => r.ref).join(', ')}`);
     L.push(`Given as: ${run.injection.join(', ')}`);
     if (run.argvExposed) L.push('ON THE COMMAND LINE: every user of this machine can read it while it runs (/proc/<pid>/cmdline)');
-    L.push(`Hosts: ${shape.hosts.length ? shape.hosts.join(', ') : 'unknown — the tool names none'}`);
+    const dst = VR.destinationsOf(shape);   // lane vault-use-grants round 2 (BLOCKER): where the value GOES (routing flags, proxies), not only what the URL names
+    L.push(`Hosts: ${dst.hosts.length ? dst.hosts.join(', ') : 'unknown — the tool names none'}${dst.opaque ? ' (and a route this card cannot resolve — a proxy or ProxyCommand)' : ''}`);
     if (run.plainEnv.length) L.push(`Env: ${run.plainEnv.map((e) => `${e.name}=${quote(e.value)}`).join(' ')}`);
     L.push(`Folder: ${cwd}`);
     for (const f of run.files) if (f.template != null) L.push(`Template ${f.name} (@${f.template}):`, String(f.text).replace(/\s+$/, ''));
@@ -730,9 +1044,10 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     const runReceipt = `vr-${randomBytes(8).toString('hex')}`;   // ONE receipt per run: the answer of a run that ran, its run line and every entry's use line (a refusal's lines carry it too — the audit's)
     let usedRefs = null;           // the plan's references, once it parsed — each one's use line (lane vault-manual-and-lock)
     const purposes = new Map();    // entry id → the purpose of the grant that opened it
+    const standingIds = new Map(); // lane vault-use-grants: entry id → the vault-use grant that admitted the run (its use line names it)
     const useLines = (outcome, receipt, ran = false) => {
       if (!usedRefs || (USE_SKIP.has(outcome) && !ran) || typeof vault.noteUse !== 'function') return;   // a child that RAN with the value is a use whatever ended it
-      for (const r of usedRefs) { try { vault.noteUse(r.ref, { by: by.kind, door: 'run', conv: scope }, { outcome: outcome === 'ran' ? 'ok' : outcome, purpose: purposes.get(r.id) || null, actor: VB.actorName(caller.name, 'a conversation'), receipt, store: r.store, used: ran }); } catch { } }
+      for (const r of usedRefs) { try { vault.noteUse(r.ref, { by: by.kind, door: 'run', conv: scope }, { outcome: outcome === 'ran' ? 'ok' : outcome, purpose: purposes.get(r.id) || null, actor: VB.actorName(caller.name, 'a conversation'), receipt, store: r.store, used: ran, grant: standingIds.get(r.id) || null }); } catch { } }
     };
     const note = (outcome, extra = {}) => { audit('vault-run', { by, outcome, ...extra }); useLines(outcome, runReceipt, !!extra.receipt); };   // ONE line: the actor, the outcome (ran | the refusal's code), the facts — never a value; + each entry's use line
     if (caller.job) { note('job_no_use'); return named('job_no_use'); }
@@ -765,24 +1080,39 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     if (!spec.ok) { note(spec.code, { tool: resolved, why: spec.why || null }); return spec; }
     usedRefs = spec.refs;
     const shape = VR.shapeOf(spec), key = VR.shapeKeyOf(shape), shapeId = shapeIdOf(key);
-    const detail = detailOf(spec, shape, place);
+    const dest = VR.destinationsOf(shape);   // lane vault-use-grants round 2 (BLOCKER): the grant covers the run's DESTINATIONS, judged by the reader the card uses
+    // lane vault-use-grants: THE STANDING APPROVAL of each entry for THIS caller and THIS run's hosts (the grant door's PURE verdict —
+    // a Task Group's members read now); a member that does not cover the run is named on the card
+    const standing = new Map();
+    if (useGrants) {
+      let uf = null;
+      try { uf = useFacts(caller) || {}; } catch { uf = { groupsUnreadable: true }; }
+      const facts = { ...uf, conversationKeys: [...new Set([caller.conversationId, ...(Array.isArray(uf.conversationKeys) ? uf.conversationKeys : [])].filter(Boolean).map(String))], groupIds: Array.isArray(uf.groupIds) ? uf.groupIds : [], groupsUnreadable: !!uf.groupsUnreadable };
+      for (const r of spec.refs) { const row = rowOf(r); if (row) { try { standing.set(r.id, useGrants.verdictFor(r.id, facts, { hosts: dest.hosts, destinationKnown: !!shape.always, entryHosts: row.hosts || [], tool: shape.name })); } catch { /* unreadable: no standing approval */ } } }   // round 3 (item 5): `tool` scopes a wildcard default to its CLI
+    }
+    let detail = [detailOf(spec, shape, place), ...VUG.standingLines([...standing.values()], { always: !!shape.always }), ...(useGrants && shape.always ? [`«Always» = a standing approval: this conversation may use ${spec.refs.length > 1 ? 'these secrets' : 'this secret'} for ${dest.hosts.join(', ')} without asking (the Vault window lists it and takes it back).`] : [])].join('\n');
     if (detail.length > DETAIL_MAX) return named('card_too_long');
     const head = { tool: spec.tool, entries: spec.refs.map((r) => r.ref), shapeId, hosts: shape.hosts, injection: spec.injection, argvExposed: spec.argvExposed, cwd: place, cmd: utf8Head(SS.redactSecrets(cmdText(spec.argv)).text) };
     // THE FACTS the verdict reads: each entry's row (exists), its switch (open), its class (the engine's check) and its length
     const d = load();
+    const refused = !!(d && d.refused);   // round 3 (MAJOR item 2): the store failed its mark — fail CLOSED (every standing grant paused)
     const entries = [];
     const admitted = [];   // a GRANT that opened a closed entry (lane vault-manual-and-lock) — a once-grant is spent before the run starts
     for (const r of spec.refs) {
       const row = rowOf(r), c = classOf(r, row);
       if (!c.runnable) { note('entry_has_its_own_door', { ...head, ref: r.ref }); return named('entry_has_its_own_door', { ref: r.ref, door: c.door, words: `${VR.WORDS.entry_has_its_own_door}: ${c.door}` }); }
-      const sw = !!(row && d && d.runnable.has(r.id)), g = row ? grantOf(scope, r.id) : null;
+      const sw = !refused && !!(row && d && d.runnable.has(r.id)), g = row ? grantOf(scope, r.id) : null;
       if (g) purposes.set(r.id, g.purpose);
       if (g && !sw) admitted.push({ pair: pairOf(scope, r.id), g });
-      const open = sw || !!g;   // the owner's switch (every conversation) OR the grant his answer wrote (this one)
+      const suspended = refused || !!(row && d && d.suspended && d.suspended.has(r.id));   // round 2 MAJOR: the owner turned this entry OFF — every grant is suspended while it is (kept, not deleted); round 3: a refused store suspends EVERYTHING
+      const open = sw || !!g;   // round 4 (MAJOR item 4): ON is an ALLOW-LIST — only the owner's switch (`runnable`, trusted store) or the once-grant his answer wrote opens the entry; a standing vault-use grant is honoured ONLY when the switch is ON too (a refused / wiped / replayed store lists nothing ON ⇒ fail closed; an entry with a grant but never switched ON is PAUSED — A7)
       let bytes = 0;
       if (row && open) { try { const v = valueOf(r); bytes = v == null ? 0 : Buffer.byteLength(v, 'utf8'); } catch { bytes = 0; } }
-      entries.push({ id: r.id, exists: !!row, open, bytes });
+      entries.push({ id: r.id, exists: !!row, open, bytes, on: sw });
     }
+    // lane vault-use-grants round 5 (item 3): when «Always» is offered on an entry that is NOT already switched on, the card
+    // says pressing «Always» (with 验证是你) ALSO opens it for agent runs — the switch flips in the same act (option b).
+    if (useGrants && shape.always && entries.some((e) => e.exists && !e.on)) detail = `${detail}\n${ALWAYS_SWITCH_LINE}`;   // round 5 (item 3) + round 6 (MINOR item 3): ONE key, localized by the client through t() (zh + ja); round 6 (MAJOR item 4): it opens the entry for THIS conversation — the grants the owner paused stay paused
     const pair = pairOf(caller.conversationId, key);
     const stored = d ? d.always.find((a) => a.conv === caller.conversationId && a.key === key) : null;
     const short = shortAlways.get(pair);
@@ -791,6 +1121,47 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     // to whom); an AGENT's own entry (`agent:<scope>/<name>`) is its conversation's only
     const granted = spec.refs.every((r) => { const sc = VR.agentScopeOf(r); return !sc || sc === scope || sc === caller.conversationId; });   // a mint's scope is the use law's conv (lane vault-mint-put)
     let verdict = VR.runVerdict({ state: vaultState(), plan: spec, shape, entries, granted, remembered, seen: seen.has(pair), instance: instanceKind(), policy: policy(), now: now() });
+    // lane vault-use-grants: A STANDING APPROVAL SHORT-CIRCUITS THE CARD — every entry admitted for every host of the run (the
+    // verdict's own refusals stand: a lock, an unknown entry, a too-short value, another conversation's own entry)
+    if (!verdict.ok && verdict.ask && !refused && spec.refs.length && spec.refs.every((r) => (standing.get(r.id) || {}).ok === true && memberUsable(d, r.id, (standing.get(r.id) || {}).id))) {   // round 4 (MAJOR item 4): a grant short-circuits the card ONLY when the entry is listed ON (an allow-list, trusted store); round 7 (MAJOR item 2): `memberUsable` IS that allow-list read AND the pause fact in one — the entry ON, and either the owner opened it (everyone usable) or a PRESS did and THIS member is in the resumed set. A member a press left paused draws the card (never a silent by:grant).
+      for (const r of spec.refs) standingIds.set(r.id, standing.get(r.id).id);
+      verdict = { ok: true, by: 'grant', grants: [...new Set(standingIds.values())] };
+      head.grants = verdict.grants;
+    }
+    // lane vault-use-grants round 7 (MINOR): AN 8-HOUR PASTE GRANT is HOST-SCOPED — it admits a run with no card ONLY for the
+    // HOSTS the request named (the Settings words «may use it in commands to those hosts for 8 hours» now match the code). A run
+    // whose destinations are not ALL covered — another host, an opaque route, or a paste that named no hosts — draws its card.
+    const hostCovered = (hosts, h) => hosts.some((gh) => gh === h || (gh.startsWith('*.') && (h === gh.slice(2) || h.endsWith(gh.slice(1)))));   // a paste --host may be a literal or a `*.suffix` wildcard
+    if (!verdict.ok && verdict.ask && !refused && !dest.opaque && dest.hosts.length && spec.refs.length && spec.refs.every((r) => { const a = admitted.find((x) => x.pair === pairOf(scope, r.id)); return a && Array.isArray(a.g.hosts) && a.g.hosts.length && dest.hosts.every((h) => hostCovered(a.g.hosts, h)); })) {
+      verdict = { ok: true, by: 'grant' };
+    }
+    // lane vault-use-grants (R4): THE POLICY JUDGE (vault.policyJudge, default OFF) — a run that would ask, every entry with a policy,
+    // the pair not revoked ⇒ the decision API judges the card's facts; yes ⇒ it runs (recorded); anything else ⇒ the card says so
+    let policyOnNow = false;
+    try { policyOnNow = !!(policyJudge && policyOn()); } catch { policyOnNow = false; }   // round 3 (MAJOR item 6): a memo is nothing without a LIVE judge — the block only runs when the plugin is on (policyOn)
+    if (!verdict.ok && verdict.ask && policyOnNow && d && !refused && spec.refs.length) {
+      const pols = spec.refs.map((r) => (d.policies[r.id] ? d.policies[r.id].text : null));
+      if (pols.every(Boolean)) {
+        const parts = policyPartsOf(spec, shape, spec.refs, place), jkey = judgedKeyOf(parts, pols.join('\n'));   // round 2 MAJOR: the memo key is the EXACT facts (round 3: incl. env + folder)
+        const revoked = d.policyRevoked.some((x) => x.conv === caller.conversationId && x.key === key);   // round 3 (MAJOR item 3): a Revoke covers the whole SHAPE — every variant draws the card
+        // round 3 (MAJOR item 6): the door's OWN marked `policyApproved` is the sole memo (never the engine's unmarked decision-memo.json) — honoured only here, with a live judge
+        const memoHit = spec.refs.every((r) => { const ap = d.policyApproved[r.id]; return !!(ap && ap.shapes.some((x) => x.conv === caller.conversationId && x.key === jkey)); });
+        const hk = `${caller.conversationId}\n${spec.refs.map((r) => r.id).sort().join(',')}`;
+        if (revoked) detail = `${detail}\nYou revoked the policy judge's approval of this command shape — so this card asks you.`;
+        else if (memoHit) { verdict = { ok: true, by: 'policy', memo: true }; head.policy = { memo: true }; }   // a remembered approval of the EXACT command — no fetch
+        else {
+          const res = reserveHour(hk);   // round 4 (item 5): BOOK the slot SYNCHRONOUSLY before the await — concurrent runs can never each pass a check-then-write race
+          if (!res.ok) detail = `${detail}\nThe policy judge has already approved ${POLICY_PER_HOUR} commands for this run in the last hour — it asks you now. Change the limit, or turn the judge off, in the Vault window.`;
+          else {
+            const j = await judgePolicy({ caller, parts, policies: pols });
+            if (signal && signal.aborted) { releaseHour(hk, res.ts); note('caller_gone', head); return named('caller_gone'); }
+            if (j.approve) { verdict = { ok: true, by: 'policy', p: j.p }; head.policy = { p: j.p }; recordApproval({ caller, spec, refs: spec.refs, p: j.p, key: jkey, shapeKey: key, parts, policy: pols.join(' · ') }); }
+            else { releaseHour(hk, res.ts); detail = `${detail}\n${j.line}`; }   // a refused judgment frees its slot — the hour is spent on approvals, not NOs
+          }
+        }
+      }
+      if (detail.length > DETAIL_MAX) return named('card_too_long');
+    }
     let askId = null, asked = null;
     if (!verdict.ok && verdict.ask) {
       if (callerRuns(caller.conversationId) >= RUNS_PER_CALLER || runs.size >= RUNS_MAX) return named('too_many_runs');
@@ -801,7 +1172,8 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       if (outcome) { note(outcome, { ...head, askId }); return named(outcome); }
       // allowed / always — the verdict AGAIN over the facts as they stand NOW (a lock, a switch closed while the card waited)
       const d2 = load();
-      const again = spec.refs.map((r) => { const row = rowOf(r); return { id: r.id, exists: !!row, open: !!(row && ((d2 && d2.runnable.has(r.id)) || grantOf(scope, r.id))), bytes: entries.find((e) => e.id === r.id).bytes }; });
+      const refused2 = !!(d2 && d2.refused);
+      const again = spec.refs.map((r) => { const row = rowOf(r); const sw2 = !refused2 && !!(row && d2 && d2.runnable.has(r.id)); return { id: r.id, exists: !!row, open: !!(row && (sw2 || grantOf(scope, r.id))), bytes: entries.find((e) => e.id === r.id).bytes }; });   // round 4 (MAJOR item 4): after the answer, the entry is open only when the switch is ON (the allow-list) or the once-grant his answer wrote — «Always» runs on an already-switched-on entry (the card showed only because it was ON)
       verdict = VR.runVerdict({ state: vaultState(), plan: spec, shape, entries: again, granted, remembered: { until: null }, seen: true, instance: instanceKind(), policy: 'allow', now: now() });
       if (verdict.ok) verdict = { ok: true, by: asked === 'always' ? 'always' : 'once' };
     }
@@ -945,7 +1317,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   /** The process ends: every child, its strays and its files with it (sync — an exit handler). */
   function closeAll() { for (const rec of [...runs]) { killGroup(rec, 'SIGKILL'); endMarked(rec.mark); shredDir(rec.dir); } runs.clear(); }
 
-  return { run, answer, setRunnable, rowFacts, runnableFor, reconcile, sweep, closeAll, onLocked, request, answerRequest, usesFor, grantPasted,
+  return { run, answer, setRunnable, resumeGrant, rowFacts, runnableFor, reconcile, sweep, closeAll, onLocked, request, answerRequest, usesFor, grantPasted, useGrants, setPolicy, revokeApprovals, noteGrantStale,
     listRequests: () => [...requests.values()].map((q) => ({ askId: q.askId, who: q.who, ref: q.ref, askedAt: q.askedAt })), _grants: grants, _requests: requests, _reqQuiet: reqQuiet,
     listAsks: () => [...asks.values()].map((q) => ({ askId: q.askId, who: q.who, always: q.always, askedAt: q.askedAt, expiresAt: q.askedAt + VR.ASK_TTL_MS })), running: () => runs.size, ACTION_TYPE, _asks: asks, _seen: seen };
 }

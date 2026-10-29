@@ -9897,6 +9897,7 @@ export default {
   "Extra Antigravity CLI args appended when starting an Antigravity session.": "启动 Antigravity 会话时追加的 Antigravity CLI 参数。",
   "Default (Antigravity’s own setting)": "默认（Antigravity 自己的设置）",
   "{who} wants to run a command with a stored secret": "{who} 想用保险库里的密钥运行一条命令", // lane vault-run-door
+  "«Always» (with the second password) also turns on «Usable by agent runs» for this entry — it opens it for THIS conversation; any grants you paused stay paused.": "按「总是允许」（需验证是你）也会为此条目打开「可供 agent 运行使用」——它只为当前这个对话打开；你暂停的其他授权仍保持暂停。", // lane vault-run-door
   "Always for this shape": "此形状总是", // lane vault-run-door
   "The same tool, flags, hosts and secrets run without asking for 30 days — asks for the second password first": "同一工具、旗标、主机与密钥 30 天内不再问——先要再输一次第二密码", // lane vault-run-door
   "Allowed for this shape for 30 days": "此形状 30 天内总是允许", // lane vault-run-door
@@ -11150,4 +11151,81 @@ export default {
   "Open Usage": "打开 用量",
   "Not saved yet — press Enter or leave the field": "未保存——按回车或离开输入框即可保存",
   "Not saved yet — press Enter or leave the field · in force now: {value}": "未保存——按回车或离开输入框即可保存 · 当前生效：{value}",
+  "As each has it now": "各自保持现有设置", // lane vault-use-grants
+  "No end": "不设期限", // lane vault-use-grants
+  "8 hours": "8 小时", // lane vault-use-grants
+  "the hosts it was stored for ({hosts})": "保存时指定的主机（{hosts}）", // lane vault-use-grants
+  "Who may use it…": "谁可以用…", // lane vault-use-grants
+  "Let a conversation, a Task Group or all agents run commands with it for the hosts you name — no card each time. Another host still asks you.": "让某个对话、任务组或所有 agent 在你指定的主机上用它运行命令——不再每次弹卡片。其他主机仍会问你。", // lane vault-use-grants
+  "Who may use it could not be read — it is refused as it is (never read wider). Save it again to repair it.": "无法读取「谁可以用」——按原样拒绝（绝不放宽解读）。重新保存即可修复。", // lane vault-use-grants
+  "Used with no card by:": "无需卡片即可使用：", // lane vault-use-grants
+  "used {n}×": "已用 {n} 次", // lane vault-use-grants
+  "Paused while the entry is off — turn «Usable by agent runs» on to restore these.": "该条目已关闭，授权暂停——打开「可供 agent 运行使用」即可恢复。", // lane vault-use-grants
+  "paused by you": "你暂停了它", // lane vault-use-grants (round 7)
+  "closed when the vault locked — run it again after the unlock": "保险库锁定时已关闭——解锁后重新运行", // lane vault-use-grants (round 7)
+  "Unverified until you unlock the vault — not in use until then.": "在你解锁保险库之前无法验证——在此之前不生效。", // lane vault-use-grants (round 6)
+  "Un-pause this — let it be used again": "取消暂停——让它重新可用", // lane vault-use-grants (round 6)
+  "every {host} host": "{host} 下的每个主机", // lane vault-use-grants (round 3)
+  "every {host} host (incl. other customers’ endpoints)": "{host} 下的每个主机（含其他客户的端点）", // lane vault-use-grants (round 3)
+  "until {when}": "至 {when}", // lane vault-use-grants
+  "Take this back": "收回", // lane vault-use-grants
+  "except {name}": "除了 {name}", // lane vault-use-grants
+  "used {n}× by {m} conversations": "已被 {m} 个对话使用 {n} 次", // lane vault-use-grants
+  "Who may use «{name}»": "谁可以用「{name}」", // lane vault-use-grants
+  "They run commands with it — vibespace-vault run — for the hosts below with no card each time; they never see it. Another host, or a command whose destination cannot be told (a shell, a script), still asks you.": "他们可以用它运行命令（vibespace-vault run），发往下面的主机时不再每次弹卡片；他们永远看不到它。其他主机，或无法判断发往何处的命令（shell、脚本），仍会问你。", // lane vault-use-grants
+  "Who may use it": "谁可以用", // lane vault-use-grants
+  "Who": "给谁", // lane vault-use-grants
+  "For which hosts": "用于哪些主机", // lane vault-use-grants
+  "The hosts it was stored for ({hosts})": "保存时指定的主机（{hosts}）", // lane vault-use-grants
+  "Each keeps its own hosts — or type hosts for all": "各自保留自己的主机——或输入主机统一设置", // lane vault-use-grants
+  "Host names or addresses, e.g. 192.168.1.1, router.lan": "主机名或地址，例如 192.168.1.1、router.lan", // lane vault-use-grants
+  "Until": "期限", // lane vault-use-grants
+  "Name the hosts it may be used for — a host name or address each (never «any host»)": "请写明可用于哪些主机——每个写一个主机名或地址（不能是「任意主机」）", // lane vault-use-grants
+  "Saved — they use it with no card for those hosts": "已保存——他们用于这些主机时不再弹卡片", // lane vault-use-grants
+  "Saved — nobody uses it without a card": "已保存——现在没有人可以免卡片使用", // lane vault-use-grants
+  "A host is a host name or address (no wildcard, no address with a path)": "主机是主机名或地址（不能用通配符，也不能带路径）", // lane vault-use-grants
+  "You typed it in at an agent's request — the conversation that asked is named": "你应 agent 的请求填写的——注明了发起请求的对话", // lane vault-use-grants
+  "Filled by you · asked for by {who}": "你填写的 · 应 {who} 的请求", // lane vault-use-grants
+  "for {hosts}": "用于 {hosts}", // lane vault-use-grants
+  "Search all": "搜索全部", // lane vault-use-grants
+  "No stored value matches “{q}” — searched: {fields}": "没有与「{q}」匹配的存储值——已搜索：{fields}", // lane vault-use-grants
+  "No stored value matches “{q}” in «{purpose}» — searched: {fields}": "「{purpose}」中没有与「{q}」匹配的存储值——已搜索：{fields}", // lane vault-use-grants
+  "{n} match under other purposes": "其他用途下有 {n} 个匹配", // lane vault-use-grants
+  "names": "名称", // lane vault-use-grants
+  "kinds": "类型", // lane vault-use-grants
+  "purposes": "用途", // lane vault-use-grants
+  "hosts": "主机", // lane vault-use-grants
+  "where they came from": "出处", // lane vault-use-grants
+  "ids": "ID", // lane vault-use-grants
+  "Always let this conversation use it (these hosts)": "总是允许这个对话用它（这些主机）", // lane vault-use-grants
+  "A standing approval: this conversation may use it for these hosts for 30 days — the Vault window lists it": "已设为长期授权：这个对话 30 天内可用于这些主机——保险库窗口里能看到它", // lane vault-use-grants
+  "A standing approval: this conversation runs commands with these secrets for these hosts without asking for 30 days — the Vault window lists it and takes it back; asks for the second password first": "长期授权：这个对话 30 天内对这些主机使用这些秘密运行命令无需再问——保险库窗口列出它，也可收回；先要输入第二密码", // lane vault-use-grants
+  "For: {hosts} — the conversation that asked is not allowed to use it until you allow it on its row in the Vault window («Who may use it…»).": "用于：{hosts}——在你于保险库窗口该行（「谁可以用…」）允许之前，发起请求的对话不能使用它。", // lane vault-use-grants
+  "A pasted secret may be used by the conversation that asked for it": "你粘贴的秘密可由请求它的对话使用", // lane vault-use-grants
+  "When an agent asks you to paste a secret and names the hosts it is for, the conversation that asked may use it in commands to those hosts for 8 hours — they are not asked again. A command to any other host still shows you its card, and a request that named no hosts shows a card for every command. Locking the vault ends the grant, and the entry's own «Usable by agent runs» switch is untouched. OFF: a paste grants nothing — the agent's receipt tells it to request the secret, and you open the entry in the Vault window.": "当 agent 请你粘贴一个秘密并写明用于哪些主机时，发起请求的对话可以在接下来 8 小时内用它向这些主机发命令——不再逐次询问。向其他任何主机的命令仍会给你看卡片；若请求未写明主机，则每条命令都给你看卡片。锁定保险库即结束授权，条目自己的「可供 agent 运行使用」开关不受影响。关闭：粘贴不授予任何权限——agent 的回执会让它去请求该秘密，由你在保险库窗口打开此条目。", // lane vault-use-grants
+  "Policy for the judge: «{text}»": "裁决策略：「{text}」", // lane vault-use-grants
+  "Policy for the judge: «{text}» — the judge is off (Settings ▸ Integration)": "裁决策略：「{text}」——策略裁决已关闭（设置 ▸ 集成）", // lane vault-use-grants
+  "Approved by the policy judge {n}× · last {time}": "策略裁决已批准 {n} 次 · 最近 {time}", // lane vault-use-grants
+  "The commands the judge approved ask you again next time": "裁决批准过的命令下次会重新询问你", // lane vault-use-grants
+  "Revoked — those commands ask you again": "已撤销——这些命令会重新询问你", // lane vault-use-grants
+  "Policy for the judge (optional)": "给裁决的策略（可选）", // lane vault-use-grants
+  "e.g. only 192.168.1.1, read-only status calls to read the WAN status": "例如：只用于 192.168.1.1，只读的状态查询，用来读取 WAN 状态", // lane vault-use-grants
+  "The policy judge is ON: a run its grants do not cover is judged against these words by the decision API; a yes runs it (recorded in For you), anything else shows you the card. It never sees the value.": "策略裁决已开启：授权未覆盖的运行会由 decision API 按这段话裁决；通过就运行（记录在「待你处理」里），其余情况都会给你弹卡片。它永远看不到值。", // lane vault-use-grants
+  "The policy judge is OFF (Settings ▸ Integration ▸ «Let the policy judge approve vault uses») — the words are kept for when you turn it on.": "策略裁决已关闭（设置 ▸ 集成 ▸「让策略裁决批准保险库使用」）——这段话会保留，等你开启时使用。", // lane vault-use-grants
+  "{who}: a command with a stored secret was approved by the policy judge": "{who}：一条使用存储秘密的命令已由策略裁决批准", // lane vault-use-grants
+  "Approved by the policy judge · {time} · inside your policy ({p})": "由策略裁决批准 · {time} · 在你的策略范围内（{p}）", // lane vault-use-grants
+  "Your policy: {policy}": "你的策略：{policy}", // lane vault-use-grants
+  "The command: {cmd}": "命令：{cmd}", // lane vault-use-grants
+  "Open the entry in the Vault window to see its policy — its Revoke makes this command ask you again next time.": "在保险库窗口打开该条目可查看它的策略——在那里撤销后，这条命令下次会重新询问你。", // lane vault-use-grants
+  "Let the policy judge approve vault uses": "让策略裁决批准保险库使用", // lane vault-use-grants
+  "An entry may carry your policy («only 192.168.1.1, read-only status calls») in the Vault window's «Who may use it…». ON: a run its grants do not cover is judged against that policy by the decision API (the LLM plugin, its key and its daily budget) — approved runs go without a card and are recorded in For you with a Revoke; a no, or a judge that cannot be asked, shows you the card. It never sees a value. OFF (default): every such run asks you.": "条目可以在保险库窗口的「谁可以用…」里带上你的策略（「只用于 192.168.1.1，只读状态查询」）。开启：授权未覆盖的运行由 decision API（LLM 插件、它的密钥和每日预算）按该策略裁决——批准的运行不弹卡片，并记录在「待你处理」里，可撤销；被否决或无法询问裁决时，会给你弹卡片。它永远看不到值。关闭（默认）：每次这样的运行都会问你。", // lane vault-use-grants
+  "Vault policy": "保险库策略", // lane vault-use-grants
+  "The vault-run store could not be trusted — every entry is off until you switch it on": "运行存储无法被信任——每一条都已关闭，需要你重新打开它才会生效",
+  "The vault-run store ({why}) could not be trusted — every entry is OFF for agent runs and every standing grant is paused; nothing runs until you switch each entry on again in the Vault window (that re-marks it; a grant is not enough — the switch is the allow-list). No value was given out.": "运行存储（{why}）无法被信任——每一条对 agent 运行都已关闭，所有长期授权都已暂停；在保险库窗口里重新打开每一条才会运行（这会重新盖章；仅有授权不够——开关才是允许清单）。没有任何值被交出。",
+  "A stored value’s sharing could not be trusted — a grant was dropped and paused": "某个存储值的共享无法被信任——一条授权已被丢弃并暂停",
+  "data/grants.json: a sharing grant for {resource} did not match the vault’s mark (a forged, widened or replayed row) and was dropped. Set who may use it again in the Vault window. No value was given out.": "data/grants.json：{resource} 的一条共享授权与保险库的标记不符（被伪造、被放宽或被重放的记录），已被丢弃。请在保险库窗口里重新设置谁可以用它。没有任何值被交出。",
+  "A wildcard host (like *.example.com) is scoped to the tool that first used it — add it from a run card with «Always», not here": "通配主机（例如 *.example.com）只限第一次用它的那个工具——请在运行卡片里用「总是允许」添加，而不是在这里",
+  "It said it needs it for: {hosts}. If you paste it, the conversation that asked may use it in commands to those hosts for 8 hours — a command to any other host still shows you its card; a vault lock ends it. To let it be used without that limit, turn on «Usable by agent runs» on its row in the Vault window.": "它说需要用于：{hosts}。如果你粘贴，发起请求的对话可以在接下来 8 小时内用它向这些主机发命令——向其他任何主机的命令仍会给你看卡片；锁定保险库即结束。要不受时间限制地使用，请在保险库窗口里该条目的行上打开「可供 agent 运行使用」。",
+  "If you paste it, the conversation that asked may use it, but every command still shows you its card (it named no hosts); a vault lock ends it. To let it be used without a card, turn on «Usable by agent runs» on its row in the Vault window.": "如果你粘贴，发起请求的对话可以使用它，但每条命令仍会给你看卡片（它未写明主机）；锁定保险库即结束。要无需卡片地使用，请在保险库窗口里该条目的行上打开「可供 agent 运行使用」。",
+  "The conversation that asked is not allowed to use it in runs until you turn on «Usable by agent runs» on its row in the Vault window.": "发起请求的对话在你于保险库窗口里该条目的行上打开「可供 agent 运行使用」之前，不能在运行里使用它。"
 };

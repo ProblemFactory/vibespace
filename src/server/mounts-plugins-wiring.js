@@ -105,7 +105,29 @@ const vaultContents = require('./vault-contents.js').create({ vault, sources: va
 // lane vault-run-door (design q-043 §8 P0-f): `vibespace-vault run` — the HUB spawns an agent's command with a stored value
 // injected (env / a 0600 file / stdin — never argv) and answers its output SCRUBBED; the owner opens each entry for runs and
 // answers each new command shape (src/server/vault-run-door.js over PURE src/vault-run.js); a lock stops every run
-const vaultRun = require('./vault-run-door.js').create({ dataDir: path.join(rootDir, 'data'), vault, sources: vaultSources, userTodos, log: (m) => console.log('[vault-run]', m),
+// lane vault-use-grants (the owner 2026-10-27 「每个密码请求都要我同意太麻烦了！」): WHO may use an entry with NO card, for which hosts,
+// until when — the grant door `vault-use` (PURE src/vault-use-grant.js; ONE writer src/server/vault-use-grants.js into the grants
+// store); the run door asks it before a card, with the caller's keys and its Task Groups READ NOW (never copied onto the grant)
+const vaultUseGrants = require('./vault-use-grants.js').create({ grants: () => require('./grants-store.js').store(), vault, dataDir: path.join(rootDir, 'data'), log: (m) => console.log(m),
+  // lane vault-use-grants round 4 (item 4): a vault-use member dropped because its mac no longer verifies (a forged row, a
+  // deleted `except`, or an older row replayed after an owner write bumped the generation) is named ONCE in the For-you tray —
+  // filed by the run door (a vault producer: `noteGrantStale`), late-bound (vaultRun is constructed just below).
+  onStale: (resource) => { try { vaultRun.noteGrantStale(resource); } catch (e) { console.log(`[vault-use] the grant-stale notice could not be filed (${e.message})`); } } });
+const vaultUseFacts = (caller) => {
+  for (const [id, s] of activeSessions) {
+    if (!s || s.isTmuxView || !caller || require('../claude-lock-capture.js').addressableId(s) !== caller.conversationId) continue;   // fork-safe: a pending fork shares its parent's id and is never picked
+    let groupIds = [], groupsUnreadable = false;
+    const tasks = getTasks && getTasks();
+    if (tasks && sessionStatusKey) { try { groupIds = tasks.groupsForSession({ sessionKey: sessionStatusKey(s, id), cwd: s.cwd, initialGroupId: s._initialGroupId, initialGroupIds: s._initialGroupIds }).map((g) => g.id); } catch { groupsUnreadable = true; } }
+    return { conversationKeys: require('../grant-model.js').conversationKeysOf(s, s._webuiId || id), groupIds, groupsUnreadable };
+  }
+  return { conversationKeys: caller && caller.conversationId ? [caller.conversationId] : [] };
+};
+const vaultRun = require('./vault-run-door.js').create({ dataDir: path.join(rootDir, 'data'), vault, sources: vaultSources, userTodos, log: (m) => console.log('[vault-run]', m), useGrants: vaultUseGrants, useFacts: vaultUseFacts,
+  // lane vault-use-grants (R4, default OFF): the policy judge = the ONE decisions caller (decision-engine judge, use vault-use-policy —
+  // its gates: the LLM plugin, the key, the day's money); the owner's policy rides the question, the card's facts the input
+  policyOn: () => serverSetting('vault.policyJudge') === true,
+  policyJudge: (parts, { policy, memo }) => decisionEngine.judge('vault-use-policy', parts, { questions: [require('../decision-model.js').vaultPolicyQuestion(policy)], memo, perHour: 30 }),   // round 3 (MAJOR item 6): `memo` is ALWAYS null (the door's marked policyApproved is the sole memo, never the engine's unmarked decision-memo.json). round 4 (MAJOR item 5): `perHour: 30` RESTORED as the engine's atomic SECOND fence (it books in the same synchronous step as the budget check) beside the door's own per-conversation counter — two independent, fail-closed bounds (the engine's is a shared billing cap, the door's is this use's own, persisted across a restart)
   agentEnv: () => require('../agent-env.js').agentEnv(process.env, { drop: require('../harness-env.js').agentCredentialEnvNames(require('../harnesses').list()) }),
   instanceKind: () => require('../hub-act-policy.js').instanceKindOf(process.env, { presetsDir: (() => { try { return require('./cluster-presets.js').sharedPresets().dir || null; } catch { return null; } })() }),
   liveOf: (cid) => { for (const s of activeSessions.values()) if (s && cid && (s.backendSessionId || s.claudeSessionId) === cid) return true; return false; } });
@@ -131,7 +153,7 @@ const browserLogins = require('./browser-logins.js').create({ vault, grants: () 
 // lane vault-paste-request (the owner 2026-10-23: 「应该允许你给我弹一个保险库输入框让我直接 paste 进去」): an agent ASKS for a secret, the
 // owner PASTES it into its For-you item's masked box (or refuses); the value goes to the one writer of its place (a registry
 // field: the integration store; a free entry: the vault's `secret:<id>`); the asker reads a receipt at its next turn (the stash)
-const vaultPaste = require('./vault-paste-door.js').create({ vault, integrations, userTodos, deliver, vaultRun, log: (m) => console.log('[vault-paste]', m) });
+const vaultPaste = require('./vault-paste-door.js').create({ vault, integrations, userTodos, deliver, vaultRun, useGrants: vaultUseGrants, setting: (k) => serverSetting(k), log: (m) => console.log('[vault-paste]', m) });   // useGrants + setting: lane vault-use-grants (a request's default grant)
 require('../routes/vault.js').registerVaultRoutes(app, { vault, activeSessions, getJobs, contents: vaultContents, who: (req) => require('../auth.js').Auth.signInHandle(req), run: vaultRun, paste: vaultPaste,
   totp: vaultTotp, callerOf: (token) => sessionCallerOf(token), runOf: totpRunOf, grantLive: (g) => !g.subject.startsWith('session:') || totpRunOf(g.subject.slice(8)) === g.run, subjects: () => conversationSubjects(),
   logins: browserLogins,   // lane browser-login: the Vault window's web logins (add / delete / 用于… — a person's doors)

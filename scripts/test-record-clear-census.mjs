@@ -457,7 +457,7 @@ const ROUTES = {
   // the same way (use-law's bearerOf → jobByToken), so each reaches the jobs stash to name who it refused; no record of the five kinds
   'GET /api/vault/totp': 'meta', 'POST /api/vault/totp': 'meta', 'GET /api/vault/totp/:name': 'meta', 'DELETE /api/vault/totp/:name': 'meta', 'POST /api/vault/totp/:name/grants': 'meta', 'DELETE /api/vault/totp/grants/:id': 'meta',
   // lane browser-login: the Vault window's web logins (names, provenance words and grant rows — never a password; a person's doors)
-  'GET /api/vault/web-logins': 'meta', 'POST /api/vault/web-logins': 'meta', 'DELETE /api/vault/web-logins/:name': 'meta', 'POST /api/vault/web-logins/grants': 'meta', 'POST /api/vault/web-logins/ungrant': 'meta',
+  'GET /api/vault/web-logins': 'meta', 'POST /api/vault/web-logins': 'meta', 'DELETE /api/vault/web-logins/:name': 'meta', 'POST /api/vault/web-logins/grants': 'meta', 'POST /api/vault/web-logins/ungrant': 'meta', 'POST /api/vault/use-grants': 'meta', 'POST /api/vault/use-grants/revoke': 'meta', 'POST /api/vault/use-grants/resume': 'meta', 'POST /api/vault/use-policy': 'meta', 'POST /api/vault/use-policy/revoke': 'meta',   // lane vault-use-grants: a vault-use grant row (ids, hosts, an end — no record text); round 6: /resume un-pauses one member
   // the run door's two person doors (lane vault-run-door) ride the same person() wrapper — the bearer it refuses is named the same way
   'POST /api/vault/runnable': 'meta', 'POST /api/vault/run/asks/:askId': 'meta',
   // lane vault-manual-and-lock: an agent's REQUEST (the session resolved through the jobs stash like run), its USES (its own
