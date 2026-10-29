@@ -140,7 +140,7 @@ export function loginExpiryChipHtml(a, { local = true } = {}) {
     const near = local && typeof ls.msLeft === 'number' && ls.msLeft < 24 * 3600e3;
     // …and its tooltip ENDS with why the reading ages (lane auto-cli-oat-unprobeable): never probed, refreshed by use —
     // after the facts the owner ruled lead the hover (2026-10-15: where the token sits, which CLI verified it)
-    const pn = /^unprobeable:(oat-no-profile|cli-unmeasured|oat-not-in-folder)$/.test(String(a.probeEligibility || '')) ? acctProbeNote(a) : null;
+    const pn = /^unprobeable:(oat-no-profile|cli-unmeasured|oat-not-in-folder|oat-folder-no-panel)$/.test(String(a.probeEligibility || '')) ? acctProbeNote(a) : null;
     const tail = pn ? ' · ' + escHtml(pn.text) : '';
     // THE TOKEN IN THE FOLDER (lane pool-oat-materialize): a member with no usable login whose
     // long-lived token was written into its credential file — pooled sessions spend it too. A POOL
@@ -250,6 +250,8 @@ export function acctProbeNote(a) {
   if (el === 'unprobeable:oat-no-profile') return { text: t('Long-lived token only, without the profile scope: can’t be probed — refreshes when a session uses it'), at: 0 };
   if (el === 'unprobeable:cli-unmeasured') return { text: t('Long-lived token only, and claude {cli} isn’t measured with it: can’t be probed — refreshes when a session uses it', { cli: String((a.oatCli && a.oatCli.cli) || '?') }), at: 0 };
   if (el === 'unprobeable:oat-not-in-folder') return { text: t('Long-lived token only, not in its folder: can’t be probed — refreshes when a session uses it'), at: 0 };
+  // lane pool-silent-members R3: the token IS in its folder, but the panel prints no quota line for it (measured 10-26 → 10-28)
+  if (el === 'unprobeable:oat-folder-no-panel') return { text: t('Long-lived token in its folder: claude {cli} prints no quota lines for it — refreshes when a session uses it', { cli: String((a.oatCli && a.oatCli.cli) || '?') }), at: 0 };
   const p = a.probe;
   if (a.probeEligibility === 'probeable' && p && p.ok === false && p.why) return { text: t('Last probe failed: {why}', { why: String(p.why) }), at: Number(p.at) || 0 };
   return null;

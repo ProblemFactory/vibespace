@@ -20,7 +20,7 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 const { capsOf } = require('./backend-caps.js'); // PURE registry: per-backend hot-switch verdict rides list() so the UI never offers a dead toggle
-const { loginRank, loginUsable, withOat, oatFileOf, oatFileOurs, credsRestOf, oatFileMerge, oatFileCurrent, oatShapeOf, oatFileBody, materializeVerdict } = require('./login-expiry.js'); // PURE: which login is the WORST of a pool's members; the materialized long-lived token's verdict
+const { loginRank, loginUsable, withOat, oatFileOf, oatFileOurs, usageBearerOk, credsRestOf, oatFileMerge, oatFileCurrent, oatShapeOf, oatFileBody, materializeVerdict } = require('./login-expiry.js'); // PURE: which login is the WORST of a pool's members; the materialized long-lived token's verdict
 const { identityRowState } = require('./oat-identity-model.js'); // PURE: what the roster says of a row's token identity (lane oat-identity-fix)
 const { probeEligibility, probeRecordOf } = require('./auto-cli-model.js'); // PURE: may the quota panel probe PROVE this row; its last failed probe, bounded (lane auto-cli-oat-unprobeable)
 const cliCaps = require('./cli-caps.js'); // PURE: oatInFile(version, fixture) — a measured CLI version gates the materialized token
@@ -1457,6 +1457,9 @@ class AccountManager {
         out.wrote = true;
       } else if (v.cleanup) {
         out.removed = await material.removeCredentialFile(dir, { isOurs: (f) => oatFileOurs(f, id), rest: credsRestOf, expect: seen.stat });
+        // A TAKE-BACK IS JOURNALED BY NAME (lane pool-silent-members R1): the sweep runs quiet, and 90c995a3 deleted six
+        // members' files on a CLI update with no line at all — whatever the reason, the journal names the account
+        if (out.removed) console.log(`[oat-file] took ${this.get(id)?.name || id}'s long-lived-token file back out of its folder — ${v.verdict}; the pool cannot place it until its token is written again or it logs in`);
       }
     } catch (e) { out.verdict = 'write-failed'; out.code = String((e && e.code) || 'error'); }
     const was = this._oatFileFacts.get(id);
@@ -1708,6 +1711,72 @@ class AccountManager {
     const all = this._state.accounts.filter((x) => this._acctBackend(x) === be && this._acctType(x) === 'subscription');
     const wanted = Array.isArray(a.members) && a.members.length ? all.filter((x) => a.members.includes(x.id)) : all;
     return wanted.map((x) => x.id);
+  }
+  /** THE POOL'S ROSTER (lane pool-silent-members R2, inc-mvsjhna7): EVERY member the pool lists — the Usage window shows
+   *  each one — with whether a NEW placement may land on it and, when not, WHY in the store's own facts. poolMembers stays
+   *  the CANDIDATE list; the pool's verdict and its notice name every roster member the candidates lack (12:56 PT: the
+   *  notice could name 6 of 14, because 8 never reached the decision). → [{id, name, placeable, why?}] */
+  poolRoster(id) {
+    const a = this.get(id);
+    if (!a || this._acctType(a) !== 'pooled') return [];
+    const be = this._acctBackend(a) || 'claude';
+    return this.poolMembership(id).map((mid) => {
+      let why = null;
+      try { why = this._unplaceableWhy(be, mid); } catch { why = { code: 'unreadable' }; }
+      return { id: mid, name: this.get(mid)?.name || mid, placeable: !why, ...(why ? { why } : {}) };
+    });
+  }
+  /** The members some pool LISTS that the hub's CLI keeps out because it was never measured with their token file
+   *  (R1's For-you item, oat-file-sync) → [{id, name}], each once. */
+  cliUnmeasuredMembers() {
+    const out = new Map();
+    for (const p of this._state.accounts) {
+      if (this._acctType(p) !== 'pooled') continue;
+      for (const r of this.poolRoster(p.id)) if (r.why && r.why.code === 'cli-unmeasured' && !out.has(r.id)) out.set(r.id, { id: r.id, name: r.name });
+    }
+    return [...out.values()];
+  }
+  /** R1's For-you item for the hub's CLI right now (oat-file-sync files it — that module requires nothing, so the words
+   *  come from here): null when the CLI is measured / unknown or no pool member is out for it; else {cli, members, prefix,
+   *  item} (PURE src/cli-caps.js cliUnmeasuredItem / cliUnmeasuredPrefix). */
+  cliUnmeasuredNotice() {
+    const c = this.oatFileCaps();
+    if (!c.known || c.ok || !c.cli || c.cli === 'unparsed') return null;
+    const members = this.cliUnmeasuredMembers();
+    if (!members.length) return null;
+    return { cli: c.cli, members, prefix: cliCaps.cliUnmeasuredPrefix(c.cli), item: cliCaps.cliUnmeasuredItem({ cli: c.cli, names: members.map((m) => m.name) }) };
+  }
+  /** WHY a NEW placement may not land on member `id` — null exactly when _placeable says true (test-account-pool pins the
+   *  two as one answer over every shape); else { code, cli?, file?, reason? }:
+   *    cli-unmeasured     a long-lived token the hub's CLI was never measured with (file: whether our file sits there)
+   *    vault-locked       a long-lived token the sweep could not decrypt: the vault is locked (kept; written once it opens)
+   *    oat-not-in-folder  a long-lived token not (yet) written to the folder on a measured CLI (reason: the store's refusal,
+   *                       'pending' before this process's first sweep)
+   *    oat-expired        no login, and the long-lived token has ended
+   *    oat-mismatch       the post-check read the token as ANOTHER account's
+   *    logged-out | expired | no-file | no-login   the login itself (wiped / ended / no file / nothing readable) */
+  _unplaceableWhy(be, id) {
+    const info = this._readAuthFor(be, id);
+    const caps = this.oatFileCaps();
+    const unmeasured = caps.known && !caps.ok;
+    if (info.loggedIn && !info.oatFile) return null;
+    if (info.loggedIn) {
+      if (this.oatCheckOf(id)?.state === 'mismatch') return { code: 'oat-mismatch' };
+      return unmeasured ? { code: 'cli-unmeasured', cli: caps.cli, file: true } : null;
+    }
+    const fact = this._oatFact(this.get(id));
+    if (fact && fact.validUntil > Date.now()) {
+      if (unmeasured) return { code: 'cli-unmeasured', cli: caps.cli, file: false };
+      const f = this._oatFileFacts.get(id);
+      // (acceptance r2) the LOCKED vault is its own wall (the sweep could not decrypt the token: kept, written once the
+      // vault opens) — and before this process's first sweep there is no refusal yet to name (never «re-login»)
+      if (f && f.code === 'vault_locked') return { code: 'vault-locked' };
+      if (!f) return { code: 'oat-not-in-folder', reason: 'pending' };
+      return { code: 'oat-not-in-folder', ...(f.reason || f.verdict ? { reason: String(f.reason || f.verdict) } : {}) };
+    }
+    if (fact) return { code: 'oat-expired' };
+    const ls = this.loginStateOf(id, Date.now(), { slot: true });
+    return { code: ls.absent ? 'no-file' : (ls.state === 'logged-out' || ls.state === 'expired') ? ls.state : 'no-login' };
   }
 
   /** The pool's own symlink path + a member's home dir — per backend (codex
@@ -2312,8 +2381,16 @@ class AccountManager {
     if (!a || !capsOf(this._acctBackend(a)).oauthUsage || this._acctType(a) !== 'subscription') return null;
     // never our materialized long-lived token (pool-oat-materialize verify r1 F10): it is inference-only and
     // was never measured as a direct bearer — an oat-only row refuses the ⟳ / identity reads as before
+    // …nor ANY long-lived token (acceptance r3 F4, login-expiry usageBearerOk): one planted without our mark is the same credential
     const info = this.readSubCreds(id);
-    return info.oatFile ? null : (info.accessToken || null);
+    return info.oatFile || !usageBearerOk(info.accessToken) ? null : info.accessToken;
+  }
+  /** Why the folder's own token is no usage Bearer, by name — 'long-lived' (a long-lived token, ours or not) — or null */
+  usageTokenRefusal(id) {
+    const a = this.get(id);
+    if (!a || this._acctType(a) !== 'subscription') return null;
+    const info = this.readSubCreds(id);
+    return info.oatFile || (typeof info.accessToken === 'string' && info.accessToken && !usageBearerOk(info.accessToken)) ? 'long-lived' : null;
   }
 
   // ── Read-only probes of the CLI's own login state (NEVER written) ──

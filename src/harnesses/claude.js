@@ -95,7 +95,9 @@ const SETTINGS_FILE = cliConfigFile(HARNESS_SETTINGS.claude.files.settings, { cr
 function claudeLoginState(dir, now = Date.now()) {
   const fp = path.join(dir, '.credentials.json');
   let raw = null;
-  try { raw = JSON.parse(fs.readFileSync(fp, 'utf-8')); } catch { return loginState(null, now); }
+  // a MISSING file is said apart from an unreadable one (lane pool-silent-members R1): `absent` lets the row's long-lived
+  // token answer for it (login-expiry withOat) — never «not logged in» for a member whose token file was taken back
+  try { raw = JSON.parse(fs.readFileSync(fp, 'utf-8')); } catch (e) { return e && e.code === 'ENOENT' ? { ...loginState(null, now), absent: true } : loginState(null, now); }
   // `writtenAt` = the file's last write. It is the ONLY on-disk clock that
   // says anything about when this login session STARTED, but it is NOT the
   // login time: every access-token refresh rewrites this file while

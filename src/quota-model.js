@@ -98,6 +98,15 @@ const WINDOW_JITTER_SEC = 120;
  *  the estimator re-based a bucket on the bare instant while the pool's own
  *  reader waited, and the overlay handed the pool the re-based bucket. */
 const RESET_GRACE_SEC = 60;
+/** ONE CLOCK AND ONE INEQUALITY over that grace (lane pool-silent-members R4, inc-mvsjhna7): a window whose stated reset
+ *  is `resetsAt` has LANDED once `resetsAt + RESET_GRACE_SEC <= nowSec` (whole seconds — `nowSec` is floored here, so
+ *  a fractional clock and a floored one answer every second alike). Every reader asks THIS — bucketRemaining, quotaVerdict
+ *  (src/account-pool-auto.js) and the estimator's weekly roll; `nowSecOf` is the one clock the pool's decisions read. */
+function nowSecOf(ms = Date.now()) { return Math.floor(Number(ms) / 1000); }
+function resetLanded(resetsAt, nowSec) {
+  const r = Number(resetsAt) || 0;
+  return r > 0 && r + RESET_GRACE_SEC <= Math.floor(Number(nowSec));
+}
 
 const SCOPES = Object.freeze(['plan', 'model', 'credits', 'overage']);
 const STATES = Object.freeze(['running', 'empty', 'unknown']);
@@ -1356,7 +1365,7 @@ function wallAttribution({
 
 module.exports = {
   // constants
-  WINDOW_MINUTES, EMPTY_WINDOW_JITTER_SEC, WINDOW_JITTER_SEC, RESET_GRACE_SEC, SCOPES, STATES, EMPTY_SET,
+  WINDOW_MINUTES, EMPTY_WINDOW_JITTER_SEC, WINDOW_JITTER_SEC, RESET_GRACE_SEC, nowSecOf, resetLanded, SCOPES, STATES, EMPTY_SET,
   // builders
   makeWindow, makeLimit, makeLimitSet,
   // validator

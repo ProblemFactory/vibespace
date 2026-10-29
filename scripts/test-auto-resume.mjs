@@ -202,7 +202,13 @@ const T0 = Date.now();   // the module refuses waits >26h out, so the clock must
 // ── 7. wiring pins ──
 {
   const eng = read('src/server/usage-pool-engine.js');
-  ok('exhaustion arms it — AFTER trying the pool switch (seconds beat hours)', /maybePoolAutoSwitch\(session\);[\s\S]{0,400}getAutoResume\(\)\?\.armIfEnabled/.test(eng));
+  // (lane pool-silent-members R4: the gate's switch hands its ONE clock — `{ now }` — and runs BEFORE the probe of the
+  // member it moves to, so the arm sits after that probe: the window grew from 400 to 1600 characters; acceptance r2: the
+  // probe's fresh reading may re-decide once — `{ now: at, force: true }` — before the verdict, the window 2600; acceptance r3:
+  // EVERY gate re-decides on the reading after the ONE shared probe it awaited — 2 183 characters, the window unchanged)
+  ok('exhaustion arms it — AFTER trying the pool switch (seconds beat hours)', /maybePoolAutoSwitch\(session, \{ now \}\);[\s\S]{0,2600}getAutoResume\(\)\?\.armIfEnabled/.test(eng));
+  ok('…and the fresh reading re-decides ONCE when the member it moved to cannot serve after all — in EVERY gate, on the one shared probe it awaited, at the clock after it, the verdict at that same instant (acceptance r2 + r3)',
+    /if \(target\) await preFireProbe\(target, session\);[\s\S]{0,900}if \(pooled\) \{\n\s*at = Date\.now\(\);\n\s*const tv = quotaVerdictFor\(target, \{ model, session, now: at \}\);\n\s*if \(tv && tv\.usable !== true\) maybePoolAutoSwitch\(session, \{ now: at, force: true \}\);\n\s*\}\n\s*const v = quotaVerdictFor\(scope, \{ model, session, now: at \}\);/.test(eng));
   // round 4: it disarms, and it says it is NOT proof of work — a passive
   // reading may not clear the loop breaker (the full classification table for
   // every noteRecovered caller is pinned in test-auto-resume-loop §5)
@@ -351,6 +357,19 @@ const T0 = Date.now();   // the module refuses waits >26h out, so the clock must
   ok('no usage data ⇒ usable null (unknown, never guessed dead)', quotaVerdict(null, nowS).usable === null);
   ok('a rolled-over window reads FULL again once its stated reset is a minute behind (reset-passed rule intact, with the landing grace)', quotaVerdict({ fiveHour: { utilization: 1, resetsAt: nowS - 61 } }, nowS).usable === true);
   ok('…but 30 s after the stated instant it is STILL blocked — the vendor lands a stated reset late (owner 2026-09-18: 稍微等一分钟)', quotaVerdict({ fiveHour: { utilization: 1, resetsAt: nowS - 30 } }, nowS).usable === false && quotaVerdict({ fiveHour: { utilization: 1, resetsAt: nowS - 30 } }, nowS).blockedUntil === (nowS + 30) * 1000);
+  // THE EXACT SECOND (lane pool-silent-members R4, inc-mvsjhna7 13:01:00): a timed fire is armed for reset + grace, so
+  // that second must have ONE answer. 90c995a3 asked `reset + grace < now` (landed) and `reset + grace > now` (to come):
+  // at equality the landing member read «5h 1% < 10%» with NO future reset — blockedUntil 0, dropped from the pool's min.
+  {
+    const apa = require(path.join(REPO, 'src/account-pool-auto.js'));
+    const R = nowS - 60; // the stated reset, exactly one grace ago
+    const at = quotaVerdict({ fiveHour: { utilization: 0.99, resetsAt: R }, sevenDay: { utilization: 0.36, resetsAt: nowS + 3 * 86400 } }, nowS);
+    ok('EXACT SECOND: at reset + grace the window HAS landed — usable, and the reason says when it reset (never a null wait)', at.usable === true && at.blockedUntil === 0 && /5h 100% \(reset at \d\d:\d\d:\d\dZ\)/.test(at.reason), JSON.stringify(at));
+    ok('…one second earlier it is still blocked, its wait the very next second (the one inequality, both sides)', (() => { const v = quotaVerdict({ fiveHour: { utilization: 0.99, resetsAt: R + 1 } }, nowS); return v.usable === false && v.blockedUntil === (nowS + 1) * 1000; })());
+    ok('…a FRACTIONAL clock answers the second exactly as the floored one (the switch and the verdict cannot disagree)', [0, 0.3, 0.999].every((f) => quotaVerdict({ fiveHour: { utilization: 0.99, resetsAt: R } }, nowS + f).usable === true && quotaVerdict({ fiveHour: { utilization: 0.99, resetsAt: R + 1 } }, nowS + f).usable === false));
+    ok('…bucketRemaining and quotaVerdict read ONE helper: resetLanded(R, nowS) ⇔ 100 % free', typeof apa.resetLanded === 'function' && apa.resetLanded(R, nowS) === true && apa.resetLanded(R + 1, nowS) === false && apa.resetLanded(R, nowS + 0.5) === true && apa.bucketRemaining({ utilization: 0.99, resetsAt: R }, nowS) === 100 && apa.nowSecOf(nowS * 1000 + 999) === nowS);
+    ok('…NO dead bucket ever carries a reset that has landed (a dead bucket is either waiting or unknowable)', (() => { for (let d = -120; d <= 120; d++) { const v = quotaVerdict({ fiveHour: { utilization: 0.99, resetsAt: nowS + d } }, nowS); if (v.usable === false && v.blockedUntil === 0) return false; if (v.usable === false && v.blockedUntil <= nowS * 1000) return false; } return true; })());
+  }
 
   // engine wiring: the machine owns every transition (2.355.0 wiring law)
   const eng = read('src/server/usage-pool-engine.js');

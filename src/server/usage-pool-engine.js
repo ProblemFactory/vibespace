@@ -64,7 +64,7 @@ function create({ app, rootDir, USAGE_CACHE_DIR, activeSessions, wss, WS_OPEN, g
 // conversations (headless instances degrade to hot behavior until a client
 // appears — the switch itself never waits on a browser).
 const { orderProviderFields } = require('../sealed-orders.js'); // (lane pool-provider-latents, q-055 M1) the sealed order's provider fields — the device obeys the same file
-const { decidePoolSwitch, decidePinnedPlacement, soonestUsableMember, rankPoolMembers, poolBlockedNotice, poolCreditsNotice, conversationDisplayName, bucketRemaining, warmCache, crossProviderMode, providerLabel, providerKey, sameProvider, conversationInTurn, projectCacheAhead, projectionCrossing, PROJECTION_LEAD_SEC, SWITCH_THRESHOLD_PCT: POOL_HARD_PCT } = require('../account-pool-auto.js');
+const { decidePoolSwitch, decidePinnedPlacement, soonestUsableMember, rankPoolMembers, poolBlockedNotice, poolBlockedDetail, poolNoticeCut, poolCreditsNotice, conversationDisplayName, bucketRemaining, warmCache, nowSecOf, crossProviderMode, providerLabel, providerKey, sameProvider, conversationInTurn, projectCacheAhead, projectionCrossing, PROJECTION_LEAD_SEC, SWITCH_THRESHOLD_PCT: POOL_HARD_PCT } = require('../account-pool-auto.js');
 const arSignal = require('../auto-resume-signal.js'); // PURE: the limit LANE a snapshot is about + the fresh-window edge
 const resetCredit = require('../reset-credit.js'); // PURE: is a stored reset credit worth spending at THIS wall, at THIS rung (design-reset-credits §4)
 const codexResetHelper = require('../codex-reset-helper.js'); // lane reset-path: ONE bounded app-server child carries a PERSON's press when no conversation can
@@ -385,7 +385,7 @@ async function pushSealedOrders(poolId) {
   const ranked = rankPoolMembers({
     members,
     readCache: (id) => { try { return JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, id + '.json'), 'utf-8')); } catch { return null; } },
-    nowSec: Date.now() / 1000,
+    nowSec: nowSecOf(),
     // A sealed order is executed by the DEVICE, possibly hours after we push
     // it and while this server is unreachable — a login that dies in the
     // meantime would be an unreachable fallback. Members near/past their
@@ -472,7 +472,9 @@ setTimeout(() => {
     }
   } catch { }
 }, 15000);
-setInterval(() => { try { sweepUsageAnchors(); } catch {} }, 60000);
+// lane pool-silent-members R1: a claude CLI the oat fixture never measured is never silent — ONE For-you item per version
+const cliUnmeasuredNotice = require('./cli-unmeasured-notice.js').create({ accounts: () => accounts, todos: () => getUserTodos(), file: path.join(rootDir, 'data', 'cli-unmeasured-notice.json') }); // its OWN memory per version (acceptance r2)
+setInterval(() => { try { sweepUsageAnchors(); } catch {} try { cliUnmeasuredNotice.tick(); } catch {} }, 60000);
 setTimeout(() => { try { sweepUsageAnchors(); } catch {} }, 20000);
 
 // ── Plan C (B-a612, 2.315.0): per-session pool placement ────────────────────
@@ -642,7 +644,7 @@ function poolChooserForModel(poolId, { model, pin = null, hinted = false } = {})
     // that cannot serve starts it where the automatic rules would (the pin kept on the session)
     if (pin) {
       const pm = healthyPoolMembers(poolId);
-      const dp = decidePinnedPlacement({ explicit: true, pin, currentId: cur, members: pm, ...providerIn(a, null, model), readCache, nowSec: Date.now() / 1000, hot: true, readLogin: poolReadLogin(), membership: poolMembershipOf(poolId), priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(pm), creditsIds: creditsMemberIds(pm) });
+      const dp = decidePinnedPlacement({ explicit: true, pin, currentId: cur, members: pm, ...providerIn(a, null, model), readCache, nowSec: nowSecOf(), hot: true, readLogin: poolReadLogin(), membership: poolMembershipOf(poolId), priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(pm), creditsIds: creditsMemberIds(pm) });
       // (q-053 P0b) a pin of ANOTHER provider is never where a spawn starts: its model is the request's, the pin's provider
       // would serve it under another id — it applies through the conversation's cold switch (the pin kept), so the spawn
       // is placed by the automatic rules below
@@ -670,7 +672,7 @@ function poolChooserForModel(poolId, { model, pin = null, hinted = false } = {})
     // a Fable conversation hinted as Opus would be placed on the member whose Fable is spent.
     const { decidePoolSwitch } = require('../account-pool-auto.js');
     const mem = healthyPoolMembers(poolId);
-    const d = decidePoolSwitch({ currentId: cur, members: mem, readCache, nowSec: Date.now() / 1000, ...providerIn(a, null, model), hot: true, placing: !hinted, readLogin: poolReadLogin(), membership, priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(mem), creditsIds: creditsMemberIds(mem) });
+    const d = decidePoolSwitch({ currentId: cur, members: mem, readCache, nowSec: nowSecOf(), ...providerIn(a, null, model), hot: true, placing: !hinted, readLogin: poolReadLogin(), membership, priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(mem), creditsIds: creditsMemberIds(mem) });
     // (nobody can serve a conversation started here AND the default names a removed member — a boot before the
     // first sweep: the engine's fallback, a member the pool lists, verify r2)
     // …and 全B: the verdict's own parking member when nobody can serve (`holdTo`) — a new conversation meets that
@@ -1977,8 +1979,10 @@ function wallCount(key, now = Date.now()) {
 
 // The account system's usability answer for a scope (pool id OR cache key),
 // model-projected. Pool = any member usable / min over members' blockedUntil.
-function quotaVerdictFor(scope, { model, session = null } = {}) {
-  const nowSec = Math.floor(Date.now() / 1000);
+function quotaVerdictFor(scope, { model, session = null, now = Date.now(), only = null } = {}) {
+  // ONE CLOCK (lane pool-silent-members R4): the pre-fire gate hands the instant its switch judged, so the switch
+  // and this verdict can never answer the reset second differently (nowSecOf = the pool's one floored clock)
+  const nowSec = nowSecOf(now);
   // THE PROJECTION FAMILY, not the stated model (2026-09-13 r2): with no
   // session this is exactly `familyOfModel(model)` — byte-identical for every
   // session-less caller — and with one it drops the projection while a
@@ -2020,7 +2024,16 @@ function quotaVerdictFor(scope, { model, session = null } = {}) {
     // or the user re-adding it, does), exactly like a dead login.
     const heldId = session ? heldPoolMemberFor(session, scope) : null;
     const heldRec = heldId ? (() => { try { return accounts.get(heldId) || null; } catch { return null; } })() : null;
-    const members = heldId ? (heldRec ? [{ id: heldId, name: heldRec.name || heldId }] : []) : (accounts.poolMembers(scope) || []);
+    const listed = heldId ? (heldRec ? [{ id: heldId, name: heldRec.name || heldId }] : []) : (accounts.poolMembers(scope) || []);
+    // `only`: ONE member's verdict on the same reading (the pre-fire gate's last check — acceptance r3)
+    const members = only ? listed.filter((m) => m.id === only) : listed;
+    // ONE CANDIDATE PREDICATE (acceptance r3, reproduced: repro/accept-r2/engine-gate-authfail.mjs): a member the vendor
+    // refused within 10 min is no candidate of the switch (switchCandidates) — so it is none of this verdict either, with
+    // the same escape (every member marked ⇒ the marks are wrong more likely than the pool is dead): b552c972 answered
+    // «usable via m-ok» while the switch could not move there, and the continue went into the spent member's link
+    let all = []; try { all = accounts.poolMembers(scope) || []; } catch { all = []; }
+    const marked = new Set(all.filter((m) => memberAuthFailed(m.id)).map((m) => m.id));
+    const authOut = marked.size && marked.size < all.length ? marked : new Set();
     // The member whose credentials the CLI reads is judged FIRST, so `via`
     // names the account the session is actually billing whenever that one is
     // usable; the verdict carries on/linked/slotOk for the
@@ -2051,6 +2064,7 @@ function quotaVerdictFor(scope, { model, session = null } = {}) {
       if (walled.has(m.id) && v.usable !== false) {
         return { id: m.id, name: m.name || m.id, v: { ...v, usable: false, reason: `rejected this conversation (${v.reason})` } };
       }
+      if (authOut.has(m.id)) { const mk = _memberAuthFail.get(m.id); const ago = mk ? Math.max(0, Math.floor((Date.now() - mk.at) / 60000)) : 0; return { id: m.id, name: m.name || m.id, v: { ...v, usable: false, blockedUntil: mk ? mk.at + AUTH_FAIL_TTL_MS : 0, reason: `refused by the vendor ${ago} min ago — retried after 10 min` } }; } // acceptance r3: the switch's own exclusion
       if (heldId && m.id === heldId && !heldListed) return { id: m.id, name: m.name || m.id, v: { ...v, usable: false, blockedUntil: 0, reason: `no longer a logged-in member of this pool (narrowed out, or its login file is gone) — it waits for its cold restart` } };
       return { id: m.id, name: m.name || m.id, v };
     });
@@ -3246,31 +3260,77 @@ function scheduleWallProbe(session, scope, model, attempt) {
 
 /** The pre-fire gate (auto-resume beforeFire): probe fresh quota, re-check
  *  the verdict — false vetoes the spend and re-arms to the new blockedUntil. */
-const _preFireProbeAt = new Map(); // probe target → last pre-fire probe (60s floor)
+// ONE PROBE PER TARGET, SHARED (acceptance r3, reproduced: repro/accept-r2/skeptic-gate-two-trace.mjs): b552c972 stamped
+// the 60 s floor BEFORE its await, so a sibling gate for the same target — re-entering through fireNow inside the first
+// gate's own synchronous switch, or arriving while the probe was in flight — skipped the probe AND the re-decision and
+// judged the pre-probe cache: of N conversations armed for one reset, N−1 continued into the member the probe had just
+// named spent. The in-flight probe is a PROMISE every gate for that target awaits; the floor still spawns at most one
+// panel per target per minute, and every gate re-decides on the reading after it.
+const _preFireProbe = new Map(); // probe target → {at, pending, done} — the last pre-fire probe (60s floor) and its promise
+function preFireProbe(target, session) {
+  const p = _preFireProbe.get(target);
+  if (p && (p.pending || Date.now() - p.at <= 60e3)) return p.done || Promise.resolve();
+  const rec = { at: Date.now(), pending: true, done: null };
+  _preFireProbe.set(target, rec);
+  let run = null;
+  try { run = Promise.resolve(probeQuotaForKey(target, { session })); } catch { run = Promise.resolve(); } // caps-routed (S4): the identity's harness picks the rung
+  rec.done = run.catch(() => { }).finally(() => { rec.pending = false; });
+  return rec.done;
+}
 async function beforeAutoResumeFire(id, session) {
   try {
+    // ONE CLOCK (lane pool-silent-members R4, inc-mvsjhna7 13:01:00): the switch and the verdict below judge the SAME
+    // instant — the switch read a fractional clock and the verdict a floored one, so at reset + grace the switch moved
+    // every conversation onto the member whose window had just landed while the verdict dropped that member
+    const now = Date.now();
     const model = sessionModelFor(session);
     const scope = _wallScope(session);
     const a = accounts.get(scope);
-    const target = a && a.type === 'pooled' ? sessionBillingMember(session, scope).id : scope; // the member whose credentials the CLI reads (2026-09-07: the link, slot-validated)
+    // THE MEMBER IT IS MOVING TO (R4): the pool decision runs FIRST, so the probe reads the member this continue will
+    // bill — at 13:01:00 the probe target was read BEFORE the switch, so it probed the member being LEFT and judged
+    // the destination on its pre-reset cache
+    maybePoolAutoSwitch(session, { now });
+    const target = a && a.type === 'pooled' ? sessionBillingMember(session, scope).id : scope; // the member whose credentials the CLI reads (2026-09-07: the link, slot-validated) — AFTER the switch
     // The immediate (pool-switch) path runs this gate too since 2026-09-07,
     // so the probe needs a floor: the wall demotion wrote this target's cache
     // microseconds ago, and a `claude -p /usage` spawn per hot switch would be
     // a new cost on a path that fires in bursts. The RE-VERDICT below always
     // runs — only the spawn is throttled.
-    const probedAt = target ? _preFireProbeAt.get(target) || 0 : 0;
-    if (target && Date.now() - probedAt > 60e3) {
-      _preFireProbeAt.set(target, Date.now());
-      try { await probeQuotaForKey(target, { session }); } catch { } // caps-routed (S4): the identity's harness picks the rung
+    if (target) await preFireProbe(target, session);
+    // THE FRESH READING DECIDES — IN EVERY GATE (acceptance r2 + r3, reproduced: repro/r2/engine-r2.mjs gate,
+    // repro/accept-r2/skeptic-gate-two-trace.mjs): the switch above judged the member it moved to on its CACHE; when the
+    // reading after the probe (this gate's own, or the one it awaited) says that member cannot serve after all, the pool
+    // decision is re-made ONCE on it, at the clock after the probe, and the verdict reads the same instant — on 9d53db09
+    // the pool's verdict ("another member is usable") let the continue go into the spent member's link
+    const pooled = !!a && a.type === 'pooled';
+    let at = now;
+    if (pooled) {
+      at = Date.now();
+      const tv = quotaVerdictFor(target, { model, session, now: at });
+      if (tv && tv.usable !== true) maybePoolAutoSwitch(session, { now: at, force: true });
     }
-    maybePoolAutoSwitch(session);
-    const v = quotaVerdictFor(scope, { model, session });
+    const v = quotaVerdictFor(scope, { model, session, now: at });
     // a HELD process (r4) is continued only on a POSITIVE answer about the login
     // it holds: its verdict is that one member's, and "cannot tell" is not a go
     if (v.usable === false || (v.held && v.usable !== true)) {
+      // HELD AND SAID (acceptance r3): no member can serve on the reading after the probe — the journal names the wall
+      if (pooled) console.log(`[auto-resume] ${id}: continue held at the fire — no member of ${a.name || scope} can serve on the reading after the probe (${String(v.reason || '').slice(0, 400)})`);
       if (v.blockedUntil > Date.now()) getAutoResume()?.armIfEnabled?.(id, session, v.blockedUntil, 're-armed at fire: ' + v.reason, { cause: armCauseFor(v, null, null, 0) });
       else scheduleWallProbe(session, scope, model, 1);
       return false;
+    }
+    // THE FIRE'S LAST CHECK IS THE LINK'S MEMBER (acceptance r3): the pool's «usable via X» is no licence to continue
+    // into the member the conversation's link still names when the switch could not move it (a dwell, a pin, an engine
+    // mark) — that member, judged on the same reading at the same instant, must not be spent; else the continue is held
+    // and said, and the wall probe re-asks
+    if (pooled && !v.held) {
+      const on = sessionBillingMember(session, scope).id;
+      const lv = on && on !== v.viaId ? quotaVerdictFor(scope, { model, session, now: at, only: on }) : null;
+      if (lv && lv.usable === false) {
+        console.log(`[auto-resume] ${id}: continue held at the fire — ${nameOf(on)}, the member its link names, cannot serve (${String(lv.reason || '').slice(0, 300)}); the pool's verdict names ${v.via || '?'}, and the link did not move there`);
+        scheduleWallProbe(session, scope, model, 1);
+        return false;
+      }
     }
     return true;
   } catch (e) {
@@ -3775,7 +3835,7 @@ function resetReadingEndsHold(identityKey, session, snap) {
   const [, p] = e;
   if ((Number(snap && snap.fetchedAt) || Date.now()) < p.at) return null;
   if (session && session._webuiId === p.sid) return e;
-  try { if (quotaVerdict(snap, Math.floor(Date.now() / 1000)).usable === true) return e; } catch { }
+  try { if (quotaVerdict(snap, nowSecOf()).usable === true) return e; } catch { }
   console.log(`[reset-credit] ${nameOf(identityKey)}: a reading from ${session ? session._webuiId : '?'} still shows the wall — not the post-reset reading; the hold stands`);
   return null;
 }
@@ -3917,7 +3977,7 @@ function poolAlternativeFor(session, now = Date.now()) {
     // and spend a credit the switch rung did not need.
     const rc = poolReadCache(poolId);
     const readCache = (id) => (id === currentId ? { fetchedAt: now, sevenDay: { utilization: 1, resetsAt: 0 } } : rc(id));
-    const d = decidePoolSwitch({ currentId, members, readCache, nowSec: now / 1000, proactive: false, hot, pessimism: darkTaintedAccounts(), exclude: [...sessionWalledMembers(sid, now)], ...providerIn(a, session), readLogin: poolReadLogin(), priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds: creditsMemberIds(members), explain: true });
+    const d = decidePoolSwitch({ currentId, members, readCache, nowSec: nowSecOf(now), proactive: false, hot, pessimism: darkTaintedAccounts(), exclude: [...sessionWalledMembers(sid, now)], ...providerIn(a, session), readLogin: poolReadLogin(), priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds: creditsMemberIds(members), explain: true });
     return !!(d && d.to && !d.toCredits);
   } catch { return null; }
 }
@@ -4871,7 +4931,7 @@ function handleResetCreditResult(session, payload) {
     try {
       const c = tKey ? readRawUsageCache(tKey) : null;
       const triedAt = triedAtOf();
-      if (c && triedAt && (Number(c.fetchedAt) || 0) > triedAt && quotaVerdict(c, Math.floor(Date.now() / 1000)).usable === true) superseded = 'a reading newer than the attempt shows the limit open';
+      if (c && triedAt && (Number(c.fetchedAt) || 0) > triedAt && quotaVerdict(c, nowSecOf()).usable === true) superseded = 'a reading newer than the attempt shows the limit open';
     } catch { }
   }
   if (superseded) {
@@ -5065,7 +5125,7 @@ function recordCodexQuotaSignal(session, payload, rec = null, { asOf = null } = 
       // answers the wall a card offered a credit for
       // — never while a credit on it is IN FLIGHT: the current wrapper re-reads BEFORE it answers, so that
       // reading is the credit's own post-reset reading, and the answer resolves the card as USED
-      try { if (!resetCreditInFlight(resetCreditTryFor(w.key))) resolveResetCreditCards(w.key, { kind: 'reading', at: Number(w.snap.fetchedAt) || Date.now(), usable: quotaVerdict(w.snap, Math.floor(Date.now() / 1000)).usable === true }); } catch { }
+      try { if (!resetCreditInFlight(resetCreditTryFor(w.key))) resolveResetCreditCards(w.key, { kind: 'reading', at: Number(w.snap.fetchedAt) || Date.now(), usable: quotaVerdict(w.snap, nowSecOf()).usable === true }); } catch { }
       // the post-reset reading a `reset` answer was waiting on (r3): the pool
       // re-decides on it now — whatever it says
       { const e = resetReadingEndsHold(w.key, session, w.snap); if (e) releaseResetHold(e[0], 'its post-reset reading landed'); }
@@ -5294,7 +5354,7 @@ function markLimitBannerNow(session, text) {
   } catch (e) { console.warn('[usage] banner mark failed:', e.message); }
 }
 
-function maybePoolAutoSwitch(session, { stop = false } = {}) {
+function maybePoolAutoSwitch(session, { stop = false, now = null, force: forced = false } = {}) {
   try {
     if (!session._accountId) return;
     // THE FIRST STOP (2026-09-22, warm-soft-defer): a conversation whose SOFT
@@ -5306,9 +5366,10 @@ function maybePoolAutoSwitch(session, { stop = false } = {}) {
     // (verifier LOW-2): a turn the gate never let the pool evaluate while it ran
     // has recorded nothing, yet owes the same move — the evaluation is cheap,
     // and the 180 s dwell belt is NOT forced, exactly as for the new-member wake.
-    const force = stop
-      && !conversationInTurn({ isStreaming: session._isStreaming, turnState: session._turnState });
-    maybePoolAutoSwitchForPool(session._accountId, force ? { force: true } : undefined);
+    // …and the pre-fire gate's re-decision on the fresh probe (acceptance r2): its first decision just closed the gate
+    const force = forced || (stop
+      && !conversationInTurn({ isStreaming: session._isStreaming, turnState: session._turnState }));
+    maybePoolAutoSwitchForPool(session._accountId, force || now != null ? { ...(force ? { force: true } : {}), ...(now != null ? { now } : {}) } : undefined);
   } catch { }
 }
 /** The conversation's turn state went IDLE (claude `system/session_state_changed`,
@@ -5764,7 +5825,8 @@ function armWorkflowUsageWatcher(session, sessionId, runId) {
 setInterval(async () => {
   // THE STALE-LINK SWEEP first, for EVERY pool (2026-09-28): a member the pool no
   // longer lists stops serving on this tick whatever the placement mode
-  try { sweepNonMemberLinks(); } catch { }
+  const rosters = new Map(); // ONE roster per pool for this tick: the sweep and the evaluation share it (acceptance r3)
+  try { sweepNonMemberLinks({ rosters }); } catch { }
   try {
     const pools = (accounts.list().accounts || []).filter((a) => a.type === 'pooled' && a.auto);
     if (!pools.length) return;
@@ -5773,7 +5835,7 @@ setInterval(async () => {
     // an odometer read mid-walk would decide on a ledger missing its newest
     // bytes (or re-decide on the one a scan in flight is about to commit)
     try { usageHistory.scan(); await usageHistory.scanSettled(); } catch { }
-    for (const a of pools) { try { maybePoolAutoSwitchForPool(a.id); } catch { } }
+    for (const a of pools) { try { maybePoolAutoSwitchForPool(a.id, { rosters }); } catch { } }
   } catch { }
   // 30s (was 60s): the 2026-08-09 #2 exhaustion burned HALF the Fable bucket
   // between two ticks (12 concurrent maxed-context agents ≈ $100+/min) — a
@@ -5927,6 +5989,94 @@ function switchCandidates(poolId) {
   const ok = all.filter((m) => !memberAuthFailed(m.id));
   return ok.length ? ok : all; // the 2.335.0 auth-fail escape, unchanged
 }
+/** THE POOL'S ROSTER FOR ONE EVALUATION (lane pool-silent-members, acceptance r2): accounts.poolRoster reads every
+ *  member's credential files synchronously on the main thread, so it is read ONCE per evaluation however many
+ *  conversations the evaluation decides (the loop law — prod-stall-202: ONE login read per member per tick; 9d53db09 read
+ *  it once per BLOCKED conversation, 61 rosters for 60), and only when a decision is blocked (the thunk is lazy). Each
+ *  row carries the ENGINE's own marks the store cannot know — refused by the vendor (the 10-min auth mark) or a lapsed
+ *  subscription — so the verdict names the true wall, never «re-login» for a member whose login is fine. → () => rows */
+/** THE FULL ROSTER BEHIND A BLOCKED NOTICE (acceptance r2): the toast's text is bounded (the first 3 of each bucket and
+ *  «and N more» — account-pool-auto NOTICE_NAMES_MAX), so every member's line goes to the journal beside it — once per
+ *  notice key (serverNotice's own key: per pool, reason and hour), never per evaluation */
+const _poolDetailSaid = new Set();
+function journalPoolDetail(key, poolName, d, currentName, now) {
+  try {
+    if (_poolDetailSaid.has(key)) return;
+    if (_poolDetailSaid.size > 500) _poolDetailSaid.clear();
+    _poolDetailSaid.add(key);
+    for (const line of poolBlockedDetail(d, { currentName, when: (ms) => OF.when(ms, { now }) })) console.log(`[pool] ${poolName} · ${line}`);
+  } catch { }
+}
+// …AND ONE PER POOL TICK (acceptance r3, measured: repro/accept-r2/engine-gate-authfail.mjs removed): the 30 s tick's
+// stale-link sweep decides every conversation on a narrowed-out member through removalVerdict, and each call read its own
+// roster — 60 conversations, 60 rosters, 1 561 sync fs calls in one turn of the main thread. A tick hands one `rosters`
+// map to the sweep AND the evaluation (the same memo, keyed by the tick); a call outside a tick still reads one roster
+// per call (memberRemoved shares its own across its conversations).
+// THE OWNER'S DOOR FOR THE ROSTER DETAIL IS FOR YOU, NOT THE JOURNAL (acceptance r3, claim 2's judgment): the toast and
+// its history carry the bounded text only, so the blocked pool files ONE For-you notice per blocked EPISODE — a short
+// headline, and poolBlockedDetail in its detail (every member's wall and remedy, one line each, the current one first);
+// patched in place while the episode lasts (one save + one broadcast, only when the words changed), never re-filed in it
+// once the owner resolved it, closed by the agent when the pool can serve again, and kept alive by an expiry the next
+// blocked evaluation pushes on (a pool no evaluation reaches — not automatic — lets it lapse within two hours)
+const POOL_BLOCKED_TODO_TTL_MS = 2 * 3600e3;
+const POOL_BLOCKED_DETAIL_LINES = 120; // a bigger roster is cut with its count named (the journal keeps every line)
+const _poolBlockedTodo = new Map(); // poolId → the For-you item id of THIS blocked episode
+function poolBlockedTodo(poolId, poolName, d, currentName, now) {
+  let todos = null;
+  try { todos = getUserTodos(); } catch { todos = null; }
+  if (!todos || typeof todos.add !== 'function') return null;
+  try {
+    const all = poolBlockedDetail(d, { currentName, when: (ms) => OF.when(ms, { now }) });
+    const lines = all.length > POOL_BLOCKED_DETAIL_LINES ? [...all.slice(0, POOL_BLOCKED_DETAIL_LINES), `… and ${all.length - POOL_BLOCKED_DETAIL_LINES} more (the journal has every line)`] : all;
+    const text = `Pool "${poolName}": no member can serve it — ${all.length} account${all.length === 1 ? '' : 's'}, each with what holds it back and its remedy below`;
+    const detail = lines.join('\n');
+    const known = _poolBlockedTodo.get(poolId);
+    let it = null;
+    if (known) { try { it = todos.get(known); } catch { it = null; } }
+    if (known && (!it || it.status !== 'open')) return null; // this episode's item was resolved (the owner's word): said once
+    if (!it && typeof todos.forSession === 'function') { try { it = (todos.forSession([`pool:blocked:${poolId}`]) || [])[0] || null; } catch { it = null; } } // (after a restart)
+    if (!it && !poolNoticeCut(d)) return null; // the toast named every member: it IS the whole copy (a small pool files nothing new)
+    if (it) {
+      _poolBlockedTodo.set(poolId, it.id);
+      const until = now + POOL_BLOCKED_TODO_TTL_MS;
+      if (typeof todos.reshapeItems === 'function') todos.reshapeItems((x) => {
+        if (x.id !== it.id || x.status !== 'open' || x.clearedAt) return false;
+        let changed = false;
+        if (x.text !== text || x.detail !== detail) { x.text = text; x.detail = detail; delete x.judged; changed = true; }
+        if (!x.expiresAt || x.expiresAt < now + POOL_BLOCKED_TODO_TTL_MS / 2) { x.expiresAt = until; changed = true; }
+        return changed;
+      });
+      return it.id;
+    }
+    const item = todos.add(`pool:blocked:${poolId}`, { origin: 'pool', kind: 'notice', urgency: 'normal', by: 'agent', sessionName: 'Manage Agents', text, detail, expiresAt: now + POOL_BLOCKED_TODO_TTL_MS });
+    _poolBlockedTodo.set(poolId, (item && item.id) || null);
+    return (item && item.id) || null;
+  } catch (e) { console.warn('[pool] blocked: could not file the For-you item:', e.message); return null; }
+}
+/** the pool can serve again: this episode's item (still open) is over — closed by the agent, and the next block is a new one */
+function poolBlockedTodoEnd(poolId) {
+  if (!_poolBlockedTodo.has(poolId)) return;
+  const id = _poolBlockedTodo.get(poolId);
+  _poolBlockedTodo.delete(poolId);
+  try { const todos = getUserTodos(); const it = id && todos && typeof todos.get === 'function' ? todos.get(id) : null; if (it && it.status === 'open' && typeof todos.setStatus === 'function') todos.setStatus(id, 'done', 'agent'); } catch { }
+}
+function evaluationRoster(poolId, rosters = null) {
+  if (rosters instanceof Map) { let t = rosters.get(poolId); if (!t) { t = evaluationRoster(poolId); rosters.set(poolId, t); } return t; }
+  let rows = null;
+  return () => {
+    if (rows) return rows;
+    let list = [];
+    try { list = accounts.poolRoster(poolId) || []; } catch { list = []; }
+    rows = list.map((r) => {
+      if (!r || !r.placeable) return r;
+      const m = _memberAuthFail.get(r.id);
+      if (m && memberAuthFailed(r.id)) return { ...r, why: { code: 'auth-failed', at: m.at } };
+      try { if (memberServeLapsed(r.id)) return { ...r, why: { code: 'lapsed' } }; } catch { }
+      return r;
+    });
+    return rows;
+  };
+}
 
 // A running session's CLI reported an AUTH-class API failure (401×2+/403/ban/
 // credit message). Quota decisions can't see this — the failed account often
@@ -5991,7 +6141,7 @@ function notePoolAuthFailure(session, sid, info = {}) {
         `Pool "${a.name}": account ${memberName} ${loginDead ? why : `is failing authentication (${why})`} and no other member can take over — re-login or replace it in Manage Agents.`, { level: 'warn' });
       return;
     }
-    const ranked = rankPoolMembers({ members: alive, readCache: poolReadCache(poolId), nowSec: now / 1000, readLogin: poolReadLogin(), creditsIds: creditsMemberIds(alive), priority: poolPriorityOf(a), providerOf: poolProviderOf(a), fromProvider: poolProviderOf(a)(memberId) });
+    const ranked = rankPoolMembers({ members: alive, readCache: poolReadCache(poolId), nowSec: nowSecOf(now), readLogin: poolReadLogin(), creditsIds: creditsMemberIds(alive), priority: poolPriorityOf(a), providerOf: poolProviderOf(a), fromProvider: poolProviderOf(a)(memberId) });
     const to = (ranked[0] && ranked[0].id) || alive[0].id;
     const toName = accounts.get(to)?.name || to;
     const hasOwnLink = (() => { try { fs.lstatSync(accounts.sessionPoolLinkPath(poolId, sid)); return true; } catch { return false; } })();
@@ -6213,7 +6363,7 @@ function crossMoveNow(poolId, sid, memberId, now = Date.now()) {
   const fam = projectionFamilyFor(s2, sessionModelFor(s2));
   const readCache = (id) => projectCacheForFamily(base(id), fam);
   const members = switchCandidates(poolId);
-  const d = decidePoolSwitch({ ...providerIn(a, s2), crossProvider: 'allow', currentId: curFor, members, readCache, nowSec: now / 1000, proactive: false, hot, pessimism: darkTaintedAccounts(), exclude: [...sessionWalledMembers(sid, now)], readLogin: poolReadLogin(), membership: poolMembershipOf(poolId), priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds: creditsMemberIds(members), explain: true });
+  const d = decidePoolSwitch({ ...providerIn(a, s2), crossProvider: 'allow', currentId: curFor, members, readCache, nowSec: nowSecOf(now), proactive: false, hot, pessimism: darkTaintedAccounts(), exclude: [...sessionWalledMembers(sid, now)], readLogin: poolReadLogin(), membership: poolMembershipOf(poolId), priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds: creditsMemberIds(members), explain: true });
   if (!d || !d.to) return { moved: false, why: (d && d.reason) || 'hold' };
   if (!d.cross || d.to !== memberId) return { moved: false, why: d.cross ? 'another-member' : 'own-provider-again' };
   return applyCrossMove(poolId, sid, s2, curFor, d, now);
@@ -6275,7 +6425,7 @@ function placeUnplaced(poolId, sid, s2, unp, { now = Date.now(), hot = false, me
   const base = poolReadCache(poolId);
   const fam = projectionFamilyFor(s2, sessionModelFor(s2));
   const readCache = (id) => projectCacheForFamily(base(id), fam);
-  const d = decidePoolSwitch({ currentId: unp.member, members: mem, readCache, nowSec: now / 1000, proactive: false, hot, ...providerIn(a, s2), pessimism: darkTaintedAccounts(), exclude: [...sessionWalledMembers(sid, now)], readLogin: readLogin || poolReadLogin(), membership: membership || poolMembershipOf(poolId), priority: priority || poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(mem), creditsIds: creditsIds || creditsMemberIds(mem), explain: true });
+  const d = decidePoolSwitch({ currentId: unp.member, members: mem, readCache, nowSec: nowSecOf(now), proactive: false, hot, ...providerIn(a, s2), pessimism: darkTaintedAccounts(), exclude: [...sessionWalledMembers(sid, now)], readLogin: readLogin || poolReadLogin(), membership: membership || poolMembershipOf(poolId), priority: priority || poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(mem), creditsIds: creditsIds || creditsMemberIds(mem), explain: true });
   if (d && d.to && d.cross) { const r = applyCrossMove(poolId, sid, s2, unp.member, d, now); return { placed: !!r.moved, why: r.why }; } // the pool's 'allow': cold, with its line
   if (d && d.to) {
     try { accounts.ensureSessionPoolLink(poolId, sid, d.to, { why: 'removed-from-pool' }); } catch (e) { console.warn(`[pool] unplaced ${poolId}/${sid}: re-place failed:`, e.message); return { placed: false, why: 'repoint-failed' }; }
@@ -6404,7 +6554,7 @@ function setConversationPin(sid, memberId, { by = 'user', now = Date.now() } = {
   const base = poolReadCache(poolId);
   const fam = projectionFamilyFor(s, sessionModelFor(s));
   const readCache = (id) => projectCacheForFamily(base(id), fam);
-  const d = decidePinnedPlacement({ explicit: true, pin: memberId, currentId: current, members, readCache, nowSec: now / 1000, proactive: false, hot: true, ...providerIn(a, s), pessimism: darkTaintedAccounts(), exclude: [...sessionWalledMembers(sid, now)], readLogin: poolReadLogin(), membership, priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds: creditsMemberIds(members) });
+  const d = decidePinnedPlacement({ explicit: true, pin: memberId, currentId: current, members, readCache, nowSec: nowSecOf(now), proactive: false, hot: true, ...providerIn(a, s), pessimism: darkTaintedAccounts(), exclude: [...sessionWalledMembers(sid, now)], readLogin: poolReadLogin(), membership, priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds: creditsMemberIds(members) });
   if (d && d.reason === 'pin' && d.to && d.cross) {
     // (q-053 P0b) the owner pinned a member of ANOTHER provider: the owner's own act (never silent) — a COLD move, the model
     // re-resolved, the line in the conversation (applyCrossMove); no client to restart it ⇒ it waits, the pin kept
@@ -6437,7 +6587,7 @@ function memberVerdictFor(poolId, memberId, session = null, sid = null, now = Da
   try {
     const base = poolReadCache(poolId);
     const fam = session ? projectionFamilyFor(session, sessionModelFor(session)) : null;
-    const d = decidePinnedPlacement({ explicit: true, pin: memberId, currentId: memberId, members: switchCandidates(poolId), readCache: (id) => projectCacheForFamily(base(id), fam), nowSec: now / 1000, proactive: false, hot: true, pessimism: darkTaintedAccounts(), exclude: sid ? [...sessionWalledMembers(sid, now)] : null, readLogin: poolReadLogin(), membership: poolMembershipOf(poolId) });
+    const d = decidePinnedPlacement({ explicit: true, pin: memberId, currentId: memberId, members: switchCandidates(poolId), readCache: (id) => projectCacheForFamily(base(id), fam), nowSec: nowSecOf(now), proactive: false, hot: true, pessimism: darkTaintedAccounts(), exclude: sid ? [...sessionWalledMembers(sid, now)] : null, readLogin: poolReadLogin(), membership: poolMembershipOf(poolId) });
     return d && d.reason === 'pin' ? { ok: true, why: null } : { ok: false, why: (d && d.pinWhy) || 'pin-member-unknown' };
   } catch { return { ok: false, why: 'pin-member-unknown' }; }
 }
@@ -6459,7 +6609,9 @@ function gatherPlan(poolId, memberId, now = Date.now()) {
     const whole = memberVerdictFor(poolId, memberId, null, null, now);
     out.ok = whole.ok;
     out.why = whole.why;
-    if (!out.ok) { try { const v = quotaVerdict(poolReadCache(poolId)(memberId), now / 1000, { tier: 'hard' }); if (v && v.usable === false && v.until && v.until.resetsAt) out.until = v.until.resetsAt * 1000; } catch { } }
+    // the vendor REFUSED it within 10 min (the switch's own exclusion): its bucket's words, not «not usable» (acceptance r3 F3)
+    if (!out.ok && memberAuthFailed(memberId)) { const mk = _memberAuthFail.get(memberId); out.why = 'auth-failed'; out.authFailedAt = mk ? mk.at : null; out.until = mk ? mk.at + AUTH_FAIL_TTL_MS : null; }
+    if (!out.ok) { try { const v = quotaVerdict(poolReadCache(poolId)(memberId), nowSecOf(now), { tier: 'hard' }); if (v && v.usable === false && v.until && v.until.resetsAt) out.until = v.until.resetsAt * 1000; } catch { } }
     for (const [sid, s] of activeSessions) {
       if (s._accountId !== poolId || s.host) continue;
       if (poolPinOf(s, poolId)) { out.skip.push({ sid, name: convName(s, sid), why: 'pinned' }); continue; }
@@ -6578,7 +6730,7 @@ function holdRemoved(poolId, sid, s, fromId, d, now = Date.now()) {
  *  on `fromId`, judged WITH the membership fact — the one decision the removal
  *  paths share (the store's default re-point asks it through updatePool's
  *  chooser, memberRemoved for every linked conversation). */
-function removalVerdict(poolId, fromId, session = null, sid = null, now = Date.now()) {
+function removalVerdict(poolId, fromId, session = null, sid = null, now = Date.now(), roster = null) {
   const a = accounts.get(poolId);
   // `hot` sets the bars the verdict NAMES; never `proactive` — a removed member is a
   // hard wall, so the move is the exhausted branch's and no voluntary tier runs here
@@ -6593,11 +6745,11 @@ function removalVerdict(poolId, fromId, session = null, sid = null, now = Date.n
   // provider is the per-session pass's cold move (or the owner's card) at its next tick
   const pinRec = session ? poolPinOf(session, poolId) : null;
   if (pinRec) {
-    const dp = decidePinnedPlacement({ explicit: true, pin: pinRec.memberId, currentId: fromId, members, readCache, nowSec: now / 1000, proactive: false, hot, ...providerIn(a, session), crossProvider: 'never', pessimism: darkTaintedAccounts(), exclude: sid ? [...sessionWalledMembers(sid, now)] : null, readLogin: poolReadLogin(), priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds: creditsMemberIds(members), membership: poolMembershipOf(poolId) });
+    const dp = decidePinnedPlacement({ explicit: true, pin: pinRec.memberId, currentId: fromId, members, readCache, nowSec: nowSecOf(now), proactive: false, hot, ...providerIn(a, session), crossProvider: 'never', pessimism: darkTaintedAccounts(), exclude: sid ? [...sessionWalledMembers(sid, now)] : null, readLogin: poolReadLogin(), priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds: creditsMemberIds(members), membership: poolMembershipOf(poolId) });
     if (dp && dp.reason === 'pin' && dp.to && !dp.cross) return dp; // (q-053 P0b) never a pin on another provider here: this re-point is hot
     if (dp && dp.reason === 'pin-exhausted') return { ...dp, reason: dp.autoReason };
   }
-  return decidePoolSwitch({ currentId: fromId, members, readCache, nowSec: now / 1000, proactive: false, hot, ...providerIn(a, session), crossProvider: 'never', pessimism: darkTaintedAccounts(), exclude: sid ? [...sessionWalledMembers(sid, now)] : null, readLogin: poolReadLogin(), priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds: creditsMemberIds(members), membership: poolMembershipOf(poolId), explain: true });
+  return decidePoolSwitch({ currentId: fromId, members, readCache, nowSec: nowSecOf(now), proactive: false, hot, ...providerIn(a, session), crossProvider: 'never', pessimism: darkTaintedAccounts(), exclude: sid ? [...sessionWalledMembers(sid, now)] : null, readLogin: poolReadLogin(), priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds: creditsMemberIds(members), membership: poolMembershipOf(poolId), explain: true, roster: roster || evaluationRoster(poolId) }); // R2: every listed member named when blocked (read only then, once — per sweep, r3)
 }
 /** Where the pool DEFAULT goes when the member it sits on left the pool — a
  *  DECISION (never the first member in the list). null = nobody can take it. */
@@ -6626,13 +6778,13 @@ function fallbackDefaultTarget(poolId, fromId = null) {
     const members = switchCandidates(poolId).filter((m) => m && m.id !== fromId && membership.includes(m.id));
     // (q-053 P0b) parking never lands on another provider: the default's own (a deleted member's = the pool's own)
     const pv = poolProviderOf(a), fromProv = pv(fromId || accounts.poolCurrent(poolId));
-    return soonestUsableMember({ members, readCache: poolReadCache(poolId), nowSec: Date.now() / 1000, priority: poolPriorityOf(a), creditsIds: creditsMemberIds(members), providerOf: pv, fromProvider: fromProv, readLogin: poolReadLogin() }); // a lapsed member last (verify r1 ④)
+    return soonestUsableMember({ members, readCache: poolReadCache(poolId), nowSec: nowSecOf(), priority: poolPriorityOf(a), creditsIds: creditsMemberIds(members), providerOf: pv, fromProvider: fromProv, readLogin: poolReadLogin() }); // a lapsed member last (verify r1 ④)
   } catch (e) { console.warn('[pool] default fallback failed:', e.message); return null; }
 }
 /** THE ONE ENTRY POINT: members `removedIds` no longer belong to `poolId` — move
  *  everything they still serve NOW. Returns what it did (the route answers it,
  *  the suites read it). */
-function memberRemoved(poolId, removedIds, { why = 'removed-from-pool' } = {}) {
+function memberRemoved(poolId, removedIds, { why = 'removed-from-pool', rosters = null } = {}) {
   const out = { pool: poolId, removed: [], moved: [], restarted: [], stayed: [], held: [], defaultMoved: null };
   try {
     const a = accounts.get(poolId);
@@ -6645,6 +6797,7 @@ function memberRemoved(poolId, removedIds, { why = 'removed-from-pool' } = {}) {
     out.removed = [...removed];
     const now = Date.now();
     const hot = !!a.hot && capsOf(a.backend).hotSwitch === 'verified';
+    const sweepRoster = evaluationRoster(poolId, rosters); // ONE roster for every conversation this removal decides (acceptance r3)
     // ① the DEFAULT — where new conversations start and every legacy follower bills
     const def = accounts.poolCurrent(poolId);
     if (def && removed.has(def)) {
@@ -6668,7 +6821,7 @@ function memberRemoved(poolId, removedIds, { why = 'removed-from-pool' } = {}) {
       if (now - (_removedSaidAt.get(k) || 0) < 10 * 60e3) return;
       _removedSaidAt.set(k, now);
       console.log(`[pool] removed-member evict ${poolId}/${sid}: ${on} stays — ${d ? `no member can take over (${d.reason})` : 'nothing to move it to yet'}`);
-      if (d) serverNotice(`pool-removed-stuck-${poolId}-${on}-${Math.floor(now / 3600e3)}`, poolBlockedNotice(d, { poolName: a.name, currentName: nameOf(on) }), { level: 'warn' });
+      if (d) { const nk = `pool-removed-stuck-${poolId}-${on}-${Math.floor(now / 3600e3)}`; serverNotice(nk, poolBlockedNotice(d, { poolName: a.name, currentName: nameOf(on), when: (ms) => OF.when(ms, { now }) }), { level: 'warn' }); journalPoolDetail(nk, a.name, d, nameOf(on), now); poolBlockedTodo(poolId, a.name, d, nameOf(on), now); }
     };
     for (const [sid, s] of activeSessions) {
       if (s._accountId !== poolId || s.host) continue;
@@ -6694,14 +6847,14 @@ function memberRemoved(poolId, removedIds, { why = 'removed-from-pool' } = {}) {
         // …and only a default that CAN SERVE it (verify r1): when nobody can take over, the default
         // sits on the store's first member — restarting the conversation onto that cut it off from
         // a member that serves, for one that cannot (a linked conversation in the same state stays)
-        const dv = removalVerdict(poolId, on, s, sid, now);
+        const dv = removalVerdict(poolId, on, s, sid, now, sweepRoster);
         if (dv && dv.reason === 'removed-hold') { const h = holdRemoved(poolId, sid, s, on, dv, now); if (h.held || h.deferred) out.held.push({ sid, on, to: h.to, deferred: h.deferred }); else out.stayed.push({ sid, on }); continue; } // 全B: stop and wait (a mid-turn one at its stop)
         if (!dv || !dv.to) { stay(sid, s, on, dv); continue; }
         if (dv.to !== to && !memberCanServe(poolId, to, s, sid, now)) { stay(sid, s, on, null); continue; }
         if (restartInFlight(s, now)) continue; // its restart is already on the way
         restart.push(pack(sid, s));
       } else {
-        const d = removalVerdict(poolId, on, s, sid, now);
+        const d = removalVerdict(poolId, on, s, sid, now, sweepRoster);
         if (d && d.reason === 'removed-hold') { const h = holdRemoved(poolId, sid, s, on, d, now); if (h.held || h.deferred) out.held.push({ sid, on, to: h.to, deferred: h.deferred }); else out.stayed.push({ sid, on }); continue; } // 全B: stop and wait (a mid-turn one at its stop)
         if (!d || !d.to) { stay(sid, s, on, d); continue; }
         to = d.to;
@@ -6731,7 +6884,7 @@ function memberRemoved(poolId, removedIds, { why = 'removed-from-pool' } = {}) {
  *  lists — a removal made while the server was down, a link older than the
  *  removal — goes through memberRemoved. Every pool tick runs it first (auto or
  *  not: a removed member stops serving whatever the pool's placement mode). */
-function sweepNonMemberLinks({ why = 'removed-from-pool' } = {}) { // ONE spelling of the act in the slot ledger, whoever sees the removal first (verify r1)
+function sweepNonMemberLinks({ why = 'removed-from-pool', rosters = null } = {}) { // ONE spelling of the act in the slot ledger, whoever sees the removal first (verify r1)
   const out = [];
   try {
     for (const a of accounts.list().accounts || []) {
@@ -6747,7 +6900,7 @@ function sweepNonMemberLinks({ why = 'removed-from-pool' } = {}) { // ONE spelli
         if (!on && hasOwnPoolLink(a.id, sid)) { try { on = accounts.poolCurrentFor(a.id, sid); } catch { } }
         if (on && !membership.includes(on)) stale.add(on);
       }
-      if (stale.size) out.push(memberRemoved(a.id, [...stale], { why }));
+      if (stale.size) out.push(memberRemoved(a.id, [...stale], { why, rosters }));
     }
   } catch (e) { console.warn('[pool] stale-link sweep failed:', e.message); }
   return out;
@@ -6850,13 +7003,13 @@ function projectionRereadFor(memberId, nowMs = Date.now(), billing = null) {
     return { inMs: best.inSec * 1000, label: best.label, line: best.line, pctPerMin: best.pctPerMin, band: best.band, fam: best.fam, resetsAt: best.resetsAt || 0, burnPtPerMin: Math.round(burnPtPerMin * 100) / 100 };
   } catch { return null; }
 }
-function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
+function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, rosters = null } = {}) {
   try {
     if (!poolId) return;
     const a = accounts.get(poolId);
     if (!a || a.type !== 'pooled' || !a.auto) return;
     if (_wholeLedger.holds()) return; // lane ledger-dedup-law r2: the estimate + dark-host pessimism below would read half the ledger — decided again at the warm's end
-    const now = Date.now();
+    const now = nowIn != null ? nowIn : Date.now(); // the pre-fire gate's ONE clock when it asks (pool-silent-members R4)
     // `force` is the new-member wake (onMemberReadingFresh, and its login half
     // when the login's read did not answer) and NOTHING else:
     // this gate throttles per-RECORD kicks, and a member's first reading is not
@@ -6921,6 +7074,7 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
     // decidePoolSwitch so its refusal can name it and prescribe the re-login.
     const members = switchCandidates(poolId);
     const readLogin = poolReadLogin(); // ONE login read per member for this whole tick (per-session pass + pool decision)
+    const roster = evaluationRoster(poolId, rosters); // …and ONE roster read for it, shared by every conversation's decision (acceptance r2) and the tick's sweep (r3)
     const creditsIds = creditsMemberIds(members); // ONE raw-cache read per member for this whole tick (B-ad05)
     const burnOf = projectionBurnMemo(now); // ONE burn read per member for this whole tick (B-f69c ③)
     const membership = poolMembershipOf(poolId); // the removed-member wall (2026-09-28): a member the pool no longer LISTS is a hard wall for every decision below
@@ -6970,8 +7124,8 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
       // real readings; the projection's other half, the auto-cli fast rung,
       // fetches the reading they judge — projectionRereadFor).
       const lead = warm.warm ? 0 : PROJECTION_LEAD_SEC;
-      const viewFor = lead ? (id) => projectCacheAhead(projected(id), burnOf(id), now / 1000, lead) : projected;
-      const pc = lead ? projectionCrossing(projected(curFor), burnOf(curFor), now / 1000, { hot }) : null;
+      const viewFor = lead ? (id) => projectCacheAhead(projected(id), burnOf(id), nowSecOf(now), lead) : projected;
+      const pc = lead ? projectionCrossing(projected(curFor), burnOf(curFor), nowSecOf(now), { hot }) : null;
       const early = pc && pc.inSec <= lead ? `projected: ${pc.label} reaches its ${pc.line}% line in ~${Math.max(1, Math.round(pc.inSec / 60))} min at ${pc.pctPerMin}%/min` : null;
       // THE CONVERSATION'S PIN (2026-09-28) — PRECEDENCE: pin > pool priority order > automatic.
       // A pinned conversation is decided by decidePinnedPlacement BEFORE (instead of) the pool
@@ -6983,8 +7137,8 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
       // rejection (verdict-level twin of the same fact)
       const rejected = [...sessionWalledMembers(sid, now)];
       const pinRec = poolPinOf(s2, poolId);
-      const dp = pinRec ? decidePinnedPlacement({ pin: pinRec.memberId, currentId: curFor, members, readCache: projected, autoReadCache: viewFor, ...providerIn(a, s2), nowSec: now / 1000, proactive: hot, hot, pessimism: darkTaintedAccounts(), exclude: rejected, readLogin, membership, priority, reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds, warm }) : null;
-      const ds = dp ? (dp.reason === 'pin-exhausted' ? { ...dp, reason: dp.autoReason, pinExhausted: true } : dp) : decidePoolSwitch({ currentId: curFor, members, readCache: viewFor, ...providerIn(a, s2), nowSec: now / 1000, proactive: hot, hot, pessimism: darkTaintedAccounts(), exclude: rejected, readLogin, membership, priority, reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds, warm, explain: true });
+      const dp = pinRec ? decidePinnedPlacement({ pin: pinRec.memberId, currentId: curFor, members, readCache: projected, autoReadCache: viewFor, ...providerIn(a, s2), nowSec: nowSecOf(now), proactive: hot, hot, pessimism: darkTaintedAccounts(), exclude: rejected, readLogin, membership, priority, reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds, warm }) : null;
+      const ds = dp ? (dp.reason === 'pin-exhausted' ? { ...dp, reason: dp.autoReason, pinExhausted: true } : dp) : decidePoolSwitch({ currentId: curFor, members, readCache: viewFor, ...providerIn(a, s2), nowSec: nowSecOf(now), proactive: hot, hot, pessimism: darkTaintedAccounts(), exclude: rejected, readLogin, membership, priority, reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds, warm, explain: true, roster }); // R2: every listed member named when blocked (the evaluation's ONE roster)
       if (!ds || !ds.to) {
         // (q-053 P0b, decision ①) only ANOTHER provider could take it and the pool's setting is 'never': ONE For-you card asks
         // the owner (nothing moves); the blocked outcome below still speaks as today
@@ -7111,9 +7265,10 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
     // the default moves every follower at once, so one warm follower keeps the
     // decision on the estimate of NOW (a projection alone never moves a warm
     // conversation).
-    const defaultView = defaultWarm ? readCache : (id) => projectCacheAhead(readCache(id), burnOf(id), now / 1000, PROJECTION_LEAD_SEC);
-    const d = decidePoolSwitch({ currentId, members, readCache: defaultView, nowSec: now / 1000, proactive: hot, hot, ...providerIn(a, null), offer: false, pessimism: darkTaintedAccounts(), readLogin, membership, priority, reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds, warm: defaultWarm, explain: true });
+    const defaultView = defaultWarm ? readCache : (id) => projectCacheAhead(readCache(id), burnOf(id), nowSecOf(now), PROJECTION_LEAD_SEC);
+    const d = decidePoolSwitch({ currentId, members, readCache: defaultView, nowSec: nowSecOf(now), proactive: hot, hot, ...providerIn(a, null), offer: false, pessimism: darkTaintedAccounts(), readLogin, membership, priority, reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(members), creditsIds, warm: defaultWarm, explain: true, roster }); // R2: every listed member named when blocked (the evaluation's ONE roster)
     if (!d) return;
+    if (d.to || !['stuck', 'no-members', 'no-settleable', 'all-lapsed', 'all-logins-expired'].includes(d.reason)) poolBlockedTodoEnd(poolId); // the pool can serve again (r3)
     if (!d.to) {
       if (d.reason === 'removed-hold') {
         // 全B: the DEFAULT never keeps a removed member either — parked on the member usable soonest (its followers,
@@ -7148,8 +7303,10 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
         // login its own clause + the re-login remedy instead of rendering it
         // as a spent quota bucket with "wait for a window to reset".
         // It lives there, not here, so the suite can assert the STRING.
-        serverNotice(`pool-blocked-${poolId}-${d.reason}-${Math.floor(now / 3600000)}`,
-          poolBlockedNotice(d, { poolName: a.name, currentName: nameOf(currentId) }), { level: 'warn' });
+        const nk = `pool-blocked-${poolId}-${d.reason}-${Math.floor(now / 3600000)}`;
+        serverNotice(nk, poolBlockedNotice(d, { poolName: a.name, currentName: nameOf(currentId), when: (ms) => OF.when(ms, { now }) }), { level: 'warn' });
+        journalPoolDetail(nk, a.name, d, nameOf(currentId), now);
+        poolBlockedTodo(poolId, a.name, d, nameOf(currentId), now); // …and every member's line where the owner looks (r3)
       }
       return;
     }
@@ -7192,7 +7349,7 @@ function maybePoolAutoSwitchForPool(poolId, { force = false } = {}) {
     }
     const fromPct = d.fromRemaining != null ? Math.round(d.fromRemaining) : null;
     // an EARLY move (B-f69c ③) says so: its `fromRemaining` is the PROJECTED number
-    const dpc = defaultWarm ? null : projectionCrossing(readCache(currentId), burnOf(currentId), now / 1000, { hot });
+    const dpc = defaultWarm ? null : projectionCrossing(readCache(currentId), burnOf(currentId), nowSecOf(now), { hot });
     const dEarly = dpc && dpc.inSec <= PROJECTION_LEAD_SEC ? `projected: ${dpc.label} reaches its ${dpc.line}% line in ~${Math.max(1, Math.round(dpc.inSec / 60))} min at ${dpc.pctPerMin}%/min` : null;
     // SCRAPS (round-2 verifier): the only member left was itself minutes from
     // its login deadline. Moving beats staying on a dead member, but the user

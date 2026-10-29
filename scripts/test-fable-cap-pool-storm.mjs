@@ -571,7 +571,7 @@ console.log('— §3 a healthy current member is never "no member can serve it"'
       // incident's (its notice was captured 20 min earlier, at 5h 100% / 7d 69%
       // / Fable 45%; these caches are the 04:31-04:55Z on-demand rows).
       ok('§3 NEGATIVE CONTROL: …and the SENTENCE is the one the owner read — the CURRENT member\'s own healthy numbers, under "out of quota"',
-        /no member can serve it — out of quota \(still available: /.test(sentence) && /Fable 40%/.test(sentence), sentence);
+        /no member can serve it — Member P is out of quota \(still available: /.test(sentence) && /Fable 40%/.test(sentence), sentence);
       ok('§3 …while the fixed sentence never contrasts "out of quota" with a list of what is available',
         !/out of quota \(still available/.test(poolBlockedNotice(pre, { poolName: '全部', currentName: 'Member P' })),
         poolBlockedNotice(pre, { poolName: '全部', currentName: 'Member P' }));
@@ -890,7 +890,7 @@ console.log('— §6 (r2) a blocked pool names the bucket that blocked it');
     !(d.liveBuckets || []).some((x) => /^7d /.test(x)) && (d.liveBuckets || []).length === 2, JSON.stringify(d.liveBuckets));
   const sentence = poolBlockedNotice(d, { poolName: 'P', currentName: 'Cur' });
   ok('§6 THE SENTENCE names the binding number and contrasts it with real headroom',
-    /no member can serve it — nearly spent: 7d 4% \(still available: 5h 90%, Fable 80%\)\./.test(sentence), sentence);
+    /no member can serve it — Cur is nearly spent: 7d 4% \(still available: 5h 90%, Fable 80%\)\./.test(sentence), sentence); // (lane pool-silent-members R2: the current member named)
 
   // NEGATIVE CONTROL: ROUND 1 — the two-band split with round 1's own `rest`.
   // That is the code this finding is about; master is a SECOND control below,
@@ -907,7 +907,8 @@ console.log('— §6 (r2) a blocked pool names the bucket that blocked it');
     const pre1 = mutR1.mod.decidePoolSwitch(args);
     const s1 = mutR1.mod.poolBlockedNotice(pre1, { poolName: 'P', currentName: 'Cur' });
     ok('§6 NEGATIVE CONTROL (round 1): a genuinely blocked pool with NO number in the sentence at all',
-      s1 === 'Pool "P": no member can serve it — out of quota. Conversations on it will hit a limit until a window resets, you add a member, or you move them off the pool.', s1);
+      // (lane pool-silent-members R2: the others out of quota are NAMED with their spent buckets — a count named nobody)
+      new RegExp('^Pool "P": no member can serve it — Cur is out of quota\\. Out of quota: B \\(7d 0% until \\d\\d:\\d\\d:\\d\\dZ, Fable 0% until \\d\\d:\\d\\d:\\d\\dZ\\), C \\(7d 0% until \\d\\d:\\d\\d:\\d\\dZ, Fable 0% until \\d\\d:\\d\\d:\\d\\dZ\\)\\. Conversations on it will hit a limit until a window resets, you add a member, or you move them off the pool\\.$').test(s1), s1);
   }
   // NEGATIVE CONTROL: master — it names the binding bucket, but under
   // "still available" while the sentence says "out of quota".
@@ -963,11 +964,11 @@ console.log('— §6 (r2) a blocked pool names the bucket that blocked it');
     JSON.stringify({ reason: cold.reason, low: cold.lowBuckets, live: cold.liveBuckets }));
   ok('§6 CONTROL: …and its sentence is master\'s, verbatim',
     poolBlockedNotice(cold, { poolName: 'P', currentName: 'Cur' })
-      === 'Pool "P": no member can serve it — spent: 7d 1% (still available: 5h 7%, Fable 80%). Conversations on it will hit a limit until a window resets, you add a member, or you move them off the pool.',
+      .replace(/until \d\d:\d\d:\d\dZ/g, 'until T') === 'Pool "P": no member can serve it — Cur is spent: 7d 1% (still available: 5h 7%, Fable 80%). Out of quota: B (7d 0% until T, Fable 0% until T), C (7d 0% until T, Fable 0% until T). Conversations on it will hit a limit until a window resets, you add a member, or you move them off the pool.', // (+ R2's named others)
     poolBlockedNotice(cold, { poolName: 'P', currentName: 'Cur' }));
   const legacy = { reason: 'no-members', to: null, deadBuckets: [], liveBuckets: ['5h 100%', '7d 69%', 'Fable 45%'] };
   ok('§6 CONTROL: a decision object with no `lowBuckets` (the §3 shape) still refuses to contrast "out of quota"',
-    poolBlockedNotice(legacy, { poolName: 'P', currentName: 'A' }) === 'Pool "P": no member can serve it — out of quota. Conversations on it will hit a limit until a window resets, you add a member, or you move them off the pool.',
+    poolBlockedNotice(legacy, { poolName: 'P', currentName: 'A' }) === 'Pool "P": no member can serve it — A is out of quota. Conversations on it will hit a limit until a window resets, you add a member, or you move them off the pool.',
     poolBlockedNotice(legacy, { poolName: 'P', currentName: 'A' }));
   ok('§6 CONTROL: §3 is intact — a HEALTHY current member still answers `no-better`, which renders nothing',
     decidePoolSwitch({ ...args, readCache: (id) => ({ cur: bk(0, 0.30, 0.30), b: bk(0, 1, 1), c: bk(0, 1, 1) })[id] || null }).reason === 'no-better');
@@ -2718,8 +2719,8 @@ console.log('— §17 a warm conversation is never moved proactively (the owner\
 
     // NEGATIVE CONTROL: the engine WITHOUT the per-session wiring moves the warm conversation too.
     const mut = mutate('src/server/usage-pool-engine.js', 'warm', [[
-      'overageIds: overageMemberIds(members), creditsIds, warm, explain: true });',
-      'overageIds: overageMemberIds(members), creditsIds, explain: true }); // PRE-FIX: no warm-cache hold',
+      'overageIds: overageMemberIds(members), creditsIds, warm, explain: true, roster });',
+      'overageIds: overageMemberIds(members), creditsIds, explain: true, roster }); // PRE-FIX: no warm-cache hold',
     ]]);
     ok('§17 NEGATIVE CONTROL: the patch hit the product source', mut.hit === true, mut.why || '');
     if (mut.hit) {
@@ -2924,8 +2925,8 @@ console.log('— §18 a soft move of a warm mid-turn conversation waits for its 
     }
     // NEGATIVE CONTROL ②: without the boundary's force the closed gate swallows the first stop.
     const mutG = mutate('src/server/usage-pool-engine.js', 'softgate', [[
-      'maybePoolAutoSwitchForPool(session._accountId, force ? { force: true } : undefined);',
-      'maybePoolAutoSwitchForPool(session._accountId); // PRE-FIX: the stop is an ordinary kick',
+      'maybePoolAutoSwitchForPool(session._accountId, force || now != null ? { ...(force ? { force: true } : {}), ...(now != null ? { now } : {}) } : undefined);',
+      'maybePoolAutoSwitchForPool(session._accountId, now != null ? { now } : undefined); // PRE-FIX: the stop is an ordinary kick',
     ]]);
     ok('§18 (a) GATE CONTROL: the patch hit the product source', mutG.hit === true, mutG.why || '');
     if (mutG.hit) {
@@ -3074,7 +3075,7 @@ console.log('— §18 a soft move of a warm mid-turn conversation waits for its 
   const preFixOwed = () => mutate('src/server/usage-pool-engine.js', 'softowed', [
     ['const _warmHoldLogAt = new Map();', 'const _softDeferred = new Map(); // PRE-FIX: the owed-move map\nconst _warmHoldLogAt = new Map();'],
     ["if (ds && ds.reason === 'warm-soft-defer') { noteWarmHold(", "if (ds && ds.reason === 'warm-soft-defer') { _softDeferred.set(poolId + ':' + sid, 1); noteWarmHold("],
-    ['    const force = stop\n', "    const force = stop && _softDeferred.has(session._accountId + ':' + session._webuiId) // PRE-FIX: forced only for an owed move\n"],
+    ['    const force = forced || (stop\n', "    const force = forced || (stop && _softDeferred.has(session._accountId + ':' + session._webuiId) // PRE-FIX: forced only for an owed move\n"],
     ['    if (!session || !session._accountId) return;\n    maybePoolAutoSwitch(session, { stop: true });',
       "    if (!session || !session._accountId || !_softDeferred.has(session._accountId + ':' + session._webuiId)) return; // PRE-FIX: only an owed move\n    maybePoolAutoSwitch(session, { stop: true });"],
   ]);

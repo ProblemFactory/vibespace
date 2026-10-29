@@ -66,6 +66,7 @@
 //                                             scripts/fixtures/oat-in-file.json (cli-caps withMeasured:
 //                                             every other version's record kept — lane oat-in-file-2-1-306)
 //        [--no-netns --claude <fake script>]   no namespace: a FAKE claude only (below)
+//        [--no-netns --loopback-real --claude <the real claude>]   no namespace, the REAL binary (the loopback-real rung, below)
 //        [--gap ms] [--flush-ms ms] [--near-ms ms]   (the fake's fast self-test shortens the waits)
 //
 // Needs `sudo -n` (for the network namespace) and `strace`. Without them it
@@ -78,6 +79,15 @@
 // vendor connect from the real binary would be a real SYN). The oat variants set
 // HTTPS_PROXY/HTTP_PROXY = the mock in both rungs (it records each CONNECT and answers
 // 403), so the namespace changes nothing the CLI sees on the loopback mock.
+// THE LOOPBACK-REAL RUNG (lane pool-silent-members, 2.1.312 on 2026-10-28; tracked since acceptance r2 so the record
+// it wrote is reproducible from the tree): `--no-netns --loopback-real --claude <the real claude>` — where no sudo is
+// to be had, the REAL binary runs WITHOUT the namespace and stays on loopback by three fences, each recorded: every
+// API / OAuth / OTel base points at the loopback mock; HTTPS_PROXY / HTTP_PROXY = the mock ITSELF, which records each
+// CONNECT and refuses it (403 — no TLS session ever opens, so nothing reaches a vendor host); and the strace watchdog
+// (the sampler) SIGKILLs the process group and ABORTS the run (exit 3) at the first off-loopback connect().
+// CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 keeps the CLI's optional traffic off. The record says so: `netns: false`,
+// `rung: 'loopback-real'`, `proxy: 'loopback-mock'` (every record this script writes — the --out record and the fixture
+// record alike, acceptance r3 — names its proxy: the mock).
 //
 // THE MOCK OUTLIVES ITS CLIENTS (lane pool-oat-measure-fix, 2026-10-14): 主开发's first real-CLI
 // rung (2.1.296) died at oat-file on `read ECONNRESET`, an unhandled 'error' on a Socket. The oat
@@ -105,6 +115,7 @@ const argv = process.argv.slice(2);
 const opt = (k, d) => { const i = argv.indexOf('--' + k); return i >= 0 ? argv[i + 1] : d; };
 const flag = (k) => argv.includes('--' + k);
 const NETNS = !flag('no-netns');
+const LOOPBACK_REAL = flag('loopback-real') && !NETNS; // the real binary without the namespace (header)
 const { OAT_VARIANTS, oatInFile, cliVersionOf, measuredVersions, withMeasured } = createRequire(import.meta.url)(path.join(path.dirname(SELF), '..', 'src', 'cli-caps.js'));
 // FAKE tokens, built at runtime: no token-shaped literal sits in the tree
 const OAT_PFX = ['sk', 'ant', 'oat01'].join('-');
@@ -150,10 +161,19 @@ if (NETNS && !flag('inner')) {
 // so the real binary (an ELF under …/claude/versions/) is refused before it is ever executed.
 function fakeClaude() {
   const c = opt('claude', '');
-  if (!c) { console.error('REFUSED: --no-netns needs --claude <a FAKE claude script>; the real CLI runs only in the namespace rung'); process.exit(2); }
+  if (!c) { console.error('REFUSED: --no-netns needs --claude <a FAKE claude script>; the real CLI runs only in the namespace rung (or, named on purpose, --loopback-real)'); process.exit(2); }
   let real = '', head = '';
   try { real = fs.realpathSync(c); const fd = fs.openSync(real, 'r'); const b = Buffer.alloc(2); fs.readSync(fd, b, 0, 2, 0); fs.closeSync(fd); head = b.toString('latin1'); } catch { }
-  if (head !== '#!' || /[\\/]claude[\\/]versions[\\/]/.test(real)) { console.error(`REFUSED: --no-netns runs a FAKE claude script only (${real || c} is not one); the real CLI runs only in the namespace rung`); process.exit(2); }
+  if (head !== '#!' || /[\\/]claude[\\/]versions[\\/]/.test(real)) { console.error(`REFUSED: --no-netns runs a FAKE claude script only (${real || c} is not one); the real CLI runs only in the namespace rung (or, named on purpose, --loopback-real)`); process.exit(2); }
+  return real;
+}
+// --no-netns --loopback-real: the REAL claude, named on purpose by --claude (never the one on PATH), behind the three
+// fences the header names — the strace belt is required (checked in main, as for the fake)
+function realClaude() {
+  const c = opt('claude', '');
+  if (!c) { console.error('REFUSED: --loopback-real needs --claude <the real claude> (never the one on PATH)'); process.exit(2); }
+  let real = '';
+  try { real = fs.realpathSync(c); fs.accessSync(real, fs.constants.X_OK); } catch { console.error(`REFUSED: --loopback-real: ${c} is not an executable file`); process.exit(2); }
   return real;
 }
 
@@ -172,7 +192,7 @@ async function main() {
   };
   process.on('uncaughtException', (e) => event('process uncaughtException', e));
   process.on('unhandledRejection', (e) => event('process unhandledRejection', e));
-  const CLAUDE = NETNS ? opt('claude') : fakeClaude();
+  const CLAUDE = NETNS ? opt('claude') : LOOPBACK_REAL ? realClaude() : fakeClaude();
   if (!NETNS) { try { execFileSync('sh', ['-c', 'command -v strace']); } catch { console.error('REFUSED: needs strace'); process.exit(2); } }
   const GAP = Number(opt('gap', '65000'));
   const FLUSH_MS = Number(opt('flush-ms', '2500'));   // the OTel batch's flush wait after the last turn
@@ -181,7 +201,7 @@ async function main() {
   const ROOT = `/tmp/vs-hotsw-${process.pid}`;
   fs.mkdirSync(ROOT, { recursive: true, mode: 0o700 });
   const version = execFileSync(CLAUDE, ['--version'], { encoding: 'utf8', env: { PATH: process.env.PATH, HOME: ROOT } }).trim();
-  process.stderr.write(`[measure] ${CLAUDE} = ${version}${NETNS ? '' : ' (--no-netns: a FAKE claude on the loopback mock)'}\n`);
+  process.stderr.write(`[measure] ${CLAUDE} = ${version}${NETNS ? '' : LOOPBACK_REAL ? ' (--no-netns --loopback-real: the REAL claude, no namespace — every base and HTTPS_PROXY on the loopback mock, the strace belt aborts at the first off-loopback connect)' : ' (--no-netns: a FAKE claude on the loopback mock)'}\n`);
   // the namespace's lo addresses (127/8, ::1 and the resolver the outer rung pinned there) and the resolver the CLI asks
   const LO_ADDRS = NETNS ? (() => { try { return execFileSync('ip', ['-o', 'addr', 'show', 'dev', 'lo'], { encoding: 'utf8' }).split('\n').map((l) => (/\binet6?\s+([^/\s]+)/.exec(l) || [])[1]).filter(Boolean); } catch { return []; } })() : [];
   const RESOLVER = nameserversOf();
@@ -333,6 +353,7 @@ async function main() {
     CLAUDE_CODE_ENABLE_TELEMETRY: '1', OTEL_METRICS_EXPORTER: 'none', OTEL_LOGS_EXPORTER: 'otlp', OTEL_EXPORTER_OTLP_PROTOCOL: 'http/json',
     OTEL_EXPORTER_OTLP_ENDPOINT: BASE + '/otel', OTEL_LOGS_EXPORT_INTERVAL: '1000',
     CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS: '1', DISABLE_AUTOUPDATER: '1',
+    ...(LOOPBACK_REAL ? { CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1' } : {}), // the loopback-real rung: the CLI's optional traffic off
   });
   const resetMock = () => { M.reqs = []; M.heads = []; M.otel = []; M.oauth = []; M.other = []; M.mode.reject429.clear(); M.mode.fail401.clear(); M.mode.slowMs = 0; M.gen = { A: 1, B: 1 }; };
   const mark = (out) => ({ reqs: M.reqs.length, heads: M.heads.length, otel: M.otel.length, oauth: M.oauth.length, other: M.other.length, escapes: M.escapes.length, out: out.length });
@@ -699,7 +720,7 @@ async function main() {
     results.push(r);
     process.stderr.write(JSON.stringify({ variant: r.variant, steps: r.steps.map((s) => [s.step, s.accts.join(' '), s.result?.subtype || s.result]), otel: r.otel.map((o) => `${o.phase}:${(o.org || '').slice(0, 8)}`), oauth: r.oauth.map((o) => `${o.phase}:${o.kind}:${o.acct}`), fileAfter: r.fileAfter, credSyscalls: r.credSyscalls, events: r.events.length }) + '\n');
   }
-  const record = { measuredAt: new Date().toISOString(), cli: results[0]?.version || version, netns: NETNS, resolver: RESOLVER, loAddrs: LO_ADDRS, gapMs: GAP, escapes: M.escapes.map((e) => `${e.via} ${e.what}`), aborted: ESCAPED.length ? ESCAPED : undefined, events: EVENTS.map((e) => ({ ...e, t: new Date(e.t).toISOString().slice(11, 23) })), results };
+  const record = { measuredAt: new Date().toISOString(), cli: results[0]?.version || version, netns: NETNS, ...(LOOPBACK_REAL ? { rung: 'loopback-real' } : {}), proxy: 'loopback-mock', resolver: RESOLVER, loAddrs: LO_ADDRS, gapMs: GAP, escapes: M.escapes.map((e) => `${e.via} ${e.what}`), aborted: ESCAPED.length ? ESCAPED : undefined, events: EVENTS.map((e) => ({ ...e, t: new Date(e.t).toISOString().slice(11, 23) })), results };
   if (EVENTS.length) process.stderr.write(`[measure] ${EVENTS.length} events recorded, the run kept going (record.events)\n`);
   if (!flag('keep')) { try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { } } // the scratch HOME + fake creds + strace logs (--keep to inspect)
   if (OUT) fs.writeFileSync(OUT, JSON.stringify(record, null, 2));
@@ -707,7 +728,7 @@ async function main() {
   server.close();
   if (ESCAPED.length) { console.error(`ABORTED: the CLI connect()ed off loopback${NETNS ? ' inside the namespace (the namespace refused it — check it anyway)' : ''} — ${ESCAPED.map((e) => `${e.variant}: ${e.connect} = ${e.result}`).join('; ')}`); process.exit(3); }
   if (flag('write-fixture')) {
-    const fx = { cliVersion: cliVersionOf(version), measuredAt: new Date().toISOString().slice(0, 10), script: 'scripts/measure-claude-cred-read.mjs', netns: NETNS, variants: {} };
+    const fx = { cliVersion: cliVersionOf(version), measuredAt: new Date().toISOString().slice(0, 10), script: 'scripts/measure-claude-cred-read.mjs', netns: NETNS, ...(LOOPBACK_REAL ? { rung: 'loopback-real' } : {}), proxy: 'loopback-mock', variants: {} };
     for (const name of OAT_VARIANTS) { const r = results.find((x) => x.variant === name); fx.variants[name] = { verdict: r.verdict, note: r.note }; }
     const next = withMeasured(fixtureNow(), fx); // re-read: every other version's record as the file holds it now
     fs.writeFileSync(FIXTURE, JSON.stringify(next, null, 1) + '\n');

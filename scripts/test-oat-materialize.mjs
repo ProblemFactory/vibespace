@@ -93,8 +93,10 @@ const TABLE = [
   ['our file, an older token / date ⇒ materialize, no archive (ours is replaced)', { file: oursFile, ours: true, current: false }, { verdict: 'materialize', archive: false, cleanup: false }],
   ['a marked file holding ANOTHER token (not ours) ⇒ materialize, archive first', { file: LE.oatFileBody(OAT2, { expiresAt: NOW + DAY, shape: SHAPE }) }, { verdict: 'materialize', archive: true, cleanup: false }],
   ['this CLI unmeasured ⇒ cli-unmeasured, nothing written', { caps: { ok: false }, file: login(NOW, { dead: true }) }, { verdict: 'cli-unmeasured', archive: false, cleanup: false }],
-  ['this CLI unmeasured + our file ⇒ cli-unmeasured, cleanup ours', { caps: { ok: false, known: true }, file: oursFile, ours: true, current: true }, { verdict: 'cli-unmeasured', archive: false, cleanup: true }],
-  ['the CLI version UNKNOWN (a probe that failed) + our file ⇒ nothing written, nothing taken back', { caps: { ok: false, known: false }, file: oursFile, ours: true, current: true }, { verdict: 'cli-unmeasured', archive: false, cleanup: false }],
+  // lane pool-silent-members R1 (inc-mvsjhna7): a CLI update never shrinks a pool in silence — our file is HELD on an
+  // unmeasured CLI, known or not, linked or not; 90c995a3 took it back here and six members left the pool unnamed
+  ['this CLI unmeasured + our file ⇒ cli-unmeasured, HELD (never taken back for a version reason)', { caps: { ok: false, known: true }, file: oursFile, ours: true, current: true }, { verdict: 'cli-unmeasured', archive: false, cleanup: false, held: true }],
+  ['the CLI version UNKNOWN (a probe that failed) + our file ⇒ nothing written, nothing taken back (held)', { caps: { ok: false, known: false }, file: oursFile, ours: true, current: true }, { verdict: 'cli-unmeasured', archive: false, cleanup: false, held: true }],
   ['no subscription shape known ⇒ no-scopes, nothing written', { shape: null, fileState: 'absent', file: null }, { verdict: 'no-scopes', archive: false, cleanup: false }],
   ['a live login wins over an unmeasured CLI (keep-login first)', { caps: { ok: false }, file: login(NOW) }, { verdict: 'keep-login', archive: false, cleanup: false }],
   // verify r1 (pool-oat-verify, 4c1be7e0e REFUTED)
@@ -104,7 +106,7 @@ const TABLE = [
   ['F3: a STALE ours (an older token of this row) on an UNKNOWN CLI ⇒ replaced in place (the window stops writes, never the swap)', { caps: { ok: false, known: false }, file: oursFile, ours: true, current: false }, { verdict: 'materialize', archive: false, cleanup: false }],
   ['F5: a KNOWN unmeasured CLI + ours + a link names the member ⇒ cli-unmeasured, HELD (the file stays)', { caps: { ok: false, known: true }, file: oursFile, ours: true, current: true, linked: true }, { verdict: 'cli-unmeasured', archive: false, cleanup: false, held: true }],
   ['F5: …a STALE ours there, linked ⇒ replaced in place (the sessions on it keep a valid token)', { caps: { ok: false, known: true }, file: oursFile, ours: true, current: false, linked: true }, { verdict: 'materialize', archive: false, cleanup: false }],
-  ['F5: …a stale ours, no link ⇒ cli-unmeasured, cleanup ours', { caps: { ok: false, known: true }, file: oursFile, ours: true, current: false, linked: false }, { verdict: 'cli-unmeasured', archive: false, cleanup: true }],
+  ['F5: …a stale ours, no link ⇒ cli-unmeasured, HELD (R1: nothing taken back for a version reason)', { caps: { ok: false, known: true }, file: oursFile, ours: true, current: false, linked: false }, { verdict: 'cli-unmeasured', archive: false, cleanup: false, held: true }],
   ['F1: a file holding only the CLI\'s other keys (mcpOAuth, no login) ⇒ materialize, NOTHING archived (merged in place)', { file: { mcpOAuth: { 'srv|1': { accessToken: 'm' } } } }, { verdict: 'materialize', archive: false, cleanup: false }],
 ];
 const runTable = (fn) => TABLE.map(([name, m, want]) => { const got = fn({ caps, shape: SHAPE, oat: { present: true, validUntil: NOW + 300 * DAY }, fileState: 'present', ...m }, NOW); return { name, ok: JSON.stringify(got) === JSON.stringify(want), got, want }; });
@@ -129,9 +131,13 @@ for (const r of runTable(LE.materializeVerdict)) ok(r.ok, 'verdict: ' + r.name, 
   const mut = compileWith('src/login-expiry.js', "loginUsable(loginFileState(f, now))) return { verdict: 'keep-login'", "false) return { verdict: 'keep-login'");
   const red = mut ? runTable(mut.materializeVerdict).filter((r) => !r.ok).map((r) => r.name) : null;
   ok(!!red && red.some((n) => /live login/.test(n)), 'RED control (invariant 4): a verdict without the keep-login rung overwrites a live login — the table catches it', red);
-  const mut3 = compileWith('src/login-expiry.js', "return { verdict: 'cli-unmeasured', archive: false, cleanup: ours && known };", "return { verdict: 'cli-unmeasured', archive: false, cleanup: ours };");
+  const mut3 = compileWith('src/login-expiry.js', "return { verdict: 'cli-unmeasured', archive: false, cleanup: false, ...(ours ? { held: true } : {}) };", "return { verdict: 'cli-unmeasured', archive: false, cleanup: ours };");
   const red3 = mut3 ? runTable(mut3.materializeVerdict).filter((r) => !r.ok).map((r) => r.name) : null;
   ok(!!red3 && red3.some((n) => /UNKNOWN/.test(n)), 'RED control (layer 2): a verdict that cleans up on an UNKNOWN CLI would take files back on a failed probe — caught', red3);
+  // RED control (R1): the 90c995a3 rule itself — held only while a link names the member, else taken back on a KNOWN version
+  const mut360 = compileWith('src/login-expiry.js', "    return { verdict: 'cli-unmeasured', archive: false, cleanup: false, ...(ours ? { held: true } : {}) };\n", "    if (ours && known && m.linked) return { verdict: 'cli-unmeasured', archive: false, cleanup: false, held: true };\n    return { verdict: 'cli-unmeasured', archive: false, cleanup: ours && known };\n");
+  const red360 = mut360 ? runTable(mut360.materializeVerdict).filter((r) => !r.ok).map((r) => r.name) : null;
+  ok(!!red360 && red360.some((n) => /^this CLI unmeasured \+ our file/.test(n)) && red360.some((n) => /^F5: …a stale ours, no link/.test(n)), 'RED control (R1, the 90c995a3 rule): a verdict that takes our file back on a KNOWN unmeasured CLI once no link names the member — the rows catch it', red360);
   const mut2 = compileWith('src/login-expiry.js', "archive: !ours && (m.fileState === 'unreadable' || !!o)", 'archive: false');
   const red2 = mut2 ? runTable(mut2.materializeVerdict).filter((r) => !r.ok).map((r) => r.name) : null;
   ok(!!red2 && red2.some((n) => /dead login/.test(n)), 'RED control (invariant 4): a verdict that never archives would lose a dead login — caught', red2);
@@ -141,7 +147,7 @@ for (const r of runTable(LE.materializeVerdict)) ok(r.ok, 'verdict: ' + r.name, 
     ['F8 (a symlinked dir written through)', "  if (m.dirState === 'symlink') return { verdict: 'dir-symlink', archive: false, cleanup: false };\n", '', /^F8:/],
     ['F4 (an undecryptable token treated as present)', "  if (m.oat && m.oat.present && m.oat.readable === false) return { verdict: 'none', archive: false, cleanup: false, reason: 'oat-unreadable' };\n", '', /^F4:/],
     ['F3 (a stale ours left in the unknown window)', '    if (ours && !m.current && shaped && !(known && !m.linked)) return { verdict: \'materialize\', archive: false, cleanup: false };\n', '', /^F3:/],
-    ['F5 (a linked member\'s file taken back)', "    if (ours && known && m.linked) return { verdict: 'cli-unmeasured', archive: false, cleanup: false, held: true };\n", '', /^F5: a KNOWN/],
+    ['F5 (a linked member\'s file taken back)', "    return { verdict: 'cli-unmeasured', archive: false, cleanup: false, ...(ours ? { held: true } : {}) };\n", "    return { verdict: 'cli-unmeasured', archive: false, cleanup: ours && known };\n", /^F5: a KNOWN/],
     ['F1 (any file there archived)', "archive: !ours && (m.fileState === 'unreadable' || !!o)", "archive: !ours && m.fileState !== 'absent'", /^F1:/],
   ]) {
     const mu = compileWith('src/login-expiry.js', from, to);
@@ -169,7 +175,7 @@ const deadBytes = sha(credsOf(am, dead)), liveBytes = sha(credsOf(am, live));
   const r = await so(am, dead, OAT);
   ok(am.oatFileCaps().ok === false && r.oatFile === 'cli-unmeasured' && sha(credsOf(am, dead)) === deadBytes && !archives(am, dead).length, 'no CLI version known ⇒ the capability gate is shut: setOat stores the token, writes NOTHING (cli-unmeasured)', r);
   const c = await nv(am, '2.1.296 (Claude Code)');
-  ok(c.ok === true && c.cli === '2.1.296' && c.measured === '2.1.296, 2.1.306, 2.1.307, 2.1.308' && c.changed === true, 'the hub\'s CLI = the measured 2.1.296 ⇒ oatInFile true (cli-caps over the committed fixture, which holds 2.1.296, 2.1.306, 2.1.307 and 2.1.308), and the rows re-sync', c);
+  ok(c.ok === true && c.cli === '2.1.296' && c.measured === '2.1.296, 2.1.306, 2.1.307, 2.1.308, 2.1.312' && c.changed === true, 'the hub\'s CLI = the measured 2.1.296 ⇒ oatInFile true (cli-caps over the committed fixture, which holds 2.1.296, 2.1.306, 2.1.307, 2.1.308 and 2.1.312), and the rows re-sync', c);
   const arch = archives(am, dead);
   const f = readJ(credsOf(am, dead));
   const a = am.get(dead);
@@ -229,7 +235,7 @@ const deadBytes = sha(credsOf(am, dead)), liveBytes = sha(credsOf(am, live));
   } else ok(false, 'RED control anchors present (accounts.js ours / account-material remover)');
 }
 {
-  // the CLI version flips to an unmeasured one ⇒ the store takes its files back
+  // the CLI version flips to an unmeasured one ⇒ the store KEEPS its files (lane pool-silent-members R1; 90c995a3 took them back)
   const am2 = new AccountManager({ dataDir: path.join(tmp, 'data2') });
   const m = am2.createSubscription({ name: 'Dead Two' }).id;
   put(am2, m, login(NOW, { dead: true }));
@@ -237,9 +243,11 @@ const deadBytes = sha(credsOf(am, dead)), liveBytes = sha(credsOf(am, live));
   await so(am2, m, OAT);
   ok(readJ(credsOf(am2, m))?.claudeAiOauth?.accessToken === OAT, '(2.1.296: written)');
   const c = await nv(am2, '2.1.300 (Claude Code)');
-  ok(c.ok === false && c.changed && !fs.existsSync(credsOf(am2, m)) && archives(am2, m).length === 1, 'the hub moves to an UNMEASURED 2.1.300 ⇒ our file is removed (today\'s behaviour returns), the archive stays', c);
+  ok(c.ok === false && c.changed && readJ(credsOf(am2, m))?.claudeAiOauth?.accessToken === OAT && archives(am2, m).length === 1, 'the hub moves to an UNMEASURED 2.1.300 ⇒ our file STAYS (R1: a CLI update never takes it back — the pool names the member unplaceable instead), the archive stays', c);
   const row = am2.list().accounts.find((a) => a.id === m);
-  ok(row.oatFile && row.oatFile.state === 'refused' && row.oatFile.reason === 'cli-unmeasured' && row.oatFile.cli === '2.1.300', 'the row says why: refused · cli-unmeasured · CLI 2.1.300', row.oatFile);
+  ok(row.oatFile && row.oatFile.state === 'held' && row.oatFile.reason === 'cli-unmeasured' && row.oatFile.cli === '2.1.300' && row.loginState && row.loginState.state === 'oat-only', 'the row says why: held · cli-unmeasured · CLI 2.1.300 (long-lived token only — never «not logged in»)', { door: row.oatFile, ls: row.loginState && row.loginState.state });
+  // (the file a CLI update no longer takes back is removed by hand: the leg below is about a WRITE that fails)
+  fs.rmSync(credsOf(am2, m), { force: true });
   // a failed write leaves the token working on today's env road
   const open0 = fs.promises.open; // inject the failure at the writer's own O_EXCL open (the owner could chmod a 0500 dir back)
   fs.promises.open = function (p, flags, ...r) { if (flags === 'wx' && String(p).startsWith(am2.subDir(m) + path.sep)) return Promise.reject(Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' })); return open0.call(this, p, flags, ...r); };
@@ -267,7 +275,7 @@ const deadBytes = sha(credsOf(am, dead)), liveBytes = sha(credsOf(am, live));
     return { c, r: r.oatFile, file: readJ(credsOf(amV, m))?.claudeAiOauth?.accessToken === OAT, archived: archives(amV, m).length, door: amV.list().accounts.find((a) => a.id === m).oatFile, spawn: !!amV.resolveForSpawn(m).oatFile };
   };
   const now = await on306('now');
-  ok(now.c.ok === true && now.c.cli === '2.1.306' && now.c.measured === '2.1.296, 2.1.306, 2.1.307, 2.1.308' && now.r === 'materialize' && now.file && now.archived === 1 && now.door?.state === 'written' && now.door.cli === '2.1.306' && now.spawn, 'the hub\'s CLI = 2.1.306 (measured 2026-10-21) ⇒ oatInFile true: the dead login archived, the token in the member\'s folder, the row says written · CLI 2.1.306, the spawn reads the file — as on 2.1.296', now);
+  ok(now.c.ok === true && now.c.cli === '2.1.306' && now.c.measured === '2.1.296, 2.1.306, 2.1.307, 2.1.308, 2.1.312' && now.r === 'materialize' && now.file && now.archived === 1 && now.door?.state === 'written' && now.door.cli === '2.1.306' && now.spawn, 'the hub\'s CLI = 2.1.306 (measured 2026-10-21) ⇒ oatInFile true: the dead login archived, the token in the member\'s folder, the row says written · CLI 2.1.306, the spawn reads the file — as on 2.1.296', now);
   const one = path.join(tmp, 'fx-2.1.296-only.json'); fs.writeFileSync(one, JSON.stringify(COMMITTED.versions['2.1.296'], null, 1) + '\n');
   const base = await on306('base', one);
   ok(base.c.ok === false && base.c.known && base.c.measured === '2.1.296' && base.r === 'cli-unmeasured' && !base.file && base.archived === 0 && base.door?.state === 'refused' && base.door.reason === 'cli-unmeasured' && !base.spawn, 'RED CONTROL (the base): over the one-version file (2.1.296 only) the same 2.1.306 is an UNMEASURED CLI — nothing archived or written, the row says refused · cli-unmeasured, the spawn stays on the env road', base);
@@ -285,8 +293,8 @@ const deadBytes = sha(credsOf(am, dead)), liveBytes = sha(credsOf(am, live));
     return { c, r: r.oatFile, file: readJ(credsOf(amV, m))?.claudeAiOauth?.accessToken === OAT, archived: archives(amV, m).length, door: amV.list().accounts.find((a) => a.id === m).oatFile, spawn: !!amV.resolveForSpawn(m).oatFile };
   };
   const now = await on307('now');
-  ok(now.c.ok === true && now.c.cli === '2.1.307' && now.c.measured === '2.1.296, 2.1.306, 2.1.307, 2.1.308' && now.r === 'materialize' && now.file && now.archived === 1 && now.door?.state === 'written' && now.door.cli === '2.1.307' && now.spawn, 'the hub\'s CLI = 2.1.307 (measured 2026-10-22) ⇒ oatInFile true: the dead login archived, the token in the member\'s folder, the row says written · CLI 2.1.307, the spawn reads the file — as on 2.1.306', now);
-  const { '2.1.307': measured307, '2.1.308': _measured308, ...two } = COMMITTED.versions;
+  ok(now.c.ok === true && now.c.cli === '2.1.307' && now.c.measured === '2.1.296, 2.1.306, 2.1.307, 2.1.308, 2.1.312' && now.r === 'materialize' && now.file && now.archived === 1 && now.door?.state === 'written' && now.door.cli === '2.1.307' && now.spawn, 'the hub\'s CLI = 2.1.307 (measured 2026-10-22) ⇒ oatInFile true: the dead login archived, the token in the member\'s folder, the row says written · CLI 2.1.307, the spawn reads the file — as on 2.1.306', now);
+  const { '2.1.307': measured307, '2.1.308': _measured308, '2.1.312': _m312a, ...two } = COMMITTED.versions;
   const twoF = path.join(tmp, 'fx-2.1.296-2.1.306.json'); fs.writeFileSync(twoF, JSON.stringify({ versions: two }, null, 1) + '\n');
   const base = await on307('base', twoF);
   ok(!!measured307 && base.c.ok === false && base.c.known && base.c.measured === '2.1.296, 2.1.306' && base.r === 'cli-unmeasured' && !base.file && base.archived === 0 && base.door?.state === 'refused' && base.door.reason === 'cli-unmeasured' && !base.spawn, 'RED CONTROL (the .340 base): over the two-version file (2.1.296 + 2.1.306) the same 2.1.307 is an UNMEASURED CLI — nothing archived or written, the row says refused · cli-unmeasured, the spawn stays on the env road', base);
@@ -304,8 +312,8 @@ const deadBytes = sha(credsOf(am, dead)), liveBytes = sha(credsOf(am, live));
     return { c, r: r.oatFile, file: readJ(credsOf(amV, m))?.claudeAiOauth?.accessToken === OAT, archived: archives(amV, m).length, door: amV.list().accounts.find((a) => a.id === m).oatFile, spawn: !!amV.resolveForSpawn(m).oatFile };
   };
   const now = await on308('now');
-  ok(now.c.ok === true && now.c.cli === '2.1.308' && now.c.measured === '2.1.296, 2.1.306, 2.1.307, 2.1.308' && now.r === 'materialize' && now.file && now.archived === 1 && now.door?.state === 'written' && now.door.cli === '2.1.308' && now.spawn, 'the hub\'s CLI = 2.1.308 (measured 2026-10-22) ⇒ oatInFile true: the dead login archived, the token in the member\'s folder, the row says written · CLI 2.1.308, the spawn reads the file — as on 2.1.307', now);
-  const { '2.1.308': measured308, ...three } = COMMITTED.versions;
+  ok(now.c.ok === true && now.c.cli === '2.1.308' && now.c.measured === '2.1.296, 2.1.306, 2.1.307, 2.1.308, 2.1.312' && now.r === 'materialize' && now.file && now.archived === 1 && now.door?.state === 'written' && now.door.cli === '2.1.308' && now.spawn, 'the hub\'s CLI = 2.1.308 (measured 2026-10-22) ⇒ oatInFile true: the dead login archived, the token in the member\'s folder, the row says written · CLI 2.1.308, the spawn reads the file — as on 2.1.307', now);
+  const { '2.1.308': measured308, '2.1.312': _m312b, ...three } = COMMITTED.versions;
   const threeF = path.join(tmp, 'fx-2.1.296-2.1.306-2.1.307.json'); fs.writeFileSync(threeF, JSON.stringify({ versions: three }, null, 1) + '\n');
   const base = await on308('base', threeF);
   ok(!!measured308 && base.c.ok === false && base.c.known && base.c.measured === '2.1.296, 2.1.306, 2.1.307' && base.r === 'cli-unmeasured' && !base.file && base.archived === 0 && base.door?.state === 'refused' && base.door.reason === 'cli-unmeasured' && !base.spawn, 'RED CONTROL (the .341 base): over the three-version file (2.1.296 + 2.1.306 + 2.1.307) the same 2.1.308 is an UNMEASURED CLI — nothing archived or written, the row says refused · cli-unmeasured, the spawn stays on the env road', base);
@@ -489,11 +497,240 @@ console.log('§6 oat-file-sync — the spawned claude\'s --version gates it');
   } else ok(false, 'RED control anchor present (oat-file-sync)');
   ver = '2.1.300';
   const c2 = await h.tick();
-  ok(!c2.ok && !fs.existsSync(credsOf(amY, y)) && logs.some((l) => /2\.1\.300 — not measured/.test(l)), 'the CLI upgrades to an unmeasured version ⇒ the next tick takes the files back', logs.slice(-1));
+  ok(!c2.ok && fs.existsSync(credsOf(amY, y)) && readJ(credsOf(amY, y))?.claudeAiOauth?.accessToken === OAT && logs.some((l) => /2\.1\.300 — not measured/.test(l)), 'the CLI upgrades to an unmeasured version ⇒ the next tick KEEPS the files and says the version (R1 — 90c995a3 took them back in silence)', logs.slice(-1));
   h.stop();
   ok(!logs.join('\n').includes(OAT.slice(14, 40)), 'nothing it logged carries token bytes');
   const P2 = require(path.join(REPO, 'src/machine-probes.js'));
   ok(typeof P2.cliVersion === 'function' && (await P2.cliVersion(path.join(tmp, 'no-such-claude'))) === null, 'machine-probes.cliVersion: cliFacts\' own which + --version read; a missing binary is null (never a throw)');
+}
+
+console.log('§6b R1 (lane pool-silent-members, inc-mvsjhna7) — a CLI update never shrinks a pool in silence');
+{
+  // THE INCIDENT, replayed on the real sweep + the real For-you store: the hub's claude auto-updated to 2.1.312 while the
+  // fixture named only 2.1.296–2.1.308. 90c995a3 took the member's token file back at the next sweep with no line said,
+  // and the pool dropped it as «not logged in» (8 of 14 members silent for 17 h). Here: the fixture WITHOUT its 2.1.312
+  // record (the base's), a fake 2.1.312 `--version`, one member living on our token file beside one live login.
+  const S = require(path.join(REPO, 'src/server/oat-file-sync.js'));
+  const { UserTodoManager } = require(path.join(REPO, 'src/user-todos.js'));
+  const APA = require(path.join(REPO, 'src/account-pool-auto.js'));
+  const NOTICE = (() => { try { return require(path.join(REPO, 'src/server/cli-unmeasured-notice.js')); } catch { return null; } })(); // the pool engine creates it and ticks it every 60 s
+  const FXC = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/oat-in-file.json'), 'utf8'));
+  const { '2.1.312': _r312, ...upTo308 } = FXC.versions;
+  const fxBase = path.join(tmp, 'fx-to-2.1.308.json'); fs.writeFileSync(fxBase, JSON.stringify({ versions: upTo308 }));
+  const dI = path.join(tmp, 'data-r1-cli'); fs.mkdirSync(dI, { recursive: true });
+  const amI = new AccountManager({ dataDir: dI, oatFixture: fxBase });
+  const D1 = amI.createSubscription({ name: 'acct-1' }).id; put(amI, D1, login(NOW, { dead: true }));
+  const L2 = amI.createSubscription({ name: 'acct-2' }).id; put(amI, L2, login(NOW));
+  const PI = amI.createPool({ name: 'All' }).id;
+  const todos = new UserTodoManager({ dataDir: dI, onChange: () => { } });
+  const ITEMS = () => todos.openItems().filter((i) => i.sessionKey === 'pool:cli-unmeasured');
+  const logs = []; let ver = '2.1.308';
+  // one tick = the sweep's tick, then the notice's (the engine's 60 s tick); a restart = a fresh pair
+  const mkSync = () => {
+    const sy = S.start({ accounts: amI, machineProbes: { cliVersion: async () => ver }, claudeCmd: 'x', log: (l) => logs.push(String(l)), bootDelayMs: 1e9, recheckMs: 1e9 });
+    const no = NOTICE ? NOTICE.create({ accounts: () => amI, todos: () => todos, log: (l) => logs.push(String(l)) }) : null;
+    return { async tick() { await sy.tick(); if (no) no.tick(); }, stop() { sy.stop(); } };
+  };
+  const h = mkSync();
+  amI.setOat(D1, OAT); await amI.oatFileSettled();
+  await h.tick();
+  ok(readJ(credsOf(amI, D1))?.claudeAiOauth?.accessToken === OAT && amI.poolMembers(PI).some((m) => m.id === D1), '(2.1.308, measured: acct-1 lives on its token file and is a pool candidate)');
+  const said0 = [];
+  const log0 = console.log; console.log = (...a) => { said0.push(a.join(' ')); };
+  ver = '2.1.312';
+  try { await h.tick(); } finally { console.log = log0; }
+  ok(readJ(credsOf(amI, D1))?.claudeAiOauth?.accessToken === OAT, 'R1: the hub auto-updates to 2.1.312 (a version the fixture never measured) ⇒ acct-1\'s token file STAYS in its folder (90c995a3: deleted at this sweep, no line said)', { exists: fs.existsSync(credsOf(amI, D1)) });
+  const roster = typeof amI.poolRoster === 'function' ? amI.poolRoster(PI) : null;
+  const rD = roster && roster.find((r) => r.id === D1);
+  ok(!amI.poolMembers(PI).some((m) => m.id === D1) && !!rD && rD.placeable === false && rD.why && rD.why.code === 'cli-unmeasured' && rD.why.cli === '2.1.312' && rD.why.file === true,
+    'R1: …the pool places nothing NEW on it, and its ROSTER still lists it — unplaceable WITH its reason (cli-unmeasured · CLI 2.1.312 · the file there)', roster);
+  ok(!!rD && typeof APA.unplaceableText === 'function' && APA.unplaceableText(rD.why) === 'long-lived token only (CLI 2.1.312 unmeasured) — re-login or wait for the measurement', 'R1: …in words: «long-lived token only (CLI 2.1.312 unmeasured) — re-login or wait for the measurement»', rD && typeof APA.unplaceableText === 'function' && APA.unplaceableText(rD.why));
+  const rowI = amI.list().accounts.find((a) => a.id === D1);
+  ok(rowI.loginState && rowI.loginState.state === 'oat-only' && rowI.oatFile && rowI.oatFile.state === 'held' && rowI.oatFile.cli === '2.1.312', 'R1: …the row reads «long-lived token only» (held · cli-unmeasured · CLI 2.1.312), never «not logged in»', { ls: rowI.loginState && rowI.loginState.state, door: rowI.oatFile });
+  const it1 = ITEMS();
+  ok(it1.length === 1 && it1[0].text === 'The Claude CLI updated to 2.1.312; 1 account cannot be placed by the pool until this version is measured — its login is kept' && /Accounts: acct-1\./.test(it1[0].detail) && it1[0].origin === 'pool' && it1[0].i18n && it1[0].i18n.text.params.v === '2.1.312',
+    'R1: …ONE For-you item: «The Claude CLI updated to 2.1.312; 1 account cannot be placed by the pool until this version is measured — its login is kept», naming acct-1 (origin pool, zh/ja params)', it1.map((i) => ({ text: i.text, detail: i.detail, origin: i.origin })));
+  ok(logs.some((l) => /claude CLI 2\.1\.312 is not measured: 1 pool member\(s\) cannot be placed until it is \(their token files are kept\) — For-you item filed/.test(l)) && !logs.some((l) => l.includes('acct-1')), 'R1: …the journal says the version, the count and that the item was filed — never the item\'s words', logs.slice(-2));
+  await h.tick();
+  ok(ITEMS().length === 1, 'R1: …a second sweep files nothing more (one item per version)', ITEMS().length);
+  const engSrc = fs.readFileSync(path.join(REPO, 'src/server/usage-pool-engine.js'), 'utf8');
+  ok(/const cliUnmeasuredNotice = require\('\.\/cli-unmeasured-notice\.js'\)\.create\(\{ accounts: \(\) => accounts, todos: \(\) => getUserTodos\(\), file: path\.join\(rootDir, 'data', 'cli-unmeasured-notice\.json'\) \}\);[^\n]*\nsetInterval\(\(\) => \{ try \{ sweepUsageAnchors\(\); \} catch \{\} try \{ cliUnmeasuredNotice\.tick\(\); \} catch \{\} \}, 60000\);/.test(engSrc), 'R1 WIRING: the pool engine creates the notice with the store, the For-you store and its OWN memory file (data/cli-unmeasured-notice.json), and ticks it every 60 s (oat-file-sync itself still requires nothing)');
+  ver = '2.1.308'; await h.tick();
+  ok(ITEMS().length === 0 && amI.poolMembers(PI).some((m) => m.id === D1), 'R1: the version is measured again ⇒ the item resolves itself and acct-1 is a candidate again (its file never left)', { open: ITEMS().length });
+  const told = todos.idsWhere((i) => i.sessionKey === 'pool:cli-unmeasured');
+  ver = '2.1.312'; const h2 = mkSync(); await h2.tick(); h2.stop();
+  // (acceptance r2) the AGENT closed it (the CLI was on a measured version), the owner never did: acct-1 held out again
+  // on 2.1.312 re-opens THAT item — never silence while a member is held out, never a second filing
+  ok(ITEMS().length === 1 && ITEMS()[0].id === told[0] && todos.idsWhere((i) => i.sessionKey === 'pool:cli-unmeasured').length === 1, 'R1: …back on 2.1.312 after a restart, acct-1 held out again ⇒ the SAME item re-opens (the agent closed it, the owner never did) — one item, never a second filing', { open: ITEMS().map((i) => i.id), told });
+  h.stop();
+  // a take-back for ANOTHER reason (the owner removed the token) is journaled BY NAME
+  ver = '2.1.308'; amI.noteCliVersion('2.1.308'); await amI.oatFileSettled();
+  const said = []; const log1 = console.log; console.log = (...a) => { said.push(a.join(' ')); };
+  try { amI.clearOat(D1); await amI.oatFileSettled(); } finally { console.log = log1; }
+  ok(!fs.existsSync(credsOf(amI, D1)) && said.some((l) => /^\[oat-file\] took acct-1's long-lived-token file back out of its folder — none; the pool cannot place it/.test(l)), 'R1: a take-back for another reason (the token removed) is journaled BY NAME — never a quiet sweep', said);
+  ok(!said0.some((l) => /took acct-1/.test(l)), '…and the CLI update itself took nothing back (no take-back line at the 2.1.312 sweep)', said0);
+}
+
+console.log('§6c R1 acceptance r2 — the item\'s lifecycle: an unreadable version is no verdict, the owner\'s dismissal is final, the open item is patched in place, the roster read throttled');
+{
+  const { UserTodoManager } = require(path.join(REPO, 'src/user-todos.js'));
+  const NOTICE = require(path.join(REPO, 'src/server/cli-unmeasured-notice.js'));
+  const CC = require(path.join(REPO, 'src/cli-caps.js'));
+  const S = require(path.join(REPO, 'src/server/oat-file-sync.js'));
+  const KEY = NOTICE.ITEM_KEY;
+  // (1) AN UNREADABLE VERSION IS NOT A VERDICT — the REAL store + the REAL sweep + the REAL For-you store: a restart whose
+  // first `claude --version` gets no answer (a loaded boot, the binary mid-upgrade: machine-probes' 5 s timeout) leaves the
+  // version unknown until the sweep's next 15-min recheck. 9d53db09's 60 s tick closed the item as «done» by the agent
+  // and, once the version read again, never filed it again (the just-closed item sat in the snapshot's tail)
+  {
+    const FXC = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/oat-in-file.json'), 'utf8'));
+    const { '2.1.312': _x, ...upTo308 } = FXC.versions;
+    const fx = path.join(tmp, 'fx-6c.json'); fs.writeFileSync(fx, JSON.stringify({ versions: upTo308 }));
+    const dir = path.join(tmp, 'data-6c-unknown'); fs.mkdirSync(dir, { recursive: true });
+    const memFile = path.join(dir, 'cli-unmeasured-notice.json');
+    const run = async (M) => {
+      fs.rmSync(dir, { recursive: true, force: true }); fs.mkdirSync(dir, { recursive: true });
+      const am1 = new AccountManager({ dataDir: dir, oatFixture: fx });
+      const D = am1.createSubscription({ name: 'acct-1' }).id; put(am1, D, login(NOW, { dead: true }));
+      const L = am1.createSubscription({ name: 'acct-2' }).id; put(am1, L, login(NOW));
+      am1.createPool({ name: 'All' });
+      am1.setOat(D, OAT); await am1.oatFileSettled();
+      const logs = [];
+      const boot = (am, ver) => {
+        const todos = new UserTodoManager({ dataDir: dir, onChange: () => { } });
+        const sy = S.start({ accounts: am, machineProbes: { cliVersion: async () => ver() }, claudeCmd: 'x', log: (l) => logs.push(String(l)), bootDelayMs: 1e9, recheckMs: 1e9 });
+        const no = M.create({ accounts: () => am, todos: () => todos, file: memFile, log: (l) => logs.push(String(l)) });
+        return { todos, async tick() { await sy.tick(); no.tick(); }, stop() { sy.stop(); todos.flush(); } };
+      };
+      let v1 = '2.1.308'; const b1 = boot(am1, () => v1); await b1.tick(); // measured: acct-1's token file is written
+      v1 = '2.1.312'; await b1.tick();                                       // the auto-update: acct-1 held out, the item filed
+      const id = (b1.todos.openItems().find((i) => i.sessionKey === KEY) || {}).id || null; b1.stop();
+      // the restart: a fresh store (its CLI version unknown until the probe answers) and a probe that does not answer
+      const am2 = new AccountManager({ dataDir: dir, oatFixture: fx });
+      let v2 = null; const b2 = boot(am2, () => v2);
+      await b2.tick(); await b2.tick(); // two 60 s ticks inside the unknown spell
+      const snap = (x) => (x ? { status: x.status, by: x.resolvedBy } : null); // the store hands its live record: copied now
+      const during = snap(b2.todos.get(id));
+      v2 = '2.1.312'; await b2.tick(); // the version reads again: still unmeasured, acct-1 still held out
+      const after = snap(b2.todos.get(id)); const open = b2.todos.openItems().filter((i) => i.sessionKey === KEY); b2.stop();
+      return { id, during, after, open: open.map((i) => i.id), unreadable: logs.filter((l) => /version unreadable/.test(l)).length };
+    };
+    const r = await run(NOTICE);
+    ok(!!r.id && r.during && r.during.status === 'open' && r.unreadable === 1, 'r2 (1): a restart whose `claude --version` gets no answer (the CLI unknown) leaves the open item EXACTLY as it is — two ticks in the unknown spell, the item still open, and the journal says «version unreadable» ONCE (9d53db09: «done» by the agent at the first tick)', r);
+    ok(r.after && r.after.status === 'open' && r.open.length === 1 && r.open[0] === r.id, 'r2 (1): …the version reads again (2.1.312, still unmeasured, acct-1 held out): the SAME item is open — never closed, never a second filing (9d53db09: closed and never re-filed)', r);
+    const M0 = compileWith('src/server/cli-unmeasured-notice.js', "const unreadable = !caps.ok && (!caps.known || !caps.cli || caps.cli === 'unparsed');", 'const unreadable = false;');
+    const rc = M0 ? await run(M0) : null;
+    ok(!!rc && rc.during && rc.during.status === 'done' && rc.during.by === 'agent', 'RED CONTROL (1): the same restart with the unknown-version guard taken out closes the item «done» by the agent — 9d53db09\'s defect, so the guard is what keeps it', rc);
+  }
+  // (2) THE OWNER'S DISMISSAL IS FINAL; THE OPEN ITEM IS PATCHED; THE ROSTER READ IS THROTTLED — the REAL For-you store on an
+  // injected clock and the module's OWN memory file (data/cli-unmeasured-notice.json); the store is a stand-in that counts
+  // its roster reads (accounts.cliUnmeasuredNotice reads every pool's members' credential files)
+  const w0FactOf = (M) => { const w = world(M); const id = w.mk(M).tick(); return !!id && w.todos.get(id)[M.FACT || 'cliUnmeasured'] === '2.1.312'; };
+  const world = (M = NOTICE, { file = true } = {}) => {
+    let clock = Date.parse('2026-10-28T12:00:00Z');
+    const dir = fs.mkdtempSync(path.join(tmp, 'data-6c-'));
+    const memFile = path.join(dir, 'cli-unmeasured-notice.json');
+    const todos = new UserTodoManager({ dataDir: dir, onChange: () => { }, now: () => clock, expirySweepMs: 0 });
+    const w = { todos, reads: 0, cli: '2.1.312', ok: false, names: ['acct-7', 'acct-8', 'acct-9', 'acct-10', 'acct-11', 'acct-12'], logs: [], memFile };
+    const acc = {
+      oatFileCaps: () => ({ known: true, ok: w.ok, cli: w.cli }),
+      cliUnmeasuredNotice: () => { w.reads++; return !w.ok && w.names.length ? { cli: w.cli, members: w.names.map((n, i) => ({ id: 'm' + i, name: n })), prefix: CC.cliUnmeasuredPrefix(w.cli), item: CC.cliUnmeasuredItem({ cli: w.cli, names: w.names }) } : null; },
+    };
+    w.mk = (Mod = M, f = file ? memFile : null) => Mod.create({ accounts: () => acc, todos: () => todos, file: f, log: (l) => w.logs.push(String(l)), now: () => clock });
+    w.wait = (ms) => { clock += ms; };
+    w.othersResolved = (n) => { for (let i = 0; i < n; i++) { clock += 5 * 60e3; const r = todos.add('sess-other-' + i + '-' + clock, { text: 'other item ' + i + ' ' + clock, origin: 'agent', by: 'agent' }); todos.setStatus(r.id, 'done', 'user'); } };
+    w.mine = () => todos.idsWhere((i) => i.sessionKey === KEY).map((id) => todos.get(id));
+    return w;
+  };
+  {
+    const w = world(); const n1 = w.mk();
+    const id = n1.tick();
+    ok(!!id && w.todos.get(id).text.startsWith('The Claude CLI updated to 2.1.312; 6 accounts') && w.reads === 1, 'r2 (2): filed once for 2.1.312 — «6 accounts cannot be placed …»', w.mine().map((i) => i.text));
+    const r0 = w.reads; w.wait(60e3); n1.tick(); w.wait(60e3); n1.tick();
+    ok(w.reads === r0, 'r2 (2) THROTTLE: inside the 15-min recheck the roster is NOT read again (every pool member\'s credential files, on the main thread)', { reads: w.reads });
+    w.names = w.names.slice(0, 4); w.wait(16 * 60e3); n1.tick(); // two members re-logged
+    const p = w.todos.get(id);
+    ok(p.id === id && p.status === 'open' && p.text === 'The Claude CLI updated to 2.1.312; 4 accounts cannot be placed by the pool until this version is measured — their logins are kept' && p.detail.split('\n')[0] === 'Accounts: acct-7, acct-8, acct-9, acct-10.' && p.i18n.text.params.n === 4 && w.mine().length === 1,
+      'r2 (2) PATCH: two members re-logged ⇒ the OPEN item is patched IN PLACE — the same id, «4 accounts», the four names, the zh/ja params — never a second filing (9d53db09: «6 accounts … acct-7 … acct-12» for as long as it stayed open)', { text: p.text, detail: p.detail.split('\n')[0], items: w.mine().length });
+    ok(w.logs.some((l) => /claude CLI 2\.1\.312 is not measured: the For-you item now counts 4 pool member\(s\) \(was 6\)/.test(l)) && !w.logs.some((l) => /acct-/.test(l)), 'r2 (2) PATCH: …the journal says the new count — never the item\'s words', w.logs);
+    w.todos.setStatus(id, 'dismissed', 'user'); // THE OWNER dismisses it
+    w.othersResolved(16); w.wait(61 * 60e3); // a busy For-you: 16 other items resolved over 80 min, then an hour more
+    const inTail = (w.todos.snapshot().resolved || []).some((x) => x.id === id);
+    n1.tick();
+    ok(!inTail && w.todos.get(id).status === 'dismissed', 'r2 (2) FINAL: dismissed by the owner, out of the For-you snapshot\'s resolved tail (16 others resolved, > 1 h) — the 15-min recheck leaves it DISMISSED (9d53db09: `add` re-opened it)', { inTail, status: w.todos.get(id).status });
+    w.wait(16 * 60e3); w.mk().tick();
+    ok(w.todos.get(id).status === 'dismissed', 'r2 (2) FINAL: …after a restart (the memory file): still dismissed', w.todos.get(id).status);
+    w.wait(16 * 60e3); w.mk(NOTICE, null).tick();
+    ok(w.todos.get(id).status === 'dismissed', 'r2 (2) FINAL: …after a restart with NO memory file (the store\'s FULL ledger is the belt — never its display tail): still dismissed', w.todos.get(id).status);
+    const mem = JSON.parse(fs.readFileSync(w.memFile, 'utf8'));
+    ok(mem.versions && mem.versions['2.1.312'] && mem.versions['2.1.312'].itemId === id && mem.versions['2.1.312'].resolvedBy === 'user' && mem.versions['2.1.312'].count === 4 && mem.versions['2.1.312'].filedAt > 0, 'r2 (2) the module\'s OWN memory: {versions: {"2.1.312": {filedAt, itemId, count: 4, resolvedBy: "user", resolvedAt}}} — written atomically, read at the next boot', mem);
+    w.todos._state.items = w.todos._state.items.filter((i) => i.id !== id); // the store's 1000-item ledger pruned it
+    w.wait(16 * 60e3); w.mk().tick();
+    ok(w.mine().length === 0, 'r2 (2) FINAL: …and once the store\'s ledger has PRUNED the item, its memory alone keeps the owner\'s word — nothing filed again for 2.1.312', w.mine().map((i) => i.status));
+    w.cli = '2.1.313'; w.wait(16 * 60e3); const id13 = w.mk().tick();
+    ok(!!id13 && w.todos.get(id13).text.startsWith('The Claude CLI updated to 2.1.313; 4 accounts'), 'r2 (2): …a NEW version is a new key — 2.1.313 files its own item', w.mine().map((i) => i.text));
+  }
+  {
+    // RED CONTROL (2): the same owner's dismissal with the module's memory taken out (the rec never read) — `add` re-opens it
+    const Mx = compileWith('src/server/cli-unmeasured-notice.js', 'if (rec && ownerWord(rec.resolvedBy)) return null;', 'if (false) return null;'); // (r3: the owner's word, learned this tick)
+    const w = world(Mx || NOTICE); const n1 = w.mk();
+    const id = n1.tick(); w.todos.setStatus(id, 'dismissed', 'user'); w.othersResolved(16); w.wait(61 * 60e3); n1.tick();
+    ok(!!Mx && w.todos.get(id).status === 'open', 'RED CONTROL (2): with its memory taken out, the dismissed item is RE-OPENED at the recheck — 9d53db09\'s defect, so the memory is what keeps the owner\'s word', Mx && w.todos.get(id).status);
+  }
+  {
+    // (3) nobody left out ⇒ the AGENT resolves it; held out again on the same version ⇒ the SAME item re-opens; measured ⇒ resolved, no roster read
+    const w = world(); const n1 = w.mk(); const id = n1.tick();
+    const names = w.names; w.names = []; w.wait(16 * 60e3); n1.tick();
+    const closed = { ...w.todos.get(id) }; // the store hands its live record: copied now
+    w.names = names.slice(0, 2); w.wait(16 * 60e3); n1.tick();
+    const back = { ...w.todos.get(id) };
+    ok(closed.status === 'done' && closed.resolvedBy === 'agent' && back.status === 'open' && back.text.startsWith('The Claude CLI updated to 2.1.312; 2 accounts') && w.mine().length === 1, 'r2 (3): nobody left out ⇒ resolved by the agent; two held out again on 2.1.312 ⇒ the SAME item re-opens, patched to «2 accounts» (the agent closed it, the owner never did)', { closed: closed.status + '/' + closed.resolvedBy, back: back.status, text: back.text });
+    const r0 = w.reads; w.ok = true; w.wait(60e3); n1.tick(); w.wait(16 * 60e3); n1.tick();
+    ok(w.todos.get(id).status === 'done' && w.todos.get(id).resolvedBy === 'agent' && w.reads === r0, 'r2 (3): the version MEASURED ⇒ the item resolves itself, and a measured CLI reads no roster at all', { status: w.todos.get(id).status, reads: w.reads - r0 });
+  }
+  // ── acceptance r3: the owner's word is never lost (r2i12/attack.cjs legs U4 / a / d / e / c + skeptic-notice-reopen.cjs A / B)
+  const NF = NOTICE.FACT;
+  const prune = (w, id) => { w.todos._state.items = w.todos._state.items.filter((i) => i.id !== id); }; // the store's 1000-item ledger pruned it
+  const red = (label, from, to) => { const M = compileWith('src/server/cli-unmeasured-notice.js', from, to); ok(!!M, `RED CONTROL ${label}: the patch hits`); return M; };
+  { // (4) U4 — dismissed DURING an unreadable spell, pruned before the version reads again
+    const leg = (M) => { const w = world(M); const n = w.mk(M); const id = n.tick(); w.cli = null; w.wait(60e3); n.tick(); w.todos.setStatus(id, 'dismissed', 'user'); w.wait(60e3); n.tick(); prune(w, id); w.cli = '2.1.312'; w.wait(16 * 60e3); n.tick(); return { open: w.mine().filter((i) => i.status === 'open').length, mem: JSON.parse(fs.readFileSync(w.memFile, 'utf8')).versions['2.1.312'].resolvedBy }; };
+    const r = leg(NOTICE);
+    ok(r.open === 0 && r.mem === 'user', 'r3 (4) U4: the owner dismisses DURING an unreadable spell and the store prunes the item before the version reads again ⇒ nothing is filed again (the word was learned in the spell — learning is free, only the filing waits)', r);
+    const M = red('(4)', 'learn(todos, ledger, v); // whatever the version read', 'if (!unreadable) learn(todos, ledger, v); // whatever the version read');
+    if (M) { const rr = leg(M); ok(rr.open === 1, 'RED CONTROL (4): with learning skipped in the spell (b552c972) a NEW item is filed for the version the owner dismissed', rr); }
+  }
+  { // (5) (a) a DAMAGED memory: said once, rebuilt from the ledger (by the item's FACT) before anything is filed
+    const leg = (M, body) => { const w = world(M); const n = w.mk(M); const id = n.tick(); w.todos.setStatus(id, 'dismissed', 'user'); w.wait(60e3); n.tick(); fs.writeFileSync(w.memFile, body(w, id)); w.names = w.names.slice(0, 4); w.wait(16 * 60e3); const l0 = w.logs.length; w.mk(M).tick(); w.wait(16 * 60e3); w.mk(M).tick(); return { id, st: w.todos.get(id).status, items: w.mine().length, said: w.logs.slice(l0).filter((l) => /memory cli-unmeasured-notice\.json is damaged/.test(l)).length }; };
+    const garbage = () => 'garbage {{{ not json';
+    const neverHad = (w) => JSON.stringify({ versions: { '2.1.312': { filedAt: 1, itemId: 'ut-neverhad00', count: 6, resolvedBy: null, resolvedAt: null } } });
+    const g = leg(NOTICE, garbage), nh = leg(NOTICE, neverHad);
+    ok(g.st === 'dismissed' && g.items === 1 && g.said === 1, 'r3 (5) a GARBAGE memory file (then two members re-logged): said ONCE in the journal over two restarts, rebuilt from the ledger — the dismissal holds, no second item', g);
+    ok(nh.st === 'dismissed' && nh.items === 1, 'r3 (5) a memory naming an item the store never had (resolvedBy null) while the dismissed item is in the ledger, the count 6→4 ⇒ still dismissed, no second item (b552c972: a SECOND item filed beside it)', nh);
+    ok(w0FactOf(NOTICE), 'r3 (5) …the item carries its FACT (`' + NF + '`: the version) — the ledger belt keys on it, never on the words');
+    const M = red('(5)', 'const byFact = (todos) => {', 'const byFact = (todos) => new Map(); const byFact0 = (todos) => {');
+    if (M) { const rr = leg(M, neverHad); ok(rr.items === 2, 'RED CONTROL (5): with the ledger belt not keyed on the fact, the never-had memory files a SECOND item for the dismissed version', rr); }
+  }
+  { // (6) (d) the bound: 21 versions, the first one dismissed, the ledger pruned — the owner's word outlives the agent's
+    const leg = (M) => { const w = world(M); const n = w.mk(M); const ids = []; for (let k = 0; k < 21; k++) { w.cli = '2.1.' + (400 + k); w.wait(16 * 60e3); ids.push(n.tick()); if (k === 0) { w.todos.setStatus(ids[0], 'dismissed', 'user'); w.wait(60e3); n.tick(); } } for (const id of ids) if (id && w.todos.get(id) && w.todos.get(id).status !== 'open') prune(w, id); const keys = Object.keys(JSON.parse(fs.readFileSync(w.memFile, 'utf8')).versions); w.cli = '2.1.400'; w.wait(16 * 60e3); const back = n.tick(); return { kept: keys.length, has400: keys.includes('2.1.400'), refiled: back }; };
+    const r = leg(NOTICE);
+    ok(r.kept === 20 && r.has400 && !r.refiled, 'r3 (6) 21 versions (the first dismissed by the owner), the ledger pruned: the memory keeps 20 and the owner\'s word is never the one evicted — back on 2.1.400, nothing filed (b552c972: its own save evicted the record it had just written)', r);
+    const M = red('(6)', '(ownerWord(memory.versions[b].resolvedBy) - ownerWord(memory.versions[a].resolvedBy)) || ', '');
+    if (M) { const rr = leg(M); ok(!!rr.refiled, 'RED CONTROL (6): evicting by last use alone drops the dismissed version, and back on it a new item is filed', rr); }
+  }
+  { // (7) (e) the owner CLEARED the item (Clear content…), the memory deleted, a restart — the cleared item keeps its fact
+    const leg = (M) => { const w = world(M); const n = w.mk(M); const id = n.tick(); w.todos.clearItems([id], { by: 'owner' }); w.wait(60e3); n.tick(); fs.rmSync(w.memFile, { force: true }); w.wait(16 * 60e3); const r = w.mk(M).tick(); return { refiled: r, items: w.mine().length, fact: w.todos.get(id)[NF] || null, open: w.todos.get(id).status }; };
+    const r = leg(NOTICE);
+    ok(!r.refiled && r.items === 1 && r.fact === '2.1.312', 'r3 (7) cleared by the owner, the memory deleted, a restart ⇒ nothing filed again: the cleared item keeps its fact (Clear content… drops words, never facts)', r);
+    const M = red('(7)', 'if (id) { patch(todos, id, v, null); setRec(', 'if (id) { setRec(');
+    if (M) { const rr = leg(M); ok(!!rr.refiled, 'RED CONTROL (7): an item filed without its fact is lost to the belt once cleared (its words are gone) — re-filed', rr); }
+  }
+  { // (8) the owner's LATER word: a hand reopen / the Mark-all-read Undo — learned, and the open item patched again
+    const leg = (M, undo) => { const w = world(M); const n = w.mk(M); const id = n.tick(); w.wait(60e3); if (undo) w.todos.readNotices([id], true, 'user'); else w.todos.setStatus(id, 'dismissed', 'user'); w.wait(30e3); n.tick(); w.wait(5e3); if (undo) w.todos.readNotices([id], false, 'user'); else w.todos.setStatus(id, 'open', 'user'); w.names = w.names.slice(0, 1); w.wait(16 * 60e3); n.tick(); const it = w.todos.get(id); return { st: it.status, text: it.text.replace(/^The Claude CLI updated to 2\.1\.312; /, '').replace(/ cannot be placed.*$/, '') }; };
+    const a = leg(NOTICE, false), b = leg(NOTICE, true);
+    ok(a.st === 'open' && a.text === '1 account' && b.st === 'open' && b.text === '1 account', 'r3 (8) the owner REOPENS the dismissed item by hand / presses Mark-all-read\'s Undo, five members re-log ⇒ the open item reads «1 account» (the last transition is learned in both directions — b552c972: frozen at «6 accounts»)', { a, b });
+    const M = red('(8)', '      const by = lastWord(it);\n', '      const by = r && ownerWord(r.resolvedBy) ? r.resolvedBy : lastWord(it);\n');
+    if (M) { const rr = leg(M, false); ok(rr.text === '6 accounts', 'RED CONTROL (8): an owner\'s word learned ONE way (b552c972) freezes the reopened item at «6 accounts»', rr); }
+  }
 }
 
 console.log('§7 VERIFY R1 — each finding of pool-oat-verify (4c1be7e0e REFUTED) as a store leg, with its RED control');
@@ -639,20 +876,23 @@ console.log('§7 VERIFY R1 — each finding of pool-oat-verify (4c1be7e0e REFUTE
     const link = am5.ensureSessionPoolLink(P5, 'sess-5-1791900000000', O1, { why: 'spawn' });
     const c = await nv(am5, '2.1.300 (Claude Code)');
     let spawnErr = null; try { am5.resolveForSpawn(P5, 'claude', { sessionKey: 'sess-6-1791900000000' }); } catch (e) { spawnErr = e; }
-    const out = { c, linkedCreds: readJ(path.join(link, '.credentials.json'))?.claudeAiOauth?.accessToken === OAT, cands: am5.poolMembers(P5).length, isMember: am5.isPoolMember(P5, O1), spawnErr: spawnErr && { code: spawnErr.code, msg: spawnErr.message }, doorO1: am5.list().accounts.find((a) => a.id === O1).oatFile, o2Gone: !fs.existsSync(credsOf(am5, O2)) };
+    const out = { c, linkedCreds: readJ(path.join(link, '.credentials.json'))?.claudeAiOauth?.accessToken === OAT, cands: am5.poolMembers(P5).length, isMember: am5.isPoolMember(P5, O1), spawnErr: spawnErr && { code: spawnErr.code, msg: spawnErr.message }, doorO1: am5.list().accounts.find((a) => a.id === O1).oatFile, o2Kept: fs.existsSync(credsOf(am5, O2)) };
     am5.dropSessionPoolLink(P5, 'sess-5-1791900000000');
     await am5.syncOatFiles();
     out.afterLast = fs.existsSync(credsOf(am5, O1));
     return out;
   };
   const r5 = await f5();
-  ok(r5.c.ok === false && r5.c.known && r5.linkedCreds && r5.o2Gone, 'F5 gateFlip: the hub moves to an unmeasured 2.1.300 — the linked conversation\'s file STAYS (its creds intact through the link); the unlinked member\'s goes', r5);
+  ok(r5.c.ok === false && r5.c.known && r5.linkedCreds && r5.o2Kept, 'F5 gateFlip: the hub moves to an unmeasured 2.1.300 — the linked conversation\'s file STAYS (its creds intact through the link); the unlinked member\'s STAYS too (R1: never taken back for a version reason)', r5);
   ok(r5.cands === 0 && r5.isMember === false && r5.spawnErr && r5.spawnErr.code === 'oat-cli-unmeasured' && /conversations already running continue/.test(r5.spawnErr.msg), 'F5: the pool has 0 candidates for a NEW placement (poolMembers / isPoolMember) and a new conversation is refused by name (oat-cli-unmeasured), never "signed out"', { cands: r5.cands, err: r5.spawnErr });
   ok(r5.doorO1 && r5.doorO1.state === 'held' && r5.doorO1.cli === '2.1.300', 'F5: the row says it — held (「此 CLI 版本未测量：现有会话继续，不再新派」)', r5.doorO1);
-  ok(r5.afterLast === false, 'F5: the last link gone, the next sweep takes the file back', r5.afterLast);
-  const mF5 = mutantStore({ le: [["    if (ours && known && m.linked) return { verdict: 'cli-unmeasured', archive: false, cleanup: false, held: true };\n", '']] });
+  ok(r5.afterLast === true, 'F5: the last link gone, the next sweep KEEPS the file (R1 — 90c995a3 took it back here, with no word said)', r5.afterLast);
+  const mF5 = mutantStore({ le: [["    return { verdict: 'cli-unmeasured', archive: false, cleanup: false, ...(ours ? { held: true } : {}) };\n", "    return { verdict: 'cli-unmeasured', archive: false, cleanup: ours };\n"]] });
   const r5m = mF5 ? await f5(mF5) : null;
   ok(!!r5m && r5m.linkedCreds === false, 'RED control (F5): without the held rung the flip unlinks the file under the running conversation (r1) — the leg above catches it', r5m && { linkedCreds: r5m.linkedCreds });
+  const mF5r1 = mutantStore({ le: [["    return { verdict: 'cli-unmeasured', archive: false, cleanup: false, ...(ours ? { held: true } : {}) };\n", "    if (ours && known && m.linked) return { verdict: 'cli-unmeasured', archive: false, cleanup: false, held: true };\n    return { verdict: 'cli-unmeasured', archive: false, cleanup: ours && known };\n"]] });
+  const r5r1 = mF5r1 ? await f5(mF5r1) : null;
+  ok(!!r5r1 && r5r1.linkedCreds === true && r5r1.o2Kept === false && r5r1.afterLast === false, 'RED control (R1, the 90c995a3 rule): held only while linked — the unlinked member\'s file goes at the flip and the last link\'s departure takes the other back (the two legs above catch it)', r5r1 && { linkedCreds: r5r1.linkedCreds, o2Kept: r5r1.o2Kept, afterLast: r5r1.afterLast });
   const mF5b = mutantStore({ acc: [['    return !(c.known && !c.ok);\n', '    return true;\n']] });
   const r5b = mF5b ? await f5(mF5b) : null;
   ok(!!r5b && r5b.cands > 0, 'RED control (F5): a candidacy that ignores the gate keeps placing on the held member — the 0-candidates leg catches it', r5b && r5b.cands);
@@ -713,7 +953,7 @@ console.log('§7 VERIFY R1 — each finding of pool-oat-verify (4c1be7e0e REFUTE
     const o = am10.createSubscription({ name: 'Oat only' }).id; put(am10, o, login(NOW, { dead: true })); await so(am10, o, OAT);
     const l = am10.createSubscription({ name: 'Login' }).id; const lv = login(NOW); put(am10, l, lv);
     ok(am10.readSubCreds(o).oatFile === true && am10.usageToken(o) === null && am10.usageToken(l) === lv.claudeAiOauth.accessToken, 'F10: usageToken never hands out a materialized oat (inference-only; the ⟳ / identity-group reads refuse an oat-only row as before — no token ⇒ no request) — a live login\'s access token still reads', { oat: am10.usageToken(o) === OAT ? 'OAT' : am10.usageToken(o) });
-    const mF10 = mutantStore({ acc: [['    return info.oatFile ? null : (info.accessToken || null);', '    return info.accessToken || null;']] });
+    const mF10 = mutantStore({ acc: [['    return info.oatFile || !usageBearerOk(info.accessToken) ? null : info.accessToken;', '    return info.accessToken || null;']] }); // (acceptance r3: the usage bearer law)
     if (mF10) { const amM = f10(mF10); await nv(amM, '2.1.296'); const x = amM.createSubscription({ name: 'X' }).id; put(amM, x, login(NOW, { dead: true })); await so(amM, x, OAT); ok(amM.usageToken(x) === OAT, 'RED control (F10): the r1 reader hands the oat to the usage call — the leg above catches it'); } else ok(false, 'F10 anchor present');
   }
 

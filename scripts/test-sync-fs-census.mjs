@@ -251,6 +251,7 @@ const ROWS = [
   ["src/server/cli-cmd.js", "*", 1, "local-only", "boot-only: fixed bin dirs + PATH entries + a command name (xset/xauth/claude/codex)"],
   ["src/server/cli-env.js", "*", 2, "local-only", "rd = /run/user/<uid>; p = $XAUTHORITY, /run/user/<uid>/*auth*, ~/.Xauthority"],
   ["src/server/cli-registration.js", "*", 3, "local-only", "stateFile = data/cli-registration.json and data/claude-cli-dumps/<semver>.json under dataDir=<checkout>/data"],
+  ["src/server/cli-unmeasured-notice.js", "*", 1, "local-only", "file = <checkout>/data/cli-unmeasured-notice.json — the unmeasured-CLI item's own memory (usage-pool-engine passes path.join(rootDir, 'data', …)); read once per process"],
   ["src/server/cluster-presets.js", "*", 4, "local-only", "the presets directory the cluster projects (the reader's own; set by the deployment) — deploy config, never a person-named or storage-mount path"],
   ["src/server/conversation-deliver.js", "*", 1, "local-only", "retryFile = <dataDir>/msg-retry.json and its .corrupt- aside; dataDir = server.js <checkout>/data"],
   ["src/server/csp-reports.js", "*", 5, "local-only", "file = <checkout>/data/csp-reports.jsonl (+ .1) or VIBESPACE_CSP_REPORTS_FILE, a chrome suite's scratch file (server.js create)"],

@@ -1878,6 +1878,7 @@ const I_RECV = {
   // ── not a record: what each is ──
   'src/harnesses/claude-oat-expiry.js|a': ['account', 'an account / pool name'], 'server.js|h': ['host', 'a machine name'],
   'src/accounts.js|a': ['account', 'an account'], 'src/accounts.js|target': ['account', 'an account'],
+  'src/server/account-usage-routes.js|row': ['account', 'a pool member\'s roster row (accounts.poolRoster) — its account name in the gather route\'s refusal (lane pool-silent-members acceptance r2)'],
   'src/lib/aes-fallback.js|key.algorithm': ['crypto key', 'the imported AES key\'s algorithm name (AES-CBC / AES-ECB) in a mismatch Error — a constant of the fallback, never a record (lane mac-ard-signin; int259 seam)'],
   'src/browser-profiles.js|f': ['launch fatal row', 'a fixed reason code of LAUNCH_FATALS (lane browser-tmpdir-socket-length)'],
   'src/browser-profiles.js|existing': ['browser profile', 'a profile label'], 'src/browser-profiles.js|profile': ['browser profile', 'a profile label'], 'src/browser-profiles.js|row': ['browser profile', 'a profile label'],
@@ -1955,6 +1956,7 @@ const I_RECV = {
   'src/server/feedback-forward.js|w': ['words', 'the paused feedback forward\'s own words (PURE src/feedback-forward-model.js pauseWords: the target\'s URL as configured, the status its door answered, how many reports wait) — the source of a new For-you record, never a copy of one (lane feedback-forward-404)'],
   'src/server/csp-reports.js|w': ['words', 'the CSP notice\'s own words (PURE src/app-csp.js noticeWords: a directive, what it would block — a keyword or an origin + 3 path segments, never a value — and where it was seen) — the source of a new For-you record, never a copy of one (lane app-page-csp)'],
   'src/server/tls.js|p': ['words', 'the https plan\'s own words (PURE src/tls-plan.js: the owner\'s step — the tailnet\'s HTTPS certificates, the operator right) — the source of a new For-you record, never a copy of one (lane https-tailscale)'],
+  'src/server/cli-unmeasured-notice.js|it': ['words', 'the unmeasured-CLI For-you item\'s own words (PURE src/cli-caps.js cliUnmeasuredItem: the CLI version, the member names, the two ways out) — the source of a new For-you record, never a copy of one (lane pool-silent-members)'],
   'src/server/mount-health-watch.js|it': ['words', 'the wedged-mount For-you item\'s own words (PURE src/mount-health.js canaryItem: the mountpoint, the strikes, who presses it, what the server paused) — the source of a new For-you record, never a copy of one (lane fuse-canary-notice)'],
   'src/server/hooks-late.js|item': ['words', 'the late-hooks For-you line\'s own words (PURE src/hooks-late.js forYouItem: VibeSpace\'s sentence + the names of the running sessions it lists) — the source of a new For-you record, never a copy of one (lane hooks-create)'], 'src/server/hooks-late.js|h': ['words', 'a harness descriptor\'s constant label (Claude Code / Codex) in the journal line — never a record (lane hooks-create)'],
   'src/server/fd-gauge.js|w': ['words', 'the fd gauge\'s own sentence (handle counts by kind, the busiest folders) — never a record (lane-dead-bridge)'], 'src/server/fd-gauge.js|b': ['words', 'the EMFILE blame sentence (who ran out: this server / a mount\'s FUSE daemon / the machine) — never a record (lane-dead-bridge)'],
@@ -2039,6 +2041,7 @@ const I_RECV = {
   'src/lib/manage-agents.js|said': ['pool verdict', 'the gather route\'s answer worded by PURE gatherWords (members and counts) — lane pool-pin'],
   'src/lib/session-lifecycle.js|r': ['account', 'a pool member row (the conversation\'s pin menu) — lane pool-pin'],
   'src/server/usage-pool-engine.js|wake': ['pool verdict', 'a member wake\'s own reason (the engine\'s verdict words)'],
+  'src/server/usage-pool-engine.js|lv': ['pool verdict', 'the pre-fire gate\'s last check — the link member\'s verdict reason (the engine\'s own words: buckets, a member\'s name) — lane pool-silent-members acceptance r3'],
   'src/server/usage-pool-engine.js|owed': ['account', 'the line a cross-provider switch owes the resumed conversation (q-053 P0b): the members\' and providers\' names and two model ids — the engine\'s own words'],
   'src/server/usage-pool-engine.js|out': ['pool verdict', 'a pin\'s placement reason (the engine\'s verdict words)'],
   'src/server/usage-pool-engine.js|ds': ['pool verdict', 'a per-session switch decision (member ids and numbers)'],

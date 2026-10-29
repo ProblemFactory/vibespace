@@ -196,7 +196,7 @@ ck('notePoolAuthFailure: a lapse is recorded durably and NEVER sets the 10-minut
 ck('notePoolAuthFailure: no toast per attempt for a lapse (the episode\'s For-you item is the one voice)', /if \(!lapsed && now - \(_authNoticeAt\.get\(memberId\) \|\| 0\) > 60000\) \{/.test(npa) && /if \(lapsed\) \{ console\.log\(/.test(npa));
 ck('the evidence edge: onMemberReadingFresh asks memberServeLapsed first (a Re-check that answers re-admits at once)', /out\.reason = 'no-member'; return out; \}\n\s*try \{ memberServeLapsed\(memberId\); \} catch \{ \}/.test(ENG));
 ck('the ⟳ route: a failed panel on a lapsed member answers lapsed and never falls to the token ladder; the panel\'s failed answer reaches the census',
-  /if \(!cliOk && !isGlobal && typeof app\.locals\.memberServeLapsed === 'function' && app\.locals\.memberServeLapsed\(key\)\) \{\n\s*const refused = !!\(pv && pv\.outcome === 'write-refused' && pv\.code === 'identity' && pv\.at >= t0\);/.test(UR) && /app\.locals\.noteMemberServeFailure\?\.\(key, \{ message: /.test(UR)
+  /if \(!cliOk && !isGlobal && typeof app\.locals\.memberServeLapsed === 'function' && app\.locals\.memberServeLapsed\(key\)\) \{\n\s*if \(refusedByName\) return res\.json\(refusalAnswer\(refusedByName\)\);\n\s*const refused = !!\(pv && pv\.outcome === 'write-refused' && pv\.code === 'identity' && pv\.at >= t0\);/.test(UR) // (acceptance r3: a door's refusal BY NAME first — the lapsed sentence only after a panel ran) && /app\.locals\.noteMemberServeFailure\?\.\(key, \{ message: /.test(UR)
   && /app\.locals\.memberServeLapsed = memberServeLapsed;/.test(ENG) && /app\.locals\.noteMemberServeFailure = \(id, info\) => noteMemberServeFailure\(id, info, \{ source: 'a usage check' \}\);/.test(ENG));
 ck('server.js hands memberServeLapsed to the auto-cli loop; the loop paces a lapsed member by the idle threshold', /createAutoCliLoop\(\{ serverSetting, accounts, autoCliReady, memberServeLapsed,/.test(SRV) && /const lapsed = !!\(d\.memberServeLapsed && d\.memberServeLapsed\(a\.id\)\);/.test(ACL));
 ck('the panel\'s renewal rung (verify r1 ③): a lapsed member\'s phase-only refusal is handed to reanchorLapsedMember BEFORE the refusal branch, and a verified write is the evidence',
@@ -260,7 +260,9 @@ console.log('§7 the real engine: quotaVerdictFor, beforeAutoResumeFire, fallbac
     const out = path.join(SCR, name); fs.writeFileSync(out, txt); return require(out);
   };
   const REAL = require(ENGINE);
-  const NO_VERDICT = patched('eng-no-verdict.js', [["      if (memberLapsed(li)) return { id: m.id, name: m.name || m.id, v: { ...v, usable: false, blockedUntil: 0, reason: 'subscription inactive — it rejoins once it answers again' } }; // verify r1 ①\n", '']]);
+  // (lane pool-silent-members acceptance r3: the pre-fire gate's LAST CHECK — the link's member on the reading at the fire —
+  // now holds the patched copy's continue on its own, a belt below the verdict: the copy takes it out too)
+  const NO_VERDICT = patched('eng-no-verdict.js', [["      if (memberLapsed(li)) return { id: m.id, name: m.name || m.id, v: { ...v, usable: false, blockedUntil: 0, reason: 'subscription inactive — it rejoins once it answers again' } }; // verify r1 ①\n", ''], ['      if (lv && lv.usable === false) {', '      if (false) {']]);
   const NO_FALLBACK = patched('eng-no-fallback.js', [[", readLogin: poolReadLogin() }); // a lapsed member last (verify r1 ④)", ' });']]);
   const NO_DIRECT = patched('eng-no-direct.js', [["    if (a && a.type === 'subscription' && !session.host) {\n", "    if (false) {\n"]]);
   const { captureRateLimitEvent, parseRateLimitEvent } = require(path.join(REPO, 'src/rate-limit-capture.js'));

@@ -2912,7 +2912,7 @@ console.log('\n§8 the EDF reserve floor (D2): a voluntary move stops at the flo
   ok('§8 the blocked notice says the SPENDING limit, not "out of quota" (which prescribes waiting for a reset)',
     /held back by your spending limits/i.test(sentence) && /15% reserve floor/.test(sentence) && !/out of quota/.test(sentence), sentence);
   const quotaWall = poolBlockedNotice(run({ b: acct(0.99, 6 * D), a: acct(0.995, 12 * H) }, { reserveFloorPct: 15 }), { poolName: 'All', currentName: 'B' });
-  ok('§8 CONTROL: a quota-emptied list still says the quota sentence, verbatim as before', /no member can serve it — spent:/.test(quotaWall), quotaWall);
+  ok('§8 CONTROL: a quota-emptied list still says the quota sentence, verbatim as before', /no member can serve it — B is spent:/.test(quotaWall), quotaWall);
   ok('§8 the engine reads both bars from SETTINGS and hands them to the pure decision',
     /reserveFloorPct: reserveFloorPct\(\), overageIds: overageMemberIds\(/.test(read('src/server/usage-pool-engine.js')));
   const w = mkWorld({ settings: {} });

@@ -195,7 +195,12 @@ var P2X; P2X = am.createPool({ name: 'P2' }).id; // the earlier block removed it
   ck('…while the conversation linked to it keeps its token file (the running process is the measured binary)', fs.existsSync(path.join(lk, '.credentials.json')) && amT.readSubCreds(T).oatFile === true);
   amT.dropSessionPoolLink(PT, 'sess-7-1791900000000'); amT.dropSessionPoolLink(PT, 'sess-8-1791900000000');
   await amT.syncOatFiles();
-  ck('…and the last link gone, the next sweep takes the file back', !fs.existsSync(path.join(amT.subDir(T), '.credentials.json')));
+  // lane pool-silent-members R1 (inc-mvsjhna7): a CLI update never shrinks a pool in silence — the file STAYS, and the
+  // pool's roster names T with the store's reason (90c995a3 took it back here and T read «not logged in»)
+  ck('…and the last link gone, the next sweep KEEPS the file (R1: never taken back for a version reason)', fs.existsSync(path.join(amT.subDir(T), '.credentials.json')) && amT.readSubCreds(T).oatFile === true);
+  const rosT = amT.poolRoster(PT);
+  ck('…T is no candidate, but the pool\'s ROSTER lists every member: X placeable, T unplaceable WITH its reason (cli-unmeasured · CLI 2.1.300 · its file there)', JSON.stringify(rosT.map((r) => [r.name, r.placeable])) === JSON.stringify([['Login X', true], ['Token T', false]]) && rosT[1].why.code === 'cli-unmeasured' && rosT[1].why.cli === '2.1.300' && rosT[1].why.file === true, JSON.stringify(rosT));
+  ck('…poolRoster and poolMembership name the same members, in the same order (the roster is the membership, never the candidate list)', JSON.stringify(rosT.map((r) => r.id)) === JSON.stringify(amT.poolMembership(PT)));
   // lane oat-in-file-2-1-306: 2.1.306 is measured too (2026-10-21, the verdicts 2.1.296 has) ⇒ no escape on it
   amT.noteCliVersion('2.1.306 (Claude Code)');
   await amT.oatFileSettled();
@@ -230,7 +235,7 @@ var P2X; P2X = am.createPool({ name: 'P2' }).id; // the earlier block removed it
 {
   // RED CONTROL (lane cli-2-1-307-records, the .340 base): over the two-version fixture (2.1.296 + 2.1.306) the same member on 2.1.307 is escaped
   const FX = JSON.parse(fs.readFileSync(path.resolve('scripts/fixtures/oat-in-file.json'), 'utf8'));
-  const { '2.1.307': _measured307, '2.1.308': _measured308, ...two } = FX.versions;
+  const { '2.1.307': _measured307, '2.1.308': _measured308, '2.1.312': _m312a, ...two } = FX.versions;
   const twoF = path.join(DATA, 'fx-2.1.296-2.1.306.json'); fs.writeFileSync(twoF, JSON.stringify({ versions: two }));
   const amB = new AccountManager({ dataDir: path.join(DATA, 'tok-base-307'), oatFixture: twoF });
   const SH = { scopes: ['user:inference', 'user:profile'], subscriptionType: 'max' };
@@ -247,7 +252,7 @@ var P2X; P2X = am.createPool({ name: 'P2' }).id; // the earlier block removed it
 {
   // RED CONTROL (lane cli-2-1-308-records, the .341 base): over the three-version fixture (2.1.296 + 2.1.306 + 2.1.307) the same member on 2.1.308 is escaped
   const FX = JSON.parse(fs.readFileSync(path.resolve('scripts/fixtures/oat-in-file.json'), 'utf8'));
-  const { '2.1.308': _measured308, ...three } = FX.versions;
+  const { '2.1.308': _measured308, '2.1.312': _m312b, ...three } = FX.versions;
   const threeF = path.join(DATA, 'fx-2.1.296-2.1.306-2.1.307.json'); fs.writeFileSync(threeF, JSON.stringify({ versions: three }));
   const amB = new AccountManager({ dataDir: path.join(DATA, 'tok-base-308'), oatFixture: threeF });
   const SH = { scopes: ['user:inference', 'user:profile'], subscriptionType: 'max' };
@@ -260,6 +265,87 @@ var P2X; P2X = am.createPool({ name: 'P2' }).id; // the earlier block removed it
   amB.noteCliVersion('2.1.308 (Claude Code)');
   await amB.oatFileSettled();
   ck('RED CONTROL (the .341 base): over the three-version fixture (2.1.296 + 2.1.306 + 2.1.307) the same oat-only member on 2.1.308 stays out of the pool and its folder holds no token — the escape the second auto-update brought', !!_measured308 && Object.keys(three).join() === '2.1.296,2.1.306,2.1.307' && !amB.poolMembers(PB).some((m) => m.id === T) && !amB.isPoolMember(PB, T) && amB.readSubCreds(T).oatFile !== true && amB.poolMembers(PB).some((m) => m.id === X));
+}
+{
+  // lane pool-silent-members R1: 2.1.312 measured 2026-10-28 (the loopback rung) ⇒ no escape on it; over the .360 base's
+  // four-version fixture (2.1.296 – 2.1.308) the same member on 2.1.312 is out of the pool — and, since R1, NAMED for it
+  const FX = JSON.parse(fs.readFileSync(path.resolve('scripts/fixtures/oat-in-file.json'), 'utf8'));
+  const { '2.1.312': measured312, ...four } = FX.versions;
+  const run = async (tag, fxPath) => {
+    const amB = new AccountManager({ dataDir: path.join(DATA, 'tok-312-' + tag), ...(fxPath ? { oatFixture: fxPath } : {}) });
+    const SH = { scopes: ['user:inference', 'user:profile'], subscriptionType: 'max' };
+    const X = amB.createSubscription({ name: 'Login X' }).id;
+    fs.writeFileSync(path.join(amB.subDir(X), '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'x', refreshToken: 'r', expiresAt: Date.now() + 36e5, refreshTokenExpiresAt: Date.now() + 20 * 864e5, ...SH } }), { mode: 0o600 });
+    const T = amB.createSubscription({ name: 'Token T' }).id;
+    fs.writeFileSync(path.join(amB.subDir(T), '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: '', refreshToken: '', expiresAt: 0, refreshTokenExpiresAt: Date.now() - 864e5, ...SH } }), { mode: 0o600 });
+    const PB = amB.createPool({ name: 'Tok pool' }).id;
+    amB.setOat(T, ['sk', '-ant-oat01-'].join('') + 'POOLfake_' + 'u'.repeat(40));
+    amB.noteCliVersion('2.1.312 (Claude Code)');
+    await amB.oatFileSettled();
+    const why = amB.poolRoster(PB).find((r) => r.id === T)?.why || null;
+    return { cand: amB.poolMembers(PB).some((m) => m.id === T), member: amB.isPoolMember(PB, T), file: amB.readSubCreds(T).oatFile === true, why };
+  };
+  const now = await run('now', null);
+  ck('token slot: the hub auto-updated to 2.1.312 (measured 2026-10-28) ⇒ T\'s token is in its folder and T is a pool candidate — not escaped', now.cand && now.member && now.file && now.why === null, JSON.stringify(now));
+  const fourF = path.join(DATA, 'fx-to-2.1.308.json'); fs.writeFileSync(fourF, JSON.stringify({ versions: four }));
+  const base = await run('base', fourF);
+  ck('RED CONTROL (the .360 base, 90c995a3): over the four-version fixture (2.1.296 – 2.1.308) the same member on 2.1.312 stays out of the pool, its folder holding no token — and the roster NAMES it: no credential file in its folder (CLI 2.1.312 unmeasured)', !!measured312 && Object.keys(four).join() === '2.1.296,2.1.306,2.1.307,2.1.308' && !base.cand && !base.member && !base.file && base.why && base.why.code === 'cli-unmeasured' && base.why.cli === '2.1.312' && base.why.file === false, JSON.stringify(base));
+}
+{
+  // THE ONE ANSWER (R2): _unplaceableWhy is null EXACTLY when _placeable is true — over every shape a member can be in
+  const amW = new AccountManager({ dataDir: path.join(DATA, 'why-census') });
+  amW.noteCliVersion('2.1.300 (Claude Code)'); // a known unmeasured CLI: the token-file shapes are all refused
+  const SH = { scopes: ['user:inference', 'user:profile'], subscriptionType: 'max' };
+  const mk = (name, creds, oat) => { const id = amW.createSubscription({ name }).id; if (creds) fs.writeFileSync(path.join(amW.subDir(id), '.credentials.json'), JSON.stringify(creds), { mode: 0o600 }); if (oat) amW.setOat(id, ['sk', '-ant-oat01-'].join('') + 'WHYfake_' + oat.repeat(40)); return id; };
+  const ids = [
+    mk('live', { claudeAiOauth: { accessToken: 'a', refreshToken: 'r', expiresAt: Date.now() + 36e5, refreshTokenExpiresAt: Date.now() + 20 * 864e5, ...SH } }),
+    mk('wiped', { claudeAiOauth: { accessToken: '', refreshToken: '', expiresAt: 0, refreshTokenExpiresAt: Date.now() - 864e5, ...SH } }),
+    mk('nofile', null),
+    mk('nofile+oat', null, 'p'),
+    mk('wiped+oat', { claudeAiOauth: { accessToken: '', refreshToken: '', expiresAt: 0, refreshTokenExpiresAt: Date.now() - 864e5, ...SH } }, 'q'),
+    mk('ourfile', { claudeAiOauth: { accessToken: ['sk', '-ant-oat01-'].join('') + 'WHYfake_' + 'r'.repeat(40), expiresAt: Date.now() + 300 * 864e5, ...SH }, vibespaceOat: { v: 1 } }, 'r'),
+  ];
+  await amW.oatFileSettled();
+  const rows = ids.map((id) => ({ name: amW.get(id).name, placeable: amW._placeable('claude', id), why: amW._unplaceableWhy('claude', id) }));
+  ck('R2: _unplaceableWhy(id) is null ⇔ _placeable(id) — one answer over a live login, a wiped one, no file, a token with no file, a token over a wiped login, our token file', rows.every((r) => r.placeable === (r.why === null)) && rows[0].placeable === true && rows.slice(1).every((r) => r.why && typeof r.why.code === 'string'), JSON.stringify(rows));
+  ck('R2: …each refusal says its own fact (wiped ⇒ logged-out, no file ⇒ no-file, a token with no file on an unmeasured CLI ⇒ cli-unmeasured · file:false)', rows[1].why.code === 'logged-out' && rows[2].why.code === 'no-file' && rows[3].why.code === 'cli-unmeasured' && rows[3].why.file === false && rows[4].why.code === 'cli-unmeasured', JSON.stringify(rows.map((r) => [r.name, r.why && r.why.code])));
+}
+{
+  // (lane pool-silent-members acceptance r2) THE LOCKED VAULT IS THE WALL, NEVER THE LOGIN. The deploy of this very fix
+  // restarts the hub and the vault locks: a member whose token file 90c995a3's sweep took away (a valid long-lived token,
+  // NO file — the CLI measured now) cannot be re-materialized until the owner unlocks. 9d53db09's roster said
+  // «long-lived token only, not written to its folder (key-unreadable) — re-login»: six needless logins.
+  const APA = require(path.resolve('src/account-pool-auto.js'));
+  const Module = require('node:module');
+  const run = async (AM, tag) => {
+    const am = new AM({ dataDir: path.join(DATA, 'vault-locked-' + tag) });
+    const X = am.createSubscription({ name: 'Login X' }).id;
+    fs.writeFileSync(path.join(am.subDir(X), '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'x', refreshToken: 'r', expiresAt: Date.now() + 36e5, refreshTokenExpiresAt: Date.now() + 20 * 864e5, scopes: ['user:inference', 'user:profile'], subscriptionType: 'max' } }), { mode: 0o600 });
+    const T = am.createSubscription({ name: 'Token V' }).id;
+    const P = am.createPool({ name: 'V pool' }).id;
+    am.noteCliVersion('2.1.312 (Claude Code)');
+    am.setOat(T, ['sk', '-ant-oat01-'].join('') + 'VAULTfake_' + 'v'.repeat(40));
+    await am.oatFileSettled();
+    const cf = path.join(am.subDir(T), '.credentials.json');
+    fs.rmSync(cf, { force: true }); // the take-back 90c995a3's 2.1.312 sweep made
+    // A RESTART before its first sweep: no refusal is known yet for the member — never «re-login»
+    const am2 = new AM({ dataDir: path.join(DATA, 'vault-locked-' + tag) });
+    const pending = am2.poolRoster(P).find((r) => r.id === T)?.why || null;
+    am2._key = () => { throw Object.assign(new Error('the vault is locked'), { code: 'key-unreadable:vault_locked' }); }; // …and the vault locked
+    await am2.syncOatFiles();
+    const locked = am2.poolRoster(P).find((r) => r.id === T)?.why || null;
+    return { pending, locked, file: fs.existsSync(cf) };
+  };
+  const r = await run(AccountManager, 'now');
+  ck('r2 (b): a locked vault (the restart this deploy makes) ⇒ the token-only member\'s roster reason is the VAULT — {code: vault-locked}: «the vault is locked — its long-lived token is kept and written to its folder once it opens (Unlock… at the top of the page; For you names what is waiting on it)»', !!r.locked && r.locked.code === 'vault-locked' && APA.unplaceableText(r.locked) === 'the vault is locked — its long-lived token is kept and written to its folder once it opens (Unlock… at the top of the page; For you names what is waiting on it)' && r.file === false);
+  ck('r2 (b): …and before the restarted hub\'s first sweep (no refusal known yet) it reads «not written to its folder yet» — never «re-login»', !!r.pending && r.pending.code === 'oat-not-in-folder' && r.pending.reason === 'pending' && !/re-login/.test(APA.unplaceableText(r.pending)));
+  const file = path.resolve('src/accounts.js'), src = fs.readFileSync(file, 'utf8'), cut = "      if (f && f.code === 'vault_locked') return { code: 'vault-locked' };\n";
+  ck('RED CONTROL (b): the patch (the vault code dropped — 9d53db09\'s _unplaceableWhy) hits', src.includes(cut));
+  if (src.includes(cut)) {
+    const m = new Module(file, null); m.filename = file; m.paths = Module._nodeModulePaths(path.dirname(file)); m._compile(src.replace(cut, ''), file);
+    const rc = await run(m.exports.AccountManager, 'mut');
+    ck('RED CONTROL (b): without the vault code the same locked vault is told «… (key-unreadable) — re-login» — the wrong remedy', !!rc.locked && rc.locked.code === 'oat-not-in-folder' && /\(key-unreadable\) — re-login$/.test(APA.unplaceableText(rc.locked)));
+  }
 }
 // THE PROVIDER OF A POOL MEMBER (q-053 P0b): every member names its provider (a LABEL — readings stay the slot's); the
 // pool's crossProvider setting (never by default, the owner's decision ①) is validated and listed.
