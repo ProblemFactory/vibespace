@@ -7,7 +7,7 @@ import { metric, track } from './telemetry-client.js';
 import { stripAnsi } from './highlight.js';
 import { ChatMinimap } from './chat-minimap.js';
 import { ChatSearch } from './chat-search.js';
-import { ChatRenderers, toolDisplayName, formatSleepRemaining, isCompactSummaryText } from './chat-renderers.js';
+import { ChatRenderers, toolDisplayName, formatSleepRemaining, formatSettleRemaining, isCompactSummaryText } from './chat-renderers.js';
 import { fmtElapsed } from './subagent-card.js'; // lane agy-subagent-cards: a running subagent card's elapsed time
 import { ChatInput } from './chat-input.js';
 import { ChatStatusBar } from './chat-status-bar.js';
@@ -57,6 +57,10 @@ const isMemoryPath = (fp) => isAgentMemoryPath(fp);
 // AbortSignal and a `when` that scopes the chord to the window the keystroke
 // happened in.
 export const STEER_NOW_COMMAND = 'chat.steerNow';
+// …and its twin where the second key HOLDS (lane claude-steer-inject — the owner's ruling «A»: on a Claude conversation
+// plain Enter hands the message to the running turn, Alt+Enter keeps it until the turn ends). Two commands, two
+// mutually exclusive `when`s on the one chord: each id says exactly what it does.
+export const HOLD_NOW_COMMAND = 'chat.holdNow';
 // Every MOUNTED ChatView, so a document-level keystroke can find the view it
 // belongs to (the dispatcher's ctx is app-wide: `{ app, event }`). Entries are
 // added at construction and removed in dispose() — a Set of live views, never
@@ -88,6 +92,15 @@ if (!hasCommand(STEER_NOW_COMMAND)) {
     // no-op the composer would give.
     when: (ctx) => !!steerTargetView(ctx)?._canSteerComposer(),
     run: (ctx) => steerTargetView(ctx)?.steerComposerText() ?? false,
+  });
+}
+if (!hasCommand(HOLD_NOW_COMMAND)) {
+  registerCommand({
+    id: HOLD_NOW_COMMAND,
+    title: () => t('Queue it until the turn ends'),
+    icon: UI_ICONS.clock,
+    when: (ctx) => !!steerTargetView(ctx)?._canHoldComposer(),
+    run: (ctx) => steerTargetView(ctx)?.holdComposerText() ?? false,
   });
 }
 
@@ -1033,6 +1046,7 @@ class ChatView {
       // Alt+Enter in the composer runs the SAME contributed command the
       // registered keybinding does (owner: one verb, rebindable by plugins).
       onSteerChord: () => runCommand(STEER_NOW_COMMAND, { view: this }),
+      onHoldChord: () => runCommand(HOLD_NOW_COMMAND, { view: this }),
       onSteerSend: (msgId) => this._steerAfterSend(msgId),
     });
     this._chatInput.popupContainer = container;
@@ -1048,6 +1062,12 @@ class ChatView {
       key: 'alt+enter',
       command: STEER_NOW_COMMAND,
       when: (ctx) => steerTargetView(ctx) === this && this._canSteerComposer(),
+      signal: winInfo?._listenerCtl?.signal,
+    });
+    this._holdKeyDispose = registerKeybinding({
+      key: 'alt+enter',
+      command: HOLD_NOW_COMMAND,
+      when: (ctx) => steerTargetView(ctx) === this && this._canHoldComposer(),
       signal: winInfo?._listenerCtl?.signal,
     });
     this._setupChatDrop(container);
@@ -1137,6 +1157,8 @@ class ChatView {
         const now = Date.now();
         // lane agy-subagent-cards: a RUNNING subagent card's elapsed time counts the same way (a finished card has no data-sub-since)
         for (const el of this._container?.querySelectorAll?.('.chat-sub-elapsed[data-sub-since]') || []) el.textContent = fmtElapsed(now - (Number(el.dataset.subSince) || now));
+        // lane claude-steer-inject r5: a held message's «settling» chip counts down to the window's backstop
+        for (const el of this._container?.querySelectorAll?.('.chat-settle-remaining[data-settle-until]') || []) el.textContent = formatSettleRemaining((Number(el.dataset.settleUntil) || 0) - now);
         const els = this._container?.querySelectorAll?.('.chat-sleep-remaining[data-sleep-until]');
         if (!els || !els.length) return;
         for (const el of els) el.textContent = formatSleepRemaining((Number(el.dataset.sleepUntil) || 0) - now);
@@ -1601,7 +1623,9 @@ class ChatView {
     // cannot, so a queued notification is a billed turn waiting to happen and
     // the strip says so. Unknown (null) is never a hint.
     const notifSteerMissing = this._queueNotifSteer === false && notificationDeliveryFor(backend) === 'steer';
-    return { queue: !!row.queue, steer: verbs.includes('steer'), queueOps: verbs.length > 0, queueVerbs: verbs, notifSteerMissing };
+    // ⑤ the row's DECLARED default door (lane claude-steer-inject) rides along; composerSendModes draws it only where
+    // the verbs above back it
+    return { queue: !!row.queue, steer: verbs.includes('steer'), queueOps: verbs.length > 0, queueVerbs: verbs, notifSteerMissing, ...(row.enterDoor === 'steer' ? { enterDoor: 'steer' } : {}) };
   }
 
   /** This view's harness id — the ONE resolution order (live session record,
@@ -1711,6 +1735,10 @@ class ChatView {
 
   /** Run the chord. @returns {boolean} whether a message went out. */
   steerComposerText() { return !!this._chatInput?.steerNow(); }
+  /** The hold door's twins (lane claude-steer-inject): Alt+Enter where Enter itself hands the message over — the
+   *  binding's `when` is the chord's own: it acts only while a turn runs (acceptance r4; at idle the key is the composer's). */
+  _canHoldComposer() { return !!this._chatInput?.holdChordActs; }
+  holdComposerText() { return !!this._chatInput?.holdNow(); }
 
   /** THE CHORD'S SECOND HALF. A steer NAMES A QUEUED ITEM — codex's
    *  `turn/steer` takes the app-server's queued-submission id and there is no
@@ -1851,11 +1879,18 @@ class ChatView {
     const queued = new Map();
     for (const m of this._messages || []) if (m?.queueState) queued.set(m.id, m);
     if (!queued.size) return;   // nothing on screen claims a queue state
-    const onSteer = this._queueCaps().steer ? (m) => this._steerQueuedMessage(m) : null;
     for (const [id, el] of this._elements) {
       const msg = queued.get(id);
-      if (msg && el) ChatRenderers.applyQueueChip(el, msg, onSteer);
+      if (msg && el) ChatRenderers.applyQueueChip(el, msg, this._queueChipSteer(msg));
     }
+  }
+
+  /** The chip's ⚡ for THIS bubble: only where the harness steers AND its queue row may join the turn — claude marks a
+   *  command and a frame VibeSpace typed `steerable: false` (lane claude-steer-inject r2): no control that only refuses. */
+  _queueChipSteer(msg) {
+    if (!this._queueCaps().steer) return null;
+    const row = (this._queue || []).find((it) => it.msgId && this._msgIdOf(msg) === it.msgId);
+    return row && row.steerable === false ? null : (m) => this._steerQueuedMessage(m);
   }
 
   /** THE choke point for every queue action (strip buttons, row Enter, bubble
@@ -4183,6 +4218,9 @@ class ChatView {
     const msgIdx = this._messages.findIndex(m => m.id === id);
     if (msgIdx < 0) return;
     const msg = this._messages[msgIdx];
+    // the settle chip's deadline on THIS browser's clock (lane claude-steer-inject r6, the hub-clock law): the hub says `until`
+    // and its own `now` together — the offset between the two clocks never enters the countdown
+    if (fields.settling && Number(fields.settling.until) > 0 && Number(fields.settling.now) > 0) fields.settling = { ...fields.settling, localUntil: Date.now() + (Number(fields.settling.until) - Number(fields.settling.now)) };
     Object.assign(msg, fields);
     // A Workflow launch ack just landed → status-bar chip for the running run
     if (msg.toolName === 'Workflow' && fields.content && !this._loadingHistory) {
@@ -4226,9 +4264,9 @@ class ChatView {
 
     // Queue chip: a cheap in-place swap. A full re-render here would rebuild
     // the whole bubble (markdown, images, fold state) for a one-word badge.
-    if ('queueState' in fields) {
+    if ('queueState' in fields || 'settling' in fields) {
       const el = this._elements.get(id);
-      if (el) ChatRenderers.applyQueueChip(el, msg, this._queueCaps().steer ? (m) => this._steerQueuedMessage(m) : null);
+      if (el) ChatRenderers.applyQueueChip(el, msg, this._queueChipSteer(msg));
     }
 
     // Status transitions
@@ -4592,6 +4630,10 @@ class ChatView {
       if (op.others > 0) parts.push(t('{k} other attachment(s) were not put back — attach them again', { k: op.others }));
       if (op.cut > 0) parts.push(t('{m} message(s) came back shortened', { m: op.cut }));
       if (op.omitted > 0) parts.push(t('{k} more queued message(s) were too long to put back', { k: op.omitted }));
+      // claude (lane claude-steer-inject): what the person had already HANDED to the turn is the turn's — never put back:
+      // read by the agent already, or still held by the CLI (it stays in the conversation, unanswered)
+      if (op.landed > 0) parts.push(t('{k} message(s) you sent into the turn had already reached the agent', { k: op.landed }));
+      if (op.kept > 0) parts.push(t('{k} message(s) you sent into the turn stay with it', { k: op.kept }));
       if (parts.length) showToast(parts.join(' · '), { duration: 6000 });
       return;
     }
@@ -7536,6 +7578,8 @@ class ChatView {
     // chord for a disposed view.
     try { this._steerKeyDispose?.(); } catch { }
     this._steerKeyDispose = null;
+    try { this._holdKeyDispose?.(); } catch { }
+    this._holdKeyDispose = null;
     this._clearPendingSteers();
     if (this._resetTimer) { clearTimeout(this._resetTimer); this._resetTimer = null; } // a pending rebuild dies with the view (B-63f1 ②)
     this._resetPending = null; this._resetQueue = null; this._resetOverflow = false;

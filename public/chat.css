@@ -1004,6 +1004,8 @@
 .chat-queue-chip-queued:hover { background: var(--bg-hover); color: var(--text); }
 .chat-queue-chip:disabled { cursor: default; }
 .chat-queue-chip-steered { color: var(--accent); border-color: var(--accent); }
+/* lane claude-steer-inject: handed = on its way into the running turn (the accent, dashed: not read yet); kept = Stop came first */
+.chat-queue-chip-handed { color: var(--accent); border-color: var(--accent); border-style: dashed; }
 .chat-queue-chip-removed { text-decoration: line-through; }
 /* ── SEND MODES WHILE A TURN RUNS (the Alt+Enter chord, 2026-09-07) ───────
    TWO faces of ONE capability, split by VIEWPORT so they can never both show:
@@ -1021,7 +1023,7 @@
 /* inc-muukd9oq-qyc3: an Enter the input-method guard turned into a newline says so here for 2 s (the hint's row) */
 .chat-ime-hint { width: 100%; font-size: 11px; color: var(--text-dim); padding: 3px 2px 0; }
 .chat-ime-hint[hidden] { display: none; }
-.chat-steer-btn {
+.chat-steer-btn, .chat-hold-btn {
   display: none; background: none; border: 1px solid var(--border);
   color: var(--text-dim); cursor: pointer; flex-shrink: 0;
   border-radius: var(--radius-sm); min-width: 36px; min-height: 36px;
@@ -1031,6 +1033,12 @@
 .chat-steer-btn:active { background: var(--bg-hover); color: var(--text); }
 .chat-steer-btn svg { width: 16px; height: 16px; display: block; }
 @media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) { .chat-steer-btn:not(.hidden) { display: inline-flex; } }
+/* the hold button (lane claude-steer-inject): the bolt's twin where Send itself hands a Claude message to the running
+   turn — this one keeps it until the turn ends; the same split (JS the capability, CSS the viewport) */
+.chat-hold-btn.hidden { display: none; }
+.chat-hold-btn:active { background: var(--bg-hover); color: var(--text); }
+.chat-hold-btn svg { width: 16px; height: 16px; display: block; }
+@media (max-width: 768px), (pointer: coarse) and (max-width: 1023px) { .chat-hold-btn:not(.hidden) { display: inline-flex; } }
 /* Chat search, phone face (docs/design-mobile-gaps.md #4): the status bar's
    magnifier is Ctrl+F's touch equivalent — same split as the steer bolt. */
 .chat-status-search { display: none; }
@@ -1807,6 +1815,10 @@ body.hide-empty-thinking .chat-compact .chat-msg.chat-empty-thinking { display: 
 .chat-media-missing { display: none; font-size: 11px; color: var(--text-dim); }
 .chat-media.chat-media-broken .chat-tool-img { display: none; }
 .chat-media.chat-media-broken .chat-media-missing { display: inline; }
+/* lane claude-steer-inject r5: a copy's picture whose kept file is gone — the placeholder says so */
+.chat-media-gone { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border: 1px dashed var(--border); border-radius: var(--radius-sm); font-size: 12px; color: var(--text-dim); }
+.chat-media-gone svg { width: 14px; height: 14px; }
+.chat-settle-remaining { font-variant-numeric: tabular-nums; opacity: 0.8; }
 .chat-tool-image-chip { font-size: 11px; color: var(--text-dim); border: 1px dashed var(--border); border-radius: var(--radius-sm); padding: 2px 6px; }
 /* Live `clock.sleep` countdown (2.369.58) — tabular figures so a ticking
    mm:ss does not jiggle the row every second. */

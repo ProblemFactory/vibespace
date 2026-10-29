@@ -23,7 +23,10 @@
  *       send_failed    — no adapter for the backend, or the pty write threw
  *
  * Mid-turn is NOT a refusal: the frame is written and the session's own send
- * mode takes over (claude's CLI queues it; codex's wrapper `thread/queue/add`).
+ * mode takes over (claude's wrapper holds it — or, with `steer` (the person's
+ * door was «hand it to the running turn», 2.369.361), writes it to the CLI,
+ * which takes it into the turn at its next tool call; codex's wrapper
+ * `thread/queue/add`).
  * `origin` names the caller in the log lines ('ws' | 'inbox-reply' | 'dispatch'); `by` = {cid, name} of the
  * dispatching conversation (origin 'dispatch' only) — the compaction label and the live record name it (verify r1 ①).
  *
@@ -44,7 +47,7 @@ const { wrapperCaps } = require('./wrapper-files.js');
 const STDIN_CONFIRM_MS = 600;   // the broken-stdin detector's confirm stage (session-stdout's ATTACH_PROBE_CONFIRM_MS, same reason)
 
 function createUserInputSender({ activeSessions, adapterRegistry, BUFFERS_DIR, broadcastToSession, feedLive, autoResume, reattachLocalPty, ptyQuietSince, writeSessionInput = (s, line) => s.pty.write(line + '\n'), log = console.log, framesDir = path.join(__dirname, '..', '..', 'data', 'chat-frames') }) {
-  function send(sessionId, text, { msgId: givenMsgId = null, origin = 'ws', by = null } = {}) {
+  function send(sessionId, text, { msgId: givenMsgId = null, origin = 'ws', by = null, steer = false } = {}) {
     const session = activeSessions.get(sessionId);
     if (!session) return { ok: false, code: 'no_session', error: 'no live session ' + sessionId };
     if (!(session.pty && session.mode === 'chat')) return { ok: false, code: 'not_chat', error: 'not a live chat session' };
@@ -68,7 +71,7 @@ function createUserInputSender({ activeSessions, adapterRegistry, BUFFERS_DIR, b
     let stdinPayload, userMsg;
     // a dispatch's frame names its origin: should the wrapper hold it mid-turn (2.369.354), it is never the person's
     // to edit and never comes back into their composer on Stop
-    try { ({ stdinPayload, userMsg } = adapter.formatChatInput(text, msgId, human ? {} : { origin: 'dispatch' })); }
+    try { ({ stdinPayload, userMsg } = adapter.formatChatInput(text, msgId, human ? (steer === true ? { steer: true } : {}) : { origin: 'dispatch' })); }
     catch (e) {
       // POISON GUARD tripped (2.360.0): a shredded frame must reach
       // the USER as an error, never the transcript as text. The ws caller

@@ -725,6 +725,13 @@ function getHistorySessionId(session) {
 // takes its memo with it.
 const _mergeMemo = new WeakMap();
 
+// THE COPY'S KEPT FILES (lane claude-steer-inject r5, r6): a claude wrapper's copy of a mid-turn frame (`webui_copy`) names its
+// pictures — and a text block over 8 KB — by sha + extension, the files beside its buffer in ITS OWN session's folder
+// (src/kept-copies.js). They are read back OFF the event loop before the history needs them (boot-restore preloads them into
+// `session._keptFiles`, the attach awaits `session._keptLoad`); the merge resolves from that map with no fs call. A file that
+// is not in it (gone, refused, past the cap, never written) stays a reference marked `gone` — the placeholder that says so.
+const KC = require('./kept-copies.js');
+
 class SessionMessages {
   constructor(session, sessionId, { buffersDir, permissionModes } = {}) {
     this._session = session;
@@ -750,8 +757,9 @@ class SessionMessages {
     // re-attach) merges once. `_all` is shared exactly as the no-insert case
     // always shared the cache's array; `_pendingPerms` is copied per instance.
     const buffer = session.buffer || '';
+    const kept = session._keptFiles || null; // the restore's preload (a new map ⇒ a new merge)
     const memo = _mergeMemo.get(jsonl);
-    if (memo && memo.buffer === buffer) {
+    if (memo && memo.buffer === buffer && memo.kept === kept) {
       this._pendingPerms = { ...memo.perms };
       this._helperResults = memo.helperResults || [];
       this._all = memo.all;
@@ -791,7 +799,7 @@ class SessionMessages {
     for (const line of buffer.split('\n')) {
       const trimmed = line.replace(/\r/g, '').trim();
       if (!trimmed) continue;
-      try { parsed.push(JSON.parse(trimmed)); } catch {}
+      try { const rec = JSON.parse(trimmed); parsed.push(rec && rec.webui_copy ? KC.resolveRecord(rec, kept, (m) => console.warn(`[kept] ${this._sessionId || 'a session'}: ${m}`)) : rec); } catch {}
     }
     // A ROTATED buffer can start with unmatched stdout-only records from mid-
     // history; anchor those just before the first matched record (not at the
@@ -813,7 +821,10 @@ class SessionMessages {
       const isControl = msg.type === 'control_request' || msg.type === 'control_response' || msg.type === 'control_cancel_request';
       if (!isControl) {
         if (isSubagentMessage(msg)) { this._noteHelperResult(msg); continue; }
-        if (msg._fromWebui && msg.timestamp) {
+        // a claude wrapper's copy of a MID-TURN frame (`webui_copy`, lane claude-steer-inject r2) is the only record of
+        // those words the transcript may hold — never dropped for a later user record (a tool_result is one); the
+        // normalizer draws it once (src/message-manager.js _processUser)
+        if (msg._fromWebui && msg.timestamp && !msg.webui_copy) {
           if (jsonl.some(m => m.type === 'user' && m.timestamp >= msg.timestamp)) continue;
         }
       }
@@ -831,7 +842,7 @@ class SessionMessages {
       }
       this._all = all;
     }
-    _mergeMemo.set(jsonl, { buffer, all: this._all, perms: { ...this._pendingPerms }, helperResults: this._helperResults });
+    _mergeMemo.set(jsonl, { buffer, kept, all: this._all, perms: { ...this._pendingPerms }, helperResults: this._helperResults });
     this._display = this._all.filter(isDisplayMessage);
   }
 

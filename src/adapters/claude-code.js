@@ -327,6 +327,12 @@ class ClaudeCodeAdapter extends BackendAdapter {
     // with an extra record — turning a record ON for a surface that cannot use
     // it is exactly the kind of unverified spawn change this batch is not for.
     if (mode === 'chat') env.CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS = '1';
+    // THE PROMPT HOOK'S PHASE (lane claude-steer-inject r4): with this set the CLI says `system/hook_started` /
+    // `hook_response` for its UserPromptSubmit hooks (`if (i.CLAUDE_CODE_EMIT_USER_PROMPT_SUBMIT_HOOK_EVENTS)
+    // userPromptSubmitStartAndEndEnabled = !0`, 2.1.312) — the one word before a turn's init that says a turn is starting.
+    // data/bin/chat-wrapper.js reads them (no backstop counts while a prompt hook runs: the Stop window and an owed turn
+    // wait for the init the hook precedes) and keeps them out of the chat. Pure observability, chat only, like the state events above.
+    if (mode === 'chat') env.CLAUDE_CODE_EMIT_USER_PROMPT_SUBMIT_HOOK_EVENTS = '1';
     // Per-session apiKeyHelper neutralization (2.236.0, userN's "can't
     // switch to my subscription" on a keyHelper machine): a configured
     // apiKeyHelper in the merged settings UNCONDITIONALLY overrides claude.ai
@@ -383,11 +389,20 @@ class ClaudeCodeAdapter extends BackendAdapter {
   // 2.1.308 with a local mock API: it runs the frame and strips them (the transcript never holds them), so a wrapper
   // spawned before 2.369.354 that forwards this frame verbatim loses nothing. A client-built frame (an image paste) is
   // spliced, never re-serialized: the keys go in front of its first key (a 38 MB paste is copied once, not re-encoded).
-  formatChatInput(text, msgId, { origin = null } = {}) {
+  // `steer` (2.369.361, lane claude-steer-inject — the owner's ruling «A»): the person's door was «hand it to the running
+  // turn» (plain Enter, the CLI's own default) ⇒ `webui_steer: true`, a third key the CLI strips the same way. A wrapper
+  // that serves the 'steer' verb writes such a frame to the CLI at once even mid-turn; any older one holds it (and its
+  // composer never offered the door). Never stamped for a frame VibeSpace types (`origin`): those are always held.
+  formatChatInput(text, msgId, { origin = null, steer = false } = {}) {
     let stdinPayload, userMsg;
     let parsed = null;
     try { parsed = JSON.parse(text); if (!(parsed.type === 'user' && parsed.message)) parsed = null; } catch {}
-    const marks = { ...(msgId ? { webui_msg_id: String(msgId) } : {}), ...(origin ? { webui_origin: String(origin) } : {}) };
+    // A KEPT REFERENCE IS THE WRAPPER'S OWN RECORD (lane claude-steer-inject r6): only its restart copy names a picture by
+    // reference (src/kept-copies.js) — a sent message carries the picture itself. A client-built one is refused by name.
+    if (parsed && Array.isArray(parsed.message.content) && parsed.message.content.some((b) => require('../kept-copies.js').isKeptBlock(b))) {
+      throw new Error('kept_refused: a message may not carry a kept picture reference (only the wrapper\'s restart copy names one) — send the picture itself');
+    }
+    const marks = { ...(msgId ? { webui_msg_id: String(msgId) } : {}), ...(origin ? { webui_origin: String(origin) } : {}), ...(steer === true && !origin ? { webui_steer: true } : {}) };
     const markJson = JSON.stringify(marks).slice(1, -1);
     if (parsed) {
       stdinPayload = markJson ? text.replace(/^\s*\{/, '{' + markJson + ',') : text;
@@ -563,15 +578,16 @@ class ClaudeCodeAdapter extends BackendAdapter {
   }
 
   // QUEUE OPS (2.369.354, lane claude-wrapper-queue): the mid-turn queue is the WRAPPER's (data/bin/chat-wrapper.js
-  // holds a frame that arrives while a turn runs — the CLI's own queue is never used), so a queue op is a frame for the
-  // wrapper — the acp/agy shape verbatim: remove / reorder (afterId null = the front) / edit. NOT steer: the CLI takes
-  // no input into a running turn (a frame sent there is queued by the CLI itself, the queue the wrapper replaced), and
-  // NOT run-now / run-all: a held message only exists while a turn runs and goes the moment it ends. Refused HERE with
-  // the reason, before a frame exists (accept-and-ignore is the 2.361.4 failure).
+  // holds a frame that arrives while a turn runs), so a queue op is a frame for the wrapper — the acp/agy shape verbatim:
+  // remove / reorder (afterId null = the front) / edit, and since 2.369.361 (lane claude-steer-inject) steer / steer-all
+  // = hand a held row to the running turn (MEASURED on 2.1.308: the CLI takes a frame written mid-turn into the turn at
+  // its next tool result; the codex `steer-all` shape, id null). NOT run-now / run-all: a held message only exists while
+  // a turn runs and goes the moment it ends. Refused HERE with the reason, before a frame exists (accept-and-ignore is
+  // the 2.361.4 failure).
   formatQueueOp({ op, id, afterId, text } = {}) {
-    if (op === 'steer' || op === 'steer-all') throw new Error('Claude Code takes no input into a running turn — the message runs when this turn ends, or you can remove it');
     if (op === 'run-now' || op === 'run-all') throw new Error('a held message starts as soon as the current turn ends — it cannot start before it');
-    if (op !== 'remove' && op !== 'reorder' && op !== 'edit') throw new Error(`unknown queue op "${op}"`);
+    if (op === 'steer-all') return JSON.stringify({ type: 'queue-op', op, id: null });
+    if (op !== 'remove' && op !== 'reorder' && op !== 'edit' && op !== 'steer') throw new Error(`unknown queue op "${op}"`);
     if (!id) throw new Error(`queue op "${op}" needs an item id`);
     if (op === 'reorder') {
       if (afterId === undefined) throw new Error('queue op "reorder" needs an anchor (afterId, or null for the front of the queue)');

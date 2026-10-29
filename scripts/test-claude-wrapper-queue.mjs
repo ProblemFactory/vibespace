@@ -21,7 +21,8 @@
 //        waited for idle holds it until the agent is done
 //   §B THE CHAT WINDOW in a REAL browser: a worktree server (the working tree overlaid), a claude chat session whose CLI
 //      is the stand-in (scripts/fixtures/claude-stand-in-cli.cjs — the measured turn shape), headless chrome: a message
-//      typed mid-turn ⇒ the queue strip's row with ✎ and ✕ and the bubble's queued chip; Stop ⇒ the strip empties, the
+//      HELD mid-turn (Alt+Enter since 2.369.361 — plain Enter hands it to the turn, scripts/test-claude-steer-chrome.mjs) ⇒
+//      the queue strip's row with ✎, ✕ and ⚡ and the bubble's queued chip; Stop ⇒ the strip empties, the
 //      words are back in the composer, ONE toast says so, the chip says removed — and the CLI never got them
 // real-cli-env: the CLI's env is built from nothing — {HOME (a scratch dir), PATH, LANG, TERM, a LOOPBACK ANTHROPIC_BASE_URL, a fake key built by concatenation, the nonessential-traffic switches}; no ambient key can reach it
 import fs from 'node:fs';
@@ -140,7 +141,7 @@ if (!claudeBin) {
   // a copy of the wrapper with the HOLD switched off (every user frame forwarded at once — the pre-.354 behaviour)
   const ctlDir = scratchDir('cwq-ctl-tree');
   const cwSrc = fs.readFileSync(LANE, 'utf8');
-  const HOLD = 'if (!turnBusy || !opensTurn(o)) { forwardUser(line, o, buffered); return; }';
+  const HOLD = 'if (!(turnBusy || cliOwesTurn || stopping) || !opensTurn(o)) { forwardUser(line, o, buffered); return; }';   // the gate line (2.369.361 adds the CLI-owes-a-turn clause, lane claude-steer-inject — and the Stop window, its acceptance r2)
   const ctlSrc = cwSrc.replace(HOLD, '{ forwardUser(line, o, buffered); return; }');
   fs.mkdirSync(path.join(ctlDir, 'data', 'bin'), { recursive: true });
   fs.symlinkSync(path.join(REPO, 'src'), path.join(ctlDir, 'src'));
@@ -181,7 +182,9 @@ if (!claudeBin) {
   });
   ok(s3.heldDuringA, '③ while A runs the held frame is nowhere in the CLI — no request, no transcript row (the CLI\'s own enqueue never happened)', s3);
   ok(s3.bAfterIdleMs !== null && s3.bAfterIdleMs >= 0 && s3.bAfterIdleMs < 5000 && s3.bUserRecord && s3.lastEnqueueAfterIdle, `③ …A's turn end releases it: ONE frame, at the mock ${s3.bAfterIdleMs} ms after A's idle, run as a turn of its own (a plain user record, enqueued only at the drain)`, s3);
-  ok(S(s3.qc) === S([0, 1, 0]), '③ …and the strip saw it come and go: the baseline [], one row, [] at the drain', s3.qc);
+  // (acceptance r2, lane claude-steer-inject: the CLI's first state word republishes the empty queue with the steer pair
+  // named — the hand-over door is advertised only from there)
+  ok(S(s3.qc) === S([0, 0, 1, 0]), '③ …and the strip saw it come and go: the baseline [], the proof\'s republication [], one row, [] at the drain', s3.qc);
   ok(!s3.keyInTranscript, '⑤ the frame\'s VibeSpace keys (webui_msg_id) never reach the transcript — the CLI strips unknown keys', s3);
   const s4 = await realRun('burst', LANE, 3000, async ({ send, recs, reqFor }) => {
     const at = send(frame('LONG-A the turn starter', 'm-a'));
@@ -287,24 +290,26 @@ else {
     return { ok: !!(v && v._chatInput), ro: v ? !!v._readOnly : null };
   })()`);
   ok(opened && opened.ok && !opened.ro, '§B the chat window opened live with a composer', opened);
-  const typeAndSend = async (text) => {
+  // `alt` = Alt+Enter — since 2.369.361 (lane claude-steer-inject) plain Enter HANDS a mid-turn message to the running
+  // turn and Alt+Enter is the door that HOLDS it (this section's subject: the held queue and Stop's put-back)
+  const typeAndSend = async (text, { alt = false } = {}) => {
     await ev('(() => { const t = window.__v._chatInput._textarea; t.focus(); return document.activeElement === t; })()');
     await cdp('Input.insertText', { text });
-    await cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13, text: '\r' });
-    await cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13 });
+    await cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13, modifiers: alt ? 1 : 0, ...(alt ? {} : { text: '\r' }) });
+    await cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 13, modifiers: alt ? 1 : 0 });
   };
   const capTexts = () => (fs.existsSync(cap) ? fs.readFileSync(cap, 'utf8').trim().split('\n').filter(Boolean).map((l) => { try { const f = JSON.parse(l); return f.type === 'user' ? S(f.message.content) : f.type; } catch { return '?'; } }) : []);
   if (opened && opened.ok) {
     await typeAndSend('LONG-1 a turn that runs for a while');
     const streaming = await until(() => ev("!!document.querySelector('.chat-interrupt-btn')"), 10000, 100);
     ok(streaming && capTexts().some((t) => t.includes('LONG-1')), '§B the first message started a turn (the Stop button is up, the CLI got it)', capTexts());
-    await typeAndSend('these words are held mid-turn');
+    await typeAndSend('these words are held mid-turn', { alt: true });
     const STRIP = `(() => { const s = document.querySelector('.chat-queue-strip'); const rows = s ? [...s.querySelectorAll('[data-queue-id]')].map((b) => b.dataset.queueId) : []; return { visible: !!(s && !s.classList.contains('hidden') && s.getBoundingClientRect().height > 0), text: s ? s.textContent : '', edits: s ? s.querySelectorAll('[data-queue-op="edit"]').length : 0, removes: s ? s.querySelectorAll('[data-queue-op="remove"]').length : 0, steers: s ? s.querySelectorAll('[data-queue-op="steer"],[data-queue-op="steer-all"],[data-queue-op="run-now"],[data-queue-op="run-all"]').length : 0, ids: [...new Set(rows)] }; })()`;
     await until(async () => (await ev(STRIP)).visible, 8000, 100);
     const strip = await ev(STRIP);
     const chip = () => ev(`(() => { const m = (window.__v._messages || []).filter((x) => x.role === 'user').pop(); const el = m && document.querySelector('[data-msg-id="' + m.id + '"]'); return { state: m ? m.queueState || null : null, chipShown: !!(el && el.querySelector('[data-queue-state]')), text: m ? JSON.stringify(m.content).slice(0, 80) : '' }; })()`);
     const c1 = await chip();
-    ok(strip.visible && /these words are held mid-turn/.test(strip.text) && strip.edits === 1 && strip.removes === 1 && strip.steers === 0, '§B typed mid-turn ⇒ the queue strip shows the row with ✎ edit and ✕ remove (no steer / run-now — claude has none)', strip);
+    ok(strip.visible && /these words are held mid-turn/.test(strip.text) && strip.edits === 1 && strip.removes === 1 && strip.steers === 1, '§B HELD mid-turn (Alt+Enter, the hold door since 2.369.361) ⇒ the queue strip shows the row with ✎ edit, ✕ remove and ⚡ (steer — hand it to the running turn, lane claude-steer-inject; no run-now)', strip);
     ok(c1.state === 'queued' && c1.chipShown, '§B …and the bubble wears the queued chip', c1);
     ok(!capTexts().some((t) => t.includes('these words are held')), '§B …and the CLI never got it (the wrapper holds it)', capTexts());
     // STOP — a trusted click on the composer's Stop button

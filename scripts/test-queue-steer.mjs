@@ -79,7 +79,10 @@ console.log('— ① the capability row (backend-caps ⇄ client META)');
   ok('deriveInputModes IS the law (the same function the client mirror uses), and it drops a verb outside the closed set', JSON.stringify(deriveInputModes({ queue: true, queueVerbs: ['steer', 'teleport'] })) === shape(true, ['steer']));
   ok('codex serves ALL SEVEN verbs (add/list/delete/update/reorder/start + turn/steer, every shape dumped from the 0.153.4 schema)', JSON.stringify(capsOf('codex').inputModes) === shape(true, ['remove', 'steer', 'steer-all', 'reorder', 'edit', 'run-now', 'run-all']), capsOf('codex').inputModes);
   ok('opencode (ACP v1) removes/reorders/edits its own local queue but cannot steer, and cannot start one early (that queue only exists while a prompt runs)', JSON.stringify(capsOf('opencode').inputModes) === shape(true, ['remove', 'reorder', 'edit']), capsOf('opencode').inputModes);
-  ok("claude (2.369.354): its WRAPPER holds a mid-turn frame — remove / reorder / edit on its own array, NO steer (the CLI takes no input into a running turn), NO run-now / run-all (a held frame goes the moment the turn ends)", JSON.stringify(capsOf('claude').inputModes) === shape(true, ['remove', 'reorder', 'edit']), capsOf('claude').inputModes);
+  // lane claude-steer-inject (2.369.361): «no steer — the CLI takes no input into a running turn» was MEASURED false on 2.1.308
+  // (a frame written mid-tool is taken into the turn at the next tool result) — the row gains steer / steer-all and the
+  // owner's ruling «A» makes the hand-over plain Enter's door (`enterDoor`)
+  ok("claude (2.369.354 → 2.369.361): its WRAPPER owns the mid-turn queue — remove / reorder / edit on its own array, STEER / STEER-ALL hand a held frame to the running turn, NO run-now / run-all (a held frame goes the moment the turn ends); plain Enter's door = steer", JSON.stringify(capsOf('claude').inputModes) === shape(true, ['remove', 'steer', 'steer-all', 'reorder', 'edit']).replace(/\}$/, ',"enterDoor":"steer"}'), capsOf('claude').inputModes);
   ok('shell (terminal-only) has no input queue at all', JSON.stringify(capsOf('shell').inputModes) === shape(false, []));
   ok('an unknown backend gets the all-false NO_CAPS row (never codex\'s by accident)', JSON.stringify(capsOf('gemini').inputModes) === shape(false, []));
   // the client gates its chrome on META; a drifted copy would offer a control
@@ -147,12 +150,13 @@ console.log('— ② the adapter verb (formatQueueOp)');
     ok('opencode STEER is refused WITH THE REASON and what happens instead', /no steer/i.test(msg) && /runs after this turn|after this turn|remove it/i.test(msg), msg);
   }
   {
-    // 2.369.354: the queue is the WRAPPER's — the acp frame vocabulary verbatim; steer / run-now refused HERE, with the reason
+    // 2.369.354: the queue is the WRAPPER's — the acp frame vocabulary verbatim; run-now refused HERE, with the reason (steer too
+    // until 2.369.361 — lane claude-steer-inject: it now hands a held row to the running turn)
     const cl = reg.get('claude');
     ok('claude remove / reorder (afterId null = the front) / edit → the SAME frames as the ACP wrapper reads', JSON.stringify(JSON.parse(cl.formatQueueOp({ op: 'remove', id: 'q1' }))) === JSON.stringify({ type: 'queue-op', op: 'remove', id: 'q1' })
       && JSON.parse(cl.formatQueueOp({ op: 'reorder', id: 'q1', afterId: null })).afterId === null && JSON.parse(cl.formatQueueOp({ op: 'edit', id: 'q1', text: 'x' })).text === 'x');
     const msg = threw(() => cl.formatQueueOp({ op: 'steer', id: 'q1' })) || '';
-    ok('claude STEER is refused WITH THE REASON and what happens instead (the CLI takes no input into a running turn)', /no input into a running turn/.test(msg) && /runs when this turn ends/.test(msg), msg);
+    ok('claude STEER (2.369.361 — was refused «takes no input into a running turn», MEASURED false on 2.1.308) → the frame that hands a held row to the running turn; steer-all → the codex shape (id null)', !msg && cl.formatQueueOp({ op: 'steer', id: 'q1' }) === JSON.stringify({ type: 'queue-op', op: 'steer', id: 'q1' }) && cl.formatQueueOp({ op: 'steer-all' }) === JSON.stringify({ type: 'queue-op', op: 'steer-all', id: null }), msg);
     ok('claude run-now is refused with its reason (a held frame goes the moment the turn ends)', /as soon as the current turn ends/.test(threw(() => cl.formatQueueOp({ op: 'run-now', id: 'q1' })) || ''));
     ok('claude formats the resync ASK (its wrapper serves queue-resync)', cl.formatQueueResync() === JSON.stringify({ type: 'queue-resync' }));
   }
@@ -283,7 +287,7 @@ console.log('— ③ the ws case gates on the caps row AND the running wrapper')
   // lane stop-refills-composer: the result names its VERB — only the edit's own result answers a pending edit (a Stop's
   // `remove ok:true` for the edited row is the gone outcome: the rewrite is kept), and Stop's put-back has its ONE toast
   ok("…naming its verb, so a Stop's remove never resolves a pending edit as saved (lane stop-refills-composer)", /this\._resolvePendingEdit\(queueOp == null \|\| queueOp === 'edit' \? ok : false, text \|\| ''\)/.test(read('src/lib/chat-input.js')));
-  ok("Stop's put-back is ONE toast on every client (_onMeta handles queue-putback; the words are already in the box)", /if \(op\.subtype === 'queue-putback'\) \{[\s\S]{0,900}showToast\(parts\.join\(' · '\), \{ duration: 6000 \}\);\s*\n\s*return;/.test(cv));
+  ok("Stop's put-back is ONE toast on every client (_onMeta handles queue-putback; the words are already in the box)", /if \(op\.subtype === 'queue-putback'\) \{[\s\S]{0,1300}showToast\(parts\.join\(' · '\), \{ duration: 6000 \}\);\s*\n\s*return;/.test(cv));
   ok("…and a 'gone' verdict REMOVES the row first (the wrapper is authoritative about absence; a red ghost is the incident)", /if \(op\.ok === false && op\.reason === 'gone'\) this\._dropQueueRow\(op\.id\);/.test(cv));
   ok('wiring pin: the strip, the row keyboard and the chip send the SAME ws message through one method', /const frame = \{ type: 'queue-op', sessionId: this\.sessionId, op, id: id \|\| null \};/.test(cv) && (cv.match(/type: 'queue-op'/g) || []).length === 1);
   ok("…and the verb's own argument rides it: afterId only when the caller supplied one (null = the front), text only when it is a string", /if \(extra && 'afterId' in extra\) frame\.afterId = extra\.afterId === null \? null : String\(extra\.afterId\);/.test(cv) && /if \(extra && typeof extra\.text === 'string'\) frame\.text = extra\.text;/.test(cv));
@@ -401,14 +405,16 @@ console.log('— ⑨a the PURE send-mode predicate (caps → {showHint, allowSte
   const oc = m('opencode');
   ok('opencode (queue+queueOps, NO steer): the hint mentions Enter only, and Alt+Enter is not a chord', oc.showHint === true && oc.queueSegment === true && oc.steerSegment === false && oc.allowSteerChord === false, oc);
   const cl = m('claude');
-  ok('claude (2.369.354 — the wrapper holds a mid-turn frame, NO steer): the hint says Enter queues, and Alt+Enter is not a chord (the opencode answer)', cl.showHint === true && cl.queueSegment === true && cl.steerSegment === false && cl.allowSteerChord === false, cl);
+  ok('claude (2.369.361 — two doors, lane claude-steer-inject): Enter HANDS it to the running turn, Alt+Enter HOLDS it — both segments, the HOLD chord (never the steer one)', cl.showHint === true && cl.enterDoor === 'steer' && cl.altDoor === 'queue' && cl.queueSegment === true && cl.steerSegment === true && cl.allowSteerChord === false && cl.allowHoldChord === true && cl.steerOnEnter === true, cl);
   const sh = m('shell');
   ok('shell (no input queue at all): nothing', sh.showHint === false && sh.allowSteerChord === false, sh);
   ok('an unknown backend / missing caps object is the all-false row (never codex\'s by accident)', [composerSendModes(undefined), composerSendModes(null), composerSendModes({}), m('gemini')].every((r) => r.showHint === false && r.allowSteerChord === false));
   // the chord is the SAME fact as the steer segment: a chord that silently
   // degraded to a plain send would be worse than no chord at all
-  ok('allowSteerChord === steerSegment on every declared harness (one fact, never two)', Object.keys(require(path.join(REPO, 'src/backend-caps.js')).BACKEND_CAPS).every((id) => m(id).allowSteerChord === m(id).steerSegment));
-  ok('…and the chord is never offered without the harness row saying steer', Object.keys(require(path.join(REPO, 'src/backend-caps.js')).BACKEND_CAPS).every((id) => m(id).allowSteerChord === capsOf(id).inputModes.steer));
+  // lane claude-steer-inject: the chord is the SECOND key's door — steer (codex) or hold (claude, whose Enter steers) — and
+  // each chord is the same fact as that door; the steer segment is the harness row's steer, on whichever key carries it
+  ok('each chord is the SAME fact as the second key\'s door on every declared harness (one fact, never two): allowSteerChord ⇔ altDoor steer, allowHoldChord ⇔ altDoor queue', Object.keys(require(path.join(REPO, 'src/backend-caps.js')).BACKEND_CAPS).every((id) => m(id).allowSteerChord === (m(id).altDoor === 'steer') && m(id).allowHoldChord === (m(id).altDoor === 'queue')));
+  ok('…and the steer door (segment or chord) is never offered without the harness row saying steer', Object.keys(require(path.join(REPO, 'src/backend-caps.js')).BACKEND_CAPS).every((id) => m(id).steerSegment === capsOf(id).inputModes.steer && (!m(id).allowSteerChord || capsOf(id).inputModes.steer)));
   // it reads the LIVE intersection, so no wrapper advert ⇒ nothing offered
   ok('the all-false intersection chat-view returns without a wrapper advert yields no hint and no chord', composerSendModes({ queue: false, steer: false, queueOps: false }).showHint === false);
 }
@@ -586,7 +592,9 @@ console.log('— ⑤ the client strip (DOM-free render of the REAL ChatInput)');
   const hint = (id) => ChatInput.sendHintHtml(modesOf(srvCaps(id).inputModes));
   ok('codex: BOTH segments, separated', /Enter queues/.test(hint('codex')) && /Alt\+Enter injects now/.test(hint('codex')) && /chat-send-hint-sep/.test(hint('codex')), hint('codex'));
   ok('opencode: the queue segment only — the line never teaches a key that does nothing here', /Enter queues/.test(hint('opencode')) && !/Alt\+Enter/.test(hint('opencode')) && !/chat-send-hint-sep/.test(hint('opencode')), hint('opencode'));
-  ok('claude: the queue segment only (the opencode line) — never a key that does nothing here', /Enter queues/.test(hint('claude')) && !/Alt\+Enter/.test(hint('claude')) && !/chat-send-hint-sep/.test(hint('claude')), hint('claude'));
+  // lane claude-steer-inject (2.369.361): claude's two doors — Enter's first, then the second key's (on a .354 wrapper the
+  // live intersection leaves «Enter queues» alone: scripts/test-claude-steer.mjs §1/§2)
+  ok('claude: «Enter sends now · Alt+Enter queues until the turn ends» — Enter\'s door first, then the second key\'s; never a key that does nothing here', /^<span[^>]*>Enter sends now<\/span><span class="chat-send-hint-sep">·<\/span><span[^>]*>Alt\+Enter queues until the turn ends<\/span>$/.test(hint('claude')), hint('claude'));
   ok('shell: the hint is EMPTY markup (and _updateSendModes never unhides it)', hint('shell') === '');
   ok('the hint carries no raw glyph icon and every phrase is a t() key (zh+ja pinned below)', !/[⚡✕]/.test(hint('codex')));
 
@@ -599,7 +607,7 @@ console.log('— ⑤ the client strip (DOM-free render of the REAL ChatInput)');
   ok('IDLE codex session: no turn ⇒ no chord (Enter is an ordinary send)', mkCI({ _queueCaps: cxCaps }).steerChordAllowed === false);
   ok('…and mid-turn the chord is live', mkCI({ _queueCaps: cxCaps, _isStreaming: true }).steerChordAllowed === true);
   ok('opencode mid-turn: queue but no steer ⇒ still no chord', mkCI({ _queueCaps: srvCaps('opencode').inputModes, _isStreaming: true }).steerChordAllowed === false);
-  ok('claude mid-turn: no chord', mkCI({ _queueCaps: srvCaps('claude').inputModes, _isStreaming: true }).steerChordAllowed === false);
+  ok('claude mid-turn: no STEER chord — its second key HOLDS (lane claude-steer-inject: Enter itself hands the message over)', mkCI({ _queueCaps: srvCaps('claude').inputModes, _isStreaming: true }).steerChordAllowed === false && mkCI({ _queueCaps: srvCaps('claude').inputModes, _isStreaming: true }).holdChordAllowed === true);
   ok('a session whose caps have not arrived yet (the late-capability ordering) offers no chord', mkCI({ _isStreaming: true }).steerChordAllowed === false);
   ok('the chord answer NEVER consults the textarea (it must not flicker per keystroke)', !/steerChordAllowed[\s\S]{0,200}_textarea/.test(read('src/lib/chat-input.js')));
 
@@ -627,7 +635,7 @@ console.log('— ⑤ the client strip (DOM-free render of the REAL ChatInput)');
     const real = mkCI({ _queueCaps: cxCaps, _isStreaming: true, _send: () => 'm-99', _onSteerSend: (id) => { handedId = id; } });
     ok('…and the positive control still steers on a STRING id (the guard is `typeof`, not truthiness)', real.steerNow() === true && handedId === 'm-99');
     const cant = mkCI({ _queueCaps: srvCaps('claude').inputModes, _isStreaming: true, _send: () => { sends++; return 'x'; } });
-    ok('steerNow() on a harness that cannot steer sends NOTHING at all', cant.steerNow() === false && sends === 1);
+    ok('steerNow() where the second key is not the steer door (claude: Enter steers, Alt+Enter holds) sends NOTHING at all', cant.steerNow() === false && sends === 1);
   }
   // _send's MERGED contract, at the source (2.369.61 chord ⊕ round-5 bail-out):
   // a STRING msgId when a queueable message went out, `true` when it took the
@@ -638,7 +646,7 @@ console.log('— ⑤ the client strip (DOM-free render of the REAL ChatInput)');
       /return msgId;/.test(src) && (src.match(/return false;/g) || []).length >= 3 && /const msgId = typeof r === 'string' \? r : null;/.test(src), (src.match(/return (false|true|msgId);[^\n]*/g) || []));
     // …and the value it can NEVER answer with (r2 verifier): the pre-merge
     // contract's `null` is gone, so a stub that returns it tests nothing.
-    const sendBody = src.slice(src.indexOf('\n  _send() {'), src.indexOf('\n  _addImageAttachment('));
+    const sendBody = src.slice(src.indexOf('\n  _send('), src.indexOf('\n  _addImageAttachment('));   // `_send({ hold })` since lane claude-steer-inject
     ok('the merged _send has no `return null` path left — the third value is `true`, and a test stubbing `null` would pin a state the product cannot reach',
       sendBody.length > 500 && !/\breturn null\b/.test(sendBody), sendBody.length);
   }
@@ -1075,7 +1083,7 @@ console.log('— wiring + docs pins');
     /const keptText = this\._textarea\.value;/.test(cinput) && /const keptAttachments = this\._attachments;/.test(cinput)
     && /if \(keptAttachments\.length\) \{ this\._attachments = keptAttachments; this\._renderAttachments\(\); \}/.test(cinput));
   ok('…and `_send` ANSWERS whether it took the box, so a bail-out reaches the action\'s caller as a refusal too',
-    /_send\(\) \{\n\s*const text = this\._textarea\.value\.trim\(\);\n\s*const hasAttachments = this\._attachments\.length > 0;\n\s*if \(!text && !hasAttachments\) return false;/.test(cinput)
+    /_send\((?:\{ hold = false \} = \{\})?\) \{\n\s*const text = this\._textarea\.value\.trim\(\);\n\s*const hasAttachments = this\._attachments\.length > 0;\n\s*if \(!text && !hasAttachments\) return false;/.test(cinput)
     && /const sent = this\._send\(\) !== false;/.test(cinput) && /\n    return sent;\n  \}/.test(cinput));
   ok('…and the draft SLOT is handed back with the text (confirmDelivery would clear the store out from under it)',
     /if \(prevPendingSend\) this\._pendingSend = prevPendingSend;\n\s*else if \(!carriesUserText\) this\._pendingSend = null;/.test(cinput));
@@ -1189,7 +1197,9 @@ console.log('— wiring + docs pins');
     // does not — a pre-.354 claude wrapper would forward a queue-op line to the CLI verbatim)
     const clw = read('data/bin/chat-wrapper.js');
     ok('the claude chat-wrapper serves queue-op AND queue-resync, never forwarding either to the CLI', /if \(parsed\.type === 'queue-op'\) \{ handleQueueOp\(parsed\); continue; \}/.test(clw) && /if \(parsed\.type === 'queue-resync'\) \{ publishQueue\(\); continue; \}/.test(clw));
-    ok('…and adverts inputQueue + its verb list + queueResync in the sidecar it writes', /caps: \{ frameFile: true, inputQueue: true, queueVerbs: CLAUDE_QUEUE_VERBS, queueResync: true \}/.test(clw) && /const CLAUDE_QUEUE_VERBS = \['remove', 'reorder', 'edit'\];/.test(clw));
+    // (acceptance r2, lane claude-steer-inject: the advert STARTS as the .354 three and gains the steer pair at the CLI's
+    // first state word — proveState writes the sidecar at once; a CLI that says none never advertises the hand-over)
+    ok('…and adverts inputQueue + its verb list + queueResync in the sidecar it writes', /caps: \{ frameFile: true, inputQueue: true, queueVerbs: CLAUDE_HOLD_VERBS, queueResync: true \}/.test(clw) && /const CLAUDE_QUEUE_VERBS = \['remove', 'steer', 'steer-all', 'reorder', 'edit'\];/.test(clw) && /const CLAUDE_HOLD_VERBS = \['remove', 'reorder', 'edit'\];/.test(clw) && /function proveState\(\) \{\n\s+stateProven = true;\n\s+meta\.caps\.queueVerbs = CLAUDE_QUEUE_VERBS;/.test(clw));
   }
   ok('the ACP unknown-verb message lists queue-op (the wrapper tells the truth about what it serves)', /chat-input\/interrupt\/queue-op\//.test(aw));
   // DISTINCT phrases per file (a loose grep matched 'queue-operation' in an
@@ -1230,7 +1240,7 @@ console.log('— wiring + docs pins');
     // lane channel-enter-ime: the slash picker's Tab/Enter now stands behind !imeOwnsKey(e) (an input method's Enter commits its word)
     /if \((?:!imeOwnsKey\(e\) && \()?e\.key === 'Tab' \|\| e\.key === 'Enter'\)/.test(cinput2) && /const mod = !!\(e\.ctrlKey \|\| e\.metaKey\);[\s\S]*?return mod \? 'send' : 'newline';/.test(read('src/lib/chat-enter-keys.js')) && /if \(act === 'send'\) \{ e\.preventDefault\(\); this\._send\(\); \}/.test(cinput2)
     && (cinput2.match(/e\.key === 'Enter' && e\.altKey/g) || []).length === 1);
-  ok('the chord condition excludes every other modifier (Alt+Shift/Alt+Ctrl+Enter are not it)', /e\.key === 'Enter' && e\.altKey && !e\.ctrlKey && !e\.metaKey && !e\.shiftKey && this\.steerChordAllowed/.test(cinput2));
+  ok('the chord condition excludes every other modifier (Alt+Shift/Alt+Ctrl+Enter are not it)', /e\.key === 'Enter' && e\.altKey && !e\.ctrlKey && !e\.metaKey && !e\.shiftKey && \(this\.steerChordAllowed \|\| this\.holdChordAllowed\)/.test(cinput2));
   ok('BOTH surfaces gate on the ONE capability answer, never on a backend id', /this\._steerBtn\.classList\.toggle\('hidden', !\(live && modes\.allowSteerChord\)\)/.test(cinput2) && !/=== 'codex'|=== 'claude'|=== 'opencode'|=== 'antigravity'/.test(cinput2));
   ok('…which comes from the PURE composerSendModes over the LIVE queue caps (the same object the strip reads)', /_sendModes\(\) \{ return composerSendModes\(this\._queueCaps[,)]/.test(cinput2) && /_canSteerComposer\(\) \{ return !!this\._chatInput\?\.steerChordAllowed; \}/.test(cv2));
   ok('both faces repaint on BOTH inputs: the streaming flag AND the late-arriving caps (the dead-chip ordering)', /_updateSendModes\(\);\s*\n\s*\}/.test(cinput2) && /this\._renderQueue\(\);[\s\S]{0,400}this\._updateSendModes\(\);/.test(cinput2) && (cinput2.match(/this\._updateSendModes\(\)/g) || []).length >= 4, (cinput2.match(/this\._updateSendModes\(\)/g) || []).length);
@@ -1760,15 +1770,23 @@ console.log('— ⑨e the chord in a REAL browser (trusted keystrokes) + the 375
       ok('CTRL+ENTER still means send/queue — the chord did not redefine it', st.sent === 3 && st.chord === 1 && st.steers.length === 1, st);
       await evaljs(`window.__ci._expanded = false; true`);
 
-      // ── DESKTOP, a claude session mid-turn (2.369.354): «Enter queues» only, and Alt+Enter is a PLAIN send ──
+      // ── DESKTOP, a claude session mid-turn (2.369.361, lane claude-steer-inject — the owner's ruling «A»): «Enter sends now
+      // · Alt+Enter queues until the turn ends»; Alt+Enter is the HOLD chord (an unstamped send), plain Enter hands over ──
       ok('a real ChatInput mounts with claude caps', (await mount(claudeCaps)) === true);
       await evaljs(`window.__ci.showTyping('thinking...'); true`);
       st = await state();
-      ok('CLAUDE: the hint says «Enter queues» and nothing about Alt+Enter; no steer button (claude has no steer)', st.hintDisplay !== 'none' && /Enter queues/.test(st.hintText) && !/Alt\+Enter/.test(st.hintText) && st.btnDisplay === 'none', st);
+      ok('CLAUDE: the hint says «Enter sends now · Alt+Enter queues until the turn ends»; no steer bolt (its second key holds)', st.hintDisplay !== 'none' && /Enter sends now/.test(st.hintText) && /Alt\+Enter queues until the turn ends/.test(st.hintText) && st.btnDisplay === 'none', st);
+      const lastSent = async () => { const j = await evaljs('JSON.stringify(window.__sent[window.__sent.length - 1] || null)'); return j ? JSON.parse(j) : null; };
       await type('alt on claude');
       await key(ALT);
       st = await state();
-      ok('CLAUDE: Alt+Enter is NOT a chord — it falls through to the ordinary send, and nothing claims a steer', st.chord === 0 && st.steers.length === 0 && st.sent === 1, st);
+      const altFrame = await lastSent();
+      ok('CLAUDE: Alt+Enter is the HOLD chord — ONE ordinary send WITHOUT the hand-over stamp (the wrapper holds it), and nothing claims a steer', st.chord === 0 && st.steers.length === 0 && st.sent === 1 && !!altFrame && !('steer' in altFrame), { st, altFrame });
+      await type('enter on claude');
+      await key(0);
+      st = await state();
+      const enterFrame = await lastSent();
+      ok('CLAUDE: plain Enter sends WITH the hand-over stamp (steer:true — the CLI\'s own default: the agent reads it at its next tool call)', st.sent === 2 && st.chord === 0 && !!enterFrame && enterFrame.steer === true, { st, enterFrame });
 
       // ── ≤768px MEASUREMENT (375×667), the owner's standing rule ──
       await setViewport(375, 667);
@@ -3839,7 +3857,9 @@ console.log('— ⑪ drag-reorder / edit / run-all in a REAL browser (trusted po
         ok(`an ACP harness gets NO run-all / steer-all / run-now (${JSON.stringify(acpHead)})`, !acpHead.runAll && !acpHead.steerAll && acpHead.runNow === 0);
         ok('…but it does get the reorder grips and the edit controls it really serves (peer excluded)', acpHead.grips === 3 && acpHead.edits === 2, JSON.stringify(acpHead));
         const claudeHead = await evaljs(`(() => { window.__ci.setQueue(window.__items, ${CLAUDE_VERBS}); const s = document.querySelector('.chat-queue-strip'); return { hidden: s.classList.contains('hidden'), runAll: !!document.querySelector('[data-queue-op="run-all"]'), steerAll: !!document.querySelector('[data-queue-op="steer-all"]'), runNow: document.querySelectorAll('[data-queue-op="run-now"]').length, steers: document.querySelectorAll('[data-queue-op="steer"]').length, grips: document.querySelectorAll('.chat-queue-grip').length, edits: document.querySelectorAll('[data-queue-op="edit"]').length, removes: document.querySelectorAll('[data-queue-op="remove"]').length }; })()`);
-        ok(`claude (2.369.354): the strip shows, with the ACP controls — grips, ✎ edit (peer excluded), ✕ remove — and NO run-all / steer-all / run-now / steer (${JSON.stringify(claudeHead)})`, !claudeHead.hidden && !claudeHead.runAll && !claudeHead.steerAll && claudeHead.runNow === 0 && claudeHead.steers === 0 && claudeHead.grips === 3 && claudeHead.edits === 2 && claudeHead.removes === 3);
+        // lane claude-steer-inject (2.369.361): claude's wrapper serves steer / steer-all — the ⚡ per held row hands it to the
+        // running turn, «inject all» in the header; still no run-all / run-now
+        ok(`claude (2.369.361): the strip shows grips, ✎ edit (peer excluded), ✕ remove, a ⚡ per row and «inject all» — and NO run-all / run-now (${JSON.stringify(claudeHead)})`, !claudeHead.hidden && !claudeHead.runAll && claudeHead.steerAll && claudeHead.runNow === 0 && claudeHead.steers === 3 && claudeHead.grips === 3 && claudeHead.edits === 2 && claudeHead.removes === 3);
       }
       // STOP PUTS THE DROPPED QUEUE BACK (lane stop-refills-composer, owner 2026-10-24): the server's draft op carries
       // `prepended`; the REAL ChatInput over the REAL StateSync lands only its prefix, in front of the LIVE box
@@ -5988,7 +6008,7 @@ process.stdin.on('data', (d) => {
 // measured on 2.1.308: running → result → idle per frame; it QUEUES a mid-turn frame itself and runs it after an
 // interrupt). Every declared verb driven against a held row, the refusals, the resync, the drain order, a frame
 // VibeSpace typed, a frame with an image held WHOLE, and Stop's order law — then nothing runs after it.
-console.log('— ⑯ claude: the wrapper holds a mid-turn frame (remove / reorder / edit / steer refused / resync / drain / Stop)');
+console.log('— ⑯ claude: the wrapper holds a mid-turn frame (remove / reorder / edit / a steer naming a row that left / resync / drain / Stop)');
 {
   const { spawn } = require('child_process');
   const { ClaudeCodeAdapter } = require(path.join(REPO, 'src/adapters/claude-code.js'));
@@ -6011,9 +6031,16 @@ console.log('— ⑯ claude: the wrapper holds a mid-turn frame (remove / reorde
   try {
     await until16(() => fs.existsSync(path.join(dir16, 's.json')) && !!lastQueue());
     const side = JSON.parse(fs.readFileSync(path.join(dir16, 's.json'), 'utf8'));
-    ok('⑯ the sidecar adverts the queue (inputQueue, the three verbs, queueResync) and the BASELINE publication is an empty queue with its verbs', side.caps?.inputQueue === true && JSON.stringify(side.caps.queueVerbs) === JSON.stringify(['remove', 'reorder', 'edit']) && side.caps.queueResync === true && lastQueue().items.length === 0 && JSON.stringify(lastQueue().verbs) === JSON.stringify(['remove', 'reorder', 'edit']), side.caps);
+    // (five verbs since 2.369.361 — steer / steer-all hand a held row to the running turn, and 'steer' in this hello is the
+    // hand-over door's advert: lane claude-steer-inject — and since its acceptance r2 only once the CLI has said a state
+    // word: at boot the hello names the .354 three)
+    const FIVE = JSON.stringify(['remove', 'steer', 'steer-all', 'reorder', 'edit']), THREE = JSON.stringify(['remove', 'reorder', 'edit']);
+    ok('⑯ the sidecar adverts the queue (inputQueue, the .354 three until the CLI proves its state words, queueResync) and the BASELINE publication is an empty queue with its verbs', side.caps?.inputQueue === true && JSON.stringify(side.caps.queueVerbs) === THREE && side.caps.queueResync === true && lastQueue().items.length === 0 && JSON.stringify(lastQueue().verbs) === THREE, side.caps);
     send(ad.formatChatInput('LONG-1 the running turn', 'm-1').stdinPayload);
     await until16(() => running() >= 1);
+    await until16(() => JSON.stringify(lastQueue()?.verbs) === FIVE);
+    const side2 = JSON.parse(fs.readFileSync(path.join(dir16, 's.json'), 'utf8'));
+    ok('⑯ …the CLI\'s first state word proves it: the sidecar AND a fresh publication name the five (the hand-over door)', JSON.stringify(side2.caps?.queueVerbs) === FIVE && JSON.stringify(lastQueue().verbs) === FIVE, { sidecar: side2.caps?.queueVerbs, inBand: lastQueue()?.verbs });
     // an image paste (the client's own frame shape) is held WHOLE; a typed text; a frame VibeSpace typed (auto-resume)
     const IMG = 'iVBORw0KGgo' + 'A'.repeat(400);
     send(ad.formatChatInput(JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: IMG } }, { type: 'text', text: 'what is in this picture' }] } }), 'm-img').stdinPayload);
@@ -6041,12 +6068,13 @@ console.log('— ⑯ claude: the wrapper holds a mid-turn frame (remove / reorde
     ok('⑯ edit rewrites the first text block only (the image stays — BY EXCLUSION, the acp/codex rule)', results('edit')[0].ok === true && lastQueue().items.find((i) => i.id === rImg).text === 'describe it in one line' && /^\[image\] describe it in one line$/.test(lastQueue().items.find((i) => i.id === rImg).preview));
     ok('⑯ a frame VibeSpace typed (webui_origin) is not-editable', results('edit')[1].ok === false && results('edit')[1].reason === 'not-editable');
     // the verbs this harness does NOT serve are reported, never silent (the adapter refuses them first; this is the
-    // arm for a frame that reaches the wrapper anyway)
-    send(JSON.stringify({ type: 'queue-op', op: 'steer', id: r2 }));
+    // arm for a frame that reaches the wrapper anyway). STEER IS SERVED since 2.369.361 (lane claude-steer-inject — it hands
+    // a held row to the running turn: scripts/test-claude-steer.mjs ②③④); here it names a row that left: gone, honestly
+    send(JSON.stringify({ type: 'queue-op', op: 'steer', id: 'q-left' }));
     send(JSON.stringify({ type: 'queue-op', op: 'run-now', id: r2 }));
     send(JSON.stringify({ type: 'queue-op', op: 'remove', id: 'q-nobody' }));
     await until16(() => results().length >= 8);
-    ok('⑯ steer ⇒ not-steerable, run-now ⇒ not-startable, an unknown id ⇒ gone — each a result, nothing changed', results('steer')[0]?.reason === 'not-steerable' && results('run-now')[0]?.reason === 'not-startable' && results('remove').find((r) => r.id === 'q-nobody')?.reason === 'gone' && lastQueue().items.length === 3);
+    ok('⑯ run-now ⇒ not-startable, a steer / remove naming a row that is not held ⇒ gone — each a result, nothing changed', results('steer')[0]?.reason === 'gone' && results('run-now')[0]?.reason === 'not-startable' && results('remove').find((r) => r.id === 'q-nobody')?.reason === 'gone' && lastQueue().items.length === 3);
     // resync: the same queue, stated again (an empty one too, below)
     const nQ = recs.filter((r) => r.type === 'queue_changed').length;
     send(ad.formatQueueResync());

@@ -78,7 +78,14 @@ function queueDroppedOf(record) {
     items.push({ id: typeof it.id === 'string' ? it.id : '', msgId: typeof it.msgId === 'string' ? it.msgId : '', ts: Number.isFinite(it.ts) ? it.ts : null, text, cut: it.cut === true || text.length < raw.length, attachments, ...(it.started === true ? { started: true } : {}) });
   }
   const omitted = Number.isSafeInteger(p.omitted) && p.omitted > 0 ? p.omitted : 0;
-  return { dropId, by: typeof p.by === 'string' && p.by ? p.by.slice(0, 32) : 'stop', turnId: typeof p.turnId === 'string' && p.turnId ? p.turnId : null, items, omitted };
+  // EACH HANDED FRAME'S FATE (lane claude-steer-inject r2, claude): messages the person had already HANDED to the turn Stop
+  // ends are never put back (they are the turn's) — `kept` the CLI still held (they stay in the conversation, unanswered),
+  // `landed` the model had already read. Counted for the toast, and named (`keptIds` / `landedIds`) so the bubbles' chips
+  // are drawn from THIS record; a record may carry them and no items at all
+  const ids = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string' && x).map((x) => x.slice(0, 128)).slice(0, PUTBACK_MAX_ITEMS) : []);
+  const count = (n) => (Number.isSafeInteger(n) && n > 0 ? Math.min(n, PUTBACK_MAX_ITEMS) : 0);
+  const kept = count(p.kept), landed = count(p.landed), keptIds = ids(p.keptIds), landedIds = ids(p.landedIds);
+  return { dropId, by: typeof p.by === 'string' && p.by ? p.by.slice(0, 32) : 'stop', turnId: typeof p.turnId === 'string' && p.turnId ? p.turnId : null, items, omitted, ...(kept ? { kept } : {}), ...(keptIds.length ? { keptIds } : {}), ...(landed ? { landed } : {}), ...(landedIds.length ? { landedIds } : {}) };
 }
 
 /** THE MERGE (the server door's one rule): the put-back texts, oldest first, blank-line separated, IN FRONT of the draft
@@ -151,7 +158,9 @@ function landDraft({ focused, dirty, current, incoming, prepended, selStart, sel
 
 /** The toast's facts: n = rows whose text came back, images / others = attachments named but not restored, cut = rows
  *  shortened to 20000, omitted = rows past the record's 100000 chars (not carried at all), started = those of the n that
- *  had already started and were stopped (`started: true`, codex — the toast names them). */
+ *  had already started and were stopped (`started: true`, codex — the toast names them), kept = messages handed to the
+ *  stopped turn that the CLI still held — they stay with it, unanswered; landed = handed messages the model had already
+ *  read (claude, lane claude-steer-inject — the toast names each count that is not 0). */
 function putbackNotice(d) {
   const items = d && Array.isArray(d.items) ? d.items : [];
   let n = 0, images = 0, others = 0, cut = 0, started = 0;
@@ -161,7 +170,9 @@ function putbackNotice(d) {
     if (it.cut) cut++;
     for (const a of Array.isArray(it.attachments) ? it.attachments : []) { if (a && IMAGE_TYPES.has(a.type)) images++; else if (a) others++; }
   }
-  return { n, images, others, cut, omitted: d && Number.isSafeInteger(d.omitted) && d.omitted > 0 ? d.omitted : 0, started };
+  const kept = d && Number.isSafeInteger(d.kept) && d.kept > 0 ? d.kept : 0;
+  const landed = d && Number.isSafeInteger(d.landed) && d.landed > 0 ? d.landed : 0;
+  return { n, images, others, cut, omitted: d && Number.isSafeInteger(d.omitted) && d.omitted > 0 ? d.omitted : 0, started, ...(kept ? { kept } : {}), ...(landed ? { landed } : {}) };
 }
 
 /** A row the app-server DRAINED under codex's Stop sweep (`{deleted:false}` — it left the queue to run): was it STOPPED?

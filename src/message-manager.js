@@ -297,6 +297,37 @@ function syntheticUsage(raw) {
 // the source up to the first `])`.
 const TERMINAL_TASK_STATUS = new Set(['completed', 'failed', 'stopped', 'killed']);
 
+// the isMeta companion lines that are never the person's message (r6: the measured shapes, nothing broader)
+const META_NOTE_RE = /^\s*(?:\[Image source: |Base directory for this skill: |Caveat: )/;
+/** How many leading blocks of a batched user record (from `off`) are THIS copy's (lane claude-steer-inject r5) — its blocks
+ *  in order: each text trim-equal (the CLI joins a batch with a newline), a picture's place a picture or the CLI's line
+ *  about it; 0 unless at least one of its words matched (a copy is never claimed by a picture's place alone). */
+function copyPrefixLen(copy, rec, off) {
+  if (!Array.isArray(copy) || !copy.length || off + copy.length > rec.length) return 0;
+  const said = new Set(copy.filter((b) => b && b.type === 'text').map((b) => String(b.text || '').trim()));
+  let words = 0;
+  for (let i = 0; i < copy.length; i++) {
+    const k = copy[i], r = rec[off + i];
+    if (!k || !r) return 0;
+    if (k.type === 'text') { if (r.type !== 'text' || String(r.text || '').trim() !== String(k.text || '').trim()) return 0; words++; }
+    else if (k.type === 'image') { if (!(r.type === 'image' || (r.type === 'text' && !said.has(String(r.text || '').trim())))) return 0; }
+    else return 0;
+  }
+  return words ? copy.length : 0;
+}
+/** The bubble a claimed copy draws (lane claude-steer-inject r5): the copy's blocks — a picture whose kept file is gone
+ *  replaced by the record's picture at its place — then a picture only the record holds, then every line of the record the
+ *  copy does not say (the CLI's words about the message: a picture it could not process). */
+function claimedContent(copy, rec) {
+  const said = new Set(copy.filter((b) => b && b.type === 'text').map((b) => String(b.text || '').trim()));
+  const pics = rec.filter((b) => b && b.type === 'image' && !b.gone);
+  let p = 0;
+  const out = copy.map((b) => (b && b.type === 'image' ? ((pics[p] && b.gone) ? { ...pics[p++] } : (p++, b)) : b));
+  for (; p < pics.length; p++) out.push({ ...pics[p] });
+  for (const b of rec) if (b && b.type === 'text' && String(b.text || '').trim() && !said.has(String(b.text).trim())) out.push({ ...b });
+  return out;
+}
+
 class MessageManager extends MessageWindow {
   // Injected by the server once the settings SyncStore exists (the normalizer
   // can't reach server state directly). null in tests → defaults apply.
@@ -318,9 +349,11 @@ class MessageManager extends MessageWindow {
     // THE WRAPPER'S QUEUE (2.369.354, lane claude-wrapper-queue): data/bin/chat-wrapper.js HOLDS a frame sent mid-turn
     // and says so on the acp/codex wire — queued_input / queue_changed / queue_op_result / queue_dropped, top-level lines
     this.userMessageIds = new Map();      // webui msgId → message id (the bubble a queue row belongs to)
+    this._webuiCopies = new Map();        // msgId → {cliUuid, id, handNo}: a wrapper's copy of a mid-turn frame — claimed by the CLI's record of it (a batch in HAND-OVER order, r6)
     this._queue = [];                     // the wrapper's promptQueue, as published
     this._queuedMsgIds = new Set();       // bubbles currently wearing a 'queued' chip
     this._queuePublished = false;         // has this wrapper ever published a queue? (in-band capability signal)
+    this._settling = null;                // {until, hook} while a window the CLI owes a turn holds the queue (`queue_settle`, r5)
     this._queueVerbs = null;              // …and the verb list that publication named
     // A HELPER's own view (`sub-<tool_use_id>` / `sub-agent-<id>`, lane S1): its
     // asks attach to its own tool cards; the PARENT's normalizer instead hangs a
@@ -844,6 +877,8 @@ class MessageManager extends MessageWindow {
       case 'queue_changed': return this._processQueueChanged(raw, emit);
       case 'queue_op_result': return this._processQueueOpResult(raw, emit);
       case 'queue_dropped': return this._processQueueDropped(raw, emit); // Stop's put-back (the base's one method)
+      case 'input_handover': return this._processInputHandover(raw, emit); // 2.369.361: a frame handed to the running turn
+      case 'queue_settle': return this._processQueueSettle(raw, emit); // r5: the held frames wait on a window the CLI owes a turn
       // the transcript's persisted PR pointer {prNumber, prUrl, prRepository} =
       // the same fact as system/code_change_published (design-unknown-records)
       case 'pr-link': return this._processCodeChange({ provider: null, url: raw.prUrl, repo: raw.prRepository, identifier: raw.prNumber != null ? String(raw.prNumber) : null, action: null }, emit);
@@ -1488,6 +1523,10 @@ class MessageManager extends MessageWindow {
           .filter((b) => b && b.type === 'text' && typeof b.text === 'string' && b.text.trim())
           .map((b) => ({ type: 'text', text: b.text }));
       const text = blocks.map((b) => b.text).join('');
+      // a wrapper's copy of the same mid-turn frame drew it (acceptance r4): this attachment is its record by WITNESS — its
+      // source_uuid is the uuid the wrapper stamped on the frame — and its blocks (the image too) are what is drawn
+      const fullBlocks = typeof a.prompt === 'string' ? blocks : (Array.isArray(a.prompt) ? a.prompt : []).map((b) => (b && b.type === 'text' && typeof b.text === 'string' ? { type: 'text', text: b.text } : (b && b.type === 'image' ? { type: 'image', mediaType: b.source?.media_type || 'image/png', data: b.source?.data || '' } : null))).filter(Boolean);
+      if (a.source_uuid && this._claimWebuiCopy(fullBlocks, a.source_uuid, emit)) return;
       if (!text.trim()) return;
       // Mid-turn task completion (2.368.31): the notification rides THIS
       // attachment when the agent was busy — close the task and render the
@@ -1502,6 +1541,7 @@ class MessageManager extends MessageWindow {
       }
       for (let i = this.messages.length - 1, seen = 0; i >= 0 && seen < 12; i--, seen++) {
         const m = this.messages[i];
+        // (a wrapper's copy of the same mid-turn frame drew it: this attachment is its record — the copy is claimed)
         if (m.role === 'user' && (m[PEER_RECORDED] || (m.content || []).map((b) => b.text || '').join('')) === text) return;
       }
       if (a.origin?.kind === 'peer' && a.origin.msg_id && this._peerMsgIds.has(a.origin.msg_id)) return; // already rendered (msg_id is authoritative)
@@ -1594,6 +1634,56 @@ class MessageManager extends MessageWindow {
   // whose wrapper predates it never publishes, so they answer [] / false / null
   // — null = "named no verb list", not "serves none".
 
+  /** The CLI's own record of a frame a wrapper copy already drew (src/server/session-store.js keeps that copy through a
+   *  restart) — found by its WITNESS (acceptance r4): the uuid the wrapper stamped on the frame, which the CLI keeps as
+   *  its user record's `uuid` and as a queued_command attachment's `source_uuid` (measured on 2.1.312). Claimed once —
+   *  never a second bubble — at ANY distance (a held frame drained after a 60-call turn is still the same message), and
+   *  never by its words. What is drawn is the person's message AND what the CLI says of it (claimedContent, r5): the copy's
+   *  pictures (kept by reference), a picture the copy no longer keeps taken from the record, a picture only the record has
+   *  (an older build's words-only copy), and the record's own words the copy lacks — the CLI's «[Image could not be
+   *  processed …]» lines are its fact of what the model got, never hidden behind the copy. Never a copy Stop put back
+   *  (removed / stopped: it never ran). */
+  _claimWebuiCopy(content, uuid, emit) {
+    if (!uuid || !this._webuiCopies.size) return false;
+    let hit = null;
+    for (const [msgId, c] of this._webuiCopies) if (c.cliUuid && c.cliUuid === String(uuid)) { hit = msgId; break; }
+    if (!hit) return false;
+    const hc = this._webuiCopies.get(hit);
+    // A copy whose frame is STILL HELD (hand-over number 0, r6) never claims a record: it never reached the CLI
+    if (hc.handNo === 0) return false;
+    // A BATCH IS CLAIMED AS A BATCH (acceptance r5) — IN HAND-OVER ORDER, BY ITS WITNESS (r6): frames the CLI ran together as
+    // ONE turn are ONE user record under the LAST frame's uuid, the earlier frames' blocks first in the order the wrapper
+    // WROTE them (the copy's `handNo`, never the order the copies arrived: a held frame bolted after a handed one comes
+    // second). Each earlier handed copy still waiting claims its own blocks off the front (its words trim-equal, a picture's
+    // place); a held copy (handNo 0) and one handed after the hit never do — the same words held and sent again are told
+    // apart by the uuid witness. A copy of an older build (no handNo) keeps r5's arrival order.
+    const rec = (content || []).map((b) => ({ ...b }));
+    const parts = [];
+    let off = 0;
+    // the copies that may be in this batch: handed BEFORE the hit (hand-over order) — or, for an older build's copies (no
+    // handNo), any other unclaimed one; the record is walked from its front, each step claimed by the eligible copy whose
+    // blocks are there (so neither the copies' arrival order nor their hand-over order is assumed to be the record's)
+    const pool = [...this._webuiCopies].filter(([msgId, c]) => msgId !== hit && (hc.handNo == null ? c.handNo == null : (c.handNo > 0 && c.handNo < hc.handNo)))
+      .sort((a, b) => (a[1].handNo || 0) - (b[1].handNo || 0));
+    for (let step = true; step && off < rec.length;) {
+      step = false;
+      for (const [msgId, c] of pool) {
+        if (parts.some(([m]) => m === msgId)) continue;
+        const n = copyPrefixLen(this.messageIndex.get(c.id)?.content, rec, off);
+        if (n && off + n < rec.length) { parts.push([msgId, rec.slice(off, off + n)]); off += n; step = true; break; }
+      }
+    }
+    parts.push([hit, rec.slice(off)]);
+    for (const [msgId, blocks] of parts) {
+      const msg = this.messageIndex.get(this._webuiCopies.get(msgId).id);
+      this._webuiCopies.delete(msgId);
+      if (!msg) continue;
+      const drawn = claimedContent(msg.content || [], blocks);
+      if (JSON.stringify(drawn) !== JSON.stringify(msg.content)) { msg.content = drawn; if (emit) this._emit({ op: 'edit', id: msg.id, fields: { content: msg.content } }); }
+    }
+    return true;
+  }
+
   /** Stamp the queue chip on the bubble a held message belongs to; false when there is no such bubble (the acp / codex
    *  rule — the caller then draws a visible notice, so a held message is never silent). */
   _stampQueueChip(msgId, state, emit) {
@@ -1601,11 +1691,55 @@ class MessageManager extends MessageWindow {
     const id = this.userMessageIds.get(String(msgId));
     const msg = id ? this.messageIndex.get(id) : null;
     if (!msg) return false;
-    if (msg.queueState === state) return true;
+    // a frame Stop put back (or the person removed) never ran: no later record of the CLI is ITS record
+    if (state === 'removed' || state === 'stopped') this._webuiCopies.delete(String(msgId));
+    // the hub's `now` is re-said at every emit (r6): it pairs with `until` for the client's own deadline
+    const settling = state === 'queued' && this._settling ? (this._settling.until ? { ...this._settling, now: Date.now() } : this._settling) : null;
+    const settleMoved = JSON.stringify(msg.settling || null) !== JSON.stringify(settling) && !(msg.settling && settling && msg.settling.until === settling.until && !!msg.settling.running === !!settling.running);
+    if (msg.queueState === state && !settleMoved) return true;
     msg.queueState = state;
+    if (settleMoved) msg.settling = settling;
     if (state === 'queued') this._queuedMsgIds.add(String(msgId)); else this._queuedMsgIds.delete(String(msgId));
-    if (emit) this._emit({ op: 'edit', id: msg.id, fields: { queueState: state } });
+    if (emit) this._emit({ op: 'edit', id: msg.id, fields: { queueState: state, ...(settleMoved ? { settling } : {}) } });
     return true;
+  }
+
+  /** `input_handover` (2.369.361, lane claude-steer-inject) — the wrapper wrote these frames to the CLI while a turn ran
+   *  (the person's Enter, or the ⚡ on a held row), and says what became of them: 'handed' (written — the agent reads it at
+   *  its next tool call), 'landed' (it rode a tool result into the turn and the model answered — «Steered», where it sits),
+   *  'own-turn' (the turn ended first: the CLI ran it as a turn of its own — an ordinary message, no chip). What Stop
+   *  meant for each one is said by Stop's ONE `queue_dropped` (`keptIds` → 'kept', `landedIds` → 'steered' — message-
+   *  window `_processQueueDropped`); a 'kept' state here is still read (a record of an earlier build). No bubble ⇒ nothing to mark:
+   *  the frame reached the agent, which is never a silence worth a card. */
+  _processInputHandover(raw, emit) {
+    const state = { handed: 'handed', landed: 'steered', 'own-turn': null, kept: 'kept' }[raw.state];
+    if (state === undefined) return;
+    for (const msgId of Array.isArray(raw.msg_ids) ? raw.msg_ids : []) this._stampQueueChip(msgId, state, emit);
+  }
+
+  /** `queue_settle` (lane claude-steer-inject r5, THE BACKSTOP SPEAKS — the deadline-card law): while a window in which the CLI
+   *  owes a turn is open (a Stop's follow-up, a turn it owes for handed frames) the frames held behind it are not simply
+   *  «Queued»: their chip says «held — the turn is settling» and counts down to the backstop (`until`, epoch ms; null while
+   *  a prompt hook pauses it). 'settled' clears it; 'backstop' clears it and says, once, that the turn did not answer in
+   *  time and the held messages go now. */
+  _processQueueSettle(raw, emit) {
+    const st = raw.state;
+    if (st !== 'settling' && st !== 'settled' && st !== 'backstop' && st !== 'running') return;
+    // `now` = this hub's clock when it was said (r6, the hub-clock law): the client turns `until` into its own deadline with it
+    const why = raw.why === 'stop' || raw.why === 'handover' ? raw.why : null;
+    this._settling = st === 'settling' ? { until: Number(raw.until) || null, now: Date.now(), ...(why ? { why } : {}), ...(raw.hook ? { hook: true } : {}) }
+      : st === 'running' ? { running: true, ...(why ? { why } : {}) } : null;
+    for (const msgId of this._queuedMsgIds) {
+      const msg = this.messageIndex.get(this.userMessageIds.get(msgId));
+      if (!msg) continue;
+      msg.settling = this._settling;
+      if (emit) this._emit({ op: 'edit', id: msg.id, fields: { queueState: msg.queueState, settling: msg.settling } });
+    }
+    if (st === 'backstop' && (Array.isArray(raw.msg_ids) ? raw.msg_ids.length : 0)) {
+      const secs = Math.round((Number(raw.ms) || 30000) / 1000);
+      const msg = this._create({ role: 'system', content: [{ type: 'system_info', text: `The turn did not answer in ${secs} s — the held messages are delivered now`, seconds: secs }], noticeKind: 'queue-backstop' });
+      if (emit) this._emit({ op: 'create', message: msg });
+    }
   }
 
   /** `queued_input` — the chip on the bubble IS the notice; the card is the fallback for a held frame with no bubble. */
@@ -1645,7 +1779,11 @@ class MessageManager extends MessageWindow {
   static queueOpFailureText(rec) {
     switch (rec.reason) {
       case 'gone': return 'That message is no longer queued — it already ran.';
-      case 'not-steerable': return 'Claude Code takes no input into a running turn — the message runs when this turn ends.';
+      // the claude wrapper says WHY a held row may not join the turn (lane claude-steer-inject r2); no `why` = a command
+      case 'not-steerable': return rec.why === 'origin' ? "VibeSpace's own message runs between turns — it stays queued and runs when this turn ends."
+        : rec.why === 'stopping' ? 'The turn is being stopped — it stays queued and runs as soon as the stop settles.'
+          : rec.why === 'unproven' ? 'This agent has not shown yet that it can take a message into a running turn — it stays queued and runs when this turn ends.'
+            : 'A command runs between turns — it stays queued and runs when this turn ends.';
       case 'not-startable': return 'A queued message starts as soon as the current turn ends.';
       case 'not-editable': return 'That message is not yours to rewrite — you can remove it instead.';
       case 'anchor-gone': return 'The message it was dropped after is no longer queued — nothing was moved.';
@@ -1779,6 +1917,9 @@ class MessageManager extends MessageWindow {
 
       const normalizedContent = textBlocks.map(b => {
         if (b.type === 'text') return { type: 'text', text: b.text || '' };
+        // a copy's picture whose kept file is gone (lane claude-steer-inject r5, src/session-store.js resolveKept): a reference
+        // the renderer draws as a placeholder that says so
+        if (b.type === 'image' && b.source?.type === 'kept') return { type: 'image', mediaType: b.source.media_type || 'image/png', data: '', gone: true, ...(b.source.bytes ? { bytes: b.source.bytes } : {}) };
         if (b.type === 'image') return { type: 'image', mediaType: b.source?.media_type || 'image/png', data: b.source?.data || '' };
         return null;
       }).filter(Boolean);
@@ -1826,9 +1967,25 @@ class MessageManager extends MessageWindow {
       // inc-mu6bfv1t-4drq; or the device stream filling a gap the parse already
       // rendered) is the SAME message — never a second card.
       if (raw.origin?.kind === 'peer' && raw.origin.msg_id && this._peerMsgIds.has(raw.origin.msg_id)) return;
-      this.turnIndex++;
+      // A MID-TURN FRAME THE PERSON SENT (lane claude-steer-inject r2): the claude wrapper copies it into its history
+      // buffer (`webui_copy`) so a restart keeps its bubble and chip — and the SAME message is drawn ONCE: a record whose
+      // msgId already has a bubble is that bubble (the live send's or the copy's), and the CLI's own record of those words
+      // a little later (the turn they ran as, a held frame drained, a kept frame's interrupted follow-up) claims the copy.
+      if (raw._fromWebui && raw.msgId && this.userMessageIds.has(String(raw.msgId)) && (raw.webui_copy || this._webuiCopies.has(String(raw.msgId)))) return;
+      if (!raw._fromWebui && !raw.origin && this._claimWebuiCopy(normalizedContent, raw.uuid, emit)) return;
+      // AN isMeta COMPANION LINE IS NEVER THE PERSON'S MESSAGE (lane claude-steer-inject r5, both CLI builds): the CLI's own
+      // lines to the model — «[Image source: /tmp/…]» beside a pasted picture — drew an extra «You» bubble after every
+      // restart. A dim note, no turn of its own; a record the person typed (promptSource / ours) or one with an origin stays itself.
+      // NARROW (r6): the measured shapes only — the «[Image source: …]» line beside a pasted picture, a skill's body, the
+      // «Caveat:» line of a local command; a Stop-hook feedback turn and a compaction's continuation keep their turns
+      const metaNote = raw.isMeta === true && !raw.origin && !raw.promptSource && !raw._fromWebui && META_NOTE_RE.test(normalizedContent.filter((b) => b.type === 'text').map((b) => b.text).join(''));
+      if (!metaNote) this.turnIndex++;
       // Use original msgId if present (for dedup with client-side local preview)
       const msg = this._create({ role: 'user', status: 'complete', content: normalizedContent, turnIndex: this.turnIndex });
+      if (raw.webui_copy && raw._fromWebui && raw.msgId) {
+        this._webuiCopies.set(String(raw.msgId), { cliUuid: typeof raw.cliUuid === 'string' && raw.cliUuid ? raw.cliUuid : null, id: msg.id, handNo: Number.isFinite(raw.handNo) ? raw.handNo : null });
+        if (this._webuiCopies.size > 32) this._webuiCopies.delete(this._webuiCopies.keys().next().value);
+      }
       // Provenance for the notification classifier: promptSource = the CLI's
       // marker on HUMAN-submitted prompts (JSONL 'sdk'; our own live sends
       // stamp it too), isSynthetic = CLI-synthesized records (hook feedback on
@@ -1869,7 +2026,7 @@ class MessageManager extends MessageWindow {
       }
       else if (raw.originKind === 'auto-resume') { msg.originKind = 'auto-resume'; msg.typed = false; if (typeof raw.originNote === 'string' && raw.originNote) msg.originNote = raw.originNote; } // VibeSpace's own continue prompt (auto-resume) — labelled, never a "you typed this" bubble (2.369.32)
       else if (raw.promptSource || raw._fromWebui) msg.typed = true;
-      if (raw.isSynthetic) msg.synthetic = true;
+      if (raw.isSynthetic || metaNote) msg.synthetic = true;
       // THE BUBBLE'S IDENTITY (2.369.354): a frame the wrapper holds names this msgId in its queue row — stamped ON the
       // message (the client joins its chip by it; a server-only map is not an identity it can see), the acp/codex stamp
       if (raw._fromWebui && raw.msgId) { msg.webuiMsgId = String(raw.msgId); this.userMessageIds.set(String(raw.msgId), msg.id); }
@@ -2387,6 +2544,16 @@ const KNOWN_IGNORED_RECORD_TYPES = new Set([
   // transcript bookkeeping (JSONL-only rows the CLI writes beside the conversation)
   'last-prompt', 'custom-title', 'agent-name', 'permission-mode', 'mode', 'atis-latch', // (pr-link is ROUTED since 2026-09-21 — the same fact as system/code_change_published)
   'file-history-snapshot', 'file-history-delta', 'cost-state', 'summary', 'progress',
+  // the CLI's REQUEST REPLAY rows (lane claude-steer-inject r5, read off the strings of 2.1.288–2.1.312 and MEASURED in every
+  // 2.1.308 / 2.1.312 transcript of a loopback-mock run): each API request the CLI sends is written as `api-request` (its
+  // params, by hash) + `api-request-shape` (the system prompt and tools, once per hash) + `api-request-blob` (each message,
+  // once per hash) so the CLI can replay it. Gated by CLAUDE_CODE_ELEGANT_MEADOW / the tengu_elegant_meadow flag — default
+  // OFF through 2.1.296, ON since 2.1.307 — JSONL only, never on stdout. A copy of the request, never a conversation row.
+  'api-request', 'api-request-shape', 'api-request-blob',
+  // `tools-used` {tools:[names]} (2.1.312 — the strings of 2.1.308 have no writer; MEASURED in every 2.1.312 transcript that
+  // ran a tool): the names of the tools the session has used, re-written when the set grows (tengu_silly_shore, default on).
+  // The tool cards are the chat's record of what ran.
+  'tools-used',
   // the /design canvas session's own bookkeeping (corpus-verified 2026-09-22 by a read-only grep:
   // ONE 2.1.238 transcript, 60 rows — artifact-autoreact-ledger 52 / frame-link 5 /
   // artifact-comment-monitor 3). Each names artifacts or a canvas frame by id + url and carries no

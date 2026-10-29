@@ -182,7 +182,8 @@ export const ROWS = [
   ['src/server/window-targets-engine.js', 'own-tree', 4, null, DATA],
   ['src/server/wrapper-files.js', 'own-tree', 6, null, PROC], // ci358-reds round 2 +2: the boot's age sweep (readdir + stat of BUFFERS_DIR), moved out of server.js
   ['src/session-status.js', 'own-tree', 1, null, DATA],
-  ['src/session-store.js', 'own-tree', 27, null, `${CLI}; lane hub-fuse-sync-guard −2: the project-dir decode's three probes are ONE (probeCandidate: never below a storage mount)`],
+  ['src/session-store.js', 'own-tree', 27, null, `${CLI}; lane hub-fuse-sync-guard −2: the project-dir decode's three probes are ONE (probeCandidate: never below a storage mount); lane claude-steer-inject r6: the restart copy's kept pictures are read by src/kept-copies.js preload (r5's two reads here moved there)`],
+  ['src/kept-copies.js', 'own-tree', 5, null, 'lane claude-steer-inject r6: a claude restart copy\'s kept pictures in data/session-buffers/<id>.img — the WRAPPER writes them (writeKept / capDir: its own process); the restore preloads them async (fs.promises stat + readFile, ≤ 32 MB a file, 3 s in all) — the instance\'s own tree, the folder derived from the session id, never a record\'s path'],
   ['src/slot-transitions.js', 'own-tree', 4, null, DATA],
   ['src/sock-path.js', 'own-tree', 4, null, DATA],
   ['src/ssh-key.js', 'own-tree', 1, null, DATA],

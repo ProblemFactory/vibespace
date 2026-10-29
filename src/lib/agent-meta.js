@@ -45,7 +45,7 @@ export const BACKEND_META = {
     // inProgressTools is FALSE on every harness today: claude's record for it
     // never leaves the CLI's own host callback (backend-caps.js carries the
     // dump + the wire measurement), so nothing may draw an "executing" dot.
-    caps: { fork: true, forkAtMessage: true, review: false, renameWriteback: false, autoResume: { signal: true, resume: 'message', supported: true }, accounts: true, peerDelivery: 'cli-inbox', inputModes: deriveInputModes({ queue: true, queueVerbs: ['remove', 'reorder', 'edit'] }), turnState: 'authoritative', inProgressTools: false, responseStyle: { live: false, closed: false, values: ['Concise', 'Explanatory', 'Learning', 'Proactive'] }, worktree: { supported: true, flag: '--worktree', named: true, requiresGitRepo: true, hookEscape: 'WorktreeCreate', landsIn: '.claude/worktrees/<name>', branchPrefix: 'worktree-' }, permissionRules: { source: 'settings-files', session: true, instance: true, liveVerb: false }, toolAllowlist: { kind: 'tools', allow: '--allowedTools', deny: '--disallowedTools', tools: ['Read', 'Edit', 'Write', 'Bash', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'NotebookEdit'], keep: ['Bash'] } },
+    caps: { fork: true, forkAtMessage: true, review: false, renameWriteback: false, autoResume: { signal: true, resume: 'message', supported: true }, accounts: true, peerDelivery: 'cli-inbox', inputModes: deriveInputModes({ queue: true, queueVerbs: ['remove', 'steer', 'steer-all', 'reorder', 'edit'], enterDoor: 'steer' }), turnState: 'authoritative', inProgressTools: false, responseStyle: { live: false, closed: false, values: ['Concise', 'Explanatory', 'Learning', 'Proactive'] }, worktree: { supported: true, flag: '--worktree', named: true, requiresGitRepo: true, hookEscape: 'WorktreeCreate', landsIn: '.claude/worktrees/<name>', branchPrefix: 'worktree-' }, permissionRules: { source: 'settings-files', session: true, instance: true, liveVerb: false }, toolAllowlist: { kind: 'tools', allow: '--allowedTools', deny: '--disallowedTools', tools: ['Read', 'Edit', 'Write', 'Bash', 'Glob', 'Grep', 'WebFetch', 'WebSearch', 'NotebookEdit'], keep: ['Bash'] } },
     // One-line hint per response-style VALUE (same contract as effortHints:
     // English key, t() at render — the VALUE itself is protocol and is never
     // translated).
@@ -322,34 +322,59 @@ export function styleAppliesLive(caps, wrapperLive) {
   return !!(caps && caps.live) && wrapperLive !== false;
 }
 
+/** THE SEND-DOOR TABLE (lane claude-steer-inject — the owner's ruling «A», 2026-10-27: «Enter 立即送入，Alt+Enter 排队»).
+ *  ONE row per default: which door PLAIN ENTER opens while a turn runs, and which the SECOND key opens (Alt+Enter; the
+ *  button beside Send ≤ 768 px). A harness row picks its default with `inputModes.enterDoor` (absent = 'queue'):
+ *    'queue' — Enter holds the message until the turn ends (editable); the second key injects it now (codex);
+ *    'steer' — Enter hands it to the running turn at once (the agent reads it at its next tool call — the Claude CLI's
+ *              own default); the second key holds it until the turn ends (claude). */
+export const SEND_DOOR_TABLE = Object.freeze({
+  queue: Object.freeze({ enter: 'queue', alt: 'steer' }),
+  steer: Object.freeze({ enter: 'steer', alt: 'queue' }),
+});
+
 /** PURE (DOM-free, suite-tested): what the COMPOSER may do while a turn is
  *  running, from ONE `inputModes` row. The caller passes the caps it has
  *  already intersected with the RUNNING wrapper's advert (chat-view's
  *  `_queueCaps()` — the very object the queue strip's Steer buttons read), so
  *  the chord, the hint and the strip can never disagree about this session.
- *    steerSegment / allowSteerChord — Alt+Enter injects into the running turn
- *      (`steer`). A chord that would silently degrade to a plain send is worse
- *      than no chord, so the two are the SAME fact.
- *    queueSegment — say that Enter queues. Gated on `queueOps`, not on `queue`:
- *      claude's CLI really does hold a mid-turn message, but it publishes no
- *      queue and takes no operation on it, so there is no strip, no live chip
- *      and nothing to act on — a line announcing "it is queued" with nothing on
- *      screen to show it is a promise we cannot keep (the 2.361.4
- *      accept-and-ignore lesson, in text form).
- *    showHint — draw the line at all. `false` ⇒ no hint AND no chord (claude,
- *      shell, and any unknown backend).
- *  WHERE the two surfaces appear is CSS's business, not this predicate's: the
- *  hint is the desktop face and the bolt button beside Send is the ≤768px one
+ *  A DOOR IS DRAWN ONLY WHERE THE RUNNING WRAPPER BACKS IT (the 2.361.4
+ *  accept-and-ignore lesson): the steer door ⇔ `steer` (the wrapper names the
+ *  verb — for claude that advert IS the hand-over door, lane
+ *  claude-steer-inject), the queue door ⇔ `queue` ∧ `queueOps` (a held message
+ *  with a strip to show it — a line announcing "it is queued" with nothing on
+ *  screen is a promise we cannot keep). The row's default door
+ *  (SEND_DOOR_TABLE[enterDoor]) is Enter's when it is drawn; otherwise Enter
+ *  keeps the door the wrapper really serves (a claude session on a .354
+ *  wrapper HOLDS every frame: «Enter queues» alone, honestly) and the second
+ *  key has nothing to open.
+ *    enterDoor / altDoor — 'queue' | 'steer' | null.
+ *    queueSegment / steerSegment — the hint names that door (on either key).
+ *    allowSteerChord — the second key STEERS (codex: send, then convert the
+ *      queued item — the `chat.steerNow` command); allowHoldChord — the second
+ *      key HOLDS (claude: a plain send the wrapper keeps — `chat.holdNow`). A
+ *      chord that would silently degrade to a plain send is worse than no
+ *      chord, so each is the SAME fact as its segment.
+ *    steerOnEnter — plain Enter carries the hand-over stamp (`steer: true` on
+ *      the ws `chat-input`).
+ *    showHint — draw the line at all. `false` ⇒ no hint AND no chord (shell,
+ *      any unknown backend, a claude session spawned before 2.369.354).
+ *  WHERE the surfaces appear is CSS's business, not this predicate's: the
+ *  hint is the desktop face and the button beside Send is the ≤768px one
  *  (chat.css, same shape as `.chat-attach-btn`). */
 export function composerSendModes(caps, { enterSends = true } = {}) {
-  const queue = !!(caps && caps.queue);
-  const steer = !!(caps && caps.steer);
-  const queueOps = !!(caps && caps.queueOps);
-  const queueSegment = queue && queueOps;
-  // chat.enterSends off (lane chat-enter-ime): Enter is a newline, so the line must say which key sends — the queue
-  // segment names it where the harness queues, a send segment everywhere else.
-  const sendSegment = enterSends === false && !queueSegment;
-  return { queueSegment, steerSegment: steer, allowSteerChord: steer, sendSegment, enterSends: enterSends !== false, showHint: queueSegment || steer || sendSegment };
+  const queueDoor = !!(caps && caps.queue && caps.queueOps);
+  const steerDoor = !!(caps && caps.steer);
+  const row = SEND_DOOR_TABLE[caps && caps.enterDoor === 'steer' ? 'steer' : 'queue'];
+  const served = (door) => (door === 'steer' ? steerDoor : queueDoor);
+  const enterDoor = served(row.enter) ? row.enter : (served(row.alt) && row.alt === 'queue' ? 'queue' : null);
+  const altDoor = enterDoor === row.enter && served(row.alt) ? row.alt : null;
+  const queueSegment = enterDoor === 'queue' || altDoor === 'queue';
+  const steerSegment = enterDoor === 'steer' || altDoor === 'steer';
+  // chat.enterSends off (lane chat-enter-ime): Enter is a newline, so the line must say which key sends — Enter's own
+  // door segment names it where there is one, a send segment everywhere else.
+  const sendSegment = enterSends === false && !enterDoor;
+  return { enterDoor, altDoor, queueSegment, steerSegment, allowSteerChord: altDoor === 'steer', allowHoldChord: altDoor === 'queue', steerOnEnter: enterDoor === 'steer', sendSegment, enterSends: enterSends !== false, showHint: queueSegment || steerSegment || sendSegment };
 }
 
 /** PURE: WHICH FACT is the response style a panel is showing? `live` = what the

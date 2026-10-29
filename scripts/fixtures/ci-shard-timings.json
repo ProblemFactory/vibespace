@@ -339,6 +339,7 @@
   "test-path-field-chrome": 20000,
   "test-claude-wrapper-queue": 30000,
   "test-dialog-yield-chrome": 95000,
+  "test-claude-steer-chrome": 120000,
   "test-phone-refusal-wrap-chrome": 76000, "test-desktop-small-chrome": 575000
  },
  "desktop": {

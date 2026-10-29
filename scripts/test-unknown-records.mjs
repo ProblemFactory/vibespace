@@ -59,7 +59,10 @@ console.log('§2 history renders the same cards (the fall-back is a renderer, no
   const consumerTypes = [...consumer.matchAll(/msg\.type === '([a-z_]+)'/g)].map((m) => m[1]).filter((t) => !['system', 'assistant', 'user', 'result', 'control_response', 'attachment'].includes(t));
   const missing = consumerTypes.filter((t) => !MM.KNOWN_IGNORED_RECORD_TYPES.has(t));
   ok(`every top-level type the SERVER consumer handles is on the normalizer's known-ignored list (${consumerTypes.length} checked)`, missing.length === 0, missing);
-  const transcriptTypes = ['queue-operation', 'last-prompt', 'custom-title', 'agent-name', 'permission-mode', 'mode', 'atis-latch', 'file-history-snapshot', 'file-history-delta', 'cost-state', 'summary', 'progress'];
+  const transcriptTypes = ['queue-operation', 'last-prompt', 'custom-title', 'agent-name', 'permission-mode', 'mode', 'atis-latch', 'file-history-snapshot', 'file-history-delta', 'cost-state', 'summary', 'progress',
+    // the request-replay rows + tools-used (lane claude-steer-inject r5: MEASURED in every 2.1.308 / 2.1.312 transcript — counted as
+    // an unknown kind on every restart until declared)
+    'api-request', 'api-request-shape', 'api-request-blob', 'tools-used'];
   const mm2 = createMessageManager('claude', 'test-unknown-3');
   mm2.convertHistory(transcriptTypes.map((type) => ({ type, uuid: 'u-' + type })));
   ok('the transcript\'s own bookkeeping rows never become cards on a rebuild (declared ignored)', cards(mm2).length === 0);

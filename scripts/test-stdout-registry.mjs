@@ -196,6 +196,27 @@ console.log('— B3 turn truth (claude)');
 const turnStates = (id) => calls.broadcasts.filter((b) => b.id === id && b.type === 'turn-state').map((b) => b.state);
 const inflight = (id) => calls.broadcasts.filter((b) => b.id === id && b.type === 'tools-in-progress').map((b) => b.ids.join(','));
 {
+  // A TURN THE CLI STARTS BY ITSELF (lane claude-steer-inject r4): a frame it held past a turn's end runs as a turn of its
+  // own — after the result, with NO state word between (the CLI never left 'running') and no user record on stdout. Its
+  // init is the turn's start: the running line comes back there (7df30f96: none until the model's first record — the
+  // composer showed no turn and no Stop for the whole of it)
+  const s = mkSession('claude', 'w-own'); const p = fakePty();
+  so.setupSessionPty(s, 'w-own', p);
+  p.data(J({ type: 'system', subtype: 'session_state_changed', state: 'running', uuid: 'u-own-1', session_id: 'sid-own' }));
+  p.data(J({ type: 'system', subtype: 'init', session_id: 'sid-own', model: 'm', tools: [] }));
+  p.data(J({ type: 'result', subtype: 'success', session_id: 'sid-own', duration_ms: 1 }));
+  p.data(J({ type: 'assistant', session_id: 'sid-own', message: { id: 'msg_o1', role: 'assistant', content: [{ type: 'text', text: 'done' }] } }));
+  s._streamingLabel = ''; // the result's turn is over on the line (the line the composer reads)
+  const before = labels('w-own').length;
+  p.data(J({ type: 'system', subtype: 'init', session_id: 'sid-own', model: 'm', tools: [] }));
+  ok('a top-level init while the CLI still says \'running\' and the line is clear (its own turn for a frame it held) ⇒ the running line is back: \'thinking...\'', s._streamingLabel === 'thinking...' && labels('w-own').slice(before).includes('thinking...'), JSON.stringify({ label: s._streamingLabel, labels: labels('w-own') }));
+  const s2 = mkSession('claude', 'w-own-idle'); const p2 = fakePty();
+  so.setupSessionPty(s2, 'w-own-idle', p2);
+  p2.data(J({ type: 'system', subtype: 'session_state_changed', state: 'idle', uuid: 'u-own-2', session_id: 'sid-own2' }));
+  p2.data(J({ type: 'system', subtype: 'init', session_id: 'sid-own2', model: 'm', tools: [] }));
+  ok('CONTROL: an init said while the CLI is idle (a resume\'s, before any input) draws no running line', !s2._streamingLabel && !labels('w-own-idle').includes('thinking...'), JSON.stringify({ label: s2._streamingLabel }));
+}
+{
   // ① ENV-ABSENT DEGRADATION — the default path. No session_state_changed ever
   //    arrives (an old CLI, or a session spawned before the spawn env), so the
   //    derived result/user inference must be untouched and NOTHING may claim
@@ -233,6 +254,7 @@ const inflight = (id) => calls.broadcasts.filter((b) => b.id === id && b.type ==
   p.data(J({ type: 'user', session_id: 'sid-b3', message: { role: 'user', content: 'peer note' } }));
   ok('under authority a user record does NOT flip streaming back on (the derived write stood down)', s._isStreaming === false);
   ok('…and the state broadcasts are exactly the three transitions, no repeats', turnStates('w-b3').join(',') === 'running,requires_action,idle');
+
   // ⑥ an out-of-enum state changes NOTHING (never coerced to idle)
   p.data(J({ type: 'system', subtype: 'session_state_changed', state: 'wedged', uuid: 'u-st-4', session_id: 'sid-b3' }));
   ok('an unknown state leaves the belief untouched (no coercion to idle)', s._turnState === 'idle' && turnStates('w-b3').length === 3);
@@ -701,12 +723,16 @@ const wireVerdict = (res, why = '') => {
   //    disagreeing. Anything that makes the measurement impossible (no CLI, no
   //    tool ran, a timeout) SKIPS LOUDLY — a probe that could not measure is
   //    never evidence of absence.
+  //    THE SWITCH (lane claude-steer-inject r6, §ban-safety): this leg runs ONE REAL claude turn with the box's login — one of
+  //    the TWO rows that may talk to the vendor (with test-chat-e2e); VS_NO_REAL_CLI=1 (every acceptance run sets it) skips it
+  //    by name, before the probe starts.
   let res = null, why = '';
-  try {
+  const noRealCli = process.env.VS_NO_REAL_CLI === '1';
+  if (!noRealCli) try {
     const raw = require('child_process').execFileSync(process.execPath, [path.join(REPO, 'scripts/probe-claude-stdout.mjs')], { encoding: 'utf8', timeout: 180000, stdio: ['ignore', 'pipe', 'ignore'] });
     res = JSON.parse(String(raw).trim().split('\n').filter(Boolean).pop() || '{}');
   } catch (e) { why = e.message; }
-  const verdict = wireVerdict(res, why);
+  const verdict = noRealCli ? { skip: 'SKIPPED the wire leg (ⓕ): VS_NO_REAL_CLI=1 — the real claude turn is not run' } : wireVerdict(res, why);
   if (verdict.skip) console.log(`  SKIP: ${verdict.skip}`);
   else {
     const n = (t) => res.types[t] || 0;
@@ -1930,6 +1956,9 @@ console.log('— wiring pins');
         chat.env.CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS === '1', JSON.stringify(chat.env));
       ok('…and NOT on a terminal spawn: the stream-json parse is its only reader, and we did not verify what the TUI sink does with an extra record',
         term.env.CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS === undefined, JSON.stringify(term.env));
+      // r4 (lane claude-steer-inject): the prompt hook's phase — the one word before a turn's init that says one is starting
+      ok('…and the PROMPT HOOK\'s phase too (CLAUDE_CODE_EMIT_USER_PROMPT_SUBMIT_HOOK_EVENTS: the wrapper\'s Stop window and owed turn wait through the hook) — chat only',
+        chat.env.CLAUDE_CODE_EMIT_USER_PROMPT_SUBMIT_HOOK_EVENTS === '1' && term.env.CLAUDE_CODE_EMIT_USER_PROMPT_SUBMIT_HOOK_EVENTS === undefined, JSON.stringify({ chat: chat.env, term: term.env }));
       ok('…it rides the spawn env, never an allowlist: agentEnv() is a DROP table, so ws-handler needs no entry for it',
         /AGENT_ENV_DROP/.test(wsh) && !/CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS/.test(wsh) && /env\.CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS = '1';/.test(ad));
     }

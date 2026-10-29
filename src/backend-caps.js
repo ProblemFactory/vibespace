@@ -57,7 +57,7 @@
 //   queue      — a message sent mid-turn is HELD and runs after the turn, and
 //                the harness REPORTS that state back to us (claude's is held by
 //                VibeSpace's own wrapper since 2.369.354 — the CLI's stdin queue
-//                ran a held frame right after Stop, so it is never used).
+//                ran a held frame right after Stop, so it is never used to hold).
 //   queueVerbs — THE VERB TABLE (design-harness-features §3.1): the closed set
 //                of queue actions this harness actually SERVES. Adding a verb
 //                is one array entry + its three implementations (adapter
@@ -78,7 +78,17 @@
 //                 the message first (lane agy-harness-fixes) — a NEW billed
 //                 turn, so its row declares `steerJoinsTurn: false` and a
 //                 notification never takes that verb (notificationDelivery).
+//                 claude (2.369.361, lane claude-steer-inject — MEASURED on
+//                 2.1.308): its wrapper writes the frame to the CLI, which
+//                 takes it into the turn at the next tool result.
 //   'steer-all' — the same, for every queued item in order.
+// enterDoor — DECLARED, the ONE row of the send-door table (lane
+//   claude-steer-inject, the owner's ruling «A» 2026-10-27): what PLAIN ENTER
+//   does while a turn runs. Absent = 'queue' (Enter holds it, the second key —
+//   Alt+Enter, the button beside Send ≤ 768 px — steers: codex). 'steer' =
+//   Enter hands it to the running turn (the CLI's own default) and the second
+//   key holds it until the turn ends (claude). Either door is drawn ONLY where
+//   the running wrapper serves it (src/lib/agent-meta.js composerSendModes).
 //   'reorder'   — move an item (ws frame: RELATIVE `afterId`; the wrapper
 //                 translates it into the app-server's absolute full-order
 //                 array — the two layers deliberately do not share vocabulary,
@@ -336,6 +346,9 @@ function deriveInputModes(row) {
     // it and runs the message as a turn of its own (agy). Carried only where a row says so: a missing key is codex's
     // `turn/steer`, the meaning every older row was written against.
     ...(row && row.steerJoinsTurn === false ? { steerJoinsTurn: false } : {}),
+    // DECLARED, never derived (lane claude-steer-inject): plain Enter's door while a turn runs — carried only where a row
+    // says 'steer'; a missing key is the 'queue' door every older row was written against
+    ...(row && row.enterDoor === 'steer' ? { enterDoor: 'steer' } : {}),
   });
 }
 const BACKEND_CAPS = {
@@ -370,10 +383,13 @@ const BACKEND_CAPS = {
     // queue_changed and dropped on Stop with ONE queue_dropped (the words go back into the composer). Until .353 this
     // row was an honest EMPTY table — the CLI queued stdin itself and reported nothing — and MEASURED on 2.1.308 that
     // queue RAN a frame right after `control_request interrupt` (+27 ms): VibeSpace holds what it must be able to drop.
-    // remove / reorder / edit are splices on the wrapper's array; NO steer (the CLI takes no input into a running turn)
-    // and NO run-now / run-all (a held frame goes the moment the turn ends). The ws layer still asks the RUNNING
-    // wrapper's sidecar advert (a claude session spawned before .354 serves none).
-    inputModes: { queue: true, queueVerbs: ['remove', 'reorder', 'edit'] },
+    // remove / reorder / edit are splices on the wrapper's array; NO run-now / run-all (a held frame goes the moment the
+    // turn ends). STEER since 2.369.361 (lane claude-steer-inject — the owner, 2026-10-27, ruling «A»): MEASURED on
+    // 2.1.308 the CLI takes a frame written to it mid-turn INTO the turn at the next tool result, so the wrapper HANDS a
+    // frame over — and `enterDoor: 'steer'` makes that plain Enter's door (the CLI's own default); Alt+Enter holds it.
+    // The ws layer still asks the RUNNING wrapper's advert: a .354 wrapper serves no steer (it holds every frame, and the
+    // composer then says «Enter queues» alone); one spawned before .354 serves nothing.
+    inputModes: { queue: true, queueVerbs: ['remove', 'steer', 'steer-all', 'reorder', 'edit'], enterDoor: 'steer' },
     // system/session_state_changed (env-gated at spawn) — VERIFIED on our
     // stdout in the wrapper's spawn shape (running → idle around a real turn).
     // inProgressTools is false because the record it would need is swallowed by

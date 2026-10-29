@@ -100,6 +100,7 @@ export const CENSUS = [
   ['chat-input.js', 'input', 'control', 'the attach / file / folder pickers (type=file)'],
   ['chat-input.js', 'textarea', 'text', 'THE CHAT COMPOSER'],
   ['chat-input.js', 'tabindex', 'widget', 'the queue strip\'s items'],
+  ['chat-input.js', 'execcommand', 'helper', 'the composer\'s own newline on an idle Alt+Enter where Enter is a newline (lane claude-steer-inject r5/r6): insertText into the person\'s own focused box — their typing, never a takeover act; its Ctrl+Z undoes it'],
   ['chat-minimap.js', 'input', 'text', 'the TOC filter'],
   ['chat-needs-card.js', 'tabindex', 'control', 'a FOLDED needs card\'s row (0, role button, Enter / Space open it in place — lane chat-needs-you-card, acceptance round 2: the accordion in the chat)'],
   ['chat-renderers.js', 'input', 'text', 'AskUserQuestion\'s own answer; an inline edit'],

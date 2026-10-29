@@ -338,6 +338,7 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
         }
       } catch {}
       try { fs.unlinkSync(path.join(BUFFERS_DIR, id + '.buf')); } catch {}
+      fs.rm(path.join(BUFFERS_DIR, id + '.img'), { recursive: true, force: true }, () => { }); // the copies' kept pictures (lane claude-steer-inject r5) go with the buffer — off the loop (r6)
       try { fs.unlinkSync(path.join(BUFFERS_DIR, id + '.json')); } catch {}
     }
     // B-f698: an UNEXPECTED exit while working is resumed ONCE by itself (no continue, no bill) + one For-you item;
