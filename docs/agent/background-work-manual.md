@@ -209,6 +209,54 @@ URL — share the new one.
 - `access <id> --view session|group|all --control session|group|all` —
   owner-only; the user can lock access against agent edits
 
+## 7b. Memory bound — a job that eats the machine is stopped by name
+
+Every run has a memory bound: `--memory 8G` at create (or `vibespace-job memory <id> 8G|512M|inherit` later — owner
+conversation only, and it asks the user first like `start`; it applies from the NEXT run), else the user's Settings → Background Work, else the cluster's
+default, else **4 GB**. Unbounded (0) is the user's call alone — you cannot set it. On an instance with a memory limit of
+its own (a cluster pod) every bound is capped below it — the hub keeps max(1 GB, a quarter): `--memory 16G` on an 8 GB pod
+runs at 6 GB, and `show` says «capped by the instance's 8 GB limit (asked 16 GB)». The cap is the limit that CONTAINS the
+job — under a user systemd the job's own scope sits beside VibeSpace, so a limit on VibeSpace's own service does not lower
+it, a limit on the user slice does (`show` names which).
+- **A stop ends the WHOLE job** — everything it started (on a cluster pod with no systemd: what stayed in its process
+  group, and a service's processes that left it but kept the job's environment): the job has **10 s from the stop** to
+  shut down cleanly — ONE clock for all of it; a process that ignores SIGTERM is killed when the 10 s run out (its run
+  says «stopped by force: it did not end on SIGTERM in 10 s …»), and one the job starts DURING the stop gets only what is
+  left of them («… (1 process got less than the full grace)»). A SIGTERM to the job's wrapper alone (`kill <pid>`) stops
+  it the same way: the wrapper sends it on to the whole group.
+- **What a TASK leaves running is stopped when it ends** (`nohup x &`, a background daemon): its run says «the job left
+  1 process running — it was stopped; to keep a daemon, run it as a service job». A **service** keeps what it starts
+  until its NEXT START — your `start`, its restart policy's, or the replay after VibeSpace restarts or updates — or its
+  stop, park or removal; then they are stopped (SIGTERM, 10 s, then by force; said, and `show` says when — or that they
+  had already ended on their own) and its next run starts only once they are gone. A search that could not finish
+  proves nothing: the next run waits («could not check 100 of 3100 processes … — not restarted») and the next start
+  searches again. On a cluster pod a process that
+  LEAVES the job's process group (`setsid`) cannot be stopped from there: a task's is named — «1 process left its group
+  — not stopped; run it as a service job» — and a service keeps it with the rest. It is found by the job's mark in its
+  environment (`VIBESPACE_JOB_ID`): a program that detaches itself AND clears its environment (`setsid env -i …`) is
+  beyond what VibeSpace can see — nothing names it, nothing stops it. Keep such a daemon in the job's process group.
+- **A service never starts beside a run that may still be running.** When VibeSpace cannot prove its last run ended
+  (its records unreadable after a restart), nothing starts it — not the replay, not its restart policy, not `start` —
+  and the user gets ONE For-you notice: «cannot prove the previous run is gone (pid.json unreadable) — not restarted; if
+  it is gone: systemctl --user kill --signal=KILL <unit> (or vibespace-job stop <id>), then start it again; if it runs:
+  it keeps running». `vibespace-job stop <id>` ends the doubt (what of that run can be named is stopped: its scope, the
+  processes carrying its `VIBESPACE_JOB_ID`); so does its scope found empty. Then `start` works.
+
+- The wrapper enforces it with what this host offers and SAYS which (`vibespace-job show <id>` → `memory: …`):
+  a cgroup of the user systemd (a real ceiling, no swap) or RLIMIT_DATA on the process (a fleet pod: no systemd);
+  `unbounded — this host cannot enforce a bound` when neither works. The rung is proven on the process before the job
+  runs: a systemd that refuses the scope or does not answer in 3 s only moves the job to the next rung (the why says so).
+- Past the bound the job ends `cause=oom-bound` — «stopped: used more than 4 GB». `cause=oom` = killed by an OOM
+  from OUTSIDE its bound (the whole instance ran out).
+- **Two out-of-memory ends in a row PARK the job** («parked: out of memory twice — raise its bound or fix the job»):
+  a service is no longer restarted — not by its backoff, not when VibeSpace restarts — until someone runs
+  `vibespace-job start <id>`. Raise the bound first (`vibespace-job memory <id> 8G`) or fix the leak.
+- Any other end — ok, error, a restart of VibeSpace — resets the count.
+- On a cluster ONE process past the pod's limit kills the whole instance (your conversation included); a run that
+  died that way counts too when the instance's own OOM record shows it (a restart for another reason never counts).
+- Under RLIMIT_DATA node counts ~600 MB of its own reservations against the bound — under ~512 MB node cannot
+  even start. Give a node job at least 1G. A size under 256M is refused by name.
+
 ## 8. Permissions model (why you can't see some jobs)
 
 view/control scopes: `session` (owner conversation only) / `group` (sessions

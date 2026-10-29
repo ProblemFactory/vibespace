@@ -11,6 +11,10 @@
  *   foldTasks(tasks, {expanded, sessionNames})  owner session → name family → rows
  *   pruneFolds(folds, layout)           the persisted fold map, minus keys no group holds
  *   heldText(digest, {t})               the held-notification sentence, words by the device's own t()
+ *   memoryChip(job, t) · memoryEndWords(job, t) · memorySourceWords(job, t) · memoryWords(mb) · memoryFieldValue(job) ·
+ *   memorySetValue(job, typed) · memoryCapWords(cap, t) · memoryEffectiveWords(job, t) · runLeftWords(run, t)
+ *                                       the memory bound's chip, its named end / park, where it comes from (lane jobs-memory-bound);
+ *                                       what a run's job left running (round 5)
  *
  * The client READS `job.ack` (the server computes it over the full record —
  * the snapshot's journal is truncated) and never derives acknowledgement.
@@ -197,4 +201,90 @@ export function heldText(digest, { t, cid = null } = {}) {
   else if (kind === 'not-reachable') why = tr('the agent did not accept it (busy or unreachable); delivered with the conversation’s next prompt or a hand-over');
   else why = tr('the conversation has no live inbox right now; delivered when it next resumes');
   return `${head} — ${why}`;
+}
+
+// ── THE MEMORY BOUND (lane jobs-memory-bound, F6 of B-7f9e) — the card's words over the snapshot's facts: memoryMb (THE
+// LADDER's answer for the next run) · memoryBound (the rung the latest run measured: {mb, by, why}) · run.cause (oom-bound /
+// oom) · parkedFor. `t` is the device's translator, handed in (PURE). A size reads the same in every language.
+export function memoryWords(mb) {
+  const n = Math.max(0, Math.floor(Number(mb) || 0));
+  return n < 1024 ? `${n} MB` : `${Math.round((n / 1024) * 10) / 10} GB`;
+}
+const runsNow = (j) => j.state === 'up' || j.state === 'starting' || j.state === 'awaiting-user'; // the run's own bound is the one in force
+/** «4 GB · cgroup» / «4 GB · rlimit» / «unbounded — this host cannot enforce a bound» — '' from a hub that says nothing; a
+ *  bound a limit lowered says so (round 3), and WHICH limit (round 4 — the one that contains the job): «6 GB · rlimit · capped
+ *  by the instance’s 8 GB limit» · «24 GB · cgroup · capped by the user slice’s 32 GB limit». A live run's are its own proof's. */
+export function memoryChip(j, t) {
+  if (!j || j.memoryMb === undefined || j.memoryMb === null) return '';
+  const b = j.memoryBound, live = !!(b && b.mb && runsNow(j));
+  if (!j.memoryMb && !live) return t('unbounded — set by the owner');
+  if (b && b.by === 'none' && b.mb) return t('unbounded — this host cannot enforce a bound');
+  if (b && b.by === 'cgroup' && !b.mb && runsNow(j)) return t('unbounded (the owner set 0) · in its own scope'); // round 5: never «0 MB · cgroup»
+  const mb = live ? b.mb : j.memoryMb, cap = live ? b.cap : j.memoryCap;
+  const capped = cap && cap.limitMb ? ` · ${memoryCapWords(cap, t)}` : '';
+  return (b && b.by !== 'none' ? `${memoryWords(mb)} · ${b.by === 'cgroup' ? 'cgroup' : 'rlimit'}` : memoryWords(mb)) + capped;
+}
+/** the limit that lowered a bound, named (round 4): the instance (a container's own root), the user slice, or a cgroup by its
+ *  name (the hub's own unit …) */
+export function memoryCapWords(cap, t) {
+  const size = memoryWords(cap && cap.limitMb), of = cap && cap.of;
+  if (!of || of === 'instance') return t('capped by the instance’s {size} limit', { size });
+  return of === 'user slice' ? t('capped by the user slice’s {size} limit', { size }) : t('capped by {name}’s {size} limit', { name: of, size });
+}
+/** BESIDE the properties field, read-only (round 4): the bound the next run gets and the limit that lowered the stored one —
+ *  «effective 6 GB · the instance’s limit 8 GB»; '' when nothing lowers it (the field itself always shows what is STORED) */
+export function memoryEffectiveWords(j, t) {
+  const c = j && j.memoryCap;
+  if (!c || !c.limitMb) return '';
+  const size = memoryWords(c.limitMb);
+  const lim = !c.of || c.of === 'instance' ? t('the instance’s limit {size}', { size }) : c.of === 'user slice' ? t('the user slice’s limit {size}', { size }) : t('{name}’s limit {size}', { name: c.of, size });
+  return `${t('effective {size}', { size: memoryWords(j.memoryMb) })} · ${lim}`;
+}
+/** WHAT A RUN'S JOB LEFT RUNNING (round 5 — the ruling of 2026-10-27: a job's scope IS the job): a task's were stopped (by
+ *  force past the grace), a service's kept while it runs — «left 1 running — stopped; to keep a daemon, run it as a service
+ *  job»; round 6: what the engine stopped later says when (`cleared` — this device's clock: «left 1 running — stopped at
+ *  14:05», never «kept» once they are gone), and a task's processes that left its group are said, not stopped; '' when it left
+ *  nothing */
+export function runLeftWords(run, t) {
+  const l = run && run.left;
+  if (!l || !(l.n > 0 || l.escaped > 0)) return '';
+  const hhmm = (ms) => { const d = new Date(ms); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+  const sh = l.short > 0 ? ` · ${t('{n} got less than the full grace', { n: l.short })}` : ''; // round 8: first seen after the stop
+  if (l.cleared) return t('left {n} running — stopped at {time}', { n: l.n, time: hhmm(l.cleared) }) + sh;
+  if (l.gone) return t('left {n} running — had already ended by {time}', { n: l.n, time: hhmm(l.gone) }); // round 7: nothing was stopped
+  if (l.kept) return t('left {n} running — kept: the service’s until it stops or starts again', { n: l.n });
+  const esc = l.escaped > 0 ? t('{n} left its group — not stopped; run it as a service job', { n: l.escaped }) : '';
+  if (!(l.n > 0)) return esc;
+  // round 7: the advice once — beside what left its group, the stopped ones are said plain
+  if (esc) return `${l.force ? t('left {n} running — stopped by force', { n: l.n }) : t('left {n} running — stopped', { n: l.n })}${sh} · ${esc}`;
+  return (l.force ? t('left {n} running — stopped by force; to keep a daemon, run it as a service job', { n: l.n }) : t('left {n} running — stopped; to keep a daemon, run it as a service job', { n: l.n })) + sh;
+}
+/** the NAMED end the card says beside the state — the park first (it is why the job no longer runs) */
+export function memoryEndWords(j, t) {
+  if (!j) return '';
+  if (j.parkedFor === 'memory') return t('parked: out of memory twice — raise its bound or fix the job');
+  const c = j.run && j.run.cause;
+  if (c === 'oom-bound') return t('stopped: used more than {size}', { size: memoryWords((j.memoryBound && j.memoryBound.mb) || j.run.memoryMb || j.memoryMb) });
+  if (c === 'oom') return t('killed: the instance ran out of memory');
+  return '';
+}
+/** the properties field: the job's OWN stored bound EXACTLY (acceptance round 2 — a rounded 0.1 GB written back changed it):
+ *  a whole GB as «4G», anything else in MB («1536M», «1000M»), «0» = unbounded; '' when the job has none (the ladder's). The
+ *  STORED value — the asked one — never the effective bound a cap lowered it to (round 4: a stored 16G showed «6G», a stored 0
+ *  «6G», and typing 6G wrote nothing); the effective one stands beside it (memoryEffectiveWords) */
+export function memoryFieldValue(j) {
+  if (!j || j.memorySource !== 'job') return '';
+  const mb = Math.max(0, Math.floor(Number(j.memoryAskedMb ?? j.memoryMb) || 0));
+  return !mb ? '0' : mb % 1024 === 0 ? `${mb / 1024}G` : `${mb}M`;
+}
+/** Set: what to write — null when the field still says what is STORED (nothing changes, nothing is written — compared with
+ *  the stored value only, never the effective one); '' = back to the ladder (`inherit`) */
+export function memorySetValue(j, typed) {
+  const v = String(typed == null ? '' : typed).trim();
+  return v === memoryFieldValue(j) ? null : (v || 'inherit');
+}
+/** where the bound comes from, for the properties row */
+export function memorySourceWords(j, t) {
+  const s = j && j.memorySource;
+  return s === 'job' ? t('its own') : s === 'setting' ? t('your setting') : s === 'cluster' ? t('the cluster’s default') : t('the default');
 }

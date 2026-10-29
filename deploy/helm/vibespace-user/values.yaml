@@ -216,6 +216,19 @@ opslog:
   dir: /var/opslog
   keepDays: 30
 
+# BACKGROUND WORK'S MEMORY BOUND (lane jobs-memory-bound): the bound every job
+# on this pod runs under unless the job itself or the owner's Settings
+# (Background Work → Memory bound) say otherwise — env VIBESPACE_JOBS_MEMORY_MB,
+# in MB. Empty = the product's default, 4096. The pod's cgroup has
+# memory.oom.group=1: ONE process past resources.limits.memory kills the WHOLE
+# pod, the server with it — so a cluster may lower this to keep every job well
+# under that limit. A pod has no user systemd: the bound is RLIMIT_DATA on the
+# job, and node counts ~600 MB of its own reservations against it (keep it
+# ≥ 1024 for node jobs). 0 is not the cluster's to give (unbounded is the
+# owner's call) and renders nothing.
+jobs:
+  memoryMb: ""
+
 # COMPANY PRESETS (Google OAuth clients for Drive / Gmail, a Lark app, browser
 # keys) — the instance-default credentials a user would otherwise obtain
 # themselves. A user's own key always wins; the UI shows which one is in use.

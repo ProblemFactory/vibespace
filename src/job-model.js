@@ -175,6 +175,187 @@ function onServiceExit(job, { uptimeMs, now }) {
   return { restartInMs: delay, supervise: { consecutiveFails: fails, parkedAt: null } };
 }
 
+// ── THE MEMORY BOUND (lane jobs-memory-bound, F6 of B-7f9e, 2026-10-26) ─────
+// A fleet pod's cgroup has memory.oom.group=1: ONE process past the container's limit kills the WHOLE pod, the hub with it
+// (the forensics of 2026-10-27: 638 restarts in 74 h — an exec from outside that time, but a job would have done the same),
+// and nothing bounded a job. Every run now carries a bound — THE LADDER below — that data/bin/job-wrapper.js ENFORCES with
+// the best rung it measures at spawn (a cgroup of the user systemd › RLIMIT_DATA on the child › none, said), and an end by
+// it is NAMED (`oom-bound`, beside the `oom` of a kill from outside). An OOM counts toward THE PARK LAW — a boot's judgement
+// exactly like a sweep's.
+const MEMORY = Object.freeze({ defaultMb: 4096, minMb: 256, maxMb: 1024 * 1024, parkAfter: 2, hubShareMinMb: 1024, hubShareRatio: 0.25 });
+const MEMORY_CAUSES = Object.freeze(['oom-bound', 'oom']);
+const MEMORY_RUNGS = Object.freeze(['cgroup', 'rlimit-data']); // best first; `none` = neither answered (said, never silent)
+const MEMORY_PARK_TEXT = 'parked: out of memory twice — raise its bound or fix the job';
+const SIZE_UNIT = { k: 1 / 1024, m: 1, g: 1024, t: 1024 * 1024 };
+/** a size → MB, EXACT (512k is 0.5 MB — never rounded to 0, which would read as «unbounded»): 8G · 512M · 1.5g · 4096 (MB)
+ *  · 0; null when it is not one */
+function parseMemoryMb(v) {
+  if (typeof v === 'number') return Number.isFinite(v) && v >= 0 ? v : null;
+  const m = /^\s*(\d+(?:\.\d+)?)\s*([kmgt])?(?:i?b)?\s*$/i.exec(String(v == null ? '' : v));
+  if (!m) return null;
+  const mb = Number(m[1]) * SIZE_UNIT[(m[2] || 'm').toLowerCase()];
+  return Number.isFinite(mb) ? mb : null;
+}
+/** a per-job value at create or in the job's properties: «0» / «off» (unbounded) is the OWNER's call alone, typed as such (the
+ *  user — never an agent, never a default, never a size that rounds down to nothing); any other value below minMb is refused
+ *  BY NAME for everyone — it would starve a runtime at start (node reserves ~600 MB of RLIMIT_DATA, measured) */
+function memoryValueVerdict(raw, { byUser = false } = {}) {
+  const mb = /^\s*off\s*$/i.test(String(raw == null ? '' : raw)) ? 0 : parseMemoryMb(raw);
+  if (mb === null) return { ok: false, error: `memory: "${String(raw).slice(0, 40)}" is not a size — say 8G, 512M or a number of MB` };
+  if (mb === 0) return byUser ? { ok: true, mb: 0 } : { ok: false, error: 'memory 0 (unbounded) is the owner\'s call — they set it in the job\'s properties or in Settings → Background Work' };
+  if (mb < MEMORY.minMb) return { ok: false, error: `memory: at least ${MEMORY.minMb} MB — "${String(raw).slice(0, 40)}" is under it (0 or off = unbounded, the owner's call)` };
+  if (mb > MEMORY.maxMb) return { ok: false, error: `memory: at most ${MEMORY.maxMb / 1024 / 1024} TB` };
+  return { ok: true, mb: Math.floor(mb) };
+}
+const finiteMb = (v) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.floor(v) : null);
+// THE LADDER's reading of a stored value: one below the floor (an older record, a setting typed as 100, a cluster's env) is
+// held AT the floor — never unbounded, never a bound a runtime cannot start under
+const ladderMb = (v) => { const mb = finiteMb(v); return mb !== null && mb > 0 && mb < MEMORY.minMb ? MEMORY.minMb : mb; };
+/** THE INSTANCE'S CAP (acceptance round 3): on a pod with memory.oom.group=1 a job bound at or above the container's limit
+ *  protects nothing — the container dies first, the hub with it. The instance's own memory.max (`limitMb`; null / 0 = no
+ *  limit: a host that caps nothing) keeps the hub's share — max(1 GiB, 25 %): measured 2026-10-27 the owner's hub held
+ *  2.9 GB resident and a scratch hub ~0.5 GB, an agent CLI 0.5–0.85 GB, so the hub and one conversation need ≥ 1 GiB on the
+ *  smallest pod and the share grows with the pod — and a job may have the rest (never under the floor: a smaller instance
+ *  still bounds the job at minMb, said by the cap's numbers). */
+function instanceCapOf(limitMb) {
+  const lim = finiteMb(limitMb);
+  if (!lim) return null;
+  const hubMb = Math.max(MEMORY.hubShareMinMb, Math.ceil(lim * MEMORY.hubShareRatio));
+  return { limitMb: lim, hubMb, capMb: Math.max(MEMORY.minMb, lim - hubMb) };
+}
+/** THE LADDER: the job's own value › the owner's setting `jobs.memoryMb` (an explicit 0 = unbounded) › the cluster's
+ *  default (the chart's env VIBESPACE_JOBS_MEMORY_MB — a cluster may lower it; never 0) › 4096 — the ASKED bound. `setting`
+ *  is undefined while the owner never set it (the server's settings reader answers the stored value, never the schema
+ *  default). THE EFFECTIVE bound (round 3) = min(the asked, the instance's cap): where the instance has a memory.max
+ *  (`instanceMb`) and the asked bound is above its cap — or unbounded (0) — the answer is the cap, and it says so
+ *  ({askedMb, cap: {limitMb, hubMb}}); a host with no limit caps nothing. The limit is the one that CONTAINS the job (round
+ *  4): the caller says which (`instanceOf`, a limitHolder name) and the cap carries it as `of`. */
+function memoryMbOf(job, { setting, cluster, instanceMb, instanceOf } = {}) {
+  const asked = (() => {
+    const own = ladderMb(job && job.memoryMb);
+    if (own !== null) return { mb: own, source: 'job' };
+    const set = ladderMb(setting);
+    if (set !== null) return { mb: set, source: 'setting' };
+    const cl = ladderMb(typeof cluster === 'string' && cluster.trim() ? Number(cluster) : cluster);
+    if (cl) return { mb: cl, source: 'cluster' };
+    return { mb: MEMORY.defaultMb, source: 'default' };
+  })();
+  const cap = instanceCapOf(instanceMb);
+  if (!cap || (asked.mb && asked.mb <= cap.capMb)) return asked;
+  return { mb: cap.capMb, source: asked.source, askedMb: asked.mb, cap: { limitMb: cap.limitMb, hubMb: cap.hubMb, ...(instanceOf ? { of: instanceOf } : {}) } };
+}
+/** WHICH LIMIT capped (round 4), by the cgroup that holds it: «/» — the root a container sees (a pod's cgroup namespace) — is
+ *  the instance; user.slice / user-<uid>.slice the user slice; any other cgroup its own name (the hub's unit, a slice) */
+function limitHolder(cg) {
+  const s = String(cg || '');
+  if (!s || s === '/') return 'instance';
+  const base = s.split('/').filter(Boolean).pop() || '';
+  if (/^user(-\d+)?\.slice$/.test(base)) return 'user slice';
+  return /^[A-Za-z0-9_.@:-]{1,80}$/.test(base) ? base : 'instance';
+}
+/** «the instance's 8 GB limit» · «the user slice's 32 GB limit» · «vibespace.service's 8 GB limit» */
+function capWords(cap) {
+  const of = (cap && cap.of) || 'instance';
+  return `${of === 'instance' || of === 'user slice' ? 'the ' + of : of}'s ${memoryWords(cap && cap.limitMb)} limit`;
+}
+/** the rung a run carries — a FACT the wrapper measured (`none` says why), never a silent fallback */
+function boundRecord(r) {
+  const by = r && ['cgroup', 'rlimit-data', 'none'].includes(r.by) ? r.by : 'none';
+  const c = r && r.cap && typeof r.cap === 'object' && finiteMb(r.cap.limitMb) ? r.cap : null; // round 4: the limit that lowered it, named
+  return { mb: finiteMb(r && r.mb) || 0, by, why: clip(String((r && r.why) || (by === 'none' ? 'the wrapper did not say' : '')), 200), ...(c ? { cap: { limitMb: finiteMb(c.limitMb), hubMb: finiteMb(c.hubMb) || 0, of: typeof c.of === 'string' && c.of ? clip(c.of, 80) : limitHolder(c.cgroup) } } : {}) };
+}
+/** 4096 → "4 GB", 1536 → "1.5 GB", 512 → "512 MB" */
+function memoryWords(mb) {
+  const n = finiteMb(mb) || 0;
+  if (n < 1024) return `${n} MB`;
+  return `${String(Math.round((n / 1024) * 10) / 10)} GB`;
+}
+/** the rung a run's bound held by, in THE RECORD's words (round 5 — `show` / `poll` print these, never «a rung ⇒ a size»): an
+ *  unbounded scope (the owner's 0 where nothing it shares with the hub is limited) is never «held by a cgroup at 0 MB» */
+function boundWords(b) {
+  if (!b) return '';
+  if (b.by === 'none') return `unbounded — ${b.why || 'the wrapper did not say'}`;
+  if (!finiteMb(b.mb)) return b.by === 'cgroup' ? 'unbounded (the owner set 0) · in its own scope' : 'unbounded (the owner set 0)';
+  return `held by ${b.by === 'cgroup' ? 'a cgroup' : 'RLIMIT_DATA'} at ${memoryWords(b.mb)}`;
+}
+/** WHAT A RUN'S JOB LEFT RUNNING (round 5 — the ruling of 2026-10-27: a job's scope IS the job): the wrapper's count at the job's
+ *  own end — a task's were stopped (SIGTERM; by force past the grace); a service's KEPT, its own while it runs, named by
+ *  identity (pid, starttime, boot) for the engine to stop. Round 6: `escaped` — processes that LEFT the job's group (setsid)
+ *  on a rung without a scope, found by the job's mark in their environ: a task's are said, not stopped (a service keeps them
+ *  with the rest); `recorded` — how many of `n` the record names when they were more than its bound (64); `cleared` — when
+ *  they were stopped (a service STOPPED on a rung without a scope: its wrapper stops what it kept with it). exit.json's
+ *  `left`, sanitized; null = none */
+function leftRecord(l) {
+  if (!l || typeof l !== 'object' || !Number.isInteger(l.n) || l.n < 0) return null;
+  const escaped = Number.isInteger(l.escaped) && l.escaped > 0 ? Math.min(l.escaped, 9999) : 0;
+  if (l.n < 1 && !escaped) return null;
+  const pids = l.kept && Array.isArray(l.pids) ? l.pids.filter((p) => Array.isArray(p) && Number.isInteger(p[0]) && p[0] > 1 && Number.isFinite(p[1])).slice(0, 64).map((p) => [p[0], p[1]]) : [];
+  const n = Math.min(l.n, 9999), recorded = pids.length && Number.isInteger(l.recorded) && l.recorded < n ? l.recorded : 0;
+  const cleared = l.kept && Number.isFinite(l.cleared) && l.cleared > 0 ? l.cleared : 0;
+  const gone = l.kept && !cleared && Number.isFinite(l.gone) && l.gone > 0 ? l.gone : 0;
+  const short = (cleared || (!l.kept && l.force)) && Number.isInteger(l.short) && l.short > 0 ? Math.min(l.short, n) : 0; // round 8
+  return { n, ...(l.kept ? { kept: true } : l.force ? { force: true } : {}), ...(escaped ? { escaped } : {}), ...(pids.length ? { pids, boot: typeof l.boot === 'string' ? clip(l.boot, 64) : '' } : {}), ...(recorded ? { recorded } : {}), ...(cleared ? { cleared } : {}), ...(gone ? { gone } : {}), ...(short ? { short } : {}) };
+}
+/** «the job left 1 process running — it was stopped; to keep a daemon, run it as a service job» · «… stopped by force …» ·
+ *  «it left 1 process running — kept: a service's own until it is stopped or started again» · round 6: «1 process left its
+ *  group — not stopped; run it as a service job» (a task's setsid escapee) · «… (64 of 70 recorded)» · once the engine stopped
+ *  what a service kept (`cleared`, its instant): «it left 1 process running — stopped at 14:05» (the hub's clock); round 7: once
+ *  it found nothing of it still running (`gone` — nothing was signalled): «… — it had already ended by 14:05»; round 8:
+ *  `short` — how many of them were first seen after the stop and got only what was left of its grace: «… (1 process got less
+ *  than the full grace)». data/bin/job-wrapper.js says the same in the job's log — a suite pins the twins equal */
+function leftWords(l) {
+  const n = l.n || 0, es = (k) => (k === 1 ? '' : 'es');
+  const hhmm = (ms) => { const d = new Date(ms); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
+  const sh = l.short ? ` (${l.short} process${es(l.short)} got less than the full grace)` : ''; // round 8: first seen after the stop
+  if (l.cleared) return `it left ${n} process${es(n)} running — stopped at ${hhmm(l.cleared)}${sh}`;
+  if (l.gone) return `it left ${n} process${es(n)} running — ${n === 1 ? 'it' : 'they'} had already ended by ${hhmm(l.gone)}`;
+  if (l.kept) return `it left ${n} process${es(n)} running — kept: a service's own until it is stopped or started again${l.escaped ? ` (${l.escaped} outside its group)` : ''}${l.recorded ? ` (${l.recorded} of ${n} recorded)` : ''}`;
+  const esc = l.escaped ? `${l.escaped} process${es(l.escaped)} left its group — not stopped` : '';
+  if (!n) return `${esc}; run it as a service job`;
+  return `the job left ${n} process${es(n)} running — ${n === 1 ? 'it was' : 'they were'} stopped${l.force ? ' by force' : ''}${sh}${esc ? `; ${esc}; run it as a service job` : '; to keep a daemon, run it as a service job'}`;
+}
+/** what a run's end says beyond its cause (the journal, `show` / `poll`): what its job left (round 6: and when the engine
+ *  stopped what it kept), else a kill we made */
+function runEndWords(run) { return run && run.left ? leftWords(run.left) : (run && typeof run.forced === 'string' && run.forced) || ''; }
+/** the NAMED end the journal says (the card words the same through its own t()) */
+function memoryEndWhat(run) {
+  if (!run || !MEMORY_CAUSES.includes(run.cause)) return '';
+  if (run.cause === 'oom-bound') return `stopped: used more than ${memoryWords((run.memoryBound && run.memoryBound.mb) || run.memoryMb)}`;
+  return 'killed: the instance ran out of memory (not its own bound)';
+}
+/** THE PARK LAW — at EVERY judged end (the sweep's, the boot's adopt of an exit record, the boot's env-restart — one road in
+ *  src/jobs.js, _countEnd): an end in MEMORY_CAUSES counts, ANY other end resets (an env-restart too: OOM / restart / OOM is
+ *  not two in a row); parkAfter in a row ⇒ parked by name, not run again until the owner acts (start — after raising the bound
+ *  or fixing the job). Pure over the supervise record; the boot replay is no exception. */
+function onMemoryEnd(supervise, cause, nowMs) {
+  const sup = { consecutiveFails: 0, parkedAt: null, ...(supervise || {}) };
+  if (!MEMORY_CAUSES.includes(cause)) return { supervise: { ...sup, oomEnds: 0 }, park: false, count: 0 };
+  const count = (Number(sup.oomEnds) || 0) + 1;
+  const park = count >= MEMORY.parkAfter;
+  return { supervise: { ...sup, oomEnds: count, ...(park ? { parkedAt: nowMs, parkedFor: 'memory' } : {}) }, park, count };
+}
+/** THE BOOT'S JUDGE of a run that died WITH its environment (no exit record: under memory.oom.group the wrapper dies too).
+ *  PAGE CACHE IS NEVER PRESSURE (acceptance round 2): memory.current counts reclaimable cache, so «the instance sat near its
+ *  limit» is no evidence of an OOM — a rolling update of a pod full of cache looked exactly like one. The judge says `oom`
+ *  ONLY when the instance's OWN memory.events (oom_kill / oom_group_kill) ROSE since the job started — read now, at the boot,
+ *  from the SAME cgroup the wrapper sampled (`now` = {cgId, oomKill, oomGroupKill}; a new container's counters start afresh
+ *  and are not this run's) — AND the job held at least `share` of the instance's ANON memory (memory.stat anon, never
+ *  memory.current) at the wrapper's last sample. Anything else is the base's env-restart («ended with the instance»), never
+ *  counted. The verdict carries the sample's numbers and its reason (`why`): the record shows the judge's reasoning. */
+function bootEndCause(sample, now, { share = 0.5 } = {}) {
+  const s = sample && typeof sample === 'object' ? sample : null;
+  if (!s) return { cause: 'env-restart' };
+  const n = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  const facts = { jobAnonMb: Math.round(n(s.jobAnonMb)), anonMb: Math.round(n(s.anonMb)), fileMb: Math.round(n(s.fileMb)), usedMb: Math.round(n(s.usedMb)), limitMb: Math.round(n(s.limitMb)), at: n(s.at) };
+  const sameCg = !!(now && s.cgId && now.cgId === s.cgId);
+  const kills = sameCg ? (n(now.oomKill) - n(s.oomKillAtStart)) + (n(now.oomGroupKill) - n(s.oomGroupKillAtStart)) : 0;
+  const end = (cause, why) => ({ cause, why, ...facts, ...(sameCg ? { oomKills: Math.max(0, kills) } : {}) });
+  if (!sameCg) return end('env-restart', 'the instance\'s memory cgroup is not the one the job ran in (a new container) — its OOM count is not this run\'s');
+  if (!(kills > 0)) return end('env-restart', 'the instance\'s memory.events count no OOM kill since the job started — it ended with the instance');
+  if (!(facts.anonMb > 0 && facts.jobAnonMb >= share * facts.anonMb)) return end('env-restart', `the instance was OOM-killed, but this job held ${facts.jobAnonMb} of its ${facts.anonMb} MB of anon memory — not most of it`);
+  return end('oom', `the instance was OOM-killed (${kills}) and this job held ${facts.jobAnonMb} of its ${facts.anonMb} MB of anon memory`);
+}
+
 // ── names ─────────────────────────────────────────────────────────────────
 /** scope-namespaced name resolution: collision within the caller-visible set auto-suffixes. */
 function resolveName(wanted, visibleNames) {
@@ -384,17 +565,22 @@ const FOR_YOU_WORDS = Object.freeze({
   parked: 'Service {name} crash-looped and was parked — vibespace-job start {id} to retry',
   missed: 'Scheduled job {name} MISSED its time (server was down)',
   fire: '{text}',
+  // lane jobs-memory-bound (the seam with job-notify-user r3): a doubted previous run, a park for memory
+  doubt: '{name}: cannot prove the previous run is gone ({why}) — not restarted; if it is gone: {ifGone}, then start it again; if it runs: it keeps running',
+  'parked-memory': '{name}: parked — out of memory twice. Raise its bound or fix the job, then start it again',
 });
 /** PURE. One For-you copy of `job` → {fact, words: {key, params}, urgency}: `fact` is WHICH copy (the store's resolver
  *  key and re-file match — src/user-todos.js jobFact): 'ask' | 'fire' | 'missed' | 'parked' | 'end:<state>:<cause>' (a
  *  done and a failed end are two facts, two items). `text` = a notify fire's --text (the job's name when it has none). */
-function forYouCopy(job, kind, { text = null, cause = null, urgency = null } = {}) {
+function forYouCopy(job, kind, { text = null, cause = null, urgency = null, why = null, ifGone = null } = {}) {
   const name = String((job && (job.name || job.id)) || 'job');
   const tok = (v, n) => String(v == null || v === '' ? 'unknown' : v).toLowerCase().replace(/[^a-z0-9._()-]/g, '-').slice(0, n);
   if (kind === 'end') return { fact: `end:${tok(job.state, 24).replace(/[^a-z_-]/g, '-')}:${tok(cause, 48)}`, words: { key: FOR_YOU_WORDS.end, params: { name, state: String(job.state), cause: String(cause) } }, urgency: job.state === 'failed' ? 'normal' : 'low' };
   if (kind === 'ask') return { fact: 'ask', words: { key: FOR_YOU_WORDS.ask, params: { name } }, urgency: 'normal' };
   if (kind === 'parked') return { fact: 'parked', words: { key: FOR_YOU_WORDS.parked, params: { name, id: String(job.id) } }, urgency: 'normal' };
   if (kind === 'missed') return { fact: 'missed', words: { key: FOR_YOU_WORDS.missed, params: { name } }, urgency: 'high' };
+  if (kind === 'doubt') return { fact: 'doubt', words: { key: FOR_YOU_WORDS.doubt, params: { name, why: String(why), ifGone: String(ifGone) } }, urgency: 'normal' };
+  if (kind === 'parked-memory') return { fact: 'parked-memory', words: { key: FOR_YOU_WORDS['parked-memory'], params: { name } }, urgency: 'normal' };
   if (kind === 'fire') return { fact: 'fire', words: { key: FOR_YOU_WORDS.fire, params: { text: String(text || name) } }, urgency: urgency || 'normal' };
   return null;
 }
@@ -637,6 +823,7 @@ module.exports = {
   vetSpec, jobCommandParts, VENDOR_PATTERNS,
   parseCron, nextFire, validateSchedule, AGENT_MIN_EVERY_MS,
   SUPERVISE, onServiceExit, resolveName,
+  MEMORY, MEMORY_CAUSES, MEMORY_RUNGS, MEMORY_PARK_TEXT, memoryValueVerdict, memoryMbOf, instanceCapOf, limitHolder, capWords, boundRecord, boundWords, leftRecord, leftWords, runEndWords, memoryWords, memoryEndWhat, onMemoryEnd, bootEndCause,
   renderJobsDigest, renderJobsUpdate, fitDigest, jobLine,
   validatePanel, validateAnswers, nextInteractionSeq, answerVersionVerdict, CONTEXT_PAYLOAD_CAP, clip,
   notifyEffective, notifyUserOf, spawnTaskOf, storedAction, renderOwnerNotify, renderNotifStash, FOR_YOU_WORDS, forYouCopy,

@@ -203,6 +203,7 @@
   "test-init-frame": 2607,
   "test-integrations-ui": 41819,
   "test-jobs-engine": 114472,
+  "test-jobs-memory-scopes": 12000,
   "test-jobs-panel": 52059,
   "test-layout-history": 148,
   "test-local-discovery-device": 10182,

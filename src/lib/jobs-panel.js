@@ -10,7 +10,7 @@ import { marked } from 'marked';
 import { sanitizeHtml } from './safe-html.js';
 import { mountDiagrams } from './mermaid-render.js'; // lane chat-mermaid: a panel's ```mermaid fence draws
 import { registerWindowType } from './window-types.js';
-import { badgeCounts, foldTasks, pruneFolds, heldText, ackableIds, isFoldKey } from './jobs-layout.js';
+import { badgeCounts, foldTasks, pruneFolds, heldText, ackableIds, isFoldKey, memoryChip, memoryEndWords, memorySourceWords, memoryWords, memoryFieldValue, memorySetValue, memoryCapWords, memoryEffectiveWords, runLeftWords } from './jobs-layout.js';
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
 
 const GLYPH = { 'awaiting-user': '⚑', failed: '✖', unverified: '?', missed: '✖', up: '●', starting: '◌', down: '○', scheduled: '◷', interrupted: '⚠', done: '✔' }; // text glyphs only — emoji ban
@@ -126,6 +126,10 @@ function stateLine(j) {
   else if (run.endedAt) bits.push(hum(Date.now() - run.endedAt) + ' ' + t('ago'));
   if (run.exit !== null && run.exit !== undefined) bits.push('exit=' + run.exit);
   if (j.nextFireAt) bits.push(t('next') + ' ~' + hum(j.nextFireAt - Date.now()));
+  const memEnd = memoryEndWords(j, t); // lane jobs-memory-bound: an end by the bound (or the park it led to) is named
+  if (memEnd) bits.push(memEnd);
+  const left = runLeftWords(run, t); // round 5: what the job left running — stopped (a task's), kept (a service's)
+  if (left) bits.push(left);
   return bits.join(' · ');
 }
 
@@ -280,6 +284,9 @@ function renderCard(app, root, j, { compact, refresh, archived = false }) {
     if (j.progress) { const pg = document.createElement('span'); pg.className = 'jobs-chip jobs-chip-prog'; pg.textContent = j.progress; l2.appendChild(pg); }
     if (j.runsCount > 1) { const rc = document.createElement('span'); rc.className = 'jobs-chip'; rc.textContent = '×' + j.runsCount; l2.appendChild(rc); }
     for (const p of j.ports || []) { const c = document.createElement('span'); c.className = 'jobs-chip'; c.textContent = ':' + p; l2.appendChild(c); }
+    // lane jobs-memory-bound: the bound and the rung that holds it — «4 GB · cgroup» / «4 GB · rlimit» / «unbounded — …»
+    const memText = !compact && j.kind !== 'cron' ? memoryChip(j, t) : '';
+    if (memText) { const mc = document.createElement('span'); mc.className = 'jobs-chip jobs-chip-mem' + (/^\d/.test(memText) ? '' : ' jobs-chip-mem-none'); mc.textContent = memText; mc.title = j.memoryBound?.why || ''; l2.appendChild(mc); }
     if (j.publishedUrl) { const u = document.createElement('button'); u.className = 'jobs-chip jobs-chip-url'; u.textContent = '↗ ' + j.publishedUrl.replace(/^https?:\/\//, ''); u.onclick = (ev) => { ev.stopPropagation(); app.openBrowser?.(j.publishedUrl) || window.open(j.publishedUrl); }; l2.appendChild(u); }
     for (const g of (j.owner?.groups || []).slice(0, 2)) { const c = document.createElement('span'); c.className = 'jobs-chip jobs-chip-grp'; c.textContent = g; l2.appendChild(c); }
     if (!compact && j.context?.payload) { const cx = document.createElement('span'); cx.className = 'jobs-ctx'; cx.textContent = j.context.payload.split('\n')[0].slice(0, 90); l2.appendChild(cx); }
@@ -349,6 +356,28 @@ async function expandDetail(app, el, j, refresh) {
   clr.onclick = (ev) => { ev.stopPropagation(); clearRecords([{ kind: 'job', id: j.id, at: j.createdAt, words: isCleared(j) ? clearedText() : j.name }]).then((r) => { if (r && r.ok) refresh?.(); }); };
   acc.appendChild(clr);
   d.appendChild(acc);
+  // lane jobs-memory-bound: THE BOUND, editable where the job is — a size (8G · 512M · a number of MB), empty = back to the
+  // default (your setting, else the cluster's, else 4 GB), 0 = unbounded; it applies from the job's next run
+  const memRow = document.createElement('div'); memRow.className = 'jobs-access jobs-memory';
+  const memLbl = document.createElement('span'); memLbl.textContent = t('Memory bound') + ':';
+  const memIn = document.createElement('input'); memIn.className = 'jobs-memory-input'; memIn.size = 8;
+  memIn.value = memoryFieldValue(job); // the STORED bound exactly — never a rounded one Set would write back, never the effective one
+  memIn.placeholder = (job.memoryAskedMb ?? job.memoryMb) ? memoryWords(job.memoryAskedMb ?? job.memoryMb) : t('unbounded'); // what an empty field asks: the ladder's
+  const memSet = document.createElement('button'); memSet.className = 'jobs-btn'; memSet.textContent = t('Set');
+  const memFact = document.createElement('span'); memFact.className = 'jobs-memory-fact';
+  memFact.textContent = `${memorySourceWords(job, t)}${job.memoryBound ? ' · ' + (memoryChip(job, t) || '') : ''} · ${t('from its next run')}`;
+  memSet.onclick = async () => {
+    const value = memorySetValue(job, memIn.value);
+    if (value === null) { showToast(t('Memory bound: {size}', { size: job.memoryMb ? memoryWords(job.memoryMb) : t('unbounded') })); return; } // unchanged: nothing is written
+    const r2 = await fetchJson(`/api/jobs/${j.id}/memory`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ value }) });
+    if (r2?.error) showToast(r2.error, { error: true }); else { showToast(t('Memory bound: {size}', { size: r2.memoryMb ? memoryWords(r2.memoryMb) : t('unbounded') }) + (r2.memoryCap?.limitMb ? ' · ' + memoryCapWords(r2.memoryCap, t) : '')); refresh?.(); } // the effective bound, and the limit that lowered the asked one
+  };
+  // round 4: beside the stored value, read-only — the bound the next run gets and the limit that lowers it («effective 6 GB ·
+  // the instance’s limit 8 GB»)
+  const memEff = document.createElement('span'); memEff.className = 'jobs-memory-fact';
+  memEff.textContent = memoryEffectiveWords(job, t);
+  memRow.append(memLbl, memIn, memSet, memFact, memEff);
+  d.appendChild(memRow);
   // owner auto-notify state (2.344.0): which lane told (or will tell) the
   // owner conversation about this job, and when it last happened
   {
@@ -403,7 +432,8 @@ async function expandDetail(app, el, j, refresh) {
   }
   for (const run of (job.runs || []).slice(-6).reverse()) {
     const rr = document.createElement('div'); rr.className = 'jobs-run';
-    rr.textContent = `${new Date(run.startedAt).toLocaleString()} · ${run.endedAt ? hum(run.endedAt - run.startedAt) : t('running')} · exit=${run.exit ?? '—'} ${run.cause || ''} (${run.trigger})`;
+    const left = runLeftWords(run, t); // round 5: what it left running
+    rr.textContent = `${new Date(run.startedAt).toLocaleString()} · ${run.endedAt ? hum(run.endedAt - run.startedAt) : t('running')} · exit=${run.exit ?? '—'} ${run.cause || ''} (${run.trigger})${left ? ' · ' + left : ''}`;
     d.appendChild(rr);
   }
   if (job.logTail) { const lt = document.createElement('pre'); lt.className = 'jobs-log'; lt.textContent = job.logTail; d.appendChild(lt); }

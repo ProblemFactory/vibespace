@@ -55,7 +55,7 @@ export const ROWS = [
   ['src/harness-config.js', 'own-tree', 9, null, CLI],
   ['src/hosts.js', 'own-tree', 29, null, DATA],
   ['src/incident.js', 'own-tree', 19, null, DATA],
-  ['src/jobs.js', 'own-tree', 24, null, `${DATA}; lane job-spec-off-argv +1: the run's spec file, opened O_WRONLY|O_CREAT|O_EXCL 0600 inside its own ctl dir (data/job-logs) — a write, never a read; lane job-wrapper-update-window +1: a stat of data/bin/job-wrapper.js (its mtime: is a protocol mismatch the update's window?) — the server's own tree`],
+  ['src/jobs.js', 'own-tree', 30, null, `${DATA}; lane job-spec-off-argv +1: the run's spec file, opened O_WRONLY|O_CREAT|O_EXCL 0600 inside its own ctl dir (data/job-logs) — a write, never a read; lane job-wrapper-update-window +1: a stat of data/bin/job-wrapper.js (its mtime: is a protocol mismatch the update's window?) — the server's own tree; lane jobs-memory-bound +3 (_cgroupNow, the boot judge): /proc/self/cgroup, the instance's own /sys/fs/cgroup memory.events and a stat of that dir (its identity) — kernel pseudo-files, never a mount; round 3 +2 (_instanceLimit, the ladder's cap): /proc/self/cgroup and memory.max up the hub's own cgroup ancestors — kernel pseudo-files, at most once a minute; round 4 +1 (_reapScope; round 5: moved into _scopeProcs, the ONE bounded read — a reap, a kept scope's stop): the cgroup.procs of a run's scope (/sys/fs/cgroup, the dir its own bound.json names) — a kernel pseudo-file, never a mount`],
   ['src/ledger-slot-backfill.js', 'own-tree', 13, null, CLI],
   ['src/login-state.js', 'own-tree', 2, null, CLI],
   ['src/machine-mounts.js', 'own-tree', 7, null, DATA],
@@ -67,7 +67,7 @@ export const ROWS = [
   ['src/peer-messaging.js', 'own-tree', 4, null, `${CLI}; lane peer-registry-identity +1: the registration's inbox socket (statSync isSocket — the CLI's own runtime-dir socket, never a mount)`],
   ['src/plugins.js', 'own-tree', 1, null, DATA],
   ['src/port-forward.js', 'own-tree', 4, null, PROC],
-  ['src/proc-identity.js', 'own-tree', 7, null, PROC],
+  ['src/proc-identity.js', 'own-tree', 11, null, `${PROC}; lane jobs-memory-bound round 6 +2 (membersOf — a recorded run's processes at clear time): the /proc listing and a process's environ (the job's mark) — procfs, never a mount; round 8 +2: a candidate's <pid>/task/<pid>/children and an unreadable environ's <pid>/status (its owner) — procfs`],
   ['src/proc-listen.js', 'own-tree', 4, null, PROC],
   ['src/quota-model-migrate.js', 'own-tree', 2, null, CLI],
   ['src/rate-limit-capture.js', 'own-tree', 2, null, CLI], // lane oat-identity-fix-r3 −1: the `.window-` sidecar read moved to its ONE reader (src/window-stamp.js)

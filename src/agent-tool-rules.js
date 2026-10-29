@@ -135,6 +135,7 @@ const AGENT_TOOL_RULES = Object.freeze([
       run: 'runs an arbitrary shell command (sh -c) outside the CLI\'s own Bash check',
       start: 're-runs a job\'s stored shell command',
       access: 'widens who may view or control a job — a grant is the user\'s',
+      memory: 'moves a job\'s memory bound — the line that keeps one job from taking the whole instance down is the user\'s to move (lane jobs-memory-bound)',
     }),
   }),
 ]);

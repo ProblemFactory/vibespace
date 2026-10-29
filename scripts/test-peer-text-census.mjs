@@ -1080,6 +1080,17 @@ const PRINTS = {
     'r.preview': `${V}:the preview`, 'r.preview.enabled': `${V}:a flag`, 'r.preview.mode': `${V}:an enum`, 'r.preview.reason': `${V}:the preview's reason`,
     'r.renamed': `${V}:a flag`, 'r.survivalNote': `${V}:the runtime note`, 'r.text': `${V}:the manual text (docs)`, 'res._neterr': `${V}:node's fetch error text`,
     'run.cause': `${V}:the run's cause`, 'run.exit': `${V}:an exit code`,
+    // lane jobs-memory-bound: memLine(j) — the job's memory bound, the rung its last run measured, the park; and the `memory` verb's echo
+    'j.memoryMb': `${V}:a number of MB`, 'j.memorySource': `${V}:an enum (job | setting | cluster | default)`, 'j.memoryBound': `${V}:the rung record {mb, by, why} the wrapper measured`, 'b.by': `${V}:an enum (cgroup | rlimit-data | none)`,
+    'b.why': `${V}:the wrapper's own sentence (a fixed vocabulary + the scope's unit name VibeSpace built)`, 'b.mb': `${V}:a number of MB`, 'j.parkedFor': `${V}:an enum`, 'j.cronParent': `${V}:a job id`, 'r.memoryMb': `${V}:a number of MB`, 'r.memorySource': `${V}:an enum`,
+    // acceptance round 3: THE INSTANCE'S CAP — the asked bound beside the effective one, and the cap {limitMb, hubMb} the hub read off its own cgroup
+    'j.memoryAskedMb': `${V}:a number of MB`, 'j.memoryCap': `${V}:the cap record {limitMb, hubMb} the hub read off its own cgroup`, 'c.limitMb': `${V}:a number of MB`, 'c.hubMb': `${V}:a number of MB`,
+    'r.memoryAskedMb': `${V}:a number of MB`, 'r.memoryCap': `${V}:the cap record {limitMb, hubMb}`, 'r.memoryCap.limitMb': `${V}:a number of MB`, 'rc': `${V}:a local the CLI built from r.memoryCap / r.memoryAskedMb (numbers in fixed words)`,
+    // acceptance round 4: WHICH limit capped — the one that contains the job (capWords(c) prints it)
+    'c.of': `${V}:the limit's holder — instance | user slice | a cgroup's own name the hub or the wrapper read off a cgroup path (VibeSpace's or systemd's unit names)`,
+    // acceptance round 5: THE RECORD's words — the rung (src/job-model.js boundWords: fixed words + a size + the wrapper's why), and what
+    // a run's end left or killed (runEndWords: fixed words + counts + a scope's unit name VibeSpace built)
+    'b.words': `${V}:the hub's words for the rung that held the last run (boundWords — fixed vocabulary, a size, b.why)`, 'run.endWords': `${V}:the hub's words for what the run's job left running or the kill the hub made (runEndWords — fixed vocabulary, counts, a unit name VibeSpace built)`, 'j.run.endWords': `${V}:the same words, on show's last-run line`,
     // verify r3 F2: the subscribe / unsubscribe echo is ONE print whose arguments span three lines — r2's line-based walker saw none of these six
     'r.updated': `${V}:a flag`, 'r.already': `${V}:a flag`, 'r.filter': `${O}:the caller's own subscription filter (echoed)`, 'r.count': `${V}:a count`, 'r.removed': `${V}:a flag`, 'pos': `${O}:the job the caller named (its positional argument)`,
     // verify r3 F4: the REACH of the prints — the records behind `j`, the run behind `dur_`, the request behind call()

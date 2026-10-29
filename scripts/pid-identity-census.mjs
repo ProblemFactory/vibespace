@@ -113,6 +113,11 @@ export const ROWS = [
   ['src/ws-create.js', "try { process.kill(Number(lock.pid), 'SIGKILL'); } catch { }", 'scan', 'captureForkProof\\(', 'a pending fork\'s own CLI holding its parent\'s id (B-8b7b: the lock dir, the ppid walk to its wrapper and lockWrittenByItsPid read in the same proof step, 2 sightings)'],
   ['src/ws-handler.js', "try { process.kill(dpid, 'SIGTERM'); } catch {}", 'scan', 'pidsMatchingCmdline\\(', 'a stale dtach of this socket (cmdline scan, same pass)', 4],
   ['src/ws-handler.js', 'kill -9 $P 2>/dev/null; true;', 'legacy', 'vs_same_proc "\\$P" "\\$T"', 'a remote session\'s CLI (the ssh kill)', 0, 1, SHWHY],
+  // lane jobs-memory-bound, acceptance round 5 (the ruling: what a task LEAVES running is stopped at its end): on a rung without a
+  // scope, the processes of the wrapper's OWN process group (pgrp = its pid, read off a fresh /proc scan in the same pass, each
+  // with its starttime) — the engine's stop of what a service KEPT goes through src/proc-identity.js (no row of its own)
+  ['data/bin/job-wrapper.js', "if (termed.has(termKey(p)) || !same(p)) return; termed.set(termKey(p), Date.now()); try { process.kill(p[0], 'SIGTERM'); } catch { } };", 'starttime', '!same\\(p\\)', 'what the job left — its group\'s at an end or a stop, a stopped service\'s escapees (round 7: termOnce, once each) — every row from a fresh /proc scan, its start re-read on the line'],
+  ['data/bin/job-wrapper.js', "const killNow = (p) => { if (!same(p)) return false; try { process.kill(p[0], 'SIGKILL'); return true; } catch { return false; } };", 'starttime', '!same\\(p\\)', 'what is still there once the stop\'s ONE clock is out (round 8: the group and a stopped service\'s marked processes rescanned until a pass finds none) — by force, each row from a fresh /proc scan, its start re-read on the line'],
 ];
 // the persisted pids — each record and what its signal proves (a record with no starttime cannot be signalled by proof)
 export const RECORDS = [

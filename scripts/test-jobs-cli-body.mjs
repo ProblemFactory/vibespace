@@ -182,7 +182,7 @@ const readFlags = (src) => new Set([...branchOf(src).matchAll(/flags\.([a-z][a-z
 // the census invocations: every flag below rides one of them (mutually exclusive shapes get their own)
 const INV = {
   svc: ['run', 'sleep 60', '--name', 'census-svc', '--note', 'a note', '--context', 'ctx words', '--cwd', CWD, '--until', 'READY', '--timeout', '6h', '--stdin-open', '--notify', 'on',
-    '--view', 'all', '--control', 'group', '--stop-with-owner', '--keep-up', '--restart', 'always', '--port', '8123', '--publish'],
+    '--view', 'all', '--control', 'group', '--stop-with-owner', '--keep-up', '--restart', 'always', '--port', '8123', '--publish', '--memory', '8G'],
   task: ['run', 'true', '--name', 'census-task', '--notify-user'],
   every: ['run', 'echo hi', '--name', 'census-every', '--every', '30m', '--jitter', '5', '--notify-ok', '--notify-user'],
   cron: ['run', 'true', '--name', 'census-cron', '--cron', '41 9 * * *'],
@@ -194,6 +194,7 @@ const PINS = {
   '--name': [['nc', 'name', 'census-nc']], '--note': [['svc', 'note', 'a note']], '--context': [['svc', 'context.payload', 'ctx words']],
   '--cwd': [['svc', 'cmd.cwd', CWD]], '--until': [['svc', 'untilOutput', 'READY']], '--timeout': [['svc', 'timeoutMs', 6 * 3600e3]],
   '--stdin-open': [['svc', 'stdinOpen', true]],
+  '--memory': [['svc', 'memoryMb', '8G']],   // the seam with jobs-memory-bound: the CLI sends the flag's own string
   // every shape that tells the user (a plain task, a scheduled run, notify-cron) — top-level; a scheduled run ALSO carries
   // the compatibility copy in its task (an engine ≤ 2.369.360 reads only that); a service refuses the flag (leg (1))
   '--notify-user': [['task', 'notifyUser', true], ['every', 'notifyUser', true], ['every', 'action.task.notifyUser', true], ['nc', 'notifyUser', true]],

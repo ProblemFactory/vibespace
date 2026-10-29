@@ -157,6 +157,60 @@ function signalIdentity(identity, signal, opts = {}) {
   return one(pid);
 }
 
+/**
+ * THE PROCESSES OF A RECORDED RUN (lane jobs-memory-bound, acceptance round 6) — a FRESH /proc scan, never a list read back:
+ * every process of process group `pgid` (0: none), or carrying `mark` (NAME=value) in its environ — a process that left the
+ * group (setsid) still carries what it inherited — started at or after `since` (field 22), not a zombie, never this process.
+ * Identities ({pid, starttime, bootId}), proven again by signalIdentity at the act. [] where there is no /proc.
+ * Round 7: BOUNDED by rows AND time (the caller's thread is the hub's: the sync-fs law's spirit) — at most `maxRows` processes
+ * and `maxMs`; a process in uninterruptible sleep (D) is not read (an environ read takes its memory map's lock). What it could
+ * not read is COUNTED on the answer's `scan` — {scanned, total, unreadable, cut} — for the caller to say, never skipped silently.
+ * Round 8: A CUT SCAN PROVES NOTHING (the caller never reads «none found» off one as «none left»), and the bound is spent where it
+ * matters: the job's OWN candidates first — `first` (the pids its record names) and their children (/proc/<pid>/task/<pid>/
+ * children), at most 256, outside the bound — then the rest, newest pid first. An unreadable environ is told by its OWNER (the
+ * real uid of /proc/<pid>/status): `others` of other users (never ours to read), the rest ours (not dumpable).
+ */
+const MEMBERS_ROWS = 4096, MEMBERS_MS = 250;
+function membersOf({ pgid = 0, since = 0, mark = '', first = [], maxRows = MEMBERS_ROWS, maxMs = MEMBERS_MS } = {}, opts) {
+  const root = rootOf(opts), out = [];
+  let ents = [];
+  try { ents = fs.readdirSync(root); } catch { out.scan = { scanned: 0, total: 0, unreadable: 0, others: 0, cut: false }; return out; }
+  const bootId = bootIdOf(opts), me = typeof process.getuid === 'function' ? process.getuid() : -1;
+  const pids = ents.filter((e) => /^\d+$/.test(e) && Number(e) !== process.pid).map(Number).sort((a, b) => b - a); // newest first
+  let scanned = 0, unreadable = 0, others = 0, cut = false;
+  const ownerOf = (e) => { try { const m = /^Uid:\s+(\d+)/m.exec(fs.readFileSync(`${root}/${e}/status`, 'utf8')); return m ? Number(m[1]) : -1; } catch { return -1; } };
+  const unread = (e) => { unreadable++; const u = ownerOf(e); if (u >= 0 && u !== me) others++; };
+  const check = (e) => {
+    scanned++;
+    const r = statRest(e, opts);
+    if (!r || r[0] === 'Z' || Number(r[19]) < since) return;
+    let hit = !!pgid && Number(r[2]) === Number(pgid);
+    if (!hit && mark) {
+      if (r[0] === 'D') unread(e);
+      else { try { hit = fs.readFileSync(`${root}/${e}/environ`, 'latin1').split('\0').includes(mark); } catch (err) { if (!err || (err.code !== 'ENOENT' && err.code !== 'ESRCH')) unread(e); } } // gone meanwhile: nothing unread
+    }
+    if (hit) out.push({ pid: e, starttime: Number(r[19]), bootId });
+  };
+  const cand = new Set(), queue = (Array.isArray(first) ? first : []).map(Number).filter((p) => p > 1 && p !== process.pid);
+  while (queue.length && cand.size < 256) {
+    const p = queue.shift();
+    if (cand.has(p)) continue;
+    cand.add(p);
+    try { for (const c of fs.readFileSync(`${root}/${p}/task/${p}/children`, 'utf8').split(/\s+/)) if (/^\d+$/.test(c) && Number(c) !== process.pid) queue.push(Number(c)); } catch { }
+  }
+  const listed = new Set(pids);
+  for (const p of cand) if (listed.has(p)) check(p);
+  let rest = 0;
+  const t1 = Date.now(); // the bound is the rest's
+  for (const e of pids) {
+    if (cand.has(e)) continue;
+    if (rest >= maxRows || Date.now() - t1 > maxMs) { cut = true; break; }
+    rest++; check(e);
+  }
+  out.scan = { scanned, total: pids.length, unreadable, others, cut };
+  return out;
+}
+
 // ── SHIPPED TWIN BEGIN — data/bin/vibespace-remote-keeper carries these lines byte-for-byte: it ships to a host as ONE
 // file and cannot require src/ (the vibespace-usage-scan precedent). test-pid-identity pins the copy to this source. ──
 /** agentd's spawn-proof token (moved verbatim from src/agentd/agentd.js pidStartTime): 'l' + field 22 on a
@@ -251,7 +305,7 @@ function legacyOnce(door, pid, say) {
 
 module.exports = {
   PROC_ROOT, UNPROVABLE, WITHHELD_KEY, LEGACY_LINE,
-  hasProc, bootIdOf, starttimeOf, stateOf, identityOf, judge, sameProcess, aliveIdentity, signalIdentity, reportOnce, startToken,
+  hasProc, bootIdOf, starttimeOf, stateOf, identityOf, judge, sameProcess, aliveIdentity, signalIdentity, membersOf, reportOnce, startToken,
   bootToken, tokenVerdict, identityFromToken, procIdentityShellFns, withheldWords, legacyOnce,
   _resetReported: () => { _reported.clear(); _legacySaid.clear(); },
 };

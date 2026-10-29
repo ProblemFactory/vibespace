@@ -83,6 +83,25 @@ function forYouLine(j) {
   const fyRefused = [...fyLast.values()].filter((fy) => !fy.ok);
   return fyRefused.length ? 'for you: ' + fyRefused.map((fy) => `${COPY_WORDS[fy.copy || 'fire'] || 'a copy'} was NOT filed — ${fy.reason || 'the For you tray refused it'}`).join('; ') : '';
 }
+// lane jobs-memory-bound: the job's memory bound, the rung that held its last run (or why none did), its named end and the
+// park — the hub's facts, worded here (this file ships to hosts without a checkout)
+const sizeWords = (mb) => (mb >= 1024 ? `${Math.round(mb / 102.4) / 10} GB` : `${mb} MB`);
+// the limit that lowered a bound, named (round 4 — the one that contains the job): the instance, the user slice, a cgroup's name
+const capWords = (c) => `${!c.of || c.of === 'instance' ? 'the instance' : c.of === 'user slice' ? 'the user slice' : c.of}'s ${sizeWords(c.limitMb)} limit`;
+function memLine(j) {
+  if (j.memoryMb === undefined) return '';   // an older hub
+  const run = j.run || {}, b = j.memoryBound;
+  const c = j.memoryCap, asked = j.memoryAskedMb ? sizeWords(j.memoryAskedMb) : 'unbounded';
+  const capped = c && c.limitMb ? ` — capped by ${capWords(c)} (asked ${asked}; the hub keeps ${sizeWords(c.hubMb)})` : '';
+  const head = j.memoryMb ? `memory: ${sizeWords(j.memoryMb)}${capped} (${j.memorySource === 'job' ? 'its own' : j.memorySource === 'setting' ? "the owner's setting" : j.memorySource === 'cluster' ? "the cluster's default" : 'the default'})` : 'memory: UNBOUNDED (the owner set 0)';
+  // round 5: the RECORD's words (an unbounded scope is «unbounded (the owner set 0) · in its own scope», never «a cgroup at 0 MB»);
+  // a hub older than them: a size only where there is one
+  const rung = !b ? '' : b.words ? ` · last run ${b.words}` : b.by === 'none' ? ` · last run unbounded — ${b.why}` : b.mb ? ` · last run held by ${b.by === 'cgroup' ? 'a cgroup' : 'RLIMIT_DATA'} at ${sizeWords(b.mb)}` : ' · last run unbounded';
+  const end = run.cause === 'oom-bound' ? ` · its last run was stopped: used more than ${sizeWords((b && b.mb) || j.memoryMb)}` : run.cause === 'oom' ? ' · its last run was killed: the instance ran out of memory' : '';
+  const park = j.parkedFor === 'memory' ? ` · PARKED (out of memory twice): raise it (vibespace-job memory ${j.cronParent || j.id} 8G) or fix the job, then vibespace-job start ${j.cronParent || j.id}`
+    : j.oomEnds ? ` · ${j.oomEnds} out-of-memory end in a row (2 park it)` : '';
+  return head + rung + end + park;
+}
 function printJob(j, tailLines) {
   const run = j.run || {};
   const dur_ = run.startedAt ? (run.endedAt ? ` ran ${hum(run.endedAt - run.startedAt)}` : ` up ${hum(Date.now() - run.startedAt)}`) : '';
@@ -92,6 +111,8 @@ function printJob(j, tailLines) {
   if (j.actionText) console.log('text: ' + j.actionText);
   if (pubLine(j)) console.log(pubLine(j));
   if (forYouLine(j)) console.log(forYouLine(j));
+  if (memLine(j) && (j.parkedFor || j.oomEnds || /^oom/.test((j.run || {}).cause || ''))) console.log(memLine(j));
+  if (run.endWords) console.log(`end: ${run.endWords}`); // round 5: what its job left running (a task's stopped, a service's kept), or a kill the hub made
   if (j.answers && j.answers.length) console.log('answers: ' + JSON.stringify(j.answers[j.answers.length - 1]));
   if (j.logTail) console.log(`log tail:\n${j.logTail.split('\n').map((l) => '  ' + l).join('\n')}`);
   else if (j.logWithheld) console.log("log tail: (withheld — this job's content was cleared at the user's request)");
@@ -102,6 +123,8 @@ function printJob(j, tailLines) {
 const USAGE = `vibespace-job — background work that OUTLIVES this conversation (services · long tasks · cron)
 create:  vibespace-job run "CMD" --name NAME [--context "brief (echoed at poll, survives your compaction)"]
            [--cwd DIR] [--until "MARKER"] [--timeout 6h] [--stdin-open] [--notify-user] [--notify on|off]
+           [--memory 8G]   ← its memory bound (default: the owner's setting, else the cluster's, else 4G); past it the job is
+                             stopped by name, and two such ends in a row park it
            [--keep-up [--restart on-failure|always|never] [--port N] [--publish]]     ← service
            [--every 30m | --cron "41 9 * * *" | --at "+5m"|"2026-09-05 06:00"]        ← schedule (spawns CMD; bare datetime = SERVER-LOCAL tz — prefer relative "+5m"/"+1h30m" or ISO with Z)
              (--notify-user: when the task ends — scheduled, every fire's run — a copy lands in the user's For you tray; default off;
@@ -121,6 +144,7 @@ read:    vibespace-job list [--mine|--subscribed|--archived] · vibespace-job po
 control: vibespace-job stop <id> [--force] · vibespace-job start <id> · vibespace-job rm <id> [--stop]
          vibespace-job access <id> [--view session|group|all] [--control session|group|all]
          vibespace-job notify <id> on|off|inherit   (owner only — change auto-notify without recreating)
+         vibespace-job memory <id> 8G|512M|inherit  (owner only — its memory bound from its next run; 0 is the user's call)
          vibespace-job subscribe <id> [--filter "SpaceX|Starship"] · unsubscribe <id>   (any session that can VIEW
            the job gets its notifications; --filter = case-insensitive regex on the message text, re-subscribe updates it;
            the OWNER subscribing to its own job: the filter shapes its auto-notify too)
@@ -192,7 +216,7 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
         const task = {
           cmd: { argv: ['sh', '-c', cmdStr], cwd: flags.cwd || process.cwd() },
           untilOutput: flags.until || null, timeoutMs: flags.timeout ? dur(flags.timeout) : null,
-          stdinOpen: !!flags['stdin-open'],
+          stdinOpen: !!flags['stdin-open'], memoryMb: typeof flags.memory === 'string' ? flags.memory : undefined,
           notifyOk: !!flags['notify-ok'] || echoReminder, restart: flags.restart || 'on-failure',
           ports: [].concat(flags.port || []).filter(Boolean).map(Number), publish: !!flags.publish,
         };
@@ -262,10 +286,11 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
       if (j.actionText) console.log('text: ' + j.actionText);
       console.log(`params: restart=${j.restart} timeout=${j.timeoutMs || '—'} until=${j.untilOutput || '—'} singleInstance=${j.singleInstance} stopWithOwner=${j.stopWithOwner} notifyOk=${j.notifyOk} notifyUser=${j.kind === 'service' ? 'n/a (a service never tells at its end)' : j.notifyUser}`);
       if (forYouLine(j)) console.log(forYouLine(j));
+      if (memLine(j)) console.log(memLine(j));
       console.log(`access: view=${j.access.view} control=${j.access.control}${j.access.lockedBy ? ' (locked by user)' : ''} · notify=${j.notify}${j.lastNotify ? ' last=' + j.lastNotify.lane + (j.lastNotify.ok ? '✓' : '✗') : ''} · subscribers=${j.subscribersCount}${j.mySubscription ? ' (you' + (j.mySubscription.filter ? ', filter=' + j.mySubscription.filter : '') + ')' : ''}`);
       if (j.context && j.context.payload) console.log('context: ' + j.context.payload);
       if (pubLine(j)) console.log(pubLine(j));
-      if (j.run) console.log(`last run: ${atWords(j, 'runStartedAt', j.run.startedAt)} exit=${j.run.exit ?? '—'} ${j.run.cause || ''} (${j.runsCount} run(s))`);
+      if (j.run) console.log(`last run: ${atWords(j, 'runStartedAt', j.run.startedAt)} exit=${j.run.exit ?? '—'} ${j.run.cause || ''} (${j.runsCount} run(s))${j.run.endWords ? ' — ' + j.run.endWords : ''}`);
       break;
     }
     case 'poll': case 'answers': {
@@ -299,6 +324,13 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
     case 'access': {
       const r = await call('POST', `/api/agent/jobs/${encodeURIComponent(pos[1])}/access`, { view: flags.view, control: flags.control });
       console.log('access updated: view=' + r.access.view + ' control=' + r.access.control);
+      break;
+    }
+    case 'memory': {
+      if (!pos[1] || !pos[2]) { console.error('usage: vibespace-job memory <id|name> 8G|512M|inherit'); process.exit(1); }
+      const r = await call('POST', `/api/agent/jobs/${encodeURIComponent(pos[1])}/memory`, { value: pos[2] });
+      const rc = r.memoryCap && r.memoryCap.limitMb ? ` — capped by ${capWords(r.memoryCap)} (asked ${r.memoryAskedMb ? sizeWords(r.memoryAskedMb) : 'unbounded'})` : '';
+      console.log(`memory bound: ${r.memoryMb ? sizeWords(r.memoryMb) : 'unbounded'}${rc} (${r.memorySource}) — from its next run; a parked job waits for vibespace-job start`);
       break;
     }
     case 'notify': {
