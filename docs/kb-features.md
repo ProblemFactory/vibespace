@@ -836,6 +836,10 @@ impossible rather than a review promise.
   long bound, so a Stop never answers the kept message; a message held across
   a restart and run before the chat is opened is drawn once; a message still
   riding the last tool result at Stop is settled with the window.
+  **Acceptance r8 (the same .361):** the same words held twice across a
+  restart are each drawn once, whichever runs first — a message still held is
+  never taken for part of another message's record; messages Claude ran
+  together are matched by the uuids its turn names, never by their words.
 - **Removing a queued agent-to-agent / job message gives it back.** It was
   already reported delivered, so `remove` re-reports `peer_message_result
   ok:false` with the text and sender and the delivery ladder re-stashes it for

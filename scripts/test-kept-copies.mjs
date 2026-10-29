@@ -15,10 +15,14 @@
 //     path / retireDuplicate / ws close take it with the buffer (off the loop)
 //   ⑦ A REFERENCE OPENS ONLY ITS OWN SESSION'S FILE — a forged `OTHER.img/<sha>.png` (r5's shape) and a sibling's sha ⇒
 //     the placeholder, 0 bytes of the other session's file
-//   ⑧ a batch claimed in HAND-OVER order by its witness (copyPrefixLen / claimedContent): [Y, X] under X's uuid ⇒ Y once;
+//   ⑧ a batch claimed by the stamps its init names (copyPrefixLen / claimedContent): [Y, X] under X's uuid ⇒ Y once;
 //     the same words held and sent again ⇒ the held copy keeps its own bubble
-//   THREE MUTANTS, red BY NAME (scratch copies, never src/): copyPrefixLen → 0 (the batch drawn twice), resolveRecord
-//   dropped from the store's merge (every kept picture a placeholder), dropFiles a no-op (the .img files leak).
+//   ⑨ (r8) THE POOL HOLDS ONLY FRAMES THAT RAN: a copy still held claims nothing and is claimed by nothing (the same words
+//     held twice, the later one run first ⇒ each once); a stamped copy joins only by its stamp, a stampless one (an older
+//     build) by its FULL words once it was handed — never a prefix
+//   FOUR MUTANTS, red BY NAME (scratch copies, never src/): copyPrefixLen → 0 (the batch drawn twice), resolveRecord
+//   dropped from the store's merge (every kept picture a placeholder), dropFiles a no-op (the .img files leak), every copy
+//   pooled by its words (r7's road: a still-held copy drawn twice).
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -123,16 +127,20 @@ const fr = await restart(forgedR5 + '\n' + forgedSib);
 const leaked = JSON.stringify(fr).includes(Buffer.from('OTHER-SESSION-SECRET-PICTURE').toString('base64'));
 ok(view(fr).every((v) => v.gone === 1 && v.pics === 0) && !leaked, 'a forged `OTHER.img/<sha>.png` reference AND another session\'s sha ⇒ the placeholder, 0 bytes of the other session\'s file', view(fr));
 
-console.log('⑧ a batch claimed in HAND-OVER order by its witness');
+console.log('⑧ a batch claimed by the stamps its init names');
+// THE TURN'S INIT names every stamped frame it consumed, in order — measured on 2.1.308 and 2.1.312 (two frames written
+// mid-turn, run together: init.user_message_uuids [C, D], ONE user record under D's uuid, [C\n, D])
+const initOf = (...uuids) => JSON.stringify({ type: 'system', subtype: 'init', session_id: 'cli-sess-kept', user_message_uuids: uuids });
+const handed = (...ids) => JSON.stringify({ type: 'input_handover', state: 'handed', msg_ids: ids });
 // Alt+Enter X (held), Enter Y (handed: 1), the ⚡ on X (handed: 2) — the CLI's ONE record under X's uuid is [Y, X]
 const bx = copyLine('m-x', 'u-x', [{ type: 'text', text: 'MARK-X held then bolted' }], 2), by = copyLine('m-y', 'u-y', [{ type: 'text', text: 'MARK-Y handed' }], 1);
 const cliYX = { type: 'user', uuid: 'u-x', timestamp: new Date().toISOString(), message: { role: 'user', content: [{ type: 'text', text: 'MARK-Y handed\n' }, { type: 'text', text: 'MARK-X held then bolted' }] } };
-const yx = await restart(bx + '\n' + by, { jsonl: [cliYX] });
+const yx = await restart([bx, by, initOf('u-y', 'u-x')].join('\n'), { jsonl: [cliYX] });
 ok(view(yx).length === 2 && view(yx).filter((v) => /MARK-Y/.test(v.text)).length === 1 && view(yx).find((v) => v.msgId === 'm-x')?.text === 'MARK-X held then bolted', 'arrival X, Y; hand-over Y, X ⇒ [Y, X] under X\'s uuid: Y drawn ONCE, X its own words', view(yx));
 // the same words held (Alt+Enter) and sent again (Enter, handed) — the handed one's record is its own, the held copy keeps its bubble
 const sh = copyLine('m-h', 'u-h', [{ type: 'text', text: 'same words' }], 0), ss = copyLine('m-e', 'u-e', [{ type: 'text', text: 'same words' }], 1);
 const cliE = { type: 'user', uuid: 'u-e', timestamp: new Date().toISOString(), message: { role: 'user', content: [{ type: 'text', text: 'same words' }] } };
-const same = await restart(sh + '\n' + ss, { jsonl: [cliE] });
+const same = await restart([sh, ss, initOf('u-e')].join('\n'), { jsonl: [cliE] });
 ok(view(same).length === 2 && view(same).every((v) => v.text === 'same words') && view(same).some((v) => v.msgId === 'm-h') && view(same).some((v) => v.msgId === 'm-e'), 'the same words held and sent again: the held copy (hand-over 0) never takes the handed one\'s record — two bubbles, each its own', view(same));
 // (r7) THE STAMP IS THE WITNESS: the hub restored the copy while its frame was HELD (handNo 0 — the wrapper's later number
 // never reaches the hub), the turn ended, the frame drained and the CLI wrote its record under the stamped uuid ⇒ ONE bubble
@@ -140,26 +148,68 @@ const hd = copyLine('m-hd', 'u-hd', [{ type: 'text', text: 'MARK-H held across a
 const cliHd = { type: 'user', uuid: 'u-hd', timestamp: new Date().toISOString(), message: { role: 'user', content: [{ type: 'text', text: 'MARK-H held across a restart' }] } };
 const hdv = await restart(hd, { jsonl: [cliHd] });
 ok(view(hdv).length === 1 && view(hdv)[0].msgId === 'm-hd', '(r7) a frame held at the restart, drained before the first attach: its record (the stamp) claims the copy that says 0 — ONE bubble (r6: two)', view(hdv));
-// …and two held at the restart, drained together as ONE record under the last stamp ⇒ each once
+// …and two held at the restart, both ⚡-handed after it (the copies still say 0 at the hub): ONE record under the last
+// stamp, its init naming both ⇒ each once
 const h1 = copyLine('m-h1', 'u-h1', [{ type: 'text', text: 'MARK-P first held' }], 0), h2 = copyLine('m-h2', 'u-h2', [{ type: 'text', text: 'MARK-Q second held' }], 0);
 const cliH12 = { type: 'user', uuid: 'u-h2', timestamp: new Date().toISOString(), message: { role: 'user', content: [{ type: 'text', text: 'MARK-P first held\n' }, { type: 'text', text: 'MARK-Q second held' }] } };
-const h12 = await restart(h1 + '\n' + h2, { jsonl: [cliH12] });
-ok(view(h12).length === 2 && view(h12).filter((v) => /MARK-P/.test(v.text)).length === 1 && view(h12).find((v) => v.msgId === 'm-h2')?.text === 'MARK-Q second held', '(r7) two held at the restart, drained as one batch under the last stamp: each drawn ONCE', view(h12));
+const h12 = await restart([h1, h2, handed('m-h1'), handed('m-h2'), initOf('u-h1', 'u-h2')].join('\n'), { jsonl: [cliH12] });
+ok(view(h12).length === 2 && view(h12).filter((v) => /MARK-P/.test(v.text)).length === 1 && view(h12).find((v) => v.msgId === 'm-h2')?.text === 'MARK-Q second held', '(r7→r8) two held at the restart, both handed after it, run as one batch whose init names both stamps: each drawn ONCE', view(h12));
 const bb = copyLine('m-b', 'u-b', [{ type: 'text', text: 'IMG-B with a picture' }, img('B')], 1), bc = copyLine('m-c', 'u-c', [{ type: 'text', text: 'MARK-C two' }], 2);
 const cliBC = { type: 'user', uuid: 'u-c', timestamp: new Date().toISOString(), message: { role: 'user', content: [{ type: 'text', text: 'IMG-B with a picture' }, { type: 'image', source: { type: 'base64', media_type: 'image/png', data: PNG('B') } }, { type: 'text', text: 'MARK-C two' }] } };
-const bcv = await restart(bb + '\n' + bc, { jsonl: [cliBC] });
+const bcBuf = [bb, bc, initOf('u-b', 'u-c')].join('\n');
+const bcv = await restart(bcBuf, { jsonl: [cliBC] });
 ok(view(bcv).length === 2 && view(bcv).find((v) => v.msgId === 'm-b')?.pics === 1 && view(bcv).find((v) => v.msgId === 'm-c')?.text === 'MARK-C two' && view(bcv).find((v) => v.msgId === 'm-c')?.pics === 0, 'a batch [B words + picture, C] under C\'s uuid: B once with its picture, C alone', view(bcv));
 
-console.log('THE THREE MUTANTS (scratch copies, never src/), each red BY NAME');
+console.log('⑨ (r8) the pool holds only frames that RAN — a still-held copy claims nothing and is claimed by nothing');
+// two held at the restart (both say 0): H1 «continue», H2 «continue» + a picture; the ⚡ on H2 — its record comes first
+// (its init names it alone), H1 drains at the turn end (its own init, its own record) ⇒ each ONCE (r7: H1 taken by H2's
+// leading words, then drawn again from its own record)
+const q1 = copyLine('m-q1', 'u-q1', [{ type: 'text', text: 'continue' }], 0), q2 = copyLine('m-q2', 'u-q2', [{ type: 'text', text: 'continue' }, img('P')], 0);
+const recP2 = { type: 'user', uuid: 'u-q2', timestamp: new Date().toISOString(), message: { role: 'user', content: [{ type: 'text', text: 'continue' }, { type: 'image', source: { type: 'base64', media_type: 'image/png', data: PNG('P') } }] } };
+const recP1 = { type: 'user', uuid: 'u-q1', timestamp: new Date().toISOString(), message: { role: 'user', content: [{ type: 'text', text: 'continue' }] } };
+const pBuf = [q1, q2, handed('m-q2'), initOf('u-q2')].join('\n');
+const pv = await restart(pBuf, { jsonl: [recP2, { type: 'system', subtype: 'init', session_id: 'cli-sess-kept', user_message_uuids: ['u-q1'] }, recP1] });
+ok(view(pv).length === 2 && view(pv).filter((v) => v.msgId === 'm-q1').length === 1 && view(pv).find((v) => v.msgId === 'm-q2')?.pics === 1 && view(pv).every((v) => v.msgId), 'the same words held twice, the later one run first: the still-held one is never in its pool — each drawn ONCE (r7: three bubbles)', view(pv));
+// …and with no init at all (a ring that lost it, a CLI before 2.1.307): the still-held copy is still never pooled
+const pn = await restart([q1, q2].join('\n'), { jsonl: [recP2, recP1] });
+ok(view(pn).length === 2 && view(pn).filter((v) => v.msgId === 'm-q1').length === 1, 'with no init naming the turn\'s stamps: a stamped copy is never claimed by another frame\'s words — each once', view(pn));
+// the same while H1 is STILL held (its record not yet written): H1 keeps its own bubble, its words never taken
+const ph = await restart(pBuf, { jsonl: [recP2] });
+ok(view(ph).length === 2 && view(ph).find((v) => v.msgId === 'm-q1')?.text === 'continue' && view(ph).find((v) => v.msgId === 'm-q2')?.text === 'continue', 'while H1 is still held: its bubble stands, H2\'s bubble is H2\'s words alone', view(ph));
+// THE STAMP, NOT THE WORDS: a frame that RAN (handed) whose words begin the hit's record, but the hit's init names only the
+// hit — it is not in this batch (it waits for its own record, its own stamp)
+const z1 = copyLine('m-z1', 'u-z1', [{ type: 'text', text: 'same start' }], 1), z2 = copyLine('m-z2', 'u-z2', [{ type: 'text', text: 'same start' }, { type: 'text', text: 'and more' }], 2);
+const recZ2 = { type: 'user', uuid: 'u-z2', timestamp: new Date().toISOString(), message: { role: 'user', content: [{ type: 'text', text: 'same start' }, { type: 'text', text: 'and more' }] } };
+const zv = await restart([z1, z2, handed('m-z1'), handed('m-z2'), initOf('u-z2')].join('\n'), { jsonl: [recZ2] });
+ok(view(zv).length === 2 && view(zv).find((v) => v.msgId === 'm-z1')?.text === 'same start' && view(zv).find((v) => v.msgId === 'm-z2')?.text === 'same start | and more', 'a handed frame whose words begin another\'s record, its stamp NOT named by that turn\'s init: not claimed — each its own words', view(zv));
+// THE LEGACY FALLBACK: a copy WITHOUT a stamp (an older build) is matched by its FULL words — only once it was handed
+const lg = (msgId, text) => JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'text', text }] }, msgId, _fromWebui: true, webui_copy: true, timestamp: new Date(Date.now() - 60000).toISOString() });
+const lHit = copyLine('m-lh', 'u-lh', [{ type: 'text', text: 'LEG-H the last' }], 0);
+const recL = { type: 'user', uuid: 'u-lh', timestamp: new Date().toISOString(), message: { role: 'user', content: [{ type: 'text', text: 'LEG-A legacy words\n' }, { type: 'text', text: 'LEG-H the last' }] } };
+const lv = await restart([lg('m-la', 'LEG-A legacy words'), lHit, handed('m-la')].join('\n'), { jsonl: [recL] });
+ok(view(lv).length === 2 && view(lv).find((v) => v.msgId === 'm-lh')?.text === 'LEG-H the last' && view(lv).filter((v) => /LEG-A/.test(v.text)).length === 1, 'a copy without a stamp, handed: claimed by its FULL words off the front — drawn once', view(lv));
+const lHeld = await restart([lg('m-la', 'LEG-A legacy words'), lHit].join('\n'), { jsonl: [recL] });
+ok(view(lHeld).filter((v) => v.msgId === 'm-la').length === 1 && /LEG-A/.test(view(lHeld).find((v) => v.msgId === 'm-lh')?.text || ''), 'a copy without a stamp that was never handed (still held): not claimed by its words', view(lHeld));
+const lPre = await restart([lg('m-la', 'LEG-A legacy'), lHit, handed('m-la')].join('\n'), { jsonl: [recL] });
+ok(view(lPre).filter((v) => v.msgId === 'm-la').length === 1 && view(lPre).find((v) => v.msgId === 'm-la')?.text === 'LEG-A legacy', 'a copy without a stamp whose words only BEGIN a block of the record: never a prefix — not claimed', view(lPre));
+
+console.log('THE FOUR MUTANTS (scratch copies, never src/), each red BY NAME');
 const M = mutantCopies('kept-copies', REPO);
 const mmSrc = read('src/message-manager.js');
 const PREFIX = 'function copyPrefixLen(copy, rec, off) {';
 const mmMut = M.write('src/message-manager.js', mmSrc.replace(PREFIX, PREFIX + ' return 0;'), 'prefix0');
 const MMx = require(mmMut);
 const mx = new MMx.MessageManager(ID);
-mx.convertHistory([...new SS.SessionMessages({ buffer: bb + '\n' + bc, cwd: dir, backend: 'claude', _keptFiles: await KC.preload(dir, ID, bb + '\n' + bc) }, ID, { buffersDir: dir }).raw(), cliBC]);
+mx.convertHistory([...new SS.SessionMessages({ buffer: bcBuf, cwd: dir, backend: 'claude', _keptFiles: await KC.preload(dir, ID, bcBuf) }, ID, { buffersDir: dir }).raw(), cliBC]);
 const mxv = view(mx.messages.filter((m) => m.role === 'user'));
 ok(mmSrc.includes(PREFIX) && mxv.filter((v) => /IMG-B/.test(v.text)).length === 2, 'MUTANT copyPrefixLen → 0: RED — B drawn TWICE (its own bubble + inside C\'s)', mxv);
+// r7's road: every other copy pooled, matched by its words — the still-held H1 taken by H2's leading words, then drawn again
+const POOLED = '(c.cliUuid ? named.includes(c.cliUuid) : c.ran === true)';
+const MMw = require(M.write('src/message-manager.js', mmSrc.replace(POOLED, 'true'), 'words-pool'));
+const mw = new MMw.MessageManager(ID);
+mw.convertHistory([...new SS.SessionMessages({ buffer: pBuf, cwd: dir, backend: 'claude', _keptFiles: await KC.preload(dir, ID, pBuf) }, ID, { buffersDir: dir }).raw(), recP2, { type: 'system', subtype: 'init', session_id: 'cli-sess-kept', user_message_uuids: ['u-p1'] }, recP1]);
+const mwv = view(mw.messages.filter((m) => m.role === 'user'));
+ok(mmSrc.includes(POOLED) && mwv.length === 3 && mwv.filter((v) => v.text === 'continue' && !v.pics).length === 2, 'MUTANT every copy pooled by its words (r7\'s road): RED — the still-held «continue» drawn TWICE (three bubbles for two messages)', mwv);
 const ssSrc = read('src/session-store.js');
 const RESOLVE = "parsed.push(rec && rec.webui_copy ? KC.resolveRecord(rec, kept, ";
 const ssMut = M.write('src/session-store.js', ssSrc.replace(RESOLVE, 'parsed.push(rec && false ? KC.resolveRecord(rec, kept, '), 'no-resolve');
