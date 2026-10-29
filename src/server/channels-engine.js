@@ -106,6 +106,9 @@ const { secretBox, holdsCiphertext, vaultForDir } = require('../secret-box.js');
 const VB = require('../vault-blocked.js');   // PURE: a refusal's actor name (lane vault-locked-refusal-notice)
 /** What a refresh hears while the LOCKED vault keeps its sign-in closed — a pass that began locked, or a call a lock landed under (lane lark-refresh-stall r3). */
 const VAULT_LOCKED_WORDS = 'the vault is locked — this account\'s sign-in opens after the owner unlocks it on this instance\'s page; the owner has already been told (For you names what is waiting on it)';
+// lane lark-refresh-stall r4: the pass's own landing when it began under a DEAD sign-in (no landing yet) — a refusal it meets is the
+// dead bearer's, never a landing's made meanwhile (`e.passLanding`, speakSignin, verifiedSignin)
+const PASS_BEGAN_DEAD = -1;
 const { VAULT_LOCKED: VAULT_LOCKED_CODE } = require('../key-file.js');   // lane vault-e2e-password-fix-r2: the vault's refusal code
 const { OWN_KEY, CLUSTER_PREFIX } = require('./integration-store.js');   // the two credential-key forms, spelled ONCE (the store's)
 const R = require('../integration-registry.js');   // PURE: the rows' `bindsPerAccount` + `clientFieldsOf` (the custom client's two fields)
@@ -2334,8 +2337,10 @@ function create(deps = {}) {
       let progressAt = now();    // lane R5: the bounded progress broadcast of a long (paced) pass
       let ended = null;          // the model's `end`
       let vendorOk = 0;          // lane lark-refresh-stall r2: the vendor calls of this pass that ANSWERED (a landed sign-in is verified by one)
-      // r3 (acceptance r2 C3): the landing this pass's requests use — a NEWER one landing mid-pass is verified by its own pass
-      e.passLanding = rec.signinVerifying && typeof rec.signinVerifying === 'object' ? Number(rec.signinVerifying.since) || null : null;
+      // r3 (acceptance r2 C3): the landing this pass's requests use — a NEWER one landing mid-pass is verified by its own pass.
+      // r4 (acceptance r3 C5: a pass that began while the sign-in was DEAD had no landing to name — the old bearer's 401 after
+      // a mid-flight landing turned the NEW landing red, then the forced pass retracted it): such a pass is PASS_BEGAN_DEAD
+      e.passLanding = rec.signinVerifying && typeof rec.signinVerifying === 'object' ? Number(rec.signinVerifying.since) || null : rec.signinDead ? PASS_BEGAN_DEAD : null;
       const held = { keys: [], answers: [], timer: null, at: -Infinity };   // THE VIEWS ARE PACED: the window's early keys + their answers
       const flushEarly = () => {
         if (held.timer) { clearTimeout(held.timer); held.timer = null; }
@@ -2492,14 +2497,15 @@ function create(deps = {}) {
         // failure — the same ladder as a request's (failPass: the record, the item, the red line), never swallowed; anything
         // else meets the pass's first request at the same door (accessToken). r3 (acceptance r2): it runs before the drain
         // opens, so no request is TAKEN yet — the requests filed before it are this pass's waiters and hear the dead sign-in
-        // (auth-expired by name) from this one failure; a request filed during the call stays for the next pass (Drain rule 3)
+        // (auth-expired by name) from this one failure. r4 (acceptance r3: an owner press filed WHILE the renew was in flight
+        // stayed for the next pass — that drain met the dead sign-in again, two ladder steps for one press): EVERY request
+        // filed by the failure, before the call or during it, hears it — one press, one step
         if (!backoff && connected && st && st.state === 'connected' && e.adapter.auth && typeof e.adapter.auth.renew === 'function') {
-          const waitedFor = e.dq.requests.slice();
           try { await e.adapter.auth.renew(); }
           catch (err) {
             if (caps.signinDeadOf(err instanceof ChannelError ? err : null)) {
               failure = await failPass(err);
-              for (const r of waitedFor) deliver([r.id], { ...failure, polledAt: lastPollOf(r.key) });
+              for (const r of e.dq.requests.slice()) deliver([r.id], { ...failure, polledAt: lastPollOf(r.key) });
               return { ok: false, why: failure.code, changed, results };
             }
           }
@@ -7086,7 +7092,8 @@ function create(deps = {}) {
     // a token it replaced, and `since` is never a stale landing
     const passLanding = ver && !reassert ? Number((live.get(rec.id) || {}).passLanding) || null : null;
     if (ver && passLanding && passLanding !== Number(ver.since)) {
-      log.warn(`[channels] ${rec.id}: the sign-in that landed ${new Date(passLanding).toISOString()} was refused at its first request (${cause || 'refused'}) — a newer sign-in landed ${new Date(Number(ver.since)).toISOString()} since; it is verified by its own first request`);
+      const was = passLanding === PASS_BEGAN_DEAD ? `a request of a pass that began under the dead sign-in (its bearer) was refused${caps.SIGNIN_CAUSES.includes(cause0) ? ` (${cause0})` : ''}` : `the sign-in that landed ${new Date(passLanding).toISOString()} was refused at its first request (${cause || 'refused'})`;
+      log.warn(`[channels] ${rec.id}: ${was} — a newer sign-in landed ${new Date(Number(ver.since)).toISOString()} since; it is verified by its own first request`);
       return;
     }
     // lane lark-refresh-stall R2/R4: a `refresh-lost` carries the stall the lost answer waited through — the log line, the item

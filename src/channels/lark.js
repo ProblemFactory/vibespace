@@ -1081,6 +1081,11 @@ function requiredScopesOf(msg) {
  * never aborts by itself — it DEFERS the abort past the poll phase (`setImmediate`, the check phase of the same turn), so an
  * answer already in the socket is READ first and `end()` cancels the abort; with nothing read, it fires in that same turn
  * (a loop held every turn is still bounded). A tick that finds the abort still due (a driver that turns no loop) fires it.
+ * r4 (acceptance r3: the deferral's OTHER edge — a hold that began AFTER the crossing tick, in that turn's own poll phase or
+ * in an immediate queued before `fire`, lost an answer that landed DURING it: the turn's poll had already returned, `fire`
+ * ran next): the deferred abort that finds the loop was held since the crossing tick (a gap of 1.5 ticks or more — the same
+ * measure that counts a gap as held) counts that hold and defers ONCE more, past the next turn's poll phase; the tick of that
+ * turn leaves it to the immediate. One re-defer, never a loop: a hold in the next turn too ends in that turn's check phase.
  * `end()` stops it and answers the held milliseconds it measured (the stall the words name); `windows()` answers WHERE the
  * loop was held — each late gap's own wall-clock span `{from, to}` (r3: the witness judges these, never the instant a loss is
  * recorded; at most HOLD_WINDOWS_MAX, the longest kept).
@@ -1089,7 +1094,7 @@ const LIVE_TICK_MS = 1000;
 const HOLD_WINDOWS_MAX = 32;
 function liveDeadline(boundMs, { tickMs = LIVE_TICK_MS, mono = () => performance.now(), wall = () => Date.now() } = {}) {
   const ctl = new AbortController();
-  let last = mono(), live = 0, heldMs = 0, ended = false, due = false;
+  let last = mono(), live = 0, heldMs = 0, ended = false, due = false, again = false;
   const holds = [];
   const held = (gap) => {
     const to = wall();
@@ -1097,13 +1102,18 @@ function liveDeadline(boundMs, { tickMs = LIVE_TICK_MS, mono = () => performance
     if (holds.length > HOLD_WINDOWS_MAX) holds.splice(holds.reduce((m, h, i) => (h.to - h.from < holds[m].to - holds[m].from ? i : m), 0), 1);
   };
   const step = () => { const at = mono(); const gap = at - last; last = at; if (gap >= 1.5 * tickMs) { heldMs += gap - tickMs; live += tickMs; held(gap); } else live += gap; };
-  const fire = () => {
-    if (ended) return;   // the answer was read in the poll phase — end() came first
+  const abort = () => {
     ended = true; clearInterval(timer);
     ctl.abort(new Error(`no answer in ${Math.round(live / 1000)} s of running time${heldMs >= 1000 ? ` (the loop was held ${Math.round(heldMs / 1000)} s besides)` : ''}`));
   };
+  const fire = () => {
+    if (ended) return;   // the answer was read in the poll phase — end() came first
+    // r4: held since the crossing tick (`last`) — an answer that landed during the hold is read by the next poll first
+    if (!again && mono() - last >= 1.5 * tickMs) { again = true; step(); setImmediate(fire); return; }
+    abort();
+  };
   const timer = setInterval(() => {
-    if (due) return fire();
+    if (due) { if (!again) abort(); return; }   // r4: a re-deferred abort is the immediate's (after this turn's poll)
     step();
     if (live < boundMs) return;
     due = true;
@@ -1320,11 +1330,12 @@ function create(record = {}, deps = {}) {
   }
 
   let unsaved = null;   // verify r5: {token, supersedes} — a refreshed token the store could not persist, held until the store's next chance
+  let lostUnsaved = null;   // lane lark-refresh-stall r4: {rt, fact} — a LOST answer the locked store could not record, held until the unlock
   function readToken() {
     if (!tokens) return { token: null, why: 'no token store was handed to this adapter' };
     const t = tokens.read();
-    // r3: a LOCKED vault reads no token but drops nothing — a rotated token held unsaved waits for the unlock
-    if (!t || !t.token) { if (!vaultLockedWhy(t && t.why)) unsaved = null; return { token: null, why: (t && t.why) || 'never-authenticated' }; }
+    // r3: a LOCKED vault reads no token but drops nothing — a rotated token (r4: a lost answer's fact) held unsaved waits for the unlock
+    if (!t || !t.token) { if (!vaultLockedWhy(t && t.why)) { unsaved = null; lostUnsaved = null; } return { token: null, why: (t && t.why) || 'never-authenticated' }; }
     // verify r5: a refreshed token the store could not persist stands in for the one it superseded (the vendor
     // ROTATED it — the old one is retired) until the store holds anything else (cleared, re-authorized)
     if (unsaved) { if (String(t.token.refresh_token || '') === unsaved.supersedes) return { token: unsaved.token, why: null }; unsaved = null; }
@@ -1345,10 +1356,11 @@ function create(record = {}, deps = {}) {
   async function accessToken(depth = 0) {   // verify r4 F1: `depth` bounds the re-entry (a superseded refresh re-reads ONCE)
     const cred = credential();
     if (!cred.values) throw vaultLockedWhy(cred.why) ? notConnectedError('Lark', cred.why) : new ChannelError('auth-expired', `Lark app credential missing: ${cred.why}`, { retryable: false, detail: { needsCredentials: true } });
-    const { token, why } = readToken();
+    let { token, why } = readToken();
     if (!token) throw notConnectedError('Lark', why);   // lane vault-e2e-password-fix-r2: a LOCKED vault is `vault-locked`, never "expired"
     if (token.invalidGrantAt) throw new ChannelError('auth-expired', 'Lark refresh token was refused — re-authorize', { retryable: false, detail: { cause: token.invalidGrantCause || 'refresh-refused', ...(token.invalidGrantHeldMs ? { heldMs: token.invalidGrantHeldMs } : {}), ...(token.invalidGrantHeldWhy ? { heldWhy: token.invalidGrantHeldWhy } : {}) } });   // verify r5: a dead grant is not POSTed again per request (auth.state already said needs-reauth)
     if (unsaved && unsaved.token === token) await persistToken(token, unsaved.supersedes);   // verify r5: the store's next chance at a token it could not persist
+    if (lostUnsaved) token = await writeLost(token);   // r4: the lost answer the locked store could not take — on the token before the refresh decides
     if (token.access_token && Number(token.expiresAt) > now() + REFRESH_MARGIN_MS) return token.access_token;
     if (token.access_token && Number(token.expiresAt) > now() + TENANT_MARGIN_MS && refreshPaused && refreshPaused.until > now() && refreshPaused.rt === String(token.refresh_token || '')) return token.access_token;   // lane lark-refresh-stall R3: the bearer still lives; the failed refresh of THIS token waits its pause
     if (!token.refresh_token) throw new ChannelError('auth-expired', 'Lark access token expired and no refresh token is held — re-authorize', { retryable: false, detail: { cause: 'token-expired' } });
@@ -1403,9 +1415,23 @@ function create(record = {}, deps = {}) {
     let why = held >= heldMs && held >= 1000 && typeof deps.loopWitness === 'function' ? (() => { try { return deps.loopWitness(held, e.detail.heldWindows || null) || null; } catch { return null; } })() : null;
     if (!why && heldMs > held) why = token.refreshLostHeldWhy || null;
     log.warn && log.warn(`[channels] lark: the token refresh's answer was lost after the request left (${String(e.message || '').slice(0, 200)}${heldMs >= 1000 ? `; the hub's loop was held ${Math.round(heldMs / 1000)} s while it waited${why ? ` — ${why === 'disk' ? 'slow synchronous disk calls' : why} held it` : ''}` : ''}) — the outcome is unknown (Lark may have spent the single-use refresh token); the next refresh tries it once`);
-    const cur = readToken().token;
+    const { token: cur, why: curWhy } = readToken();
+    // r4 (acceptance r3: a loss while the vault LOCKED was not recorded — after the unlock the retry's 20064 was worded
+    // `revoked-elsewhere`, the incident's own wrong words): the fact is held in memory for the token this refresh tried and
+    // written at the first read after the unlock (like a rotated token held unsaved); a restart while locked loses it
+    if (!cur && vaultLockedWhy(curWhy)) { lostUnsaved = { rt: String(token.refresh_token || ''), fact: { refreshLostAt: Number(token.refreshLostAt) || now(), refreshLostHeldMs: heldMs, ...(why ? { refreshLostHeldWhy: why } : {}) } }; return; }
     if (!cur || String(cur.refresh_token || '') !== String(token.refresh_token || '')) return;
     try { await tokens.write({ ...cur, refreshLostAt: Number(cur.refreshLostAt) || now(), refreshLostHeldMs: heldMs, ...(why ? { refreshLostHeldWhy: why } : {}) }, { expiresAt: cur.refreshExpiresAt || null, scopes: cur.scopes || [], supersedes: String(cur.refresh_token || '') }); } catch { /* the fact stays in this error's words; the next refresh decides */ }
+  }
+  /** r4: a lost answer's fact held while the vault was locked meets the token read after the unlock — written ONLY while the
+   *  store still holds the token that refresh tried (a re-authorize meanwhile drops it); the token the refresh then decides
+   *  on carries it even when the write fails (kept for the next read). */
+  async function writeLost(cur) {
+    const l = lostUnsaved;
+    if (!l || String(cur.refresh_token || '') !== l.rt || cur.invalidGrantAt) { lostUnsaved = null; return cur; }
+    const next = { ...cur, ...l.fact, refreshLostAt: Number(cur.refreshLostAt) || l.fact.refreshLostAt, refreshLostHeldMs: Math.max(Number(cur.refreshLostHeldMs) || 0, l.fact.refreshLostHeldMs) };
+    try { await tokens.write(next, { expiresAt: cur.refreshExpiresAt || null, scopes: cur.scopes || [], supersedes: l.rt }); lostUnsaved = null; } catch { /* held: the next read tries again */ }
+    return next;
   }
   async function refreshAccessToken(cred, token) {
     let d, sentAt = null;
@@ -1481,18 +1507,26 @@ function create(record = {}, deps = {}) {
     if (w && w.superseded) return null;
     return next.access_token;
   }
+  /** lane lark-refresh-stall r4 (acceptance r3: a vault locked while an ORDINARY request waited for its pace was «Lark was
+   *  disconnected» and climbed the failure ladder — the twin of r3's refresh-pace fix): every re-read reads WHY — a locked
+   *  vault is `vault-locked` by name (the engine counts no failure for it), the request not sent. */
+  function bearerRead() {
+    const { token: t, why } = readToken();
+    if (!t && vaultLockedWhy(why)) throw notConnectedError('Lark', why);
+    return t;
+  }
   /** THE BEARER AS IT IS NOW (lane R5 verify r4): the store, re-read
    *  synchronously AFTER the pace wait — a disconnect that landed meanwhile
    *  refuses the request by name (never sent with a token the owner dropped);
    *  a re-authorize's or a sibling's refresh's newer token is the one sent. */
   function bearerNow(at) {
-    const t = readToken().token;
+    const t = bearerRead();
     if (!t || !t.access_token) throw new ChannelError('auth-expired', 'Lark was disconnected while the request waited for its pace — the request was not sent', { retryable: false, detail: { tokenDropped: true } });
     return t.access_token !== at && Number(t.expiresAt) > now() ? t.access_token : at;
   }
   /** Is the token the store holds NOW past its expiry (verify r5)? A queue longer than the token's remaining life is
    *  refreshed ONCE (single-flight) before the send — never an expired bearer on the wire. */
-  const bearerExpired = () => { const t = readToken().token; return !!(t && t.access_token) && !(Number(t.expiresAt) > now()); };
+  const bearerExpired = () => { const t = bearerRead(); return !!(t && t.access_token) && !(Number(t.expiresAt) > now()); };
 
   /** `at` = the instant the request was SENT (r2: an answer read 90 min late kept `read + expires_in` — the adapter believed
    *  120 min where the vendor gave 30, 14 passes refused); a lifetime counts from the vendor's mint, never from the read. */
