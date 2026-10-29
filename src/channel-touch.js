@@ -42,23 +42,28 @@
  *    latest; else a candidate — running or lingering alike — that runs `vibespace-channels` as a COMMAND WORD
  *    (`channelsRuns` — never the name in quoted prose `--reason "… vibespace-channels read …"` / `$'…'`, a comment, a
  *    heredoc's data, blind text or another command's argument): ONE such call keeps its rows against any stranger;
- *    several, one of them a background producer, ⇒ ③ (never the latest); ② else exactly ONE candidate that could have
+ *    several, one of them a background producer, ⇒ ③ (never the latest); r6: a LINGERING call's claim is bounded by its
+ *    own run — never past the start of a LATER call of its turn that could have produced the touch (a producer that
+ *    provably ran after it; a later CLI runner wins), past it the lingering call only vetoes; ② else exactly ONE candidate that could have
  *    produced it — every running call counts, a lingering one only when it could run — when it could have run anything
  *    (`callCanRun`: a shell call not made only of RUNS_NOTHING — a script, an interpreter, a shell's script file; a
  *    helper by its TOOL NAME, HELPER_TOOLS); ③ else (a producer that could run lingering beside a foreground stranger,
  *    several running none naming it, or a lone call that runs nothing) the turn's VibeSpace NOTE row (`notes` —
  *    «VibeSpace gave the assistant its task context»), never silently on a neighbour; ④ no note in the touch's turn
  *    (`turns` — the instants turns start, `opensTurn`: the harness's own turn facts — a record that entered a running
- *    turn never starts one, nor the CLI's compaction summary; the skew window never crosses one; a call that opens
- *    its turn is inside it for the skew) ⇒ unbound, the chip still lists it. A `delivery` touch always takes ③/④.
+ *    turn never starts one, nor the CLI's compaction summary — r6: unless the harness marks it its turn's FIRST record
+ *    (`turnStart`, read first); the skew window never crosses one; a call that opens its turn and NAMES the touch's
+ *    conversation is inside it for the skew) ⇒ unbound, the chip still lists it. A `delivery` touch always takes ③/④.
  *    A call LINGERS (its work outlives its card) when the normalizer says so (`producerOf`: run_in_background, the
  *    harness backgrounded it — until the end every close road writes) or its line sends work to the background the
- *    line does not end itself (`&` with no `wait` / `kill` / killing `trap` after it, a `vibespace-job run`).
+ *    line does not end itself (r6: a job ends only by a FOREGROUND `wait` / `kill` of its pid after it — shell-words
+ *    endJobs: never a backgrounded one, a `kill -0` probe, a trap, another job's pid, one after `&&` / `||`, another
+ *    subshell's job), or starts a `vibespace-job run`.
  *    THE SCANNER (PURE src/shell-words.js `shellCommands` / `commandsRun`, imported) reads enough shell to tell a command
  *    word from prose: a shell
  *    wrapper IS its script (`bash -c`, a re-joined codex argv read whole, a heredoc / here-string / pipe it reads),
  *    wrappers and script runners (eval, watch, parallel, find -exec, `env -S`) reach their operand; a heredoc's body
- *    is read to its delimiter line (inside a `$( … )` span too); what it cannot read (shell past SCAN_MAX, an unclosed
+ *    is read to its delimiter line and never counts toward SCAN_MAX (inside a `$( … )` span too); what it cannot read (shell past SCAN_MAX, an unclosed
  *    heredoc) could run — never a run of the CLI.
  *  - `foldTouches` / `foldView`: one ROW per conversation — the ops counted
  *    (read = messages read, search = hits, reply / compose / refresh /
@@ -108,14 +113,14 @@ const CALL_KINDS = Object.freeze(['command', 'helper', 'other']);
  *  carries a `prompt` and runs nothing). */
 const HELPER_TOOLS = Object.freeze(['Agent', 'Task', 'Sub-agent']);
 /** lane touch-chip-cause r3: WHAT RUNS NOTHING ELSE — ONE table, three families: the SHELL's own builtins that run no
- *  other program (`set -e`, `[[ … ]]`, `export X=1`, `read`, `cd` …), the tools that read or write FILES and run nothing
+ *  other program (`set -e`, `[[ … ]]`, `export X=1`, `read`, `cd`, r6: `kill` — a signal, no program …), the tools that read or write FILES and run nothing
  *  (cat / grep / jq / git over files …), and the product's own STATUS CLIs (the owner's `vibespace-status working
  *  --reason …`). A shell call made only of these (or of `command -v` lookups) could not have run the channels CLI, so it
  *  is never a lone call's cause; any other word (a script, an interpreter, a shell's script file, an unknown program)
  *  could have. INERT_COMMANDS is DERIVED from it. */
 const RUNS_NOTHING = Object.freeze({
   builtins: Object.freeze([':', 'true', 'false', 'set', 'unset', 'export', 'local', 'declare', 'typeset', 'readonly', 'read', 'shift', 'let', 'cd', 'pwd',
-    'pushd', 'popd', 'dirs', 'echo', 'printf', 'test', '[', '[[', 'type', 'hash', 'umask', 'wait', 'return', 'exit', 'break', 'continue', 'shopt', 'alias',
+    'pushd', 'popd', 'dirs', 'echo', 'printf', 'test', '[', '[[', 'type', 'hash', 'umask', 'wait', 'kill', 'return', 'exit', 'break', 'continue', 'shopt', 'alias',
     'unalias', 'getopts']),
   files: Object.freeze(['sleep', 'ls', 'cat', 'head', 'tail', 'wc', 'grep', 'rg', 'jq', 'sort', 'uniq', 'cut', 'tr', 'tee', 'date', 'mkdir', 'touch', 'cp', 'mv',
     'rm', 'ln', 'stat', 'diff', 'basename', 'dirname', 'realpath', 'which', 'git']),
@@ -245,11 +250,7 @@ function upsertTouch(list, t, { max = RING_MAX } = {}) {
 // lane touch-chip-cause (the .362 train fix): THE SCANNER — where a command line runs a program, the CLI as a command word,
 // what could not be read — lives in PURE src/shell-words.js (the client's run summary reads it there and never imports
 // this module); imported here, re-exported as before
-const { SCAN_MAX, WRAPPERS, SCRIPT_RUNNERS, RUNS_A_COMMAND, shellCommands, commandsRun, cliRuns, channelsRuns } = require('./shell-words.js');
-/** r4: the commands with which a line ENDS its own background jobs — `a & b & wait`, `srv & …; kill $PID`, `trap 'kill …'
- *  EXIT`: a job the same call waits for or kills does not outlive the card */
-const REAPERS = Object.freeze(['wait', 'kill']);
-const REAP_RE = new RegExp(`(^|[\\s;&|(])(${REAPERS.join('|')})(?![\\w-])`);
+const { SCAN_MAX, WRAPPERS, SCRIPT_RUNNERS, RUNS_A_COMMAND, REAPERS, shellCommands, commandsRun, cliRuns, channelsRuns } = require('./shell-words.js');
 
 /** Does a shell call run the agent's channels CLI? (the renderer's holder gate — harness-neutral: the command TEXT, the
  *  CLI as a command word since round 2). */
@@ -258,12 +259,10 @@ function commandTouchesChannels(cmd) { return channelsRuns(cmd).length > 0; }
 /** r3: does one run (of commandsRun) run NOTHING ELSE? — a lookup (`command -v`), or a word of RUNS_NOTHING (r4: not in
  *  a form that runs a program, RUNS_A_COMMAND). */
 const inertRun = (x) => !x.execs && (!!x.lookup || INERT_COMMANDS.includes(x.base));
-/** r4: does the line itself END the background job of run `i` — a `wait` / `kill` after it, or a `trap` whose script
- *  kills or waits? */
-const reaped = (ran, i) => ran.some((y, j) => (j > i && REAPERS.includes(y.base)) || (y.base === 'trap' && REAP_RE.test(y.verb)));
 /** r3: does a command line send work to the BACKGROUND that outlives the call — a non-inert command ended by `&` (r4: a
- *  group's commands too) that the line does not end itself, or a `vibespace-job run` / `start`? */
-const backgrounds = (ran) => ran.some((x, i) => (x.bg && !inertRun(x) && !reaped(ran, i)) || (x.base === 'vibespace-job' && (x.verb === 'run' || x.verb === 'start')));
+ *  group's commands too) whose job the line does not end itself (r6: `ended` — a FOREGROUND `wait` / `kill` of that job,
+ *  shell-words endJobs), or a `vibespace-job run` / `start`? */
+const backgrounds = (ran) => ran.some((x) => (x.bg && !x.ended && !inertRun(x)) || (x.base === 'vibespace-job' && (x.verb === 'run' || x.verb === 'start')));
 
 /** lane touch-chip-cause r2: a command line every command word of which RUNS NOTHING ELSE (RUNS_NOTHING) — it could not
  *  have run the CLI. An empty line runs nothing; r3: a line with BLIND text (cut off, an unclosed heredoc) could run. */
@@ -276,11 +275,15 @@ const promptVerbs = (s) => [...s.matchAll(PROMPT_VERB_RE)].map((m) => m[1]);
 /** Does this call's command (or prompt) NAME the touch? The strongest evidence of which card a touch is. `runs` = the
  *  call's channelsRuns (the verb is read off the CLI's command word, never off prose); r3: a `helper` call's evidence is
  *  its prompt — the verb is read off the CLI's name + verb as a phrase there. */
+/** r6: does this call's text name the touch's own CONVERSATION (its key) or its proposal — never a verb? */
+function namesConv(text, t) {
+  const s = String(text || '');
+  return !!(s && t && ((t.convId && s.includes(`${t.adapterId}/${t.convId}`)) || (t.proposalId && s.includes(t.proposalId))));
+}
 function namesTouch(text, t, runs, kind) {
   const s = String(text || '');
   if (!s || !t) return false;
-  if (t.convId && s.includes(`${t.adapterId}/${t.convId}`)) return true;
-  if (t.proposalId && s.includes(t.proposalId)) return true;
+  if (namesConv(s, t)) return true;
   const verbs = kind === 'helper' ? promptVerbs(s) : (runs || channelsRuns(s)).map((r) => r.verb);
   if (t.op === 'search' && verbs.includes('search')) return true;
   if (t.op === 'compose' && verbs.includes('compose') && s.includes(t.adapterId)) return true;
@@ -340,8 +343,8 @@ function producerOf({ input = null, taskInfo = null } = {}) {
  *  unless it carries `turnStart`. */
 function opensTurn(msg, prev) {
   if (!msg) return false;
+  if (typeof msg.turnStart === 'boolean') return msg.turnStart;   // r6: the harness's own fact FIRST — a turn whose first record is the summary opens there
   if (msg.role === 'user' && isCompactSummaryText((msg.content || []).map((b) => (b && b.text) || '').join(''))) return false;   // r4: the CLI wrote it — the turn goes on
-  if (typeof msg.turnStart === 'boolean') return msg.turnStart;
   if (msg.role !== 'user' || msg.midTurn || msg.imageAttachment || MID_TURN_QUEUE.includes(msg.queueState)) return false;
   return !(prev && Number.isFinite(prev.turnIndex) && Number.isFinite(msg.turnIndex) && prev.turnIndex === msg.turnIndex);
 }
@@ -389,8 +392,9 @@ function bindToCall(touches, calls, { notes = [], turns = [], skewMs = SKEW_MS, 
   const ns = (Array.isArray(notes) ? notes : []).map((n) => ({ id: String(n && n.id), at: num(n && n.at) })).filter((n) => n.id && n.at > 0).sort((a, b) => a.at - b.at);
   const us = (Array.isArray(turns) ? turns : []).map(num).filter((v) => v > 0);
   // r3: a call never causes a touch of ANOTHER turn — a turn starts between the call's start and the touch; r4: a call that
-  // OPENS its turn (the turn's start is its own) is inside it for the skew before it too
-  const crossesTurn = (c, at) => { const lo = Math.min(c.start, at), hi = Math.max(c.start, at); return us.some((u) => u > lo && u <= hi && !(u === c.start && at < c.start)); };
+  // OPENS its turn (the turn's start is its own) is inside it for the skew before it too — r6: only a call that NAMES the
+  // touch's conversation (the previous turn's own call keeps its last touch otherwise)
+  const crossesTurn = (c, t, at) => { const lo = Math.min(c.start, at), hi = Math.max(c.start, at); return us.some((u) => u > lo && u <= hi && !(u === c.start && at < c.start && namesConv(c.text, t))); };
   const noteFor = (at) => {
     for (let k = ns.length - 1; k >= 0; k--) {
       const n = ns[k];
@@ -414,17 +418,21 @@ function bindToCall(touches, calls, { notes = [], turns = [], skewMs = SKEW_MS, 
       // the touch's own turn
       const running = [], lingering = [];
       for (const c of cs) {
-        if (crossesTurn(c, at)) continue;
+        if (crossesTurn(c, t, at)) continue;
         if (c.start - skewMs <= at && (c.stop === null || at < c.stop + skewMs)) running.push(c);
         else if (c.lingers && c.start <= at && (c.bgEnd === null || at < c.bgEnd + skewMs)) lingering.push(c);
       }
       // ① a candidate whose command (a helper: its prompt) NAMES the touch — its conversation, its proposal, its verb —
       // the latest; else a candidate that runs the CLI as a command word (a caller's kindless call: the time rules alone)
-      // — r4: running or lingering alike; ONE such call keeps its rows against any stranger, running or lingering; several,
-      // one of them a background producer (it outlives its card): by name or the note, never the latest
+      // — r4: running or lingering alike; ONE such call keeps its rows against any stranger; several, one of them a
+      // background producer (it outlives its card): by name or the note, never the latest. r6: a LINGERING call's claim is
+      // BOUNDED by its own run — never past the start of a LATER call of the turn that could have produced the touch (a
+      // producer that provably ran after it — running at the touch or not; a stranger that runs the CLI then wins); past
+      // it the lingering call only vetoes (②: it could still be running — no end seen)
       const cand = new Set([...running, ...lingering]);
-      const exact = cs.filter((c) => cand.has(c) && namesTouch(c.text, t, c.runs, c.kind));
-      const named = cs.filter((c) => cand.has(c) && callNames(c, t));
+      const claims = (c) => !lingering.includes(c) || !cs.some((p) => p !== c && p.start > c.start && p.start - skewMs <= at && !crossesTurn(p, t, at) && callCauses(p, t));
+      const exact = cs.filter((c) => cand.has(c) && claims(c) && namesTouch(c.text, t, c.runs, c.kind));
+      const named = cs.filter((c) => cand.has(c) && claims(c) && callNames(c, t));
       // ② the ONE candidate that could have produced it — every running call counts (one that runs nothing too: several
       // running ⇒ the note), a lingering call only when it could run (a helper, a script: one that runs nothing never vetoes)
       const could = [...running, ...lingering.filter(callCanRun)];
