@@ -746,9 +746,9 @@ try {
       for (const n of present) suites[n] = n === failing ? FAIL_STUB : PASS_STUB;
       return stubGateRepo(tag, { ciSource, suites, commits: 1 });
     };
-    const runFast = (s, args) => {
+    const runFast = (s, args, envExtra = {}) => {
       const r = spawnSync(process.execPath, [path.join(s.root, 'scripts', 'ci.mjs'), ...args.map((a) => a.replace('%SHA%', s.sha))],
-        { cwd: s.root, encoding: 'utf-8', env: GIT_ENV, timeout: 300000 });
+        { cwd: s.root, encoding: 'utf-8', env: { ...GIT_ENV, ...envExtra }, timeout: 300000 });
       const out = (r.stdout || '') + (r.stderr || '');
       try { spawnSync('git', ['-C', s.root, 'worktree', 'prune'], { env: GIT_ENV }); } catch { }
       try { fs.rmSync(s.root, { recursive: true, force: true }); } catch { }
@@ -778,6 +778,17 @@ try {
     const allGone = runFast(fastStub('absent-all', { ciSource: CI_SRC_A, present: [] }), ['--isolate', '--sha=%SHA%']);
     ok(allGone.status === 0 && /NO VERDICT — the fast tier could not gate/.test(allGone.out) && !/ALL GREEN/.test(allGone.out),
       `a commit containing NONE of the suites gets NO VERDICT, never a vacuous ALL GREEN — and is not blocked (exit ${allGone.status})`);
+    // (lane claude-steer-inject r7c) …and so under VS_NO_REAL_CLI=1, which every acceptance / integration run sets: the
+    // by-name skip of the real-turn row applies only to a suite PRESENT at the commit (r6 skipped it before the absence
+    // check, so an all-absent commit counted one skip and claimed ALL GREEN) — and a skip by name never counts as a run
+    const allGoneNoCli = runFast(fastStub('absent-all-nocli', { ciSource: CI_SRC_A, present: [] }), ['--isolate', '--sha=%SHA%'], { VS_NO_REAL_CLI: '1' });
+    ok(allGoneNoCli.status === 0 && /NO VERDICT — the fast tier could not gate[^\n]*none of its/.test(allGoneNoCli.out) && !/ALL GREEN/.test(allGoneNoCli.out) && !/○ SKIPPED test-chat-e2e/.test(allGoneNoCli.out),
+      `(r7c) under VS_NO_REAL_CLI=1 a commit containing NONE of the suites is still NO VERDICT — the absent real-turn row stays absent, never a by-name skip (exit ${allGoneNoCli.status})`);
+    if (fastNames.includes('test-chat-e2e')) {
+      const onlyE2e = runFast(fastStub('only-e2e-nocli', { ciSource: CI_SRC_A, present: ['test-chat-e2e'] }), ['--isolate', '--sha=%SHA%'], { VS_NO_REAL_CLI: '1' });
+      ok(onlyE2e.status === 0 && /○ SKIPPED test-chat-e2e — VS_NO_REAL_CLI=1/.test(onlyE2e.out) && /NO VERDICT — [^\n]*SKIPPED by name/.test(onlyE2e.out) && !/ALL GREEN/.test(onlyE2e.out),
+        `(r7c) …and a commit whose ONLY present suite is the real-turn row, skipped by name: nothing ran ⇒ NO VERDICT, never «ALL GREEN — 1 of N ran» (exit ${onlyE2e.status})`);
+    }
     // NEGATIVE CONTROL: the real module with the existence check removed.
     const NEUTER_A = ["  if (absentIsSkip && !fs.existsSync(path.join(root, 'scripts', s.name + '.mjs'))) {",
       '  if (false) {'];

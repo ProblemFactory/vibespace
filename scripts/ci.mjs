@@ -3158,7 +3158,7 @@ async function fastGate({ sha: wantSha, isolate } = {}) {
     if (!runBuild({ cwd: runRoot }).ok) { console.error('\n✗ build FAILED — release gate is RED, do not push\n'); return 1; }
     if (!runSecretScan({ cwd: runRoot, sha }).ok) { console.error('\n✗ secret-scan RED — release gate is RED, do not push (GitHub push protection refuses these shapes: build token shapes at runtime by concatenation)\n'); return 1; }
     console.log(`[ci] ${lanes} parallel lane(s) over ${plan.parallel.length} suites (longest first), then 1 serial lane over ${plan.serial.length}: ${plan.serial.map((s) => s.name).join(', ')}`);
-    const absent = [], timings = [];
+    const absent = [], timings = [], skippedByName = [];
     let red = null;
     const dirPace = dirSweepPacer();
     const hangDir = path.join(markerDir(), 'fail-logs'); // a timed-out suite's hang report (the heavy tier's fail-log dir; ci-hang-report)
@@ -3167,8 +3167,11 @@ async function fastGate({ sha: wantSha, isolate } = {}) {
         if (red) break;
         const s = queue.shift();
         if (!s) break;
-        // VS_NO_REAL_CLI=1 (r6, §ban-safety): the real-turn row is not started at all — SKIPPED by name (the wire leg skips inside its suite)
-        if (s.name === 'test-chat-e2e' && process.env.VS_NO_REAL_CLI === '1') { console.log(`  ○ SKIPPED ${s.name} — VS_NO_REAL_CLI=1 (the one real turn)`); continue; }
+        // VS_NO_REAL_CLI=1 (r6, §ban-safety): the real-turn row is not started at all — SKIPPED by name (the wire leg skips inside its suite).
+        // Only a suite PRESENT in the tree being gated (r7c): an absent one stays ABSENT, so a commit that contains none of
+        // the suites still gets NO VERDICT (the .362 train: under VS_NO_REAL_CLI=1 an all-absent stub counted one skip and
+        // claimed ALL GREEN). A by-name skip ran nothing either: it never counts as a suite that ran.
+        if (s.name === 'test-chat-e2e' && process.env.VS_NO_REAL_CLI === '1' && fs.existsSync(path.join(runRoot, 'scripts', s.name + '.mjs'))) { skippedByName.push(s.name); console.log(`  ○ SKIPPED ${s.name} — VS_NO_REAL_CLI=1 (the one real turn)`); continue; }
         const r = await runSuiteAsync(s, { root: runRoot, absentIsSkip: !!isolate, sha, lane, inflight, hang: { dir: hangDir, attempt: 1 } });
         if (red) r.lines = [`  · ${s.name} stopped [lane ${lane}] — ${red} is red`];   // SIGTERMed by another lane's red: not a verdict
         console.log(r.lines.join('\n'));
@@ -3205,10 +3208,14 @@ async function fastGate({ sha: wantSha, isolate } = {}) {
       console.log(`\nNO VERDICT — the fast tier could not gate ${shortSha(sha)}: none of its ${fast.length} suites exist at that commit (an old tag, or a commit that predates them). Nothing ran, so nothing is claimed; the push is not blocked by an absence.`);
       return 0;
     }
+    if (absent.length + skippedByName.length === fast.length) {
+      console.log(`\nNO VERDICT — the fast tier could not gate ${shortSha(sha)}: ${absent.length} of its ${fast.length} suites do not exist at that commit and the rest (${skippedByName.join(', ')}) were SKIPPED by name. Nothing ran, so nothing is claimed; the push is not blocked by an absence.`);
+      return 0;
+    }
     const sum = timings.reduce((n, t) => n + t.ms, 0);
     console.log(`[ci] lanes: ${lanes} parallel (${Math.round(parMs / 1000)}s) + serial (${Math.round((Date.now() - tPar - parMs) / 1000)}s); suites summed ${Math.round(sum / 1000)}s = what a sequential tier would have taken`);
     for (const line of fastTimingReport(timings)) console.log(line);
-    const ran = fast.length - absent.length;
+    const ran = fast.length - absent.length - skippedByName.length;
     const subject = isolate ? `for ${shortSha(sha)} (isolated worktree at the commit being pushed)` : '(this working tree)';
     console.log(`\nALL GREEN — fast gate passed in ${Math.round((Date.now() - t0) / 1000)}s ${subject}${absent.length ? ` — ${ran} of ${fast.length} suites ran; ${absent.length} not present at that commit` : ''}`);
     if (absent.length) console.log(`[ci] SKIPPED (absent at ${shortSha(sha)}, not run and not judged): ${absent.join(', ')}`);
