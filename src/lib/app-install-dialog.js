@@ -422,7 +422,7 @@ export function openAppSearch(app, m, { onDone = null } = {}) {
 /** "Install from a .deb file…" (owner D4) — a .deb ON THAT MACHINE by its path: THE plan (dpkg-deb -I + the
  *  simulation), the same approval, and the file copied into the machine's package cache with its sha256. */
 export function openDebInstall(app, m, { onDone = null, path = '' } = {}) {
-  const { body, close, raised, ready } = createModalShell({ id: 'app-deb-dialog', key: m.hostId, title: t('Install a .deb file on {machine}', { machine: machineInSentence(m) }), dialogClass: 'desktop-install app-deb', escapeToClose: true, kind: 'form' });
+  const { body, close, raised, ready } = createModalShell({ id: 'app-deb-dialog', key: `${m.hostId}:${path || ''}`, title: t('Install a .deb file on {machine}', { machine: machineInSentence(m) }), dialogClass: 'desktop-install app-deb', escapeToClose: true, kind: 'form' });
   if (raised) return null;   // raised: the same subject's form, as it was
   body.appendChild(el('p', 'app-search-intro', t('The .deb file’s full path on {machine} — in Files, right-click a .deb file and choose “Install this package…”, or type its path. Its plan shows what it installs and whether it runs its own install scripts.', { machine: machineInSentence(m) })));
   const form = el('form', 'app-search-form');
@@ -474,7 +474,7 @@ export function openSourceDialog(app, m, { onDone = null } = {}) {
  *  composes it) and it is named by those words.
  *  It can only PROPOSE; the user approves in For you or here. It is marked as a helper (not a standing conversation). */
 export function openAgentHelp(app, m, { request: carried = '' } = {}) {
-  const { body, close, raised, ready } = createModalShell({ id: 'app-help-dialog', key: m.hostId, title: t('Let an agent help install an app'), dialogClass: 'desktop-install app-help', escapeToClose: true, kind: 'form' });
+  const { body, close, raised, ready } = createModalShell({ id: 'app-help-dialog', key: `${m.hostId}:${carried || ''}`, title: t('Let an agent help install an app'), dialogClass: 'desktop-install app-help', escapeToClose: true, kind: 'form' });
   if (raised) return null;   // raised: the same subject's form, as it was
   body.appendChild(el('p', 'app-search-intro', t('Starts a temporary helper conversation that knows how to install apps on {machine}. It can only propose an install — you approve it in For you. Close it when it says done.', { machine: machineInSentence(m) })));
   const form = el('form', 'app-search-form');

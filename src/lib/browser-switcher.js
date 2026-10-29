@@ -53,8 +53,9 @@ export function openBrowserSwitcher(app, { profileId, sessionId = null, preselec
   const st = { view: null, error: null, gen: 0, closed: false, pending: null, timer: null, entries: new Map(), warned: new Set() };
   const onGlobal = (m) => { if (m && m.type === 'browser-profiles-updated' && !st.closed) schedule(); };
   // lane dialog-yield r3: the switcher's subject is its PROFILE (the title says «Browser» for every one) — pB after pA closes pA
-  // through its door and draws pB; pA again raises the open one (its handle comes back, its one broadcast handler kept)
-  const shell = createModalShell({ id: 'browser-switcher-dialog', key: profileId, title: t('Browser'), dialogClass: 'browser-switcher', bodyClass: 'brsw-body', escapeToClose: true,
+  // through its door and draws pB; pA again raises the open one (its handle comes back, its one broadcast handler kept). r5: and the
+  // CONVERSATION it was asked from — its switch is told to that one (two conversations' switchers for one profile are two subjects)
+  const shell = createModalShell({ id: 'browser-switcher-dialog', key: `${profileId}:${sessionId || ''}`, title: t('Browser'), dialogClass: 'browser-switcher', bodyClass: 'brsw-body', escapeToClose: true,
     onClose: () => { st.closed = true; if (st.timer) clearTimeout(st.timer); try { app.ws?.offGlobal?.(onGlobal); } catch { /* optional */ } }, kind: 'form' });
   if (shell.raised) return shell.overlay._switcher || shell;
   const { dialog, body, close } = shell;

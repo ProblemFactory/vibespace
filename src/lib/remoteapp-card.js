@@ -52,7 +52,7 @@ export function remoteappCardRefusal(r, machine) {
 export function openRemoteappSettings(app, m) {
   const machine = m.name || m.hostId;
   const host = encodeURIComponent(m.hostId);
-  const { body, close, raised, live } = createModalShell({ id: 'remoteapp-settings', key: m && m.hostId, title: t('RemoteApp settings — {machine}', { machine }), dialogClass: 'remoteapp-settings', escapeToClose: true, kind: 'form' });
+  const { body, close, raised, live, ready } = createModalShell({ id: 'remoteapp-settings', key: m && m.hostId, title: t('RemoteApp settings — {machine}', { machine }), dialogClass: 'remoteapp-settings', escapeToClose: true, kind: 'form' });
   if (raised) return null;   // raised: the same subject's form, as it was
   const lead = el('p', 'ra-lead', t('Open {machine}’s apps as their own windows through Remote Desktop. Set it up once here.', { machine }));
   const factsHead = el('div', 'ra-head', t('What {machine} needs', { machine }));
@@ -160,6 +160,6 @@ export function openRemoteappSettings(app, m) {
   }
   fp.i.onkeydown = (e) => { if (enterSubmits(e)) { e.preventDefault(); doSave(); } }; // the IME guard: a composing Enter is the IME's
   drawFacts(); tech();
-  loadSetup(); loadFacts();
+  ready.then((s) => { if (s) { loadSetup(); loadFacts(); } });   // lane dialog-yield r5: QUEUED behind another machine's ask, it reads when it opens
   return { close };
 }

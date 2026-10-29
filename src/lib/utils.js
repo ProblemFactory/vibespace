@@ -91,6 +91,16 @@ export function announceModal(overlay) {
 //     dropped. A detached body's isConnected is no liveness check: «Models — B» read itself closed during the ask and
 //     opened on «Loading…» for ever (§103 reds an isConnected read on the shell's own elements, and a queueable caller that
 //     never reads `ready`).
+// Round 5 (acceptance r4):
+//   • A QUEUED FORM IS ANSWERED ON EVERY ROAD: the open form ended by its caller's `overlay.remove()` (the documented close)
+//     releases the one waiting behind its ask — it opens (`ready` → the shell); every end has a NAME (`endedBy`: 'closed',
+//     'removed', 'window', 'kept' — the person kept the form it waited for — or 'replaced' — a third ask took its place). On
+//     37c1b566 B's ready hung for ever and asking B again was a silent no-op.
+//   • THE QUESTION A DOOR ASKS IS SEEN: a person's ask that needs the open form's «unsaved changes» answer RAISES that form
+//     first (another desktop: switched to, said in a toast); the system's pulses its tile. 37c1b566 drew the question under
+//     the window the person was in — a hang nobody could see.
+//   • `active()` = open and the person's active window (a reopen stands where the old form stood); `hold(on)` = undismissable
+//     while it runs (a running install's log is never closed by the person's next app request: that one opens beside it).
 // The shape returned is the same: `overlay` = the root holding the id (a form's: .dialog-form inside its window, whose
 // .remove() closes the window — a caller's overlay.remove() keeps working).
 let formHost = null, formTitleSeq = 0, formIdSeq = 0, freshSeq = 0;
@@ -129,6 +139,7 @@ export function createModalShell(opts = {}) {
     if (verdict === 'raise') return fam[at].raise({ opener: opener === 'system' ? 'system' : 'person', onClose: opts.onClose });
     if (verdict === 'door') {
       const sh = fam[at];
+      if (sh.asks()) sh.raise({ opener: opener === 'system' ? 'system' : 'person' });   // r5: its question is SEEN — in front for the person's ask (switched to, said), the tile pulsing for the system's
       sh.door();
       if (sh.live()) { const q = buildShell({ ...opts, id: sh.domId, base, from }, true); sh.queue(q); return q.api; }   // asked: it opens in that one's place when its door closes it
     }
@@ -164,19 +175,28 @@ function buildShell({ kind, id, base = null, key = null, title = '', dialogClass
   pageKeysScroll(overlay, dialog); // lane door-healthy-chat: PageUp / PageDown move the dialog's scroll region
   let unbindEscape = null;
   let gone = false;   // a form ends ONCE: its own close, or its window closed by any other door (the ✕, a desktop's close)
-  let mounted = false, queued = null, settle = null;
+  let mounted = false, queued = null, settle = null, endedBy = null, held = false;
   const ready = new Promise((r) => { settle = r; });
   const closers = [onClose];   // + the onClose of every re-open that RAISED this form: released when it ends
-  const ended = () => { if (gone) return false; gone = true; unbindEscape?.(); return true; };
+  /** it ends ONCE, with its NAME (r5): 'closed' · 'removed' (its caller's overlay.remove()) · 'window' (its window closed by another door) · 'kept' / 'replaced' (queued, never opened) */
+  const ended = (why) => { if (gone) return false; gone = true; endedBy = why; unbindEscape?.(); return true; };
+  const detach = () => { try { Element.prototype.remove.call(overlay); } catch { /* already out */ } };
+  /** what waits on it is answered: its own `ready` (null when it never opened) and the form queued behind its ask (it opens) */
+  const release = () => { if (!mounted) settle(null); const q = queued; queued = null; if (q) q.go(); };
   const runClose = () => {
     for (const fn of closers) { try { fn?.(); } catch (e) { console.warn('[createModalShell] onClose:', e); } }
-    if (!mounted) settle(null);
-    const q = queued; queued = null; if (q) q.go();   // the form the person asked for while this one's door asked
+    release();   // the form the person asked for while this one's door asked
   };
   const close = hosted
-    ? () => { if (!ended()) return; if (fh) fh.close(); runClose(); }
-    : () => { if (mounted) { unbindEscape?.(); overlay.remove(); } else if (!ended()) return; gone = true; runClose(); };
-  const dropQueued = () => { const q = queued; queued = null; if (q) q.drop(); };   // the person kept this one: the asked form never opens — said (its onClose, ready null)
+    ? () => { if (!ended('closed')) return; if (fh) fh.close(); runClose(); }
+    : () => { if (!ended('closed')) return; if (mounted) detach(); runClose(); };
+  // THE CALLER'S overlay.remove() is a door too (r5): it closes the form WITHOUT onClose — as a decision's bare remove (refresh-live:
+  // remove, then finish(r)) — and answers what waits on it (37c1b566: the queued form's ready hung for ever, asked again: a no-op)
+  overlay.remove = () => {
+    if (hosted || !mounted) { if (ended('removed')) { if (fh) fh.close(); release(); } return; }   // a form (or one still queued): it ends here
+    detach(); if (!gone && !endedBy) { endedBy = 'removed'; release(); }   // a sheet, as before (a later close() still runs its onClose) — what waits on it is answered
+  };
+  const dropQueued = () => { const q = queued; queued = null; if (q) q.drop('kept'); };   // the person kept this one: the asked form never opens — said (its onClose, ready null, endedBy 'kept')
   const guard = unsaved && typeof unsaved === 'object' ? unsavedGuard({ overlay, dialog, body, unsaved, close, onKept: dropQueued }) : null;
   const dismiss = guard ? guard.dismiss : close;   // the person's own ✕ / Escape / backdrop — asks first when dirty
   // an unguarded FORM: what the person typed is watched, and an Escape (or another form under its id) asks before it goes
@@ -204,7 +224,6 @@ function buildShell({ kind, id, base = null, key = null, title = '', dialogClass
       if (escDoor(e) === 'none') return;
       e.preventDefault(); e.stopPropagation();
     });
-    overlay.remove = () => { if (ended()) { if (fh) fh.close(); if (!mounted) settle(null); } };   // a caller's overlay.remove() closes the form — WITHOUT onClose, as a decision's bare remove (refresh-live: remove, then finish(r))
   } else if (escapeToClose) {
     overlay.tabIndex = -1;
     overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); escDoor(e); } });
@@ -235,6 +254,12 @@ function buildShell({ kind, id, base = null, key = null, title = '', dialogClass
     /** THE liveness predicate (round 4): true while it is open or QUEUED (its detached body is no «closed» — never read
      *  isConnected on the shell's own elements), false once it ended or the person kept the form it waited for */
     live: () => live(),
+    /** r5: open AND the person's active window (a sheet: the screen's) — a reopen stands where the old form stood */
+    active: () => live() && mounted && (fh ? fh.active() : true),
+    /** r5: while it runs, a neighbour never closes it (undismissable — the next subject opens BESIDE it); hold(false) when done */
+    hold: (on = true) => { held = !!on; },
+    /** r5: why it ended — null while live; 'closed' · 'removed' · 'window' · 'kept' · 'replaced' */
+    get endedBy() { return endedBy; },
     /** where it landed: 'front' | 'behind' | 'sheet' (null while queued) — a caller's «busy» latch clears unless 'front' / 'sheet' */
     get placed() { return !mounted ? null : fh ? fh.placed() : 'sheet'; },
   };
@@ -248,7 +273,7 @@ function buildShell({ kind, id, base = null, key = null, title = '', dialogClass
     else { overlay.className = 'dialog-overlay'; overlay.style.zIndex = '99998'; document.body.appendChild(overlay); }
     announceModal(overlay); // lane dialog-keys: in the opening act's own task, before the caller focuses anything in it
     if (fh) {
-      fh.bind({ dismiss: (how) => dismiss(how), closed: () => { if (ended()) runClose(); } });
+      fh.bind({ dismiss: (how) => dismiss(how), closed: () => { if (ended('window')) runClose(); } });
       setTimeout(() => { try { if (fh.active() && overlay.isConnected && !overlay.contains(document.activeElement)) overlay.focus({ preventScroll: true }); } catch { /* focus is a courtesy */ } }, 0);
     } else if (escapeToClose) setTimeout(() => { if (!overlay.contains(document.activeElement)) overlay.focus(); }, 0);   // (never from the dialog's own field — lane dialog-yield r2: the mounts key step focuses its passphrase box)
     settle(api);
@@ -256,8 +281,10 @@ function buildShell({ kind, id, base = null, key = null, title = '', dialogClass
   // what a second open of this id finds: the same KEY is raised, another one asks this one's door first (round 3)
   overlay._shell = {
     kind, key, title, base, domId: id, overlay,
-    undismissable: kind === 'form' && undismissableVerdict({ undismissable, escapeToClose: !!escapeToClose, closeOnBackdrop, onEscape: typeof onEscape === 'function' }),
+    get undismissable() { return kind === 'form' && (held || undismissableVerdict({ undismissable, escapeToClose: !!escapeToClose, closeOnBackdrop, onEscape: typeof onEscape === 'function' })); },
     live,
+    /** r5: its door will ASK (an unsaved guard / typed words that are dirty) — the opener raises it first so the question is seen */
+    asks: () => mounted && !gone && (guard ? guard.isDirty() : !!typed && typed.dirty()),
     raise: ({ opener: by = 'person', onClose: also = null } = {}) => {
       if (also) closers.push(also);
       if (!mounted) return { ...api, raised: true };   // the same subject is QUEUED already: the same wait (asked, its ready)
@@ -266,14 +293,14 @@ function buildShell({ kind, id, base = null, key = null, title = '', dialogClass
       return { ...api, raised: true, asked: false, ready: Promise.resolve(api) };
     },
     door: () => { if (guard) guard.dismiss(); else if (typed && typed.dirty()) softAsk(); else close(); },
-    queue: (q) => { if (queued) queued.drop(); queued = q; },
+    queue: (q) => { if (queued) queued.drop('replaced'); queued = q; },
   };
   if (base) families.set(base, [...(families.get(base) || []), overlay._shell]);   // found by its key from now on — beside or queued too
   if (!deferred) mount();
   return {
     api,
     go: mount,
-    drop: () => { if (gone) return; gone = true; unbindEscape?.(); runClose(); },
+    drop: (why = 'kept') => { if (!ended(why)) return; runClose(); },
   };
 }
 /** THE PAGE KEYS SCROLL A DIALOG (lane door-healthy-chat, 2.369.344 — the naive studies' B3: «the Who can use… dialog and

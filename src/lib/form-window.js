@@ -220,13 +220,16 @@ export function installFormHost(app) {
         bind(hooks) {
           bound = hooks;
           // FOCUS IS THE PERSON'S: no script focus enters a form standing behind; a Tab the person pressed raises it
+          let refusing = false;   // r5: BOUNDED — the guard's own focus() never re-enters it
           root.addEventListener('focusin', (e) => {
             if (e.target !== root) lastFocus = e.target;
-            const v = formFocusVerdict({ active: mode === 'sheet' || (!!win && wm.activeWindowId === win.id), byKeyboard: Date.now() - lastTabAt < 400 });
+            if (refusing) return;
+            const back = e.relatedTarget;
+            const v = formFocusVerdict({ active: mode === 'sheet' || (!!win && wm.activeWindowId === win.id), byKeyboard: Date.now() - lastTabAt < 400, within: !!back && root.contains(back) });
             if (v === 'allow') return;
             if (v === 'raise') { wm.revealWindow(win.id); return; } // the person tabbed into it: named by the person (§62's door)
-            const back = e.relatedTarget;
-            try { if (back && back.isConnected && back.focus) back.focus({ preventScroll: true }); else e.target.blur?.(); } catch { }
+            refusing = true;
+            try { if (back && back.isConnected && back.focus) back.focus({ preventScroll: true }); else e.target.blur?.(); } catch { } finally { refusing = false; }
           });
           watchWindow();
         },

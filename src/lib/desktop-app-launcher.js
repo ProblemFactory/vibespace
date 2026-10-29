@@ -649,7 +649,7 @@ export async function showInstallDialog(m, { what = 'xpra', onDone = null, reque
   const spec = xp || isApp || tv || vm ? null : installSpecFor(what);
   const appLabel = spec ? spec.label : 'LibreOffice';
   const name = xp ? machineName(m) : machineInSentence(m); // xpra's words exactly as before; a LibreOffice install names the machine inside its sentences
-  const { body: ib, close: iclose, raised } = createModalShell({ id: 'desktop-install-dialog', key: installSubjectKey(m, { what, request, proposalId }), title: vm ? (vmRemove ? t('Remove the virtual microphone from {machine}', { machine: name }) : t('Install a virtual microphone on {machine}', { machine: name })) : tv ? t('Install TightVNC Server on {machine}', { machine: name }) : isApp ? appDialogTitle(request || { kind: 'apt', packages: [] }, name) : xp ? t('Install xpra on {machine}', { machine: name }) : what === FONTS_ID ? t('Install the Calibri / Cambria look-alike fonts on {machine}', { machine: name }) : t('Install LibreOffice on {machine}', { machine: name }), dialogClass: 'desktop-install', escapeToClose: true, kind: 'form' });
+  const { body: ib, close: iclose, raised, hold } = createModalShell({ id: 'desktop-install-dialog', key: installSubjectKey(m, { what, request, proposalId }), title: vm ? (vmRemove ? t('Remove the virtual microphone from {machine}', { machine: name }) : t('Install a virtual microphone on {machine}', { machine: name })) : tv ? t('Install TightVNC Server on {machine}', { machine: name }) : isApp ? appDialogTitle(request || { kind: 'apt', packages: [] }, name) : xp ? t('Install xpra on {machine}', { machine: name }) : what === FONTS_ID ? t('Install the Calibri / Cambria look-alike fonts on {machine}', { machine: name }) : t('Install LibreOffice on {machine}', { machine: name }), dialogClass: 'desktop-install', escapeToClose: true, kind: 'form' });
   if (raised) return;   // raised: the same subject's form, as it was
   ib.classList.add('desktop-install-body');
   if (isApp) ib.classList.add('desktop-install-app');
@@ -721,7 +721,10 @@ export async function showInstallDialog(m, { what = 'xpra', onDone = null, reque
     catch (e) { note.textContent = t('Could not start the install: {why}', { why: e.message }); note.classList.add('is-bad'); goBtn.disabled = false; return; }
     if (!res.ok || !res.body) { let j = null; try { j = await res.json(); } catch { j = null; } note.textContent = (j && ((isApp ? appRefusalText(j.code) : vm ? micInstallRefusalText(j.code, !!plan.adminDialog) : installRefusalText(j.code, what)) || j.error)) || t('Could not start the install'); note.classList.add('is-bad'); goBtn.disabled = false; return; }
     const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = ''; let end = null;
-    for (;;) {
+    // lane dialog-yield r5: A RUNNING INSTALL IS NEVER CLOSED BY A NEIGHBOUR — while its log streams, the person's next app request on
+    // this machine opens BESIDE it (37c1b566: Remove… on inkscape closed the running gimp install's window, its log gone mid-run)
+    hold(true);
+    try { for (;;) {
       const { value, done } = await reader.read();
       if (done) break;
       buf += dec.decode(value, { stream: true });
@@ -733,7 +736,7 @@ export async function showInstallDialog(m, { what = 'xpra', onDone = null, reque
         if (o.log != null && !(isApp && /^= (run|ok)\b/.test(o.log))) { log.textContent += o.log + '\n'; log.scrollTop = log.scrollHeight; } // design 009 B (review I13): the slot's own `= run …` / `= ok` markers are not the user's words
         if (o.done || o.error) end = o;
       }
-    }
+    } } finally { hold(false); }
     if (end && end.done && isApp) { note.textContent = appDoneText(end, installPlaceOf(m)); note.classList.remove('is-bad'); showToast(appDoneText(end, installPlaceOf(m))); goBtn.style.display = 'none'; onDone?.(end); }
     else if (end && end.done && vm) { const w = vmRemove ? t('The virtual microphone is removed from {machine}', { machine: installPlaceOf(m) }) : t('{app} is installed on {machine}', { app: end.label || plan.label || '', machine: installPlaceOf(m) }) + (end.defaultsKept ? ` · ${t('Kept your default speaker and microphone')}` : ''); note.textContent = w; showToast(w); goBtn.style.display = 'none'; onDone?.(end); } // lane stream-mic-road
     else if (end && end.done && xp) { note.textContent = t('xpra {version} is installed on {machine}', { version: end.installed || '', machine: name }); showToast(t('xpra is installed on {machine}', { machine: name })); onDone?.(); }

@@ -11489,4 +11489,6 @@ export default {
   "Each keeps its long-lived token in its folder, and a conversation started on it directly keeps working; the pool names it in its notices with this reason.": "各アカウントの長期トークンはそのフォルダーに残り、そのアカウントで直接始めた会話はそのまま動きます。プールの通知はこの理由とともにそのアカウントを名指しします。",
   "To use one in the pool now, re-login it in Manage Agents. This item resolves itself once CLI {v} is measured.": "今すぐプールで使うには、「エージェントを管理」で再ログインしてください。CLI {v} の測定が終わると、この項目は自動で解決します。",
   "Long-lived token in its folder: claude {cli} prints no quota lines for it — refreshes when a session uses it": "長期トークンはフォルダー内にあります：claude {cli} はこれについて使用量を表示しません——セッションが使ったときに更新されます",
+  "The field this picker was for is gone — the picker closed and nothing was written": "このピッカーの入力欄はもうありません — ピッカーを閉じました。何も書き込まれていません",
+  "The row {path} is gone — {picked} was not written": "「{path}」の行はもうありません — {picked} は書き込まれていません",
 };

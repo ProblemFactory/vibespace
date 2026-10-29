@@ -889,7 +889,7 @@ function installedList(m, { onPick }) {
 export function showMachineDesktopDialog(app, m0, { install = null, recheck = null, closeOpener = null } = {}) {
   let m = m0;
   const machine = nameOf(m);
-  const { body, close: closeDialog, raised, live } = createModalShell({ id: 'machine-desktop-dialog', key: m0 && (m0.hostId || m0.id), title: t('{machine} — its desktop', { machine }), dialogClass: 'machine-desktop-dialog', escapeToClose: true, kind: 'form' });
+  const { body, close: closeDialog, raised, live, ready } = createModalShell({ id: 'machine-desktop-dialog', key: m0 && (m0.hostId || m0.id), title: t('{machine} — its desktop', { machine }), dialogClass: 'machine-desktop-dialog', escapeToClose: true, kind: 'form' });
   if (raised) return null;   // raised: the same subject's form, as it was
   // inc-mv51w0ow-crw3 (owner: "选择打开桌面之后不会自动关闭无关对话框直接展示桌面连接窗口"): a press that opens a window closes
   // this dialog AND the one it was opened from (the Apps dialog, `closeOpener`) — the window is what the person asked to see
@@ -998,7 +998,7 @@ export function showMachineDesktopDialog(app, m0, { install = null, recheck = nu
   }
   input.onkeydown = (e) => { if (enterSubmits(e)) { e.preventDefault(); run({ window: asWindow() }); } };
   render();
-  listApps(false);
+  ready.then((s) => { if (s) listApps(false); });   // lane dialog-yield r5: QUEUED behind another machine's ask, it lists when it opens (§103: a loader the body calls is work after the open)
   readSignin();
   if (mic && m.code !== 'offline') mic.refresh();
   // lane desktop-picker-instant: a listing that landed elsewhere (the machine's hello, another window's Check again) is announced —

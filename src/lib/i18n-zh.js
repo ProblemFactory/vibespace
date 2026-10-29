@@ -11490,4 +11490,6 @@ export default {
   "Each keeps its long-lived token in its folder, and a conversation started on it directly keeps working; the pool names it in its notices with this reason.": "每个账号的长期 token 都留在它的文件夹里，直接在它上面开的对话照常工作；账号池的通知会点名它并说明这个原因。",
   "To use one in the pool now, re-login it in Manage Agents. This item resolves itself once CLI {v} is measured.": "想现在就让它进入账号池，请在「管理 agent」里重新登录。CLI {v} 测量完成后，这一项会自动消失。",
   "Long-lived token in its folder: claude {cli} prints no quota lines for it — refreshes when a session uses it": "长期 token 在它的文件夹里：claude {cli} 不会为它显示额度——有会话用到它时才会刷新",
+  "The field this picker was for is gone — the picker closed and nothing was written": "这个选择器所属的输入框已不存在——选择器已关闭，没有写入任何内容",
+  "The row {path} is gone — {picked} was not written": "「{path}」这一行已不存在——没有写入 {picked}",
 };

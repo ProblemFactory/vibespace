@@ -76,7 +76,7 @@ export function commentSentText(r) {
 
 /** The publish dialog (the explorer's twin): title + public → POST /api/design/publish → the link. Also the chip's door. */
 export function openDesignPublishDialog(app, { host = '', dir = '', title = '' } = {}) {
-  const { body, close, raised } = createModalShell({ id: 'design-publish-dialog', key: `${host}:${dir}`, beside: true, title: t('Publish design'), escapeToClose: true, minWidth: '380px', dialogClass: 'design-publish-dialog', kind: 'form' });
+  const { body, close, raised } = createModalShell({ id: 'design-publish-dialog', key: `${host}:${dir}`, beside: true, title: t('Publish design'), escapeToClose: true, minWidth: '380px', dialogClass: 'design-publish-dialog', kind: 'form' });   // not the subject: title — the page title it starts with (one publish form per design folder; asked again it is raised, what was typed kept)
   if (raised) return;   // raised: the same subject's form, as it was
   const nameLab = mk('label', 'design-publish-field');
   nameLab.append(document.createTextNode(t('Page title')));

@@ -517,7 +517,13 @@ function showSearchDialog(app, a, { q: initial = '', convId = null, convTitle = 
   let scope = convId ? { convId: String(convId), title: String(convTitle || convId) } : null;
   const titleText = () => (scope ? t('Search: {q} — {conversation}', { q: initial, conversation: scope.title }) : scope === null && (convId || group) ? t('Search: {q}', { q: initial })
     : accounts.length === 1 ? t('Search messages — {label}', { label: accounts[0].label || accounts[0].id }) : t('Search messages…'));
-  const { dialog, body, close, raised, ready } = createModalShell({ id: 'chan-search-dialog', key: `${a.id}:${convId || ''}`, title: titleText(), dialogClass: 'chan-dialog chan-search', escapeToClose: true, kind: 'form' });
+  // THE SUBJECT (lane dialog-yield r5): the account SET, the words, the conversation scope and an agent card's own search — `a` is a
+  // LIST for both pre-filled callers, so 37c1b566's `${a.id}` was «undefined» for every one of them: «bar» raised foo's results, a
+  // second agent card showed the first card's hits. Two searches are two forms side by side (`beside`): results are a view the
+  // person may compare, nothing in one is lost to the other; the same search asked again is raised
+  const subject = JSON.stringify([accounts.map((x) => x && x.id).sort(), convId || '', !!group, initial, agentMemo || '', searchedAt || 0]);
+  // not the subject: convTitle — the scope's display name (its id is convId) // not the subject: agentHits — the card's own hits, named by its memo + when it searched
+  const { dialog, body, close, raised, ready } = createModalShell({ id: 'chan-search-dialog', key: subject, beside: true, title: titleText(), dialogClass: 'chan-dialog chan-search', escapeToClose: true, kind: 'form' });
   if (raised) return null;   // raised: the same subject's form, as it was
   const row = document.createElement('div');
   row.className = 'chan-search-row';

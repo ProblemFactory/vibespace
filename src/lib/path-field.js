@@ -28,7 +28,7 @@
 //     it remembers its last folder per field
 //   · never offered unasked: the instance's own checkout, its data dir, dot-folders (typed explicitly they still resolve)
 import { t } from './i18n.js';
-import { escHtml, fetchJson, createModalShell, onOutsidePress, pressToken } from './utils.js';
+import { escHtml, fetchJson, createModalShell, onOutsidePress, pressToken, showToast } from './utils.js';
 import { ownFloat } from './form-yield.js'; // PURE (lane dialog-yield r3): the floated list is the form's — a press on it keeps the form's keys
 import { FILE_ICONS, UI_ICONS } from './icons.js';
 import { getFileIcon } from './file-types.js';
@@ -684,7 +684,7 @@ export function pathField(input, opts = {}) {
     if (!K.sel) K.sel = (inputsNow().bases[0] || { path: '~' }).path;
     for (let q = K.sel; q && q.includes('/'); q = parentOf(q)) K.open.add(q);
     K.open.add(K.sel);
-    const shell = createModalShell({ id: 'path-picker', key: pickKey, beside: true, from, title: kind === 'file' ? t('Pick a file or folder') : t('Pick a folder'), dialogClass: 'pf-picker', escapeToClose: true, onClose: () => { st.picking = false; st.picker = null; input.focus(); }, kind: 'form' });
+    const shell = createModalShell({ id: 'path-picker', key: pickKey, beside: true, from, title: kind === 'file' ? t('Pick a file or folder') : t('Pick a folder'), dialogClass: 'pf-picker', escapeToClose: true, onClose: () => { st.picking = false; st.picker = null; if (!st.destroyed) input.focus(); }, kind: 'form' });
     if (shell.raised) { st.picking = false; return; }   // (this field's picker opened meanwhile: it is raised, its tree as it was)
     st.picker = shell;
     if (shell.placed === 'behind') st.picking = false;   // not where the person can reach it: the latch never leaves a dead Browse… (a press raises it)
@@ -794,6 +794,9 @@ export function pathField(input, opts = {}) {
   function refresh() { memo = { key: '', m: null }; st.answered = null; if (st.open) ask(); st.chipsAt = ''; paint(); paintChips(true); }   // the chips drawn once, forced
   function destroy() {
     st.destroyed = true; clearTimeout(st.timer); clearTimeout(st.probeTimer); st.ctl?.abort?.();
+    // lane dialog-yield r5: ITS OPEN PICKER GOES WITH IT, said — a pick there would land in no field (37c1b566: a Task Detail row
+    // removed while its picker was open kept the picker, and the pick was dropped in silence)
+    if (st.picker && st.picker.live()) { const pk = st.picker; st.picker = null; st.picking = false; pk.close(); showToast(t('The field this picker was for is gone — the picker closed and nothing was written')); }
     st.outside?.(); st.outside = null;
     window.removeEventListener('resize', onReflow); window.removeEventListener('scroll', onReflow, true);
     input.removeEventListener('input', onInput);
