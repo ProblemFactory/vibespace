@@ -114,6 +114,11 @@ export class NeedsCards {
     this._filed = new Map(); // what a landing's read PROVED: a FILING (id + createdAt, r4) → the record that filed it (r3 — a fact
                              // of the transcript, kept while that filing is listed or is the newest landing's; «no record» never is)
     this._flying = null;     // the newest landing's filing — the pass never prunes its proof (r4)
+    // WHO IS LOOKING (lane wake-approve-card — an IDENTITY fact, never this view's: the owner decides from every view they
+    // open, history and sub-agent viewers included). THE one place a card asks it: the registry's VIEWER_ROLE today; the
+    // day an instance gains a non-owner viewer (VIEWERS' deferred row) it is answered here, and its cards read «waiting
+    // for the owner» with no buttons (decisionCard's false branch)
+    this._role = () => VIEWER_ROLE;
   }
 
   /** The loaded records in DISPLAY order, lean (the view's ordered accessor — _messages' insertion order put an older page's
@@ -121,11 +126,6 @@ export class NeedsCards {
   _records() {
     const v = this.view;
     return (typeof v.loadedRecords === 'function' ? v.loadedRecords() : v._messages || []).map(leanRecord);
-    // WHO IS LOOKING (lane wake-approve-card — an IDENTITY fact, never this view's: the owner decides from every view they
-    // open, history and sub-agent viewers included). THE one place a card asks it: the registry's VIEWER_ROLE today; the
-    // day an instance gains a non-owner viewer (VIEWERS' deferred row) it is answered here, and its cards read «waiting
-    // for the owner» with no buttons (decisionCard's false branch)
-    this._role = () => VIEWER_ROLE;
   }
 
   /** Subscribe for the VIEW's life: its own controller, aborted by the window's (`signal`) or by the view's dispose (stop) —
