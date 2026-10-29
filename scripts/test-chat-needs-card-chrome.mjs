@@ -1150,9 +1150,99 @@ try {
     await A.shot('desktop-1280-r3-tail-wheel.png');
     check(`#1 (RED on ed660f19: yanked to the live end, pinned) the reader's wheel while the tail page is out ⇒ the page's result is dropped: the window stays mid-history (records ${t2.ws}–${t2.we} of ${t2.total}), not pinned (${ro2.join(' → ')})`, t0b.card && t0b.we < t0b.total && ro2.some((r) => /^tailPage\(/.test(r)) && t2.we < t2.total && !t2.pinned, { t0b, t2, roads: ro2 });
     await SLOW(false);
+    // ── ⑯ THE TAIL, ROUND 4 (lane needs-card-tail r4 — the r3 delta verdict on b3fef024; its accdisp probe's (d) (e) (f3) and
+    // the index road's failed show): the law both ways (the ↓ pressed BEFORE a landing), a failed tail page moves nothing, a
+    // stale landing's held live turn counted once, a show that fails after a jump puts back what the jump changed. The tail
+    // page (flagged at its jumpToBottom call — the read's pages stay quick) made slow or failing on demand; every landing's
+    // road and result written down
+    {
+      console.log('⑯ THE TAIL r4 — the law both ways (↓ before a landing); a failed tail page moves nothing; a stale landing counts its held turn once; a failed show after a jump puts back what it changed');
+      const TAIL16 = (o) => A.evalJs(`(() => { const v = ${VIEW}, nc = v._needsCards, o = ${J(o)};
+        if (o && !v.__page16) { v.__page16 = v._fetchMessagePage; window.__r16 = [];
+          nc.__land16 = nc.land; nc.land = (x, op) => { const id = typeof x === 'string' ? x : x && x.id; window.__r16.push('land:' + id); return nc.__land16.call(nc, x, op).then((r) => { window.__r16.push('landed:' + id + '=' + r); return r; }); };
+          v.__trace16 = v._trace; v._trace = function (k, d) { if (/^(jumpToBottom:stale|tailStale|jumpToIndex:stale|tailHold|tailRefetch)$/.test(k)) window.__r16.push('trace:' + k); return v.__trace16.call(v, k, d); };
+          v.__jtb16 = v.jumpToBottom; v.jumpToBottom = function (a) { window.__inJtb16 = true; try { return v.__jtb16.call(v, a); } finally { window.__inJtb16 = false; } };
+          v._fetchMessagePage = function (off, l, opt) { const w = window.__tail16 || {}, tail = !!window.__inJtb16; window.__inJtb16 = false;
+            if (!tail || !(w.n > 0)) return v.__page16.call(v, off, l, opt);
+            w.n--; window.__r16.push('tailPage(' + off + ')');
+            return new Promise((res, rej) => setTimeout(() => { if (w.fail) { window.__r16.push('tailPageFAILED'); rej(new Error('the tail page failed (⑯)')); } else { window.__r16.push('tailPageBack'); res(v.__page16.call(v, off, l, opt)); } }, w.ms || 600)); }; }
+        if (o) window.__tail16 = o;
+        if (!o && v.__page16) { v._fetchMessagePage = v.__page16; delete v.__page16; nc.land = nc.__land16; delete nc.__land16; v._trace = v.__trace16; delete v.__trace16; v.jumpToBottom = v.__jtb16; delete v.__jtb16; window.__tail16 = null; }
+        return 1; })()`);
+      const r16 = () => A.evalJs('(window.__r16 || []).slice()');
+      const wait16 = (re, ms = 15000) => A.waitFor(`(window.__r16 || []).some((r) => ${re.toString()}.test(r))`, ms).catch(() => { });
+      const ST16 = (id) => `(() => { const x = ${ST(id)}, v = ${VIEW}, l = v._messageList; return { ...x, pinned: v._pinned, st: Math.round(l.scrollTop), gap: Math.round(l.scrollHeight - l.clientHeight - l.scrollTop), pick: v._needsCards._dockPick, badge: v._newMsgCount }; })()`;
+      const STATUS16 = `(() => { const e = document.querySelector('.chat-history-status'); return e ? { text: e.textContent.trim(), shown: e.getClientRects().length > 0 && getComputedStyle(e).display !== 'none' && getComputedStyle(e).visibility !== 'hidden' && Number(getComputedStyle(e).opacity) > 0 } : null; })()`;
+      const pressDown16 = async () => { const b = await A.evalJs(`(() => { const b = ${VIEW}._scrollBtn; if (!b || b.classList.contains('hidden')) return null; const r = b.getBoundingClientRect(); return r.width && r.height ? { x: r.left + r.width / 2, y: r.top + r.height / 2 } : null; })()`); if (b) { await A.clickAt(b.x, b.y); return 'clicked'; } await A.evalJs(`${VIEW}._scrollBtn.click()`); return 'click()'; };
+      await TAIL16({ n: 0 });
+      // (a) THE ↓ PRESSED BEFORE A LANDING (the probe's f3 — older than r3, on both trees: the ↓'s tail replaced the newer landing)
+      const a0 = await choose(ids[1], 82);
+      await TAIL16({ n: 1, ms: 3000 });
+      const howDown = await pressDown16(); await sleep(400);
+      await pick(ids[1]);
+      await wait16(new RegExp('^landed:' + ids[1] + '='), 8000); const a1 = await A.evalJs(ST16(ids[1]));
+      await wait16(/^tailPageBack$/, 8000); await sleep(2000);
+      const a2 = await A.evalJs(ST16(ids[1])), ra = await r16();
+      await A.shot('desktop-1280-r4-down-then-landing.png');
+      check(`(a) (RED on b3fef024: the older ↓'s tail page came back and rebuilt the window at the live end — q82 gone, pinned) the ↓ (${howDown}) pressed BEFORE a landing: the newer landing stands — q82 in view in the window it was landed in (records ${a2.ws}–${a2.we} of ${a2.total}), not pinned; the ↓'s page dropped (${ra.join(' → ')})`, a0.card && a1.card && a2.card && a2.inView && /question 82/.test(a2.cmd) && a2.ws === a1.ws && a2.we < a2.total && !a2.pinned && ra.includes('trace:jumpToBottom:stale'), { a0, a1, a2, ra });
+      // (b) A FAILED TAIL PAGE MOVES NOTHING (the probe's (e) — older than r3): q84 (no record ⇒ the tail road), its tail page fails
+      await TAIL16({ n: 0 }); await choose(ids[1], 82); const b0 = await A.evalJs(ST16(ids[1]));
+      await A.evalJs('(window.__r16 = [], 1)');
+      await TAIL16({ n: 1, fail: true, ms: 600 });
+      await pick(q84.id);
+      await wait16(new RegExp('^landed:' + q84.id + '='), 12000); await sleep(1200);
+      const b1 = await A.evalJs(ST16(ids[1])), rb = await r16(), sb = await A.evalJs(STATUS16);
+      await A.shot('desktop-1280-r4-tail-failed.png');
+      check(`(b) (RED on b3fef024: «end» — the mid-history window force-scrolled to its bottom, scrollTop 362 → 757, and q84 kept the dock pick) the tail page failed (${rb.join(' → ')}): said ONCE («${sb && sb.text}»), and nothing moved — scrollTop ${b0.st} → ${b1.st}, q82 in view ${b0.inView} → ${b1.inView}, the pin ${b0.pinned} → ${b1.pinned}, the pick ${b0.pick} → ${b1.pick}`, rb.includes('tailPageFAILED') && rb.includes('landed:' + q84.id + '=null') && !!sb && sb.shown && /Couldn.t load the latest messages/.test(sb.text) && Math.abs(b1.st - b0.st) <= 2 && b1.inView && b1.ws === b0.ws && b1.pinned === b0.pinned && b1.pick === b0.pick, { b0, b1, rb, sb });
+      // (c) A STALE LANDING COUNTS ITS HELD TURN ONCE (the probe's (d) — new in r3: +14 for the server's +7): q84's tail page out
+      //     6 s, q82 pressed (q84 is stale), a live turn (do:fill3) arrives while the page is out — held, replayed on the stale return
+      await TAIL16({ n: 0 }); await choose(ids[1], 82);
+      const T0 = (await page(0, 1)).total || 0, c0 = await A.evalJs(ST16(ids[1]));
+      await A.evalJs('(window.__r16 = [], 1)');
+      await TAIL16({ n: 1, ms: 6000 });
+      await pick(q84.id);
+      await wait16(/^tailPage\(/, 8000);
+      await pick(ids[1]); await sleep(400);
+      sayTo(sid, 'a live turn do:fill3');
+      let T1 = T0; for (let i = 0; i < 40; i++) { T1 = (await page(0, 1)).total || 0; if (T1 >= T0 + 7) break; await sleep(200); }
+      const held = await A.evalJs(`(() => { const v = ${VIEW}; return v._tailHold ? v._tailHold.ops.length : -1; })()`);
+      await wait16(new RegExp('^landed:' + q84.id + '='), 15000); await sleep(2500);
+      T1 = (await page(0, 1)).total || 0;
+      const c1 = await A.evalJs(ST16(ids[1])), rc = await r16();
+      await A.shot('desktop-1280-r4-stale-total.png');
+      check(`(c) (RED on b3fef024: the stale tail page's total applied, then each replayed create counted again) the live turn arrived while q84's stale tail page was out (${held} ops held) — the window that stays counts it ONCE: its total ${c0.total} → ${c1.total} (+${c1.total - c0.total}) vs the server's ${T0} → ${T1} (+${T1 - T0}); q82 in view (records ${c1.ws}–${c1.we}) (${rc.join(' → ')})`, held > 0 && T1 >= T0 + 7 && rc.includes('trace:jumpToBottom:stale') && rc.includes('landed:' + q84.id + '=null') && c1.total - c0.total === T1 - T0 && c1.card && c1.inView && c1.ws === c0.ws, { c0, c1, T0, T1, held, rc });
+      // (d) A SHOW THAT FAILS AFTER A JUMP PUTS BACK WHAT THE JUMP CHANGED: q81's record hidden by a CSS rule (B-2adb's shape —
+      //     an element, no box); its landing reads up, jumpToIndex rebuilds the window there, the show fails
+      await TAIL16(null);
+      const rid81 = (all[where[0]] || {}).id || '';
+      const toasts16 = () => A.evalJs(`[...document.querySelectorAll('.global-toast')].map((x) => x.textContent).join(' | ')`);
+      // (d1) a PINNED reader at the live tail
+      await toConv(A, sid, [], 1280, 800, false); await A.waitFor(`(() => { const v = ${VIEW}; return v._pinned && v._windowEnd >= v._total; })()`, 15000).catch(() => { }); await sleep(1500);
+      await A.evalJs(`(() => { const s = document.createElement('style'); s.id = 'hide16'; s.textContent = '.chat-msg[data-msg-id="' + CSS.escape(${J(rid81)}) + '"] { display: none !important; }'; document.head.append(s); return 1; })()`); // (after the reload: toConv loads the page)
+      await TAIL16({ n: 0 });
+      const d0 = await A.evalJs(ST16(ids[1]));
+      await pick(ids[0]);
+      await wait16(new RegExp('^landed:' + ids[0] + '='), 15000);
+      await A.waitFor(`(() => { const v = ${VIEW}; return v._pinned && v._windowEnd >= v._total; })()`, 10000).catch(() => { }); await sleep(1500);
+      const d1 = await A.evalJs(ST16(ids[1])), t1 = await toasts16(), rd1 = await r16();
+      await A.shot('desktop-1280-r4-failed-show-pinned.png');
+      check(`(d1) (RED on b3fef024: left at records 0–50, unpinned, only a toast) a PINNED reader presses q81, whose record a CSS rule hides: the jump rebuilt the window there, the show failed — put back: pinned at the live tail again (records ${d1.ws}–${d1.we} of ${d1.total}, gap ${d1.gap}); the toast «${t1}» (${rd1.join(' → ')})`, !!rid81 && d0.pinned && rd1.includes('landed:' + ids[0] + '=null') && d1.pinned && d1.we >= d1.total && d1.gap <= 2 && /not drawn in this chat/.test(t1), { rid81, d0, d1, t1, rd1 });
+      // (d2) a reader mid-history (q82 landed): put back at the record they were reading
+      await choose(ids[1], 82); await sleep(3000);
+      const READ16 = `(() => { const v = ${VIEW}, l = v._messageList, lr = l.getBoundingClientRect(); const m = [...l.querySelectorAll(':scope > .chat-msg')].find((x) => { const r = x.getBoundingClientRect(); return r.height > 0 && r.bottom > lr.top; }); return { id: m ? m.dataset.msgId : null, top: m ? Math.round(m.getBoundingClientRect().top) : null, ws: v._windowStart, we: v._windowEnd, pinned: v._pinned }; })()`;
+      const e0 = await A.evalJs(READ16);
+      await A.evalJs('(window.__r16 = [], 1)');
+      await pick(ids[0]);
+      await wait16(new RegExp('^landed:' + ids[0] + '='), 15000); await sleep(2500);
+      const e1 = await A.evalJs(READ16), at1 = await A.evalJs(`(() => { const v = ${VIEW}, l = v._messageList, m = [...l.querySelectorAll(':scope > .chat-msg')].find((x) => x.dataset.msgId === ${J(e0.id)}); return m ? Math.round(m.getBoundingClientRect().top) : null; })()`), t2 = await toasts16(), rd2 = await r16();
+      await A.shot('desktop-1280-r4-failed-show-reader.png');
+      check(`(d2) (RED on b3fef024: left at records 0–50) a reader mid-history (records ${e0.ws}–${e0.we}, reading ${e0.id} at ${e0.top}) presses q81 (hidden): put back at the record they were reading — ${e0.id} at ${at1} (records ${e1.ws}–${e1.we}), not pinned (${rd2.join(' → ')})`, !!e0.id && rd2.includes('landed:' + ids[0] + '=null') && at1 != null && Math.abs(at1 - e0.top) <= 4 && e1.ws > 0 && !e1.pinned && /not drawn in this chat/.test(t2), { e0, e1, at1, t2, rd2 });
+      await A.evalJs(`(() => { document.getElementById('hide16')?.remove(); return 1; })()`);
+      await TAIL16(null);
+    }
     await A.evalJs(`(() => { const m = app._inboxModel; if (window.__todos15) { Object.defineProperty(m, 'todos', window.__todos15); delete window.__todos15; } ${VIEW}._needsCards.schedule(); return 1; })()`);
-  } catch (e) { fail++; console.log('  ✗ ⑭/⑮ threw: ' + (e?.message || e)); }
-  lap('⑭ ⑮ done');
+  } catch (e) { fail++; console.log('  ✗ ⑭/⑮/⑯ threw: ' + (e?.message || e)); }
+  lap('⑭ ⑮ ⑯ done');
 
   check('the shots are written (desktop 1280 + phone 375)', ['desktop-1280-watch-request.png', 'desktop-1280-ask-chips.png', 'desktop-1280-resolved.png', 'phone-375-watch-request.png', 'phone-375-ask-chips.png', 'phone-375-resolved.png', 'phone-375-accordion.png', 'phone-375-accordion-opened.png', 'desktop-1280-accordion.png'].every((f) => fs.existsSync(path.join(SHOTS, f))));
   check('no page error', pageErrors.length === 0, pageErrors.slice(0, 5));

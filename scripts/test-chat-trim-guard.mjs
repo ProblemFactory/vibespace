@@ -142,7 +142,7 @@ ok('a structural change between the readings hands the decision back to the pagi
 // decisions off it, and a switch re-measures 4-6 windows at once.
 ok('ChatView.setSuspended exists and arms the structural settle window on resume', /setSuspended\(on\) \{/.test(cv) && /this\._lastStructuralAt = Date\.now\(\);/.test(cv.slice(cv.indexOf('setSuspended'))));
 ok('resume returns a pinned view to the LIVE tail — behind-the-tail windows take the full jumpToBottom (inc-mtfi6034 mobile old-position), and it does NOT stamp a user navigation over its own series',
-  /this\._windowEnd < this\._total\) this\.jumpToBottom\(\{ user: false \}\);/.test(cv.slice(cv.indexOf('setSuspended'))));
+  /this\._windowEnd < this\._total\) this\.jumpToBottom\(\{ user: false, stale: \(\) => this\._navigatedSince\(resumeAt\) \}\);/.test(cv.slice(cv.indexOf('setSuspended')))); // (lane needs-card-tail r4: its page dropped once the reader — or a landing — went somewhere while it was out)
 // four paging entries: extendTop / extendBottom / the scroll handler's
 // decisions / the short-view rescue (which answers `false`, not `return`)
 ok('all four paging entries gate on _suspended (extendTop/extendBottom/scroll decisions/short-view rescue)',
@@ -765,6 +765,58 @@ ok('desktop _showWin resumes the ChatView (the resume settle is armed from there
       const got = v.loadedRecords().map((m) => m.id);
       ok(`RED-able (ed660f19: n100 lingered at the window's top, windowStart 1192): a top trim (${removed} cards) the same — loadedRecords() is c192…c399 + n250 + n399, and windowStart moves by the records cut (1000 → 1193)`,
         removed === 192 && JSON.stringify(got) === JSON.stringify(want(192, 400, [250, 399])) && v._windowStart === 1193 && ids(list)[0] === 'c192', JSON.stringify({ removed, n: got.length, head: got.slice(0, 2), ws: v._windowStart })); }
+  }
+  // ⑤c THE ROUND TRIP (lane needs-card-tail r4 — the r3 delta verdict's rev-delta-trim-hole / refute-trim-hole-real-extend):
+  //    r3's cut took a record drawn as nothing out of _messages but kept its id in _renderedMsgIds — paged back over it,
+  //    _onCreateMessage refused it, the window held one record fewer than its bounds and the NEXT trim moved them one short:
+  //    a drawn record was never fetched again (c216 / c558–c559), one round trip later. The REAL _extendTop / _extendBottom
+  //    with their REAL trims and the REAL _onCreateMessage (a card per record, nothing for the notice), three round trips over
+  //    a window mid-history with the notice inside it: every round, every drawn record in the bounds is drawn and the
+  //    window's records are exactly the server's records between its bounds.
+  {
+    const S = [];
+    for (let i = 0; i < 1200; i++) { S.push({ id: 'c' + i, role: 'tool', ts: 1e12 + i * 1000, content: [{ type: 'tool_use', input: {} }] }); if (i === 600) S.push({ id: 'n601', role: 'system', noticeKind: 'unknown-record', content: [{ type: 'unknown_record' }] }); }
+    const list = { children: [], clientHeight: CH, scrollTop: 0 };
+    Object.defineProperty(list, 'scrollHeight', { get() { return Math.max(list.children.length * 100, CH); } });
+    Object.defineProperty(list, 'childElementCount', { get() { return list.children.length; } });
+    Object.defineProperty(list, 'firstChild', { get() { return list.children[0] || null; } });
+    list.querySelectorAll = () => list.children.slice();
+    list.querySelector = () => list.children[0] || null;
+    list.appendChild = (el) => { el.isConnected = true; list.children.push(el); return el; };
+    list.insertBefore = (frag, ref) => { const at = ref ? list.children.indexOf(ref) : 0; const els = frag.children || [frag]; for (const e of els) e.isConnected = true; list.children.splice(Math.max(0, at), 0, ...els); };
+    const mkEl = (id) => ({ dataset: { msgId: id }, isConnected: false, style: {}, classList: { contains: (k) => k === 'chat-msg', add() { }, remove() { }, toggle() { } },
+      get parentNode() { return this.isConnected ? list : null; }, get offsetParent() { return {}; }, get offsetHeight() { return 100; }, get offsetTop() { return list.children.indexOf(this) * 100; },
+      remove() { this.isConnected = false; const i = list.children.indexOf(this); if (i >= 0) list.children.splice(i, 1); }, querySelector: () => null, querySelectorAll: () => [] });
+    const v = Object.assign(Object.create(ChatView.prototype), {
+      _messageList: list, _elements: new Map(), _renderedMsgIds: new Set(), _messages: [], _windowStart: 0, _windowEnd: 0, _total: S.length, _pinned: false, _traces: [], _windowGen: 1,
+      _trace(tag, d) { this._traces.push({ tag, ...d }); }, _traceExpect() { }, _scheduleAxSync() { }, _applyInitHealth() { }, _syncReviewAvailability() { }, _applyElementMarks() { },
+      _statusBar: null, _channelTouches: null, app: null, _search: null,
+      _beginHistoryLoad() { return () => { }; }, _reserveFreshHeights() { }, _updateRuns() { }, _applyWheelCarry() { }, _dropWheelCarry() { }, _liftLoadLock() { this._loading = false; },
+      _setPinned(p) { this._pinned = p; }, _dropGapSlab() { }, _showHistoryStatus(m) { throw new Error('history status: ' + m); },
+      async _fetchMessages(offset, limit) { return S.slice(offset, offset + limit).map((m) => ({ ...m })); },
+      _withViewportAnchor(fn) { const st = list.scrollTop; const a = list.children.find((e) => e.offsetTop + 100 > st); const off = a ? st - a.offsetTop : 0; fn(); if (a && a.isConnected) { list.scrollTop = a.offsetTop + off; return true; } return false; },
+      _renderers: { renderToolMsg: (m) => mkEl(m.id), renderSystemMsg: () => null, addWrapToggles() { }, addOpenInEditorBtn() { } },
+    });
+    v._loadingHistory = true; for (const m of S.slice(460, 700)) v._onCreateMessage({ ...m }); v._loadingHistory = false;
+    v._windowStart = 460; v._windowEnd = 700;
+    const holes = () => { const drawn = new Set(list.children.map((e) => e.dataset.msgId)); return S.slice(v._windowStart, v._windowEnd).filter((m) => m.id !== 'n601' && !drawn.has(m.id)).map((m) => m.id); };
+    const same = () => JSON.stringify(v.loadedRecords().map((m) => m.id)) === JSON.stringify(S.slice(v._windowStart, v._windowEnd).map((m) => m.id));
+    const rounds = [];
+    const doc0 = globalThis.document;
+    globalThis.document = { createDocumentFragment: () => ({ children: [], appendChild(el) { this.children.push(el); return el; } }) };
+    try {
+      for (let r = 1; r <= 3; r++) {
+        v._loading = false; list.scrollTop = 0; await v._extendTop();
+        rounds.push({ r, side: 'up', ws: v._windowStart, we: v._windowEnd, holes: holes(), same: same(), notice: v._messages.some((m) => m.id === 'n601') });
+        v._loading = false; list.scrollTop = list.scrollHeight - list.clientHeight; await v._extendBottom();
+        rounds.push({ r, side: 'down', ws: v._windowStart, we: v._windowEnd, holes: holes(), same: same(), notice: v._messages.some((m) => m.id === 'n601') });
+      }
+    } finally { globalThis.document = doc0; }
+    const trims = v._traces.filter((x) => /^trim(Top|Bottom)$/.test(x.tag)).length;
+    ok(`RED-able (r4 #1 — b3fef024: c558, c559 never fetched again by the third round; ed660f19 from the first): three scroll round trips over a window mid-history (the REAL _extendTop/_extendBottom and their ${trims} trims, the REAL _onCreateMessage), a notice drawn as nothing inside it — every round, every drawn record between the bounds is drawn and the window's records are exactly the server's between its bounds`,
+      trims >= 4 && rounds.length === 6 && rounds.every((x) => !x.holes.length && x.same), JSON.stringify(rounds));
+    ok('…and the cut releases every mark of a record it cuts as drop(el) does — ONE release for both roads (_elements, _renderedMsgIds, the removed set)',
+      /const release = \(id\) => \{ if \(!id\) return; this\._elements\.delete\(id\); this\._renderedMsgIds\.delete\(id\); removedIds\.add\(id\); \};\n\s+const drop = \(el\) => \{ release\(el\.dataset\.msgId\); el\.remove\(\); \};/.test(cv) && /for \(const m of ms\) if \(m && !stays\.has\(m\)\) release\(m\.id\);/.test(cv));
   }
   // ⑥ THE PIN PREDICATE: the DOM edge is not the tail.
   {

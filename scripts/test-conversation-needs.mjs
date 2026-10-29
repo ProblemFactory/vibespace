@@ -330,7 +330,7 @@ ok(/const needs = oldEl\.querySelector\?\.\(':scope > \.cn-cards'\);[\s\S]{0,200
 ok(/if \(hasPendingHelperAsk\(m\)\) return null;\n(?:[^\n]*\n){2}\s+if \(el\.querySelector\(':scope > \.cn-cards > :is\(\.cn-card\.cn-open, \.cn-card\.cn-kept\)'\)\) return null;/.test(CV) && /card\.classList\.add\('cn-kept'\);/.test(CARD), 'a run never folds a record holding a card that waits — nor one whose answered card keeps a box in use (S1\'s rule beside it)');
 ok(/onJumpToNeed: \(id\) => \{ \(id \? this\._needsCards\?\.land\(id\) : this\._needsCards\?\.jumpToNewest\(\)\)\?\.catch\?\.\(\(\) => \{\}\); \}/.test(CV) && /chip\('foryou', `chat-status-foryou/.test(BAR) && /const needsChip = e\.target\.closest\('\.chat-status-foryou\.chat-status-clickable'\);\n\s+if \(needsChip\) \{\n\s+e\.stopPropagation\(\);\n\s+const rows = this\._needRows \|\| \[\];\n\s+if \(rows\.length < 2\) \{ this\._onJumpToNeed\?\.\(rows\.length \? rows\[0\]\.id : null\); return; \}/.test(BAR) && /b\.onclick = \(ev\) => \{ ev\.stopPropagation\(\); list\.remove\(\); this\._onJumpToNeed\?\.\(r\.id\); \};/.test(BAR), 'the chip: drawn from setNeeds — THE INDEX (lane needs-card-tail): one ask ⇒ its click lands it, several ⇒ its list (newest first), a row lands that one through the cards\' ONE landing');
 // acceptance round 2 (P3): ONE SOURCE — the chip's words are the open cards this pass drew, never the store's list beside them
-ok(/view\._statusBar\?\.setNeeds\?\.\(this\._chipOf\(plan\)\);/.test(CARD) && !/\bshown\b/.test(CARD.slice(CARD.indexOf('  _pass('), CARD.indexOf('  _create(e) {'))) && /const w = chipWords\(plan\.waiting, t\);/.test(CARD) && /const plan = tailPlan\(open, transcript, \{ rendered: drawn, atEnd, pick: this\._dockPick(?:, known: this\._filed)? \}\);/.test(CARD), 'ONE PASS (lane needs-card-tail — was «the chip counts the cards drawn»): the chip lists EVERY open ask (PURE tailPlan\'s waiting — the cards are a subset now) from the same pass that draws the cards (a filing ⇒ N+1 and its card, an answer ⇒ N and the dock moved, in one frame)');
+ok(/view\._statusBar\?\.setNeeds\?\.\(this\._chipOf\(plan\)\);/.test(CARD) && !/\bshown\b/.test(CARD.slice(CARD.indexOf('  _pass('), CARD.indexOf('  _create(e) {'))) && /const w = chipWords\(plan\.waiting, t\);/.test(CARD) && /const plan = tailPlan\(open, transcript, \{ rendered: drawn, atEnd, pick: this\._dockPick(?:, known: this\._(?:filed|provedOf\(open\)))? \}\);/.test(CARD), 'ONE PASS (lane needs-card-tail — was «the chip counts the cards drawn»): the chip lists EVERY open ask (PURE tailPlan\'s waiting — the cards are a subset now) from the same pass that draws the cards (a filing ⇒ N+1 and its card, an answer ⇒ N and the dock moved, in one frame)');
 ok(/try \{ if \(!card\) card = this\._create\(e\); else this\._patch\(card, e\); \} catch \(err\) \{ console\.warn\('\[chat-needs\] a card failed to draw:'[^}]*continue; \}/.test(CARD), 'ONE card that throws is said and skipped — the pass still reaches the chip');
 // acceptance round 2 (P2): THE ACCORDION — one open slot (the person's pick while it waits, else the newest; a filing takes it back)
 ok(/const fresh = open\.filter\(\(e\) => !this\._seen\.has\(e\.item\.id\)\);\n\s+if \(fresh\.length\) this\._slot = newestOf\(fresh\)\.item\.id;\n\s+this\._seen = new Set\(open\.map\(\(e\) => e\.item\.id\)\);\n\s+const openSlot = this\._slot;/.test(CARD) && /fold: x\.item\.id !== openSlot/.test(CARD) && /card\.classList\.toggle\('cn-fold', fold\);/.test(CARD) && /row\.classList\.toggle\('ut-open', !fold\);/.test(CARD) && /const fold = !!e\.fold && !boxInUse\(card\.querySelector\('\.ut-reply'\)\);/.test(CARD) && /card\.addEventListener\('click', \(ev\) => \{\n\s+if \(unfold\(ev\) \|\| card\._openedAt == null/.test(CARD), 'THE ACCORDION: ONE open card (the slot: a FILING\'s newest id, a tap, the chip), the rest folded rows whose whole row opens them; a reply box in use is never folded');
@@ -804,6 +804,142 @@ console.log('⑩b THE TAIL r2 — the end is the display order\'s; the landing r
       const rv = { _runs: [{ open: false, members: [host] }], opened: [], _setRunOpen(run, o) { run.open = o; this.opened.push(o); } };
       const drawn = REAL.revealRecord ? REAL.revealRecord.call(rv, host) : null;
       ok(drawn === false && rv._runs[0].open === false && rv.opened.join() === 'true,false', 'RED-able (r3 minor — ed660f19: the run stayed open): the REAL revealRecord closes a run it opened for a record that is still not drawn', { drawn, opened: rv.opened }); }
+    // ── ⑩d THE TAIL, ROUND 4 (the r3 delta verdict on b3fef024): THE PROOF TRAVELS WITH THE LANDING (a notice, an answered ask
+    // the pass does not list) and is the FILING's (a re-filed ask); A ROAD THAT FAILS MOVES NOTHING (the index road's failed
+    // show, a failed tail page — said once, no scroll, no pick); THE LAW BOTH WAYS (the ↓ pressed before a landing, the resume
+    // re-tail in flight); a stale page's total is not applied; the accordion's slot moves only for a show that lands; a stale
+    // landing's held ops replayed once each and its failure said by nobody (the acceptance's two mutants)
+    console.log('⑩d THE TAIL r4 — the proof travels with the landing and is the filing\'s; a road that fails moves nothing; the law both ways; a stale page\'s total is not applied; the slot moves only for a show that lands');
+    const REAL4 = { _fetchMessagePage: method('  async _fetchMessagePage(', '  // ── History-load transition'), _onOp: method('  _onOp(op) {', '  // Create a new normalized message') };
+    const DEFER = /if \(!this\._loadingHistory && \(this\._teleported \|\| \(!this\._pinned && this\._windowEnd < this\._total\)\)\) \{\n\s+this\._total\+\+;/.test(CVS);
+    ok(Object.values(REAL4).every((f) => typeof f === 'function') && DEFER, 'the REAL _fetchMessagePage and _onOp are read out of src/lib/chat-view.js (and _onCreateMessage\'s deferral — a live create while the view reads history counts `_total++` — is the line the legs below mirror)', { real: Object.keys(REAL4).filter((k) => typeof REAL4[k] !== 'function'), DEFER });
+    const rejecting = () => { let fail; const p = new Promise((_, r) => { fail = r; }); p.catch(() => { }); return { p, open: () => fail(new Error('the tail page failed')) }; };
+    const until = async (v, re) => { for (let i = 0; i < 80 && !v.log.some((l) => re.test(l)); i++) await tick(2); };
+    const NOREC = (C) => ({ ...askOf(C, 0), id: 'ut-norecord01', createdAt: C[0].ts - 3 * 3600e3, text: 'filed before the record' });
+    // THE PROOF TRAVELS WITH THE LANDING (r4 #2): a NOTICE (needOf ⇒ null: never listed) and an answered ask past the
+    // snapshot's resolved tail, their filing call the window's last record (c149, filed 1.2 s later)
+    { const C = conv(310, [149]);
+      const N = { ...askOf(C, 149), id: 'ut-notice00149', kind: 'notice', text: 'FYI at 149' };
+      const v = roads(fakeView(C, [N], 100, 150), C), nc = cardsFor(v);
+      nc._pass(); globalThis.__cnToasts = [];
+      const res = await nc.land(N.id);
+      ok(res === 'record' && v.log.includes('show(c149)') && !v.log.includes('jumpToBottom(REAL)') && v._windowStart === 100 && !globalThis.__cnToasts.length, 'RED-able (r4 #2 — b3fef024: here()\'s own pass pruned the proof, the tail road 260..310, force-scrolled): a NOTICE whose filing call ends the window — the read proves c149 IN the window ⇒ it lands there', { res, ws: v._windowStart, log: v.log });
+      const R = { ...askOf(C, 149), id: 'ut-oldresolved1', status: 'done', resolvedBy: 'allowed' };
+      const v2 = roads(fakeView(C, [], 100, 150), C), nc2 = cardsFor(v2);
+      nc2._pass();
+      const res2 = await nc2.land(R);
+      ok(res2 === 'record' && v2.log.includes('show(c149)') && !v2.log.includes('jumpToBottom(REAL)') && v2._windowStart === 100, 'RED-able (r4 #2): …and an answered ask past the resolved tail (a For-you door passes the item) lands at c149, never the tail', { res: res2, ws: v2._windowStart, log: v2.log }); }
+    // THE PROOF IS THE FILING'S (r4 #3): landed in the window (proved → c149), answered, then RE-FILED under the same id by a
+    // new call at c300 (user-todos.js «REOPENS the same item» — a new createdAt)
+    { const C = conv(310, [149, 300]), X = askOf(C, 149);
+      const v = roads(fakeView(C, [X], 100, 150), C), nc = cardsFor(v), model = v.app.__model;
+      const r1 = await nc.land(X.id);
+      model.todos = { open: [], resolved: [{ ...X, status: 'done', resolvedBy: 'replied', resolvedAt: NOW }] }; nc._pass();
+      const X2 = { ...X, createdAt: C[300].ts + 1200 };
+      model.todos = { open: [X2], resolved: [] }; model.byId = (id) => (id === X2.id ? X2 : null); nc._pass();
+      const before = cardsOf(v); v.log.length = 0;
+      const r2 = await nc.land(X2.id);
+      ok(r1 === 'card' && !before.some((c) => c.id === X.id && c.at === 'c149') && r2 === 'card' && v.log.includes('nav:jumpToIndex') && v.log.includes('show(c300)') && !v.log.includes('show(c149)'), 'RED-able (r4 #3 — b3fef024, a regression against ed660f19: the reopened ask stood at the OLD filing c149 and landed there with no read): the proof is the FILING\'s — the re-filed ask reads toward its new call and lands at c300', { r1, before, r2, log: v.log }); }
+    // A SHOW THAT FAILS ON THE INDEX ROAD PUTS BACK WHAT THE JUMP CHANGED (r4 minor): a pinned tail window; the ask's record
+    // c10 above it has, once loaded, no box (a CSS rule — B-2adb's shape) and no run to open
+    { const C = conv(310, [10]), A = askOf(C, 10);
+      const v = roads(fakeView(C, [A], 260, 310), C), nc = cardsFor(v);
+      const draw0 = v._onCreateMessage;
+      v._onCreateMessage = (m) => { draw0(m); const el = v._elements.get(m.id); if (el && m.id === 'c10') el._box = false; };
+      v.revealRecord = () => { v.log.push('reveal'); return false; };
+      v._pinned = true; nc._pass(); globalThis.__cnToasts = [];
+      const res = await nc.land(A.id);
+      ok(res === null && v._windowStart === 260 && v._windowEnd === 310 && v._pinned === true && globalThis.__cnToasts.length === 1 && !v.log.some((l) => /^show\(/.test(l)), 'RED-able (r4 minor — b3fef024: left at records 0..50, unpinned, unpositioned, only a toast): a show that fails on the INDEX road puts back what the jump changed — the pinned reader at the live tail again (260..310, pinned), one toast', { res, ws: v._windowStart, we: v._windowEnd, pinned: v._pinned, toasts: globalThis.__cnToasts, log: v.log }); }
+    // THE LAW BOTH WAYS (r4 minor): the resume re-tail's page in flight (jumpToBottom({user:false}), as reTail calls it) when a
+    // door's landing lands on the card at c120
+    { const C = conv(310, [120]), Y = askOf(C, 120);
+      const v = roads(fakeView(C, [Y], 100, 150), C), nc = cardsFor(v);
+      nc._pass(); v.tailGate = deferred();
+      const retail = v.jumpToBottom({ user: false });
+      await until(v, /^fetchPage/); await tick(3); // (a stamp is a time: a person's act never lands in the call's own millisecond)
+      const landed = await nc.land(Y.id, { since: Date.now() - 50 });
+      v.tailGate.open(); v.tailGate = null;
+      const moved = await retail;
+      ok(landed === 'card' && moved === false && v._windowStart === 100 && !v._pinned && cardsOf(v).some((c) => c.id === Y.id && c.at === 'c120') && v.log.includes('trace:jumpToBottom:stale'), 'RED-able (r4 minor — b3fef024: the re-tail\'s page answered after the landing and rebuilt the window at the tail, pinned, the card gone): an automatic tail fetch in flight when a landing lands drops its page', { landed, moved, ws: v._windowStart, pinned: v._pinned, log: v.log }); }
+    // …the ↓ pressed BEFORE a landing (the ↓ road: jumpToBottom() — a window paged out of the tail refetches it), then the
+    // ↓ pressed AFTER a landing's tail page went out (the control: the ↓ is the newest, it wins)
+    { const C = conv(310, [120]), X = NOREC(C), Y = askOf(C, 120);
+      const v = roads(fakeView(C, [X, Y], 100, 150), C), nc = cardsFor(v);
+      v._pinned = false; nc._pass(); v.tailGate = deferred();
+      const down = v.jumpToBottom();
+      await until(v, /^fetchPage/); await tick(3);
+      const landed = await nc.land(Y.id);
+      v.tailGate.open(); v.tailGate = null;
+      const moved = await down;
+      ok(landed === 'card' && moved === false && v._windowStart === 100 && !v._pinned && cardsOf(v).some((c) => c.id === Y.id && c.at === 'c120') && !v.log.includes('forceScrollToBottom'), 'RED-able (r4 minor — b3fef024: the older ↓\'s tail replaced the newer landing, 260..310, pinned): the ↓ pressed BEFORE a landing — the newer landing stands, the ↓\'s page is dropped', { landed, moved, ws: v._windowStart, pinned: v._pinned, log: v.log });
+      const v2 = roads(fakeView(C, [X, Y], 100, 150), C), nc2 = cardsFor(v2);
+      v2._pinned = false; nc2._pass(); v2.tailGate = deferred();
+      const p = nc2.land(X.id);
+      await until(v2, /^fetchPage/); await tick(3);
+      const down2 = v2.jumpToBottom();
+      v2.tailGate.open(); v2.tailGate = null;
+      const [r, m2] = await Promise.all([p, down2]);
+      ok(r === null && v2._windowStart === 260 && v2._pinned === true && v2.log.includes('trace:tailStale'), '…the control: the ↓ pressed AFTER a landing\'s tail page went out still wins — pinned at the live tail, the landing dropped', { r, m2, ws: v2._windowStart, pinned: v2._pinned, log: v2.log }); }
+    // A FAILED TAIL PAGE (not stale) MOVES NOTHING (r4 minor — the acceptance's H-D): said ONCE, no scroll, no pick kept
+    { const C = conv(310, [120]), X = NOREC(C), Y = askOf(C, 120);
+      const v = roads(fakeView(C, [X, Y], 100, 150), C), nc = cardsFor(v);
+      v._pinned = false; nc._pass(); const pick0 = nc._dockPick;
+      v.tailGate = rejecting();
+      const p = nc.land(X.id);
+      await until(v, /^fetchPage/);
+      v.tailGate.open(); v.tailGate = null;
+      const r = await p;
+      const said = v.log.filter((l) => l === 'status:Couldn\'t load the latest messages');
+      ok(r === null && said.length === 1 && v._windowStart === 100 && !v.log.includes('forceScrollToBottom') && !v.log.includes('scrollToBottom') && nc._dockPick === pick0 && v._tailHold === null, 'RED-able (r4 minor — b3fef024: «end» — the mid-history window scrolled to its bottom, and the failed ask kept the dock pick): a tail page that FAILS is said ONCE and moves nothing — no scroll, no pick, the hold released', { r, said, ws: v._windowStart, pick0, pick: nc._dockPick, log: v.log }); }
+    // A STALE LANDING'S FAILURE IS SAID BY NOBODY (the acceptance's mutant c1e — the catch without its stale branch)
+    { const C = conv(310, [120]), X = NOREC(C), Y = askOf(C, 120);
+      const v = roads(fakeView(C, [X, Y], 100, 150), C), nc = cardsFor(v);
+      nc._pass(); v.tailGate = rejecting();
+      const p = nc.land(X.id);
+      await until(v, /^fetchPage/);
+      const second = await nc.land(Y.id);
+      v.tailGate.open(); v.tailGate = null;
+      const r = await p;
+      ok(second === 'card' && r === null && !v.log.some((l) => /^status:/.test(l)) && v._tailHold === null && v._windowStart === 100, 'mutant-pin (the acceptance\'s c1e): a STALE landing whose tail page fails says nothing — the newer press stands, the hold released', { second, r, log: v.log }); }
+    // A STALE PAGE'S TOTAL IS NOT APPLIED; A STALE LANDING'S HELD OPS REPLAYED ONCE EACH (r4 minor — the acceptance's (d), and
+    // its mutant c1d — the stale branch without _releaseTailHold): the REAL _fetchMessagePage (over a stubbed `fetch`) and the
+    // REAL _onOp; a live turn of 7 creates arrives while press 1's tail page is out (the server +7), press 2 lands first
+    { const C = conv(310, [120]), X = NOREC(C), Y = askOf(C, 120), S = C.slice();
+      const v = roads(fakeView(C, [X, Y], 100, 150), C), nc = cardsFor(v);
+      v._pinned = false; nc._pass();
+      let gate = deferred();
+      const fetch0 = globalThis.fetch;
+      globalThis.fetch = async (url) => { const q = new URL(url, 'http://x').searchParams, o = +q.get('offset'), l = +q.get('limit'); v.log.push(`fetchPage(${o},${l})`); if (gate) await gate.p; return { ok: true, json: async () => ({ messages: S.slice(o, o + l), total: S.length }) }; };
+      const draw = v._onCreateMessage, applied = [];
+      Object.assign(v, { _fetchMessagePage: REAL4._fetchMessagePage, _onOp: REAL4._onOp, _getSessionIds: () => ({ backend: 'claude', backendSessionId: 'x', cwd: '/w', host: '' }), _noteRecordKind() { }, _newMsgCount: 0,
+        _onCreateMessage: (m) => { if (!v._loadingHistory && (v._teleported || (!v._pinned && v._windowEnd < v._total))) { v._total++; v._newMsgCount++; applied.push(m.id); return; } draw(m); } }); // the real deferral (pinned above)
+      const total0 = v._total;
+      try {
+        const p = nc.land(X.id);
+        await until(v, /^fetchPage\(260/);
+        for (let k = 0; k < 7; k++) { const m = { id: `live${k}`, ts: NOW + k, role: 'assistant', content: [{ type: 'text', text: 'live' }] }; S.push(m); v._onOp({ op: 'create', message: m }); }
+        const held = v._tailHold ? v._tailHold.ops.length : -1;
+        const second = await nc.land(Y.id);
+        gate.open(); gate = null;
+        const r1 = await p;
+        ok(held === 7 && second === 'card' && r1 === null && v._tailHold === null && applied.join() === 'live0,live1,live2,live3,live4,live5,live6' && v.log.includes('trace:jumpToBottom:stale'), 'mutant-pin (the acceptance\'s c1d): a STALE landing\'s 7 held creates are replayed ONCE each, in order, onto the window that stays — the hold released', { held, second, r1, hold: v._tailHold, applied, log: v.log });
+        ok(v._total - total0 === S.length - C.length && v._newMsgCount === 7, `RED-able (r4 minor — b3fef024: +14 for the server's +7 — the stale tail page's total applied, then each replayed create counted again): the window that stays counts +${v._total - total0} for the server's +${S.length - C.length}`, { total0, total: v._total, server: S.length, badge: v._newMsgCount });
+      } finally { globalThis.fetch = fetch0; }
+    }
+    // THE ACCORDION MOVES ONLY FOR A SHOW THAT LANDS (r4 minor — the acceptance's C1b): the open card at c290; the landing on
+    // the folded one at c280, its record with no box (a CSS rule) — the show fails
+    { const C = conv(300, [280, 290]), Z = askOf(C, 280), A = askOf(C, 290);
+      const v = fakeView(C, [Z, A], 250, 300), nc = cardsFor(v);
+      nc._pass();
+      const folds = () => v._messageList.querySelectorAll(':scope > * > .cn-cards > .cn-card').map((c) => `${c.dataset.item}:${c.classList.contains('cn-fold') ? 'fold' : 'open'}`).sort().join();
+      const was = folds(), slot0 = nc._slot;
+      v._elements.get('c280')._box = false; v.revealRecord = () => false;
+      globalThis.__cnToasts = [];
+      const res = await nc.land(Z.id);
+      ok(res === null && globalThis.__cnToasts.length === 1 && folds() === was && nc._slot === slot0 && /ut-ask0000290:open/.test(was), 'RED-able (r4 minor — b3fef024: the slot moved before the show — the open card at c290 folded, the box-less target unfolded): a show that fails leaves the accordion as it was', { res, was, now: folds(), slot0, slot: nc._slot });
+      v._elements.get('c280')._box = true; v.revealRecord = (el) => { el._box = true; return true; };
+      const res2 = await nc.land(Z.id);
+      ok(res2 === 'card' && nc._slot === Z.id && /ut-ask0000280:open/.test(folds()) && /ut-ask0000290:fold/.test(folds()), '…and a show that lands takes the slot: the landed card open, the other folded', { res2, now: folds(), slot: nc._slot }); }
   }
   // THE WIRING (source pins)
   const CV = read('src/lib/chat-view.js'), CARD = read('src/lib/chat-needs-card.js'), UTA = read('src/lib/user-todos-actions.js');

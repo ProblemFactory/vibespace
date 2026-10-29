@@ -93,6 +93,10 @@ const lineOf = (c) => (c && c.querySelector(':scope > .cn-rows > .ut-item .ut-te
 /** The newest of `entries` ({item}) by its filing time (a tie: the later in the list). */
 const newestOf = (entries) => entries.reduce((a, e) => (!a || (Number(e.item.createdAt) || 0) >= (Number(a.item.createdAt) || 0) ? e : a), null);
 
+/** A FILING, not an item (r4): the store re-files a resolved ask under the SAME id with a new createdAt (user-todos.js «REOPENS
+ *  the same item») — what a read proved about the old filing says nothing about the new one. */
+const filingOf = (item) => `${item.id}@${Number(item.createdAt) || 0}`;
+
 export class NeedsCards {
   /** @param view the ChatView (its _messageList, _messages, _elements, _statusBar) */
   constructor(view) {
@@ -107,8 +111,9 @@ export class NeedsCards {
     this._dockNoRecord = false; // …and that landing's read reached the conversation's first record: it has none (judged per landing, r2)
     this._landGen = 0;      // THE DISPLACEMENT LAW (r2): the newest landing's generation — an older one never moves the reader
     this._placeSig = '';    // what the last pass placed where — a pass that moves no card reads no layout
-    this._filed = new Map(); // what a landing's read PROVED: an ask → the record that filed it (r3 — a fact of the transcript,
-                             // kept while the ask is listed; «no record» never is)
+    this._filed = new Map(); // what a landing's read PROVED: a FILING (id + createdAt, r4) → the record that filed it (r3 — a fact
+                             // of the transcript, kept while that filing is listed or is the newest landing's; «no record» never is)
+    this._flying = null;     // the newest landing's filing — the pass never prunes its proof (r4)
   }
 
   /** The loaded records in DISPLAY order, lean (the view's ordered accessor — _messages' insertion order put an older page's
@@ -278,7 +283,8 @@ export class NeedsCards {
     // hour, was never patched or removed again): a card whose reply box is in use is drawn from the snapshot's copy (a clear
     // rewrites it there), else from the copy it last drew; once the box is left, the normal removal applies
     const listed = new Set([...open, ...done].map((e) => e.item.id));
-    for (const id of this._filed?.keys() || []) if (!listed.has(id)) this._filed.delete(id);
+    const filings = new Set([...open, ...done].map((e) => filingOf(e.item)));
+    for (const k of this._filed?.keys() || []) if (!filings.has(k) && k !== this._flying) this._filed.delete(k);
     for (const c of view._messageList.querySelectorAll(':scope > * > .cn-cards > .cn-card')) {
       if (listed.has(c.dataset.item) || !c._item || !boxInUse(c.querySelector('.ut-reply'))) continue;
       done.push({ item: todos.resolved.find((i) => i.id === c.dataset.item) || todos.open.find((i) => i.id === c.dataset.item) || c._item, kind: c.dataset.kind || 'check' });
@@ -291,7 +297,7 @@ export class NeedsCards {
       view._statusBar?.setNeeds?.(null);
       this._seen.clear(); // nothing waits: whatever is filed next is a filing
       this._placeSig = '';
-      this._filed?.clear();
+      for (const k of this._filed?.keys() || []) if (k !== this._flying) this._filed.delete(k);
       if (this._openIds) { this._openIds = ''; try { view._updateRuns?.(); } catch { } }
       this._keepReader(keep);
       return 0;
@@ -306,7 +312,7 @@ export class NeedsCards {
     // the newest message): a card whose record is on screen stands there; of the rest at most ONE docks at the END (the
     // person's pick, else the newest) and only in a window that reaches the live end; every one is in the chip
     const atEnd = !view._teleported && !(view._windowEnd < view._total);
-    const plan = tailPlan(open, transcript, { rendered: drawn, atEnd, pick: this._dockPick, known: this._filed });
+    const plan = tailPlan(open, transcript, { rendered: drawn, atEnd, pick: this._dockPick, known: this._provedOf(open) });
     if (this._dockPick != null && !plan.loose.includes(this._dockPick)) { this._dockPick = null; this._dockNoRecord = false; } // the pick answered, or its record on screen: the newest docks again
     // THE ACCORDION: the open slot moves on a FILING only — an id this view has not seen waiting (the newest of them; a
     // view's first pass sees every one as new); a resolution never moves it (round 3, #3)
@@ -319,7 +325,7 @@ export class NeedsCards {
     const want = new Map(); // anchor element → [{item, kind, resolved, dock}]
     for (const e of [...open.map((x) => ({ ...x, resolved: false, fold: x.item.id !== openSlot })), ...done.map((x) => ({ ...x, resolved: true }))]) {
       let el = null;
-      if (e.resolved) { const p = placementOf(e.item, transcript, { resolved: true, more: !atEnd }); const at = drawnAt(transcript, p.at != null ? p.at : this._knownAt(e.item.id, transcript), drawn); el = at != null ? view._elements.get(at) : null; }
+      if (e.resolved) { const p = placementOf(e.item, transcript, { resolved: true, more: !atEnd }); const at = drawnAt(transcript, p.at != null ? p.at : this._knownAt(e.item, transcript), drawn); el = at != null ? view._elements.get(at) : null; }
       else if (plan.at.has(e.item.id)) el = view._elements.get(plan.at.get(e.item.id));
       else if (plan.dock === e.item.id && lastId != null) {
         el = view._elements.get(lastId);
@@ -395,10 +401,17 @@ export class NeedsCards {
     return null;
   }
 
-  /** The record a landing's read proved filed `id`, when it is loaded (r3) → its id | null. */
-  _knownAt(id, rows) {
-    const rec = this._filed?.get(id);
+  /** The record a landing's read proved filed `item` — THIS filing (r4) — when it is loaded (r3) → its id | null. */
+  _knownAt(item, rows) {
+    const rec = item ? this._filed?.get(filingOf(item)) : null;
     return rec != null && rows.some((r) => r && r.id === rec) ? rec : null;
+  }
+
+  /** What landings' reads proved for `entries` ({item}) → Map(item id → record id), each item's CURRENT filing only (r4). */
+  _provedOf(entries) {
+    const out = new Map();
+    if (this._filed?.size) for (const e of entries) { const rec = this._filed.get(filingOf(e.item)); if (rec != null) out.set(e.item.id, rec); }
+    return out;
   }
 
   /** Is the record `id` on screen (its element in this list)? */
@@ -634,7 +647,14 @@ export class NeedsCards {
    *  A RECORD THE READ FINDS IN THE WINDOW IS A HIT (r3 — a window ending inside the skew margin of the filing could not
    *  place the card alone; the read past it proved the record, and the landing said «not drawn» and took the tail): the card
    *  stands at that record (`_filed`). A FAILED SHOW LEAVES NO MARK (r3): a target with no box is said («the record is not
-   *  drawn»), the reader left where they are, the pin kept. → 'card' | 'record' | 'dock' | 'end' | null */
+   *  drawn»), the reader left where they are, the pin kept. THE PROOF TRAVELS WITH THE LANDING (r4 — here()'s own pass pruned
+   *  the proof of anything it does not list, a notice or an answered ask past the resolved tail, and the hit took the tail
+   *  road): here() reads the record the read found directly, and the pass never prunes the newest landing's filing; the
+   *  proof is the FILING's (id + createdAt — a re-filed ask was placed at its old filing's record). A road that fails moves
+   *  nothing (r4): a page that could not be read is said by the jump and ends the landing (no tail road after it, no
+   *  scroll, no pick kept); a show that fails after a jump rebuilt the window puts back what the jump changed (a pinned
+   *  reader at the live tail again, any other at the record they were reading); the accordion's slot moves only for a show
+   *  that lands (_show). → 'card' | 'record' | 'dock' | 'end' | null */
   async land(x, { since = null } = {}) {
     const view = this.view;
     if (view._disposed || !view._messageList) return null;
@@ -644,14 +664,15 @@ export class NeedsCards {
     if (!item) return null;
     if (since != null && view._navigatedSince?.(since)) return null;
     const gen = this._landGen = (this._landGen || 0) + 1;
+    const filing = this._flying = filingOf(item);
     view._noteUserNav?.('needsLand');
     let mark = Date.now();
     const gone = () => gen !== this._landGen || !!view._disposed || !!view._navigatedSince?.(mark);
     const ours = (p) => { mark = Date.now(); return p; }; // this landing's own jump stamps the view's navigation as it starts
     const keys = this.keys() || [];
     const isCard = item.status === 'open' && needsOf([item], keys).length > 0;
-    if (isCard) this._slot = item.id; // the accordion: the landed one is THE open card
     let missed = false; // a target found with no box (r3: said once, nothing moved)
+    let proved = null;  // the record THIS landing's read found (r4: read directly, never through a map the pass may prune)
     const show = (el) => { if (this._show(el)) return true; if (el && el.isConnected) missed = true; return false; };
     const said = () => { showToast(t('The record that filed it is not drawn in this chat'), { type: 'info' }); return null; };
     // ① / ② what is loaded — a record drawn as nothing stands for the nearest drawn record after it (r2); the record a read
@@ -663,8 +684,27 @@ export class NeedsCards {
       const rows = this._records();
       const atEnd = !view._teleported && !(view._windowEnd < view._total);
       const p = placementOf(item, rows, { resolved: true, more: !atEnd });
-      const at = drawnAt(rows, p.at != null ? p.at : this._knownAt(item.id, rows), (rid) => this._onScreen(rid));
+      const known = proved != null && rows.some((r) => r && r.id === proved) ? proved : this._knownAt(item, rows);
+      const at = drawnAt(rows, p.at != null ? p.at : known, (rid) => this._onScreen(rid));
       return at != null && show(view._elements.get(at)) ? 'record' : null;
+    };
+    // what a jump changes, to put back when the show after it fails: the pin, else the record the reader was reading
+    const backOf = () => {
+      let line = null;
+      if (!view._pinned) try { line = this._readerLine(); } catch { } // (a layout that cannot be read: nothing to put back)
+      const rid = line ? line.el.dataset.msgId : null;
+      const k = rid != null ? this._records().findIndex((r) => r.id === rid) : -1;
+      return { pinned: !!view._pinned, idx: k >= 0 ? (view._windowStart || 0) + k : null, id: rid, top: line ? line.top : null };
+    };
+    const putBack = async (b) => {
+      if (b.pinned) { await ours(view.jumpToBottom?.({ user: false, stale: gone })); return; }
+      if (b.idx == null || typeof view.jumpToIndex !== 'function') return;
+      await ours(view.jumpToIndex(b.idx, { stale: gone, land: () => {
+        const el = b.id != null ? view._elements.get(b.id) : null;
+        if (gone() || !el || !el.getClientRects().length) return;
+        const d = el.getBoundingClientRect().top - b.top;
+        if (Math.abs(d) >= 1) { view._traceExpect?.('needsPutBack'); view._messageList.scrollTop += d; }
+      } }));
     };
     const now = here();
     if (now) return now;
@@ -672,10 +712,10 @@ export class NeedsCards {
     // a seek slab has no index space: the live end first
     if (view._teleported && typeof view.jumpToBottom === 'function') {
       let landed = null;
-      await ours(view.jumpToBottom({ land: () => !gone() && !!(landed = here()), stale: gone }));
+      const moved = await ours(view.jumpToBottom({ land: () => !gone() && !!(landed = here()), stale: gone }));
       if (landed) return landed;
-      if (gone()) return null;
-      if (missed) return said();
+      if (gone() || moved === false) return null; // (a tail that could not be read: said by the jump, nothing moved — r4)
+      if (missed) return said();                  // (the jump positioned the tail it loaded)
     }
     // ③ its record outside what is loaded: the history read TOWARD it — up or down (r2: only upward, and an ask filed BELOW
     //   a window loaded mid-history was called «no record») — and the window loaded there (jumpToIndex, S1's road)
@@ -684,17 +724,18 @@ export class NeedsCards {
       let rec = null;
       idx = await this._anchorIndex(item, (r) => { rec = r; });
       if (gone()) return null;
-      if (rec && idx >= 0) (this._filed || (this._filed = new Map())).set(item.id, rec.id);
+      if (rec && idx >= 0) { proved = rec.id; (this._filed || (this._filed = new Map())).set(filing, rec.id); }
       if (rec && this._records().some((r) => r.id === rec.id)) { // in the window: a hit, never «not drawn» (r3)
         const t2 = here();
         if (t2) return t2;
         if (missed) return said();
       } else if (idx != null && idx >= 0) {
         let landed = null;
-        await ours(view.jumpToIndex(idx, { land: () => { if (!gone()) landed = here(); }, stale: gone }));
+        const back = backOf();
+        const moved = await ours(view.jumpToIndex(idx, { land: () => { if (!gone()) landed = here(); }, stale: gone }));
         if (landed) return landed;
-        if (gone()) return null;
-        if (missed) return said();
+        if (gone() || moved === false) return null; // (a page that could not be read: said by the jump, nothing moved — r4)
+        if (missed) { await putBack(back); return gone() ? null : said(); } // the jump rebuilt the window, the show failed: put back (r4)
       }
     }
     // ④ no record (−1: filed before the conversation's first record — a fact of THIS read), or unknown: an open card takes
@@ -702,18 +743,21 @@ export class NeedsCards {
     const tail = () => {
       const t3 = here();
       if (t3 || !isCard || missed) return t3;
+      const was = [this._dockPick, this._dockNoRecord];
       this._dockPick = item.id;
       this._dockNoRecord = idx === -1;
       this.render({ hold: true });
       const card = this._cardOf(item.id);
-      return card && show(card) ? 'dock' : null;
+      if (card && show(card)) return 'dock';
+      [this._dockPick, this._dockNoRecord] = was; this.render({ hold: true }); // a dock that did not land keeps no pick (r4)
+      return null;
     };
     let tried = false;
     if (view._teleported || view._windowEnd < view._total) {
       let landed = null;
-      await ours(view.jumpToBottom?.({ land: () => { if (gone()) return false; tried = true; landed = tail(); return !!landed; }, stale: gone }));
+      const moved = await ours(view.jumpToBottom?.({ land: () => { if (gone()) return false; tried = true; landed = tail(); return !!landed; }, stale: gone }));
       if (landed) return landed;
-      if (gone()) return null;
+      if (gone() || moved === false) return null; // a tail that could not be read: said ONCE by the jump — no scroll, no pick (r4)
     }
     if (!tried) { const t4 = tail(); if (t4) return t4; }
     if (missed) return said();

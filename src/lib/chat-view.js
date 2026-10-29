@@ -2449,7 +2449,7 @@ class ChatView {
     return data.messages || [];
   }
 
-  async _fetchMessagePage(offset, limit, { withStatus = false } = {}) {
+  async _fetchMessagePage(offset, limit, { withStatus = false, applyTotal = true } = {}) {
     const { backend, backendSessionId, cwd, host } = this._getSessionIds();
     if (!backendSessionId) return { messages: [], total: 0 };
     const query = new URLSearchParams({
@@ -2469,7 +2469,7 @@ class ChatView {
     // the scroll paths can surface a retry row (静默失败零容忍).
     if (!res.ok) throw new Error(t('Server error {code}', { code: res.status }));
     const data = await res.json();
-    if (typeof data.total === 'number') this._total = data.total;
+    if (applyTotal && typeof data.total === 'number') this._total = data.total; // (a tail fetch applies its own once its slab is the view — r4)
     return data;
   }
 
@@ -2625,7 +2625,7 @@ class ChatView {
         if (this._disposed || this._suspended) return;
         if (this._navigatedSince(resumeAt)) return;   // the reader went somewhere on purpose
         if (!this._pinned && !this._pinnedAtSuspend) return;
-        if (this._teleported || this._windowEnd < this._total) this.jumpToBottom({ user: false }); // re-pins itself
+        if (this._teleported || this._windowEnd < this._total) this.jumpToBottom({ user: false, stale: () => this._navigatedSince(resumeAt) }); // re-pins itself — and drops its page if the reader (or a landing) went somewhere while it was out (r4)
         else {
           this._setPinned(true, 'resumeRetail');          // re-assert: we ARE the live tail
           this._scrollToBottom();
@@ -3345,11 +3345,11 @@ class ChatView {
     if (must) this._trace('foldCeiling', { side, n: els.length, forced: must });
     if (!n) { this._trace('trimSkipZone', { side, n: els.length, st: Math.round(st), sh: shBefore, ch }); return 0; }
     const removedIds = new Set();
-    const drop = (el) => {
-      const id = el.dataset.msgId;
-      if (id) { this._elements.delete(id); this._renderedMsgIds.delete(id); removedIds.add(id); }
-      el.remove();
-    };
+    // ONE RELEASE for both roads (lane needs-card-tail r4 — the cut took a record drawn as nothing out of _messages but kept
+    // its id in _renderedMsgIds: paged back over, _onCreateMessage refused it, the window held one record fewer than its
+    // bounds and the next trim moved them one short — a drawn record never fetched again, one round trip later)
+    const release = (id) => { if (!id) return; this._elements.delete(id); this._renderedMsgIds.delete(id); removedIds.add(id); };
+    const drop = (el) => { release(el.dataset.msgId); el.remove(); };
     let anchored = null;
     // THE WINDOW'S RECORDS ARE THE WINDOW (lane needs-card-tail r3): a record drawn as nothing has no element to drop, so the
     // record list is cut where the elements were (display order) — none lingers from the trimmed range (an unknown-record
@@ -3361,6 +3361,8 @@ class ChatView {
       if (!ks.length) return n;
       const held = (m) => !!m && !removedIds.has(m.id) && this._elements.has(m.id); // past the cut and still drawn: kept
       const kept = side === 'bottom' ? [...ms.slice(0, ks[0]), ...ms.slice(ks[0]).filter(held)] : [...ms.slice(0, ks[ks.length - 1] + 1).filter(held), ...ms.slice(ks[ks.length - 1] + 1)];
+      const stays = new Set(kept);
+      for (const m of ms) if (m && !stays.has(m)) release(m.id); // every record cut is released as an element is (r4)
       this._messages = kept;
       return Math.max(n, ms.length - kept.length);
     };
@@ -3720,7 +3722,9 @@ class ChatView {
 
   // Jump to a specific message index: replace window entirely. `land` (lane needs-card-tail — the needs cards' landing):
   // called with the target element in place of the default landing (its own element, a card inside it, landed whole);
-  // `stale` (r2 — a stale landing never moves the reader): asked once the page is read — true ⇒ nothing is replaced
+  // `stale` (r2 — a stale landing never moves the reader): asked once the page is read — true ⇒ nothing is replaced.
+  // → whether the window was replaced (r4: a failed page moved nothing, and its caller must know — a landing went on to
+  // the tail road after «Couldn't load that part»)
   async jumpToIndex(targetIdx, { land = null, stale = null } = {}) {
     this._noteUserNav('jumpToIndex');   // a chosen destination — the resume re-tail must never overrule it
     this._trace('jumpToIndex', { idx: targetIdx });
@@ -3734,13 +3738,13 @@ class ChatView {
     const endLoad = this._beginHistoryLoad(t('Loading messages…'));
     try { msgs = await this._fetchMessages(start, end - start); }
     catch (e) {
-      if (stale && stale()) return;
+      if (stale && stale()) return false;
       this._showHistoryStatus(t('Couldn\'t load that part of the conversation'), {
         kind: 'error', retry: () => this.jumpToIndex(targetIdx),
       });
-      return;
+      return false;
     } finally { endLoad(); }
-    if (stale && stale()) { this._trace('jumpToIndex:stale', { idx: targetIdx }); return; } // a newer press / the reader's own move came first
+    if (stale && stale()) { this._trace('jumpToIndex:stale', { idx: targetIdx }); return false; } // a newer press / the reader's own move came first
 
     // Clear and rebuild DOM
     this._messageList.querySelectorAll('.chat-msg, .chat-msg-system').forEach(el => el.remove());
@@ -3781,6 +3785,7 @@ class ChatView {
       this._scrollElStable(targetEl);
     }
     if (this._search?.hasHighlight) this._search.applyHighlightLayer();
+    return true;
   }
 
   // Jump to the bottom of the conversation. `user:false` = the resume re-tail
@@ -3789,9 +3794,18 @@ class ChatView {
   // `land` / `stale` (lane needs-card-tail r3 — EVERY road a landing takes obeys the displacement law: an older landing's
   // tail fetch replaced the window a newer landing, or the reader's own wheel, had just made): `stale` is asked once the
   // tail is read, BEFORE the window is replaced — true ⇒ nothing is replaced (the held live ops apply to the window that
-  // stays); `land` is called once the tail is the view — truthy ⇒ it landed (the needs cards' landing), else the bottom
+  // stays); `land` is called once the tail is the view — truthy ⇒ it landed (the needs cards' landing), else the bottom.
+  // THE LAW WORKS BOTH WAYS (r4 — the ↓ pressed BEFORE a landing replaced the newer landing; the resume re-tail's page
+  // answered after a door's landing): a call with no `stale` of its own is stale once the READER moved after it — a stamp
+  // of _navigatedSince's but `_lastJumpAt` (the jump-target replay, chat-view-seek 1.6 s after a teleport, writes it with
+  // nobody's act; every jump a person makes stamps `_lastNavAt` too) WRITTEN since the call: a value compared, not a time —
+  // an act in the call's own millisecond still counts. A stale page's total is not applied (the window that
+  // stays keeps its own count — the held creates replayed onto it count once; it was +14 for +7). → true = the window was
+  // replaced, false = nothing was (the page failed, or stale), undefined = a newer tail call answers for the view
   async jumpToBottom({ user = true, land = null, stale = null } = {}) {
     if (user) this._noteUserNav('jumpToBottom');
+    const acts = () => `${this._lastNavAt || 0}|${this._lastPositionAt || 0}|${this._search?._lastRevealAt || 0}`, seen = acts();
+    if (!stale) stale = () => acts() !== seen;
     const windowSize = 50;
     const known = Number.isFinite(this._total) ? this._total : 0;
     let start = Math.max(0, known - windowSize);
@@ -3815,7 +3829,7 @@ class ChatView {
     let msgs;
     const endLoad = this._beginHistoryLoad(t('Loading messages…'));
     try {
-      let page = await this._fetchMessagePage(start, known - start);
+      let page = await this._fetchMessagePage(start, known - start, { applyTotal: false });
       // THE TAIL IS THE SERVER'S (inc-mvl02dkn-gop0): the slab above is sized by
       // OUR count, and a count that fell short (a create that rendered no card is
       // never counted) ends the slab before the conversation does — the newest
@@ -3824,21 +3838,21 @@ class ChatView {
       if (Number.isFinite(page?.total) && page.total > start + (page.messages || []).length) {
         this._trace('tailRefetch', { known, total: page.total, start, n: (page.messages || []).length });
         start = Math.max(0, page.total - windowSize);
-        page = await this._fetchMessagePage(start, page.total - start);
+        page = await this._fetchMessagePage(start, page.total - start, { applyTotal: false });
       }
       msgs = page?.messages || [];
     }
     catch (e) {
       if (call !== this._tailCall) return;   // a newer tail call answers for the view
-      if (stale && stale()) { this._releaseTailHold(hold); return; } // a stale landing's failure is nobody's to say
+      if (stale()) { this._releaseTailHold(hold); return false; } // a stale landing's failure is nobody's to say
       this._showHistoryStatus(t('Couldn\'t load the latest messages'), {
         kind: 'error', retry: () => this.jumpToBottom(),
       });
       this._releaseTailHold(hold);   // the held ops apply to the window that stays
-      return;
+      return false;
     } finally { endLoad(); }
     if (call !== this._tailCall) { this._trace('tailStale', { call, newest: this._tailCall }); return; } // verify r1: superseded
-    if (stale && stale()) { this._trace('jumpToBottom:stale', { start }); this._releaseTailHold(hold); return; } // a newer press / the reader's own move came first: the window stays
+    if (stale()) { this._trace('jumpToBottom:stale', { start }); this._releaseTailHold(hold); return false; } // a newer press / the reader's own move came first: the window stays
 
     this._messageList.querySelectorAll('.chat-msg, .chat-msg-system').forEach(el => el.remove());
     this._resetGapAfterJump();
@@ -3857,11 +3871,12 @@ class ChatView {
     this._setPinned(true, 'jumpToBottom');
     this._releaseTailHold(hold);   // pinned at the tail now: the held echo renders below the slab
     if (this._search?.hasHighlight) this._search.applyHighlightLayer();
-    if (land && land()) return;    // a landing landed at the tail (it scrolled and unpinned itself)
+    if (land && land()) return true;    // a landing landed at the tail (it scrolled and unpinned itself)
 
     // Temporarily disable content-visibility so the browser computes real heights
     // for all elements, then scroll to bottom, then re-enable
     this._forceScrollToBottom();
+    return true;
   }
 
   /** Replay the live ops a tail fetch held (B-172e ①), in arrival order, once
