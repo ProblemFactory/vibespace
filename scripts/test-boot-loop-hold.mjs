@@ -19,6 +19,11 @@
 //   ③ RED CONTROL: the same boot with VIBESPACE_BOOT_TRACE_SYNC=1 (the warm the old way, in one tick) is red by the
 //     same judge — and VIBESPACE_BOOT_TRACE=1 names the hold: the step (usage-ledger-warm) and its sync sites.
 //     (lane ledger-dedup-law r10) + a TWO-HOLD control: short calls across two holds — each credited its own share, named.
+//     Lane ledger-dedup-law r12: EVERY HOLD IS NAMED — the measured boot arms the server's CPU sampler (VIBESPACE_BOOT_TRACE_CPU=1:
+//     no call wrapped), so a hold that is no step names the frames its CPU stood in (the r11 acceptance's unnamed 272 ms THE
+//     LAW red was the browser census's walk — src/browser-orphans.js, O(daemons² × processes) on a busy box, fixed); the warm
+//     of ④ is named by its calls OR its CPU in src/usage-history.js (r11 read `sites: []` on a slow boot — its reads landed
+//     outside the step and its 3.3 s of parsing made no call); a pure control of the sampler beside the two-hold one.
 //   ⑤ A PROBE THAT CANNOT BE REAPED IS AN ANSWER (B-92a4, lane boot-probes-unkillable): the same boot with a fake `fuser`
 //     + `pgrep` on PATH that ignore TERM and never answer about a restore socket (the NFS D-state stand-in) ⇒ the listener
 //     opens within the probe cap + 5 s of the probes' start, the span names the N unanswered, every session is restored
@@ -28,6 +33,7 @@
 // Run: node scripts/test-boot-loop-hold.mjs   (BOOT_SHAPE_SCALE=0.3 for a lighter shape; BOOT_SESSIONS=13)
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
+import { performance } from 'node:perf_hooks';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
@@ -53,7 +59,8 @@ function judge(clock, law = LAW_MS, control = null) {
   return { ok: !!clock && clock.first != null && !over.length, over, gaps, top, maxMs: top ? top.ms : 0, maxHeld: gaps.reduce((m, g) => Math.max(m, g.held), 0), firstMs: clock ? clock.first : null };
 }
 /** A gap in words: «listen 226 ms (cpu 223 · run-queue wait 3 · control 0 ⇒ held 223)». */
-const gapWords = (g, names = []) => g ? `${(names.find((h) => Math.abs(h.at - g.at) <= 50) || {}).name || '—'} ${g.ms} ms (cpu ${g.cpu ?? '?'} · run-queue wait ${g.wait ?? '?'} · control ${g.ctl} ⇒ held ${g.held})` : 'none';
+const holdName = (h) => (h && (h.name || ((h.sites || [])[0] || {}).what)) || null; // r12: a step / span, else what ran in it
+const gapWords = (g, names = []) => g ? `${holdName(names.find((h) => Math.abs(h.at - g.at) <= 50)) || '—'} ${g.ms} ms (cpu ${g.cpu ?? '?'} · run-queue wait ${g.wait ?? '?'} · control ${g.ctl} ⇒ held ${g.held})` : 'none';
 console.log('① the judge');
 check('a 300 ms gap past the first turn is red', !judge({ first: 900, gaps: [{ at: 2000, ms: 300 }] }).ok);
 check('a 249 ms gap is green; the first turn (the code loading) is never judged', judge({ first: 5000, gaps: [{ at: 2000, ms: 249 }] }).ok);
@@ -146,12 +153,12 @@ await stop('SIGKILL');
 // ── boot 1: THE MEASURED BOOT ──
 console.log('③ the measured boot: production-shaped stores + the restore');
 ctlStart('measured');
-boot('measured');
+boot('measured', { VIBESPACE_BOOT_TRACE_CPU: '1' }); // r12: the sampler only — every hold named by what ran in it
 const b1 = await ready();
 await warmDone();
 await sleep(600); // the clocks' next ticks past the warm's last slice (a hold is recorded when the loop turns again)
-const rep1 = await getJson('/api/boot-trace');
-const c1 = readClock('measured'), log1 = logOf('measured');
+const c1 = readClock('measured'); // r12: the clock read BEFORE the sampler's one fold (its stop is a turn of its own)
+const rep1 = await getJson('/api/boot-trace?cpu=1'), log1 = logOf('measured'); // r12: ?cpu=1 — the samples folded, once
 const k1 = await ctlStop('measured');
 await stop();
 const j1 = judge(c1, LAW_MS, k1), names1 = (rep1 && rep1.holds) || [];
@@ -167,6 +174,9 @@ const warm1 = span(rep1, 'usage-ledger-warm');
 check('the ledger warm ran in slices and loaded the shape\'s ledger', !!warm1 && warm1.slices > 100 && warm1.rows > shape.rows.ledger * 0.5, warm1);
 check('the OTel stash replay, the identity repair and the restore probes ran off the loop (each a span that ended)', ['otel-replay', 'identity-repair', 'restore-probes'].every((n) => span(rep1, n) && span(rep1, n).ms != null), rep1 && rep1.spans);
 check(`THE LAW: no hold ≥ ${LAW_MS} ms from the first loop turn to the warm's end — the longest gap ${gapWords(j1.top, names1)}; the longest hold ${j1.maxHeld} ms; code loading ${j1.firstMs} ms, not judged; monitorEventLoopDelay max ${c1 && c1.eldMax} ms`, j1.ok, { over: j1.over.map((g) => gapWords(g, names1)), named: names1 });
+// r12: the server names EVERY hold it recorded (≥ 100 ms) — its step / span, or the frames its CPU stood in (the sampler ran)
+const unnamed1 = names1.filter((h) => !holdName(h));
+check(`every hold the server recorded is NAMED — ${names1.map((h) => `${h.ms} ms ${holdName(h) || 'UNNAMED'}`).join(' · ') || 'none ≥ 100 ms'} (the sampler: ${rep1 && rep1.cpu ? `${rep1.cpu.samples} samples${rep1.cpu.error ? ', ' + rep1.cpu.error : ''}` : 'NOT armed'}; 935a9f0b: «— 272 ms», the browser census's walk, unnamed)`, !!rep1 && !!rep1.cpu && rep1.cpu.samples > 0 && !unnamed1.length, { unnamed1, cpu: rep1 && rep1.cpu });
 // the server's own clock by the same rule: each of its holds at or over the law is a gap this clock judged the BOX's
 const serverOver = names1.filter((h) => h.ms >= LAW_MS).filter((h) => { const g = j1.gaps.find((x) => Math.abs(x.at - h.at) <= 50); return !g || g.held >= LAW_MS; });
 check(`the server's own boot clock agrees: its longest hold ${rep1 && rep1.maxHoldMs} ms (${serverOver.length ? 'held by the boot' : rep1 && rep1.maxHoldMs >= LAW_MS ? 'the box\'s, by the same three numbers' : 'under the law'}) and its code-loading time is this clock's first turn (±150 ms)`, !!rep1 && !serverOver.length && Math.abs((rep1.mainMs || 0) - (c1 ? c1.first : 0)) <= 150 + (rep1.startAt || 0), rep1 && { mainMs: rep1.mainMs, startAt: rep1.startAt, first: c1 && c1.first, maxHoldMs: rep1.maxHoldMs, serverOver });
@@ -178,12 +188,13 @@ boot('control', { VIBESPACE_BOOT_TRACE_SYNC: '1', VIBESPACE_BOOT_TRACE: '1' });
 await ready();
 await until(async () => { const r = await getJson('/api/boot-trace'); return r && (r.steps || []).some((s) => s.name === 'usage-ledger-warm') ? r : null; }, 150000);
 await sleep(600);
-const rep2 = await getJson('/api/boot-trace');
+const rep2 = await getJson('/api/boot-trace?cpu=1'); // r12: the sampler's samples folded (once)
 const c2 = readClock('control'), k2 = await ctlStop('control'), j2 = judge(c2, LAW_MS, k2);
 await stop();
 check(`the same judge (law + the same-box control) is RED on the old warm: ${gapWords(j2.top, (rep2 && rep2.holds) || [])}`, !j2.ok && j2.over.length > 0, j2);
 const named = rep2 && (rep2.holds || []).find((h) => h.name === 'usage-ledger-warm');
-check('…the server names the hold: the step usage-ledger-warm, and the tracer its sync sites in src/usage-history.js', !!named && named.ms >= LAW_MS && (named.sites || []).some((x) => /usage-history\.js/.test(x.what)), named || (rep2 && rep2.holds));
+const warmBy = (k) => ((named && named.sites) || []).filter((x) => /usage-history\.js/.test(x.what) && (k === 'cpu') === /^cpu /.test(x.what)).length;
+check(`…the server names the hold: the step usage-ledger-warm, and the tracer its sites in src/usage-history.js — ${warmBy('call')} by its sync calls, ${warmBy('cpu')} by the CPU it spent there (r11: \`sites: []\` on a slow boot — its 3.3 s of parsing made no call)`, !!named && named.ms >= LAW_MS && (named.sites || []).length > 0 && warmBy('call') + warmBy('cpu') > 0, named || (rep2 && rep2.holds));
 // lane ledger-dedup-law r10: THE TWO-HOLD CONTROL — the control above warms in ONE tick (one hold), so a fold that crossed holds
 // stayed green there; a stepped warm is many holds of short calls. 600 calls of 0.5 ms, 0.3 ms apart, across two 240 ms holds
 // (the loop turning between them, a fake clock): each hold is credited only its own share (by overlap, the op closed when the
@@ -196,6 +207,19 @@ check('…the server names the hold: the step usage-ledger-warm, and the tracer 
   try { for (let k = 0; k < 600; k++) { clock += 0.3; if (k === 300) turnNo++; fs.existsSync(f); } } finally { undo(); fs.existsSync = orig; }
   const two = [{ at: 0, ms: 240 }, { at: 240, ms: 240 }].map((g) => { const sites = typeof BT.sitesOf === 'function' ? BT.sitesOf(ops, g) : []; return { ...g, credited: sites.reduce((n, x) => n + x.ms, 0), named: sites.some((x) => /test-boot-loop-hold\.mjs/.test(x.what)) }; });
   check(`…the two-hold control: 600 short calls across two 240 ms holds — hold 1 credited ${two[0].credited} ms, hold 2 ${two[1].credited} ms, each naming its site (a fold never crosses a hold)`, two.every((g) => g.named && g.credited > 0 && g.credited <= g.ms), { two, ops: ops.length });
+}
+
+// lane ledger-dedup-law r12: THE SAMPLER'S CONTROL — 300 ms of pure CPU in a function of this file (no sync call: the call
+// tracer sees nothing) ⇒ the sampler names this file's frame for most of it (935a9f0b: no sampler — nothing named)
+{
+  const BT = require(path.join(repo, 'src/server/boot-trace.js'));
+  const smp = typeof BT.cpuSampler === 'function' ? BT.cpuSampler({ now: () => performance.now() }) : null;
+  const spinParse = (ms) => { const t1 = performance.now(); let n = 0; while (performance.now() - t1 < ms) n += JSON.parse(`{"n":${n}}`).n >= 0 ? 1 : 0; return n; };
+  const w0 = performance.now(); spinParse(300); const w = { at: w0, ms: performance.now() - w0 };
+  if (smp) smp.drain(false);
+  const got = smp ? smp.sitesIn(w) : [], mine = got.filter((x) => /test-boot-loop-hold\.mjs/.test(x.what)).reduce((n, x) => n + x.ms, 0);
+  if (smp) smp.stop();
+  check(`…the sampler's control: 300 ms of pure CPU in this file (no sync call) — ${mine} ms named to its frame (${got.map((x) => `${x.ms} ms ${x.what}`).join(' · ') || 'nothing named'})`, mine >= 200, got);
 }
 
 // ── boots 3 + 4: THE RESTORE'S PROBES CANNOT BE REAPED (B-92a4) ──

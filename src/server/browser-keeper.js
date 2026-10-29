@@ -2789,7 +2789,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       let rows = [];
       try { rows = await (daemonTable || F.daemonRows)(); } catch (e) { log.warn?.(`[browser] the daemon census could not read the process table: ${e && e.message}`); rows = []; }
       const live = liveKeys(); const dirs = orphanDirs(); const out = { ended: [], kept: [], reported: [], reowned: [] }; let pending = 0;
-      for (const d of O.daemonsFromRows(rows)) {
+      const daemons = O.daemonsFromRows(rows); // lane ledger-dedup-law r12: once a pass (the forget below re-derived it per daemon seen)
+      for (const d of daemons) {
         const id = `${d.pid}:${d.starttime}`; const seen = orphanSeen.get(id) || {}; orphanSeen.set(id, seen);
         const rec = Object.values(reg.browsers).find((r) => isLocalRec(r) && r.pid === d.pid && r.starttime === d.starttime) || null;
         if (rec && (starting.has(rec.profileId) || stopping.has(rec.profileId))) continue;
@@ -2816,7 +2817,8 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
         if (v.act === 'report') { out.reported.push({ pid: d.pid, why: v.why }); if (!seen.said && !d.cdp && !browserAlive) { seen.said = true; log.warn?.(`[browser] ${O.reportLine({ pid: d.pid, startedAt: d.startedAt, now: t })}`); } continue; }
         out.kept.push({ pid: d.pid, why: v.why }); if (!browserAlive) pending++;
       }
-      for (const k of [...orphanSeen.keys()]) if (!O.daemonsFromRows(rows).some((d) => `${d.pid}:${d.starttime}` === k)) orphanSeen.delete(k);
+      const present = new Set(daemons.map((d) => `${d.pid}:${d.starttime}`));
+      for (const k of [...orphanSeen.keys()]) if (!present.has(k)) orphanSeen.delete(k);
       await remoteOrphans(seenBy, t, out);
       orphanPending = pending;
       if (dirty) commit();

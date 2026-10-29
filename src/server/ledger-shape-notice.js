@@ -47,6 +47,11 @@
  * `earlier`) when the month's next hold re-words or reopens the item — a re-word never loses a count (r4–r8 dropped a
  * closed item's «36» when the month's next episode reopened it). A hold whose read-back FAILED (its file unreadable —
  * EACCES, EIO) is ONE notice per hold ('hold-read'), naming the file, closed when it is read.
+ * Round 12 (A LINE THAT IS NO RECORD NEVER BLOCKS): a held set file's line that is no record VibeSpace writes is SET ASIDE
+ * by usage-history (the file as it was, its bytes intact, in data/usage-history/_set-aside — the live one rewritten from
+ * its records, an older one moved) and the hold goes on; ONE notice per hold ('set-aside') names the file, the line and
+ * what was done (the rest kept, the line set aside), says nothing waits, and is closed by the owner — never «check the
+ * file's permissions» (r11 failed the read-back for ever and said that).
  * `wire({usageHistory, userTodos})` = server.js's one line (it sets `usageHistory.onShape`, reconciles 3 s after boot).
  */
 const INBOX_KEY = 'usage-ledger';
@@ -77,6 +82,19 @@ const D_READ = [
   i18nKey('What happens now: VibeSpace reads the file again by itself — after a few seconds, then less often (at most once a minute); this notice closes when it is read.'),
   i18nKey('What to do: check the file\'s permissions and the disk that holds VibeSpace\'s data folder. If this notice is still here in an hour, send feedback from the gear menu.'),
 ];
+// r12: a held set file's line that is no record — SET ASIDE (the file as it was, its bytes intact), the hold going on: ONE
+// notice per hold, re-said in place at each setting-aside, closed by the owner (nothing waits)
+const ASIDE_KEY = 'set-aside';
+const TEXT_ASIDE = i18nKey('A held usage file of {machine} for {month} had a line that is no record — set aside; nothing waits');
+const TEXT_ASIDE_UNREAD = i18nKey('An older held usage file of {machine} for {month} could not be read ({code}) — set aside; nothing waits'); // an OLDER generation's set the disk would not read: moved aside unread
+const D_ASIDE_WHAT = {
+  aside: i18nKey('What: line {line} of data/usage-history/_held/{file} is no record VibeSpace writes. VibeSpace kept every other record of the file and set the line aside: the file as it was, bytes intact, is data/usage-history/_set-aside/{aside}.'),
+  over: i18nKey('What: line {line} of data/usage-history/_held/{file} is no record VibeSpace writes. VibeSpace kept every other record of the file and removed the line — data/usage-history/_set-aside already holds {over} files, so no copy of it was kept.'),
+  kept: i18nKey('What: line {line} of data/usage-history/_held/{file} is no record VibeSpace writes. VibeSpace read every other record of the file and read past the line; it could not set the file aside ({error}) and tries again the next time it reads it.'),
+  unread: i18nKey('What: data/usage-history/_held/{file} — the record of an older hold of {month} — could not be read ({code}). VibeSpace set it aside unread, bytes intact, as data/usage-history/_set-aside/{aside}; its count of dropped events is not known.'),
+};
+const D_ASIDE_NOW = i18nKey('What happens now: nothing waits — the held events of {month} are recorded as usual. A line VibeSpace cannot read names no held event; at most, a count of dropped events said for {month} misses what it named.');
+const D_ASIDE_TODO = i18nKey('What to do: nothing — close this notice once you have read it. If it comes back, send feedback from the gear menu: the set-aside file shows what was written.');
 // r8: a count said where no pause carries it (a hold drained at a boot with no open notice, one read back with nothing live)
 const TEXT_DROPPED = i18nKey('Usage of {machine} for {month}: {dropped} held events were dropped past the bound — never recorded');
 const D_DROPPED_WHAT = i18nKey('What: while data/usage-history/{shard} was out of shape, the events of {month} were held beside it (at most {bound}); the rest of them are in the ledger now.');
@@ -188,6 +206,18 @@ function readNoticeOf({ hostName, host, shard, month, file, code, since, tag = '
   const lines = D_READ.map((key, i) => (i === 0 ? { key, params: { file: p.file, code: p.code, since: p.since, month: p.month, machine: p.machine } } : { key }));
   return { text: fillOf(TEXT_READ, p), detail: lines.map((l) => fillOf(l.key, { ...p, ...(l.params || {}) })).join('\n'), i18n: { text: { key: TEXT_READ, params: { machine: p.machine, name, tag: t, month: p.month, shard: sh, host: String(host || '').slice(0, 160), code: p.code } }, detail: lines } };
 }
+/** r12: the words of a held set file's line set aside — or an older one the disk would not read, moved aside unread (PURE):
+ *  the file, its line(s), what was done, that nothing waits; `aside` = the set-aside copy's name (`over`: the folder past its
+ *  bound, no copy; neither: it could not be set aside, `error`). */
+function asideNoticeOf({ hostName, host, shard, month, file, lines, aside, over, code, error, tag = '' } = {}) {
+  const sh = String(shard || '').slice(0, 60), mo = /^\d{4}-\d{2}$/.test(String(month || '')) ? String(month) : (/(\d{4}-\d{2})/.exec(sh) || [])[1] || 'this month';
+  const name = String(hostName || host || 'a machine').slice(0, 80), t = String(tag || '').slice(0, 24);
+  const p = { machine: t ? `${name} (${t})` : name, month: mo, file: String(file || '').slice(0, 120), line: String(lines || '').slice(0, 60), aside: String(aside || '').slice(0, 160), over: String(Math.max(0, Number(over) || 0)), code: String(code || '').slice(0, 40), error: String(error || 'an error').slice(0, 40) };
+  const unread = !lines && !!code, head = unread ? TEXT_ASIDE_UNREAD : TEXT_ASIDE;
+  const what = unread ? D_ASIDE_WHAT.unread : aside ? D_ASIDE_WHAT.aside : over ? D_ASIDE_WHAT.over : D_ASIDE_WHAT.kept;
+  const rows = [{ key: what, params: { line: p.line, file: p.file, aside: p.aside, over: p.over, error: p.error, code: p.code, month: p.month } }, { key: D_ASIDE_NOW, params: { month: p.month } }, { key: D_ASIDE_TODO }];
+  return { text: fillOf(head, p), detail: rows.map((l) => fillOf(l.key, { ...p, ...(l.params || {}) })).join('\n'), i18n: { text: { key: head, params: { machine: p.machine, name, tag: t, month: p.month, shard: sh, host: String(host || '').slice(0, 160), code: p.code } }, detail: rows } };
+}
 /** r8: the words of the `_held/` listing that failed (PURE). */
 function listNoticeOf({ code, since } = {}) {
   const p = { code: String(code || 'an error').slice(0, 40), since: since ? hhmm(since) : 'a while' };
@@ -199,7 +229,7 @@ function wire({ usageHistory, userTodos, log = (m) => console.log('[usage]', m),
   if (!usageHistory) return null;
   const open = new Map(); // host × file → For-you item id (r4: ONE notice per paused month of a machine; r5: its identity)
   /** r8: THE one filing of this module (a pause, a count said, the listing) — by its key, never by its words (r6). */
-  const fileItem = (w, itemKey) => userTodos.add(INBOX_KEY, { origin: 'server', kind: 'notice', urgency: 'high', by: 'agent', sessionName: 'Usage', text: w.text, detail: w.detail, i18n: w.i18n, itemKey });
+  const fileItem = (w, itemKey, urgency = 'high') => userTodos.add(INBOX_KEY, { origin: 'server', kind: 'notice', urgency, by: 'agent', sessionName: 'Usage', text: w.text, detail: w.detail, i18n: w.i18n, itemKey }); // r12: a set-aside line's notice is 'normal' (nothing waits)
   const keyOf = (host, shard) => `${host}\n${shard}`;
   const close = (id, by) => { try { const it = userTodos.get?.(id); if (it && it.status === 'open') userTodos.setStatus(id, 'done', by); } catch { } };
   const paramsOf = (it) => (it && it.i18n && it.i18n.text && it.i18n.text.params) || {};
@@ -345,6 +375,21 @@ function wire({ usageHistory, userTodos, log = (m) => console.log('[usage]', m),
         if (it.status === 'open') return; // said once
         userTodos.reshapeItems((x, now) => { if (x.id !== it.id) return false; x.text = w.text; x.detail = w.detail; x.i18n = w.i18n; x.urgency = 'high'; x.status = 'open'; x.resolvedAt = null; x.resolvedBy = null; x.expiresAt = null; x.createdAt = now; delete x.judged; return true; });
       } catch (e) { log(`the unreadable hold's notice was not filed: ${e.message}`); }
+    } else if (ev.kind === 'set-aside') {
+      // r12: a held set file's line set aside — ONE item per hold (host × file): filed, re-said in place by the next setting-
+      // aside (a closed one reopened, never a second), closed by the owner; the reconcile leaves it (nothing waits)
+      try {
+        const k = `${ASIDE_KEY}\n${ev.host}\n${ev.shard}`, it = keyedItem(k);
+        const pause = itemOf(ev.host, ev.shard), name = (ev.hostName && ev.hostName !== ev.host ? ev.hostName : nameOf(pause)) || ev.host;
+        const w = asideNoticeOf({ ...ev, hostName: name });
+        if (!it) { fileItem(w, k, 'normal'); return; }
+        userTodos.reshapeItems((x, now) => {
+          if (x.id !== it.id || (x.status === 'open' && x.text === w.text && x.detail === w.detail)) return false;
+          x.text = w.text; x.detail = w.detail; x.i18n = w.i18n;
+          if (x.status !== 'open') { x.status = 'open'; x.resolvedAt = null; x.resolvedBy = null; x.expiresAt = null; x.createdAt = now; delete x.judged; }
+          return true;
+        });
+      } catch (e) { log(`the set-aside line's notice was not filed: ${e.message}`); }
     } else if (ev.kind === 'hold-list') {
       try {
         const it = listItem();
@@ -360,6 +405,7 @@ function wire({ usageHistory, userTodos, log = (m) => console.log('[usage]', m),
   const keyedItem = (k) => { const ids = typeof userTodos.idsWhere === 'function' ? userTodos.idsWhere((i) => ours(i) && i.itemKey === k) : []; return ids.map((x) => userTodos.get(x)).filter(Boolean).sort((a, b) => (Number(a.createdAt) || 0) - (Number(b.createdAt) || 0)).pop() || null; };
   const listItem = () => keyedItem(LIST_KEY);
   const isRead = (it) => String((it && it.itemKey) || '').startsWith(READ_KEY + '\n');
+  const isAside = (it) => String((it && it.itemKey) || '').startsWith(ASIDE_KEY + '\n'); // r12
   /** r8: a count said where no open pause carries it — the item of (host, file) says it already (open or closed: its line
    *  has the count), else it is re-said in place (open) or one is filed (a closed one reopened: never a second) → whether
    *  it is on disk. */
@@ -396,6 +442,7 @@ function wire({ usageHistory, userTodos, log = (m) => console.log('[usage]', m),
       for (const it of (userTodos.snapshot?.() || {}).open || []) {
         if (!it || it.sessionKey !== INBOX_KEY || it.kind !== 'notice' || it.origin !== 'server') continue;
         if (it.itemKey === LIST_KEY || isRead(it)) continue; // r8: judged after the holds are listed (below) — r9: a hold read-back's too
+        if (isAside(it)) continue; // r12: a line set aside — said; the owner closes it (nothing waits)
         if (it.i18n && it.i18n.text && it.i18n.text.key === TEXT_DROPPED) continue; // r8: a count said — the owner closes it
         const p = (it.i18n && it.i18n.text && it.i18n.text.params) || {};
         if (open.get(keyOf(p.host, p.shard)) === it.id) continue;
@@ -436,4 +483,4 @@ function wire({ usageHistory, userTodos, log = (m) => console.log('[usage]', m),
   return { open, reconcile };
 }
 
-module.exports = { wire, noticeOf, droppedNoticeOf, listNoticeOf, readNoticeOf, INBOX_KEY, LIST_KEY, READ_KEY, TEXT, TEXT_DRAIN, TEXT_DROPPED, TEXT_LIST, TEXT_READ, D_WHAT, D_HELD, D_DROPPED, D_DROPPED_MAYBE, D_DROPPED_EARLIER, D_DROPPED_WHAT, D_TODO_READ, D_LIST, D_READ, D_NOW, D_DRAIN_FAILED, D_TODO };
+module.exports = { wire, noticeOf, droppedNoticeOf, listNoticeOf, readNoticeOf, asideNoticeOf, INBOX_KEY, LIST_KEY, READ_KEY, ASIDE_KEY, TEXT, TEXT_DRAIN, TEXT_DROPPED, TEXT_LIST, TEXT_READ, TEXT_ASIDE, TEXT_ASIDE_UNREAD, D_ASIDE_WHAT, D_ASIDE_NOW, D_ASIDE_TODO, D_WHAT, D_HELD, D_DROPPED, D_DROPPED_MAYBE, D_DROPPED_EARLIER, D_DROPPED_WHAT, D_TODO_READ, D_LIST, D_READ, D_NOW, D_DRAIN_FAILED, D_TODO };

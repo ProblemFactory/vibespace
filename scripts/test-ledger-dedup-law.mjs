@@ -359,7 +359,7 @@ await leg('⑧', async () => {
   const { Worker } = require('node:worker_threads');
   const H = fs.readFileSync(path.join(REPO, 'src/usage-history.js'), 'utf8'), roadFile = path.join(REPO, 'src/usage-hold-road.js');
   const R = fs.existsSync(roadFile) ? fs.readFileSync(roadFile, 'utf8') : '';
-  const methods = (text) => { const out = new Map(), heads = [...text.matchAll(/^  (?:async )?([A-Za-z_$][\w$]*)\s*\(.*\)\s*\{/gm)]; heads.forEach((m, i) => out.set(m[1], text.slice(m.index, i + 1 < heads.length ? heads[i + 1].index : text.length))); return out; };
+  const methods = (text) => { const out = new Map(), heads = [...text.matchAll(/^  (?:async )?([A-Za-z_$][\w$]*)\s*\(.*\)\s*\{/gm)].filter((m) => !/^(if|for|while|switch|catch|function|return)$/.test(m[1])); /* r12: a keyword is no method */ heads.forEach((m, i) => out.set(m[1], text.slice(m.index, i + 1 < heads.length ? heads[i + 1].index : text.length))); return out; };
   const hm = methods(H), rm = methods(R);
   const both = [...rm.keys()].filter((n) => hm.has(n) && n !== 'constructor');
   const seen = new Set(), todo = ['_aggBegin', '_aggRow', '_aggEnd', '_packWhole'];

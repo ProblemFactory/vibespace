@@ -11,6 +11,11 @@
 // pre-fix control ⑤ the other half over time on a fake clock (a silent endpoint, a Chrome gone; the row + the journal say it;
 // CONTROL the pre-fix verdict keeps both) ⑥ the boot (a stopped record's daemon whose page answers RE-OWNED, a silent one
 // ENDED with its Chrome, a live record whose page answers nothing ENDED at adoption; CONTROL the pre-fix boot leaves them).
+// LANE LEDGER-DEDUP-LAW r12 (test-boot-loop-hold's law, red at 272 ms on a busy box): ⑦ THE CENSUS READS THE TABLE ONCE — the
+// real keeper's boot census over a busy box's table (1 500 processes, 40 daemons) calls daemonsFromRows ONCE a pass, the
+// call O(processes); CONTROL the pre-fix reader (inline, its per-daemon filters) — the same answer on random tables, and
+// once more per daemon seen: ~40× the cost of one loop turn's census. The claim is a COUNT (test-ci-gate: no wall-clock
+// bound in a fast suite): the row reads one call makes, through proxied rows.
 import { createRequire } from 'module';
 import fs from 'fs';
 import os from 'os';
@@ -276,6 +281,62 @@ console.log('— ④ browser-serve end-daemon + the capability gate');
   ok((await ask(['browser-serve', 'browser-end-daemon'], 'end-daemon')).asked === 'end-daemon', 'with the capability it is asked');
   const daemonSrc = fs.readFileSync(path.join(REPO, 'src/agentd/agentd.js'), 'utf8');
   ok(/capabilities: \[[^\]]*'browser-end-daemon'[^\]]*\]/.test(daemonSrc) && S.BROWSER_SERVE_OPS.includes('end-daemon'), 'the daemon announces `browser-end-daemon`; `end-daemon` is in the shared op table');
+}
+
+console.log('— ⑦ the census reads the table once (lane ledger-dedup-law r12)');
+{
+  const base = (p) => String(p || '').split('/').pop(), num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+  const daemonsFromRowsBefore = function (rows) { // 935a9f0b's, verbatim (its `base`/`num` are the module's)
+    const all = (Array.isArray(rows) ? rows : []).filter((r) => r && Number.isInteger(r.pid));
+    const byPid = new Map(all.map((r) => [r.pid, r]));
+    const kids = (pid) => all.filter((r) => r.ppid === pid);
+    const isXvfb = (r) => /^Xvfb$/.test(base((r.argv || [])[0]));
+    const authOf = (r) => { const a = r.argv || []; const i = a.indexOf('-auth'); return i >= 0 ? String(a[i + 1] || '') : ''; };
+    const isChrome = (r) => !isXvfb(r) && !/agent-browser/.test(base((r.argv || [])[0])) && !(r.argv || []).some((x) => /^--type=/.test(String(x)));
+    // lane browser-daemon-survives-update: the Chrome's own endpoint (its DevTools port, its directory) off its argv
+    const argOf = (r, k) => { const a = (r.argv || []).find((x) => String(x).startsWith(k + '=')); return a ? String(a).slice(k.length + 1) : null; };
+    const daemons = all.filter((r) => /agent-browser/.test(base((r.argv || [])[0])) && r.env && r.env.AGENT_BROWSER_DAEMON === '1');
+    return daemons.map((d) => {
+      const near = [...kids(d.pid), ...kids(d.pid).flatMap((k) => kids(k.pid))];
+      const xa = d.env && d.env.XAUTHORITY ? String(d.env.XAUTHORITY) : '';
+      const xvfb = all.filter((r) => isXvfb(r) && (near.includes(r) || (xa && authOf(r) === xa)));
+      return {
+        pid: d.pid, ppid: d.ppid, cdp: !!(d.env && d.env.AGENT_BROWSER_CDP), starttime: d.starttime == null ? null : d.starttime, startedAt: num(d.startedAt), env: d.env || {},
+        chrome: near.filter(isChrome).map((r) => ({ pid: r.pid, starttime: r.starttime, port: Number(argOf(r, '--remote-debugging-port')) || null, dir: argOf(r, '--user-data-dir') })),
+        xvfb: [...new Set(xvfb)].map((r) => ({ pid: r.pid, starttime: r.starttime, auth: authOf(r) || null })),
+        parentAlive: byPid.has(d.ppid),
+      };
+    });
+  };
+  let seed = 11; const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+  const table = (n, d) => {
+    const rows = [];
+    for (let i = 0; i < n; i++) rows.push({ pid: 1000 + i, ppid: 1000 + Math.floor(rnd() * Math.max(1, i)), starttime: 5000 + i, startedAt: 0, argv: ['/usr/bin/bash', '-c', 'x'] });
+    for (let k = 0; k < d; k++) {
+      const p = 50000 + 10 * k, xa = `/tmp/agent-browser-xauth-${k}`;
+      rows.push({ pid: p, ppid: 1, starttime: 9000 + k, startedAt: NOW - 3 * H, argv: ['/opt/agent-browser/agent-browser-linux-x64'], env: { AGENT_BROWSER_DAEMON: '1', XAUTHORITY: rnd() < 0.5 ? xa : '' } });
+      rows.push({ pid: p + 1, ppid: p, starttime: 9100 + k, argv: ['/usr/bin/google-chrome', `--remote-debugging-port=${40000 + k}`, `--user-data-dir=/tmp/c${k}`] });
+      rows.push({ pid: p + 2, ppid: rnd() < 0.5 ? p : 1, starttime: 9200 + k, argv: ['Xvfb', ':9' + k, '-auth', xa] });
+      rows.push({ pid: p + 3, ppid: p + 1, starttime: 9300 + k, argv: ['/usr/bin/google-chrome', '--type=renderer'] });
+    }
+    return rows.sort(() => rnd() - 0.5);
+  };
+  let differ = 0;
+  for (let i = 0; i < 200; i++) { const t = table(20 + Math.floor(rnd() * 300), 1 + Math.floor(rnd() * 12)); if (JSON.stringify(O.daemonsFromRows(t)) !== JSON.stringify(daemonsFromRowsBefore(t))) differ++; }
+  const rows = table(1500, 40), dataDir = path.join(ROOT, 'data-census'); fs.mkdirSync(dataDir, { recursive: true });
+  const real = O.daemonsFromRows; let calls = 0;
+  O.daemonsFromRows = (r) => { calls++; return real(r); };
+  try {
+    const keeper = K.create({ dataDir, homeDir: ROOT, env: () => ({ PATH: path.join(ROOT, 'nobin'), HOME: ROOT }), liveKeys: () => new Set(), install: false, log: { log() { }, warn() { }, error() { } }, now: () => NOW, daemonTable: async () => rows, endIdentity: async () => 'ended' });
+    await keeper.boot();
+  } finally { O.daemonsFromRows = real; }
+  // THE WORK, COUNTED: every field read of a row in one call (a Proxy per row) — the reader's, and the pre-fix one's
+  const reads = (fn) => { let n = 0; const px = rows.map((r) => new Proxy(r, { get(t, k, rc) { n++; return Reflect.get(t, k, rc); } })); fn(px); return n; };
+  const now = reads((r) => real(r)), was = reads((r) => daemonsFromRowsBefore(r));
+  // the reader: ~6 field reads a row + one Xvfb match per daemon × Xvfb (40 × 40 here); the pre-fix one: the whole table per daemon
+  ok(differ === 0 && calls === 1 && now <= 6 * rows.length + 2 * 40 * 40 && was > 40 * rows.length,
+    `⑦ the census over a busy box's table (${rows.length} processes, 40 daemons) calls daemonsFromRows ${calls}× a pass, and a call reads ${now} row fields (${(now / rows.length).toFixed(1)} a row — linear in the processes + 40 × 40 Xvfb matches); the same answer as the pre-fix reader on ${200 - differ} of 200 random tables (CONTROL the pre-fix reader: ${was} row fields a call — ${(was / rows.length).toFixed(0)} a row, × the daemons — and the census called it once more per daemon seen: ${41 * was} reads a pass, test-boot-loop-hold's 272 ms hold)`,
+    { differ, calls, now, was });
 }
 
 console.log(`\n${fail ? '✗' : '✓'} test-browser-orphans: ${pass} passed, ${fail} failed`);

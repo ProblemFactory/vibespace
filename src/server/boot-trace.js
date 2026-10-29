@@ -16,6 +16,15 @@
 // VIBESPACE_BOOT_TRACE=1 also NAMES the sync work inside each hold: every fs.*Sync / execFileSync / execSync /
 // spawnSync call and every JSON.parse of ≥ 1 MB is timed with its first repo frame until the window closes, and each
 // hold lists its top sites. A diagnostics door (a stack per call) — never on by default.
+// Lane ledger-dedup-law r12: A HOLD OF PURE CPU IS NAMED TOO — the calls above are a hold's sync CALLS; a hold that made
+// none (the sync ledger warm: 98 % of its 4 s is parsing lines, its reads landed outside it on a slow boot — `sites: []`;
+// the browser census's walk of the process table) named nothing. VIBESPACE_BOOT_TRACE=1 also SAMPLES the main thread's
+// stack (the in-process inspector's profiler, every CPU_SAMPLE_US), and each hold names the repo frames its samples stood
+// in (`cpu <function> (<file>:<line>)`, the garbage collector by its name) beside its calls. VIBESPACE_BOOT_TRACE_CPU=1
+// arms the sampler alone (no call is wrapped — a sample costs the loop µs): the gate's measured boot names every hold.
+// The samples are FOLDED ONCE — at the window's close, or when a report asks (`GET /api/boot-trace?cpu=1`, `report({cpu:
+// true})`): the profiler is never restarted (a start re-logs every compiled function — ~150 ms of the loop on a booted
+// hub; folding at each report made the gate's 250 ms poll a hold of its own). Before the fold a hold names its calls only.
 // VIBESPACE_BOOT_TRACE_SYNC=1 is the gate's RED control (scripts/test-boot-loop-hold.mjs): the boot's ledger warm runs
 // the old way, in one tick on the loop.
 // NOTES (B-92a4): a boot step's own lines that outlive its span — the restore's probe-pending sessions and the re-probe's
@@ -60,6 +69,7 @@ function start({ dataDir, env = process.env, now = () => performance.now(), wind
   };
   const timer = setInterval(tick, TICK_MS); if (timer.unref) timer.unref();
   const unwrap = env.VIBESPACE_BOOT_TRACE === '1' ? wrapSync({ ops, now, turn: () => turns }) : () => { };
+  const cpu = env.VIBESPACE_BOOT_TRACE === '1' || env.VIBESPACE_BOOT_TRACE_CPU === '1' ? cpuSampler({ now }) : null; // r12
   const nameOf = (g) => {
     if (g.label) return g.label;
     const overlap = (x) => Math.max(0, Math.min(g.at + g.ms, x.at + x.ms) - Math.max(g.at, x.at));
@@ -70,16 +80,22 @@ function start({ dataDir, env = process.env, now = () => performance.now(), wind
   };
   // a hold is the span between two turns of the clock: [last, t]. r11: the exact span (r10 used the rounded [at - 1, at +
   // ms + TICK_MS]: two holds in a row overlapped by 1 ms and an op there was credited to both)
-  const holdSites = (g) => sitesOf(ops, g.t1 != null ? { at: g.t0, ms: g.t1 - g.t0 } : { at: g.at - 1, ms: g.ms + TICK_MS + 1 });
-  function report() {
-    const holds = gaps.slice().sort((a, b) => b.ms - a.ms).slice(0, KEEP).map((g) => ({ at: g.at, ms: g.ms, name: nameOf(g), ...(ops.length ? { sites: holdSites(g) } : {}) }));
+  const holdWin = (g) => (g.t1 != null ? { at: g.t0, ms: g.t1 - g.t0 } : { at: g.at - 1, ms: g.ms + TICK_MS + 1 });
+  // r12: a hold's calls (top 3) and the frames its CPU stood in (top 3, `cpu …`)
+  const holdSites = (g) => [...(ops.length ? sitesOf(ops, holdWin(g)) : []), ...(cpu ? cpu.sitesIn(holdWin(g)) : [])];
+  function report({ cpu: foldCpu = false } = {}) {
+    if (cpu && (foldCpu || closed)) cpu.drain(false); // r12: folded ONCE, never restarted (a restart re-logs every compiled function)
+    const holds = gaps.slice().sort((a, b) => b.ms - a.ms).slice(0, KEEP).map((g) => ({ at: g.at, ms: g.ms, name: nameOf(g), ...(ops.length || cpu ? { sites: holdSites(g) } : {}) }));
     return { pid: process.pid, startedAt: Math.round(performance.timeOrigin + startAt), startAt: Math.round(startAt), mainMs, listenAt: listenAt == null ? null : Math.round(listenAt), windowMs, closed, traced: env.VIBESPACE_BOOT_TRACE === '1',
+      ...(env.VIBESPACE_BOOT_TRACE === '1' ? { ops: ops.length, opsDropped: ops.dropped || 0 } : {}), // r12: the ops kept, and those past OPS_MAX — a hold with `sites: []` says whether its ops were dropped
+      ...(cpu ? { cpu: cpu.facts() } : {}), // r12: the sampler's samples (kept, dropped, its interval) — or why it could not run
       maxHoldMs: gaps.reduce((m, g) => Math.max(m, g.ms), 0), eldMaxMs: Math.round(eld.max / 1e6), holds, steps: steps.map((s) => ({ name: s.name, at: Math.round(s.at), ms: Math.round(s.ms) })), spans: spans.map((s) => ({ name: s.name, at: Math.round(s.at), ms: s.ms == null ? null : Math.round(s.ms), ...(s.facts || {}) })), notes: notes.slice() };
   }
   function close() {
     if (closed) return;
     closed = true; clearInterval(timer); eld.disable(); unwrap();
     const rep = report();
+    if (cpu) cpu.stop(); // r12: after the report's last drain
     if (dataDir) {
       const file = path.join(dataDir, 'boot-trace.json');
       fs.promises.writeFile(file + '.tmp', JSON.stringify(rep, null, 1)).then(() => fs.promises.rename(file + '.tmp', file)).catch(() => { }).finally(() => resolveDone(rep));
@@ -99,7 +115,7 @@ function start({ dataDir, env = process.env, now = () => performance.now(), wind
     listening() { if (listenAt === null) listenAt = now(); sticky = 'listen'; },
     report, close, done,
     /** GET /api/boot-trace — this boot's holds (live until the window closes). */
-    register(app) { app.get('/api/boot-trace', (req, res) => res.json(report())); },
+    register(app) { app.get('/api/boot-trace', (req, res) => res.json(report({ cpu: !!(req.query && req.query.cpu === '1') }))); }, // r12: ?cpu=1 folds the sampler's samples (once)
   };
   return one;
 }
@@ -203,4 +219,62 @@ function wrapSync({ ops, now, turn = () => 0 }) {
   return () => { for (const u of undo.splice(0)) u(); };
 }
 
-module.exports = { start, wrapSync, sitesOf, TICK_MS, HOLD_MS, WINDOW_MS, FOLD_MS, ARG_KEY_MAX };
+/** r12: THE CPU SAMPLER — the main thread's stack every CPU_SAMPLE_US (the in-process inspector's profiler; its sample times
+ *  are the monotonic clock's µs, put on the tracer's clock by one offset taken at its start). `drain(again)` folds the
+ *  samples in (stop, read; `again` starts it once more — the tracer never asks: a start re-logs every compiled function) — each kept as (its time, the first repo frame from the top of its stack: its
+ *  function and line; outside the tracer and node_modules; the garbage collector and V8's own work by their names; an idle
+ *  sample is no hold's and is not kept). `sitesIn({at, ms}, top)` → the frames a window's samples stood in, their ms
+ *  (samples × the interval), as `{ms, what: 'cpu …'}`. Bounded: CPU_SAMPLES_MAX samples, the rest counted. → null when no
+ *  inspector can be had (a build without it): the report says so (`cpu.error`). */
+const CPU_SAMPLE_US = 1000;
+const CPU_SAMPLES_MAX = 200000;
+function cpuSampler({ now }) {
+  const root = path.join(__dirname, '..', '..') + path.sep;
+  const at = [], what = [], names = [], nameIx = new Map();
+  let session = null, running = false, off = 0, dropped = 0, error = null;
+  const ix = (n) => { let k = nameIx.get(n); if (k === undefined) { k = names.length; names.push(n); nameIx.set(n, k); } return k; };
+  const post = (m, q) => { let out = null; session.post(m, q || {}, (e, r) => { if (e) error = String((e && e.message) || e).slice(0, 120); else out = r || {}; }); return out; }; // the in-process session answers synchronously
+  const begin = () => { off = now() - Number(process.hrtime.bigint()) / 1e6; running = !!post('Profiler.start'); };
+  try { const inspector = require('inspector'); session = new inspector.Session(); session.connect(); post('Profiler.enable'); post('Profiler.setSamplingInterval', { interval: CPU_SAMPLE_US }); begin(); }
+  catch (e) { error = String((e && e.message) || e).slice(0, 120); session = null; }
+  function fold(prof) {
+    const byId = new Map(), parent = new Map(), memo = new Map();
+    for (const n of prof.nodes || []) { byId.set(n.id, n); for (const c of n.children || []) parent.set(c, n.id); }
+    const frameOf = (id) => {
+      let k = memo.get(id);
+      if (k !== undefined) return k;
+      const n0 = byId.get(id), fn0 = n0 ? n0.callFrame.functionName : '';
+      if (fn0 === '(idle)') k = -1; // the loop waiting — no hold's
+      else if (fn0 === '(garbage collector)' || fn0 === '(program)') k = ix(fn0);
+      else {
+        for (let n = n0; n && k === undefined; n = byId.get(parent.get(n.id))) {
+          const u = String(n.callFrame.url || '').replace(/^file:\/\//, '');
+          if (u.startsWith(root) && !u.includes('node_modules') && !u.endsWith('boot-trace.js')) k = ix(`${n.callFrame.functionName || '(anonymous)'} (${u.slice(root.length)}:${n.callFrame.lineNumber + 1})`);
+        }
+        if (k === undefined) k = ix('(outside the repo)');
+      }
+      memo.set(id, k); return k;
+    };
+    let t = prof.startTime || 0;
+    for (let i = 0; i < (prof.samples || []).length; i++) {
+      t += prof.timeDeltas[i] || 0;
+      const k = frameOf(prof.samples[i]);
+      if (k < 0) continue;
+      if (at.length >= CPU_SAMPLES_MAX) { dropped++; continue; }
+      at.push(off + t / 1000); what.push(k);
+    }
+  }
+  return {
+    drain(again) { if (!session || !running) return; const r = post('Profiler.stop'); running = false; if (r && r.profile) fold(r.profile); if (again) begin(); },
+    sitesIn(w, top = 3) {
+      let lo = 0, hi = at.length; while (lo < hi) { const m = (lo + hi) >> 1; if (at[m] < w.at) lo = m + 1; else hi = m; } // the samples are in time order
+      const by = new Map();
+      for (let i = lo; i < at.length && at[i] <= w.at + w.ms; i++) by.set(what[i], (by.get(what[i]) || 0) + 1);
+      return [...by].sort((a, b) => b[1] - a[1]).slice(0, top).map(([k, n]) => ({ ms: Math.round(n * CPU_SAMPLE_US / 1000), what: `cpu ${names[k]}` }));
+    },
+    facts() { return { samples: at.length, dropped, intervalUs: CPU_SAMPLE_US, running, ...(error ? { error } : {}) }; }, // `running`: not folded yet
+    stop() { this.drain(false); try { if (session) { post('Profiler.disable'); session.disconnect(); } } catch { } session = null; },
+  };
+}
+
+module.exports = { start, wrapSync, sitesOf, cpuSampler, TICK_MS, HOLD_MS, WINDOW_MS, FOLD_MS, ARG_KEY_MAX, CPU_SAMPLE_US };
