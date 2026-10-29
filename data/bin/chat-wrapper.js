@@ -169,9 +169,10 @@ try { fs.mkdirSync(path.dirname(metaFile), { recursive: true }); } catch {}
 // why): until then this process holds every frame, exactly like a .354 one.
 const CLAUDE_QUEUE_VERBS = ['remove', 'steer', 'steer-all', 'reorder', 'edit'];
 const CLAUDE_HOLD_VERBS = ['remove', 'reorder', 'edit'];
-// receipts (lane human-cli r2): this wrapper acks a frame BY ITS ID, writes that ack into the buffer when the frame asks
-// (`webui_receipt` — the person's CLI never stays attached; it reads the buffer) and refuses a TORN line with `_stdin_nack`
-const meta = { pid: process.pid, startedAt: Date.now(), mode: 'chat', tasks: {}, todos: [], caps: { frameFile: true, inputQueue: true, queueVerbs: CLAUDE_HOLD_VERBS, queueResync: true, receipts: true }, queue: [] };
+// receipts (lane human-cli r2/r3): this wrapper acks a frame BY ITS ID, writes that ack into its RECEIPTS file when the frame
+// asks (`webui_receipt` — the person's CLI never stays attached; never the replay buffer) and refuses a TORN line with `_stdin_nack`
+const meta = { pid: process.pid, startedAt: Date.now(), mode: 'chat', tasks: {}, todos: [], caps: { frameFile: true, inputQueue: true, queueVerbs: CLAUDE_HOLD_VERBS, queueResync: true }, queue: [] };
+meta.caps.receipts = true;   // lane human-cli: the receipts road (an ack by id, a torn line's nack — <id>.receipts beside the buffer)
 let metaTimer = null;
 
 // replaced, never rewritten in place (ci358-reds item 7): a hub read between writeFileSync's truncate and its bytes saw an
@@ -203,12 +204,22 @@ function persistBuffer() {
 }
 
 function schedulePersist() {
-  if (!writeTimer) writeTimer = setTimeout(persistBuffer, 2000);
+  if (!writeTimer) writeTimer = setTimeout(persistBuffer, Date.now() - lastReceiptAt < FOLLOWED_MS ? 250 : 2000);   // a person's CLI follows the buffer (it asked for a receipt lately): its replies land in 250 ms
 }
-/** A receipt is waited for (the person's CLI reads the buffer file): the pending persist runs now, not in 2 s. */
-function persistSoon() {
-  if (writeTimer) clearTimeout(writeTimer);
-  writeTimer = setTimeout(persistBuffer, 50);
+/** THE RECEIPTS ROAD (lane human-cli r3): a receipt is the WRITER's, never a replayed record — the buffer is what a
+ *  conversation replays to a person. The ack a frame asked for (`webui_receipt`: the person's CLI never stays attached)
+ *  and a torn line's nack go to <id>.receipts beside the buffer (the last 50, rewritten whole; removed when this wrapper
+ *  exits) — the CLI follows that file (src/local-index.js receiptsFileOf spells the same name). */
+const receiptsFile = bufferFile ? String(bufferFile).replace(/\.buf$/, '') + '.receipts' : null;
+const receiptLines = [];
+var lastReceiptAt = 0;            // var: schedulePersist may run before this line (a record at boot) — undefined reads as «not followed»
+const FOLLOWED_MS = 120000;       // a receipt asked for in the last 2 min = a person's CLI is following this buffer
+function writeReceipt(rec) {
+  if (!receiptsFile) return;
+  lastReceiptAt = Date.now();
+  receiptLines.push(JSON.stringify(rec));
+  if (receiptLines.length > 50) receiptLines.shift();
+  try { fs.writeFileSync(receiptsFile, receiptLines.join('\n') + '\n'); } catch {}
 }
 /** The ring (keep the last MAX_BUFFER chars, aligned to a line). THE KEPT FILE OUTLIVES THE FRAME IT SERVES (acceptance r6:
  *  a 522 KB output burst trimmed a HELD frame's copy line and its picture 6 s after they were written — a restart in the gap
@@ -223,6 +234,7 @@ function trimBuffer() {
   if (!gone.includes('"webui_copy"')) return;
   for (const l of KC.pinnedLines(gone, buffer, [...copies.values()].filter((c) => !c.settled).map((c) => c.line))) buffer += l + '\n';
 }
+process.on('exit', () => { if (receiptLines.length) { try { fs.unlinkSync(receiptsFile); } catch {} } });
 
 let child = null;
 let childDead = true;
@@ -1222,17 +1234,18 @@ for (const sig of Object.keys(WRAPPER_SIGNO)) process.on(sig, () => onWrapperSig
 // still taken as typed text.
 const looksLikeFrame = (line) => line[0] === '{' || line.endsWith('}') || /"[\w-]+"\s*:/.test(line);
 /** The ack: the pipe is alive (the server's broken-pty detector) AND, for a frame, WHICH frame — `msg_id` = its
- *  webui_msg_id / request_id. A frame that asked for a receipt gets the same record in the buffer. */
+ *  webui_msg_id / request_id. A frame that asked for a receipt gets the same record in its receipts file. */
 function ackLine(id, receipt) {
-  const line = JSON.stringify({ type: '_stdin_ack', timestamp: Date.now(), ...(id ? { msg_id: String(id) } : {}) });
-  if (receipt) { buffer += line + '\n'; persistSoon(); }
-  try { process.stdout.write(line + '\n'); } catch {}
+  const ack = { type: '_stdin_ack', timestamp: Date.now(), ...(id ? { msg_id: String(id) } : {}) };
+  if (receipt) writeReceipt(ack);
+  try { process.stdout.write(JSON.stringify(ack) + '\n'); } catch {}
 }
 function nackTorn(line) {
   log(`stdin line unparseable (${line.length} bytes, starts ${JSON.stringify(line.slice(0, 48).replace(/\s+/g, ' '))}) — refused, NOT sent to claude`);
-  record('_stdin_nack', { timestamp: Date.now(), reason: 'torn', bytes: line.length });
+  const nack = { type: '_stdin_nack', timestamp: Date.now(), reason: 'torn', bytes: line.length };
+  writeReceipt(nack);                                                        // the sender's receipt — never a replayed record
+  try { process.stdout.write(JSON.stringify(nack) + '\n'); } catch {}       // the pipe is alive (the server's detector)
   record('system', { subtype: 'informational', level: 'warning', content: `A message did not reach Claude: its line arrived corrupted (${line.length} bytes, unparseable — two senders at once, or a dropped byte). Please send it again.` });
-  persistSoon();
 }
 let stdinLineBuf = '';
 try {

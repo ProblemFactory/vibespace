@@ -233,7 +233,8 @@ const asks = [{ type: 'control_request', request_id: 'r', request: { subtype: 'c
 ok('a PERMISSION ASK (claude / acp / codex) is SAID with the door — the turn waits on it and this CLI cannot answer it', asks.every((l) => l.length === 1 && l[0].who === 'note' && /answer it on the hub's page/.test(l[0].text)) && /Bash: rm -rf build/.test(asks[0][0] && asks[0][0].text) && /Edit main\.py/.test(asks[1][0] && asks[1][0].text), asks);
 ok('the last N only', (call(LI.historyOf, tr.map((r) => JSON.stringify(r)).join('\n'), { max: 2 }) || []).length === 2);
 ok('RECEIPTS: an ack names its frame (msg_id); a nack names a torn line (no id — its line did not parse); anything else is no receipt',
-  deq(call(LI.receiptOf, tr[16]), { kind: 'ack', id: 'vs-cli-1', at: 1 }) && deq(call(LI.receiptOf, tr[17]), { kind: 'nack', reason: 'torn', bytes: 99, at: 2 }) && call(LI.receiptOf, tr[0]) === null && call(LI.receiptOf, { type: '_stdin_ack' }).id === null && LI.RECEIPT_FLAG === 'webui_receipt');
+  deq(call(LI.receiptOf, tr[16]), { kind: 'ack', id: 'vs-cli-1', at: 1 }) && deq(call(LI.receiptOf, tr[17]), { kind: 'nack', reason: 'torn', bytes: 99, at: 2 }) && call(LI.receiptOf, tr[0]) === null && call(LI.receiptOf, { type: '_stdin_ack' }).id === null && LI.RECEIPT_FLAG === 'webui_receipt'
+  && call(LI.receiptsFileOf, '/d/b/sess-1-2.buf') === '/d/b/sess-1-2.receipts');   // r3: a receipt rides its own file — never the buffer a conversation replays
 
 console.log('⑬ the hub\'s unit (its log is that unit\'s journal) — only its OWN main process owns it');
 ok('a user unit, a system unit, a shell (none)',
