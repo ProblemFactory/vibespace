@@ -16,24 +16,26 @@
 //     the card at build and PATCHED in place on every `active-sessions` (a stash change never re-renders the list).
 // Every string is textContent (a peer's name is its own choice); the icons are the library's SVG.
 import { fetchJson, showToast } from './utils.js';
-import { t } from './i18n.js';
+import { t, deviceLocale } from './i18n.js';
 import { UI_ICONS } from './icons.js';
-import { stashSummaryWords, summaryDigest, previewDigest, previewWords, handedOverWords } from '../stash-summary.js';
+import { stashSummaryWords, summaryDigest, previewDigest, previewWords, handedOverWords, handOverRefusalWords } from '../stash-summary.js';
 
 const span = (cls, text) => { const s = document.createElement('span'); s.className = cls; if (text != null) s.textContent = text; return s; };
 const setText = (el, v) => { if (el && el.textContent !== v) el.textContent = v; };
 
-/** A refused hand-over in the device's words (by the route's CODE; the English `error` is the contract). */
-export function handOverRefusalText(r) {
-  const code = r && r.code;
-  if (code === 'spend_refused') return t('Not handed over — the limit for turns nobody typed is reached; the notices keep waiting for the next turn');
-  if (code === 'unreachable') return t('Not handed over — the agent could not be reached; the notices keep waiting for its next turn');
-  if (code === 'in_flight') return t('A hand-over for this agent is already in progress');
-  if (code === 'held_for_next_turn') return t('Not handed over — this agent’s process predates mid-turn notifications; the notices ride its next prompt (restart the session to receive them mid-turn)');
-  if (code === 'nothing_waiting') return t('Nothing is waiting any more');
-  if (code === 'restarting') return t('Not handed over — the server is restarting; the notices keep waiting for the agent’s next turn');   // verify r3: the door shut before the shutdown's wait
-  if (code === 'no_session') return t('That agent session is no longer running');
-  return t('Hand-over failed: {why}', { why: (r && r.error) || t('server unreachable') });
+/** A refused hand-over in the device's words (by the route's CODE; the English `error` is the contract) — PURE
+ *  `handOverRefusalWords` (lane owner-press-attended: the 429 body's account, cap and next free slot, in this device's
+ *  zone). `now` is injectable for a suite. */
+export function handOverRefusalText(r, { now = Date.now() } = {}) { return handOverRefusalWords(r, t, { now, locale: deviceLocale() }).text; }
+/** The refusal's toast: its words and — where a setting decides it — the door to Settings → Spending (the gear's
+ *  «All settings…» window, the Spending section selected). */
+function showRefusal(r) {
+  const w = handOverRefusalWords(r, t, { now: Date.now(), locale: deviceLocale() });
+  const settings = globalThis.app && globalThis.app._settingsUI;
+  const app = globalThis.app;
+  const action = w.door === 'spending' && settings && typeof settings.open === 'function' ? { label: t('Open Settings → Spending'), run: () => settings.open({ category: t('Spending') }) }
+    : w.door === 'usage' && app && typeof app.openUsage === 'function' ? { label: t('Open Usage'), run: () => app.openUsage() } : null;   // r2: a signed-out or unnamed account's door is the Usage window
+  showToast(w.text, { type: r && r.code === 'nothing_waiting' ? 'info' : 'error', ...(action ? { action, duration: 12000 } : {}) });
 }
 
 export function createStashStrip({ sessionId }) {
@@ -61,7 +63,7 @@ export function createStashStrip({ sessionId }) {
     st.busy = true; go.disabled = true;
     const r = await fetchJson(`/api/sessions/${encodeURIComponent(sessionId)}/stash/hand-over`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
     st.busy = false; go.disabled = !!(st.summary && (st.summary.inFlight || st.summary.reachable === false));
-    if (!r || r.error || !r.ok) { showToast(handOverRefusalText(r), { type: r && r.code === 'nothing_waiting' ? 'info' : 'error' }); return; }
+    if (!r || r.error || !r.ok) { showRefusal(r); return; }
     showToast(handedOverWords(r, t), { duration: r.held ? 7000 : 4000 });   // verify r2: what is still held is named, never hidden in the count
   });
   const noBtn = span('chat-stash-nobutton', '');   // a harness with no live inbox: the sentence where the button would be

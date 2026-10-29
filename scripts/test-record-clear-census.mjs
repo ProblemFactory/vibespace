@@ -1900,6 +1900,11 @@ const I_RECV = {
   'src/lib/browser-live-window.js|sw': ['words', 'a PURE step\'s sentence (browser-new-profile-model machineStepWords: a paired machine with no browser — the machine\'s id + its one command; lane remote-profile-start)'],
   'src/lib/browser-profile-picker.js|r.pin': ['browser profile', 'a profile label'], 'src/lib/browser-build-dialog.js|view': ['browser profile', 'a profile label (Change build…, lane browser-admin)'], 'src/lib/browser-new-profile.js|o': ['browser profile', 'an install outcome\'s words (the New profile… dialog, lane browser-admin)'],
   'src/lib/browser-switcher.js|e': ['error', 'an Error\'s name'], 'src/lib/browser-switcher.js|w': ['words', 'a PURE outcome\'s sentence'],
+  // lane owner-press-attended: the refused hand-over's toast (PURE stash-summary handOverRefusalWords — the route's code + the
+  // 429 body's account name, cap and next free slot, never a notice's words); the handback verdict's `reason` is a spend
+  // reason CODE (browser-handback | browser-handback-idle), compared, never shown
+  'src/lib/stash-strip.js|w': ['words', 'a PURE outcome\'s sentence (handOverRefusalWords: a refusal code + an account name, a cap, a time)'],
+  'src/server/browser-handback.js|verdict': ['words', 'a PURE verdict\'s spend-reason CODE (announceVerdict: which reason the ladder is asked under)'],
   'src/lib/browser-trace-view.js|e': ['browser profile', 'a profile label'], 'src/lib/browser-trace-view.js|f': ['browser profile', 'a profile / its file'], 'src/lib/browser-trace-view.js|o': ['browser profile', 'an orphan profile dir'],
   'src/lib/browser-trace-view.js|res.profile': ['browser profile', 'a profile label'], 'src/lib/browser-trace-view.js|res': ['browser profile', 'the profile adopted from'], 'src/lib/browser-trace-view.js|r': ['browser profile', 'a profile label'],
   'src/lib/browser-trace-view.js|k': ['browser profile', 'a kept conversation browser\'s label (the session name it was kept for — lane browser-resume §3.9)'], 'src/server/browser-kept.js|e': ['browser profile', 'a kept conversation browser\'s label (the session name it was kept for — lane browser-resume §3.9)'],

@@ -132,6 +132,8 @@ const whoOf = (label, target = 'browser') => { const n = targetOf(target); retur
 const takenWho = (label, target = 'browser', shared = false) => (targetOf(target) === 'browser' && label ? (shared ? `the shared window of the "${label}" browser (your tab is in it)` : `your window of the "${label}" browser`) : whoOf(label, target)); // verify r2 ⑦: a legacy shared window is named as such
 /** The ONE declared unattended-spend reason of this feature (§4.3.1). */
 const SPEND_REASON = 'browser-handback';
+// lane owner-press-attended: the click above is ATTENDED (a person's press); an idle / viewer-left announcement is not
+const IDLE_SPEND_REASON = 'browser-handback-idle';
 /** Measured on 0.32.0: "Pending confirmations auto-deny after 60 seconds." */
 const CONFIRM_TTL_MS = 60 * 1000;
 /** The inactivity window after which a takeover somebody walked away from
@@ -235,12 +237,12 @@ function announceVerdict({ cause = 'explicit', announceIdle = false, sibling = f
   // that names it); with nothing of its own to re-run, a billed wake would tell an idle agent nothing it needs now — the
   // zero-spend notice rides its next turn. One click on one view never wakes every conversation leased on the browser.
   if (c === 'explicit' && sibling && !(Array.isArray(rerun) && rerun.length)) return { deliver: false, reason: null, why: 'a handback mirrored from another conversation\'s view, with nothing of this conversation\'s interrupted or refused: zero-spend — the notice rides its next turn' };
-  if (c === 'explicit') return { deliver: true, reason: SPEND_REASON, why: 'an explicit handback is a per-occurrence owner act, and the agent may be idle — only a turn wakes it (it still takes the ceiling)' };
+  if (c === 'explicit') return { deliver: true, reason: SPEND_REASON, why: 'an explicit handback is a per-occurrence owner act, and the agent may be idle — only a turn wakes it (an ATTENDED turn: the ceiling neither refuses nor counts it)' };
   // lane browser-resume B: the between-turns twin — the stash entry IS its carrier (the agent reads it at its next turn); no
   // turn, no notice (two carriers read the same hand-back twice — the owner's one-carrier rule, 2026-09-27)
   if (c === 'continue') return { deliver: false, reason: null, notice: false, why: 'the user handed it back for the next turn — the stash entry carries the note and the tabs (one carrier, nothing billed)' };
   if (c === 'idle' || c === 'viewer-left') return announceIdle
-    ? { deliver: true, reason: SPEND_REASON, why: `browser.announceIdleHandback is ON — a ${c} handback is announced under the same reason and the same ceiling` }
+    ? { deliver: true, reason: IDLE_SPEND_REASON, why: `browser.announceIdleHandback is ON — a ${c} handback is announced under its own reason, and the ceiling counts it (nobody pressed anything)` }
     : { deliver: false, reason: null, why: `a ${c} handback is nobody's action: zero-spend by default (the lease flips, the live view and the card update, the agent discovers it when its next command succeeds; the notice rides the next message)` };
   return { deliver: false, reason: null, why: `a ${c} handback is a state change only` };
 }
@@ -1007,7 +1009,7 @@ function inputSummary(states, hasBrowser) {
 }
 
 module.exports = {
-  HANDBACK_CAUSES, TARGETS, SPEND_REASON, CONFIRM_TTL_MS, DEFAULT_TAKEOVER_IDLE_MS, MIN_TAKEOVER_IDLE_MS, POINTER_ACTIONS,
+  HANDBACK_CAUSES, TARGETS, SPEND_REASON, IDLE_SPEND_REASON, CONFIRM_TTL_MS, DEFAULT_TAKEOVER_IDLE_MS, MIN_TAKEOVER_IDLE_MS, POINTER_ACTIONS,
   inputKeyFor, newInputState, takeoverIdleMs, decideTakeover, decideHandback, decidePass, idleHandbackVerdict, announceVerdict,
   handbackWakes, handbackWakeEcho, // r6 A-F9: the count one explicit Hand back spends + its echo
   browserPausedRefusal, handbackText, handbackFacts, handbackNotice, renderHandbackNotice, idleInboxItem,

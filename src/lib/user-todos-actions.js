@@ -17,9 +17,9 @@
 //
 // `inboxModel(app)` is memoized on the app: the first caller (the panel's
 // install at boot) builds it, the window asks for the same one.
-import { t, resolveLang } from './i18n.js';
+import { t, resolveLang, deviceLocale } from './i18n.js';
 import { fetchJson, showToast } from './utils.js';
-import { replyButtonState, liveDotState, LIVE_DOT_WHY, restoreDetails, badgeWords } from './user-todos-layout.js'; // PURE: the reply verdict + the running dot (design-user-inbox-reply D1.5/D1.7); restoreDetails = the whole detail this client already saw survives a snapshot that previews it
+import { replyButtonState, liveDotState, LIVE_DOT_WHY, restoreDetails, badgeWords, saidLine, itemTextOf, itemDetailLinesOf, itemRecordLinesOf } from './user-todos-layout.js'; // PURE: the reply verdict + the running dot (design-user-inbox-reply D1.5/D1.7); restoreDetails = the whole detail this client already saw survives a snapshot that previews it
 import { showInstallDialog, launchDpr, launchUiScale } from './desktop-app-launcher.js';
 import { appRefusalText } from './app-install-dialog.js'; // a refusal code → the user's words (busy, a decided proposal…)
 import { shownDigest, openRowOf } from './app-card-model.js'; // design 009: the digest of the card pressed; the row an Installed card opens // Layer 0 apps: THE install dialog an agent's install proposal opens (the same component as "Install xpra on {machine}…")
@@ -77,11 +77,16 @@ export function inboxModel(app) {
   // card grammar (lane card-grammar-exceptions): a raw-API proposal says its CARD's title (`card.head`, the words the
   // chat card and the Outbox row say — never the raw path), worded here like the card does
   // lane vault-key-row-compact: a param may be WORDS (`{key}` — a verb's own words): said in this language before the sentence is filled
-  const said = (l) => t(l.key, Object.fromEntries(Object.entries(l.params || {}).map(([k, v]) => [k, v && typeof v === 'object' && typeof v.key === 'string' ? t(v.key) : v])));
-  const wordsOf = (i) => (isCleared(i) ? clearedText() : i && i.card && i.card.kind === 'api-call' && i.card.head ? titleWords(i.card.head, { t, lang: resolveLang() }) : i && i.i18n && i.i18n.text ? said(i.i18n.text) : (i && i.text) || '');
+  // lane owner-press-attended: a param may be an INSTANT (`{at}` — an epoch): said in this device's zone, never the hub's;
+  // r2: or an INSTANT CLAUSE (`{at, key, gone}`) said «… now» once it has passed — ONE renderer, user-todos-layout saidLine
+  const said = (l) => saidLine(l, t, { locale: deviceLocale() });
+  const wordsOf = (i) => (isCleared(i) ? clearedText() : i && i.card && i.card.kind === 'api-call' && i.card.head ? titleWords(i.card.head, { t, lang: resolveLang() }) : itemTextOf(i, said));
   /** The detail as LINES (the Vault window's band: its first line is a use failure's cause, the rest sit under one fold). */
-  const detailLinesOf = (i) => (isCleared(i) ? [] : i && i.i18n && Array.isArray(i.i18n.detail) && i.i18n.detail.length ? i.i18n.detail.map(said) : String((i && i.detail) || '').split('\n').filter(Boolean));
+  const detailLinesOf = (i) => (isCleared(i) ? [] : itemDetailLinesOf(i, said));
   const detailOf = (i) => (isCleared(i) ? '' : i && i.i18n && Array.isArray(i.i18n.detail) && i.i18n.detail.length ? detailLinesOf(i).join('\n') : (i && i.detail) || '');
+  /** lane owner-press-attended r3: the detail as the RECORD a Copy says — a fold («And 6 more producers.») said as the rows it
+   *  folds (the fold is for the eye, not the record) */
+  const recordOf = (i) => (isCleared(i) ? '' : i && i.i18n && Array.isArray(i.i18n.detail) && i.i18n.detail.length ? itemRecordLinesOf(i, said).join('\n') : (i && i.detail) || '');
   const nameFor = (key, items) => {
     const s = sessionFor(key);
     const spoken = items.find((i) => i.i18n && i.i18n.source && i.i18n.source.key);
@@ -635,7 +640,7 @@ export function inboxModel(app) {
   const model = {
     get todos() { return todos; },
     get loaded() { return loaded; },
-    byId, sessionFor, displayName, wordsOf, detailOf, detailLinesOf, nameFor, jump, isDoor, setStatus, resolveOne, optionsFor, readNotices, postReply, runAction, ensureDetail, clearContent, menuFor, isCleared, openArtifact, openLink,
+    byId, sessionFor, displayName, wordsOf, detailOf, recordOf, detailLinesOf, nameFor, jump, isDoor, setStatus, resolveOne, optionsFor, readNotices, postReply, runAction, ensureDetail, clearContent, menuFor, isCleared, openArtifact, openLink,
     ingestLive, factFor, keyForWebui, webuiIdsFor, keysFor, replyState, replyBox, patchDot, boardOf, drafts,
     /** THE row renderer's context (src/lib/user-todos-row.js) — the words,
      *  names and the live verdict; a surface passes it (or a copy with its flags) */

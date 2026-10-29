@@ -41,6 +41,18 @@
 // The set is CLOSED and it holds only reasons a producer passes TODAY: a
 // declared-but-unused reason is a slot the next producer slides into without
 // anyone deciding anything (test-spend-paths asserts both directions).
+// `attended: true` (lane owner-press-attended, userW measured 2026-10-28 00:33–00:48 PT — five presses of the strip's
+// «Hand over now · starts a turn» refused `hour-cap`, the sixth CHARGED): A PER-OCCURRENCE PRESS ON A COOKIE-ONLY DOOR
+// IS AN ATTENDED TURN. The reason's only door is a person's press whose own button carries the money word, and that
+// door refuses every bearer (vsst_ / jbt_ / vsak_) by name — so the ceiling neither refuses nor counts it:
+// `authorizeUnattendedSpend` answers {ok, attended} BEFORE the caps and the guard takes no hold; `noteUnattendedSpend`
+// writes no stamp, only the `attended` tally (the census and the snapshot still see every press). The credential,
+// spend-control and paid-overage refusals still bind — a press is not an opt-in to paying overage. Each attended
+// reason's AUTOMATIC twin keeps its own gated reason (stash-handover ↔ stash-retry, browser-handback ↔
+// browser-handback-idle, outbox-wake-now ↔ channel-receipt, owner-group-wake / owner-channel-send ↔ peer-message).
+// On an instance nobody signs in to the press still passes the write-origin verdict and the owner routes' wake PACER
+// (the groups engine's `mayWake`) — only the BUDGET is exempt. scripts/test-spend-paths.mjs §2b: every attended
+// reason's site is a cookie-only door.
 const SPEND_REASONS = Object.freeze({
   'auto-resume': { turn: true, what: 'the continue after a usage limit' },
   'stop-nudge': { turn: true, what: 'the Stop bookkeeping mini-turn' },
@@ -69,24 +81,48 @@ const SPEND_REASONS = Object.freeze({
   // free-lane prediction failed and the wrapper's own verdict charged it.
   // Producer: src/server/channels-engine.js.
   'channel-receipt': { turn: true, what: 'an outbox receipt handed back to the drafting agent' },
+  // lane owner-press-attended: the receipt the DECIDER chose to deliver now — «Approve / Reject and wake the agent now»
+  // on the outbox card (POST /api/channels/outbox/:id/approve|reject, cookie only): its own reason, because
+  // `channel-receipt` also covers the free-lane prediction that may fail (that one stays gated). ONE per proposal.
+  'outbox-wake-now': { turn: true, attended: true, what: 'an outbox receipt the user chose to deliver now' },
+  // lane owner-press-attended: the user's OWN message to an agent from the Channels panel — composed and sent by the
+  // user, or an agent's draft the user approved (src/channels/agents.js). A draft sent by POLICY for an agent stays
+  // `peer-message` (nobody pressed anything).
+  'owner-channel-send': { turn: true, attended: true, what: "the user's own message to an agent from the Channels panel" },
+  // lane owner-press-attended: a group message the USER posted (the group window's Send, «Wake now» in the create /
+  // invite dialog — routes/channels.js, cookie only, the wake count echoed back first) waking its members now; an
+  // agent's post stays `peer-message`.
+  'owner-group-wake': { turn: true, attended: true, what: 'a group message the user posted, waking its members now' },
   // agent browser P3 (design-agent-browser-v2 §4.3.1): the browser control
   // handback — an explicit handback (the click) and, only when
   // browser.announceIdleHandback is ON, an idle/viewer-left one. The producer
   // is src/server/browser-handback.js, through the delivery ladder.
-  'browser-handback': { turn: true, what: 'the browser control handback announcement' },
+  // lane owner-press-attended: the CLICK («Hand back (wakes N)», the person's Done) is attended; the idle / viewer-left
+  // announcement — nobody's action, only with browser.announceIdleHandback ON — is its gated twin
+  'browser-handback': { turn: true, attended: true, what: 'the browser control handback the user pressed, or the browser proposal the user approved' },   // r3: + the person's Approve (tellProposal)
+  'browser-handback-idle': { turn: true, what: 'a browser handback nobody pressed (idle, the viewer left)' },   // r2: + an explicit one with no door's press
   // desktop lane E (D3, 2026-09-25): the user's "Ask <agent> to take control" from a desktop-app window, when they
   // tick "wake it now" — the default rides the agent's next turn for free (the stash). The producer is
   // src/server/window-request.js, through the delivery ladder.
-  'window-share-request': { turn: true, what: 'a window control request the user sent from a desktop-app window (wake now)' },
+  'window-share-request': { turn: true, attended: true, what: 'a window control request the user sent from a desktop-app window (wake now)' },
   // 2026-09-27 (the owner: "我在界面里完全看不到'有消息在 queue'这件事情"): the chat's strip above the composer shows
   // what waits for the agent's next turn, and its "Hand over now" delivers the whole stash at once — ONE ladder call,
   // ONE turn. The producer is src/server/stash-handover.js (POST /api/sessions/:id/stash/hand-over, cookie only).
-  'stash-handover': { turn: true, what: 'the user handed a conversation its waiting notices now' },
+  'stash-handover': { turn: true, attended: true, what: 'the user handed a conversation its waiting notices now' },
   // lane notify-retry (R3, 2026-10-01): the waiting notices that did not fit a prompt's inline context are posted as
   // their own message the moment that turn ends — the hand-over's own machinery, run by the turn end instead of a click;
   // declared beside its producer (src/server/stash-handover.js, the auto path)
   'stash-retry': { turn: true, what: 'the waiting notices that did not fit a prompt, posted when its turn ended' },
+  // lane owner-press-attended r2 (the acceptance's seam with wake-approve-card): a person's «Deliver» on a HELD channel
+  // digest (the decide door — already a person door there, personVerdict) is attended; the boot and timer flushes stay
+  // `channel-message`. Declared HERE first; its ONE site is wired by wake-approve-card — test-spend-paths §2b's DEFERRED
+  // census row names that lane, and goes red the day the site exists without the row being retired.
+  'held-deliver': { turn: true, attended: true, what: 'a held channel digest the user chose to deliver now' },
 });
+/** Is this reason ATTENDED (see the header of SPEND_REASONS)? Read off the table — never a second list. */
+const isAttended = (reason) => !!(reason && Object.prototype.hasOwnProperty.call(SPEND_REASONS, reason) && SPEND_REASONS[reason].attended === true);
+// the attended tally keeps a day of presses (the census's window), at most this many
+const ATTENDED_KEEP = 500;
 
 // D6's proposal, as shipped defaults. They are SETTINGS (see
 // src/lib/settings-schema.js `spend.*`); these are the values a caller that
@@ -180,7 +216,7 @@ function budgetLimits(get = () => undefined) {
 }
 
 /** PURE. An empty ledger. */
-function emptyBudget() { return { v: 1, identities: {}, instance: [], notices: {} }; }
+function emptyBudget() { return { v: 1, identities: {}, instance: [], notices: {}, attended: [] }; }
 
 // A LEDGER STAMP CARRIES ITS REASON (2026-09-15, owner: after the spend cap
 // stashed every Background Work notification nobody could say WHICH producer
@@ -217,7 +253,9 @@ function pruneBudget(state, now = Date.now(), limits = null) {
   }
   const notices = {};
   for (const [k, v] of Object.entries(s.notices || {})) if (Number(v) > cut) notices[k] = Number(v);
-  return { v: 1, identities, instance: keep(s.instance), notices };
+  // the ATTENDED tally (lane owner-press-attended): `{at, reason, key}` per press, a day, never a stamp any cap reads
+  const attended = Array.isArray(s.attended) ? s.attended.filter((t) => stampAt(t) > cut).slice(-ATTENDED_KEEP) : [];
+  return { v: 1, identities, instance: keep(s.instance), notices, attended };
 }
 
 /** PURE. What this identity (and the instance) has spent inside each window. */
@@ -499,7 +537,7 @@ function authorizeUnattendedSpend({
   // bind on both or a concurrent pass walks straight through it.
   const inFlight = pendingCounts(pending, key, now);
   const flight = (n) => (n > 0 ? ` (+${n} in flight)` : '');
-  const no = (why, detail, retryAfter = 0, producers = null) => ({ ok: false, why, detail, retryAfter, counts, inFlight, limits: L, reason, identity: identity || null, producers });
+  const no = (why, detail, retryAfter = 0, producers = null, extra = null) => ({ ok: false, why, detail, retryAfter, counts, inFlight, limits: L, reason, identity: identity || null, producers, ...(extra || {}) });
   if (!reason || !(reason in SPEND_REASONS)) {
     // An unnamed producer is the one shape the census exists to prevent; if it
     // reaches here at runtime it must not spend.
@@ -513,7 +551,7 @@ function authorizeUnattendedSpend({
   // A credential that CANNOT serve (expired/wiped login, no long-lived token)
   // spends nothing but a failed turn and a junk card. 'unknown' passes: P6.
   if (credential && credential.serves === 'no') {
-    return no('identity-cannot-serve', `${name} cannot authorize a request right now (${credential.state || 'signed out'})`);
+    return no('identity-cannot-serve', `${name} cannot authorize a request right now (${credential.state || 'signed out'})`, 0, null, { credentialState: String(credential.state || 'signed out') });   // r2: the notice names the login
   }
   // THE SAME CLASS, stated by the harness instead of by the credential file
   // (design §1.4's third named field): codex says this account has reached its
@@ -533,18 +571,23 @@ function authorizeUnattendedSpend({
     // used to print an instant in the PAST (a resetsAt that has already come
     // round — now an expiry rung inside overageState, so it cannot reach here).
     const seen = Number(overage.ageMs) > 0 ? ` (last reported ${Math.round(overage.ageMs / 60000)} min ago)` : '';
-    return no('overage-in-use', `${name} is billing paid overage${seen} — unattended turns are refused while real money is being spent`, overage.resetsAt ? overage.resetsAt * 1000 : 0);
+    return no('overage-in-use', `${name} is billing paid overage${seen} — unattended turns are refused while real money is being spent`, overage.resetsAt ? overage.resetsAt * 1000 : 0, null, Number(overage.ageMs) > 0 ? { overageSeenAt: now - Number(overage.ageMs) } : null);   // r3: the notice says WHEN it was last reported (an instant, said in the viewer's zone)
   }
+  // ATTENDED (lane owner-press-attended): a person's per-occurrence press — the BUDGET neither refuses nor counts it.
+  // Answered BEFORE the caps (a full hour of stamps does not refuse it) and with no hold (spend-guard reads `attended`).
+  if (isAttended(reason)) return { ok: true, attended: true, why: null, detail: null, retryAfter: 0, counts, inFlight, limits: L, reason, identity: identity || null };
   // THE HOLD IS PART OF THE SUM. `retryAfter` still speaks only of STAMPS: a
   // hold settles when its producer answers, not on a window boundary, so
   // promising an instant for it would be a guess (0 = "no promise about when",
-  // which refusalText prints as nothing at all).
+  // which refusalText prints as nothing at all). A window full of HOLDS alone has
+  // no oldest stamp — its retryAfter is 0, never `0 + HOUR_MS` (a 1970 instant the
+  // client would say as «free now», lane owner-press-attended r2).
   if (L.perIdentityHour === 0) return no('hour-cap', `unattended turns per identity per hour are set to 0`);
-  if (counts.hour + inFlight.identity >= L.perIdentityHour) return no('hour-cap', `${name} has spent ${counts.hour}${flight(inFlight.identity)} unattended turns this hour (cap ${L.perIdentityHour})`, counts.hourOldest + HOUR_MS, counts.producers.hour);
+  if (counts.hour + inFlight.identity >= L.perIdentityHour) return no('hour-cap', `${name} has spent ${counts.hour}${flight(inFlight.identity)} unattended turns this hour (cap ${L.perIdentityHour})`, counts.hourOldest ? counts.hourOldest + HOUR_MS : 0, counts.producers.hour);
   if (L.perIdentityDay === 0) return no('day-cap', `unattended turns per identity per day are set to 0`);
-  if (counts.day + inFlight.identity >= L.perIdentityDay) return no('day-cap', `${name} has spent ${counts.day}${flight(inFlight.identity)} unattended turns today (cap ${L.perIdentityDay})`, counts.dayOldest + DAY_MS, counts.producers.day);
+  if (counts.day + inFlight.identity >= L.perIdentityDay) return no('day-cap', `${name} has spent ${counts.day}${flight(inFlight.identity)} unattended turns today (cap ${L.perIdentityDay})`, counts.dayOldest ? counts.dayOldest + DAY_MS : 0, counts.producers.day);
   if (L.perInstanceDay === 0) return no('instance-cap', `unattended turns for this instance are set to 0`);
-  if (counts.instanceDay + inFlight.instance >= L.perInstanceDay) return no('instance-cap', `this instance has spent ${counts.instanceDay}${flight(inFlight.instance)} unattended turns today (cap ${L.perInstanceDay})`, counts.instanceOldest + DAY_MS, counts.producers.instanceDay);
+  if (counts.instanceDay + inFlight.instance >= L.perInstanceDay) return no('instance-cap', `this instance has spent ${counts.instanceDay}${flight(inFlight.instance)} unattended turns today (cap ${L.perInstanceDay})`, counts.instanceOldest ? counts.instanceOldest + DAY_MS : 0, counts.producers.instanceDay);
   return { ok: true, why: null, detail: null, retryAfter: 0, counts, inFlight, limits: L, reason, identity: identity || null };
 }
 
@@ -557,6 +600,8 @@ function noteUnattendedSpend(state, { identity, at = Date.now(), limits = BUDGET
   const L = { ...BUDGET_DEFAULTS, ...(limits || {}) };
   const key = identity && identity.key ? String(identity.key) : null;
   const s = pruneBudget(state, at, L);
+  // ATTENDED: no stamp — the press joins the tally only (it never fills a window, never crosses the 80 % line)
+  if (isAttended(reason)) { s.attended = [...s.attended, { at, reason, key }].slice(-ATTENDED_KEEP); return { state: s, warn: null }; }
   if (!key) return { state: s, warn: null };
   const cap = stampCap(L);
   // the stamp names its producer (5b ②) — a SPEND_REASONS member or null
@@ -594,10 +639,109 @@ function refusalText(v, { sessionName = null } = {}) {
   const who = v.identity && (v.identity.name || v.identity.key) ? (v.identity.name || v.identity.key) : 'this account';
   const what = SPEND_REASONS[v.reason]?.what || v.reason;
   const where = sessionName ? ` in "${sessionName}"` : '';
-  const when = v.retryAfter > 0 ? ` Next allowed after ${new Date(v.retryAfter).toLocaleString()}.` : '';
+  // THE INSTANT IS NAMED IN UTC, ZONE SAID (lane owner-press-attended): `toLocaleString()` printed the HUB's zone with no
+  // zone word — userW's pod (Etc/UTC) said «8:21:33 AM», read in PT as 7.5 h away. A viewer reads the For-you item in
+  // their own zone through `refusalI18n` (the client renders the epoch); this English line is the journal's and the key's.
+  const when = v.retryAfter > 0 ? ` Next allowed after ${new Date(v.retryAfter).toISOString().replace(/\.\d{3}Z$/, 'Z')}.` : '';
   const spentBy = producersText(v.producers);
   const spent = spentBy ? ` Spent by: ${spentBy}.` : '';
   return `VibeSpace refused ${what}${where}: ${v.detail}.${when}${spent}`;
+}
+
+/** PURE. THE REFUSAL AS STRUCTURE (lane owner-press-attended; r2: «a notice never loses a fact it carried» — r1 filed one
+ *  generic sentence that every client rendered IN PLACE OF `refusalText`, so the For-you notice lost the producer, the
+ *  conversation, «Spent by» and the counts, and told a signed-out account to raise a limit). ONE row per `why`
+ *  (REFUSAL_WORDS), each in two forms — with the conversation and without — whose params carry every fact `refusalText`
+ *  says: the producer (`{key}` words: SPEND_REASONS[r].what), the conversation, the account, the cap and its scope, and
+ *  the next free slot as an INSTANT CLAUSE (`{at, key, gone}`: the client says «the next frees at 08:57» in the
+ *  viewer's zone while the instant is ahead and «the next is free now» once it has passed — at RENDER, the stored epoch
+ *  never changes). The detail is LINES with params: the reason, the account, the counts per window, ONE «Spent by» row
+ *  per producer, and the door that can help (a cap → Settings → Spending; a signed-out account → the Usage window; a
+ *  vendor's spend control → not a VibeSpace setting). null for an allowed verdict. Keys are English sentences the
+ *  dictionaries carry; scripts/test-spend-paths.mjs §10 reads them RENDERED through the client's own saidLine. */
+const REFUSAL_WORDS = Object.freeze({
+  'hour-cap': Object.freeze(['VibeSpace held {producer} in «{conversation}»: {account} has used its {cap} turns nobody typed this hour. {next}', 'VibeSpace held {producer}: {account} has used its {cap} turns nobody typed this hour. {next}']),
+  'day-cap': Object.freeze(['VibeSpace held {producer} in «{conversation}»: {account} has used its {cap} turns nobody typed in 24 hours. {next}', 'VibeSpace held {producer}: {account} has used its {cap} turns nobody typed in 24 hours. {next}']),
+  'instance-cap': Object.freeze(['VibeSpace held {producer} in «{conversation}»: this instance has used its {cap} turns nobody typed in 24 hours. {next}', 'VibeSpace held {producer}: this instance has used its {cap} turns nobody typed in 24 hours. {next}']),
+  'switched-off': Object.freeze(['VibeSpace held {producer} in «{conversation}»: turns nobody typed are switched off for {account} — its limit is 0.', 'VibeSpace held {producer}: turns nobody typed are switched off for {account} — its limit is 0.']),
+  'switched-off-instance': Object.freeze(['VibeSpace held {producer} in «{conversation}»: turns nobody typed are switched off for this instance — its limit is 0.', 'VibeSpace held {producer}: turns nobody typed are switched off for this instance — its limit is 0.']),
+  'identity-cannot-serve': Object.freeze(['VibeSpace held {producer} in «{conversation}»: {account} cannot answer a request right now ({state}) — sign it in again from the Usage window.', 'VibeSpace held {producer}: {account} cannot answer a request right now ({state}) — sign it in again from the Usage window.']),
+  'spend-control-reached': Object.freeze(['VibeSpace held {producer} in «{conversation}»: {account} has reached its spend control, so its requests are refused — a turn on it would buy nothing.', 'VibeSpace held {producer}: {account} has reached its spend control, so its requests are refused — a turn on it would buy nothing.']),
+  'identity-unknown': Object.freeze(['VibeSpace held {producer} in «{conversation}»: it could not tell which account the turn would bill.', 'VibeSpace held {producer}: it could not tell which account the turn would bill.']),
+  'overage-in-use': Object.freeze(['VibeSpace held {producer} in «{conversation}»: {account} is billing paid overage, and turns nobody typed are refused while real money is spent. {next}', 'VibeSpace held {producer}: {account} is billing paid overage, and turns nobody typed are refused while real money is spent. {next}']),
+  'unknown-reason': Object.freeze(['VibeSpace refused a turn nobody typed in «{conversation}»: «{producer}» is not a declared reason.', 'VibeSpace refused a turn nobody typed: «{producer}» is not a declared reason.']),
+  other: Object.freeze(['VibeSpace held {producer} in «{conversation}»: the spend ceiling refused it ({why}).', 'VibeSpace held {producer}: the spend ceiling refused it ({why}).']),
+});
+/** the instant clause: `key` while the instant is ahead (`{time}` = the viewer's clock), `gone` once it has passed */
+const NEXT_WORDS = Object.freeze({
+  cap: Object.freeze({ key: 'The next frees at {time}.', gone: 'The next is free now.' }),
+  overage: Object.freeze({ key: 'Its overage resets at {time}.', gone: 'Its overage window has reset since.' }),
+});
+/** the detail's lines (ONE «Spent by» row per producer, at most SPENT_ROWS then «And N more») and the doors */
+const LINE_WORDS = Object.freeze({
+  held: 'Held: {producer} ({reason})',
+  account: 'Account: {account}',
+  accountUnknown: 'Account: not known',
+  counts: 'Turns nobody typed: {hour} of {hourCap} this hour, {day} of {dayCap} in 24 hours; this instance {instance} of {instanceCap} in 24 hours.',
+  countsInstance: 'Turns nobody typed on this instance: {instance} of {instanceCap} in 24 hours.',   // r3: the account unknown — the instance's count still said
+  inFlight: 'Also in flight: {n} started and not yet answered — they count against the cap until they settle.',   // r3: «(+N in flight)»
+  overageSeen: 'Paid overage was last reported at {time}.',   // r3: «(last reported N min ago)», as the instant
+  spentBy: 'Spent by {producer}: {n}',
+  more: 'And {n} more producers.',
+  legacy: 'older builds (no reason recorded)',
+});
+const DOOR_WORDS = Object.freeze({
+  spending: 'Turns you type, and the buttons you press that say «starts a turn», are never counted. Change the limits in Settings → Spending.',
+  overage: 'Paid overage refuses even the turns you press. Whether turns nobody typed may spend it is Settings → Spending → «Allow unattended turns while an account bills paid overage».',
+  usage: 'Sign {account} in again from the Usage window — the limits in Settings → Spending cannot help here.',
+  vendor: 'The spend control is set with the account’s vendor — the limits in Settings → Spending cannot help here.',
+  wiring: 'This is VibeSpace failing closed, not a limit: the Usage window lists the accounts and the hub log’s [spend] lines name the conversation — the limits in Settings → Spending cannot help here.',
+});
+const ROW_DOOR = Object.freeze({ 'hour-cap': 'spending', 'day-cap': 'spending', 'instance-cap': 'spending', 'switched-off': 'spending', 'switched-off-instance': 'spending', 'overage-in-use': 'overage', 'identity-cannot-serve': 'usage', 'spend-control-reached': 'vendor', 'identity-unknown': 'wiring', 'unknown-reason': 'wiring', other: 'wiring' });
+const SPENT_ROWS = 6;
+const CAP_OF = Object.freeze({ 'hour-cap': ['perIdentityHour', 'hour'], 'day-cap': ['perIdentityDay', 'day'], 'instance-cap': ['perInstanceDay', 'instance'] });
+/** a producer as words: a declared reason says its `what` in the viewer's language; a legacy stamp says so */
+const producerWords = (r) => (SPEND_REASONS[r] ? { key: SPEND_REASONS[r].what } : r === 'unknown' ? { key: LINE_WORDS.legacy } : String(r || '?'));
+/** PURE. Which REFUSAL_WORDS row a refused verdict reads (a cap set to 0 is «switched off», never «used its 0 turns»). */
+function refusalRow(v) {
+  const capOf = CAP_OF[v && v.why];
+  if (capOf) return Number((v.limits || {})[capOf[0]]) === 0 ? (v.why === 'instance-cap' ? 'switched-off-instance' : 'switched-off') : v.why;
+  return v && REFUSAL_WORDS[v.why] ? v.why : 'other';
+}
+function refusalI18n(v, { sessionName = null } = {}) {
+  if (!v || v.ok) return null;
+  const account = (v.identity && (v.identity.name || v.identity.key)) || '';
+  const L = v.limits || {};
+  const row = refusalRow(v);
+  const capOf = CAP_OF[v.why];
+  const conversation = sessionName ? String(sessionName).slice(0, 120) : '';
+  const producer = row === 'unknown-reason' ? String(v.reason == null ? '?' : v.reason).slice(0, 80) : producerWords(v.reason);
+  const at = Number(v.retryAfter) > 0 ? Number(v.retryAfter) : 0;
+  const next = at ? { at, ...(row === 'overage-in-use' ? NEXT_WORDS.overage : NEXT_WORDS.cap) } : '';
+  const params = {
+    producer, account, ...(conversation ? { conversation } : {}), next, why: String(v.why || ''),
+    ...(capOf ? { cap: Number(L[capOf[0]]) || 0, scope: capOf[1] } : {}),
+    ...(row === 'identity-cannot-serve' ? { state: String(v.credentialState || 'signed out') } : {}),
+  };
+  const text = { key: REFUSAL_WORDS[row][conversation ? 0 : 1], params };
+  const c = v.counts || {};
+  const detail = [{ key: LINE_WORDS.held, params: { producer, reason: String(v.reason == null ? '?' : v.reason).slice(0, 80) } }];
+  detail.push(account ? { key: LINE_WORDS.account, params: { account } } : { key: LINE_WORDS.accountUnknown });
+  if (account && v.counts) detail.push({ key: LINE_WORDS.counts, params: { hour: c.hour || 0, hourCap: Number(L.perIdentityHour) || 0, day: c.day || 0, dayCap: Number(L.perIdentityDay) || 0, instance: c.instanceDay || 0, instanceCap: Number(L.perInstanceDay) || 0 } });
+  else if (v.counts) detail.push({ key: LINE_WORDS.countsInstance, params: { instance: c.instanceDay || 0, instanceCap: Number(L.perInstanceDay) || 0 } });   // r3: identity-unknown kept «(instance 7/800)» only in English
+  // r3: what the English line says as «(+N in flight)» — the holds a cap sums with the stamps (a cap reached by holds alone
+  // read «used its 3 turns» beside «0 of 3»)
+  const flying = capOf ? Number((v.inFlight || {})[v.why === 'instance-cap' ? 'instance' : 'identity']) || 0 : 0;
+  if (flying > 0) detail.push({ key: LINE_WORDS.inFlight, params: { n: flying } });
+  if (row === 'overage-in-use' && Number(v.overageSeenAt) > 0) detail.push({ key: LINE_WORDS.overageSeen, params: { time: { at: Number(v.overageSeenAt) } } });
+  const by = Object.entries(v.producers || (c.producers && c.producers.hour) || {}).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]);
+  const spentRow = ([r, n]) => ({ key: LINE_WORDS.spentBy, params: { producer: producerWords(r), n } });
+  for (const x of by.slice(0, SPENT_ROWS)) detail.push(spentRow(x));
+  // r3: the fold is for the EYE, not the record — «And N more» carries the folded rows (`more`); Copy says every producer
+  if (by.length > SPENT_ROWS) detail.push({ key: LINE_WORDS.more, params: { n: by.length - SPENT_ROWS }, more: by.slice(SPENT_ROWS).map(spentRow) });
+  const door = ROW_DOOR[row];
+  detail.push(door === 'usage' ? { key: DOOR_WORDS.usage, params: { account } } : { key: DOOR_WORDS[door] });
+  return { text, detail, door };
 }
 
 /** PURE. The 80% line. */
@@ -617,5 +761,6 @@ module.exports = {
   budgetLimits, emptyBudget, pruneBudget, spendCounts, stampAt, stampReason, producerCounts, producersText,
   pendingCounts, reservePending, releasePending, expirePending,
   overageState, overageAllowed, overageText, spendControlState,
-  authorizeUnattendedSpend, noteUnattendedSpend, refusalText, noticeText,
+  authorizeUnattendedSpend, noteUnattendedSpend, refusalText, refusalI18n, refusalRow, noticeText,
+  REFUSAL_WORDS, NEXT_WORDS, LINE_WORDS, DOOR_WORDS,
 };

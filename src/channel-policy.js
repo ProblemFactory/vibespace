@@ -491,6 +491,15 @@ function rootReplyOf(caps) {
   if (t && Array.isArray(t.placements)) return ROOT_REPLIES.includes(t.rootReply) && offered.includes(t.rootReply) ? t.rootReply : null;
   return offered.includes('quote') ? 'quote' : offered.includes('thread') ? 'thread' : null;   // the pre-enum contract: replyTo = a reply in the list
 }
+/** lane owner-press-attended: did a PERSON decide this send? The user drafted it (the composer's /send or /propose —
+ *  `draftedBy.kind === 'user'`, whatever let it out) or pressed Approve on it (`approvedBy === 'user'` — the approve
+ *  route's own word). A draft an agent wrote that POLICY sent (`approvedBy === 'policy'`) is nobody's press. The Agents
+ *  adapter's send reads it: a person's send is an ATTENDED turn (src/spend-authorizer.js `owner-channel-send`). */
+function userDecidedSend(p) {
+  if (!p || typeof p !== 'object') return false;
+  if (p.approvedBy === 'user') return true;
+  return !!(p.draftedBy && p.draftedBy.kind === 'user');
+}
 /** A stored proposal's placement — THE READ ALIAS (a proposal stored before the enum carries `inThread` / `replyTo`
  *  only). null for a composed message and a reaction (they are not replies). */
 function placementOf(p) {
@@ -1655,6 +1664,7 @@ function renderReceiptBlock(receipt, { adapterLabel = null, title = null, text =
 }
 
 module.exports = {
+  userDecidedSend,   // lane owner-press-attended
   sentIdsOf,   // lane channel-reply-real
   sharedFilesOf, rekeyByFiles,   // lane slack-file-send-key
   OUTBOX_STATES, TRANSITIONS, TERMINAL_STATES, POLICY_MODES, DECISION_REASONS, RECEIPT_STATUSES, PROPOSAL_TTL_MS, TEXT_MAX_BYTES, HONESTY_LINE_DEFAULT, IDEMPOTENCY_MODES,

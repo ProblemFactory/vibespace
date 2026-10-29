@@ -32,6 +32,9 @@
 //      map an older build wrote is hashed at the first start (each login valid once; the old bytes overwritten); a vault
 //      LOCK act (the real engine + src/server/vault-hooks.js) revokes every login and closes every page socket with 4401 —
 //      the shutdown's quiet lock does not.
+//   ⑧ THE ATTENDED DOOR (lane owner-press-attended): the strip's hand-over — a press the spend ceiling neither refuses nor
+//      counts — through the real gate in both auth modes: the owner's cookie presses; vsst_ / jbt_ / vsak_ are refused (401 by
+//      the gate with sign-in on, 403 agent_forbidden by the route with it off); a cross-site cookie write is the gate's 403.
 // Run: node scripts/test-auth.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -632,6 +635,35 @@ console.log('⑦ LOGIN TOKENS AT REST (lane vault-e2e-password-fix-r2, the owner
       'a LOCK (the door): every login revoked (the old cookie ⇒ 401 — the page shows the sign-in, then the unlock), every page socket closed with 4401, auth.json\'s map empty', { status: after.status, closed });
     v.close(); wss.close(); await I.close();
   }
+}
+
+// ── ⑧ THE ATTENDED DOOR (lane owner-press-attended) ─────────────────────────────────────────────────────────────────
+// The strip's «Hand over now · starts a turn» is an ATTENDED press since this lane: the spend ceiling neither refuses nor
+// counts it, so its door must be the person's alone. The REAL route (src/server/stash-handover.js) behind the REAL gate,
+// per auth mode: the owner's cookie (same-origin) presses; vsst_ / jbt_ / vsak_ are refused — by the gate with sign-in on
+// (no cookie ⇒ 401), by the route itself with it off (403 agent_forbidden; pressBearer); a cross-site cookie write is the
+// gate's 403. With sign-in OFF a bearer-less local request presses too — the owner cannot be told apart (docs: kb row).
+// Every other attended door is read by scripts/test-spend-paths.mjs §2b (first act = the bearer refusal).
+console.log('⑧ the attended door — the hand-over through the real gate: the cookie presses, every bearer is refused');
+{
+  const SH = require(path.join(REPO, 'src/server/stash-handover.js'));
+  const mount = (app) => SH.create({ activeSessions: new Map(), getDeliver: () => null, renderMsgStash: () => ({ text: '', shown: [], rest: [] }), renderNotifStash: () => '', log: { log() {}, warn() {} } }).register(app);
+  const P = '/api/sessions/s1/stash/hand-over';
+  const BEARERS = { vsst: 'Bearer vsst_' + 'a'.repeat(32), jbt: 'Bearer jbt_' + 'b'.repeat(32), vsak: 'Bearer vsak_' + 'c'.repeat(43) };
+  for (const mode of ['password', 'none']) {
+    const I = await instance(mode, { extra: mount });
+    const owner = await hit(I, P, { headers: mode === 'password' ? { ...I.cookie, ...SAME(I) } : SAME(I) });
+    const xs = await hit(I, P, { headers: { ...I.cookie, ...XS } });
+    const b = {};
+    for (const [k, v] of Object.entries(BEARERS)) b[k] = await hit(I, P, { headers: { authorization: v } });
+    const want = mode === 'password' ? (x) => x.status === 401 : (x) => x.status === 403 && x.json && x.json.code === 'agent_forbidden';
+    ok(owner.status === 404 && owner.json && owner.json.code === 'no_session' && xs.status === 403 && xs.json && xs.json.error === 'cross-site' && Object.values(b).every(want),
+      `sign-in ${mode === 'password' ? 'ON' : 'OFF'}: the owner's same-origin press REACHES the hand-over (404 no_session here), a cross-site cookie write is the gate's 403, and vsst_ / jbt_ / vsak_ are each refused (${mode === 'password' ? '401 by the gate' : '403 agent_forbidden by the route'})`,
+      { owner: owner.status, xs: xs.status, bearers: Object.fromEntries(Object.entries(b).map(([k, x]) => [k, `${x.status} ${(x.json && (x.json.code || x.json.error)) || ''}`])) });
+    await I.close();
+  }
+  ok(/if \(pressBearer\(req\.headers\)\) return res\.status\(403\)\.json\(\{ error: 'the user’s hand-over — not an agent route', code: 'agent_forbidden' \}\);/.test(fs.readFileSync(path.join(REPO, 'src/server/stash-handover.js'), 'utf8')),
+    'the hand-over\'s own refusal is the shared pressBearer (any bearer) — not the vsst_/jbt_-only test that let an automation key\'s vsak_ through with sign-in off');
 }
 
 console.warn = warn0;

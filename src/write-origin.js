@@ -1,5 +1,8 @@
 /**
- * THE SAME-ORIGIN RULE FOR COOKIE WRITES (lane owner-write-origin, B-6b2b — rel249 verify #7) — PURE, imports nothing.
+ * THE SAME-ORIGIN RULE FOR COOKIE WRITES (lane owner-write-origin, B-6b2b — rel249 verify #7) + THE PRESS SCOPE (lane
+ * owner-press-attended r3) — the ONE verdict + the press scope; imports node:async_hooks; stateful per request (the
+ * `PRESS_SCOPE` AsyncLocalStorage, the `MINTED` WeakSet, a sequence; `pressOf` enters the press into the caller's chain —
+ * call it ONCE per request, at the door: a second mint in one chain replaces the first).
  *
  * The owner's browser holds the instance's authority in a cookie (or, on a local instance with no sign-in, in its
  * network position). A page on ANOTHER site can make that browser send a write — a form POST, a no-cors fetch, a
@@ -85,4 +88,53 @@ function pageVerdict(headers = {}, own = '') {
   return ours && offered && offered === ours ? { ok: true, why: 'origin' } : { ok: false, why: offered ? 'origin' : 'no-browser' };
 }
 
-module.exports = { crossSiteVerdict, pageVerdict, ownOriginOf, normOrigin, WRITES };
+/** lane owner-press-attended: A PERSON'S PRESS CARRIES NO BEARER. An ATTENDED door — a press the spend ceiling neither
+ *  refuses nor counts (src/spend-authorizer.js `attended`) — refuses EVERY `Authorization: Bearer …` by name: an agent's
+ *  vsst_, a Background Work job's jbt_, an automation key's vsak_. The owner's page never sends one (its credential is the
+ *  cookie — src/auth.js reads nothing else), so this refuses no person. scripts/test-spend-paths.mjs §2b reads every
+ *  attended door for it. */
+const PRESS_BEARER_RE = /^Bearer\s+\S/i;
+function pressBearer(headers) { return PRESS_BEARER_RE.test(String((headers && headers.authorization) || '')); }
+
+/** lane owner-press-attended r2: THE PRESS — what makes a turn ATTENDED. The acceptance measured a header-less `curl`
+ *  (no bearer, no Origin, no Sec-Fetch-Site) pressing «Hand over now» free and unstamped with sign-in OFF: `crossSiteVerdict`
+ *  lets a browser-less write through by design. So an attended turn needs a PRESS, and only a door mints one —
+ *  `pressOf(req)`: no bearer AND the STRICT page verdict (`pageVerdict`: a person on THIS instance's own page). The door
+ *  hands it down with its engine call as `pressed`; every attended site selects its attended reason only on
+ *  `isPress(pressed)` (else its gated twin). No JSON can forge one — a body, an agent's payload, a record re-read from
+ *  disk never carries one (`toJSON` drops it) — so the ONLY road to an attended turn is a door that minted it.
+ *  scripts/test-spend-paths.mjs §2b derives the doors from the `pressOf(` calls, walks every `pressed` hop from each
+ *  attended site back to them, and reads each door for its bearer refusal. (A script that FORGES browser headers is a
+ *  person to this check — with sign-in OFF anything local can also rewrite the settings; the line this draws is that
+ *  nothing makes a free turn by leaving a header OUT.)
+ *
+ *  r3 (the capability-token law — a token binds to the call AND its target): r2's press was ONE frozen module-level
+ *  value, so `pressOf(reqA) === pressOf(reqB)` and any callee holding it could hand it to an unrelated wake (the live
+ *  view kept the HANDSHAKE's for every later Hand back on the socket). A press is now minted PER REQUEST — a frozen
+ *  `{at, route, reqId}` — and bound to that request's own async chain (`PRESS_SCOPE`, an AsyncLocalStorage the mint
+ *  enters; channels-engine's `spender` is the same idiom): `isPress(x)` holds only for a value THIS module minted that
+ *  is the press of the chain it is seen in. Every await, `.then`, timer and synchronous listener of the door's request
+ *  inherits it — so one request's press wakes the N members one post names (ONE act); a press carried into another
+ *  request's chain (door A's press at door B's wake), kept on a long-lived object, or replayed later from a timer some
+ *  OTHER chain armed is not a press there. The live view mints one per hand-back MESSAGE (`pressOf(viewer.page)` — the
+ *  page the handshake proved), never the handshake's. */
+const { AsyncLocalStorage } = require('node:async_hooks');
+const PRESS_SCOPE = new AsyncLocalStorage();
+const MINTED = new WeakSet();
+let pressSeq = 0;
+const routeOf = (req, route) => String(route || `${(req && req.method) || 'GET'} ${(req && req.route && req.route.path) || String((req && req.url) || '').split('?')[0]}`).slice(0, 120);
+function pressOf(req, route = null) {
+  const h = (req && req.headers) || {};
+  if (pressBearer(h)) return null;
+  if (!pageVerdict(h, ownOriginOf(h, { encrypted: !!(req && req.socket && req.socket.encrypted) })).ok) return null;
+  const press = Object.freeze({ at: Date.now(), route: routeOf(req, route), reqId: ++pressSeq, toJSON: () => undefined });
+  MINTED.add(press);
+  PRESS_SCOPE.enterWith(press);   // the rest of THIS request's chain — never another request's
+  return press;
+}
+const isPress = (x) => !!x && typeof x === 'object' && MINTED.has(x) && PRESS_SCOPE.getStore() === x;
+/** The live view's handshake, kept for its later messages (src/server/browser-stream.js): the headers the page verdict
+ *  reads — never a press. Each Hand back message mints its own from it. */
+const pageOfUpgrade = (req) => Object.freeze({ headers: Object.freeze({ ...((req && req.headers) || {}) }), socket: Object.freeze({ encrypted: !!(req && req.socket && req.socket.encrypted) }), url: String((req && req.url) || '').split('?')[0], method: 'WS' });
+
+module.exports = { crossSiteVerdict, pageVerdict, ownOriginOf, normOrigin, WRITES, pressBearer, pressOf, isPress, pageOfUpgrade };

@@ -31,32 +31,59 @@ const { normalizeOrigin } = require('./inbox-origin.js'); // PURE: the closed se
 const belt = require('./agent-output-belt.js'); // lane agent-output-sinks: the sink belt — a For-you item's text / detail never carries a credential in the clear
 const { applyClear } = require('./record-clear.js'); // PURE: "Clear content…" (2026-09-28) — what a clear replaces; this store holds the door (clearItems)
 
+/** lane lark-refresh-stall: the params a WORDS param may carry (each a string or a finite number) — more is refused by name. */
+const NESTED_PARAMS_MAX = 8;
 /** `{text:{key,params}, detail?:[{key,params}…], source?:{key}}` → the same,
  *  clamped, or null; a shape that is not that throws by name. Params are
  *  strings/numbers only (they are interpolated into a sentence, never HTML) —
  *  or WORDS, `{key}` (lane vault-key-row-compact: an i18n key the client says
- *  in its language before it fills the sentence — a verb's own words). */
+ *  in its language before it fills the sentence — a verb's own words) — or an
+ *  INSTANT, `{at}` (lane owner-press-attended: an epoch the client says in the
+ *  VIEWER's zone; a time string the hub rendered is the hub's zone, unnamed) — or
+ *  an INSTANT CLAUSE, `{at, key, gone?}` (r2: `key` filled with that clock while
+ *  the instant is ahead, `gone` once it has passed — «the next is free now»). */
 function normalizeI18n(x) {
   if (x == null) return null;
   if (typeof x !== 'object' || Array.isArray(x)) throw new Error('i18n must be an object');
+  // lane lark-refresh-stall: a WORDS param (`{key}`) may carry its own scalar params (a dead sign-in's cause names the stall's
+  // length) — r2: at most NESTED_PARAMS_MAX, each a string or a finite number; any other shape is REFUSED by name (the
+  // producer says it and files its words without them — never a sentence with a «{minutes}» left in it)
+  const nestedParams = (p, what) => {
+    if (p == null) return {};
+    if (typeof p !== 'object' || Array.isArray(p)) throw new Error(`i18n.${what}.params must be an object of strings / numbers`);
+    const ents = Object.entries(p);
+    if (ents.length > NESTED_PARAMS_MAX) throw new Error(`i18n.${what}.params carries ${ents.length} params — at most ${NESTED_PARAMS_MAX}`);
+    const o = {};
+    for (const [k, v] of ents) {
+      if (typeof v === 'string') o[k] = v.slice(0, 200);
+      else if (typeof v === 'number' && Number.isFinite(v)) o[k] = v;
+      else throw new Error(`i18n.${what}.params.${k} must be a string or a finite number (${Array.isArray(v) ? 'an array' : v === null ? 'null' : typeof v} refused)`);
+    }
+    return ents.length ? { params: o } : {};
+  };
   const line = (l, what) => {
     if (!l || typeof l !== 'object' || typeof l.key !== 'string' || !l.key.trim()) throw new Error(`i18n.${what} needs a key`);
     const out = { key: l.key.slice(0, 400) };
     if (l.params != null) {
       if (typeof l.params !== 'object' || Array.isArray(l.params)) throw new Error(`i18n.${what}.params must be an object`);
       out.params = {};
-      for (const [k, v] of Object.entries(l.params)) { if (typeof v === 'string') out.params[k] = v.slice(0, 600); else if (typeof v === 'number' && Number.isFinite(v)) out.params[k] = v; else if (v && typeof v === 'object' && !Array.isArray(v) && typeof v.key === 'string' && v.key.trim()) out.params[k] = { key: v.key.slice(0, 400) }; }
+      for (const [k, v] of Object.entries(l.params)) { if (typeof v === 'string') out.params[k] = v.slice(0, 600); else if (typeof v === 'number' && Number.isFinite(v)) out.params[k] = v; else if (v && typeof v === 'object' && !Array.isArray(v) && Number.isFinite(v.at) && v.at > 0 && typeof v.key === 'string' && v.key.trim()) out.params[k] = { at: v.at, key: v.key.slice(0, 400), ...(typeof v.gone === 'string' && v.gone.trim() ? { gone: v.gone.slice(0, 400) } : {}) }; else if (v && typeof v === 'object' && !Array.isArray(v) && typeof v.key === 'string' && v.key.trim() && v.at === undefined) out.params[k] = { key: v.key.slice(0, 400), ...nestedParams(v.params, `${what}.params.${k}`) }; else if (v && typeof v === 'object' && !Array.isArray(v) && Number.isFinite(v.at) && v.at > 0) out.params[k] = { at: v.at, ...(typeof v.gone === 'string' && v.gone.trim() ? { gone: v.gone.slice(0, 400) } : {}) }; }   // r3: a clause missing its key keeps its `gone` (the renderer gives it the default key — never a bare clock that lies)
     }
     return out;
   };
   const out = { text: line(x.text, 'text') };
   if (x.detail != null) {
     if (!Array.isArray(x.detail)) throw new Error('i18n.detail must be an array of lines');
-    out.detail = x.detail.slice(0, 12).map((l, i) => line(l, `detail[${i}]`));
+    // lane owner-press-attended r3: a fold's rows (`more` — «And N more producers.» carries the producers it folds) are
+    // kept for the RECORD a Copy says whole (the fold is for the eye, never the record); a row carries no fold of its own
+    out.detail = x.detail.slice(0, 12).map((l, i) => { const o = line(l, `detail[${i}]`); if (Array.isArray(l.more) && l.more.length) o.more = l.more.slice(0, MORE_LINES_MAX).map((m, j) => line(m, `detail[${i}].more[${j}]`)); return o; });
   }
   if (x.source != null) out.source = { key: line(x.source, 'source').key };
   return out;
 }
+
+/** lane owner-press-attended r3: the rows a detail line's fold (`more`) may carry — the record a Copy says whole. */
+const MORE_LINES_MAX = 24;
 
 /** lane decision-inbox-rank (the LLM plugin's INBOX v2): the board's FACTS of an item as the store keeps them —
  *  {state, dated (≤ 40 characters of the item's own words, a date phrase), due, reasks, askedAt} — or null. Counts,
@@ -297,9 +324,11 @@ class UserTodoManager {
   onStatus(fn) { if (typeof fn === 'function') this._statusListeners.push(fn); return () => { this._statusListeners = this._statusListeners.filter((f) => f !== fn); }; }
   // lane foryou-plugin-notices: `batch: true` = 「全部标为已看」 (setStatusMany) — a plugin whose ✓ APPLIES something (its
   // door's `done`) acts on ONE ✓ by the owner, never on a whole group marked seen
-  _emitStatus(items, by, batch = false) {
+  // lane owner-press-attended r2: `pressed` = the PRESS the For-you ✓'s door minted (write-origin pressOf) — a listener
+  // whose act starts a turn (browser-handback's takeover-request item) makes it ATTENDED only with it
+  _emitStatus(items, by, batch = false, { pressed = null } = {}) {
     if (!this._statusListeners.length) return;
-    for (const it of items) for (const fn of this._statusListeners) { try { fn(it, batch ? { status: it.status, by, batch: true } : { status: it.status, by }); } catch { } }
+    for (const it of items) for (const fn of this._statusListeners) { try { fn(it, batch ? { status: it.status, by, batch: true } : { status: it.status, by, ...(pressed ? { pressed } : {}) }); } catch { } }
   }
   /** lane foryou-plugin-notices: THE CAPABILITY GATE of a plugin's reminder — `fn(pluginId)` → true when that plugin declares
    *  'reminders' (src/plugins/<id>.js `provides`; the wiring hands PluginManager's answer in). A filing by a plugin the gate
@@ -634,7 +663,7 @@ class UserTodoManager {
     return true;
   }
 
-  setStatus(id, status, by = 'user') {
+  setStatus(id, status, by = 'user', { pressed = null } = {}) {
     if (!STATUSES.includes(status)) throw new Error(`status must be one of ${STATUSES.join('/')}`);
     const item = this._state.items.find((i) => i.id === id);
     if (!item) throw new Error('item not found');
@@ -644,7 +673,7 @@ class UserTodoManager {
     if (status === 'open') { item.resolvedAt = null; item.resolvedBy = null; item.expiresAt = null; if (!wasOpen) delete item.judged; } // F2: a reopen is judged again
     else { item.resolvedAt = this._now(); item.resolvedBy = by; }
     this._save(); this._notify();
-    if (wasOpen && status !== 'open') this._emitStatus([item], by);
+    if (wasOpen && status !== 'open') this._emitStatus([item], by, false, { pressed });
     // verify-r6 W2: a REOPEN is said too — a producer whose question is over (an exit ask answered / expired) closes it
     // again at once instead of leaving dead buttons open until the next boot
     else if (!wasOpen && status === 'open') this._emitStatus([item], by);

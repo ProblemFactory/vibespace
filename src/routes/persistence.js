@@ -688,6 +688,11 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     return _settingsCache;
   }
 
+  // lane owner-press-attended r2: THE IN-FORCE SPEND NUMBERS RIDE THE WRITE — the POST's echo AND the settings-updated
+  // broadcast carry the SAME `spend` (budgetLimits over what the server now holds, a CAP_MAX clamp included — the 2.309.0
+  // cache law: the invalidation pushes the RESULT), so every tab's «in force now» has ONE source (a tab kept saying its
+  // own last echo, 50, after another device raised the cap to 100)
+  function spendOf(data) { try { return require('../spend-authorizer.js').budgetLimits((k) => (data || {})[k]); } catch { return null; } }
   function writeSettings(data) {
     ensureDir(dataDir);
     const prev = readSettings(); // capture BEFORE the cache swap (for the change callback)
@@ -698,11 +703,13 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     if (back.length) { data = { ...data }; for (const k of back) delete data[k]; }
     _settingsCache = data;
     writeJsonAtomic(SETTINGS_FILE, data);
-    broadcast({ type: 'settings-updated', settings: data });
+    const spend = spendOf(data);
+    broadcast({ type: 'settings-updated', settings: data, ...(spend ? { spend } : {}) });
     // Server-side change hook (2.190.0): the ONLY settings key with a server
     // side effect is the Integration master switch — everything else is read
     // lazily via readSettings. Never let a callback failure break the write.
     try { onSettingsWrite?.(data, prev); } catch (e) { console.warn('[settings] change callback failed:', e.message); }
+    return spend;
   }
 
   // Server-side settings accessor: /api/settings persists HERE
@@ -729,8 +736,11 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   router.post('/api/settings', (req, res) => {
     const data = req.body;
     if (!data || typeof data !== 'object') return res.status(400).json({ error: 'Expected object' });
-    writeSettings(data);
-    res.json({ success: true });
+    // lane owner-press-attended: the save ECHOES what the server now USES for the spend ceiling — the spend guard reads
+    // `budgetLimits(serverSetting)` over this very cache on its next check (a clamp at CAP_MAX included), so the Settings
+    // row says the live number, not the typed one; r2: the broadcast carries the same `spend` (writeSettings)
+    const spend = writeSettings(data);
+    res.json({ success: true, ...(spend ? { spend } : {}) });
   });
 
   router.patch('/api/settings', (req, res) => {

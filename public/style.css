@@ -1933,6 +1933,9 @@ html:not(.voice-absent) .voice-field-grip > textarea { padding-right: 44px; }
   padding: 2px; border-radius: var(--radius-sm); transition: color var(--transition);
 }
 .settings-reset-btn:hover { color: var(--accent); }
+/* lane owner-press-attended: a number row's save mark — «Not saved yet» / «Saving…» / «Saved · in force now: N» */
+.settings-save-mark { font-size: 11px; color: var(--text-dim); max-width: 180px; line-height: 1.3; }
+.settings-save-mark[data-state="pending"], .settings-save-mark[data-state="failed"] { color: var(--yellow, #e5c07b); }
 .settings-empty { padding: 24px; text-align: center; color: var(--text-dim); font-size: 12px; }
 /* settings tiers (B-df40 part 2): the header's advanced switch, the row chips, the "N advanced settings hidden · Show" line */
 .settings-header-actions { flex-wrap: wrap; justify-content: flex-end; }

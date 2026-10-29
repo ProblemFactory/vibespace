@@ -5364,7 +5364,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
    * `url` is the page the human left it on. The lease flip is a STATE CHANGE
    * and happens regardless of what the announcer later decides to deliver.
    */
-  function handback({ browserKey, profileId = null, viewerId = null, cause = 'explicit', url = '', sessionId = null, mirror = true, sibling = null, expectWakes } = {}) {
+  function handback({ browserKey, profileId = null, viewerId = null, cause = 'explicit', url = '', sessionId = null, mirror = true, sibling = null, expectWakes, pressed = null } = {}) {
     ensureLoaded();
     const k = inputKey(browserKey, profileId);
     const held = (inputs.get(k) || {}).takenBy || null; // who drove — the siblings taken WITH this one follow (verify r6)
@@ -5377,7 +5377,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     inputs.set(k, d.state);
     // verify r7: the mirrored event names the primary (`sibling`) — the announcer delivers a sibling's handback only when ITS
     // cycle has something to re-run (a billed wake of an idle agent that was doing nothing is not this click's to spend)
-    if (mirror && profileId && held) for (const sib of siblingsHeldBy(browserKey, profileId, held.viewerId)) handback({ browserKey: sib.lease.browserKey, profileId, viewerId, cause: d.cause, url: '', sessionId: sib.lease.sessionId || null, mirror: false, sibling: browserKey });
+    if (mirror && profileId && held) for (const sib of siblingsHeldBy(browserKey, profileId, held.viewerId)) handback({ browserKey: sib.lease.browserKey, profileId, viewerId, cause: d.cause, url: '', sessionId: sib.lease.sessionId || null, mirror: false, sibling: browserKey, pressed });
     mirrorLeaseInput(browserKey, profileId, 'agent');
     // the handback CLOSES the cycle: ONE re-run reminder per takeover → handback (the owner's ruling: "交还时提醒它重新运行")
     const closed = INT.closeInterruption(cycles.get(k) || null, { at: d.state.handedBackAt });
@@ -5386,7 +5386,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const rerun = INT.interruptedVerbs(closed);
     const userActs = closed && Array.isArray(closed.userActs) ? closed.userActs.slice() : []; // lane browser-resume C: the user's tab acts while he drove
     log.log?.(`[browser] ${browserKey}${profileId ? ' on ' + profileId : ' (ephemeral)'}: handed back to the agent (${d.cause}${d.byHolder ? '' : ', not by the holder'}) after ${Math.round(d.heldMs / 1000)} s${d.state.url ? ' at ' + T.urlForLog(d.state.url) : ''}${rerun.length ? ` — to re-run: ${rerun.join(', ')}` : ''}${userActs.length ? ` — the user's tab acts while driving (said to the agent): ${userActs.map((a) => a.kind).join(', ')}` : ''}`); // lane live-input: origin + path in the journal — never the query (order ids, tokens)
-    emitInput({ kind: 'handback', browserKey, profileId: profileId || null, sessionId, state: { ...d.state }, cause: d.cause, url: d.state.url || '', heldMs: d.heldMs, byHolder: d.byHolder, rerun, ...(userActs.length ? { userActs } : {}), interruption: INT.interruptionView(closed), ...(sibling ? { sibling } : {}), sharedWindow: sharedWindowOf(browserKey, profileId) }); // verify r2 ⑦
+    emitInput({ kind: 'handback', browserKey, profileId: profileId || null, sessionId, state: { ...d.state }, cause: d.cause, url: d.state.url || '', heldMs: d.heldMs, byHolder: d.byHolder, rerun, ...(userActs.length ? { userActs } : {}), interruption: INT.interruptionView(closed), ...(sibling ? { sibling } : {}), sharedWindow: sharedWindowOf(browserKey, profileId), pressed }); // verify r2 ⑦ — r2 (lane owner-press-attended): + the door's PRESS (an explicit handback is attended only with it)
     if (profileId) driveEnded(profileId); // verify r5 ②: no window of the browser driven any more ⇒ the holders refused meanwhile are told
     return { ok: true, cause: d.cause, heldMs: d.heldMs, byHolder: d.byHolder, rerun, userActs, state: inputStateFor(browserKey, profileId) };
   }
@@ -5657,22 +5657,22 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     return { ok: true, request: { ...rec }, reasserted: false, cut: v.cut };
   }
   /** Move a record by `how` (PURE transition) — the ONE place a record changes after its birth. */
-  function moveRequest(rec, how, { viewerId = null, cause = null } = {}) {
+  function moveRequest(rec, how, { viewerId = null, cause = null, pressed = null } = {}) {
     const t = TQ.transition(rec, how, { at: now(), viewerId });
     if (!t.ok || !t.changed) return t;
     requests.set(rec.id, t.rec);
     log.log?.(`[browser] takeover request ${rec.id}: ${rec.state} → ${t.rec.state} (${how}${cause ? ', ' + cause : ''})`);
-    requestChanged(t.rec, { kind: t.to, how, cause, from: t.from });
+    requestChanged(t.rec, { kind: t.to, how, cause, from: t.from, pressed });
     return t;
   }
   /** The agent's withdraw / the person's Done (without a takeover) / a parked flag — by id. `how` ∈ withdraw | done. */
-  function resolveTakeoverRequest(id, how) {
+  function resolveTakeoverRequest(id, how, { pressed = null } = {}) {
     loadRequests();
     const rec = requests.get(String(id || ''));
     if (!rec) return { ok: false, code: 'not_found', error: 'no such takeover request' };
     if (!TQ.isOpen(rec)) return { ok: false, code: 'closed', error: `request ${rec.id} is already ${rec.state}`, request: { ...rec } };
     if (how !== 'withdraw' && how !== 'done') return { ok: false, code: 'bad_how', error: 'a request is withdrawn (the agent) or done (the person)' };
-    const t = moveRequest(rec, how);
+    const t = moveRequest(rec, how, { pressed });
     return t.ok ? { ok: true, request: { ...t.rec } } : { ok: false, code: t.code, error: `request ${rec.id} did not move`, request: { ...rec } };
   }
   /** The For-you item that carries a request (its id, the conversation key it is filed under), its parking (a dismissal:

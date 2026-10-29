@@ -163,7 +163,7 @@ console.log('— lane browser-takeover-queue: ask-human — one request per leas
   // the explicit handback ends it: done, the delivery names it, the item resolved
   k12.takeover({ browserKey: KEY_C, profileId: p.id, viewerId: 62, sessionId: 'sess-c' });
   clock12 += 1000;
-  const h1 = await call('POST', '/api/browser/handback', { sessionId: 'sess-c' });
+  const h1 = await call('POST', '/api/browser/handback', { sessionId: 'sess-c' }, { 'Sec-Fetch-Site': 'same-origin' });   // lane owner-press-attended r2: the person's page (the door mints the PRESS)
   await settle();
   const r1 = k12.takeoverRequest(id);
   ok(h1.status === 200 && r1.state === 'done' && r1.how === 'handback' && k12.takeoverRequests().length === 0, 'the explicit Hand back resolves it (done, by the handback) — it leaves the queue');

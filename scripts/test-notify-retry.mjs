@@ -153,6 +153,8 @@ const serveSock = (p) => { if (fs.existsSync(p)) return; const s = net.createSer
 console.log('\n§2 the ladder: a transient miss on a live pid is parked, retried at turn end, ONE wake billed');
 const CD = require(path.join(REPO, 'src/server/conversation-deliver.js'));
 const JM_MODEL = require(path.join(REPO, 'src/job-model.js'));
+// lane owner-press-attended r2: «Hand over now» is the user's press only with the PRESS its door minted (src/write-origin.js pressOf)
+const PRESS = require(path.join(REPO, 'src/write-origin.js')).pressOf({ headers: { 'sec-fetch-site': 'same-origin' } });
 /** a rig: a stub registry dir (the REAL findPeer over it), a scripted post, a live-session map, a recording guard,
  *  a manual clock for the park's timers */
 function rig(name, { dataDir = null, pid = process.pid, now0 = 1_700_000_000_000 } = {}) {
@@ -397,7 +399,7 @@ const NOTIFY = (R, extra = {}) => R.deliver.deliverToConversation(R.cid, 'Backgr
   ok(R.deliver.retryTake(R.cid, new Set(raw), { via: 'hand-over' }).length === 0 && typeof R.deliver.claimRetry(R.cid, raw, 'ho-x') === 'function' && !R.deliver.retryPeek(R.cid)[0].ho, '(k) …the take and the claim doors refuse it by construction');
   const SHk = require(path.join(REPO, 'src/server/stash-handover.js')), ARk = require(path.join(REPO, 'src/agent-routes.js'));
   const view = SHk.create({ activeSessions: R.sessions, getDeliver: () => R.deliver, getJobs: () => null, broadcastSessions: () => { }, renderMsgStash: ARk.renderMsgStash, renderNotifStash: JM_MODEL.renderNotifStash, debounceMs: 5, log: { log() { }, warn() { } } });
-  const r = await view.handOver('w1');
+  const r = await view.handOver('w1', { pressed: PRESS });
   release(); await p1; await sleep(5);
   ok(r.ok === false && r.code === 'nothing_waiting' && R.posts.length === 1 && R.ledger.length === 1 && R.releases.length === 0, '(k) a hand-over clicked during the post finds nothing waiting: ONE post, ONE charge (was: two of each)', JSON.stringify({ r, p: R.posts.length, l: R.ledger, rel: R.releases }));
   // a caller holding a STALE list (the timer sweep's slice) never posts an entry a hand-over took meanwhile
@@ -851,7 +853,7 @@ const tEn = (k, p = {}) => String(k).replace(/\{(\w+)\}/g, (m, n) => (p[n] !== u
   const fact = view.summaryFor(R.session);
   ok(fact && fact.count === 1 && fact.items[0].kind === 'retrying' && fact.retrying.n === 1 && fact.retrying.nextAt === R.now() + 30_000 && fact.reachable === true && fact.billed === true, 'the `stash` fact shows the parked entry as retrying with its next attempt', JSON.stringify(fact));
   R.setAnswer(async () => ({ ok: true, phase: 'written' }));
-  const r = await view.handOver('w1');
+  const r = await view.handOver('w1', { pressed: PRESS });
   ok(r.ok === true && r.delivered === 1 && R.posts.length === 1 && /hand-over ho-/.test(R.posts[0]) && /dc-watch finished/.test(R.posts[0]), 'Hand over now delivers the parked notice as ONE frame', JSON.stringify(r));
   ok(R.ledger.length === 1 && R.ledger[0].reason === 'stash-handover' && R.releases.length === 1 && R.releases[0] === 'h1' && R.authorized.length === 2, 'the hand-over bills its own turn; the parked hold (h1) is given back, never charged', JSON.stringify({ l: R.ledger, r: R.releases, a: R.authorized }));
   ok(R.deliver.retryCount(R.cid) === 0 && !view.summaryFor(R.session), 'the park is empty, the fact clears');
@@ -867,7 +869,7 @@ const tEn = (k, p = {}) => String(k).replace(/\{(\w+)\}/g, (m, n) => (p[n] !== u
   await NOTIFY(R2);
   const view2 = SH.create({ activeSessions: R2.sessions, getDeliver: () => R2.deliver, getJobs: () => null, broadcastSessions: () => { }, renderMsgStash, renderNotifStash: JM_MODEL.renderNotifStash, debounceMs: 5, log: { log() { }, warn() { } } });
   R2.setRefuse('hour-cap');
-  const r2 = await view2.handOver('w1');
+  const r2 = await view2.handOver('w1', { pressed: PRESS });
   ok(r2.ok === false && r2.code === 'spend_refused' && R2.deliver.retryCount(R2.cid) === 1 && !R2.deliver.retryPeek(R2.cid)[0].ho, 'a refused hand-over leaves the entry parked, unclaimed', JSON.stringify(r2));
 }
 
@@ -1356,7 +1358,7 @@ scenarios.push(['S10', async () => {
   const ids = R.deliver.retryPeek(R.cid).map((e) => e.id);
   R.session._isStreaming = false;
   R.answerAll(OK_R4);
-  const r = await R.view.handOver('w1'); await sleep(10);
+  const r = await R.view.handOver('w1', { pressed: PRESS }); await sleep(10);
   judge('S10 Hand over now with two parked: one frame under stash-handover (the user\'s), the park\'s holds given back, each job reads delivered via hand-over, one card', { table: tableRun([['handover-claim'], ['post-ok']]), engine: eng(R, ids[0]), owner: { ...ownerSeen(R), ok: r.ok, delivered: r.delivered, released: R.releases.length, log2: ownerSeen(R, j2).log }, expect: { ok: true, delivered: 2, released: 2, log: 'message ok via hand-over r0', log2: 'message ok via hand-over r0', acked: true, frames: 1, ledger: ['stash-handover'], cards: 1, cardHead: '2 waiting notice(s) handed over — their delivery was being retried — delivered now', park: 0, strip: null } });
 }]);
 // ── S11 Hand over now pressed WHILE the retry post is in flight ──
@@ -1369,7 +1371,7 @@ scenarios.push(['S11', async () => {
   R.session._isStreaming = false;
   const te = R.deliver.noteTurnEnd(R.session); await sleep(8);
   const during = ownerSeen(R);
-  const r = await R.view.handOver('w1');
+  const r = await R.view.handOver('w1', { pressed: PRESS });
   release(); await te; await sleep(8);
   judge('S11 Hand over now during the retry\'s flight: the strip shows nothing (the entry is on its way), the press answers nothing_waiting, ONE post ONE charge', { table: tableRun([['turn-end'], ['post-ok']]), engine: eng(R, id), owner: { ...ownerSeen(R), duringStrip: during.strip, code: r.code }, expect: { duringStrip: null, code: 'nothing_waiting', frames: 1, ledger: ['job-notification'], park: 0 } });
 }]);

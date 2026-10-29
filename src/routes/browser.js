@@ -638,7 +638,11 @@ const USE_IS_USERS = 'who may use a profile is the user\'s choice (Agent browser
 const ADOPT_IS_USERS = 'a persistent profile made from a conversation\'s browser is the user\'s act (the picker\'s "New persistent profile…") — an agent token may not adopt a conversation\'s kept browser, its own or another\'s; an agent\'s `new --adopt` is the door for a folder of its own'; // verify r3 (Y4)
 const BUILDS_DOWNLOAD_IS_USERS = 'downloading or removing a Chrome build is the user\'s act (Agent browser panel → Change build… → Download another build…) — an agent token may not do it, nor read Google\'s lists through VibeSpace; `vibespace-browser providers` lists the builds this machine has';
 const RESTART_IS_USERS = 'restarting a browser is the user\'s act — an agent token may not do it; tell the user which page is not responding';
-function refuseAgentBearer(req, res, error = OWN_BROWSING_IS_USERS) { if (!isAgentBearer(req)) return false; res.status(403).json({ error, code: 'agent_forbidden' }); return true; }
+const { pressBearer, pressOf } = require('../write-origin.js');
+// lane owner-press-attended: every route here that refuses an agent is the USER's alone — and several are ATTENDED doors (a
+// hand-back, a takeover's Done, a proposal's Approve: presses the spend ceiling neither refuses nor counts) — so the refusal
+// covers EVERY bearer (vsst_, jbt_ and an automation key's vsak_; `pressBearer`), never only the two agent prefixes
+function refuseAgentBearer(req, res, error = OWN_BROWSING_IS_USERS) { if (!isAgentBearer(req) && !pressBearer(req.headers)) return false; res.status(403).json({ error, code: 'agent_forbidden' }); return true; }
 router.post('/api/browser/profiles/:id/browse', async (req, res) => {
   if (refuseHost(req, res)) return;
   if (refuseAgentBearer(req, res)) return;
@@ -1074,6 +1078,7 @@ router.post('/api/browser/session/:sessionId/restart', async (req, res) => {
  *  flips the lease and the announcer delivers through the gated ladder. */
 router.post('/api/browser/handback', (req, res) => {
   if (refuseHost(req, res)) return;
+  if (refuseAgentBearer(req, res, HANDBACK_IS_USERS)) return;   // lane owner-press-attended: an attended door — every bearer refused
   const k = keeperOr503(res); if (!k) return;
   const f = needKey(res, sessionFacts(String(req.body?.sessionId || ''))); if (!f) return;
   try {
@@ -1082,7 +1087,7 @@ router.post('/api/browser/handback', (req, res) => {
     // no named target and nothing taken on the default: hand back whichever of this conversation's browsers IS taken
     if (!req.body?.profile && !(k.inputStateFor(f.browserKey, t.profileId).input === 'user')) { const held = k.inputsFor(f.browserKey).find((s) => s.input === 'user'); if (held) t = { ok: true, profileId: held.profileId }; }
     // r6 A-F9: `expectWakes` = the count the pressing surface SHOWED (checked by the keeper; absent = not checked)
-    const r = k.handback({ browserKey: f.browserKey, profileId: t.profileId, viewerId: null, cause: 'explicit', url: '', sessionId: f.sessionId, ...(Number.isInteger(req.body?.expectWakes) ? { expectWakes: req.body.expectWakes } : {}) });
+    const r = k.handback({ browserKey: f.browserKey, profileId: t.profileId, viewerId: null, cause: 'explicit', url: '', sessionId: f.sessionId, ...(Number.isInteger(req.body?.expectWakes) ? { expectWakes: req.body.expectWakes } : {}), pressed: pressOf(req) });   // r2: the person's PRESS (attended only with it)
     if (!r.ok) return failVerdict(res, r);
     res.json({ ok: true, cause: r.cause, heldMs: r.heldMs, profileId: t.profileId, input: k.inputSummaryFor(f.browserKey) });
   } catch (e) { fail(res, e); }
@@ -1108,11 +1113,11 @@ router.post('/api/browser/takeovers/:id/done', (req, res) => {
     if (!rec) return res.status(404).json({ error: `no takeover request ${id}`, code: 'not_found' });
     if (!TQ.isOpen(rec)) return res.status(409).json({ error: `that request is already ${rec.state}`, code: 'closed', request: TQ.viewOf(rec) });
     if (rec.state === 'taken' && k.inputStateFor(rec.browserKey, rec.profileId).input === 'user') {
-      const r = k.handback({ browserKey: rec.browserKey, profileId: rec.profileId, viewerId: null, cause: 'explicit', url: '', sessionId: rec.sessionId || null });
+      const r = k.handback({ browserKey: rec.browserKey, profileId: rec.profileId, viewerId: null, cause: 'explicit', url: '', sessionId: rec.sessionId || null, pressed: pressOf(req) });
       if (!r.ok) return failVerdict(res, r);
       return res.json({ ok: true, how: 'handback', request: TQ.viewOf(k.takeoverRequest(id)) });
     }
-    const r = k.resolveTakeoverRequest(id, 'done');
+    const r = k.resolveTakeoverRequest(id, 'done', { pressed: pressOf(req) });
     if (!r.ok) return failVerdict(res, r);
     res.json({ ok: true, how: 'done', request: TQ.viewOf(r.request) });
   } catch (e) { fail(res, e); }
@@ -1199,7 +1204,11 @@ router.post('/api/browser/proposals/:id/approve', (req, res) => {
   const shown = typeof req.body?.shown === 'string' ? req.body.shown.slice(0, 40) : null;
   if (!shown) return res.status(400).json({ error: 'an Approve names the card it was pressed on (`shown`)', code: 'shown_required' });
   if (String(req.params.id).startsWith('pk-')) return passkeyAnswer(req, res, typeof req.body?.choice === 'string' ? req.body.choice : 'once', shown); // lane passkey-store-core
-  try { const r = pr.approve(req.params.id, { shown, by: 'user' }); if (!r.ok) return failVerdict(res, r); res.json(r); } catch (e) { fail(res, e); }
+  // lane owner-press-attended r3: the person's Approve is ATTENDED — its PRESS rides the run to the agent's tell
+  // (browser-propose run → tell → browser-handback tellProposal → viaLadder's browser-handback); acceptance r2 measured
+  // r2's press-less tell as the gated browser-handback-idle, refused at a full hour cap and called «nobody pressed»
+  const press = pressOf(req);
+  try { const r = pr.approve(req.params.id, { shown, by: 'user', pressed: press }); if (!r.ok) return failVerdict(res, r); res.json(r); } catch (e) { fail(res, e); }
 });
 router.post('/api/browser/proposals/:id/reject', (req, res) => {
   if (refuseHost(req, res)) return;

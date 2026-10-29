@@ -58,6 +58,8 @@ const run = (bin, args, env = process.env, timeout = 8000) => new Promise((res) 
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const S = { ...require('../src/server/desktop-stream.js'), ...require('../src/server/stream-relay-rfb.js'), ...require('../src/server/stream-relay-xpra.js') } /* F-B4: the relays' classifiers live in their own modules */;
 const T = require('../src/browser-takeover.js');
+// lane owner-press-attended r2: an explicit handback / a wake-now request is ATTENDED only with the PRESS its door minted
+const PRESS = require('../src/write-origin.js').pressOf({ headers: { 'sec-fetch-site': 'same-origin' } });
 const WT = require('../src/window-targets.js');
 const D = require('../src/desktop-display.js');
 const ENGINE = require('../src/server/window-targets-engine.js');
@@ -245,7 +247,7 @@ console.log('§1 PURE: the sieve\'s strip, the window noun, the mode arithmetic,
   ok(ann.installWindow(e3) === true && ann.installWindow(e3) === false, 'installWindow hangs once on the engine\'s input seam');
   e3.attach('da-one', f1);
   e3.takeover({ handle: 'da-one', viewerId: 'v1' });
-  e3.handback({ handle: 'da-one', viewerId: 'v1', cause: 'explicit' });
+  e3.handback({ handle: 'da-one', viewerId: 'v1', cause: 'explicit', pressed: PRESS });
   await sleep(20);
   ok(delivered.length === 1 && delivered[0].cid === 'conv-1' && delivered[0].opts.spendReason === 'browser-handback' && delivered[0].opts.kind === 'notification' && /the "App da-one" window back to you/.test(delivered[0].text) && /vibespace-window snapshot da-one/.test(delivered[0].text), 'an explicit window handback is delivered through the ONE ladder under the ONE reason (browser-handback) with the window text');
   e3.takeover({ handle: 'da-one', viewerId: 'v1' });
@@ -360,7 +362,7 @@ console.log('§3 REAL: the keeper\'s Xvfb + x11vnc + the GTK fixture, the wiring
     await new Promise((r) => srv.listen(port, '127.0.0.1', r));
     const API = `http://127.0.0.1:${port}`;
     const cli = (token, ...args) => new Promise((res) => { const c = spawn(process.execPath, [path.join(REPO, 'data', 'bin', 'vibespace-window'), ...args], { env: { ...base, VIBESPACE_API: API, VIBESPACE_SESSION_TOKEN: token }, stdio: ['ignore', 'pipe', 'pipe'] }); let out = '', err = ''; c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { err += d; }); c.on('close', (code) => res({ code, out, err })); });
-    const api = async (method, p, body) => { const r = await fetch(API + p, { method, headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined }); let j = null; try { j = await r.json(); } catch { } return { status: r.status, j }; };
+    const api = async (method, p, body) => { const r = await fetch(API + p, { method, headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), 'Sec-Fetch-Site': 'same-origin' }, body: body ? JSON.stringify(body) : undefined }); let j = null; try { j = await r.json(); } catch { } return { status: r.status, j }; };   // r2: the person's own page (the door mints the PRESS)
     const engine = wired.windowEngine;
     const f1 = engine.factsForToken('vsst_aaaa');
     // the agent (session 1) opens the fixture through the CLI
@@ -557,7 +559,7 @@ async function laneE() {
   await new Promise((r) => srv.listen(port, '127.0.0.1', r));
   const API = `http://127.0.0.1:${port}`;
   const cli = (token, ...args) => new Promise((res) => { const c = spawn(process.execPath, [path.join(REPO, 'data', 'bin', 'vibespace-window'), ...args], { env: { ...base, VIBESPACE_API: API, VIBESPACE_SESSION_TOKEN: token }, stdio: ['ignore', 'pipe', 'pipe'] }); let out = '', err = ''; c.stdout.on('data', (d) => { out += d; }); c.stderr.on('data', (d) => { err += d; }); c.on('close', (code) => res({ code, out, err })); });
-  const api = async (method, p, body) => { const r = await fetch(API + p, { method, headers: body ? { 'Content-Type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined }); let j = null; try { j = await r.json(); } catch { } return { status: r.status, j }; };
+  const api = async (method, p, body) => { const r = await fetch(API + p, { method, headers: { ...(body ? { 'Content-Type': 'application/json' } : {}), 'Sec-Fetch-Site': 'same-origin' }, body: body ? JSON.stringify(body) : undefined }); let j = null; try { j = await r.json(); } catch { } return { status: r.status, j }; };   // r2: the person's own page (the door mints the PRESS)
   const engine = wired.windowEngine;
   const launch = async (body) => { const r = await api('POST', '/api/desktop/apps', body); if (r.status !== 200) return { err: r.j }; const ready = await until(() => { const x = keeper.get(r.j.id); return x && x.state === 'ready'; }, 45000, 250); return { id: r.j.id, ready, rec: keeper.get(r.j.id), reach: r.j.reach || null }; };
   // the stand-in for the user's pane: ONE scratch Xvfb, one `xpra attach` per app
@@ -667,7 +669,7 @@ async function laneE() {
     const rq = await api('POST', `/api/desktop/apps/${C}/reach/request`, { sessionId: 's1', note: 'please press 5' });
     ok(rq.status === 200 && rq.j.delivered === 'next-turn' && rq.j.granted === true, 'D3: "Ask alpha to take control" GRANTS the calculator back to alpha (by:request) and rides its next turn (free)');
     const rw = await api('POST', `/api/desktop/apps/${C}/reach/request`, { sessionId: 's1', wake: true });
-    ok(rw.status === 200 && rw.j.delivered === 'next-turn' && rw.j.whyCode === 'spend' && /budget/.test(rw.j.why) && /hour-cap/.test(rw.j.why), `D3 "wake it now" at an owner cap of 0: the REAL spend guard refuses (hour-cap, fail closed) and the request falls to the next turn, said — "${rw.j && rw.j.why}"`);
+    ok(rw.status === 200 && rw.j.delivered === 'next-turn' && rw.j.whyCode === 'no_lane' && !/budget|hour-cap/.test(rw.j.why), `D3 "wake it now" at an owner cap of 0 (lane owner-press-attended): the press is ATTENDED — the cap does not refuse it (r1 left this heavy leg asserting the refusal); with no live inbox the request falls to the next turn, said — "${rw.j && rw.j.why}"`);
     deliver.flush();
     const st = JSON.parse(fs.readFileSync(path.join(dataDir, 'msg-stash.json'), 'utf8'));
     ok(Array.isArray(st['conv-a']) && st['conv-a'].length === 2 && st['conv-a'].every((e) => e.source === 'window-request' && e.fromName === 'The user (Desktop apps)' && e.text.includes(`handle ${C}`)) && /please press 5/.test(st['conv-a'][0].text), 'both ride alpha\'s next turn on the ladder\'s stash (source window-request, the handle, the user\'s line)');

@@ -74,7 +74,7 @@ function noticeExpiry(about, now = Date.now()) {
  *        inbox is created further down the boot (TDZ otherwise).
  * @param deps.log                console.log
  */
-function create({ dataDir, serverSetting = () => undefined, identityOf = null, readCacheFor = null, credentialStateOf = null, getUserTodos = () => null, log = () => { } } = {}) {
+function create({ dataDir, serverSetting = () => undefined, identityOf = null, readCacheFor = null, credentialStateOf = null, getUserTodos = () => null, log = () => { }, schedule = (fn, ms) => { const t = setTimeout(fn, ms); if (t && t.unref) t.unref(); return t; }, unschedule = (t) => clearTimeout(t) } = {}) {
   const file = path.join(dataDir, 'spend-budget.json');
   let state = A.emptyBudget();
   let nudge = {};   // sessionKey -> {at, n, everSeenStatus} (the Stop nudge's PERSISTED cooldown)
@@ -95,7 +95,16 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
       if (raw.nudge && typeof raw.nudge === 'object') nudge = raw.nudge;
     }
   } catch { }
-  const spoke = new Map();   // journal dedup: `${reason}|${key}|${why}` -> ts
+  const spoke = new Map();   // journal dedup: `${reason}|${key}|${why}` -> {at, more, line, timer} (`more` = refusals the window swallowed)
+  // r2 (measured: five refusals in a minute ⇒ ONE line, and with no later refusal the other four were never journaled):
+  // a window that SWALLOWED refusals is FLUSHED when it ends — one bounded timer per signature, armed at the first
+  // swallowed refusal for the window's end, unref'd; a refusal after the end still carries the count on its own line
+  const flushSpoke = (sig) => {
+    const sp = spoke.get(sig);
+    if (!sp) return;
+    if (sp.timer) { try { unschedule(sp.timer); } catch { } sp.timer = null; }
+    if (sp.more > 0) { log(`${sp.line} — (+${sp.more} more in the last 5 min)`); sp.more = 0; }
+  };
   let chargesUnhinted = 0;   // charges that made this module resolve the identity itself (see identityFor)
   let lastUnhintedLog = 0;
   let pending = [];          // the live HOLDS (see the header) — in memory only
@@ -189,21 +198,23 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     } catch { return null; }
   }
 
-  function fileInbox(text, detail, urgency, expiresAt) {
+  function fileInbox(text, detail, urgency, expiresAt, i18n = null) {
     let userTodos = null;
     try { userTodos = getUserTodos(); } catch { userTodos = null; }
     if (!userTodos) return false;
     // kind 'notice' (2.369.118): a spend ceiling is FOR THE USER'S INFORMATION —
     // it sits in the popup's own Notices section and never in the red badge
     // …and it dies with the window it is about (`expiresAt`, see NOTICE_TTL_MS)
-    try { userTodos.add(INBOX_KEY, { origin: 'spend', text: String(text).slice(0, 300), detail, urgency, by: 'agent', sessionName: 'Spending', kind: 'notice', expiresAt }); return true; }
+    // `i18n` (lane owner-press-attended): the refusal as STRUCTURE — the client says the next free slot in the viewer's
+    // zone from its epoch (A.refusalI18n), never a time string this hub rendered
+    try { userTodos.add(INBOX_KEY, { ...(i18n ? { i18n } : {}), origin: 'spend', text: String(text).slice(0, 300), detail, urgency, by: 'agent', sessionName: 'Spending', kind: 'notice', expiresAt }); return true; }
     catch (e) { log('[spend] could not file the inbox item: ' + e.message); return false; }
   }
 
   /** THE GATE. Every producer of a turn nobody typed calls this BEFORE it
    *  spends, and nothing else may decide. Returns the PURE verdict; the side
    *  effects of a refusal (journal + telemetry + inbox) happen here, once. */
-  function authorize({ reason, session = null, sessionId = null, sessionName = null, identity: identityHint = null, hold: takeHold = true, now = Date.now() } = {}) {
+  function authorize({ reason, session = null, sessionId = null, sessionName = null, cid = null, identity: identityHint = null, hold: takeHold = true, now = Date.now() } = {}) {
     sweepHolds(now);
     const identity = identityFor(session, identityHint);
     const key = identity && identity.key;
@@ -223,6 +234,9 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     // identity the continue actually lands on. Measured with the real module at
     // cap 1/hour: with the first call reserving, the second refused its own
     // request and NOTHING ever fired. The charging call is the one that holds.
+    // AN ATTENDED VERDICT HOLDS NOTHING (lane owner-press-attended): a person's press is never a slot of the ceiling —
+    // `note()` turns it into the attended tally, never a stamp
+    if (v.ok && v.attended) return v;
     if (v.ok && key && takeHold) {
       const hold = `h${++holdSeq}`;
       pending = A.reservePending(pending, { id: hold, key, at: now });
@@ -230,12 +244,24 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     }
     if (v.ok) return v;
     const sig = `${reason}|${key || '?'}|${v.why}`;
-    const last = spoke.get(sig) || 0;
-    const text = A.refusalText(v, { sessionName });
-    if (now - last > REFUSE_LOG_MS) {
-      spoke.set(sig, now);
-      if (spoke.size > 400) spoke.clear();
-      log(`[spend] refused ${reason} for ${sessionId || 'a session'} on ${identity ? identity.name : 'an unknown identity'} — ${v.why}: ${v.detail}`);
+    const last = spoke.get(sig) || { at: 0, more: 0 };
+    // r2: THE NOTICE NAMES THE CONVERSATION — the delivery ladder passes the session, not its name (its refusals said
+    // «in» nothing); the name the session carries is the conversation the owner reads
+    const convName = sessionName || (session && typeof session.name === 'string' && session.name) || null;
+    const text = A.refusalText(v, { sessionName: convName });
+    // THE LINE NAMES THE CONVERSATION and SAYS WHAT IT COLLAPSED (lane owner-press-attended: userW's five refused presses
+    // showed as three lines «for a session» — the ladder passes the cid, the 5-min dedupe hid two with no word)
+    if (now - last.at > REFUSE_LOG_MS) {
+      if (last.timer) { try { unschedule(last.timer); } catch { } }
+      if (spoke.size >= 400) { for (const k of [...spoke.keys()]) flushSpoke(k); spoke.clear(); }
+      const who = sessionId || (cid ? `conversation ${cid}` : 'a session');
+      const more = last.more > 0 ? ` (+${last.more} more in the 5 min after the previous line)` : '';
+      const line = `[spend] refused ${reason} for ${who} on ${identity ? identity.name : 'an unknown identity'} — ${v.why}`;
+      spoke.set(sig, { at: now, more: 0, line, timer: null });
+      log(`${line}: ${v.detail}${more}`);
+    } else {
+      last.more++;
+      if (!last.timer && spoke.get(sig) === last) last.timer = schedule(() => { const sp = spoke.get(sig); if (sp) sp.timer = null; flushSpoke(sig); }, Math.max(1, last.at + REFUSE_LOG_MS - now));
     }
     try { global.__vsEvent?.('spend-refused', `${reason}:${v.why}`); } catch { }
     // NO SILENT FAILURES: a refused automatic turn is a promise the product
@@ -251,7 +277,7 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
         + `(instance ${v.counts.instanceDay}/${v.limits.perInstanceDay}).\n\n`
         + 'These ceilings bound every turn VibeSpace starts without you — the auto-continue after a usage limit, the Stop bookkeeping nudge, '
         + 'Background Work notifications and messages from other sessions. Adjust them in Settings → Spending, or act on the account named above.',
-        v.why === 'overage-in-use' ? 'high' : 'normal', noticeExpiry('refusal', now));
+        v.why === 'overage-in-use' ? 'high' : 'normal', noticeExpiry('refusal', now), A.refusalI18n(v, { sessionName: convName }));
       if (filed) { state.notices[inboxSig] = now; persist(); }
     }
     return v;
@@ -334,6 +360,8 @@ function create({ dataDir, serverSetting = () => undefined, identityOf = null, r
     snapshot: () => ({
       budget: A.pruneBudget(state, Date.now(), limits()), nudge: { ...nudge },
       chargesUnhinted, holdsOpen: A.expirePending(pending, Date.now()).live.length, holdsExpired,
+      // lane owner-press-attended: the presses the ceiling neither refused nor counted, by reason (the last 24 h)
+      attended: A.producerCounts(A.pruneBudget(state, Date.now(), limits()).attended),
     }),
     _file: file,
   };

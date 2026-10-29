@@ -1330,7 +1330,7 @@ function createSessionMessages(session, sessionId) {
         sessionKeyFor: (s, id) => (sessionStatusKey ? sessionStatusKey(s, id) : null),
         feedCard: (session, block) => N.feedProposalCard(session, block),
         patchSettings: (patch) => persistenceRouter.patchSettings(patch),
-        tell: (o) => (browserHandback ? browserHandback.tellProposal(o) : { told: 'failed' }),
+        tell: ({ sessionId, browserKey, text, pressed }) => (browserHandback ? browserHandback.tellProposal({ sessionId, browserKey, text, pressed }) : { told: 'failed' }),   // lane owner-press-attended r3: + the Approve's press
         pinConversation: ({ sessionId, profileId }) => {
           const RB = require('../routes/browser');
           const f = RB.sessionFacts(sessionId);

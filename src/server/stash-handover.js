@@ -80,6 +80,7 @@ const { toAgentText: agentText } = require('../peer-text.js');   // THE belt on 
 const FROM_NAME = 'VibeSpace notices';
 
 const isAgentBearer = (req) => /^Bearer\s+(vsst_|jbt_)/i.test(String((req.headers && req.headers.authorization) || ''));
+const { pressBearer, pressOf, isPress } = require('../write-origin.js');   // lane owner-press-attended: the hand-over is an ATTENDED door — no bearer of any kind
 const HANDOVER_MAX_ENTRIES = 30;       // conversation-deliver's STASH_CAP — every entry in one message
 const HANDOVER_MAX_BYTES = 12 * 1024;
 /** How long a delivered hand-over's originals are remembered for a frame that comes back. The wrapper's DELIVERY
@@ -96,7 +97,7 @@ const DELIVERED_FILE = 'stash-handover.json';
 const HANDOVER_TAG_RE = /\(hand-over (ho-[a-z0-9]+-[a-z0-9]+)\)/;
 const STATUS = Object.freeze({ agent_forbidden: 403, no_session: 404, no_conversation: 409, nothing_waiting: 409, in_flight: 409, held_for_next_turn: 409, spend_refused: 429, unreachable: 409, unavailable: 503, restarting: 503 });
 
-function create({ activeSessions, getDeliver = () => null, getJobs = () => null, getGroups = () => null, broadcastSessions = () => {}, renderMsgStash, renderNotifStash, log = console, debounceMs = 300, now = () => Date.now(), schedule = (fn, ms) => { const t = setTimeout(fn, ms); if (t && t.unref) t.unref(); return t; }, dataDir = null } = {}) {
+function create({ activeSessions, getDeliver = () => null, getJobs = () => null, getGroups = () => null, getChannels = () => null, broadcastSessions = () => {}, renderMsgStash, renderNotifStash, log = console, debounceMs = 300, now = () => Date.now(), schedule = (fn, ms) => { const t = setTimeout(fn, ms); if (t && t.unref) t.unref(); return t; }, dataDir = null } = {}) {
   const cidOf = (s) => (s && (s.backendSessionId || s.claudeSessionId)) || null;
   const jobsReady = () => { try { const jm = getJobs(); return jm && typeof jm.peekNotifs === 'function' ? jm : null; } catch { return null; } };
   let seq = 0;
@@ -279,7 +280,7 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
   }
   if (forget()) persistDelivered();
   /** Hand the whole stash over now — ONE message through the ladder, reason `stash-handover`. */
-  async function handOver(webuiId, { auto = false } = {}) {
+  async function handOver(webuiId, { auto = false, pressed = null } = {}) {
     const s = activeSessions && activeSessions.get(String(webuiId));
     if (!s) return { ok: false, code: 'no_session', error: 'no such live session' };
     const cid = cidOf(s);
@@ -291,10 +292,10 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
     const rec = { id, at: now(), p: null };
     inflight.set(cid, rec);
     changed();   // the fact says `inFlight` to every client
-    rec.p = handOverNow(s, cid, id, { auto });
+    rec.p = handOverNow(s, cid, id, { auto, pressed });
     try { return await rec.p; } finally { if (inflight.get(cid) === rec) inflight.delete(cid); changed(); }
   }
-  async function handOverNow(s, cid, id, { auto = false } = {}) {
+  async function handOverNow(s, cid, id, { auto = false, pressed = null } = {}) {
     const d = getDeliver();
     if (!d || typeof d.deliverToConversation !== 'function') return { ok: false, code: 'unavailable', error: 'the delivery ladder is not wired on this instance' };
     const jm = jobsReady();
@@ -328,8 +329,9 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
         ? `VibeSpace delivers the ${n} notice(s) that did not fit your previous prompt's context (hand-over ${id}):\n\n${text}`
         : `The user handed over the ${n} notice(s) that were waiting for your next turn (hand-over ${id}):\n\n${text}`;
       const cardText = S.handoverCardText(n, text, { why });   // 2026-09-28: the card carries the notices behind an expander (handoverFacts), not the count alone; R4: its head says why they waited
+      // r2: the ATTENDED reason only on the door's press (write-origin isPress) — a hand-over nobody pressed is the gated twin
       try {
-        r = auto
+        r = !isPress(pressed)
           ? await d.deliverToConversation(cid, frame, { kind: 'notification', spendReason: 'stash-retry', fromName: FROM_NAME, cardText })
           : await d.deliverToConversation(cid, frame, { kind: 'notification', spendReason: 'stash-handover', fromName: FROM_NAME, cardText });
       } catch (e) { r = { ok: false, reason: (e && e.message) || String(e) }; }
@@ -340,6 +342,9 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
       }
       // DELIVERED: take exactly what went out; what arrived meanwhile keeps waiting
       const tookStashed = shownStashed.length ? d.drainStash(cid, new Set(shownStashed)) : [];
+      // R4 (lane owner-press-attended): a channel block a refused wake left here reached the agent — its row's «last wake
+      // held» clears now (the channels engine stamps that wake `handedOverAt`), not at the rule's next successful wake
+      try { const ch = getChannels(); if (ch && typeof ch.noteHandedOver === 'function') ch.noteHandedOver(cid, tookStashed).catch((e) => log.warn?.(`[stash] ${cid}: the channels row could not take the hand-over — ${(e && e.message) || e}`)); } catch { }
       // a parked entry leaves the park (its hold given back — this hand-over billed its own turn) and is remembered as
       // a plain entry: a frame that comes back restores it as a WAITING notice, never as one still being retried
       const tookParked = shownParked.length && typeof d.retryTake === 'function' ? d.retryTake(cid, new Set(shownParked), { via: 'hand-over', lane: r.lane || null }).map((e) => ({ source: 'agent', kind: e.kind, fromName: e.fromName || null, text: e.text, ts: e.firstAt, held: { kind: 'not-reachable', attempts: (e.attempts || []).length } })) : [];
@@ -447,12 +452,38 @@ function create({ activeSessions, getDeliver = () => null, getJobs = () => null,
     return Promise.race([Promise.allSettled(ps).then(() => ps.length), new Promise((res) => { const t = setTimeout(() => res(-ps.length), maxMs); if (t.unref) t.unref(); })]);
   }
 
+  // R4 (lane owner-press-attended — userW's five presses left three journal lines, and a refusal that was not the spend
+  // ceiling left none): a PRESS the hand-over refused for any other reason is said ONCE per (conversation, code) per
+  // 5 min in the journal — with how many the window swallowed — and counted in telemetry every time, like the spend one
+  // (that one is spend-guard's: `[spend] refused …`, event `spend-refused`). r4 (accept-r3 confirmed 0): a spend refusal
+  // with NO `why` is the authorizer's own failure — spend-guard wrote no line for it, so this one does (the toast names it)
+  const REFUSAL_LOG_MS = 5 * 60 * 1000;
+  const refusalSpoke = new Map();   // `${cid}|${code}` -> {at, more}
+  function noteRefusal(webuiId, r) {
+    if (!r || r.ok || (r.code === 'spend_refused' && r.why)) return;
+    try { global.__vsEvent?.('stash-handover-refused', String(r.code || 'failed')); } catch { }
+    const s = activeSessions && activeSessions.get(String(webuiId));
+    const conv = cidOf(s) || String(webuiId);
+    const sig = conv + '|' + r.code;
+    const t0 = now();
+    const last = refusalSpoke.get(sig) || { at: 0, more: 0 };
+    if (last.at && t0 - last.at <= REFUSAL_LOG_MS) { last.more++; return; }
+    refusalSpoke.set(sig, { at: t0, more: 0 });
+    if (refusalSpoke.size > 400) refusalSpoke.clear();
+    log.log?.(`[stash] hand-over refused for conversation ${conv} — ${r.code}: ${r.error || 'no reason given'}${last.more ? ` (+${last.more} more in the 5 min after the previous line)` : ''}`);
+  }
+
   function register(app) {
     app.post('/api/sessions/:id/stash/hand-over', async (req, res) => {
       try {
-        if (isAgentBearer(req)) return res.status(403).json({ error: 'the user’s hand-over — not an agent route', code: 'agent_forbidden' });
-        const r = await handOver(String(req.params.id));
+        if (pressBearer(req.headers)) return res.status(403).json({ error: 'the user’s hand-over — not an agent route', code: 'agent_forbidden' });
+        // r2: AN ATTENDED DOOR IS A PERSON'S DOOR — the press is minted for a person on this page only; a header-less script is
+        // refused by name (its only effect here would be the press)
+        const press = pressOf(req);
+        if (!press) return res.status(403).json({ error: 'the hand-over is a press on this instance’s own page — a request with no page (a script) cannot make one', code: 'not_a_person' });
+        const r = await handOver(String(req.params.id), { pressed: press });
         if (!r.ok) {
+          noteRefusal(String(req.params.id), r);
           if (r.retryAfter) res.setHeader('Retry-After', String(Math.max(1, Math.ceil(Number(r.retryAfter) / 1000) || 1)));
           return res.status(STATUS[r.code] || 400).json(r);
         }

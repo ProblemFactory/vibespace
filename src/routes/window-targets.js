@@ -51,6 +51,7 @@ const fs = require('fs');
 const DESK = require('../window-desktop');
 const DH = require('../desktop-handover'); // lane desktop-handover: md-<hostId> handles
 const router = express.Router();
+const { pressBearer, pressOf } = require('../write-origin.js');   // lane owner-press-attended: an ATTENDED door (a press that wakes an agent) refuses every bearer
 
 let ctx = null;
 function setup(deps) { ctx = deps; }
@@ -244,11 +245,12 @@ router.post('/api/window/desktop/:handle/pause', (req, res) => {
   try { const r = engine.takeover({ handle: h, viewerId, holderAlive: true }); if (!r.ok) return fail(res, { code: r.code, message: r.error }); res.json({ ok: true, already: !!r.already, lease: r.lease }); } catch (e) { fail(res, e); }
 });
 router.post('/api/window/desktop/:handle/resume', (req, res) => {
+  if (pressBearer(req.headers)) return fail(res, { code: 'agent_forbidden', message: 'a press that wakes an agent is the user\'s — a bearer token (an agent, a job, an automation key) cannot make one' });
   if (refuseHost(req, res)) return;
   const engine = engineOr503(res); if (!engine) return;
   const h = desktopHandleOf(req, res); if (!h) return;
   const viewerId = req.body?.viewerId != null && VIEWER_RE.test(String(req.body.viewerId)) ? String(req.body.viewerId) : null;
-  try { const r = engine.handback({ handle: h, viewerId, cause: 'explicit' }); if (!r.ok) return fail(res, { code: r.code, message: r.error }); res.json({ ok: true, cause: r.cause, heldMs: r.heldMs, byHolder: r.byHolder, lease: r.lease }); } catch (e) { fail(res, e); }
+  try { const r = engine.handback({ handle: h, viewerId, cause: 'explicit', pressed: pressOf(req) }); if (!r.ok) return fail(res, { code: r.code, message: r.error }); res.json({ ok: true, cause: r.cause, heldMs: r.heldMs, byHolder: r.byHolder, lease: r.lease }); } catch (e) { fail(res, e); }
 });
 
 module.exports = { router, setup, STATUS };

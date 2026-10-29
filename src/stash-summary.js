@@ -235,6 +235,70 @@ function whenWords(at, now, t) {
   if (d < 90 * 1000) return t('in {n} s', { n: Math.round(d / 1000) });
   return t('in {n} min', { n: Math.round(d / 60000) });
 }
+/** PURE. AN INSTANT IN THE VIEWER'S WORDS (lane owner-press-attended): the DEVICE's locale and zone — the hub's zone is
+ *  never the reader's (userW's pod said «8:21:33 AM» in UTC to a reader in PT, who read it as 7.5 h away). The same local
+ *  day ⇒ the clock alone; another day ⇒ its weekday + the clock. `locale` / `timeZone` are injectable (a suite pins one;
+ *  absent = the device's). The hub's clock is the fact (`at`, an epoch); this is only its rendering. */
+function clockAt(at, { now = Date.now(), locale = undefined, timeZone = undefined } = {}) {
+  const d = new Date(Number(at) || 0);
+  const z = timeZone ? { timeZone } : {};
+  try {
+    const dayKey = (x) => new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit', ...z }).format(x);
+    const clock = new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit', ...z }).format(d);
+    return dayKey(d) === dayKey(new Date(Number(now) || 0)) ? clock : `${new Intl.DateTimeFormat(locale, { weekday: 'short', ...z }).format(d)} ${clock}`;
+  } catch { return d.toISOString().slice(11, 16) + ' UTC'; }
+}
+/** PURE. A REFUSED HAND-OVER IN WORDS, WITH ITS DOOR (lane owner-press-attended — the strip's toast said only «the spending
+ *  ceiling…»: no account, no cap, no time, no door, and he pressed five times). Reads the route's 429 body (`identity`,
+ *  `cap`, `retryAfter`, `why`) → `{text, door}`; `door: 'spending'` = a setting decides it (Settings → Spending), `'usage'`
+ *  = the account's sign-in does (the Usage window). A cap `why` without its facts (an older hub) keeps the old cap
+ *  sentence; a body with NO `why` (the authorizer itself failed) says the reply's `error` and the log lines written for it
+ *  (r4). The press itself is ATTENDED since this lane, so a cap refusal reaches here only from an older hub; overage, a
+ *  signed-out account and the other codes still do. */
+function handOverRefusalWords(r, t, { now = Date.now(), locale = undefined, timeZone = undefined } = {}) {
+  const code = r && r.code;
+  if (code === 'spend_refused') {
+    // r2: ONE row per `why`, the same table as the For-you notice (spend-authorizer REFUSAL_WORDS): a cap set to 0 is
+    // «switched off», a signed-out account's door is the Usage window, a body with no identity never says «the limit
+    // is reached» unless the refusal WAS a cap; an instant already past is said «free now — press again» (computed here,
+    // at the toast, from the epoch — never «(in 1 min)» for a time gone)
+    const why = r.why || null;
+    const account = (r.identity && (r.identity.name || r.identity.key)) || null;
+    const cap = r.cap === null || r.cap === undefined || !Number.isFinite(Number(r.cap)) ? null : Number(r.cap);
+    const at = Number(r.retryAfter) > 0 ? Number(r.retryAfter) : 0;
+    const gone = at > 0 && at <= now;
+    const mins = at && !gone ? Math.max(1, Math.ceil((at - now) / 60000)) : 0;
+    const wait = mins < 90 ? t('{n} min', { n: mins }) : mins % 60 ? t('{h} h {m} min', { h: Math.floor(mins / 60), m: mins % 60 }) : t('{h} h', { h: mins / 60 });
+    const p = { account, cap, time: at ? clockAt(at, { now, locale, timeZone }) : '', wait };
+    const capped = why === 'hour-cap' || why === 'day-cap' || why === 'instance-cap';
+    if (capped && cap === 0) return { text: why !== 'instance-cap' && account ? t('Not handed over — turns nobody typed are switched off for {account}. The notices keep waiting.', p) : t('Not handed over — turns nobody typed are switched off for this instance. The notices keep waiting.'), door: 'spending' };
+    if (why === 'hour-cap' && account && cap !== null) return { text: gone ? t('Not handed over — {account} has used its {cap} turns nobody typed this hour; the next is free now — press again. The notices keep waiting.', p) : at ? t('Not handed over — {account} has used its {cap} turns nobody typed this hour; the next frees at {time} (in {wait}). The notices keep waiting.', p) : t('Not handed over — {account} has used its {cap} turns nobody typed this hour. The notices keep waiting.', p), door: 'spending' };
+    if (why === 'day-cap' && account && cap !== null) return { text: gone ? t('Not handed over — {account} has used its {cap} turns nobody typed in 24 hours; the next is free now — press again. The notices keep waiting.', p) : at ? t('Not handed over — {account} has used its {cap} turns nobody typed in 24 hours; the next frees at {time} (in {wait}). The notices keep waiting.', p) : t('Not handed over — {account} has used its {cap} turns nobody typed in 24 hours. The notices keep waiting.', p), door: 'spending' };
+    if (why === 'instance-cap' && cap !== null) return { text: gone ? t('Not handed over — this instance has used its {cap} turns nobody typed in 24 hours; the next is free now — press again. The notices keep waiting.', p) : at ? t('Not handed over — this instance has used its {cap} turns nobody typed in 24 hours; the next frees at {time} (in {wait}). The notices keep waiting.', p) : t('Not handed over — this instance has used its {cap} turns nobody typed in 24 hours. The notices keep waiting.', p), door: 'spending' };
+    if (capped) return { text: t('Not handed over — the limit for turns nobody typed is reached; the notices keep waiting for the next turn'), door: 'spending' };
+    if (why === 'overage-in-use') return { text: account ? t('Not handed over — {account} is billing paid overage, and VibeSpace refuses the turns it starts by itself while it does. The notices keep waiting.', p) : t('Not handed over — the account this turn would bill is on paid overage, and VibeSpace refuses the turns it starts by itself while it is. The notices keep waiting.'), door: 'spending' };
+    if (why === 'identity-cannot-serve') return { text: account ? t('Not handed over — {account} cannot sign requests right now (its sign-in expired or was removed). The notices keep waiting.', p) : t('Not handed over — the account this turn would bill cannot sign requests right now (its sign-in expired or was removed). The notices keep waiting.'), door: 'usage' };
+    if (why === 'spend-control-reached') return { text: account ? t('Not handed over — {account} has reached its spend control, so its requests are refused. The notices keep waiting.', p) : t('Not handed over — the account this turn would bill has reached its spend control, so its requests are refused. The notices keep waiting.'), door: null };
+    if (why === 'identity-unknown') return { text: t('Not handed over — VibeSpace could not tell which account this turn would bill. The notices keep waiting.'), door: 'usage' };
+    if (why) return { text: t('Not handed over — the spend ceiling refused this turn ({why}). The notices keep waiting.', { why: String(why).slice(0, 60) }), door: null };
+    // r3 (accept-r2 claim 0): a refusal with NO `why` is not a cap — the current hub sends one when the authorizer itself
+    // threw (conversation-deliver fails closed with refused:'spend' and no why); never «the limit is reached» for it.
+    // r4 (accept-r3 confirmed 0): A TOAST NAMES WHAT IT HAS — the reply's `error` (what failed) is SAID, quoted and clipped
+    // (a t() param; the toast is textContent, never HTML), and the log pointer names the lines that ARE written for it
+    // (conversation-deliver's «[deliver] spend authorizer threw …», stash-handover's «[stash] hand-over refused …»); never
+    // «[spend]» — spend-guard writes that only for a refusal it DECIDED. A body with no `error` points at no line at all.
+    const reason = String((r && r.error) || '').replace(/[\u0000-\u001f\u007f]+/g, ' ').trim().slice(0, 200);
+    if (reason) return { text: t('Not handed over — the spend check failed and refused this turn: “{reason}” (it fails closed when it cannot decide). The notices keep waiting; the hub log’s [stash] and [deliver] lines record it.', { reason }), door: null };
+    return { text: t('Not handed over — the spend check refused this turn without saying why (it fails closed when it cannot decide). The notices keep waiting.'), door: null };
+  }
+  if (code === 'unreachable') return { text: t('Not handed over — the agent could not be reached; the notices keep waiting for its next turn'), door: null };
+  if (code === 'in_flight') return { text: t('A hand-over for this agent is already in progress'), door: null };
+  if (code === 'held_for_next_turn') return { text: t('Not handed over — this agent’s process predates mid-turn notifications; the notices ride its next prompt (restart the session to receive them mid-turn)'), door: null };
+  if (code === 'nothing_waiting') return { text: t('Nothing is waiting any more'), door: null };
+  if (code === 'restarting') return { text: t('Not handed over — the server is restarting; the notices keep waiting for the agent’s next turn'), door: null };   // verify r3: the door shut before the shutdown's wait
+  if (code === 'no_session') return { text: t('That agent session is no longer running'), door: null };
+  return { text: t('Hand-over failed: {why}', { why: (r && r.error) || t('server unreachable') }), door: null };
+}
 /** WHY THE NOTICES WAITED (lane notify-retry, R4 — the hand-over card said "completed while this conversation was
  *  closed" for a conversation that never closed): the English sentence for a set of held kinds, ONE closed table,
  *  read back by `handoverFacts` as a key the client translates. Null when nothing states a reason (a peer's message). */
@@ -272,4 +336,4 @@ function handoverFacts(body) {
  *  hand-over sentence and its id). */
 function handoverCardText(n, text, { why = null } = {}) { return `${Number(n) || 0} waiting notice(s) handed over${why ? ` — ${why}` : ''}\n\n${String(text || '').trim()}`; }
 
-module.exports = { KIND_ORDER, REACTION_DIGEST_FROM, kindOf, summarize, summaryDigest, previewDigest, previewWords, previewHead, PREVIEW_MAX, PREVIEW_CHARS, partWords, stashSummaryWords, handedOverWords, handoverFacts, handoverCardText, HANDOVER_HEAD_RE, HELD_WHY, heldWhyOf, heldKeyOf, whenWords };
+module.exports = { KIND_ORDER, REACTION_DIGEST_FROM, kindOf, summarize, summaryDigest, previewDigest, previewWords, previewHead, PREVIEW_MAX, PREVIEW_CHARS, partWords, stashSummaryWords, handedOverWords, handoverFacts, handoverCardText, HANDOVER_HEAD_RE, HELD_WHY, heldWhyOf, heldKeyOf, whenWords, clockAt, handOverRefusalWords };

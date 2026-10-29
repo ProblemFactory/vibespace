@@ -149,3 +149,63 @@ export function settingsViewModel(schema, { categories = [], query = '', showAdv
 export function hiddenAdvancedText(n, t = (s) => s) {
   return n === 1 ? t('1 advanced setting hidden') : t('{n} advanced settings hidden', { n });
 }
+
+// ── A TYPED NUMBER IS NOT LIVE UNTIL IT COMMITS — AND THE ROW SAYS SO (lane owner-press-attended) ──────────────────────
+// userW (2026-10-28) typed 200 into Settings → Spending at 00:40 and pressed «Hand over now» at 00:47 — refused: the file
+// was written at 00:48:01. The number field committed on `change` (blur / Enter) only, and the row showed no unsaved state.
+// r1 made every keystroke commit; the acceptance MEASURED what that does (r2, accept-r1 MAJOR): a pause of 500 ms after
+// the first digit POSTed it — claude.transcriptRetentionDays typed «730» wrote cleanupPeriodDays=7 into
+// ~/.claude/settings.json on the spot, browser.idleTimeoutMs committed 1 ms, a prefix under a row's min was stored AT the
+// min. So A HALF-TYPED NUMBER NEVER REACHES THE SERVER: the commit stays on `change`, and only the WORDS ride `input`.
+/** The number field's commit rule, wired onto an input-like object (`value`, `oninput`, `onchange` — the DOM's, or a
+ *  suite's stand-in). `input` stores NOTHING: it only says whether the field now differs from the stored number
+ *  (`onTyping(true)` → the row's «Not saved yet — press Enter or leave the field»). `change` (Enter / blur / a stepper
+ *  click) commits, exactly as the base did: an out-of-range value is stored CLAMPED and written back into the field with
+ *  its words (`onBound`), an empty / invalid field → the default; the store's own 500 ms debounce then POSTs it. No row
+ *  and no schema flag commits a typed number on `input` — a live-commit road does not exist for one.
+ *  `clamp(num)` → {value, bound} (the schema's clampToSchema); `onCommit()` after the store write (the row's mark). */
+export function bindNumberField(input, { schema, path, settings, clamp, onBound = () => {}, onCommit = () => {}, onTyping = () => {} } = {}) {
+  input.oninput = () => {
+    const num = parseFloat(input.value);
+    onTyping(!(Number.isFinite(num) && JSON.stringify(settings.get(path)) === JSON.stringify(num)));
+  };
+  input.onchange = () => {
+    onTyping(false);
+    const num = parseFloat(input.value);
+    if (!Number.isFinite(num)) { settings.set(path, schema.default); input.value = schema.default; onCommit(); return; }
+    const c = clamp(num);
+    settings.set(path, c.value);
+    if (c.bound) { input.value = c.value; onBound(c); }
+    onCommit();
+  };
+}
+/** The Spending rows whose number the SERVER's spend guard reads — path → its `budgetLimits` field. */
+const SPEND_LIVE_FIELDS = Object.freeze({
+  'spend.unattendedPerIdentityHour': 'perIdentityHour',
+  'spend.unattendedPerIdentityDay': 'perIdentityDay',
+  'spend.unattendedPerInstanceDay': 'perInstanceDay',
+  'spend.budgetNoticePct': 'noticePct',
+});
+/** The number the server USES for a Spending row — ONE source (r2): the server's own CONFIRMED `spend` (`live.spend`:
+ *  the POST echo of this tab's save, REPLACED by the `spend` a settings-updated broadcast carries and cleared by a
+ *  refetch — SettingsManager), else `budgetLimits` (the spend guard's own PURE reader, injected) over the values the
+ *  server last confirmed — never the typed value. null for any other row. */
+export function inForceOf(path, { live = null, server = () => undefined, budgetLimits = null } = {}) {
+  const f = SPEND_LIVE_FIELDS[path];
+  if (!f) return null;
+  if (live && live.spend && Number.isFinite(Number(live.spend[f]))) return Number(live.spend[f]);
+  if (typeof budgetLimits !== 'function') return null;
+  const v = Number(budgetLimits(server)[f]);
+  return Number.isFinite(v) ? v : null;
+}
+/** The row's save mark: 'typed' «Not saved yet — press Enter or leave the field» (the field differs from the store; nothing
+ *  is stored) → 'pending' / 'saving' «Saving…» (committed; the debounce, then the POST) → 'saved' «Saved» — it STAYS
+ *  until the next edit | 'failed'; a Spending row adds the number in force (`inForce`, see inForceOf). '' = nothing. */
+export function saveMarkWords(state, t = (s) => s, { inForce = null } = {}) {
+  const live = inForce !== null && inForce !== undefined ? { value: inForce } : null;
+  if (state === 'typed') return live ? t('Not saved yet — press Enter or leave the field · in force now: {value}', live) : t('Not saved yet — press Enter or leave the field');
+  if (state === 'pending' || state === 'saving') return t('Saving…');
+  if (state === 'failed') return t('Not saved — the server did not answer; change it again to retry');
+  if (state === 'saved') return live ? t('Saved · in force now: {value}', live) : t('Saved');
+  return live ? t('In force now: {value}', live) : '';
+}

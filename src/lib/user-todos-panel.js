@@ -1055,7 +1055,7 @@ export function installUserTodos(app) {
         ...(rs.show && rs.enabled ? [{ label: t('Reply'), action: () => openBox(item) }] : []),
         { label: t('Mark done'), action: () => setStatus(id, 'done') },
         { label: tc('inbox', 'Dismiss'), action: () => setStatus(id, 'dismissed') },
-        { label: t('Copy'), action: () => { copyText([model.wordsOf(rec), model.detailOf(rec)].filter(Boolean).join('\n\n')); showToast(t('Copied')); } },
+        { label: t('Copy'), action: () => { copyText([model.wordsOf(rec), model.recordOf ? model.recordOf(rec) : model.detailOf(rec)].filter(Boolean).join('\n\n')); showToast(t('Copied')); } },   // r3 (lane owner-press-attended): the RECORD — a fold said whole
         ...model.menuFor(id),
       ]);
       return;

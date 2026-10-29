@@ -1,5 +1,6 @@
 import { SETTINGS_SCHEMA, SETTINGS_CATEGORIES, pluginSectionFor, harnessSectionFor, harnessFileRel, harnessCategory, channelVendorName, orderedCategories, settingsGroupOf, settingsGroups, clampToSchema, pluginCategoryOf } from './settings-schema.js';
-import { settingsViewModel, hiddenAdvancedText, whenClauses, clauseKind, SHOW_ADVANCED_KEY } from './settings-view.js'; // PURE: what is drawn — tiers, `when`, search, modified (B-df40 part 2)
+import { settingsViewModel, hiddenAdvancedText, whenClauses, clauseKind, SHOW_ADVANCED_KEY, bindNumberField, inForceOf, saveMarkWords } from './settings-view.js';
+import { budgetLimits } from '../spend-authorizer.js';   // lane owner-press-attended: a Spending row says the number the server USES (the guard's own PURE reader) // PURE: what is drawn — tiers, `when`, search, modified (B-df40 part 2)
 import { showConfirmDialog, fetchJson, showToast, copyText } from './utils.js';
 import { receiptLine, offLine, applyHead, refusalLine, recoveredLine } from './cli-config-chips.js';
 import { machineDisplayText } from './browser-display-words.js'; // lane headless-fallback: the display fact beside the headed preference
@@ -443,6 +444,7 @@ class SettingsUI {
 
     const control = this._createControl(path, schema, row);
     controlWrap.appendChild(control);
+    if (schema.type === 'number' && !schema.slider && !schema.store) controlWrap.appendChild(this._saveMark(path));   // lane owner-press-attended
     // lane settings-multiline-row (owner 2026-10-14): a multi-line box STACKS — the words above it across the row, the box
     // under them across the row (style.css "settings rows never squeeze their words"); read off the control, so every textarea row does
     if (control.tagName === 'TEXTAREA' || control.querySelector('textarea')) row.classList.add('settings-row-stack');
@@ -460,6 +462,42 @@ class SettingsUI {
 
     row.append(info, controlWrap);
     return row;
+  }
+
+  /** lane owner-press-attended: a number row's SAVE MARK — «Not saved yet» → «Saving…» → «Saved» (a Spending row adds the
+   *  number the server USES: its echo of the last save, else the guard's own reader over what the server confirmed). ONE
+   *  save-state subscription per SettingsUI (taken with the first mark) patches the marks of the OPEN window by their
+   *  `data-path` — a re-render (every search keystroke draws the rows again) adds no listener. */
+  _saveMark(path) {
+    const mark = document.createElement('span');
+    mark.className = 'settings-save-mark';
+    mark.dataset.path = path;
+    mark.setAttribute('aria-live', 'polite');
+    this._drawSaveMark(mark, path);
+    // a settings stand-in without save states (a suite's fake store, a door that draws these rows elsewhere) draws the mark idle
+    if (!this._saveMarkSub && typeof this.settings.onSaveState === 'function') this._saveMarkSub = this.settings.onSaveState((p) => {
+      const c = this._content;
+      if (!c || !c.isConnected) return;
+      for (const m of c.querySelectorAll('.settings-save-mark')) if (m.dataset.path === p) this._drawSaveMark(m, p);
+    });
+    return mark;
+  }
+  /** r2: a number typed and not yet committed (Enter / leaving the field) — the FIELD's state, the store holds nothing */
+  _markTyped(path, typed) {
+    if (!this._typed) this._typed = new Set();
+    if (typed === this._typed.has(path)) return;
+    if (typed) this._typed.add(path); else this._typed.delete(path);
+    const c = this._content;
+    if (c && c.isConnected) for (const m of c.querySelectorAll('.settings-save-mark')) if (m.dataset.path === path) this._drawSaveMark(m, path);
+  }
+  _drawSaveMark(mark, path) {
+    const S = this.settings;
+    const st = this._typed && this._typed.has(path) ? 'typed' : typeof S.saveStateOf === 'function' ? S.saveStateOf(path) : 'idle';
+    const inForce = inForceOf(path, { live: typeof S.liveEcho === 'function' ? S.liveEcho() : null, server: (k) => (typeof S.serverValue === 'function' ? S.serverValue(k) : S.get(k)), budgetLimits });
+    const text = saveMarkWords(st, t, { inForce });
+    if (mark.textContent !== text) mark.textContent = text;
+    if (mark.dataset.state !== st) mark.dataset.state = st;
+    mark.hidden = !text;
   }
 
   /** lane headless-fallback (2026-09-28): the FACT beside the headed PREFERENCE — this machine's display right now, read
@@ -829,23 +867,18 @@ class SettingsUI {
       if (schema.min !== undefined) input.min = schema.min;
       if (schema.max !== undefined) input.max = schema.max;
       if (schema.step !== undefined) input.step = schema.step;
-      input.onchange = () => {
-        // Empty/invalid input must not store NaN (it persisted as null and
-        // broke numeric consumers like taskbar sizing) — revert to default
-        const num = parseFloat(input.value);
-        if (Number.isFinite(num)) {
-          // OUT OF RANGE IS SAID, never stored as typed (lane R2 verify,
-          // 2026-09-26): the row's own bounds, written back into the field
-          const c = clampToSchema(schema, num);
-          this.settings.set(path, c.value);
-          if (c.bound) {
-            input.value = c.value;
-            showToast(c.bound === 'max' ? t('{label}: kept at the maximum, {value}', { label: schema.label || path, value: c.value }) : t('{label}: raised to the minimum, {value}', { label: schema.label || path, value: c.value }));
-          }
-        }
-        else { this.settings.set(path, schema.default); input.value = schema.default; }
-        row.classList.toggle('modified', this.settings.isModified(path));
-      };
+      // Empty/invalid input must not store NaN (it persisted as null and broke numeric consumers like taskbar sizing) —
+      // the `change` reverts it to the default. OUT OF RANGE IS SAID, never stored as typed (lane R2 verify, 2026-09-26):
+      // the row's own bounds, written back into the field. lane owner-press-attended (r2): it commits on `change` only — a
+      // half-typed number never reaches the server — and the row's mark (`_saveMark`) says «Not saved yet — press Enter or
+      // leave the field» while the field differs from the store, «Saving…», then «Saved» once the server has it.
+      bindNumberField(input, {
+        schema, path, settings: this.settings,
+        clamp: (num) => clampToSchema(schema, num),
+        onTyping: (typed) => this._markTyped(path, typed),   // r2: the field differs from the store — said, never stored
+        onBound: (c) => showToast(c.bound === 'max' ? t('{label}: kept at the maximum, {value}', { label: schema.label || path, value: c.value }) : t('{label}: raised to the minimum, {value}', { label: schema.label || path, value: c.value })),
+        onCommit: () => row.classList.toggle('modified', this.settings.isModified(path)),
+      });
       return input;
     }
 

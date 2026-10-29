@@ -789,7 +789,7 @@ async function sweepWindowLeg(ENGmod, name) {
   const { eng, deliver, delivered } = W;
   deliver.wakeOk = true;
   await prime(eng);
-  const billed = () => delivered.filter((d) => d.opts.spendReason === 'channel-receipt' && d.opts.noWake === false).length;
+  const billed = () => delivered.filter((d) => (d.opts.spendReason === 'outbox-wake-now' || d.opts.spendReason === 'channel-receipt') && !d.opts.noWake).length;   // lane owner-press-attended: a WAKE is billed — the attended reason with the decider's press (r2), the gated one without
   const p1 = await eng.propose(AGENT, A, C, { text: 'double click' });
   const [a1, a2] = await Promise.all([eng.approve(p1.proposal.id, { deliver: 'wake-now' }), eng.approve(p1.proposal.id, { deliver: 'wake-now' })]);
   const a3 = await eng.approve(p1.proposal.id, { deliver: 'wake-now' });
@@ -797,6 +797,16 @@ async function sweepWindowLeg(ENGmod, name) {
   const p2 = await eng.propose(AGENT, A, C, { text: 'race' });
   const [r1, r2] = await Promise.all([eng.reject(p2.proposal.id, { reason: 'no', deliver: 'wake-now' }), eng.approve(p2.proposal.id, { deliver: 'wake-now' })]);
   ok([r1, r2].filter((r) => r.ok).length === 1 && billed() === 2, 'reject ‖ approve, both wake-now: one wins, ONE billed turn');
+  // lane owner-press-attended r2: the decider's wake is ATTENDED only with the PRESS its door minted (src/write-origin.js
+  // pressOf — the owner routes hand it down); the same wake-now approve with no press is the gated channel-receipt wake
+  const PRESS = require(path.join(REPO, 'src/write-origin.js')).pressOf({ headers: { 'sec-fetch-site': 'same-origin' } });
+  const d0 = delivered.length;
+  const p5 = await eng.propose(AGENT, A, C, { text: 'pressed' });
+  await eng.approve(p5.proposal.id, { deliver: 'wake-now', pressed: PRESS });
+  const p6 = await eng.propose(AGENT, A, C, { text: 'not pressed' });
+  await eng.approve(p6.proposal.id, { deliver: 'wake-now' });
+  const woke = delivered.slice(d0).filter((d) => !d.opts.noWake).map((d) => d.opts.spendReason);
+  ok(JSON.stringify(woke) === JSON.stringify(['outbox-wake-now', 'channel-receipt']), 'r2: a wake-now approve WITH the door\'s press wakes under outbox-wake-now (attended); the same approve with NO press under channel-receipt (gated, counted)', JSON.stringify(woke));
   // a vendor-refused send the decider asked to hear NOW: still one wake, with the FAILED receipt (a failure is worth telling)
   eng.stop();
 }
@@ -809,7 +819,7 @@ async function sweepWindowLeg(ENGmod, name) {
   const { eng, deliver, delivered } = W;
   deliver.wakeOk = true;
   await prime(eng);
-  const billed = () => delivered.filter((d) => d.opts.spendReason === 'channel-receipt' && d.opts.noWake === false).length;
+  const billed = () => delivered.filter((d) => (d.opts.spendReason === 'outbox-wake-now' || d.opts.spendReason === 'channel-receipt') && !d.opts.noWake).length;   // lane owner-press-attended: a WAKE is billed — the attended reason with the decider's press (r2), the gated one without
   const p3 = await eng.propose(AGENT, A, C, { text: 'vendor says no' });
   const a4 = await eng.approve(p3.proposal.id, { deliver: 'wake-now' });
   const q3 = eng.store.outbox.snapshot().proposals[p3.proposal.id];
@@ -1183,7 +1193,7 @@ async function rowWriteLeg(engMod, name) {
   W.ladder.wakeOk = true;
   const r = await eng.reject(p.proposal.id, { reason: 'no', deliver: 'wake-now' }).catch((e) => ({ threw: e.message }));
   eng.store.outbox.update = origU;
-  const billed = delivered.filter((d) => d.opts.spendReason === 'channel-receipt' && d.opts.noWake === false).length;
+  const billed = delivered.filter((d) => (d.opts.spendReason === 'outbox-wake-now' || d.opts.spendReason === 'channel-receipt') && !d.opts.noWake).length;   // lane owner-press-attended: a WAKE is billed — the attended reason with the decider's press (r2), the gated one without
   const q = eng.store.outbox.snapshot().proposals[p.proposal.id];
   eng.stop();
   const f = P.receiptFateOf(q);

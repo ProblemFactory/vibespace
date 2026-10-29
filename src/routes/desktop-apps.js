@@ -213,6 +213,8 @@ function hostParam(req, res) {
 function bodyOf(req) { const b = { ...(req.body || {}) }; delete b.host; delete b.share; delete b.fileHost; return b; }
 /** Lane E: a share is the USER's act — an agent's session / job token is refused (the reset-credit / inbox-reply rule). */
 const isAgentBearer = (req) => /^Bearer\s+(vsst_|jbt_)/i.test(String((req.headers && req.headers.authorization) || ''));
+const { pressBearer, pressOf } = require('../write-origin.js');   // lane owner-press-attended: an ATTENDED door (a press that wakes an agent) refuses every bearer
+const PRESS_IS_USERS = 'a press that wakes an agent is the user\'s — a bearer token (an agent, a job, an automation key) cannot make one';
 /** lane app-launch-singleton: WHO a launch request comes from — an agent's session token names its session (the window
  *  engine's token table), a job token an unnamed agent; anything else is the person's own door. */
 function launchedByOfReq(req) {
@@ -945,11 +947,12 @@ router.post('/api/desktop/apps/:id/viewers/takeover', (req, res) => {
   } catch (e) { fail(res, e); }
 });
 router.post('/api/desktop/apps/:id/handback', (req, res) => {
+  if (pressBearer(req.headers)) return fail(res, { code: 'agent_forbidden', message: PRESS_IS_USERS });
   if (!ID_RE.test(req.params.id)) return res.status(400).json({ error: 'bad id', code: 'bad-request' });
   const engine = engineOr503(res); if (!engine) return;
   const viewerId = req.body?.viewerId != null && VIEWER_RE.test(String(req.body.viewerId)) ? String(req.body.viewerId) : null;
   if (!ctx.keeper.get(req.params.id)) return res.status(404).json({ error: `no desktop app ${req.params.id}`, code: 'not-found' });
-  try { const r = engine.handback({ handle: req.params.id, viewerId, cause: 'explicit' }); if (!r.ok) return fail(res, { code: r.code, message: r.error }); res.json({ ok: true, cause: r.cause, heldMs: r.heldMs, byHolder: r.byHolder, lease: r.lease }); } catch (e) { fail(res, e); }
+  try { const r = engine.handback({ handle: req.params.id, viewerId, cause: 'explicit', pressed: pressOf(req) }); if (!r.ok) return fail(res, { code: r.code, message: r.error }); res.json({ ok: true, cause: r.cause, heldMs: r.heldMs, byHolder: r.byHolder, lease: r.lease }); } catch (e) { fail(res, e); }
 });
 
 // ── lane E: reach + the share mode + the window request (human-only; the engine decides) ──
@@ -990,12 +993,13 @@ router.put('/api/desktop/apps/:id/reach/mode', (req, res) => {
   try { res.json(engine.setShareMode(req.params.id, req.body && req.body.mode)); } catch (e) { fail(res, e); }
 });
 router.post('/api/desktop/apps/:id/reach/request', async (req, res) => {
+  if (pressBearer(req.headers)) return fail(res, { code: 'agent_forbidden', message: PRESS_IS_USERS });
   const engine = reachGate(req, res); if (!engine) return;
   if (!ctx.windowRequest) return fail(res, { code: 'no-engine', message: 'window requests are not wired in this process' });
   const b = req.body || {};
   if (typeof b.sessionId !== 'string' || !/^[A-Za-z0-9._:-]{1,120}$/.test(b.sessionId)) return fail(res, { code: 'bad-request', message: 'a request names the agent session it asks (sessionId)' });
   if (b.note != null && typeof b.note !== 'string') return fail(res, { code: 'bad-request', message: 'note is text' });
-  try { res.json(await ctx.windowRequest.request({ handle: req.params.id, sessionId: b.sessionId, note: b.note || '', wake: b.wake === true, endHold: b.endHold === true })); } catch (e) { fail(res, e); }
+  try { res.json(await ctx.windowRequest.request({ handle: req.params.id, sessionId: b.sessionId, note: b.note || '', wake: b.wake === true, endHold: b.endHold === true, pressed: pressOf(req) })); } catch (e) { fail(res, e); }   // r2: the wake is attended only on the person's PRESS
 });
 
 // the singleton desktop (src/vnc.js) — answers unchanged from server.js

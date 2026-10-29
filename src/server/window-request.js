@@ -21,6 +21,7 @@
  * (file, 'deliver-ladder'); the reason literal below is what its reason table reads.
  */
 const R = require('../window-reach.js');
+const { isPress } = require('../write-origin.js');   // lane owner-press-attended r2: the wake is attended only on its door's press
 const { capsOf } = require('../backend-caps.js'); // PURE: caps.terminalOnly (no agent to reach)
 const { liveForkPending } = require('../claude-lock-capture.js');   // verify r5: a pending fork's id is its parent's — never a delivery target
 
@@ -40,7 +41,7 @@ function create({ engine, deliver = null, activeSessions = null, now = Date.now,
    * conversation id yet — nothing to deliver into), fork_pending (verify r6: a fork still carrying its parent's id —
    * ask again in a moment), bad-request (no delivery ladder on this instance).
    */
-  async function request({ handle, sessionId, note = '', wake = false, endHold = false } = {}) {
+  async function request({ handle, sessionId, note = '', wake = false, endHold = false, pressed = null } = {}) {
     const view = engine.reachOf(handle);
     if (!view) throw namedError('not-found', `no desktop-app window ${JSON.stringify(String(handle || ''))} is live on this machine`);
     const s = sessionsMap().get(String(sessionId || ''));
@@ -66,6 +67,9 @@ function create({ engine, deliver = null, activeSessions = null, now = Date.now,
     // verify r5: the stash answers whether the entry is on disk — a memory-only queue is named on the result (and logged), never a silent "next-turn"
     const stash = () => { const st = deliver.stashFor(cid, { source: 'window-request', kind: 'peer', fromName: FROM_NAME, text }); if (st && st.stored === false) { out.durable = false; out.durableWhy = st.why; log.warn?.(`[window] request: ${view.handle} → ${name} — ${st.why}`); } };
     if (!wake) { stash(); log.log?.(`[window] request: ${view.handle} → ${name} — rides its next turn`); return { ...out, delivered: 'next-turn' }; }
+    // r2 (lane owner-press-attended): the wake is ATTENDED — so only the person's PRESS (write-origin pressOf, minted by
+    // the door) makes one; a request with no page rides the agent's next turn, said by name
+    if (!isPress(pressed)) { stash(); return { ...out, delivered: 'next-turn', whyCode: 'not_pressed', why: 'waking the agent now is a press on this instance’s own page — this request rides its next turn' }; }
     const last = lastWake.get(cid) || 0;
     if (now() - last < WAKE_FLOOR_MS) {
       stash();

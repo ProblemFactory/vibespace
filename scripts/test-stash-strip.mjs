@@ -151,6 +151,8 @@ console.log('② the engine (real ladder + real jobs stash + the real hand-over)
 const CD = require(path.join(REPO, 'src/server/conversation-deliver.js'));
 const { JobManager } = require(path.join(REPO, 'src/jobs.js'));
 const SH = require(path.join(REPO, 'src/server/stash-handover.js'));
+// lane owner-press-attended r2: the PRESS the strip's door mints for a person on its own page (src/write-origin.js pressOf)
+const PRESS = require(path.join(REPO, 'src/write-origin.js')).pressOf({ headers: { 'sec-fetch-site': 'same-origin' } });
 const { renderMsgStash } = require(path.join(REPO, 'src/agent-routes.js'));
 const { renderNotifStash } = require(path.join(REPO, 'src/job-model.js'));
 function rig({ refuse = null, handoverModule = SH, backend = 'claude', streaming = false, deferPost = false, deliverOverride = null } = {}) {
@@ -184,7 +186,7 @@ const job = (id, name) => ({ id, name, state: 'done' });
   // a notice that lands WHILE the hand-over is delivering must keep waiting
   const post0 = R.posts.length;
   const origPost = R.deliver.deliverToConversation;
-  const h = R.view.handOver('w1');
+  const h = R.view.handOver('w1', { pressed: PRESS });
   R.deliver.stashFor(R.CID, { source: 'agent', kind: 'peer', fromName: 'Bo', text: 'arrived during the hand-over' });
   const r = await h;
   ok(r.ok && r.delivered === 3 && R.posts.length === post0 + 1, 'HAND OVER: ONE injection', r);
@@ -296,9 +298,13 @@ console.log('③ the route');
     const a = await post('/api/sessions/w1/stash/hand-over', { Authorization: 'Bearer vsst_x' });
     const b = await post('/api/sessions/w1/stash/hand-over', { Authorization: 'Bearer jbt_x' });
     ok(a.status === 403 && a.body.code === 'agent_forbidden' && b.status === 403 && R.posts.length === 0, 'an agent\'s session / job bearer is 403 — the hand-over is the user\'s');
-    const c = await post('/api/sessions/w1/stash/hand-over');
-    const d = await post('/api/sessions/w1/stash/hand-over');
-    const e = await post('/api/sessions/zz/stash/hand-over');
+    // r2: an attended door is a PERSON's door — a request with no page (no bearer, no Origin, no Sec-Fetch-Site: a script) is 403 by name
+    const bare = await post('/api/sessions/w1/stash/hand-over');
+    ok(bare.status === 403 && bare.body.code === 'not_a_person' && R.posts.length === 0, 'r2: a header-less request (a script, no page) is 403 not_a_person — it presses nothing', bare);
+    const page = { 'Sec-Fetch-Site': 'same-origin' };
+    const c = await post('/api/sessions/w1/stash/hand-over', page);
+    const d = await post('/api/sessions/w1/stash/hand-over', page);
+    const e = await post('/api/sessions/zz/stash/hand-over', page);
     ok(c.status === 200 && c.body.ok && c.body.delivered === 1 && d.status === 409 && d.body.code === 'nothing_waiting' && e.status === 404, 'the cookie POST hands over; a second is nothing_waiting 409; an unknown session 404', { c: c.body, d: d.status, e: e.status });
   } finally { srv.close(); }
 }
@@ -369,9 +375,56 @@ globalThis.document = { createElement: (t) => new El(t) };   // what the strip b
   ok(dl.hidden === true && more.textContent === 'Details', 'a second click closes the list');
   strip.set(null);
   ok(strip.el.hidden === true, 'the fact clears ⇒ the strip is hidden');
-  ok(/^Not handed over — the limit for turns nobody typed/.test(SS.handOverRefusalText({ code: 'spend_refused' })) && /could not be reached/.test(SS.handOverRefusalText({ code: 'unreachable' })) && SS.handOverRefusalText({ error: 'boom' }) === 'Hand-over failed: boom'
+  ok(/^Not handed over — the spend check refused this turn without saying why/.test(SS.handOverRefusalText({ code: 'spend_refused' })) && /could not be reached/.test(SS.handOverRefusalText({ code: 'unreachable' })) && SS.handOverRefusalText({ error: 'boom' }) === 'Hand-over failed: boom'
     && /already in progress/.test(SS.handOverRefusalText({ code: 'in_flight' })) && /predates mid-turn notifications/.test(SS.handOverRefusalText({ code: 'held_for_next_turn' })),
     'a refusal is SAID in the device\'s words, by its code (incl. in_flight and held_for_next_turn)');
+  // lane owner-press-attended (R2): THE MEASURED 429 BODY — userW's 00:47:34 PT press on account acct-1 (cap 30, the next slot
+  // 08:21:33Z): said WITH its facts and its door. The pre-fix strip said the fact-less sentence for it (no account, no cap,
+  // no time, no door) and he pressed five times; that sentence is now only what a fact-less body (an older hub) reads.
+  {
+    const body = { ok: false, code: 'spend_refused', id: 'ho-x-7', why: 'hour-cap', retryAfter: Date.parse('2026-10-28T08:21:33Z'), identity: { key: 'sub-x', name: 'acct-1' }, cap: 30, error: 'spend budget: acct-1 has spent 30 unattended turns this hour (cap 30)' };
+    const now = Date.parse('2026-10-28T07:47:34Z');
+    const w = S.handOverRefusalWords(body, tEn, { now, locale: 'en-US', timeZone: 'America/Los_Angeles' });
+    ok(w.door === 'spending' && w.text === 'Not handed over — acct-1 has used its 30 turns nobody typed this hour; the next frees at 01:21 AM (in 34 min). The notices keep waiting.',
+      'R2 the measured 429 body is SAID: the account (acct-1), the cap (30), the next free slot in the VIEWER\'s zone (01:21 AM PT — the hub said 8:21:33 AM, its UTC, unnamed) and in how long — with the door to Settings → Spending', JSON.stringify(w));
+    const sz = S.handOverRefusalWords(body, tEn, { now, locale: 'zh-CN', timeZone: 'Asia/Shanghai' });
+    ok(/the next frees at 16:21 \(in 34 min\)/.test(sz.text), 'R2 …the same instant in another viewer\'s zone and locale (16:21 in Shanghai) — the hub\'s clock is the fact, the zone is the rendering', sz.text);
+    const strip = SS.handOverRefusalText(body, { now });
+    ok(/\bacct-1\b/.test(strip) && /\b30\b/.test(strip) && /\(in 34 min\)/.test(strip), 'R2 …and the strip\'s own export speaks it (account, cap, minutes)', strip);
+    const pre = S.handOverRefusalWords({ code: 'spend_refused' }, tEn, { now });
+    // r3 (accept-r2 claim 0): a body with NO why is not a cap (the hub sends one when the authorizer itself threw) — it
+    // says the check refused without saying why, never the pre-fix «the limit … is reached», and names no Spending door
+    ok(pre.text === 'Not handed over — the spend check refused this turn without saying why (it fails closed when it cannot decide). The notices keep waiting.' && pre.door === null && !/acct-1|30|01:21|limit|\[/.test(pre.text),
+      'R2 CONTROL: a fact-less body (no why — the authorizer threw) names no account, no cap, no time — r3: and no limit «reached», no Spending door — r4: with no `error` either, it points at no log line', pre.text);
+    // r4 (accept-r3 confirmed 0): the body the current hub sends when the authorizer THREW (no why, its `error` says what
+    // failed) — the toast SAYS that error, quoted, and names the log lines written for it ([stash] / [deliver]), never [spend]
+    const threw = S.handOverRefusalWords({ ok: false, code: 'spend_refused', id: 'h1', error: 'spend authorizer failed: settings store unreadable', why: null, retryAfter: 0, identity: null, cap: null }, tEn, { now });
+    ok(threw.text === 'Not handed over — the spend check failed and refused this turn: “spend authorizer failed: settings store unreadable” (it fails closed when it cannot decide). The notices keep waiting; the hub log’s [stash] and [deliver] lines record it.' && threw.door === null && !/\[spend\]/.test(threw.text),
+      'r4 the authorizer threw: the reply\'s `error` is SAID (quoted) and the pointer names the [stash] / [deliver] lines written for it — never a [spend] line nobody writes', threw.text);
+    const ctl = S.handOverRefusalWords({ code: 'spend_refused', error: 'x\u0007\n'.repeat(3) + 'y'.repeat(400) }, tEn, { now });
+    ok(!/[\u0000-\u001f]/.test(ctl.text) && /“x x x y{190,200}”/.test(ctl.text), 'r4 …the reason is belted: control characters become spaces, 200 characters at most', ctl.text);
+    const day = S.handOverRefusalWords({ ...body, why: 'day-cap', cap: 200, retryAfter: Date.parse('2026-10-29T07:00:00Z') }, tEn, { now, locale: 'en-US', timeZone: 'America/Los_Angeles' });
+    const inst = S.handOverRefusalWords({ ...body, why: 'instance-cap', cap: 800, identity: null }, tEn, { now, locale: 'en-US', timeZone: 'America/Los_Angeles' });
+    const over = S.handOverRefusalWords({ ...body, why: 'overage-in-use', cap: null, retryAfter: 0 }, tEn, { now });
+    const out = S.handOverRefusalWords({ ...body, why: 'identity-cannot-serve', cap: null, retryAfter: 0 }, tEn, { now });
+    const zero = S.handOverRefusalWords({ ...body, cap: 0, retryAfter: 0 }, tEn, { now });
+    ok(/in 24 hours; the next frees at Thu 12:00 AM \(in 23 h 13 min\)/.test(day.text) && day.door === 'spending' && /this instance has used its 800/.test(inst.text) && inst.door === 'spending'
+      && /acct-1 is billing paid overage/.test(over.text) && over.door === 'spending' && /acct-1 cannot sign requests right now/.test(out.text) && out.door === 'usage' && /switched off for acct-1/.test(zero.text) && zero.door === 'spending',
+      'R2 every refusal that remains after the attended law has its own words — another day names its weekday; overage and a cap of 0 («switched off») carry the Settings door, a signed-out account the Usage window (r2)', JSON.stringify([day.text, inst.text, over.text, out.text, zero.text]));
+    const src = read('src/lib/stash-strip.js');
+    ok(/if \(!r \|\| r\.error \|\| !r\.ok\) \{ showRefusal\(r\); return; \}/.test(src) && /w\.door === 'spending' && settings && typeof settings\.open === 'function' \? \{ label: t\('Open Settings → Spending'\), run: \(\) => settings\.open\(\{ category: t\('Spending'\) \}\) \}/.test(src),
+      'R2 the strip\'s refusal toast carries the door: «Open Settings → Spending» opens the Settings window on its Spending section');
+    // r2: THE SAME TABLE AS THE NOTICE (accept-r1 finding 1 + attack 2): no body with no identity says «the limit is reached»
+    // unless the refusal WAS a cap; an instant already PAST is said «free now — press again», never «(in 1 min)»
+    const noId = (why) => S.handOverRefusalWords({ ...body, why, identity: null, cap: null, retryAfter: 0 }, tEn, { now }).text;
+    const past = S.handOverRefusalWords({ ...body, retryAfter: now - 7.5 * 60e3 }, tEn, { now, locale: 'en-US', timeZone: 'America/Los_Angeles' });
+    ok(/could not tell which account/.test(noId('identity-unknown')) && /the account this turn would bill cannot sign requests/.test(noId('identity-cannot-serve')) && /has reached its spend control/.test(noId('spend-control-reached'))
+      && /is on paid overage/.test(noId('overage-in-use')) && /refused this turn \(weird\)/.test(noId('weird')) && ['identity-unknown', 'identity-cannot-serve', 'spend-control-reached', 'overage-in-use', 'weird'].every((w) => !/limit for turns nobody typed is reached/.test(noId(w))),
+      'r2 a refusal whose body names no account has its own words per why — never «the limit is reached» unless it WAS a cap', JSON.stringify(['identity-unknown', 'identity-cannot-serve', 'weird'].map(noId)));
+    ok(past.text === 'Not handed over — acct-1 has used its 30 turns nobody typed this hour; the next is free now — press again. The notices keep waiting.' && !/\(in /.test(past.text),
+      'r2 a retryAfter already 7.5 min PAST is said «the next is free now — press again» (base: «the next frees at 12:40 AM (in 1 min)»)', past.text);
+    ok(/w\.door === 'usage' && app && typeof app\.openUsage === 'function' \? \{ label: t\('Open Usage'\), run: \(\) => app\.openUsage\(\) \}/.test(src), 'r2 a signed-out (or unnamed) account\'s toast opens the Usage window — its door');
+  }
   // the card hint
   const list = new El('div');
   const card = new El('div'); card.className = 'session-item-card'; card._webuiId = 'w1';

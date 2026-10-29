@@ -1338,6 +1338,9 @@ ok(hs && hs.browserKey === HL && hs.open && hs.recorded === true && hs.count >= 
       // a save-login For-you card (SAVE_LOGIN_IS_USERS); lane engine-distribution, the kernel's download (ENGINES_ARE_USERS)
       ['POST', '/api/browser/logins/cards/:id/:verb', '/api/browser/logins/cards/sl-0000abcd/approve', { shown: '00000000' }],
       ['POST', '/api/browser/engines/:id/kernel', '/api/browser/engines/vibespace.custom-browser/kernel', {}],
+      // lane owner-press-attended: the Hand back of a conversation's browser is an ATTENDED press — every bearer refused (r1 put
+      // `refuseAgentBearer` on it, which this census derives; r2 walks it — r1 left this heavy suite red)
+      ['POST', '/api/browser/handback', '/api/browser/handback', { sessionId: 'sess-any' }],
     ];
     const table = WALK_H.map(([m, p]) => m + ' ' + p).sort();
     ok(J(derived) === J(table), `the human-route census: the routes that serve HIS browsing, derived from the routers (${derived.length}), are exactly the walk's table — a new one is RED until it is walked`, { derived, table });

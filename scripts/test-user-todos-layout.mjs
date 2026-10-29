@@ -450,6 +450,88 @@ console.log('⑪ NOTICES BY ORIGIN (B-328d) — the closed producer set, the leg
       const last = casts[casts.length - 1];
       ok(last && last.open.some((i) => i.id === 'ut-00000000ee' && i.origin === 'spend'), 'the broadcast snapshot carries origin');
       m.stop(); m2.stop();
+      // lane owner-press-attended (R2): a spend refusal is filed with its words as STRUCTURE (src/spend-authorizer.js
+      // refusalI18n) — the account, the cap and the next free slot as an INSTANT param `{at}` (an epoch). The store keeps it,
+      // the broadcast carries it, the client says it in the VIEWER's zone (userW's pod printed «8:21:33 AM», its UTC, unnamed).
+      {
+        const SA = req(path.join(ROOT, 'src/spend-authorizer.js'));
+        const at = Date.parse('2026-10-28T08:21:33Z');
+        const v = { ok: false, why: 'hour-cap', retryAfter: at, identity: { key: 'k', name: 'acct-1' }, limits: SA.budgetLimits(() => undefined), reason: 'stash-retry', detail: 'acct-1 has spent 30 unattended turns this hour (cap 30)' };
+        const idir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ut-instant-'));
+        const icasts = [];
+        const m4 = new UserTodoManager({ dataDir: idir, onChange: (snap) => icasts.push(snap), expirySweepMs: 0 });
+        const sp = m4.add('accounts', { text: SA.refusalText(v, { sessionName: 'build-bot' }), kind: 'notice', origin: 'spend', i18n: SA.refusalI18n(v, { sessionName: 'build-bot' }) });
+        const lastI = icasts[icasts.length - 1];
+        // r2: the next free slot is an INSTANT CLAUSE `{at, key, gone}` (the client says «free now» once it has passed)
+        const nx = sp.i18n.text.params.next;
+        ok(nx && nx.at === at && nx.key === 'The next frees at {time}.' && nx.gone === 'The next is free now.' && sp.i18n.text.params.account === 'acct-1' && sp.i18n.text.params.cap === 30 && sp.i18n.text.params.conversation === 'build-bot' && /\{next\}/.test(sp.i18n.text.key)
+          && lastI && lastI.open.some((i) => i.id === sp.id && i.i18n.text.params.next && i.i18n.text.params.next.at === at && i.i18n.text.params.next.gone === 'The next is free now.'),
+          'R2 the spend refusal\'s INSTANT CLAUSE ({next: {at, key, gone}}) is kept by the store and carried by the broadcast — with the conversation, the account and the cap', JSON.stringify(sp.i18n));
+        ok(/Next allowed after 2026-10-28T08:21:33Z\./.test(sp.text) && !/\b(AM|PM)\b/.test(sp.text), 'R2 …and its English line (the dedupe key, the journal\'s words) names the instant in UTC — never a hub-zone clock', sp.text);
+        const bad = m4.add('accounts', { text: 'a malformed instant', kind: 'notice', origin: 'spend', i18n: { text: { key: 'at {time}', params: { time: { at: 'soon' }, neg: { at: -5 }, cl: { at: -1, key: 'x {time}' }, nokey: { at: at, key: '' } } } } });
+        ok(!['time', 'neg', 'cl', 'nokey'].some((k) => k in (bad.i18n.text.params || {}) && !(k === 'nokey' && bad.i18n.text.params.nokey.at === at && !('key' in bad.i18n.text.params.nokey))), 'R2 …an instant that is not a positive finite epoch is no param (dropped, never a string the client prints); a clause with an empty key keeps only its instant', JSON.stringify(bad.i18n));
+        m4.stop();
+        fs.rmSync(idir, { recursive: true, force: true });
+        const SS0 = req(path.join(ROOT, 'src/stash-summary.js'));
+        const now = Date.parse('2026-10-28T07:47:34Z');
+        ok(SS0.clockAt(at, { now, locale: 'en-US', timeZone: 'America/Los_Angeles' }) === '01:21 AM' && SS0.clockAt(at, { now, locale: 'en-GB', timeZone: 'UTC' }) === '08:21',
+          'R2 the client\'s rendering (PURE clockAt): the same epoch is 01:21 AM for a PT viewer and 08:21 for a UTC one');
+        // r2: THE ONE RENDERER (user-todos-layout saidLine — user-todos-actions' said() IS it): the clause follows the clock
+        const LY = await import(path.join(ROOT, 'src/lib/user-todos-layout.js'));
+        const tt = (k, p0) => String(k).replace(/\{(\w+)\}/g, (m, x) => (p0 && p0[x] !== undefined ? String(p0[x]) : m));
+        const ahead = LY.saidLine(sp.i18n.text, tt, { now, locale: 'en-US', timeZone: 'America/Los_Angeles' });
+        const gone = LY.saidLine(sp.i18n.text, tt, { now: at + 7.5 * 60e3, locale: 'en-US', timeZone: 'America/Los_Angeles' });
+        ok(/The next frees at 01:21 AM\.$/.test(ahead) && /The next is free now\.$/.test(gone) && !/01:21/.test(gone),
+          'R2 the clause is said at RENDER: «The next frees at 01:21 AM.» while ahead, «The next is free now.» once 7.5 min past (the stored epoch unchanged)', JSON.stringify({ ahead, gone }));
+        ok(/const said = \(l\) => saidLine\(l, t, \{ locale: deviceLocale\(\) \}\);/.test(fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-actions.js'), 'utf8'))
+          && /if \(Number\.isFinite\(v\.at\)\) return clockAt\(v\.at, \{ now, locale, timeZone \}\);/.test(fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-layout.js'), 'utf8')),
+          'R2 the For-you words (user-todos-actions said()) ARE saidLine — an {at} param through clockAt in the device\'s locale and zone');
+        const zh = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-ja.js'), 'utf8');
+        const keys = new Set([...Object.values(SA.REFUSAL_WORDS).flat(), ...Object.values(SA.NEXT_WORDS).flatMap((x) => [x.key, x.gone]), ...Object.values(SA.LINE_WORDS), ...Object.values(SA.DOOR_WORDS), ...Object.values(SA.SPEND_REASONS).map((r) => r.what)]);
+        for (const why of ['hour-cap', 'day-cap', 'instance-cap', 'overage-in-use', 'identity-cannot-serve', 'spend-control-reached', 'identity-unknown', 'unknown-reason', 'weird']) for (const ra of [at, 0]) for (const sn of ['build-bot', null]) { const w = SA.refusalI18n({ ...v, why, retryAfter: ra, producers: { 'job-notification': 2, unknown: 1 } }, { sessionName: sn }); keys.add(w.text.key); for (const d of w.detail || []) keys.add(d.key); }
+        const missing = [...keys].filter((k) => !zh.includes(JSON.stringify(k) + ':') || !ja.includes(JSON.stringify(k) + ':'));
+        ok(keys.size >= 56 && missing.length === 0, `R2 every sentence refusalI18n can file — its rows, clauses, lines, doors and every producer's words (${keys.size}) — is in the zh and ja dictionaries`, missing.join(' | '));
+        // r3 (accept-r2 claim 2): A MERGE CANNOT SILENTLY DROP A SIBLING'S RULE — lane lark-refresh-stall's WORDS param carries
+        // its OWN params (a dead sign-in's cause names the stall's length); a merge that kept r2's saidLine and dropped
+        // `v.params` passed this suite and rendered a literal «{minutes}». The leg reads it through the store AND the renderer.
+        {
+          const ndir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ut-nested-'));
+          const m5 = new UserTodoManager({ dataDir: ndir, expirySweepMs: 0 });
+          const NKEY = '{account} ({kind}): sign-in expired — re-authorize ({cause})';
+          const cause = { key: 'the hub stalled {minutes} min while refreshing the sign-in', params: { minutes: 89 } };
+          const ni = m5.add('channels', { text: 'Owner (Lark): sign-in expired', kind: 'notice', origin: 'channels', i18n: { text: { key: NKEY, params: { account: 'Owner', kind: 'Lark', cause } }, detail: [{ key: 'Cause: {cause}', params: { cause } }] } });
+          let refused = null; try { m5.add('channels', { text: 'x', kind: 'notice', origin: 'channels', i18n: { text: { key: '{c}', params: { c: { key: 'deep {x}', params: { x: { key: 'deeper' } } } } } } }); } catch (e) { refused = e.message; }
+          m5.stop(); fs.rmSync(ndir, { recursive: true, force: true });
+          const nt = LY.saidLine(ni.i18n.text, tt), nd = LY.saidLine(ni.i18n.detail[0], tt);
+          ok(nt === 'Owner (Lark): sign-in expired — re-authorize (the hub stalled 89 min while refreshing the sign-in)' && nd === 'Cause: the hub stalled 89 min while refreshing the sign-in' && !/\{minutes\}/.test(nt + nd) && ni.i18n.text.params.cause.params.minutes === 89 && /must be a string or a finite number/.test(String(refused)),
+            'r3 NESTED WORDS (lark-refresh-stall\'s rule, carried): a WORDS param\'s OWN params survive the store and the ONE renderer — «89 min», never «{minutes}»; a nested param that is not a string / number is refused by name', JSON.stringify({ nt, nd, refused }));
+          // r3 (accept-r2 claim 0 (c)): A CLAUSE THAT LOST ITS KEY — a bare `{at}` in THE clause's slot `next` (or `{at, gone}`)
+          // rendered a bare clock that never turned into «now»; it now says the DEFAULT words, the complete clause's
+          const kdir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ut-keyless-'));
+          const m6 = new UserTodoManager({ dataDir: kdir, expirySweepMs: 0 });
+          const ki = m6.add('accounts', { text: 'held', kind: 'notice', origin: 'spend', i18n: { text: { key: 'VibeSpace held it. {next}', params: { next: { at, gone: 'The next is free now.' } } }, detail: [{ key: 'held. {next}', params: { next: { at } } }, { key: 'Its window: {next}', params: { next: { at, gone: 'Its overage window has reset since.' } } }, { key: 'Reported at {time}.', params: { time: { at } } }] } });
+          m6.stop(); fs.rmSync(kdir, { recursive: true, force: true });
+          const PT = { locale: 'en-US', timeZone: 'America/Los_Angeles' };
+          const kAhead = [ki.i18n.text, ...ki.i18n.detail].map((l) => LY.saidLine(l, tt, { now, ...PT }));
+          const kPast = [ki.i18n.text, ...ki.i18n.detail].map((l) => LY.saidLine(l, tt, { now: at + 60e3, ...PT }));
+          ok(JSON.stringify(kAhead) === JSON.stringify(['VibeSpace held it. The next frees at 01:21 AM.', 'held. The next frees at 01:21 AM.', 'Its window: Its overage resets at 01:21 AM.', 'Reported at 01:21 AM.'])
+            && JSON.stringify(kPast) === JSON.stringify(['VibeSpace held it. The next is free now.', 'held. The next is free now.', 'Its window: Its overage window has reset since.', 'Reported at 01:21 AM.'])
+            && ki.i18n.text.params.next.gone === 'The next is free now.' && LY.CLAUSE_DEFAULTS[0] === SA.NEXT_WORDS.cap && LY.CLAUSE_DEFAULTS[1] === SA.NEXT_WORDS.overage,
+            'r3 A KEYLESS CLAUSE says the DEFAULT words (spend-authorizer NEXT_WORDS — the same table): «The next frees at 01:21 AM.» ahead, «The next is free now.» once past — never a bare clock; an INSTANT in any other slot stays its clock', JSON.stringify({ kAhead, kPast }));
+          // r3: THE FOLD IS FOR THE EYE, NOT THE RECORD — a line's `more` rows survive the store; the eye reads the line, a Copy the rows
+          const fdir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ut-fold-'));
+          const m7 = new UserTodoManager({ dataDir: fdir, expirySweepMs: 0 });
+          const fi = m7.add('accounts', { text: 'x', kind: 'notice', origin: 'spend', i18n: { text: { key: 'x' }, detail: [{ key: 'Spent by {producer}: {n}', params: { producer: 'a', n: 3 } }, { key: 'And {n} more producers.', params: { n: 2 }, more: [{ key: 'Spent by {producer}: {n}', params: { producer: 'b', n: 2 } }, { key: 'Spent by {producer}: {n}', params: { producer: 'c', n: 1 }, more: [{ key: 'never' }] }] }] } });
+          m7.stop(); fs.rmSync(fdir, { recursive: true, force: true });
+          const eye = LY.itemDetailLinesOf(fi, (l) => LY.saidLine(l, tt)), rec = LY.itemRecordLinesOf(fi, (l) => LY.saidLine(l, tt));
+          const acts = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-actions.js'), 'utf8');
+          ok(JSON.stringify(eye) === JSON.stringify(['Spent by a: 3', 'And 2 more producers.']) && JSON.stringify(rec) === JSON.stringify(['Spent by a: 3', 'Spent by b: 2', 'Spent by c: 1']) && !('more' in fi.i18n.detail[1].more[1])
+            && /const recordOf = \(i\) => \(isCleared\(i\) \? '' : [^\n]*itemRecordLinesOf\(i, said\)\.join\('\\n'\)/.test(acts)
+            && /model\.recordOf \? model\.recordOf\(cur\) : model\.detailOf\(cur\)/.test(fs.readFileSync(path.join(ROOT, 'src/lib/inbox-window.js'), 'utf8'))
+            && /model\.recordOf \? model\.recordOf\(rec\) : model\.detailOf\(rec\)/.test(fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-panel.js'), 'utf8')),
+            'r3 THE FOLD IS FOR THE EYE: a line\'s folded rows (`more`) survive the store (one level); the eye reads «And 2 more producers.», the RECORD both Copy buttons say (inbox window, For-you menu) reads every row', JSON.stringify({ eye, rec }));
+        }
+      }
       // r2 (verifier, pre-existing): stop() is the manager's last act — a debounced
       // write pending at stop() is flushed NOW; its 500 ms timer used to outlive
       // stop() and fire into a data dir the owner had already removed (ENOENT)

@@ -1070,7 +1070,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     return { ok: true, already: !!d.already, lease: leaseView(l) };
   }
   /** Control goes back to the agent. `cause` ∈ HANDBACK_CAUSES; any viewer may hand back. */
-  function handback({ handle, viewerId = null, cause = 'explicit' } = {}) {
+  function handback({ handle, viewerId = null, cause = 'explicit', pressed = null } = {}) {
     load();
     const h = String(handle || '');
     const l = leases.get(h);
@@ -1079,7 +1079,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     inputs.set(h, d.state);
     audit({ sessionId: l ? l.sessionId : null, browserKey: l ? l.browserKey : null, handle: h, origin: (l && l.origin) || ORIGIN, verb: 'handback', by: 'user', ok: true, cause: d.cause, heldMs: d.heldMs, byHolder: d.byHolder, ...(viewerId ? { viewer: String(viewerId) } : {}) });
     log.log?.(`[window] ${h} (${labelOf(h)}): handed back to the agent (${d.cause}${d.byHolder ? '' : ', not by the holder'}) after ${Math.round(d.heldMs / 1000)} s`);
-    if (l) emitInput({ kind: 'handback', target: 'window', handle: h, label: labelOf(h), sessionId: l.sessionId, browserKey: l.browserKey, state: { ...d.state }, cause: d.cause, heldMs: d.heldMs, byHolder: d.byHolder });
+    if (l) emitInput({ kind: 'handback', target: 'window', handle: h, label: labelOf(h), sessionId: l.sessionId, browserKey: l.browserKey, state: { ...d.state }, cause: d.cause, heldMs: d.heldMs, byHolder: d.byHolder, pressed });   // r2: + the door's PRESS (attended only with it)
     publish();
     return { ok: true, cause: d.cause, heldMs: d.heldMs, byHolder: d.byHolder, lease: leaseView(l) };
   }

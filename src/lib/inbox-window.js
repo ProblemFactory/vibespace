@@ -696,7 +696,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
       const { error } = await model.ensureDetail(id);
       if (error) showToast(t('Could not load the rest of the text: {why}', { why: error }), { type: 'error' });
       const cur = model.byId(id) || it;
-      copyText(itemView(cur, { t, words: model.wordsOf(cur), detail: model.detailOf(cur) }).copy); showToast(t('Copied')); return;
+      copyText(itemView(cur, { t, words: model.wordsOf(cur), detail: model.recordOf ? model.recordOf(cur) : model.detailOf(cur) }).copy); showToast(t('Copied')); return;   // r3 (lane owner-press-attended): the RECORD — a fold said whole
     }
     if (a === 'producer') { model.runAction(it); return; }
     if (a === 'app-install' || a === 'app-retry') {

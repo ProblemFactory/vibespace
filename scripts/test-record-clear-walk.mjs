@@ -505,10 +505,12 @@ for (const p of PROBES) {
 // "Hand over now" after the clear (verify r3 on the merged tree: the census's derived file list found this route outside the old
 // hand list): the owner hands the seat's waiting notices over as ONE turn — what reaches the stub's stdin carries no word; a
 // seat with nothing waiting is refused by name (409 nothing_waiting), never a leak
-{ const ho = await raw(`/api/sessions/${WIN}/stash/hand-over`, { method: 'POST', body: {} }); await sleep(900);
+{ const ho = await raw(`/api/sessions/${WIN}/stash/hand-over`, { method: 'POST', body: {}, headers: { 'sec-fetch-site': 'same-origin' } }); await sleep(900);   // lane owner-press-attended r3: the person's page (the hand-over is a press — write-origin pressOf)
   const tail = stdinLog().split('\n').filter(Boolean).slice(-3).join('\n');
   check(`POST /api/sessions/:id/stash/hand-over after the clear ⇒ ${ho.status} ${(ho.json && (ho.json.code || (ho.json.ok && 'delivered ' + ho.json.delivered))) || ''}: nothing it delivered carries a word`, (ho.status === 200 || (ho.status === 409 && ho.json && ho.json.code === 'nothing_waiting')) && !has(tail) && !has(ho.text), { status: ho.status, body: ho.text.slice(0, 200), tail: wordsIn(tail) });
-  const hoA = await raw(`/api/sessions/${WIN}/stash/hand-over`, { method: 'POST', body: {}, headers: AG }); check('…and an agent\'s bearer on it ⇒ 403 agent_forbidden', hoA.status === 403 && hoA.json && hoA.json.code === 'agent_forbidden', hoA); }
+  const hoA = await raw(`/api/sessions/${WIN}/stash/hand-over`, { method: 'POST', body: {}, headers: AG }); check('…and an agent\'s bearer on it ⇒ 403 agent_forbidden', hoA.status === 403 && hoA.json && hoA.json.code === 'agent_forbidden', hoA);
+  // lane owner-press-attended r2/r3: a request with no page (Node fetch: the cookie, no Sec-Fetch-Site, no Origin) is no press ⇒ refused by name
+  const hoS = await raw(`/api/sessions/${WIN}/stash/hand-over`, { method: 'POST', body: {} }); check('…and the owner\'s cookie with NO page (a script: no Sec-Fetch-Site, no Origin) ⇒ 403 not_a_person', hoS.status === 403 && hoS.json && hoS.json.code === 'not_a_person', { status: hoS.status, body: hoS.text.slice(0, 200) }); }
 // a second user turn after the clear: what the chat injects (override notices, the group report, the held job notifications) carries no word
 await turn('second turn');
 { const log = stdinLog(); const after = log.slice(log.indexOf('second turn')); check('the stub\'s stdin after the clear (a typed turn + what rode it) carries no word', !has(after), wordsIn(after)); }

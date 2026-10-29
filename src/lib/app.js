@@ -318,7 +318,7 @@ class App {
     // Sync settings from other clients via WebSocket
     this.ws.onGlobal((msg) => {
       if (msg.type === 'settings-updated' && msg.settings) {
-        this.settings.applyRemote(msg.settings);
+        this.settings.applyRemote(msg.settings, { spend: msg.spend || null });   // r2: the server's in-force spend numbers ride the broadcast
       }
       if (msg.type === 'custom-themes-updated' && msg.themes) {
         this._applyCustomThemesFromServer(msg.themes);
