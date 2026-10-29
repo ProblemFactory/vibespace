@@ -107,6 +107,7 @@ export function resolvedByText(by, t, item = null) {
   if (by === 'delivered') return t('delivered'); // r6: a held digest the owner released (Deliver)
   if (by === 'discarded' && item && item.resolvedFact && item.resolvedFact.why === 'watch-removed') return t('the rule they were held for was removed — {n} messages discarded', { n: Number(item.resolvedFact.n) || 0 }); // r9: no watcher left to deliver to
   if (by === 'discarded' && item && item.resolvedFact && item.resolvedFact.why === 'access-removed') return t('the access they were held under was removed — {n} messages discarded', { n: Number(item.resolvedFact.n) || 0 }); // r10: the grant its watcher lived by was revoked
+  if (by === 'discarded' && item && item.resolvedFact && item.resolvedFact.why === 'not-covered') return t('the rule no longer covers this conversation — {n} messages discarded', { n: Number(item.resolvedFact.n) || 0 }); // r11: out of the rule's reach (its rules edited, the conversation renamed)
   if (by === 'discarded') return t('discarded — nothing was sent'); // …or dropped (Discard)
   if (by === 'granted') { const gw = item ? grantWords(item, { t }) : null; return gw ? gw.text : t('allowed'); } // r4: an agent's request for a stored secret (vault-grant-ask) answered — r6: the duration its record carries (none ⇒ «allowed») and the grant's life (ended / revoked), THE reader foryou-actions grantWords
   // B-2198 part 2: a raw-API proposal's item is answered BY its outcome (the card's words: Ran · 200 · 1.2 KB / Rejected by you)
@@ -204,7 +205,8 @@ export function runFactsHtml(i, t, { buttons = true } = {}) {
   const row = answers.length ? `<div class="ut-exit-answer ut-hub-answer ut-run-answer">${answers.map((a) => `<button type="button" class="ut-act ut-action-exit ut-exit-${a === 'deny' ? 'deny' : 'allow'} ut-hub-${a}" data-answer="${a}">${escHtml(hubAnswerWord(a, t, i.action.type))}</button>`).join('')}${answers.includes('always') ? '' : runHintHtml(v)}</div>` : '';
   const fold = v.fold.length ? `<details class="ut-detail-exp ut-run-fold"><summary>${escHtml(t('Technical details'))}</summary><div class="ut-run-tech">${v.fold.map((f) => `<div class="ut-run-row"><span class="ut-run-lbl">${escHtml(f.label)}</span><span class="ut-run-val">${f.cmd != null ? `<pre class="ut-run-cmd ut-run-cmd-full">${escHtml(f.cmd)}</pre>` : linesHtml(f.lines)}</span></div>`).join('')}</div></details>` : '';
   const cut = v.cut ? `<div class="ut-run-cut">${escHtml(v.cut.text)}</div>` : ''; // r8: a command longer than the body's bound says it is a cut (the whole: the fold)
-  return `<div class="ut-run"><pre class="ut-run-cmd">${escHtml(v.cmd)}</pre>${cut}<div class="ut-run-facts">${rows}</div>${row}${fold}</div>`;
+  const again = v.again ? `<div class="ut-run-again">${segHtml(v.again)}</div>` : ''; // r11: a near-identical rerun names the ONE way it differs (the door's whyAgain)
+  return `<div class="ut-run"><pre class="ut-run-cmd">${escHtml(v.cmd)}</pre>${cut}${again}<div class="ut-run-facts">${rows}</div>${row}${fold}</div>`;
 }
 
 /** A CARD WITH A DEADLINE SHOWS IT (r7 addendum): THE model's line (foryou-actions deadlineOf) under the question — «valid for

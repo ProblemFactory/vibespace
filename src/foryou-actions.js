@@ -437,6 +437,7 @@ function settledWords(item, t = fmt, kind = null) {
   if (by === 'delivered') return t('delivered');   // r6: a held digest the owner released
   if (by === 'discarded' && item && item.resolvedFact && item.resolvedFact.why === 'watch-removed') return t('the rule they were held for was removed — {n} messages discarded', { n: Number(item.resolvedFact.n) || 0 });   // r9: no watcher left to deliver to — the store ended it, said
   if (by === 'discarded' && item && item.resolvedFact && item.resolvedFact.why === 'access-removed') return t('the access they were held under was removed — {n} messages discarded', { n: Number(item.resolvedFact.n) || 0 });   // r10: its row stands, inert — the grant it lived by was revoked
+  if (by === 'discarded' && item && item.resolvedFact && item.resolvedFact.why === 'not-covered') return t('the rule no longer covers this conversation — {n} messages discarded', { n: Number(item.resolvedFact.n) || 0 });   // r11: the rule stands, its reach no longer takes the held conversation
   if (by === 'discarded') return t('discarded — nothing was sent');
   if (by === 'expired' && item && item.action && item.action.type === 'channel-held-digest') return t('expired — discarded, nothing was sent');   // r6: its end discards
   if (by === 'ask-expired' && item && item.action) return t(DEADLINE_WORDS['timed-out']);   // r7 addendum: a held ask nobody answered in time (a command: exit / run / hub act / automation) keeps its place with its outcome
@@ -647,7 +648,12 @@ function decidedStamp(item, { t = fmt, now = Date.now() } = {}) {
  *  marked, the «Always» HINT (why it is not offered) and the FOLD's technical lines (the full path, the references, what
  *  «Always» remembers, the masking, the templates — never in the body). A value is SEGMENTS: {text} words, {mono} data (a
  *  path, a host, a variable), {aside} a parenthesis, {code} a code these tables have no words for — drawn monospace, never guessed into a
- *  sentence. null = no facts this client reads (v ≠ 1, another kind): the record's prose `detail`, exactly as before. */
+ *  sentence. null = no facts this client reads (v ≠ 1, another kind): the record's prose `detail`, exactly as before.
+ *  r11 — ONE PRODUCER CONTRACT (主开发's ruling): vault-agent-own's vault-run.js `cardFactsOf` (+ the door's `whyAgain`) is the
+ *  ONLY author of what a run card says; this model draws the facts as they carry them and nothing it reads elsewhere (no
+ *  live session name — a fallback that reads the hub is a fact nobody produced): `who`; every clipped string's `<key>Cut`
+ *  marker with its `<key>Full` chunks reassembled under the fold (r25's clipFold — a secret's name / entry / ref, an env
+ *  name / value, the «Always» directive; `whoCut` has no fold); `whyAgain` — the ONE dimension named. */
 /** THE ONE BOUND of a run card's command (r8 — /var/tmp/vibespace-lanes/vault-card-contract.md, both lanes): the body shows
  *  ≤ RUN_CMD_BODY_MAX characters (a longer one: its start + «…», `cmdCut: true`), the fold holds the whole ≤ RUN_CMD_MAX
  *  (`cmdFull`); a longer whole is cut THERE and said — r9: the door sends the QUOTED argv (1 000 single quotes make a
@@ -679,6 +685,14 @@ const RUN_SHAPE = Object.freeze({   // what «Always» remembers (the shape key'
   line: i18nKey('«Always» remembers this whole command line'),
 });
 const RUN_AS = Object.freeze({ file: i18nKey('file {name}'), arg: i18nKey('on the command line'), stdin: i18nKey('standard input') });   // env: the variable's own name
+const RUN_WHY_AGAIN = Object.freeze({   // = vault-run.js's WHY_AGAIN (r11 — vault-agent-own r25 minor 6b): the ONE way a near-identical rerun differs from the command the owner let through late
+  folder: i18nKey('it runs in another folder'),
+  env: i18nKey('its environment variable {name} changed'),
+  'secret-set': i18nKey('it uses another set of secrets'),
+  'arg-order': i18nKey('its arguments are in another order'),
+  'arg-space': i18nKey('its arguments are spaced differently'),
+  args: i18nKey('its arguments changed'),
+});
 /** The fact row a reason is ABOUT — that row goes first, with the warning accent. */
 const RUN_DECIDES = Object.freeze({ 'destination-unknown': 'hosts', redirect: 'hosts', 'brace-var': 'hosts', 'opaque-route': 'hosts', 'program-writable': 'program' });
 const RUN_ROWS = Object.freeze(['hosts', 'program', 'folder', 'secrets']);
@@ -687,6 +701,9 @@ function runCardOf(item, { t = fmt } = {}) {
   const f = item && item.action && item.action.type === 'vault-run-ask' && item.facts && typeof item.facts === 'object' && (item.facts.v === 1 || item.facts.v === 2) ? item.facts : null;   // r8: v 2 = vault-agent-own r23 (the chunked folds, env, the templates' text, the reason)
   if (!f) return null;
   const str = (x) => (typeof x === 'string' ? x : '');
+  const joined = (x) => (Array.isArray(x) ? x.filter((c) => typeof c === 'string').join('') : str(x));
+  // r11 (r25's clipFold): a clipped field → what the card's face draws (its clip + «…») and the WHOLE (its fold reassembled)
+  const wholeOf = (o, k) => { const x = o && typeof o === 'object' ? o : {}, shown = str(x[k]), cut = x[k + 'Cut'] === true; return { shown: cut && shown && !shown.endsWith('\u2026') ? shown + '\u2026' : shown, whole: (cut && joined(x[k + 'Full'])) || shown, cut }; };
   const own = (table, code) => typeof code === 'string' && Object.prototype.hasOwnProperty.call(table, code);
   const said = (table, code) => (own(table, code) ? [{ text: t(table[code]) }] : code ? [{ code: String(code) }] : []);
   const list = (xs) => xs.flatMap((x, k) => (k ? [{ text: t(', ') }, ...x] : x));
@@ -704,13 +721,13 @@ function runCardOf(item, { t = fmt } = {}) {
   const headOf = (n) => { const cut = n.indexOf(' · '); return cut > 0 ? n.slice(0, cut) : n; };
   const groups = [];
   for (const s of secrets) {
-    const name = str(s.name) || str(s.ref), key = str(s.entry) || headOf(name);
+    const name = wholeOf(s, 'name').shown || wholeOf(s, 'ref').shown, key = wholeOf(s, 'entry').whole || headOf(name);
     let g = groups.find((x) => x.key === key);
     if (!g) groups.push(g = { key, names: [], as: [] });
     g.names.push(name); g.as.push(asOf(s.as));
   }
   const entryName = (g) => (g.names.length === 1 ? g.names[0] : g.names.every((n) => headOf(n) === headOf(g.names[0])) ? headOf(g.names[0]) : g.names.join(t(', ')));
-  const who = str(f.who) || str(item.sessionName) || t('An agent'), toolName = str(tool.name) || str(tool.path);
+  const who = wholeOf(f, 'who').shown || t('An agent'), toolName = str(tool.name) || str(tool.path);   // r11: the facts' own `who` — never the record's live session name
   const headline = groups.length ? t('{who} wants to run {tool} with “{entries}”', { who, tool: toolName, entries: groups.map(entryName).join(t(', ')) }) : t('{who} wants to run {tool}', { who, tool: toolName });
   const a = f.always && typeof f.always === 'object' ? f.always : {};
   const h = f.hosts && typeof f.hosts === 'object' ? f.hosts : {};
@@ -729,12 +746,11 @@ function runCardOf(item, { t = fmt } = {}) {
   const rows = [...(decides ? [decides] : []), ...RUN_ROWS.filter((k) => k !== decides)]
     .filter((k) => k !== 'folder' || folder).filter((k) => k !== 'secrets' || groups.length)
     .map((key) => ({ key, label: t(RUN_LABEL[key]), lines: lines[key], warn: key === decides || (key === 'hosts' && !known) }));
-  const hint = a.offered === true ? null : [{ text: t('No «Always»: {why}', { why: own(RUN_ALWAYS_WHY, a.why) ? t(RUN_ALWAYS_WHY[a.why]) : '' }).replace(/[:：]\s*$/, (m) => m.trimEnd()) }, ...(a.why && !own(RUN_ALWAYS_WHY, a.why) ? [{ code: String(a.why) }] : []), ...(str(a.directive) ? [{ mono: str(a.directive) }] : [])];
+  const hint = a.offered === true ? null : [{ text: t('No «Always»: {why}', { why: own(RUN_ALWAYS_WHY, a.why) ? t(RUN_ALWAYS_WHY[a.why]) : '' }).replace(/[:：]\s*$/, (m) => m.trimEnd()) }, ...(a.why && !own(RUN_ALWAYS_WHY, a.why) ? [{ code: String(a.why) }] : []), ...(str(a.directive) ? [{ mono: wholeOf(a, 'directive').shown }] : [])];
   const templates = (Array.isArray(f.templates) ? f.templates : []).filter((x) => x && typeof x === 'object');
   // r8 (a store clips and says, never throws): a command longer than the body's RUN_CMD_BODY_MAX — `cmd` its start, `cmdCut`,
   // the whole (≤ RUN_CMD_MAX) in `cmdFull` (chunks — r23's shape; the store folds an older producer's the same way); the body
   // SAYS it is a cut (drawn with «…») and the fold holds it all, reassembled
-  const joined = (x) => (Array.isArray(x) ? x.filter((c) => typeof c === 'string').join('') : str(x));
   const full = f.cmdCut === true && joined(f.cmdFull) ? joined(f.cmdFull) : null;
   // r9 (a store never states a length it cannot prove — the acceptance: a 2 035-byte argv with 1 000 quotes is a 5 037-char
   // quoted cmd; the store kept 4 096 and the line said «命令共 4096 个字符 … 完整命令在「技术细节」里»): the fold is CUT when a
@@ -755,14 +771,22 @@ function runCardOf(item, { t = fmt } = {}) {
   const why = [...(rs && rs.notOwn === true ? [[{ text: t('it uses a secret another conversation stored') }]] : []),
     ...away.map((x) => [{ mono: str(x.ref) }, { text: ' ' }, { text: awayWords(x) }])];
   const cut = (Array.isArray(f.cut) ? f.cut : []).filter((x) => typeof x === 'string' && x).slice(0, 16);
-  const env = (Array.isArray(f.env) ? f.env : []).filter((x) => x && typeof x === 'object' && str(x.name));   // r8: a run's plain (not secret) --env, when the door says it
+  const env = (Array.isArray(f.env) ? f.env : []).filter((x) => x && typeof x === 'object' && str(x.name)).map((x) => ({ name: wholeOf(x, 'name').whole, value: wholeOf(x, 'value') }));   // r8: a run's plain (not secret) --env, when the door says it; r11: a clipped value is said and its whole is a box of its own
+  const directive = wholeOf(a, 'directive');
+  // r11: the ONE dimension a near-identical rerun differs in from the command let through late (the door's `whyAgain` {code, name})
+  const wa = typeof f.whyAgain === 'string' ? { code: f.whyAgain } : f.whyAgain && typeof f.whyAgain === 'object' ? f.whyAgain : null;
+  const AGAIN = i18nKey('Asked again — it differs from the command you let through: {why}');
+  const again = !wa ? null : own(RUN_WHY_AGAIN, wa.code) ? [{ text: t(AGAIN, { why: wa.code === 'env' && !str(wa.name) ? t('an environment variable changed') : t(RUN_WHY_AGAIN[wa.code], { name: str(wa.name) }) }) }]
+    : [{ text: t(AGAIN, { why: '' }).trimEnd() }, { text: ' ' }, { code: String(wa.code || '') }];   // a code this client has no words for: drawn as a code
   const fold = [
     ...(why.length ? [{ label: t('Why it asks'), lines: why }] : []),
     ...(full ? [{ label: foldCut ? t('Command (its first {n} characters)', { n: full.length }) : t('Whole command'), lines: [], cmd: full }] : []),
     ...(cut.length ? [{ label: t('Shortened'), lines: [[{ text: t('too long to keep whole, cut at the card\'s bound:') }, { text: ' ' }, ...list(cut.map((x) => [{ code: x }]))]] }] : []),
     { label: t(RUN_LABEL.program), lines: [[{ mono: path }]] },
-    ...(env.length ? [{ label: t('Environment'), lines: env.map((x) => [{ mono: `${str(x.name)}=${str(x.value)}` }]) }] : []),
-    ...(secrets.length ? [{ label: t(RUN_LABEL.secrets), lines: secrets.map((s) => [{ text: str(s.name) }, { text: ' — ' }, { mono: str(s.ref) }, { text: ' → ' }, ...asOf(s.as)]) }] : []),
+    ...(env.length ? [{ label: t('Environment'), lines: env.map((x) => (x.value.cut ? [{ mono: `${x.name}=` }, { aside: t('(its value is {n} characters — shortened on the card, the whole value below)', { n: x.value.whole.length }) }] : [{ mono: `${x.name}=${x.value.whole}` }])) }] : []),
+    ...env.filter((x) => x.value.cut).map((x) => ({ label: t('{name} (its whole value)', { name: x.name }), lines: [], cmd: x.value.whole })),   // r11: a clipped env value WHOLE, in its own scrolling box
+    ...(secrets.length ? [{ label: t(RUN_LABEL.secrets), lines: secrets.map((s) => { const nm = wholeOf(s, 'name'), rf = wholeOf(s, 'ref'), en = wholeOf(s, 'entry'); return [{ text: nm.whole }, { text: ' — ' }, { mono: rf.whole }, { text: ' → ' }, ...asOf(s.as), ...(nm.cut || rf.cut || en.cut ? [{ aside: t('(shortened on the card — whole here)') }] : [])]; }) }] : []),
+    ...(directive.cut ? [{ label: t('Its config directive (whole)'), lines: [], cmd: directive.whole }] : []),   // r11: the «Always» hint's directive, whole
     ...(known ? [{ label: t(RUN_LABEL.hosts), lines: hosts.map((x) => [{ mono: x }]) }] : []),
     ...(f.shape ? [{ label: t('Shape'), lines: [said(RUN_SHAPE, f.shape)] }] : []),
     ...(f.masking ? [{ label: t('Output'), lines: [said(RUN_MASKING, f.masking)] }] : []),
@@ -772,9 +796,9 @@ function runCardOf(item, { t = fmt } = {}) {
   const cmd0 = str(f.cmd), shown = full ? cmd0.replace(/\u2026$/, '').length : cmd0.length;
   const cmd = full && !/\u2026$/.test(cmd0) ? cmd0 + '\u2026' : cmd0;   // the body's cut is drawn as one
   const cutText = !full ? null : !foldCut ? t('The command is {n} characters long; the card shows its first {m} — the whole command is under “{fold}”.', { n: total, m: shown, fold: t('Technical details') })
-    : total != null ? t('The command is {n} characters long — over {max}, so the whole command was not kept: see its run record in the Vault window. The card shows its first {m}.', { n: total, max: RUN_CMD_MAX, m: shown })
-      : t('The command is over {max} characters, so the whole command was not kept: see its run record in the Vault window. The card shows its first {m}.', { max: RUN_CMD_MAX, m: shown });
-  return { headline, cmd, cut: full ? { n: total, whole: !foldCut, shown, text: cutText } : null, rows, always: { offered: a.offered === true, hint }, fold };
+    : total != null ? t('The command is {n} characters long — cut at {k}, so the whole command was not kept: see its run record in the Vault window. The card shows its first {m}.', { n: total, k: full.length, m: shown })   // r11: the cut point is what ARRIVED (the store's 4 096, or the door's own cut) — never «over 4 096» below it
+      : t('The command is over {max} characters, so the whole command was not kept: see its run record in the Vault window. The card shows its first {m}.', { max: full.length, m: shown });
+  return { headline, cmd, cut: full ? { n: total, whole: !foldCut, shown, text: cutText } : null, again, rows, always: { offered: a.offered === true, hint }, fold };
 }
 /** r9 (a store says when it DROPS): a run card whose facts the store dropped files a stub `{dropped, cut: ['facts']}` (no `v` —
  *  runCardOf reads it as no facts: the prose, as before) and its card says so in ONE line above the text. → words | null */
@@ -841,4 +865,4 @@ function filedLine(x, id, tray = null) {
   return fmt(FILED[s.at], { what: fmt(ONE[KINDS.includes(s.kind) ? s.kind : 'check']), tray: where, on: s.on || 'its own card in this conversation' }) + (id ? ` (${id})` : '');
 }
 
-module.exports = { ROWS, ROW_OF, ANSWERS, CARDS, ACTION_IDENTITY, WAIT_ACTIONS, CARD_ACTION_TYPES, ANSWER_ACTION_TYPES, KINDS, KIND_WORDS: ONE, SURFACES, BY_TYPE, BY_ORIGIN, IDENTITY_FIELDS, SKEW_MS, FILED_WINDOW_MS, needOf, needsOf, recordsOf, placementOf, tailPlan, drawnAt, filingIndex, chipWords, settledWords, surfaceOf, FILED, filedLine, PERSON_DECIDES, DECISION_ROWS, DECISION_ENDS, endsOf, STAMPS, isDecisionRow, offersClosers, CLOSERS, HIDDEN_BY, POINTER_ROWS, isPointer, isHidden, closersOf, expiryWords, VIEWERS, VIEWER_ROLE, canDecide, clockWords, decidedStamp, decisionCard, grantLifeOf, grantWords, verbsOf, runCardOf, factsDroppedWords, FACTS_DROPPED_WORDS, RUN_ALWAYS_WHY, RUN_HOSTS_WHY, RUN_MASKING, RUN_SHAPE, RUN_CMD_BODY_MAX, RUN_CMD_MAX, deadlineOf, DEADLINE_WORDS, DEADLINE_LIVE_MS, DEADLINE_WARN_MS, OUTCOME_ENDS, endOf, ruledOf };
+module.exports = { ROWS, ROW_OF, ANSWERS, CARDS, ACTION_IDENTITY, WAIT_ACTIONS, CARD_ACTION_TYPES, ANSWER_ACTION_TYPES, KINDS, KIND_WORDS: ONE, SURFACES, BY_TYPE, BY_ORIGIN, IDENTITY_FIELDS, SKEW_MS, FILED_WINDOW_MS, needOf, needsOf, recordsOf, placementOf, tailPlan, drawnAt, filingIndex, chipWords, settledWords, surfaceOf, FILED, filedLine, PERSON_DECIDES, DECISION_ROWS, DECISION_ENDS, endsOf, STAMPS, isDecisionRow, offersClosers, CLOSERS, HIDDEN_BY, POINTER_ROWS, isPointer, isHidden, closersOf, expiryWords, VIEWERS, VIEWER_ROLE, canDecide, clockWords, decidedStamp, decisionCard, grantLifeOf, grantWords, verbsOf, runCardOf, factsDroppedWords, FACTS_DROPPED_WORDS, RUN_ALWAYS_WHY, RUN_WHY_AGAIN, RUN_HOSTS_WHY, RUN_MASKING, RUN_SHAPE, RUN_CMD_BODY_MAX, RUN_CMD_MAX, deadlineOf, DEADLINE_WORDS, DEADLINE_LIVE_MS, DEADLINE_WARN_MS, OUTCOME_ENDS, endOf, ruledOf };

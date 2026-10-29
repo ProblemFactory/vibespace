@@ -58,6 +58,15 @@
 //     warning accent under 15 s); past its 60 s THE LATE CARD
 //     (the owner's ruling «A»: r20b's `late` mark — its answers stay); the other two variants and the stress shapes LOOKED at
 //     on both widths. SHOTS r7-<lang>-<1280|390>-<chat|tray|window>.png, r7-zh-*-warn / -ended / -late / -<variant>.png.
+// ACCEPTANCE ROUND 11 (主开发's ruling: ONE producer contract — vault-agent-own's cardFactsOf is the only author of a run card's
+//     facts): every facts object the legs inject is the PRODUCER'S (scripts/fixtures/vault-run-card-legs.json, generated on a
+//     scratch copy of the train tip by repro/r11/make-card-legs.mjs) and is injected through EITHER door — this tree's (no
+//     producer: the stand-in files the fixture's facts) or the train's (its own cardFactsOf; the stand-in swaps in the leg's),
+//     so the legs read the same facts on both. ⑩ THE FOLD AND WHY IT ASKS AGAIN: the producer's 2 100-character env value whole
+//     under the fold (said cut on the card), the door's whyAgain named (arg-order, an env var) in zh / en / ja at 1280 and 390;
+//     THE REAL PRODUCER (a door that has cardFactsOf): a card the door's own facts fill reads exactly its who and its entry's
+//     Vault-window name — nothing the renderer read elsewhere. SHOTS r11-<lang>-1280-fold.png, r11-zh-390-fold.png,
+//     r11-zh-1280-again-env.png, r11-zh-1280-producer.png.
 // Requires google-chrome (SKIP without) and a fresh `npm run build`. Run: node scripts/test-wake-approve-card-chrome.mjs [--shots <dir>]
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -194,7 +203,10 @@ fs.mkdirSync(path.join(wt, 'data'), { recursive: true });
 // ROUND 7 — THE SERVER HALF'S STAND-IN (until int-C): this tree's vault-run door files no `facts` (lane vault-agent-own r20's
 // cardFactsOf) and no `late` mark (its r20b): the SCRATCH COPY's door hands the run card the facts the suite wrote (R7_FACTS)
 // and, while R7_LATE exists, keeps a card nobody answered OPEN at its 60 s, marked `late` (its expiresAt + 24 h) — the agent's
-// command refused all the same. A door that has cardFactsOf is left exactly as it is (int-C runs this leg on the real one)
+// command refused all the same. ROUND 11 (the train ran these legs on its own door's facts — «Session 1», the entry's label —
+// and read them as red): on a door that HAS cardFactsOf the stand-in swaps the leg's facts (R7_FACTS, the producer's — the
+// generated legs fixture) in for the door's own while R7_FACTS exists, and settles in the ruled shape (R9_RULED); its own late
+// mark is real and left alone. With no R7_FACTS the door's own facts file (⑩'s producer leg)
 const R7_FACTS = path.join(stubDir, 'r7-facts.json'), R7_LATE = path.join(stubDir, 'r7-late');
 // ROUND 9: while R9_RULED exists the scratch door settles the next card it settles in THE RULED SHAPE written there ({by, fact} —
 // vault-agent-own r24's late allow / lock settles, which this tree's door cannot make) — the ruled words LOOKED at and shot
@@ -202,16 +214,25 @@ const R9_RULED = path.join(stubDir, 'r9-ruled.json');
 {
   const f = path.join(wt, 'src', 'server', 'vault-run-door.js');
   let d = fs.readFileSync(f, 'utf8');
+  const OPEN = "why === 'gone' ? 'ask-over' : outcome === 'changed' ? 'ask-changed' : outcome; if (it && it.status === 'open') {";   // the RUN card's settle (its 'expired')
+  const RULED = `if (it && it.status === 'open' && require('fs').existsSync(${JSON.stringify(R9_RULED)})) { const rl = JSON.parse(require('fs').readFileSync(${JSON.stringify(R9_RULED)}, 'utf8')); userTodos.resolveAnswered([it.id], rl.by, { ...rl.fact, ...(rl.fact && rl.fact.decidedBy ? { decidedAt: now() } : {}) }); } else `;
+  const LEG_FACTS = `(() => { try { return { facts: JSON.parse(require('fs').readFileSync(${JSON.stringify(R7_FACTS)}, 'utf8')) }; } catch { return null; } })()`;
   if (!/cardFactsOf/.test(d)) {
     const ACT = "action: { type: 'vault-run-ask', askId, always: !!shape.always, tool: String(shape.name || '').slice(0, 40) },";
-    const OPEN = "why === 'gone' ? 'ask-over' : outcome === 'changed' ? 'ask-changed' : outcome; if (it && it.status === 'open') {";   // the RUN card's settle (its 'expired')
     if (d.split(ACT).length !== 2 || d.split(OPEN).length !== 2) throw new Error('r7 stand-in: the door\'s anchors moved');
-    d = d.replace(ACT, ACT + ` ...(() => { try { return { facts: JSON.parse(require('fs').readFileSync(${JSON.stringify(R7_FACTS)}, 'utf8')) }; } catch { return {}; } })(),`);
-    d = d.replace(OPEN, OPEN.replace("if (it && it.status === 'open') {", `if (it && it.status === 'open' && outcome === 'expired' && require('fs').existsSync(${JSON.stringify(R7_LATE)})) { it.action = { ...it.action, late: true, lateAt: now() }; it.expiresAt = now() + 86400e3; userTodos._save(); userTodos._notify(); } else if (it && it.status === 'open' && require('fs').existsSync(${JSON.stringify(R9_RULED)})) { const rl = JSON.parse(require('fs').readFileSync(${JSON.stringify(R9_RULED)}, 'utf8')); userTodos.resolveAnswered([it.id], rl.by, { ...rl.fact, ...(rl.fact && rl.fact.decidedBy ? { decidedAt: now() } : {}) }); } else if (it && it.status === 'open') {`));
-    fs.writeFileSync(f, d);
-    console.log('  (r7: the scratch door stands in for the server half — facts from the fixture, the late mark)');
+    d = d.replace(ACT, ACT + ` ...(${LEG_FACTS} || {}),`);
+    d = d.replace(OPEN, OPEN.replace("if (it && it.status === 'open') {", `if (it && it.status === 'open' && outcome === 'expired' && require('fs').existsSync(${JSON.stringify(R7_LATE)})) { it.action = { ...it.action, late: true, lateAt: now() }; it.expiresAt = now() + 86400e3; userTodos._save(); userTodos._notify(); } else ${RULED}if (it && it.status === 'open') {`));
+    console.log('  (r7: the scratch door stands in for the server half — the legs\' facts (the producer\'s), the late mark, the ruled settle)');
+  } else {   // r11: the producer's door — the legs' facts swapped in for its own (while R7_FACTS exists), the ruled settle
+    const FACTS = '...(facts ? { facts } : {}),';
+    if (d.split(FACTS).length !== 2 || d.split(OPEN).length !== 2) throw new Error('r11 stand-in: the producer door\'s anchors moved');
+    d = d.replace(FACTS, `...(${LEG_FACTS} || (facts ? { facts } : {})),`);
+    d = d.replace(OPEN, OPEN.replace("if (it && it.status === 'open') {", `${RULED}if (it && it.status === 'open') {`));
+    console.log('  (r11: the producer\'s door — the legs\' facts swapped in while the leg writes them, the ruled settle; its own late mark)');
   }
+  fs.writeFileSync(f, d);
 }
+const PRODUCER_DOOR = /cardFactsOf/.test(fs.readFileSync(path.join(repo, 'src', 'server', 'vault-run-door.js'), 'utf8'));
 const srvLog = fs.openSync(path.join(SHOTS, 'server.log'), 'a');
 const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: path.join(stubDir, 'claude'), VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '', VIBESPACE_CHANNELS_FAKE: '1' }, stdio: ['ignore', srvLog, srvLog] });
 const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--password-store=basic',
@@ -757,7 +778,7 @@ try {
   // variants and the stress shapes LOOKED at on both widths
   console.log('⑧ ROUND 7 — the run card as facts (three surfaces × 1280 / 390 × zh / en / ja); its deadline and the late card; the variants and the stress shapes');
   try {
-    const V7 = Object.fromEntries(JSON.parse(fs.readFileSync(path.join(repo, 'scripts/fixtures/vault-run-card-facts.json'), 'utf8')).variants.map((v) => [v.name, v.facts]));
+    const LV = Object.fromEntries(JSON.parse(fs.readFileSync(path.join(repo, 'scripts/fixtures/vault-run-card-legs.json'), 'utf8')).variants.map((v) => [v.name, v.facts]));   // r11: the PRODUCER'S facts (generated — repro/r11/make-card-legs.mjs)
     fs.mkdirSync(path.join(WORK, 'office-net'), { recursive: true });
     fs.writeFileSync(path.join(WORK, 'office-net', 'unifi-api.sh'), '#!/bin/sh\necho ok\n', { mode: 0o755 });
     const UNIFI = ['./office-net/unifi-api.sh', 'PUT', '/proxy/network/api/s/default/rest/networkconf/5f9c3a6e8b2d4c0012a7e1f4', '/tmp/unifi-work/wan2-primary.json'];
@@ -765,7 +786,7 @@ try {
     let tag7 = 0;
     const ran7 = () => (cliLog().match(/### vfacts 0 rc=/g) || []).length;
     const runCard = async (facts, argv = UNIFI) => {
-      fs.writeFileSync(R7_FACTS, JSON.stringify(facts));
+      if (facts) fs.writeFileSync(R7_FACTS, JSON.stringify(facts)); else fs.rmSync(R7_FACTS, { force: true });   // r11: no facts = the door's own (a producer door's cardFactsOf)
       fs.writeFileSync(path.join(stubDir, 'r7-run.json'), JSON.stringify({ tag: 'r7-' + (++tag7), argv }));
       const seen = new Set([...(await api()).open, ...(await api()).resolved].map((i) => i.id));
       say('now do:vfacts');
@@ -812,7 +833,7 @@ try {
     const facts1 = (o) => !!o && o.cmd && o.cmdWraps && o.cmdInside && !o.prose && !o.sideways && J3(o.rows) === J3(['hosts!', 'program', 'folder', 'secrets']) && o.fold === 'closed';
     const answers1 = (o) => !!o && !!o.once && o.once.primary && Number(o.once.opacity) === 1 && !o.once.disabled && !!o.deny && o.deny.neutral && !o.always && !!o.hint && o.hintBeside;
     const HEAD = { zh: 'ops watch 想用「UniFi 账号」运行 unifi-api.sh', en: 'ops watch wants to run unifi-api.sh with “UniFi 账号”', ja: 'ops watch が「UniFi 账号」を使って unifi-api.sh を実行しようとしています' };
-    const facts = { ...V7['hosts-unknown'], who: 'ops watch' };
+    const facts = LV.ops;
     const look7 = {};
     let lateItem7 = null;
     for (const l of ['zh', 'en', 'ja']) {
@@ -848,9 +869,8 @@ try {
     }
     await lap('⑧ three languages done');
     // THE OTHER TWO VARIANTS and THE STRESS SHAPES — the chat card LOOKED at on both widths (zh)
-    const stress = { ...facts, cmd: UNIFI.join(' ') + ' --note ' + 'a1b2c3d4e5f6'.repeat(16), secrets: ['运维控制器本地管理员账号用于读取广域网状态和切换主线路的那一个账号条目名字很长很长很长', 'B', 'C', 'D'].map((n, k) => ({ name: `${n} · 密码`, ref: `vault://secrets/secret:stress-${k}/secret`, as: { kind: 'env', name: `STRESS_${k}` } })), hosts: { known: true, list: ['a.example.com:443', 'b.example.com', '10.0.0.7:8443'] }, always: { offered: false, why: 'program-writable', directive: null } };
     await lang(A, 'zh', false); await lang(B, 'zh', true); await A.front(); await quiet(A); await quiet(B);   // the variants are LOOKED at in zh (the language loop ends in ja)
-    const shapes = [['hosts-known-always', { ...V7['hosts-known-always'], who: 'ops watch' }, CURL], ['config-reads', { ...V7['config-reads'], who: 'ops watch' }, UNIFI], ['stress', stress, UNIFI]];
+    const shapes = [['hosts-known-always', LV['known-always'], CURL], ['config-reads', LV['config-reads'], UNIFI], ['stress', LV.stress, UNIFI]];
     for (const [name, f, argv] of shapes) {
       const it = await runCard(f, argv);
       await A.waitFor(`!!document.querySelector('${CARD7(it.id)}')`, 15000); await A.evalJs(`document.querySelector('${CARD7(it.id)}')?.scrollIntoView({ block: 'center' }); true`); await sleep(500);
@@ -858,8 +878,8 @@ try {
       await B.front(); await B.waitFor(`!!document.querySelector('${CARD7(it.id)}')`, 15000); await unfold(B, CARD7(it.id)); await B.evalJs(`document.querySelector('${CARD7(it.id)}')?.scrollIntoView({ block: 'start' }); true`); await sleep(500);
       const dB = await B.evalJs(LOOK7(CARD7(it.id))); await B.shot(`r7-zh-390-${name}.png`); await A.front();
       const sane = (o) => !!o && o.cmd && o.cmdWraps && o.cmdInside && !o.sideways && !o.overflowCard && !o.prose && o.rows.length <= 4;
-      const want = name === 'hosts-known-always' ? (o) => o.always && !o.hint && !o.rows.some((x) => x.endsWith('!')) : name === 'config-reads' ? (o) => !o.always && (o.hint || '').includes(V7['config-reads'].always.directive) : (o) => o.rows[0] === 'program!' && o.rows.length === 4;
-      check(`r7 ⑧ ${name} (zh, 1280 + 390): ${name === 'stress' ? 'a 300-character command, 4 entries (one named in 40+ CJK characters), 3 hosts — wrapped inside the card, nothing out of it, «程序» first (the deciding fact)' : name === 'config-reads' ? 'the hint names the reason and its directive' : '«Always» offered — no hint, nothing marked'}`, [dA, dB].every((o) => sane(o) && want(o)), { dA, dB });
+      const want = name === 'hosts-known-always' ? (o) => o.always && !o.hint && !o.rows.some((x) => x.endsWith('!')) : name === 'config-reads' ? (o) => !o.always && (o.hint || '').includes(LV['config-reads'].always.directive) : (o) => o.rows[0] === 'program!' && o.rows.length === 4;
+      check(`r7 ⑧ ${name} (zh, 1280 + 390): ${name === 'stress' ? `a ${LV.stress.cmd.length}-character command, 4 entries (one named in 40+ CJK characters), 3 hosts — wrapped inside the card, nothing out of it, «程序» first (the deciding fact)` : name === 'config-reads' ? 'the hint names the reason and its directive' : '«Always» offered — no hint, nothing marked'}`, [dA, dB].every((o) => sane(o) && want(o)), { dA, dB });
       await release(it);
     }
     await lap('⑧ done');
@@ -876,10 +896,8 @@ try {
         all.every((o) => !!o && !!o.deadline && o.dlState === 'late' && !!o.once && o.once.primary && !!o.deny && !o.always) && (l !== 'en' || all.every((o) => o.deadline === LATE9.en)), all);
     }
     await lang(A, 'zh', false); await A.front(); await quiet(A);
-    const chunks9 = (x) => { const o = []; for (let i = 0; i < x.length; i += 2000) o.push(x.slice(i, i + 2000)); return o; };
-    const long9 = (n) => (UNIFI.join(' ') + ' --note \'' + "a'\\''".repeat(1400)).slice(0, n);
-    const clip = [['2973', { ...facts, cmd: long9(2973).slice(0, 2000), cmdCut: true, cmdFull: chunks9(long9(2973)) }, '命令共 2973 个字符，这里只显示前 2000 个 — 完整命令在「技术细节」里。'],
-      ['5037', { ...facts, cmd: long9(5037).slice(0, 2000), cmdCut: true, cmdFull: chunks9(long9(5037)) }, '命令超过 4096 个字符，完整命令未保存 — 请在保险库窗口查看运行记录。这里只显示前 2000 个。']];
+    const clip = [['2973', LV['clip-2973'], '命令共 2973 个字符，这里只显示前 2000 个 — 完整命令在「技术细节」里。'],   // r11: the producer's long commands (cmd, cmdCut, cmdFull — r23)
+      ['5037', LV['clip-5037'], '命令超过 4096 个字符，完整命令未保存 — 请在保险库窗口查看运行记录。这里只显示前 2000 个。']];
     for (const [name, f, line] of clip) {
       const it = await runCard(f);
       await A.waitFor(`!!document.querySelector('${CARD7(it.id)}')`, 15000); await unfold(A, CARD7(it.id));
@@ -921,6 +939,58 @@ try {
         words.length === 3 && words.every((w, k) => !!w && w.shown && w.verb === WANT9[l][k]) && /^\d\d:\d\d$/.test(words[0].ago || '') && /^\d\d:\d\d$/.test(words[1].ago || ''), { words, by: closed.map(([n, it]) => it && [n, it.resolvedBy, it.resolvedFact]) });
     }
     await lap('⑨ done');
+    // ⑩ ROUND 11 — THE FOLD AND WHY IT ASKS AGAIN, DRAWN (the renderer pin owed to vault-agent-own): the producer's 2 100-character
+    // env value WHOLE in its own box under the fold and said cut on the line above it; the door's whyAgain (arg-order — its own
+    // whyAgainOf over the two exact commands) named on the card's face; zh / en / ja at 1280, zh at 390; an env var's change;
+    // then THE REAL PRODUCER (a door that has cardFactsOf): the card reads the facts the door made — its who, its entry's name
+    console.log('⑩ ROUND 11 — the producer\'s fold and whyAgain on the card (zh / en / ja at 1280, zh at 390); the real producer\'s own facts drawn as they are');
+    const FOLD = LV.fold, NOTE = FOLD.env[0].valueFull.join('');
+    const LOOK11 = (sel) => `(() => { const c = document.querySelector(${JSON.stringify(sel)}); if (!c || !c.getClientRects().length) return null; const d = c.querySelector('.ut-run-fold'); if (d) d.open = true;
+      const again = c.querySelector('.ut-run-again'), cr = c.getBoundingClientRect();
+      const box = [...c.querySelectorAll('.ut-run-fold .ut-run-cmd-full')].find((b) => b.textContent.length === ${NOTE.length}), br = box && box.getBoundingClientRect();
+      const row = [...c.querySelectorAll('.ut-run-fold .ut-run-row')].find((r) => (r.querySelector('.ut-run-val')?.textContent || '').startsWith('RUN_NOTE='));
+      const boxRow = box && box.closest('.ut-run-row');
+      return { again: again ? again.textContent.trim() : null, againShown: !!again && !!again.getClientRects().length, line: row ? row.querySelector('.ut-run-val').textContent.trim() : null, boxLabel: boxRow ? boxRow.querySelector('.ut-run-lbl').textContent.trim() : null,
+        whole: !!box && box.textContent === ${JSON.stringify(NOTE)}, inside: !!br && br.left >= cr.left - 0.5 && br.right <= cr.right + 0.5, scrolls: !!box && box.scrollHeight > box.clientHeight + 1, headline: (c.querySelector('.ut-text, .iw-title')?.textContent || '').trim().slice(0, 120), sideways: document.scrollingElement.scrollWidth > innerWidth + 1 }; })()`;
+    const W11 = {
+      zh: { again: '再次询问 — 与你放行过的命令不同：参数顺序不同', line: 'RUN_NOTE=（值共 2100 个字符 — 卡片上已截短，完整的值在下方）', box: 'RUN_NOTE（完整的值）' },
+      en: { again: 'Asked again — it differs from the command you let through: its arguments are in another order', line: 'RUN_NOTE=(its value is 2100 characters — shortened on the card, the whole value below)', box: 'RUN_NOTE (its whole value)' },
+      ja: { again: '再確認 — 通したコマンドと違います：引数の順番が違います', line: 'RUN_NOTE=（値は 2100 文字 — カードでは省略、値の全体は下にあります）', box: 'RUN_NOTE（値の全体）' },
+    };
+    const look11 = async (P, id, shot) => {
+      await P.waitFor(`!!document.querySelector('${CARD7(id)}')`, 15000); await unfold(P, CARD7(id));
+      await P.evalJs(`document.querySelector('${CARD7(id)}')?.scrollIntoView({ block: 'start' }); true`); await sleep(400);
+      const o = await P.evalJs(LOOK11(CARD7(id)));
+      await P.evalJs(`document.querySelector('${CARD7(id)} .ut-run-fold')?.scrollIntoView({ block: 'start' }); true`); await sleep(400); await P.shot(shot);
+      return o;
+    };
+    const it11 = await runCard(FOLD);
+    const f11 = {};
+    for (const l of ['zh', 'en', 'ja']) { await lang(A, l, false); await A.front(); await quiet(A); f11[l] = await look11(A, it11.id, `r11-${l}-1280-fold.png`); }
+    await lang(B, 'zh', true); await B.front(); await quiet(B); f11.phone = await look11(B, it11.id, 'r11-zh-390-fold.png'); await A.front();
+    const good11 = (o, w) => !!o && o.againShown && o.again === w.again && o.line === w.line && o.boxLabel === w.box && o.whole && o.inside && o.scrolls && !o.sideways;
+    check(`r11 ⑩ THE FOLD AND WHY IT ASKS AGAIN (the chat card — shots r11-<lang>-1280-fold.png, r11-zh-390-fold.png): «${(f11.zh || {}).again}» on the face; the env line «${(f11.zh || {}).line}»; the 2 100-character value WHOLE in its own scrolling box «${(f11.zh || {}).boxLabel}», inside the card — zh / en / ja at 1280 and zh at 390 (704a0f4c: no again line, the value cut at 2 000 with no marker)`,
+      good11(f11.zh, W11.zh) && good11(f11.en, W11.en) && good11(f11.ja, W11.ja) && good11(f11.phone, W11.zh), f11);
+    await lang(A, 'zh', false); await A.front(); await quiet(A);
+    await release(it11);
+    const itE = await runCard(LV['again-env']);
+    const fE = await look11(A, itE.id, 'r11-zh-1280-again-env.png');
+    check(`r11 ⑩ an env var's change named — «${fE && fE.again}» (shot r11-zh-1280-again-env.png)`, !!fE && fE.again === '再次询问 — 与你放行过的命令不同：环境变量 RUN_TAG 变了', fE);
+    await release(itE);
+    // THE REAL PRODUCER: no facts written — a producer door files its own (cardFactsOf); the card draws exactly them
+    if (!PRODUCER_DOOR) check('r11 ⑩ THE REAL PRODUCER: SKIP by name — this tree\'s door has no cardFactsOf (the producer half rides the train; this leg runs on a scratch merge onto it)', true);
+    else {
+      const itP = await runCard(null);
+      const fp = itP.facts || {};
+      const entry = [...new Set((fp.secrets || []).map((x) => String(x.name || '').split(' · ')[0]))].join('、');
+      const want = `${fp.who} 想用「${entry}」运行 ${(fp.tool || {}).name}`;
+      await A.waitFor(`!!document.querySelector('${CARD7(itP.id)}')`, 15000); await unfold(A, CARD7(itP.id)); await A.evalJs(`document.querySelector('${CARD7(itP.id)}')?.scrollIntoView({ block: 'center' }); true`); await sleep(500);
+      const pl = await A.evalJs(LOOK7(CARD7(itP.id))); await A.shot('r11-zh-1280-producer.png');
+      check(`r11 ⑩ THE REAL PRODUCER (shot r11-zh-1280-producer.png): the door's own facts (v ${fp.v}, who «${fp.who}», ${(fp.secrets || []).length} secret(s) «${entry}») drawn as they are — «${pl && pl.headline}»; nothing the renderer read elsewhere`,
+        fp.v === 2 && !!fp.who && fp.who !== 'ops watch' && !!entry && !!pl && pl.headline === want && pl.cmd && !pl.prose, { want, got: pl && pl.headline, facts: { v: fp.v, who: fp.who, secrets: (fp.secrets || []).map((x) => x.name) } });
+      await release(itP);
+    }
+    await lap('⑩ done');
   } catch (e) { fail++; console.log('  ✗ ⑧ threw: ' + (e?.stack || e)); }
   check('no page threw', pageErrors.length === 0, pageErrors.slice(0, 3));
 } catch (e) { fail++; console.log('  ✗ threw: ' + (e?.stack || e)); }

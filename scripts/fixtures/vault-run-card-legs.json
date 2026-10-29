@@ -1,0 +1,1010 @@
+{
+  "v": 2,
+  "_": "GENERATED — never hand-edit. Lane wake-approve-card r11: every facts object a run-card leg injects (test-wake-approve-card, test-wake-approve-card-chrome), made by the PRODUCER (lane vault-agent-own src/vault-run.js cardFactsOf over real plans; the door's own whyAgainOf / exactPartsOf / cmdText for `whyAgain`, set as the door sets it) on a scratch copy of the train tip. `codes` = VR.CARD_FACTS_CODES, the contract export.",
+  "producer": {
+    "commit": "fc4cadefe",
+    "src/vault-run.js": "9b03bf1e59dd",
+    "src/server/vault-run-door.js": "ac9258204888"
+  },
+  "codes": {
+    "always": [
+      "destination-unknown",
+      "program-writable",
+      "config-reads",
+      "card-too-long",
+      "redirect",
+      "brace-var",
+      "opaque-route",
+      "agent-template"
+    ],
+    "hosts": [
+      "tool-names-none",
+      "opaque",
+      "config-driven"
+    ],
+    "masking": [
+      "common-encodings"
+    ],
+    "shape": [
+      "tool",
+      "line"
+    ],
+    "whyAgain": [
+      "folder",
+      "env",
+      "secret-set",
+      "arg-order",
+      "arg-space",
+      "args"
+    ]
+  },
+  "variants": [
+    {
+      "name": "ops",
+      "why": "r7 ⑧: the owner's run — an agent-writable program, two env secrets of ONE entry, no host it declares",
+      "facts": {
+        "v": 2,
+        "who": "ops watch",
+        "tool": {
+          "name": "unifi-api.sh",
+          "path": "~/workspace/ops/office-net/unifi-api.sh",
+          "writable": true
+        },
+        "cmd": "./office-net/unifi-api.sh PUT /proxy/network/api/s/default/rest/networkconf/5f9c3a6e8b2d4c0012a7e1f4 /tmp/unifi-work/wan2-primary.json",
+        "folder": "~/workspace/ops",
+        "secrets": [
+          {
+            "name": "UniFi 账号 · 用户名",
+            "entry": "unifi-account",
+            "ref": "vault://secrets/unifi-account/username",
+            "as": {
+              "kind": "env",
+              "name": "UNIFI_USER"
+            },
+            "own": true,
+            "provenance": "stored",
+            "forHost": null,
+            "sendsTo": null
+          },
+          {
+            "name": "UniFi 账号 · 密码",
+            "entry": "unifi-account",
+            "ref": "vault://secrets/unifi-account/password",
+            "as": {
+              "kind": "env",
+              "name": "UNIFI_PASS"
+            },
+            "own": true,
+            "provenance": "stored",
+            "forHost": null,
+            "sendsTo": null
+          }
+        ],
+        "env": [],
+        "hosts": {
+          "known": false,
+          "list": [],
+          "why": "tool-names-none"
+        },
+        "shape": "tool",
+        "always": {
+          "offered": false,
+          "why": "destination-unknown",
+          "directive": null
+        },
+        "reason": {
+          "notOwn": false,
+          "away": [
+            {
+              "ref": "vault://secrets/unifi-account/username",
+              "forHost": null,
+              "host": null,
+              "unknown": true,
+              "keep": false
+            },
+            {
+              "ref": "vault://secrets/unifi-account/password",
+              "forHost": null,
+              "host": null,
+              "unknown": true,
+              "keep": false
+            }
+          ]
+        },
+        "templates": [],
+        "masking": "common-encodings"
+      }
+    },
+    {
+      "name": "known-always",
+      "why": "r7 ⑧: «Always» offered — no hint, nothing marked",
+      "facts": {
+        "v": 2,
+        "who": "ops watch",
+        "tool": {
+          "name": "psql",
+          "path": "/usr/bin/psql",
+          "writable": false
+        },
+        "cmd": "psql -h db.example.com -U svc -c 'select 1'",
+        "folder": "~/workspace/ops",
+        "secrets": [
+          {
+            "name": "生产数据库 · 密码",
+            "entry": "prod-db",
+            "ref": "vault://secrets/prod-db/password",
+            "as": {
+              "kind": "env",
+              "name": "PGPASSWORD"
+            },
+            "own": false,
+            "provenance": "granted",
+            "forHost": null,
+            "sendsTo": null
+          }
+        ],
+        "env": [],
+        "hosts": {
+          "known": true,
+          "list": [
+            "db.example.com"
+          ]
+        },
+        "shape": "tool",
+        "always": {
+          "offered": true,
+          "why": null,
+          "directive": null
+        },
+        "reason": null,
+        "templates": [],
+        "masking": "common-encodings"
+      }
+    },
+    {
+      "name": "config-reads",
+      "why": "r7 ⑧: «Always» withheld by a config read — the hint names it and its directive",
+      "facts": {
+        "v": 2,
+        "who": "ops watch",
+        "tool": {
+          "name": "curl",
+          "path": "/usr/bin/curl",
+          "writable": false
+        },
+        "cmd": "curl -sS -K '$VAULT_FILE{B}'",
+        "folder": "~/workspace/ops",
+        "secrets": [
+          {
+            "name": "API 令牌",
+            "entry": "api-token",
+            "ref": "vault://secrets/api-token/token",
+            "as": {
+              "kind": "file",
+              "name": "B"
+            },
+            "own": false,
+            "provenance": "granted",
+            "forHost": null,
+            "sendsTo": null
+          }
+        ],
+        "env": [],
+        "hosts": {
+          "known": false,
+          "list": [],
+          "why": "config-driven"
+        },
+        "shape": "tool",
+        "always": {
+          "offered": false,
+          "why": "config-reads",
+          "directive": "config ./more.cfg"
+        },
+        "reason": null,
+        "templates": [
+          {
+            "label": "B",
+            "bytes": 69,
+            "shown": true,
+            "text": "config ./more.cfg\nheader = \"X-Auth: $VAULT{secrets/api-token/token}\"\n"
+          }
+        ],
+        "masking": "common-encodings"
+      }
+    },
+    {
+      "name": "stress",
+      "why": "r7 ⑧: the stress shape — wrapped inside the card, «程序» first",
+      "facts": {
+        "v": 2,
+        "who": "ops watch",
+        "tool": {
+          "name": "curl",
+          "path": "~/workspace/ops/bin/curl",
+          "writable": true
+        },
+        "cmd": "./bin/curl -s https://a.example.com:443/v1/a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6 https://b.example.com/v1/a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6 https://10.0.0.7:8443/v1/items",
+        "folder": "~/workspace/ops",
+        "secrets": [
+          {
+            "name": "运维控制器本地管理员账号用于读取广域网状态和切换主线路的那一个账号条目名字很长很长很长 · 密码",
+            "entry": "stress-0",
+            "ref": "vault://secrets/stress-0/secret",
+            "as": {
+              "kind": "env",
+              "name": "STRESS_0"
+            },
+            "own": false,
+            "provenance": "granted",
+            "forHost": null,
+            "sendsTo": null
+          },
+          {
+            "name": "B · 密码",
+            "entry": "stress-1",
+            "ref": "vault://secrets/stress-1/secret",
+            "as": {
+              "kind": "env",
+              "name": "STRESS_1"
+            },
+            "own": false,
+            "provenance": "granted",
+            "forHost": null,
+            "sendsTo": null
+          },
+          {
+            "name": "C · 密码",
+            "entry": "stress-2",
+            "ref": "vault://secrets/stress-2/secret",
+            "as": {
+              "kind": "env",
+              "name": "STRESS_2"
+            },
+            "own": false,
+            "provenance": "granted",
+            "forHost": null,
+            "sendsTo": null
+          },
+          {
+            "name": "D · 密码",
+            "entry": "stress-3",
+            "ref": "vault://secrets/stress-3/secret",
+            "as": {
+              "kind": "env",
+              "name": "STRESS_3"
+            },
+            "own": false,
+            "provenance": "granted",
+            "forHost": null,
+            "sendsTo": null
+          }
+        ],
+        "env": [],
+        "hosts": {
+          "known": true,
+          "list": [
+            "10.0.0.7:8443",
+            "a.example.com",
+            "b.example.com"
+          ]
+        },
+        "shape": "tool",
+        "always": {
+          "offered": false,
+          "why": "program-writable",
+          "directive": null
+        },
+        "reason": null,
+        "templates": [],
+        "masking": "common-encodings"
+      }
+    },
+    {
+      "name": "clip-2973",
+      "why": "r9 ⑨: a 2 973-character command — cmd its first 2 000, cmdCut, the WHOLE in cmdFull",
+      "facts": {
+        "v": 2,
+        "who": "ops watch",
+        "tool": {
+          "name": "unifi-api.sh",
+          "path": "~/workspace/ops/office-net/unifi-api.sh",
+          "writable": true
+        },
+        "cmd": "./office-net/unifi-api.sh PUT /proxy/network/api/s/default/rest/networkconf/5f9c3a6e8b2d4c0012a7e1f4 /tmp/unifi-work/wan2-primary.json --note 'a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'",
+        "cmdCut": true,
+        "cmdFull": [
+          "./office-net/unifi-api.sh PUT /proxy/network/api/s/default/rest/networkconf/5f9c3a6e8b2d4c0012a7e1f4 /tmp/unifi-work/wan2-primary.json --note 'a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'",
+          "\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''bbbb'"
+        ],
+        "folder": "~/workspace/ops",
+        "secrets": [
+          {
+            "name": "UniFi 账号 · 用户名",
+            "entry": "unifi-account",
+            "ref": "vault://secrets/unifi-account/username",
+            "as": {
+              "kind": "env",
+              "name": "UNIFI_USER"
+            },
+            "own": true,
+            "provenance": "stored",
+            "forHost": null,
+            "sendsTo": null
+          },
+          {
+            "name": "UniFi 账号 · 密码",
+            "entry": "unifi-account",
+            "ref": "vault://secrets/unifi-account/password",
+            "as": {
+              "kind": "env",
+              "name": "UNIFI_PASS"
+            },
+            "own": true,
+            "provenance": "stored",
+            "forHost": null,
+            "sendsTo": null
+          }
+        ],
+        "env": [],
+        "hosts": {
+          "known": false,
+          "list": [],
+          "why": "tool-names-none"
+        },
+        "shape": "tool",
+        "always": {
+          "offered": false,
+          "why": "destination-unknown",
+          "directive": null
+        },
+        "reason": {
+          "notOwn": false,
+          "away": [
+            {
+              "ref": "vault://secrets/unifi-account/username",
+              "forHost": null,
+              "host": null,
+              "unknown": true,
+              "keep": false
+            },
+            {
+              "ref": "vault://secrets/unifi-account/password",
+              "forHost": null,
+              "host": null,
+              "unknown": true,
+              "keep": false
+            }
+          ]
+        },
+        "templates": [],
+        "masking": "common-encodings"
+      }
+    },
+    {
+      "name": "clip-5037",
+      "why": "r9 ⑨: a 5 037-character command — the store keeps 4 096 of the fold and names cmdFull in `cut`",
+      "facts": {
+        "v": 2,
+        "who": "ops watch",
+        "tool": {
+          "name": "unifi-api.sh",
+          "path": "~/workspace/ops/office-net/unifi-api.sh",
+          "writable": true
+        },
+        "cmd": "./office-net/unifi-api.sh PUT /proxy/network/api/s/default/rest/networkconf/5f9c3a6e8b2d4c0012a7e1f4 /tmp/unifi-work/wan2-primary.json --note 'a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'",
+        "cmdCut": true,
+        "cmdFull": [
+          "./office-net/unifi-api.sh PUT /proxy/network/api/s/default/rest/networkconf/5f9c3a6e8b2d4c0012a7e1f4 /tmp/unifi-work/wan2-primary.json --note 'a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'",
+          "\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'",
+          "\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''a'\\''bbb'"
+        ],
+        "folder": "~/workspace/ops",
+        "secrets": [
+          {
+            "name": "UniFi 账号 · 用户名",
+            "entry": "unifi-account",
+            "ref": "vault://secrets/unifi-account/username",
+            "as": {
+              "kind": "env",
+              "name": "UNIFI_USER"
+            },
+            "own": true,
+            "provenance": "stored",
+            "forHost": null,
+            "sendsTo": null
+          },
+          {
+            "name": "UniFi 账号 · 密码",
+            "entry": "unifi-account",
+            "ref": "vault://secrets/unifi-account/password",
+            "as": {
+              "kind": "env",
+              "name": "UNIFI_PASS"
+            },
+            "own": true,
+            "provenance": "stored",
+            "forHost": null,
+            "sendsTo": null
+          }
+        ],
+        "env": [],
+        "hosts": {
+          "known": false,
+          "list": [],
+          "why": "tool-names-none"
+        },
+        "shape": "tool",
+        "always": {
+          "offered": false,
+          "why": "destination-unknown",
+          "directive": null
+        },
+        "reason": {
+          "notOwn": false,
+          "away": [
+            {
+              "ref": "vault://secrets/unifi-account/username",
+              "forHost": null,
+              "host": null,
+              "unknown": true,
+              "keep": false
+            },
+            {
+              "ref": "vault://secrets/unifi-account/password",
+              "forHost": null,
+              "host": null,
+              "unknown": true,
+              "keep": false
+            }
+          ]
+        },
+        "templates": [],
+        "masking": "common-encodings"
+      }
+    },
+    {
+      "name": "fold",
+      "why": "r11: a 2 100-character env value (valueCut + valueFull), a 2 100-character secret name (nameCut + nameFull), whyAgain arg-order",
+      "facts": {
+        "v": 2,
+        "who": "ops watch",
+        "tool": {
+          "name": "unifi-api.sh",
+          "path": "~/workspace/ops/office-net/unifi-api.sh",
+          "writable": true
+        },
+        "cmd": "./office-net/unifi-api.sh /proxy/network/api/s/default/rest/networkconf/5f9c3a6e8b2d4c0012a7e1f4 PUT /tmp/unifi-work/wan2-primary.json",
+        "folder": "~/workspace/ops",
+        "secrets": [
+          {
+            "name": "UniFi 账号 · 用户名 （运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制",
+            "nameCut": true,
+            "nameFull": [
+              "UniFi 账号 · 用户名 （运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制",
+              "器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管理员）（运维控制器本地管"
+            ],
+            "entry": "unifi-account",
+            "ref": "vault://secrets/unifi-account/username",
+            "as": {
+              "kind": "env",
+              "name": "UNIFI_USER"
+            },
+            "own": true,
+            "provenance": "stored",
+            "forHost": null,
+            "sendsTo": null
+          },
+          {
+            "name": "UniFi 账号 · 密码",
+            "entry": "unifi-account",
+            "ref": "vault://secrets/unifi-account/password",
+            "as": {
+              "kind": "env",
+              "name": "UNIFI_PASS"
+            },
+            "own": true,
+            "provenance": "stored",
+            "forHost": null,
+            "sendsTo": null
+          }
+        ],
+        "env": [
+          {
+            "name": "RUN_NOTE",
+            "value": "wan2-primary failover window 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef012",
+            "valueCut": true,
+            "valueFull": [
+              "wan2-primary failover window 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef012",
+              "3456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456"
+            ]
+          }
+        ],
+        "hosts": {
+          "known": false,
+          "list": [],
+          "why": "tool-names-none"
+        },
+        "shape": "tool",
+        "always": {
+          "offered": false,
+          "why": "destination-unknown",
+          "directive": null
+        },
+        "reason": {
+          "notOwn": false,
+          "away": [
+            {
+              "ref": "vault://secrets/unifi-account/username",
+              "forHost": null,
+              "host": null,
+              "unknown": true,
+              "keep": false
+            },
+            {
+              "ref": "vault://secrets/unifi-account/password",
+              "forHost": null,
+              "host": null,
+              "unknown": true,
+              "keep": false
+            }
+          ]
+        },
+        "templates": [],
+        "masking": "common-encodings",
+        "whyAgain": {
+          "code": "arg-order"
+        }
+      }
+    },
+    {
+      "name": "again-env",
+      "why": "r11: whyAgain env (RUN_TAG changed)",
+      "facts": {
+        "v": 2,
+        "who": "ops watch",
+        "tool": {
+          "name": "unifi-api.sh",
+          "path": "~/workspace/ops/office-net/unifi-api.sh",
+          "writable": true
+        },
+        "cmd": "./office-net/unifi-api.sh PUT /proxy/network/api/s/default/rest/networkconf/5f9c3a6e8b2d4c0012a7e1f4 /tmp/unifi-work/wan2-primary.json",
+        "folder": "~/workspace/ops",
+        "secrets": [
+          {
+            "name": "UniFi 账号 · 用户名",
+            "entry": "unifi-account",
+            "ref": "vault://secrets/unifi-account/username",
+            "as": {
+              "kind": "env",
+              "name": "UNIFI_USER"
+            },
+            "own": true,
+            "provenance": "stored",
+            "forHost": null,
+            "sendsTo": null
+          },
+          {
+            "name": "UniFi 账号 · 密码",
+            "entry": "unifi-account",
+            "ref": "vault://secrets/unifi-account/password",
+            "as": {
+              "kind": "env",
+              "name": "UNIFI_PASS"
+            },
+            "own": true,
+            "provenance": "stored",
+            "forHost": null,
+            "sendsTo": null
+          }
+        ],
+        "env": [
+          {
+            "name": "RUN_TAG",
+            "value": "r7-2"
+          }
+        ],
+        "hosts": {
+          "known": false,
+          "list": [],
+          "why": "tool-names-none"
+        },
+        "shape": "tool",
+        "always": {
+          "offered": false,
+          "why": "destination-unknown",
+          "directive": null
+        },
+        "reason": {
+          "notOwn": false,
+          "away": [
+            {
+              "ref": "vault://secrets/unifi-account/username",
+              "forHost": null,
+              "host": null,
+              "unknown": true,
+              "keep": false
+            },
+            {
+              "ref": "vault://secrets/unifi-account/password",
+              "forHost": null,
+              "host": null,
+              "unknown": true,
+              "keep": false
+            }
+          ]
+        },
+        "templates": [],
+        "masking": "common-encodings",
+        "whyAgain": {
+          "code": "env",
+          "name": "RUN_TAG"
+        }
+      }
+    },
+    {
+      "name": "again-folder",
+      "why": "r11: whyAgain folder",
+      "facts": {
+        "v": 2,
+        "who": "ops watch",
+        "tool": {
+          "name": "unifi-api.sh",
+          "path": "~/workspace/ops/office-net/unifi-api.sh",
+          "writable": true
+        },
+        "cmd": "./office-net/unifi-api.sh PUT /proxy/network/api/s/default/rest/networkconf/5f9c3a6e8b2d4c0012a7e1f4 /tmp/unifi-work/wan2-primary.json",
+        "folder": "~/workspace/ops/sub",
+        "secrets": [
+          {
+            "name": "UniFi 账号 · 用户名",
+            "entry": "unifi-account",
+            "ref": "vault://secrets/unifi-account/username",
+            "as": {
+              "kind": "env",
+              "name": "UNIFI_USER"
+            },
+            "own": true,
+            "provenance": "stored",
+            "forHost": null,
+            "sendsTo": null
+          },
+          {
+            "name": "UniFi 账号 · 密码",
+            "entry": "unifi-account",
+            "ref": "vault://secrets/unifi-account/password",
+            "as": {
+              "kind": "env",
+              "name": "UNIFI_PASS"
+            },
+            "own": true,
+            "provenance": "stored",
+            "forHost": null,
+            "sendsTo": null
+          }
+        ],
+        "env": [],
+        "hosts": {
+          "known": false,
+          "list": [],
+          "why": "tool-names-none"
+        },
+        "shape": "tool",
+        "always": {
+          "offered": false,
+          "why": "destination-unknown",
+          "directive": null
+        },
+        "reason": {
+          "notOwn": false,
+          "away": [
+            {
+              "ref": "vault://secrets/unifi-account/username",
+              "forHost": null,
+              "host": null,
+              "unknown": true,
+              "keep": false
+            },
+            {
+              "ref": "vault://secrets/unifi-account/password",
+              "forHost": null,
+              "host": null,
+              "unknown": true,
+              "keep": false
+            }
+          ]
+        },
+        "templates": [],
+        "masking": "common-encodings",
+        "whyAgain": {
+          "code": "folder"
+        }
+      }
+    },
+    {
+      "name": "again-secret-set",
+      "why": "r11: whyAgain secret-set",
+      "facts": {
+        "v": 2,
+        "who": "ops watch",
+        "tool": {
+          "name": "unifi-api.sh",
+          "path": "~/workspace/ops/office-net/unifi-api.sh",
+          "writable": true
+        },
+        "cmd": "./office-net/unifi-api.sh PUT /proxy/network/api/s/default/rest/networkconf/5f9c3a6e8b2d4c0012a7e1f4 /tmp/unifi-work/wan2-primary.json",
+        "folder": "~/workspace/ops",
+        "secrets": [
+          {
+            "name": "UniFi 账号 · 用户名",
+            "entry": "unifi-account",
+            "ref": "vault://secrets/unifi-account/username",
+            "as": {
+              "kind": "env",
+              "name": "UNIFI_USER"
+            },
+            "own": true,
+            "provenance": "stored",
+            "forHost": null,
+            "sendsTo": null
+          }
+        ],
+        "env": [],
+        "hosts": {
+          "known": false,
+          "list": [],
+          "why": "tool-names-none"
+        },
+        "shape": "tool",
+        "always": {
+          "offered": false,
+          "why": "destination-unknown",
+          "directive": null
+        },
+        "reason": {
+          "notOwn": false,
+          "away": [
+            {
+              "ref": "vault://secrets/unifi-account/username",
+              "forHost": null,
+              "host": null,
+              "unknown": true,
+              "keep": false
+            },
+            {
+              "ref": "vault://secrets/unifi-account/password",
+              "forHost": null,
+              "host": null,
+              "unknown": true,
+              "keep": false
+            }
+          ]
+        },
+        "templates": [],
+        "masking": "common-encodings",
+        "whyAgain": {
+          "code": "secret-set"
+        }
+      }
+    },
+    {
+      "name": "again-arg-space",
+      "why": "r11: whyAgain arg-space",
+      "facts": {
+        "v": 2,
+        "who": "ops watch",
+        "tool": {
+          "name": "unifi-api.sh",
+          "path": "~/workspace/ops/office-net/unifi-api.sh",
+          "writable": true
+        },
+        "cmd": "./office-net/unifi-api.sh PUT /proxy/network/api/s/default/rest/networkconf/5f9c3a6e8b2d4c0012a7e1f4 '/tmp/unifi-work/wan2  primary.json'",
+        "folder": "~/workspace/ops",
+        "secrets": [
+          {
+            "name": "UniFi 账号 · 用户名",
+            "entry": "unifi-account",
+            "ref": "vault://secrets/unifi-account/username",
+            "as": {
+              "kind": "env",
+              "name": "UNIFI_USER"
+            },
+            "own": true,
+            "provenance": "stored",
+            "forHost": null,
+            "sendsTo": null
+          },
+          {
+            "name": "UniFi 账号 · 密码",
+            "entry": "unifi-account",
+            "ref": "vault://secrets/unifi-account/password",
+            "as": {
+              "kind": "env",
+              "name": "UNIFI_PASS"
+            },
+            "own": true,
+            "provenance": "stored",
+            "forHost": null,
+            "sendsTo": null
+          }
+        ],
+        "env": [],
+        "hosts": {
+          "known": false,
+          "list": [],
+          "why": "tool-names-none"
+        },
+        "shape": "tool",
+        "always": {
+          "offered": false,
+          "why": "destination-unknown",
+          "directive": null
+        },
+        "reason": {
+          "notOwn": false,
+          "away": [
+            {
+              "ref": "vault://secrets/unifi-account/username",
+              "forHost": null,
+              "host": null,
+              "unknown": true,
+              "keep": false
+            },
+            {
+              "ref": "vault://secrets/unifi-account/password",
+              "forHost": null,
+              "host": null,
+              "unknown": true,
+              "keep": false
+            }
+          ]
+        },
+        "templates": [],
+        "masking": "common-encodings",
+        "whyAgain": {
+          "code": "arg-space"
+        }
+      }
+    },
+    {
+      "name": "again-args",
+      "why": "r11: whyAgain args",
+      "facts": {
+        "v": 2,
+        "who": "ops watch",
+        "tool": {
+          "name": "unifi-api.sh",
+          "path": "~/workspace/ops/office-net/unifi-api.sh",
+          "writable": true
+        },
+        "cmd": "./office-net/unifi-api.sh PUT /proxy/network/api/s/default/rest/networkconf/5f9c3a6e8b2d4c0012a7e1f4 /tmp/unifi-work/wan1-primary.json",
+        "folder": "~/workspace/ops",
+        "secrets": [
+          {
+            "name": "UniFi 账号 · 用户名",
+            "entry": "unifi-account",
+            "ref": "vault://secrets/unifi-account/username",
+            "as": {
+              "kind": "env",
+              "name": "UNIFI_USER"
+            },
+            "own": true,
+            "provenance": "stored",
+            "forHost": null,
+            "sendsTo": null
+          },
+          {
+            "name": "UniFi 账号 · 密码",
+            "entry": "unifi-account",
+            "ref": "vault://secrets/unifi-account/password",
+            "as": {
+              "kind": "env",
+              "name": "UNIFI_PASS"
+            },
+            "own": true,
+            "provenance": "stored",
+            "forHost": null,
+            "sendsTo": null
+          }
+        ],
+        "env": [],
+        "hosts": {
+          "known": false,
+          "list": [],
+          "why": "tool-names-none"
+        },
+        "shape": "tool",
+        "always": {
+          "offered": false,
+          "why": "destination-unknown",
+          "directive": null
+        },
+        "reason": {
+          "notOwn": false,
+          "away": [
+            {
+              "ref": "vault://secrets/unifi-account/username",
+              "forHost": null,
+              "host": null,
+              "unknown": true,
+              "keep": false
+            },
+            {
+              "ref": "vault://secrets/unifi-account/password",
+              "forHost": null,
+              "host": null,
+              "unknown": true,
+              "keep": false
+            }
+          ]
+        },
+        "templates": [],
+        "masking": "common-encodings",
+        "whyAgain": {
+          "code": "args"
+        }
+      }
+    },
+    {
+      "name": "directive-long",
+      "why": "r11: a config directive past the bound (directiveCut + directiveFull)",
+      "facts": {
+        "v": 2,
+        "who": "ops watch",
+        "tool": {
+          "name": "curl",
+          "path": "/usr/bin/curl",
+          "writable": false
+        },
+        "cmd": "curl -sS -K '$VAULT_FILE{B}'",
+        "folder": "~/workspace/ops",
+        "secrets": [
+          {
+            "name": "API 令牌",
+            "entry": "api-token",
+            "ref": "vault://secrets/api-token/token",
+            "as": {
+              "kind": "file",
+              "name": "B"
+            },
+            "own": false,
+            "provenance": "granted",
+            "forHost": null,
+            "sendsTo": null
+          }
+        ],
+        "env": [],
+        "hosts": {
+          "known": false,
+          "list": [],
+          "why": "config-driven"
+        },
+        "shape": "tool",
+        "always": {
+          "offered": false,
+          "why": "config-reads",
+          "directive": "config ./ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+          "directiveCut": true,
+          "directiveFull": [
+            "config ./ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd.cfg"
+          ]
+        },
+        "reason": null,
+        "templates": [
+          {
+            "label": "B",
+            "bytes": 2165,
+            "shown": true,
+            "text": "config ./ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "textFull": [
+              "config ./ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+              "ddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd.cfg\nheader = \"X-Auth: $VAULT{secrets/api-token/token}\"\n"
+            ]
+          }
+        ],
+        "masking": "common-encodings"
+      }
+    }
+  ]
+}

@@ -8208,6 +8208,7 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
 .iw-deadline { margin-top: 6px; font-size: 12px; }
 .ut-run-cut { margin: 2px 0 4px; font-size: 11px; color: var(--warn-text); } /* r8: the body's command is a cut — the whole is in the fold */
 .ut-run-cmd-full { max-height: 16em; overflow: auto; margin: 0; } /* r8: the fold's whole command (≤ 4 096 characters) scrolls inside its box */
+.ut-run-again { margin: 2px 0 4px; font-size: 12px; color: var(--warn-text); } /* r11: why a near-identical rerun asks again — the ONE dimension (whyAgain) */
 .ut-end-code, .iw-meta-code { font-family: var(--font-mono, ui-monospace, Menlo, Consolas, monospace); font-size: 0.95em; } /* r8: an end this client cannot classify — its code, typed */
 .ut-action-proposal { width: auto; padding: 0 8px; font-size: 11px; font-weight: 600; border-radius: var(--radius-sm); } /* lane browser-propose: a WORDED button on the 24 px .ut-act icon box — its own width (the exit ask's rule) */
 .ut-proposal-answer .ut-action-proposal { height: 24px; min-width: 64px; }
