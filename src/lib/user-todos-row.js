@@ -70,7 +70,6 @@ export function resolvedByText(by, t, item = null) {
   if (by === 'ask-expired') return t('expired (no answer in 60 s)');
   if (by === 'ask-changed') return t('not run — it changed after it was shown'); // verify-r6 W1
   if (by === 'ask-over') return t('this request is over — the agent can ask again'); // verify-r6 W2: a reopened ask that is over
-  if (by === 'vault_locked') return t('closed when the vault locked — run it again after the unlock'); // lane vault-use-grants round 7 (MINOR): a run card the lock settled SAYS so where the owner looks — never a dead card, never a silent close
   if (by === 'conversation-gone') return t('the conversation ended before you answered');
   if (by === 'stored') return t('saved to the vault'); // lane vault-paste-request: a paste request answered by its paste
   // B-2198 part 2: a raw-API proposal's item is answered BY its outcome (the card's words: Ran · 200 · 1.2 KB / Rejected by you)

@@ -11059,7 +11059,6 @@ export default {
   "used {n}×": "已用 {n} 次", // lane vault-use-grants
   "Paused while the entry is off — turn «Usable by agent runs» on to restore these.": "该条目已关闭，授权暂停——打开「可供 agent 运行使用」即可恢复。", // lane vault-use-grants
   "paused by you": "你暂停了它", // lane vault-use-grants (round 7)
-  "closed when the vault locked — run it again after the unlock": "保险库锁定时已关闭——解锁后重新运行", // lane vault-use-grants (round 7)
   "Unverified until you unlock the vault — not in use until then.": "在你解锁保险库之前无法验证——在此之前不生效。", // lane vault-use-grants (round 6)
   "Un-pause this — let it be used again": "取消暂停——让它重新可用", // lane vault-use-grants (round 6)
   "every {host} host": "{host} 下的每个主机", // lane vault-use-grants (round 3)

@@ -11058,7 +11058,6 @@ export default {
   "used {n}×": "{n} 回使用", // lane vault-use-grants
   "Paused while the entry is off — turn «Usable by agent runs» on to restore these.": "項目がオフの間は停止中——「エージェントの実行で使用可」をオンにすると復元します。", // lane vault-use-grants (round 3: スイッチ名と同一表記)
   "paused by you": "あなたが一時停止しました", // lane vault-use-grants (round 7)
-  "closed when the vault locked — run it again after the unlock": "保管庫をロックしたときに閉じました——解除後にもう一度実行してください", // lane vault-use-grants (round 7)
   "Unverified until you unlock the vault — not in use until then.": "保管庫のロックを解除するまで検証できません——それまでは使用されません。", // lane vault-use-grants (round 6)
   "Un-pause this — let it be used again": "一時停止を解除——再び使用可にする", // lane vault-use-grants (round 6)
   "every {host} host": "{host} のすべてのホスト", // lane vault-use-grants (round 3)
