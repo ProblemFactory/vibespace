@@ -4035,6 +4035,7 @@ export default {
   "Direct send is not offered here": "这里不提供直接发送",
   "The request was refused: {error}": "请求被拒绝: {error}",
   "The request was refused": "请求被拒绝",
+  "This card did not send the digest of what it shows — nothing was approved": "这张卡片没有送出它所显示内容的摘要——什么都没有批准",
   "That filter no longer exists": "那个过滤器已经不存在了",
   "That filter is still used by an assignment": "那个过滤器仍被某个分配使用",
   "The channel refused the send: {error}": "频道拒绝了这次发送: {error}",

@@ -1760,6 +1760,10 @@ async function ccReachLeg(engine, tag) {
   const r1 = await call('/api/channels/outbox/:id/approve', { id: p2.proposal.id }, { shown: 'v1:0000000000000000:1' });
   const r2 = await call('/api/channels/outbox/:id/approve', { id: p2.proposal.id }, { shown: P.shownDigest(p2.proposal) });
   ok(r0.status === 400 && r0.body.code === 'bad-request' && r0.body.why === 'shown-required' && r1.status === 409 && r1.body.code === 'changed-since-shown' && r2.status === 200 && r2.body.proposal.state === 'sent', 'F6 route: no `shown` ⇒ 400 shown-required; a stale one ⇒ 409 changed-since-shown; the card\'s own ⇒ sent', JSON.stringify([r0.status, r0.body.why, r1.status, r1.body.code, r2.status]));
+  // lane reaction-approve-shown: the refusal names WHAT is missing, never a cause the route cannot see — no request and no
+  // WS hello carries the bundle's version, so it never says «reload» (the old words sent the owner to reload a current tab)
+  const saysMissing = (w) => /did not send the digest of what it shows/.test(String(w)) && !/reload/i.test(String(w));
+  ok(saysMissing(r0.body.error) && !saysMissing('shown is required — the digest of the card being approved (reload the page if this tab is from before the update)'), 'reaction-approve-shown route: no `shown` ⇒ the words say the card did not send its digest, and never «reload» (CONTROL: the old words fail the same judge)', r0.body.error);
   eng.stop();
   // CONTROL: the engine without the comparison sends the mismatched approval
   const SHOWN = "      if (String(shown) !== now0) return { ok: false, code: 'changed-since-shown',";
@@ -2182,7 +2186,41 @@ async function chatReadLegs(ENGmod, name) {
           'lane channels-proposals-recall (real card): a recall QUOTES the user\'s message it takes back, says it acts as the user and why it waits; no Edit; its Outbox row reads the same sentence', JSON.stringify(said));
         rcard._all().find((e) => e.dataset.approve === '1').click();
         await new Promise((r) => setTimeout(r, 0));
-        ok(posts.length === n1 + 1 && /\/api\/channels\/outbox\/p-rc1\/approve$/.test(posts[n1].url) && posts[n1].body.expectWakes === 0 && posts[n1].body.deliver === 'next-turn', '…its Approve posts the approval with no wake (the receipt rides the next turn)', JSON.stringify(posts[n1]));
+        ok(posts.length === n1 + 1 && /\/api\/channels\/outbox\/p-rc1\/approve$/.test(posts[n1].url) && posts[n1].body.expectWakes === 0 && posts[n1].body.deliver === 'next-turn' && posts[n1].body.shown === P.shownDigest(rq), '…its Approve posts the approval with no wake (the receipt rides the next turn) and the digest of what the card showed (lane reaction-approve-shown: this road posted none)', JSON.stringify(posts[n1]));
+      }
+      // lane reaction-approve-shown (the owner's hub, 2026-10-28: «提案 · 一个表情回应 · 待批准», every Approve refused «shown
+      // is required … reload the page»): a REACTION card's Approve is THE approve — armed like every Approve, it posts the
+      // digest of what it showed; its words never follow a remembered «wake now» (its receipt always rides the next turn);
+      // a refusal for a missing digest says what is missing, never «reload»
+      {
+        const rx = { id: 'p-rx1', kind: 'reaction', adapterId: 'lark', adapterLabel: 'Lark', convId: 'oc_1', title: 'Ops room', state: 'awaiting-approval', text: '', draftedBy: { kind: 'agent', id: 'agent-1', name: 'Worker' }, reaction: { op: 'add', key: 'THUMBSUP', glyph: '👍', msg: 'om_1', quote: { author: 'Ada', text: 'ship it' } }, policy: { mode: 'review', reasons: ['reaction-policy'] }, sendAs: 'user', at: 1, ttlAt: clock0 + 86400e3 };
+        const n2 = posts.length;
+        const xcard = CO.renderProposalCard(app, rx);
+        const xbtn = xcard._all().find((e) => e.dataset.approve === '1');
+        await xbtn.onclick({ isTrusted: true });
+        const held = posts.length === n2 && xcard._cls.has('chan-prop-arming');
+        clock0 += P.ARM_MS;
+        await xbtn.onclick({ isTrusted: true });
+        await new Promise((r) => setTimeout(r, 0));
+        const xp = posts[n2];
+        ok(held && posts.length === n2 + 1 && /\/api\/channels\/outbox\/p-rx1\/approve$/.test(xp.url) && xp.body.shown === P.shownDigest(rx) && xp.body.expectWakes === 0 && xp.body.deliver === 'next-turn',
+          'reaction-approve-shown (real card): a REACTION\'s Approve is armed like every Approve (a person\'s click on the fresh card posts nothing), then posts the digest of what the card showed', JSON.stringify({ held, body: xp && xp.body }));
+        // the words: a remembered «wake now» relabels a text card's primary (CONTROL) and never the reaction's
+        const tcard = CO.renderProposalCard(app, { ...rp, id: 'p-rx-t' });
+        const tbtn = tcard._all().find((e) => e.dataset.approve === '1');
+        const both = document.createElement('div'); both.appendChild(xcard); both.appendChild(tcard);
+        CO.relabelPrimaries('wake-now', both);
+        ok(xbtn.textContent === CO.approveLabel('next-turn') && xbtn.dataset.deliver === 'next-turn' && tbtn.textContent === CO.approveLabel('wake-now') && tbtn.dataset.deliver === 'wake-now',
+          'reaction-approve-shown: a remembered «wake now» relabels a text card\'s Approve (CONTROL) and never a reaction\'s — its receipt always rides the next turn, and its words say so', JSON.stringify([xbtn.textContent, tbtn.textContent]));
+        // the refusal (a route answering 400 shown-required) in the card's toast: what is missing, never «reload»
+        const f0 = globalThis.fetch;
+        def('fetch', async () => ({ json: async () => ({ ok: false, code: 'bad-request', why: 'shown-required', error: 'this card did not send the digest of what it shows (shown) — nothing was approved' }) }));
+        const ycard = CO.renderProposalCard(app, { ...rx, id: 'p-rx2' });
+        ycard._all().find((e) => e.dataset.approve === '1').click();
+        await new Promise((r) => setTimeout(r, 0));
+        def('fetch', f0);
+        const said = texts(body).filter((x) => /digest/.test(x));
+        ok(said.includes('This card did not send the digest of what it shows — nothing was approved') && !said.some((x) => /reload/i.test(x)), 'reaction-approve-shown: the refused Approve\'s toast names what is missing (in the interface\'s words) and never says «reload»', JSON.stringify(said));
       }
       // ── B-f467 (userW 2026-10-03: "no visual centre of gravity — some things I want to see at a glance"; his
       // screenshot = the All view with a Gmail compose awaiting + a sent Lark card): ONE ROW PER PROPOSAL in the channel
@@ -2513,6 +2551,47 @@ async function chatReadLegs(ENGmod, name) {
   // the client wiring pins (the card's press is armed; the approve body carries the digest)
   const csrc = fs.readFileSync(path.join(REPO, 'src/lib/channel-outbox.js'), 'utf-8');
   ok(/shown: P\.shownDigest\(p\)/.test(csrc) && (csrc.match(/if \(!cardArmed\(card, ev\)\) return;|if \(cardArmed\(card, ev\)\)/g) || []).length >= 4 && /placeArmed\(sec,/.test(csrc) && /placeArmed\(list, nodes\)/.test(csrc) && !/el\('div', 'chan-prop-text', p\.text/.test(csrc), 'PINS: the approve POST carries `shown`; Approve, Reject, both chevrons and the reject box are armed-only; both containers re-arm moved cards; the body is revealed, never raw');
+  // ── lane reaction-approve-shown (the owner's hub, 2026-10-28: an agent's proposed 👍 refused on every press since
+  //    2.369.197 — the card's reaction / recall road posted no `shown`): THE APPROVE CENSUS, grep-derived over the
+  //    client tree. Every line naming an `/approve` URL is another family's (its own route and rules, by prefix) or an
+  //    OUTBOX approve — which must send `shown: P.shownDigest(` on that line and be THE ONE (the card's door
+  //    `approveProposal`, called by every road). An unclassified approve URL is red by name; so is a planted site. ──
+  {
+    const OTHER_APPROVES = ['/api/channels/api/proposals/', '/api/browser/proposals/', '/api/apps/proposals/', '/api/channels/reach-requests/'];
+    const clientFiles = () => {
+      const out = [['src/client.js', fs.readFileSync(path.join(REPO, 'src/client.js'), 'utf-8')]];
+      for (const f of fs.readdirSync(path.join(REPO, 'src/lib'), { recursive: true }).map(String).filter((f) => f.endsWith('.js')).sort()) out.push([`src/lib/${f}`, fs.readFileSync(path.join(REPO, 'src/lib', f), 'utf-8')]);
+      return out;
+    };
+    const approveCensus = (files) => {
+      const sites = [], bad = [], unclassified = [];
+      for (const [rel, src] of files) if (src.includes('/approve')) src.split('\n').forEach((line, i) => {
+        if (!/\/approve\b/.test(line) || /^\s*(\/\/|\*|\/\*)/.test(line)) return;
+        const at = `${rel}:${i + 1}`;
+        if (OTHER_APPROVES.some((x) => line.includes(x))) return;
+        if (!/channels\/outbox\//.test(line)) { unclassified.push(at); return; }
+        sites.push(at);
+        if (!/\bshown: P\.shownDigest\(/.test(line)) bad.push(at);
+      });
+      return { sites, bad, unclassified };
+    };
+    const files = clientFiles();
+    const real = approveCensus(files);
+    const door = csrc.split('\n').findIndex((l) => /^function approveProposal\(p, body\) \{$/.test(l));
+    const roads = (csrc.match(/await approveProposal\(p, \{/g) || []).length;
+    ok(files.length > 100 && real.bad.length === 0 && real.unclassified.length === 0 && real.sites.length === 1 && real.sites[0] === `src/lib/channel-outbox.js:${door + 2}` && roads === 2,
+      `APPROVE CENSUS (${files.length} client files): ONE outbox approve POST — the door approveProposal, sending \`shown\` — and both card roads (text; reaction / recall) call it; every other approve URL is another family's`, JSON.stringify({ ...real, door: door + 2, roads }));
+    const planted = approveCensus([...files, ['src/lib/zz-planted.js', "  const r = await fetchJson(`/api/channels/outbox/${encodeURIComponent(id)}/approve`, { method: 'POST', headers: JSON_HDR, body: JSON.stringify({ expectWakes: 0 }) });"]]);
+    ok(planted.bad.length === 1 && planted.bad[0] === 'src/lib/zz-planted.js:1', 'CONTROL: a planted outbox approve POST without `shown` is RED BY NAME (src/lib/zz-planted.js:1)', JSON.stringify(planted.bad));
+    // the base's shape (2.369.197 → .360): the reaction / recall road with its own POST, no digest — a mutant of THIS source
+    const ROAD = 'const r = await approveProposal(p, { expectWakes: 0, ';
+    const mut = csrc.replace(ROAD, 'const r = await post(`/api/channels/outbox/${encodeURIComponent(p.id)}/approve`, { expectWakes: 0, ');
+    const mline = csrc.split('\n').findIndex((l) => l.includes(ROAD)) + 1;
+    const base = approveCensus(files.map(([rel, src]) => [rel, rel === 'src/lib/channel-outbox.js' ? mut : src]));
+    ok(csrc.split(ROAD).length === 2 && base.bad.length === 1 && base.bad[0] === `src/lib/channel-outbox.js:${mline}` && base.sites.length === 2, `CONTROL: the base's reaction / recall road (its own approve POST, no digest) is RED BY NAME (src/lib/channel-outbox.js:${mline})`, JSON.stringify(base));
+    const unk = approveCensus([...files, ['src/lib/zz-other.js', "  await fetchJson(`/api/zz/${id}/approve`, { method: 'POST' });"]]);
+    ok(unk.unclassified.length === 1 && unk.unclassified[0] === 'src/lib/zz-other.js:1', 'CONTROL: an approve URL of no known family is RED BY NAME until it is classified (src/lib/zz-other.js:1)', JSON.stringify(unk.unclassified));
+  }
 }
 for (const r of copiesCensusR6(MR6.files, MR6.dir, REPO, { minCopies: 5 })) ok(r.pass, r.name, r.detail);
 
@@ -2616,6 +2695,48 @@ const RX_KEY = 'hourglass';   // never seeded (the seed draws from the first 12 
   await eng.react(A, C, target.vendorId, 'gift');   // the lost request DID land
   const rc2 = await eng.reconcile(u2.proposal.id);
   ok(rc2.ok && rc2.resolved && rc2.state === 'sent' && rc2.answer === 'landed', 'unknown → sent: the list shows it — it landed (one list call, never a second POST)', JSON.stringify(rc2));
+  eng.stop();
+}
+// ── lane reaction-approve-shown (the owner's hub, 2026-10-28: an agent's 👍 refused on every Approve since 2.369.197): a
+//    REACTION and a RECALL approved THROUGH THE ROUTE the card posts to, with the body the card posts. Every leg above
+//    approves with `eng.approve`, which takes a missing digest — the card's reaction / recall road never met the route
+//    that refuses one. No `shown` ⇒ 400 in words that name what is missing (never «reload»), nothing moves; the digest of
+//    the proposal as the Outbox lists it (what the card is drawn from) ⇒ sent, the vendor told ──
+{
+  const revf = path.join(ROOT, 'ras-revisions.json');
+  fs.writeFileSync(revf, '{"revisions":{}}');
+  const registry = CH.createChannelRegistry();
+  registry.register(fake.makeFakeAdapter({ kind: A, receive: 'poll', sendAs: ['user'], revisionsFile: revf }));
+  const W = mkEngine({ name: 'ras', registry });
+  const { eng } = W;
+  await prime(eng);
+  await eng.store.appendRecords(A, C, [{ vendorId: 'm-ras-mine', convId: C, at: Date.now() - 600e3, author: { id: 'ou_me', name: 'me', isSelf: true, isBot: false }, text: 'the numbers are wrong' }]);
+  const target = eng.store.readTail(A, C, { limit: 50 }).find((r) => r && r.vendorId && !(r.author && r.author.isSelf));
+  const rxp = await eng.proposeReaction(AGENT, A, C, { msg: target.vendorId, key: RX_KEY });
+  const rcp = await eng.proposeRecall(AGENT, A, C, { msg: 'm-ras-mine' });
+  ok(rxp.ok && rxp.proposal.state === 'awaiting-approval' && rcp.ok && rcp.proposal.state === 'awaiting-approval', 'FIXTURE: an agent\'s reaction and recall, each awaiting approval', JSON.stringify([rxp.code || rxp.error, rcp.code || rcp.error]));
+  const routes = require(path.join(REPO, 'src/routes/channels.js'));
+  routes.setup({ getEngine: () => eng, authEnabled: () => true });
+  const call = (url, params, body) => new Promise((resolve) => {
+    const req = { method: 'POST', url, params, query: {}, body: body || {} };
+    const res = { statusCode: 200, status(c) { this.statusCode = c; return this; }, json(payload) { resolve({ status: this.statusCode, body: payload }); return this; }, setHeader() {} };
+    const layer = routes.router.stack.find((l) => l.route && l.route.path === url && l.route.methods.post);
+    Promise.resolve(layer.route.stack[0].handle(req, res, () => {})).catch((err) => resolve({ status: 500, body: { error: String(err && err.message) } }));
+  });
+  const saysMissing = (w) => /did not send the digest of what it shows/.test(String(w)) && !/reload/i.test(String(w));
+  const asListed = (id) => eng.outboxView().proposals.find((x) => x.id === id);
+  const rows = [];
+  for (const [what, id] of [['reaction', rxp.proposal && rxp.proposal.id], ['recall', rcp.proposal && rcp.proposal.id]]) {
+    if (!id) continue;
+    const bare = await call('/api/channels/outbox/:id/approve', { id }, { expectWakes: 0, deliver: 'next-turn' });   // the base's reaction / recall road
+    const still = eng.store.outbox.snapshot().proposals[id].state;
+    const card = await call('/api/channels/outbox/:id/approve', { id }, { expectWakes: 0, deliver: 'next-turn', shown: P.shownDigest(asListed(id)) });
+    rows.push({ what, bare: bare.status, why: bare.body.why, words: saysMissing(bare.body.error), still, card: card.status, state: card.body.proposal && card.body.proposal.state });
+  }
+  ok(rows.length === 2 && rows.every((r) => r.bare === 400 && r.why === 'shown-required' && r.words && r.still === 'awaiting-approval'), 'reaction-approve-shown route: a reaction\'s and a recall\'s Approve WITHOUT the digest (the base card\'s body) ⇒ 400 shown-required in words naming what is missing (never «reload»), still awaiting', JSON.stringify(rows));
+  const fold = eng.reactionsRead(A, C, [target.vendorId]).reactions[target.vendorId] || [];
+  let revs = {}; try { revs = JSON.parse(fs.readFileSync(revf, 'utf8')).revisions || {}; } catch {}
+  ok(rows.length === 2 && rows.every((r) => r.card === 200 && r.state === 'sent') && fold.some((x) => x.key === RX_KEY && x.mine) && (revs['m-ras-mine'] || {}).state === 'recalled', 'reaction-approve-shown route: the SAME Approve with the digest of the card as the Outbox lists it ⇒ sent — the reaction is the account\'s own, the message taken back at the vendor', JSON.stringify({ rows, fold, revs }));
   eng.stop();
 }
 // sending → unknown: the adapter THREW mid-react (the answer lost) — never retried; the card offers Check outcome

@@ -119,6 +119,8 @@ export function routeErrorText(r, { fallback = null, ruleLabel = (k) => k } = {}
     // 2026-09-28: a placement the channel does not offer (the PURE policy's words — the card and this toast agree)
     case 'placement-not-offered': return P.placementRefusalText(r, { t });
     case 'bad-policy': case 'bad-grant': case 'bad-request':
+      // lane reaction-approve-shown: an Approve that carried no `shown` digest — what is missing, never «reload»
+      if (r.why === 'shown-required') return t('This card did not send the digest of what it shows — nothing was approved');
       return raw ? t('The request was refused: {error}', { error: raw }) : t('The request was refused');
     // lane channel-threads (2026-09-28, spec §2.7 / §9): threads + reactions, every refusal in words
     case 'bad-emoji': return t('That emoji is not one this channel allows');
