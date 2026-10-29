@@ -9,7 +9,7 @@
 
 import { NOTE_MARKER, noteKindOfText, userNoteOf } from '../assistant-note.js'; // B-40f8: the note TEXT rule is PURE and shared — the server's turn previews read the same one
 import { exitCallOf, exitCallCard } from '../exit-call.js'; // lane exit-calls-in-history: a vibespace-exit Bash call read as the machine call it is (PURE, shared with the server)
-import { channelsRuns } from '../channel-touch.js'; // lane touch-chip-cause r2: where a command line RUNS the channels CLI (a command word, never prose)
+import { channelsRuns } from '../shell-words.js'; // lane touch-chip-cause r2: where a command line RUNS the channels CLI (a command word, never prose) — the PURE scanner (the .362 train fix: never src/channel-touch.js)
 
 // Every kind the classifier can return. The summary ORDER below must list
 // each one — an unlisted kind used to count `undefined++` = NaN and vanish

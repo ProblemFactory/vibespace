@@ -880,9 +880,14 @@ await section('⑨', async () => {
   const MUT = mutantCopies('channel-touch-r3', REPO);
   const src = read('src/channel-touch.js');
   const copy = (tag, from, to, file = 'src/channel-touch.js', text = src) => { if (text.split(from).length !== 2) anchorMissing(tag, file + ' (one occurrence)'); return MUT.load(file, text.replace(from, to), tag); };
-  const shellCmd = copy('shell-word', '      if (scripts) { for (const sc of scripts) add(', "      if (scripts) { out.push({ base: cw.base, at, verb: '' }); for (const sc of scripts) add(");
+  // a SCANNER rule's copy (the .362 train fix: the scanner is PURE src/shell-words.js) — the patched scanner, loaded under a
+  // copy of channel-touch.js that requires IT: the control reads the binder over the patched scanner
+  const SW = read('src/shell-words.js');
+  const scanWith = (tag, text) => MUT.load('src/channel-touch.js', src.replace("require('./shell-words.js')", `require(${JSON.stringify(MUT.write('src/shell-words.js', text, tag))})`), tag);
+  const scan = (tag, from, to) => { if (SW.split(from).length !== 2) anchorMissing(tag, 'src/shell-words.js (one occurrence)'); return scanWith(tag, SW.replace(from, to)); };
+  const shellCmd = scan('shell-word', '      if (scripts) { for (const sc of scripts) add(', "      if (scripts) { out.push({ base: cw.base, at, verb: '' }); for (const sc of scripts) add(");
   ok(eq(B9(shellCmd, tn(5, R0 + 10_000), [one('S', A2, R0 + 9_000, R0 + 20_000)], ctx).by, { S: 5 }), 'CONTROL the shell counted as a command of its own (r2): the lone codex `bash -lc vibespace-status …` takes the 5 reads again');
-  const noJoin = copy('joined-argv', '    if (!op.q && j + 1 < words.length && c.src) return', '    if (false) return');
+  const noJoin = scan('joined-argv', '    if (!op.q && j + 1 < words.length && c.src) return', '    if (false) return');
   ok(eq(B9(noJoin, [1, 2, 3].map((i) => touch({ id: 'cs' + i, adapterId: 'lark', convId: 's' + i, op: 'search', query: 'x', at: R0 + 3000 + i })), cb, { notes: [], turns: [] }).by, { LOOP: 3 }), 'CONTROL a re-joined argv read as bash would (its first word the script): the search verb is lost, the codex batch\'s search rows go to the read loop');
   const noLinger = copy('lingers', '      const lingers = c.background === true ||', '      const lingers = false &&');
   ok(eq(B9(noLinger, tn(4, R0 + 30_000), Dv, ctx).by, { NPM: 4 }) && eq(B9(noLinger, [1, 2, 3, 4].map((i) => touch({ id: 'b' + i, adapterId: 'lark', convId: 'c' + i, at: R0 + 30_000 + i * 100 })), [one('BG', 'for c in $(cat /tmp/l); do vibespace-channels read "$c"; done', R0 + 5000, R0 + 5500, { background: true }), one('FG', 'npm run build', R0 + 20_000, R0 + 60_000)], { notes: [{ id: 'note:turn', at: R0 + 200 }], turns: [R0] }).by, { FG: 4 }),
@@ -893,12 +898,12 @@ await section('⑨', async () => {
   ok(eq(B9(noTurnBound, [touch({ id: 'o1', adapterId: 'lark', convId: 'fx-o1', at: R0 + 60_000 })], [{ id: 'U1', start: R0, end: null, text: 'python3 x.py', kind: 'command' }], { notes: n1, turns: turns2 }).by, { U1: 1 }), 'CONTROL the turn bound removed: turn 1\'s unfinished call takes a touch of turn 2');
   const blindInert = copy('blind', '        runs, inert: !ran.blind.length && ran.every(inertRun),', '        runs, inert: ran.every(inertRun),');
   ok(eq(B9(blindInert, [1, 2, 3].map((i) => touch({ id: 'h' + i, adapterId: 'lark', convId: 'c' + i, at: R0 + 2000 + i * 10 })), [one('X', cutRun, R0, R0 + 9000)], { notes: [{ id: 'note:n', at: R0 - 100 }], turns: [R0 - 200] }).notes, { 'note:n': 3 }), 'CONTROL a cut scan read as inert (r2): the call whose `./read-all.sh` lies past SCAN_MAX loses its 3 rows to the note');
-  const noAnsi = copy('ansi-quote', "      if (ch === '$' && s[i + 1] === \"'\") {", '      if (false) {');
-  const noCmt = copy('comment', "    if (ch === '#') { while (i < s.length && s[i] !== '\\n') i++; continue; }", "    if (ch === '#' && !words.length) { while (i < s.length && s[i] !== '\\n') i++; continue; }");
+  const noAnsi = scan('ansi-quote', "      if (ch === '$' && s[i + 1] === \"'\") {", '      if (false) {');
+  const noCmt = scan('comment', "    if (ch === '#') { while (i < s.length && s[i] !== '\\n') i++; continue; }", "    if (ch === '#' && !words.length) { while (i < s.length && s[i] !== '\\n') i++; continue; }");
   ok(noAnsi.channelsRuns(ansi).length > 0 && noCmt.channelsRuns(cmt).length > 0, 'CONTROL $\'…\' read as a plain quote / a mid-line # read as a word (r2): the prose shapes run the CLI again');
   const PS = "    if ((ch === '<' || ch === '>') && s[i + 1] === '(') {", RS = "      else if (ch === ';' || (ch === '&' && !two)) list = out.length;\n      redirect = false;\n";
-  if (src.split(PS).length !== 2 || src.split(RS).length !== 2) anchorMissing('proc-subst', 'src/channel-touch.js (one occurrence each)');
-  const noProc = MUT.load('src/channel-touch.js', src.replace(PS, '    if (false) {').replace(RS, "      else if (ch === ';' || (ch === '&' && !two)) list = out.length;\n"), 'proc-subst');
+  if (SW.split(PS).length !== 2 || SW.split(RS).length !== 2) anchorMissing('proc-subst', 'src/shell-words.js (one occurrence each)');
+  const noProc = scanWith('proc-subst', SW.replace(PS, '    if (false) {').replace(RS, "      else if (ch === ';' || (ch === '&' && !two)) list = out.length;\n"));
   ok(noProc.channelsRuns('diff <(vibespace-channels list) /tmp/x').length === 0, 'CONTROL no process substitution and the redirect flag kept past a separator (r2): `diff <(vibespace-channels list)` — the redirect swallows the subshell\'s first word');
   const noPrompt = copy('helper-prompt', "  const verbs = kind === 'helper' ? promptVerbs(s) :", '  const verbs =');
   ok(eq(B9(noPrompt, [0, 1, 2, 3].map((i) => touch({ id: 'hs' + i, op: 'search', adapterId: 'lark', convId: 'q' + i, query: 'pairing review', at: R0 + 12_000 + i * 300 })), helpers, ctx).notes, { 'note:ctx': 4 }), 'CONTROL a helper\'s prompt never read for its verb (r2): the search rows leave helper A for the note');
@@ -1069,15 +1074,26 @@ await section('⑩', async () => {
   const cmpBind = (TT) => B9(TT, tn(3, R0 + 5_500), [one('LOOP', LOOP, R0 + 1000, null), one('VS', 'vibespace-status working --reason x', R0 + 6000, null)], { notes: [{ id: 'note:ctx', at: R0 + 100 }], turns: cmpTurns(TT).map((x) => x + R0) });
   ok(eq(cmpTurns(T), [0]) && !T.opensTurn({ role: 'user', turnStart: true, content: [{ type: 'text', text: SUMMARY }] }, null) && eq(cmpBind(T).by, { LOOP: 3 }),
     'A COMPACTION NEVER STARTS A TURN (claim 1 finding 2): the CLI\'s compaction summary (a user-role record it writes mid-turn) is no boundary — the loop started before it keeps its reads (r3: the summary cut the turn, 3 unbound)', { turns: cmpTurns(T), by: cmpBind(T) });
+  // ── THE SCANNER IS PURE AND THE CLIENT'S RUN SUMMARY NEVER READS THE WITNESS (the .362 train fix — test-collab-live-counter)
+  const swText = (() => { try { return read('src/shell-words.js'); } catch { return null; } })(), crs = read('src/lib/chat-run-summary.js');
+  const crsImports = crs.match(/^\s*import .*$/gm) || [];
+  ok(swText !== null && !/\brequire\s*\(|^\s*import\b/m.test(swText) && crsImports.some((l) => /from '\.\.\/shell-words\.js';/.test(l)) && !crsImports.some((l) => /from '[^']*channel-touch\.js'/.test(l))
+    && /require\('\.\/shell-words\.js'\)/.test(read('src/channel-touch.js')) && T.channelsRuns === require(path.join(REPO, 'src/shell-words.js')).channelsRuns,
+    'THE SCANNER IS PURE (the .362 train fix): src/shell-words.js imports nothing; the client\'s run summary (chat-run-summary) reads `channelsRuns` from it and never imports src/channel-touch.js (test-collab-live-counter pins its PURE imports); channel-touch.js requires it and re-exports the same function', crsImports);
   // ── A PATCHED COPY PER RULE
   const MUT = mutantCopies('channel-touch-r4', REPO);
   const src = read('src/channel-touch.js'), MMS = read('src/message-manager.js');
   const copy = (tag, from, to, file = 'src/channel-touch.js', text = src) => { if (text.split(from).length !== 2) anchorMissing(tag, file + ' (one occurrence)'); return MUT.load(file, text.replace(from, to), tag); };
-  const noDocs = copy('span-heredoc', 'function spanEnd(s, i, open, close, docs = open === \'(\') {', 'function spanEnd(s, i, open, close, docs = false) {');
+  // a SCANNER rule's copy (the .362 train fix: the scanner is PURE src/shell-words.js) — the patched scanner, loaded under a
+  // copy of channel-touch.js that requires IT: the control reads the binder over the patched scanner
+  const SW = read('src/shell-words.js');
+  const scanWith = (tag, text) => MUT.load('src/channel-touch.js', src.replace("require('./shell-words.js')", `require(${JSON.stringify(MUT.write('src/shell-words.js', text, tag))})`), tag);
+  const scan = (tag, from, to) => { if (SW.split(from).length !== 2) anchorMissing(tag, 'src/shell-words.js (one occurrence)'); return scanWith(tag, SW.replace(from, to)); };
+  const noDocs = scan('span-heredoc', 'function spanEnd(s, i, open, close, docs = open === \'(\') {', 'function spanEnd(s, i, open, close, docs = false) {');
   ok(!noDocs.runsNothing(commit(bodies[0])) && eq(B9(noDocs, t3, [one('COMMIT', commit(bodies[1]), R0 + 40, null)], ctx).by, { COMMIT: 3 }), 'CONTROL a `$( … )` span blind to heredocs (r3): the commit idiom with «1)» in its body could run again — a lone commit takes the 3 reads');
-  const blindRun = copy('blind-run', '{ return ran.filter((x) => x.base === CLI).map(({ at, verb }) => ({ at, verb })); }', "{ return [...ran.filter((x) => x.base === CLI).map(({ at, verb }) => ({ at, verb })), ...ran.blind.flatMap((b) => [...b.matchAll(/vibespace-channels(?:\\s+([a-z][\\w-]*))?/g)].map((m) => ({ at: -1, verb: m[1] || '' })))]; }");
+  const blindRun = scan('blind-run', '{ return ran.filter((x) => x.base === CLI).map(({ at, verb }) => ({ at, verb })); }', "{ return [...ran.filter((x) => x.base === CLI).map(({ at, verb }) => ({ at, verb })), ...ran.blind.flatMap((b) => [...b.matchAll(/vibespace-channels(?:\\s+([a-z][\\w-]*))?/g)].map((m) => ({ at: -1, verb: m[1] || '' })))]; }");
   ok(eq(B9(blindRun, t6, [scr, one('CUT', cutCli, R0 + 5040, R0 + 9000)], ctx).by, { CUT: 3 }), 'CONTROL the CLI\'s name in blind text read as a run (r3): the cut call takes `bash /tmp/read-all.sh`\'s rows');
-  const docCut = copy('heredoc-cut', '        const b = heredocBody(s, i, h);', '        const b = heredocBody(s.slice(0, SCAN_MAX), i, h);');
+  const docCut = scan('heredoc-cut', '        const b = heredocBody(s, i, h);', '        const b = heredocBody(s.slice(0, SCAN_MAX), i, h);');
   ok(!docCut.runsNothing(longMsg), 'CONTROL a heredoc body counted against SCAN_MAX (r3): the 9 KB vibespace-msg could run again');
   const noReap = copy('reapers', 'const reaped = (ran, i) =>', 'const reaped = () => false; const reapedR4 = (ran, i) =>');
   ok(eq(B9(noReap, t25, [one('PAR', reap[0], R0, null), py], ctx), NOTE3), 'CONTROL no reapers (r3): `npm test & npm run lint & wait` lingers — the later python script loses its reads to the note');
@@ -1087,11 +1103,11 @@ await section('⑩', async () => {
   ok(eq(B9(inertVeto, t30, [one('TAIL', 'tail -f /tmp/app.log', R0 + 5_000, R0 + 5_300, { background: true }), one('PY', 'python3 x.py', R0 + 20_000, null)], ctx), NOTE3), 'CONTROL a lingering call that runs nothing counted as a candidate: a background `tail -f` takes the lone python script\'s reads to the note');
   const latest = copy('producers-latest', '      else if (named.length === 1 || (named.length > 1 && !named.some((c) => c.lingers))) pick', '      else if (named.length) pick');
   ok(eq(B9(latest, tn(4, R0 + 8_000), [one('P1', LOOP, R0 + 5_000, null, { background: true }), one('P2', LOOP.replace('ids', 'ids2'), R0 + 5_040, null, { background: true })], ctx).by, { P2: 4 }), 'CONTROL several CLI runners judged by the latest even when one is a background producer (r3): two producers in one batch ⇒ P2 4, a guess');
-  const noList = copy('list-bg', "      if (ch === '&' && !two) for (let k = list; k < out.length; k++) out[k].words.bg = true;", "      if (ch === '&' && !two && c) c.words.bg = true;");
+  const noList = scan('list-bg', "      if (ch === '&' && !two) for (let k = list; k < out.length; k++) out[k].words.bg = true;", "      if (ch === '&' && !two && c) c.words.bg = true;");
   ok(eq(B9(noList, t30, [one('BG', comp[1], R0 + 5_000, R0 + 5_300), fgNpm], ctx).by, { NPM: 3 }) && eq(B9(noList, t30, [one('BG', ands[0], R0 + 5_000, R0 + 5_300), fgNpm], ctx).by, { NPM: 3 }),
     'CONTROL `&` read as backgrounding only the command before it (r3): `( for … done ) &` and `vibespace-channels list | tee … &` do not linger — the later lone npm test takes their reads');
-  const noSplit = copy('env-split', "      if (base === 'env' && (ENV_SPLIT.includes(o)", "      if (false && (ENV_SPLIT.includes(o)");
-  const noExec = copy('exec-forms', '    const execs = RUNS_A_COMMAND.has(cw.base) &&', '    const execs = false &&');
+  const noSplit = scan('env-split', "      if (base === 'env' && (ENV_SPLIT.includes(o)", "      if (false && (ENV_SPLIT.includes(o)");
+  const noExec = scan('exec-forms', '    const execs = RUNS_A_COMMAND.has(cw.base) &&', '    const execs = false &&');
   ok(noSplit.channelsRuns(envS[0]).length === 0 && noExec.runsNothing(runs[0]), 'CONTROL `env -S` read as an option and a file tool\'s exec form as inert (r3): `env -S \'vibespace-channels read x\'` runs nothing, `git rebase -x \'npm test\'` runs nothing');
   const noBgFact = copy('producer-fact', ' || !!(ti && ti.backgrounded === true),', ',');
   const [nl, nr] = bindBoth(noBgFact, MessageManager);
