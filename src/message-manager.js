@@ -1649,22 +1649,27 @@ class MessageManager extends MessageWindow {
     for (const [msgId, c] of this._webuiCopies) if (c.cliUuid && c.cliUuid === String(uuid)) { hit = msgId; break; }
     if (!hit) return false;
     const hc = this._webuiCopies.get(hit);
-    // A copy whose frame is STILL HELD (hand-over number 0, r6) never claims a record: it never reached the CLI
-    if (hc.handNo === 0) return false;
+    // THE STAMP IS THE WITNESS (acceptance r7): a record under the copy's uuid IS the CLI's record of that frame, whatever
+    // hand-over number the copy says — the number is written into the WRAPPER's buffer only (a copy line never rides
+    // stdout), so a copy the hub restored while its frame was held still says 0 after the frame drained or was handed
+    // (r6 refused that claim: the same message drawn twice after a restart-then-drain).
     // A BATCH IS CLAIMED AS A BATCH (acceptance r5) — IN HAND-OVER ORDER, BY ITS WITNESS (r6): frames the CLI ran together as
     // ONE turn are ONE user record under the LAST frame's uuid, the earlier frames' blocks first in the order the wrapper
     // WROTE them (the copy's `handNo`, never the order the copies arrived: a held frame bolted after a handed one comes
     // second). Each earlier handed copy still waiting claims its own blocks off the front (its words trim-equal, a picture's
-    // place); a held copy (handNo 0) and one handed after the hit never do — the same words held and sent again are told
-    // apart by the uuid witness. A copy of an older build (no handNo) keeps r5's arrival order.
+    // place); a copy the hub saw held (handNo 0) never joins a hit it saw handed, nor does one handed after the hit — the
+    // same words held and sent again are told apart by the uuid witness. A copy of an older build (no handNo) keeps r5's
+    // arrival order.
     const rec = (content || []).map((b) => ({ ...b }));
     const parts = [];
     let off = 0;
-    // the copies that may be in this batch: handed BEFORE the hit (hand-over order) — or, for an older build's copies (no
-    // handNo), any other unclaimed one; the record is walked from its front, each step claimed by the eligible copy whose
-    // blocks are there (so neither the copies' arrival order nor their hand-over order is assumed to be the record's)
-    const pool = [...this._webuiCopies].filter(([msgId, c]) => msgId !== hit && (hc.handNo == null ? c.handNo == null : (c.handNo > 0 && c.handNo < hc.handNo)))
-      .sort((a, b) => (a[1].handNo || 0) - (b[1].handNo || 0));
+    // the copies that may be in this batch: handed BEFORE the hit (hand-over order); for a hit whose number the hub never
+    // saw (0: restored while held), every other copy of its build (a frame handed after the restore says 0 too — the order
+    // is unknown, the walk decides); for an older build's copies (no handNo), any other unclaimed one. The record is walked
+    // from its front, each step claimed by the eligible copy whose blocks are there (so neither the copies' arrival order
+    // nor their hand-over order is assumed to be the record's)
+    const pool = [...this._webuiCopies].filter(([msgId, c]) => msgId !== hit && (hc.handNo == null ? c.handNo == null : (hc.handNo === 0 ? c.handNo != null : (c.handNo > 0 && c.handNo < hc.handNo))))
+      .sort((a, b) => (a[1].handNo > 0 ? a[1].handNo : Number.MAX_SAFE_INTEGER) - (b[1].handNo > 0 ? b[1].handNo : Number.MAX_SAFE_INTEGER));
     for (let step = true; step && off < rec.length;) {
       step = false;
       for (const [msgId, c] of pool) {

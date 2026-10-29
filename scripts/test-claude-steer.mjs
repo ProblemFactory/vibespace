@@ -302,5 +302,44 @@ await guard('§r6 the settle chip tells the truth', () => {
   const w = read('data/bin/chat-wrapper.js');
   ok(/record\('queue_settle', \{ state: 'running', why: 'handover' \}\)/.test(w) && /why: stopping \? 'stop' : 'handover'/.test(w), '(r6) the wrapper says «running» at the owed turn\'s init and names WHY a window holds (a Stop or a hand-over)');
 });
+await guard('§r7 the hook bound is two facts: which hooks the CLI loads AND how many it said started', () => {
+  // the wrapper's own census + bound, run over scratch settings (never the box's): HOME / cwd / argv / env are stubs
+  const w = read('data/bin/chat-wrapper.js');
+  const body = w.slice(w.indexOf('const PROMPT_HOOK_MARGIN_MS'), w.indexOf('let hookTimer = null;'));
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-steer-r7-'));
+  const home = path.join(root, 'home'), cwd = path.join(root, 'cwd'), bin = path.join(REPO, 'data/bin');
+  fs.mkdirSync(path.join(home, '.claude'), { recursive: true }); fs.mkdirSync(cwd, { recursive: true });
+  const hooksOf = (...hs) => JSON.stringify({ hooks: { UserPromptSubmit: [{ hooks: hs }] } });
+  const PRODUCT = { type: 'command', command: `"${process.execPath}" ${path.join(bin, 'vibespace-hook.mjs')}`, timeout: 10 };
+  const run = ({ settings, argv = [], env = {}, started = 1 }) => {
+    fs.writeFileSync(path.join(home, '.claude', 'settings.json'), settings);
+    const proc = { env: { HOME: home, ...env }, platform: 'linux', cwd: () => cwd, argv: ['node', 'chat-wrapper.js', 'b.buf', 'm.json', 'claude', ...argv] };
+    const f = new Function('fs', 'path', 'os', 'process', '__dirname', body + '\nreturn { promptHookCensus, promptHookBound };');
+    return f(fs, path, { ...os, homedir: () => home }, proc, bin).promptHookBound(started);
+  };
+  try {
+    const flag = path.join(root, 'mine.json'); fs.writeFileSync(flag, hooksOf({ type: 'command', command: 'sleep 100', timeout: 120 }));
+    const lone = run({ settings: hooksOf(PRODUCT) });
+    ok(lone.ms === 15000 && /the product's hook/.test(lone.why), '(r7) the product-only control: one hook started, the settings name only the product\'s (this install\'s path, timeout 10) ⇒ 15 s', lone);
+    const two = run({ settings: hooksOf(PRODUCT), started: 2 });
+    ok(two.ms === 605000 && /2 hook\(s\) said started/.test(two.why), '(r7) TWO hooks started, the settings name one ⇒ the unseen one fails closed: 605 s (r6: 15 s ⇒ the kept frame answered after Stop)', two);
+    const remote = run({ settings: hooksOf(PRODUCT), env: { VIBESPACE_REMOTE_SID: 'r-1' } });
+    ok(remote.ms === 605000 && /remote session/.test(remote.why), '(r7) a REMOTE session (its CLI loads the device\'s settings) ⇒ unknown ⇒ 605 s', remote);
+    const flagged = run({ settings: hooksOf(PRODUCT), argv: ['--settings', flag], started: 2 });
+    ok(flagged.ms === 125000 && /not the product's: its timeout 120 s/.test(flagged.why), '(r7) a `--settings <file>` in the CLI\'s arguments is READ: its 120 s hook attributed ⇒ 125 s', flagged);
+    const inline = run({ settings: hooksOf(PRODUCT), argv: ['--settings=' + hooksOf({ type: 'command', command: 'sleep 1', timeout: 40 })], started: 2 });
+    ok(inline.ms === 45000, '(r7) an inline `--settings=<json>` is read too ⇒ its 40 s hook + 5 s', inline);
+    const named = run({ settings: hooksOf({ type: 'command', command: 'sleep 125 # vibespace-hook.mjs' }) });
+    ok(named.ms === 605000 && !/product's hook/.test(named.why), '(r7) the product\'s hook by IDENTITY, never a name match: `sleep 125 # vibespace-hook.mjs` is a user hook ⇒ its 600 s default + 5 s', named);
+    const elsewhere = run({ settings: hooksOf({ type: 'command', command: 'node /var/tmp/some-other-place/vibespace-hook.mjs', timeout: 600 }) });
+    ok(elsewhere.ms === 605000 && !/product's hook/.test(elsewhere.why), '(r7) a vibespace-hook.mjs from another path is not the product\'s ⇒ its own 600 s + 5 s', elsewhere);
+    const longer = run({ settings: hooksOf({ ...PRODUCT, timeout: 300 }) });
+    ok(longer.ms === 305000, '(r7) the product\'s path with timeout 300 ⇒ ITS registered timeout + 5 s (r6 said 15 s)', longer);
+    const plugin = run({ settings: hooksOf(PRODUCT), argv: ['--plugin-dir', root] });
+    ok(plugin.ms === 605000, '(r7) a `--plugin-dir` (its hooks are its own) ⇒ 605 s', plugin);
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+  ok(/const b = promptHookBound\(hooksStarted\);/.test(w) && /promptHooks\.add\(hid\); hooksStarted\+\+;/.test(w), '(r7) the wrapper arms the bound with the count the CLI said started (r6 read the census alone)');
+  ok(/function settleStopCopies\(why\) \{\n\s+landRiding\(why\);[\s\S]{0,200}settleCopies\(kept\); settleCopies\(rode\);/.test(w) && (w.match(/settleStopCopies\(/g) || []).length === 3, '(r7) every frame a Stop touched settles once — kept AND riding (the follow-up took it), at the settle and at the backstop');
+});
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

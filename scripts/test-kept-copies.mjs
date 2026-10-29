@@ -134,6 +134,17 @@ const sh = copyLine('m-h', 'u-h', [{ type: 'text', text: 'same words' }], 0), ss
 const cliE = { type: 'user', uuid: 'u-e', timestamp: new Date().toISOString(), message: { role: 'user', content: [{ type: 'text', text: 'same words' }] } };
 const same = await restart(sh + '\n' + ss, { jsonl: [cliE] });
 ok(view(same).length === 2 && view(same).every((v) => v.text === 'same words') && view(same).some((v) => v.msgId === 'm-h') && view(same).some((v) => v.msgId === 'm-e'), 'the same words held and sent again: the held copy (hand-over 0) never takes the handed one\'s record — two bubbles, each its own', view(same));
+// (r7) THE STAMP IS THE WITNESS: the hub restored the copy while its frame was HELD (handNo 0 — the wrapper's later number
+// never reaches the hub), the turn ended, the frame drained and the CLI wrote its record under the stamped uuid ⇒ ONE bubble
+const hd = copyLine('m-hd', 'u-hd', [{ type: 'text', text: 'MARK-H held across a restart' }], 0);
+const cliHd = { type: 'user', uuid: 'u-hd', timestamp: new Date().toISOString(), message: { role: 'user', content: [{ type: 'text', text: 'MARK-H held across a restart' }] } };
+const hdv = await restart(hd, { jsonl: [cliHd] });
+ok(view(hdv).length === 1 && view(hdv)[0].msgId === 'm-hd', '(r7) a frame held at the restart, drained before the first attach: its record (the stamp) claims the copy that says 0 — ONE bubble (r6: two)', view(hdv));
+// …and two held at the restart, drained together as ONE record under the last stamp ⇒ each once
+const h1 = copyLine('m-h1', 'u-h1', [{ type: 'text', text: 'MARK-P first held' }], 0), h2 = copyLine('m-h2', 'u-h2', [{ type: 'text', text: 'MARK-Q second held' }], 0);
+const cliH12 = { type: 'user', uuid: 'u-h2', timestamp: new Date().toISOString(), message: { role: 'user', content: [{ type: 'text', text: 'MARK-P first held\n' }, { type: 'text', text: 'MARK-Q second held' }] } };
+const h12 = await restart(h1 + '\n' + h2, { jsonl: [cliH12] });
+ok(view(h12).length === 2 && view(h12).filter((v) => /MARK-P/.test(v.text)).length === 1 && view(h12).find((v) => v.msgId === 'm-h2')?.text === 'MARK-Q second held', '(r7) two held at the restart, drained as one batch under the last stamp: each drawn ONCE', view(h12));
 const bb = copyLine('m-b', 'u-b', [{ type: 'text', text: 'IMG-B with a picture' }, img('B')], 1), bc = copyLine('m-c', 'u-c', [{ type: 'text', text: 'MARK-C two' }], 2);
 const cliBC = { type: 'user', uuid: 'u-c', timestamp: new Date().toISOString(), message: { role: 'user', content: [{ type: 'text', text: 'IMG-B with a picture' }, { type: 'image', source: { type: 'base64', media_type: 'image/png', data: PNG('B') } }, { type: 'text', text: 'MARK-C two' }] } };
 const bcv = await restart(bb + '\n' + bc, { jsonl: [cliBC] });
