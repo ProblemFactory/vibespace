@@ -312,6 +312,7 @@
   "test-usage-pace": 24,
   "test-usage-scan-op": 5397,
   "test-usage-scan-subagents": 90,
+  "test-vault-login-chrome": 3400,
   "test-vault-paste-chrome": 22000,
   "test-vault-totp-add-chrome": 30000,
   "test-vault-run-wire": 5000,

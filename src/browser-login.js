@@ -199,6 +199,51 @@ function formOfSurface(b, { now = 0 } = {}) {
 /** Keep a tab's forms: the newest last, one per id, ≤ FORMS_MAX. */
 function keepForm(forms, f) { const out = (Array.isArray(forms) ? forms : []).filter((x) => x && x.id !== f.id); out.push(f); return out.slice(-FORMS_MAX); }
 const typesOf = (f) => new Set((f && f.fields || []).map((x) => x.type));
+const STEPS = Object.freeze(['email', 'password', 'totp']);
+/** Which step a login form is on (`'email' | 'password' | 'totp'`): a password / new-password box ⇒ `'password'`; an otp box
+ *  alone ⇒ `'totp'`; a username / email box alone (step 1 of a two-step sign-in) ⇒ `'email'`. */
+function stepOfForm(form) {
+  const list = Array.isArray(form) ? form : (form && Array.isArray(form.fields) ? form.fields : []);
+  const t = new Set(list.map((x) => x && x.type));
+  if (t.has('password') || t.has('new-password')) return 'password';
+  if (t.has('otp')) return 'totp';
+  if (t.has('username')) return 'email';
+  return null;
+}
+/** Classify ONE visible input / accessibility-tree textbox (read-only metadata — never `.value`) into a `FIELD_TYPES` row
+ *  (`{fieldId, type, constraints?}`) or `null` when it is not a login input (a search box, a button, a hidden / disabled field). */
+function classifyLoginField(raw, { hasPassword = false } = {}) {
+  if (!raw || typeof raw !== 'object' || raw.visible === false || raw.disabled === true || raw.readOnly === true || raw.hidden === true) return null;
+  const role = str(raw.role).toLowerCase().trim();
+  if (role && !['textbox', 'combobox', 'spinbutton'].includes(role)) return null;
+  const it = str(raw.type || raw.inputType).toLowerCase().trim();
+  if (['hidden', 'submit', 'button', 'reset', 'checkbox', 'radio', 'file', 'image', 'range', 'color', 'search', 'date', 'time', 'month', 'week', 'datetime-local'].includes(it)) return null;
+  const fieldId = str(raw.fieldId || raw.ref || raw.id);
+  if (!FIELD_ID_RE.test(fieldId)) return null;
+  const acParts = str(raw.autocomplete).toLowerCase().trim().split(/\s+/).filter(Boolean);
+  const ac = acParts.length ? acParts[acParts.length - 1] : '';
+  const hint = [raw.name, raw.id, raw.label, raw.ariaLabel, raw.placeholder].map(str).filter(Boolean).join(' ');
+  if (!ac && it !== 'password' && /\b(search|query|filter|find)\b/i.test(hint)) return null;
+  let type = null;
+  if (ac === 'one-time-code' || /\b(totp|otp|one[-_ ]?time|2fa|mfa|verification[-_ ]?code|security[-_ ]?code|enter[-_ ]?code|auth[-_ ]?code|two[-_ ]?step|passcode)\b/i.test(hint) || ((it === 'tel' || str(raw.inputMode).toLowerCase().trim() === 'numeric') && /\b(code|pin|totp|otp|token)\b/i.test(hint))) type = 'otp';
+  else if (ac === 'new-password' || (it === 'password' && /\b(new[-_ ]?pass|create[-_ ]?pass|confirm[-_ ]?pass)\b/i.test(hint))) type = 'new-password';
+  else if (it === 'password' || ac === 'current-password' || /\b(password|passwd|enter your password)\b/i.test(hint)) type = 'password';
+  else if (ac === 'username' || ac === 'email' || it === 'email' || /\b(user(?:name)?|e-?mail|identifier|login|account|phone)\b/i.test(hint) || (hasPassword && (it === 'text' || it === 'tel' || it === ''))) type = 'username';
+  if (!type) return null;
+  const c = type === 'password' || type === 'new-password' ? constraintsOf(raw.constraints || raw) : null;
+  return { fieldId, type, ...(c ? { constraints: c } : {}) };
+}
+/** A standard Chrome tab's read-only input / accessibility-tree descriptors → a `formOf` record with `.step` (`'email' |
+ *  'password' | 'totp'`), or `null` when the page holds no sign-in field. */
+function classifyChromeForm(raw, { now = 0 } = {}) {
+  if (!raw || typeof raw !== 'object') return null;
+  const list = Array.isArray(raw.fields) ? raw.fields : Array.isArray(raw.inputs) ? raw.inputs : Array.isArray(raw.nodes) ? raw.nodes : [];
+  const hasPassword = list.some((x) => x && x.visible !== false && !x.disabled && !x.readOnly && !x.hidden && (str(x.type || x.inputType).toLowerCase().trim() === 'password' || /\b(password|passwd|enter your password|new-password|current-password)\b/i.test([x.autocomplete, x.name, x.id, x.label, x.ariaLabel, x.placeholder].map(str).join(' '))));
+  const fields = list.slice(0, FIELDS_MAX * 2).map((x, i) => classifyLoginField(x && typeof x === 'object' && !x.fieldId && !x.ref ? { ...x, fieldId: `vs-f-${i}` } : x, { hasPassword })).filter(Boolean);
+  if (!fields.length) return null;
+  const f = formOf({ surfaceId: str(raw.surfaceId || raw.formId) || `chrome-login-${str(raw.targetId || 'tab').slice(0, 32)}`, targetId: raw.targetId, pageOrigin: raw.pageOrigin || raw.origin, frameOrigin: raw.frameOrigin, actionOrigin: raw.actionOrigin, kind: raw.kind, fields }, { now });
+  return f ? { ...f, step: stepOfForm(f) } : null;
+}
 /** A form the mode can use: a sign-in needs a username, password or two-step field; a new password (signup / change)
  *  needs a new-password field — or a signup's plain password field. */
 function usable(f, want) {
@@ -379,10 +424,11 @@ function loginText(r) {
   const site = `${str(r.origin)}${r.user ? ` (${r.user})` : ''}`;
   const tail = r.submitted ? ' and submitted the form' : ' — the form is NOT submitted: press its button (or run the same login with --submit)';
   const receipt = r.receipt ? ` Receipt ${r.receipt}.` : '';
+  const stepWord = r.step && STEPS.includes(r.step) ? ` Step: ${r.step}.` : '';
   const otp = r.otpMissing ? ' The page also asks for a two-step code the vault holds none for — the owner can pair one with this login in the Vault window.' : '';
-  if (r.mode === 'signup') return `Filled ${what} on ${site}: the vault made a ${r.length || GENERATED_LEN}-character password for the new account and keeps it — you never see it${tail}. When the page takes the form the vault saves this login automatically and tells the owner.${receipt}`;
-  if (r.mode === 'change') return `Filled ${what} on ${site}: the vault made a new ${r.length || GENERATED_LEN}-character password and keeps the old one for one revision — you never see either${tail}.${receipt}`;
-  return `Filled ${what} on ${site} from the vault — you never see the values${tail}.${otp}${receipt}`;
+  if (r.mode === 'signup') return `Filled ${what} on ${site}: the vault made a ${r.length || GENERATED_LEN}-character password for the new account and keeps it — you never see it${tail}. When the page takes the form the vault saves this login automatically and tells the owner.${stepWord}${receipt}`;
+  if (r.mode === 'change') return `Filled ${what} on ${site}: the vault made a new ${r.length || GENERATED_LEN}-character password and keeps the old one for one revision — you never see either${tail}.${stepWord}${receipt}`;
+  return `Filled ${what} on ${site} from the vault — you never see the values${tail}.${otp}${stepWord}${receipt}`;
 }
 /** THE OWNER'S NOTICE after a save (For you, informational — never an approval): i18n keys + params, the English words. */
 const NOTICE = Object.freeze({
@@ -400,10 +446,10 @@ function noticeWords(state, { origin = '', username = '', conversation = '' } = 
 }
 
 module.exports = {
-  PREFIX, DOOR, USER_MAX, FORMS_MAX, FIELDS_MAX, PATTERN_MAX, GENERATED_LEN, GENERATED_MIN, GENERATED_MAX, TEXT_MAX, FORM_KINDS, FIELD_TYPES, BY, SOURCES, STRENGTHS, SAVE_STATES, REFUSALS,
+  PREFIX, DOOR, USER_MAX, FORMS_MAX, FIELDS_MAX, PATTERN_MAX, GENERATED_LEN, GENERATED_MIN, GENERATED_MAX, TEXT_MAX, FORM_KINDS, FIELD_TYPES, STEPS, BY, SOURCES, STRENGTHS, SAVE_STATES, REFUSALS,
   NAME_RE, ORIGIN_RE, CLASSES, LADDER, NOTICE, LOCKED,
   originOf, hostOf, secureOrigin, userOf, entryName, parseName, isEntryName, grantResources, resourceOk, scopeOf,
   recordOf, textOf, publicOf, newRecord, changedRecord,
-  formOf, formOfSurface, keepForm, planOf, constraintsFor, fillVerdict, valuesOf,
+  formOf, formOfSurface, keepForm, stepOfForm, classifyLoginField, classifyChromeForm, planOf, constraintsFor, fillVerdict, valuesOf,
   generatePassword, patternOf, saveVerdict, nextRecord, loginText, noticeWords,
 };

@@ -126,6 +126,17 @@ const FORM = (o = {}) => BL.formOf({ surfaceId: 'surf-cred-1', targetId: 'T1', p
   const hf = BL.formOfSurface(sb);
   ok(hf && hf.surface && hf.kind === 'http-auth' && hf.answerId === 'sign-in' && hf.pageOrigin === SITE && eq(hf.fields.map((x) => x.type), ['username', 'password']) && !hf.proxy, 'an http-auth SURFACE is a form the same road fills: text = the user name, password = the password, its credential answer');
   ok(BL.formOfSurface({ ...sb, detail: { isProxy: true } }).proxy === true && BL.formOfSurface({ ...sb, kind: 'js-dialog' }) === null && BL.formOfSurface({ ...sb, fields: [{ fieldId: 'u', type: 'text' }] }) === null, 'a proxy\'s sign-in is marked (no site\'s login answers it); another kind / no password field ⇒ no form');
+  // lane vault-login-chrome: PURE classifyChromeForm + stepOfForm over DOM input descriptors and accessibility-tree fixtures
+  const cfOne = BL.classifyChromeForm({ targetId: 'T1', pageOrigin: SITE, fields: [{ fieldId: 'vs-f-0', type: 'text', name: 'username', autocomplete: 'username', label: 'User', visible: true }, { fieldId: 'vs-f-1', type: 'password', name: 'password', autocomplete: 'current-password', minLength: 4, visible: true }] });
+  ok(cfOne && cfOne.step === 'password' && eq(cfOne.fields.map((x) => [x.fieldId, x.type]), [['vs-f-0', 'username'], ['vs-f-1', 'password']]) && cfOne.fields[1].constraints.minLength === 4, 'classifyChromeForm: one-step login form (username + password) ⇒ step "password", constraints kept');
+  const cfEmail = BL.classifyChromeForm({ targetId: 'T1', pageOrigin: SITE, nodes: [{ ref: 'e1', role: 'textbox', name: 'Email or phone', autocomplete: 'username', visible: true }, { ref: 'e2', role: 'textbox', name: 'Enter your password', type: 'password', visible: false }] });
+  ok(cfEmail && cfEmail.step === 'email' && eq(cfEmail.fields.map((x) => [x.fieldId, x.type]), [['e1', 'username']]), 'classifyChromeForm (accessibility-tree / two-step step 1): only the visible email textbox is classified ⇒ step "email"');
+  const cfPwd = BL.classifyChromeForm({ targetId: 'T1', pageOrigin: SITE, nodes: [{ ref: 'e1', role: 'textbox', name: 'Email or phone', visible: false }, { ref: 'e2', role: 'textbox', name: 'Enter your password', visible: true }] });
+  ok(cfPwd && cfPwd.step === 'password' && eq(cfPwd.fields.map((x) => [x.fieldId, x.type]), [['e2', 'password']]), 'classifyChromeForm (accessibility-tree / two-step step 2): only the visible password textbox is classified ⇒ step "password"');
+  const cfTotp = BL.classifyChromeForm({ targetId: 'T1', pageOrigin: SITE, nodes: [{ ref: 'e1', role: 'textbox', name: 'Enter code', inputType: 'tel', autocomplete: 'one-time-code', visible: true }] });
+  ok(cfTotp && cfTotp.step === 'totp' && eq(cfTotp.fields.map((x) => [x.fieldId, x.type]), [['e1', 'otp']]), 'classifyChromeForm (accessibility-tree / two-step step 3): one-time-code / "Enter code" ⇒ step "totp"');
+  const cfPlain = BL.classifyChromeForm({ targetId: 'T1', pageOrigin: SITE, fields: [{ fieldId: 'vs-f-0', type: 'text', id: 'q', placeholder: 'Search', visible: true }, { fieldId: 'vs-f-1', role: 'button', name: 'Go', visible: true }] });
+  ok(cfPlain === null, 'classifyChromeForm: a plain search box / button with no sign-in field ⇒ null (login_no_form)');
 }
 
 // ═══ ④ THE FILL VERDICT ═══
