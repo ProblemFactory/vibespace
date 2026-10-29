@@ -2593,9 +2593,9 @@ class ChatView {
       const resumeAt = this._resumeAt;
       const reTail = () => { try {
         if (this._disposed || this._suspended) return;
-        if (this._navigatedSince(resumeAt)) return;   // the reader went somewhere on purpose
+        if (this._positionedSince(resumeAt)) return;   // the reader went somewhere on purpose (or a jump of theirs landed — r6)
         if (!this._pinned && !this._pinnedAtSuspend) return;
-        if (this._teleported || this._windowEnd < this._total) this.jumpToBottom({ user: false, stale: () => this._navigatedSince(resumeAt) }); // re-pins itself — and drops its page if the reader (or a landing) went somewhere while it was out (r4)
+        if (this._teleported || this._windowEnd < this._total) this.jumpToBottom({ user: false, stale: () => this._positionedSince(resumeAt) }); // re-pins itself — and drops its page if the reader (or a landing) went somewhere while it was out (r4)
         else {
           this._setPinned(true, 'resumeRetail');          // re-assert: we ARE the live tail
           this._scrollToBottom();
@@ -2733,29 +2733,43 @@ class ChatView {
     this._endResumeSettle();
   }
 
-  /** Did the READER position this view after `since`? The chat-view-seek
-   *  `userScrolled = (this._lastUserScrollAt||0) > Math.max(jumpAt, revealAt)`
-   *  idiom, generalised over every positioning stamp we own: a POSITIONING act
-   *  (_lastPositionAt — wheel/touch/nav key/scrollbar drag), explicit nav, a
-   *  jump landing (_scrollElStable sets _lastJumpAt) and a search reveal.
-   *  Automatic repositioning must lose to every one of them — and to NONE of
-   *  the acts that merely touched the view: `_lastUserScrollAt` is not read
+  /** Did the READER position this view after `since`? — did a person ACT: a
+   *  stamp of _readerActs written since (a positioning act — wheel/touch/nav
+   *  key/scrollbar drag —, explicit nav, a search reveal). A press asks this
+   *  (a needs card's landing: the displacement law), and a press loses only to
+   *  a NEWER act: a jump's LANDING is not one (lane needs-card-tail r6 — an
+   *  older jump's page landing late dropped a newer ↓ or send). NONE of the
+   *  acts that merely touched the view count: `_lastUserScrollAt` is not read
    *  here, because a click is not a positioning act (round-3 MAJOR). */
   _navigatedSince(since) {
     return Math.max(...this._readerActs()) > since;
   }
 
+  /** …or did a jump of the reader's LAND since? The question AUTOMATIC
+   *  repositioning asks (the resume's re-tail and its unpin gate — nobody's
+   *  press): it loses to every act of the reader's AND to the landing of one
+   *  (_scrollElStable's `_lastJumpAt` — a jump pressed before the resume whose
+   *  page lands after it is a chosen destination too). The chat-view-seek
+   *  `userScrolled = (this._lastUserScrollAt||0) > Math.max(jumpAt, revealAt)`
+   *  idiom, generalised. A replay writes neither (r5). */
+  _positionedSince(since) {
+    return this._navigatedSince(since) || (this._lastJumpAt || 0) > since;
+  }
+
   /** THE READER'S ACTS (lane needs-card-tail r5) — the ONE place that names the stamps only a person's act writes: a
    *  positioning (`_lastPositionAt` — wheel/touch/nav key/scrollbar drag), an explicit navigation (`_lastNavAt` — the
-   *  minimap, the run bar, ↓, a jump, a search reveal), a jump landing (`_lastJumpAt`, _scrollElStable) and a search reveal
-   *  (`_search._lastRevealAt`). Every replay the view performs for itself (chat-view-seek's c-v restore: the jump target,
-   *  the search reveal) writes `_lastReplayAt` instead, which nothing here reads — a replay 1.6 s after a teleport dropped
-   *  a ↓ or a send pressed in its window (r4's default read the reveal's stamps). `_lastUserScrollAt` is not one: a click
-   *  is not a positioning act (round 3). `scroll: false` leaves the positioning out — A SEND (B-172e: a scroll during its
-   *  fetch never cancels it). → the stamps, in a fixed order (_navigatedSince takes their max; jumpToBottom's default
-   *  compares their values) */
+   *  minimap, the run bar, ↓, a jump, a search reveal) and a search reveal (`_search._lastRevealAt`). A READER ACT IS
+   *  STAMPED WHEN IT STARTS, NEVER WHEN ITS PAGE LANDS (r6): a jump's landing (`_lastJumpAt`, _scrollElStable) is the
+   *  view's own effect of an older press, like a replay — it is not here (r5 had put it back: the minimap's jumpToIndex,
+   *  the waiting chip, a minimap time jump landing late dropped a ↓ or a send pressed while their page was out, and caught
+   *  no newer press — every jump a person makes stamps `_lastNavAt` as it starts); only the resume's _positionedSince reads
+   *  it. Every replay the view performs for itself (chat-view-seek's c-v restore: the jump target, the search reveal)
+   *  writes `_lastReplayAt` instead, which nothing reads — a replay 1.6 s after a teleport dropped a ↓ or a send pressed in
+   *  its window (r4's default read the reveal's stamps). `_lastUserScrollAt` is not one: a click is not a positioning act
+   *  (round 3). `scroll: false` leaves the positioning out — A SEND (B-172e: a scroll during its fetch never cancels it).
+   *  → the stamps, in a fixed order (_navigatedSince takes their max; jumpToBottom's default compares their values) */
   _readerActs({ scroll = true } = {}) {
-    return [this._lastNavAt || 0, scroll ? this._lastPositionAt || 0 : 0, this._lastJumpAt || 0, this._search?._lastRevealAt || 0];
+    return [this._lastNavAt || 0, scroll ? this._lastPositionAt || 0 : 0, this._search?._lastRevealAt || 0];
   }
 
   /** Is an atBottom→false transition the RESUME's own re-measure rather than
@@ -2766,7 +2780,7 @@ class ChatView {
     const at = this._resumeAt || 0;
     if (!at || Date.now() - at > RESUME_DISPLACEMENT_MS) return false;
     if (!this._pinnedAtSuspend) return false;      // never dragged a window that was reading history
-    return !this._navigatedSince(at);
+    return !this._positionedSince(at);
   }
 
   /** Is an AUTOMATIC (observer- or geometry-driven) upward page allowed right
@@ -3779,7 +3793,8 @@ class ChatView {
   // stays); `land` is called once the tail is the view — truthy ⇒ it landed (the needs cards' landing), else the bottom.
   // THE LAW WORKS BOTH WAYS (r4 — the ↓ pressed BEFORE a landing replaced the newer landing; the resume re-tail's page
   // answered after a door's landing): a call with no `stale` of its own is stale once the READER acted after it — a stamp
-  // of _readerActs (THE one list; r5 — a replay the view performs for itself writes none of them) WRITTEN since the call:
+  // of _readerActs (THE one list; r5 — a replay the view performs for itself writes none of them; r6 — nor does an
+  // older jump's page landing: the newer press wins) WRITTEN since the call:
   // a value compared, not a time — an act in the call's own millisecond still counts. `send` (r5 — B-172e: A SEND IS THE
   // PERSON'S ACT; a touch on the list while its tail page was out dropped the landing and the sent message stayed undrawn):
   // a scroll during its fetch never cancels it (the scroll may move the view after the landing); a newer press still
@@ -5611,9 +5626,10 @@ class ChatView {
   async jumpToPendingAsk(requestId = null) {
     const asks = this._pendingAsks || [];
     const a = (requestId != null && asks.find((x) => String(x.requestId) === String(requestId))) || asks[0] || null;
-    let el = this._askElement(a);
+    let el = this._askElement(a), paged = false;
     if (!el && a && Number.isFinite(a.msgIndex) && this._canPaginate !== false && a.msgIndex >= 0 && a.msgIndex < (this._total || 0)) {
-      await this.jumpToIndex(a.msgIndex);
+      paged = true;
+      await this.jumpToIndex(a.msgIndex); // stamps this press as it STARTS (its _noteUserNav)
       el = this._askElement(a);
     }
     if (!el) {
@@ -5621,7 +5637,9 @@ class ChatView {
       el = this._messageList.querySelector('.chat-helper-ask.pending') || [...this._messageList.querySelectorAll('.chat-permission-inline')].find((x) => x.querySelector('.chat-perm-btn')) || null;
     }
     if (!el) { showToast(t('Nothing to answer is on screen — the request may have been settled already')); return false; }
-    this._noteUserNav?.('jumpToAsk');
+    // A READER ACT IS STAMPED WHEN IT STARTS (lane needs-card-tail r6): a paged ask was stamped by its jump — a stamp here,
+    // at its page's landing, dropped a ↓ or a send pressed while the page was out
+    if (!paged) this._noteUserNav?.('jumpToAsk');
     this._setPinned(false, 'jumpToAsk');
     const host = el.closest('.chat-msg');
     if (host) host.style.contentVisibility = 'visible';

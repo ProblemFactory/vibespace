@@ -1075,6 +1075,76 @@ console.log('⑩b THE TAIL r2 — the end is the display order\'s; the landing r
       if (!hiddenInRun) ok(res === null && r.putBack && r.runOpen === true && r.readerHasBox && r.scrollTop === -40 && r.toasts === 1, 'RED-able (r5 minor — 497beb03: putBack false, the run closed, scrollTop 0): the index road\'s put-back RE-OPENS the run the reader was reading inside — c120 drawn again, where it stood (40 px down)', r);
       else ok(res === null && r.putBack && r.runOpen === false && !r.readerHasBox && r.scrollTop === -33 && r.toasts === 1, 'RED-able (r5 minor): …a record still not drawn inside its opened run (a CSS rule) — the run closes again and its FOLD LINE stands where the record stood (7 px → 40 px)', r);
     }
+    // ── ⑩f THE TAIL, ROUND 6 (the r5 delta verdict on d5ab5a88): A READER ACT IS STAMPED WHEN IT STARTS, NEVER WHEN ITS PAGE
+    // LANDS — r5 put the jump LANDING's stamp (_lastJumpAt, the REAL _scrollElStable) into the one list, and an OLDER jump with
+    // no `stale` of its own (the minimap's jumpToIndex, the waiting chip's jumpToPendingAsk, a minimap time jump) landing while
+    // a NEWER ↓ or send had its tail page out dropped the newer press (the reader left at the older jump's window; a send's
+    // echo deferred undrawn — B-172e); the REAL jumps, the REAL landing writer, the REAL _fetchMessagePage / _onOp (the echo
+    // held during the fetch); the older page answers first (requests are answered in order)
+    console.log('⑩f THE TAIL r6 — a reader act is stamped when it starts, never when its page lands: an older jump landing late never drops a newer ↓ / send / card');
+    const R6 = { jumpToPendingAsk: method('  async jumpToPendingAsk(', '  /** A helper card\'s lifecycle chip'), _jumpToFileTime: methodOf(SEEKS, '    async _jumpToFileTime(ts, line) {', '    _scrollElStable(el, ') };
+    ok(Object.values(R6).every((f) => typeof f === 'function'), 'the REAL jumpToPendingAsk (chat-view.js) and _jumpToFileTime (chat-view-seek.js) are read out of the sources', Object.keys(R6).filter((k) => typeof R6[k] !== 'function'));
+    const MINIMAP = /\(idx\) => \{ this\._noteUserNav\('minimap'\); return this\.jumpToIndex\(idx\); \}/.test(CVS) && /\(ts, line\) => \{ this\._noteUserNav\('minimap-time'\); return this\._jumpToFileTime\(ts, line\); \}/.test(CVS);
+    const raf6 = globalThis.requestAnimationFrame; globalThis.requestAnimationFrame = () => 0; // (the REAL centring loops: their first step only)
+    try {
+      /** press 1 = the OLDER jump (`road`), its page held; press 2 while it is out = ↓ or a send (`press`), its tail page held */
+      const olderRace = async (road, press) => {
+        const C = conv(310, []), S = C.slice();
+        const v = roads(fakeView(C, [], 100, 150), C);
+        v._pinned = false;
+        let tailGate = deferred();
+        const fetch0 = globalThis.fetch;
+        globalThis.fetch = async (url) => { const q = new URL(url, 'http://x').searchParams, o = +q.get('offset'), l = +q.get('limit'); v.log.push(`fetchPage(${o},${l})`); if (tailGate) await tailGate.p; return { ok: true, json: async () => ({ messages: S.slice(o, o + l), total: S.length }) }; };
+        const draw = v._onCreateMessage, deferredIds = [];
+        Object.assign(v, { _fetchMessagePage: REAL4._fetchMessagePage, _onOp: REAL4._onOp, _getSessionIds: () => ({ backend: 'claude', backendSessionId: 'x', cwd: '/w', host: '' }), _noteRecordKind() { }, _newMsgCount: 0, _cancelForcedScroll() { }, _endResumeSettle() { },
+          _onCreateMessage: (m) => { if (!v._loadingHistory && (v._teleported || (!v._pinned && v._windowEnd < v._total))) { v._total++; v._newMsgCount++; deferredIds.push(m.id); return; } draw(m); }, // the real deferral
+          _scrollElStable: REAL5._scrollElStable, _lastJumpAt: 0, _canPaginate: true,
+          _pendingAsks: [{ requestId: 'rq-c200', msgIndex: 200 }], _askElement: (a) => (a ? v._elements.get('c200') || null : null), jumpToPendingAsk: R6.jumpToPendingAsk,
+          _jumpToFileTime: R6._jumpToFileTime, _scrollToNearestTs: () => false, _gapElForLine: () => null, _nearestElByTs: () => null, _reportVisibleTsRange() { },
+          _seekTeleport: async (line) => { v.log.push(`seekTeleport(${line})`); if (v.jumpGate) await v.jumpGate.p; v.setWindow(180, 230); v._teleported = true; return v._elements.get('c200') || null; }, // the slab is the stub's, its landing the REAL _scrollElStable
+          _resetGapAfterJump() { v._teleported = false; } });
+        try {
+          v.jumpGate = deferred();
+          const first = road === 'minimap' ? (v._noteUserNav('minimap'), v.jumpToIndex(200)) : road === 'chip' ? v.jumpToPendingAsk() : (v._noteUserNav('minimap-time'), v._jumpToFileTime(C[200].ts, 200)); // as chat-view.js wires them
+          await until(v, /^fetch\(|^seekTeleport/); await tick(2);
+          const second = v.jumpToBottom(press === 'send' ? sendArgs : undefined);
+          await until(v, /^fetchPage/);
+          if (press === 'send') { const echo = { id: 'sent-echo', ts: NOW + 1, role: 'user', content: [{ type: 'text', text: 'my message' }] }; S.push(echo); v._onOp({ op: 'create', message: echo }); } // the server feeds the sent message live in the same breath (held)
+          await tick(2);
+          v.jumpGate.open(); v.jumpGate = null; const r1 = await first; // the OLDER page answers first
+          const landed = v._lastJumpAt > 0, at = `${v._windowStart}..${v._windowEnd}`; await tick(2);
+          tailGate.open(); tailGate = null; const moved = await second;
+          return { road, press, older: !!r1, landed, olderAt: at, moved, window: `${v._windowStart}..${v._windowEnd}`, pinned: v._pinned, teleported: v._teleported, stale: v.log.includes('trace:jumpToBottom:stale'), echoDrawn: v._elements.has('sent-echo'), echoDeferred: deferredIds.includes('sent-echo'), lateStamp: v.log.includes('nav:jumpToAsk'), total: S.length };
+        } finally { globalThis.fetch = fetch0; }
+      };
+      const name = { minimap: 'minimap jump (jumpToIndex)', chip: 'waiting-chip jump (jumpToPendingAsk)', time: 'minimap time jump (_jumpToFileTime)' };
+      for (const road of ['minimap', 'chip', 'time']) for (const press of ['down', 'send']) {
+        const r = await olderRace(road, press);
+        const won = r.older && r.landed && r.olderAt === '180..230' && r.moved === true && r.pinned && !r.teleported && !r.stale && (press === 'send' ? r.window === `${r.total - 50}..${r.total}` && r.echoDrawn && !r.echoDeferred : r.window === '260..310');
+        ok(won && (road !== 'chip' || !r.lateStamp), `RED-able (r6 — d5ab5a88: DROPPED as stale, the reader left at the older jump's 180..230${press === 'send' ? ', the echo deferred undrawn: B-172e' : ''}): an OLDER ${name[road]} lands while a NEWER ${press === 'send' ? 'send' : '↓'} has its tail page out — the NEWER press wins (the live tail, pinned${press === 'send' ? ', the sent message drawn' : ''})${road === 'chip' ? '; the chip stamps its paged press once, as its jump starts' : ''}`, r);
+      }
+      // …and a NEEDS CARD's landing (a press too: its gone() asks _navigatedSince) is not cancelled by an OLDER minimap jump
+      // landing while the card's read is out (every NEWER act still cancels it — ⑩c / ⑩d); the REAL _navigatedSince
+      { const C = conv(310, [10]), A = askOf(C, 10);
+        const v = roads(fakeView(C, [A], 100, 150), C), nc = cardsFor(v);
+        const gates = [deferred(), deferred()]; let calls = 0;
+        Object.assign(v, { _scrollElStable: REAL5._scrollElStable, _navigatedSince: REAL5._navigatedSince, _lastJumpAt: 0 });
+        v._fetchMessages = async (o, l) => { const g = gates[Math.min(calls++, 1)]; v.log.push(`fetch(${o},${l})`); await g.p; return C.slice(o, o + l); }; // the minimap's page on gate 0, the card's reads on gate 1
+        v._pinned = false; nc._pass();
+        v._noteUserNav('minimap'); const first = v.jumpToIndex(200);
+        await tick(3);
+        const card = nc.land(A.id);
+        for (let i = 0; i < 60 && calls < 2; i++) await tick(2);
+        await tick(3); // (gone() compares times: the older page answers a few ms after the card's press)
+        gates[0].open(); const r1 = await first; // the OLDER page answers first: the minimap lands (180..230)
+        const olderAt = `${v._windowStart}..${v._windowEnd}`; await tick(2);
+        gates[1].open(); const res = await card;
+        const r = { r1, olderAt, res, window: `${v._windowStart}..${v._windowEnd}`, cards: cardsOf(v), jumpAt: v._lastJumpAt > 0 };
+        ok(r1 === true && olderAt === '180..230' && res === 'card' && v._windowStart === 0 && cardsOf(v).some((c) => c.id === A.id && c.at === 'c10'), 'RED-able (r6 — d5ab5a88: null, the card dropped, the reader left at 180..230): a needs card pressed while an OLDER minimap jump\'s page is out LANDS though that page lands first (c10, the window 0..50)', r); }
+    } finally { if (raf6 === undefined) delete globalThis.requestAnimationFrame; else globalThis.requestAnimationFrame = raf6; }
+    ok(!!ACTS && !/_lastJumpAt/.test(String(ACTS)) && /_positionedSince\(since\) \{\s*return this\._navigatedSince\(since\) \|\| \(this\._lastJumpAt \|\| 0\) > since;/.test(CVS)
+      && (CVS.match(/this\._positionedSince\((?:resumeAt|at)\)/g) || []).length === 3 && /if \(!paged\) this\._noteUserNav\?\.\('jumpToAsk'\);/.test(CVS) && MINIMAP,
+      'r6: the reader-act list holds no landing stamp (_lastJumpAt — read only by the resume\'s _positionedSince, at its three automatic sites); the waiting chip stamps a paged ask once, as its jump starts; the minimap\'s two jumps carry no `stale` of their own (the race above is the product\'s wiring)');
   }
   // THE WIRING (source pins)
   const CV = read('src/lib/chat-view.js'), CARD = read('src/lib/chat-needs-card.js'), UTA = read('src/lib/user-todos-actions.js');

@@ -393,9 +393,10 @@ const SCENARIO = `(async () => {
   //    neutered on the instance, in the same run, and the pre-fix failure must
   //    come back — otherwise these two legs prove nothing.
   view._navigatedSince = () => false;      // the re-tail blind to the reader again
+  view._positionedSince = () => false;     // …the resume's own question too (lane needs-card-tail r6: an act OR a jump's landing)
   view._noteUserNav = function () {};      // …and the off-list nav surfaces stop stamping
   const navControl = await navLeg();
-  delete view._navigatedSince; delete view._noteUserNav;
+  delete view._navigatedSince; delete view._positionedSince; delete view._noteUserNav;
 
   //    The control injects at the SAME 1900ms offset the sweep above passes at
   //    — an exact A/B on one offset. (Not 1400: the first run measured that the
