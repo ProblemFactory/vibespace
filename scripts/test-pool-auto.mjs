@@ -880,7 +880,7 @@ await (async () => {
     const bl = quietly(() => wb.eng.sweepNonMemberLinks());
     ck('boot: the first pool tick\'s sweep re-points every stale link (decision: Fish)', ['s-warm', 's-cold', 's-idle'].every((sid) => wb.on(sid) === 'fish') && bl.filter((l) => /removed-member evict/.test(l)).length === 3, bl.join(' | '));
     const eng2 = fs.readFileSync(path.resolve('src/server/usage-pool-engine.js'), 'utf8').split('\n').map((l) => l.replace(/(^|\s)\/\/.*$/, '')).join('\n');
-    ck('WIRING PIN: the 30 s pool tick runs the stale-link sweep FIRST, for every pool (before the auto filter)', /setInterval\(async \(\) => \{\s*try \{ sweepNonMemberLinks\(\); \} catch \{ \}\s*try \{\s*const pools = \(accounts\.list\(\)\.accounts \|\| \[\]\)\.filter\(\(a\) => a\.type === 'pooled' && a\.auto\);/.test(eng2));
+    ck('WIRING PIN: the 30 s pool tick runs the stale-link sweep FIRST, for every pool (before the auto filter) — sharing the tick\'s ONE roster per pool with the evaluation (acceptance r3)', /setInterval\(async \(\) => \{\s*const rosters = new Map\(\);\s*try \{ sweepNonMemberLinks\(\{ rosters \}\); \} catch \{ \}\s*try \{\s*const pools = \(accounts\.list\(\)\.accounts \|\| \[\]\)\.filter\(\(a\) => a\.type === 'pooled' && a\.auto\);/.test(eng2));
     ck('WIRING PIN: both proactive sites hand the membership fact to the verdict', (eng2.match(/decidePoolSwitch\(\{[^\n]*readLogin, membership, priority, reserveFloorPct/g) || []).length === 2);
     // (d) the per-session pass sees a removal FIRST (a kick before the tick) — same wall, same words
     const wp = world(engMod);
@@ -2725,7 +2725,8 @@ console.log('── pool-silent-members r2: the roster is read ONCE per evaluati
   const OATX = ['sk', '-ant-oat01-'].join('') + 'POOLr2fake_';
   // THE INCIDENT'S ROSTER SHAPE (14): 6 live logins every one spent, 6 living on a long-lived token on an UNMEASURED CLI
   // (no file), 2 wiped — every conversation's decision is blocked
-  const world = async (engMod, { sessions = 1, names = null } = {}) => {
+  const { UserTodoManager } = require(path.resolve('src/user-todos.js'));
+  const world = async (engMod, { sessions = 1, names = null, withTodos = false } = {}) => {
     const root = fs.mkdtempSync(path.join(scr, 'w-'));
     const dataDir = path.join(root, 'data');
     const am = new AccountManager({ dataDir });
@@ -2741,13 +2742,14 @@ console.log('── pool-silent-members r2: the roster is read ONCE per evaluati
     const nowS = Math.floor(Date.now() / 1000);
     for (const id of ids) fs.writeFileSync(path.join(cacheDir, id + '.json'), JSON.stringify({ fetchedAt: Date.now() - 60000, source: 'on-demand', fiveHour: { utilization: 0.99, resetsAt: nowS + 7200 }, sevenDay: { utilization: 0.3, resetsAt: nowS + 3 * 86400 } }));
     const sess = new Map(), notices = [];
+    const todos = withTodos ? new UserTodoManager({ dataDir, onChange: () => { } }) : null; // (r3 ⑦) the For-you store the engine files into
     const eng = engMod.create({
       app: { get() { }, post() { }, put() { }, delete() { }, use() { }, locals: {} }, rootDir: root, USAGE_CACHE_DIR: cacheDir, activeSessions: sess,
       wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { }, serverNotice: (k, t) => { notices.push(t); return 1; }, serverSetting: () => undefined, getAccounts: () => am,
       getHosts: () => ({ device: async () => ({ poolOrders: async () => { }, ackPoolOrdersLog() { } }) }),
       getUsageHistory: () => ({ _cost: () => 0, ingestRemoteEvents() { } }), recordUsageAttribution() { }, adapterRegistry: { get: () => ClaudeCodeAdapter },
       getAutoResume: () => ({ armIfEnabled() { }, noteFireOutcome() { }, noteRecovered() { }, noteNoPoolTarget() { }, statusFor: () => null, enabledFor: () => false, fireNow() { } }),
-      getQuotaProbe: () => null, getSessionMetaStore: () => null,
+      getQuotaProbe: () => null, getSessionMetaStore: () => null, ...(todos ? { getUserTodos: () => todos } : {}),
     });
     const convs = [];
     for (let i = 0; i < sessions; i++) {
@@ -2765,7 +2767,7 @@ console.log('── pool-silent-members r2: the roster is read ONCE per evaluati
       try { eng.maybePoolAutoSwitchForPool(P, { force: true }); } finally { console.log = o; console.warn = w; fs.readFileSync = realRead; am.poolRoster = realRoster; }
       return { calls, reads, lines };
     };
-    return { eng, am, P, ids, convs, notices, evaluate };
+    return { eng, am, P, ids, convs, notices, evaluate, todos };
   };
   const engMod = require(path.resolve('src/server/usage-pool-engine.js'));
   const probe = await world(engMod);
@@ -2776,9 +2778,11 @@ console.log('── pool-silent-members r2: the roster is read ONCE per evaluati
     for (const n of [1, 20, 60]) { const w = await world(engMod, { sessions: n }); const e = w.evaluate(); runs.push({ n, calls: e.calls, reads: e.reads, notices: w.notices.length }); }
     console.log('    one roster = ' + one + ' members, ' + perRoster + ' readFileSync; per evaluation: ' + runs.map((r) => `${r.n} conv → ${r.calls} roster / ${r.reads} reads`).join(' · '));
     ck(`r2 ③ ONE ROSTER PER EVALUATION: a blocked evaluation over 1 / 20 / 60 conversations reads the roster ${runs.map((r) => r.calls).join(' / ')} time(s) — never once per conversation (9d53db09: 2 / 21 / 61)`, runs.every((r) => r.calls === 1));
-    ck(`r2 ③ …its synchronous reads per evaluation are ONE roster's (${runs.map((r) => r.reads).join(' / ')} for 1 / 20 / 60 conversations, ≤ 1.6 × the 14 members — never × conversations)`, runs.every((r) => r.reads === runs[0].reads) && runs[0].reads <= 1.6 * 14 && runs[0].reads === perRoster);
+    // (acceptance r3 F5: the bound AS MEASURED, never one world's number — a roster reads each member's .credentials.json and
+    // .claude.json, + the CLI fixture once: 29 for 14 signed-in members, 81 for 40 — repro/r3/roster-paths.cjs)
+    ck(`r2 ③ …its synchronous reads per evaluation are ONE roster's (${runs.map((r) => r.reads).join(' / ')} for 1 / 20 / 60 conversations, ≤ 2 × the 14 members + 1 — never × conversations)`, runs.every((r) => r.reads === runs[0].reads) && runs[0].reads <= 2 * 14 + 1 && runs[0].reads === perRoster);
     ck('r2 ③ …and the blocked notice still names the roster (the per-session decisions and the default share that one read)', runs.every((r) => r.notices >= 1));
-    const m0 = mutEngine('roster-per-conv', 'const roster = evaluationRoster(poolId);', 'const roster = () => accounts.poolRoster(poolId);');
+    const m0 = mutEngine('roster-per-conv', 'const roster = evaluationRoster(poolId, rosters);', 'const roster = () => accounts.poolRoster(poolId);');
     ck('RED CONTROL (③) the patch (9d53db09: a fresh roster thunk per decision) hits', m0.hit);
     if (m0.hit) { const w = await world(m0.mod, { sessions: 20 }); const e = w.evaluate(); ck(`RED CONTROL (③): with a roster thunk per decision the SAME evaluation over 20 conversations reads it ${e.calls} times (${e.reads} reads) — the memo is what bounds it`, e.calls >= 20 && e.reads >= 20 * perRoster); }
     // ⑤ THE VENDOR REFUSAL IS ITS OWN WALL: B's turn is refused 403 (its login file is fine): switchCandidates drops it for
@@ -2801,6 +2805,29 @@ console.log('── pool-silent-members r2: the roster is read ONCE per evaluati
     const m1 = mutEngine('no-auth-mark', "if (m && memberAuthFailed(r.id)) return { ...r, why: { code: 'auth-failed', at: m.at } };", '');
     ck('RED CONTROL (⑤) the patch (the roster without the engine\'s auth mark) hits', m1.hit);
     if (m1.hit) { const am1 = await authWorld(m1.mod); ck('RED CONTROL (⑤): without the engine\'s mark the same member is NOT named as refused by the vendor (only «left out of this decision») — the mark is what names the true wall', !/Refused by the vendor/.test(am1.n) && /acct-B: signed in, but left out of this decision/.test(am1.n)); }
+    // ── acceptance r3 ──
+    // ⑥ ONE CANDIDATE PREDICATE: the verdict the pre-fire gate spends on excludes the member the switch excludes (the
+    // vendor's 10-min refusal mark) — b552c972 answered «usable via acct-B» while no switch could move there
+    { const v = au.w.eng.quotaVerdictFor(au.w.P, {}); ck(`r3 ⑥ ONE CANDIDATE PREDICATE: acct-B refused by the vendor (its cache 80 % left) is no member the pool's verdict can be usable through — usable=${v && v.usable}, via ${(v && v.via) || '-'}`, v && v.usable === false && /acct-B: refused by the vendor \d+ min ago — retried after 10 min/.test(v.reason || ''), v && v.reason); }
+    // ⑦ THE OWNER'S DOOR FOR THE DETAIL: the blocked pool files ONE For-you notice carrying every member's line (current first)
+    { const w = await world(engMod, { sessions: 1, withTodos: true }); const e = w.evaluate(); e && w.evaluate();
+      const items = w.todos.idsWhere((i) => i.sessionKey === 'pool:blocked:' + w.P).map((id) => w.todos.get(id));
+      const d = items[0] ? String(items[0].detail || '').split('\n') : [];
+      ck(`r3 ⑦ THE DETAIL WHERE THE OWNER LOOKS: a blocked evaluation (twice) files ONE For-you notice — «${items[0] ? items[0].text.slice(0, 60) : '-'}…» — whose detail is poolBlockedDetail, ${d.length} lines, the current member first`, items.length === 1 && items[0].status === 'open' && items[0].kind === 'notice' && items[0].origin === 'pool' && d.length === 14 && /^acct-1 \(current\): /.test(d[0]) && d.some((l) => /^acct-13: /.test(l)), d.slice(0, 3));
+      // the pool can serve again (acct-2 renewed): the episode's item is closed by the agent
+      fs.writeFileSync(path.join(w.am.subDir(w.ids[1]), '..', '..', 'usage-cache', w.ids[1] + '.json'), JSON.stringify({ fetchedAt: Date.now(), source: 'on-demand', fiveHour: { utilization: 0.1, resetsAt: Math.floor(Date.now() / 1000) + 7200 }, sevenDay: { utilization: 0.1, resetsAt: Math.floor(Date.now() / 1000) + 3 * 86400 } }));
+      w.evaluate();
+      ck('r3 ⑦ …and when a member can serve again the episode\'s item is over — done by the agent, nothing new filed', items[0] && w.todos.get(items[0].id).status === 'done' && w.todos.get(items[0].id).resolvedBy === 'agent' && w.todos.idsWhere((i) => i.sessionKey === 'pool:blocked:' + w.P).length === 1); }
+    // ⑧ ONE ROSTER PER TICK: the stale-link sweep decides every conversation on a narrowed-out member through
+    // removalVerdict — b552c972 read a roster per conversation (20 for 20) before the evaluation read its own
+    { const w = await world(engMod, { sessions: 20 });
+      w.am.updatePool(w.P, { members: w.ids.slice(1) }); // acct-1, every conversation's link, narrowed out
+      let calls = 0; const realRoster = w.am.poolRoster.bind(w.am); w.am.poolRoster = (id) => { calls++; return realRoster(id); };
+      const o = console.log, ww = console.warn; console.log = () => { }; console.warn = () => { };
+      let swept = null;
+      try { const rosters = new Map(); swept = w.eng.sweepNonMemberLinks({ rosters }); w.eng.maybePoolAutoSwitchForPool(w.P, { force: true, rosters }); } finally { console.log = o; console.warn = ww; w.am.poolRoster = realRoster; }
+      const held = ((swept && swept[0] && swept[0].held) || []).length;
+      ck(`r3 ⑧ ONE ROSTER PER TICK: the sweep over 20 conversations on a narrowed-out member (${held} held) and the evaluation after it read the roster ${calls} time(s) — the tick's one memo (b552c972: 20 in the sweep alone)`, calls === 1 && held === 20); }
   }
 }
 

@@ -553,6 +553,8 @@ app.post('/api/accounts/pool/:id/gather', (req, res) => {
     if (plan && !wholeOk && (!hot || !plan.move.length)) {
       const whyWords = { 'pin-exhausted': 'is out of quota', 'pin-login-dead': 'cannot sign in', 'pin-lapsed': 'has an inactive subscription', 'pin-member-excluded': 'just refused these conversations' }[plan.why] || 'is not usable in the pool right now';
       console.log(`[pool] gather ${id}: → ${memberId} refused — ${plan.why} (nothing moved)`);
+      // THE BUCKET'S WORDS (acceptance r3 F3): a member the vendor refused within 10 min is told as the roster tells it
+      if (plan.why === 'auth-failed') return res.status(409).json({ code: 'target_cannot_serve', why: 'auth-failed', until: plan.until || null, member: memberName, error: `${memberName}: ${require('../account-pool-auto.js').unplaceableText({ code: 'auth-failed', agoMin: plan.authFailedAt ? Math.max(0, Math.floor((Date.now() - plan.authFailedAt) / 60000)) : undefined })} — nothing was moved.` });
       return res.status(409).json({ code: 'target_cannot_serve', why: plan.why, until: plan.until || null, member: memberName, error: `${memberName} ${whyWords} — nothing was moved. The pool brings its conversations back to it when it can serve again.` });
     }
     let r;

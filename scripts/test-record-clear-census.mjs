@@ -2033,6 +2033,7 @@ const I_RECV = {
   'src/lib/manage-agents.js|said': ['pool verdict', 'the gather route\'s answer worded by PURE gatherWords (members and counts) — lane pool-pin'],
   'src/lib/session-lifecycle.js|r': ['account', 'a pool member row (the conversation\'s pin menu) — lane pool-pin'],
   'src/server/usage-pool-engine.js|wake': ['pool verdict', 'a member wake\'s own reason (the engine\'s verdict words)'],
+  'src/server/usage-pool-engine.js|lv': ['pool verdict', 'the pre-fire gate\'s last check — the link member\'s verdict reason (the engine\'s own words: buckets, a member\'s name) — lane pool-silent-members acceptance r3'],
   'src/server/usage-pool-engine.js|owed': ['account', 'the line a cross-provider switch owes the resumed conversation (q-053 P0b): the members\' and providers\' names and two model ids — the engine\'s own words'],
   'src/server/usage-pool-engine.js|out': ['pool verdict', 'a pin\'s placement reason (the engine\'s verdict words)'],
   'src/server/usage-pool-engine.js|ds': ['pool verdict', 'a per-session switch decision (member ids and numbers)'],

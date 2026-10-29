@@ -895,7 +895,7 @@ if (!probe) {
   // THE GATE PROBES THE MEMBER IT IS MOVING TO (R4): the switch runs BEFORE the probe target is read
   const eng = read('src/server/usage-pool-engine.js');
   const body = (() => { const i = eng.indexOf('async function beforeAutoResumeFire(id, session) {'); return i < 0 ? '' : eng.slice(i, eng.indexOf('\n}\n', i)); })();
-  const sw = body.indexOf('maybePoolAutoSwitch(session, { now });'), tg = body.indexOf('sessionBillingMember(session, scope).id'), pr = body.indexOf('probeQuotaForKey(target'), vd = body.indexOf('quotaVerdictFor(scope, { model, session, now: at })');
+  const sw = body.indexOf('maybePoolAutoSwitch(session, { now });'), tg = body.indexOf('sessionBillingMember(session, scope).id'), pr = body.indexOf('await preFireProbe(target'), vd = body.indexOf('quotaVerdictFor(scope, { model, session, now: at })'); // (acceptance r3: the ONE shared probe per target)
   // (acceptance r2) …and the probe's fresh reading may re-decide ONCE (forced, at the clock after the probe) before the
   // verdict, which reads that SAME instant (`at` = the switch's `now` when nothing was probed)
   const re = body.indexOf('maybePoolAutoSwitch(session, { now: at, force: true });');
@@ -909,7 +909,7 @@ if (!probe) {
 {
   const { mutantCopies } = await import('./mutant-copy.mjs');
   const MG = mutantCopies('arl-r2gate', REPO);
-  const gateWorld = (engModule = null) => {
+  const gateWorld = (engModule = null, { n = 1, probeDelay = 0 } = {}) => {
     const gateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-arloop-gate-'));
     const dataDir = path.join(gateRoot, 'data');
     const am = new AccountManager({ dataDir });
@@ -919,36 +919,44 @@ if (!probe) {
     const P = am.createPool({ name: 'pool' }).id; am.setPoolTarget(P, id['m-link']); am.updatePool(P, { auto: true, hot: true });
     const cacheDir = path.join(dataDir, 'usage-cache'); fs.mkdirSync(cacheDir, { recursive: true });
     const writeCache = (k, c) => fs.writeFileSync(path.join(cacheDir, k + '.json'), JSON.stringify(c));
-    const sessions = new Map(), fired = [], probed = [];
+    const sessions = new Map(), fired = [], probed = [], firedOn = [];
     const ar = arMod.create({ dataDir, activeSessions: sessions, serverSetting: () => true, log: (...a) => console.log(...a), notify: () => { },
-      sendToSession: (sid, s2, text) => { fired.push(text); return true; },
+      sendToSession: (sid, s2, text) => { fired.push(text); firedOn.push({ sid, link: am.get(am.poolCurrentFor(P, sid))?.name || '?' }); return true; },
       beforeFire: (sid, s2) => { try { return eng.beforeAutoResumeFire(sid, s2); } catch { return true; } },
       fireIdentity: (sid, s2) => { try { return eng.fireIdentityFor(s2); } catch { return null; } } });
     const eng = (engModule || engMod).create({ app: { get() { }, post() { }, put() { }, delete() { }, use() { }, locals: {} }, rootDir: gateRoot, USAGE_CACHE_DIR: cacheDir, activeSessions: sessions,
       wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { }, serverNotice: () => 1, serverSetting: () => undefined, getAccounts: () => am, getHosts: () => null, getUsageHistory: () => null,
       recordUsageAttribution() { }, adapterRegistry: { get() { return null; } }, getAutoResume: () => ar,
       // THE PROBE: whatever member it is asked about answers «limited — resets in 30 min» (the late reset)
-      getQuotaProbe: () => (target) => { probed.push(am.get(target)?.name || target); const ns = Math.floor(Date.now() / 1000); writeCache(target, { fetchedAt: Date.now(), source: 'cli-usage', fiveHour: { utilization: 1, status: 'limited', resetsAt: ns + 30 * 60 }, sevenDay: { utilization: 0.36, resetsAt: ns + 3 * 86400 } }); return true; } });
+      getQuotaProbe: () => (target) => { probed.push(am.get(target)?.name || target); if (probeDelay) return new Promise((res) => setTimeout(() => { const ns = Math.floor(Date.now() / 1000); writeCache(target, { fetchedAt: Date.now(), source: 'cli-usage', fiveHour: { utilization: 1, status: 'limited', resetsAt: ns + 30 * 60 }, sevenDay: { utilization: 0.36, resetsAt: ns + 3 * 86400 } }); res(true); }, probeDelay)); const ns = Math.floor(Date.now() / 1000); writeCache(target, { fetchedAt: Date.now(), source: 'cli-usage', fiveHour: { utilization: 1, status: 'limited', resetsAt: ns + 30 * 60 }, sevenDay: { utilization: 0.36, resetsAt: ns + 3 * 86400 } }); return true; } });
     const SID = 'sess-4i', session = { backend: 'claude', mode: 'chat', host: null, _webuiId: SID, claudeSessionId: 'cid-4i', _accountId: P, _autoResume: true, _servedModel: 'claude-fable-5', _servedModelAt: Date.now(), pty: { write() { } }, name: 'work' };
     sessions.set(SID, session); am.ensureSessionPoolLink(P, SID, id['m-link']);
-    return { am, ar, eng, P, id, SID, session, writeCache, fired, probed, nameOf: (k) => am.get(k)?.name || k, end: () => fs.rmSync(gateRoot, { recursive: true, force: true }) };
+    const more = []; // (§4j) siblings armed for the same reset — the incident's shape
+    for (let i = 1; i < n; i++) { const sid = SID + '-' + i, s2 = { ...session, _webuiId: sid, claudeSessionId: 'cid-4i-' + i }; sessions.set(sid, s2); am.ensureSessionPoolLink(P, sid, id['m-link']); more.push({ sid, s2 }); }
+    return { am, ar, eng, P, id, SID, session, more, sessions, writeCache, fired, firedOn, probed, nameOf: (k) => am.get(k)?.name || k, end: () => fs.rmSync(gateRoot, { recursive: true, force: true }) };
   };
-  const fire = async (engModule = null) => {
-    const w = gateWorld(engModule);
+  const fire = async (engModule = null, { n = 1, probeDelay = 0, authFailOk = false } = {}) => {
+    const w = gateWorld(engModule, { n, probeDelay });
     if (!w) return null;
     const realNow = Date.now, RU = Math.floor(realNow() / 1000) + 120, far = RU + 100 * 60, R7 = Math.floor(realNow() / 1000) + 3 * 86400;
     const c = (u5, r5, u7 = 0.4) => ({ fetchedAt: realNow() - 60000, source: 'cli-usage', fiveHour: { utilization: u5, ...(u5 >= 1 ? { status: 'limited' } : {}), resetsAt: r5 }, sevenDay: { utilization: u7, resetsAt: R7 } });
     w.writeCache(w.id['m-link'], c(1, far)); w.writeCache(w.id['m-fish'], c(1, far + 600));
     w.writeCache(w.id['m-spare'], c(0.99, RU, 0.36));     // its 5h lands at RU: at the fire its cache reads 100 %
     w.writeCache(w.id['m-ok'], c(0.45, far + 1200, 0.5)); // usable, but less room than the landed one
-    w.ar.armIfEnabled(w.SID, w.session, (RU + 60) * 1000, '5h 1% < 10%');
+    if (authFailOk) { // (§4j) m-ok was refused by the vendor (403) on ANOTHER conversation a minute ago: the engine's 10-min mark
+      const sid = 'sess-4j-other', s2 = { ...w.session, _webuiId: sid, claudeSessionId: 'cid-4j-other', _autoResume: false };
+      w.sessions.set(sid, s2); w.am.ensureSessionPoolLink(w.P, sid, w.id['m-ok']);
+      const o = console.log, ww = console.warn; console.log = () => { }; console.warn = () => { };
+      try { w.eng.notePoolAuthFailure(s2, sid, { status: 403, message: 'API Error: 403 {"type":"error","error":{"type":"permission_error"}}' }); } finally { console.log = o; console.warn = ww; }
+    }
+    for (const x of [{ sid: w.SID, s2: w.session }, ...w.more]) w.ar.armIfEnabled(x.sid, x.s2, (RU + 60) * 1000, '5h 1% < 10%');
     const T = RU * 1000 + 60300;
     const cap = capture();
     Date.now = () => T;
     let did = false;
-    try { const a = w.ar._armed.get(w.SID); if (a) a.resetsAt = T - GRACE_MS - 1000; const b = w.fired.length; w.ar.tick(T); await new Promise((r) => setTimeout(r, 40)); did = w.fired.length > b; } finally { Date.now = realNow; }
+    try { for (const x of [w.SID, ...w.more.map((m) => m.sid)]) { const a = w.ar._armed.get(x); if (a) a.resetsAt = T - GRACE_MS - 1000; } const b = w.fired.length; w.ar.tick(T); await new Promise((r) => setTimeout(r, probeDelay ? probeDelay + 300 : 40)); did = w.fired.length > b; } finally { Date.now = realNow; }
     cap.done();
-    const res = { did, link: w.nameOf(w.am.poolCurrentFor(w.P, w.SID)), probed: w.probed.slice() };
+    const res = { did, link: w.nameOf(w.am.poolCurrentFor(w.P, w.SID)), probed: w.probed.slice(), firedOn: w.firedOn.slice(), lines: cap.lines ? cap.lines.slice() : [] };
     w.end();
     return res;
   };
@@ -957,10 +965,35 @@ if (!probe) {
   else {
     ok('§4i FRESH READING: the switch lands on m-spare (its window just landed), the probe of m-spare says spent again, m-ok can serve ⇒ the decision is re-made ONCE and the continue goes to m-ok — never into m-spare\'s wall', g.did === true && g.link === 'm-ok' && g.probed.length === 1 && g.probed[0] === 'm-spare', JSON.stringify(g));
     const esrc = read('src/server/usage-pool-engine.js'), cut = '      if (tv && tv.usable !== true) maybePoolAutoSwitch(session, { now: at, force: true });\n';
-    ok('§4i RED CONTROL: the patch (the re-decision taken out — 9d53db09\'s gate) hits', esrc.includes(cut));
-    if (esrc.includes(cut)) {
-      const r = await fire(MG.load('src/server/usage-pool-engine.js', esrc.replace(cut, ''), 'no-redecide'));
-      ok('§4i RED CONTROL: without the re-decision the SAME fire continues into m-spare — the member its own fresh probe just called spent (the wall again)', r && r.did === true && r.link === 'm-spare', JSON.stringify(r));
+    const last = '      if (lv && lv.usable === false) {\n';
+    ok('§4i RED CONTROL: the patches (the re-decision taken out — 9d53db09\'s gate; the fire\'s last check taken out — b552c972\'s) hit', esrc.includes(cut) && esrc.includes(last));
+    if (esrc.includes(cut) && esrc.includes(last)) {
+      const r = await fire(MG.load('src/server/usage-pool-engine.js', esrc.replace(cut, '').replace(last, '      if (false) {\n'), 'no-redecide'));
+      ok('§4i RED CONTROL: without the re-decision AND the last check the SAME fire continues into m-spare — the member its own fresh probe just called spent (the wall again)', r && r.did === true && r.link === 'm-spare', JSON.stringify(r));
+      // THE FIRE'S LAST CHECK IS THE LINK'S MEMBER (acceptance r3): with the re-decision out, the belt alone still holds it
+      const h = await fire(MG.load('src/server/usage-pool-engine.js', esrc.replace(cut, ''), 'no-redecide-belt'));
+      ok('§4i THE LAST CHECK (acceptance r3): with the re-decision taken out, the pool\'s «usable via m-ok» is no licence — the link\'s member m-spare is spent on the same reading ⇒ the continue is HELD and said, never sent into the wall', h && h.did === false && h.lines.some((l) => /continue held at the fire — m-spare, the member its link names, cannot serve/.test(l)), JSON.stringify(h && { did: h.did, link: h.link }));
+    }
+    // ── §4j ONE PROBE PER TARGET, SHARED; ONE CANDIDATE PREDICATE (acceptance r3, reproduced: repro/accept-r2/
+    // skeptic-gate-two-trace.mjs + engine-gate-authfail.mjs). b552c972 stamped the 60 s floor BEFORE its await: a sibling
+    // gate for the same target (re-entering through fireNow inside the first gate's own switch) skipped the probe AND the
+    // re-decision and continued into m-spare. And the pool's verdict never read the vendor's 10-min refusal mark the switch
+    // obeys — «usable via m-ok» while the switch could not move there.
+    const two = await fire(null, { n: 2, probeDelay: 150 });
+    ok('§4j ONE PROBE, SHARED: two conversations armed for the same reset, the probe of m-spare answering 150 ms later ⇒ ONE probe, and BOTH continue on m-ok (b552c972: one into m-spare)', two && two.probed.length === 1 && two.firedOn.length === 2 && two.firedOn.every((f) => f.link === 'm-ok'), JSON.stringify(two && { probed: two.probed, firedOn: two.firedOn }));
+    const share = '  if (p && (p.pending || Date.now() - p.at <= 60e3)) return p.done || Promise.resolve();\n';
+    ok('§4j RED CONTROL: the patch (a sibling gate does not await the in-flight probe — b552c972\'s stamp) hits', esrc.includes(share));
+    if (esrc.includes(share)) {
+      const r = await fire(MG.load('src/server/usage-pool-engine.js', esrc.replace(share, '  if (p && (p.pending || Date.now() - p.at <= 60e3)) return Promise.resolve();\n').replace(last, '      if (false) {\n'), 'no-share'), { n: 2, probeDelay: 150 });
+      ok('§4j RED CONTROL: a sibling that judges the pre-probe cache continues into m-spare (the wall its fresh probe names)', r && r.firedOn.some((f) => f.link === 'm-spare'), JSON.stringify(r && r.firedOn));
+    }
+    const af = await fire(null, { authFailOk: true });
+    ok('§4j ONE CANDIDATE PREDICATE: m-ok refused by the vendor a minute ago (the switch\'s 10-min exclusion) and every other member spent ⇒ the continue is HELD and said — never «usable via m-ok» into m-spare\'s wall', af && af.did === false && af.lines.some((l) => /continue held at the fire — no member of pool can serve .*m-ok: refused by the vendor \d+ min ago — retried after 10 min/.test(l)), JSON.stringify(af && { did: af.did, link: af.link }));
+    const excl = "      if (authOut.has(m.id)) {";
+    ok('§4j RED CONTROL: the patch (the verdict without the switch\'s auth exclusion — b552c972) hits', esrc.includes(excl));
+    if (esrc.includes(excl)) {
+      const r = await fire(MG.load('src/server/usage-pool-engine.js', esrc.replace(excl, '      if (false) {').replace(last, '      if (false) {\n'), 'no-authout'), { authFailOk: true });
+      ok('§4j RED CONTROL: without it the verdict says «usable via m-ok» and the continue goes into m-spare — CONTINUED INTO THE WALL', r && r.did === true && r.link === 'm-spare', JSON.stringify(r && { did: r.did, link: r.link }));
     }
   }
 }
@@ -1344,7 +1377,8 @@ if (!probe) {
   ok('WIRING: the pool hands its own no-target verdict to the breaker (the ONLY source of "no usable member left")', /const noWay = ds && \(ds\.reason === 'all-rejected' \|\| ds\.reason === 'no-members' \|\| ds\.reason === 'stuck'[^)]*\);\s*\n\s*if \(noWay\) try \{ getAutoResume\(\)\?\.noteNoPoolTarget\?\.\(sid, rejected\.length, ds\.reason\); \}/.test(eng) && /ds\.reason === 'all-logins-expired'/.test(eng));
   ok('the module exports the two PURE notice rules (functional check)', typeof arMod.refusalNoticeFor === 'function' && typeof arMod.continueNoticeFor === 'function' && arMod.NO_TARGET_FRESH_MS > 0);
   ok("WIRING: the verdict's SCOPE for an unpooled session is its own credential slot too (routing the verdict to the spawn-time org asks a different account whether this session may spend)", /function _wallScope\(session\) \{[\s\S]{0,220}return wallKeyFor\(session\);/.test(eng) && !/orgVerifiedKey\(session, usageCacheKeyFor\(session\), 'wall/.test(eng));
-  ok('WIRING: the immediate path cannot turn the pre-fire probe into a spawn per pool switch (60s floor per target; the RE-VERDICT always runs)', /_preFireProbeAt/.test(eng) && /Date\.now\(\) - probedAt > 60e3/.test(eng));
+  // (acceptance r3: the floor is ONE SHARED probe per target — the in-flight promise every gate for it awaits, §4j)
+  ok('WIRING: the immediate path cannot turn the pre-fire probe into a spawn per pool switch (60s floor per target, ONE shared in-flight probe; the RE-VERDICT always runs)', /const _preFireProbe = new Map\(\);/.test(eng) && /if \(p && \(p\.pending \|\| Date\.now\(\) - p\.at <= 60e3\)\) return p\.done/.test(eng) && /if \(target\) await preFireProbe\(target, session\);/.test(eng));
   // ── round 4: the classification table IS the audit ──────────────────────
   // The kb essay carries this table in prose; here it is executable. The file
   // set is DERIVED (walk src/, keep whatever mentions noteRecovered) rather

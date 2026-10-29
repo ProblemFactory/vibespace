@@ -111,6 +111,15 @@ function oatFileOf(creds) {
   if (typeof o.accessToken !== 'string' || !o.accessToken || o.refreshToken) return null;
   return o;
 }
+// THE USAGE BEARER LAW (lane pool-silent-members acceptance r3, F4 — measured: an oat-shaped token planted in a member's
+// folder without our mark was sent as the Bearer of /api/oauth/usage and /roles): a direct usage read carries ONLY the
+// CLI's own login token — the one `claude login` wrote beside its refresh token. A long-lived token (`claude setup-token`'s
+// sk-ant-oat…) is never one, OURS (oatFileOf) or a file we did not write: it is an inference credential, and the CLI
+// itself never reads usage with it (2.1.312 prints no quota lines for a folder-token login) — a request shape the vendor
+// never sees from its own client is the shape §ban-safety exists to stop
+const LONG_LIVED_TOKEN_RE = /^sk-ant-oat\d{2}-/;
+/** May `token` be the Bearer of a direct usage read? A non-empty string that is not a long-lived token. */
+function usageBearerOk(token) { return typeof token === 'string' && token !== '' && !LONG_LIVED_TOKEN_RE.test(token); }
 /** OURS for row `id`: our materialized file (oatFileOf) whose mark names this row. */
 function oatFileOurs(creds, id) {
   if (!id || !oatFileOf(creds)) return false;
@@ -484,7 +493,7 @@ function materializeVerdict(member, now = Date.now()) {
 }
 
 module.exports = {
-  OAT_FILE_MARK, oatFileOf, oatFileOurs, credsRestOf, oatFileMerge, oatFileCurrent, oatShapeOf, oatFileBody, materializeVerdict,
+  OAT_FILE_MARK, oatFileOf, oatFileOurs, LONG_LIVED_TOKEN_RE, usageBearerOk, credsRestOf, oatFileMerge, oatFileCurrent, oatShapeOf, oatFileBody, materializeVerdict,
   EXPIRING_MS, NEAR_MS, WARN_STAGES, STAGE_MS, DEAD_STATES, STALE_GRACE_MS, SHORT_SESSION_MS, OAT_ONLY,
   loginState, withOat, ledgerExp, loginUsable, loginSwitchTarget, loginRank, loginBlockReason,
   loginAgeText, loginBucketLabel, loginBlockedPhrase, loginBlockedText, loginWallPhrase,

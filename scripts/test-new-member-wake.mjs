@@ -949,8 +949,11 @@ console.log('\n§8 half ② fires only the conversations nothing could move (r2)
         "      let landsOn = memberId; // PRE-FIX"],
       ["      const cold = !!(pa && pa.type === 'pooled' && !(pa.hot && capsOf(pa.backend).hotSwitch === 'verified'));",
         "      const cold = false; // PRE-FIX"],
+      // (lane pool-silent-members acceptance r3) the pre-fire gate's LAST CHECK — the link's member on the reading at the
+      // fire — now holds this very continue on its own (a belt below the wake's filter): the pre-fix copy takes it out too
+      ["      if (lv && lv.usable === false) {", "      if (false) { // PRE-FIX"],
     ]);
-    ok('control setup: the PRE-FIX copy applied all three replacements', mut.hits === 3, JSON.stringify(mut));
+    ok('control setup: the PRE-FIX copy applied all four replacements', mut.hits === 4, JSON.stringify(mut));
     const w2 = await walled({ auto: false }, mut.mod);
     const r2 = w2.eng.onMemberReadingFresh(w2.NEW, 'manual refresh (cli-panel)');
     await settle();

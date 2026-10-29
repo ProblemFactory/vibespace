@@ -86,7 +86,8 @@
 // CONNECT and refuses it (403 — no TLS session ever opens, so nothing reaches a vendor host); and the strace watchdog
 // (the sampler) SIGKILLs the process group and ABORTS the run (exit 3) at the first off-loopback connect().
 // CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 keeps the CLI's optional traffic off. The record says so: `netns: false`,
-// `rung: 'loopback-real'`, `proxy: 'loopback-mock'` (every record this script writes names its proxy: the mock).
+// `rung: 'loopback-real'`, `proxy: 'loopback-mock'` (every record this script writes — the --out record and the fixture
+// record alike, acceptance r3 — names its proxy: the mock).
 //
 // THE MOCK OUTLIVES ITS CLIENTS (lane pool-oat-measure-fix, 2026-10-14): 主开发's first real-CLI
 // rung (2.1.296) died at oat-file on `read ECONNRESET`, an unhandled 'error' on a Socket. The oat
@@ -719,7 +720,7 @@ async function main() {
     results.push(r);
     process.stderr.write(JSON.stringify({ variant: r.variant, steps: r.steps.map((s) => [s.step, s.accts.join(' '), s.result?.subtype || s.result]), otel: r.otel.map((o) => `${o.phase}:${(o.org || '').slice(0, 8)}`), oauth: r.oauth.map((o) => `${o.phase}:${o.kind}:${o.acct}`), fileAfter: r.fileAfter, credSyscalls: r.credSyscalls, events: r.events.length }) + '\n');
   }
-  const record = { measuredAt: new Date().toISOString(), cli: results[0]?.version || version, netns: NETNS, resolver: RESOLVER, loAddrs: LO_ADDRS, gapMs: GAP, escapes: M.escapes.map((e) => `${e.via} ${e.what}`), aborted: ESCAPED.length ? ESCAPED : undefined, events: EVENTS.map((e) => ({ ...e, t: new Date(e.t).toISOString().slice(11, 23) })), results };
+  const record = { measuredAt: new Date().toISOString(), cli: results[0]?.version || version, netns: NETNS, ...(LOOPBACK_REAL ? { rung: 'loopback-real' } : {}), proxy: 'loopback-mock', resolver: RESOLVER, loAddrs: LO_ADDRS, gapMs: GAP, escapes: M.escapes.map((e) => `${e.via} ${e.what}`), aborted: ESCAPED.length ? ESCAPED : undefined, events: EVENTS.map((e) => ({ ...e, t: new Date(e.t).toISOString().slice(11, 23) })), results };
   if (EVENTS.length) process.stderr.write(`[measure] ${EVENTS.length} events recorded, the run kept going (record.events)\n`);
   if (!flag('keep')) { try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { } } // the scratch HOME + fake creds + strace logs (--keep to inspect)
   if (OUT) fs.writeFileSync(OUT, JSON.stringify(record, null, 2));

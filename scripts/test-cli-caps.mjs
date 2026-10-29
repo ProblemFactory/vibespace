@@ -200,6 +200,8 @@ const measure = (args) => spawnSync(process.execPath, [SCRIPT, '--no-netns', '--
     /const LOOPBACK_REAL = flag\('loopback-real'\) && !NETNS;/.test(MS) && /const CLAUDE = NETNS \? opt\('claude'\) : LOOPBACK_REAL \? realClaude\(\) : fakeClaude\(\);/.test(MS)
     && /\.\.\.\(LOOPBACK_REAL \? \{ CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1' \} : \{\}\)/.test(MS) && /const PROXY_ENV = \{ HTTPS_PROXY: BASE, HTTP_PROXY: BASE,/.test(MS)
     && /\.\.\.\(LOOPBACK_REAL \? \{ rung: 'loopback-real' \} : \{\}\), proxy: 'loopback-mock', variants: \{\} \};/.test(MS));
+  // (acceptance r3: never a claim wider than the code — the --out record names its rung and its proxy too, not only the fixture's)
+  ok('…and the --out record says them as well — every record the script writes names its proxy (the mock), the loopback-real one its rung', /const record = \{ measuredAt: [^\n]*, netns: NETNS, \.\.\.\(LOOPBACK_REAL \? \{ rung: 'loopback-real' \} : \{\}\), proxy: 'loopback-mock', resolver: RESOLVER,/.test(MS));
   ok('…and its --no-netns line says the truth for each rung («the REAL claude, no namespace …» / «a FAKE claude on the loopback mock»)', /LOOPBACK_REAL \? ' \(--no-netns --loopback-real: the REAL claude, no namespace/.test(MS) && /: ' \(--no-netns: a FAKE claude on the loopback mock\)'/.test(MS));
 }
 

@@ -1156,10 +1156,28 @@ const namesOf = (list, fmt = (m) => m.name || m.id) => {
   return all.length > NOTICE_NAMES_MAX ? `${shown} and ${all.length - NOTICE_NAMES_MAX} more` : shown;
 };
 /** the members the pool cannot place, one clause per reason: «acct-13: signed out …» / «6 accounts: <reason> (a, b, c and 3 more)» */
+// ONE REASON SAID FOR MANY (acceptance r3: «14 accounts: … in ITS folder»): the grouped clause speaks of THEIR folders
+const PLURAL = [['its long-lived token is kept and written to its folder', 'their long-lived tokens are kept and written to their folders'],
+  ['long-lived token kept, not written to its folder', 'long-lived tokens kept, not written to their folders'], ['long-lived token only', 'long-lived tokens only'],
+  ['in its folder', 'in their folders'], ['to its folder', 'to their folders'], ['its login was wiped', 'their logins were wiped'],
+  ['its subscription is inactive — it rejoins once it answers', 'their subscriptions are inactive — each rejoins once it answers'],
+  ['its login and its long-lived token have both ended', 'their logins and long-lived tokens have both ended'],
+  ['its long-lived token reads as another account\'s — re-mint it', 'their long-lived tokens read as another account\'s — re-mint them'],
+  ['its login has expired', 'their logins have expired'], ['its login could not be read', 'their logins could not be read']];
+const pluralOf = (w) => { let s = String(w); for (const [a, b] of PLURAL) if (s.includes(a)) s = s.split(a).join(b); return s; };
 function unplaceableClauses(list) {
   const groups = new Map();
   for (const m of Array.isArray(list) ? list : []) { const w = unplaceableText(m.why); if (!groups.has(w)) groups.set(w, []); groups.get(w).push(m); }
-  return [...groups].map(([w, ms]) => (ms.length === 1 ? `${ms[0].name || ms[0].id}: ${w}` : `${ms.length} accounts: ${w} (${namesOf(ms)})`)).join('; ');
+  return [...groups].map(([w, ms]) => (ms.length === 1 ? `${ms[0].name || ms[0].id}: ${w}` : `${ms.length} accounts: ${pluralOf(w)} (${namesOf(ms)})`)).join('; ');
+}
+/** Did the bounded notice CUT names («and N more»)? Then the toast is not the whole story, and the owner's copy of every
+ *  member's line is a For-you item (acceptance r3 — the journal is a record, never the only copy) */
+function poolNoticeCut(d) {
+  const lists = ['reserveBlocked', 'overageBlocked', 'creditsHeld', 'lapsedBlocked', 'modelBlocked', 'quotaBlocked', 'authFailed', 'rejectedMembers', 'notBetter', 'crossHeld', 'loginBlocked'];
+  if (lists.some((k) => Array.isArray(d && d[k]) && d[k].length > NOTICE_NAMES_MAX)) return true;
+  const groups = new Map(); // the unplaceable clauses cut per reason (unplaceableClauses)
+  for (const m of Array.isArray(d && d.unplaceable) ? d.unplaceable : []) { const w = unplaceableText(m.why); groups.set(w, (groups.get(w) || 0) + 1); }
+  return [...groups.values()].some((n) => n > NOTICE_NAMES_MAX);
 }
 const authFailedText = (m) => `${m.name || m.id} (${Number.isFinite(m.agoMin) ? `${m.agoMin} min ago` : 'just now'} — retried after 10 min)`;
 function poolBlockedNotice(d, { poolName = '', currentName = 'the current member', when = null } = {}) {
@@ -1645,4 +1663,4 @@ function conversationDisplayName(session, customNames, fallbackId = '') {
 module.exports = {
   quotaVerdict, nowSecOf, resetLanded, resetAtText, unplaceableText, namedMembersOf, conversationDisplayName, priorityOrder, priorityRankOf, decidePinnedPlacement, soonestUsableMember,
   CROSS_PROVIDER_MODES, crossProviderMode, providerKey, providerLabel, sameProvider, fallbackOnlyOf, resolveModel, servesModel, hotSwitchFor,
-  classifyAuthFailure, memberLapsed, lapseCleared, readingFingerprint, serveAfterFailure, SERVE_LAPSED, decideCliRefresh, cliRefreshWhy, nextScheduledReadMs, projectionBucketBought, projectionReadsAfter, PROJECTION_LEAD_SEC, PROJECTION_MOVE_MS, PROJECTION_WINDOW_MS, PROJECTION_MEMORY_MS, PROJECTION_RECORD_MAX_MS, projectCacheAhead, projectionCrossing, SWITCH_THRESHOLD_PCT, THRESH, RESET_GRACE_SEC, rankPoolMembers, UNKNOWN_REMAINING_PCT, PROACTIVE_MARGIN_SEC, MIN_GAIN_PCT, SPARE_MOVE_MARGIN_PCT, CACHE_TTL_SEC, CACHE_TTL_1M_SEC, cacheTtlSecFor, warmCache, conversationInTurn, bucketRemaining, bucketRems, accountRemaining, weeklyDeadline, spareLaneRemaining, decidePoolSwitch, poolBlockedNotice, poolBlockedDetail, NOTICE_NAMES_MAX, poolCreditsNotice };
+  classifyAuthFailure, memberLapsed, lapseCleared, readingFingerprint, serveAfterFailure, SERVE_LAPSED, decideCliRefresh, cliRefreshWhy, nextScheduledReadMs, projectionBucketBought, projectionReadsAfter, PROJECTION_LEAD_SEC, PROJECTION_MOVE_MS, PROJECTION_WINDOW_MS, PROJECTION_MEMORY_MS, PROJECTION_RECORD_MAX_MS, projectCacheAhead, projectionCrossing, SWITCH_THRESHOLD_PCT, THRESH, RESET_GRACE_SEC, rankPoolMembers, UNKNOWN_REMAINING_PCT, PROACTIVE_MARGIN_SEC, MIN_GAIN_PCT, SPARE_MOVE_MARGIN_PCT, CACHE_TTL_SEC, CACHE_TTL_1M_SEC, cacheTtlSecFor, warmCache, conversationInTurn, bucketRemaining, bucketRems, accountRemaining, weeklyDeadline, spareLaneRemaining, decidePoolSwitch, poolBlockedNotice, poolBlockedDetail, poolNoticeCut, NOTICE_NAMES_MAX, poolCreditsNotice };

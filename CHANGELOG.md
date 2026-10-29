@@ -12,6 +12,9 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Re-check refreshes an account with no login in its folder through your machine's own login of the same account, when there is one.
 - The For-you note about an unmeasured Claude CLI stays dismissed, keeps its account count current, and survives an unreadable CLI version.
 - Pool notices stay short (a few accounts of each kind and how many more) and say when a locked vault or a vendor refusal holds an account.
+- Auto-resume never continues into an account its fresh check found spent, even when several conversations wait for the same reset.
+- When a pool's notice has to shorten its list, For you keeps the full list: every account and what holds it back.
+- Dismissing, reopening or clearing the unmeasured-CLI note in For you is kept; Re-check is yours alone (an agent's token is refused).
 
 ## 2.369.360 — 2026-10-27
 

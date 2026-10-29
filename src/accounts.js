@@ -20,7 +20,7 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 const { capsOf } = require('./backend-caps.js'); // PURE registry: per-backend hot-switch verdict rides list() so the UI never offers a dead toggle
-const { loginRank, loginUsable, withOat, oatFileOf, oatFileOurs, credsRestOf, oatFileMerge, oatFileCurrent, oatShapeOf, oatFileBody, materializeVerdict } = require('./login-expiry.js'); // PURE: which login is the WORST of a pool's members; the materialized long-lived token's verdict
+const { loginRank, loginUsable, withOat, oatFileOf, oatFileOurs, usageBearerOk, credsRestOf, oatFileMerge, oatFileCurrent, oatShapeOf, oatFileBody, materializeVerdict } = require('./login-expiry.js'); // PURE: which login is the WORST of a pool's members; the materialized long-lived token's verdict
 const { identityRowState } = require('./oat-identity-model.js'); // PURE: what the roster says of a row's token identity (lane oat-identity-fix)
 const { probeEligibility, probeRecordOf } = require('./auto-cli-model.js'); // PURE: may the quota panel probe PROVE this row; its last failed probe, bounded (lane auto-cli-oat-unprobeable)
 const cliCaps = require('./cli-caps.js'); // PURE: oatInFile(version, fixture) — a measured CLI version gates the materialized token
@@ -2381,8 +2381,16 @@ class AccountManager {
     if (!a || !capsOf(this._acctBackend(a)).oauthUsage || this._acctType(a) !== 'subscription') return null;
     // never our materialized long-lived token (pool-oat-materialize verify r1 F10): it is inference-only and
     // was never measured as a direct bearer — an oat-only row refuses the ⟳ / identity reads as before
+    // …nor ANY long-lived token (acceptance r3 F4, login-expiry usageBearerOk): one planted without our mark is the same credential
     const info = this.readSubCreds(id);
-    return info.oatFile ? null : (info.accessToken || null);
+    return info.oatFile || !usageBearerOk(info.accessToken) ? null : info.accessToken;
+  }
+  /** Why the folder's own token is no usage Bearer, by name — 'long-lived' (a long-lived token, ours or not) — or null */
+  usageTokenRefusal(id) {
+    const a = this.get(id);
+    if (!a || this._acctType(a) !== 'subscription') return null;
+    const info = this.readSubCreds(id);
+    return info.oatFile || (typeof info.accessToken === 'string' && info.accessToken && !usageBearerOk(info.accessToken)) ? 'long-lived' : null;
   }
 
   // ── Read-only probes of the CLI's own login state (NEVER written) ──

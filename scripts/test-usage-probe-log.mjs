@@ -277,9 +277,9 @@ const L = require(path.join(REPO, 'src/server/usage-probe-log.js'));
   // IN-PROCESS (https.request stubbed: no socket, no vendor request); HOME is a scratch dir holding a FAKE login.
   {
     const https = require('node:https'); const { EventEmitter } = require('node:events');
-    const routes = {};
+    const routes = {}, LOC = {}; // (r3 ④g) the engine's lapsed reader rides app.locals
     usageMod.setupUsage({
-      app: { get() { }, post(p, fn) { routes[p] = fn; }, put() { }, delete() { }, use() { }, locals: {} },
+      app: { get() { }, post(p, fn) { routes[p] = fn; }, put() { }, delete() { }, use() { }, locals: LOC },
       accounts: am, hosts: null, usageHistory: null, activeSessions: new Map(),
       serverSetting: () => undefined, ensureDir: (d) => fs.mkdirSync(d, { recursive: true }),
       USAGE_CACHE_FILE: path.join(dataDir, 'usage-cache.json'), USAGE_CACHE_DIR: cacheDir,
@@ -324,6 +324,40 @@ const L = require(path.join(REPO, 'src/server/usage-probe-log.js'));
         j2 && !j2.success && /^not refreshed — not probed \(unprobeable:oat-folder-no-panel: /.test(j2.error) && !/re-login/.test(j2.error) && !j2.loginNeeded, JSON.stringify(j2));
       ok('§5 ④e: …and the empty folder (no login) is refused by name with loginNeeded — «needs re-login to refresh usage — not probed (unprobeable:no-login …)»; neither spawned the panel nor made a fetch',
         j3 && j3.loginNeeded === true && /^needs re-login to refresh usage — not probed \(unprobeable:no-login: /.test(j3.error) && runs() === b2 && calls.length === n0, JSON.stringify({ j3, fetches: calls.length - n0 }));
+      // ── acceptance r3 ──
+      // ④f THE ⟳ DOOR IS HUMAN-GATED (§ban-safety, claim 1 F1): an agent's session / job bearer is refused 403 human_only
+      // BEFORE anything is read — b552c972 (and master) answered 200 and made the ladder's vendor requests
+      const callAs = (account, auth) => new Promise((resolve) => { let st = 200; routes['/api/usage/refresh']({ body: { account }, headers: { authorization: auth } }, { status(c) { st = c; return this; }, json: (j) => resolve({ st, ...j }) }); });
+      globalLogin(true);
+      const n4 = calls.length, b4 = runs();
+      const jv = await callAs(idF, 'Bearer ' + ['vsst', 'fakeagent0000'].join('_')), jj = await callAs(idF, 'Bearer ' + ['jbt', 'fakejob00000'].join('_'));
+      ok('§5 ④f (acceptance r3): ⟳ with an agent\'s vsst_ / jbt_ bearer ⇒ 403 human_only, the bearer never echoed — 0 vendor requests, 0 panel spawns (b552c972: 200 + 2 requests through the ladder)',
+        jv.st === 403 && jv.code === 'human_only' && jj.st === 403 && jj.code === 'human_only' && calls.length === n4 && runs() === b4 && !JSON.stringify([jv, jj]).includes('fakeagent'), JSON.stringify({ jv, jj, fetches: calls.length - n4 }));
+      globalLogin(false);
+      // ④g A REFUSAL BY NAME BEFORE THE LAPSED SENTENCE (confirmed 1): a lapsed row the door refused asked nothing — it is
+      // told what was refused and its remedy; «the subscription still does not answer» only when a panel RAN
+      LOC.memberServeLapsed = (k) => k === id2 || k === id3;
+      const j2l = await call(id2), j3l = await call(id3);
+      LOC.memberServeLapsed = undefined;
+      ok('§5 ④g (acceptance r3): ⟳ on a LAPSED row the door refused ⇒ the refusal by name with its remedy (the empty folder: «needs re-login …», loginNeeded; the folder token: «not refreshed — not probed …») — never «the subscription still does not answer» (b552c972: that, with no loginNeeded, 0 panels)',
+        j3l.loginNeeded === true && /^needs re-login to refresh usage — not probed \(unprobeable:no-login: /.test(j3l.error) && !j3l.lapsed && /^not refreshed — not probed \(unprobeable:oat-folder-no-panel: /.test(j2l.error) && !j2l.lapsed && !j2l.loginNeeded, JSON.stringify({ j2l, j3l }));
+      // ④h ONE FACT, ONE SENTENCE (F2): a token the LOCKED vault keeps is told as the roster and the gather tell it
+      const id4 = am.createSubscription({ name: 'Locked Four' }).id;
+      const realL4 = am.list.bind(am);
+      am.list = () => { const l = realL4(); l.accounts = l.accounts.map((r) => { if (r.id !== id4) return r; const x = { ...r, oat: true, loginState: OAT_LS, oatScopes: SCOPES, oatCli: { cli: '2.1.306', measured: true }, oatFile: { state: 'refused', reason: 'key-unreadable', cli: '2.1.306', code: 'vault_locked' } }; x.probeEligibility = probeEligibility(x); return x; }); return l; };
+      const j4 = await call(id4);
+      am.list = realL4;
+      ok('§5 ④h (acceptance r3): ⟳ on a member whose token the LOCKED vault keeps ⇒ «not refreshed — the vault is locked — … (Unlock… …; For you names what is waiting on it)», no loginNeeded, never «re-login» — the roster\'s own sentence (b552c972: «needs re-login …»)',
+        /^not refreshed — the vault is locked — /.test(j4.error) && /Unlock…/.test(j4.error) && !/re-login/.test(j4.error) && !j4.loginNeeded, JSON.stringify(j4));
+      // ④i THE USAGE BEARER LAW (F4): an oat-shaped token planted in a member's folder WITHOUT our mark is never a Bearer —
+      // refused by name, 0 vendor requests (b552c972 sent it to /api/oauth/usage and /roles)
+      const id5 = am.createSubscription({ name: 'Planted Five' }).id;
+      const PLANTED = ['sk', '-ant-oat01-'].join('') + 'PLANTEDfake_' + 'q7'.repeat(24);
+      fs.writeFileSync(path.join(am.subDir(id5), '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: PLANTED, expiresAt: Date.now() + 300 * 86400e3, subscriptionType: 'max' } }), { mode: 0o600 });
+      const n5 = calls.length;
+      const j5 = await call(id5);
+      ok('§5 ④i (acceptance r3): an oat-shaped token in the folder without our mark ⇒ never sent as a usage bearer — «not refreshed — the account\'s folder holds a long-lived token …», 0 vendor requests, usageToken() null',
+        /^not refreshed — the account's folder holds a long-lived token, and a long-lived token is never sent as a usage bearer/.test(j5.error) && calls.length === n5 && !calls.some((c) => c.bearer === PLANTED) && am.usageToken(id5) === null && am.usageTokenRefusal(id5) === 'long-lived', JSON.stringify({ j5, fetches: calls.length - n5 }));
     } finally { https.request = realReq; process.env.HOME = realHome; am.list = realList; }
   }
   // RED CONTROLS at the door: the same door over the verdict with ONE check cut — the profile-less token / the unmeasured

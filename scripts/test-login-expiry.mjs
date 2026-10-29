@@ -1806,7 +1806,8 @@ console.log('— §10 login × long-lived token (oat-only)');
   // same-account / identity-group fallbacks (never our long-lived token: usageToken refuses it) are tried first, and the
   // row is refused by name — loginNeeded, its own words — only when no fallback has a token either
   const ladderAt = ur.indexOf('IDENTITY-GROUP fallback (2.266.1'), namedAt = ur.indexOf("if (!token && refusedByName) return res.json(");
-  ck('...the route answers loginNeeded by name once its token ladder has nothing either (the ladder FIRST, acceptance r2); the probe env strips the token anyway', /const refusedByName = !cliOk && pv && pv\.at >= t0 && \(pv\.code === 'login' \|\| pv\.code === 'unprobeable'\) \? pv : null;/.test(ur) && /: \{ error: 'needs re-login to refresh usage — ' \+ refusedByName\.why, loginNeeded: true/.test(ur) && ladderAt > 0 && namedAt > ladderAt && /delete env\.CLAUDE_CODE_OAUTH_TOKEN;/.test(ur));
+  // (acceptance r3: the words live in ONE `refusalAnswer(r)` — the lapsed row the door refused is told the same refusal)
+  ck('...the route answers loginNeeded by name once its token ladder has nothing either (the ladder FIRST, acceptance r2); the probe env strips the token anyway', /const refusedByName = !cliOk && pv && pv\.at >= t0 && \(pv\.code === 'login' \|\| pv\.code === 'unprobeable'\) \? pv : null;/.test(ur) && /: \{ error: 'needs re-login to refresh usage — ' \+ r\.why, loginNeeded: true/.test(ur) && /if \(!token && refusedByName\) return res\.json\(refusalAnswer\(refusedByName\)\);/.test(ur) && ladderAt > 0 && namedAt > ladderAt && /delete env\.CLAUDE_CODE_OAUTH_TOKEN;/.test(ur));
   const probeCallers = [];
   for (const p of ['src/usage-routes.js', 'src/server/account-usage-routes.js', 'src/server/auto-cli-loop.js', 'server.js']) { const n = (src(p).match(/spawnPanelProbe\(/g) || []).length; if (n) probeCallers.push(p + ':' + n); }
   console.log('    panel-probe sites: ' + probeCallers.join(' '));

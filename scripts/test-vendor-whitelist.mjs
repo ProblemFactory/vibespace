@@ -90,7 +90,9 @@ const ALLOW = {
   // _fetchOAuthUsage (oauth/usage) + _fetchOAuthRoles (claude_cli/roles):
   // each URL line + its anthropic-beta header line sit inside one https.request
   // context window; counts pin the shape, not exact line numbers.
-  'src/usage-routes.js': { max: 6, gates: ['usagePollingEnabled', '_rateLimitBackoffUntil', "onDemandQuotaRefresh"] },
+  // …and the ⟳ door is HUMAN-GATED (lane pool-silent-members acceptance r3, F1): an agent's vsst_ / jbt_ bearer is refused
+  // 403 human_only before anything is read; the bearer law (usageBearerOk): a long-lived token is never the Bearer
+  'src/usage-routes.js': { max: 6, gates: ['usagePollingEnabled', '_rateLimitBackoffUntil', "onDemandQuotaRefresh", "code: 'human_only'", 'usageBearerOk('] },
   // refreshAvailableModels' v1/models fetch (both auth types) — lived in
   // server.js until the 2.325.0 decomposition moved the CLI environment out
   'src/server/cli-env.js': { max: 4, gates: ['usagePollingEnabled'] },
@@ -455,6 +457,17 @@ ok(!CONSTRUCT_HOSTS.test("'https://nodejs.org/dist'") && /'https:\/\/nodejs\.org
   const green = Object.entries(matrix).filter(([, v]) => !v.startsWith('RED'));
   console.log(`    one-shot matrix: ${Object.entries(matrix).map(([k, v]) => `${k} ⇒ ${v.split(' ')[0]}`).join(' · ')}`);
   ok(green.length === 0 && Object.keys(matrix).length === ROWS.length * Object.keys(PLANTS).length, `CONTROLS (one-shot, ${Object.keys(matrix).length}): ${Object.keys(PLANTS).join(' · ')} — planted in EACH row, each RED`, green.length ? green : matrix);
+}
+// THE ⟳ DOOR'S HUMAN GATE IS ITS FIRST ACT (acceptance r3, F1 — measured: on an instance nobody signs in to, an agent's
+// bearer got 200 and the ladder's two vendor requests): the refusal precedes every read — the setting, the throttle, the
+// panel, the ladder — in the route's own body (test-usage-probe-log ④f drives it: 403 human_only, 0 requests)
+{
+  const ur = fs.readFileSync(path.join(REPO, 'src/usage-routes.js'), 'utf-8');
+  const at = ur.indexOf("app.post('/api/usage/refresh', async (req, res) => {");
+  const body = at < 0 ? '' : ur.slice(at, ur.indexOf('\n});\n', at));
+  const gate = body.search(/if \(\/\^Bearer\\s\+\(vsst_\|jbt_\)\/i\.test\(String\(\(req\.headers && req\.headers\.authorization\) \|\| ''\)\)\) return res\.status\(403\)\.json\(\{[^\n]*code: 'human_only' \}\);/);
+  const firstRead = Math.min(...['serverSetting(', 'req.body', '_onDemandUsageAt', 'refreshViaCliPanel(', 'usageToken(', 'getOAuthToken('].map((k) => { const i = body.indexOf(k); return i < 0 ? Infinity : i; }));
+  ok(gate > 0 && gate < firstRead, '§2 THE ⟳ DOOR IS HUMAN-GATED: POST /api/usage/refresh refuses an agent\'s vsst_ / jbt_ bearer (403 human_only) BEFORE it reads anything — the setting, the body, the throttle, the panel, a token', { gate, firstRead });
 }
 for (const [rel, a] of Object.entries(ALLOW)) {
   ok(constructions[rel] > 0, `${rel} still holds its allowlisted vendor call (moved/renamed ⇒ update the allowlist)`);

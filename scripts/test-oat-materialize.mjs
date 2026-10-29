@@ -618,13 +618,14 @@ console.log('§6c R1 acceptance r2 — the item\'s lifecycle: an unreadable vers
     const r = await run(NOTICE);
     ok(!!r.id && r.during && r.during.status === 'open' && r.unreadable === 1, 'r2 (1): a restart whose `claude --version` gets no answer (the CLI unknown) leaves the open item EXACTLY as it is — two ticks in the unknown spell, the item still open, and the journal says «version unreadable» ONCE (9d53db09: «done» by the agent at the first tick)', r);
     ok(r.after && r.after.status === 'open' && r.open.length === 1 && r.open[0] === r.id, 'r2 (1): …the version reads again (2.1.312, still unmeasured, acct-1 held out): the SAME item is open — never closed, never a second filing (9d53db09: closed and never re-filed)', r);
-    const M0 = compileWith('src/server/cli-unmeasured-notice.js', "if (!caps.ok && (!caps.known || !caps.cli || caps.cli === 'unparsed')) {", 'if (false) {');
+    const M0 = compileWith('src/server/cli-unmeasured-notice.js', "const unreadable = !caps.ok && (!caps.known || !caps.cli || caps.cli === 'unparsed');", 'const unreadable = false;');
     const rc = M0 ? await run(M0) : null;
     ok(!!rc && rc.during && rc.during.status === 'done' && rc.during.by === 'agent', 'RED CONTROL (1): the same restart with the unknown-version guard taken out closes the item «done» by the agent — 9d53db09\'s defect, so the guard is what keeps it', rc);
   }
   // (2) THE OWNER'S DISMISSAL IS FINAL; THE OPEN ITEM IS PATCHED; THE ROSTER READ IS THROTTLED — the REAL For-you store on an
   // injected clock and the module's OWN memory file (data/cli-unmeasured-notice.json); the store is a stand-in that counts
   // its roster reads (accounts.cliUnmeasuredNotice reads every pool's members' credential files)
+  const w0FactOf = (M) => { const w = world(M); const id = w.mk(M).tick(); return !!id && w.todos.get(id)[M.FACT || 'cliUnmeasured'] === '2.1.312'; };
   const world = (M = NOTICE, { file = true } = {}) => {
     let clock = Date.parse('2026-10-28T12:00:00Z');
     const dir = fs.mkdtempSync(path.join(tmp, 'data-6c-'));
@@ -671,7 +672,7 @@ console.log('§6c R1 acceptance r2 — the item\'s lifecycle: an unreadable vers
   }
   {
     // RED CONTROL (2): the same owner's dismissal with the module's memory taken out (the rec never read) — `add` re-opens it
-    const Mx = compileWith('src/server/cli-unmeasured-notice.js', 'const rec = load().versions[v] || recFromLedger(todos, v, prefix);', 'const rec = null;');
+    const Mx = compileWith('src/server/cli-unmeasured-notice.js', 'if (rec && ownerWord(rec.resolvedBy)) return null;', 'if (false) return null;'); // (r3: the owner's word, learned this tick)
     const w = world(Mx || NOTICE); const n1 = w.mk();
     const id = n1.tick(); w.todos.setStatus(id, 'dismissed', 'user'); w.othersResolved(16); w.wait(61 * 60e3); n1.tick();
     ok(!!Mx && w.todos.get(id).status === 'open', 'RED CONTROL (2): with its memory taken out, the dismissed item is RE-OPENED at the recheck — 9d53db09\'s defect, so the memory is what keeps the owner\'s word', Mx && w.todos.get(id).status);
@@ -686,6 +687,49 @@ console.log('§6c R1 acceptance r2 — the item\'s lifecycle: an unreadable vers
     ok(closed.status === 'done' && closed.resolvedBy === 'agent' && back.status === 'open' && back.text.startsWith('The Claude CLI updated to 2.1.312; 2 accounts') && w.mine().length === 1, 'r2 (3): nobody left out ⇒ resolved by the agent; two held out again on 2.1.312 ⇒ the SAME item re-opens, patched to «2 accounts» (the agent closed it, the owner never did)', { closed: closed.status + '/' + closed.resolvedBy, back: back.status, text: back.text });
     const r0 = w.reads; w.ok = true; w.wait(60e3); n1.tick(); w.wait(16 * 60e3); n1.tick();
     ok(w.todos.get(id).status === 'done' && w.todos.get(id).resolvedBy === 'agent' && w.reads === r0, 'r2 (3): the version MEASURED ⇒ the item resolves itself, and a measured CLI reads no roster at all', { status: w.todos.get(id).status, reads: w.reads - r0 });
+  }
+  // ── acceptance r3: the owner's word is never lost (r2i12/attack.cjs legs U4 / a / d / e / c + skeptic-notice-reopen.cjs A / B)
+  const NF = NOTICE.FACT;
+  const prune = (w, id) => { w.todos._state.items = w.todos._state.items.filter((i) => i.id !== id); }; // the store's 1000-item ledger pruned it
+  const red = (label, from, to) => { const M = compileWith('src/server/cli-unmeasured-notice.js', from, to); ok(!!M, `RED CONTROL ${label}: the patch hits`); return M; };
+  { // (4) U4 — dismissed DURING an unreadable spell, pruned before the version reads again
+    const leg = (M) => { const w = world(M); const n = w.mk(M); const id = n.tick(); w.cli = null; w.wait(60e3); n.tick(); w.todos.setStatus(id, 'dismissed', 'user'); w.wait(60e3); n.tick(); prune(w, id); w.cli = '2.1.312'; w.wait(16 * 60e3); n.tick(); return { open: w.mine().filter((i) => i.status === 'open').length, mem: JSON.parse(fs.readFileSync(w.memFile, 'utf8')).versions['2.1.312'].resolvedBy }; };
+    const r = leg(NOTICE);
+    ok(r.open === 0 && r.mem === 'user', 'r3 (4) U4: the owner dismisses DURING an unreadable spell and the store prunes the item before the version reads again ⇒ nothing is filed again (the word was learned in the spell — learning is free, only the filing waits)', r);
+    const M = red('(4)', 'learn(todos, ledger, v); // whatever the version read', 'if (!unreadable) learn(todos, ledger, v); // whatever the version read');
+    if (M) { const rr = leg(M); ok(rr.open === 1, 'RED CONTROL (4): with learning skipped in the spell (b552c972) a NEW item is filed for the version the owner dismissed', rr); }
+  }
+  { // (5) (a) a DAMAGED memory: said once, rebuilt from the ledger (by the item's FACT) before anything is filed
+    const leg = (M, body) => { const w = world(M); const n = w.mk(M); const id = n.tick(); w.todos.setStatus(id, 'dismissed', 'user'); w.wait(60e3); n.tick(); fs.writeFileSync(w.memFile, body(w, id)); w.names = w.names.slice(0, 4); w.wait(16 * 60e3); const l0 = w.logs.length; w.mk(M).tick(); w.wait(16 * 60e3); w.mk(M).tick(); return { id, st: w.todos.get(id).status, items: w.mine().length, said: w.logs.slice(l0).filter((l) => /memory cli-unmeasured-notice\.json is damaged/.test(l)).length }; };
+    const garbage = () => 'garbage {{{ not json';
+    const neverHad = (w) => JSON.stringify({ versions: { '2.1.312': { filedAt: 1, itemId: 'ut-neverhad00', count: 6, resolvedBy: null, resolvedAt: null } } });
+    const g = leg(NOTICE, garbage), nh = leg(NOTICE, neverHad);
+    ok(g.st === 'dismissed' && g.items === 1 && g.said === 1, 'r3 (5) a GARBAGE memory file (then two members re-logged): said ONCE in the journal over two restarts, rebuilt from the ledger — the dismissal holds, no second item', g);
+    ok(nh.st === 'dismissed' && nh.items === 1, 'r3 (5) a memory naming an item the store never had (resolvedBy null) while the dismissed item is in the ledger, the count 6→4 ⇒ still dismissed, no second item (b552c972: a SECOND item filed beside it)', nh);
+    ok(w0FactOf(NOTICE), 'r3 (5) …the item carries its FACT (`' + NF + '`: the version) — the ledger belt keys on it, never on the words');
+    const M = red('(5)', 'const byFact = (todos) => {', 'const byFact = (todos) => new Map(); const byFact0 = (todos) => {');
+    if (M) { const rr = leg(M, neverHad); ok(rr.items === 2, 'RED CONTROL (5): with the ledger belt not keyed on the fact, the never-had memory files a SECOND item for the dismissed version', rr); }
+  }
+  { // (6) (d) the bound: 21 versions, the first one dismissed, the ledger pruned — the owner's word outlives the agent's
+    const leg = (M) => { const w = world(M); const n = w.mk(M); const ids = []; for (let k = 0; k < 21; k++) { w.cli = '2.1.' + (400 + k); w.wait(16 * 60e3); ids.push(n.tick()); if (k === 0) { w.todos.setStatus(ids[0], 'dismissed', 'user'); w.wait(60e3); n.tick(); } } for (const id of ids) if (id && w.todos.get(id) && w.todos.get(id).status !== 'open') prune(w, id); const keys = Object.keys(JSON.parse(fs.readFileSync(w.memFile, 'utf8')).versions); w.cli = '2.1.400'; w.wait(16 * 60e3); const back = n.tick(); return { kept: keys.length, has400: keys.includes('2.1.400'), refiled: back }; };
+    const r = leg(NOTICE);
+    ok(r.kept === 20 && r.has400 && !r.refiled, 'r3 (6) 21 versions (the first dismissed by the owner), the ledger pruned: the memory keeps 20 and the owner\'s word is never the one evicted — back on 2.1.400, nothing filed (b552c972: its own save evicted the record it had just written)', r);
+    const M = red('(6)', '(ownerWord(memory.versions[b].resolvedBy) - ownerWord(memory.versions[a].resolvedBy)) || ', '');
+    if (M) { const rr = leg(M); ok(!!rr.refiled, 'RED CONTROL (6): evicting by last use alone drops the dismissed version, and back on it a new item is filed', rr); }
+  }
+  { // (7) (e) the owner CLEARED the item (Clear content…), the memory deleted, a restart — the cleared item keeps its fact
+    const leg = (M) => { const w = world(M); const n = w.mk(M); const id = n.tick(); w.todos.clearItems([id], { by: 'owner' }); w.wait(60e3); n.tick(); fs.rmSync(w.memFile, { force: true }); w.wait(16 * 60e3); const r = w.mk(M).tick(); return { refiled: r, items: w.mine().length, fact: w.todos.get(id)[NF] || null, open: w.todos.get(id).status }; };
+    const r = leg(NOTICE);
+    ok(!r.refiled && r.items === 1 && r.fact === '2.1.312', 'r3 (7) cleared by the owner, the memory deleted, a restart ⇒ nothing filed again: the cleared item keeps its fact (Clear content… drops words, never facts)', r);
+    const M = red('(7)', 'if (id) { patch(todos, id, v, null); setRec(', 'if (id) { setRec(');
+    if (M) { const rr = leg(M); ok(!!rr.refiled, 'RED CONTROL (7): an item filed without its fact is lost to the belt once cleared (its words are gone) — re-filed', rr); }
+  }
+  { // (8) the owner's LATER word: a hand reopen / the Mark-all-read Undo — learned, and the open item patched again
+    const leg = (M, undo) => { const w = world(M); const n = w.mk(M); const id = n.tick(); w.wait(60e3); if (undo) w.todos.readNotices([id], true, 'user'); else w.todos.setStatus(id, 'dismissed', 'user'); w.wait(30e3); n.tick(); w.wait(5e3); if (undo) w.todos.readNotices([id], false, 'user'); else w.todos.setStatus(id, 'open', 'user'); w.names = w.names.slice(0, 1); w.wait(16 * 60e3); n.tick(); const it = w.todos.get(id); return { st: it.status, text: it.text.replace(/^The Claude CLI updated to 2\.1\.312; /, '').replace(/ cannot be placed.*$/, '') }; };
+    const a = leg(NOTICE, false), b = leg(NOTICE, true);
+    ok(a.st === 'open' && a.text === '1 account' && b.st === 'open' && b.text === '1 account', 'r3 (8) the owner REOPENS the dismissed item by hand / presses Mark-all-read\'s Undo, five members re-log ⇒ the open item reads «1 account» (the last transition is learned in both directions — b552c972: frozen at «6 accounts»)', { a, b });
+    const M = red('(8)', '      const by = lastWord(it);\n', '      const by = r && ownerWord(r.resolvedBy) ? r.resolvedBy : lastWord(it);\n');
+    if (M) { const rr = leg(M, false); ok(rr.text === '6 accounts', 'RED CONTROL (8): an owner\'s word learned ONE way (b552c972) freezes the reopened item at «6 accounts»', rr); }
   }
 }
 
@@ -909,7 +953,7 @@ console.log('§7 VERIFY R1 — each finding of pool-oat-verify (4c1be7e0e REFUTE
     const o = am10.createSubscription({ name: 'Oat only' }).id; put(am10, o, login(NOW, { dead: true })); await so(am10, o, OAT);
     const l = am10.createSubscription({ name: 'Login' }).id; const lv = login(NOW); put(am10, l, lv);
     ok(am10.readSubCreds(o).oatFile === true && am10.usageToken(o) === null && am10.usageToken(l) === lv.claudeAiOauth.accessToken, 'F10: usageToken never hands out a materialized oat (inference-only; the ⟳ / identity-group reads refuse an oat-only row as before — no token ⇒ no request) — a live login\'s access token still reads', { oat: am10.usageToken(o) === OAT ? 'OAT' : am10.usageToken(o) });
-    const mF10 = mutantStore({ acc: [['    return info.oatFile ? null : (info.accessToken || null);', '    return info.accessToken || null;']] });
+    const mF10 = mutantStore({ acc: [['    return info.oatFile || !usageBearerOk(info.accessToken) ? null : info.accessToken;', '    return info.accessToken || null;']] }); // (acceptance r3: the usage bearer law)
     if (mF10) { const amM = f10(mF10); await nv(amM, '2.1.296'); const x = amM.createSubscription({ name: 'X' }).id; put(amM, x, login(NOW, { dead: true })); await so(amM, x, OAT); ok(amM.usageToken(x) === OAT, 'RED control (F10): the r1 reader hands the oat to the usage call — the leg above catches it'); } else ok(false, 'F10 anchor present');
   }
 

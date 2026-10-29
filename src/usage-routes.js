@@ -40,6 +40,8 @@ const quotaModel = require('./quota-model.js');
 const { authoritativeScopesOf } = quotaModel;
 
 const probeLog = require('./server/usage-probe-log.js'); // the raw /usage probe ring (2.369.109)
+const { usageBearerOk } = require('./login-expiry.js'); // PURE: THE USAGE BEARER LAW — the CLI's own login token, never a long-lived one (acceptance r3)
+const { unplaceableText } = require('./account-pool-auto.js'); // PURE: the roster's words — ⟳ says the SAME sentence for the same fact (acceptance r3)
 const { probeFailWhy, probeWhyText, probeEligibility, isUnprobeable, notProbedWords, panelAnswerClass, OAT_FOLDER_NO_PANEL } = require('./auto-cli-model.js'); // PURE: may the probe PROVE this row, a failed probe's reason + THE ONE scrub (lane auto-cli-oat-unprobeable)
 // THE PANEL PROBE'S ARGV (B-9b40): `/usage` and no MCP server at all. Measured on
 // the claude 2.1.288 binary: print mode loads the account's claude.ai connectors
@@ -162,7 +164,7 @@ function getOAuthToken(callback) {
   // its own session activity — the next poll picks up the fresh token. (60s
   // skew so we don't use a token about to expire mid-request.)
   const creds = _readOAuthCreds();
-  const token = (creds?.accessToken && (!creds.expiresAt || Date.now() < creds.expiresAt - 60000))
+  const token = (usageBearerOk(creds?.accessToken) && (!creds.expiresAt || Date.now() < creds.expiresAt - 60000))
     ? creds.accessToken
     : null;
   if (callback) { callback(token); return; }
@@ -627,8 +629,11 @@ async function refreshViaCliPanel(key) {
     const el = probeEligibility(acctMeta);
     if (isUnprobeable(el)) {
       const oat = acctMeta.loginState && acctMeta.loginState.state === 'oat-only';
-      const folderToken = el === OAT_FOLDER_NO_PANEL; // a measured CLI with our token in the folder: no re-login is the fix
-      panelSays(key, { at: Date.now(), outcome: folderToken ? 'not-probed' : 'login-needed', code: 'unprobeable', el, identityVerified: false, why: folderToken ? `not probed (${el}: ${notProbedWords(el, acctMeta)})` : oat ? `the OAuth login ended and the long-lived token cannot be probed (${el}: ${notProbedWords(el, acctMeta)}); re-login to refresh usage` : `not probed (${el}: ${notProbedWords(el, acctMeta)}) — re-login to refresh usage`, rung: 'panel' });
+      // ONE FACT, ONE SENTENCE (acceptance r3, F2): a token the LOCKED vault keeps is told as the roster and the gather
+      // tell it — the vault is the wall, never the login (9d53db09 and b552c972 said «re-login» here)
+      const vaultLocked = !!(acctMeta.oatFile && acctMeta.oatFile.code === 'vault_locked');
+      const folderToken = el === OAT_FOLDER_NO_PANEL || vaultLocked; // a measured CLI with our token in the folder, or a locked vault: no re-login is the fix
+      panelSays(key, { at: Date.now(), outcome: folderToken ? 'not-probed' : 'login-needed', code: 'unprobeable', el, ...(vaultLocked ? { wall: 'vault-locked' } : {}), identityVerified: false, why: vaultLocked ? unplaceableText({ code: 'vault-locked' }) : folderToken ? `not probed (${el}: ${notProbedWords(el, acctMeta)})` : oat ? `the OAuth login ended and the long-lived token cannot be probed (${el}: ${notProbedWords(el, acctMeta)}); re-login to refresh usage` : `not probed (${el}: ${notProbedWords(el, acctMeta)}) — re-login to refresh usage`, rung: 'panel' });
       return false;
     }
   }
@@ -920,6 +925,11 @@ const wakePool = (key, why) => {
 };
 
 app.post('/api/usage/refresh', async (req, res) => {
+  // THE ⟳ DOOR IS HUMAN-GATED (lane pool-silent-members acceptance r3, F1 — §ban-safety, measured: on an instance nobody
+  // signs in to, an agent's bearer got HTTP 200 and the ladder's vendor requests): a vendor read made for a person's
+  // click, so an agent's session / job token is refused before anything is read — the refusal its two sibling doors
+  // (repair-identity, gather) give; the bearer itself is never echoed
+  if (/^Bearer\s+(vsst_|jbt_)/i.test(String((req.headers && req.headers.authorization) || ''))) return res.status(403).json({ error: 'human-triggered only — ⟳ reads an account\'s quota from the vendor for a person\'s click; an agent token is refused', code: 'human_only' });
   // User-facing kill switch (accounts.onDemandQuotaRefresh = 'off'): never
   // contact Anthropic, even if a stale client asks.
   let odMode = 'manual';
@@ -1118,10 +1128,18 @@ app.post('/api/usage/refresh', async (req, res) => {
   // NOTHING here (acceptance r2): the token ladder below — the same-account and identity-group fallbacks 90c995a3 reached
   // for both — is tried first, and the refusal is said by name only when it has no token either (below the ladder)
   const refusedByName = !cliOk && pv && pv.at >= t0 && (pv.code === 'login' || pv.code === 'unprobeable') ? pv : null;
+  // the refusal BY NAME: what was refused and its remedy — the row's own state (a folder token, a locked vault: no re-login)
+  const refusalAnswer = (r) => (r.el === OAT_FOLDER_NO_PANEL || r.wall === 'vault-locked'
+    ? { error: 'not refreshed — ' + r.why, rung: 'panel', identityVerified: false, why: r.why, skipped }
+    : { error: 'needs re-login to refresh usage — ' + r.why, loginNeeded: true, rung: 'panel', identityVerified: false, why: r.why, skipped });
   // A LAPSED SUBSCRIPTION (2026-10-08) is re-admitted only by the panel's own answer: when the panel did not answer,
   // the token ladder below is NOT tried for it — a reading that is not the CLI serving must never count as the renewal
   // …and the answer SAYS which (verify r1 ③): the CLI answered but its reading was refused as another account's window, or it did not answer
+  // …and only when a panel RAN (acceptance r3, reproduced: repro/accept-r2/skeptic-lapsed-refresh.mjs): a door that
+  // refused the spawn asked nothing — the refusal by name comes first, with its remedy (b552c972 said «the subscription
+  // still does not answer» with no loginNeeded, 0 panels and 0 fetches)
   if (!cliOk && !isGlobal && typeof app.locals.memberServeLapsed === 'function' && app.locals.memberServeLapsed(key)) {
+    if (refusedByName) return res.json(refusalAnswer(refusedByName));
     const refused = !!(pv && pv.outcome === 'write-refused' && pv.code === 'identity' && pv.at >= t0);
     return res.json({ error: refused ? `answered, but refused as another window — ${pv.why}` : 'not recorded — the subscription still does not answer (the pool keeps skipping it)', rung: 'panel', lapsed: true, refused, identityVerified: false, why: (pv && pv.why) || null, skipped });
   }
@@ -1144,6 +1162,8 @@ app.post('/api/usage/refresh', async (req, res) => {
   // real vendor request on a SIBLING's token and can re-create the phantom
   // cache entry the belt exists to prevent (member-wake r3 verifier, LOW).
   if (!isGlobal && !(accounts.list().accounts || []).some((x) => x.id === key)) return res.status(404).json({ error: 'that account was removed while its usage was being read' });
+  // THE USAGE BEARER LAW (acceptance r3, login-expiry usageBearerOk — kb-design-lessons §9): every rung of this ladder hands
+  // only the CLI's own login token, never a long-lived one (ours or planted without our mark) — a usage read is never made with one
   let token = isGlobal ? getOAuthToken() : accounts.usageToken(key);
   // Same-account fallback (2.181.0, real report): a named subscription's dir
   // token is only refreshed while a session RUNS on that dir — but when the
@@ -1178,9 +1198,9 @@ app.post('/api/usage/refresh', async (req, res) => {
     } catch { }
   }
   // the door refused the panel (acceptance r2) and no fallback serves this account either: refused BY NAME, the row's own remedy
-  if (!token && refusedByName) return res.json(refusedByName.el === OAT_FOLDER_NO_PANEL
-    ? { error: 'not refreshed — ' + refusedByName.why, rung: 'panel', identityVerified: false, why: refusedByName.why, skipped }
-    : { error: 'needs re-login to refresh usage — ' + refusedByName.why, loginNeeded: true, rung: 'panel', identityVerified: false, why: refusedByName.why, skipped });
+  if (!token && refusedByName) return res.json(refusalAnswer(refusedByName));
+  // the folder holds a long-lived token and nothing else serves: refused BY NAME (the usage bearer law, acceptance r3 F4)
+  if (!token && !isGlobal && typeof accounts.usageTokenRefusal === 'function' && accounts.usageTokenRefusal(key) === 'long-lived') return res.json({ error: 'not refreshed — the account\'s folder holds a long-lived token, and a long-lived token is never sent as a usage bearer (it is an inference credential; the CLI itself never reads usage with it) — its usage refreshes when a session uses it, or re-login', rung: 'token', identityVerified: false, skipped });
   if (!token) return res.json({ error: 'no currently-valid token for this account (nor its linked machine login) — run a session on it (the CLI refreshes its own login), then retry' });
   _onDemandUsageAt[key] = Date.now();
   _fetchOAuthUsage(token, (u) => {

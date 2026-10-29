@@ -667,7 +667,7 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
     ok('R14 the held process\'s wall on A arms for A\'s OWN reset — not a 45 s near-arm "switched to a usable account (Cx Beta)"', !!armInfo && armInfo.inSec > 3600 && !/switched to a usable account/.test(armInfo.reason), JSON.stringify(armInfo));
     ok('R14 the real auto-resume + the real pre-fire gate deliver NO continue into the process holding walled A', w.sent.length === 0, `sent=${JSON.stringify(w.sent.map((x) => x.text.slice(0, 40)))} | ${lt.filter((l) => /auto-resume/.test(l)).join(' | ').slice(0, 300)}`);
     ok('R14 …the gate probed A through cx1\'s own wrapper and re-armed on A\'s answer', sHeld.wrote.some((x) => /"codex-read-limits"/.test(x)) && !!w.ar._armed.get('cx1'), JSON.stringify(sHeld.wrote.map((x) => x.slice(0, 40))));
-    const pre = patchedEngine('noHeldVerdict', [['    const members = heldId ? (heldRec ? [{ id: heldId, name: heldRec.name || heldId }] : []) : (accounts.poolMembers(scope) || []);\n', '    const members = accounts.poolMembers(scope) || [];\n']]);
+    const pre = patchedEngine('noHeldVerdict', [['    const listed = heldId ? (heldRec ? [{ id: heldId, name: heldRec.name || heldId }] : []) : (accounts.poolMembers(scope) || []);\n', '    const listed = accounts.poolMembers(scope) || [];\n']]); // (pool-silent-members acceptance r3: `listed`, the verdict's `only` filters it)
     ok('R14 NEGATIVE CONTROL: the patch hit the product source', !!pre);
     if (pre) { const c = await run(pre); ok('R14 NEGATIVE CONTROL: with the pool verdict (B usable) a billed continue IS delivered into the process holding walled A — the leg sees the held verdict', c.w.sent.length >= 1 && /switched to a usable account/.test((c.armInfo && c.armInfo.reason) || ''), `sent=${c.w.sent.length} ${JSON.stringify(c.armInfo)}`); }
   }
@@ -725,7 +725,7 @@ ok('a signed-out target self-heals to a live member at spawn', r2 && am.poolCurr
       ok(`R14c [${how}] the real auto-resume + the real pre-fire gate deliver NO continue and charge nothing`, r.w.sent.length === 0 && JSON.stringify(r.w.charges()) === '{"A":0,"B":0}', `sent=${r.w.sent.length} ${JSON.stringify(r.w.charges())} | ${r.lt.filter((l) => /auto-resume/.test(l)).join(' | ').slice(0, 300)}`);
     }
     const pre = patchedEngine('r3HeldVerdict', [
-      ['    const members = heldId ? (heldRec ? [{ id: heldId, name: heldRec.name || heldId }] : []) : (accounts.poolMembers(scope) || []);\n', '    const members = (accounts.poolMembers(scope) || []).filter((m) => !heldId || m.id === heldId);\n'],
+      ['    const listed = heldId ? (heldRec ? [{ id: heldId, name: heldRec.name || heldId }] : []) : (accounts.poolMembers(scope) || []);\n', '    const listed = (accounts.poolMembers(scope) || []).filter((m) => !heldId || m.id === heldId);\n'],
       ['    if (!verdicts.length) return heldId\n', '    if (!verdicts.length) return false\n'],
       ['    if (v.usable === false || (v.held && v.usable !== true)) {\n', '    if (v.usable === false) {\n'],
       ['    const hs = validateHeldSlot(poolId, held);\n', '    const hs = validateBillingSlot(poolId, held);\n'],
