@@ -93,6 +93,7 @@ function askCredentials(m, types, auth, sign = null) {
   const was = asking.get(k);
   // r4: the ask's form is judged by its shell's live() — never its root's isConnected: a QUEUED sign-in (behind another form's
   // ask) has a detached root, and the second ask ended the first one with null («sign-in cancelled») while its form waited
+  // not the subject: sign — the hub's word on THIS machine's sign-in (refused / locked / can), read at the ask; a second ask while the form is open shares its answer
   if (was && was.live && was.live()) return createModalShell({ id: 'machine-desktop-signin', key: k, kind: 'form' }).ready.then(() => was.p);   // (the same id + key: the open — or queued — one raised; the one answer the person gives)
   if (was) { asking.delete(k); was.finish(null); }   // its form ended without an answer (a window torn down): that ask ends, a fresh one opens
   let finish = null, shellLive = null;
@@ -102,6 +103,7 @@ function askCredentials(m, types, auth, sign = null) {
     const machine = nameOf(m);
     const wantUser = Array.isArray(types) && types.includes('username');
     const s = sign || {};
+    // not the subject: sign — the hub's word on THIS machine's sign-in (refused / locked / can), read at the ask
     const { body, close, raised, live, ready } = createModalShell({ id: 'machine-desktop-signin', key: k, title: t('Sign in to {machine}', { machine }), dialogClass: 'machine-desktop-signin', escapeToClose: true, onClose: () => finish(null), kind: 'form' });   // a FORM (lane dialog-yield r3: the desktop that asked waits for it — the chat does not)
     if (raised) return;   // (never: `asking` answers a second ask first)
     shellLive = live;

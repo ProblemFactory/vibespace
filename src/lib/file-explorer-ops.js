@@ -599,6 +599,7 @@ export function installExplorerOps(FileExplorer) {
   // path-mount semantics (default private = login-only; public = anyone).
   async _publishPageDialog(fullPath, name) {
     const existing = (await fetch(`/api/pages/by-path?path=${encodeURIComponent(fullPath)}`).then((r) => r.json()).catch(() => null))?.page || null;
+    // not the subject: name — the file's own name (the last part of fullPath, the key)
     const { body, close, raised } = createModalShell({ id: 'publish-page-dialog', key: fullPath, beside: true, title: existing ? t('Published page') : t('Publish page'), escapeToClose: true, minWidth: '420px', kind: 'form' });
     if (raised) return null;   // raised: the same subject's form, as it was
     // (declared BEFORE the markup reads it — lane dialog-yield r3: below it, a published file's dialog threw «Cannot access

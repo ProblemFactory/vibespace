@@ -302,11 +302,49 @@ console.log('⑦ round 5 — a key names the subject a caller PREFILLS; every ro
   const CSS6 = read('public/style.css');
   ok(/\.dialog-overlay > \.dialog\.design-sheet, \.dialog-overlay > \.dialog\.design-composer-sheet \{ position: absolute; left: 0; right: 0; bottom: 0;/.test(CSS6) && /\.dialog-overlay \{\n\s*position: fixed; inset: 0;/.test(CSS6) && !/design-(composer-)?sheet[^{}]*\{[^}]*position: fixed/.test(CSS6), 'style.css: the design window\'s bottom sheets are ABSOLUTE in their FIXED overlay — the containing block declared, never the side effect of its backdrop-filter (Safari before 18 drops the unprefixed property)');
   const TD6 = read('src/lib/task-detail.js'), PF6 = read('src/lib/path-field.js');
-  ok(/const addWas = was\.get\('\+add'\);\n\s*const addKept = addWas && \(addWas\.input\.value\.trim\(\) \|\| addWas\.picking\(\)\) \? addWas : null;/.test(TD6) && /addPf\.set\('', \{ commit: true \}\);/.test(TD6) && /at: rows\.length, key: '\+add', was: addKept \? was : null,/.test(TD6) && !/addInput\.value = '';/.test(TD6) && /byRow\.set\(key, old\); old\.refresh\(\); return old; \}/.test(TD6), 'Task Detail: the «+ Add a path…» row is RESET after an add (its hint back) and carried over only while it holds typed words or its picker is open; a kept row is painted as the world is now');
-  ok(/const picking = \(\) => !!\(st\.picking \|\| \(st\.picker && st\.picker\.live\(\)\)\);/.test(PF6) && /ensure, destroy, picking \};/.test(PF6), 'path-field: `picking()` — its picker open or its listing on the way');
+  ok(/const addWas = was\.get\('\+add'\);\n\s*const addKept = addWas && addWas\.inUse\(_ae\) \? addWas : null;/.test(TD6) && /addPf\.set\('', \{ commit: true \}\);/.test(TD6) && /at: rows\.length, key: '\+add', was: addKept \? was : null,/.test(TD6) && !/addInput\.value = '';/.test(TD6) && /byRow\.set\(key, old\); old\.refresh\(\); return old; \}/.test(TD6), 'Task Detail: the «+ Add a path…» row is RESET after an add (its hint back) and carried over while the person is in it (r7: inUse() — the table below); a kept row is painted as the world is now');
+  ok(/const picking = \(\) => !!\(st\.picking \|\| \(st\.picker && st\.picker\.live\(\)\)\);/.test(PF6) && /ensure, destroy, picking, inUse \};/.test(PF6), 'path-field: `picking()` — its picker open or its listing on the way');
   const MDH = read('src/lib/machine-desktop-handover.js'), DRV = read('scripts/dbg-comm-surfaces.mjs');
   ok(/id: 'machine-desktop-handover', key: `\$\{hostId\}:\$\{s\.key\}`/.test(MDH), 'Hand over: its key names the machine its post goes to, then the stream');
   ok((DRV.match(/querySelectorAll\('\.dialog-overlay, \.dialog-form'\)\) o\.remove\(\);/g) || []).length === 3 && !/querySelectorAll\('\.dialog-overlay'\)\) o\.remove\(\)/.test(DRV), 'dbg-comm-surfaces (test-channels-i18n\'s driver): its «close the dialogs» closes the FORMS too, through their door (the rule\'s «Who may read» form left open had the conversation\'s Grant access wait behind its question: notify / reach / Integrations never drawn)');
+}
+
+// ── round 7 (acceptance r6 of f2c3b9c2): the add row is carried over while the person is IN it; an emptied box drops its stale words ──
+{
+  const TD7 = read('src/lib/task-detail.js'), PF7 = read('src/lib/path-field.js');
+  const mi = /const inUse = \(ae = document\.activeElement\) => (!st\.destroyed && !!\(inside\(ae\) \|\| st\.open \|\| input\.value\.trim\(\) \|\| picking\(\)\));/.exec(PF7);
+  ok(!!mi && /ensure, destroy, picking, inUse \};/.test(PF7) && /const addKept = addWas && addWas\.inUse\(_ae\) \? addWas : null;/.test(TD7) && TD7.indexOf("const _ae = document.activeElement;") < TD7.indexOf("body.innerHTML = '';\n    const host = document.createElement('div');\n    host.className = 'task-detail-settings';") && /at: rows\.length, key: '\+add', was: addKept \? was : null,/.test(TD7) && /addPf\.set\('', \{ commit: true \}\);/.test(TD7),
+    'path-field: `inUse(ae)` — ONE predicate, the person is IN the field (focused or a press in its list / picker, its list open, typed, picking); Task Detail carries the add row over by it — the active element read BEFORE the body is emptied (emptying it moves the focus out) — and resets it only after a successful add');
+  // the add field's state when a tasks-updated repaint lands → carried over (the same element, its list as it was)?
+  const INUSE = [
+    [{ focused: true, open: true, text: '', picking: false }, true, 'an EMPTY box the person is in, its suggestion list OPEN (f2c3b9c2 rebuilt it: the list closed under the person)'],
+    [{ focused: true, open: false, text: '', picking: false }, true, 'an empty box with the caret in it (its list closed by Escape)'],
+    [{ focused: false, open: true, text: '', picking: false }, true, 'its list open, the press on its way'],
+    [{ focused: false, open: false, text: '~/wo', picking: false }, true, 'typed words not yet added, the person elsewhere'],
+    [{ focused: false, open: false, text: '', picking: true }, true, 'its picker open (or its listing on the way)'],
+    [{ focused: false, open: false, text: '', picking: false }, false, 'an empty box the person LEFT — drawn fresh, its hint'],
+    [{ focused: false, open: false, text: '   ', picking: false }, false, 'blanks only, the person elsewhere — empty'],
+    [{ destroyed: true, focused: true, open: true, text: '', picking: false }, false, 'a destroyed field — never carried'],
+  ];
+  const mk7 = (expr) => new Function('st', 'input', 'inside', 'ae', 'picking', `return ${expr};`);
+  const run7 = (f) => INUSE.filter(([x, want]) => !!f({ destroyed: !!x.destroyed, open: x.open }, { value: x.text }, (n) => n === 'IN', x.focused ? 'IN' : 'OUT', () => x.picking) !== want).map(([, , w]) => w);
+  ok(!!mi && run7(mk7(mi[1])).length === 0, `the add field's carry-over table (${INUSE.length} rows)`, mi && run7(mk7(mi[1])));
+  const r6keep = mk7('!!(input.value.trim() || picking())');   // f2c3b9c2 task-detail.js:461 `addWas.input.value.trim() || addWas.picking()`, in the field's own terms
+  ok(J(run7(r6keep)) === J([INUSE[0][2], INUSE[1][2], INUSE[2][2]]), "MUTANT (f2c3b9c2's `input.value.trim() || picking()`): the empty box the person is in — its list open, its caret, its list — is rebuilt — RED", run7(r6keep));
+  // a row's «not applied» words over a sequence of the field's states → what a repaint refills from
+  const mo = /^\s*onState: (\(v\) => \{ const k = input\.dataset\.rowKey \|\| ''; .*\} \}),$/m.exec(TD7);
+  const SEQ = [
+    [['unresolved', 'empty'], null, 1, 'typed ~/nope (not applied), then the box EMPTIED — the words are dropped (f2c3b9c2 refilled them on the next repaint, «Not applied … was not found»)'],
+    [['unresolved', 'searching', 'empty'], null, 1, 'typed, edited, emptied — dropped'],
+    [['unresolved', 'ok'], null, 0, 'typed, then a path that resolves — dropped'],
+    [['unresolved'], '~/nope', 0, 'typed and not applied — kept (the box keeps saying 未生效)'],
+    [['unresolved', 'missing'], '~/nope', 0, 'typed, then edited to another missing path not yet committed — the words not applied stay'],
+  ];
+  const runS = (f) => SEQ.filter(([steps, want, empties]) => { const u = new Map(); let e = 0; const input = { dataset: { rowKey: '+add' }, value: '~/nope' }; const g = f(u, input, { onEmpty: () => { e++; } }); for (const st of steps) g({ status: st }); return (u.has('+add') ? u.get('+add') : null) !== want || e !== empties; }).map(([, , , w]) => w);
+  const mkS = (expr) => new Function('unresolved', 'input', 'bind', `return ${expr};`);
+  ok(!!mo && runS(mkS(mo[1])).length === 0 && /old\._bind\.onEmpty = onEmpty;/.test(TD7) && /onEmpty: \(\) => \{ if \(addWarn\) \{ addWarn\.remove\(\); addWarn = null; \} \},/.test(TD7), `Task Detail: a box the person EMPTIED drops its «not applied» words (the 'empty' status) and the add row's «Not applied … was not found» line with them (${SEQ.length} sequences)`, mo && runS(mkS(mo[1])));
+  const r6state = mkS("(v) => { if (v.status === 'unresolved') unresolved.set(input.dataset.rowKey || '', input.value); else if (v.status === 'ok') unresolved.delete(input.dataset.rowKey || ''); }");   // f2c3b9c2 task-detail.js:156, verbatim
+  ok(J(runS(r6state)) === J([SEQ[0][3], SEQ[1][3]]), "MUTANT (f2c3b9c2's onState — 'empty' drops nothing): an emptied box's words come back on the next repaint — RED", runS(r6state));
 }
 
 console.log(`\n${fail ? '✗' : '✓'} test-dialog-yield: ${pass} passed, ${fail} failed${fail ? '' : ' — ALL PASS'}`);

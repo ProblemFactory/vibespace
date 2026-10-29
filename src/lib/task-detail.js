@@ -145,15 +145,17 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
   const groupEntry = () => ({ id: task.id, name: task.title, color: sidebar.getTaskColor ? sidebar.getTaskColor(task) : null, folders: sidebar._folderPaths(task), context: task.contextDir || null, selected: false });
 
   /** a row's path field: the one its key held at the last paint (moved into the new row, its picker and its words kept), else a new one */
-  const makePathField = (input, { at, onCommit, key = null, was = null }) => {
+  const makePathField = (input, { at, onCommit, onEmpty = null, key = null, was = null }) => {
     const old = key && was ? was.get(key) : null;
     // r6: a kept field is PAINTED against the world as it is now (a rebuilt one was — 0ae9fbcb's kept row A still said «does not exist»)
-    if (old) { was.delete(key); old._bind.at = at; old._bind.onCommit = onCommit; fields.push(old); byRow.set(key, old); old.refresh(); return old; }
-    const bind = { at, onCommit };
+    if (old) { was.delete(key); old._bind.at = at; old._bind.onCommit = onCommit; old._bind.onEmpty = onEmpty; fields.push(old); byRow.set(key, old); old.refresh(); return old; }
+    const bind = { at, onCommit, onEmpty };
     const pf = pathField(input, {
       bases: () => basesFor(bind.at), groupsOf: () => [groupEntry()], host: () => null,
       kind: 'file', create: 'never', picker: true, id: 'task-context-row', onCommit: (info) => bind.onCommit(info),
-      onState: (v) => { if (v.status === 'unresolved') unresolved.set(input.dataset.rowKey || '', input.value); else if (v.status === 'ok') unresolved.delete(input.dataset.rowKey || ''); },
+      // r7: a box the person EMPTIED drops its «not applied» words — a repaint never brings back text they deleted (f2c3b9c2 refilled
+      // the add box from the stale entry, «Not applied … was not found» under it)
+      onState: (v) => { const k = input.dataset.rowKey || ''; if (v.status === 'unresolved') unresolved.set(k, input.value); else if (v.status === 'ok' || v.status === 'empty') { unresolved.delete(k); if (v.status === 'empty') bind.onEmpty?.(); } },
     });
     pf._bind = bind;
     fields.push(pf);
@@ -455,10 +457,11 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
       table.appendChild(empty);
     }
     ctxSec.appendChild(table);
-    // ＋ 添加路径… — r6: carried over only while it holds typed words not yet added (or its picker is open); an empty one is drawn
-    // fresh, its hint back (0ae9fbcb kept it after an add: the ADDED path's «= ~/x ✓» under an empty box)
+    // ＋ 添加路径… — r7: carried over while the person is IN it (path-field's `inUse()`: focused, its list open, typed, or picking —
+    // f2c3b9c2 rebuilt an EMPTY box with its list open, the list closing under the person); one they left empty is drawn fresh.
+    // It is RESET only after a successful add (onCommit below: 0ae9fbcb kept the ADDED path's «= ~/x ✓» under an empty box)
     const addWas = was.get('+add');
-    const addKept = addWas && (addWas.input.value.trim() || addWas.picking()) ? addWas : null;
+    const addKept = addWas && addWas.inUse(_ae) ? addWas : null;   // (_ae: read before the body was emptied)
     const addInput = addKept ? addKept.input : document.createElement('input');
     addInput.className = 'task-detail-input ctx-add-input';
     addInput.placeholder = t('+ Add a path… (a folder or a file; relative = against the row above; takes effect when you leave the box or press Enter)');
@@ -467,8 +470,10 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
     const addWrap = document.createElement('div'); addWrap.className = 'ctx-add';
     if (!addKept) addWrap.appendChild(addInput);
     ctxSec.appendChild(addWrap);
+    let addWarn = null;   // «Not applied: … was not found» — gone with the words it names (r7)
     const addPf = makePathField(addInput, {
       at: rows.length, key: '+add', was: addKept ? was : null,   // (an add row not kept is a NEW field; the old one is destroyed with the rest below)
+      onEmpty: () => { if (addWarn) { addWarn.remove(); addWarn = null; } },
       onCommit: (info) => {
         const text = String(info.text || '').trim() || info.path;
         unresolved.delete('+add');
@@ -479,7 +484,7 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
         showToast(t('Added row {n}: {path} · told 「{level}」{tags} (change it on the row)', { n: next.length, path: text, level: TELL_LABEL[info.isFile ? 'contents' : 'index'](), tags: info.isFile ? '' : ' · ' + t('Discover sessions') }));
       },
     });
-    if (unresolved.has('+add')) { const w = document.createElement('div'); w.className = 'ctx-res ctx-warn'; w.textContent = t('Not applied: {path} was not found', { path: unresolved.get('+add') }); addWrap.appendChild(w); }
+    if (unresolved.has('+add')) { addWarn = document.createElement('div'); addWarn.className = 'ctx-res ctx-warn'; addWarn.textContent = t('Not applied: {path} was not found', { path: unresolved.get('+add') }); addWrap.appendChild(addWarn); }
     if (addKept) addWrap.insertBefore(addPf.el, addWrap.firstChild);
     // ＋ 引用另一个任务组…
     const refBtn = document.createElement('button');

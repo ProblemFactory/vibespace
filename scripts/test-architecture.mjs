@@ -5688,6 +5688,13 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
 // straight, an alias and an indirection (`const o = opts; const k = o.path; key: k` ⇒ the key names `opts.path` only), a
 // for-of variable. A RECORD named by one of its members carries its own facts (`m.id` names `m.name`); an options BAG
 // (opts / options / o …) is many inputs. Five planted shapes, each GREEN on 0ae9fbcb, are RED by name.
+// Round 7 (acceptance r6 — the reviewer planted eleven shapes and nine stayed green; the real tree had two rows no road reached:
+// Change build…'s `pick` through a radio's `.checked`, Publish page's `name` through `value="${…}"` markup): MORE ROADS — a tick
+// or a choice (`.checked` / `.selected` = p), `setAttribute('value', p)`, `Object.assign(el, { value: p })`, a textarea's text,
+// markup (`value="${p}"`, `<textarea>${p}`, `'<input value="' + p`, `${on ? 'checked' : ''}`), a member helper (`ui.field(p)`,
+// `this.m(p)`), an iteration callback's own parameter (`ps.forEach((v) => { i.value = v; })` ⇒ `ps`), a helper ANY depth
+// (memoized, a cycle read once), a bag by its `= {}` default or its name (spec). WHAT IT STILL CANNOT FOLLOW IS SAID BY NAME —
+// BLIND_SPOTS, printed with the census, each shape planted and proven unfollowed (a road that becomes followed leaves the list).
 {
   const lit = (x) => x && x.type === 'Literal' && (x.value === 'form' || x.value === 'decision');
   const DYN = (n) => n && n.type === 'ConditionalExpression' && [n.consequent, n.alternate].every(lit);
@@ -5705,24 +5712,32 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
    *  (`const o = opts; o.label` ⇒ `opts.label`); a for-of variable its list. A guard (`p && p.id`, `p ? … : …`, `!p`) is no
    *  read of `p`; a name a nested function binds is that function's own. `chain` = the call's enclosing functions (outermost
    *  first); `tops` = the module's own top-level functions (a helper may live there). */
+  const ITER_RE = /^(forEach|map|flatMap|filter|some|every|find|findIndex)$/;   // r7: a callback's own first parameter carries the list it walks
+  const iterCb = (n, parent) => !!parent && /Function/.test(n.type) && parent.type === 'CallExpression' && parent.arguments[0] === n && parent.callee.type === 'MemberExpression' && !parent.callee.computed && ITER_RE.test(parent.callee.property.name);
   const namesOf = (q, out = []) => { if (!q) return out; if (q.type === 'Identifier') out.push(q.name); else if (q.type === 'ObjectPattern') q.properties.forEach((r) => namesOf(r.type === 'RestElement' ? r.argument : r.value, out)); else if (q.type === 'ArrayPattern') q.elements.forEach((e) => namesOf(e, out)); else if (q.type === 'AssignmentPattern') namesOf(q.left, out); else if (q.type === 'RestElement') namesOf(q.argument, out); return out; };
   /** walkAll, carrying the names the functions on the way bind (a nested function's parameter is its own, not the form's) */
   const walkScoped = (n, visit, shadow = new Set(), parent = null) => {
     if (!n || typeof n.type !== 'string') return;
-    if (/Function/.test(n.type)) { const own = n.params.flatMap((q) => namesOf(q)); if (own.length) shadow = new Set([...shadow, ...own]); }
+    if (/Function/.test(n.type)) { const own = n.params.slice(iterCb(n, parent) ? 1 : 0).flatMap((q) => namesOf(q)); if (own.length) shadow = new Set([...shadow, ...own]); }   // (r7: an iteration callback's item is a road, not its own)
     visit(n, parent, shadow);
     for (const k of Object.keys(n)) { if (k === 'loc') continue; const c = n[k]; if (Array.isArray(c)) c.forEach((x) => walkScoped(x, visit, shadow, n)); else if (c && typeof c.type === 'string') walkScoped(c, visit, shadow, n); }
   };
-  const roads = (chain, params, tops = new Map()) => {
-    const taint = new Map(), alias = new Map(), decl = [], helpers = new Map();
+  const isTextarea = (x) => !!x && x.type === 'CallExpression' && !!x.arguments[0] && x.arguments[0].type === 'Literal' && x.arguments[0].value === 'textarea';   // createElement('textarea') / el('textarea', …)
+  const roads = (chain, params, tops = new Map(), outer = null) => {
+    const taint = new Map(), alias = new Map(), decl = [], helpers = new Map(), textareas = new Set();
     // what is visible at the call: each enclosing function's OWN body (the nearest first), all of the innermost (its handlers)
     const collect = (n, all, parent) => {
       if (!n || typeof n.type !== 'string') return;
       if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && n.init && /Function/.test(n.init.type)) { if (!helpers.has(n.id.name)) helpers.set(n.id.name, n.init); if (!all) return; }
       else if (n.type === 'FunctionDeclaration' && n.id) { if (!helpers.has(n.id.name)) helpers.set(n.id.name, n); if (!all) return; }
       else if (/Function/.test(n.type) && !all) return;
-      else if (n.type === 'VariableDeclarator' && n.init) decl.push([n.id, n.init, false]);
+      else if (n.type === 'VariableDeclarator' && n.init) {
+        decl.push([n.id, n.init, false]);
+        if (n.id.type === 'Identifier' && isTextarea(n.init)) textareas.add(n.id.name);   // r7
+        if (n.id.type === 'Identifier' && n.init.type === 'ObjectExpression') for (const q of n.init.properties) if (q.type === 'Property' && !q.computed && q.value && /Function/.test(q.value.type)) helpers.set(`${n.id.name}.${q.key.name || q.key.value}`, q.value);   // r7: `const ui = { field: (v) => … }` ⇒ ui.field
+      }
       else if ((n.type === 'ForOfStatement' || n.type === 'ForInStatement') && n.left.type === 'VariableDeclaration') for (const d of n.left.declarations) decl.push([d.id, n.right, true]);
+      else if (n.type === 'CallExpression' && n.arguments[0] && iterCb(n.arguments[0], n) && n.arguments[0].params[0]) decl.push([n.arguments[0].params[0], n.callee.object, true]);   // r7: `ps.forEach((v) => …)` ⇒ v carries ps
       for (const k of Object.keys(n)) { if (k === 'loc') continue; const c = n[k]; if (Array.isArray(c)) c.forEach((x) => collect(x, all, n)); else if (c && typeof c.type === 'string') collect(c, all, n); }
     };
     for (let i = chain.length - 1; i >= 0; i--) collect(chain[i].body, i === chain.length - 1, chain[i]);
@@ -5744,37 +5759,75 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
       else if (id.type === 'ObjectPattern' && p) for (const r of id.properties) { const k = r.type === 'Property' && !r.computed ? (r.key.name || r.key.value) : null; for (const nm of namesOf(r.type === 'RestElement' ? r.argument : r.value)) carry(nm, new Set([k ? `${p}.${k}` : p])); }
       else { const s = srcOf(init); for (const nm of namesOf(id)) carry(nm, s); }
     }
-    return { srcOf, helper: (nm) => helpers.get(nm) || tops.get(nm) || null };
+    return { srcOf, helper: (nm) => helpers.get(nm) || (outer && outer(nm)) || tops.get(nm) || null, textarea: (nm) => textareas.has(nm) };
   };
-  const BAG_RE = /^(o|opt|opts|options|params|args|init|prefill|cfg|config|settings)$/;   // r6: a parameter that is a bag of inputs, not a record
+  const BAG_RE = /^(o|opt|opts|options|params|args|init|prefill|cfg|config|settings|spec)$/;   // r6: a parameter that is a bag of inputs, not a record (r7: + spec; one with a `= {}` default is one whatever its name)
+  /** r7: THE BLIND SPOTS — the roads this census does NOT follow, said by name with their shape (printed with the census; each
+   *  planted in the r7 controls and proven unfollowed — a road that becomes followed fails its control and leaves this list) */
+  const BLIND_SPOTS = [
+    ['a computed member', '`el[k] = p`, `el[\'value\'] = p` — the property is not a name the census reads'],
+    ["another module's helper", "`import { field } from './x.js'; field(body, p)` — a body in another file is not read (a local or this module's helper is)"],
+    ['a function value', '`const f = on ? a : b; f(p)`; a callback handed to a function that feeds it (`run(p, (v) => { i.value = v; })`) — the callee is no name bound to one function'],
+    ['a value parked elsewhere', '`this._label = label` (a module variable, a Map) written in one place and read into a field in another'],
+    ['a bag under another name', '`function f(app, bag) { … key: bag.path … i.value = bag.label }` — no `= {}` default and a name outside BAG_RE: read as a RECORD (its path names its label)'],
+    ["a spread into a wrapper's field", "`mountsDialog(t, [{ key: 'x', ...p }], …)` — a spread's members are not read"],
+    ['another iteration', '`ps.reduce((a, v) => …)`, `Array.from(ps, (v) => …)` — only the first argument of forEach / map / flatMap / filter / some / every / find / findIndex is followed'],
+    ['markup in pieces', '`[\'<input value="\', p, \'">\'].join(\'\')` — a value attribute assembled from an array or by a helper returning only its slot'],
+    ['a field by another property', 'a contenteditable\'s `textContent`, `selectedIndex`, `valueAsNumber`, a custom element\'s own property — only value / checked / selected / defaultValue / defaultChecked (and a textarea\'s text) are a field'],
+    ['a name a nested block declares', '`const k = (() => { const words = \'w\'; return `${host}:${words}`; })()` — a `const` that shadows a parameter reads as the parameter (names are tracked by function, not by block): the key seems to name `words`'],
+  ];
   const opensForm = (h) => { let o = false; walkAll(h.body, (z) => { if (!o && z.type === 'CallExpression' && z.callee.type === 'Identifier' && /^(createModalShell|mountsDialog|_mountsDialog|showInputDialog)$/.test(z.callee.name)) o = true; }); return o; };
   /** r5 + r6: THE FORM'S INPUTS — source → how it reaches the form: a field's value (`x.value = …`; a wrapper's field `value: …`),
    *  a load (fetchJson / fetch / api — its own body and the handlers it builds), or a LOCAL HELPER's parameter that does (r6:
    *  `field(label, href)` where `field` sets `i.value = value` — two helpers deep; one that opens a form of its own is another
    *  form, the call's own function a re-open). Each through the roads above. */
+  const FIELD_SET_RE = /^(value|checked|selected|defaultValue|defaultChecked)$/;   // r7: what a field shows — its words, a tick, a choice
+  const FIELD_MARKUP_RE = /\bvalue=["']$|<textarea\b[^>]*>$/i;   // r7: markup — a value attribute's slot, a textarea's text
+  const tailText = (x) => (!x ? '' : x.type === 'Literal' ? String(x.value) : x.type === 'TemplateLiteral' ? x.quasis[x.quasis.length - 1].value.raw : x.type === 'BinaryExpression' && x.operator === '+' ? tailText(x.right) : '');
   const inputsWith = (R, roots, fieldProps, depth = 0, tops = new Map(), skip = new Set()) => {
     const out = new Map();
     const add = (x, why, sh) => { for (const s of R.srcOf(x, sh)) if (!out.has(s)) out.set(s, why); };
+    const SHOWS = 'its field shows it';
     for (const root of roots) walkScoped(root, (y, par, sh) => {
-      if (y.type === 'AssignmentExpression' && y.left.type === 'MemberExpression' && !y.left.computed && y.left.property.name === 'value') add(y.right, 'its field shows it', sh);
-      if (fieldProps && y.type === 'Property' && !y.computed && (y.key.name || y.key.value) === 'value') add(y.value, 'its field shows it', sh);
-      if (y.type !== 'CallExpression' || y.callee.type !== 'Identifier') return;
-      if (LOAD_RE.test(y.callee.name)) { for (const a of y.arguments) add(a, 'its load sends it', sh); return; }
-      const h = depth < 2 && !sh.has(y.callee.name) ? R.helper(y.callee.name) : null;
+      if (y.type === 'AssignmentExpression' && y.left.type === 'MemberExpression' && !y.left.computed) {
+        const p = y.left.property.name;
+        if (FIELD_SET_RE.test(p)) add(y.right, SHOWS, sh);   // (r7: + .checked / .selected — Change build…'s `pick`)
+        else if (/^(textContent|innerText)$/.test(p) && y.left.object.type === 'Identifier' && R.textarea(y.left.object.name)) add(y.right, SHOWS, sh);   // r7: a textarea's text IS its value
+      }
+      if (fieldProps && y.type === 'Property' && !y.computed && (y.key.name || y.key.value) === 'value') add(y.value, SHOWS, sh);
+      if (y.type === 'TemplateLiteral') y.expressions.forEach((e, i) => { if (FIELD_MARKUP_RE.test(y.quasis[i].value.raw)) add(e, SHOWS, sh); });   // r7: `<input value="${p}">` (Publish page's `name`)
+      if (y.type === 'BinaryExpression' && y.operator === '+' && FIELD_MARKUP_RE.test(tailText(y.left))) add(y.right, SHOWS, sh);   // r7: '<input value="' + p
+      if (y.type === 'ConditionalExpression' && [y.consequent, y.alternate].some((b) => b.type === 'Literal' && /^\s*(checked|selected)\s*$/.test(String(b.value)))) add(y.test, SHOWS, sh);   // r7: `${on ? 'checked' : ''}`
+      if (y.type !== 'CallExpression') return;
+      const c = y.callee;
+      if (c.type === 'MemberExpression' && !c.computed && c.property.name === 'setAttribute' && y.arguments[0] && y.arguments[0].type === 'Literal' && /^(value|checked|selected)$/.test(y.arguments[0].value)) { add(y.arguments[1], SHOWS, sh); return; }   // r7
+      if (c.type === 'MemberExpression' && !c.computed && c.object.type === 'Identifier' && c.object.name === 'Object' && c.property.name === 'assign') {   // r7: Object.assign(el, { value: p })
+        const t0 = y.arguments[0], ta = isTextarea(t0) || (!!t0 && t0.type === 'Identifier' && R.textarea(t0.name));
+        for (const a of y.arguments.slice(1)) if (a.type === 'ObjectExpression') for (const q of a.properties) if (q.type === 'Property' && !q.computed && (FIELD_SET_RE.test(q.key.name || q.key.value) || (ta && /^(textContent|innerText)$/.test(q.key.name || q.key.value)))) add(q.value, SHOWS, sh);
+        return;
+      }
+      // the callee — a name, or (r7) a member of a local object of functions / a method of this one (`ui.field(p)`, `this.m(p)`)
+      const nm = c.type === 'Identifier' ? c.name : c.type === 'MemberExpression' && !c.computed && (c.object.type === 'Identifier' || c.object.type === 'ThisExpression') ? `${c.object.type === 'ThisExpression' ? 'this' : c.object.name}.${c.property.name}` : null;
+      if (!nm) return;
+      if (c.type === 'Identifier' && LOAD_RE.test(nm)) { for (const a of y.arguments) add(a, 'its load sends it', sh); return; }
+      const h = !sh.has(nm.split('.')[0]) ? R.helper(nm) : null;
       if (!h || skip.has(h) || opensForm(h)) return;
-      for (const [i, { keys, why }] of helperReach(h, tops, depth, new Set([...skip, h]))) {
+      for (const [i, { keys, why }] of helperReach(h, tops, depth, skip, R.helper)) {
         const a = y.arguments[i]; if (!a) continue;
         const parts = keys && a.type === 'ObjectExpression' ? a.properties.filter((q) => q.type === 'Property' && !q.computed && keys.has(q.key.name || q.key.value)).map((q) => q.value) : [a];
-        for (const x of parts) add(x, `${why.replace(/, through .*$/, '')}, through \`${y.callee.name}()\``, sh);
+        for (const x of parts) add(x, `${why.replace(/, through .*$/, '')}, through \`${nm}()\``, sh);
       }
     });
     return out;
   };
   /** a helper's parameter positions that reach a field's value / a load: index → { keys (the members of an object argument it
    *  reads — `field(body, { label, value })` ⇒ value; null = the whole argument), why } */
-  const helperReach = (h, tops, depth, skip) => {
+  const reachMemo = new WeakMap();   // r7: helper → its reach (ANY depth — r6 stopped two deep; a helper in progress reads as none: a cycle once)
+  const helperReach = (h, tops, depth, skip, outer = null) => {
+    if (reachMemo.has(h)) return reachMemo.get(h);
+    reachMemo.set(h, new Map());
     const hp = new Set(h.params.flatMap((q) => namesOf(q)));
-    const got = [...inputsWith(roads([h], hp, tops), [h.body], false, depth + 1, tops, skip)];
+    const got = [...inputsWith(roads([h], hp, tops, outer), [h.body], false, depth + 1, tops, skip)];
     const out = new Map();
     h.params.forEach((q0, i) => {
       const q = q0.type === 'AssignmentPattern' ? q0.left : q0;
@@ -5785,6 +5838,7 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
       else keys = null;
       out.set(i, { keys, why: hit[0][1] });
     });
+    reachMemo.set(h, out);
     return out;
   };
   /** r5 + r6: the subject rules of one keyed call → its RED lines (the inputs named — through the same roads on both sides; no
@@ -5797,7 +5851,8 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
     // a RECORD named by one of its members carries its own facts (`m.id` names `m.name`, `row.id` its `row.exec`); an options BAG
     // (opts / options / o …) is many inputs — each member its own (`opts.path` names no `opts.label`)
     const member = (root) => [...named].some((k) => k.startsWith(root + '.'));
-    const covered = (x) => { const root = x.split('.')[0]; return named.has(x) || named.has(root) || ((x === root || !BAG_RE.test(root)) && member(root)); };
+    const bags = new Set(chain.flatMap((g) => g.params.filter((q) => q.type === 'AssignmentPattern' && q.left.type === 'Identifier' && q.right.type === 'ObjectExpression').map((q) => q.left.name)));   // r7: `opts = {}` is a bag whatever its name
+    const covered = (x) => { const root = x.split('.')[0]; return named.has(x) || named.has(root) || ((x === root || !(BAG_RE.test(root) || bags.has(root))) && member(root)); };
     const inputs = inputsWith(R, roots, fieldProps, 0, tops, new Set(chain));
     const dropped = [...inputs].filter(([x]) => !covered(x) && !notSubj.has(x) && !notSubj.has(x.split('.')[0]));
     if (dropped.length) red.push(`${at} — the key «${keyText}» drops ${dropped.map(([x, why]) => `\`${x}\` (${why})`).join(', ')} — two such opens would share one form — name it, or say \`// not the subject: <name> — <why>\``);
@@ -5813,6 +5868,7 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
       let ast;
       try { ast = acorn.parse(src, { ecmaVersion: 'latest', sourceType: 'module', locations: true, allowHashBang: true }); } catch (e) { bad.push(`${f}: unparsable (${e.message})`); continue; }
       const lines = src.split('\n');
+      const saidAbove = (line) => { let i = line - 2; while (i >= 0 && /^\s*\/\//.test(lines[i])) i--; return lines.slice(i + 1, line - 1).join('\n'); };   // r7: the comment block right above a call (each «not the subject» its own line)
       const consts = new Map();   // module / function `const NAME = '<literal>'` — a fixed id by name (DIALOG_ID)
       walkAll(ast, (n) => { if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && n.init && n.init.type === 'Literal' && typeof n.init.value === 'string') consts.set(n.id.name, n.init.value); });
       const decls = new Map();   // r4: name → every init declared under it in the file (a key resolved through the ones in its scope)
@@ -5820,6 +5876,10 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
       const topLevel = new Set(); for (const st of ast.body) { const d = st.type === 'ExportNamedDeclaration' ? st.declaration : st; if (d && d.type === 'VariableDeclaration') d.declarations.forEach((x) => topLevel.add(x)); }
       const topFns = new Map();   // r6: the module's own top-level functions (a helper a form's body calls may live there)
       for (const st of ast.body) { const d = st.type === 'ExportNamedDeclaration' || st.type === 'ExportDefaultDeclaration' ? st.declaration : st; if (!d) continue; if (d.type === 'FunctionDeclaration' && d.id) topFns.set(d.id.name, d); if (d.type === 'VariableDeclaration') for (const x of d.declarations) if (x.id.type === 'Identifier' && x.init && /Function/.test(x.init.type)) topFns.set(x.id.name, x.init); }
+      walkAll(ast, (y) => {   // r7: a method a body calls as `this.m(…)` — a class's own, or an object of methods mixed into one
+        const k = (y.type === 'MethodDefinition' || y.type === 'Property') && !y.computed && y.value && /Function/.test(y.value.type) ? (y.key.name || y.key.value) : null;
+        if (k && !topFns.has('this.' + k)) topFns.set('this.' + k, y.value);
+      });
       const localFns = new Map();   // r5: name → its function (a key helper, a loader the body calls)
       walkAll(ast, (y) => { if (y.type === 'FunctionDeclaration' && y.id) localFns.set(y.id.name, y); if (y.type === 'VariableDeclarator' && y.id.type === 'Identifier' && y.init && /Function/.test(y.init.type)) localFns.set(y.id.name, y.init); });
       const fns = [];
@@ -5894,7 +5954,7 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
             const scanned = [kv, ...scannedInits];
             if (allLit(kv)) subjRed.push(`${at} — a literal key names no subject («${keyText}»)`);
             else if (idOption && !minted) subjRed.push(`${at} — the key «${keyText}» is a caller's id option: it names the field's KIND, not its instance (mint the instance's own)`);
-            if (fn && !minted) subjRed.push(...subjectRules({ at, keyText, kv, chain: [...fns], fn, params, scanned, span, roots: [fn.body], fieldProps: false, tops: topFns }));
+            if (fn && !minted) subjRed.push(...subjectRules({ at, keyText, kv, chain: [...fns], fn, params, scanned, span: saidAbove(n.loc.start.line) + '\n' + span, roots: [fn.body], fieldProps: false, tops: topFns }));
             const helperAt = kv.type === 'Identifier' ? scannedInits.slice(0, 1) : [kv];   // the key itself (or the one local it names)
             if (!minted) for (const x of helperAt) walkAll(x, (y) => {   // a key HELPER that returns the same key whatever it is given (key: keyOf(m))
               if (y.type !== 'CallExpression' || y.callee.type !== 'Identifier' || !localFns.has(y.callee.name)) return;
@@ -5975,7 +6035,7 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
             const look = (x, depth) => walkAll(x, (y, par) => { if (y.type === 'Identifier' && !(par && par.type === 'MemberExpression' && par.property === y && !par.computed) && !(par && par.type === 'Property' && par.key === y && !par.computed)) { reach.add(y.name); if (depth < 3 && !params.has(y.name) && decls.has(y.name) && !seen.has(y.name)) { seen.add(y.name); for (const d of decls.get(y.name)) if (d.start >= fns[0].start && d.end <= fns[0].end) { scanned.push(d.init); look(d.init, depth + 1); } } } });
             look(kp.value, 0);
             const keyText = src.slice(kp.value.start, kp.value.end).replace(/\s+/g, ' ').slice(0, 70);
-            const red = subjectRules({ at, keyText, kv: kp.value, chain: [...fns], fn, params, scanned, span, roots: [n.arguments[1], n.arguments[3]].filter(Boolean), fieldProps: true, tops: topFns });
+            const red = subjectRules({ at, keyText, kv: kp.value, chain: [...fns], fn, params, scanned, span: saidAbove(n.loc.start.line) + '\n' + span, roots: [n.arguments[1], n.arguments[3]].filter(Boolean), fieldProps: true, tops: topFns });
             subjRed.push(...red);
             wrapRows.push({ at, id: ip ? src.slice(ip.value.start, ip.value.end).replace(/\s+/g, ' ').slice(0, 40) : '—', key: keyText, subject: [...reach].filter((x) => params.has(x)).join(', ') || keyText, red: red.length });
           }
@@ -6112,7 +6172,8 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
   const keyed = real.rows.filter((r) => (r.kind === 'form' || r.kind === 'dynamic') && r.key && r.key !== 'null');
   console.log(`  THE KEY IS THE SUBJECT (r4) — file:line · id · key · what it names · beside (two subjects, two forms):\n${keyed.map((r) => `    ${short(r)} · ${r.id} · ${r.key} · ${r.subject}${r.beside ? ' · beside' : ''}`).join('\n')}`);
   console.log(`  THE KEY IS THE SUBJECT — the WRAPPER calls (r5: a mountsDialog / _mountsDialog call against its opts.key — its fields' values and its submit's loads) — file:line · id · key · what it names:\n${real.wrapRows.map((r) => `    ${r.at.replace(/^src\/lib\//, '')} · ${r.id} · ${r.key} · ${r.subject}${r.red ? ' · RED' : ''}`).join('\n')}`);
-  ok(real.subjRed.length === 0 && real.wrapRows.length >= 8, `§103 r4 + r5 + r6 every key names ONE subject — its INPUTS, through every road a value takes (${keyed.length} keyed forms + ${real.wrapRows.length} wrapper calls): no literal key, no caller's id option standing for an instance, no member of a LIST, no constant helper; every parameter that reaches a field's value, a load or a wrapper's key named by the key (or said «not the subject»)${real.subjRed.length ? ' — RED: ' + real.subjRed.join(' | ') : ''}`);
+  console.log(`  §103 r7 THE BLIND SPOTS — roads this census does NOT follow (a form whose input takes one stays green; each shape planted below and proven unfollowed):\n${BLIND_SPOTS.map(([k, w]) => `    ${k} — ${w}`).join('\n')}`);
+  ok(real.subjRed.length === 0 && real.wrapRows.length >= 8, `§103 r4 + r5 + r6 + r7 every key names ONE subject — its INPUTS, through every road the census follows (${keyed.length} keyed forms + ${real.wrapRows.length} wrapper calls; ${BLIND_SPOTS.length} blind spots said above): no literal key, no caller's id option standing for an instance, no member of a LIST, no constant helper; every parameter that reaches a field's value, a load or a wrapper's key named by the key (or said «not the subject»)${real.subjRed.length ? ' — RED: ' + real.subjRed.join(' | ') : ''}`);
   const fixedForms = real.rows.filter((r) => r.kind === 'form' && (r.idKind === 'fixed' || r.idKind === 'the caller\'s'));
   const queueable = fixedForms.filter((r) => r.queueable);
   console.log(`  THE CALLER IS TOLD (r4) — ${fixedForms.length} fixed-id forms read \`raised\`; ${queueable.length} QUEUEABLE (keyed, not beside — another subject under the id waits behind the open one's ask) read \`ready\` and judge liveness by live():\n${queueable.map((r) => `    ${short(r)} · ${r.id} · ${r.readsReady ? 'reads ready ✓' : r.after ? `works after the open (${r.after}) — ready ✗` : 'a pure synchronous draw (its content lands in the body that opens)'} · own isConnected ${r.liveReads.length}`).join('\n')}\n  never queued: ${fixedForms.filter((r) => !r.queueable).length} (one subject ${fixedForms.filter((r) => !r.queueable && !r.key).length} · beside ${fixedForms.filter((r) => !r.queueable && r.beside).length} · undismissable ${fixedForms.filter((r) => !r.queueable && r.key && !r.beside && r.never).length} · read-only under their own id ${fixedForms.filter((r) => !r.queueable && r.key && !r.beside && !r.never).length})`);
@@ -6191,6 +6252,27 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
     && r6('zz-r6e.js:2').length === 1 && /drops `words` \(its field shows it, through `field\(\)`\)/.test(r6('zz-r6e.js:2')[0])
     && !['zz-r6a.js:2', 'zz-r6b.js:2', 'zz-r6c.js:2', 'zz-r6d.js:2', 'zz-r6e.js:3', 'zz-r6f.js:1'].some((k) => r6(k).length),
     `§103 r6 NEGATIVE CONTROLS (the roads — each GREEN on 0ae9fbcb): a field filled through a local helper's OWN parameter (the doc Link form: field(label, href)), a destructured opts (const { path, label } = opts), an opts member read straight (opts.label), an alias + an indirection (const o = opts; const k = o.path; key: k) and a module helper taking an object (field(body, { value: words })) are RED by name — each twin that names the input, and a RECORD named by its id showing its own name (m.hostId · m.name), are not (${JSON.stringify(ctl6.subjRed)})`);
+  // r7: THE ACCEPTANCE'S ELEVEN SHAPES (repro/accept-r6/zz-acc-roads.js, verbatim — nine GREEN on f2c3b9c2) are RED by name, and
+  // four more roads (a tick in markup, markup by +, a method helper, a bag by its default); each twin naming the input is not.
+  // THE BLIND SPOTS: each shape BLIND_SPOTS says is planted and stays green — the list is what the census truly cannot see.
+  const ctl7 = census103([
+    ['src/lib/zz-r7a.js', "import { createModalShell } from './utils.js';\nexport function acc1(app, host, label) { const { body, raised } = createModalShell({ id: 'acc1', key: host, title: 'A', kind: 'form' }); if (raised) return; body.innerHTML = `<input class=\"x\" value=\"${label}\">`; }\nexport function acc2(app, host, words) { const { body, raised } = createModalShell({ id: 'acc2', key: host, title: 'B', kind: 'form' }); if (raised) return; const ta = document.createElement('textarea'); ta.textContent = words; body.append(ta); }\nexport function acc3(app, host, label) { const { body, raised } = createModalShell({ id: 'acc3', key: host, title: 'C', kind: 'form' }); if (raised) return; body.append(Object.assign(document.createElement('input'), { value: label })); }\nexport function acc4(app, host, label) { const { body, raised } = createModalShell({ id: 'acc4', key: host, title: 'D', kind: 'form' }); if (raised) return; const f3 = (v) => { const i = document.createElement('input'); i.value = v; body.append(i); }; const f2 = (v) => f3(v); const f1 = (v) => f2(v); f1(label); }\nexport function acc5(app, spec) { const { body, raised } = createModalShell({ id: 'acc5', key: spec.path, title: 'E', kind: 'form' }); if (raised) return; const i = document.createElement('input'); i.value = spec.label; body.append(i); }\nexport function acc6(app, host, label) { const ui = { field: (v) => { const i = document.createElement('input'); i.value = v; return i; } }; const { body, raised } = createModalShell({ id: 'acc6', key: host, title: 'F', kind: 'form' }); if (raised) return; body.append(ui.field(label)); }\nexport function acc7(app, host, labels) { const { body, raised } = createModalShell({ id: 'acc7', key: host, title: 'G', kind: 'form' }); if (raised) return; labels.forEach((v) => { const i = document.createElement('input'); i.value = v; body.append(i); }); }\nexport function acc8(app, host, on) { const { body, raised } = createModalShell({ id: 'acc8', key: host, title: 'H', kind: 'form' }); if (raised) return; const c = document.createElement('input'); c.type = 'checkbox'; c.checked = on; body.append(c); }\nexport function acc9(app, host, label) { const { body, raised } = createModalShell({ id: 'acc9', key: host, title: 'I', kind: 'form' }); if (raised) return; const i = document.createElement('input'); i.setAttribute('value', label); body.append(i); }\nexport function acc10(app, host, { label } = {}) { const { body, raised } = createModalShell({ id: 'acc10', key: host, title: 'J', kind: 'form' }); if (raised) return; const i = document.createElement('input'); i.value = label; body.append(i); }\nexport function acc11(app, host, label) { const { body, raised } = createModalShell({ id: 'acc11', key: host, title: 'K', kind: 'form' }); if (raised) return; const i = document.createElement('input'); body.append(i); i.value = `${label}`.trim(); }"],
+    ['src/lib/zz-r7t.js', "export function t1(app, host, label) { const { body, raised } = createModalShell({ id: 't1', key: JSON.stringify([host, label]), title: 'A', kind: 'form' }); if (raised) return; body.innerHTML = `<input class=\"x\" value=\"${label}\">`; }\nexport function t2(app, host, words) { const { body, raised } = createModalShell({ id: 't2', key: JSON.stringify([host, words]), title: 'B', kind: 'form' }); if (raised) return; const ta = document.createElement('textarea'); ta.textContent = words; body.append(ta); }\nexport function t5(app, spec) { const { body, raised } = createModalShell({ id: 't5', key: `${spec.path}:${spec.label}`, title: 'E', kind: 'form' }); if (raised) return; const i = document.createElement('input'); i.value = spec.label; body.append(i); }\nexport function t7(app, host, labels) { const { body, raised } = createModalShell({ id: 't7', key: `${host}:${labels.join()}`, title: 'G', kind: 'form' }); if (raised) return; labels.forEach((v) => { const i = document.createElement('input'); i.value = v; body.append(i); }); }\nexport function t8(app, host, on) { const { body, raised } = createModalShell({ id: 't8', key: `${host}:${on}`, title: 'H', kind: 'form' }); if (raised) return; const c = document.createElement('input'); c.type = 'checkbox'; c.checked = on; body.append(c); }\nexport function t12(app, host, on) { const { body, raised } = createModalShell({ id: 't12', key: host, title: 'L', kind: 'form' }); if (raised) return; body.innerHTML = `<input type=\"checkbox\" ${on ? 'checked' : ''}>`; }\nexport function t13(app, host, label) { const { body, raised } = createModalShell({ id: 't13', key: host, title: 'M', kind: 'form' }); if (raised) return; body.innerHTML = '<input value=\"' + label + '\">'; }\nexport function t14(app, host, label) { const { body, raised } = createModalShell({ id: 't14', key: host, title: 'N', kind: 'form' }); if (raised) return; const i = document.createElement('input'); this.fill(body, label); }\nexport function t15(app, host, bag = {}) { const { body, raised } = createModalShell({ id: 't15', key: bag.path, title: 'O', kind: 'form' }); if (raised) return; const i = document.createElement('input'); i.value = bag.label; body.append(i); }\nexport const methods = { fill(body, v) { const i = document.createElement('input'); i.value = v; body.append(i); } };"],
+  ]);
+  const ctl7b = census103([
+    ['src/lib/zz-r7b.js', "export function b1(app, host, label) { const { body, raised } = createModalShell({ id: 'b1', key: host, title: 'A', kind: 'form' }); if (raised) return; const i = document.createElement('input'); const k = 'value'; i[k] = label; body.append(i); }\nimport { field } from './zz-r7-other.js';\nexport function b2(app, host, label) { const { body, raised } = createModalShell({ id: 'b2', key: host, title: 'B', kind: 'form' }); if (raised) return; field(body, label); }\nexport function b3(app, host, label, on) { const a = (v) => { const i = document.createElement('input'); i.value = v; return i; }; const b = a; const f = on ? a : b; const { body, raised } = createModalShell({ id: 'b3', key: host, title: 'C', kind: 'form' }); if (raised) return; body.append(f(label)); }\nexport const store = {}; export function b4(app, host, label) { store.label = label; const { body, raised } = createModalShell({ id: 'b4', key: host, title: 'D', kind: 'form' }); if (raised) return; const i = document.createElement('input'); i.value = store.label; body.append(i); }\nexport function b5(app, bag) { const { body, raised } = createModalShell({ id: 'b5', key: bag.path, title: 'E', kind: 'form' }); if (raised) return; const i = document.createElement('input'); i.value = bag.label; body.append(i); }\nexport function b6(h, p) { mountsDialog('T', [{ key: 'x', ...p }], 'Go', async (v, { close }) => { close(); }, { id: 'b6', key: h.id }); }\nexport function b7(app, host, labels) { const { body, raised } = createModalShell({ id: 'b7', key: host, title: 'G', kind: 'form' }); if (raised) return; labels.reduce((a, v) => { const i = document.createElement('input'); i.value = v; body.append(i); return a; }, 0); }\nexport function b8(app, host, label) { const { body, raised } = createModalShell({ id: 'b8', key: host, title: 'H', kind: 'form' }); if (raised) return; body.innerHTML = ['<input value=\"', label, '\">'].join(''); }\nexport function b9(app, host, n) { const { body, raised } = createModalShell({ id: 'b9', key: host, title: 'I', kind: 'form' }); if (raised) return; const s = document.createElement('select'); s.selectedIndex = n; body.append(s); }\nexport function b10(app, host, words) { const k = (() => { const words = 'w'; return `${host}:${words}`; })(); const { body, raised } = createModalShell({ id: 'b10', key: k, title: 'J', kind: 'form' }); if (raised) return; const i = document.createElement('input'); i.value = words; body.append(i); }"],
+    ['src/lib/zz-r7-other.js', "export const field = (body, v) => { const i = document.createElement('input'); i.value = v; body.append(i); };"],
+  ]);
+  const r7 = (k) => ctl7.subjRed.filter((b) => b.startsWith('src/lib/' + k + ' '));
+  const want7 = [[2, 'label'], [3, 'words'], [4, 'label'], [5, 'label'], [6, 'spec.label'], [7, 'label'], [8, 'labels'], [9, 'on'], [10, 'label'], [11, 'label'], [12, 'label']];
+  const miss7 = want7.filter(([l, x]) => !(r7('zz-r7a.js:' + l).length === 1 && r7('zz-r7a.js:' + l)[0].includes('drops `' + x + '`')));
+  const more7 = [[6, 'on'], [7, 'label'], [8, 'label'], [9, 'bag.label']].filter(([l, x]) => !(r7('zz-r7t.js:' + l).length === 1 && r7('zz-r7t.js:' + l)[0].includes('drops `' + x + '`')));
+  const twin7 = ['zz-r7t.js:1', 'zz-r7t.js:2', 'zz-r7t.js:3', 'zz-r7t.js:4', 'zz-r7t.js:5'].filter((k) => r7(k).length);
+  ok(!miss7.length && !more7.length && !twin7.length && ctl7.subjRed.length === 15,
+    `§103 r7 NEGATIVE CONTROLS (the acceptance's eleven shapes — nine GREEN on f2c3b9c2): markup value="${'$'}{p}", a textarea's text, Object.assign(el, { value }), a helper three deep, a bag named spec, ui.field(p), ps.forEach((v) => …), .checked = on, setAttribute('value', p), a destructured opts and a later set are RED by name; so are a tick in markup, '<input value="' + p, this.fill(p) and a bag by its = {} default — each twin naming the input is not (missed: ${JSON.stringify({ miss7, more7, twin7 })}; ${JSON.stringify(ctl7.subjRed.map((b) => b.split(' — ')[0]))})`);
+  const seen7 = ctl7b.subjRed.map((b) => b.split(' — ')[0]);
+  ok(ctl7b.subjRed.length === 0 && BLIND_SPOTS.length === 10,
+    `§103 r7 THE BLIND SPOTS ARE TRUE — each of the ${BLIND_SPOTS.length} shapes the census says it cannot follow, planted with its key dropping the input, stays green (one that turns RED is followed now: take it off BLIND_SPOTS)${seen7.length ? ' — followed now: ' + seen7.join(', ') : ''}`);
   const rctl = readers103([
     ['src/lib/zz-r1.js', "const open = document.querySelectorAll('.dialog-overlay');"],
     ['src/lib/zz-r2.js', "if (el.classList.contains('dialog-form')) x();"],

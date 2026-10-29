@@ -34,6 +34,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - In a document, Link on a second link while the first one's form is open opens that link's own form, and Apply changes the link you asked about.
 - On iPhones with iOS 17 or earlier, the Design window's Comment sheet stays above the keyboard.
 - In a Task Group's Context table, «+ Add a path…» is empty with its hint again after an add, and the rows show their folders as they are now.
+- In a Task Group's Context table, «+ Add a path…» keeps its suggestion list open while you use it, and a path you deleted from it no longer comes back.
 
 ## 2.369.360 — 2026-10-27
 

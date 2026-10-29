@@ -543,6 +543,7 @@ export function wireStepPaste(ctx, { tokenKey, configPage, start, callback, whyT
 // the channel accounts' OAuth-client select.
 export function reauthDialog({ id = 'mount-reauth-dialog', key = null, title, hint: hintText, signinLabel, provider, fields = null, start, status: statusOf, callback, finish: apply, savingText = null, pasteHint = null, pasteSecret = false, pastePlaceholder = 'http://127.0.0.1:53682/?state=…&code=…' }) {
   // not the subject: fields — the caller's key names them (the mount / the account its OAuth-client select belongs to)
+  // not the subject: start — the caller's sign-in call; the consent link it answers is this form's work after a press (the caller's key names whom it signs in)
   const { body, close, raised, overlay } = createModalShell({ id, key, title, bodyClass: 'mounts-dialog-body', escapeToClose: true, kind: 'form' });   // key = the mount / the account re-authorized (lane dialog-yield r3)
   if (raised) return overlay._reauth || null;   // raised: this sign-in, as it was
   const hint = document.createElement('div');
