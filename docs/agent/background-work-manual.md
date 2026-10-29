@@ -79,8 +79,11 @@ separate setting — not audience 1's auto-notify:
   conversation's `list` / `show` and its update lines, and the «Background
   jobs visible to this session» list every conversation that can see the
   job — yours too — gets when it starts or resumes. A `notify-cron` made without `--text`
-  sends that same belted name as its message. Your own `list` / `show` /
-  `poll` and the create output print the name as you typed it.
+  sends that same belted name as its message. A secret-shaped part of
+  the name is hidden when the job is CREATED — the whole name is checked
+  before it is cut to 64 characters — so the job is stored with
+  `«redacted»` in its place, and your own `list` / `show` / `poll` and the
+  create output print that stored name (the rest as you typed it).
 - `--urgency` takes the For you tray's own set, `low|normal|high|urgent`.
   With `--notify-user`, anything else is refused when you create the job;
   without it the urgency is never read.

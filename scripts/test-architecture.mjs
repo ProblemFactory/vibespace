@@ -5040,7 +5040,9 @@ function makeFlow93(acorn) {
   // archive list, a holder's own list accessor, a record found in a list)
   const SOURCE_CALLS = new Set(['jobByToken', 'visibleJobs', 'archivedList', '_loadArchive', 'jobsList', 'findVisibleIn']);
   const COLL = new Set(['filter', 'find', 'findLast', 'slice', 'sort', 'toSorted', 'toReversed', 'concat', 'at', 'reverse', 'map', 'flatMap', 'values', 'get', 'entries']);
-  const CB = new Set(['map', 'filter', 'some', 'find', 'findLast', 'every', 'flatMap', 'forEach', 'sort', 'toSorted', 'reduce', 'findIndex']);
+  const CB = new Set(['map', 'filter', 'some', 'find', 'findLast', 'every', 'flatMap', 'forEach', 'sort', 'toSorted', 'reduce', 'findIndex', 'then']);   // r7: a promise's `.then((r) => …)`
+  // r7 (accept-r6 unverified 3): a WHOLE-record serialization carries its name with it — a read of the name, like `.name`
+  const SERIAL = new Set(['JSON.stringify', 'Object.values', 'Object.entries', 'Object.getOwnPropertyDescriptors', 'util.inspect', 'inspect']);
   const ADD = new Set(['set', 'push', 'unshift', 'add']);
   // calls whose RESULT is never a record though they take one (the accessor, a snapshot, a scalar, a predicate, a name)
   const NON_CARRY0 = ['labelOf', 'labelVia', 'nameOf', 'snapshot', 'snapshotArchived', 'agentJobView', 'resolveName', 'String', 'Number', 'Boolean', 'stringify', '_ageHint', '_hum', 'canView', 'canControl', 'canEdit', 'isOwner', 'isTerminal', 'isOneShot', 'isTerminalOneShot', 'has', 'includes', 'log', 'warn', 'error', 'test', 'startsWith', 'endsWith', 'indexOf', 'some', 'every', 'findIndex', 'heldKind', 'attentionOf', 'ackState', 'terminalAt', 'archiveVerdict', 'notifyEffective', 'notifyUserOf', 'storedAction', 'spawnTaskOf', 'keys', 'join'];
@@ -5050,7 +5052,10 @@ function makeFlow93(acorn) {
   const unwrap = (n) => { while (n && (n.type === 'ChainExpression' || n.type === 'ParenthesizedExpression' || n.type === 'AwaitExpression')) n = n.expression || n.argument; return n; };
   const pathOf = (n) => { n = unwrap(n); if (!n) return null; if (n.type === 'ThisExpression') return 'this'; if (n.type === 'Identifier') return n.name; if (n.type === 'MemberExpression' && !n.computed) { const o = pathOf(n.object); return o ? o + '.' + n.property.name : null; } return null; };
 
-  return function flow93({ files, read, seeds = ['job', 'jb'], nonCarry = [], from = null, changed = null, initial = /\.jobs\b|jobByToken|archivedList|jobsList|liveHits|archHits|visibleJobs|\b(?:job|jb)\s*(?:\?\.|\.)\s*name\b/ }) {
+  // the files a full run STARTS from — every spelling of an origin (r7: an engine handle, `{ jobs } =`, `['jobs']`, every source
+  // call — r6's list missed a destructured Map and a holder that calls the engine by another name) and a seed's name read
+  const INITIAL = new RegExp(String.raw`\bjm\b|\bjobManager\b|\bgetJobs\b|\.jm\b|\bjobs\s*\(|\.jobs\b|\[\s*['"\x60]jobs['"\x60]\s*\]|\{[^}]*\bjobs\b[^}]*\}\s*=|liveHits|archHits|` + [...SOURCE_CALLS].join('|') + String.raw`|\b(?:job|jb)\s*(?:\?\.|\.)\s*name\b`);
+  return function flow93({ files, read, seeds = ['job', 'jb'], nonCarry = [], from = null, changed = null, initial = INITIAL }) {
     const NON_CARRY = new Set([...NON_CARRY0, ...nonCarry]), SEEDS = new Set(seeds);
     const known = new Set(files);
     const parsed = from ? new Map([...from.parsed].filter(([f]) => !(changed || []).includes(f))) : new Map();
@@ -5140,10 +5145,12 @@ function makeFlow93(acorn) {
       const home = (name, scope) => { let s = scope; while (s && !s.declared.has(name)) s = s.parent; return s ? s.node : P.ast; };
       const setOf = (m, node) => { let s = m.get(node); if (!s) m.set(node, (s = new Set())); return s; };
       let grew = false, found = new Map();
-      const tainted = (name, scope) => SEEDS.has(name) || setOf(local, home(name, scope)).has(name);
+      const tainted = (name, scope) => (!summary && SEEDS.has(name)) || setOf(local, home(name, scope)).has(name);   // r7: a return summary follows data, never a name (a string param `job` is no record)
       const taint = (name, scope) => { const s = setOf(local, home(name, scope)); if (!s.has(name)) { s.add(name); grew = true; } };
       const taintPath = (p) => { const s = setOf(local, P.ast); if (!s.has('@' + p)) { s.add('@' + p); grew = true; } };
-      const hit = (node, how, fnName) => { if (summary) return; const line = node.loc.start.line; const k = `${file}:${line}`; if (!found.has(k)) found.set(k, { file, line, text: P.lines[line - 1] || '', fn: fnName, how }); };
+      // r7 (accept-r6 unverified 1): EVERY read on a line is its own hit (its columns) — r6 kept the first per line, so a second raw
+      // read on an allowed line was never judged
+      const hit = (node, how, fnName) => { if (summary) return; const line = node.loc.start.line, col = node.loc.start.column, text = P.lines[line - 1] || ''; const end = node.loc.end.line === line ? node.loc.end.column : text.length; const k = `${file}:${line}:${col}`; if (!found.has(k)) found.set(k, { file, line, col, end, text, fn: fnName, how }); };
       const isEngine = (n, scope) => {
         n = unwrap(n); if (!n) return false;
         if (n.type === 'ThisExpression') return file === ENGINE;
@@ -5167,13 +5174,14 @@ function makeFlow93(acorn) {
           }
           case 'CallExpression': {
             let c = unwrap(n.callee), inner = c; while (inner && inner.type === 'CallExpression') inner = unwrap(inner.callee);   // a curried call — labelVia(jm)(job) — is named by its maker
+            if (pathOf(c) === 'JSON.parse' && n.arguments[0]) { const a = unwrap(n.arguments[0]); if (a && a.type === 'CallExpression' && pathOf(a.callee) === 'JSON.stringify') return carries(a.arguments[0], scope); }   // r7: a deep COPY of a record
             const nm = inner && (inner.type === 'Identifier' ? inner.name : inner.type === 'MemberExpression' ? propName(inner) : null);
             if (inner !== c && nm && NON_CARRY.has(nm)) return false;
             if (nm && SOURCE_CALLS.has(nm)) return true;
             if (nm && NON_CARRY.has(nm)) return false;
             if (c && c.type === 'MemberExpression' && nm && COLL.has(nm)) return carries(c.object, scope) || (nm === 'concat' && n.arguments.some((a) => carries(a.type === 'SpreadElement' ? a.argument : a, scope)));
             const took = n.arguments.some((a) => carries(a.type === 'SpreadElement' ? a.argument : a, scope)), t = callee(n, scope, !took);
-            if (t) return (t.$file === file || t.$file === ENGINE ? returnsOf(t, false) : false) || (took && returnsOf(t, true));   // a known callee: what ITS return hands back (a record of its own: the engine's or this file's)
+            if (t) return returnsOf(t, false) || (took && returnsOf(t, true));   // a known callee: what ITS return hands back (r7: a record of its own in ANY module — a sibling's lookup helper)
             return took;                                                          // an unknown one hands back what it took
           }
           case 'NewExpression': return n.arguments.some((a) => carries(a.type === 'SpreadElement' ? a.argument : a, scope));
@@ -5198,7 +5206,12 @@ function makeFlow93(acorn) {
       const callee = (n, scope, cheap = false) => {
         const c = unwrap(n.callee);
         if (c && c.type === 'MemberExpression' && propName(c) && isEngine(c.object, scope) && known.has(ENGINE)) return fnIn(ENGINE, propName(c));
-        if (cheap) return c && c.type === 'Identifier' ? P.fns.get(c.name) || null : c && c.type === 'MemberExpression' && pathOf(c.object) === 'this' ? P.fns.get(propName(c)) || null : null;
+        if (cheap) {   // r7 (accept-r6 unverified 0): a required module's function too — `H.jobOf(jm, t)` answers a record no caller handed in
+          if (c && c.type === 'Identifier') return P.fns.get(c.name) || (P.imported.has(c.name) ? resolve(file, P, c) : null);
+          const o = c && c.type === 'MemberExpression' ? unwrap(c.object) : null;
+          if (o && pathOf(o) === 'this') return P.fns.get(propName(c)) || null;
+          return o && o.type === 'Identifier' && P.alias.has(o.name) ? resolve(file, P, c) : null;
+        }
         return resolve(file, P, n.callee);
       };
       const bindParams = (fn, ks) => { const s = P.scopes.get(fn); for (const k of ks) { const rest = fn.params.findIndex((p) => p.type === 'RestElement'); const p = rest >= 0 && k >= rest ? fn.params[rest] : fn.params[k]; if (p) bind(p, s, fn.$name || null); } };
@@ -5224,10 +5237,12 @@ function makeFlow93(acorn) {
             walk(n.init, scope, fnName);
             if (n.init && isEngine(n.init, scope) && n.id.type === 'Identifier') setOf(engines, home(n.id.name, scope)).add(n.id.name);
             if (n.init && carries(n.init, scope)) bind(n.id, scope, fnName);
+            if (n.init && n.id.type === 'ObjectPattern' && isEngine(n.init, scope)) for (const p of n.id.properties) if (p.type === 'Property' && !p.computed && ((p.key.name || p.key.value) === 'jobs' || ((p.key.name || p.key.value) === 'archive' && file === ENGINE))) bind(p.value, scope, fnName);   // r7: `const { jobs } = jm`
+            if (n.init && n.id.type === 'Identifier' && unwrap(n.init).type === 'ObjectExpression') for (const p of unwrap(n.init).properties) if (p.type === 'Property' && !p.computed && p.value && carries(p.value, scope)) taintPath(n.id.name + '.' + (p.key.name || p.key.value));   // r7: a record held in an object's FIELD (`hit.rec`)
             return;
           case 'AssignmentExpression':
             walk(n.left, scope, fnName); walk(n.right, scope, fnName);
-            if (carries(n.right, scope)) { if (n.left.type === 'Identifier') taint(n.left.name, scope); else if (n.left.type === 'ArrayPattern' || n.left.type === 'ObjectPattern') bind(n.left, scope, fnName); else { const pp = pathOf(n.left); if (pp && pp.startsWith('this.')) taintPath(pp); } }
+            if (carries(n.right, scope)) { if (n.left.type === 'Identifier') taint(n.left.name, scope); else if (n.left.type === 'ArrayPattern' || n.left.type === 'ObjectPattern') bind(n.left, scope, fnName); else { const pp = pathOf(n.left); if (pp && pp.includes('.')) taintPath(pp); } }   // r7: any object's field, not only this.'s
             return;
           case 'ForOfStatement':
             walk(n.right, scope, fnName);
@@ -5242,12 +5257,17 @@ function makeFlow93(acorn) {
               else link(resolve(file, P, a), 0);
             }
             for (const a of n.arguments) walk(a, scope, fnName);
-            if (c && c.type === 'MemberExpression' && nm && ADD.has(nm) && n.arguments.some((a) => carries(a.type === 'SpreadElement' ? a.argument : a, scope))) { const o = unwrap(c.object); if (o.type === 'Identifier') taint(o.name, scope); else { const pp = pathOf(o); if (pp && pp.startsWith('this.')) taintPath(pp); } }
+            if (c && c.type === 'MemberExpression' && nm && ADD.has(nm) && n.arguments.some((a) => carries(a.type === 'SpreadElement' ? a.argument : a, scope))) { const o = unwrap(c.object); if (o.type === 'Identifier') taint(o.name, scope); else { const pp = pathOf(o); if (pp && pp.includes('.')) taintPath(pp); } }
             const ks = n.arguments.map((a, k) => (carries(a.type === 'SpreadElement' ? a.argument : a, scope) ? k : -1)).filter((k) => k >= 0);
             if (ks.length) { const t = callee(n, scope); if (t) for (const k of ks) link(t, k); }   // a callee is read only when a record reaches it
-            if (c && c.type === 'MemberExpression' && pathOf(c) === 'Reflect.get' && n.arguments[1] && n.arguments[1].type === 'Literal' && n.arguments[1].value === 'name' && carries(n.arguments[0], scope)) hit(n, 'a Reflect.get read', fnName);
+            if (c && c.type === 'MemberExpression' && (pathOf(c) === 'Reflect.get' || pathOf(c) === 'Object.getOwnPropertyDescriptor') && n.arguments[1] && n.arguments[1].type === 'Literal' && n.arguments[1].value === 'name' && carries(n.arguments[0], scope)) hit(n, 'a reflective read', fnName);
+            if (c && SERIAL.has(pathOf(c)) && n.arguments[0] && carries(n.arguments[0], scope) && !(pathOf(c) === 'JSON.stringify' && n.$p && n.$p.type === 'CallExpression' && pathOf(n.$p.callee) === 'JSON.parse')) hit(n, 'a whole-record serialization', fnName);
             return;
           }
+          case 'ForInStatement':   // r7: a key walk over a record reads its name among the rest
+            walk(n.right, scope, fnName);
+            if (carries(n.right, scope)) hit(n.right, 'a key walk over a record', fnName);
+            walk(n.left, scope, fnName); walk(n.body, scope, fnName); return;
           case 'MemberExpression':
             walk(n.object, scope, fnName); if (n.computed) walk(n.property, scope, fnName);
             if (propName(n) === 'name' && carries(n.object, scope) && !(n.$p && n.$p.type === 'AssignmentExpression' && n.$p.left === n)) hit(n, 'a read', fnName);
@@ -5262,10 +5282,24 @@ function makeFlow93(acorn) {
       for (const [k, v] of found) hits.set(k, v);
       return returns;
     };
-    const scan = (file) => { const P = parse(file); if (P.ast) analyze(file, P.ast); };
+    const scanned = new Set();
+    const scan = (file) => { scanned.add(file); const P = parse(file); if (P.ast) analyze(file, P.ast); };
+    const settle = () => { for (let n = 0; n < 30 && dirty.size; n++) { const todo = [...dirty]; dirty.clear(); for (const f of todo) scan(f); } };
     const start = changed ? changed.filter((f) => known.has(f)) : files.filter((f) => initial.test(read(f) || ''));
     for (const f of start) scan(f);
-    for (let n = 0; n < 30 && dirty.size; n++) { const todo = [...dirty]; dirty.clear(); for (const f of todo) scan(f); }
+    settle();
+    // r7 (the real gate's plant C1 — a caller of a sibling module's lookup helper matched no origin and was never read; the
+    // incremental controls scan a planted file directly, so they stayed red): A RECORD REACHES A FILE BY A RETURN too — a file
+    // that requires a module one of whose functions hands back a record (its own return summary) and calls it by name is read
+    if (!changed) for (let round = 0; round < 8; round++) {
+      const giving = new Map();
+      for (const [f, P] of parsed) if (P.ast) for (const [nm, fn] of [...P.fns, ...P.props]) if (returnsOf(fn, false)) { if (!giving.has(f)) giving.set(f, new Set()); giving.get(f).add(nm); }
+      const reaches = (f) => { const t = read(f) || ''; for (const m of t.matchAll(/require\(\s*['"](\.{1,2}\/[^'"]+)['"]\s*\)/g)) { const g = giving.get(reqFile(f, m[1])); if (g && [...g].some((nm) => new RegExp(`\\b${nm.replace(/\$/g, '\\$')}\\s*\\(`).test(t))) return true; } return false; };
+      const more = files.filter((f) => !scanned.has(f) && reaches(f));
+      if (!more.length) break;
+      for (const f of more) scan(f);
+      settle();
+    }
     return { hits: [...hits.values()], paramTaint, parsed, unparsed: [...unparsed], hitsMap: hits, summaries };
   };
 }
@@ -5311,8 +5345,9 @@ function makeFlow93(acorn) {
   // …and EVERY PERSON-FACING NAME (r4, claim r3-1 FINDING 3): the snapshot a non-author reads (the Jobs panel's card title, the
   // ask window's title, another lineage), the events ring (the injected digest), the Ports label — the record keeps it raw
   const nameRoad93 = (jb) => /name: author \|\| !job\.name \? job\.name : this\.labelOf\(job\),/.test(jb) && /this\.events\.push\(\{ ts: now\(\), jobId: job\.id, name: this\.labelOf\(job\),/.test(jb)
-    && /label: 'service: ' \+ this\.labelOf\(job\) \}/.test(jb) && /return \{ job: this\.snapshot\(job, \{ author: true \}\), renamed \};/.test(jb);
-  ok(nameRoad93(jb93), '§93 the name road: a token-shaped job NAME is belted wherever a person or another conversation reads it (snapshot, events ring, Ports label) — whole for its author (the create echo, its own views)');
+    && /label: 'service: ' \+ this\.labelOf\(job\) \}/.test(jb) && /return \{ job: this\.snapshot\(job, \{ author: true \}\), renamed \};/.test(jb)
+    && jb.includes('M.resolveName(spec.name, visNames, { mask: (t) => this._agentWords(t) })');   // r7: the record's name belted WHOLE (the engine's belt, the vault's values too), then cut
+  ok(nameRoad93(jb93), '§93 the name road: a token-shaped job NAME is belted wherever a person or another conversation reads it (snapshot, events ring, Ports label) — its author reads the record (the create echo, its own views; r7: the record keeps the name belted at create)');
   // THE ONE FOR-YOU DOOR, CENSUSED BY ITS CALLERS (lane job-notify-user r4, accept-r3 unverified 0 + claim r3-1 FINDING 2): the
   // engine reaches the For-you store's dep in ONE method — _forYou (the constructor holds it; the stray door journals a call
   // that skipped _forYou) — and every _forYou call hands it the copy M.forYouCopy built. The census walks the METHODS that
@@ -5351,7 +5386,16 @@ function makeFlow93(acorn) {
         if (/^[^,]*,\s*['"`]stray['"`]/.test(args)) { strays++; if (method !== '_forYouStray') bad.push(`${file}:${i + 1} ${method} files the stray copy outside the stray door (_forYouStray)`); }
       }
       if (file !== 'src/jobs.js' && /\._forYou(?:Stray|Verdict)?\s*\(/.test(l)) bad.push(`${file}:${i + 1} ${method} calls the engine's For-you door from outside the engine — the engine files its own copies`);
+      else if (file !== 'src/jobs.js' && /\b_forYou(?:Stray|Verdict)?\b/.test(l)) bad.push(`${file}:${i + 1} ${method} holds the engine's For-you door from outside the engine (an alias, a .call) — the engine files its own copies`);
       for (const m of l.matchAll(/this\._forYou\([^,()]*,\s*/g)) if (!l.slice(m.index + m[0].length).startsWith('M.forYouCopy(')) bad.push(`${file}:${i + 1} ${method} hands _forYou a copy it built itself (a copy is M.forYouCopy's)`);
+      // r7 (accept-r6 unverified 2 — hyg-plants.patch): the door is CALLED by name — held as a value (an alias, `.call`, a bound
+      // copy) it was handed any {words, fact} under no spelling r6 read; the run-time mint (M.mintedFor) refuses such a copy too
+      if (file === 'src/jobs.js') for (const m of l.matchAll(/\b_forYou\b/g)) {
+        const before = l.slice(0, m.index), after = l.slice(m.index + m[0].length);
+        if ((/\bthis\.$/.test(before) && /^\(/.test(after)) || l.trim() === '_forYou(job, c) {') continue;                                  // a call by name, its head
+        if ((/callerOf\(JobManager\.prototype\.$/.test(before) && /^\)/.test(after)) || /\(src\/jobs\.js $/.test(before)) continue;     // its own caller frame, the log's words
+        bad.push(`${file}:${i + 1} ${method} holds the For-you door as a value (an alias, a .call) — the door is called by name, this._forYou(job, M.forYouCopy(…))`);
+      }
     });
     if (file === 'src/jobs.js' && (captures !== 1 || gets !== 1 || calls !== 1 || strays !== 1)) bad.push(`src/jobs.js captures the For-you dep ${captures}× (the constructor's one line), reads it ${gets}× and reaches it ${calls}× in _forYou, files the stray copy ${strays}× — exactly once each`);
     return bad;
@@ -5360,7 +5404,10 @@ function makeFlow93(acorn) {
   const doorFiles93 = [...srcFiles93, 'server.js', ...binFiles93];
   const doorBad93 = doorFiles93.flatMap((f) => door93(read(f), f));
   const view93 = (jb) => jb.includes('const stray = (a) => this._forYouStray(a, callerOf(stray));') && jb.includes('this.d = depsView(deps, { notifyUser: stray });') && jb.includes("return this._forYou(job, M.forYouCopy(job, 'stray'));") && /const mine = Object\.assign\(Object\.create\(null\), own\);\s*return new Proxy\(mine, \{/.test(jb);
-  ok(!doorBad93.length && view93(jb93), `§93 THE DOOR CENSUS (${doorFiles93.length} files — src/, server.js, data/bin — every scope): the engine reaches the For-you dep in _forYou alone (held off the object graph: the constructor's one set, _forYou's one get; \`this.d\` a view with no road back to deps — no prototype road), every copy it files is M.forYouCopy's own words (no shape) and the stray copy is the stray door's${doorBad93.length ? ' — ' + doorBad93.join(' | ') : ''}`);
+  // r7 (accept-r6 unverified 2 — hyg-door-call.cjs): THE MINT — forYouCopy mints each copy (frozen, keyed in a module WeakMap
+  // to the job it was minted for) and _forYou files only a copy minted for ITS job; a hand-built one is refused by name
+  const mint93 = (jm, jb) => jm.includes('const MINTED = new WeakMap();') && jm.includes('Object.freeze(c.words); MINTED.set(Object.freeze(c), job || null);') && jb.includes('if (M.mintedFor(c) !== (job || null)) {') && jb.indexOf('if (M.mintedFor(c) !== (job || null)) {') < jb.indexOf(GET93);
+  ok(!doorBad93.length && view93(jb93) && mint93(read('src/job-model.js'), jb93), `§93 THE DOOR CENSUS (${doorFiles93.length} files — src/, server.js, data/bin — every scope): the engine reaches the For-you dep in _forYou alone (held off the object graph: the constructor's one set, _forYou's one get; \`this.d\` a view with no road back to deps — no prototype road), the door is called by name (never held as a value), every copy it files is one M.forYouCopy MINTED for its job (its own words, no shape — a hand-built copy is refused at run time) and the stray copy is the stray door's${doorBad93.length ? ' — ' + doorBad93.join(' | ') : ''}`);
   const PARK93 = "this._forYou(job, M.forYouCopy(job, 'parked'));";
   const plant93 = (add) => jb93.replace(PARK93, PARK93 + '\n' + add);
   const redBy93 = (src, re) => door93(src, 'src/jobs.js').some((p) => re.test(p));
@@ -5407,6 +5454,7 @@ function makeFlow93(acorn) {
   // read the engine's SNAPSHOT (its name the accessor's), never a record.
   const NAME_READERS93 = [
     ['src/jobs.js', 'const raw = String((job && (job.name || job.id)) || \'\');', 'THE accessor (labelOf: the name belted on its own, memoised)'],
+    ['src/jobs.js', "fs.writeFileSync(tmp, JSON.stringify(obj, (k, v) => (k.startsWith('_') ? undefined : v), 1));", 'the record\'s writer — a whole-record serialization (r7): data/jobs.json and the archive, the hub\'s own files, never shown'],
     ['src/jobs.js', 'name: author || !job.name ? job.name : this.labelOf(job),', 'the author\'s own copy (the create echo, its own views) — a non-author\'s is the accessor\'s'],
     ['src/jobs.js', 'jobName: job.name, ownerCid:', 'a For-you copy\'s FIELD — the store belts jobName on its own (r3)'],
     ['src/jobs.js', "name: `${job.name} run`,", 'the record\'s writer (a scheduled run\'s own record)'],
@@ -5434,11 +5482,15 @@ function makeFlow93(acorn) {
   const flowOpts93 = { files: nameFiles93, read, nonCarry: RENDERERS93.map(([, n]) => n) };
   const flowBase93 = flow93(flowOpts93);
   const flowWith93 = (plants) => { const files = [...new Set([...nameFiles93, ...Object.keys(plants)])]; return flow93({ ...flowOpts93, files, read: (f) => (f in plants ? plants[f] : read(f)), from: flowBase93, changed: Object.keys(plants) }); };
+  // r7 (accept-r6 unverified 1): a row allows the hits its text HOLDS — each hit's own columns inside one spelling of the row on
+  // its line — never the whole line (r6 allowed a line by substring, so `note: job.name, jobName: job.name` passed)
+  const covers93 = (h, [f, a]) => { if (f !== h.file) return false; for (let k = h.text.indexOf(a); k >= 0; k = h.text.indexOf(a, k + 1)) if (k <= h.col && h.end <= k + a.length) return true; return false; };
+  const how93 = (h) => (h.how && h.how !== 'a read' ? ` (${h.how})` : '');
   const nameBad93 = (fl, renderers = RENDERERS93) => {
     const isRenderer = (h) => !!h.fn && RENDER93.test(h.fn);
-    const bad = fl.hits.filter((h) => !isRenderer(h) && !NAME_READERS93.some(([f, a]) => f === h.file && h.text.includes(a))).map((h) => `${h.file}:${h.line} reads a job record's name raw — a person or another conversation reads it through the engine's ONE accessor (jm.labelOf / M.labelVia(jm))`);
-    for (const h of fl.hits.filter(isRenderer)) bad.push(`${h.file}:${h.line} ${h.fn} — a RENDERER — reads a job record's name raw — its input is labelOf's (a row's \`label\`, the \`name\` the engine hands it), never the record's`);
-    for (const [f, a] of NAME_READERS93) if (!fl.hits.some((h) => h.file === f && h.text.includes(a))) bad.push(`NAME_READERS93 lists a reader ${f} no longer has («${a.slice(0, 50)}»)`);
+    const bad = fl.hits.filter((h) => !isRenderer(h) && !NAME_READERS93.some((row) => covers93(h, row))).map((h) => `${h.file}:${h.line} reads a job record's name raw${how93(h)} at column ${h.col + 1} — a person or another conversation reads it through the engine's ONE accessor (jm.labelOf / M.labelVia(jm))`);
+    for (const h of fl.hits.filter(isRenderer)) bad.push(`${h.file}:${h.line} ${h.fn} — a RENDERER — reads a job record's name raw${how93(h)} — its input is labelOf's (a row's \`label\`, the \`name\` the engine hands it), never the record's`);
+    for (const row of NAME_READERS93) if (!fl.hits.some((h) => covers93(h, row))) bad.push(`NAME_READERS93 lists a reader ${row[0]} no longer has («${row[1].slice(0, 50)}»)`);
     const reached = new Set([...fl.paramTaint].filter(([k, s]) => s.size && RENDER93.test(k.split(':').pop())).map(([k]) => k.split('#')[0] + ' ' + k.split(':').pop()));
     for (const r of reached) if (!renderers.some(([f, n]) => r === f + ' ' + n)) bad.push(`${r} takes a job record and is no row of RENDERERS93 — a renderer's input is labelOf's (a row's \`label\`), never the record's name`);
     for (const [f, n] of renderers) if (!reached.has(f + ' ' + n)) bad.push(`RENDERERS93 lists ${f} ${n}, which no job record reaches`);
@@ -5446,7 +5498,18 @@ function makeFlow93(acorn) {
     return bad;
   };
   const nameRed93 = nameBad93(flowBase93);
-  ok(!nameRed93.length, `§93 THE NAME CENSUS (by data flow — ${nameFiles93.length} server-side files, ${flowBase93.parsed.size} a record reaches): a job record's name is read only by its writers, the ONE accessor, the author's copy and the store-belted FIELDS (${NAME_READERS93.length} rows) and never by a renderer (${RENDERERS93.length} rows: ${RENDERERS93.map(([, n]) => n).join(', ')})${nameRed93.length ? ' — ' + nameRed93.join(' | ') : ''}`);
+  // THE BLIND SPOTS, NAMED (r7, accept-r6 unverified 0 + 3): r7 follows a sibling module's lookup helper (any resolved callee's
+  // own return), a record in an object's field (`hit.rec`, `o.rec = rec`), the Map destructured off the engine, a promise's
+  // `.then`, a deep copy (JSON.parse(JSON.stringify(rec))), a whole-record serialization (JSON.stringify / Object.values /
+  // Object.entries / util.inspect), a reflective or descriptor read and a key walk (for…in). What it does not follow is SAID:
+  const BLIND93 = [
+    'a record in a field of an object HANDED to another function (`f({ rec })` → `o.rec.name` — a field is followed in its own file)',
+    'a record through an emitter, a callback registry, a timer or a queue (`emit(\'x\', rec)` → a listener elsewhere)',
+    'a computed key (`rec[k]`, k === \'name\' at run time — a for…in over a record is red)',
+    'a callee through a dynamic require, a re-export, a class instance that is no require alias (`obj.m(rec)`), a getter or a Proxy',
+    'a record that leaves the process (a worker, IPC, the wire — the client and the CLIs read the engine\'s snapshot, its name the accessor\'s)',
+  ];
+  ok(!nameRed93.length, `§93 THE NAME CENSUS (by data flow — ${nameFiles93.length} server-side files, ${flowBase93.parsed.size} a record reaches; ${flowBase93.hits.length} reads, each judged on its own columns): a job record's name is read only by its writers, the ONE accessor, the author's copy and the store-belted FIELDS (${NAME_READERS93.length} rows) and never by a renderer (${RENDERERS93.length} rows: ${RENDERERS93.map(([, n]) => n).join(', ')}) — blind spots, named: ${BLIND93.map((b, i) => `(${i + 1}) ${b}`).join('; ')}${nameRed93.length ? ' — ' + nameRed93.join(' | ') : ''}`);
   const nameIsRed93 = (plants, re) => nameBad93(flowWith93(plants)).some((p) => re.test(p));
   const pf93 = read('src/port-forward.js'), af93 = read('src/artifacts.js'), bjp93 = read('src/browser-job-principal.js'), jm93 = read('src/job-model.js'), jw93wire = read('src/server/jobs-wiring.js');
   const DIGEST93 = 'const rows = vis.map((j) => ({ id: j.id, kind: j.kind, state: j.state, ageHint: this._ageHint(j), label: this.labelOf(j) }));\n    return M.fitDigest(existingBytes, M.renderJobsDigest(rows), { count: vis.length });';
@@ -5472,8 +5535,27 @@ function makeFlow93(acorn) {
     ['a renderer reading `.name` off the rows it is handed', !nameIsRed93({ 'src/job-model.js': jm93.replace(LINE93, '${agentPiece(j.name || j.label, 24)}') }, /^src\/job-model\.js:\d+ jobLine — a RENDERER — reads/)],
     ['a renderer a record reaches that is no row', !nameIsRed93(ghost93("function ghostRow(j) {\n  return '- ' + j.id;\n}\nmodule.exports = (jm) => [...jm.jobs.values()].map(ghostRow);\n"), /^src\/server\/ghost-name\.js ghostRow takes a job record and is no row of RENDERERS93/)],
     ['a stale renderer row', !nameBad93(flowBase93, [...RENDERERS93, ['src/job-model.js', 'renderGhostRows', 'x']]).some((p) => /RENDERERS93 lists src\/job-model\.js renderGhostRows, which no job record reaches/.test(p))],
+    // r7 (accept-r6 unverified 0 + 1 + 3 — census-plants.mjs, hyg-ghost-r6s.js): the shapes r6 never followed, every read on a line
+    ['a lookup helper in a sibling module, its result read (no record handed in)', !nameIsRed93({ 'src/server/ghost-h.js': "function jobOf(jm, token) { return jm.jobByToken(token) || null; }\nmodule.exports = { jobOf };\n", 'src/routes/ghost-r.js': "const H = require('../server/ghost-h.js');\nmodule.exports = (jm, t, res) => {\n  const j = H.jobOf(jm, t);\n  res.json({ asker: 'job ' + j.name });\n};\n" }, /^src\/routes\/ghost-r\.js:4 reads/)],
+    ['a record held in an object\'s field', !nameIsRed93(ghost93("module.exports = (jm, id, out) => {\n  const hit = { rec: jm.jobs.get(id), at: 1 };\n  out.push('job ' + hit.rec.name);\n};\n"), /^src\/server\/ghost-name\.js:3 reads/)],
+    ['a record assigned to an object\'s field', !nameIsRed93(ghost93("module.exports = (jm, id, out) => {\n  const o = {};\n  o.rec = jm.jobs.get(id);\n  out.push(o.rec.name);\n};\n"), /^src\/server\/ghost-name\.js:4 reads/)],
+    ['the jobs Map destructured off the engine', !nameIsRed93(ghost93("module.exports = (jm, id, out) => {\n  const { jobs } = jm;\n  const j = jobs.get(id);\n  out.push('job ' + j.name);\n};\n"), /^src\/server\/ghost-name\.js:4 reads/)],
+    ['a promise\'s `.then` callback', !nameIsRed93(ghost93("module.exports = (jm, id, out) => {\n  Promise.resolve(jm.jobs.get(id)).then((r) => out.push('job ' + r.name));\n};\n"), /^src\/server\/ghost-name\.js:2 reads/)],
+    ['a whole-record JSON.stringify', !nameIsRed93(ghost93("module.exports = (jm, id) =>\n  'job ' + JSON.stringify(jm.jobs.get(id));\n"), /^src\/server\/ghost-name\.js:2 reads a job record's name raw \(a whole-record serialization\)/)],
+    ['a whole-record Object.values', !nameIsRed93(ghost93("module.exports = (jm, id) =>\n  'job ' + Object.values(jm.jobs.get(id)).join(' ');\n"), /^src\/server\/ghost-name\.js:2 reads a job record's name raw \(a whole-record serialization\)/)],
+    ['a deep copy (JSON.parse(JSON.stringify(rec))), then a read', !nameIsRed93(ghost93("module.exports = (jm, id) => {\n  const c = JSON.parse(JSON.stringify(jm.jobs.get(id)));\n  return c.name;\n};\n"), /^src\/server\/ghost-name\.js:3 reads/)],
+    ['a key walk over a record', !nameIsRed93(ghost93("module.exports = (jm, id, out) => {\n  const r = jm.jobs.get(id);\n  for (const k in r) out.push(r[k]);\n};\n"), /^src\/server\/ghost-name\.js:3 reads a job record's name raw \(a key walk over a record\)/)],
+    ['a descriptor read', !nameIsRed93(ghost93("module.exports = (jm, id) =>\n  Object.getOwnPropertyDescriptor(jm.jobs.get(id), 'name').value;\n"), /^src\/server\/ghost-name\.js:2 reads/)],
+    ['a second raw read on the For-you payload line (census-plants.mjs)', !nameIsRed93({ 'src/jobs.js': jb93.replace('jobName: job.name, ownerCid:', 'note: job.name, jobName: job.name, ownerCid:') }, /^src\/jobs\.js:\d+ reads a job record's name raw at column/)],
+    ['a second raw read on the lookup line (census-plants.mjs)', !nameIsRed93({ 'src/agent-routes.js': read('src/agent-routes.js').replace('vis.find((j) => j.name === ref) || null;', 'vis.find((j) => j.name === ref) || null, say(vis[0].name);') }, /^src\/agent-routes\.js:\d+ reads a job record's name raw at column/)],
   ];
   ok(cn93.every(([, v]) => v === false), `§93 NAME CENSUS CONTROLS: ${cn93.map(([n, v]) => `${n} (${v ? 'WRONG' : 'RED'})`).join(', ')}`);
+  // r7 (the real gate's plants C1 + C2, repro/r7/plants.sh): the controls above re-run from the base with each planted file
+  // scanned directly — so they were red while a FULL run never read a caller of a sibling's lookup helper, nor a file that
+  // destructured the Map, neither matching r6's origin text. The same plants through a FULL run (the start set, the return closure)
+  const FULL93 = { 'src/server/ghost-h.js': "function jobOf(jm, token) { return jm.jobByToken(token) || null; }\nmodule.exports = { jobOf };\n", 'src/routes/ghost-r.js': "const H = require('../server/ghost-h.js');\nmodule.exports = (box, t, res) => {\n  const j = H.jobOf(box, t);\n  res.json({ asker: 'job ' + j.name });\n};\n", 'src/server/ghost-d.js': "module.exports = (eng, id, out) => {\n  const { jobs } = eng.jm;\n  const j = jobs.get(id);\n  out.push('job ' + j.name);\n};\n" };
+  const full93 = nameBad93(flow93({ ...flowOpts93, files: [...nameFiles93, ...Object.keys(FULL93)], read: (f) => (f in FULL93 ? FULL93[f] : read(f)) }));
+  ok(['src/routes/ghost-r.js:4 reads', 'src/server/ghost-d.js:4 reads'].every((k) => full93.some((p) => p.startsWith(k))), `§93 NAME CENSUS CONTROL, a FULL run: a caller of a sibling module's lookup helper and a destructured Map are read and RED by name (no incremental start)${full93.length ? ' — ' + full93.slice(0, 3).join(' | ') : ''}`);
   // …and the digest's rows are BUILT (accept-r5 confirmed 0): digestFor hands the renderer the accessor's label, never a record
   ok(jb93.includes(DIGEST93) && jm93.includes(LINE93) && !jb93.split('\n').some((l) => !/^\s*(\/\/|\*)/.test(l) && /\bwithAge\b|\.\.\.j, ageHint/.test(l)), '§93 the digest: digestFor builds each row ({id, kind, state, ageHint, label: this.labelOf(j)}) — jobLine cuts the BELTED label (the cut never precedes the mask)');
   const c93 = [
@@ -5484,6 +5566,7 @@ function makeFlow93(acorn) {
     ['the chat card\'s label carrying the raw name (514a962c)', msgRoad93(jb93.replace("fromName: 'Background Work · ' + this.labelOf(job)", "fromName: 'Background Work · ' + (job.name || job.id)"))],
     ['a second filer with origin \'jobs\' (src/server/ghost-jobs.js)', !filers93([...files93, ['src/server/ghost-jobs.js', "userTodos.add('jobs', { origin: 'jobs', text: 'x' });\n"]]).length],
     ['a person-facing snapshot carrying the raw name (b9d8b1ba)', nameRoad93(jb93.replace('name: author || !job.name ? job.name : this.labelOf(job),', 'name: job.name,'))],
+    ['the record\'s name cut with no engine belt before it (ff3c8a20f)', nameRoad93(jb93.replace('M.resolveName(spec.name, visNames, { mask: (t) => this._agentWords(t) })', 'M.resolveName(spec.name, visNames)'))],
     ['a planted DIRECT filer (accept-r3: `this.d.notifyUser({ text … })` after the park copy)', !redBy93(plant93("        try { this.d.notifyUser({ text: `${job.name}: parked — out of memory twice`, urgency: 'normal', jobId: job.id, jobName: job.name }); } catch { }"), /:\d+ \w+ reaches the For-you dep/)],
     ['a WRAPPER method through the dep', !redBy93(jb93.replace('  _forYou(job, c) {', '  _tellUser(x) { return this.d.notifyUser(x); }\n  _forYou(job, c) {'), /_tellUser reaches the For-you dep/)],
     ['an ALIAS of the dep', !redBy93(plant93('        const door = this.d.notifyUser; door({ words: { key: \'x {y}\' } });'), /reaches the For-you dep/)],
@@ -5505,6 +5588,11 @@ function makeFlow93(acorn) {
     ['server.js walking the engine\'s view', !door93(read('server.js') + "\nObject.getPrototypeOf(jobsWiring.jm.d).notifyUser({ text: 'raw' });\n", 'server.js').some((p) => /^server\.js:\d+ \S+ walks the engine's deps view/.test(p))],
     ['a server.js plant `jm._forYouDep(…)`', !door93(read('server.js') + "\njobsWiring.jm._forYouDep({ text: 'raw' });\n", 'server.js').some((p) => /^server\.js:\d+ \S+ reaches the For-you dep/.test(p))],
     ['a server.js call of the engine\'s door', !door93(read('server.js') + "\njobsWiring.jm._forYou(null, { stray: { text: 'raw' } });\n", 'server.js').some((p) => /^server\.js:\d+ \S+ calls the engine's For-you door from outside/.test(p))],
+    // r7 (accept-r6 unverified 2 — hyg-plants.patch, hyg-door-call.cjs): the door held as a value, the mint dropped
+    ['the door held as a value and called with `.call` (hyg-plants.patch)', !redBy93(plant93("        this._forYou.call(this, job, { fact: 'parked', words: { key: 'HAND-BUILT words' } });"), /:\d+ \w+ holds the For-you door as a value/)],
+    ['an alias of the door', !redBy93(plant93("        const door = this._forYou; door(job, M.forYouCopy(job, 'parked'));"), /:\d+ \w+ holds the For-you door as a value/)],
+    ['server.js holding the engine\'s door (hyg-plants.patch)', !door93(read('server.js') + "\nconst door1r6 = jobsWiring.jm._forYou; door1r6.call(jobsWiring.jm, null, { fact: 'fire', words: { key: 'HAND-BUILT' } });\n", 'server.js').some((p) => /^server\.js:\d+ \S+ holds the engine's For-you door from outside/.test(p))],
+    ['the door filing a copy it never checked was minted (ff3c8a20f)', mint93(read('src/job-model.js'), jb93.replace('if (M.mintedFor(c) !== (job || null)) {', 'if (false) {'))],
     ['a data/bin plant through `d.notifyUser`', !door93(read('data/bin/vibespace-job') + "\nd.notifyUser({ text: 'raw' });\n", 'data/bin/vibespace-job').some((p) => /^data\/bin\/vibespace-job:\d+ \S+ reaches the For-you dep/.test(p))],
   ];
   ok(c93.every(([, v]) => v === false), `§93 CONTROLS: ${c93.map(([n, v]) => `${n} (${v ? 'WRONG' : 'RED'})`).join(', ')}`);

@@ -9,7 +9,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Reminders made with --notify-user before this update did not keep the option: recreate them (vibespace-job show prints notifyUser=false for those).
 - A job's details now say when the job tells you in For you, and what else reaches you for that kind of job; vibespace-job show says whether it tells you.
 - A secret in a job's message or name is hidden in For you, the Jobs panel, Ports, Artifacts and the agent browser; a refused copy shows as not delivered, not ✓.
-- When another agent can see your background job, a secret in its name is hidden from it too; a secret followed by - or _ is now hidden as well.
+- When another agent can see your background job, a secret in its name is hidden from it too — any kind of key, even one followed by - or _ or in a long name.
 - Background jobs' items in For you are now in Chinese and Japanese too.
 
 ## 2.369.360 — 2026-10-27

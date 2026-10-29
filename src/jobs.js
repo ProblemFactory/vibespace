@@ -1214,7 +1214,9 @@ class JobManager {
    *  label — and (r5) EVERY holder of a record outside this engine asks HERE (M.labelVia(jm): the Ports scan row, the
    *  Artifacts service row and its chat card, the browser's job label and its strip row, the vault's asker, feedback's
    *  session, the memory-pressure roots, the live view's tab); r4 belted the forward label and left its scan row one line
-   *  away raw. The RECORD keeps the raw name (data/jobs.json, the archive): the author's own fact, whole to it.
+   *  away raw. The RECORD keeps the name resolveName BELTED (r7: the belt on the whole name as asked, then the slug and the
+   *  cut — r6 cut first and a token the cut split was no shape; data/jobs.json, the archive, the author's echo); a record an
+   *  older engine wrote keeps what it stored, whole to its author.
    *  test-architecture §93 THE NAME CENSUS names any reader of a record's name that skips this accessor.
    *  Memoised 30 s per name (the belt reads the vault; a list snapshot asks for every name). */
   labelOf(job) {
@@ -1239,13 +1241,21 @@ class JobManager {
     // log says a refusal); a copy forYouCopy does not know is refused BY NAME (claim r3-2 minor 7: a TypeError into _finalizeRun)
     // r5: the ONE line that reaches the dep. r6: a copy is the engine's words + its fact, nothing else — a SHAPED copy (a
     // hand-built one handed through M.forYouCopy) is refused by name and said in the log with its caller, like a stray
+    // r7 (accept-r6 unverified 2): a copy forYouCopy MINTED for THIS job (M.mintedFor) — a hand-built {words, fact}, however it
+    // was handed in (`.call`, an alias), or a copy minted for another job is refused by name and said in the log with its caller
     if (!c || !c.words || !c.fact) {
       if (c && c.refused && (c.copy === 'stray' || c.copy === 'shaped')) this.d.log(`[jobs] a For-you filing outside the one door (src/jobs.js _forYou) — caller ${callerOf(JobManager.prototype._forYou)}${job ? ' — job ' + job.id : ''}: ${c.refused}`);
       return this._forYouVerdict(job, { ok: false, why: (c && c.refused) || 'no such For-you copy' }, (c && c.copy) || 'unknown');
     }
+    if (M.mintedFor(c) !== (job || null)) {
+      const why = M.mintedFor(c) === undefined ? 'a For-you copy is one forYouCopy minted — a hand-built copy is refused' : 'a For-you copy minted for another job is refused';
+      this.d.log(`[jobs] a For-you filing outside the one door (src/jobs.js _forYou) — caller ${callerOf(JobManager.prototype._forYou)}${job ? ' — job ' + job.id : ''}: ${why}`);
+      return this._forYouVerdict(job, { ok: false, why }, 'hand-built');
+    }
+    const words = { ...c.words, ...(c.words.params ? { params: { ...c.words.params } } : {}) };   // the store's own (the minted copy stays frozen)
     const forYouDep = FOR_YOU_DEPS.get(this) || null;
     let v;
-    try { v = forYouDep ? forYouDep({ words: c.words, fact: c.fact, urgency: c.urgency, ...(job ? { jobId: job.id, jobName: job.name, ownerCid: job.owner?.conversation?.id || null } : {}) }) : { ok: false, why: 'no For-you store is wired' }; } catch (e) { v = { ok: false, why: e.message }; }
+    try { v = forYouDep ? forYouDep({ words, fact: c.fact, urgency: c.urgency, ...(job ? { jobId: job.id, jobName: job.name, ownerCid: job.owner?.conversation?.id || null } : {}) }) : { ok: false, why: 'no For-you store is wired' }; } catch (e) { v = { ok: false, why: e.message }; }
     return this._forYouVerdict(job, v, c.fact.split(':')[0]);
   }
   /** THE STRAY DOOR (r4): `this.d.notifyUser(...)` called from anywhere but _forYou — said in the server log WITH ITS CALLER
@@ -1617,7 +1627,7 @@ class JobManager {
     }
     if (spec.context && Buffer.byteLength(spec.context.payload || '', 'utf-8') > M.CONTEXT_PAYLOAD_CAP) return { error: `context payload exceeds ${M.CONTEXT_PAYLOAD_CAP} bytes — store the brief in a file and reference its path` };
     const visNames = new Set(M.visibleJobs([...this.jobs.values()], caller).map((j) => j.name));
-    const { name, renamed } = M.resolveName(spec.name, visNames);
+    const { name, renamed } = M.resolveName(spec.name, visNames, { mask: (t) => this._agentWords(t) });   // r7: the belt on the WHOLE name, then the cut
     const job = {
       id: rid(), kind: spec.kind || 'task', name, note: spec.note || '',
       cmd: spec.cmd, envFrom: spec.envFrom || [], restart: spec.restart || 'on-failure',
@@ -1638,7 +1648,7 @@ class JobManager {
       try { this._spawn(job, 'manual'); } catch (e) { job.state = 'failed'; this._touch(job); return { error: `spawn failed: ${e.message}`, job: this.snapshot(job, { author: true }) }; }
     } else { job.nextFireAt = M.nextFire(job.schedule, now()); this._touch(job); }
     this._save();
-    return { job: this.snapshot(job, { author: true }), renamed };   // the creator IS the author (r4: its own name whole)
+    return { job: this.snapshot(job, { author: true }), renamed };   // the creator IS the author (r4: the record's own name — r7: belted at create)
   }
   stop(job, { force } = {}) {
     if (this.readOnly) return { error: 'registry is read-only in this process' };
