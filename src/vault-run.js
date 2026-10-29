@@ -839,18 +839,34 @@ const SSH_OPT_WS = ' \t\r\n\f';
 const SSH_OPT_CTRL = /[\x00-\x08\x0b\x0e-\x1f\x7f]/;   // a control char that is NOT one of ssh's whitespace separators (\t \n \r \f handled by the grammar)
 function readSshOpt(val) {
   const s = String(val == null ? '' : val);
-  const isSep = (c) => SSH_OPT_WS.includes(c) || c === '=';
-  const token = (start) => { let t = '', j = start, inq = false; while (j < s.length) { const c = s[j]; if (c === '"') { inq = !inq; j++; continue; } if (!inq && isSep(c)) break; t += c; j++; } return inq ? { bad: true } : { tok: t, end: j }; };   // quotes stripped; `bad` = an unmatched quote (strdelim returns NULL ⇒ ssh ignores the line ⇒ we fail closed)
-  const skipSep = (j) => { while (j < s.length && SSH_OPT_WS.includes(s[j])) j++; if (s[j] === '=') { j++; while (j < s.length && SSH_OPT_WS.includes(s[j])) j++; } return j; };   // strdelim allows ONE `=` between the tokens to be skipped
-  let kw = token(0);
-  if (kw.bad) return { opaque: true };
-  if (kw.tok === '') { const t1 = token(skipSep(0)); if (t1.bad) return { opaque: true }; kw = t1; }   // a leading `=` / ws is an empty first token — read the keyword once more (a second empty ⇒ ssh applies nothing)
-  const key = kw.tok.toLowerCase();
-  if (!key) return {};   // ssh ignores a line with no keyword (`==HostName=`) — no option applied, nothing routes
+  // OpenSSH strdelim_internal (misc.c, split_equals=1) — NOT a bare cut at the first `=`/space. A token runs to the next
+  // whitespace / `"` / single `=`. A `"` opens a quoted run: the chars BEFORE it stay, the quote PAIR is stripped, and the
+  // MATCHING quote ENDS the token — reading does NOT continue past it (`Host"Name"evil` → keyword `HostName`, then value `evil`;
+  // `"HostName"evil` the same). An UNMATCHED quote ⇒ strdelim returns NULL ⇒ ssh ignores the line ⇒ we fail closed (opaque).
+  // ONE `=` between tokens is consumed. An EMPTY first token (a leading `=` / ws, OR a `""`) is skipped ONCE and the NEXT token
+  // is the keyword (process_config_line: `if (*keyword == '\0') keyword = strdelim(&str)`); a SECOND empty token ⇒ no keyword ⇒
+  // ssh applies nothing. Pinned spelling-by-spelling against `ssh -F /dev/null -G` (the generated oracle in test-vault-run-model).
+  const strdelim = (pos) => {
+    if (pos >= s.length) return null;
+    const old = pos; let d = pos;
+    while (d < s.length && !(SSH_OPT_WS.includes(s[d]) || s[d] === '"' || s[d] === '=')) d++;
+    if (d >= s.length) return { tok: s.slice(old), next: s.length };
+    if (s[d] === '"') { let e = d + 1; while (e < s.length && s[e] !== '"') e++; if (e >= s.length) return { bad: true }; let n = e + 1; while (n < s.length && SSH_OPT_WS.includes(s[n])) n++; return { tok: s.slice(old, d) + s.slice(d + 1, e), next: n }; }
+    const hadEq = s[d] === '='; let n = d + 1; while (n < s.length && SSH_OPT_WS.includes(s[n])) n++;
+    if (!hadEq && s[n] === '=') { n++; while (n < s.length && SSH_OPT_WS.includes(s[n])) n++; }   // one `=` skipped either as this delimiter or the next char
+    return { tok: s.slice(old, d), next: n };
+  };
+  let kw = strdelim(0);
+  if (kw && kw.bad) return { opaque: true };
+  if (kw && kw.tok === '') { kw = strdelim(kw.next); if (kw && kw.bad) return { opaque: true }; }   // an empty first token (leading `=` / ws / `""`) ⇒ ssh re-reads the keyword once
+  const key = kw ? kw.tok.toLowerCase() : '';
+  if (!key) return {};   // no keyword (a second empty token, `==HostName=`) ⇒ ssh applies nothing, nothing routes
   if (SSH_OPT_CTRL.test(key)) return { opaque: true };
   if (SSH_LOCAL_O.has(key)) return { opaque: true };
   if (SSH_HOST_OPTS.has(key)) {
-    const raw = s.slice(skipSep(kw.end)).replace(/"/g, '');   // the value, quotes stripped (ProxyJump may list a,b; HostName is one)
+    const v = strdelim(kw.next);   // the value — ONE strdelim token (HostName is one host; ProxyJump lists a,b with no ws)
+    if (v && v.bad) return { opaque: true };
+    const raw = v ? v.tok : '';
     if (SSH_OPT_CTRL.test(raw) || /%/.test(raw)) return { opaque: true };   // a control char, or a `%h`/`%%` token ssh expands to a host we cannot name ⇒ fail closed
     return { hosts: raw.split(/[,\s]+/).filter(Boolean) };
   }
@@ -1057,14 +1073,20 @@ function shapeOf(run) {
     (dest.opaque || routesOpaque.length > 0) ? 'opaque-route' : null,
   ].filter(Boolean);
   const noAlways = noAlwaysAll[0] || null;   // the PRIMARY reason, for the card prose (program-writable above opaque-route — see above)
-  // lane vault-use-grants round 9 (seam ruling C with vault-agent-own, 主开发): DESTINATION KNOWLEDGE is a SEPARATE fact from
-  // «always» eligibility. `destKnown` = the reader READ every destination of a KNOWN tool (the arg set is complete, nothing
-  // opaque, not a config / program-writable / runs-project read) — a GRANT naming every one of those hosts COVERS the run even
-  // when «always» would be withheld. Kept apart from `always`: when a keyed routing flag whose host IS read withholds «always»
-  // (vault-agent-own's rule, int361 seam 37b51fa9), `destKnown` stays true, so the grant road is judged on «can the reader name
-  // every host», never on `always`. In THIS tree the two coincide; the seam makes them diverge without touching this expression.
+  // lane vault-use-grants round 9/10 (seam ruling C with vault-agent-own, 主开发): DESTINATION KNOWLEDGE is a SEPARATE fact from
+  // «always» eligibility, and `destKnown` is DERIVED so the two laws both hold by construction:
+  //   (1) «always» ⇒ destKnown (round 10 MAJOR): a shape the card may hold «always» for MUST be destKnown, or the door writes a
+  //       standing grant the judge can never read back — the button does nothing. The `!noAlways` disjunct makes this STRUCTURAL:
+  //       whatever makes a shape «always»-eligible (this tree's rules, OR after the int361 merge vault-agent-own's «a SHOWN config
+  //       template that reads nothing is offered «always»» — which r9's blanket `!configFile` wrongly called destKnown=false)
+  //       makes it destKnown too, with no second expression to keep in step.
+  //   (2) destKnown ⊋ «always» (ruling C): the reader can still have READ every destination of a KNOWN tool (arg set complete,
+  //       nothing opaque, not a config / program-writable / runs-project read) while «always» is WITHHELD on a keyed routing flag
+  //       whose host is read — a GRANT naming those hosts COVERS that run. The positive disjunct keeps destKnown true there, so
+  //       the grant road is judged on «can the reader name every host», never on `always` (never `!!shape.always`).
+  // In THIS tree the disjuncts coincide (always ⟺ the positive read); the int361 seam makes them diverge without a re-edit here.
   // int361: on the train `unread` (vault-agent-own r2: a curl glob, a bare number — a target the shape cannot list) is unread, so it is no known destination either — never a grant's cover, as 37b51fa9 had it.
-  const destKnown = known && kind === 'tool' && !dest.opaque && hosts.size > 0 && !unread && !row.runsProject && !configFile && !run.programWritable;
+  const destKnown = !noAlways || (known && kind === 'tool' && !dest.opaque && hosts.size > 0 && !unread && !row.runsProject && !configFile && !run.programWritable);
   return {
     v: SHAPE_V, tool: run.tool, name: run.name, kind, sub, flags: [...flags].sort(), args, hosts: [...hosts].sort(), routeHosts: dest.hosts.slice().sort(), routeOpaque: dest.opaque, mentions, badHost, userinfo, cardTooLong, configReads,
     entries: run.refs.map((r) => r.ref).sort(), injection: [...run.injection].sort(), env: run.plainEnv.map((e) => `${e.name}=${e.value}`).sort(), keyed: keyed.sort(),
