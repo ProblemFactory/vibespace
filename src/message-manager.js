@@ -349,8 +349,9 @@ class MessageManager extends MessageWindow {
     // THE WRAPPER'S QUEUE (2.369.354, lane claude-wrapper-queue): data/bin/chat-wrapper.js HOLDS a frame sent mid-turn
     // and says so on the acp/codex wire — queued_input / queue_changed / queue_op_result / queue_dropped, top-level lines
     this.userMessageIds = new Map();      // webui msgId → message id (the bubble a queue row belongs to)
-    this._webuiCopies = new Map();        // msgId → {cliUuid, id, ran}: a wrapper's copy of a mid-turn frame — claimed by the CLI's record of it (a batch by the stamps its init names, r8)
+    this._webuiCopies = new Map();        // msgId → {cliUuid, id, ran}: a wrapper's copy of a mid-turn frame — claimed by the CLI's record of it (a batch by the first witness that names it, r9); ran = its hand-over order (0 = never handed)
     this._turnUuids = null;               // the last init's `user_message_uuids`: the stamped frames that turn consumed, in the CLI's order (r8)
+    this._handOrder = 0;                  // the order the wrapper's `input_handover` records said frames reached the CLI (r9)
     this._queue = [];                     // the wrapper's promptQueue, as published
     this._queuedMsgIds = new Set();       // bubbles currently wearing a 'queued' chip
     this._queuePublished = false;         // has this wrapper ever published a queue? (in-band capability signal)
@@ -920,7 +921,7 @@ class MessageManager extends MessageWindow {
     if (raw.subtype === 'init') {
       // THE TURN'S STAMPS (lane claude-steer-inject r8): the client uuids this turn consumed, said by the CLI itself — frames
       // run together as ONE record are ALL named here, in their order (measured on 2.1.308 and 2.1.312: [C, D] for the one
-      // record under D's uuid). The batch claim keys on them (_claimWebuiCopy); an init that names none clears them.
+      // record under D's uuid). The batch claim's FIRST witness (_claimWebuiCopy, r9); an init that names none clears them.
       this._turnUuids = Array.isArray(raw.user_message_uuids) && raw.user_message_uuids.length ? raw.user_message_uuids.map(String) : null;
       const frame = initFrameFacts(raw);
       // ONE CARD PER *DISTINCT* FRAME (round 2). A conversation carries one
@@ -1648,7 +1649,7 @@ class MessageManager extends MessageWindow {
    *  (an older build's words-only copy), and the record's own words the copy lacks — the CLI's «[Image could not be
    *  processed …]» lines are its fact of what the model got, never hidden behind the copy. Never a copy Stop put back
    *  (removed / stopped: it never ran). */
-  _claimWebuiCopy(content, uuid, emit) {
+  _claimWebuiCopy(content, uuid, emit, merged) {
     if (!uuid || !this._webuiCopies.size) return false;
     let hit = null;
     for (const [msgId, c] of this._webuiCopies) if (c.cliUuid && c.cliUuid === String(uuid)) { hit = msgId; break; }
@@ -1657,20 +1658,30 @@ class MessageManager extends MessageWindow {
     // hand-over number the copy says — the number is written into the WRAPPER's buffer only (a copy line never rides
     // stdout), so a copy the hub restored while its frame was held still says 0 after the frame drained or was handed
     // (r6 refused that claim: the same message drawn twice after a restart-then-drain).
-    // A BATCH IS CLAIMED AS A BATCH (acceptance r5) — BY THE STAMPS ITS INIT NAMES (r8): frames the CLI ran together as ONE
-    // turn are ONE user record under the LAST frame's uuid, the earlier frames' blocks first, and the turn's init names
-    // every one of them in that order (`user_message_uuids`). THE POOL HOLDS ONLY FRAMES THAT RAN: a stamped copy joins
-    // ONLY when that init named its stamp before the hit's — a frame still held was never consumed, so it claims nothing
-    // and is claimed by nothing, whatever its words (r7 let a copy restored while held take the leading words of another
-    // frame's record: the same words queued twice, the second drawn twice when it ran; r6's hand-over number cannot say
-    // it — a rewrite of the copy line never reaches the hub). A copy WITHOUT a stamp (an older build) is the only one
-    // matched by words — its FULL words, and only once an `input_handover` said it reached the CLI. Never a prefix alone.
+    // A BATCH IS CLAIMED AS A BATCH (acceptance r5): frames the CLI ran together as ONE turn are ONE user record under the
+    // LAST frame's uuid, the earlier frames' blocks first. THE POOL HOLDS ONLY FRAMES THAT RAN (r8): a frame still held was
+    // never consumed, so it claims nothing and is claimed by nothing, whatever its words (r7 let a copy restored while held
+    // take the leading words of another frame's record; r6's hand-over number cannot say it — a rewrite of the copy line
+    // never reaches the hub). WHO RAN WITH THE HIT IS SAID BY A WITNESS, NEVER BY ONE ROAD (r9) — the first that names the
+    // hit's batch, in this order:
+    //   1. the turn's init (`user_message_uuids`, 2.1.307 on): every stamp the turn consumed, in order;
+    //   2. else the record's own `mergedSendUuids` (measured on 2.1.308 and 2.1.312: the merged record names the members
+    //      before it) — the CLI's transcript, there when the init is not: the init rides stdout only and the wrapper
+    //      persists its buffer every 2 s, so a hub restart inside that window rebuilds with no init (r8 drew the batch's
+    //      earlier frame twice);
+    //   3. else the hand-over order (`input_handover`, every build — the only witness before 2.1.307): a frame the wrapper
+    //      wrote to the CLI, in the order it was written.
+    // A named witness is the whole batch: a stamped copy it does not name stays out. A copy WITHOUT a stamp (an older
+    // build) joins only once handed. Every member is matched by its FULL blocks off the record's front — never a prefix.
     const rec = (content || []).map((b) => ({ ...b }));
     const parts = [];
     let off = 0;
-    const named = this._turnUuids && this._turnUuids.includes(String(uuid)) ? this._turnUuids.slice(0, this._turnUuids.indexOf(String(uuid))) : [];
-    const pool = [...this._webuiCopies].filter(([msgId, c]) => msgId !== hit && (c.cliUuid ? named.includes(c.cliUuid) : c.ran === true))
-      .sort((a, b) => (a[1].cliUuid ? named.indexOf(a[1].cliUuid) : named.length) - (b[1].cliUuid ? named.indexOf(b[1].cliUuid) : named.length));
+    const u = String(uuid);
+    const named = this._turnUuids && this._turnUuids.includes(u) ? this._turnUuids.slice(0, this._turnUuids.indexOf(u))
+      : Array.isArray(merged) && merged.length ? merged.map(String) : null;
+    const rank = (c) => (named && c.cliUuid ? named.indexOf(c.cliUuid) : (named ? named.length : 0) + c.ran);
+    const pool = [...this._webuiCopies].filter(([msgId, c]) => msgId !== hit && (named && c.cliUuid ? named.includes(c.cliUuid) : c.ran > 0))
+      .sort((a, b) => rank(a[1]) - rank(b[1]));
     // the record is walked from its front, each step claimed by the pooled copy whose blocks are there (copyPrefixLen: each
     // text trim-equal, a picture's place) — the stamps decide WHO is in the batch, the copy's own blocks only where it ends
     for (let step = true; step && off < rec.length;) {
@@ -1723,9 +1734,9 @@ class MessageManager extends MessageWindow {
     const state = { handed: 'handed', landed: 'steered', 'own-turn': null, kept: 'kept' }[raw.state];
     if (state === undefined) return;
     for (const msgId of Array.isArray(raw.msg_ids) ? raw.msg_ids : []) {
-      // every state here means the frame was WRITTEN to the CLI — the only fact a copy without a stamp has that it ran (r8)
+      // every state here means the frame was WRITTEN to the CLI — a batch's last witness, in the order said (r9)
       const c = this._webuiCopies.get(String(msgId));
-      if (c) c.ran = true;
+      if (c && !c.ran) c.ran = ++this._handOrder;
       this._stampQueueChip(msgId, state, emit);
     }
   }
@@ -1985,7 +1996,7 @@ class MessageManager extends MessageWindow {
       // msgId already has a bubble is that bubble (the live send's or the copy's), and the CLI's own record of those words
       // a little later (the turn they ran as, a held frame drained, a kept frame's interrupted follow-up) claims the copy.
       if (raw._fromWebui && raw.msgId && this.userMessageIds.has(String(raw.msgId)) && (raw.webui_copy || this._webuiCopies.has(String(raw.msgId)))) return;
-      if (!raw._fromWebui && !raw.origin && this._claimWebuiCopy(normalizedContent, raw.uuid, emit)) return;
+      if (!raw._fromWebui && !raw.origin && this._claimWebuiCopy(normalizedContent, raw.uuid, emit, raw.mergedSendUuids)) return;
       // AN isMeta COMPANION LINE IS NEVER THE PERSON'S MESSAGE (lane claude-steer-inject r5, both CLI builds): the CLI's own
       // lines to the model — «[Image source: /tmp/…]» beside a pasted picture — drew an extra «You» bubble after every
       // restart. A dim note, no turn of its own; a record the person typed (promptSource / ours) or one with an origin stays itself.
@@ -1996,7 +2007,7 @@ class MessageManager extends MessageWindow {
       // Use original msgId if present (for dedup with client-side local preview)
       const msg = this._create({ role: 'user', status: 'complete', content: normalizedContent, turnIndex: this.turnIndex });
       if (raw.webui_copy && raw._fromWebui && raw.msgId) {
-        this._webuiCopies.set(String(raw.msgId), { cliUuid: typeof raw.cliUuid === 'string' && raw.cliUuid ? raw.cliUuid : null, id: msg.id, ran: false });
+        this._webuiCopies.set(String(raw.msgId), { cliUuid: typeof raw.cliUuid === 'string' && raw.cliUuid ? raw.cliUuid : null, id: msg.id, ran: 0 });
         if (this._webuiCopies.size > 32) this._webuiCopies.delete(this._webuiCopies.keys().next().value);
       }
       // Provenance for the notification classifier: promptSource = the CLI's
