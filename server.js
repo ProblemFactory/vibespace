@@ -1828,7 +1828,7 @@ probeSockets().finally(() => hub.listen(PORT, HOST, () => { bootTrace.listening(
     const cutoff = Date.now() - 7 * 86400000;
     try {
       for (const fn of fs.readdirSync(BUFFERS_DIR)) {
-        const m = fn.match(/^(.+)\.(buf|json)$/);
+        const m = fn.match(/^(.+)\.(buf|json|receipts)$/); // .receipts (lane human-cli r4): the wrapper's own exit removes it — never when it was killed past that
         if (!m || activeSessions.has(m[1])) continue;
         try {
           const st = fs.statSync(path.join(BUFFERS_DIR, fn));

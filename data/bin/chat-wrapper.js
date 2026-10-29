@@ -143,7 +143,7 @@ var lastReceiptAt = 0;            // var: schedulePersist may run before this li
 const FOLLOWED_MS = 120000;       // a receipt asked for in the last 2 min = a person's CLI is following this buffer
 function writeReceipt(rec) {
   if (!receiptsFile) return;
-  lastReceiptAt = Date.now();
+  if (rec.type === '_stdin_ack') lastReceiptAt = Date.now();   // r4: only an ack a frame ASKED for opens the 250 ms window (a person's CLI follows) — a torn line's nack alone never does
   receiptLines.push(JSON.stringify(rec));
   if (receiptLines.length > 50) receiptLines.shift();
   try { fs.writeFileSync(receiptsFile, receiptLines.join('\n') + '\n'); } catch {}

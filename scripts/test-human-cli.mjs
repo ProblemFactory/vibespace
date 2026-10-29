@@ -16,8 +16,12 @@
 //      reply read from the buffer, Esc = Stop (said only after its receipt), Ctrl-C leaves; a piped line by id or name; a
 //      piped NUMBER refused; a number at a terminal confirmed by name first
 //   §6 the refusals: an agent (a bare `vibespace` too), a chat has no screen, a dead session names its buffer, no hub ever ran
+//   §7 round 4: the follower keys on RECORD IDENTITY (a line edited in place — claude-steer's copy line — while replies
+//      stream: each reply once, a shown record's edit said «(updated)»); the baseline BEFORE the history (a FROZEN hub's 2 s:
+//      the record persisted meanwhile shown once); the REAL agy-wrapper's receipts (a hub that answers: sent + acked, a torn
+//      line nacked, its receipts file gone with it); the 250 ms persist window only on a receipt asked for
 // RED on the base (6428c67e): no data/bin/vibespace, no index; RED on round 1 (5a0b2463): §0, the live-hub attach, the
-// receipt, the piped number, the bare refusal.
+// receipt, the piped number, the bare refusal; RED on round 3 (ea0cecce): §7 and the killed session's .receipts (§2).
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -166,6 +170,16 @@ const liveChat = runCli(['chat', CID, '--wait', '2'], { input: 'while the hub is
 ok('a line from `chat` while the hub is up: acknowledged by the wrapper\'s receipt (no «not acknowledged»), the reply read from the buffer',
   liveChat.status === 0 && /reply: while the hub is up HCLIVE/.test(liveChat.stdout) && !/not acknowledged|read-only/.test(liveChat.stdout + liveChat.stderr), liveChat.stdout.slice(-500) + liveChat.stderr);
 ok('…and the HUB\'s own view got that reply too (the CLI pushed and let go — never a second reader)', !!(await until(() => frames.slice(nFrames).some((f) => JSON.stringify(f).includes('reply: while the hub is up HCLIVE')), 10000)));
+// round 4: a wrapper killed past its exit handler leaves <id>.receipts — the hub's kill-path teardown takes it with the
+// buffer (planted: this session's wrapper wrote none of its own, so its own exit would leave it)
+const gone = await create({ backend: 'claude', mode: 'chat', cwd: cwdC, sessionName: 'hc-gone', reqId: 'c2' });
+const GID = gone && gone.type === 'created' ? gone.sessionId : null;
+const GR = GID ? BUF(GID).replace(/\.buf$/, '.receipts') : null;
+if (GR) { await until(() => fs.existsSync(BUF(GID)), 10000); fs.writeFileSync(GR, JSON.stringify({ type: '_stdin_ack', timestamp: Date.now(), msg_id: 'vs-cli-planted' }) + '\n'); }
+if (GID) ws.send(JSON.stringify({ type: 'kill', sessionId: GID }));
+const tornDown = GID ? await until(() => !fs.existsSync(BUF(GID)), 20000) : null;
+ok('a session ENDED through the hub: its <id>.receipts goes with its buffer — the kill-path teardown removes it (round 4; a wrapper killed past its own exit handler leaves one)',
+  !!tornDown && !!(await until(() => !fs.existsSync(GR), 3000)), JSON.stringify({ created: gone && gone.type, buf: !!GID && fs.existsSync(BUF(GID)), receipts: !!GR && fs.existsSync(GR) }));
 
 console.log('§3 the hub is killed (SIGTERM — this scratch hub only): the index survives it');
 const hubPid = srv.pid;
@@ -260,6 +274,129 @@ const dead = runCli(['attach', 'hc-term']);
 ok('attach on a dead session: refused with words + the buffer file that holds its last screen', dead.status === 1 && /cannot attach to «hc-term»/.test(dead.stderr) && dead.stderr.includes('.buf'), dead.stderr);
 const none = runCli(['ls'], { home: EMPTY_HOME });
 ok('a machine where no hub ever ran: «no VibeSpace hub has run here» + the door', none.status === 1 && /no VibeSpace hub has run here/.test(none.stderr) && /ssh <hub> vibespace ls/.test(none.stderr), none.stderr);
+
+console.log('§7 round 4 — the follower keys on identity, the baseline before the history, the fourth wrapper\'s receipts, the persist window');
+{
+  const net = require('net');
+  const LI = require(path.join(REPO, 'src/local-index.js'));
+  const R4 = path.join(ROOT, 'r4'), BUFS7 = path.join(R4, 'bufs'), H7 = path.join(R4, 'home'), PLACE7 = path.join(H7, '.vibespace', 'local');
+  fs.mkdirSync(BUFS7, { recursive: true }); fs.mkdirSync(PLACE7, { recursive: true }); fs.chmodSync(path.dirname(PLACE7), 0o700); fs.chmodSync(PLACE7, 0o700);
+  const kids = [], servers = [];
+  const listen7 = (srv, ...a) => new Promise((r) => { servers.push(srv); srv.listen(...a, () => r(srv)); });
+  // a hub that answers — or FROZEN: it accepts and never answers (the CLI's one ask waits its 2 s)
+  const fakeHub = (frozen) => listen7(net.createServer((c) => { c.on('error', () => { }); if (!frozen) c.end('HTTP/1.1 200 OK\r\ncontent-length: 0\r\n\r\n'); }), 0, '127.0.0.1');
+  // a dtach master's stand-in: the CLI's MSG_PUSH packets (10 bytes: type 0, len, 8 payload bytes) back into lines
+  const master = (sock, onLine = () => { }) => listen7(net.createServer((c) => {
+    let b = Buffer.alloc(0), line = Buffer.alloc(0);
+    c.on('error', () => { });
+    c.on('data', (d) => {
+      b = Buffer.concat([b, d]);
+      while (b.length >= 10) {
+        const pk = b.subarray(0, 10); b = b.subarray(10);
+        if (pk[0] !== 0) continue;
+        line = Buffer.concat([line, pk.subarray(2, 2 + pk[1])]);
+        let i; while ((i = line.indexOf(10)) >= 0) { onLine(line.subarray(0, i).toString('utf8')); line = line.subarray(i + 1); }
+      }
+    });
+  }), sock);
+  const ST7 = LI.procStat(fs.readFileSync('/proc/self/stat', 'utf8'));
+  const index7 = (rows, port) => fs.writeFileSync(path.join(PLACE7, LI.indexFileOf('a4a4a4a4a4a4')), JSON.stringify(LI.docOf({ hub: { pid: process.pid, starttime: ST7.starttime, root: R4, port, host: '127.0.0.1', seenAt: Date.now() }, rows, now: Date.now() })), { mode: 0o600 });
+  const row7 = (id, o, extra = {}) => LI.rowOf(id, { mode: 'chat', backend: 'claude', name: id, createdAt: Date.now() - 60000, ...o }, { buffersDir: BUFS7, ...extra });
+  // the person's CLI, async (this process serves its socket and its hub)
+  const cli7 = (args, input = '') => new Promise((resolve) => {
+    const ch = spawn(process.execPath, [CLI, ...args], { env: { ...CLI_ENV, HOME: H7 }, stdio: ['pipe', 'pipe', 'pipe'] });
+    kids.push(ch);
+    let out = ''; ch.stdout.on('data', (d) => { out += d; }); ch.stderr.on('data', (d) => { out += d; });
+    ch.stdin.end(input);
+    const t = setTimeout(() => { try { ch.kill('SIGKILL'); } catch { } }, 30000);
+    ch.on('exit', (code) => { clearTimeout(t); resolve({ code, out }); });
+  });
+  const rec = (o) => JSON.stringify(o);
+  const said = (text, extra = {}) => rec({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] }, ...extra });
+  const copyLine = (handNo) => rec({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'a held line HCHELD' }] }, msgId: 'vs-cli-held', handNo, _fromWebui: true, webui_copy: true });
+  const count = (s, needle) => s.split(needle).length - 1;
+  const readOr = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return ''; } };
+
+  { // §7a THE FOLLOWER ON IDENTITY — the buffer's middle line EDITED IN PLACE while replies stream
+    const id = 'sess-r4-follow', buf = path.join(BUFS7, id + '.buf'), sock = path.join(R4, 'f.sock');
+    await master(sock); const hub = await fakeHub(false);
+    index7([row7(id, { socketPath: sock })], hub.address().port);
+    const L1 = said('EARLIER HCEARLY', { uuid: 'u-early' }), L2 = rec({ type: 'system', subtype: 'informational', content: 'queued' });
+    fs.writeFileSync(buf, [L1, copyLine(0), L2].join('\n') + '\n');
+    const run = cli7(['chat', id, '--wait', '4']);
+    await sleep(1200);
+    const R = (i) => said(`REPLY-${i} HCR4`);
+    for (const lines of [
+      [L1, copyLine(1), L2, R(1)],                                                            // the held copy drains: its line edited IN PLACE
+      [said('EARLIER HCEARLY, edited', { uuid: 'u-early' }), copyLine(1), L2, R(1), R(2)],   // a record already shown, edited in place
+      [copyLine(1), L2, R(1), R(2), R(3)],                                                    // the head cut
+      [copyLine(1), L2, R(1), R(2), R(3), R(4)],
+    ]) { fs.writeFileSync(buf, lines.join('\n') + '\n'); await sleep(300); }
+    const r = await run;
+    const replies = [1, 2, 3, 4].map((i) => count(r.out, `REPLY-${i} HCR4`));
+    ok('THE FOLLOWER ON RECORD IDENTITY (round 4): the buffer\'s middle line EDITED IN PLACE (a held copy draining — claude-steer\'s copy line) while replies stream — every reply shown exactly once (round 3\'s prefix rule: the first two never)',
+      replies.every((n) => n === 1), JSON.stringify(replies) + ' | ' + r.out.slice(-700));
+    ok('…a record already shown, edited in place: said once more, marked «(updated)»; the head cut repeats nothing; the held copy (the person\'s own line) only in the history',
+      count(r.out, '(updated)') === 1 && /\(updated\) claude: EARLIER HCEARLY, edited/.test(r.out) && count(r.out, 'EARLIER HCEARLY') === 2 && count(r.out, 'HCHELD') === 1, r.out.slice(-700));
+  }
+  { // §7b THE BASELINE BEFORE THE HISTORY — a FROZEN hub: the CLI's one ask waits 2 s while the wrapper persists
+    const id = 'sess-r4-gap', buf = path.join(BUFS7, id + '.buf'), sock = path.join(R4, 'g.sock');
+    await master(sock); const hub = await fakeHub(true);
+    index7([row7(id, { socketPath: sock })], hub.address().port);
+    fs.writeFileSync(buf, said('HISTORY-0 HCGAP') + '\n');
+    const run = cli7(['chat', id, '--wait', '3']);
+    await sleep(1000); fs.appendFileSync(buf, said('REPLY-AT-1s HCGAP') + '\n');   // persisted while the CLI waits on the frozen hub
+    await sleep(2000); fs.appendFileSync(buf, said('REPLY-AT-3s HCGAP') + '\n');
+    const r = await run;
+    ok('THE BASELINE BEFORE THE HISTORY (round 4): on a FROZEN hub the record the wrapper persisted while the CLI waited its 2 s is shown — the history, the gap and the live tail each exactly once',
+      /the hub is frozen/.test(r.out) && count(r.out, 'HISTORY-0 HCGAP') === 1 && count(r.out, 'REPLY-AT-1s HCGAP') === 1 && count(r.out, 'REPLY-AT-3s HCGAP') === 1, r.out.slice(-700));
+  }
+  { // §7c THE FOURTH CHAT WRAPPER — the REAL agy-wrapper over the stub agy, behind a dtach master's stand-in
+    const id = 'sess-r4-agy', buf = path.join(BUFS7, id + '.buf'), meta = path.join(BUFS7, id + '.json'), rcpt = LI.receiptsFileOf(buf), sock = path.join(R4, 'a.sock'), stubLog = path.join(R4, 'agy-stub.log');
+    const env = { ...process.env }; for (const k of Object.keys(env)) if (/^VIBESPACE_|^ACP_WEBUI_|^AGY_|^CLAUDE_CODE_/.test(k)) delete env[k];
+    const w = spawn(process.execPath, [path.join(REPO, 'data/bin/agy-wrapper.js'), buf, meta, path.join(REPO, 'scripts/fixtures/antigravity-agy')], { cwd: R4, env: { ...env, VIBESPACE_SKIP_AGENT_HOOKS: '1', AGY_WEBUI_CWD: R4, AGY_WEBUI_BACKEND: 'antigravity', AGY_STUB_LOG: stubLog, AGY_WEBUI_AUTH_GRACE_MS: '400' }, stdio: ['pipe', 'ignore', 'ignore'] });
+    kids.push(w);
+    const caps = await until(() => { try { return JSON.parse(fs.readFileSync(meta, 'utf8')).caps || null; } catch { return null; } }, 10000);
+    await master(sock, (line) => { try { w.stdin.write(line + '\n'); } catch { } });
+    const hub = await fakeHub(false);   // the hub UP and answering — where round 3 refused this session «started before 2.369.361»
+    const input = LI.frameTemplatesOf(JSON.stringify({ type: 'chat-input', text: LI.FRAME_TEXT, msgId: LI.FRAME_ID }), JSON.stringify({ type: 'interrupt' }));   // AgyAdapter's own Enter + Stop frames
+    index7([row7(id, { backend: 'antigravity', socketPath: sock }, { input })], hub.address().port);
+    const r = await cli7(['chat', id, '--wait', '1'], 'hello agy HCAGY\n');
+    const reached = await until(() => readOr(stubLog).includes('hello agy HCAGY'), 8000);
+    ok('THE FOURTH CHAT WRAPPER (round 4): agy-wrapper advertises receipts, and on a hub that answers `vibespace chat` SENDS to an Antigravity session — acknowledged by its receipt (round 3: read-only, «started before 2.369.361»)',
+      !!caps && caps.receipts === true && r.code === 0 && !/read-only|not acknowledged/.test(r.out) && /"type":"_stdin_ack"[^\n]*"msg_id":"vs-cli-/.test(readOr(rcpt)), JSON.stringify({ caps, code: r.code, rcpt: readOr(rcpt) }) + ' | ' + r.out.slice(-500));
+    ok('…the line reached agy without the receipt key; the replay buffer holds no ack', !!reached && !readOr(stubLog).includes('webui_receipt') && !/_stdin_ack|_stdin_nack/.test(readOr(buf)), readOr(stubLog).slice(-400));
+    w.stdin.write('{"type":"chat-input","text":"torn HCTORN\n');   // a line torn in transit: it does not parse
+    const nacked = await until(() => /"type":"_stdin_nack"[^\n]*"reason":"torn"/.test(readOr(rcpt)), 5000);
+    const said2 = await until(() => /lost-input/.test(readOr(buf)), 5000);
+    ok('…a TORN line: its _stdin_nack in the receipts file (one grammar with claude / codex / acp) and the «did not reach Antigravity» notice in the buffer — never a prompt', !!nacked && !!said2 && !readOr(stubLog).includes('HCTORN'), readOr(rcpt));
+    w.kill('SIGTERM');
+    await until(() => w.exitCode != null || w.signalCode != null, 5000);
+    ok('…its receipts file goes with the wrapper; the buffer it leaves holds neither ack nor nack', !fs.existsSync(rcpt) && !/_stdin_ack|_stdin_nack/.test(readOr(buf)), readOr(rcpt));
+  }
+  { // §7d THE PERSIST WINDOW — the real chat-wrapper over the stand-in claude, no person's CLI following
+    const id = 'sess-r4-pw', buf = path.join(BUFS7, id + '.buf'), meta = path.join(BUFS7, id + '.json');
+    const w = spawn(process.execPath, [path.join(REPO, 'data/bin/chat-wrapper.js'), buf, meta, process.execPath, path.join(REPO, 'scripts/fixtures/claude-stand-in-cli.cjs')], { cwd: R4, env: { PATH: process.env.PATH, HOME: R4, VIBESPACE_SKIP_AGENT_HOOKS: '1', STAND_IN_LONG_MS: '2500' }, stdio: ['pipe', 'ignore', 'ignore'] });
+    kids.push(w);
+    await until(() => fs.existsSync(meta), 10000);
+    await sleep(2500);   // whatever the boot wrote is persisted (its 2 s cadence)
+    const size = () => { try { return fs.statSync(buf).size; } catch { return 0; } };
+    const s0 = size(), t0 = Date.now();
+    w.stdin.write('{"type":"user","message":{"role":"user","content":[{"type":"text","text":"torn HCPW\n');   // torn — and no person's CLI follows
+    await until(() => size() > s0, 6000, 20);
+    const tornMs = Date.now() - t0;
+    ok('THE 250 ms WINDOW OPENS ONLY ON A RECEIPT ASKED FOR (round 4): a torn line with no CLI following is persisted at the wrapper\'s 2 s cadence (round 3: 250 ms for 2 min — a sync whole-buffer rewrite 8× as often, for nobody)', tornMs >= 1500, `${tornMs} ms`);
+    const t1 = Date.now();
+    w.stdin.write(JSON.stringify({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'followed HCPW' }] }, webui_msg_id: 'vs-cli-pw', webui_receipt: true }) + '\n');
+    await until(() => readOr(buf).includes('reply: followed HCPW'), 6000, 20);
+    const followedMs = Date.now() - t1;
+    ok('…a frame that ASKS for a receipt (a person\'s CLI follows) opens it: its reply is in the buffer well inside the 2 s cadence', followedMs < 1500, `${followedMs} ms`);
+    w.kill('SIGTERM');
+    await until(() => w.exitCode != null || w.signalCode != null, 5000);
+  }
+  for (const k of kids) { try { if (k.exitCode == null && k.signalCode == null) k.kill('SIGKILL'); } catch { } }   // only this section's own children
+  for (const s of servers) { try { s.close(); } catch { } }
+}
 
 try { ws.close(); } catch { }
 console.log(`\ntest-human-cli: ${pass} passed, ${fail} failed`);

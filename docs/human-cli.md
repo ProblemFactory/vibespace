@@ -51,7 +51,8 @@ or a unique part of its name — the command then shows the name and asks before
   second viewer on the session's socket can make the hub's own view miss output. `--take` attaches anyway.
 - **chat** never stays connected to the session: each line is handed over and the connection let go, and the reply is
   read from the session's own log file. Each line is confirmed by the session («not acknowledged in 6 s» if it is
-  not); Stop says «Stop taken» only once the session confirms it.
+  not); Stop says «Stop taken» only once the session confirms it. Every reply is shown once; one the session changes
+  after it was shown is shown again, marked «(updated)».
 
 ## Over ssh
 

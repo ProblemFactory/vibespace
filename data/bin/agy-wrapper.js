@@ -100,14 +100,38 @@ const meta = {
   // ladder's live rung may write it (backend-caps peerDelivery 'rpc-queue'). notificationSteer:false — 'steer' here is
   // a STOP + a new billed turn, never codex's free fold into the running turn: said explicitly, so the verb list above
   // can never make a mid-turn notification look free (src/server/wrapper-files.js wrapperCaps: explicit beats derived).
-  caps: { frameFile: true, peerMessage: true, notificationSteer: false, inputQueue: true, queueVerbs: QUEUE_VERBS, permissionRules: true, queueResync: true },
+  // receipts (lane human-cli r4): the receipts road below — the person's CLI sends here only while it can be told a torn line
+  caps: { frameFile: true, peerMessage: true, notificationSteer: false, inputQueue: true, queueVerbs: QUEUE_VERBS, permissionRules: true, queueResync: true, receipts: true },
   queue: [],
 };
 
 let buffer = '', writeTimer = null, metaTimer = null;
 function persistBuffer() { writeTimer = null; try { fs.mkdirSync(path.dirname(bufferFile), { recursive: true }); fs.writeFileSync(bufferFile, buffer); } catch { } }
 function persistMeta() { metaTimer = null; try { fs.mkdirSync(path.dirname(metaFile), { recursive: true }); fs.writeFileSync(metaFile, JSON.stringify(meta)); } catch { } }
-function schedulePersist() { if (!writeTimer) writeTimer = setTimeout(persistBuffer, 1000); }
+function schedulePersist() { if (!writeTimer) writeTimer = setTimeout(persistBuffer, Date.now() - lastReceiptAt < FOLLOWED_MS ? 250 : 1000); }   // a person's CLI follows the buffer (it asked for a receipt lately): its replies land in 250 ms
+/** THE RECEIPTS ROAD (lane human-cli r3; r4: this fourth chat wrapper too — ONE grammar across chat-wrapper / codex / acp /
+ *  agy): a receipt is the WRITER's, never a replayed record — the buffer is what a conversation replays to a person. The
+ *  ack a frame asked for (`webui_receipt`: the person's CLI never stays attached) and a torn line's nack go to
+ *  <id>.receipts beside the buffer (the last 50, rewritten whole; removed when this wrapper exits) — the CLI follows that
+ *  file (src/local-index.js receiptsFileOf spells the same name). */
+const receiptsFile = bufferFile ? String(bufferFile).replace(/\.buf$/, '') + '.receipts' : null;
+const receiptLines = [];
+var lastReceiptAt = 0;            // var: schedulePersist may run before this line (a record at boot) — undefined reads as «not followed»
+const FOLLOWED_MS = 120000;       // a receipt asked for in the last 2 min = a person's CLI is following this buffer
+function writeReceipt(rec) {
+  if (!receiptsFile) return;
+  if (rec.type === '_stdin_ack') lastReceiptAt = Date.now();   // r4: only an ack a frame ASKED for opens the 250 ms window (a person's CLI follows) — a torn line's nack alone never does
+  receiptLines.push(JSON.stringify(rec));
+  if (receiptLines.length > 50) receiptLines.shift();
+  try { fs.writeFileSync(receiptsFile, receiptLines.join('\n') + '\n'); } catch { }
+}
+process.on('exit', () => { if (receiptLines.length) { try { fs.unlinkSync(receiptsFile); } catch { } } });
+function rejectStdinLine(line) {
+  const nack = { type: '_stdin_nack', timestamp: Date.now(), reason: 'torn', bytes: line.length };   // the sender's receipt (lane human-cli r4): its own road, never the replay buffer
+  writeReceipt(nack);
+  try { process.stdout.write(JSON.stringify(nack) + '\n'); } catch { }
+  notice('error', `Your message did not reach Antigravity: the input line was corrupted in transit (${line.length} bytes, unparseable) — please send it again.`, 'lost-input');
+}
 function scheduleMeta() { if (!metaTimer) metaTimer = setTimeout(persistMeta, 200); }
 function writeRecord(rec) {
   const line = JSON.stringify(rec);
@@ -1014,9 +1038,15 @@ function boot() {
       const line = stdinBuf.slice(0, idx).replace(/\r/g, '').trim();
       stdinBuf = stdinBuf.slice(idx + 1);
       if (!line) continue;
-      try { process.stdout.write(JSON.stringify({ type: '_stdin_ack', timestamp: Date.now() }) + '\n'); } catch { }
+      // the ack: "the pipe is alive" (also for a line that is not valid) — naming its frame's msgId; a frame that asks for a
+      // RECEIPT (`webui_receipt`, the person's CLI) gets it in its receipts file, never the replay buffer (lane human-cli r4)
       let msg = safeJsonParse(line);
-      if (!msg || typeof msg !== 'object') { notice('error', `Your message did not reach Antigravity: the input line was corrupted in transit (${line.length} bytes, unparseable) — please send it again.`, 'lost-input'); continue; }
+      const receipt = !!(msg && typeof msg === 'object' && msg.webui_receipt === true);
+      if (receipt) delete msg.webui_receipt;
+      const ack = { type: '_stdin_ack', timestamp: Date.now(), ...(msg && typeof msg === 'object' && (msg.msgId || msg.webui_msg_id) ? { msg_id: String(msg.msgId || msg.webui_msg_id) } : {}) };
+      if (receipt) writeReceipt(ack);
+      try { process.stdout.write(JSON.stringify(ack) + '\n'); } catch { }
+      if (!msg || typeof msg !== 'object') { rejectStdinLine(line); continue; }
       if (msg.type === '_frame_file') { msg = loadFrameFile(msg); if (!msg) continue; }
       handleInput(msg).catch((err) => { notice('error', err.message, 'handler-error'); });
     }

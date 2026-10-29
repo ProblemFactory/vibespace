@@ -398,16 +398,27 @@ function historySources(row) {
   if (row.buffer) out.push(['buffer', row.buffer]);
   return out;
 }
+/** What a history read holds, by identity: each line's text, and its record's uuid — a record the buffer's follower
+ *  reports from the gap (round 4) that the history already showed is not shown twice. */
+function seenOf(text) {
+  const seen = new Set();
+  for (const raw of String(text || '').split('\n')) {
+    const ln = raw.trim(); if (!ln) continue;
+    seen.add(ln);
+    try { const o = JSON.parse(ln); if (o && typeof o.uuid === 'string' && o.uuid) seen.add('uuid|' + o.uuid); } catch { }
+  }
+  return seen;
+}
 async function historyOf(row, max) {
   const tried = [];
   for (const [kind, file] of historySources(row)) {
     const r = await readTail(file);
     if (!r.ok) { tried.push(`${kind} ${tildeOf(file)}: ${r.why}`); continue; }
     const msgs = LI.historyOf(r.text, { max });
-    if (msgs.length) return { msgs, kind, file, tried };
+    if (msgs.length) return { msgs, kind, file, tried, seen: seenOf(r.text) };
     tried.push(`${kind} ${tildeOf(file)}: no messages`);
   }
-  return { msgs: [], kind: null, file: null, tried };
+  return { msgs: [], kind: null, file: null, tried, seen: new Set() };
 }
 const COLOR = process.stdout.isTTY && !process.env.NO_COLOR;
 const dim = (s) => (COLOR ? `\x1b[2m${s}\x1b[0m` : s);
@@ -422,42 +433,69 @@ function msgText(m, agentName) {
 }
 const HELD_WORDS = { 'vault-locked': 'the hub\'s vault is locked and the session waits for it — Unlock… at the top of the hub\'s page (For you names what is waiting on it)' };
 
-/** The wrapper's buffer, FOLLOWED in a child (a stalled mount holds the child, never this process): each new complete
- *  line as it lands, plus a pulse every second. The wrapper rewrites the whole file (a rolling window): new = what follows
- *  the old text's longest kept part. */
+/** The wrapper's buffer, FOLLOWED in a child (a stalled mount holds the child, never this process): each record new since
+ *  the baseline as it lands, plus a pulse every tick. ROUND 4 — A FOLLOWER KEYS ON RECORD IDENTITY, NEVER ON A TEXT
+ *  PREFIX: the wrapper rewrites the whole file (a rolling window), and on the train claude-steer EDITS a copy line in place
+ *  (a held frame's handNo when it drains, an edit of a held row, a ⚡) — round 2's «the old text, cut at the front, grown
+ *  at the end» read that as «not my file» and went blind (0 of 8 records shown on int361). A line is known by its text; a
+ *  record by its id (claude's uuid, a copy line's msgId) — only while ONE line of the read holds it (a placeholder uuid
+ *  shared by two records identifies neither). Every line not seen before is said once; a known record whose line changed
+ *  is said as `updated`; a line seen before (moved, or the head cut) never again. The baseline is two reads one tick apart
+ *  (one may catch a rewrite half-done), then `ready`; what is known is forgotten by READS, never by time (an idle
+ *  session's lines stay known). */
 const FOLLOW_CHILD = `
 const fs = require('fs');
 const p = JSON.parse(process.argv[1]);
-let prev = null, sig = '', mis = null;
+const known = new Map(), ids = new Map();   // a line (its text; #n for a repeat within one read) → {id, at} · a record's id → {at}
+let reads = 0, sig = '';
 const say = (s) => { try { fs.writeSync(1, s + '\\n'); } catch { process.exit(0); } };
+const own = (s) => Buffer.from(s).toString();   // a key of its own (a slice of the read would hold the whole read alive)
+function idOf(ln) {
+  let o = null; try { o = JSON.parse(ln); } catch { return ''; }
+  if (!o || typeof o !== 'object') return '';
+  if (o.webui_copy === true && o.msgId) return 'copy|' + o.msgId;
+  if (typeof o.uuid === 'string' && o.uuid) return 'uuid|' + o.type + '|' + o.uuid;
+  return '';
+}
 function tick() {
   let st = null; try { st = fs.statSync(p); } catch { }
   const s = st ? st.size + ':' + st.mtimeMs : 'none';
-  if (s !== sig) {
+  if (s !== sig || reads < 2) {
     sig = s;
     let t = ''; try { t = fs.readFileSync(p, 'utf8'); } catch { t = ''; }
-    if (prev == null) prev = t;
-    else if (t !== prev) {
-      let cut = -1;
-      if (t.startsWith(prev)) cut = 0;
-      else { const first = t.slice(0, t.indexOf('\\n') + 1); for (let i = first ? prev.indexOf(first) : -1; i >= 0; i = prev.indexOf(first, i + 1)) { if ((i === 0 || prev[i - 1] === '\\n') && t.startsWith(prev.slice(i))) { cut = i; break; } } }
-      const add = cut >= 0 ? t.slice(prev.length - cut) : '';
-      const done = add.lastIndexOf('\\n');
-      if (cut < 0) { if (t === mis) { prev = t; mis = null; } else { mis = t; sig = ''; } }   // not a rolling window of the old text (a read mid-rewrite, or a new file): re-based only once two reads agree
-      else if (done >= 0) { mis = null; for (const ln of add.slice(0, done).split('\\n')) if (ln.trim()) say(ln); prev = t.slice(0, t.length - (add.length - done - 1)); sig = ''; }
+    const end = t.lastIndexOf('\\n');
+    if (end !== t.length - 1) sig = '';   // a partial last line (a read mid-write): read again next tick
+    const rows = [], rep = new Map(), idn = new Map();
+    for (const ln of t.slice(0, end + 1).split('\\n')) {
+      if (!ln.trim()) continue;
+      const n = rep.get(ln) || 0; rep.set(ln, n + 1);
+      const k = n ? ln + ' #' + n : ln, e = known.get(k), id = e ? e.id : idOf(ln);
+      if (id) idn.set(id, (idn.get(id) || 0) + 1);
+      rows.push([k, ln, id, e]);
     }
+    reads++;
+    for (const [k, ln, id, e] of rows) {
+      const one = !!id && idn.get(id) === 1, was = one && ids.has(id);
+      if (one) ids.set(id, { at: reads });
+      if (e) { e.at = reads; continue; }   // a line seen before (moved, or the head cut): never said twice
+      known.set(own(k), { id, at: reads });
+      if (reads <= 2) continue;            // the baseline
+      say(was ? '{"_follow":"updated","line":' + ln + '}' : ln);   // the same record rewritten in place, or a new one
+    }
+    if (reads === 2) say('{"_follow":"ready"}');
+    if (reads % 20 === 0) for (const m of [known, ids]) for (const [k, e] of m) if (reads - e.at > 50) m.delete(k);
   }
   say('{"_follow":"pulse"}');
 }
 tick(); setInterval(tick, ${POLL_MS});`;
 function follow(file, onRecord, onStall) {
   let ch, buf = '', last = Date.now(), stalled = false, isReady = null;
-  // READY = the child took its baseline (its first pulse): a line sent before it could be acked INTO the baseline and
-  // never reported — every send waits on it (bounded: a child that never speaks is the stall below)
+  // READY = the child took its baseline (its `ready`, after two reads): a line sent before it could be acked INTO the
+  // baseline and never reported — every send waits on it, and chat reads the history only after it (round 4); bounded: a
+  // child that never speaks is the stall below
   const ready = new Promise((r) => { isReady = r; setTimeout(r, PROBE_MS).unref(); });
   try { ch = cp.spawn(process.execPath, ['-e', FOLLOW_CHILD, JSON.stringify(file)], { stdio: ['ignore', 'pipe', 'ignore'], env: {} }); } catch { return { stop() { }, ready: Promise.resolve() }; }
   ch.stdout.on('data', (d) => {
-    isReady();
     last = Date.now(); if (stalled) { stalled = false; onStall(false); }
     buf += d;
     let i;
@@ -465,8 +503,10 @@ function follow(file, onRecord, onStall) {
       const ln = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
       if (!ln || ln[0] !== '{') continue;
       let rec; try { rec = JSON.parse(ln); } catch { continue; }
+      if (rec._follow === 'ready') { isReady(); continue; }
+      if (rec._follow === 'updated') { if (rec.line && typeof rec.line === 'object') onRecord(rec.line, { updated: true }); continue; }
       if (rec._follow) continue;
-      onRecord(rec);
+      onRecord(rec, { raw: ln });
     }
   });
   const watch = setInterval(() => { if (!stalled && Date.now() - last > 3 * PROBE_MS) { stalled = true; onStall(true); } }, 1000);
@@ -497,33 +537,17 @@ async function cmdChat(q, opts) {
   if (!(await confirmName(pick, 'chat with'))) { say('nothing sent.'); return 1; }
   const agentName = C(row.backend || 'agent');
   const metaFile = row.buffer ? row.buffer.replace(/\.buf$/, '.json') : null;
-  const [hist, judged] = await Promise.all([historyOf(row, opts.n), judgeAll([pick.doc], { ask: true, reads: metaFile ? [metaFile] : [] })]);
-  const fact = row.socket ? judged.facts.sock.get(row.socket) : null;
-  const hub = judged.hubs[0];
-  const live = hub.hub.state === 'up' && hub.http && hub.http.word === 'answers';
-  let caps = {}; try { const m = judged.facts.read.get(metaFile); caps = (m && m.ok && JSON.parse(m.text).caps) || {}; } catch { caps = {}; }
-  const receipts = caps.receipts === true;
-  say(dim(`${label(row)} · ${agentName} · ${tildeOf(row.cwd || '')} · ${hub.hub.state === 'none' ? 'no hub on record' : `the hub is ${hub.hub.state}`}`));
-  if (hist.msgs.length) { say(dim(`the last ${hist.msgs.length} message(s), from its ${hist.kind} ${tildeOf(hist.file)}:`)); for (const m of hist.msgs) say(msgText(m, agentName)); }
-  else say(dim(`no earlier messages could be read${hist.tried.length ? ' (' + hist.tried.join('; ') + ')' : ''}`));
-  if (!row.socket) { warn(`vibespace: ${label(row)} has no dtach socket (a daemon pipe session) — only the hub reaches it; read-only`); return 1; }
-  if (fact !== 'accepts') { warn(`vibespace: ${label(row)} is read-only here: ${goneWords(row, fact)} — the wrapper is not reachable; above is the last it wrote.`); return 1; }
-  let readOnly = !row.input ? 'the hub did not write how this session takes a line (a hub before 2.369.361)'
-    : row.inputHeld ? `${HELD_WORDS[row.inputHeld] || `its machine is not connected (${C(row.inputHeld)}) — a line would only wait`} (as the hub last said, ${LI.ageWords(Date.now() - (pick.doc.doc.writtenAt || 0))} ago)`
-      : !receipts && live ? 'the hub is up, and this session\'s wrapper (started before 2.369.361) cannot refuse a line torn by two senders at once — send from the hub\'s page, or here while the hub is down'
-        : null;
-  say(dim(readOnly ? `read-only: ${readOnly}` : `type a line + Enter to send it · ${tty ? 'Esc or ' : ''}/stop = Stop the running turn · ${tty ? 'Ctrl-C' : 'end of input'} = leave (the session keeps running)${live ? ' · the hub\'s page shows the reply, not your line' : ''}`));
-
-  let chunkOpen = false, leaving = false, rl = null, failed = 0;
+  let chunkOpen = false, leaving = false, rl = null, failed = 0, histDone = false;
   const waiters = [];   // {id, resolve} — a receipt for OUR frame (ack by id) or a torn line (nack) after our push
   const out = (line) => {
     if (chunkOpen) { process.stdout.write('\n'); chunkOpen = false; }
     if (rl && tty) { readline.clearLine(process.stdout, 0); readline.cursorTo(process.stdout, 0); process.stdout.write(line + '\n'); rl.prompt(true); }
     else process.stdout.write(line + '\n');
   };
-  const onRecord = (rec) => {
+  const onRecord = (rec, how = {}) => {
     const rc = LI.receiptOf(rec);
     if (rc) {
+      if (how.updated) return;
       // an ack names its frame; a nack cannot (its line did not parse) — the oldest waiter takes it, after a breath in which
       // its own ack may still arrive (the wrapper acks every line in order)
       if (rc.kind === 'ack') { const w = waiters.find((x) => x.id === rc.id); if (w) w.resolve('ack'); }
@@ -532,6 +556,7 @@ async function cmdChat(q, opts) {
     }
     for (const m of LI.recordLines(rec)) {
       if (m.who === 'you') continue;   // the person's own line is echoed when it is sent
+      if (how.updated) { if (!m.chunk) out(dim('  (updated) ') + msgText(m, agentName)); continue; }   // a record the session rewrote in place (round 4): said again, marked — never a reset of the follower
       if (m.chunk) {
         if (!chunkOpen) { if (rl && tty) { readline.clearLine(process.stdout, 0); readline.cursorTo(process.stdout, 0); } process.stdout.write(`${bold(agentName)}: `); chunkOpen = true; }
         process.stdout.write(C(m.text, { keep: '\n\t' }));
@@ -540,8 +565,45 @@ async function cmdChat(q, opts) {
       out(msgText(m, agentName));
     }
   };
-  const tail = row.buffer ? follow(row.buffer, onRecord, (on) => out(dim(on ? `  (the session's buffer ${tildeOf(row.buffer)} stopped answering — its mount? replies will show once it answers)` : '  (the buffer answers again)'))) : { stop() { }, ready: Promise.resolve() };
-  const rtail = row.buffer && receipts ? follow(LI.receiptsFileOf(row.buffer), onRecord, () => { }) : { stop() { }, ready: Promise.resolve() };   // the wrapper's receipts ride their own file (never the replay buffer)
+  // THE BASELINE FIRST (round 4): both followers take theirs BEFORE the history is read and the hub is asked (up to 2 s
+  // on a frozen hub) — a record the wrapper persists meanwhile is in the history or shown right after it, once (by its
+  // text; by its uuid against a transcript), never in neither. What they report until the history is printed waits here.
+  const early = [];
+  const onEarly = (rec, how) => (histDone ? onRecord(rec, how) : early.push([rec, how]));
+  const stallWords = (on) => dim(on ? `  (the session's buffer ${tildeOf(row.buffer)} stopped answering — its mount? replies will show once it answers)` : '  (the buffer answers again)');
+  const idle = { stop() { }, ready: Promise.resolve() };
+  const tail = row.buffer ? follow(row.buffer, onEarly, (on) => (histDone ? out(stallWords(on)) : early.push([null, { stall: on }]))) : idle;
+  let rtail = row.buffer ? follow(LI.receiptsFileOf(row.buffer), onEarly, () => { }) : idle;   // the wrapper's receipts ride their own file (never the replay buffer)
+  const [hist, judged] = await Promise.all([tail.ready.then(() => historyOf(row, opts.n)), judgeAll([pick.doc], { ask: true, reads: metaFile ? [metaFile] : [] })]);
+  const fact = row.socket ? judged.facts.sock.get(row.socket) : null;
+  const hub = judged.hubs[0];
+  const live = hub.hub.state === 'up' && hub.http && hub.http.word === 'answers';
+  // the wrapper's caps, from its sidecar — an unreadable sidecar is UNKNOWN (said so), never «an old wrapper» (round 4)
+  const metaFact = metaFile ? judged.facts.read.get(metaFile) : null;
+  let caps = null; try { caps = metaFact && metaFact.ok ? (JSON.parse(metaFact.text).caps || {}) : null; } catch { caps = null; }
+  const receipts = !!caps && caps.receipts === true;
+  if (!receipts) { rtail.stop(); rtail = idle; }
+  const capsUnknown = () => (!metaFile ? 'the hub wrote no buffer for this session'
+    : `this session's sidecar ${tildeOf(metaFile)} could not be read (${metaFact === 'no-answer' ? `no answer in ${PROBE_MS / 1000} s` : C((metaFact && metaFact.code) || 'not one JSON object')})`);
+  say(dim(`${label(row)} · ${agentName} · ${tildeOf(row.cwd || '')} · ${hub.hub.state === 'none' ? 'no hub on record' : `the hub is ${hub.hub.state}`}`));
+  if (hist.msgs.length) { say(dim(`the last ${hist.msgs.length} message(s), from its ${hist.kind} ${tildeOf(hist.file)}:`)); for (const m of hist.msgs) say(msgText(m, agentName)); }
+  else say(dim(`no earlier messages could be read${hist.tried.length ? ' (' + hist.tried.join('; ') + ')' : ''}`));
+  if (!row.socket) { tail.stop(); rtail.stop(); warn(`vibespace: ${label(row)} has no dtach socket (a daemon pipe session) — only the hub reaches it; read-only`); return 1; }
+  if (fact !== 'accepts') { tail.stop(); rtail.stop(); warn(`vibespace: ${label(row)} is read-only here: ${goneWords(row, fact)} — the wrapper is not reachable; above is the last it wrote.`); return 1; }
+  let readOnly = !row.input ? 'the hub did not write how this session takes a line (a hub before 2.369.361)'
+    : row.inputHeld ? `${HELD_WORDS[row.inputHeld] || `its machine is not connected (${C(row.inputHeld)}) — a line would only wait`} (as the hub last said, ${LI.ageWords(Date.now() - (pick.doc.doc.writtenAt || 0))} ago)`
+      : !receipts && live ? (caps ? 'the hub is up, and this session\'s wrapper writes no receipts (it started before 2.369.361 — a restart of the session gets them), so it could not refuse a line torn by two senders at once — send from the hub\'s page, or here while the hub is down'
+        : `the hub is up, and ${capsUnknown()} — whether its wrapper writes receipts is unknown; send from the hub's page, or here while the hub is down`)
+        : null;
+  // the gap: what the wrapper persisted after the baseline — shown once; never what the history above already showed
+  histDone = true;
+  for (const [rec, how] of early.splice(0)) {
+    if (!rec) { out(stallWords(how.stall)); continue; }
+    if (how.raw && (hist.seen.has(how.raw) || (hist.kind === 'transcript' && typeof rec.uuid === 'string' && rec.uuid && hist.seen.has('uuid|' + rec.uuid)))) continue;
+    onRecord(rec, how);
+  }
+  out(dim(readOnly ? `read-only: ${readOnly}` : `type a line + Enter to send it · ${tty ? 'Esc or ' : ''}/stop = Stop the running turn · ${tty ? 'Ctrl-C' : 'end of input'} = leave (the session keeps running)${live ? ' · the hub\'s page shows the reply, not your line' : ''}`));
+
   const leave = (code = 0, words = null) => {
     if (leaving) return; leaving = true;
     if (words) out(words);

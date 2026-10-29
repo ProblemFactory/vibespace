@@ -368,6 +368,7 @@ function registerWsHandler(wss, ctx) {
       if (session.pty) session.pty.kill();
       if (session.sockName) deleteSessionMeta(session.sockName);
       // Clean up wrapper buffer files
+      fs.unlink(path.join(BUFFERS_DIR, data.sessionId + '.receipts'), () => { }); // the wrapper's receipts (lane human-cli r4): its own exit removes them, not when it is killed past that — off the loop
       try { fs.unlinkSync(path.join(BUFFERS_DIR, data.sessionId + '.json')); } catch {}
       try { fs.unlinkSync(path.join(BUFFERS_DIR, data.sessionId + '.buf')); } catch {}
       // Per-session agentd attach cfg (0600 — vsht_ host token + full
