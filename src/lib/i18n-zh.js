@@ -11250,7 +11250,7 @@ export default {
   "A wildcard host (like *.example.com) is scoped to the tool that first used it — add it from a run card with «Always», not here": "通配主机（例如 *.example.com）只限第一次用它的那个工具——请在运行卡片里用「总是允许」添加，而不是在这里",
   "It said it needs it for: {hosts}. If you paste it, the conversation that asked may use it in commands to those hosts for 8 hours — a command to any other host still shows you its card; a vault lock ends it. To let it be used without that limit, turn on «Usable by agent runs» on its row in the Vault window.": "它说需要用于：{hosts}。如果你粘贴，发起请求的对话可以在接下来 8 小时内用它向这些主机发命令——向其他任何主机的命令仍会给你看卡片；锁定保险库即结束。要不受时间限制地使用，请在保险库窗口里该条目的行上打开「可供 agent 运行使用」。",
   "If you paste it, the conversation that asked may use it, but every command still shows you its card (it named no hosts); a vault lock ends it. To let it be used without a card, turn on «Usable by agent runs» on its row in the Vault window.": "如果你粘贴，发起请求的对话可以使用它，但每条命令仍会给你看卡片（它未写明主机）；锁定保险库即结束。要无需卡片地使用，请在保险库窗口里该条目的行上打开「可供 agent 运行使用」。",
-  "The conversation that asked is not allowed to use it in runs until you turn on «Usable by agent runs» on its row in the Vault window.": "发起请求的对话在你于保险库窗口里该条目的行上打开「可供 agent 运行使用」之前，不能在运行里使用它。"
+  "The conversation that asked is not allowed to use it in runs until you turn on «Usable by agent runs» on its row in the Vault window.": "发起请求的对话在你于保险库窗口里该条目的行上打开「可供 agent 运行使用」之前，不能在运行里使用它。",
   // lane wake-approve-card: a decision only your click makes says who and when (the chat card and the tray row alike; «approved by you» is the API dialog's key)
   "denied by you": "你已拒绝",
   "waiting for the owner — answer it in the conversation or in For you": "等待所有者处理 — 在对话里或「待你处理」中回答",
