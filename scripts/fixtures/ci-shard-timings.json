@@ -91,6 +91,7 @@
   "test-chat-needs-card-chrome": 430000,
   "test-channel-agent-watch": 4000,
   "test-jobs-cli-body": 1000,
+  "test-browser-verbs": 9300,
   "test-conversation-needs": 2000,
   "test-wake-approve-card-chrome": 90000,
   "test-wake-approve-card": 2000,
