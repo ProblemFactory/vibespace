@@ -832,7 +832,7 @@ export const SUITES = [
   // THE GATE'S OWN GATE, in seven parts (lane fast-tier-ratchet, 2026-10-20): the one process ran 37 s alone — over THE TIER
   // RULE's 10 s, and a LAW row stays fast — so its independent sections are seven suites of ≤ 10 s, every section's text
   // unchanged, the shared kit scripts/ci-gate-kit.mjs (the checkout allowance rides the two parts that make one: §5, §8).
-  { name: 'test-ci-gate', tier: 'fast', why: 'LAW architecture · 6.4 s — the gate\'s own gate, part 1/7: §1 the census, §2 tier hygiene + THIS rule (§2b) + §2e the wall-clock census + §2f the apt installs + §2h every setup step bounded, the ONE fonts road (the rest: test-ci-gate-push / -tiers / -shards / -reaper / -hang / -watchdog)' },
+  { name: 'test-ci-gate', tier: 'fast', why: 'LAW architecture · 6.6 s — the gate\'s own gate, part 1/7: §1 the census, §2 tier hygiene + THIS rule (§2b) + §2e the wall-clock census + §2f the apt installs + §2h every setup step bounded, the ONE fonts road + §2i a red names its legs (the rest: test-ci-gate-push / -tiers / -shards / -reaper / -hang / -watchdog)' },
   { name: 'test-ci-gate-push', tier: 'fast', why: 'LAW architecture · 6.3 s — the gate\'s own gate, part 2/7: §3 the block rule over real commits, §4 the real pre-push hook end to end, §5 the detached child\'s git environment (a real git worktree add, the damage as the control)', allow: ['checkout'] },
   { name: 'test-ci-gate-tiers', tier: 'fast', why: 'LAW architecture · 4.9 s — the gate\'s own gate, part 3/7: §6 machine-global fixtures + no-verdict honesty, §7 no literal date, §8 lanes / the serial table / the impact scope (a real git worktree add), §8d the xpra window family', allow: ['checkout'] },
   { name: 'test-ci-gate-shards', tier: 'fast', why: 'LAW architecture · 4.2 s — the gate\'s own gate, part 4/7: §8b every heavy suite in exactly one shard, §8c the self-hosted batch + the hosted shards partition the tier' },
@@ -2148,6 +2148,34 @@ export function startLaneBuses(lanes, { root = process.env.VIBESPACE_CI_LANE_ROO
   log(`[ci:heavy] lane env: a private HOME + XDG_RUNTIME_DIR + session bus per lane under ${root} (${procs.filter((x) => fs.existsSync(x.bus)).length} of ${lanes.length} buses up), no DISPLAY inherited`);
   return procs;
 }
+// A RED NAMES ITS LEGS (lane ci-mirror-hygiene, 2.369.362): a red suite's row keeps its last 40 lines, and its ✗ lines
+// can sit above them — 2.369.361's mirror fast job printed «test-pool-auto 4 FAILED (667 passed)» and no leg (the cause,
+// the depth-1 clone, cost an hour of guessing). So the ✗ entry carries EVERY `✗` line of the suite's output first
+// (stdout's, then stderr's), before the tail: at most FAIL_LINES_MAX, each cut at FAIL_LINE_CHARS, the count said; a
+// suite that printed none adds nothing. test-ci-gate §2i plants the runner's shape.
+export const FAIL_LINES_MAX = 40, FAIL_LINE_CHARS = 400;
+export function failLegs(stdout, stderr) {
+  const xs = `${stdout || ''}\n${stderr || ''}`.split('\n').filter((l) => /^\s*✗ /.test(l)).map((l) => l.trimEnd());
+  if (!xs.length) return '';
+  const more = xs.length - FAIL_LINES_MAX;
+  return `\n  [ci] its ✗ lines: ${xs.length}${more > 0 ? ` — the first ${FAIL_LINES_MAX}` : ''} (from its whole output; its last 40 lines follow):\n`
+    + xs.slice(0, FAIL_LINES_MAX).map((l) => (l.length > FAIL_LINE_CHARS ? l.slice(0, FAIL_LINE_CHARS) + '…' : l)).join('\n')
+    + (more > 0 ? `\n  [ci] … ${more} more ✗ line(s) not shown` : '');
+}
+// A FAILED RUN'S WHOLE OUTPUT, kept: <dir>/<sha8>.<suite>.<try>.log, said on its own line → the file, or null. The heavy
+// tier's <markers>/fail-logs since lane ci-aidev-desktop-batch; the FAST tier's FAST_FAIL_LOGS since lane
+// ci-mirror-hygiene (its hang reports there too) — ci.yml's fast job uploads it on a red, as the heavy shards do theirs.
+export const FAST_FAIL_LOGS = 'data/ci-fast/fail-logs';
+const fastFailDir = () => path.join(repo, ...FAST_FAIL_LOGS.split('/'));
+export function writeFailLog(dir, sha, s, r, attempt, { tag = '[ci]', log = console.log } = {}) {
+  if (r.ok || r.absent || !r.full) return null;
+  try {
+    const f = path.join(dir, `${shortSha(sha)}.${s.name}.${attempt}.log`);
+    fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(f, r.full);
+    log(`  ${tag} the whole output of ${s.name} (try ${attempt}): ${f}`);
+    return f;
+  } catch (e) { log(`  · fail log not kept: ${e && e.message}`); return null; }
+}
 const load1 = () => Math.round(os.loadavg()[0] * 10) / 10;
 export function runSuiteAsync(s, { root = repo, absentIsSkip = false, sha = '', lane = 1, inflight = new Set(), hang = null } = {}) {
   return new Promise((resolve) => {
@@ -2186,12 +2214,12 @@ export function runSuiteAsync(s, { root = repo, absentIsSkip = false, sha = '', 
       const load = [l0, load1()], ld = `load ${load[0]}→${load[1]}`;
       if (status === 0) { resolve({ ok: true, ms, load, lines: [`  ✓ ${s.name} (${ms}ms) ${tag} ${ld} — ${(stdout.trim().split('\n').pop() || 'ok').slice(0, 80)}`] }); return; }
       const r = { status, signal, error };
-      // the hang report rides INSIDE the ✗ line's entry: lines[1] / lines[2] stay the stdout tail / stderr the rerun ledger reads
+      // the hang report rides INSIDE the ✗ line's entry, and so do its ✗ lines (failLegs): lines[1] / lines[2] stay the stdout tail / stderr the rerun ledger reads
       const hl = asked ? readHangReport(asked, { root, envExcluded: hr.envExcluded }) : null, digest = hl && hl.lines.length ? '\n' + hl.lines.join('\n') : '';
       // the suite's OWN watchdog wrote the report before this clock ran (its digest is in the stdout tail): the row names the file
       const own = !asked && hr.armed && (() => { try { return fs.statSync(hr.file).mtimeMs >= t - 1000; } catch { return false; } })() ? hr.file : '';
       resolve({ ok: false, ms, load, killedFromOutside: killedFromOutside(r), hangReport: hl || own ? hr.file : undefined, full: (digest ? digest.slice(1) + '\n' : '') + stdout + (stderr ? '\n── stderr ──\n' + stderr : ''), lines: [
-        `\n✗ ${s.name} FAILED (${ms}ms${error ? ', ' + error.code : ''}${signal ? ', ' + signal : ''}) ${tag} ${ld}${hl ? hl.head : own ? ` — hang report (the suite's own watchdog): ${own}` : ''}${digest}`,
+        `\n✗ ${s.name} FAILED (${ms}ms${error ? ', ' + error.code : ''}${signal ? ', ' + signal : ''}) ${tag} ${ld}${hl ? hl.head : own ? ` — hang report (the suite's own watchdog): ${own}` : ''}${digest}${failLegs(stdout, stderr)}`,
         stdout.split('\n').slice(-40).join('\n'),
         stderr || ''] });
     };
@@ -3161,7 +3189,7 @@ async function fastGate({ sha: wantSha, isolate } = {}) {
     const absent = [], timings = [], skippedByName = [];
     let red = null;
     const dirPace = dirSweepPacer();
-    const hangDir = path.join(markerDir(), 'fail-logs'); // a timed-out suite's hang report (the heavy tier's fail-log dir; ci-hang-report)
+    const hangDir = fastFailDir(); // the fast tier's fail-log dir: a timed-out suite's hang report (ci-hang-report) + a red suite's whole output (ci-mirror-hygiene)
     const laneWorker = async (queue, lane) => {
       for (;;) {
         if (red) break;
@@ -3183,6 +3211,7 @@ async function fastGate({ sha: wantSha, isolate } = {}) {
         if (r.absent) { absent.push(s.name); continue; }
         if (!r.ok) {
           red = s.name;
+          writeFailLog(hangDir, sha, s, r, 1); // its whole output — ci.yml's fast job uploads it (test-ci-gate §2i)
           const others = [...inflight];
           for (const c of others) { try { c.kill('SIGTERM'); } catch { } }
           if (others.length) console.log(`[ci] stopping: ${s.name} is red — ${others.length} suite(s) in flight on the other lanes SIGTERMed, nothing new starts`);
@@ -3448,17 +3477,11 @@ async function heavyGate({ sha: wantSha, isolate, dir, only, dirtyOk, lock, lock
       console.log(`\n[ci:heavy] stopping: ${why}`);
       for (const c of inflight) { try { c.kill('SIGTERM'); } catch { } }
     };
-    // A FAILED RUN'S WHOLE OUTPUT (lane ci-aidev-desktop-batch): the log above keeps a red suite's last 40 lines, and a
-    // suite's own diagnostics print long before its verdict (on a second machine nothing else is left to read) — so
-    // every failed run is kept whole in <markers>/fail-logs/<sha9>.<suite>.<try>.log, said on its own line
-    const keepFailLog = (s, r, attempt) => {
-      if (r.ok || r.absent || !r.full) return;
-      try {
-        const f = path.join(d, 'fail-logs', `${shortSha(sha)}.${s.name}.${attempt}.log`);
-        fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, r.full);
-        console.log(`  [ci:heavy] the whole output of ${s.name} (try ${attempt}): ${f}`);
-      } catch (e) { console.log(`  · fail log not kept: ${e && e.message}`); }
-    };
+    // A FAILED RUN'S WHOLE OUTPUT (lane ci-aidev-desktop-batch): the log above keeps a red suite's ✗ lines and last 40
+    // lines, and a suite's own diagnostics print long before its verdict (on a second machine nothing else is left to
+    // read) — so every failed run is kept whole in <markers>/fail-logs/<sha8>.<suite>.<try>.log (writeFailLog, the fast
+    // tier's door too), said on its own line
+    const keepFailLog = (s, r, attempt) => { writeFailLog(path.join(d, 'fail-logs'), sha, s, r, attempt, { tag: '[ci:heavy]' }); };
     // the parallel lanes' in-flight count, for --serial-overlap (the serial lane may start beside the last ≤ n of them)
     let parInFlight = 0, parQueue = null, overlapGo = () => {};
     const overlapReady = new Promise((res) => { overlapGo = res; });

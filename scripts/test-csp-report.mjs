@@ -20,6 +20,8 @@
 //      code (file-viewer's innerHTML) — a line and the notice; no sample / another origin / another script / another build /
 //      no bundle ⇒ what a report always was; a hostile MAIL never reaches the parse with a handler (mail-frame step 1);
 //      ⑥c a suite's sanitizer line is printed, never a failure
+//      ⑥d a suite's OWN probe (scratch.mjs takeProbeCspReport, lane ci-mirror-hygiene): its report is taken by its payload
+//      — 156 one, 154 none; a line differing in any field still fails the suite (MUTANT: keyed by directive alone ⇒ RED)
 //   ③ the route: a fake report lands as ONE line; the duplicate is still one line + ONE notice; the same pair on another
 //      line is a second line and no second notice; a restart re-writes and re-notices nothing; a report from a FRAME the
 //      page made (document about / blob / data) is a line and NO notice (主开发's ruling 2) — the count tells them apart
@@ -511,6 +513,47 @@ console.log('⑥c the teardown: a line of the sanitizer\'s parse is printed and 
   const both = child('test-csp-child-sanitizer-red.mjs', [LINE, { ...LINE, kind: undefined, line: 9, sample: 'window.__x=1' }]);
   ok(both.rc === 1 && /CSP: the app page reported 1 thing/.test(both.out), '…and one more line WITHOUT the kind ⇒ exit 1, that one counted (the policy is complete only when nothing else was reported)', both);
   ok(cspSanitizerLine(JSON.stringify(LINE)) && !cspSanitizerLine(JSON.stringify({ ...LINE, kind: undefined })) && !cspSanitizerLine('not json'), 'cspSanitizerLine: the kind, read off the line');
+}
+
+// ── ⑥d A SUITE'S OWN PROBE IS EXPECTED BY ITS PAYLOAD, NEVER COUNTED (lane ci-mirror-hygiene, 2.369.362 — the .361 mirror's
+// Chrome 156 counted test-chat-mermaid-chrome's own XSS probe as the app's report) ──
+console.log('⑥d a suite\'s own probe: its report is taken by its payload (takeProbeCspReport); any other line still fails the suite');
+{
+  const dir = path.join(ROOT, 'suite6d'); fs.mkdirSync(dir, { recursive: true });
+  const SCR = path.join(REPO, 'scripts', 'scratch.mjs'), O = 'http://127.0.0.1:1';
+  const KEY = { directive: 'script-src-attr', blocked: 'inline', sample: 'window.__pwned=1', source: `${O}/mermaid.js`, document: `${O}/` };
+  const PROBE = { at: 'x', ...KEY, line: 2, column: 10038, disposition: 'report', noticed: true };
+  const child = (name, lines, key = KEY, scr = SCR) => {
+    const f = path.join(dir, name);
+    fs.writeFileSync(f, `const S = await import(${JSON.stringify(scr)});\n`
+      + `const file = process.env[S.CSP_REPORTS_ENV];\n`
+      + `const fs = await import('node:fs'); const path = await import('node:path'); fs.mkdirSync(path.dirname(file), { recursive: true });\n`
+      + `for (const l of ${JSON.stringify(lines)}) fs.appendFileSync(file, JSON.stringify(l) + '\\n');\n`
+      + `try { const t = await S.takeProbeCspReport(${JSON.stringify(key)}); console.log('TAKE ' + JSON.stringify({ n: t.taken.length, ok: t.ok, samples: t.taken.map((r) => r.sample) })); } catch (e) { console.log('THREW ' + e.message); }\n`
+      + `console.log('ALL PASS (1)'); process.exit(0);\n`);
+    const r = spawnSync(process.execPath, [f], { encoding: 'utf8', env: { ...process.env, VIBESPACE_CSP_REPORTS_FILE: '' } });
+    const take = (/^TAKE (.+)$/m.exec(r.stdout) || [])[1];
+    return { rc: r.status, take: take ? JSON.parse(take) : null, threw: (/^THREW (.+)$/m.exec(r.stdout) || [])[1] || null, out: r.stdout + r.stderr };
+  };
+  const p156 = child('test-csp-child-probe-156.mjs', [PROBE]), p154 = child('test-csp-child-probe-154.mjs', []);
+  ok(p156.rc === 0 && p156.take?.n === 1 && p156.take.ok && !/CSP: the app page reported/.test(p156.out), 'a browser that reports the probe\'s dropped handler (Chrome 156): its ONE line is taken by the payload and the suite passes', p156);
+  ok(p154.rc === 0 && p154.take?.n === 0 && p154.take.ok, 'a browser that reports nothing (Chrome 154): nothing taken and ok — the leg is never skipped by a version', p154);
+  const near = [{ ...PROBE, sample: 'window.__pwned=2', line: 3 }, { ...PROBE, source: `${O}/bundle.js`, line: 4 }, { ...PROBE, document: 'about', line: 5 }];
+  const other = child('test-csp-child-probe-other.mjs', [PROBE, ...near]);
+  ok(other.rc === 1 && other.take?.n === 1 && /CSP: the app page reported 3 thing/.test(other.out) && /«window\.__pwned=2»/.test(other.out) && /code in http:\/\/127\.0\.0\.1:1\/bundle\.js/.test(other.out),
+    'a line that differs in ANY field (another payload, another source, another document) is not taken: the teardown names all 3 and the suite fails', other);
+  const two = child('test-csp-child-probe-two.mjs', [PROBE, { ...PROBE, line: 7 }]);
+  ok(two.take?.n === 2 && two.take.ok === false, 'two lines of the same payload ⇒ ok false (the probe is EXACTLY one)', two.take);
+  const partial = Object.fromEntries(Object.entries(KEY).filter(([k]) => k !== 'sample'));
+  const wide = child('test-csp-child-probe-partial.mjs', [PROBE], partial);
+  ok(/^takeProbeCspReport: the key names no sample/.test(wide.threw || '') && wide.rc === 1, 'a key that names no sample throws — and the probe\'s line, untaken, fails the suite', wide);
+  // MUTANT: the door keyed by directive + blocked alone ⇒ every near miss is taken and the suite passes (RED)
+  const src = readRepo('scripts/scratch.mjs'), anchor = '(r) => PROBE_KEY_FIELDS.every((k) => r[k] === key[k])';
+  ok(src.includes(anchor), 'the mutant anchor (the five-field match) is in scripts/scratch.mjs');
+  const mut = path.join(dir, 'scratch-mutant.mjs');
+  fs.writeFileSync(mut, src.replace(anchor, '(r) => r.directive === key.directive && r.blocked === key.blocked').replace(/from '\.\//g, `from '${path.join(REPO, 'scripts')}/`).replace(/require\('\.\.\//g, `require('${REPO}/`));
+  const m = child('test-csp-child-probe-mutant.mjs', [PROBE, ...near], KEY, mut);
+  ok(m.rc === 0 && m.take?.n === 4, 'MUTANT (keyed by directive + blocked alone) ⇒ RED: all 4 lines taken and the suite passes', m.take);
 }
 
 // ── ⑦ THE FRAME HOST ──
