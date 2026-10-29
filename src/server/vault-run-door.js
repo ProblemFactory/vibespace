@@ -308,8 +308,11 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   // round 9 (MINOR): ONE bound for `runnable` AND `opened`. r7 sliced `opened` to ENTRY_MAX but wrote `runnable` UNCAPPED, so an
   // entry past the cap reloaded as ON with no `opened` record = OWNER-opened = every member usable (fail OPEN — the opposite of
   // the audit's «fail closed»). Now `runnable` is capped too and `opened` holds ONLY kept-runnable entries: an entry past the cap
-  // drops from BOTH ⇒ reloads OFF (the owner re-opens) — a paused member is never silently un-paused by a restart.
-  const bodyOf = (d) => { const runSorted = [...d.runnable].sort().slice(0, ENTRY_MAX); const runSet = new Set(runSorted); return JSON.stringify({ v: 1, gen: Number(d.gen) || 0, runnable: runSorted, ...(d.suspended && d.suspended.size ? { suspended: [...d.suspended].sort().slice(0, ENTRY_MAX) } : {}), always: d.always.slice().sort((a, b) => (a.conv + a.key).localeCompare(b.conv + b.key)),
+  // drops from BOTH ⇒ reloads OFF (the owner re-opens) — a paused member is never silently un-paused by a restart. round 10
+  // (MINOR): the cut drops the OLDEST past the cap (`slice(-ENTRY_MAX)` over the Set's insertion order, then sorted for the mark),
+  // never the entry the owner JUST toggled on; and `save` rebuilds the live sets from the PERSISTED (capped) body, so the bound
+  // bites in MEMORY immediately — r9 kept the uncapped set as `db`, so a past-cap entry ran ON until the next reload, then OFF.
+  const bodyOf = (d) => { const runSorted = [...d.runnable].slice(-ENTRY_MAX).sort(); const runSet = new Set(runSorted); return JSON.stringify({ v: 1, gen: Number(d.gen) || 0, runnable: runSorted, ...(d.suspended && d.suspended.size ? { suspended: [...d.suspended].sort().slice(0, ENTRY_MAX) } : {}), always: d.always.slice().sort((a, b) => (a.conv + a.key).localeCompare(b.conv + b.key)),
     ...(d.policies && Object.keys(d.policies).length ? { policies: Object.fromEntries(Object.keys(d.policies).sort().slice(0, ENTRY_MAX).map((k) => [k, d.policies[k]])) } : {}),   // lane vault-use-grants (R4): only when there is one — a body without them is marked as before
     ...(d.policyRevoked && d.policyRevoked.length ? { policyRevoked: d.policyRevoked.slice().sort((a, b) => (a.conv + a.key).localeCompare(b.conv + b.key)).slice(0, REVOKE_MAX) } : {}),
     ...(d.policyApproved && Object.keys(d.policyApproved).length ? { policyApproved: Object.fromEntries(Object.keys(d.policyApproved).sort().slice(0, ENTRY_MAX).map((k) => [k, { n: Number(d.policyApproved[k].n) || 0, lastAt: Number(d.policyApproved[k].lastAt) || 0, shapes: (d.policyApproved[k].shapes || []).slice(-AP_MAX).map((s) => ({ conv: s.conv, key: s.key, ...(s.shape ? { shape: s.shape } : {}) })), items: (d.policyApproved[k].items || []).slice(-AP_MAX) }])) } : {}),   // lane vault-use-grants round 2 (MAJOR): the judge's approvals ride the marked store so a Revoke survives a restart — ONE canonical key order AND cap so save and load serialize identically (the mark verifies); `shape` = the coarse shape key the Revoke covers (round 3)
@@ -341,21 +344,28 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
    *  unless the entry is press-opened (a manual-ON entry needs no mark; an OFF entry is held by the switch). */
   const resumeMember = (key, gid) => { const d = load(); if (!d || !pressOpened(d, key)) return { ok: true, resumed: false }; if (d.opened[key].resumed && d.opened[key].resumed[gid]) return { ok: true, resumed: false }; const opened = { ...d.opened, [key]: { at: d.opened[key].at, resumed: { ...(d.opened[key].resumed || {}), [gid]: now() } } }; const r = save({ runnable: d.runnable, always: d.always, opened }); return r.ok ? { ok: true, resumed: true } : r; };
   // lane vault-use-grants round 9 (MAJOR item 4): the owner's OWN writer — the 「谁可以用…」 picker Save, proven with 验证是你 —
-  // RESUMES every member it leaves on a PRESS-opened entry (one another conversation's «Always» holds open). A member the owner
-  // adds while open-by-press is the OWNER's act: born resumed, said in the window as runnable, run by:grant — on the base it
-  // ran; the inverted model wrongly paused it and credited the owner with a pause («paused by you»). An AGENT's request
-  // (addMember, the «Always» / request path) does NOT resume. We wrap the ONE writer so every caller agrees (the route AND a
-  // test that holds the same useGrants instance); the door's own «Always» rollback uses `rawSetRow` (the UNWRAPPED writer — it
-  // restores a prior row, it must never resume). Idempotent via the module WeakMap SETROW_RAW (NOT an underscore-prefixed
-  // property on useGrants — such a write reads as a session field to the census): the TRUE raw writer is stashed first, so a second
-  // door over the same useGrants (a test's `mk()`) does not double-wrap and every door's rollback gets the real raw (the resume
-  // closure reads the SHARED store through `load`, so the first door's wrapper serves every door correctly).
+  // RESUMES a member the owner ADDS with 验证是你 to a PRESS-opened entry (one another conversation's «Always» holds open). A
+  // resume is a REVEAL-class act — ↻ (resumeGrant) itself refuses it without the second password — so the wrapper resumes ONLY
+  // when (a) this Save was PROVEN with 验证是你 (the route's `reauthed:true` flag, which a widening Save already requires) AND
+  // (b) the member is one this Save ADDED (absent from the row before). That member is the OWNER's act: born resumed, said in the
+  // window as runnable, run by:grant — on the base it ran; the inverted model wrongly paused it and credited the owner with a
+  // pause («paused by you»). A click-only Save (no 验证是你), a narrowing, or an unchanged re-save adds nothing and resumes
+  // NOTHING — the owner's OTHER paused grants stay paused (round 10 MAJOR: r9 resumed EVERY member on ANY landed Save, so a
+  // click-only narrowing un-paused a grant the second password should have gated). An AGENT's request (addMember, the «Always» /
+  // request path) does NOT resume. We wrap the ONE writer so every caller agrees (the route AND a test that holds the same
+  // useGrants instance); the door's own «Always» rollback uses `rawSetRow` (the UNWRAPPED writer — it restores a prior row, it
+  // must never resume). Idempotent via the module WeakMap SETROW_RAW (NOT an underscore-prefixed property on useGrants — such a
+  // write reads as a session field to the census): the TRUE raw writer is stashed first, so a second door over the same useGrants
+  // (a test's `mk()`) does not double-wrap and every door's rollback gets the real raw (the resume closure reads the SHARED store
+  // through `load`, so the first door's wrapper serves every door correctly).
   const rawSetRow = useGrants && typeof useGrants.setRow === 'function' ? (SETROW_RAW.get(useGrants) || useGrants.setRow.bind(useGrants)) : null;
   if (rawSetRow && !SETROW_RAW.has(useGrants)) {
     SETROW_RAW.set(useGrants, rawSetRow);
     useGrants.setRow = (id, row, opts = {}) => {
+      let before = new Set();
+      try { const p = useGrants.publicFor(id); before = new Set(((p && p.to) || []).map((m) => m && m.id).filter(Boolean)); } catch { }   // the row's members BEFORE this write — so only the ones this Save ADDS are born resumed
       const r = rawSetRow(id, row, opts);
-      if (r && r.ok) { try { const d = load(); if (d && pressOpened(d, id)) { const pub = useGrants.publicFor(id); for (const m of (pub && pub.to) || []) if (m && m.id) resumeMember(id, m.id); } } catch { } }   // the owner's act over the whole row — the members it wrote are born resumed
+      if (r && r.ok && opts && opts.reauthed === true) { try { const d = load(); if (d && pressOpened(d, id)) { const pub = useGrants.publicFor(id); for (const m of (pub && pub.to) || []) if (m && m.id && !before.has(m.id)) resumeMember(id, m.id); } } catch { } }   // a 验证是你-proven Save: resume ONLY the member it added
       return r;
     };
   }
@@ -441,10 +451,17 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     // CLOSED (those members become paused on the next read), never an un-pause, so a cap is safe but never silent.
     for (const k of Object.keys(next.opened || {})) { const n = Object.keys((next.opened[k] && next.opened[k].resumed) || {}).length; if (n > AP_MAX) audit('vault-run-pause-bound', { store: STORE_FILE, entry: k, resumed: n, cap: AP_MAX, dropped: n - AP_MAX, effect: 'the marks past the cap fail closed (those members stay paused)' }); }
     if ((next.runnable ? next.runnable.size : 0) > ENTRY_MAX || Object.keys(next.opened || {}).length > ENTRY_MAX) audit('vault-run-pause-bound', { store: STORE_FILE, runnable: next.runnable ? next.runnable.size : 0, opened: Object.keys(next.opened || {}).length, cap: ENTRY_MAX, effect: 'the entries past the cap turn OFF on reload (every member paused — fail closed)' });   // round 9: the cap is on runnable AND opened together, so an entry past it reloads OFF — the words are now true
-    const mark = vault.macOf(MARK_LABEL, bodyOf(next));
+    const body = bodyOf(next);
+    const mark = vault.macOf(MARK_LABEL, body);
     if (!mark) return named('vault_locked');
-    try { writeJsonAtomic(FILE, { ...JSON.parse(bodyOf(next)), mark }); } catch (e) { return named('failed', { why: `data/${STORE_FILE} could not be written (${e.code || e.message})` }); }
+    try { writeJsonAtomic(FILE, { ...JSON.parse(body), mark }); } catch (e) { return named('failed', { why: `data/${STORE_FILE} could not be written (${e.code || e.message})` }); }
     db = next; dbEpoch = vault.epoch(); lastGen = next.gen;
+    // round 10 (MINOR): the cap bites in MEMORY too. `bodyOf` capped `runnable`/`opened` on disk, but `db = next` kept the UNCAPPED
+    // set, so an entry past the bound ran ON for the rest of the unlock and only read OFF after a reload (a silent switch-off). Trim
+    // the live sets the SAME way bodyOf did — drop the OLDEST past the bound (insertion order preserved, never the entry the owner
+    // just toggled) and reconcile `opened` to the kept `runnable` (fail closed) — so what runs now is what a restart would restore.
+    if (db.runnable.size > ENTRY_MAX) { db.runnable = new Set([...db.runnable].slice(-ENTRY_MAX)); db.opened = Object.fromEntries(Object.entries(db.opened || {}).filter(([k]) => db.runnable.has(k))); }
+    if (db.suspended && db.suspended.size > ENTRY_MAX) db.suspended = new Set([...db.suspended].slice(-ENTRY_MAX));
     return { ok: true };
   }
 

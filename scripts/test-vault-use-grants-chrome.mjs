@@ -2,30 +2,31 @@
 // WHO MAY USE A STORED SECRET, AND THE WINDOW THAT FINDS IT — IN A REAL PAGE (heavy, chrome — lane vault-use-grants; the owner
 // 2026-10-27: 「我现在完全无法在 vault 里看到刚才建立的密码」 — measured: an OPEN Vault window learnt nothing until reopened — and
 // 「每个密码请求都要我同意太麻烦了！」). A worktree hub WITH a sign-in password, a stub CLI behind the REAL chat wrapper (a live
-// conversation «Home network» with its own session token — the suite plays its agent), a fake `curl` in a read-only folder on
-// the hub's PATH, a real headless Chrome with TWO pages of one sign-in (the WATCHING one and the STORING one):
+// conversation «Home network» with its own session token — the suite plays its agent), the SYSTEM `/usr/bin/curl` (round 10: a
+// program the agent CANNOT write — so the door's program-writable rule is false and the destination is read; the run reaches
+// LOOPBACK stub servers on 127.0.0.1 at three distinct ports, so a grant for one host:port covers it and another does not), a
+// real headless Chrome with TWO pages of one sign-in (the WATCHING one and the STORING one):
 //   ① sign in, set the second password from the page, the live conversation and its token
 //   ② THE LIVE LIST (the owner's symptom): the watching page holds the Vault window open with «Unifi» typed — «no match»
-//      NAMES what it searched; the agent asks (`vibespace-vault request … --name "UniFi UCG-Fiber admin (192.168.1.1)"
-//      --host 192.168.1.1`); the STORING page answers it through the request route ⇒ the row appears in the watching window
-//      WITHOUT a reopen (the search box kept, the «N stored values» line follows), its origin «Filled by you · asked for by
-//      Home network»; the request box SAID the default before the paste
-//   ③ NO CARD: the agent's `vibespace-vault run --env T=<ref> -- curl https://192.168.1.1/…` runs at once (the default grant) —
-//      its output scrubbed; the row's chip «Home network · 192.168.1.1 · used 1×» arrives by itself
-//   ④ THE CARD THAT NAMES THE GRANT: a run to 10.0.0.9 files its card — «a standing approval exists … this run is outside it:
-//      10.0.0.9» — denied
+//      NAMES what it searched; the agent asks (`vibespace-vault request … --name "UniFi UCG-Fiber admin" --host <HOST_IN>`);
+//      the STORING page answers it through the request route ⇒ the row appears in the watching window WITHOUT a reopen (the
+//      search box kept, the «N stored values» line follows), its origin «Filled by you · asked for by Home network»
+//   ③ NO CARD: the agent's `vibespace-vault run --env T=<ref> -- curl http://<HOST_IN>/…` runs at once (the paste grant) — a run
+//      to ANOTHER host:port draws its card, where «Always» (验证是你) writes the standing member and opens «Usable by agent runs»
+//   ④ THE CARD THAT NAMES THE GRANT: a run to a THIRD host:port files its card — «a standing approval exists … this run is
+//      outside it» — denied
 //   ⑤ 「Who may use it…」: THE principal picker (All agents + the live conversation), the hosts, the end; All agents added ⇒
 //      验证是你 first (a widening), then the chip; ✕ takes it back with a click
 //   ⑥ «no match» under a picked purpose («Kept by agents») names it + 「Search all」 ⇒ the row
 //   ⑦ THE POLICY JUDGE'S RECORD (R4; never a vendor): with the hub stopped, the REAL run door over the same data dir and a STUB
-//      judge approves one run (the way the window suite seeds its cards — no test door in the product); the hub boots, and
-//      the approval is where a run card's result is shown today — For you (the chat card chain is not on this base):
-//      «Approved by the policy judge · HH:MM · inside your policy (0.93)»; its door opens the entry's row, which says the policy
+//      judge approves one run (the system curl reaching the loopback stub); the hub boots, and the approval is where a run
+//      card's result is shown today — For you: «Approved by the policy judge · HH:MM · inside your policy (0.93)»
 //   --shots <dir> keeps vug-*.png (the search before / after, the picker, the card naming the grant).
 //   RED CONTROL: this suite over the base tree (6428c67e) — ② the row never appears without a reopen; ③–⑥ do not exist.
 // Run: node scripts/test-vault-use-grants-chrome.mjs [--shots <dir>]   (SKIPs without chrome)
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
+import http from 'node:http';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -35,11 +36,19 @@ const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => fs.existsSync(p));
 if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
+const CURL = ['/usr/bin/curl', '/bin/curl'].find((p) => fs.existsSync(p));
+if (!CURL) { console.log('SKIP: no system curl'); process.exit(0); }
 const VNC_ENV = await vncEnv();
-const [PORT, CDP_PORT] = await freePorts(2);
-const wt = scratch('vug-wt'), PROFILE = scratch('vug-chrome'), fakeHome = scratch('vug-home'), stubDir = scratch('vug-stub'), fakeBin = scratch('vug-bin');
+const [PORT, CDP_PORT, P_IN, P_ALWAYS, P_THIRD] = await freePorts(5);
+// round 10 (RULING, 主开发): the run's destinations are LOOPBACK stubs the SYSTEM curl can actually reach. ONE IP, three ports ⇒
+// three distinct host:port grant targets (normHost keeps the port, hostCovered is exact-match): HOST_IN is paste-granted, the
+// other two are not. No `--resolve` (which this tree and the int361 tip read differently) — a plain host:port is destKnown on both.
+const HOST_IN = `127.0.0.1:${P_IN}`, HOST_ALWAYS = `127.0.0.1:${P_ALWAYS}`, HOST_THIRD = `127.0.0.1:${P_THIRD}`;
+const rx = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');   // escape a host:port for a RegExp
+const stubs = [P_IN, P_ALWAYS, P_THIRD].map((p) => { const s = http.createServer((q, r) => { r.writeHead(200, { 'Content-Type': 'text/plain' }); r.end('VUG-STUB-REACHED'); }); s.listen(p, '127.0.0.1'); return s; });   // the loopback stubs the real curl hits
+const wt = scratch('vug-wt'), PROFILE = scratch('vug-chrome'), fakeHome = scratch('vug-home'), stubDir = scratch('vug-stub');
 const SHOTS = process.argv.includes('--shots') ? path.resolve(process.argv[process.argv.indexOf('--shots') + 1]) : null;
-for (const d of [fakeHome, stubDir, fakeBin, ...(SHOTS ? [SHOTS] : [])]) fs.mkdirSync(d, { recursive: true });
+for (const d of [fakeHome, stubDir, ...(SHOTS ? [SHOTS] : [])]) fs.mkdirSync(d, { recursive: true });
 const CWD = path.join(fakeHome, 'project'); fs.mkdirSync(CWD, { recursive: true });
 let failed = 0, passed = 0;
 const check = (n, c, e) => { if (c) { passed++; console.log(`  ✓ ${n}`); } else { failed++; console.error(`  ✗ ${n}${e !== undefined ? '\n    ' + (typeof e === 'string' ? e : JSON.stringify(e)).slice(0, 900) : ''}`); } };
@@ -48,7 +57,7 @@ const SIGN_IN = 'vug-leg-sign-in-7';
 const SECOND = 'vug leg second password';
 const SID = crypto.randomUUID();
 const VALUE = ['unifi', 'admin', 'value', crypto.randomBytes(8).toString('hex')].join('-');
-const LABEL = 'UniFi UCG-Fiber admin (192.168.1.1)';
+const LABEL = 'UniFi UCG-Fiber admin';
 
 try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch { }
 execSync(`git worktree add --detach ${wt} HEAD`, { cwd: repo, stdio: 'ignore' });
@@ -67,13 +76,10 @@ process.stdout.write(JSON.stringify({ type: 'system', subtype: 'init', model: 'c
 process.stdin.on('data', () => {});
 process.stdin.on('end', () => process.exit(0));
 `, { mode: 0o755 });
-// a fake `curl` in a READ-ONLY folder on the hub's PATH (the door's «an agent could have written it» is false)
-fs.writeFileSync(path.join(fakeBin, 'curl'), `#!${process.execPath}\nprocess.stdout.write('curl got ' + process.env.T + ' for ' + process.argv.slice(2).join(' ') + '\\n');\n`, { mode: 0o555 });
-fs.chmodSync(fakeBin, 0o555);
 
 const LOG = path.join(stubDir, 'server.log');
 let srv = null;
-const startServer = () => { const fd = fs.openSync(LOG, 'a'); srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PATH: fakeBin + ':' + process.env.PATH, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: SIGN_IN }, stdio: ['ignore', fd, fd] }); fs.closeSync(fd); };
+const startServer = () => { const fd = fs.openSync(LOG, 'a'); srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: SIGN_IN }, stdio: ['ignore', fd, fd] }); fs.closeSync(fd); };
 const stopServer = async () => { const p = srv; srv = null; if (!p) return; p.kill('SIGTERM'); await new Promise((r) => { const t = setTimeout(() => { try { p.kill('SIGKILL'); } catch { } r(); }, 8000); if (p.exitCode !== null || p.signalCode !== null) { clearTimeout(t); r(); return; } p.once('exit', () => { clearTimeout(t); r(); }); }); };
 const ready = async (ms = 60000) => { const t0 = Date.now(); for (;;) { try { const r = await fetch(`http://127.0.0.1:${PORT}/login`); if (r.status === 200) return true; } catch { } if (Date.now() - t0 > ms) return false; await sleep(300); } };
 const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage',
@@ -83,10 +89,10 @@ const cleanup = () => {
   if (cleaned) return; cleaned = true;
   try { chrome.kill('SIGKILL'); } catch { }
   try { srv && srv.kill('SIGKILL'); } catch { }
+  for (const s of stubs) { try { s.close(); } catch { } }
   for (const r of [wt, fakeHome, stubDir]) { try { endRootedProcesses(r); } catch { } }
   try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch { }
-  try { fs.chmodSync(fakeBin, 0o755); } catch { }
-  for (const d of [wt, PROFILE, fakeHome, stubDir, fakeBin]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } }
+  for (const d of [wt, PROFILE, fakeHome, stubDir]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch { } }
 };
 process.on('exit', cleanup);
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });
@@ -120,7 +126,7 @@ try {
   if (!t0) throw new Error('no chrome page');
   const A = await pageOf(t0);   // THE WATCHING PAGE
   startServer();
-  check('the hub boots (sign-in password on, a fake curl on its PATH)', await ready());
+  check('the hub boots (sign-in password on, the system curl + loopback stubs up)', await ready());
   const URL = `http://127.0.0.1:${PORT}/`;
 
   console.log('① sign in, the second password, a live conversation');
@@ -151,14 +157,14 @@ try {
   check('«Unifi» typed: «no match» NAMES what it searched (names, kinds, purposes, hosts, where they came from, ids)', /No stored value matches “Unifi” — searched: names, kinds, purposes, hosts, where they came from, ids/.test(String(empty0)), empty0);
   const note0 = await A.evalJs(`(document.querySelector('.vw-note') || document.querySelector('.vault-window .vw-head-note') || {}).textContent || ''`);
   await A.shot('vug-1-search-before.png');
-  const a1 = await ask(['the UniFi admin password', '--purpose', 'log in to the UniFi gateway to read the WAN status', '--kind', 'password', '--name', LABEL, '--host', '192.168.1.1'], TOKEN);
+  const a1 = await ask(['the UniFi admin password', '--purpose', 'log in to the UniFi gateway to read the WAN status', '--kind', 'password', '--name', LABEL, '--host', HOST_IN], TOKEN);
   const hostsHere = a1.code === 0;
   const a1b = hostsHere ? a1 : await ask(['the UniFi admin password', '--purpose', 'log in to the UniFi gateway to read the WAN status', '--kind', 'password', '--name', LABEL], TOKEN);
-  check('the agent asks with the hosts it will use (`--host 192.168.1.1`) ⇒ exit 0, a request id, «for 192.168.1.1»', hostsHere && !!a1.id && /for 192\.168\.1\.1/.test(a1.out), a1.out);
+  check(`the agent asks with the hosts it will use (\`--host ${HOST_IN}\`) ⇒ exit 0, a request id, «for ${HOST_IN}»`, hostsHere && !!a1.id && new RegExp('for ' + rx(HOST_IN)).test(a1.out), a1.out);
   const reqId = a1b.id;
   const todo = async () => (await A.api('GET', '/api/user-todos')).json.todos;
   const item = ((await todo()).open || []).find((i) => i.action && i.action.requestId === reqId);
-  check('THE REQUEST BOX SAYS THE HOST-SCOPED 8-HOUR GRANT before the paste (round 7 — a paste opens no switch): «It said it needs it for: 192.168.1.1. If you paste it, the conversation that asked may use it in commands to those hosts for 8 hours — a command to any other host still shows you its card … turn on «Usable by agent runs» …»', !!item && /It said it needs it for: 192\.168\.1\.1\. If you paste it, the conversation that asked may use it in commands to those hosts for 8 hours/.test(item.detail) && /a command to any other host still shows you its card/.test(item.detail) && /turn on «Usable by agent runs»/.test(item.detail), item && item.detail);
+  check('THE REQUEST BOX SAYS THE HOST-SCOPED 8-HOUR GRANT before the paste (round 7 — a paste opens no switch): «It said it needs it for: <HOST_IN>. If you paste it, the conversation that asked may use it in commands to those hosts for 8 hours — a command to any other host still shows you its card … turn on «Usable by agent runs» …»', !!item && new RegExp('It said it needs it for: ' + rx(HOST_IN) + '\\. If you paste it, the conversation that asked may use it in commands to those hosts for 8 hours').test(item.detail) && /a command to any other host still shows you its card/.test(item.detail) && /turn on «Usable by agent runs»/.test(item.detail), item && item.detail);
   // THE STORING PAGE: a second page of the same sign-in answers the request through the request route
   const tB = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?about:blank`, { method: 'PUT' })).json();
   const B = await pageOf(tB);
@@ -174,19 +180,20 @@ try {
   const kept = await A.evalJs(`({ q: document.querySelector('.vw-search').value, note: (document.querySelector('.vw-note') || {}).textContent || '', rows: [...document.querySelectorAll('.vw-list .vw-row')].filter((r) => r.isConnected).length })`);
   check('… the search box keeps «Unifi», the «N stored values» line follows (1 → 2), only the match shows', kept.q === 'Unifi' && /\b2 stored values\b/.test(kept.note) && kept.rows === 1, { kept, note0 });
   const prov = await A.evalJs(`(() => { const r = ${LIST_ROW(LABEL)}; return r ? { prov: r.dataset.prov, chip: (r.querySelector('.vw-chip-prov .vw-chip-words') || {}).textContent || '', meta: (r.querySelector('.vw-meta') || {}).textContent || '' } : null; })()`);
-  check('its origin: «Filled by you · asked for by Home network»; its meta names the host', !!prov && prov.prov === 'request' && prov.chip === 'Filled by you · asked for by Home network' && /for 192\.168\.1\.1/.test(prov.meta), prov);
+  check('its origin: «Filled by you · asked for by Home network»; its meta names the host', !!prov && prov.prov === 'request' && prov.chip === 'Filled by you · asked for by Home network' && new RegExp('for ' + rx(HOST_IN)).test(prov.meta), prov);
   await A.shot('vug-2-search-after.png');
 
   console.log('③ THE HOST-SCOPED 8-HOUR PASTE GRANT (round 7) — a run to the host the request NAMED runs with NO card; a run to ANOTHER host draws the card, where «Always» (验证是你) writes the standing member and opens «Usable by agent runs»');
   const cards = async () => ((await todo()).open || []).filter((i) => i.action && i.action.type === 'vault-run-ask');
-  // (a) IN SCOPE — a run to 192.168.1.1 (the pasted --host) is admitted with NO card (the owner's 「每个密码请求都要我同意太麻烦了！」)
-  const inScope = await cli('vibespace-vault', ['run', '--env', `T=${REF}`, '--', 'curl', '-sk', 'https://192.168.1.1/api/auth/login'], TOKEN, { timeout: 70000 });
-  check('IN SCOPE: a run to 192.168.1.1 (the pasted --host) runs by:grant with NO card (the host-scoped 8h grant), its output scrubbed', inScope.code === 0 && /^curl got \[vault:secrets\//m.test(inScope.out) && !inScope.out.includes(VALUE) && (await cards()).length === 0, { out: inScope.out.slice(0, 160), openCards: (await cards()).length });
-  // (b) OUT OF SCOPE — a run to 10.0.0.9 (NOT named) draws a card that offers «Always»
-  const runP = cli('vibespace-vault', ['run', '--env', `T=${REF}`, '--', 'curl', '-sk', 'https://10.0.0.9/collect'], TOKEN, { timeout: 70000 });
+  // (a) IN SCOPE — a run to HOST_IN (the pasted --host) is admitted with NO card (the owner's 「每个密码请求都要我同意太麻烦了！」); the
+  // SYSTEM curl actually reaches the loopback stub there (round 10 RULING: a real program the agent cannot write — destKnown true)
+  const inScope = await cli('vibespace-vault', ['run', '--env', `T=${REF}`, '--', 'curl', '-s', `http://${HOST_IN}/api/auth/login`], TOKEN, { timeout: 70000 });
+  check('IN SCOPE: a run to HOST_IN (the pasted --host) runs by:grant with NO card — the real curl reached the loopback stub, no secret in its output', inScope.code === 0 && inScope.out.includes('VUG-STUB-REACHED') && !inScope.out.includes(VALUE) && (await cards()).length === 0, { out: inScope.out.slice(0, 160), openCards: (await cards()).length });
+  // (b) OUT OF SCOPE — a run to HOST_ALWAYS (NOT named) draws a card that offers «Always»
+  const runP = cli('vibespace-vault', ['run', '--env', `T=${REF}`, '--', 'curl', '-s', `http://${HOST_ALWAYS}/collect`], TOKEN, { timeout: 70000 });
   let runCard = null;
   for (let i = 0; i < 60 && !runCard; i++) { runCard = (await cards())[0] || null; if (!runCard) await sleep(200); }
-  check('OUT OF SCOPE: a run to 10.0.0.9 draws a card that offers «Always» (the paste grant does not cover it)', !!runCard && runCard.action.always === true && /also turns on «Usable by agent runs»/.test(runCard.detail), runCard && runCard.detail);
+  check('OUT OF SCOPE: a run to HOST_ALWAYS draws a card that offers «Always» (the paste grant does not cover it)', !!runCard && runCard.action.always === true && /also turns on «Usable by agent runs»/.test(runCard.detail), runCard && runCard.detail);
   // ANSWER «Always» through the reveal window (验证是你) — open the page secret, then POST with X-Vault-Page. The reliable
   // path: a run card's button carries a press-guard (lane attention-policy-ui-red) a synthetic click cannot satisfy; the
   // picker's reveal (⑤) proves the reveal mechanism itself.
@@ -195,9 +202,9 @@ try {
   const ans = await A.evalJs(`fetch('/api/vault/run/asks/${runCard.action.askId}', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Vault-Page': ${JSON.stringify(rs.json.page || '')} }, body: JSON.stringify({ answer: 'always', ttl: '30d' }) }).then(async (r) => ({ status: r.status, json: await r.json().catch(() => ({})) }))`);
   check('«Always» (with 验证是你) ⇒ ok, by:always — the standing member is written and «Usable by agent runs» opened in the same act', ans.status === 200 && ans.json.ok && ans.json.outcome === 'always', ans.json);
   const r1 = await runP;
-  check('`vibespace-vault run … curl https://10.0.0.9/…` ⇒ ran by:always, its output scrubbed', r1.code === 0 && /^curl got \[vault:secrets\//m.test(r1.out) && !r1.out.includes(VALUE), r1.out);
+  check('`vibespace-vault run … curl http://HOST_ALWAYS/…` ⇒ ran by:always, the real curl reached the stub, no secret in its output', r1.code === 0 && r1.out.includes('VUG-STUB-REACHED') && !r1.out.includes(VALUE), r1.out);
   const chip = await A.until(`(() => { const r = ${LIST_ROW(LABEL)}; const c = r && [...r.querySelectorAll('.vw-use-chip')].find((x) => /^Home network/.test(x.textContent)); return c ? c.textContent : null; })()`, { timeout: 8000 });
-  check('the row\'s chip arrives: «Home network · 10.0.0.9 · until …» (the 30-day «Always») (+ ✕)', /^Home network · 10\.0\.0\.9 · (used \d+×|until .+)✕$/.test(String(chip)), chip);
+  check('the row\'s chip arrives: «Home network · HOST_ALWAYS · until …» (the 30-day «Always») (+ ✕)', new RegExp('^Home network · ' + rx(HOST_ALWAYS) + ' · (used \\d+×|until .+)✕$').test(String(chip)), chip);
   // round 7 (MINOR): the ↻ un-pause is a LIVE control inside a greyed paused chip — the CSS dims only .vw-use-words, so the
   // ↻ renders at full opacity (a greyed control is the one the owner banned). Inject the real class structure and read the
   // COMPUTED opacity of each: the ↻ must be 1 while the words are 0.55 (the dimming is on a sibling, not an ancestor).
@@ -206,11 +213,11 @@ try {
   await A.shot('vug-7-resume-opacity.png');
   await A.evalJs(`document.getElementById('vw-rot-probe')?.remove(); true`);
 
-  console.log('④ THE CARD THAT NAMES THE GRANT — a third host, outside the standing member (10.0.0.9)');
-  const pend = cli('vibespace-vault', ['run', '--env', `T=${REF}`, '--', 'curl', 'https://172.16.0.5/collect'], TOKEN, { timeout: 70000 });
+  console.log('④ THE CARD THAT NAMES THE GRANT — a third host, outside the standing member (HOST_ALWAYS)');
+  const pend = cli('vibespace-vault', ['run', '--env', `T=${REF}`, '--', 'curl', '-s', `http://${HOST_THIRD}/collect`], TOKEN, { timeout: 70000 });
   let card = null;
   for (let i = 0; i < 60 && !card; i++) { card = (await cards())[0] || null; if (!card) await sleep(200); }
-  check('a run to 172.16.0.5 files its card, naming the standing approval (10.0.0.9) and what is outside it', !!card && /A standing approval exists for this conversation \(vg-[0-9a-f]{8}: 10\.0\.0\.9\) — this run is outside it: 172\.16\.0\.5\./.test(card.detail) && /«Always» widens it to 172\.16\.0\.5/.test(card.detail), card && card.detail);
+  check('a run to HOST_THIRD files its card, naming the standing approval (HOST_ALWAYS) and what is outside it', !!card && new RegExp('A standing approval exists for this conversation \\(vg-[0-9a-f]{8}: ' + rx(HOST_ALWAYS) + '\\) — this run is outside it: ' + rx(HOST_THIRD) + '\\.').test(card.detail) && new RegExp('«Always» widens it to ' + rx(HOST_THIRD)).test(card.detail), card && card.detail);
   if (card) {
     await A.realClick('#taskbar-user-todos');
     await A.until(visible('#user-todos-popup .ut-item'), { timeout: 8000 });
@@ -230,20 +237,20 @@ try {
   const opened = await A.evalJs(`(() => { const r = ${LIST_ROW(LABEL)}; const b = r && r.querySelector('.vw-use-grant'); if (!b) return false; b.click(); return true; })()`);
   check('the row has 「Who may use it…」 and it opens the dialog', opened && !!(await A.until(visible('#vault-use-grant .pp-root, #vault-use-grant .vw-use-hosts'), { timeout: 5000 })));
   const dlg = await A.evalJs(`(() => { const d = document.getElementById('vault-use-grant'); if (!d) return null; return { title: (d.querySelector('.dialog-title, h3, .modal-title') || {}).textContent || '', chips: [...d.querySelectorAll('.pp-chip')].map((c) => c.textContent), own: !!d.querySelector('.vw-use-own'), hosts: (d.querySelector('.vw-use-hosts') || {}).value, end: (d.querySelector('.vw-use-end') || {}).value }; })()`);
-  check('the dialog: the conversation that asked already picked, «The hosts it was stored for (192.168.1.1)», the end «as each has it now»', !!dlg && dlg.chips.some((c) => /Home network/.test(c)) && dlg.own === true && dlg.end === 'keep', dlg);
+  check('the dialog: the conversation that asked already picked, «The hosts it was stored for (HOST_IN)», the end «as each has it now»', !!dlg && dlg.chips.some((c) => /Home network/.test(c)) && dlg.own === true && dlg.end === 'keep', dlg);
   await A.evalJs(`(() => { const d = document.getElementById('vault-use-grant'); const box = d.querySelector('.pp-input, input[type=search], .pp-box input'); if (box) { box.focus(); box.dispatchEvent(new Event('focus')); } return true; })()`);
   await sleep(300);
   await A.shot('vug-3-picker.png');
   const pickedAll = await A.evalJs(`(() => { const d = document.getElementById('vault-use-grant'); const row = [...document.querySelectorAll('.pp-row, .pp-item, [role=option]')].find((x) => /All agents/.test(x.textContent)); if (!row) return false; row.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); row.click(); return true; })()`);
   check('All agents can be picked (the picker\'s first row)', !!pickedAll);
-  await A.evalJs(`(() => { const d = document.getElementById('vault-use-grant'); const c = d.querySelector('.vw-use-own input'); if (c && c.checked) { c.checked = false; c.dispatchEvent(new Event('change')); } const h = d.querySelector('.vw-use-hosts'); h.value = '192.168.1.1'; h.dispatchEvent(new Event('input')); d.querySelector('.vw-use-save').click(); return true; })()`);
+  await A.evalJs(`(() => { const d = document.getElementById('vault-use-grant'); const c = d.querySelector('.vw-use-own input'); if (c && c.checked) { c.checked = false; c.dispatchEvent(new Event('change')); } const h = d.querySelector('.vw-use-hosts'); h.value = ${JSON.stringify(HOST_IN)}; h.dispatchEvent(new Event('input')); d.querySelector('.vw-use-save').click(); return true; })()`);
   const pw = await A.until(visible('#vault-reveal-dialog input[type=password], .vault-reveal-dialog input[type=password]'), { timeout: 6000 });
   check('a WIDENING (All agents) asks 验证是你 first — the second password', !!pw);
   if (pw) {
     await A.evalJs(`(() => { const i = document.querySelector('#vault-reveal-dialog input[type=password], .vault-reveal-dialog input[type=password]'); i.focus(); i.value = ${JSON.stringify(SECOND)}; i.dispatchEvent(new Event('input', { bubbles: true })); const go = [...document.querySelectorAll('#vault-reveal-dialog button, .vault-reveal-dialog button')].find((b) => /Confirm|Verify|OK|Show|继续|确认|验证/.test(b.textContent) && !/Cancel/.test(b.textContent)); (go || {}).click?.(); return !!go; })()`);
   }
   const allChip = await A.until(`(() => { const r = ${LIST_ROW(LABEL)}; const c = r && [...r.querySelectorAll('.vw-use-chip')].find((x) => /^All agents/.test(x.textContent)); return c ? c.textContent : null; })()`, { timeout: 10000 });
-  check('… saved: the row shows «All agents · 192.168.1.1» beside «Home network»', /^All agents · 192\.168\.1\.1/.test(String(allChip)), allChip);
+  check('… saved: the row shows «All agents · HOST_IN» beside «Home network»', new RegExp('^All agents · ' + rx(HOST_IN)).test(String(allChip)), allChip);
   const x = await A.evalJs(`(() => { const r = ${LIST_ROW(LABEL)}; const c = r && [...r.querySelectorAll('.vw-use-chip')].find((x) => /^All agents/.test(x.textContent)); const b = c && c.querySelector('.vw-use-x'); if (!b) return false; b.click(); return true; })()`);
   const gone = x && await A.until(`(() => { const r = ${LIST_ROW(LABEL)}; return !!r && ![...r.querySelectorAll('.vw-use-chip')].some((x) => /^All agents/.test(x.textContent)) && [...r.querySelectorAll('.vw-use-chip')].some((x) => /^Home network/.test(x.textContent)); })()`, { timeout: 8000 });
   check('✕ takes All agents back with a click (no password — a narrowing); the asker stays', !!gone);
@@ -267,12 +274,12 @@ try {
     const { UserTodoManager } = r('src/user-todos.js');
     const ut = new UserTodoManager({ dataDir: DATA, expirySweepMs: 0 });
     const door = r('src/server/vault-run-door.js').create({ dataDir: DATA, vault, userTodos: ut, sources: { secrets: () => r('src/server/vault-contents.js').secretSource({ vault }) }, instanceKind: () => 'cluster', home: fakeHome,
-      agentEnv: () => ({ ...process.env, PATH: fakeBin + ':' + process.env.PATH }), liveOf: () => true, policyOn: () => true,
+      agentEnv: () => ({ ...process.env }), liveOf: () => true, policyOn: () => true,
       policyJudge: async () => ({ ok: true, answers: [{ name: 'within_policy', probability: 0.93 }] }) });   // THE STUB — never a vendor
     const id = REF.replace(/^vault:\/\/secrets\/(secret:[0-9a-f]{10})\/secret$/, 'secrets:$1#secret');
     door.setRunnable({ id, on: true, reauthed: true });
-    const pol = door.setPolicy({ id, text: 'only 192.168.1.1, read-only status calls to read the WAN status', reauthed: true });
-    const ran = await door.run({ caller: { conversationId: SID, sessionKey: `claude:${SID}`, name: 'Home network', cwd: CWD, scope: SID }, args: ['--env', `T=${REF}`, '--', 'curl', '-sk', 'https://192.168.1.1/api/stat/sites'], cwd: CWD });
+    const pol = door.setPolicy({ id, text: `only ${HOST_IN}, read-only status calls to read the WAN status`, reauthed: true });
+    const ran = await door.run({ caller: { conversationId: SID, sessionKey: `claude:${SID}`, name: 'Home network', cwd: CWD, scope: SID }, args: ['--env', `T=${REF}`, '--', 'curl', '-s', `http://${HOST_IN}/api/stat/sites`], cwd: CWD });
     check('the REAL run door with a stub judge (0.93) runs it with no card — by: policy', un.ok && pol.ok && ran.ok && ran.by === 'policy', { un: un.ok, pol, by: ran.by, code: ran.code });
     try { ut.flush?.(); } catch { } try { ut.stop?.(); } catch { }
     try { vault.lock('close', { quiet: true }); } catch { }
@@ -298,7 +305,7 @@ try {
   await A.shot('vug-6-policy-approved.png');
   await A.evalJs(`(() => { const it = [...document.querySelectorAll('#user-todos-popup .ut-item')].find((e) => /approved by the policy judge/.test(e.textContent)); const t = it && it.querySelector('.ut-text'); if (t) t.click(); return !!t; })()`);
   const row = await A.until(`(() => { const r = ${LIST_ROW(LABEL)}; const p = r && r.querySelector('.vw-use-policy'); return p ? p.textContent : null; })()`, { timeout: 10000 });
-  check('its door opens the entry\'s row, which says the policy (and that the judge is off on this hub — its setting is the owner\'s)', /Policy for the judge: «only 192\.168\.1\.1, read-only status calls to read the WAN status» — the judge is off/.test(String(row)), row);
+  check('its door opens the entry\'s row, which says the policy (and that the judge is off on this hub — its setting is the owner\'s)', new RegExp('Policy for the judge: «only ' + rx(HOST_IN) + ', read-only status calls to read the WAN status» — the judge is off').test(String(row)), row);
 
   console.log('⑧ OFF greys the grant chip «paused», in three languages (round 3 MINOR — LOOK at the shots)');
   const useId = REF.replace(/^vault:\/\/secrets\/(secret:[0-9a-f]{10})\/secret$/, 'secrets:$1#secret');

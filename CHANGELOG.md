@@ -6,7 +6,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 
 ### Added
 - A vault entry can now say who may use it and for which hosts — those runs stop asking each time; «Always» on a run card is such a grant.
-- A password you paste for an agent's request lets that conversation use it for 8 hours; turn on «Usable by agent runs» on its row to remove the limit.
+- A pasted password works for the asking conversation for 8 hours — only in commands to the hosts it named, and only where VibeSpace can read the destination.
 - An optional policy judge (off by default) can approve a vault use that fits rules you write for the entry; anything else still asks you.
 - A grant works only while the entry's «Usable by agent runs» is on; turning it off pauses each grant, and approving one conversation won't resume the others.
 - A grant for a whole domain (like *.example.com) stays tied to the one tool that first used it.

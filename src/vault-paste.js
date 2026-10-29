@@ -24,8 +24,8 @@
  *     wildcard). With them, and the setting `vault.requestGrantsRequester` on (default), the card SAYS the conversation that
  *     asked may use it in commands to those hosts for 8 HOURS — round 7 (MINOR): the grant is HOST-SCOPED, so a command TOWARD
  *     those hosts runs with no card while a command to any OTHER host still draws it (a request that named no hosts draws a card
- *     for every command); round 9 (BLOCKER): it runs with no card ONLY for a KNOWN tool whose destination is read with certainty
- *     (shape.always) — a new KIND of command (a shell, an interpreter, an unknown program, a config-file read) still draws its
+ *     for every command); round 9/10 (BLOCKER): it runs with no card ONLY for a KNOWN tool whose destination the reader READ with
+ *     certainty (shape.destKnown — ruling C, NOT shape.always) — a new KIND of command (a shell, an interpreter, an unknown program, a config-file read) still draws its
  *     card, so the secret never rides a run whose destination the reader cannot see; a vault lock ends it; the entry's own switch is untouched. The paste opens that run grant to the
  *     requesting conversation only; the receipt tells the agent. With the setting OFF the paste grants nothing.
  */
