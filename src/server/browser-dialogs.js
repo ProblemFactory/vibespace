@@ -2240,7 +2240,9 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (kerr) return { ok: false, code: kerr === 'stale_origin' ? 'login_phishing' : 'login_failed', error: kerr === 'stale_origin' ? `the page is no longer ${plan.origin} (the kernel checked it again) — nothing was filled` : kerr === 'not_attached' ? 'VibeSpace is not attached to that tab — nothing was filled' : `the browser did not fill the form (${String(kerr).slice(0, 40)})${plan.mode === 'login' ? '' : ' — the new login stays in the vault, pending, so no password is lost'}` };
     if (!plan.form.surface) e.filled = { formId: plan.form.id, name: plan.name, mode: plan.mode, at: now(), conv, actor };
     if (!w.kernel && submit && (plan.mode === 'signup' || plan.mode === 'change')) {
-      try { const sr = logins.submitted({ origin: plan.origin, usernameHint: plan.user, password: null, outcome: 'navigated', by: 'agent', name: plan.name, conv, convName: actor, profileId: w.profileId }); emit({ kind: 'login-saved', profileId: w.profileId, targetId: e.targetId, state: sr ? sr.state : 'none', name: (sr && sr.name) || null }); } catch { /* */ }
+      try {
+        const sr = logins.submitted({ origin: plan.origin, usernameHint: plan.user, password: null, outcome: 'navigated', by: 'agent', name: plan.name, conv, convName: actor, profileId: w.profileId });   // int361: the password-naming call on its own line (test-browser-prompts' watch: no line naming the password emits)
+        emit({ kind: 'login-saved', profileId: w.profileId, targetId: e.targetId, state: sr ? sr.state : 'none', name: (sr && sr.name) || null }); } catch { /* */ }
     }
     return { ok: true, mode: plan.mode, origin: plan.origin, user: plan.user, filled: plan.filled, ...(chromeStep ? { step: chromeStep } : {}), submitted: !!submit || !!plan.form.surface, receipt: u && u.receipt, otpMissing: !!plan.otpMissing, ...(plan.length ? { length: plan.length } : {}) };
   }
