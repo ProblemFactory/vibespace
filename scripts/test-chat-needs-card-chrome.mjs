@@ -216,7 +216,12 @@ const cleanup = () => {
 process.on('exit', cleanup);
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });
 const PENDS = new Map();
-armWatchdog({ capMs: 600e3, exit: (code) => process.exit(code), pending: () => [...PENDS.values()].map((x) => `CDP ${x.method} (${((Date.now() - x.at) / 1000).toFixed(1)} s)`) });
+// run bare (no gate) the suite assumes its ci.mjs row's budget (budgetFor: a chrome heavy row, 900 s) and says so — lane
+// needs-card-tail r5: a run by hand took the 300 s default, and its own clock fired at 270 s, 23 s into ⑬, on a suite that
+// runs ~430 s alone (int361's direct run of 497beb03; the gate's runs were green)
+const BARE = !process.env.VIBESPACE_SUITE_BUDGET_MS;
+const WD = armWatchdog({ capMs: 600e3, env: BARE ? { ...process.env, VIBESPACE_SUITE_BUDGET_MS: '900000' } : process.env, exit: (code) => process.exit(code), pending: () => [...PENDS.values()].map((x) => `CDP ${x.method} (${((Date.now() - x.at) / 1000).toFixed(1)} s)`) });
+console.log(`watchdog: ${Math.round(WD.deadline.ms / 1000)} s (${WD.deadline.capped ? "the suite's own ceiling" : 'the budget − 30 s'}; the budget ${Math.round(WD.deadline.budgetMs / 1000)} s — ${BARE ? "a bare run: its ci.mjs row's" : "the gate's"})`);
 for (let i = 0; i < 120; i++) { try { await fetch(`${ORIGIN}/api/home`); break; } catch { await sleep(250); } }
 
 // ── raw CDP, one connection per page (+ the RED control's bundle through the Fetch domain) ──

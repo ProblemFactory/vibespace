@@ -49,8 +49,12 @@ export function installChatSeek(ChatView) {
     const replay = userScrolled ? 'userScrolled' : (revealAt > jumpAt && this._search?._lastRevealRun) ? 'reveal' : (target && target.isConnected) ? 'target' : 'none';
     this._trace?.('stableHeights', { on: 0, replay, st: Math.round(this._messageList.scrollTop), sh: this._messageList.scrollHeight });
     if (userScrolled) return;
+    // THE VIEW'S OWN REPLAY IS NOBODY'S ACT (lane needs-card-tail r5 — the reveal arm wrote _lastRevealAt + _lastNavAt, and a
+    // ↓ or a send pressed in this 1.6 s window was dropped as stale): it writes its own stamp, which no reader-act predicate
+    // reads (chat-view _readerActs); the replayed reveal and jump target write none of theirs
+    if (replay !== 'none') this._lastReplayAt = Date.now();
     if (replay === 'reveal') this._search._lastRevealRun();
-    else if (replay === 'target') this._scrollElStable(target);
+    else if (replay === 'target') this._scrollElStable(target, { replay: true });
   },
 
     _maybeSeekLater() {
@@ -437,10 +441,10 @@ export function installChatSeek(ChatView) {
     return target;
   },
 
-    _scrollElStable(el, { fit = false } = {}) {
+    _scrollElStable(el, { fit = false, replay = false } = {}) {
     if (!el || !el.isConnected) return;
     this._lastJumpTargetEl = el;
-    this._lastJumpAt = Date.now();
+    if (!replay) this._lastJumpAt = Date.now(); // a replay (the c-v restore re-centring its target) is not a jump (r5)
     this._programmaticScroll = true;
     clearTimeout(this._jumpGuardTimer);
     this._jumpGuardTimer = setTimeout(() => { this._programmaticScroll = false; }, 1100);
