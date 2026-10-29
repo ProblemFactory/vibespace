@@ -340,6 +340,7 @@ function setupSessionPty(session, id, ptyProcess, { cleanupOnExit = true } = {})
       try { fs.unlinkSync(path.join(BUFFERS_DIR, id + '.buf')); } catch {}
       fs.rm(path.join(BUFFERS_DIR, id + '.img'), { recursive: true, force: true }, () => { }); // the copies' kept pictures (lane claude-steer-inject r5) go with the buffer — off the loop (r6)
       try { fs.unlinkSync(path.join(BUFFERS_DIR, id + '.json')); } catch {}
+      fs.unlink(path.join(BUFFERS_DIR, id + '.receipts'), () => { }); // the wrapper's receipts (lane human-cli r4): its exit removes them, not when it was killed past that — off the loop
     }
     // B-f698: an UNEXPECTED exit while working is resumed ONCE by itself (no continue, no bill) + one For-you item;
     // a second one only notifies. The rule is PURE (exit-facts unexpectedExitVerdict) over the facts the line printed.

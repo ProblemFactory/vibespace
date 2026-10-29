@@ -368,6 +368,7 @@ function registerWsHandler(wss, ctx) {
       if (session.pty) session.pty.kill();
       if (session.sockName) deleteSessionMeta(session.sockName);
       // Clean up wrapper buffer files
+      fs.unlink(path.join(BUFFERS_DIR, data.sessionId + '.receipts'), () => { }); // the wrapper's receipts (lane human-cli r4): its own exit removes them, not when it is killed past that — off the loop
       try { fs.unlinkSync(path.join(BUFFERS_DIR, data.sessionId + '.json')); } catch {}
       try { fs.unlinkSync(path.join(BUFFERS_DIR, data.sessionId + '.buf')); } catch {}
       fs.rm(path.join(BUFFERS_DIR, data.sessionId + '.img'), { recursive: true, force: true }, () => { }); // the copies' kept pictures (lane claude-steer-inject r5) go with the buffer — off the loop (r6)

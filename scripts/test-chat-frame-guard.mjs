@@ -343,6 +343,17 @@ setInterval(() => {}, 1e3);
   ok(ws.includes('chat-input REFUSED'), 'every refusal leaves a server-side journal line (the 2.364.1 forensics gap: nothing in the journal)');
   const sv = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
   ok(sv.includes("'chat-frames'") && sv.includes('48 * 3600 * 1000'), 'orphaned chat-frames swept age-based (old wrappers never unlink)');
+  // lane human-cli r4: a wrapper killed past its exit handler leaves <id>.receipts — the age sweep (inline in server.js here;
+  // src/server/wrapper-files.js AGED_WRAPPER_FILE once it moved there) and the kill-path teardown take it with the buffer
+  const wfSrc = fs.readFileSync(path.join(REPO, 'src/server/wrapper-files.js'), 'utf8');
+  const sweepPat = (/fn\.match\((\/\^\(\.\+\)\\\.\([^)]*\)\$\/)\);/.exec(sv) || /const AGED_WRAPPER_FILE = (\/[^\n;]*\/);/.exec(wfSrc) || [])[1] || '';
+  ok(!!sweepPat && new RegExp(sweepPat.slice(1, -1)).test('sess-1-2.receipts'), `the age sweep's pattern takes <id>.receipts (${sweepPat || 'no sweep pattern found'})`);
+  ok(fs.readFileSync(path.join(REPO, 'src/server/session-stdout.js'), 'utf8').includes("fs.unlink(path.join(BUFFERS_DIR, id + '.receipts'), () => { });") && fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8').includes("fs.unlink(path.join(BUFFERS_DIR, data.sessionId + '.receipts'), () => { });"),
+    'a session\'s end removes <id>.receipts with its buffer (off the loop): the exit teardown (session-stdout) AND the kill (ws-handler endSession)');
+  // ONE receipts grammar across the FOUR chat wrappers: advertised, a torn line nacked, the 250 ms window opened only by an ack asked for
+  const four = ['chat-wrapper.js', 'codex-chat-wrapper.js', 'acp-wrapper.js', 'agy-wrapper.js'].map((f) => [f, fs.readFileSync(path.join(REPO, 'data/bin', f), 'utf8')]);
+  const offGrammar = four.filter(([, s]) => !(/receipts(: | = )true/.test(s) && s.includes("type: '_stdin_nack'") && s.includes("if (rec.type === '_stdin_ack') lastReceiptAt = Date.now();") && !/^\s*lastReceiptAt = Date\.now\(\);/m.test(s))).map(([f]) => f);
+  ok(!offGrammar.length, `the four chat wrappers speak one receipts grammar — caps.receipts, the torn line's _stdin_nack, the window opened only by an asked-for ack (off: ${offGrammar.join(', ') || 'none'})`);
   // CAPABILITY-ONLY GATE (design-harness-plugins §1 P1): the bypass condition is
   // size + local transport; the wrapper's advertised capability decides the
   // rest. A backend-id exclusion is exactly what kept the shredding class open

@@ -148,7 +148,7 @@ function notificationSteerOf(wc, { inBand = null, published = false } = {}) {
  *  renames over its sidecar (ci358-reds item 7), left behind when the wrapper is killed between its write and its rename.
  *  A file is unlinked only when untouched since `cutoff` AND its id is not live: a dead wrapper's files stop being
  *  written, so age is race-free by construction. Returns the count unlinked. */
-const AGED_WRAPPER_FILE = /^(.+)\.(buf|json|json\.\d+\.tmp|img)$/; // .img = the copies' kept pictures (lane claude-steer-inject r5): a folder, same rule
+const AGED_WRAPPER_FILE = /^(.+)\.(buf|json|json\.\d+\.tmp|img|receipts)$/; // .img = the copies' kept pictures (lane claude-steer-inject r5): a folder, same rule; .receipts (lane human-cli r4): the wrapper's own exit removes it — never when it was killed past that (int362: r4's server.js sweep rule lands here, the ONE sweep)
 function sweepAgedWrapperFiles(BUFFERS_DIR, { cutoff, isActive = () => false } = {}) {
   let swept = 0, names;
   try { names = fs.readdirSync(BUFFERS_DIR); } catch { return 0; }
