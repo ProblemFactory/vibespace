@@ -506,6 +506,37 @@ async function newShapeCards(doorMod) {
     ok(!!cb && !!wa && wa.code === 'folder', 'round 25 (minor 6b): the SAME command rerun in a DIFFERENT folder draws a card whose facts.whyAgain names the one difference (folder) — a1f79c42 drew the card but named no reason', { card: !!cb, whyAgain: wa });
   }
 
+  // round 26 (minor): a rerun that differs ONLY by SPACING (same tokens, same order) names 'arg-space', not 'arg-order'. RED on 75ef16b09: arg-order was tested first and a spacing-only rerun has equal sorted word-lists too, so 'arg-space' was unreachable (the card said 参数顺序 for a pure spacing change).
+  {
+    const items = new Map(); let n = 0; const subs = [];
+    const store = {
+      add: (k, v) => { const id = 'b' + (++n); items.set(id, { id, status: 'open', ...v }); return { id }; },
+      get: (id) => { const it = items.get(id); return it ? { ...it } : null; },
+      setStatus: (id, st, by) => { const it = items.get(id); if (it) { it.status = st; subs.forEach((f) => { try { f({ ...it }, { status: st, by }); } catch {} }); } },
+      resolveAnswered: (ids, outcome, fact) => { for (const id of ids) { const it = items.get(id); if (it) { it.status = 'done'; it.resolvedBy = outcome; it.resolvedFact = fact; } } },
+      reshapeItems: (fn) => { for (const it of items.values()) { try { fn(it); } catch {} } },
+      snapshot: () => ({ open: [...items.values()].filter((x) => x.status === 'open').map((x) => ({ ...x })) }),
+      onStatus: (f) => subs.push(f),
+    };
+    const bw = await world({ instance: 'cluster', askMs: 60 });
+    const bd = bw.mk(DOOR, { userTodos: store });
+    bd.setRunnable({ id: 'mounts:m1#secretKey', on: true, reauthed: true });
+    const A = ['--env', 'T=vault://mounts/m1/secretKey', '--', 'curl', '-s', '-H', 'X-A: 1', 'https://api.example.com/api/stat'];
+    const A2 = ['--env', 'T=vault://mounts/m1/secretKey', '--', 'curl', '-s', '-H', 'X-A:  1', 'https://api.example.com/api/stat'];   // the SAME header, one extra space in its value (same shape key, exact argv differs only by spacing)
+    const openAsk = () => store.snapshot().open.find((x) => x.action && x.action.type === 'vault-run-ask');
+    const pA = bd.run({ caller: bw.caller, args: A, cwd: bw.work });
+    for (let i = 0; i < 400 && !openAsk(); i++) await sleep(5);
+    await pA;
+    const late = store.snapshot().open.find((x) => x.action && x.action.late);
+    bd.answer(late.action.askId, { answer: 'once' });
+    const pB = bd.run({ caller: bw.caller, args: A2, cwd: bw.work });
+    let cb = null; for (let i = 0; i < 400 && !cb; i++) { cb = store.snapshot().open.find((x) => x.action && x.action.type === 'vault-run-ask' && !x.action.late && x.facts); if (!cb) await sleep(5); }
+    if (cb) bd.answer(cb.action.askId, { answer: 'deny' });
+    await pB;
+    const wa = cb && cb.facts && cb.facts.whyAgain;
+    ok(!!cb && !!wa && wa.code === 'arg-space', 'round 26 (minor): a rerun differing ONLY by spacing names facts.whyAgain=arg-space (not arg-order) — arg-space is now tested before arg-order', { card: !!cb, whyAgain: wa });
+  }
+
   // round 23 (MAJOR #5): the settled late record read by wake-approve-card 2a5e9ce8's own reader (copied) — a late allow stamps «allowed:late», a deny «denied by person», the vault's 24 h / lock stamp NOTHING (decidedBy ≠ person)
   {
     const wakeStamp = (rec) => { const by = rec.resolvedBy, fact = rec.resolvedFact; if (!fact || fact.decidedBy !== 'person') return null; return by === 'allowed' && fact.late === true ? 'allowed:late' : by; };

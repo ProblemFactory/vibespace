@@ -713,8 +713,16 @@ function cfgBareOrUrl(v) {
 function routeHostOne(raw) {
   const t = String(raw).trim();
   if (!t) return null;
+  if (/^[a-z][a-z0-9+.-]{0,31}:(?:\/|[a-z])/i.test(t) && !/^[a-z][a-z0-9+.-]{0,31}:\/\//i.test(t)) return null;   // round 26 (MAJOR 2a, confirmed, wire-proven curl 8.18): the r25 scheme-word rule was in targetOf / cfgBareOrUrl but NOT here — a scheme-shaped token that is not canonical scheme:// (proxy = http:/HOST one-slash, socks5:/HOST) dials a host PAST the scheme word; the reader never reads «http» / «socks5» as a bare route host ⇒ blind (fail closed). A host:port (evil.test:3128 — a digit after the colon) is not scheme-shaped and is read
   const r = urlParse(/^[a-z][a-z0-9+.-]{0,31}:\/\//i.test(t) ? t : 'http://' + t);
   return r.host ? r.host.replace(/:\d+$/, '') : null;   // the host without its port (a proxy / socks / resolve host is named; a port is not a host); an IPv6 literal stays bracketed ([::1])
+}
+// round 26 (MAJOR 2b): a --resolve ADDR is an IP literal curl DIALS (IPv4, or IPv6 bracketed [::1] or BARE ::1) — never a URL host. A bare v6 is bracketed so the ONE parser (urlParse) reads it; it is NEVER dropped (the r23 law: a non-empty route token the parser rejects BLINDS the directive, it is not silently dropped — curl would still dial it).
+function routeAddrOne(raw) {
+  const t = String(raw).trim();
+  if (!t) return null;
+  const bare6 = t.indexOf(':') >= 0 && t[0] !== '[';   // a bare IPv6 literal (holds a colon, not already bracketed) — WHATWG requires brackets
+  return routeHostOne(bare6 ? `[${t}]` : t);
 }
 // a connect-to / resolve field string split on ':' but NOT inside [ ] (an IPv6 literal `[::1]` holds colons)
 function colonFields(s) {
@@ -736,7 +744,7 @@ function cfgRouteHosts(key, v) {
   if (key === 'url') { if (t[0] === '@') return { file: true }; hosts = cfgBareOrUrl(t); }
   else if (key === 'doh-url' || key === 'ipfs-gateway') hosts = cfgBareOrUrl(t);
   else if (key === 'connect-to') { const f = colonFields(t); const h = f.length >= 3 ? routeHostOne(f[2]) : null; hosts = h ? [h] : []; }   // HOST1:PORT1:HOST2:PORT2 — curl connects to HOST2 (bracket-aware so an IPv6 [::1] host is not split, and read by the ONE parser)
-  else if (key === 'resolve') { const f = colonFields(t.replace(/^\+/, '')); const h = f[0] ? routeHostOne(f[0]) : null; const addrs = f.slice(2).join(':').split(',').map((a) => routeHostOne(a)).filter(Boolean); hosts = [h, ...addrs].filter(Boolean); }   // [+]HOST:PORT:ADDR[,ADDR] — the mapped host and its address(es), each through the ONE parser
+  else if (key === 'resolve') { const f = colonFields(t.replace(/^\+/, '')); const h = f[0] ? routeHostOne(f[0]) : null; const raw = f.slice(2).join(':').split(',').map((a) => a.trim()).filter((a) => a !== ''); const addrs = raw.map((a) => routeAddrOne(a)); if (addrs.some((a) => !a)) return { blind: true }; hosts = [h, ...addrs].filter(Boolean); }   // round 26 (MAJOR 2b): [+]HOST:PORT:ADDR[,ADDR] — the mapped host + its address(es); each ADDR is an IP literal read by routeAddrOne (a BARE IPv6 ::1 bracketed first, never dropped), and a non-empty ADDR the parser rejects BLINDS (curl still dials it), it is not filtered away
   else { const h = routeHostOne(t); hosts = h ? [h] : []; }   // proxy / preproxy / proxy1.0 / socks* / dns-servers: [protocol://][user@]host[:port] read exactly as curl reads it (#/? end the authority; a `\` / userinfo-past / unsafe byte blinds)
   return hosts.length ? { hosts } : { blind: true };   // round 23 (reopens r19 item 1): a NON-empty route token whose host the parser REJECTS is a BLIND authority — named, «always» withheld, never a DROPPED host (curl would still dial it)
 }
@@ -779,6 +787,16 @@ function argClassOf(a) {
   if (/^[+-]?\d+(?:\.\d+)?$/.test(a)) return '<number>';
   if (/[\/\\]|^[.~]/.test(a)) return '<path>';
   return '<word>';
+}
+// round 26 (minor): wget `-e VAR[=…]` commands that do NOT route the connection (politeness / timestamp / output verbosity) — mirrors vault-use-grants' WGET_SAFE_E. Every OTHER -e command (a proxy var: use_proxy / http(s)_proxy / ftp_proxy, or an unknown one) and every other keyed flag ROUTES (fail closed).
+const WGET_SAFE_E = new Set(['robots', 'timestamping', 'quiet', 'verbose', 'server_response', 'progress', 'show_progress', 'dot_style', 'content_disposition', 'content_on_error', 'trust_server_names', 'debug', 'no_verbose']);
+/** Does a keyed flag entry `${flag}=${value}` actually ROUTE the connection? Only a routing key withholds «always» (opaque-route) — a reviewed non-routing wget `-e robots=off` must not be told «it routes somewhere its address does not say». */
+function keyRoutes(entry, row) {
+  const eq = String(entry).indexOf('=');
+  const f = eq >= 0 ? entry.slice(0, eq) : entry;
+  const v = eq >= 0 ? entry.slice(eq + 1) : '';
+  if (row && row.name === 'wget' && (f === '-e' || f === '--execute')) return !WGET_SAFE_E.has((v.split('=')[0] || '').trim().toLowerCase());   // a known non-routing wgetrc command does not route; a proxy var / an unknown one does
+  return true;   // curl proxy/resolve/connect-to/socks/doh-url/dns-servers/alt-svc/interface/unix-socket, ssh -o ProxyCommand/-J, httpie --proxy, git -c, rsync -e — all route (fail closed)
 }
 /** planOf's answer (`run`) → its SHAPE: { v, tool, name, kind, sub, flags, args, hosts, entries, injection, env (NAME=value), keyed,
  *  templates, on, script, known, proxyEnv, always, noAlways, argvExposed }. `always` = «always» may be offered for it. */
@@ -866,19 +884,36 @@ function shapeOf(run) {
   const userinfo = !!(row && kind === 'tool') && routeWords.some(urlUserinfo);   // round 18/19 (item 1 + MINOR): a credential-carrying http(s) URL in a ROUTE word (a -R/--repo/--hostname/GH_HOST/GH_REPO value, a repo spec, a gh api/<url> positional, a curl target) ⇒ url_userinfo; judged on route words ONLY — a userinfo URL quoted in a --body / -d body is a mention, never contacted, never refused
   const bigTpl = run.files.find((f) => f.template != null && typeof f.text === 'string' && bytesOf(f.text) > TEMPLATE_CARD_MAX);   // round 18 (item 2): ANY template (a config flag, a body, a positional, a -d value) past the card render bound ⇒ card_too_long — ONE verdict, never a note that hides it
   const cardTooLong = bigTpl ? { name: bigTpl.name, template: bigTpl.template, bytes: bytesOf(bigTpl.text) } : null;
-  const noAlways = kind !== 'tool' ? kind : !known || !hosts.size || unread ? 'unknown-destination' : row.runsProject ? 'runs-project-code' : configFile && !(configShown && !configReads) ? 'config-file' : keyed.length > 0 ? 'opaque-route' : run.programWritable ? 'program-writable' : null;   // round 25 (the vault-use-grants seam ruling): an argv routing flag (--unix-socket / --proxy / ssh -oProxyCommand / wget -e use_proxy|http_proxy — all in `keyed`, all making `blind` true) routes the connection off every named host ⇒ an OPAQUE destination, never a standing pass («always» withheld, as the config reader already does for a template's route directive)
+  const routesOpaque = keyed.filter((k) => keyRoutes(k, row));   // round 25/26: the keyed flags that actually ROUTE — a proxy / socket / resolve / jump / ProxyCommand (not wget's non-routing -e robots=off)
+  const writableProg = kind === 'tool' && !!run.programWritable;
+  // round 26 (BLOCKER, confirmed, two votes 0.93+): the withholding reasons are a SET, not a ladder — program-writable is its OWN
+  // reason the order can no longer hide. The r25 ladder put opaque-route BEFORE program-writable, so a keyed routing flag masked
+  // the program-writable fact; int361's ruling-C seam reads noAlways==='opaque-route' (with a readable destination) as «the
+  // destination is known» and a standing grant then covered an agent-WRITABLE program named curl given a no-op --interface lo /
+  // --resolve host:443:host / -x host (measured on the real int361 door). A grant NEVER covers an agent's own program, whatever the
+  // route — so program-writable ranks ABOVE opaque-route (the existing seam reads noAlways!=='opaque-route' ⇒ destKnown=false ⇒ the
+  // card), and the shape also carries `programWritable` + the full `noAlwaysAll` so the door's destinationKnown can read «the
+  // destination is known AND the program is not the agent's» directly (int-C: int361 ANDs !shape.programWritable into the seam).
+  const noAlwaysAll = kind !== 'tool' ? [kind] : [
+    (!known || !hosts.size || unread) ? 'unknown-destination' : null,
+    (row && row.runsProject) ? 'runs-project-code' : null,
+    (configFile && !(configShown && !configReads)) ? 'config-file' : null,
+    writableProg ? 'program-writable' : null,
+    routesOpaque.length > 0 ? 'opaque-route' : null,
+  ].filter(Boolean);
+  const noAlways = noAlwaysAll[0] || null;   // the PRIMARY reason, for the card prose (program-writable above opaque-route — see above)
   return {
     v: SHAPE_V, tool: run.tool, name: run.name, kind, sub, flags: [...flags].sort(), args, hosts: [...hosts].sort(), routeHosts: [...routeHosts].sort(), mentions, badHost, userinfo, cardTooLong, configReads,
     entries: run.refs.map((r) => r.ref).sort(), injection: [...run.injection].sort(), env: run.plainEnv.map((e) => `${e.name}=${e.value}`).sort(), keyed: keyed.sort(),
     templates: run.files.filter((f) => f.text != null).map((f) => `${f.name}=${f.text}`).sort(), on: run.on || null, script,
-    known, proxyEnv: !!(known && row.proxyEnv), always: !noAlways, noAlways, argvExposed: !!run.argvExposed, gitDriven,
+    known, proxyEnv: !!(known && row.proxyEnv), always: !noAlways, noAlways, noAlwaysAll, programWritable: writableProg, argvExposed: !!run.argvExposed, gitDriven,
     // lane vault-agent-own (the review): where it sends what it reads cannot be told — the raw facts, never `noAlways` (a
     // known tool naming no host reads 'unknown-destination' there, which hid a config file / a program an agent wrote).
     // Round 2: every row of KNOWN_TOOLS reaches the network, so a known tool whose host the table did not READ (`curl` with
     // no URL, `psql` over a service, `rclone remote:`) is not a local command — no host read is not «no host»; a target the
     // shape cannot list (`unread`) and a destination its config keeps (`confDest`: git's url.<base>.insteadOf in the
     // project's own .git/config, an rclone remote) are blind too
-    blind: kind !== 'tool' || !known || !hosts.size || unread || keyed.length > 0 || configFile || !!(row && (row.runsProject || row.confDest)) || !!run.programWritable,
+    blind: kind !== 'tool' || !known || !hosts.size || unread || routesOpaque.length > 0 || configFile || !!(row && (row.runsProject || row.confDest)) || !!run.programWritable,   // round 26: a NON-routing keyed flag (wget -e robots=off) no longer blinds a known destination
   };
 }
 /** THE KEY a remembered «always» is stored under — everything decision ④ says, nothing positional. */

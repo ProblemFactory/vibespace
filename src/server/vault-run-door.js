@@ -637,7 +637,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     if (prev.place !== cur.place) return { code: 'folder' };
     if (JSON.stringify(prev.env) !== JSON.stringify(cur.env)) { const chg = cur.env.find((x) => !prev.env.includes(x)) || prev.env.find((x) => !cur.env.includes(x)) || ''; return { code: 'env', name: (chg.split('=')[0] || null) }; }
     if (JSON.stringify(prev.refs) !== JSON.stringify(cur.refs)) return { code: 'secret-set' };
-    if (prev.argv !== cur.argv) { const w = (a) => a.trim().split(/\s+/); if (w(prev.argv).slice().sort().join('\u0000') === w(cur.argv).slice().sort().join('\u0000')) return { code: 'arg-order' }; if (prev.argv.replace(/\s+/g, ' ').trim() === cur.argv.replace(/\s+/g, ' ').trim()) return { code: 'arg-space' }; return { code: 'args' }; }
+    if (prev.argv !== cur.argv) { const norm = (a) => a.replace(/\s+/g, ' ').trim(); const w = (a) => a.trim().split(/\s+/); if (norm(prev.argv) === norm(cur.argv)) return { code: 'arg-space' }; if (w(prev.argv).slice().sort().join('\u0000') === w(cur.argv).slice().sort().join('\u0000')) return { code: 'arg-order' }; return { code: 'args' }; }   // round 26 (minor): arg-space (same tokens + order, only spacing differs) is tested BEFORE arg-order (same token SET, different order) — a spacing-only rerun has equal sorted lists too, so order-first made 'arg-space' unreachable
     return null;
   }
 
