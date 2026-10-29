@@ -990,7 +990,8 @@ setInterval(() => { }, 1000);
 
     // (5) THE NAME WHEREVER A PERSON OR ANOTHER CONVERSATION READS IT (claim r3-1 FINDING 3): a token-shaped job name, belted on
     // the snapshot a non-author reads (the panel's card title, the ask window's title), another lineage's view, the events ring
-    // and the digest it injects, the Ports label — whole for its author; the record keeps it raw (the author's own fact)
+    // and the digest it injects, the Ports label. r7 (accept-r6, the second reviewer): the record keeps the name resolveName
+    // BELTED (the belt on the whole name as asked, then the cut) — the author's echo is the record's; no reader sees a token's piece
     {
       const X = wired('names');
       const nm = 'deploy-' + MAT;
@@ -1002,7 +1003,7 @@ setInterval(() => { }, 1000);
       const sn = X.jm.snapshot(job), other = jobModel.agentJobView(X.jm.snapshot(job), { mine: false }), dig = X.jm.updatesFor({ ...who, conversationId: 'someone-else', isUser: true }, 0).text;
       ok(!raw(sn.name) && !raw(other.name) && !raw(X.jm.events[X.jm.events.length - 1].name) && !raw(dig) && X.labels.length === 1 && !raw(X.labels[0]) && /^service: deploy-ghp_«redacted»/.test(X.labels[0]),
         'r4 a token-shaped job NAME is belted on the snapshot a person reads (card title, ask window), another lineage\'s view, the events ring + the digest it injects, the Ports label', JSON.stringify({ sn: sn.name, other: other.name, label: X.labels[0], dig: dig.slice(0, 160) }));
-      ok(raw(r.job.name) && raw(X.jm.snapshot(job, { author: true }).name) && raw(job.name), '…whole for its AUTHOR (the create echo, its own views) — the record keeps the raw name (the author\'s own fact)', JSON.stringify({ echo: r.job.name.slice(0, 12) }));
+      ok(!raw(r.job.name) && r.job.name === job.name && X.jm.snapshot(job, { author: true }).name === job.name && job.name === 'deploy-ghp_«redacted»', '…r7: its AUTHOR reads the record (the create echo, its own views) and the record keeps the BELTED name — no token reaches jobs.json, the archive or the echo', JSON.stringify({ echo: r.job.name }));
       // (6) a notify cron with no --text: the body the author gets is the same LABEL the header carries (claim r3-2 minor 6)
       const c = X.jm.jobs.get(X.jm.create({ kind: 'cron', name: 'remind-' + MAT, schedule: { everyMs: 3600e3 }, action: { type: 'notify' }, owner: own }, who).job.id);
       X.jm._fireCron(c, 'cron');
@@ -1052,7 +1053,7 @@ setInterval(() => { }, 1000);
       const L5 = X.jm.labelOf(job);   // create() names it `deploy-ghp_…`; its label is that name belted
       ok(/^deploy-ghp_«redacted»$/.test(L5) && scan && scan.service === L5 && card && card.name === L5 && row && row.name === L5 && bl === 'job ' + L5 && !raw(scan.service) && !raw(card.name) && !raw(row.name) && !raw(bl),
         'r5 THE ONE NAME ACCESSOR: the Ports scan row, the Artifacts service row and the chat card it feeds, the browser\'s job label read the engine\'s labelOf — never the record (76ffc823: all four raw beside a belted twin)', JSON.stringify({ scan: scan && scan.service, card: card && card.name, row: row && row.name, bl }));
-      ok(stub === 'job ' + job.id && raw(job.name), '…a holder with no engine shows the job\'s id, never the record\'s words; the record keeps the raw name', stub);
+      ok(stub === 'job ' + job.id && job.name === L5, '…a holder with no engine shows the job\'s id, never the record\'s words; r7: the record keeps the belted name', stub);
       // (9) the stray door files THROUGH _forYou (the dep's one call): same verdict, same journal line
       const seen = []; const door = X.jm._forYou; X.jm._forYou = function (j, c) { seen.push(c && (c.copy || c.fact)); return door.call(this, j, c); };
       const sv = X.jm.d.notifyUser({ text: 'raw words', urgency: 'normal', jobId: job.id, jobName: job.name, ownerCid: CID });
@@ -1073,8 +1074,8 @@ setInterval(() => { }, 1000);
       const dj = X.jm.jobs.get(X.jm.create({ kind: 'service', name: 'deploy ' + MAT, cmd: { argv: ['sh', '-c', 'sleep 60'] }, owner: own, access: { view: 'all' } }, who).job.id);
       const other = { conversationId: 'c0ffee00-0000-4000-8000-0000000000b6', sessionId: 's-other', sessionCreatedAt: 2, groups: new Set() };
       const dOther = txt(X.jm.digestFor(other, 0)), dOwn = txt(X.jm.digestFor(who, 0)), dLine = dOther.split('\n').find((l) => l.includes(dj.id)) || '';
-      ok(dLine.includes(' — ' + X.jm.labelOf(dj) + ' — ') && /«redacted»/.test(dLine) && !dOther.includes(MAT.slice(4, 12)) && !dOwn.includes(MAT.slice(4, 12)) && raw(dj.name),
-        'r6 THE DIGEST: another conversation (and the owner) reads labelOf\'s label in the injected digest — no head of the token survives the cut; the record keeps the raw name', dLine);
+      ok(dLine.includes(' — ' + X.jm.labelOf(dj) + ' — ') && /«redacted»/.test(dLine) && !dOther.includes(MAT.slice(4, 12)) && !dOwn.includes(MAT.slice(4, 12)) && !raw(dj.name),
+        'r6 THE DIGEST: another conversation (and the owner) reads labelOf\'s label in the injected digest — no head of the token survives the cut; r7: the record keeps the belted name', dLine);
       // (12) r6 a hand-built copy handed to the stray kind (accept-r5 confirmed 1 — stray-launder-files.cjs): refused BY NAME,
       // journaled `stray`, logged with its caller, nothing filed (140205ee filed it as a real «parked» copy, no log line)
       const n12 = X.items().length, l12 = X.logs.length;
@@ -1106,6 +1107,21 @@ setInterval(() => { }, 1000);
       for (const k of Reflect.ownKeys(X.todos)) { const val = X.todos[k]; for (const x of val instanceof Map ? [...val.values()] : [val]) if (x && typeof x === 'object' && Object.isFrozen(x) && x.origin === 'jobs') { holds.push(String(k)); found14.push(x); } }
       const lift = await new Promise((res) => { Promise.resolve().then(X.todos.add.bind(X.todos, `claude:${CID}`, { origin: 'jobs', by: 'agent', jobId: 'jb-0000aa57', jobFact: 'ask', filerKey: found14[0], i18n: { text: { key: '{name} needs your input', params: { name: 'lifted' } } } })).then(() => res('FILED'), (e2) => res(e2.message)); });
       ok(X.todos._filerKeys === undefined && !holds.length && /needs a caller the store can name/.test(lift) && key && key.origin === 'jobs', 'r6 THE KEY HOLDER: no property of the store holds its filer key — a holder that walks the store finds none and its frameless filing is refused; the wiring filed with it above', JSON.stringify({ holds, lift }));
+      // (15) r7 THE MINT (accept-r6 unverified 2 — hyg-door-call.cjs): the door files a copy forYouCopy minted for ITS job — a
+      // hand-built {words, fact} handed through `.call` (ff3c8a20f filed it and journaled ✓, no log line) or a copy minted for
+      // another job is refused by name, journaled `hand-built`, its caller in the log, nothing filed
+      { const n15 = X.items().length, l15 = X.logs.length, door = X.jm._forYou;
+        const hv = door.call(X.jm, job, { fact: 'parked', words: { key: 'HAND-BUILT words, no template of the engine' }, urgency: 'high' });
+        const he = (job.notifyLog || []).filter((x) => x.lane === 'user-inbox').pop();
+        const ov = X.jm._forYou(job, M.forYouCopy(dj, 'ask'));
+        ok(hv && hv.ok === false && /a hand-built copy is refused/.test(hv.why) && he && he.copy === 'hand-built' && he.ok === false && ov && ov.ok === false && /minted for another job/.test(ov.why) && X.items().length === n15 && !X.items().some((i) => /HAND-BUILT/.test(i.text))
+          && X.logs.slice(l15).filter((l) => /outside the one door .*caller scripts\/test-jobs-engine\.mjs:\d+/.test(l)).length === 2, 'r7 THE MINT: a hand-built copy (`.call`) and a copy minted for another job are refused by name — journaled `hand-built`, the caller in the log, nothing filed', JSON.stringify({ hv, he, ov })); }
+      // (16) r7 THE RECORD'S NAME (accept-r6, the second reviewer — hyg-name-cut64.cjs): the belt on the WHOLE name, then the cut —
+      // ff3c8a20f cut to 64 first and a token the cut split showed up to 19 of its 36 characters to every viewer
+      { const body16 = MAT.slice(4), cj = X.jm.jobs.get(X.jm.create({ kind: 'service', name: 'nightly build of the whole staging stack ' + MAT, cmd: { argv: ['sh', '-c', 'sleep 60'] }, owner: own, access: { view: 'all' } }, who).job.id);
+        const seen16 = [cj.name, X.jm.labelOf(cj), X.jm.snapshot(cj).name, X.jm.snapshot(cj, { author: true }).name, txt(X.jm.digestFor(other, 0))].join('\n');
+        let leak16 = 0; for (let i = 0; i + 8 <= body16.length; i++) if (seen16.includes(body16.slice(i, i + 8))) leak16++;
+        ok(cj.name === 'nightly-build-of-the-whole-staging-stack-ghp_«redacted»' && !leak16, 'r7 THE RECORD\'S NAME: belted WHOLE, then cut — no piece of a token the 64-char cut would split reaches the record, the author\'s echo, a viewer\'s snapshot or digest', JSON.stringify({ name: cj.name, leak16 })); }
       X.end();
     }
   }

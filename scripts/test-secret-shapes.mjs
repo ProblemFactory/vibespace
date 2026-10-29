@@ -62,6 +62,38 @@ console.log('§1 redactSecrets — the shared masker’s contract (R1–R8 exhau
   const OLD_TAIL = new RegExp('\\bgh[pousr]_[A-Za-z0-9]{20,255}(?![A-Za-z0-9_\\-])');
   ok(tail.every((t) => !t.includes(MAT) && t.includes(REDACTED)) && tail[0] === 'ghp_' + REDACTED + '-deploy' && OLD_TAIL.test(PAT) && !OLD_TAIL.test(PAT + '-deploy') && redactSecrets('sk-' + MAT + '-x').text === 'sk-' + REDACTED,
     'a known prefix followed by `-` / `_` (a job name `<token>-deploy`, a suffix `-2`) is redacted — the prefix and the words after stay; a family whose material holds `-` still takes its whole run', tail);
+  // lane job-notify-user r7 (accept-r6 confirmed 0): EVERY family its own tail — the material's own class decides where it ends
+  // (a run at the first character outside ITS class, a fixed-length family after its length); r6 moved five families and AIza /
+  // github_pat_ / xox?- stayed raw before a `-` / `_`. Every family × {`-`, `_`, a word character, the end} and after a `_`
+  // (`ci_<token>`: `\b` kept it whole): the material never shows; a tail its class does not hold stays in clear
+  const AN = (n) => { let o = ''; while (o.length < n) o += crypto.randomBytes(24).toString('base64').replace(/[^A-Za-z0-9]/g, ''); return o.slice(0, n); };
+  const UP = (n) => { let o = ''; while (o.length < n) o += crypto.randomBytes(24).toString('hex').toUpperCase(); return o.slice(0, n); };
+  const FAM = [   // [family, prefix, material, the class holds '-', holds '_', fixed length]
+    ...['p', 'o', 'u', 's', 'r'].map((x) => ['gh' + x + '_', ['g', 'h', x, '_'].join(''), AN(36), false, false, false]),
+    ['github_pat_', ['git', 'hub_pat_'].join(''), AN(22) + '_' + AN(59), false, true, false],
+    ['sk_live_', ['sk', '_live_'].join(''), AN(24), false, false, false], ['rk_test_', ['rk', '_test_'].join(''), AN(24), false, false, false],
+    ['AKIA', ['AK', 'IA'].join(''), UP(16), false, false, true], ['ASIA', ['AS', 'IA'].join(''), UP(16), false, false, true],
+    ['npm_', ['np', 'm_'].join(''), AN(36), false, false, true], ['hf_', ['h', 'f_'].join(''), AN(30), false, false, false],
+    ['AIza', ['AI', 'za'].join(''), AN(35), true, true, true], ['sk-', ['s', 'k-'].join(''), AN(40), true, true, false],
+    ...['a', 'b', 'p', 'r', 's'].map((x) => ['xox' + x + '-', ['xo', 'x', x, '-'].join(''), '1234567890-' + AN(24), true, false, false]),
+    ['xoxe-', ['xo', 'xe-'].join(''), '1-' + AN(30), true, true, false], ['xoxe.', ['xo', 'xe.'].join(''), AN(30), true, true, false],
+    ['glpat-', ['gl', 'pat-'].join(''), AN(20), true, true, false],
+    ...['st', 'mt', 'wh'].map((x) => ['vs' + x + '_', ['v', 's', x, '_'].join(''), AN(32), true, true, false]),
+    ['vswp_', ['vs', 'wp_'].join(''), AN(40), true, true, false], ['jbt_', ['jb', 't_'].join(''), AN(32), true, true, false],
+  ];
+  const famBad = [];
+  for (const [fam, pre, mat, dash, under, fixed] of FAM) {
+    const tok = pre + mat, probe = mat.slice(-12);
+    for (const [tail, kept] of [['-deploy', !dash], ['_prod', !under], ['x', fixed], ['', false]]) {
+      const out = redactSecrets('job ' + tok + tail).text;
+      if (out.includes(probe) || !out.includes(REDACTED)) famBad.push(`${fam} + «${tail}» → ${out}`);
+      else if (kept && !out.endsWith(REDACTED + tail)) famBad.push(`${fam} + «${tail}»: the tail its class does not hold is not kept → ${out}`);
+    }
+    for (const lead of ['ci_', '-', ' ']) { const out = redactSecrets(lead + tok).text; if (out.includes(probe)) famBad.push(`«${lead}» + ${fam} → ${out}`); }
+  }
+  ok(!famBad.length, `EVERY family its own tail: ${FAM.length} families × {-, _, a word character, the end} and after \`_\` / \`-\` / a blank — the material hidden, a tail its class does not hold kept in clear${famBad.length ? ' — ' + famBad.join(' | ') : ''}`);
+  const FP = ['my-deploy', 'gh-pages', 'npm-run-all', 'npm_config_cache', 'sk-learn', 'hf_hub_download', 'xoxo-gossip', 'AKIA-docs', 'ASIAN_FOOD', 'glpat-x', 'jbt_x', 'deploy-2'];
+  ok(FP.every((t) => redactSecrets('run ' + t + ' now').text === 'run ' + t + ' now'), 'the false-positive controls stay in clear (my-deploy, gh-pages, npm-run-all, npm_config_cache, sk-learn, …)', FP.map((t) => redactSecrets(t).text));
   const shp = redactSecrets('x');
   ok(typeof shp.text === 'string' && typeof shp.redacted === 'number', 'returns { text, redacted }');
   ok(redactSecrets('').text === '' && redactSecrets(null).text === '', 'empty / null is handled');

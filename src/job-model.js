@@ -359,8 +359,21 @@ function bootEndCause(sample, now, { share = 0.5 } = {}) {
 
 // ── names ─────────────────────────────────────────────────────────────────
 /** scope-namespaced name resolution: collision within the caller-visible set auto-suffixes. */
-function resolveName(wanted, visibleNames) {
-  const base = String(wanted || 'job').replace(/[^\w.一-鿿-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64) || 'job';
+// THE CUT NEVER PRECEDES THE MASK, AT THE RECORD TOO (lane job-notify-user r7, accept-r6 — the second reviewer): the name was
+// slugged and cut to 64 BEFORE any belt, so a token the cut split was below its family's length (and a `token=…` the slug turned
+// into `token-…` was no shape at all) — labelOf belted what was left and up to 19 of a GitHub token's 36 characters (30 of an
+// npm token's) reached every viewer. The belt (`mask` — the engine's, with the vault's values; the shapes census by default)
+// runs on the WHOLE text as it was asked, the slug keeps each masked run (`«redacted»`) as it is, the belt runs again on the
+// slug, and the cut never splits a masked run (a cut inside one moves to its start, its kept head with it). The record keeps
+// the belted name (the author's own echo included — no reader of the record sees a token's piece)
+const shapesBelt = (t) => require('./secret-shapes.js').redactSecrets(t).text;
+function resolveName(wanted, visibleNames, { mask = shapesBelt } = {}) {
+  const R = '«redacted»', slug = (t) => t.replace(/[^\w.一-鿿-]+/g, '-');
+  const whole = mask(String(wanted || 'job'));   // the belt bounds its own input (secret-shapes INPUT_MAX)
+  const s = mask(whole.split(R).map(slug).join(R)).replace(/^-+|-+$/g, '');
+  let cut = 64;
+  for (let i = s.indexOf(R); i >= 0 && i < cut; i = s.indexOf(R, i + R.length)) if (i + R.length > cut) { cut = i - /\w*[-.]?$/.exec(s.slice(0, i))[0].length; break; }   // with the head it keeps (`ghp_`, `xoxb-`, `TOKEN-`)
+  const base = (cut < 64 ? s.slice(0, cut).replace(/-+$/, '') : s.slice(0, cut)) || 'job';
   if (!visibleNames.has(base)) return { name: base };
   for (let i = 2; i < 100; i++) if (!visibleNames.has(`${base}-${i}`)) return { name: `${base}-${i}`, renamed: true };
   return { name: `${base}-${Date.now().toString(36)}`, renamed: true };
@@ -590,7 +603,21 @@ const FOR_YOU_WORDS = Object.freeze({
  *  confirmed 1): 'stray' is the stray door's copy — its OWN fixed words + its fact, nothing a caller hands in; a `shape` (r5
  *  carried any shape it was given THROUGH the one door: `_forYou(job, M.forYouCopy(job, 'stray', { shape }))` filed a
  *  hand-built copy journaled as a real one) is REFUSED by name, for every kind. */
+// THE MINT (lane job-notify-user r7, accept-r6 unverified 2): the door files a copy forYouCopy MINTED — never an object that
+// merely has {words, fact} (a hand-built one handed to `_forYou` through `.call` or an alias was filed and journaled as a real
+// copy, the census reading only the direct call's spelling). A module WeakMap keyed by the copy, valued by the job it was
+// minted for (null: an engine notice); the copy, its words and its params are frozen (a minted copy re-worded is no copy).
+// `mintedFor(c)` answers that job — `undefined` for anything forYouCopy did not mint
+const MINTED = new WeakMap();
+function mintedFor(c) { return c && typeof c === 'object' ? MINTED.get(c) : undefined; }
 function forYouCopy(job, kind, opts = {}) {
+  const c = forYouWords(job, kind, opts);
+  if (!c.words) return c;
+  if (c.words.params) Object.freeze(c.words.params);
+  Object.freeze(c.words); MINTED.set(Object.freeze(c), job || null);
+  return c;
+}
+function forYouWords(job, kind, opts) {
   const { text = null, cause = null, urgency = null, error = null, why = null, ifGone = null } = opts || {};
   if (opts && typeof opts === 'object' && Object.prototype.hasOwnProperty.call(opts, 'shape')) return { fact: null, words: null, urgency: null, copy: String(kind).slice(0, 24) === 'stray' ? 'stray' : 'shaped', refused: `a For-you copy carries the engine's own words — a shape handed to forYouCopy is refused (a filing outside the one door is journaled with its caller, never laundered through it)` };
   const name = String((job && (job.name || job.id)) || 'job');
@@ -883,6 +910,6 @@ module.exports = {
   MEMORY, MEMORY_CAUSES, MEMORY_RUNGS, MEMORY_PARK_TEXT, memoryValueVerdict, memoryMbOf, instanceCapOf, limitHolder, capWords, boundRecord, boundWords, leftRecord, leftWords, runEndWords, memoryWords, memoryEndWhat, onMemoryEnd, bootEndCause,
   renderJobsDigest, renderJobsUpdate, fitDigest, jobLine,
   validatePanel, validateAnswers, nextInteractionSeq, answerVersionVerdict, CONTEXT_PAYLOAD_CAP, clip,
-  notifyEffective, notifyUserOf, spawnTaskOf, storedAction, renderOwnerNotify, renderNotifStash, FOR_YOU_WORDS, forYouCopy, legacyCopyFact, labelVia,
+  notifyEffective, notifyUserOf, spawnTaskOf, storedAction, renderOwnerNotify, renderNotifStash, FOR_YOU_WORDS, forYouCopy, mintedFor, legacyCopyFact, labelVia,
   agentJobView,
 };

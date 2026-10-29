@@ -136,6 +136,25 @@ ok(r.stay === true, 'restart:never stays down');
 // ── names ──
 ok(M.resolveName('dev server!', new Set()).name === 'dev-server', 'name sanitization');
 ok(M.resolveName('x', new Set(['x'])).name === 'x-2', 'collision auto-suffixes within visible scope');
+// lane job-notify-user r7 (accept-r6, the second reviewer — hyg-name-cut64.cjs): the belt on the WHOLE name, THEN the slug and the
+// cut — r6 cut to 64 first, so a token the cut split was below its family's length (19 of a GitHub token's 36 chars raw), and a
+// `token=…` the slug turned into `token-…` was no shape at all; the cut never splits a masked run (it moves to the run's start)
+{
+  const R = '«redacted»', mat = (n, k = 7) => { const a = 'Q7w8E9r0T1y2U3i4O5p6A7s8D9f0G1h2J3k4L5z6X7c8V9b0N1m2'; let o = ''; for (let i = 0; i < n; i++) o += a[(i * k + 3) % a.length]; return o; };
+  const GH = ['gh', 'p_'].join('') + mat(36), NPM = ['np', 'm_'].join('') + mat(36, 17);
+  const rn = (w) => M.resolveName(w, new Set()).name;
+  const cut41 = rn('nightly build of the whole staging stack ' + GH), cut31 = rn('publish the package to the reg ' + NPM), kv = rn('deploy TOKEN=' + mat(20, 11) + ' now');
+  const at58 = rn('a'.repeat(58) + ' ' + GH + ' tail'), xox = rn('a'.repeat(50) + ' ' + ['xo', 'xb-'].join('') + '1234567890-' + mat(20));
+  ok(cut41 === 'nightly-build-of-the-whole-staging-stack-ghp_' + R && cut31 === 'publish-the-package-to-the-reg-npm_' + R && !cut41.includes(mat(36).slice(0, 8)) && !cut31.includes(mat(36, 17).slice(0, 8)),
+    'r7 resolveName: a token past the 64th character is belted WHOLE before the cut (the record keeps `ghp_«redacted»`, never 19 of its characters)', [cut41, cut31]);
+  ok(kv === 'deploy-TOKEN-' + R && !kv.includes(mat(20, 11)), 'r7 resolveName: the belt runs on the name AS ASKED — a `TOKEN=value` the slug would turn into `TOKEN-value` (no shape) is belted first', kv);
+  ok(at58 === 'a'.repeat(58) && xox === 'a'.repeat(50) && [at58, xox].every((n) => n.length <= 64 && !n.includes('«')),
+    'r7 resolveName: the cut never splits a masked run — a cut inside `«redacted»` moves to the run\'s start, its kept head (`ghp_`, `xoxb-`) with it', [at58, xox]);
+  ok(rn('dev server!') === 'dev-server' && rn('a'.repeat(70)) === 'a'.repeat(64) && rn('') === 'job' && rn('  --x--  ') === 'x' && rn(['gh', 'p_'].join('') + mat(36) + ' deploy') === 'ghp_' + R + '-deploy',
+    'r7 resolveName: a name with no secret is slugged and cut as before; a token first keeps its head and the words after');
+  const seen = []; const viaEngine = M.resolveName('x ' + GH, new Set(), { mask: (t) => { seen.push(t); return t.split(GH).join('[vault:gh]'); } }).name;
+  ok(seen[0] === 'x ' + GH && viaEngine === 'x-vault-gh' && !viaEngine.includes(mat(36).slice(0, 8)), 'r7 resolveName: the engine\'s belt (`mask` — the vault\'s values too) runs on the WHOLE text as asked, before the slug', [seen, viaEngine]);
+}
 
 // ── renderers (budget + no-wrap laws) ──
 const many = Array.from({ length: 200 }, (_, i) => mk(i, { label: '超长中文名'.repeat(12) + i, state: ['awaiting-user', 'failed', 'up', 'scheduled', 'done'][i % 5] }));
@@ -217,6 +236,15 @@ ok(M.notifyEffective({}, null, undefined).on === true && M.notifyEffective({}, n
   ok(st.fact === 'stray' && st.words.key === M.FOR_YOU_WORDS.stray && fill(st.words) === 'Background job build-x has a notice for you — open it in the Jobs panel' && st.urgency === 'normal'
     && launder.fact === null && launder.words === null && launder.copy === 'stray' && /a shape handed to forYouCopy is refused/.test(launder.refused) && shaped.fact === null && shaped.copy === 'shaped' && /a shape handed to forYouCopy is refused/.test(shaped.refused),
     'r6 forYouCopy stray: the stray door\'s own words + the fact «stray»; a shape (r5 carried any shape THROUGH the one door) is refused by name for every kind', JSON.stringify([st, launder, shaped]));
+  // lane job-notify-user r7 (accept-r6 unverified 2 — hyg-door-call.cjs): THE MINT — every copy forYouCopy builds is minted for its job
+  // (frozen: its words and params too); a hand-built {words, fact} and a refusal are not; mintedFor answers the job (null: a notice)
+  {
+    const jb = { ...j, name: 'mint-me' }, c = M.forYouCopy(jb, 'ask'), n0 = M.forYouCopy(null, 'store-corrupt'), hb = { fact: 'ask', words: { key: '{name} needs your input', params: { name: 'HAND-BUILT' } } };
+    let threw = false; try { 'use strict'; c.words.params.name = 'HAND-BUILT'; } catch { threw = true; }
+    ok(M.mintedFor(c) === jb && M.mintedFor(n0) === null && M.mintedFor(hb) === undefined && M.mintedFor(M.forYouCopy(jb, 'nope')) === undefined && M.mintedFor(null) === undefined && M.mintedFor('x') === undefined
+      && Object.isFrozen(c) && Object.isFrozen(c.words) && Object.isFrozen(c.words.params) && c.words.params.name === 'mint-me' && M.mintedFor({ ...c }) === undefined,
+      'r7 forYouCopy MINTS each copy for its job (frozen whole — a minted copy re-worded stays the engine\'s words); a hand-built copy, a spread of a minted one and a refusal are not minted', threw);
+  }
   const ef = M.forYouCopy(null, 'engine-failed', { error: 'EACCES' }), sc = M.forYouCopy(null, 'store-corrupt');
   ok(ef.fact === 'engine-failed' && fill(ef.words) === 'Background Work engine failed to start: EACCES' && ef.urgency === 'high' && sc.fact === 'store-corrupt' && !sc.words.params, 'forYouCopy: the engine\'s own notices (no job — r4: through the same door)', JSON.stringify([ef, sc]));
   // THE LEGACY RUNG'S READER (r4): a ≤ .360 copy's fact read back off its own template; any other words under a job id = a fire

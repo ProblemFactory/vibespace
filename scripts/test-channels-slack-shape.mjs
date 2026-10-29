@@ -550,9 +550,10 @@ console.log('⑧ two pastes: the setup token makes the app, the user token conne
   const short = 'xoxe.' + 'xoxp-1-' + body(40);
   ok(!leftWhole(SS, short) && SS.redactSecrets(`t ${short}`).text.includes('xoxe.'), 'a short one too, the prefix kept');
   const ssrc = fs.readFileSync(path.join(REPO, 'src/secret-shapes.js'), 'utf8');
-  const BOUND = 'xoxe[.\\-][A-Za-z0-9.+/=_\\-]{10,512}|xox[abprs]-[A-Za-z0-9\\-]{10,512}';
-  ok(ssrc.includes(BOUND), 'the bound the control patches is in the source');
-  const SS2 = require(MC.write('src/secret-shapes.js', ssrc.replace(BOUND, BOUND.replace(/512/g, '255')), 'bound255'));
+  // lane job-notify-user r7: every PREFIX family ends on its own class's tail, so the two Slack bounds are no longer adjacent — each is patched
+  const BOUNDS = ['xoxe[.\\-][A-Za-z0-9.+/=_\\-]{10,512}', 'xox[abprs]-[A-Za-z0-9\\-]{10,512}'];
+  ok(BOUNDS.every((b) => ssrc.split(b).length === 2), 'the bounds the control patches are in the source (once each)');
+  const SS2 = require(MC.write('src/secret-shapes.js', BOUNDS.reduce((t, b) => t.replace(b, b.replace(/512/g, '255')), ssrc), 'bound255'));
   const whole = longs.filter(({ tok }) => leftWhole(SS2, tok));
   ok(whole.length === longs.length && !leftWhole(SS2, short), `CONTROL — the old 255 bound leaves every long token whole (${whole.length}/${longs.length}), a short one still redacted`);
 }
