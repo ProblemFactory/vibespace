@@ -297,6 +297,8 @@ function syntheticUsage(raw) {
 // the source up to the first `])`.
 const TERMINAL_TASK_STATUS = new Set(['completed', 'failed', 'stopped', 'killed']);
 
+// the isMeta companion lines that are never the person's message (r6: the measured shapes, nothing broader)
+const META_NOTE_RE = /^\s*(?:\[Image source: |Base directory for this skill: |Caveat: )/;
 /** How many leading blocks of a batched user record (from `off`) are THIS copy's (lane claude-steer-inject r5) — its blocks
  *  in order: each text trim-equal (the CLI joins a batch with a newline), a picture's place a picture or the CLI's line
  *  about it; 0 unless at least one of its words matched (a copy is never claimed by a picture's place alone). */
@@ -347,7 +349,7 @@ class MessageManager extends MessageWindow {
     // THE WRAPPER'S QUEUE (2.369.354, lane claude-wrapper-queue): data/bin/chat-wrapper.js HOLDS a frame sent mid-turn
     // and says so on the acp/codex wire — queued_input / queue_changed / queue_op_result / queue_dropped, top-level lines
     this.userMessageIds = new Map();      // webui msgId → message id (the bubble a queue row belongs to)
-    this._webuiCopies = new Map();        // msgId → {cliUuid, id}: a wrapper's copy of a mid-turn frame — claimed by the CLI's record of it (in send order: a batch is claimed in it)
+    this._webuiCopies = new Map();        // msgId → {cliUuid, id, handNo}: a wrapper's copy of a mid-turn frame — claimed by the CLI's record of it (a batch in HAND-OVER order, r6)
     this._queue = [];                     // the wrapper's promptQueue, as published
     this._queuedMsgIds = new Set();       // bubbles currently wearing a 'queued' chip
     this._queuePublished = false;         // has this wrapper ever published a queue? (in-band capability signal)
@@ -1646,16 +1648,30 @@ class MessageManager extends MessageWindow {
     let hit = null;
     for (const [msgId, c] of this._webuiCopies) if (c.cliUuid && c.cliUuid === String(uuid)) { hit = msgId; break; }
     if (!hit) return false;
-    // A BATCH IS CLAIMED AS A BATCH (acceptance r5): frames the CLI ran together as ONE turn are ONE user record under the
-    // LAST frame's uuid, the earlier frames' blocks first, in order. Each earlier copy still waiting for its record claims
-    // its own blocks off the front (its words, trim-equal; a picture's place), so the batch is never drawn twice.
+    const hc = this._webuiCopies.get(hit);
+    // A copy whose frame is STILL HELD (hand-over number 0, r6) never claims a record: it never reached the CLI
+    if (hc.handNo === 0) return false;
+    // A BATCH IS CLAIMED AS A BATCH (acceptance r5) — IN HAND-OVER ORDER, BY ITS WITNESS (r6): frames the CLI ran together as
+    // ONE turn are ONE user record under the LAST frame's uuid, the earlier frames' blocks first in the order the wrapper
+    // WROTE them (the copy's `handNo`, never the order the copies arrived: a held frame bolted after a handed one comes
+    // second). Each earlier handed copy still waiting claims its own blocks off the front (its words trim-equal, a picture's
+    // place); a held copy (handNo 0) and one handed after the hit never do — the same words held and sent again are told
+    // apart by the uuid witness. A copy of an older build (no handNo) keeps r5's arrival order.
     const rec = (content || []).map((b) => ({ ...b }));
     const parts = [];
     let off = 0;
-    for (const [msgId, c] of this._webuiCopies) {
-      if (msgId === hit) break;
-      const n = copyPrefixLen(this.messageIndex.get(c.id)?.content, rec, off);
-      if (n) { parts.push([msgId, rec.slice(off, off + n)]); off += n; }
+    // the copies that may be in this batch: handed BEFORE the hit (hand-over order) — or, for an older build's copies (no
+    // handNo), any other unclaimed one; the record is walked from its front, each step claimed by the eligible copy whose
+    // blocks are there (so neither the copies' arrival order nor their hand-over order is assumed to be the record's)
+    const pool = [...this._webuiCopies].filter(([msgId, c]) => msgId !== hit && (hc.handNo == null ? c.handNo == null : (c.handNo > 0 && c.handNo < hc.handNo)))
+      .sort((a, b) => (a[1].handNo || 0) - (b[1].handNo || 0));
+    for (let step = true; step && off < rec.length;) {
+      step = false;
+      for (const [msgId, c] of pool) {
+        if (parts.some(([m]) => m === msgId)) continue;
+        const n = copyPrefixLen(this.messageIndex.get(c.id)?.content, rec, off);
+        if (n && off + n < rec.length) { parts.push([msgId, rec.slice(off, off + n)]); off += n; step = true; break; }
+      }
     }
     parts.push([hit, rec.slice(off)]);
     for (const [msgId, blocks] of parts) {
@@ -1677,8 +1693,9 @@ class MessageManager extends MessageWindow {
     if (!msg) return false;
     // a frame Stop put back (or the person removed) never ran: no later record of the CLI is ITS record
     if (state === 'removed' || state === 'stopped') this._webuiCopies.delete(String(msgId));
-    const settling = state === 'queued' ? this._settling : null;
-    const settleMoved = (msg.settling || null) !== settling;
+    // the hub's `now` is re-said at every emit (r6): it pairs with `until` for the client's own deadline
+    const settling = state === 'queued' && this._settling ? (this._settling.until ? { ...this._settling, now: Date.now() } : this._settling) : null;
+    const settleMoved = JSON.stringify(msg.settling || null) !== JSON.stringify(settling) && !(msg.settling && settling && msg.settling.until === settling.until && !!msg.settling.running === !!settling.running);
     if (msg.queueState === state && !settleMoved) return true;
     msg.queueState = state;
     if (settleMoved) msg.settling = settling;
@@ -1707,8 +1724,11 @@ class MessageManager extends MessageWindow {
    *  time and the held messages go now. */
   _processQueueSettle(raw, emit) {
     const st = raw.state;
-    if (st !== 'settling' && st !== 'settled' && st !== 'backstop') return;
-    this._settling = st === 'settling' ? { until: Number(raw.until) || null, ...(raw.hook ? { hook: true } : {}) } : null;
+    if (st !== 'settling' && st !== 'settled' && st !== 'backstop' && st !== 'running') return;
+    // `now` = this hub's clock when it was said (r6, the hub-clock law): the client turns `until` into its own deadline with it
+    const why = raw.why === 'stop' || raw.why === 'handover' ? raw.why : null;
+    this._settling = st === 'settling' ? { until: Number(raw.until) || null, now: Date.now(), ...(why ? { why } : {}), ...(raw.hook ? { hook: true } : {}) }
+      : st === 'running' ? { running: true, ...(why ? { why } : {}) } : null;
     for (const msgId of this._queuedMsgIds) {
       const msg = this.messageIndex.get(this.userMessageIds.get(msgId));
       if (!msg) continue;
@@ -1953,15 +1973,17 @@ class MessageManager extends MessageWindow {
       // a little later (the turn they ran as, a held frame drained, a kept frame's interrupted follow-up) claims the copy.
       if (raw._fromWebui && raw.msgId && this.userMessageIds.has(String(raw.msgId)) && (raw.webui_copy || this._webuiCopies.has(String(raw.msgId)))) return;
       if (!raw._fromWebui && !raw.origin && this._claimWebuiCopy(normalizedContent, raw.uuid, emit)) return;
-      // AN isMeta RECORD IS NEVER THE PERSON'S MESSAGE (lane claude-steer-inject r5, both CLI builds): the CLI's own companion
+      // AN isMeta COMPANION LINE IS NEVER THE PERSON'S MESSAGE (lane claude-steer-inject r5, both CLI builds): the CLI's own
       // lines to the model — «[Image source: /tmp/…]» beside a pasted picture — drew an extra «You» bubble after every
       // restart. A dim note, no turn of its own; a record the person typed (promptSource / ours) or one with an origin stays itself.
-      const metaNote = raw.isMeta === true && !raw.origin && !raw.promptSource && !raw._fromWebui;
+      // NARROW (r6): the measured shapes only — the «[Image source: …]» line beside a pasted picture, a skill's body, the
+      // «Caveat:» line of a local command; a Stop-hook feedback turn and a compaction's continuation keep their turns
+      const metaNote = raw.isMeta === true && !raw.origin && !raw.promptSource && !raw._fromWebui && META_NOTE_RE.test(normalizedContent.filter((b) => b.type === 'text').map((b) => b.text).join(''));
       if (!metaNote) this.turnIndex++;
       // Use original msgId if present (for dedup with client-side local preview)
       const msg = this._create({ role: 'user', status: 'complete', content: normalizedContent, turnIndex: this.turnIndex });
       if (raw.webui_copy && raw._fromWebui && raw.msgId) {
-        this._webuiCopies.set(String(raw.msgId), { cliUuid: typeof raw.cliUuid === 'string' && raw.cliUuid ? raw.cliUuid : null, id: msg.id });
+        this._webuiCopies.set(String(raw.msgId), { cliUuid: typeof raw.cliUuid === 'string' && raw.cliUuid ? raw.cliUuid : null, id: msg.id, handNo: Number.isFinite(raw.handNo) ? raw.handNo : null });
         if (this._webuiCopies.size > 32) this._webuiCopies.delete(this._webuiCopies.keys().next().value);
       }
       // Provenance for the notification classifier: promptSource = the CLI's

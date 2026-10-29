@@ -370,7 +370,7 @@ function registerWsHandler(wss, ctx) {
       // Clean up wrapper buffer files
       try { fs.unlinkSync(path.join(BUFFERS_DIR, data.sessionId + '.json')); } catch {}
       try { fs.unlinkSync(path.join(BUFFERS_DIR, data.sessionId + '.buf')); } catch {}
-      try { fs.rmSync(path.join(BUFFERS_DIR, data.sessionId + '.img'), { recursive: true, force: true }); } catch {} // the copies' kept pictures (lane claude-steer-inject r5) go with the buffer
+      fs.rm(path.join(BUFFERS_DIR, data.sessionId + '.img'), { recursive: true, force: true }, () => { }); // the copies' kept pictures (lane claude-steer-inject r5) go with the buffer — off the loop (r6)
       // Per-session agentd attach cfg (0600 — vsht_ host token + full
       // spawn command) accumulated forever (audit #16/#53). The path is
       // derivable, so a restart-restored session (in-memory field lost)
@@ -1173,6 +1173,7 @@ function registerWsHandler(wss, ctx) {
                 }
                 catch (e) { console.error('remote jsonl fetch failed:', e.message); }
               }
+              if (session._keptLoad) { try { await session._keptLoad; } catch { } } // the copies' kept pictures, read off the loop at the restore (r6)
               const sm = createSessionMessages(session, data.sessionId);
               // Initialize normalizer from full JSONL + buffer history on first attach.
               // Can't use total===0: PTY output via processLive may have populated the

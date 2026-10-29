@@ -561,6 +561,7 @@ export const SUITES = [
   { name: 'test-doc-model', tier: 'fast', why: 'in-process · 351 ms (PURE: the Doc window\'s fidelity corpus over prosemirror-markdown, the comments message, the edit summary, the conflict table, the hub over stub senders, six patched copies)' }, // lane doc-window
   { name: 'test-doc-comments-sync', tier: 'fast', why: 'in-process · 58 ms (the Doc window\'s comment drafts through the REAL drafts SyncStore behind the cut-verbatim state-set / state-resync cases and two cut-verbatim client StateSyncs: a doc: key round-trips and broadcasts, removal / emptying, one init load, a reconnect; two controls)' }, // lane doc-comments-synced
   { name: 'test-sync-arrival', tier: 'fast', why: 'in-process · 0.1 s (StateSync\'s arrival rule, B-cede: the REAL SyncStore behind the cut-verbatim state-set / state-resync cases and cut-verbatim client StateSyncs over FIFO fake sockets on a discrete-event clock — the PURE verdict table, a seeded two-client race over d ∈ {0,1,2,5,10,20,50} ms (both on the server\'s value, never older than an acked set), another key never held, a reconnect\'s ops / snapshot / in-flight drop converge, the ack + from + basedOn frames; controls: the pre-fix client crosses, a per-store verdict loses a key)' }, // lane statesync-last-arrival
+  { name: 'test-kept-copies', tier: 'fast', why: 'in-process · 100 ms (lane claude-steer-inject r6: the restart copy\'s kept pictures — src/kept-copies.js write / preload / resolve through the REAL store + normalizer with fixture buffers, own-session references only, the hand-over-order batch claim, the age sweep of <id>.img; three mutants red by name)' }, // acceptance r5: every r5 road had only lane-dir harnesses
   { name: 'test-claude-steer', tier: 'fast', why: 'in-process · 0.2 s (lane claude-steer-inject: the PURE send-door table, the composer\'s hand-over stamp and hold door over a DOM-free ChatInput, the adapter + the ONE typing path, the input_handover chips, Stop\'s ONE record of each frame\'s fate, the restart copy drawn once, the strip\'s steerable rows; the real-wrapper legs are §0 of the heavy twin — the fast sum had 0.77 s left)' },
   { name: 'test-queue-putback', tier: 'fast', why: 'in-process · 0.2 s (Stop puts the dropped queue back, lane stop-refills-composer: the PURE rules + the three wrappers\' byte-identical inline twins, the ONE server door over the REAL drafts SyncStore behind the cut-verbatim state-set / state-resync cases, two cut-verbatim client StateSyncs driving the cut-verbatim composer landing handler on a discrete-event clock — the lost-update race + its controls, the belt, ONE extra set — and the three normalizers; lane draft-focus-guard §8: landDraft\'s rows + a 1536-combination grid, two composers with the cut-verbatim autosave — the verifier\'s «x» vs «hel», a×8 / b×8 at two cadences, the blur legs, RED = the 2.369.354 overwrite)' },
   { name: 'test-doc-window-width', tier: 'fast', why: 'in-process · 201 ms (the Doc window\'s width + leaving rules, PURE: Fit default / Comfortable / phone, the RED patched-measure copy, the table wrapper rule, /api/download reuse, the ONE self-contained export + print sheet + belt; window pins)' }, // lane doc-window-width-export
@@ -3150,6 +3151,8 @@ async function fastGate({ sha: wantSha, isolate } = {}) {
         if (red) break;
         const s = queue.shift();
         if (!s) break;
+        // VS_NO_REAL_CLI=1 (r6, §ban-safety): the real-turn row is not started at all — SKIPPED by name (the wire leg skips inside its suite)
+        if (s.name === 'test-chat-e2e' && process.env.VS_NO_REAL_CLI === '1') { console.log(`  ○ SKIPPED ${s.name} — VS_NO_REAL_CLI=1 (the one real turn)`); continue; }
         const r = await runSuiteAsync(s, { root: runRoot, absentIsSkip: !!isolate, sha, lane, inflight, hang: { dir: hangDir, attempt: 1 } });
         if (red) r.lines = [`  · ${s.name} stopped [lane ${lane}] — ${red} is red`];   // SIGTERMed by another lane's red: not a verdict
         console.log(r.lines.join('\n'));
@@ -3955,7 +3958,31 @@ export function exitFlushed(code) {
   process.exitCode = code;
   process.stdout.write('', () => process.stderr.write('', () => process.exit(code)));
 }
+// THE FLAGS ci.mjs KNOWS (lane claude-steer-inject r6, the acceptance's «node scripts/ci.mjs --help»: ci.mjs ignored an unknown
+// flag and ran the WHOLE fast tier — test-chat-e2e billed a real turn on the CI OAT in a shared scratch). Anything else —
+// --help included — prints the usage and exits 2 before a suite starts.
+const CI_FLAGS = Object.freeze(['affected', 'allow-hub-full', 'census', 'check-heavy', 'dirty-ok', 'dry-run', 'head', 'heavy', 'heavy-affected', 'heavy-launch', 'host', 'hosts', 'isolate', 'list-affected', 'lock', 'lock-wait-ms', 'markers', 'only', 'pid-file', 'range', 'reap', 'serial-overlap', 'sha', 'shard', 'shard-timings', 'status', 'why']);
+const CI_USAGE = `usage: node scripts/ci.mjs [mode] [options]
+  (no mode)            the FAST tier on this working tree (--isolate [--sha=<x>]: on a commit)
+  --heavy              the heavy tier (--only=a,b · --affected --range=<old>..<new> · --shard=<i>/<n> · --host=<name> · --why)
+  --heavy-launch <x>   a heavy run handed to a background child · --check-heavy / --status: the markers' verdict
+  --list-affected      the heavy suites a --range touches · --census · --hosts · --shard-timings <files…>
+  --reap [--dry-run]   the scratch reaper
+  ops: --markers=<dir> --head=<sha> --lock=<file> --lock-wait-ms=<n> --pid-file=<f> --serial-overlap=<n> --dirty-ok --allow-hub-full
+  env: VS_NO_REAL_CLI=1 — the two rows that may talk to the vendor (test-chat-e2e's real turn, test-stdout-registry's wire leg)
+       print SKIPPED by name; every acceptance run sets it`;
+/** The first argv token ci.mjs does not know (a `--name[=v]` / `-x` outside CI_FLAGS), or null. */
+function unknownFlag(argv) {
+  for (const a of argv) {
+    if (!a.startsWith('-')) continue;
+    const name = a.replace(/^--?/, '').split('=')[0];
+    if (!a.startsWith('--') || !CI_FLAGS.includes(name)) return a;
+  }
+  return null;
+}
 function main(argv) {
+  const bad = unknownFlag(argv);
+  if (bad !== null) { console.error((bad === '--help' || bad === '-h' ? '' : `✗ ci.mjs does not know ${bad} — nothing started\n`) + CI_USAGE); return exitFlushed(2); }
   const arg = (name) => { const hit = argv.find((a) => a === '--' + name || a.startsWith('--' + name + '=')); return hit === undefined ? undefined : (hit.includes('=') ? hit.slice(hit.indexOf('=') + 1) : true); };
   const str = (name) => (typeof arg(name) === 'string' ? arg(name) : null);
   // Ops flags (all modes): --markers=<dir> where the heavy results live,

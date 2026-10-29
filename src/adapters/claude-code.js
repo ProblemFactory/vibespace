@@ -397,6 +397,11 @@ class ClaudeCodeAdapter extends BackendAdapter {
     let stdinPayload, userMsg;
     let parsed = null;
     try { parsed = JSON.parse(text); if (!(parsed.type === 'user' && parsed.message)) parsed = null; } catch {}
+    // A KEPT REFERENCE IS THE WRAPPER'S OWN RECORD (lane claude-steer-inject r6): only its restart copy names a picture by
+    // reference (src/kept-copies.js) — a sent message carries the picture itself. A client-built one is refused by name.
+    if (parsed && Array.isArray(parsed.message.content) && parsed.message.content.some((b) => require('../kept-copies.js').isKeptBlock(b))) {
+      throw new Error('kept_refused: a message may not carry a kept picture reference (only the wrapper\'s restart copy names one) — send the picture itself');
+    }
     const marks = { ...(msgId ? { webui_msg_id: String(msgId) } : {}), ...(origin ? { webui_origin: String(origin) } : {}), ...(steer === true && !origin ? { webui_steer: true } : {}) };
     const markJson = JSON.stringify(marks).slice(1, -1);
     if (parsed) {

@@ -393,9 +393,7 @@ console.log('§10 lane classifier-stop-card: system/informational is HANDLED on 
   ok('CONTROL: without the handler the notice is the red Unknown-event card again (the owner\'s report)', cards(a).length === 1 && cards(a)[0].content[0].name === 'informational' && stops(a).length === 0, a.messages.map((m) => m.noticeKind));
   const noFold = require(M.write('src/message-manager.js', mmSrc.replace(fold, '        if (false) {'), 'no-fold'));
   const b = hist(noFold, [txAsk('n0'), txNotice('n1'), txNudge('n2')]);
-  // (re-derived, lane claude-steer-inject r5: an isMeta record is never the person's message nor a turn of its own — so without the
-  // fold the nudge is a dim note OUTSIDE the stop card; before r5 it was the owner's «You» bubble and a second turn)
-  ok('CONTROL: without the fold the history nudge is NOT in the stop card — a note of its own outside it', users(b).length === 2 && users(b)[1].synthetic === true && users(b)[1].typed !== true && !JSON.stringify(stops(b)).includes(NUDGE.slice(0, 40)), { users: users(b).length, turn: b.turnIndex });
+  ok('CONTROL: without the fold the history nudge is a user message ("You") and a second turn', users(b).length === 2 && b.turnIndex === 2 && users(b)[1].typed !== true, { users: users(b).length, turn: b.turnIndex });
   const ssCopy = M.write('src/safety-stop.js', read('src/safety-stop.js').replace("'s safeguards stopped the response above · continuing once with that noted\", '≤2.1.280'", "'s safeguards stopped the response above\", '≤2.1.280'"), 'row-drift');
   const rowDrift = require(M.write('src/message-manager.js', mmSrc.replace("require('./safety-stop.js')", `require(${JSON.stringify(ssCopy)})`), 'on-row-drift'));
   const c = live(rowDrift, [stAsk('o0'), stNotice('o1')]);

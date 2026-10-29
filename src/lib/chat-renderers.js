@@ -374,7 +374,7 @@ export function imageMediaHtml({ path = '', host = null, mediaType = '', bytes =
 
 // Seconds left on a held message's settle chip (lane claude-steer-inject r5) — «12 s»; ChatView's ticker rewrites it.
 export function formatSettleRemaining(ms) {
-  return t('{n} s', { n: Math.max(0, Math.ceil((Number(ms) || 0) / 1000)) });
+  return t('{s} s', { s: Math.max(0, Math.ceil((Number(ms) || 0) / 1000)) });
 }
 
 // Time REMAINING on a live `sleep` card, mm:ss (h:mm:ss past an hour) — the
@@ -831,12 +831,16 @@ class ChatRenderers {
     // HELD WHILE THE TURN SETTLES (lane claude-steer-inject r5, the deadline-card law): a window in which the CLI owes a turn
     // holds it — the chip says so and counts down to the backstop (ChatView's one-second ticker rewrites the seconds)
     const settling = state === 'queued' && msg?.settling ? msg.settling : null;
-    const label = settling ? t('Held — the turn is settling') : state === 'queued' ? t('Queued') : state === 'steered' ? t('Steered') : state === 'stopped' ? t('Started, then stopped')
+    const label = settling ? (settling.running ? t('Held — the previous turn’s follow-up is running') : t('Held — the turn is settling')) : state === 'queued' ? t('Queued') : state === 'steered' ? t('Steered') : state === 'stopped' ? t('Started, then stopped')
       : state === 'handed' ? t('Handed to the turn') : state === 'kept' ? t('Stays with the stopped turn') : t('Removed');
-    const until = settling && Number(settling.until) > 0 ? Number(settling.until) : 0;
+    // a countdown only while a timer exists, on THIS browser's clock (r6, the hub-clock law: ChatView turned the hub's `until`
+    // into `localUntil` with the hub's `now` when the edit arrived; a restored page has no such pair and shows no seconds)
+    const until = settling && !settling.running && Number(settling.localUntil) > 0 ? Number(settling.localUntil) : 0;
     chip.innerHTML = `${icon}<span>${escHtml(label)}</span>${until ? ` <span class="chat-settle-remaining" data-settle-until="${until}">${escHtml(formatSettleRemaining(until - Date.now()))}</span>` : ''}`;
     chip.title = settling
-      ? (settling.hook ? t('The stopped turn is running its prompt hook — this message waits until the turn settles') : t('The stopped turn is settling — this message waits for it; if the turn does not answer in time it is delivered then'))
+      ? (settling.running ? t('Claude is running a message you handed over as a turn of its own — this one runs after it')
+        : settling.why === 'handover' ? t('The turn ended before Claude took a message you handed over — it runs that one first; this message waits for it, and goes if it does not start in time')
+          : settling.hook ? t('The stopped turn is running its prompt hook — this message waits until the turn settles') : t('The stopped turn is settling — this message waits for it; if the turn does not answer in time it is delivered then'))
       : state === 'queued'
       ? t('Waiting behind the running turn — steering it injects it now, at the agent’s next reply')
       : state === 'steered' ? t('Injected into the running turn')

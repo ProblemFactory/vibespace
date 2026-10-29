@@ -27,6 +27,9 @@ const require = createRequire(import.meta.url);
 const { fixtureLitter, isFixtureProjectDir, FIXTURE_STALE_MS } = require('../src/fixture-guard.js');
 
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
+// THE SWITCH (lane claude-steer-inject r6, §ban-safety): one of the TWO rows that may bill a real turn — VS_NO_REAL_CLI=1 (every
+// acceptance run sets it) skips it by name, before a token is read
+if (process.env.VS_NO_REAL_CLI === '1') { console.log('SKIPPED test-chat-e2e: VS_NO_REAL_CLI=1 — the real haiku turn is not run'); process.exit(0); }
 let token = process.env.VIBESPACE_CI_OAT || '';
 if (!token) { try { token = fs.readFileSync(path.join(os.homedir(), '.config', 'vibespace', 'ci-oat'), 'utf-8').trim(); } catch { } }
 if (!token) { console.log('SKIP: no CI token (fill ~/.config/vibespace/ci-oat from `claude setup-token`)'); process.exit(0); }

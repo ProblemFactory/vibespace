@@ -718,29 +718,12 @@ function getHistorySessionId(session) {
 // takes its memo with it.
 const _mergeMemo = new WeakMap();
 
-// THE COPY'S KEPT FILES (lane claude-steer-inject r5): a claude wrapper's copy of a mid-turn frame (`webui_copy`) names its
-// pictures — and a text block over 8 KB — as files beside its buffer (`<id>.img/<sha256>.<ext>`, data/bin/chat-wrapper.js
-// keptBlock), never their bytes. Read back here, at the merge (the memo keeps the result): a file that is there becomes the
-// block again; one that is gone (the ring's trim took its copy, the session's sweep, a write that failed) stays a reference
-// marked `gone` — the normalizer draws a placeholder that says so, never nothing.
-const KEPT_FILE_RE = /^[\w.-]+\.img\/[0-9a-f]{32}\.[a-z]{2,4}$/;
-const KEPT_READ_MAX = 32 * 1024 * 1024;
-function resolveKept(rec, buffersDir) {
-  const content = rec && rec.message && Array.isArray(rec.message.content) ? rec.message.content : null;
-  if (!content || !content.some((b) => b && ((b.type === 'image' && b.source && b.source.type === 'kept') || (b.type === 'text' && b.kept)))) return rec;
-  const read = (ref) => {
-    if (!buffersDir || !ref || typeof ref.file !== 'string' || !KEPT_FILE_RE.test(ref.file)) return null;
-    try { const f = path.join(buffersDir, ref.file); return fs.statSync(f).size <= KEPT_READ_MAX ? fs.readFileSync(f) : null; } catch { return null; }
-  };
-  return { ...rec, message: { ...rec.message, content: content.map((b) => {
-    if (b && b.type === 'image' && b.source && b.source.type === 'kept') {
-      const bytes = read(b.source);
-      return bytes ? { type: 'image', source: { type: 'base64', media_type: b.source.media_type || 'image/png', data: bytes.toString('base64') }, kept: b.source.file } : { type: 'image', source: { ...b.source, gone: true } };
-    }
-    if (b && b.type === 'text' && b.kept) { const bytes = read(b.kept); return bytes ? { type: 'text', text: bytes.toString('utf8') } : { ...b, kept: { ...b.kept, gone: true } }; }
-    return b;
-  }) } };
-}
+// THE COPY'S KEPT FILES (lane claude-steer-inject r5, r6): a claude wrapper's copy of a mid-turn frame (`webui_copy`) names its
+// pictures — and a text block over 8 KB — by sha + extension, the files beside its buffer in ITS OWN session's folder
+// (src/kept-copies.js). They are read back OFF the event loop before the history needs them (boot-restore preloads them into
+// `session._keptFiles`, the attach awaits `session._keptLoad`); the merge resolves from that map with no fs call. A file that
+// is not in it (gone, refused, past the cap, never written) stays a reference marked `gone` — the placeholder that says so.
+const KC = require('./kept-copies.js');
 
 class SessionMessages {
   constructor(session, sessionId, { buffersDir, permissionModes } = {}) {
@@ -767,8 +750,9 @@ class SessionMessages {
     // re-attach) merges once. `_all` is shared exactly as the no-insert case
     // always shared the cache's array; `_pendingPerms` is copied per instance.
     const buffer = session.buffer || '';
+    const kept = session._keptFiles || null; // the restore's preload (a new map ⇒ a new merge)
     const memo = _mergeMemo.get(jsonl);
-    if (memo && memo.buffer === buffer) {
+    if (memo && memo.buffer === buffer && memo.kept === kept) {
       this._pendingPerms = { ...memo.perms };
       this._helperResults = memo.helperResults || [];
       this._all = memo.all;
@@ -808,7 +792,7 @@ class SessionMessages {
     for (const line of buffer.split('\n')) {
       const trimmed = line.replace(/\r/g, '').trim();
       if (!trimmed) continue;
-      try { const rec = JSON.parse(trimmed); parsed.push(rec && rec.webui_copy ? resolveKept(rec, this._buffersDir) : rec); } catch {}
+      try { const rec = JSON.parse(trimmed); parsed.push(rec && rec.webui_copy ? KC.resolveRecord(rec, kept, (m) => console.warn(`[kept] ${this._sessionId || 'a session'}: ${m}`)) : rec); } catch {}
     }
     // A ROTATED buffer can start with unmatched stdout-only records from mid-
     // history; anchor those just before the first matched record (not at the
@@ -851,7 +835,7 @@ class SessionMessages {
       }
       this._all = all;
     }
-    _mergeMemo.set(jsonl, { buffer, all: this._all, perms: { ...this._pendingPerms }, helperResults: this._helperResults });
+    _mergeMemo.set(jsonl, { buffer, kept, all: this._all, perms: { ...this._pendingPerms }, helperResults: this._helperResults });
     this._display = this._all.filter(isDisplayMessage);
   }
 

@@ -99,7 +99,8 @@
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
-const { randomUUID, createHash } = require('crypto');
+const os = require('os');
+const { randomUUID } = require('crypto');
 
 const logFile = path.join(path.dirname(process.argv[2] || '/tmp/chat-wrapper'), 'chat-wrapper.log');
 // Rotate at 5MB (shared by all sessions' wrappers, grew without bound)
@@ -202,15 +203,18 @@ function persistBuffer() {
 function schedulePersist() {
   if (!writeTimer) writeTimer = setTimeout(persistBuffer, 2000);
 }
-/** The ring (keep the last MAX_BUFFER chars, aligned to a line). A copy that falls out of it takes its kept files along
- *  (acceptance r5): a picture is kept exactly as long as the record that names it. */
+/** The ring (keep the last MAX_BUFFER chars, aligned to a line). THE KEPT FILE OUTLIVES THE FRAME IT SERVES (acceptance r6:
+ *  a 522 KB output burst trimmed a HELD frame's copy line and its picture 6 s after they were written — a restart in the gap
+ *  drew nothing): the copy line of a frame the CLI has not yet witnessed is PINNED (written again at the head), and the ring
+ *  deletes no kept file — a file goes when its frame's witness record landed or the frame was dropped (settleCopy). */
 function trimBuffer() {
   if (buffer.length <= MAX_BUFFER) return;
   const trimStart = buffer.indexOf('\n', buffer.length - MAX_BUFFER);
   if (trimStart <= 0) return;
   const gone = buffer.slice(0, trimStart + 1);
   buffer = buffer.substring(trimStart + 1);
-  if (gone.includes('"webui_copy"')) dropKeptNotIn(gone, buffer);
+  if (!gone.includes('"webui_copy"')) return;
+  for (const l of KC.pinnedLines(gone, buffer, [...copies.values()].filter((c) => !c.settled).map((c) => c.line))) buffer += l + '\n';
 }
 
 let child = null;
@@ -288,11 +292,43 @@ const promptHooks = new Set();    // the UserPromptSubmit hooks the CLI said sta
 // EVERY WINDOW HAS A NAMED END (acceptance r5): the pause a prompt hook buys is bounded too — a hook_started with no
 // hook_response (a lost line, the two out of order) pinned the window for ever (a frame stayed held 48 s, a second Stop did
 // not free it). The CLI itself answers every hook it starts — `success`, or `cancelled` at the hook's own timeout — so the
-// bound is that timeout plus a margin: the product registers ONE UserPromptSubmit hook with `timeout: 10`
-// (data/bin/vibespace-hook-register.mjs); a second one running beside it is a user's own, whose timeout is its own (the CLI's
-// default is 600 s). A bound that fires says «the prompt hook never answered» and the window falls to its backstop.
-const PRODUCT_PROMPT_HOOK_MS = 10000 + 5000;
-const OWN_PROMPT_HOOK_MS = 600000 + 5000;
+// bound is that timeout plus a margin. THE BOUND IS KEYED ON WHICH HOOK RUNS, NEVER ON HOW MANY (acceptance r6: r5 gave a
+// LONE hook the product's 15 s, so a user's own 60 s hook with the product's absent closed the window at +45 s and the
+// frame the CLI held at Stop was answered): MEASURED, `hook_started` names no command — {hook_id, hook_name:
+// 'UserPromptSubmit', hook_event} on 2.1.312 (2.1.308 says nothing) — so the wrapper reads the hooks the CLI LOADS
+// (promptHookCensus: the user / project / local / managed settings): when every UserPromptSubmit hook there is the
+// product's (data/bin/vibespace-hook.mjs, registered with `timeout: 10`), a hook that starts is the product's ⇒ 10 s + 5 s;
+// any other hook ⇒ ITS timeout (the CLI's 600 s default when it names none) + 5 s, alone or beside the product's; a file
+// that cannot be read, or an enabled plugin (its hooks are its own), cannot be attributed ⇒ the user bound (fail closed).
+// A bound that fires says «the prompt hook never answered» and the window falls to its backstop.
+const PROMPT_HOOK_MARGIN_MS = 5000;
+const PRODUCT_PROMPT_HOOK_MS = 10000 + PROMPT_HOOK_MARGIN_MS;
+const OWN_PROMPT_HOOK_MS = 600000 + PROMPT_HOOK_MARGIN_MS;
+function promptHookCensus() {
+  const user = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
+  const files = [path.join(user, 'settings.json'), path.join(process.cwd(), '.claude', 'settings.json'), path.join(process.cwd(), '.claude', 'settings.local.json'), '/etc/claude-code/managed-settings.json'];
+  let product = 0, unknown = '';
+  const other = [];
+  for (const f of files) {
+    let j = null;
+    try { j = JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { if (e && e.code !== 'ENOENT') unknown = unknown || `${f} unreadable`; continue; }
+    if (j && j.enabledPlugins && typeof j.enabledPlugins === 'object' && Object.values(j.enabledPlugins).some(Boolean)) unknown = unknown || `a plugin is enabled in ${f}`;
+    const groups = j && j.hooks && Array.isArray(j.hooks.UserPromptSubmit) ? j.hooks.UserPromptSubmit : [];
+    for (const g of groups) for (const h of (g && Array.isArray(g.hooks) ? g.hooks : [])) {
+      if (h && typeof h.command === 'string' && /vibespace-hook\.mjs/.test(h.command)) product++;
+      else other.push(h && Number(h.timeout) > 0 ? Number(h.timeout) * 1000 : 600000);
+    }
+  }
+  // a hook started and the settings name none: it is not attributable (a plugin's, a file the wrapper does not read) — fail closed
+  if (!product && !other.length && !unknown) unknown = 'no UserPromptSubmit hook in the settings the wrapper reads';
+  return { product, other, unknown };
+}
+function promptHookBound() {
+  const c = promptHookCensus();
+  if (!c.unknown && !c.other.length && c.product) return { ms: PRODUCT_PROMPT_HOOK_MS, why: "the product's hook — every UserPromptSubmit hook the CLI loads is data/bin/vibespace-hook.mjs: its registered 10 s timeout + 5 s" };
+  const ms = Math.max(c.unknown ? 600000 : 0, ...c.other) + PROMPT_HOOK_MARGIN_MS;
+  return { ms, why: c.unknown ? `a hook the wrapper cannot attribute (${c.unknown}): the CLI's 600 s default + 5 s` : `a hook that is not the product's: its timeout ${(ms - PROMPT_HOOK_MARGIN_MS) / 1000} s + 5 s` };
+}
 let hookTimer = null;             // the bound on the prompt-hook pause (armed while promptHooks is non-empty)
 let hookBoundMs = 0;
 const answeredHooks = new Set();  // hook_ids whose hook_response came BEFORE their hook_started (never a pin)
@@ -300,6 +336,7 @@ let boundUntil = null;            // when the armed backstop fires (epoch ms) �
 let settleSaid = '';              // the last `queue_settle` the wrapper said (said on a change only)
 const copies = new Map();         // msgId → {line, ts, cliUuid}: the history-buffer copy of a mid-turn frame (an edit rewrites it)
 let handSeq = 0;
+const startingCopies = [];        // msgIds of copied frames written to start a turn of their own: their init is the witness
 const queueVerbs = () => (stateProven ? CLAUDE_QUEUE_VERBS : CLAUDE_HOLD_VERBS);
 
 const frameBlocks = (o) => {
@@ -379,6 +416,8 @@ function proveState() {
  *  buffer here — at the moment it really reaches the CLI, so a frame Stop dropped never reads as a sent one. */
 function forwardUser(line, o, buffered) {
   if (opensTurn(o)) { turnBusy = true; awaitingStart = true; }
+  const mid = o && typeof o.webui_msg_id === 'string' ? o.webui_msg_id : '';
+  if (mid && copies.has(mid)) { noteWritten(mid); startingCopies.push(mid); } // its own turn's user record is its witness (the init)
   sendChild(line);
   if (buffered) { buffer += line + '\n'; schedulePersist(); }
 }
@@ -390,59 +429,64 @@ function forwardUser(line, o, buffered) {
  *  sent message (`_fromWebui` + `msgId`) and marked `webui_copy`: src/server/session-store.js keeps it through a restart,
  *  src/message-manager.js draws it once (the same msgId is the same bubble; the CLI's own later record claims it).
  *  It replaces a frame-file body's raw line (returns true): one record per frame.
- *  THE COPY IS A REFERENCE (acceptance r5): its pictures — and a text block over KEPT_TEXT_MIN — are KEPT FILES beside this
- *  buffer (`<id>.img/<sha256>.<ext>`, the frame file itself is unlinked once read), and the copy names them
- *  (`source: {type:'kept', file, media_type, bytes}`): never inline bytes, never a words-only cut, a line under 1 KB at any
- *  frame size (r4 inlined a 3 × 40 KB frame as a 123 KB line and cut a 400 KB one to its words). The server reads the files
- *  back at a restart (session-store resolveKept); a file that is gone draws a placeholder that SAYS so. A file that could
- *  not be written is named `unkept` — the same placeholder, never silence. The files go with the record that names them:
- *  the ring's trim (trimBuffer) and the session's buffer sweep (the server). */
-const KEPT_DIR = (/\.buf$/.test(bufferFile) ? bufferFile.slice(0, -4) : bufferFile) + '.img';
-const KEPT_REL = path.basename(KEPT_DIR);
-const KEPT_TEXT_MIN = 8 * 1024;
-const KEPT_EXT = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/gif': 'gif', 'image/webp': 'webp' };
-const KEPT_REF_RE = /"file":"([^"\/]+\.img\/[0-9a-f]{32}\.[a-z]{2,4})"/g;
-function keepBytes(bytes, ext) {
-  const name = createHash('sha256').update(bytes).digest('hex').slice(0, 32) + '.' + ext;
-  try {
-    const file = path.join(KEPT_DIR, name);
-    if (!fs.existsSync(file)) { fs.mkdirSync(KEPT_DIR, { recursive: true }); fs.writeFileSync(file, bytes); }
-    return KEPT_REL + '/' + name;
-  } catch (e) { log(`kept file not written (${e.message}) — the copy names it unkept`); return null; }
-}
-function keptBlock(b) {
-  if (b && b.type === 'image' && b.source && b.source.type === 'base64' && typeof b.source.data === 'string') {
-    const mt = typeof b.source.media_type === 'string' && b.source.media_type ? b.source.media_type : 'image/png';
-    const bytes = Buffer.from(b.source.data, 'base64');
-    const file = keepBytes(bytes, KEPT_EXT[mt] || 'bin');
-    return { type: 'image', source: { type: 'kept', media_type: mt, bytes: bytes.length, ...(file ? { file } : { unkept: true }) } };
-  }
-  if (b && b.type === 'text' && typeof b.text === 'string' && b.text.length > KEPT_TEXT_MIN) {
-    const file = keepBytes(Buffer.from(b.text, 'utf8'), 'txt');
-    return { type: 'text', text: b.text.slice(0, 400) + '…', kept: { chars: b.text.length, ...(file ? { file } : { unkept: true }) } };
-  }
-  return b;
-}
-/** The kept files named in `gone` and nowhere in `still` are deleted (a copy left the ring, or was rewritten). */
-function dropKeptNotIn(gone, still) {
-  for (const m of String(gone).matchAll(KEPT_REF_RE)) {
-    if (still.includes('"file":"' + m[1] + '"')) continue;
-    try { fs.unlinkSync(path.join(path.dirname(KEPT_DIR), m[1])); } catch { }
-  }
-}
-function copyLineOf(o, msgId, ts, cliUuid) {
-  const content = frameBlocks(o).map(keptBlock);
-  return JSON.stringify({ type: 'user', message: { role: 'user', content }, msgId, cliUuid, _fromWebui: true, webui_copy: true, timestamp: ts });
+ *  THE COPY IS A REFERENCE (acceptance r5, r6): its pictures — and a text block over 8 KB — are KEPT FILES beside this
+ *  buffer (`<id>.img/<sha>.<ext>`; the frame file itself is unlinked once read), named by sha and extension ONLY
+ *  (`source: {type:'kept', sha, ext, media_type, bytes}` — the folder is the session's own, never in the record:
+ *  src/kept-copies.js, the ONE place that names, writes and reads them): never inline bytes, never a words-only cut; the
+ *  line is ~233 B + ~135 B per picture. The restore reads the files back off the loop (boot-restore → kept-copies preload);
+ *  a file that is gone draws a placeholder that SAYS so; one that could not be written is `unkept`. A file goes when the
+ *  CLI witnessed its frame or the frame was dropped (settleCopy), the session's kept bytes are capped (the oldest go), and
+ *  the session's sweeps take the folder. */
+const KC = require(path.join(__dirname, '..', '..', 'src', 'kept-copies.js')); // the ONE place that names / writes / reads kept files
+const KEPT_DIR = KC.keptDirOfBuffer(bufferFile);
+/** THE HAND-OVER ORDER (acceptance r6): a copy says WHEN its frame reached the CLI — `handNo` 0 while it is held, the n-th
+ *  frame written to the CLI once it is (handOver / a drain / a ⚡) — so a batch the CLI ran as one turn is claimed in that
+ *  order, and a still-held copy never claims a record (the normalizer, src/message-manager.js). */
+let handOrder = 0;
+function copyLineOf(o, msgId, ts, cliUuid, handNo = 0) {
+  const content = frameBlocks(o).map((b) => KC.keepBlock(b, KEPT_DIR, log));
+  return JSON.stringify({ type: 'user', message: { role: 'user', content }, msgId, cliUuid, handNo, _fromWebui: true, webui_copy: true, timestamp: ts });
 }
 function recordPersonFrame(o, msgId, cliUuid) {
   const ts = new Date().toISOString();
   const line = copyLineOf(o, msgId, ts, cliUuid);
   buffer += line + '\n';
-  copies.set(msgId, { line, ts, cliUuid });
-  if (copies.size > 64) copies.delete(copies.keys().next().value);
+  copies.set(msgId, { line, ts, cliUuid, handNo: 0, settled: false });
+  // only a SETTLED copy leaves the map (a pending one is pinned in the ring and its files are kept)
+  if (copies.size > 64) for (const [k, c] of copies) { if (copies.size <= 64) break; if (c.settled) copies.delete(k); }
+  const evicted = KC.capDir(KEPT_DIR);
+  if (evicted.length) log(`the kept pictures passed ${KC.CAP_BYTES / 1048576} MB — the oldest ${evicted.length} file(s) evicted (their copies draw «no longer kept»)`);
   schedulePersist();
   return true;
 }
+/** Replace a copy's line in the buffer (an edit, a hand-over number). */
+function replaceCopyLine(msgId, next) {
+  const c = copies.get(msgId);
+  if (!c || c.line === next) return;
+  const at = buffer.lastIndexOf(c.line + '\n');
+  if (at >= 0) { buffer = buffer.slice(0, at) + next + '\n' + buffer.slice(at + c.line.length + 1); schedulePersist(); }
+  else { buffer += next + '\n'; schedulePersist(); }
+  c.line = next;
+}
+/** The frame of `msgId` was just written to the CLI: its copy gets the next hand-over number. */
+function noteWritten(msgId) {
+  const c = msgId && copies.get(msgId);
+  if (!c || c.handNo) return;
+  c.handNo = ++handOrder;
+  let rec = null; try { rec = JSON.parse(c.line); } catch { return; }
+  rec.handNo = c.handNo;
+  replaceCopyLine(msgId, JSON.stringify(rec));
+}
+/** The CLI WITNESSED the frame (its own record of it landed: taken in, its own turn, a follow-up) or it was DROPPED (put
+ *  back, removed): its kept files go — a restart then draws the picture from the CLI's own record (claimedContent fills a
+ *  gone picture), or the placeholder for a dropped one. A file another pending copy still names stays. */
+function settleCopy(msgId) {
+  const c = msgId && copies.get(msgId);
+  if (!c || c.settled) return;
+  c.settled = true;
+  KC.dropFiles(KEPT_DIR, KC.namesToDrop(c.line, [...copies.values()].filter((x) => !x.settled).map((x) => x.line)));
+}
+const settleCopies = (ids) => { for (const id of ids || []) settleCopy(id); };
 /** THE WITNESS (acceptance r4): the uuid a person's mid-turn frame carries to the CLI — the CLI keeps it as the uuid of its
  *  own user record of those words (a turn they ran as, a held frame drained, a kept frame's interrupted follow-up) and as
  *  the `source_uuid` of the `queued_command` attachment a frame taken in at a tool result becomes (measured on 2.1.312).
@@ -461,15 +505,12 @@ function stampFrame(line, o) {
 function rewriteCopy(msgId, o) {
   const c = copies.get(msgId);
   if (!c) return;
-  const next = copyLineOf(o, msgId, c.ts, c.cliUuid);
-  const at = buffer.lastIndexOf(c.line + '\n');
-  if (at >= 0) { buffer = buffer.slice(0, at) + next + '\n' + buffer.slice(at + c.line.length + 1); schedulePersist(); }
-  if (c.line !== next) dropKeptNotIn(c.line, buffer);
-  copies.set(msgId, { ...c, line: next });
+  replaceCopyLine(msgId, copyLineOf(o, msgId, c.ts, c.cliUuid, c.handNo));
 }
 
 /** A frame goes to the CLI WHILE A TURN RUNS: never held, never editable again — witnessed into the turn (processLine). */
 function handOver(line, { buffered = false, msgId = '', id = null, via = 'enter' } = {}) {
+  noteWritten(msgId);
   sendChild(line);
   if (buffered) { buffer += line + '\n'; schedulePersist(); }
   handed.push({ id: id || `h${++handSeq}-${process.pid}`, msgId, ts: Date.now(), phase: 'handed' });
@@ -481,6 +522,7 @@ function settleHanded(state) {
   if (!handed.length) return [];
   const ids = handed.splice(0, handed.length).map((h) => h.msgId).filter(Boolean);
   record('input_handover', { state, msg_ids: ids });
+  settleCopies(ids); // taken in with the last request, or its own turn's record: the CLI holds the frame now
   return ids;
 }
 
@@ -505,7 +547,7 @@ function onBound() {
   const owed = cliOwes(), ms = owed ? OWED_BACKSTOP_MS : SETTLE_BOUND_MS;
   const what = [];
   if (cliOwesTurn) { cliOwesTurn = false; what.push(`the turn owed for ${settleHanded('own-turn').length} handed frame(s)`); }
-  if (stopping) { what.push(`the Stop window (${stopping.held} frame(s) the CLI held, ${stopping.follows} follow-up turn(s) interrupted)`); landRiding('the window closed with no follow-up'); deliverHeldInterrupt('the window closed on its backstop'); stopping = null; }
+  if (stopping) { what.push(`the Stop window (${stopping.held} frame(s) the CLI held, ${stopping.follows} follow-up turn(s) interrupted)`); landRiding('the window closed with no follow-up'); settleCopies(stopping.kept); deliverHeldInterrupt('the window closed on its backstop'); stopping = null; }
   if (what.length) log(owed
     ? `backstop: no prompt hook, no follow-up turn and no idle ${ms} ms after the CLI's last word (above the product's prompt-hook budget: 3 s fetch, 10 s CLI timeout) — disarmed ${what.join(' + ')}`
     : `bound: the CLI owes nothing and said no idle ${ms} ms after its last result (a background task keeps it running) — closed ${what.join(' + ')}`);
@@ -524,23 +566,24 @@ function saySettle() {
   const key = open ? 'settling:' + until : 'settled';
   if (key === settleSaid || (!settleSaid && key === 'settled')) return;
   settleSaid = key;
-  record('queue_settle', open ? { state: 'settling', until, ms: OWED_BACKSTOP_MS, ...(until === null && promptHooks.size ? { hook: true } : {}) } : { state: 'settled' });
+  record('queue_settle', open ? { state: 'settling', until, ms: OWED_BACKSTOP_MS, why: stopping ? 'stop' : 'handover', ...(until === null && promptHooks.size ? { hook: true } : {}) } : { state: 'settled' });
 }
-/** The prompt-hook pause's own bound (acceptance r5) — armed when the first hook starts, widened when a second runs beside it. */
+/** The prompt-hook pause's own bound (acceptance r5, keyed on which hook runs since r6) — armed when the first hook starts,
+ *  widened if a later census says longer; never narrowed while one runs. */
 function armHookBound() {
   if (!promptHooks.size) { clearTimeout(hookTimer); hookTimer = null; hookBoundMs = 0; return; }
-  const ms = promptHooks.size > 1 ? OWN_PROMPT_HOOK_MS : PRODUCT_PROMPT_HOOK_MS;
-  if (hookTimer && ms <= hookBoundMs) return;
+  const b = promptHookBound();
+  if (hookTimer && b.ms <= hookBoundMs) return;
   clearTimeout(hookTimer);
-  hookBoundMs = ms;
+  hookBoundMs = b.ms;
   hookTimer = setTimeout(() => {
     hookTimer = null;
     if (!promptHooks.size) return;
     const n = promptHooks.size; hookBoundMs = 0;
     promptHooks.clear();
-    log(`the prompt hook never answered: ${n} UserPromptSubmit hook(s) said started and no hook_response in ${ms / 1000} s (${ms === PRODUCT_PROMPT_HOOK_MS ? "the product's hook: its registered 10 s timeout + 5 s" : "a user's own hook beside it: the CLI's 600 s default + 5 s"}) — the window falls to its backstop`);
+    log(`the prompt hook never answered: ${n} UserPromptSubmit hook(s) said started and no hook_response in ${b.ms / 1000} s (${b.why}) — the window falls to its backstop`);
     armBound();
-  }, ms);
+  }, b.ms);
 }
 function clearPromptHooks() { promptHooks.clear(); armHookBound(); }
 /** A SECOND STOP INSIDE THE WINDOW IS HELD (acceptance r5): written raw while the follow-up's prompt hook runs it makes the
@@ -551,8 +594,11 @@ function clearPromptHooks() { promptHooks.clear(); armHookBound(); }
 function holdSecondStop(line) {
   // the window is open and the CLI's turn already ended (its interrupted result came): what is left is the follow-up
   if (!stopping || turnBusy) return false;
+  const prior = stopping.heldInterrupt;
   dropHeldForStop();
   stopping.heldInterrupt = line;
+  // EVERY REQUEST GETS ITS RESPONSE (r6): a Stop folded into the newer one is answered here — the CLI answers the one delivered
+  if (prior) { let rid = null; try { rid = JSON.parse(prior).request_id; } catch { } if (rid) record('control_response', { response: { subtype: 'success', request_id: rid }, webui_note: 'folded into the one interrupt on the follow-up init' }); }
   log(`a second Stop inside the window: held (${promptHooks.size ? "the follow-up's prompt hook runs — written now it would drop the kept frame" : 'delivered on the follow-up init or when the window closes'})`);
   return true;
 }
@@ -568,6 +614,7 @@ function deliverHeldInterrupt(why) {
 function landRiding(why) {
   if (!stopping || !stopping.riding || !stopping.riding.length || stopping.follows) return;
   record('input_handover', { state: 'landed', msg_ids: stopping.riding });
+  settleCopies(stopping.riding);
   log(`the frame(s) that rode the last tool result went with the turn's last request — landed (${why})`);
   stopping.riding = [];
 }
@@ -627,8 +674,9 @@ function dropHeldForStop() {
   const held = handed.length + (stopping ? stopping.held : 0);
   const live = turnBusy || cliOwesTurn || !!stopping;
   handed.length = 0; landedThisTurn = []; cliOwesTurn = false;
-  if (live) { stopping = { held, follows: stopping ? stopping.follows : 0, riding: (stopping ? stopping.riding || [] : []).concat(riding), heldInterrupt: stopping ? stopping.heldInterrupt || null : null }; armBound(); }
+  if (live) { stopping = { held, follows: stopping ? stopping.follows : 0, riding: (stopping ? stopping.riding || [] : []).concat(riding), heldInterrupt: stopping ? stopping.heldInterrupt || null : null, kept: (stopping ? stopping.kept || [] : []).concat(keptIds.filter((x) => !riding.includes(x))) }; armBound(); }
   const dropped = promptQueue.splice(0, promptQueue.length);
+  settleCopies(dropped.map((q) => q.msgId)); // put back (or VibeSpace's own): never run — its kept files go
   for (const q of dropped) record('queue_op_result', { op: 'remove', id: q.id, ok: true, msg_id: q.msgId, reason: 'stopped' });
   const putBack = dropped.filter((q) => !q.origin);
   if (putBack.length || keptIds.length || landedIds.length) {
@@ -646,6 +694,7 @@ function dropHeldForStop() {
 function settleStop(why) {
   if (!stopping) return;
   landRiding(why);
+  settleCopies(stopping.kept); // the follow-up's interrupted record holds the kept frames
   deliverHeldInterrupt(`the window settled: ${why}`);
   log(`stop settled (${why}): ${stopping.held} frame(s) the CLI held at Stop, ${stopping.follows} follow-up turn(s) interrupted`);
   stopping = null;
@@ -754,6 +803,7 @@ function handleQueueOp(msg) {
   }
   const [dropped] = promptQueue.splice(idx, 1);
   record('queue_op_result', { op, id, ok: true, msg_id: dropped.msgId });
+  settleCopy(dropped.msgId); // removed: it never runs — its kept files go
   publishQueue();
 }
 
@@ -849,12 +899,14 @@ function processLine(line) {
         const ids = landed.map((h) => h.msgId).filter(Boolean);
         landedThisTurn.push(...ids);
         record('input_handover', { state: 'landed', msg_ids: ids });
+        settleCopies(ids);
       }
     }
     if (starts) {
       turnBusy = true; awaitingStart = false;
       clearTimeout(boundTimer); boundTimer = null; boundUntil = null;
       clearPromptHooks(); // the turn started: no prompt hook of its own still runs (a lost hook_response never pins the clock)
+      settleCopies(startingCopies.splice(0, startingCopies.length)); // a drained frame's own turn wrote its user record
       if (stopping && stopping.held > 0) {
         // A TURN THE CLI STARTS INSIDE THE STOP WINDOW for frames it held at Stop — EVERY one (it may split them into
         // several): a second interrupt on THIS line, IN THIS TICK. Its request leaves ~12 ms after this init (measured);
@@ -867,13 +919,15 @@ function processLine(line) {
         // the CLI's own turn for what it was still holding: theirs now — a Stop in it stops a TURN, it keeps no message
         cliOwesTurn = false;
         settleHanded('own-turn');
+        // the deadline-card law (r6): the window that held frames behind it ENDED at this init — say so, no countdown
+        if (promptQueue.length) { record('queue_settle', { state: 'running', why: 'handover' }); settleSaid = 'running'; }
       }
     } else if (msg.type === 'result' || (idle && !awaitingStart)) {
       turnBusy = false; awaitingStart = false; turnEnded = true;
       if (msg.type === 'result') {
         // a frame that rode this turn's last request is in the conversation as read, whatever the model said after
         const rode = handed.filter((h) => h.phase === 'riding');
-        if (rode.length) { for (const h of rode) handed.splice(handed.indexOf(h), 1); record('input_handover', { state: 'landed', msg_ids: rode.map((h) => h.msgId).filter(Boolean) }); }
+        if (rode.length) { for (const h of rode) handed.splice(handed.indexOf(h), 1); record('input_handover', { state: 'landed', msg_ids: rode.map((h) => h.msgId).filter(Boolean) }); settleCopies(rode.map((h) => h.msgId)); }
         // the turn ended before the CLI took these in: it runs them as a turn of its own next (measured), and no held
         // frame may cut in before that turn
         if (handed.length && !stopping) cliOwesTurn = true;

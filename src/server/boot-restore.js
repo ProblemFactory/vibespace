@@ -268,7 +268,7 @@ function retireDuplicate(sockFile, socketPath, id, claudeSessionId) {
   }, () => { });
   try { fs.unlinkSync(socketPath); } catch {}
   try { fs.unlinkSync(path.join(BUFFERS_DIR, id + '.buf')); } catch {}
-  try { fs.rmSync(path.join(BUFFERS_DIR, id + '.img'), { recursive: true, force: true }); } catch {} // the copies' kept pictures go with the buffer (r5)
+  fs.rm(path.join(BUFFERS_DIR, id + '.img'), { recursive: true, force: true }, () => { }); // the copies' kept pictures go with the buffer (r5; off the loop, r6)
   try { fs.unlinkSync(path.join(BUFFERS_DIR, id + '.json')); } catch {}
   deleteSessionMeta(sockFile);
 }
@@ -559,6 +559,8 @@ function restoreSessions() {
       _goalElapsed: wrapperGoalElapsed,
       _goalTokensUsed: wrapperGoalTokens,
     });
+    // the copies' kept pictures (lane claude-steer-inject r6): read OFF the loop, bounded; the first history read awaits it
+    if (savedBuffer.includes('"webui_copy"')) session._keptLoad = require('../kept-copies.js').preload(BUFFERS_DIR, id, savedBuffer).then((m) => { session._keptFiles = m; }, () => { session._keptFiles = new Map(); });
     // Create normalizer for chat sessions (populated on first attach from JSONL + buffer)
     if (sessionMode === 'chat') {
       session._normalizer = createMessageManager(session.backend || 'claude', id);

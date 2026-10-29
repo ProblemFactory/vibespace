@@ -815,6 +815,13 @@ impossible rather than a review promise.
   (10 s + 5 s for the product's hook) and says so; a second Stop in that window
   waits for the follow-up's start, so the kept message stays. Alt+Enter at idle
   in the expanded editor (or with Enter set to a new line) types a new line.
+  **Acceptance r6 (the same .361):** a person's own long prompt hook (the
+  product's absent) no longer closes a Stop window early — the bound is that
+  hook's own timeout; a kept picture opens only from its own conversation's
+  folder; a held screenshot survives any burst of output; messages Claude ran
+  together are claimed in the order they were handed over; a held message says
+  «Held — the previous turn's follow-up is running» once the CLI's owed turn
+  starts (no countdown without a timer).
 - **Removing a queued agent-to-agent / job message gives it back.** It was
   already reported delivered, so `remove` re-reports `peer_message_result
   ok:false` with the text and sender and the delivery ladder re-stashes it for

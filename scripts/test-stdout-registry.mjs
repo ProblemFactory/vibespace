@@ -723,12 +723,16 @@ const wireVerdict = (res, why = '') => {
   //    disagreeing. Anything that makes the measurement impossible (no CLI, no
   //    tool ran, a timeout) SKIPS LOUDLY — a probe that could not measure is
   //    never evidence of absence.
+  //    THE SWITCH (lane claude-steer-inject r6, §ban-safety): this leg runs ONE REAL claude turn with the box's login — one of
+  //    the TWO rows that may talk to the vendor (with test-chat-e2e); VS_NO_REAL_CLI=1 (every acceptance run sets it) skips it
+  //    by name, before the probe starts.
   let res = null, why = '';
-  try {
+  const noRealCli = process.env.VS_NO_REAL_CLI === '1';
+  if (!noRealCli) try {
     const raw = require('child_process').execFileSync(process.execPath, [path.join(REPO, 'scripts/probe-claude-stdout.mjs')], { encoding: 'utf8', timeout: 180000, stdio: ['ignore', 'pipe', 'ignore'] });
     res = JSON.parse(String(raw).trim().split('\n').filter(Boolean).pop() || '{}');
   } catch (e) { why = e.message; }
-  const verdict = wireVerdict(res, why);
+  const verdict = noRealCli ? { skip: 'SKIPPED the wire leg (ⓕ): VS_NO_REAL_CLI=1 — the real claude turn is not run' } : wireVerdict(res, why);
   if (verdict.skip) console.log(`  SKIP: ${verdict.skip}`);
   else {
     const n = (t) => res.types[t] || 0;

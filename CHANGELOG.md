@@ -2,7 +2,7 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
-## 2.369.361 — 2026-10-27
+## 2.369.361 — 2026-10-28
 
 ### Changed
 - A message sent while a Claude conversation works now reaches it at its next tool call, as in the CLI; to hold it for the turn's end or edit it, use Alt+Enter.

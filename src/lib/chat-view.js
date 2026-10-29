@@ -4190,6 +4190,9 @@ class ChatView {
     const msgIdx = this._messages.findIndex(m => m.id === id);
     if (msgIdx < 0) return;
     const msg = this._messages[msgIdx];
+    // the settle chip's deadline on THIS browser's clock (lane claude-steer-inject r6, the hub-clock law): the hub says `until`
+    // and its own `now` together — the offset between the two clocks never enters the countdown
+    if (fields.settling && Number(fields.settling.until) > 0 && Number(fields.settling.now) > 0) fields.settling = { ...fields.settling, localUntil: Date.now() + (Number(fields.settling.until) - Number(fields.settling.now)) };
     Object.assign(msg, fields);
     // A Workflow launch ack just landed → status-bar chip for the running run
     if (msg.toolName === 'Workflow' && fields.content && !this._loadingHistory) {

@@ -269,7 +269,7 @@ await guard('§6 the buffer copy', () => {
   ok(users(e, 'E put back').length === 2 && users(e, 'E put back')[0].queueState === 'removed', 'a frame Stop PUT BACK never ran: the person\'s resend of the same words is its own bubble (the copy keeps «Removed»)', users(e, 'E put back').map((m) => m.queueState || null));
   ok(/if \(msg\._fromWebui && msg\.timestamp && !msg\.webui_copy\) \{/.test(read('src/session-store.js')), 'the history merge keeps a copy whatever user record follows it (a tool_result is one) — src/session-store.js');
   const wr = read('data/bin/chat-wrapper.js');
-  ok(/if \(!origin && msgId && !isCommandFrame\(o\)\) \{\n\s+const st = stampFrame\(line, o\);\n\s+line = st\.line;\n\s+if \(recordPersonFrame\(o, msgId, st\.uuid\)\) buffered = false;\n\s+\}/.test(wr) && /return JSON\.stringify\(\{ type: 'user', message: \{ role: 'user', content \}, msgId, cliUuid, _fromWebui: true, webui_copy: true, timestamp: ts \}\);/.test(wr) && /buffer \+= line \+ '\\n';\n\s+copies\.set\(msgId, \{ line, ts, cliUuid \}\);/.test(wr) && /rewriteCopy\(entry\.msgId, o\);/.test(wr), 'the wrapper writes the copy into its HISTORY BUFFER only (never stdout — the live view drew it at send), for the person\'s mid-turn frames (never a slash command — the CLI records the command it runs its own way)');
+  ok(/if \(!origin && msgId && !isCommandFrame\(o\)\) \{\n\s+const st = stampFrame\(line, o\);\n\s+line = st\.line;\n\s+if \(recordPersonFrame\(o, msgId, st\.uuid\)\) buffered = false;\n\s+\}/.test(wr) && /return JSON\.stringify\(\{ type: 'user', message: \{ role: 'user', content \}, msgId, cliUuid, handNo, _fromWebui: true, webui_copy: true, timestamp: ts \}\);/.test(wr) && /buffer \+= line \+ '\\n';\n\s+copies\.set\(msgId, \{ line, ts, cliUuid, handNo: 0, settled: false \}\);/.test(wr) && /rewriteCopy\(entry\.msgId, o\);/.test(wr), 'the wrapper writes the copy into its HISTORY BUFFER only (never stdout — the live view drew it at send), for the person\'s mid-turn frames (never a slash command — the CLI records the command it runs its own way)');
 });
 
 // ── §7 THE STRIP AND THE REFUSALS (r2) ──
@@ -286,5 +286,21 @@ await guard('§7 the strip', () => {
   ok(/^VibeSpace's own message runs between turns/.test(txt('origin')) && /^The turn is being stopped/.test(txt('stopping')) && /^This agent has not shown yet/.test(txt('unproven')) && /^A command runs between turns/.test(txt('command')) && /^A command runs between turns/.test(txt()), 'not-steerable says WHY: VibeSpace\'s own message / the stop settling / an unproven CLI / a command (no why = a command, an older wrapper)', ['origin', 'stopping', 'unproven', 'command', null].map(txt));
 });
 
+await guard('§r6 the settle chip tells the truth', () => {
+  const MMr = require(path.join(REPO, 'src/message-manager.js'));
+  const m = new MMr.MessageManager('s-r6-chip');
+  m.processLive({ type: 'user', _fromWebui: true, msgId: 'm-c', message: { role: 'user', content: [{ type: 'text', text: 'C held behind B' }] }, timestamp: new Date().toISOString() });
+  m.processLive({ type: 'queue_changed', items: [{ id: 'q1', msgId: 'm-c', preview: 'C', ts: 1, kind: 'user' }], verbs: ['remove', 'steer', 'steer-all', 'reorder', 'edit'] });
+  m.processLive({ type: 'queue_settle', state: 'settling', until: Date.now() + 30000, ms: 30000, why: 'handover' });
+  const c = () => m.messages.find((x) => x.webuiMsgId === 'm-c');
+  const settling = c()?.settling;
+  m.processLive({ type: 'queue_settle', state: 'running', why: 'handover' });
+  const running = c()?.settling;
+  ok(!!settling && settling.why === 'handover' && Number(settling.now) > 0 && Number(settling.until) > settling.now && !!running && running.running === true && !running.until, '(r6) the owed turn\'s init ENDS the settle: «settling» (its why, the hub\'s now + until) → «running» with no deadline — a countdown only while a timer exists', { settling, running });
+  const cv = read('src/lib/chat-view.js'), cr = read('src/lib/chat-renderers.js');
+  ok(/localUntil: Date\.now\(\) \+ \(Number\(fields\.settling\.until\) - Number\(fields\.settling\.now\)\)/.test(cv) && /Number\(settling\.localUntil\) > 0 \? Number\(settling\.localUntil\)/.test(cr) && !/Number\(settling\.until\) > 0 \? Number\(settling\.until\)/.test(cr), '(r6) the hub-clock law: the browser counts down to `until − now` from the moment the edit arrived (never the hub\'s epoch against its own clock); a restored page shows no seconds');
+  const w = read('data/bin/chat-wrapper.js');
+  ok(/record\('queue_settle', \{ state: 'running', why: 'handover' \}\)/.test(w) && /why: stopping \? 'stop' : 'handover'/.test(w), '(r6) the wrapper says «running» at the owed turn\'s init and names WHY a window holds (a Stop or a hand-over)');
+});
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
