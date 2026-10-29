@@ -1358,7 +1358,7 @@ async function goneLeg(ENGM, name) {
   try {
     const req = w.reqOf();
     const rm = await w.eng.removePattern(A, w.pid);
-    const r1 = w.reqOf(), it = w.m2.userTodos.get(req.todoId);
+    const r1 = JSON.parse(J2s(w.reqOf())), it = JSON.parse(J2s(w.m2.userTodos.get(req.todoId)));   // r10: as the removal left them — before the press
     const d = await w.eng.decideRequest(req.id, true, 'user', { person: true });
     return { held: req && req.held.n, removed: !!rm.ok, request: r1.status, decidedBy: r1.decidedBy, item: it.status, by: it.resolvedBy, fact: it.resolvedFact || null, words: FA.settledWords ? FA.settledWords(it, (k, p) => String(k).replace(/\{(\w+)\}/g, (_, x) => (p && p[x] != null ? p[x] : ''))) : null,
       press: { ok: !!d.ok, code: d.code || null, n: d.n == null ? null : d.n }, pending: (w.eng.store.index.peek(KEY).pending || []).length, woken: w.m2.delivered.length };
@@ -1373,7 +1373,7 @@ try {
   const call = '    await pruneHeld(adapterId);\n';
   const cut = src.split(call).length === 2 ? src.replace(call, '') : src;
   const r = await goneLeg(MUT.load('src/server/channels-engine.js', cut, 'no-prune-held'), 'e9-gone-red');
-  ok(cut !== src && r.request !== 'denied' && r.press.ok && r.pending === 30, `CONTROL: a prune that never reaches the held store — the card stays open, Deliver pushes ${r.pending} rows into pending for a watcher that is gone`, J2s(r));
+  ok(cut !== src && r.request === 'open' && r.item === 'open' && !r.press.ok && r.press.code === 'rule-gone' && r.pending === 0, `CONTROL: a prune that never reaches the held store — the card stays OPEN after its rule is removed (r10: Deliver's own read of the rule then ends it by name, ${r.press.code}, ${r.pending} rows pushed for nobody — r9 pushed 30)`, J2s(r));
 } catch (e) { ok(false, '⑦ (b) threw on this tree: ' + ((e && e.stack) || e)); }
 // (c) A NULL ROW IS SKIPPED AND SAID (attack (b) of the acceptance: a hand-edited held row made Deliver THROW and stuck the request 'approved')
 try {
@@ -1428,6 +1428,143 @@ try {
       J2s({ aside, notice: !!notice, req: req1 && { status: req1.status, todoId: req1.todoId, was: req0.todoId }, card: card && { status: card.status, text: card.text } }));
   } finally { m3.eng.stop(); m3.userTodos.stop(); }
 } catch (e) { ok(false, '⑦ (e) threw on this tree: ' + ((e && e.stack) || e)); }
+
+console.log('⑧ ROUND 10 (lane wake-approve-card) — a held decision ends only when its RULE is gone, never when it is merely not in effect; one walker over the held conversations');
+// THE HELD WORLD, generalized: `setup(eng)` writes the grains, `live` is the roster the engine reads (mutable — a conversation
+// stops / runs again), 30 hits aged 3 days ⇒ the next boot sets them aside for ONE decision; `lines` = the journal
+const SAID10 = (k, p) => String(k).replace(/\{(\w+)\}/g, (_, x) => (p && p[x] != null ? p[x] : ''));
+async function heldWorld10(name, { ENGM = ENG, live, setup }) {
+  const lines = [];
+  const m1 = mkEngine(name, { ENGM, live });
+  await m1.eng.pass(A, { force: true });
+  await setup(m1.eng);
+  const rec = m1.eng.adapterRecords().adapters.find((x) => x.id === A);
+  const recs0 = m1.eng.messages(A, C, { limit: 3 });
+  const base = (recs0.records || recs0).slice(-1)[0];
+  await m1.eng.onFresh(rec, C, Array.from({ length: 30 }, (_, i) => ({ ...base, id: `old10-${i}`, text: `old message ${i}` })), { origin: 'test' });
+  if (m1.eng.settleWakes) await m1.eng.settleWakes();
+  const t0 = m1.clock();
+  await m1.eng.store.index.update(() => { const e2 = m1.eng.store.index.entry(A, C, { create: false }); for (const x of e2.pending) x.at = t0 - 3 * 86400e3; });
+  m1.eng.stop(); await new Promise((r) => setTimeout(r, 10));
+  const m2 = mkEngine(name, { ENGM, live, lines });
+  m2.eng.start(); await new Promise((r) => setTimeout(r, 20));
+  if (m2.eng.settleWakes) await m2.eng.settleWakes();
+  const reqOf = () => (m2.eng.store.index.table('watchRequests') || []).find((r) => r && r.kind === 'held');
+  const rowsOf = (r) => ((r && r.held && r.held.convs) || []).reduce((n, c) => n + (c && Array.isArray(c.rows) ? c.rows.length : 0), 0);
+  const cardOf = (r) => { const it = r && r.todoId ? m2.userTodos.get(r.todoId) : null; return it ? { status: it.status, by: it.resolvedBy || null, words: it.status === 'open' ? it.text : FA.settledWords(it, SAID10) } : null; };
+  const state = () => { const r = reqOf(); return { request: r ? r.status : null, by: (r && r.decidedBy) || null, rows: rowsOf(r), card: cardOf(r) }; };
+  return { m2, eng: m2.eng, live, lines, reqOf, state };
+}
+const EVERY10 = { kind: 'everyone', id: '*' };
+const PRESS10 = (d) => ({ ok: !!(d && d.ok), code: (d && d.code) || null, why: (d && d.why) || null, agent: (d && d.agent) || null, n: d && d.n != null ? d.n : null, delivered: d ? d.delivered : null });
+// (a) ALL AGENTS on a rule (a digest), held at boot for the running agent-1; agent-1 STOPS (the owner closed it): the rule and
+// its All-agents notification stand — an unrelated write and agent-2's own next-turn watch leave the decision open, its rows
+// in the request; Deliver while it is stopped says so and keeps them; agent-1 runs again ⇒ Deliver delivers the 30
+async function fanStopLeg(ENGM, name) {
+  const live = [{ cid: 'agent-1', name: 'Worker', groups: [] }];
+  const w = await heldWorld10(name, { ENGM, live, setup: async (eng) => {
+    await eng.setGrain(A, { kind: 'account' }, { access: [acc(EVERY10), acc(OTHER)] });
+    await eng.setGrain(A, { kind: 'pattern' }, { pattern: { match: 'any', rules: [{ kind: 'title', value: 'Ops' }] }, access: [acc(OTHER)], watchers: [{ principal: EVERY10, delivery: 'wake', notify: 'digest', digestMinutes: 60, dailyWakeCap: 5 }] });
+  } });
+  try {
+    const req = w.reqOf();
+    const out = { pk: req && req.held.pk, held: w.state() };
+    live.length = 0; live.push({ cid: 'agent-2', name: 'Other', groups: [] });   // agent-1 stopped; agent-2 runs
+    await w.eng.setGrain(A, { kind: 'conversation', convId: C }, { watchers: [] });
+    out.afterWrite = w.state();
+    const aw = await w.eng.agentWatch({ kind: 'agent', id: 'agent-2', name: 'Other', groups: [], msgLevelFor: () => 'none' }, KEY, { delivery: 'next-turn', why: 'r10' });
+    out.watch = !!(aw && aw.ok); out.afterWatch = w.state();
+    out.press1 = PRESS10(await w.eng.decideRequest(req.id, true, 'user', { person: true }));
+    out.afterPress1 = w.state(); out.pending1 = (w.eng.store.index.peek(KEY).pending || []).length;
+    live.push({ cid: 'agent-1', name: 'Worker', groups: [] });   // agent-1 runs again
+    out.press2 = PRESS10(await w.eng.decideRequest(req.id, true, 'user', { person: true }));
+    out.afterPress2 = w.state(); out.woken = w.m2.delivered.length;
+    return out;
+  } finally { w.eng.stop(); }
+}
+// THE MUTANT «the prune reads in effect» (r9's line): pruneHeld judging by heldInEffect instead of the rule's existence
+function inEffectMutant() {
+  const src = engineSource(REPO);
+  const fixed = '      const rule = heldRuleOf(r);\n';
+  return { src, cut: src.split(fixed).length === 2 ? src.replace(fixed, "      const rule = heldInEffect(r) ? 'stands' : 'removed';\n") : src };
+}
+try {
+  const g = await fanStopLeg(ENG, 'e10-fan');
+  ok(g.pk === 'everyone:*>agent-1' && g.held.request === 'open' && g.held.rows === 30 && g.afterWrite.request === 'open' && g.afterWrite.rows === 30 && g.afterWrite.card && g.afterWrite.card.status === 'open' && g.watch && g.afterWatch.request === 'open' && g.afterWatch.rows === 30 && g.afterWatch.card.status === 'open',
+    `(a) an All-agents target that merely STOPPED keeps the owner's held decision: an unrelated write on the account, then agent-2's own next-turn watch ⇒ the request open, its 30 rows in the request, the card «${g.afterWatch.card && g.afterWatch.card.words}» (8b46c196: denied 'watch-removed' at the first write — «the rule they were held for was removed» while the rule stood)`, J2s(g));
+  ok(!g.press1.ok && g.press1.code === 'not-in-effect' && g.press1.why === 'not-running' && g.press1.agent === 'Worker' && g.press1.n === 30 && g.afterPress1.request === 'open' && g.afterPress1.rows === 30 && g.afterPress1.card.status === 'open' && g.pending1 === 0,
+    `(a) Deliver while its target is stopped says so and keeps them (409 ${g.press1.code} / ${g.press1.why}: «Worker is not running — the 30 messages stay held …»): the request open, 30 rows still in it, nothing released into a pending list the next prune would drop (8b46c196: released, «they go with its next delivery», the card «delivered»)`, J2s({ press1: g.press1, after: g.afterPress1, pending: g.pending1 }));
+  ok(g.press2.ok && g.press2.delivered === true && g.press2.n === 30 && g.afterPress2.request === 'approved' && g.afterPress2.card.by === 'delivered' && g.woken === 1,
+    `(a) the target runs again ⇒ Deliver delivers the 30 held messages in ONE turn (the rows were kept, never dropped)`, J2s({ press2: g.press2, after: g.afterPress2, woken: g.woken }));
+  const m = inEffectMutant();
+  const r = await fanStopLeg(MUT.load('src/server/channels-engine.js', m.cut, 'held-in-effect'), 'e10-fan-red');
+  ok(m.cut !== m.src && r.afterWrite.request === 'denied' && r.afterWrite.by === 'watch-removed' && r.afterWrite.rows === 0, `CONTROL «the prune reads in effect»: the same stop + write through a prune that asks «in effect now?» ⇒ ${r.afterWrite.request} ${r.afterWrite.by}, ${r.afterWrite.rows} rows left — the census names it`, J2s(r.afterWrite));
+} catch (e) { ok(false, '⑧ (a) threw on this tree: ' + ((e && e.stack) || e)); }
+// (b) A GROUP MEMBER'S VIA-ROW (the conversation's own watcher row, agent-1 as a member of Crew — the group holds the access):
+// the member stops ⇒ the rule stands, the decision stays open; then the GROUP'S ACCESS is revoked (the row stays stored,
+// INERT) ⇒ the decision ends, worded as what happened — the access, not «the rule was removed»
+async function memberLeg(ENGM, name) {
+  const live = [{ cid: 'agent-1', name: 'Worker', groups: ['g-x'] }, { cid: 'agent-2', name: 'Other', groups: [] }];
+  const w = await heldWorld10(name, { ENGM, live, setup: async (eng) => {
+    await eng.setGrain(A, { kind: 'account' }, { access: [acc(GRP9), acc(OTHER)] });
+    const c = await eng.setGrain(A, { kind: 'conversation', convId: C }, { watchers: [{ principal: AGENT, via: 'g-x', delivery: 'wake', notify: 'digest', digestMinutes: 60, dailyWakeCap: 5 }] });
+    if (!c.ok) throw new Error('setup: ' + J2s(c));
+  } });
+  try {
+    const req = w.reqOf();
+    const out = { pk: req && req.held.pk, via: req && req.held.via, held: w.state() };
+    live.splice(0, 1);   // agent-1 is not running (membership unknown)
+    await w.eng.setGrain(A, { kind: 'account' }, { access: [acc(GRP9), acc(OTHER), acc({ kind: 'agent', id: 'agent-3', name: 'Third' })] });
+    out.afterWrite = w.state();
+    out.press = PRESS10(await w.eng.decideRequest(req.id, true, 'user', { person: true }));
+    out.afterPress = w.state();
+    await w.eng.setGrain(A, { kind: 'account' }, { access: [acc(OTHER)] });   // the group's access revoked — the via-row stays stored, inert
+    const g = w.eng.grainReadAt(A, { kind: 'conversation', convId: C }) || {};
+    out.inert = (g.inert || []).map((x) => x.principal.id);
+    out.afterRevoke = w.state();
+    return out;
+  } finally { w.eng.stop(); }
+}
+try {
+  const g = await memberLeg(ENG, 'e10-member');
+  ok(g.pk === 'agent:agent-1' && g.via === 'conversation' && g.held.rows === 30 && g.afterWrite.request === 'open' && g.afterWrite.rows === 30 && g.afterWrite.card.status === 'open'
+    && !g.press.ok && g.press.code === 'not-in-effect' && g.press.why === 'not-running' && g.afterPress.request === 'open' && g.afterPress.rows === 30,
+    `(b) a group member's via-row while the member is not running: a write on the account leaves the decision open with its 30 rows; Deliver says «${g.press.agent} is not running» and keeps them (8b46c196: denied at the write)`, J2s({ afterWrite: g.afterWrite, press: g.press }));
+  ok(g.inert.includes('agent-1') && g.afterRevoke.request === 'denied' && g.afterRevoke.by === 'access-removed' && g.afterRevoke.rows === 0 && g.afterRevoke.card.by === 'discarded' && g.afterRevoke.card.words === 'the access they were held under was removed — 30 messages discarded',
+    `(b) the group's ACCESS revoked (the via-row stays stored, inert) — the rule is gone for it ⇒ the decision ends, worded as what happened: «${g.afterRevoke.card && g.afterRevoke.card.words}»`, J2s({ inert: g.inert, after: g.afterRevoke }));
+  const m = inEffectMutant();
+  const r = await memberLeg(MUT.load('src/server/channels-engine.js', m.cut, 'held-in-effect'), 'e10-member-red');
+  ok(m.cut !== m.src && r.afterWrite.request === 'denied' && r.afterWrite.rows === 0, `CONTROL «the prune reads in effect»: the member not running ⇒ ${r.afterWrite.request} ${r.afterWrite.by} at the unrelated write`, J2s(r.afterWrite));
+} catch (e) { ok(false, '⑧ (b) threw on this tree: ' + ((e && e.stack) || e)); }
+// (c) A NULL HELD CONVERSATION ENTRY (the acceptance's minor, rev-held-prune.mjs leg (2)): an account write, the agent's own
+// watch and Deliver walk it through THE one walker — no throw anywhere, said ONCE in the journal
+try {
+  const live = [{ cid: 'agent-1', name: 'Worker', groups: [] }, { cid: 'agent-2', name: 'Other', groups: [] }];
+  const w = await heldWorld10('e10-null', { live, setup: async (eng) => {
+    await eng.setGrain(A, { kind: 'account' }, { access: [acc(AGENT), acc(OTHER)] });
+    await eng.setGrain(A, { kind: 'conversation', convId: C }, { watchers: [{ principal: AGENT, delivery: 'wake', notify: 'digest', digestMinutes: 60, dailyWakeCap: 5 }] });
+  } });
+  try {
+    const req = w.reqOf();
+    await w.eng.store.index.update((ix) => { const r2 = ix.watchRequests.find((r) => r && r.id === req.id); r2.held.convs.unshift(null); });
+    const threw = [];
+    const tryIt = async (label, f) => { try { return await f(); } catch (e) { threw.push(`${label}: ${(e && e.message) || e}`); return null; } };
+    const wr = await tryIt('account write', () => w.eng.setGrain(A, { kind: 'account' }, { access: [acc(AGENT), acc(OTHER), acc({ kind: 'agent', id: 'agent-3', name: 'Third' })] }));
+    const aw = await tryIt('agent watch', () => w.eng.agentWatch({ kind: 'agent', id: 'agent-2', name: 'Other', groups: [], msgLevelFor: () => 'none' }, KEY, { delivery: 'next-turn', why: 'r10' }));
+    const d = await tryIt('Deliver', () => w.eng.decideRequest(req.id, true, 'user', { person: true }));
+    const said = w.lines.filter((l) => /held conversation entries unreadable/.test(l));
+    ok(!threw.length && wr && wr.ok && aw && aw.ok && d && d.ok && d.delivered === true && d.n === 30 && d.skipped === 1 && Array.isArray(d.request.held.convs) && d.request.held.convs.length === 1 && said.length === 1,
+      `(c) a NULL held conversation entry is skipped by THE one walker everywhere it is read — the account write, the agent's watch and Deliver answer (delivered 30, skipped ${d && d.skipped}); said ONCE in the journal («${(said[0] || '').slice(0, 110)}») (8b46c196: «Cannot read properties of null (reading 'key')» after each write was stored; Deliver «Cannot destructure property 'rows'» after it took effect)`, J2s({ threw, said: said.length, d: d && { ok: d.ok, n: d.n, skipped: d.skipped } }));
+  } finally { w.eng.stop(); }
+} catch (e) { ok(false, '⑧ (c) threw on this tree: ' + ((e && e.stack) || e)); }
+// (d) THE ONE WALKER, a census: channels-access.js reads `held.convs` only through heldConvsOf — every other mention is the
+// writer's (the request created with `convs: []`, holdAside's push) or releaseAside's count of what the walker skipped
+{
+  const lines10 = fs.readFileSync(path.join(REPO, 'src/server/channels-access.js'), 'utf8').split('\n');
+  const ALLOWED10 = [/const all = r2 && r2\.held && Array\.isArray\(r2\.held\.convs\) \? r2\.held\.convs : \[\];/, /const entries = \(Array\.isArray\(h\.convs\) \? h\.convs\.length : 0\) - convs\.length;/, /if \(!was\) r2\.held\.convs\.push\(/];
+  const walks = lines10.map((l, i) => ({ l, i: i + 1 })).filter(({ l }) => /\.convs\b/.test(l) && !/^\s*(\*|\/\/|\/\*\*)/.test(l) && !/\b(?:plan|p0)\.convs\b/.test(l) && !ALLOWED10.some((re) => re.test(l)));
+  ok(walks.length === 0 && ALLOWED10.every((re) => lines10.some((l) => re.test(l))), `(d) THE ONE WALKER: no line of channels-access.js reads a held request's conversations but heldConvsOf (the writer's push and the skipped count aside) — ${walks.length} other read(s) (8b46c196: 7 — heldCountOf, fileHeldCard, holdAside's find, releaseAside, Deliver's flush, the answer, heldWatched)`, J2s(walks.map((x) => `${x.i}: ${x.l.trim().slice(0, 100)}`)));
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

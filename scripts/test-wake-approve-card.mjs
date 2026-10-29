@@ -1441,5 +1441,48 @@ try {
     '(c) DEFECT 2: the page\'s access toast reads the write\'s own `wakes.reactivated` — «访问权限已保存：… — 这次重新启用了 2 个唤醒…» when it woke rows (the answer\'s words belted: test-channel-agent-watch ⑦ (a)), «…不会唤醒任何人» only when it woke none');
 } catch (e) { ok(false, '⑰ (c) threw on this tree: ' + ((e && e.stack) || e)); }
 
+console.log('⑱ ROUND 10 — a held decision ends only when its rule is gone: the route, the words and the page say which');
+try {
+  // (a) THE ROUTE: a Deliver the rule cannot take NOW (`not-in-effect` — its watcher not running / not woken by it) and one whose
+  // rule is GONE (`rule-gone` — ended, discarded) are 409s with their facts (who, how many, why), never a 500 the page cannot word
+  const pressHeld = async (mod, answer) => {
+    mod.setup({ getEngine: () => ({ decideRequest: async () => answer }) });
+    const app = express(); app.use(express.json()); app.use(mod.router);
+    const srv = http.createServer(app); await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    try {   // the whole answer (listen()'s send keeps code / error only)
+      const r = await fetch(`http://127.0.0.1:${srv.address().port}/api/channels/reach-requests/wr-held/approve`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Sec-Fetch-Site': 'same-origin' }, body: '{}' });
+      let j = {}; try { j = await r.json(); } catch { }
+      return { status: r.status, ...j };
+    } finally { await new Promise((r) => srv.close(r)); }
+  };
+  const NIE = { ok: false, code: 'not-in-effect', why: 'not-running', agent: 'Worker', n: 30, error: 'Worker is not running — the 30 messages stay held: Deliver once it runs, or Discard them' };
+  const GONE = { ok: false, code: 'rule-gone', why: 'access-removed', n: 30, error: 'the access they were held under was removed — 30 messages discarded, nothing was sent' };
+  const a1 = await pressHeld(routerFrom(REAL_SRC), NIE), a2 = await pressHeld(routerFrom(REAL_SRC), GONE);
+  ok(a1.status === 409 && a1.code === 'not-in-effect' && a1.why === 'not-running' && a1.agent === 'Worker' && a1.n === 30 && a2.status === 409 && a2.code === 'rule-gone' && a2.why === 'access-removed' && a2.n === 30,
+    '(a) the decide route: a held Deliver its rule cannot take now ⇒ 409 `not-in-effect` (who, how many, why); one whose rule is gone ⇒ 409 `rule-gone` — never a 500', J({ a1, a2 }));
+  const MAP10 = " || code === 'not-in-effect' || code === 'rule-gone'";
+  const red = REAL_SRC.split(MAP10).length === 2 ? await pressHeld(routerFrom(REAL_SRC.replace(MAP10, '')), NIE) : null;
+  ok(red && red.status === 500, 'RED CONTROL: answer3 without the two codes (8b46c196 had neither) — the same press ⇒ HTTP 500', red);
+} catch (e) { ok(false, '⑱ (a) threw on this tree: ' + ((e && e.stack) || e)); }
+try {
+  // (b) THE WORDS OF AN END: a held decision ended because its watcher's ACCESS was revoked (the row stands, inert) says so — the
+  // registry (the chat card) and the tray row are one sentence in en / zh / ja; the removed rule keeps r9's words
+  const ended = (why) => ({ id: 'ut-r10-' + why, sessionKey: 'channels', text: '30 messages for Worker held since …', status: 'done', kind: 'action', origin: 'channels', createdAt: Date.now() - 9e4, resolvedAt: Date.now() - 6e4, resolvedBy: 'discarded', resolvedFact: { n: 30, why }, action: { type: 'channel-held-digest', id: 'wr-r10' } });
+  const both = (it, t) => [FA.settledWords(it, t), ROW3.resolvedByText(it.resolvedBy, t, it)];
+  const seen = { en: both(ended('access-removed'), tt3), zh: both(ended('access-removed'), Z), ja: both(ended('access-removed'), JA), removed: both(ended('watch-removed'), tt3) };
+  ok(J(seen.en) === J(['the access they were held under was removed — 30 messages discarded', 'the access they were held under was removed — 30 messages discarded'])
+    && seen.zh[0] === seen.zh[1] && seen.zh[0] === '它们所依据的访问权限已撤销 — 已丢弃 30 条消息' && seen.ja[0] === seen.ja[1] && seen.ja[0] === '保留の根拠だったアクセス権が取り消されました — 30 件のメッセージを破棄しました'
+    && J(seen.removed) === J(['the rule they were held for was removed — 30 messages discarded', 'the rule they were held for was removed — 30 messages discarded']),
+    `(b) an end by a revoked access reads «${seen.en[0]}» / «${seen.zh[0]}» / «${seen.ja[0]}» on the card AND the tray row (8b46c196: «the rule … was removed» — the rule stood); a removed rule keeps «${seen.removed[0]}»`, J(seen));
+} catch (e) { ok(false, '⑱ (b) threw on this tree: ' + ((e && e.stack) || e)); }
+try {
+  // (c) THE PAGE: the press road (the chat card and the tray) toasts both refusals in the owner's language — who, how many, why
+  const UA = read('src/lib/user-todos-actions.js');
+  const KEYS10 = ['{agent} is not running — the {n} messages stay held: Deliver once it runs, or Discard them', '{agent} is not woken by this rule now (not in its group, or left out of it) — the {n} messages stay held: Deliver once it is, or Discard them', 'the access they were held under was removed — {n} messages discarded', 'the rule they were held for was removed — {n} messages discarded'];
+  const branch = /if \(held && r && r\.code === 'not-in-effect'\) \{ showToast\(r\.why === 'not-running' \? t\('\{agent\} is not running/.test(UA) && /if \(held && r && r\.code === 'rule-gone'\) \{ showToast\(r\.why === 'access-removed' \? t\('the access they were held under was removed/.test(UA);
+  const missing = KEYS10.filter((k) => !UA.includes(`t('${k}'`) || !(k in DICT8.zh) || !(k in JA9));
+  ok(branch && !missing.length, `(c) the press road toasts \`not-in-effect\` («${Z(KEYS10[0], { agent: 'Worker', n: 30 })}») and \`rule-gone\` in the owner's language — ${KEYS10.length} keys, each with zh + ja`, J({ branch, missing }));
+} catch (e) { ok(false, '⑱ (c) threw on this tree: ' + ((e && e.stack) || e)); }
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

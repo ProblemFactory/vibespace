@@ -670,6 +670,10 @@ question about another machine is the failure the rule exists to stop.
   hold the write. **r9:** the gate judges the rows the write will STORE (`accessVerdict` — setGrain's normaliser: a group's `target`
   dropped), and the 200's `wakes.reactivated` / `madeInert` rows carry only belted `words` (no raw `who` / `where`). A held decide
   answers `skipped: k` for rows that were not records; a removed watcher RESOLVES its held card (`discarded`, fact `{why: 'watch-removed', n}`).
+  **r10:** a held decision ends only when its RULE is gone — no stored row names the watcher (`watch-removed`) or the row stands inert,
+  its grant revoked (`access-removed`) — never because it is not in effect now (a stopped target, a member not running). A Deliver its
+  rule cannot take now answers **409 `not-in-effect`** `{why: 'not-running' | 'not-admitted', agent, n}` and keeps the rows (Discard
+  still drops them); one whose rule is gone answers **409 `rule-gone`** `{why, n}` and the decision is ended as above.
 
 - **P1a — the adapter's own consent flow and options** (design §10.1, §12.4,
   §13; every failure answers `{error, code, detail}` with a status BY CODE:
