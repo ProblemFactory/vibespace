@@ -67,7 +67,7 @@ export function useExtras(row, { app = null, refresh = () => {} } = {}) {
       const chips = el('div', `vw-ak-grants vw-use-chips${paused ? ' vw-use-paused' : ''}`);
       chips.append(el('span', 'vw-ak-to vw-use-to', t('Used with no card by:')));
       for (const m of live) {
-        const pausedM = !!m.paused;   // round 6 (MAJOR item 4): the owner's OFF paused THIS member; a per-conversation «Always» opened the switch but left it paused
+        const pausedM = !!m.paused;   // round 7 (MAJOR item 2): the entry is ON by another conversation's PRESS and THIS member was never resumed — the owner's pause stands (the ↻ un-pauses it). No date: the inverted model keeps no per-member pause time, so none can go stale.
         const chip = el('span', `vw-ak-chip vw-use-chip${m.expired ? ' vw-use-expired' : ''}${pausedM ? ' vw-use-chip-paused' : ''}`);
         chip.dataset.grant = m.id || '';
         chip.dataset.principal = m.principal || '';
@@ -75,7 +75,7 @@ export function useExtras(row, { app = null, refresh = () => {} } = {}) {
         if (m.uses) bits.push(t('used {n}×', { n: m.uses }));
         if (m.expired) bits.push(t('expired'));
         else if (m.until) bits.push(t('until {when}', { when: dateOf(m.until) }));
-        if (pausedM) bits.push(t('paused by you on {when}', { when: dateOf(m.paused) }));
+        if (pausedM) bits.push(t('paused by you'));
         chip.append(el('span', 'vw-use-words', bits.join(' · ')));
         chip.title = `${m.id || ''}${m.convs > 1 ? ' · ' + t('{n} conversations', { n: m.convs }) : ''}`;
         if (pausedM) {   // un-pause ONE member — a widening, so it asks for the second password (验证是你)

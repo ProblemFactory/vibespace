@@ -392,7 +392,7 @@ console.log('⑩ CONTROLS — patched copies, each RED on its leg');
 {
   const M = mutantCopies('vault-use-grants', REPO);
   const DSRC = fs.readFileSync(path.join(REPO, 'src/server/vault-run-door.js'), 'utf8');
-  const cut = "if (!verdict.ok && verdict.ask && !refused && spec.refs.length && spec.refs.every((r) => !!(d && d.runnable.has(r.id)) && (standing.get(r.id) || {}).ok === true && !(d.paused && d.paused[r.id] && d.paused[r.id][(standing.get(r.id) || {}).id]))) {";
+  const cut = "if (!verdict.ok && verdict.ask && !refused && spec.refs.length && spec.refs.every((r) => (standing.get(r.id) || {}).ok === true && memberUsable(d, r.id, (standing.get(r.id) || {}).id))) {";
   ok(DSRC.split(cut).length === 2, 'the short-circuit line is there once (the control below patches it)');
   const noShort = M.load('src/server/vault-run-door.js', DSRC.replace(cut, 'if (false) {'), 'noshort');
   const w1 = await world({ doorMod: noShort });

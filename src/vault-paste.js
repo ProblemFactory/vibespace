@@ -19,12 +19,13 @@
  *     POST body only, straight to the writer, and is never kept anywhere else).
  *   · THE RECEIPT — at the agent's next turn: what was stored, where, and for what — never the value; or that the owner
  *     refused it (the 拒绝 press, or the item leaving the tray by ✓ / ✕ without a paste), with how long not to ask again.
- *   · THE HOSTS AND THE 8-HOUR GRANT (lane vault-use-grants, the owner 2026-10-27 「每个密码请求都要我同意太麻烦了！」; round 6): a new
+ *   · THE HOSTS AND THE 8-HOUR GRANT (lane vault-use-grants, the owner 2026-10-27 「每个密码请求都要我同意太麻烦了！」; round 6/7): a new
  *     entry's request may name the hosts it is for (`--host 192.168.1.1,router.lan` — host names / addresses, ≤ 8, never a
  *     wildcard). With them, and the setting `vault.requestGrantsRequester` on (default), the card SAYS the conversation that
- *     asked may use it in commands to those hosts for 8 HOURS (a new kind of command still shows a card; a vault lock ends it;
- *     the entry's own switch is untouched), and the paste opens that run grant to the requesting conversation only; the receipt
- *     tells the agent. With the setting OFF the paste grants nothing — the receipt tells the agent to request the secret.
+ *     asked may use it in commands to those hosts for 8 HOURS — round 7 (MINOR): the grant is HOST-SCOPED, so a command TOWARD
+ *     those hosts runs with no card while a command to any OTHER host still draws it (a request that named no hosts draws a card
+ *     for every command); a vault lock ends it; the entry's own switch is untouched. The paste opens that run grant to the
+ *     requesting conversation only; the receipt tells the agent. With the setting OFF the paste grants nothing.
  */
 const IR = require('./integration-registry.js');
 const HC = require('./hidden-chars.js');
@@ -179,8 +180,8 @@ function cardOf({ who, words, purpose, target, replaces = false, grant = null })
     // a time limit, read again at the paste) is the owner's own act and nothing else flips it.
     ...(target.kind === 'entry' ? [grant
       ? (target.hosts && target.hosts.length
-        ? { key: i18nKey('It said it needs it for: {hosts}. If you paste it, the conversation that asked may use it in commands for 8 hours (a vault lock ends it; a new kind of command still shows you its card). To let it be used without that limit, turn on «Usable by agent runs» on its row in the Vault window.'), params: { hosts: target.hosts.join(', ') } }
-        : { key: i18nKey('If you paste it, the conversation that asked may use it in commands for 8 hours (a vault lock ends it; a new kind of command still shows you its card). To let it be used without that limit, turn on «Usable by agent runs» on its row in the Vault window.') })
+        ? { key: i18nKey('It said it needs it for: {hosts}. If you paste it, the conversation that asked may use it in commands to those hosts for 8 hours — a command to any other host still shows you its card; a vault lock ends it. To let it be used without that limit, turn on «Usable by agent runs» on its row in the Vault window.'), params: { hosts: target.hosts.join(', ') } }
+        : { key: i18nKey('If you paste it, the conversation that asked may use it, but every command still shows you its card (it named no hosts); a vault lock ends it. To let it be used without a card, turn on «Usable by agent runs» on its row in the Vault window.') })
       : { key: i18nKey('The conversation that asked is not allowed to use it in runs until you turn on «Usable by agent runs» on its row in the Vault window.') }] : []),
     { key: i18nKey('Paste it below and press Save to vault — it goes straight into the vault. The agent is told only that it is stored and where, never the value.') },
   ];
@@ -210,9 +211,14 @@ function receiptText(o = {}) {
   if (o.outcome === 'stored') {
     const rc = o.receipt ? ` Receipt ${piece(o.receipt, 32)}.` : '';
     if (t.kind === 'field') return `${head}: STORED — «${piece(o.words)}» is saved in ${piece(intoOf(t), 200)} (${piece(t.rowLabel, 80)} › ${piece(t.fieldLabel, 80)}) for: ${piece(o.purpose)}. VibeSpace uses it there itself; you never see the value — never ask for it in the chat.${rc}`;
-    // lane vault-use-grants round 6: the paste opens ONLY an 8-hour run grant (grantHours) to the requesting conversation — the
-    // r4 standing host-scoped member is gone; OFF ⇒ no grant, the receipt tells the agent to `request` it. (A vault lock ends it.)
-    const use = o.grantHours ? `This conversation may use it in a command for ${Number(o.grantHours)} hours (a vault lock ends it, so a hub restart does too; a new kind of command still shows the user its card): vibespace-vault run --env NAME=${piece(o.ref, 120)} -- <command>.` : `To use it in a command, ask for it: vibespace-vault request ${piece(o.ref, 120)} --for "<what you will run>".`;
+    // lane vault-use-grants round 7 (MINOR): the paste opens an 8-hour run grant (grantHours) to the requesting conversation,
+    // HOST-SCOPED to the hosts it named — a command toward them runs with no card; a command elsewhere (or a request that named
+    // no hosts) still draws the user's card. OFF ⇒ no grant, the receipt tells the agent to `request` it. (A vault lock ends it.)
+    const use = o.grantHours
+      ? (t.hosts && t.hosts.length
+        ? `This conversation may use it in a command toward ${piece(t.hosts.join(', '), 120)} for ${Number(o.grantHours)} hours (a vault lock ends it, so a hub restart does too; a command to another host still shows the user its card): vibespace-vault run --env NAME=${piece(o.ref, 120)} -- <command>.`
+        : `This conversation may use it in a command for ${Number(o.grantHours)} hours, but each command still shows the user its card (the request named no hosts): vibespace-vault run --env NAME=${piece(o.ref, 120)} -- <command>.`)
+      : `To use it in a command, ask for it: vibespace-vault request ${piece(o.ref, 120)} --for "<what you will run>".`;
     return `${head}: STORED — «${piece(t.label, 80)}» (${KIND_WORDS[t.entryKind] || 'Secret'}) is the vault entry ${piece(o.ref, 120)} for: ${piece(o.purpose)}. You never see the value. ${use}${rc}`;
   }
   if (o.outcome === 'withdrawn') return `${head}: WITHDRAWN — the user locked the vault, which ends every open request («${piece(o.words)}»). Nothing was stored. Ask again once the vault is unlocked (vibespace-vault status says so) — do not ask the user to unlock it.`;

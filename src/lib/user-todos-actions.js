@@ -18,6 +18,7 @@
 // `inboxModel(app)` is memoized on the app: the first caller (the panel's
 // install at boot) builds it, the window asks for the same one.
 import { t, resolveLang } from './i18n.js';
+import { ROW_OF as FORYOU_ROW_OF } from '../foryou-actions.js';   // lane vault-use-grants round 7: the For-you action registry — which items declare `localizeDetail` (a registry read, never a type-literal branch — §78)
 import { fetchJson, showToast } from './utils.js';
 import { replyButtonState, liveDotState, LIVE_DOT_WHY, restoreDetails, badgeWords } from './user-todos-layout.js'; // PURE: the reply verdict + the running dot (design-user-inbox-reply D1.5/D1.7); restoreDetails = the whole detail this client already saw survives a snapshot that previews it
 import { showInstallDialog, launchDpr, launchUiScale } from './desktop-app-launcher.js';
@@ -80,8 +81,14 @@ export function inboxModel(app) {
   const said = (l) => t(l.key, Object.fromEntries(Object.entries(l.params || {}).map(([k, v]) => [k, v && typeof v === 'object' && typeof v.key === 'string' ? t(v.key) : v])));
   const wordsOf = (i) => (isCleared(i) ? clearedText() : i && i.card && i.card.kind === 'api-call' && i.card.head ? titleWords(i.card.head, { t, lang: resolveLang() }) : i && i.i18n && i.i18n.text ? said(i.i18n.text) : (i && i.text) || '');
   /** The detail as LINES (the Vault window's band: its first line is a use failure's cause, the rest sit under one fold). */
-  const detailLinesOf = (i) => (isCleared(i) ? [] : i && i.i18n && Array.isArray(i.i18n.detail) && i.i18n.detail.length ? i.i18n.detail.map(said) : String((i && i.detail) || '').split('\n').filter(Boolean).map((l) => t(l)));   // lane vault-use-grants round 6 (MINOR item 3): a plain-detail line is run through t() — a FIXED line that carries a dict entry (the vault «Always» switch line, zh + ja) shows in the owner's language; a dynamic line (a command, a host) has no entry and falls back to itself
-  const detailOf = (i) => (isCleared(i) ? '' : i && i.i18n && Array.isArray(i.i18n.detail) && i.i18n.detail.length ? detailLinesOf(i).join('\n') : String((i && i.detail) || '').split('\n').map((l) => (l ? t(l) : l)).join('\n'));
+  // lane vault-use-grants round 7: a plain-detail line is run through t() ONLY for an item whose registry row DECLARES
+  // `localizeDetail` (the vault RUN card) — so its one FIXED line (the «Always» switch line, zh + ja) shows in the owner's
+  // language. Every OTHER item's plain detail passes through UNtouched: r6 ran t() over every item's every line, which
+  // translated bare words like "Yes"/"Cancel" and (before t() was hardened) rendered "constructor" as the Object constructor.
+  // The gate is a REGISTRY read (ROW_OF keyed by the action type), not a type-literal branch (§78's id-branch ratchet).
+  const tLine = (i, l) => (l && i && i.action && FORYOU_ROW_OF[i.action.type] && FORYOU_ROW_OF[i.action.type].localizeDetail ? t(l) : l);
+  const detailLinesOf = (i) => (isCleared(i) ? [] : i && i.i18n && Array.isArray(i.i18n.detail) && i.i18n.detail.length ? i.i18n.detail.map(said) : String((i && i.detail) || '').split('\n').filter(Boolean).map((l) => tLine(i, l)));
+  const detailOf = (i) => (isCleared(i) ? '' : i && i.i18n && Array.isArray(i.i18n.detail) && i.i18n.detail.length ? detailLinesOf(i).join('\n') : String((i && i.detail) || '').split('\n').map((l) => tLine(i, l)).join('\n'));
   const nameFor = (key, items) => {
     const s = sessionFor(key);
     const spoken = items.find((i) => i.i18n && i.i18n.source && i.i18n.source.key);

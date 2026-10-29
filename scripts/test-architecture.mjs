@@ -24,7 +24,7 @@ import { GIT_REDIRECTORS, gitEnvFrom } from './git-env.mjs';
 import { trackedFiles } from './tracked-files.mjs';   // lane grants-unify: §97 (b) lists src via git ls-files
 import * as acorn from 'acorn';   // lane grants-unify (verify F3): §97 (a) judges each reader's function body, not its lines
 import { engineSource, FAMILIES as ENGINE_FAMILIES } from './channels-engine-src.mjs';
-import { BEFORE_REF as BEFORE82, beforeBlocks, beforeText, census as censusMoved, judge as judgeMoved, region as regionMoved } from './claude-md-retire.mjs';   // lane claude-md-retire: §82's census, shared with the retire verb   // lane dc-channels-seams: the engine + its three family files as one text
+import { BEFORE_REF as BEFORE82, beforeBlocks, beforeText, census as censusMoved, judge as judgeMoved, region as regionMoved, regionAt as regionAt82 } from './claude-md-retire.mjs';   // lane claude-md-retire: §82's census, shared with the retire verb   // lane dc-channels-seams: the engine + its three family files as one text
 
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
@@ -4602,6 +4602,18 @@ console.log('§82 CLAUDE.md is an index of ≤ 100 000 bytes; the moved per-file
     ok(j.ok, `§82 ④ ${j.line}${j.said.map((x) => '\n       ' + x).join('')}`);
     const off = (b.heads || []).flatMap((t, i) => (h82(t) === String(b.rows[i]).split(':')[0] && [...t].length <= fx82.keyChars ? [] : [i + 1]));
     ok(Array.isArray(b.retired) && Array.isArray(b.heads) && b.heads.length === b.rows.length && off.length === 0, `§82 ⑤ ${b.name}: ${(b.heads || []).length} clear heads align with its ${b.rows.length} rows (each hashes to its row's head) · ${(b.retired || []).length} retired${off.length ? ' — OFF at rows ' + off.slice(0, 10).join(' ') : ''}`);
+    // lane vault-use-grants round 7 (MINOR item 4): a dated INDEX-shaped line lives ONLY inside this `## INDEX` region — a
+    // planted/stranded one in the essays (after the region's end) is RED by name. r6's hole: §82 ③/④ read only lines INSIDE
+    // the region, so the five stranded lane lines below the first essay kept every assert green. INDEX-SHAPED = a dated bullet
+    // ENDING in the `⇒ kb-bugfix-invariants` pointer (the CLAUDE.md size law: every index entry ends in a `⇒ kb-…` pointer) —
+    // this is what separates a stranded index line from a legit essay cross-reference bullet (which cites `(kb-bugfix-invariants)`
+    // in parentheses, prose). Judged by line INDEX (via regionAt), so a planted DUPLICATE of a real line is caught too.
+    if (b.name === 'bugfix-index') {
+      const r = regionAt82(text, b.region), all = text.split('\n'), INDEX_LINE = /^- \(20\d\d-\d\d-\d\d\).*⇒ kb-bugfix-invariants(\.md)?\s*$/;
+      const inRegion = r ? new Set(r.idx) : new Set();
+      const stray = all.map((l, i) => [l, i]).filter(([l, i]) => INDEX_LINE.test(l) && !inRegion.has(i));
+      ok(!!r && stray.length === 0, `§82 ⑥ every dated INDEX line (ending in the ⇒ kb-bugfix-invariants pointer) in ${b.home} is inside the "${b.region}" region — none stranded in the essays${stray.length ? ' — OUTSIDE at lines ' + stray.map(([, i]) => i + 1).join(',') : ''}`, { stray: stray.length });
+    }
   }
   // CONTROLS: a home missing one moved line, a line's head reworded, a tail edit (quiet: edited, not lost), a new 301-char
   // index line, a dangling pointer, a CLAUDE.md one byte over the ratchet
@@ -4622,6 +4634,10 @@ console.log('§82 CLAUDE.md is an index of ≤ 100 000 bytes; the moved per-file
     ['a new 301-character index line', over300(bug, [...bl, '- ' + 'x'.repeat(299)]).length === 1, true],
     ['a dangling pointer', pointers82(md + '\nnew line ⇒ kb-nope.md\n').some((k) => !fs.existsSync(path.join(REPO, 'docs', k + '.md'))), true],
     ['one byte over the ratchet', Buffer.byteLength(md + 'x'.repeat(CLAUDE_MD_MAX_BYTES - bytes + 1)) > CLAUDE_MD_MAX_BYTES, true],
+    // round 7 (MINOR item 4): a dated INDEX line (ending in the ⇒ pointer) planted in the essays (after the region) is detected
+    // by §82 ⑥; a legit essay cross-reference bullet (parens, not the ⇒ pointer) is NOT — both plants checked.
+    ['an INDEX line planted after the region is caught', (() => { const bt = homes.get('bugfix-index').text + '\n- (2026-10-29) a planted stranded index line ⇒ kb-bugfix-invariants\n'; const rr = regionAt82(bt, '## INDEX'); const inR = rr ? new Set(rr.idx) : new Set(); const RE = /^- \(20\d\d-\d\d-\d\d\).*⇒ kb-bugfix-invariants(\.md)?\s*$/; return bt.split('\n').some((l, i) => RE.test(l) && !inR.has(i)); })(), true],
+    ['an essay cross-reference bullet (parens, not ⇒) is NOT caught', (() => { const bt = homes.get('bugfix-index').text + '\n- (2026-10-29) a legit essay cross-reference (kb-bugfix-invariants)\n'; const rr = regionAt82(bt, '## INDEX'); const inR = rr ? new Set(rr.idx) : new Set(); const RE = /^- \(20\d\d-\d\d-\d\d\).*⇒ kb-bugfix-invariants(\.md)?\s*$/; return bt.split('\n').some((l, i) => RE.test(l) && !inR.has(i)); })(), false],
   ];
   ok(mid > 0 && r82.every(([, got, want]) => got === want), `§82 CONTROLS: ${r82.map(([n, got, want]) => `${n} (${got === want ? (want ? 'RED' : 'quiet') : 'WRONG'})`).join(', ')}`);
 }

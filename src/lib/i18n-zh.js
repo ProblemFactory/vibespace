@@ -11058,7 +11058,8 @@ export default {
   "Used with no card by:": "无需卡片即可使用：", // lane vault-use-grants
   "used {n}×": "已用 {n} 次", // lane vault-use-grants
   "Paused while the entry is off — turn «Usable by agent runs» on to restore these.": "该条目已关闭，授权暂停——打开「可供 agent 运行使用」即可恢复。", // lane vault-use-grants
-  "paused by you on {when}": "你于 {when} 暂停", // lane vault-use-grants (round 6)
+  "paused by you": "你暂停了它", // lane vault-use-grants (round 7)
+  "closed when the vault locked — run it again after the unlock": "保险库锁定时已关闭——解锁后重新运行", // lane vault-use-grants (round 7)
   "Unverified until you unlock the vault — not in use until then.": "在你解锁保险库之前无法验证——在此之前不生效。", // lane vault-use-grants (round 6)
   "Un-pause this — let it be used again": "取消暂停——让它重新可用", // lane vault-use-grants (round 6)
   "every {host} host": "{host} 下的每个主机", // lane vault-use-grants (round 3)
@@ -11098,7 +11099,7 @@ export default {
   "A standing approval: this conversation runs commands with these secrets for these hosts without asking for 30 days — the Vault window lists it and takes it back; asks for the second password first": "长期授权：这个对话 30 天内对这些主机使用这些秘密运行命令无需再问——保险库窗口列出它，也可收回；先要输入第二密码", // lane vault-use-grants
   "For: {hosts} — the conversation that asked is not allowed to use it until you allow it on its row in the Vault window («Who may use it…»).": "用于：{hosts}——在你于保险库窗口该行（「谁可以用…」）允许之前，发起请求的对话不能使用它。", // lane vault-use-grants
   "A pasted secret may be used by the conversation that asked for it": "你粘贴的秘密可由请求它的对话使用", // lane vault-use-grants
-  "When an agent asks you to paste a secret and names the hosts it is for, the conversation that asked may use it in commands to those hosts for 8 hours — a new kind of command still shows you its card first, and locking the vault ends it. The entry's own «Usable by agent runs» switch is untouched. OFF: a paste grants nothing — the agent's receipt tells it to request the secret, and you open the entry in the Vault window.": "当 agent 请你粘贴一个秘密并写明用于哪些主机时，发起请求的对话可以在接下来 8 小时内用它向这些主机发命令——每种新命令仍会先给你看卡片，锁定保险库即结束。条目自己的「可供 agent 运行使用」开关不受影响。关闭：粘贴不授予任何权限——agent 的回执会让它去请求该秘密，由你在保险库窗口打开此条目。", // lane vault-use-grants
+  "When an agent asks you to paste a secret and names the hosts it is for, the conversation that asked may use it in commands to those hosts for 8 hours — they are not asked again. A command to any other host still shows you its card, and a request that named no hosts shows a card for every command. Locking the vault ends the grant, and the entry's own «Usable by agent runs» switch is untouched. OFF: a paste grants nothing — the agent's receipt tells it to request the secret, and you open the entry in the Vault window.": "当 agent 请你粘贴一个秘密并写明用于哪些主机时，发起请求的对话可以在接下来 8 小时内用它向这些主机发命令——不再逐次询问。向其他任何主机的命令仍会给你看卡片；若请求未写明主机，则每条命令都给你看卡片。锁定保险库即结束授权，条目自己的「可供 agent 运行使用」开关不受影响。关闭：粘贴不授予任何权限——agent 的回执会让它去请求该秘密，由你在保险库窗口打开此条目。", // lane vault-use-grants
   "Policy for the judge: «{text}»": "裁决策略：「{text}」", // lane vault-use-grants
   "Policy for the judge: «{text}» — the judge is off (Settings ▸ Integration)": "裁决策略：「{text}」——策略裁决已关闭（设置 ▸ 集成）", // lane vault-use-grants
   "Approved by the policy judge {n}× · last {time}": "策略裁决已批准 {n} 次 · 最近 {time}", // lane vault-use-grants
@@ -11121,7 +11122,7 @@ export default {
   "A stored value’s sharing could not be trusted — a grant was dropped and paused": "某个存储值的共享无法被信任——一条授权已被丢弃并暂停",
   "data/grants.json: a sharing grant for {resource} did not match the vault’s mark (a forged, widened or replayed row) and was dropped. Set who may use it again in the Vault window. No value was given out.": "data/grants.json：{resource} 的一条共享授权与保险库的标记不符（被伪造、被放宽或被重放的记录），已被丢弃。请在保险库窗口里重新设置谁可以用它。没有任何值被交出。",
   "A wildcard host (like *.example.com) is scoped to the tool that first used it — add it from a run card with «Always», not here": "通配主机（例如 *.example.com）只限第一次用它的那个工具——请在运行卡片里用「总是允许」添加，而不是在这里",
-  "It said it needs it for: {hosts}. If you paste it, the conversation that asked may use it in commands for 8 hours (a vault lock ends it; a new kind of command still shows you its card). To let it be used without that limit, turn on «Usable by agent runs» on its row in the Vault window.": "它说需要用于：{hosts}。如果你粘贴，发起请求的对话可以在命令中使用它 8 小时（锁定保险库即结束；新形态的命令仍会给你看卡片）。要不受时间限制地使用，请在保险库窗口里该条目的行上打开「可供 agent 运行使用」。",
-  "If you paste it, the conversation that asked may use it in commands for 8 hours (a vault lock ends it; a new kind of command still shows you its card). To let it be used without that limit, turn on «Usable by agent runs» on its row in the Vault window.": "如果你粘贴，发起请求的对话可以在命令中使用它 8 小时（锁定保险库即结束；新形态的命令仍会给你看卡片）。要不受时间限制地使用，请在保险库窗口里该条目的行上打开「可供 agent 运行使用」。",
+  "It said it needs it for: {hosts}. If you paste it, the conversation that asked may use it in commands to those hosts for 8 hours — a command to any other host still shows you its card; a vault lock ends it. To let it be used without that limit, turn on «Usable by agent runs» on its row in the Vault window.": "它说需要用于：{hosts}。如果你粘贴，发起请求的对话可以在接下来 8 小时内用它向这些主机发命令——向其他任何主机的命令仍会给你看卡片；锁定保险库即结束。要不受时间限制地使用，请在保险库窗口里该条目的行上打开「可供 agent 运行使用」。",
+  "If you paste it, the conversation that asked may use it, but every command still shows you its card (it named no hosts); a vault lock ends it. To let it be used without a card, turn on «Usable by agent runs» on its row in the Vault window.": "如果你粘贴，发起请求的对话可以使用它，但每条命令仍会给你看卡片（它未写明主机）；锁定保险库即结束。要无需卡片地使用，请在保险库窗口里该条目的行上打开「可供 agent 运行使用」。",
   "The conversation that asked is not allowed to use it in runs until you turn on «Usable by agent runs» on its row in the Vault window.": "发起请求的对话在你于保险库窗口里该条目的行上打开「可供 agent 运行使用」之前，不能在运行里使用它。"
 };

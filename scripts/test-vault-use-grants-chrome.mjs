@@ -158,7 +158,7 @@ try {
   const reqId = a1b.id;
   const todo = async () => (await A.api('GET', '/api/user-todos')).json.todos;
   const item = ((await todo()).open || []).find((i) => i.action && i.action.requestId === reqId);
-  check('THE REQUEST BOX SAYS THE 8-HOUR GRANT before the paste (r5 item 2 — a paste opens no switch): «It said it needs it for: 192.168.1.1. If you paste it, the conversation that asked may use it in commands for 8 hours … turn on «Usable by agent runs» …»', !!item && /It said it needs it for: 192\.168\.1\.1\. If you paste it, the conversation that asked may use it in commands for 8 hours/.test(item.detail) && /turn on «Usable by agent runs»/.test(item.detail), item && item.detail);
+  check('THE REQUEST BOX SAYS THE HOST-SCOPED 8-HOUR GRANT before the paste (round 7 — a paste opens no switch): «It said it needs it for: 192.168.1.1. If you paste it, the conversation that asked may use it in commands to those hosts for 8 hours — a command to any other host still shows you its card … turn on «Usable by agent runs» …»', !!item && /It said it needs it for: 192\.168\.1\.1\. If you paste it, the conversation that asked may use it in commands to those hosts for 8 hours/.test(item.detail) && /a command to any other host still shows you its card/.test(item.detail) && /turn on «Usable by agent runs»/.test(item.detail), item && item.detail);
   // THE STORING PAGE: a second page of the same sign-in answers the request through the request route
   const tB = await (await fetch(`http://127.0.0.1:${CDP_PORT}/json/new?about:blank`, { method: 'PUT' })).json();
   const B = await pageOf(tB);
@@ -177,12 +177,16 @@ try {
   check('its origin: «Filled by you · asked for by Home network»; its meta names the host', !!prov && prov.prov === 'request' && prov.chip === 'Filled by you · asked for by Home network' && /for 192\.168\.1\.1/.test(prov.meta), prov);
   await A.shot('vug-2-search-after.png');
 
-  console.log('③ THE 8-HOUR PASTE GRANT + «Always» (r5 item 2/3) — the first run draws a card; «Always» (验证是你) writes the standing member and opens «Usable by agent runs»');
+  console.log('③ THE HOST-SCOPED 8-HOUR PASTE GRANT (round 7) — a run to the host the request NAMED runs with NO card; a run to ANOTHER host draws the card, where «Always» (验证是你) writes the standing member and opens «Usable by agent runs»');
   const cards = async () => ((await todo()).open || []).filter((i) => i.action && i.action.type === 'vault-run-ask');
-  const runP = cli('vibespace-vault', ['run', '--env', `T=${REF}`, '--', 'curl', '-sk', 'https://192.168.1.1/api/auth/login'], TOKEN, { timeout: 70000 });
+  // (a) IN SCOPE — a run to 192.168.1.1 (the pasted --host) is admitted with NO card (the owner's 「每个密码请求都要我同意太麻烦了！」)
+  const inScope = await cli('vibespace-vault', ['run', '--env', `T=${REF}`, '--', 'curl', '-sk', 'https://192.168.1.1/api/auth/login'], TOKEN, { timeout: 70000 });
+  check('IN SCOPE: a run to 192.168.1.1 (the pasted --host) runs by:grant with NO card (the host-scoped 8h grant), its output scrubbed', inScope.code === 0 && /^curl got \[vault:secrets\//m.test(inScope.out) && !inScope.out.includes(VALUE) && (await cards()).length === 0, { out: inScope.out.slice(0, 160), openCards: (await cards()).length });
+  // (b) OUT OF SCOPE — a run to 10.0.0.9 (NOT named) draws a card that offers «Always»
+  const runP = cli('vibespace-vault', ['run', '--env', `T=${REF}`, '--', 'curl', '-sk', 'https://10.0.0.9/collect'], TOKEN, { timeout: 70000 });
   let runCard = null;
   for (let i = 0; i < 60 && !runCard; i++) { runCard = (await cards())[0] || null; if (!runCard) await sleep(200); }
-  check('the first run draws a card that offers «Always» (the 8-hour paste grant opened the entry; a new command shape still asks)', !!runCard && runCard.action.always === true && /also turns on «Usable by agent runs»/.test(runCard.detail), runCard && runCard.detail);
+  check('OUT OF SCOPE: a run to 10.0.0.9 draws a card that offers «Always» (the paste grant does not cover it)', !!runCard && runCard.action.always === true && /also turns on «Usable by agent runs»/.test(runCard.detail), runCard && runCard.detail);
   // ANSWER «Always» through the reveal window (验证是你) — open the page secret, then POST with X-Vault-Page. The reliable
   // path: a run card's button carries a press-guard (lane attention-policy-ui-red) a synthetic click cannot satisfy; the
   // picker's reveal (⑤) proves the reveal mechanism itself.
@@ -191,15 +195,22 @@ try {
   const ans = await A.evalJs(`fetch('/api/vault/run/asks/${runCard.action.askId}', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Vault-Page': ${JSON.stringify(rs.json.page || '')} }, body: JSON.stringify({ answer: 'always', ttl: '30d' }) }).then(async (r) => ({ status: r.status, json: await r.json().catch(() => ({})) }))`);
   check('«Always» (with 验证是你) ⇒ ok, by:always — the standing member is written and «Usable by agent runs» opened in the same act', ans.status === 200 && ans.json.ok && ans.json.outcome === 'always', ans.json);
   const r1 = await runP;
-  check('`vibespace-vault run … curl https://192.168.1.1/…` ⇒ ran by:always, its output scrubbed', r1.code === 0 && /^curl got \[vault:secrets\//m.test(r1.out) && !r1.out.includes(VALUE), r1.out);
+  check('`vibespace-vault run … curl https://10.0.0.9/…` ⇒ ran by:always, its output scrubbed', r1.code === 0 && /^curl got \[vault:secrets\//m.test(r1.out) && !r1.out.includes(VALUE), r1.out);
   const chip = await A.until(`(() => { const r = ${LIST_ROW(LABEL)}; const c = r && [...r.querySelectorAll('.vw-use-chip')].find((x) => /^Home network/.test(x.textContent)); return c ? c.textContent : null; })()`, { timeout: 8000 });
-  check('the row\'s chip arrives: «Home network · 192.168.1.1 · until …» (the 30-day «Always») (+ ✕)', /^Home network · 192\.168\.1\.1 · (used \d+×|until .+)✕$/.test(String(chip)), chip);
+  check('the row\'s chip arrives: «Home network · 10.0.0.9 · until …» (the 30-day «Always») (+ ✕)', /^Home network · 10\.0\.0\.9 · (used \d+×|until .+)✕$/.test(String(chip)), chip);
+  // round 7 (MINOR): the ↻ un-pause is a LIVE control inside a greyed paused chip — the CSS dims only .vw-use-words, so the
+  // ↻ renders at full opacity (a greyed control is the one the owner banned). Inject the real class structure and read the
+  // COMPUTED opacity of each: the ↻ must be 1 while the words are 0.55 (the dimming is on a sibling, not an ancestor).
+  const rotOpacity = await A.evalJs(`(() => { const host = document.querySelector('.vw-list') || document.body; const chip = document.createElement('span'); chip.className = 'vw-ak-chip vw-use-chip vw-use-chip-paused'; const w = document.createElement('span'); w.className = 'vw-use-words'; w.textContent = 'Conv A · 192.168.1.1 · paused by you'; chip.appendChild(w); const rot = document.createElement('button'); rot.className = 'vw-ak-x vw-use-resume'; rot.textContent = '↻'; chip.appendChild(rot); host.appendChild(chip); const out = { resume: getComputedStyle(rot).opacity, words: getComputedStyle(w).opacity }; chip.id = 'vw-rot-probe'; return out; })()`);
+  check('the ↻ un-pause is full-opacity (1) inside a paused chip whose WORDS are dimmed (0.55) — not a greyed control', rotOpacity.resume === '1' && rotOpacity.words === '0.55', rotOpacity);
+  await A.shot('vug-7-resume-opacity.png');
+  await A.evalJs(`document.getElementById('vw-rot-probe')?.remove(); true`);
 
-  console.log('④ THE CARD THAT NAMES THE GRANT — another host');
-  const pend = cli('vibespace-vault', ['run', '--env', `T=${REF}`, '--', 'curl', 'https://10.0.0.9/collect'], TOKEN, { timeout: 70000 });
+  console.log('④ THE CARD THAT NAMES THE GRANT — a third host, outside the standing member (10.0.0.9)');
+  const pend = cli('vibespace-vault', ['run', '--env', `T=${REF}`, '--', 'curl', 'https://172.16.0.5/collect'], TOKEN, { timeout: 70000 });
   let card = null;
   for (let i = 0; i < 60 && !card; i++) { card = (await cards())[0] || null; if (!card) await sleep(200); }
-  check('a run to 10.0.0.9 files its card, naming the standing approval and what is outside it', !!card && /A standing approval exists for this conversation \(vg-[0-9a-f]{8}: 192\.168\.1\.1\) — this run is outside it: 10\.0\.0\.9\./.test(card.detail) && /«Always» widens it to 10\.0\.0\.9/.test(card.detail), card && card.detail);
+  check('a run to 172.16.0.5 files its card, naming the standing approval (10.0.0.9) and what is outside it', !!card && /A standing approval exists for this conversation \(vg-[0-9a-f]{8}: 10\.0\.0\.9\) — this run is outside it: 172\.16\.0\.5\./.test(card.detail) && /«Always» widens it to 172\.16\.0\.5/.test(card.detail), card && card.detail);
   if (card) {
     await A.realClick('#taskbar-user-todos');
     await A.until(visible('#user-todos-popup .ut-item'), { timeout: 8000 });

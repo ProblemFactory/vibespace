@@ -22,13 +22,14 @@
  *     dropped — never on the item, the audit, a log line, a broadcast, an answer or the receipt.
  *   · THE USE LAW: a stored paste is a `vault-use` of its entry for the conversation that asked (door `paste`, its purpose,
  *     a receipt) — `vibespace-vault uses` reads it back; the agent's receipt names the same receipt.
- *   · THE 8-HOUR GRANT (lane vault-use-grants round 6): a new entry's request that names its hosts (`--host`) — and the setting
+ *   · THE 8-HOUR GRANT (lane vault-use-grants round 6/7): a new entry's request that names its hosts (`--host`) — and the setting
  *     `vault.requestGrantsRequester` on (default) — says on its card that the conversation that asked may use it in commands to
- *     those hosts for 8 HOURS; the paste opens that run grant (the run door's grantPasted) to the REQUESTING conversation ONLY —
- *     a new kind of command still shows its card, a vault lock ends it, and the entry's own «Usable by agent runs» switch is
- *     untouched — and records the hosts and who asked (the Vault window's «filled by you · asked for by …» origin). The setting
- *     is read again at the paste: switched OFF meanwhile ⇒ NOTHING is granted — the receipt tells the agent to request the
- *     secret and the owner opens the entry in the Vault window.
+ *     those hosts for 8 HOURS; the paste opens that run grant (the run door's grantPasted, which is HANDED the hosts — round 7)
+ *     to the REQUESTING conversation ONLY. HOST-SCOPED: a command TOWARD those hosts runs with no card; a command to any other
+ *     host (or a request that named no hosts) still draws the card; a vault lock ends it; the entry's own «Usable by agent runs»
+ *     switch is untouched — and the entry records the hosts and who asked (the Vault window's «filled by you · asked for by …»
+ *     origin). The setting is read again at the paste: switched OFF meanwhile ⇒ NOTHING is granted — the receipt tells the agent
+ *     to request the secret and the owner opens the entry in the Vault window.
  *   · BOUNDS: 4 open requests per conversation and 64 on the hub (then too_many_requests); the same conversation × place
  *     while one is open ⇒ its id again (already: 'open'); after a refusal the same place is quiet for 10 minutes
  *     (request_quiet — the agent was told so in its receipt).
@@ -192,12 +193,13 @@ function create({ vault, integrations = null, userTodos = null, deliver = null, 
       const r = vault.secretPut(entry, vv.value, { prov: 'owner', actor: who, label: q.target.label, kind: q.target.entryKind, note: `Asked for by ${who}: ${q.purpose}`.slice(0, P.LIMITS.note), hosts: q.target.hosts || [], askedBy: { conv: q.conv, name: who } });
       if (!r || !r.ok) { const c = String((r && r.code) || ''); return named(c.includes('vault_locked') ? 'vault_locked' : c === 'vault_not_set_up' ? 'vault_not_set_up' : 'store_failed'); }
       ref = `vault://secrets/${entry}/${P.ENTRY_FIELD}`;
-      // lane vault-use-grants round 5 (MAJOR item 2): THE PASTE OPENS NOTHING BUT ITS OWN 8-HOUR GRANT to the REQUESTING
-      // conversation (grantPasted — scoped to q.scope, bounded, ended by a lock; a new kind of command still draws its card).
+      // lane vault-use-grants round 5/7 (MAJOR item 2): THE PASTE OPENS NOTHING BUT ITS OWN 8-HOUR GRANT to the REQUESTING
+      // conversation (grantPasted — scoped to q.scope, bounded, ended by a lock; round 7: HOST-SCOPED — a command toward a named
+      // host runs with no card, a command elsewhere or a request that named no hosts still draws its card).
       // The entry's «Usable by agent runs» switch is the owner's 验证是你 act and NOTHING else flips it: r4 forged
       // `reauthed:true` here, so one paste opened the new secret to EVERY conversation's run door (ON is an allow-list). To let
       // it be used without the 8-hour limit (and by whoever the owner lists), the owner turns the switch on in the Vault window.
-      if (grantsAsker() && vaultRun && typeof vaultRun.grantPasted === 'function') { try { const g = vaultRun.grantPasted({ scope: q.scope, ref, purpose: q.purpose, by, requestId: id }); if (g && g.ok) grantHours = g.hours; } catch (e) { log(`${q.requestId}: the run grant could not be written: ${e.message}`); } }
+      if (grantsAsker() && vaultRun && typeof vaultRun.grantPasted === 'function') { try { const g = vaultRun.grantPasted({ scope: q.scope, ref, purpose: q.purpose, hosts: (q.target && q.target.hosts) || [], by, requestId: id }); if (g && g.ok) grantHours = g.hours; } catch (e) { log(`${q.requestId}: the run grant could not be written: ${e.message}`); } }   // round 7 (MINOR): the grant is HOST-SCOPED to the hosts the request named (the words say «to those hosts»)
     }
     let receipt = null;
     try { receipt = (vault.noteUse(entry, { by: 'agent', door: 'paste', conv: q.scope }, { outcome: 'ok', purpose: q.purpose, actor: who }) || {}).receipt || null; } catch { /* the store answered: the use line is the audit's */ }

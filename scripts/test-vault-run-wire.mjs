@@ -88,9 +88,12 @@ async function main() {
 
   console.log(`REAL-TOOL PARITY CENSUS (curl ${ver}) — the peer the tool reached is NAMED by the reader, or the reader is OPAQUE (fail closed)\n`);
 
-  // kind: 'control' (a routine run — MUST reach the listener and the reader MUST name it); 'leak-closed' (an attack that
-  // reaches the listener — the reader MUST be opaque, no silent leak); 'blind' (a scheme token the bare reader would misread —
-  // the reader MUST be opaque whether or not the tool reaches here).
+  // kind (round 7 item 8): the REACH-GATED kinds assert the tool reached the listener (so the no-spawn mutant takes them RED) —
+  // 'control' (a routine run — reaches AND the reader names it); 'named-or-opaque' (reaches AND the reader names-or-opaque);
+  // 'reach-opaque' (an attack / a scheme token curl connects on — reaches AND the reader is OPAQUE, no silent leak); 'config'
+  // (reaches via the config url, WITHHOLDS «always»). The READER-ONLY kinds are NAMED so and NOT reach-gated — 'reader-lan' (a
+  // trailing-dot IP curl 8.18 may refuse), 'reader-opaque' (ftp:/ / http:HOST — curl reads the scheme word as the host and
+  // reaches nothing here); each asserts only a reader property.
   const rows = [
     ['clean http (control)', CURL, (p) => ['-s', '-m', '2', '-q', '--data', '@' + VALFILE, `http://127.0.0.1:${p}/clean`], 'control'],
     ['#@ fragment (curl ignores after #; control — connects to 127.0.0.1)', CURL, (p) => ['-s', '-m', '2', '-q', '--data', '@' + VALFILE, `http://127.0.0.1:${p}/frag#@127.0.0.5:9`], 'control'],
@@ -99,13 +102,13 @@ async function main() {
     ['-x proxy to listener (control)', CURL, (p) => ['-s', '-m', '2', '-q', '--data', '@' + VALFILE, '-x', `127.0.0.1:${p}`, 'http://granted.example/px'], 'named-or-opaque'],
     ['--url schemeless (control)', CURL, (p) => ['-s', '-m', '2', '-q', '--data', '@' + VALFILE, '--url', `127.0.0.1:${p}/u`], 'control'],
     ['[::ffff:127.0.0.1] mapped (control)', CURL, (p) => ['-s', '-m', '2', '-q', '-g', '--data', '@' + VALFILE, `http://[::ffff:127.0.0.1]:${p}/m`], 'control'],
-    ['backslash before @ (round4 BLOCKER: granted\\@listener)', CURL, (p) => ['-s', '-m', '2', '-q', '--data', '@' + VALFILE, `http://127.0.0.5:9\\@127.0.0.1:${p}/bs`], 'leak-closed'],
-    ['userinfo @ (round4)', CURL, (p) => ['-s', '-m', '2', '-q', '--data', '@' + VALFILE, `http://u:p@127.0.0.1:${p}/ui`], 'leak-closed'],
+    ['backslash before @ (round4 BLOCKER: granted\\@listener)', CURL, (p) => ['-s', '-m', '2', '-q', '--data', '@' + VALFILE, `http://127.0.0.5:9\\@127.0.0.1:${p}/bs`], 'reach-opaque'],
+    ['userinfo @ (round4)', CURL, (p) => ['-s', '-m', '2', '-q', '--data', '@' + VALFILE, `http://u:p@127.0.0.1:${p}/ui`], 'reach-opaque'],
     ['trailing-dot host (round4)', CURL, (p) => ['-s', '-m', '2', '-q', '--data', '@' + VALFILE, `http://127.0.0.1.:${p}/dot`], 'reader-lan'],
     // round 5 item 5: a scheme-shaped token the bare reader would read as the SCHEME WORD
-    ['one-slash http:/HOST (round5)', CURL, (p) => ['-s', '-m', '2', '-q', '--data', '@' + VALFILE, `http:/127.0.0.1:${p}/one`], 'blind'],
-    ['one-slash ftp:/HOST (round5)', CURL, (p) => ['-s', '-m', '1', '-q', '-T', VALFILE, `ftp:/127.0.0.1:${p}/one`], 'blind'],
-    ['bare scheme http:HOST (round5)', CURL, (p) => ['-s', '-m', '2', '-q', '--data', '@' + VALFILE, `http:127.0.0.1:${p}/bare`], 'blind'],
+    ['one-slash http:/HOST (round5)', CURL, (p) => ['-s', '-m', '2', '-q', '--data', '@' + VALFILE, `http:/127.0.0.1:${p}/one`], 'reach-opaque'],
+    ['one-slash ftp:/HOST (round5)', CURL, (p) => ['-s', '-m', '1', '-q', '-T', VALFILE, `ftp:/127.0.0.1:${p}/one`], 'reader-opaque'],
+    ['bare scheme http:HOST (round5)', CURL, (p) => ['-s', '-m', '2', '-q', '--data', '@' + VALFILE, `http:127.0.0.1:${p}/bare`], 'reader-opaque'],
     // round 5 item 5: the proxy authority is cut at the first # / ? — curl connects to host:port, NOT the fragment/query host
     ['-x proxy#@other (round5: curl connects to the proxy host, not the # host)', CURL, (p) => ['-s', '-m', '2', '-q', '--data', '@' + VALFILE, '-x', `127.0.0.1:${p}#@granted.example:3128`, 'http://granted.example/x'], 'named-or-opaque'],
     ['-x proxy?@other (round5)', CURL, (p) => ['-s', '-m', '2', '-q', '--data', '@' + VALFILE, '-x', `127.0.0.1:${p}?@granted.example:3128`, 'http://granted.example/x'], 'named-or-opaque'],
@@ -117,47 +120,43 @@ async function main() {
   if (have(WGET)) {
     const urls = path.join(TMP, 'urls.txt'); fs.writeFileSync(urls, `http://127.0.0.1:${P}/exfil\n`);
     rows.push(['wget clean (control)', WGET, (p) => ['-q', '-O', '/dev/null', '-T', '2', '-t', '1', '--no-config', '--method=POST', '--body-file=' + VALFILE, `http://127.0.0.1:${p}/w`], 'control']);
-    rows.push(['wget -e input=FILE (round4: leaks to the file’s host)', WGET, () => ['-q', '-O', '/dev/null', '-T', '2', '-t', '1', '--no-config', '--method=POST', '--body-file=' + VALFILE, '-e', 'input=' + urls, 'http://127.0.0.5:9/x'], 'leak-closed']);
+    rows.push(['wget -e input=FILE (round4: leaks to the file’s host)', WGET, () => ['-q', '-O', '/dev/null', '-T', '2', '-t', '1', '--no-config', '--method=POST', '--body-file=' + VALFILE, '-e', 'input=' + urls, 'http://127.0.0.5:9/x'], 'reach-opaque']);
   }
 
+  // round 7 (MINOR item 8): ONE row-checking function, shared by the real loop AND the no-spawn mutant below. A REACH-GATED
+  // row's verdict DEPENDS on `hit` (the tool reached the listener); the reader-only rows do not. r6's mutant re-implemented the
+  // predicate inline (hit always null), so it stayed green even with r5's `!hit ||` restored — a tautology. Now the mutant runs
+  // THIS function with no spawn, so every reach-gated row it checks takes RED, and a reverted predicate is caught.
+  const REACH_GATED = new Set(['control', 'named-or-opaque', 'reach-opaque', 'config']);   // the tool MUST reach the listener in the real run
+  const READER_ONLY = new Set(['reader-lan', 'reader-opaque']);   // named reader-only: the tool reaches nothing here (a trailing-dot IP curl refuses; a scheme word curl reads as the host)
+  const checkRow = (kind, hit, reader, P) => {
+    const named = hit ? readerNames(reader, P) : false;
+    if (kind === 'control' || kind === 'named-or-opaque') return !!hit && (named || reader.opaque);
+    if (kind === 'reach-opaque') return !!hit && reader.opaque;   // the tool REACHED the listener (an attack / a scheme-token that curl connects on) AND the reader is OPAQUE — no silent by: grant
+    if (kind === 'reader-lan') return readerNames(reader, P) || reader.opaque;   // the reader names the LAN peer (trailing dot stripped) or is opaque
+    if (kind === 'reader-opaque') return reader.opaque;   // the reader is OPAQUE (ftp:/ / http:HOST — curl reads the scheme word as the host, reaches nothing here)
+    if (kind === 'config') return !!hit && !reader.always && !readerNames(reader, P);   // reached via the config url; WITHHOLDS «always», does not name that url (int-C / r23 cfgRouteHosts)
+    return false;
+  };
+  const MSG = { control: 'the tool REACHED the listener AND the reader names it', 'named-or-opaque': 'the tool REACHED the listener AND the reader names it or is opaque', 'reach-opaque': 'the tool REACHED the listener AND the reader is OPAQUE (the card — no silent by: grant)', 'reader-lan': 'the reader names the LAN peer (trailing dot stripped) or is opaque (reader-only)', 'reader-opaque': 'the reader is OPAQUE (reader-only — curl reads the scheme word as the host, reaches nothing here)', config: 'reached via the config url; WITHHOLDS «always» and does not name that url (int-C / r23 cfgRouteHosts)' };
   for (const [label, tool, mk, kind] of rows) {
     const argv = mk(P);
     const hit = await reached(L, () => run(tool, argv));
     const reader = readerDest([path.basename(tool), ...argv]);
-    const named = hit ? readerNames(reader, P) : false;
-    if (kind === 'control') {
-      ok(!!hit && (named || reader.opaque), `${label}: the tool REACHED the listener AND the reader names it`, { reached: !!hit, readerHosts: reader.hosts, opaque: reader.opaque });
-    } else if (kind === 'named-or-opaque') {
-      // round 6 (MINOR item 6): these rows (the --resolve / --connect-to / -x controls, the trailing-dot, the r5 proxy #@/?@
-      // attacks) DO reach the listener in this environment — ASSERT the reach, so a no-spawn mutant cannot pass them on `!hit`.
-      ok(!!hit && (named || reader.opaque), `${label}: the tool REACHED the listener AND the reader names it or is opaque`, { reached: !!hit, host: hit && hit.host, readerHosts: reader.hosts, opaque: reader.opaque });
-    } else if (kind === 'reader-lan') {
-      // round 6 (MINOR item 6): a READER-property row (the reader must name the LAN peer with the trailing dot stripped, or be
-      // opaque) — NOT reach-gated: curl 8.18 may refuse to connect to a trailing-dot IP, so this proves the reader, not the wire.
-      ok(readerNames(reader, P) || reader.opaque, `${label}: the reader names the LAN peer (trailing dot stripped) or is opaque`, { reached: !!hit, readerHosts: reader.hosts, opaque: reader.opaque });
-    } else if (kind === 'leak-closed' || kind === 'blind') {
-      ok(reader.opaque, `${label}: the reader is OPAQUE (the card — the tool ${hit ? `reached 127.0.0.1:${P}` : 'routed off here'}; no silent by: grant)`, { reached: !!hit, leaked: hit && hit.leaked, readerHosts: reader.hosts, opaque: reader.opaque });
-    } else if (kind === 'config') {
-      // THIS lane reads -K as config-file — it WITHHOLDS «always» (no auto-grant of a new shape). Reading the config's own url
-      // directive host is vault-agent-own r23's cfgRouteHosts (BLIND, not dropped), adopted at int-C — noted in the As-built.
-      ok(!!hit && !reader.always && !readerNames(reader, P), `${label}: the tool reached the listener via the config's url; the reader WITHHOLDS «always» (${reader.noAlways}) and does not name that url — no silent by: grant of a new shape (int-C / r23 cfgRouteHosts reads the config's url host)`, { reached: !!hit, noAlways: reader.noAlways, always: reader.always });
-    }
+    ok(checkRow(kind, hit, reader, P), `${label}: ${MSG[kind] || kind}`, { reached: !!hit, readerHosts: reader.hosts, opaque: reader.opaque, noAlways: reader.noAlways });
   }
 
-  // round 6 (MINOR item 6): THE NO-SPAWN MUTANT — with the tool never run, NOTHING reaches the listener, so EVERY reach-gated
-  // row (control + named-or-opaque) must go RED. r5 passed 17/25 under this mutant because the named-or-opaque rows passed on
-  // `!hit`; now each asserts the reach, so a census that stopped connecting can never go green silently.
+  // round 7 (MINOR item 8): THE NO-SPAWN MUTANT — run the SHARED checkRow with the tool NEVER spawned (hit=null). Every
+  // reach-gated row must go RED; a vacuous pass (a row whose verdict does not depend on the reach) names itself. Restoring r5's
+  // `!hit ||` into checkRow would make every reach-gated row pass here — RED, by name. (Reader-only rows are exempt by design.)
   {
-    let vacuous = 0;
-    for (const [, tool, mk, kind] of rows) {
-      if (kind !== 'control' && kind !== 'named-or-opaque') continue;
-      const argv = mk(P);
-      const hit = await reached(L, async () => {});   // NO SPAWN — nothing connects
-      const reader = readerDest([path.basename(tool), ...argv]);
-      const named = hit ? readerNames(reader, P) : false;
-      if (!!hit && (named || reader.opaque)) vacuous++;   // the SAME predicate the control/named-or-opaque branches use
+    const vacuous = [];
+    for (const [label, tool, mk, kind] of rows) {
+      if (!REACH_GATED.has(kind)) { if (!READER_ONLY.has(kind)) vacuous.push(`${label} (unclassified kind «${kind}»)`); continue; }
+      const reader = readerDest([path.basename(tool), ...mk(P)]);
+      if (checkRow(kind, null, reader, P)) vacuous.push(label);   // no hit ⇒ the shared branch MUST be false
     }
-    ok(vacuous === 0, 'NO-SPAWN MUTANT: with the tool never run, every reach-gated row goes RED — no control passes vacuously on !hit (r5: 17/25 green)', { vacuous });
+    ok(vacuous.length === 0, 'NO-SPAWN MUTANT: the SHARED checkRow, run with the tool never spawned, takes every reach-gated row RED — a reverted `!hit ||` predicate is caught here (r5: 17/25 green)', { vacuous });
   }
 
   // (c) the REAL git over a loopback listener (http smart-transport) — a clean granted run is NAMED; the backslash/userinfo
@@ -169,7 +168,7 @@ async function main() {
     ok(!!gh && (readerNames(gr, P) || gr.opaque), 'REAL git ls-remote http://127.0.0.1:P/r.git: reached the listener AND the reader names it (a routine granted run)', { reached: !!gh, hosts: gr.hosts });
     const gb = await reached(L, () => run(GIT, ['ls-remote', `http://127.0.0.5:9\\@127.0.0.1:${P}/r.git`], GENV));
     const gbr = readerDest(['git', 'ls-remote', `http://127.0.0.5:9\\@127.0.0.1:${P}/r.git`]);
-    ok(gbr.opaque, `REAL git ls-remote with a backslash authority: reader is OPAQUE (git ${gb ? `reached 127.0.0.1:${P}` : 'routed off'} — no silent by: grant)`, { reached: !!gb, opaque: gbr.opaque });
+    ok(!!gb && gbr.opaque, `REAL git ls-remote with a backslash authority: git REACHED 127.0.0.1:${P} AND the reader is OPAQUE — no silent by: grant (round 7: reach-gated, not a reader-only assert)`, { reached: !!gb, opaque: gbr.opaque });
     // the ssh family: a fake GIT_SSH records the host git hands to ssh — for `ssh://router` git passes the bare alias `router`
     // (which the real ssh resolves through ~/.ssh/config), and the reader is OPAQUE for that single-label alias.
     const FS = path.join(TMP, 'fakessh'); const ARGS = path.join(TMP, 'ssh-args');

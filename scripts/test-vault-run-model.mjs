@@ -231,12 +231,33 @@ console.log('④ THE SHAPE KEY — tool + flags + hosts + entries (decision ④)
     && RO(['ssh', '-J', 'jump.example', 'box.example']) === false,
     'ssh -J / -W: a single-label jump host is OPAQUE (every host-bearing ssh option goes through ONE alias reader); a DOTTED -J host is not',
     ['ssh -J router box.example', 'scp -J router f box.example:/x', 'sftp -J router box.example'].map((c) => [c, RO(c.split(' '))]));
-  // round 6 (MAJOR item 2): a ONE-LETTER host is an alias; the drive-letter exemption lives ONLY in the scpLike `X:path` reader
-  const RH = (argv) => V.shapeOf(V.planOf({ argv, env: [['T', M1]] })).routeHosts;
-  ok(RO(['ssh', 'r', 'true']) === true && RO(['sftp', 'r']) === true && RO(['ssh', 'ssh://r', 'true']) === true && RO(['ssh', '-o', 'HostName=r', 'box.example', 'true']) === true && RO(['ssh', '-J', 'r', 'box.example', 'true']) === true && RO(['ssh', 'rr', 'true']) === true
-    && !RH(['scp', 'file', 'C:\\x']).includes('c') && RO(['scp', 'file', 'C:\\x']) === false,
-    'a one-letter ssh/sftp host (and -o HostName / -J) is an alias (opaque); a one-letter `C:\\x` is a LOCAL drive, never a host',
-    { sshr: RO(['ssh', 'r', 'true']), drive: RH(['scp', 'file', 'C:\\x']) });
+  // round 7 (MAJOR item 1b): the DERIVED table — a short ssh flag the reader marks and its `-o` long spelling must agree,
+  // because both read the SAME SSH_OPT_TABLE rows (the oracle `ssh -F /dev/null -G` prints one keyword for `-S x` and
+  // `-o ControlPath=x`). A long spelling the reader forgot would be a MISSING ROW, red here — not a silent by:grant leak.
+  {
+    const G = (argv) => V.shapeOf(V.planOf({ argv, env: [['T', M1]] })).routeOpaque;
+    const miss = [];
+    for (const r of V.SSH_OPT_TABLE) {
+      if (r.mode === 'opaque') { if (!(G(['ssh', r.flag, 'x', 'box.example', 'true']) === true && G(['ssh', '-o', `${r.o}=x`, 'box.example', 'true']) === true && V.SSH_LOCAL_O.has(r.o))) miss.push(`${r.flag}↔${r.o}`); }
+      else { if (!(G(['ssh', r.flag, 'alias', 'box.example', 'true']) === true && G(['ssh', '-o', `${r.o}=alias`, 'box.example', 'true']) === true && V.SSH_HOST_OPTS.has(r.o))) miss.push(`${r.flag}↔${r.o}`); }
+    }
+    ok(miss.length === 0 && V.SSH_OPT_TABLE.length === 5, 'the ssh (short flag ↔ -o long) table is DERIVED: every opaque/host flag agrees with its -o spelling (-S/-L/-R/-D/-J)', { miss, rows: V.SSH_OPT_TABLE.length });
+  }
+  // round 6 (MAJOR item 2): a ONE-LETTER ssh/sftp host is an alias (opaque, every spelling).
+  const RH6 = (argv, extra = {}) => V.shapeOf(V.planOf({ argv, env: [['T', M1]], ...extra })).routeHosts;
+  const ROx = (argv, extra = {}) => V.shapeOf(V.planOf({ argv, env: [['T', M1]], ...extra })).routeOpaque;
+  ok(RO(['ssh', 'r', 'true']) === true && RO(['sftp', 'r']) === true && RO(['ssh', 'ssh://r', 'true']) === true && RO(['ssh', '-o', 'HostName=r', 'box.example', 'true']) === true && RO(['ssh', '-J', 'r', 'box.example', 'true']) === true && RO(['ssh', 'rr', 'true']) === true,
+    'a one-letter ssh/sftp host (and -o HostName / -J) is an alias (opaque)',
+    { sshr: RO(['ssh', 'r', 'true']) });
+  // round 7 (MAJOR item 1c): the drive-letter rule is PLATFORM-KEYED — a one-letter `X:path` is a host on POSIX (the hub),
+  // a LOCAL Windows drive ONLY on a win32 runner, and `u@r:/x` is a remote host on BOTH. (r6's rule, measured wrong on Linux —
+  // Linux scp/rsync have no drive-letter rule and connect to host C/c/x/a — is REVERSED.) Both branches are tested.
+  ok(RH6(['scp', 'file', 'C:\\x']).includes('c') && ROx(['scp', 'file', 'C:\\x']) === true && RH6(['scp', 'file', 'c:/x']).includes('c') && RH6(['rsync', 'a:', 'd']).includes('a') && ROx(['scp', 'f', 'u@r:/x']) === true,
+    'POSIX (the hub): a one-letter `X:path` / `c:/x` / `a:` connects to host X (an alias ⇒ opaque); `u@r:/x` is a remote host',
+    { posix_Cx: RH6(['scp', 'file', 'C:\\x']), posix_opaque: ROx(['scp', 'file', 'C:\\x']) });
+  ok(!RH6(['scp', 'file', 'C:\\x'], { win32: true }).includes('c') && ROx(['scp', 'file', 'C:\\x'], { win32: true }) === false && ROx(['scp', 'f', 'u@r:/x'], { win32: true }) === true,
+    'win32 runner: a bare one-letter `C:\\x` is a LOCAL drive (not a host, not opaque); `u@r:/x` is still a remote host',
+    { win32_Cx: RH6(['scp', 'file', 'C:\\x'], { win32: true }), win32_opaque: ROx(['scp', 'file', 'C:\\x'], { win32: true }) });
   // round 5 (MAJOR item 5): a scheme-shaped token is never a bare host; a proxy value's authority is cut at the first # / ?
   ok(RO(['curl', 'http:/127.0.0.1:80/x']) === true && RO(['curl', 'ftp:ftp']) === true && RO(['curl', 'smtp:/127.0.0.1/x']) === true && RO(['curl', 'localhost:9999/x']) === false,
     'a one-slash `S:/HOST` and a bare `S:HOST` for a known scheme are BLIND; `localhost:9999` (not a scheme) is read as a host');
