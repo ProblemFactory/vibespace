@@ -82,7 +82,8 @@ function create({ activeSessions, BUFFERS_DIR, getUserTodos, getSessionStatus, s
   }
   function jobRoots() {
     const jw = jobsWiringOf(); const jm = jw && typeof jw.getJobs === 'function' ? jw.getJobs() : null; const out = [];
-    try { for (const j of (jm && jm.jobs ? jm.jobs.values() : [])) if (j && j.proc && Number.isInteger(j.proc.pid)) out.push({ pid: j.proc.pid, name: j.name || j.id }); } catch { /* none */ }
+    const nameOf = require('../job-model.js').labelVia(jm);   // the NAME through the engine's ONE accessor (lane job-notify-user r5)
+    try { for (const j of (jm && jm.jobs ? jm.jobs.values() : [])) if (j && j.proc && Number.isInteger(j.proc.pid)) out.push({ pid: j.proc.pid, name: nameOf(j) || j.id }); } catch { /* none */ }
     return out;
   }
   function keeperMarks(procs) {

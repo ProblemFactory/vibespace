@@ -989,8 +989,10 @@ await section('§7 controls (patched copies)', async () => {
   const fR = M.write('src/secret-shapes.js', ssMutR, 'pemre'), SSr = require(fR);
   { const v = stepsOf(R4_SHAPES.pemBeginStorm, 512, 8, { module: fR }); ok(!v.err && !v.ok && !/MIIEpAIBAAKCAQEA/.test(SSr.redactSecrets('-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA\n-----END RSA PRIVATE KEY-----').text), `CONTROL (r): the label regex reads quadratic by the count — ${stepsLine(v)} at ×8 input, the plain block still hidden (the §2d pem legs go red)`, v); }
   // (s) verify r4 F3: the JWT alternative restored into PREFIX_RE, the scan removed — the §2d jwt legs go red (×65 at ×8)
-  const ssMutS = ssSrc.replace("|jbt_[A-Za-z0-9_\\-]{8,255})(?![A-Za-z0-9_\\-])/g;", "|jbt_[A-Za-z0-9_\\-]{8,255}|eyJ[A-Za-z0-9_\\-]{8,65536}\\.eyJ[A-Za-z0-9_\\-]{8,65536}\\.[A-Za-z0-9_\\-]{8,65536})(?![A-Za-z0-9_\\-])/g;").replace("    const jwt = redactJwt(text); text = jwt.text; n += jwt.n;", '').replace("|vsmt_|vswh_|vswp_|jbt_)/;", "|vsmt_|vswh_|vswp_|jbt_|eyJ)/;");
-  ok(ssMutS !== ssSrc && ssMutS.includes('eyJ[A-Za-z0-9_') && !ssMutS.includes('const jwt = redactJwt(text)'), '(s) the patch applies');
+  // lane job-notify-user r6: PREFIX_RE's last group closes `…{8,255})(?![A-Za-z0-9_\-]))/g;` (the letters-and-digits families have their
+  // own tail before it) — the JWT alternative goes back into THAT group, under the old tail
+  const ssMutS = ssSrc.replace("|jbt_[A-Za-z0-9_\\-]{8,255})(?![A-Za-z0-9_\\-]))/g;", "|jbt_[A-Za-z0-9_\\-]{8,255}|eyJ[A-Za-z0-9_\\-]{8,65536}\\.eyJ[A-Za-z0-9_\\-]{8,65536}\\.[A-Za-z0-9_\\-]{8,65536})(?![A-Za-z0-9_\\-]))/g;").replace("    const jwt = redactJwt(text); text = jwt.text; n += jwt.n;", '').replace("|vsmt_|vswh_|vswp_|jbt_)/;", "|vsmt_|vswh_|vswp_|jbt_|eyJ)/;");
+  ok(ssMutS !== ssSrc && ssMutS.includes('|eyJ[A-Za-z0-9_\\-]{8,65536}\\.eyJ') && !ssMutS.includes('const jwt = redactJwt(text)'), '(s) the patch applies (the alternative IS in PREFIX_RE — r6: a comment\'s `eyJ[A-Za-z0-9_` no longer passes for it)');
   const fS = M.write('src/secret-shapes.js', ssMutS, 'jwtre'), SSs = require(fS);
   { const v = stepsOf(R4_SHAPES.jwtDashStorm, 512, 8, { module: fS }); ok(!v.err && !v.ok && SSs.redactSecrets('x-eyJaaaaaaaa.eyJbbbbbbbb.cccccccc y').text === 'x-eyJ«redacted» y', `CONTROL (s): the JWT alternative reads quadratic by the count — ${stepsLine(v)} at ×8 input, the plain token still hidden (the §2d jwt legs go red)`, v); }
   // (t) verify r4 F4: the per-head line-end search restored — the §2d work witness goes red (6 553 searches for one line)

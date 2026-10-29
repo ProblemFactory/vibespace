@@ -365,8 +365,10 @@ function serviceLink({ port, host = '', forward = null, instanceUrl = '' } = {})
   const base = /^https?:\/\//i.test(String(instanceUrl || '')) ? String(instanceUrl).replace(/\/+$/, '') : ''; // absent ⇒ relative (the client's absUrl)
   return { url: `${base}/proxy/${target}`, via: 'proxy', target, localUrl, forwardId };
 }
-/** ONE job → its service row, or null (never listened; or stopped longer than SERVICE_KEEP_MS ago). */
-function serviceRow(job, { now = Date.now(), base = '', forwards = [] } = {}) {
+/** ONE job → its service row, or null (never listened; or stopped longer than SERVICE_KEEP_MS ago). `labelOf` = the engine's
+ *  ONE name accessor (M.labelVia(jm) — lane job-notify-user r5, accept-r4 refuted 0: the row and the chat card a person reads
+ *  carried the record's raw name); absent ⇒ the job's id, never the record's words. */
+function serviceRow(job, { now = Date.now(), base = '', forwards = [], labelOf = null } = {}) {
   const l = job && job.listen;
   if (!job || !job.id || !l || !(Number(l.port) > 0)) return null;
   const running = SERVICE_RUNNING.includes(job.state);
@@ -374,18 +376,18 @@ function serviceRow(job, { now = Date.now(), base = '', forwards = [] } = {}) {
   const stoppedAt = running ? 0 : Number((run && run.endedAt) || job.updatedAt || l.at) || 0;
   if (!running && now - stoppedAt > SERVICE_KEEP_MS) return null;
   const firstAt = Number(l.firstAt) || Number(l.at) || 0;
-  return { key: 'job:' + job.id, host: '', path: '', name: String(job.name || job.id), kind: 'service', jobId: String(job.id), port: Number(l.port),
+  return { key: 'job:' + job.id, host: '', path: '', name: String((typeof labelOf === 'function' && labelOf(job)) || job.id), kind: 'service', jobId: String(job.id), port: Number(l.port),
     ...serviceLink({ port: l.port, host: LOCAL_HOST_ID, forward: forwardFor(forwards, LOCAL_HOST_ID, l.port), instanceUrl: base }),
     since: Number(run && run.startedAt) || firstAt, state: running ? 'running' : 'stopped', stoppedAt,
     firstAt, lastAt: Math.max(Number(l.at) || 0, stoppedAt, firstAt), by: 'agent', writes: 0, edits: 0, lastOp: 'listen', bytes: null, lastId: null };
 }
 /** THE LINEAGE RULE: the rows of the jobs whose OWNER conversation is `cid` (another conversation's job ⇒ no row). */
-function serviceRows(jobs, { cid = null, now = Date.now(), base = '', forwards = [] } = {}) {
+function serviceRows(jobs, { cid = null, now = Date.now(), base = '', forwards = [], labelOf = null } = {}) {
   const rows = {};
   if (!cid) return rows;
   for (const j of jobs || []) {
     if (jobOwnerCid(j) !== cid) continue;
-    const r = serviceRow(j, { now, base, forwards });
+    const r = serviceRow(j, { now, base, forwards, labelOf });
     if (r) rows[r.key] = r;
   }
   return rows;

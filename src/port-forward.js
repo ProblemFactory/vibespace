@@ -281,7 +281,10 @@ class PortForwardManager {
           for (const j of jm.jobs.values()) {
             if (j.kind === 'service' && ['up', 'starting', 'awaiting-user'].includes(j.state)) for (const pt of j.ports || []) owned.set(Number(pt), j);
           }
-          for (const row of ports) if (owned.has(row.port)) { row.service = owned.get(row.port).name; row.serviceJob = owned.get(row.port).id; }
+          // the NAME through the engine's ONE accessor (lane job-notify-user r5, accept-r4 confirmed 0): r4 belted the forward
+          // label and this row — one line from it in the same panel — still showed the record's raw name
+          const nameOf = require('./job-model.js').labelVia(jm);
+          for (const row of ports) if (owned.has(row.port)) { row.service = nameOf(owned.get(row.port)); row.serviceJob = owned.get(row.port).id; }
         }
       } catch { }
       const { execFile } = require('child_process');

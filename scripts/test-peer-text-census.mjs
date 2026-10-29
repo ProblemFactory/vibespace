@@ -174,7 +174,7 @@ const TABLE = {
   'src/job-model.js :: renderOwnerNotify(': { rules: BELT, pin: /agentPiece\(what, 200\)/, why: 'the job\'s announce line (its own stdout), its name and its context through `agentPiece` = the belt (line)' },
   'src/job-model.js :: renderNotifStash(': { rules: BELT, pin: /agentPiece\(n\.text, 160\)/, why: 'each stashed notification line' },
   'src/job-model.js :: renderJobsUpdate(': { rules: BELT, pin: /agentPiece\(e\.what, 400\)/, why: 'each event line (an announce = the job\'s stdout)' },
-  'src/job-model.js :: renderJobsDigest(': { rules: BELT, pin: /agentPiece\(j\.name, 24\)/, why: 'each job\'s name' },
+  'src/job-model.js :: renderJobsDigest(': { rules: BELT, pin: /agentPiece\(j\.label != null \? j\.label : j\.id, 24\)/, why: 'each job\'s label (the ONE accessor\'s — lane job-notify-user r6: its rows are digestFor\'s, never a record)' },
   'src/agent-routes.js :: renderMsgStash(': { rules: ['re-judged-at-read', ...BELT], pin: /const out = \(t\) => \(notice \? t : agentText\(t, \{ kind: 'block' \}\)\)/, why: 'a PEER entry (a legacy one stored before the rule, a raw vibespace-msg text) is judged on its way out, after every cut; its sender\'s name as a piece; a NOTIFICATION entry is VibeSpace\'s own frame, its peer parts judged by their producer rows, never re-judged (our own tags ride inside it by design)' },
   'src/agent-routes.js :: deliverToConversation(': { rules: BELT, pin: /const safeText = agentText\(text, \{ kind: 'block' \}\)/, pin2: /const fromName = agentText\(s\.name \|\| 'unnamed session', \{ kind: 'line', max: 200 \}\)/, why: 'the legacy direct vibespace-msg lane (no groups engine): the peer session\'s text through the belt, its name as a piece (pin2 — verify r1 F5: the name\'s call reverted green without it)' },
   'src/agent-routes.js :: stashFor(': { rules: BELT, pin: /stashFor\(target\.cid, \{ source: 'agent', kind: 'peer', fromName, text: safeText \}\)/, why: 'the same text when the lane could not deliver' },
@@ -1321,7 +1321,7 @@ const SITES = {
   'job:ownerNotify': (b, n) => JM.renderOwnerNotify({ id: 'jb-1', kind: 'task', name: n, state: 'done', context: { payload: b } }, { what: 'announced: ' + b }) + '\n' + NEXT,
   'job:notifStash': (b, n) => ours(JM.renderNotifStash([{ ts: T0, jobId: 'jb-1', jobName: n, text: b }, { ts: T0 + 1, jobId: 'jb-2', jobName: 'x', text: NEXT }])),
   'job:update': (b, n) => ours(JM.renderJobsUpdate([{ id: 'jb-1', name: n, what: b }, { id: 'jb-2', name: 'x', what: NEXT }, { id: 'jb-1', name: n, what: 'announced: ' + b }, { id: 'jb-1', name: n, what: 'announced: ' + b }])),
-  'job:digest': (b, n) => JM.renderJobsDigest([{ id: 'jb-1', kind: 'task', state: 'done', name: b }, { id: 'jb-2', kind: 'task', state: 'up', name: NEXT }]),
+  'job:digest': (b, n) => JM.renderJobsDigest([{ id: 'jb-1', kind: 'task', state: 'done', label: b }, { id: 'jb-2', kind: 'task', state: 'up', label: NEXT }]),   // r6: the engine's ROWS (digestFor: the label labelOf's)
   // the stash: two PEER entries (re-judged at the drain) and one NOTIFICATION entry whose text is a PRODUCER's frame (a
   // channel wake block — judged by its own row; a notification's text is never raw peer text by construction)
   // (verify r1 F5: the fourth entry is a BLOCK-source PEER entry — the block path's re-judge at the drain reverted green without it)
@@ -2464,7 +2464,7 @@ console.log('§6 the shared-store census (words another principal wrote into a s
     'RX_DIGEST_FROM': 'a constant of ours (channels)',
     'REV_NOTE_FROM': 'a constant of ours (channels — lane channel-record-revisions\' recall note)',
     "'VibeSpace'": 'ours (auto-resume / the pool engine)', "'You · via Channels'": 'ours', "'Channels · Outbox'": 'ours', "'Channels · API'": 'ours (B-2198 part 2: the raw-API receipt)', "'Channels · judged rules'": 'ours (lane judged-watch-state: the once-a-day not-a-hit line, DM.judgedSkipLine)',
-    "'Background Work · ' + this._jobLabel(job)": 'a job name is a slug (resolveName) — belted on its own (lane job-notify-user r3, _jobLabel: a token-shaped name reached the chat card raw)',
+    "'Background Work · ' + this.labelOf(job)": 'a job name is a slug (resolveName) — belted on its own (lane job-notify-user r3, labelOf: a token-shaped name reached the chat card raw)',
     "'Background Work · ' + (e.jobName || e.jobId)": 'a client card of a slug',
     "'Background Work · ' + CLEARED_TEXT": 'ours (a cleared job)',
     '`Machines · ${machine}`': "a client card; the machine's name the user gave",

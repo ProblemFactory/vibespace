@@ -936,16 +936,17 @@ setInterval(() => { }, 1000);
     const own = { conversation: { backend: 'claude', id: CID }, sessionId: 's-r4', sessionCreatedAt: 1, createdBy: 'agent', groupsSnapshot: [] };
 
     // (1) THE STRAY DOOR: a direct filing in the pre-r3 shape (accept-r3 legacy-shape-filer / planted-direct-filer, the shape
-    // jobs-memory-bound 887e8d66 files twice) — refused in the STORE's own words and JOURNALED on the job, poll says it
+    // jobs-memory-bound 887e8d66 files twice) — r4 refused it in the STORE's own words; r6 (accept-r5 confirmed 1): the stray
+    // door files its OWN copy (the engine's words + the fact «stray»), journaled on the job, the caller in the log
     {
       const X = wired('stray');
       const job = X.jm.jobs.get(X.jm.create({ kind: 'service', name: 'build-x', cmd: { argv: ['sh', '-c', 'sleep 60'] }, owner: own }, who).job.id);
       let v; try { v = X.jm.d.notifyUser({ text: 'build-x: parked — out of memory twice', urgency: 'normal', jobId: job.id, jobName: job.name, ownerCid: CID }); } catch (e) { v = { threw: e.message }; }
-      const e = (job.notifyLog || []).filter((x) => x.lane === 'user-inbox').pop();
-      ok(v && v.ok === false && /^origin 'jobs' files its words as i18n \{key, params\}/.test(v.why) && e && e.ok === false && e.copy === 'stray' && e.reason === v.why && !X.items().length,
-        'r4 THE STRAY DOOR: a direct `this.d.notifyUser({ text, … })` (the pre-r3 shape) is refused in the store\'s OWN words and journaled on its job — never «i18n.text needs a key» into a swallowed catch', JSON.stringify({ v, e }));
-      ok(/^for you: a copy filed outside the one door was NOT filed — origin 'jobs' files its words as i18n \{key, params\}.* \(a refused copy is not retried — free For you and run it again\)$/.test(forYouLine(X.jm.snapshot(job))) && X.logs.some((l) => /a For-you filing outside the one door/.test(l)),
-        '…and poll / show say it by name (the CLI\'s own forYouLine over the snapshot), and the server log names the door it skipped', forYouLine(X.jm.snapshot(job)));
+      const e = (job.notifyLog || []).filter((x) => x.lane === 'user-inbox').pop(), it = X.items().find((i) => i.jobId === job.id);
+      ok(v && v.ok === true && e && e.ok === true && e.copy === 'stray' && it && it.jobFact === 'stray' && it.text === 'Background job build-x has a notice for you — open it in the Jobs panel' && !X.items().some((i) => /out of memory/.test(i.text)),
+        'r4 → r6 THE STRAY DOOR: a direct `this.d.notifyUser({ text, … })` files the STRAY copy — the engine\'s own words + the fact «stray», journaled on its job — never its own shape (140205ee carried any shape through the one door)', JSON.stringify({ v, e, it }));
+      ok(X.logs.some((l) => /a For-you filing outside the one door \(src\/jobs\.js _forYou\) — caller scripts\/test-jobs-engine\.mjs:\d+/.test(l) && l.includes(job.id)) && forYouLine(X.jm.snapshot(job)) === '',
+        '…the server log names the door it skipped AND its caller (file:line); poll / show stay quiet (the stray copy landed)', X.logs.filter((l) => /one door/.test(l)));
       // (2) a kind forYouCopy does not know: a NAMED refusal journaled — never a TypeError into its caller (claim r3-2 minor 7)
       let u, threw = null; try { u = X.jm._forYou(job, M.forYouCopy(job, 'parked-mem0ry')); } catch (err) { threw = err.message; }
       const ue = (job.notifyLog || []).filter((x) => x.lane === 'user-inbox').pop();
@@ -1023,6 +1024,89 @@ setInterval(() => { }, 1000);
       const tab = I.noticeKeyFailures([], dicts, [{ name: 'planted', keys: [...I.noticeKeyTables()[0].keys, 'Task {name} was planted untranslated'] }]);
       ok(!real.length && I.noticeKeyTables()[0].keys.length >= 7, `r4 the i18n road: every server key the jobs engine files has zh + ja (${I.noticeKeyTables()[0].keys.length} table keys + the wiring's literals)`, JSON.stringify(real));
       ok(lit.length === 2 && tab.length === 2 && lit.every((f) => /planted, never translated/.test(f.key)) && tab.every((f) => f.table === 'planted'), 'CONTROL: a planted bare key — a wiring {key} literal or a FOR_YOU_WORDS row — is red in BOTH dicts', JSON.stringify([...lit, ...tab]));
+    }
+
+    // ── lane job-notify-user r5 (accept-r4 confirmed 0 + refuted 0, confirmed 1, unverified 0): (8) THE ONE NAME ACCESSOR AT EVERY
+    // HOLDER — a running service whose name carries a token shape: the Ports SCAN row (the real PortForwardManager.detect over this
+    // engine), the Artifacts service row + the chat card it feeds (the real registry's noteService / listFor), the browser's job
+    // label (jobLabelOf through M.labelVia) each read the engine's labelOf, and a holder with no engine shows no name; (9) the
+    // stray door files THROUGH _forYou; (10) the wiring's filings carry the key the store handed its one filer
+    {
+      const X = wired('r5-names');
+      const raw = (s) => String(s).includes(MAT.slice(4, 16));
+      const job = X.jm.jobs.get(X.jm.create({ kind: 'service', name: 'deploy ' + MAT, cmd: { argv: ['sh', '-c', 'sleep 60'] }, ports: [45556], owner: own }, who).job.id);
+      const { PortForwardManager } = require('../src/port-forward.js');
+      const pf = new PortForwardManager({ hosts: null, dataDir: path.join(R4, 'r5-names'), broadcast() { }, log() { }, plugins: null, serverSetting: () => undefined, getJobs: () => X.jm });
+      pf.detectLocal = async () => [{ port: 45556, proto: 'tcp', proc: 'node' }]; pf._enrichDocker = async () => { };
+      const scan = (await pf.detect('__local__'))[0];
+      try { pf.shutdown && pf.shutdown(); } catch { }
+      const REG = require('../src/server/artifact-registry.js');
+      const session = { claudeSessionId: CID, _normalizer: { sessionId: 's-r4' }, _rebuildQueue: [] };
+      REG.configure({ activeSessions: () => new Map([['s-r4', session]]), jobs: () => X.jm, ports: () => null, log: { warn() { } } });
+      job.listen = { port: 45556, firstAt: Date.now(), at: Date.now() };
+      REG.noteService(job);
+      const card = session._rebuildQueue.map((q) => q.card).find((c) => c && c.kind === 'service');
+      const row = (REG.listFor('s-r4').items || []).find((c) => c.kind === 'service');
+      const J = require('../src/browser-job-principal.js');
+      const bl = J.jobLabelOf(job, M.labelVia(X.jm)), stub = J.jobLabelOf(job, M.labelVia({ jobs: X.jm.jobs }));
+      const L5 = X.jm.labelOf(job);   // create() names it `deploy-ghp_…`; its label is that name belted
+      ok(/^deploy-ghp_«redacted»$/.test(L5) && scan && scan.service === L5 && card && card.name === L5 && row && row.name === L5 && bl === 'job ' + L5 && !raw(scan.service) && !raw(card.name) && !raw(row.name) && !raw(bl),
+        'r5 THE ONE NAME ACCESSOR: the Ports scan row, the Artifacts service row and the chat card it feeds, the browser\'s job label read the engine\'s labelOf — never the record (76ffc823: all four raw beside a belted twin)', JSON.stringify({ scan: scan && scan.service, card: card && card.name, row: row && row.name, bl }));
+      ok(stub === 'job ' + job.id && raw(job.name), '…a holder with no engine shows the job\'s id, never the record\'s words; the record keeps the raw name', stub);
+      // (9) the stray door files THROUGH _forYou (the dep's one call): same verdict, same journal line
+      const seen = []; const door = X.jm._forYou; X.jm._forYou = function (j, c) { seen.push(c && (c.copy || c.fact)); return door.call(this, j, c); };
+      const sv = X.jm.d.notifyUser({ text: 'raw words', urgency: 'normal', jobId: job.id, jobName: job.name, ownerCid: CID });
+      X.jm._forYou = door;
+      const se = (job.notifyLog || []).filter((x) => x.lane === 'user-inbox').pop();
+      ok(seen.join() === 'stray' && sv && sv.ok === true && se && se.copy === 'stray' && se.ok === true, 'r5 → r6 the stray door files THROUGH _forYou (its one call reaches the dep) — the stray copy, journaled as `stray`', JSON.stringify({ seen, sv }));
+      // (10) the wiring's real filing hands the store the key it took at create; a frameless filing without that key is refused
+      const args = []; const add = X.todos.add; X.todos.add = function (k, a) { args.push(a); return add.call(this, k, a); };
+      X.jm._forYou(job, M.forYouCopy(job, 'parked'));
+      X.todos.add = add;
+      const key = args[0] && args[0].filerKey;
+      const nokey = await new Promise((res) => { Promise.resolve().then(X.todos.add.bind(X.todos, `claude:${CID}`, { origin: 'jobs', by: 'agent', jobId: 'jb-0000aa55', jobFact: 'ask', i18n: { text: { key: '{name} needs your input', params: { name: 'x' } } } })).then(() => res(null), (e) => res(e.message)); });
+      const withKey = await new Promise((res) => { Promise.resolve().then(X.todos.add.bind(X.todos, `claude:${CID}`, { origin: 'jobs', by: 'agent', jobId: 'jb-0000aa56', jobFact: 'ask', filerKey: key, i18n: { text: { key: '{name} needs your input', params: { name: 'x' } } } })).then(() => res(null), (e) => res(e.message)); });
+      ok(key && typeof key === 'object' && Object.isFrozen(key) && /needs a caller the store can name/.test(nokey || '') && withKey === null, 'r5 the wiring files with the store\'s filer key (taken at create); a frameless filing is refused without it and files with it', JSON.stringify({ key: !!key, nokey, withKey }));
+      // (11) r6 THE DIGEST (accept-r5 confirmed 0 — names-digest.cjs): every conversation that can view a job reads labelOf's label
+      // in its injected «Background jobs visible to this session» rows — belted WHOLE, then cut (140205ee cut the raw name to 24)
+      const txt = (d) => String((d && (d.text || d)) || '');   // MAT: the token-shaped name of (8)
+      const dj = X.jm.jobs.get(X.jm.create({ kind: 'service', name: 'deploy ' + MAT, cmd: { argv: ['sh', '-c', 'sleep 60'] }, owner: own, access: { view: 'all' } }, who).job.id);
+      const other = { conversationId: 'c0ffee00-0000-4000-8000-0000000000b6', sessionId: 's-other', sessionCreatedAt: 2, groups: new Set() };
+      const dOther = txt(X.jm.digestFor(other, 0)), dOwn = txt(X.jm.digestFor(who, 0)), dLine = dOther.split('\n').find((l) => l.includes(dj.id)) || '';
+      ok(dLine.includes(' — ' + X.jm.labelOf(dj) + ' — ') && /«redacted»/.test(dLine) && !dOther.includes(MAT.slice(4, 12)) && !dOwn.includes(MAT.slice(4, 12)) && raw(dj.name),
+        'r6 THE DIGEST: another conversation (and the owner) reads labelOf\'s label in the injected digest — no head of the token survives the cut; the record keeps the raw name', dLine);
+      // (12) r6 a hand-built copy handed to the stray kind (accept-r5 confirmed 1 — stray-launder-files.cjs): refused BY NAME,
+      // journaled `stray`, logged with its caller, nothing filed (140205ee filed it as a real «parked» copy, no log line)
+      const n12 = X.items().length, l12 = X.logs.length;
+      const lv = X.jm._forYou(job, M.forYouCopy(job, 'stray', { shape: { words: { key: 'Task {name} was parked', params: { name: 'HAND-BUILT words' } }, fact: 'parked', jobId: job.id, jobName: job.name } }));
+      const le = (job.notifyLog || []).filter((x) => x.lane === 'user-inbox').pop();
+      ok(lv && lv.ok === false && /a shape handed to forYouCopy is refused/.test(lv.why) && le && le.copy === 'stray' && le.ok === false && X.items().length === n12 && !X.items().some((i) => /HAND-BUILT/.test(i.text))
+        && X.logs.slice(l12).some((l) => /outside the one door .*caller scripts\/test-jobs-engine\.mjs:\d+/.test(l)), 'r6 a SHAPE handed to forYouCopy is refused by name — journaled as `stray`, its caller in the log, nothing filed', JSON.stringify({ lv, le }));
+      // (13) r6 THE PROTOTYPE ROAD (accept-r5 unverified 2 — r5skeptic-proto-door.cjs): nothing reachable from the engine is its raw
+      // For-you dep — `this.d` has no prototype, no own copy, no reflective road; the dep is still the one _forYou files through,
+      // and every other dep reads live off the wiring's object (a write lands on the view)
+      { const rawDep = (a) => ({ ok: true, raw: a }), dir13 = path.join(R4, 'proto'); fs.mkdirSync(dir13, { recursive: true });
+        const deps13 = { dataDir: dir13, notifyUser: rawDep, log() { }, broadcast() { } };
+        const PJ = new (require('../src/jobs.js').JobManager)(deps13);
+        const reach = [], seenObj = new Set();
+        const walkObj = (o, at, depth) => {
+          if (!o || (typeof o !== 'object' && typeof o !== 'function') || seenObj.has(o) || depth > 4) return; seenObj.add(o);
+          for (const k of Reflect.ownKeys(o)) { let val; try { val = o[k]; } catch { continue; } if (val === rawDep) reach.push(at + '.' + String(k)); walkObj(val, at + '.' + String(k), depth + 1); }
+          let pr = null; try { pr = Object.getPrototypeOf(o); } catch { } if (pr === deps13 || pr === rawDep) reach.push(at + '.__proto__'); if (pr && pr !== Object.prototype && pr !== Function.prototype) walkObj(pr, at + '.__proto__', depth + 1);
+        };
+        walkObj(PJ, 'jm', 0);
+        const filed = PJ._forYou(null, M.forYouCopy(null, 'store-corrupt'));
+        deps13.later = 'live'; PJ.d.log = () => 'mine';
+        ok(!reach.length && Object.getPrototypeOf(PJ.d) === null && PJ._forYouDep === undefined && Reflect.get(PJ.d, 'notifyUser') !== rawDep && filed && filed.raw && filed.raw.words.key === M.FOR_YOU_WORDS['store-corrupt'] && PJ.d.later === 'live' && deps13.log() === undefined,
+          'r6 THE PROTOTYPE ROAD is gone: no own property, prototype or reflective read from the engine reaches its raw For-you dep (140205ee: Object.getPrototypeOf(jm.d).notifyUser) — _forYou alone files through it; other deps stay live', JSON.stringify({ reach, filed: !!filed }));
+        try { PJ.shutdown(); } catch { } }
+      // (14) r6 THE KEY HOLDER (accept-r5 unverified 0 + 3 — lifted-key-filer.cjs): no property of the store holds its filer key, so
+      // a holder that walks the store finds none and its frameless filing is refused (140205ee: `_filerKeys`, lifted ⇒ FILED)
+      const holds = [], found14 = [];
+      for (const k of Reflect.ownKeys(X.todos)) { const val = X.todos[k]; for (const x of val instanceof Map ? [...val.values()] : [val]) if (x && typeof x === 'object' && Object.isFrozen(x) && x.origin === 'jobs') { holds.push(String(k)); found14.push(x); } }
+      const lift = await new Promise((res) => { Promise.resolve().then(X.todos.add.bind(X.todos, `claude:${CID}`, { origin: 'jobs', by: 'agent', jobId: 'jb-0000aa57', jobFact: 'ask', filerKey: found14[0], i18n: { text: { key: '{name} needs your input', params: { name: 'lifted' } } } })).then(() => res('FILED'), (e2) => res(e2.message)); });
+      ok(X.todos._filerKeys === undefined && !holds.length && /needs a caller the store can name/.test(lift) && key && key.origin === 'jobs', 'r6 THE KEY HOLDER: no property of the store holds its filer key — a holder that walks the store finds none and its frameless filing is refused; the wiring filed with it above', JSON.stringify({ holds, lift }));
+      X.end();
     }
   }
 } finally {

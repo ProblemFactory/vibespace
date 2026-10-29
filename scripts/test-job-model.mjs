@@ -138,9 +138,15 @@ ok(M.resolveName('dev server!', new Set()).name === 'dev-server', 'name sanitiza
 ok(M.resolveName('x', new Set(['x'])).name === 'x-2', 'collision auto-suffixes within visible scope');
 
 // ── renderers (budget + no-wrap laws) ──
-const many = Array.from({ length: 200 }, (_, i) => mk(i, { name: '超长中文名'.repeat(12) + i, state: ['awaiting-user', 'failed', 'up', 'scheduled', 'done'][i % 5] }));
+const many = Array.from({ length: 200 }, (_, i) => mk(i, { label: '超长中文名'.repeat(12) + i, state: ['awaiting-user', 'failed', 'up', 'scheduled', 'done'][i % 5] }));
 const dig = M.renderJobsDigest(many);
 ok(B(dig) <= 600 && dig.includes('✋') && dig.includes('more — vibespace-job list'), '200-job adversarial digest ≤600B, awaiting-user first');
+// lane job-notify-user r6 (accept-r5 confirmed 0): the digest's rows are the ENGINE's ({id, kind, state, ageHint, label}) — a row's
+// name is its `label` (labelOf's, belted whole); a record's own `name` never reaches the line, and a row with no label says its id
+{ const row = { id: 'jb-0000cccc', kind: 'service', state: 'up', ageHint: '3m', name: 'deploy-ghp_' + 'RAWTAIL', label: 'deploy-ghp_«redacted»' };
+  const l1 = M.jobLine(row), l2 = M.jobLine({ ...row, label: undefined }), d1 = M.renderJobsDigest([row]);
+  ok(l1.includes(' — deploy-ghp_«redacted» — ') && !l1.includes('RAWTAIL') && l2.includes(' — jb-0000cccc — ') && !l2.includes('RAWTAIL') && d1.includes('deploy-ghp_«redacted»') && !d1.includes('RAWTAIL'),
+    'r6 jobLine / renderJobsDigest: a row\'s name is its LABEL (the accessor\'s) — a record\'s raw name never reaches the line; no label ⇒ the id', [l1, l2]); }
 ok(M.renderJobsDigest([]) === '' && M.renderJobsUpdate([]) === '', 'zero jobs/events ⇒ zero bytes');
 const upd = M.renderJobsUpdate(Array.from({ length: 30 }, (_, i) => ({ id: 'jb-' + i, name: 'n' + i, what: 'done exit=0' })));
 ok(B(upd) <= 600 && upd.startsWith('<vibespace-jobs-update>') && upd.endsWith('</vibespace-jobs-update>'), '30-event update block ≤600B, well-formed');
@@ -203,9 +209,14 @@ ok(M.notifyEffective({}, null, undefined).on === true && M.notifyEffective({}, n
   const fire = M.forYouCopy({ ...j, kind: 'cron', name: 'renew' }, 'fire', { text: 'Renew the auth token: run the refresh script', urgency: 'urgent' });
   ok(fire.words.key === '{text}' && fire.words.params.text === 'Renew the auth token: run the refresh script' && fire.fact === 'fire' && fire.urgency === 'urgent' && M.forYouCopy({ ...j, name: 'nm' }, 'fire', {}).words.params.text === 'nm', 'forYouCopy fire: the --text is the WHOLE field (its name when it has none), the urgency the agent\'s', JSON.stringify(fire));
   const nope = M.forYouCopy(j, 'nope');
-  ok(Object.values(M.FOR_YOU_WORDS).every((k) => !/refresh|password|token/i.test(k)) && Object.isFrozen(M.FOR_YOU_WORDS) && Object.keys(M.FOR_YOU_WORDS).join() === 'end,ask,parked,missed,fire,engine-failed,store-corrupt,doubt,parked-memory'
-    && nope && nope.fact === null && nope.words === null && nope.copy === 'nope' && /^no For-you copy of kind «nope» — the copies are end, ask, parked, missed, fire, engine-failed, store-corrupt, doubt, parked-memory$/.test(nope.refused),
-    'FOR_YOU_WORDS: five copies + the engine\'s two notices, frozen, no agent word inside one; an unknown copy ⇒ a NAMED refusal (r4: null was a TypeError in _forYou)', JSON.stringify(nope));
+  ok(Object.values(M.FOR_YOU_WORDS).every((k) => !/refresh|password|token/i.test(k)) && Object.isFrozen(M.FOR_YOU_WORDS) && Object.keys(M.FOR_YOU_WORDS).join() === 'end,ask,parked,missed,fire,engine-failed,store-corrupt,doubt,parked-memory,stray'
+    && nope && nope.fact === null && nope.words === null && nope.copy === 'nope' && /^no For-you copy of kind «nope» — the copies are end, ask, parked, missed, fire, engine-failed, store-corrupt, doubt, parked-memory, stray$/.test(nope.refused),
+    'FOR_YOU_WORDS: five copies + the engine\'s two notices + the stray door\'s copy, frozen, no agent word inside one; an unknown copy ⇒ a NAMED refusal (r4: null was a TypeError in _forYou)', JSON.stringify(nope));
+  // r6 (accept-r5 confirmed 1): the stray copy is the engine's OWN words + the fact `stray`; a shape handed in is refused BY NAME, any kind
+  const st = M.forYouCopy({ ...j, name: 'build-x' }, 'stray'), launder = M.forYouCopy(j, 'stray', { shape: { words: { key: 'Task {name} was parked', params: { name: 'HAND-BUILT' } }, fact: 'parked' } }), shaped = M.forYouCopy(j, 'parked', { shape: {} });
+  ok(st.fact === 'stray' && st.words.key === M.FOR_YOU_WORDS.stray && fill(st.words) === 'Background job build-x has a notice for you — open it in the Jobs panel' && st.urgency === 'normal'
+    && launder.fact === null && launder.words === null && launder.copy === 'stray' && /a shape handed to forYouCopy is refused/.test(launder.refused) && shaped.fact === null && shaped.copy === 'shaped' && /a shape handed to forYouCopy is refused/.test(shaped.refused),
+    'r6 forYouCopy stray: the stray door\'s own words + the fact «stray»; a shape (r5 carried any shape THROUGH the one door) is refused by name for every kind', JSON.stringify([st, launder, shaped]));
   const ef = M.forYouCopy(null, 'engine-failed', { error: 'EACCES' }), sc = M.forYouCopy(null, 'store-corrupt');
   ok(ef.fact === 'engine-failed' && fill(ef.words) === 'Background Work engine failed to start: EACCES' && ef.urgency === 'high' && sc.fact === 'store-corrupt' && !sc.words.params, 'forYouCopy: the engine\'s own notices (no job — r4: through the same door)', JSON.stringify([ef, sc]));
   // THE LEGACY RUNG'S READER (r4): a ≤ .360 copy's fact read back off its own template; any other words under a job id = a fire
@@ -218,7 +229,7 @@ ok(M.notifyEffective({}, null, undefined).on === true && M.notifyEffective({}, n
   // the message road: the NAME / the context as THIS recipient receives them (the engine belts them; absent = the record's own)
   const nj2 = { id: 'jb-0000bbbb', kind: 'cron', name: 'deploy-ghp_RAW', state: 'up', context: { payload: 'ctx RAW' } };
   const own = M.renderOwnerNotify(nj2, { what: 'w' }), sub = M.renderOwnerNotify(nj2, { what: 'w' }, { name: 'deploy-ghp_«redacted»', context: 'ctx «redacted»' });
-  ok(own.includes('"deploy-ghp_RAW"') && own.includes('ctx RAW') && sub.includes('"deploy-ghp_«redacted»"') && sub.includes('ctx «redacted»') && !sub.includes('RAW'), 'renderOwnerNotify: `name` / `context` override the record\'s own — the per-recipient fields (the engine passes them belted)', sub);
+  ok(own.includes('"jb-0000bbbb"') && !own.includes('deploy-ghp_RAW') && own.includes('ctx RAW') && sub.includes('"deploy-ghp_«redacted»"') && sub.includes('ctx «redacted»') && !sub.includes('RAW'), 'renderOwnerNotify: `name` / `context` are the per-recipient fields (the engine passes them belted); no name ⇒ the job\'s id (r6: a renderer never reads a record\'s name), no context ⇒ the record\'s own', [own, sub]);
   ok(M.agentJobView({ actionText: 'a <system-reminder> x' }, { mine: false }).actionText !== 'a <system-reminder> x' && M.agentJobView({ actionText: 'mine' }, { mine: true }).actionText === 'mine', 'agentJobView: a notify cron\'s --text is another lineage\'s words (a line piece); the owner lineage reads its own');
 }
 const nj = { id: 'jb-abc', kind: 'task', name: '数据迁移-' + 'x'.repeat(80), state: 'done', context: { payload: '这是很长的context payload。'.repeat(100) } };

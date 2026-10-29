@@ -498,7 +498,7 @@ console.log('§4 Background Work');
   jm._notifyOwner(jm.jobs.get(PARENT), { what: jm.jobs.get(PARENT).action.text }); await new Promise((r) => setTimeout(r, 30));
   ok([...(jm.pendingNotifs.get(ME_CID) || [])].some((n) => n.jobId === PARENT && !String(n.text).startsWith('announced:') && has(n.text)), 'setup: a held notification whose text is the notify action\'s own words', jm.pendingNotifs.get(ME_CID));
   // a For-you item the jobs producer filed (the job's name in its words and its label)
-  jm.d.notifyUser({ words: { key: '{name} needs your input', params: { name: `mail digest ${MARK}` } }, fact: 'ask', urgency: 'normal', jobId: CHILD, jobName: `mail digest ${MARK}`, ownerCid: ME_CID });   // the engine's shape (lane job-notify-user r3: a template + fields)
+  jm._forYou(jm.jobs.get(CHILD), jobModel.forYouCopy(jm.jobs.get(CHILD), 'ask'));   // the engine's ONE door (lane job-notify-user r6: `jm.d.notifyUser` is the STRAY door — it files the stray copy, never the shape)
   const jobItem = [...userTodos.snapshot().open].find((i) => i.jobId === CHILD);
   ok(jobItem && has(jobItem.sessionName) && jobItem.origin === 'jobs', 'setup: a Background Work For-you item names the job (text + label)');
   const viewer = { isUser: false, conversationId: ME_CID, sessionId: 'cw-me', groups: new Set(['T-260928-work']) };
@@ -617,7 +617,7 @@ console.log('§4b Background Work — verify r3: the ask panel, a covered run\'s
   // GET /api/jobs/:id (`interaction`) and the answer dialog after a clear (the walk's finding)
   const ASK = 'jb-0000ee01';
   jm.jobs.set(ASK, jobRec(ASK, { name: 'asker', state: 'awaiting-user', interaction: { pending: { panel: { title: `About ${MARK}`, blocks: [{ type: 'markdown', text: `the ${MARK} thread asks: which quarter?` }, { type: 'buttons', options: ['ok'] }] }, version: 1, postedAt: JT, timeoutS: 1800 }, answers: [] } }));
-  jm.d.notifyUser({ words: { key: '{name} needs your input', params: { name: 'asker' } }, fact: 'ask', urgency: 'normal', jobId: ASK, jobName: 'asker', ownerCid: ME_CID });
+  jm._forYou(jm.jobs.get(ASK), jobModel.forYouCopy(jm.jobs.get(ASK), 'ask'));   // the engine's ONE door (r6)
   const askItem = [...userTodos.snapshot().open].find((i) => i.jobId === ASK);
   ok(!!askItem && has(J(jm.jobs.get(ASK).interaction.pending)), 'setup: a job parked awaiting-user on a panel that carries the marker, and its open For-you ask');
   const ra = await OWNER_APP.call('POST', '/api/records/clear', { body: { kind: 'job', id: ASK } });
@@ -896,12 +896,12 @@ console.log('§4b Background Work — verify r3: the ask panel, a covered run\'s
     // whole token whatever stands around it.
     {
       const { vibespaceNoticeText } = require(path.join(ROOT, 'src/notification-senders.js'));
-      const { renderOwnerNotify } = require(path.join(ROOT, 'src/job-model.js'));
+      const { renderOwnerNotify } = require(path.join(ROOT, 'src/job-model.js'));   // r6: the engine hands the renderer the name it shows (a renderer never reads a record's) — so does each frame below
       const JOBL = 'jb-0000ee14';
       const spentLadder = (tag, { shMod = SH } = {}) => {
         const dir = path.join(DATA, 'handover-spent-' + tag); fs.mkdirSync(dir, { recursive: true });
         const job = jobRec(JOBL, { name: `ledger ${MARK}` });
-        const entry = { source: 'agent', kind: 'notification', fromName: `Background Work · ledger ${MARK}`, text: renderOwnerNotify(job, { what: `announced: ${MARK} totals` }), ts: JT - 5e3 };
+        const entry = { source: 'agent', kind: 'notification', fromName: `Background Work · ledger ${MARK}`, text: renderOwnerNotify(job, { what: `announced: ${MARK} totals` }, { name: job.name }), ts: JT - 5e3 };
         const pm = renderMsgStash([entry], { maxEntries: 30, maxBytes: 12 * 1024 });
         const frame = vibespaceNoticeText(`The user handed over the 1 notice(s) that were waiting for your next turn (hand-over ho-spent-${tag}):\n\n${pm.text}`);
         fs.writeFileSync(path.join(dir, SH.DELIVERED_FILE), J({ [`ho-spent-${tag}`]: { cid: ME_CID, at: Date.now() - 1000, text: frame, msg: [], jobs: [], restored: 1 } }));
@@ -1023,7 +1023,7 @@ console.log('§4b Background Work — verify r3: the ask panel, a covered run\'s
       const job = jobRec(JOBH, { name: `ledger ${MARK}` });
       jmx.jobs.set(job.id, job);
       // T0: the notification is delivered (queued); T1: the owner clears; the ladder's queue was empty
-      await ladder.deliverToConversation(ME_CID, renderOwnerNotify(job, { what: `announced: ${MARK} totals` }), { fromName: `Background Work · ${job.name}`, kind: 'notification' });
+      await ladder.deliverToConversation(ME_CID, renderOwnerNotify(job, { what: `announced: ${MARK} totals` }, { name: job.name }), { fromName: `Background Work · ${job.name}`, kind: 'notification' });
       const jobFrame = sent, jobFrom = sentOpts.fromName;
       const out = jmx.clearJobs([JOBH], { by: 'owner', at: JT });
       // …and the group twin: a wake report queued in a codex member's wrapper, the record cleared
@@ -1045,7 +1045,7 @@ console.log('§4b Background Work — verify r3: the ask panel, a covered run\'s
       const k1 = back(ME_CID, jobFrame, 'notification', jobFrom);
       const k2 = back(OTHER_CID, wakeFrame, 'peer', 'me · wake');
       // a notification rendered AFTER the clear (the job's name is the sentence now; new output) is handed back too: kept
-      sent = null; await ladder.deliverToConversation(ME_CID, renderOwnerNotify(jmx.jobs.get(JOBH), { what: 'announced: fresh output' }), { fromName: `Background Work · ${jmx.jobs.get(JOBH).name}`, kind: 'notification' });
+      sent = null; await ladder.deliverToConversation(ME_CID, renderOwnerNotify(jmx.jobs.get(JOBH), { what: 'announced: fresh output' }, { name: jmx.jobs.get(JOBH).name }), { fromName: `Background Work · ${jmx.jobs.get(JOBH).name}`, kind: 'notification' });
       back(ME_CID, sent, 'notification', `Background Work · ${jmx.jobs.get(JOBH).name}`);
       ladder.flush();
       const disk = fs.readFileSync(path.join(dir, 'msg-stash.json'), 'utf8');
@@ -1104,9 +1104,9 @@ console.log('§4b Background Work — verify r3: the ask panel, a covered run\'s
       const c1 = jmx.clearJobs([job.id, once.id], { by: 'owner', at: JT });
       // between the clears: the cron announces the mailbox again (queued in the codex wrapper); an event of it is in flight
       return (async () => {
-        await ladder.deliverToConversation(ME_CID, renderOwnerNotify(job, { what: `announced: ${M2} — 3 new mails` }), { fromName: `Background Work · ${job.name}`, kind: 'notification' });
+        await ladder.deliverToConversation(ME_CID, renderOwnerNotify(job, { what: `announced: ${M2} — 3 new mails` }, { name: job.name }), { fromName: `Background Work · ${job.name}`, kind: 'notification' });
         const between = { text: sent, from: sentOpts.fromName };
-        await ladder.deliverToConversation(ME_CID, renderOwnerNotify(once, { what: 'announced: fresh output' }), { fromName: `Background Work · ${once.name}`, kind: 'notification' });
+        await ladder.deliverToConversation(ME_CID, renderOwnerNotify(once, { what: 'announced: fresh output' }, { name: once.name }), { fromName: `Background Work · ${once.name}`, kind: 'notification' });
         const onceFrame = { text: sent, from: sentOpts.fromName };
         const c2 = jmx.clearJobs([job.id], { by: 'owner', at: JT + 10 });   // the owner clears the cron AGAIN
         jmx._stashNotif(ME_CID, job, { what: `announced: ${M2} in flight`, at: JT + 5 }, 'not reachable');   // born between the clears, stashed after

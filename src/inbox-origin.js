@@ -69,7 +69,8 @@ const AGENT_FIELDS_ORIGINS = Object.freeze(['jobs']);
 // …and each fields origin's ONE product filer (lane job-notify-user r4, claim r3-1 FINDING 2): the store's add() asserts
 // its CALLER for a fields origin — a src/ file not listed here is refused by name, however it spells the origin
 // ('jo' + 'bs', AGENT_FIELDS_ORIGINS[0], a template literal: the source census read the literal only). A suite's own
-// store (scripts/) is not product code and files freely.
+// store (scripts/) is not product code and files freely. r5: a caller the store cannot NAME (an ESM frame resolves to its
+// path; a bound add run from the queue has none) is refused too — unless it carries the key the store handed its filer.
 const FIELDS_FILERS = Object.freeze({ jobs: Object.freeze(['src/server/jobs-wiring.js']) });
 
 // The group / chip words — English t() keys (the panel words them per device;

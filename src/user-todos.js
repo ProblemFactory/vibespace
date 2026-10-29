@@ -106,20 +106,29 @@ function fillWords(l) {
 // refresh-token: done (ok)» and «…: failed (exit)» to ONE text and the failure merged into the success; and the resolver
 // read /needs your input/, which «rotate-db-password «redacted» your input» no longer said.
 /** the PRODUCT file that called add() (lane job-notify-user r4): the first V8 call site outside this file, as a repo path
- *  (src/…, server.js) — null for a suite's or a tool's own store (scripts/, tools/), a copy outside the checkout, or a
- *  runtime that keeps no call sites */
+ *  (src/…, server.js); SUITE_CALLER for a suite's or a tool's own store (scripts/, tools/); null when the store cannot NAME
+ *  its caller — and r5 (accept-r4 confirmed 1) REFUSES an unnamed caller of a fields origin (r4 let null through: an ESM
+ *  module's frame is a `file://` URL, a bound add run from the microtask / timer queue has no frame of its own — both filed
+ *  origin 'jobs' from an unlisted file). A `file://` frame resolves to its path; a runtime frame (node:…) or one with no
+ *  file is no caller (the next frame is); an eval, a copy outside the checkout or a runtime that keeps no call sites is null. */
+const SUITE_CALLER = Symbol('suite');
+// THE FILER KEYS, OFF THE STORE (lane job-notify-user r6, accept-r5 unverified 0 + 3): a module WeakMap keyed by the store —
+// never a property: r5 kept them on `this._filerKeys`, and any module holding the store lifted the key and filed origin 'jobs'
+// from a frameless call. Only filerKey() mints into it, only add() reads it (test-architecture §93 THE KEY HOLDER).
+const FILER_KEYS = new WeakMap();
 function srcCallerOf(fn) {
   const prep = Error.prepareStackTrace, lim = Error.stackTraceLimit;
   try {
-    Error.stackTraceLimit = 6; Error.prepareStackTrace = (_, cs) => cs;
+    Error.stackTraceLimit = 16; Error.prepareStackTrace = (_, cs) => cs;
     const o = {}; Error.captureStackTrace(o, fn);
+    const root = path.dirname(__dirname);
     for (const c of Array.isArray(o.stack) ? o.stack : []) {
-      const f = c && typeof c.getFileName === 'function' ? c.getFileName() : null;
-      if (!f || f === __filename) continue;
-      const root = path.dirname(__dirname);
-      if (!f.startsWith(root + path.sep)) return null;
+      let f = c && typeof c.getFileName === 'function' ? c.getFileName() : null;
+      if (f && f.startsWith('file://')) { try { f = require('url').fileURLToPath(f); } catch { return null; } }
+      if (!f || f === __filename || f.startsWith('node:')) continue;
+      if (!path.isAbsolute(f) || !f.startsWith(root + path.sep)) return null;
       const rel = path.relative(root, f).split(path.sep).join('/');
-      return /^(scripts|tools|node_modules)\//.test(rel) ? null : rel;
+      return /^(scripts|tools)\//.test(rel) ? SUITE_CALLER : /^node_modules\//.test(rel) ? null : rel;
     }
     return null;
   } catch { return null; } finally { Error.prepareStackTrace = prep; Error.stackTraceLimit = lim; }
@@ -691,7 +700,20 @@ class UserTodoManager {
 
   get(id) { return this._state.items.find((i) => i.id === id) || null; }
 
-  add(sessionKey, { text, detail, urgency, by = 'agent', sessionName = null, jobId = null, kind = null, i18n = null, expiresAt = null, action = null, options = null, origin = null, card = null, facts = null, artifacts = null, cwd = null, hostId = null, openCap = null, plugin = null, open = null, about = null, jobName = null, jobFact = null, itemKey = null } = {}) {
+  /** THE FILER'S KEY (lane job-notify-user r5, accept-r4 confirmed 1): a fields origin's ONE filer (FIELDS_FILERS) takes it at
+   *  wiring time — from its own frame, named like add()'s caller — and hands it on every filing; add() lets a caller it
+   *  cannot name through ONLY with it (a bound add run from the microtask / timer queue). An object this store minted: a
+   *  copy, a key from another store or a hand-built one is refused by name; an unlisted or unnamed caller gets none. r6: the
+   *  keys live in FILER_KEYS (a module WeakMap keyed by this store) — no property of the store holds one. */
+  filerKey(origin) {
+    const filer = srcCallerOf(UserTodoManager.prototype.filerKey), listed = FIELDS_FILERS[origin] || [];
+    if (filer !== SUITE_CALLER && !(filer && listed.includes(filer))) throw new Error(`the filer key of origin '${origin}' is ${listed.join(', ') || 'no product file'}'s — ${filer || 'a caller the store cannot name'} is not its filer`);
+    let minted = FILER_KEYS.get(this);
+    if (!minted) FILER_KEYS.set(this, (minted = new Map()));
+    if (!minted.has(origin)) minted.set(origin, Object.freeze({ origin, of: 'the For-you store' }));
+    return minted.get(origin);
+  }
+  add(sessionKey, { text, detail, urgency, by = 'agent', sessionName = null, jobId = null, kind = null, i18n = null, expiresAt = null, action = null, options = null, origin = null, card = null, facts = null, artifacts = null, cwd = null, hostId = null, openCap = null, plugin = null, open = null, about = null, jobName = null, jobFact = null, itemKey = null, filerKey = null } = {}) {
     const _dataDir = path.dirname(this._file);   // agent-output-sinks: the belt finds the vault from here
     // agent-output-sinks: belt an AGENT's own words — never a system producer's notice (vault / spend / channels / machines / …).
     // Two shapes (src/inbox-origin.js): AGENT_WORDS_ORIGINS — the whole text and detail are the agent's (vibespace-ask);
@@ -705,9 +727,15 @@ class UserTodoManager {
     const beltOf = (s) => belt.maskForSink(s, { dataDir: _dataDir });
     if (agentFields) {
       // THE ONE FILER per fields origin (lane job-notify-user r4): a product file not listed in FIELDS_FILERS is refused by
-      // name, whatever spelling of the origin it used — the store judges the WRITER by what it writes
-      const filer = srcCallerOf(UserTodoManager.prototype.add);
-      if (filer && !(FIELDS_FILERS[origin] || []).includes(filer)) throw new Error(`origin '${origin}' is filed only by ${(FIELDS_FILERS[origin] || []).join(', ') || 'no product file'} — ${filer} is not its filer`);
+      // name, whatever spelling of the origin it used — the store judges the WRITER by what it writes. r5: FAIL CLOSED — a
+      // caller the store cannot name is refused too, unless the filing carries the KEY this store handed its filer
+      // (filerKey(): a bound add run from the queue has no frame of its own; a key it never minted is refused by name)
+      const filer = srcCallerOf(UserTodoManager.prototype.add), listed = FIELDS_FILERS[origin] || [];
+      if (filer !== SUITE_CALLER) {
+        if (filer && !listed.includes(filer)) throw new Error(`origin '${origin}' is filed only by ${listed.join(', ') || 'no product file'} — ${filer} is not its filer`);
+        if (!filer && filerKey == null) throw new Error(`origin '${origin}' needs a caller the store can name — it is filed only by ${listed.join(', ') || 'no product file'} (a filing with no frame of its own carries the key the store handed its filer)`);
+        if (filerKey != null && filerKey !== (FILER_KEYS.get(this) || new Map()).get(origin)) throw new Error(`origin '${origin}' carries a filer key this store never handed out — refused`);
+      }
       if (text != null || detail != null) throw new Error(`origin '${origin}' files its words as i18n {key, params} — the store composes the text and detail (each field belted on its own, never the sentence)`);
       // the shape is refused by name first; each param is belted BEFORE the clamp (a token across the 600-char cut is masked whole)
       i18n = i18n == null ? null : normalizeI18n((normalizeI18n(i18n), maskI18nParams(i18n, beltOf)));
@@ -805,8 +833,7 @@ class UserTodoManager {
     // int361 (主开发's seam (a)): ONE identity predicate — by itemKey when the filing has one, else by jobId + jobFact when it
     // has a fact, else by text among items with neither key; every branch excludes a cleared item and a DECIDED decision row
     // (lane wake-approve-card r2: a re-file is a new question beside it, never its reopen)
-    // text; one that names none never merges into one that does (a job's copy is the job's). r4: ONE identity predicate,
-    // one branch per kind of identity — the shape a second identity (a producer's key, a decided row's finality) composes into
+    // lane job-notify-user r4/r5: that predicate is `sameCopy` — one branch per kind of identity (the kb essay names it in these words)
     // THE ONE IDENTITY (int361 seam, composed by meaning): by the producer's itemKey when the filing has one, else by (jobId, jobFact) when it names a fact, else by its words among items naming NEITHER — never a cleared item, never a DECIDED decision row (a re-file is a new item beside it)
     itemKey = typeof itemKey === 'string' && itemKey ? itemKey.slice(0, 300) : null;
     const sameCopy = (i) => (itemKey ? i.itemKey === itemKey : jobFact ? i.jobId === jobId && i.jobFact === jobFact && sameFiling(i) : i.text === text && sameFiling(i) && !i.itemKey && !i.jobFact);

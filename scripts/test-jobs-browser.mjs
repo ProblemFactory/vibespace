@@ -54,7 +54,9 @@ function principalTable(M) {
 }
 console.log('— ① the principal table');
 for (const r of principalTable(J)) ok(r.good, `${r.name} → ${r.want}`, r.v);
-ok(J.jobLabelOf(job()) === 'job daily reconcile' && J.jobLabelOf(job({ name: '' })) === 'job jb-11112222' && J.jobLabelOf(job({ name: 'x'.repeat(80) })).length === 44, 'jobLabelOf: "job <name>" (≤ 40 chars of it), the id when unnamed');
+{ const L = (j) => String(j.name || j.id);   // the engine's ONE name accessor's contract (lane job-notify-user r5: src/jobs.js labelOf)
+  ok(J.jobLabelOf(job(), L) === 'job daily reconcile' && J.jobLabelOf(job({ name: '' }), L) === 'job jb-11112222' && J.jobLabelOf(job({ name: 'x'.repeat(80) }), L).length === 44, 'jobLabelOf: "job <name>" (≤ 40 chars of it) through the accessor the caller hands, the id when unnamed');
+  ok(J.jobLabelOf(job()) === 'job jb-11112222', 'jobLabelOf: no accessor ⇒ the job\'s ID — never the record\'s name (fail closed, r5)'); }
 
 console.log('— ① the routes: every /api/agent/browser/* route is in exactly ONE list (a census of the source)');
 const routesSrc = fs.readFileSync(path.join(REPO, 'src/routes/browser.js'), 'utf8');
@@ -244,7 +246,8 @@ console.log('— ④ the real routes + keeper: a job gets its own lease + window
   const jobs = new Map([['jb-0000aaaa', { id: 'jb-0000aaaa', name: 'daily reconcile', state: 'up', owner: { conversation: { id: 'conv-userW-1' } } }],
     ['jb-0000bbbb', { id: 'jb-0000bbbb', name: 'second', state: 'up', owner: { conversation: { id: 'conv-userW-1' } } }]]);
   const tokens = new Map([['jbt_aaaa', 'jb-0000aaaa'], ['jbt_bbbb', 'jb-0000bbbb']]);
-  const jm = { ready: true, jobs, jobByToken: (t) => jobs.get(tokens.get(t)) || null };
+  const eng = Object.assign(Object.create(require('../src/jobs.js').JobManager.prototype), { d: { dataDir: path.join(O, 'data-job'), log() { } } });
+  const jm = { ready: true, jobs, jobByToken: (t) => jobs.get(tokens.get(t)) || null, labelOf: (j) => eng.labelOf(j) };   // r5: + the ONE name accessor (the engine's own)
   const k = mk(K, { dataDir: path.join(O, 'data-job'), jobRunning: (id) => J.isRunningJob(jobs.get(id)) }); await k._facts.probeVersion();
   const pBank = k.createProfile({ label: 'Bank' });
   const pOther = k.createProfile({ label: 'Other' });

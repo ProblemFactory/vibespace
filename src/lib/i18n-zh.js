@@ -2930,6 +2930,7 @@ export default {
   "Background job {id}": "后台任务 {id}",
   "Background Work engine failed to start: {error}": "后台工作引擎启动失败：{error}",
   "Background Work store was corrupt — records recovered as unverified; resolve them in the Jobs panel": "后台工作的存储已损坏 — 记录已按「未核实」恢复；请在任务面板里处理",
+  "Background job {name} has a notice for you — open it in the Jobs panel": "后台任务 {name} 有一条给你的通知 — 请在任务面板里打开它",
   "global setting": "全局设置",
   "group “{name}”": "组“{name}”",
   "messaged the owner conversation {ago}": "{ago}已给所属对话发消息",

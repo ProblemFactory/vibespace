@@ -31,6 +31,32 @@ function writeJsonAtomic(file, obj) {
 /** The per-conversation notification cap (30): the oldest UNCLAIMED entries fall off; an entry stamped `ho` is being
  *  handed over and leaves by that hand-over's own drain (channel-jump verify r4 — the ladder's store has the same
  *  rule, conversation-deliver `capUnclaimed`). The store may exceed the cap by the claimed count while one is in flight. */
+// THE FOR-YOU DEP, OFF THE OBJECT GRAPH (lane job-notify-user r6, accept-r5 unverified 2): the store's dep lives HERE — a
+// module WeakMap keyed by the engine — never on the engine or on `this.d`: r5 kept it on `this._forYouDep` and made `this.d`
+// an Object.create(deps), so `Object.getPrototypeOf(this.d).notifyUser` reached the raw dep with no journal line. The ONE
+// set is the constructor's, the ONE get is _forYou's (test-architecture §93 THE DOOR CENSUS).
+const FOR_YOU_DEPS = new WeakMap();
+/** the engine's view of its deps: every dep read LIVE off `deps` (a wiring or a suite sets one after the engine is built),
+ *  the For-you dep answered by the stray door — and NO road back to `deps` (no prototype link, no own copy of notifyUser:
+ *  a Proxy's target and handler are unreachable). A write lands on the view (a suite's stub shadows a dep, as before). */
+function depsView(deps, own) {
+  const mine = Object.assign(Object.create(null), own);
+  return new Proxy(mine, {
+    get: (t, k) => (k in t ? t[k] : k === 'notifyUser' ? undefined : deps[k]),
+    has: (t, k) => k in t || (k !== 'notifyUser' && k in deps),
+  });
+}
+/** the frame that called `fn` (V8 call sites) — `src/jobs.js:1345 _finalizeRun` — for the stray door's log line */
+function callerOf(fn) {
+  const keep = Error.prepareStackTrace, lim = Error.stackTraceLimit;
+  try {
+    Error.stackTraceLimit = 1; Error.prepareStackTrace = (_, cs) => cs;
+    const o = {}; Error.captureStackTrace(o, fn);
+    const c = Array.isArray(o.stack) ? o.stack[0] : null; if (!c) return 'a caller with no frame of its own';
+    const f = String(c.getFileName() || ''), abs = f.startsWith('file://') ? require('url').fileURLToPath(f) : f;
+    return `${abs ? path.relative(path.join(__dirname, '..'), abs) : '(no file)'}:${c.getLineNumber()}${c.getFunctionName() ? ' ' + c.getFunctionName() : ''}`;
+  } catch { return 'a caller the engine cannot name'; } finally { Error.prepareStackTrace = keep; Error.stackTraceLimit = lim; }
+}
 const NOTIF_STASH_CAP = 30;
 const FLOOR_DROP_WINDOW_MS = 60 * 60 * 1000;   // verify r4: a floor witness from the future is dropped once; a second within this window is re-based (the clock keeps going back)
 /** B-dfb4 (the product decision, notify-retry verify r4): an eviction is SAID to the owner — a For-you notice (origin
@@ -132,9 +158,13 @@ class JobManager {
     // HERE and reached through _forYou alone; `this.d.notifyUser` is the STRAY door — a filing that skipped _forYou (a merge
     // that kept an older direct call) still reaches the store with its own shape, and the store's verdict is JOURNALED on
     // the job it names (r3: the wiring dropped its `text`, the store refused «i18n.text needs a key» into a swallowed catch —
-    // 0 items, no line, poll silent). test-architecture §93 names every method that reaches the dep (THE DOOR CENSUS).
-    this._forYouDep = typeof deps.notifyUser === 'function' ? deps.notifyUser : null;
-    this.d = Object.assign(Object.create(deps), { notifyUser: (a) => this._forYouStray(a) });
+    // 0 items, no line, poll silent). test-architecture §93 names every line that reaches the dep (THE DOOR CENSUS) in every
+    // file that can hold it (src/, server.js, data/bin) and every scope — r5: this ONE line is the constructor's whole share
+    // (r4 exempted the whole constructor: a closure made here over deps.notifyUser was a second door the census never saw).
+    // r6: the dep is held OFF the object graph (FOR_YOU_DEPS) and `this.d` has no road back to `deps` (depsView)
+    FOR_YOU_DEPS.set(this, typeof deps.notifyUser === 'function' ? deps.notifyUser : null);
+    const stray = (a) => this._forYouStray(a, callerOf(stray));
+    this.d = depsView(deps, { notifyUser: stray });
     this._labelMemo = new Map();   // name → its belted label (the belt reads the vault; a list snapshot asks for every name)
     this.file = path.join(deps.dataDir, 'jobs.json');
     this.notifsFile = path.join(deps.dataDir, 'job-notifications.json');
@@ -397,7 +427,7 @@ class JobManager {
     const archHits = arch.filter(family);
     // the names every derived copy is FILED UNDER (the ladder's stash heads a job's message
     // 'Background Work · <name>') — read before the record loses them
-    const namesBefore = new Set([...liveHits, ...archHits].flatMap((j) => (j.name ? [j.name, this._jobLabel(j)] : [])));   // the ladder stash's label carries the BELTED name (lane job-notify-user r3) — an older entry the raw one
+    const namesBefore = new Set([...liveHits, ...archHits].flatMap((j) => (j.name ? [j.name, this.labelOf(j)] : [])));   // the ladder stash's label carries the BELTED name (lane job-notify-user r3) — an older entry the raw one
     const nameBefore = new Map([...liveHits, ...archHits].map((j) => [j.id, j.name]));
     for (const id of want) if (!this.jobs.has(id) && !arch.some((r) => r.id === id)) out.unknown.push(id);
     const verdictOf = (j) => { const v = allow ? allow(j) : { ok: true }; return v && v.ok ? null : (v || { code: 'not_yours' }); };
@@ -486,7 +516,7 @@ class JobManager {
     // …and never ANOTHER job's (lane-redact verify r9): names are not unique — a live service NOT cleared that bears the same
     // name and publishes that forward's port owns it (its Ports row read the sentence until its next publish); an orphan
     // forward with the cleared name (no live owner) still goes — fail closed
-    const sameNameLive = (rec) => [...this.jobs.values()].some((o) => !gone.has(o.id) && o.kind === 'service' && o.publish && ('service: ' + o.name === rec.label || 'service: ' + this._jobLabel(o) === rec.label) && (o.ports || []).map(Number).includes(Number(rec.remotePort)));
+    const sameNameLive = (rec) => [...this.jobs.values()].some((o) => !gone.has(o.id) && o.kind === 'service' && o.publish && ('service: ' + o.name === rec.label || 'service: ' + this.labelOf(o) === rec.label) && (o.ports || []).map(Number).includes(Number(rec.remotePort)));
     if (svcLabels.size && this.d.getPorts) {
       try {
         const pf = this.d.getPorts();
@@ -601,7 +631,7 @@ class JobManager {
       // other agents, never the author from itself (r2 belted it: «Renew the auth token: run the refresh script» arrived
       // as «Renew the auth token: «redacted»») — while a SUBSCRIBER (another conversation) gets it belted, and the
       // context the owner attached too. A subscriber's --filter matches the words it will receive (the belted copy).
-      const name = this._jobLabel(job);
+      const name = this.labelOf(job);
       const notifText = M.renderOwnerNotify(job, ev, { name });
       const subEv = ev && ev.agentWhat ? { ...ev, what: this._agentWords(ev.what) } : ev;
       const ctx0 = !job.context ? '' : typeof job.context === 'string' ? job.context : (job.context.payload || '');
@@ -628,7 +658,7 @@ class JobManager {
    *  floor → socket post → stash fallback. Subscriber deliveries never stamp
    *  the job's lastNotify (that field narrates the OWNER lane). */
   _deliverTo(cid, job, ev, { subscriber, text: preText } = {}) {
-    const text = preText || M.renderOwnerNotify(job, ev, { name: this._jobLabel(job) });
+    const text = preText || M.renderOwnerNotify(job, ev, { name: this.labelOf(job) });
     // engine-side flood floor (the CLI also rate-limits + dedupes): ≥30s
     // between SOCKET posts per conversation, identical text 10min. A floored
     // DISTINCT event is STASHED, not dropped (2.344.1 review catch); only an
@@ -677,9 +707,9 @@ class JobManager {
     // THE RETRY PARK (lane notify-retry): a transient miss on a LIVE pid is parked by the ladder for this producer —
     // the meta is what this engine needs to book the outcome later (the job, the event, the raw text's digest for
     // the floor), with or without the job record still in the registry
-    const retry = { producer: 'jobs', meta: { jobId: job.id, jobName: this._jobLabel(job), ev: { what: (ev && ev.what) || job.state, at: (ev && ev.at) || now() }, subscriber: !!subscriber } };   // the NAME belted (lane job-notify-user r3)
+    const retry = { producer: 'jobs', meta: { jobId: job.id, jobName: this.labelOf(job), ev: { what: (ev && ev.what) || job.state, at: (ev && ev.at) || now() }, subscriber: !!subscriber } };   // the NAME belted (lane job-notify-user r3)
     const deliver = this.d.deliverToConversation
-      ? this.d.deliverToConversation(cid, text, { fromName: 'Background Work · ' + this._jobLabel(job), kind: 'notification', spendReason: 'job-notification', retry })
+      ? this.d.deliverToConversation(cid, text, { fromName: 'Background Work · ' + this.labelOf(job), kind: 'notification', spendReason: 'job-notification', retry })
       : Promise.resolve({ ok: false, reason: 'no delivery lane wired' });
     Promise.resolve(deliver).then((r) => {
       if (r && r.ok) {
@@ -769,7 +799,7 @@ class JobManager {
     // a delivery that was IN FLIGHT when the owner cleared the job stashes here afterwards with the words it
     // captured before the clear (verify r3): an event born before the clear is held as the sentence
     const stale = job.clearedAt && !((ev && ev.at) > Math.max(job.clearedAt, job.reclearedAt || 0));   // …born before the LATEST clear (verify r4: a second clear of an `already` record keeps the first clearedAt)
-    q.push({ jobId: job.id, jobName: stale ? CLEARED_TEXT : this._jobLabel(job), text: stale ? CLEARED_TEXT : ((ev && ev.what) || job.state), ts: now(), urgency: job.state === 'failed' ? 'normal' : 'low', held: held || heldOf(null, reason) });
+    q.push({ jobId: job.id, jobName: stale ? CLEARED_TEXT : this.labelOf(job), text: stale ? CLEARED_TEXT : ((ev && ev.what) || job.state), ts: now(), urgency: job.state === 'failed' ? 'normal' : 'low', held: held || heldOf(null, reason) });
     const dropped = capUnclaimedNotifs(q); // per-conversation cap; a may-have-landed copy first, then the oldest UNCLAIMED (a claimed one is being handed over — verify r4)
     const n = dropped.length;
     if (n) this.d.log(`[jobs] ${cid}: ${n} oldest waiting notification(s) fell off the ${NOTIF_STASH_CAP}-entry cap (${dropped.map((e) => `${e.jobId} ${new Date(Number(e.ts) || 0).toISOString()}${e.held && e.held.maybeDelivered ? ' — a may-have-landed copy, gave way first' : ''}`).join('; ')}) — never delivered (channel-jump verify r6: an eviction is said)`);
@@ -978,7 +1008,7 @@ class JobManager {
     // Viewers see events PASSIVELY at their next injection only (owner call
     // 2.348.0: acceptable because it never wakes anyone and the renderer
     // coalesces per-job announce floods — see renderJobsUpdate).
-    this.events.push({ ts: now(), jobId: job.id, name: this._jobLabel(job), what, verb });   // r4: the NAME belted (the injected digest — another conversation reads it)
+    this.events.push({ ts: now(), jobId: job.id, name: this.labelOf(job), what, verb });   // r4: the NAME belted (the update lines — another conversation reads it)
     if (this.events.length > 400) this.events.splice(0, this.events.length - 400);
   }
 
@@ -1460,7 +1490,7 @@ class JobManager {
     try {
       const pf = this.d.getPorts && this.d.getPorts();
       if (!pf) return;
-      const rec = await pf.forward('__local__', job.ports[0], { label: 'service: ' + this._jobLabel(job) });   // r4: the Ports label is a person's — the NAME belted
+      const rec = await pf.forward('__local__', job.ports[0], { label: 'service: ' + this.labelOf(job) });   // r4: the Ports label is a person's — the NAME belted
       job._pfId = rec && rec.id;
       job._publish = { state: 'publishing' }; this._touch(job);
       const waitMs = this.d.publishWaitMs ?? 60_000;
@@ -1583,13 +1613,17 @@ class JobManager {
   _agentWords(s) {
     try { return require('./agent-output-belt.js').maskForSink(String(s == null ? '' : s), { dataDir: this.d.dataDir }); } catch { return String(s == null ? '' : s); }
   }
-  /** the job's NAME as every message-road copy carries it (lane job-notify-user r3 — the header, the chat card's label,
-   *  the stash, the retry meta): belted on its own (claim r2-0 (b): `deploy ghp_…` reached the chat raw) — and (r4, claim
-   *  r3-1 FINDING 3) wherever a PERSON or ANOTHER conversation reads it: the snapshot a non-author reads (the Jobs panel's
-   *  card title, the ask window's title and so the taskbar, another lineage's view), the events ring (the injected digest),
-   *  the Ports label. The RECORD keeps the raw name (data/jobs.json, the archive): the author's own fact, whole to it.
+  /** THE ONE ACCESSOR of a job's PERSON-FACING NAME (lane job-notify-user r5, accept-r4 confirmed 0 + refuted 0): the name
+   *  belted on its own — every message-road copy (r3: the header, the chat card's label, the stash, the retry meta), and
+   *  (r4) wherever a PERSON or ANOTHER conversation reads it: the snapshot a non-author reads (the Jobs panel's card title,
+   *  the ask window's title and so the taskbar, another lineage's view), the events ring (the update lines), the injected digest's rows (digestFor, r6), the Ports
+   *  label — and (r5) EVERY holder of a record outside this engine asks HERE (M.labelVia(jm): the Ports scan row, the
+   *  Artifacts service row and its chat card, the browser's job label and its strip row, the vault's asker, feedback's
+   *  session, the memory-pressure roots, the live view's tab); r4 belted the forward label and left its scan row one line
+   *  away raw. The RECORD keeps the raw name (data/jobs.json, the archive): the author's own fact, whole to it.
+   *  test-architecture §93 THE NAME CENSUS names any reader of a record's name that skips this accessor.
    *  Memoised 30 s per name (the belt reads the vault; a list snapshot asks for every name). */
-  _jobLabel(job) {
+  labelOf(job) {
     const raw = String((job && (job.name || job.id)) || '');
     const memo = this._labelMemo || (this._labelMemo = new Map());   // (a manager built without the constructor — a suite's mutant — still names)
     const hit = memo.get(raw), t = now();
@@ -1609,20 +1643,25 @@ class JobManager {
   _forYou(job, c) {
     // r4: EVERY engine filing comes through here — a job's copies and the engine's own notices (`job` null: no journal, the
     // log says a refusal); a copy forYouCopy does not know is refused BY NAME (claim r3-2 minor 7: a TypeError into _finalizeRun)
-    if (!c || !c.words || !c.fact) return this._forYouVerdict(job, { ok: false, why: (c && c.refused) || 'no such For-you copy' }, (c && c.copy) || 'unknown');
+    // r5: the ONE line that reaches the dep. r6: a copy is the engine's words + its fact, nothing else — a SHAPED copy (a
+    // hand-built one handed through M.forYouCopy) is refused by name and said in the log with its caller, like a stray
+    if (!c || !c.words || !c.fact) {
+      if (c && c.refused && (c.copy === 'stray' || c.copy === 'shaped')) this.d.log(`[jobs] a For-you filing outside the one door (src/jobs.js _forYou) — caller ${callerOf(JobManager.prototype._forYou)}${job ? ' — job ' + job.id : ''}: ${c.refused}`);
+      return this._forYouVerdict(job, { ok: false, why: (c && c.refused) || 'no such For-you copy' }, (c && c.copy) || 'unknown');
+    }
+    const forYouDep = FOR_YOU_DEPS.get(this) || null;
     let v;
-    try { v = this._forYouDep ? this._forYouDep({ words: c.words, fact: c.fact, urgency: c.urgency, ...(job ? { jobId: job.id, jobName: job.name, ownerCid: job.owner?.conversation?.id || null } : {}) }) : { ok: false, why: 'no For-you store is wired' }; } catch (e) { v = { ok: false, why: e.message }; }
+    try { v = forYouDep ? forYouDep({ words: c.words, fact: c.fact, urgency: c.urgency, ...(job ? { jobId: job.id, jobName: job.name, ownerCid: job.owner?.conversation?.id || null } : {}) }) : { ok: false, why: 'no For-you store is wired' }; } catch (e) { v = { ok: false, why: e.message }; }
     return this._forYouVerdict(job, v, c.fact.split(':')[0]);
   }
-  /** THE STRAY DOOR (r4): `this.d.notifyUser(...)` called from anywhere but _forYou — filed with its OWN shape (the wiring
-   *  passes it through, so a composed text is refused in the store's own words), journaled on the job it names (copy =
-   *  its fact, else `stray`) and said in the server log. Nothing a stray filing gets refused is ever swallowed. */
-  _forYouStray(a) {
+  /** THE STRAY DOOR (r4): `this.d.notifyUser(...)` called from anywhere but _forYou — said in the server log WITH ITS CALLER
+   *  and journaled on the job it names (copy `stray`). r5: it files THROUGH _forYou. r6 (accept-r5 confirmed 1): it files the
+   *  stray copy — the engine's OWN words + the fact `stray` — never the stray's shape (r5 carried any shape through the one
+   *  door, so `M.forYouCopy(job, 'stray', { shape })` laundered a hand-built copy as a real one). */
+  _forYouStray(a, caller = 'a caller the engine cannot name') {
     const job = a && a.jobId ? this.jobs.get(a.jobId) || null : null;
-    this.d.log(`[jobs] a For-you filing outside the one door (src/jobs.js _forYou)${job ? ' — job ' + job.id : ''}`);
-    let v;
-    try { v = this._forYouDep ? this._forYouDep(a) : { ok: false, why: 'no For-you store is wired' }; } catch (e) { v = { ok: false, why: e.message }; }
-    return this._forYouVerdict(job, v, (a && typeof a.fact === 'string' && a.fact && a.fact.split(':')[0]) || 'stray');
+    this.d.log(`[jobs] a For-you filing outside the one door (src/jobs.js _forYou) — caller ${caller}${job ? ' — job ' + job.id : ''}: filed as the stray copy, its own words are not filed`);
+    return this._forYou(job, M.forYouCopy(job, 'stray'));
   }
   /** a For-you copy's VERDICT: journaled on its job (`user-inbox ✓|✗ — why`, `copy` names which; a dep that answers nothing
    *  is taken at its word), and kept on the record as the LAST verdict per copy (`forYouLast` — r4, claim r3-1 (c): the
@@ -2112,7 +2151,7 @@ class JobManager {
       // delivery rides the same toggles/rate-floor/stash as every job event.
       // the --text is the author's WORDS (whole to it, belted for a subscriber); with none the body is the job's LABEL — the same
       // belted name the header and the card carry (r4, claim r3-2 minor 6: the raw name rode the body beside a masked header)
-      this._notifyOwner(job, a.text ? { what: a.text, agentWhat: true } : { what: this._jobLabel(job) });
+      this._notifyOwner(job, a.text ? { what: a.text, agentWhat: true } : { what: this.labelOf(job) });
       this._event(job, 'cron fired: notify');
     } else if (a.type === 'spawn-task') {
       // ONE persistent child per cron (2.343.3, owner report: every fire used
@@ -2355,7 +2394,7 @@ class JobManager {
     const out = {
       // the NAME: whole for its AUTHOR (the agent route's owner lineage, the create echo), belted for every other reader — the
       // Jobs panel's card title, the ask window's title, another lineage (r4, claim r3-1 FINDING 3; the record keeps it raw)
-      id: job.id, kind: job.kind, name: author || !job.name ? job.name : this._jobLabel(job), note: job.note, state: job.state, publishedUrl: job.publishedUrl || null,
+      id: job.id, kind: job.kind, name: author || !job.name ? job.name : this.labelOf(job), note: job.note, state: job.state, publishedUrl: job.publishedUrl || null,
       // lane job-notice-dedupe: the down record is the state while the service runs (a re-publish in flight does not hide it);
       // a stopped service has none (teardown ends the episode)
       publishState: job.publishDown && job.publish && !job.publishedUrl ? 'failed' : job._publish ? job._publish.state : null, publishError: (job.publishDown && job.publishDown.error) || null, lastPublicUrl: job.lastPublicUrl || null,
@@ -2441,8 +2480,11 @@ class JobManager {
   // injection surfaces (agent-routes): caller-filtered, budgeted in the model
   digestFor(caller, existingBytes) {
     const vis = M.visibleJobs([...this.jobs.values()], caller).filter((j) => j.state !== 'done' || now() - ((j.runs || [])[j.runs?.length - 1]?.endedAt || 0) < 86400e3);
-    const withAge = vis.map((j) => ({ ...j, ageHint: this._ageHint(j) }));
-    return M.fitDigest(existingBytes, M.renderJobsDigest(withAge), { count: vis.length });
+    // r6 (accept-r5 confirmed 0): a RECORD never crosses into the renderer — each ROW is built here, its name the ONE accessor's
+    // (labelOf belts the WHOLE name; the renderer cuts the label — the cut never precedes the mask). r5 spread the record
+    // (`{ ...j, ageHint }`) and jobLine cut `j.name` to 24: another conversation's SessionStart context read a token's head raw
+    const rows = vis.map((j) => ({ id: j.id, kind: j.kind, state: j.state, ageHint: this._ageHint(j), label: this.labelOf(j) }));
+    return M.fitDigest(existingBytes, M.renderJobsDigest(rows), { count: vis.length });
   }
   updatesFor(caller, sinceTs) {
     const visIds = new Set(M.visibleJobs([...this.jobs.values()], caller).map((j) => j.id));

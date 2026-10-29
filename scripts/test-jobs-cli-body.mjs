@@ -100,7 +100,7 @@ const REAL = engine(JobManager, 'real');
 // CONTROL engine: the parent→child hand-over cut (the line this lane added) — a scheduled child no longer hears its parent
 const HAND = '      child.notifyUser = M.notifyUserOf(job);\n';
 const STORE = 'action: M.storedAction(spec.action),';
-const SAID = '      this._notifyOwner(job, a.text ? { what: a.text, agentWhat: true } : { what: this._jobLabel(job) });\n';   // r3: the author gets its own words whole (r4: no --text ⇒ the label the header carries)
+const SAID = '      this._notifyOwner(job, a.text ? { what: a.text, agentWhat: true } : { what: this.labelOf(job) });\n';   // r3: the author gets its own words whole (r4: no --text ⇒ the label the header carries)
 const SUBBELT = '      const subEv = ev && ev.agentWhat ? { ...ev, what: this._agentWords(ev.what) } : ev;\n';   // …a subscriber, belted
 const HANDS = once('src/jobs.js', HAND), STORES = once('src/jobs.js', STORE), SAIDS = once('src/jobs.js', SAID) && once('src/jobs.js', SUBBELT);
 const NOHAND = engine(HANDS ? loadPatched('src/jobs.js', [[HAND, '']]).JobManager : JobManager, 'no-handover');

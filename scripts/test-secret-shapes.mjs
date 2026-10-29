@@ -56,6 +56,12 @@ console.log('§1 redactSecrets — the shared masker’s contract (R1–R8 exhau
   ok(!kv.text.includes(KVV) && kv.text.includes('api_token'), 'a secret-named KV: the value goes, the name stays');
   ok(redactSecrets(PLAIN).text === PLAIN && redactSecrets(PLAIN).redacted === 0, 'a non-secret line is returned unchanged (a false hide costs, so the rule is narrow)');
   ok(redactSecrets(redactSecrets(PAT).text).text === redactSecrets(PAT).text, 'idempotent: a redacted text redacts to itself');
+  // lane job-notify-user r6: a letters-and-digits family ends where its letters end — a `-` / `_` after it is the text's (a job named
+  // «<token> deploy» is STORED `<token>-deploy`; the old common tail `(?![A-Za-z0-9_\-])` left it whole: the ONE name accessor showed it)
+  const tail = [PAT + '-deploy', 'deploy-' + PAT + '-2', PAT + '_backup'].map((t) => redactSecrets(t).text);
+  const OLD_TAIL = new RegExp('\\bgh[pousr]_[A-Za-z0-9]{20,255}(?![A-Za-z0-9_\\-])');
+  ok(tail.every((t) => !t.includes(MAT) && t.includes(REDACTED)) && tail[0] === 'ghp_' + REDACTED + '-deploy' && OLD_TAIL.test(PAT) && !OLD_TAIL.test(PAT + '-deploy') && redactSecrets('sk-' + MAT + '-x').text === 'sk-' + REDACTED,
+    'a known prefix followed by `-` / `_` (a job name `<token>-deploy`, a suffix `-2`) is redacted — the prefix and the words after stay; a family whose material holds `-` still takes its whole run', tail);
   const shp = redactSecrets('x');
   ok(typeof shp.text === 'string' && typeof shp.redacted === 'number', 'returns { text, redacted }');
   ok(redactSecrets('').text === '' && redactSecrets(null).text === '', 'empty / null is handled');
