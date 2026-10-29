@@ -309,10 +309,18 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   // entry past the cap reloaded as ON with no `opened` record = OWNER-opened = every member usable (fail OPEN — the opposite of
   // the audit's «fail closed»). Now `runnable` is capped too and `opened` holds ONLY kept-runnable entries: an entry past the cap
   // drops from BOTH ⇒ reloads OFF (the owner re-opens) — a paused member is never silently un-paused by a restart. round 10
-  // (MINOR): the cut drops the OLDEST past the cap (`slice(-ENTRY_MAX)` over the Set's insertion order, then sorted for the mark),
-  // never the entry the owner JUST toggled on; and `save` rebuilds the live sets from the PERSISTED (capped) body, so the bound
-  // bites in MEMORY immediately — r9 kept the uncapped set as `db`, so a past-cap entry ran ON until the next reload, then OFF.
-  const bodyOf = (d) => { const runSorted = [...d.runnable].slice(-ENTRY_MAX).sort(); const runSet = new Set(runSorted); return JSON.stringify({ v: 1, gen: Number(d.gen) || 0, runnable: runSorted, ...(d.suspended && d.suspended.size ? { suspended: [...d.suspended].sort().slice(0, ENTRY_MAX) } : {}), always: d.always.slice().sort((a, b) => (a.conv + a.key).localeCompare(b.conv + b.key)),
+  // (MINOR): the cut drops the OLDEST past the cap, never the entry the owner JUST toggled on; `save` rebuilds the live sets
+  // from the PERSISTED (capped) body, so the bound bites in MEMORY immediately — r9 kept the uncapped set as `db`, so a past-cap
+  // entry ran ON until the next reload, then OFF. round 11 (MINOR): ONE eviction order on disk AND in memory, by the entry's
+  // opened-at stamp (newest kept, oldest dropped; ties by id). r10 used `slice(-ENTRY_MAX)` over Set insertion order, which did
+  // NOT survive a reload (load rebuilds the Set from the lexicographically-SORTED disk array, so the next cut dropped the
+  // smallest id, not the oldest); and `suspended` was kept lexicographically-FIRST on disk (`sort().slice(0,…)`) but newest-in
+  // -memory — the «paused» words flipped across a restart. The stamp rides `opened[id].at` and PERSISTS, so the order a restart
+  // restores IS the order memory trims by; a no-press entry (manual ON, or any suspended entry) has stamp 0 and sorts by id —
+  // deterministic and identical in both places. The serialized array stays sorted lexicographically so the mark verifies.
+  const stampAt = (opened, id) => (opened && opened[id] && Number(opened[id].at)) || 0;
+  const keepNewest = (ids, opened, max) => [...ids].sort((a, b) => (stampAt(opened, a) - stampAt(opened, b)) || (a < b ? -1 : a > b ? 1 : 0)).slice(-max);
+  const bodyOf = (d) => { const runSorted = keepNewest(d.runnable, d.opened, ENTRY_MAX).sort(); const runSet = new Set(runSorted); return JSON.stringify({ v: 1, gen: Number(d.gen) || 0, runnable: runSorted, ...(d.suspended && d.suspended.size ? { suspended: keepNewest(d.suspended, d.opened, ENTRY_MAX).sort() } : {}), always: d.always.slice().sort((a, b) => (a.conv + a.key).localeCompare(b.conv + b.key)),
     ...(d.policies && Object.keys(d.policies).length ? { policies: Object.fromEntries(Object.keys(d.policies).sort().slice(0, ENTRY_MAX).map((k) => [k, d.policies[k]])) } : {}),   // lane vault-use-grants (R4): only when there is one — a body without them is marked as before
     ...(d.policyRevoked && d.policyRevoked.length ? { policyRevoked: d.policyRevoked.slice().sort((a, b) => (a.conv + a.key).localeCompare(b.conv + b.key)).slice(0, REVOKE_MAX) } : {}),
     ...(d.policyApproved && Object.keys(d.policyApproved).length ? { policyApproved: Object.fromEntries(Object.keys(d.policyApproved).sort().slice(0, ENTRY_MAX).map((k) => [k, { n: Number(d.policyApproved[k].n) || 0, lastAt: Number(d.policyApproved[k].lastAt) || 0, shapes: (d.policyApproved[k].shapes || []).slice(-AP_MAX).map((s) => ({ conv: s.conv, key: s.key, ...(s.shape ? { shape: s.shape } : {}) })), items: (d.policyApproved[k].items || []).slice(-AP_MAX) }])) } : {}),   // lane vault-use-grants round 2 (MAJOR): the judge's approvals ride the marked store so a Revoke survives a restart — ONE canonical key order AND cap so save and load serialize identically (the mark verifies); `shape` = the coarse shape key the Revoke covers (round 3)
@@ -457,11 +465,12 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     try { writeJsonAtomic(FILE, { ...JSON.parse(body), mark }); } catch (e) { return named('failed', { why: `data/${STORE_FILE} could not be written (${e.code || e.message})` }); }
     db = next; dbEpoch = vault.epoch(); lastGen = next.gen;
     // round 10 (MINOR): the cap bites in MEMORY too. `bodyOf` capped `runnable`/`opened` on disk, but `db = next` kept the UNCAPPED
-    // set, so an entry past the bound ran ON for the rest of the unlock and only read OFF after a reload (a silent switch-off). Trim
-    // the live sets the SAME way bodyOf did — drop the OLDEST past the bound (insertion order preserved, never the entry the owner
-    // just toggled) and reconcile `opened` to the kept `runnable` (fail closed) — so what runs now is what a restart would restore.
-    if (db.runnable.size > ENTRY_MAX) { db.runnable = new Set([...db.runnable].slice(-ENTRY_MAX)); db.opened = Object.fromEntries(Object.entries(db.opened || {}).filter(([k]) => db.runnable.has(k))); }
-    if (db.suspended && db.suspended.size > ENTRY_MAX) db.suspended = new Set([...db.suspended].slice(-ENTRY_MAX));
+    // set, so an entry past the bound ran ON for the rest of the unlock and only read OFF after a reload (a silent switch-off). round
+    // 11 (MINOR): trim the live sets with the SAME `keepNewest` bodyOf uses — by the opened-at stamp (oldest dropped, never the entry
+    // the owner just toggled), reconcile `opened` to the kept `runnable` (fail closed) — so memory and disk keep the SAME set and the
+    // same order a restart restores (r10's `slice(-ENTRY_MAX)` over insertion order diverged from the sorted disk array on reload).
+    if (db.runnable.size > ENTRY_MAX) { db.runnable = new Set(keepNewest(db.runnable, db.opened, ENTRY_MAX)); db.opened = Object.fromEntries(Object.entries(db.opened || {}).filter(([k]) => db.runnable.has(k))); }
+    if (db.suspended && db.suspended.size > ENTRY_MAX) db.suspended = new Set(keepNewest(db.suspended, db.opened, ENTRY_MAX));
     return { ok: true };
   }
 
