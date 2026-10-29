@@ -11101,6 +11101,9 @@ export default {
   "What to do: check the disk that holds VibeSpace's data folder (a network share that stopped answering, a failing disk). If this notice is still here in an hour, send feedback from the gear menu.": "该怎么做：检查存放 VibeSpace 数据文件夹的磁盘（停止响应的网络共享、故障磁盘）。如果一小时后这条通知还在，请从齿轮菜单发送反馈。",
   // lane ledger-dedup-law r9: an ended hold's count kept as its own line; the hold whose file cannot be read back
   "Earlier: {dropped} held events of {month} had been dropped past the bound — counted, never recorded.": "此前：{month} 有 {dropped} 条暂存事件因超出上限被丢弃——已计数，从未记录。",
+  "Earlier: {dropped} held events of {month} had been dropped past the bound — counted; whether they were recorded is not known.": "此前：{month} 有 {dropped} 条暂存事件因超出上限被丢弃——已计数；它们是否已记录，无从得知。",
+  "Earlier: {dropped} held events of {month} had been dropped past the bound — counted, never recorded; for {unknown} of them that is not known.": "此前：{month} 有 {dropped} 条暂存事件因超出上限被丢弃——已计数，从未记录；其中 {unknown} 条是否已记录，无从得知。",
+  "Greyed lines: what the trace saw in that hold — too little of it to name the hold.": "灰色的行：跟踪在那次阻塞中看到的内容——太少，不足以为该阻塞命名。",
   "The held usage of {machine} for {month} cannot be read ({code}) — that month waits": "{machine} 在 {month} 的暂存用量无法读取（{code}）——这个月在等待",
   "What: data/usage-history/_held/{file} could not be read ({code}) since {since} — the events of {month} held for {machine} stay on the disk, unread. Until it is read, the new events of {month} from that machine wait (it keeps them and sends them again) unless the month's file is in shape; its other months are recorded as usual.": "情况：data/usage-history/_held/{file} 自 {since} 起无法读取（{code}）——{machine} 在 {month} 暂存的事件仍在磁盘上，但未被读取。在它被读取之前，那台机器 {month} 的新事件会等待（机器会保留并重新发送），除非这个月的文件正常；它的其他月份照常记录。",
   "What happens now: VibeSpace reads the file again by itself — after a few seconds, then less often (at most once a minute); this notice closes when it is read.": "现在：VibeSpace 会自己再次读取这个文件——几秒后，然后间隔变长（最多每分钟一次）；文件被读取后这条通知会关闭。",

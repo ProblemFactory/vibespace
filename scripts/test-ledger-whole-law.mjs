@@ -109,6 +109,12 @@
 //     an EIO is marked at the first start and set aside at the second; the live set set aside keeps its notice's count as
 //     «Earlier»; the set-aside notice's words follow what was done (a copy there or not, the line still in the file or not)
 //   ⑳ (3, the set) PINS NOW: a live set's EACCES sets it aside unread (the month acked at once) — r9's state stays the segment's
+// ROUND 15 (the acceptance of f3027952 — ㉕ fails on f3027952):
+//   ㉕ the hold is read whole before anything is decided: a live set refused with its segments fails the hold WHOLE (the set
+//     kept as it was, unmarked, ONE notice; fixed ⇒ read back intact, its count checkable); a refused set beside a segment
+//     whose read passes is set aside only by the read that reads the hold whole; an older set's judgement and a live set's
+//     lines that are no record wait for the hold too; a count nobody checked is «not known» (the live set refused after its
+//     count was said «may already be recorded»; an older set with no `checked` record); a codeless read error passes
 // In-process, no server; sparse files for every big shape (fs.truncateSync / a write at an offset — no disk, no load).
 import fs from 'node:fs';
 import os from 'node:os';
@@ -2466,6 +2472,171 @@ await leg('㉔', async () => {
     ok(Object.values(got).every((g) => g.headOk && g.whatOk),
       `㉔ (5) the words follow the event — ${Object.entries(got).map(([n, g]) => `${n}: «${g.text}»${g.headOk && g.whatOk ? '' : ' ✗ (' + (g.copy ? 'a copy' : 'no copy') + ', ' + (g.goneFile ? 'the file gone' : g.still ? 'the line still in it' : 'the line gone') + ': «' + g.what + '»)'}`).join(' · ')} (a1d92418: «set aside» with no copy, «removed the line» with the line still in, «kept every other record» for a file deleted)`,
       got);
+  }
+});
+// lane ledger-dedup-law r15 (the acceptance of f3027952 — ㉕ fails on f3027952): THE HOLD IS READ WHOLE BEFORE ANYTHING IS DECIDED
+await leg('㉕', async () => {
+  console.log('㉕ THE HOLD IS READ WHOLE BEFORE ANYTHING IS DECIDED — one classification over the whole hold, one notice · A COUNT NOBODY CHECKED IS «NOT KNOWN» · A CODELESS ERROR PASSES');
+  const RD = require(REPO + '/src/usage-hold-road.js');
+  const seams = (uh) => { uh.shapeMaxBytes = 64 * KiB; uh.holdListRetryMs = 60; uh.dedupShard = (f) => { const p = new Promise(() => { }); uh._dedupJobs.set(f, p); return p; }; return uh; };
+  const world = (name) => {
+    const d = dirOf(name), sh = shardOf(d);
+    fs.writeFileSync(sh, Array.from({ length: 400 }, (_, i) => row(i)).join('\n') + '\n');
+    const todos = new UserTodoManager({ dataDir: d, expirySweepMs: 0 });
+    const W = { d, sh, todos, heldDir: path.join(d, 'usage-history', '_held'), asideDir: path.join(d, 'usage-history', '_set-aside') };
+    W.items = () => todos._state.items.filter((i) => i.sessionKey === 'usage-ledger');
+    W.open = (kind) => W.items().filter((i) => String(i.itemKey || '').startsWith(kind + '\n') && i.status === 'open').length;
+    W.month = () => W.items().find((x) => !/^(hold-read|set-aside)\n/.test(String(x.itemKey || '')) && x.i18n && x.i18n.text && x.i18n.text.params && x.i18n.text.params.host === host);
+    W.life = (inShape = false) => { const uh = seams(newUh(d)); if (inShape) uh.shapeMaxBytes = 2 * GiB; const wired = LSN.wire({ usageHistory: uh, userTodos: todos, log: () => { }, reconcileAfterMs: null }); const evs = []; const on = uh.onShape; uh.onShape = (ev) => { evs.push(ev); return on(ev); }; return { uh, wired, evs }; };
+    W.held = () => (fs.existsSync(W.heldDir) ? fs.readdirSync(W.heldDir).sort() : []);
+    W.aside = () => { try { return fs.readdirSync(W.asideDir).sort(); } catch { return []; } };
+    return W;
+  };
+  const lines = (ids) => ids.map((i) => remote(i)).join('\n') + '\n';
+  const die = (uh) => { for (const h of uh._holds.values()) h.io = new Promise(() => { }); uh._holds.clear(); const i = ALL_UH.indexOf(uh); if (i >= 0) ALL_UH.splice(i, 1); if (uh._inflight) uh._inflight.clear(); uh.onShape = null; for (const f of (uh._readFail || new Map()).values()) clearTimeout(f.timer); for (const m of [uh._lines, uh._retries]) for (const s of (m || new Map()).values()) if (s && s.timer) clearTimeout(s.timer); };
+  const realOpen = fs.promises.open;
+  /** every open of each file refused — `faults`: file → {code (null: an error with no code — V8's allocation failure), once} → undo */
+  const deny = (faults) => { const n = new Map(); fs.promises.open = function (f, ...a) { const x = faults.get(String(f)); if (x && (!x.once || !n.get(String(f)))) { n.set(String(f), 1); return Promise.reject(x.code ? Object.assign(new Error(`${x.code}: injected, open '${f}'`), { code: x.code, path: String(f) }) : new RangeError('Array buffer allocation failed')); } return realOpen.call(this, f, ...a); }; return () => { fs.promises.open = realOpen; }; };
+  const host = 'host-x', base = `events-2026-10~${host}`;
+  const loaded = async (uh, ms = 3000) => { for (let t = 0; t < ms; t += 20) { const h = uh._holds.get(base); if (h && !h.loading) return h; await sleep(20); await settle(); } return uh._holds.get(base) || null; };
+  /** a live hold of 20 rows, 3 dropped said by a restart (its item: «some of them may already be recorded») → {df, seg} */
+  const liveHold = async (W, { garbage = false, said = true } = {}) => {
+    const L1 = W.life(); await quiet(() => L1.uh.ingestRemoteEvents(host, 'X', lines(Array.from({ length: 20 }, (_, k) => 9300 + k)))); die(L1.uh);
+    const segName = W.held().find((f) => f.endsWith('.ndjson')), gen = Math.floor(Number(segName.split('.')[1]) / 1e6);
+    const df = path.join(W.heldDir, `${base}.${gen}.dropped`);
+    fs.appendFileSync(df, JSON.stringify({ gone: [1, 2, 3].map((k) => hidOf(8800 + k, host)) }) + '\n' + (garbage ? 'GARBAGE-LINE\n' : ''));
+    if (said && !garbage) { const L2 = W.life(); await quiet(async () => { L2.wired.reconcile(); await sleep(60); await settle(); }); die(L2.uh); }
+    return { df, seg: path.join(W.heldDir, segName), gen };
+  };
+  const journalAt = (out, re) => out.findIndex((l) => re.test(l));
+
+  // ── 1. THE SET AND ITS SEGMENTS REFUSED TOGETHER (probe-live-eacces-segments: a root-run server's 0600 files) — the hold fails
+  // WHOLE: nothing moved, nothing marked, ONE notice; the owner fixes the permissions ⇒ the hold reads back intact, its count
+  // checkable (the base's recovery). And a set the disk refuses beside a segment whose read passes (EMFILE once): judged only
+  // when the hold reads whole (the timer's read) — set aside then, never at the read its segment failed ──
+  {
+    const got = {};
+    for (const [name, setCode, segCode, segOnce] of [['set + segment EACCES', 'EACCES', 'EACCES', false], ['set EIO + segment EACCES', 'EIO', 'EACCES', false], ['set EACCES + segment EMFILE once', 'EACCES', 'EMFILE', true]]) {
+      const W = world('w25a-' + name.replace(/\W+/g, '-')), { df, seg } = await liveHold(W);
+      const bytes0 = fs.readFileSync(df);
+      const L = W.life(), undo = deny(new Map([[df, { code: setCode }], [seg, { code: segCode, once: segOnce }]]));
+      const acks = []; let out = [], under = null;
+      try {
+        [, out] = await quiet(async () => {
+          L.wired.reconcile(); await sleep(40); await settle();
+          for (let k = 0; k < 2; k++) acks.push(await L.uh.ingestRemoteEvents(host, 'X', lines([9400 + k])));
+          if (segOnce) { await loaded(L.uh); await settle(); }
+          under = { held: W.held(), asides: W.aside().length, marked: W.held().some((f) => f.endsWith('.unread')), read: W.open('hold-read'), aside: W.open('set-aside'), intact: fs.existsSync(df) && fs.readFileSync(df).equals(bytes0) };
+        });
+      } finally { undo(); }
+      // the owner fixes the permissions: the timer reads the hold again
+      let late = null;
+      const [, out2] = await quiet(async () => { await loaded(L.uh); [late] = [await L.uh.ingestRemoteEvents(host, 'X', lines([9500]))]; await settle(); });
+      const h = L.uh._holds.get(base), it = W.month();
+      got[name] = { acks: acks.map((a) => !!(a && a.ack) && !((a && a.holdFailed) || []).length), under, late: !!(late && late.ack), gone: h ? h.gone.size : null, asides: W.aside().length, read: W.open('hold-read'), aside: W.open('set-aside'), maybe: !!it && /the 3 oldest held events of 2026-10 were dropped — counted here; some of them may already be recorded/.test(it.detail), order: [journalAt(out.concat(out2), /could not be read \(EACCES: [^)]*\.dropped\) — 2026-10 of host-x waits/), journalAt(out.concat(out2), /set aside, its bytes intact/)] };
+      die(L.uh);
+    }
+    const a = got['set + segment EACCES'], e = got['set EIO + segment EACCES'], m = got['set EACCES + segment EMFILE once'];
+    const whole = (g) => !g.acks.some(Boolean) && g.under.held.some((f) => f.endsWith('.dropped')) && g.under.intact && !g.under.asides && !g.under.marked && g.under.read === 1 && !g.under.aside;
+    const back = (g) => g.late && g.gone === 3 && !g.asides && !g.read && !g.aside && g.maybe;
+    const okM = !m.acks.some(Boolean) && m.late && m.asides === 1 && !m.read && m.aside === 1 && m.order[0] >= 0 && m.order[1] > m.order[0];
+    ok(whole(a) && back(a) && whole(e) && back(e) && okM,
+      `㉕ (1) the hold is read whole before anything is decided — ${[['set + segment EACCES', a], ['set EIO + segment EACCES', e]].map(([n, g]) => `${n}: under the fault ${g.acks.filter(Boolean).length} of 2 acked, the set ${g.under.intact ? 'KEPT as it was' : g.under.asides ? 'SET ASIDE' : 'CHANGED'}${g.under.marked ? ' + MARKED' : ''}, ${g.under.read} hold-read + ${g.under.aside} set-aside notice(s) open; fixed ⇒ the next batch ${g.late ? 'acked' : 'NOT acked'}, the hold gone ${g.gone}${g.maybe ? ' (its 3 still «may already be recorded»)' : ''}, ${g.asides} set aside, ${g.read + g.aside} notice(s) open`).join(' · ')} · set EACCES + segment EMFILE once: ${m.asides} set aside ${m.order[1] > m.order[0] && m.order[0] >= 0 ? 'only at the read that read the hold whole (after the failed one)' : m.order[1] >= 0 ? 'BEFORE its segment was read' : '—'}, the month ${m.late ? 'acked' : 'NOT acked'}, ${m.read + m.aside} notice(s) open (f3027952: the set moved for good while the month waited, «set aside unread; nothing waits» beside «that month waits»)`,
+      got);
+  }
+
+  // ── 2. AN OLDER SET THE DISK REFUSES BESIDE A LIVE HOLD THAT CANNOT BE READ (the same 0600 files): the older one's judgement
+  // waits for the hold — kept, unmarked, ONE notice; fixed ⇒ its 7 said, the live hold read. And a live set with a line that
+  // is no record beside a refused segment: neither copied nor rewritten until the hold reads whole ──
+  {
+    const got = {};
+    {
+      const W = world('w25b-older'), { df, seg } = await liveHold(W, { said: false });
+      // the live hold's files renamed to generation 2; an older generation 0's set (7 dropped) beside it
+      const seg2 = seg.replace(/\.(\d+)\.ndjson$/, (_, q) => `.${2e6 + (Number(q) % 1e6)}.ndjson`), df2 = df.replace(/\.\d+\.dropped$/, '.2.dropped'), old = df.replace(/\.\d+\.dropped$/, '.0.dropped');
+      fs.renameSync(seg, seg2); fs.renameSync(df, df2);
+      fs.writeFileSync(old, JSON.stringify({ gone: [1, 2, 3, 4, 5, 6, 7].map((k) => hidOf(9100 + k, host)) }) + '\n');
+      const L = W.life(), undo = deny(new Map([[old, { code: 'EACCES' }], [seg2, { code: 'EACCES' }]]));
+      let under = null;
+      try { await quiet(async () => { L.wired.reconcile(); await sleep(40); await settle(); await L.uh.ingestRemoteEvents(host, 'X', lines([9400])); under = { held: W.held(), asides: W.aside().length, marked: W.held().some((f) => f.endsWith('.unread')), read: W.open('hold-read'), aside: W.open('set-aside') }; }); } finally { undo(); }
+      let late = null;
+      await quiet(async () => { await loaded(L.uh); late = await L.uh.ingestRemoteEvents(host, 'X', lines([9500])); await settle(); });
+      got.older = { under, late: !!(late && late.ack), said7: L.evs.some((ev) => ev.kind === 'dropped' && String(ev.gen) === '0' && ev.dropped === 7), asides: W.aside().length, read: W.open('hold-read'), aside: W.open('set-aside'), oldGone: !fs.existsSync(old) };
+      die(L.uh);
+    }
+    {
+      const W = world('w25b-garbage'), { df, seg } = await liveHold(W, { garbage: true });
+      const bytes0 = fs.readFileSync(df);
+      const L = W.life(), undo = deny(new Map([[seg, { code: 'EACCES' }]]));
+      let under = null;
+      try { await quiet(async () => { L.wired.reconcile(); await sleep(40); await settle(); await L.uh.ingestRemoteEvents(host, 'X', lines([9400])); under = { asides: W.aside().length, intact: fs.readFileSync(df).equals(bytes0), read: W.open('hold-read'), aside: W.open('set-aside') }; }); } finally { undo(); }
+      let late = null;
+      await quiet(async () => { await loaded(L.uh); late = await L.uh.ingestRemoteEvents(host, 'X', lines([9500])); await settle(); });
+      got.garbage = { under, late: !!(late && late.ack), asides: W.aside().length, rewritten: !fs.readFileSync(df, 'latin1').includes('GARBAGE'), read: W.open('hold-read'), aside: W.open('set-aside') };
+      die(L.uh);
+    }
+    const o = got.older, g = got.garbage;
+    const okO = o.under.held.includes(`${base}.0.dropped`) && !o.under.asides && !o.under.marked && o.under.read === 1 && !o.under.aside && o.late && o.said7 && o.oldGone && !o.asides && !o.read && !o.aside;
+    const okG = !g.under.asides && g.under.intact && g.under.read === 1 && !g.under.aside && g.late && g.asides === 1 && g.rewritten && !g.read && g.aside === 1;
+    ok(okO && okG,
+      `㉕ (2) an older set's judgement and a live set's lines that are no record wait for the hold — the older set refused beside a refused segment: ${o.under.asides ? `${o.under.asides} SET ASIDE` : 'kept'}${o.under.marked ? ' + MARKED' : ''}, ${o.under.read} hold-read + ${o.under.aside} set-aside notice(s); fixed ⇒ its 7 ${o.said7 ? 'said' : 'NOT said'}, the month ${o.late ? 'acked' : 'NOT acked'} · a live set with a line that is no record beside a refused segment: ${g.under.asides ? 'COPIED' : 'not copied'}, ${g.under.intact ? 'not rewritten' : 'REWRITTEN'}, ${g.under.read} + ${g.under.aside} notice(s); fixed ⇒ ${g.asides} copied, ${g.rewritten ? 'rewritten' : 'NOT rewritten'}, ${g.aside} set-aside notice, the month ${g.late ? 'acked' : 'NOT acked'}`,
+      got);
+  }
+
+  // ── 3. A COUNT NOBODY CHECKED IS «NOT KNOWN» (keeplost-maybe-probe): the live set refused (its segment reads) after its 3 were
+  // said «may already be recorded» ⇒ «Earlier: 3 … whether they were recorded is not known» (f3027952: «counted, never
+  // recorded»); an older set read at a boot with no `checked` record says so too, one with it «never recorded»; the words
+  // of a part not known (PURE) ──
+  {
+    const got = {};
+    {
+      const W = world('w25c-keeplost'), { df } = await liveHold(W);
+      const L = W.life(), undo = deny(new Map([[df, { code: 'EACCES' }]]));
+      try { await quiet(async () => { L.wired.reconcile(); await sleep(40); await settle(); await L.uh.ingestRemoteEvents(host, 'X', lines([9400])); }); } finally { undo(); }
+      const it = W.month(), q = (it && it.i18n && it.i18n.text && it.i18n.text.params) || {};
+      got.keepLost = { line: it ? (it.detail.split('\n').find((l) => /^Earlier:/.test(l)) || '') : '', maybe: q.maybe || '' };
+      die(L.uh);
+    }
+    for (const checked of [false, true]) {
+      const W = world('w25c-older-' + checked); fs.mkdirSync(W.heldDir, { recursive: true });
+      fs.writeFileSync(path.join(W.heldDir, `${base}.0.dropped`), JSON.stringify({ gone: [1, 2, 3, 4, 5, 6, 7].map((k) => hidOf(9100 + k, host)) }) + '\n' + (checked ? JSON.stringify({ checked: 7 }) + '\n' : ''));
+      fs.writeFileSync(path.join(W.heldDir, `${base}.2.dropped`), JSON.stringify({ gone: [1, 2, 3, 4, 5].map((k) => hidOf(9200 + k, host)) }) + '\n' + JSON.stringify({ checked: 5 }) + '\n');
+      const L = W.life(true); await quiet(async () => { L.wired.reconcile(); await sleep(80); await settle(); });
+      const it = W.items().find((x) => x.i18n && x.i18n.text && x.i18n.text.params && x.i18n.text.params.host === host);
+      got['older ' + (checked ? 'checked' : 'unchecked')] = it ? (it.detail.split('\n').find((l) => /^Earlier:/.test(l)) || '') : '';
+      die(L.uh);
+    }
+    const n = LSN.noticeOf({ host, hostName: 'X', shard: 'events-2026-10.ndjson', month: '2026-10', size: 3 * GiB, why: 'size', remedy: { state: 'running' }, held: 4, dropped: 2, gen: 3, ended: new Map([['0', 7], ['1', 5]]), maybe: new Map([['0', 7]]) });
+    got.part = (n.detail.split('\n').find((l) => /^Earlier:/.test(l)) || '');
+    got.partParams = n.i18n.text.params.maybe || '';
+    const NK = /^Earlier: (\d+) held events of 2026-10 had been dropped past the bound — counted; whether they were recorded is not known\.$/;
+    ok(NK.test(got.keepLost.line) && /^Earlier: 3 /.test(got.keepLost.line) && /(^|,)\?:3(,|$)/.test(got.keepLost.maybe) && NK.test(got['older unchecked']) && /^Earlier: 7 /.test(got['older unchecked'])
+      && /^Earlier: 7 held events of 2026-10 had been dropped past the bound — counted, never recorded\.$/.test(got['older checked'])
+      && got.part === 'Earlier: 12 held events of 2026-10 had been dropped past the bound — counted, never recorded; for 7 of them that is not known.' && got.partParams === '0:7',
+      `㉕ (3) a count nobody checked is «not known» — the live set refused after its 3 «may already be recorded»: «${got.keepLost.line.replace(/^Earlier: /, '') || 'NO LINE'}» · an older set read at a boot, unchecked: «${got['older unchecked'].replace(/^Earlier: /, '')}», checked: «${got['older checked'].replace(/^Earlier: /, '')}» · a part not known (PURE): «${got.part.replace(/^Earlier: /, '')}» (f3027952: every one «counted, never recorded»)`,
+      got);
+  }
+
+  // ── 4. A CODELESS ERROR PASSES (V8's «Array buffer allocation failed» — no code): an older set (7) beside a newer one (5), its
+  // read failing so at TWO starts ⇒ kept both times, never marked, never set aside; the third start says its 7 (f3027952:
+  // classed by its message as a code no list knows — marked, then set aside unread: the 7 lost) ──
+  {
+    const cls = typeof RD.readClassOf === 'function' ? RD.readClassOf(new RangeError('Array buffer allocation failed')) : 'NO CLASSIFIER OF THE ERROR';
+    const W = world('w25d-codeless'); fs.mkdirSync(W.heldDir, { recursive: true });
+    const f0 = path.join(W.heldDir, `${base}.0.dropped`);
+    fs.writeFileSync(f0, JSON.stringify({ gone: [1, 2, 3, 4, 5, 6, 7].map((k) => hidOf(9100 + k, host)) }) + '\n');
+    fs.writeFileSync(path.join(W.heldDir, `${base}.2.dropped`), JSON.stringify({ gone: [1, 2, 3, 4, 5].map((k) => hidOf(9200 + k, host)) }) + '\n');
+    const lives = [];
+    for (let n = 1; n <= 3; n++) {
+      const L = W.life(true), undo = n < 3 ? deny(new Map([[f0, { code: null }]])) : () => { };
+      try { await quiet(async () => { L.wired.reconcile(); await sleep(80); await settle(); }); } finally { undo(); }
+      lives.push({ kept: W.held().includes(`${base}.0.dropped`), marked: W.held().includes(`${base}.0.dropped.unread`), asides: W.aside().length, said7: L.evs.some((ev) => ev.kind === 'dropped' && String(ev.gen) === '0' && ev.dropped === 7) });
+      die(L.uh);
+    }
+    const good = cls === 'passes' && lives[0].kept && lives[1].kept && !lives[0].marked && !lives[1].marked && !lives.some((l) => l.asides) && !lives[0].said7 && !lives[1].said7 && lives[2].said7 && !lives[2].kept;
+    ok(good,
+      `㉕ (4) a codeless error passes — readClassOf(RangeError «Array buffer allocation failed») = ${cls}; an older set failing so at two starts: ${lives.map((l, i) => `life ${i + 1} ${l.asides ? 'SET ASIDE' : l.kept ? 'kept' + (l.marked ? ' + MARKED' : '') : 'gone'}${l.said7 ? ', its 7 said' : ''}`).join(', ')}`,
+      { cls, lives });
   }
 });
 fs.rmSync(tmp, { recursive: true, force: true }); // after the last leg (r8: ⑲ ran after it and left its scratch behind)

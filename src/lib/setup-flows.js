@@ -520,7 +520,7 @@ export function installSetupFlows(App) {
     const html = `<!doctype html><meta charset="utf-8"><title>${esc(t('VibeSpace diagnostics'))}</title><style>
       body{font:13px/1.5 system-ui;max-width:880px;margin:24px auto;padding:0 16px;color:#24292f}
       h2{margin:18px 0 6px} table{border-collapse:collapse;min-width:320px} td{border-bottom:1px solid #eee;padding:3px 10px 3px 0} td.n{text-align:right;font-variant-numeric:tabular-nums}
-      .dim{color:#888} pre{background:#f6f8fa;padding:8px;border-radius:6px;white-space:pre-wrap;font-size:12px}
+      .dim{color:#888} .faint{opacity:.6} pre{background:#f6f8fa;padding:8px;border-radius:6px;white-space:pre-wrap;font-size:12px}
       details{margin:4px 0;border:1px solid #eee;border-radius:6px;padding:4px 8px} summary{cursor:pointer}
       .chart{display:flex;align-items:flex-end;gap:3px;height:84px;margin:8px 0}
       .chip{display:inline-block;padding:1px 10px;border:1px solid #d0d7de;border-radius:12px;background:#f6f8fa;font-size:12px}
@@ -571,13 +571,17 @@ export function installSetupFlows(App) {
       // devices, the keeper and every timer waited), each named by the boot step it ran in; the top 5. Loading the
       // code is said apart (the port is not open yet, nothing waits). Absent on a server older than the route.
       // B-92a4: below them, a span's note (restore-probes: N unanswered …) and the boot's notes (the restore's re-probe).
+      // Lane ledger-dedup-law r15: a hold's `faint` sites (what the tracer saw in it, too little to name it) greyed under its
+      // named ones — r14 moved them out of `sites` and this table read `sites` only: they vanished.
       if (!bt || !Array.isArray(bt.holds)) return '';
       const said = [...(bt.spans || []).filter((s) => s.note).map((s) => `${s.name}: ${s.note}`), ...(Array.isArray(bt.notes) ? bt.notes : []).map((n) => `${n.at} ms · ${n.text}`)];
-      const rows = bt.holds.slice(0, 5).map((h) => `<tr><td class="n">${h.at} ms</td><td class="n"><b>${h.ms} ms</b></td><td>${esc(h.name || '?')}${(h.sites || []).map((x) => `<div class="dim">${x.ms} ms · ${esc(x.what)}</div>`).join('')}</td></tr>`).join('');
+      const rows = bt.holds.slice(0, 5).map((h) => `<tr><td class="n">${h.at} ms</td><td class="n"><b>${h.ms} ms</b></td><td>${esc(h.name || '?')}${(h.sites || []).map((x) => `<div class="dim">${x.ms} ms · ${esc(x.what)}</div>`).join('')}${(h.faint || []).map((x) => `<div class="dim faint">${x.ms} ms · ${esc(x.what)}</div>`).join('')}</td></tr>`).join('');
+      const greyed = bt.holds.slice(0, 5).some((h) => Array.isArray(h.faint) && h.faint.length);
       return `<h2>${esc(t('Server start — the longest holds'))}</h2>
       <p class="dim">${esc(t('How long the server\'s main loop was held while it started — pages, paired devices and timers waited that long. Start it with VIBESPACE_BOOT_TRACE=1 to name the file read or command behind each.'))}</p>
       <p>${esc(t('Code loaded in {ms} ms; longest hold since: {max} ms.', { ms: bt.mainMs ?? '?', max: bt.maxHoldMs ?? 0 }))}</p>
       ${rows ? `<table><tr><td class="n dim">${esc(t('after start'))}</td><td class="n dim">${esc(t('duration'))}</td><td class="dim">${esc(t('detail'))}</td></tr>${rows}</table>` : `<p class="dim">${esc(t('No hold of 100 ms or more since this server started.'))}</p>`}
+      ${greyed ? `<p class="dim faint">${esc(t('Greyed lines: what the trace saw in that hold — too little of it to name the hold.'))}</p>` : ''}
       ${said.length ? `<ul class="dim">${said.map((l) => `<li>${esc(l)}</li>`).join('')}</ul>` : ''}`;
     })()}
     <h2>${esc(t('Events per day'))}</h2><div class="chart">${bars || `<span class="dim">${esc(t('No data'))}</span>`}</div>
