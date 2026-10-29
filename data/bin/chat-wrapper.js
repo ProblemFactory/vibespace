@@ -311,45 +311,80 @@ const promptHooks = new Set();    // the UserPromptSubmit hooks the CLI said sta
 // EVERY WINDOW HAS A NAMED END (acceptance r5): the pause a prompt hook buys is bounded too — a hook_started with no
 // hook_response (a lost line, the two out of order) pinned the window for ever (a frame stayed held 48 s, a second Stop did
 // not free it). The CLI itself answers every hook it starts — `success`, or `cancelled` at the hook's own timeout — so the
-// bound is that timeout plus a margin. THE BOUND IS KEYED ON WHICH HOOK RUNS, NEVER ON HOW MANY (acceptance r6: r5 gave a
-// LONE hook the product's 15 s, so a user's own 60 s hook with the product's absent closed the window at +45 s and the
-// frame the CLI held at Stop was answered): MEASURED, `hook_started` names no command — {hook_id, hook_name:
-// 'UserPromptSubmit', hook_event} on 2.1.312 (2.1.308 says nothing) — so the wrapper reads the hooks the CLI LOADS
-// (promptHookCensus: the user / project / local / managed settings): when every UserPromptSubmit hook there is the
-// product's (data/bin/vibespace-hook.mjs, registered with `timeout: 10`), a hook that starts is the product's ⇒ 10 s + 5 s;
-// any other hook ⇒ ITS timeout (the CLI's 600 s default when it names none) + 5 s, alone or beside the product's; a file
-// that cannot be read, or an enabled plugin (its hooks are its own), cannot be attributed ⇒ the user bound (fail closed).
-// A bound that fires says «the prompt hook never answered» and the window falls to its backstop.
+// bound is that timeout plus a margin. MEASURED, `hook_started` names no command — {hook_id, hook_name: 'UserPromptSubmit',
+// hook_event} on 2.1.312 (2.1.308 says nothing) — so the bound is TWO FACTS, never one (acceptance r6 → r7): WHICH hooks
+// the CLI loads (promptHookCensus: the user / project / local / managed settings, the managed drop-ins, a `--settings` /
+// `--managed-settings` in the CLI's own arguments — each hook bounded by ITS registered timeout, the CLI's 600 s default
+// when it names none; the product's own hook, data/bin/vibespace-hook.mjs run by node from THIS install's path, is told
+// by that identity and by the `timeout: 10` it registers, never by its file name alone) AND HOW MANY the CLI said started
+// (r6 dropped the count: a hook the census cannot see beside the product's got 15 s, the window closed at +45 s and the
+// frame the CLI held at Stop was answered — a billed turn). More hooks started than the census names ⇒ the extra one is
+// not attributable ⇒ the user bound (fail closed). So is a session whose CLI loads settings this machine cannot read: a
+// REMOTE session (VIBESPACE_REMOTE_SID — the CLI runs on the device and loads ITS files), an enabled plugin or a
+// `--plugin-dir` (their hooks are their own), a file that cannot be read. A bound that fires says «the prompt hook never
+// answered» and the window falls to its backstop.
 const PROMPT_HOOK_MARGIN_MS = 5000;
 const PRODUCT_PROMPT_HOOK_MS = 10000 + PROMPT_HOOK_MARGIN_MS;
 const OWN_PROMPT_HOOK_MS = 600000 + PROMPT_HOOK_MARGIN_MS;
+const CLI_HOOK_DEFAULT_MS = 600000;
+/** The product's own hook, by identity: a node binary running THIS install's data/bin/vibespace-hook.mjs, nothing else. */
+function isProductHook(command) {
+  const own = typeof __dirname === 'string' ? path.join(__dirname, 'vibespace-hook.mjs') : '';
+  const m = /^\s*(?:"([^"]+)"|(\S+))\s+(\S+)\s*$/.exec(String(command || ''));
+  return !!(own && m && /^node(?:js)?(?:\.exe)?$/.test(path.basename(m[1] || m[2])) && m[3] === own);
+}
+/** A settings value the CLI takes from its arguments: inline JSON or a file (relative to the CLI's cwd). */
+function argSettings(argv, flag) {
+  const out = [];
+  for (let i = 0; i < argv.length; i++) {
+    const a = String(argv[i]);
+    const v = a === flag ? argv[++i] : (a.startsWith(flag + '=') ? a.slice(flag.length + 1) : null);
+    if (v != null) out.push(String(v));
+  }
+  return out;
+}
 function promptHookCensus() {
+  if (process.env.VIBESPACE_REMOTE_SID) return { hooks: [], unknown: "a remote session — its CLI loads the device's settings, which this machine cannot read" };
   const user = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
-  const files = [path.join(user, 'settings.json'), path.join(process.cwd(), '.claude', 'settings.json'), path.join(process.cwd(), '.claude', 'settings.local.json'), '/etc/claude-code/managed-settings.json'];
-  let product = 0, unknown = '';
-  const other = [];
-  for (const f of files) {
+  const managed = process.platform === 'darwin' ? '/Library/Application Support/ClaudeCode' : (process.platform === 'win32' ? 'C:\\Program Files\\ClaudeCode' : '/etc/claude-code');
+  const cliArgs = process.argv.slice(5);
+  const sources = [path.join(user, 'settings.json'), path.join(process.cwd(), '.claude', 'settings.json'), path.join(process.cwd(), '.claude', 'settings.local.json'), path.join(managed, 'managed-settings.json')];
+  let dropIns = [];
+  try { dropIns = fs.readdirSync(path.join(managed, 'managed-settings.d')).filter((n) => n.endsWith('.json')).sort().map((n) => path.join(managed, 'managed-settings.d', n)); } catch (e) { if (e && e.code !== 'ENOENT') return { hooks: [], unknown: `${path.join(managed, 'managed-settings.d')} unreadable` }; }
+  sources.push(...dropIns, ...argSettings(cliArgs, '--settings'), ...argSettings(cliArgs, '--managed-settings'));
+  if (argSettings(cliArgs, '--plugin-dir').length) return { hooks: [], unknown: 'a --plugin-dir in the CLI\'s arguments (its hooks are its own)' };
+  const byCommand = new Map(); // the CLI runs one command once, whichever files name it
+  const seen = new Set();
+  let unknown = '';
+  for (const src of sources) {
     let j = null;
-    try { j = JSON.parse(fs.readFileSync(f, 'utf8')); } catch (e) { if (e && e.code !== 'ENOENT') unknown = unknown || `${f} unreadable`; continue; }
-    if (j && j.enabledPlugins && typeof j.enabledPlugins === 'object' && Object.values(j.enabledPlugins).some(Boolean)) unknown = unknown || `a plugin is enabled in ${f}`;
+    const inline = /^\s*\{/.test(src);
+    const f = inline ? null : path.resolve(process.cwd(), src);
+    if (f) { let real = f; try { real = fs.realpathSync(f); } catch { } if (seen.has(real)) continue; seen.add(real); }
+    try { j = JSON.parse(inline ? src : fs.readFileSync(f, 'utf8')); } catch (e) { if (inline || (e && e.code !== 'ENOENT') || sources.indexOf(src) >= 4) unknown = unknown || `${inline ? 'an inline --settings' : f} unreadable`; continue; }
+    if (j && j.enabledPlugins && typeof j.enabledPlugins === 'object' && Object.values(j.enabledPlugins).some(Boolean)) unknown = unknown || `a plugin is enabled in ${f || 'an inline --settings'}`;
     const groups = j && j.hooks && Array.isArray(j.hooks.UserPromptSubmit) ? j.hooks.UserPromptSubmit : [];
     for (const g of groups) for (const h of (g && Array.isArray(g.hooks) ? g.hooks : [])) {
-      if (h && typeof h.command === 'string' && /vibespace-hook\.mjs/.test(h.command)) product++;
-      else other.push(h && Number(h.timeout) > 0 ? Number(h.timeout) * 1000 : 600000);
+      const command = h && typeof h.command === 'string' ? h.command : JSON.stringify(h);
+      const ms = h && Number(h.timeout) > 0 ? Number(h.timeout) * 1000 : CLI_HOOK_DEFAULT_MS;
+      const was = byCommand.get(command);
+      byCommand.set(command, { product: isProductHook(h && h.command), ms: Math.max(ms, was ? was.ms : 0) });
     }
   }
-  // a hook started and the settings name none: it is not attributable (a plugin's, a file the wrapper does not read) — fail closed
-  if (!product && !other.length && !unknown) unknown = 'no UserPromptSubmit hook in the settings the wrapper reads';
-  return { product, other, unknown };
+  return { hooks: [...byCommand.values()], unknown };
 }
-function promptHookBound() {
+/** The bound for `started` UserPromptSubmit hooks the CLI said started in this pause — both facts. */
+function promptHookBound(started = 1) {
   const c = promptHookCensus();
-  if (!c.unknown && !c.other.length && c.product) return { ms: PRODUCT_PROMPT_HOOK_MS, why: "the product's hook — every UserPromptSubmit hook the CLI loads is data/bin/vibespace-hook.mjs: its registered 10 s timeout + 5 s" };
-  const ms = Math.max(c.unknown ? 600000 : 0, ...c.other) + PROMPT_HOOK_MARGIN_MS;
-  return { ms, why: c.unknown ? `a hook the wrapper cannot attribute (${c.unknown}): the CLI's 600 s default + 5 s` : `a hook that is not the product's: its timeout ${(ms - PROMPT_HOOK_MARGIN_MS) / 1000} s + 5 s` };
+  if (c.unknown) return { ms: OWN_PROMPT_HOOK_MS, why: `a hook the wrapper cannot attribute (${c.unknown}): the CLI's 600 s default + 5 s` };
+  if (started > c.hooks.length) return { ms: OWN_PROMPT_HOOK_MS, why: `${started} hook(s) said started and the settings the wrapper reads name ${c.hooks.length}: the one it cannot see gets the CLI's 600 s default + 5 s` };
+  const ms = Math.max(...c.hooks.map((h) => h.ms)) + PROMPT_HOOK_MARGIN_MS;
+  if (c.hooks.every((h) => h.product)) return { ms, why: `the product's hook — every UserPromptSubmit hook the CLI loads is data/bin/vibespace-hook.mjs: its registered ${(ms - PROMPT_HOOK_MARGIN_MS) / 1000} s timeout + 5 s` };
+  return { ms, why: `a hook that is not the product's: its timeout ${(ms - PROMPT_HOOK_MARGIN_MS) / 1000} s + 5 s` };
 }
 let hookTimer = null;             // the bound on the prompt-hook pause (armed while promptHooks is non-empty)
 let hookBoundMs = 0;
+let hooksStarted = 0;             // how many UserPromptSubmit hooks the CLI said started since its last init (r7: the count is a fact)
 const answeredHooks = new Set();  // hook_ids whose hook_response came BEFORE their hook_started (never a pin)
 let boundUntil = null;            // when the armed backstop fires (epoch ms) — what a held frame's chip counts down to
 let settleSaid = '';              // the last `queue_settle` the wrapper said (said on a change only)
@@ -566,7 +601,7 @@ function onBound() {
   const owed = cliOwes(), ms = owed ? OWED_BACKSTOP_MS : SETTLE_BOUND_MS;
   const what = [];
   if (cliOwesTurn) { cliOwesTurn = false; what.push(`the turn owed for ${settleHanded('own-turn').length} handed frame(s)`); }
-  if (stopping) { what.push(`the Stop window (${stopping.held} frame(s) the CLI held, ${stopping.follows} follow-up turn(s) interrupted)`); landRiding('the window closed with no follow-up'); settleCopies(stopping.kept); deliverHeldInterrupt('the window closed on its backstop'); stopping = null; }
+  if (stopping) { what.push(`the Stop window (${stopping.held} frame(s) the CLI held, ${stopping.follows} follow-up turn(s) interrupted)`); settleStopCopies('the window closed on its backstop'); deliverHeldInterrupt('the window closed on its backstop'); stopping = null; }
   if (what.length) log(owed
     ? `backstop: no prompt hook, no follow-up turn and no idle ${ms} ms after the CLI's last word (above the product's prompt-hook budget: 3 s fetch, 10 s CLI timeout) — disarmed ${what.join(' + ')}`
     : `bound: the CLI owes nothing and said no idle ${ms} ms after its last result (a background task keeps it running) — closed ${what.join(' + ')}`);
@@ -587,11 +622,11 @@ function saySettle() {
   settleSaid = key;
   record('queue_settle', open ? { state: 'settling', until, ms: OWED_BACKSTOP_MS, why: stopping ? 'stop' : 'handover', ...(until === null && promptHooks.size ? { hook: true } : {}) } : { state: 'settled' });
 }
-/** The prompt-hook pause's own bound (acceptance r5, keyed on which hook runs since r6) — armed when the first hook starts,
- *  widened if a later census says longer; never narrowed while one runs. */
+/** The prompt-hook pause's own bound (acceptance r5; which hooks the CLI loads AND how many it said started, r7) — armed
+ *  when the first hook starts, widened when a later one (or a later census) says longer; never narrowed while one runs. */
 function armHookBound() {
   if (!promptHooks.size) { clearTimeout(hookTimer); hookTimer = null; hookBoundMs = 0; return; }
-  const b = promptHookBound();
+  const b = promptHookBound(hooksStarted);
   if (hookTimer && b.ms <= hookBoundMs) return;
   clearTimeout(hookTimer);
   hookBoundMs = b.ms;
@@ -599,12 +634,12 @@ function armHookBound() {
     hookTimer = null;
     if (!promptHooks.size) return;
     const n = promptHooks.size; hookBoundMs = 0;
-    promptHooks.clear();
+    promptHooks.clear(); hooksStarted = 0;
     log(`the prompt hook never answered: ${n} UserPromptSubmit hook(s) said started and no hook_response in ${b.ms / 1000} s (${b.why}) — the window falls to its backstop`);
     armBound();
   }, b.ms);
 }
-function clearPromptHooks() { promptHooks.clear(); armHookBound(); }
+function clearPromptHooks() { promptHooks.clear(); hooksStarted = 0; armHookBound(); }
 /** A SECOND STOP INSIDE THE WINDOW IS HELD (acceptance r5): written raw while the follow-up's prompt hook runs it makes the
  *  CLI cancel the hook AND drop the frame it held (measured, both trees) — while the record says «kept». The CLI's turn is
  *  already stopped (its interrupted result came); what is left is the follow-up the window interrupts on its init anyway.
@@ -636,6 +671,17 @@ function landRiding(why) {
   settleCopies(stopping.riding);
   log(`the frame(s) that rode the last tool result went with the turn's last request — landed (${why})`);
   stopping.riding = [];
+}
+/** EVERY FRAME A STOP TOUCHED SETTLES ONCE (acceptance r7) — each by name: KEPT (the follow-up's interrupted record holds
+ *  it), RIDING with no follow-up (landed — landRiding), RIDING with a follow-up the window interrupted (the CLI still held
+ *  it: that turn took it). r6 settled only `kept`, so a riding frame whose follow-up came was never settled — its copy
+ *  re-pinned at the buffer's end on every trim, its kept files never dropped. */
+function settleStopCopies(why) {
+  landRiding(why);
+  const kept = stopping.kept || [], rode = stopping.riding || [];
+  settleCopies(kept); settleCopies(rode);
+  if (kept.length || rode.length) log(`the Stop's frames settled (${why}): kept [${kept.join(', ')}]${rode.length ? `, riding into the interrupted follow-up [${rode.join(', ')}]` : ''}`);
+  stopping.kept = []; stopping.riding = [];
 }
 
 /** A user frame from the server: forwarded when no turn runs; while one runs, HANDED OVER when the person's door says so
@@ -712,8 +758,7 @@ function dropHeldForStop() {
 /** The Stop window closes: the CLI settled (its idle — or its result, where it says no state word). */
 function settleStop(why) {
   if (!stopping) return;
-  landRiding(why);
-  settleCopies(stopping.kept); // the follow-up's interrupted record holds the kept frames
+  settleStopCopies(why); // the follow-up's interrupted record holds the kept frames (and a riding one it took)
   deliverHeldInterrupt(`the window settled: ${why}`);
   log(`stop settled (${why}): ${stopping.held} frame(s) the CLI held at Stop, ${stopping.follows} follow-up turn(s) interrupted`);
   stopping = null;
@@ -861,7 +906,7 @@ function processLine(line) {
     const hid = String(msg.hook_id || '');
     if (msg.subtype === 'hook_started') {
       if (answeredHooks.delete(hid)) return; // its response already came (out of order): it runs no more
-      promptHooks.add(hid);
+      promptHooks.add(hid); hooksStarted++;
       clearTimeout(boundTimer); boundTimer = null; boundUntil = null;
       armHookBound();
       saySettle();

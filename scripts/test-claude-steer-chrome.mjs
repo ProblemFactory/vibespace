@@ -385,6 +385,24 @@ async function legRace(wp, label) {
   await h.kill();
   return out;
 }
+/** ⑮b (r7) EVERY FRAME A STOP TOUCHED SETTLES ONCE: the same race, B a 9 KB text (kept as a file beside the buffer) — the
+ *  follow-up that took the riding B is interrupted, the window settles, and B's copy settles with it: its kept file goes
+ *  (1f8de752 settled only `kept`: the riding copy re-pinned on every trim for ever, its file never dropped). */
+async function legRidingSettles(wp, label) {
+  const h = await boot(wp, label, { race: true });
+  h.say('TOOL-A run the slow command', 'm-a');
+  await until(h.toolUse, 3000);
+  h.say('MARK-B riding ' + 'b'.repeat(9000), 'm-b', { steer: true });
+  await until(() => h.race().some((x) => x.toolResultAfterB), 3000);
+  const files = () => { try { return fs.readdirSync(path.join(h.dir, 's.img')).length; } catch { return 0; } };
+  const before = files();
+  h.stop();
+  await until(() => /stop settled/.test(h.log()), 4000);
+  await sleep(200);
+  const out = { before, after: files(), riding: /1 kept \(1 of them riding/.test(h.log()), said: /the Stop's frames settled \(idle\): kept \[\], riding into the interrupted follow-up \[m-b\]/.test(h.log()) };
+  await h.kill();
+  return out;
+}
 /** ⑯ (r4) THE WINDOW CLOSES ON THE CLI'S WORDS: a Stop that found B held by the CLI, and a 2.5 s prompt hook before the
  *  follow-up's init (the product's own hook waits on the hub up to 3 s) — the window waits through the hook and the init
  *  is interrupted. `emit` = the CLI says the hook's phase (the adapter's switch); without it the 30 s backstop alone. */
@@ -474,8 +492,8 @@ async function legHookWedged(wp, label) {
  *  (the settings name `sleep 125`, no timeout — the CLI's 600 s) runs 1.5 s ×50 ≈ 75 s, past r5's 15 s + 30 s. The window
  *  waits on its words: B kept, its follow-up interrupted on its init, nothing answered after Stop (r5 gave a LONE hook the
  *  product's 15 s: the window closed inside the hook and the follow-up was answered — a billed turn). */
-async function legLoneUserHook(wp, label) {
-  const h = await boot(wp, label, { toolMs: 1200, clock: 50, hooks: 'user', env: { STAND_IN_PROMPT_HOOK_MS: '1500', CLAUDE_CODE_EMIT_USER_PROMPT_SUBMIT_HOOK_EVENTS: '1' } });
+async function legLoneUserHook(wp, label, { hooks = 'user', env = {} } = {}) {
+  const h = await boot(wp, label, { toolMs: 1200, clock: 50, hooks, env: { STAND_IN_PROMPT_HOOK_MS: '1500', CLAUDE_CODE_EMIT_USER_PROMPT_SUBMIT_HOOK_EVENTS: '1', ...env } });
   h.say('TOOL-A run the slow command', 'm-a');
   await until(h.toolUse, 4000);
   h.say('B handed mid tool', 'm-b', { steer: true });
@@ -546,10 +564,13 @@ const r2Clock = LANE_SRC.includes('const OWED_BACKSTOP_MS = 30000;') && LANE_SRC
   : null;
 // r5's RED controls: the 6334e9a8 rules, replayed — a prompt-hook pause with no bound, a second Stop written raw
 const noHookBound = LANE_SRC.includes('const PRODUCT_PROMPT_HOOK_MS = 10000 + 5000;') ? wrapperCopy('no-hook-bound', LANE_SRC.replace('const PRODUCT_PROMPT_HOOK_MS = 10000 + 5000;', 'const PRODUCT_PROMPT_HOOK_MS = 1e9;').replace('const OWN_PROMPT_HOOK_MS = 600000 + 5000;', 'const OWN_PROMPT_HOOK_MS = 1e9;')) : null;
-const r5CountBound = LANE_SRC.includes('  const b = promptHookBound();') ? wrapperCopy('r5-count-bound', LANE_SRC.replace('  const b = promptHookBound();', "  const b = { ms: promptHooks.size > 1 ? OWN_PROMPT_HOOK_MS : PRODUCT_PROMPT_HOOK_MS, why: 'r5: by count' };")) : null;
+const r5CountBound = LANE_SRC.includes('  const b = promptHookBound(hooksStarted);') ? wrapperCopy('r5-count-bound', LANE_SRC.replace('  const b = promptHookBound(hooksStarted);', "  const b = { ms: promptHooks.size > 1 ? OWN_PROMPT_HOOK_MS : PRODUCT_PROMPT_HOOK_MS, why: 'r5: by count' };")) : null;
+// r7's RED controls: r6's census that never asks where the CLI runs (no remote line), and r6's settle of `kept` alone
+const r6NoRemote = LANE_SRC.includes('  if (process.env.VIBESPACE_REMOTE_SID) return') ? wrapperCopy('r6-no-remote', LANE_SRC.replace('  if (process.env.VIBESPACE_REMOTE_SID) return', '  if (false) return')) : null;
+const r6KeptOnly = LANE_SRC.includes('settleCopies(kept); settleCopies(rode);') ? wrapperCopy('r6-kept-only', LANE_SRC.replace('settleCopies(kept); settleCopies(rode);', 'settleCopies(kept);')) : null;
 const rawSecondStop = LANE_SRC.includes(" && holdSecondStop(line)) continue;") ? wrapperCopy('raw-second-stop', LANE_SRC.replace(" && holdSecondStop(line)) continue;", " && false) continue;")) : null;
 const leg = (p) => p.catch((e) => ({ threw: String(e && e.message || e) }));
-const [race, hookStop, hookStopNoEmit, hookStopCtl, hookOwed, hookOwedCtl, editCopy] = await Promise.all([
+const [race, hookStop, hookStopNoEmit, hookStopCtl, hookOwed, hookOwedCtl, editCopy, riding, ridingCtl, remoteHook, remoteHookCtl] = await Promise.all([
   leg(legRace(LANE_WRAPPER, 'race')),
   leg(legHookStop(LANE_WRAPPER, 'hookstop')),
   leg(legHookStop(LANE_WRAPPER, 'hookstop-noemit', { emit: false })),
@@ -557,6 +578,10 @@ const [race, hookStop, hookStopNoEmit, hookStopCtl, hookOwed, hookOwedCtl, editC
   leg(legHookOwed(LANE_WRAPPER, 'hookowed')),
   r2Clock ? leg(legHookOwed(r2Clock, 'hookowed-ctl')) : null,
   leg(legEditCopy(LANE_WRAPPER)),
+  leg(legRidingSettles(LANE_WRAPPER, 'riding')),
+  r6KeptOnly ? leg(legRidingSettles(r6KeptOnly, 'riding-ctl')) : null,
+  leg(legLoneUserHook(LANE_WRAPPER, 'remote-hook', { hooks: 'product', env: { VIBESPACE_REMOTE_SID: 'r-1' } })),
+  r6NoRemote ? leg(legLoneUserHook(r6NoRemote, 'remote-hook-ctl', { hooks: 'product', env: { VIBESPACE_REMOTE_SID: 'r-1' } })) : null,
 ]);
 const [wedged, lone, loneCtl, wedgedCtl, secondStop, secondStopCtl] = await Promise.all([
   leg(legHookWedged(LANE_WRAPPER, 'wedged')),
@@ -637,6 +662,10 @@ ok(/the prompt hook never answered: 1 UserPromptSubmit hook\(s\) said started an
 ok(S(wedged.settle) === S([{ state: 'settling', until: null, hook: true, ids: undefined }, { state: 'settling', until: 'number', hook: false, ids: undefined }, { state: 'backstop', until: null, hook: false, ids: ['m-d'] }])
   && S(wedged.chips) === S([{ after: 'settling', chip: 'queued', settling: 'paused' }, { after: 'settling', chip: 'queued', settling: 'until' }, { after: 'backstop', chip: 'queued', settling: null }]) && S(wedged.notice) === S(['The turn did not answer in 30 s — the held messages are delivered now']), '⑲ …THE BACKSTOP SPEAKS: D\'s chip says «held — the turn is settling» (paused while the hook runs, then counting down to the backstop), and at the backstop ONE notice says «the turn did not answer in 30 s — the held messages are delivered now»', wedged);
 ok(!lone.answeredB && lone.follows === 1 && S(lone.kept) === S(['m-b']) && !lone.closedEarly, '⑲b (r6) a LONE hook of the person\'s own (the product\'s absent; 600 s by its settings) running ~75 s: the window waits on its words — B kept, the follow-up interrupted on its init, nothing answered after Stop', lone);
+ok(!remoteHook.answeredB && remoteHook.follows === 1 && S(remoteHook.kept) === S(['m-b']) && !remoteHook.closedEarly, '⑲c (r7) a REMOTE-shaped session (VIBESPACE_REMOTE_SID; the hub\'s settings name only the product\'s hook, the hook that runs is the device\'s ~75 s): the census cannot read where the CLI runs ⇒ fail closed — B kept, nothing answered after Stop', remoteHook);
+if (remoteHookCtl) ok(remoteHookCtl.answeredB && remoteHookCtl.closedEarly, '⑲c RED CONTROL: r6\'s census of the hub\'s files alone — the product\'s 15 s, the window closed inside the device\'s hook and B was ANSWERED after Stop', remoteHookCtl);
+ok(riding.before === 1 && riding.after === 0 && riding.riding && riding.said, '⑮b (r7) a frame RIDING at Stop whose follow-up the window interrupted SETTLES by name: its kept file goes', riding);
+if (ridingCtl) ok(ridingCtl.before === 1 && ridingCtl.after === 1, '⑮b RED CONTROL: r6\'s settle of `kept` alone — the riding frame\'s kept file LEAKS', ridingCtl);
 if (loneCtl) ok(loneCtl.answeredB && loneCtl.closedEarly, '⑲b RED CONTROL: r5\'s bound by COUNT (a lone hook = the product\'s 15 s) — the window closed inside the hook and B was ANSWERED after Stop', loneCtl);
 if (wedgedCtl) ok(wedgedCtl.dHeld && !wedgedCtl.dReached && !wedgedCtl.neverAnswered && !wedgedCtl.backstop, '⑲ RED CONTROL: the pause with no bound (6334e9a8) — D is still held when the leg gives up, nothing said', wedgedCtl);
 ok(S(secondStop.kept) === S(['B handed mid tool']) && !secondStop.dropped?.length && secondStop.interrupts?.[secondStop.interrupts.length - 1] === 'person-stop-2' && !secondStop.interrupts.some((x) => /^vs-stop-follow/.test(x)) && S(secondStop.drops?.map((d) => d.keptIds)) === S([['m-b']]), '⑳ (r5) a second Stop inside the follow-up\'s prompt hook is HELD and becomes THE one interrupt on its init: B stays in the conversation, as the record says («kept»)', secondStop);

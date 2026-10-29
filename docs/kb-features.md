@@ -828,6 +828,12 @@ impossible rather than a review promise.
   together are claimed in the order they were handed over; a held message says
   «Held — the previous turn's follow-up is running» once the CLI's owed turn
   starts (no countdown without a timer).
+  **Acceptance r7 (the same .361):** the prompt-hook bound is the hooks the
+  CLI loads AND how many it said started — a hook the hub cannot see (a remote
+  session's device, a `--settings` file, a managed drop-in) fails closed on the
+  long bound, so a Stop never answers the kept message; a message held across
+  a restart and run before the chat is opened is drawn once; a message still
+  riding the last tool result at Stop is settled with the window.
 - **Removing a queued agent-to-agent / job message gives it back.** It was
   already reported delivered, so `remove` re-reports `peer_message_result
   ok:false` with the text and sender and the delivery ladder re-stashes it for
