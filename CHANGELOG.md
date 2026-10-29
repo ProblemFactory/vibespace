@@ -2,6 +2,174 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.362 — 2026-10-29
+
+### Added
+- A vault entry can now say who may use it and for which hosts — those runs stop asking each time; «Always» on a run card is such a grant.
+- A password you paste for an agent's request lets that conversation use it for 8 hours; turn on «Usable by agent runs» on its row to remove the limit.
+- An optional policy judge (off by default) can approve a vault use that fits rules you write for the entry; anything else still asks you.
+- A grant works only while the entry's «Usable by agent runs» is on; turning it off pauses each grant, and approving one conversation won't resume the others.
+- A grant for a whole domain (like *.example.com) stays tied to the one tool that first used it.
+- VibeSpace checks where a command really connects against what you granted, so a crafted address can't slip a value to a host you did not allow.
+- A run approval you don't answer in time no longer disappears: for a day it stays as a card you can still allow once or deny.
+- A wake request now shows its Approve / Deny card in the chat that asked for it, too; one click decides. Only your click counts, never a typed «approve».
+- A decided request says who and when, on its card and in For you: «approved by you · 09:41».
+- An unanswered wake request expires after 7 days; its card says «expires in 7 d», and the agent can ask again.
+- A vault command an agent wants to run and an action on a paired machine show their card in the chat that asked, like a paste request.
+- A vault command card now reads in your language: who runs which program with which secret, the command in its own box, and where it sends what it reads first.
+- A card that waits for your answer only briefly shows the time it has left, counting down, and turns amber in its last 15 seconds.
+- Background jobs now run under a memory limit: 4 GB by default, changed in Settings, in a job's properties or with --memory 8G.
+- A job that goes past its limit stops and says so: “stopped: used more than 4 GB”; its card shows the limit and how this computer enforces it.
+- When the hub is down, vibespace ls / attach / chat on the machine itself lists your sessions, shows a terminal session's screen and talks to a chat session.
+- On standard Chrome, the agent signs in with the logins kept in your vault — one-step, multi-step and two-step — without ever seeing a password.
+
+### Changed
+- Opening a conversation from For you takes you to where the agent asked, with its card open there; an old question with no place left waits at the end.
+- A run approval card now lays out what runs, which stored secret it uses, where it is sent and why, instead of one long paragraph.
+- A job out of memory twice in a row waits for you instead of restarting blindly, so on a cluster it no longer takes the whole instance down again and again.
+- On a computer or cluster with its own memory limit, a job's limit stays below it, and its card says when it was lowered.
+- Stopping a background job now ends everything it started. On a cluster, a task's detached process is only named; one that also clears its environment is unseen.
+- A job's properties keep the memory limit you set and show the one in force beside it.
+- A finished background task's leftover processes are stopped and its card says so; on a cluster, one that detaches itself is only named. A stopped job gets 10 s.
+- A background service's leftover processes keep running until it stops or starts again, including the restart after a VibeSpace update.
+- If VibeSpace can't prove a service's last run has ended, it won't start a second copy beside it; For you says how to check, and stopping it ends the wait.
+- Dialogs you fill in no longer cover the screen: installing a plugin, a credential or a rename opens a small window, and the chat still takes your typing.
+- Click another window and the form steps behind it; the taskbar brings it back with what you typed. Confirmations that need your decision stay as they were.
+- A message sent while a Claude conversation works now reaches it at its next tool call, as in the CLI; to hold it for the turn's end or edit it, use Alt+Enter.
+
+### Fixed
+- Your own presses of Hand over now, Wake now and Hand back are no longer refused by, or counted against, the limit on turns nobody typed.
+- A refused hand-over now names the account, its limit and the local time it frees up, with a button to Settings → Spending.
+- A number you type in Settings is saved when you press Enter or leave the field, never half-typed; its row says «Not saved yet», «Saving…», then «Saved».
+- The Spending notice in For you says what was held and where, in your language and time zone, and «now» once the next turn is free.
+- A turn held because an account is signed out now points to the Usage window instead of the spending limits.
+- An agent's browser proposal you approve now reaches it at once even when the turn limit is used up.
+- A Spending notice also says which turns are still in flight and when paid overage was last reported; Copy includes every producer.
+- A background reminder made with --notify-user now really puts a copy in your For you when it fires; before, the option was lost and only the agent was woken.
+- Reminders made with --notify-user before this update did not keep the option: recreate them (vibespace-job show prints notifyUser=false for those).
+- A job's details now say when the job tells you in For you, and what else reaches you for that kind of job; vibespace-job show says whether it tells you.
+- A secret in a job's message or name is hidden before it reaches For you, the Jobs panel or Ports; a copy For you refused shows as not delivered, not ✓.
+- Background jobs' items in For you are now in Chinese and Japanese too.
+- The end of a chat no longer fills with old questions: only the newest one whose place is off screen waits there; «waiting for you · N» lists them all.
+- The Vault window shows a newly stored entry at once, without closing it, and its search finds it by name, host or the conversation that asked.
+- A run's output is shown in full again: only the secret values it used are hidden, the tool's own fields are kept, and nothing is cut off.
+- A password that is only digits is hidden like any other secret, whether it sits in a settings line or a connection string.
+- A run approval card names the site a command's own configuration file would reach, even when a setting inside the file carries it.
+- A run approval card reads a web address the way the command's tool does, so a crafted address cannot show one site while the command reaches another.
+- With sign-in off, a script or an agent's token could approve a channel request by calling its route; now only a click on this page decides one.
+- Two wake requests with the same words are two cards again, and asking again after a Deny is a new card; the denied one keeps its line.
+- A wake request offers only Approve and Deny: Mark done, Dismiss and Mark all seen no longer close it unanswered, and a decision is final.
+- With sign-in off, an agent's token could also give itself a wake through the Notify settings; that now takes your click on this page too.
+- Mark done on an access request in For you said «done» while the request stayed open; it now offers only Hide, which decides nothing.
+- Vault asks and machine actions end only with their own buttons now, never Mark done or Dismiss, and say «allowed by you · 09:41».
+- Approve or Deny on a wake request after its 7 days says when it expired and that the agent can ask again, instead of an error.
+- Access requests closed with Mark done before this update come back to For you while they are still open.
+- An agent's request for a stored secret ends only with Allow once, For 8 hours or Deny, and says «allowed by you for 8 h · 09:41».
+- Editing a rule that notifies an agent through the account's access no longer deletes that notification.
+- A rule digest for an agent with access through the account now arrives instead of waiting for ever.
+- A stored-secret request answered before this update reads «allowed», as it never recorded Allow once or For 8 hours.
+- An agent removing its own notification that had stopped firing now deletes it; it no longer fires again when you give the agent access back.
+- Messages held for an agent for more than a day are no longer sent on their own after a restart; For you asks you to deliver or discard them.
+- A digest of held messages now says since when they were held, not «in the last 60 min».
+- A stored-secret approval shows when it ended or that you revoked it, instead of «allowed for 8 hours» for ever.
+- An agent's list of its notifications shows the ones that stopped firing, marked as such.
+- A vault command card nobody answered in time no longer disappears; it stays in place and says it timed out and that the agent's command was refused.
+- A vault command longer than 2,000 characters gets its card again; the card shows its start and keeps the whole command under Technical details.
+- An expired vault command card you answer now closes and says what you chose, and it no longer offers «Always», which an expired card cannot take.
+- Held messages are counted exactly: Discard drops what the card says, and new messages no longer push held ones into the next digest.
+- Every held-messages decision gets its card, even with many at once, so none are discarded unseen.
+- Countdowns follow the server's clock, so a device whose clock is off no longer hides the Allow and Deny buttons too early.
+- VibeSpace starts quickly again on an instance with many channel conversations.
+- With sign-in off, adding an agent to an account no longer needs your click when it cannot turn a stopped wake back on.
+- A vault command too long to keep whole now says so and points to its run record, instead of claiming the whole command is under Technical details.
+- Removing a rule now closes its held-messages card and says how many were discarded; Deliver no longer queues them for an agent nobody watches for.
+- Requests you closed with Mark done or Dismiss before the decision buttons read «done» or «dismissed» again, not «outcome unknown».
+- A card whose details were too large to keep now says so above its text.
+- If For you cannot read its saved list at start, it sets the file aside instead of overwriting it, says where, and brings back held-messages cards.
+- On a server too old to send its time, a countdown says it follows this device's clock.
+- A vault command card says a secret is «tied to no host» instead of showing «?».
+- Saving access that turns stopped wakes back on now says how many it turned on, instead of «nobody is woken».
+- In Japanese, a request you denied now says that you denied it.
+- Lark re-authorize: once you finish signing in in another browser, the dialog completes at once instead of waiting for the next read.
+- «Sign in without the N extra permissions» shows only where Lark can really refuse; permissions already granted no longer count.
+- Your Lark sign-in no longer expires when VibeSpace stalls on a slow disk or network drive; if a sign-in does expire, the notice says why.
+- Locking the vault while Lark renews your sign-in or fetches messages no longer signs you out of Lark or makes the account wait after you unlock.
+- Closing Re-authorize while it says «Preparing authorization…» no longer opens the sign-in page afterwards.
+- After a re-authorize, «Sign-in expired» turns into «Signed in — verifying» in every open tab; if the new sign-in is refused too, it says why.
+- The usage ledger no longer writes the same batch of events twice.
+- A paired machine's usage harvest no longer waits for your approval; the hub remembers how far it got.
+- Each background task that keeps being refused gets one notice in For you that says where to allow it; it closes once allowed or after a week without asks.
+- A usage ledger file out of shape is said; only that machine's usage for that month waits (up to 64 MiB) until it is back in shape, and failed cleanup is said.
+- Your answer to one task's or conversation's request in For you no longer lets another one's through, and a Deny stays until you allow it.
+- The update removes the repeated rows from old usage ledger files once; the totals do not change.
+- The memory notice names the process holding the memory, its command line, and whether it came from outside the container.
+- While the usage ledger is still loading after a start, no estimate, learned rate or automatic pool switch is made from the part loaded so far.
+- If the folder that keeps held usage cannot be read, one notice in For you says so; other months are still recorded, and it closes once the folder can be read.
+- If one machine's held usage file cannot be read, one notice names it; its other months are still recorded, and the notice closes once the file can be read.
+- Held usage events are no longer dropped while their month starts being recorded again.
+- Held usage events dropped past the limit are counted in a notice in For you, also after a restart, and are never shown as zero.
+- In Install plugin…, Cancel and Install now match every other dialog's buttons, Install stands out, and the Git-only rows show only for a Git source.
+- While you drive an agent's browser, a form you open (a vault paste, a sign-in, the Browser switcher) takes your typing and Escape, never the agent's page.
+- Escape in a form you have typed into asks before it drops your words.
+- A running Claude sign-in asks «Cancel the sign-in?» on Escape, and the update progress no longer closes on Escape.
+- Opening a form that is already open brings it back with what you typed, instead of a blank copy.
+- A form no longer stays stuck over the screen after a confirmation closes, or after the window goes from phone width back to desktop.
+- A form that opens while you are typing in the chat waits behind it.
+- New background job… has its Create button again, and the Agents window asks before closing over unsaved instructions.
+- Rotating a webhook token twice, or making a new pairing code, shows the new one instead of the one that no longer works.
+- While you drive an agent's browser, picking a suggestion or a menu item in a form keeps your typing in the form.
+- The folder button in New Session opens its picker on top, even when a remote machine is slow to list its folders.
+- Opening another storage or machine form no longer closes a machine's set-up while it runs.
+- A published page's dialog shows its link and buttons again; if the page cannot be re-checked it says so and keeps your Unpublish.
+- On a phone, a dialog's buttons stay above the on-screen keyboard.
+- The vault's password dialogs and a machine's sign-in no longer block the chat.
+- When a window of the same kind has unsaved changes, opening another one asks first; Discard opens the one you asked for, with its content.
+- On a phone, the Design window's Comment and Artboards sheets sit right on top of the keyboard with their header in view.
+- A second search, .deb file, helper request or folder to share now opens its own dialog instead of bringing back the first one.
+- Asking for another app on a machine no longer closes the window of an install that is still running.
+- In a Task Group's Context table, the folder picker keeps working when the group changes on another screen, and says so if its row is removed.
+- A form with unsaved changes comes to the front when it has to ask first, so you can answer.
+- Change build…, reopened after a download, now waits behind the window you moved to.
+- A message you send while a Claude reply runs stays in the chat after the server restarts, with its label and its pictures; it used to disappear.
+- When Claude runs a message it was holding as a turn of its own, the chat shows the turn running and its Stop button.
+- If Claude could not read a picture you sent, the chat now shows its note beside the picture.
+- After a restart, messages Claude ran together are shown once each, and its notes about pictures no longer appear as yours.
+- A message waiting while a stopped Claude turn settles says so with a countdown, and a note says when it is sent.
+- Pressing Stop again while a stopped turn settles no longer loses the message the first Stop kept.
+- Alt+Enter in the expanded editor, or with Enter set to a new line, types a new line.
+- After a restart, the status bar no longer counts the Claude CLI's own request records as new record kinds.
+- Conversation links in a chat now sit on the command that read them; links no shown command made sit on that turn's VibeSpace line, never on an unrelated step.
+- A folded command that updates the status and then searches the channels now shows its search part.
+- With many conversation links a folded line shows only those that fit legibly plus «+N more», which lists them one per row instead of squeezing them.
+- You can now approve a reaction an agent proposes, or its taking back of a message you sent — until now these cards refused Approve with a wrong tip to reload.
+
+### Security
+- With sign-in off, an agent could widen a wake you approved by editing its rule or filter; changing what a wake reacts to now takes your click.
+- With sign-in off, an agent could turn a wake back on or edit a rule that wakes it through the account; that now takes your click.
+- With sign-in off, a script or an automation key could re-enable a webhook path that wakes an agent or add a caller; that now takes your click.
+- With sign-in off, granting an account or adding a rule that would turn a stopped wake back on now takes your click, and your own change says which it turned on.
+- A webhook pairing code not made on your page no longer completes once the path wakes an agent; make a new code on the page.
+- A refusal that tells an agent a wake depends on a conversation now shows that conversation's title as one plain line.
+- A refused webhook pairing no longer tells the other side the names of your agents, conversations or rules.
+- An agent's list of its notifications no longer names conversations it cannot read.
+- With sign-in off, an agent could turn a stopped group wake back on by adding an extra field when editing the account's access; that now takes your click.
+- A webhook pairing is now refused if a wake was turned on for its path while the pairing was completing.
+
+## 2.369.361 — 2026-10-29
+
+### Fixed
+- A Claude CLI update no longer quietly drops accounts from a pool: an unmeasured CLI version is explained in For you, and those accounts keep their logins.
+- A pool's notice now names every member and what holds it back; it blames your spending limits only when they are what holds the others.
+- Auto-resume no longer misses the second an account's usage limit resets.
+- Re-check no longer probes an account with no login in its folder; a token-only account says it refreshes when a conversation uses it.
+- Re-check refreshes an account with no login in its folder through your machine's own login of the same account, when there is one.
+- The For-you note about an unmeasured Claude CLI stays dismissed, keeps its account count current, and survives an unreadable CLI version.
+- Pool notices stay short (a few accounts of each kind and how many more) and say when a locked vault or a vendor refusal holds an account.
+- Auto-resume never continues into an account its fresh check found spent, even when several conversations wait for the same reset.
+- When a pool's notice has to shorten its list, For you keeps the full list: every account and what holds it back.
+- Dismissing, reopening or clearing the unmeasured-CLI note in For you is kept; Re-check is yours alone (an agent's token is refused).
+- When the account pool moves a conversation past a usage limit, the agent is told the limit’s “resets at …” was one account’s, not when it may continue.
+
 ## 2.369.360 — 2026-10-27
 
 ### Added
