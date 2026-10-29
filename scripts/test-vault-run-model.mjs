@@ -279,8 +279,31 @@ console.log('④ THE SHAPE KEY — tool + flags + hosts + entries (decision ④)
     for (const [kw, h] of HOST) for (const o of spell(kw, h)) ORACLE.push([o, 'host:' + h]);
     for (const kw of OPAQUE) for (const o of spell(kw, kw === 'ControlPath' ? '/tmp/x' : 'nc h 22')) ORACLE.push([o, '<opaque>']);
     ORACLE.push(['==HostName=evil.example', '<none>'], ['HostName=%h.evil.example', '<opaque>'], ['"HostName evil.example', '<opaque>'], ['User=bob', '<none>'], ['Port=2222', '<none>']);
+    // round 11 (BLOCKER regression + MAJOR): the VALUE side + the routing/code-loading keywords r10 missed. ssh reads the -o
+    // VALUE with argv_split (a `"` GLUES, never ends the token; `\` escapes a quote; an unterminated quote ⇒ reject), NOT with
+    // strdelim — r10 read the value with its strdelim port, so it STOPPED at the closing quote and UNDER-named the host behind a
+    // glued quote (`HostName "box".evil` read `box`, ssh dials `box.evil`; 16 of these leaked on r10, 0 here — repro/r11 live vs
+    // ssh -G). And CanonicalDomains / CanonicalizeHostname (rewrite the host through a list) / PKCS11Provider / SecurityKeyProvider
+    // (dlopen agent-written code with the secret in env) read as «no option» on r10 — now OPAQUE. Each want = the host `ssh -F
+    // /dev/null -G` builds (OpenSSH_10.2p1), or <opaque>; ProxyJump rejects a quoted value (ssh ignores the line) ⇒ the reader
+    // over-cards (names a host ssh does not dial — a card, never a leak), so the live oracle scores it a safe SUPERSET.
+    for (const [o, want] of [
+      ['HostName "box.example".evil.example', 'host:box.example.evil.example'],
+      ['HostName box.example"".evil.example', 'host:box.example.evil.example'],
+      ['HostName=box.example""evil.example', 'host:box.exampleevil.example'],
+      ['HostName ""evil.example', 'host:evil.example'],
+      ['HostName "box.example"x', 'host:box.examplex'],
+      ['HostName="box.example".evil.example', 'host:box.example.evil.example'],
+      ['HostName box.example=evil.example', 'host:box.example=evil.example'],
+      ['HostName "box.example"%h.evil', '<opaque>'],
+      ['HostName box.example\\"q', 'host:box.example"q'],
+      ['HostName "box.example', '<opaque>'],
+      ['ProxyJump "router.example".evil.example', 'host:router.example.evil.example'],
+      ['CanonicalDomains evil.example', '<opaque>'], ['CanonicalizeHostname yes', '<opaque>'],
+      ['PKCS11Provider /tmp/x.so', '<opaque>'], ['SecurityKeyProvider /tmp/x.so', '<opaque>'], ['Pkcs11Provider=/tmp/x.so', '<opaque>'],
+    ]) ORACLE.push([o, want]);
     const bad = ORACLE.filter(([o, want]) => KW(o) !== want);
-    ok(bad.length === 0 && ORACLE.length >= 60, `the \`-o\` reader matches OpenSSH strdelim for every GENERATED spelling (${ORACLE.length} spellings incl. empty-quote / glued-quote / mid-quote; fixture ssh -G 10.2p1, live cross-check repro/r10)`, { count: ORACLE.length, bad: bad.map(([o]) => o).slice(0, 6) });
+    ok(bad.length === 0 && ORACLE.length >= 75, `the \`-o\` reader matches OpenSSH for every GENERATED spelling (${ORACLE.length}: keyword by strdelim + VALUE by argv_split — empty/glued/mid-quote, a quote inside the value, %-behind-quote, backslash, unterminated; + CanonicalDomains/PKCS11Provider/SecurityKeyProvider opaque; fixture ssh -G 10.2p1, live cross-check repro/r11)`, { count: ORACLE.length, bad: bad.map(([o]) => o).slice(0, 6) });
   }
   // round 9 (seam ruling C with vault-agent-own, 主开发): DESTINATION KNOWLEDGE (`shape.destKnown`) is decoupled from «always»
   // eligibility — it is true for a KNOWN tool whose destinations the reader READ IN FULL (every host named, nothing opaque), so a
@@ -299,8 +322,17 @@ console.log('④ THE SHAPE KEY — tool + flags + hosts + entries (decision ④)
     // tip). Pinned over the whole matrix: no shape has always:true with destKnown:false.
     const SH = (argv) => V.shapeOf(V.planOf({ argv, env: [['T', M1]] }));
     const matrix = [...yes.map((x) => x[1]), ...no.map((x) => x[1]), ['ssh', 'box.example', 'true'], ['scp', 'f', 'box.example:/t'], ['git', 'push', 'origin', 'main'], ['curl', 'https://a.example/x']];
-    const viol = matrix.filter((a) => { const s = SH(a); return s.always === true && s.destKnown !== true; });
-    ok(viol.length === 0, 'shape.always ⇒ shape.destKnown for every shape (the door never offers «always» for a destination the grant road cannot read back — int361 seam ruling C + round-10 MAJOR)', { viol: viol.map((a) => a.join(' ')).slice(0, 4) });
+    // round 11 (MINOR): the DISTINGUISHING shape — a SHOWN `-K $VAULT_FILE{…}` config template that reads no host. In THIS tree a
+    // `-K` sets configFile ⇒ always:false, so the implication holds vacuously; on the int361 tip vault-agent-own's rule offers
+    // «always» for exactly this shape (always:true), so a merge that keeps the tip's OWN destKnown (r9's blanket `!configFile`,
+    // without the `!noAlways ||` disjunct) gives always:true + destKnown:false — the r10 MAJOR-3 bug, the «Always» button doing
+    // nothing. The leg is a tautology HERE by construction (destKnown = !noAlways || …); its teeth are the scratch-tip repro
+    // (repro/r11/always-destknown-tip.mjs) which plants r9's destKnown on a tip copy and runs THIS matrix+shape ⇒ red, then
+    // prepends `!noAlways ||` ⇒ green. Carrying the shape here keeps the matrix complete and documents the seam the repro guards.
+    const tmpl = V.shapeOf(V.planOf({ argv: ['curl', '-K', '$VAULT_FILE{hdr}', 'https://api.example.com/x'], file: [['hdr', '@h.tpl']], templates: { 'h.tpl': 'header = "X-K: $VAULT{mounts/m1/secretKey}"' }, env: [['T', M1]] }));
+    const shapes = [...matrix.map(SH), tmpl];
+    const viol = shapes.filter((s) => s.always === true && s.destKnown !== true);
+    ok(viol.length === 0, 'shape.always ⇒ shape.destKnown for every shape incl. a shown -K template (the door never offers «always» for a destination the grant road cannot read back — int361 seam ruling C + round-10 MAJOR; the scratch-tip repro/r11 is the regression catch)', { viol: viol.map((s) => s.name + ' ' + s.noAlways).slice(0, 4) });
   }
   // round 6 (MAJOR item 2): a ONE-LETTER ssh/sftp host is an alias (opaque, every spelling).
   const RH6 = (argv, extra = {}) => V.shapeOf(V.planOf({ argv, env: [['T', M1]], ...extra })).routeHosts;

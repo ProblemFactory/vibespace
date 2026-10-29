@@ -324,7 +324,7 @@ const INTERPRETERS = Object.freeze(['node', 'nodejs', 'deno', 'bun', 'python', '
 
 // ── THE KNOWN TOOLS (§8.4 — P1 vault-run-egress fences the `proxyEnv` ones) ──
 const SSH_VALUE_FLAGS = ['-b', '-c', '-D', '-E', '-e', '-F', '-I', '-i', '-J', '-L', '-l', '-m', '-O', '-o', '-p', '-P', '-Q', '-R', '-S', '-W', '-w', '-B'];
-const SSH_KEYED = ['-o', '-F', '-J', '-W', '-L', '-R', '-D', '-S'];   // lane vault-run-door: where the connection goes / what it runs (ProxyCommand) — the value is the shape
+const SSH_KEYED = ['-o', '-F', '-J', '-W', '-L', '-R', '-D', '-S', '-I'];   // lane vault-run-door: where the connection goes / what it runs (ProxyCommand) — the value is the shape; round 11 (MAJOR): `-I <pkcs11.so>` loads agent-written code with the secret in env ⇒ opaque (its value was consumed but never read before)
 // lane vault-agent-own (round 2): the flags whose VALUE is the next word, so a value is never read as a target (`curl -X POST`,
 // `wget -O out.html`); a flag missing here only makes its value look like a target — a card more, never one less
 // int361 (the vault pair, 主开发's ruling): + vault-use-grants' `--alt-svc` — its value (a cache FILE) is never read as a positional host; the flag stays keyed (opaque) too
@@ -827,6 +827,13 @@ const SSH_LOCAL_O = new Set([...SSH_OPAQUE_O, 'proxycommand', 'localcommand', 'k
 // `-o ProxyJump=router`). A missed spelling is a missing ROW here (or a short flag routed to addSshHost), never a branch
 // that forgot the alias check — so a single-label jump host can no longer slip past with `always:true`.
 const SSH_HOST_OPTS = new Set([...SSH_OPT_TABLE.filter((r) => r.mode === 'host').map((r) => r.o), 'hostname']);
+// lane vault-use-grants round 11 (MAJOR): `-o` keywords that change the destination or load code the reader cannot vouch for.
+// CanonicalDomains / CanonicalizeHostname rewrite the connect host through a domain LIST the reader cannot resolve (a grant
+// names the pre-canonical host, ssh dials the post-canonical one). PKCS11Provider / SecurityKeyProvider name a shared library
+// (.so) ssh dlopen()s with the staged secret in the child's environment — code the agent can write. Both ⇒ OPAQUE (the card,
+// «always» withheld), never read as «no option». The command-line `-I` (PKCS11 identity) is the same class — handled in
+// routeTargetsOf (it is a flag, not an `-o` keyword). Pinned vs `ssh -F /dev/null -G` in the oracle.
+const SSH_OPAQUE_KW = new Set(['canonicaldomains', 'canonicalizehostname', 'pkcs11provider', 'securitykeyprovider']);
 // lane vault-use-grants round 9 (BLOCKER item 2): read an `ssh -o <string>` keyword the way OpenSSH's strdelim (readconf.c)
 // does — NOT a bare cut at the first `=`/space. ssh: a token ends at unquoted whitespace OR a single `=`; a `"` begins a run
 // whose bytes (incl. ws and `=`) are literal and whose quotes are STRIPPED (around the keyword AND inside it: `Host"Name"` =
@@ -856,6 +863,28 @@ function readSshOpt(val) {
     if (!hadEq && s[n] === '=') { n++; while (n < s.length && SSH_OPT_WS.includes(s[n])) n++; }   // one `=` skipped either as this delimiter or the next char
     return { tok: s.slice(old, d), next: n };
   };
+  // lane vault-use-grants round 11 (BLOCKER regression from r10): the KEYWORD is read with strdelim (above), but ssh reads the
+  // VALUE with argv_split (misc.c) — a DIFFERENT grammar: a `"` TOGGLES quoting and NEVER ends the token (the matching quote is
+  // stripped and the bytes on BOTH sides glue into one argument: `"box.example".evil` → `box.example.evil`, `""evil` → `evil`),
+  // a `\` escapes a `"`/`'`/`\` (any other `\x` keeps the backslash), a run of unquoted whitespace separates arguments, and an
+  // unterminated quote (or a `\` at the end) makes ssh REJECT the line. r10 read the value with its strdelim port, which STOPS
+  // at the closing quote and threw the rest away, so a quote glued inside the value hid the real host (`HostName "box".evil`
+  // read `box`, ssh dialed `box.evil`; `%` behind a quote escaped the fail-closed check). Returns the FIRST argument (HostName
+  // is one host; ProxyJump a comma-list with no ws), or `bad` ⇒ opaque (fail closed). Pinned value-by-value vs `ssh -F /dev/null
+  // -G` (the generated oracle's value side in test-vault-run-model; live cross-check repro/r11/ssh-o-oracle.mjs).
+  const argvValue = (pos) => {
+    let i = pos; while (i < s.length && (s[i] === ' ' || s[i] === '\t')) i++;   // argv_split skips leading ws
+    let arg = '', quote = false;
+    for (; i < s.length; i++) {
+      const c = s[i];
+      if (c === '\\') { const n = s[i + 1]; if (n === '"' || n === "'" || n === '\\') { arg += n; i++; } else if (n === undefined) return { bad: true }; else arg += c; }   // escape a quote/backslash, else keep the `\` and read the next char normally (a `\` at EOS ⇒ reject)
+      else if (!quote && (c === ' ' || c === '\t')) break;   // unquoted ws ends THIS argument
+      else if (c === '"') quote = !quote;   // a quote toggles — it never ends the token, and the pair is stripped
+      else arg += c;
+    }
+    if (quote) return { bad: true };   // an unterminated quote ⇒ ssh rejects the line ⇒ fail closed
+    return { arg };
+  };
   let kw = strdelim(0);
   if (kw && kw.bad) return { opaque: true };
   if (kw && kw.tok === '') { kw = strdelim(kw.next); if (kw && kw.bad) return { opaque: true }; }   // an empty first token (leading `=` / ws / `""`) ⇒ ssh re-reads the keyword once
@@ -863,10 +892,11 @@ function readSshOpt(val) {
   if (!key) return {};   // no keyword (a second empty token, `==HostName=`) ⇒ ssh applies nothing, nothing routes
   if (SSH_OPT_CTRL.test(key)) return { opaque: true };
   if (SSH_LOCAL_O.has(key)) return { opaque: true };
+  if (SSH_OPAQUE_KW.has(key)) return { opaque: true };   // round 11 (MAJOR): CanonicalDomains / CanonicalizeHostname rewrite the host through a list the reader cannot resolve; PKCS11Provider / SecurityKeyProvider load agent-written code (a .so) with the secret in the child's env ⇒ the card, «always» withheld (a plain `-o HostName=` these are not — opaque, not a named host)
   if (SSH_HOST_OPTS.has(key)) {
-    const v = strdelim(kw.next);   // the value — ONE strdelim token (HostName is one host; ProxyJump lists a,b with no ws)
-    if (v && v.bad) return { opaque: true };
-    const raw = v ? v.tok : '';
+    const v = argvValue(kw.next);   // the value — read with argv_split (NOT strdelim): a glued quote stays part of the host
+    if (v.bad) return { opaque: true };
+    const raw = v.arg;
     if (SSH_OPT_CTRL.test(raw) || /%/.test(raw)) return { opaque: true };   // a control char, or a `%h`/`%%` token ssh expands to a host we cannot name ⇒ fail closed
     return { hosts: raw.split(/[,\s]+/).filter(Boolean) };
   }
@@ -930,6 +960,7 @@ function routeTargetsOf(row, kind, hosts, keyed, positionals, plainEnv, win32 = 
     else if (flag === '-o') { const r = readSshOpt(val); if (r.opaque) opaque = true; else if (r.hosts) for (const h of r.hosts) addSshHost(h); }   // ssh -o; round 9 (BLOCKER item 2): the keyword is read by `readSshOpt` = OpenSSH's strdelim grammar (skip a leading `=`, strip a `"` pair around/inside the keyword, split at a single `=` or any whitespace), so `=ProxyCommand=…`, `"HostName" …`, `Host"Name"` and `HostName<TAB>…` all resolve to the real keyword; an unmatched quote / control char / `%`-token value ⇒ opaque (fail closed). `-F <config>` stays `config-file` — it withholds «always»; a remap of a dotted host through a config is the acknowledged ~/.ssh/config gap, open on both trees
     else if (flag === '-J') { for (const h of val.split(',')) addSshHost(h); }   // round 6 item 1: a jump host is `-o ProxyJump=` by another spelling — the SAME alias law (addSshHost)
     else if (flag === '-W') { addSshHost(val); }   // ssh -W host:port — the forwarded destination, under the alias law too
+    else if (flag === '-I') opaque = true;   // round 11 (MAJOR): ssh -I <pkcs11 provider.so> dlopen()s agent-written code with the staged secret in the child's env ⇒ the card, «always» withheld (the same class as `-o PKCS11Provider=`)
     else if (flag === '-c' || flag === '--config-env') opaque = true;   // git config can set core.sshCommand / http.proxy — opaque
     else if (SSH_OPAQUE_FLAGS.has(flag)) opaque = true;   // round 7 item 1b: ssh -S/-L/-R/-D — DERIVED from SSH_OPT_TABLE, so a short flag and its `-o` long form (SSH_LOCAL_O, the same rows) are opaque together (`-o ControlPath=` ≡ `-S`)
   }
