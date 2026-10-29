@@ -725,6 +725,7 @@ console.log('§5 the door census — every pointer drag in the client is on the 
     ['browser-live-window.js', /^pointerup$/, "lane J's keyboard-yield witness (capture, passive): a press witness, not a drag"],
     ['path-field.js', /^(pointerup|pointercancel)$/, "lane path-field's press witness (capture): a blur commit waits for the press that caused the blur to end (a re-render under the pointer would eat its click), not a drag"],
     ['blur-commit.js', /^(pointerup|pointercancel)$/, 'blur commits (lane task-group-context, capture + passive): a press witness — a box left by a press saves after the release, nothing follows the pointer'],
+    ['form-window.js', /^pointerup$/, "lane dialog-yield r3's PRESS TOKEN (capture): the release is the click's task — a form opened in it learns whether the press landed in a blocking layer; a press witness, not a drag"],
   ];
   // THE FEED DOORS per file (a new door registers here — or it is red)
   const DOORS = { 'window.js': 2, 'tab-group.js': 3, 'resizer.js': 1, 'theme-editor.js': 2, 'chat-minimap.js': 1, 'desktop-manager.js': 2, 'file-explorer.js': 1, 'file-viewer.js': 2, 'customize-mode.js': 1, 'chat-input.js': 1, 'corner-float.js': 1 }; // + corner-float.js: lane stream-stats-popup — the stream details' pinned panel and the full-screen pill

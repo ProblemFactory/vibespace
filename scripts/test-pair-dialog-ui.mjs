@@ -202,6 +202,10 @@ try {
   const headEn = await E.evalJs(`document.querySelector('#device-pair-dialog .device-pair-state').textContent`);
   ok(/^Last dial: refused \(token mismatch\)/.test(headEn), 'the sheet\'s head says the refused state (the user sees the OLD command failed before rotating it)', headEn);
   ok(mints(E).length === 0, 'the English page minted nothing either');
+  // lane dialog-yield r2: the sheet closes here — the next open of uimac's sheet (B8, the device now CONNECTED) must draw it afresh;
+  // before r2 that open silently REPLACED this one, and a form is never replaced now (the same form would be raised)
+  await E.evalJs(`document.querySelector('#device-pair-dialog .dialog-close')?.click(); true`);
+  ok(await E.waitFor(`!document.getElementById('device-pair-dialog')`, 4000), 'the 360 px sheet closes (its ✕)');
   // attack 19: a custom address that is not an address — refused BEFORE anything is minted (the route re-judges it)
   for (const bad of ['http://mac.lan/api', 'javascript:alert(1)', 'mac.lan:99999']) {
     const r = await W.api('POST', '/api/device/dial-pair', { deviceId: 'nopair', base: bad });
@@ -368,6 +372,7 @@ try {
   {
     for (const Q of [P, E]) {
       await openRemote(Q);
+      const fl = `[...app.wm.windows.values()].filter((x) => x.type === 'form').map((x) => x.id.slice(-4) + ':' + x.title + (app.wm.activeWindowId === x.id ? '*' : ''))`;
       await Q.evalJs(`app.sidebar._showDevicePairDialog(); true`);
       await Q.waitFor(`!!document.querySelector('#device-pair-dialog .device-pair-name') && !document.querySelector('#device-pair-dialog .device-pair-go').disabled`, 10000);
       await Q.evalJs(`document.querySelector('#device-pair-dialog .device-pair-name').focus(); true`);
@@ -376,8 +381,9 @@ try {
     await E.evalJs(`(() => { const s = app.sidebar; s.__r5real = s._hostsData; Object.defineProperty(s, '_hostsData', { configurable: true, get: () => ({ ...(s.__r5real || {}), hosts: ((s.__r5real || {}).hosts || []).filter((h) => h.deviceId !== 'racemac') }), set: (v) => { s.__r5real = v; } }); return true; })()`);
     const view = (Q) => Q.evalJs(`({ note: document.querySelector('#device-pair-dialog .device-pair-exists')?.textContent || '', shown: !!document.querySelector('#device-pair-dialog .device-pair-exists')?.offsetParent, go: document.querySelector('#device-pair-dialog .device-pair-go')?.textContent || '', err: document.querySelector('#device-pair-dialog .device-pair-err')?.textContent || '', head: document.querySelector('#device-pair-dialog .device-pair-head')?.textContent || '', replaced: document.querySelector('#device-pair-dialog .device-pair-replaced')?.offsetParent ? document.querySelector('#device-pair-dialog .device-pair-replaced').textContent : '', cmd: document.querySelector('#device-pair-dialog .device-pair-cmd')?.value || '' })`);
     // window 1 creates racemac, and a REAL daemon runs its command (connected)
-    await P.realClick('#device-pair-dialog .device-pair-go');
-    ok(await P.waitFor(`!!document.querySelector('#device-pair-dialog .device-pair-cmd')`, 10000), 'A1: window 1 creates racemac');
+    const pre1 = await P.evalJs(`(() => { const f = document.getElementById('device-pair-dialog'), w = f && f.closest('.window'), g = f && f.querySelector('.device-pair-go'), r = g && g.getBoundingClientRect(), h = r && document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return { root: f ? f.className : null, win: !!w, active: !!w && [...app.wm.windows.values()].some((x) => x.element === w && app.wm.activeWindowId === x.id), go: g ? { text: g.textContent, disabled: g.disabled } : null, hit: h ? String(h.className || h.tagName).slice(0, 50) : null, name: f?.querySelector('.device-pair-name')?.value || null, go_r: r ? [Math.round(r.left), Math.round(r.top), Math.round(r.right), Math.round(r.bottom)] : null, win_r: w ? (() => { const q = w.getBoundingClientRect(); return [Math.round(q.left), Math.round(q.top), Math.round(q.right), Math.round(q.bottom), getComputedStyle(w).display, getComputedStyle(w).visibility]; })() : null, vp: [innerWidth, innerHeight], mobile: !!app.isMobile, act: (() => { const a = app.wm.windows.get(app.wm.activeWindowId); return a ? a.type + ':' + a.title : null; })(), forms: [...app.wm.windows.values()].filter((x) => x.type === 'form').map((x) => x.title + (x.isMinimized ? '(min)' : '') + (x._hiddenByDesktop ? '(desk)' : '')) }; })()`); // (where window 1's Create stands when it is pressed)
+    const press1 = await P.realClick('#device-pair-dialog .device-pair-go');
+    ok(await P.waitFor(`!!document.querySelector('#device-pair-dialog .device-pair-cmd')`, 10000), 'A1: window 1 creates racemac', { pre1, press1 });
     const b1 = JSON.parse(mints(P).at(-1).body);
     const c1 = (await view(P)).cmd;
     const tok = (c1.match(/VIBESPACE_DIAL_TOKEN=(vsdt_[0-9a-f]+)/) || [])[1], htok = (c1.match(/VIBESPACE_HOST_TOKEN=(vsht_[0-9a-f]+)/) || [])[1], durl = (c1.match(/--dial '([^']+)'/) || [])[1];

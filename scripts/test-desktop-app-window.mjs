@@ -182,7 +182,7 @@ async function page(t) {
   ws.on('message', (d) => { const m = JSON.parse(d); if (m.id && pend.has(m.id)) { pend.get(m.id)(m); pend.delete(m.id); } else if (m.method) { for (let i = evWait.length - 1; i >= 0; i--) if (evWait[i].method === m.method) evWait.splice(i, 1)[0].res(m.params || {}); } });
   const next = (method) => new Promise((res) => evWait.push({ method, res }));
   const cdp = (method, params = {}) => new Promise((res, rej) => { const id = ++seq; pend.set(id, (m) => (m.error ? rej(new Error(m.error.message)) : res(m.result))); ws.send(JSON.stringify({ id, method, params })); });
-  const evalJs = async (expr) => { const r = await cdp('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true }); if (r.exceptionDetails) throw new Error('page threw: ' + (r.exceptionDetails.exception?.description || JSON.stringify(r.exceptionDetails))); return r.result.value; };
+  const evalJs = async (expr) => { const r = await cdp('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true, userGesture: true }); /* lane dialog-yield: a scripted click here stands for the person's (a form opened by no act of the person stands BEHIND) */ if (r.exceptionDetails) throw new Error('page threw: ' + (r.exceptionDetails.exception?.description || JSON.stringify(r.exceptionDetails))); return r.result.value; };
   await cdp('Page.enable');
   return { ws, cdp, evalJs, next, close: () => { try { ws.close(); } catch {} } };
 }
@@ -240,7 +240,8 @@ const openDialog = async (p) => {
 const GEOM = `(() => {
   const ov = document.getElementById('desktop-launch-dialog'); if (!ov) return null; const dlg = ov.querySelector('.dialog');
   const R = (el) => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height, r: r.right, b: r.bottom }; };
-  const h3 = dlg.querySelector('.dialog-header h3'), x = dlg.querySelector('.dialog-close');
+  // lane dialog-yield: the Apps dialog is a FORM window on the desktop — its title and its ✕ are the window's (the dialog's head is hidden)
+  const fw = ov.closest('.window'); const h3 = fw ? fw.querySelector('.window-title') : dlg.querySelector('.dialog-header h3'), x = fw ? fw.querySelector('.win-close') : dlg.querySelector('.dialog-close');
   const hr = R(h3); const hit = document.elementFromPoint(hr.x + hr.w / 2, hr.y + hr.h / 2);
   const card = dlg.querySelector('.desktop-launch-card'); const label = card && card.querySelector('.desktop-launch-card-label');
   const grid = dlg.querySelector('.desktop-launch-grid'); const body = dlg.querySelector('.dialog-body'); const intro = dlg.querySelector('.desktop-launch-intro');
@@ -248,7 +249,7 @@ const GEOM = `(() => {
   const cols = [...dlg.querySelectorAll('.desktop-launch-col')].filter(vis).map(R);
   const cards = [...dlg.querySelectorAll('.desktop-launch-card')].map((c) => ({ id: c.dataset.appId, disabled: c.disabled, unavailable: c.classList.contains('is-unavailable'), launching: c.classList.contains('is-launching'), svg: !!c.querySelector('.desktop-launch-card-icon svg'), label: c.querySelector('.desktop-launch-card-label')?.textContent, sub: c.querySelector('.desktop-launch-card-sub')?.textContent, visible: vis(c) }));
   return { vw: innerWidth, vh: innerHeight, dlg: R(dlg), scrollLeft: dlg.scrollLeft, scrollWidth: dlg.scrollWidth, clientWidth: dlg.clientWidth, bodyClientW: body.clientWidth, bodyScrollW: body.scrollWidth, bodyContentW: body.clientWidth - parseFloat(getComputedStyle(body).paddingLeft) - parseFloat(getComputedStyle(body).paddingRight),
-    h3: hr, h3Hit: !!hit && (hit === h3 || h3.contains(hit)), close: R(x), card: card ? R(card) : null, label: label ? R(label) : null, grid: grid ? R(grid) : null, cols, cards,
+    h3: hr, h3Hit: !!hit && (hit === h3 || h3.contains(hit)), close: R(x), frame: fw ? R(fw) : null, card: card ? R(card) : null, label: label ? R(label) : null, grid: grid ? R(grid) : null, cols, cards,
     adv: dlg.querySelector('.desktop-launch-adv-toggle')?.getAttribute('aria-expanded') || null, advBodyVisible: vis(dlg.querySelector('.desktop-launch-adv-body')), introVisible: vis(intro), introText: intro ? intro.textContent : '',
     runningVisible: vis(dlg.querySelector('.desktop-launch-running-sec')), focused: document.activeElement ? (document.activeElement.className || document.activeElement.tagName) : null };
 })()`;
@@ -283,7 +284,7 @@ try {
     check(`${tag}: .dialog is not scrolled sideways and has nothing to scroll (scrollLeft ${g.scrollLeft}, scrollWidth ${g.scrollWidth} ≤ clientWidth ${g.clientWidth})`, g.scrollLeft === 0 && g.scrollWidth <= g.clientWidth);
     check(`${tag}: the body has no sideways overflow either (${g.bodyScrollW} ≤ ${g.bodyClientW})`, g.bodyScrollW <= g.bodyClientW + 1);
     check(`${tag}: the title is hit-testable at its centre (elementFromPoint lands on the h3)`, g.h3Hit, { h3: g.h3, hit: g.h3Hit });
-    check(`${tag}: ✕ sits inside the dialog's right 48px (x ${g.close.x.toFixed(0)}..${g.close.r.toFixed(0)} vs dialog right ${g.dlg.r.toFixed(0)})`, g.close.r <= g.dlg.r + 0.5 && g.close.x >= g.dlg.r - 48);
+    { const edge = (g.frame || g.dlg).r; check(`${tag}: ✕ sits inside the ${g.frame ? 'form window' : 'dialog'}'s right 48px (x ${g.close.x.toFixed(0)}..${g.close.r.toFixed(0)} vs right ${edge.toFixed(0)})`, g.close.r <= edge + 0.5 && g.close.x >= edge - 48); }
     check(`${tag}: the intro line renders`, g.introVisible && g.introText.length > 40);
     check(`${tag}: the first app card's label lies inside its card`, !!g.card && !!g.label && g.label.x >= g.card.x - 0.5 && g.label.r <= g.card.r + 0.5 && g.label.w > 0, { card: g.card, label: g.label });
     check(`${tag}: the catalog grid spans the body's content box (${g.grid && g.grid.w.toFixed(0)} of ${g.bodyContentW.toFixed(0)})`, !!g.grid && g.grid.w >= 0.98 * g.bodyContentW);

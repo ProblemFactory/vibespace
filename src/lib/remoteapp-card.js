@@ -52,7 +52,8 @@ export function remoteappCardRefusal(r, machine) {
 export function openRemoteappSettings(app, m) {
   const machine = m.name || m.hostId;
   const host = encodeURIComponent(m.hostId);
-  const { body, close } = createModalShell({ id: 'remoteapp-settings', title: t('RemoteApp settings — {machine}', { machine }), dialogClass: 'remoteapp-settings', escapeToClose: true });
+  const { body, close, raised, live } = createModalShell({ id: 'remoteapp-settings', key: m && m.hostId, title: t('RemoteApp settings — {machine}', { machine }), dialogClass: 'remoteapp-settings', escapeToClose: true, kind: 'form' });
+  if (raised) return null;   // raised: the same subject's form, as it was
   const lead = el('p', 'ra-lead', t('Open {machine}’s apps as their own windows through Remote Desktop. Set it up once here.', { machine }));
   const factsHead = el('div', 'ra-head', t('What {machine} needs', { machine }));
   const factsBox = el('div', 'ra-facts');
@@ -126,14 +127,14 @@ export function openRemoteappSettings(app, m) {
   }
   async function loadSetup() {
     const r = await fetchJson(`/api/desktop/machine-desktop/remoteapp/setup?host=${host}`);
-    if (!body.isConnected) return;
+    if (!live()) return;   // r4: THE liveness predicate (a queued body is detached, not closed)
     if (!r || r.error) { showToast(remoteappCardRefusal(r, machine), { type: 'error' }); return; }
     setup = r.setup; drawSetup();
   }
   async function loadFacts() {
     factsAnswer = null; drawFacts();
     const r = await fetchJson(`/api/desktop/machine-desktop/remoteapp/facts?host=${host}`);
-    if (!body.isConnected) return;
+    if (!live()) return;
     factsAnswer = r || { ok: false, code: 'host_unavailable' };
     facts = r && r.ok ? r.facts : null;
     drawFacts(); tech();

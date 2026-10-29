@@ -700,9 +700,12 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
   })();
   pane.addEventListener('mouseover', (e) => { if (isPhone() || S.mode !== 'rich' || !S.view) return; const a = e.target.closest && e.target.closest('a[href]'); linkBar.hover(a && S.view.dom.contains(a) ? a : null); }, { signal });
   pane.addEventListener('mouseleave', () => linkBar.hover(null), { signal });
-  /** The Link dialog (the house modal): the address + the link's text, prefilled when editing; Enter applies, Esc / Cancel ⇒ null. */
+  /** The Link dialog (a FORM — lane dialog-yield r2: the document stays editable while it is open; editLink re-reads the
+   *  document at the answer and names what changed): the address + the link's text, prefilled when editing; Enter applies,
+   *  Esc (the shell's door: it asks when something was typed) / Cancel ⇒ null. */
   const linkDialog = (title, href, text) => new Promise((resolve) => {
-    const sh = createModalShell({ title, dialogClass: 'doc-link-dialog', onClose: () => resolve(null) });
+    const sh = createModalShell({ id: 'doc-link-dialog', key: `${host}:${path}`, beside: true, title, dialogClass: 'doc-link-dialog', onClose: () => resolve(null), escapeToClose: true, kind: 'form' });
+    if (sh.raised) return;   // raised: the same subject's form, as it was
     const field = (label, value, placeholder) => { const w = mk('label', null, label), i = mk('input'); i.type = 'text'; i.value = value || ''; i.placeholder = placeholder; w.appendChild(i); sh.body.appendChild(w); return i; };
     const hrefIn = field(t('Link address'), href, 'https://'), textIn = field(t('Link text'), text, '');
     hrefIn.className = 'doc-link-href'; textIn.className = 'doc-link-text';
@@ -712,7 +715,7 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
     const answer = () => done({ href: hrefIn.value, text: textIn.value });
     apply.addEventListener('click', answer, { signal });
     cancel.addEventListener('click', () => done(null), { signal });
-    for (const i of [hrefIn, textIn]) i.addEventListener('keydown', (e) => { if (e.isComposing || e.keyCode === 229) return; if (e.key === 'Enter') { e.preventDefault(); answer(); } else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); done(null); } }, { signal });
+    for (const i of [hrefIn, textIn]) i.addEventListener('keydown', (e) => { if (e.isComposing || e.keyCode === 229) return; if (e.key === 'Enter') { e.preventDefault(); answer(); } }, { signal });
     setTimeout(() => { hrefIn.focus(); hrefIn.select(); }, 0);
   });
   /** THE LINK DOOR — the toolbar's Link, Ctrl/Cmd+K and the bar's Edit: the caret on a link (or a selection inside one) ⇒ EDIT it
@@ -726,7 +729,8 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
     linkBar.drop();
     const ans = await linkDialog(link ? t('Edit link') : t('Link'), link ? link.href : '', link ? link.text : cur.text);
     if (!ans || !S.ed || S.mode !== 'rich') return;
-    if (S.view.state.doc !== st.doc) { say(t('Changed on disk')); return; } // the positions it was opened on are gone
+    // the document moved while the form was open (typed in, reloaded): the place it was asked for is gone — said, never applied elsewhere
+    if (S.view.state.doc !== st.doc) { say(t('The document changed while the link was being edited — select the text and press Link again')); return; }
     const plan = linkPlan(cur, ans, safeHref);
     if (!plan) { S.ed.commands.focus(); return; }
     if (plan.refused) { say(t('Not a link this document can carry: {url}', { url: plan.refused })); return; }
@@ -960,7 +964,11 @@ export function mountDocWindow({ root, winInfo, host, path, name, from, signal, 
     const acts = mk('div', 'doc-note-acts'); const cancel = mk('button', null, t('Cancel')); const add = mk('button', 'doc-note-add', t('Add'));
     acts.append(cancel, add); box.append(qq, voiceField(ta, attachDictation(ta)), acts);
     let close;
-    if (isPhone()) { const sh = createModalShell({ title: t('Add comment'), escapeToClose: true, dialogClass: 'doc-note-sheet' }); sh.body.appendChild(box); close = () => sh.close(); }
+    if (isPhone()) {
+      const sh = createModalShell({ id: 'doc-comment-sheet', key: `${host}:${path}`, beside: true, title: t('Add comment'), escapeToClose: true, dialogClass: 'doc-note-sheet', kind: 'form' });
+      if (sh.raised) return;   // raised: the comment being written on this document, as it was
+      sh.body.appendChild(box); close = () => sh.close();
+    }
     else { const p = createPopover(pane, 'doc-note-pop', { position: 'cursor', x: c.left, y: c.bottom + 4 }); p.appendChild(box); close = () => p.remove(); }
     cancel.addEventListener('click', () => close());
     add.addEventListener('click', () => {

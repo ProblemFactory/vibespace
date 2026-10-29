@@ -30,8 +30,14 @@ export function installSetupFlows(App) {
      * Returns true when checkDone passed, false on cancel.
      */
     runGuidedCli({ title, cmd, hint, checkDone }) {
-      return new Promise((resolve) => {
-        const { body, close } = createModalShell({ id: 'guided-cli-dialog', title, dialogClass: 'guided-cli-dialog', bodyClass: 'guided-cli-body' });
+      let own = null;
+      const outcome = new Promise((resolve) => {
+        // lane dialog-yield r3: the flow is its COMMAND — the same sign-in asked again is the running one (raised; this call
+        // answers with ITS outcome, never a false while it runs on); another flow opens beside it — a sign-in running in its
+        // terminal is never closed by a neighbour's open
+        const { body, close, raised, overlay } = createModalShell({ id: 'guided-cli-dialog', key: cmd, undismissable: true, title, dialogClass: 'guided-cli-dialog', bodyClass: 'guided-cli-body', escapeToClose: false, kind: 'form' });
+        if (raised) { (overlay._guided || Promise.resolve(false)).then(resolve); return; }
+        own = overlay; // (no Escape: the sign-in runs in its terminal — Escape is the terminal's key)
         body.innerHTML = `
           <div class="guided-cli-status"><span class="upload-active-spinner" aria-hidden="true"></span><span class="gc-msg">${escHtml(t('Follow the prompts in the terminal below — this closes automatically when done.'))}</span></div>
           ${hint ? `<div class="mounts-field-hint">${escHtml(hint)}</div>` : ''}
@@ -84,18 +90,21 @@ export function installSetupFlows(App) {
         this.ws.onGlobal(onCreated);
         this.ws.send({ type: 'create', backend: 'shell', mode: 'terminal', name: cmd.split(' ')[0], reqId, ephemeral: true, purpose: SIGN_IN });
       });
+      if (own) own._guided = outcome;   // what a re-open of this flow answers with
+      return outcome;
     },
 
     _modal(title, { wide = false } = {}) {
-    const { overlay, body, close } = createModalShell({
-      id: 'cfg-dialog-overlay', title, bodyClass: 'cfg-dialog-body',
-      minWidth: wide ? '440px' : null, escapeToClose: true,
+    const { overlay, body, close, raised } = createModalShell({
+      id: 'cfg-dialog-overlay', key: title, title, bodyClass: 'cfg-dialog-body',   // (each settings flow is its title's: Backup & migrate, the password)
+      minWidth: wide ? '440px' : null, escapeToClose: true, kind: 'form',
     });
-    return { overlay, body, close };
+    return { overlay, body, close, raised };
   },
 
     _showTransferDialog(initialTab = 'export', presetFile = null) {
-    const { body: shell, close } = this._modal(t('Backup & migrate'), { wide: true });
+    const { body: shell, close, raised } = this._modal(t('Backup & migrate'), { wide: true });
+    if (raised) return;   // raised: the open Backup & migrate, as it was
     const tabs = document.createElement('div');
     tabs.className = 'cfg-tabs';
     const body = document.createElement('div');
@@ -123,7 +132,8 @@ export function installSetupFlows(App) {
 
     _showPasswordDialog() {
     const enabled = !!this._authEnabled;
-    const { body, close } = this._modal(enabled ? t('Change password') : t('Set a password'));
+    const { body, close, raised } = this._modal(enabled ? t('Change password') : t('Set a password'));
+    if (raised) return;   // raised: the password form being filled, as it was
     const form = document.createElement('form');
     form.className = 'cfg-pass-form';
     form.innerHTML = `
@@ -454,7 +464,9 @@ export function installSetupFlows(App) {
   // server writes a rollback point before every layout SHAPE change; this is
   // the one click that uses them.
   async _showLayoutHistory() {
-    const { body, close } = createModalShell({ id: 'layout-history-dialog', title: t('Restore a previous layout'), minWidth: '460px', escapeToClose: true });
+    // one subject: this hub’s one layout history
+    const { body, close, raised } = createModalShell({ id: 'layout-history-dialog', title: t('Restore a previous layout'), minWidth: '460px', escapeToClose: true, kind: 'form' });
+    if (raised) return null;   // raised: the same subject's form, as it was
     body.innerHTML = `<div class="empty-hint">${escHtml(t('Loading…'))}</div>`;
     const r = await fetchJson('/api/layout-history').catch(() => null);
     const entries = r?.entries || [];

@@ -125,8 +125,9 @@ export function showSecretPasteDialog(model, item, { words = '', detail = '' } =
   const box = secretBoxEl(item);
   const press = async (answer) => { if (await submitSecretBox(model, item, box, answer)) close(); };
   const fieldOf = () => box.querySelector('input.ut-secret-input');
-  const { dialog, body, close } = createModalShell({ title: t('Paste a secret into the vault'), dialogClass: 'vault-paste-dialog', escapeToClose: true,
-    unsaved: { isDirty: () => !!(fieldOf() && fieldOf().value), save: () => press('store'), discard: () => { const f = fieldOf(); if (f) f.value = ''; } } });   // a pasted value never vanishes without a word — nor stays in a closed dialog
+  const { dialog, body, close, raised } = createModalShell({ id: 'vault-paste-dialog', key: item && item.id, beside: true, title: t('Paste a secret into the vault'), dialogClass: 'vault-paste-dialog', escapeToClose: true,
+    unsaved: { isDirty: () => !!(fieldOf() && fieldOf().value), save: () => press('store'), discard: () => { const f = fieldOf(); if (f) f.value = ''; } }, kind: 'form' });
+  if (raised) return null;   // raised: the same subject's form, as it was   // a pasted value never vanishes without a word — nor stays in a closed dialog
   body.append(mk('div', 'vault-paste-words', words), mk('div', 'ut-proposal-plan vault-paste-plan', detail), box);
   box.addEventListener('click', (e) => {
     if (e.target.closest('.ut-secret-unlock')) { showUnlock({ then: () => applySecretBox(box) }); return; }
@@ -144,8 +145,10 @@ export function showSecretPasteDialog(model, item, { words = '', detail = '' } =
  *  /api/vault/secrets (a person on this page; unlocked only). `refresh()` redraws the window's list on success. */
 export function showSecretAddDialog({ refresh = () => {} } = {}) {
   let saveNow = () => {};
-  const { dialog, body, close } = createModalShell({ title: t('Add another key or password'), dialogClass: 'vault-secret-add-dialog', escapeToClose: true,
-    unsaved: { isDirty: () => !!(name.value || value.value || note.value), save: () => saveNow(), discard: () => { value.value = ''; } } });
+  // one subject: one key or password being added
+  const { dialog, body, close, raised } = createModalShell({ id: 'vault-secret-add', title: t('Add another key or password'), dialogClass: 'vault-secret-add-dialog', escapeToClose: true,
+    unsaved: { isDirty: () => !!(name.value || value.value || note.value), save: () => saveNow(), discard: () => { value.value = ''; } }, kind: 'form' });
+  if (raised) return null;   // raised: the same subject's form, as it was
   const field = (label, control) => { const l = mk('label', 'vault-secret-field'); l.append(mk('span', 'vault-secret-label', label), control); return l; };
   const name = mk('input', 'vault-pw vault-secret-name'); name.type = 'text'; name.maxLength = 80; name.autocomplete = 'off'; name.placeholder = t('What it is — e.g. Router admin password');
   const kind = mk('select', 'vault-secret-kind');

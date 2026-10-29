@@ -201,7 +201,9 @@ process.stdin.on('end', () => process.exit(0));
     d.unref(); devPids.push(d.pid);
     return d.pid;
   }
-  const lockPid = (root) => { try { return Number(String(fs.readFileSync(path.join(root, 'state', 'agentd.lock'), 'utf8')).trim()); } catch { return 0; } };
+  // a daemon's pid, or null — NEVER 0: `process.kill(0, sig)` signals this whole process GROUP (the heavy runner itself — lane
+  // dialog-yield r2 measured ci.mjs «terminated from outside (SIGTERM)» at this suite's end when a lock file was gone)
+  const lockPid = (root) => { try { const n = Number(String(fs.readFileSync(path.join(root, 'state', 'agentd.lock'), 'utf8')).trim()); return Number.isInteger(n) && n > 0 ? n : null; } catch { return null; } };
   const api = async (method, p, body, headers = {}) => { const r = await fetch(BASE + p, { method, headers: { 'Content-Type': 'application/json', ...headers }, body: body ? JSON.stringify(body) : undefined }); return { status: r.status, j: await r.json().catch(() => ({})) }; };
   const hostRow = async (deviceId) => (await api('GET', '/api/hosts')).j.hosts.find((h) => h.deviceId === deviceId);
   return { PORT, BASE, wt, home, stubDir, devDir, bundle, serverLog, srvPid: srv.pid, openPage, createStubSession, pairDevice, startDaemon, lockPid, api, hostRow, cleanup };

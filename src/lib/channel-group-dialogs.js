@@ -80,7 +80,8 @@ export async function showGroupMembersDialog(app, { group = null } = {}) {
   const roster = await loadRoster(app);
   if (!roster) return;
   const existing = invite ? (group.members || []).map((m) => m.member) : [];
-  const shell = createModalShell({ id: 'chan-group-new-dialog', title: invite ? t('Invite to {name}', { name: group.name }) : t('New group'), dialogClass: 'chan-dialog chan-group-new', escapeToClose: true });
+  const shell = createModalShell({ id: 'chan-group-new-dialog', key: group ? group.id : 'new', title: invite ? t('Invite to {name}', { name: group.name }) : t('New group'), dialogClass: 'chan-dialog chan-group-new', escapeToClose: true, kind: 'form' });
+  if (shell.raised) return;   // raised: the same subject's form, as it was
   const { body, close } = shell;
   let nameInput = null;
   if (!invite) {
@@ -142,7 +143,7 @@ export async function showGroupMembersDialog(app, { group = null } = {}) {
     // the UI action chained after the write does NOT wait for the broadcast echo
     if (!invite && r.group && r.group.id) app.openChannel(GROUP_ADAPTER_ID, r.group.id);
   };
-  setTimeout(() => (nameInput || ctx).focus({ preventScroll: true }), 0);
+  shell.ready.then((s) => { if (s) setTimeout(() => (nameInput || ctx).focus({ preventScroll: true }), 0); });   // once it opens (r4: a queued form waits behind the open one's ask)
 }
 
 export async function renameGroup(group) {
@@ -164,7 +165,8 @@ export async function archiveGroup(group) {
  */
 export function showGroupDetail(app, group0) {
   let group = group0;
-  const shell = createModalShell({ id: 'chan-group-dialog', title: t('Group — {name}', { name: group.name }), dialogClass: 'chan-dialog chan-group-detail', escapeToClose: true, onClose: () => off() });
+  const shell = createModalShell({ id: 'chan-group-dialog', key: group0 && group0.id, title: t('Group — {name}', { name: group.name }), dialogClass: 'chan-dialog chan-group-detail', escapeToClose: true, onClose: () => off(), kind: 'form' });
+  if (shell.raised) return null;   // raised: the same subject's form, as it was
   const { body, close } = shell;
   const h3 = shell.dialog.querySelector('.dialog-header h3');
   function draw() {

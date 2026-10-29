@@ -590,7 +590,7 @@ try {
     const setModels = () => stdinFrames().filter((m) => m.type === 'control_request' && m.request?.subtype === 'set_model').map((m) => m.request.model);
     const customPick = async (text) => {
       await realClick('.window-active .chat-status-model-custom');
-      await waitFor(`!!document.activeElement && document.activeElement.tagName === 'INPUT' && !!document.activeElement.closest('.dialog-overlay')`, 4000);
+      await waitFor(`!!document.activeElement && document.activeElement.tagName === 'INPUT' && !!document.activeElement.closest('.dialog-overlay, .dialog-form')`, 4000); // (lane dialog-yield r2: showInputDialog — Set model — is a FORM)
       await cdp('Input.insertText', { text });
       await key('Enter', 'Enter', 13);
     };

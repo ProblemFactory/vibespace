@@ -217,7 +217,9 @@ if (CHROME) {
     await new Promise((r) => setTimeout(r, 300));
     // scope to the NEWEST overlay — a fresh instance also shows the
     // onboarding dialog, and document-order querySelector grabs that one
-    const ovs = document.querySelectorAll('.dialog-overlay');
+    // lane dialog-yield: the capture dialog is a FORM window on the desktop (.dialog-form), never an overlay — and the static
+    // #dialog-overlay (hidden) holds textareas of its own: the dialog is the one whose actions carry the Capture button
+    const ovs = [...document.querySelectorAll('.dialog-overlay:not(.hidden), .dialog-form')].filter((o) => o.querySelector('.dialog-actions .btn-create'));
     const ov = ovs[ovs.length - 1];
     const btn = ov?.querySelector('.dialog-actions .btn-create');
     const ta = ov?.querySelector('.dialog-body textarea');

@@ -144,9 +144,9 @@ const menu = await p1.evaljs(`(async () => {
   const items = [...document.querySelectorAll('.context-menu .context-menu-item')].map((x) => x.textContent);
   const it = [...document.querySelectorAll('.context-menu .context-menu-item')].find((x) => /设置名字/.test(x.textContent));
   if (it) it.click();
-  let waitedDlg = 0; for (; waitedDlg < 50 && !([...document.querySelectorAll('.dialog-overlay')].pop() || {}).querySelector; waitedDlg++) await new Promise((r) => setTimeout(r, 100));
-  for (; waitedDlg < 50 && !([...document.querySelectorAll('.dialog-overlay')].pop() || { querySelector: () => null }).querySelector('input[type=text]'); waitedDlg++) await new Promise((r) => setTimeout(r, 100));
-  const ov = [...document.querySelectorAll('.dialog-overlay')].pop();
+  let waitedDlg = 0; for (; waitedDlg < 50 && !([...document.querySelectorAll('.dialog-overlay:not(.hidden), .dialog-form')].pop() || {}).querySelector; waitedDlg++) await new Promise((r) => setTimeout(r, 100));
+  for (; waitedDlg < 50 && !([...document.querySelectorAll('.dialog-overlay:not(.hidden), .dialog-form')].pop() || { querySelector: () => null }).querySelector('input[type=text]'); waitedDlg++) await new Promise((r) => setTimeout(r, 100));
+  const ov = [...document.querySelectorAll('.dialog-overlay:not(.hidden), .dialog-form')].pop();
   const input = ov ? ov.querySelector('input[type=text]') : null;
   const title = ov ? ((ov.querySelector('.dialog-header h3') || {}).textContent || '') : '';
   if (!input) return { items, title, input: false, waitedMenu, waitedDlg };

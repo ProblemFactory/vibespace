@@ -517,7 +517,8 @@ function showSearchDialog(app, a, { q: initial = '', convId = null, convTitle = 
   let scope = convId ? { convId: String(convId), title: String(convTitle || convId) } : null;
   const titleText = () => (scope ? t('Search: {q} — {conversation}', { q: initial, conversation: scope.title }) : scope === null && (convId || group) ? t('Search: {q}', { q: initial })
     : accounts.length === 1 ? t('Search messages — {label}', { label: accounts[0].label || accounts[0].id }) : t('Search messages…'));
-  const { dialog, body, close } = createModalShell({ id: 'chan-search-dialog', title: titleText(), dialogClass: 'chan-dialog chan-search', escapeToClose: true });
+  const { dialog, body, close, raised, ready } = createModalShell({ id: 'chan-search-dialog', key: `${a.id}:${convId || ''}`, title: titleText(), dialogClass: 'chan-dialog chan-search', escapeToClose: true, kind: 'form' });
+  if (raised) return null;   // raised: the same subject's form, as it was
   const row = document.createElement('div');
   row.className = 'chan-search-row';
   const input = document.createElement('input');
@@ -569,7 +570,8 @@ function showSearchDialog(app, a, { q: initial = '', convId = null, convTitle = 
     return { sec, h, note, rows };
   };
   const openAround = async (acc, hit) => {
-    const { body: sb, close: sclose } = createModalShell({ id: 'chan-around-sheet', title: t('Around this message'), dialogClass: 'chan-dialog chan-around', escapeToClose: true });
+    const { body: sb, close: sclose, raised } = createModalShell({ id: 'chan-around-sheet', key: `${acc && acc.id}:${hit.convId}:${hit.vendorId}`, title: t('Around this message'), dialogClass: 'chan-dialog chan-around', escapeToClose: true, kind: 'form' });
+    if (raised) return;   // raised: the same subject's form, as it was
     const note = chanLine('chan-flow-status', t("This is {vendor}'s history — VibeSpace did not save it", { vendor: vendorOf(acc) }));
     // lane around-sheet-fix (the owner's 2026-10-03 screenshot: names cut at the left, the avatar ON the name and the first
     // line, a sideways scrollbar): the rows sit in THE WINDOW'S LIST CLASS — `.chanmsg` lays out against its gutter
@@ -751,7 +753,7 @@ function showSearchDialog(app, a, { q: initial = '', convId = null, convTitle = 
   go.onclick = run;
   input.addEventListener('keydown', (e) => { if (enterSubmits(e)) { e.preventDefault(); if (!e.repeat) run(); } });
   if (initial) { input.value = initial; run('open'); }   // the panel's "Search messages for …" / an agent's row: the saved copy + the memo (lane vendor-search-memo)
-  setTimeout(() => input.focus(), 30);
+  ready.then((s) => { if (s) setTimeout(() => input.focus(), 30); });   // once it opens (r4: a queued form waits behind the open one's ask)
 }
 
 /** .212 THE AGENT'S SEARCH, AS RESULTS (`app.openChannelSearch` — the card's search row and its tail; lane
@@ -769,8 +771,9 @@ export async function openSearchResults(app, { adapterIds = [], q = '', convId =
  *  `choices` option, a text input otherwise); `''` restores the default. */
 function showOptionsDialog(app, a) {
   // lane dialog-unsaved-guard: an option changed and not saved ⇒ ✕ / Esc / the backdrop asks
-  const { body, close } = createModalShell({ id: 'chan-options-dialog', title: t('Options — {label}', { label: a.label || a.id }), dialogClass: 'chan-dialog chan-options', escapeToClose: true,
-    unsaved: { isDirty: () => drawn() !== base, save: () => doSave() } });
+  const { body, close, raised } = createModalShell({ id: 'chan-options-dialog', key: a.id, title: t('Options — {label}', { label: a.label || a.id }), dialogClass: 'chan-dialog chan-options', escapeToClose: true,
+    unsaved: { isDirty: () => drawn() !== base, save: () => doSave() }, kind: 'form' });
+  if (raised) return null;   // raised: the same subject's form, as it was
   const fields = [];
   for (const o of a.optionsSchema || []) {
     const wrap = document.createElement('div');
@@ -844,8 +847,9 @@ const pushWhat = (a) => {
 function showPushDialog(app, a) {
   const p = a.push || {};
   // lane dialog-unsaved-guard: the switch or the claim changed and not saved ⇒ ✕ / Esc / the backdrop asks
-  const { body, close } = createModalShell({ id: 'chan-push-dialog', title: t('Push lane — {label}', { label: a.label || a.id }), dialogClass: 'chan-dialog chan-options', escapeToClose: true,
-    unsaved: { isDirty: () => drawn() !== base, save: () => doSave() } });
+  const { body, close, raised } = createModalShell({ id: 'chan-push-dialog', key: a.id, title: t('Push lane — {label}', { label: a.label || a.id }), dialogClass: 'chan-dialog chan-options', escapeToClose: true,
+    unsaved: { isDirty: () => drawn() !== base, save: () => doSave() }, kind: 'form' });
+  if (raised) return null;   // raised: the same subject's form, as it was
   // WHAT PUSH IS, first (the owner: "'推送'按钮是干啥的？我没看明白，是gmail特有的吗") — both vendors' requirements, one line
   body.appendChild(chanLine('chan-flow-intro chan-push-intro', pushWhat(a)));
   body.appendChild(chanLine('chan-flow-intro', chanCaps.pushLaneText(p, a.lane, { t, now: Date.now() })));
@@ -2436,7 +2440,9 @@ function openAttentionDoor(app, anchor) {
   let close = () => { };
   const more = btn(t('Open in Settings'), () => { close(); ui.open({ search: t('Needs attention · how it is decided') }); }, 'chan-attn-more');
   if (app.isMobile) {
-    const shell = createModalShell({ id: 'chan-attn-sheet', title: t('How "needs attention" is decided'), dialogClass: 'chan-dialog chan-attn-sheet', escapeToClose: true });
+    // one subject: how the one attention rule is decided — the same words for every account
+    const shell = createModalShell({ id: 'chan-attn-sheet', title: t('How "needs attention" is decided'), dialogClass: 'chan-dialog chan-attn-sheet', escapeToClose: true, kind: 'form' });
+    if (shell.raised) return;   // raised: the same subject's form, as it was
     shell.body.append(block, more);
     close = shell.close;
   } else {

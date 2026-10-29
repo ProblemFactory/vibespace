@@ -11447,4 +11447,9 @@ export default {
   "a process VibeSpace did not start: {comm} ({pid}) — an exec from outside the container": "VibeSpace が起動していないプロセス：{comm}（{pid}）— コンテナの外から exec されたもの",
   "pid {pid} was started under pid {root}: {cmd} — which has no parent inside the container (an exec from outside)": "pid {pid} は pid {root} の下で起動されました：{cmd} — コンテナ内に親がありません（外部からの exec）",
   "pid {pid} was started under pid {root}: {cmd}": "pid {pid} は pid {root} の下で起動されました：{cmd}",
+  "A form stays a window of its own": "フォームはいつも独立した小さなウィンドウです",
+  "The document changed while the link was being edited — select the text and press Link again": "リンクの編集中に文書が変わりました — テキストを選び直して、もう一度「リンク」を押してください",
+  "This file was published elsewhere while the dialog was open — it shows as it is now": "ダイアログを開いている間に、このファイルは別の場所で公開されました — 現在の状態を表示しています",
+  "This page was unpublished elsewhere while the dialog was open — it shows as it is now": "ダイアログを開いている間に、このページは別の場所で公開停止されました — 現在の状態を表示しています",
+  "Could not re-check this page — try again": "このページを再確認できませんでした — もう一度お試しください",
 };

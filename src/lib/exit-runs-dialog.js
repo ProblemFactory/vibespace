@@ -135,7 +135,8 @@ export async function openExitRunsDialog(app, { hostId, name = '' } = {}) {
     if (upsert) upsert(r); else queued.push(r);
   }) : null;
   const unhook = () => { try { off?.(); } catch { } off = null; };
-  const { body, close, dialog } = createModalShell({ id: 'exit-runs-dialog', title: t('Commands run on {machine}', { machine: name || hostId }), dialogClass: 'exit-runs-dialog', bodyClass: 'exit-runs-body', escapeToClose: true, onClose: unhook });
+  const { body, close, dialog, raised } = createModalShell({ id: 'exit-runs-dialog', key: hostId, title: t('Commands run on {machine}', { machine: name || hostId }), dialogClass: 'exit-runs-dialog', bodyClass: 'exit-runs-body', escapeToClose: true, onClose: unhook, kind: 'form' });
+  if (raised) return null;   // raised: the same subject's form, as it was
   body.textContent = t('Loading…');
   let d = null;
   try {

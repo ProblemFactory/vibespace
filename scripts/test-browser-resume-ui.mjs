@@ -263,16 +263,17 @@ else await (async () => {
     ok(!!cb, 'while driving, "Hand back and continue…" is on the bar', S(await ev('return L().state().folded;')));
     const inputs0 = up.inputs.length;
     if (cb) await click(centre(cb));
-    // the note box = the input of the dialog that holds the focus (index.html keeps static dialogs of the same class)
-    const dlg = await until(() => ev('const a = document.activeElement; return !!(a && a.tagName === "INPUT" && a.closest(".dialog-overlay"));'), 5000);
+    // the note box = the input of the dialog that holds the focus (index.html keeps static dialogs of the same class); lane dialog-yield r2:
+    // showInputDialog is a FORM — its root is .dialog-form in its window (it holds the keys of the takeover like the overlay did)
+    const dlg = await until(() => ev('const a = document.activeElement; return !!(a && a.tagName === "INPUT" && a.closest(".dialog-overlay, .dialog-form"));'), 5000);
     ok(dlg && (await ev('return L().state().noteOpen && !L().state().ownsKeyboard;')), 'the note box opens WITH the keyboard (the view let the keys go first — a dialog never types into the page)', S(await ev('const a = document.activeElement; return { active: a && a.tagName, cls: a && a.className, st: L().state().noteOpen, owns: L().state().ownsKeyboard };')));
     const NOTE = 'I logged in — continue from the cart';
     await send('Input.insertText', { text: NOTE });
     for (const k of [['End', 'End', 35]]) { await send('Input.dispatchKeyEvent', { type: 'keyDown', key: k[0], code: k[1], windowsVirtualKeyCode: k[2] }); await send('Input.dispatchKeyEvent', { type: 'keyUp', key: k[0], code: k[1], windowsVirtualKeyCode: k[2] }); }
     await sleep(300);
-    const typed = await ev('const a = document.activeElement; return a && a.closest(".dialog-overlay") ? a.value : null;');
+    const typed = await ev('const a = document.activeElement; return a && a.closest(".dialog-overlay, .dialog-form") ? a.value : null;');
     ok(typed === NOTE && up.inputs.length === inputs0, 'the note is typed INTO the box and not one key reached the page (the stream server got no input)', S({ typed, inputs: up.inputs.slice(inputs0).map((m) => m.type) }));
-    const okBtn = await ev('const a = document.activeElement; const o = a && a.closest(".dialog-overlay"); const b = o && o.querySelector("button.btn-create"); return b && b.textContent.trim() === "Hand back" ? rect(b) : null;');
+    const okBtn = await ev('const a = document.activeElement; const o = a && a.closest(".dialog-overlay, .dialog-form"); const b = o && o.querySelector("button.btn-create"); return b && b.textContent.trim() === "Hand back" ? rect(b) : null;');
     if (okBtn) await click(centre(okBtn));
     const handed = await until(() => ev('const s = L().state(); return s.mode === "watch" && !s.mine && !s.ownsKeyboard;'), 8000);
     ok(handed, 'a REAL click on Hand back: the takeover ended (the view is in watch mode, the keyboard released)', S(await ev('const s = L().state(); return { mode: s.mode, mine: s.mine, owns: s.ownsKeyboard, cont: s.contShown };')));

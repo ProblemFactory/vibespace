@@ -50,7 +50,7 @@ export async function openResetCreditDialog(app, { accountKey, sessionId = null,
   return new Promise((resolve) => {
     let settled = false;
     const settle = (v) => { if (!settled) { settled = true; resolve(v); } };
-    const { dialog, body, close } = createModalShell({ id: 'reset-credit-dialog', title: t('Use a reset credit'), bodyClass: 'reset-credit-body', minWidth: 'min(460px, 92vw)', escapeToClose: true, onClose: () => settle('closed') });
+    const { dialog, body, close } = createModalShell({ id: 'reset-credit-dialog', title: t('Use a reset credit'), bodyClass: 'reset-credit-body', minWidth: 'min(460px, 92vw)', escapeToClose: true, onClose: () => settle('closed'), kind: 'decision' }); // decision: a destructive confirm — the credit resets
     for (const l of m.lines) {
       const el = document.createElement('div');
       el.className = 'reset-credit-line';

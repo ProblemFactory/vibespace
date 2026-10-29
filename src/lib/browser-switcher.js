@@ -52,8 +52,11 @@ export function openBrowserSwitcher(app, { profileId, sessionId = null, preselec
   if (!profileId) { showToast(t("This is a temporary browser, not a saved profile, so it can't be switched."), { type: 'warn' }); return null; }
   const st = { view: null, error: null, gen: 0, closed: false, pending: null, timer: null, entries: new Map(), warned: new Set() };
   const onGlobal = (m) => { if (m && m.type === 'browser-profiles-updated' && !st.closed) schedule(); };
-  const shell = createModalShell({ id: 'browser-switcher-dialog', title: t('Browser'), dialogClass: 'browser-switcher', bodyClass: 'brsw-body', escapeToClose: true,
-    onClose: () => { st.closed = true; if (st.timer) clearTimeout(st.timer); try { app.ws?.offGlobal?.(onGlobal); } catch { /* optional */ } } });
+  // lane dialog-yield r3: the switcher's subject is its PROFILE (the title says «Browser» for every one) — pB after pA closes pA
+  // through its door and draws pB; pA again raises the open one (its handle comes back, its one broadcast handler kept)
+  const shell = createModalShell({ id: 'browser-switcher-dialog', key: profileId, title: t('Browser'), dialogClass: 'browser-switcher', bodyClass: 'brsw-body', escapeToClose: true,
+    onClose: () => { st.closed = true; if (st.timer) clearTimeout(st.timer); try { app.ws?.offGlobal?.(onGlobal); } catch { /* optional */ } }, kind: 'form' });
+  if (shell.raised) return shell.overlay._switcher || shell;
   const { dialog, body, close } = shell;
   const h3 = dialog.querySelector('.dialog-header h3');
   const footer = document.createElement('div'); footer.className = 'dialog-footer';
@@ -291,7 +294,9 @@ export function openBrowserSwitcher(app, { profileId, sessionId = null, preselec
 
   body.appendChild(el('div', 'brsw-loading', t('Loading…')));
   refresh();
-  return { ...shell, refresh, state: () => ({ view: st.view, error: st.error, pending: st.pending, gen: st.gen, closed: st.closed }) };
+  const handle = { ...shell, refresh, state: () => ({ view: st.view, error: st.error, pending: st.pending, gen: st.gen, closed: st.closed }) };
+  shell.overlay._switcher = handle;   // what a re-open of this profile's switcher hands back
+  return handle;
 }
 
 export function installBrowserSwitcher(App) {

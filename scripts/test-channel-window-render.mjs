@@ -412,7 +412,7 @@ async function newPage() {
   const cdp = (method, params = {}) => new Promise((res) => { const id = ++seq; pend.set(id, res); ws.send(JSON.stringify({ id, method, params })); });
   await cdp('Runtime.enable'); await cdp('Page.enable');
   const evaljs = async (expr) => {
-    const r2 = await cdp('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true });
+    const r2 = await cdp('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true, userGesture: true }); // lane dialog-yield: a scripted click here stands for the person's (a form opened by no act of the person stands BEHIND)
     if (r2.result?.exceptionDetails) throw new Error('page threw: ' + JSON.stringify(r2.result.exceptionDetails).slice(0, 900));
     if (!r2.result || !r2.result.result || !('value' in r2.result.result)) throw new Error('no value from page: ' + JSON.stringify(r2).slice(0, 600));
     return r2.result.result.value;

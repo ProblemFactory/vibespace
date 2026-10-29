@@ -526,8 +526,8 @@ try {
   const okC = await waitFor(`!!${DLGC} && (() => { const s = ${DLGC}.querySelector('select'); return !!s && s.value === 'gmail'; })()`, 15000);
   const dC = await evalJs(`(() => { const d = ${DLGC}; return d ? { type: d.querySelector('select')?.value, title: d.closest('.modal, .dialog, [role=dialog]')?.querySelector('h3, .dialog-title')?.textContent || '' } : null; })()`);
   check('⑪ a REAL click on the row opens Connect an account ON GMAIL (the type preselected — the person signs in there)', okC && dC && dC.type === 'gmail', dC);
-  await shot('connect-dialog-gmail', '#mounts-dialog-overlay .dialog');
-  await evalJs(`(() => { const d = ${DLGC}; const ov = d && (d.closest('#mounts-dialog-overlay') || d.closest('.modal-overlay')); if (ov) ov.remove(); return true; })()`);
+  await shot('connect-dialog-gmail', '[id^="chan-account-"] .dialog');
+  await evalJs(`(() => { const d = ${DLGC}; const ov = d && (d.closest('[id^="chan-account-"]') || d.closest('.modal-overlay')); if (ov) ov.remove(); return true; })()`);
   await sleep(300);
   // CONTROL: the same row opened through the pre-lane door (the outbox) opens no Connect dialog — the check above can go red
   await evalJs(`app.openChannelOutbox?.(); true`);

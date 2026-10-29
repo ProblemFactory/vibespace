@@ -97,7 +97,7 @@ class WindowManager {
   createWindow({ title, type, x, y, width, height, syncId, openSpec, titleMeta, intoChain, quiet: asked = false }) {
     if (!asked) this._mobileYieldSidebar(); // a QUIET open (below) changes nothing the user is looking at — the sidebar too
     const id = syncId || ('win-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6));
-    this.windowCounter++;
+    if (type !== 'form') this.windowCounter++; // lane dialog-yield: a FORM (a dialog's small window, this client's own) never moves where the next window opens
     width = width || 700; height = height || 500;
     if (x === undefined) ({ left: x, top: y, width, height } = this._defaultPlacement(width, height));
     // BORN IN A CHAIN (agent browser P7, §4.6): `intoChain: { hostId, split, side, quiet }`

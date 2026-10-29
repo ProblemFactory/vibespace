@@ -1624,7 +1624,7 @@ function iRegexEnd(src, j) {
   return e;
 }
 /** the text of an argument / value from `i`: balanced, strings and templates respected (`stopAtComma` = one property value) */
-function iSpan(src, i, { stopAtComma = false } = {}) {
+function iSpan(src, i, { stopAtComma = false, max = 6000 } = {}) {
   let depth = 0, j = i; const stack = [];
   while (j < src.length) {
     const c = src[j];
@@ -1641,7 +1641,7 @@ function iSpan(src, i, { stopAtComma = false } = {}) {
     if (stopAtComma && depth === 0 && (c === ',' || c === ';')) break;
     if (stopAtComma && depth === 0 && c === '\n' && !/([+?:|&(,]|=>)\s*$/.test(src.slice(i, j)) && !/^\s*[+?:|&.]/.test(src.slice(j + 1, j + 80))) break;
     j++;
-    if (j - i > 6000) break;
+    if (j - i > max) break;
   }
   return src.slice(i, j);
 }
@@ -1751,7 +1751,7 @@ const I_ALIAS_HEAD = new RegExp(String.raw`^(?:String\(\s*|\(\s*|\$\{\s*)?([A-Za
 function iBlockEnd(src, masked, at) {
   let d = 0, k = at;
   for (; k >= 0; k--) { const c = masked[k]; if (c === '}') d++; else if (c === '{') { if (d === 0) break; d--; } }
-  return k < 0 ? src.length : k + 1 + iSpan(src, k + 1).length;
+  return k < 0 ? src.length : k + 1 + iSpan(src, k + 1, { max: Infinity }).length;   // lane dialog-yield: a BLOCK's end is its closing brace — the 6000-char span cap cut openBuildDialog's scope 14 characters before its toast's `name`
 }
 function iAliases(src, rel, W) {
   const masked = iMasked(src), out = [], defs = [];

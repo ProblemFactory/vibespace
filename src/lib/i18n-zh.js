@@ -11448,4 +11448,9 @@ export default {
   "a process VibeSpace did not start: {comm} ({pid}) — an exec from outside the container": "不是 VibeSpace 启动的进程：{comm}（{pid}）——从容器外部 exec 进来的",
   "pid {pid} was started under pid {root}: {cmd} — which has no parent inside the container (an exec from outside)": "pid {pid} 由 pid {root} 启动：{cmd}——它在容器内没有父进程（从外部 exec 进来的）",
   "pid {pid} was started under pid {root}: {cmd}": "pid {pid} 由 pid {root} 启动：{cmd}",
+  "A form stays a window of its own": "表单始终是独立的小窗口",
+  "The document changed while the link was being edited — select the text and press Link again": "编辑链接期间文档已改变——请重新选中文字，再按「链接」",
+  "This file was published elsewhere while the dialog was open — it shows as it is now": "对话框打开期间，这个文件已在别处发布——现在显示的是它当前的状态",
+  "This page was unpublished elsewhere while the dialog was open — it shows as it is now": "对话框打开期间，这个页面已在别处取消发布——现在显示的是它当前的状态",
+  "Could not re-check this page — try again": "无法重新核对这个页面——请再试一次",
 };

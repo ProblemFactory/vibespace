@@ -218,6 +218,8 @@ console.log('§5 a changed certificate refuses');
   const end = await until(() => { const r = v.id && keeper.get(v.id); return r && !['launching', 'ready'].includes(r.state) ? r : null; });
   ok(end && end.rdp.ended === 'rdp_cert_changed', 'the machine shows another certificate ⇒ the launch ends rdp_cert_changed', end && end.rdp);
   await until(() => acc.forwards().length === 0);
+  // (lane dialog-yield r2: the card from §4 is closed first — a form whose id is open is RAISED by the next open, never replaced)
+  await p.ev(`(() => { document.querySelector('#remoteapp-settings .dialog-close')?.click(); document.querySelector('#remoteapp-settings')?.remove(); return true; })()`);
   await p.ev(`window.__openCard(${JSON.stringify(ROW)})`);
   ok(await p.waitFor(`${CARD}.querySelector('.ra-cert').dataset.state === 'refused'`), 'the card reopened says refused');
   const r = await p.ev(`(() => { const c = ${CARD}; return { line: c.querySelector('.ra-cert').textContent, btn: c.querySelector('.ra-trust').textContent }; })()`);

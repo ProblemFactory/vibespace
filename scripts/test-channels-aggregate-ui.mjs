@@ -193,7 +193,7 @@ async function newPage() {
   const cdp = (method, params = {}) => new Promise((res) => { const id = ++seq; pend.set(id, res); ws.send(JSON.stringify({ id, method, params })); });
   await cdp('Runtime.enable'); await cdp('Page.enable');
   const evaljs = async (expr) => {
-    const r2 = await cdp('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true });
+    const r2 = await cdp('Runtime.evaluate', { expression: expr, awaitPromise: true, returnByValue: true, userGesture: true }); // lane dialog-yield: a scripted click here stands for the person's (a form opened by no act of the person stands BEHIND)
     if (r2.result?.exceptionDetails) {
       // a red names its throw (mirror-193: the runner's log cut the JSON before anything said WHICH line threw):
       // the exception's own description, then the evaluated expression's line under a caret, then the raw record
@@ -1808,9 +1808,10 @@ ok(race.bars >= 3 && race.barsParsed === race.bars && race.parsed === race.start
   // C — Esc on the sheet = 继续编辑
   const b2 = await act(ESC_ON(`#${N} .dialog-unsaved-save`));
   ok(b2.open && !b2.sheet && b2.ticked === true, 'Esc on the sheet = 继续编辑: the sheet goes, the dialog and the tick stay', JSON.stringify(b2));
-  // D — a backdrop press asks again
-  const b3 = await act(`const o = document.getElementById('${N}'); o.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))`);
-  ok(b3.open && b3.sheet, 'a backdrop press with the tick changed asks again (never a silent close)', JSON.stringify(b3));
+  // D — a backdrop press asks again (lane dialog-yield: Notify… is a FORM window on the desktop — no backdrop; its window's ✕ is
+  // the person's other dismissal and asks the same way)
+  const b3 = await act(`const o = document.getElementById('${N}'); const w = o.closest('.window'); if (w) w.querySelector('.win-close').click(); else o.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))`);
+  ok(b3.open && b3.sheet, 'a backdrop press (a form window: its ✕) with the tick changed asks again (never a silent close)', JSON.stringify(b3));
   // E — 放弃 drops it: closed, the wire untouched, a reopen unticked
   const b4 = await act(BTN(N, '放弃'));
   ok(!b4.open && !(await inferOn()), '放弃 closes and writes nothing (the wire: the judged road still OFF)', JSON.stringify(b4));

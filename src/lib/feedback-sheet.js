@@ -8,6 +8,7 @@
 // never HTML (the XSS law): the sheet builds nodes, it never assigns markup.
 import { registerMenuItem } from './contributions.js';
 import { createModalShell, getStateSync, showToast } from './utils.js';
+import { SHEET_ROOTS } from './form-yield.js'; // PURE (lane dialog-yield r2): the ONE dialog predicate set
 import { t, deviceLocale } from './i18n.js';
 import { MAINTAINER_BY } from '../feedback-model.js';   // PURE — lane fleet-feedback-marks: a mark the instance's maintainer key made
 
@@ -77,8 +78,10 @@ function paintRow(node, r, act) {
 
 /** Open the sheet. Resolves with its handle once drawn. */
 async function openFeedbackSheet() {
-  const { body, close } = createModalShell({ id: 'feedback-sheet', title: t('Agent feedback'), dialogClass: 'fb-dialog', bodyClass: 'fb-body', escapeToClose: true, onClose: () => watchers.delete(watch) });
-  body.closest('.dialog-overlay').dataset.popover = '1'; // the global Esc protocol: the sheet is ours (Esc closes it first)
+  // one subject: the agents’ one feedback list
+  const { body, close, raised } = createModalShell({ id: 'feedback-sheet', title: t('Agent feedback'), dialogClass: 'fb-dialog', bodyClass: 'fb-body', escapeToClose: true, onClose: () => watchers.delete(watch), kind: 'form' });
+  if (raised) return null;   // raised: the same subject's form, as it was
+  const sheet = body.closest(SHEET_ROOTS); if (sheet) sheet.dataset.popover = '1'; // the global Esc protocol: the SHEET (the phone tier) is ours — Esc closes it first; a form window closes on an Escape inside it (lane dialog-yield)
   body.textContent = t('Loading…');
   let watch = () => { };
   if (!(await ensureLoaded())) { body.textContent = t('Could not load the feedback list'); return null; }

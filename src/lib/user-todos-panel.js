@@ -27,6 +27,7 @@
 // the conversation (every window open / focus hides the page — window.js's central yield); the back gesture returns to
 // it (mobile-back.js: HOME = the page while the list has rows, else the conversation list); ☰ still opens the list.
 import { t, tc } from './i18n.js';
+import { SHEET_ROOTS, personDialogOf } from './form-yield.js'; // PURE (lane dialog-yield r2): the ONE dialog predicate set
 import { rowOf as attentionRow, toastWorthy, PARKED, FOLD_HEAD, settingsPolicy, bandKey, BANDS, CAP_KEY } from '../attention-model.js'; // PURE: THE attention list (lane foryou-folds) — an arrival's band (the toast rule), the 搁置 band, the fold's words; the owner's switches + cap (lane attention-predicate-shared, settingsPolicy — their ONE reader)
 import { sortGroups, openLayout, nextLayout, entriesFor, splitNotices, badgeOf, bandLayout, bandEntries, inboxBadgeFor, miniInboxEntries, noticeGroups, noticeChips, noticeFilterFor, tabCounts, NOTICE_FILTER_KEY, HISTORY_SEEN_KEY, noticeReadAll, openCount, sessionMark, firstLine } from './user-todos-layout.js'; // PURE: the append-only order while the popup is open (inc-mtw02kbq-kj96) — the notices' groups and the bands' slots (lane foryou-folds); notices split (2.369.118); notices by origin + the tab counts (B-328d)
 import { inboxModel, tierCounts, actionWords } from './user-todos-actions.js'; // THE client model (§9): the store, the live facts (the running dot + the reply verdict, D1.5/D1.7), the words, every verb — shared with the For-you window
@@ -893,7 +894,8 @@ export function installUserTodos(app) {
     // modal…; the retired ⤢ viewer was the r1 case): a capture listener on
     // document runs BEFORE the modal's own keydown, so without this one
     // Escape closed two layers (inbox r1).
-    for (const o of document.querySelectorAll('.dialog-overlay')) if (!o.classList.contains('hidden')) return;
+    for (const o of document.querySelectorAll(SHEET_ROOTS)) if (!o.classList.contains('hidden')) return;
+    if (personDialogOf(e.target)) return; // lane dialog-yield r2: an Escape inside a FORM window is that form's (its shell's door), never the sheet's
     const box = e.target?.closest?.('.ut-reply');
     if (box && popup.contains(box)) { foldBox(box); e.preventDefault(); e.stopPropagation(); return; }
     hidePopup('escape');

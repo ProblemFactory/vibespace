@@ -341,7 +341,8 @@ function failText(r, fallback) {
 /** "Share with agent…" (D2 after launch, D7 the mode). */
 export async function openShareDialog(app, id, { label = '' } = {}) {
   const base = `/api/desktop/apps/${encodeURIComponent(id)}/reach`;
-  const { body, close, overlay, dialog } = createModalShell({ id: 'window-share-dialog', title: t('Share {app} with agents', { app: label || t('Desktop app') }), dialogClass: 'wshare-dialog', escapeToClose: true });
+  const { body, close, dialog, raised, live } = createModalShell({ id: 'window-share-dialog', key: id, title: t('Share {app} with agents', { app: label || t('Desktop app') }), dialogClass: 'wshare-dialog', escapeToClose: true, kind: 'form' });
+  if (raised) return null;   // raised: the same subject's form, as it was
   // the house footer (utils' _modalShell shape): a secondary action left of the primary one
   const footer = el('div', 'dialog-footer');
   const ask = el('button', 'btn-cancel', t('Ask an agent to take control…')); ask.type = 'button';
@@ -373,7 +374,7 @@ export async function openShareDialog(app, id, { label = '' } = {}) {
         busy = false;
         if (!res || res.error) showToast(failText(res, on ? t('Could not share the window') : t('Could not stop sharing the window')), { type: 'error' });
         else { view = res; if (!on && res.revoked && res.revoked.leaseDropped) showToast(kind === 'everyone' ? t('The agent that held this window no longer reaches it') : t('{name} no longer holds this window', { name: r.name || r.id })); }
-        if (overlay.isConnected) draw();
+        if (live()) draw();
       },
       // «除了» (lane grants-unify): the members left OUT of a shared Task Group / All agents — the whole list, one PUT
       onExcept: async (except) => {
@@ -382,7 +383,7 @@ export async function openShareDialog(app, id, { label = '' } = {}) {
         busy = false;
         if (!res || res.error) showToast(failText(res, t('Could not change who is left out')), { type: 'error' });
         else { view = res; if (res.excepted && res.excepted.leaseDropped) showToast(t('The agent that held this window no longer reaches it')); }
-        if (overlay.isConnected) draw();
+        if (live()) draw();
       },
       onMode: async (m) => {
         busy = true; draw();
@@ -390,7 +391,7 @@ export async function openShareDialog(app, id, { label = '' } = {}) {
         busy = false;
         if (!res || res.error) showToast(failText(res, t('Could not change how agents see the window')), { type: 'error' });
         else view = res;
-        if (overlay.isConnected) draw();
+        if (live()) draw();
       },
     });
     const resolved = view.modeInfo && view.mode === 'auto' && view.modeInfo.resolved ? t('Right now: {mode}', { mode: modeLabel(view.modeInfo.resolved) }) : '';
@@ -398,12 +399,12 @@ export async function openShareDialog(app, id, { label = '' } = {}) {
   };
   draw();
   const off = app.ws.onGlobal(async (m) => {
-    if (m.type !== 'window-reach-updated' || busy || !overlay.isConnected) return;
+    if (m.type !== 'window-reach-updated' || busy || !live()) return;
     if (!(m.reach || []).some((v) => v && v.handle === id)) return;
     const fresh = await fetchJson(base);
-    if (fresh && !fresh.error && overlay.isConnected && !busy) { view = fresh; draw(); }
+    if (fresh && !fresh.error && live() && !busy) { view = fresh; draw(); }
   });
-  const obs = new MutationObserver(() => { if (!overlay.isConnected) { try { off?.(); } catch { } obs.disconnect(); } });
+  const obs = new MutationObserver(() => { if (!live()) { try { off?.(); } catch { } obs.disconnect(); } });
   obs.observe(document.body, { childList: true });
   return { close };
 }
@@ -412,7 +413,8 @@ export async function openShareDialog(app, id, { label = '' } = {}) {
 export async function openAskDialog(app, id, { label = '' } = {}) {
   const view = await fetchJson(`/api/desktop/apps/${encodeURIComponent(id)}/reach`);
   if (!view || view.error) { showToast(failText(view, t('Could not read this window')), { type: 'error' }); return null; }
-  const { body, close, dialog } = createModalShell({ id: 'window-ask-dialog', title: t('Ask an agent to take control of {app}', { app: label || t('Desktop app') }), dialogClass: 'wshare-dialog', escapeToClose: true });
+  const { body, close, dialog, raised, ready } = createModalShell({ id: 'window-ask-dialog', key: id, title: t('Ask an agent to take control of {app}', { app: label || t('Desktop app') }), dialogClass: 'wshare-dialog', escapeToClose: true, kind: 'form' });
+  if (raised) return null;   // raised: the same subject's form, as it was
   const footer = el('div', 'dialog-footer');
   dialog.appendChild(footer);
   const model = pickerModel({ ...rosterOf(app), record: view });
@@ -462,7 +464,7 @@ export async function openAskDialog(app, id, { label = '' } = {}) {
   };
   footer.append(cancel, send);
   sync();
-  setTimeout(() => { try { note.focus({ preventScroll: true }); } catch { } }, 0);
+  ready.then((s) => { if (s) setTimeout(() => { try { note.focus({ preventScroll: true }); } catch { } }, 0); });   // once it opens (r4: a queued form waits behind the open one's ask)
   return { close };
 }
 /** The request's answer in words (PURE over the route's answer — the suite drives it). */

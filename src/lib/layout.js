@@ -1000,6 +1000,7 @@ class LayoutManager {
       // enter a desktop record (a pre-guard drag once retagged one onto a
       // normal desktop and autosave captured it).
       if (win.type === 'stage-placeholder' || win._isStagePlaceholder) return null;
+      if (win.type === 'form') return null; // lane dialog-yield: a FORM is this client's own, like a popover — no layout, sync, desktop or preset record
       const el = win.element;
       const termSession = this.app.sessions.get(id);
       // Ensure gridBounds is up to date

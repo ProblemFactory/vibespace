@@ -1743,6 +1743,15 @@ html:not(.voice-absent) .voice-field-grip > textarea { padding-right: 44px; }
   z-index: 99998; display: flex; align-items: center; justify-content: center;
 }
 .dialog-overlay.hidden { display: none; }
+/* lane dialog-yield r3: a SHEET'S FOOT STAYS ABOVE THE ON-SCREEN KEYBOARD — the overlay ends where the keyboard begins (--kb-inset,
+   src/lib/keyboard-inset.js: the inset the composer already reads) and the dialog fits what is left, its body scrolls (measured on
+   c3ed5f0a at 390 × 844 with a 400 px visual viewport: Save stood at 744–770, under the keyboard).
+   r4: the rule is the YIELD LAW's — createModalShell's sheets (and a form's sheet), NEVER the static #dialog-overlay: it shrank
+   New Session's full-height phone sheet into a 500 px overlay and centred it — the header at −172..−78, off-screen (measured on
+   981f70d6; c3ed5f0a 0..94). A bottom sheet (the design window's) stands on the keyboard too. */
+html.vs-kb-open .dialog-overlay:not(#dialog-overlay) { bottom: calc(var(--kb-inset, 0px) / var(--ui-scale, 1)); }
+html.vs-kb-open .dialog-overlay:not(#dialog-overlay) > .dialog { max-height: calc(min(80vh, 100vh - var(--kb-inset, 0px) - 16px) / var(--ui-scale, 1)); }
+html.vs-kb-open .dialog-overlay:not(#dialog-overlay) > .dialog.design-sheet, html.vs-kb-open .dialog-overlay:not(#dialog-overlay) > .dialog.design-composer-sheet { bottom: calc(var(--kb-inset, 0px) / var(--ui-scale, 1)); max-height: calc((100vh - var(--kb-inset, 0px) - 8px) / var(--ui-scale, 1)); }
 .dialog label.hidden { display: none; } /* e.g. #custom-model-row toggle */
 .dialog {
   background: var(--bg-dialog); border: 1px solid var(--border);
@@ -1813,6 +1822,13 @@ html:not(.voice-absent) .voice-field-grip > textarea { padding-right: 44px; }
   color: var(--text-secondary); border-radius: var(--radius-sm); cursor: pointer; font-size: 12px;
 }
 .btn-cancel:hover { background: var(--hover-overlay); color: var(--text); }
+/* lane dialog-yield: a FORM (createModalShell kind 'form' — src/lib/form-window.js) IS a small window's content: the window's
+   frame and title bar carry the chrome (the dialog's own head is the window's title, its ✕ the window's), and the window
+   takes the dialog's size — the dialog stands absolute, so its box never depends on the window's */
+.window.window-form > .window-content { overflow: clip; } /* clip, never hidden: a hidden box is still scrollable by a script (a scrollIntoView on the dialog's foot shifted the whole dialog up — the workspace's own rule, window.js) */
+.dialog-form { position: absolute; left: 0; top: 0; outline: none; }
+.dialog-form > .dialog { border: 0; border-radius: 0; box-shadow: none; }
+.dialog-form > .dialog > .dialog-header { display: none; }
 
 /* ── Settings Page ── */
 .settings-dialog {
@@ -4151,6 +4167,19 @@ label.cfg-row {
 .cfg-pass-row.hidden { display: none; }
 .cfg-err { color: var(--red, #e55); font-size: 12px; min-height: 15px; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+/* lane dialog-yield R3 (the owner's screenshot of Install plugin…: two small grey boxes, the primary indistinguishable): ONE
+   action row — every button in a dialog's action row stands at the footer button's size (.btn-create / .btn-cancel: 5 × 14,
+   12 px, --radius-sm) whichever class drew it; the row's primary is .mounts-btn-primary / .btn-create, Cancel on its left */
+.dialog-actions > .mounts-btn, .dialog-actions > .btn-create, .dialog-actions > .btn-cancel { padding: 5px 14px; font-size: 12px; line-height: normal; border-radius: var(--radius-sm); }
+/* …and the owner's odd 建立… (Install plugin…'s Credential row): a dialog FIELD row that cannot be a <label> (a button beside
+   its field — a label forwards its clicks) reads like every other field: its name on the line above (the .dialog-body label
+   look), the field and its button on ONE line at ONE height */
+.dialog-body .dialog-field-row { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--text-secondary); font-weight: 500; }
+.dialog-field-line { display: flex; align-items: stretch; gap: 6px; }
+.dialog-field-line > select, .dialog-field-line > input { flex: 1 1 auto; min-width: 0; }
+.dialog-field-line > .mounts-btn { flex: none; padding: 0 12px; font-size: 12px; }
+/* Install plugin…: the git-only rows show for a git source alone (no global .hidden in this project — they showed for every source) */
+.plugin-install-row.hidden, .plugin-install-cred-hint.hidden, .plugin-install-error.hidden { display: none; }
 .cfg-pass-form { display: flex; flex-direction: column; gap: 10px; min-width: 300px; }
 .cfg-danger { color: var(--red, #e55); border-color: color-mix(in srgb, var(--red, #e55) 45%, transparent); }
 .cfg-danger:hover { background: color-mix(in srgb, var(--red, #e55) 12%, transparent); color: var(--red, #e55); }
@@ -4250,7 +4279,7 @@ label.cfg-row {
 .mounts-btn-danger:hover:not(:disabled) { border-color: var(--red, #e55); color: var(--red, #e55); }
 .mounts-row-clickable { cursor: pointer; }
 .mounts-row-clickable:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
-.mounts-btn-primary:hover:not(:disabled) { opacity: 0.85; color: var(--accent-fg); }
+.mounts-btn-primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); color: var(--accent-fg); } /* §17: a primary's hover is --accent-hover, never an opacity (lane dialog-yield) */
 .mounts-btn-danger:hover:not(:disabled) { border-color: var(--red, #e55); color: var(--red, #e55); }
 .mounts-share-row { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border: 1px dashed var(--border); border-radius: var(--radius-sm); }
 .mounts-share-text { display: flex; flex-direction: column; gap: 1px; flex: 1; min-width: 0; }

@@ -102,11 +102,12 @@ export async function loadInto(el, query) {
  */
 export function openPermissionRulesDialog({ backend, accountId = '', accountName = '', cwd = '' } = {}) {
   const label = getBackendMeta(backend)?.label || backend;
-  const { body } = createModalShell({
-    id: 'perm-rules-dialog',
+  const { body, raised } = createModalShell({
+    id: 'perm-rules-dialog', key: `${backend}:${accountId}:${cwd}`,
     title: accountName ? t('Permission rules — {name}', { name: accountName }) : t('Permission rules — {backend}', { backend: label }),
-    minWidth: '520px', escapeToClose: true,
+    minWidth: '520px', escapeToClose: true, kind: 'form',
   });
+  if (raised) return null;   // raised: the same subject's form, as it was
   const note = document.createElement('div');
   note.className = 'agents-note';
   note.textContent = t('Read-only. VibeSpace never changes an agent’s permission rules — edit them where they live.');
@@ -124,11 +125,12 @@ export function openPermissionRulesDialog({ backend, accountId = '', accountName
  * failure hides).
  */
 export async function runLocalOracle({ id, label, accountId = '', accountName = '' } = {}) {
-  const { body } = createModalShell({
-    id: 'local-oracle-dialog',
+  const { body, raised } = createModalShell({
+    id: 'local-oracle-dialog', key: `${id}:${accountId}`,
     title: accountName ? `${label} — ${accountName}` : label,
-    minWidth: '520px', escapeToClose: true,
+    minWidth: '520px', escapeToClose: true, kind: 'form',
   });
+  if (raised) return null;   // raised: the same subject's form, as it was
   const note = document.createElement('div');
   note.className = 'agents-note';
   note.textContent = t('Runs a local, read-only CLI command on this machine. It makes no network requests (measured) and runs only when you click.');

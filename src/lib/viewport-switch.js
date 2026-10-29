@@ -48,6 +48,7 @@ function unscrollFrame() {
 }
 
 function enterPhone(app) {
+  app.formsToSheets?.(); // lane dialog-yield: FIRST — an open form window becomes its sheet before any phone rule sees a window (a focused one would fold the sidebar for good)
   if (app._customize?.active) { try { app._customize.exit(); } catch { } }
   app.sidebar?.setPhoneMode?.(true);
   if (!app._mobileNav) {
@@ -66,6 +67,7 @@ function enterDesktop(app) {
   app._applyChromeArrangement?.();
   app.wm?.refitForViewport?.(false);
   app.updateTaskbar?.();
+  app.sheetsToForms?.(); // lane dialog-yield r2: LAST — a form's sheet whose home was the phone becomes its window again (what was typed kept)
 }
 
 /** Switch the page to `next` now (the watcher's settled crossing; a suite may call it). */

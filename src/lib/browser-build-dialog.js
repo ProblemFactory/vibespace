@@ -17,14 +17,15 @@ const DIALOG_ID = 'browser-build-dialog';
  *  out of openBuildDialog: test-record-clear-census reads that body in one 6000-character span (its toast sits near the end). */
 const iconOf = (r) => { if (!r.icon || !UI_ICONS[r.icon]) return []; const ic = el('span', 'bbuild-icon'); ic.innerHTML = UI_ICONS[r.icon]; return [ic]; };
 
-export async function openBuildDialog(app, profileId, { label = '', onDone = null, pick = null } = {}) {
+export async function openBuildDialog(app, profileId, { label = '', onDone = null, pick = null, opener = 'person' } = {}) {
   const id = String(profileId || '');
   const view = await fetchJson(`/api/browser/profiles/${encodeURIComponent(id)}/builds`);
   if (!view || view.error) { showToast(t('Could not read the Chrome builds') + ' — ' + ((view && view.error) || t('server unreachable')), { type: 'error', duration: 9000 }); return null; }
   const name = String(view.label || label || id);
   const local = !view.host;
   const st = { busy: false, closed: false, picked: null, confirm: false, picker: null };
-  const shell = createModalShell({ id: DIALOG_ID, title: t('Chrome build for {label}', { label: name }), dialogClass: 'bwho-dialog bbuild-dialog', bodyClass: 'bwho-body bbuild-body', escapeToClose: true, onClose: () => { st.closed = true; if (st.picker) st.picker.stop(); } });
+  const shell = createModalShell({ id: DIALOG_ID, key: profileId, opener, title: t('Chrome build for {label}', { label: name }), dialogClass: 'bwho-dialog bbuild-dialog', bodyClass: 'bwho-body bbuild-body', escapeToClose: true, onClose: () => { st.closed = true; if (st.picker) st.picker.stop(); }, kind: 'form' });
+  if (shell.raised) return null;   // raised: the same subject's form, as it was
   shell.dialog.dataset.profileId = id;
   const body = shell.body;
   const now = cardBuildLine({ buildChoice: view.buildChoice, choice: view.choice, running: view.running, missing: view.missing, live: view.live }, t);
@@ -73,7 +74,7 @@ export async function openBuildDialog(app, profileId, { label = '', onDone = nul
   footer.append(cancel, change);
   shell.dialog.append(notes, footer);
   // lane chrome-builds-download: the picker opens IN this dialog (the rows step aside); a finished download reopens Change build… with the new build picked
-  const openPicker = () => { st.picker = pickerInDialog(body, [footer, notes], { profileId: id, onDownloaded: (v) => { shell.close(); openBuildDialog(app, id, { label, onDone, pick: v }); } }); };
+  const openPicker = () => { st.picker = pickerInDialog(body, [footer, notes], { profileId: id, onDownloaded: (v) => { shell.close(); openBuildDialog(app, id, { label, onDone, pick: v, opener: 'person' }); } }); };   // (the person's own download, watched in this dialog, re-opens it in front — r3's 'system' put it behind; typedLast still keeps a field they moved on to; lane dialog-yield r4)
   async function doChange() {
     if (st.busy) return;
     const choice = choiceOfRow(st.picked, pathInput ? pathInput.value : '');

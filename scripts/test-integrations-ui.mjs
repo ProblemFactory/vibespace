@@ -559,7 +559,7 @@ const p2 = await newPage();
   ok(gm.clientValue === 'org1' && JSON.stringify(gm.options) === JSON.stringify(['Preset: Org 1', 'Preset: Channels', MOUNT_OPTION, 'Custom (own client id/secret)']), `\`OAuth client\` preselects presets[0] and offers Preset × 2 + the storage mount's own client (r) + Custom, no Built-in (${JSON.stringify(gm)})`);
   ok(gm.hint === R.rowById('gmail').clientHint, 'the registry\'s clientHint is the .mounts-field-hint line under the select');
   ok(gm.block === 'Connect Google' && gm.scope === 'inbox' && gm.query === null && gm.submit === 'Connect', `the \`Google authorization\` block (the storage .mounts-drive-connect, one per type, the other hidden), the Mailbox scope on Inbox (the query field hidden), and .btn-create "Connect" (${JSON.stringify({ block: gm.block, blocks: gm.blocks, scope: gm.scope, query: gm.query, submit: gm.submit })})`);
-  await p1.probe('connect dialog (Gmail, preset)', '#mounts-dialog-overlay .dialog');
+  await p1.probe('connect dialog (Gmail, preset)', '[id^="chan-account-"] .dialog');
   await p1.evaljs(`(() => { const c = [...${DLG('connect')}.querySelectorAll(':scope > select')].find((s) => s.style.display !== 'none' && [...s.options].some((o) => o.value === 'custom')); c.dataset.probe = 'client'; return 1; })()`);
   await p1.probe('the OAuth client select', '[data-probe="client"]');
 
@@ -591,7 +591,7 @@ const p2 = await newPage();
     return window.__copied;
   })()`);
   ok(copied === LARK_CB, `the callback row's Copy copies EXACTLY ${LARK_CB} (got ${JSON.stringify(copied)})`);
-  await p1.probe('the custom fields + callback row (Lark)', `#mounts-dialog-overlay .dialog-body > .mounts-oauth-link[data-field="cb.lark"]`);
+  await p1.probe('the custom fields + callback row (Lark)', `[id^="chan-account-"] .dialog-body > .mounts-oauth-link[data-field="cb.lark"]`);
 
   // (d) Connect before the sign-in: refused IN the dialog, nothing created
   await p1.evaljs(`(() => { const s = ${DLG('connect')}.querySelector(':scope > select'); s.value = 'gmail'; s.dispatchEvent(new Event('change')); return 1; })()`);
@@ -601,11 +601,11 @@ const p2 = await newPage();
 
   // (e) the consent IN the dialog
   await p1.evaljs(`(() => { const d = ${DLG('connect')}; [...d.querySelectorAll('.mounts-drive-connect')].find((b) => b.style.display !== 'none').querySelector('button').click(); return 1; })()`);
-  const url1 = await p1.evaljs(consentUrlIn('#mounts-dialog-overlay .mounts-drive-connect .mounts-oauth-link input'));
+  const url1 = await p1.evaljs(consentUrlIn('[id^="chan-account-"] .mounts-drive-connect .mounts-oauth-link input'));
   ok(!!url1 && new URL(url1).searchParams.get('client_id') === 'org1.apps.googleusercontent.com', `the consent starts IN the dialog under the preselected preset (client_id org1) and the cross-browser link row carries its URL (${String(url1).slice(0, 80)}…)`);
   const flowUi = await p1.evaljs(`(() => { const b = [...${DLG('connect')}.querySelectorAll('.mounts-drive-connect')].find((x) => x.style.display !== 'none'); return { paste: !!b.querySelector('input[placeholder^="http://127.0.0.1"]'), status: b.querySelector('.mounts-field-hint').textContent, opened: (window.__opened || []).length }; })()`);
   ok(flowUi.paste && /Google sign-in page opened/.test(flowUi.status) && flowUi.opened === 1, `the storage block: the status sentence names Google, the paste-back box is drawn, and window.open was asked (and stubbed) once (${JSON.stringify(flowUi)})`);
-  await p1.probe('the consent block in flight', `#mounts-dialog-overlay .mounts-drive-connect .mounts-oauth-link`);
+  await p1.probe('the consent block in flight', `[id^="chan-account-"] .mounts-drive-connect .mounts-oauth-link`);
   ok((await accounts()).length === 0, 'a running sign-in creates nothing either');
   ok((await followConsent(url1)) === 200, 'the redirect lands on the product\'s own loopback (the stub answers the token exchange)');
   const signed = await p1.evaljs(`(async () => { for (let i = 0; i < 80; i++) { const b = [...${DLG('connect')}.querySelectorAll('.mounts-drive-connect')].find((x) => x.style.display !== 'none'); const s = b && b.querySelector('.mounts-field-hint').textContent; if (/Connected/.test(s || '')) return s; await new Promise((r) => setTimeout(r, 100)); } return null; })()`);
@@ -618,7 +618,7 @@ const p2 = await newPage();
   for (let i = 0; i < 60 && !accts.length; i++) { accts = await accounts(); if (!accts.length) await sleep(100); }
   const A = accts[0];
   ok(accts.length === 1 && A.kind === 'gmail' && A.credentialKey === 'cluster:org1' && A.auth.tokenHeld && A.auth.user === 'ada@example.test', `Connect CREATED the account under the chosen preset, signed in as the stub's user (${JSON.stringify(accts.map((a) => ({ id: a.id, key: a.credentialKey, user: a.auth.user })))})`);
-  ok(await p1.evaljs(`(async () => { for (let i = 0; i < 60; i++) { if (!document.querySelector('#mounts-dialog-overlay')) return true; await new Promise((r) => setTimeout(r, 100)); } return false; })()`), 'and closed the dialog');
+  ok(await p1.evaljs(`(async () => { for (let i = 0; i < 60; i++) { if (!document.querySelector('[id^="chan-account-"]')) return true; await new Promise((r) => setTimeout(r, 100)); } return false; })()`), 'and closed the dialog');
 
   // lane channels-fold-default: a section with nothing that needs the person starts folded (and Accounts with it) — the person opened it
   await api('PATCH', '/api/user-state', { channelsPanelFolds: { [`acct:${A.id}`]: false } });
@@ -676,12 +676,12 @@ const p2 = await newPage();
   const du = await p1.evaljs(`(() => { const d = ${DLG('duplicate')}; const inputs = [...d.querySelectorAll(':scope > input')]; const sels = [...d.querySelectorAll(':scope > select')]; return { title: d.closest('.dialog').querySelector('.dialog-header h3').textContent, name: inputs[0].value, type: inputs[1].value, typeRO: inputs[1].readOnly, client: sels[0].value, query: inputs.some((i) => i.value === 'label:INBOX'), push: sels.some((s) => [...s.options].some((o) => o.value === 'exclusive')), note: (d.querySelector(':scope > .mounts-note') || {}).textContent || '', block: d.querySelector('.mounts-drive-connect button').textContent, submit: d.querySelector('.dialog-actions .btn-create').textContent }; })()`);
   ok(du.title === 'Duplicate "Gmail · ada@example.test"' && du.name === 'Gmail (copy)' && du.type === 'Gmail' && du.typeRO && du.client === 'org1' && du.query && du.push, `name "{name} (copy)", the type READ-ONLY, the client / query / push claim copied (${JSON.stringify(du)})`);
   ok(/^Copied: the type, the OAuth client/.test(du.note) && /NOT copied: the token/.test(du.note) && du.block === 'Connect Google' && du.submit === 'Create & connect', 'the copied / not-copied paragraph, its OWN consent block and "Create & connect"');
-  await p1.probe('the duplicate dialog', '#mounts-dialog-overlay .dialog');
+  await p1.probe('the duplicate dialog', '[id^="chan-account-"] .dialog');
   // switch the copy to a custom client; its first refresh will be refused (the stub's invalid_grant) — the dead-sign-in leg below
   await p1.evaljs(`(() => { const d = ${DLG('duplicate')}; const s = d.querySelector(':scope > select'); s.value = 'custom'; s.dispatchEvent(new Event('change')); const vis = [...d.querySelectorAll(':scope > input')].filter((i) => i.style.display !== 'none' && !i.readOnly); const id = vis.find((i) => i.placeholder && /googleusercontent/.test(i.placeholder)); const sec = d.querySelector(':scope > input[type="password"]'); id.value = ${JSON.stringify(CUSTOM_ID)}; sec.value = ${JSON.stringify(CUSTOM_SECRET)}; id.dispatchEvent(new Event('input')); sec.dispatchEvent(new Event('input')); return 1; })()`);
   stubMode({ email: 'ben@example.test', refresh: 'invalid_grant', expiresIn: 1 });
   await p1.evaljs(`${DLG('duplicate')}.querySelector('.mounts-drive-connect button').click(); 1`);
-  const url2 = await p1.evaljs(consentUrlIn('#mounts-dialog-overlay .mounts-drive-connect .mounts-oauth-link input'));
+  const url2 = await p1.evaljs(consentUrlIn('[id^="chan-account-"] .mounts-drive-connect .mounts-oauth-link input'));
   const copyRec = (await accounts()).find((a) => a.id !== A.id);
   ok(!!copyRec && copyRec.auth.tokenHeld === false && copyRec.label === 'Gmail (copy)' && copyRec.options.query === A.options.query, `the COPY exists unauthorized — the token is NOT copied, the settings are (${JSON.stringify(copyRec && { id: copyRec.id, tokenHeld: copyRec.auth.tokenHeld, query: copyRec.options.query })})`);
   const idx = (await api('GET', '/api/channels')).json.conversations.filter((c) => c.adapterId === (copyRec && copyRec.id));
@@ -693,7 +693,7 @@ const p2 = await newPage();
   await p1.evaljs(`${DLG('duplicate')}.querySelector('.dialog-actions .btn-create').click(); 1`);
   const B = copyRec;
   await api('PATCH', '/api/user-state', { channelsPanelFolds: { [`acct:${A.id}`]: false, [`acct:${B.id}`]: false } });   // lane channels-fold-default: opened by the person
-  ok(await p1.evaljs(panelWait(`() => !!${card(B.id)} && !document.querySelector('#mounts-dialog-overlay')`)), 'Create & connect closed the dialog; the SIBLING card appears');
+  ok(await p1.evaljs(panelWait(`() => !!${card(B.id)} && !document.querySelector('[id^="chan-account-"]')`)), 'Create & connect closed the dialog; the SIBLING card appears');
 
   // (l) the dead sign-in: the red line + Reconnect under the account (lane channel-reauth-visible — the owner 2026-10-23:
   // 「进来之后账号行下方显示登录失效需要 reauth」; it replaces D8's «Couldn't connect: …» sentence for a sign-in that died:
@@ -760,7 +760,7 @@ const p2 = await newPage();
   ok(ec.client === 'custom' && ec.values.includes(CUSTOM_ID) && ec.values.includes(CUSTOM_SECRET) && ec.labels.includes('Custom OAuth client ID') && ec.labels.includes('Custom OAuth client secret'), `D3: the custom client id AND secret are prefilled with their real values (the storage edit rule) (${JSON.stringify(ec.labels)})`);
   ok(!(await p2.evaljs(`document.body.innerHTML.includes(${JSON.stringify(CUSTOM_SECRET)})`)), 'the secret never reached the OTHER client (it rides only the owner-only config route, never a broadcast)');
   ok(!(await api('GET', '/api/channels')).text.includes(CUSTOM_SECRET), 'nor the digest');
-  await p1.evaljs(`document.querySelector('#mounts-dialog-overlay .dialog-close').click(); 1`);
+  await p1.evaljs(`document.querySelector('[id^="chan-account-"] .dialog-close').click(); 1`);
 
   // (n) Remove: refused BY NAME while referenced; an unreferenced account goes
   const conv = (await api('GET', '/api/channels')).json.conversations.find((c) => c.adapterId === A.id);
@@ -803,7 +803,7 @@ const p2 = await newPage();
     `(r) chosen: no custom id / secret inputs, the note says the server copies the secret, the Google authorization block stays (${JSON.stringify(rs)})`);
   stubMode({ email: MOUNT_EMAIL, refresh: 'ok', expiresIn: 3600 });
   await p1.evaljs(`(() => { const d = ${DLG('connect')}; d.querySelector('.mounts-drive-connect .mounts-oauth-link')?.remove(); [...d.querySelectorAll('.mounts-drive-connect')].find((b) => b.style.display !== 'none').querySelector('button').click(); return 1; })()`);
-  const urlR = await p1.evaljs(consentUrlIn('#mounts-dialog-overlay .mounts-drive-connect .mounts-oauth-link input'));
+  const urlR = await p1.evaljs(consentUrlIn('[id^="chan-account-"] .mounts-drive-connect .mounts-oauth-link input'));
   ok(!!urlR && new URL(urlR).searchParams.get('client_id') === MOUNT_CID, `(r) THE consent URL's client_id is the storage mount's own client (${urlR ? new URL(urlR).searchParams.get('client_id') : null})`);
   ok(!(await p1.evaljs(`document.documentElement.outerHTML.includes(${JSON.stringify(MOUNT_CSEC)})`)), '(r) the mount\'s secret is nowhere in the page');
   ok((await followConsent(urlR)) === 200, '(r) the redirect lands on the loopback');
@@ -848,7 +848,7 @@ const p2 = await newPage();
   await p1.evaljs(WAIT_DLG('connect'));
   await p1.evaljs(`(() => { const s = ${DLG('connect')}.querySelector(':scope > select'); s.value = 'lark'; s.dispatchEvent(new Event('change')); return 1; })()`);
   await over('the connect dialog (Lark, custom)');
-  await p1.evaljs(`document.querySelector('#mounts-dialog-overlay .dialog-close').click(); 1`);
+  await p1.evaljs(`document.querySelector('[id^="chan-account-"] .dialog-close').click(); 1`);
 
   // (s) design 012 (Slack S1) + design 017 (lane slack-connect-easy) — THE SLACK CONNECT CARD AS THREE NUMBERED STEPS,
   // in 中文: no OAuth client to choose; ① opens Slack's app page and takes the setup token (a SECRET box), the wrong
@@ -898,7 +898,7 @@ const p2 = await newPage();
   ok(sw && !sw.steps && sw.cid && sw.btn && sw.opts === 'custom,paste' && sw.back, `design 018: "Your workspace app" swaps the steps for Client ID / Secret and the Connect button; "Another way" brings the steps back (${JSON.stringify(sw)})`);
   ok(/Slack Tooling Tokens Vendor/.test(g0.text) && /12 小时/.test(g0.text) && g0.boxes[0].type === 'password' && g0.boxes[0].auto === 'off' && g0.boxes[0].ph === 'xoxe.xoxp-…' && g0.boxes[0].shown, 'step ① says what Generate Token adds and that the token expires in 12 hours; its box is a SECRET field');
   fit(g0, 'at 375 px');
-  await p1.probe('Slack connect dialog (zh) — step 1 at 375 px', '#mounts-dialog-overlay .dialog');
+  await p1.probe('Slack connect dialog (zh) — step 1 at 375 px', '[id^="chan-account-"] .dialog');
   await p1.cdp('Emulation.setDeviceMetricsOverride', { width: 860, height: 900, deviceScaleFactor: 1, mobile: false });
   await sleep(150);
   fit(await look(), 'at 860 px');
@@ -918,9 +918,9 @@ const p2 = await newPage();
   const kept = await p1.evaljs(`localStorage.getItem('vs-paste-app:slack')`);
   ok(kept && JSON.parse(kept).appId === 'A0VIBEAPP1' && !kept.includes('xox'), `the browser remembers the made app — its id and name, never a token (${kept})`);
   fit(g1, 'step ② at 375 px');
-  await p1.probe('Slack connect dialog (zh) — steps 2 and 3', '#mounts-dialog-overlay .dialog');
+  await p1.probe('Slack connect dialog (zh) — steps 2 and 3', '[id^="chan-account-"] .dialog');
   ok(await press(2, '打开安装页面') && (await p1.evaljs(`(window.__opened || []).slice(-1)[0]`)) === 'https://api.slack.com/apps/A0VIBEAPP1/oauth', 'step ② opens the made app\'s own install page by its id');
-  await p1.evaljs(`document.querySelector('#mounts-dialog-overlay .dialog-close').click(); 1`);
+  await p1.evaljs(`document.querySelector('[id^="chan-account-"] .dialog-close').click(); 1`);
   await openSlack();
   const g2 = await look();
   ok(g2.steps === 'folded,open,open' && /VibeSpace/.test(g2.made || ''), `a dialog closed after step ① and opened again RESUMES at ② with the same app (${g2.steps}, ${g2.made})`);
@@ -974,7 +974,7 @@ const p2 = await newPage();
   // the page on a NAME (mapped to this server): the browser is NOT on the instance's loopback, as a person's is on a pod
   ok(await p1.load(`http://pod-road.example.test:${PORT}/`), 'page 1 reloaded on the pod\'s name (not the loopback)');
   const DLGC = `document.querySelector('.dialog-body[data-chan-dialog="connect"]')`;
-  const openOn = async (kind) => p1.evaljs(`(async () => { document.querySelector('#mounts-dialog-overlay')?.remove(); window.app.openChannelConnect(${JSON.stringify(kind)}); for (let i = 0; i < 80; i++) { if (${DLGC}) return true; await new Promise((r) => setTimeout(r, 100)); } return false; })()`);
+  const openOn = async (kind) => p1.evaljs(`(async () => { document.querySelector('[id^="chan-account-"]')?.remove(); window.app.openChannelConnect(${JSON.stringify(kind)}); for (let i = 0; i < 80; i++) { if (${DLGC}) return true; await new Promise((r) => setTimeout(r, 100)); } return false; })()`);
   ok(await openOn('lark'), 'the chat\'s door (app.openChannelConnect) opens Connect an account on Lark');
   const f = await p1.evaljs(`(() => { const d = ${DLGC}; const sel = (k) => d.querySelector('[data-field="' + k + '"]') || [...d.querySelectorAll('select')].find((s) => s.dataset.key === k); const type = d.querySelector('select'); const brand = [...d.querySelectorAll('select')].find((s) => [...s.options].some((o) => o.value === 'feishu') && [...s.options].some((o) => o.value === 'lark') && s.style.display !== 'none'); const client = [...d.querySelectorAll('select')].find((s) => [...s.options].some((o) => o.value === 'co')); return { type: type && type.value, brand: brand ? brand.value : null, client: client ? client.value : null }; })()`);
   ok(f.type === 'lark' && f.client === 'co' && f.brand === 'lark', `the form shows the company app AND its brand: lark, not feishu (${JSON.stringify(f)})`);
@@ -1008,7 +1008,7 @@ const p2 = await newPage();
   const bareHints = await p1.evaljs(`[...${FOLD}.querySelectorAll(':scope > .mounts-field-hint')].map((h) => h.textContent)`);
   ok(bareHints.some((h) => /^This company app has no relay page yet, so this sign-in comes back to this VibeSpace’s own address \(pod-road\.example\.test\) — the app must list it, or your admin gives the app one relay page that serves every VibeSpace\./.test(h)),
     `addendum 1: the fold says WHY the route — the company app has no relay page yet (${JSON.stringify(bareHints).slice(0, 300)})`);
-  await p1.probe('a pod\'s Connect Google: the route consent, the folded paste-back opened', `#mounts-dialog-overlay .mounts-oauth-paste`);
+  await p1.probe('a pod\'s Connect Google: the route consent, the folded paste-back opened', `[id^="chan-account-"] .mounts-oauth-paste`);
   const before2 = await p1.evaljs(`(window.__opened || []).length`);
   await p1.evaljs(`(() => { ${FOLD}.querySelector('.mounts-oauth-other').click(); return 1; })()`);
   const opened2 = await p1.evaljs(`(async () => { for (let i = 0; i < 80; i++) { if ((window.__opened || []).length > ${before2}) return window.__opened.slice(-1)[0]; await new Promise((r) => setTimeout(r, 100)); } return null; })()`);
@@ -1016,7 +1016,7 @@ const p2 = await newPage();
   const fold2 = await p1.evaljs(`(async () => { for (let i = 0; i < 40; i++) { const d = ${FOLD}; if (d && !d.querySelector('.mounts-oauth-admin')) return { summary: d.querySelector('summary').textContent, hint: [...d.querySelectorAll('.mounts-field-hint')].map((x) => x.textContent).join(' | ') }; await new Promise((r) => setTimeout(r, 100)); } return null; })()`);
   ok(/^http:\/\/127\.0\.0\.1:\d+$/.test(r2 || '') && fold2 && fold2.summary === 'The sign-in page ended on an address that would not load?' && /starts with 127\.0\.0\.1/.test(fold2.hint),
     `the other road: the same sign-in the copy-the-address way (an ephemeral loopback), its fold saying why in a person's words (${r2}, ${JSON.stringify(fold2).slice(0, 300)})`);
-  await p1.evaljs(`document.querySelector('#mounts-dialog-overlay')?.remove(); 1`);
+  await p1.evaljs(`document.querySelector('[id^="chan-account-"]')?.remove(); 1`);
   // CONTROL: the same page on the instance's own loopback IS a browser on this machine — its Connect keeps the loopback
   // (the local hub's road, as before) — so the route check above is about where the browser is
   ok(await p1.load(), 'page 1 back on 127.0.0.1');
@@ -1025,7 +1025,7 @@ const p2 = await newPage();
   await p1.evaljs(`(() => { const b = [...${DLGC}.querySelectorAll('.mounts-drive-connect')].find((x) => x.style.display !== 'none'); b.querySelector('button.mounts-btn-primary').click(); return 1; })()`);
   const opened3 = await p1.evaljs(`(async () => { for (let i = 0; i < 80; i++) { if ((window.__opened || []).length > ${before3}) return window.__opened.slice(-1)[0]; await new Promise((r) => setTimeout(r, 100)); } return null; })()`);
   ok(/^http:\/\/127\.0\.0\.1:\d+$/.test(opened3 ? new URL(opened3).searchParams.get('redirect_uri') : ''), `CONTROL: a browser on the instance's own loopback keeps the loopback road (a local hub) — the route above is the pod's (${opened3 && new URL(opened3).searchParams.get('redirect_uri')})`);
-  await p1.evaljs(`document.querySelector('#mounts-dialog-overlay')?.remove(); 1`);
+  await p1.evaljs(`document.querySelector('[id^="chan-account-"]')?.remove(); 1`);
 }
 
 // ── ⑫ lane oauth-relay-road (the owner 2026-10-22: «不可能每次都让我手动加 redirect url 的» — one registered redirect per app,
@@ -1039,7 +1039,7 @@ const p2 = await newPage();
   ok(await waitServer(), 'rebooted with the relay pages at their defaults and a fleet relay page (VIBESPACE_OAUTH_RELAY_URL)');
   ok(await p1.load(), 'page 1 on 127.0.0.1 — a private address, which every relay page sends back');
   const DLGC = `document.querySelector('.dialog-body[data-chan-dialog="connect"]')`;
-  const openOn = async (kind) => p1.evaljs(`(async () => { document.querySelector('#mounts-dialog-overlay')?.remove(); window.app.openChannelConnect(${JSON.stringify(kind)}); for (let i = 0; i < 80; i++) { if (${DLGC}) return true; await new Promise((r) => setTimeout(r, 100)); } return false; })()`);
+  const openOn = async (kind) => p1.evaljs(`(async () => { document.querySelector('[id^="chan-account-"]')?.remove(); window.app.openChannelConnect(${JSON.stringify(kind)}); for (let i = 0; i < 80; i++) { if (${DLGC}) return true; await new Promise((r) => setTimeout(r, 100)); } return false; })()`);
   ok(await openOn('lark'), 'Connect an account on Lark (no company app here: Custom)');
   const lk = await p1.evaljs(`(() => {
     const d = ${DLGC}; const vis = (e) => e && e.style.display !== 'none';
@@ -1052,7 +1052,7 @@ const p2 = await newPage();
   ok(JSON.stringify(lk.rows.map((r) => r.value)) === JSON.stringify([ADMIN, PUBLIC]) && /^Redirect URL for this fleet’s VibeSpaces/.test(lk.rows[0].label || '') && lk.rows[1].label === 'A public relay page you may register if this VibeSpace has no https address' && !lk.rows.some((r) => /127\.0\.0\.1/.test(r.value)),
     `a custom Lark app's setup lists the relay pages (the fleet's; the public one — addendum 1: «you may register if this VibeSpace has no https address») — no per-instance callback row (${JSON.stringify(lk.rows)})`);
   ok(lk.hints[0] === R.rowById('lark').setup.callbackNote && lk.hints.length === 4, `…with the console note and the prerequisites under the last (${JSON.stringify(lk.hints).slice(0, 200)})`);
-  await p1.probe('a custom Lark app\'s relay rows', `#mounts-dialog-overlay .dialog-body > .mounts-oauth-link[data-field="rp1.lark"]`);
+  await p1.probe('a custom Lark app\'s relay rows', `[id^="chan-account-"] .dialog-body > .mounts-oauth-link[data-field="rp1.lark"]`);
   // a page NO relay sends back (a public http name, no https address here): the setup shows the road it really takes
   ok(await p1.load(`http://pod-road.example.test:${PORT}/`), 'page 1 reloaded on a public http name (no relay page sends it back)');
   ok(await openOn('lark'), 'Connect an account on Lark again');
@@ -1065,7 +1065,7 @@ const p2 = await newPage();
   const pre = await p1.evaljs(`(() => { const d = ${DLGC}; const vis = (e) => e && e.style.display !== 'none'; const labelOf = (row) => { let l = row.previousElementSibling; while (l && l.tagName !== 'LABEL') l = l.previousElementSibling; return l ? l.textContent : null; }; return [...d.querySelectorAll(':scope > .mounts-oauth-link')].filter(vis).map((r) => ({ field: r.dataset.field, label: labelOf(r), value: r.querySelector('input').value })); })()`);
   ok(pre.length === 1 && /^prp\d+\.gmail$/.test(pre[0].field) && pre[0].value === ADMIN && pre[0].label === 'This company app’s redirect URL — its relay page, registered once by your admin' && !pre.some((r) => r.value === PUBLIC),
     `addendum 1: a company preset's setup shows ONLY its own relay page (the fleet's here) — the public page never (${JSON.stringify(pre)})`);
-  await p1.probe('Connect Google under the company preset: its relay page only', `#mounts-dialog-overlay .dialog-body > .mounts-oauth-link[data-field^="prp"]`);
+  await p1.probe('Connect Google under the company preset: its relay page only', `[id^="chan-account-"] .dialog-body > .mounts-oauth-link[data-field^="prp"]`);
   const n0 = (((await api('GET', '/api/channels')).json || {}).adapters || []).filter((a) => a.kind === 'gmail').length;
   const before = await p1.evaljs(`(window.__opened || []).length`);
   await p1.evaljs(`(() => { const b = [...${DLGC}.querySelectorAll('.mounts-drive-connect')].find((x) => x.style.display !== 'none'); b.querySelector('button.mounts-btn-primary').click(); return 1; })()`);
@@ -1078,7 +1078,7 @@ const p2 = await newPage();
     `the fold says the ROAD and WHY in a person's words (${JSON.stringify(fold && fold.hints).slice(0, 300)})`);
   ok(fold && /^Google said this address is not allowed\? It is the relay page — add it ONCE to the app’s redirect URLs/.test(fold.admin || '') && fold.value === ADMIN && /^Sign in the other way/.test(fold.other || ''),
     `a refused sign-in: the fold names the ONE address missing (the relay page) with Copy, and keeps the other road (${JSON.stringify(fold).slice(0, 300)})`);
-  await p1.probe('Connect Google through the relay page: the fold opened', `#mounts-dialog-overlay .mounts-oauth-paste`);
+  await p1.probe('Connect Google through the relay page: the fold opened', `[id^="chan-account-"] .mounts-oauth-paste`);
   // the relay page, as shipped, with the admin copy's data-allow — the vendor sends the browser there with the stub's code
   const vm = await import('node:vm');
   const rctx = { URL, URLSearchParams, atob }; rctx.globalThis = rctx; vm.createContext(rctx);
@@ -1095,7 +1095,7 @@ const p2 = await newPage();
   let n1 = n0;
   for (let i = 0; i < 60 && n1 === n0; i++) { n1 = (((await api('GET', '/api/channels')).json || {}).adapters || []).filter((a) => a.kind === 'gmail').length; if (n1 === n0) await sleep(100); }
   ok(n1 === n0 + 1, `Connect makes the account — no per-instance address was registered anywhere (${n0} → ${n1})`);
-  await p1.evaljs(`document.querySelector('#mounts-dialog-overlay')?.remove(); 1`);
+  await p1.evaljs(`document.querySelector('[id^="chan-account-"]')?.remove(); 1`);
 }
 
 // ── ⑬ lane oauth-setup-instructions (the owner 2026-10-23: «web application 的话，在集群外部署你是不是应该提供一下 redirect uri
@@ -1113,7 +1113,7 @@ const p2 = await newPage();
   ok(await p1.load(), 'page 1 on 127.0.0.1 (the browser on the VibeSpace machine)');
   // the boot splash (#loading-screen) covers the page until boot is done — a PICTURE (the pixel probes, the shots) waits for it
   ok(await p1.evaljs(`(async () => { for (let i = 0; i < 150; i++) { const s = document.getElementById('loading-screen'); if (!s || getComputedStyle(s).display === 'none' || getComputedStyle(s).opacity === '0' || s.style.visibility === 'hidden') return true; await new Promise((r) => setTimeout(r, 100)); } return false; })()`), 'the boot splash is gone (a picture shows the page, not the splash)');
-  await p1.evaljs(`document.querySelector('#mounts-dialog-overlay')?.remove(); 1`);
+  await p1.evaljs(`document.querySelector('[id^="chan-account-"]')?.remove(); 1`);
   ok(await p1.evaljs(OPEN(BB)), 'the Integrations window opened');
   const SETUP = (k) => `document.querySelector('.integ-setup-card[data-integ-setup="${k}"]')`;
   const sc = await p1.evaljs(`(async () => { for (let i = 0; i < 60; i++) { if (document.querySelectorAll('.integ-setup-card').length >= 3) break; await new Promise((r) => setTimeout(r, 100)); }
@@ -1162,7 +1162,7 @@ const p2 = await newPage();
   if (process.env.OAUTH_SETUP_SHOTS) { const s = await p1.cdp('Page.captureScreenshot', { format: 'png', captureBeyondViewport: false }); fs.writeFileSync(path.join(process.env.OAUTH_SETUP_SHOTS, 'integrations-gmail-setup.png'), Buffer.from(s.result.data, 'base64')); }
   // the Connect dialog: the fold BEFORE the first attempt
   const DLGC = `document.querySelector('.dialog-body[data-chan-dialog="connect"]')`;
-  const openOn = async (kind) => p1.evaljs(`(async () => { document.querySelector('#mounts-dialog-overlay')?.remove(); window.app.openChannelConnect(${JSON.stringify(kind)}); for (let i = 0; i < 80; i++) { if (${DLGC}) return true; await new Promise((r) => setTimeout(r, 100)); } return false; })()`);
+  const openOn = async (kind) => p1.evaljs(`(async () => { document.querySelector('[id^="chan-account-"]')?.remove(); window.app.openChannelConnect(${JSON.stringify(kind)}); for (let i = 0; i < 80; i++) { if (${DLGC}) return true; await new Promise((r) => setTimeout(r, 100)); } return false; })()`);
   ok(await openOn('gmail'), 'Connect an account on Gmail');
   const before = await p1.evaljs(`(window.__opened || []).length`);
   const dlg = await p1.evaljs(`(() => {
@@ -1177,7 +1177,7 @@ const p2 = await newPage();
     `the Connect form, BEFORE the first attempt: the company app shows its card, Custom shows the person's own — folded under one line, above the sign-in block, the same addresses (${JSON.stringify(dlg)})`);
   ok(await p1.evaljs(`(window.__opened || []).length`) === before, 'nothing was started to show it (no sign-in page opened)');
   await p1.evaljs(`(() => { const f = [...${DLGC}.querySelectorAll(':scope > details.oauth-setup-fold')].find((x) => x.style.display !== 'none'); f.open = true; return 1; })()`);
-  await p1.probe('the Connect dialog: the setup fold opened (Custom)', `#mounts-dialog-overlay details.oauth-setup-fold[data-who="custom"][data-kind="gmail"] .oauth-setup`);
+  await p1.probe('the Connect dialog: the setup fold opened (Custom)', `[id^="chan-account-"] details.oauth-setup-fold[data-who="custom"][data-kind="gmail"] .oauth-setup`);
   if (process.env.OAUTH_SETUP_SHOTS) { const s = await p1.cdp('Page.captureScreenshot', { format: 'png' }); fs.writeFileSync(path.join(process.env.OAUTH_SETUP_SHOTS, 'connect-gmail-fold.png'), Buffer.from(s.result.data, 'base64')); }
   // Gmail's OAuth client type (an account option): what Google is asked for
   const kind = await p1.evaljs(`(() => { const d = ${DLGC}; const sel = [...d.querySelectorAll('select')].find((s) => JSON.stringify([...s.options].map((o) => o.value)) === JSON.stringify(['', 'web', 'desktop'])); if (!sel) return null; let l = sel.previousElementSibling; while (l && l.tagName !== 'LABEL') l = l.previousElementSibling; return { label: l && l.textContent, options: [...sel.options].map((o) => o.textContent), value: sel.value }; })()`);
@@ -1196,7 +1196,7 @@ const p2 = await newPage();
   const rWeb = await connectWith('web');
   ok(/^http:\/\/127\.0\.0\.1:\d+$/.test(rDesk || '') && rDesk !== PUBLIC, `«Desktop app»: the sign-in asks Google for 127.0.0.1 on any port — never the relay page a Desktop client cannot take (${rDesk})`);
   ok(rUnsaid === PUBLIC && rWeb === PUBLIC, `CONTROL: not said (as before) and «Web application» ride the public relay page on this hub — the Desktop row above is the client type's doing (${rUnsaid} / ${rWeb})`);
-  await p1.evaljs(`document.querySelector('#mounts-dialog-overlay')?.remove(); 1`);
+  await p1.evaljs(`document.querySelector('[id^="chan-account-"]')?.remove(); 1`);
 }
 
 p1.close(); p2.close();

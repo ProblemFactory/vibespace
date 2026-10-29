@@ -166,8 +166,9 @@ export async function showAccountReachDialog(app, adapter) {
   let part = null;
   // lane dialog-unsaved-guard: section ② (the access rows) changed and not saved ⇒ ✕ / Esc / the backdrop asks; the policy
   // (section ①) saves at its pick
-  const { body, close } = createModalShell({ id: 'chan-account-reach-dialog', title: t('Reach & policy — {title}', { title: st.name }), dialogClass: 'chan-dialog chan-assign chan-access chan-reach', escapeToClose: true, onClose: () => { if (part) part.picker.close(); },
-    unsaved: { isDirty: () => !!part && part.isDirty(), save: () => part && part.save() } });
+  const { body, close, raised } = createModalShell({ id: 'chan-account-reach-dialog', key: adapter.id, title: t('Reach & policy — {title}', { title: st.name }), dialogClass: 'chan-dialog chan-assign chan-access chan-reach', escapeToClose: true, onClose: () => { if (part) part.picker.close(); },
+    unsaved: { isDirty: () => !!part && part.isDirty(), save: () => part && part.save() }, kind: 'form' });
+  if (raised) return;   // raised: the same subject's form, as it was
   let pol = st.adapter.policy || null;
   const polHost = el('div', 'chan-account-policy');
   const drawPolicy = () => {
@@ -202,7 +203,9 @@ export async function showReachDialog(app, conv0) {
   const conv = full.conversation;
   // the picker's roster listener (and its open popover) end WITH the dialog (verify round 2)
   let who = null;
-  const { body, close } = createModalShell({ id: 'chan-reach-dialog', title: t('Reach & policy — {title}', { title: conv.title || conv.id }), dialogClass: 'chan-dialog chan-reach', bodyClass: 'chan-flow-body', escapeToClose: true, onClose: () => { if (who) who.close(); } });
+  let off = () => {};   // this open's broadcast handler — released WITH its form (lane dialog-yield r3: keyed on the shell, never on a document id)
+  const { body, close, raised, live } = createModalShell({ id: 'chan-reach-dialog', key: `${conv0.adapterId}/${conv0.id}`, title: t('Reach & policy — {title}', { title: conv.title || conv.id }), dialogClass: 'chan-dialog chan-reach', bodyClass: 'chan-flow-body', escapeToClose: true, onClose: () => { if (who) who.close(); off(); }, kind: 'form' });
+  if (raised) return;   // raised: the same subject's form, as it was
   let current = conv;
   // "Grant reach to…": ONE picker for the dialog's life (a repaint re-appends it — never re-created, a
   // popover the person has open survives a broadcast); its rows are the live roster, re-read on its broadcasts
@@ -303,9 +306,10 @@ export async function showReachDialog(app, conv0) {
   const key = `${conv.adapterId}/${conv.id}`;
   const onBroadcast = (msg) => {
     if (msg.type !== 'channels-updated') return;
-    if (!document.getElementById('chan-reach-dialog')) { try { app.ws.offGlobal(onBroadcast); } catch {} return; }
+    if (!live()) { off(); return; }   // r4: THE liveness predicate — a queued form's body is detached, not closed (it unsubscribed itself and opened deaf)
     if (msg.partial && !(Array.isArray(msg.changedKeys) && msg.changedKeys.includes(key))) return;
-    fetchJson(base).then((r) => { if (r && !r.error && r.conversation && document.getElementById('chan-reach-dialog')) { current = r.conversation; draw(); } }).catch(() => {});
+    fetchJson(base).then((r) => { if (r && !r.error && r.conversation && live()) { current = r.conversation; draw(); } }).catch(() => {});
   };
   app.ws.onGlobal(onBroadcast);
+  off = () => { off = () => {}; try { app.ws.offGlobal(onBroadcast); } catch { /* the socket is gone */ } };
 }

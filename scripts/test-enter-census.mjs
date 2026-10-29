@@ -230,10 +230,31 @@ function census(files, { extraMarkup = [], cost = null } = {}) {
       walk(F.body, F, (n) => { if (n.type === 'ReturnStatement' && n.argument && scopeOf(n) === F) rets.push(n); });
       if (F.body.type !== 'BlockStatement') rets.push({ argument: F.body, start: F.body.start, end: F.body.end, _p: F });
       const ks = [];
+      // lane dialog-yield r3: a value FORWARDED from a local builder — `return build(…).api` / `const q = build(…); return q.api`,
+      // the builder returning `{ api }` with `const api = { … }` — is followed to that object literal (createModalShell → buildShell)
+      const forwarded = (arg) => {
+        if (!arg || arg.type !== 'MemberExpression' || arg.computed) return null;
+        let call = unchain(arg.object);
+        if (call && call.type === 'Identifier') { let init = null; walk(F.body, F, (n) => { if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && n.id.name === call.name && n.init) init = unchain(n.init); }); call = init; }
+        if (!call || call.type !== 'CallExpression' || unchain(call.callee).type !== 'Identifier') return null;
+        const G = fns.get(calleeName(call.callee)); if (!G) return null;
+        const P = arg.property.name;
+        let obj = null;
+        walk(G.body, G, (n) => {
+          if (obj || n.type !== 'ReturnStatement' || !n.argument || scopeOf(n) !== G) return;
+          const o = unchain(n.argument); if (!o || o.type !== 'ObjectExpression') return;
+          const pr = o.properties.find((q) => q.type === 'Property' && (q.key.name || lit(q.key)) === P); if (!pr) return;
+          const v = unchain(pr.value);
+          if (v.type === 'ObjectExpression') { obj = { o: v, at: n }; return; }
+          if (v.type === 'Identifier') walk(G.body, G, (m) => { if (!obj && m.type === 'VariableDeclarator' && m.id.type === 'Identifier' && m.id.name === v.name && m.init && unchain(m.init).type === 'ObjectExpression') obj = { o: unchain(m.init), at: m }; });
+        });
+        return obj;
+      };
       for (const r of rets) {
-        let arg = unchain(r.argument);
+        let arg = unchain(r.argument), at = r;
+        if (key) { const fw = forwarded(arg); if (fw) { arg = fw.o; at = fw.at; } }
         if (key) { if (arg.type !== 'ObjectExpression') continue; const pr = arg.properties.find((q) => q.type === 'Property' && (q.key.name || lit(q.key)) === key); if (!pr) continue; arg = pr.value; }
-        const k0 = classifyExpr(arg, r, depth);
+        const k0 = classifyExpr(arg, at, depth);
         ks.push(k0.kind === 'built' ? finish(k0, null, null) : k0);
       }
       const k = ks.find((x) => x.kind === 'text') || ks.find((x) => x.kind !== 'unknown') || ks[0];

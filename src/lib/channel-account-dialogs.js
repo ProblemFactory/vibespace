@@ -539,6 +539,7 @@ export async function showConnectAccountDialog(app, kinds, { kind = null } = {})
     fields.push(...optionFieldSpecs(k.optionsSchema, { sfx, when: is(k.kind), only: 1, values: presetFacts((k.presets || [])[0]) }));
   }
   const steppers = new Map();   // kind -> the paste type's numbered steps (design 017)
+  // one subject: one account being connected
   const ctx = mountsDialog(tr('Connect an account'), fields, tr('Connect'), async (v, { close }) => {
     const k = list.find((x) => x.kind === v.type) || list[0];
     const sfx = `.${k.kind}`;
@@ -549,7 +550,7 @@ export async function showConnectAccountDialog(app, kinds, { kind = null } = {})
     if (steps) steps.connected();
     close();
     showToast(tr('{name} connected', { name: r && r.adapter ? accountName(r.adapter) : (v.name || k.label) }));
-  });
+  }, { id: 'chan-account-connect' });
   ctx.body.dataset.chanDialog = 'connect';
   // lane pod-oauth-callback: choosing a company preset that names an option's value (the Lark app's brand) sets it
   for (const k of list) {
@@ -596,7 +597,7 @@ export async function showReauthAccountDialog(app, a, { kinds = null, preselect 
   }
   const expired = (a.auth || {}).state === 'expired';
   let watcher = null;
-  const d = reauthDialog({
+  const d = reauthDialog({ key: a.id,
     id: 'chan-reauth-dialog',
     title: tr('Re-authorize "{name}"', { name: accountName(a) }),
     hint: expired
@@ -698,7 +699,7 @@ export async function showEditAccountDialog(app, a, { kinds = null } = {}) {
     // SWITCHING THE CLIENT IS A RE-AUTHORIZATION (the mount semantics, D2's twin): never a silent re-point
     if (switching) showReauthAccountDialog(app, a, { kinds, preselect: { client: v.client, appId: v.cid, appSecret: v.csec } });
     else if (Object.keys(patch).length) showToast(tr('Saved.'));
-  });
+  }, { id: 'chan-account-edit', key: a.id });
   ctx.body.dataset.chanDialog = 'edit';
   ctx.body.dataset.adapter = a.id;
   const acts = ctx.body.querySelector('.dialog-actions');
@@ -762,7 +763,7 @@ export async function showDuplicateAccountDialog(app, a, { kinds = null } = {}) 
     if (watcher) watcher.off();
     close();
     showToast(tr('{name} created and connected', { name: v.name || copyName }));
-  }, {
+  }, { id: 'chan-account-duplicate', key: a.id,
     onClose: () => {
       if (watcher) watcher.off();
       if (committed || signedIn || !dupId) return;
@@ -823,7 +824,8 @@ function refText(ref, outboxN) {
   return String(ref.kind || '');
 }
 export function showRemoveRefusedDialog(app, a, refs) {
-  const { body, close } = createModalShell({ id: 'chan-remove-refused', title: tr('Cannot remove "{name}"', { name: accountName(a) }), dialogClass: 'chan-dialog', escapeToClose: true });
+  const { body, close, raised } = createModalShell({ id: 'chan-remove-refused', key: a && a.id, title: tr('Cannot remove "{name}"', { name: accountName(a) }), dialogClass: 'chan-dialog', escapeToClose: true, kind: 'form' });
+  if (raised) return null;   // raised: the same subject's form, as it was
   body.dataset.chanDialog = 'remove-refused';
   const warn = el('div', 'chan-flow-refusal chan-warn');
   warn.append(icon('alert', 12), el('span', '', tr('This account is still referenced — release these first:')));

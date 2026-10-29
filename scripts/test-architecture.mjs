@@ -2917,6 +2917,7 @@ console.log('§62 every path where the user names a window goes through wm.revea
     'src/lib/browser-live-window.js': [1, 0, 'the fallback for an app without goToWinId (a stub app in a suite) — goToWinId IS the door'],
     'src/lib/taskbar.js': [0, 1, 'the window menu\'s Restore — a frame\'s own menu restores the frame'],
     'src/lib/session-lifecycle.js': [0, 1, '_focusExistingSession\'s REPLAY branch (a layout replay found the window already open)'],
+    'src/lib/form-window.js': [1, 0, 'a FORM that closes gives the active window back to the one it was opened over (lane dialog-yield — the opener\'s focus restored, never a window the person names)'],
   };
   // THE DOORS: [revealWindow calls, where]
   const DOORS = {
@@ -2933,6 +2934,7 @@ console.log('§62 every path where the user names a window goes through wm.revea
     'src/lib/artifacts-window.js': [1, 'the Artifacts window\'s one-per-conversation re-open (lane artifacts-list-scale; a replay passes { replay })'],
     'src/lib/design-home.js': [1, 'the Design window home\'s one-per-client re-open (a replay passes { replay }) — lane design-systems-home'],
     'src/lib/machine-desktop.js': [3, 'a machine\'s whole-desktop window: a second open reveals it — design 014 D1; lane desktop-display-modes: the machine\'s ONE window (③ / ②), a display\'s own window (①), a replayed window\'s own id'],
+    'src/lib/form-window.js': [2, 'a Tab the person pressed into a FORM standing behind brings it in front (lane dialog-yield — the person named it with the key) + the same form opened again by the person is raised, never replaced (lane dialog-yield r2)'],
     'src/lib/desktop-app-window.js': [3, 'the singleton re-open (a replay passes { replay }) + a satellite the app just opened, in front — design 016 S2 + the person\'s click on an app notification\'s toast raises its window (lane app-display-notify-sink)'],
     ...Object.fromEntries(['settings-ui', 'usage-window', 'task-log', 'task-detail', 'session-props', 'channel-window', 'channel-outbox', 'channels-panel', 'jobs-panel', 'integrations-window', 'sidebar-rail', 'browser-trace-view', 'desktop-window', 'browser-live-window', 'inbox-window', 'vault-window']
       .map((n) => ['src/lib/' + n + '.js', [1, n === 'browser-live-window' ? 'the fold-back (D3)' : 'the singleton re-open (a replay passes { replay })']])),
@@ -5710,6 +5712,375 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
   ok(bare.length === 0, `§102 every client fetch / fetchJson with a JSON.stringify body names its content type (headers) — a bare one is text/plain to express.json() and the route reads an empty body${bare.length ? ': ' + bare.join(' ') : ''}`);
   const control = bareJsonCalls("const r = await fetchJson('/api/x', { method: 'POST', body: JSON.stringify({ a: 1 }) });\nawait fetch('/api/y', { method: 'POST', headers: H, body: JSON.stringify({}) });");
   ok(control.length === 1 && control[0] === 1, `§102 CONTROL: the census sees a bare JSON POST (line 1) and spares the one with headers (${JSON.stringify(control)})`);
+}
+
+// ── §103 (lane dialog-yield, 2.369.360 — the owner on his hub, 2026-10-26: «尽可能减少 blocking popup 的使用；带填空的对话框不阻塞
+// 聊天；打开别的窗口要让位»): ONE SHELL, TWO KINDS, DECLARED AT EVERY CALL. createModalShell (src/lib/utils.js) draws a
+// `decision` — a backdrop over everything, answered before anything goes on — or a `form` — what the person fills, reads or
+// picks from: a small window that yields (src/lib/form-window.js). `kind` has NO default: every createModalShell( call in
+// src/ names one (acorn: the first argument's own `kind` property, a 'form' / 'decision' literal; the two dynamic rows —
+// plugin-client hands a plugin's own choice through, utils.js _modalShell serves showConfirmDialog (a decision) and
+// showInputDialog (a form unless its caller says otherwise) — both arms literals) — a call without one is RED by file:line.
+// Round 2 (acceptance r1) — REASONS ARE ROWS: every decision call says why on its line (`// decision: <reason>`; a decision
+// without one is RED), and the table prints per call its opener ('person' — the default — / 'system' / the caller's), its
+// Escape door ('closes' / 'asks first' — onEscape — / 'off'), and for a decision its reason and whether it carries a FIELD
+// (an input / textarea / select built in the same function). A caller's own keydown-Escape listener on a FORM's root is RED
+// (the shell's ONE door: the OAT sign-in's ran after the shell had closed it). And THE ONE «did the person open a dialog?»
+// predicate: a `.dialog-overlay` / `.dialog-form` selector, or a 'dialog-overlay' / 'dialog-form' class read, anywhere in src/
+// outside src/lib/form-yield.js is RED by file:line (keyboard-yield judged `.dialog-overlay` only — a form never held the keys
+// of a takeover); a root's className write (the shell, the form host) is its maker, not a reader.
+// Round 3 (acceptance r2) — A FORM'S IDENTITY IS ITS CALLER'S: every form call names its own `id` (no id ⇒ RED — ~17 forms
+// shared 'mounts-dialog-overlay' and Connect storage closed a running «Set up <machine>»); a FIXED id declares its `key` (the
+// subject) or says `// one subject: <why>` on the line above / in the call — a keyless fixed id under a title that varies is
+// RED (Rotate… twice raised the dead token); the function of a fixed-id form reads `raised` (a re-open hands back the LIVE
+// shell — a caller that drew again would draw twice) — RED otherwise; a lookup of the form's own id by document inside its
+// function is RED (a per-open handler kept alive by `document.getElementById(<id>)` re-fetched into a detached body); the
+// floats' owner (`data-owner-form`) is read only by form-yield.js ownerFormOf; a decision with a FIELD whose reason is a
+// retired phrase («the caller awaits», «one password», «locked until answered») is RED; and THE SYSTEM'S OPENS — derived:
+// a call that opens a form (createModalShell kind 'form', or a function holding one) inside a timer / broadcast / watcher
+// callback (setInterval, onGlobal, ws.on, a 'message' listener, an onDownloaded / onBroadcast property), one local function
+// deep — say opener 'system' or are RED; the list is printed.
+// Round 4 (acceptance r3) — A KEY NAMES ONE SUBJECT, A QUEUED FORM'S CALLER IS TOLD: a literal key names no subject (RED); a
+// key that resolves (through the file's declarations) to a caller's `id` OPTION names the field's kind, not its instance —
+// RED unless it is minted per instance (`++`, freshKey) (every Task Detail row passed 'task-context-row' and Browse… on row B
+// raised row A's picker); every parameter the form's own LOADS send (fetchJson / fetch in its function's own body) is named
+// by its key, or the call says `// not the subject: <name> — <why>` (an app request keyed by the machine raised «Remove gimp»
+// for inkscape). A QUEUEABLE form — a fixed id with a key, not `beside` (another subject under its id waits behind the open
+// one's ask) — reads `ready` (it may wait behind the open one's ask) and never judges its
+// liveness by `isConnected` on its own overlay / body / dialog (a queued body is detached: «Models — B» opened on «Loading…»
+// for ever) — `live()` is THE predicate. Both columns are printed.
+{
+  const lit = (x) => x && x.type === 'Literal' && (x.value === 'form' || x.value === 'decision');
+  const DYN = (n) => n && n.type === 'ConditionalExpression' && [n.consequent, n.alternate].every(lit);
+  const FIELD_RE = /\b\w+\(\s*['"](input|textarea|select)['"]|<(input|textarea|select)[\s>]|type\s*=\s*['"]password['"]|\bpwInput\(/; // a field built in the call's own function (createElement / a local el() helper / markup / a password box)
+  const RETIRED_RE = /caller awaits|one password|locked until answered/i;
+  const walkAll = (n, visit, parent = null) => { if (!n || typeof n.type !== 'string') return; visit(n, parent); for (const k of Object.keys(n)) { if (k === 'loc') continue; const c = n[k]; if (Array.isArray(c)) c.forEach((x) => walkAll(x, visit, n)); else if (c && typeof c.type === 'string') walkAll(c, visit, n); } };
+  /** …a function's OWN body: nested functions skipped, except `keep(fn, parent)` ones (a timer's own .then / setTimeout) */
+  const walkOwn = (n, visit, keep = () => false, parent = null) => { if (!n || typeof n.type !== 'string') return; if (parent && /Function/.test(n.type) && !keep(n, parent)) return; visit(n, parent); for (const k of Object.keys(n)) { if (k === 'loc') continue; const c = n[k]; if (Array.isArray(c)) c.forEach((x) => walkOwn(x, visit, keep, n)); else if (c && typeof c.type === 'string') walkOwn(c, visit, keep, n); } };
+  const census103 = (files) => {
+    const rows = [], bad = [], escRed = [], idRed = [], keyRed = [], raisedRed = [], docRed = [], subjRed = [], readyRed = [], liveRed = [];
+    const pend = [];   // r4: the queueable checks need every row's id first
+    for (const [f, src] of files) {
+      let ast;
+      try { ast = acorn.parse(src, { ecmaVersion: 'latest', sourceType: 'module', locations: true, allowHashBang: true }); } catch (e) { bad.push(`${f}: unparsable (${e.message})`); continue; }
+      const lines = src.split('\n');
+      const consts = new Map();   // module / function `const NAME = '<literal>'` — a fixed id by name (DIALOG_ID)
+      walkAll(ast, (n) => { if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && n.init && n.init.type === 'Literal' && typeof n.init.value === 'string') consts.set(n.id.name, n.init.value); });
+      const decls = new Map();   // r4: name → every init declared under it in the file (a key resolved through the ones in its scope)
+      walkAll(ast, (n) => { if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && n.init) decls.set(n.id.name, [...(decls.get(n.id.name) || []), n]); });
+      const topLevel = new Set(); for (const st of ast.body) { const d = st.type === 'ExportNamedDeclaration' ? st.declaration : st; if (d && d.type === 'VariableDeclaration') d.declarations.forEach((x) => topLevel.add(x)); }
+      const fns = [];
+      const walk = (n) => {
+        if (!n || typeof n.type !== 'string') return;
+        const isFn = /Function/.test(n.type);
+        if (isFn) fns.push(n);
+        if (n.type === 'CallExpression' && n.callee.type === 'Identifier' && n.callee.name === 'createModalShell') {
+          const at = `${f}:${n.loc.start.line}`;
+          const span = lines.slice(Math.max(0, n.loc.start.line - 2), n.loc.end.line).join('\n');   // the call and the line above it
+          const own = lines.slice(n.loc.start.line - 1, n.loc.end.line).join('\n');
+          const arg = n.arguments[0];
+          const props = arg && arg.type === 'ObjectExpression' ? arg.properties.filter((p) => p.type === 'Property' && !p.computed) : [];
+          const prop = (k) => props.find((p) => (p.key.name || p.key.value) === k) || null;
+          const v = prop('kind') ? prop('kind').value : null;
+          const kind = v && lit(v) ? v.value : DYN(v) ? 'dynamic' : null;
+          const later = /\/\/\s*form-later:\s*(.*)$/m.exec(own);
+          const why = /\/\/\s*decision:\s*(.*)$/m.exec(own);
+          const one = /\/\/\s*one subject:\s*(.*)$/m.exec(span);
+          const op = prop('opener') ? prop('opener').value : null;
+          const opener = !op ? 'person' : op.type === 'Literal' ? String(op.value) : 'the caller\'s';
+          const esc = prop('escapeToClose') ? prop('escapeToClose').value : null;
+          const escOn = !!esc && !(esc.type === 'Literal' && !esc.value);
+          const escape = prop('onEscape') ? 'asks first' : escOn ? 'closes' : 'off';
+          const fn = fns[fns.length - 1];
+          const scope = fn ? src.slice(fn.start, fn.end) : src;
+          const field = FIELD_RE.test(scope);
+          // the id: a literal / a const by name (fixed), a template minting a fresh one per open, the caller's (a parameter)
+          const idv = prop('id') ? prop('id').value : null;
+          const idLit = !idv ? null : idv.type === 'Literal' ? String(idv.value) : idv.type === 'Identifier' && consts.has(idv.name) ? consts.get(idv.name) : null;
+          let fresh = false; if (idv) walkAll(idv, (x) => { if (x.type === 'UpdateExpression') fresh = true; });
+          const idKind = !idv ? 'none' : idLit !== null ? 'fixed' : fresh ? 'fresh' : 'the caller\'s';
+          const idText = !idv ? '—' : idLit !== null ? idLit : src.slice(idv.start, idv.end).replace(/\s+/g, ' ').slice(0, 50);
+          const kv = prop('key') ? prop('key').value : null;
+          const keyText = kv ? src.slice(kv.start, kv.end).replace(/\s+/g, ' ').slice(0, 60) : null;
+          const tv = prop('title') ? prop('title').value : null;
+          const titleConst = !!tv && (tv.type === 'Literal' || (tv.type === 'CallExpression' && tv.callee.type === 'Identifier' && /^(t|tr)$/.test(tv.callee.name) && tv.arguments.length === 1 && tv.arguments[0].type === 'Literal'));
+          if (!kind) bad.push(`${at} — no kind (${prop('kind') ? 'not a form / decision literal' : 'missing'})`);
+          else if (later && kind !== 'decision') bad.push(`${at} — a form-later marker on a ${kind} call`);
+          else if (later && !later[1].trim()) bad.push(`${at} — a form-later marker without its reason`);
+          else if (kind === 'decision' && !(why && why[1].trim())) bad.push(`${at} — a decision without its reason (// decision: <why> on its line)`);
+          else if (kind === 'decision' && field && RETIRED_RE.test(why[1])) bad.push(`${at} — a decision with a FIELD whose reason is a retired phrase («${why[1].trim().slice(0, 60)}» — 带填空的对话框不阻塞聊天: make it a form, or name a TRUE blocking fact)`);
+          const form = kind === 'form' || kind === 'dynamic';
+          if (form && idKind === 'none') idRed.push(`${at} — a form without its own id`);
+          if (form && (idKind === 'fixed' || idKind === 'the caller\'s') && !keyText && !(one && one[1].trim())) keyRed.push(`${at} — a fixed id «${idText}» with no key and no «// one subject: <why>»`);
+          if (form && idKind === 'fixed' && !keyText && !titleConst && !prop('title') === false) keyRed.push(`${at} — a fixed id «${idText}» under a title that varies needs its key (the subject)`);
+          if (form && kind === 'form' && (idKind === 'fixed' || idKind === 'the caller\'s') && !/\braised\b/.test(scope)) raisedRed.push(`${at} — a fixed-id form whose function never reads \`raised\``);
+          if (form && idLit) {
+            const re = new RegExp(`getElementById\\(\\s*['"]${idLit.replace(/[-]/g, '\\-')}['"]\\s*\\)|querySelector\\(\\s*['"]#${idLit}['"]\\s*\\)`, 'g');
+            let m; while ((m = re.exec(scope))) docRed.push(`${f}:${(fn ? fn.loc.start.line : 1) + scope.slice(0, m.index).split('\n').length - 1} — the form «${idLit}» found by document inside its own function (${at}) — key its liveness on its shell`);
+          }
+          // r4: THE KEY NAMES ONE SUBJECT — literal ⇒ none; a caller's id option ⇒ the field's kind; the loads' parameters named
+          const on = (k) => !!prop(k) && !(prop(k).value.type === 'Literal' && !prop(k).value.value);
+          const beside = on('beside'), guarded = on('unsaved');
+          let subject = '—';
+          if (form && kv && !(kv.type === 'Literal' && kv.value === null)) {
+            const allLit = (x) => !!x && (x.type === 'Literal' || (x.type === 'TemplateLiteral' && !x.expressions.length) || (x.type === 'ConditionalExpression' && allLit(x.consequent) && allLit(x.alternate)));
+            const reach = new Set(), seen = new Set(); let minted = false, idOption = false;
+            const outer = fns[0];
+            const params = new Set(); const bind = (q) => { if (!q) return; if (q.type === 'Identifier') params.add(q.name); else if (q.type === 'ObjectPattern') q.properties.forEach((r) => bind(r.type === 'RestElement' ? r.argument : r.value)); else if (q.type === 'ArrayPattern') q.elements.forEach(bind); else if (q.type === 'AssignmentPattern') bind(q.left); else if (q.type === 'RestElement') bind(q.argument); };
+            for (const g of fns) g.params.forEach(bind);
+            const inScope = (d) => topLevel.has(d) || (!!outer && d.start >= outer.start && d.end <= outer.end);   // the call's own function chain, or the module's top level
+            const scan = (x, depth) => walkAll(x, (y, par) => {
+              if (y.type === 'UpdateExpression' || (y.type === 'CallExpression' && y.callee.type === 'Identifier' && y.callee.name === 'freshKey')) minted = true;
+              if (y.type === 'MemberExpression' && !y.computed && y.property.name === 'id' && y.object.type === 'Identifier' && /^(o|opt|opts|options)$/.test(y.object.name)) idOption = true;
+              if (y.type === 'Identifier' && !(par && par.type === 'MemberExpression' && par.property === y && !par.computed) && !(par && par.type === 'Property' && par.key === y && !par.computed)) {
+                reach.add(y.name);
+                if (depth < 3 && !params.has(y.name) && decls.has(y.name) && !seen.has(y.name)) { seen.add(y.name); for (const d of decls.get(y.name)) if (inScope(d)) scan(d.init, depth + 1); }
+              }
+            });
+            scan(kv, 0);
+            if (allLit(kv)) subjRed.push(`${at} — a literal key names no subject («${keyText}»)`);
+            else if (idOption && !minted) subjRed.push(`${at} — the key «${keyText}» is a caller's id option: it names the field's KIND, not its instance (mint the instance's own)`);
+            const loads = new Set();
+            if (fn && !minted) walkOwn(fn.body, (y) => { if (y.type === 'CallExpression' && y.callee.type === 'Identifier' && /^(fetchJson|fetch)$/.test(y.callee.name)) for (const a of y.arguments) walkAll(a, (z, par) => { if (z.type === 'Identifier' && !(par && par.type === 'MemberExpression' && par.property === z && !par.computed) && !(par && par.type === 'Property' && par.key === z && !par.computed) && params.has(z.name)) loads.add(z.name); }); });
+            const notSubj = new Set([...span.matchAll(/\/\/\s*not the subject:\s*([A-Za-z_$][\w$]*)/g)].map((m) => m[1]));
+            const dropped = [...loads].filter((x) => !reach.has(x) && !notSubj.has(x));
+            if (dropped.length) subjRed.push(`${at} — the key «${keyText}» drops ${dropped.map((x) => `\`${x}\``).join(', ')} that its loads send (two such requests would share one form) — name it, or say \`// not the subject: <name> — <why>\``);
+            subject = minted ? 'minted per open / instance' : [...reach].filter((x) => params.has(x) || decls.has(x)).slice(0, 4).join(', ') || keyText;
+          }
+          // r4: the caller of a queueable form reads `ready` and judges liveness by live(), never its own elements' isConnected
+          // THIS shell's `ready`: destructured from the call, or read off the variable holding it (another `.ready` is not it)
+          const shellNames = []; let readyName = null, shellVar = null;
+          if (form) {
+            const decl = /const\s*\{([^}]*)\}\s*=\s*$/.exec(src.slice(Math.max(0, n.start - 400), n.start));
+            if (decl) for (const part of decl[1].split(',')) { const m = /^\s*(overlay|body|dialog|ready)\s*(?::\s*([A-Za-z_$][\w$]*))?\s*$/.exec(part); if (m) { if (m[1] === 'ready') readyName = m[2] || 'ready'; else shellNames.push(m[2] || m[1]); } }
+            const sh = /(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*$/.exec(src.slice(Math.max(0, n.start - 200), n.start));
+            if (sh) { shellVar = sh[1]; for (const e of ['overlay', 'body', 'dialog']) shellNames.push(`${sh[1]}.${e}`); }
+          }
+          const readsReady = (() => { let r = false; if (fn) walkAll(fn, (y, par) => {
+            if (readyName && y.type === 'Identifier' && y.name === readyName && y.start > n.end && !(par && par.type === 'Property' && par.key === y && !par.computed)) r = true;
+            if (shellVar && y.type === 'MemberExpression' && !y.computed && y.property.name === 'ready' && y.object.type === 'Identifier' && y.object.name === shellVar) r = true;
+            if (y.type === 'MemberExpression' && !y.computed && y.property.name === 'ready' && y.object === n) r = true;   // createModalShell(…).ready
+          }); return r; })();
+          // its body handed to a helper that may build its fields (grantAccessBody(app, st, body, …)) — the form can be typed into
+          const bodyNames = shellNames.filter((x) => /(^|\.)body$/.test(x) || !/^(overlay|dialog)$|\.(overlay|dialog)$/.test(x));
+          let passesBody = false;
+          if (fn) walkAll(fn, (y) => { if (y.type === 'CallExpression' && y.arguments.some((a) => { const txt = src.slice(a.start, a.end); return bodyNames.includes(txt); }) && !(y.callee.type === 'MemberExpression' && /^(append|appendChild|prepend|insertBefore|replaceChildren|contains|querySelector|querySelectorAll|addEventListener|removeEventListener)$/.test(y.callee.property.name || ''))) passesBody = true; });
+          // WORK AFTER THE OPEN in the caller's own body — a load it awaits (an await, a .then) or a focus (now, or in a timer /
+          // frame): a queued form opens later, so that work waits for `ready`. A pure synchronous draw lands in the body that
+          // opens, and a subscription / timer set up at the build keeps the detached body current (its liveness: live()).
+          let after = null;
+          const calleeOf = (y) => (y.type === 'CallExpression' ? (y.callee.type === 'Identifier' ? y.callee.name : y.callee.type === 'MemberExpression' && !y.callee.computed ? y.callee.property.name : '') : '');
+          if (fn) walkOwn(fn.body, (y) => {
+            if (after || y.start < n.end) return;
+            const cal = calleeOf(y);
+            if (y.type === 'AwaitExpression') after = 'await';
+            else if (cal === 'then' || cal === 'focus') after = cal;
+            else if (/^(setTimeout|requestAnimationFrame|queueMicrotask)$/.test(cal) && y.arguments[0]) walkAll(y.arguments[0], (z) => { if (!after && calleeOf(z) === 'focus') after = 'focus'; });
+          });
+          const liveReads = [];
+          for (const nm of shellNames) { const re = new RegExp(`(?<![\\w$.])${nm.replace(/[.$]/g, '\\$&')}\\.isConnected\\b`, 'g'); let m; while ((m = re.exec(scope))) liveReads.push(`${f}:${(fn ? fn.loc.start.line : 1) + scope.slice(0, m.index).split('\n').length - 1} ${nm}.isConnected`); }
+          if (form && kind === 'form' && (idKind === 'fixed' || idKind === 'the caller\'s')) pend.push({ at, idText, keyed: !!keyText && !(kv && kv.type === 'Literal' && kv.value === null), beside, never: on('undismissable'), gate: field || guarded || passesBody || idKind === 'the caller\'s', readsReady, liveReads, after });
+          rows.push({ at, kind, later: later ? later[1].trim() : null, why: why ? why[1].trim() : null, opener, escape, field, id: idText, idKind, key: keyText, one: one ? one[1].trim() : null, beside, subject });
+          // the root it returned — a caller's own Escape listener on it is RED (a FORM's Escape is its shell's ONE door)
+          if (kind === 'form') {
+            const decl = /const\s*\{([^}]*)\}\s*=\s*$/.exec(src.slice(Math.max(0, n.start - 400), n.start)) || null;
+            const names = [];
+            if (decl) for (const part of decl[1].split(',')) { const m = /^\s*overlay\s*(?::\s*([A-Za-z_$][\w$]*))?\s*$/.exec(part); if (m) names.push(m[1] || 'overlay'); }
+            const sh = /(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*$/.exec(src.slice(Math.max(0, n.start - 200), n.start));
+            if (sh) names.push(`${sh[1]}.overlay`);
+            for (const nm of names) {
+              const re = new RegExp(`${nm.replace(/[.$]/g, '\\$&')}\\.addEventListener\\(\\s*['"]keydown['"]([\\s\\S]{0,600}?)\\}\\s*\\)`, 'g');
+              let m; while ((m = re.exec(scope))) if (/Escape/.test(m[1])) { const ln = (fn ? fn.loc.start.line : 1) + scope.slice(0, m.index).split('\n').length - 1; escRed.push(`${f}:${ln} — a keydown Escape listener on the form root \`${nm}\` (${at})`); }
+            }
+          }
+        }
+        for (const k of Object.keys(n)) { if (k === 'loc') continue; const c = n[k]; if (Array.isArray(c)) c.forEach(walk); else if (c && typeof c.type === 'string') walk(c); }
+        if (isFn) fns.pop();
+      };
+      walk(ast);
+    }
+    // r4: a form is QUEUEABLE when another subject can come under its id (keyed, not beside, not undismissable — that family
+    // opens beside) AND the open one can ask at its door: some call under the id gives it a field, an unsaved guard, a body a
+    // helper fills, or the id is the caller's (a read-only form under its own id closes at once — never asks, never queues)
+    const gated = new Set(pend.filter((r) => r.gate).map((r) => r.idText));
+    for (const r of pend) {
+      r.queueable = r.keyed && !r.beside && !r.never && gated.has(r.idText);
+      const row = rows.find((x) => x.at === r.at); if (row) Object.assign(row, { queueable: r.queueable, readsReady: r.readsReady, liveReads: r.liveReads, never: r.never, after: r.after });
+      if (r.queueable && r.after && !r.readsReady) readyRed.push(`${r.at} — a queueable form («${r.idText}», keyed, may wait behind the open one's ask) whose caller works after the open (${r.after}) and never reads \`ready\``);
+      if (r.queueable) for (const x of r.liveReads) liveRed.push(`${x} — a queueable form's liveness by its own element (${r.at}): a queued body is detached — use the shell's live()`);
+    }
+    return { rows, bad, escRed, idRed, keyRed, raisedRed, docRed, subjRed, readyRed, liveRed };
+  };
+  /** THE ONE PREDICATE's readers: a dialog-root selector or class read in src/ outside form-yield.js (acorn over every literal);
+   *  r3: and the floats' owner — a `data-owner-form` / `ownerForm` read anywhere but form-yield.js */
+  const readers103 = (files) => {
+    const red = [];
+    for (const [f, src] of files) {
+      if (f === 'src/lib/form-yield.js') continue;
+      if (!/dialog-(overlay|form)|owner-form|ownerForm/.test(src)) continue;
+      let ast;
+      try { ast = acorn.parse(src, { ecmaVersion: 'latest', sourceType: 'module', locations: true, allowHashBang: true }); } catch { continue; }
+      const walk = (n, parent) => {
+        if (!n || typeof n.type !== 'string') return;
+        const texts = n.type === 'Literal' && typeof n.value === 'string' ? [n.value] : n.type === 'TemplateLiteral' ? n.quasis.map((q) => q.value.cooked || '') : [];
+        for (const v of texts) {
+          const selector = /\.dialog-(overlay|form)\b/.test(v);
+          const exact = v === 'dialog-overlay' || v === 'dialog-form';
+          // a maker: the root's className written (the shell, the form host's sheet / window); an id: the static #dialog-overlay
+          const maker = parent && parent.type === 'AssignmentExpression' && parent.left.type === 'MemberExpression' && parent.left.property.name === 'className';
+          const byId = (parent && parent.type === 'CallExpression' && parent.callee.type === 'MemberExpression' && parent.callee.property.name === 'getElementById')
+            || (parent && parent.type === 'BinaryExpression' && [parent.left, parent.right].some((x) => x.type === 'MemberExpression' && x.property.name === 'id')); // `o.id !== 'dialog-overlay'`: the static overlay named by its id
+          if (selector || (exact && !maker && !byId)) red.push(`${f}:${n.loc.start.line} — ${JSON.stringify(v).slice(0, 60)}`);
+          if (/data-owner-form/.test(v)) red.push(`${f}:${n.loc.start.line} — ${JSON.stringify(v).slice(0, 60)} (the floats' owner: ownerFormOf / ownFloat only)`);
+        }
+        if (n.type === 'MemberExpression' && !n.computed && n.property.name === 'ownerForm') red.push(`${f}:${n.loc.start.line} — .ownerForm (the floats' owner: ownerFormOf / ownFloat only)`);
+        for (const k of Object.keys(n)) { if (k === 'loc') continue; const c = n[k]; if (Array.isArray(c)) c.forEach((x) => walk(x, n)); else if (c && typeof c.type === 'string') walk(c, n); }
+      };
+      walk(ast, null);
+    }
+    return red;
+  };
+  /** THE SYSTEM'S OPENS (derived): the functions that open a form (a createModalShell kind 'form' in their own body, + the
+   *  mounts / input helpers), then every call of one inside a timer / broadcast / watcher callback (setInterval, onGlobal,
+   *  ws.on, an onDownloaded / onBroadcast property) — or a local function such a callback calls, or a .then / setTimeout it
+   *  runs — with its opener. (A frame's 'message' is not one: the design frame posts the person's own clicks.) */
+  const systemOpens103 = (files) => {
+    const openers = new Set(['mountsDialog', '_mountsDialog', 'showInputDialog']);
+    const parsed = [];
+    for (const [f, src] of files) {
+      let ast; try { ast = acorn.parse(src, { ecmaVersion: 'latest', sourceType: 'module', locations: true, allowHashBang: true }); } catch { continue; }
+      parsed.push([f, src, ast]);
+      walkAll(ast, (n, parent) => {
+        if (!/Function/.test(n.type)) return;
+        let has = false;
+        walkOwn(n.body, (x) => { if (x.type === 'CallExpression' && x.callee.type === 'Identifier' && x.callee.name === 'createModalShell') { const a = x.arguments[0]; const k = a && a.type === 'ObjectExpression' ? a.properties.find((p) => p.type === 'Property' && (p.key.name === 'kind')) : null; if (k && k.value.type === 'Literal' && k.value.value === 'form') has = true; } });
+        if (!has) return;
+        const name = n.id ? n.id.name : parent && (parent.type === 'Property' || parent.type === 'MethodDefinition') && parent.key ? parent.key.name : parent && parent.type === 'VariableDeclarator' && parent.id.type === 'Identifier' ? parent.id.name : null;
+        if (name && !/^(open|show|_show|_open)?$/.test(name)) openers.add(name);
+      });
+    }
+    const calleeName = (c) => (c.callee.type === 'Identifier' ? c.callee.name : c.callee.type === 'MemberExpression' && !c.callee.computed ? c.callee.property.name : null);
+    const SYS_CALL = new Set(['setInterval', 'onGlobal']);
+    const sysCallback = (fnNode, parent) => {
+      if (!parent) return false;
+      if (parent.type === 'CallExpression' && parent.arguments.includes(fnNode)) {
+        const nm = calleeName(parent);
+        if (SYS_CALL.has(nm)) return true;
+        if (nm === 'on' && parent.callee.type === 'MemberExpression' && /\bws\b/.test(String(parent.callee.object.name || parent.callee.object.property?.name || ''))) return true;
+      }
+      if (parent.type === 'Property' && parent.value === fnNode && /^on(Broadcast|Message)$/.test(parent.key.name || '')) return true;   // (r4: an onDownloaded is the person's own download, watched in the form — not the system's)
+      return false;
+    };
+    // inside a system callback, a nested callback is still the system's only when the system runs it — a .then / .catch, a
+    // setTimeout, a microtask / frame, an array walk, a promise executor; any other nested function (a button's handler, an
+    // on* property, a listener) is what the PERSON fires
+    const SYS_NEST = new Set(['then', 'catch', 'finally', 'setTimeout', 'queueMicrotask', 'requestAnimationFrame', 'forEach', 'map', 'filter', 'some', 'every', 'reduce', 'Promise']);
+    const stillSystem = (fnNode, parent) => !!parent && (parent.type === 'CallExpression' || parent.type === 'NewExpression') && parent.arguments.includes(fnNode) && SYS_NEST.has(calleeName(parent));
+    const out = [];
+    for (const [f, src, ast] of parsed) {
+      // the local functions a system callback calls (one level deep — never an opener itself: its call is the row): their bodies count
+      const sysBodies = [];
+      const localFns = new Map();
+      walkAll(ast, (n, parent) => { if (/Function/.test(n.type) && parent && parent.type === 'VariableDeclarator' && parent.id.type === 'Identifier') localFns.set(parent.id.name, n); if (n.type === 'FunctionDeclaration' && n.id) localFns.set(n.id.name, n); });
+      walkAll(ast, (n, parent) => { if (/Function/.test(n.type) && sysCallback(n, parent)) sysBodies.push(n); });
+      for (const b of [...sysBodies]) walkOwn(b.body, (x) => { if (x.type === 'CallExpression' && x.callee.type === 'Identifier' && localFns.has(x.callee.name) && !openers.has(x.callee.name)) sysBodies.push(localFns.get(x.callee.name)); }, stillSystem);
+      const seen = new Set();
+      for (const b of sysBodies) walkOwn(b.body, (x) => {
+        if (x.type !== 'CallExpression' || seen.has(x.start)) return;
+        const nm = calleeName(x);
+        const direct = nm === 'createModalShell' && x.arguments[0] && x.arguments[0].type === 'ObjectExpression' && x.arguments[0].properties.some((p) => p.type === 'Property' && p.key.name === 'kind' && p.value.type === 'Literal' && p.value.value === 'form');
+        if (!direct && !openers.has(nm)) return;
+        seen.add(x.start);
+        let sys = false; for (const a of x.arguments) walkAll(a, (y) => { if (y.type === 'Property' && !y.computed && y.key.name === 'opener' && y.value.type === 'Literal' && y.value.value === 'system') sys = true; });
+        out.push({ at: `${f}:${x.loc.start.line}`, call: nm, system: sys });
+      }, stillSystem);
+    }
+    return out;
+  };
+  const listJs = (dir) => fs.readdirSync(path.join(REPO, dir), { withFileTypes: true }).flatMap((d) => (d.isDirectory() ? listJs(`${dir}/${d.name}`) : d.name.endsWith('.js') ? [`${dir}/${d.name}`] : []));
+  const allSrc103 = listJs('src').map((f) => [f, fs.readFileSync(path.join(REPO, f), 'utf8')]);
+  const files103 = allSrc103.filter(([, src]) => src.includes('createModalShell('));
+  const real = census103(files103);
+  const of = (k) => real.rows.filter((r) => r.kind === k);
+  const short = (r) => r.at.replace(/^src\/lib\//, '');
+  console.log(`\n§103 every createModalShell( call declares its kind (lane dialog-yield): ${real.rows.length} calls in ${files103.length} files — ${of('form').length} form · ${of('decision').length} decision · ${of('dynamic').length} dynamic`);
+  console.log(`  FORMS (a small window that yields) — file:line · id · key (or its one subject) · opener · Escape:\n${of('form').map((r) => `    ${short(r)} · ${r.id}${r.idKind === 'fixed' ? '' : ` (${r.idKind})`} · ${r.key ? 'key ' + r.key : r.one ? 'one subject: ' + r.one : '—'} · ${r.opener} · ${r.escape}`).join('\n')}`);
+  console.log(`  DECISIONS — file:line · field · reason:\n${of('decision').map((r) => `    ${short(r)} · ${r.field ? 'FIELD' : 'no field'} · ${r.why || '(none)'}`).join('\n')}`);
+  console.log(`  DYNAMIC: ${of('dynamic').map((r) => `${short(r)} · id ${r.id} (${r.idKind}) · ${r.opener} · ${r.why || ''}`).join(' | ')}`);
+  console.log(`  FORM-LATER (${real.rows.filter((r) => r.later).length}): ${real.rows.filter((r) => r.later).map((r) => `${short(r)} — ${r.later}`).join(' | ') || 'none'}`);
+  const inputCallers = allSrc103.flatMap(([f, src]) => src.split('\n').map((l, i) => [f, i + 1, l]).filter(([, , l]) => /\bshowInputDialog\(\{/.test(l) && !/export function showInputDialog/.test(l)));
+  const inputDecisions = inputCallers.filter(([, , l]) => /kind:\s*'decision'/.test(l));
+  console.log(`  showInputDialog (a FORM): ${inputCallers.length} callers — ${inputDecisions.length} ask for a decision${inputDecisions.length ? ': ' + inputDecisions.map(([f, n, l]) => `${f}:${n} — ${(/\/\/\s*decision:\s*(.*)$/.exec(l) || [, '(none)'])[1]}`).join(' | ') : ''}`);
+  ok(real.rows.length >= 100 && real.bad.length === 0, `§103 every createModalShell( call in src/ names its kind — 'decision' or 'form' — and every decision says why on its line, none a retired phrase over a FIELD (${real.rows.length} calls)${real.bad.length ? ' — RED: ' + real.bad.join(' | ') : ''}`);
+  ok(of('form').length > of('decision').length && of('dynamic').length === 2 && of('dynamic').some((r) => r.at.startsWith('src/lib/plugin-client.js:')) && of('dynamic').some((r) => r.at.startsWith('src/lib/utils.js:')), `§103 the forms outnumber the decisions (${of('form').length} / ${of('decision').length}) and the TWO dynamic rows are plugin-client's (a plugin declares its own) and utils.js _modalShell's (confirm = decision, input = form)`);
+  ok(of('decision').every((r) => !r.field), `§103 no decision carries a FIELD (r3: the five that did — machine-desktop's sign-in, «Verify it's you», the vault's unlock / set / change — are forms) (${of('decision').filter((r) => r.field).map(short).join(', ') || 'none'})`);
+  ok(inputDecisions.every(([, , l]) => /\/\/\s*decision:\s*\S/.test(l)), `§103 a showInputDialog caller that asks for a decision says why on its line (${inputDecisions.length})`);
+  ok(real.escRed.length === 0, `§103 no caller puts its own keydown-Escape listener on a FORM's root (the shell's ONE door — onEscape asks first)${real.escRed.length ? ' — RED: ' + real.escRed.join(' | ') : ''}`);
+  ok(real.idRed.length === 0, `§103 r3 every form call names its OWN id (no shared default — a call without one is RED)${real.idRed.length ? ' — RED: ' + real.idRed.join(' | ') : ''}`);
+  const fixed = real.rows.filter((r) => (r.kind === 'form' || r.kind === 'dynamic') && (r.idKind === 'fixed' || r.idKind === 'the caller\'s'));
+  console.log(`  THE KEY COLUMN (r3): ${fixed.filter((r) => r.key).length} fixed-id forms declare their subject · ${fixed.filter((r) => !r.key && r.one).length} are ONE subject (their reason on the row) · ${real.rows.filter((r) => r.idKind === 'fresh').length} mint a fresh id per open`);
+  ok(real.keyRed.length === 0, `§103 r3 a fixed-id form declares its key (the subject its content is about) or says why it is one subject — never a keyless id under a title that varies${real.keyRed.length ? ' — RED: ' + real.keyRed.join(' | ') : ''}`);
+  ok(real.raisedRed.length === 0, `§103 r3 every fixed-id form's caller reads \`raised\` (a re-open of the same subject hands back the LIVE shell)${real.raisedRed.length ? ' — RED: ' + real.raisedRed.join(' | ') : ''}`);
+  ok(real.docRed.length === 0, `§103 r3 no form's per-open work finds the form by document id (its liveness is its shell's live() / onClose)${real.docRed.length ? ' — RED: ' + real.docRed.join(' | ') : ''}`);
+  // r4: THE KEY IS THE SUBJECT (census 1) and THE CALLER IS TOLD (census 2)
+  const keyed = real.rows.filter((r) => (r.kind === 'form' || r.kind === 'dynamic') && r.key && r.key !== 'null');
+  console.log(`  THE KEY IS THE SUBJECT (r4) — file:line · id · key · what it names · beside (two subjects, two forms):\n${keyed.map((r) => `    ${short(r)} · ${r.id} · ${r.key} · ${r.subject}${r.beside ? ' · beside' : ''}`).join('\n')}`);
+  ok(real.subjRed.length === 0, `§103 r4 every key names ONE subject (${keyed.length} keyed forms): no literal key, no caller's id option standing for an instance, every parameter its loads send named by the key${real.subjRed.length ? ' — RED: ' + real.subjRed.join(' | ') : ''}`);
+  const fixedForms = real.rows.filter((r) => r.kind === 'form' && (r.idKind === 'fixed' || r.idKind === 'the caller\'s'));
+  const queueable = fixedForms.filter((r) => r.queueable);
+  console.log(`  THE CALLER IS TOLD (r4) — ${fixedForms.length} fixed-id forms read \`raised\`; ${queueable.length} QUEUEABLE (keyed, not beside — another subject under the id waits behind the open one's ask) read \`ready\` and judge liveness by live():\n${queueable.map((r) => `    ${short(r)} · ${r.id} · ${r.readsReady ? 'reads ready ✓' : r.after ? `works after the open (${r.after}) — ready ✗` : 'a pure synchronous draw (its content lands in the body that opens)'} · own isConnected ${r.liveReads.length}`).join('\n')}\n  never queued: ${fixedForms.filter((r) => !r.queueable).length} (one subject ${fixedForms.filter((r) => !r.queueable && !r.key).length} · beside ${fixedForms.filter((r) => !r.queueable && r.beside).length} · undismissable ${fixedForms.filter((r) => !r.queueable && r.key && !r.beside && r.never).length} · read-only under their own id ${fixedForms.filter((r) => !r.queueable && r.key && !r.beside && !r.never).length})`);
+  ok(queueable.length >= 20 && real.readyRed.length === 0, `§103 r4 every queueable form's caller that works after its open (a load it awaits, a focus) reads \`ready\` — it may wait behind the open one's ask; its content lands when it opens (${queueable.length} queueable · ${queueable.filter((r) => r.readsReady).length} read ready · ${queueable.filter((r) => !r.after && !r.readsReady).length} pure draws)${real.readyRed.length ? ' — RED: ' + real.readyRed.join(' | ') : ''}`);
+  ok(real.liveRed.length === 0, `§103 r4 no queueable form judges its liveness by its own overlay / body / dialog's isConnected — the shell's live() is THE predicate (a queued body is detached)${real.liveRed.length ? ' — RED: ' + real.liveRed.join(' | ') : ''}`);
+  // every mounts helper caller names its id too (the shared default is retired)
+  const mountsCalls = allSrc103.flatMap(([f, src]) => { let ast; try { ast = acorn.parse(src, { ecmaVersion: 'latest', sourceType: 'module', locations: true }); } catch { return []; } const o = []; walkAll(ast, (n) => { if (n.type !== 'CallExpression') return; const nm = n.callee.type === 'Identifier' ? n.callee.name : n.callee.type === 'MemberExpression' ? n.callee.property.name : null; if (nm !== 'mountsDialog' && nm !== '_mountsDialog') return; if (f === 'src/lib/sidebar-mounts.js' && n.arguments.length === 5 && n.arguments[4].type === 'Identifier') return; const a5 = n.arguments[4]; const has = a5 && a5.type === 'ObjectExpression' && a5.properties.some((p) => p.type === 'Property' && p.key.name === 'id'); o.push({ at: `${f}:${n.loc.start.line}`, has }); }); return o; });
+  ok(mountsCalls.length >= 15 && mountsCalls.every((c) => c.has), `§103 r3 every mountsDialog / _mountsDialog call names its own id (${mountsCalls.length} calls)${mountsCalls.some((c) => !c.has) ? ' — RED: ' + mountsCalls.filter((c) => !c.has).map((c) => c.at).join(' | ') : ''}`);
+  const sysOpens = systemOpens103(allSrc103);
+  console.log(`  THE SYSTEM'S OPENS (r3 — derived: a form-opening call inside a setInterval / onGlobal / ws.on / onBroadcast callback, one local function deep; r4: a person's own download re-opening its form is theirs): ${sysOpens.map((r) => `${r.at.replace(/^src\/lib\//, '')} ${r.call}() · ${r.system ? 'system' : 'PERSON'}`).join(' | ') || 'none'}`);
+  ok(sysOpens.length >= 2 && sysOpens.every((r) => r.system), `§103 r3 an open the SYSTEM makes (a timer, a broadcast, a watcher's completion) says opener 'system' — it opens behind, never the keys of a person typing (${sysOpens.length})${sysOpens.some((r) => !r.system) ? ' — RED: ' + sysOpens.filter((r) => !r.system).map((r) => r.at).join(' | ') : ''}`);
+  const NP = fs.readFileSync(path.join(REPO, 'src/lib/browser-new-profile.js'), 'utf8');
+  ok(/openNewProfileDialog\(app, \{ label: nameInput\.value, [^\n]*onDismissed, opener: 'person' \}\);/.test(NP), "§103 r4 the New profile hand-off re-open says opener 'person' — the person's Create press caused it (r3's 'system' put the form they were in behind their window)");
+  const readers = readers103(allSrc103);
+  console.log(`  THE ONE DIALOG PREDICATE (src/lib/form-yield.js — DIALOG_ROOTS / SHEET_ROOTS / FORM_ROOTS / BLOCKING_LAYERS / isPersonDialog / personDialogOf / ownerFormOf): readers outside it ${readers.length}`);
+  ok(readers.length === 0, `§103 every «did the person open a dialog?» reader in src/ asks form-yield.js's predicate — no .dialog-overlay / .dialog-form selector or class read elsewhere, no data-owner-form read${readers.length ? ' — RED: ' + readers.join(' | ') : ''}`);
+  const U = fs.readFileSync(path.join(REPO, 'src/lib/utils.js'), 'utf8'), FW = fs.readFileSync(path.join(REPO, 'src/lib/form-window.js'), 'utf8'), A103 = fs.readFileSync(path.join(REPO, 'src/lib/app.js'), 'utf8'), L103 = fs.readFileSync(path.join(REPO, 'src/lib/layout.js'), 'utf8');
+  ok(/export function createModalShell\(opts = \{\}\) \{\s*const \{ kind, key = null, opener = 'person', beside = false \} = opts;/.test(U) && /export function setFormHost\(/.test(U) && /fh = hosted \? formHost\.open\(\{ id, title, opener: opener === 'system' \? 'system' : 'person', from \}\)/.test(U) && /reopenVerdict\(\{ open: fam\.map\(\(s\) => \(\{ key: s\.key, undismissable: s\.undismissable \}\)\), nextKey: key, beside: !!beside \}\)/.test(U) && !/function idleShell/.test(U), '§103 the shell takes `kind` with NO default, asks the form host (setFormHost) with its opener and its press token, and judges a re-open by KEY over the whole FAMILY under the id (r4 — no idle shell)');
+  ok(/registerWindowType\(\{ type: 'form',[\s\S]{0,300}?persist: false \}\)/.test(FW) && /installFormHost\(this\)/.test(A103) && /if \(win\.type === 'form'\) return null;/.test(L103) && !/< 1500/.test(FW), '§103 the host is wired: window type `form` (persist: false), app.js installFormHost, captureWin never records a form; no clock judges «from the layer»');
+  const ctl = census103([
+    ['src/lib/zz-a.js', "createModalShell({ id: 'a', title: 'A' });"],
+    ['src/lib/zz-b.js', "createModalShell({ id: 'b', kind: 'modal' });"],
+    ['src/lib/zz-c.js', "createModalShell({ id: 'c', kind: 'form' }); // form-later: it cannot yet"],
+    ['src/lib/zz-d.js', "createModalShell({ id: 'd', kind: 'decision' }); // form-later:"],
+    ['src/lib/zz-e.js', "createModalShell({ id: 'e', kind: 'decision' }); // decision: awaited where it was asked\ncreateModalShell({ unsaved: { kind: 'form' }, id: 'f' });"],
+    ['src/lib/zz-g.js', "createModalShell({ id: 'g', kind: 'decision' });"],
+    ['src/lib/zz-h.js', "function h() {\n  const { overlay, body, raised } = createModalShell({ id: 'h', kind: 'form' }); // one subject: a control\n  overlay.addEventListener('keydown', (e) => { if (e.key === 'Escape') body.remove(); });\n}"],
+    ['src/lib/zz-i.js', "function i() { const pw = document.createElement('input'); createModalShell({ id: 'i', kind: 'decision' }); } // decision: the caller awaits, one password"],
+    ['src/lib/zz-j.js', "function j() { const { body } = createModalShell({ title: 'J', kind: 'form' }); }"],
+    ['src/lib/zz-k.js', "function k(c) { const { body, raised } = createModalShell({ id: 'k', title: t('Token for {name}', { name: c }), kind: 'form' }); if (raised) return; }"],
+    ['src/lib/zz-l.js', "function l(c) { const { body } = createModalShell({ id: 'l', key: c, title: 'L', kind: 'form' }); }"],
+    ['src/lib/zz-m.js', "function m(c) { const { body, raised } = createModalShell({ id: 'zz-m', key: c, title: 'M', kind: 'form' }); if (raised) return; setInterval(() => { if (!document.getElementById('zz-m')) return; }, 1000); }"],
+    ['src/lib/zz-n.js', "function n() { const { raised } = createModalShell({ id: 'n', key: 'task-context-row', title: 'N', kind: 'form' }); if (raised) return; }"],
+    ['src/lib/zz-o.js', "function o2(input, o = {}) { const fid = o.id || input.id; const pick = () => { const { raised } = createModalShell({ id: 'o', key: fid, title: 'O', kind: 'form' }); if (raised) return; }; }\nlet seq = 0; function o3(input, o = {}) { const fid = o.id; const inst = `${fid}#${++seq}`; const { raised } = createModalShell({ id: 'o3', key: inst, beside: true, title: 'O', kind: 'form' }); if (raised) return; }"],
+    ['src/lib/zz-p.js', "async function p(m, { what, request } = {}) { const { raised } = createModalShell({ id: 'p', key: `${m.hostId}:${what}`, title: 'P', kind: 'form' }); if (raised) return; await fetchJson('/api/plan', { body: JSON.stringify({ host: m.hostId, request }) }); }\nasync function p2(m, { what, request } = {}) { const { raised } = createModalShell({ id: 'p2', key: `${m.hostId}:${what}`, title: 'P', kind: 'form' }); // not the subject: request — the plan's words only\n if (raised) return; await fetchJson('/api/plan', { body: JSON.stringify({ request }) }); }"],
+    ['src/lib/zz-q.js', "async function q(a) { const { body, raised } = createModalShell({ id: 'q', key: a, title: 'Q', kind: 'form' }); if (raised) return; const i = document.createElement('input'); body.append(i); const r = await fetchJson('/x'); if (!body.isConnected) return; }\nasync function q2(a) { const sh = createModalShell({ id: 'q2', key: a, title: 'Q', kind: 'form' }); if (sh.raised) return; const i = document.createElement('input'); if (!(await sh.ready)) return; if (!sh.live()) return; }\nfunction q3(a) { const { body, raised } = createModalShell({ id: 'q3', key: a, beside: true, title: 'Q', kind: 'form' }); if (raised) return; body.append(document.createElement('input')); if (!body.isConnected) return; }\nfunction q4(a) { const { body, raised } = createModalShell({ id: 'q4', key: a, title: 'Q', kind: 'form' }); if (raised) return; body.append(document.createElement('input')); b.onclick = async () => { await fetchJson('/s'); }; }\nfunction q5(a) { const { body, raised } = createModalShell({ id: 'q5', key: a, title: 'Q', kind: 'form' }); if (raised) return; const i = document.createElement('input'); body.append(i); setTimeout(() => i.focus(), 0); }"],
+  ]);
+  const has = (arr, k) => arr.some((b) => b.startsWith('src/lib/' + k));
+  ok(ctl.bad.length === 7 && ['zz-a.js:1', 'zz-b.js:1', 'zz-c.js:1', 'zz-d.js:1', 'zz-e.js:2', 'zz-g.js:1', 'zz-i.js:1'].every((k) => has(ctl.bad, k)) && ctl.rows.find((r) => r.at === 'src/lib/zz-e.js:1')?.why === 'awaited where it was asked' && ctl.escRed.length === 1 && ctl.escRed[0].startsWith('src/lib/zz-h.js:3')
+    && ctl.idRed.length === 1 && has(ctl.idRed, 'zz-j.js:1') && has(ctl.keyRed, 'zz-k.js:1') && !['zz-h.js', 'zz-l.js', 'zz-m.js'].some((k) => has(ctl.keyRed, k)) && has(ctl.raisedRed, 'zz-l.js:1') && !['zz-h.js', 'zz-k.js', 'zz-m.js'].some((k) => has(ctl.raisedRed, k)) && ctl.docRed.length === 1 && has(ctl.docRed, 'zz-m.js:1')
+    && ctl.subjRed.length === 3 && has(ctl.subjRed, 'zz-n.js:1') && has(ctl.subjRed, 'zz-o.js:1') && has(ctl.subjRed, 'zz-p.js:1') && !has(ctl.subjRed, 'zz-o.js:2') && !has(ctl.subjRed, 'zz-p.js:2')
+    && ctl.readyRed.length === 2 && has(ctl.readyRed, 'zz-q.js:1') && has(ctl.readyRed, 'zz-q.js:5') && ctl.liveRed.length === 1 && has(ctl.liveRed, 'zz-q.js:1'),
+    `§103 NEGATIVE CONTROLS: a call without kind, a kind that is no kind, a form-later on a form, a form-later without its reason, a nested \`kind\` (not the call's own), a decision without its reason and a FIELD decision with a retired reason are RED; a form root's own Escape listener is RED; r3: a form with no id, a keyless fixed id under a varying title, a fixed id whose caller never reads \`raised\` and a liveness found by document id are RED; r4: a literal key ('task-context-row'), a key that is a caller's id option (not minted per instance), a key dropping what its load sends (unless said), a queueable caller that never reads \`ready\` and one judging liveness by its body's isConnected are RED — a minted instance key, a said «not the subject», a caller reading ready + live() and a beside form are not (${JSON.stringify({ bad: ctl.bad, esc: ctl.escRed, id: ctl.idRed, key: ctl.keyRed, raised: ctl.raisedRed, doc: ctl.docRed, subj: ctl.subjRed, ready: ctl.readyRed, live: ctl.liveRed })})`);
+  const rctl = readers103([
+    ['src/lib/zz-r1.js', "const open = document.querySelectorAll('.dialog-overlay');"],
+    ['src/lib/zz-r2.js', "if (el.classList.contains('dialog-form')) x();"],
+    ['src/lib/zz-r3.js', "el.className = 'dialog-overlay'; const s = document.getElementById('dialog-overlay');"],
+    ['src/lib/zz-r4.js', "const o = el.closest('[data-owner-form]'); const p = el.dataset.ownerForm;"],
+    ['src/lib/form-yield.js', "export const DIALOG_ROOTS = '.dialog-overlay, .dialog-form'; el.closest('[data-owner-form]');"],
+  ]);
+  ok(rctl.length === 4 && rctl[0].startsWith('src/lib/zz-r1.js:1') && rctl[1].startsWith('src/lib/zz-r2.js:1') && rctl.filter((x) => x.startsWith('src/lib/zz-r4.js:1')).length === 2, `§103 NEGATIVE CONTROLS (the predicate): a .dialog-overlay selector, a dialog-form class read and a floats'-owner read elsewhere are RED; a root's className write, the static overlay by id and form-yield.js itself are not (${JSON.stringify(rctl)})`);
+  const sctl = systemOpens103([
+    ['src/lib/zz-s1.js', "function openZ() { createModalShell({ id: 'z', kind: 'form' }); }\nexport function watch(app) { setInterval(() => openZ(), 1000); app.ws.onGlobal((m) => openZ({ opener: 'system' })); const done = () => openZ(); setInterval(() => done(), 5); setInterval(() => { b.onclick = () => openZ(); }, 9); }"],
+  ]);
+  ok(sctl.length === 3 && sctl.filter((r) => !r.system).length === 2 && sctl.filter((r) => r.system).length === 1, `§103 NEGATIVE CONTROL (the system's opens): an open from a setInterval — directly and one local function deep — without opener 'system' is RED; the broadcast's that says it is not (${JSON.stringify(sctl)})`);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

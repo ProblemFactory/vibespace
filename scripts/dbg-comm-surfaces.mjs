@@ -497,14 +497,14 @@ async function pass({ lang, viewport, theme }) {
     log('connect an account:', r0);
     await waitFor(page, `!!document.querySelector('${DLG('connect')}')`, 40);
     await sleep(300);
-    await capture(page, tag, 'wizard-01-connect', '#mounts-dialog-overlay .dialog', { pad: 8 });
+    await capture(page, tag, 'wizard-01-connect', '[id^="chan-account-"] .dialog', { pad: 8 });
     // Lark + Custom: the custom fields, the callback row, the three prerequisites
     await page.evaljs(`(() => { const d = document.querySelector('${DLG('connect')}'); const t = d.querySelector(':scope > select'); t.value = 'lark'; t.dispatchEvent(new Event('change')); const c = [...d.querySelectorAll(':scope > select')].find((s) => s.style.display !== 'none' && [...s.options].some((o) => o.value === 'custom')); c.value = 'custom'; c.dispatchEvent(new Event('change')); return 1; })()`);
     await sleep(200);
-    await capture(page, tag, 'wizard-02-connect-lark-custom', '#mounts-dialog-overlay .dialog', { pad: 8, fullPage: true });
+    await capture(page, tag, 'wizard-02-connect-lark-custom', '[id^="chan-account-"] .dialog', { pad: 8, fullPage: true });
     await page.evaljs(`(() => { const d = document.querySelector('${DLG('connect')}'); const t = d.querySelector(':scope > select'); t.value = 'gmail'; t.dispatchEvent(new Event('change')); return 1; })()`);
     await sleep(200);
-    await capture(page, tag, 'wizard-03-connect-gmail', '#mounts-dialog-overlay .dialog', { pad: 8 });
+    await capture(page, tag, 'wizard-03-connect-gmail', '[id^="chan-account-"] .dialog', { pad: 8 });
     await closeDialogs(page);
   }
   const larkId = await mkAccount('lark');
@@ -531,13 +531,13 @@ async function pass({ lang, viewport, theme }) {
     await page.evaljs(`(() => { const b = document.querySelector('${SEC('lark')} .chan-sec-head .mounts-icon-btn'); if (b) b.click(); return !!b; })()`);
     await waitFor(page, `!!document.querySelector('${DLG('edit')}')`, 40);
     await sleep(300);
-    await capture(page, tag, 'wizard-05-edit', '#mounts-dialog-overlay .dialog', { pad: 8, fullPage: true });
+    await capture(page, tag, 'wizard-05-edit', '[id^="chan-account-"] .dialog', { pad: 8, fullPage: true });
     await closeDialogs(page);
     await tagSections(page);
     await clickMenu(page, lang, SEC('gmail'), 'Duplicate…');
     await waitFor(page, `!!document.querySelector('${DLG('duplicate')}')`, 40);
     await sleep(300);
-    await capture(page, tag, 'wizard-06-duplicate', '#mounts-dialog-overlay .dialog', { pad: 8, fullPage: true });
+    await capture(page, tag, 'wizard-06-duplicate', '[id^="chan-account-"] .dialog', { pad: 8, fullPage: true });
     await closeDialogs(page);
     // REMOVE REFUSED: the dialog's words (the references are staged on the page's fetch — the
     // engine's refusal is the chunk-2 suites'; this driver only needs the dialog on screen)
@@ -714,7 +714,7 @@ async function pass({ lang, viewport, theme }) {
       await page.evaljs(`(() => { const b = document.querySelector('.rail-panel-channels [data-connect-account]'); if (b) b.click(); return !!b; })()`);
       await waitFor(page, `!!document.querySelector('.dialog-body[data-chan-dialog="connect"]')`, 20);
       await sleep(300);
-      await capture(page, tag, 'narrow-dialog-connect', '#mounts-dialog-overlay .dialog', { fullPage: true });
+      await capture(page, tag, 'narrow-dialog-connect', '[id^="chan-account-"] .dialog', { fullPage: true });
       await closeDialogs(page);
       await sleep(300); await tagSections(page);
       await clickMenu(page, lang, SEC('lark'), 'Options');

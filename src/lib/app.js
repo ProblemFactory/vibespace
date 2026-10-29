@@ -9,6 +9,7 @@ import { navNote } from './nav-log.js'; // lane phone-back-reload: the stale-tab
 import { track } from './telemetry-client.js';
 import { WsManager } from './ws.js';
 import { WindowManager } from './window.js';
+import { installFormHost } from './form-window.js'; // lane dialog-yield: createModalShell's kind 'form' = a small window that yields (desktop tier)
 import { TerminalSession } from './terminal.js';
 import { Sidebar } from './sidebar.js';
 import { FileExplorer } from './file-explorer.js';
@@ -217,6 +218,7 @@ class App {
     this.wm.app = this; // mediator back-ref (title-bar billing badge → switcher)
     this.wm._settings = this.settings;
     this.wm._app = this;
+    installFormHost(this); // lane dialog-yield: a dialog with fields is a window of this manager, never a backdrop over the chat
     // Re-render all tab bars when tab wrap setting changes
     // Hook-card visibility: pure CSS toggle so flipping the setting applies
     // to every open chat instantly, both directions (no re-render).
@@ -1199,7 +1201,7 @@ class App {
   // Update-confirm dialog: every changelog entry between the RUNNING version
   // and the canonical repo's latest, then an explicit "Update now".
   async _showUpdateConfirmDialog() {
-    const { body, close } = createModalShell({ id: 'update-confirm-dialog', title: t('Update VibeSpace'), bodyClass: 'update-confirm-body', minWidth: 'min(560px, 92vw)', escapeToClose: true });
+    const { body, close } = createModalShell({ id: 'update-confirm-dialog', title: t('Update VibeSpace'), bodyClass: 'update-confirm-body', minWidth: 'min(560px, 92vw)', escapeToClose: true, kind: 'decision' }); // decision: a consent — update now or not (the page reloads after); nothing to fill
     body.innerHTML = `<div class="empty-hint">${t('Checking for updates\u2026')}</div>`;
     // The changelog in the DEVICE's language (the same value `vibespace.lang`
     // resolves to); an entry the canonical has not translated comes in English.
@@ -1247,7 +1249,9 @@ class App {
   // this dialog streams its log, survives the service restart by polling
   // /api/version, and reloads the page once the new version answers.
   async _runSelfUpdate() {
-    const { body } = createModalShell({ id: 'self-update-dialog', title: t('Updating VibeSpace') });
+    // one subject: the update this hub runs — one at a time
+    const { body, raised } = createModalShell({ id: 'self-update-dialog', title: t('Updating VibeSpace'), escapeToClose: false, kind: 'form' });
+    if (raised) return;   // raised: the same subject's form, as it was // (no Escape: the update runs on — the page reloads by itself when it is up)
     body.innerHTML = `
       <div class="selfupd-phase"><span class="upload-active-spinner" aria-hidden="true"></span><span class="su-msg">${escHtml(t('Starting update…'))}</span></div>
       <pre class="selfupd-log"></pre>
@@ -2476,10 +2480,10 @@ class App {
     let hasWindows = false;
     if (activeDesk) {
       for (const [, win] of this.wm.windows) {
-        if (win._desktopId === activeDesk && !win._hiddenByDesktop) { hasWindows = true; break; }
+        if (win._desktopId === activeDesk && !win._hiddenByDesktop && win.type !== 'form') { hasWindows = true; break; }
       }
     } else {
-      hasWindows = this.wm.windows.size > 0;
+      hasWindows = [...this.wm.windows.values()].some((w) => w.type !== 'form'); // lane dialog-yield r2: a form is not a window the welcome counts (closing one re-checks — form-window.js)
     }
     if (!hasWindows) document.getElementById('welcome').classList.remove('hidden');
     else document.getElementById('welcome').classList.add('hidden');

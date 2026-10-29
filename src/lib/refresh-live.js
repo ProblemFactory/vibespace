@@ -50,11 +50,12 @@ export function openRefreshLive(app) {
   return new Promise((resolve) => {
     const rows = refreshRows(app);
     const probe = refreshPlan(rows, 'x');   // the counts (the note is judged below, as it is typed)
-    const others = rows.filter((r) => r.state !== 'live' && probe.skipped.includes(r.id)).map((r) => ({ conversationId: r.conversationId, state: r.state }));
     let done = false;
     let voice = null;
     const finish = (v) => { if (done) return; done = true; try { voice && voice.destroy(); } catch { } resolve(v); };
-    const { overlay, dialog, body, close } = createModalShell({ id: 'refresh-live-dialog', title: t('Refresh all live sessions'), dialogClass: 'refresh-live-dialog', escapeToClose: true, onClose: () => finish(null) });
+    // one subject: every live session at once — one refresh at a time
+    const { overlay, dialog, body, close, raised } = createModalShell({ id: 'refresh-live-dialog', title: t('Refresh all live sessions'), dialogClass: 'refresh-live-dialog', escapeToClose: true, onClose: () => finish(null), kind: 'form' });
+    if (raised) return null;   // raised: the same subject's form, as it was
     const p = (cls, text) => { const e = document.createElement('p'); e.className = cls; e.textContent = text; return e; };
     const n = probe.queue.length, m = probe.skipped.length;
     body.append(p('dialog-hint refresh-live-count', n
@@ -98,7 +99,11 @@ export function openRefreshLive(app) {
     const submit = async () => {
       if (!judge() || ok.disabled) return;
       ok.disabled = true; cancel.disabled = true;
-      const r = await fetchJson('/api/sessions/refresh-note', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: box.value, others }) });
+      // RE-READ at the answer (lane dialog-yield r2): a form stays open beside the work — the windows that stopped or opened
+      // meanwhile are the ones skipped now (the server counts the live ones itself; the toast says what it queued)
+      const rowsNow = refreshRows(app), planNow = refreshPlan(rowsNow, 'x');
+      const othersNow = rowsNow.filter((x) => x.state !== 'live' && planNow.skipped.includes(x.id)).map((x) => ({ conversationId: x.conversationId, state: x.state }));
+      const r = await fetchJson('/api/sessions/refresh-note', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: box.value, others: othersNow }) });
       if (!r || r.error || !r.ok) {
         ok.disabled = false; cancel.disabled = false;
         showToast(t('Refresh not queued: {why}', { why: (r && r.error) || t('server unreachable') }), { type: 'error' });

@@ -255,7 +255,9 @@ export function installIncidentRecorder(app) {
 
   // ── the capture flow ──
   app.captureIncident = async () => {
-    const shell = createModalShell({ title: t('Report a problem (capture the scene)') });
+    // one subject: one report of the scene at a time
+    const shell = createModalShell({ id: 'incident-report-dialog', title: t('Report a problem (capture the scene)'), escapeToClose: true, kind: 'form' });
+    if (shell.raised) return;   // raised: the same subject's form, as it was // (Escape from inside: the note typed is asked about, never dropped — lane dialog-yield r2)
     const body = shell.body;
     body.innerHTML = `
       <div class="usage-note" style="margin-bottom:8px">${escHtml(t('This freezes the whole scene — the last few minutes of UI activity (clicks, window events, errors; never any text you typed or message content), plus the live environment on this instance AND on every machine your sessions use: process tables, session state, lock files, transcript fingerprints. Capture this BEFORE you try to fix things yourself — afterwards the evidence is gone.'))}</div>

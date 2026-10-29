@@ -64,8 +64,9 @@ export function loginExtras(row, data, { refresh, show } = {}) {
 
 /** 用于…: the scope (this account / any account on this site / any site) and who — checked = granted at that scope. */
 export function showLoginGrantPicker(entry, data, { refresh } = {}) {
-  const { body, close } = createModalShell({ id: 'vault-login-grant', title: t('Who may have "{name}" filled', { name: entry.user ? `${entry.user} · ${String(entry.origin || '').replace(/^https:\/\//, '')}` : entry.name }), dialogClass: 'vault-dialog-box vw-ak-dialog', escapeToClose: true,
-    unsaved: { isDirty: () => boxes.some((b) => b.checked !== hadAt(scope).has(b.value)), save: () => doSave() } });
+  const { body, close, raised } = createModalShell({ id: 'vault-login-grant', key: entry.id, title: t('Who may have "{name}" filled', { name: entry.user ? `${entry.user} · ${String(entry.origin || '').replace(/^https:\/\//, '')}` : entry.name }), dialogClass: 'vault-dialog-box vw-ak-dialog', escapeToClose: true,
+    unsaved: { isDirty: () => boxes.some((b) => b.checked !== hadAt(scope).has(b.value)), save: () => doSave() }, kind: 'form' });
+  if (raised) return null;   // raised: the same subject's form, as it was
   const subjects = (data && data.subjects) || { sessions: [], groups: [] };
   const rowOf = (s) => (entry.grants || []).find((g) => g.scope === s && !g.unknown) || null;
   const hadAt = (s) => new Set(((rowOf(s) || {}).to || []).map(keyOfEntry).filter(Boolean));
@@ -128,8 +129,10 @@ export function showLoginGrantPicker(entry, data, { refresh } = {}) {
 /** 添加 → 网站登录…: the owner's own login (by: owner). The password field is taken off the body by the route (`loginPassword`). */
 export function showLoginAddDialog({ refresh = () => {} } = {}) {
   let saveNow = () => {};
-  const { dialog, body, close } = createModalShell({ title: t('Add a website login'), dialogClass: 'vault-login-add-dialog', escapeToClose: true,
-    unsaved: { isDirty: () => !!(site.value || user.value || pw.value), save: () => saveNow(), discard: () => { pw.value = ''; } } });
+  // one subject: one website login being added
+  const { dialog, body, close, raised } = createModalShell({ id: 'vault-login-add', title: t('Add a website login'), dialogClass: 'vault-login-add-dialog', escapeToClose: true,
+    unsaved: { isDirty: () => !!(site.value || user.value || pw.value), save: () => saveNow(), discard: () => { pw.value = ''; } }, kind: 'form' });
+  if (raised) return null;   // raised: the same subject's form, as it was
   const field = (label, control) => { const l = el('label', 'vault-secret-field'); l.append(el('span', 'vault-secret-label', label), control); return l; };
   const input = (cls, type, ph) => { const i = el('input', `vault-pw ${cls}`); i.type = type; i.autocomplete = 'off'; i.spellcheck = false; i.placeholder = ph; return i; };
   const site = input('vault-login-site', 'text', t('The site — e.g. https://example.com'));

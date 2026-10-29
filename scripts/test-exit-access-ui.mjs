@@ -224,8 +224,20 @@ try {
   // THE RECT CENSUS at 860 / 360
   await P.cdp('Emulation.setDeviceMetricsOverride', { width: 860, height: 760, deviceScaleFactor: 1, mobile: false });
   await sleep(300);
+  // lane dialog-yield: P is a BACKGROUND tab here (P2 opened in front) and a background tab renders nothing — no resize reaches
+  // the page; the exit dialog is a FORM window that re-fits inside the viewport on it (an overlay was laid out by CSS alone). P
+  // renders for the census — in front while the page is 860 px wide (the viewport's own switch settles at this size) — then
+  // P2 goes back in front: the legs after it run in the suite's world as before
+  await P.cdp('Page.bringToFront');
+  await sleep(500);
   ok((await P.evalJs(rectCensusJs('#exit-access-dialog .dialog', '.exit-access-mode', 20))).ok, 'RECT CENSUS 860 px: the dialog inside the viewport, no horizontal overflow', await P.evalJs(rectCensusJs('#exit-access-dialog .dialog', '.exit-access-mode', 20)));
   await P.evalJs(`document.querySelector('#exit-access-dialog .dialog-close').click(); true`);
+  // lane dialog-yield r2: ③ left the dialog CHANGED (the refused «only» with nobody) — its guard asks, and the person's answer is
+  // Discard (before r2 the next open silently REPLACED the changed form; a form is never replaced now — it would be raised)
+  await P.evalJs(`(() => { document.querySelector('#exit-access-dialog .dialog-unsaved-discard')?.click(); return true; })()`);
+  ok(await P.waitFor(`!document.getElementById('exit-access-dialog')`, 4000), 'the 860 px dialog closes — its guard asked about the refused change, Discard');
+  await P2.cdp('Page.bringToFront'); // lane dialog-yield: P back behind P2, as the suite ran before the census
+  await sleep(300);
   await P.cdp('Emulation.setDeviceMetricsOverride', { width: 360, height: 740, deviceScaleFactor: 1, mobile: true });
   await sleep(300);
   // open it on the phone the way the Machines card's button does (the same component)
@@ -235,7 +247,8 @@ try {
   await P.waitFor(`!!document.querySelector('${sec('run')}')`, 8000);
   const r360 = await P.evalJs(rectCensusJs('#exit-access-dialog .dialog', '.exit-access-mode', 44));
   const pick360 = await P.evalJs(`[...document.querySelectorAll('${sec('run')} .pp-row')].filter((e) => e.offsetParent).map((e) => Math.round(e.getBoundingClientRect().height))`);
-  ok(r360.ok && pick360.length > 0 && pick360.every((h) => h >= 40), 'RECT CENSUS 360 px: radios ≥ 44 px, picker rows ≥ 40 px, no horizontal overflow', { r360, pick360 });
+  const tier360 = await P.evalJs(`({ isMobile: !!app.isMobile, mobileLayout: !!app.wm._mobileLayout(), vw: innerWidth, exit: document.getElementById('exit-access-dialog')?.className || null, agents: document.getElementById('agents-dialog-overlay')?.className || null, forms: [...app.wm.windows.values()].filter((w) => w.type === 'form').length })`); // (the tier the forms were drawn on)
+  ok(r360.ok && pick360.length > 0 && pick360.every((h) => h >= 40), 'RECT CENSUS 360 px: radios ≥ 44 px, picker rows ≥ 40 px, no horizontal overflow', { r360, pick360, tier360 });
   ok((await P.evalJs(labelRowCensusJs('#exit-access-dialog'))).ok, 'N-radio: on the phone every radio sits beside its words (not centred above them)', await P.evalJs(labelRowCensusJs('#exit-access-dialog')));
   await P.evalJs(`document.querySelector('#exit-access-dialog .dialog-close').click(); document.querySelector('#agents-dialog-overlay .dialog-close')?.click(); true`);
   await P.cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 820, deviceScaleFactor: 1, mobile: false });

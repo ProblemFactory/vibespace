@@ -56,9 +56,9 @@ export function confirmClear(rows) {
   const list = Array.isArray(rows) ? rows : [];
   const n = list.length;
   return new Promise((resolve) => {
-    const { overlay, dialog, body, closeBtn } = createModalShell({
+    const { overlay, dialog, body, closeBtn } = createModalShell({ // decision: a destructive confirm — the record's content is cleared for good
       id: 'record-clear-dialog', title: n === 1 ? t('Clear content?') : t('Clear the content of {n} records?', { n }),
-      dialogClass: 'rc-dialog', closeOnBackdrop: false, minWidth: 'min(460px, 92vw)',
+      dialogClass: 'rc-dialog', closeOnBackdrop: false, minWidth: 'min(460px, 92vw)', kind: 'decision',
     });
     const ul = document.createElement('div');
     ul.className = 'rc-list';

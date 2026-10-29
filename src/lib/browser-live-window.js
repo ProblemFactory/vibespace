@@ -2677,7 +2677,19 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
   // and YIELDS the keys to it; a press INSIDE the view ends a yield and re-claims (the view the user pressed drives the
   // keys — the last claim wins), the sink taking the focus back after the press's own default
   document.addEventListener('pointerdown', (e) => {
+    const held = ky.dialogOverlays().length;
     const r = ky.onPointerDown(e);
+    // lane dialog-yield r2: a press OUTSIDE a held form's window gave its keys back, a press INTO an open form took them for it
+    if (r === 'dialog' || ky.dialogOverlays().length !== held) {
+      watchDialogs(); syncKeyboard();
+      if (r === 'dialog') {
+        st.dialogTakes++;
+        // a press that focused nothing inside it (its title bar, its padding): the form's own field gets the keys, a tick later
+        const ov = ky.dialogOverlays().slice(-1)[0];
+        setTimeout(() => { const a = document.activeElement, w = ov && ov.closest ? ov.closest('.window') || ov : ov; if (st.closed || !ov || !ky.dialogOverlays().includes(ov) || (a && a !== document.body && w && w.contains(a))) return; focusDialog(ov); }, 0);
+        return;
+      }
+    }
     // verify r1: a press on the text box that ALREADY holds the caret (no focusin follows) yields right here
     if (r === 'noted') { if (st.claimed && !st.copying && ky.onPressFocused(document.activeElement) === 'yield') { releaseHeld(); renderKbd(); keyboardChanged(); } return; }
     if (r !== 'resumed' && r !== 'press-view') return;
@@ -2757,7 +2769,13 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     dialogMo.disconnect();
     if (st.closed || !ky.dialogHolds) return;
     dialogMo.observe(document.body, { childList: true });
-    for (const ov of ky.dialogOverlays()) dialogMo.observe(ov, { attributes: true, attributeFilter: ['class', 'hidden'] });
+    for (const ov of ky.dialogOverlays()) {
+      dialogMo.observe(ov, { attributes: true, attributeFilter: ['class', 'hidden'] });
+      // lane dialog-yield r2: a FORM stands in its window, not on <body> — its window's removal (closed), its marks (minimized,
+      // another desktop) and the root leaving its window (re-hosted as a sheet) are what end its hold
+      const w = typeof ov.closest === 'function' ? ov.closest('.window') : null;
+      if (w) { dialogMo.observe(w, { attributes: true, attributeFilter: ['class', 'style', 'aria-hidden'] }); if (w.parentNode) dialogMo.observe(w.parentNode, { childList: true }); if (ov.parentNode) dialogMo.observe(ov.parentNode, { childList: true }); }
+    }
   }
   /** a held dialog's OWN field gets the keys: its first visible text box, else its overlay (tabIndex -1 when it has none) —
    *  never a button (an Enter it did not choose would act for him); verify r1: ONE door for the take's focus tick and the

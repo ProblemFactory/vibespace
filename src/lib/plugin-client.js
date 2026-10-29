@@ -42,6 +42,7 @@
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { registerCommand, registerMenuItem, registerKeybinding, runCommand } from './contributions.js';
 import { fetchJson, showToast, createModalShell } from './utils.js';
+let pluginDialogSeq = 0;   // lane dialog-yield r3: a plugin dialog with no id of its own is its own form
 import { registerPluginSettings, unregisterPluginSettings, pluginSettingPath } from './settings-schema.js';
 import { t } from './i18n.js';
 
@@ -204,7 +205,9 @@ export class PluginClient {
       id, version: m.version, manifest: m, signal: ctl.signal, app,
       t,
       showToast: (text, opts) => showToast(String(text ?? '').slice(0, 300), opts),
-      createModalShell: (opts) => createModalShell({ ...opts, id: `plugin-${id}-${opts?.id || 'dialog'}` }),
+      // (a plugin says its own kind, who opened it and — lane dialog-yield r3 — its dialog's id and key: an id it names is
+      // namespaced to it, none = a fresh one per open (never the shared `plugin-<id>-dialog`: a second «Settings» was dropped))
+      createModalShell: (opts) => createModalShell({ ...opts, id: opts?.id ? `plugin-${id}-${opts.id}` : `plugin-${id}-dialog-${++pluginDialogSeq}`, kind: opts?.kind === 'form' ? 'form' : 'decision', opener: opts?.opener === 'system' ? 'system' : 'person' }), // decision: a plugin's own choice (its kind says it)
       registerWindowType: ({ id: wid, label, icon, render, persist = true } = {}) => {
         if (typeof wid !== 'string' || !/^[a-z0-9-]+$/.test(wid) || typeof render !== 'function') throw new Error('api.registerWindowType expects { id: slug, label, render(winInfo) }');
         const type = `plugin:${id}:${wid}`, action = `openPlugin:${id}:${wid}`;
