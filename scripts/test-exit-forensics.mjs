@@ -1247,6 +1247,15 @@ console.log('— §5 wiring: the line, the event and the tomb are built from exi
   const PI_REQ = "require(path.join(__dirname, '..', '..', 'src', 'proc-identity.js'))";
   const builtinsOnly = (t) => !/require\((?!['"](fs|child_process)['"])[^)]*\)/.test(t.replace(/^\s*(\/\/|\*).*$/gm, ''));
   ok(builtinsOnly(read('src/proc-identity.js')) && !builtinsOnly("const x = require('./other.js');\n"), 'chat-wrapper.js\'s birth module (src/proc-identity.js) requires node builtins only (fs, child_process) — CONTROL: a relative require is red');
+  // lane claude-steer-inject (2.369.362): the wrapper keeps a person's mid-turn pictures as files beside its OWN buffer
+  // (<id>.img) — src/kept-copies.js, the one module that names, writes, reads and drops them, SHARED with the hub's restore.
+  // Admitted on the same terms as proc-identity, and on purpose an EAGER require (never a late one): the wrapper outlives a
+  // hub update, so a late require would load whatever src/ holds by then; at start it loads the module its own build shipped.
+  // Builtins only (fs, path, crypto); it opens no socket and touches only files under the folder its buffer path names.
+  const KC_REQ = "require(path.join(__dirname, '..', '..', 'src', 'kept-copies.js'))";
+  const keptOnly = (t) => !/require\((?!['"](fs|path|crypto)['"])[^)]*\)/.test(t.replace(/^\s*(\/\/|\*).*$/gm, '')) && !/\b(net|http|https|dgram|tls)\b['"]\)|\bfetch\(|\bimport\b/.test(t.replace(/^\s*(\/\/|\*).*$/gm, ''));
+  ok(keptOnly(read('src/kept-copies.js')) && !keptOnly("const x = require('./other.js');\n") && !keptOnly("const n = require('net');\n") && !keptOnly("fetch('http://x');\n"),
+    'chat-wrapper.js\'s kept-copies module (src/kept-copies.js) requires node builtins only (fs, path, crypto) and reaches no network — CONTROL: a relative require, a net require or a fetch is red');
   const transportPure = (t) => !/\brequire\(|\bimport\b/.test(t.replace(/^\s*\/\/.*$/gm, ''));
   const shipList = (t) => ((t.match(/static AGENT_TOOLS = \[([^\]]*)\]/) || [])[1] || '');
   ok(transportPure(read('src/harnesses/claude-transport.js')) && /'vibespace-status'/.test(shipList(read('src/hosts.js'))) && !/wrapper/.test(shipList(read('src/hosts.js'))),
@@ -1254,8 +1263,8 @@ console.log('— §5 wiring: the line, the event and the tomb are built from exi
   ok(!transportPure("'use strict';\nconst x = require('./other.js');\n") && /wrapper/.test(shipList("  static AGENT_TOOLS = ['vibespace-status', 'chat-wrapper.js'];")),
     'CONTROL: a require in the transport module, or a wrapper on the ship list, is red');
   for (const [f, src] of KINDS.map((k) => [path.basename(REL[k]), SRC[k]])) {
-    ok(!/require\((?!['"](fs|path|os|child_process|crypto)['"])[^)]*\)/.test(src.replace(/require\(path\.join\(__dirname, '\.\.\/\.\.\/node_modules\/node-pty'\)\)/, '').replace(TRANSPORT_REQ, '').replace(PI_REQ, '')),
-      `${f}: node builtins only (a STATIC file; node-pty is its one pre-existing dependency; crypto since lane codex-0159: the reset-credit consume's idempotencyKey; dc-harness-store 2.369.213: the claude transport flags' PURE module, below; pid-identity-close 2.369.242: the child's birth, src/proc-identity.js, above)`);
+    ok(!/require\((?!['"](fs|path|os|child_process|crypto)['"])[^)]*\)/.test(src.replace(/require\(path\.join\(__dirname, '\.\.\/\.\.\/node_modules\/node-pty'\)\)/, '').replace(TRANSPORT_REQ, '').replace(PI_REQ, '').replace(KC_REQ, '')),
+      `${f}: node builtins only (a STATIC file; node-pty is its one pre-existing dependency; crypto since lane codex-0159: the reset-credit consume's idempotencyKey; dc-harness-store 2.369.213: the claude transport flags' PURE module, below; pid-identity-close 2.369.242: the child's birth, src/proc-identity.js, above; claude-steer-inject 2.369.362: the kept copies, src/kept-copies.js, above)`);
     const body = src.slice(src.indexOf('function onWrapperSignal'), src.indexOf('for (const sig of Object.keys(WRAPPER_SIGNO))'));
     ok(body.length > 0 && !/await|setTimeout|setImmediate|\.write\(|\.end\(|Promise/.test(body.replace(/fs\.writeFileSync|clearTimeout/g, '')),
       `${f}: the signal handler is synchronous (no await/timer/stream write)`);
