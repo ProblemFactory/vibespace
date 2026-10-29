@@ -992,7 +992,7 @@ function shapeOf(run) {
   // and a shown config template's route directives (r23) are routes; `routeOpaque` withholds «always» (主开发: the opaque rule stands).
   const dest = routeTargetsOf(row, kind, [...routeHosts], keyed, positionals, run.plainEnv, win32);
   if (known && argv.slice(1).some((a) => urlOpaque(a))) dest.opaque = true;   // vault-use-grants round 4 (BLOCKER): a URL token whose authority the tool may read past (the blind family) ⇒ opaque
-  const noAlways = kind !== 'tool' ? kind : !known || !hosts.size || unread ? 'unknown-destination' : dest.opaque ? 'opaque-route' : row.runsProject ? 'runs-project-code' : configFile && !(configShown && !configReads) ? 'config-file' : run.programWritable ? 'program-writable' : null;
+  const noAlways = kind !== 'tool' ? kind : !known || !hosts.size || unread ? 'unknown-destination' : row.runsProject ? 'runs-project-code' : configFile && !(configShown && !configReads) ? 'config-file' : dest.opaque || keyed.length > 0 ? 'opaque-route' : run.programWritable ? 'program-writable' : null;   // round 25 (the vault-use-grants seam ruling): an argv routing flag (--unix-socket / --proxy / ssh -oProxyCommand / wget -e use_proxy|http_proxy — all in `keyed`, all making `blind` true) routes the connection off every named host ⇒ an OPAQUE destination, never a standing pass («always» withheld, as the config reader already does for a template's route directive)   [int361: + vault-use-grants' routeOpaque — ONE opaque rule]
   return {
     v: SHAPE_V, tool: run.tool, name: run.name, kind, sub, flags: [...flags].sort(), args, hosts: [...hosts].sort(), routeHosts: dest.hosts.slice().sort(), routeOpaque: dest.opaque, mentions, badHost, userinfo, cardTooLong, configReads,
     entries: run.refs.map((r) => r.ref).sort(), injection: [...run.injection].sort(), env: run.plainEnv.map((e) => `${e.name}=${e.value}`).sort(), keyed: keyed.sort(),
@@ -1090,7 +1090,7 @@ function alwaysWhyOf(shape) {
     case 'program-writable': return 'program-writable';
     case 'runs-project-code': return 'program-writable';   // the code that runs is not fixed either — the same promise «always» cannot make
     case 'config-file': return 'config-reads';
-    case 'opaque-route': return 'opaque-route';   // int361 (the vault pair): vault-use-grants' opaque route (routeOpaque) names its own why
+    case 'opaque-route': return 'opaque-route';
     default: return 'destination-unknown';                  // a non-'tool' kind (a shell / an interpreter): where it sends cannot be told
   }
 }
