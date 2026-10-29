@@ -778,7 +778,7 @@ await (async () => {
       const proactive = rnd() < 0.5;
       const w = rnd() < 0.3 ? { warm: rnd() < 0.5, agoSec: 10, ttlSec: 300, inTurn: rnd() < 0.5 } : null;
       const base = { currentId: cur, members: mem, readCache: (id) => caches[id] ?? null, nowSec: NOW, proactive, hot: proactive, exclude: rnd() < 0.2 ? ['b'] : null, warm: w, explain: true };
-      const want = JSON.stringify((master || { decidePoolSwitch }).decidePoolSwitch(base));
+      const want = JSON.stringify(withoutNames((master || { decidePoolSwitch }).decidePoolSwitch(base))); // BOTH sides without the name fields: the master copy has none; the ref-free side (a shallow clone, the CI mirror) is the current module and MUST be stripped alike (2.369.361 CI: 4 FAILED on depth-1)
       for (const extra of [{}, { membership: [...ids] }, { membership: new Set([cur, ...mem.map((m) => m.id)]) }]) {
         n++;
         const got = JSON.stringify(withoutNames(decidePoolSwitch({ ...base, ...extra })));
@@ -969,7 +969,7 @@ await (async () => {
       const ms = ids.filter(() => rnd() < 0.8).map((id) => ({ id, name: id.toUpperCase() }));
       const base = { currentId: ids[Math.floor(rnd() * 4)], members: ms, readCache: (id) => caches[id] ?? null, nowSec: NOW, proactive: rnd() < 0.5, explain: true, warm: rnd() < 0.3 ? { warm: rnd() < 0.5, agoSec: 5, ttlSec: 300, inTurn: rnd() < 0.5 } : null };
       base.hot = base.proactive;
-      const want = JSON.stringify(ref.decidePoolSwitch(base));
+      const want = JSON.stringify(withoutNames(ref.decidePoolSwitch(base))); // both sides stripped alike (ref = the current module on a shallow clone)
       for (const pr of [null, [], undefined]) { n++; const got = JSON.stringify(withoutNames(decidePoolSwitch({ ...base, priority: pr }))); if (got === want) same++; else if (!diff) diff = { i, pr, want, got }; }
       const wantR = JSON.stringify(ref.rankPoolMembers({ members: ms, readCache: base.readCache, nowSec: NOW }));
       n++; if (JSON.stringify(rankPoolMembers({ members: ms, readCache: base.readCache, nowSec: NOW, priority: [] })) === wantR) same++; else if (!diff) diff = { i, rank: true };
@@ -1079,7 +1079,7 @@ await (async () => {
         priority: rnd() < 0.3 ? ids.filter(() => rnd() < 0.5) : null, reserveFloorPct: rnd() < 0.3 ? 15 : 0, pessimism: rnd() < 0.2 ? { b: 10 } : {} };
       base.hot = base.proactive || rnd() < 0.3;
       const raw = (id) => caches[id] ?? null;
-      const want = JSON.stringify(ref.decidePoolSwitch({ ...base, readCache: raw }));
+      const want = JSON.stringify(withoutNames(ref.decidePoolSwitch({ ...base, readCache: raw }))); // both sides stripped alike (ref = the current module on a shallow clone)
       const lane = [{ name: 'Fable', utilization: r2(rnd()), resetsAt: NOW + 2 * D }];
       const views = [
         raw,                                                                // no spare lane anywhere
@@ -1402,7 +1402,7 @@ await (async () => {
       n++;
       const dp = decidePinnedPlacement({ ...base, pin: null });
       const got = dp === null ? JSON.stringify(withoutNames(decidePoolSwitch(base))) : 'pinned!';
-      if (got === JSON.stringify((master || { decidePoolSwitch }).decidePoolSwitch(base))) same++; else if (!diff) diff = { i, got };
+      if (got === JSON.stringify(withoutNames((master || { decidePoolSwitch }).decidePoolSwitch(base)))) same++; else if (!diff) diff = { i, got }; // both sides stripped alike (the ref-free side on a shallow clone)
     }
     ck(`pin: ${n} seeded worlds with NO pin decide byte-identically to ${master ? 'master' : 'the pool verdict (ref-free)'} (the pin path returns null, the pool verdict is ${master ? "master's" : 'untouched'})`, same === n, JSON.stringify(diff));
   }
