@@ -34,6 +34,9 @@
  *   needsOf(items, keys)         → the OPEN needs of the conversation known by `keys`, oldest first: [{item, kind}]
  *   recordsOf(items, keys)       → its RESOLVED ones (the quiet one-line records), oldest first
  *   placementOf(item, transcript)→ {at: <record id> | null, how: 'named' | 'tool' | 'turn' | 'end' | 'none'}
+ *   tailPlan(open, transcript, o)→ {at, dock, waiting, loose} — which open card stands where: at its record when that is on
+ *                                  screen, at most ONE docked at the end, every one in the chip (lane needs-card-tail)
+ *   filingIndex(item, readPage, o) → the index of the record that filed it ABOVE a loaded window (the landing's read upward)
  *   chipWords(needs, t)          → {text, title} | null — «waiting for you · an approval» / «· 3 approvals» / «· 3»
  *   settledWords(item, t)        → «approved» / «denied» / «saved to the vault» / «done» … (the quiet line's verb)
  *   surfaceOf(type | item)       → {at: 'card' | 'window' | 'owner' | 'notice', kind, on} — where it IS shown and answered
@@ -177,9 +180,13 @@ const idsOf = (item) => [item.id, ...IDENTITY_FIELDS.map((f) => item.action && i
  *  'named' — the tool card whose RESULT names the item (its id, its request id: `wr-…`, `sr-…`) — exact;
  *  'tool'  — else the latest tool card that ran the producer's CLI just before the filing (within FILED_WINDOW_MS);
  *  'turn'  — else the record at or just before the filing (the turn that filed it, as far as it had come);
- *  'end'   — else (the anchor is older than what is loaded, or nothing is) the END of the last turn — an open card is
- *            never hidden in history that is not loaded; a RESOLVED one there is 'none' (history stays history). */
-function placementOf(item, transcript, { resolved = false } = {}) {
+ *  'end'   — else (the anchor is older than what is loaded, or nothing is) the END of what is loaded — tailPlan decides
+ *            whether a card stands there (lane needs-card-tail: at most ONE, the rest wait in the chip); a RESOLVED one is
+ *            'none' (history stays history).
+ *  `more` (lane needs-card-tail) = records exist AFTER the last loaded one (a window loaded mid-history — a landing, a
+ *  search): a filing after what is loaded is not «at» the last loaded record, so the CLI-call and the at-the-filing rungs
+ *  need a loaded record past the filing (the jump to an old ask stacked every newer one on the window's last record). */
+function placementOf(item, transcript, { resolved = false, more = false } = {}) {
   const rows = Array.isArray(transcript) ? transcript.filter((r) => r && r.id != null) : [];
   const at = Number(item && item.createdAt) || 0;
   const ids = item ? idsOf(item) : [];
@@ -189,7 +196,8 @@ function placementOf(item, transcript, { resolved = false } = {}) {
   }
   const n = needOf(item);
   const cli = n && n.cli;
-  if (cli && at) {
+  const past = !more || rows.some((r) => (Number(r.ts) || 0) > at + SKEW_MS); // the filing lies inside what is loaded
+  if (cli && at && past) {
     for (let k = rows.length - 1; k >= 0; k--) {
       const r = rows[k], ts = Number(r.ts) || 0;
       if (ts > at + SKEW_MS) continue;
@@ -197,7 +205,7 @@ function placementOf(item, transcript, { resolved = false } = {}) {
       if (r.role === 'tool' && typeof r.cmd === 'string' && cli.test(r.cmd)) return { at: r.id, how: 'tool' };
     }
   }
-  if (at && rows.length) {
+  if (at && rows.length && past) {
     let hit = null;
     for (const r of rows) { const ts = Number(r.ts) || 0; if (ts && ts <= at + SKEW_MS) hit = r; }
     // the first loaded record is AFTER the filing: its anchor is in history not loaded
@@ -205,6 +213,113 @@ function placementOf(item, transcript, { resolved = false } = {}) {
   }
   if (resolved) return { at: null, how: 'none' };
   return { at: rows.length ? rows[rows.length - 1].id : null, how: 'end' };
+}
+
+/** THE TAIL (lane needs-card-tail, the owner 2026-10-28 on 2.369.360: «这个应该同时堆叠在页面最下吗？» — six asks filed days
+ *  ago stood stacked under the newest message, because every open card whose record was not on screen fell back to the
+ *  end): which of a conversation's OPEN cards stands where, given what the chat has loaded.
+ *    `open`       needsOf's entries ({item, kind}, oldest first)
+ *    `transcript` the loaded records (lean rows, placementOf's)
+ *    `rendered`   (record id) → is that record on screen (the chat's element for it, in its list)
+ *    `atEnd`      the loaded window reaches the conversation's live end (false = a window loaded mid-history)
+ *    `pick`       the ask the person landed at the end (a chip row whose ask has no record) — it keeps the dock
+ *    `known`      Map(item id → record id): the record a landing's read PROVED filed it (r3 — a window ending inside the skew
+ *                 margin of the filing cannot place it alone; the read past it did) — used when placementOf says 'end'
+ *  → { at: Map(item id → record id) — a card whose record IS on screen stands there, unchanged;
+ *      dock: item id | null — at most ONE of the rest docks at the end: the person's pick, else the NEWEST of them (the next
+ *            newest takes it when that one is answered); none in a window that ends mid-history (its end is not the chat's);
+ *      waiting: every open entry, NEWEST first — THE CHIP's index (the rest wait there; choosing one lands it);
+ *      loose: the ids with no record on screen }
+ *  The base's rule (an open card's fallback is the end) is one docked card per loose id; scripts/test-conversation-needs.mjs
+ *  ⑩ runs the owner's six (RED copy: that rule ⇒ six cards at the end). */
+function tailPlan(open, transcript, { rendered = () => true, atEnd = true, pick = null, known = null } = {}) {
+  const list = Array.isArray(open) ? open.filter((e) => e && e.item) : [];
+  const rows = Array.isArray(transcript) ? transcript : [];
+  const at = new Map(), loose = [];
+  for (const e of list) {
+    const p = placementOf(e.item, rows, { more: !atEnd });
+    const proved = known && typeof known.get === 'function' ? known.get(e.item.id) : null;
+    const rec = p.how !== 'end' && p.at != null ? p.at : proved != null && rows.some((r) => r && r.id === proved) ? proved : null;
+    const el = rec != null ? drawnAt(rows, rec, rendered) : null;
+    if (el != null) at.set(e.item.id, el);
+    else loose.push(e);
+  }
+  const newest = loose.reduce((a, e) => (!a || (Number(e.item.createdAt) || 0) >= (Number(a.item.createdAt) || 0) ? e : a), null);
+  const dock = !atEnd || !newest ? null : pick != null && loose.some((e) => e.item.id === pick) ? pick : newest.item.id;
+  return { at, dock, waiting: [...list].reverse().sort((a, b) => byCreated(b, a)), loose: loose.map((e) => e.item.id) };
+}
+
+/** A card's anchor that is LOADED but drawn as nothing (a hidden unknown-record notice — chat-view keeps the record and
+ *  draws no element) stands at the nearest DRAWN record after it — the end of what is loaded if none (lane needs-card-tail
+ *  r2: such a card vanished into the chip, or docked saying «further up» though it was filed at the end).
+ *  `rows` = the loaded records in DISPLAY order, `rendered(id)` = is that record drawn → a drawn record id | null */
+function drawnAt(rows, id, rendered = () => true) {
+  if (id == null) return null;
+  if (rendered(id)) return id;
+  const k = rows.findIndex((r) => r && r.id === id);
+  if (k < 0) return null;
+  for (let j = k + 1; j < rows.length; j++) if (rows[j] && rendered(rows[j].id)) return rows[j].id;
+  for (let j = k - 1; j >= 0; j--) if (rows[j] && rendered(rows[j].id)) return rows[j].id; // nothing drawn after it: the end
+  return null;
+}
+
+const tsOf = (r) => Number(r && r.ts) || 0;
+/** THE LANDING's read (lane needs-card-tail — R2: a chip row, R5: a For-you door, whose ask was filed outside what the chat
+ *  has loaded): where in the WHOLE conversation is the record that filed `item`? The loaded window (`rows` = its lean records
+ *  in display order, `start`/`end` = its first record's index and the one past its last, `total` = the conversation's count)
+ *  first; else the history read a page at a time by `readPage(offset, limit)` → lean records, TOWARD the filing (round 2: a
+ *  landing read only upward, and an ask filed BELOW a window loaded mid-history — after any landing, search or minimap jump
+ *  — was called «no record»):
+ *    DOWN from the window's end — nothing loaded lies past the filing and the conversation goes on;
+ *    UP from its top — the window starts after the conversation's first record (a page whose first record is inside the 2 s
+ *       skew margin is not the filing's: the page above is read too — round 2, a record opening a page made a −1).
+ *  → the index of the record that filed it (placementOf over what was read + the records around it); −1 = NO RECORD, a fact
+ *  only when the conversation's first record is read and lies after the filing (filed before what its record holds); null =
+ *  unknown (a page failed, more than `pages` pages, or nothing read lies past the filing) — never claimed «no record».
+ *  `onHit(row)` is told the record the index names (r3: the landing lands on a hit inside its window by the record's id). */
+async function filingIndex(item, readPage, { start = 0, end = null, total = null, rows = null, after = [], page = 200, pages = 60, onHit = null } = {}) {
+  const at = tsOf(item && { ts: item.createdAt });
+  if (!at || typeof readPage !== 'function') return null;
+  const win = Array.isArray(rows) ? rows.filter((r) => r && r.id != null) : Array.isArray(after) ? after.slice(0, 40) : [];
+  const s0 = Math.max(0, Number(start) || 0), e0 = end == null ? s0 + win.length : Math.max(s0, Number(end) || 0);
+  const t0 = total == null ? e0 : Math.max(e0, Number(total) || 0);
+  const past = (list) => list.some((r) => tsOf(r) > at + SKEW_MS);
+  const hit = (seg, base, more) => { const p = placementOf(item, seg, { resolved: true, more }); const k = p.at != null ? seg.findIndex((r) => r && r.id === p.at) : -1; if (k < 0) return null; if (typeof onHit === 'function') onHit(seg[k]); return base + k; };
+  // the window itself (a record drawn as nothing is still a record: its index is known)
+  if (Array.isArray(rows)) { const k = hit(win, s0, e0 < t0); if (k != null) return k; }
+  // DOWN: the filing lies after what is loaded
+  if (e0 < t0 && !past(win)) {
+    const ctx = win.slice(-200), base = e0 - ctx.length, got = [];
+    let from = e0, found = false, ended = false;
+    for (let n = 0; from < t0 && n < pages; n++) {
+      let rs;
+      try { rs = await readPage(from, Math.min(page, t0 - from)); } catch { return null; }
+      if (!Array.isArray(rs)) return null;
+      if (!rs.length) { ended = true; break; } // the conversation ends sooner than it was counted
+      got.push(...rs); from += rs.length;
+      if (past(rs)) { found = true; break; } // a record past the filing (+ the skew margin): the filing lies inside what was read
+    }
+    if (!found && !ended && from < t0) return null; // out of pages
+    return hit([...ctx, ...got], base, found && from < t0); // found, or the conversation's end reached (the filing at its very end)
+  }
+  // UP: the filing lies before what is loaded
+  let top = s0, next = win.slice(0, 40);
+  for (let n = 0; top > 0 && n < pages; n++) {
+    const from = Math.max(0, top - page);
+    let rs;
+    try { rs = await readPage(from, top - from); } catch { return null; }
+    if (!Array.isArray(rs) || !rs.length) return null;
+    const first = rs.find((r) => tsOf(r));
+    top = from;
+    if (from > 0 && first && tsOf(first) > at + SKEW_MS) { next = rs.slice(0, 40); continue; } // the whole page came after the filing
+    if (from > 0 && first && tsOf(first) > at - SKEW_MS) { next = [...rs, ...next]; continue; } // its first record inside the skew margin: the page above too
+    const seg = [...rs, ...next]; // contiguous: the page, then the records that follow it
+    const k = hit(seg, from, true);
+    if (k != null) return k;
+    return from === 0 && past(seg) ? -1 : null;
+  }
+  if (top > 0) return null;
+  return past(win) ? -1 : null; // the window starts at the first record and lies after the filing
 }
 
 /** The default formatter (the suite and the hub pass none): English with `{param}` filled — the client passes its `t`. */
@@ -215,7 +330,8 @@ const ONE = Object.freeze({ approval: i18nKey('an approval'), question: i18nKey(
 const MANY = Object.freeze({ approval: i18nKey('{n} approvals'), question: i18nKey('{n} questions'), secret: i18nKey('{n} secrets'), browser: i18nKey('{n} steps in the browser'), check: i18nKey('{n} things to check') });
 const kindOf = (e) => (e && KINDS.includes(e.kind) ? e.kind : 'check');
 /** THE CHIP's words: nothing open ⇒ null (no chip); one ⇒ «waiting for you · an approval»; several of one kind ⇒
- *  «waiting for you · 3 approvals»; mixed ⇒ «waiting for you · 3» with every kind in the title. */
+ *  «waiting for you · 3 approvals»; mixed ⇒ «waiting for you · 3» with every kind in the title. Several ⇒ its click LISTS
+ *  them (lane needs-card-tail: the chip is the index — choosing one lands it); one ⇒ its click goes to it. */
 function chipWords(needs, t = fmt) {
   const list = Array.isArray(needs) ? needs : [];
   if (!list.length) return null;
@@ -224,7 +340,8 @@ function chipWords(needs, t = fmt) {
   const said = (k, n) => (n === 1 ? t(ONE[k]) : t(MANY[k], { n }));
   const what = counts.size === 1 ? said(kindOf(list[0]), list.length) : String(list.length);
   const all = [...counts].map(([k, n]) => said(k, n)).join(', ');
-  return { text: t('waiting for you · {what}', { what }), title: t('This conversation is waiting for you: {all} — click to go to the newest card', { all }), n: list.length };
+  const title = list.length > 1 ? t('This conversation is waiting for you: {all} — click to list them, choose one to go to it', { all }) : t('This conversation is waiting for you: {all} — click to go to it', { all });
+  return { text: t('waiting for you · {what}', { what }), title, n: list.length };
 }
 
 /** The quiet record's VERB — how a resolved card reads in its line («approved · 2 min ago»). */
@@ -279,4 +396,4 @@ function filedLine(x, id, tray = null) {
   return fmt(FILED[s.at], { what: fmt(ONE[KINDS.includes(s.kind) ? s.kind : 'check']), tray: where, on: s.on || 'its own card in this conversation' }) + (id ? ` (${id})` : '');
 }
 
-module.exports = { ROWS, ROW_OF, ANSWERS, CARDS, ACTION_IDENTITY, WAIT_ACTIONS, CARD_ACTION_TYPES, ANSWER_ACTION_TYPES, KINDS, KIND_WORDS: ONE, SURFACES, BY_TYPE, BY_ORIGIN, IDENTITY_FIELDS, SKEW_MS, FILED_WINDOW_MS, needOf, needsOf, recordsOf, placementOf, chipWords, settledWords, surfaceOf, FILED, filedLine };
+module.exports = { ROWS, ROW_OF, ANSWERS, CARDS, ACTION_IDENTITY, WAIT_ACTIONS, CARD_ACTION_TYPES, ANSWER_ACTION_TYPES, KINDS, KIND_WORDS: ONE, SURFACES, BY_TYPE, BY_ORIGIN, IDENTITY_FIELDS, SKEW_MS, FILED_WINDOW_MS, needOf, needsOf, recordsOf, placementOf, tailPlan, drawnAt, filingIndex, chipWords, settledWords, surfaceOf, FILED, filedLine };

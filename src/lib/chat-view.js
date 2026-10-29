@@ -400,7 +400,7 @@ class ChatView {
       // so a read-only viewer gets the chip as well (a phone has no Ctrl+F).
       onSearch: () => this._search?.open(),
       onJumpToAsk: () => { this.jumpToPendingAsk().catch(() => {}); }, // lane S1: the waiting chip goes to the card that waits
-      onJumpToNeed: () => { this._needsCards?.jumpToNewest(); }, // lane chat-needs-you-card: the «waiting for you · N» chip lands the newest needs card
+      onJumpToNeed: (id) => { (id ? this._needsCards?.land(id) : this._needsCards?.jumpToNewest())?.catch?.(() => {}); }, // lane chat-needs-you-card: the «waiting for you · N» chip lands a needs card — lane needs-card-tail: the row chosen in its list (THE ONE LANDING), else the newest
       // agent browser P2 (§3.8 ③): the Browser chip's three actions
       onBrowserAction: (what, ev) => this._onBrowserAction(what, ev),
       // §26 (B-099e): the channels chip opens a touched conversation through the ONE door
@@ -2826,6 +2826,10 @@ class ChatView {
         const ref = (firstEl && firstEl.parentNode === this._messageList) ? firstEl : this._messageList.firstChild;
         this._messageList.insertBefore(frag, ref);
         this._loadingHistory = false;
+        // THE LOADED RECORDS STAY IN DISPLAY ORDER (lane needs-card-tail r2): the slab is drawn ABOVE the window, so its
+        // records go FIRST in _messages too — pushed after it, the older page's last record read as the chat's end (the
+        // docked needs card stood mid-history under it); loadedRecords() is the order every reader takes
+        if (msgs.length && Array.isArray(this._messages)) { const slab = new Set(msgs.map((m) => m.id)); this._messages = [...this._messages.filter((m) => slab.has(m.id)), ...this._messages.filter((m) => !slab.has(m.id))]; }
         this._windowStart = newStart;
         // MEASURED heights for the fresh slab (inc-mubvu3a4-x8sb): the anchor
         // restore below and the trim's zone read real geometry, not the 80 px
@@ -3312,9 +3316,22 @@ class ChatView {
       el.remove();
     };
     let anchored = null;
+    // THE WINDOW'S RECORDS ARE THE WINDOW (lane needs-card-tail r3): a record drawn as nothing has no element to drop, so the
+    // record list is cut where the elements were (display order) — none lingers from the trimmed range (an unknown-record
+    // notice left past the window's end put every ask filed below it on the window's last record) — and the bounds move by
+    // the records cut (by the elements alone they claimed a record the window no longer holds: a hole the next page skipped)
+    const cut = () => {
+      const ms = Array.isArray(this._messages) ? this._messages : [];
+      const ks = []; ms.forEach((m, k) => { if (m && removedIds.has(m.id)) ks.push(k); });
+      if (!ks.length) return n;
+      const held = (m) => !!m && !removedIds.has(m.id) && this._elements.has(m.id); // past the cut and still drawn: kept
+      const kept = side === 'bottom' ? [...ms.slice(0, ks[0]), ...ms.slice(ks[0]).filter(held)] : [...ms.slice(0, ks[ks.length - 1] + 1).filter(held), ...ms.slice(ks[ks.length - 1] + 1)];
+      this._messages = kept;
+      return Math.max(n, ms.length - kept.length);
+    };
     if (side === 'bottom') {
       for (let i = els.length - 1; i >= els.length - n; i--) drop(els[i]);
-      this._windowEnd -= n;
+      this._windowEnd -= cut();
       this._setPinned(false, 'trimBottom'); // the rendered window no longer ends at the live tail (reached only unpinned: a pinned _extendTop never trims — trimSkipPinned)
     } else {
       // Element-anchored ABSOLUTE restore (2.229.1, forensics-confirmed): the
@@ -3331,9 +3348,8 @@ class ChatView {
       // the same anchored section, so the viewport does not move.
       const leavesZero = !this._teleported && this._windowStart === 0;
       anchored = this._withViewportAnchor(() => { for (let i = 0; i < n; i++) drop(els[i]); if (leavesZero) this._dropGapSlab('trimTop', zone); });
-      this._windowStart += n;
+      this._windowStart += cut();
     }
-    if (removedIds.size) this._messages = this._messages.filter(m => !removedIds.has(m.id));
     // DECISION INPUTS (inc-mubvu3a4-x8sb): the height the trim read, what it
     // left behind, the viewport and the zone — `removed` alone could not show
     // a trim eating the landing the grow loop had just made.
@@ -3667,8 +3683,10 @@ class ChatView {
    *  about what lies above it yet, so «No earlier messages» waits. */
   noteHistoryInFlight(on) { this._historyInFlight = !!on; }
 
-  // Jump to a specific message index: replace window entirely
-  async jumpToIndex(targetIdx) {
+  // Jump to a specific message index: replace window entirely. `land` (lane needs-card-tail — the needs cards' landing):
+  // called with the target element in place of the default landing (its own element, a card inside it, landed whole);
+  // `stale` (r2 — a stale landing never moves the reader): asked once the page is read — true ⇒ nothing is replaced
+  async jumpToIndex(targetIdx, { land = null, stale = null } = {}) {
     this._noteUserNav('jumpToIndex');   // a chosen destination — the resume re-tail must never overrule it
     this._trace('jumpToIndex', { idx: targetIdx });
     this._traceExpect('jumpToIndex');
@@ -3681,11 +3699,13 @@ class ChatView {
     const endLoad = this._beginHistoryLoad(t('Loading messages…'));
     try { msgs = await this._fetchMessages(start, end - start); }
     catch (e) {
+      if (stale && stale()) return;
       this._showHistoryStatus(t('Couldn\'t load that part of the conversation'), {
         kind: 'error', retry: () => this.jumpToIndex(targetIdx),
       });
       return;
     } finally { endLoad(); }
+    if (stale && stale()) { this._trace('jumpToIndex:stale', { idx: targetIdx }); return; } // a newer press / the reader's own move came first
 
     // Clear and rebuild DOM
     this._messageList.querySelectorAll('.chat-msg, .chat-msg-system').forEach(el => el.remove());
@@ -3712,7 +3732,8 @@ class ChatView {
     this._updateRuns();
     const relIdx = targetIdx - start;
     const allMsgs = this._messageList.querySelectorAll('.chat-msg:not(.chat-gap-msg)');
-    if (relIdx >= 0 && relIdx < allMsgs.length) {
+    if (land) land(relIdx >= 0 && relIdx < allMsgs.length ? allMsgs[relIdx] : null);
+    else if (relIdx >= 0 && relIdx < allMsgs.length) {
       const targetEl = allMsgs[relIdx];
       for (const d of targetEl.querySelectorAll('details:not([open])')) d.open = true;
       targetEl.style.contentVisibility = 'visible';
@@ -3730,7 +3751,11 @@ class ChatView {
   // Jump to the bottom of the conversation. `user:false` = the resume re-tail
   // calling it on the reader's behalf — it must not stamp a navigation (that
   // would cancel its own bounded series and the unpin gate's evidence).
-  async jumpToBottom({ user = true } = {}) {
+  // `land` / `stale` (lane needs-card-tail r3 — EVERY road a landing takes obeys the displacement law: an older landing's
+  // tail fetch replaced the window a newer landing, or the reader's own wheel, had just made): `stale` is asked once the
+  // tail is read, BEFORE the window is replaced — true ⇒ nothing is replaced (the held live ops apply to the window that
+  // stays); `land` is called once the tail is the view — truthy ⇒ it landed (the needs cards' landing), else the bottom
+  async jumpToBottom({ user = true, land = null, stale = null } = {}) {
     if (user) this._noteUserNav('jumpToBottom');
     const windowSize = 50;
     const known = Number.isFinite(this._total) ? this._total : 0;
@@ -3770,6 +3795,7 @@ class ChatView {
     }
     catch (e) {
       if (call !== this._tailCall) return;   // a newer tail call answers for the view
+      if (stale && stale()) { this._releaseTailHold(hold); return; } // a stale landing's failure is nobody's to say
       this._showHistoryStatus(t('Couldn\'t load the latest messages'), {
         kind: 'error', retry: () => this.jumpToBottom(),
       });
@@ -3777,6 +3803,7 @@ class ChatView {
       return;
     } finally { endLoad(); }
     if (call !== this._tailCall) { this._trace('tailStale', { call, newest: this._tailCall }); return; } // verify r1: superseded
+    if (stale && stale()) { this._trace('jumpToBottom:stale', { start }); this._releaseTailHold(hold); return; } // a newer press / the reader's own move came first: the window stays
 
     this._messageList.querySelectorAll('.chat-msg, .chat-msg-system').forEach(el => el.remove());
     this._resetGapAfterJump();
@@ -3795,6 +3822,7 @@ class ChatView {
     this._setPinned(true, 'jumpToBottom');
     this._releaseTailHold(hold);   // pinned at the tail now: the held echo renders below the slab
     if (this._search?.hasHighlight) this._search.applyHighlightLayer();
+    if (land && land()) return;    // a landing landed at the tail (it scrolled and unpinned itself)
 
     // Temporarily disable content-visibility so the browser computes real heights
     // for all elements, then scroll to bottom, then re-enable
@@ -5521,6 +5549,26 @@ class ChatView {
     if (!card || !card.isConnected) return null;
     if (a.kind === 'helper') return card.querySelector(`.chat-helper-ask[data-request-id="${esc(a.requestId)}"]`) || card;
     return card.querySelector('.chat-permission-inline') || card;
+  }
+
+  /** lane needs-card-tail (R5): a For-you door to this conversation lands `item` at the record that filed it — THE ONE
+   *  LANDING (chat-needs-card.js land: its card opened there, the history loaded up to it, or the dock at the end). */
+  landOnItem(item, opts) { return this._needsCards ? this._needsCards.land(item, opts) : Promise.resolve(null); }
+
+  /** THE LOADED RECORDS IN DISPLAY ORDER (lane needs-card-tail r2): the window's records first to last as the list draws them
+   *  (a record drawn as nothing keeps its place) — the last one is the END. _extendTop keeps _messages in this order. */
+  loadedRecords() { return this._messages || []; }
+
+  /** A LANDING'S TARGET IS DRAWN (lane needs-card-tail r2 — a For-you door landed on a record folded in a closed run,
+   *  display:none, and the list ran to scrollTop 0): the run that holds the record `el` opened, as a deliberate open (the
+   *  peer card's Show does the same) → is it drawn now (a box) */
+  revealRecord(el) {
+    if (!el || !el.isConnected) return false;
+    const run = this._runs?.find((r) => !r.open && r.members?.includes(el));
+    if (run) this._setRunOpen(run, true);
+    const drawn = el.getClientRects().length > 0;
+    if (run && !drawn) this._setRunOpen(run, false); // r3: a failed show leaves no mark — a run opened for nothing closes again
+    return drawn;
   }
 
   /** THE WAITING CHIP's click (lane S1): go to the ask the user must answer — the first one, or

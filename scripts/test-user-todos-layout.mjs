@@ -21,6 +21,8 @@
 // and THE CENSUS: every two-argument .add( / ?.add( on any receiver under src/
 // and server.js declares a literal origin, the one its file produces (grep-
 // derived, with planted/patched/evasion controls — an unwired site FAILS here).
+// ㉕ (lane needs-card-tail R5): THE DOOR LANDS — every conversation a For-you surface opens is model.jump's (grep-derived,
+// RED by file:line; two named non-doors) and jump lands each through ONE helper (landOnFiling → the chat's landing).
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -1561,6 +1563,68 @@ console.log('㉔ A BUTTON NAMED FOR AN ACTION PERFORMS IT (lane controls-that-li
   ok(/'browser-grant': \(it\) =>/.test(win) && /if \(a === 'browser-grant'\) \{/.test(win) && /optionWords\(o\.label, t\)/.test(win) && /\.\.\.\(grantAsk \? \['browser-grant'\] : \[\]\)/.test(winL), 'the For-you window draws the same grant button first and the same «Reply: …» chips');
   const cli = fs.readFileSync(path.join(ROOT, 'data/bin/vibespace-ask'), 'utf8');
   ok(/const grant = opt\('grant'\);/.test(cli) && /\.\.\.\(grant !== undefined \? \{ grant \} : \{\}\)/.test(cli) && /--grant browser:<label\|id>/.test(cli), 'vibespace-ask carries --grant to the route and says what it does in its usage');
+}
+
+
+console.log('㉕ THE DOOR LANDS (lane needs-card-tail R5 — the owner 2026-10-28: «inbox点消息跳转会对话的时候，可以考虑直接跳转到对应的上下文（agent发送这个inbox消息的时候的聊天位置）») — every conversation a For-you surface opens is model.jump\'s, and jump lands it through ONE helper (grep-derived, RED by file:line)');
+{
+  const LIB = path.join(ROOT, 'src/lib');
+  const read = (rel) => fs.readFileSync(path.join(ROOT, rel), 'utf8');
+  // the For-you surfaces: the tray / the taskbar popup / the phone's page (user-todos-*), the For-you window (inbox-window*),
+  // the chat's needs cards, the PURE-adjacent helpers, the browser window's takeover section
+  const SURF = fs.readdirSync(LIB).filter((f) => /^(user-todos-|inbox-window|foryou-|chat-needs-card|browser-takeover-queue)/.test(f) && f.endsWith('.js')).sort().map((f) => 'src/lib/' + f);
+  const OPEN_RE = /\b(?:app|this\.app)\.(goToWindow|attachSession|resumeSession|attachTmuxSession)\(/g;
+  /** fn's body [start, end) — its declaration to the closing brace at the declaration's own indent */
+  const bodyRange = (src, fn) => { const m = new RegExp(`\\n( *)(?:export )?(?:const ${fn} = (?:async )?\\(|function ${fn}\\()`).exec(src); if (!m) return null; const end = src.indexOf(`\n${m[1]}}`, m.index + 1); return [m.index, end < 0 ? src.length : end]; };
+  const THE_DOOR = { file: 'src/lib/user-todos-actions.js', fn: 'jump' };
+  // the opens that are NOT a row's door — each named with its reason (a new one is RED until it lands or says why it need not)
+  const NOT_A_DOOR = [
+    { file: 'src/lib/user-todos-actions.js', fn: 'openReopened', why: 'a reply REOPENED its ended conversation — it opens at its live end, where the reply just landed' },
+    { file: 'src/lib/browser-takeover-queue.js', fn: 'revealTakeoverConversation', why: 'the Agent browser window\'s own «Waiting for you» section (the conversation\'s name) — not a For-you row; the request\'s For-you item is a row, its door is jump' },
+  ];
+  const census = (files) => {
+    const bad = [];
+    for (const [rel, src] of Object.entries(files)) {
+      for (const m of src.matchAll(OPEN_RE)) {
+        const inside = (r) => { const b = r.file === rel && bodyRange(src, r.fn); return !!b && m.index > b[0] && m.index < b[1]; };
+        if (inside(THE_DOOR) || NOT_A_DOOR.some(inside)) continue;
+        bad.push(`${rel}:${src.slice(0, m.index).split('\n').length} opens a conversation (${m[1]}) outside model.jump — a door that does not land`);
+      }
+    }
+    return bad;
+  };
+  /** jump's opens each land: the chat ones through landOnFiling (S1's / the permission card's asks through their own jump),
+   *  the tmux terminal has no chat to land in */
+  const landing = (src) => {
+    const b = bodyRange(src, 'jump'); if (!b) return ['no jump in user-todos-actions.js'];
+    const jb = src.slice(b[0], b[1]), bad = [];
+    if (!/view\.jumpToPendingAsk\(rid\)/.test(jb) || !/\} else landOnFiling\(item\); \/\/ lane needs-card-tail \(R5\)/.test(jb)) bad.push('the open window / re-attach (goToWindow · attachSession) does not land through landOnFiling');
+    if (!/app\.resumeSession\([^;]*\); landOnFiling\(item\); \}/.test(jb)) bad.push('the resume of a stopped conversation does not land through landOnFiling');
+    if ((jb.match(/landOnFiling\(item\)/g) || []).length !== 2 || (jb.match(OPEN_RE) || []).length !== 4) bad.push(`jump opens ${(jb.match(OPEN_RE) || []).length} ways, lands ${(jb.match(/landOnFiling\(item\)/g) || []).length} (want 4 opens: window · re-attach · tmux · resume — 2 landings)`);
+    const lf = bodyRange(src, 'landOnFiling');
+    if (!lf || !/v\.landOnItem\(item, \{ since \}\)/.test(src.slice(lf[0], lf[1]))) bad.push('landOnFiling does not hand the item to the chat view\'s ONE landing (landOnItem)');
+    else if (!/const gen = \+\+doorGen, since = Date\.now\(\);/.test(src.slice(lf[0], lf[1])) || !/if \(gen !== doorGen\) return;/.test(src.slice(lf[0], lf[1]))) bad.push('landOnFiling carries no generation — an older door press still waiting for its view lands over a newer one (r2: the displacement law)');
+    return bad;
+  };
+  const files = Object.fromEntries(SURF.map((rel) => [rel, read(rel)]));
+  ok(SURF.length >= 9 && SURF.includes('src/lib/inbox-window.js') && SURF.includes('src/lib/user-todos-panel.js'), `the surfaces read (${SURF.length}: ${SURF.map((f) => f.replace('src/lib/', '')).join(', ')})`);
+  const C0 = census(files);
+  ok(C0.length === 0, 'CENSUS: no For-you surface opens a conversation except model.jump (and the two named non-doors)', C0);
+  const L0 = landing(files['src/lib/user-todos-actions.js']);
+  ok(L0.length === 0, 'every conversation jump opens lands through landOnFiling → the chat view\'s landOnItem (THE ONE landing, the chip\'s too)', L0);
+  // RED controls
+  { const planted = { ...files, 'src/lib/inbox-window.js': files['src/lib/inbox-window.js'] + '\nconst goConv = (app, s) => app.goToWindow(s.webuiId);\n' };
+    const line = planted['src/lib/inbox-window.js'].split('\n').length - 1;
+    ok(census(planted).some((p) => p === `src/lib/inbox-window.js:${line} opens a conversation (goToWindow) outside model.jump — a door that does not land`), `RED: a second door planted in the For-you window is named by file:line (src/lib/inbox-window.js:${line})`); }
+  { const cut = files['src/lib/user-todos-actions.js'].replace('} else landOnFiling(item); // lane needs-card-tail (R5)', '} // lane needs-card-tail (R5)');
+    ok(landing(cut).some((p) => /goToWindow · attachSession\) does not land/.test(p)), 'RED: jump\'s window open without the landing (the base\'s shape) is named'); }
+  { const cut = files['src/lib/user-todos-actions.js'].replace('if (loaded && ((v._messages && v._messages.length) || v._total > 0)) { v.landOnItem(item, { since })', 'if (loaded && ((v._messages && v._messages.length) || v._total > 0)) { v.jumpToBottom(item)');
+    ok(landing(cut).some((p) => /does not hand the item to the chat view/.test(p)), 'RED: a landing that does not reach the chat view\'s ONE landing is named'); }
+  { const cut = files['src/lib/user-todos-actions.js'].replace('      if (gen !== doorGen) return;\n', '');
+    ok(landing(cut).some((p) => /carries no generation/.test(p)), 'RED (r2, the displacement law): a door whose wait for its view never yields to a newer press is named'); }
+  // the doors themselves call jump (the tray row's Chat door + its conversation name, the mini row, the For-you window's name)
+  const P = files['src/lib/user-todos-panel.js'], IW = files['src/lib/inbox-window.js'];
+  ok(/if \(e\.target\.closest\('\.ut-go'\)\) \{ const rec = byId\(id\); if \(rec\) jump\(rec\.sessionKey, rec\); return; \}/.test(P) && /if \(e\.target\.closest\('\.ut-sess'\) \|\| \(rec && model\.isDoor\(rec\.sessionKey, rec\)\)\) \{ if \(rec\) jump\(rec\.sessionKey, rec\); return; \}/.test(P) && /if \(e\.target\.closest\('\.iw-sess'\)\) \{ const it = model\.byId\(c\.id\); if \(it\) model\.jump\(it\.sessionKey, it\); return; \}/.test(IW), 'the doors: the tray / phone row\'s Chat door (.ut-go) and its conversation name (.ut-sess), the For-you window\'s name (.iw-sess) — each is model.jump');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
