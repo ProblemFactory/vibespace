@@ -192,7 +192,7 @@ function copyLine(value) {
 // mount, the account). The same id + key opened again is RAISED and its ctx comes back.
 export function mountsDialog(title, fields, submitLabel, onSubmit, opts = {}) {
   const shell = createModalShell({ id: opts.id, key: opts.key, title, onClose: opts.onClose, escapeToClose: true, kind: 'form' });
-  if (shell.raised) return shell.overlay._mountsCtx || { body: shell.body, close: shell.close, raised: true };
+  if (shell.raised) return shell.overlay._mountsCtx || { body: shell.body, close: shell.close, raised: true, asked: shell.asked, ready: shell.ready, live: shell.live };
   const { body, close } = shell;
   const { inputs, applyConds, hasWhen } = renderFields(body, fields);
   const err = document.createElement('div');
@@ -218,7 +218,9 @@ export function mountsDialog(title, fields, submitLabel, onSubmit, opts = {}) {
       await onSubmit(vals, { close, body, err });
     } catch (e) { err.textContent = e.message || 'Failed'; submit.disabled = false; }
   };
-  const ctx = { close, inputs, body, applyConds: hasWhen ? applyConds : () => {} };
+  // the caller is TOLD like createModalShell's (lane dialog-yield r5): `asked` (queued behind the open one's ask), `ready` (→ the
+  // shell when it opens, null when the person kept that one), `live()` — THE liveness predicate
+  const ctx = { close, inputs, body, applyConds: hasWhen ? applyConds : () => {}, asked: shell.asked, ready: shell.ready, live: shell.live };
   shell.overlay._mountsCtx = ctx;   // what a re-open of this form hands back
   return ctx;
 }

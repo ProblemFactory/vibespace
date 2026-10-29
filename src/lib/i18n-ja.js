@@ -11051,4 +11051,6 @@ export default {
   "This file was published elsewhere while the dialog was open — it shows as it is now": "ダイアログを開いている間に、このファイルは別の場所で公開されました — 現在の状態を表示しています",
   "This page was unpublished elsewhere while the dialog was open — it shows as it is now": "ダイアログを開いている間に、このページは別の場所で公開停止されました — 現在の状態を表示しています",
   "Could not re-check this page — try again": "このページを再確認できませんでした — もう一度お試しください",
+  "The field this picker was for is gone — the picker closed and nothing was written": "このピッカーの入力欄はもうありません — ピッカーを閉じました。何も書き込まれていません",
+  "The row {path} is gone — {picked} was not written": "「{path}」の行はもうありません — {picked} は書き込まれていません",
 };

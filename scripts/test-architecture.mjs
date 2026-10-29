@@ -5479,7 +5479,7 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
     { file: 'src/lib/desktop-app-launcher.js', re: /pathField\(cwdIn, \{ host: /, covers: ['desktop-launch-cwd'], why: 'the app launcher\'s working directory (the launch\'s machine)' },
     // int346: lane task-group-context's Context table replaced the «Link folder» and context-folder doors — every row's path
     // and «+ Add a path…» go through ONE maker (makePathField: the row above → the group's first folder → home)
-    { file: 'src/lib/task-detail.js', re: /const pf = pathField\(input, \{\n\s*bases: \(\) => basesFor\(at\), groupsOf: \(\) => \[groupEntry\(\)\]/, covers: ['+ Add a path… (a folder or a file; relative = against the row above; takes effect when you leave the box or press Enter)'], why: 'a Task Group\'s Context table — every row\'s path and «+ Add a path…» (lane task-group-context)' },
+    { file: 'src/lib/task-detail.js', re: /const pf = pathField\(input, \{\n\s*bases: \(\) => basesFor\(bind\.at\), groupsOf: \(\) => \[groupEntry\(\)\]/, covers: ['+ Add a path… (a folder or a file; relative = against the row above; takes effect when you leave the box or press Enter)'], why: 'a Task Group\'s Context table — every row\'s path and «+ Add a path…» (lane task-group-context)' },
     { file: 'src/lib/task-detail.js', re: /const repoPf = pathField\(repoInput, \{ kind: 'file'/, covers: ['Absolute path for the .md file'], why: 'a Task Group\'s export / import file' },
     { file: 'src/lib/file-explorer.js', re: /this\._pathField = pathField\(this\.pathInput, \{/, covers: ['src/lib/file-explorer.js:file-path-input'], why: 'the Files window\'s path bar (its machine)' },
     { file: 'src/lib/setup-flows.js', re: /const cwdPf = pathField\(cwdInput, \{/, covers: ['ob-cwd'], why: 'the tour\'s first chat — its folder' },
@@ -5672,6 +5672,14 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
 // one's ask) — reads `ready` (it may wait behind the open one's ask) and never judges its
 // liveness by `isConnected` on its own overlay / body / dialog (a queued body is detached: «Models — B» opened on «Loading…»
 // for ever) — `live()` is THE predicate. Both columns are printed.
+// Round 5 (acceptance r4 — every shape below was planted GREEN on 37c1b566): THE KEY NAMES THE FORM'S INPUTS — every parameter
+// its function receives that reaches a FIELD's value (`x.value = p`; a wrapper's field `value: p`), a LOAD (fetchJson / fetch /
+// api — in its own body or a handler it builds; a local derived from it counts) or a WRAPPER's key (a mountsDialog /
+// _mountsDialog call is a row of its own: its fields and its submit against its opts.key) is named by the key, or the call says
+// `// not the subject: <name> — <why>`; a key reading a member of a parameter the function takes as a LIST (Array.isArray) and a
+// key helper returning the same key whatever it is given are RED. THE CALLER IS TOLD reads a local async loader the body calls
+// (or an IIFE) as work after the open, and a liveness read by `parentNode` / `parentElement` / `document.contains(<own>)` as
+// one by isConnected.
 {
   const lit = (x) => x && x.type === 'Literal' && (x.value === 'form' || x.value === 'decision');
   const DYN = (n) => n && n.type === 'ConditionalExpression' && [n.consequent, n.alternate].every(lit);
@@ -5680,8 +5688,37 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
   const walkAll = (n, visit, parent = null) => { if (!n || typeof n.type !== 'string') return; visit(n, parent); for (const k of Object.keys(n)) { if (k === 'loc') continue; const c = n[k]; if (Array.isArray(c)) c.forEach((x) => walkAll(x, visit, n)); else if (c && typeof c.type === 'string') walkAll(c, visit, n); } };
   /** …a function's OWN body: nested functions skipped, except `keep(fn, parent)` ones (a timer's own .then / setTimeout) */
   const walkOwn = (n, visit, keep = () => false, parent = null) => { if (!n || typeof n.type !== 'string') return; if (parent && /Function/.test(n.type) && !keep(n, parent)) return; visit(n, parent); for (const k of Object.keys(n)) { if (k === 'loc') continue; const c = n[k]; if (Array.isArray(c)) c.forEach((x) => walkOwn(x, visit, keep, n)); else if (c && typeof c.type === 'string') walkOwn(c, visit, keep, n); } };
+  const LOAD_RE = /^(fetchJson|fetch|api)$/;
+  const idsIn = (x) => { const o = new Set(); walkAll(x, (y, par) => { if (y.type === 'Identifier' && !(par && par.type === 'MemberExpression' && par.property === y && !par.computed) && !(par && par.type === 'Property' && par.key === y && !par.computed)) o.add(y.name); }); return o; };
+  /** r5: THE FORM'S INPUTS — param → how it reaches the form: a field's value, a load (its own body and the handlers it builds); a
+   *  local whose init reads a param carries it. `fieldProps`: a wrapper's field descriptors (`value: p`) count as a field too */
+  const inputsOf = (fnNode, params, roots, fieldProps) => {
+    const taint = new Map();
+    const paramsOf = (x) => { const o = new Set(); for (const nm of idsIn(x)) { if (params.has(nm)) o.add(nm); for (const q of taint.get(nm) || []) o.add(q); } return o; };
+    const locals = []; walkAll(fnNode.body, (y) => { if (y.type === 'VariableDeclarator' && y.id.type === 'Identifier' && y.init && !/Function/.test(y.init.type)) locals.push(y); });
+    for (let pass = 0; pass < 3; pass++) for (const d of locals) { const ps = paramsOf(d.init); if (ps.size) taint.set(d.id.name, new Set([...(taint.get(d.id.name) || []), ...ps])); }
+    const out = new Map(); const add = (x, why) => { for (const q of paramsOf(x)) if (!out.has(q)) out.set(q, why); };
+    for (const root of roots) walkAll(root, (y) => {
+      if (y.type === 'AssignmentExpression' && y.left.type === 'MemberExpression' && !y.left.computed && y.left.property.name === 'value') add(y.right, 'its field shows it');
+      if (fieldProps && y.type === 'Property' && !y.computed && (y.key.name || y.key.value) === 'value') add(y.value, 'its field shows it');
+      if (y.type === 'CallExpression' && y.callee.type === 'Identifier' && LOAD_RE.test(y.callee.name)) for (const a of y.arguments) add(a, 'its load sends it');
+    });
+    return out;
+  };
+  /** r5: the subject rules of one keyed call → its RED lines (the inputs named; no member of a LIST; no constant helper) */
+  const subjectRules = ({ at, keyText, fn, params, reach, scanned, span, roots, fieldProps }) => {
+    const red = [];
+    const notSubj = new Set([...span.matchAll(/\/\/\s*not the subject:\s*([A-Za-z_$][\w$]*)/g)].map((m) => m[1]).concat(['app']));   // (`app` — the application handle every form is given — is never a subject)
+    const inputs = inputsOf(fn, params, roots, fieldProps);
+    const dropped = [...inputs].filter(([x]) => !reach.has(x) && !notSubj.has(x));
+    if (dropped.length) red.push(`${at} — the key «${keyText}» drops ${dropped.map(([x, why]) => `\`${x}\` (${why})`).join(', ')} — two such opens would share one form — name it, or say \`// not the subject: <name> — <why>\``);
+    const lists = new Set(); walkAll(fn, (y) => { if (y.type === 'CallExpression' && y.callee.type === 'MemberExpression' && y.callee.object.type === 'Identifier' && y.callee.object.name === 'Array' && y.callee.property.name === 'isArray' && y.arguments[0] && y.arguments[0].type === 'Identifier' && params.has(y.arguments[0].name)) lists.add(y.arguments[0].name); });
+    let listRead = null; for (const x of scanned) walkAll(x, (y) => { if (!listRead && y.type === 'MemberExpression' && !y.computed && y.object.type === 'Identifier' && lists.has(y.object.name) && !/^(length|map|filter|join|slice|some|every|find|reduce|forEach|sort|flatMap|concat)$/.test(y.property.name)) listRead = `${y.object.name}.${y.property.name}`; });
+    if (listRead) red.push(`${at} — the key reads \`${listRead}\` but this function takes \`${listRead.split('.')[0]}\` as a LIST (Array.isArray): a list's member is «undefined» — every search one subject`);
+    return red;
+  };
   const census103 = (files) => {
-    const rows = [], bad = [], escRed = [], idRed = [], keyRed = [], raisedRed = [], docRed = [], subjRed = [], readyRed = [], liveRed = [];
+    const rows = [], bad = [], escRed = [], idRed = [], keyRed = [], raisedRed = [], docRed = [], subjRed = [], readyRed = [], liveRed = [], wrapRows = [];
     const pend = [];   // r4: the queueable checks need every row's id first
     for (const [f, src] of files) {
       let ast;
@@ -5692,6 +5729,8 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
       const decls = new Map();   // r4: name → every init declared under it in the file (a key resolved through the ones in its scope)
       walkAll(ast, (n) => { if (n.type === 'VariableDeclarator' && n.id.type === 'Identifier' && n.init) decls.set(n.id.name, [...(decls.get(n.id.name) || []), n]); });
       const topLevel = new Set(); for (const st of ast.body) { const d = st.type === 'ExportNamedDeclaration' ? st.declaration : st; if (d && d.type === 'VariableDeclaration') d.declarations.forEach((x) => topLevel.add(x)); }
+      const localFns = new Map();   // r5: name → its function (a key helper, a loader the body calls)
+      walkAll(ast, (y) => { if (y.type === 'FunctionDeclaration' && y.id) localFns.set(y.id.name, y); if (y.type === 'VariableDeclarator' && y.id.type === 'Identifier' && y.init && /Function/.test(y.init.type)) localFns.set(y.id.name, y.init); });
       const fns = [];
       const walk = (n) => {
         if (!n || typeof n.type !== 'string') return;
@@ -5747,7 +5786,7 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
           let subject = '—';
           if (form && kv && !(kv.type === 'Literal' && kv.value === null)) {
             const allLit = (x) => !!x && (x.type === 'Literal' || (x.type === 'TemplateLiteral' && !x.expressions.length) || (x.type === 'ConditionalExpression' && allLit(x.consequent) && allLit(x.alternate)));
-            const reach = new Set(), seen = new Set(); let minted = false, idOption = false;
+            const reach = new Set(), seen = new Set(), scannedInits = []; let minted = false, idOption = false;
             const outer = fns[0];
             const params = new Set(); const bind = (q) => { if (!q) return; if (q.type === 'Identifier') params.add(q.name); else if (q.type === 'ObjectPattern') q.properties.forEach((r) => bind(r.type === 'RestElement' ? r.argument : r.value)); else if (q.type === 'ArrayPattern') q.elements.forEach(bind); else if (q.type === 'AssignmentPattern') bind(q.left); else if (q.type === 'RestElement') bind(q.argument); };
             for (const g of fns) g.params.forEach(bind);
@@ -5757,17 +5796,22 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
               if (y.type === 'MemberExpression' && !y.computed && y.property.name === 'id' && y.object.type === 'Identifier' && /^(o|opt|opts|options)$/.test(y.object.name)) idOption = true;
               if (y.type === 'Identifier' && !(par && par.type === 'MemberExpression' && par.property === y && !par.computed) && !(par && par.type === 'Property' && par.key === y && !par.computed)) {
                 reach.add(y.name);
-                if (depth < 3 && !params.has(y.name) && decls.has(y.name) && !seen.has(y.name)) { seen.add(y.name); for (const d of decls.get(y.name)) if (inScope(d)) scan(d.init, depth + 1); }
+                if (depth < 3 && !params.has(y.name) && decls.has(y.name) && !seen.has(y.name)) { seen.add(y.name); for (const d of decls.get(y.name)) if (inScope(d)) { scannedInits.push(d.init); scan(d.init, depth + 1); } }
               }
             });
             scan(kv, 0);
+            const scanned = [kv, ...scannedInits];
             if (allLit(kv)) subjRed.push(`${at} — a literal key names no subject («${keyText}»)`);
             else if (idOption && !minted) subjRed.push(`${at} — the key «${keyText}» is a caller's id option: it names the field's KIND, not its instance (mint the instance's own)`);
-            const loads = new Set();
-            if (fn && !minted) walkOwn(fn.body, (y) => { if (y.type === 'CallExpression' && y.callee.type === 'Identifier' && /^(fetchJson|fetch)$/.test(y.callee.name)) for (const a of y.arguments) walkAll(a, (z, par) => { if (z.type === 'Identifier' && !(par && par.type === 'MemberExpression' && par.property === z && !par.computed) && !(par && par.type === 'Property' && par.key === z && !par.computed) && params.has(z.name)) loads.add(z.name); }); });
-            const notSubj = new Set([...span.matchAll(/\/\/\s*not the subject:\s*([A-Za-z_$][\w$]*)/g)].map((m) => m[1]));
-            const dropped = [...loads].filter((x) => !reach.has(x) && !notSubj.has(x));
-            if (dropped.length) subjRed.push(`${at} — the key «${keyText}» drops ${dropped.map((x) => `\`${x}\``).join(', ')} that its loads send (two such requests would share one form) — name it, or say \`// not the subject: <name> — <why>\``);
+            if (fn && !minted) subjRed.push(...subjectRules({ at, keyText, fn, params, reach, scanned, span, roots: [fn.body], fieldProps: false }));
+            const helperAt = kv.type === 'Identifier' ? scannedInits.slice(0, 1) : [kv];   // the key itself (or the one local it names)
+            if (!minted) for (const x of helperAt) walkAll(x, (y) => {   // a key HELPER that returns the same key whatever it is given (key: keyOf(m))
+              if (y.type !== 'CallExpression' || y.callee.type !== 'Identifier' || !localFns.has(y.callee.name)) return;
+              const h = localFns.get(y.callee.name); const hp = new Set(); const hb = (q) => { if (!q) return; if (q.type === 'Identifier') hp.add(q.name); else if (q.type === 'ObjectPattern') q.properties.forEach((r) => hb(r.type === 'RestElement' ? r.argument : r.value)); else if (q.type === 'ArrayPattern') q.elements.forEach(hb); else if (q.type === 'AssignmentPattern') hb(q.left); else if (q.type === 'RestElement') hb(q.argument); };
+              h.params.forEach(hb);
+              const rets = h.body.type !== 'BlockStatement' ? [h.body] : []; if (h.body.type === 'BlockStatement') walkOwn(h.body, (z) => { if (z.type === 'ReturnStatement' && z.argument) rets.push(z.argument); });
+              if (rets.length && rets.every((r) => ![...idsIn(r)].some((nm) => hp.has(nm)))) subjRed.push(`${at} — the key helper \`${y.callee.name}()\` returns the same key whatever it is given (it reads none of its parameters) — one subject for every caller`);
+            });
             subject = minted ? 'minted per open / instance' : [...reach].filter((x) => params.has(x) || decls.has(x)).slice(0, 4).join(', ') || keyText;
           }
           // r4: the caller of a queueable form reads `ready` and judges liveness by live(), never its own elements' isConnected
@@ -5799,9 +5843,16 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
             if (y.type === 'AwaitExpression') after = 'await';
             else if (cal === 'then' || cal === 'focus') after = cal;
             else if (/^(setTimeout|requestAnimationFrame|queueMicrotask)$/.test(cal) && y.arguments[0]) walkAll(y.arguments[0], (z) => { if (!after && calleeOf(z) === 'focus') after = 'focus'; });
+            // r5: a LOCAL loader the body calls (or an IIFE) — its await / .then / focus is work after the open too (37c1b566 counted it a pure draw)
+            if (!after && y.type === 'CallExpression') {
+              let inner = /Function/.test(y.callee.type) ? y.callee : null;   // an IIFE, or the loader declared in THIS function (by its name)
+              if (y.callee.type === 'Identifier') walkAll(fn.body, (z) => { if (inner) return; if (z.type === 'FunctionDeclaration' && z.id && z.id.name === y.callee.name) inner = z; else if (z.type === 'VariableDeclarator' && z.id.type === 'Identifier' && z.id.name === y.callee.name && z.init && /Function/.test(z.init.type)) inner = z.init; });
+              const nm = y.callee.type === 'Identifier' ? `${y.callee.name}()` : 'an IIFE';
+              if (inner) walkOwn(inner.body, (z) => { if (after) return; const c = calleeOf(z); if (z.type === 'AwaitExpression') after = `await in ${nm}`; else if (c === 'then' || c === 'focus') after = `${c} in ${nm}`; });
+            }
           });
-          const liveReads = [];
-          for (const nm of shellNames) { const re = new RegExp(`(?<![\\w$.])${nm.replace(/[.$]/g, '\\$&')}\\.isConnected\\b`, 'g'); let m; while ((m = re.exec(scope))) liveReads.push(`${f}:${(fn ? fn.loc.start.line : 1) + scope.slice(0, m.index).split('\n').length - 1} ${nm}.isConnected`); }
+          const liveReads = [];   // (r5: a parentNode READ AS LIVENESS — negated, against null, an if's test — and document.contains(<own>); body.parentNode.append(…) is structure)
+          for (const nm of shellNames) { const e = nm.replace(/[.$]/g, '\\$&'); const re = new RegExp(`(?<![\\w$.])${e}\\.isConnected\\b|!\\s*${e}\\.(?:parentNode|parentElement)\\b|(?<![\\w$.])${e}\\.(?:parentNode|parentElement)\\s*[!=]==?\\s*null\\b|\\bif\\s*\\(\\s*${e}\\.(?:parentNode|parentElement)\\s*\\)|\\bdocument(?:\\.body|\\.documentElement)?\\.contains\\(\\s*${e}\\s*\\)`, 'g'); let m; while ((m = re.exec(scope))) liveReads.push(`${f}:${(fn ? fn.loc.start.line : 1) + scope.slice(0, m.index).split('\n').length - 1} ${m[0]}`); }
           if (form && kind === 'form' && (idKind === 'fixed' || idKind === 'the caller\'s')) pend.push({ at, idText, keyed: !!keyText && !(kv && kv.type === 'Literal' && kv.value === null), beside, never: on('undismissable'), gate: field || guarded || passesBody || idKind === 'the caller\'s', readsReady, liveReads, after });
           rows.push({ at, kind, later: later ? later[1].trim() : null, why: why ? why[1].trim() : null, opener, escape, field, id: idText, idKind, key: keyText, one: one ? one[1].trim() : null, beside, subject });
           // the root it returned — a caller's own Escape listener on it is RED (a FORM's Escape is its shell's ONE door)
@@ -5815,6 +5866,27 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
               const re = new RegExp(`${nm.replace(/[.$]/g, '\\$&')}\\.addEventListener\\(\\s*['"]keydown['"]([\\s\\S]{0,600}?)\\}\\s*\\)`, 'g');
               let m; while ((m = re.exec(scope))) if (/Escape/.test(m[1])) { const ln = (fn ? fn.loc.start.line : 1) + scope.slice(0, m.index).split('\n').length - 1; escRed.push(`${f}:${ln} — a keydown Escape listener on the form root \`${nm}\` (${at})`); }
             }
+          }
+        }
+        // r5: A WRAPPER'S KEY — a mountsDialog / _mountsDialog call is a form row of its own: what its fields show (`value:`) and what
+        // its submit sends are named by its opts.key (share-onto-dialog keyed the machine alone: F2 raised F1's form, Mount mounted F1)
+        const wname = n.type === 'CallExpression' ? (n.callee.type === 'Identifier' ? n.callee.name : n.callee.type === 'MemberExpression' && !n.callee.computed ? n.callee.property.name : null) : null;
+        if ((wname === 'mountsDialog' || wname === '_mountsDialog') && n.arguments[4] && n.arguments[4].type === 'ObjectExpression') {
+          const kp = n.arguments[4].properties.find((q) => q.type === 'Property' && !q.computed && (q.key.name || q.key.value) === 'key');
+          const ip = n.arguments[4].properties.find((q) => q.type === 'Property' && !q.computed && (q.key.name || q.key.value) === 'id');
+          const fn = fns[fns.length - 1];
+          if (kp && fn) {
+            const at = `${f}:${n.loc.start.line}`;
+            const span = lines.slice(Math.max(0, n.loc.start.line - 2), n.loc.end.line).join('\n') + '\n' + lines.slice(Math.max(0, n.arguments[4].loc.start.line - 2), n.arguments[4].loc.end.line).join('\n');
+            const params = new Set(); const bind = (q) => { if (!q) return; if (q.type === 'Identifier') params.add(q.name); else if (q.type === 'ObjectPattern') q.properties.forEach((r) => bind(r.type === 'RestElement' ? r.argument : r.value)); else if (q.type === 'ArrayPattern') q.elements.forEach(bind); else if (q.type === 'AssignmentPattern') bind(q.left); else if (q.type === 'RestElement') bind(q.argument); };
+            for (const g of fns) g.params.forEach(bind);
+            const reach = new Set(), seen = new Set(), scanned = [kp.value];
+            const look = (x, depth) => walkAll(x, (y, par) => { if (y.type === 'Identifier' && !(par && par.type === 'MemberExpression' && par.property === y && !par.computed) && !(par && par.type === 'Property' && par.key === y && !par.computed)) { reach.add(y.name); if (depth < 3 && !params.has(y.name) && decls.has(y.name) && !seen.has(y.name)) { seen.add(y.name); for (const d of decls.get(y.name)) if (d.start >= fns[0].start && d.end <= fns[0].end) { scanned.push(d.init); look(d.init, depth + 1); } } } });
+            look(kp.value, 0);
+            const keyText = src.slice(kp.value.start, kp.value.end).replace(/\s+/g, ' ').slice(0, 70);
+            const red = subjectRules({ at, keyText, fn, params, reach, scanned, span, roots: [n.arguments[1], n.arguments[3]].filter(Boolean), fieldProps: true });
+            subjRed.push(...red);
+            wrapRows.push({ at, id: ip ? src.slice(ip.value.start, ip.value.end).replace(/\s+/g, ' ').slice(0, 40) : '—', key: keyText, subject: [...reach].filter((x) => params.has(x)).join(', ') || keyText, red: red.length });
           }
         }
         for (const k of Object.keys(n)) { if (k === 'loc') continue; const c = n[k]; if (Array.isArray(c)) c.forEach(walk); else if (c && typeof c.type === 'string') walk(c); }
@@ -5832,7 +5904,7 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
       if (r.queueable && r.after && !r.readsReady) readyRed.push(`${r.at} — a queueable form («${r.idText}», keyed, may wait behind the open one's ask) whose caller works after the open (${r.after}) and never reads \`ready\``);
       if (r.queueable) for (const x of r.liveReads) liveRed.push(`${x} — a queueable form's liveness by its own element (${r.at}): a queued body is detached — use the shell's live()`);
     }
-    return { rows, bad, escRed, idRed, keyRed, raisedRed, docRed, subjRed, readyRed, liveRed };
+    return { rows, bad, escRed, idRed, keyRed, raisedRed, docRed, subjRed, readyRed, liveRed, wrapRows };
   };
   /** THE ONE PREDICATE's readers: a dialog-root selector or class read in src/ outside form-yield.js (acorn over every literal);
    *  r3: and the floats' owner — a `data-owner-form` / `ownerForm` read anywhere but form-yield.js */
@@ -5948,7 +6020,8 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
   // r4: THE KEY IS THE SUBJECT (census 1) and THE CALLER IS TOLD (census 2)
   const keyed = real.rows.filter((r) => (r.kind === 'form' || r.kind === 'dynamic') && r.key && r.key !== 'null');
   console.log(`  THE KEY IS THE SUBJECT (r4) — file:line · id · key · what it names · beside (two subjects, two forms):\n${keyed.map((r) => `    ${short(r)} · ${r.id} · ${r.key} · ${r.subject}${r.beside ? ' · beside' : ''}`).join('\n')}`);
-  ok(real.subjRed.length === 0, `§103 r4 every key names ONE subject (${keyed.length} keyed forms): no literal key, no caller's id option standing for an instance, every parameter its loads send named by the key${real.subjRed.length ? ' — RED: ' + real.subjRed.join(' | ') : ''}`);
+  console.log(`  THE KEY IS THE SUBJECT — the WRAPPER calls (r5: a mountsDialog / _mountsDialog call against its opts.key — its fields' values and its submit's loads) — file:line · id · key · what it names:\n${real.wrapRows.map((r) => `    ${r.at.replace(/^src\/lib\//, '')} · ${r.id} · ${r.key} · ${r.subject}${r.red ? ' · RED' : ''}`).join('\n')}`);
+  ok(real.subjRed.length === 0 && real.wrapRows.length >= 8, `§103 r4 + r5 every key names ONE subject — its INPUTS (${keyed.length} keyed forms + ${real.wrapRows.length} wrapper calls): no literal key, no caller's id option standing for an instance, no member of a LIST, no constant helper; every parameter that reaches a field's value, a load or a wrapper's key named by the key (or said «not the subject»)${real.subjRed.length ? ' — RED: ' + real.subjRed.join(' | ') : ''}`);
   const fixedForms = real.rows.filter((r) => r.kind === 'form' && (r.idKind === 'fixed' || r.idKind === 'the caller\'s'));
   const queueable = fixedForms.filter((r) => r.queueable);
   console.log(`  THE CALLER IS TOLD (r4) — ${fixedForms.length} fixed-id forms read \`raised\`; ${queueable.length} QUEUEABLE (keyed, not beside — another subject under the id waits behind the open one's ask) read \`ready\` and judge liveness by live():\n${queueable.map((r) => `    ${short(r)} · ${r.id} · ${r.readsReady ? 'reads ready ✓' : r.after ? `works after the open (${r.after}) — ready ✗` : 'a pure synchronous draw (its content lands in the body that opens)'} · own isConnected ${r.liveReads.length}`).join('\n')}\n  never queued: ${fixedForms.filter((r) => !r.queueable).length} (one subject ${fixedForms.filter((r) => !r.queueable && !r.key).length} · beside ${fixedForms.filter((r) => !r.queueable && r.beside).length} · undismissable ${fixedForms.filter((r) => !r.queueable && r.key && !r.beside && r.never).length} · read-only under their own id ${fixedForms.filter((r) => !r.queueable && r.key && !r.beside && !r.never).length})`);
@@ -5992,6 +6065,23 @@ console.log('\n§97 one grant model: admission only in grant-model · no reader 
     && ctl.subjRed.length === 3 && has(ctl.subjRed, 'zz-n.js:1') && has(ctl.subjRed, 'zz-o.js:1') && has(ctl.subjRed, 'zz-p.js:1') && !has(ctl.subjRed, 'zz-o.js:2') && !has(ctl.subjRed, 'zz-p.js:2')
     && ctl.readyRed.length === 2 && has(ctl.readyRed, 'zz-q.js:1') && has(ctl.readyRed, 'zz-q.js:5') && ctl.liveRed.length === 1 && has(ctl.liveRed, 'zz-q.js:1'),
     `§103 NEGATIVE CONTROLS: a call without kind, a kind that is no kind, a form-later on a form, a form-later without its reason, a nested \`kind\` (not the call's own), a decision without its reason and a FIELD decision with a retired reason are RED; a form root's own Escape listener is RED; r3: a form with no id, a keyless fixed id under a varying title, a fixed id whose caller never reads \`raised\` and a liveness found by document id are RED; r4: a literal key ('task-context-row'), a key that is a caller's id option (not minted per instance), a key dropping what its load sends (unless said), a queueable caller that never reads \`ready\` and one judging liveness by its body's isConnected are RED — a minted instance key, a said «not the subject», a caller reading ready + live() and a beside form are not (${JSON.stringify({ bad: ctl.bad, esc: ctl.escRed, id: ctl.idRed, key: ctl.keyRed, raised: ctl.raisedRed, doc: ctl.docRed, subj: ctl.subjRed, ready: ctl.readyRed, live: ctl.liveRed })})`);
+  // r5: THE SHAPES THE ACCEPTANCE PLANTED (each GREEN on 37c1b566) — RED by name; their twins that name the input are not
+  const ctl5 = census103([
+    ['src/lib/zz-r5a.js', "function a5(app, m, { path = '' } = {}) { const { body, raised } = createModalShell({ id: 'r5a', key: m.hostId, title: 'A', kind: 'form' }); if (raised) return; const i = document.createElement('input'); i.value = path || ''; body.append(i); }\nfunction a6(app, m, { path = '' } = {}) { const { body, raised } = createModalShell({ id: 'r5a2', key: `${m.hostId}:${path}`, title: 'A', kind: 'form' }); if (raised) return; const i = document.createElement('input'); i.value = path || ''; body.append(i); }"],
+    ['src/lib/zz-r5b.js', "function b5(app, a, { q = '' } = {}) { const accounts = Array.isArray(a) ? a : [a]; const { raised } = createModalShell({ id: 'r5b', key: `${a.id}:${q}`, title: 'B', kind: 'form' }); if (raised) return; }\nfunction b6(app, a, { q = '' } = {}) { const accounts = Array.isArray(a) ? a : [a]; const { raised } = createModalShell({ id: 'r5b2', key: `${accounts.map((x) => x.id).join()}:${q}`, title: 'B', kind: 'form' }); if (raised) return; }"],
+    ['src/lib/zz-r5c.js', "function c5(h, folder) { mountsDialog('T', [{ key: 'folder', label: 'F', value: folder || '' }], 'Go', async (v, { close }) => { close(); }, { id: 'r5c', key: h.id }); }\nfunction c6(h, folder) { mountsDialog('T', [{ key: 'folder', label: 'F', value: folder || '' }], 'Go', async (v, { close }) => { await api(`/api/m/${h.id}`); close(); }, { id: 'r5c2', key: `${h.id}:${folder}` }); }"],
+    ['src/lib/zz-r5d.js', "const keyOf = (m) => 'machine';\nfunction d5(m) { const { raised } = createModalShell({ id: 'r5d', key: keyOf(m), title: 'D', kind: 'form' }); if (raised) return; }\nconst keyOf2 = (m) => `machine:${m.hostId}`;\nfunction d6(m) { const { raised } = createModalShell({ id: 'r5d2', key: keyOf2(m), title: 'D', kind: 'form' }); if (raised) return; }"],
+    ['src/lib/zz-r5e.js', "function e5(a) { const { body, raised } = createModalShell({ id: 'r5e', key: a, title: 'E', kind: 'form' }); if (raised) return; const i = document.createElement('input'); body.append(i); const load = async () => { const r = await fetchJson('/x'); i.focus(); }; load(); }\nfunction e6(a) { const { body, raised, ready } = createModalShell({ id: 'r5e2', key: a, title: 'E', kind: 'form' }); if (raised) return; const i = document.createElement('input'); body.append(i); const load = async () => { const r = await fetchJson('/x'); i.focus(); }; ready.then((s) => { if (s) load(); }); }"],
+    ['src/lib/zz-r5f.js', "async function f5(a) { const { body, overlay, raised, ready } = createModalShell({ id: 'r5f', key: a, title: 'F', kind: 'form' }); if (raised) return; body.append(document.createElement('input')); if (!(await ready)) return; if (!overlay.parentNode) return; if (!document.contains(body)) return; body.parentNode.append(document.createElement('div')); }"],
+  ]);
+  const r5 = (arr, k) => arr.filter((b) => b.startsWith('src/lib/' + k));
+  ok(r5(ctl5.subjRed, 'zz-r5a.js:1').length === 1 && /drops `path` \(its field shows it\)/.test(r5(ctl5.subjRed, 'zz-r5a.js:1')[0]) && !r5(ctl5.subjRed, 'zz-r5a.js:2').length
+    && r5(ctl5.subjRed, 'zz-r5b.js:1').some((x) => /reads `a\.id` but this function takes `a` as a LIST/.test(x)) && !r5(ctl5.subjRed, 'zz-r5b.js:2').length
+    && r5(ctl5.subjRed, 'zz-r5c.js:1').length === 1 && /drops `folder` \(its field shows it\)/.test(r5(ctl5.subjRed, 'zz-r5c.js:1')[0]) && !r5(ctl5.subjRed, 'zz-r5c.js:2').length
+    && r5(ctl5.subjRed, 'zz-r5d.js:2').some((x) => /key helper `keyOf\(\)` returns the same key/.test(x)) && !r5(ctl5.subjRed, 'zz-r5d.js:4').length
+    && r5(ctl5.readyRed, 'zz-r5e.js:1').length === 1 && /await in load\(\)/.test(r5(ctl5.readyRed, 'zz-r5e.js:1')[0]) && !r5(ctl5.readyRed, 'zz-r5e.js:2').length
+    && r5(ctl5.liveRed, 'zz-r5f.js:1').length === 2 && ctl5.liveRed.some((x) => /!overlay\.parentNode/.test(x)) && ctl5.liveRed.some((x) => /document\.contains\(body\)/.test(x)) && !ctl5.liveRed.some((x) => /body\.parentNode\.append|parentNode$/.test(x.split(' — ')[0]) && !/!/.test(x.split(' — ')[0])),
+    `§103 r5 NEGATIVE CONTROLS (the shapes the acceptance planted GREEN on 37c1b566): a prefilled field value the key drops, a key reading a member of a LIST (a.id), a wrapper's opts.key dropping its field's value (mountsDialog), a key helper returning a constant (keyOf(m)), a nested async loader the body calls (a «pure draw» on 37c1b566) and a liveness by !overlay.parentNode / document.contains(body) are RED by name — each twin that names the input / reads ready, and body.parentNode.append(…), is not (${JSON.stringify({ subj: ctl5.subjRed, ready: ctl5.readyRed, live: ctl5.liveRed })})`);
   const rctl = readers103([
     ['src/lib/zz-r1.js', "const open = document.querySelectorAll('.dialog-overlay');"],
     ['src/lib/zz-r2.js', "if (el.classList.contains('dialog-form')) x();"],

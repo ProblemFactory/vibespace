@@ -166,9 +166,10 @@ export function formInside({ at, box, ws } = {}) {
   return left === at.left && top === at.top ? null : { left, top };
 }
 /** MAY A FOCUS ENTER IT (PURE): while it is the active window — a press into it makes it so; a Tab the person pressed
- *  brings it in front — never a script's focus() while it stands behind. */
-export function formFocusVerdict({ active = false, byKeyboard = false } = {}) {
-  if (active) return 'allow';
+ *  brings it in front — never a script's focus() while it stands behind. r5: a move WITHIN it (the focus was already inside)
+ *  enters nothing — allowed (37c1b566 sent it back to the field it came from, whose focusin sent it back again: the stack overflowed). */
+export function formFocusVerdict({ active = false, byKeyboard = false, within = false } = {}) {
+  if (active || within) return 'allow';
   return byKeyboard ? 'raise' : 'refuse';
 }
 

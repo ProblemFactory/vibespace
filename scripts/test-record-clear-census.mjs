@@ -1183,6 +1183,7 @@ const CACHES = {
   'src/lib/task-log.js|userClosed': 'entry ids the user closed',
   'src/lib/task-detail.js|foldOpen': 'lane task-group-context: the 更多选项 fold left open, per Task Group id (an id → a flag; no record words)',
   'src/lib/task-detail.js|unresolved': 'lane task-group-context: the text typed into a Context row that did not resolve (the person\'s own typing — a path, never a record\'s words), per window',
+  'src/lib/task-detail.js|byRow': 'lane dialog-yield r5: a Context row\'s key (its path) → that row\'s live path field, carried across repaints so its open picker survives a tasks-updated (per window; the fields of rows gone are destroyed at the paint — never a record\'s words)',
   'src/lib/inbox-window.js|tailIds': 'the resolved tail\'s ids',
   'src/lib/jobs-panel.js|EXPANDED': 'expanded job ids',
   'src/lib/channel-window.js|placed': 'vendor ids placed (an adapter conversation)',

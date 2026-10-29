@@ -11052,4 +11052,6 @@ export default {
   "This file was published elsewhere while the dialog was open — it shows as it is now": "对话框打开期间，这个文件已在别处发布——现在显示的是它当前的状态",
   "This page was unpublished elsewhere while the dialog was open — it shows as it is now": "对话框打开期间，这个页面已在别处取消发布——现在显示的是它当前的状态",
   "Could not re-check this page — try again": "无法重新核对这个页面——请再试一次",
+  "The field this picker was for is gone — the picker closed and nothing was written": "这个选择器所属的输入框已不存在——选择器已关闭，没有写入任何内容",
+  "The row {path} is gone — {picked} was not written": "「{path}」这一行已不存在——没有写入 {picked}",
 };

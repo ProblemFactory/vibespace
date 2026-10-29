@@ -25,10 +25,12 @@ export async function openAccountModelsDialog({ accountId, name = '', onTest = n
   if (raised) return null;   // raised: the same subject's form, as it was
   body.classList.add('am-body');
   body.textContent = t('Loading…');
-  const r = await fetchJson(`/api/accounts/${encodeURIComponent(accountId)}/models`);
   // lane dialog-yield r4: QUEUED behind another account's open Models (its ask) — the content lands when this one opens; null =
-  // the person kept that one, or closed this one while it loaded (a detached body is no «closed»: B opened on «Loading…» for ever)
-  if (!(await ready) || !live()) return null;
+  // the person kept that one (a detached body is no «closed»: B opened on «Loading…» for ever). r5: READ WHEN IT OPENS — an
+  // account deleted while B waited says so («Could not read the models — …»), never the rows read at the ask
+  if (!(await ready)) return null;
+  const r = await fetchJson(`/api/accounts/${encodeURIComponent(accountId)}/models`);
+  if (!live()) return null;   // closed while it loaded
   if (!r || r.error || !r.provider) {
     body.textContent = r && r.provider === null ? t('This account’s harness has no model provider') : t('Could not read the models — {reason}', { reason: (r && r.error) || t('server unreachable') });
     return null;

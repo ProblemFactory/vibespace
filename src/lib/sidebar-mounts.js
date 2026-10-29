@@ -1100,7 +1100,7 @@ export function installSidebarMounts(Sidebar) {
         const via = r.via === 'tunnel' ? tr('over the device tunnel') : tr('over the public address');
         showToast(tr('Mounted at {mp} on {name} ({via})', { mp: r.mountpoint, name: h.name, via }));
         this._renderMounts();
-      }, { id: 'share-onto-dialog', key: h.id });
+      }, { id: 'share-onto-dialog', key: `${h.id}:${(prefillFolder && prefillFolder.path) || prefillFolder || ''}` });   // the machine AND the folder (lane dialog-yield r5: F2 on a one-machine hub raised F1's form and mounted F1)
     },
 
     // The PULL direction on any machine row (B-f3e8 — ONE dialog for ssh and

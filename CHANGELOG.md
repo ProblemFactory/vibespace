@@ -25,6 +25,12 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - On a phone, a dialog's buttons stay above the on-screen keyboard.
 - The vault's password dialogs and a machine's sign-in no longer block the chat.
 - When a window of the same kind has unsaved changes, opening another one asks first; Discard opens the one you asked for, with its content.
+- On a phone, the Design window's Comment and Artboards sheets sit right on top of the keyboard with their header in view.
+- A second search, .deb file, helper request or folder to share now opens its own dialog instead of bringing back the first one.
+- Asking for another app on a machine no longer closes the window of an install that is still running.
+- In a Task Group's Context table, the folder picker keeps working when the group changes on another screen, and says so if its row is removed.
+- A form with unsaved changes comes to the front when it has to ask first, so you can answer.
+- Change build…, reopened after a download, now waits behind the window you moved to.
 
 ## 2.369.360 — 2026-10-27
 

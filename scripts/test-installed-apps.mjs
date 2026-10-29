@@ -283,7 +283,7 @@ console.log('§8 the dialog: installed list + filter + keyed rows + Examples / R
   const body = ROOT.children[ROOT.children.length - 1];
   ok(body.find('machine-apps-note')[0].textContent === 'Listing the apps on WIN-DESK1…', 'the dialog opens saying it is listing the machine');
   await tick(); await tick();
-  ok(asked[0] === '/api/desktop/machine-desktop/apps?host=win-a', 'it asks the kept list (no fresh) when it opens', asked);
+  ok(asked.filter((u) => /\/machine-desktop\/apps\?/.test(u)).join() === '/api/desktop/machine-desktop/apps?host=win-a', 'it asks the kept list (no fresh) when it opens', asked);   // (lane dialog-yield r5: the list is read once the form OPENS — after its `ready`, so after the dialog's other first asks)
   const rowsNow = () => body.find('machine-apps-row').filter((b) => b.parent && !b.parent.hidden);
   const title = body.find('machine-apps-title')[0];
   ok(title.textContent === 'Installed on WIN-DESK1 (2)' && J(rowsNow().map((b) => b.firstChild.textContent)) === J(['7-Zip', 'JASP']) && rowsNow()[1].lastChild.textContent === 'Start menu' && rowsNow()[0].lastChild.textContent === 'Installed programs', '"Installed on WIN-DESK1 (2)": each row = its name + where Windows keeps it');

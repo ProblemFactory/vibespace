@@ -102,13 +102,17 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
   winInfo._taskDetailSetTab = setTab;
 
   // ── 设置 ──
-  let fields = [];            // the path fields of the current paint (each holds document listeners — destroyed per paint)
+  let fields = [];            // the path fields of the current paint (each holds document listeners — destroyed when its row goes)
+  // lane dialog-yield r5: THE KEYED-ROW LAW (2.369.169) for the path fields — row key → its field, carried ACROSS repaints: a
+  // tasks-updated broadcast while row A's picker was open rebuilt every field (Browse… on the rebuilt row opened a SECOND picker,
+  // a pick in the first wrote nothing, in silence — measured on 37c1b566); a field whose row is gone is destroyed (its picker closes, said)
+  let byRow = new Map();
   const unresolved = new Map(); // row key → the typed text that did not take (it stays in its box, saying 未生效)
   let preview = null;         // the last GET /api/tasks/:id/context answer
   let previewSeq = 0, previewTimer = null;
   let settingsDirty = false;
 
-  const destroyFields = () => { for (const f of fields) { try { f.destroy(); } catch { } } fields = []; };
+  const destroyFields = () => { for (const f of fields) { try { f.destroy(); } catch { } } fields = []; byRow = new Map(); };
   const section = (parent, label, hint, cls = '') => {
     const s = document.createElement('div');
     s.className = 'task-detail-section' + (cls ? ' ' + cls : '');
@@ -140,20 +144,28 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
   };
   const groupEntry = () => ({ id: task.id, name: task.title, color: sidebar.getTaskColor ? sidebar.getTaskColor(task) : null, folders: sidebar._folderPaths(task), context: task.contextDir || null, selected: false });
 
-  const makePathField = (input, { at, onCommit }) => {
+  /** a row's path field: the one its key held at the last paint (moved into the new row, its picker and its words kept), else a new one */
+  const makePathField = (input, { at, onCommit, key = null, was = null }) => {
+    const old = key && was ? was.get(key) : null;
+    if (old) { was.delete(key); old._bind.at = at; old._bind.onCommit = onCommit; fields.push(old); byRow.set(key, old); return old; }
+    const bind = { at, onCommit };
     const pf = pathField(input, {
-      bases: () => basesFor(at), groupsOf: () => [groupEntry()], host: () => null,
-      kind: 'file', create: 'never', picker: true, id: 'task-context-row', onCommit,
+      bases: () => basesFor(bind.at), groupsOf: () => [groupEntry()], host: () => null,
+      kind: 'file', create: 'never', picker: true, id: 'task-context-row', onCommit: (info) => bind.onCommit(info),
       onState: (v) => { if (v.status === 'unresolved') unresolved.set(input.dataset.rowKey || '', input.value); else if (v.status === 'ok') unresolved.delete(input.dataset.rowKey || ''); },
     });
+    pf._bind = bind;
     fields.push(pf);
+    if (key) byRow.set(key, pf);
     return pf;
   };
 
   const rowKeyOf = (r) => (r.ref ? '@' + r.ref : r.path);
+  /** every row's key in table order — a path written twice is `<path>#1`, … (two rows, two fields) */
+  const rowKeysOf = (rows) => { const n = new Map(); return rows.map((r) => { const k = rowKeyOf(r); const c = n.get(k) || 0; n.set(k, c + 1); return c ? `${k}#${c}` : k; }); };
 
-  /** ONE path row of the table. */
-  const pathRow = (table, r, i) => {
+  /** ONE path row of the table. `rk` = its key; `was` = the last paint's fields by key (its own is carried over) */
+  const pathRow = (table, r, i, rk = rowKeyOf(r), was = null) => {
     const x = resOf(i), kind = kindOf(i);
     const row = document.createElement('div');
     row.className = 'ctx-row';
@@ -161,12 +173,14 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
     row.dataset.kind = kind;
     // ① 路径 — the shared path field (files as well as folders); under it: where it resolved, then the plan's words
     const pc = document.createElement('div'); pc.className = 'ctx-cell ctx-path';
-    const input = document.createElement('input');
+    const kept = was && was.get(rk);
+    const input = kept ? kept.input : document.createElement('input');
     input.className = 'task-detail-input ctx-path-input';
     input.dataset.rowKey = rowKeyOf(r);
-    input.value = unresolved.has(rowKeyOf(r)) ? unresolved.get(rowKeyOf(r)) : r.path;
+    const want = unresolved.has(rowKeyOf(r)) ? unresolved.get(rowKeyOf(r)) : r.path;
+    if (!kept) input.value = want; else if (document.activeElement !== input && input.value !== want) kept.set(want, { commit: false });
     input.title = r.path;
-    pc.appendChild(input);
+    if (!kept) pc.appendChild(input);
     const res = document.createElement('div'); res.className = 'ctx-res';
     const resWords = [];
     if (x && x.abs && x.abs !== r.path && x.kind !== 'remote') resWords.push('= ' + tilde(x.abs, home()));
@@ -180,15 +194,18 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
     pc.append(res, plan);
     row.appendChild(pc);
     const pf = makePathField(input, {
-      at: i,
+      at: i, key: rk, was,
       onCommit: (info) => {
         const text = String(info.text || '').trim() || info.path;
-        if (text === r.path) return;
-        unresolved.delete(rowKeyOf(r));
+        // the row AS IT IS NOW (a repaint may have moved it): found by its key — gone ⇒ said, never a silent drop (r5)
         const rows = rowsOf();
-        rows[i] = { ...rows[i], path: text };
+        const j = rowKeysOf(rows).indexOf(rk);
+        if (j < 0) { showToast(t('The row {path} is gone — {picked} was not written', { path: r.path, picked: text }), { type: 'error' }); return; }
+        if (text === rows[j].path) return;
+        unresolved.delete(rowKeyOf(rows[j]));
+        rows[j] = { ...rows[j], path: text };
         // the verbs follow the kind (POC v2.1): a file never auto-joins nor holds the notes
-        if (info.isFile) rows[i].tags = (rows[i].tags || []).filter((g) => g !== 'discover' && g !== 'notes');
+        if (info.isFile) rows[j].tags = (rows[j].tags || []).filter((g) => g !== 'discover' && g !== 'notes');
         writeRows(rows);
       },
     });
@@ -396,7 +413,7 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
     settingsDirty = false;
     const refocus = body.contains(_ae) && /^(INPUT|TEXTAREA)$/.test(_ae.tagName) ? (_ae.dataset.rowKey ? `[data-row-key="${CSS.escape(_ae.dataset.rowKey)}"]` : _ae.placeholder ? `[placeholder="${CSS.escape(_ae.placeholder)}"]` : null) : null;
     const scrollTop = body.scrollTop;
-    destroyFields();
+    const was = byRow; byRow = new Map(); fields = [];   // r5: each row's field is carried over by its key; the rest are destroyed below
     body.innerHTML = '';
     const host = document.createElement('div');
     host.className = 'task-detail-settings';
@@ -429,7 +446,8 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
     headRow.innerHTML = [t('Path'), t('Note (for people and the agent)'), t('Tell the agent'), t('Tags'), ''].map((l) => `<div class="ctx-cell">${escHtml(l)}</div>`).join('');
     table.appendChild(headRow);
     const rows = task.ctx || [];
-    rows.forEach((r, i) => (r.ref ? refRow(table, r, i) : pathRow(table, r, i)));
+    const keys = rowKeysOf(rows);
+    rows.forEach((r, i) => (r.ref ? refRow(table, r, i) : pathRow(table, r, i, keys[i], was)));
     if (!rows.length) {
       const empty = document.createElement('div'); empty.className = 'empty-hint';
       empty.textContent = t('No rows yet — add the folders and files this group works in. A new conversation is told each one at the depth you choose.');
@@ -437,16 +455,17 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
     }
     ctxSec.appendChild(table);
     // ＋ 添加路径…
-    const addInput = document.createElement('input');
+    const addKept = was.get('+add');
+    const addInput = addKept ? addKept.input : document.createElement('input');
     addInput.className = 'task-detail-input ctx-add-input';
     addInput.placeholder = t('+ Add a path… (a folder or a file; relative = against the row above; takes effect when you leave the box or press Enter)');
     addInput.dataset.rowKey = '+add';
-    if (unresolved.has('+add')) addInput.value = unresolved.get('+add');
+    if (unresolved.has('+add') && !addKept) addInput.value = unresolved.get('+add');
     const addWrap = document.createElement('div'); addWrap.className = 'ctx-add';
-    addWrap.appendChild(addInput);
+    if (!addKept) addWrap.appendChild(addInput);
     ctxSec.appendChild(addWrap);
     const addPf = makePathField(addInput, {
-      at: rows.length,
+      at: rows.length, key: '+add', was,
       onCommit: (info) => {
         const text = String(info.text || '').trim() || info.path;
         unresolved.delete('+add');
@@ -458,7 +477,7 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
       },
     });
     if (unresolved.has('+add')) { const w = document.createElement('div'); w.className = 'ctx-res ctx-warn'; w.textContent = t('Not applied: {path} was not found', { path: unresolved.get('+add') }); addWrap.appendChild(w); }
-    void addPf;
+    if (addKept) addWrap.insertBefore(addPf.el, addWrap.firstChild);
     // ＋ 引用另一个任务组…
     const refBtn = document.createElement('button');
     refBtn.className = 'task-detail-link ctx-ref-add';
@@ -495,7 +514,8 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
     // 更多选项 — folded, its values on the chips
     paintMore(host);
 
-    if (refocus) { const el = body.querySelector(refocus); if (el) el.focus(); }
+    for (const f of was.values()) { try { f.destroy(); } catch { } }   // their rows are gone (an open picker closes, said)
+    if (refocus) { const el = body.querySelector(refocus); if (el && document.activeElement !== el) el.focus(); }
     body.scrollTop = scrollTop;
     paintPlan();
     fetchPreview();

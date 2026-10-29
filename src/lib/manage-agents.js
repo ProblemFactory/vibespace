@@ -1302,7 +1302,7 @@ export function installManageAgents(App, ctx = {}) {
     const subs = (list?.accounts || []).filter((x) => x.type === 'subscription' && (x.backend || 'claude') === be && !x.pooled);
     const fresh = (list?.accounts || []).find((x) => x.id === poolId) || a || {};
     // lane dialog-unsaved-guard: members / placement / order changed and not saved ⇒ ✕ / Esc / the backdrop asks
-    const { body, close, raised } = createModalShell({ id: 'pool-members-dialog', key: poolId, title: t('Pool members — {name}', { name: a?.name || '' }), minWidth: '460px', escapeToClose: true,
+    const { body, close, raised } = createModalShell({ id: 'pool-members-dialog', key: poolId, title: t('Pool members — {name}', { name: a?.name || '' }), minWidth: '460px', escapeToClose: true,   // not the subject: a — the pool's own row as the list drew it (its id is the key)
       unsaved: { isDirty: () => JSON.stringify(st) !== st0, save: () => save() }, kind: 'form' });
     if (raised) return null;   // raised: the same subject's form, as it was
     const explicit = Array.isArray(fresh.members) && fresh.members.length ? fresh.members : null;
