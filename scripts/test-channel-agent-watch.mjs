@@ -1433,7 +1433,7 @@ console.log('⑧ ROUND 10 (lane wake-approve-card) — a held decision ends only
 // THE HELD WORLD, generalized: `setup(eng)` writes the grains, `live` is the roster the engine reads (mutable — a conversation
 // stops / runs again), 30 hits aged 3 days ⇒ the next boot sets them aside for ONE decision; `lines` = the journal
 const SAID10 = (k, p) => String(k).replace(/\{(\w+)\}/g, (_, x) => (p && p[x] != null ? p[x] : ''));
-async function heldWorld10(name, { ENGM = ENG, live, setup }) {
+async function heldWorld10(name, { ENGM = ENG, live, setup, park = null }) {
   const lines = [];
   const m1 = mkEngine(name, { ENGM, live });
   await m1.eng.pass(A, { force: true });
@@ -1444,7 +1444,7 @@ async function heldWorld10(name, { ENGM = ENG, live, setup }) {
   await m1.eng.onFresh(rec, C, Array.from({ length: 30 }, (_, i) => ({ ...base, id: `old10-${i}`, text: `old message ${i}` })), { origin: 'test' });
   if (m1.eng.settleWakes) await m1.eng.settleWakes();
   const t0 = m1.clock();
-  await m1.eng.store.index.update(() => { const e2 = m1.eng.store.index.entry(A, C, { create: false }); for (const x of e2.pending) x.at = t0 - 3 * 86400e3; });
+  await m1.eng.store.index.update(() => { const e2 = m1.eng.store.index.entry(A, C, { create: false }); if (park) park(e2, base, t0); for (const x of e2.pending) x.at = t0 - 3 * 86400e3; });   // r11 `park`: hits a watcher nobody runs for are parked by hand, as the engine does
   m1.eng.stop(); await new Promise((r) => setTimeout(r, 10));
   const m2 = mkEngine(name, { ENGM, live, lines });
   m2.eng.start(); await new Promise((r) => setTimeout(r, 20));
@@ -1565,6 +1565,73 @@ try {
   const walks = lines10.map((l, i) => ({ l, i: i + 1 })).filter(({ l }) => /\.convs\b/.test(l) && !/^\s*(\*|\/\/|\/\*\*)/.test(l) && !/\b(?:plan|p0)\.convs\b/.test(l) && !ALLOWED10.some((re) => re.test(l)));
   ok(walks.length === 0 && ALLOWED10.every((re) => lines10.some((l) => re.test(l))), `(d) THE ONE WALKER: no line of channels-access.js reads a held request's conversations but heldConvsOf (the writer's push and the skipped count aside) — ${walks.length} other read(s) (8b46c196: 7 — heldCountOf, fileHeldCard, holdAside's find, releaseAside, Deliver's flush, the answer, heldWatched)`, J2s(walks.map((x) => `${x.i}: ${x.l.trim().slice(0, 100)}`)));
 }
+
+console.log('⑨ ROUND 11 (lane wake-approve-card) — a rule\'s REACH is a fact of the rule: a held decision whose conversation the rule no longer covers ends by name, as its live hits do');
+// THE RULE'S REACH (the r10 acceptance's minor, repro/accept-r10/skeptic/probe-held.mjs legs 1–2): a rule «title: Ops» names
+// Worker (a wake row ⇒ a CONVERSATION plan, source 'pattern'; a digest row ⇒ a SCOPE plan); the 30 hits are held at boot.
+// The owner edits the rule to «title: Deploy» — the rule stands, it no longer covers the held conversation: the same write's
+// live prune drops that conversation's pending hits for Worker, and the held decision ends with them, by name (704a0f4c: open
+// for ever, its Deliver refused «not in its group, or left out of it» — Worker is in no group)
+async function reachLeg11(ENGM, name, notify, { rename = false } = {}) {
+  const live = [];   // nobody running at the first boot: the hits stay pending
+  const w = await heldWorld10(name, { ENGM, live, setup: async (eng) => {
+    await eng.setGrain(A, { kind: 'account' }, { access: [acc(AGENT), acc(OTHER)] });
+    const pr = await eng.setGrain(A, { kind: 'pattern' }, { pattern: { match: 'any', rules: [{ kind: 'title', value: 'Ops' }] }, access: [acc(OTHER)], watchers: [{ principal: AGENT, delivery: 'wake', notify, ...(notify === 'digest' ? { digestMinutes: 60 } : {}), dailyWakeCap: 5 }] });
+    if (!pr.ok) throw new Error('setup: ' + J2s(pr));
+  }, park: (e2, base, t0) => { if (!e2.pending.length) for (let i = 0; i < 30; i++) e2.pending.push({ record: { ...base, id: `inj11-${i}`, text: `old message ${i}` }, why: [], at: t0, road: 'wake', for: 'agent:agent-1' }); } });
+  live.push({ cid: 'agent-1', name: 'Worker', groups: [] }, { cid: 'agent-2', name: 'Other', groups: [] });
+  try {
+    const req = w.reqOf();
+    const pid = req && req.held.patternId;
+    const out = { via: req && req.held.via, source: req && req.held.source, held: w.state() };
+    const t1 = w.m2.clock();
+    await w.eng.store.index.update(() => { const e2 = w.eng.store.index.entry(A, C, { create: false }); for (let i = 0; i < 3; i++) e2.pending.push({ record: { id: `fresh11-${i}`, text: 'fresh' }, why: [], at: t1, road: 'wake', for: 'agent:agent-1' }); });
+    const live1 = () => (w.eng.store.index.peek(KEY).pending || []).filter((p) => p && p.for === 'agent:agent-1').length;
+    await w.eng.setGrain(A, { kind: 'account' }, { access: [acc(AGENT), acc(OTHER), acc({ kind: 'agent', id: 'agent-3', name: 'Third' })] });   // an unrelated write: the rule still covers it
+    out.afterUnrelated = w.state(); out.liveBefore = live1();
+    if (rename) {   // the conversation renamed (no grain write ⇒ no prune ran): the owner's Deliver reads the reach itself
+      await w.eng.store.index.update(() => { const e2 = w.eng.store.index.entry(A, C, { create: false }); e2.title = 'Deploy room'; });
+      out.press = PRESS10(await w.eng.decideRequest(req.id, true, 'user', { person: true }));
+      out.after = w.state(); out.woken = w.m2.delivered.length;
+      return out;
+    }
+    const ed = await w.eng.setGrain(A, { kind: 'pattern', id: pid }, { pattern: { match: 'any', rules: [{ kind: 'title', value: 'Deploy' }] } });
+    out.edit = !!(ed && ed.ok); out.after = w.state(); out.liveAfter = live1();
+    out.press = PRESS10(await w.eng.decideRequest(req.id, true, 'user', { person: true }));
+    return out;
+  } finally { w.eng.stop(); }
+}
+// THE MUTANT «the rule is judged without its reach» (704a0f4c's heldRuleOf for a rule)
+function reachMutant11() {
+  const src = engineSource(REPO);
+  const fixed = "      return v !== 'stands' || !convs.length || convs.some(reach) ? v : 'not-covered';\n";
+  return { src, cut: src.split(fixed).length === 2 ? src.replace(fixed, '      return v;\n') : src };
+}
+const GONE11 = 'the rule no longer covers this conversation — 30 messages discarded';
+try {
+  const g = await reachLeg11(ENG, 'e11-reach', 'wake');
+  ok(g.via === 'conversation' && g.source === 'pattern' && g.held.rows === 30 && g.afterUnrelated.request === 'open' && g.afterUnrelated.rows === 30 && g.liveBefore === 3,
+    `(a) a rule's held decision stands while the rule covers its conversation: an unrelated write leaves it open with its 30 rows (and Worker's 3 live hits)`, J2s({ held: g.held, afterUnrelated: g.afterUnrelated, liveBefore: g.liveBefore }));
+  ok(g.edit && g.after.request === 'denied' && g.after.by === 'not-covered' && g.after.rows === 0 && g.after.card && g.after.card.by === 'discarded' && g.after.card.words === GONE11 && g.liveAfter === 0 && !g.press.ok && g.press.code === 'bad-state',
+    `(a) the rule edited so it no longer covers the conversation ⇒ ONE fact, ONE road: at the same write Worker's live hits go 3 → ${g.liveAfter} AND the held decision ends by name — «${g.after.card && g.after.card.words}» (704a0f4c: open for ever, Deliver refused «Worker is not woken by this rule now (not in its group, or left out of it)»)`, J2s({ after: g.after, liveAfter: g.liveAfter, press: g.press }));
+  const m = reachMutant11();
+  const r = await reachLeg11(MUT.load('src/server/channels-engine.js', m.cut, 'held-no-reach'), 'e11-reach-red', 'wake');
+  ok(m.cut !== m.src && r.after.request === 'open' && r.after.rows === 30 && r.liveAfter === 0 && !r.press.ok && r.press.code === 'not-in-effect' && r.press.why === 'not-admitted',
+    `CONTROL «the rule is judged without its reach» (704a0f4c): the same edit ⇒ the live hits pruned (${r.liveAfter}) but the decision ${r.after.request} with ${r.after.rows} rows, Deliver ${r.press.code} / ${r.press.why} — two answers to one fact`, J2s({ after: r.after, press: r.press }));
+} catch (e) { ok(false, '⑨ (a) threw on this tree: ' + ((e && e.stack) || e)); }
+// (b) THE SAME AS A RULE DIGEST (a SCOPE plan): the edit ends it by the same name
+try {
+  const g = await reachLeg11(ENG, 'e11-reach-digest', 'digest');
+  ok(g.via === 'scope' && g.source === 'pattern' && g.afterUnrelated.request === 'open' && g.after.request === 'denied' && g.after.by === 'not-covered' && g.after.card && g.after.card.words === GONE11,
+    `(b) a rule DIGEST (a scope plan) held for Worker: the rule edited off its conversation ⇒ «${g.after.card && g.after.card.words}»`, J2s({ via: g.via, after: g.after }));
+} catch (e) { ok(false, '⑨ (b) threw on this tree: ' + ((e && e.stack) || e)); }
+// (c) THE CONVERSATION RENAMED (no grain write, so no prune ran): the owner's Deliver reads the reach itself — 409 rule-gone
+// why 'not-covered', the decision ended, nothing woken
+try {
+  const g = await reachLeg11(ENG, 'e11-rename', 'wake', { rename: true });
+  ok(!g.press.ok && g.press.code === 'rule-gone' && g.press.why === 'not-covered' && g.press.n === 30 && g.after.request === 'denied' && g.after.by === 'not-covered' && g.after.card && g.after.card.words === GONE11 && g.woken === 0,
+    `(c) the conversation renamed out of the rule's reach (no write, no prune): Deliver ⇒ 409 ${g.press.code} / ${g.press.why} (n ${g.press.n}), the card «${g.after.card && g.after.card.words}», nobody woken (704a0f4c: 409 not-in-effect «not in its group», open for ever)`, J2s({ press: g.press, after: g.after, woken: g.woken }));
+} catch (e) { ok(false, '⑨ (c) threw on this tree: ' + ((e && e.stack) || e)); }
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

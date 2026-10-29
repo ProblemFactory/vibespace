@@ -1321,10 +1321,10 @@ function create(engineCtx) {
       // for a fan-out target that had stopped — «they go with its next delivery», the card «delivered», the next prune dropped them)
       const rule = heldRuleOf(req0);
       if (rule !== 'stands') {
-        const why = rule === 'no-access' ? 'access-removed' : 'watch-removed';
+        const { why, words } = heldEndOf(rule);
         const n = await endHeld(req0, why);
         notify([]);
-        if (n !== null) return { ok: false, code: 'rule-gone', why, n, error: `${why === 'access-removed' ? 'the access they were held under was removed' : 'the rule they were held for was removed'} — ${n} messages discarded, nothing was sent` };
+        if (n !== null) return { ok: false, code: 'rule-gone', why, n, error: `${words} — ${n} messages discarded, nothing was sent` };
         return { ok: false, code: 'bad-state', error: 'request already decided (in another window, a moment ago)' };
       }
       if (!heldInEffect(req0)) {
@@ -2109,7 +2109,12 @@ function create(engineCtx) {
    *   - heldInEffect — can it wake its watcher NOW (the reads the flush takes: storedWatcherFor for a scope digest, wakeEffOf
    *     for a conversation's) — a stopped target, a member not running or out of its group, one left out: not now.
    *  Only a rule that is gone ends the decision (pruneHeld / Deliver); one merely not in effect keeps it open with its rows —
-   *  Deliver says why it cannot now, Discard still drops them. */
+   *  Deliver says why it cannot now, Discard still drops them.
+   *  r11 — a rule's REACH is a fact of the rule (主开发: «one fact, one road»; the acceptance: a rule edited so it no longer
+   *  matched the held conversation kept the decision open for ever, its Deliver refused «not in its group» while the same
+   *  write's live prune dropped that conversation's pending hits for the same watcher): a rule's held decision whose every
+   *  held conversation the rule no longer MATCHES (wakeEffOf's own test — F.matchConversation over convFacts) is
+   *  'not-covered' and ends by name; a conversation the index cannot read is never judged out of reach. */
   function heldRuleOf(r) {
     const h = (r && r.held) || {};
     const fan = F.fanOfKey(h.pk);
@@ -2117,7 +2122,13 @@ function create(engineCtx) {
     const names = (rows) => (Array.isArray(rows) ? rows : []).some((w) => w && pkOf(w.principal) === root);
     const judge = (g) => (!g ? 'removed' : names(g.watchers) ? 'stands' : names(g.stored) ? 'no-access' : 'removed');
     if (h.source === 'account') return judge(readGrainHolder(r.adapterId, 'account', accountGrainOf(r.adapterId)));
-    if (h.source === 'pattern') { const pa = h.patternId ? patternById(h.patternId) : null; return judge(pa && pa.adapterId === r.adapterId ? readGrainHolder(r.adapterId, 'pattern', pa) : null); }
+    if (h.source === 'pattern') {
+      const pa = h.patternId ? patternById(h.patternId) : null;
+      const v = judge(pa && pa.adapterId === r.adapterId ? readGrainHolder(r.adapterId, 'pattern', pa) : null);
+      const reach = (c) => { const en = store.index.peek(c.key); return !en || !!(pa.pattern && F.matchConversation(pa.pattern, convFacts(en)).hit); };
+      const convs = heldConvsOf(r);
+      return v !== 'stands' || !convs.length || convs.some(reach) ? v : 'not-covered';
+    }
     const v = heldConvsOf(r).map((c) => judge(readGrainHolder(r.adapterId, 'conversation', store.index.peek(c.key))));   // a conversation's own row: it stands while one of its held conversations still stores it
     return v.includes('stands') ? 'stands' : v.includes('no-access') ? 'no-access' : 'removed';
   }
@@ -2126,9 +2137,17 @@ function create(engineCtx) {
     if (h.via === 'scope') return !!storedWatcherFor(h.source === 'account' ? accountGrainOf(r.adapterId) : patternById(h.patternId), h.pk);
     return heldConvsOf(r).some((c) => { const eff = wakeEffOf(store.index.peek(c.key)); return !!eff && eff.watchers.some((x) => itemIs(x, h.pk)); });
   }
-  /** ONE held decision ENDED by the system because its rule is gone (`why` 'watch-removed' | 'access-removed'): its rows dropped
-   *  (releaseAside), the request `denied` by `why`, the card «… — N messages discarded» (no person mark: nobody decided). → the
-   *  hits it touched | null (it was no longer open). */
+  /** Why a held decision ENDS, by its rule's fact (heldRuleOf) — the record's `why` and the words an API answer says (the
+   *  client words the `why` itself: foryou-actions settledWords, user-todos-row, the press toast). */
+  const HELD_END = Object.freeze({
+    removed: Object.freeze({ why: 'watch-removed', words: 'the rule they were held for was removed' }),
+    'no-access': Object.freeze({ why: 'access-removed', words: 'the access they were held under was removed' }),
+    'not-covered': Object.freeze({ why: 'not-covered', words: 'the rule no longer covers this conversation' }),   // r11: out of the rule's reach
+  });
+  const heldEndOf = (rule) => HELD_END[rule] || HELD_END.removed;
+  /** ONE held decision ENDED by the system because its rule is gone (`why` 'watch-removed' | 'access-removed' | r11
+   *  'not-covered'): its rows dropped (releaseAside), the request `denied` by `why`, the card «… — N messages discarded» (no
+   *  person mark: nobody decided). → the hits it touched | null (it was no longer open). */
   async function endHeld(r0, why) {
     const t = now();
     let touched = null;
@@ -2141,7 +2160,7 @@ function create(engineCtx) {
     });
     if (touched === null) return null;
     try { store.audit({ kind: 'watch', op: 'held-discard', principal: r0.principal, scope: r0.scope, requestId: r0.id, n: touched, at: t, by: 'system', why }); } catch {}
-    const what = why === 'access-removed' ? 'the access its watcher lived by' : 'the rule';
+    const what = why === 'access-removed' ? 'the access its watcher lived by' : why === 'not-covered' ? 'the rule\'s reach over its conversation' : 'the rule';
     if (r0.todoId && userTodos && typeof userTodos.get === 'function') {
       try { const it = userTodos.get(r0.todoId); if (it && it.status === 'open') userTodos.resolveAnswered([r0.todoId], 'discarded', { n: touched, why }); } catch (e) { log.warn(`[channels] ${r0.id}: ${what} is gone and its ${touched} held hit(s) were discarded, but the card could not be closed (${(e && e.message) || e})`); }
     }
@@ -2153,7 +2172,7 @@ function create(engineCtx) {
     for (const r of store.index.table('watchRequests') || []) {
       if (!(r && r.kind === 'held' && r.status === 'open' && r.adapterId === adapterId)) continue;
       const rule = heldRuleOf(r);
-      if (rule !== 'stands') gone.push({ r, why: rule === 'no-access' ? 'access-removed' : 'watch-removed' });
+      if (rule !== 'stands') gone.push({ r, why: heldEndOf(rule).why });
     }
     for (const g of gone) await endHeld(g.r, g.why);
     if (gone.length) notify([]);

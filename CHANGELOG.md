@@ -41,6 +41,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A vault command too long to keep whole now says so and points to its run record, instead of claiming the whole command is under Technical details.
 - Removing a rule, or the access it relied on, now closes its held-messages card and says how many were discarded.
 - Held messages for an agent that has only stopped now wait for it; Deliver says it is not running and keeps them.
+- Editing a rule so it no longer covers a conversation now closes that conversation's held-messages card and says how many were discarded.
+- A vault command card now shows a long environment value or secret name whole under Technical details, and says why a near-identical rerun asks again.
 - Requests you closed with Mark done or Dismiss before the decision buttons read «done» or «dismissed» again, not «outcome unknown».
 - A card whose details were too large to keep now says so above its text.
 - If For you cannot read its saved list at start, it sets the file aside instead of overwriting it, says where, and brings back held-messages cards.
