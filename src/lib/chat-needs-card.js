@@ -652,9 +652,13 @@ export class NeedsCards {
    *  road): here() reads the record the read found directly, and the pass never prunes the newest landing's filing; the
    *  proof is the FILING's (id + createdAt — a re-filed ask was placed at its old filing's record). A road that fails moves
    *  nothing (r4): a page that could not be read is said by the jump and ends the landing (no tail road after it, no
-   *  scroll, no pick kept); a show that fails after a jump rebuilt the window puts back what the jump changed (a pinned
-   *  reader at the live tail again, any other at the record they were reading); the accordion's slot moves only for a show
-   *  that lands (_show). → 'card' | 'record' | 'dock' | 'end' | null */
+   *  scroll, no pick kept); a show that fails after a jump rebuilt the window puts back what the jump changed — on ③'s
+   *  index road and on ④'s tail road (r5: the tail road left a mid-history reader at the live end): a pinned reader at the
+   *  live tail again, any other at the record they were reading — a record inside a run they had opened, its run opened
+   *  again (r5: the rebuilt window folds every run; the record had no box and nothing was put back), else its run's fold
+   *  line, else the nearest drawn record. THE ONE ROAD THAT DOES NOT PUT BACK is a teleported reader's (a seek slab has no
+   *  index space to return to): the live end the jump loaded stays, and the toast says the record is not drawn. The
+   *  accordion's slot moves only for a show that lands (_show). → 'card' | 'record' | 'dock' | 'end' | null */
   async land(x, { since = null } = {}) {
     const view = this.view;
     if (view._disposed || !view._messageList) return null;
@@ -700,8 +704,17 @@ export class NeedsCards {
       if (b.pinned) { await ours(view.jumpToBottom?.({ user: false, stale: gone })); return; }
       if (b.idx == null || typeof view.jumpToIndex !== 'function') return;
       await ours(view.jumpToIndex(b.idx, { stale: gone, land: () => {
-        const el = b.id != null ? view._elements.get(b.id) : null;
-        if (gone() || !el || !el.getClientRects().length) return;
+        if (gone() || b.id == null) return;
+        // the rebuilt window folds every run (r5): the record the reader read inside a run they had opened opens it again;
+        // still not drawn — its run's fold line stands where the record stood, else the nearest drawn record
+        const boxed = (rid) => { const e = view._elements.get(rid); return !!e && e.isConnected && e.getClientRects().length > 0; };
+        let el = view._elements.get(b.id) || null;
+        if (el && !boxed(b.id)) view.revealRecord?.(el);
+        if (el && !boxed(b.id)) {
+          const fold = view._runs?.find((r) => r.members?.includes(el))?.header, at = drawnAt(this._records(), b.id, boxed);
+          el = fold && fold.isConnected && fold.getClientRects().length ? fold : at != null ? view._elements.get(at) : null;
+        }
+        if (!el) return;
         const d = el.getBoundingClientRect().top - b.top;
         if (Math.abs(d) >= 1) { view._traceExpect?.('needsPutBack'); view._messageList.scrollTop += d; }
       } }));
@@ -715,11 +728,11 @@ export class NeedsCards {
       const moved = await ours(view.jumpToBottom({ land: () => !gone() && !!(landed = here()), stale: gone }));
       if (landed) return landed;
       if (gone() || moved === false) return null; // (a tail that could not be read: said by the jump, nothing moved — r4)
-      if (missed) return said();                  // (the jump positioned the tail it loaded)
+      if (missed) return said();                  // (the jump positioned the tail it loaded — no put-back: the doc above)
     }
     // ③ its record outside what is loaded: the history read TOWARD it — up or down (r2: only upward, and an ask filed BELOW
     //   a window loaded mid-history was called «no record») — and the window loaded there (jumpToIndex, S1's road)
-    let idx = null;
+    let idx = null, back = null; // (what the reader had before the first jump that rebuilt the window — ③'s or ④'s)
     if (view._canPaginate !== false && typeof view.jumpToIndex === 'function') {
       let rec = null;
       idx = await this._anchorIndex(item, (r) => { rec = r; });
@@ -731,7 +744,7 @@ export class NeedsCards {
         if (missed) return said();
       } else if (idx != null && idx >= 0) {
         let landed = null;
-        const back = backOf();
+        back = backOf();
         const moved = await ours(view.jumpToIndex(idx, { land: () => { if (!gone()) landed = here(); }, stale: gone }));
         if (landed) return landed;
         if (gone() || moved === false) return null; // (a page that could not be read: said by the jump, nothing moved — r4)
@@ -755,9 +768,11 @@ export class NeedsCards {
     let tried = false;
     if (view._teleported || view._windowEnd < view._total) {
       let landed = null;
+      if (!back && !view._teleported) back = backOf(); // (a seek slab has no index space to put back — the doc above)
       const moved = await ours(view.jumpToBottom?.({ land: () => { if (gone()) return false; tried = true; landed = tail(); return !!landed; }, stale: gone }));
       if (landed) return landed;
       if (gone() || moved === false) return null; // a tail that could not be read: said ONCE by the jump — no scroll, no pick (r4)
+      if (missed && back) { await putBack(back); return gone() ? null : said(); } // the tail loaded, the show failed: put back (r5)
     }
     if (!tried) { const t4 = tail(); if (t4) return t4; }
     if (missed) return said();

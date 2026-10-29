@@ -303,9 +303,10 @@ ok('…and the press is CLEARED on pointerup/pointercancel, window-scoped on the
 // re-tail compares nav-vs-resume: the chat-view-seek `userScrolled` idiom.
 ok('there is ONE navigation stamp (_noteUserNav) and it ends the settle like a wheel does',
   /_noteUserNav\(via\) \{[\s\S]{0,220}this\._lastNavAt = Date\.now\(\);[\s\S]{0,220}this\._endResumeSettle\(\);/.test(cv));
-ok('…and the reader-position test generalises the seek idiom over every POSITIONING stamp (positioning act, nav, jump landing, search reveal) — and reads _lastUserScrollAt NOWHERE, because a click is not one (round 3)',
-  /_navigatedSince\(since\) \{[\s\S]{0,500}this\._lastNavAt \|\| 0[\s\S]{0,120}this\._lastPositionAt \|\| 0[\s\S]{0,160}this\._lastJumpAt \|\| 0[\s\S]{0,160}this\._search\?\._lastRevealAt \|\| 0[\s\S]{0,60}> since;/.test(cv)
-  && !/_navigatedSince\(since\) \{[\s\S]{0,500}_lastUserScrollAt/.test(cv));
+ok('…and the reader-position test generalises the seek idiom over every POSITIONING stamp (positioning act, nav, jump landing, search reveal) — and reads _lastUserScrollAt NOWHERE, because a click is not one (round 3; lane needs-card-tail r5: the stamps are THE one list, _readerActs — jumpToBottom\'s default reads it too)',
+  /_navigatedSince\(since\) \{\s*return Math\.max\(\.\.\.this\._readerActs\(\)\) > since;\s*\}/.test(cv)
+  && /_readerActs\(\{ scroll = true \} = \{\}\) \{\s*return \[this\._lastNavAt \|\| 0, scroll \? this\._lastPositionAt \|\| 0 : 0, this\._lastJumpAt \|\| 0, this\._search\?\._lastRevealAt \|\| 0\];\s*\}/.test(cv)
+  && !/_navigatedSince\(since\) \{[^}]*_lastUserScrollAt/.test(cv) && !/_readerActs\(\{ scroll = true \} = \{\}\) \{[^}]*_lastUserScrollAt/.test(cv));
 ok('the resume re-tail BAILS when the reader navigated after the resume (never yank a reader back to the tail)',
   /const resumeAt = this\._resumeAt;[\s\S]{0,400}if \(this\._navigatedSince\(resumeAt\)\) return;/.test(cv));
 ok('every off-list navigation surface stamps: minimap (index + time), search reveal, run-bar landing, jumpToIndex, user jumpToBottom',
@@ -314,7 +315,7 @@ ok('every off-list navigation surface stamps: minimap (index + time), search rev
   && /onNav: \(\) => this\._noteUserNav\('search-reveal'\)/.test(cv)
   && /_landOnHeader\(run\) \{[\s\S]{0,400}this\._noteUserNav\('runBar'\);/.test(cv)
   && /async jumpToIndex\(targetIdx(?:, \{ land = null(?:, stale = null)? \} = \{\})?\) \{\s*this\._noteUserNav\('jumpToIndex'\);/.test(cv) // (lane needs-card-tail: its optional `land` — the needs cards' landing — and r2's `stale` never move the stamp off the first line)
-  && /async jumpToBottom\(\{ user = true(?:, land = null, stale = null)? \} = \{\}\) \{\s*if \(user\) this\._noteUserNav\('jumpToBottom'\);/.test(cv)); // (lane needs-card-tail r3: the landing's `land` / `stale` never move the stamp off the first line)
+  && /async jumpToBottom\(\{ user = true(?:, land = null, stale = null(?:, send = false)?)? \} = \{\}\) \{\s*if \(user\) this\._noteUserNav\('jumpToBottom'\);/.test(cv)); // (lane needs-card-tail r3: the landing's `land` / `stale` never move the stamp off the first line; r5: nor the send's `send`)
 {
   const sch = fs.readFileSync(path.join(REPO, 'src/lib/chat-search.js'), 'utf8');
   ok('…and ChatSearch actually calls it on a REVEAL (the reveal scrolls the list from outside its own listeners)',

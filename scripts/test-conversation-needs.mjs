@@ -724,6 +724,7 @@ console.log('⑩b THE TAIL r2 — the end is the display order\'s; the landing r
       try { return new Function('t', `return (${src});`)((s) => String(s)); } catch { return null; }
     };
     const REAL = { jumpToBottom: method('  async jumpToBottom(', '  /** Replay the live ops a tail fetch held'), _releaseTailHold: method('  _releaseTailHold(hold) {', '  /** A FULL-WINDOW REBUILD LANDED'), jumpToIndex: method('  async jumpToIndex(', '  // Jump to the bottom of the conversation.'), revealRecord: method('  revealRecord(el) {', '  /** THE WAITING CHIP') };
+    const ACTS = method('  _readerActs(', '  /** Is an atBottom→false transition'); // (r5; absent before it — its jumpToBottom read the stamps inline)
     ok(Object.values(REAL).every((f) => typeof f === 'function'), 'the REAL jumpToBottom, _releaseTailHold, jumpToIndex and revealRecord are read out of src/lib/chat-view.js', Object.keys(REAL).filter((k) => typeof REAL[k] !== 'function'));
     const tick = (ms) => new Promise((r) => setTimeout(r, ms));
     /** the view's own roads: the REAL jumps over the fake view's records (a tail page held by `tailGate`, a jump's page by `jumpGate`) */
@@ -738,6 +739,7 @@ console.log('⑩b THE TAIL r2 — the end is the display order\'s; the landing r
         _fetchMessages: async (o, l) => { v.log.push(`fetch(${o},${l})`); if (v.jumpGate && v.log.includes('nav:jumpToIndex')) await v.jumpGate.p; return C.slice(o, o + l); } });
       v.jumpToBottom = function (o) { v.log.push('jumpToBottom(REAL)'); return REAL.jumpToBottom.call(this, o); };
       v._releaseTailHold = REAL._releaseTailHold; v.jumpToIndex = REAL.jumpToIndex;
+      if (ACTS) v._readerActs = ACTS; // r5: THE one list of reader-act stamps — the REAL jumpToBottom's default reads it
       v._renderedMsgIds = new Set(v._messages.map((m) => m.id));
       return v;
     };
@@ -940,6 +942,142 @@ console.log('⑩b THE TAIL r2 — the end is the display order\'s; the landing r
       v._elements.get('c280')._box = true; v.revealRecord = (el) => { el._box = true; return true; };
       const res2 = await nc.land(Z.id);
       ok(res2 === 'card' && nc._slot === Z.id && /ut-ask0000280:open/.test(folds()) && /ut-ask0000290:fold/.test(folds()), '…and a show that lands takes the slot: the landed card open, the other folded', { res2, now: folds(), slot: nc._slot }); }
+    // ── ⑩e THE TAIL, ROUND 5 (the r4 delta verdict on 497beb03): A REPLAY IS NOBODY'S ACT — chat-view-seek's c-v restore re-runs
+    // the last search reveal (or jump target) 1.6 s after a teleport; it wrote the reveal's stamps and a navigation, and r4's
+    // default stale dropped a ↓ or a send pressed in that window — through the REAL _setStableHeights / _scrollElStable
+    // (chat-view-seek.js), the REAL _scrollToRange (chat-search.js) and the REAL _noteUserNav / _navigatedSince / _readerActs /
+    // jumpToBottom (chat-view.js); A SEND IS THE PERSON'S ACT (B-172e — a touch on the list during its fetch dropped it); ④'s
+    // tail road puts back; the put-back re-opens the run the reader was reading inside
+    console.log('⑩e THE TAIL r5 — a replay is nobody\'s act (one list of reader-act stamps); a send lands whatever the scroll; the tail road puts back; the put-back re-opens the reader\'s run');
+    const SEEKS = read('src/lib/chat-view-seek.js'), SRCH = read('src/lib/chat-search.js');
+    const methodOf = (SRC, head, next) => {
+      const a = SRC.indexOf(head), b = a < 0 ? -1 : SRC.indexOf(next, a);
+      if (a < 0 || b < 0) return null;
+      const src = SRC.slice(a, b).trim().replace(/,$/, '').replace(/^async (\w+)\(/, 'async function $1(').replace(/^(\w+)\(/, 'function $1(');
+      try { return new Function('t', `return (${src});`)((s) => String(s)); } catch { return null; }
+    };
+    const REAL5 = { _setStableHeights: methodOf(SEEKS, '    _setStableHeights(stable, ', '    _maybeSeekLater() {'), _scrollElStable: methodOf(SEEKS, '    _scrollElStable(el, ', '    async _seekTeleport(line) {'),
+      _scrollToRange: methodOf(SRCH, '  _scrollToRange(range', '  /** Open every collapsed'), _noteUserNav: method('  _noteUserNav(via) {', '  /** Did the READER position'),
+      _navigatedSince: method('  _navigatedSince(since) {', '  /** '), _notePositioning: method('  _notePositioning(via) {', '  /** Did this press land on the list') };
+    ok(Object.values(REAL5).every((f) => typeof f === 'function'), 'the REAL _setStableHeights / _scrollElStable (chat-view-seek.js), _scrollToRange (chat-search.js), _noteUserNav / _navigatedSince / _notePositioning (chat-view.js) are read out of the sources', Object.keys(REAL5).filter((k) => typeof REAL5[k] !== 'function'));
+    /** a teleported search slab: the REAL stamp writers and the REAL tail jump over a fake list (the tail page held by `tailGate`) */
+    const replayView = (C) => {
+      const log = [], cls = new Set(['chat-no-content-visibility']), rect = () => ({ top: 0, bottom: 0, left: 0, right: 0, width: 0, height: 0 });
+      const list = { scrollTop: 0, scrollHeight: 9000, clientHeight: 600, querySelectorAll: () => [], getBoundingClientRect: rect };
+      const v = { log, _readOnly: false, _teleported: true, _pinned: false, _total: C.length, _windowStart: 0, _windowEnd: 0, _messageList: list, _elements: new Map(), _renderedMsgIds: new Set(), _messages: [],
+        _container: { classList: { contains: (c) => cls.has(c), add: (c) => cls.add(c), remove: (c) => cls.delete(c) } }, _tailHold: null, _tailCall: 0, _windowGen: 0, _lastNavAt: 0, _lastPositionAt: 0, _lastUserScrollAt: 0, tailGate: null,
+        _trace(k, d) { log.push(`trace:${k}${d && d.replay ? ':' + d.replay : ''}`); }, _traceExpect() { }, _cancelForcedScroll() { }, _clearWheelCarry() { }, _endResumeSettle() { },
+        _beginHistoryLoad: () => () => { }, _showHistoryStatus(m) { log.push(`status:${m}`); }, _onCreateMessage(m) { v._messages.push(m); }, _onOp() { }, _resetGapAfterJump() { v._teleported = false; },
+        _fetchMessagePage: async (o, l) => { log.push(`fetchPage(${o},${l})`); if (v.tailGate) await v.tailGate.p; return { messages: C.slice(o, o + l), total: C.length }; },
+        _setPinned(p, why) { v._pinned = !!p; log.push(`pinned=${!!p}(${why})`); }, _forceScrollToBottom() { log.push('forceScrollToBottom'); } };
+      Object.assign(v, { jumpToBottom: REAL.jumpToBottom, _releaseTailHold: REAL._releaseTailHold, _noteUserNav: REAL5._noteUserNav, _navigatedSince: REAL5._navigatedSince, _setStableHeights: REAL5._setStableHeights, _scrollElStable: REAL5._scrollElStable });
+      if (ACTS) v._readerActs = ACTS;
+      const node = { nodeType: 1, isConnected: true, closest: () => null, parentElement: null };
+      v._search = { _messageList: list, hasHighlight: false, _onNav: () => v._noteUserNav('search-reveal'), _onReveal() { }, _expandRangeAncestors() { }, _scrollNestedIntoView() { }, _flashRange() { }, applyHighlightLayer() { }, _setCurrentHighlight() { }, _scrollToRange: REAL5._scrollToRange }; // wired as chat-view.js wires it
+      v.range = { startContainer: node, getBoundingClientRect: rect }; v.target = { isConnected: true, getBoundingClientRect: rect };
+      return v;
+    };
+    const stamps = (v) => `${v._lastNavAt || 0}|${v._lastPositionAt || 0}|${v._lastJumpAt || 0}|${v._search._lastRevealAt || 0}`;
+    const SEND = /\/\/ B-172e ②\n\s+this\.jumpToBottom\(([^)]*)\);/.exec(CVS); // what onSend calls, read out of the source
+    const sendArgs = SEND && SEND[1] ? new Function(`return (${SEND[1]});`)() : undefined;
+    const raf0 = globalThis.requestAnimationFrame; globalThis.requestAnimationFrame = () => 0; // (the REAL centring loops: their first step only)
+    try {
+      // a full-file search jump (jumpToFileMatch: the teleport's target, then _revealNearest's reveal a few ms later), a press
+      // while teleported, the c-v restore firing while its tail page is out — `arm` 'reveal' | 'target' (no reveal); `press`
+      const replayRace = async (arm, press, during = (v) => v._setStableHeights(false)) => {
+        const C = conv(310, []), v = replayView(C);
+        v._scrollElStable(v.target); await tick(2);
+        if (arm === 'reveal') v._search._scrollToRange(v.range);
+        await tick(3);
+        v.tailGate = deferred();
+        const p = press(v);
+        await until(v, /^fetchPage/); await tick(2);
+        const pre = stamps(v), mark = Date.now(); await tick(2);
+        during(v);
+        const post = stamps(v), since = v._navigatedSince(mark);
+        v.tailGate.open(); v.tailGate = null;
+        const moved = await p;
+        return { moved, landed: !v._teleported && v._pinned && v._windowStart === 260, stale: v.log.includes('trace:jumpToBottom:stale'), replay: (v.log.find((l) => /^trace:stableHeights/.test(l)) || '').split(':')[2] || null, pre, post, since, replayAt: v._lastReplayAt || 0 };
+      };
+      const down = await replayRace('reveal', (v) => v.jumpToBottom());
+      ok(down.replay === 'reveal' && down.landed && down.moved === true && !down.stale, `RED-able (r5 #1 — 497beb03: DROPPED — the replay wrote _lastRevealAt + _lastNavAt, the page discarded as stale, the reader left on the slab): the ↓ pressed in the 1.6 s after a search teleport LANDS though the c-v restore replays the reveal while its tail page is out`, down);
+      ok(down.post === down.pre && down.replayAt > 0 && down.since === false, 'RED-able (r5 #1): the replay writes its OWN stamp (_lastReplayAt) and none of the reader-act stamps — _navigatedSince reads no act (a landing or the resume re-tail is never displaced by it)', down);
+      const send = await replayRace('reveal', (v) => v.jumpToBottom(sendArgs));
+      ok(send.replay === 'reveal' && send.landed && send.moved === true, `RED-able (r5 #1 — 497beb03: DROPPED, the echo deferred onto the slab): a SEND in the same window (onSend → jumpToBottom(${SEND ? SEND[1] : '?'})) lands at the live tail`, send);
+      const target = await replayRace('target', (v) => v.jumpToBottom());
+      ok(target.replay === 'target' && target.landed, '…the control, the TARGET arm (a jump with no reveal after it): the ↓ lands (on 497beb03 too — its default did not read _lastJumpAt)', target);
+      ok(target.post === target.pre && target.since === false, 'RED-able (r5 #1 — 497beb03: the replayed target wrote _lastJumpAt, and _navigatedSince read the replay as an act): the replayed jump target writes no reader-act stamp', target);
+      const person = await replayRace('reveal', (v) => v.jumpToBottom(), (v) => v._search._scrollToRange(v.range));
+      ok(person.moved === false && person.stale && !person.landed, '…and a PERSON\'s reveal while the ↓\'s page is out still answers for the view (the law holds for every act a person makes: the page dropped, the slab stays)', person);
+    } finally { if (raf0 === undefined) delete globalThis.requestAnimationFrame; else globalThis.requestAnimationFrame = raf0; }
+    ok(!!ACTS && /_navigatedSince\(since\) \{\s*return Math\.max\(\.\.\.this\._readerActs\(\)\) > since;/.test(CVS) && /const acts = \(\) => this\._readerActs\(\{ scroll: !send \}\)\.join\('\|'\), seen = acts\(\);/.test(CVS) && !/_lastReplayAt/.test(String(ACTS))
+      && /if \(replay !== 'none'\) this\._lastReplayAt = Date\.now\(\);/.test(SEEKS) && /this\._scrollElStable\(target, \{ replay: true \}\)/.test(SEEKS) && /this\._lastRevealRun = \(\) => this\._scrollToRange\(range, \{ replay: true \}\);/.test(SRCH),
+      'r5 #1: ONE list names the reader-act stamps (_readerActs — _navigatedSince and jumpToBottom\'s default both read it, the replay\'s own _lastReplayAt never); the c-v restore\'s two replays pass `replay`');
+    // A SEND IS THE PERSON'S ACT (r5 — B-172e: the default stale took the send road; a touch on the list while its tail page was
+    // out dropped the landing, the sent message deferred into the ↓ count): the REAL _fetchMessagePage / _onOp / _notePositioning;
+    // the echo arrives during the fetch (held); then a touch, a wheel, a nav key — or a newer press
+    for (const act of ['touch', 'wheel', 'key', 'press']) {
+      const C = conv(310, [120]), S = C.slice(), Y = askOf(C, 120);
+      const v = roads(fakeView(C, [Y], 100, 150), C), nc = cardsFor(v);
+      v._pinned = false; nc._pass();
+      let gate = deferred();
+      const fetch0 = globalThis.fetch;
+      globalThis.fetch = async (url) => { const q = new URL(url, 'http://x').searchParams, o = +q.get('offset'), l = +q.get('limit'); v.log.push(`fetchPage(${o},${l})`); if (gate) await gate.p; return { ok: true, json: async () => ({ messages: S.slice(o, o + l), total: S.length }) }; };
+      const draw = v._onCreateMessage, deferredIds = [];
+      Object.assign(v, { _fetchMessagePage: REAL4._fetchMessagePage, _onOp: REAL4._onOp, _getSessionIds: () => ({ backend: 'claude', backendSessionId: 'x', cwd: '/w', host: '' }), _noteRecordKind() { }, _newMsgCount: 0, _cancelForcedScroll() { }, _endResumeSettle() { },
+        _onCreateMessage: (m) => { if (!v._loadingHistory && (v._teleported || (!v._pinned && v._windowEnd < v._total))) { v._total++; v._newMsgCount++; deferredIds.push(m.id); return; } draw(m); } }); // the real deferral
+      try {
+        const sent = v.jumpToBottom(sendArgs);
+        await until(v, /^fetchPage/);
+        const echo = { id: 'sent-echo', ts: NOW + 1, role: 'user', content: [{ type: 'text', text: 'my message' }] };
+        S.push(echo); v._onOp({ op: 'create', message: echo }); // the server feeds the sent message live in the same breath (held)
+        await tick(3);
+        let other = null;
+        if (act === 'press') other = nc.land(Y.id); else REAL5._notePositioning.call(v, act); // a newer press: a card landing at c120
+        gate.open(); gate = null;
+        const moved = await sent, o = await other;
+        const r = { moved, o, window: `${v._windowStart}..${v._windowEnd}`, pinned: v._pinned, echoDrawn: v._elements.has('sent-echo'), echoDeferred: deferredIds.includes('sent-echo') };
+        if (act !== 'press') ok(moved === true && v._pinned && v._windowEnd === S.length && r.echoDrawn && !r.echoDeferred, `RED-able (r5 #2 — 497beb03: the landing dropped, the window 100..150, the echo deferred): a SEND lands on the sent message though a ${act} on the list came during its tail fetch (B-172e)`, r);
+        else ok(o === 'card' && moved === false && v._windowStart === 100 && !v._pinned, '…while a newer PRESS during its fetch (a card landing at c120) answers for the view instead — the send\'s page dropped, the landing stays', r);
+      } finally { globalThis.fetch = fetch0; }
+    }
+    // ④'S TAIL ROAD PUTS BACK (r5 — the acceptance's (B): a mid-history reader, the read failed ⇒ unknown, the tail loaded, the
+    // show failed ⇒ the live end, pinned): the reader back at their record c120, 40 px down, said once
+    { const C = conv(310, [300]), A = askOf(C, 300);
+      const v = roads(fakeView(C, [A], 100, 150), C), nc = cardsFor(v);
+      const draw0 = v._onCreateMessage;
+      v._onCreateMessage = (m) => { draw0(m); const el = v._elements.get(m.id); if (el && m.id === 'c300') el._box = false; };
+      v.revealRecord = () => false; v._traceExpect = (k) => v.log.push(`expect:${k}`);
+      v._fetchMessages = async (o, l) => { if (!v.log.includes('nav:jumpToIndex')) { v.log.push(`fetch(${o},${l}) FAILS`); throw new Error('read failed'); } v.log.push(`fetch(${o},${l})`); return C.slice(o, o + l); }; // the landing's read fails; the put-back's page answers
+      v._pinned = false; nc._pass(); globalThis.__cnToasts = [];
+      nc._readerLine = () => { const el = v._elements.get('c120'); return el && el.isConnected ? { el, top: 40 } : null; };
+      const res = await nc.land(A.id);
+      ok(res === null && v._windowStart === 100 && !v._pinned && v.log.includes('expect:needsPutBack') && globalThis.__cnToasts.length === 1, 'RED-able (r5 minor — 497beb03: the reader left at the live end 260..310, pinned): ④\'s tail road, its show failed — the reader PUT BACK at the record they were reading (the window 100..150, unpinned, c120 where it stood) and the toast once', { res, window: `${v._windowStart}..${v._windowEnd}`, pinned: v._pinned, toasts: globalThis.__cnToasts.length, log: v.log.filter((l) => /jumpTo|expect|pinned/.test(l)) }); }
+    // THE PUT-BACK RE-OPENS THE READER'S RUN (r5 — the acceptance's (C): the reader's line c120 inside a run they had opened; the
+    // rebuilt window folds every run — no box, nothing was put back): the REAL revealRecord over a run model; a record hidden
+    // inside the opened run (a CSS rule) puts back its run's FOLD LINE
+    for (const hiddenInRun of [false, true]) {
+      const C = conv(310, [10]), A = askOf(C, 10);
+      const v = roads(fakeView(C, [A], 100, 150), C), nc = cardsFor(v);
+      const draw0 = v._onCreateMessage, css = new Set(hiddenInRun ? ['c120'] : []);
+      v._onCreateMessage = (m) => { draw0(m); const el = v._elements.get(m.id); if (el && m.id === 'c10') el._box = false; };
+      v.revealRecord = REAL.revealRecord; v._traceExpect = (k) => v.log.push(`expect:${k}`); v._messageList.scrollTop = 0;
+      v._setRunOpen = (run, open) => { run.open = open; for (const el of run.members) el._box = open && !css.has(el.dataset.msgId); };
+      v._runs = [];
+      v._updateRuns = () => { // the PUT-BACK's rebuild (the second jumpToIndex) folds c119..c121 (the run the reader had opened)
+        if (v.log.filter((l) => l === 'nav:jumpToIndex').length < 2) return;
+        const members = ['c119', 'c120', 'c121'].map((id) => v._elements.get(id)).filter(Boolean), header = new El();
+        header.classList.add('chat-run-header'); v._messageList.insertBefore(header, members[0]); header.getBoundingClientRect = () => ({ top: 7, bottom: 31, left: 0, right: 0, width: 1, height: 24 });
+        v._runs = [{ header, members, open: true }]; v._setRunOpen(v._runs[0], false);
+      };
+      v._pinned = false; nc._pass(); globalThis.__cnToasts = [];
+      nc._readerLine = () => { const el = v._elements.get('c120'); return el && el.isConnected ? { el, top: 40 } : null; };
+      const res = await nc.land(A.id);
+      const run = v._runs[0], el = v._elements.get('c120');
+      const r = { res, window: `${v._windowStart}..${v._windowEnd}`, putBack: v.log.includes('expect:needsPutBack'), runOpen: run ? run.open : null, readerHasBox: !!(el && el.getClientRects().length), scrollTop: v._messageList.scrollTop, toasts: globalThis.__cnToasts.length };
+      if (!hiddenInRun) ok(res === null && r.putBack && r.runOpen === true && r.readerHasBox && r.scrollTop === -40 && r.toasts === 1, 'RED-able (r5 minor — 497beb03: putBack false, the run closed, scrollTop 0): the index road\'s put-back RE-OPENS the run the reader was reading inside — c120 drawn again, where it stood (40 px down)', r);
+      else ok(res === null && r.putBack && r.runOpen === false && !r.readerHasBox && r.scrollTop === -33 && r.toasts === 1, 'RED-able (r5 minor): …a record still not drawn inside its opened run (a CSS rule) — the run closes again and its FOLD LINE stands where the record stood (7 px → 40 px)', r);
+    }
   }
   // THE WIRING (source pins)
   const CV = read('src/lib/chat-view.js'), CARD = read('src/lib/chat-needs-card.js'), UTA = read('src/lib/user-todos-actions.js');

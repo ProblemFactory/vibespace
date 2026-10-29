@@ -304,6 +304,9 @@ class ChatView {
     // `_lastPositionAt` answers "did the reader MOVE it" — only the second may
     // cancel the resume repair (round-3 verifier's MAJOR).
     this._lastPositionAt = 0;
+    // The view's OWN replays (chat-view-seek's c-v restore re-running the last jump target or search reveal) stamp here and
+    // nowhere else — no reader-act predicate reads it (_readerActs; lane needs-card-tail r5).
+    this._lastReplayAt = 0;
     // Did the live press land on the list's own SCROLLBAR GUTTER? While it is
     // held, a scroll is the reader dragging the view — WHERE the press landed,
     // never WHEN a later scroll happens to arrive (round-4 verifier's MAJORs).
@@ -1017,8 +1020,10 @@ class ChatView {
         // live op is deferred in teleport mode (the sent message nowhere). Any
         // view that is not the live tail leaves for it, as the resume re-tail
         // already does; jumpToBottom exits teleport mode and holds the echo.
+        // A SEND IS THE PERSON'S ACT (r5): a scroll during its tail fetch never
+        // cancels its landing (`send` — only a newer press answers instead).
         if (this._teleported || this._windowEnd < this._total) { // B-172e ②
-          this.jumpToBottom();
+          this.jumpToBottom({ send: true });
         } else {
           this._setPinned(true, 'send');
           this._scrollToBottom();
@@ -2772,8 +2777,20 @@ class ChatView {
    *  the acts that merely touched the view: `_lastUserScrollAt` is not read
    *  here, because a click is not a positioning act (round-3 MAJOR). */
   _navigatedSince(since) {
-    return Math.max(this._lastNavAt || 0, this._lastPositionAt || 0,
-      this._lastJumpAt || 0, this._search?._lastRevealAt || 0) > since;
+    return Math.max(...this._readerActs()) > since;
+  }
+
+  /** THE READER'S ACTS (lane needs-card-tail r5) — the ONE place that names the stamps only a person's act writes: a
+   *  positioning (`_lastPositionAt` — wheel/touch/nav key/scrollbar drag), an explicit navigation (`_lastNavAt` — the
+   *  minimap, the run bar, ↓, a jump, a search reveal), a jump landing (`_lastJumpAt`, _scrollElStable) and a search reveal
+   *  (`_search._lastRevealAt`). Every replay the view performs for itself (chat-view-seek's c-v restore: the jump target,
+   *  the search reveal) writes `_lastReplayAt` instead, which nothing here reads — a replay 1.6 s after a teleport dropped
+   *  a ↓ or a send pressed in its window (r4's default read the reveal's stamps). `_lastUserScrollAt` is not one: a click
+   *  is not a positioning act (round 3). `scroll: false` leaves the positioning out — A SEND (B-172e: a scroll during its
+   *  fetch never cancels it). → the stamps, in a fixed order (_navigatedSince takes their max; jumpToBottom's default
+   *  compares their values) */
+  _readerActs({ scroll = true } = {}) {
+    return [this._lastNavAt || 0, scroll ? this._lastPositionAt || 0 : 0, this._lastJumpAt || 0, this._search?._lastRevealAt || 0];
   }
 
   /** Is an atBottom→false transition the RESUME's own re-measure rather than
@@ -3796,15 +3813,17 @@ class ChatView {
   // tail is read, BEFORE the window is replaced — true ⇒ nothing is replaced (the held live ops apply to the window that
   // stays); `land` is called once the tail is the view — truthy ⇒ it landed (the needs cards' landing), else the bottom.
   // THE LAW WORKS BOTH WAYS (r4 — the ↓ pressed BEFORE a landing replaced the newer landing; the resume re-tail's page
-  // answered after a door's landing): a call with no `stale` of its own is stale once the READER moved after it — a stamp
-  // of _navigatedSince's but `_lastJumpAt` (the jump-target replay, chat-view-seek 1.6 s after a teleport, writes it with
-  // nobody's act; every jump a person makes stamps `_lastNavAt` too) WRITTEN since the call: a value compared, not a time —
-  // an act in the call's own millisecond still counts. A stale page's total is not applied (the window that
-  // stays keeps its own count — the held creates replayed onto it count once; it was +14 for +7). → true = the window was
-  // replaced, false = nothing was (the page failed, or stale), undefined = a newer tail call answers for the view
-  async jumpToBottom({ user = true, land = null, stale = null } = {}) {
+  // answered after a door's landing): a call with no `stale` of its own is stale once the READER acted after it — a stamp
+  // of _readerActs (THE one list; r5 — a replay the view performs for itself writes none of them) WRITTEN since the call:
+  // a value compared, not a time — an act in the call's own millisecond still counts. `send` (r5 — B-172e: A SEND IS THE
+  // PERSON'S ACT; a touch on the list while its tail page was out dropped the landing and the sent message stayed undrawn):
+  // a scroll during its fetch never cancels it (the scroll may move the view after the landing); a newer press still
+  // answers for the view. A stale page's total is not applied (the window that stays keeps its own count — the held
+  // creates replayed onto it count once; it was +14 for +7). → true = the window was replaced, false = nothing was (the
+  // page failed, or stale), undefined = a newer tail call answers for the view
+  async jumpToBottom({ user = true, land = null, stale = null, send = false } = {}) {
     if (user) this._noteUserNav('jumpToBottom');
-    const acts = () => `${this._lastNavAt || 0}|${this._lastPositionAt || 0}|${this._search?._lastRevealAt || 0}`, seen = acts();
+    const acts = () => this._readerActs({ scroll: !send }).join('|'), seen = acts();
     if (!stale) stale = () => acts() !== seen;
     const windowSize = 50;
     const known = Number.isFinite(this._total) ? this._total : 0;

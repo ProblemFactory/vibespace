@@ -301,12 +301,13 @@ class ChatSearch {
    * (4) content-visibility keeps recomputing heights ~1s after a slab loads —
    *     centering re-runs on rAF + timers.
    */
-  _scrollToRange(range) {
+  _scrollToRange(range, { replay = false } = {}) {
     if (!range) return;
-    this._lastRevealAt = Date.now();
-    this._onNav?.();
+    // a REPLAY (chat-view-seek's c-v restore re-runs the last reveal) is the view's own, never the reader's: it writes no
+    // reader stamp and stamps no navigation (lane needs-card-tail r5 — it dropped a ↓ or a send pressed in its window)
+    if (!replay) { this._lastRevealAt = Date.now(); this._onNav?.(); }
     { const n = range.startContainer; const c = n && (n.nodeType === 1 ? n : n.parentElement)?.closest?.('.chat-msg'); if (c) this._onReveal?.(c); }   // the card the reveal lands on stays in the reader's band
-    this._lastRevealRun = () => this._scrollToRange(range); // replayed after c-v restore
+    this._lastRevealRun = () => this._scrollToRange(range, { replay: true }); // replayed after c-v restore
     const list = this._messageList;
     let node = range.startContainer;
     node = node.nodeType === 1 ? node : node.parentElement;
