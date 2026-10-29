@@ -48,6 +48,12 @@
 //      by its own run (never past a later producer; a later CLI runner wins after its start); the opening skew needs the
 //      touch's conversation; a heredoc body inside a span never counts toward SCAN_MAX; a summary that IS a turn's first
 //      record opens it; a patched copy per rule
+//   ⑫ ROUND 7 (the r6 verdict): naming beats recency — the claim bound is the COMMAND WORD's alone (a loop keeps the
+//      reads it names beside a later CLI call of another conversation, for the rest of the turn); a turn's opener names
+//      its touch by conversation OR verb; a backgrounded list is a shell of its own (its orphans outlive a `wait`
+//      outside it), and a disowned job, a function's body until it is called, a pause / request signal, a reaper through
+//      a wrapper, one pass of a loop's job end nothing — each against bash's truth (repro r7-bash-truth.cjs); a patched
+//      copy per rule
 //   ⑤ WIRING PINS: every agent channel route records (test-architecture §63 is the census), the renderer's holder on
 //      the three card shapes, the view in ChatView's ONE element hook + the broadcast + the turn + dispose, the
 //      status bar's keyed `channels` chip (escHtml'd), the ONE channel-window call, no innerHTML in the view, the
@@ -238,7 +244,7 @@ await section('④', async () => {
   const C = (id, start, end = null, text = '') => ({ id, start, end, text });
   const par = [C('P1', 10000, null, 'vibespace-channels read gmail/c1'), C('P2', 10400, null, 'vibespace-channels read gmail/c2')];
   const q1 = [touch({ id: 'q1', at: 13000, convId: 'c1' })];
-  const named = copy('named', 'const exact = cs.filter((c) => cand.has(c) && claims(c) && namesTouch(c.text, t, c.runs, c.kind));', 'const exact = [];');
+  const named = copy('named', 'const exact = cs.filter((c) => cand.has(c) && namesTouch(c.text, t, c.runs, c.kind));', 'const exact = [];');
   ok(T.bindToCall(q1, par).byCall.P1 && !named.bindToCall(q1, par).byCall.P1, 'CONTROL the named-evidence rule removed: a parallel call\'s touch lands on its sibling');
   const batch = copy('batch', 'if (cs[j].start > cs[i].start + batchMs) {', 'if (cs[j].start > cs[i].start) {');
   ok(!batch.bindToCall(q1, par).byCall.P1, 'CONTROL the batch rule removed: the first call of a parallel batch stops when its sibling starts, its touch is lost to it');
@@ -1110,7 +1116,7 @@ await section('⑩', async () => {
   ok(eq(B9(blindRun, t6, [scr, one('CUT', cutCli, R0 + 5040, R0 + 9000)], ctx).by, { CUT: 3 }), 'CONTROL the CLI\'s name in blind text read as a run (r3): the cut call takes `bash /tmp/read-all.sh`\'s rows');
   const docCut = scan('heredoc-cut', '        const b = heredocBody(s, i, h);', '        const b = heredocBody(s.slice(0, SCAN_MAX), i, h);');
   ok(!docCut.runsNothing(longMsg), 'CONTROL a heredoc body counted against SCAN_MAX (r3): the 9 KB vibespace-msg could run again');
-  const noReap = scan('reapers', '  if (!jobs.length) return;\n  const vars = new Map();', '  return;\n  const vars = new Map();');
+  const noReap = scan('reapers', '  if (!jobs.length) return;\n  const vars = new Map(),', '  return;\n  const vars = new Map(),');
   ok(eq(B9(noReap, t25, [one('PAR', reap[0], R0, null), py], ctx), NOTE3), 'CONTROL no reapers (r3): `npm test & npm run lint & wait` lingers — the later python script loses its reads to the note');
   const veto = copy('linger-veto', '      const named = cs.filter((c) => cand.has(c) && claims(c) && callNames(c, t));', '      const named = lingering.length ? [] : running.filter((c) => callNames(c, t));');
   ok(eq(B9(veto, t30, [one('DEV', 'npm run dev', R0 + 5_000, R0 + 5_300, { background: true }), fgLoop], ctx), NOTE3), 'CONTROL r3\'s veto (anything lingering turns the command-word rung off): the foreground CLI loop loses its reads to the note beside a lingering `npm run dev`');
@@ -1118,7 +1124,7 @@ await section('⑩', async () => {
   ok(eq(B9(inertVeto, t30, [one('TAIL', 'tail -f /tmp/app.log', R0 + 5_000, R0 + 5_300, { background: true }), one('PY', 'python3 x.py', R0 + 20_000, null)], ctx), NOTE3), 'CONTROL a lingering call that runs nothing counted as a candidate: a background `tail -f` takes the lone python script\'s reads to the note');
   const latest = copy('producers-latest', '      else if (named.length === 1 || (named.length > 1 && !named.some((c) => c.lingers))) pick', '      else if (named.length) pick');
   ok(eq(B9(latest, tn(4, R0 + 8_000), [one('P1', LOOP, R0 + 5_000, null, { background: true }), one('P2', LOOP.replace('ids', 'ids2'), R0 + 5_040, null, { background: true })], ctx).by, { P2: 4 }), 'CONTROL several CLI runners judged by the latest even when one is a background producer (r3): two producers in one batch ⇒ P2 4, a guess');
-  const noList = scan('list-bg', '        for (let k = list; k < out.length; k++) { out[k].words.bg = true; out[k].words.job = job; }', '        if (c) { c.words.bg = true; c.words.job = job; }');
+  const noList = scan('list-bg', '        for (let k = list; k < out.length; k++) {\n          const w = out[k].words;', '        for (let k = c ? out.length - 1 : out.length; k < out.length; k++) {\n          const w = out[k].words;');
   ok(eq(B9(noList, t30, [devEarly, one('BG', comp[1], R0 + 5_000, R0 + 5_300)], ctx).by, { DEV: 3 }) && eq(B9(noList, t30, [devEarly, one('BG', ands[0], R0 + 5_000, R0 + 5_300)], ctx).by, { DEV: 3 }),
     'CONTROL `&` read as backgrounding only the command before it (r3): `( for … done ) &` and `vibespace-channels list | tee … &` do not linger — the lingering dev server takes their reads');
   const noSplit = scan('env-split', "      if (base === 'env' && (ENV_SPLIT.includes(o)", "      if (false && (ENV_SPLIT.includes(o)");
@@ -1133,7 +1139,7 @@ await section('⑩', async () => {
   const textMark = copy('entered-turn', "      if (m.role !== 'user' || !m.webuiMsgId || ", "      if (m.role !== 'user' || ", 'src/message-manager.js', MMS);
   const sw2 = swOf(textMark.MessageManager);
   ok(sw2.opener && sw2.opener.midTurn === true && eq(sw2.turns, [0]), 'CONTROL a queued_command that marks the newest same words (r3): the rebuilt opener «continue» loses its turn — turns [0]');
-  const noOpen = copy('opening-skew', ' && !(u === c.start && at < c.start && namesConv(c.text, t))', '');
+  const noOpen = copy('opening-skew', ' && !(u === c.start && at < c.start && namesTouch(c.text, t, c.runs, c.kind))', '');
   ok(eq(B9(noOpen, [touch({ id: 'sk', adapterId: 'lark', convId: 'fx-9', at: R0 + 9_700 })], [one('X', 'vibespace-channels read lark/fx-9', R0 + 10_000, R0 + 12_000)], { notes: [{ id: 'note:t1', at: R0 + 100 }], turns: [R0, R0 + 10_000] }).notes, { 'note:t1': 1 }), 'CONTROL a call that opens its turn excluded for the skew before it (r3): the touch goes to turn 1\'s note');
   const noCmp = copy('compaction', "  if (msg.role === 'user' && isCompactSummaryText(", "  if (false && isCompactSummaryText(");
   ok(eq(cmpTurns(noCmp), [0, 5100]), 'CONTROL a compaction summary read as a turn\'s start (r3): the summary cuts the turn');
@@ -1180,8 +1186,8 @@ await section('⑪', async () => {
     rib: B9(T, tn(3, R0 + 700_000), [one('RIB', 'for c in $(cat ids); do vibespace-channels read "$c"; done', R0 + 2_000, R0 + 2_100, { background: true }), triage(R0 + 600_000, R0 + 900_000)], ctx),
   };
   ok(eq(lb.fin, NOTE3) && eq(lb.before.by, { BGCLI: 3 }) && eq(lb.ended.by, { BGCLI: 3 }) && eq(lb.cliLater.by, { LIST: 3 }) && eq(lb.ampLater.by, { L2: 3 }) && eq(lb.inertLater.by, { BGCLI: 3 })
-    && eq(lb.earlier.by, { BGCLI: 3 }) && eq(lb.exact, { by: {}, notes: { 'note:ctx': 1 }, unbound: 0 }) && eq(lb.rib, NOTE3),
-    'A LINGERING CLAIM IS BOUNDED BY ITS OWN RUN (r6 MAJOR, skeptic-correctness-probe.cjs «cli & early + later lone python script», refute-amp-linger.cjs): a `vibespace-channels search … &` at 2 s and a lone `python3 tools/triage_inbox.py` from 600 s — reads at 700 s ⇒ the note (r4: the line, finished ten minutes earlier, took them); reads at 300 s ⇒ the line (nothing later ran); the script ended before the reads ⇒ the line, the one call that could still be running; a LATER CLI runner — foreground or `&` — wins the reads after its start (r4: the note); a later call that runs nothing (`vibespace-status`) bounds nothing; against an EARLIER stranger the line keeps its rows; the bound holds for a line that names the conversation and for a `run_in_background` loop with no end seen', Object.fromEntries(Object.entries(lb).map(([k, r]) => [k, Object.keys(r.by).length ? r.by : r.notes])));
+    && eq(lb.earlier.by, { BGCLI: 3 }) && eq(lb.exact, { by: { BGX: 1 }, notes: {}, unbound: 0 }) && eq(lb.rib, NOTE3),
+    'A LINGERING CLAIM IS BOUNDED BY ITS OWN RUN (r6 MAJOR, skeptic-correctness-probe.cjs «cli & early + later lone python script», refute-amp-linger.cjs): a `vibespace-channels search … &` at 2 s and a lone `python3 tools/triage_inbox.py` from 600 s — reads at 700 s ⇒ the note (r4: the line, finished ten minutes earlier, took them); reads at 300 s ⇒ the line (nothing later ran); the script ended before the reads ⇒ the line, the one call that could still be running; a LATER CLI runner — foreground or `&` — wins the reads after its start (r4: the note); a later call that runs nothing (`vibespace-status`) bounds nothing; against an EARLIER stranger the line keeps its rows; the bound holds for a `run_in_background` loop with no end seen — r7: a line that NAMES the conversation keeps it (naming beats recency, ⑫)', Object.fromEntries(Object.entries(lb).map(([k, r]) => [k, Object.keys(r.by).length ? r.by : r.notes])));
   // ── 3. THE OPENING SKEW NEEDS THE TOUCH'S CONVERSATION — skeptic-opening-skew.cjs / -status.cjs / -bg.cjs
   const B = R0 + 2_000_000;
   const conv = (o) => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, v.map((t) => t.convId)]));
@@ -1220,27 +1226,134 @@ await section('⑪', async () => {
   const copy = (tag, from, to) => { if (src.split(from).length !== 2) anchorMissing(tag, 'src/channel-touch.js (one occurrence)'); return MUT.load('src/channel-touch.js', src.replace(from, to), tag); };
   const scanWith = (tag, text) => MUT.load('src/channel-touch.js', src.replace("require('./shell-words.js')", `require(${JSON.stringify(MUT.write('src/shell-words.js', text, tag))})`), tag);
   const scan = (tag, from, to) => { if (SW.split(from).length !== 2) anchorMissing(tag, 'src/shell-words.js (one occurrence)'); return scanWith(tag, SW.replace(from, to)); };
-  const bgReap = scan('bg-reaper', ' || c.words.bg || c.words.andOr ||', ' || c.words.andOr ||');
+  const bgReap = scan('bg-reaper', '          if (w.scope === scope) w.scope = sub;\n', '');
   ok(eq(bgBind(bgReap, POLL + '\nP=$!\n{ sleep 3600; kill $P; } &').by, { PY: 3 }), 'CONTROL a backgrounded `kill` read as ending the job (r4): the brace watchdog `{ sleep 3600; kill $P; } &` ends the loop — the later script takes its reads');
-  const noProbe = scan('kill-probe', '    if (probe) continue;\n', '');
+  const noProbe = scan('kill-probe', "      if (kill && !ENDING_SIGNALS.has(sig.toUpperCase().replace(/^SIG/, ''))) return;", '');
   ok(eq(bgBind(noProbe, shapes['bg loop + kill -0 probe']).by, { PY: 3 }), 'CONTROL `kill -0` read as a kill (r4): the probe ends the loop — the later script takes its reads');
-  const noCond = scan('and-or', ' || c.words.andOr ||', ' ||');
+  const noCond = scan('and-or', 'if (c.words.andOr || c.pipeFrom', 'if (c.pipeFrom');
   ok(eq(bgBind(noCond, 'node server.js & PID=$!; curl -s "$URL/health" || kill $PID').by, { PY: 3 }), 'CONTROL a `kill` after `||` counted (it runs only on a failure): the server ends — the later script takes its reads');
   const noScope = scan('job-scope', 'jobs.filter((j) => j.scope === c.words.scope && j.at < c.words[0].at)', 'jobs.filter((j) => j.at < c.words[0].at)');
   ok(eq(bgBind(noScope, '(setsid ./serve.sh > /tmp/s.log 2>&1 &)\nnpm run lint & wait').by, { PY: 3 }), 'CONTROL another subshell\'s job ended by this shell\'s `wait`: the double-forked server ends — the later script takes its reads');
   const anyPid = scan('job-pid', '    const job = (a) => {', '    const job = () => open[open.length - 1] || null; const jobR6 = (a) => {');
   ok(eq(bgBind(anyPid, shapes['bg loop + wait on other pid']).by, { PY: 3 }), 'CONTROL a `wait` of ANY pid read as ending the latest job (r4): `wait $S` ends the loop — the later script takes its reads');
-  const anyOne = scan('wait-n', '(kill ? [] : one ? (live.length === 1 ? live : []) : open)', '(kill ? [] : open)');
+  const anyOne = scan('wait-n', '(kill ? [] : one ? (live.length === 1 && !live[0].many ? live : []) : live)', '(kill ? [] : live)');
   ok(eq(bgBind(anyOne, 'node a.js & node b.js & wait -n; echo done').by, { PY: 3 }), 'CONTROL `wait -n` read as waiting for every job (r4): two jobs, one left running — the later script takes the reads');
   const noBound = copy('claim-bound', '      const claims = (c) => !lingering.includes(c) ||', '      const claims = () => true; const claimsR6 = (c) => !lingering.includes(c) ||');
   ok(eq(B9(noBound, tn(3, R0 + 700_000), [BGCLI, triage(R0 + 600_000, R0 + 900_000)], ctx).by, { BGCLI: 3 }), 'CONTROL a lingering claim with no bound (r4): the `&` search that finished ten minutes earlier takes the lone script\'s reads');
-  const anyOpener = copy('opening-names', ' && namesConv(c.text, t))); };', ')); };');
+  const anyOpener = copy('opening-names', ' && namesTouch(c.text, t, c.runs, c.kind))); };', ')); };');
   ok(eq(os(anyOpener, 'vibespace-channels list --json').by, { W: ['fx-1', 'fx-2'], X: ['fx-3'] }), 'CONTROL the opening skew for any opener (r4): turn 2\'s `vibespace-channels list --json` takes turn 1\'s last read');
   const spanCount = scan('span-docs', 'i - skipped - span.docs < SCAN_MAX', 'i - skipped < SCAN_MAX');
   ok(!spanCount.runsNothing(commitLong) && spanCount.commandsRun(commitLong).blind.length === 1, 'CONTROL a span\'s heredoc body counted toward SCAN_MAX (r4): the 9 KB commit idiom goes blind — it could run');
   const cmpFirst = copy('compaction-order', "  if (typeof msg.turnStart === 'boolean') return msg.turnStart;   // r6:", "  if (typeof msg.turnStart === 'boolean' && !isCompactSummaryText((msg.content || []).map((b) => (b && b.text) || '').join(''))) return msg.turnStart;   // r6:");
   ok(eq(liveTurns(cmpFirst, held), [0]), 'CONTROL the summary judged before the harness\'s turn fact (r4): the held message\'s compacted turn never opens — turns [0]');
   for (const c of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 10, label: '⑪ ' })) ok(c.pass, c.name, c.detail);
+});
+
+// ═══ ⑫ ROUND 7 ═══
+console.log('⑫ ROUND 7 — naming beats recency (the bound is the command word\'s alone), a turn\'s opener names its touch by conversation or verb, a backgrounded list is a shell of its own, a disowned job / a function\'s body / a pause end nothing');
+await section('⑫', async () => {
+  const B9 = (TT, touches, calls, opts) => { const r = TT.bindToCall(touches, calls, opts); const ids = (o) => Object.fromEntries(Object.entries(o || {}).map(([k, v]) => [k, v.length])); return { by: ids(r.byCall), notes: ids(r.byNote), unbound: r.unbound.length }; };
+  const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const R0 = 6_000_000;
+  const ctx = { notes: [{ id: 'note:ctx', at: R0 + 100 }], turns: [R0] };
+  const one = (id, text, start, end, o = {}) => ({ id, start, end, text, kind: 'command', background: false, bgEnd: 0, ...o });
+  const rd = (convId, s) => touch({ id: convId + '@' + s, adapterId: 'lark', convId, at: R0 + s * 1000 + 50 });
+  // ── 1. NAMING BEATS RECENCY — hyg-exact-vs-later-cli.cjs, hyg-sticky.cjs, rev6-two-pollers.cjs, rev6-claim-exact.cjs
+  const LOOP = one('LOOP', 'while :; do vibespace-channels read lark/fx-a --limit 5 > /tmp/a.json; sleep 30; done &', R0 + 2_000, R0 + 2_100);
+  const RB = one('RB', 'vibespace-channels read gmail/fx-b > /tmp/b.json &', R0 + 600_000, R0 + 600_100);
+  const sticky = [30, 60, 600, 630, 660, 900, 1800].map((s) => rd('fx-a', s));
+  const nb = {
+    fg: B9(T, [rd('fx-a', 600.5)], [LOOP, one('RB', 'vibespace-channels read gmail/fx-b', R0 + 600_000, null)], ctx),
+    amp: B9(T, [rd('fx-a', 700)], [LOOP, RB], ctx),
+    sticky: B9(T, sticky, [LOOP, RB], ctx),
+    pollers: B9(T, [rd('fx-a', 700), rd('fx-b', 700.5), rd('fx-a', 900), rd('fx-b', 900.5)], [LOOP, one('POLL_B', 'while true; do vibespace-channels read lark/fx-b; sleep 20; done > /tmp/b.log 2>&1 &', R0 + 600_000, R0 + 600_300)], ctx),
+    search: B9(T, [rd('fx-a', 600.5)], [LOOP, one('S', 'vibespace-channels search "release notes"', R0 + 600_000, null)], ctx),
+    compose: B9(T, [rd('fx-a', 600.5)], [LOOP, one('S', 'vibespace-channels compose lark --to someone', R0 + 600_000, null)], ctx),
+    python: B9(T, [rd('fx-a', 700)], [LOOP, one('PY', 'python3 tools/triage_inbox.py', R0 + 600_000, R0 + 900_000)], ctx),
+    unnamed: B9(T, [rd('fx-z', 700)], [LOOP, RB], ctx),
+  };
+  ok(eq(nb.fg.by, { LOOP: 1 }) && eq(nb.amp.by, { LOOP: 1 }) && eq(nb.sticky.by, { LOOP: 7 }) && eq(nb.pollers.by, { LOOP: 2, POLL_B: 2 }) && eq(nb.search.by, { LOOP: 1 }) && eq(nb.compose.by, { LOOP: 1 }) && eq(nb.python.by, { LOOP: 1 }) && eq(nb.unnamed.by, { RB: 1 }),
+    'NAMING BEATS RECENCY (r7 MAJOR, hyg-exact-vs-later-cli.cjs + hyg-sticky.cjs + rev6-two-pollers.cjs + rev6-claim-exact.cjs): a poll loop `while :; do vibespace-channels read lark/fx-a …; done &` keeps its lark/fx-a reads beside a LATER `vibespace-channels read gmail/fx-b` — running at the read, or `&` — for the rest of the turn (r6: the gmail card took them, 5 of 7), beside a later poller of ANOTHER conversation (each keeps its own), a later search / compose running at the read, a later lone script (r6: the note); the bound stays the COMMAND WORD\'s: a read the loop does not name goes to the later CLI runner (r6\'s rule, held)', Object.fromEntries(Object.entries(nb).map(([k, r]) => [k, r.by])));
+  // ── 2. A TURN'S OPENER NAMES ITS TOUCH BY CONVERSATION OR VERB — rev6-opening-search.cjs
+  const B2 = R0 + 2_000_000;
+  const ob = (TT, xText, touches) => { const r = TT.bindToCall(touches, [one('W', 'python3 tools/triage_inbox.py', B2 + 1000, B2 + 20_000), one('X', xText, B2 + 20_400, B2 + 21_000)], { notes: [{ id: 'note:t1', at: B2 + 100 }, { id: 'note:t2', at: B2 + 20_450 }], turns: [B2, B2 + 20_400] }); const ids = (o) => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, v.length])); return { by: ids(r.byCall), notes: ids(r.byNote) }; };
+  const hits = ['h1', 'h2', 'h3'].map((c, i) => touch({ id: 'h' + i, op: 'search', adapterId: 'lark', convId: c, count: 2, at: B2 + 20_100 + i * 10 }));
+  const SEARCH = 'vibespace-channels search "release notes" --full';
+  const opv = { search: ob(T, SEARCH, hits), compose: ob(T, 'vibespace-channels compose lark --to someone', [touch({ id: 'cp', op: 'compose', adapterId: 'lark', convId: null, at: B2 + 20_100 })]), neither: ob(T, SEARCH, [touch({ id: 'er', adapterId: 'lark', convId: 'c9', at: B2 + 20_100 })]) };
+  ok(eq(opv.search.by, { X: 3 }) && eq(opv.compose.by, { X: 1 }) && eq(opv.neither.by, { W: 1 }),
+    'A TURN\'S OPENER NAMES ITS TOUCH BY CONVERSATION OR VERB (r7 minor, rev6-opening-search.cjs): turn 2 opens on `vibespace-channels search …` / `compose lark …` — the hits / the draft stamped 300 ms before its card are its own (r6: turn 1\'s script took them); a read the opener names by neither stays turn 1\'s script\'s (⑪: a `list` opener too)', opv);
+  // ── 3. A JOB ENDS ONLY BY A WAIT / KILL THAT ENDS IT IN ITS OWN SHELL — hyg-endjobs-probes.cjs, rev6-disown.cjs, rerun6-endjobs-attack.cjs; bash's truth: repro r7-bash-truth.cjs
+  const C = 'vibespace-channels read lark/inbox';
+  const linger = {
+    '( C & ) & wait': `( ${C} & ) & wait`,
+    '{ C & } & wait': `{ ${C} & } & wait`,
+    'for … do C & done & wait': 'for c in a b; do vibespace-channels read lark/$c & done & wait',
+    'while read … do C & done < ids & wait': 'while read c; do vibespace-channels read "$c" & done < ids & wait',
+    'bash -c "C &" & wait': `bash -c "${C} &" & wait`,
+    'C & disown; wait': `${C} & disown; wait`,
+    'C &! ⏎ wait (zsh)': `${C} &!\nwait`,
+    'C &| ⏎ wait (zsh)': `${C} &|\nwait`,
+    'C & f() { wait; } (never called)': `${C} & f() { wait; }`,
+    'g() { C & } ⏎ g & wait': `g() { ${C} & }\ng & wait`,
+    'C & timeout 5 wait $!': `${C} & timeout 5 wait $!`,
+    'C & kill -STOP $!': `${C} & kill -STOP $!`,
+    'C & kill -HUP $!': `${C} & kill -HUP $!`,
+    'C & kill -s USR1 $!': `${C} & kill -s USR1 $!`,
+    'loop & ; wait -n': 'for c in a b c; do vibespace-channels read lark/$c & done; wait -n',
+    'loop & ; wait %1': 'for c in a b c; do vibespace-channels read lark/$c & done; wait %1',
+    'C & P=$!; P=1; wait $P': `${C} & P=$!; P=1; wait $P`,
+  };
+  const ends = {
+    'C & wait': `${C} & wait`,
+    '{ C & wait; } & wait': `{ ${C} & wait; } & wait`,
+    'bash -c "C & wait" & wait': `bash -c "${C} & wait" & wait`,
+    'C & f() { wait; }; f': `${C} & f() { wait; }; f`,
+    'C & ⏎ function g { ⏎ wait ⏎ } ⏎ g': `${C} &\nfunction g {\n  wait\n}\ng`,
+    'C & kill -TERM $!': `${C} & kill -TERM $!`,
+    'C & kill -9 %1': `${C} & kill -9 %1`,
+    'loop & ; wait': 'for c in a b c; do vibespace-channels read lark/$c & done; wait',
+    'C & command wait': `${C} & command wait`,
+  };
+  const cliEnded = (TT, x) => TT.commandsRun(x).filter((r) => r.base === 'vibespace-channels').every((r) => r.bg && r.ended);
+  const cliLingers = (TT, x) => TT.commandsRun(x).some((r) => r.base === 'vibespace-channels' && r.bg && !r.ended);
+  const pyLate = one('PY', 'python3 tools/report.py --out /tmp/r.md', R0 + 20_000, R0 + 60_000), t30 = [0, 1, 2].map((i) => rd('fx-' + i, 30 + i));
+  const bgBind = (TT, x) => B9(TT, t30, [one('LINE', x, R0 + 2_000, R0 + 2_400), pyLate], ctx);
+  const lr = Object.fromEntries(Object.entries(linger).map(([k, x]) => [k, cliLingers(T, x) && eq(bgBind(T, x).notes, { 'note:ctx': 3 })]));
+  const er = Object.fromEntries(Object.entries(ends).map(([k, x]) => [k, cliEnded(T, x) && eq(bgBind(T, x).by, { PY: 3 })]));
+  ok(Object.values(lr).every(Boolean) && Object.values(er).every(Boolean),
+    'A JOB ENDS ONLY BY A WAIT / KILL THAT ENDS IT IN ITS OWN SHELL (r7 minors, hyg-endjobs-probes.cjs + rev6-disown.cjs + rerun6-endjobs-attack.cjs; bash\'s truth: repro r7-bash-truth.cjs): the orphans of a backgrounded `( … )`, `{ …; }`, loop or `bash -c` outlive a `wait` outside it, a disowned job (`disown`, zsh `&!` / `&|`), a `wait` in a function never called (or called with `&`), `timeout 5 wait $!`, `kill -STOP` / `-HUP` / `-s USR1`, `wait -n` / `wait %1` of a loop\'s jobs (a job per pass), `wait $P` once P is reassigned — each lingers: beside the later lone script, the note (r6: the script took the reads); a `wait` inside the group, a CALLED function, `kill -TERM` / `-9`, a plain `wait` of the loop, `command wait` end it ⇒ the script', { lingers: lr, ends: er });
+  // ── A PATCHED COPY PER RULE
+  const MUT = mutantCopies('channel-touch-r7', REPO);
+  const src = read('src/channel-touch.js'), SW = read('src/shell-words.js');
+  const copy = (tag, from, to) => { if (src.split(from).length !== 2) anchorMissing(tag, 'src/channel-touch.js (one occurrence)'); return MUT.load('src/channel-touch.js', src.replace(from, to), tag); };
+  const sw = (tag, from, to) => { if (SW.split(from).length !== 2) anchorMissing(tag, 'src/shell-words.js (one occurrence)'); return MUT.load('src/shell-words.js', SW.replace(from, to), tag); };
+  const exactBound = copy('exact-bound', 'const exact = cs.filter((c) => cand.has(c) && namesTouch(', 'const exact = cs.filter((c) => cand.has(c) && claims(c) && namesTouch(');
+  ok(eq(B9(exactBound, sticky, [LOOP, RB], ctx).by, { LOOP: 2, RB: 5 }), 'CONTROL the claim bound on the NAMED half too (r6): the gmail/fx-b card takes 5 of the loop\'s 7 lark/fx-a reads');
+  const convOnly = copy('opening-verb', ' && namesTouch(c.text, t, c.runs, c.kind))); };', ' && namesConv(c.text, t))); };');
+  ok(eq(ob(convOnly, SEARCH, hits).by, { W: 3 }), 'CONTROL the opening skew by conversation only (r6): turn 1\'s script takes the opening search\'s own hits');
+  const flat = sw('orphan-scope', '          if (w.job && w.job.scope === scope) w.job.scope = sub;\n', '');
+  ok(cliEnded(flat, linger['{ C & } & wait']) && cliEnded(flat, linger['for … do C & done & wait']), 'CONTROL a backgrounded list\'s jobs left in the outer shell (r6): `{ C & } & wait` and the backgrounded loop end their orphans');
+  const outerOnly = sw('orphan-chain', 'c.words.jobs && c.words.jobs.every(', 'c.words.job && [c.words.job].every(');
+  ok(cliEnded(outerOnly, linger['( C & ) & wait']), 'CONTROL the outermost job\'s verdict alone (r6): `( C & ) & wait` ends the orphan inside');
+  const nestedOuter = sw('nested-orphan', 'ended && (!x.bg || e) ?', 'ended ?');
+  ok(cliEnded(nestedOuter, linger['bash -c "C &" & wait']), 'CONTROL a shell\'s own background run given the outer verdict (r6): `bash -c "C &" & wait` ends the CLI');
+  const noDisown = sw('disown', "    if (cw.base === 'disown') {", "    if (cw.base === 'disown-r6') {");
+  ok(cliEnded(noDisown, linger['C & disown; wait']), 'CONTROL `disown` ignored (r6): `wait` ends the disowned job');
+  const noZsh = sw('zsh-disown', "disowned: s[i + 1] === '!' || s[i + 1] === '|' }", 'disowned: false }');
+  ok(cliEnded(noZsh, linger['C &! ⏎ wait (zsh)']), 'CONTROL zsh\'s `&!` read as a plain `&` (r6): `wait` ends the disowned job');
+  const bodyRuns = sw('fn-body', '    if (c.words.fn) {', '    if (false) {');
+  ok(cliEnded(bodyRuns, linger['C & f() { wait; } (never called)']), 'CONTROL a function\'s body run where it is defined (r6): `f() { wait; }`, never called, ends the job');
+  const bodyJobs = sw('fn-jobs', '.filter((j) => !j.fn || (called.get(j.fn) || []).includes(j.scope))', '');
+  ok(cliEnded(bodyJobs, linger['g() { C & } ⏎ g & wait']), 'CONTROL a body\'s job open before any foreground call: `g & wait` ends the job `g` launched in its own shell');
+  const anySignal = sw('signals', "      if (kill && !ENDING_SIGNALS.has(sig.toUpperCase().replace(/^SIG/, ''))) return;", "      if (kill && /^(SIG)?0$/i.test(sig)) return;");
+  ok(cliEnded(anySignal, linger['C & kill -STOP $!']) && cliEnded(anySignal, linger['C & kill -HUP $!']), 'CONTROL every signal but 0 read as an end (r6): `kill -STOP` / `kill -HUP` end the job');
+  const anyWrapper = sw('wrapper', " || c.words.slice(0, cw.k).some((w) => w.v !== 'command' && WRAPPERS.has(w.v.slice(w.v.lastIndexOf('/') + 1)))", '');
+  ok(cliEnded(anyWrapper, linger['C & timeout 5 wait $!']), 'CONTROL a reaper through an external wrapper (r6): `timeout 5 wait $!` ends the job');
+  const onePass = sw('loop-many', "        if (groups.some((g) => g.close === 'done' && g.scope === scope)) job.many = true;   // inside a loop: a job per pass\n", '');
+  ok(cliEnded(onePass, linger['loop & ; wait -n']) && cliEnded(onePass, linger['loop & ; wait %1']), 'CONTROL a loop\'s jobs read as ONE (r6): `wait -n` / `wait %1` end every pass');
+  const keepVar = sw('var-reassign', '      else if (m) vars.delete(m[1]);\n', '');
+  ok(cliEnded(keepVar, linger['C & P=$!; P=1; wait $P']), 'CONTROL a variable still naming `$!` once reassigned (r6): `P=1; wait $P` ends the job');
+  for (const c of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 13, label: '⑫ ' })) ok(c.pass, c.name, c.detail);
 });
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

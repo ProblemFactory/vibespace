@@ -42,9 +42,11 @@
  *    latest; else a candidate — running or lingering alike — that runs `vibespace-channels` as a COMMAND WORD
  *    (`channelsRuns` — never the name in quoted prose `--reason "… vibespace-channels read …"` / `$'…'`, a comment, a
  *    heredoc's data, blind text or another command's argument): ONE such call keeps its rows against any stranger;
- *    several, one of them a background producer, ⇒ ③ (never the latest); r6: a LINGERING call's claim is bounded by its
- *    own run — never past the start of a LATER call of its turn that could have produced the touch (a producer that
- *    provably ran after it; a later CLI runner wins), past it the lingering call only vetoes; ② else exactly ONE candidate that could have
+ *    several, one of them a background producer, ⇒ ③ (never the latest); r6: a LINGERING call's claim BY THE CLI'S
+ *    COMMAND WORD is bounded by its own run — never past the start of a LATER call of its turn that could have produced
+ *    the touch (a producer that provably ran after it; a later CLI runner wins), past it the lingering call only vetoes
+ *    — r7: a claim BY NAME never is (naming beats recency: a call that names the touch keeps it whatever started
+ *    later); ② else exactly ONE candidate that could have
  *    produced it — every running call counts, a lingering one only when it could run — when it could have run anything
  *    (`callCanRun`: a shell call not made only of RUNS_NOTHING — a script, an interpreter, a shell's script file; a
  *    helper by its TOOL NAME, HELPER_TOOLS); ③ else (a producer that could run lingering beside a foreground stranger,
@@ -52,13 +54,16 @@
  *    «VibeSpace gave the assistant its task context»), never silently on a neighbour; ④ no note in the touch's turn
  *    (`turns` — the instants turns start, `opensTurn`: the harness's own turn facts — a record that entered a running
  *    turn never starts one, nor the CLI's compaction summary — r6: unless the harness marks it its turn's FIRST record
- *    (`turnStart`, read first); the skew window never crosses one; a call that opens its turn and NAMES the touch's
- *    conversation is inside it for the skew) ⇒ unbound, the chip still lists it. A `delivery` touch always takes ③/④.
+ *    (`turnStart`, read first); the skew window never crosses one; a call that opens its turn and NAMES the touch — its
+ *    conversation, its proposal or (r7) its verb, never neither — is inside it for the skew) ⇒ unbound, the chip still
+ *    lists it. A `delivery` touch always takes ③/④.
  *    A call LINGERS (its work outlives its card) when the normalizer says so (`producerOf`: run_in_background, the
  *    harness backgrounded it — until the end every close road writes) or its line sends work to the background the
  *    line does not end itself (r6: a job ends only by a FOREGROUND `wait` / `kill` of its pid after it — shell-words
  *    endJobs: never a backgrounded one, a `kill -0` probe, a trap, another job's pid, one after `&&` / `||`, another
- *    subshell's job), or starts a `vibespace-job run`.
+ *    subshell's job; r7: never a disowned job, an orphan inside a backgrounded group, a pause or a request (`kill -STOP` /
+ *    `-HUP`), a reaper through an external wrapper, a function's reaper until the function is called), or starts a
+ *    `vibespace-job run`.
  *    THE SCANNER (PURE src/shell-words.js `shellCommands` / `commandsRun`, imported) reads enough shell to tell a command
  *    word from prose: a shell
  *    wrapper IS its script (`bash -c`, a re-joined codex argv read whole, a heredoc / here-string / pipe it reads),
@@ -393,8 +398,9 @@ function bindToCall(touches, calls, { notes = [], turns = [], skewMs = SKEW_MS, 
   const us = (Array.isArray(turns) ? turns : []).map(num).filter((v) => v > 0);
   // r3: a call never causes a touch of ANOTHER turn — a turn starts between the call's start and the touch; r4: a call that
   // OPENS its turn (the turn's start is its own) is inside it for the skew before it too — r6: only a call that NAMES the
-  // touch's conversation (the previous turn's own call keeps its last touch otherwise)
-  const crossesTurn = (c, t, at) => { const lo = Math.min(c.start, at), hi = Math.max(c.start, at); return us.some((u) => u > lo && u <= hi && !(u === c.start && at < c.start && namesConv(c.text, t))); };
+  // touch (the previous turn's own call keeps its last touch otherwise) — r7: by its conversation, its proposal or its
+  // VERB (namesTouch: a turn-opening search / compose keeps its own early-stamped touches), never by neither
+  const crossesTurn = (c, t, at) => { const lo = Math.min(c.start, at), hi = Math.max(c.start, at); return us.some((u) => u > lo && u <= hi && !(u === c.start && at < c.start && namesTouch(c.text, t, c.runs, c.kind))); };
   const noteFor = (at) => {
     for (let k = ns.length - 1; k >= 0; k--) {
       const n = ns[k];
@@ -425,13 +431,15 @@ function bindToCall(touches, calls, { notes = [], turns = [], skewMs = SKEW_MS, 
       // ① a candidate whose command (a helper: its prompt) NAMES the touch — its conversation, its proposal, its verb —
       // the latest; else a candidate that runs the CLI as a command word (a caller's kindless call: the time rules alone)
       // — r4: running or lingering alike; ONE such call keeps its rows against any stranger; several, one of them a
-      // background producer (it outlives its card): by name or the note, never the latest. r6: a LINGERING call's claim is
-      // BOUNDED by its own run — never past the start of a LATER call of the turn that could have produced the touch (a
-      // producer that provably ran after it — running at the touch or not; a stranger that runs the CLI then wins); past
-      // it the lingering call only vetoes (②: it could still be running — no end seen)
+      // background producer (it outlives its card): by name or the note, never the latest. r6: a LINGERING call's claim BY
+      // THE COMMAND WORD is BOUNDED by its own run — never past the start of a LATER call of the turn that could have
+      // produced the touch (a producer that provably ran after it — running at the touch or not; a stranger that runs the
+      // CLI then wins); past it the lingering call only vetoes (②: it could still be running — no end seen). r7: a claim
+      // BY NAME is never bounded — a lingering call that names the touch keeps it whatever started later (naming beats
+      // recency: a later CLI call naming ANOTHER conversation never takes a loop's named reads)
       const cand = new Set([...running, ...lingering]);
       const claims = (c) => !lingering.includes(c) || !cs.some((p) => p !== c && p.start > c.start && p.start - skewMs <= at && !crossesTurn(p, t, at) && callCauses(p, t));
-      const exact = cs.filter((c) => cand.has(c) && claims(c) && namesTouch(c.text, t, c.runs, c.kind));
+      const exact = cs.filter((c) => cand.has(c) && namesTouch(c.text, t, c.runs, c.kind));
       const named = cs.filter((c) => cand.has(c) && claims(c) && callNames(c, t));
       // ② the ONE candidate that could have produced it — every running call counts (one that runs nothing too: several
       // running ⇒ the note), a lingering call only when it could run (a helper, a script: one that runs nothing never vetoes)

@@ -5,6 +5,8 @@
  * its spans, a shell's script, a script runner's, a find -exec's, `env -S`'s), `cliRuns` / `channelsRuns` (where the
  * channels CLI is a command word). Bounded: SCAN_MAX characters of shell, nesting 4; what it cannot read is `blind`.
  * r6: `endJobs` — which of a line's background jobs the line ENDS itself (a foreground `wait` / `kill` of the job's pid).
+ * r7: a job sent to the background is a shell of its own (the jobs it launches are its orphans), a disowned job is never
+ * waited for, a function's body runs only where it is called.
  *
  * lane touch-chip-cause (the .362 train fix, 2026-10-29): moved out of src/channel-touch.js — chat-run-summary (the
  * client's run summary, which imports nothing but PURE rule modules: test-collab-live-counter, test-fold-ux and
@@ -141,7 +143,10 @@ function spanEnd(s, i, open, close, docs = open === '(', acc = null) {
  *  compound command (`( … ) &`, `{ …; } &`, `for … done &`, `if … fi &`) is `bg`.
  *  r6: each single `&` makes ONE JOB of this shell (`words.job` = `{at, scope, ended}`, the outermost `&` wins; a `( … )`
  *  subshell is a scope of its own, `words.scope`); a command after `&&` / `||` carries `words.andOr`; endJobs marks the
- *  jobs the line ends itself.
+ *  jobs the line ends itself. r7: a single `&` makes its list a SHELL OF ITS OWN — the list's commands and the jobs they
+ *  launched move to that shell's scope (`words.jobs` = every job around a command, innermost first: a run ends only when
+ *  each did); zsh `&!` / `&|` disown the job at birth; a FUNCTION's body (`name () { … }`, `function name { … }`) carries
+ *  `words.fn` — its words run where the function is called, never where it is defined.
  *  PURE, bounded: SCAN_MAX characters of shell (a heredoc's body is read to its delimiter line and never counts — r6: a
  *  heredoc inside a `$( … )` span neither), nesting
  *  4 — the rest (and an unclosed heredoc's body) is returned as `blind` text. */
@@ -156,11 +161,17 @@ function shellCommands(src, owner = null, depth = 0, offset = 0) {
   // r6: `scope` = the `( … )` subshell open here (0: the line's own shell); `jobs` = this shell's background jobs, ONE per
   // single `&` ({at, scope, ended}); `mine` = this shell's own commands (a span's are its own shell's); `andOr` = the next
   // command runs on a condition (after `&&` / `||`); `span.docs` = the heredoc bodies read inside `$( … )` spans
-  let words = [], pending = [], redirect = false, pipe = null, skipped = 0, list = 0, andOr = false, scope = 0, scopes = 0;
+  // r7: `fn` = a function definition's name read, its `{` body not yet open ({name}: one per definition)
+  let words = [], pending = [], redirect = false, pipe = null, skipped = 0, list = 0, andOr = false, scope = 0, scopes = 0, fn = null;
   const groups = [], jobs = [], mine = [], span = { docs: 0 };
   const end = () => {
     const c = words.length ? { words, owner, src: s, pipeFrom: pipe } : null;
-    if (c) { out.push(c); mine.push(c); words.scope = scope; words.andOr = andOr; andOr = false; }
+    if (c) {
+      out.push(c); mine.push(c); words.scope = scope; words.andOr = andOr; andOr = false;
+      const body = groups.filter((g) => g.fn).pop();
+      if (body) words.fn = body.fn;
+      else if (words.length === 2 && words[0].v === 'function' && !words[0].q && !words[1].q) fn = { name: words[1].v };   // `function name` — its body next
+    }
     words = []; pipe = null;
     return c;
   };
@@ -241,18 +252,36 @@ function shellCommands(src, owner = null, depth = 0, offset = 0) {
     if (ch === '&' && s[i + 1] === '>') { i += s[i + 2] === '>' ? 3 : 2; redirect = true; continue; }
     if (ch === '(' && s[i + 1] === '(' && !words.length) { i = spanEnd(s, i, '(', ')', false) + 1; continue; }   // `(( … ))` arithmetic
     if (ch === '|' && s[i + 1] === '&') { pipe = end(); redirect = false; i += 2; continue; }   // `|&`: a pipe (stderr too)
+    if (ch === '(' && /^[ \t]*\)/.test(s.slice(i + 1, i + 64)) && (words.length === 1 || (words.length === 2 && words[0].v === 'function')) && words.every((x) => !x.q) && /^[\w.:@+-]+$/.test(words[words.length - 1].v)) {
+      const name = words[words.length - 1].v, c = end();   // r7: `name ()` / `function name ()` — a definition: its body next
+      if (c) c.words.def = true;
+      fn = { name }; list = out.length;
+      i = s.indexOf(')', i) + 1;
+      continue;
+    }
     if (';&|()'.includes(ch)) {
       const two = (ch === '&' || ch === '|' || ch === ';') && s[i + 1] === ch;
       const c = end();
       if (ch === '&' && !two) {   // `… &` — its whole and-or list to the background: r6 — ONE job of this shell, launched here
-        const job = { at: i, scope, ended: false };
+        // r7: the job IS A SHELL OF ITS OWN — its list's commands and the jobs they launched run there (a `wait` outside
+        // ends the job's own pid, never an orphan inside it; a reaper inside ends only what that shell launched); zsh's
+        // `&!` / `&|` disown it at birth (never waited for)
+        const job = { at: i, scope, ended: false, disowned: s[i + 1] === '!' || s[i + 1] === '|' }, sub = ++scopes, body = groups.filter((g) => g.fn).pop();
+        if (body) job.fn = body.fn;   // launched where its function is called
+        if (groups.some((g) => g.close === 'done' && g.scope === scope)) job.many = true;   // inside a loop: a job per pass
         jobs.push(job);
-        for (let k = list; k < out.length; k++) { out[k].words.bg = true; out[k].words.job = job; }
+        for (let k = list; k < out.length; k++) {
+          const w = out[k].words;
+          if (w.scope === scope) w.scope = sub;
+          if (w.job && w.job.scope === scope) w.job.scope = sub;
+          w.bg = true; w.job = job; w.jobs = [...(w.jobs || []), job];
+        }
+        if (job.disowned) i++;
       }
       if (two && ch !== ';') andOr = true;
       if (ch === '|' && !two) pipe = c;
       if (ch === ')') { const g = closeGroup(')'); if (g) list = g.outer; }
-      else if (ch === '(') { groups.push({ close: ')', outer: list, scope }); scope = ++scopes; list = out.length; }
+      else if (ch === '(') { groups.push({ close: ')', outer: list, scope }); scope = ++scopes; list = out.length; fn = null; }
       else if (ch === ';' || (ch === '&' && !two)) list = out.length;
       redirect = false;
       i += two ? 2 : 1;
@@ -289,10 +318,12 @@ function shellCommands(src, owner = null, depth = 0, offset = 0) {
     i = w.end > i ? w.end : i + 1;
     if (redirect) { redirect = false; continue; }
     if (/^\d+$/.test(w.v) && (s[i] === '<' || s[i] === '>')) continue;   // a file descriptor before a redirection
+    if (!w.q && w.v === '{' && words.length === 2 && words[0].v === 'function') end();   // r7: `function name {`
     if (!w.q && words.every((x) => OPENERS.has(x.v))) {   // r4: a compound command's own words, where a command word stands
-      if (GROUP_OPEN.has(w.v)) groups.push({ close: GROUP_OPEN.get(w.v), outer: list, scope });
+      if (GROUP_OPEN.has(w.v)) groups.push({ close: GROUP_OPEN.get(w.v), outer: list, scope, ...(fn && w.v === '{' ? { fn } : {}) });
       else if (GROUP_CLOSE.has(w.v)) { const g = closeGroup(w.v); if (g) list = g.outer; }
-    }
+      fn = null;
+    } else if (!words.length) fn = null;
     words.push(w);
   }
   end();
@@ -336,33 +367,36 @@ function commandWord(words) {
 
 /** r6: the commands with which a line ENDS its own background jobs. */
 const REAPERS = Object.freeze(['wait', 'kill']);
+/** r7: the signals with which a `kill` ENDS a job (none named: TERM) — never STOP / CONT / HUP / USR1 / USR2 / WINCH …
+ *  (a pause, a resume, a request a program may catch) nor `0` (a probe) */
+const ENDING_SIGNALS = new Set(['TERM', 'KILL', 'INT', 'QUIT', 'ABRT', 'IOT', 'ALRM', 'PIPE', '15', '9', '2', '3', '6', '14', '13']);
 /** r6: THE JOBS A LINE ENDS ITSELF — marks `ended` on the background jobs of ONE shell (shellCommands: one per single `&`)
  *  that a FOREGROUND `wait` / `kill` of that shell ends after their launch: `wait` with no operand ends every job before
  *  it (`wait -n` the one job, when only one runs); `wait` / `kill` of a job's pid — `$!`, a variable assigned `$!` after
- *  it, `%n` / `%%` / `%-` — ends that job. Nothing else ends a job: a `wait` / `kill` sent to the background itself, `kill
- *  -0` (a probe) / `kill -l`, a literal or computed pid, a reaper after `&&` / `||` (it runs on a condition) or in a pipe
- *  (a subshell), a job of another `( … )` subshell, a `trap` (it ends nothing until it fires — never seen). PURE. */
+ *  it, `%n` / `%%` / `%-` — ends that job. Nothing else ends a job: a `wait` / `kill` sent to the background itself (r7:
+ *  it runs in that job's own shell), `kill -0` (a probe) / `kill -l`, a literal or computed pid, a reaper after `&&` /
+ *  `||` (it runs on a condition) or in a pipe (a subshell), a job of another `( … )` subshell, a `trap` (it ends nothing
+ *  until it fires — never seen). r7: nor a job DISOWNED (`disown` — the current job, `-a` / `-r` every one, an operand
+ *  the one it names — or zsh's `&!` / `&|`: the shell no longer waits for it), an ORPHAN inside a backgrounded group (it
+ *  is that group's shell's job: only a reaper in that shell ends it), a `kill` with a signal that ends nothing
+ *  (ENDING_SIGNALS), a reaper through an external wrapper (`timeout 5 wait` — a builtin; `command` alone runs it), a
+ *  reaper in a FUNCTION's body — until the function is CALLED in the foreground (its body's reapers run there), a reaper
+ *  naming ONE pass of a job launched in a loop (`$!`, `%1`, `wait -n` — only a `wait` of every job ends it), a variable
+ *  once it is assigned anything but `$!`. PURE. */
 function endJobs(cmds, jobs) {
   if (!jobs.length) return;
-  const vars = new Map();
+  const vars = new Map(), bodies = new Map(), defs = new Map(), called = new Map();
   const piped = new Set(cmds.map((c) => c.pipeFrom).filter(Boolean));
   for (const c of cmds) {
-    const open = jobs.filter((j) => j.scope === c.words.scope && j.at < c.words[0].at);   // this shell's jobs launched before it
-    for (const w of c.words) { const m = /^([A-Za-z_][A-Za-z0-9_]*)=\$(?:!|\{!\})$/.exec(w.v); if (m) vars.set(m[1], open[open.length - 1] || null); }
-    const cw = commandWord(c.words);
-    if (!cw || !REAPERS.includes(cw.base) || c.words.bg || c.words.andOr || c.pipeFrom || piped.has(c)) continue;
-    const kill = cw.base === 'kill', ops = [];
-    let one = false, probe = false, opts = true;
-    for (let k = cw.k + 1; k < c.words.length; k++) {
-      const a = c.words[k].v;
-      if (opts && a === '--') { opts = false; continue; }
-      if (!opts || a.length < 2 || a[0] !== '-') { ops.push(a); continue; }
-      if (kill && (a === '-l' || a === '-L' || /^-(SIG)?0$/i.test(a))) probe = true;
-      else if (kill && (a === '-s' || a === '-n')) { if (/^(SIG)?0$/i.test((c.words[k + 1] || {}).v || '')) probe = true; k++; }
-      else if (!kill && a === '-p') k++;
-      else if (!kill && a.includes('n')) one = true;
+    // this shell's jobs launched before it — r7: a job of a function's body once the function was called in this shell
+    const open = jobs.filter((j) => j.scope === c.words.scope && j.at < c.words[0].at).filter((j) => !j.fn || (called.get(j.fn) || []).includes(j.scope));
+    for (const w of c.words) {   // `P=$!` names the latest job; r7: any other value unnames it
+      const m = /^([A-Za-z_][A-Za-z0-9_]*)=([^]*)$/.exec(w.v);
+      if (m && /^\$(?:!|\{!\})$/.test(m[2])) vars.set(m[1], open[open.length - 1] || null);
+      else if (m) vars.delete(m[1]);
     }
-    if (probe) continue;
+    const cw = commandWord(c.words);
+    if (!cw || c.words.def) continue;
     const job = (a) => {
       if (a === '$!' || a === '${!}' || a === '%%' || a === '%+' || a === '%') return open[open.length - 1] || null;
       if (a === '%-') return open[open.length - 2] || null;
@@ -372,9 +406,43 @@ function endJobs(cmds, jobs) {
       const j = v ? vars.get(v[1] || v[2]) : null;
       return j && open.includes(j) ? j : null;
     };
-    const live = open.filter((j) => !j.ended);
-    const ends = !ops.length ? (kill ? [] : one ? (live.length === 1 ? live : []) : open) : one ? (ops.length === 1 ? [job(ops[0])] : []) : ops.map(job);
-    for (const j of ends) if (j) j.ended = true;
+    if (cw.base === 'disown') {   // r7: wherever it could run (on a condition, in a pipe, in a body): never waited for
+      const args = c.words.slice(cw.k + 1).map((w) => w.v), ops = args.filter((a) => a[0] !== '-');
+      const marks = args.some((a) => /^-[a-z]*[ar]/.test(a)) ? open : ops.length ? ops.map(job) : open.slice(-1);
+      for (const j of marks) if (j && !j.ended) j.disowned = true;
+      continue;
+    }
+    if (c.words.fn) {   // r7: a function's body — its reapers run where the function is CALLED
+      if (defs.get(c.words.fn.name) !== c.words.fn) { defs.set(c.words.fn.name, c.words.fn); bodies.set(c.words.fn, []); }
+      if (REAPERS.includes(cw.base)) bodies.get(c.words.fn).push({ words: c.words, cw });
+      continue;
+    }
+    if (c.words.andOr || c.pipeFrom || piped.has(c) || c.words.slice(0, cw.k).some((w) => w.v !== 'command' && WRAPPERS.has(w.v.slice(w.v.lastIndexOf('/') + 1)))) continue;
+    const reap = (words, rw) => {
+      const kill = rw.base === 'kill', ops = [];
+      let one = false, sig = 'TERM', opts = true;
+      for (let k = rw.k + 1; k < words.length; k++) {
+        const a = words[k].v;
+        if (opts && a === '--') { opts = false; continue; }
+        if (!opts || a.length < 2 || a[0] !== '-') { ops.push(a); continue; }
+        if (kill && (a === '-l' || a === '-L')) return;
+        if (kill && (a === '-s' || a === '-n')) { sig = (words[k + 1] || {}).v || ''; k++; }
+        else if (kill) sig = a.slice(1);
+        else if (a === '-p') k++;
+        else if (a.includes('n')) one = true;
+      }
+      if (kill && !ENDING_SIGNALS.has(sig.toUpperCase().replace(/^SIG/, ''))) return;   // a probe (`-0`), a pause, a request
+      // r7: a job launched in a LOOP is one per pass — only a `wait` of every job ends it (`$!`, `%n`, `wait -n` name one pass)
+      const live = open.filter((j) => !j.ended && !j.disowned), one1 = (a) => { const j = job(a); return j && !j.many ? j : null; };
+      const ends = !ops.length ? (kill ? [] : one ? (live.length === 1 && !live[0].many ? live : []) : live) : one ? (ops.length === 1 ? [one1(ops[0])] : []) : ops.map(one1);
+      for (const j of ends) if (j && !j.disowned) j.ended = true;
+    };
+    if (REAPERS.includes(cw.base)) { reap(c.words, cw); continue; }
+    const def = defs.get(cw.base);   // a function CALLED here: its body's jobs are this shell's, its body's reapers run here
+    if (!def) continue;
+    called.set(def, [...(called.get(def) || []), c.words.scope]);
+    open.push(...jobs.filter((j) => j.fn === def && j.scope === c.words.scope && !open.includes(j)));
+    for (const b of bodies.get(def) || []) reap(b.words, b.cw);
   }
 }
 
@@ -421,9 +489,10 @@ function commandsRun(cmd, owner = null, depth = 0, offset = 0) {
   const cmds = shellCommands(cmd, owner, depth, offset);
   const out = [];
   out.blind = cmds.blind.slice();
-  // r6: a run of a background job (`bg`) carries `ended` when the line ends that job itself (endJobs) — inside a command
-  // sent to the background, its own shell's verdicts give way to the outer job's
-  const add = (list, bg, ended) => { for (const { ended: e, ...x } of list) out.push(bg ? { ...x, bg: true, ...(ended ? { ended: true } : {}) } : { ...x, ...(e ? { ended: true } : {}) }); for (const b of list.blind) out.blind.push(b); };
+  // r6: a run of a background job (`bg`) carries `ended` when the line ends that job itself (endJobs) — r7: inside a
+  // command sent to the background, a run its own shell sent to the background ends only when that shell ended it too
+  // (`bash -c 'cli &' & wait` leaves the CLI running)
+  const add = (list, bg, ended) => { for (const { ended: e, ...x } of list) out.push(bg ? { ...x, bg: true, ...(ended && (!x.bg || e) ? { ended: true } : {}) } : { ...x, ...(e ? { ended: true } : {}) }); for (const b of list.blind) out.blind.push(b); };
   const run = (c, words, cw, at, bg, ended) => {
     if (cw.lookup) { out.push({ base: cw.base, at, verb: '', lookup: true }); return; }
     if (cw.split !== undefined && depth < 4) { add(commandsRun([cw.split, ...words.slice(cw.rest).map((w) => w.v)].join(' '), at, depth + 1), bg, ended); return; }
@@ -454,7 +523,7 @@ function commandsRun(cmd, owner = null, depth = 0, offset = 0) {
   };
   for (const c of cmds) {
     const cw = commandWord(c.words);
-    if (cw) run(c, c.words, cw, c.owner === null ? offset + c.words[cw.k].at : c.owner, !!c.words.bg, !!(c.words.job && c.words.job.ended));
+    if (cw) run(c, c.words, cw, c.owner === null ? offset + c.words[cw.k].at : c.owner, !!c.words.bg, !!(c.words.jobs && c.words.jobs.every((j) => j.ended && !j.disowned)));
   }
   return out;
 }
@@ -474,6 +543,6 @@ function cliRuns(ran) { return ran.filter((x) => x.base === CLI).map(({ at, verb
 function channelsRuns(cmd) { return cliRuns(commandsRun(cmd)); }
 
 module.exports = {
-  CLI, SHELLS, OPENERS, DATA_HEADS, WRAPPERS, SCRIPT_RUNNERS, FIND_RUNS, ENV_SPLIT, SCAN_MAX, GROUP_OPEN, GROUP_CLOSE, RUNS_A_COMMAND, REAPERS,
+  CLI, SHELLS, OPENERS, DATA_HEADS, WRAPPERS, SCRIPT_RUNNERS, FIND_RUNS, ENV_SPLIT, SCAN_MAX, GROUP_OPEN, GROUP_CLOSE, RUNS_A_COMMAND, REAPERS, ENDING_SIGNALS,
   spanEnd, shellCommands, commandWord, endJobs, shellScripts, commandsRun, cliRuns, channelsRuns,
 };
