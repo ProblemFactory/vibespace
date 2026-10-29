@@ -393,8 +393,10 @@ const FOR_YOU_WORDS = Object.freeze({
  *  key and re-file match — src/user-todos.js jobFact): 'ask' | 'fire' | 'missed' | 'parked' | 'end:<state>:<cause>' (a
  *  done and a failed end are two facts, two items). `text` = a notify fire's --text (the job's name when it has none).
  *  r4: a kind it does not know answers a NAMED refusal ({fact: null, refused, copy}) — never null (claim r3-2 minor 7:
- *  `_forYou(job, null)` threw a TypeError into _finalizeRun); `error` = the engine-failed notice's field. */
-function forYouCopy(job, kind, { text = null, cause = null, urgency = null, error = null } = {}) {
+ *  `_forYou(job, null)` threw a TypeError into _finalizeRun); `error` = the engine-failed notice's field. r5: 'stray' is
+ *  no copy — it carries a filing that skipped the door (`shape`, the stray door's own) THROUGH the one door unchanged, so
+ *  the store refuses it in its own words and _forYou is the only line that reaches the dep. */
+function forYouCopy(job, kind, { text = null, cause = null, urgency = null, error = null, shape = null } = {}) {
   const name = String((job && (job.name || job.id)) || 'job');
   const tok = (v, n) => String(v == null || v === '' ? 'unknown' : v).toLowerCase().replace(/[^a-z0-9._()-]/g, '-').slice(0, n);
   if (kind === 'end') return { fact: `end:${tok(job.state, 24).replace(/[^a-z_-]/g, '-')}:${tok(cause, 48)}`, words: { key: FOR_YOU_WORDS.end, params: { name, state: String(job.state), cause: String(cause) } }, urgency: job.state === 'failed' ? 'normal' : 'low' };
@@ -404,7 +406,20 @@ function forYouCopy(job, kind, { text = null, cause = null, urgency = null, erro
   if (kind === 'fire') return { fact: 'fire', words: { key: FOR_YOU_WORDS.fire, params: { text: String(text || name) } }, urgency: urgency || 'normal' };
   if (kind === 'engine-failed') return { fact: 'engine-failed', words: { key: FOR_YOU_WORDS['engine-failed'], params: { error: String(error) } }, urgency: 'high' };
   if (kind === 'store-corrupt') return { fact: 'store-corrupt', words: { key: FOR_YOU_WORDS['store-corrupt'] }, urgency: 'high' };
+  if (kind === 'stray') { const a = shape && typeof shape === 'object' ? shape : {}; return { fact: null, words: null, urgency: null, copy: (typeof a.fact === 'string' && a.fact && a.fact.split(':')[0]) || 'stray', stray: a }; }
   return { fact: null, words: null, urgency: null, copy: tok(kind, 24), refused: `no For-you copy of kind «${String(kind).slice(0, 24)}» — the copies are ${Object.keys(FOR_YOU_WORDS).join(', ')}` };
+}
+
+// A HOLDER'S HANDLE ON THE ONE NAME ACCESSOR (lane job-notify-user r5, accept-r4 confirmed 0 + refuted 0): a module that holds
+// a job RECORD (it got it from the engine — jm.jobs, jobByToken) and shows its name to a person or another conversation asks
+// the engine (`jm.labelOf`, src/jobs.js: the name belted on its own, the record kept raw) — never `job.name`: the Ports scan
+// row, the Artifacts service row / chat card and the browser's job label read the record raw one line from a belted twin.
+// '' for a job with no name or a holder with no engine (a stub, a manager not ready) — the caller's own fallback follows (the
+// job's id, «a job») — fail closed, never the record's words. test-architecture §93 THE NAME CENSUS names every reader of a
+// record's name outside its writers and this accessor.
+function labelVia(jm) {
+  const own = jm && typeof jm.labelOf === 'function' ? jm : null;
+  return (job) => (job && job.name && own ? String(own.labelOf(job)) : '');
 }
 
 // THE LEGACY RUNG'S READER (lane job-notify-user r4, accept-r3 unverified 1 + 4): an engine ≤ 2.369.360 filed every copy as
@@ -669,6 +684,6 @@ module.exports = {
   SUPERVISE, onServiceExit, resolveName,
   renderJobsDigest, renderJobsUpdate, fitDigest, jobLine,
   validatePanel, validateAnswers, nextInteractionSeq, answerVersionVerdict, CONTEXT_PAYLOAD_CAP, clip,
-  notifyEffective, notifyUserOf, spawnTaskOf, storedAction, renderOwnerNotify, renderNotifStash, FOR_YOU_WORDS, forYouCopy, legacyCopyFact,
+  notifyEffective, notifyUserOf, spawnTaskOf, storedAction, renderOwnerNotify, renderNotifStash, FOR_YOU_WORDS, forYouCopy, legacyCopyFact, labelVia,
   agentJobView,
 };

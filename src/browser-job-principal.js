@@ -40,10 +40,12 @@ function ownerConversationOf(job) {
   const cid = job && job.owner && job.owner.conversation && job.owner.conversation.id;
   return typeof cid === 'string' && cid ? cid : null;
 }
-/** The words a surface shows for a job (read live — never stored with its browsing). */
-function jobLabelOf(job) {
+/** The words a surface shows for a job (read live — never stored with its browsing): its NAME through the engine's ONE
+ *  accessor the caller hands (`labelOf` = M.labelVia(jm) — lane job-notify-user r5: the browser's label read the record
+ *  raw), else its id — never the record's words. */
+function jobLabelOf(job, labelOf = null) {
   if (!job) return 'job';
-  const name = typeof job.name === 'string' ? job.name.trim().slice(0, 40) : '';
+  const name = typeof labelOf === 'function' ? String(labelOf(job) || '').trim().slice(0, 40) : '';
   return 'job ' + (name || String(job.id || '?'));
 }
 
@@ -51,9 +53,9 @@ function jobLabelOf(job) {
  * → {ok:true, principal:{kind:'job', jobId, ownerConversationId, ownerKey}} | {ok:false, code, error}.
  * `ownerKey` = the owner conversation's browser key (its live session's, else its recorded binding), '' when none.
  */
-function jobPrincipalOf({ job = null, ownerKey = '' } = {}) {
+function jobPrincipalOf({ job = null, ownerKey = '', labelOf = null } = {}) {
   if (!job || typeof job !== 'object' || !job.id) return { ok: false, code: 'unauthorized', error: 'unknown job token' };
-  if (!isRunningJob(job)) return { ok: false, code: 'job_not_running', error: `${jobLabelOf(job)} is not running — a job uses the browser only while its run is alive` };
+  if (!isRunningJob(job)) return { ok: false, code: 'job_not_running', error: `${jobLabelOf(job, labelOf)} is not running — a job uses the browser only while its run is alive` };
   const cid = ownerConversationOf(job);
   if (!cid) return { ok: false, code: 'job_no_owner', error: 'this job has no owner conversation — a job uses the browser as the conversation that created it; run vibespace-browser from a conversation' };
   if (!B.isBrowserKey(ownerKey)) {

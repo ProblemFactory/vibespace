@@ -287,7 +287,9 @@ const instanceBase = () => { try { return (deps.instanceUrl && deps.instanceUrl.
 const jobsList = () => { try { const jm = deps.jobs && deps.jobs(); return jm && jm.jobs ? [...jm.jobs.values()] : []; } catch { return []; } };
 /** lane artifacts-services-url: the Ports panel's forward records (src/port-forward.js list()) — a row's link ladder reads them */
 const forwardsList = () => { try { const pf = deps.ports && deps.ports(); return pf && typeof pf.list === 'function' ? pf.list() : []; } catch { return []; } };
-const linkFacts = () => ({ now: Date.now(), base: instanceBase(), forwards: forwardsList() });
+// a service row's NAME is the engine's ONE accessor's (lane job-notify-user r5) — never the record's
+const jobsLabel = () => { let jm = null; try { jm = deps.jobs && deps.jobs(); } catch { jm = null; } return require('../job-model.js').labelVia(jm); };
+const linkFacts = () => ({ now: Date.now(), base: instanceBase(), forwards: forwardsList(), labelOf: jobsLabel() });
 /** A conversation's service rows, DERIVED from the jobs engine at every read (AF.serviceRows: the lineage rule, the 24 h
  *  stopped window) — never folded into `session._artifacts`, never persisted. */
 function servicesOf(session) {

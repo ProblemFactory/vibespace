@@ -148,7 +148,7 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
    *  conv: 'job-<id>', name } for a live job's jbt_ — else null (none, or a token nobody holds: it names no actor). */
   const bearerOf = (req) => {
     const token = String((req.headers && req.headers.authorization) || '').replace(/^Bearer\s+/i, '') || String((req.body && req.body.token) || '');
-    if (token.startsWith('jbt_')) { const jm = getJobs && getJobs(); const j = jm && jm.ready !== false && typeof jm.jobByToken === 'function' ? jm.jobByToken(token) : null; return j ? { by: 'job', conv: `job-${j.id}`, name: j.name || null } : null; }
+    if (token.startsWith('jbt_')) { const jm = getJobs && getJobs(); const j = jm && jm.ready !== false && typeof jm.jobByToken === 'function' ? jm.jobByToken(token) : null; return j ? { by: 'job', conv: `job-${j.id}`, name: require('../job-model.js').labelVia(jm)(j) || null } : null; }   // r5: the NAME through the engine's ONE accessor
     if (!token.startsWith('vsst_')) return null;
     for (const [k, s] of activeSessions) if (s && sameToken(token, s.agentToken)) return { by: 'agent', conv: String(s._webuiId || k), name: s.name || s.webuiName || null };
     return null;
@@ -263,7 +263,7 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
   /** The calling principal → { scope, actor } | null. A vsst_ session: its conversation id; a live jbt_ job: `job-<id>`. */
   function agentPrincipal(req) {
     const token = String((req.headers && req.headers.authorization) || '').replace(/^Bearer\s+/i, '');
-    if (token.startsWith('jbt_')) { const jm = getJobs && getJobs(); const j = jm && jm.ready !== false && typeof jm.jobByToken === 'function' ? jm.jobByToken(token) : null; return j ? { scope: `job-${j.id}`, actor: j.name || `job ${j.id}` } : null; }
+    if (token.startsWith('jbt_')) { const jm = getJobs && getJobs(); const j = jm && jm.ready !== false && typeof jm.jobByToken === 'function' ? jm.jobByToken(token) : null; return j ? { scope: `job-${j.id}`, actor: require('../job-model.js').labelVia(jm)(j) || `job ${j.id}` } : null; }   // r5: the NAME through the engine's ONE accessor
     if (!token.startsWith('vsst_')) return null;
     for (const [k, s] of activeSessions) if (s && sameToken(token, s.agentToken)) return { scope: String(s._webuiId || k), actor: s.name || s.webuiName || String(s._webuiId || k) };
     return null;
@@ -406,7 +406,7 @@ function registerRunRoutes(app, { run, activeSessions, getJobs, contents, who, p
   /** The vsst_'s conversation, as the door reads a caller — or { job } / null. */
   function runCallerOf(req) {
     const token = tokenOf(req);
-    if (token.startsWith('jbt_')) { const jm = getJobs && getJobs(); const j = jm && jm.ready !== false && typeof jm.jobByToken === 'function' ? jm.jobByToken(token) : null; return j ? { job: true, name: j.name || null } : null; }
+    if (token.startsWith('jbt_')) { const jm = getJobs && getJobs(); const j = jm && jm.ready !== false && typeof jm.jobByToken === 'function' ? jm.jobByToken(token) : null; return j ? { job: true, name: require('../job-model.js').labelVia(jm)(j) || null } : null; }   // r5: the NAME through the engine's ONE accessor
     if (!token.startsWith('vsst_')) return null;
     for (const [k, s] of activeSessions) {
       if (!s || !sameToken(token, s.agentToken)) continue;

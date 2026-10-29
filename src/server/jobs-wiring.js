@@ -10,6 +10,10 @@ const fs = require('fs');
 const path = require('path');
 
 function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, taskGroups, activeSessions, deliver, getTelemetry = () => null, onStash = () => {}, onRunEnded = () => {} }) {
+  // THE FILER'S KEY (lane job-notify-user r5): this file is origin 'jobs''s one filer (src/inbox-origin.js FIELDS_FILERS) —
+  // the store names it by its frame, and the key it hands here rides every filing (a caller with no frame needs it)
+  let forYouKey = null;
+  try { forYouKey = userTodos && typeof userTodos.filerKey === 'function' ? userTodos.filerKey('jobs') : null; } catch (e) { log('[jobs] the For-you store handed this wiring no key of its filer —', e.message); }
   const jm = new JobManager({
     dataDir,
     onService: (job) => require('./artifact-registry.js').noteService(job), // lane artifacts-services: a job that listens ⇒ its conversation's `service` row + card
@@ -51,7 +55,7 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
           origin: 'jobs', // B-328d
           text, detail,
           i18n: words == null ? null : { text: words, ...(jobId ? { detail: [ownerCid && jobName ? { key: 'Background job {id} · via {name}', params: { id: jobId, name: jobName } } : { key: 'Background job {id}', params: { id: jobId } }] } : {}) },   // r4: the i18n-check road reads these literals (zh + ja required)
-          urgency: urgency || 'normal', by: 'agent', jobId, jobFact: jobId ? fact : null,
+          urgency: urgency || 'normal', by: 'agent', jobId, jobFact: jobId ? fact : null, filerKey: forYouKey,
           sessionName: ownerCid && sessName ? sessName : null, jobName: jobName || (ownerCid && sessName ? 'job' : 'background job'),
         });
         return { ok: true, id: (it && it.id) || null };
@@ -75,7 +79,7 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
       // lane job-notify-user r3: the words ARE the structure (an AGENT-FIELDS origin files no composed text — the store
       // fills the template; `jobs`, the job names the stash already carries belted, is a field belted on its own again)
       userTodos.add(`claude:${cid}`, {
-        origin: 'jobs', kind: 'notice', urgency: 'low', by: 'agent',
+        origin: 'jobs', kind: 'notice', urgency: 'low', by: 'agent', filerKey: forYouKey,
         sessionName: sessName ? `${sessName} · Background Work` : 'Background Work',
         i18n: {
           text: { key: 'Background Work notifications for this conversation were dropped — {cap} were already waiting, the most it keeps', params: { cap } },

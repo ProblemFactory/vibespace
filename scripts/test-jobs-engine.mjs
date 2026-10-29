@@ -1024,6 +1024,50 @@ setInterval(() => { }, 1000);
       ok(!real.length && I.noticeKeyTables()[0].keys.length >= 7, `r4 the i18n road: every server key the jobs engine files has zh + ja (${I.noticeKeyTables()[0].keys.length} table keys + the wiring's literals)`, JSON.stringify(real));
       ok(lit.length === 2 && tab.length === 2 && lit.every((f) => /planted, never translated/.test(f.key)) && tab.every((f) => f.table === 'planted'), 'CONTROL: a planted bare key — a wiring {key} literal or a FOR_YOU_WORDS row — is red in BOTH dicts', JSON.stringify([...lit, ...tab]));
     }
+
+    // ── lane job-notify-user r5 (accept-r4 confirmed 0 + refuted 0, confirmed 1, unverified 0): (8) THE ONE NAME ACCESSOR AT EVERY
+    // HOLDER — a running service whose name carries a token shape: the Ports SCAN row (the real PortForwardManager.detect over this
+    // engine), the Artifacts service row + the chat card it feeds (the real registry's noteService / listFor), the browser's job
+    // label (jobLabelOf through M.labelVia) each read the engine's labelOf, and a holder with no engine shows no name; (9) the
+    // stray door files THROUGH _forYou; (10) the wiring's filings carry the key the store handed its one filer
+    {
+      const X = wired('r5-names');
+      const raw = (s) => String(s).includes(MAT.slice(4, 16));
+      const job = X.jm.jobs.get(X.jm.create({ kind: 'service', name: 'deploy ' + MAT, cmd: { argv: ['sh', '-c', 'sleep 60'] }, ports: [45556], owner: own }, who).job.id);
+      const { PortForwardManager } = require('../src/port-forward.js');
+      const pf = new PortForwardManager({ hosts: null, dataDir: path.join(R4, 'r5-names'), broadcast() { }, log() { }, plugins: null, serverSetting: () => undefined, getJobs: () => X.jm });
+      pf.detectLocal = async () => [{ port: 45556, proto: 'tcp', proc: 'node' }]; pf._enrichDocker = async () => { };
+      const scan = (await pf.detect('__local__'))[0];
+      try { pf.shutdown && pf.shutdown(); } catch { }
+      const REG = require('../src/server/artifact-registry.js');
+      const session = { claudeSessionId: CID, _normalizer: { sessionId: 's-r4' }, _rebuildQueue: [] };
+      REG.configure({ activeSessions: () => new Map([['s-r4', session]]), jobs: () => X.jm, ports: () => null, log: { warn() { } } });
+      job.listen = { port: 45556, firstAt: Date.now(), at: Date.now() };
+      REG.noteService(job);
+      const card = session._rebuildQueue.map((q) => q.card).find((c) => c && c.kind === 'service');
+      const row = (REG.listFor('s-r4').items || []).find((c) => c.kind === 'service');
+      const J = require('../src/browser-job-principal.js');
+      const bl = J.jobLabelOf(job, M.labelVia(X.jm)), stub = J.jobLabelOf(job, M.labelVia({ jobs: X.jm.jobs }));
+      const L5 = X.jm.labelOf(job);   // create() names it `deploy-ghp_…`; its label is that name belted
+      ok(/^deploy-ghp_«redacted»$/.test(L5) && scan && scan.service === L5 && card && card.name === L5 && row && row.name === L5 && bl === 'job ' + L5 && !raw(scan.service) && !raw(card.name) && !raw(row.name) && !raw(bl),
+        'r5 THE ONE NAME ACCESSOR: the Ports scan row, the Artifacts service row and the chat card it feeds, the browser\'s job label read the engine\'s labelOf — never the record (76ffc823: all four raw beside a belted twin)', JSON.stringify({ scan: scan && scan.service, card: card && card.name, row: row && row.name, bl }));
+      ok(stub === 'job ' + job.id && raw(job.name), '…a holder with no engine shows the job\'s id, never the record\'s words; the record keeps the raw name', stub);
+      // (9) the stray door files THROUGH _forYou (the dep's one call): same verdict, same journal line
+      const seen = []; const door = X.jm._forYou; X.jm._forYou = function (j, c) { seen.push(c && c.copy); return door.call(this, j, c); };
+      const sv = X.jm.d.notifyUser({ text: 'raw words', urgency: 'normal', jobId: job.id, jobName: job.name, ownerCid: CID });
+      X.jm._forYou = door;
+      const se = (job.notifyLog || []).filter((x) => x.lane === 'user-inbox').pop();
+      ok(seen.join() === 'stray' && sv && sv.ok === false && /^origin 'jobs' files its words as i18n/.test(sv.why) && se && se.copy === 'stray' && se.reason === sv.why, 'r5 the stray door files THROUGH _forYou (its one call reaches the dep) — refused in the store\'s words, journaled as `stray`', JSON.stringify({ seen, sv }));
+      // (10) the wiring's real filing hands the store the key it took at create; a frameless filing without that key is refused
+      const args = []; const add = X.todos.add; X.todos.add = function (k, a) { args.push(a); return add.call(this, k, a); };
+      X.jm._forYou(job, M.forYouCopy(job, 'parked'));
+      X.todos.add = add;
+      const key = args[0] && args[0].filerKey;
+      const nokey = await new Promise((res) => { Promise.resolve().then(X.todos.add.bind(X.todos, `claude:${CID}`, { origin: 'jobs', by: 'agent', jobId: 'jb-0000aa55', jobFact: 'ask', i18n: { text: { key: '{name} needs your input', params: { name: 'x' } } } })).then(() => res(null), (e) => res(e.message)); });
+      const withKey = await new Promise((res) => { Promise.resolve().then(X.todos.add.bind(X.todos, `claude:${CID}`, { origin: 'jobs', by: 'agent', jobId: 'jb-0000aa56', jobFact: 'ask', filerKey: key, i18n: { text: { key: '{name} needs your input', params: { name: 'x' } } } })).then(() => res(null), (e) => res(e.message)); });
+      ok(key && typeof key === 'object' && Object.isFrozen(key) && /needs a caller the store can name/.test(nokey || '') && withKey === null, 'r5 the wiring files with the store\'s filer key (taken at create); a frameless filing is refused without it and files with it', JSON.stringify({ key: !!key, nokey, withKey }));
+      X.end();
+    }
   }
 } finally {
   try { const all = JSON.parse(fs.readFileSync(path.join(dir, 'jobs.json'), 'utf-8')); } catch { }

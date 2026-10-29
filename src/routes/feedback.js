@@ -61,7 +61,7 @@ function registerFeedbackRoutes(app, { store, activeSessions, getJobs = () => nu
       let sid = null, s = null;
       if (cid) for (const [id, x] of activeSessions) if (x && addressableId(x) === cid) { sid = id; s = x; break; }
       const key = cid || `job:${job.id}`;
-      return { ids: [key, sid], facts: { session: { id: key, name: nameOf(s) || `job ${job.name || job.id}` }, group: groupFor(s, sid), harness: s ? (s.backend || 'claude') : null, instance: instance() } };
+      return { ids: [key, sid], facts: { session: { id: key, name: nameOf(s) || `job ${require('../job-model.js').labelVia(jm)(job) || job.id}` }, group: groupFor(s, sid), harness: s ? (s.backend || 'claude') : null, instance: instance() } };
     }
     if (!token.startsWith('vsst_')) { res.status(401).json({ error: 'missing session token — vibespace-feedback runs inside a VibeSpace session', code: 'unauthorized' }); return null; }
     for (const [id, s] of activeSessions) {

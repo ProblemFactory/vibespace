@@ -902,7 +902,8 @@ router.get('/api/browser/session/:sessionId', (req, res) => {
     const st = k.statusFor(f.browserKey);
     const jobNames = {};
     const jm = typeof ctx.getJobs === 'function' ? ctx.getJobs() : null;
-    for (const c of (st.children || [])) if (c && c.job) { const j = jm && jm.jobs && typeof jm.jobs.get === 'function' ? jm.jobs.get(c.job) : null; jobNames[c.handle] = (j && !j.clearedAt && typeof j.name === 'string' && j.name.trim()) ? j.name.trim().slice(0, 40) : String(c.job); }
+    const nameOf = require('../job-model.js').labelVia(jm);   // the NAME through the engine's ONE accessor (lane job-notify-user r5)
+    for (const c of (st.children || [])) if (c && c.job) { const j = jm && jm.jobs && typeof jm.jobs.get === 'function' ? jm.jobs.get(c.job) : null; jobNames[c.handle] = (j && !j.clearedAt && nameOf(j).trim().slice(0, 40)) || String(c.job); }
     res.json({ ...st, helperNames: require('../server/browser-helpers.js').namesOf(f.session), jobNames, backend: f.session.backend || null });
   } catch (e) { fail(res, e); }
 });
@@ -1548,7 +1549,8 @@ function jobFactsOf(token, { mint = true } = {}) {
   if (cid) for (const [tid, t] of (ctx.activeSessions || new Map())) if (t && addressableId(t) === cid) { s = t; id = tid; break; }
   let ownerKey = s && B.isBrowserKey(s._browserKey) ? s._browserKey : '';
   if (!ownerKey && cid && typeof ctx.bindingsLookup === 'function') { try { ownerKey = String(ctx.bindingsLookup(cid) || ''); } catch { ownerKey = ''; } }
-  const v = J.jobPrincipalOf({ job, ownerKey });
+  const nameOf = require('../job-model.js').labelVia(jm);   // the NAME through the engine's ONE accessor (lane job-notify-user r5)
+  const v = J.jobPrincipalOf({ job, ownerKey, labelOf: nameOf });
   if (!v.ok) return { refusal: { status: v.code === 'unauthorized' ? 401 : (STATUS[v.code] || 409), code: v.code, error: v.error } };
   if (s && (s.hostId || s.host || s._browserVariant === B.VARIANTS.H)) return { refusal: { status: 409, code: 'remote_session', error: 'this job\'s conversation runs on another machine — its browser is that machine\'s; VibeSpace cannot act on its pages from here' } };
   let taskIds = [], groupsUnreadable = false;
@@ -1560,7 +1562,7 @@ function jobFactsOf(token, { mint = true } = {}) {
   let handle = null;
   if (mint) { try { handle = k.jobHandleFor({ ownerKey, jobId: job.id }); } catch (e) { return { refusal: { status: STATUS[e && e.code] || 409, code: (e && e.code) || 'error', error: String((e && e.message) || e) } }; } }
   else { try { handle = k && typeof k.findJobHandle === 'function' ? k.findJobHandle({ ownerKey, jobId: job.id }) : null; } catch { handle = null; } }
-  const label = J.jobLabelOf(job);
+  const label = J.jobLabelOf(job, nameOf);
   // a job whose conversation is not running has no live session: the facts carry a stub (a name for the browser's
   // session label; no spawn pairs — a job never starts the conversation's own temporary browser)
   const conversationKeys = [...new Set([...(cid ? [String(cid)] : []), ...(id ? [`webui:${id}`] : []), ...(ownerKey ? [String(ownerKey)] : [])])];   // lane grants-unify: as its owner conversation
@@ -2467,8 +2469,9 @@ function jobBindingOf(k, f, st) {
   const p = jv.ok ? k.profile(jv.profileId) : null;
   const l = p ? (st.leases || []).find((x) => x && x.profileId === p.id) : null;
   let job = null;
-  try { const jm = typeof ctx.getJobs === 'function' ? ctx.getJobs() : null; job = jm && jm.jobs && typeof jm.jobs.get === 'function' ? jm.jobs.get(f.job.id) : null; } catch { job = null; }
-  return { id: f.job.id, label: J.jobLabelOf(job || { id: f.job.id }), lands: p ? { profileId: p.id, label: p.label } : null, refused: jv.ok ? null : { code: jv.code, error: jv.error }, pin: k.pinFor(f.ownerKey) || null, lease: l ? { browser: l.browser || null, input: l.input || null, others: Number(l.others) || 0 } : null };
+  let nameOf = null;
+  try { const jm = typeof ctx.getJobs === 'function' ? ctx.getJobs() : null; job = jm && jm.jobs && typeof jm.jobs.get === 'function' ? jm.jobs.get(f.job.id) : null; nameOf = require('../job-model.js').labelVia(jm); } catch { job = null; }
+  return { id: f.job.id, label: J.jobLabelOf(job || { id: f.job.id }, nameOf), lands: p ? { profileId: p.id, label: p.label } : null, refused: jv.ok ? null : { code: jv.code, error: jv.error }, pin: k.pinFor(f.ownerKey) || null, lease: l ? { browser: l.browser || null, input: l.input || null, others: Number(l.others) || 0 } : null };
 }
 /** lane browser-recipes: the no-display sentence for THIS conversation's `status` — a LIVE browser of its own says what
  *  its launch found (the recorded fact), else this machine is probed now; a conversation on another machine: nothing

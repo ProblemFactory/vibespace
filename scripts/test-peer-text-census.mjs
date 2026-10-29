@@ -2444,7 +2444,7 @@ console.log('§6 the shared-store census (words another principal wrote into a s
     'RX_DIGEST_FROM': 'a constant of ours (channels)',
     'REV_NOTE_FROM': 'a constant of ours (channels — lane channel-record-revisions\' recall note)',
     "'VibeSpace'": 'ours (auto-resume / the pool engine)', "'You · via Channels'": 'ours', "'Channels · Outbox'": 'ours', "'Channels · API'": 'ours (B-2198 part 2: the raw-API receipt)', "'Channels · judged rules'": 'ours (lane judged-watch-state: the once-a-day not-a-hit line, DM.judgedSkipLine)',
-    "'Background Work · ' + this._jobLabel(job)": 'a job name is a slug (resolveName) — belted on its own (lane job-notify-user r3, _jobLabel: a token-shaped name reached the chat card raw)',
+    "'Background Work · ' + this.labelOf(job)": 'a job name is a slug (resolveName) — belted on its own (lane job-notify-user r3, labelOf: a token-shaped name reached the chat card raw)',
     "'Background Work · ' + (e.jobName || e.jobId)": 'a client card of a slug',
     "'Background Work · ' + CLEARED_TEXT": 'ours (a cleared job)',
     '`Machines · ${machine}`': "a client card; the machine's name the user gave",

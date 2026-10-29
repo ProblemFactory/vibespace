@@ -338,6 +338,28 @@ console.log('§3b the JOBS ROAD — the real jobs wiring: the agent\'s words as 
   ok(named.length === 4 && wt.snapshot().open.length === 0, `every planted writer of origin 'jobs' — ${Object.keys(GHOSTS).join(', ')} — is REFUSED by the store BY NAME (src/server/ghost-jobs.js is not its filer)`, JSON.stringify(said));
   const listed = fileVia('src/server/jobs-wiring.js', GHOSTS["'jo' + 'bs'"]);
   ok(listed === null && wt.snapshot().open.length === 1, 'CONTROL: the same code at the listed filer\'s path (src/server/jobs-wiring.js) files — the store reads its CALLER, not a blanket refusal', listed);
+  // …AND FAILS CLOSED (lane job-notify-user r5, accept-r4 confirmed 1): r4 answered null — and FILED — for a caller it could not
+  // name: an ESM module (its V8 frame is a `file://` URL — here a script compiled under that very URL, nothing written into the
+  // tree) and a bound add run from the microtask queue (no frame of its own). A `file://` frame resolves to its path; an
+  // unnamed caller files only with the KEY the store minted for its one filer (`filerKey` — jobs-wiring takes it at create)
+  const vm = require('vm');
+  const args = (name, extra = {}) => ({ origin: 'jo' + 'bs', by: 'agent', jobId: 'jb-0000a0a1', jobFact: 'ask', jobName: name, i18n: { text: { key: '{name} needs your input', params: { name } } }, ...extra });
+  const viaUrl = (rel, name) => { try { vm.runInThisContext("(t, a) => t.add('claude:conv-ghost', a)", { filename: 'file://' + path.join(REPO, rel) })(wt, args(name)); return null; } catch (e) { return e.message; } };
+  const esm = viaUrl('src/server/ghost-esm.mjs', 'ghost-esm');
+  ok(/^origin 'jobs' is filed only by src\/server\/jobs-wiring\.js — src\/server\/ghost-esm\.mjs is not its filer$/.test(esm || ''), 'r5: an ESM writer (its frame a file:// URL) of origin \'jobs\' is REFUSED BY NAME — the URL resolves to src/server/ghost-esm.mjs (r4: null ⇒ FILED)', esm);
+  const esmListed = viaUrl('src/server/jobs-wiring.js', 'listed-esm');
+  ok(esmListed === null, 'CONTROL: the same file:// frame at the listed filer\'s path files (the URL is resolved, never refused as a shape)', esmListed);
+  // (no `await` on the add's own chain — an awaiting function IS a named caller: V8 keeps its async frame, and it is judged)
+  const queued = (extra) => new Promise((res) => { Promise.resolve().then(wt.add.bind(wt, 'claude:conv-ghost', args('ghost-bound', extra))).then(() => res(null), (e) => res(e.message)); });
+  const nokey = await queued({});
+  ok(/^origin 'jobs' needs a caller the store can name — it is filed only by src\/server\/jobs-wiring\.js/.test(nokey || ''), 'r5: a BOUND add run from the microtask queue (no frame of its own) is REFUSED — «origin \'jobs\' needs a caller the store can name» (r4: FILED)', nokey);
+  const forged = await queued({ filerKey: Object.freeze({ origin: 'jobs', of: 'the For-you store' }) });
+  ok(/^origin 'jobs' carries a filer key this store never handed out — refused$/.test(forged || ''), 'r5: …with a hand-built key it is REFUSED BY NAME', forged);
+  let ghostKey; try { ghostKey = asModule('src/server/ghost-jobs.js', "module.exports = (t) => t.filerKey('jobs');")(wt); } catch (e) { ghostKey = e.message; }
+  ok(/^the filer key of origin 'jobs' is src\/server\/jobs-wiring\.js's — src\/server\/ghost-jobs\.js is not its filer$/.test(String(ghostKey)), 'r5: an unlisted file asking the store for the key is REFUSED BY NAME', String(ghostKey));
+  const before = wt.snapshot().open.length;
+  const own = await queued({ jobId: 'jb-0000a0a2', filerKey: asModule('src/server/jobs-wiring.js', "module.exports = (t) => t.filerKey('jobs');")(wt) });
+  ok(own === null && wt.snapshot().open.length === before + 1, 'CONTROL: the frameless filing with the key the store handed its listed filer files — the key stands in for the frame, nothing else does', own);
   wt.stop && wt.stop();
 }
 

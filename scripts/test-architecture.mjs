@@ -5044,7 +5044,7 @@ console.log('\n§84 a suite ends what it made (B-60d2)');
   // lane job-notify-user r2: + src/jobs.js — a notify cron's fire belts the agent's --text before the owner message and the For-you copy
   const EXPECTED93 = ['src/jobs.js', 'src/server/conversation-deliver.js', 'src/server/groups-engine.js', 'src/session-status.js', 'src/task-groups.js', 'src/user-todos.js'];
   const srcFiles93 = [];
-  const walk93 = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const rel = d + '/' + e.name; if (e.isDirectory()) { if (e.name !== 'node_modules') walk93(rel); } else if (e.name.endsWith('.js')) srcFiles93.push(rel); } };
+  const walk93 = (d) => { for (const e of fs.readdirSync(path.join(REPO, d), { withFileTypes: true })) { const rel = d + '/' + e.name; if (e.isDirectory()) { if (e.name !== 'node_modules') walk93(rel); } else if (/\.(c|m)?js$/.test(e.name)) srcFiles93.push(rel); } };   // r5: an .mjs / .cjs product file too (accept-r4 confirmed 1: walk93 read .js only)
   walk93('src');
   const callers93 = srcFiles93.filter((f) => /\.maskForSink\s*\(/.test(read(f))).sort();
   ok(JSON.stringify(callers93) === JSON.stringify(EXPECTED93), `§93 the belt's callers are EXACTLY the six sink writers${callers93.join() !== EXPECTED93.join() ? ` — got: ${callers93.join(', ') || '(none)'}` : ''}`);
@@ -5062,37 +5062,48 @@ console.log('\n§84 a suite ends what it made (B-60d2)');
     && /beltOf\(jobName\.trim\(\)\.slice\(0, 200\)\)/.test(ut) && /\(agentWords \? beltOf\(text\.trim\(\)\) : text\.trim\(\)\)/.test(ut);
   ok(/origin: 'jobs'/.test(jw93w) && jobsRoad93(io93, ut93), '§93 the jobs road: jobs-wiring files origin \'jobs\', an agent-FIELDS origin — the store belts each field (the params, the label\'s job name), never the sentence');
   // THE MESSAGE ROAD (r3, claim r2-0 (b)): the job's NAME is belted on every copy of a job's message — the chat card's label
-  // (fromName), the retry meta, the stash, the header (src/jobs.js _jobLabel) — and a SUBSCRIBER's copy of the agent's --text
+  // (fromName), the retry meta, the stash, the header (src/jobs.js labelOf) — and a SUBSCRIBER's copy of the agent's --text
   // is belted (its author's is whole)
-  const msgRoad93 = (jb) => /_jobLabel\(job\) \{[\s\S]{0,800}?const out = this\._agentWords\(raw\);/.test(jb) && /fromName: 'Background Work · ' \+ this\._jobLabel\(job\)/.test(jb)
-    && /jobName: this\._jobLabel\(job\), ev:/.test(jb) && /jobName: stale \? CLEARED_TEXT : this\._jobLabel\(job\)/.test(jb) && /M\.renderOwnerNotify\(job, ev, \{ name \}\)/.test(jb)
+  const msgRoad93 = (jb) => /labelOf\(job\) \{[\s\S]{0,800}?const out = this\._agentWords\(raw\);/.test(jb) && /fromName: 'Background Work · ' \+ this\.labelOf\(job\)/.test(jb)
+    && /jobName: this\.labelOf\(job\), ev:/.test(jb) && /jobName: stale \? CLEARED_TEXT : this\.labelOf\(job\)/.test(jb) && /M\.renderOwnerNotify\(job, ev, \{ name \}\)/.test(jb)
     && /const subEv = ev && ev\.agentWhat \? \{ \.\.\.ev, what: this\._agentWords\(ev\.what\) \} : ev;/.test(jb);
   ok(msgRoad93(jb93), '§93 the message road: the job\'s NAME belted on every copy (the label, the header, the retry meta, the stash), a subscriber\'s copy of the --text belted');
   // …and EVERY PERSON-FACING NAME (r4, claim r3-1 FINDING 3): the snapshot a non-author reads (the Jobs panel's card title, the
   // ask window's title, another lineage), the events ring (the injected digest), the Ports label — the record keeps it raw
-  const nameRoad93 = (jb) => /name: author \|\| !job\.name \? job\.name : this\._jobLabel\(job\),/.test(jb) && /this\.events\.push\(\{ ts: now\(\), jobId: job\.id, name: this\._jobLabel\(job\),/.test(jb)
-    && /label: 'service: ' \+ this\._jobLabel\(job\) \}/.test(jb) && /return \{ job: this\.snapshot\(job, \{ author: true \}\), renamed \};/.test(jb);
+  const nameRoad93 = (jb) => /name: author \|\| !job\.name \? job\.name : this\.labelOf\(job\),/.test(jb) && /this\.events\.push\(\{ ts: now\(\), jobId: job\.id, name: this\.labelOf\(job\),/.test(jb)
+    && /label: 'service: ' \+ this\.labelOf\(job\) \}/.test(jb) && /return \{ job: this\.snapshot\(job, \{ author: true \}\), renamed \};/.test(jb);
   ok(nameRoad93(jb93), '§93 the name road: a token-shaped job NAME is belted wherever a person or another conversation reads it (snapshot, events ring, Ports label) — whole for its author (the create echo, its own views)');
   // THE ONE FOR-YOU DOOR, CENSUSED BY ITS CALLERS (lane job-notify-user r4, accept-r3 unverified 0 + claim r3-1 FINDING 2): the
   // engine reaches the For-you store's dep in ONE method — _forYou (the constructor holds it; the stray door journals a call
   // that skipped _forYou) — and every _forYou call hands it the copy M.forYouCopy built. The census walks the METHODS that
   // reach the dep (a direct call, a wrapper, an alias, a destructure) and the callers of _forYou — never a string a filer
   // writes: r3's `origin: 'jobs'` census stayed green for a direct `this.d.notifyUser({ text, … })` the store refuses at run time
-  const DOOR93 = new Set(['constructor', '_forYou', '_forYouStray']);
+  // r5 (accept-r4 unverified 0): EVERY file that can hold the dep — src/ (.js / .mjs / .cjs), server.js, data/bin — and EVERY
+  // scope: r4 exempted the whole constructor and read src/ only, so a closure made in the constructor over deps.notifyUser, or
+  // a `jm._forYouDep(…)` in server.js, reached the store with no journal line and stayed green. The constructor's whole share
+  // is the ONE capture line (CAPTURE93, verbatim); _forYou's ONE call (CALL93) is the door — the stray door files through it.
+  const CAPTURE93 = "this._forYouDep = typeof deps.notifyUser === 'function' ? deps.notifyUser : null;", CALL93 = 'this._forYouDep ? this._forYouDep(c.stray || {';
   const DEP93 = /\b(?:this\.)?d\.notifyUser\b|\bdeps\.notifyUser\b|\b_forYouDep\b|\[\s*['"`]notifyUser['"`]\s*\]|\{[^}]*\bnotifyUser\b[^}]*\}\s*=\s*(?:this\.d|deps|d)\b/;
   const door93 = (src, file) => {
-    const bad = []; let method = '(top)';
+    const bad = []; let method = '(top)', captures = 0, calls = 0;
     src.split('\n').forEach((l, i) => {
-      const h = /^(?:  (?:async |static |get |set )?|function )([A-Za-z_$][\w$]*)\s*\([^)]*\)\s*\{/.exec(l);
+      const h = /^(?:  (?:async |static |get |set )?|function |async function )([A-Za-z_$][\w$]*)\s*\([^)]*\)\s*\{/.exec(l);
       if (h && !/^(if|for|while|switch|catch)$/.test(h[1])) method = h[1];
       if (/^\s*(\/\/|\*|\/\*)/.test(l)) return;
-      if (DEP93.test(l) && !(file === 'src/jobs.js' && DOOR93.has(method))) bad.push(`${file}:${i + 1} ${method} reaches the For-you dep — only _forYou may (a direct filing or a wrapper is a second door)`);
+      let rest = l;
+      if (file === 'src/jobs.js' && method === 'constructor' && l.trim() === CAPTURE93) { captures++; return; }
+      if (file === 'src/jobs.js' && method === '_forYou' && l.includes(CALL93)) { calls += l.split(CALL93).length - 1; rest = l.split(CALL93).join(''); }
+      if (DEP93.test(rest)) bad.push(`${file}:${i + 1} ${method} reaches the For-you dep — only _forYou may (a direct filing, a wrapper or a closure is a second door)`);
+      if (file !== 'src/jobs.js' && /\._forYou(?:Stray|Verdict)?\s*\(/.test(l)) bad.push(`${file}:${i + 1} ${method} calls the engine's For-you door from outside the engine — the engine files its own copies`);
       for (const m of l.matchAll(/this\._forYou\([^,()]*,\s*/g)) if (!l.slice(m.index + m[0].length).startsWith('M.forYouCopy(')) bad.push(`${file}:${i + 1} ${method} hands _forYou a copy it built itself (a copy is M.forYouCopy's)`);
     });
+    if (file === 'src/jobs.js' && (captures !== 1 || calls !== 1)) bad.push(`src/jobs.js captures the For-you dep ${captures}× (the constructor's one line) and reaches it ${calls}× in _forYou — exactly once each`);
     return bad;
   };
-  const doorBad93 = srcFiles93.filter((f) => f !== 'src/server/jobs-wiring.js').flatMap((f) => door93(read(f), f));
-  ok(!doorBad93.length && /this\._forYouDep = typeof deps\.notifyUser === 'function' \? deps\.notifyUser : null;/.test(jb93) && /notifyUser: \(a\) => this\._forYouStray\(a\)/.test(jb93), `§93 THE DOOR CENSUS: the engine reaches the For-you dep in _forYou alone (the stray door journals any other call) and every copy it files is M.forYouCopy's${doorBad93.length ? ' — ' + doorBad93.join(' | ') : ''}`);
+  const binFiles93 = String(spawnSync('git', ['-C', REPO, 'ls-files', 'data/bin'], { encoding: 'utf-8', env: gitEnvFrom(process.env) }).stdout || '').split('\n').filter(Boolean);   // tracked files (§96)
+  const doorFiles93 = [...srcFiles93, 'server.js', ...binFiles93];
+  const doorBad93 = doorFiles93.flatMap((f) => door93(read(f), f));
+  ok(!doorBad93.length && /notifyUser: \(a\) => this\._forYouStray\(a\)/.test(jb93) && /return this\._forYou\(job, M\.forYouCopy\(job, 'stray', \{ shape: a \}\)\);/.test(jb93), `§93 THE DOOR CENSUS (${doorFiles93.length} files — src/, server.js, data/bin — every scope): the engine reaches the For-you dep in _forYou alone (the constructor's one capture line; the stray door files through _forYou) and every copy it files is M.forYouCopy's${doorBad93.length ? ' — ' + doorBad93.join(' | ') : ''}`);
   const PARK93 = "this._forYou(job, M.forYouCopy(job, 'parked'));";
   const plant93 = (add) => jb93.replace(PARK93, PARK93 + '\n' + add);
   const redBy93 = (src, re) => door93(src, 'src/jobs.js').some((p) => re.test(p));
@@ -5100,22 +5111,92 @@ console.log('\n§84 a suite ends what it made (B-60d2)');
   // (a planted src/server/ghost-jobs.js) stayed green; the filers of origin 'jobs' are a closed set too
   const FILERS93 = { 'src/server/jobs-wiring.js': 2 };
   const filers93 = (files) => { const got = {}; for (const [f, src] of files) for (const l of src.split('\n')) if (!/^\s*(\/\/|\*)/.test(l) && /origin:\s*'jobs'/.test(l)) got[f] = (got[f] || 0) + 1; return JSON.stringify(got) === JSON.stringify(FILERS93) ? [] : Object.keys(got).filter((f) => got[f] !== FILERS93[f]).concat(Object.keys(FILERS93).filter((f) => !got[f])); };
-  const files93 = srcFiles93.map((f) => [f, read(f)]);
+  const files93 = doorFiles93.map((f) => [f, read(f)]);   // r5: every file that can hold a store (src/ .js/.mjs/.cjs, server.js, data/bin)
   const bad93 = filers93(files93);
   ok(!bad93.length, `§93 the filers of origin 'jobs' are EXACTLY src/server/jobs-wiring.js ×2 (notifyUser + noticeDropped)${bad93.length ? ' — got: ' + bad93.join(', ') : ''}`);
+  // THE NAME CENSUS (lane job-notify-user r5, accept-r4 confirmed 0 + refuted 0): a job RECORD's name reaches a person or another
+  // conversation through the engine's ONE accessor (src/jobs.js labelOf; a holder asks it through M.labelVia(jm)) — r4 belted the
+  // forward label and left the Ports scan row one line away raw, and the Artifacts row + chat card and the browser label read the
+  // record raw too. The census reads every server-side line that takes `.name` off a record (a `job` / `jb`; an identifier bound
+  // from jm.jobs.get / jobByToken / jm.jobs.values() / visibleJobs / the clear's hits; a Map filled with them; a destructure or a
+  // bracket read) and every one must be a row of NAME_READERS93 — the record's own writers, the accessor, the author's own copy, a
+  // FIELD the For-you store belts on its own. Any other is red BY NAME. The client (src/lib/) and the CLIs (data/bin/) read the
+  // engine's SNAPSHOT (its name is the accessor's), never a record.
+  const SRC93 = String.raw`(?:\.jobs\.(?:get|values)\(|\bjobByToken\(|\bjobsList\(\)|\bvisibleJobs\(|\b(?:live|arch)Hits\b)`;
+  const nameReads93 = (src, file) => {
+    const out = [], vars = new Set(['job', 'jb']), lists = new Set(), maps = new Set(), id = (x) => x.replace(/[$]/g, '\\$');
+    src.split('\n').forEach((l, i) => {
+      if (/^\s*(\/\/|\*|\/\*)/.test(l)) return;
+      const LS = lists.size ? '|\\b(?:' + [...lists].map(id).join('|') + ')\\b' : '';
+      for (const m of l.matchAll(new RegExp(String.raw`(?:const|let|var)\s+([\w$]+)\s*=\s*[^;]*?` + SRC93, 'g'))) (/\.jobs\.get\(|jobByToken\(/.test(m[0]) ? vars : lists).add(m[1]);
+      for (const m of l.matchAll(new RegExp(String.raw`for\s*\(\s*(?:const|let|var)\s+([\w$]+)\s+of\s+[^)]*?(?:` + SRC93 + LS + ')', 'g'))) vars.add(m[1]);
+      for (const m of l.matchAll(new RegExp('(?:' + SRC93 + LS + String.raw`)[\])\s,.\w]*?\.(?:map|filter|some|find|every|flatMap|forEach)\(\s*\(?\s*([\w$]+)`, 'g'))) vars.add(m[1]);
+      for (const m of l.matchAll(/\b([\w$]+)\.set\([^,]+,\s*([\w$]+)\s*\)/g)) if (vars.has(m[2])) maps.add(m[1]);
+      const V = [...vars].map(id).join('|'), MP = [...maps].map(id).join('|');
+      const reads = [new RegExp(String.raw`\b(?:${V})\s*(?:\?\.|\.)\s*name\b`), new RegExp(String.raw`\b(?:${V})\s*\[\s*['"\x60]name['"\x60]\s*\]`),
+        new RegExp(String.raw`\{[^}]*\bname\b[^}]*\}\s*=\s*(?:(?:${V})\b|[^;]*?(?:\.jobs\.get\(|\bjobByToken\())`), new RegExp(String.raw`(?:\.jobs\.get|\bjobByToken)\([^)]*\)\s*(?:\?\.|\.)\s*name\b`),
+        ...(MP ? [new RegExp(String.raw`\b(?:${MP})\.get\([^)]*\)\s*(?:\?\.|\.)\s*name\b`)] : [])];
+      if (reads.some((re) => re.test(l))) out.push({ file, line: i + 1, text: l });
+    });
+    return out;
+  };
+  const NAME_READERS93 = [
+    ['src/jobs.js', 'const raw = String((job && (job.name || job.id)) || \'\');', 'THE accessor (labelOf: the name belted on its own, memoised)'],
+    ['src/jobs.js', 'name: author || !job.name ? job.name : this.labelOf(job),', 'the author\'s own copy (the create echo, its own views) — a non-author\'s is the accessor\'s'],
+    ['src/jobs.js', 'jobName: job.name, ownerCid:', 'a For-you copy\'s FIELD — the store belts jobName on its own (r3)'],
+    ['src/jobs.js', "name: `${job.name} run`,", 'the record\'s writer (a scheduled run\'s own record)'],
+    ['src/jobs.js', 'const visNames = new Set(M.visibleJobs([...this.jobs.values()], caller).map((j) => j.name));', 'the record\'s writer (resolveName\'s uniqueness — never shown)'],
+    ['src/jobs.js', 'const namesBefore = new Set([...liveHits, ...archHits].flatMap((j) => (j.name ? [j.name, this.labelOf(j)] : [])));', 'Clear content: the record\'s own copies, matched in both spellings'],
+    ['src/jobs.js', 'const nameBefore = new Map([...liveHits, ...archHits].map((j) => [j.id, j.name]));', 'Clear content: the record\'s own name, matched'],
+    ['src/jobs.js', "('service: ' + o.name === rec.label || 'service: ' + this.labelOf(o) === rec.label)", 'Clear content: a forward\'s label matched in both spellings'],
+    ['src/job-model.js', 'const name = String((job && (job.name || job.id)) || \'job\');', 'forYouCopy: a For-you copy\'s FIELD — the store belts each param on its own (r3)'],
+    ['src/job-model.js', 'agentPiece(name != null ? name : job.name, 40)', 'a pure renderer — every engine call hands it the accessor\'s `name` (the message road above)'],
+    ['src/agent-routes.js', 'vis.find((j) => j.name === ref)', 'a lookup by the caller\'s ref — an identity, never shown'],
+    ['src/job-model.js', "(job && job.name && own ? String(own.labelOf(job)) : '')", 'labelVia: whether there IS a name — the words are the accessor\'s'],
+  ];
+  const nameFiles93 = [...srcFiles93.filter((f) => !f.startsWith('src/lib/')), 'server.js'];
+  const nameBad93 = (reads) => {
+    const bad = reads.filter((r) => !NAME_READERS93.some(([f, a]) => f === r.file && r.text.includes(a))).map((r) => `${r.file}:${r.line} reads a job record's name raw — a person or another conversation reads it through the engine's ONE accessor (jm.labelOf / M.labelVia(jm))`);
+    for (const [f, a] of NAME_READERS93) if (!reads.some((r) => r.file === f && r.text.includes(a))) bad.push(`NAME_READERS93 lists a reader ${f} no longer has («${a.slice(0, 50)}»)`);
+    return bad;
+  };
+  const nameHits93 = nameFiles93.flatMap((f) => nameReads93(read(f), f));
+  const nameRed93 = nameBad93(nameHits93);
+  ok(!nameRed93.length, `§93 THE NAME CENSUS (${nameFiles93.length} server-side files): a job record's name is read only by its writers, the ONE accessor, the author's copy and the store-belted FIELDS (${NAME_READERS93.length} rows) — every holder shows it through jm.labelOf${nameRed93.length ? ' — ' + nameRed93.join(' | ') : ''}`);
+  const nameIsRed93 = (file, src, re) => nameBad93(nameFiles93.flatMap((f) => (f === file ? [] : nameHits93.filter((h) => h.file === f))).concat(nameReads93(src, file))).some((p) => re.test(p));
+  const pf93 = read('src/port-forward.js'), af93 = read('src/artifacts.js'), bjp93 = read('src/browser-job-principal.js');
+  const cn93 = [
+    ['the Ports scan row reading the record (76ffc823)', !nameIsRed93('src/port-forward.js', pf93.replace('row.service = nameOf(owned.get(row.port));', 'row.service = owned.get(row.port).name;'), /^src\/port-forward\.js:\d+ reads a job record's name raw/)],
+    ['the Artifacts service row reading the record (76ffc823)', !nameIsRed93('src/artifacts.js', af93.replace("name: String((typeof labelOf === 'function' && labelOf(job)) || job.id),", 'name: String(job.name || job.id),'), /^src\/artifacts\.js:\d+ reads/)],
+    ['the browser label reading the record (76ffc823)', !nameIsRed93('src/browser-job-principal.js', bjp93.replace("const name = typeof labelOf === 'function' ? String(labelOf(job) || '').trim().slice(0, 40) : '';", "const name = typeof job.name === 'string' ? job.name.trim().slice(0, 40) : '';"), /^src\/browser-job-principal\.js:\d+ reads/)],
+    ['a new holder reading a looked-up record', !nameIsRed93('src/server/ghost-name.js', "function f(jm, id) {\n  const j = jm.jobs.get(id);\n  return 'job ' + j.name;\n}\n", /^src\/server\/ghost-name\.js:3 reads/)],
+    ['a destructured record name', !nameIsRed93('src/server/ghost-name.js', "const { name } = jm.jobByToken(t);\n", /^src\/server\/ghost-name\.js:1 reads/)],
+    ['a bracket read off a record list', !nameIsRed93('src/server/ghost-name.js', "for (const x of jm.jobs.values()) out.push(x['name']);\n", /^src\/server\/ghost-name\.js:1 reads/)],
+    ['a stale row (a reader the tree no longer has)', !nameBad93(nameHits93.filter((h) => !h.text.includes('vis.find((j) => j.name === ref)'))).some((p) => /NAME_READERS93 lists a reader src\/agent-routes\.js/.test(p))],
+  ];
+  ok(cn93.every(([, v]) => v === false), `§93 NAME CENSUS CONTROLS: ${cn93.map(([n, v]) => `${n} (${v ? 'WRONG' : 'RED'})`).join(', ')}`);
   const c93 = [
     ['a caller with its belt stripped', /\.maskForSink\s*\(/.test(read('src/user-todos.js').replace(/belt\.maskForSink\(([^,]+),[^)]*\)/g, '$1'))],
     ['a seventh, unlisted caller', JSON.stringify([...callers93, 'src/ghost.js'].sort()) === JSON.stringify(EXPECTED93)],
     ['the jobs origin dropped from the agent-fields set', jobsRoad93(io93.replace("const AGENT_FIELDS_ORIGINS = Object.freeze(['jobs']);", 'const AGENT_FIELDS_ORIGINS = Object.freeze([]);'), ut93)],
     ['the store belting the WHOLE sentence of a fields item (fcf105a5)', jobsRoad93(io93, ut93.replace('(agentWords ? beltOf(text.trim()) : text.trim())', '(agentWords || agentFields ? beltOf(text.trim()) : text.trim())'))],
-    ['the chat card\'s label carrying the raw name (514a962c)', msgRoad93(jb93.replace("fromName: 'Background Work · ' + this._jobLabel(job)", "fromName: 'Background Work · ' + (job.name || job.id)"))],
+    ['the chat card\'s label carrying the raw name (514a962c)', msgRoad93(jb93.replace("fromName: 'Background Work · ' + this.labelOf(job)", "fromName: 'Background Work · ' + (job.name || job.id)"))],
     ['a second filer with origin \'jobs\' (src/server/ghost-jobs.js)', !filers93([...files93, ['src/server/ghost-jobs.js', "userTodos.add('jobs', { origin: 'jobs', text: 'x' });\n"]]).length],
-    ['a person-facing snapshot carrying the raw name (b9d8b1ba)', nameRoad93(jb93.replace('name: author || !job.name ? job.name : this._jobLabel(job),', 'name: job.name,'))],
+    ['a person-facing snapshot carrying the raw name (b9d8b1ba)', nameRoad93(jb93.replace('name: author || !job.name ? job.name : this.labelOf(job),', 'name: job.name,'))],
     ['a planted DIRECT filer (accept-r3: `this.d.notifyUser({ text … })` after the park copy)', !redBy93(plant93("        try { this.d.notifyUser({ text: `${job.name}: parked — out of memory twice`, urgency: 'normal', jobId: job.id, jobName: job.name }); } catch { }"), /:\d+ \w+ reaches the For-you dep/)],
     ['a WRAPPER method through the dep', !redBy93(jb93.replace('  _forYou(job, c) {', '  _tellUser(x) { return this.d.notifyUser(x); }\n  _forYou(job, c) {'), /_tellUser reaches the For-you dep/)],
     ['an ALIAS of the dep', !redBy93(plant93('        const door = this.d.notifyUser; door({ words: { key: \'x {y}\' } });'), /reaches the For-you dep/)],
     ['a DESTRUCTURED dep', !redBy93(plant93('        const { notifyUser } = this.d; notifyUser({ words: { key: \'x {y}\' } });'), /reaches the For-you dep/)],
     ['a hand-built copy handed to _forYou', !redBy93(jb93.replace(PARK93, "this._forYou(job, { fact: 'parked', words: { key: 'x {y}' } });"), /hands _forYou a copy it built itself/)],
+    // r5 (accept-r4 unverified 0 — skeptic-probe-door-census.mjs): the constructor is no blanket door, server.js and data/bin are read
+    ['a closure over deps.notifyUser made in the constructor', !redBy93(jb93.replace(CAPTURE93, CAPTURE93 + "\n    this._bootNote = () => deps.notifyUser({ text: 'raw ' + 'words' });"), /:\d+ constructor reaches the For-you dep/)],
+    ['a closure over this._forYouDep made in the constructor', !redBy93(jb93.replace(CAPTURE93, CAPTURE93 + '\n    this._say = (t) => this._forYouDep({ text: t });'), /:\d+ constructor reaches the For-you dep/)],
+    ['the capture line doubled', !redBy93(jb93.replace(CAPTURE93, CAPTURE93 + '\n    ' + CAPTURE93), /captures the For-you dep 2×/)],
+    ['an alias of the dep made inside _forYou', !redBy93(jb93.replace('    let v;\n    try { v = this._forYouDep ? this._forYouDep(c.stray', '    const keep = this._forYouDep;\n    let v;\n    try { v = this._forYouDep ? this._forYouDep(c.stray'), /:\d+ _forYou reaches the For-you dep/)],
+    ['the stray door reaching the dep itself (76ffc823)', !redBy93(jb93.replace("return this._forYou(job, M.forYouCopy(job, 'stray', { shape: a }));", 'return this._forYouVerdict(job, this._forYouDep(a), \'stray\');'), /:\d+ _forYouStray reaches the For-you dep/)],
+    ['a server.js plant `jm._forYouDep(…)`', !door93(read('server.js') + "\njobsWiring.jm._forYouDep({ text: 'raw' });\n", 'server.js').some((p) => /^server\.js:\d+ \S+ reaches the For-you dep/.test(p))],
+    ['a server.js call of the engine\'s door', !door93(read('server.js') + "\njobsWiring.jm._forYou(null, { stray: { text: 'raw' } });\n", 'server.js').some((p) => /^server\.js:\d+ \S+ calls the engine's For-you door from outside/.test(p))],
+    ['a data/bin plant through `d.notifyUser`', !door93(read('data/bin/vibespace-job') + "\nd.notifyUser({ text: 'raw' });\n", 'data/bin/vibespace-job').some((p) => /^data\/bin\/vibespace-job:\d+ \S+ reaches the For-you dep/.test(p))],
   ];
   ok(c93.every(([, v]) => v === false), `§93 CONTROLS: ${c93.map(([n, v]) => `${n} (${v ? 'WRONG' : 'RED'})`).join(', ')}`);
 }
