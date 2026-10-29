@@ -1279,15 +1279,20 @@ function pressCensus(override = {}) {
   const emptyWalks = Object.entries(PC.walks).filter(([, x]) => x.size === 0).map(([k]) => k);
   if (emptyWalks.length) console.log('    walks that reached no door: ' + emptyWalks.join(', '));
   // THE PURE LAW over the measured ledger: 30 stamps this hour (peer-message), the default cap 30
-  const now = Date.parse('2026-10-28T07:47:34Z');
-  const st = [...Array(30)].map((_, i) => ({ at: Date.parse('2026-10-28T07:21:33Z') + i * 1e4, reason: 'peer-message' }));
+  // int361 seam: clock-relative fixture (lane owner-press-attended, pinned) — the measured timeline (now 2026-10-28T07:47:34Z, the
+  // stamps from 07:21:33Z, the next free 08:21:33Z) rides the REAL clock: the guard prunes its ledger with Date.now() (24 h), so a
+  // fixed date went red on every tree a day later. T0 = Date.now() − 5 min on a whole second; every instant = T0 + its offset.
+  const T0 = Math.floor((Date.now() - 5 * 60e3) / 1000) * 1000, at = (iso) => T0 + (Date.parse(iso) - Date.parse('2026-10-28T07:47:34Z'));
+  const isoZ = (ms) => new Date(ms).toISOString().replace('.000Z', 'Z');
+  const now = at('2026-10-28T07:47:34Z');
+  const st = [...Array(30)].map((_, i) => ({ at: at('2026-10-28T07:21:33Z') + i * 1e4, reason: 'peer-message' }));
   const full = { v: 1, identities: { k: st }, instance: st, notices: {} };
   const who = { key: 'k', name: 'acct-1' };
   const ask = (M, reason, extra = {}) => M.authorizeUnattendedSpend({ reason, identity: who, state: full, limits: M.budgetLimits(() => undefined), now, ...extra });
   const press = ask(A, 'stash-handover');
   const retry = ask(A, 'stash-retry');
   ok('§2b a FULL hour (30 stamps, cap 30) AUTHORIZES the press `stash-handover` as attended — and still refuses its automatic twin `stash-retry` (hour-cap, next free 08:21:33Z)',
-    press.ok === true && press.attended === true && retry.ok === false && retry.why === 'hour-cap' && retry.retryAfter === Date.parse('2026-10-28T08:21:33Z'), JSON.stringify({ press: [press.ok, press.attended], retry: [retry.ok, retry.why] }));
+    press.ok === true && press.attended === true && retry.ok === false && retry.why === 'hour-cap' && retry.retryAfter === at('2026-10-28T08:21:33Z'), JSON.stringify({ press: [press.ok, press.attended], retry: [retry.ok, retry.why] }));
   const others = Object.keys(A.SPEND_REASONS).filter((r) => A.SPEND_REASONS[r].turn && !A.SPEND_REASONS[r].attended);
   ok('§2b …every attended reason passes a full hour, every other turn reason is refused by it (' + others.length + ' gated)',
     attended.every((r) => ask(A, r).ok === true) && others.every((r) => ask(A, r).why === 'hour-cap'));
@@ -1337,8 +1342,8 @@ function pressCensus(override = {}) {
   }
   const it = items[0];
   ok('§2b R2: the For-you refusal carries its words as STRUCTURE — the account, the cap and the next free slot as an INSTANT CLAUSE ({next:{at, key, gone}}, r2) — and its English line names the instant in UTC (Z), never a hub-zone clock',
-    !!it && it.i18n && it.i18n.text.params.account === 'acct-1' && it.i18n.text.params.cap === 30 && it.i18n.text.params.next && it.i18n.text.params.next.at === Date.parse('2026-10-28T08:21:33Z') && /\{next\}/.test(it.i18n.text.key)
-      && /Next allowed after 2026-10-28T08:21:33Z\./.test(it.text) && !/\b(AM|PM)\b/.test(it.text), JSON.stringify(it && { text: it.text, i18n: it.i18n }));
+    !!it && it.i18n && it.i18n.text.params.account === 'acct-1' && it.i18n.text.params.cap === 30 && it.i18n.text.params.next && it.i18n.text.params.next.at === at('2026-10-28T08:21:33Z') && /\{next\}/.test(it.i18n.text.key)
+      && new RegExp('Next allowed after ' + isoZ(at('2026-10-28T08:21:33Z')) + '\\.').test(it.text) && !/\b(AM|PM)\b/.test(it.text), JSON.stringify(it && { text: it.text, i18n: it.i18n }));
 
   // THE OWNER'S CHANNELS SEND: the adapter's reason follows a PERSON's decision (P.userDecidedSend), never the drafter alone
   const P = require(path.join(REPO, 'src/channel-policy.js'));
