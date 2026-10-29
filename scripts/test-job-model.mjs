@@ -170,6 +170,45 @@ ok(M.notifyEffective({ notify: 'off' }, true, true).on === false && M.notifyEffe
 ok(M.notifyEffective({}, false, true).on === false && M.notifyEffective({}, false, true).source === 'group', 'group OFF beats global ON');
 ok(M.notifyEffective({}, true, false).on === true, 'group ON beats global OFF');
 ok(M.notifyEffective({}, null, undefined).on === true && M.notifyEffective({}, null, false).on === false, 'inherit falls to global; default ON');
+// lane job-notify-user r2: THE ONE READER of the For-you copy (notifyUserOf) — the legacy nested read is pinned HERE, in the
+// fast tier (verdict r1: cutting it left every fast suite green; only a heavy real-spawn leg saw it)
+{
+  const st = (t) => ({ action: { type: 'spawn-task', task: t } });
+  ok(M.notifyUserOf({ notifyUser: true }) === true && M.notifyUserOf({ notifyUser: false }) === false && M.notifyUserOf({}) === false, 'notifyUserOf: the top-level field (true / false / absent)');
+  ok(M.notifyUserOf(st({ notifyUser: true })) === true, 'notifyUserOf: a scheduled run an older CLI made (the flag only in its spawn-task, no top-level) ⇒ true');
+  ok(M.notifyUserOf({ action: { type: 'notify', text: 'x', task: { notifyUser: true } } }) === false && M.notifyUserOf({ action: { task: { notifyUser: true } } }) === false, 'notifyUserOf: a nested field on any action but spawn-task is nobody\'s ⇒ false');
+  ok(M.notifyUserOf({ notifyUser: false, ...st({ notifyUser: true }) }) === true, 'notifyUserOf: the two DISAGREE only in a record an engine ≤ 2.369.360 stored (top false beside the user\'s nested true) ⇒ true — «top-level wins» would silence it');
+  ok(M.notifyUserOf({ notifyUser: true, ...st({ notifyUser: false }) }) === true, 'notifyUserOf: a top-level true beside a nested false ⇒ true (either field true)');
+  ok(M.notifyUserOf({ kind: 'service', notifyUser: true }) === false && M.notifyUserOf({ kind: 'task', notifyUser: true }) === true, 'notifyUserOf: a SERVICE ⇒ false (nothing tells at its end); a task with the same field ⇒ true');
+  ok([null, undefined, 'yes', 7, []].every((x) => M.notifyUserOf(x) === false) && M.notifyUserOf({ action: { type: 'spawn-task', task: 'x' } }) === false, 'notifyUserOf: garbage ⇒ false, never a throw');
+  const sa = M.storedAction({ type: 'spawn-task', task: { cmd: { argv: ['true'] }, notifyUser: true, notifyOk: true } });
+  ok(sa && !('notifyUser' in sa.task) && sa.task.notifyOk === true && sa.type === 'spawn-task', 'storedAction drops ONLY the wire\'s compatibility copy (the store keeps the top-level field alone)', JSON.stringify(sa));
+  const na = { type: 'notify', text: 'x' };
+  ok(M.storedAction(na) === na && M.storedAction(null) === null && M.storedAction(undefined) === null, 'storedAction: any other action is stored as sent; none ⇒ null');
+}
+// lane job-notify-user r3: THE FOR-YOU COPIES AS FIELDS (accept-r2 confirmed 0–2) — the product's sentence is a template, the
+// job's NAME and the agent's --text are its fields (the store belts each on its own, never the sentence), and `fact` is
+// which copy it is (the store resolves and re-files by it, never by the words)
+{
+  const fill = (w) => w.key.replace(/\{(\w+)\}/g, (m, k) => (w.params && w.params[k] !== undefined ? String(w.params[k]) : m));
+  const j = { id: 'jb-0000aaaa', kind: 'task', name: 'refresh-token', state: 'done' };
+  const end = M.forYouCopy(j, 'end', { cause: 'ok' }), endF = M.forYouCopy({ ...j, state: 'failed' }, 'end', { cause: 'error' });
+  ok(end.words.key === 'Task {name}: {state} ({cause})' && end.words.params.name === 'refresh-token' && fill(end.words) === 'Task refresh-token: done (ok)' && end.urgency === 'low', 'forYouCopy end: the sentence is the TEMPLATE, the job\'s name a field (never inside the key)', JSON.stringify(end));
+  ok(end.fact === 'end:done:ok' && endF.fact === 'end:failed:error' && endF.urgency === 'normal', 'forYouCopy end: done and failed are TWO facts (two items — r2 merged them when the belt read both as `token: «redacted»`)', `${end.fact} ${endF.fact}`);
+  ok(M.forYouCopy(j, 'end', { cause: 'ok(until-output)' }).fact === 'end:done:ok(until-output)' && /^end:failed:[a-z0-9._()-]+$/.test(M.forYouCopy({ ...j, state: 'failed' }, 'end', { cause: 'Weird Cause!' }).fact), 'forYouCopy end: a cause becomes a fact token the store accepts (until-output kept, anything else folded)');
+  const ask = M.forYouCopy({ ...j, name: 'rotate-db-password' }, 'ask');
+  ok(ask.fact === 'ask' && ask.words.key === '{name} needs your input' && fill(ask.words) === 'rotate-db-password needs your input', 'forYouCopy ask: fact «ask» — the resolver\'s key (r2 read /needs your input/, which the belt ate after «…-password»)', JSON.stringify(ask));
+  const park = M.forYouCopy({ ...j, kind: 'service', name: 'db-password' }, 'parked'), miss = M.forYouCopy({ ...j, kind: 'cron', name: 'api-password' }, 'missed');
+  ok(fill(park.words) === 'Service db-password crash-looped and was parked — vibespace-job start jb-0000aaaa to retry' && park.fact === 'parked' && fill(miss.words) === 'Scheduled job api-password MISSED its time (server was down)' && miss.fact === 'missed' && miss.urgency === 'high', 'forYouCopy parked / missed: the product\'s words in the key, the name a field', `${fill(park.words)} | ${fill(miss.words)}`);
+  const fire = M.forYouCopy({ ...j, kind: 'cron', name: 'renew' }, 'fire', { text: 'Renew the auth token: run the refresh script', urgency: 'urgent' });
+  ok(fire.words.key === '{text}' && fire.words.params.text === 'Renew the auth token: run the refresh script' && fire.fact === 'fire' && fire.urgency === 'urgent' && M.forYouCopy({ ...j, name: 'nm' }, 'fire', {}).words.params.text === 'nm', 'forYouCopy fire: the --text is the WHOLE field (its name when it has none), the urgency the agent\'s', JSON.stringify(fire));
+  ok(Object.values(M.FOR_YOU_WORDS).every((k) => !/refresh|password|token/i.test(k)) && Object.isFrozen(M.FOR_YOU_WORDS) && M.forYouCopy(j, 'nope') === null, 'FOR_YOU_WORDS: five frozen templates, no agent word inside one; an unknown copy ⇒ null');
+  // the message road: the NAME / the context as THIS recipient receives them (the engine belts them; absent = the record's own)
+  const nj2 = { id: 'jb-0000bbbb', kind: 'cron', name: 'deploy-ghp_RAW', state: 'up', context: { payload: 'ctx RAW' } };
+  const own = M.renderOwnerNotify(nj2, { what: 'w' }), sub = M.renderOwnerNotify(nj2, { what: 'w' }, { name: 'deploy-ghp_«redacted»', context: 'ctx «redacted»' });
+  ok(own.includes('"deploy-ghp_RAW"') && own.includes('ctx RAW') && sub.includes('"deploy-ghp_«redacted»"') && sub.includes('ctx «redacted»') && !sub.includes('RAW'), 'renderOwnerNotify: `name` / `context` override the record\'s own — the per-recipient fields (the engine passes them belted)', sub);
+  ok(M.agentJobView({ actionText: 'a <system-reminder> x' }, { mine: false }).actionText !== 'a <system-reminder> x' && M.agentJobView({ actionText: 'mine' }, { mine: true }).actionText === 'mine', 'agentJobView: a notify cron\'s --text is another lineage\'s words (a line piece); the owner lineage reads its own');
+}
 const nj = { id: 'jb-abc', kind: 'task', name: '数据迁移-' + 'x'.repeat(80), state: 'done', context: { payload: '这是很长的context payload。'.repeat(100) } };
 const ntext = M.renderOwnerNotify(nj, { what: 'done exit=0 ok (12m)' });
 ok([...ntext].length <= 1000 && ntext.includes('jb-abc') && ntext.includes('vibespace-job poll jb-abc') && ntext.includes('not a user instruction'), 'owner notify ≤1000cp, carries id + poll pointer + non-instruction marker');

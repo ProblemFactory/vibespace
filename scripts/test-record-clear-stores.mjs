@@ -498,7 +498,7 @@ console.log('§4 Background Work');
   jm._notifyOwner(jm.jobs.get(PARENT), { what: jm.jobs.get(PARENT).action.text }); await new Promise((r) => setTimeout(r, 30));
   ok([...(jm.pendingNotifs.get(ME_CID) || [])].some((n) => n.jobId === PARENT && !String(n.text).startsWith('announced:') && has(n.text)), 'setup: a held notification whose text is the notify action\'s own words', jm.pendingNotifs.get(ME_CID));
   // a For-you item the jobs producer filed (the job's name in its words and its label)
-  jm.d.notifyUser({ text: `mail digest ${MARK} needs your input`, urgency: 'normal', jobId: CHILD, jobName: `mail digest ${MARK}`, ownerCid: ME_CID });
+  jm.d.notifyUser({ words: { key: '{name} needs your input', params: { name: `mail digest ${MARK}` } }, fact: 'ask', urgency: 'normal', jobId: CHILD, jobName: `mail digest ${MARK}`, ownerCid: ME_CID });   // the engine's shape (lane job-notify-user r3: a template + fields)
   const jobItem = [...userTodos.snapshot().open].find((i) => i.jobId === CHILD);
   ok(jobItem && has(jobItem.sessionName) && jobItem.origin === 'jobs', 'setup: a Background Work For-you item names the job (text + label)');
   const viewer = { isUser: false, conversationId: ME_CID, sessionId: 'cw-me', groups: new Set(['T-260928-work']) };
@@ -617,7 +617,7 @@ console.log('§4b Background Work — verify r3: the ask panel, a covered run\'s
   // GET /api/jobs/:id (`interaction`) and the answer dialog after a clear (the walk's finding)
   const ASK = 'jb-0000ee01';
   jm.jobs.set(ASK, jobRec(ASK, { name: 'asker', state: 'awaiting-user', interaction: { pending: { panel: { title: `About ${MARK}`, blocks: [{ type: 'markdown', text: `the ${MARK} thread asks: which quarter?` }, { type: 'buttons', options: ['ok'] }] }, version: 1, postedAt: JT, timeoutS: 1800 }, answers: [] } }));
-  jm.d.notifyUser({ text: `asker needs your input`, urgency: 'normal', jobId: ASK, jobName: 'asker', ownerCid: ME_CID });
+  jm.d.notifyUser({ words: { key: '{name} needs your input', params: { name: 'asker' } }, fact: 'ask', urgency: 'normal', jobId: ASK, jobName: 'asker', ownerCid: ME_CID });
   const askItem = [...userTodos.snapshot().open].find((i) => i.jobId === ASK);
   ok(!!askItem && has(J(jm.jobs.get(ASK).interaction.pending)), 'setup: a job parked awaiting-user on a panel that carries the marker, and its open For-you ask');
   const ra = await OWNER_APP.call('POST', '/api/records/clear', { body: { kind: 'job', id: ASK } });
@@ -1246,16 +1246,17 @@ console.log('§4b Background Work — verify r3: the ask panel, a covered run\'s
   }
   // (g) the job's ask lifecycle closes a CLEARED ask item too (resolveByJob told the ask apart by its words)
   {
-    const it = userTodos.add(ME, { text: 'asker3 needs your input', jobId: 'jb-0000ee08', origin: 'jobs', by: 'agent' });
+    const it = userTodos.add(ME, { i18n: { text: { key: '{name} needs your input', params: { name: 'asker3' } } }, jobId: 'jb-0000ee08', jobFact: 'ask', origin: 'jobs', by: 'agent' });
     userTodos.clearItems([it.id], { by: 'owner' });
     const n = userTodos.resolveByJob('jb-0000ee08');
     ok(n === 1 && userTodos.get(it.id).status === 'done', 'an answered / expired / withdrawn panel resolves the job\'s ask item even after the owner cleared its words', userTodos.get(it.id));
-    const NEW_ASK = "if (onlyAsk && !it.clearedAt && !/needs your input/.test(it.text)) continue;";
+    const NEW_ASK = "if (onlyAsk && !it.clearedAt && it.jobFact !== 'ask') continue;";   // lane job-notify-user r3: the ask is told apart by its FACT
     ok(UT_SRC.split(NEW_ASK).length === 2, 'the ask rule is present once (the control swaps exactly it)');
+    // the control is the WORDS rule with no cleared exemption (pre verify-r3): a cleared item says the sentence, never «needs your input»
     const PRE = MUT.load(UT_REL, UT_SRC.replace(NEW_ASK, "if (onlyAsk && !/needs your input/.test(it.text)) continue;"), 'ask-by-words-only');
     const dir = path.join(DATA, 'ut-pre'); fs.mkdirSync(dir, { recursive: true });
     const ut = new PRE.UserTodoManager({ dataDir: dir, onChange: () => {}, expirySweepMs: 0 });
-    const it2 = ut.add(ME, { text: 'asker4 needs your input', jobId: 'jb-0000ee09', origin: 'jobs', by: 'agent' });
+    const it2 = ut.add(ME, { i18n: { text: { key: '{name} needs your input', params: { name: 'asker4' } } }, jobId: 'jb-0000ee09', jobFact: 'ask', origin: 'jobs', by: 'agent' });
     ut.clearItems([it2.id], { by: 'owner' });
     ok(ut.resolveByJob('jb-0000ee09') === 0 && ut.get(it2.id).status === 'open', 'NEGATIVE CONTROL: the pre-r3 rule leaves the cleared ask open forever after the answer');
     try { ut.stop(); } catch { }

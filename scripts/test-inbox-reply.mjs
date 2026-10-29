@@ -319,7 +319,7 @@ const userTextOf = (line) => { const f = JSON.parse(line); return f.message.cont
   const acc = H.userTodos.add('accounts', { origin: 'login', text: 'login expires', by: 'server' });
   const r8 = H.call(acc.id, { text: 'x' });
   cases.push(['accounts-keyed item ⇒ 409 no_session', r8.status === 409 && r8.json.code === 'no_session']);
-  const job = H.userTodos.add('claude:sid-live-1', { origin: 'jobs', text: 'job needs your input', jobId: 'job-1' });
+  const job = H.userTodos.add('claude:sid-live-1', { origin: 'jobs', i18n: { text: { key: '{name} needs your input', params: { name: 'job' } } }, jobId: 'job-1', jobFact: 'ask' });   // a jobs item files its words as structure (lane job-notify-user r3)
   const r9 = H.call(job.id, { text: 'x' });
   cases.push(['jobId item ⇒ 409 job_item', r9.status === 409 && r9.json.code === 'job_item']);
   cases.push(['no refusal wrote a frame to the live session', live.wrote.length === 0]);

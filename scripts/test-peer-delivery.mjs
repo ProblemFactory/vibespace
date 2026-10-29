@@ -227,7 +227,7 @@ const jb = read('src/jobs.js');
 // Asserted by MEMBERSHIP, not verbatim: the options object gained
 // `spendReason` with the spend ceiling (design-account-hardening §4.4c), and a
 // pin on the exact literal fails for a field ADDED beside the one it protects.
-ok("jobs.js TYPES its owner notifications (the wiring pin: a rule with no call site is dead code)", /deliverToConversation\(cid, text, \{[^}]*fromName: 'Background Work · ' \+ \(job\.name \|\| job\.id\)[^}]*kind: 'notification'[^}]*\}\)/.test(jb));
+ok("jobs.js TYPES its owner notifications (the wiring pin: a rule with no call site is dead code)", /deliverToConversation\(cid, text, \{[^}]*fromName: 'Background Work · ' \+ this\._jobLabel\(job\)[^}]*kind: 'notification'[^}]*\}\)/.test(jb));
 const ar = read('src/agent-routes.js');
 ok('…while vibespace-msg (a PERSON writing to another session) passes no kind at all ⇒ peer', /deliver\.deliverToConversation\(target\.cid, framed, \{(?![^}]*\bkind:)[^}]*fromName[^}]*cardText: text[^}]*\}\)/.test(ar) && !/msg\/send[\s\S]{0,2000}kind: 'notification'/.test(ar));
 const sp = read('src/lib/session-props.js');

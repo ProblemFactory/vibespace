@@ -1577,7 +1577,9 @@ const I_SINKS = [
   ['notice', (c) => /(^|\.)serverNotice$/.test(c), 'a server notice: a toast on every device (→ every device\'s toast history)'],
   ['telemetry', (c, rel, before) => (iIsLib(rel) && /^(track|metric)$/.test(c)) || (c === 'record' && /(telemetry|getTelemetry\??\.?\(\)|\btel)\??\.$/.test(before)) || /(^|\.)telemetry\.record$/.test(c) || /^(global\.)?__vsEvent$/.test(c), 'data/telemetry → the Diagnostics window (errors, drift rows, by-event tables) — `global.__vsEvent(name, detail)` included (server.js: a telemetry event)'],
   ['error', (c) => /^(new )?(Error|TypeError|RangeError)$/.test(c), 'an Error: a route answers `{error: e.message}` (→ a client toast); an uncaught one → telemetry `server-error`'],
-  ['todo', (c) => /(^|\.)(userTodos|todos)(\(\))?\.add$/.test(c) || /(^|\.)notifyUser$/.test(c), 'a For-you item — a DERIVED record when made from another record\'s words'],
+  // lane job-notify-user r3: `this._forYou` is the engine's ONE For-you copy door (src/jobs.js) — a copy's fields ride its
+  // argument (M.forYouCopy(job, …, { text: a.text })), and the door stamps the job's id on the one notifyUser call (pinned below)
+  ['todo', (c) => /(^|\.)(userTodos|todos)(\(\))?\.add$/.test(c) || /(^|\.)(notifyUser|_forYou)$/.test(c), 'a For-you item — a DERIVED record when made from another record\'s words'],
   ['activity', (c) => /(^|\.)addProgress$/.test(c), 'an Activity entry'],
   ['status', (c) => /(^|\.)(pushNotice|setByAgent|setByUser|noteEvent)$/.test(c), 'a status entry / a notice queued for the agent\'s next turn'],
   ['peer', (c) => /(^|\.)(deliverToConversation|_notifyOwner|_deliverTo|postToPeer|emitPeerCard|injectPeerCard|feedPeerCard)$/.test(c), 'a delivery into a conversation (the agent\'s context + the chat card drawn for it)'],
@@ -1596,7 +1598,7 @@ const I_CHECK = {
   length: (args, read) => { const r = iEsc(read); const code = iCode(args).replace(new RegExp(String.raw`\b(B|Buffer\.byteLength)\(\s*${r}\b[^)]*\)|${r}\.length\b`, 'g'), ''); return !new RegExp(String.raw`(?<![\w$.])${r}\b`).test(code); },
   ref: (args) => /history:\s*\{\s*m:/.test(args) && /ref:\s*\{\s*kind:/.test(args),
   live: (args) => /\b(isCleared|clearedText|shownText|wordsOf)\(/.test(args),
-  cascade: (args) => /\bjobId\b/.test(args),
+  cascade: (args) => /\bjobId\b/.test(args) || /^\s*job\s*,\s*M\.forYouCopy\(job\b/.test(args),   // r3: `_forYou(job, M.forYouCopy(job, …))` — the door stamps the job's id
   own: () => true,
   transcript: () => true,
 };
@@ -1899,7 +1901,7 @@ const I_RECV = {
   'src/lib/browser-live-window.js|dw': ['words', 'a PURE outcome\'s sentence (browser-switcher-model)'],
   'src/lib/browser-live-window.js|sw': ['words', 'a PURE step\'s sentence (browser-new-profile-model machineStepWords: a paired machine with no browser — the machine\'s id + its one command; lane remote-profile-start)'],
   'src/lib/browser-profile-picker.js|r.pin': ['browser profile', 'a profile label'], 'src/lib/browser-build-dialog.js|view': ['browser profile', 'a profile label (Change build…, lane browser-admin)'], 'src/lib/browser-new-profile.js|o': ['browser profile', 'an install outcome\'s words (the New profile… dialog, lane browser-admin)'],
-  'src/lib/browser-switcher.js|e': ['error', 'an Error\'s name'], 'src/lib/browser-switcher.js|w': ['words', 'a PURE outcome\'s sentence'],
+  'src/lib/browser-switcher.js|e': ['error', 'an Error\'s name'], 'src/server/jobs-wiring.js|e': ['error', 'the For you store\'s refusal (lane job-notify-user r2: its code and its open COUNT — a number, never an item\'s text)'], 'src/lib/browser-switcher.js|w': ['words', 'a PURE outcome\'s sentence'],
   // lane owner-press-attended: the refused hand-over's toast (PURE stash-summary handOverRefusalWords — the route's code + the
   // 429 body's account name, cap and next free slot, never a notice's words); the handback verdict's `reason` is a spend
   // reason CODE (browser-handback | browser-handback-idle), compared, never shown
@@ -2118,7 +2120,7 @@ const I_SITES = {
   'src/jobs.js|peer|job.name': ['transcript', 'a job notification delivered into its owner / subscriber conversation (the card label `Background Work · <name>`); a HELD one is the stash the door rewrites'],
   'src/jobs.js|peer|a.text': ['transcript', 'the notify action\'s own text delivered to the owner conversation'],
   'src/jobs.js|todo|job.name': ['cascade', 'a For-you item filed by the job (failed / parked / missed / needs input) carries its jobId — the job\'s clear cascades to it'],
-  'src/jobs.js|todo|a.text': ['cascade', 'the notify action\'s For-you item carries the jobId — cleared with the job'],
+  'src/jobs.js|todo|a.text': ['cascade', 'the notify action\'s For-you item carries the jobId — cleared with the job (r3: the --text rides `_forYou`, the one door)'],
   'src/lib/jobs-panel.js|dialog|j.name': ['live', '"Remove job" names a cleared job in this device\'s words (r5 ⑨)'],
   'src/lib/jobs-panel.js|title|job.name': ['live', 'the Job input window\'s title, re-worded on every render + generic in every layout record (WORDLESS_TITLES)'],
   'src/lib/user-todos-panel.js|toast|nameFor()': ['ref', 'the arrival toast: the history keeps the head + {kind: todo, id} (r4 ⑤ / r5 ⑩)'],
@@ -2198,7 +2200,7 @@ console.log('§I the interpolation census (verify r8): every message that embeds
     ok(al.length >= 25 && defs.size >= 15 && al.every((r) => r.read && r.sink && I_RECV[`${iRel(r.rel)}|${iRecvOf(r.read)}`]), `I verify r9 — THE ONE-LEVEL ALIAS PASS: a text field COPIED into a local (\`const x = rec.<field>\` / \`const { field } = rec\`) and handed to a sink in its block is a read at that sink — ${defs.size} copies, ${al.length} sink reads, every one judged by the receiver + site tables above (a copy into an object's member or through two locals is declared)`, al.length); }
   ok(iAbsent(srcs).length === 0, `I the absent sinks stay absent — ${I_ABSENT.map(([w]) => w).join(', ')}: zero sites`, iAbsent(srcs));
   // the classes' own standing statements: the cascade reaches every item a job filed; the dialog says agents keep what they received
-  ok(read('src/server/record-clear.js').includes('userTodos.idsWhere((i) => i.jobId && gone.has(i.jobId))') && /userTodos\.add\(sessKey, \{\s*origin: 'jobs', \/\/ B-328d\s*text, urgency: urgency \|\| 'normal', by: 'agent', jobId,/.test(read('src/server/jobs-wiring.js')), 'I `cascade`: a job\'s clear cascades to every For-you item carrying its jobId, and the ONE filing door (jobs-wiring notifyUser) stamps it');
+  ok(read('src/server/record-clear.js').includes('userTodos.idsWhere((i) => i.jobId && gone.has(i.jobId))') && /userTodos\.add\(sessKey, \{\s*origin: 'jobs', \/\/ B-328d\s*i18n: [^\n]*\n\s*urgency: urgency \|\| 'normal', by: 'agent', jobId,/.test(read('src/server/jobs-wiring.js')) && /_forYou\(job, c\) \{\n\s*let v;\n\s*try \{ v = this\.d\.notifyUser\(\{ words: c\.words, fact: c\.fact, urgency: c\.urgency, jobId: job\.id,/.test(read('src/jobs.js')), 'I `cascade`: a job\'s clear cascades to every For-you item carrying its jobId, and the ONE filing door (jobs-wiring notifyUser) stamps it');
   ok(read('src/lib/record-clear-ui.js').includes("copies.className = 'dialog-hint rc-copies';"), 'I `transcript`: the confirm dialog says an agent keeps what it already received (.rc-copies, r4 ③)');
   { const rail = read('src/lib/sidebar-rail.js');
     ok(/row\.service = owned\.get\(row\.port\)\.name; row\.serviceJob = owned\.get\(row\.port\)\.id;/.test(read('src/port-forward.js')) && rail.includes("(msg.type === 'jobs-updated' && Array.isArray(msg.cleared))) render();"), 'I verify r8 ④: a Ports scan row carries its service\'s job id, the page\'s scan cache is scrubbed on the clear (the carrier row above) and the panel re-renders');
@@ -2240,7 +2242,7 @@ console.log('§I controls: one planted interpolation per class, each RED on its 
   { const rel = 'src/lib/jobs-panel.js', m = plant(5, rel, "  if (r?.error) showToast(r.error, { error: true });\n  refresh?.();", "  const say = (m) => showToast(m);\n  if (r?.error) showToast(r.error, { error: true });\n  else say(j.name);\n  refresh?.();", 'wrapped-toast', true);
     const c = judge(rel, m); ok(c.bad.length === 1 && /jobs-panel\.js\|toast\|j\.name/.test(c.bad[0]), 'CONTROL 5 (verify r8): a wrapper that hands a job\'s name to showToast is RED at its call', c.bad); }
   // 6. a server notice naming the job
-  { const rel = 'src/jobs.js', from = "    try { this.d.notifyUser({ text: `${job.name} needs your input`,", m = plant(6, rel, from, "    try { serverNotice?.('job-ask', `${job.name} asks for input`); } catch { }\n" + from, 'notice-names-job');
+  { const rel = 'src/jobs.js', from = "    this._forYou(job, M.forYouCopy(job, 'ask'));", m = plant(6, rel, from, "    try { serverNotice?.('job-ask', `${job.name} asks for input`); } catch { }\n" + from, 'notice-names-job');
     const c = judge(rel, m); ok(c.bad.length === 1 && /jobs\.js\|notice\|job\.name .*no class/.test(c.bad[0]), 'CONTROL 6 (verify r8): a server notice naming the job is RED (a toast on every device)', c.bad); }
   // 7. the client console with an item's text (the incident recorder's ring keeps it)
   { const rel = 'src/lib/user-todos-panel.js', from = "        const el = showToast(`${head} · ${nameFor(i.sessionKey, [i])}: ${wordsOf(i)}`,", m = plant(7, rel, from, "        console.warn('[inbox] arrival', wordsOf(i));\n" + from, 'console-item-words', true);
@@ -2268,9 +2270,9 @@ console.log('§I controls: one planted interpolation per class, each RED on its 
     ok(!iPortsWorded(fs.readFileSync(m, 'utf8')), 'CONTROL 13 (verify r8 ⑤): the pre-r8 Ports rows (the stored English key, the pre-filled path) are RED'); }
   // 14–15. verify r8 ⑥: the sink spellings the first cut missed — a telemetry event through `global.__vsEvent`, a `server-notice`
   //         FRAME broadcast directly (not through serverNotice())
-  { const rel = 'src/jobs.js', from = "    try { this.d.notifyUser({ text: `${job.name} needs your input`,", m = plant(14, rel, from, "    global.__vsEvent?.('job-ask', job.name);\n" + from, 'vsevent-names-job');
+  { const rel = 'src/jobs.js', from = "    this._forYou(job, M.forYouCopy(job, 'ask'));", m = plant(14, rel, from, "    global.__vsEvent?.('job-ask', job.name);\n" + from, 'vsevent-names-job');
     const c = judge(rel, m); ok(c.bad.length === 1 && /jobs\.js\|telemetry\|job\.name .*no class/.test(c.bad[0]), 'CONTROL 14 (verify r8 ⑥): a telemetry event through global.__vsEvent naming the job is RED', c.bad); }
-  { const rel = 'src/jobs.js', from = "    try { this.d.notifyUser({ text: `${job.name} needs your input`,", m = plant(15, rel, from, "    this.d.broadcast('server-notice', { type: 'server-notice', key: 'job-ask', text: `${job.name} asks` });\n" + from, 'notice-frame-names-job');
+  { const rel = 'src/jobs.js', from = "    this._forYou(job, M.forYouCopy(job, 'ask'));", m = plant(15, rel, from, "    this.d.broadcast('server-notice', { type: 'server-notice', key: 'job-ask', text: `${job.name} asks` });\n" + from, 'notice-frame-names-job');
     const c = judge(rel, m); ok(c.bad.length === 1 && /jobs\.js\|notice\|job\.name .*no class/.test(c.bad[0]), 'CONTROL 15 (verify r8 ⑥): a server-notice FRAME naming the job, broadcast directly, is RED', c.bad); }
   // 16. verify r9 (the revert table: r8 ⑥'s third spelling — `window.__vsOp` as the console sink — reverted, NOTHING went red:
   //     no op breadcrumb in the tree reads a record, and controls 14 / 15 plant the other two spellings only). A breadcrumb

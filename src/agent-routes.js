@@ -2642,7 +2642,7 @@ app.get('/api/agent/jobs', (req, res) => {
   // `vibespace-job list --archived`) — same snapshot shape + archived:true
   if (req.query.archived) {
     const arch = a.selfJob ? [] : jobModel.visibleJobs(a.jm.archivedList(), a.caller);
-    return res.json({ success: true, archived: true, jobs: arch.map((r) => { const mine = jobModel.isOwner(r, a.caller); return jobWhen({ ...jobModel.agentJobView(a.jm.snapshotArchived(r), { mine }), mine, mySubscription: null }); }) });   // verify r5 F1 (lane peer-census): another lineage's record through the belt
+    return res.json({ success: true, archived: true, jobs: arch.map((r) => { const mine = jobModel.isOwner(r, a.caller); return jobWhen({ ...jobModel.agentJobView(a.jm.snapshotArchived(r, { author: mine }), { mine }), mine, mySubscription: null }); }) });   // verify r5 F1 (lane peer-census): another lineage's record through the belt
   }
   let list = a.selfJob ? [a.selfJob] : jobModel.visibleJobs([...a.jm.jobs.values()], a.caller);
   // ?mine=1 → owned by this conversation · ?subscribed=1 → this conversation subscribed
@@ -2653,7 +2653,7 @@ app.get('/api/agent/jobs', (req, res) => {
     jobs: list.map((j) => {
       const mine = a.selfJob ? true : jobModel.isOwner(j, a.caller);
       return jobWhen({
-        ...jobModel.agentJobView(a.jm.snapshot(j), { mine }),   // verify r5 F1 (lane peer-census): a job of ANOTHER lineage (view opened / subscribed) is another session's words — through the belt; the owner lineage reads its own raw
+        ...jobModel.agentJobView(a.jm.snapshot(j, { author: mine }), { mine }),   // lane job-notify-user r3: `author` — a notify cron's --text whole for the lineage that wrote it · verify r5 F1 (lane peer-census): a job of ANOTHER lineage (view opened / subscribed) is another session's words — through the belt; the owner lineage reads its own raw
         mine,
         mySubscription: a.selfJob ? null : (j.subscribers || []).find((s) => s.conversationId === a.caller.conversationId) || null,
       });
@@ -2673,7 +2673,7 @@ app.get('/api/agent/jobs/:ref', async (req, res) => {
     // archived id still answer, the SAME shape, with archived:true — an agent
     // holding an old id never gets a 404 because of housekeeping
     const arc = a.selfJob ? null : findVisibleIn(a.jm.archivedList(), a.caller, ref);
-    if (arc) { const mine = jobModel.isOwner(arc, a.caller); return res.json({ success: true, job: jobWhen({ ...jobModel.agentJobView(a.jm.snapshotArchived(arc, { tail: Math.min(Number(req.query.tail) || 0, 400) }), { mine }), mine, mySubscription: null }) }); }   // verify r5 F1: through the belt
+    if (arc) { const mine = jobModel.isOwner(arc, a.caller); return res.json({ success: true, job: jobWhen({ ...jobModel.agentJobView(a.jm.snapshotArchived(arc, { tail: Math.min(Number(req.query.tail) || 0, 400), author: mine }), { mine }), mine, mySubscription: null }) }); }   // verify r5 F1: through the belt
     return res.status(404).json({ error: NOT_VISIBLE(ref) });
   }
   const wait = Math.min(Number(req.query.wait) || 0, 600) * 1000;
@@ -2688,7 +2688,7 @@ app.get('/api/agent/jobs/:ref', async (req, res) => {
   res.json({
     success: true,
     job: jobWhen({
-      ...jobModel.agentJobView(a.jm.snapshot(job, { tail: Math.min(Number(req.query.tail) || 0, 400) }), { mine }),   // verify r5 F1 (lane peer-census): another lineage's context / command / last line / LOG TAIL through the belt; `progress` (any viewer writes it) for everyone
+      ...jobModel.agentJobView(a.jm.snapshot(job, { tail: Math.min(Number(req.query.tail) || 0, 400), author: mine }), { mine }),   // lane job-notify-user r3: `author` (a notify cron's --text whole for its lineage) · verify r5 F1 (lane peer-census): another lineage's context / command / last line / LOG TAIL through the belt; `progress` (any viewer writes it) for everyone
       mine,
       mySubscription: a.selfJob ? null : (job.subscribers || []).find((s) => s.conversationId === a.caller.conversationId) || null,
     }),

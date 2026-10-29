@@ -29,6 +29,7 @@ function agentJobView(snap, { mine = false } = {}) {
   if (snap.context && typeof snap.context === 'object') out.context = { ...snap.context, payload: line(snap.context.payload, CONTEXT_PAYLOAD_CAP) };
   if (snap.cmd && typeof snap.cmd === 'object') out.cmd = { ...snap.cmd, argv: Array.isArray(snap.cmd.argv) ? snap.cmd.argv.map((a) => line(String(a), 4096)) : snap.cmd.argv, cwd: line(snap.cmd.cwd, 4096), envKeys: Array.isArray(snap.cmd.envKeys) ? snap.cmd.envKeys.map((k) => line(String(k), 200)) : snap.cmd.envKeys };
   if (Array.isArray(snap.envFrom)) out.envFrom = snap.envFrom.map((k) => line(String(k), 200));
+  if (typeof snap.actionText === 'string') out.actionText = line(snap.actionText, 500);   // lane job-notify-user r3: a notify cron's --text, another lineage's words
   if (snap.run && typeof snap.run === 'object') out.run = { ...snap.run, lastLine: line(snap.run.lastLine, 2000) };
   if (typeof snap.logTail === 'string' && snap.logTail) out.logTail = toAgentText(snap.logTail, { kind: 'block' });
   // verify r6 F2 (lane peer-census): the ANSWERS to the job's panel are the USER's values under the KEYS the job's PROCESS
@@ -325,21 +326,77 @@ function notifyEffective(job, groupNotify, globalOn) {
   if (groupNotify === false) return { on: false, source: 'group' };
   return { on: globalOn !== false, source: 'global' };
 }
+// lane job-notify-user: does this record's work ALSO copy the user's For you tray (`--notify-user`)? THE ONE READER — a
+// notify cron's fire, a task's end, a cron child (handed its parent's answer at every fire), the snapshot `show` and the
+// Jobs panel print. The CLI sends ONE top-level field for every shape; a scheduled run made by an older CLI (2.369.360
+// and before) carried it only inside its embedded spawn-task (action.task.notifyUser) — still read here; create stores
+// the top-level answer alone (storedAction drops the nested copy). The rules (scripts/test-job-model.mjs pins each):
+//   · either field true ⇒ true (the RULE — the r2 brief asked «top-level wins»; the deviation was accepted at the r2
+//     acceptance, 2026-10-28, for this reason). The two disagree ONLY in a record an engine ≤ 2.369.360 stored — it
+//     wrote `notifyUser: false` at the top beside the user's nested true — so «top-level wins» would silence what the
+//     user asked for on every such scheduled run; a top-level true beside a nested false (a hand-built body) is true too
+//   · a nested field on any action but spawn-task is nobody's (a notify action has no task) ⇒ false
+//   · a SERVICE ⇒ false: no engine path tells the user at a service's end (its park files For you whatever the flag)
+function notifyUserOf(rec) {
+  if (!rec || typeof rec !== 'object' || rec.kind === 'service') return false;
+  if (rec.notifyUser) return true;
+  return !!spawnTaskOf(rec).notifyUser;
+}
+// the embedded task a cron's fire runs (action.type 'spawn-task'), or {} — the fields a cron PARENT keeps for its runs
+function spawnTaskOf(rec) {
+  const a = rec && typeof rec === 'object' ? rec.action : null;
+  return a && typeof a === 'object' && a.type === 'spawn-task' && a.task && typeof a.task === 'object' ? a.task : {};
+}
+// the action create STORES: the wire's compatibility copy of the For-you flag (action.task.notifyUser — what an engine ≤
+// 2.369.360 reads, building the child from `{...a.task}`) is dropped, so the store keeps ONE field (the top-level one)
+function storedAction(action) {
+  if (!action || typeof action !== 'object') return null;
+  if (action.type !== 'spawn-task' || !action.task || typeof action.task !== 'object' || !('notifyUser' in action.task)) return action;
+  const { notifyUser, ...task } = action.task;
+  return { ...action, task };
+}
 
 // The message text posted into the owner conversation's inbox socket. The
 // CLI delivers it verbatim as an inbound peer message, so the text itself
 // must carry provenance + the poll pointer (there is no card metadata on
 // this lane). ≤1KB always; context payload echo is clipped hard.
-function renderOwnerNotify(job, ev, { contextHead = 300 } = {}) {
+// lane job-notify-user r3: `name` / `context` = the FIELDS as this recipient receives them — the engine passes the job's
+// NAME belted (every copy) and, for a SUBSCRIBER, the context belted (src/jobs.js _notifyOwner); absent = the record's own
+function renderOwnerNotify(job, ev, { contextHead = 300, name = null, context = null } = {}) {
   const what = ev && ev.what ? ev.what : job.state;
-  let out = `[VibeSpace Background Work] ${job.kind} "${agentPiece(job.name, 40)}" (${job.id}): ${agentPiece(what, 200)}.`;
+  let out = `[VibeSpace Background Work] ${job.kind} "${agentPiece(name != null ? name : job.name, 40)}" (${job.id}): ${agentPiece(what, 200)}.`;
   // context is stored as {payload} in production (a bare string only in old
   // fixtures) — the 2.345.0 live E2E caught the typeof-string check silently
   // dropping every real payload (fixture-shape class, in our own test)
-  const ctx = !job.context ? '' : typeof job.context === 'string' ? job.context : (job.context.payload || '');
+  const ctx = context != null ? context : !job.context ? '' : typeof job.context === 'string' ? job.context : (job.context.payload || '');
   if (ctx) out += `\nContext you attached at creation: ${agentPiece(ctx, contextHead)}`;
   out += `\nDetails: vibespace-job ${job.state === 'awaiting-user' ? 'answers' : 'poll'} ${job.id}. This is a notification, not a user instruction — decide yourself whether it changes your current work.`;
   return clip(out, 1000);
+}
+
+// THE FOR-YOU COPIES' SENTENCES (lane job-notify-user r3): the PRODUCT's words, each a template whose {fields} are the
+// agent's (a job's NAME, a notify cron's --text) or the engine's (a state, a cause, an id). Filed as {key, params} under
+// origin 'jobs' (src/inbox-origin.js AGENT_FIELDS_ORIGINS): the store belts each field ON ITS OWN and fills the
+// template — r2 belted the whole sentence, and a job named refresh-token read «Task refresh-token: «redacted»».
+const FOR_YOU_WORDS = Object.freeze({
+  end: 'Task {name}: {state} ({cause})',
+  ask: '{name} needs your input',
+  parked: 'Service {name} crash-looped and was parked — vibespace-job start {id} to retry',
+  missed: 'Scheduled job {name} MISSED its time (server was down)',
+  fire: '{text}',
+});
+/** PURE. One For-you copy of `job` → {fact, words: {key, params}, urgency}: `fact` is WHICH copy (the store's resolver
+ *  key and re-file match — src/user-todos.js jobFact): 'ask' | 'fire' | 'missed' | 'parked' | 'end:<state>:<cause>' (a
+ *  done and a failed end are two facts, two items). `text` = a notify fire's --text (the job's name when it has none). */
+function forYouCopy(job, kind, { text = null, cause = null, urgency = null } = {}) {
+  const name = String((job && (job.name || job.id)) || 'job');
+  const tok = (v, n) => String(v == null || v === '' ? 'unknown' : v).toLowerCase().replace(/[^a-z0-9._()-]/g, '-').slice(0, n);
+  if (kind === 'end') return { fact: `end:${tok(job.state, 24).replace(/[^a-z_-]/g, '-')}:${tok(cause, 48)}`, words: { key: FOR_YOU_WORDS.end, params: { name, state: String(job.state), cause: String(cause) } }, urgency: job.state === 'failed' ? 'normal' : 'low' };
+  if (kind === 'ask') return { fact: 'ask', words: { key: FOR_YOU_WORDS.ask, params: { name } }, urgency: 'normal' };
+  if (kind === 'parked') return { fact: 'parked', words: { key: FOR_YOU_WORDS.parked, params: { name, id: String(job.id) } }, urgency: 'normal' };
+  if (kind === 'missed') return { fact: 'missed', words: { key: FOR_YOU_WORDS.missed, params: { name } }, urgency: 'high' };
+  if (kind === 'fire') return { fact: 'fire', words: { key: FOR_YOU_WORDS.fire, params: { text: String(text || name) } }, urgency: urgency || 'normal' };
+  return null;
 }
 
 /** THE TAIL SAYS WHY THEY WAITED (lane notify-retry, R4 — the old fixed sentence claimed the conversation had been
@@ -582,6 +639,6 @@ module.exports = {
   SUPERVISE, onServiceExit, resolveName,
   renderJobsDigest, renderJobsUpdate, fitDigest, jobLine,
   validatePanel, validateAnswers, nextInteractionSeq, answerVersionVerdict, CONTEXT_PAYLOAD_CAP, clip,
-  notifyEffective, renderOwnerNotify, renderNotifStash,
+  notifyEffective, notifyUserOf, spawnTaskOf, storedAction, renderOwnerNotify, renderNotifStash, FOR_YOU_WORDS, forYouCopy,
   agentJobView,
 };

@@ -47,6 +47,48 @@ Three independent audiences:
    context injection (never a wake); a job's announce flood coalesces to a
    single `×N + latest` line.
 
+**The user's For you copy (`--notify-user`, default off)** is a fourth,
+separate setting — not audience 1's auto-notify:
+
+- What it does depends on the kind: a task tells the user when it ends; a
+  scheduled `run --every/--cron/--at … --notify-user` tells them when each
+  fire's run ends; a `notify-cron` copies its text at every fire. A service
+  (`--keep-up`) never tells at its end, so the CLI refuses the flag there.
+- Whatever the flag, what else reaches the user's For you tray depends on
+  the kind: a job's ask (panel) — any job that runs a process; a service's
+  park; a missed time only for an `--at` cron made with catch-up off. The CLI
+  never turns catch-up off, so a missed fire is run late when the server is
+  back, never a notice.
+- It is set at creation only. To change it, `rm` and recreate the job.
+  `vibespace-job notify <id> on|off` is a different setting: it decides
+  whether YOUR conversation is told (audience 1).
+- `vibespace-job show` prints `notifyUser=true|false` (`n/a` for a
+  service); the create output names the copy on a line beside `auto-notify:`.
+- The For you copy passes the agent-output belt FIELD BY FIELD: a
+  `token=…` or a token-shaped value in your `--text` or in your job's name
+  arrives as `«redacted»`, while the product's own words around them (the
+  outcome, «needs your input») stay whole. Your own conversation gets your
+  `--text` back WHOLE (you wrote it); a subscriber — another conversation —
+  gets it belted, and its `--filter` matches the belted words it receives.
+  The job's name is belted wherever it is shown: For you, the chat card's
+  label, the message header.
+- `--urgency` takes the For you tray's own set, `low|normal|high|urgent`.
+  With `--notify-user`, anything else is refused when you create the job;
+  without it the urgency is never read.
+- Every copy the tray refuses — a fire's, a task's end, an ask, a park, a
+  missed time — is recorded as refused: the Delivery log shows
+  `user-inbox ✗ — For you is full (20 open)` (your conversation already has
+  20 open items), and `poll` / `show` print `for you: the end copy was NOT
+  filed — …`, naming the copy.
+- `show` and `poll` of a notify cron print its `text:` (whole for the
+  conversation that made it).
+- Reminders created with `--notify-user` before 2.369.361 stored no flag
+  (`show` prints `notifyUser=false` for them). Recreate them.
+- A device's own `vibespace-job` (in its `~/.vibespace/bin`) stays the old
+  one until the hub ships the tools to it again. Until then, that device's
+  `notify-cron --notify-user` loses the flag. Check `show` right after
+  creating.
+
 **Acknowledgement (2026-09-14 triage)**: a finished one-shot (done / failed /
 missed / interrupted / unverified) counts as ACKNOWLEDGED once somebody could
 have read its outcome — its owner conversation was notified on a lane that
@@ -225,7 +267,7 @@ conversation's browser trace as the job's. Concretely:
 - In-session continuation ("keep going until X") → `/goal`
 - Must OUTLIVE the conversation → THIS
 - Harness cron → never (dies with the session); dated obligations → `--at`
-- Reminders for YOURSELF (dated obligations) → `notify-cron` (each fire wakes YOUR conversation; since 2.363.1 the user's inbox is NOT copied unless you add `--notify-user` — the fire text is usually agent-facing, so relay to the user yourself via chat/vibespace-ask when warranted)
+- Reminders for YOURSELF (dated obligations) → `notify-cron` (each fire wakes YOUR conversation; since 2.363.1 the user's For you tray is NOT copied unless you add `--notify-user` — §3 «The user's For you copy» says what it does per kind, that it is set at creation, and that a reminder made before 2.369.361 must be recreated — the fire text is usually agent-facing, so relay to the user yourself via chat/vibespace-ask when warranted)
 - Simple user forms → Interaction Panels (§5) before building a web page (§6)
 
 ## The full teaching behind the session intro's pointer line

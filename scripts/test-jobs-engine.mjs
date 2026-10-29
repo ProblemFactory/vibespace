@@ -21,7 +21,9 @@ const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-jobs-'));
 fs.mkdirSync(path.join(dir, 'bin'), { recursive: true });
 fs.copyFileSync(new URL('../data/bin/job-wrapper.js', import.meta.url), path.join(dir, 'bin', 'job-wrapper.js'));
 const notifications = [];
-const deps = { dataDir: dir, broadcast: () => { }, notifyUser: (n) => notifications.push(n), log: () => { } };
+// a For-you copy as the store fills it (lane job-notify-user r3: the engine hands a template + fields — `words` — never a sentence)
+const saidCopy = (n) => ({ ...n, text: n && n.words ? String(n.words.key).replace(/\{(\w+)\}/g, (m, k) => (n.words.params && n.words.params[k] !== undefined ? String(n.words.params[k]) : m)) : n && n.text });
+const deps = { dataDir: dir, broadcast: () => { }, notifyUser: (n) => notifications.push(saidCopy(n)), log: () => { } };
 const caller = { conversationId: 'conv-T', sessionId: 'sess-T', sessionCreatedAt: 1, groups: new Set(['T-g']) };
 const owner = { conversation: { backend: 'claude', id: 'conv-T' }, sessionId: 'sess-T', sessionCreatedAt: 1, createdBy: 'agent', groupsSnapshot: ['T-g'] };
 
@@ -180,6 +182,40 @@ try {
   await C._cronTick();
   ok(notifications.some((n) => n.text === '给用户的提醒ABC'), '--notify-user notify-cron DOES copy the user inbox');
   ok((jcU.notifyLog || []).some((e) => e.lane === 'user-inbox' && e.ok) && (jcU.notifyLog || []).some((e) => e.lane === 'message' && e.ok), 'opt-in journal records BOTH lanes', JSON.stringify(jcU.notifyLog));
+  // lane job-notify-user: the legs above hand the engine a top-level field the CLI never wrote (notify-cron sent no
+  // notifyUser at all; a scheduled run hid it inside action.task). Here the body is the REAL CLI's, captured against a
+  // loopback recorder (a drift in its builder reds here; test-jobs-cli-body pins every flag + the route's hop), and a
+  // scheduled run's fire spawns a REAL child: with --notify-user its end tells the user and the cron's record says so;
+  // without it, silent; a body from an older CLI (the flag only inside action.task) is still honoured.
+  {
+    const http = await import('node:http');
+    const got = [];
+    const rec = http.createServer((q, s2) => { let raw = ''; q.on('data', (c) => { raw += c; }); q.on('end', () => {
+      const b = JSON.parse(raw || '{}'); got.push(b);
+      s2.writeHead(200, { 'content-type': 'application/json' }); s2.end(JSON.stringify({ success: true, job: { id: 'jb-rec', name: b.name, kind: b.kind }, notify: null }));
+    }); });
+    await new Promise((r) => rec.listen(0, '127.0.0.1', r));
+    const cliBody = (argv) => new Promise((resolve) => {
+      const p = spawn(process.execPath, [new URL('../data/bin/vibespace-job', import.meta.url).pathname, ...argv], { cwd: dir, env: { PATH: process.env.PATH, HOME: dir, VIBESPACE_API: `http://127.0.0.1:${rec.address().port}`, VIBESPACE_SESSION_TOKEN: 'vsst_rec' } });
+      p.on('close', () => resolve(got.find((b) => b.name === argv[argv.indexOf('--name') + 1])));
+    });
+    const [bYes, bNo] = await Promise.all([cliBody(['run', 'true', '--name', 'cli-at-user', '--at', '+1h', '--notify-user']), cliBody(['run', 'true', '--name', 'cli-at-plain', '--at', '+1h'])]);
+    rec.close();
+    ok(bYes && bYes.notifyUser === true && bYes.action && bYes.action.type === 'spawn-task' && bYes.action.task.notifyUser === true && bNo && bNo.notifyUser === false && bNo.action.task.notifyUser === false,
+      'the CLI\'s scheduled-run body: the top-level notifyUser (true with --notify-user, false without) + the same in the task — the compatibility copy for an engine ≤ 2.369.360 (r2)', JSON.stringify([bYes, bNo]));
+    const legacy = bYes && { ...bYes, name: 'cli-at-legacy', notifyUser: undefined, action: { ...bYes.action, task: { ...bYes.action.task, notifyUser: true } } };
+    const made = [bYes, bNo, legacy].filter(Boolean).map((b) => C.jobs.get(C.create({ ...b, owner }, caller).job.id));
+    ok(made.length === 3 && made.every((j) => j.action && j.action.task && !('notifyUser' in j.action.task)) && made.map((j) => j.notifyUser).join() === 'true,false,true', 'the STORE keeps one field: each cron record holds notifyUser at the top (the older body\'s nested flag read once), its task none', JSON.stringify(made.map((j) => [j.notifyUser, j.action && j.action.task && j.action.task.notifyUser])));
+    for (const j of made) j.nextFireAt = Date.now() - 1000;
+    const before = notifications.length;
+    await C._cronTick();
+    const kids = made.map((j) => [...C.jobs.values()].find((x) => x.cronParent === j.id));
+    ok(await until(() => kids.every((k) => k && ['done', 'failed'].includes(k.state))), 'each scheduled run\'s fire spawned a REAL child that ended', kids.map((k) => k && k.state).join(','));
+    const toldFor = (k) => !!k && notifications.slice(before).some((n) => n.jobId === k.id && /: done \(ok\)$/.test(n.text));
+    ok(toldFor(kids[0]) && C.snapshot(made[0]).notifyUser === true, 'run --at … --notify-user (the CLI\'s body): the child\'s end tells the user, and the cron\'s own record says notifyUser=true', JSON.stringify(notifications.slice(before)));
+    ok(!toldFor(kids[1]) && C.snapshot(made[1]).notifyUser === false, 'CONTROL: without the flag the child ends silently for the user, notifyUser=false');
+    ok(toldFor(kids[2]) && C.snapshot(made[2]).notifyUser === true, 'an older CLI\'s body (the flag only inside action.task) is still honoured — and shown', JSON.stringify(made[2] && C.snapshot(made[2]).notifyUser));
+  }
 
   // preview honesty
   C.d.peerReachable = () => false;
@@ -774,7 +810,7 @@ setInterval(() => { }, 1000);
       fs.mkdirSync(path.dirname(bin), { recursive: true });
       fs.writeFileSync(bin, WRAP);
       const w = { D, bin, told: [], inbox: [], engines: [] };
-      w.deps = { dataDir: D, broadcast() { }, log() { }, notifyGlobal: () => true, notifyUser: (n) => w.inbox.push(n), deliverToConversation: async (cid, text) => { w.told.push(text); return { ok: true, lane: 'message' }; } };
+      w.deps = { dataDir: D, broadcast() { }, log() { }, notifyGlobal: () => true, notifyUser: (n) => w.inbox.push(saidCopy(n)), deliverToConversation: async (cid, text) => { w.told.push(text); return { ok: true, lane: 'message' }; } };
       w.boot = () => { try { fs.rmSync(path.join(D, 'jobs.lock'), { force: true }); } catch { } const X = new JM(w.deps); X.init(); for (const t of X._timers || []) clearInterval(t); w.engines.push(X); return X; };
       w.wrapper = (src, mtimeMs) => { fs.writeFileSync(bin, src); if (mtimeMs) fs.utimesSync(bin, new Date(), new Date(mtimeMs)); };
       w.end = () => { for (const X of w.engines) { try { for (const j of X.jobs.values()) if (['up', 'starting'].includes(j.state)) X.stop(j); } catch { } try { X.shutdown(); } catch { } } };
