@@ -243,6 +243,46 @@ console.log('④ THE SHAPE KEY — tool + flags + hosts + entries (decision ④)
     }
     ok(miss.length === 0 && V.SSH_OPT_TABLE.length === 5, 'the ssh (short flag ↔ -o long) table is DERIVED: every opaque/host flag agrees with its -o spelling (-S/-L/-R/-D/-J)', { miss, rows: V.SSH_OPT_TABLE.length });
   }
+  // round 9 (BLOCKER item 2): THE strdelim ORACLE — the `-o` reader reads a keyword the way OpenSSH's strdelim (readconf.c) does,
+  // NOT a bare cut at the first `=`/space. The FIXTURE is `ssh -F /dev/null -G` on OpenSSH_10.2p1 (the real binary on this box):
+  // each spelling → the keyword ssh resolves it to ('·' = ssh ignores the line). readSshOpt must classify it the same: a
+  // local/forward keyword ⇒ opaque, a host keyword ⇒ its host, an ignored line ⇒ neither. When the real `ssh -G` is present it
+  // is RUN for every spelling and the fixture is cross-checked against it (else SKIP — the fixture stands).
+  {
+    const KW = (o) => { const r = V.readSshOpt(o); return r.opaque ? '<opaque>' : r.hosts ? 'host:' + r.hosts.join(',') : '<none>'; };
+    const ORACLE = [   // [ spelling, ssh -G keyword (fixture), what readSshOpt must make of it ]
+      ['HostName=evil.example', 'hostname', 'host:evil.example'],
+      ['=HostName=evil.example', 'hostname', 'host:evil.example'],
+      ['"HostName" evil.example', 'hostname', 'host:evil.example'],
+      ['Host"Name" evil.example', 'hostname', 'host:evil.example'],
+      ['HostName\tevil.example', 'hostname', 'host:evil.example'],
+      ['=ProxyCommand=nc evil.example 22', 'proxycommand', '<opaque>'],
+      ['"ProxyCommand" nc evil.example 22', 'proxycommand', '<opaque>'],
+      ['=ControlPath=/tmp/x', 'controlpath', '<opaque>'],
+      ['=ProxyJump=r1', 'proxyjump', 'host:r1'],
+      ['="ProxyJump" r1', 'proxyjump', 'host:r1'],
+      ['==HostName=evil.example', '·', '<none>'],                 // ssh ignores a double-empty-token line ⇒ no option
+      ['HostName=%h.evil.example', 'hostname', '<opaque>'],       // ssh expands %h; the reader cannot name it ⇒ fail closed (safe superset)
+      ['User=bob', 'user', '<none>'],
+    ];
+    const bad = ORACLE.filter(([o, , want]) => KW(o) !== want);
+    ok(bad.length === 0, 'the `-o` reader matches OpenSSH strdelim for every spelling in the oracle table (fixture: ssh -G, 10.2p1)', { bad: bad.map(([o]) => o).slice(0, 6) });
+    // the live cross-check against the REAL `ssh -F /dev/null -G` is repro/r9/ssh-o-oracle.mjs — it is NOT a leg here: this suite
+    // is FAST / in-process (the tier rule forbids a fast suite from running an external binary), so the pinned 10.2p1 fixture is
+    // the gate and the repro script keeps it honest against the binary on the box (run in the round's report).
+  }
+  // round 9 (seam ruling C with vault-agent-own, 主开发): DESTINATION KNOWLEDGE (`shape.destKnown`) is decoupled from «always»
+  // eligibility — it is true for a KNOWN tool whose destinations the reader READ IN FULL (every host named, nothing opaque), so a
+  // GRANT naming them covers the run even when «always» is withheld (a keyed routing flag whose host is read); false when the
+  // destination cannot be read. The grant road reads THIS, never `shape.always` (the two coincide in this tree; the int361 seam
+  // makes them diverge for a keyed routing flag, so the field is pinned here now).
+  {
+    const DK = (argv) => V.shapeOf(V.planOf({ argv, env: [['T', M1]] })).destKnown;
+    const yes = [['curl url', ['curl', 'https://h.example/x']], ['curl -x read proxy', ['curl', '-x', 'proxy.example:3128', 'https://h.example/x']]];
+    const no = [['curl -K config', ['curl', '-K', 'cfg', 'https://h.example/']], ['ssh ProxyCommand (opaque)', ['ssh', '-o', 'ProxyCommand=nc x 22', 'h.example', 'x']], ['interpreter', ['python3', 's.py', 'https://h.example/']], ['unknown tool', ['mytool', 'https://h.example/']], ['no host', ['curl', '--help']]];
+    const badY = yes.filter(([, a]) => DK(a) !== true), badN = no.filter(([, a]) => DK(a) !== false);
+    ok(badY.length === 0 && badN.length === 0, 'shape.destKnown = the reader READ every destination of a KNOWN tool — true for a read URL AND a keyed routing flag whose host is read, false for a config-file / opaque route / interpreter / unknown tool / no host (the grant road reads this, not shape.always)', { badY: badY.map((x) => x[0]), badN: badN.map((x) => x[0]) });
+  }
   // round 6 (MAJOR item 2): a ONE-LETTER ssh/sftp host is an alias (opaque, every spelling).
   const RH6 = (argv, extra = {}) => V.shapeOf(V.planOf({ argv, env: [['T', M1]], ...extra })).routeHosts;
   const ROx = (argv, extra = {}) => V.shapeOf(V.planOf({ argv, env: [['T', M1]], ...extra })).routeOpaque;

@@ -398,7 +398,7 @@ function planOf(req = {}) {
   }
   if (argvExposed) injection.push('argv');
   if (!refs.size) return refuse('no_reference');
-  return { ok: true, argv, tool: String(req.resolved || argv[0]), name, kind: toolKindOf(name), row, refs: [...refs.values()], env, plainEnv, files, stdin, injection: [...new Set(injection)], argvExposed, on: req.on ? String(req.on) : null, timeoutSec: timeoutOf(req.timeoutSec) || TIMEOUT_DEFAULT_S, programWritable: req.programWritable === true, win32: req.win32 === true };   // round 7 item 1c: the door passes `win32` = the runner's platform (POSIX today); the reader reads a one-letter `X:path` as a host unless true
+  return { ok: true, argv, tool: String(req.resolved || argv[0]), name, kind: toolKindOf(name), row, refs: [...refs.values()], env, plainEnv, files, stdin, injection: [...new Set(injection)], argvExposed, on: req.on ? String(req.on) : null, timeoutSec: timeoutOf(req.timeoutSec) || TIMEOUT_DEFAULT_S, programWritable: req.programWritable === true, win32: req.win32 === true };   // round 7 item 1c / round 9 (MINOR): `win32` = the platform where the command RUNS. The hub is POSIX and NO caller sets it today (the door's local run path never passes it ⇒ the win32 branch is reachable only from a test), so a one-letter `X:path` reads as a host. The caller that WOULD pass it is the DEVICE road — a run dispatched to a paired win32 machine would carry that machine's reported platform — but the door returns `device_road_later` for a remote / `--on` run, so it is not wired yet.
 }
 /** The door's LAST step over planOf's answer (`run`) — the only object that holds values (never stored, never logged): the
  *  child's argv / env / stdin and each file's content. `valueOf(ref)` = the vault's value; `pathOf(slot)` = the door's 0700 run dir + a name. */
@@ -496,6 +496,35 @@ const SSH_LOCAL_O = new Set([...SSH_OPAQUE_O, 'proxycommand', 'localcommand', 'k
 // `-o ProxyJump=router`). A missed spelling is a missing ROW here (or a short flag routed to addSshHost), never a branch
 // that forgot the alias check — so a single-label jump host can no longer slip past with `always:true`.
 const SSH_HOST_OPTS = new Set([...SSH_OPT_TABLE.filter((r) => r.mode === 'host').map((r) => r.o), 'hostname']);
+// lane vault-use-grants round 9 (BLOCKER item 2): read an `ssh -o <string>` keyword the way OpenSSH's strdelim (readconf.c)
+// does — NOT a bare cut at the first `=`/space. ssh: a token ends at unquoted whitespace OR a single `=`; a `"` begins a run
+// whose bytes (incl. ws and `=`) are literal and whose quotes are STRIPPED (around the keyword AND inside it: `Host"Name"` =
+// `HostName`); a leading `=` (or leading ws) is an EMPTY first token it skips ONCE to read the real keyword; a SECOND empty
+// token (`==HostName=`) ⇒ ssh ignores the line (no option). We reproduce that, verified against `ssh -F /dev/null -G` for
+// every spelling in the suite's oracle table. Anything strdelim would reject (an unmatched quote), a control char inside the
+// keyword/value, or a HostName/ProxyJump value we cannot resolve to a literal host (a `%` token ssh expands) ⇒ OPAQUE (fail
+// closed): the keyword is not in a table we read with certainty, so the card is drawn and «always» withheld.
+const SSH_OPT_WS = ' \t\r\n\f';
+const SSH_OPT_CTRL = /[\x00-\x08\x0b\x0e-\x1f\x7f]/;   // a control char that is NOT one of ssh's whitespace separators (\t \n \r \f handled by the grammar)
+function readSshOpt(val) {
+  const s = String(val == null ? '' : val);
+  const isSep = (c) => SSH_OPT_WS.includes(c) || c === '=';
+  const token = (start) => { let t = '', j = start, inq = false; while (j < s.length) { const c = s[j]; if (c === '"') { inq = !inq; j++; continue; } if (!inq && isSep(c)) break; t += c; j++; } return inq ? { bad: true } : { tok: t, end: j }; };   // quotes stripped; `bad` = an unmatched quote (strdelim returns NULL ⇒ ssh ignores the line ⇒ we fail closed)
+  const skipSep = (j) => { while (j < s.length && SSH_OPT_WS.includes(s[j])) j++; if (s[j] === '=') { j++; while (j < s.length && SSH_OPT_WS.includes(s[j])) j++; } return j; };   // strdelim allows ONE `=` between the tokens to be skipped
+  let kw = token(0);
+  if (kw.bad) return { opaque: true };
+  if (kw.tok === '') { const t1 = token(skipSep(0)); if (t1.bad) return { opaque: true }; kw = t1; }   // a leading `=` / ws is an empty first token — read the keyword once more (a second empty ⇒ ssh applies nothing)
+  const key = kw.tok.toLowerCase();
+  if (!key) return {};   // ssh ignores a line with no keyword (`==HostName=`) — no option applied, nothing routes
+  if (SSH_OPT_CTRL.test(key)) return { opaque: true };
+  if (SSH_LOCAL_O.has(key)) return { opaque: true };
+  if (SSH_HOST_OPTS.has(key)) {
+    const raw = s.slice(skipSep(kw.end)).replace(/"/g, '');   // the value, quotes stripped (ProxyJump may list a,b; HostName is one)
+    if (SSH_OPT_CTRL.test(raw) || /%/.test(raw)) return { opaque: true };   // a control char, or a `%h`/`%%` token ssh expands to a host we cannot name ⇒ fail closed
+    return { hosts: raw.split(/[,\s]+/).filter(Boolean) };
+  }
+  return {};   // a non-routing keyword (User, Port, IdentityFile, …) — ssh offers «always»
+}
 // lane vault-use-grants round 4 (MINOR item 6): wget `-e CMD` runs ONE .wgetrc command. Only a REVIEWED, pinned set of
 // NON-routing / non-credential / non-file-redirect commands is safe to let a grant stand for; every other command (input,
 // *_proxy, use_proxy, post_file, load_cookies, base, certificate, private_key, header, referer, user, password, ask_password,
@@ -567,7 +596,7 @@ function routeTargetsOf(row, kind, hosts, keyed, positionals, plainEnv, win32 = 
     else if (flag === '--doh-url') { const hs = urlHosts(val); if (hs.length) hs.forEach((h) => out.add(h)); else if (val.trim()) opaque = true; }
     else if (flag === '--unix-socket' || flag === '--abstract-unix-socket' || flag === '--dns-servers' || flag === '--alt-svc') { if (val.trim() || flag.includes('unix')) opaque = true; }   // a local socket / an attacker-chosen resolver / an alt route — a destination the grant can never name
     else if (flag === '-e' || flag === '--execute' || flag === '--rsh') { if (row.name === 'rsync') opaque = true; else if (!WGET_SAFE_E.has(String(val).split('=')[0].trim().toLowerCase())) opaque = true; }   // rsync -e <remote shell>; wget -e <.wgetrc cmd> opaque unless a reviewed non-routing command (round 4: -e input=FILE leaked)
-    else if (flag === '-o') { const t = val.replace(/^\s+/, ''); const c = t.search(/[=\s]/); const k = (c < 0 ? t : t.slice(0, c)).toLowerCase(); const rest = c < 0 ? '' : t.slice(c + 1).trim(); if (/[\x00-\x1f\x7f]/.test(k) || /[\x00-\x1f\x7f]/.test(rest)) opaque = true; else if (SSH_LOCAL_O.has(k)) opaque = true; else if (SSH_HOST_OPTS.has(k)) for (const h of rest.split(/[,\s]+/)) addSshHost(h); }   // ssh -o; round 7 item 1a: ssh ends the keyword at `=` OR ANY whitespace (tab/newline too) and strips leading blanks — a `HostName<TAB>`, `<SP>HostName=` or `ProxyCommand<TAB>` spelling no longer hides the option; a control char surviving in the key or value ⇒ fail closed. `-F <config>` stays `config-file` — it withholds «always»; a remap of a dotted host through a config is the acknowledged ~/.ssh/config gap, open on both trees
+    else if (flag === '-o') { const r = readSshOpt(val); if (r.opaque) opaque = true; else if (r.hosts) for (const h of r.hosts) addSshHost(h); }   // ssh -o; round 9 (BLOCKER item 2): the keyword is read by `readSshOpt` = OpenSSH's strdelim grammar (skip a leading `=`, strip a `"` pair around/inside the keyword, split at a single `=` or any whitespace), so `=ProxyCommand=…`, `"HostName" …`, `Host"Name"` and `HostName<TAB>…` all resolve to the real keyword; an unmatched quote / control char / `%`-token value ⇒ opaque (fail closed). `-F <config>` stays `config-file` — it withholds «always»; a remap of a dotted host through a config is the acknowledged ~/.ssh/config gap, open on both trees
     else if (flag === '-J') { for (const h of val.split(',')) addSshHost(h); }   // round 6 item 1: a jump host is `-o ProxyJump=` by another spelling — the SAME alias law (addSshHost)
     else if (flag === '-W') { addSshHost(val); }   // ssh -W host:port — the forwarded destination, under the alias law too
     else if (flag === '-c' || flag === '--config-env') opaque = true;   // git config can set core.sshCommand / http.proxy — opaque
@@ -642,12 +671,19 @@ function shapeOf(run) {
   const dest = routeTargetsOf(row, kind, [...hosts], keyed, positionals, run.plainEnv, win32);
   if (known && argv.slice(1).some((a) => urlOpaque(a))) dest.opaque = true;   // round 4 (BLOCKER): a URL token in the command whose host the reader cannot be certain of (the backslash/userinfo family) ⇒ opaque
   const noAlways = kind !== 'tool' ? kind : !known ? 'unknown-destination' : dest.opaque ? 'opaque-route' : !hosts.size ? 'unknown-destination' : row.runsProject ? 'runs-project-code' : configFile ? 'config-file' : run.programWritable ? 'program-writable' : null;
+  // lane vault-use-grants round 9 (seam ruling C with vault-agent-own, 主开发): DESTINATION KNOWLEDGE is a SEPARATE fact from
+  // «always» eligibility. `destKnown` = the reader READ every destination of a KNOWN tool (the arg set is complete, nothing
+  // opaque, not a config / program-writable / runs-project read) — a GRANT naming every one of those hosts COVERS the run even
+  // when «always» would be withheld. Kept apart from `always`: when a keyed routing flag whose host IS read withholds «always»
+  // (vault-agent-own's rule, int361 seam 37b51fa9), `destKnown` stays true, so the grant road is judged on «can the reader name
+  // every host», never on `always`. In THIS tree the two coincide; the seam makes them diverge without touching this expression.
+  const destKnown = known && kind === 'tool' && !dest.opaque && hosts.size > 0 && !row.runsProject && !configFile && !run.programWritable;
   return {
     v: SHAPE_V, tool: run.tool, name: run.name, kind, sub, flags: [...flags].sort(), args, hosts: [...hosts].sort(),
     routeHosts: dest.hosts.slice().sort(), routeOpaque: dest.opaque,
     entries: run.refs.map((r) => r.ref).sort(), injection: [...run.injection].sort(), env: run.plainEnv.map((e) => `${e.name}=${e.value}`).sort(), keyed: keyed.sort(),
     templates: run.files.filter((f) => f.text != null).map((f) => `${f.name}=${f.text}`).sort(), on: run.on || null, script,
-    known, proxyEnv: !!(known && row.proxyEnv), always: !noAlways, noAlways, argvExposed: !!run.argvExposed,
+    known, proxyEnv: !!(known && row.proxyEnv), always: !noAlways, noAlways, destKnown, argvExposed: !!run.argvExposed,
   };
 }
 /** THE KEY a remembered «always» is stored under — everything decision ④ says, nothing positional. */
@@ -1038,6 +1074,6 @@ module.exports = {
   INJECTIONS, injectionOf, ENV_HIJACK, ENV_CONFIG, envRefusedOf,
   TOOL_ROWS, SHELLS, INTERPRETERS, KNOWN_TOOLS, toolNameOf, knownToolOf, refusedTool, toolKindOf,
   RUN_FLAGS, parseRunArgs, timeoutOf, planOf, materialize,
-  shapeOf, shapeKeyOf, destinationsOf, routeTargetsOf, sshTargetHost, targetOf, urlParse, splitAuthority, normHost, SSH_OPT_TABLE, SSH_LOCAL_O, SSH_HOST_OPTS, OWN_DOORS, RUNNABLE_STORES, ownDoorOf, runVerdict,
+  shapeOf, shapeKeyOf, destinationsOf, routeTargetsOf, sshTargetHost, readSshOpt, targetOf, urlParse, splitAuthority, normHost, SSH_OPT_TABLE, SSH_LOCAL_O, SSH_HOST_OPTS, OWN_DOORS, RUNNABLE_STORES, ownDoorOf, runVerdict,
   FORMS, FORM_ROWS, VIEWS, formsOf, createMasker, createRunMasker, maskText,
 };

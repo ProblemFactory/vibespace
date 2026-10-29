@@ -4591,6 +4591,14 @@ console.log('§82 CLAUDE.md is an index of ≤ 100 000 bytes; the moved per-file
   if (retiring82 && !md82) console.log(`  SKIP §82 ④ the retired blocks' before-text sha leg: ${BEFORE82} is not in this checkout (depth-1) — the per-row leg still holds them`);
   const before82 = md82 && Object.fromEntries(beforeBlocks(md82).map((x) => [x.name, x.lines]));
   const homes = new Map();
+  // lane vault-use-grants round 9 (MINOR): THE INDEX-LINE SHAPE is DERIVED FROM THE REGION, not a hand-kept tail form — a dated
+  // bullet (`- (YYYY-MM-DD) …`) is an INDEX line in EVERY tail form the region holds (`⇒ kb-bugfix-invariants`, `(kb-bugfix-
+  // invariants)`, or any other), so a stranded one in ANY form is caught. r7 matched ONLY the `⇒` tail (11 of 223 lines), so a
+  // parens-form line (109) or another form (104) stranded below the first essay stayed GREEN — exactly the line dialog-yield's
+  // rebase stranded. ONE predicate, run by the leg AND its controls (never a regex re-declared inline — the tautology §82 itself
+  // bans): a dated bullet outside the `## INDEX` region's line set.
+  const INDEX_DATED = /^- \(20\d\d-\d\d-\d\d\)/;
+  const strandedDated = (text, region) => { const rr = regionAt82(text, region); const inR = rr ? new Set(rr.idx) : new Set(); return text.split('\n').map((l, i) => [l, i]).filter(([l, i]) => INDEX_DATED.test(l) && !inR.has(i)); };
   for (const b of fx82.blocks) {
     const text = fs.readFileSync(path.join(REPO, b.home), 'utf8'), lines = region82(text, b.region);
     homes.set(b.name, { text, lines });
@@ -4602,17 +4610,14 @@ console.log('§82 CLAUDE.md is an index of ≤ 100 000 bytes; the moved per-file
     ok(j.ok, `§82 ④ ${j.line}${j.said.map((x) => '\n       ' + x).join('')}`);
     const off = (b.heads || []).flatMap((t, i) => (h82(t) === String(b.rows[i]).split(':')[0] && [...t].length <= fx82.keyChars ? [] : [i + 1]));
     ok(Array.isArray(b.retired) && Array.isArray(b.heads) && b.heads.length === b.rows.length && off.length === 0, `§82 ⑤ ${b.name}: ${(b.heads || []).length} clear heads align with its ${b.rows.length} rows (each hashes to its row's head) · ${(b.retired || []).length} retired${off.length ? ' — OFF at rows ' + off.slice(0, 10).join(' ') : ''}`);
-    // lane vault-use-grants round 7 (MINOR item 4): a dated INDEX-shaped line lives ONLY inside this `## INDEX` region — a
+    // lane vault-use-grants round 7/9 (MINOR): a dated INDEX line (ANY tail form) lives ONLY inside this `## INDEX` region — a
     // planted/stranded one in the essays (after the region's end) is RED by name. r6's hole: §82 ③/④ read only lines INSIDE
-    // the region, so the five stranded lane lines below the first essay kept every assert green. INDEX-SHAPED = a dated bullet
-    // ENDING in the `⇒ kb-bugfix-invariants` pointer (the CLAUDE.md size law: every index entry ends in a `⇒ kb-…` pointer) —
-    // this is what separates a stranded index line from a legit essay cross-reference bullet (which cites `(kb-bugfix-invariants)`
-    // in parentheses, prose). Judged by line INDEX (via regionAt), so a planted DUPLICATE of a real line is caught too.
+    // the region, so the stranded lane lines below the first essay kept every assert green. Judged by line INDEX (via regionAt)
+    // over the SHARED `strandedDated` predicate, so a planted DUPLICATE of a real line — in the ⇒ form OR the parens form — is
+    // caught too.
     if (b.name === 'bugfix-index') {
-      const r = regionAt82(text, b.region), all = text.split('\n'), INDEX_LINE = /^- \(20\d\d-\d\d-\d\d\).*⇒ kb-bugfix-invariants(\.md)?\s*$/;
-      const inRegion = r ? new Set(r.idx) : new Set();
-      const stray = all.map((l, i) => [l, i]).filter(([l, i]) => INDEX_LINE.test(l) && !inRegion.has(i));
-      ok(!!r && stray.length === 0, `§82 ⑥ every dated INDEX line (ending in the ⇒ kb-bugfix-invariants pointer) in ${b.home} is inside the "${b.region}" region — none stranded in the essays${stray.length ? ' — OUTSIDE at lines ' + stray.map(([, i]) => i + 1).join(',') : ''}`, { stray: stray.length });
+      const stray = strandedDated(text, b.region);
+      ok(regionAt82(text, b.region) && stray.length === 0, `§82 ⑥ every dated INDEX line (any tail form) in ${b.home} is inside the "${b.region}" region — none stranded in the essays${stray.length ? ' — OUTSIDE at lines ' + stray.map(([, i]) => i + 1).join(',') : ''}`, { stray: stray.length });
     }
   }
   // CONTROLS: a home missing one moved line, a line's head reworded, a tail edit (quiet: edited, not lost), a new 301-char
@@ -4634,10 +4639,12 @@ console.log('§82 CLAUDE.md is an index of ≤ 100 000 bytes; the moved per-file
     ['a new 301-character index line', over300(bug, [...bl, '- ' + 'x'.repeat(299)]).length === 1, true],
     ['a dangling pointer', pointers82(md + '\nnew line ⇒ kb-nope.md\n').some((k) => !fs.existsSync(path.join(REPO, 'docs', k + '.md'))), true],
     ['one byte over the ratchet', Buffer.byteLength(md + 'x'.repeat(CLAUDE_MD_MAX_BYTES - bytes + 1)) > CLAUDE_MD_MAX_BYTES, true],
-    // round 7 (MINOR item 4): a dated INDEX line (ending in the ⇒ pointer) planted in the essays (after the region) is detected
-    // by §82 ⑥; a legit essay cross-reference bullet (parens, not the ⇒ pointer) is NOT — both plants checked.
-    ['an INDEX line planted after the region is caught', (() => { const bt = homes.get('bugfix-index').text + '\n- (2026-10-29) a planted stranded index line ⇒ kb-bugfix-invariants\n'; const rr = regionAt82(bt, '## INDEX'); const inR = rr ? new Set(rr.idx) : new Set(); const RE = /^- \(20\d\d-\d\d-\d\d\).*⇒ kb-bugfix-invariants(\.md)?\s*$/; return bt.split('\n').some((l, i) => RE.test(l) && !inR.has(i)); })(), true],
-    ['an essay cross-reference bullet (parens, not ⇒) is NOT caught', (() => { const bt = homes.get('bugfix-index').text + '\n- (2026-10-29) a legit essay cross-reference (kb-bugfix-invariants)\n'; const rr = regionAt82(bt, '## INDEX'); const inR = rr ? new Set(rr.idx) : new Set(); const RE = /^- \(20\d\d-\d\d-\d\d\).*⇒ kb-bugfix-invariants(\.md)?\s*$/; return bt.split('\n').some((l, i) => RE.test(l) && !inR.has(i)); })(), false],
+    // round 9 (MINOR): §82 ⑥'s OWN predicate (strandedDated) judges a plant — not a regex re-declared here (the tautology §82
+    // bans). A dated line stranded after the region is caught in the ⇒ tail form AND in the parens tail form (dialog-yield's
+    // rebase stranded exactly the parens form, which r7 missed); a NON-dated essay bullet is not an INDEX line and is spared.
+    ['a stranded INDEX line (⇒ tail) is caught', strandedDated(homes.get('bugfix-index').text + '\n- (2026-10-29) a planted stranded index line ⇒ kb-bugfix-invariants\n', '## INDEX').length > 0, true],
+    ['a stranded INDEX line (parens tail — the dialog-yield shape) is caught', strandedDated(homes.get('bugfix-index').text + '\n- (2026-10-29) a legit-looking stranded line (kb-bugfix-invariants)\n', '## INDEX').length > 0, true],
+    ['a non-dated essay bullet after the region is NOT an INDEX line', strandedDated(homes.get('bugfix-index').text + '\n- test-foo ⑤: a prose gates bullet, no date\n', '## INDEX').length > strandedDated(homes.get('bugfix-index').text, '## INDEX').length, false],
   ];
   ok(mid > 0 && r82.every(([, got, want]) => got === want), `§82 CONTROLS: ${r82.map(([n, got, want]) => `${n} (${got === want ? (want ? 'RED' : 'quiet') : 'WRONG'})`).join(', ')}`);
 }
