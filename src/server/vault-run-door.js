@@ -1465,7 +1465,10 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       // HOSTS the request named (the Settings words «may use it in commands to those hosts for 8 hours» now match the code). A run
       // whose destinations are not ALL covered — another host, an opaque route, or a paste that named no hosts — draws its card.
       const hostCovered = (hosts, h) => hosts.some((gh) => gh === h || (gh.startsWith('*.') && (h === gh.slice(2) || h.endsWith(gh.slice(1)))));   // a paste --host may be a literal or a `*.suffix` wildcard
-      if (!verdict.ok && verdict.ask && !refused && !dest.opaque && dest.hosts.length && spec.refs.length && spec.refs.every((r) => { const a = admitted.find((x) => x.pair === pairOf(scope, r.id)); return a && Array.isArray(a.g.hosts) && a.g.hosts.length && dest.hosts.every((h) => hostCovered(a.g.hosts, h)); })) {
+      // round 7/8 (MINOR): read the paste grant from `grantOf` (the conv × entry grant), NOT `admitted` — `admitted` requires the
+      // switch to be OFF (`g && !sw`), so once a per-conversation «Always» press-opened the switch toward ANOTHER host, the paste
+      // grant stopped admitting its OWN named hosts. The 8-hour host-scoped grant stands independent of the switch state.
+      if (!verdict.ok && verdict.ask && !refused && !dest.opaque && dest.hosts.length && spec.refs.length && spec.refs.every((r) => { const g = grantOf(scope, r.id); return g && Array.isArray(g.hosts) && g.hosts.length && dest.hosts.every((h) => hostCovered(g.hosts, h)); })) {
         verdict = { ok: true, by: 'grant' };
       }
       // lane vault-use-grants (R4): THE POLICY JUDGE (vault.policyJudge, default OFF) — a run that would ask, every entry with a policy,

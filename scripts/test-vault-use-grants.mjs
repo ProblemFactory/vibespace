@@ -317,7 +317,7 @@ console.log('⑦ THE REQUEST DEFAULT — the conversation that asked × the host
   // round 5 (MAJOR item 2): the paste opens an 8-HOUR run grant to the asker (requestGrantsRequester) — NOT a standing
   // host-scoped member, and it NEVER flips the «Usable by agent runs» switch (r4 forged `reauthed:true`, opening the new
   // secret to EVERY conversation's run door).
-  ok(item && item.detail.includes('It said it needs it for: 192.168.1.1') && item.detail.includes('may use it in commands for 8 hours') && item.detail.includes('Usable by agent runs'), 'THE CARD SAYS the 8-hour run grant where the owner pastes (the switch is the owner\'s own act)', item && item.detail);
+  ok(item && item.detail.includes('It said it needs it for: 192.168.1.1') && item.detail.includes('may use it in commands to those hosts for 8 hours') && item.detail.includes('a command to any other host still shows you its card') && item.detail.includes('Usable by agent runs'), 'THE CARD SAYS the HOST-SCOPED 8-hour run grant where the owner pastes (round 7; the switch is the owner\'s own act)', item && item.detail);
   const an = w.paste.answer(rq.requestId, { answer: 'store', value: VALUE });
   ok(an.ok && an.outcome === 'stored' && /^secret:[0-9a-f]{10}$/.test(an.entry), 'the owner pastes ⇒ stored', an);
   const id = `secrets:${an.entry}#secret`;
@@ -327,11 +327,13 @@ console.log('⑦ THE REQUEST DEFAULT — the conversation that asked × the host
   const sn = w.vault.secretNames().find((x) => x.name === an.entry);
   ok(sn && sn.hosts.join() === '192.168.1.1' && sn.askedBy.conv === 'cid-asker-1' && sn.askedBy.name === 'Home network', 'the entry records the hosts and who asked (words — never a value)', sn);
   const rc = w.stash.filter((x) => x.cid === 'cid-asker-1').pop();
-  ok(rc && /STORED/.test(rc.text) && /use it in a command for 8 hours/.test(rc.text) && !rc.text.includes(VALUE), 'the agent\'s receipt says it may use it for 8 hours with no card', rc && rc.text);
-  const run = await runAnswered(w, CURL(`vault://secrets/${an.entry}/secret`, 'https://192.168.1.1/api/auth/login'), { answer: 'always', reauthed: true, ttl: '30d' });
-  ok(run.card && run.r.ok, '… the 8-hour grant makes the entry RUNNABLE: its first run draws a card the owner approves (vs entry_not_runnable with no grant); «Always» then opens it fully', { by: run.r.by, code: run.r.code, card: !!run.card });
-  const run2 = await runAnswered(w, CURL(`vault://secrets/${an.entry}/secret`, 'https://192.168.1.1/api/status'));
-  ok(run2.r.ok && run2.r.by === 'grant' && !run2.card, '… and after «Always» (which opened the switch), another shape runs with NO card', { by: run2.r.by, code: run2.r.code });
+  ok(rc && /STORED/.test(rc.text) && /use it in a command toward 192\.168\.1\.1 for 8 hours/.test(rc.text) && /a command to another host still shows the user its card/.test(rc.text) && !rc.text.includes(VALUE), 'the agent\'s receipt says it may use it toward the named host for 8 hours (a command elsewhere still cards)', rc && rc.text);
+  const runIn = await runAnswered(w, CURL(`vault://secrets/${an.entry}/secret`, 'https://192.168.1.1/api/auth/login'));
+  ok(runIn.r.ok && runIn.r.by === 'grant' && !runIn.card, '… round 7: the HOST-SCOPED 8-hour grant makes the entry runnable TOWARD the named host — a run to 192.168.1.1 runs by:grant with NO card (vs entry_not_runnable with no grant)', { by: runIn.r.by, code: runIn.r.code, card: !!runIn.card });
+  const runOut = await runAnswered(w, CURL(`vault://secrets/${an.entry}/secret`, 'https://10.0.0.9/collect'), { answer: 'always', reauthed: true, ttl: '30d' });
+  ok(runOut.card && runOut.r.ok, '… a run to ANOTHER host draws a card the owner approves; «Always» then opens it and writes a standing member for that host', { by: runOut.r.by, code: runOut.r.code, card: !!runOut.card });
+  const run2 = await runAnswered(w, CURL(`vault://secrets/${an.entry}/secret`, 'https://10.0.0.9/api/status'));
+  ok(run2.r.ok && run2.r.by === 'grant' && !run2.card, '… and after «Always» (which opened the switch), another shape to that host runs with NO card', { by: run2.r.by, code: run2.r.code });
   const d = w.paste.dropEntry(an.entry.slice(7));
   ok(d.ok && !w.useGrants.rowsOf(id).length, 'deleting the entry succeeds (no dangling grant row)');
   w.setting['vault.requestGrantsRequester'] = false;
@@ -349,7 +351,7 @@ console.log('⑦ THE REQUEST DEFAULT — the conversation that asked × the host
   w.setting['vault.requestGrantsRequester'] = true;
   const r4 = w.paste.request({ caller: c, words: 'a key', purpose: 'build', kind: 'api-key', name: 'Build key' });
   const it4 = (w.userTodos.snapshot().open || []).find((i) => i.action && i.action.requestId === r4.requestId);
-  ok(it4 && it4.detail.includes('may use it in commands for 8 hours'), 'a request that names NO host ⇒ still the 8-hour grant (it supplied the value), no host line');
+  ok(it4 && it4.detail.includes('may use it, but every command still shows you its card') && it4.detail.includes('it named no hosts'), 'a request that names NO host ⇒ a grant is still made (it supplied the value) but EVERY command cards — no host line (round 7)', it4 && it4.detail);
   const b1 = w.paste.request({ caller: c, words: 'x', purpose: 'y', kind: 'password', hosts: '*' });   // round 2: a lone «*» (any host) is still refused; a *.domain wildcard is now a valid host
   const b2 = w.paste.request({ caller: c, words: 'x', purpose: 'y', into: 'llm.apiKey', hosts: 'api.example.com' });
   const b3 = w.paste.request({ caller: c, words: 'x', purpose: 'y', kind: 'password', hosts: '*.amazonaws.com' });

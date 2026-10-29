@@ -101,7 +101,6 @@ export function resolvedByText(by, t, item = null) {
   if (by === 'ask-expired') return item && item.action ? '' : t('expired'); // r7 addendum: the status word says it all (statusWords — «timed out — the agent's command was refused …»)
   if (by === 'ask-changed') return t('not run — it changed after it was shown'); // verify-r6 W1
   if (by === 'ask-over') return t('this request is over — the agent can ask again'); // verify-r6 W2: a reopened ask that is over
-  if (by === 'vault_locked') return t('closed when the vault locked — run it again after the unlock'); // lane vault-use-grants round 7 (MINOR): a run card the lock settled SAYS so where the owner looks — never a dead card, never a silent close
   if (by === 'hidden') return ''; // r3: a hidden pointer's status word says it all (statusWords) — nothing was decided
   if (by === 'conversation-gone') return t('the conversation ended before you answered');
   if (by === 'stored') return t('saved to the vault'); // lane vault-paste-request: a paste request answered by its paste
