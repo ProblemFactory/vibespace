@@ -28,7 +28,10 @@
 // Round 14: A HOLD IS NAMED ONLY BY WHAT FILLS IT — each source (the calls, the CPU samples) names a hold when what it saw
 // there is at least half the hold's span or NAME_MIN_MS; below that its sites ride the hold as `faint` (said, never its
 // name). r12 named a hold by ANY site in it: one 1 ms sample of a process the box stopped for 300 ms named the hold
-// «cpu (program)», so «every hold is named» could not fail once the sampler ran.
+// «cpu (program)», so «every hold is named» could not fail once the sampler ran. Round 15: what a source saw is its RAW
+// time, summed unrounded and rounded once (`seen` — r14 summed the sites' ms after rounding each: 600 calls of 0.4 ms at
+// 600 sites summed 0 and their 240 ms of a 300 ms hold went `faint`); a hold's `faint` sites are listed, greyed, in
+// ⚙ Diagnostics under the named ones (src/lib/setup-flows.js — r14 rendered `sites` only: they vanished from the table).
 // VIBESPACE_BOOT_TRACE_SYNC=1 is the gate's RED control (scripts/test-boot-loop-hold.mjs): the boot's ledger warm runs
 // the old way, in one tick on the loop.
 // NOTES (B-92a4): a boot step's own lines that outlive its span — the restore's probe-pending sessions and the re-probe's
@@ -131,8 +134,10 @@ function start({ dataDir, env = process.env, now = () => performance.now(), wind
 }
 
 /** r14: do a source's sites in window w ({at, ms}) — every one of them, not its top 3 — FILL it: at least half its span or
- *  NAME_MIN_MS (PURE). One sample, or one short call, in a hold the box made is no name of it. */
-function fills(sites, w) { const ms = sites.reduce((n, x) => n + x.ms, 0); return ms > 0 && (ms >= NAME_MIN_MS || ms >= w.ms / 2); }
+ *  NAME_MIN_MS (PURE). One sample, or one short call, in a hold the box made is no name of it. r15: weighed by the RAW time
+ *  the source saw there (`sites.seen`: sitesOf's / sitesIn's unrounded sum over every site), rounded once — never the
+ *  sum of the sites' rounded ms (sub-ms calls at many sites summed 0). */
+function fills(sites, w) { const ms = Math.round(Number.isFinite(sites.seen) ? sites.seen : sites.reduce((n, x) => n + x.ms, 0)); return ms > 0 && (ms >= NAME_MIN_MS || ms >= w.ms / 2); }
 
 /** VIBESPACE_BOOT_TRACE=1: every sync fs / child call + every ≥ 1 MB JSON.parse, timed with its first repo frame. Returns the unwrap.
  *  Lane ledger-dedup-law r9: A SITE IS NAMED BY ITS CALLS, never by a 1 ms floor — every call is kept, a run of calls at one
@@ -161,7 +166,8 @@ const ARG_KEY_MAX = 512; // r11: a longer string argument keys its run by its le
 const digestOf = (x) => { let h = 2166136261; const step = Math.max(1, Math.floor(x.length / 64)); for (let i = 0; i < x.length; i += step) h = Math.imul(h ^ x.charCodeAt(i), 16777619); return `${x.length}~${(h >>> 0).toString(36)}`; };
 /** The ms each site spent INSIDE a window w = {at, ms} — PURE over wrapSync's ops: an op's calls are spread over its span and
  *  credited by OVERLAP (an op that began before the window or ends after it gives it only its share), never by where it
- *  began; a call made inside another traced call (`nested`) is its caller's time. Top `top`, longest first. */
+ *  began; a call made inside another traced call (`nested`) is its caller's time. Top `top`, longest first; r15: the
+ *  array's `seen` = the raw ms of every site (unrounded). */
 function sitesOf(ops, w, top = 3) {
   const by = new Map(), a0 = w.at, a1 = w.at + w.ms;
   for (const o of ops) {
@@ -170,7 +176,9 @@ function sitesOf(ops, w, top = 3) {
     const share = b1 > b0 ? o.ms * Math.max(0, Math.min(a1, b1) - Math.max(a0, b0)) / (b1 - b0) : (b0 >= a0 && b0 < a1 ? o.ms : 0);
     if (share > 0) { const k = `${o.op} ${o.site}`; by.set(k, (by.get(k) || 0) + share); }
   }
-  return [...by].sort((a, b) => b[1] - a[1]).slice(0, top).map(([k, ms]) => ({ ms: Math.round(ms), what: k }));
+  const all = [...by].sort((a, b) => b[1] - a[1]), out = all.slice(0, top).map(([k, ms]) => ({ ms: Math.round(ms), what: k }));
+  out.seen = all.reduce((n, [, ms]) => n + ms, 0); // r15: the raw time of every site (`fills` weighs it, rounded once)
+  return out;
 }
 function wrapSync({ ops, now, turn = () => 0 }) {
   const root = path.join(__dirname, '..', '..') + path.sep, undo = [];
@@ -284,7 +292,9 @@ function cpuSampler({ now }) {
       let lo = 0, hi = at.length; while (lo < hi) { const m = (lo + hi) >> 1; if (at[m] < w.at) lo = m + 1; else hi = m; } // the samples are in time order
       const by = new Map();
       for (let i = lo; i < at.length && at[i] <= w.at + w.ms; i++) by.set(what[i], (by.get(what[i]) || 0) + 1);
-      return [...by].sort((a, b) => b[1] - a[1]).slice(0, top).map(([k, n]) => ({ ms: Math.round(n * CPU_SAMPLE_US / 1000), what: `cpu ${names[k]}` }));
+      const all = [...by].sort((a, b) => b[1] - a[1]), out = all.slice(0, top).map(([k, n]) => ({ ms: Math.round(n * CPU_SAMPLE_US / 1000), what: `cpu ${names[k]}` }));
+      out.seen = all.reduce((t, [, n]) => t + n, 0) * CPU_SAMPLE_US / 1000; // r15: every sample's time, unrounded (`fills`)
+      return out;
     },
     facts() { return { samples: at.length, dropped, intervalUs: CPU_SAMPLE_US, running, ...(error ? { error } : {}) }; }, // `running`: not folded yet
     stop() { this.drain(false); try { if (session) { post('Profiler.disable'); session.disconnect(); } } catch { } session = null; },

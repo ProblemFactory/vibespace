@@ -29,6 +29,9 @@
 //     unnamed passes only when this suite's own three numbers say the BOX took most of it (held < half the gap), said so;
 //     THE STOPPED CONTROL: a child with the tracer, SIGSTOPped 300 ms (the box — no work of its own) ⇒ that hold UNNAMED, a
 //     300 ms spin in it named (a1d92418: one 1 ms sample named the stopped hold «cpu (program)» — the check could not fail).
+//     Lane ledger-dedup-law r15: THE FILL IS THE RAW TIME — 600 calls of 0.4 ms at 600 sites in a 300 ms hold name it (f3027952
+//     summed the sites' rounded ms: 0 — `faint`); THE DIAGNOSTICS ROW — ⚙ Diagnostics' own row expression lists a hold's
+//     `faint` sites, greyed, under its named ones (f3027952 rendered `sites` only: they vanished from the table).
 //   ⑤ A PROBE THAT CANNOT BE REAPED IS AN ANSWER (B-92a4, lane boot-probes-unkillable): the same boot with a fake `fuser`
 //     + `pgrep` on PATH that ignore TERM and never answer about a restore socket (the NFS D-state stand-in) ⇒ the listener
 //     opens within the probe cap + 5 s of the probes' start, the span names the N unanswered, every session is restored
@@ -259,6 +262,29 @@ process.stdout.write('ready\\n');`;
   const big = ((rep && rep.holds) || []).filter((h) => h.ms >= 200).sort((a, b) => a.at - b.at), stopped = big[0] || null, spun = big[1] || null;
   check(`…the STOPPED control: a child stopped 300 ms (SIGSTOP — the box) holds ${stopped ? stopped.ms : '?'} ms, ${stopped ? holdWords(stopped) || 'unnamed, nothing seen in it' : 'NO HOLD'}${stopped && holdName(stopped) ? ' — NAMED' : ''}; its 300 ms spin holds ${spun ? spun.ms : '?'} ms, named ${spun ? holdName(spun) || 'NOTHING' : '—'} (a1d92418: the stopped hold named «cpu (program)» by one sample)`,
     !!stopped && !holdName(stopped) && !!spun && !!holdName(spun) && (spun.sites || []).some((x) => /^cpu /.test(x.what)), rep && rep.holds);
+}
+
+// lane ledger-dedup-law r15: THE FILL IS THE RAW TIME — 600 calls of 0.4 ms, each at its own site, in a 300 ms hold (a burst of
+// lazy requires): the calls saw 240 ms of it ⇒ they name it (f3027952 summed each site's ROUNDED ms — 0 — and the 240 ms went
+// `faint`); the same 600 calls at 3 sites name it too
+{
+  const BT = require(path.join(repo, 'src/server/boot-trace.js')), w = { at: 1000, ms: 300 };
+  const at = (k) => Array.from({ length: 600 }, (_, i) => ({ op: 'readFileSync', site: `src/x${i % k}.js:1`, at: 1000 + i * 0.45, span: 0.4, ms: 0.4 }));
+  const fill = (k) => { const all = BT.sitesOf(at(k), w, Infinity); return { fills: BT.fills(all, w), shown: all.slice(0, 3).reduce((n, x) => n + x.ms, 0) }; };
+  const many = fill(600), few = fill(3);
+  check(`…the fill is the raw time: 600 calls of 0.4 ms in a 300 ms hold — at 600 sites ${many.fills ? 'NAME it' : 'do NOT name it (faint)'}, at 3 sites ${few.fills ? 'name it' : 'do NOT name it'} (the top three shown ${many.shown} / ${few.shown} ms)`, many.fills && few.fills, { many, few });
+}
+
+// lane ledger-dedup-law r15: THE DIAGNOSTICS ROW — ⚙ Diagnostics' own row expression (src/lib/setup-flows.js) over a hold with a
+// named site and a `faint` one ⇒ both listed, the faint one greyed (f3027952 read `sites` only: the faint one vanished)
+{
+  const src = fs.readFileSync(path.join(repo, 'src/lib/setup-flows.js'), 'utf8');
+  const expr = (src.split('\n').find((l) => l.includes('const rows = bt.holds.slice(0, 5)')) || '').trim().replace(/^const rows = /, 'return ').replace(/;$/, '');
+  const esc = (x) => String(x).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+  let row = '';
+  try { row = new Function('bt', 'esc', expr)({ holds: [{ at: 215, ms: 309, name: 'listen', sites: [{ ms: 160, what: 'cpu named-site (src/x.js:1)' }], faint: [{ ms: 43, what: 'fs.readFileSync faint-site src/y.js:2' }] }] }, esc); } catch (e) { row = `THREW ${e.message}`; }
+  const faint = /<div class="dim faint">43 ms · fs\.readFileSync faint-site/.test(row), named = /<div class="dim">160 ms · cpu named-site/.test(row);
+  check(`…the Diagnostics row: a hold's named site ${named ? 'listed' : 'MISSING'}, its faint one ${faint ? 'listed, greyed' : 'MISSING'} — ${row.replace(/<[^>]+>/g, ' | ').replace(/( \| )+/g, ' | ').slice(0, 200)}`, named && faint, row);
 }
 
 // ── boots 3 + 4: THE RESTORE'S PROBES CANNOT BE REAPED (B-92a4) ──
