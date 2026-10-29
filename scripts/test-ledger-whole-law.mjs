@@ -102,6 +102,13 @@
 //     moved aside and never becomes the month's live one (three lives); a cut record is read by the writer's grammar (our
 //     own writer's one-byte cut); the words name the file + the line, never «permissions»; the bound; a set-aside that fails
 //   ㉒ (5) re-pinned: the older generation's set that is no set is SET ASIDE and said (r11 kept it «read again at the next start»)
+// ROUND 14 (the acceptance of 7da5b435 — ㉔ fails on a1d92418):
+//   ㉔ the error's class decides, never the file's age: ONE classifier for a set whose read throws, on both roads — what passes
+//     (EMFILE, ENFILE, ENOMEM, ESTALE, ETIMEDOUT, EAGAIN, EBUSY) is kept and read again (an older one at the next start, its
+//     count said then; the live one by its timer), the disk's refusal (EACCES, EISDIR, ENOTDIR, ENXIO) sets it aside unread,
+//     an EIO is marked at the first start and set aside at the second; the live set set aside keeps its notice's count as
+//     «Earlier»; the set-aside notice's words follow what was done (a copy there or not, the line still in the file or not)
+//   ⑳ (3, the set) PINS NOW: a live set's EACCES sets it aside unread (the month acked at once) — r9's state stays the segment's
 // In-process, no server; sparse files for every big shape (fs.truncateSync / a write at an offset — no disk, no load).
 import fs from 'node:fs';
 import os from 'node:os';
@@ -1462,7 +1469,7 @@ await leg('⑳', async () => {
   const deny = (file) => {
     fs.chmodSync(file, 0); let real = true; try { fs.closeSync(fs.openSync(file, 'r')); real = false; } catch { }
     if (!real) fs.promises.open = function (f, ...a) { if (String(f) === file) return Promise.reject(Object.assign(new Error(`EACCES: permission denied, open '${file}'`), { code: 'EACCES', path: file })); return realOpen.call(this, f, ...a); };
-    return () => { fs.chmodSync(file, 0o644); fs.promises.open = realOpen; };
+    return () => { try { fs.chmodSync(file, 0o644); } catch { } fs.promises.open = realOpen; }; // r14: a set the disk refused is moved aside — its old path is gone
   };
   const race = (p, ms) => Promise.race([Promise.resolve(p).then((r) => ({ r })), sleep(ms).then(() => ({ timeout: true }))]);
 
@@ -1527,9 +1534,20 @@ await leg('⑳', async () => {
     await sleep(80); await settle(); // its own timer reads it again (the seam: 60 ms)
     const [rB] = await quiet(() => L2.uh.ingestRemoteEvents(host, 'X', lines([9400, NOV + 6])));
     const nov7 = ledgerOf(W.nov, host).length, after = W.notices().filter((i) => String(i.itemKey || '').startsWith('hold-read')).map((i) => i.status).join();
-    ok(novIn === 6 && nov7 === 7 && answers.every((r) => r && !r.deferred && r.holdFailed && r.holdFailed.length === 1 && r.holdFailed[0].month === '2026-10' && r.holdFailed[0].error === 'EACCES' && r.retryAfter > 0) && lines2 === 1 && reads.length === 1 && readOpen === 'open' && /cannot be read \(EACCES\)/.test(reads[0].text) && reads[0].detail.includes(target) && ack(rB) && after === 'done',
-      `⑳ (3, the ${which} file EACCES) 6 batches after the restart: November ${novIn} of 6 recorded (${nov7} of 7 once it is read); October answered ${last.holdFailed ? last.holdFailed.map((f) => `${f.month}:${f.error}`).join(',') : last.deferred || '—'}, retryAfter ${last.retryAfter}; ${lines2} «could not be read» line(s); ${reads.length} notice(s) naming ${reads[0] && reads[0].detail.includes(target) ? 'the file' : 'NOT the file'}; the file readable again ⇒ its timer reads it, the next batch ${ack(rB) ? 'acked' : 'NOT acked'}, the notice ${after || '—'} (3c4fa614: every batch «deferred ledger-hold-loading» — November 0 of 6, 2 warn lines a batch, no retryAfter, no notice)`,
-      { novIn, answers: answers.map((r) => r && { ack: r.ack, deferred: r.deferred, holdFailed: r.holdFailed, retryAfter: r.retryAfter }), lines2, reads: reads.map((i) => i.text), after, rB: rB && { ack: rB.ack, holdFailed: rB.holdFailed } });
+    // r14 (PINNED → PINS NOW for the set): THE ERROR'S CLASS DECIDES, NEVER THE FILE'S AGE — EACCES on a LIVE set is «the disk
+    // will not read this file», set aside unread as an older one's is (a1d92418 retried the live one on its timer, every
+    // October batch unacked, and set the older one aside): the month goes on at once, no hold-read notice, the set-aside one
+    // said once. A SEGMENT (acked rows to record — never set aside) keeps r9's state: kept, read again by its timer
+    const asides = W.notices().filter((i) => String(i.itemKey || '').startsWith('set-aside\n'));
+    if (which === 'segment') {
+      ok(novIn === 6 && nov7 === 7 && answers.every((r) => r && !r.deferred && r.holdFailed && r.holdFailed.length === 1 && r.holdFailed[0].month === '2026-10' && r.holdFailed[0].error === 'EACCES' && r.retryAfter > 0) && lines2 === 1 && reads.length === 1 && readOpen === 'open' && /cannot be read \(EACCES\)/.test(reads[0].text) && reads[0].detail.includes(target) && ack(rB) && after === 'done',
+        `⑳ (3, the ${which} file EACCES) 6 batches after the restart: November ${novIn} of 6 recorded (${nov7} of 7 once it is read); October answered ${last.holdFailed ? last.holdFailed.map((f) => `${f.month}:${f.error}`).join(',') : last.deferred || '—'}, retryAfter ${last.retryAfter}; ${lines2} «could not be read» line(s); ${reads.length} notice(s) naming ${reads[0] && reads[0].detail.includes(target) ? 'the file' : 'NOT the file'}; the file readable again ⇒ its timer reads it, the next batch ${ack(rB) ? 'acked' : 'NOT acked'}, the notice ${after || '—'} (3c4fa614: every batch «deferred ledger-hold-loading» — November 0 of 6, 2 warn lines a batch, no retryAfter, no notice)`,
+        { novIn, answers: answers.map((r) => r && { ack: r.ack, deferred: r.deferred, holdFailed: r.holdFailed, retryAfter: r.retryAfter }), lines2, reads: reads.map((i) => i.text), after, rB: rB && { ack: rB.ack, holdFailed: rB.holdFailed } });
+    } else {
+      ok(novIn === 6 && nov7 === 7 && answers.every((r) => r && r.ack && !r.holdFailed && !r.deferred) && lines2 === 1 && !reads.length && asides.length === 1 && /could not be read \(EACCES\) — set aside unread/.test(asides[0].text) && ack(rB) && fs.readdirSync(path.join(W.d, 'usage-history', '_set-aside')).length === 1,
+        `⑳ (3, the set file EACCES — PINS NOW, r14) 6 batches after the restart: November ${novIn} of 6 recorded; October ${answers.filter((r) => r && r.ack && !r.holdFailed).length} of 6 acked at once — the set SET ASIDE unread (${asides.length} notice${asides[0] ? ': «' + asides[0].text + '»' : ''}), ${reads.length} hold-read notice(s), ${lines2} «could not be read» line(s) (a1d92418: retried on its timer — October 0 of 6 acked, while an older set's EACCES was set aside: the rule followed the file's age)`,
+        { novIn, answers: answers.map((r) => r && { ack: r.ack, deferred: r.deferred, holdFailed: r.holdFailed }), lines2, reads: reads.map((i) => i.text), asides: asides.map((i) => i.text) });
+    }
   }
 
   // ── 4. THE COUNT IS THE GENERATION'S (.acc8 skep8-probe-carried-double; .acc8c c4): the drain's segment unlinks EBUSY and
@@ -2285,6 +2303,169 @@ await leg('㉓', async () => {
     ok(!!keyed && !!plain && keyed.id !== plain.id && plain.id === again.id && items.length === 2 && items.filter((i) => i.itemKey).length === 1,
       `㉓ (5) a filing with the words of a KEYED notice and no key: ${keyed && plain && keyed.id !== plain.id ? 'a new item' : 'MERGED into the keyed one'} (a second such filing ${plain && again && plain.id === again.id ? 'joins it' : 'does NOT join it'}) — ${items.length} item(s), ${items.filter((i) => i.itemKey).length} keyed (without lane r6's \`!i.itemKey\` guard: one item, the keyed notice taken by a text twin)`,
       { keyed: keyed && keyed.id, plain: plain && plain.id, again: again && again.id, n: items.length });
+  }
+});
+// lane ledger-dedup-law r14 (the acceptance of 7da5b435 — ㉔ fails on a1d92418): THE ERROR'S CLASS DECIDES, NEVER THE FILE'S AGE
+await leg('㉔', async () => {
+  console.log('㉔ THE ERROR\'S CLASS DECIDES, NEVER THE FILE\'S AGE — one classifier for a set whose read throws, on both roads · THE WORDS FOLLOW THE EVENT');
+  const RD = require(REPO + '/src/usage-hold-road.js');
+  const seams = (uh) => { uh.shapeMaxBytes = 64 * KiB; uh.holdListRetryMs = 60; uh.dedupShard = (f) => { const p = new Promise(() => { }); uh._dedupJobs.set(f, p); return p; }; return uh; };
+  const world = (name) => {
+    const d = dirOf(name), sh = shardOf(d);
+    fs.writeFileSync(sh, Array.from({ length: 400 }, (_, i) => row(i)).join('\n') + '\n');
+    const todos = new UserTodoManager({ dataDir: d, expirySweepMs: 0 });
+    const W = { d, sh, todos, heldDir: path.join(d, 'usage-history', '_held'), asideDir: path.join(d, 'usage-history', '_set-aside') };
+    W.items = () => todos._state.items.filter((i) => i.sessionKey === 'usage-ledger');
+    W.asideItems = () => W.items().filter((i) => String(i.itemKey || '').startsWith('set-aside\n'));
+    W.life = (inShape = false) => { const uh = seams(newUh(d)); if (inShape) uh.shapeMaxBytes = 2 * GiB; const wired = LSN.wire({ usageHistory: uh, userTodos: todos, log: () => { }, reconcileAfterMs: null }); const evs = []; const on = uh.onShape; uh.onShape = (ev) => { evs.push(ev); return on(ev); }; return { uh, wired, evs }; };
+    W.held = () => (fs.existsSync(W.heldDir) ? fs.readdirSync(W.heldDir).sort() : []);
+    W.aside = () => { try { return fs.readdirSync(W.asideDir).sort(); } catch { return []; } };
+    W.inLedger = (host) => fs.readFileSync(sh, 'utf8').split('\n').filter((l) => l.includes(`"rid":"h:${host}:`)).length;
+    return W;
+  };
+  const lines = (ids) => ids.map((i) => remote(i)).join('\n') + '\n';
+  const die = (uh) => { for (const h of uh._holds.values()) h.io = new Promise(() => { }); uh._holds.clear(); const i = ALL_UH.indexOf(uh); if (i >= 0) ALL_UH.splice(i, 1); if (uh._inflight) uh._inflight.clear(); uh.onShape = null; for (const f of (uh._readFail || new Map()).values()) clearTimeout(f.timer); for (const m of [uh._lines, uh._retries]) for (const s of (m || new Map()).values()) if (s && s.timer) clearTimeout(s.timer); };
+  const realOpen = fs.promises.open, realWrite = fs.promises.writeFile, realUnlink = fs.promises.unlink;
+  /** every open of `file` refused with `code` (`once`: the first only) → undo */
+  const refuse = (file, code, once = false) => { let n = 0; fs.promises.open = function (f, ...a) { if (String(f) === file && (!once || !n++)) return Promise.reject(Object.assign(new Error(`${code}: injected, open '${file}'`), { code, path: file })); return realOpen.call(this, f, ...a); }; return () => { fs.promises.open = realOpen; }; };
+  const keptSaid = (out) => out.filter((l) => /could not be read \([A-Z]+: [^)]*\) — kept, read again at the next start/.test(l));
+  const host = 'host-x', base = `events-2026-10~${host}`;
+  const sets = (W) => { fs.mkdirSync(W.heldDir, { recursive: true }); const f0 = path.join(W.heldDir, `${base}.0.dropped`); fs.writeFileSync(f0, JSON.stringify({ gone: [1, 2, 3, 4, 5, 6, 7].map((k) => hidOf(9100 + k, host)) }) + '\n'); fs.writeFileSync(path.join(W.heldDir, `${base}.2.dropped`), JSON.stringify({ gone: [1, 2, 3, 4, 5].map((k) => hidOf(9200 + k, host)) }) + '\n'); return f0; };
+  const droppedOf = (evs) => evs.filter((e) => e.kind === 'dropped').map((e) => `${e.gen}:${e.dropped}`).sort().join(',');
+
+  // ── 1. THE ONE CLASSIFIER (PURE): what passes, what the disk refuses, and what may pass once (EIO, a code no list knows) ──
+  {
+    const want = { EMFILE: 'passes', ENFILE: 'passes', ENOMEM: 'passes', ESTALE: 'passes', ETIMEDOUT: 'passes', EAGAIN: 'passes', EBUSY: 'passes', EACCES: 'refused', EISDIR: 'refused', ENOTDIR: 'refused', ENXIO: 'refused', EIO: 'once', EPERM: 'once', 'EWHATEVER': 'once' };
+    const got = Object.fromEntries(Object.keys(want).map((c) => [c, typeof RD.setReadClass === 'function' ? RD.setReadClass(c) : 'NO CLASSIFIER']));
+    ok(Object.keys(want).every((c) => got[c] === want[c]),
+      `㉔ (1) ONE classifier for a set whose read throws — ${['passes', 'refused', 'once'].map((k) => `${k}: ${Object.keys(got).filter((c) => got[c] === k).join(' ') || '—'}`).join(' · ')}${Object.values(got).includes('NO CLASSIFIER') ? ' (a1d92418: NO CLASSIFIER — the file\'s age decided)' : ''}`, got);
+  }
+
+  // ── 2. AN OLDER GENERATION'S SET, ITS READ FAILING WITH WHAT PASSES (corr/emfile-older-gen + probe-stale-transient-eio): gen 0
+  // (7 dropped) beside gen 2 (5); life 1 in shape, every open of gen 0 refused — and the month held again in that life (a second
+  // read, the same error); life 2 none ⇒ kept, said once, its 7 said at life 2 ──
+  {
+    const got = {};
+    for (const code of ['EMFILE', 'ENFILE', 'ENOMEM', 'ESTALE', 'ETIMEDOUT', 'EAGAIN', 'EBUSY', 'EIO']) {
+      const W = world('w24b-' + code), f0 = sets(W);
+      const L1 = W.life(true), undo = refuse(f0, code);
+      let out1 = [];
+      try { [, out1] = await quiet(async () => { L1.wired.reconcile(); await sleep(60); await settle(); L1.uh.shapeMaxBytes = 64 * KiB; await L1.uh.ingestRemoteEvents(host, 'X', lines([9300, 9301])); await settle(); }); } finally { undo(); }
+      const g = got[code] = { kept1: W.held().includes(`${base}.0.dropped`), marked1: W.held().includes(`${base}.0.dropped.unread`), asides1: W.aside().length, said1: keptSaid(out1).length, dropped1: droppedOf(L1.evs) };
+      die(L1.uh);
+      const L2 = W.life(true);
+      await quiet(async () => { L2.wired.reconcile(); await sleep(80); await settle(); });
+      g.dropped2 = droppedOf(L2.evs); g.held2 = W.held(); g.asides2 = W.aside().length; g.earlier = W.items().some((i) => /(^|,)0:7(,|$)/.test(String((((i.i18n || {}).text || {}).params || {}).ended || '')) || /: 7 held events were dropped|the 7 oldest held events/.test(`${i.text}\n${i.detail}`)); // generation 0's 7 — its own entry (the «Earlier» line sums the ended ones)
+      die(L2.uh);
+    }
+    const good = (c, g) => g.kept1 && g.marked1 === (c === 'EIO') && !g.asides1 && g.said1 === 1 && g.dropped1 === '2:5' && g.dropped2.split(',').includes('0:7') && !g.held2.length && !g.asides2 && g.earlier;
+    ok(Object.entries(got).every(([c, g]) => good(c, g)),
+      `㉔ (2) an OLDER generation's set whose read fails with what passes — ${Object.entries(got).map(([c, g]) => `${c}: life 1 ${g.kept1 ? 'KEPT' : 'NOT kept'}${g.marked1 ? ' + marked' : ''}${g.asides1 ? `, ${g.asides1} SET ASIDE` : ''}, said ${g.said1}× over two reads; life 2 said ${g.dropped2 || 'nothing'}${g.earlier ? ' («7» in its notice)' : ''}, _held/ ${g.held2.length ? 'holds ' + g.held2.join(',') : 'empty'}`).join(' · ')} (a1d92418: moved aside unread at life 1 — «its count is not known», the 7 never said)`,
+      got);
+  }
+
+  // ── 3. THE DISK'S REFUSAL SETS IT ASIDE UNREAD (EACCES, ENOTDIR, ENXIO — injected; EISDIR — a directory) and an EIO at TWO
+  // starts (marked at the first, set aside at the second, said as the disk's answer); a third start is clean ──
+  {
+    const got = {};
+    for (const code of ['EACCES', 'ENOTDIR', 'ENXIO', 'EISDIR', 'EIO twice']) {
+      const W = world('w24c-' + code.replace(/\W+/g, '-')), f0 = sets(W);
+      if (code === 'EISDIR') { fs.rmSync(f0); fs.mkdirSync(f0); }
+      const bytes0 = code === 'EISDIR' ? null : fs.readFileSync(f0), lifeOf = [];
+      for (let n = 1; n <= 3; n++) {
+        const L = W.life(true), undo = code === 'EISDIR' || n === 3 || (code !== 'EIO twice' && n > 1) ? () => { } : refuse(f0, code === 'EIO twice' ? 'EIO' : code);
+        let out = [];
+        try { [, out] = await quiet(async () => { L.wired.reconcile(); await sleep(80); await settle(); }); } finally { undo(); }
+        lifeOf.push({ held: W.held(), asides: W.aside(), kept: keptSaid(out).length, unread: out.filter((l) => /could not be read \(E[A-Z]+/.test(l) && /set aside, its bytes intact/.test(l)).length, twice: out.some((l) => /at a start before this one too/.test(l)) });
+        die(L.uh);
+      }
+      const it = W.asideItems()[0], moved = W.aside()[0] ? path.join(W.asideDir, W.aside()[0]) : null;
+      got[code] = { lifeOf, item: it ? it.text : '', twiceLine: !!it && /could not be read at the start before this one either/.test(it.detail), nowLine: !!it && /misses the ones this file named/.test(it.detail), intact: !!moved && (bytes0 ? fs.readFileSync(moved).equals(bytes0) : fs.statSync(moved).isDirectory()) };
+    }
+    const good = (c, g) => {
+      const [a, b, z] = g.lifeOf, at = c === 'EIO twice' ? 1 : 0, setAt = g.lifeOf[at];
+      return setAt.asides.length === 1 && setAt.unread === 1 && !setAt.held.includes(`${base}.0.dropped`) && g.intact && /could not be read \(E[A-Z]+\) — set aside unread; nothing waits/.test(g.item) && g.nowLine
+        && (c === 'EIO twice' ? a.kept === 1 && a.held.includes(`${base}.0.dropped.unread`) && !a.asides.length && setAt.twice && g.twiceLine && !setAt.held.some((f) => f.endsWith('.unread')) : !g.twiceLine)
+        && !z.kept && !z.unread && !z.held.length && z.asides.length === 1 && (c === 'EIO twice' || (!b.kept && !b.unread));
+    };
+    ok(Object.entries(got).every(([c, g]) => good(c, g)),
+      `㉔ (3) the disk's refusal — ${Object.entries(got).map(([c, g]) => `${c}: ${g.lifeOf.map((l, i) => `life ${i + 1} ${l.unread ? 'SET ASIDE unread' : l.kept ? 'kept' + (l.held.some((f) => f.endsWith('.unread')) ? ' + marked' : '') : l.held.length ? 'holds ' + l.held.join(',') : 'clean'}`).join(', ')}${g.intact ? ' (bytes intact)' : ''}${g.twiceLine ? ', said as the disk\'s answer' : ''}`).join(' · ')} (a1d92418: every one set aside at life 1 — an EIO too)`,
+      got);
+  }
+
+  // ── 4. THE LIVE ROAD, THE SAME CLASSIFIER: a live hold (20 rows held, 3 dropped said in its notice by a restart); then a restart
+  // out of shape whose read of the live set fails — EMFILE (once: r9's state, read again by its timer), EACCES (set aside unread
+  // at once: the month acked, the notice's 3 kept as «Earlier»), EIO at two starts (r9's state + marked, then set aside) ──
+  {
+    const got = {};
+    for (const code of ['EMFILE', 'EACCES', 'EIO']) {
+      const W = world('w24d-' + code), ids = Array.from({ length: 20 }, (_, k) => 9300 + k), L1 = W.life();
+      await quiet(() => L1.uh.ingestRemoteEvents(host, 'X', lines(ids)));
+      die(L1.uh);
+      const seg = W.held().find((f) => f.endsWith('.ndjson')), gen = seg ? Math.floor(Number(seg.split('.')[1]) / 1e6) : 0;
+      const df = path.join(W.heldDir, `${base}.${gen}.dropped`);
+      fs.appendFileSync(df, JSON.stringify({ gone: [1, 2, 3].map((k) => hidOf(8800 + k, host)) }) + '\n');
+      const L2 = W.life(); await quiet(async () => { L2.wired.reconcile(); await sleep(60); await settle(); }); // the 3 said
+      const said3 = W.items().some((x) => /the 3 oldest held events/.test(x.detail));
+      die(L2.uh);
+      const g = got[code] = { said3, lives: [] };
+      for (let n = 3; n <= (code === 'EIO' ? 4 : 3); n++) {
+        const L = W.life(), undo = refuse(df, code, code === 'EMFILE'); // the fault for the whole start (EMFILE: its first open)
+        const acks = []; let late = null;
+        try {
+          await quiet(async () => { L.wired.reconcile(); await sleep(40); await settle(); for (let k = 0; k < 2; k++) acks.push(await L.uh.ingestRemoteEvents(host, 'X', lines([9400 + 2 * n + k]))); });
+          await sleep(120); await settle(); // r9's timer (60 ms) reads it again
+          [late] = await quiet(() => L.uh.ingestRemoteEvents(host, 'X', lines([9500 + n])));
+        } finally { undo(); }
+        const item = W.items().find((x) => !/^(hold-read|set-aside)\n/.test(String(x.itemKey || '')) && x.i18n && x.i18n.text && x.i18n.text.params && x.i18n.text.params.host === host);
+        g.lives.push({ acks: acks.map((a) => !!(a && a.ack) && !((a && a.holdFailed) || []).length), late: !!(late && late.ack), asides: W.aside().length, marked: W.held().some((f) => f.endsWith('.unread')), readItems: W.items().filter((i) => String(i.itemKey || '').startsWith('hold-read\n') && i.status === 'open').length, asideItem: (W.asideItems()[0] || {}).text || '', earlier3: !!item && /Earlier: 3 held events/.test(item.detail), gone: (L.uh._holds.get(base) || { gone: new Set() }).gone.size });
+        die(L.uh);
+      }
+    }
+    const e = got.EMFILE, a = got.EACCES, i = got.EIO;
+    const okE = e.said3 && !e.lives[0].acks.some(Boolean) && e.lives[0].late && !e.lives[0].asides && e.lives[0].gone === 3;
+    const okA = a.said3 && a.lives[0].acks.every(Boolean) && a.lives[0].asides === 1 && /could not be read \(EACCES\) — set aside unread/.test(a.lives[0].asideItem) && !a.lives[0].readItems && a.lives[0].earlier3;
+    const okI = i.said3 && !i.lives[0].acks.some(Boolean) && i.lives[0].marked && !i.lives[0].asides && i.lives[1].acks.every(Boolean) && i.lives[1].asides === 1 && !i.lives[1].marked && /could not be read \(EIO\) — set aside unread/.test(i.lives[1].asideItem) && i.lives[1].earlier3;
+    ok(okE && okA && okI,
+      `㉔ (4) the LIVE road, the same classifier — EMFILE: ${e.lives[0].acks.filter(Boolean).length} of 2 acked while it failed, read again by its timer ⇒ the next batch ${e.lives[0].late ? 'acked' : 'NOT acked'}, ${e.lives[0].asides} set aside, its count ${e.lives[0].gone} kept · EACCES: ${a.lives[0].acks.filter(Boolean).length} of 2 acked at once, ${a.lives[0].asides} set aside unread, ${a.lives[0].readItems} hold-read notice(s), the notice's 3 ${a.lives[0].earlier3 ? 'kept as «Earlier»' : 'NOT kept'} · EIO: start 1 ${i.lives[0].acks.filter(Boolean).length} of 2 acked${i.lives[0].marked ? ', marked' : ''}; start 2 ${i.lives[1].acks.filter(Boolean).length} of 2 acked, ${i.lives[1].asides} set aside unread${i.lives[1].earlier3 ? ', the 3 kept as «Earlier»' : ''} (a1d92418: every live read error retried — EACCES unacked for ever — while an older one's was set aside)`,
+      got);
+  }
+
+  // ── 5. THE WORDS FOLLOW THE EVENT (probe-aside-words): a bad line in a set, then what the disk could do — each notice's headline
+  // says «set aside» only when a copy IS there, its What line says what became of the file and the line ──
+  {
+    const P = fs.promises, got = {};
+    const fill = (W) => { fs.mkdirSync(W.asideDir, { recursive: true }); for (let k = 0; k < (RD.SET_ASIDE_MAX || 64); k++) fs.writeFileSync(path.join(W.asideDir, `old-${k}`), ''); };
+    const cases = [
+      ['live, copied + rewritten', false, () => { }],
+      ['live, the copy refused (EEXIST)', false, (W) => fs.writeFileSync(W.asideDir, 'a file where the folder goes')],
+      ['live, copied, the rewrite failed (EIO)', false, () => { P.writeFile = function (p, ...x) { if (String(p).endsWith('.dropped.tmp')) return Promise.reject(Object.assign(new Error('EIO: injected'), { code: 'EIO' })); return realWrite.call(this, p, ...x); }; }],
+      ['live, past the bound, rewritten', false, fill],
+      ['live, past the bound, the rewrite failed (EIO)', false, (W) => { fill(W); P.writeFile = function (p, ...x) { if (String(p).endsWith('.dropped.tmp')) return Promise.reject(Object.assign(new Error('EIO: injected'), { code: 'EIO' })); return realWrite.call(this, p, ...x); }; }],
+      ['older, moved', true, () => { }],
+      ['older, past the bound, removed', true, fill],
+      ['older, past the bound, its unlink failed (EBUSY)', true, (W, f) => { fill(W); P.unlink = function (p, ...x) { if (String(p) === f) return Promise.reject(Object.assign(new Error('EBUSY: injected'), { code: 'EBUSY' })); return realUnlink.call(this, p, ...x); }; }],
+    ];
+    for (const [name, older, fault] of cases) {
+      const W = world('w24e-' + name.replace(/\W+/g, '-')); fs.mkdirSync(W.heldDir, { recursive: true });
+      const f = path.join(W.heldDir, `${base}.${older ? 0 : 2}.dropped`);
+      fs.writeFileSync(f, JSON.stringify({ gone: [1, 2, 3].map((k) => hidOf(9500 + k, host)) }) + '\n' + 'GARBAGE-LINE\n');
+      if (older) fs.writeFileSync(path.join(W.heldDir, `${base}.2.dropped`), JSON.stringify({ gone: [1, 2].map((k) => hidOf(9200 + k, host)) }) + '\n');
+      const L = W.life(false); let at = null, before = 0;
+      const on = L.uh.onShape; L.uh.onShape = (ev) => { if (ev.kind === 'set-aside') at = { file: fs.existsSync(f) ? fs.readFileSync(f, 'latin1') : null, copies: W.aside().length - before }; return on(ev); };
+      try { fault(W, f); before = W.aside().length; await quiet(async () => { L.wired.reconcile(); await sleep(80); await settle(); }); } finally { P.writeFile = realWrite; P.unlink = realUnlink; }
+      const it = W.asideItems()[0], what = it ? it.detail.split('\n')[0] : '';
+      const copy = !!at && at.copies > 0, still = !!at && at.file != null && at.file.includes('GARBAGE'), goneFile = !!at && at.file == null;
+      const headOk = !!it && (copy ? /— set aside; nothing waits$/.test(it.text) : /— read past it; nothing waits$/.test(it.text));
+      const whatOk = still ? /still in the file|read past the line/.test(what) && !/removed the line|set the line aside|removed the file/.test(what)
+        : goneFile ? (older ? (copy ? /moved the file as it was/ : /then removed the file/).test(what) : false)
+          : /removed the line|set the line aside/.test(what);
+      got[name] = { copy, still, goneFile, headOk, whatOk, text: it ? it.text.split(' — ')[1] : 'NO NOTICE', what: what.slice(0, 160) };
+      die(L.uh);
+    }
+    ok(Object.values(got).every((g) => g.headOk && g.whatOk),
+      `㉔ (5) the words follow the event — ${Object.entries(got).map(([n, g]) => `${n}: «${g.text}»${g.headOk && g.whatOk ? '' : ' ✗ (' + (g.copy ? 'a copy' : 'no copy') + ', ' + (g.goneFile ? 'the file gone' : g.still ? 'the line still in it' : 'the line gone') + ': «' + g.what + '»)'}`).join(' · ')} (a1d92418: «set aside» with no copy, «removed the line» with the line still in, «kept every other record» for a file deleted)`,
+      got);
   }
 });
 fs.rmSync(tmp, { recursive: true, force: true }); // after the last leg (r8: ⑲ ran after it and left its scratch behind)

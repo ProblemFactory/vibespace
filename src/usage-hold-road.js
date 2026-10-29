@@ -85,6 +85,20 @@ const SET_KINDS = new Map([['gone', 'rids'], ['back', 'rids'], ['below', 'n'], [
 const SET_ASIDE_DIR = '_set-aside'; // r12: data/usage-history/_set-aside — set files as they were, a line in them no record
 const SET_ASIDE_MAX = 64; // r12: files kept there; past it a set's bad lines are said (their first bytes), not copied
 const SET_BAD_MAX = 8; // r12: bad lines named per file (the rest counted)
+// r14: THE ERROR'S CLASS DECIDES, NEVER THE FILE'S AGE — ONE classifier for a set file whose read THROWS, on both roads (the
+// live generation's read-back, an older one's at `_dropStale`): what passes (the fd table, memory, a link that timed out, a
+// busy file) is KEPT and read again — the live one by its own timer (r9), an older one at the next start, its count said
+// then; only «the disk will not read this file» SETS IT ASIDE unread; an EIO — or a code neither list knows — may pass:
+// kept the first time and MARKED (`<set>.unread` in _held/), set aside unread at a later start that still cannot read it.
+// r12 set aside EVERY older set whose read threw (one EMFILE at a boot lost its count for good) while the live one's same
+// error was retried.
+const SET_READ_PASSES = new Set(['EMFILE', 'ENFILE', 'ENOMEM', 'ESTALE', 'ETIMEDOUT', 'EAGAIN', 'EBUSY']);
+const SET_READ_REFUSED = new Set(['EACCES', 'EISDIR', 'ENOTDIR', 'ENXIO']);
+const HOLD_UNREAD_RE = /^(events-\d{4}-\d{2})~([A-Za-z0-9_-]+)\.(\d+)\.dropped\.unread$/; // r14: a set whose read failed once (EIO …) — its mark
+/** r14: a set file's read error → 'passes' (kept, read again) | 'refused' (the disk will not read it: set aside unread) |
+ *  'once' (EIO, or a code neither list knows: kept and marked the first time — refused at a later start) (PURE). */
+const setReadClass = (code) => (SET_READ_REFUSED.has(code) ? 'refused' : SET_READ_PASSES.has(code) ? 'passes' : 'once');
+const errCode = (e) => String((e && e.code) || (e && e.message) || e).slice(0, 40);
 /** r12: is `t` a record the set's writer could have CUT — a proper prefix of one of its records, read by its grammar («{»,
  *  «{"go», «{"gone":["h:x:a","h:x:», «{"below":1» …), never by two magic bytes (r11 took only «{"»: a record cut after its
  *  first byte was garbage) (PURE). */
@@ -456,7 +470,7 @@ class UsageHoldRoad {
    *  count — its set, no segment left — was never read back, the boot re-worded its notice to «0 dropped» and swept the
    *  set: 33 rows said nowhere). */
   _listOf(names) {
-    const m = new Map();
+    const m = new Map(), marks = [];
     for (const n of names) {
       let x = HOLD_NAME_RE.exec(n);
       if (x && !(Number.isSafeInteger(Number(x[3])) && holdGenOf(x[3]) <= HOLD_GEN_MAX)) continue; // r10: not a name of ours (past HOLD_GEN_MAX): never read, never unlinked
@@ -465,6 +479,15 @@ class UsageHoldRoad {
       if (x && !(Number.isSafeInteger(Number(x[3])) && Number(x[3]) <= HOLD_GEN_MAX)) continue;
       if (x) { const k = `${x[1]}~${x[2]}`; if (!m.has(k)) m.set(k, []); if (!this._dropFiles.has(k)) this._dropFiles.set(k, []); if (!this._dropFiles.get(k).includes(Number(x[3]))) this._dropFiles.get(k).push(Number(x[3])); this._holdGenSeen(k, Number(x[3])); continue; }
       if (HOLD_DROP_TMP_RE.test(n)) this._track(this._heldUnlink(path.join(this.heldDir, n)));
+      else if (HOLD_UNREAD_RE.test(n)) marks.push(n);
+    }
+    // r14: a set's mark of a read that failed once (EIO …) — kept while its set is listed: a start that still cannot read the
+    // set takes the error for the disk's answer (`_setUnread`); one whose set is gone is swept. A mark this process made is
+    // never one of an earlier start
+    for (const n of marks) {
+      const set = n.slice(0, -'.unread'.length), p = path.join(this.heldDir, set);
+      if (this._marksMade && this._marksMade.has(p)) continue;
+      if (names.includes(set)) (this._unreadMarks || (this._unreadMarks = new Set())).add(p); else this._track(this._heldUnlink(p + '.unread'));
     }
     return m;
   }
@@ -591,27 +614,37 @@ class UsageHoldRoad {
     for (const g of gens.filter((x) => x !== h.gen && !left.has(x)).sort((a, b) => a - b)) {
       const df = this._dropFile(key, g);
       const gone = () => this._dropFiles.set(key, (this._dropFiles.get(key) || []).filter((x) => x !== g));
-      // r12: AN OLDER GENERATION'S SET NEVER BECOMES THE MONTH'S LIVE ONE — one that cannot be read (EACCES, EIO, a
-      // directory) is SET ASIDE unread (moved, its bytes intact) and said; only one that cannot be moved either stays for
-      // the next start (r11 kept every unreadable one, garbage too: once the newer generation ended, the next start read
-      // it back as the month's live hold, failed for ever, and every batch of that month was answered unacked)
+      // r12: AN OLDER GENERATION'S SET NEVER BECOMES THE MONTH'S LIVE ONE — one the disk will not read (EACCES, a directory)
+      // is SET ASIDE unread (moved, its bytes intact) and said; only one that cannot be moved either stays for the next start
+      // (r11 kept every unreadable one, garbage too: once the newer generation ended, the next start read it back as the
+      // month's live hold, failed for ever, and every batch of that month was answered unacked). r14: THE ERROR'S CLASS
+      // DECIDES (`_setUnread`, the live road's own): one that passes (EMFILE, ESTALE …) is KEPT, said once, read again at
+      // the next start and its count said then (r12 moved every one aside unread: one EMFILE at a boot lost its count)
       let st; try { st = await this._readSet(df); } catch (e) {
-        const code = String((e && e.code) || (e && e.message) || e).slice(0, 40), a = await this._setAsideFile(df, true);
-        if (a.copy) gone();
-        this._saidAside(h, g, df, a, { code, stale: true });
+        const v = await this._setUnread(df, e);
+        if (!v.aside) { this._saidKept(h, g, df, v.code); continue; }
+        const a = await this._setAsideFile(df, true);
+        if (a.copy) { gone(); await this._unmark(df); }
+        this._saidAside(h, g, df, a, { code: v.code, twice: v.twice, stale: true, did: a.copy ? 'moved' : 'kept' });
         continue;
       }
+      if (this._marked(df)) await this._unmark(df); // r14: read — its mark of a failed read goes
       if (st.torn) console.warn(`[usage] the hold ${key}: the set of its generation ${g} ends in a torn line (a write a crash cut — the rows it named were still held then) — read as no line`);
       const n = st.retired ? 0 : st.gone.size;
       if (n && this._emitShape({ kind: 'dropped', host: h.host, hostName: h.hostName || h.host, shard: base, month: base.slice(7, 14), dropped: n, gen: g, unchecked: !st.checked, holdMax: this._holdMax() }) === false) continue;
       // r12: lines that are no record — the file SET ASIDE (moved whole, its bytes intact; the count said above is its
       // records'), said once; past the bound it goes as a readable one does, its lines' first bytes said; one that
-      // cannot be moved stays (read past again at the next start — never a throw)
+      // cannot be moved stays (read past again at the next start — never a throw). r14: said as what was DONE — past the
+      // bound it is unlinked FIRST, then said removed (or kept, its unlink failed); r12 said it before the unlink, as
+      // «kept every other record … removed the line» for a file that was then deleted
       if (st.bad.length) {
         const a = await this._setAsideFile(df, true);
-        this._saidAside(h, g, df, a, { st, stale: true });
-        if (a.copy) { gone(); continue; }
-        if (!a.over) continue;
+        if (a.copy) { gone(); this._saidAside(h, g, df, a, { st, stale: true, did: 'moved' }); continue; }
+        if (!a.over) { this._saidAside(h, g, df, a, { st, stale: true, did: 'kept' }); continue; }
+        const err = await this._heldUnlinkCode(df);
+        if (!err) gone();
+        this._saidAside(h, g, df, err ? { ...a, error: err } : a, { st, stale: true, did: err ? 'kept' : 'removed' });
+        continue;
       }
       if (await this._heldUnlink(df)) gone();
     }
@@ -653,6 +686,50 @@ class UsageHoldRoad {
     const s = await LD.eachLineAsync(df, 0, line, { io: this._ioOf('read-back'), tail: line });
     return { ...r, end: s.end, lineEnd: s.lineEnd, torn: cut > 0, cut, bad, records };
   }
+  /** r14: a set file whose read threw → {code, aside, twice} — THE ONE CLASSIFIER's verdict (`setReadClass`) for this file,
+   *  on both roads: `aside` = set it aside unread (the disk refused it, or an EIO-like error that a mark from an earlier
+   *  start names too: `twice`); else it is KEPT and read again — marked the first time an EIO-like error meets it (a mark
+   *  that cannot be written leaves it unmarked: kept, never set aside on a guess). */
+  async _setUnread(df, e) {
+    const code = errCode(e), c = setReadClass(code);
+    if (c !== 'once') return { code, aside: c === 'refused', twice: false };
+    if (this._unreadMarks && this._unreadMarks.has(df)) return { code, aside: true, twice: true };
+    const made = this._marksMade || (this._marksMade = new Set());
+    if (!made.has(df)) { try { await this._holdIO('mark', df, fs.promises.writeFile(df + '.unread', JSON.stringify({ unread: code, at: new Date().toISOString() }) + '\n')); made.add(df); } catch { } }
+    return { code, aside: false, twice: false };
+  }
+  /** r14: does a mark of a failed read name the set `df` (one an earlier start left, or this one's)? */
+  _marked(df) { return !!((this._unreadMarks && this._unreadMarks.has(df)) || (this._marksMade && this._marksMade.has(df))); }
+  /** r14: the set `df` read or set aside — its mark of a failed read goes. */
+  async _unmark(df) {
+    if (!this._marked(df)) return;
+    if (this._unreadMarks) this._unreadMarks.delete(df); if (this._marksMade) this._marksMade.delete(df);
+    await this._heldUnlink(df + '.unread');
+  }
+  /** r14: an older generation's set whose read failed with an error that passes — KEPT, said ONCE (a journal line per file ×
+   *  error in a process; nothing waits on it: no notice), read again at the next start (its count said then). */
+  _saidKept(h, g, df, code) {
+    const said = this._keptSaid || (this._keptSaid = new Set()), k = `${df}\n${code}`;
+    if (said.has(k)) return; said.add(k);
+    console.warn(`[usage] the hold ${h.key}: the set of its generation ${g} (an older one) could not be read (${code}: ${path.basename(df)}) — kept, read again at the next start (${setReadClass(code) === 'once' ? 'an error that may pass: a next start that cannot read it either sets it aside' : 'an error that passes'})`);
+  }
+  /** r14: the LIVE generation's set read (`_readSet`) — by THE ONE CLASSIFIER when its read throws (`_setUnread`, an older
+   *  one's too): one that passes throws on (`_readFailed`: kept, read again by its own timer — r9); the disk's refusal SETS
+   *  IT ASIDE unread and the hold goes on with no set (its count not known — said; the notice keeps the count it said as
+   *  «Earlier», never re-worded to 0); one that cannot be moved throws on. r12 retried every live error and set aside every
+   *  older one: the rule changed with the file's age. */
+  async _readLive(h, df) {
+    try { const s = await this._readSet(df, h.gone); if (this._marked(df)) await this._unmark(df); return s; } catch (e) {
+      const v = await this._setUnread(df, e);
+      if (!v.aside) throw e;
+      const a = await this._setAsideFile(df, true);
+      if (!a.copy) throw e;
+      await this._unmark(df);
+      h.gone.clear(); // what a read cut short had added
+      this._saidAside(h, h.gen, df, a, { code: v.code, twice: v.twice, did: 'moved' });
+      return { gone: h.gone, retired: false, checked: false, below: 0, end: 0, lineEnd: 0, torn: false, cut: 0, bad: [], records: 0 };
+    }
+  }
   /** r12: the set file `df` SET ASIDE as it is — moved (`move`: an older generation's, it goes) or copied (the live one's,
    *  rewritten after) into data/usage-history/_set-aside, named `<file>.<UTC stamp>`, its bytes intact; past SET_ASIDE_MAX
    *  files there none is made (`over`) → {copy} (the copy's file name) | {copy: null, over} | {copy: null, error}. On the hold's async road. */
@@ -678,31 +755,32 @@ class UsageHoldRoad {
    *  rewritten, the lines' first bytes said. Said once (`_saidAside`). */
   async _setAsideLive(h, df, s) {
     const a = await this._setAsideFile(df, false);
+    let did = 'kept'; // r14: what was done, said as it (`_saidAside`)
     if (a.copy || a.over) {
       const text = dropLines('gone', [...h.gone]) + (s.below ? JSON.stringify({ below: s.below }) + '\n' : '') + (s.retired ? JSON.stringify({ retired: h.gen }) + '\n' : '') + (s.checked ? JSON.stringify({ checked: h.gone.size }) + '\n' : '');
       try {
         if (!text) { if (!(await this._heldUnlink(df))) throw Object.assign(new Error('unlink'), { code: 'unlink' }); h.goneBytes = 0; }
         else { await this._holdIO('compaction', df, fs.promises.writeFile(df + '.tmp', text)); await this._holdIO('compaction', df, fs.promises.rename(df + '.tmp', df)); h.goneBytes = Buffer.byteLength(text); }
-        h.goneTorn = false; h.compactAt = Math.max(DROP_COMPACT_MIN, 4 * h.goneBytes);
+        h.goneTorn = false; h.compactAt = Math.max(DROP_COMPACT_MIN, 4 * h.goneBytes); did = 'rewritten';
       } catch (e) { await this._heldUnlink(df + '.tmp'); a.rewrite = String((e && e.code) || e).slice(0, 40); }
     }
-    this._saidAside(h, h.gen, df, a, { st: s });
+    this._saidAside(h, h.gen, df, a, { st: s, did });
   }
   /** r12: a set file's lines that are no record — or an older generation's set that could not be read — SAID ONCE: a
    *  journal line (the file, its lines, what was done) and the owner's notice (`set-aside`: the file, the line, the rest
    *  kept and the line set aside — never «permissions»; r11 said «check the file's permissions» and waited for ever). An
    *  unread set that could not be moved either is a journal line only (read again at the next start, as r10). */
-  _saidAside(h, g, df, a, { st = null, code = null, stale = false } = {}) {
+  _saidAside(h, g, df, a, { st = null, code = null, stale = false, did = null, twice = false } = {}) {
     const file = path.basename(df), base = h.base + '.ndjson', bad = st ? st.bad : [], nBad = bad.length + (bad.more || 0);
     const lines = bad.map((x) => x.n).join(', ') + (bad.more ? ` (+${bad.more} more)` : '');
-    const what = st ? `line${nBad === 1 ? '' : 's'} ${lines} of ${file} (generation ${g}${stale ? ', an older one' : ''}) ${nBad === 1 ? 'is' : 'are'} no record of a set (${bad[0].why}, byte ${bad[0].at}: ${bad[0].head})` : `the set of its generation ${g} (an older one) could not be read (${code}: ${file})`;
+    const what = st ? `line${nBad === 1 ? '' : 's'} ${lines} of ${file} (generation ${g}${stale ? ', an older one' : ''}) ${nBad === 1 ? 'is' : 'are'} no record of a set (${bad[0].why}, byte ${bad[0].at}: ${bad[0].head})` : `the set of its generation ${g}${stale ? ' (an older one)' : ''} could not be read (${code}${twice ? ' — at a start before this one too: the disk\'s answer' : ''}: ${file})`;
     const done = a.copy ? `set aside, its bytes intact, as ${SET_ASIDE_DIR}/${a.copy}` : a.over ? `not copied (${SET_ASIDE_DIR} holds ${a.over} files, its bound)` : `it could not be set aside (${a.error})`;
-    const then = !st ? (a.copy ? 'its count is not known' : 'kept, read again at the next start')
-      : stale ? (a.copy ? `its ${st.records} other record(s) read and said` : a.over ? `its ${st.records} other record(s) read and said; it goes` : 'read past those lines; the file kept, set aside at the next start')
-        : (a.copy || a.over) && !a.rewrite ? `the set rewritten from its ${st.records} record(s) — the hold goes on` : `read past those lines (the file kept as it is${a.rewrite ? `: its rewrite failed, ${a.rewrite}` : ''}; set aside at its next read) — the hold goes on`;
+    const then = !st ? (a.copy ? `its count is not known${stale ? '' : ' — the hold goes on'}` : 'kept, read again at the next start')
+      : stale ? (did === 'moved' ? `its ${st.records} other record(s) read and said` : did === 'removed' ? `its ${st.records} other record(s) read and said; the file removed` : a.over ? `its ${st.records} other record(s) read and said; its removal failed (${a.error}) — kept, read again at the next start` : 'read past those lines; the file kept, set aside at the next start')
+        : did === 'rewritten' ? `the set rewritten from its ${st.records} record(s) — the hold goes on` : `read past those lines (the file kept as it is${a.rewrite ? `: its rewrite failed, ${a.rewrite}` : ''}; set aside at its next read) — the hold goes on`;
     console.warn(`[usage] the hold ${h.key}: ${what} — ${done}; ${then}`);
     if (!st && !a.copy) return;
-    this._emitShape({ kind: 'set-aside', host: h.host, hostName: h.hostName || h.host, shard: base, month: base.slice(7, 14), file, gen: g, lines: lines || null, aside: a.copy || null, over: a.over || null, code, error: a.error || a.rewrite || null, stale, read: st ? st.records : null });
+    this._emitShape({ kind: 'set-aside', host: h.host, hostName: h.hostName || h.host, shard: base, month: base.slice(7, 14), file, gen: g, lines: lines || null, aside: a.copy || null, over: a.over || null, code, error: a.error || a.rewrite || null, stale, read: st ? st.records : null, did: did || (a.copy ? 'moved' : 'kept'), twice: !!twice }); // r14: `did` — what was done to the file, the words' one source
   }
   /** The hold of (shard, host) → its record | NO_HOLD (nothing held; `create` makes the record) | null (a hold on disk is
    *  being read back — `.loading` on the record; the caller waits for it). A hold on disk is read back ONCE, on the async
@@ -774,7 +852,7 @@ class UsageHoldRoad {
    *  road: a slice per read (≤ LD.STEP_BYTES), the loop free between them. */
   async _holdLoad(h, seqs) {
     const df = this._dropFile(h.key, h.gen);
-    const s = await this._readSet(df, h.gone), checked = s.checked; // r9: `checked` — every dropped row checked (r10: `_readSet`, the one parse)
+    const s = await this._readLive(h, df), checked = s.checked; // r9: `checked` — every dropped row checked (r10: `_readSet`, the one parse; r14: by the one classifier when it throws)
     h.below = Math.max(h.below, s.below); if (s.retired) h.retired = true;
     h.goneBytes = s.end; h.goneTorn = s.end > s.lineEnd; // a crash mid-append: the next line starts on a line of its own
     if (s.bad.length) await this._setAsideLive(h, df, s); // r12: a line that is no record set aside — the hold goes on (r11: the read-back threw, for ever)
@@ -1041,7 +1119,9 @@ class UsageHoldRoad {
     return this._emitShape({ kind: 'dropped', host: h.host, hostName: h.hostName || h.host, shard: base, month: base.slice(7, 14), dropped, gen: h.gen, unchecked: !!h.unchecked, holdMax: this._holdMax() }) !== false;
   }
   /** r7: ONE unlink of a hold's file → whether it is gone (an error — EBUSY on the NFS data dir — leaves it: `stale`). */
-  async _heldUnlink(p) { try { await this._holdIO('unlink', p, fs.promises.unlink(p)); this._diskFiles.delete(p); return true; } catch (e) { if (e && e.code === 'ENOENT') { this._diskFiles.delete(p); return true; } return false; } }
+  async _heldUnlink(p) { return (await this._heldUnlinkCode(p)) === null; }
+  /** r14: an unlink of the hold's road → null (gone) | the code of the error it met (said as what was done). */
+  async _heldUnlinkCode(p) { try { await this._holdIO('unlink', p, fs.promises.unlink(p)); this._diskFiles.delete(p); return null; } catch (e) { if (e && e.code === 'ENOENT') { this._diskFiles.delete(p); return null; } return errCode(e); } }
   async _holdUnlink(h, seq) { const done = await this._heldUnlink(this._holdFile(h, seq)); if (!done) h.stale = true; return done; }
   /** r4: a month back in shape — its held rows ingested IN ORDER (the oldest segment first) through the ingest's own law (the
    *  shard's rid index: a row the ledger already holds costs zero bytes), a slice at a time. One drain per hold; a failed
@@ -1390,4 +1470,4 @@ class UsageHoldRoad {
   _waitBigWarm() { return this._pendingLeft() > this._takeoverMax() ? this.warmSettled() : null; }
 }
 
-module.exports = { UsageHoldRoad, setRecordCut, SET_ASIDE_DIR, SET_ASIDE_MAX };
+module.exports = { UsageHoldRoad, setRecordCut, setReadClass, SET_ASIDE_DIR, SET_ASIDE_MAX, SET_READ_PASSES, SET_READ_REFUSED };

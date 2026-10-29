@@ -86,15 +86,25 @@ const D_READ = [
 // notice per hold, re-said in place at each setting-aside, closed by the owner (nothing waits)
 const ASIDE_KEY = 'set-aside';
 const TEXT_ASIDE = i18nKey('A held usage file of {machine} for {month} had a line that is no record — set aside; nothing waits');
-const TEXT_ASIDE_UNREAD = i18nKey('An older held usage file of {machine} for {month} could not be read ({code}) — set aside; nothing waits'); // an OLDER generation's set the disk would not read: moved aside unread
+const TEXT_ASIDE_PAST = i18nKey('A held usage file of {machine} for {month} had a line that is no record — read past it; nothing waits'); // r14: no copy made (the folder at its bound, a copy that failed): the line read past
+const TEXT_ASIDE_UNREAD = i18nKey('A held usage file of {machine} for {month} could not be read ({code}) — set aside unread; nothing waits'); // a set the disk would not read (r14: either road — the classifier is the error's, never the file's age): moved aside unread
 const D_ASIDE_WHAT = {
   aside: i18nKey('What: line {line} of data/usage-history/_held/{file} is no record VibeSpace writes. VibeSpace kept every other record of the file and set the line aside: the file as it was, bytes intact, is data/usage-history/_set-aside/{aside}.'),
   over: i18nKey('What: line {line} of data/usage-history/_held/{file} is no record VibeSpace writes. VibeSpace kept every other record of the file and removed the line — data/usage-history/_set-aside already holds {over} files, so no copy of it was kept.'),
   kept: i18nKey('What: line {line} of data/usage-history/_held/{file} is no record VibeSpace writes. VibeSpace read every other record of the file and read past the line; it could not set the file aside ({error}) and tries again the next time it reads it.'),
-  unread: i18nKey('What: data/usage-history/_held/{file} — the record of an older hold of {month} — could not be read ({code}). VibeSpace set it aside unread, bytes intact, as data/usage-history/_set-aside/{aside}; its count of dropped events is not known.'),
+  unread: i18nKey('What: data/usage-history/_held/{file} — the record of the held events of {month} that were dropped past the bound — could not be read ({code}). VibeSpace set it aside unread, bytes intact, as data/usage-history/_set-aside/{aside}; the count of dropped events it named is not known.'),
+  // r14: THE WORDS FOLLOW THE EVENT — one line per thing usage-history did (`did`): copied but the rewrite failed, kept as it
+  // is (past the bound, a change that failed), an older one moved, an older one removed (past the bound, read first)
+  copied: i18nKey('What: line {line} of data/usage-history/_held/{file} is no record VibeSpace writes. VibeSpace copied the file as it was, bytes intact, to data/usage-history/_set-aside/{aside}, but rewriting it without the line failed ({error}): the line is still in the file. VibeSpace reads past it and tries again the next time it reads the file.'),
+  keptOver: i18nKey('What: line {line} of data/usage-history/_held/{file} is no record VibeSpace writes. VibeSpace read past the line and kept the file as it is: data/usage-history/_set-aside already holds {over} files, so no copy was kept, and changing the file failed ({error}). It tries again the next time it reads the file.'),
+  moved: i18nKey('What: line {line} of data/usage-history/_held/{file} — the record of an older hold of {month} — is no record VibeSpace writes. VibeSpace read the file\'s other records (their count is said for {month}), then moved the file as it was, bytes intact, to data/usage-history/_set-aside/{aside}.'),
+  removed: i18nKey('What: line {line} of data/usage-history/_held/{file} — the record of an older hold of {month} — is no record VibeSpace writes. VibeSpace read the file\'s other records (their count is said for {month}), then removed the file, as it removes every older record once it is read; data/usage-history/_set-aside already holds {over} files, so no copy was kept.'),
 };
+const D_ASIDE_TWICE = i18nKey('It could not be read at the start before this one either ({code}), so VibeSpace takes it for the disk\'s answer, not an error that passes.'); // r14: an EIO-like error met at two starts
+const D_ASIDE_NOW_UNREAD = i18nKey('What happens now: nothing waits — the held events of {month} are recorded as usual; a count of dropped events said for {month} misses the ones this file named.'); // r14: a whole file unread (r12 said «a line» of it)
 const D_ASIDE_NOW = i18nKey('What happens now: nothing waits — the held events of {month} are recorded as usual. A line VibeSpace cannot read names no held event; at most, a count of dropped events said for {month} misses what it named.');
 const D_ASIDE_TODO = i18nKey('What to do: nothing — close this notice once you have read it. If it comes back, send feedback from the gear menu: the set-aside file shows what was written.');
+const D_ASIDE_TODO_NOCOPY = i18nKey('What to do: nothing — close this notice once you have read it. If it comes back, send feedback from the gear menu.'); // r14: no copy was kept — none to look at
 // r8: a count said where no pause carries it (a hold drained at a boot with no open notice, one read back with nothing live)
 const TEXT_DROPPED = i18nKey('Usage of {machine} for {month}: {dropped} held events were dropped past the bound — never recorded');
 const D_DROPPED_WHAT = i18nKey('What: while data/usage-history/{shard} was out of shape, the events of {month} were held beside it (at most {bound}); the rest of them are in the ledger now.');
@@ -208,14 +218,21 @@ function readNoticeOf({ hostName, host, shard, month, file, code, since, tag = '
 }
 /** r12: the words of a held set file's line set aside — or an older one the disk would not read, moved aside unread (PURE):
  *  the file, its line(s), what was done, that nothing waits; `aside` = the set-aside copy's name (`over`: the folder past its
- *  bound, no copy; neither: it could not be set aside, `error`). */
-function asideNoticeOf({ hostName, host, shard, month, file, lines, aside, over, code, error, tag = '' } = {}) {
+ *  bound, no copy; neither: it could not be set aside, `error`). r14: THE WORDS FOLLOW THE EVENT — `did` is what
+ *  usage-history did to the file (rewritten / moved / removed / kept as it is; an event without it — r12's shape — read
+ *  from its other fields), `error` a copy or a change that failed, `twice` an unread file's error met at two starts: r12
+ *  chose the words from `aside`/`over` alone and told the owner what was meant, not done («set aside» when the copy failed,
+ *  «removed the line» when the rewrite failed, «kept every other record» for a file deleted). */
+const didOf = ({ aside, over, error, stale }) => (stale ? (aside ? 'moved' : over && !error ? 'removed' : 'kept') : (aside || over) && !error ? 'rewritten' : 'kept');
+function asideNoticeOf({ hostName, host, shard, month, file, lines, aside, over, code, error, did = null, twice = false, stale = false, tag = '' } = {}) {
   const sh = String(shard || '').slice(0, 60), mo = /^\d{4}-\d{2}$/.test(String(month || '')) ? String(month) : (/(\d{4}-\d{2})/.exec(sh) || [])[1] || 'this month';
   const name = String(hostName || host || 'a machine').slice(0, 80), t = String(tag || '').slice(0, 24);
   const p = { machine: t ? `${name} (${t})` : name, month: mo, file: String(file || '').slice(0, 120), line: String(lines || '').slice(0, 60), aside: String(aside || '').slice(0, 160), over: String(Math.max(0, Number(over) || 0)), code: String(code || '').slice(0, 40), error: String(error || 'an error').slice(0, 40) };
-  const unread = !lines && !!code, head = unread ? TEXT_ASIDE_UNREAD : TEXT_ASIDE;
-  const what = unread ? D_ASIDE_WHAT.unread : aside ? D_ASIDE_WHAT.aside : over ? D_ASIDE_WHAT.over : D_ASIDE_WHAT.kept;
-  const rows = [{ key: what, params: { line: p.line, file: p.file, aside: p.aside, over: p.over, error: p.error, code: p.code, month: p.month } }, { key: D_ASIDE_NOW, params: { month: p.month } }, { key: D_ASIDE_TODO }];
+  const unread = !lines && !!code, d = did || didOf({ aside, over, error, stale });
+  const head = unread ? TEXT_ASIDE_UNREAD : aside ? TEXT_ASIDE : TEXT_ASIDE_PAST; // «set aside» only when a copy of it IS there
+  const what = unread ? D_ASIDE_WHAT.unread : d === 'moved' ? D_ASIDE_WHAT.moved : d === 'removed' ? D_ASIDE_WHAT.removed
+    : d === 'rewritten' ? (aside ? D_ASIDE_WHAT.aside : D_ASIDE_WHAT.over) : aside ? D_ASIDE_WHAT.copied : over ? D_ASIDE_WHAT.keptOver : D_ASIDE_WHAT.kept;
+  const rows = [{ key: what, params: { line: p.line, file: p.file, aside: p.aside, over: p.over, error: p.error, code: p.code, month: p.month } }, ...(unread && twice ? [{ key: D_ASIDE_TWICE, params: { code: p.code } }] : []), { key: unread ? D_ASIDE_NOW_UNREAD : D_ASIDE_NOW, params: { month: p.month } }, { key: aside ? D_ASIDE_TODO : D_ASIDE_TODO_NOCOPY }];
   return { text: fillOf(head, p), detail: rows.map((l) => fillOf(l.key, { ...p, ...(l.params || {}) })).join('\n'), i18n: { text: { key: head, params: { machine: p.machine, name, tag: t, month: p.month, shard: sh, host: String(host || '').slice(0, 160), code: p.code } }, detail: rows } };
 }
 /** r8: the words of the `_held/` listing that failed (PURE). */
@@ -381,6 +398,7 @@ function wire({ usageHistory, userTodos, log = (m) => console.log('[usage]', m),
       try {
         const k = `${ASIDE_KEY}\n${ev.host}\n${ev.shard}`, it = keyedItem(k);
         const pause = itemOf(ev.host, ev.shard), name = (ev.hostName && ev.hostName !== ev.host ? ev.hostName : nameOf(pause)) || ev.host;
+        if (ev.code && !ev.lines && !ev.stale && ev.aside && pause) keepLost(pause, ev); // r14: the LIVE set moved aside unread
         const w = asideNoticeOf({ ...ev, hostName: name });
         if (!it) { fileItem(w, k, 'normal'); return; }
         userTodos.reshapeItems((x, now) => {
@@ -401,6 +419,15 @@ function wire({ usageHistory, userTodos, log = (m) => console.log('[usage]', m),
       } catch (e) { log(`the hold folder's notice was not filed: ${e.message}`); }
     }
   };
+  /** r14: the LIVE generation's set moved aside unread (the disk refused it) — the hold goes on with no set, so the count its
+   *  month's item says of that generation is no longer the generation's: it stays as the item's «Earlier» line (a count of no
+   *  known generation, `?`), never re-worded to 0 by the hold's next count (r8: an unknown count keeps the line). */
+  function keepLost(item, ev) {
+    const q = paramsOf(item), line = dropLineOf(item), n = line && line.params ? Math.max(0, Number(line.params.dropped) || 0) : 0;
+    if (!n || (q.gen != null && q.gen !== '' && ev.gen != null && String(q.gen) !== String(ev.gen))) return;
+    const ended = endedOf(q); ended.set('?', (ended.get('?') || 0) + n);
+    redrop(item, { dropped: 0, unchecked: false, gen: ev.gen, ended, earlier: sumOf(ended) }, ev.month);
+  }
   /** r8: the item filed by `itemKey` (the listing's ONE — r9: a hold read-back's ONE). */
   const keyedItem = (k) => { const ids = typeof userTodos.idsWhere === 'function' ? userTodos.idsWhere((i) => ours(i) && i.itemKey === k) : []; return ids.map((x) => userTodos.get(x)).filter(Boolean).sort((a, b) => (Number(a.createdAt) || 0) - (Number(b.createdAt) || 0)).pop() || null; };
   const listItem = () => keyedItem(LIST_KEY);
@@ -483,4 +510,4 @@ function wire({ usageHistory, userTodos, log = (m) => console.log('[usage]', m),
   return { open, reconcile };
 }
 
-module.exports = { wire, noticeOf, droppedNoticeOf, listNoticeOf, readNoticeOf, asideNoticeOf, INBOX_KEY, LIST_KEY, READ_KEY, ASIDE_KEY, TEXT, TEXT_DRAIN, TEXT_DROPPED, TEXT_LIST, TEXT_READ, TEXT_ASIDE, TEXT_ASIDE_UNREAD, D_ASIDE_WHAT, D_ASIDE_NOW, D_ASIDE_TODO, D_WHAT, D_HELD, D_DROPPED, D_DROPPED_MAYBE, D_DROPPED_EARLIER, D_DROPPED_WHAT, D_TODO_READ, D_LIST, D_READ, D_NOW, D_DRAIN_FAILED, D_TODO };
+module.exports = { wire, noticeOf, droppedNoticeOf, listNoticeOf, readNoticeOf, asideNoticeOf, INBOX_KEY, LIST_KEY, READ_KEY, ASIDE_KEY, TEXT, TEXT_DRAIN, TEXT_DROPPED, TEXT_LIST, TEXT_READ, TEXT_ASIDE, TEXT_ASIDE_PAST, TEXT_ASIDE_UNREAD, D_ASIDE_WHAT, D_ASIDE_TWICE, D_ASIDE_NOW, D_ASIDE_NOW_UNREAD, D_ASIDE_TODO, D_ASIDE_TODO_NOCOPY, D_WHAT, D_HELD, D_DROPPED, D_DROPPED_MAYBE, D_DROPPED_EARLIER, D_DROPPED_WHAT, D_TODO_READ, D_LIST, D_READ, D_NOW, D_DRAIN_FAILED, D_TODO };
