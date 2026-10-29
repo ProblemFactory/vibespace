@@ -73,6 +73,8 @@ const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const arMod = require(path.join(REPO, 'src/server/auto-resume.js'));
 const { create: createAR, CONTINUE_PROMPT, GRACE_MS, FIRE_MAX_IMMEDIATE, FIRE_QUARANTINE_MS, continueNoticeFor } = arMod;
+// lane resume-words: the continue is CONTINUE_PROMPT's head + facts + the CLI's own sentence (continuePromptFor)
+const IS_CONTINUE = (t) => typeof t === 'string' && !!CONTINUE_PROMPT && typeof CONTINUE_PROMPT.cli === 'string' && t.endsWith(' ' + CONTINUE_PROMPT.cli) && t.includes(' ' + CONTINUE_PROMPT.facts + ' ');
 const engMod = require(path.join(REPO, 'src/server/usage-pool-engine.js'));
 const { AccountManager } = require(path.join(REPO, 'src/accounts.js'));
 const readingLag = require(path.join(REPO, 'src/reading-lag.js'));
@@ -293,7 +295,7 @@ console.log('\n§1 the incident: a member becomes usable while two conversations
     ok('…the wake ACTED and named the pool it re-decided', r.wake.acted === true && r.wake.pools.includes(w.P), JSON.stringify(r.wake));
     ok('…and BOTH waiting conversations were continued, exactly once each',
       r.wake.fired.length === 2 && w.fired.length === 2 && new Set(w.fired.map((f) => f.id)).size === 2, JSON.stringify(w.fired.map((f) => f.id)));
-    ok('…with the CLI\'s own continue prompt (a real send, not a notice)', w.fired.every((f) => f.text === CONTINUE_PROMPT));
+    ok('…with the CLI\'s own continue prompt (a real send, not a notice)', w.fired.every((f) => IS_CONTINUE(f.text)));
     ok('…and they are no longer armed', !w.ar._armed.get(w.A._webuiId) || w.ar._armed.get(w.A._webuiId).fired === true);
     const card = [...w.fired.map((f) => f.note).filter(Boolean), ...w.notes.map((n) => n.text)].join(' | ');   // 2.369.97: a delivered continue carries its cause on the prompt; a separate notice survives only where no prompt reached the conversation
     ok('the card names WHAT UNBLOCKED IT — the account became usable — not a pool switch that never happened',

@@ -15,6 +15,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Auto-resume never continues into an account its fresh check found spent, even when several conversations wait for the same reset.
 - When a pool's notice has to shorten its list, For you keeps the full list: every account and what holds it back.
 - Dismissing, reopening or clearing the unmeasured-CLI note in For you is kept; Re-check is yours alone (an agent's token is refused).
+- When the account pool moves a conversation past a usage limit, the agent is told the limit’s “resets at …” was one account’s, not when it may continue.
 
 ## 2.369.360 — 2026-10-27
 

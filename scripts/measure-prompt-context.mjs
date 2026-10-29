@@ -18,10 +18,11 @@ const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const B = (t) => Buffer.byteLength(String(t || ''), 'utf-8');
 export const INTRO_MAX = 4096;          // the tools intro, every shape
-export const FIRST_PROMPT_MAX = 7680;   // the three-group shape with the 4 notices + the 1 KB stash entry (lane task-group-context: +512 — every
+export const FIRST_PROMPT_MAX = 8064;   // the three-group shape with the 4 notices + the 1 KB stash entry (lane task-group-context: +512 — every
                                         // Context-table row is told, the three groups' folder rows a line each under one table heading, the
                                         // objective's heading names it the group's standing rules; measured 7 535 B at the widest reach, 6.9–7.2 KB
                                         // before; the ≥ ROOM_MIN under INLINE_CAP is unchanged)
+                                        // lane resume-words: +384 — the USAGE WALLS standing rule (442 B) rides every group's tools section: 7 977 B measured at the widest reach
 export const ROOM_MIN = 1024;           // under INLINE_CAP, left for what else rides (the nudge, a jobs update, a report)
 export const UPDATE_MAX = 4096;         // lane injection-relevance: one group's busy UPDATE block (8 picked lines + the digest + the others'-backlog
                                         // line) — measured 1.6 KB at the p90, 2.5 KB at a 460-line burst; the block's own hard cap is 5 000 B, three groups' 6 500 B

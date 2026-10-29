@@ -47,6 +47,8 @@ const ok = (n, c, e) => { if (c) { pass++; console.log('  ✓ ' + n); } else { f
 const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
 const arMod = require(path.join(REPO, 'src/server/auto-resume.js'));
 const { create, CONTINUE_PROMPT, GRACE_MS, FIRE_MAX_IMMEDIATE, FIRE_QUARANTINE_MS, FIRE_WINDOW_MS } = arMod;
+// lane resume-words: the continue is CONTINUE_PROMPT's head + facts + the CLI's own sentence (continuePromptFor)
+const IS_CONTINUE = (t) => typeof t === 'string' && !!CONTINUE_PROMPT && typeof CONTINUE_PROMPT.cli === 'string' && t.endsWith(' ' + CONTINUE_PROMPT.cli) && t.includes(' ' + CONTINUE_PROMPT.facts + ' ');
 const engMod = require(path.join(REPO, 'src/server/usage-pool-engine.js'));
 const { AccountManager } = require(path.join(REPO, 'src/accounts.js'));
 
@@ -223,7 +225,7 @@ if (!probe) {
     ok('NEGATIVE CONTROL: with the wall attributed away from the credential slot AND no memory of a failed fire, the session re-fires without bound (≥10 billed continues)', n >= 10, 'fires=' + n);
     ok('…and the reproduction is the journal we have: every cycle re-armed "switched to a usable account" naming the LINK the CLI keeps rejecting', lines.filter((l) => /armed for .*switched to a usable account \(userP\)/.test(l)).length >= 10, lines.slice(0, 3).join(' | '));
     ok("…the linked member's cache never learned it was blocked (the whole mechanism of the incident)", (w.readCache(w.LINK) || {}).source === 'cli-usage' && w.readCache(w.LINK).fiveHour.utilization === 0.1, JSON.stringify(w.readCache(w.LINK)));
-    ok('…and every one of those continues was a real send of the CLI\'s continue prompt', w.fired.length === n && w.fired.every((f) => f.text === CONTINUE_PROMPT));
+    ok('…and every one of those continues was a real send of the CLI\'s continue prompt', w.fired.length === n && w.fired.every((f) => IS_CONTINUE(f.text)));
   }
 
   // (b) ATTRIBUTION alone stops it — the wall lands on the slot, the verdict turns
@@ -292,7 +294,7 @@ if (!probe) {
   ok('…and nothing was said in the conversation yet (a switch that self-heals in 45s must not narrate itself)', w.notes.length === 0, JSON.stringify(w.notes));
   // the tick, ~60s later in production (the arm is back-dated instead of slept)
   const did = await w.tickFire();
-  ok('…the TICK is what continues it — one continue, delivered onto the member the pool moved to', did === true && w.fired.length === 1 && w.fired[0].text === CONTINUE_PROMPT, JSON.stringify({ fires: w.fired.length }));
+  ok('…the TICK is what continues it — one continue, delivered onto the member the pool moved to', did === true && w.fired.length === 1 && IS_CONTINUE(w.fired[0].text), JSON.stringify({ fires: w.fired.length }));
   // 2.369.97 ONE CARD PER CONTINUE: the wording rides the delivered prompt (`note`); no second notice follows
   ok('…and the card says the POOL SWITCHED, not that the limit reset (round 1 said 用量上限已重置 on exactly this, now the dominant, path)', w.fired.length === 1 && w.fired[0].note === '账号池已切换到 B-Stack Max，已自动继续这个任务。' && w.notes.length === 0, JSON.stringify({ note: w.fired[0] && w.fired[0].note, notes: w.notes }));
   ok('…NEGATIVE CONTROL: the reset wording still exists for an arm anchored on a real reset (the fix is a branch, not a rename)', arMod.continueNoticeFor({ kind: 'timed', armReason: '5h 0% < 10%', label: 'B-Stack Max' }).text === '用量上限已重置，已自动继续这个任务。');
@@ -601,7 +603,7 @@ if (!probe) {
   gate = true;
   ar.fireNow('s1', 'switched');
   await new Promise((r) => setTimeout(r, 30));
-  ok('…a passing gate delivers exactly one continue', seen === 2 && sent.length === 1 && sent[0] === CONTINUE_PROMPT);
+  ok('…a passing gate delivers exactly one continue', seen === 2 && sent.length === 1 && IS_CONTINUE(sent[0]));
   // re-entrancy: the real gate calls maybePoolAutoSwitch, which calls fireNow
   const sessions2 = new Map(); const sent2 = [];
   const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-argate2-')); cleanup.push(dir2);

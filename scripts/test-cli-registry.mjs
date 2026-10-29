@@ -12,6 +12,8 @@
 //      MUTANT: a 2 KB paragraph / segment ⇒ RED
 //   ④ the renders: every teaching shape (measure-prompt-context teachingShapes) equals its pin in
 //      scripts/fixtures/cli-registry-renders.json — the 4a14bcc2 (2.369.298) render, or a pinned change WITH its reason
+//   ③b the standing rules (lane resume-words): every STANDING_RULES id carries its pinned facts, rides every SessionStart
+//      shape, ≤ 3 lines; CONTROL: the usage-walls row removed / gutted ⇒ RED by name
 //   ⑤ the index: renderIndex names every row, docs/agent/index-manual.md's generated block equals it, AGENT_DOC_TOPICS is
 //      the rows', `vibespace-docs` with no argument asks for it; a closed gate omits its row from every surface
 // Run: node scripts/test-cli-registry.mjs            (--write-index rewrites index-manual.md's block from the rows)
@@ -183,6 +185,44 @@ console.log('— ③ the caps (every gate open, the widest shape)');
   const extra = { name: 'vibespace-extra', topic: 'extra', manual: 'pages-manual.md', gate: 'always', summary: 's', teach: { sessionStart: () => REG.CHANNELS_SECTION_LINES.read, reminder: () => REG.CHANNELS_REMINDER_SEG.read } };
   const mx = capProblems([...REG.ROWS, extra]);
   ok(mx.some((p) => /SessionStart/.test(p)), `a seventh taught row with a channels-size paragraph is RED on the SessionStart cap (${mx.join('; ')})`);
+}
+
+// lane resume-words (the owner 2026-10-29: an agent read the CLI's «resets at …» as the time IT may continue): the
+// STANDING RULES ride the Reporting-back section after the tool paragraphs; each id's facts are pinned here, a planted
+// removal is red by name
+console.log('— ③b the standing rules (a usage wall\'s reset is one account\'s; VibeSpace\'s continue is the only signal)');
+{
+  const TT = { status: true, ask: true, task: true, jobs: true, channels: 'read' };
+  const RULE_FACTS = {
+    'usage-walls': [/^USAGE WALLS: /, /a limit message from the CLI \("resets at …", weekly or 5-hour\) names ONE account's reset/, /never schedule, park or promise work for that time/,
+      /VibeSpace's account pool may switch you at once/, /when you may continue, VibeSpace sends the continue message \(that message IS the signal\)/,
+      /say so on the board \(`vibespace-status blocked --reason "usage wall"`\) and stop/, /never a backlog item "after the reset"/],
+  };
+  const ruleProblems = (rules) => {
+    const sec = REG.renderSessionStartTools(TT, {}, REG.ROWS, rules).join('\n');
+    const bad = [];
+    for (const [id, facts] of Object.entries(RULE_FACTS)) {
+      const r = (Array.isArray(rules) ? rules : []).find((x) => x && x.id === id);
+      if (!r || typeof r.text !== 'function') { bad.push(`${id}: no standing rule row`); continue; }
+      const text = r.text({ status: true });
+      for (const f of facts) if (!f.test(text)) bad.push(`${id}: lost ${f}`);
+      if (!sec.split('\n').includes(text)) bad.push(`${id}: not a paragraph of the Reporting-back section`);
+      if (text.split('\n').length > 3 || B(text) > 480) bad.push(`${id}: ${B(text)} B over ${text.split('\n').length} lines (≤ 3 lines, ≤ 480 B)`);
+    }
+    return bad;
+  };
+  const now = ruleProblems(REG.STANDING_RULES);
+  ok(Array.isArray(REG.STANDING_RULES) && Object.isFrozen(REG.STANDING_RULES) && now.length === 0, `the standing rules carry their facts and ride the section (${(REG.STANDING_RULES || []).map((r) => `${r.id} ${B(r.text({ status: true }))} B`).join(', ')})`, now);
+  const shapes = teachingShapes().filter((x) => /^section · /.test(x.name));
+  ok(shapes.length >= 7 && shapes.every((x) => !x.text || /\nUSAGE WALLS: /.test(x.text)) && shapes.filter((x) => x.text).length >= 6, `every SessionStart shape the hook renders carries USAGE WALLS (${shapes.filter((x) => x.text).length} rendered; every toggle off renders nothing)`);
+  const off = REG.renderSessionStartTools({ ask: true, task: true, jobs: true }, {}).join('\n');
+  ok(/\nUSAGE WALLS: /.test(off) && !/vibespace-status/.test(off) && /If you must wait, say so and stop — never a backlog item "after the reset"\./.test(off), 'the status toggle closed: the rule still rides, and teaches no vibespace-status (2.211.0)');
+  const removed = ruleProblems((REG.STANDING_RULES || []).filter((r) => r.id !== 'usage-walls'));
+  ok(removed.length === 1 && removed[0] === 'usage-walls: no standing rule row', `CONTROL: the usage-walls row removed ⇒ RED by name (${removed[0]})`);
+  const gutted = ruleProblems((REG.STANDING_RULES || []).map((r) => (r.id === 'usage-walls' ? { ...r, text: () => 'USAGE WALLS: wait for the reset.' } : r)));
+  ok(gutted.length === 6 && gutted.every((p) => /^usage-walls: lost /.test(p)), `CONTROL: its facts gutted ⇒ RED by name, fact by fact (${gutted.length})`);
+  const dropped = ruleProblems(REG.STANDING_RULES).length === 0 && REG.renderSessionStartTools(TT, {}, REG.ROWS, []).join('\n').includes('USAGE WALLS');
+  ok(!dropped, 'CONTROL: a section rendered without the rules carries no USAGE WALLS (the paragraph is the rule\'s, not a row\'s)');
 }
 
 console.log('— ④ the renders (pinned per shape: the 4a14bcc2 render, or a pinned change with its reason)');

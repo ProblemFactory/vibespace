@@ -9,6 +9,8 @@
 //   · renderReminderLine — the per-turn reminder's standard line (agent-routes perTurnToolsLine);
 //   · renderIndex — the table `vibespace-docs` with no argument prints (docs/agent/index-manual.md's generated block);
 //   · AGENT_DOC_TOPICS — topic → manual file(s), what `GET /api/agent/docs/:topic` serves.
+// STANDING_RULES (lane resume-words) ride the SessionStart section after the tool paragraphs: a rule every agent needs
+// that no CLI row owns (a usage wall's reset time is one account's, never the time to continue).
 // `gate` is a NAME the hook already evaluates, never a function into the server: status / ask / task / jobs = the
 // per-feature toggles, channels = the session's reach word ('read' | 'request' — lane channels-teach; 'connect' — lane
 // pod-oauth-callback: nothing connected yet and the admin offers a company app), always. A closed
@@ -43,16 +45,35 @@ const expiredSeg = (expired) => { const n = expiredNames(expired); return n ? ` 
  *  that it is theirs — never a guessed place */
 const trayOf = (tray) => (typeof tray === 'string' && tray ? tray : 'their tray');
 
+/** THE STANDING RULES (lane resume-words, the owner 2026-10-29: «agent 都会优先理解那个 claude 自己的 reset time 作为"用量重置
+ *  时间"，但实际上 vibespace 通知的时候才是重置的时候»): rules no CLI row owns, rendered after the tool paragraphs of the
+ *  Reporting-back section in row order. `text(ctx)` may read the open gates (`status`) — a closed toggle's CLI is never
+ *  taught here either (2.211.0). test-cli-registry pins every id and the facts each carries; a planted removal is red by
+ *  name. Each ≤ 3 lines: the section's cap pays for them.
+ *  · usage-walls — the Screeps conversation read the CLI's «resets Oct 30, 9am» as THE reset, parked a backlog item
+ *    «until the reset» and told the owner so — while the pool had already moved it and sent the continue. The time a
+ *    limit message names is ONE account's; VibeSpace's continue (src/server/auto-resume.js CONTINUE_PROMPT) is the
+ *    only signal. */
+const STANDING_RULES = Object.freeze([
+  {
+    id: 'usage-walls',
+    text: ({ status }) => 'USAGE WALLS: a limit message from the CLI ("resets at …", weekly or 5-hour) names ONE account\'s reset — never schedule, park or promise work for that time. VibeSpace\'s account pool may switch you at once; when you may continue, VibeSpace sends the continue message (that message IS the signal). '
+      + (status ? 'If you must wait, say so on the board (`vibespace-status blocked --reason "usage wall"`) and stop' : 'If you must wait, say so and stop') + ' — never a backlog item "after the reset".',
+  },
+]);
+
 const GATES = Object.freeze(['status', 'ask', 'task', 'jobs', 'channels', 'always']);
 /** the byte caps test-cli-registry holds the rendered teaching to (every gate open, the widest shape; RED past them):
  *  · sessionStart — the section with its trailer, measured 2 561 B (three groups, read reach) + the 164 B test-prompt-budget
  *    ③ leaves that shape under its 7 168 B: a paragraph past it is the budget's red too, named here first; lane
- *    agent-feedback's paragraph took 154 B of that room (2 715 B — 10 B left: the next paragraph cuts another);
+ *    agent-feedback's paragraph took 154 B of that room (2 715 B — 10 B left: the next paragraph cuts another); lane
+ *    resume-words' USAGE WALLS standing rule is a rule every session needs, not a CLI's paragraph — it raises the cap by
+ *    its own 442 B (440 + its blank line: 2 709 → 3 151 B measured, 3 160 B), test-prompt-budget ③ re-judged with it;
  *  · reminder — the bare line, measured 1 077 B (a manager, several groups, read reach) + room for ONE more segment the size
  *    of the channels one (113 B): the next taught row pays for itself or cuts another — lane agent-feedback's segment and
  *    its `feedback` pointer topic took 101 B (1 178 B — 22 B left);
  *  · summary — one index cell. */
-const CAPS = Object.freeze({ summary: 140, sessionStart: 2725, reminder: 1200 });
+const CAPS = Object.freeze({ summary: 140, sessionStart: 3160, reminder: 1200 });
 
 // ctx: sessionStart { g: the `--group <id> ` prefix ('' single-group), multi, reach, tray } · reminder { multi, reach, topics, tray }
 // (tray = the hub's words for where the owner's tray is — src/tray-words.js trayWords().phrase)
@@ -182,7 +203,7 @@ const teachOf = (row, surface) => (row.teach && typeof row.teach[surface] === 'f
  *  then one copy-ready paragraph per open row. Every toggle and the reach closed ⇒ [] (2.211.0: nothing taught; the msg
  *  pointer never rides alone — test-msg-cli-groups). `gid` = the --group prefix agents must use ('' single-group; the
  *  generic '--group <id> ' in the shared multi-group section). */
-function renderSessionStartTools(T, { gid = '', multi = false, tray = null } = {}, rows = ROWS) {
+function renderSessionStartTools(T, { gid = '', multi = false, tray = null } = {}, rows = ROWS, rules = STANDING_RULES) {
   const F = T || { status: true, ask: true, task: true, jobs: true };
   const ctx = { g: gid || '', multi: !!multi, reach: F.channels || false, expired: F.channelsExpired || null, tray };
   const on = rows.map((r) => ({ r, fn: teachOf(r, 'sessionStart') })).filter((x) => x.fn && gateOpen(x.r.gate, F))
@@ -196,6 +217,8 @@ function renderSessionStartTools(T, { gid = '', multi = false, tray = null } = {
         : 'These are bound to THIS session.')
       : 'They\'re bound to THIS session — you never pass a group id.'];
   for (const x of on) out.push('', x.text);
+  // the standing rules (lane resume-words) — after every paragraph, whatever rows rendered
+  for (const r of rules) { const text = r.text({ status: !!F.status }); if (text) out.push('', text); }
   return out;
 }
 
@@ -233,4 +256,4 @@ function renderIndex(rows = ROWS) {
 /** topic → manual file(s) under docs/agent, aliases included — what `vibespace-docs <topic>` serves */
 const AGENT_DOC_TOPICS = Object.freeze(Object.fromEntries(ROWS.flatMap((r) => [[r.topic, r.manual], ...(r.aliases || []).map((a) => [a, r.manual])])));
 
-module.exports = { ROWS, GATES, CAPS, CHANNELS_SECTION_LINES, CHANNELS_REMINDER_SEG, AGENT_DOC_TOPICS, INDEX_MARKS, gateOpen, pointerTopics, renderSessionStartTools, renderReminderLine, renderIndex };
+module.exports = { ROWS, STANDING_RULES, GATES, CAPS, CHANNELS_SECTION_LINES, CHANNELS_REMINDER_SEG, AGENT_DOC_TOPICS, INDEX_MARKS, gateOpen, pointerTopics, renderSessionStartTools, renderReminderLine, renderIndex };

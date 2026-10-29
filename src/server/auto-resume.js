@@ -43,10 +43,36 @@ const { GENERIC_LEGACY_KEYS } = require('../harness-settings'); // PURE: the leg
 const path = require('path');
 const { windowOpened } = require('../auto-resume-signal.js'); // PURE: does this reading say the wall is gone?
 const harnesses = require('../harnesses');                    // the descriptor registry: THE resume verb lives there
+const { toAgentText } = require('../peer-text.js');          // PURE: the one belt on a name an agent reads (the account label)
 
-// The CLI's own continue prompt, verbatim (2.1.239) — same words, so a session
-// that has seen the TUI behave this way sees nothing new.
-const CONTINUE_PROMPT = 'You can continue now. Continue the task you were working on when the usage limit was reached; do not repeat work that is already complete.';
+// THE CONTINUE AN AGENT READS (lane resume-words, the owner 2026-10-29: «agent 都会优先理解那个 claude 自己的 reset
+// time 作为"用量重置时间"，但实际上 vibespace 通知的时候才是重置的时候»). The Screeps conversation hit a WEEKLY wall
+// («resets Oct 30, 9am»); the pool moved it to another account at once and sent the continue — but the agent had
+// already read the CLI's line as THE reset, parked its work "until the reset" 33 hours out and told the owner so. The
+// continue used to be the CLI's own sentence alone, which says nothing about that time. Now it SAYS what the time was
+// and was not. ONE constant, agent-facing English (never t()), assembled by continuePromptFor:
+//   switched / lifted  WHAT unblocked us, by continueNoticeFor's class: the pool now serves the conversation from
+//                      `{account}` (the label through the peer-text belt — the owner's words, like every name an agent
+//                      reads), or the wall lifted on the same account;
+//   facts              the limit message's reset was ONE account's and is not the continue; THIS message is; un-park;
+//   cli                the CLI's own continue prompt, verbatim (2.1.239) — still the last sentence.
+// The product's card («账号池已切换到 X，已自动继续这个任务») keeps its own words (continueNoticeFor).
+const CONTINUE_PROMPT = Object.freeze({
+  switched: 'VibeSpace auto-resume: the account pool now serves this conversation from {account}.',
+  lifted: 'VibeSpace auto-resume: the usage limit on this conversation\'s account has lifted.',
+  facts: 'The usage-limit message the CLI printed ("resets at …", weekly or 5-hour) named ONE account\'s reset time — that time is NOT when you may continue, and nothing is to be scheduled for it: THIS message is the continue. If you parked or deferred work "until the reset", un-park it now.',
+  cli: 'You can continue now. Continue the task you were working on when the usage limit was reached; do not repeat work that is already complete.',
+});
+const CONTINUE_ACCOUNT_MAX = 80;   // an account label is ONE inline piece, bounded
+/** PURE: the continue this fire delivers — `note` = continueNoticeFor's verdict ({cls}), `account` = the label of the
+ *  identity the continue lands on (null when unknown). */
+function continuePromptFor(note, account) {
+  const name = account == null ? '' : toAgentText(account, { kind: 'line', max: CONTINUE_ACCOUNT_MAX }).trim();
+  const head = note && note.cls === 'switched'
+    ? CONTINUE_PROMPT.switched.replace('{account}', () => (name ? `the account "${name}"` : 'another account'))
+    : CONTINUE_PROMPT.lifted;
+  return `${head} ${CONTINUE_PROMPT.facts} ${CONTINUE_PROMPT.cli}`;
+}
 const TICK_MS = 30000;      // the CLI polls at 30s; match it
 const GRACE_MS = 15000;     // let the reset actually land before asking
 const MAX_WAIT_MS = 26 * 60 * 60 * 1000; // a weekly bucket can be far out; refuse to sit forever
@@ -917,7 +943,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
       // notice survives only where no prompt reached the conversation (the
       // refusal / far-reset sentences, which have no card of their own).
       const carried = { note: note && note.text ? note.text : null };
-      try { ok = !!verb.deliver(session, CONTINUE_PROMPT, { sendChatInput: (s2, text) => sendToSession(id, s2, text, carried) }); }
+      try { ok = !!verb.deliver(session, continuePromptFor(note, label2), { sendChatInput: (s2, text) => sendToSession(id, s2, text, carried) }); }
       catch (e) { log(`[auto-resume] ${id}: the '${verb.form}' resume verb threw: ${e.message}`); ok = false; }
       if (!ok) { log(`[auto-resume] ${id}: could not deliver the continue prompt (will retry)`); giveBack(); return false; }
       armed.delete(id);
@@ -1097,7 +1123,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
   const stop = () => { if (timer) { clearInterval(timer); timer = null; } };
 
   return {
-    armIfEnabled, noteRecovered, forget, setEnabled, statusFor, enabledFor, fireNow, armedIds, tick, start, stop, CONTINUE_PROMPT,
+    armIfEnabled, noteRecovered, forget, setEnabled, statusFor, enabledFor, fireNow, armedIds, tick, start, stop, CONTINUE_PROMPT, continuePromptFor,
     noteQuotaReading, // the fresh-window edge: a reading that says the wall is gone continues the session NOW
     noteFireOutcome, recentFireFailures, canFire, noteNoPoolTarget, // the loop breaker's seams (engine: walled turn ⇒ ok:false; per-session switch ⇒ exclude + its own no-target verdict)
     _armed: armed, _fires: fires,
@@ -1105,7 +1131,7 @@ function create({ dataDir, activeSessions, sendToSession, serverSetting, broadca
 }
 
 module.exports = {
-  create, CONTINUE_PROMPT, TICK_MS, GRACE_MS, MAX_WAIT_MS,
+  create, CONTINUE_PROMPT, continuePromptFor, TICK_MS, GRACE_MS, MAX_WAIT_MS,
   FIRE_WINDOW_MS, FIRE_BACKOFF_MS, FIRE_MAX_IMMEDIATE, FIRE_QUARANTINE_MS, NO_TARGET_FRESH_MS, EDGE_HOLD_MS,
   refusalNoticeFor, continueNoticeFor, armNoticeFor, // PURE: what the conversation is told, and when
 };

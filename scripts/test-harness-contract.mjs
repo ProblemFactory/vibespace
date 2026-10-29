@@ -840,8 +840,13 @@ console.log('— auto-resume conformance (owner ruling 2026-09-08)');
     } else {
       ok(!!rec, `${id}: declares the '${verb.form}' verb ⇒ the wait is armed`);
       const fired = w.ar.tick(Date.now() + 60000 + 60000);
-      ok(fired === 1 && w.sent.length === 1 && w.sent[0].text === arMod.CONTINUE_PROMPT && w.sent[0].backend === id,
+      ok(fired === 1 && w.sent.length === 1 && w.sent[0].backend === id,
         `${id}: …and the continue is DELIVERED through its own '${verb.form}' verb into that harness's channel`, JSON.stringify(w.sent));
+      // lane resume-words: the words that reach the channel ARE continuePromptFor's — the wall lifted on this account,
+      // the facts about the CLI's reset time, the CLI's own sentence — unchanged by the harness's deliver road
+      const want = typeof arMod.continuePromptFor === 'function' ? arMod.continuePromptFor({ cls: 'reset' }, null) : null;
+      ok(!!want && !!w.sent[0] && w.sent[0].text === want && /THIS message is the continue/.test(w.sent[0].text) && /un-park it now/.test(w.sent[0].text),
+        `${id}: …the CONTINUE WORDS reach that channel unchanged (what the reset time was and was not, un-park, the CLI's continue)`, w.sent[0] && w.sent[0].text);
       ok(w.ar.statusFor('s1').armed === false, `${id}: …exactly once (the wait is spent)`);
       ok(w.ar.statusFor('s1').resume === verb.form, `${id}: …and the status names the form the surfaces gate on`);
     }
@@ -912,7 +917,7 @@ console.log('— auto-resume conformance (owner ruling 2026-09-08)');
     ok(/autoResumeCapsFor\(this\._backend\)\.supported/.test(sb), 'WIRING: the status-bar chip is drawn from the DERIVED caps row, through the shared reader');
     const arSrc = fs.readFileSync(path.join(REPO, 'src/server/auto-resume.js'), 'utf8');
     ok(/if \(!verbFor\(session\)\) \{ log\(/.test(arSrc), 'WIRING: armIfEnabled refuses a harness with no resume verb (never a promise nobody can keep)');
-    ok(/const verb = verbFor\(session\);[\s\S]{0,1200}verb\.deliver\(session, CONTINUE_PROMPT, \{ sendChatInput/.test(arSrc), 'WIRING: the ONE fire choke point runs the DESCRIPTOR\'s verb, handing it the ORCH channel');
+    ok(/const verb = verbFor\(session\);[\s\S]{0,1200}verb\.deliver\(session, continuePromptFor\(note, label2\), \{ sendChatInput/.test(arSrc), 'WIRING: the ONE fire choke point runs the DESCRIPTOR\'s verb, handing it the ORCH channel');
     ok((arSrc.match(/verb\.deliver\(/g) || []).length === 1, 'WIRING: …and there is exactly ONE of them (a second fire path is how the loop breaker — and the spend authorizer — get bypassed)');
     const engSrc2 = fs.readFileSync(path.join(REPO, 'src/server/usage-pool-engine.js'), 'utf8');
     ok((engSrc2.match(/noteQuotaReadingForResume\(/g) || []).length === 3, 'WIRING: ONE shared reading edge with exactly its two producers (claude + codex), never a per-harness answer', String((engSrc2.match(/noteQuotaReadingForResume\(/g) || []).length));
