@@ -145,7 +145,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Auto-resume never continues into an account its fresh check found spent, even when several conversations wait for the same reset.
 - When a pool's notice has to shorten its list, For you keeps the full list: every account and what holds it back.
 - Dismissing, reopening or clearing the unmeasured-CLI note in For you is kept; Re-check is yours alone (an agent's token is refused).
-- You can approve an agent's proposed reaction, or its taking back of your message, again — since 2.369.197 Approve was refused with a wrong tip to reload.
+- You can now approve a reaction an agent proposes, or its taking back of a message you sent — until now these cards refused Approve with a wrong tip to reload.
 
 ### Security
 - With sign-in off, an agent could widen a wake you approved by editing its rule or filter; changing what a wake reacts to now takes your click.

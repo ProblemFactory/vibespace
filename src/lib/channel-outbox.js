@@ -332,6 +332,11 @@ export function cardArmed(card, ev) {
   }
   return v.armed;
 }
+/** EVERY decision button on an armed card is bound through this ONE helper (acceptance r2 of lane reaction-approve-shown:
+ *  the reaction / recall road armed its Approve but not its Reject… nor the reject box's Reject, so a press inside the
+ *  window acted) — a press while the card arms nudges it and does nothing else; test-channel-outbox's census holds every
+ *  decision binding of the card to it, so no road can forget a button. */
+const armedOnly = (card, fn) => (ev) => (cardArmed(card, ev) ? fn(ev) : undefined);
 
 const stamp = (ms) => {
   if (!ms) return '';
@@ -597,33 +602,32 @@ export function renderProposalCard(app, p, { compact = false, line = false, onLi
       // never follow this device's remembered «wake now» — `relabelPrimaries` and a kept card's patch skip it (the owner's
       // reaction card read «批准并立即唤醒 agent» while its press posted next-turn)
       approveR.dataset.deliverFixed = '1';
-      approveR.onclick = async (ev) => {
-        if (!cardArmed(card, ev)) return;   // r6 F6: armed only, like every Approve
+      approveR.onclick = armedOnly(card, async () => {   // r6 F6: armed only, like every Approve
         for (const b of act.querySelectorAll('button')) b.disabled = true;
         const r = await approveProposal(p, { expectWakes: 0, ...(toAgent ? { deliver: 'next-turn' } : {}) });
         if (!r) { for (const b of act.querySelectorAll('button')) b.disabled = false; return; }
         const sent = !!(r.proposal && r.proposal.state === 'sent');
         const o = r.proposal ? (r.proposal.outcome || P.outcomeOf(r.proposal)) : null;
         showToast(sent ? (recall ? t('Message taken back') : t('Reaction added')) : t('Not sent: {why}', { why: (o && P.outcomeText(o, { t, errorCodeText: chanCaps.errorCodeText })) || routeErrorText(r) }), { type: sent ? 'info' : 'error' });
-      };
-      reject.onclick = () => {
+      });
+      reject.onclick = armedOnly(card, () => {
         const old = card.querySelector('.chan-prop-rejectbox');
         if (old) old.remove();
         const box = el('div', 'chan-prop-rejectbox');
         const inp = el('input', 'chan-opt-input');
         inp.type = 'text'; inp.placeholder = t('Reason (the agent reads it)');
         const go = btn(t('Reject'), null, 'mounts-btn-primary');
-        go.onclick = async () => {
+        go.onclick = armedOnly(card, async () => {
           go.disabled = true;
           const r = await post(`/api/channels/outbox/${encodeURIComponent(p.id)}/reject`, { reason: inp.value, ...(toAgent ? { deliver: 'next-turn', expectWakes: 0 } : {}) });
           if (!r) { go.disabled = false; return; }
           showToast(t('Rejected'));
-        };
+        });
         inp.addEventListener('keydown', (e) => { if (enterSubmits(e)) go.click(); });   // an input method's committing Enter is its own (inc-mv7mdv6b-emxq)
         box.append(inp, go);
         act.after(box);
         inp.focus();
-      };
+      });
       act.append(reject, approveR);
       card.appendChild(act);
       armCard(card);
@@ -653,7 +657,7 @@ export function renderProposalCard(app, p, { compact = false, line = false, onLi
       else showToast(sent ? t('Sent') : t('Not sent: {why}', { why: (o && P.outcomeText(o, { t, errorCodeText: chanCaps.errorCodeText, sendWhyText: chanCaps.sendWhyText })) || routeErrorText(r) }), { type: sent ? 'info' : 'error' });
       if (woke && r.proposal && r.proposal.receiptChoicePaced) showToast(t('The agent was not woken (paced: {why}) — it hears with its next message', { why: r.proposal.receiptChoicePaced }), { type: 'warn' });
     };
-    approve.onclick = (ev) => { if (cardArmed(card, ev)) doApprove(toAgent ? pressedDelivery(approve) : null); };   // verify r3: what the button SAYS; r6 F6: armed only
+    approve.onclick = armedOnly(card, () => doApprove(toAgent ? pressedDelivery(approve) : null));   // verify r3: what the button SAYS; r6 F6: armed only
     edit.onclick = () => {
       if (editor) return;
       editor = el('textarea', 'chan-prop-edit');
@@ -672,21 +676,20 @@ export function renderProposalCard(app, p, { compact = false, line = false, onLi
       inp.type = 'text'; inp.placeholder = t('Reason (the agent reads it)');
       const go = btn(toAgent ? rejectLabel(deliver, { box: true }) : t('Reject'), null, 'mounts-btn-primary');
       if (toAgent) go.dataset.deliver = deliver;
-      go.onclick = async (ev) => {
-        if (!cardArmed(card, ev)) return;
+      go.onclick = armedOnly(card, async () => {
         go.disabled = true;
         const woke = toAgent && deliver === 'wake-now' ? 1 : 0;
         const r = await post(`/api/channels/outbox/${encodeURIComponent(p.id)}/reject`, { reason: inp.value, ...(toAgent ? { deliver, expectWakes: woke } : {}) });
         if (!r) { go.disabled = false; return; }
         showToast(t('Rejected'));
         if (woke && r.proposal && r.proposal.receiptChoicePaced) showToast(t('The agent was not woken (paced: {why}) — it hears with its next message', { why: r.proposal.receiptChoicePaced }), { type: 'warn' });
-      };
+      });
       inp.addEventListener('keydown', (e) => { if (enterSubmits(e)) go.click(); });   // an input method's committing Enter is its own (inc-mv7mdv6b-emxq)
       box.append(inp, go);
       act.after(box);
       inp.focus();
     };
-    reject.onclick = (ev) => { if (cardArmed(card, ev)) openReject(toAgent ? rememberedDelivery() : null); };
+    reject.onclick = armedOnly(card, () => openReject(toAgent ? rememberedDelivery() : null));
     /** THE ▾ HALF of a split button: the menu of delivery choices. */
     const chevron = (kind, items) => {
       const c = document.createElement('button');
@@ -696,14 +699,13 @@ export function renderProposalCard(app, p, { compact = false, line = false, onLi
       c.title = kind === 'approve' ? t('More ways to approve') : t('More ways to reject');
       c.setAttribute('aria-label', c.title);
       c.appendChild(icon('chevronDown', 11));
-      c.onclick = (ev) => {
-        ev.stopPropagation();
-        if (!cardArmed(card, ev)) return;
+      const openMenu = armedOnly(card, () => {
         const r = c.getBoundingClientRect();
         // ONE class name (the item class is derived from it); the modifier after
         const menu = showContextMenu(r.left, r.bottom + 2, items());
         if (menu) { menu.classList.add('chan-split-menu'); menu.dataset.menu = kind; }
-      };
+      });
+      c.onclick = (ev) => { ev.stopPropagation(); openMenu(ev); };
       return c;
     };
     if (toAgent) {
