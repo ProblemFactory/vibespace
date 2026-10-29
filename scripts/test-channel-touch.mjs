@@ -40,6 +40,14 @@
 //      claude normalizer fed live marks a steer and a mid-turn hub card `midTurn` where they enter, the next turn's
 //      first record `turnStart`; every chip value from the chip table (src/queue-chips.js); codex's turn from its own
 //      task_started; a patched copy per rule
+//   ⑩ ROUND 4 (the r3 verdict): a heredoc is data to its delimiter (inside a `$( … )` span too), blind text is never a
+//      run, a single `&` sends its whole and-or list to the background, a lingering call competes like a running one, the
+//      producer fact is the normalizer's (one end writer on every close road); a patched copy per rule
+//   ⑪ ROUND 6 (the r4 verdict): a job ends only by a FOREGROUND `wait` / `kill` of its pid (never a backgrounded one, a
+//      `kill -0` probe, a trap, another job's pid, a conditional one, another subshell's job); a lingering claim is bounded
+//      by its own run (never past a later producer; a later CLI runner wins after its start); the opening skew needs the
+//      touch's conversation; a heredoc body inside a span never counts toward SCAN_MAX; a summary that IS a turn's first
+//      record opens it; a patched copy per rule
 //   ⑤ WIRING PINS: every agent channel route records (test-architecture §63 is the census), the renderer's holder on
 //      the three card shapes, the view in ChatView's ONE element hook + the broadcast + the turn + dispose, the
 //      status bar's keyed `channels` chip (escHtml'd), the ONE channel-window call, no innerHTML in the view, the
@@ -230,7 +238,7 @@ await section('④', async () => {
   const C = (id, start, end = null, text = '') => ({ id, start, end, text });
   const par = [C('P1', 10000, null, 'vibespace-channels read gmail/c1'), C('P2', 10400, null, 'vibespace-channels read gmail/c2')];
   const q1 = [touch({ id: 'q1', at: 13000, convId: 'c1' })];
-  const named = copy('named', 'const exact = cs.filter((c) => cand.has(c) && namesTouch(c.text, t, c.runs, c.kind));', 'const exact = [];');
+  const named = copy('named', 'const exact = cs.filter((c) => cand.has(c) && claims(c) && namesTouch(c.text, t, c.runs, c.kind));', 'const exact = [];');
   ok(T.bindToCall(q1, par).byCall.P1 && !named.bindToCall(q1, par).byCall.P1, 'CONTROL the named-evidence rule removed: a parallel call\'s touch lands on its sibling');
   const batch = copy('batch', 'if (cs[j].start > cs[i].start + batchMs) {', 'if (cs[j].start > cs[i].start) {');
   ok(!batch.bindToCall(q1, par).byCall.P1, 'CONTROL the batch rule removed: the first call of a parallel batch stops when its sibling starts, its touch is lost to it');
@@ -613,8 +621,9 @@ await section('⑧', async () => {
     return { by, bad };
   };
   // r4: the census reads the files that hold `.record` — one `git grep` over the working tree (tracked, untracked and ignored:
-  // the files a full read would scan) names them; without git (an archive copy) every src file is read
-  const withRecord = (() => { try { return new Set(execFileSync('git', ['grep', '-l', '--untracked', '--no-exclude-standard', '-F', '.record', '--', 'src/*.js'], { cwd: REPO, encoding: 'utf8' }).split('\n').filter(Boolean)); } catch { return null; } })();
+  // the files a full read would scan) names them; without git (an archive copy) every src file is read. r6: the files that
+  // hold the census's own call shape, `.record(` / `.recordMany(` (a strip only removes text — no other file can match)
+  const withRecord = (() => { try { return new Set(execFileSync('git', ['grep', '-l', '--untracked', '--no-exclude-standard', '-E', '\\.record(Many)?\\(', '--', 'src/*.js'], { cwd: REPO, encoding: 'utf8' }).split('\n').filter(Boolean)); } catch { return null; } })();
   const texts = srcFiles('src').map((f) => [f, !withRecord || withRecord.has(f) || f === 'src/server/conversation-deliver.js' ? read(f) : '']);
   const cz = census(texts);
   // the ONE writer's call sites (r2 — the census said «one writer» and printed one line; the report counted 17, the file has 16)
@@ -711,8 +720,9 @@ await section('⑨', async () => {
   const Ds = [one('SCRIPT', './read-all.sh', R0 + 10_000, R0 + 10_300, { background: true }), one('NPM', 'npm test', R0 + 29_000, R0 + 60_000, { background: false })];
   const d1 = B9(T, tn(4, R0 + 30_000), D, ctx), d2 = B9(T, tn(4, R0 + 30_000), Dv, ctx), d3 = B9(T, tn(4, R0 + 30_000), Ds, ctx);
   const E = B9(T, tn(3, R0 + 140_000), [one('PY', 'python3 tools/report.py --out fixture.md', R0 + 10_000, R0 + 20_000)], ctx);
-  ok(eq(d1, { by: { LOOP: 4 }, notes: {}, unbound: 0 }) && eq(d2, d1) && eq(d3, { by: {}, notes: { 'note:ctx': 4 }, unbound: 0 }) && eq(E, { by: {}, notes: { 'note:ctx': 3 }, unbound: 0 }),
-    'A BACKGROUND PRODUCER STAYS A CANDIDATE (MAJOR 3 (ii), probe D): a read loop whose card returned (the view: `run_in_background`; a caller that does not say: a call that ran the CLI) + a later lone `npm test` — r4: the loop runs the CLI, it keeps its 4 rows (r3: the note; r2: NPM 4); a background SCRIPT (it could have run anything) + the `npm test` are TWO candidates, none naming the reads ⇒ the note; an ended `python3 tools/report.py` never takes reads two minutes later (probe E; r2: PY 3)', { d1, d2, d3, E });
+  const d0 = B9(T, tn(4, R0 + 20_000), D, ctx);
+  ok(eq(d1, { by: {}, notes: { 'note:ctx': 4 }, unbound: 0 }) && eq(d2, d1) && eq(d3, d1) && eq(d0, { by: { LOOP: 4 }, notes: {}, unbound: 0 }) && eq(E, { by: {}, notes: { 'note:ctx': 3 }, unbound: 0 }),
+    'A BACKGROUND PRODUCER STAYS A CANDIDATE (MAJOR 3 (ii), probe D): a read loop whose card returned (the view: `run_in_background`; a caller that does not say: a call that ran the CLI) + a later lone `npm test` — the loop could still be running, the npm test never takes its reads (r2: NPM 4); r6: the loop\'s claim ends where the npm test (a later producer that provably ran) starts — two that could have produced them ⇒ the note (r4: LOOP 4), as for a background SCRIPT; before the npm test starts the loop keeps them; an ended `python3 tools/report.py` never takes reads two minutes later (probe E; r2: PY 3)', { d0, d1, d2, d3, E });
   const fgList = [one('LIST', 'vibespace-channels list', R0 + 5_000, R0 + 6_000, { background: false }), one('PY', 'python3 tools/triage_inbox.py', R0 + 8_000, null, { background: false })];
   const bgEnded = [one('BG', loop, R0 + 5_000, R0 + 5_300, { background: true, bgEnd: R0 + 7_000 }), one('PY', 'python3 tools/triage_inbox.py', R0 + 8_000, null, { background: false })];
   const amp = [one('AMP', 'nohup ./read-all.sh > /tmp/o 2>&1 &', R0 + 5_000, R0 + 5_100, { background: false }), one('V', 'vibespace-status working --reason x', R0 + 8_000, null, { background: false })];
@@ -729,7 +739,7 @@ await section('⑨', async () => {
     'A CALL NEVER CAUSES A LATER TURN\'S TOUCH (MAJOR 3 (i), tail-cross.cjs): turn 1 ends on `bash run.sh` / `npm test` / an Agent helper; a touch 10 s or 4 h into turn 2 ⇒ turn 2\'s note, or the chip when it has none (r2: turn 1\'s call); an UNFINISHED call of turn 1 neither', { tcr: tcr.slice(0, 2), open1 });
   const bgl = { 'npm run build': 'npm run build', 'set -e; vibespace-status …': 'set -e; vibespace-status working --reason "pass"', '[[ … ]] && vibespace-status …': '[[ -n "$X" ]] && vibespace-status working --reason "pass"', 'vibespace-status … (control)': 'vibespace-status working --reason "pass"' };
   const bgr = Object.entries(bgl).map(([k, text]) => [k, B9(T, [1, 2, 3, 4].map((i) => touch({ id: 'b' + i, adapterId: 'lark', convId: 'c' + i, at: R0 + 30_000 + i * 100 })), [one('BG', 'for c in $(cat /tmp/l); do vibespace-channels read "$c"; done', R0 + 5000, R0 + 5500), one('FG', text, R0 + 20_000, R0 + 60_000)], { notes: [{ id: 'note:turn', at: R0 + 200 }], turns: [R0] })]);
-  ok(bgr.every(([, r]) => eq(r, { by: { BG: 4 }, notes: {}, unbound: 0 })), 'THE OWNER\'S SYMPTOM, EVERY PREFIX (hs-bg-loop-probe): a background CLI loop reading while a lone `npm run build` / `set -e; vibespace-status …` / `[[ … ]] && vibespace-status …` / `vibespace-status …` runs ⇒ r4: the LOOP keeps its 4 rows for each (r3: the note; r2: FG 4 for the first three) — never the foreground call', bgr);
+  ok(bgr.every(([k, r]) => eq(r, k === 'npm run build' ? { by: {}, notes: { 'note:turn': 4 }, unbound: 0 } : { by: { BG: 4 }, notes: {}, unbound: 0 })), 'THE OWNER\'S SYMPTOM, EVERY PREFIX (hs-bg-loop-probe): a background CLI loop reading while a lone `set -e; vibespace-status …` / `[[ … ]] && vibespace-status …` / `vibespace-status …` runs ⇒ the LOOP keeps its 4 rows for each (r3: the note; r2: FG 4 for the first two) — never the foreground call; beside a lone `npm run build` (r6: a later producer that provably ran — the loop\'s claim ends at its start) ⇒ the note (r4: BG 4; r2: FG 4)', bgr);
   // ── 3. ONE TABLE OF WHAT RUNS NOTHING
   ok(eq(T.INERT_COMMANDS, [...RN.builtins, ...RN.files, ...RN.product]) && ['set', '[[', '[', 'test', 'export', 'local', 'read', 'declare', 'true', 'false', ':', 'type', 'cd', 'pwd', 'echo', 'printf'].every((w) => RN.builtins.includes(w))
     && ['set -e; vibespace-status x', '[[ -n "$X" ]] && vibespace-status x', 'export A=1 && vibespace-status x', 'n=$((n+1)) && vibespace-status x', '(( n++ )); vibespace-status x', 'read -r x < f; echo "$x"', 'command -v vibespace-channels', 'local a=1; declare -a b'].every(T.runsNothing)
@@ -894,7 +904,7 @@ await section('⑨', async () => {
     'CONTROL a producer that never lingers (r2): the background loop\'s reads land on the lone `npm test` / `npm run build`');
   const tailBack = copy('tail-rung', '      else if (!named.length && could.length === 1 && callCanRun(could[0])) pick = could[0];\n', '      else if (!named.length && could.length === 1 && callCanRun(could[0])) pick = could[0];\n      else if (!running.length && cs.length && callCauses(cs[cs.length - 1], t)) pick = cs[cs.length - 1];\n');
   ok(eq(B9(tailBack, tn(3, R0 + 140_000), [one('PY', 'python3 tools/report.py --out fixture.md', R0 + 10_000, R0 + 20_000)], ctx).by, { PY: 3 }), 'CONTROL r2\'s tail rung restored (the last call, no end bound): an ended script takes reads that arrive two minutes later');
-  const noTurnBound = copy('turn-bound', '        if (crossesTurn(c, at)) continue;', '');
+  const noTurnBound = copy('turn-bound', '        if (crossesTurn(c, t, at)) continue;', '');
   ok(eq(B9(noTurnBound, [touch({ id: 'o1', adapterId: 'lark', convId: 'fx-o1', at: R0 + 60_000 })], [{ id: 'U1', start: R0, end: null, text: 'python3 x.py', kind: 'command' }], { notes: n1, turns: turns2 }).by, { U1: 1 }), 'CONTROL the turn bound removed: turn 1\'s unfinished call takes a touch of turn 2');
   const blindInert = copy('blind', '        runs, inert: !ran.blind.length && ran.every(inertRun),', '        runs, inert: ran.every(inertRun),');
   ok(eq(B9(blindInert, [1, 2, 3].map((i) => touch({ id: 'h' + i, adapterId: 'lark', convId: 'c' + i, at: R0 + 2000 + i * 10 })), [one('X', cutRun, R0, R0 + 9000)], { notes: [{ id: 'note:n', at: R0 - 100 }], turns: [R0 - 200] }).notes, { 'note:n': 3 }), 'CONTROL a cut scan read as inert (r2): the call whose `./read-all.sh` lies past SCAN_MAX loses its 3 rows to the note');
@@ -958,13 +968,16 @@ await section('⑩', async () => {
   const lm = B9(T, t6, [scr, one('MSG', longMsg, R0 + 5040, R0 + 9000)], ctx), cb = B9(T, t6, [scr, one('CUT', cutCli, R0 + 5040, R0 + 9000)], ctx);
   ok(longMsg.length > T.SCAN_MAX && T.runsNothing(longMsg) && T.channelsRuns(longMsg).length === 0 && eq(lm, NOTE3) && T.channelsRuns(cutCli).length === 0 && !T.runsNothing(cutCli) && eq(cb, NOTE3) && eq(B9(T, t6, [one('CUT', cutCli, R0 + 5040, R0 + 9000)], ctx).by, { CUT: 3 }),
     'BLIND TEXT IS NEVER A RUN (r4 MAJOR 1, hygiene-blind-rung1.cjs): a 9 KB `vibespace-msg send … <<\'EOF\' … EOF` is read to its EOF — a product CLI whose heredoc is data runs nothing and never takes `bash /tmp/read-all.sh`\'s rows (r3: MSG 3); the CLI\'s name in SHELL cut past SCAN_MAX makes the call «could run», never a command word: alone it keeps its rows, beside the script it is one of two that could run ⇒ the note', { lm, cb });
-  // ── 3. A LINE ENDS ITS OWN JOBS — `wait`, `kill`, a `trap` that kills
-  const reap = ['npm test & npm run lint & wait', 'node server.js & PID=$!; sleep 2; curl -s "$URL/health"; kill $PID', "trap 'kill $(jobs -p)' EXIT; node server.js & sleep 2; curl -s \"$URL/health\"", 'node a.js & node b.js & wait -n; echo done'];
-  const keep = ['nohup node server.js > /tmp/s.log 2>&1 &', 'npm test; wait; node server.js &', 'node server.js & disown'];
+  // ── 3. A LINE ENDS ITS OWN JOBS — r6: only a FOREGROUND `wait` / `kill` of the job's pid (shell-words endJobs)
+  const reap = ['npm test & npm run lint & wait', 'node server.js & PID=$!; sleep 2; curl -s "$URL/health"; kill $PID', 'node a.js & wait -n; echo done', 'node server.js & sleep 2; curl -s "$URL/health"; kill %1', './build.sh & B=$!; ./lint.sh; wait "$B"', '( node a.js & wait )'];
+  const keep = ['nohup node server.js > /tmp/s.log 2>&1 &', 'npm test; wait; node server.js &', 'node server.js & disown',
+    "trap 'kill $(jobs -p)' EXIT; node server.js & sleep 2; curl -s \"$URL/health\"", 'node a.js & node b.js & wait -n; echo done', '( node a.js & node b.js & wait ) > /tmp/o 2>&1 &',
+    'node server.js & P=$!\n{ sleep 3600; kill $P; } &', 'node server.js > /tmp/s.log 2>&1 &\nsleep 1; kill -0 $! && echo alive', 'sleep 1 & A=$!\nnode server.js &\nwait $A',
+    'node server.js & PID=$!; curl -s "$URL/health" || kill $PID', '(setsid ./serve.sh > /tmp/s.log 2>&1 &)\nnpm run lint & wait'];
   const py = one('PY', 'python3 tools/triage_inbox.py', R0 + 20_000, null), t25 = tn(3, R0 + 25_000);
   const rp = reap.map((x) => B9(T, t25, [one('PAR', x, R0, null), py], ctx)), kp = keep.map((x) => B9(T, t25, [one('PAR', x, R0, null), py], ctx));
   ok(rp.every((r) => eq(r.by, { PY: 3 })) && kp.every((r) => eq(r, NOTE3)),
-    'A LINE ENDS ITS OWN JOBS (r4 MAJOR 2 (i), linger-probe.cjs): `a & b & wait`, `srv & PID=$!; …; kill $PID`, `trap \'kill …\' EXIT`, `wait -n` — the job does not outlive the card: a later lone python script keeps its reads (r3: the note); `nohup … &`, a `wait` BEFORE the `&`, `& disown` still outlive it ⇒ two that could run, the note', { rp: rp.map((r) => r.by), kp: kp.map((r) => r.notes) });
+    'A LINE ENDS ITS OWN JOBS (r4 MAJOR 2 (i), linger-probe.cjs; r6 MAJOR, skeptic-reaper-bg.cjs): a FOREGROUND `wait` (every job before it; `wait -n` the one job), `kill $PID` (PID=$!), `kill %1`, `wait "$B"`, a `( … & wait )` subshell that waits for its own — the job does not outlive the card: a later lone python script keeps its reads (r3: the note); `nohup … &`, a `wait` BEFORE the `&`, `& disown` and, r6, a `trap` (it ends nothing until it fires), `wait -n` over two jobs, a `wait` inside the backgrounded group, a backgrounded watchdog `kill`, a `kill -0` probe, a `wait` of another job\'s pid, a `kill` after `||`, another subshell\'s job — the job outlives the card ⇒ two that could run, the note (r4: PY 3 for these eight)', { rp: rp.map((r) => r.by), kp: kp.map((r) => r.notes) });
   // ── 4. A LINGERING CALL COMPETES LIKE A RUNNING ONE — the two mirrors, and what a lingering call never does
   const t30 = tn(3, R0 + 25_000);
   const loopBg = one('LOOP', LOOP, R0 + 5_000, R0 + 5_300, { background: true }), fgLoop = one('LOOP', LOOP, R0 + 20_000, null);
@@ -976,16 +989,18 @@ await section('⑩', async () => {
     twoBg: B9(T, tn(4, R0 + 8_000), [one('P1', LOOP, R0 + 5_000, null, { background: true }), one('P2', LOOP.replace('ids', 'ids2'), R0 + 5_040, null, { background: true })], ctx),
     twoAmp: B9(T, tn(4, R0 + 8_000), [one('P1', 'vibespace-channels read lark/a-list > /tmp/a &', R0 + 5_000, null), one('P2', 'vibespace-channels read lark/b-list > /tmp/b &', R0 + 5_040, null)], ctx),
   };
-  ok(eq(mir.loopBgNpm.by, { LOOP: 3 }) && eq(mir.devBgLoop.by, { LOOP: 3 }) && eq(mir.helperLoop.by, { LOOP: 3 }) && eq(mir.loneBg.by, { LOOP: 3 }) && eq(mir.tailPy.by, { PY: 3 })
-    && eq(mir.loopList, NOTE3) && eq(mir.helperNpm, NOTE3) && eq(mir.twoBg.notes, { 'note:ctx': 4 }) && eq(mir.twoAmp.notes, { 'note:ctx': 4 }),
-    'A LINGERING CALL COMPETES LIKE A RUNNING ONE (r4 MAJOR 2 (ii)(iii), hygiene-bg-linger.cjs): a lingering CLI loop beside a foreground `npm test` ⇒ the loop; a lingering `npm run dev` (or a background helper) beside a foreground CLI loop ⇒ the loop (r3: the note); a lone lingering loop ⇒ itself; a lingering call that runs nothing (`tail -f`) never vetoes ⇒ the lone python script; a lingering CLI loop beside another CLI runner, two background producers in one batch (claim 0 (b) B4) and a background helper beside a lone stranger ⇒ by name or the note, never the latest', Object.fromEntries(Object.entries(mir).map(([k, r]) => [k, r.by])));
+  ok(eq(mir.loopBgNpm, NOTE3) && eq(mir.devBgLoop.by, { LOOP: 3 }) && eq(mir.helperLoop.by, { LOOP: 3 }) && eq(mir.loneBg.by, { LOOP: 3 }) && eq(mir.tailPy.by, { PY: 3 })
+    && eq(mir.loopList.by, { LIST: 3 }) && eq(mir.helperNpm, NOTE3) && eq(mir.twoBg.notes, { 'note:ctx': 4 }) && eq(mir.twoAmp.notes, { 'note:ctx': 4 }),
+    'A LINGERING CALL COMPETES LIKE A RUNNING ONE (r4 MAJOR 2 (ii)(iii), hygiene-bg-linger.cjs): a lingering `npm run dev` (or a background helper) beside a foreground CLI loop ⇒ the loop (r3: the note); a lone lingering loop ⇒ itself; a lingering call that runs nothing (`tail -f`) never vetoes ⇒ the lone python script; two background producers in one batch (claim 0 (b) B4) and a background helper beside a lone stranger ⇒ by name or the note, never the latest; r6 — a lingering claim is bounded by its own run: a lingering CLI loop beside a LATER foreground `npm test` ⇒ the note (r4: the loop), beside a LATER CLI runner ⇒ that runner, after its start (r4: the note)', Object.fromEntries(Object.entries(mir).map(([k, r]) => [k, r.by])));
   // ── 5. A COMPOUND COMMAND SENT TO THE BACKGROUND — every command of its group
   const comp = ['for c in $(cat ids); do vibespace-channels read "$c"; done &', '( for c in $(cat ids); do vibespace-channels read "$c"; done ) &', '{ for c in $(cat ids); do vibespace-channels read "$c"; done; } &', 'while true; do vibespace-channels read x; sleep 5; done &', 'for c in $(cat ids); do vibespace-channels read "$c"; done > /tmp/log 2>&1 &', 'if true; then vibespace-channels read x; fi &'];
   const ands = ['vibespace-channels list | tee /tmp/l.txt &', 'cd /tmp/w && vibespace-channels read lark/x > /tmp/r &'];
-  const cg = [...comp, ...ands].map((x) => B9(T, t30, [one('BG', x, R0 + 5_000, R0 + 5_300), fgNpm], ctx));
-  ok(cg.every((r) => eq(r.by, { BG: 3 })) && eq(B9(T, t30, [one('BG', './a.sh && cd /tmp &', R0 + 5_000, R0 + 5_300), fgNpm], ctx), NOTE3) && eq(B9(T, t30, [one('BG', '( ./a.sh; ./b.sh ) &', R0 + 5_000, R0 + 5_300), fgNpm], ctx), NOTE3) && eq(B9(T, t30, [one('BG', '( ./a.sh; ./b.sh ) & wait', R0 + 5_000, R0 + 5_300), fgNpm], ctx).by, { NPM: 3 })
-    && eq(B9(T, t30, [one('BG', 'case "$m" in a) ./a.sh;; esac &', R0 + 5_000, R0 + 5_300), fgNpm], ctx), NOTE3),
-    'A SINGLE `&` SENDS ITS WHOLE AND-OR LIST TO THE BACKGROUND (claim 0 (b) B1, as bash does): `for … done &`, `( … ) &`, `{ …; } &`, `while … done &`, `… done > log 2>&1 &`, `if … fi &`, `case … esac &`, a pipeline `vibespace-channels list | tee … &`, `cd x && vibespace-channels read … &` — every command of it outlives the card: the CLI keeps its reads beside a later lone `npm test` (r3: NPM 4); a backgrounded group of scripts or `./a.sh && cd /tmp &` beside it ⇒ two that could run, the note; `( … ) & wait` ends it', cg.map((r) => r.by));
+  // r6: the stranger is an EARLIER lingering `npm run dev` — a LATER producer bounds the line's claim (⑪)
+  const devEarly = one('DEV', 'npm run dev', R0 + 1_000, R0 + 1_300, { background: true });
+  const cg = [...comp, ...ands].map((x) => B9(T, t30, [devEarly, one('BG', x, R0 + 5_000, R0 + 5_300)], ctx));
+  ok(cg.every((r) => eq(r.by, { BG: 3 })) && eq(B9(T, t30, [devEarly, one('BG', './a.sh && cd /tmp &', R0 + 5_000, R0 + 5_300)], ctx), NOTE3) && eq(B9(T, t30, [devEarly, one('BG', '( ./a.sh; ./b.sh ) &', R0 + 5_000, R0 + 5_300)], ctx), NOTE3) && eq(B9(T, t30, [devEarly, one('BG', '( ./a.sh; ./b.sh ) & wait', R0 + 5_000, R0 + 5_300)], ctx).by, { DEV: 3 })
+    && eq(B9(T, t30, [devEarly, one('BG', 'case "$m" in a) ./a.sh;; esac &', R0 + 5_000, R0 + 5_300)], ctx), NOTE3),
+    'A SINGLE `&` SENDS ITS WHOLE AND-OR LIST TO THE BACKGROUND (claim 0 (b) B1, as bash does): `for … done &`, `( … ) &`, `{ …; } &`, `while … done &`, `… done > log 2>&1 &`, `if … fi &`, `case … esac &`, a pipeline `vibespace-channels list | tee … &`, `cd x && vibespace-channels read … &` — every command of it outlives the card: the CLI keeps its reads beside an EARLIER lingering `npm run dev` (r6: beside a LATER producer its claim ends there — ⑪); a backgrounded group of scripts or `./a.sh && cd /tmp &` beside it ⇒ two that could run, the note; `( … ) & wait` ends it ⇒ the dev server', cg.map((r) => r.by));
   // ── 6. `env -S` IS A COMMAND LINE; A FILE TOOL'S FORM THAT RUNS A PROGRAM COULD RUN
   const envS = ["env -S 'vibespace-channels read x'", "env -S'vibespace-channels read x'", "env --split-string='vibespace-channels read x'", "/usr/bin/env -S 'vibespace-channels read' x"];
   const runs = ["git rebase -x 'npm test' main", 'git rebase --exec=./check.sh main', 'git bisect run ./check.sh', "git submodule foreach 'git pull'", "git -c alias.r='!./run.sh' r", 'rg --pre ./decode.sh foo', 'sort --compress-program=gzip big.txt', "env -S 'python3 run.py'"];
@@ -1072,8 +1087,8 @@ await section('⑩', async () => {
   const cmp = [{ role: 'user', ts: R0, turnIndex: 1, content: [{ type: 'text', text: 'triage the inbox' }] }, { role: 'tool', ts: R0 + 1000, turnIndex: 1 }, { role: 'user', ts: R0 + 5100, turnIndex: 2, content: [{ type: 'text', text: SUMMARY }] }, { role: 'tool', ts: R0 + 6000, turnIndex: 2 }];
   const cmpTurns = (TT) => { const out = []; let prev = null; for (const m of cmp) { if (TT.opensTurn(m, prev)) out.push(m.ts - R0); prev = m; } return out; };
   const cmpBind = (TT) => B9(TT, tn(3, R0 + 5_500), [one('LOOP', LOOP, R0 + 1000, null), one('VS', 'vibespace-status working --reason x', R0 + 6000, null)], { notes: [{ id: 'note:ctx', at: R0 + 100 }], turns: cmpTurns(TT).map((x) => x + R0) });
-  ok(eq(cmpTurns(T), [0]) && !T.opensTurn({ role: 'user', turnStart: true, content: [{ type: 'text', text: SUMMARY }] }, null) && eq(cmpBind(T).by, { LOOP: 3 }),
-    'A COMPACTION NEVER STARTS A TURN (claim 1 finding 2): the CLI\'s compaction summary (a user-role record it writes mid-turn) is no boundary — the loop started before it keeps its reads (r3: the summary cut the turn, 3 unbound)', { turns: cmpTurns(T), by: cmpBind(T) });
+  ok(eq(cmpTurns(T), [0]) && T.opensTurn({ role: 'user', turnStart: true, content: [{ type: 'text', text: SUMMARY }] }, null) && !T.opensTurn({ role: 'user', content: [{ type: 'text', text: SUMMARY }] }, { turnIndex: 1 }) && eq(cmpBind(T).by, { LOOP: 3 }),
+    'A COMPACTION NEVER STARTS A TURN BY ITSELF (claim 1 finding 2; r6 minor): the CLI\'s compaction summary (a user-role record it writes mid-turn) is no boundary — the loop started before it keeps its reads (r3: the summary cut the turn, 3 unbound); r6: the harness\'s own fact is read FIRST — a summary that IS a turn\'s first record (`turnStart`) opens it (r4: never; ⑪ feeds the live normalizer)', { turns: cmpTurns(T), by: cmpBind(T) });
   // ── THE SCANNER IS PURE AND THE CLIENT'S RUN SUMMARY NEVER READS THE WITNESS (the .362 train fix — test-collab-live-counter)
   const swText = (() => { try { return read('src/shell-words.js'); } catch { return null; } })(), crs = read('src/lib/chat-run-summary.js');
   const crsImports = crs.match(/^\s*import .*$/gm) || [];
@@ -1089,23 +1104,23 @@ await section('⑩', async () => {
   const SW = read('src/shell-words.js');
   const scanWith = (tag, text) => MUT.load('src/channel-touch.js', src.replace("require('./shell-words.js')", `require(${JSON.stringify(MUT.write('src/shell-words.js', text, tag))})`), tag);
   const scan = (tag, from, to) => { if (SW.split(from).length !== 2) anchorMissing(tag, 'src/shell-words.js (one occurrence)'); return scanWith(tag, SW.replace(from, to)); };
-  const noDocs = scan('span-heredoc', 'function spanEnd(s, i, open, close, docs = open === \'(\') {', 'function spanEnd(s, i, open, close, docs = false) {');
+  const noDocs = scan('span-heredoc', "    if (docs && ch === '\\n' && pending.length) {", "    if (false && ch === '\\n' && pending.length) {");
   ok(!noDocs.runsNothing(commit(bodies[0])) && eq(B9(noDocs, t3, [one('COMMIT', commit(bodies[1]), R0 + 40, null)], ctx).by, { COMMIT: 3 }), 'CONTROL a `$( … )` span blind to heredocs (r3): the commit idiom with «1)» in its body could run again — a lone commit takes the 3 reads');
   const blindRun = scan('blind-run', '{ return ran.filter((x) => x.base === CLI).map(({ at, verb }) => ({ at, verb })); }', "{ return [...ran.filter((x) => x.base === CLI).map(({ at, verb }) => ({ at, verb })), ...ran.blind.flatMap((b) => [...b.matchAll(/vibespace-channels(?:\\s+([a-z][\\w-]*))?/g)].map((m) => ({ at: -1, verb: m[1] || '' })))]; }");
   ok(eq(B9(blindRun, t6, [scr, one('CUT', cutCli, R0 + 5040, R0 + 9000)], ctx).by, { CUT: 3 }), 'CONTROL the CLI\'s name in blind text read as a run (r3): the cut call takes `bash /tmp/read-all.sh`\'s rows');
   const docCut = scan('heredoc-cut', '        const b = heredocBody(s, i, h);', '        const b = heredocBody(s.slice(0, SCAN_MAX), i, h);');
   ok(!docCut.runsNothing(longMsg), 'CONTROL a heredoc body counted against SCAN_MAX (r3): the 9 KB vibespace-msg could run again');
-  const noReap = copy('reapers', 'const reaped = (ran, i) =>', 'const reaped = () => false; const reapedR4 = (ran, i) =>');
+  const noReap = scan('reapers', '  if (!jobs.length) return;\n  const vars = new Map();', '  return;\n  const vars = new Map();');
   ok(eq(B9(noReap, t25, [one('PAR', reap[0], R0, null), py], ctx), NOTE3), 'CONTROL no reapers (r3): `npm test & npm run lint & wait` lingers — the later python script loses its reads to the note');
-  const veto = copy('linger-veto', '      const named = cs.filter((c) => cand.has(c) && callNames(c, t));', '      const named = lingering.length ? [] : running.filter((c) => callNames(c, t));');
+  const veto = copy('linger-veto', '      const named = cs.filter((c) => cand.has(c) && claims(c) && callNames(c, t));', '      const named = lingering.length ? [] : running.filter((c) => callNames(c, t));');
   ok(eq(B9(veto, t30, [one('DEV', 'npm run dev', R0 + 5_000, R0 + 5_300, { background: true }), fgLoop], ctx), NOTE3), 'CONTROL r3\'s veto (anything lingering turns the command-word rung off): the foreground CLI loop loses its reads to the note beside a lingering `npm run dev`');
   const inertVeto = copy('linger-inert', '      const could = [...running, ...lingering.filter(callCanRun)];', '      const could = [...running, ...lingering];');
   ok(eq(B9(inertVeto, t30, [one('TAIL', 'tail -f /tmp/app.log', R0 + 5_000, R0 + 5_300, { background: true }), one('PY', 'python3 x.py', R0 + 20_000, null)], ctx), NOTE3), 'CONTROL a lingering call that runs nothing counted as a candidate: a background `tail -f` takes the lone python script\'s reads to the note');
   const latest = copy('producers-latest', '      else if (named.length === 1 || (named.length > 1 && !named.some((c) => c.lingers))) pick', '      else if (named.length) pick');
   ok(eq(B9(latest, tn(4, R0 + 8_000), [one('P1', LOOP, R0 + 5_000, null, { background: true }), one('P2', LOOP.replace('ids', 'ids2'), R0 + 5_040, null, { background: true })], ctx).by, { P2: 4 }), 'CONTROL several CLI runners judged by the latest even when one is a background producer (r3): two producers in one batch ⇒ P2 4, a guess');
-  const noList = scan('list-bg', "      if (ch === '&' && !two) for (let k = list; k < out.length; k++) out[k].words.bg = true;", "      if (ch === '&' && !two && c) c.words.bg = true;");
-  ok(eq(B9(noList, t30, [one('BG', comp[1], R0 + 5_000, R0 + 5_300), fgNpm], ctx).by, { NPM: 3 }) && eq(B9(noList, t30, [one('BG', ands[0], R0 + 5_000, R0 + 5_300), fgNpm], ctx).by, { NPM: 3 }),
-    'CONTROL `&` read as backgrounding only the command before it (r3): `( for … done ) &` and `vibespace-channels list | tee … &` do not linger — the later lone npm test takes their reads');
+  const noList = scan('list-bg', '        for (let k = list; k < out.length; k++) { out[k].words.bg = true; out[k].words.job = job; }', '        if (c) { c.words.bg = true; c.words.job = job; }');
+  ok(eq(B9(noList, t30, [devEarly, one('BG', comp[1], R0 + 5_000, R0 + 5_300)], ctx).by, { DEV: 3 }) && eq(B9(noList, t30, [devEarly, one('BG', ands[0], R0 + 5_000, R0 + 5_300)], ctx).by, { DEV: 3 }),
+    'CONTROL `&` read as backgrounding only the command before it (r3): `( for … done ) &` and `vibespace-channels list | tee … &` do not linger — the lingering dev server takes their reads');
   const noSplit = scan('env-split', "      if (base === 'env' && (ENV_SPLIT.includes(o)", "      if (false && (ENV_SPLIT.includes(o)");
   const noExec = scan('exec-forms', '    const execs = RUNS_A_COMMAND.has(cw.base) &&', '    const execs = false &&');
   ok(noSplit.channelsRuns(envS[0]).length === 0 && noExec.runsNothing(runs[0]), 'CONTROL `env -S` read as an option and a file tool\'s exec form as inert (r3): `env -S \'vibespace-channels read x\'` runs nothing, `git rebase -x \'npm test\'` runs nothing');
@@ -1118,11 +1133,114 @@ await section('⑩', async () => {
   const textMark = copy('entered-turn', "      if (m.role !== 'user' || !m.webuiMsgId || ", "      if (m.role !== 'user' || ", 'src/message-manager.js', MMS);
   const sw2 = swOf(textMark.MessageManager);
   ok(sw2.opener && sw2.opener.midTurn === true && eq(sw2.turns, [0]), 'CONTROL a queued_command that marks the newest same words (r3): the rebuilt opener «continue» loses its turn — turns [0]');
-  const noOpen = copy('opening-skew', ' && !(u === c.start && at < c.start)', '');
+  const noOpen = copy('opening-skew', ' && !(u === c.start && at < c.start && namesConv(c.text, t))', '');
   ok(eq(B9(noOpen, [touch({ id: 'sk', adapterId: 'lark', convId: 'fx-9', at: R0 + 9_700 })], [one('X', 'vibespace-channels read lark/fx-9', R0 + 10_000, R0 + 12_000)], { notes: [{ id: 'note:t1', at: R0 + 100 }], turns: [R0, R0 + 10_000] }).notes, { 'note:t1': 1 }), 'CONTROL a call that opens its turn excluded for the skew before it (r3): the touch goes to turn 1\'s note');
   const noCmp = copy('compaction', "  if (msg.role === 'user' && isCompactSummaryText(", "  if (false && isCompactSummaryText(");
   ok(eq(cmpTurns(noCmp), [0, 5100]), 'CONTROL a compaction summary read as a turn\'s start (r3): the summary cuts the turn');
   for (const c of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 15, label: '⑩ ' })) ok(c.pass, c.name, c.detail);
+});
+
+// ═══ ⑪ ROUND 6 ═══
+console.log('⑪ ROUND 6 — a job ends only by a foreground wait / kill of its pid, a lingering claim is bounded by its own run, the opening skew needs the touch\'s conversation, a span\'s heredoc never counts, a summary that opens a turn opens it');
+await section('⑪', async () => {
+  const B9 = (TT, touches, calls, opts) => { const r = TT.bindToCall(touches, calls, opts); const ids = (o) => Object.fromEntries(Object.entries(o || {}).map(([k, v]) => [k, v.length])); return { by: ids(r.byCall), notes: ids(r.byNote), unbound: r.unbound.length }; };
+  const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+  const R0 = 4_000_000;
+  const ctx = { notes: [{ id: 'note:ctx', at: R0 + 100 }], turns: [R0] };
+  const NOTE3 = { by: {}, notes: { 'note:ctx': 3 }, unbound: 0 };
+  const tn = (n, at0, o = {}) => Array.from({ length: n }, (_, i) => touch({ id: 'w' + at0 + '-' + i, adapterId: 'lark', convId: 'fx-' + at0 + '-' + i, at: at0 + i * 1000, ...o }));
+  const one = (id, text, start, end, o = {}) => ({ id, start, end, text, kind: 'command', background: false, bgEnd: 0, ...o });
+  // ── 1. A JOB ENDS ONLY BY A FOREGROUND wait / kill OF ITS PID — the verdict's shapes (skeptic-reaper-bg.cjs, refuter-reaper-bg-extra.cjs)
+  const POLL = 'while true; do vibespace-channels read lark/inbox; sleep 20; done > /tmp/poll.log 2>&1 &';
+  const shapes = {
+    'bg group with its own wait': '(for c in lark/a lark/b lark/c; do vibespace-channels read "$c" > "/tmp/$(basename $c).json" & done; wait; touch /tmp/reads.done) &',
+    'bg loop + bg watchdog kill': POLL + '\nP=$!\n(sleep 3600; kill $P) &',
+    'bg loop + kill -0 probe': POLL + '\nsleep 1; kill -0 $! && echo polling',
+    'bg loop + trap kill on INT': "trap 'kill $(jobs -p)' INT\n" + POLL,
+    'bg loop + wait on other pid': 'sleep 2 & S=$!\n' + POLL + '\nwait $S',
+    'control: no reaper': POLL,
+  };
+  const pyLate = one('PY', 'python3 tools/report.py --out /tmp/r.md', R0 + 20_000, R0 + 60_000), t30 = tn(3, R0 + 30_000);
+  const bgBind = (TT, x) => B9(TT, t30, [one('BG', x, R0 + 2_000, R0 + 2_400), pyLate], ctx);
+  const rb = Object.fromEntries(Object.entries(shapes).map(([k, x]) => [k, bgBind(T, x)]));
+  ok(Object.values(rb).every((r) => eq(r, NOTE3)) && eq(bgBind(T, POLL + '\nwait').by, { PY: 3 }) && T.commandsRun('npm test & npm run lint & wait').filter((r) => r.bg).every((r) => r.ended) && !T.commandsRun(shapes['bg loop + kill -0 probe']).some((r) => r.ended),
+    'A JOB ENDS ONLY BY A FOREGROUND wait / kill OF ITS PID (r6 MAJOR, skeptic-reaper-bg.cjs + refuter-reaper-bg-extra.cjs): a CLI group that waits inside its own `( … ) &`, a loop with a backgrounded watchdog `kill`, a `kill -0` probe, a `trap … INT`, a `wait` of another job — each outlives its card: the later lone python script never takes the loop\'s reads (r4: PY 3 for all but the watchdog) — two that could have produced them, the note (the loop\'s claim ends where the script starts, §2); a foreground `wait` ends the loop ⇒ the script', Object.fromEntries(Object.entries(rb).map(([k, r]) => [k, r.by])));
+  // ── 2. A LINGERING CLAIM IS BOUNDED BY ITS OWN RUN — skeptic-correctness-probe.cjs «cli & early + later lone python script», refute-amp-linger.cjs
+  const BGCLI = one('BGCLI', 'vibespace-channels search "x" > /tmp/s.json &', R0 + 2_000, R0 + 2_100);
+  const triage = (start, end) => one('PY', 'python3 tools/triage_inbox.py', start, end);
+  const lb = {
+    fin: B9(T, tn(3, R0 + 700_000), [BGCLI, triage(R0 + 600_000, R0 + 900_000)], ctx),
+    before: B9(T, tn(3, R0 + 300_000), [BGCLI, triage(R0 + 600_000, R0 + 900_000)], ctx),
+    ended: B9(T, tn(3, R0 + 700_000), [BGCLI, triage(R0 + 600_000, R0 + 610_000)], ctx),
+    cliLater: B9(T, tn(3, R0 + 600_200), [BGCLI, one('LIST', 'vibespace-channels list --json', R0 + 600_000, null)], ctx),
+    ampLater: B9(T, tn(3, R0 + 700_000), [BGCLI, one('L2', 'vibespace-channels read lark/y > /tmp/y &', R0 + 600_000, R0 + 600_100)], ctx),
+    inertLater: B9(T, tn(3, R0 + 600_200), [BGCLI, one('VS', 'vibespace-status working --reason x', R0 + 600_000, null)], ctx),
+    earlier: B9(T, tn(3, R0 + 700_000), [one('DEV', 'npm run dev', R0 + 1_000, R0 + 1_300, { background: true }), BGCLI], ctx),
+    exact: B9(T, [touch({ id: 'ex', adapterId: 'lark', convId: 'fx-x', at: R0 + 700_000 })], [one('BGX', 'vibespace-channels read lark/fx-x > /tmp/x.json &', R0 + 2_000, R0 + 2_100), triage(R0 + 600_000, R0 + 900_000)], ctx),
+    rib: B9(T, tn(3, R0 + 700_000), [one('RIB', 'for c in $(cat ids); do vibespace-channels read "$c"; done', R0 + 2_000, R0 + 2_100, { background: true }), triage(R0 + 600_000, R0 + 900_000)], ctx),
+  };
+  ok(eq(lb.fin, NOTE3) && eq(lb.before.by, { BGCLI: 3 }) && eq(lb.ended.by, { BGCLI: 3 }) && eq(lb.cliLater.by, { LIST: 3 }) && eq(lb.ampLater.by, { L2: 3 }) && eq(lb.inertLater.by, { BGCLI: 3 })
+    && eq(lb.earlier.by, { BGCLI: 3 }) && eq(lb.exact, { by: {}, notes: { 'note:ctx': 1 }, unbound: 0 }) && eq(lb.rib, NOTE3),
+    'A LINGERING CLAIM IS BOUNDED BY ITS OWN RUN (r6 MAJOR, skeptic-correctness-probe.cjs «cli & early + later lone python script», refute-amp-linger.cjs): a `vibespace-channels search … &` at 2 s and a lone `python3 tools/triage_inbox.py` from 600 s — reads at 700 s ⇒ the note (r4: the line, finished ten minutes earlier, took them); reads at 300 s ⇒ the line (nothing later ran); the script ended before the reads ⇒ the line, the one call that could still be running; a LATER CLI runner — foreground or `&` — wins the reads after its start (r4: the note); a later call that runs nothing (`vibespace-status`) bounds nothing; against an EARLIER stranger the line keeps its rows; the bound holds for a line that names the conversation and for a `run_in_background` loop with no end seen', Object.fromEntries(Object.entries(lb).map(([k, r]) => [k, Object.keys(r.by).length ? r.by : r.notes])));
+  // ── 3. THE OPENING SKEW NEEDS THE TOUCH'S CONVERSATION — skeptic-opening-skew.cjs / -status.cjs / -bg.cjs
+  const B = R0 + 2_000_000;
+  const conv = (o) => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, v.map((t) => t.convId)]));
+  const os = (TT, xText) => { const r = TT.bindToCall([5_000, 12_000, 19_900].map((d, i) => touch({ id: 'os' + i, adapterId: 'lark', convId: 'fx-' + (i + 1), at: B + d })), [one('W', 'python3 tools/triage_inbox.py', B + 1000, B + 20_000), one('X', xText, B + 20_400, B + 21_000)], { notes: [{ id: 'note:t1', at: B + 100 }, { id: 'note:t2', at: B + 20_450 }], turns: [B, B + 20_400] }); return { by: conv(r.byCall), notes: conv(r.byNote) }; };
+  const osBg = (TT, xText) => { const r = TT.bindToCall([10_000, 20_000, 28_000, 28_700, 29_400, 29_900].map((d, i) => touch({ id: 'ob' + i, adapterId: 'lark', convId: 'fx-' + (i + 1), at: B + d })), [one('W', 'python3 tools/poll_inbox.py', B + 1000, B + 1300, { background: true }), one('X', xText, B + 30_000, B + 31_000)], { notes: [{ id: 'note:t1', at: B + 100 }], turns: [B, B + 30_000] }); return { by: conv(r.byCall), notes: conv(r.byNote) }; };
+  const osr = { list: os(T, 'vibespace-channels list --json'), status: os(T, 'vibespace-status working --reason next'), names: os(T, 'vibespace-channels read lark/fx-3'), bgList: osBg(T, 'vibespace-channels list --json'), bgStatus: osBg(T, 'vibespace-status working --reason next') };
+  const w6 = { by: { W: ['fx-1', 'fx-2', 'fx-3', 'fx-4', 'fx-5', 'fx-6'] }, notes: {} };
+  ok(eq(osr.list, { by: { W: ['fx-1', 'fx-2', 'fx-3'] }, notes: {} }) && eq(osr.status, osr.list) && eq(osr.names, { by: { W: ['fx-1', 'fx-2'], X: ['fx-3'] }, notes: {} }) && eq(osr.bgList, w6) && eq(osr.bgStatus, w6),
+    'THE OPENING SKEW NEEDS THE TOUCH\'S CONVERSATION (r6 minor, skeptic-opening-skew.cjs / -status.cjs / -bg.cjs): turn 1\'s lone script keeps its last read 500 ms before turn 2 opens on `vibespace-channels list --json` (r4: X) or `vibespace-status …` (r4: turn 1\'s note); a background poller keeps the reads in the 1.5 s before the opener (r4: X / the note); an opener that NAMES the read\'s conversation (`vibespace-channels read lark/fx-3`) still takes it (r4 minor)', osr);
+  // ── 4. A HEREDOC BODY IN A SPAN NEVER COUNTS TOWARD SCAN_MAX — skeptic-correctness-probe.cjs commitLong
+  const commitLong = 'git commit -m "$(cat <<\'EOF\'\n' + 'x'.repeat(9000) + '\nEOF\n)" && git log --oneline -1';
+  const spanShell = 'x="$(' + 'echo a; '.repeat(1200) + 'true)"; vibespace-channels read lark/q';
+  const cl = T.commandsRun(commitLong);
+  ok(eq(cl.map((r) => r.base + (r.verb ? ':' + r.verb : '')), ['cat', 'git:commit', 'git:log']) && cl.blind.length === 0 && T.runsNothing(commitLong) && eq(B9(T, tn(3, R0 + 5_000), [one('COMMIT', commitLong, R0 + 4_000, null)], ctx), NOTE3)
+    && T.channelsRuns(spanShell).length === 0 && !T.runsNothing(spanShell),
+    'A HEREDOC BODY IN A SPAN NEVER COUNTS TOWARD SCAN_MAX (r6 minor, skeptic-correctness-probe.cjs commitLong): the commit idiom with a 9 KB body — its `&& git log` is read, nothing is blind, it runs nothing: a lone commit leaves the reads to the note (r4: blind, COMMIT 3); 9 KB of SHELL inside a span still counts — the CLI after it is blind, the call could run', { cl: cl.map((r) => r.base), blind: cl.blind.length });
+  // ── 5. A TURN WHOSE FIRST RECORD IS THE SUMMARY OPENS THERE — skeptic-compact-turnstart.cjs through the REAL claude normalizer, live
+  const { MessageManager } = require(path.join(REPO, 'src/message-manager.js'));
+  const CB = Date.parse('2026-10-28T03:00:00.000Z'), ci = (d) => new Date(CB + d).toISOString();
+  const SUMMARY = 'This session is being continued from a previous conversation that ran out of context. The summary below covers the earlier portion.';
+  const send = (d, text, id) => ({ type: 'user', message: { role: 'user', content: text }, msgId: id, timestamp: ci(d), _fromWebui: true });
+  const use = (d, id, command) => ({ type: 'assistant', timestamp: ci(d), message: { id: 'a' + id, role: 'assistant', content: [{ type: 'tool_use', id, name: 'Bash', input: { command } }] } });
+  const res = (d, id) => ({ type: 'user', timestamp: ci(d), message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: 'ok' }] } });
+  const said = (d) => ({ type: 'assistant', timestamp: ci(d), message: { id: 's' + d, role: 'assistant', content: [{ type: 'text', text: 'done' }] } });
+  const result = (d) => ({ type: 'result', subtype: 'success', timestamp: ci(d), is_error: false, result: 'done' });
+  const summary = (d) => ({ type: 'user', timestamp: ci(d), isCompactSummary: true, message: { role: 'user', content: [{ type: 'text', text: SUMMARY }] } });
+  const liveTurns = (TT, recs) => { const realNow = Date.now, mm = new MessageManager('s-fixture'); try { for (const [d, r] of recs) { Date.now = () => CB + d; mm.processLive(r); } } finally { Date.now = realNow; } const out = []; let prev = null; for (const m of mm.messages) { if (TT.opensTurn(m, prev)) out.push(m.ts - CB); prev = m; } return out; };
+  const held = [[0, send(0, 'triage the inbox', 'm1')], [1000, use(1000, 'W', 'python3 tools/triage_inbox.py')], [5000, send(5000, 'then summarize the release thread', 'm2')], [20000, res(20000, 'W')], [21000, said(21000)], [21500, result(21500)],
+    [30000, summary(30000)], [31000, use(31000, 'VS', 'vibespace-status working --reason summary')], [40000, res(40000, 'VS')], [41000, said(41000)], [41500, result(41500)]];
+  const mid = [[0, send(0, 'triage the inbox', 'm1')], [1000, use(1000, 'W', 'python3 tools/triage_inbox.py')], [20000, res(20000, 'W')], [25000, summary(25000)], [26000, use(26000, 'VS', 'vibespace-status working --reason summary')], [30000, res(30000, 'VS')], [31000, said(31000)], [31500, result(31500)]];
+  ok(eq(liveTurns(T, held), [0, 30_000]) && eq(liveTurns(T, mid), [0]),
+    'A TURN WHOSE FIRST RECORD IS THE SUMMARY OPENS THERE (r6 minor, skeptic-compact-turnstart.cjs — the REAL claude normalizer, live): a held message\'s turn the CLI compacts first — the summary carries `turnStart` (the first record after the result) and opens turn 2 at 30 s (r4: turns [0], turn 2 merged into turn 1); a summary written mid-turn carries none and never opens one', { held: liveTurns(T, held), mid: liveTurns(T, mid) });
+  // ── A PATCHED COPY PER RULE
+  const MUT = mutantCopies('channel-touch-r6', REPO);
+  const src = read('src/channel-touch.js'), SW = read('src/shell-words.js');
+  const copy = (tag, from, to) => { if (src.split(from).length !== 2) anchorMissing(tag, 'src/channel-touch.js (one occurrence)'); return MUT.load('src/channel-touch.js', src.replace(from, to), tag); };
+  const scanWith = (tag, text) => MUT.load('src/channel-touch.js', src.replace("require('./shell-words.js')", `require(${JSON.stringify(MUT.write('src/shell-words.js', text, tag))})`), tag);
+  const scan = (tag, from, to) => { if (SW.split(from).length !== 2) anchorMissing(tag, 'src/shell-words.js (one occurrence)'); return scanWith(tag, SW.replace(from, to)); };
+  const bgReap = scan('bg-reaper', ' || c.words.bg || c.words.andOr ||', ' || c.words.andOr ||');
+  ok(eq(bgBind(bgReap, POLL + '\nP=$!\n{ sleep 3600; kill $P; } &').by, { PY: 3 }), 'CONTROL a backgrounded `kill` read as ending the job (r4): the brace watchdog `{ sleep 3600; kill $P; } &` ends the loop — the later script takes its reads');
+  const noProbe = scan('kill-probe', '    if (probe) continue;\n', '');
+  ok(eq(bgBind(noProbe, shapes['bg loop + kill -0 probe']).by, { PY: 3 }), 'CONTROL `kill -0` read as a kill (r4): the probe ends the loop — the later script takes its reads');
+  const noCond = scan('and-or', ' || c.words.andOr ||', ' ||');
+  ok(eq(bgBind(noCond, 'node server.js & PID=$!; curl -s "$URL/health" || kill $PID').by, { PY: 3 }), 'CONTROL a `kill` after `||` counted (it runs only on a failure): the server ends — the later script takes its reads');
+  const noScope = scan('job-scope', 'jobs.filter((j) => j.scope === c.words.scope && j.at < c.words[0].at)', 'jobs.filter((j) => j.at < c.words[0].at)');
+  ok(eq(bgBind(noScope, '(setsid ./serve.sh > /tmp/s.log 2>&1 &)\nnpm run lint & wait').by, { PY: 3 }), 'CONTROL another subshell\'s job ended by this shell\'s `wait`: the double-forked server ends — the later script takes its reads');
+  const anyPid = scan('job-pid', '    const job = (a) => {', '    const job = () => open[open.length - 1] || null; const jobR6 = (a) => {');
+  ok(eq(bgBind(anyPid, shapes['bg loop + wait on other pid']).by, { PY: 3 }), 'CONTROL a `wait` of ANY pid read as ending the latest job (r4): `wait $S` ends the loop — the later script takes its reads');
+  const anyOne = scan('wait-n', '(kill ? [] : one ? (live.length === 1 ? live : []) : open)', '(kill ? [] : open)');
+  ok(eq(bgBind(anyOne, 'node a.js & node b.js & wait -n; echo done').by, { PY: 3 }), 'CONTROL `wait -n` read as waiting for every job (r4): two jobs, one left running — the later script takes the reads');
+  const noBound = copy('claim-bound', '      const claims = (c) => !lingering.includes(c) ||', '      const claims = () => true; const claimsR6 = (c) => !lingering.includes(c) ||');
+  ok(eq(B9(noBound, tn(3, R0 + 700_000), [BGCLI, triage(R0 + 600_000, R0 + 900_000)], ctx).by, { BGCLI: 3 }), 'CONTROL a lingering claim with no bound (r4): the `&` search that finished ten minutes earlier takes the lone script\'s reads');
+  const anyOpener = copy('opening-names', ' && namesConv(c.text, t))); };', ')); };');
+  ok(eq(os(anyOpener, 'vibespace-channels list --json').by, { W: ['fx-1', 'fx-2'], X: ['fx-3'] }), 'CONTROL the opening skew for any opener (r4): turn 2\'s `vibespace-channels list --json` takes turn 1\'s last read');
+  const spanCount = scan('span-docs', 'i - skipped - span.docs < SCAN_MAX', 'i - skipped < SCAN_MAX');
+  ok(!spanCount.runsNothing(commitLong) && spanCount.commandsRun(commitLong).blind.length === 1, 'CONTROL a span\'s heredoc body counted toward SCAN_MAX (r4): the 9 KB commit idiom goes blind — it could run');
+  const cmpFirst = copy('compaction-order', "  if (typeof msg.turnStart === 'boolean') return msg.turnStart;   // r6:", "  if (typeof msg.turnStart === 'boolean' && !isCompactSummaryText((msg.content || []).map((b) => (b && b.text) || '').join(''))) return msg.turnStart;   // r6:");
+  ok(eq(liveTurns(cmpFirst, held), [0]), 'CONTROL the summary judged before the harness\'s turn fact (r4): the held message\'s compacted turn never opens — turns [0]');
+  for (const c of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 10, label: '⑪ ' })) ok(c.pass, c.name, c.detail);
 });
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
