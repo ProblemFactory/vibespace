@@ -103,7 +103,10 @@ async function main() {
     ['--url schemeless (control)', CURL, (p) => ['-s', '-m', '2', '-q', '--data', '@' + VALFILE, '--url', `127.0.0.1:${p}/u`], 'control'],
     ['[::ffff:127.0.0.1] mapped (control)', CURL, (p) => ['-s', '-m', '2', '-q', '-g', '--data', '@' + VALFILE, `http://[::ffff:127.0.0.1]:${p}/m`], 'control'],
     ['backslash before @ (round4 BLOCKER: granted\\@listener)', CURL, (p) => ['-s', '-m', '2', '-q', '--data', '@' + VALFILE, `http://127.0.0.5:9\\@127.0.0.1:${p}/bs`], 'reach-opaque'],
-    ['userinfo @ (round4)', CURL, (p) => ['-s', '-m', '2', '-q', '--data', '@' + VALFILE, `http://u:p@127.0.0.1:${p}/ui`], 'reach-opaque'],
+    // int361 (主开发's int-C ruling on the vault pair): the userinfo row falls to the ONE parser — urlParse reads the host past the
+    // userinfo, the SAME host curl reaches (so the reader names it), and the door refuses the run url_userinfo (vault-agent-own r18);
+    // a `\` before @ (the row above) stays blind/opaque
+    ['userinfo @ (round4; int361: the ONE parser names the host, the door refuses url_userinfo)', CURL, (p) => ['-s', '-m', '2', '-q', '--data', '@' + VALFILE, `http://u:p@127.0.0.1:${p}/ui`], 'control'],
     ['trailing-dot host (round4)', CURL, (p) => ['-s', '-m', '2', '-q', '--data', '@' + VALFILE, `http://127.0.0.1.:${p}/dot`], 'reader-lan'],
     // round 5 item 5: a scheme-shaped token the bare reader would read as the SCHEME WORD
     ['one-slash http:/HOST (round5)', CURL, (p) => ['-s', '-m', '2', '-q', '--data', '@' + VALFILE, `http:/127.0.0.1:${p}/one`], 'reach-opaque'],
