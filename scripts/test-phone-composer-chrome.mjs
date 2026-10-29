@@ -240,8 +240,11 @@ console.log('② desk 1100 — the composer + bar untouched (DOM signature pinne
   const k = await page(1100, 760, { phone: false, css: 'leak' }); const leak = await k.shot(null, 260); const leakSig = await k.ev(SIG_JS); k.close();
   console.log(`    desk sig sha1 ${crypto.createHash('sha1').update(sig).digest('hex').slice(0, 12)} · png ${real.slice(0, 12)}`);
   // re-pinned .334: lane agent-window-no-pop put div.chat-agent-cards first in the input area; re-pinned by lane
-  // agy-status-bar-facts: the (claude) bar ends in ONE span.chat-status-unreported.chat-status-dim — the facts its row lacks
-  const DESK_SIG = process.env.PHONE_COMPOSER_DESK_SIG || '09097d333468';
+  // agy-status-bar-facts: the (claude) bar ends in ONE span.chat-status-unreported.chat-status-dim — the facts its row lacks;
+  // re-pinned .362 by lane claude-steer-inject (09097d333468 → 43b4907f5e0b, measured: the signature differs from the base's by
+  // exactly button.chat-hold-btn.hidden(svg(circle,path)) right after button.chat-steer-btn.hidden(svg(path))) — the composer's
+  // HOLD button, the chain's own Alt+Enter door («hold it to the turn's end»), hidden on the desk until a Claude turn runs
+  const DESK_SIG = process.env.PHONE_COMPOSER_DESK_SIG || '43b4907f5e0b';
   ok('desk: the composer + bar DOM signature is the pinned desk one (no + door, no in-field mic, no ⋯)', crypto.createHash('sha1').update(sig).digest('hex').slice(0, 12) === DESK_SIG && !/chat-plus-btn|chat-input-field|chat-status-more/.test(sig), sig);
   ok('desk: the PNG equals the render with the phone block stripped', real === stripped, { real, stripped });
   ok('RED control: the phone block un-gated changes the desk PNG', leak !== real && leakSig === sig, { leak, real });
