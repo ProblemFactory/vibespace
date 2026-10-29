@@ -594,6 +594,7 @@ export async function showReauthAccountDialog(app, a, { kinds = null, preselect 
     const c = r && r.config && r.config.client;
     if (c) custom = { appId: c.appId || '', appSecret: c.appSecret || '' };
   }
+  let closed = false;   // r4: the dialog closed (its onClose) — a watcher its start makes after that is taken at once
   const expired = (a.auth || {}).state === 'expired';
   let watcher = null;
   const d = reauthDialog({
@@ -613,13 +614,16 @@ export async function showReauthAccountDialog(app, a, { kinds = null, preselect 
         const r = await post(`/api/channels/adapters/${enc(a.id)}/reauthorize`, { ...choiceBody(vals), ...(road ? { road } : {}) });
         if (watcher) watcher.off();
         watcher = authWatcher(app, a.id, (r.adapter && r.adapter.lastAuthAt) || null);
+        // r4 (acceptance r3: ✕ while «Preparing authorization…» — the POST, up to 8 s for Lark's scope read — closed with no
+        // watcher yet; this one then listened for the page's life): a dialog closed meanwhile takes it at once
+        if (closed) { watcher.off(); watcher = null; }
         return { url: r.flow && r.flow.consentUrl, notice: flowNotice(r.flow), pasteHint: publicPasteHint(r.flow, a), narrow: narrowOf(r.flow, () => post(`/api/channels/adapters/${enc(a.id)}/auth/narrow`, {})), ...routeTrouble(r.flow, spec, () => go('loopback'), presetIn(spec, vals.client)) };
       };
       return go(null);
     },
     status: async () => (watcher ? watcher.state() : {}),
     cancel: () => post(`/api/channels/adapters/${enc(a.id)}/auth/cancel`, {}), askFirst: showConfirmDialog,   // lane lark-refresh-stall r2: Escape on a running sign-in asks first
-    onClose: () => { if (watcher) { watcher.off(); watcher = null; } },   // r3: a dialog that closes takes its watcher's listeners with it
+    onClose: () => { closed = true; if (watcher) { watcher.off(); watcher = null; } },   // r3: a dialog that closes takes its watcher's listeners with it (r4: and one its start makes after the close)
     callback: async (url) => { await post(`/api/channels/adapters/${enc(a.id)}/auth/finish`, { url }); return { token: a.id }; },
     finish: async (_token, { close }) => {
       if (watcher) watcher.off();

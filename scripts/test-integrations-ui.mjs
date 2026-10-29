@@ -824,13 +824,36 @@ const p2 = await newPage();
   // dialog until the consent's own end; while a consent runs the ⋯ offers no second Re-authorize)
   const wsCounts = `({ state: app.ws._stateListeners.length, global: app.ws.globalHandlers.length, open: !!document.querySelector('#chan-reauth-dialog') })`;
   const lc0 = await p1.evaljs(wsCounts);
+  // r4 (acceptance r3: ✕ while «Preparing authorization…» — the reauthorize POST still waiting; for Lark up to 8 s, the app's
+  // scope read — closed with no watcher yet: the one its start made AFTER the close listened for the page's life, and the
+  // consent page opened for a dialog that was gone): the page HOLDS that POST until the ✕, then lets it answer
+  await p1.evaljs(`(() => { const f0 = window.fetch, o0 = window.open; window.__pages = 0; window.__o0 = o0; window.open = (...x) => { window.__pages++; return o0.apply(window, x); };
+    window.fetch = function (u, o) { if (String(u).includes('/reauthorize')) { window.fetch = f0; return new Promise((res, rej) => { window.__heldPost = () => f0.call(window, u, o).then(res, rej); }); } return f0.apply(this, arguments); }; return 1; })()`);
   await p1.evaljs(`${DLG('reauth')}.querySelector(':scope > .mounts-btn-primary').click(); 1`);
-  const lcUrl = await p1.evaljs(consentUrlIn('#chan-reauth-dialog .mounts-oauth-link input'));
-  const lc1 = await p1.evaljs(wsCounts);
+  const prep = await p1.evaljs(`(async () => { for (let i = 0; i < 100 && !window.__heldPost; i++) await new Promise((r) => setTimeout(r, 20)); const d = document.querySelector('#chan-reauth-dialog'); return { held: !!window.__heldPost, status: d ? [...d.querySelectorAll('.mounts-field-hint')].map((e) => e.textContent).pop() : null }; })()`);
   await p1.evaljs(`document.querySelector('#chan-reauth-dialog .dialog-close').click(); 1`);
+  const lb1 = await p1.evaljs(wsCounts);
+  await p1.evaljs(`window.__heldPost && window.__heldPost(); 1`);
+  await sleep(1200);   // the POST answers; the start goes on after the close
+  const lb2 = await p1.evaljs(wsCounts);
+  const pagesB = await p1.evaljs(`(() => { const n = window.__pages; window.open = window.__o0; delete window.__o0; delete window.__heldPost; return n; })()`);
+  ok(prep.held && prep.status === 'Preparing authorization…' && !lb1.open && lb1.state === lc0.state && lb1.global === lc0.global && lb2.state === lc0.state && lb2.global === lc0.global && pagesB === 0,
+    `r4: a re-authorize closed by ✕ WHILE its POST waits («${prep.status}») leaves NONE of its watcher's listeners after the POST answers, and opens no consent page (state/global: before ${lc0.state}/${lc0.global}, at the ✕ ${lb1.state}/${lb1.global}, after the answer ${lb2.state}/${lb2.global}; consent pages ${pagesB}; c79d74b0: +1/+1 and a page)`);
+  // …and the consent that start began has no page to finish on: cancelled — the ⋯ offers Re-authorize again at once
+  let freed = false;
+  for (let i = 0; i < 40 && !freed; i++) { const x = (await accounts()).find((y) => y.id === C.id) || {}; freed = !(x.flow && x.flow.running); if (!freed) await sleep(100); }
+  await sleep(300);
+  const again = freed && await p1.evaljs(`(async () => { ${card(C.id)}.querySelector('.chan-sec-more').click(); await new Promise((r) => setTimeout(r, 200)); const it = [...document.querySelectorAll('.context-menu .context-menu-item')].find((e) => /^(Re-authorize|Connect)$/.test(e.textContent.trim())); if (it) it.click(); return !!it; })()`);
+  ok(freed && again && await p1.evaljs(WAIT_DLG('reauth')), `r4: the consent the closed dialog started is cancelled — the account runs none (${freed}) and its ⋯ opens Re-authorize again (${again})`);
+  // r3's order: ✕ while the consent RUNS (its link shown)
+  const lc0b = await p1.evaljs(wsCounts);
+  if (again) await p1.evaljs(`${DLG('reauth')}.querySelector(':scope > .mounts-btn-primary').click(); 1`);
+  const lcUrl = again ? await p1.evaljs(consentUrlIn('#chan-reauth-dialog .mounts-oauth-link input')) : null;
+  const lc1 = await p1.evaljs(wsCounts);
+  await p1.evaljs(`(() => { const x = document.querySelector('#chan-reauth-dialog .dialog-close'); if (x) x.click(); return 1; })()`);
   await sleep(300);
   const lc2 = await p1.evaljs(wsCounts);
-  ok(!!lcUrl && lc1.state === lc0.state + 1 && lc1.global === lc0.global + 1 && !lc2.open && lc2.state === lc0.state && lc2.global === lc0.global,
+  ok(!!lcUrl && lc0b.state === lc0.state && lc0b.global === lc0.global && lc1.state === lc0.state + 1 && lc1.global === lc0.global + 1 && !lc2.open && lc2.state === lc0.state && lc2.global === lc0.global,
     `r3: a re-authorize closed by ✕ while its sign-in runs leaves NONE of its watcher's listeners (state/global: before ${lc0.state}/${lc0.global}, running ${lc1.state}/${lc1.global}, closed ${lc2.state}/${lc2.global}; 9221575b kept both)`);
   const cfgR = await api('GET', '/api/channels/oauth/mount-clients?kind=gmail');
   ok(cfgR.status === 200 && cfgR.json.clients.some((x) => x.mountId === MOUNT_ID) && !cfgR.text.includes(MOUNT_CSEC) && !cfgR.text.includes(MOUNT_CID), '(r) the list route answers the mount without its secret or its whole id');

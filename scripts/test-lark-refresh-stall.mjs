@@ -24,7 +24,9 @@
 //
 // RED on 6428c67e and on 60e29ad0 (run this file inside a `git archive` copy): the base dies `revoked-elsewhere`; 60e29ad0
 // fails the r2 legs (the tick edges, the sent flag, the dropped bearer, the exchange, the words, the verifying landing);
-// 9221575b fails the r3 legs (the edge's answer aborted, the dead waiters, the locked vault, the witness window, C3).
+// 9221575b fails the r3 legs (the edge's answer aborted, the dead waiters, the locked vault, the witness window, C3);
+// c79d74b0 fails the r4 legs (a hold that begins in the crossing turn's own poll phase, the request-pace lock, a loss under a
+// lock, the press mid-renew, C5 — a pass begun dead across a landing — and the dialog's late watcher / hoisted poll).
 import fs from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
@@ -113,6 +115,7 @@ const srv = http.createServer((req, res) => {
     if (u.startsWith('/open-apis/authen/v1/user_info')) return send(res, 200, { code: 0, msg: 'success', data: { open_id: 'ou_X', name: 'Owner X', union_id: 'on_X' } });
     if (/u-bad/.test(String(req.headers.authorization || ''))) return send(res, 200, { code: 99991663, msg: 'Invalid access token for authorization. Please make a request with token attached.' });
     if (/u-5xx/.test(String(req.headers.authorization || ''))) return send(res, 503, { code: 500, msg: 'internal error' });
+    if (/u-hold401/.test(String(req.headers.authorization || ''))) { await nap(1500); return send(res, 401, { code: 99991663, msg: 'Invalid access token for authorization. Please make a request with token attached.' }); }
     return send(res, 200, { code: 0, msg: 'success', data: { items: [], has_more: false, page_token: '' } });
   });
 });
@@ -280,8 +283,9 @@ console.log('\n② R1: the refresh is bounded by LIVE loop time, never by a time
     // r2 (acceptance r1's fake-clock drive): the tick accounting's two edges, driven tick by tick (a captured interval, a fake
     // monotonic clock — no real hold): a gap ≥ 1.5 ticks counts its EXCESS as held, and the bound fires on the first tick past
     // 20 s LIVE even when that tick came late. r3: each turn runs as libuv does — timers (the tick), poll (an answer that
-    // waited in the socket: the request ends its clock), check (the immediates: a deferred abort)
-    const drive = (gaps, answerOn = -1) => {
+    // waited in the socket: the request ends its clock), check (the immediates: a deferred abort). r4: `inTurn[i]` = a hold
+    // INSIDE turn i, after its poll phase read the sockets (an answer landing then is read by the NEXT turn's poll)
+    const drive = (gaps, answerOn = -1, inTurn = {}) => {
       let cb = null, mono2 = 0, wall = 0, at = null, read = null;
       const imm = [];
       const si = globalThis.setInterval, ci = globalThis.clearInterval, sim = globalThis.setImmediate;
@@ -294,6 +298,7 @@ console.log('\n② R1: the refresh is bounded by LIVE loop time, never by a time
           mono2 += gaps[i]; wall += gaps[i];
           if (cb) cb();
           if (i === answerOn && !dl.signal.aborted) { dl.end(); read = wall; }
+          if (inTurn[i]) { mono2 += inTurn[i]; wall += inTurn[i]; }
           for (const f of imm.splice(0)) f();
           if (dl.signal.aborted) at = wall;
         }
@@ -315,6 +320,15 @@ console.log('\n② R1: the refresh is bounded by LIVE loop time, never by a time
     ok(lateRead.read === 24000 && lateRead.at === null && lateRead.held === 4000, `r3: the same late crossing tick with an answer IN THE SOCKET — the answer is READ, no abort (read at ${lateRead.read} ms, aborted at ${lateRead.at}, held ${lateRead.held} ms; 9221575b aborted at 24 000)`);
     const shortRead = drive([...rep(19, 1000), 1200, 1000], 19);
     ok(shortRead.read === 20200 && shortRead.at === null, `r3: a short hold (1.2 s, counted as running) that crosses the bound with an answer in the socket — read, never aborted (read at ${shortRead.read}, aborted at ${shortRead.at}; r1 and r2 aborted it)`);
+    // r4 (acceptance r3, the deferral's OTHER edge): the crossing tick is ON TIME, the hold begins AFTER it — in that turn's own
+    // poll phase (or an immediate queued before `fire`) — and the answer lands DURING it: the next turn's poll reads it
+    const edgeRead = drive(rep(22, 1000), 20, { 19: 1500 });
+    ok(edgeRead.read === 22500 && edgeRead.at === null && edgeRead.held === 500 && edgeRead.windows && edgeRead.windows.length === 1,
+      `r4: a 1.5 s hold that begins in the crossing turn's OWN poll phase, the answer landing during it — read by the next turn's poll, no abort (read at ${edgeRead.read}, aborted at ${edgeRead.at}, held ${edgeRead.held} ms, windows ${JSON.stringify(edgeRead.windows)}; c79d74b0 aborted at 21 500)`);
+    const edgeNone = drive(rep(22, 1000), -1, { 19: 1500 });
+    ok(edgeNone.at === 22500, `r4: …nothing in the socket: the abort waits ONE turn more, then fires (at ${edgeNone.at} ms) — one re-defer, never a loop`);
+    const edgeEvery = drive(rep(601, 0).map((g, i) => (i ? g : 2100)), -1, Object.fromEntries(Array.from({ length: 601 }, (_, i) => [i, 2100])));
+    ok(edgeEvery.at === 46200, `r4: a loop held 2.1 s inside EVERY turn's poll phase, nothing in the socket: still bounded — the 21st turn (${edgeEvery.at} ms; the held-before-the-tick loop above: the 20th, 42 000)`);
   }
   const src = fs.readFileSync(path.join(REPO, 'src/channels/lark.js'), 'utf-8');
   const refresh = src.slice(src.indexOf('  async function refreshAccessToken('), src.indexOf('  function bearerNow('));
@@ -489,6 +503,25 @@ console.log('\n③b r3: a vault locked mid-refresh is `vault-locked` by name; a 
   const vP = mkV(tP, () => jsonRes({ code: 404 }, 404), async () => { tP.st.locked = true; });
   const rP = await tryB(vP.a);
   ok(rP.code === 'vault-locked' && vP.posts.length === 0, `a lock during the refresh's pace: vault-locked, nothing sent (${JSON.stringify(rP)}, POSTs ${vP.posts.length})`);
+  // r4 (acceptance r3): an ORDINARY request's pace — the bearer far from its margin, the lock lands while the request waits
+  const tQ = lockStore({ ...held(), expiresAt: Date.now() + 60 * 60e3 });
+  let sentQ = 0;
+  const regQ = CH.createChannelRegistry(); regQ.register(lark.adapter);
+  const aQ = regQ.create('lark', { id: 'lq' }, { fetch: async () => { sentQ++; return jsonRes({ code: 0, data: { items: [], has_more: false } }); }, tokens: tQ, resolveIntegration: () => CRED, log: quiet, pace: async () => { tQ.st.locked = true; }, meter: () => {} });
+  const rQ = await aQ.listConversations({ limit: 5 }).then(() => ({ code: null }), (e) => ({ code: e.code, detail: e.detail || null }));
+  ok(rQ.code === 'vault-locked' && !(rQ.detail && rQ.detail.tokenDropped) && sentQ === 0, `r4: a lock lands while an ORDINARY request waits for its pace — \`vault-locked\` by name, nothing sent (${JSON.stringify(rQ)}, sent ${sentQ}; c79d74b0: auth-expired, tokenDropped, «disconnected»)`);
+  // r4 (acceptance r3): the answer is LOST (the vendor spent the single-use token) as the lock lands — the loss is held for the unlock
+  let clk = Date.now(); const spentL = new Set(), postsL = [];
+  const tL = lockStore({ ...held(), expiresAt: clk + 10 * 60e3 });
+  const regL = CH.createChannelRegistry(); regL.register(lark.adapter);
+  const aL = regL.create('lark', { id: 'll' }, { now: () => clk, tokens: tL, resolveIntegration: () => CRED, log: quiet, pace: async () => {}, meter: () => {},
+    fetch: async (url, init) => { const body = init && init.body ? JSON.parse(init.body) : null; if (body && body.grant_type === 'refresh_token') { postsL.push(body.refresh_token); if (spentL.has(body.refresh_token)) return jsonRes(R20064, 400); spentL.add(body.refresh_token); tL.st.locked = true; throw new Error('other side closed'); } return jsonRes({ code: 404 }, 404); } });
+  const rL = await tryB(aL);
+  const lostWhileLocked = !!(tL.st.token && tL.st.token.refreshLostAt);
+  tL.st.locked = false; clk += 61e3;   // the owner unlocks; past the refresh's pause
+  const rL2 = await tryB(aL);
+  ok(rL.code === 'vault-locked' && !lostWhileLocked && rL2.code === 'auth-expired' && rL2.detail && rL2.detail.cause === 'refresh-lost' && tL.st.token && Number(tL.st.token.refreshLostAt) > 0 && tL.st.token.invalidGrantCause === 'refresh-lost' && postsL.length === 2,
+    `r4: a refresh answer LOST as the vault locked — held in memory, written at the first read after the unlock: the retry's 20064 is \`refresh-lost\` (${JSON.stringify(rL)} → ${JSON.stringify(rL2 && { code: rL2.code, cause: rL2.detail && rL2.detail.cause })}, stamped ${tL.st.token && tL.st.token.invalidGrantCause}, POSTs ${postsL.length}; c79d74b0: revoked-elsewhere, the incident's own wrong words)`);
 }
 
 // ── ④ R3: the margin and the pass's own renew — past the back-off gate (r2) ──
@@ -560,24 +593,24 @@ console.log('\n④b r3: a dead refusal at the renew answers the waiting requests
 {
   const dir = path.join(ROOT, 'renew-dead');
   fs.mkdirSync(path.join(dir, 'channels'), { recursive: true });
-  fs.writeFileSync(path.join(dir, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: [{ ...acctRec('rd', 'u', 'rd', 'Renewing'), options: {} }, { ...acctRec('rp', 'u', 'rd', 'Pressed'), options: {} }, { ...acctRec('vl', 'u', 'rd', 'Locking'), options: {} }] }, null, 1));
+  fs.writeFileSync(path.join(dir, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: [{ ...acctRec('rd', 'u', 'rd', 'Renewing'), options: {} }, { ...acctRec('rp', 'u', 'rd', 'Pressed'), options: {} }, { ...acctRec('vl', 'u', 'rd', 'Locking'), options: {} }, { ...acctRec('rm', 'u', 'rd', 'Pressed mid-renew'), options: {} }] }, null, 1));
   const fake = require(path.join(REPO, 'src/channels/fake.js'));
   const m = fake.makeFakeAdapter({ kind: 'rd', receive: 'poll', sendAs: ['user'] });
   let clock = Date.now(); const now = () => clock;
-  const dead = new Set(), locked = new Set(), hist = {};
+  const dead = new Set(), locked = new Set(), hist = {}, gates = {};
   const DEAD = () => new CH.ChannelError('auth-expired', 'lark token refresh: The refresh token has been revoked. (20064)', { retryable: false, detail: { cause: 'revoked-elsewhere' } });
   const registry = CH.createChannelRegistry();
   registry.register({ kind: 'rd', caps: m.caps, create(rec, deps) {
     const impl = m.create(rec, deps); const h = impl.history;
     impl.history = async (...a) => { hist[rec.id] = (hist[rec.id] || 0) + 1; if (dead.has(rec.id)) throw DEAD(); if (locked.has(rec.id)) throw CH.notConnectedError('Locking', 'vault-locked'); return h.apply(impl, a); };
-    impl.auth = { ...(impl.auth || {}), async state() { return { state: 'connected', expiresAt: null, scopes: ['x'], why: null }; }, async renew() { if (dead.has(rec.id)) throw DEAD(); return false; } };
+    impl.auth = { ...(impl.auth || {}), async state() { return { state: 'connected', expiresAt: null, scopes: ['x'], why: null }; }, async renew() { if (dead.has(rec.id)) { if (rec.id === 'rm') await new Promise((r) => { gates.rm = r; }); throw DEAD(); } return false; } };
     return impl;
   } });
   const userTodos = new UserTodoManager({ dataDir: dir, expirySweepMs: 0 });
   const eng = ENG.create({ dataDir: dir, registry, env: {}, broadcast: () => {}, log: quiet, userTodos, serverSetting: () => undefined, now });
   const rec = (id) => eng.adapterRecords().adapters.find((x) => x.id === id) || {};
   try {
-    for (const id of ['rd', 'rp', 'vl']) { await eng.pass(id, { force: true }); await eng.pass(id, { force: true }); }
+    for (const id of ['rd', 'rp', 'vl', 'rm']) { await eng.pass(id, { force: true }); await eng.pass(id, { force: true }); }
     clock += 10 * 60e3;
     dead.add('rd'); dead.add('rp');
     const h0 = hist.rd || 0;
@@ -593,6 +626,19 @@ console.log('\n④b r3: a dead refusal at the renew answers the waiting requests
     const vr2 = await tryAsync(() => eng.refresh('vl', 'rd-ops', { origin: 'agent' }));
     ok(vr && vr.code === 'vault-locked' && vr2 && vr2.code === 'vault-locked' && rec('vl').consecutiveFailures === 0 && !(rec('vl').lastPass && rec('vl').lastPass.code === 'vault-locked'),
       `a vault locked under the vendor call counts NO failure — the agent hears vault-locked twice, no back-off (${vr && vr.code}, ${vr2 && vr2.code}; failures ${rec('vl').consecutiveFailures}; 9221575b: 1 and «backoff»)`);
+    // r4 (acceptance r3): the owner's press is filed WHILE the renew is in flight — it hears the same one failure
+    dead.add('rm');
+    const m0 = hist.rm || 0;
+    const agentP = tryAsync(() => eng.refresh('rm', 'rd-ops', { origin: 'agent' }));
+    for (let i = 0; i < 200 && !gates.rm; i++) await sleep(5);
+    const inFlight = !!gates.rm;
+    const pressP = tryAsync(() => eng.refresh('rm', 'rd-ops', { origin: 'refresh' }));
+    await sleep(20);
+    if (gates.rm) gates.rm();
+    const [am, pm] = await Promise.all([agentP, pressP]);
+    await sleep(100);
+    ok(inFlight && am && am.code === 'auth-expired' && pm && pm.code === 'auth-expired' && rec('rm').consecutiveFailures === 1 && (hist.rm || 0) === m0,
+      `r4: ONE press filed while the renew is in flight climbs ONE step — it hears the renew's dead refusal (${am && am.code} / ${pm && pm.code}; failures ${rec('rm').consecutiveFailures}, history ${m0} → ${hist.rm || 0}; c79d74b0: 2 and a second pass)`);
   } finally { try { eng.stop(); } catch { } try { userTodos.stop(); } catch { } }
 }
 
@@ -658,8 +704,9 @@ console.log('\n⑥ R5: a consent that lands on a dead sign-in is «signed in —
 {
   const dir = path.join(ROOT, 'land');
   fs.mkdirSync(path.join(dir, 'channels'), { recursive: true });
-  fs.writeFileSync(path.join(dir, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: [acctRec('ld', 'Owner D'), acctRec('lg', 'Owner G'), acctRec('lt', 'Owner T')] }, null, 1));
-  const TOK = { ld: mkTokens(tokenOf('ur-D', 15e3)), lg: mkTokens(tokenOf('ur-G', 15e3)), lt: mkTokens(tokenOf('ur-T', 15e3)) };
+  fs.writeFileSync(path.join(dir, 'channels', 'adapters.json'), JSON.stringify({ v: 1, adapters: [acctRec('ld', 'Owner D'), acctRec('lg', 'Owner G'), acctRec('lt', 'Owner T'), acctRec('lc', 'Owner C')] }, null, 1));
+  // lc (r4 C5): dead by a BEARER refusal (no stamped grant) — a later pass still carries the dead family's bearer
+  const TOK = { ld: mkTokens(tokenOf('ur-D', 15e3)), lg: mkTokens(tokenOf('ur-G', 15e3)), lt: mkTokens(tokenOf('ur-T', 15e3)), lc: mkTokens({ ...tokenOf('ur-C', 2 * 3600e3), access_token: 'u-bad-C' }) };
   await planRt('ur-D', 'revoked'); await planRt('ur-G', 'revoked'); await planRt('ur-T', 'revoked');
   const lines = []; const T0 = performance.now(); const ms = () => Math.round(performance.now() - T0);
   const log = { log: (s) => lines.push(`${ms()} ${s}`), warn: (s) => lines.push(`${ms()} ${s}`), error: (s) => lines.push(`${ms()} ${s}`) };
@@ -667,14 +714,15 @@ console.log('\n⑥ R5: a consent that lands on a dead sign-in is «signed in —
   const registry = CH.createChannelRegistry();
   registry.register({ ...lark.adapter, create: (rec, deps) => { depsOf[rec.id] = deps; return lark.adapter.create(rec, { ...deps, log, tokens: TOK[rec.id], resolveIntegration: () => CRED, fetch: viaLoopback }); } });
   const userTodos = new UserTodoManager({ dataDir: dir, expirySweepMs: 0 });
-  const frames = { ld: [], lg: [], lt: [] };
+  const frames = { ld: [], lg: [], lt: [], lc: [] };
+  const openItems = (id) => (userTodos._state.items || []).filter((i) => i.action && i.action.type === 'channel-reauth' && i.action.adapterId === id && i.status === 'open').length;
   const eng = ENG.create({ dataDir: dir, registry, env: {}, log, userTodos, serverSetting: () => undefined,
-    broadcast: (m) => { if (m && m.type === 'channels-updated' && m.digest && m.digest.adapters) for (const a of m.digest.adapters) if (frames[a.id]) frames[a.id].push({ t: ms(), item: (itemOf(a.id) || {}).status || null, authState: a.authState, authVerifying: a.authVerifying === true, authCause: a.authCause, authSince: a.authSince, line: CC.signinLineText(a, { t: tOf(zh) }) }); } });
+    broadcast: (m) => { if (m && m.type === 'channels-updated' && m.digest && m.digest.adapters) for (const a of m.digest.adapters) if (frames[a.id]) frames[a.id].push({ t: ms(), item: (itemOf(a.id) || {}).status || null, open: openItems(a.id), authState: a.authState, authVerifying: a.authVerifying === true, authCause: a.authCause, authSince: a.authSince, line: CC.signinLineText(a, { t: tOf(zh) }) }); } });
   const rec = (id) => eng.adapterRecords().adapters.find((r) => r.id === id) || {};
   const itemOf = (id) => (userTodos._state.items || []).find((i) => i.action && i.action.type === 'channel-reauth' && i.action.adapterId === id) || null;
   const settle = async (id, f) => { for (let i = 0; i < 200 && !f(rec(id)); i++) await sleep(25); await sleep(200); };
   try {
-    await eng.pass('ld', { force: true }); await eng.pass('lg', { force: true }); await eng.pass('lt', { force: true });
+    await eng.pass('ld', { force: true }); await eng.pass('lg', { force: true }); await eng.pass('lt', { force: true }); await eng.pass('lc', { force: true });
     ok(rec('ld').signinDead && rec('lg').signinDead && itemOf('ld') && itemOf('ld').status === 'open', 'setup: both sign-ins dead (20064), their items open');
     const land = async (id, token) => {
       TOK[id].st.token = token;
@@ -724,6 +772,22 @@ console.log('\n⑥ R5: a consent that lands on a dead sign-in is «signed in —
     ok(midT.verifying && !midT.dead && sinceL2 && sinceL3 && sinceL3 - sinceL2 >= 1000 && Number(dT.since) === sinceL3 && dT.cause === 'refused-at-first-use'
       && logT.some((s) => s.includes(`the new sign-in (landed ${new Date(sinceL3).toISOString()}) was refused at its first request`)) && !logT.some((s) => s.includes(new Date(sinceL2).toISOString()) && /was refused/.test(s)),
       `r3 C3: a third landing while the second verifies (its first request 503: ${JSON.stringify(midT)}) — L3's refusal is L3's verdict: since = L3's landing (${dT.since}; L2 ${sinceL2}, L3 ${sinceL3}; 9221575b: L2), the log names L3: ${JSON.stringify(logT.map((s) => s.slice(0, 120)))}`);
+    // C (r4, acceptance r3 C5): a pass that began while the sign-in was DEAD carries the old bearer (held 1.5 s, then 401); a
+    // good consent lands while it waits — the old bearer's refusal is never the new landing's verdict
+    const deadC = !!rec('lc').signinDead;
+    TOK.lc.st.token = { ...tokenOf('ur-C', 2 * 3600e3), access_token: 'u-hold401-C' };
+    const nC = frames.lc.length, lC = lines.length;
+    const passC = eng.pass('lc', { force: true }).catch(() => null);
+    await sleep(300);
+    const c1 = await land('lc', { access_token: 'u-good-C1', expiresAt: Date.now() + 2 * 3600e3, refresh_token: 'ur-C1', refreshExpiresAt: Date.now() + 7 * 86400e3, scopes: ['im:message'], openId: 'ou_ur-C', name: 'Owner ur-C', brand: 'feishu' });
+    await passC;
+    await settle('lc', (r) => !r.signinVerifying && r.lastPass && r.lastPass.ok);
+    const fC = frames.lc.slice(nC).map((f) => (f.authState === 'ok' ? (f.authVerifying ? 'verifying' : 'ok') : f.authState)).filter((x, i, a) => i === 0 || a[i - 1] !== x);
+    const reopened = frames.lc.slice(c1.nF).some((f) => f.open > 0);
+    const logC = lines.slice(lC).map((x) => x.replace(/^\d+ /, '')).filter((x) => /lc:/.test(x));
+    ok(deadC && JSON.stringify(fC) === JSON.stringify(['verifying', 'ok']) && !reopened && !rec('lc').signinDead && logC.some((x) => /lc: a request of a pass that began under the dead sign-in \(its bearer\) was refused — a newer sign-in landed .* since/.test(x))
+      && !logC.some((x) => /the new sign-in \(landed .*\) was refused/.test(x)) && logC.some((x) => /the sign-in works again \(the first requests with the new sign-in went through\)/.test(x)),
+      `r4 C5: the dead sign-in's bearer, refused after a landing made during its pass, is never the landing's verdict — no red flap, no item re-filed (${fC.join(' → ')}, an open item after the landing: ${reopened}; c79d74b0: verifying → expired → ok), the log: ${JSON.stringify(logC.map((x) => x.slice(0, 120)))}`);
   } finally { try { eng.stop(); } catch { } try { userTodos.stop(); } catch { } }
   // the re-authorize dialog: a landing missed while the socket was down is read ONCE on reconnect; Escape on a running
   // sign-in asks first (the dialog-yield seam) — source facts here, the chrome leg in test-integrations-ui (l)
@@ -731,7 +795,15 @@ console.log('\n⑥ R5: a consent that lands on a dead sign-in is «signed in —
   ok(/app\.ws\.onStateChange\(onState\)/.test(dlg) && /fetchJson\('\/api\/channels\?scope=accounts'\)\.then\(\(d\) => \{ if \(d && Array\.isArray\(d\.adapters\)\) judge/.test(dlg), 'r2: the dialog\'s watcher re-reads the account ONCE on every reconnect (a landing broadcast missed while the socket was down)');
   const md = fs.readFileSync(path.join(REPO, 'src/lib/mounts-dialog.js'), 'utf-8');
   ok(/escapeToClose: true, onEscape: \(\) => escapeAsk\(\) \}\)/.test(md) && /tr\('Cancel the sign-in\?'\)/.test(md) && /askFirst: showConfirmDialog/.test(dlg), 'r2: the re-authorize dialog\'s Escape on a RUNNING sign-in asks «Cancel the sign-in?» (onEscape, the OAT shape)');
-  ok(/onClose: closed, escapeToClose: true/.test(md) && /onClose: \(\) => \{ if \(watcher\) \{ watcher\.off\(\); watcher = null; \} \}/.test(dlg), 'r3: every close of the dialog (✕, backdrop, Escape, its finish) tears its watcher down — the chrome count in test-integrations-ui (r)');
+  ok(/onClose: closed, escapeToClose: true/.test(md) && /onClose: \(\) => \{ closed = true; if \(watcher\) \{ watcher\.off\(\); watcher = null; \} \}/.test(dlg), 'r3: every close of the dialog (✕, backdrop, Escape, its finish) tears its watcher down — the chrome count in test-integrations-ui (r)');
+  // r4 (acceptance r3): a watcher its start makes AFTER the close (✕ while the reauthorize POST waits) is taken at once, and
+  // the dialog shows no consent page for a close during its start; `poll` / `stopPoll` stand BEFORE the shell handed `closed`
+  // (the dialog-yield seam: a raised form's end runs it early)
+  ok(/watcher = authWatcher\(app, a\.id, [^\n]*\n(?:\s*\/\/[^\n]*\n)*\s*if \(closed\) \{ watcher\.off\(\); watcher = null; \}/.test(dlg) && /const r = await start\([^\n]*\n(?:\s*\/\/[^\n]*\n)*\s*if \(!status\.isConnected\) \{ if \(typeof cancel === 'function'\)/.test(md),
+    'r4: a close while «Preparing authorization…» takes the watcher made after it, opens no consent page and cancels the consent — the chrome count in test-integrations-ui (r)');
+  const rd = md.slice(md.indexOf('export function reauthDialog('), md.indexOf('\nexport ', md.indexOf('export function reauthDialog(') + 1));
+  const iStop = rd.indexOf('const stopPoll = () =>'), iShell = rd.indexOf('createModalShell(');
+  ok(iStop > 0 && iShell > iStop && rd.indexOf('const stopPoll = () =>', iStop + 1) < 0 && rd.indexOf('createModalShell(', iShell + 1) < 0, `r4: reauthDialog declares \`poll\` / \`stopPoll\` ONCE, before its createModalShell call that is handed \`closed\` (stopPoll at ${iStop}, the shell at ${iShell} of its body)`);
 }
 
 await worker.terminate();

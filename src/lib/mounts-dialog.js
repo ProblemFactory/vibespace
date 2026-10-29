@@ -547,7 +547,11 @@ export function reauthDialog({ id = 'mount-reauth-dialog', title, hint: hintText
     return false;
   };
   // r3 (acceptance r2, the listener-lifecycle law): every close — ✕, the backdrop, Escape, the dialog's own finish — stops the
-  // poll and hands the caller's `onClose` its teardown (a running sign-in's watcher listens to the socket until it is told)
+  // poll and hands the caller's `onClose` its teardown (a running sign-in's watcher listens to the socket until it is told).
+  // r4 (acceptance r3, the dialog-yield seam): `poll` / `stopPoll` are declared BEFORE the shell that is handed `closed` — a
+  // shell that runs it early (a raised form's end) never meets an uninitialised const
+  let pasteBox = null, poll = null;
+  const stopPoll = () => { clearInterval(poll); poll = null; };
   const closed = () => { stopPoll(); if (typeof onClose === 'function') { try { onClose(); } catch { /* the dialog is gone either way */ } } };
   const { body, close } = createModalShell({ id, title, bodyClass: 'mounts-dialog-body', onClose: closed, escapeToClose: true, onEscape: () => escapeAsk() });
   const hint = document.createElement('div');
@@ -561,8 +565,6 @@ export function reauthDialog({ id = 'mount-reauth-dialog', title, hint: hintText
   let form = null;
   if (fields && fields.length) { body.append(hint); form = renderFields(body, fields); body.append(btn, status); }
   else body.append(hint, btn, status);
-  let pasteBox = null, poll = null;
-  const stopPoll = () => { clearInterval(poll); poll = null; };
   const finish = async (token) => {
     stopPoll();
     status.textContent = savingText || tr('Saving token & reconnecting…');
@@ -575,6 +577,9 @@ export function reauthDialog({ id = 'mount-reauth-dialog', title, hint: hintText
     status.textContent = tr('Preparing authorization…');
     try {
       const r = await start(form ? form.readValues() : {});
+      // r4 (acceptance r3): closed while «Preparing authorization…» — no consent page and no poll for a dialog that is gone; the
+      // consent it started has no page to finish on, so it is cancelled (as Escape's «yes» cancels one)
+      if (!status.isConnected) { if (typeof cancel === 'function') { try { await cancel(); } catch { /* the consent machine ends it at its own time */ } } return; }
       if (r.error) throw new Error(r.error);
       // lane pod-oauth-callback: the other road re-shows the block for the consent it started (the folded paste-back)
       const show = (x) => {
