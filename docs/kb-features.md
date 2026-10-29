@@ -2820,6 +2820,23 @@ the failure this design argues against.
   "unknown". The account hold is in memory (src/channels/vendor-hold.js — the
   one shape Slack's per-method 429 hold uses); the 429'd send itself stays
   failed / partly sent as before.
+- **Lark: a sign-in survives a hub stall** (lane lark-refresh-stall, .361). The
+  token refresh runs with 15 minutes to spare (the pass renews on its own) and
+  is bounded by the time the hub's loop actually ran, so a hold of the loop
+  (a NAS, a disk) never aborts it over an answer already received. An answer
+  truly lost after the request left is recorded; the same refresh token is
+  tried once, and if Lark then refuses it the account says «hub 在刷新令牌时卡住了
+  89 分钟，一次性刷新令牌已被用掉» (cause `refresh-lost`) in the hub's log, the
+  For-you item and the red line — never «another VibeSpace». The words say
+  only what was measured: the stall's length first (seconds, minutes, hours,
+  days), «被 NAS/磁盘读写» only when the hub's own witness timed slow disk calls
+  over that window, no vendor name in the cause; a For-you row with a cause
+  wraps whole. The consent's own code exchange has the same bound. A re-authorize
+  that lands turns the red line into «已登录 — 正在验证» in its own broadcast,
+  every tab (a dialog whose socket was down reads it on the reconnect); the
+  first request that answers ends it, a refusal turns it red once with its own
+  cause. A Disconnect while a refresh is in flight never hands the dropped
+  bearer back.
 
 ### Communication panel — P1b: the push lane (2026-09-16; design §6.4, fence 11, decisions 18 + 20)
 
@@ -3254,6 +3271,8 @@ Every account section (Lark / Gmail / Slack / the webhook door) starts folded un
 ### Communication panel — a dead sign-in is said where the person looks (lane channel-reauth-visible, .348 — the owner, 2026-10-23: 「对于需要 reauth 的 channel 应该需要更明显的提示」)
 When a connected account's sign-in stops working (the vendor refuses its refresh token, Lark answers 20064 because the same user signed in to the same app elsewhere, its OAuth client is refused or missing), the account is in the **auth-expired state** from its FIRST refused pass until a pass goes through again: the Channels rail badge turns red `⚠N` and its tip names the accounts; ONE urgent For-you item per account sits at the top («<login> (<label>): sign-in expired — re-authorize (<why>)») with a Reconnect button; under the account in Channels a red line says «Sign-in expired — re-authorize · <why> · since <time>» with Reconnect (the same Re-authorize dialog — options, access and history kept) — «Re-authorizing…» + Cancel while the consent runs, still shown when the section is folded, the section's left edge red; `vibespace-channels list / read / search` and the hook's channels line name the account to an agent. A restart, a vault lock, another failure or a started consent never clears it; a consent that ends unfinished re-asserts the same item; the first good pass (or removing / disconnecting the account) ends it. The account view's fields: `authState` ('expired' | 'pending' | 'ok'), `authCause`, `authSince`; the record's `signinDead`.
 
+**The sign-in dialog ends at the LANDING (lane lark-signin-dialog, .359 — the owner 2026-10-26: his Re-authorize, finished in another browser, ended 77 s later, when the pass after it went through):** the Re-authorize and Duplicate sign-in blocks watch the account's `channels-updated` row and end on the FIRST one whose `lastAuthAt` moved — re-authorized, or the refusal it carries — whatever the account's state says (channel-caps `consentEndOf`); the landing also clears the refused pass that made the account «expired» (it was about the old token), so the landing's row no longer reads «expired» and the forced pass after it writes the real verdict. The red line and the For-you item still go when a pass goes through.
+
 ### Communication panel — the account row's notice grammar (lane channel-row-notices, .349 — the owner, 2026-10-23: 「这个提示最好不要常驻了，很丑陋；然后为啥我这里提示需要重新授权，重新授权干啥？」)
 Under an account in Channels: **a standing state is ONE short line that can be put away** — a parked push lane says «实时推送未开启 — 消息靠轮询（30 秒–15 分钟）» (plain, no command) with ⓘ and 「知道了」; 「知道了」 is kept per instance (user state `channelsNoticesSeen` {account: the state's sig}) and the line comes back only when the state CHANGES (another code, a new demotion). ⓘ (also on the health line) opens the account's fold: the lane's cause in a few words (its `UNAVAILABLE_CAUSES`), «不会漏消息», where the steps are, a demotion's numbers, and optional consents. The install command and console steps live on the account type's setup card (⚙ → Integrations, «实时推送（可选）», the live lane's `PUSH_SETUP`) and in ⚙ Diagnostics («频道 — 实时推送») — never on the row. **A re-authorization line names its gain and what works meanwhile** (PURE `reauthWhyText(kind, reason, facts)`): read-only «可读，回复需要再授权一次（缺 <scope> 权限）»; Lark's paged consent «继续授权以获取应用下一组权限（next 个），总计剩余 n 个权限 — 下一组：<families>；现在的收发消息不受影响» (from the consent's `nextPageCount` / `morePending` / `morePendingScopes` by `scopeFamily`; shown when an agent holds the account's raw API and the families are known, else under ⓘ; «继续授权一次补齐剩余 n 项权限（共 K 页，逐页同意）» once lark-consent-chain sets `chain`); a countdown «登录将在 {eta} 后到期 — 到期前再授权一次即可» (warn only once overdue); never a bare «需要重新授权». The dead sign-in's red line (channel-reauth-visible) is unchanged.
 
@@ -3427,7 +3446,9 @@ feature must never need a new consent.
   last page closes the tab. The row says «正在授权 第 2/3 页…» + Cancel meanwhile; a page that does not land costs nothing
   already granted (Lark's grants accumulate) — the «N more» line returns. Page 1 carries the namespaces a shipped feature
   reaches. The sign-in dialog's «Sign in without the N extra permissions» row shows only where Lark can refuse (the app's
-  list could not be read — said with why — or the list lacks a scope the floor asks).
+  list could not be read — said with why — or the list lacks a scope the floor asks AND the account's held token does not
+  carry it: a scope Lark already granted this app is enabled by Lark's own evidence — lane lark-signin-dialog, .359; each
+  consent page says its source, the gap and the held count in ONE journal line «[channels] lark: consent page N/T asks …»).
 - **Slack:** slack-manifest.js `USER_SCOPES` = the 51 user scopes `apps.manifest.validate` accepted on 2026-10-03
   (q-017-probe.md "Wide scopes"; `remote_files:write` is the one Slack refuses for a user token); READ / SEND
   unchanged; the "Another way" link still fits LINK_MAX (1 895 bytes at the longest owner name). secret-shapes R4

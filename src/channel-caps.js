@@ -513,8 +513,38 @@ const CONV_CAPS_FAIL_WHYS = Object.freeze(['rate-limited', 'backoff', 'not-conne
  *   client-refused      the vendor refused the OAuth client itself (Google `invalid_client`)
  *   client-missing      the account's OAuth client is no longer configured on this instance
  *   consent-unfinished  the person's re-authorize ended without a sign-in (timed out, cancelled, refused)
+ *   refresh-lost        lane lark-refresh-stall: the refresh's answer was LOST after it left (the hub's loop held, a cut
+ *                       socket) and the vendor had spent its single-use refresh token — the refusal that followed is this,
+ *                       never `revoked-elsewhere`; `heldMs` = the stall the lost answer waited through (the words name it);
+ *                       r2: `heldWhy` = what the hub's witness saw hold the loop in that window (STALL_WITNESSES), else none
+ *   refused-at-first-use lane lark-refresh-stall r2: a consent LANDED on a dead sign-in and the vendor refused the new
+ *                       sign-in's first request with no cause of its own (the account verified it and it failed)
  */
-const SIGNIN_CAUSES = Object.freeze(['refresh-refused', 'revoked-elsewhere', 'token-expired', 'client-refused', 'client-missing', 'consent-unfinished']);
+const SIGNIN_CAUSES = Object.freeze(['refresh-refused', 'revoked-elsewhere', 'token-expired', 'client-refused', 'client-missing', 'consent-unfinished', 'refresh-lost', 'refused-at-first-use']);
+/** lane lark-refresh-stall r2: what a stall's words may NAME as its cause — only what the hub's own witness measured in that
+ *  window: 'disk' = the slow synchronous fs calls loop-blame timed cover at least half of it. Nothing else is a cause word
+ *  (CPU work, a GC, an unwrapped wait are not told apart — the words then say the length alone). */
+const STALL_WITNESSES = Object.freeze(['disk']);
+/** PURE: the witness of a stall `heldMs` long — `calls` = loop-blame's slow sync fs calls `{at, ms}` (wall clock), `windows` =
+ *  the HOLD's own spans `[{from, to}]` (wall clock) the request's live clock measured. 'disk' when the calls cover at least
+ *  half of the stall INSIDE those spans, else null; no span ⇒ null (r3, acceptance r2: a window anchored at the instant the
+ *  loss was recorded missed a disk hold 19 s before it, and credited a CPU hold to the disk reads of the live wait after it). */
+function stallWitnessOf(calls, { heldMs = 0, windows = null } = {}) {
+  const ms = num(heldMs);
+  if (ms === null || ms < 1000 || !Array.isArray(calls) || !Array.isArray(windows)) return null;
+  let covered = 0;
+  for (const w of windows) {
+    const from = num(w && w.from), to = num(w && w.to);
+    if (from === null || to === null || to <= from) continue;
+    for (const c of calls) { const a = num(c && c.at), d = num(c && c.ms); if (a !== null && d !== null) covered += Math.max(0, Math.min(a + d, to) - Math.max(a, from)); }
+  }
+  return covered >= ms / 2 ? 'disk' : null;
+}
+/** PURE: a dead sign-in failure's stall facts for `speakSignin` — `{heldMs, heldWhy}` (both null when it names none). */
+function signinStallOf(err) {
+  const d = (err && err.detail) || {};
+  return { heldMs: num(d.heldMs) || null, heldWhy: STALL_WITNESSES.includes(d.heldWhy) ? d.heldWhy : null };
+}
 /** Is this vendor failure a DEAD SIGN-IN? `auth-expired`, except the engine's own race words (a disconnect that landed
  *  while the request waited — `tokenDropped`: the owner's act, said by the disconnect itself). A vault-locked read is
  *  `vault-locked` (the vault's own banner), never this. */
@@ -533,15 +563,54 @@ function signinCauseOf(err) {
 }
 /** THE ACCOUNT VIEW'S THREE FACTS: `authState` = 'expired' (a dead sign-in) | 'pending' (dead, and a consent is in
  *  flight now) | 'ok' (no dead sign-in is known); `authCause` = a SIGNIN_CAUSES code or null; `authSince` = when the
- *  first refused pass landed (ms) or null. `running` = a consent flow of this account is in flight. */
+ *  first refused pass landed (ms) or null. `running` = a consent flow of this account is in flight. lane lark-refresh-stall:
+ *  `authHeldMs` rides a `refresh-lost` (the stall its words name). */
 function signinView(rec, { running = false } = {}) {
   const d = rec && rec.signinDead && typeof rec.signinDead === 'object' ? rec.signinDead : null;
-  if (!d) return { authState: 'ok', authCause: null, authSince: null };
-  return { authState: running ? 'pending' : 'expired', authCause: SIGNIN_CAUSES.includes(d.cause) ? d.cause : null, authSince: num(d.since) };
+  // lane lark-refresh-stall r2: a consent landed on a dead sign-in and its first request has not answered yet — the row is
+  // green with the verifying word (`authVerifying`), `authSince` = the landing
+  const v = !d && rec && rec.signinVerifying && typeof rec.signinVerifying === 'object' ? rec.signinVerifying : null;
+  if (!d) return v ? { authState: 'ok', authCause: null, authSince: num(v.since), authVerifying: true } : { authState: 'ok', authCause: null, authSince: null };
+  return { authState: running ? 'pending' : 'expired', authCause: SIGNIN_CAUSES.includes(d.cause) ? d.cause : null, authSince: num(d.since), ...(d.cause === 'refresh-lost' && num(d.heldMs) ? { authHeldMs: num(d.heldMs), ...(STALL_WITNESSES.includes(d.heldWhy) ? { authHeldWhy: d.heldWhy } : {}) } : {}) };
 }
-/** The cause in the person's words (an English t() key; '' = none known). */
-function signinCauseText(cause, { t = defaultT } = {}) {
+/** lane lark-refresh-stall: a stall in the person's unit (r2, acceptance r1: no hour unit made 36 h «2160 min», and 59 999 ms
+ *  read «60 s»): seconds under a minute, minutes under 2 h (one decimal under ten), hours from 2 h, days from 2 days (one
+ *  decimal); null under a second (no stall was measured). */
+function stallSpanOf(ms) {
+  const v = num(ms);
+  if (v === null || v < 1000) return null;
+  const one = (x) => Math.round(x * 10) / 10;
+  const s = Math.round(v / 1000);
+  if (s < 60) return { seconds: s };
+  if (v < 2 * 3600e3) { const m = v / 60000; return { minutes: m < 10 ? one(m) : Math.round(m) }; }
+  if (v < 2 * 86400e3) return { hours: one(v / 3600e3) };
+  return { days: one(v / 86400e3) };
+}
+/** The words of a `refresh-lost` per unit — r2: the length FIRST (the fact the person needs), one level of parentheses at
+ *  most in any surface (the item wraps the cause in its own), vendor-free in every language (the item's {kind} names it),
+ *  and a cause word only from the witness (`disk`). */
+const STALL_WORDS = Object.freeze({
+  seconds: "the hub stalled {seconds} s while refreshing the sign-in, and its single-use refresh token was used up",
+  minutes: "the hub stalled {minutes} min while refreshing the sign-in, and its single-use refresh token was used up",
+  hours: "the hub stalled {hours} h while refreshing the sign-in, and its single-use refresh token was used up",
+  days: "the hub stalled {days} days while refreshing the sign-in, and its single-use refresh token was used up",
+});
+const STALL_WORDS_DISK = Object.freeze({
+  seconds: "the hub stalled {seconds} s on slow disk / NAS calls while refreshing the sign-in, and its single-use refresh token was used up",
+  minutes: "the hub stalled {minutes} min on slow disk / NAS calls while refreshing the sign-in, and its single-use refresh token was used up",
+  hours: "the hub stalled {hours} h on slow disk / NAS calls while refreshing the sign-in, and its single-use refresh token was used up",
+  days: "the hub stalled {days} days on slow disk / NAS calls while refreshing the sign-in, and its single-use refresh token was used up",
+});
+/** The cause in the person's words (an English t() key; '' = none known). `heldMs` = a `refresh-lost`'s stall, `heldWhy` its
+ *  witness. The engine passes a `t` that answers `{key, params}` — the For-you item carries the words as structure. */
+function signinCauseText(cause, { t = defaultT, heldMs = null, heldWhy = null } = {}) {
   switch (String(cause || '')) {
+    case 'refresh-lost': {
+      const s = stallSpanOf(heldMs);
+      if (s) { const unit = Object.keys(s)[0]; return t((heldWhy === 'disk' ? STALL_WORDS_DISK : STALL_WORDS)[unit], s); }
+      return t("the answer to the sign-in's refresh was lost on the way, and its single-use refresh token was used up");
+    }
+    case 'refused-at-first-use': return t('the new sign-in was refused at its first request');
     case 'refresh-refused': return t('the vendor refused the refresh token');
     case 'revoked-elsewhere': return t('your account signed in to this app from another VibeSpace');
     case 'token-expired': return t('the sign-in reached the end of its lifetime');
@@ -557,9 +626,10 @@ function signinCauseText(cause, { t = defaultT } = {}) {
 function signinLineText(a, { t = defaultT, when = null } = {}) {
   const st = a && a.authState;
   if (st === 'pending') return t('Re-authorizing… (in the tab that opened)');
+  if (st === 'ok' && a.authVerifying === true) return t('Signed in — verifying with its first request…');   // lane lark-refresh-stall r2
   if (st !== 'expired') return '';
   const bits = [t('Sign-in expired — re-authorize')];
-  const c = signinCauseText(a.authCause, { t });
+  const c = signinCauseText(a.authCause, { t, heldMs: a.authHeldMs, heldWhy: a.authHeldWhy });
   if (c) bits.push(c);
   const w = num(a.authSince) !== null && typeof when === 'function' ? when(num(a.authSince)) : '';
   if (w) bits.push(t('since {time}', { time: w }));
@@ -1525,6 +1595,18 @@ function consentChainText(chain, { t = defaultT } = {}) {
   if (!(page >= 1 && total >= 2 && page <= total)) return '';
   return t('Authorizing page {page}/{total}… (in the tab that opened)', { page, total });
 }
+/** lane lark-signin-dialog (the owner 2026-10-26: his Re-authorize dialog finished 77 s after the consent LANDED — it waited for
+ *  the pass after it): THE END OF A CONSENT as the sign-in dialog reads it off ONE account's `channels-updated` row. The engine
+ *  stamps `lastAuthAt` when a consent lands (success or failure), so a stamp other than `base` (the row's when the consent
+ *  began) IS the end: `{fail}` = the refusal the row says (`lastAuthError`), else `{token, user}` — whatever `auth.state`
+ *  says: the account's health is the card's, decided by the pass that follows; the dialog never waits on it. null = not
+ *  ended yet. */
+function consentEndOf(row, base = null) {
+  const r = row && typeof row === 'object' ? row : null;
+  if (!r || !r.lastAuthAt || r.lastAuthAt === base) return null;
+  if (r.lastAuthError) return { fail: String(r.lastAuthError) };
+  return { token: r.id || null, user: (r.auth && r.auth.user) || null };
+}
 /** lane lark-consent-chain, ADDENDUM 1 (the owner: 「lark 授权窗口那个什么 11 项权限的提示没用了吧？」): may the sign-in dialog offer
  *  THE NARROWING ROW («Sign in without …» — a vendor that refuses a WHOLE consent naming a scope its app has not enabled:
  *  Lark 20027, said on the vendor's own page only) for the press that drops `scopes`? Only where that refusal CAN happen:
@@ -1544,11 +1626,12 @@ function narrowRowVerdict(flow, scopes = []) {
 
 module.exports = {
   consentChainText, narrowRowVerdict,   // lane lark-consent-chain
+  consentEndOf,   // lane lark-signin-dialog
   sendWhyText, threadWhyText, reactWhyText, reactReadText, refusedScopeText,
   CONV_CAPS_TTL_MS, HOST_FACTS_TTL_MS, PUSH_HEARTBEAT_MS, SCAN_SOURCE_ORDER, OFFER_WHAT,
   PUSH_MISS_THRESHOLD, PUSH_MISS_MIN_SAMPLES, PUSH_MISS_WINDOW_MS, PUSH_MISS_MIN_KEEP, PUSH_CLAIMS,
   laneState, scanState, convCapsState, offers, authState, recallRowOf,
-  SIGNIN_CAUSES, signinDeadOf, signinCauseOf, signinView, signinCauseText, signinLineText,   // lane channel-reauth-visible
+  SIGNIN_CAUSES, signinDeadOf, signinCauseOf, signinView, signinCauseText, signinLineText, stallSpanOf, STALL_WITNESSES, stallWitnessOf, signinStallOf,   // lane channel-reauth-visible; stallSpanOf …: lane lark-refresh-stall
   identityWarning, identityWarningText, freshnessClaim, freshnessText, humanAge,
   // 2026-09-26: the per-conversation cadence, the override choices, the vendor budget + push remedies
   TIER_DEFAULTS, COLD_MAX_SEC, REFRESH_CHOICES, validRefresh, pollTier, tierUntil, cadenceFor, budgetText, learnedBudgetText, passStateText, firstReadText, pushUnavailableText,

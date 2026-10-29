@@ -48,7 +48,7 @@ import { t as tr, deviceLocale } from './i18n.js';
 import { mountsDialog, wireOAuthConnect, reauthDialog, wireStepPaste, api as mountsApi } from './mounts-dialog.js';
 import { routeErrorText, policyModeText } from './channel-words.js';
 import * as P from '../channel-policy.js';
-import { narrowRowVerdict } from '../channel-caps.js';   // lane lark-consent-chain ADDENDUM 1: the narrowing row only where the vendor can refuse
+import { narrowRowVerdict, consentEndOf } from '../channel-caps.js';   // lane lark-consent-chain ADDENDUM 1: the narrowing row only where the vendor can refuse; lane lark-signin-dialog: a consent's end
 import { ownerPolicyModel, guardRowsEl } from './channel-reach-editor.js';   // lanes account-policy-door + guards-door: the policy row's model and guard rows
 import { icon, el, btn } from './channel-chrome.js';
 import { accountTitle } from './channel-avatar.js';   // lane channels-badges: the badge's hover title and the card's name are ONE spelling
@@ -486,19 +486,34 @@ function flowNotice(flow) {
 /** Watch ONE account's row on `channels-updated` for the end of a consent
  *  that began at `base` (the row's `lastAuthAt` when it started): the
  *  engine stamps `lastAuthAt` when a consent LANDS (success or failure), so
- *  a changed stamp is the answer — `{token}` when it connected, `{fail}`
- *  with the refusal otherwise. No fetch: the broadcast IS the computation. */
+ *  a changed stamp is the answer — `{token}` when it landed, `{fail}`
+ *  with the refusal otherwise. No fetch: the broadcast IS the computation.
+ *  lane lark-signin-dialog: the LANDING ends the dialog (channel-caps
+ *  `consentEndOf`), never `auth.state` — the pass after the landing decides
+ *  the account's health (the card's), and waiting on it kept the owner's
+ *  dialog open 77 s after his consent landed. */
 function authWatcher(app, id, base) {
   let answer = {};
+  const judge = (row) => {
+    const end = consentEndOf(row, base);
+    if (!end) return;
+    answer = end.fail ? { fail: tr('The consent flow ended: {error}', { error: end.fail }) } : { token: id, running: false, user: end.user };
+  };
   const on = (msg) => {
     if (!msg || msg.type !== 'channels-updated' || !msg.digest) return;
-    const row = (msg.digest.adapters || []).find((x) => x.id === id);
-    if (!row || !row.lastAuthAt || row.lastAuthAt === base) return;
-    if (row.lastAuthError) answer = { fail: tr('The consent flow ended: {error}', { error: row.lastAuthError }) };
-    else if (row.auth && row.auth.state === 'connected') answer = { token: id, running: false, user: row.auth.user || null };
+    judge((msg.digest.adapters || []).find((x) => x.id === id));
+  };
+  // lane lark-refresh-stall r2 (acceptance r1): a landing broadcast sent while the socket was DOWN never arrives — the dialog
+  // waited for the next channels-updated; on every reconnect the account's row is read ONCE (the window's accounts scope —
+  // never the panel's first read)
+  const onState = (up) => {
+    if (!up || answer.token || answer.fail) return;
+    fetchJson('/api/channels?scope=accounts').then((d) => { if (d && Array.isArray(d.adapters)) judge(d.adapters.find((x) => x.id === id)); }).catch(() => {});
   };
   const unsub = app.ws.onGlobal(on);
-  return { state: () => answer, off: () => { try { if (typeof unsub === 'function') unsub(); else app.ws.offGlobal(on); } catch {} } };
+  if (typeof app.ws.onStateChange === 'function') app.ws.onStateChange(onState);
+  let live = true;   // r3: `off()` runs once, whoever calls it first (the finish, a re-start, the dialog's close)
+  return { state: () => answer, off: () => { if (!live) return; live = false; try { if (typeof unsub === 'function') unsub(); else app.ws.offGlobal(on); } catch {} try { if (typeof app.ws.offStateChange === 'function') app.ws.offStateChange(onState); } catch {} } };
 }
 
 // ── CONNECT AN ACCOUNT (§2.5, §8.1 #11: type-first, one dialog for every type) ──
@@ -603,6 +618,8 @@ export async function showReauthAccountDialog(app, a, { kinds = null, preselect 
       return go(null);
     },
     status: async () => (watcher ? watcher.state() : {}),
+    cancel: () => post(`/api/channels/adapters/${enc(a.id)}/auth/cancel`, {}), askFirst: showConfirmDialog,   // lane lark-refresh-stall r2: Escape on a running sign-in asks first
+    onClose: () => { if (watcher) { watcher.off(); watcher = null; } },   // r3: a dialog that closes takes its watcher's listeners with it
     callback: async (url) => { await post(`/api/channels/adapters/${enc(a.id)}/auth/finish`, { url }); return { token: a.id }; },
     finish: async (_token, { close }) => {
       if (watcher) watcher.off();

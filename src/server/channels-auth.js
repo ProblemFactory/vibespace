@@ -29,7 +29,7 @@ function create(engineCtx) {
     store, box, flows, signState, consentRowOf, consentDepsOf, resolveIntegration, rowOf, live, paceCarry, adapterRecords, saveAdapters,
     refusedScopesOf, morePendingOf, pendingScopesOf, tokensFor, adapterFor, refreshAuth, EMPTY_SCAN, pass, rejudgeConvCaps, conversationName, presetsOf, clientFieldDecls,
     customClientView, vendorNameOf, adapterView, notify, disarmPush, syncPushLanes, dropLive, retractUnsaved, retractFailure, wakeTimers, policyFor,
-    speakSignin, retractSignin,   // lane channel-reauth-visible: an unfinished consent re-asserts the dead sign-in's item; a removal / a disconnect ends it
+    speakSignin, retractSignin, landSignin,   // lane channel-reauth-visible: an unfinished consent re-asserts the dead sign-in's item; a removal / a disconnect ends it; lane lark-refresh-stall r2: a landing verifies
     accountGrainOf, patternsOf, convGrainOf, honestyLineFor, notifyOutbox,
     CG,   // lane grants-unify: the channel doors' rows in THE grants store (src/server/channels-grants.js)
   } = engineCtx;
@@ -633,6 +633,7 @@ function create(engineCtx) {
       if (st.changed) rec.identity = st.identity;
       if (st.learned) { learned = st.learned; rec.lastAuthNote = { code: 'enterprise-learned', at: now() }; } else delete rec.lastAuthNote;
       rec.lastAuthError = null; rec.lastAuthAt = now();
+      if (rec.lastPass && rec.lastPass.ok === false) rec.lastPass = null;   // lane lark-signin-dialog: as at the record's own door (onAuthDone)
     });
     if (learned) log.log(`[channels] ${rec.id}: the sign-in names the organisation ${learned} the account's identity did not — the same account; its identity learned it`);
     dropLive(rec.id, 'client switched');
@@ -641,6 +642,7 @@ function create(engineCtx) {
     await refreshAuth(e);
     e.failures = 0; e.nextAt = 0; e.rateStrikes = 0; e.backoffKind = null;
     await retractFailure(rec);
+    if (rec.signinDead || rec.signinVerifying) await landSignin(rec);   // lane lark-refresh-stall R5 r2: as at the record's own door (onAuthDone) — «signed in — verifying» (r3: a verifying record re-dated)
     await rejudgeConvCaps(rec, 're-authorized');   // inc-muk9jj0j-rel3: every conversation, BEFORE the one whole digest
     if (!engineCtx.stopped) notify([]);
     if (!engineCtx.stopped) pass(rec.id, { force: true }).catch((err) => log.warn('[channels] pass after re-authorize failed:', err && err.message));
@@ -930,7 +932,11 @@ function create(engineCtx) {
     // is not the record's last sign-in line (the connected record used to wear "replaced by a newer sign-in" as an
     // error). verify r8: one whose consent LANDED before the newer began is a landed consent — the write is the fact
     if (r && !r.ok && r.cancelled === 'superseded') { log.log(`[channels] ${rec.id}: an older sign-in completed after a newer one and was refused (${r.error || 'superseded'}) — the newer sign-in stands`); return; }
-    await store.adapters.update(() => { rec.lastAuthError = r && r.ok ? null : String((r && r.error) || 'the consent flow failed'); rec.lastAuthAt = now(); });
+    // lane lark-signin-dialog (the owner 2026-10-26: «it suddenly worked while I was typing», 77 s after his consent landed):
+    // a LANDED consent clears the record's refused pass — that refusal (the dead sign-in that made him re-authorize) was
+    // evidence about the OLD token, and `authState` read it as «expired» on the fresh one until the pass below finished; the
+    // landing's broadcast says `connected`, the forced pass writes the real verdict
+    await store.adapters.update(() => { rec.lastAuthError = r && r.ok ? null : String((r && r.error) || 'the consent flow failed'); rec.lastAuthAt = now(); if (r && r.ok && rec.lastPass && rec.lastPass.ok === false) rec.lastPass = null; });
     const e = adapterFor(rec);
     await refreshAuth(e);
     // verify r8: THE WRITE IS THE FACT, and so is what came after it — a consent that landed and was DISCONNECTED
@@ -940,8 +946,13 @@ function create(engineCtx) {
     if (r && r.ok) log.log(`[channels] ${rec.id}: connected${rec.auth && rec.auth.user ? ` as ${rec.auth.user}` : ''}`);
     else log.warn(`[channels] ${rec.id}: consent flow failed: ${(r && r.error) || 'unknown'}`);
     // lane channel-reauth-visible: a consent that ended without a sign-in on a DEAD account re-asserts its item (the same one,
-    // the words say the sign-in was not finished); one that landed retracts nothing — the next pass that goes through does
+    // the words say the sign-in was not finished). lane lark-refresh-stall R5 (the owner's hub 2026-10-27: his consent landed
+    // 20:57:33, the row kept «登录失效 — 需要重新授权 · …» until a pass went through at 21:02:03): one that LANDED ends the dead
+    // sign-in here, in the landing's own broadcast — r2: as «signed in — verifying» (engine `landSignin`): the red line goes
+    // and the item is resolved now, «works again» is said only after a request with the new token answered, and a refusal
+    // of that first request turns the row red ONCE with its own cause, `since` = this landing (speakSignin)
     if (!(r && r.ok) && rec.signinDead) await speakSignin(rec, 'consent-unfinished', { reassert: true, vendorWords: String((r && r.error) || '') });
+    if (r && r.ok && (rec.signinDead || rec.signinVerifying)) await landSignin(rec);   // r3: a landing on a verifying record re-dates it (C3)
     // inc-muk9jj0j-rel3: A CONSENT CHANGES WHAT EVERY CONVERSATION MAY DO — re-judged HERE, at the write, for the whole
     // account (the pass below visits only what is due), then ONE whole digest carries the fresh verdicts
     if (r && r.ok) await rejudgeConvCaps(rec, 'connected');

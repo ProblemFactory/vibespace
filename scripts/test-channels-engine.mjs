@@ -7048,7 +7048,7 @@ console.log('\n㉘ lane channel-reauth-visible: a dead sign-in is ONE standing u
   }
   // CONTROLS — the base's shape: the 3-strike ladder files the dead sign-in, a supersede retracts it
   const esrcS = engineSource(REPO);
-  const NEW = "        if (deadSignin) await speakSignin(rec, caps.signinCauseOf(err), { vendorWords: String((err && err.message) || '') });\n        else if (!rate && e.failures === FAILURES_BEFORE_LOUD) {";
+  const NEW = "        if (deadSignin) await speakSignin(rec, caps.signinCauseOf(err), { vendorWords: String((err && err.message) || ''), ...caps.signinStallOf(err) });   // lane lark-refresh-stall: a refresh-lost names its stall\n        else if (!rate && e.failures === FAILURES_BEFORE_LOUD) {";
   const OLD = "        if (!rate && e.failures === FAILURES_BEFORE_LOUD) {";
   ok(esrcS.split(NEW).length === 2, 'CONTROL fixture: the dead sign-in\'s producer line is found once in the shipped engine');
   const C1 = MUTE.load('src/server/channels-engine.js', esrcS.replace(NEW, OLD), 'signin-ladder');

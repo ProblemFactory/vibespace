@@ -1628,5 +1628,34 @@ console.log('㉕ THE DOOR LANDS (lane needs-card-tail R5 — the owner 2026-10-2
   ok(/if \(e\.target\.closest\('\.ut-go'\)\) \{ const rec = byId\(id\); if \(rec\) jump\(rec\.sessionKey, rec\); return; \}/.test(P) && /if \(e\.target\.closest\('\.ut-sess'\) \|\| \(rec && model\.isDoor\(rec\.sessionKey, rec\)\)\) \{ if \(rec\) jump\(rec\.sessionKey, rec\); return; \}/.test(P) && /if \(e\.target\.closest\('\.iw-sess'\)\) \{ const it = model\.byId\(c\.id\); if \(it\) model\.jump\(it\.sessionKey, it\); return; \}/.test(IW), 'the doors: the tray / phone row\'s Chat door (.ut-go) and its conversation name (.ut-sess), the For-you window\'s name (.iw-sess) — each is model.jump');
 }
 
+console.log('   lane lark-refresh-stall r2: a WORDS param\'s own params — kept through a restart, refused BY NAME otherwise (never a «{minutes}» on screen)');
+{
+  const os = await import('node:os');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-ut-nested-'));
+  try {
+    const { createRequire } = await import('node:module');
+    const { UserTodoManager } = createRequire(import.meta.url)(path.join(ROOT, 'src/user-todos.js'));
+    const KEY = '{account} ({kind}): sign-in expired — re-authorize ({cause})';
+    const cause = (params) => ({ key: 'the hub stalled {minutes} min while refreshing the sign-in, and its single-use refresh token was used up', params });
+    const fileWith = (m, c, n) => m.add('channels', { text: `Owner (Lark): sign-in expired — re-authorize ${n}`, urgency: 'urgent', origin: 'channels', i18n: { text: { key: KEY, params: { account: 'Owner', kind: 'Lark', cause: c } } } });
+    const m = new UserTodoManager({ dataDir: dir, expirySweepMs: 0 });
+    const a = fileWith(m, cause({ minutes: 89 }), 'a');
+    m.stop();
+    const m2 = new UserTodoManager({ dataDir: dir, expirySweepMs: 0 });   // the restart: a fresh store reads the file
+    eq(m2.get(a.id) && m2.get(a.id).i18n.text.params.cause, cause({ minutes: 89 }), 'a words param\'s scalar params survive a restart of the store');
+    const nine = Object.fromEntries('abcdefghi'.split('').map((k, i) => [k, i]));
+    for (const [bad, want, why] of [[{ minutes: { n: 89 } }, /params\.cause\.params\.minutes must be a string or a finite number \(object refused\)/, 'an object'], [{ minutes: true }, /params\.cause\.params\.minutes must be a string or a finite number \(boolean refused\)/, 'true'], [[89], /params\.cause\.params must be an object of strings \/ numbers/, 'an array'], [nine, /params\.cause\.params carries 9 params — at most 8/, 'a 9th param'], [{ minutes: NaN }, /\(number refused\)/, 'NaN']]) {
+      const n0 = m2.snapshot().open.length; let msg = '';
+      try { fileWith(m2, cause(bad), why); } catch (e) { msg = e.message; }
+      ok(want.test(msg) && m2.snapshot().open.length === n0, `… ${why} is REFUSED by name and nothing is filed («${msg}»)`);
+    }
+    m2.stop();
+  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  // the clip law: a row whose words carry a cause wraps whole (the popup's two lines, the phone's one never cut its number)
+  const rowSrc = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-row.js'), 'utf8');
+  ok(/i\.i18n\.text\.params\.cause && typeof i\.i18n\.text\.params\.cause === 'object'/.test(rowSrc) && rowSrc.includes("(wraps ? ' ut-item-wraps' : '')"), 'a row whose words carry a CAUSE wears ut-item-wraps');
+  ok(css0().includes(':is(#user-todos-popup, #phone-home, .ut-mini-popover, body) .ut-item.ut-item-wraps:not(.ut-open) > .ut-body > .ut-text { display: block !important; -webkit-line-clamp: unset !important; line-clamp: none !important; overflow: visible !important; }'), '…and that row is never clamped (one rule over every surface, after the clamps)');
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

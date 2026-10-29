@@ -100,9 +100,12 @@ const { createChannelStore } = require('../channel-store.js');
 const { createChannelRegistry, ChannelError } = require('../channels/index.js');
 const { identityOf, identityMismatch, heldIdentity, mismatchSentence, namelessSentence, cancelledSentence, stampIdentity } = require('../channel-identity.js');   // verify r5: whose account a consent may land on; r6: the held identity read off the token it holds, a nameless consent; r7: a cancelled consent; lane slack-grid-identity: the one stamp rule
 const caps = require('../channel-caps.js');
+const LoopBlame = require('./loop-blame.js');   // lane lark-refresh-stall r2: what held the loop — the slow sync fs calls it timed (a stall's words name only that)
 const fake = require('../channels/fake.js');
 const { secretBox, holdsCiphertext, vaultForDir } = require('../secret-box.js');
 const VB = require('../vault-blocked.js');   // PURE: a refusal's actor name (lane vault-locked-refusal-notice)
+/** What a refresh hears while the LOCKED vault keeps its sign-in closed — a pass that began locked, or a call a lock landed under (lane lark-refresh-stall r3). */
+const VAULT_LOCKED_WORDS = 'the vault is locked — this account\'s sign-in opens after the owner unlocks it on this instance\'s page; the owner has already been told (For you names what is waiting on it)';
 const { VAULT_LOCKED: VAULT_LOCKED_CODE } = require('../key-file.js');   // lane vault-e2e-password-fix-r2: the vault's refusal code
 const { OWN_KEY, CLUSTER_PREFIX } = require('./integration-store.js');   // the two credential-key forms, spelled ONCE (the store's)
 const R = require('../integration-registry.js');   // PURE: the rows' `bindsPerAccount` + `clientFieldsOf` (the custom client's two fields)
@@ -809,7 +812,10 @@ function create(deps = {}) {
       const adapterDeps = { fetch: fetchFn, log, tokens: tokensFor(rec), state: stateFor(rec), people: { read: () => store.peopleRead(rec.id), write: (m) => store.peopleWrite(rec.id, m) }, oauth: flows, consent: consentDepsOf(rec.kind), onAuthDone: (adapterId, r) => onAuthDone(adapterId, r), deliver, liveSessions, credentialKey: rec.credentialKey || null, meter: (units) => { const x = live.get(rec.id) || paceCarry.get(rec.id); if (x) charge(x, units); }, pace: (units) => paceWait(rec.id, units, rec), named: (convId) => { const en = store.index.entry(rec.id, String(convId), { create: false }); return !!(en && en.named === true); },
         // lane webhook-l1-server: the account's OWN data directory (data/channels/<id>/), the channels secret-box, a stored
         // record by its vendor id, an instance setting — handed to every adapter, read by the ones that need them
-        ownDir: path.join(dataDir, 'channels', String(rec.id)), secrets: { seal: (v) => box.enc(v), open: (v) => box.dec(v) }, findRecord: (convId, vendorId) => (store.index.entry(rec.id, String(convId), { create: false }) ? store.findRecord(rec.id, String(convId), String(vendorId)) : null), setting: (key) => { try { return serverSetting(key); } catch { return undefined; } } };
+        ownDir: path.join(dataDir, 'channels', String(rec.id)), secrets: { seal: (v) => box.enc(v), open: (v) => box.dec(v) }, findRecord: (convId, vendorId) => (store.index.entry(rec.id, String(convId), { create: false }) ? store.findRecord(rec.id, String(convId), String(vendorId)) : null), setting: (key) => { try { return serverSetting(key); } catch { return undefined; } },
+        // lane lark-refresh-stall r2: the hub's witness of a stall — what loop-blame timed over that window ('disk' or null);
+        // r3: over the HOLD's own windows (the request's live clock measured them), none ⇒ null
+        loopWitness: (heldMs, windows) => { const ws = (Array.isArray(windows) ? windows : []).filter((w) => w && Number.isFinite(w.from) && Number.isFinite(w.to)); return ws.length ? caps.stallWitnessOf(LoopBlame.blame(Math.min(...ws.map((w) => w.from)), Math.max(...ws.map((w) => w.to)), { k: LoopBlame.KEPT }), { heldMs: Number(heldMs) || 0, windows: ws }) : null; } };
       // r4: the resolver is PER RECORD (`resolverFor`) — an account's own
       // (`custom`) client lives on its record, a preset in the store.
       const adapter = registry.create(rec.kind, rec, { now, resolveIntegration: resolverFor(rec), ...adapterDeps });
@@ -2327,6 +2333,9 @@ function create(deps = {}) {
       let failure = null;        // the pass's typed failure — what a taken waiter hears (Drain rule 3)
       let progressAt = now();    // lane R5: the bounded progress broadcast of a long (paced) pass
       let ended = null;          // the model's `end`
+      let vendorOk = 0;          // lane lark-refresh-stall r2: the vendor calls of this pass that ANSWERED (a landed sign-in is verified by one)
+      // r3 (acceptance r2 C3): the landing this pass's requests use — a NEWER one landing mid-pass is verified by its own pass
+      e.passLanding = rec.signinVerifying && typeof rec.signinVerifying === 'object' ? Number(rec.signinVerifying.since) || null : null;
       const held = { keys: [], answers: [], timer: null, at: -Infinity };   // THE VIEWS ARE PACED: the window's early keys + their answers
       const flushEarly = () => {
         if (held.timer) { clearTimeout(held.timer); held.timer = null; }
@@ -2352,6 +2361,10 @@ function create(deps = {}) {
         // a fact about the account — no stamp on the record, no ladder step, no "For you" item; the pass ends as the abort it is
         if (outlived(rec, e)) return { ok: false, code: stopped ? 'stopped' : 'account-changed', error: 'the refresh was cut short (the engine stopped or the account changed) — refresh again', polledAt: null };
         const code = err instanceof ChannelError ? err.code : 'vendor-error';
+        // lane lark-refresh-stall r3 (acceptance r2): a vault LOCKED under a vendor call (a lock landing while a token refresh
+        // was in flight) is the vault's state, never the account's failure — no ladder step, no back-off, no item (the lock's
+        // own notice names it); the pass's waiters hear `vault-locked` by name, as a pass that began locked answers them
+        if (code === 'vault-locked') return { ok: false, code: 'vault-locked', error: VAULT_LOCKED_WORDS, polledAt: null };
         // lane R5: a RATE refusal is its own short ladder (the vendor's hint, else
         // 5 s doubling to 60 s) that never climbs the failure ladder; the bucket
         // is EMPTIED so the pass that resumes starts paced, never with a burst
@@ -2394,7 +2407,7 @@ function create(deps = {}) {
         // ONE standing urgent item per account with its Reconnect (`speakSignin`), never the 3-strike ladder's item. Only a
         // sign-in the record HOLDS can die: a Connect never finished / a disconnected account (no token) keeps the ladder
         const deadSignin = caps.signinDeadOf(err instanceof ChannelError ? err : null) && !!(rec.auth && rec.auth.tokenEnc);
-        if (deadSignin) await speakSignin(rec, caps.signinCauseOf(err), { vendorWords: String((err && err.message) || '') });
+        if (deadSignin) await speakSignin(rec, caps.signinCauseOf(err), { vendorWords: String((err && err.message) || ''), ...caps.signinStallOf(err) });   // lane lark-refresh-stall: a refresh-lost names its stall
         else if (!rate && e.failures === FAILURES_BEFORE_LOUD) {
           log.warn(`[channels] ${rec.id}: ${e.failures} consecutive failures (${code}): ${(err && err.message) || err}`);
           await speakFailure(rec, code, err);
@@ -2473,6 +2486,24 @@ function create(deps = {}) {
         // those passes run, fail with the vendor's typed refusal, and SPEAK
         // (fence 8), because the user has something to act on.
         const connected = !(st && ((st.state === 'unknown' && st.why === 'never-authenticated') || st.state === 'vault-locked'));   // r2: a LOCKED vault builds no request, counts no failure
+        // lane lark-refresh-stall R3: a sign-in INSIDE its refresh margin is renewed by the pass itself, with the margin to
+        // spare — never only when a request needs a bearer. r2 (acceptance r1): past the back-off gate only (a pass inside a
+        // back-off makes no vendor call — the drain refuses its requests by name), and a DEAD refusal it meets is this pass's
+        // failure — the same ladder as a request's (failPass: the record, the item, the red line), never swallowed; anything
+        // else meets the pass's first request at the same door (accessToken). r3 (acceptance r2): it runs before the drain
+        // opens, so no request is TAKEN yet — the requests filed before it are this pass's waiters and hear the dead sign-in
+        // (auth-expired by name) from this one failure; a request filed during the call stays for the next pass (Drain rule 3)
+        if (!backoff && connected && st && st.state === 'connected' && e.adapter.auth && typeof e.adapter.auth.renew === 'function') {
+          const waitedFor = e.dq.requests.slice();
+          try { await e.adapter.auth.renew(); }
+          catch (err) {
+            if (caps.signinDeadOf(err instanceof ChannelError ? err : null)) {
+              failure = await failPass(err);
+              for (const r of waitedFor) deliver([r.id], { ...failure, polledAt: lastPollOf(r.key) });
+              return { ok: false, why: failure.code, changed, results };
+            }
+          }
+        }
         // `scan.hostFacts` TRIGGER ③ (design §4 / §5 invariant 7, r6): a scan-lane pass asks the host's facts of the RESOLVER, once, before its first fetch (Drain rule 14)
         const scanLane = laneOrScan(rec, {}).via === 'scan';
         e.dq = Drain.open(e.dq, { origin, force, backoff, timerDue: e.timerDue, hostScan: scanLane });
@@ -2509,6 +2540,7 @@ function create(deps = {}) {
               await store.adapters.update(() => { if (!rec.scan) rec.scan = EMPTY_SCAN(); rec.scan.hostFacts = hf; });
               result = {};
             } else throw new Error(`channels: the drain named an unknown action ${act.type}`);
+            vendorOk++;
           } catch (err) {
             if (aborted(err)) result = { error: 'stopped' };   // a stop / a drop woke a pace sleep — the next step settles every waiter by name (rule 2)
             else { failure = await failPass(err); result = { error: failure.code }; }
@@ -2540,6 +2572,7 @@ function create(deps = {}) {
         if (quiet && quiet.full) await retractSlowed(rec);
         await retractFailure(rec);
         if (rec.signinDead && !(st && (st.state === 'needs-reauth' || st.state === 'needs-credentials'))) await retractSignin(rec, 'a pass went through');   // lane channel-reauth-visible
+        if (rec.signinVerifying && vendorOk > 0 && !(e.passLanding && Number(rec.signinVerifying.since) !== e.passLanding)) await verifiedSignin(rec);   // lane lark-refresh-stall r2: «works again» only after a request with the new sign-in answered (r3: THAT landing's)
         retractUnsaved(rec);   // verify r6: that write landed the whole file — the sign-in is on disk
         retryHotConvCaps(rec);   // lane gmail-reply-known: an open window's refused send row asks again now
         notify(changed.filter((k) => !early.has(k)), { full: false });
@@ -2555,6 +2588,7 @@ function create(deps = {}) {
       } finally {
         flushEarly();   // every exit: the held window's broadcast and answers before the safety net below
         e.passing = null;
+        e.passLanding = null;
         e.chargeBy = null;
         if (e.dq.pass) e.dq = Drain.close(e.dq);
         // THE SAFETY NET: an outcome this pass recorded is settled by the pass's end at the latest, and a pass that ended without the model's `end` leaves no taken waiter unanswered (a delivered outcome is final — a Promise cannot be re-resolved)
@@ -2583,7 +2617,7 @@ function create(deps = {}) {
   function settlementFor(act, failure, key, vaultClosed = false) {
     if (act.outcome === 'stopped') return { ok: false, code: 'stopped', error: 'the channels engine is stopping — refresh again after the restart' };
     // lane vault-e2e-password-fix-r2: a refresh of an account the LOCKED vault keeps closed hears the vault, never "not connected"
-    if (act.outcome === 'not-connected' && vaultClosed) return { ok: false, code: 'vault-locked', error: 'the vault is locked — this account\'s sign-in opens after the owner unlocks it on this instance\'s page; the owner has already been told (For you names what is waiting on it)', polledAt: null };
+    if (act.outcome === 'not-connected' && vaultClosed) return { ok: false, code: 'vault-locked', error: VAULT_LOCKED_WORDS, polledAt: null };
     if (act.outcome === 'account-changed') return { ok: false, code: 'account-changed', error: 'the account changed while the refresh waited — refresh again' };
     if (act.outcome === 'not-connected') return { ok: false, code: 'not-connected', error: 'the refresh failed (not-connected)', polledAt: null };
     return failure ? { ...failure, polledAt: lastPollOf(key) } : { ok: false, code: String(act.code || 'failed'), error: `the refresh failed (${act.code || 'failed'})`, polledAt: lastPollOf(key) };
@@ -7027,7 +7061,8 @@ function create(deps = {}) {
    *  `channel-reauth` action (its Reconnect opens the account's Re-authorize dialog). A failing pass with nothing new says
    *  nothing again (no write, no reopen: the person's own dismissal stands); a NEW cause — or `reassert` (a consent that
    *  ended unfinished) — re-files the SAME item (same text ⇒ same id, its words updated, reopened). Retracted only by
-   *  `retractSignin`: the first pass that went through, the account's removal, the owner's own disconnect. */
+   *  `retractSignin`: the first pass that went through, the account's removal, the owner's own disconnect. A consent that
+   *  LANDED (lane lark-refresh-stall R5 → r2) is `landSignin`: «signed in — verifying» until its first request answers. */
   const SIGNIN_KEYS = Object.freeze({
     kc: i18nKey('{account} ({kind}): sign-in expired — re-authorize ({cause})'), k: i18nKey('{account} ({kind}): sign-in expired — re-authorize'),
     c: i18nKey('{account}: sign-in expired — re-authorize ({cause})'), n: i18nKey('{account}: sign-in expired — re-authorize'),
@@ -7039,23 +7074,42 @@ function create(deps = {}) {
     const user = rec.auth && typeof rec.auth.user === 'string' && rec.auth.user && !label.includes(rec.auth.user) ? rec.auth.user : '';
     return { account: user || label, kind: user ? label : '' };
   };
-  async function speakSignin(rec, cause0, { reassert = false, vendorWords = '' } = {}) {
+  async function speakSignin(rec, cause0, { reassert = false, vendorWords = '', heldMs = null, heldWhy = null } = {}) {
     const prev = rec.signinDead && typeof rec.signinDead === 'object' ? rec.signinDead : null;
+    // lane lark-refresh-stall r2: a refusal while a LANDED sign-in verifies (its first request) is that new sign-in's — its
+    // own cause, or that it was refused at its first request; `since` = the landing; said once (red ONCE, never a flap)
+    const ver = !prev && rec.signinVerifying && typeof rec.signinVerifying === 'object' ? rec.signinVerifying : null;
     // a failure that names no cause keeps the one already known (Lark's stamped grant says only "refused" after 20064)
-    const cause = caps.SIGNIN_CAUSES.includes(cause0) ? cause0 : prev && caps.SIGNIN_CAUSES.includes(prev.cause) ? prev.cause : null;
+    const cause = caps.SIGNIN_CAUSES.includes(cause0) ? cause0 : ver ? 'refused-at-first-use' : prev && caps.SIGNIN_CAUSES.includes(prev.cause) ? prev.cause : null;
+    // r3 (acceptance r2 C3): ONE VERDICT PER LANDING — a refusal in a pass that began under an EARLIER landing is that landing's
+    // (said in the log); a newer sign-in landed since and is verified by its own first request — its row is not turned red by
+    // a token it replaced, and `since` is never a stale landing
+    const passLanding = ver && !reassert ? Number((live.get(rec.id) || {}).passLanding) || null : null;
+    if (ver && passLanding && passLanding !== Number(ver.since)) {
+      log.warn(`[channels] ${rec.id}: the sign-in that landed ${new Date(passLanding).toISOString()} was refused at its first request (${cause || 'refused'}) — a newer sign-in landed ${new Date(Number(ver.since)).toISOString()} since; it is verified by its own first request`);
+      return;
+    }
+    // lane lark-refresh-stall R2/R4: a `refresh-lost` carries the stall the lost answer waited through — the log line, the item
+    // and the row name it; r2: and WHAT held the loop only when the hub's witness of that window named it (`heldWhy`)
+    const stallMs = cause !== 'refresh-lost' ? null : Number(heldMs) > 0 ? Number(heldMs) : prev && prev.cause === cause && Number(prev.heldMs) > 0 ? Number(prev.heldMs) : null;
+    const stallWhy = !stallMs ? null : caps.STALL_WITNESSES.includes(heldWhy) ? heldWhy : !(Number(heldMs) > 0) && prev && caps.STALL_WITNESSES.includes(prev.heldWhy) ? prev.heldWhy : null;
     const held = prev && prev.item && userTodos && typeof userTodos.get === 'function' ? userTodos.get(prev.item.id) : null;
     if (prev && !reassert && (prev.cause || null) === cause && (held ? !held.clearedAt : !userTodos)) return;   // nothing new: the item stands as it is
-    const since = prev && Number(prev.since) ? Number(prev.since) : now();
-    if (!prev) log.warn(`[channels] ${rec.id}: the sign-in expired${cause ? ` (${cause})` : ''} — a "For you" item asks the owner to re-authorize: ${String(vendorWords).slice(0, 300)}`);
-    let item = prev && prev.item ? prev.item : null;
+    const since = prev && Number(prev.since) ? Number(prev.since) : ver && Number(ver.since) ? Number(ver.since) : now();
+    const stallSaid = stallMs ? `; the hub's loop was held ${Math.round(stallMs / 1000)} s while the refresh's answer waited${stallWhy === 'disk' ? ' — slow synchronous disk calls held it' : ''}` : '';
+    if (ver) log.warn(`[channels] ${rec.id}: the new sign-in (landed ${new Date(since).toISOString()}) was refused at its first request (${cause}${stallSaid}) — a "For you" item asks the owner to re-authorize: ${String(vendorWords).slice(0, 300)}`);
+    else if (!prev) log.warn(`[channels] ${rec.id}: the sign-in expired${cause ? ` (${cause}${stallSaid})` : ''} — a "For you" item asks the owner to re-authorize: ${String(vendorWords).slice(0, 300)}`);
+    let item = prev && prev.item ? prev.item : ver && ver.item ? ver.item : null;
     if (userTodos && typeof userTodos.add === 'function') {
       const { account, kind } = signinWho(rec);
       const text = `${kind ? `${account} (${kind})` : account}: sign-in expired — re-authorize`;
-      const key = SIGNIN_KEYS[(kind ? 'k' : '') + (cause ? 'c' : '') || 'n'];
-      const causeWords = caps.signinCauseText(cause);
-      try {
-        if (rec.failureItem) await retractFailure(rec, 'the dead sign-in item took over');   // ONE item per account: the ladder's goes
-        const it = userTodos.add(INBOX_KEY, {
+      const causeWords = caps.signinCauseText(cause, { heldMs: stallMs, heldWhy: stallWhy });
+      const causeLine = caps.signinCauseText(cause, { heldMs: stallMs, heldWhy: stallWhy, t: (key, params) => ({ key, ...(params ? { params } : {}) }) });   // the item's words as structure (a stall's length rides as a param)
+      // r2: the store REFUSES a words shape it cannot keep by name (src/user-todos.js) — said in the log, and the item is
+      // filed with its cause's plain sentence left out (never a «{minutes}» on the person's screen)
+      const fileWith = (withCause) => {
+        const key = SIGNIN_KEYS[(kind ? 'k' : '') + (cause && withCause ? 'c' : '') || 'n'];
+        return userTodos.add(INBOX_KEY, {
           origin: 'channels', kind: 'action',
           text,
           detail: `Account: ${account}${kind ? ` (${kind})` : ''} — ${rec.id}\nSince: ${new Date(since).toISOString()}${causeWords ? `\nWhy: ${causeWords}` : ''}${vendorWords ? `\nVendor said: ${String(vendorWords).slice(0, 600)}` : ''}\n\nWhat to do: ${remedyFor(rec, 'auth-expired')} Re-authorizing keeps the account's options, access and history.\n\nNothing new arrives from this account until then. This item stays until a pass of the account goes through again — then it is retracted automatically.`,
@@ -7063,25 +7117,67 @@ function create(deps = {}) {
           action: { type: 'channel-reauth', adapterId: rec.id, signin: 'expired' },
           // ONE open item per account row: the producer's own bound (the agents' cap of 20 is shared by every account's items under one key)
           openCap: Math.max(20, 4 * (adapterRecords().adapters.length + 1)),
-          i18n: { text: { key: i18nKey(key), params: { account, ...(kind ? { kind } : {}), ...(cause ? { cause: { key: causeWords } } : {}) } }, source: INBOX_SOURCE },   // the cause: channel-caps signinCauseText's own key
+          i18n: { text: { key: i18nKey(key), params: { account, ...(kind ? { kind } : {}), ...(cause && withCause ? { cause: causeLine } : {}) } }, source: INBOX_SOURCE },   // the cause: channel-caps signinCauseText's own key (+ its params)
         });
+      };
+      try {
+        if (rec.failureItem) await retractFailure(rec, 'the dead sign-in item took over');   // ONE item per account: the ladder's goes
+        let it;
+        try { it = fileWith(true); }
+        catch (e) {
+          if (!(cause && /^i18n\./.test(String((e && e.message) || '')))) throw e;
+          log.warn(`[channels] ${rec.id}: the For-you store refused the dead sign-in's cause words (${e.message}) — the item is filed without them`);
+          it = fileWith(false);
+        }
         if (it && it.id) item = { id: it.id, text };
       } catch (e) { log.warn(`[channels] ${rec.id}: could not file the dead sign-in in the inbox: ${(e && e.message) || e}`); }
     }
-    await store.adapters.update(() => { rec.signinDead = { cause, since, item, at: now() }; });
+    await store.adapters.update(() => { rec.signinDead = { cause, since, item, at: now(), ...(stallMs ? { heldMs: stallMs } : {}), ...(stallWhy ? { heldWhy: stallWhy } : {}) }; delete rec.signinVerifying; });
     notify([], { full: false });   // the account views (the rail badge, the red line) carry it at once
+  }
+  /** lane lark-refresh-stall r2 (acceptance r1's R5 attack: a landing whose new token the vendor REFUSED went green at +1 ms
+   *  and red at the forced pass's first request — the item done then re-filed, the cause lost, `since` reset, and the log
+   *  said «the sign-in works again» before any request had used the token): A CONSENT THAT LANDS ON A DEAD SIGN-IN IS «signed
+   *  in — verifying». In the landing's own broadcast the red line goes and the item is resolved; `rec.signinVerifying =
+   *  {since, item}` stands until the first pass whose vendor calls ANSWERED (`verifiedSignin`: «works again», said once) or
+   *  the first refusal (`speakSignin`: red ONCE, that refusal's own cause, `since` = the landing). */
+  async function landSignin(rec) {
+    const d = rec.signinDead && typeof rec.signinDead === 'object' ? rec.signinDead : null;
+    const v = !d && rec.signinVerifying && typeof rec.signinVerifying === 'object' ? rec.signinVerifying : null;
+    if (!d && !v) return;
+    const at = now();
+    if (v) {
+      // r3 (acceptance r2 C3: a third landing while the second still verified — its refusal was dated, and named, by the second):
+      // a NEWER landing on a verifying record moves `since` to itself; the earlier one's request, if it answers later, is its own
+      await store.adapters.update(() => { rec.signinVerifying = { since: at, ...(v.item ? { item: v.item } : {}) }; });
+      log.log(`[channels] ${rec.id}: a newer sign-in landed — verifying it with its first request (the one that landed ${new Date(Number(v.since)).toISOString()} was not verified yet)`);
+      notify([], { full: false });
+      return;
+    }
+    await store.adapters.update(() => { delete rec.signinDead; rec.signinVerifying = { since: at, ...(d.item ? { item: d.item } : {}) }; });
+    log.log(`[channels] ${rec.id}: a new sign-in landed — verifying it with its first request (the dead sign-in's item is resolved)`);
+    resolveSigninItem(rec, d, 'a new sign-in landed');
+    notify([], { full: false });
+  }
+  async function verifiedSignin(rec) {
+    if (!rec.signinVerifying) return;
+    await store.adapters.update(() => { delete rec.signinVerifying; });
+    log.log(`[channels] ${rec.id}: the sign-in works again (the first requests with the new sign-in went through)`);
+    notify([], { full: false });
+  }
+  function resolveSigninItem(rec, d, why) {
+    if (!(d.item && userTodos && typeof userTodos.get === 'function')) return;
+    try {
+      const it = userTodos.get(d.item.id);
+      if (it && it.status === 'open' && it.sessionKey === INBOX_KEY && it.text === d.item.text) { userTodos.setStatus(d.item.id, 'done', RESOLVED_BY); log.log(`[channels] ${rec.id}: ${why} — retracted the dead sign-in item`); }
+    } catch (e) { log.warn(`[channels] ${rec.id}: could not retract the dead sign-in item: ${(e && e.message) || e}`); }
   }
   async function retractSignin(rec, why = 'a pass went through') {
     const d = rec.signinDead && typeof rec.signinDead === 'object' ? rec.signinDead : null;
-    if (!d) return;
-    await store.adapters.update(() => { delete rec.signinDead; });
+    if (!d) { if (rec.signinVerifying) { await store.adapters.update(() => { delete rec.signinVerifying; }); notify([], { full: false }); } return; }
+    await store.adapters.update(() => { delete rec.signinDead; delete rec.signinVerifying; });
     log.log(`[channels] ${rec.id}: the sign-in works again (${why})`);
-    if (d.item && userTodos && typeof userTodos.get === 'function') {
-      try {
-        const it = userTodos.get(d.item.id);
-        if (it && it.status === 'open' && it.sessionKey === INBOX_KEY && it.text === d.item.text) { userTodos.setStatus(d.item.id, 'done', RESOLVED_BY); log.log(`[channels] ${rec.id}: ${why} — retracted the dead sign-in item`); }
-      } catch (e) { log.warn(`[channels] ${rec.id}: could not retract the dead sign-in item: ${(e && e.message) || e}`); }
-    }
+    resolveSigninItem(rec, d, why);
     notify([], { full: false });
   }
   /** The retraction: ONLY the item this engine filed (same id, same text),
@@ -8254,7 +8350,7 @@ function create(deps = {}) {
     rxBackedOff, rxBackoffRefusal, notePages, noteRxRateLimit, appendSides, react, unreact, recallMessage, vendorSearch, aroundFor, refreshConvCaps, retractUnsaved,
     retractFailure, track, wakeTimers, clearWakeTimer, coalesceSeconds, billedWake, pathBudgetVerdict,
     flushScope, flushPending,   // lane wake-approve-card r6: a held digest the owner releases is delivered through the same flush (channels-access decideHeld)
-    speakSignin, retractSignin,   // lane channel-reauth-visible: the dead sign-in's ONE item (an unfinished consent re-asserts it; a removal / a disconnect ends it)
+    speakSignin, retractSignin, landSignin,   // lane channel-reauth-visible: the dead sign-in's ONE item (an unfinished consent re-asserts it; a removal / a disconnect ends it); lane lark-refresh-stall r2: a landing VERIFIES
     judgedRoadFor,   // lane judged-watch-state: the watch answers' judged-road line (channels-access)
     CG,              // lane grants-unify: the channel doors' rows (src/server/channels-grants.js)
     get stopped() { return stopped; },
@@ -8714,7 +8810,7 @@ function create(deps = {}) {
     listFor, readFor, statusFor,
     proposalsListFor, proposeRecall,   // lane channels-proposals-recall: the agent's own proposals as a list; a recall of the user's message, proposed
     reachCountFor,   // lane channels-teach: the hook teaches vibespace-channels on this (a count, never a render)
-    signinExpiredFor, speakSignin, retractSignin, retractFailure,   // lane channel-reauth-visible: the hook's dead-sign-in names; the items' doors (suites drive them)
+    signinExpiredFor, speakSignin, retractSignin, landSignin, retractFailure,   // lane channel-reauth-visible: the hook's dead-sign-in names; the items' doors (suites drive them)
     connectOffer, connectOffers, connectTaught,   // lane pod-oauth-callback: the agent's `connect` verb, `list`'s not-connected line, the 'connect' reach word
     flushPending: (adapterId, convId, opts) => { const rec = adapterRecords().adapters.find((r) => r.id === adapterId); return rec ? flushPending(rec, convId, opts || {}) : Promise.resolve({ ok: false, why: 'no-such-adapter' }); },
     // R4: a window is per (conversation | scope, WATCHER) — `key` names the conversation (or `scope:acct:<id>` / `scope:pat:<id>`), `principal` the watcher
