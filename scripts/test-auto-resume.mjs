@@ -203,8 +203,11 @@ const T0 = Date.now();   // the module refuses waits >26h out, so the clock must
 {
   const eng = read('src/server/usage-pool-engine.js');
   // (lane pool-silent-members R4: the gate's switch hands its ONE clock — `{ now }` — and runs BEFORE the probe of the
-  // member it moves to, so the arm sits after that probe: the window grew from 400 to 1600 characters)
-  ok('exhaustion arms it — AFTER trying the pool switch (seconds beat hours)', /maybePoolAutoSwitch\(session, \{ now \}\);[\s\S]{0,1600}getAutoResume\(\)\?\.armIfEnabled/.test(eng));
+  // member it moves to, so the arm sits after that probe: the window grew from 400 to 1600 characters; acceptance r2: the
+  // probe's fresh reading may re-decide once — `{ now: at, force: true }` — before the verdict, the window 2600)
+  ok('exhaustion arms it — AFTER trying the pool switch (seconds beat hours)', /maybePoolAutoSwitch\(session, \{ now \}\);[\s\S]{0,2600}getAutoResume\(\)\?\.armIfEnabled/.test(eng));
+  ok('…and the probe\'s fresh reading re-decides ONCE when the member it moved to cannot serve after all — at the clock after the probe, the verdict at that same instant (acceptance r2)',
+    /if \(probed && a && a\.type === 'pooled'\) \{\n\s*at = Date\.now\(\);\n\s*const tv = quotaVerdictFor\(target, \{ model, session, now: at \}\);\n\s*if \(tv && tv\.usable !== true\) maybePoolAutoSwitch\(session, \{ now: at, force: true \}\);\n\s*\}\n\s*const v = quotaVerdictFor\(scope, \{ model, session, now: at \}\);/.test(eng));
   // round 4: it disarms, and it says it is NOT proof of work — a passive
   // reading may not clear the loop breaker (the full classification table for
   // every noteRecovered caller is pinned in test-auto-resume-loop §5)

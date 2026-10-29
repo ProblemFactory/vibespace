@@ -310,6 +310,43 @@ var P2X; P2X = am.createPool({ name: 'P2' }).id; // the earlier block removed it
   ck('R2: _unplaceableWhy(id) is null ⇔ _placeable(id) — one answer over a live login, a wiped one, no file, a token with no file, a token over a wiped login, our token file', rows.every((r) => r.placeable === (r.why === null)) && rows[0].placeable === true && rows.slice(1).every((r) => r.why && typeof r.why.code === 'string'), JSON.stringify(rows));
   ck('R2: …each refusal says its own fact (wiped ⇒ logged-out, no file ⇒ no-file, a token with no file on an unmeasured CLI ⇒ cli-unmeasured · file:false)', rows[1].why.code === 'logged-out' && rows[2].why.code === 'no-file' && rows[3].why.code === 'cli-unmeasured' && rows[3].why.file === false && rows[4].why.code === 'cli-unmeasured', JSON.stringify(rows.map((r) => [r.name, r.why && r.why.code])));
 }
+{
+  // (lane pool-silent-members acceptance r2) THE LOCKED VAULT IS THE WALL, NEVER THE LOGIN. The deploy of this very fix
+  // restarts the hub and the vault locks: a member whose token file 90c995a3's sweep took away (a valid long-lived token,
+  // NO file — the CLI measured now) cannot be re-materialized until the owner unlocks. 9d53db09's roster said
+  // «long-lived token only, not written to its folder (key-unreadable) — re-login»: six needless logins.
+  const APA = require(path.resolve('src/account-pool-auto.js'));
+  const Module = require('node:module');
+  const run = async (AM, tag) => {
+    const am = new AM({ dataDir: path.join(DATA, 'vault-locked-' + tag) });
+    const X = am.createSubscription({ name: 'Login X' }).id;
+    fs.writeFileSync(path.join(am.subDir(X), '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'x', refreshToken: 'r', expiresAt: Date.now() + 36e5, refreshTokenExpiresAt: Date.now() + 20 * 864e5, scopes: ['user:inference', 'user:profile'], subscriptionType: 'max' } }), { mode: 0o600 });
+    const T = am.createSubscription({ name: 'Token V' }).id;
+    const P = am.createPool({ name: 'V pool' }).id;
+    am.noteCliVersion('2.1.312 (Claude Code)');
+    am.setOat(T, ['sk', '-ant-oat01-'].join('') + 'VAULTfake_' + 'v'.repeat(40));
+    await am.oatFileSettled();
+    const cf = path.join(am.subDir(T), '.credentials.json');
+    fs.rmSync(cf, { force: true }); // the take-back 90c995a3's 2.1.312 sweep made
+    // A RESTART before its first sweep: no refusal is known yet for the member — never «re-login»
+    const am2 = new AM({ dataDir: path.join(DATA, 'vault-locked-' + tag) });
+    const pending = am2.poolRoster(P).find((r) => r.id === T)?.why || null;
+    am2._key = () => { throw Object.assign(new Error('the vault is locked'), { code: 'key-unreadable:vault_locked' }); }; // …and the vault locked
+    await am2.syncOatFiles();
+    const locked = am2.poolRoster(P).find((r) => r.id === T)?.why || null;
+    return { pending, locked, file: fs.existsSync(cf) };
+  };
+  const r = await run(AccountManager, 'now');
+  ck('r2 (b): a locked vault (the restart this deploy makes) ⇒ the token-only member\'s roster reason is the VAULT — {code: vault-locked}: «the vault is locked — its long-lived token is kept and written to its folder once it opens (Unlock… at the top of the page; For you names what is waiting on it)»', !!r.locked && r.locked.code === 'vault-locked' && APA.unplaceableText(r.locked) === 'the vault is locked — its long-lived token is kept and written to its folder once it opens (Unlock… at the top of the page; For you names what is waiting on it)' && r.file === false);
+  ck('r2 (b): …and before the restarted hub\'s first sweep (no refusal known yet) it reads «not written to its folder yet» — never «re-login»', !!r.pending && r.pending.code === 'oat-not-in-folder' && r.pending.reason === 'pending' && !/re-login/.test(APA.unplaceableText(r.pending)));
+  const file = path.resolve('src/accounts.js'), src = fs.readFileSync(file, 'utf8'), cut = "      if (f && f.code === 'vault_locked') return { code: 'vault-locked' };\n";
+  ck('RED CONTROL (b): the patch (the vault code dropped — 9d53db09\'s _unplaceableWhy) hits', src.includes(cut));
+  if (src.includes(cut)) {
+    const m = new Module(file, null); m.filename = file; m.paths = Module._nodeModulePaths(path.dirname(file)); m._compile(src.replace(cut, ''), file);
+    const rc = await run(m.exports.AccountManager, 'mut');
+    ck('RED CONTROL (b): without the vault code the same locked vault is told «… (key-unreadable) — re-login» — the wrong remedy', !!rc.locked && rc.locked.code === 'oat-not-in-folder' && /\(key-unreadable\) — re-login$/.test(APA.unplaceableText(rc.locked)));
+  }
+}
 // THE PROVIDER OF A POOL MEMBER (q-053 P0b): every member names its provider (a LABEL — readings stay the slot's); the
 // pool's crossProvider setting (never by default, the owner's decision ①) is validated and listed.
 {

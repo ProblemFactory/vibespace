@@ -9,6 +9,9 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A pool's notice now names every member and what holds it back; it blames your spending limits only when they are what holds the others.
 - Auto-resume no longer misses the second an account's usage limit resets.
 - Re-check no longer probes an account with no login in its folder; a token-only account says it refreshes when a conversation uses it.
+- Re-check refreshes an account with no login in its folder through your machine's own login of the same account, when there is one.
+- The For-you note about an unmeasured Claude CLI stays dismissed, keeps its account count current, and survives an unreadable CLI version.
+- Pool notices stay short (a few accounts of each kind and how many more) and say when a locked vault or a vendor refusal holds an account.
 
 ## 2.369.360 — 2026-10-27
 

@@ -573,7 +573,7 @@ ck('auth: hostile/empty input is quiet', classifyAuthFailure({}) === false && cl
   ck('WIRING PIN: the turn-end boundary is the FIRST STOP (maybePoolAutoSwitch(session, { stop: true }) inside noteTurnEnd)',
     /function noteTurnEnd\(session, rec = null\) \{[\s\S]*?maybePoolAutoSwitch\(session, \{ stop: true \}\);[\s\S]*?\n\}/.test(eng));
   ck('WIRING PIN: EVERY signalled stop of a conversation no longer in a turn forces past the eval gate, owed or not (verifier LOW-2)',
-    /const force = stop\n\s*&& !conversationInTurn\(\{ isStreaming: session\._isStreaming, turnState: session\._turnState \}\);/.test(eng));
+    /const force = forced \|\| \(stop\n\s*&& !conversationInTurn\(\{ isStreaming: session\._isStreaming, turnState: session\._turnState \}\)\);/.test(eng)); // (+ the pre-fire gate's forced re-decision, pool-silent-members acceptance r2)
   ck('WIRING PIN: the authoritative idle record re-decides every pooled conversation\'s stop (noteTurnStopped is not gated on an owed move — LOW-2)',
     /function noteTurnStopped\(session\) \{\n\s*try \{\n\s*if \(!session \|\| !session\._accountId\) return;\n\s*maybePoolAutoSwitch\(session, \{ stop: true \}\);/.test(eng));
   ck('WIRING PIN: a per-session re-point clears that conversation\'s two hold/defer throttle keys (a new deferral episode speaks — LOW-3)',
@@ -1322,6 +1322,16 @@ await (async () => {
   const g403 = w.call('POST', '/api/accounts/pool/:id/gather', { id: w.P }, { memberId: w.id.fish }, { authorization: 'Bearer jbt_x' });
   const g400 = w.call('POST', '/api/accounts/pool/:id/gather', { id: w.P }, { memberId: 'sub-stranger' });
   ck('gather: an agent token is refused (403); a non-member by name (400 not_member)', g403.code === 403 && g400.code === 400 && g400.body.code === 'not_member');
+  {
+    // (lane pool-silent-members acceptance r2, claim 1 (f)) A MEMBER THE POOL LISTS BUT CANNOT PLACE is refused with the
+    // ROSTER's own reason and remedy — 9d53db09 said «not a signed-in member of this pool» of every one (a CLI unmeasured,
+    // the vault locked, a wiped login…)
+    const mid = w.am.poolMembership(w.P)[0]; // the pool's first listed member
+    const cf = path.join(w.am.subDir(mid), '.credentials.json'), keep = fs.readFileSync(cf);
+    fs.writeFileSync(cf, JSON.stringify({ claudeAiOauth: { accessToken: '', refreshToken: '', expiresAt: 0, refreshTokenExpiresAt: Date.now() - 86400e3, subscriptionType: 'max' } }), { mode: 0o600 });
+    let gw; try { gw = w.call('POST', '/api/accounts/pool/:id/gather', { id: w.P }, { memberId: mid }); } finally { fs.writeFileSync(cf, keep, { mode: 0o600 }); }
+    ck('gather (r2): onto a member the pool LISTS but cannot place (its login wiped) ⇒ refused by the ROSTER\'s reason — 409 not_placeable «<member>: signed out (its login was wiped) — re-login — nothing was moved.», why logged-out', gw.code === 409 && gw.body.code === 'not_placeable' && gw.body.why === 'logged-out' && gw.body.error === `${w.am.get(mid).name}: signed out (its login was wiped) — re-login — nothing was moved.`, JSON.stringify(gw));
+  }
   const g = w.call('POST', '/api/accounts/pool/:id/gather', { id: w.P }, { memberId: w.id.uci });
   ck('gather: "Move every conversation here now" on the member that ALREADY is the default still acts — every link moves, the mid-turn one included (never greyed, never a no-op)', g.code === 200 && g.body.hot === true && ['s-idle', 's-busy', 's-cold'].every((sid) => w.on(sid) === 'uci') && g.body.affected.length === 0, JSON.stringify(g.body));
   ck('spend: no placement act here asked auto-resume to continue anything it would not have (a hot move nudges only an ARMED conversation; none is)', true);
@@ -2684,6 +2694,113 @@ await (async () => {
       }
       for (const r of copiesCensus(ML.files, ML.dir, path.resolve('.'), { minCopies: 4, label: 'latents mutants: ' })) ck(r.name, r.pass);
     }
+  }
+}
+
+// ── lane pool-silent-members ACCEPTANCE r2: THE EVALUATION'S ONE ROSTER, and the engine's own marks in it ──
+// accounts.poolRoster reads every member's credential files synchronously on the main thread; 9d53db09 handed each
+// conversation's decision `() => accounts.poolRoster(poolId)`, so a blocked evaluation read it once per conversation
+// (61 rosters for 60 — the prod-stall-202 class). And a member the engine's switchCandidates dropped for a VENDOR refusal
+// (401×2 / 403 / ban: the 10-min mark) was named «not signed in — re-login» — its login was fine.
+console.log('── pool-silent-members r2: the roster is read ONCE per evaluation; a vendor-refused member is its own bucket ──');
+{
+  const fs = require('node:fs');
+  const { AccountManager } = require(path.resolve('src/accounts.js'));
+  const { ClaudeCodeAdapter } = require(path.resolve('src/adapters/claude-code.js'));
+  const { scratch } = await import('./scratch.mjs');
+  const scr = scratch('pool-roster-r2'); fs.rmSync(scr, { recursive: true, force: true }); fs.mkdirSync(scr, { recursive: true });
+  const mutEngine = (tag, from, to) => {
+    const root = path.join(scr, 'mut-' + tag);
+    fs.cpSync(path.resolve('src'), path.join(root, 'src'), { recursive: true });
+    fs.copyFileSync(path.resolve('package.json'), path.join(root, 'package.json'));
+    try { fs.symlinkSync(path.resolve('node_modules'), path.join(root, 'node_modules')); } catch { }
+    const fp = path.join(root, 'src/server/usage-pool-engine.js');
+    const src = fs.readFileSync(fp, 'utf8');
+    if (!src.includes(from)) return { hit: false };
+    fs.writeFileSync(fp, src.replace(from, to));
+    return { hit: true, mod: require(fp) };
+  };
+  const live = (am, id) => fs.writeFileSync(path.join(am.subDir(id), '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'tok-' + id, refreshToken: 'r-' + id, expiresAt: Date.now() + 36e5, refreshTokenExpiresAt: Date.now() + 30 * 86400e3, subscriptionType: 'max' } }), { mode: 0o600 });
+  const wiped = (am, id) => fs.writeFileSync(path.join(am.subDir(id), '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: '', refreshToken: '', expiresAt: 0, refreshTokenExpiresAt: Date.now() - 86400e3, subscriptionType: 'max' } }), { mode: 0o600 });
+  const OATX = ['sk', '-ant-oat01-'].join('') + 'POOLr2fake_';
+  // THE INCIDENT'S ROSTER SHAPE (14): 6 live logins every one spent, 6 living on a long-lived token on an UNMEASURED CLI
+  // (no file), 2 wiped — every conversation's decision is blocked
+  const world = async (engMod, { sessions = 1, names = null } = {}) => {
+    const root = fs.mkdtempSync(path.join(scr, 'w-'));
+    const dataDir = path.join(root, 'data');
+    const am = new AccountManager({ dataDir });
+    if (!am.poolSupported()) return null;
+    const ids = [];
+    const list = names || Array.from({ length: 14 }, (_, i) => 'acct-' + (i + 1));
+    list.forEach((n, i) => { const id = am.createSubscription({ name: n }).id; ids.push(id); if (names || i < 6) live(am, id); else if (i < 12) am.setOat(id, OATX + String.fromCharCode(97 + i).repeat(40)); else wiped(am, id); });
+    if (!names) am.noteCliVersion('2.1.399 (Claude Code)');
+    await am.oatFileSettled();
+    const P = am.createPool({ name: 'Pool' }).id;
+    am.setPoolTarget(P, ids[0]); am.updatePool(P, { auto: true, hot: true });
+    const cacheDir = path.join(dataDir, 'usage-cache'); fs.mkdirSync(cacheDir, { recursive: true });
+    const nowS = Math.floor(Date.now() / 1000);
+    for (const id of ids) fs.writeFileSync(path.join(cacheDir, id + '.json'), JSON.stringify({ fetchedAt: Date.now() - 60000, source: 'on-demand', fiveHour: { utilization: 0.99, resetsAt: nowS + 7200 }, sevenDay: { utilization: 0.3, resetsAt: nowS + 3 * 86400 } }));
+    const sess = new Map(), notices = [];
+    const eng = engMod.create({
+      app: { get() { }, post() { }, put() { }, delete() { }, use() { }, locals: {} }, rootDir: root, USAGE_CACHE_DIR: cacheDir, activeSessions: sess,
+      wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { }, serverNotice: (k, t) => { notices.push(t); return 1; }, serverSetting: () => undefined, getAccounts: () => am,
+      getHosts: () => ({ device: async () => ({ poolOrders: async () => { }, ackPoolOrdersLog() { } }) }),
+      getUsageHistory: () => ({ _cost: () => 0, ingestRemoteEvents() { } }), recordUsageAttribution() { }, adapterRegistry: { get: () => ClaudeCodeAdapter },
+      getAutoResume: () => ({ armIfEnabled() { }, noteFireOutcome() { }, noteRecovered() { }, noteNoPoolTarget() { }, statusFor: () => null, enabledFor: () => false, fireNow() { } }),
+      getQuotaProbe: () => null, getSessionMetaStore: () => null,
+    });
+    const convs = [];
+    for (let i = 0; i < sessions; i++) {
+      const sid = 'r2-sess-' + i;
+      const s2 = { backend: 'claude', mode: 'chat', host: null, _webuiId: sid, claudeSessionId: 'cid-' + sid, _accountId: P, name: sid, cwd: root, sockName: 'cw-' + sid, buffer: '', createdAt: Date.now(), pty: { write() { } }, _spawnModel: 'claude-fable-5-1', _lastPtyDataAt: Date.now() - 20 * 60e3, _isStreaming: false, _turnState: 'idle' };
+      sess.set(sid, s2); am.ensureSessionPoolLink(P, sid, ids[0], { why: 'spawn' }); convs.push({ sid, s2 });
+    }
+    // ONE evaluation, counted: the roster calls and the synchronous file reads made INSIDE them; the journal kept
+    const evaluate = () => {
+      let calls = 0, reads = 0, depth = 0;
+      const realRoster = am.poolRoster.bind(am), realRead = fs.readFileSync;
+      am.poolRoster = (id) => { calls++; depth++; try { return realRoster(id); } finally { depth--; } };
+      fs.readFileSync = function (...a) { if (depth) reads++; return realRead.apply(this, a); };
+      const o = console.log, w = console.warn, lines = []; console.log = (...a) => lines.push(a.join(' ')); console.warn = (...a) => lines.push(a.join(' '));
+      try { eng.maybePoolAutoSwitchForPool(P, { force: true }); } finally { console.log = o; console.warn = w; fs.readFileSync = realRead; am.poolRoster = realRoster; }
+      return { calls, reads, lines };
+    };
+    return { eng, am, P, ids, convs, notices, evaluate };
+  };
+  const engMod = require(path.resolve('src/server/usage-pool-engine.js'));
+  const probe = await world(engMod);
+  if (!probe) ck('r2 roster SKIP — pools unsupported on this platform', true);
+  else {
+    const one = probe.am.poolRoster(probe.P).length, perRoster = (() => { let n = 0; const r = fs.readFileSync; fs.readFileSync = function (...a) { n++; return r.apply(this, a); }; try { probe.am.poolRoster(probe.P); } finally { fs.readFileSync = r; } return n; })();
+    const runs = [];
+    for (const n of [1, 20, 60]) { const w = await world(engMod, { sessions: n }); const e = w.evaluate(); runs.push({ n, calls: e.calls, reads: e.reads, notices: w.notices.length }); }
+    console.log('    one roster = ' + one + ' members, ' + perRoster + ' readFileSync; per evaluation: ' + runs.map((r) => `${r.n} conv → ${r.calls} roster / ${r.reads} reads`).join(' · '));
+    ck(`r2 ③ ONE ROSTER PER EVALUATION: a blocked evaluation over 1 / 20 / 60 conversations reads the roster ${runs.map((r) => r.calls).join(' / ')} time(s) — never once per conversation (9d53db09: 2 / 21 / 61)`, runs.every((r) => r.calls === 1));
+    ck(`r2 ③ …its synchronous reads per evaluation are ONE roster's (${runs.map((r) => r.reads).join(' / ')} for 1 / 20 / 60 conversations, ≤ 1.6 × the 14 members — never × conversations)`, runs.every((r) => r.reads === runs[0].reads) && runs[0].reads <= 1.6 * 14 && runs[0].reads === perRoster);
+    ck('r2 ③ …and the blocked notice still names the roster (the per-session decisions and the default share that one read)', runs.every((r) => r.notices >= 1));
+    const m0 = mutEngine('roster-per-conv', 'const roster = evaluationRoster(poolId);', 'const roster = () => accounts.poolRoster(poolId);');
+    ck('RED CONTROL (③) the patch (9d53db09: a fresh roster thunk per decision) hits', m0.hit);
+    if (m0.hit) { const w = await world(m0.mod, { sessions: 20 }); const e = w.evaluate(); ck(`RED CONTROL (③): with a roster thunk per decision the SAME evaluation over 20 conversations reads it ${e.calls} times (${e.reads} reads) — the memo is what bounds it`, e.calls >= 20 && e.reads >= 20 * perRoster); }
+    // ⑤ THE VENDOR REFUSAL IS ITS OWN WALL: B's turn is refused 403 (its login file is fine): switchCandidates drops it for
+    // 10 min, and the roster the evaluation reads carries the engine's mark
+    const authWorld = async (mod) => {
+      const w = await world(mod, { sessions: 2, names: ['acct-A', 'acct-B', 'acct-C'] });
+      const [A, B] = w.ids;
+      const nowS = Math.floor(Date.now() / 1000);
+      fs.writeFileSync(path.join(w.am.subDir(A), '..', '..', 'usage-cache', B + '.json'), JSON.stringify({ fetchedAt: Date.now() - 60000, source: 'on-demand', fiveHour: { utilization: 0.2, resetsAt: nowS + 7200 }, sevenDay: { utilization: 0.3, resetsAt: nowS + 3 * 86400 } }));
+      const c1 = w.convs[1]; w.am.ensureSessionPoolLink(w.P, c1.sid, B, { why: 'spawn' });
+      const o = console.log, ww = console.warn; console.log = () => { }; console.warn = () => { };
+      try { w.eng.notePoolAuthFailure(c1.s2, c1.sid, { status: 403, message: 'API Error: 403 {"type":"error","error":{"type":"permission_error"}}' }); } finally { console.log = o; console.warn = ww; }
+      w.notices.length = 0;
+      const e = w.evaluate();
+      return { w, e, n: w.notices.find((t) => /acct-B/.test(t)) || '' };
+    };
+    const au = await authWorld(engMod);
+    ck('r2 ⑤ a member the vendor refused (403, its login fine) is named in its OWN bucket — «Refused by the vendor: acct-B (0 min ago — retried after 10 min)» — never «not signed in — re-login»', /Refused by the vendor: acct-B \(\d+ min ago — retried after 10 min\)\./.test(au.n) && !/acct-B: not signed in/.test(au.n) && !/acct-B[^.;]*re-login/.test(au.n));
+    ck('r2 ⑤ …and the notice\'s full roster is journaled beside it, ONE line per member (the toast is bounded; the journal is not)', au.e.lines.filter((l) => /^\[pool\] Pool · /.test(l)).length === 3 && au.e.lines.some((l) => /^\[pool\] Pool · acct-B: refused by the vendor \d+ min ago — retried after 10 min$/.test(l)) && au.e.lines.some((l) => /^\[pool\] Pool · acct-A \(current\): /.test(l)));
+    const m1 = mutEngine('no-auth-mark', "if (m && memberAuthFailed(r.id)) return { ...r, why: { code: 'auth-failed', at: m.at } };", '');
+    ck('RED CONTROL (⑤) the patch (the roster without the engine\'s auth mark) hits', m1.hit);
+    if (m1.hit) { const am1 = await authWorld(m1.mod); ck('RED CONTROL (⑤): without the engine\'s mark the same member is NOT named as refused by the vendor (only «left out of this decision») — the mark is what names the true wall', !/Refused by the vendor/.test(am1.n) && /acct-B: signed in, but left out of this decision/.test(am1.n)); }
   }
 }
 

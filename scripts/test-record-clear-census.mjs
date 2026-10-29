@@ -1876,6 +1876,7 @@ const I_RECV = {
   // ── not a record: what each is ──
   'src/harnesses/claude-oat-expiry.js|a': ['account', 'an account / pool name'], 'server.js|h': ['host', 'a machine name'],
   'src/accounts.js|a': ['account', 'an account'], 'src/accounts.js|target': ['account', 'an account'],
+  'src/server/account-usage-routes.js|row': ['account', 'a pool member\'s roster row (accounts.poolRoster) — its account name in the gather route\'s refusal (lane pool-silent-members acceptance r2)'],
   'src/lib/aes-fallback.js|key.algorithm': ['crypto key', 'the imported AES key\'s algorithm name (AES-CBC / AES-ECB) in a mismatch Error — a constant of the fallback, never a record (lane mac-ard-signin; int259 seam)'],
   'src/browser-profiles.js|f': ['launch fatal row', 'a fixed reason code of LAUNCH_FATALS (lane browser-tmpdir-socket-length)'],
   'src/browser-profiles.js|existing': ['browser profile', 'a profile label'], 'src/browser-profiles.js|profile': ['browser profile', 'a profile label'], 'src/browser-profiles.js|row': ['browser profile', 'a profile label'],

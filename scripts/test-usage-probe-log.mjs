@@ -247,8 +247,8 @@ const L = require(path.join(REPO, 'src/server/usage-probe-log.js'));
     withFacts(am, facts);
     const before = runs();
     const r = await u.refreshViaCliPanel(id), pv = u.panelVerdictFor(id);
-    ok(`§5 ${label}: refused by name (code login, «${el}»), NO spawn, NO failure on its record; the row says ${el}`,
-      r === false && runs() === before && pv.code === 'login' && pv.why.includes(el) && re.test(pv.why) && rowOf().probe === undefined && rowOf().probeEligibility === el, JSON.stringify({ runs: runs() - before, why: pv.why, el: rowOf().probeEligibility }));
+    ok(`§5 ${label}: refused by name (code unprobeable, «${el}»), NO spawn, NO failure on its record; the row says ${el}`,
+      r === false && runs() === before && pv.code === 'unprobeable' && pv.el === el && pv.why.includes(el) && re.test(pv.why) && rowOf().probe === undefined && rowOf().probeEligibility === el, JSON.stringify({ runs: runs() - before, why: pv.why, el: rowOf().probeEligibility }));
   }
   withFacts(am, PROBEABLE_FACTS);
   const b4 = runs();
@@ -257,7 +257,7 @@ const L = require(path.join(REPO, 'src/server/usage-probe-log.js'));
   // in the owner's log since 10-26 (on 2.1.308 too) answered the subscription header with no quota line. The panel serves
   // live logins only; such a row is read passively (a session on it) or by the owner's own session.
   ok('§5 ④c R3: an oat-only row whose token (user:profile, a measured CLI) IS written in its folder is NOT probed — the panel prints no quota line for a folder-token login — refused by name (unprobeable:oat-folder-no-panel), NO spawn, no failure on its record',
-    r4 === false && runs() === b4 && pv4.code === 'login' && pv4.why.includes('unprobeable:oat-folder-no-panel') && /prints no quota lines for a folder-token login/.test(pv4.why) && rowOf().probeEligibility === 'unprobeable:oat-folder-no-panel' && rowOf().probe === undefined, JSON.stringify({ r4, runs: runs() - b4, why: pv4.why, el: rowOf().probeEligibility }));
+    r4 === false && runs() === b4 && pv4.code === 'unprobeable' && pv4.outcome === 'not-probed' && !/re-login/.test(pv4.why) && pv4.why.includes('unprobeable:oat-folder-no-panel') && /prints no quota lines for a folder-token login/.test(pv4.why) && rowOf().probeEligibility === 'unprobeable:oat-folder-no-panel' && rowOf().probe === undefined, JSON.stringify({ r4, runs: runs() - b4, why: pv4.why, el: rowOf().probeEligibility }));
   am.list = realList;
   // ④d THE ⟳ DOOR AT 12:58:18 PT (R3): a row the loop calls `unprobeable:no-login` (its folder EMPTY — the take-back's shape)
   // is refused by the SAME predicate — 90c995a3 refused only oat-only rows, spawned it, and booked the CLI's non-subscriber
@@ -269,8 +269,63 @@ const L = require(path.join(REPO, 'src/server/usage-probe-log.js'));
   const b5 = runs();
   const r5 = await u.refreshViaCliPanel(id), pv5 = u.panelVerdictFor(id);
   ok('§5 ④d R3: the ⟳ door refuses a no-login row by the loop\'s own predicate (unprobeable:no-login) — NO spawn, no parse failure booked on its record',
-    r5 === false && runs() === b5 && pv5.code === 'login' && pv5.why.includes('unprobeable:no-login') && /not logged in/.test(pv5.why) && rowOf().probe === undefined, JSON.stringify({ r5, runs: runs() - b5, why: pv5.why }));
+    r5 === false && runs() === b5 && pv5.code === 'unprobeable' && pv5.why.includes('unprobeable:no-login') && /not logged in/.test(pv5.why) && rowOf().probe === undefined, JSON.stringify({ r5, runs: runs() - b5, why: pv5.why }));
   am.list = realList;
+  // ④e THE ROUTE'S LADDER FIRST (acceptance r2): the door's refusal skips only the panel's spawn — the ⟳ route tries its
+  // same-account fallback (2.181.0: the machine's own login is the same Anthropic account) BEFORE it refuses by name, as
+  // 90c995a3 did for both rows (9d53db09 answered «needs re-login» with no fallback tried). The vendor call is answered
+  // IN-PROCESS (https.request stubbed: no socket, no vendor request); HOME is a scratch dir holding a FAKE login.
+  {
+    const https = require('node:https'); const { EventEmitter } = require('node:events');
+    const routes = {};
+    usageMod.setupUsage({
+      app: { get() { }, post(p, fn) { routes[p] = fn; }, put() { }, delete() { }, use() { }, locals: {} },
+      accounts: am, hosts: null, usageHistory: null, activeSessions: new Map(),
+      serverSetting: () => undefined, ensureDir: (d) => fs.mkdirSync(d, { recursive: true }),
+      USAGE_CACHE_FILE: path.join(dataDir, 'usage-cache.json'), USAGE_CACHE_DIR: cacheDir,
+      CODEX_SESSIONS_DIR: path.join(root, 'codex-sessions'), META_DIR: path.join(dataDir, 'session-meta'),
+      AVAILABLE_MODELS: [], BUFFERS_DIR: path.join(dataDir, 'session-buffers'),
+      probeUsageForAccountKey: async () => false, onMemberReadingFresh: () => ({}), CLAUDE_CMD: bin,
+    });
+    const EMAIL = 'fold' + '@example.invalid'; // built at runtime: no address-shaped literal in the tree
+    const GTOK = ['GLOBAL', 'fake', 'login'].join('-'); // the machine login's FAKE token, built at runtime
+    const home = mkd(`vs-probelog-home-${process.pid}-`); fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
+    const globalLogin = (on) => { const f = path.join(home, '.claude', '.credentials.json'); if (on) fs.writeFileSync(f, JSON.stringify({ claudeAiOauth: { accessToken: GTOK, expiresAt: Date.now() + 36e5 } })); else fs.rmSync(f, { force: true }); };
+    fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({ oauthAccount: { emailAddress: EMAIL } }));
+    const calls = [], realReq = https.request, realHome = process.env.HOME;
+    https.request = (url, opts, cb) => {
+      calls.push({ url: String(url), bearer: String((opts && opts.headers && opts.headers.authorization) || '').replace(/^Bearer /, '') });
+      const res = new EventEmitter(); res.statusCode = 200; res.headers = {};
+      const req = new EventEmitter(); req.setTimeout = () => req; req.destroy = () => { };
+      req.end = () => setImmediate(() => { cb(res); res.emit('data', JSON.stringify({ five_hour: { utilization: 12, resets_at: new Date(Date.now() + 3 * 3600e3).toISOString() }, seven_day: { utilization: 40, resets_at: new Date(Date.now() + 3 * 86400e3).toISOString() } })); res.emit('end'); });
+      return req;
+    };
+    process.env.HOME = home;
+    const call = (account) => new Promise((resolve) => routes['/api/usage/refresh']({ body: { account }, headers: {} }, { status() { return this; }, json: (j) => resolve(j) }));
+    try {
+      // the folder-token row (our token written in its folder, a measured CLI), the same account as the machine's login
+      say(`printf 'You are currently using your subscription to power your Claude Code usage\\n'\n`);
+      const idF = am.createSubscription({ name: 'Fold One' }).id; // no login file of its own: only the fallback can serve it
+      const realL0 = am.list.bind(am);
+      am.list = () => { const l = realL0(); l.accounts = l.accounts.map((r) => { if (r.id !== idF) return r; const x = { ...r, ...PROBEABLE_FACTS, email: EMAIL }; x.probeEligibility = probeEligibility(x); return x; }); return l; };
+      globalLogin(true);
+      const b = runs(); const j1 = await call(idF);
+      am.list = realL0;
+      ok('§5 ④e (acceptance r2): ⟳ on a folder-token member that is the SAME account as the machine\'s login is REFRESHED through the route\'s same-account fallback — the ladder first, no panel spawn, the machine login\'s token (a stubbed fetch, in-process)',
+        j1 && j1.success === true && runs() === b && calls.length >= 1 && calls[0].bearer === GTOK && /\/api\/oauth\/usage$/.test(calls[0].url), JSON.stringify({ j1, calls: calls.length, spawns: runs() - b }));
+      // nothing serves it: refused BY NAME, the row's own remedy — a folder-token row is never told to re-login
+      const id2 = am.createSubscription({ name: 'Fold Two' }).id, id3 = am.createSubscription({ name: 'Bare Three' }).id;
+      globalLogin(false);
+      const realL = am.list.bind(am);
+      am.list = () => { const l = realL(); l.accounts = l.accounts.map((r) => { const f = r.id === id2 ? { ...PROBEABLE_FACTS, email: 'other' + '@example.invalid' } : r.id === id3 ? NOLOGIN_FACTS : null; if (!f) return r; const x = { ...r, ...f }; x.probeEligibility = probeEligibility(x); return x; }); return l; };
+      const n0 = calls.length, b2 = runs();
+      const j2 = await call(id2), j3 = await call(id3);
+      ok('§5 ④e: …with no fallback token, the folder-token row is refused BY NAME — «not refreshed — not probed (unprobeable:oat-folder-no-panel …)», never «re-login», no loginNeeded',
+        j2 && !j2.success && /^not refreshed — not probed \(unprobeable:oat-folder-no-panel: /.test(j2.error) && !/re-login/.test(j2.error) && !j2.loginNeeded, JSON.stringify(j2));
+      ok('§5 ④e: …and the empty folder (no login) is refused by name with loginNeeded — «needs re-login to refresh usage — not probed (unprobeable:no-login …)»; neither spawned the panel nor made a fetch',
+        j3 && j3.loginNeeded === true && /^needs re-login to refresh usage — not probed \(unprobeable:no-login: /.test(j3.error) && runs() === b2 && calls.length === n0, JSON.stringify({ j3, fetches: calls.length - n0 }));
+    } finally { https.request = realReq; process.env.HOME = realHome; am.list = realList; }
+  }
   // RED CONTROLS at the door: the same door over the verdict with ONE check cut — the profile-less token / the unmeasured
   // CLI (the boot shape: no version known yet, the folder door still «written») is SPAWNED
   {

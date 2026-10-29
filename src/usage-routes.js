@@ -40,7 +40,7 @@ const quotaModel = require('./quota-model.js');
 const { authoritativeScopesOf } = quotaModel;
 
 const probeLog = require('./server/usage-probe-log.js'); // the raw /usage probe ring (2.369.109)
-const { probeFailWhy, probeWhyText, probeEligibility, isUnprobeable, notProbedWords, panelAnswerClass } = require('./auto-cli-model.js'); // PURE: may the probe PROVE this row, a failed probe's reason + THE ONE scrub (lane auto-cli-oat-unprobeable)
+const { probeFailWhy, probeWhyText, probeEligibility, isUnprobeable, notProbedWords, panelAnswerClass, OAT_FOLDER_NO_PANEL } = require('./auto-cli-model.js'); // PURE: may the probe PROVE this row, a failed probe's reason + THE ONE scrub (lane auto-cli-oat-unprobeable)
 // THE PANEL PROBE'S ARGV (B-9b40): `/usage` and no MCP server at all. Measured on
 // the claude 2.1.288 binary: print mode loads the account's claude.ai connectors
 // unless the MCP config is strict (`headlessSyncsClaudeAiConnectors: !strictConfig
@@ -538,7 +538,7 @@ const _panelVerdict = {};            // key → the last probe's {at, outcome, i
 // the row says why already), a removed account has no record, and `__global__` is no account.
 function panelSays(key, v) {
   _panelVerdict[key] = v;
-  if (key === '__global__' || !v || v.code === 'login') return v;
+  if (key === '__global__' || !v || v.code === 'login' || v.code === 'unprobeable') return v; // the door's refusal is no failed probe either (acceptance r2)
   try {
     if (v.outcome === 'written') accounts.noteProbe?.(key, null);
     else accounts.noteProbe?.(key, { at: v.at, ok: false, why: probeWhyText(v.why) || v.outcome });
@@ -620,10 +620,15 @@ async function refreshViaCliPanel(key) {
     // THE LOOP'S ELIGIBILITY, WHOLE (lane pool-silent-members R3, inc-mvsjhna7 12:58:18 PT): 90c995a3 refused only an
     // oat-only row, so a row the loop already called `unprobeable:no-login` (its folder empty) was spawned anyway — the CLI
     // printed its non-subscriber cost summary and the row booked it as a parse failure. ONE predicate for ⟳ and the loop.
+    // …AND A REFUSAL HERE SKIPS ONLY THE PANEL'S SPAWN (acceptance r2): the route still tries its token ladder's
+    // same-account (2.181.0) and identity-group (2.266.1) fallbacks — a folder-token row or an empty folder whose
+    // account the machine's own login (or a live sibling) serves was refreshed there on 90c995a3 — and refuses by name
+    // only what the ladder cannot serve either (code 'unprobeable', the remedy the row's own state names)
     const el = probeEligibility(acctMeta);
     if (isUnprobeable(el)) {
       const oat = acctMeta.loginState && acctMeta.loginState.state === 'oat-only';
-      panelSays(key, { at: Date.now(), outcome: 'login-needed', code: 'login', identityVerified: false, why: oat ? `the OAuth login ended and the long-lived token cannot be probed (${el}: ${notProbedWords(el, acctMeta)}); re-login to refresh usage` : `not probed (${el}: ${notProbedWords(el, acctMeta)}) — re-login to refresh usage`, rung: 'panel' });
+      const folderToken = el === OAT_FOLDER_NO_PANEL; // a measured CLI with our token in the folder: no re-login is the fix
+      panelSays(key, { at: Date.now(), outcome: folderToken ? 'not-probed' : 'login-needed', code: 'unprobeable', el, identityVerified: false, why: folderToken ? `not probed (${el}: ${notProbedWords(el, acctMeta)})` : oat ? `the OAuth login ended and the long-lived token cannot be probed (${el}: ${notProbedWords(el, acctMeta)}); re-login to refresh usage` : `not probed (${el}: ${notProbedWords(el, acctMeta)}) — re-login to refresh usage`, rung: 'panel' });
       return false;
     }
   }
@@ -1109,7 +1114,10 @@ app.post('/api/usage/refresh', async (req, res) => {
   const t0 = Date.now();
   const cliOk = await refreshViaCliPanel(key);
   const pv = panelVerdictFor(key);
-  if (!cliOk && pv && pv.at >= t0 && pv.code === 'login') return res.json({ error: 'needs re-login to refresh usage — ' + pv.why, loginNeeded: true, rung: 'panel', identityVerified: false, why: pv.why, skipped });
+  // a panel that answered «no login in the folder» (code 'login') or a door that refused the spawn (code 'unprobeable') ENDS
+  // NOTHING here (acceptance r2): the token ladder below — the same-account and identity-group fallbacks 90c995a3 reached
+  // for both — is tried first, and the refusal is said by name only when it has no token either (below the ladder)
+  const refusedByName = !cliOk && pv && pv.at >= t0 && (pv.code === 'login' || pv.code === 'unprobeable') ? pv : null;
   // A LAPSED SUBSCRIPTION (2026-10-08) is re-admitted only by the panel's own answer: when the panel did not answer,
   // the token ladder below is NOT tried for it — a reading that is not the CLI serving must never count as the renewal
   // …and the answer SAYS which (verify r1 ③): the CLI answered but its reading was refused as another account's window, or it did not answer
@@ -1169,6 +1177,10 @@ app.post('/api/usage/refresh', async (req, res) => {
       }
     } catch { }
   }
+  // the door refused the panel (acceptance r2) and no fallback serves this account either: refused BY NAME, the row's own remedy
+  if (!token && refusedByName) return res.json(refusedByName.el === OAT_FOLDER_NO_PANEL
+    ? { error: 'not refreshed — ' + refusedByName.why, rung: 'panel', identityVerified: false, why: refusedByName.why, skipped }
+    : { error: 'needs re-login to refresh usage — ' + refusedByName.why, loginNeeded: true, rung: 'panel', identityVerified: false, why: refusedByName.why, skipped });
   if (!token) return res.json({ error: 'no currently-valid token for this account (nor its linked machine login) — run a session on it (the CLI refreshes its own login), then retry' });
   _onDemandUsageAt[key] = Date.now();
   _fetchOAuthUsage(token, (u) => {

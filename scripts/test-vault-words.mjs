@@ -112,6 +112,7 @@ const ROWS = {
   'src/voice-model.js': [[K1N, 'person', 'voice input while the Dropline sign-in is sealed']],
   'src/lib/vault-window.js': [['The vault is locked — Unlock… above shows what it holds', 'person', 'the Vault window\'s own note (its header\'s Unlock… is the door)']],
   'src/lib/machine-desktop.js': [['The vault is locked — unlock it to sign in automatically', 'person', 'the machine desktop\'s sign-in form and toast — the owner\'s own words (test-desktop-signin pins them) WITH the two facts beside them', { count: 2, with: TAIL }]],
+  'src/account-pool-auto.js': [['the vault is locked — its long-lived token is kept', 'person', 'the pool notice\'s reason for a member whose long-lived token the locked vault keeps out of its folder (lane pool-silent-members acceptance r2: never «re-login»)']],
   'src/accounts.js': [['the stored keys open after the owner unlocks it', 'both', 'an account key the locked vault keeps closed — a person\'s dialog and an agent\'s CLI read it']],
   'src/server/channels-engine.js': [
     ['this account\'s sign-in opens after the owner unlocks it on this instance', 'both', 'a refresh of an account the locked vault keeps closed'],

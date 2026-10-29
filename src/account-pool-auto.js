@@ -32,7 +32,7 @@
 // every decision below then behaves EXACTLY as it did before this input
 // existed. That is deliberate: a harness that cannot read a login deadline
 // must not have its members quietly demoted.
-const { loginUsable, loginSwitchTarget, loginRank, loginWallPhrase, loginBlockedText } = require('./login-expiry.js');
+const { loginUsable, loginSwitchTarget, loginRank, loginWallPhrase, loginBlockedText, loginBlockedPhrase } = require('./login-expiry.js');
 // ── A LAPSED SUBSCRIPTION (2026-10-08, owner: "UCI Max 订阅到期没续费，系统会自动排除它吗？续费后不想重新添加").
 // Production: the pool moved four conversations + its default ONTO a member whose subscription had been
 // canceled (its cached readings looked fine — a lapse leaves no reading), the first turn failed with the
@@ -705,13 +705,22 @@ function decidePoolSwitch({ currentId, members, readCache, nowSec, proactive = f
   // (accounts.poolRoster's `why`), never absent from a verdict: 8 of 14 never reached this loop on 10-28
   // `roster` = the list, or a function returning it — read ONLY when a decision is blocked (a proactive scan that finds
   // nowhere better never pays for a second read of every member's login)
+  // (acceptance r2) a member the candidates lack for the ENGINE's reason — refused by the vendor (401×2 / 403 / ban, the
+  // 10-min mark the engine's roster carries as `why.code: 'auth-failed'`) — is its OWN bucket with its own words; a row the
+  // store calls placeable that the candidates lack anyway is «left out of this decision», never «re-login»
   const rosterDetail = () => {
     let list = null;
     try { list = typeof roster === 'function' ? roster() : roster; } catch { list = null; }
     if (!Array.isArray(list)) return {};
     const candIds = new Set((members || []).map((m) => m && m.id));
-    const unplaceable = list.filter((r) => r && r.id && r.id !== currentId && !candIds.has(r.id)).map((r) => ({ id: r.id, name: r.name || r.id, why: r.why || null }));
-    return unplaceable.length ? { unplaceable } : {};
+    const unplaceable = [], authFailed = [];
+    for (const r of list) {
+      if (!r || !r.id || r.id === currentId || candIds.has(r.id)) continue;
+      const why = r.why || (r.placeable ? { code: 'held-out' } : null);
+      if (why && why.code === 'auth-failed') { const at = Number(why.at) || 0; authFailed.push({ id: r.id, name: r.name || r.id, at, agoMin: at ? Math.max(0, Math.floor((Number(nowSec) * 1000 - at) / 60000)) : null }); continue; }
+      unplaceable.push({ id: r.id, name: r.name || r.id, why });
+    }
+    return { ...(unplaceable.length ? { unplaceable } : {}), ...(authFailed.length ? { authFailed } : {}) };
   };
   const barDetail = () => ({
     ...(quotaBlocked.length ? { quotaBlocked } : {}),
@@ -1112,7 +1121,15 @@ function unplaceableText(why) {
     case 'cli-unmeasured': return w.file === false
       ? `no credential file in its folder (CLI ${cli} unmeasured) — re-login or wait for the measurement`
       : `long-lived token only (CLI ${cli} unmeasured) — re-login or wait for the measurement`;
-    case 'oat-not-in-folder': return `long-lived token only, not written to its folder${typeof w.reason === 'string' && /^[a-z-]{1,40}$/.test(w.reason) ? ` (${w.reason})` : ''} — re-login`;
+    // (acceptance r2) the LOCKED vault is the wall, never the login: the token is kept and written once it opens — the
+    // deploy of this very fix restarts the hub (the vault locks), and «re-login» sent the owner to six needless logins
+    case 'vault-locked': return 'the vault is locked — its long-lived token is kept and written to its folder once it opens (Unlock… at the top of the page; For you names what is waiting on it)';
+    case 'oat-not-in-folder': return w.reason === 'pending'
+      ? 'long-lived token kept, not written to its folder yet — the hub writes it within a minute of starting'
+      : `long-lived token only, not written to its folder${typeof w.reason === 'string' && /^[a-z-]{1,40}$/.test(w.reason) ? ` (${w.reason})` : ''} — re-login`;
+    case 'auth-failed': return `refused by the vendor${Number.isFinite(w.agoMin) ? ` ${w.agoMin} min ago` : ''} — retried after 10 min`;
+    case 'lapsed': return 'its subscription is inactive — it rejoins once it answers again';
+    case 'held-out': return 'signed in, but left out of this decision';
     case 'oat-expired': return 'its login and its long-lived token have both ended — re-login or re-mint the token';
     case 'oat-mismatch': return 'its long-lived token reads as another account\'s — re-mint it';
     case 'logged-out': return 'signed out (its login was wiped) — re-login';
@@ -1126,9 +1143,25 @@ function unplaceableText(why) {
 function namedMembersOf(d) {
   const ids = [];
   const take = (arr) => { for (const m of Array.isArray(arr) ? arr : []) if (m && m.id) ids.push(m.id); };
-  for (const k of ['quotaBlocked', 'rejectedMembers', 'unplaceable', 'loginBlocked', 'lapsedBlocked', 'reserveBlocked', 'overageBlocked', 'creditsHeld', 'modelBlocked', 'crossHeld', 'notBetter']) take(d && d[k]);
+  for (const k of ['quotaBlocked', 'rejectedMembers', 'unplaceable', 'authFailed', 'loginBlocked', 'lapsedBlocked', 'reserveBlocked', 'overageBlocked', 'creditsHeld', 'modelBlocked', 'crossHeld', 'notBetter']) take(d && d[k]);
   return ids;
 }
+// THE NOTICE IS BOUNDED (acceptance r2, claim 1 (a): a 40-member roster was ONE 2 554-char toast, the same clause 14×):
+// each bucket names its first NOTICE_NAMES_MAX members and «and N more»; members the pool cannot place for the SAME
+// reason share ONE clause with their count; the full roster — one line per member — is poolBlockedDetail's
+const NOTICE_NAMES_MAX = 3;
+const namesOf = (list, fmt = (m) => m.name || m.id) => {
+  const all = Array.isArray(list) ? list : [];
+  const shown = all.slice(0, NOTICE_NAMES_MAX).map(fmt).join(', ');
+  return all.length > NOTICE_NAMES_MAX ? `${shown} and ${all.length - NOTICE_NAMES_MAX} more` : shown;
+};
+/** the members the pool cannot place, one clause per reason: «acct-13: signed out …» / «6 accounts: <reason> (a, b, c and 3 more)» */
+function unplaceableClauses(list) {
+  const groups = new Map();
+  for (const m of Array.isArray(list) ? list : []) { const w = unplaceableText(m.why); if (!groups.has(w)) groups.set(w, []); groups.get(w).push(m); }
+  return [...groups].map(([w, ms]) => (ms.length === 1 ? `${ms[0].name || ms[0].id}: ${w}` : `${ms.length} accounts: ${w} (${namesOf(ms)})`)).join('; ');
+}
+const authFailedText = (m) => `${m.name || m.id} (${Number.isFinite(m.agoMin) ? `${m.agoMin} min ago` : 'just now'} — retried after 10 min)`;
 function poolBlockedNotice(d, { poolName = '', currentName = 'the current member', when = null } = {}) {
   const dead = (d?.deadBuckets || []).join(', ');
   const low = (d?.lowBuckets || []).join(', ');
@@ -1138,19 +1171,19 @@ function poolBlockedNotice(d, { poolName = '', currentName = 'the current member
   // to keep, an overage member is spending real money. Naming them is the
   // difference between "out of quota" (which sends the user to wait for a
   // reset) and the two settings that actually apply.
-  const held = (d?.reserveBlocked || []).map((m) => `${m.name || m.id} (${Math.round(m.remaining)}% weekly)`).join(', ');
+  const held = namesOf(d?.reserveBlocked, (m) => `${m.name || m.id} (${Math.round(m.remaining)}% weekly)`);
   const heldNote = held ? ` Held back by the ${d.reserveFloorPct}% reserve floor: ${held}.` : '';
-  const paying = (d?.overageBlocked || []).map((m) => m.name || m.id).join(', ');
+  const paying = namesOf(d?.overageBlocked);
   const payNote = paying ? ` Skipped because they are billing paid overage: ${paying}.` : '';
   // USAGE CREDITS (B-ad05): held back while the current member still has
   // quota — it is the last resort, and it bills pay-per-use once used.
-  const creditsNames = (d?.creditsHeld || []).map((m) => m.name || m.id).join(', ');
+  const creditsNames = namesOf(d?.creditsHeld);
   // A LAPSED SUBSCRIPTION (2026-10-08): skipped, said in words — never a silently short list
-  const lapsedNames = (d?.lapsedBlocked || []).map((m) => m.name || m.id).join(', ');
+  const lapsedNames = namesOf(d?.lapsedBlocked);
   const lapsedWall = d?.reason === 'all-lapsed';
   const lapsedNote = lapsedNames && !lapsedWall ? ` Skipped because their subscription is inactive: ${lapsedNames}.` : '';
   // THE PROVIDER (q-053 P0b): a member that cannot serve this conversation's model, and the OFFER the owner's card makes
-  const modelNames = (d?.modelBlocked || []).map((m) => `${m.name || m.id} (${m.provider})`).join(', ');
+  const modelNames = namesOf(d?.modelBlocked, (m) => `${m.name || m.id} (${m.provider})`);
   const modelNote = modelNames ? ` Cannot serve ${(d.modelBlocked[0] && d.modelBlocked[0].model) || 'its model'}: ${modelNames} — their provider has no such model.` : '';
   const xo = d?.crossOffer;
   const crossNote = xo ? ` ${xo.name || xo.id} (${xo.to}) can take it as ${xo.toModel} — a move to another provider restarts the conversation and waits for your OK in For you.` : '';
@@ -1159,23 +1192,26 @@ function poolBlockedNotice(d, { poolName = '', currentName = 'the current member
   // bucket and when it resets, the members the pool cannot place with the store's reason, the ones that just refused
   // this conversation, and the candidates that were simply not better — the 12:56 notice named 2 of 13 others
   const at = (sec) => { try { return typeof when === 'function' ? when(sec * 1000) : resetAtText(sec); } catch { return resetAtText(sec); } };
-  const quotaNames = (d?.quotaBlocked || []).map((m) => `${m.name || m.id} (${(m.buckets || []).map((b) => `${b.label} ${Math.round(b.remaining)}%${b.resetsAt ? ` until ${at(b.resetsAt)}` : ''}`).join(', ') || 'spent'})`).join(', ');
+  const quotaOne = (m) => `${m.name || m.id} (${(m.buckets || []).map((b) => `${b.label} ${Math.round(b.remaining)}%${b.resetsAt ? ` until ${at(b.resetsAt)}` : ''}`).join(', ') || 'spent'})`;
+  const quotaNames = namesOf(d?.quotaBlocked, quotaOne);
   const quotaNote = quotaNames ? ` Out of quota: ${quotaNames}.` : '';
-  const unplaceableNames = (d?.unplaceable || []).map((m) => `${m.name || m.id}: ${unplaceableText(m.why)}`).join('; ');
+  const unplaceableNames = unplaceableClauses(d?.unplaceable);
   const unplaceableNote = unplaceableNames ? ` The pool cannot place: ${unplaceableNames}.` : '';
-  const rejectedNames = (d?.rejectedMembers || []).map((m) => m.name || m.id).join(', ');
+  const authFailedNames = namesOf(d?.authFailed, authFailedText);
+  const authFailedNote = authFailedNames ? ` Refused by the vendor: ${authFailedNames}.` : '';
+  const rejectedNames = namesOf(d?.rejectedMembers);
   const rejectedNote = rejectedNames ? ` Just refused this conversation: ${rejectedNames}.` : '';
-  const heldApart = (d?.crossHeld || []).filter((m) => !(d?.crossOffer && d.crossOffer.id === m.id)).map((m) => `${m.name || m.id} (${m.provider || 'another provider'})`).join(', ');
+  const heldApart = namesOf((d?.crossHeld || []).filter((m) => !(d?.crossOffer && d.crossOffer.id === m.id)), (m) => `${m.name || m.id} (${m.provider || 'another provider'})`);
   const heldApartNote = heldApart ? ` Held apart (another provider, or used only as a fallback): ${heldApart}.` : '';
-  const notBetterNames = (d?.notBetter || []).map((m) => `${m.name || m.id}${m.remaining != null ? ` (${Math.round(m.remaining)}%)` : ''}`).join(', ');
+  const notBetterNames = namesOf(d?.notBetter, (m) => `${m.name || m.id}${m.remaining != null ? ` (${Math.round(m.remaining)}%)` : ''}`);
   const notBetterNote = notBetterNames ? ` No better than ${currentName}: ${notBetterNames}.` : '';
-  const named = `${quotaNote}${unplaceableNote}${rejectedNote}${heldApartNote}${notBetterNote}`;
+  const named = `${quotaNote}${unplaceableNote}${authFailedNote}${rejectedNote}${heldApartNote}${notBetterNote}`;
   // A bar is only the WHOLE story when nothing else emptied the list — the
   // same rule 'all-logins-expired' earned in round 2: a quota-emptied list
   // stays a quota sentence and the bars are named alongside it. …and «held back by your spending limits» is about
   // EVERY OTHER member (R2): it is said only when every other member's own state is a bar — the reserve floor, paid
   // overage, usage credits — never off the CURRENT member's buckets alone (12:56:40: three others were out of quota)
-  const othersWalled = (d?.quotaBlocked || []).length + (d?.unplaceable || []).length + (d?.rejectedMembers || []).length + (d?.loginBlocked || []).length
+  const othersWalled = (d?.quotaBlocked || []).length + (d?.unplaceable || []).length + (d?.authFailed || []).length + (d?.rejectedMembers || []).length + (d?.loginBlocked || []).length
     + (d?.lapsedBlocked || []).length + (d?.modelBlocked || []).length + (d?.crossHeld || []).length + (d?.notBetter || []).length + (Number(d?.excluded) || 0);
   const barsOnly = !dead && !!(held || paying) && !othersWalled;
   // NAME EVERY BUCKET THAT IS HOLDING THIS BACK, IN ITS OWN BAND (r2). A hot
@@ -1196,7 +1232,8 @@ function poolBlockedNotice(d, { poolName = '', currentName = 'the current member
   // contrast it with, so the clause is dropped rather than allowed to argue
   // with the sentence it decorates.
   const rest = (dead || low) && live ? ` (still available: ${live})` : '';
-  const loginNames = loginBlockedText(d?.loginBlocked);
+  const loginList = Array.isArray(d?.loginBlocked) ? d.loginBlocked : [];
+  const loginNames = loginBlockedText(loginList.slice(0, NOTICE_NAMES_MAX)) + (loginList.length > NOTICE_NAMES_MAX ? ` and ${loginList.length - NOTICE_NAMES_MAX} more` : '');
   // THE CURRENT MEMBER WAS REMOVED FROM THE POOL (2026-09-28) and nobody can take
   // its conversations: that is the whole story — its quota and its login are
   // about an account the owner took out, so neither is narrated as the wall.
@@ -1254,6 +1291,31 @@ function poolBlockedNotice(d, { poolName = '', currentName = 'the current member
     ? ' Adjust them in Settings → Spending, or add a member.'
     : ' Conversations on it will hit a limit until a window resets, you add a member, or you move them off the pool.';
   return `Pool "${poolName}": ${why}.${alt}${also}${named}${heldNote}${payNote}${lapsedNote}${creditsNote}${modelNote}${crossNote}${fix}`;
+}
+
+/** THE FULL ROSTER behind a blocked notice (acceptance r2): ONE LINE PER MEMBER — the current one first, then every other
+ *  member in its bucket with its own reason — never bounded (the notice's text is; this is what «and N more» stands for).
+ *  The engine journals it beside the notice; the census (test-account-verdicts) reads every member here. → [line] */
+function poolBlockedDetail(d, { currentName = 'the current member', when = null } = {}) {
+  const at = (sec) => { try { return typeof when === 'function' ? when(sec * 1000) : resetAtText(sec); } catch { return resetAtText(sec); } };
+  const dead = (d?.deadBuckets || []).join(', '), low = (d?.lowBuckets || []).join(', ');
+  const cur = d?.notMember ? 'no longer a member of the pool' : d?.fromLogin ? String(d.fromLogin) : d?.fromLapsed ? 'subscription inactive'
+    : dead ? `spent: ${dead}${low ? `; nearly spent: ${low}` : ''}` : low ? `nearly spent: ${low}` : d?.fromRemaining != null ? `${Math.round(d.fromRemaining)}% left` : 'out of quota';
+  const lines = [`${currentName} (current): ${cur}`];
+  const each = (list, f) => { for (const m of Array.isArray(list) ? list : []) if (m) lines.push(`${m.name || m.id}: ${f(m)}`); };
+  each(d?.quotaBlocked, (m) => `out of quota — ${(m.buckets || []).map((b) => `${b.label} ${Math.round(b.remaining)}%${b.resetsAt ? ` until ${at(b.resetsAt)}` : ''}`).join(', ') || 'spent'}`);
+  each(d?.unplaceable, (m) => `the pool cannot place it — ${unplaceableText(m.why)}`);
+  each(d?.authFailed, (m) => unplaceableText({ code: 'auth-failed', agoMin: m.agoMin }));
+  each(d?.rejectedMembers, () => 'just refused this conversation');
+  each(d?.loginBlocked, (m) => `needs a re-login — ${loginBlockedPhrase(m)}`);
+  each(d?.lapsedBlocked, () => 'its subscription is inactive');
+  each(d?.reserveBlocked, (m) => `held back by the ${d.reserveFloorPct}% reserve floor (${Math.round(m.remaining)}% weekly)`);
+  each(d?.overageBlocked, () => 'skipped — it is billing paid overage');
+  each(d?.creditsHeld, () => 'held back — it bills usage credits past its quota');
+  each(d?.modelBlocked, (m) => `cannot serve ${m.model || 'its model'} (${m.provider || 'its provider'})`);
+  each(d?.crossHeld, (m) => `held apart (${m.provider || 'another provider'}, or used only as a fallback)`);
+  each(d?.notBetter, (m) => `no better than ${currentName}${m.remaining != null ? ` (${Math.round(m.remaining)}%)` : ''}`);
+  return lines;
 }
 
 /**
@@ -1583,4 +1645,4 @@ function conversationDisplayName(session, customNames, fallbackId = '') {
 module.exports = {
   quotaVerdict, nowSecOf, resetLanded, resetAtText, unplaceableText, namedMembersOf, conversationDisplayName, priorityOrder, priorityRankOf, decidePinnedPlacement, soonestUsableMember,
   CROSS_PROVIDER_MODES, crossProviderMode, providerKey, providerLabel, sameProvider, fallbackOnlyOf, resolveModel, servesModel, hotSwitchFor,
-  classifyAuthFailure, memberLapsed, lapseCleared, readingFingerprint, serveAfterFailure, SERVE_LAPSED, decideCliRefresh, cliRefreshWhy, nextScheduledReadMs, projectionBucketBought, projectionReadsAfter, PROJECTION_LEAD_SEC, PROJECTION_MOVE_MS, PROJECTION_WINDOW_MS, PROJECTION_MEMORY_MS, PROJECTION_RECORD_MAX_MS, projectCacheAhead, projectionCrossing, SWITCH_THRESHOLD_PCT, THRESH, RESET_GRACE_SEC, rankPoolMembers, UNKNOWN_REMAINING_PCT, PROACTIVE_MARGIN_SEC, MIN_GAIN_PCT, SPARE_MOVE_MARGIN_PCT, CACHE_TTL_SEC, CACHE_TTL_1M_SEC, cacheTtlSecFor, warmCache, conversationInTurn, bucketRemaining, bucketRems, accountRemaining, weeklyDeadline, spareLaneRemaining, decidePoolSwitch, poolBlockedNotice, poolCreditsNotice };
+  classifyAuthFailure, memberLapsed, lapseCleared, readingFingerprint, serveAfterFailure, SERVE_LAPSED, decideCliRefresh, cliRefreshWhy, nextScheduledReadMs, projectionBucketBought, projectionReadsAfter, PROJECTION_LEAD_SEC, PROJECTION_MOVE_MS, PROJECTION_WINDOW_MS, PROJECTION_MEMORY_MS, PROJECTION_RECORD_MAX_MS, projectCacheAhead, projectionCrossing, SWITCH_THRESHOLD_PCT, THRESH, RESET_GRACE_SEC, rankPoolMembers, UNKNOWN_REMAINING_PCT, PROACTIVE_MARGIN_SEC, MIN_GAIN_PCT, SPARE_MOVE_MARGIN_PCT, CACHE_TTL_SEC, CACHE_TTL_1M_SEC, cacheTtlSecFor, warmCache, conversationInTurn, bucketRemaining, bucketRems, accountRemaining, weeklyDeadline, spareLaneRemaining, decidePoolSwitch, poolBlockedNotice, poolBlockedDetail, NOTICE_NAMES_MAX, poolCreditsNotice };

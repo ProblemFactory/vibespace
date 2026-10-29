@@ -1749,7 +1749,9 @@ class AccountManager {
   /** WHY a NEW placement may not land on member `id` — null exactly when _placeable says true (test-account-pool pins the
    *  two as one answer over every shape); else { code, cli?, file?, reason? }:
    *    cli-unmeasured     a long-lived token the hub's CLI was never measured with (file: whether our file sits there)
-   *    oat-not-in-folder  a long-lived token not (yet) written to the folder on a measured CLI (reason: the store's refusal)
+   *    vault-locked       a long-lived token the sweep could not decrypt: the vault is locked (kept; written once it opens)
+   *    oat-not-in-folder  a long-lived token not (yet) written to the folder on a measured CLI (reason: the store's refusal,
+   *                       'pending' before this process's first sweep)
    *    oat-expired        no login, and the long-lived token has ended
    *    oat-mismatch       the post-check read the token as ANOTHER account's
    *    logged-out | expired | no-file | no-login   the login itself (wiped / ended / no file / nothing readable) */
@@ -1766,7 +1768,11 @@ class AccountManager {
     if (fact && fact.validUntil > Date.now()) {
       if (unmeasured) return { code: 'cli-unmeasured', cli: caps.cli, file: false };
       const f = this._oatFileFacts.get(id);
-      return { code: 'oat-not-in-folder', ...(f && (f.reason || f.verdict) ? { reason: String(f.reason || f.verdict) } : {}) };
+      // (acceptance r2) the LOCKED vault is its own wall (the sweep could not decrypt the token: kept, written once the
+      // vault opens) — and before this process's first sweep there is no refusal yet to name (never «re-login»)
+      if (f && f.code === 'vault_locked') return { code: 'vault-locked' };
+      if (!f) return { code: 'oat-not-in-folder', reason: 'pending' };
+      return { code: 'oat-not-in-folder', ...(f.reason || f.verdict ? { reason: String(f.reason || f.verdict) } : {}) };
     }
     if (fact) return { code: 'oat-expired' };
     const ls = this.loginStateOf(id, Date.now(), { slot: true });

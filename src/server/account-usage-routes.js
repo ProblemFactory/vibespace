@@ -514,7 +514,18 @@ app.post('/api/accounts/pool/:id/gather', (req, res) => {
     const a = accounts.get(id);
     if (!a || a.type !== 'pooled') return res.status(400).json({ error: 'not a pooled account', code: 'not_pooled' });
     const memberId = String(req.body?.memberId || '');
-    if (!(accounts.poolMembers(id) || []).some((m) => m.id === memberId)) return res.status(400).json({ error: 'not a signed-in member of this pool', code: 'not_member' });
+    if (!(accounts.poolMembers(id) || []).some((m) => m.id === memberId)) {
+      // THE REFUSAL NAMES THE WALL (lane pool-silent-members acceptance r2, claim 1 (f)): a member the pool LISTS but cannot
+      // place is told with the roster's own reason and remedy (a CLI unmeasured, the vault locked, a wiped login…) —
+      // «not a signed-in member» was false for a signed-in member whose token file the CLI cannot be handed
+      let row = null;
+      try { row = typeof accounts.poolRoster === 'function' ? (accounts.poolRoster(id) || []).find((r) => r && r.id === memberId) || null : null; } catch { row = null; }
+      if (row && row.why) {
+        const words = require('../account-pool-auto.js').unplaceableText(row.why);
+        return res.status(409).json({ code: 'not_placeable', why: row.why.code, member: row.name || memberId, error: `${row.name || memberId}: ${words} — nothing was moved.` });
+      }
+      return res.status(400).json({ error: 'not a signed-in member of this pool', code: 'not_member' });
+    }
     const hot = !!a.hot && require('../backend-caps.js').capsOf(a.backend || 'claude').hotSwitch === 'verified';
     const before = accounts.poolCurrent(id);
     const memberName = accounts.get(memberId)?.name || memberId;

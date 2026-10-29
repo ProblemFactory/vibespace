@@ -2719,8 +2719,8 @@ console.log('— §17 a warm conversation is never moved proactively (the owner\
 
     // NEGATIVE CONTROL: the engine WITHOUT the per-session wiring moves the warm conversation too.
     const mut = mutate('src/server/usage-pool-engine.js', 'warm', [[
-      'overageIds: overageMemberIds(members), creditsIds, warm, explain: true, roster: () => accounts.poolRoster(poolId) });',
-      'overageIds: overageMemberIds(members), creditsIds, explain: true, roster: () => accounts.poolRoster(poolId) }); // PRE-FIX: no warm-cache hold',
+      'overageIds: overageMemberIds(members), creditsIds, warm, explain: true, roster });',
+      'overageIds: overageMemberIds(members), creditsIds, explain: true, roster }); // PRE-FIX: no warm-cache hold',
     ]]);
     ok('§17 NEGATIVE CONTROL: the patch hit the product source', mut.hit === true, mut.why || '');
     if (mut.hit) {
@@ -3075,7 +3075,7 @@ console.log('— §18 a soft move of a warm mid-turn conversation waits for its 
   const preFixOwed = () => mutate('src/server/usage-pool-engine.js', 'softowed', [
     ['const _warmHoldLogAt = new Map();', 'const _softDeferred = new Map(); // PRE-FIX: the owed-move map\nconst _warmHoldLogAt = new Map();'],
     ["if (ds && ds.reason === 'warm-soft-defer') { noteWarmHold(", "if (ds && ds.reason === 'warm-soft-defer') { _softDeferred.set(poolId + ':' + sid, 1); noteWarmHold("],
-    ['    const force = stop\n', "    const force = stop && _softDeferred.has(session._accountId + ':' + session._webuiId) // PRE-FIX: forced only for an owed move\n"],
+    ['    const force = forced || (stop\n', "    const force = forced || (stop && _softDeferred.has(session._accountId + ':' + session._webuiId) // PRE-FIX: forced only for an owed move\n"],
     ['    if (!session || !session._accountId) return;\n    maybePoolAutoSwitch(session, { stop: true });',
       "    if (!session || !session._accountId || !_softDeferred.has(session._accountId + ':' + session._webuiId)) return; // PRE-FIX: only an owed move\n    maybePoolAutoSwitch(session, { stop: true });"],
   ]);

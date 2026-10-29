@@ -168,20 +168,50 @@ console.log('── the pool verdict names every member of its roster (R2) ─�
   const d = decidePoolSwitch({ currentId: id[1], members, roster, readCache: (x) => caches[x] || null, nowSec, hot: true, proactive: true, reserveFloorPct: 15, readLogin: (x) => am.loginStateOf(x, Date.now(), { slot: true }), explain: true });
   const txt = poolBlockedNotice(d, { poolName: 'All', currentName: 'acct-1' });
   check(`(the incident's shape: the candidate list holds the 6 live logins of 14 — ${members.length} — and the decision is blocked: ${d && d.reason})`, members.length === 6 && roster.length === 14 && !!d && d.to === null);
-  const missing = roster.filter((r) => !new RegExp(`\\b${r.name}\\b`).test(txt)).map((r) => r.name);
-  check(`CENSUS: every member of the roster is NAMED in the pool's notice — ${14 - missing.length} of 14${missing.length ? `; unnamed: ${missing.join(', ')}` : ''}`, missing.length === 0);
+  // (acceptance r2) THE NOTICE IS BOUNDED: its TEXT names the current member and the first 3 of each bucket and COUNTS the
+  // rest («and N more», «6 accounts: …»); its DETAIL (poolBlockedDetail — journaled beside the notice) has ONE line per member
+  const detail = typeof APA.poolBlockedDetail === 'function' ? APA.poolBlockedDetail(d, { currentName: 'acct-1' }) : [];
+  const lined = roster.filter((r) => detail.some((l) => l.startsWith(r.name + ': ') || l.startsWith(r.name + ' (current): ')));
+  const missing = roster.filter((r) => !lined.includes(r)).map((r) => r.name);
+  check(`CENSUS: every member of the roster has its OWN line in the notice's detail — ${lined.length} of 14 (${detail.length} lines, the current member first)${missing.length ? `; missing: ${missing.join(', ')}` : ''}`, lined.length === 14 && detail.length === 14 && /^acct-1 \(current\): /.test(detail[0] || ''));
+  const shownN = roster.filter((r) => new RegExp(`\\b${r.name}\\b`).test(txt)).length;
+  const countedN = [...txt.matchAll(/ and (\d+) more/g)].reduce((a, m) => a + Number(m[1]), 0);
+  check(`CENSUS: the notice's TEXT names or counts every member — ${shownN} named + ${countedN} counted («and N more») of 14 — never one silent`, shownN + countedN === 14);
   const named = typeof APA.namedMembersOf === 'function' ? APA.namedMembersOf(d) : [];
   const others = roster.filter((r) => r.id !== id[1]).map((r) => r.id);
   const twice = named.filter((x, i) => named.indexOf(x) !== i);
   check(`CENSUS: the verdict puts every OTHER member in exactly ONE named bucket (${new Set(named).size} of ${others.length}${twice.length ? `; twice: ${twice.map((x) => am.get(x).name).join(', ')}` : ''})`, others.every((x) => named.includes(x)) && !twice.length && named.every((x) => others.includes(x)));
   check('…out of quota is a NAMED list with the spent bucket and its reset — «acct-4 (5h 3% until …)», «acct-5 (5h 0% until …)», «acct-6 (Fable 1% until …)» — never a count', /Out of quota: acct-4 \(5h 3% until \d\d:\d\d:\d\dZ\), acct-5 \(5h 0% until \d\d:\d\d:\d\dZ\), acct-6 \(Fable 1% until \d\d:\d\d:\d\dZ\)\./.test(txt));
-  check('…the members the pool cannot place are named WITH the store\'s reason — «acct-7: no credential file in its folder (CLI 2.1.312 unmeasured) — re-login or wait for the measurement» … «acct-13: signed out (its login was wiped) — re-login»', /The pool cannot place: acct-7: no credential file in its folder \(CLI 2\.1\.312 unmeasured\) — re-login or wait for the measurement; acct-8: /.test(txt) && /acct-13: signed out \(its login was wiped\) — re-login; acct-14: signed out/.test(txt));
+  check('…the members the pool cannot place are named WITH the store\'s reason, ONE clause per reason with its count — «6 accounts: no credential file in its folder (CLI 2.1.312 unmeasured) — re-login or wait for the measurement (acct-7, acct-8, acct-9 and 3 more); 2 accounts: signed out (its login was wiped) — re-login (acct-13, acct-14)»', /The pool cannot place: 6 accounts: no credential file in its folder \(CLI 2\.1\.312 unmeasured\) — re-login or wait for the measurement \(acct-7, acct-8, acct-9 and 3 more\); 2 accounts: signed out \(its login was wiped\) — re-login \(acct-13, acct-14\)\./.test(txt));
+  check('…and the detail names each with its own reason — «acct-12: the pool cannot place it — no credential file in its folder (CLI 2.1.312 unmeasured) — …», «acct-5: out of quota — 5h 0% until …»', detail.includes('acct-12: the pool cannot place it — no credential file in its folder (CLI 2.1.312 unmeasured) — re-login or wait for the measurement') && detail.some((l) => /^acct-5: out of quota — 5h 0% until \d\d:\d\d:\d\dZ$/.test(l)));
   check('…«held back by your spending limits» is NOT said: three others are out of quota (barsOnly reads every OTHER member)', !/held back by your spending limits/.test(txt) && /Held back by the 15% reserve floor: acct-2 \(3% weekly\), acct-3 \(3% weekly\)\./.test(txt));
   // the positive control: when every other member really IS held by a bar, the sentence is true and is said
   const onlyBars = decidePoolSwitch({ currentId: id[1], members: members.filter((m) => [id[1], id[2], id[3]].includes(m.id)), roster: roster.filter((r) => [id[1], id[2], id[3]].includes(r.id)), readCache: (x) => caches[x] || null, nowSec, hot: true, proactive: true, reserveFloorPct: 15, readLogin: (x) => am.loginStateOf(x, Date.now(), { slot: true }), explain: true });
   check('CONTROL: a roster whose every other member sits under the reserve floor still reads «every other member is held back by your spending limits»', /every other member is held back by your spending limits/.test(poolBlockedNotice(onlyBars, { poolName: 'All', currentName: 'acct-1' })));
   if (fail) console.log('    notice: ' + txt);
   fs.rmSync(dirR, { recursive: true, force: true });
+  // (acceptance r2, claim 1 (a)) A 40-MEMBER ROSTER — 19 candidates every one spent, 14 on a token the unmeasured CLI cannot
+  // be handed, 7 wiped: 9d53db09 said it in ONE 2 694-char toast, the same clause 14×, no «and N more», no detail
+  const m40 = [], r40 = [], c40 = {};
+  for (let i = 1; i <= 40; i++) {
+    const mid = 'm' + i, name = 'acct-' + i;
+    if (i <= 19) { m40.push({ id: mid, name }); r40.push({ id: mid, name, placeable: true }); c40[mid] = { fetchedAt: Date.now(), fiveHour: { utilization: 0.99, resetsAt: nowSec + H + i * 60 }, sevenDay: { utilization: 0.5, resetsAt: nowSec + 3 * D } }; }
+    else if (i <= 33) r40.push({ id: mid, name, placeable: false, why: { code: 'cli-unmeasured', cli: '2.1.312', file: false } });
+    else r40.push({ id: mid, name, placeable: false, why: { code: 'logged-out' } });
+  }
+  const notice40 = (A) => { const d40 = A.decidePoolSwitch({ currentId: 'm1', members: m40, readCache: (x) => c40[x] || null, nowSec, roster: () => r40, explain: true }); return { d40, t40: A.poolBlockedNotice(d40, { poolName: 'All', currentName: 'acct-1' }), l40: typeof A.poolBlockedDetail === 'function' ? A.poolBlockedDetail(d40, { currentName: 'acct-1' }) : [] }; };
+  const { d40, t40, l40 } = notice40(APA);
+  const sh40 = r40.filter((r) => new RegExp(`\\b${r.name}\\b`).test(t40)).length, ct40 = [...t40.matchAll(/ and (\d+) more/g)].reduce((a, m) => a + Number(m[1]), 0);
+  check(`BOUNDED: a 40-member roster's toast is ${t40.length} chars (≤ 700) — the current member and the first 3 of each bucket, the rest counted (${sh40} named + ${ct40} counted = 40)`, t40.length <= 700 && sh40 + ct40 === 40 && APA.namedMembersOf(d40).length === 39);
+  check('BOUNDED: …the clause shared by 14 members is said ONCE with its count — «14 accounts: no credential file in its folder (CLI 2.1.312 unmeasured) — … (acct-20, acct-21, acct-22 and 11 more)»', (t40.match(/no credential file in its folder/g) || []).length === 1 && /14 accounts: no credential file in its folder \(CLI 2\.1\.312 unmeasured\) — re-login or wait for the measurement \(acct-20, acct-21, acct-22 and 11 more\)/.test(t40) && /Out of quota: acct-2 \(5h 1% until [^)]*\), acct-3 \([^)]*\), acct-4 \([^)]*\) and 15 more\./.test(t40));
+  check('BOUNDED: …and the detail carries the WHOLE roster, one line per member (40 — the current member first)', l40.length === 40 && /^acct-1 \(current\): /.test(l40[0]) && r40.every((r) => l40.some((l) => l.startsWith(r.name + ': ') || l.startsWith(r.name + ' (current): '))));
+  {
+    const Module = require('node:module'), file = path.join(path.dirname(new URL(import.meta.url).pathname), '..', 'src', 'account-pool-auto.js');
+    const src = fs.readFileSync(file, 'utf8'), cut = 'const NOTICE_NAMES_MAX = 3;';
+    const mm = src.includes(cut) ? (() => { const m = new Module(file, null); m.filename = file; m.paths = Module._nodeModulePaths(path.dirname(file)); m._compile(src.replace(cut, 'const NOTICE_NAMES_MAX = 1e6;'), file); return m.exports; })() : null;
+    const r = mm ? notice40(mm) : null;
+    check(`RED CONTROL: the same 40 with the bound taken out (NOTICE_NAMES_MAX unbounded) is a ${r ? r.t40.length : '?'}-char toast — the bound is what keeps it short`, !!r && r.t40.length > 1000);
+  }
 }
 
 console.log(fail ? `${fail} FAILED (${pass} passed)` : `ALL PASS (${pass})`);

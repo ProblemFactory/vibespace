@@ -895,8 +895,74 @@ if (!probe) {
   // THE GATE PROBES THE MEMBER IT IS MOVING TO (R4): the switch runs BEFORE the probe target is read
   const eng = read('src/server/usage-pool-engine.js');
   const body = (() => { const i = eng.indexOf('async function beforeAutoResumeFire(id, session) {'); return i < 0 ? '' : eng.slice(i, eng.indexOf('\n}\n', i)); })();
-  const sw = body.indexOf('maybePoolAutoSwitch(session, { now });'), tg = body.indexOf('sessionBillingMember(session, scope).id'), pr = body.indexOf('probeQuotaForKey(target'), vd = body.indexOf('quotaVerdictFor(scope, { model, session, now })');
-  ok('WIRING: the pre-fire gate switches FIRST, then reads the billing member, probes it and judges with the SAME `now`', sw > 0 && tg > sw && pr > tg && vd > pr && /const now = Date\.now\(\);/.test(body.slice(0, sw)), JSON.stringify({ sw, tg, pr, vd }));
+  const sw = body.indexOf('maybePoolAutoSwitch(session, { now });'), tg = body.indexOf('sessionBillingMember(session, scope).id'), pr = body.indexOf('probeQuotaForKey(target'), vd = body.indexOf('quotaVerdictFor(scope, { model, session, now: at })');
+  // (acceptance r2) …and the probe's fresh reading may re-decide ONCE (forced, at the clock after the probe) before the
+  // verdict, which reads that SAME instant (`at` = the switch's `now` when nothing was probed)
+  const re = body.indexOf('maybePoolAutoSwitch(session, { now: at, force: true });');
+  ok('WIRING: the pre-fire gate switches FIRST, then reads the billing member, probes it, re-decides on the fresh reading when the member cannot serve after all, and judges with ONE clock', sw > 0 && tg > sw && pr > tg && re > pr && vd > re && /const now = Date\.now\(\);/.test(body.slice(0, sw)) && /let at = now;/.test(body.slice(pr, re)), JSON.stringify({ sw, tg, pr, re, vd }));
+}
+// ── §4i THE FRESH READING DECIDES (lane pool-silent-members acceptance r2 — the reviewers' «plausible», reproduced) ──
+// The gate's switch moved the conversation onto the member whose 5h had just landed (its CACHE said 100 %); the probe of
+// THAT member said spent again (a late reset: «limited, resets in 30 min»); another member was usable. 9d53db09 judged the
+// POOL ("another member is usable") and continued into the spent member's link — the wall again. The decision is re-made
+// ONCE on the fresh reading: the continue goes to the member that can serve.
+{
+  const { mutantCopies } = await import('./mutant-copy.mjs');
+  const MG = mutantCopies('arl-r2gate', REPO);
+  const gateWorld = (engModule = null) => {
+    const gateRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-arloop-gate-'));
+    const dataDir = path.join(gateRoot, 'data');
+    const am = new AccountManager({ dataDir });
+    if (!am.poolSupported()) return null;
+    const login = (id) => fs.writeFileSync(path.join(am.subDir(id), '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'tok-' + id, refreshToken: 'r', expiresAt: Date.now() + 36e5, subscriptionType: 'max' } }), { mode: 0o600 });
+    const id = {}; for (const n of ['m-link', 'm-fish', 'm-spare', 'm-ok']) { id[n] = am.createSubscription({ name: n }).id; login(id[n]); }
+    const P = am.createPool({ name: 'pool' }).id; am.setPoolTarget(P, id['m-link']); am.updatePool(P, { auto: true, hot: true });
+    const cacheDir = path.join(dataDir, 'usage-cache'); fs.mkdirSync(cacheDir, { recursive: true });
+    const writeCache = (k, c) => fs.writeFileSync(path.join(cacheDir, k + '.json'), JSON.stringify(c));
+    const sessions = new Map(), fired = [], probed = [];
+    const ar = arMod.create({ dataDir, activeSessions: sessions, serverSetting: () => true, log: (...a) => console.log(...a), notify: () => { },
+      sendToSession: (sid, s2, text) => { fired.push(text); return true; },
+      beforeFire: (sid, s2) => { try { return eng.beforeAutoResumeFire(sid, s2); } catch { return true; } },
+      fireIdentity: (sid, s2) => { try { return eng.fireIdentityFor(s2); } catch { return null; } } });
+    const eng = (engModule || engMod).create({ app: { get() { }, post() { }, put() { }, delete() { }, use() { }, locals: {} }, rootDir: gateRoot, USAGE_CACHE_DIR: cacheDir, activeSessions: sessions,
+      wss: { clients: new Set() }, WS_OPEN: 1, broadcastToSession() { }, serverNotice: () => 1, serverSetting: () => undefined, getAccounts: () => am, getHosts: () => null, getUsageHistory: () => null,
+      recordUsageAttribution() { }, adapterRegistry: { get() { return null; } }, getAutoResume: () => ar,
+      // THE PROBE: whatever member it is asked about answers «limited — resets in 30 min» (the late reset)
+      getQuotaProbe: () => (target) => { probed.push(am.get(target)?.name || target); const ns = Math.floor(Date.now() / 1000); writeCache(target, { fetchedAt: Date.now(), source: 'cli-usage', fiveHour: { utilization: 1, status: 'limited', resetsAt: ns + 30 * 60 }, sevenDay: { utilization: 0.36, resetsAt: ns + 3 * 86400 } }); return true; } });
+    const SID = 'sess-4i', session = { backend: 'claude', mode: 'chat', host: null, _webuiId: SID, claudeSessionId: 'cid-4i', _accountId: P, _autoResume: true, _servedModel: 'claude-fable-5', _servedModelAt: Date.now(), pty: { write() { } }, name: 'work' };
+    sessions.set(SID, session); am.ensureSessionPoolLink(P, SID, id['m-link']);
+    return { am, ar, eng, P, id, SID, session, writeCache, fired, probed, nameOf: (k) => am.get(k)?.name || k, end: () => fs.rmSync(gateRoot, { recursive: true, force: true }) };
+  };
+  const fire = async (engModule = null) => {
+    const w = gateWorld(engModule);
+    if (!w) return null;
+    const realNow = Date.now, RU = Math.floor(realNow() / 1000) + 120, far = RU + 100 * 60, R7 = Math.floor(realNow() / 1000) + 3 * 86400;
+    const c = (u5, r5, u7 = 0.4) => ({ fetchedAt: realNow() - 60000, source: 'cli-usage', fiveHour: { utilization: u5, ...(u5 >= 1 ? { status: 'limited' } : {}), resetsAt: r5 }, sevenDay: { utilization: u7, resetsAt: R7 } });
+    w.writeCache(w.id['m-link'], c(1, far)); w.writeCache(w.id['m-fish'], c(1, far + 600));
+    w.writeCache(w.id['m-spare'], c(0.99, RU, 0.36));     // its 5h lands at RU: at the fire its cache reads 100 %
+    w.writeCache(w.id['m-ok'], c(0.45, far + 1200, 0.5)); // usable, but less room than the landed one
+    w.ar.armIfEnabled(w.SID, w.session, (RU + 60) * 1000, '5h 1% < 10%');
+    const T = RU * 1000 + 60300;
+    const cap = capture();
+    Date.now = () => T;
+    let did = false;
+    try { const a = w.ar._armed.get(w.SID); if (a) a.resetsAt = T - GRACE_MS - 1000; const b = w.fired.length; w.ar.tick(T); await new Promise((r) => setTimeout(r, 40)); did = w.fired.length > b; } finally { Date.now = realNow; }
+    cap.done();
+    const res = { did, link: w.nameOf(w.am.poolCurrentFor(w.P, w.SID)), probed: w.probed.slice() };
+    w.end();
+    return res;
+  };
+  const g = await fire();
+  if (!g) ok('§4i SKIP — pools unsupported on this platform', true);
+  else {
+    ok('§4i FRESH READING: the switch lands on m-spare (its window just landed), the probe of m-spare says spent again, m-ok can serve ⇒ the decision is re-made ONCE and the continue goes to m-ok — never into m-spare\'s wall', g.did === true && g.link === 'm-ok' && g.probed.length === 1 && g.probed[0] === 'm-spare', JSON.stringify(g));
+    const esrc = read('src/server/usage-pool-engine.js'), cut = '      if (tv && tv.usable !== true) maybePoolAutoSwitch(session, { now: at, force: true });\n';
+    ok('§4i RED CONTROL: the patch (the re-decision taken out — 9d53db09\'s gate) hits', esrc.includes(cut));
+    if (esrc.includes(cut)) {
+      const r = await fire(MG.load('src/server/usage-pool-engine.js', esrc.replace(cut, ''), 'no-redecide'));
+      ok('§4i RED CONTROL: without the re-decision the SAME fire continues into m-spare — the member its own fresh probe just called spent (the wall again)', r && r.did === true && r.link === 'm-spare', JSON.stringify(r));
+    }
+  }
 }
 // ── §4f WHAT MAY CLEAR THE BREAKER (round 4, the r3 verifier's finding) ────
 // Round 1 cleared the ENTIRE loop-breaker record inside noteRecovered, for

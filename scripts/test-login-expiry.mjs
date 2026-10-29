@@ -933,7 +933,7 @@ console.log('— §5 wiring');
   const apa = fs.readFileSync(path.join(REPO, 'src/account-pool-auto.js'), 'utf8');
   ck("the pure decision only claims 'all-logins-expired' when the login gate was the ONLY wall", /loginBlocked\.length && !quotaBlockedN\) \? 'all-logins-expired'/.test(apa) && /quotaBlockedN\+\+/.test(apa));
   // ROUND 2 phrasing + ROUND 3 placement, now both in the pure module.
-  ck('each blocked member states its OWN state in the notice (never one "expired or is about to" over the whole list)', /loginBlockedText\(d\?\.loginBlocked\)/.test(apa) && !/login session has expired or is about to/.test(apa));
+  ck('each blocked member states its OWN state in the notice (never one "expired or is about to" over the whole list)', /loginBlockedText\((?:d\?\.loginBlocked|loginList\.slice\(0, NOTICE_NAMES_MAX\))\)/.test(apa) && !/login session has expired or is about to/.test(apa));
   ck('a MIXED wall (quota emptied the list AND someone needs a re-login) says both halves', /Also needing a re-login: \$\{loginNames\}/.test(apa) && /const also = !namedInWhy && loginNames/.test(apa));
   // ROUND 3: the current member's dead login is a named FIELD, and the quota
   // arrays never carry a login label again.
@@ -1802,7 +1802,11 @@ console.log('— §10 login × long-lived token (oat-only)');
   const ur = src('src/usage-routes.js');
   const fnAt = ur.indexOf('async function refreshViaCliPanel('), refuse = ur.indexOf("acctMeta.loginState.state === 'oat-only'", fnAt), spawnAt = ur.indexOf('spawnPanelProbe(bin', fnAt);
   ck('⟳ / auto-cli door: refreshViaCliPanel refuses an oat-only row (code login) BEFORE the probe spawn', fnAt > 0 && refuse > fnAt && spawnAt > refuse);
-  ck('...the route answers loginNeeded and stops (no token ladder); the probe env strips the token anyway', /pv\.code === 'login'\) return res\.json\(\{ error: 'needs re-login to refresh usage — ' \+ pv\.why, loginNeeded: true/.test(ur) && /delete env\.CLAUDE_CODE_OAUTH_TOKEN;/.test(ur));
+  // (lane pool-silent-members acceptance r2) the refusal no longer ENDS the route before its token ladder: the ladder's
+  // same-account / identity-group fallbacks (never our long-lived token: usageToken refuses it) are tried first, and the
+  // row is refused by name — loginNeeded, its own words — only when no fallback has a token either
+  const ladderAt = ur.indexOf('IDENTITY-GROUP fallback (2.266.1'), namedAt = ur.indexOf("if (!token && refusedByName) return res.json(");
+  ck('...the route answers loginNeeded by name once its token ladder has nothing either (the ladder FIRST, acceptance r2); the probe env strips the token anyway', /const refusedByName = !cliOk && pv && pv\.at >= t0 && \(pv\.code === 'login' \|\| pv\.code === 'unprobeable'\) \? pv : null;/.test(ur) && /: \{ error: 'needs re-login to refresh usage — ' \+ refusedByName\.why, loginNeeded: true/.test(ur) && ladderAt > 0 && namedAt > ladderAt && /delete env\.CLAUDE_CODE_OAUTH_TOKEN;/.test(ur));
   const probeCallers = [];
   for (const p of ['src/usage-routes.js', 'src/server/account-usage-routes.js', 'src/server/auto-cli-loop.js', 'server.js']) { const n = (src(p).match(/spawnPanelProbe\(/g) || []).length; if (n) probeCallers.push(p + ':' + n); }
   console.log('    panel-probe sites: ' + probeCallers.join(' '));

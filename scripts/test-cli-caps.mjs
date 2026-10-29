@@ -189,6 +189,18 @@ const measure = (args) => spawnSync(process.execPath, [SCRIPT, '--no-netns', '--
   ok('--no-netns refuses anything under …/claude/versions/ (the vendor install path)', rv.status === 2 && /REFUSED: --no-netns runs a FAKE claude/.test(rv.stderr), `exit ${rv.status}: ${String(rv.stderr).slice(-300)}`);
   const r2 = measure(['--variant', 'oat-file']);
   ok('--no-netns without --claude refuses (never the one on PATH)', r2.status === 2 && /REFUSED: --no-netns needs --claude/.test(r2.stderr), `exit ${r2.status}: ${String(r2.stderr).slice(-300)}`);
+  // THE LOOPBACK-REAL RUNG IS TRACKED (lane pool-silent-members acceptance r2: the 2.1.312 record named this script, whose
+  // --no-netns refused the real binary — it came from an untracked lane copy). Named on purpose only (never the one on
+  // PATH), the three fences in the script itself: every base and the PROXY on the loopback mock, the strace belt, the CLI's
+  // optional traffic off; the record says the rung and the proxy. (Here it is only REFUSED: no binary is ever run.)
+  const r3 = measure(['--loopback-real', '--variant', 'oat-file']);
+  ok('--no-netns --loopback-real without --claude refuses before anything runs (never the one on PATH)', r3.status === 2 && /REFUSED: --loopback-real needs --claude <the real claude>/.test(r3.stderr), `exit ${r3.status}: ${String(r3.stderr).slice(-300)}`);
+  const MS = fs.readFileSync(SCRIPT, 'utf8');
+  ok('…the rung lives in the TRACKED script: the real binary only with --no-netns --loopback-real, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1, HTTPS_PROXY = the mock, the record\'s rung + proxy (the belt on both rungs is test-oat-measure-fake\'s, a heavy)',
+    /const LOOPBACK_REAL = flag\('loopback-real'\) && !NETNS;/.test(MS) && /const CLAUDE = NETNS \? opt\('claude'\) : LOOPBACK_REAL \? realClaude\(\) : fakeClaude\(\);/.test(MS)
+    && /\.\.\.\(LOOPBACK_REAL \? \{ CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1' \} : \{\}\)/.test(MS) && /const PROXY_ENV = \{ HTTPS_PROXY: BASE, HTTP_PROXY: BASE,/.test(MS)
+    && /\.\.\.\(LOOPBACK_REAL \? \{ rung: 'loopback-real' \} : \{\}\), proxy: 'loopback-mock', variants: \{\} \};/.test(MS));
+  ok('…and its --no-netns line says the truth for each rung («the REAL claude, no namespace …» / «a FAKE claude on the loopback mock»)', /LOOPBACK_REAL \? ' \(--no-netns --loopback-real: the REAL claude, no namespace/.test(MS) && /: ' \(--no-netns: a FAKE claude on the loopback mock\)'/.test(MS));
 }
 
 // ── ⑥ the committed fixture (主开发's namespace rung writes it) ──
@@ -205,7 +217,7 @@ if (!fs.existsSync(COMMITTED)) {
   // loopback mock with a fake long-lived token, NO namespace — and the record SAYS so (`netns: false`, `rung:
   // 'loopback-real'`): the mock answered every API/OAuth/OTel call, HTTPS_PROXY = the mock refused each CONNECT
   // (16 to api.anthropic.com, all refused), the strace belt saw no off-loopback connect. Every older record is the namespace rung's.
-  ok('…each measured with the real CLI (not a fake): 2.1.296–2.1.308 in the namespace, 2.1.312 on the loopback rung and SAYING so', recs.length > 0 && recs.every(([k, r]) => k !== '9.9.9' && (k === '2.1.312' ? r.netns === false && r.rung === 'loopback-real' : r.netns === true && !('rung' in r))), JSON.stringify(recs.map(([k, r]) => [k, r.netns, r.rung || null])));
+  ok('…each measured with the real CLI (not a fake): 2.1.296–2.1.308 in the namespace, 2.1.312 on the loopback rung and SAYING so', recs.length > 0 && recs.every(([k, r]) => k !== '9.9.9' && (k === '2.1.312' ? r.netns === false && r.rung === 'loopback-real' && r.proxy === 'loopback-mock' : r.netns === true && !('rung' in r))), JSON.stringify(recs.map(([k, r]) => [k, r.netns, r.rung || null])));
   const sha = (o) => crypto.createHash('sha256').update(JSON.stringify(o)).digest('hex');
   ok('the 2.1.296 record says exactly what the file said since 2026-10-14 (sha256 of its JSON, pinned)', !!F?.versions?.['2.1.296'] && sha(F.versions['2.1.296']) === 'd7389f7a2edb1d1038cd0ab389d7ec11e5a009586fac78dceca407a732dcbaa5', F?.versions?.['2.1.296'] && sha(F.versions['2.1.296']));
   const verdicts = (v) => SIX.map((n) => F?.versions?.[v]?.variants?.[n]?.verdict).join(' ');

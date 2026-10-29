@@ -134,6 +134,7 @@
    "script": "scripts/measure-claude-cred-read.mjs",
    "netns": false,
    "rung": "loopback-real",
+   "proxy": "loopback-mock",
    "variants": {
     "oat-file": {
      "verdict": "PASS",
