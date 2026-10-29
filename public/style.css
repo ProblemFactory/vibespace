@@ -7516,6 +7516,7 @@ label.chan-cap-row { cursor: default; }
 /* §26 (B-099e): the channel witness's rows on a tool card — one per conversation the call read or drafted */
 .chat-channel-touches { margin: 4px 0 2px; display: flex; flex-direction: column; gap: 2px; }
 .chat-channel-touches[hidden] { display: none; }
+.chat-channel-touches > .chat-channel-touch[hidden], .chat-channel-touches > .chat-channel-touches-more[hidden] { display: none; } /* lane touch-chip-cause: a chip the strip's fit folds away (the row's own display:flex would keep it) */
 .chat-vendor-bypass { margin: 4px 0 2px; font-size: 11px; line-height: 1.4; }
 /* B-2198 THE RAW-API CARD (chat · Outbox · For you · API access…) + the API access dialog — lane channel-api-chrome: drawn
    for the first time in a browser; every request string wraps (a long path / body never runs off a 390 px screen) */

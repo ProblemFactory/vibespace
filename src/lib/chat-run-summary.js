@@ -9,6 +9,7 @@
 
 import { NOTE_MARKER, noteKindOfText, userNoteOf } from '../assistant-note.js'; // B-40f8: the note TEXT rule is PURE and shared — the server's turn previews read the same one
 import { exitCallOf, exitCallCard } from '../exit-call.js'; // lane exit-calls-in-history: a vibespace-exit Bash call read as the machine call it is (PURE, shared with the server)
+import { channelsRuns } from '../channel-touch.js'; // lane touch-chip-cause r2: where a command line RUNS the channels CLI (a command word, never prose)
 
 // Every kind the classifier can return. The summary ORDER below must list
 // each one — an unlisted kind used to count `undefined++` = NaN and vanish
@@ -300,12 +301,21 @@ export function runSummaryLabel({ byKind, mcpServers, files = [], nErr = 0, runn
 
 /** lane run-fold-channel-compact: the first words of a call's command for a COMPACT card's one-line head — its first
  *  non-blank line, whitespace folded to single spaces, cut at HEAD_WORDS_MAX code points with "…" (the head's CSS
- *  ellipsis then cuts it to the width). '' when the call carries no command. PURE. */
+ *  ellipsis then cuts it to the width). '' when the call carries no command. PURE.
+ *  lane touch-chip-cause: a CHAINED command (`vibespace-status working --reason "…" && vibespace-channels search "…"`)
+ *  opens at its `vibespace-channels` segment, after "… " — the compact card's rows are what THAT segment touched, and
+ *  the head that read `vibespace-status working…` named an act that touched nothing. r2: the segment opens only where
+ *  the CLI is a COMMAND WORD (PURE channelsRuns) — never inside a quoted argument (`--reason "… vibespace-channels read
+ *  …"`) or another command's argument (`grep vibespace-channels`); a `bash -c '…'` string opens at its shell. */
 export const HEAD_WORDS_MAX = 120;
 export function commandHeadWords(cmd) {
   const s = String(cmd || '').slice(0, 2048); // a 10 KB heredoc is never split whole for 120 code points
-  const line = s.split('\n').find((l) => l.trim()) || '';
-  const w = [...line.replace(/\s+/g, ' ').trim()];
+  const run = channelsRuns(s)[0];
+  // the segment opens at its command word — a path to the CLI (`/opt/x/bin/vibespace-channels`) is part of it
+  const from = run ? run.at : 0;
+  const lead = from > 0 && s.slice(0, from).trim() ? '… ' : '';
+  const line = (lead ? s.slice(from) : s).split('\n').find((l) => l.trim()) || '';
+  const w = [...(lead + line.replace(/\s+/g, ' ').trim())];
   return w.length > HEAD_WORDS_MAX ? w.slice(0, HEAD_WORDS_MAX - 1).join('') + '…' : w.join('');
 }
 

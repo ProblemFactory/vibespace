@@ -375,6 +375,29 @@ function mergeToolInput(existingInput, extraInput) {
 }
 
 class CodexMessageManager extends MessageWindow {
+  /** lane touch-chip-cause r3: WHICH RECORD STARTS A TURN — codex's OWN turn facts (`task_started` / `task_complete`), never
+   *  the `midTurn` mark (which here means «does not close the streams»: a drained inherited submission carries it and DOES
+   *  start its turn). `turnStart` true = the submission that began a turn (a record made while no turn runs — it starts the
+   *  next — or the first record after `task_started`, whatever it is: a queued item drained into the turn has no record of
+   *  its own); false = a person / peer / notification record that entered a RUNNING turn (steered, queued behind it). */
+  _turnBegins() {
+    this._turnRunning = true;
+    this._turnStartPending = !this._openerSeen;
+    this._openerSeen = false;
+  }
+  _create(fields) {
+    const msg = super._create(fields);
+    if (msg.role === 'user') {
+      if (!this._turnRunning) { msg.turnStart = true; this._openerSeen = true; }
+      else if (this._turnStartPending) { msg.turnStart = true; this._turnStartPending = false; }
+      else msg.turnStart = false;
+    } else if (this._turnStartPending && (msg.role === 'assistant' || msg.role === 'tool')) {
+      msg.turnStart = true;
+      this._turnStartPending = false;
+    }
+    return msg;
+  }
+
   // opts.threadId = the READER's thread id (the rollout being rendered) — the
   // DEFAULT ledger thread id for records that carry no file provenance (gap
   // slabs, tail-only reads, the live stream/buffer). A record a reader merged
@@ -2115,6 +2138,7 @@ class CodexMessageManager extends MessageWindow {
         if (turnId !== this._currentTurnId) {
           this._currentTurnId = turnId;
           this.turnIndex++;
+          this._turnBegins();
         }
       }
       if (event.model_context_window) this._status.contextWindow = event.model_context_window;
@@ -2143,6 +2167,7 @@ class CodexMessageManager extends MessageWindow {
       return;
     }
     if (type === 'task_complete' || type === 'turn_aborted' || type === 'task_failed') {
+      this._turnRunning = false; // lane touch-chip-cause r3: the turn ended (codex's own fact)
       this._finalizeStreaming(emit, { includeReasoning: true });
       if (type === 'task_failed') {
         const msg = this._create({

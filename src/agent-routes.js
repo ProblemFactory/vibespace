@@ -1996,7 +1996,8 @@ const splitConvKey = (v) => { const k = String(v || ''); const i = k.indexOf('/'
 // hidden one leaves nothing — the uniform not-found stays an oracle-free answer), so the chat can draw a clickable row
 // on the tool call's card — no tool, no injected context. test-architecture §63 is the census: every
 // `/api/agent/channels/` handler calls touchChannel, or is on its closed exemption list with the reason.
-const touchChannel = (id, touches) => { try { const w = getTouches(); if (w && touches && touches.length) w.recordMany(id, touches); } catch (e) { console.warn('[channel-touches] record failed:', (e && e.message) || e); } };
+// lane touch-chip-cause: every touch here is the AGENT's own act (its CLI's verb) — the chat binds it to the call that ran it.
+const touchChannel = (id, touches) => { try { const w = getTouches(); if (w && touches && touches.length) w.recordMany(id, touches, { cause: 'agent' }); } catch (e) { console.warn('[channel-touches] record failed:', (e && e.message) || e); } };
 const chanAnswer = (res, r) => {
   if (r && r.ok) return res.json(r);
   const code = (r && r.code) || 'error';

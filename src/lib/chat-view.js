@@ -31,7 +31,7 @@ import { attachSlab } from './view-visibility.js'; // perf r1: which slab an att
 import { heldText } from './jobs-layout.js';
 import { resumeAccountBar } from './resume-account-bar.js'; // lane resume-account-door: the pinned account cannot serve ⇒ the bar says so, with its two doors
 import { browserFactWords } from '../browser-fact.js'; // lane S2: THE words of THE browser fact (the chip prints them, never its own)
-import { toolCommandText } from '../browser-trace.js'; // lane run-fold-channel-compact: a compact card's head names its command
+import { agentCommandText } from '../agent-tool-rules.js'; // lane run-fold-channel-compact: a compact card's head names its command (touch-chip-cause r3: an argv call's head is its script's)
 import { createCardTraceLoader } from './browser-trace-view.js'; // agent browser P5 (§4.5 / D35): the tool card's action trace
 import { createChannelTouchView, openTouchRow } from './channel-touch-view.js'; // §26 (B-099e): the conversations an agent read / drafted, as rows on the tool card + the status-bar chip
 import { serviceHref, serviceOpenSpec, publishArtifacts } from './artifact-card.js'; // lane artifacts-services(-url): a service row's link (the server's ladder: published forward, else this instance's proxy)
@@ -7391,7 +7391,7 @@ class ChatView {
   _compactHead(el) {
     const head = el.querySelector('.chat-tool-use > .chat-tool-label');
     if (!head || head.querySelector(':scope > .chat-channel-compact-cmd')) return;
-    const words = commandHeadWords(toolCommandText(el._rawMsg?.content?.[0]?.input));
+    const words = commandHeadWords(agentCommandText(el._rawMsg?.content?.[0]?.input));
     if (!words) return;
     const s = document.createElement('span');
     s.className = 'chat-channel-compact-cmd';

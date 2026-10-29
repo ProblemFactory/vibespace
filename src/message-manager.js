@@ -416,6 +416,7 @@ class MessageManager extends MessageWindow {
     this.turnIndex++;
     const msg = this._create({ role: 'user', status: 'complete', content: [{ type: 'text', text: body }], turnIndex: this.turnIndex });
     msg.originKind = 'peer-message';
+    if (this._turnLive && !msg.turnStart) msg.midTurn = true; // lane touch-chip-cause r3: drawn while a turn RAN — it entered that turn (a peer message, a notice, Background Work)
     msg.peerFrom = fromName && String(fromName).trim() ? String(fromName).trim() : null; // a name is its words, never surrounding whitespace (lane S3)
     if (kind === 'notification' || kind === 'peer') msg.peerVia = kind; // the PATH the card's words took (S3 verify F3) — the delivery site's own kind, never read off the words
     // a STORED RESET CREDIT the card offers (design-reset-credits §5): the wall
@@ -715,7 +716,41 @@ class MessageManager extends MessageWindow {
   _taskRecordAt(emit) { return this._replayAt != null ? this._replayAt : (emit ? Date.now() : 0); }
 
   /** ONE record into cards (MessageWindow's processLive / convertHistoryAsync). */
-  _feedRecord(claudeMsg, emit) { this._processMessage(claudeMsg, emit); }
+  _feedRecord(claudeMsg, emit) { this._processMessage(claudeMsg, emit); if (emit) this._turnFact(claudeMsg); }
+
+  /** lane touch-chip-cause r3: THE TURN A LIVE RECORD ENTERS — the CLI's own turn facts, read off the live stream (a rebuild
+   *  reads the transcript's own records instead: a prompt the CLI took is a turn's start, a queued_command entered a running
+   *  one): an assistant record or `session_state_changed` running ⇒ a turn RUNS; its `result` (or `idle`) ⇒ it ended, and
+   *  the NEXT turn's first record — whatever it is: a held message's delivery has no record of its own, its bubble was
+   *  drawn where it was typed — carries `turnStart` (`_create`). A record the person or the hub adds while a turn runs
+   *  carries `midTurn`, set where it enters (`_processUser`'s live send, `injectPeerCard`) — never a turn's start. */
+  _turnFact(raw) {
+    if (!raw || typeof raw !== 'object') return;
+    const state = raw.type === 'system' && raw.subtype === 'session_state_changed' ? raw.state : null;
+    if (raw.type === 'assistant' || state === 'running' || state === 'requires_action') this._turnLive = true;
+    else if (raw.type === 'result' || (state === 'idle' && this._turnLive)) { this._turnLive = false; this._turnStartPending = true; }
+  }
+
+  /** …and the record that opens the next turn (r3): the first person / hub / assistant / tool record, or the turn's hook note,
+   *  made after a live turn ended (every card made here passes `_create`; a tool card is minted by hand — it calls this too). */
+  _create(fields) { return this._turnStartOf(super._create(fields)); }
+  _turnStartOf(msg) {
+    if (this._turnStartPending && (msg.role === 'user' || msg.role === 'assistant' || msg.role === 'tool' || (msg.role === 'system' && msg.content?.[0]?.hookData))) {
+      msg.turnStart = true;
+      this._turnStartPending = false;
+    }
+    return msg;
+  }
+  /** …and a queued_command record (the CLI took a message INTO its running turn) marks the bubble already drawn for it —
+   *  the one the attachment's dedup returns on (the same 12-record window, the same words) — before that return. */
+  _enteredTurn(text, emit) {
+    for (let i = this.messages.length - 1, seen = 0; i >= 0 && seen < 12; i--, seen++) {
+      const m = this.messages[i];
+      if (m.role !== 'user' || (m[PEER_RECORDED] || (m.content || []).map((b) => b.text || '').join('')) !== text) continue;
+      if (!m.midTurn && !m.turnStart) { m.midTurn = true; if (emit) this._emit({ op: 'edit', id: m.id, fields: { midTurn: true } }); }
+      return;
+    }
+  }
 
   _extractText(msg) {
     return msg.content.map(b => {
@@ -1466,6 +1501,7 @@ class MessageManager extends MessageWindow {
       const st = (stMatch ? stMatch[1].trim() : 'completed').toLowerCase();
       taskMsg.taskInfo.status = st === 'completed' ? 'completed' : (st || 'completed');
       taskMsg.taskInfo.closedBy = 'notification';
+      taskMsg.taskInfo.endedAt = this._currentTs || Date.now(); // lane touch-chip-cause r3: the instant its end was SEEN — a background producer stops being a channel touch's candidate here
       const smMatch = contentStr.match(/<summary>([\s\S]*?)<\/summary>/);
       if (smMatch) taskMsg.taskInfo.summary = smMatch[1].trim().slice(0, 200);
       if (emit) this._emit({ op: 'edit', id: taskMsg.id, fields: { taskInfo: taskMsg.taskInfo } });
@@ -1536,9 +1572,11 @@ class MessageManager extends MessageWindow {
         this.turnIndex++;
         const nmsg = this._create({ role: 'user', status: 'complete', content: blocks, turnIndex: this.turnIndex });
         nmsg.originKind = 'task-notification';
+        nmsg.midTurn = true; // lane touch-chip-cause r2: it entered a RUNNING turn (codex's mark — the channel binder's turn model never starts a turn here)
         if (emit) this._emit({ op: 'create', message: nmsg });
         return;
       }
+      this._enteredTurn(text, emit); // lane touch-chip-cause r3: the bubble the dedup below returns on entered a running turn — the mark rides it first
       for (let i = this.messages.length - 1, seen = 0; i >= 0 && seen < 12; i--, seen++) {
         const m = this.messages[i];
         // (a wrapper's copy of the same mid-turn frame drew it: this attachment is its record — the copy is claimed)
@@ -1547,6 +1585,7 @@ class MessageManager extends MessageWindow {
       if (a.origin?.kind === 'peer' && a.origin.msg_id && this._peerMsgIds.has(a.origin.msg_id)) return; // already rendered (msg_id is authoritative)
       this.turnIndex++;
       const msg = this._create({ role: 'user', status: 'complete', content: blocks, turnIndex: this.turnIndex });
+      msg.midTurn = true; // lane touch-chip-cause r2: a message that entered a RUNNING turn (a steer, a mid-turn peer message) — no new turn's note follows it; codex's mark
       if (a.origin?.kind === 'peer') {
         // same provenance law as the idle-wake user record — render the
         // peer card, never a "You" bubble of someone else's words
@@ -2030,6 +2069,9 @@ class MessageManager extends MessageWindow {
       // THE BUBBLE'S IDENTITY (2.369.354): a frame the wrapper holds names this msgId in its queue row — stamped ON the
       // message (the client joins its chip by it; a server-only map is not an identity it can see), the acp/codex stamp
       if (raw._fromWebui && raw.msgId) { msg.webuiMsgId = String(raw.msgId); this.userMessageIds.set(String(raw.msgId), msg.id); }
+      // lane touch-chip-cause r3: a message the person sends while a turn RUNS entered that turn (held, handed or steered) —
+      // never a turn's start where it was typed; a held one's turn opens at its delivery (the next turn's first record)
+      if (raw._fromWebui && emit && this._turnLive && !msg.turnStart) msg.midTurn = true;
       if (emit) this._emit({ op: 'create', message: msg });
     }
   }
@@ -2128,6 +2170,7 @@ class MessageManager extends MessageWindow {
           toolCallId: block.id, toolName: block.name, toolStatus: null,
           permission: null, usage: null, taskInfo: null, meta: recMeta,
         };
+        this._turnStartOf(msg); // lane touch-chip-cause r3: a turn whose first record is this call
         this.messages.push(msg);
         this.messageIndex.set(msgId, msg);
         this.pendingToolCalls.set(block.id, { msgId, block });

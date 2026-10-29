@@ -5485,6 +5485,7 @@ export default {
   "Access asked by {name} · {ago}": "{name} {ago}申请访问",
   "Read by {name} · {ago}": "{name} {ago}读过",
   "Channel conversations this call read or drafted": "这次调用读过或起草的频道会话",
+  "Channel conversations of this turn that no call shown here ran": "本轮触达、但不是这里任何一次调用产生的频道会话", // lane touch-chip-cause: the note row's box
   "Open this conversation": "打开这个会话",
   "Not sent yet — open the Outbox": "还没发出 —— 打开发件箱",
   "Show less": "收起",
