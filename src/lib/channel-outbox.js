@@ -123,7 +123,7 @@ export function pressedDelivery(button) { return button && button.dataset && but
 /** Every visible agent-draft primary on this page follows the remembered choice, words and fact together. */
 export function relabelPrimaries(want = rememberedDelivery(), root = document) {
   for (const b of root.querySelectorAll('.chan-prop button[data-approve][data-deliver]')) {
-    if (b.dataset.deliver === want) continue;
+    if (b.dataset.deliverFixed || b.dataset.deliver === want) continue;   // a reaction / recall: always next-turn
     b.dataset.deliver = want;
     const card = b.closest('.chan-prop');
     b.textContent = approveLabel(want, { edited: !!(card && card.querySelector('.chan-prop-edit')) });
@@ -383,6 +383,14 @@ async function post(pathname, body) {
   if (!r || r.error) { showToast(routeErrorText(r), { type: 'error' }); return null; }
   return r;
 }
+/** THE ONE APPROVE (lane reaction-approve-shown — the owner's hub, 2026-10-28: an agent's proposed 👍 was refused on
+ *  every press since 2.369.197, «shown is required … reload the page»): every road that approves a proposal — a text,
+ *  a reaction, a recall, with edits, without the files — posts HERE, and every approval carries `shown` = the PURE
+ *  digest of the record the card was drawn from (r6 verify F6). The reaction / recall road had its own POST without it:
+ *  two roads, one drifted. test-channel-outbox's census holds every outbox approve POST in the client tree to this one. */
+function approveProposal(p, body) {
+  return post(`/api/channels/outbox/${encodeURIComponent(p.id)}/approve`, { ...body, shown: P.shownDigest(p) });
+}
 
 /**
  * ONE approval card for ONE proposal. `opts.compact` = the inline form
@@ -585,9 +593,14 @@ export function renderProposalCard(app, p, { compact = false, line = false, onLi
       const approveR = btn(toAgent ? approveLabel('next-turn') : t('Approve'), null, 'mounts-btn-primary');
       approveR.dataset.approve = '1';
       approveR.dataset.deliver = 'next-turn';
-      approveR.onclick = async () => {
+      // lane reaction-approve-shown: its receipt ALWAYS rides the next turn (the engine never wakes for one), so its words
+      // never follow this device's remembered «wake now» — `relabelPrimaries` and a kept card's patch skip it (the owner's
+      // reaction card read «批准并立即唤醒 agent» while its press posted next-turn)
+      approveR.dataset.deliverFixed = '1';
+      approveR.onclick = async (ev) => {
+        if (!cardArmed(card, ev)) return;   // r6 F6: armed only, like every Approve
         for (const b of act.querySelectorAll('button')) b.disabled = true;
-        const r = await post(`/api/channels/outbox/${encodeURIComponent(p.id)}/approve`, { expectWakes: 0, ...(toAgent ? { deliver: 'next-turn' } : {}) });
+        const r = await approveProposal(p, { expectWakes: 0, ...(toAgent ? { deliver: 'next-turn' } : {}) });
         if (!r) { for (const b of act.querySelectorAll('button')) b.disabled = false; return; }
         const sent = !!(r.proposal && r.proposal.state === 'sent');
         const o = r.proposal ? (r.proposal.outcome || P.outcomeOf(r.proposal)) : null;
@@ -613,6 +626,7 @@ export function renderProposalCard(app, p, { compact = false, line = false, onLi
       };
       act.append(reject, approveR);
       card.appendChild(act);
+      armCard(card);
       return card;
     }
     const approve = btn(toAgent ? approveLabel(rememberedDelivery()) : t('Approve'), null, 'mounts-btn-primary');
@@ -628,9 +642,9 @@ export function renderProposalCard(app, p, { compact = false, line = false, onLi
       const text = editor ? editor.value : null;
       // r3: a send that starts a turn echoes the count the card SAID (`expectWakes`) — and a receipt woken now is one more
       const woke = toAgent && deliver === 'wake-now' ? 1 : 0;
-      // r6 verify F6: `shown` = the digest of the record THIS card was drawn from — the engine refuses the
-      // approval (409 changed-since-shown, nothing sent) when the proposal is no longer that record
-      const r = await post(`/api/channels/outbox/${encodeURIComponent(p.id)}/approve`, { ...(text !== null && text !== p.text ? { text } : {}), expectWakes: (Number(p.wakes) || 0) + woke, ...(toAgent ? { deliver } : {}), ...(noFile ? { withoutFiles: true } : {}), shown: P.shownDigest(p) });
+      // r6 verify F6: `shown` (approveProposal adds it) = the digest of the record THIS card was drawn from — the engine
+      // refuses the approval (409 changed-since-shown, nothing sent) when the proposal is no longer that record
+      const r = await approveProposal(p, { ...(text !== null && text !== p.text ? { text } : {}), expectWakes: (Number(p.wakes) || 0) + woke, ...(toAgent ? { deliver } : {}), ...(noFile ? { withoutFiles: true } : {}) });
       if (!r) { lock(false); return; }
       const sent = !!(r.proposal && r.proposal.state === 'sent');
       const o = r.proposal ? (r.proposal.outcome || P.outcomeOf(r.proposal)) : null;
@@ -844,7 +858,7 @@ function keyedCard(app, p, prev, { compact = false, line = false, onLine = null,
     // does the new one — patch the words in place, the editor untouched
     const want = rememberedDelivery();
     const approveBtn = prev.querySelector(':scope > .chan-prop-actions button[data-approve]');
-    if (approveBtn && p.draftedBy && p.draftedBy.kind === 'agent' && approveBtn.dataset.deliver !== want) {
+    if (approveBtn && !approveBtn.dataset.deliverFixed && p.draftedBy && p.draftedBy.kind === 'agent' && approveBtn.dataset.deliver !== want) {
       approveBtn.dataset.deliver = want;
       approveBtn.textContent = approveLabel(want, { edited: !!prev.querySelector('.chan-prop-edit') });
     }

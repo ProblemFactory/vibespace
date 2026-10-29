@@ -1262,7 +1262,12 @@ function deliverOf(b) {
 // r6 verify F6 (2026-09-28, "what you approve is what runs"): `shown` = the PURE digest
 // (channel-policy `shownDigest`) of the record the card was drawn from — REQUIRED; the
 // engine refuses a proposal that is no longer that record (`409 changed-since-shown`,
-// nothing sent). A request without it (a tab from before this rule) is refused by name.
+// nothing sent). A request without it is refused by name — in words that say WHAT is
+// missing, never a cause this route cannot see (lane reaction-approve-shown: the words
+// said «reload the page if this tab is from before the update» and sent the owner to
+// reload a current tab — the card's reaction road posted no digest. No request and no
+// WS hello carries the bundle's version, so this route never knows a tab is stale and
+// never says «reload»).
 router.post('/api/channels/outbox/:id/approve', async (req, res) => {
   try {
     if (refuseAgentBearer(req, res, PRESS_IS_OWNERS)) return;
@@ -1271,7 +1276,7 @@ router.post('/api/channels/outbox/:id/approve', async (req, res) => {
     const b = req.body || {};
     const d = deliverOf(b);
     if (!d.ok) return answer3(res, d);
-    if (typeof b.shown !== 'string' || !b.shown) return answer3(res, { ok: false, code: 'bad-request', why: 'shown-required', error: 'shown is required — the digest of the card being approved (reload the page if this tab is from before the update)' });
+    if (typeof b.shown !== 'string' || !b.shown) return answer3(res, { ok: false, code: 'bad-request', why: 'shown-required', error: 'this card did not send the digest of what it shows (shown) — nothing was approved' });
     answer3(res, await engine().approve(req.params.id, { text: typeof b.text === 'string' ? b.text : null, by: 'user', deliver: d.deliver, shown: b.shown, withoutFiles: b.withoutFiles === true, ...wakeGuards(b), pressed: press }));
   } catch (e) { fail(res, e); }
 });

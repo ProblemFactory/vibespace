@@ -4068,6 +4068,7 @@ export default {
   "Direct send is not offered here": "ここでは直接送信は提供されません",
   "The request was refused: {error}": "リクエストは拒否されました: {error}",
   "The request was refused": "リクエストは拒否されました",
+  "This card did not send the digest of what it shows — nothing was approved": "このカードは表示している内容のダイジェストを送信しませんでした — 何も承認されていません",
   "That filter no longer exists": "そのフィルタはもう存在しません",
   "That filter is still used by an assignment": "そのフィルタはまだ割り当てで使われています",
   "The channel refused the send: {error}": "チャンネルが送信を拒否しました: {error}",
