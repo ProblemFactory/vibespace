@@ -62,7 +62,9 @@ function safeJsonParse(text, fallback = null) {
 function rejectStdinLine(line) {
   const head = line.slice(0, 48).replace(/\s+/g, ' ');
   log(`stdin line unparseable (${line.length} bytes, starts ${JSON.stringify(head)}) — dropped, NOT sent to codex`);
-  writeRecord({ type: '_stdin_nack', timestamp: Date.now(), reason: 'torn', bytes: line.length }); persistSoon();   // the sender's receipt (lane human-cli r2)
+  const nack = { type: '_stdin_nack', timestamp: Date.now(), reason: 'torn', bytes: line.length };   // the sender's receipt (lane human-cli r3): its own road, never the replay buffer
+  writeReceipt(nack);
+  try { process.stdout.write(JSON.stringify(nack) + '\n'); } catch {}
   record('event_msg', {
     type: 'task_failed',
     error: `Your message did not reach codex: the input line was corrupted in transit (${line.length} bytes, unparseable) — please send it again.`,
@@ -504,13 +506,24 @@ function persistMeta() {
 }
 
 function schedulePersist() {
-  if (!writeTimer) writeTimer = setTimeout(persistBuffer, 1000);
+  if (!writeTimer) writeTimer = setTimeout(persistBuffer, Date.now() - lastReceiptAt < FOLLOWED_MS ? 250 : 1000);   // a person's CLI follows the buffer (it asked for a receipt lately): its replies land in 250 ms
 }
-/** A receipt is waited for (the person's CLI reads the buffer file — lane human-cli r2): the pending persist runs now. */
-function persistSoon() {
-  if (writeTimer) clearTimeout(writeTimer);
-  writeTimer = setTimeout(persistBuffer, 50);
+/** THE RECEIPTS ROAD (lane human-cli r3): a receipt is the WRITER's, never a replayed record — the buffer is what a
+ *  conversation replays to a person. The ack a frame asked for (`webui_receipt`: the person's CLI never stays attached)
+ *  and a torn line's nack go to <id>.receipts beside the buffer (the last 50, rewritten whole; removed when this wrapper
+ *  exits) — the CLI follows that file (src/local-index.js receiptsFileOf spells the same name). */
+const receiptsFile = bufferFile ? String(bufferFile).replace(/\.buf$/, '') + '.receipts' : null;
+const receiptLines = [];
+var lastReceiptAt = 0;            // var: schedulePersist may run before this line (a record at boot) — undefined reads as «not followed»
+const FOLLOWED_MS = 120000;       // a receipt asked for in the last 2 min = a person's CLI is following this buffer
+function writeReceipt(rec) {
+  if (!receiptsFile) return;
+  lastReceiptAt = Date.now();
+  receiptLines.push(JSON.stringify(rec));
+  if (receiptLines.length > 50) receiptLines.shift();
+  try { fs.writeFileSync(receiptsFile, receiptLines.join('\n') + '\n'); } catch {}
 }
+process.on('exit', () => { if (receiptLines.length) { try { fs.unlinkSync(receiptsFile); } catch {} } });
 
 function scheduleMeta() {
   if (!metaTimer) metaTimer = setTimeout(persistMeta, 200);
@@ -3703,12 +3716,12 @@ async function boot() {
       // the ack means "the pipe is alive", not "the line was valid".
       let msg = safeJsonParse(line);
       // the ack names its frame (lane human-cli r2): `msg_id` = the chat-input's msgId; a frame that asks for a RECEIPT
-      // (`webui_receipt`, the person's CLI — it reads the buffer, never this stream) gets it in the buffer too
+      // (`webui_receipt`, the person's CLI — it never reads this stream) gets it in its receipts file (never the replay buffer)
       const receipt = !!(msg && typeof msg === 'object' && msg.webui_receipt === true);
       if (receipt) delete msg.webui_receipt;
       const ack = { type: '_stdin_ack', timestamp: Date.now(), ...(msg && typeof msg === 'object' && (msg.msgId || msg.webui_msg_id) ? { msg_id: String(msg.msgId || msg.webui_msg_id) } : {}) };
-      if (receipt) { writeRecord(ack); persistSoon(); }
-      else try { process.stdout.write(JSON.stringify(ack) + '\n'); } catch {}
+      if (receipt) writeReceipt(ack);
+      try { process.stdout.write(JSON.stringify(ack) + '\n'); } catch {}
       if (!msg || typeof msg !== 'object') { rejectStdinLine(line); continue; }
       // Large-frame FILE BYPASS: the payload rides the filesystem, stdin only
       // carries the pointer. Resolved HERE (not inside handleInput) so the file

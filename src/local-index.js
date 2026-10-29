@@ -447,10 +447,13 @@ function fillFrame(tpl, { text = '', id = '' } = {}) {
   return fill(tpl);
 }
 
-// ── the wrapper's RECEIPTS (round 2): a frame carrying `webui_receipt: true` is acked INTO the wrapper's buffer (the CLI
-//    never stays attached — it reads the buffer), the ack naming the frame's own id; a line that came in TORN (two
-//    writers at once, a dropped byte) is refused with a nack — never a user message. ──
+// ── the wrapper's RECEIPTS (round 2; round 3: their own file): a frame carrying `webui_receipt: true` is acked into the
+//    wrapper's RECEIPTS file beside its buffer (the CLI never stays attached; a receipt is never a replayed record), the
+//    ack naming the frame's own id; a line that came in TORN (two writers at once, a dropped byte) is refused with a
+//    nack — never a user message. ──
 const RECEIPT_FLAG = 'webui_receipt';
+/** r3: a receipt rides its OWN file beside the buffer (`<id>.receipts`) — a receipt is never a replayed record. */
+const receiptsFileOf = (buffer) => (buffer ? String(buffer).replace(/\.buf$/, '') + '.receipts' : null);
 /** A buffer record → {kind: 'ack', id} | {kind: 'nack', reason, bytes} | null. */
 function receiptOf(rec) {
   if (!rec || typeof rec !== 'object') return null;
@@ -574,7 +577,7 @@ function unitOwnedBy({ pid, execPid = null, ppid = null, parentComm = null } = {
 
 module.exports = {
   INDEX_VERSION, INDEX_KIND, INDEX_FILE_RE, OWN_ROOT_DIR, SWEEP_MS, HEARTBEAT_MS, FRESH_MS, NET_FSTYPE, ROW_KEYS, HUB_KEYS, SOCKET_FACTS, DTACH, TURN_WORDS,
-  FRAME_TEXT, FRAME_ID, RECEIPT_FLAG, indexFileOf, mountOf, landedPathOf, indexPlaceOf, rungFolderOf, inputHeldOf, rowOf, docOf, parseIndex, procStat,
+  FRAME_TEXT, FRAME_ID, RECEIPT_FLAG, receiptsFileOf, indexFileOf, mountOf, landedPathOf, indexPlaceOf, rungFolderOf, inputHeldOf, rowOf, docOf, parseIndex, procStat,
   procVerdict, socketFactOf, judgeRow, judgeHub, clean, ageWords, orderRows, orderHubs, entriesOf, pickSession, cellWidth, fitCell, tableOf,
   dtachPacket, dtachPush, dtachAttach, frameTemplatesOf, fillFrame, receiptOf, toolLine, personText, recordLines, historyOf, unitOfCgroup, unitOwnedBy,
 };

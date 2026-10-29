@@ -451,9 +451,13 @@ function tick() {
 }
 tick(); setInterval(tick, ${POLL_MS});`;
 function follow(file, onRecord, onStall) {
-  let ch, buf = '', last = Date.now(), stalled = false;
-  try { ch = cp.spawn(process.execPath, ['-e', FOLLOW_CHILD, JSON.stringify(file)], { stdio: ['ignore', 'pipe', 'ignore'], env: {} }); } catch { return { stop() { } }; }
+  let ch, buf = '', last = Date.now(), stalled = false, isReady = null;
+  // READY = the child took its baseline (its first pulse): a line sent before it could be acked INTO the baseline and
+  // never reported — every send waits on it (bounded: a child that never speaks is the stall below)
+  const ready = new Promise((r) => { isReady = r; setTimeout(r, PROBE_MS).unref(); });
+  try { ch = cp.spawn(process.execPath, ['-e', FOLLOW_CHILD, JSON.stringify(file)], { stdio: ['ignore', 'pipe', 'ignore'], env: {} }); } catch { return { stop() { }, ready: Promise.resolve() }; }
   ch.stdout.on('data', (d) => {
+    isReady();
     last = Date.now(); if (stalled) { stalled = false; onStall(false); }
     buf += d;
     let i;
@@ -467,7 +471,7 @@ function follow(file, onRecord, onStall) {
   });
   const watch = setInterval(() => { if (!stalled && Date.now() - last > 3 * PROBE_MS) { stalled = true; onStall(true); } }, 1000);
   watch.unref(); ch.unref();
-  return { stop() { clearInterval(watch); abandon(ch); } };
+  return { stop() { clearInterval(watch); abandon(ch); }, ready };
 }
 /** ONE frame to the session's socket and let go: a dtach PUSH-only client (never MSG_ATTACH — never a reader), in a
  *  child with a clock (a connect to a socket on a stalled mount waits in the kernel). → {ok} | {ok: false, why}. */
@@ -536,11 +540,12 @@ async function cmdChat(q, opts) {
       out(msgText(m, agentName));
     }
   };
-  const tail = row.buffer ? follow(row.buffer, onRecord, (on) => out(dim(on ? `  (the session's buffer ${tildeOf(row.buffer)} stopped answering — its mount? replies will show once it answers)` : '  (the buffer answers again)'))) : { stop() { } };
+  const tail = row.buffer ? follow(row.buffer, onRecord, (on) => out(dim(on ? `  (the session's buffer ${tildeOf(row.buffer)} stopped answering — its mount? replies will show once it answers)` : '  (the buffer answers again)'))) : { stop() { }, ready: Promise.resolve() };
+  const rtail = row.buffer && receipts ? follow(LI.receiptsFileOf(row.buffer), onRecord, () => { }) : { stop() { }, ready: Promise.resolve() };   // the wrapper's receipts ride their own file (never the replay buffer)
   const leave = (code = 0, words = null) => {
     if (leaving) return; leaving = true;
     if (words) out(words);
-    tail.stop();
+    tail.stop(); rtail.stop();
     try { if (rl) rl.close(); } catch { }
     setTimeout(() => process.exit(code), 50);
   };
@@ -554,6 +559,7 @@ async function cmdChat(q, opts) {
       w.t = setTimeout(() => w.resolve('none'), RECEIPT_MS);
       waiters.push(w);
     }) : null;
+    await Promise.all([tail.ready, rtail.ready]);   // both followers took their baseline — a receipt cannot land unseen
     const pushed = await pushFrame(row.socket, frame);
     if (!pushed.ok) { if (w) w.resolve('unsent'); out(dim(`  (not sent: ${pushed.why})`)); return 'unsent'; }
     return got || 'no-receipts';
