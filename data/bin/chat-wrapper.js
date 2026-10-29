@@ -475,8 +475,9 @@ function forwardUser(line, o, buffered) {
 const KC = require(path.join(__dirname, '..', '..', 'src', 'kept-copies.js')); // the ONE place that names / writes / reads kept files
 const KEPT_DIR = KC.keptDirOfBuffer(bufferFile);
 /** THE HAND-OVER ORDER (acceptance r6): a copy says WHEN its frame reached the CLI — `handNo` 0 while it is held, the n-th
- *  frame written to the CLI once it is (handOver / a drain / a ⚡) — so a batch the CLI ran as one turn is claimed in that
- *  order, and a still-held copy never claims a record (the normalizer, src/message-manager.js). */
+ *  frame written to the CLI once it is (handOver / a drain / a ⚡) — the buffer's own record of the order. The hub never
+ *  keys a claim on it (a rewrite of this line never reaches the hub, r7): a batch is claimed by the stamps the CLI's init
+ *  names, and a still-held copy — never named — claims nothing (the normalizer, src/message-manager.js, r8). */
 let handOrder = 0;
 function copyLineOf(o, msgId, ts, cliUuid, handNo = 0) {
   const content = frameBlocks(o).map((b) => KC.keepBlock(b, KEPT_DIR, log));
