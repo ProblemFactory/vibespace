@@ -444,7 +444,9 @@ export function installChatSeek(ChatView) {
     _scrollElStable(el, { fit = false, replay = false } = {}) {
     if (!el || !el.isConnected) return;
     this._lastJumpTargetEl = el;
-    if (!replay) this._lastJumpAt = Date.now(); // a replay (the c-v restore re-centring its target) is not a jump (r5)
+    // a replay (the c-v restore re-centring its target) is not a jump (r5); the stamp is a LANDING's — no reader-act
+    // predicate reads it, only the resume's _positionedSince (lane needs-card-tail r6)
+    if (!replay) this._lastJumpAt = Date.now();
     this._programmaticScroll = true;
     clearTimeout(this._jumpGuardTimer);
     this._jumpGuardTimer = setTimeout(() => { this._programmaticScroll = false; }, 1100);

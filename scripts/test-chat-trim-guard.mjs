@@ -142,7 +142,7 @@ ok('a structural change between the readings hands the decision back to the pagi
 // decisions off it, and a switch re-measures 4-6 windows at once.
 ok('ChatView.setSuspended exists and arms the structural settle window on resume', /setSuspended\(on\) \{/.test(cv) && /this\._lastStructuralAt = Date\.now\(\);/.test(cv.slice(cv.indexOf('setSuspended'))));
 ok('resume returns a pinned view to the LIVE tail — behind-the-tail windows take the full jumpToBottom (inc-mtfi6034 mobile old-position), and it does NOT stamp a user navigation over its own series',
-  /this\._windowEnd < this\._total\) this\.jumpToBottom\(\{ user: false, stale: \(\) => this\._navigatedSince\(resumeAt\) \}\);/.test(cv.slice(cv.indexOf('setSuspended')))); // (lane needs-card-tail r4: its page dropped once the reader — or a landing — went somewhere while it was out)
+  /this\._windowEnd < this\._total\) this\.jumpToBottom\(\{ user: false, stale: \(\) => this\._positionedSince\(resumeAt\) \}\);/.test(cv.slice(cv.indexOf('setSuspended')))); // (lane needs-card-tail r4: its page dropped once the reader — or a landing — went somewhere while it was out; r6: _positionedSince — an act OR a landing)
 // four paging entries: extendTop / extendBottom / the scroll handler's
 // decisions / the short-view rescue (which answers `false`, not `return`)
 ok('all four paging entries gate on _suspended (extendTop/extendBottom/scroll decisions/short-view rescue)',
@@ -303,12 +303,13 @@ ok('…and the press is CLEARED on pointerup/pointercancel, window-scoped on the
 // re-tail compares nav-vs-resume: the chat-view-seek `userScrolled` idiom.
 ok('there is ONE navigation stamp (_noteUserNav) and it ends the settle like a wheel does',
   /_noteUserNav\(via\) \{[\s\S]{0,220}this\._lastNavAt = Date\.now\(\);[\s\S]{0,220}this\._endResumeSettle\(\);/.test(cv));
-ok('…and the reader-position test generalises the seek idiom over every POSITIONING stamp (positioning act, nav, jump landing, search reveal) — and reads _lastUserScrollAt NOWHERE, because a click is not one (round 3; lane needs-card-tail r5: the stamps are THE one list, _readerActs — jumpToBottom\'s default reads it too)',
+ok('…and the reader-position test generalises the seek idiom over every POSITIONING stamp (positioning act, nav, jump landing, search reveal) — and reads _lastUserScrollAt NOWHERE, because a click is not one (round 3; lane needs-card-tail r5: the stamps are THE one list, _readerActs — jumpToBottom\'s default reads it too; r6: a reader act is stamped when it STARTS — the jump LANDING is not in the list, only the resume\'s _positionedSince reads it)',
   /_navigatedSince\(since\) \{\s*return Math\.max\(\.\.\.this\._readerActs\(\)\) > since;\s*\}/.test(cv)
-  && /_readerActs\(\{ scroll = true \} = \{\}\) \{\s*return \[this\._lastNavAt \|\| 0, scroll \? this\._lastPositionAt \|\| 0 : 0, this\._lastJumpAt \|\| 0, this\._search\?\._lastRevealAt \|\| 0\];\s*\}/.test(cv)
-  && !/_navigatedSince\(since\) \{[^}]*_lastUserScrollAt/.test(cv) && !/_readerActs\(\{ scroll = true \} = \{\}\) \{[^}]*_lastUserScrollAt/.test(cv));
+  && /_readerActs\(\{ scroll = true \} = \{\}\) \{\s*return \[this\._lastNavAt \|\| 0, scroll \? this\._lastPositionAt \|\| 0 : 0, this\._search\?\._lastRevealAt \|\| 0\];\s*\}/.test(cv)
+  && /_positionedSince\(since\) \{\s*return this\._navigatedSince\(since\) \|\| \(this\._lastJumpAt \|\| 0\) > since;\s*\}/.test(cv)
+  && !/_navigatedSince\(since\) \{[^}]*_lastUserScrollAt/.test(cv) && !/_readerActs\(\{ scroll = true \} = \{\}\) \{[^}]*_lastUserScrollAt/.test(cv) && !/_positionedSince\(since\) \{[^}]*_lastUserScrollAt/.test(cv));
 ok('the resume re-tail BAILS when the reader navigated after the resume (never yank a reader back to the tail)',
-  /const resumeAt = this\._resumeAt;[\s\S]{0,400}if \(this\._navigatedSince\(resumeAt\)\) return;/.test(cv));
+  /const resumeAt = this\._resumeAt;[\s\S]{0,400}if \(this\._positionedSince\(resumeAt\)\) return;/.test(cv) && /return !this\._positionedSince\(at\);/.test(cv)); // (r6: an act of the reader's OR the landing of one)
 ok('every off-list navigation surface stamps: minimap (index + time), search reveal, run-bar landing, jumpToIndex, user jumpToBottom',
   /_noteUserNav\('minimap'\); return this\.jumpToIndex/.test(cv)
   && /_noteUserNav\('minimap-time'\); return this\._jumpToFileTime/.test(cv)
