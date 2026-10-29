@@ -39,6 +39,7 @@ function agentJobView(snap, { mine = false } = {}) {
   if (Array.isArray(snap.answers)) out.answers = snap.answers.map((a) => (a && typeof a === 'object' ? Object.fromEntries(Object.entries(a).map(([k, v]) => [line(k, 200), typeof v === 'string' ? line(v, 4096) : v])) : a));
   const notif = (n) => (n && typeof n === 'object' ? { ...n, ...(typeof n.to === 'string' ? { to: line(n.to, 200) } : {}), ...(typeof n.reason === 'string' ? { reason: line(n.reason, 400) } : {}) } : n);
   if (Array.isArray(snap.notifyLog)) out.notifyLog = snap.notifyLog.map(notif);
+  if (snap.forYouLast && typeof snap.forYouLast === 'object') out.forYouLast = Object.fromEntries(Object.entries(snap.forYouLast).map(([k, v]) => [line(k, 40), notif(v)]));   // r4: the last verdict per copy (store words; line pieces like the journal's)
   if (snap.lastNotify) out.lastNotify = notif(snap.lastNotify);
   return out;
 }
@@ -384,11 +385,16 @@ const FOR_YOU_WORDS = Object.freeze({
   parked: 'Service {name} crash-looped and was parked — vibespace-job start {id} to retry',
   missed: 'Scheduled job {name} MISSED its time (server was down)',
   fire: '{text}',
+  // the ENGINE's own notices (no job: never a fact, never a field of an agent's) — through the same door (r4: every engine filing)
+  'engine-failed': 'Background Work engine failed to start: {error}',
+  'store-corrupt': 'Background Work store was corrupt — records recovered as unverified; resolve them in the Jobs panel',
 });
 /** PURE. One For-you copy of `job` → {fact, words: {key, params}, urgency}: `fact` is WHICH copy (the store's resolver
  *  key and re-file match — src/user-todos.js jobFact): 'ask' | 'fire' | 'missed' | 'parked' | 'end:<state>:<cause>' (a
- *  done and a failed end are two facts, two items). `text` = a notify fire's --text (the job's name when it has none). */
-function forYouCopy(job, kind, { text = null, cause = null, urgency = null } = {}) {
+ *  done and a failed end are two facts, two items). `text` = a notify fire's --text (the job's name when it has none).
+ *  r4: a kind it does not know answers a NAMED refusal ({fact: null, refused, copy}) — never null (claim r3-2 minor 7:
+ *  `_forYou(job, null)` threw a TypeError into _finalizeRun); `error` = the engine-failed notice's field. */
+function forYouCopy(job, kind, { text = null, cause = null, urgency = null, error = null } = {}) {
   const name = String((job && (job.name || job.id)) || 'job');
   const tok = (v, n) => String(v == null || v === '' ? 'unknown' : v).toLowerCase().replace(/[^a-z0-9._()-]/g, '-').slice(0, n);
   if (kind === 'end') return { fact: `end:${tok(job.state, 24).replace(/[^a-z_-]/g, '-')}:${tok(cause, 48)}`, words: { key: FOR_YOU_WORDS.end, params: { name, state: String(job.state), cause: String(cause) } }, urgency: job.state === 'failed' ? 'normal' : 'low' };
@@ -396,7 +402,31 @@ function forYouCopy(job, kind, { text = null, cause = null, urgency = null } = {
   if (kind === 'parked') return { fact: 'parked', words: { key: FOR_YOU_WORDS.parked, params: { name, id: String(job.id) } }, urgency: 'normal' };
   if (kind === 'missed') return { fact: 'missed', words: { key: FOR_YOU_WORDS.missed, params: { name } }, urgency: 'high' };
   if (kind === 'fire') return { fact: 'fire', words: { key: FOR_YOU_WORDS.fire, params: { text: String(text || name) } }, urgency: urgency || 'normal' };
-  return null;
+  if (kind === 'engine-failed') return { fact: 'engine-failed', words: { key: FOR_YOU_WORDS['engine-failed'], params: { error: String(error) } }, urgency: 'high' };
+  if (kind === 'store-corrupt') return { fact: 'store-corrupt', words: { key: FOR_YOU_WORDS['store-corrupt'] }, urgency: 'high' };
+  return { fact: null, words: null, urgency: null, copy: tok(kind, 24), refused: `no For-you copy of kind «${String(kind).slice(0, 24)}» — the copies are ${Object.keys(FOR_YOU_WORDS).join(', ')}` };
+}
+
+// THE LEGACY RUNG'S READER (lane job-notify-user r4, accept-r3 unverified 1 + 4): an engine ≤ 2.369.360 filed every copy as
+// its sentence WHOLE, with no fact — and the five sentences it filed ARE the templates above. So the fact a legacy copy
+// carries is read back off its own template: an end's state and cause parsed out («Task {name}: {state} ({cause})» →
+// end:<state>:<cause>, the fact forYouCopy derives), a park naming the item's own job, a missed time, an ask; any other
+// words under a job id were a notify FIRE's (its --text, or the job's name). PURE; null = not a job's copy (no job id).
+// The store runs it ONCE per item at load (src/user-todos.js THE ONE LEGACY RUNG), never on a filing.
+const LEGACY_FIELD = { name: '[\\s\\S]+', state: '[a-z_-]{1,24}', cause: '[^\\n]{1,48}', id: '\\S+' };
+const LEGACY_RE = Object.fromEntries(['end', 'parked', 'missed', 'ask'].map((k) => [k, new RegExp('^' + FOR_YOU_WORDS[k].split(/(\{\w+\})/).map((p) => {
+  const f = /^\{(\w+)\}$/.exec(p);
+  return f ? `(?<${f[1]}>${LEGACY_FIELD[f[1]]})` : p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}).join('') + '$')]));
+function legacyCopyFact(text, jobId) {
+  if (typeof text !== 'string' || !text || !jobId) return null;
+  const e = LEGACY_RE.end.exec(text);
+  if (e) return forYouCopy({ state: e.groups.state, name: e.groups.name }, 'end', { cause: e.groups.cause }).fact;
+  const p = LEGACY_RE.parked.exec(text);
+  if (p && p.groups.id === String(jobId)) return 'parked';
+  if (LEGACY_RE.missed.test(text)) return 'missed';
+  if (LEGACY_RE.ask.test(text)) return 'ask';
+  return 'fire';
 }
 
 /** THE TAIL SAYS WHY THEY WAITED (lane notify-retry, R4 — the old fixed sentence claimed the conversation had been
@@ -639,6 +669,6 @@ module.exports = {
   SUPERVISE, onServiceExit, resolveName,
   renderJobsDigest, renderJobsUpdate, fitDigest, jobLine,
   validatePanel, validateAnswers, nextInteractionSeq, answerVersionVerdict, CONTEXT_PAYLOAD_CAP, clip,
-  notifyEffective, notifyUserOf, spawnTaskOf, storedAction, renderOwnerNotify, renderNotifStash, FOR_YOU_WORDS, forYouCopy,
+  notifyEffective, notifyUserOf, spawnTaskOf, storedAction, renderOwnerNotify, renderNotifStash, FOR_YOU_WORDS, forYouCopy, legacyCopyFact,
   agentJobView,
 };

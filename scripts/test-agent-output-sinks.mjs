@@ -315,6 +315,30 @@ console.log('§3b the JOBS ROAD — the real jobs wiring: the agent\'s words as 
   const tg = new UserTodoManager({ dataDir: dg, onChange: () => {} });
   let gerr = ''; try { tg.add('jobs', { origin: 'jobs', text: 'Task x ' + SHAPE + ': done (ok)' }); } catch (e) { gerr = e.message; }
   ok(/files its words as i18n \{key, params\}/.test(gerr) && tg.snapshot().open.length === 0, 'the store REFUSES a jobs filing with a composed text (fail closed: the fields are what it belts)', gerr);
+  // THE WRITER BY WHAT IT WRITES (lane job-notify-user r4, claim r3-1 FINDING 2): the census above reads the literal — a filer
+  // spelling the origin 'jo' + 'bs', AGENT_FIELDS_ORIGINS[0] or a template literal stayed green in both censuses. The STORE
+  // asserts its caller for a fields origin (src/inbox-origin.js FIELDS_FILERS): each planted shape, compiled as a module AT
+  // src/server/ghost-jobs.js (in memory — nothing is written into the tree), files into a REAL store and is refused BY NAME;
+  // CONTROL: the very same code compiled at the listed filer's path files
+  const { FIELDS_FILERS: FF } = require(path.join(REPO, 'src/inbox-origin.js'));
+  ok(JSON.stringify(Object.keys(FF)) === JSON.stringify([...AGENT_FIELDS_ORIGINS]) && Object.entries(FF).every(([o, fs0]) => fs0.every((f) => f in FIELDS_FILERS)), 'the store\'s filer table (FIELDS_FILERS) names one listed filer per fields origin — the census above counts the same files', JSON.stringify(FF));
+  const Mod = require('module');
+  const asModule = (rel, code) => { const abs = path.join(REPO, rel); const m = new Mod(abs, null); m.filename = abs; m.paths = Mod._nodeModulePaths(path.dirname(abs)); m._compile(code, abs); return m.exports; };
+  const GHOSTS = {
+    "'jo' + 'bs'": "'jo' + 'bs'",
+    'AGENT_FIELDS_ORIGINS[0]': "require('../inbox-origin.js').AGENT_FIELDS_ORIGINS[0]",
+    'a template literal': "`${'jo'}bs`",
+    "the literal origin: 'jobs'": "'jobs'",
+  };
+  const wd = scratch('aos-writer'); fs.mkdirSync(wd, { recursive: true });
+  const wt = new UserTodoManager({ dataDir: wd, onChange: () => {}, expirySweepMs: 0 });
+  const fileVia = (rel, expr) => { try { asModule(rel, `module.exports = (t) => t.add('claude:conv-ghost', { origin: ${expr}, by: 'agent', jobId: 'jb-0000a0a0', jobFact: 'ask', jobName: 'ghost', i18n: { text: { key: '{name} needs your input', params: { name: 'ghost' } } } });`)(wt); return null; } catch (e) { return e.message; } };
+  const said = Object.fromEntries(Object.entries(GHOSTS).map(([n, expr]) => [n, fileVia('src/server/ghost-jobs.js', expr)]));
+  const named = Object.entries(said).filter(([, m]) => /^origin 'jobs' is filed only by src\/server\/jobs-wiring\.js — src\/server\/ghost-jobs\.js is not its filer$/.test(m || ''));
+  ok(named.length === 4 && wt.snapshot().open.length === 0, `every planted writer of origin 'jobs' — ${Object.keys(GHOSTS).join(', ')} — is REFUSED by the store BY NAME (src/server/ghost-jobs.js is not its filer)`, JSON.stringify(said));
+  const listed = fileVia('src/server/jobs-wiring.js', GHOSTS["'jo' + 'bs'"]);
+  ok(listed === null && wt.snapshot().open.length === 1, 'CONTROL: the same code at the listed filer\'s path (src/server/jobs-wiring.js) files — the store reads its CALLER, not a blanket refusal', listed);
+  wt.stop && wt.stop();
 }
 
 // ---------------------------------------------------------------------------

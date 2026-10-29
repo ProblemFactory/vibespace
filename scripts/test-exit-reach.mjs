@@ -650,7 +650,7 @@ async function x1Legs(w) {
   // CONTROL (x1a): the store merging by (sessionKey, text) alone — the agent's re-file lands on the ask
   const M1 = mutantCopies('exitx1', REPO);
   const tsrc = fs.readFileSync(path.join(REPO, 'src/user-todos.js'), 'utf8');
-  const tmut = tsrc.replace('i.sessionKey === sessionKey && sameWords(i) && sameFiling(i)', 'i.sessionKey === sessionKey && sameWords(i)');   // sameWords = the text for an item that names no job fact (lane job-notify-user r3)
+  const tmut = tsrc.replace(': i.text === text && sameFiling(i) && ', ': i.text === text && ');   // the identity's TEXT branch (an item that names no job fact — lane job-notify-user r3/r4: one predicate, one branch per identity)
   ok(tmut !== tsrc, '(x1a) the patch applies');
   const wa = world({ Todos: M1.load('src/user-todos.js', tmut, 'textmerge').UserTodoManager });
   const oa = await x1Legs(wa);

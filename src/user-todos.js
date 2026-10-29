@@ -27,7 +27,8 @@ const path = require('path');
 const { timedSync } = require('./timed-sync.js'); // PURE: the store-write clock (design 011 lane 1, store-timing)
 const crypto = require('crypto');
 const { normalizeOptions, REPLY_MAX } = require('./inbox-reply.js'); // PURE: the option-chip rule the route, the CLI and the panel share (design-user-inbox-reply D3a)
-const { normalizeOrigin, AGENT_WORDS_ORIGINS, AGENT_FIELDS_ORIGINS } = require('./inbox-origin.js'); // PURE: the closed set of PRODUCERS an item names (B-328d) — the Notices area groups by it; a filing that names none is REFUSED (r2)
+const { normalizeOrigin, AGENT_WORDS_ORIGINS, AGENT_FIELDS_ORIGINS, FIELDS_FILERS } = require('./inbox-origin.js'); // PURE: the closed set of PRODUCERS an item names (B-328d) — the Notices area groups by it; a filing that names none is REFUSED (r2)
+const { legacyCopyFact } = require('./job-model.js'); // PURE: THE ONE LEGACY RUNG reads a ≤ .360 job copy's fact off its own template (lane job-notify-user r4)
 const belt = require('./agent-output-belt.js'); // lane agent-output-sinks: the sink belt — a For-you item's text / detail never carries a credential in the clear
 const { applyClear } = require('./record-clear.js'); // PURE: "Clear content…" (2026-09-28) — what a clear replaces; this store holds the door (clearItems)
 
@@ -77,6 +78,25 @@ function fillWords(l) {
 // re-file match of an item carrying one is (sessionKey, jobId, jobFact), never the text: the r2 belt masked «Task
 // refresh-token: done (ok)» and «…: failed (exit)» to ONE text and the failure merged into the success; and the resolver
 // read /needs your input/, which «rotate-db-password «redacted» your input» no longer said.
+/** the PRODUCT file that called add() (lane job-notify-user r4): the first V8 call site outside this file, as a repo path
+ *  (src/…, server.js) — null for a suite's or a tool's own store (scripts/, tools/), a copy outside the checkout, or a
+ *  runtime that keeps no call sites */
+function srcCallerOf(fn) {
+  const prep = Error.prepareStackTrace, lim = Error.stackTraceLimit;
+  try {
+    Error.stackTraceLimit = 6; Error.prepareStackTrace = (_, cs) => cs;
+    const o = {}; Error.captureStackTrace(o, fn);
+    for (const c of Array.isArray(o.stack) ? o.stack : []) {
+      const f = c && typeof c.getFileName === 'function' ? c.getFileName() : null;
+      if (!f || f === __filename) continue;
+      const root = path.dirname(__dirname);
+      if (!f.startsWith(root + path.sep)) return null;
+      const rel = path.relative(root, f).split(path.sep).join('/');
+      return /^(scripts|tools|node_modules)\//.test(rel) ? null : rel;
+    }
+    return null;
+  } catch { return null; } finally { Error.prepareStackTrace = prep; Error.stackTraceLimit = lim; }
+}
 const JOB_FACT_RE = /^(?:[a-z][a-z-]{0,31}|end:[a-z_-]{1,24}:[a-z0-9._()-]{1,48})$/;
 function normalizeJobFact(f, jobId, origin) {
   if (f == null) return null;
@@ -291,11 +311,18 @@ class UserTodoManager {
       if (parsed && Array.isArray(parsed.items)) this._state = parsed;
       this._lastWritten = JSON.stringify(this._state, null, 2);
     } catch { /* fresh */ }
-    // THE ONE LEGACY RUNG (lane job-notify-user r3): a job's ask filed before 2.369.361 carries no `jobFact` — the only
-    // place the store reads its sentence, once, at load (an engine ≤ .360 filed «<name> needs your input» whole): it takes
-    // the fact, so the resolver keys on the fact alone and the panel answered after the upgrade still closes it
+    // THE ONE LEGACY RUNG (lane job-notify-user r3 → r4: every copy, AFTER the load): a job's copy filed before 2.369.361
+    // carries no `jobFact` — the only place the store reads a sentence, once, at load. An engine ≤ .360 filed each of its
+    // five copies as the template's sentence whole, so every OPEN one takes the fact its own template implies (job-model
+    // legacyCopyFact: end:<state>:<cause> parsed out, parked, missed, ask, else the fire's) — the resolver keys on the fact
+    // alone (the panel answered after the upgrade still closes the ask) and the next copy of the same job re-files into it
+    // (r3 covered asks only: an open .360 end / park / missed / fire copy sat beside its first fact-keyed twin). An item with
+    // no stored origin but a job id is a pre-B-328d job copy (only Background Work files a jobId) — r3 skipped it.
     for (const it of this._state.items) {
-      if (it && it.origin === 'jobs' && it.jobId && it.jobFact == null && it.status === 'open' && !it.clearedAt && typeof it.text === 'string' && / needs your input$/.test(it.text)) it.jobFact = 'ask';
+      if (it && it.jobId && (it.origin === 'jobs' || it.origin == null) && it.jobFact == null && it.status === 'open' && !it.clearedAt) {
+        const f = legacyCopyFact(it.text, it.jobId);
+        if (f) it.jobFact = f;
+      }
     }
     // EXPIRY (2.369.152, "SPEND NOTICES LIVED FOREVER AS ACTIONS"): a notice
     // about a WINDOW (this hour's / today's unattended-turn budget, a 6 h
@@ -496,6 +523,10 @@ class UserTodoManager {
     const agentFields = AGENT_FIELDS_ORIGINS.includes(origin);
     const beltOf = (s) => belt.maskForSink(s, { dataDir: _dataDir });
     if (agentFields) {
+      // THE ONE FILER per fields origin (lane job-notify-user r4): a product file not listed in FIELDS_FILERS is refused by
+      // name, whatever spelling of the origin it used — the store judges the WRITER by what it writes
+      const filer = srcCallerOf(UserTodoManager.prototype.add);
+      if (filer && !(FIELDS_FILERS[origin] || []).includes(filer)) throw new Error(`origin '${origin}' is filed only by ${(FIELDS_FILERS[origin] || []).join(', ') || 'no product file'} — ${filer} is not its filer`);
       if (text != null || detail != null) throw new Error(`origin '${origin}' files its words as i18n {key, params} — the store composes the text and detail (each field belted on its own, never the sentence)`);
       // the shape is refused by name first; each param is belted BEFORE the clamp (a token across the 600-char cut is masked whole)
       i18n = i18n == null ? null : normalizeI18n((normalizeI18n(i18n), maskI18nParams(i18n, beltOf)));
@@ -584,9 +615,10 @@ class UserTodoManager {
       return !idKey || i.action[idKey] === action[idKey];
     };
     // lane job-notify-user r3: an item that names its job's fact re-files by the FACT (jobId + jobFact), never by its
-    // text; one that names none never merges into one that does (a job's copy is the job's)
-    const sameWords = (i) => (jobFact ? i.jobId === jobId && i.jobFact === jobFact : i.text === text && !i.jobFact);
-    const existing = this._state.items.find((i) => i.sessionKey === sessionKey && sameWords(i) && sameFiling(i) && !i.clearedAt);
+    // text; one that names none never merges into one that does (a job's copy is the job's). r4: ONE identity predicate,
+    // one branch per kind of identity — the shape a second identity (a producer's key, a decided row's finality) composes into
+    const sameCopy = (i) => (jobFact ? i.jobId === jobId && i.jobFact === jobFact && sameFiling(i) : i.text === text && sameFiling(i) && !i.jobFact);
+    const existing = this._state.items.find((i) => i.sessionKey === sessionKey && sameCopy(i) && !i.clearedAt);
     const openCount = this._state.items.filter((i) => i.sessionKey === sessionKey && i.status === 'open').length;
     // a SERVER producer whose open items its own domain bounds (one per account row) may raise the per-key cap; the agent
     // route never passes it (lane oat-identity-fix-r2, L1)
@@ -618,6 +650,7 @@ class UserTodoManager {
       if (urgency && urgency !== existing.urgency) { existing.urgency = urgency; changed = true; }
       if (kind && kind !== existing.kind) { existing.kind = kind; changed = true; }
       if (i18n && JSON.stringify(i18n) !== JSON.stringify(existing.i18n || null)) { existing.i18n = i18n; changed = true; }
+      if (jobFact && text !== existing.text) { existing.text = text; delete existing.judged; changed = true; }   // r4: a fact item's words are not its identity — they follow its fields (the English text the agent CLI reads)
       if (action && JSON.stringify(action) !== JSON.stringify(existing.action || null)) { existing.action = action; changed = true; }
       if (card && JSON.stringify(card) !== JSON.stringify(existing.card || null)) { existing.card = card; changed = true; }
       if (options && JSON.stringify(options) !== JSON.stringify(existing.options || null)) { existing.options = options; changed = true; } // a re-file WITH options replaces them; one without keeps the old set

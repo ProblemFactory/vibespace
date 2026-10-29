@@ -20,7 +20,7 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
     // status-bar chip read it off the same frame (`jm` is bound lazily: the
     // constructor never broadcasts)
     broadcast: (type, payload) => broadcastAll({ type, ...payload, held: jm.heldDigest() }),
-    notifyUser: ({ words, fact = null, urgency, jobId, jobName, ownerCid }) => {
+    notifyUser: ({ words = null, text, detail, fact = null, urgency, jobId, jobName, ownerCid }) => {
       // ATTRIBUTION = the AGENT CONVERSATION that owns the job (owner verdict
       // 2.357.0: an ask hanging off a background-task entity is 反直觉 — the
       // user thinks in terms of the agent they were talking to, and 2.348.1's
@@ -44,10 +44,13 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
         // TEMPLATE (`words` = {key, params}) whose fields are the agent's (the job's NAME, a notify cron's --text) — the
         // store belts each field on its own and fills the template, never the sentence; the group label is the owner
         // conversation's own name (the person's fact, whole) + the job's name (`jobName`, a field the store belts);
-        // `fact` = which copy of the job it is (the resolver's key and the re-file match, never the words)
+        // `fact` = which copy of the job it is (the resolver's key and the re-file match, never the words). r4: the SHAPE passes
+        // THROUGH — a composed `text` / `detail` (a filing in the pre-r3 shape) reaches the store, which refuses it in its own
+        // words («origin 'jobs' files its words as i18n {key, params}»); r3 dropped it and the store said «i18n.text needs a key»
         const it = userTodos.add(sessKey, {
           origin: 'jobs', // B-328d
-          i18n: { text: words, ...(jobId ? { detail: [ownerCid && jobName ? { key: 'Background job {id} · via {name}', params: { id: jobId, name: jobName } } : { key: 'Background job {id}', params: { id: jobId } }] } : {}) },
+          text, detail,
+          i18n: words == null ? null : { text: words, ...(jobId ? { detail: [ownerCid && jobName ? { key: 'Background job {id} · via {name}', params: { id: jobId, name: jobName } } : { key: 'Background job {id}', params: { id: jobId } }] } : {}) },   // r4: the i18n-check road reads these literals (zh + ja required)
           urgency: urgency || 'normal', by: 'agent', jobId, jobFact: jobId ? fact : null,
           sessionName: ownerCid && sessName ? sessName : null, jobName: jobName || (ownerCid && sessName ? 'job' : 'background job'),
         });

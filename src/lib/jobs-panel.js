@@ -379,7 +379,7 @@ async function expandDetail(app, el, j, refresh) {
     if (when) { const fu = document.createElement('div'); fu.className = 'jobs-meta jobs-notify-user'; fu.textContent = when; d.appendChild(fu); }
     const missed = job.kind !== 'cron' ? null : job.schedule && job.schedule.at && job.catchUp === 'none' ? t('A missed time reaches you in For you') : t('A missed time is caught up when the server is back — never a notice');
     const always = job.kind === 'task' ? t('Its asks reach you in For you')
-      : job.kind === 'service' ? t('Its asks and a park reach you in For you')
+      : job.kind === 'service' ? (job.restart === 'never' ? t('Its asks reach you in For you') : t('Its asks and a park reach you in For you'))   // r4: --restart never never parks
         : job.actionType === 'notify' ? missed : t("Each run's asks reach you in For you") + ' · ' + missed;
     const aw = document.createElement('div'); aw.className = 'jobs-meta jobs-notify-always';
     aw.textContent = always;

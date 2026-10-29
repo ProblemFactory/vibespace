@@ -66,6 +66,11 @@ const INBOX_ORIGINS = Object.freeze(['spend', 'login', 'pool', 'jobs', 'channels
 // filer of a fields origin (a second filer outside the listed set is red by name).
 const AGENT_WORDS_ORIGINS = Object.freeze(['agent']);
 const AGENT_FIELDS_ORIGINS = Object.freeze(['jobs']);
+// …and each fields origin's ONE product filer (lane job-notify-user r4, claim r3-1 FINDING 2): the store's add() asserts
+// its CALLER for a fields origin — a src/ file not listed here is refused by name, however it spells the origin
+// ('jo' + 'bs', AGENT_FIELDS_ORIGINS[0], a template literal: the source census read the literal only). A suite's own
+// store (scripts/) is not product code and files freely.
+const FIELDS_FILERS = Object.freeze({ jobs: Object.freeze(['src/server/jobs-wiring.js']) });
 
 // The group / chip words — English t() keys (the panel words them per device;
 // i18nKey is the extraction marker scripts/i18n-extract.mjs reads).
@@ -97,4 +102,4 @@ function normalizeOrigin(x) {
   return x;
 }
 
-module.exports = { INBOX_ORIGINS, AGENT_WORDS_ORIGINS, AGENT_FIELDS_ORIGINS, ORIGIN_LABELS, normalizeOrigin };
+module.exports = { INBOX_ORIGINS, AGENT_WORDS_ORIGINS, AGENT_FIELDS_ORIGINS, FIELDS_FILERS, ORIGIN_LABELS, normalizeOrigin };
