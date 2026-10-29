@@ -90,7 +90,7 @@ separate setting — not audience 1's auto-notify:
   refused copy is NOT retried: free some For you items and run the job again.
 - `show` and `poll` of a notify cron print its `text:` (whole for the
   conversation that made it).
-- Reminders created with `--notify-user` before 2.369.361 stored no flag
+- Reminders created with `--notify-user` before 2.369.362 stored no flag
   (`show` prints `notifyUser=false` for them). Recreate them.
 - A device's own `vibespace-job` (in its `~/.vibespace/bin`) stays the old
   one until the hub ships the tools to it again. Until then, that device's
@@ -323,7 +323,7 @@ conversation's browser trace as the job's. Concretely:
 - In-session continuation ("keep going until X") → `/goal`
 - Must OUTLIVE the conversation → THIS
 - Harness cron → never (dies with the session); dated obligations → `--at`
-- Reminders for YOURSELF (dated obligations) → `notify-cron` (each fire wakes YOUR conversation; since 2.363.1 the user's For you tray is NOT copied unless you add `--notify-user` — §3 «The user's For you copy» says what it does per kind, that it is set at creation, and that a reminder made before 2.369.361 must be recreated — the fire text is usually agent-facing, so relay to the user yourself via chat/vibespace-ask when warranted)
+- Reminders for YOURSELF (dated obligations) → `notify-cron` (each fire wakes YOUR conversation; since 2.363.1 the user's For you tray is NOT copied unless you add `--notify-user` — §3 «The user's For you copy» says what it does per kind, that it is set at creation, and that a reminder made before 2.369.362 must be recreated — the fire text is usually agent-facing, so relay to the user yourself via chat/vibespace-ask when warranted)
 - Simple user forms → Interaction Panels (§5) before building a web page (§6)
 
 ## The full teaching behind the session intro's pointer line
