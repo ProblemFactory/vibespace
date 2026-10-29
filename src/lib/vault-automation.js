@@ -234,6 +234,7 @@ function limitsFollowOpen(boxes, limWrap) {
  *  key's grants (the hint says so — no new first-use card); a verb taken away is refused from its next call. */
 export function showEditDialog(key, data, { refresh } = {}) {
   // lane dialog-unsaved-guard: a verb or a limit changed and not saved ⇒ ✕ / Esc / the backdrop asks
+  // not the subject: data — the vault's catalog (the subjects and choices it offers), the same for every key
   const { body, close, raised } = createModalShell({ id: 'vault-ak-edit', key: key.id, title: t('Edit "{name}"', { name: key.name }), dialogClass: 'vault-dialog-box vw-ak-dialog', escapeToClose: true,
     unsaved: { isDirty: () => drawn() !== base, save: () => doSave() }, kind: 'form' });
   if (raised) return null;   // raised: the same subject's form, as it was
@@ -532,6 +533,7 @@ function reachRows(initial, data, { id }) {
 /** The reach dialog (lane key-instance-scope): one grant's reach, changed — the key row's chip opens it; 保存 writes it. */
 export function showReachDialog(key, g, data, { refresh } = {}) {
   // lane dialog-unsaved-guard: the reach changed and not saved ⇒ ✕ / Esc / the backdrop asks
+  // not the subject: data — the vault's catalog (the subjects and choices it offers), the same for every key
   const { body, close, raised } = createModalShell({ id: 'vault-ak-reach', key: `${key.id}:${g.subject}`, title: t('Reach of "{name}" for {subject}', { name: key.name, subject: subjectName(g.subject, data) }), dialogClass: 'vault-dialog-box vw-ak-dialog', escapeToClose: true,
     unsaved: { isDirty: () => JSON.stringify(rows.value()) !== base, save: () => doSave() }, kind: 'form' });
   if (raised) return null;   // raised: the same subject's form, as it was
@@ -566,6 +568,7 @@ export function showReachDialog(key, g, data, { refresh } = {}) {
 export function showGrantPicker(key, data, { refresh } = {}) {
   // lane dialog-unsaved-guard: a pick or the new grants' reach changed and not saved ⇒ ✕ / Esc / the backdrop asks
   let picker = null;
+  // not the subject: data — the vault's catalog (the subjects and choices it offers), the same for every key
   const { body, close, raised } = createModalShell({ id: 'vault-ak-grant', key: key.id, title: t('Grant "{name}" to', { name: key.name }), dialogClass: 'vault-dialog-box vw-ak-dialog', escapeToClose: true,
     unsaved: { isDirty: () => drawn() !== base, save: () => doSave() }, onClose: () => { if (picker) picker.close(); }, kind: 'form' });
   if (raised) return null;   // raised: the same subject's form, as it was

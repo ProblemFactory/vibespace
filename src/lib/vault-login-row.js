@@ -64,6 +64,7 @@ export function loginExtras(row, data, { refresh, show } = {}) {
 
 /** 用于…: the scope (this account / any account on this site / any site) and who — checked = granted at that scope. */
 export function showLoginGrantPicker(entry, data, { refresh } = {}) {
+  // not the subject: data — the vault's catalog (the subjects it offers), the same for every entry
   const { body, close, raised } = createModalShell({ id: 'vault-login-grant', key: entry.id, title: t('Who may have "{name}" filled', { name: entry.user ? `${entry.user} · ${String(entry.origin || '').replace(/^https:\/\//, '')}` : entry.name }), dialogClass: 'vault-dialog-box vw-ak-dialog', escapeToClose: true,
     unsaved: { isDirty: () => boxes.some((b) => b.checked !== hadAt(scope).has(b.value)), save: () => doSave() }, kind: 'form' });
   if (raised) return null;   // raised: the same subject's form, as it was

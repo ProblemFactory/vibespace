@@ -147,7 +147,8 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
   /** a row's path field: the one its key held at the last paint (moved into the new row, its picker and its words kept), else a new one */
   const makePathField = (input, { at, onCommit, key = null, was = null }) => {
     const old = key && was ? was.get(key) : null;
-    if (old) { was.delete(key); old._bind.at = at; old._bind.onCommit = onCommit; fields.push(old); byRow.set(key, old); return old; }
+    // r6: a kept field is PAINTED against the world as it is now (a rebuilt one was — 0ae9fbcb's kept row A still said «does not exist»)
+    if (old) { was.delete(key); old._bind.at = at; old._bind.onCommit = onCommit; fields.push(old); byRow.set(key, old); old.refresh(); return old; }
     const bind = { at, onCommit };
     const pf = pathField(input, {
       bases: () => basesFor(bind.at), groupsOf: () => [groupEntry()], host: () => null,
@@ -454,8 +455,10 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
       table.appendChild(empty);
     }
     ctxSec.appendChild(table);
-    // ＋ 添加路径…
-    const addKept = was.get('+add');
+    // ＋ 添加路径… — r6: carried over only while it holds typed words not yet added (or its picker is open); an empty one is drawn
+    // fresh, its hint back (0ae9fbcb kept it after an add: the ADDED path's «= ~/x ✓» under an empty box)
+    const addWas = was.get('+add');
+    const addKept = addWas && (addWas.input.value.trim() || addWas.picking()) ? addWas : null;
     const addInput = addKept ? addKept.input : document.createElement('input');
     addInput.className = 'task-detail-input ctx-add-input';
     addInput.placeholder = t('+ Add a path… (a folder or a file; relative = against the row above; takes effect when you leave the box or press Enter)');
@@ -465,13 +468,13 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
     if (!addKept) addWrap.appendChild(addInput);
     ctxSec.appendChild(addWrap);
     const addPf = makePathField(addInput, {
-      at: rows.length, key: '+add', was,
+      at: rows.length, key: '+add', was: addKept ? was : null,   // (an add row not kept is a NEW field; the old one is destroyed with the rest below)
       onCommit: (info) => {
         const text = String(info.text || '').trim() || info.path;
         unresolved.delete('+add');
         const next = rowsOf();
         next.push({ path: text, note: '', tell: null, tags: info.isFile ? [] : ['discover'], share: null });
-        addInput.value = '';
+        addPf.set('', { commit: true });   // r6: the add row is RESET — its box empty, its line the empty-box hint (never the added path's facts)
         writeRows(next);
         showToast(t('Added row {n}: {path} · told 「{level}」{tags} (change it on the row)', { n: next.length, path: text, level: TELL_LABEL[info.isFile ? 'contents' : 'index'](), tags: info.isFile ? '' : ' · ' + t('Discover sessions') }));
       },

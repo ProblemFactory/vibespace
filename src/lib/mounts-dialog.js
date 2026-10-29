@@ -191,6 +191,7 @@ function copyLine(value) {
 // Connect storage closed the running «Set up <machine>» through the shared id's door); opts.key = the subject (the machine, the
 // mount, the account). The same id + key opened again is RAISED and its ctx comes back.
 export function mountsDialog(title, fields, submitLabel, onSubmit, opts = {}) {
+  // not the subject: fields — the caller's opts.key names them (every mountsDialog call is a census row of its own, r5)
   const shell = createModalShell({ id: opts.id, key: opts.key, title, onClose: opts.onClose, escapeToClose: true, kind: 'form' });
   if (shell.raised) return shell.overlay._mountsCtx || { body: shell.body, close: shell.close, raised: true, asked: shell.asked, ready: shell.ready, live: shell.live };
   const { body, close } = shell;
@@ -561,6 +562,7 @@ export function reauthDialog({ id = 'mount-reauth-dialog', key = null, title, hi
   let pasteBox = null, poll = null;
   const stopPoll = () => { clearInterval(poll); poll = null; };
   const closed = () => { stopPoll(); if (typeof onClose === 'function') { try { onClose(); } catch { /* the dialog is gone either way */ } } };
+  // not the subject: fields — the caller's key names them (the mount / the account its OAuth-client select belongs to)
   const { body, close, raised, overlay } = createModalShell({ id, key, title, bodyClass: 'mounts-dialog-body', kind: 'form', onClose: closed, escapeToClose: true, onEscape: () => escapeAsk() });   // key = the mount / the account re-authorized (lane dialog-yield r3); kind 'form' + lark-refresh-stall's onClose / Escape-asks (int361: 主开发's option order)
   if (raised) return overlay._reauth || null;   // raised: this sign-in, as it was
   const hint = document.createElement('div');

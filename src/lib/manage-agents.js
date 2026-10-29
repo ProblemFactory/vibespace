@@ -849,6 +849,7 @@ export function installManageAgents(App, ctx = {}) {
     // lane dialog-unsaved-guard: a token PASTED and not saved ⇒ ✕ / Esc / the backdrop asks; Discard clears it from the page
     // (a minted token waits on the hub — a reopened dialog shows its phase again — so the mint asks nothing here)
     const pasted = () => body.querySelector('#oat-paste');
+    // not the subject: a — the account record `id` names (its name, its token state)
     const { overlay, body, close: shut, dismiss, raised, ready } = createModalShell({ id: 'oat-dialog', key: id, title: t('Long-lived token — {name}', { name }), minWidth: 'min(460px, 92vw)', onClose: () => { gone = true; off?.(); clearTimeout(closeTimer); try { rawScr?.destroy(); } catch { } rawScr = null; },
       unsaved: { isDirty: () => !!(pasted() && pasted().value.trim()), save: () => savePasted(), discard: () => { if (pasted()) pasted().value = ''; } },
       escapeToClose: true, onEscape: () => oatEscape(), kind: 'form' });

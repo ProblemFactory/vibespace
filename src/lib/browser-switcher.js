@@ -55,6 +55,7 @@ export function openBrowserSwitcher(app, { profileId, sessionId = null, preselec
   // lane dialog-yield r3: the switcher's subject is its PROFILE (the title says «Browser» for every one) — pB after pA closes pA
   // through its door and draws pB; pA again raises the open one (its handle comes back, its one broadcast handler kept). r5: and the
   // CONVERSATION it was asked from — its switch is told to that one (two conversations' switchers for one profile are two subjects)
+  // not the subject: preselect — which backend row the caller came for (a stale banner's one click): a hint the open switcher's rows already carry
   const shell = createModalShell({ id: 'browser-switcher-dialog', key: `${profileId}:${sessionId || ''}`, title: t('Browser'), dialogClass: 'browser-switcher', bodyClass: 'brsw-body', escapeToClose: true,
     onClose: () => { st.closed = true; if (st.timer) clearTimeout(st.timer); try { app.ws?.offGlobal?.(onGlobal); } catch { /* optional */ } }, kind: 'form' });
   if (shell.raised) return shell.overlay._switcher || shell;

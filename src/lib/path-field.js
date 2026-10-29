@@ -804,7 +804,8 @@ export function pathField(input, opts = {}) {
   }
   paint();   // the chips row waits for refresh() (a field is built while the page boots — no fetch then)
   const setDerived = (text, { note = '', commit: c = false } = {}) => set(text, { commit: c, how: 'derived', derived: { note } });
-  const handle = { el: wrap, input, value: () => st.committed, verdict: () => { emitState(); return st.verdict; }, commit: () => commit('api'), set, setDerived, refresh, open, close, ensure, destroy };
+  const picking = () => !!(st.picking || (st.picker && st.picker.live()));   // its picker open, or its listing on the way (lane dialog-yield r6: a repaint keeps such a field)
+  const handle = { el: wrap, input, value: () => st.committed, verdict: () => { emitState(); return st.verdict; }, commit: () => commit('api'), set, setDerived, refresh, open, close, ensure, destroy, picking };
   input._pathField = handle;
   return handle;
 }

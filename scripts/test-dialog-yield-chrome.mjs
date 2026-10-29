@@ -50,6 +50,9 @@
 // removed under its picker ⇒ the picker closes, said · ㊸ the open form ended by its caller's overlay.remove() while another
 // subject waits ⇒ that one OPENS · ㊹ a person's ask while the open form is dirty BEHIND the chat ⇒ it is raised, its question
 // seen · ㊺ a script focus moving WITHIN a form standing behind ⇒ one focusin (the guard bounded). On 37c1b566 ㊴–㊺ are RED.
+// Round 6 (acceptance r5): ㊻ the doc editor's Link asked on «design notes», then (its form open) on «tracker» ⇒ two forms, the
+// second edits tracker · ㊼ the design sheets with the overlay's backdrop-filter gone ⇒ still on the keyboard (their containing
+// block declared) · ㊽ «+ Add a path…» after an add ⇒ the empty-box hint; a kept row painted as the world is now. On 0ae9fbcb ㊻–㊽ are RED.
 // On 6428c67e (the base — run the file on a `git archive` copy) ①–⑤ and ⑦ are RED; ⑥ and ⑧ hold on both. On da9545e8 (round 1)
 // the round-2 legs are RED (⑪–⑳, ⑨'s way back, ⑤'s system opener).
 // PNGs: DIALOG_YIELD_PNG_DIR (default: the scratch root) <prefix>-<leg>.png, prefix = DIALOG_YIELD_SHOT_PREFIX (default 'run').
@@ -129,6 +132,7 @@ for (const f of ['src', 'public', 'server.js', 'package.json', 'data/bin']) fs.c
 fs.symlinkSync(path.join(repo, 'node_modules'), path.join(wt, 'node_modules'));
 fs.writeFileSync(path.join(wt, 'src/lib/build-version.js'), `export const BUILD_VERSION = ${J(require(path.join(repo, 'package.json')).version)};\n`);
 execSync('npx esbuild src/client.js --bundle --outfile=public/bundle.js --format=iife --platform=browser --target=es2020 --loader:.css=css', { cwd: wt, stdio: 'ignore' });
+execSync('npx esbuild src/doc-editor-entry.js --bundle --outfile=public/doc-editor.js --format=esm --platform=browser --target=es2020', { cwd: wt, stdio: 'ignore' });   // r6: the Link form lives in the doc editor's lazy bundle — the tree's own, never a stale build
 execSync('npx esbuild --bundle --format=iife --global-name=__dyProbe --platform=browser --target=es2020 --outfile=public/dy-probe.js', { cwd: wt, stdio: ['pipe', 'ignore', 'ignore'], input: "export { showConfirmDialog } from './src/lib/utils.js'; export { showTokenOnce, showPairCodeOnce } from './src/lib/channel-webhook.js'; export { showReachDialog } from './src/lib/channel-reach-editor.js'; export { openAccountModelsDialog } from './src/lib/account-models.js'; export { pathField } from './src/lib/path-field.js'; export { showInstallDialog } from './src/lib/desktop-app-launcher.js'; export { openAgentHelp } from './src/lib/app-install-dialog.js';" }); // (r3: the real webhook token / code dialogs and Reach & policy — sheets of the probe's own shell; r4: the real Models dialog, path field and install form; r5: the helper form)
 
 const port = await freePort();
@@ -1188,6 +1192,96 @@ await step('㊺', async () => {
     return { ...pre, focusins: n, ms, threw, now: document.activeElement && document.activeElement.className }; })()`);
   check('㊺ the focus inside a form standing behind; a script focus moves WITHIN it ⇒ ONE focusin, the move allowed (37c1b566: the guard sent it back to the field it came from, whose focusin sent it back again — 43 focusins here and the move refused; the acceptance\'s run overflowed the stack)', r.inside && !r.activeIsA && r.focusins === 1 && !r.threw && r.now === 'dy-fg2', r);
   await closeForms(); await sleep(300);
+});
+
+// ── ㊻ (r6) the doc editor's Link form: its subject is the LINK — Link on «design notes», then (that form open) on «tracker» ⇒ two forms, the second edits tracker ──
+await step('㊻', async () => {
+  const LP = path.join(home, 'dy-links.md');
+  fs.writeFileSync(LP, '# Links\n\nRead the [design notes](https://example.com/design) before you start.\n\nThe [tracker](https://tracker.example.org/board) has the rest.\n');
+  await evalJs(`(() => { app.openFile(${J(LP)}, 'dy-links.md', {}); return true; })()`);
+  const up = await waitFor(`(() => { for (const w of app.wm.windows.values()) { const pm = w.content && w.content.querySelector('.doc-page .ProseMirror'); if (pm && pm.querySelectorAll('a[href]').length >= 2) return true; } return false; })()`, 20000);
+  await sleep(800);
+  const tagA = (txt, name) => evalJs(`(() => { document.querySelectorAll('[data-dy="${name}"]').forEach((x) => { delete x.dataset.dy; }); const a = [...document.querySelectorAll('.doc-page .ProseMirror a')].find((x) => x.textContent === ${J(txt)}); if (!a) return false; a.dataset.dy = ${J(name)}; return true; })()`);
+  const ctrlK = async () => { await cdp('Input.dispatchKeyEvent', { type: 'rawKeyDown', modifiers: 2, key: 'k', code: 'KeyK', windowsVirtualKeyCode: 75, nativeVirtualKeyCode: 75 }); await cdp('Input.dispatchKeyEvent', { type: 'keyUp', modifiers: 2, key: 'k', code: 'KeyK', windowsVirtualKeyCode: 75, nativeVirtualKeyCode: 75 }); await sleep(700); };
+  const forms = `[...document.querySelectorAll('.doc-link-dialog')].map((d) => ({ href: (d.querySelector('input.doc-link-href') || {}).value, text: (d.querySelector('input.doc-link-text') || {}).value }))`;
+  await tagA('design notes', 'dy-la'); await realClick('[data-dy="dy-la"]'); await sleep(400);
+  await ctrlK();
+  const first = await evalJs(forms);
+  // the form yields: the person goes back into the document, the caret on the OTHER link, and asks again
+  await tagA('tracker', 'dy-lb'); await realClick('[data-dy="dy-lb"]'); await sleep(500);
+  await ctrlK();
+  const second = await evalJs(forms);
+  await evalJs(`(() => { const d = [...document.querySelectorAll('.doc-link-dialog')].find((x) => (x.querySelector('input.doc-link-text') || {}).value === 'tracker') || [...document.querySelectorAll('.doc-link-dialog')].pop(); const i = d.querySelector('input.doc-link-href'); i.focus(); i.select(); return true; })()`);
+  await typeText('https://example.com/NEW'); await key('Enter', 'Enter', 13); await sleep(900);
+  const links = await evalJs(`[...document.querySelectorAll('.doc-page .ProseMirror a')].map((a) => [a.textContent, a.getAttribute('href')])`);
+  // the first link asked again ⇒ ITS form, raised (one form for one link)
+  await tagA('design notes', 'dy-la'); await realClick('[data-dy="dy-la"]'); await sleep(400);
+  await ctrlK();
+  const again = await evalJs(forms);
+  await shot('46-doc-link-two');
+  console.log('  ㊻ ' + J({ first, second, links, again }));
+  check('㊻ Link on «design notes», then — its form open — on «tracker» ⇒ a second form, prefilled with TRACKER\'s address, beside the first; its Apply rewrites «tracker», «design notes» untouched; «design notes» asked again ⇒ its own form raised, one per link (0ae9fbcb: the key was the document — the second ask raised the first form, still showing design\'s address, and Apply rewrote «design notes»)',
+    up && first.length === 1 && first[0].href === 'https://example.com/design' && second.length === 2 && second.some((f) => f.text === 'tracker' && f.href === 'https://tracker.example.org/board')
+    && links.some(([t, h]) => t === 'tracker' && h === 'https://example.com/NEW') && links.some(([t, h]) => t === 'design notes' && h === 'https://example.com/design') && again.length === 1 && again[0].text === 'design notes', { up, first, second, links, again });
+  await closeForms(); await evalJs(`(() => { for (const w of [...app.wm.windows.values()]) if (w.content && w.content.querySelector('.doc-page')) { w.onCloseRequest = null; app.wm.closeWindow(w.id); } return true; })()`); await sleep(400);
+});
+
+// ── ㊼ (r6) the design sheets' containing block is DECLARED: absolute in their fixed overlay — with the overlay's backdrop-filter gone (Safari before 18) they still stand on the keyboard ──
+await step('㊼', async () => {
+  await cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+  await sleep(900);
+  const out = {};
+  for (const cls of ['design-composer-sheet', 'design-sheet']) {
+    await evalJs(`(() => { const sh = __dy.api().createModalShell({ id: 'r6-${cls}', title: 'Sheet', kind: 'form', escapeToClose: true, dialogClass: '${cls}' }); const f = document.createElement('div'); f.className = 'design-composer-foot'; const b = document.createElement('button'); b.className = 'btn-create dy-r6-send'; b.textContent = 'Send'; f.append(b); sh.body.append(f); window.__dyR6Sheet = sh; return true; })()`);
+    await waitFor(`!!document.getElementById('plugin-dyprobe-r6-${cls}')?.classList.contains('form-sheet')`, 8000);
+    await sleep(400);
+    await evalJs(`(() => { Object.defineProperty(window.visualViewport, 'height', { configurable: true, get: () => 500 }); window.visualViewport.dispatchEvent(new Event('resize')); return true; })()`);
+    await sleep(700);
+    out[cls] = await evalJs(`(() => { const sh = window.__dyR6Sheet, ov = sh.dialog.parentElement; const R = (e) => { const q = e.getBoundingClientRect(); return [Math.round(q.top), Math.round(q.bottom)]; };
+      const read = () => ({ dialog: R(sh.dialog), send: R(sh.dialog.querySelector('.dy-r6-send')) });
+      const withFilter = read(); const cs = getComputedStyle(sh.dialog);
+      const o = { position: cs.position, offsetParentIsOverlay: sh.dialog.offsetParent === ov, overlayPosition: getComputedStyle(ov).position, withFilter };
+      ov.style.backdropFilter = 'none'; ov.style.webkitBackdropFilter = 'none';   // the engine that drops the unprefixed property
+      o.filterNow = getComputedStyle(ov).backdropFilter; o.withoutFilter = read(); return o; })()`);
+    await shot(`47-${cls}-no-filter`);
+    await evalJs(`(() => { delete window.visualViewport.height; window.visualViewport.dispatchEvent(new Event('resize')); window.__dyR6Sheet.close(); return true; })()`);
+    await sleep(400);
+  }
+  console.log('  ㊼ ' + J(out));
+  const on = (o) => o.position === 'absolute' && o.offsetParentIsOverlay && o.overlayPosition === 'fixed' && o.filterNow === 'none' && Math.abs(o.withoutFilter.dialog[1] - 500) <= 8 && o.withoutFilter.send[1] <= 500 && o.withoutFilter.dialog[0] >= 0 && Math.abs(o.withFilter.dialog[1] - 500) <= 8;
+  check('㊼ the design window\'s bottom sheets on the phone, keyboard up (344): each sheet\'s containing block is its FIXED overlay by declaration (position: absolute, offsetParent = the overlay) — with the overlay\'s backdrop-filter gone it still stands on the keyboard, Send above it (0ae9fbcb: position fixed, its containing block the filter\'s side effect — without it the composer fell to 727..844, under the keyboard)', on(out['design-composer-sheet']) && on(out['design-sheet']), out);
+  await closeForms();
+  await cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
+  await sleep(800);
+});
+
+// ── ㊽ (r6) Task Detail's «+ Add a path…» after an add ⇒ an empty box with its empty-box hint (never the added path's facts); a kept row is painted as the world is now ──
+await step('㊽', async () => {
+  for (const d of ['dy-addA', 'dy-addB']) fs.mkdirSync(path.join(home, d), { recursive: true });
+  fs.writeFileSync(path.join(home, 'dy-addB', 'a.txt'), 'x');
+  const row = (d) => ({ path: path.join(home, d), note: '', tell: null, tags: [], share: null });
+  const mk = await (await fetch(`${origin}/api/tasks`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: J({ title: 'DY add' }) })).json();
+  const tid = mk && mk.task && mk.task.id;
+  await (await fetch(`${origin}/api/tasks/${tid}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: J({ ctx: [row('dy-addA')] }) })).json();
+  await waitFor(`!!app.sidebar._taskById(${J(tid)}) && (app.sidebar._taskById(${J(tid)}).ctx || []).length === 1`, 10000);
+  await evalJs(`(() => { app.openTaskDetail(${J(tid)}, { tab: 'settings' }); return true; })()`);
+  await waitFor(`document.querySelectorAll('.ctx-row[data-row] .ctx-path-input').length === 1 && !!document.querySelector('.ctx-add-input')`, 10000);
+  await sleep(800);
+  const under0 = await evalJs(`(() => { const i = document.querySelector('.ctx-add-input'); i.dataset.dyOld = '1'; i.dataset.dy = 'dy-add'; return i.closest('.path-field').querySelector('.pf-under').textContent; })()`);
+  await realClick('[data-dy="dy-add"]');
+  await typeText(path.join(home, 'dy-addB'));
+  await sleep(1800);
+  const underTyped = await evalJs(`document.querySelector('.ctx-add-input').closest('.path-field').querySelector('.pf-under').textContent`);
+  await key('Enter', 'Enter', 13);
+  await waitFor(`(app.sidebar._taskById(${J(tid)}).ctx || []).length === 2 && document.querySelectorAll('.ctx-row[data-row] .ctx-path-input').length === 2`, 10000);
+  await sleep(2000);
+  const after = await evalJs(`(() => { const all = [...document.querySelectorAll('.ctx-add-input')]; const i = all[0]; const w = i && i.closest('.path-field'); const a = [...document.querySelectorAll('.ctx-path-input')].find((x) => x.value.endsWith('dy-addA')); return { n: all.length, parent: i && i.parentElement ? i.parentElement.className : null, value: i ? i.value : null, focused: !!i && document.activeElement === i, state: w ? w.dataset.state : null, under: w ? w.querySelector('.pf-under').textContent : null, rowA: a ? a.closest('.path-field').querySelector('.pf-under').textContent : null }; })()`);
+  await shot('48-add-row-after');
+  console.log('  ㊽ ' + J({ under0, underTyped, after }));
+  check('㊽ «+ Add a path…» typed ~/dy-addB, Enter, the row added (the tasks-updated repaint ran) ⇒ the add box is EMPTY, focused, its line the empty-box hint again (0ae9fbcb: the kept field kept «= ~/dy-addB ✓ 1 file» under an empty box, state ok)', /dy-addB/.test(underTyped) && after.value === '' && after.focused && after.under === under0 && after.state !== 'ok', { under0, underTyped, after });
+  check('㊽ the kept row A is painted against the world as it is now — it never says its existing folder «does not exist» after the repaint (0ae9fbcb: the kept field was never repainted)', after.rowA !== null && !/does not exist/.test(after.rowA), after);
+  await evalJs(`(() => { for (const w of [...app.wm.windows.values()]) if (w.element.querySelector('.ctx-path-input')) app.wm.closeWindow(w.id); return true; })()`); await sleep(400);
+  await fetch(`${origin}/api/tasks/${tid}`, { method: 'DELETE' });
 });
 
 // ── ⑲ the welcome never counts a form: the last chat closed with a form open, then the form — the empty desktop shows its welcome ──
