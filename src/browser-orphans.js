@@ -54,8 +54,15 @@ function daemonMark(env, configDirs) {
 function daemonsFromRows(rows) {
   const all = (Array.isArray(rows) ? rows : []).filter((r) => r && Number.isInteger(r.pid));
   const byPid = new Map(all.map((r) => [r.pid, r]));
-  const kids = (pid) => all.filter((r) => r.ppid === pid);
+  // lane ledger-dedup-law r12: the table indexed ONCE — its children by parent, its Xvfbs (each daemon filtered the WHOLE
+  // table for its children, its grandchildren and its Xvfb: O(daemons × processes) a call, and the keeper's census called
+  // it once more per daemon it had seen — ~100 ms of one loop turn over 18 daemons × 1 169 processes, 272 ms on a busier
+  // box: test-boot-loop-hold's law). The same answer, in the table's order.
+  const kidsOf = new Map();
+  for (const r of all) { let k = kidsOf.get(r.ppid); if (!k) kidsOf.set(r.ppid, (k = [])); k.push(r); }
+  const kids = (pid) => kidsOf.get(pid) || [];
   const isXvfb = (r) => /^Xvfb$/.test(base((r.argv || [])[0]));
+  const xvfbs = all.filter(isXvfb);
   const authOf = (r) => { const a = r.argv || []; const i = a.indexOf('-auth'); return i >= 0 ? String(a[i + 1] || '') : ''; };
   const isChrome = (r) => !isXvfb(r) && !/agent-browser/.test(base((r.argv || [])[0])) && !(r.argv || []).some((x) => /^--type=/.test(String(x)));
   // lane browser-daemon-survives-update: the Chrome's own endpoint (its DevTools port, its directory) off its argv
@@ -64,7 +71,7 @@ function daemonsFromRows(rows) {
   return daemons.map((d) => {
     const near = [...kids(d.pid), ...kids(d.pid).flatMap((k) => kids(k.pid))];
     const xa = d.env && d.env.XAUTHORITY ? String(d.env.XAUTHORITY) : '';
-    const xvfb = all.filter((r) => isXvfb(r) && (near.includes(r) || (xa && authOf(r) === xa)));
+    const xvfb = xvfbs.filter((r) => near.includes(r) || (xa && authOf(r) === xa));
     return {
       pid: d.pid, ppid: d.ppid, cdp: !!(d.env && d.env.AGENT_BROWSER_CDP), starttime: d.starttime == null ? null : d.starttime, startedAt: num(d.startedAt), env: d.env || {},
       chrome: near.filter(isChrome).map((r) => ({ pid: r.pid, starttime: r.starttime, port: Number(argOf(r, '--remote-debugging-port')) || null, dir: argOf(r, '--user-data-dir') })),

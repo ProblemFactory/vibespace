@@ -156,9 +156,9 @@ function eachLine(file, from, to, fn, { step = STEP_BYTES, limit = Infinity } = 
  *  read-back and its drain) — every whole line from `from` to the end of the file, read in `step`-byte slices (a line
  *  longer than a slice is read whole, up to LINE_MAX; bytes with no newline past it are no line) → {end, lineEnd, eof}:
  *  `lineEnd` = the place after the last whole line, `end` = where a next read starts (the file's end once `eof` — a torn
- *  tail included; else `lineEnd`; r11: `tail` = a torn tail's first ≤ 64 bytes). `limit`: stop at the first line end past `from + limit` (a drain's slice). A file that
+ *  tail included; else `lineEnd`; r12: `tail(buf, a, b, offset)` is handed a torn tail WHOLE, at the end — its kind is the caller's grammar's; r11 answered its first 64 bytes, and the set's reader judged a record by two of them). `limit`: stop at the first line end past `from + limit` (a drain's slice). A file that
  *  does not exist → {end: from, lineEnd: from, eof: true, missing: true}. `fn(buf, a, b, offset)` as eachLine's. */
-async function eachLineAsync(file, from, fn, { step = STEP_BYTES, limit = Infinity, io = null } = {}) {
+async function eachLineAsync(file, from, fn, { step = STEP_BYTES, limit = Infinity, io = null, tail = null } = {}) {
   const on = io || ((f, p) => p); // r9 (ledger-dedup-law): the caller's wrapper of each file call (usage-history `_holdIO`: bounded and said)
   // r10: an error names the FILE it read — FileHandle.read's errors carry no `path` (a read-back that failed mid-read was
   // said by its hold's key, no file of it)
@@ -173,7 +173,7 @@ async function eachLineAsync(file, from, fn, { step = STEP_BYTES, limit = Infini
         else { const b2 = Buffer.alloc(Math.min(LINE_MAX, buf.length * 2)); buf.copy(b2, 0, 0, carry); buf = b2; }
       }
       const { bytesRead } = await on(file, fh.read(buf, carry, buf.length - carry, pos + carry));
-      if (bytesRead <= 0) return { end: pos + carry, lineEnd, eof: true, ...(carry ? { tail: buf.toString('latin1', 0, Math.min(carry, 64)) } : {}) }; // r11: a torn tail's first bytes (its kind)
+      if (bytesRead <= 0) { if (carry && tail) tail(buf, 0, carry, pos); return { end: pos + carry, lineEnd, eof: true }; } // r12: a torn tail handed whole (r11: its first 64 bytes)
       const n = carry + bytesRead, last = buf.subarray(0, n).lastIndexOf(10);
       if (last < 0) { carry = n; continue; }
       for (let p = 0; p <= last;) { const nl = buf.indexOf(10, p); if (nl > p) fn(buf, p, nl, pos + p); p = nl + 1; }

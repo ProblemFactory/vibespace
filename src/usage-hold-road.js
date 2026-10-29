@@ -77,6 +77,44 @@ const HOLD_SLOW_MS = 10e3, HOLD_SLOW_AGAIN_MS = 60e3, HOLD_ANSWER_MS = 30e3, HOL
 const holdGenOf = (seq) => Math.floor(Number(seq) / HOLD_GEN_SPAN);
 const DROP_LINE_RIDS = 4096, DROP_COMPACT_MIN = 64 * 1024; // r6: rids per set line (≪ a MiB line); the set file rewritten past 4× its set (≥ 64 KiB)
 const dropLines = (tag, rids) => { let out = ''; for (let i = 0; i < rids.length; i += DROP_LINE_RIDS) out += JSON.stringify({ [tag]: rids.slice(i, i + DROP_LINE_RIDS) }) + '\n'; return out; };
+// r12: THE SET'S WRITER'S GRAMMAR — each record it writes is JSON.stringify of ONE kind, no spaces: {"gone":[rid,…]},
+// {"back":[rid,…]}, {"below":N}, {"retired":G}, {"checked":N}. A line is one of them, a record a write CUT (any proper
+// prefix of one — `setRecordCut`), a hole a crash left (NUL bytes), or NO RECORD: set aside (`_setAsideFile`), never a
+// throw (r11 threw `set-garbage`: a live generation's read-back failed for ever and its month waited, unacked).
+const SET_KINDS = new Map([['gone', 'rids'], ['back', 'rids'], ['below', 'n'], ['retired', 'n'], ['checked', 'n']]);
+const SET_ASIDE_DIR = '_set-aside'; // r12: data/usage-history/_set-aside — set files as they were, a line in them no record
+const SET_ASIDE_MAX = 64; // r12: files kept there; past it a set's bad lines are said (their first bytes), not copied
+const SET_BAD_MAX = 8; // r12: bad lines named per file (the rest counted)
+/** r12: is `t` a record the set's writer could have CUT — a proper prefix of one of its records, read by its grammar («{»,
+ *  «{"go», «{"gone":["h:x:a","h:x:», «{"below":1» …), never by two magic bytes (r11 took only «{"»: a record cut after its
+ *  first byte was garbage) (PURE). */
+function setRecordCut(t) {
+  const L = t.length; let i = 0;
+  if (t[i] !== '{') return false; if (++i === L) return true;
+  if (t[i] !== '"') return false; i++;
+  const q = t.indexOf('"', i);
+  if (q < 0) { const k = t.slice(i); for (const n of SET_KINDS.keys()) if (n.startsWith(k)) return true; return false; }
+  const kind = SET_KINDS.get(t.slice(i, q)); if (!kind) return false;
+  if ((i = q + 1) === L) return true;
+  if (t[i] !== ':') return false; if (++i === L) return true;
+  if (kind === 'n') { while (i < L && t[i] >= '0' && t[i] <= '9') i++; return i === L; }
+  if (t[i] !== '[') return false; i++;
+  for (let first = true; ; first = false) {
+    if (i === L) return true;
+    if (t[i] === ']') return i + 1 === L; // only its «}» missing
+    if (!first) { if (t[i] !== ',') return false; if (++i === L) return true; }
+    if (t[i] !== '"') return false; i++;
+    for (;;) { // a string's body, JSON.stringify's escapes
+      if (i === L) return true;
+      const c = t.charCodeAt(i);
+      if (c === 0x22) { i++; break; }
+      if (c < 0x20) return false;
+      if (c !== 0x5c) { i++; continue; }
+      if (++i === L) return true;
+      if (t[i] === 'u') { for (let k = 1; k <= 4; k++) { if (i + k === L) return true; if (!/[0-9a-fA-F]/.test(t[i + k])) return false; } i += 5; } else if ('"\\/bfnrt'.includes(t[i])) i++; else return false;
+    }
+  }
+}
 // r7: the bytes the set takes as its compacted lines (its compaction's bound is 4× that — r6 took 4× the FILE read back)
 const dropBytesOf = (set) => { let n = 0; for (const r of set) n += r.length + 3; return n + 12 * Math.ceil(set.size / DROP_LINE_RIDS); };
 // r7: a held row is a WHOLE line — the drain's own test, at the read-back too (a line torn by a crash mid-append is no row)
@@ -552,39 +590,119 @@ class UsageHoldRoad {
     const base = h.base + '.ndjson';
     for (const g of gens.filter((x) => x !== h.gen && !left.has(x)).sort((a, b) => a - b)) {
       const df = this._dropFile(key, g);
-      let st; try { st = await this._readSet(df); } catch (e) { console.warn(`[usage] the hold ${key}: the set of its generation ${g} could not be read (${(e && e.code) || (e && e.message) || e}${e && e.why ? ' — ' + e.why : ''}: ${path.basename(df)}) — kept, read again at the next start`); continue; }
+      const gone = () => this._dropFiles.set(key, (this._dropFiles.get(key) || []).filter((x) => x !== g));
+      // r12: AN OLDER GENERATION'S SET NEVER BECOMES THE MONTH'S LIVE ONE — one that cannot be read (EACCES, EIO, a
+      // directory) is SET ASIDE unread (moved, its bytes intact) and said; only one that cannot be moved either stays for
+      // the next start (r11 kept every unreadable one, garbage too: once the newer generation ended, the next start read
+      // it back as the month's live hold, failed for ever, and every batch of that month was answered unacked)
+      let st; try { st = await this._readSet(df); } catch (e) {
+        const code = String((e && e.code) || (e && e.message) || e).slice(0, 40), a = await this._setAsideFile(df, true);
+        if (a.copy) gone();
+        this._saidAside(h, g, df, a, { code, stale: true });
+        continue;
+      }
       if (st.torn) console.warn(`[usage] the hold ${key}: the set of its generation ${g} ends in a torn line (a write a crash cut — the rows it named were still held then) — read as no line`);
       const n = st.retired ? 0 : st.gone.size;
       if (n && this._emitShape({ kind: 'dropped', host: h.host, hostName: h.hostName || h.host, shard: base, month: base.slice(7, 14), dropped: n, gen: g, unchecked: !st.checked, holdMax: this._holdMax() }) === false) continue;
-      if (await this._heldUnlink(df)) this._dropFiles.set(key, (this._dropFiles.get(key) || []).filter((x) => x !== g));
+      // r12: lines that are no record — the file SET ASIDE (moved whole, its bytes intact; the count said above is its
+      // records'), said once; past the bound it goes as a readable one does, its lines' first bytes said; one that
+      // cannot be moved stays (read past again at the next start — never a throw)
+      if (st.bad.length) {
+        const a = await this._setAsideFile(df, true);
+        this._saidAside(h, g, df, a, { st, stale: true });
+        if (a.copy) { gone(); continue; }
+        if (!a.over) continue;
+      }
+      if (await this._heldUnlink(df)) gone();
     }
   }
   /** r10: a generation's set file read → {gone, retired, checked, below, end, lineEnd, torn} — the read-back's own parse
    *  (`gone` adds, `back` removes, in their order; `checked`: the last `checked` record came after the last `gone` line).
-   *  r11: A SET FILE THAT IS NO SET FILE IS UNREAD — every line is one of its records, a record a write cut (a torn line:
-   *  `{"` and no whole JSON — a crash mid-append; the hold's next write ends it with a newline), or a hole a crash left (NUL
-   *  bytes, rowStart's rule); anything else throws `set-garbage`, its line named (the caller keeps the file and says it:
-   *  r10 read binary bytes or {"gone":"33"} as an empty set and unlinked it, nothing said). A torn line is no line —
-   *  `torn` (its rows were still held when it was cut: r7's order is the rows, then the set's line, then the unlinks). */
+   *  r11: every line is one of its records, a record a write cut, or a hole a crash left (NUL bytes, rowStart's rule).
+   *  r12: A LINE THAT IS NO RECORD NEVER BLOCKS — read BY THE WRITER'S GRAMMAR: a record of a kind it writes is used; a
+   *  proper prefix of one is a record a write CUT (`setRecordCut` — «{», a NUL run then «{», «{"go» …; r11 knew only «{"») and
+   *  is no line (`torn`: its rows were still held when it was cut — r7's order is the rows, then the set's line, then the
+   *  unlinks); NUL runs at either end of a line are a hole a crash left; ANYTHING ELSE (binary bytes, a line whose start a
+   *  crash zeroed, {"gone":"33"}, a kind a newer build writes) is listed in `bad` — {n: its line number, at: its offset,
+   *  why, head: its first bytes} — and read past: the caller SETS THE FILE ASIDE and says it (r11 threw `set-garbage` and
+   *  the live generation's read-back failed for ever: its acked rows never recorded, its month unacked). `records`: the
+   *  records read. Throws only what the disk throws (EACCES, EIO …). */
   async _readSet(df, gone = new Set()) {
     const r = { gone, retired: false, checked: false, below: 0 };
-    let n = 0, bad = null, torn = false;
-    const s = await LD.eachLineAsync(df, 0, (buf, a, b) => {
-      n++;
+    let n = 0, next = 0, cut = 0, records = 0;
+    const bad = [];
+    const line = (buf, a, b, off) => {
+      n += 1 + Math.max(0, off - next); next = off + (b - a) + 1; // its line number: the empty lines before it counted (one byte each)
+      const a0 = a;
       while (a < b && buf[a] === 0) a++; // a hole a crash left before the line
+      while (b > a && buf[b - 1] === 0) b--; // … or after it (a length a crash extended)
       if (a === b) return;
-      let j; try { j = JSON.parse(buf.toString('utf8', a, b)); } catch { j = undefined; }
-      if (Array.isArray(j && j.gone)) { for (const x of j.gone) r.gone.add(String(x)); r.checked = false; }
-      else if (Array.isArray(j && j.back)) for (const x of j.back) r.gone.delete(String(x));
-      else if (j && Number.isFinite(j.below)) r.below = Math.max(r.below, j.below);
-      else if (j && j.retired != null) r.retired = true;
-      else if (j && Number.isFinite(j.checked)) r.checked = true;
-      else if (j === undefined && buf[a] === 0x7b && buf[a + 1] === 0x22) torn = true; // a record a write cut
-      else if (!bad) bad = `its line ${n} is no record of a set`;
-    }, { io: this._ioOf('read-back') });
-    if (s.end > s.lineEnd) { const t = String(s.tail || '').replace(/^\0+/, ''); if (!t || t.startsWith('{"')) torn = true; else if (!bad) bad = 'its last bytes are no record of a set'; }
-    if (bad) throw Object.assign(new Error(`${path.basename(df)}: ${bad}`), { code: 'set-garbage', why: bad, path: df });
-    return { ...r, end: s.end, lineEnd: s.lineEnd, torn };
+      const t = buf.toString('utf8', a, b);
+      let j; try { j = JSON.parse(t); } catch { j = undefined; }
+      if (j && typeof j === 'object') {
+        if (Array.isArray(j.gone)) { for (const x of j.gone) r.gone.add(String(x)); r.checked = false; records++; return; }
+        if (Array.isArray(j.back)) { for (const x of j.back) r.gone.delete(String(x)); records++; return; }
+        if (Number.isFinite(j.below)) { r.below = Math.max(r.below, j.below); records++; return; }
+        if (j.retired != null) { r.retired = true; records++; return; }
+        if (Number.isFinite(j.checked)) { r.checked = true; records++; return; }
+      }
+      if (j === undefined && setRecordCut(t)) { cut++; return; } // a record a write cut: no line
+      if (bad.length >= SET_BAD_MAX) { bad.more = (bad.more || 0) + 1; return; }
+      bad.push({ n, at: off + (a - a0), why: j === undefined ? 'no record' : 'a record of no kind this build writes', head: JSON.stringify(buf.toString('latin1', a, Math.min(b, a + 48))) });
+    };
+    const s = await LD.eachLineAsync(df, 0, line, { io: this._ioOf('read-back'), tail: line });
+    return { ...r, end: s.end, lineEnd: s.lineEnd, torn: cut > 0, cut, bad, records };
+  }
+  /** r12: the set file `df` SET ASIDE as it is — moved (`move`: an older generation's, it goes) or copied (the live one's,
+   *  rewritten after) into data/usage-history/_set-aside, named `<file>.<UTC stamp>`, its bytes intact; past SET_ASIDE_MAX
+   *  files there none is made (`over`) → {copy} (the copy's file name) | {copy: null, over} | {copy: null, error}. On the hold's async road. */
+  async _setAsideFile(df, move) {
+    const dir = path.join(path.dirname(this.heldDir), SET_ASIDE_DIR);
+    try {
+      await this._holdIO('folder', dir, fs.promises.mkdir(dir, { recursive: true }));
+      const names = await this._holdIO('listing', dir, fs.promises.readdir(dir));
+      if (names.length >= SET_ASIDE_MAX) return { copy: null, over: names.length };
+      const stamp = new Date().toISOString().replace(/[-:]|\.\d+/g, '');
+      let copy = `${path.basename(df)}.${stamp}`;
+      for (let i = 2; names.includes(copy); i++) copy = `${path.basename(df)}.${stamp}-${i}`;
+      const to = path.join(dir, copy);
+      if (move) { await this._holdIO('set-aside', df, fs.promises.rename(df, to)); this._diskFiles.delete(df); }
+      else await this._holdIO('set-aside', df, fs.promises.copyFile(df, to, fs.constants.COPYFILE_EXCL));
+      return { copy };
+    } catch (e) { return { copy: null, error: String((e && e.code) || (e && e.message) || e).slice(0, 40) }; }
+  }
+  /** r12: the LIVE generation's set read with lines that are no record (`s.bad`): the file COPIED aside as it is (its bytes
+   *  intact), then REWRITTEN from what was read — the writer's own lines (`gone`, `below`, `retired`, `checked`; tmp +
+   *  rename, `_dropCompact`'s road) — and the hold goes on with it: its held rows drain, its batches are acked. A copy
+   *  that fails leaves the file as it is (read past again; never a rewrite that loses the bytes); past the bound it is
+   *  rewritten, the lines' first bytes said. Said once (`_saidAside`). */
+  async _setAsideLive(h, df, s) {
+    const a = await this._setAsideFile(df, false);
+    if (a.copy || a.over) {
+      const text = dropLines('gone', [...h.gone]) + (s.below ? JSON.stringify({ below: s.below }) + '\n' : '') + (s.retired ? JSON.stringify({ retired: h.gen }) + '\n' : '') + (s.checked ? JSON.stringify({ checked: h.gone.size }) + '\n' : '');
+      try {
+        if (!text) { if (!(await this._heldUnlink(df))) throw Object.assign(new Error('unlink'), { code: 'unlink' }); h.goneBytes = 0; }
+        else { await this._holdIO('compaction', df, fs.promises.writeFile(df + '.tmp', text)); await this._holdIO('compaction', df, fs.promises.rename(df + '.tmp', df)); h.goneBytes = Buffer.byteLength(text); }
+        h.goneTorn = false; h.compactAt = Math.max(DROP_COMPACT_MIN, 4 * h.goneBytes);
+      } catch (e) { await this._heldUnlink(df + '.tmp'); a.rewrite = String((e && e.code) || e).slice(0, 40); }
+    }
+    this._saidAside(h, h.gen, df, a, { st: s });
+  }
+  /** r12: a set file's lines that are no record — or an older generation's set that could not be read — SAID ONCE: a
+   *  journal line (the file, its lines, what was done) and the owner's notice (`set-aside`: the file, the line, the rest
+   *  kept and the line set aside — never «permissions»; r11 said «check the file's permissions» and waited for ever). An
+   *  unread set that could not be moved either is a journal line only (read again at the next start, as r10). */
+  _saidAside(h, g, df, a, { st = null, code = null, stale = false } = {}) {
+    const file = path.basename(df), base = h.base + '.ndjson', bad = st ? st.bad : [], nBad = bad.length + (bad.more || 0);
+    const lines = bad.map((x) => x.n).join(', ') + (bad.more ? ` (+${bad.more} more)` : '');
+    const what = st ? `line${nBad === 1 ? '' : 's'} ${lines} of ${file} (generation ${g}${stale ? ', an older one' : ''}) ${nBad === 1 ? 'is' : 'are'} no record of a set (${bad[0].why}, byte ${bad[0].at}: ${bad[0].head})` : `the set of its generation ${g} (an older one) could not be read (${code}: ${file})`;
+    const done = a.copy ? `set aside, its bytes intact, as ${SET_ASIDE_DIR}/${a.copy}` : a.over ? `not copied (${SET_ASIDE_DIR} holds ${a.over} files, its bound)` : `it could not be set aside (${a.error})`;
+    const then = !st ? (a.copy ? 'its count is not known' : 'kept, read again at the next start')
+      : stale ? (a.copy ? `its ${st.records} other record(s) read and said` : a.over ? `its ${st.records} other record(s) read and said; it goes` : 'read past those lines; the file kept, set aside at the next start')
+        : (a.copy || a.over) && !a.rewrite ? `the set rewritten from its ${st.records} record(s) — the hold goes on` : `read past those lines (the file kept as it is${a.rewrite ? `: its rewrite failed, ${a.rewrite}` : ''}; set aside at its next read) — the hold goes on`;
+    console.warn(`[usage] the hold ${h.key}: ${what} — ${done}; ${then}`);
+    if (!st && !a.copy) return;
+    this._emitShape({ kind: 'set-aside', host: h.host, hostName: h.hostName || h.host, shard: base, month: base.slice(7, 14), file, gen: g, lines: lines || null, aside: a.copy || null, over: a.over || null, code, error: a.error || a.rewrite || null, stale, read: st ? st.records : null });
   }
   /** The hold of (shard, host) → its record | NO_HOLD (nothing held; `create` makes the record) | null (a hold on disk is
    *  being read back — `.loading` on the record; the caller waits for it). A hold on disk is read back ONCE, on the async
@@ -659,6 +777,7 @@ class UsageHoldRoad {
     const s = await this._readSet(df, h.gone), checked = s.checked; // r9: `checked` — every dropped row checked (r10: `_readSet`, the one parse)
     h.below = Math.max(h.below, s.below); if (s.retired) h.retired = true;
     h.goneBytes = s.end; h.goneTorn = s.end > s.lineEnd; // a crash mid-append: the next line starts on a line of its own
+    if (s.bad.length) await this._setAsideLive(h, df, s); // r12: a line that is no record set aside — the hold goes on (r11: the read-back threw, for ever)
     const live = seqs.filter((q) => q >= h.below);
     // r8: a `retired` line is honoured only when `below` covers every segment of the generation (nothing live is left: its
     // end wrote `below` before each drained segment's unlink) — else it is no record of ours: the generation reads back
@@ -1271,4 +1390,4 @@ class UsageHoldRoad {
   _waitBigWarm() { return this._pendingLeft() > this._takeoverMax() ? this.warmSettled() : null; }
 }
 
-module.exports = { UsageHoldRoad };
+module.exports = { UsageHoldRoad, setRecordCut, SET_ASIDE_DIR, SET_ASIDE_MAX };
