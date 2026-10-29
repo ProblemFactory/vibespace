@@ -964,11 +964,11 @@ if (!probe) {
   if (!g) ok('§4i SKIP — pools unsupported on this platform', true);
   else {
     ok('§4i FRESH READING: the switch lands on m-spare (its window just landed), the probe of m-spare says spent again, m-ok can serve ⇒ the decision is re-made ONCE and the continue goes to m-ok — never into m-spare\'s wall', g.did === true && g.link === 'm-ok' && g.probed.length === 1 && g.probed[0] === 'm-spare', JSON.stringify(g));
-    const esrc = read('src/server/usage-pool-engine.js'), cut = '      if (tv && tv.usable !== true) maybePoolAutoSwitch(session, { now: at, force: true });\n';
-    const last = '      if (lv && lv.usable === false) {\n';
+    const esrc = read('src/server/usage-pool-engine.js'), cut = '        maybePoolAutoSwitch(session, { now: at, force: true });\n';
+    const last = '    const lv = pooled && !v.held ? linkHold(session, scope, model, v, at) : null;\n';
     ok('§4i RED CONTROL: the patches (the re-decision taken out — 9d53db09\'s gate; the fire\'s last check taken out — b552c972\'s) hit', esrc.includes(cut) && esrc.includes(last));
     if (esrc.includes(cut) && esrc.includes(last)) {
-      const r = await fire(MG.load('src/server/usage-pool-engine.js', esrc.replace(cut, '').replace(last, '      if (false) {\n'), 'no-redecide'));
+      const r = await fire(MG.load('src/server/usage-pool-engine.js', esrc.replace(cut, '').replace(last, '    const lv = null;\n'), 'no-redecide'));
       ok('§4i RED CONTROL: without the re-decision AND the last check the SAME fire continues into m-spare — the member its own fresh probe just called spent (the wall again)', r && r.did === true && r.link === 'm-spare', JSON.stringify(r));
       // THE FIRE'S LAST CHECK IS THE LINK'S MEMBER (acceptance r3): with the re-decision out, the belt alone still holds it
       const h = await fire(MG.load('src/server/usage-pool-engine.js', esrc.replace(cut, ''), 'no-redecide-belt'));
@@ -984,7 +984,7 @@ if (!probe) {
     const share = '  if (p && (p.pending || Date.now() - p.at <= 60e3)) return p.done || Promise.resolve();\n';
     ok('§4j RED CONTROL: the patch (a sibling gate does not await the in-flight probe — b552c972\'s stamp) hits', esrc.includes(share));
     if (esrc.includes(share)) {
-      const r = await fire(MG.load('src/server/usage-pool-engine.js', esrc.replace(share, '  if (p && (p.pending || Date.now() - p.at <= 60e3)) return Promise.resolve();\n').replace(last, '      if (false) {\n'), 'no-share'), { n: 2, probeDelay: 150 });
+      const r = await fire(MG.load('src/server/usage-pool-engine.js', esrc.replace(share, '  if (p && (p.pending || Date.now() - p.at <= 60e3)) return Promise.resolve();\n').replace(last, '    const lv = null;\n'), 'no-share'), { n: 2, probeDelay: 150 });
       ok('§4j RED CONTROL: a sibling that judges the pre-probe cache continues into m-spare (the wall its fresh probe names)', r && r.firedOn.some((f) => f.link === 'm-spare'), JSON.stringify(r && r.firedOn));
     }
     const af = await fire(null, { authFailOk: true });
@@ -992,7 +992,7 @@ if (!probe) {
     const excl = "      if (authOut.has(m.id)) {";
     ok('§4j RED CONTROL: the patch (the verdict without the switch\'s auth exclusion — b552c972) hits', esrc.includes(excl));
     if (esrc.includes(excl)) {
-      const r = await fire(MG.load('src/server/usage-pool-engine.js', esrc.replace(excl, '      if (false) {').replace(last, '      if (false) {\n'), 'no-authout'), { authFailOk: true });
+      const r = await fire(MG.load('src/server/usage-pool-engine.js', esrc.replace(excl, '      if (false) {').replace(last, '    const lv = null;\n'), 'no-authout'), { authFailOk: true });
       ok('§4j RED CONTROL: without it the verdict says «usable via m-ok» and the continue goes into m-spare — CONTINUED INTO THE WALL', r && r.did === true && r.link === 'm-spare', JSON.stringify(r && { did: r.did, link: r.link }));
     }
   }

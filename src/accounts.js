@@ -2382,15 +2382,16 @@ class AccountManager {
     // never our materialized long-lived token (pool-oat-materialize verify r1 F10): it is inference-only and
     // was never measured as a direct bearer — an oat-only row refuses the ⟳ / identity reads as before
     // …nor ANY long-lived token (acceptance r3 F4, login-expiry usageBearerOk): one planted without our mark is the same credential
+    // — known by its SHAPE, an access token with no refresh token beside it, never by its prefix (acceptance r4)
     const info = this.readSubCreds(id);
-    return info.oatFile || !usageBearerOk(info.accessToken) ? null : info.accessToken;
+    return info.oatFile || !usageBearerOk({ accessToken: info.accessToken, refreshToken: info.refreshable }) ? null : info.accessToken;
   }
   /** Why the folder's own token is no usage Bearer, by name — 'long-lived' (a long-lived token, ours or not) — or null */
   usageTokenRefusal(id) {
     const a = this.get(id);
     if (!a || this._acctType(a) !== 'subscription') return null;
     const info = this.readSubCreds(id);
-    return info.oatFile || (typeof info.accessToken === 'string' && info.accessToken && !usageBearerOk(info.accessToken)) ? 'long-lived' : null;
+    return info.oatFile || (typeof info.accessToken === 'string' && info.accessToken && !usageBearerOk({ accessToken: info.accessToken, refreshToken: info.refreshable })) ? 'long-lived' : null;
   }
 
   // ── Read-only probes of the CLI's own login state (NEVER written) ──

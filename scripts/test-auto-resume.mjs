@@ -205,10 +205,11 @@ const T0 = Date.now();   // the module refuses waits >26h out, so the clock must
   // (lane pool-silent-members R4: the gate's switch hands its ONE clock — `{ now }` — and runs BEFORE the probe of the
   // member it moves to, so the arm sits after that probe: the window grew from 400 to 1600 characters; acceptance r2: the
   // probe's fresh reading may re-decide once — `{ now: at, force: true }` — before the verdict, the window 2600; acceptance r3:
-  // EVERY gate re-decides on the reading after the ONE shared probe it awaited — 2 183 characters, the window unchanged)
-  ok('exhaustion arms it — AFTER trying the pool switch (seconds beat hours)', /maybePoolAutoSwitch\(session, \{ now \}\);[\s\S]{0,2600}getAutoResume\(\)\?\.armIfEnabled/.test(eng));
-  ok('…and the fresh reading re-decides ONCE when the member it moved to cannot serve after all — in EVERY gate, on the one shared probe it awaited, at the clock after it, the verdict at that same instant (acceptance r2 + r3)',
-    /if \(target\) await preFireProbe\(target, session\);[\s\S]{0,900}if \(pooled\) \{\n\s*at = Date\.now\(\);\n\s*const tv = quotaVerdictFor\(target, \{ model, session, now: at \}\);\n\s*if \(tv && tv\.usable !== true\) maybePoolAutoSwitch\(session, \{ now: at, force: true \}\);\n\s*\}\n\s*const v = quotaVerdictFor\(scope, \{ model, session, now: at \}\);/.test(eng));
+  // EVERY gate re-decides on the reading after the ONE shared probe it awaited — 2 183 characters, the window unchanged;
+  // acceptance r4: each gate in its own turn, and ONE forced re-decision per pool per reading — 2 941, the window 3200)
+  ok('exhaustion arms it — AFTER trying the pool switch (seconds beat hours)', /maybePoolAutoSwitch\(session, \{ now \}\);[\s\S]{0,3200}getAutoResume\(\)\?\.armIfEnabled/.test(eng));
+  ok('…and the fresh reading re-decides ONCE when the member it moved to cannot serve after all — in EVERY gate, on the one shared probe it awaited, at the clock after it, the verdict at that same instant (acceptance r2 + r3); ONE forced re-decision per pool per reading, the rest read its result (acceptance r4)',
+    /if \(target\) await preFireProbe\(target, session\);[\s\S]{0,1600}if \(pooled\) \{\n\s*at = Date\.now\(\);\n\s*const tv = quotaVerdictFor\(target, \{ model, session, now: at \}\);[\s\S]{0,800}if \(tv && tv\.usable !== true && !\(rec && rec\.redecided && rec\.redecided\.has\(scope\)\)\) \{\n\s*if \(rec\) \(rec\.redecided \|\| \(rec\.redecided = new Set\(\)\)\)\.add\(scope\);\n\s*maybePoolAutoSwitch\(session, \{ now: at, force: true \}\);\n\s*\}\n\s*\}\n\s*const v = quotaVerdictFor\(scope, \{ model, session, now: at \}\);/.test(eng));
   // round 4: it disarms, and it says it is NOT proof of work — a passive
   // reading may not clear the loop breaker (the full classification table for
   // every noteRecovered caller is pinned in test-auto-resume-loop §5)

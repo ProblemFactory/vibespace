@@ -40,7 +40,7 @@ const quotaModel = require('./quota-model.js');
 const { authoritativeScopesOf } = quotaModel;
 
 const probeLog = require('./server/usage-probe-log.js'); // the raw /usage probe ring (2.369.109)
-const { usageBearerOk } = require('./login-expiry.js'); // PURE: THE USAGE BEARER LAW — the CLI's own login token, never a long-lived one (acceptance r3)
+const { usageBearerOk } = require('./login-expiry.js'); // PURE: THE USAGE BEARER LAW — the CLI's own login token (a refresh token beside it), never a long-lived one (acceptance r3/r4)
 const { unplaceableText } = require('./account-pool-auto.js'); // PURE: the roster's words — ⟳ says the SAME sentence for the same fact (acceptance r3)
 const { probeFailWhy, probeWhyText, probeEligibility, isUnprobeable, notProbedWords, panelAnswerClass, OAT_FOLDER_NO_PANEL } = require('./auto-cli-model.js'); // PURE: may the probe PROVE this row, a failed probe's reason + THE ONE scrub (lane auto-cli-oat-unprobeable)
 // THE PANEL PROBE'S ARGV (B-9b40): `/usage` and no MCP server at all. Measured on
@@ -164,7 +164,7 @@ function getOAuthToken(callback) {
   // its own session activity — the next poll picks up the fresh token. (60s
   // skew so we don't use a token about to expire mid-request.)
   const creds = _readOAuthCreds();
-  const token = (usageBearerOk(creds?.accessToken) && (!creds.expiresAt || Date.now() < creds.expiresAt - 60000))
+  const token = (usageBearerOk(creds) && (!creds.expiresAt || Date.now() < creds.expiresAt - 60000))
     ? creds.accessToken
     : null;
   if (callback) { callback(token); return; }
