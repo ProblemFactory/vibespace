@@ -2020,7 +2020,7 @@ class MessageManager extends MessageWindow {
       // msgId already has a bubble is that bubble (the live send's or the copy's), and the CLI's own record of those words
       // a little later (the turn they ran as, a held frame drained, a kept frame's interrupted follow-up) claims the copy.
       if (raw._fromWebui && raw.msgId && this.userMessageIds.has(String(raw.msgId)) && (raw.webui_copy || this._webuiCopies.has(String(raw.msgId)))) return;
-      if (!raw._fromWebui && !raw.origin && this._claimWebuiCopy(normalizedContent, raw.uuid, emit)) return;
+      if (!raw._fromWebui && !raw.origin && this._claimWebuiCopy(normalizedContent, raw.uuid, emit)) { this._turnStartPending = true; return; } // seam touch-chip-cause × claude-steer: the copied frame DELIVERED as a turn's prompt — that turn opens at its next record
       // AN isMeta COMPANION LINE IS NEVER THE PERSON'S MESSAGE (lane claude-steer-inject r5, both CLI builds): the CLI's own
       // lines to the model — «[Image source: /tmp/…]» beside a pasted picture — drew an extra «You» bubble after every
       // restart. A dim note, no turn of its own; a record the person typed (promptSource / ours) or one with an origin stays itself.
@@ -2031,6 +2031,7 @@ class MessageManager extends MessageWindow {
       // Use original msgId if present (for dedup with client-side local preview)
       const msg = this._create({ role: 'user', status: 'complete', content: normalizedContent, turnIndex: this.turnIndex });
       if (raw.webui_copy && raw._fromWebui && raw.msgId) {
+        msg.midTurn = true; // seam touch-chip-cause × claude-steer: a copy is made only of a MID-TURN frame — it entered a running turn
         this._webuiCopies.set(String(raw.msgId), { cliUuid: typeof raw.cliUuid === 'string' && raw.cliUuid ? raw.cliUuid : null, id: msg.id, handNo: Number.isFinite(raw.handNo) ? raw.handNo : null });
         if (this._webuiCopies.size > 32) this._webuiCopies.delete(this._webuiCopies.keys().next().value);
       }
