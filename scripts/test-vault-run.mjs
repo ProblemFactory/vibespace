@@ -1108,15 +1108,15 @@ console.log('⑪ THE OWN ROAD (lane vault-agent-own) — what an agent stored it
   const rn1 = wr ? await runAnswered(wr, nodeArgs, { answer: 'once' }) : null, rn2 = wr ? await runAnswered(wr, nodeArgs, { answer: 'deny' }) : null;
   ok(nD === 1 && !!rn1 && rn1.r.ok && !!rn2 && !rn2.card && rn2.r.ok, 'RED COPY (round 2): a door reading the local rule on a cluster runs the SAME node -e again with NO card after one plain 允许 — the shipped door asks (above)', { n: nD, second: rn2 && (rn2.r.by || rn2.r.code), card: rn2 && !!rn2.card });
   if (wr) wr.vault.lock('door');
-  // a blind shape «always» IS offered for (a known tool naming its host, a routing flag): «always» needs the second password,
-  // then the shape runs with no card — until a LOCK ends the 8-hour «always»
+  // round 25 (the vault-use-grants seam ruling): an OPAQUE route (curl --resolve remaps the destination off the named host — a routing flag, `blind`) never offers «always» — the card is once / deny only, and the SAME shape draws its OWN card again (an opaque destination is never a standing pass; vault-use-grants' rule stands at int-C)
   const kyArgs = ['--env', `T=${MINT}`, '--', 'curl', '-s', '--resolve', 'api.example.com:443:127.0.0.1', 'https://api.example.com/v1/login'];
   const k1 = await runAnswered(w, kyArgs, { answer: null });
-  const kNo = k1.card ? w.door.answer(k1.card.action.askId, { answer: 'always', ttl: '8h' }) : null;
-  const kYes = k1.card ? w.door.answer(k1.card.action.askId, { answer: 'always', ttl: '8h', reauthed: true }) : null;
-  const k1r = await k1.r, k2 = await w.door.run({ caller: w.caller, args: kyArgs, cwd: w.work });
-  ok(!!k1.card && k1.card.action.always === true && kNo && kNo.code === 'reveal_needs_password' && kYes && kYes.ok && k1r.ok && k1r.by === 'always' && k2.ok && k2.by === 'always' && !leaks((k1r.stdout || '') + (k2.stdout || ''), MINT_V).length,
-    'a blind shape with «always» on offer (curl --resolve): «always» without the second password is refused, with it the run goes and the same shape runs again with NO card (allowedBy always)', { always: k1.card && k1.card.action.always, no: kNo && kNo.code, by: [k1r.by || k1r.code, k2.by || k2.code] });
+  const kNoAlways = k1.card ? w.door.answer(k1.card.action.askId, { answer: 'always', ttl: '8h', reauthed: true }) : null;   // «always» is not on offer for an opaque route (even with the second password)
+  const k1a = k1.card ? w.door.answer(k1.card.action.askId, { answer: 'once' }) : null;   // once is
+  const k1r = await k1.r;
+  const k2 = await runAnswered(w, kyArgs, { answer: 'deny' });   // the SAME opaque shape asks AGAIN — no standing pass was minted
+  ok(!!k1.card && k1.card.action.always === false && kNoAlways && kNoAlways.code === 'always_not_offered' && k1a && k1a.ok && k1r.ok && k1r.by === 'once' && !!k2.card && k2.card.action.always === false && !leaks(k1r.stdout || '', MINT_V).length,
+    'round 25 (the vault-use-grants seam ruling): an OPAQUE route (curl --resolve) never offers «always» — answering «always» is refused always_not_offered, the card is once / deny, the run goes by:once, and the same shape draws its OWN card again (an opaque destination is never a standing pass)', { always: k1.card && k1.card.action.always, kAlways: kNoAlways && kNoAlways.code, by: k1r.by || k1r.code, k2always: k2.card && k2.card.action.always });
   // round 17 (item 1): curl -K whose config is a $VAULT_FILE template the card RENDERS IN FULL ⇒ «always» IS offered (the owner
   // sees the agent's ONLY written input; the pass is keyed on the template bytes, already in the shape key). The owner's UniFi case.
   fs.writeFileSync(path.join(w.work, 'unifi.cfg'), 'header = "X-API-KEY: $VAULT{agent:conv-1/site-pw}"\nheader = "Accept: application/json"\ninsecure\nsilent\n');
@@ -1205,7 +1205,7 @@ console.log('⑪ THE OWN ROAD (lane vault-agent-own) — what an agent stored it
   await w.vault.unlock(PW);
   const passGone = await runAnswered(w, ['--env', `T=${MINT}`, '--', 'curl', '-s', 'https://elsewhere.example.net/x'], { answer: 'deny' });
   const alwaysGone = await runAnswered(w, kyArgs, { answer: 'deny' });
-  ok(!!passGone.card && !!alwaysGone.card, 'after the lock the host pass is gone — that host asks again — and so is the 8-hour «always» of the blind shape', [!!passGone.card, !!alwaysGone.card]);
+  ok(!!passGone.card && !!alwaysGone.card, 'after the lock the host pass is gone — that host asks again — and the opaque route (curl --resolve) asks its own card as it always does (it never held a standing pass)', [!!passGone.card, !!alwaysGone.card]);
   // THE REQUEST, THE LIST, THE OWNER'S CARD
   const q = w.door.request({ caller: { ...w.caller, scope: 'conv-1' }, entry: OWN, purpose: 'push the tag' });
   ok(q.ok && q.already === 'own' && !q.minted && !(w.userTodos.snapshot().open || []).some((x) => x.action && x.action.type === 'vault-grant-ask'), 'a request for its own entry ⇒ already: own — no card in For you (the owner is never asked for what it stored itself)', q);

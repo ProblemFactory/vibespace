@@ -866,7 +866,7 @@ function shapeOf(run) {
   const userinfo = !!(row && kind === 'tool') && routeWords.some(urlUserinfo);   // round 18/19 (item 1 + MINOR): a credential-carrying http(s) URL in a ROUTE word (a -R/--repo/--hostname/GH_HOST/GH_REPO value, a repo spec, a gh api/<url> positional, a curl target) ⇒ url_userinfo; judged on route words ONLY — a userinfo URL quoted in a --body / -d body is a mention, never contacted, never refused
   const bigTpl = run.files.find((f) => f.template != null && typeof f.text === 'string' && bytesOf(f.text) > TEMPLATE_CARD_MAX);   // round 18 (item 2): ANY template (a config flag, a body, a positional, a -d value) past the card render bound ⇒ card_too_long — ONE verdict, never a note that hides it
   const cardTooLong = bigTpl ? { name: bigTpl.name, template: bigTpl.template, bytes: bytesOf(bigTpl.text) } : null;
-  const noAlways = kind !== 'tool' ? kind : !known || !hosts.size || unread ? 'unknown-destination' : row.runsProject ? 'runs-project-code' : configFile && !(configShown && !configReads) ? 'config-file' : run.programWritable ? 'program-writable' : null;
+  const noAlways = kind !== 'tool' ? kind : !known || !hosts.size || unread ? 'unknown-destination' : row.runsProject ? 'runs-project-code' : configFile && !(configShown && !configReads) ? 'config-file' : keyed.length > 0 ? 'opaque-route' : run.programWritable ? 'program-writable' : null;   // round 25 (the vault-use-grants seam ruling): an argv routing flag (--unix-socket / --proxy / ssh -oProxyCommand / wget -e use_proxy|http_proxy — all in `keyed`, all making `blind` true) routes the connection off every named host ⇒ an OPAQUE destination, never a standing pass («always» withheld, as the config reader already does for a template's route directive)
   return {
     v: SHAPE_V, tool: run.tool, name: run.name, kind, sub, flags: [...flags].sort(), args, hosts: [...hosts].sort(), routeHosts: [...routeHosts].sort(), mentions, badHost, userinfo, cardTooLong, configReads,
     entries: run.refs.map((r) => r.ref).sort(), injection: [...run.injection].sort(), env: run.plainEnv.map((e) => `${e.name}=${e.value}`).sort(), keyed: keyed.sort(),
@@ -964,6 +964,7 @@ function alwaysWhyOf(shape) {
     case 'program-writable': return 'program-writable';
     case 'runs-project-code': return 'program-writable';   // the code that runs is not fixed either — the same promise «always» cannot make
     case 'config-file': return 'config-reads';
+    case 'opaque-route': return 'opaque-route';
     default: return 'destination-unknown';                  // a non-'tool' kind (a shell / an interpreter): where it sends cannot be told
   }
 }
