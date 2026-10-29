@@ -2158,7 +2158,7 @@ router.post('/api/agent/browser/login', async (req, res) => {
     const s = f.session || {};
     const cid = require('../claude-lock-capture.js').addressableId(s);
     const r = await D.fillLogin(t, { origin: word(body.origin, 300), user: word(body.user, 200), newUser: word(body.newUser, 200), generate: body.generate === true, submit: body.submit === true,
-      facts: { conversationKeys: Array.isArray(f.conversationKeys) ? f.conversationKeys : [], groupIds: Array.isArray(f.taskIds) ? f.taskIds : [], groupsUnreadable: !!f.groupsUnreadable }, conv: cid ? String(cid) : f.sessionId, actor: String(s.webuiName || s.name || '').slice(0, 80) || null });
+      facts: { conversationKeys: Array.isArray(f.conversationKeys) ? f.conversationKeys : [], groupIds: Array.isArray(f.taskIds) ? f.taskIds : [], groupsUnreadable: !!f.groupsUnreadable }, conv: cid ? String(cid) : f.sessionId, actor: String(s.webuiName || s.name || '').slice(0, 80) || null, owners: [cid, f.sessionId].filter(Boolean).map(String) });   // owners: lane vault-agent-own — its durable id and its registered one (a login it stored itself)
     const text = require('../peer-text.js').toAgentText(BL.loginText(r), { max: BL.TEXT_MAX });
     if (!r.ok) return res.status(STATUS[r.code] || 409).json({ error: text, code: r.code, ...(r.grant ? { grant: r.grant } : {}) });
     try { ctx.traceDialogAct?.({ sessionId: f.sessionId, profileId: t.ephemeral ? null : t.profileId, action: 'login', dialog: { type: 'login', message: r.origin } }); } catch (e) { console.warn('[browser-login] the trace row was not written — ' + (e && e.message)); }

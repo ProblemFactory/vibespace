@@ -14,20 +14,28 @@ credential into any of them.
 ```
 vibespace-vault [status]            the state: unlocked / LOCKED / not set up
 vibespace-vault lock                lock it now (a suspected leak, the end of a sensitive task)
-vibespace-vault totp <name>         the CURRENT two-step code of an entry the user granted this conversation — never its seed
+vibespace-vault totp <name>         the CURRENT two-step code of an entry you added (totp add) or the user granted you — never its seed
+vibespace-vault totp add <name> --from-file <0600 file> | --stdin
+                                    store a two-step seed you hold (the otpauth:// link or the seed) as a two-step entry
+vibespace-vault login add <origin> --user <name> --from-file <0600 file> | --stdin [--totp <name>]
+                                    store a website login you hold (its password) — the browser kernel fills it
 vibespace-vault mint <name> [--length 24] [--charset ascii-printable|alnum|digits] [--for <host/service>]
                                     the HUB makes a random secret in YOUR namespace and seals it — you never see it
 vibespace-vault put <name> --from-file <0600 file> | --stdin
                                     seal a value you ALREADY have (never on the command line)
 vibespace-vault run [--env NAME=vault://…]… [--file NAME=vault://…|@<template>]… [--stdin vault://…] [--timeout <s>] -- <command…>
                                     run a command with a stored secret you never see
-vibespace-vault list                what you may use in a run: entries the user opened for runs, or granted to you
+vibespace-vault list                what you may use in a run: your own entries, entries the user opened for runs or granted to you
 vibespace-vault request <vault://…> --for "<purpose>"
                                     ask the user for an entry, with what you will run with it
 vibespace-vault request "<what you need>" --purpose "<why>" [--into <row>.<field> | --kind api-key|password|secret] [--name <label>] [--host <h>[,<h>…]]
                                     ask the user to PASTE a secret you do not have — a masked box in their For you tray
 vibespace-vault uses                your grants, your open requests, your own uses (entry, purpose, when, outcome, receipt)
 ```
+
+## When a run card goes unanswered
+
+If the user does not answer your run card within its minute, your `vibespace-vault run` is refused `ask_expired` — but the card does **not** disappear. It stays in their For you tray as a *late* card for 24 hours, and if they allow it late, **your next run of that exact command passes once** with no new card (round 23: the pass is for THAT command — a different command, even of the same program, draws its own card); then it is spent — run it again and a fresh card appears. So on `ask_expired`, do not re-file a `vibespace-ask` or nag in chat: do other work and simply run the same command again later — a late allow will let that next run through. A late deny, a lock, or the 24 hours ends it.
 
 ## When the vault is locked
 
@@ -50,7 +58,9 @@ Ask again after the unlock.
   logins. `vibespace-vault list` prints the ones you may use. Each is **closed for runs until the user opens it** (⚙ System
   ▸ Vault…, the row's «Usable by agent runs» — for every conversation) **or answers your `request`** (for yours alone).
 - `vault://agent:<scope>/<name>` — YOUR OWN entries (`mint` / `put`): the scope is this conversation, added by the hub; you
-  choose only `<name>` (letters, digits, `.` `_` `-`). Another conversation's own entry is never yours (`use_not_granted`).
+  choose only `<name>` (letters, digits, `.` `_` `-`). **Yours to use with no switch, no grant and no card** — this
+  conversation runs with them without asking anyone (it keeps them if it ends and comes back). Another conversation's own
+  entry is never yours (`use_not_granted`).
 - **Never referenced by a run**: sign-in and login tokens, machine pairing tokens, channel tokens, passkeys, automation
   keys, the stores' own keys — each has its own door (`entry_has_its_own_door` names it).
 
@@ -123,7 +133,8 @@ for the entry. The answer then says `by: grant` / `by: policy`. Another host, or
   and how each is given, the hosts, the folder — **Allow once / Always for this shape / Deny** (允许一次 / 此形状总是 / 拒绝).
   *This shape = the tool + its flags + the hosts + the entries; positional arguments may change.* On a shared (cluster)
   instance every run asks unless the user chose «always»; on their own machine a shape allowed once runs again without
-  asking until the vault locks. «Always» is not offered for a shell, an interpreter, a tool whose destination is unknown,
+  asking until the vault locks. **Your own entries draw no card** (see «Your own secrets» below); a card that does come
+  says who stored each secret and why it asks. «Always» is not offered for a shell, an interpreter, a tool whose destination is unknown,
   or a program an agent could have written. The call waits up to 60 s for the answer.
 - **Refused by name, before anything runs**: a reference on the command line (`argv_refused`); a tool that prints,
   transforms, packs, copies or traces what it reads (`cat`, `echo`, `env`, `base64`, `xxd`, `tar`, `openssl`, `cp`, `tee`,
@@ -133,6 +144,7 @@ for the entry. The answer then says `by: grant` / `by: policy`. Another host, or
 - **It runs on this instance**, in your folder (the project, the temp folder or ~/Downloads), 120 s by default
   (`--timeout`, ≤ 600 s), output ≤ 2 MiB; the exit code is the command's. When it ends, anything it left running ends
   too. A remote conversation and `--on` are not here yet (`device_road_later`).
+- **The output scrubber replaces the VALUES you injected, never a field by its name, and never cuts the output** (round 21): it blanks each injected value and its common encodings (raw, base64, hex, URL, JSON-escaped, UTF-16, …) to `[vault:<store>/<row>/<field>]` wherever they appear — a JSON field the tool returns that happens to be named `key` / `auth` / `token` is the tool's own data and is left alone (it is not a secret unless its VALUE is one you injected), and the whole output arrives (a value cut off by the 2 MiB bound, a timeout or a lock shows a `[vault:…]` placeholder only over the trailing bytes that could be a half value — clean output at a cut arrives clean, never a dropped byte; round 23).
 - **The scrubber is a sieve, not a wall**: the output is scrubbed of the value's common spellings; a command that
   re-encodes it can still show it — the owner sees the whole command before it runs. (The spellings: itself, base64,
   base32, URL-encoded, JSON-, HTML- or backslash-escaped, hex, UTF-16, quoted-printable, coloured or wrapped. A part of a
@@ -151,7 +163,37 @@ for the entry. The answer then says `by: grant` / `by: policy`. Another host, or
   (`--from-file`) or **stdin** (`--stdin`) — **never the command line** (`value_in_argv`). Provenance: *agent stored · the
   agent saw the plaintext* — the copy in this transcript is **not** protected, so rotate the value when you can.
 
-Creating needs no approval (it costs nothing and leaks nothing); USING your own entry in a run follows the rules above.
+Creating needs no approval (it costs nothing and leaks nothing), and neither does USING your own entry: `run` with it asks
+nobody — no switch, no grant, no card (`list` names it «yours»; `request` for it answers that it is yours). The ONE question
+left is for a **minted** value: a run that sends it to a host other than the one you minted it `--for` (or to any host,
+without `--for`) shows the user ONE card naming both hosts; once allowed, that host is asked no more until the vault locks.
+A command whose destination cannot be told asks too: a shell, an interpreter, a config file, a routing flag, the project's
+own code, a client's shell escape (`psql -c '\! …'`, `psql -f <file>`, `mysql -e 'system …'`) — and a known tool naming no host the vault can read (`curl -s` with no address, `psql` over a service or
+`PGSERVICE`, `rclone remote:`, `git push origin`, `kubectl` on its kubeconfig): every tool the vault knows reaches the
+network, so «no host read» is not «no host». It asks ONCE per command shape on the user's own machine and EVERY run on a
+shared (cluster) instance, unless the user chose «Always for this shape» (where offered, behind the second password). A host
+written without `https://` (`curl api.example.com`), in a connection string (`psql "host=…"`), attached (`-hdb.example.com`)
+or in a host list (`postgresql://a,b/db`) is read like any other. So name the host, in the tool itself:
+`curl https://<its host>/…`, `psql -h <its host>` — never a script. Every use is still recorded (`uses`), scrubbed and refused
+by the same tables.
+
+## A seed or a login you hold — `totp add` and `login add`
+
+**A two-step seed or a website password goes in as ITS KIND — never as a free `put`.** The vault then does the work and you
+never need the value again:
+
+- **totp add `<name>`** — the `otpauth://` link or the base32 seed, from a **0600 file** (`--from-file`) or **stdin**
+  (`--stdin`), never the command line. It becomes the two-step entry `totp:<name>`, yours: `vibespace-vault totp <name>`
+  answers its CURRENT code to this conversation with no grant (another conversation needs the user's 用于…). You never read
+  the seed back. A name already in the vault is refused (`exists` — pick another).
+- **login add `<origin>` --user `<name>`** — a website login you were given: its password from a 0600 file or stdin,
+  optionally `--totp <name>` (a two-step entry YOU added with `totp add` — another is refused `bad_totp`). It becomes a web-login entry, yours: `vibespace-browser
+  login <origin> --user <name>` fills it on your tab (the kernel fills — you never see the password, nor the code) with no
+  grant; another conversation needs the user's 用于…. A login already kept for that account is never written over
+  (`login_exists`).
+
+Both answer the entry's name — never the value. The copy in this transcript is not protected: tell the user to rotate a
+password you were handed in the chat when they can.
 
 ## Every refusal and the door the user uses
 
@@ -160,13 +202,14 @@ Creating needs no approval (it costs nothing and leaks nothing); USING your own 
 | `vault_locked` | the vault is locked; the user has already been told | Unlock… at the top of the page (the second password) — wait |
 | `vault_not_set_up` | no second password yet — nothing is sealed | ⚙ System ▸ Vault… (set it up) |
 | `human_only` | a person's door (unlock, set up, change, show a value, open for runs, answer a card) | the page |
-| `entry_not_runnable` | the entry is closed for runs | the Vault window row's «Usable by agent runs» — or your `request` in For you |
+| `entry_not_runnable` | the entry is closed for runs (never one of your own) | the Vault window row's «Usable by agent runs» — or your `request` in For you |
 | `use_not_granted` | this conversation may not use it (another conversation's own entry, or a grant that ended) | your `request` in For you |
 | `entry_has_its_own_door` | a sign-in / pairing / channel token, a passkey, a key | the door the answer names (Channels panel, Accounts…) |
 | `entry_unknown` | no such entry (any more) | — (`vibespace-vault list`) |
 | `request_pending` · `request_quiet` | you already asked for that entry / the user said no a moment ago (10 minutes) | For you (the open question) |
 | `ask_pending` · `ask_denied` · `ask_expired` · `ask_unfiled` · `ask_changed` | the run card waits / said no / got no answer in 60 s / could not be filed / changed after it was shown — nothing ran | For you (the run card) |
-| `not_granted` (totp) | the user has not granted this two-step code to this conversation | the Vault window ▸ the code's 用于… |
+| `not_granted` (totp) | the user has not granted this two-step code to this conversation (a code you added yourself needs no grant) | the Vault window ▸ the code's 用于… |
+| `exists` · `login_exists` | `totp add` / `login add`: that name or that account is in the vault already | — (another name; the user deletes) |
 | `argv_refused` · `tool_prints_secrets` · `tool_wraps_another` · `env_refused` · `entry_too_short_to_mask` · `cwd_refused` | the run's plan is refused | — (change the command) |
 | `job_no_use` | a Background Work job never uses a stored secret | run it from the conversation |
 | `device_road_later` | a run on a paired machine is not here yet | — |

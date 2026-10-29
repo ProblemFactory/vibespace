@@ -8728,6 +8728,9 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
 .vw-group { display: flex; align-items: center; gap: 6px; padding: 12px 0 4px; border-bottom: 1px solid var(--border); font-size: 11px; letter-spacing: .04em; font-weight: 600; color: var(--text-dim); }
 .vw-group-n { color: var(--text-dim); font-weight: normal; }
 .vw-group-err { color: var(--bad-text); font-weight: normal; }
+.vw-group:has(.vw-group-help) { flex-wrap: wrap; }   /* lane vault-agent-own: «Kept by agents» says its rule under its name */
+.vw-group-help { flex-basis: 100%; font-weight: normal; letter-spacing: 0; line-height: 1.4; }
+.vw-own-rule { color: var(--text-dim); margin-top: 2px; font-size: 11px; line-height: 1.35; }   /* lane vault-agent-own: an agent row's rule — wraps, never clipped */
 .vw-empty { padding: 8px 0 10px; color: var(--text-dim); }
 /* lane vault-window-v2 (design q-047 §3.3): a row = name + meta · kind / provenance / state chips · last use · the value and its doors; 技术细节 under it */
 .vw-row { display: grid; grid-template-columns: minmax(200px, 1.2fr) minmax(170px, 1fr) 140px minmax(250px, auto); align-items: center; gap: 4px 10px; padding: 9px 0; border-bottom: 1px solid var(--border); }

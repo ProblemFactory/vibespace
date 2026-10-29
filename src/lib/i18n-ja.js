@@ -9741,6 +9741,11 @@ export default {
   "Integrations & channels": "連携とチャネル", // lane vault-window-v2
   "Machines & relay": "マシンとリレー", // lane vault-window-v2
   "Kept by agents": "エージェントの保管", // lane vault-window-v2
+  "Its own conversation uses it directly · other conversations cannot use it": "保存した会話はそのまま使える · 他の会話は使えない",
+  "Its own conversation uses it directly · other conversations need a grant": "保存した会話はそのまま使える · 他の会話は許可が必要",
+  "kept by {name}": "{name} が保存",
+  "What an agent kept itself: the conversation that kept it uses it without asking you; other conversations cannot use it": "エージェントが自分で保存したもの：保存した会話はあなたに聞かずに使えます。他の会話は使えません",
+  "Added by an agent itself — the agent saw the seed": "エージェントが自分で追加 · シードを見ている",
   "By you": "自分", // lane vault-window-v2
   "Scanned · by you": "スキャン · 自分", // lane vault-window-v2
   "Minted by the hub · never shown": "ハブが生成 · 未表示", // lane vault-window-v2
@@ -9897,6 +9902,8 @@ export default {
   "Default (Antigravity’s own setting)": "既定（Antigravity 自身の設定）",
   "{who} wants to run a command with a stored secret": "{who} が保管庫のシークレットを使ってコマンドを実行しようとしています", // lane vault-run-door
   "«Always» (with the second password) also turns on «Usable by agent runs» for this entry — it opens it for THIS conversation; any grants you paused stay paused.": "「常に許可」（本人確認が必要）を押すと、この項目の「エージェントの実行で使用可」もオンになります——開くのはこの会話だけで、あなたが一時停止した他の許可は停止したままです。", // lane vault-run-door
+  "{tool} on this machine changed: {from} → {to} (a root-owned tool — runs continue)": "このマシンの {tool} が変更されました：{from} → {to}（root 所有のツール——実行は継続します）", // lane vault-agent-own r18 (item 5): the drift FYI notice
+  "{tool} ({path}) is sealed by root ownership, so the vault trusts whatever root installs there. Its bytes changed since the last run ({from} → {to}) — root (a package roll or a reinstall) replaced it, and runs continue. This is a notice; nothing to do.": "このマシンの {tool}（{path}）は root 所有によって封印されているため、vault は root がそこにインストールするものをすべて信頼します。前回の実行以降、バイト列が変更されました（{from} → {to}）——root（パッケージ更新または再インストール）が置き換えたもので、実行は継続します。これは通知です。対応は不要です。", // lane vault-agent-own r19 (MINOR): the drift FYI DETAIL paragraph
   "Always for this shape": "この形は常に許可", // lane vault-run-door
   "The same tool, flags, hosts and secrets run without asking for 30 days — asks for the second password first": "同じツール・フラグ・ホスト・シークレットなら 30 日間確認せずに実行します — 先に第二パスワードを確認します", // lane vault-run-door
   "Allowed for this shape for 30 days": "この形を 30 日間許可しました", // lane vault-run-door

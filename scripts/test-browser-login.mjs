@@ -575,6 +575,61 @@ const fresh = (X) => X.evs.length;
   }
 }
 
+{
+  // lane vault-agent-own (the owner 2026-10-26: 「它自己存的使用为啥还要我的允许？」): A LOGIN THE AGENT HOLDS ITSELF (`vibespace-vault
+  // login add`) — sealed agent-typed with its owner (the storing conversation); THAT conversation's fill needs NO grant (its own
+  // paired two-step seed too), another conversation's is login_not_granted; no answer holds the password; an agent never
+  // writes over a kept login
+  const X = await world();
+  try {
+    const tid = X.k.targets()[0].targetId;
+    const PWA = pwOf('agent'), seed = T.base32Encode(crypto.randomBytes(20));
+    const ts = X.totp.agentAdd({ seed, name: 'shop-own' }, { owner: 'conv-1', actor: 'Chat One' });
+    const a = X.logins.addAgent({ origin: SITE, username: 'Ann', password: PWA, totpName: 'shop-own' }, { owner: 'conv-1', actor: 'Chat One' });
+    ok(ts.ok && a.ok && a.name === `web-login:${SITE}#ann` && !JSON.stringify([a, ts]).includes(PWA) && !JSON.stringify(ts).includes(seed), 'the agent stores a login it holds (and its own two-step seed): each answer names the entry — never the password, never the seed', [a, ts]);
+    const nm = X.logins.names().find((x) => x.name === a.name);
+    const row = VI.secretRowOf(X.eng.secretNames().find((s) => s.name === a.name));
+    ok(nm && nm.source === 'agent-typed' && nm.owner === 'conv-1' && row && row.provenance && row.provenance.prov === 'agent-typed' && row.provenance.owner === 'conv-1' && VI.provenanceOf(VI.rowOf('secrets', row)) === 'agent-put', 'provenance agent-typed (the chip of a password the agent typed into a page itself), its owner the storing conversation', { nm, prov: row && row.provenance });
+    X.k.detectCredentialForm({ targetId: tid, kind: 'login', otp: true });
+    await until(() => X.w.loginForms(PID).length === 1, 1500);
+    const other = await X.w.fillLogin(TGT, FILL({ conv: 'conv-2', owners: ['conv-2', 'sess-2'] }));
+    ok(!other.ok && other.code === 'login_not_granted' && X.k.filledCredentials().length === 0, 'ANOTHER conversation ⇒ login_not_granted (the owner grants it like any login) — nothing filled', other.code);
+    const mine = await X.w.fillLogin(TGT, FILL({ owners: ['conv-1', 'sess-1'] }));
+    const fc = X.k.filledCredentials().pop();
+    const tu = X.audit().filter((l) => l.event === 'vault-totp-use' && l.ok);
+    ok(mine.ok && eq(mine.filled, ['username', 'password', 'otp']) && fc && fc.count === 3 && !JSON.stringify(mine).includes(PWA) && tu.length === 1 && X.grants.rowsFor('browser-login', `${SITE}#ann`).length === 0 && X.grants.rowsFor('browser-login', '*').length === 0,
+      'ITS conversation ⇒ FILLED with NO grant row anywhere — the user name, the password and its own two-step code (the kernel fills; the agent sees none of them)', { mine, count: fc && fc.count });
+    ok(X.logins.addAgent({ origin: SITE, username: 'ann', password: pwOf('x') }, { owner: 'conv-1' }).code === 'login_exists' && X.logins.addAgent({ origin: 'http://shop.example.test', username: 'b', password: pwOf('y') }, { owner: 'conv-1' }).code === 'login_bad_origin' && X.logins.addAgent({ origin: SITE, username: 'c', password: pwOf('z') }, {}).code === 'unauthorized',
+      'an agent never writes over a kept login (login_exists); https only; no owner ⇒ unauthorized');
+    // THE REVIEW (HIGH): its own fill needs no grant — so the login may pair ONLY a two-step entry this conversation added itself
+    const ownerSeed = X.totp.addEntry({ seed: T.base32Encode(crypto.randomBytes(20)), name: 'owners-code' }, { who: 'test' });
+    const otherSeed = X.totp.agentAdd({ seed: T.base32Encode(crypto.randomBytes(20)), name: 'other-code' }, { owner: 'conv-2', actor: 'Chat Two' });
+    const pairOwner = X.logins.addAgent({ origin: SITE, username: 'dee', password: pwOf('d'), totpName: 'owners-code' }, { owner: 'conv-1' });
+    const pairOther = X.logins.addAgent({ origin: SITE, username: 'eve', password: pwOf('e'), totpName: 'other-code' }, { owner: 'conv-1' });
+    const pairNone = X.logins.addAgent({ origin: SITE, username: 'fay', password: pwOf('f'), totpName: 'no-such-code' }, { owner: 'conv-1' });
+    ok(ownerSeed.ok && otherSeed.ok && pairOwner.code === 'bad_totp' && pairOther.code === 'bad_totp' && pairNone.code === 'bad_totp' && /added itself/.test(pairOwner.error || ''),
+      'login add --totp names only a two-step entry THIS conversation added: the owner\'s seed, another conversation\'s, a missing one ⇒ bad_totp (nothing stored)', [pairOwner.code, pairOther.code, pairNone.code]);
+    // a record that pairs a seed it does not own (sealed straight in — an older entry, a forged box): its own fill fills NO code
+    const forged = BL.newRecord({ origin: SITE, username: 'gus', password: pwOf('g'), totpName: 'owners-code', source: 'agent-typed', now: 1, conversation: 'Chat One' });
+    X.eng.secretPut(`web-login:${SITE}#gus`, BL.textOf(forged), { kind: 'agent-typed', actor: 'Chat One', owner: 'conv-1' });
+    const before = X.audit().filter((l) => l.event === 'vault-totp-use' && l.ok).length;
+    const gus = await X.w.fillLogin(TGT, FILL({ user: 'gus', owners: ['conv-1', 'sess-1'] }));
+    const after = X.audit().filter((l) => l.event === 'vault-totp-use' && l.ok).length;
+    ok(gus.ok && gus.otpMissing === true && eq(gus.filled, ['username', 'password']) && after === before && X.audit().some((l) => l.event === 'vault-totp-use' && !l.ok && l.code === 'not_granted' && l.entry === 'totp:owners-code'),
+      'an OWN fill whose record pairs a seed the caller does not own: the user name and password, NO code (refused not_granted, audited) — the D3 cover is for a GRANTED login', { gus, before, after });
+    // RED: the same fill through a copy whose codeForLogin forgets the owners check fills the owner's code into the page
+    const VTS = fs.readFileSync(path.join(REPO, 'src/server/vault-totp.js'), 'utf8');
+    const noOwners = VTS.replace("if (Array.isArray(owners)) { const ow = ownerOf(entry); if (!ow || !owners.includes(ow)) return done(named('not_granted')); }", '');
+    const VTm = noOwners !== VTS ? MUT.load('src/server/vault-totp.js', noOwners, 'noowners') : null;
+    const totpM = VTm && VTm.create({ dataDir: X.d, vault: X.eng, log: () => { } });
+    const loginsM = totpM && L.create({ vault: X.eng, grants: () => X.grants, totpCode: (n, o) => totpM.codeForLogin(n, o) });
+    const formO = BL.formOf({ surfaceId: 'surf-otp-1', targetId: 'T1', pageOrigin: SITE, frameOrigin: SITE, kind: 'login', fields: [{ fieldId: 'f-o-1', type: 'username' }, { fieldId: 'f-o-2', type: 'password' }, { fieldId: 'f-o-3', type: 'otp' }], hasSubmit: true }, { now: 1 });
+    const planM = loginsM && loginsM.planFill({ forms: [formO], origin: SITE, user: 'gus', facts: ME, conv: 'conv-1', actor: 'Chat One', owners: ['conv-1'] });
+    const planR = X.logins.planFill({ forms: [formO], origin: SITE, user: 'gus', facts: ME, conv: 'conv-1', actor: 'Chat One', owners: ['conv-1'] });
+    ok(planM && planM.ok && eq(planM.filled, ['username', 'password', 'otp']) && planR.ok && planR.otpMissing === true && !planR.filled.includes('otp'), 'RED: a copy without the owners check fills the owner\'s two-step code on the agent\'s own road (the real one: no code)', { mutant: planM && planM.filled, real: planR.filled });
+  } finally { await X.close(); }
+}
+
 // ═══ ⑨ THE DOORS: the REAL route + the REAL CLI ═══
 console.log('⑨ the real route + the real CLI; the owner\'s card route; the Vault window\'s doors');
 {
@@ -658,6 +713,12 @@ console.log('⑩ RED controls — each mutant lets the bad fill through');
   const exactPort = SRC.replace("const here = (Array.isArray(entries) ? entries : []).filter((e) => e && e.origin === o);", "const here = (Array.isArray(entries) ? entries : []).filter((e) => e && hostOf(e.origin) === hostOf(o));");
   const M3 = exactPort !== SRC ? MUT.load('src/browser-login.js', exactPort, 'hostonly') : null;
   const p8443 = FORM({ pageOrigin: 'https://shop.example.test:8443', frameOrigin: 'https://shop.example.test:8443' });
+  // lane vault-agent-own: a copy that reads any caller as the login's owner fills an agent's own login for ANOTHER conversation
+  const anyOwner = SRC.replace("(Array.isArray(owners) ? owners : []).includes(kept.owner)", 'true');
+  const M4 = anyOwner !== SRC ? MUT.load('src/browser-login.js', anyOwner, 'anyowner') : null;
+  const ownEnt = [{ origin: SITE, user: 'alice', owner: 'conv-1' }];
+  ok(M4 && M4.fillVerdict({ forms: [FORM()], entries: ownEnt, grantRows: () => [], facts: ME, owners: ['conv-2'], vaultState: 'unlocked' }).ok === true && BL.fillVerdict({ forms: [FORM()], entries: ownEnt, grantRows: () => [], facts: ME, owners: ['conv-2'], vaultState: 'unlocked' }).code === 'login_not_granted' && BL.fillVerdict({ forms: [FORM()], entries: ownEnt, grantRows: () => [], facts: ME, owners: ['conv-1'], vaultState: 'unlocked' }).ok === true,
+    'RED: a copy that reads any caller as the owner fills an agent\'s own login for another conversation (the real one: its owner only, by name)');
   ok(M3 && M3.fillVerdict({ forms: [p8443], entries: ENT, grantRows: rowsFrom([ROW('*', [{ kind: 'everyone' }])]), facts: ME, vaultState: 'unlocked' }).ok === true, 'RED: a copy matching by host alone offers the :443 login on a :8443 page (the real one is exact to the port)');
 }
 

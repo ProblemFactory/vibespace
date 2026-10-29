@@ -26,6 +26,11 @@
 //   rows come back; the vault's door (`vs-vault-door`) opens the UNLOCK modal while locked and the window once unlocked;
 //   ⑨ 立即锁定 from the header locks (the page lands on the sign-in) and the window lists nothing. --shots keeps a 1280×800
 //   PNG of the header in each state (vw-head-*.png).
+//   ⑥c (lane vault-agent-own — the owner: 「它自己存的使用为啥还要我的允许？」): an agent's own rows (a value it PUT, a seed it added
+//      with `totp add`) sealed while the hub was down: the agent row's meta says the rule «Its own conversation uses it directly
+//      · other conversations cannot use it» + who kept it, and carries NO «Usable by agent runs» switch (the owner's rows keep
+//      theirs); its chip says «stored by an agent» (a PUT is never «never shown»); the seed's row says «· other conversations
+//      need a grant»; «Kept by agents» says its rule under its name; ⑧ the same words in Chinese (本对话可直接使用 · …)
 //   V2 (lane vault-window-v2, design q-047 §3): ②b the RAIL — 全部 + the nine purposes, each count = its rows in the list =
 //   its group head (NINE-COLUMN COUNTS = ROWS), a purpose picked shows its rows only; a row = name · kind chip · provenance
 //   chip; THE REVEAL DOOR'S HELP (the automation key's why is its 「显示」's title — no free-floating line); the provenance
@@ -387,6 +392,23 @@ check('… and no value is left in the page', ![PLANT_INT, PLANT_KEY, RAND].some
 await shot('vw-5-locked.png');
 const relogin = await evalJs(`fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: ${JSON.stringify(SIGN_IN)} }) }).then((r) => r.status)`);
 check('signed in again', relogin === 200, relogin);
+// lane vault-agent-own: an agent's OWN rows, sealed while the hub is down (the engine over the hub's own data dir — an agent's
+// put and `totp add` write exactly these boxes; no test door in the product). The restart boots LOCKED: ⑥a unlocks it.
+const AGENT_ROW = '.vw-row[data-id="secrets:agent:conv-chrome-1/deploy-token#secret"]', AGENT_SEED_ROW = '.vw-row[data-id="secrets:totp:agent-shop#seed"]';
+{
+  await stopServer();
+  const VEc = require(path.join(wt, 'src/server/vault-engine.js'));
+  const ec = VEc.create({ dataDir: DATA, log: { log() {}, warn() {} }, idleTimer: false, register: false });
+  const un = await ec.unlock(SECOND, {});
+  const put = ec.agentPut('agent:conv-chrome-1/deploy-token', ['agent', crypto.randomBytes(10).toString('hex')].join('-'), { actor: 'Deploy helper' });
+  const seed = ec.secretPut('totp:agent-shop', JSON.stringify({ v: 1, seed: ['JBSW', 'Y3DP', 'EHPK', '3PXP'].join(''), digits: 6, period: 30, algorithm: 'SHA1', issuer: 'Shop', account: 'me', source: 'manual' }), { kind: 'agent-typed', actor: 'Deploy helper', owner: 'conv-chrome-1' });
+  ec.close();
+  check('⑥c the agent\'s own entries sealed while the hub was down (a put + an agent-added two-step seed)', !!(un && un.ok && put.ok && seed.ok), { un: un && un.ok, put, seed });
+  startServer();
+  check('⑥c the hub is back', await ready());
+  const again = await evalJs(`fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: ${JSON.stringify(SIGN_IN)} }) }).then((r) => r.status)`);
+  check('⑥c signed in again after the restart', again === 200, again);
+}
 console.log('⑥a the header while LOCKED (lane vault-one-door): 解锁… is the one door; the vault\'s door event');
 await cdp('Page.navigate', { url: URL });
 // wait-for-effect, staged (lane vault-unlock-modal-race): a locked vault opens the unlock modal only after the load's
@@ -418,6 +440,24 @@ check('… and the header follows (立即锁定 + 修改第二密码…)', (awai
 await evalJs(`window.dispatchEvent(new CustomEvent('vs-vault-door')); true`);
 check('unlocked, the door opens the Vault window (still ONE window, no dialog)', !!(await until(`[...app.wm.windows.values()].filter((w) => w.type === 'vault').length === 1 && !document.getElementById('vault-dialog') && !document.getElementById('vault-unlock-dialog')`, { timeout: 3000 })));
 await closeVaultWindow();
+
+console.log('⑥c lane vault-agent-own: an agent\'s own rows say the rule — no switch for its conversation');
+{
+  await openWindow();
+  await until(`!!document.querySelector(${JSON.stringify(AGENT_ROW)})`, { timeout: 15000 });
+  const ag = await evalJs(`(() => { const r = document.querySelector(${JSON.stringify(AGENT_ROW)}), s = document.querySelector(${JSON.stringify(AGENT_SEED_ROW)}), own = document.querySelector('.vw-row[data-store="mounts"], .vw-row[data-store="app-secrets"]'), head = document.querySelector('.vw-group[data-purpose="agents"]');
+    const rule = r?.querySelector('.vw-own-rule'), rb = rule?.getBoundingClientRect();
+    return { meta: rule?.textContent || '', ruleSeen: !!(rb && rb.height > 0 && rule.scrollWidth <= rule.clientWidth + 1 && getComputedStyle(rule).whiteSpace !== 'nowrap'), run: !!r?.querySelector('.vw-run'), prov: r?.dataset.prov, chip: r?.querySelector('.vw-chip-prov')?.getAttribute('aria-label') || '', purpose: r?.dataset.purpose,
+      seedMeta: s?.querySelector('.vw-own-rule')?.textContent || '', seedProv: s?.dataset.prov, ownerRun: own ? !!own.querySelector('.vw-run') : null, help: head?.querySelector('.vw-group-help')?.textContent || '', railHelp: document.querySelector('.vw-rail-item[data-purpose="agents"]')?.title || '' }; })()`);
+  check('⑥c the agent row (a value it PUT): its own line says the rule — «Its own conversation uses it directly · other conversations cannot use it» and who kept it — WHOLE (it wraps; the one-line meta would clip it); NO «Usable by agent runs» switch', /Its own conversation uses it directly · other conversations cannot use it/.test(ag.meta) && /kept by Deploy helper/.test(ag.meta) && ag.ruleSeen && ag.run === false && ag.purpose === 'agents', ag);
+  check('⑥c …its chip says «Stored by an agent · it saw the value» (a PUT — never «never shown»)', ag.prov === 'agent-put' && /Stored by an agent/.test(ag.chip), [ag.prov, ag.chip]);
+  check('⑥c the seed an agent added itself (Two-step codes): «stored by an agent», «… · other conversations need a grant»', ag.seedProv === 'agent-put' && /Its own conversation uses it directly · other conversations need a grant/.test(ag.seedMeta), [ag.seedProv, ag.seedMeta]);
+  check('⑥c «Kept by agents» says its rule under its name (and as the rail item\'s help)', /the conversation that kept it uses it without asking you; other conversations cannot use it/.test(ag.help) && ag.help === ag.railHelp, [ag.help, ag.railHelp]);
+  check('⑥c an OWNER\'s row (storage / an app login) keeps its «Usable by agent runs» switch', ag.ownerRun !== false, ag.ownerRun);
+  await evalJs(`document.querySelector(${JSON.stringify(AGENT_ROW)})?.scrollIntoView({ block: 'center' }); true`);
+  await shot('vw-agent-row.png');
+  await closeVaultWindow();
+}
 
 console.log('⑥b Manage Agents\' Show key… through the page\'s window');
 await cdp('Page.navigate', { url: URL });
@@ -460,7 +500,7 @@ await click('#vault-filter-dialog .vw-fchip[data-prov="system"]');
 check('… a press applies at once: the list behind it follows (the hub\'s own row only)', !!(await until(`(() => { const rows = [...document.querySelectorAll('.vw-list .vw-row')]; return rows.length === 1 && rows[0].dataset.store === 'automation'; })()`, { timeout: 5000 })));
 await click('#vault-filter-dialog .vw-fchip[data-prov="system"]');
 await click('#vault-filter-dialog .vw-filter-done');
-check('… and back: every row, the modal closed', !!(await until(`document.querySelectorAll('.vw-list .vw-row').length === 4 && !document.getElementById('vault-filter-dialog')`, { timeout: 5000 })));
+check('… and back: every row, the modal closed', !!(await until(`document.querySelectorAll('.vw-list .vw-row').length === 4 + 2 && !document.getElementById('vault-filter-dialog')`, { timeout: 5000 })));   // + ⑥c's two agent rows (lane vault-agent-own)
 await shot('vw-6-phone.png');
 await cdp('Emulation.clearDeviceMetricsOverride');
 
@@ -472,6 +512,9 @@ await splashGone();
 await openWindow();
 check('「显示」', (await evalJs(`document.querySelector(${JSON.stringify(ROW_INT + ' .vw-show')})?.textContent`)) === '显示');
 check('the setup-token row says 「长期 OAuth 令牌」', /长期 OAuth 令牌/.test(await evalJs(`document.querySelector(${JSON.stringify(ROW_OAT + ' .vw-meta')})?.textContent || ''`)));
+// lane vault-agent-own: the agent row's rule in Chinese (the brief's words), and the group's help sentence
+const zhAgent = await evalJs(`({ meta: document.querySelector(${JSON.stringify(AGENT_ROW + ' .vw-own-rule')})?.textContent || '', help: document.querySelector('.vw-group[data-purpose="agents"] .vw-group-help')?.textContent || '' })`);
+check('⑥c in Chinese: the agent row says 「本对话可直接使用 · 其他对话不能使用」 + 「由 Deploy helper 保存」; «agent 存放» says its rule', zhAgent.meta.includes('本对话可直接使用 · 其他对话不能使用') && zhAgent.meta.includes('由 Deploy helper 保存') && /存它的那个对话直接使用/.test(zhAgent.help), zhAgent);
 check('the rail in Chinese: 全部 · 两步验证 · 登录与账号 · 集成与频道 · 机器与中继 · 存储 · 应用登录 · 通行密钥 · 网站登录 · 自动化 key · 密码与密钥 · agent 存放 (lane vault-paste-request: + 密码与密钥; lane browser-login: + 网站登录)', (await evalJs(`[...document.querySelectorAll('.vw-rail .vw-rail-name')].map((e) => e.textContent).join(' · ')`)) === '全部 · 两步验证 · 登录与账号 · 集成与频道 · 机器与中继 · 存储 · 应用登录 · 通行密钥 · 网站登录 · 自动化 key · 密码与密钥 · agent 存放');
 check('「显示」 on the automation key carries the owner\'s own sentence as its help; the chips read 「hub 铸造 · 从未显示」 / 「我自己」', (await evalJs(`document.querySelector('.vw-row[data-store="automation"] .vw-show')?.title`)) === '显示密钥值——只在要交给外部系统时；内部 agent 按授权使用，不需要看到值' && (await evalJs(`document.querySelector('.vw-row[data-store="automation"] .vw-chip-prov')?.textContent`)) === 'hub 铸造 · 从未显示' && (await evalJs(`document.querySelector(${JSON.stringify(rowKey(accId) + ' .vw-chip-prov')})?.textContent`)) === '我自己');
 await click(ROW_INT + ' .vw-show');

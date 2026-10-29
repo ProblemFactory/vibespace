@@ -9742,6 +9742,11 @@ export default {
   "Integrations & channels": "集成与频道", // lane vault-window-v2
   "Machines & relay": "机器与中继", // lane vault-window-v2
   "Kept by agents": "agent 存放", // lane vault-window-v2
+  "Its own conversation uses it directly · other conversations cannot use it": "本对话可直接使用 · 其他对话不能使用",
+  "Its own conversation uses it directly · other conversations need a grant": "本对话可直接使用 · 其他对话需授权",
+  "kept by {name}": "由 {name} 保存",
+  "What an agent kept itself: the conversation that kept it uses it without asking you; other conversations cannot use it": "agent 自己存的：存它的那个对话直接使用，不用问你；其他对话不能使用",
+  "Added by an agent itself — the agent saw the seed": "agent 自己添加 · agent 见过种子",
   "By you": "我自己", // lane vault-window-v2
   "Scanned · by you": "扫码 · 我自己", // lane vault-window-v2
   "Minted by the hub · never shown": "hub 铸造 · 从未显示", // lane vault-window-v2
@@ -9898,6 +9903,8 @@ export default {
   "Default (Antigravity’s own setting)": "默认（Antigravity 自己的设置）",
   "{who} wants to run a command with a stored secret": "{who} 想用保险库里的密钥运行一条命令", // lane vault-run-door
   "«Always» (with the second password) also turns on «Usable by agent runs» for this entry — it opens it for THIS conversation; any grants you paused stay paused.": "按「总是允许」（需验证是你）也会为此条目打开「可供 agent 运行使用」——它只为当前这个对话打开；你暂停的其他授权仍保持暂停。", // lane vault-run-door
+  "{tool} on this machine changed: {from} → {to} (a root-owned tool — runs continue)": "本机的 {tool} 已变更：{from} → {to}（由 root 安装的工具——运行照常继续）", // lane vault-agent-own r18 (item 5): the drift FYI notice
+  "{tool} ({path}) is sealed by root ownership, so the vault trusts whatever root installs there. Its bytes changed since the last run ({from} → {to}) — root (a package roll or a reinstall) replaced it, and runs continue. This is a notice; nothing to do.": "本机的 {tool}（{path}）由 root 所有权封存，因此 vault 信任 root 在那里安装的任何内容。它的字节自上次运行以来发生了变更（{from} → {to}）——是 root（软件包滚动或重新安装）替换了它，运行照常继续。这只是一条通知；无需处理。", // lane vault-agent-own r19 (MINOR): the drift FYI DETAIL paragraph
   "Always for this shape": "此形状总是", // lane vault-run-door
   "The same tool, flags, hosts and secrets run without asking for 30 days — asks for the second password first": "同一工具、旗标、主机与密钥 30 天内不再问——先要再输一次第二密码", // lane vault-run-door
   "Allowed for this shape for 30 days": "此形状 30 天内总是允许", // lane vault-run-door

@@ -2201,7 +2201,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   }
   /** THE `login` DOOR: the conversation's own tabs' forms (+ a held http-auth surface) → the logins module's plan → the kernel
    *  fills (or the surface is answered) → ONE use line → the agent's answer: what was filled, never a value. */
-  async function fillLogin({ profileId, browserKey = '', sessionId = null, ephemeral = false } = {}, { origin = null, user = null, newUser = null, generate = false, submit = false, facts = {}, conv = null, actor = null } = {}) {
+  async function fillLogin({ profileId, browserKey = '', sessionId = null, ephemeral = false } = {}, { origin = null, user = null, newUser = null, generate = false, submit = false, facts = {}, conv = null, actor = null, owners = [] } = {}) {
     const pid = String(profileId || ''); const w = watches.get(pid);
     if (!logins) return { ok: false, code: 'not_watched', error: 'VibeSpace keeps no web logins on this server' };
     if (!w || w.state !== 'open') return { ok: false, code: 'not_watched', error: 'VibeSpace is not watching this browser' };
@@ -2211,7 +2211,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     for (const e of w.targets.values()) if (inScope(scope, e.targetId)) for (const f of e.forms || []) forms.push(f);
     for (const rec of w.surf.values()) if (rec.kind === 'http-auth' && inScope(scope, rec.targetId)) { const f = BL().formOfSurface(SF().blockAt(rec, { now: now() }), { now: rec.openedAt || 0 }); if (f) forms.push({ ...f, targetId: rec.targetId }); }
     forms.sort((a, b) => (a.at || 0) - (b.at || 0));
-    const plan = logins.planFill({ forms, origin, user, newUser, generate, facts, conv, actor });
+    const plan = logins.planFill({ forms, origin, user, newUser, generate, facts, conv, actor, owners });   // owners: lane vault-agent-own (a login the caller stored itself)
     if (!plan.ok) return plan;
     const e = w.targets.get(String(plan.form.targetId || ''));
     let r = null, kerr = null;

@@ -16,6 +16,10 @@
  *     digest, so a conversation that ended and came back is not covered (design §5 L1 «会话结束失效») — or to one of its
  *     Task Groups. Every answer, refusals too, is ONE `vault-totp-use` audit line (names and codes of refusal — never a
  *     code); paced 20 a minute per conversation.
+ *   · AN AGENT'S OWN (lane vault-agent-own — the owner 2026-10-26: 「它自己存的使用为啥还要我的允许？」): an agent adds a seed it holds
+ *     itself (POST /api/agent/vault/totp — `vibespace-vault totp add <name> --from-file | --stdin`: the otpauth link or the seed,
+ *     taken off the body) as `totp:<name>`, sealed `agent-typed` with its `owner` = the storing conversation (its durable id);
+ *     THAT conversation gets the code with no grant — a resume keeps it — and never the seed back; any other needs a grant.
  *   · THE GRANTS: data/vault-grants.json (0600; tmp `wx` + fsync + rename) — { id, entry, subject, at, by, run }, never a
  *     value. An unreadable file grants nothing and is never written over.
  *   · LOCKED ⇒ every code answers 423 vault_locked (nothing is cached across a lock: each answer opens the entry).
@@ -57,6 +61,7 @@ function create({ dataDir, vault, now = () => Date.now(), hmac = hmacNode, rando
   const lockedCode = () => (vaultState() === 'not_set_up' ? 'vault_not_set_up' : 'vault_locked');
   const names = () => (typeof vault.secretNames === 'function' ? vault.secretNames() : []).filter((s) => T.nameOfEntry(s.name));
   const has = (entry) => names().some((s) => s.name === entry);
+  const ownerOf = (entry) => { const s = names().find((x) => x.name === entry); return (s && typeof s.owner === 'string' && s.owner) || null; };   // lane vault-agent-own
   const whoOf = (who) => String(who || 'sign-in-off').slice(0, 40);
 
   // ── the grants ──
@@ -126,6 +131,23 @@ function create({ dataDir, vault, now = () => Date.now(), hmac = hmacNode, rando
     p.value.seed = null;
     if (!put || !put.ok) return named(/vault_locked/.test(String(put && put.code)) ? 'vault_locked' : 'failed', put && put.code);
     vault.audit('vault-totp-add', { who: whoOf(who), ip, by: 'human', entry, source: p.value.source });
+    return { ok: true, name: p.name, entry };
+  }
+  /** lane vault-agent-own: AN AGENT adds a seed it holds itself — the otpauth link or the seed (never stored here), sealed as
+   *  `totp:<name>` `agent-typed` with its `owner` (the storing conversation's durable id). → { ok, name, entry } — never the
+   *  seed, never a code (`vibespace-vault totp <name>` answers the code). A name already in the vault is refused (`exists`). */
+  function agentAdd(input, { owner = null, actor = null, ip = null } = {}) {
+    if (vaultState() !== 'unlocked') return named(lockedCode());
+    if (!owner) return named('unauthorized', 'the calling conversation has no id yet — send it one message first');
+    const p = planOf(input);
+    if (!p.ok) return p;
+    const entry = T.entryOf(p.name);
+    if (has(entry)) { p.value.seed = null; return named('exists', 'a two-step code of that name is in the vault already — pick another name (the user deletes one in the Vault window)'); }
+    if (!dropGrantsOf(entry)) { p.value.seed = null; return named('failed', `${GRANTS_FILE} could not be read or written — nothing is stored`); }   // a stale grant never covers a new seed
+    const put = vault.secretPut(entry, JSON.stringify(p.value), { kind: 'agent-typed', actor: actor ? clip(actor, 128) : null, owner: clip(owner, 128) });
+    p.value.seed = null;
+    if (!put || !put.ok) return named(/vault_locked/.test(String(put && put.code)) ? 'vault_locked' : 'failed', put && put.code);
+    vault.audit('vault-totp-add', { who: clip(actor || 'an agent', 40), ip, by: 'agent', entry, source: p.value.source });
     return { ok: true, name: p.name, entry };
   }
   /** 看码: the CURRENT code — no 「验证是你」, paced, ONE audit line per answer. */
@@ -209,7 +231,7 @@ function create({ dataDir, vault, now = () => Date.now(), hmac = hmacNode, rando
     const done = (r, via = null) => { vault.audit('vault-totp-use', { by: 'agent', subject, entry: entry || clip(name, 130), ip, ok: !!r.ok, ...(r.ok ? { via } : { code: r.code }) }); return r; };
     if (!entry) return done(named('not_granted'));
     const { grants } = readGrants();
-    const v = T.useVerdict({ grants, entry, caller, vaultState: vaultState() });
+    const v = T.useVerdict({ grants, entry, caller, vaultState: vaultState(), owner: ownerOf(entry) });   // owner: lane vault-agent-own (a seed it added itself)
     if (!v.ok) return done(v);
     const t = now(), k = subject;
     const mine = (usePace.get(k) || []).filter((x) => t - x < VI.REVEAL_PACE_MS && t >= x);
@@ -226,11 +248,14 @@ function create({ dataDir, vault, now = () => Date.now(), hmac = hmacNode, rando
   /** lane browser-login (D3 — the owner, 2026-10-25: the login grant COVERS its paired two-step code): the CODE of `name` for a
    *  web login the browser-login door already admitted — the hub fills it through the kernel (the agent sees no code); ONE
    *  `vault-totp-use` line (via browser-login), paced like a conversation's own answers; never the seed. */
-  function codeForLogin(name, { conv = null, ip = null } = {}) {
+  function codeForLogin(name, { conv = null, ip = null, owners = null } = {}) {
     const entry = T.entryOf(String(name == null ? '' : name));
     const subject = conv ? `session:${clip(conv, 200)}` : 'unknown';
     const done = (r) => { vault.audit('vault-totp-use', { by: 'agent', subject, entry: entry || clip(name, 130), ip, ok: !!r.ok, ...(r.ok ? { via: 'browser-login' } : { code: r.code }) }); return r; };
     if (!entry) return done(named('not_found'));
+    // lane vault-agent-own (the review): a login filled on its OWN road (no grant — the caller stored it) carries the caller's ids:
+    // its paired code answers only when the caller owns that entry too; the login grant's D3 cover is for a GRANTED login
+    if (Array.isArray(owners)) { const ow = ownerOf(entry); if (!ow || !owners.includes(ow)) return done(named('not_granted')); }
     const t = now(), k = subject;
     const mine = (usePace.get(k) || []).filter((x) => t - x < VI.REVEAL_PACE_MS && t >= x);
     const p = VI.paceVerdict(mine, t, T.USE_PACE_MAX);
@@ -241,7 +266,7 @@ function create({ dataDir, vault, now = () => Date.now(), hmac = hmacNode, rando
     done({ ok: true });
     return { ok: true, code: r.code, secondsLeft: r.secondsLeft };
   }
-  return { addEntry, view, drop, grant, ungrant, list, use, codeForLogin, GRANTS_FILE };   // addEntry, never `add(`: a For-you add site's name (test-user-todos-layout's census)
+  return { addEntry, agentAdd, view, drop, grant, ungrant, list, use, codeForLogin, GRANTS_FILE };   // addEntry, never `add(`: a For-you add site's name (test-user-todos-layout's census)
 }
 
 module.exports = { create, runOfToken, GRANTS_FILE };

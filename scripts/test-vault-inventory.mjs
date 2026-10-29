@@ -524,6 +524,21 @@ console.log('⑨ AGENT-OWNED SECRETS — provenance rows (q-043 §9, lane vault-
   const mraw = mm.exports.secretRowOf({ name: 'agent:c/x', at: ac, prov: 'minted', actor: 'A' });
   const mrow = mm.exports.rowOf('secrets', mraw);
   ok(cut !== src && mraw.provenance && mrow.provenance === null, 'MUTANT (rowOf drops provenance) ⇒ the agent row loses its provenance — the v2 chip would show nothing (RED on the provenance-row assert)');
+  // lane vault-agent-own: the CHIP tells mint from put (the row now carries its origin — a PUT showed «never shown» before:
+  // provenanceOf read `origin`, the agent row never had one); a mint's --for rides its provenance; an agent's own two-step seed
+  // (`totp add`) is «stored by an agent» with its owner; «Kept by agents» says its rule
+  ok(VI.provenanceOf(mintRow) === 'agent-mint' && VI.provenanceOf(putRow) === 'agent-put' && mintRow.origin === 'mint' && putRow.origin === 'put', 'the MINTED row\'s chip says «minted by an agent · never shown», the STORED row\'s «stored by an agent · it saw the value»', [VI.provenanceOf(mintRow), VI.provenanceOf(putRow)]);
+  const noOrigin = src.replace("origin: prov === 'minted' ? 'mint' : 'put', provenance:", 'provenance:');
+  const mo = new Mod(mf); mo.filename = mf; mo.paths = Mod._nodeModulePaths(path.dirname(mf)); mo._compile(noOrigin, mf);
+  ok(noOrigin !== src && mo.exports.provenanceOf(mo.exports.rowOf('secrets', mo.exports.secretRowOf({ name: 'agent:c/x', prov: 'stored' }))) === 'agent-mint', 'CONTROL RED: without the origin a PUT reads «minted · never shown» (the window lied about what the agent saw)');
+  ea.agentMint('agent:conv-INV/site-pw', { length: 24, charset: 'alnum', actor: 'Build chat', forHost: 'api.example.com' });
+  ea.secretPut('totp:agent-shop', JSON.stringify({ v: 1, seed: ['JBSW', 'Y3DP', 'EHPK', '3PXP'].join(''), digits: 6, period: 30, algorithm: 'SHA1' }), { kind: 'agent-typed', actor: 'Build chat', owner: 'conv-INV' });
+  const inv3 = va.list().rows;
+  const fr = inv3.find((r) => r.id === 'secrets:agent:conv-INV/site-pw#secret'), tr = inv3.find((r) => r.id === 'secrets:totp:agent-shop#seed');
+  ok(fr && fr.provenance.forHost === 'api.example.com' && tr && tr.kind === 'totp' && tr.provenance && tr.provenance.prov === 'agent-typed' && tr.provenance.owner === 'conv-INV' && tr.provenance.actor === 'Build chat' && VI.provenanceOf(tr) === 'agent-put' && tr.detail === 'Added by an agent itself — the agent saw the seed' && VI.purposeOf(tr) === 'two-step',
+    'a mint\'s --for rides its provenance; an agent\'s own two-step seed: kind totp, provenance agent-typed + its owner, the «stored by an agent» chip, under Two-step codes', [fr && fr.provenance, tr && tr.provenance]);
+  const ag = VI.PURPOSES.find((p) => p.id === 'agents');
+  ok(ag && /uses it without asking you/.test(ag.help) && /other conversations cannot use it/.test(ag.help) && VI.PURPOSES.filter((p) => p.help).length === 1, '«Kept by agents» carries its rule as its help sentence (the only purpose with one)', ag);
   ea.close();
 }
 

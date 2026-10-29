@@ -44,6 +44,7 @@ const STATUS = Object.freeze({
   // lane vault-paste-request: a paste request's answer / a free entry (src/server/vault-paste-door.js)
   invalid_value: 400, store_failed: 500, value_too_long: 400, unfiled: 503, request_quiet: 429, too_many_requests: 429, value_in_request: 400, job_no_use: 403,
   name_required: 400, name_too_long: 400, note_too_long: 400, bad_kind: 400, hidden_chars: 400, entry_unknown_id: 404,
+  login_exists: 409, login_bad_origin: 400, login_bad_user: 400, bad_totp: 400,   // lane vault-agent-own: `vibespace-vault login add`
 });
 const WORDS = Object.freeze({
   wrong_password: 'that is not the second password',
@@ -225,8 +226,22 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
       let caller = null;
       try { caller = token.startsWith('vsst_') ? callerOf(token) : null; } catch { caller = null; }
       if (!caller) return answer(res, { ok: false, code: 'unauthorized' });
-      const r = totp.use({ conversationId: caller.conversationId, groups: caller.groups, live: caller.live, run: runOfToken(token) }, req.params.name, { ip: ipOf(req) });
+      const r = totp.use({ conversationId: caller.conversationId, groups: caller.groups, live: caller.live, run: runOfToken(token), scope: caller.scope, conv: caller.conv }, req.params.name, { ip: ipOf(req) });
       return r.ok ? res.json({ ok: true, name: r.name, code: r.code, secondsLeft: r.secondsLeft, period: r.period }) : answer(res, r);
+    });
+    // lane vault-agent-own: AN AGENT adds a seed it holds itself (`vibespace-vault totp add <name> --from-file | --stdin`) — the
+    // otpauth link or the seed taken OFF the body (never the URL); the entry is owned by the storing conversation (its durable
+    // id) and its code answers THAT conversation with no grant. The answer names the entry — never the seed, never a code.
+    app.post('/api/agent/vault/totp', (req, res) => {
+      res.set('Cache-Control', 'no-store');
+      const [uri, seed] = take(req, 'uri', 'seed');
+      const token = String((req.headers && req.headers.authorization) || '').replace(/^Bearer\s+/i, '');
+      let caller = null;
+      try { caller = token.startsWith('vsst_') ? callerOf(token) : null; } catch { caller = null; }
+      if (!caller) return answer(res, { ok: false, code: 'unauthorized' });
+      if (req.query && (req.query.uri !== undefined || req.query.seed !== undefined)) return answer(res, { ok: false, code: 'value_in_argv' });
+      const r = totp.agentAdd({ uri, seed, name: body(req).name }, { owner: caller.conv || caller.scope || null, actor: caller.name || null, ip: ipOf(req) });
+      return r.ok ? res.json({ ok: true, name: r.name, entry: r.entry }) : res.status(STATUS[r.code] || 400).json({ ok: false, code: r.code, error: r.code === 'exists' ? r.why : WORDS[r.code] || r.why || r.code });   // an agent cannot delete — its own words for `exists`
     });
   }
   // ── WEB LOGINS (lane browser-login — src/server/browser-logins.js over PURE src/browser-login.js). PEOPLE only: the list (names,
@@ -247,6 +262,21 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
     app.delete('/api/vault/web-logins/:name', noStoreL(person((req) => logins.drop(String(req.params.name || ''), { who: whoL(req) }))));
     app.post('/api/vault/web-logins/grants', noStoreL(person((req) => { const b = bodyL(req); return logins.grant(String(b.name || ''), String(b.scope || ''), String(b.subject || ''), { by: `user:${whoL(req).slice(0, 24)}` }); })));
     app.post('/api/vault/web-logins/ungrant', noStoreL(person((req) => { const b = bodyL(req); return logins.ungrant(String(b.resource || ''), String(b.principal || ''), { by: `user:${whoL(req).slice(0, 24)}` }); })));
+    // lane vault-agent-own: AN AGENT stores a login it holds itself (`vibespace-vault login add <origin> --user <name> --from-file |
+    // --stdin [--totp <name>]`) — the password taken OFF the body (never the URL); a `web-login:` entry, provenance agent-typed,
+    // owned by the storing conversation (its fill there needs no grant). The answer names the entry — never the password.
+    app.post('/api/agent/vault/login', (req, res) => {
+      res.set('Cache-Control', 'no-store');
+      const [pw] = take(req, 'loginPassword');
+      const token = String((req.headers && req.headers.authorization) || '').replace(/^Bearer\s+/i, '');
+      let caller = null;
+      try { caller = token.startsWith('vsst_') ? callerOf(token) : null; } catch { caller = null; }
+      if (!caller) return answer(res, { ok: false, code: 'unauthorized' });
+      if (req.query && req.query.loginPassword !== undefined) return answer(res, { ok: false, code: 'value_in_argv' });
+      const b = bodyL(req);
+      const r = logins.addAgent({ origin: b.origin, username: b.username, password: typeof pw === 'string' ? pw : '', totpName: b.totpName || null }, { owner: caller.conv || caller.scope || null, actor: caller.name || null });
+      return r.ok ? res.json({ ok: true, name: r.name, origin: r.origin, user: r.user }) : res.status(STATUS[r.code] || 400).json({ ok: false, code: r.code, error: r.error || WORDS[r.code] || r.code });
+    });
   }
   // ── agents: the state and the lock — never unlock ──
   app.get('/api/agent/vault/state', (req, res) => (agentOk(req) ? res.json(agentFacts()) : answer(res, { ok: false, code: 'unauthorized' })));
@@ -261,21 +291,25 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
   //    in the Vault window behind 「验证是你」). An agent error says only the code + its words (never the vault's facts). ──
   const agentErr = (res, r) => { const code = (r && r.code) || 'error'; res.status(STATUS[code] || 400).json({ ok: false, code, error: WORDS[code] || code }); };
   const norm = (r) => { if (!r || r.ok) return r; let code = r.code; if (typeof code === 'string') { if (code.indexOf('vault_locked') >= 0) code = 'vault_locked'; else if (code === 'bad-name') code = 'bad_name'; } return { ...r, code }; };
-  /** The calling principal → { scope, actor } | null. A vsst_ session: its conversation id; a live jbt_ job: `job-<id>`. */
+  /** The calling principal → { scope, owner, actor } | null. A vsst_ session: its conversation id (`scope` — the use law's conv);
+   *  a live jbt_ job: `job-<id>`. lane vault-agent-own: `owner` = the conversation's DURABLE id (its CLI session id, kept across
+   *  a resume — a pending fork borrows its parent's and so names none here) — the scope a NEW entry is named by; else `scope`. */
   function agentPrincipal(req) {
     const token = String((req.headers && req.headers.authorization) || '').replace(/^Bearer\s+/i, '');
-    if (token.startsWith('jbt_')) { const jm = getJobs && getJobs(); const j = jm && jm.ready !== false && typeof jm.jobByToken === 'function' ? jm.jobByToken(token) : null; return j ? { scope: `job-${j.id}`, actor: j.name || `job ${j.id}` } : null; }
+    if (token.startsWith('jbt_')) { const jm = getJobs && getJobs(); const j = jm && jm.ready !== false && typeof jm.jobByToken === 'function' ? jm.jobByToken(token) : null; return j ? { scope: `job-${j.id}`, owner: `job-${j.id}`, actor: j.name || `job ${j.id}` } : null; }
     if (!token.startsWith('vsst_')) return null;
-    for (const [k, s] of activeSessions) if (s && sameToken(token, s.agentToken)) return { scope: String(s._webuiId || k), actor: s.name || s.webuiName || String(s._webuiId || k) };
+    const { addressableId } = require('../claude-lock-capture.js');
+    for (const [k, s] of activeSessions) if (s && sameToken(token, s.agentToken)) return { scope: String(s._webuiId || k), owner: String(addressableId(s) || s._webuiId || k), actor: s.name || s.webuiName || String(s._webuiId || k) };
     return null;
   }
   app.post('/api/agent/vault/mint', (req, res) => {
     const p = agentPrincipal(req);
     if (!p) return agentErr(res, { code: 'unauthorized' });
     const b = req.body && typeof req.body === 'object' ? req.body : {};
-    const en = V.agentEntryName(p.scope, b.name);
+    const en = V.agentEntryName(p.owner, b.name);   // lane vault-agent-own: named by the durable id
     if (!en.ok) return agentErr(res, en);
-    const r = vault.agentMint(en.name, { length: b.length, charset: b.charset, actor: p.actor });
+    const forWords = typeof b.for === 'string' ? b.for.replace(/[\u0000-\u001f\u007f-\u009f\u00ad\u061c\u180e\u200b-\u200f\u2028-\u202e\u2060-\u206f\ufeff]/g, '').trim().slice(0, 200) || null : null;   // the review: no control / direction characters kept (it is shown to the owner)
+    const r = vault.agentMint(en.name, { length: b.length, charset: b.charset, actor: p.actor, forHost: forWords });   // forHost: the one host it goes to without asking
     if (!r.ok) return agentErr(res, norm(r));
     if (typeof vault.noteUse === 'function') { try { vault.noteUse(r.name, { by: 'agent', door: 'mint', conv: p.scope }, { outcome: 'ok', purpose: typeof b.for === 'string' ? b.for.slice(0, 200) : 'mint a secret it never sees', actor: p.actor }); } catch { /* the mint still answered — the use law seam (int331): mint is a USE so `uses` reads it back */ } }
     res.json({ ok: true, name: r.name, ref: r.ref, provenance: 'agent minted · never shown to the agent', for: typeof b.for === 'string' ? b.for.slice(0, 200) : null });
@@ -286,13 +320,13 @@ function registerVaultRoutes(app, { vault, activeSessions = new Map(), getJobs =
     const value = b.value; if (b && typeof b === 'object') delete b.value;   // taken OFF the request — no later reader sees it
     if (!p) return agentErr(res, { code: 'unauthorized' });
     if (req.query && typeof req.query.value !== 'undefined') return agentErr(res, { code: 'value_in_argv' });   // never the URL (argv-readable)
-    const en = V.agentEntryName(p.scope, b.name);
+    const en = V.agentEntryName(p.owner, b.name);   // lane vault-agent-own: named by the durable id
     if (!en.ok) return agentErr(res, en);
     if (typeof value !== 'string' || value === '') return agentErr(res, { code: 'value_required' });
     const r = vault.agentPut(en.name, value, { actor: p.actor });
     if (!r.ok) return agentErr(res, norm(r));
     if (typeof vault.noteUse === 'function') { try { vault.noteUse(r.name, { by: 'agent', door: 'put', conv: p.scope }, { outcome: 'ok', purpose: 'store a value it was given', actor: p.actor }); } catch { /* the put still answered — the use law seam (int331): put is a USE so `uses` reads it back */ } }
-    res.json({ ok: true, name: r.name, ref: r.ref, provenance: 'agent stored · the agent saw the plaintext', hint: 'the transcript\'s copy is not protected — rotate this value when you can' });
+    res.json({ ok: true, name: r.name, ref: r.ref, provenance: 'agent stored · the agent saw the plaintext', hint: 'the transcript\'s copy is not protected — rotate this value when you can; this conversation runs with it without asking anyone (vibespace-vault run)' });
   });
   // lane vault-use-law: every answer of the link-token door (the device audit's row, below) is also a USE of that machine's
   // link token by the conversation that asked — the ONE writer's line (door link-token, conv, outcome) and, for a refusal
@@ -419,7 +453,8 @@ function registerRunRoutes(app, { run, activeSessions, getJobs, contents, who, p
       const cid = s.backendSessionId || s.claudeSessionId || null;
       return { conversationId: cid, sessionKey: cid ? `${s.backend || 'claude'}:${cid}` : null, name: s.name || s.webuiName || null, cwd: typeof s.cwd === 'string' ? s.cwd : null,
         remote: !!(s._dialDeviceId || (s.host && s.host !== 'local')), live: !s.isTmuxView,
-        scope: String(s._webuiId || k) };   // lane vault-manual-and-lock: THIS conversation as the use law and a mint spell it (its vault-use `conv`, an agent entry's scope)
+        scope: String(s._webuiId || k),   // lane vault-manual-and-lock: THIS conversation as the use law and a mint spell it (its vault-use `conv`, an agent entry's scope)
+        conv: require('../claude-lock-capture.js').addressableId(s) };   // lane vault-agent-own: its DURABLE id, fork-safe (a pending fork's is null) — what a new agent entry is named by
     }
     return null;
   }

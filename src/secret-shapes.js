@@ -128,7 +128,7 @@ function redactContinuations(text) {
     if (/^private-lines$/i.test(name)) {
       const cnt = parseInt(val, 10); if (!(cnt > 0)) continue;
       const end = Math.min(lines.length, i + 1 + Math.min(cnt, 100000));
-      if (end > i + 1 && !(end === i + 2 && lines[i + 1].trim() === REDACTED)) { lines.splice(i + 1, end - (i + 1), REDACTED); n++; }
+      if (end > i + 1 && !(end === i + 2 && lines[i + 1].trim() === REDACTED)) { lines[i] = lines[i].replace(/\d+(?=\s*$)/, REDACTED); lines.splice(i + 1, end - (i + 1), REDACTED); n++; }   // round 22: R2b redacts the COUNT here too — else the typed-value rule leaves `Private-Lines: 2` and a second pass re-reads the count and eats the MAC line (idempotency); a re-read sees «redacted» ⇒ parseInt NaN ⇒ skip
       continue;
     }
     if (!secretName(name) || (val !== '' && val !== REDACTED && !BLOCK_VAL.test(val) && !openQuote(val))) continue;
@@ -151,7 +151,7 @@ function redactContinuations(text) {
 // R2: `NAME = value` / `NAME: value` / `"name": "value"` / `--name=value` — the HEAD is matched, the value's extent is
 // decided in code (a regex that consumed the value either stopped a bare value at a space — `Authorization: Bearer
 // abc` kept `abc` — or swallowed the next key of `a=1 token=x`): a quoted value to its closing quote on the line, a
-// bare value to the end of its line (`token=abc ms=5` hides `ms=5` too — a stored head hides more, never less)
+// bare value to the end of its line. Round 23 (MAJOR): the `,})]` cut applies ONLY inside a JSON document (a quoted key `"name":`) and the typed-value skip ONLY under a `:` key (JSON / YAML, where a parser TYPES the scalar) — NEVER on a dotenv / shell / `--flag=value` / bare `NAME=value` line, where every value is a STRING redacted WHOLE to the line end (`DB_PASSWORD=84726193` and `DB_PASSWORD=Xy)9#kq]Lm2v` hide whole; r21/r22 ran the cut and the number rule on every head and leaked the tail / the numeric password). A space is NOT a delimiter (`Bearer abc`, `token=a ms=5` keep reading); a stored head hides more, never less
 const KV_HEAD = /(^|[\s,;{(\[:/])(-{0,2})(["']?)([A-Za-z_][A-Za-z0-9_.\-]{0,80})\3([ \t]*[:=][ \t]*)/gm;   // verify r2 F4: `:` and `/` open a name too (.npmrc's `//registry…/:_authToken=<uuid>`)
 /** Is the character at `i` preceded by an ODD run of backslashes (escaped)? */
 function escapedAt(text, i) { let k = 0; while (i - 1 - k >= 0 && text[i - 1 - k] === '\\') k++; return k % 2 === 1; }
@@ -162,6 +162,8 @@ function redactKv(text) {
     const headEnd = KV_HEAD.lastIndex;
     if (!secretName(m[4])) continue;                       // the next key may start right after this head
     const q = text[headEnd] === '"' || text[headEnd] === "'" ? text[headEnd] : '';
+    const sepColon = m[5].indexOf(':') >= 0;                        // round 23: a `:` key (JSON / YAML / a header) vs an `=` assignment (dotenv / shell / `--flag=`)
+    const jsonCtx = sepColon && (m[3] === '"' || m[3] === "'");     // a QUOTED key under a `:` is a JSON document — only there does `,})]` close a bare value
     // verify r4 F4 (the census, in code): the line's end was searched from EVERY head — `token="a" token="b" …` on one line walked the
     // line once per head (quadratic by construction; the clock read ×8 only because a 64 KiB memchr lives in cache); found once per line
     if (headEnd > lineEnd) { const nl = text.indexOf('\n', headEnd); lineEnd = nl < 0 ? text.length : nl; }
@@ -169,6 +171,8 @@ function redactKv(text) {
     if (q) {   // verify r2 F5: a backslash-escaped quote inside the value does not close it (`"ab\"cd"` kept `cd"`); verify r5 F1: nor a doubled one (`'it''s'` kept `s'`)
       const close = nextClose(text, headEnd + 1, q, lineEnd);
       if (close >= 0) valEnd = close + 1;
+    } else if (jsonCtx) {   // round 23 (MAJOR): a bare value closes at the first `,` `}` `]` `)` ONLY inside a JSON document (a quoted `"name":`) so a one-line JSON is never swallowed; on a dotenv / shell / `--flag=` / bare line a bare value runs WHOLE to the line end (a `)` or `,` in a password is kept hidden)
+      for (let p = headEnd; p < lineEnd; p++) { const c = text.charCodeAt(p); if (c === 44 || c === 125 || c === 93 || c === 41) { valEnd = p; break; } }
     }
     // verify r2 F2: the WHOLE value, to its closing quote or its line end — a cut at VALUE_MAX replaced the first 4096
     // characters and KEPT the rest of the line: a 6 KB bearer JWT (an Azure token), a kubeconfig `client-key-data` of an
@@ -182,6 +186,13 @@ function redactKv(text) {
     const trimmed = val.trimEnd();
     const inner = q ? trimmed.slice(1, trimmed.length > 1 && trimmed.endsWith(q) ? -1 : undefined) : trimmed;
     if (!inner || inner === REDACTED) { KV_HEAD.lastIndex = headEnd; continue; }
+    // round 22/23: a bare scalar a JSON/YAML parser TYPES as a boolean / number / null is NOT a secret (a secret is never `false` or `5` or `null`) — it stays, but ONLY under a `:` key (JSON / YAML), where a parser types it; under `=` (dotenv / shell / `--flag=`) EVERY value is a string, so a numeric password `DB_PASSWORD=84726193` is redacted (round 23 MAJOR). Every other value stays redacted, fail-closed (a string the parser cannot type is a secret). Only the GENERIC name-based pass reaches here — the run's own output is value-based since r21.
+    // round 25 (item 4, refuted-but-real): the typed skip fires ONLY inside a document the belt can PROVE — a JSON object (a QUOTED key, jsonCtx) or an INDENTED YAML mapping entry (the key is the first token on its line, with real leading whitespace) — NEVER a lone `NAME: value`, an HTTP header (`> X-Api-Key: 84726193`), a curl -v line or prose, where a numeric secret is redacted WHOLE (daade1a7 redacted them; r22's `:`-wide skip leaked them in clear)
+    const nameStart = m.index + m[1].length + m[2].length + m[3].length;
+    let bp = nameStart - 1; while (bp >= 0 && (text[bp] === ' ' || text[bp] === '\t')) bp--;   // walk BACK over the indentation only (bounded — the leading whitespace run, never the whole line: linear overall, verify-r3 perf)
+    const indentedYaml = sepColon && !m[3] && bp < nameStart - 1 && (bp < 0 || text[bp] === '\n');   // the key is the first token on its line AND has real indentation ⇒ a provable YAML mapping entry (a top-level / mid-line / header key is not)
+    const provableTyped = jsonCtx || indentedYaml;
+    if (!q && provableTyped && /^(?:true|false|null|-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?)$/i.test(inner)) { KV_HEAD.lastIndex = valEnd; continue; }
     n++;
     out += text.slice(last, headEnd) + (q ? q + REDACTED + q : REDACTED) + val.slice(trimmed.length);
     last = valEnd; KV_HEAD.lastIndex = valEnd;

@@ -211,11 +211,14 @@ function grantOf(raw) {
 /** May THIS caller have THIS entry's code now? `caller` = { conversationId, groups, run } (the vsst_'s conversation, its
  *  Task Groups, its token's digest, `live` false = a view, not a running conversation). Locked first (a locked vault answers
  *  nothing), then the grant: its conversation in THIS run, or one of its Task Groups. → { ok, grant } | { ok: false, code }. */
-function useVerdict({ grants = [], entry = '', caller = null, vaultState = 'locked' } = {}) {
+function useVerdict({ grants = [], entry = '', caller = null, vaultState = 'locked', owner = null } = {}) {
   if (vaultState === 'not_set_up') return named('vault_not_set_up');
   if (vaultState !== 'unlocked') return named('vault_locked');
   if (!caller || !caller.conversationId) return named('unauthorized', 'the calling conversation has no id yet — send it one message first');
   if (caller.live === false) return named('not_running');
+  // lane vault-agent-own: an entry the CALLER added itself (`vibespace-vault totp add` — its `owner` is one of the caller's ids:
+  // the durable conversation id a resume keeps, or its registered one) is its own — no grant, in this run or a later one
+  if (typeof owner === 'string' && owner !== '' && [caller.scope, ...(caller.conv !== undefined ? [caller.conv] : [caller.conversationId])].includes(owner)) return { ok: true, grant: { subject: 'own' }, own: true };   // `conv` = the fork-safe durable id: a pending fork borrows its parent's conversationId
   const subject = `session:${caller.conversationId}`;
   const groups = (Array.isArray(caller.groups) ? caller.groups : []).map((g) => `group:${g}`);
   const g = (grants || []).find((x) => x && x.entry === entry && ((x.subject === subject && !!x.run && x.run === caller.run) || (x.subject.startsWith('group:') && groups.includes(x.subject))));

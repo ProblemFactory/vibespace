@@ -92,16 +92,22 @@ const LOGIN_SOURCES = Object.freeze({
   'vault-minted': { origin: 'mint', label: i18nKey('Registered by an agent · its password made by the vault, never shown'), sawPlaintext: false },
   'agent-typed': { origin: 'put', label: i18nKey('Typed by an agent itself · strength unknown — the agent knows it'), sawPlaintext: true },
 });
+const TOTP_TYPED = i18nKey('Added by an agent itself — the agent saw the seed');   // lane vault-agent-own: `vibespace-vault totp add`
 const FREE_ENTRY_RE = /^secret:[\w.-]{1,160}$/;   // lane vault-paste-request (src/vault-paste.js — the hub's ids are 10 hex characters)
 const FREE_KINDS = Object.freeze(['api-key', 'password', 'secret']);
 function secretRowOf(s, { machineName = (k) => k } = {}) {
   const name = String((s && s.name) || ''), at = s && s.at;
   const nameOf = (k) => { try { return String(machineName(k) || k); } catch { return k; } };
-  for (const r of SECRET_ROWS) { const m = r.re.exec(name); if (m) return { entry: name, field: r.field, kind: r.kind, label: r.label(m[1], nameOf), detail: r.detail, createdAt: at }; }
+  for (const r of SECRET_ROWS) {
+    const m = r.re.exec(name);
+    if (!m) continue;
+    const typed = r.kind === 'totp' && s && s.kind === 'agent-typed';   // lane vault-agent-own: a seed an agent added itself (`vibespace-vault totp add`) — the agent saw it
+    return { entry: name, field: r.field, kind: r.kind, label: r.label(m[1], nameOf), detail: typed ? TOTP_TYPED : r.detail, createdAt: at, ...(typed ? { origin: 'put', provenance: { by: 'agent', prov: 'agent-typed', sawPlaintext: true, actor: s.actor || null, owner: s.owner || null } } : {}) };
+  }
   // lane vault-paste-request: a FREE entry (`secret:<id>` — pasted by the owner in For you at an agent's request, or added
   // in the Vault window's 「其他密钥或密码…」): its row says the label, the kind and the note a person wrote (never a value)
   const wl = WEB_LOGIN_RE.exec(name);
-  if (wl) { const src = Object.prototype.hasOwnProperty.call(LOGIN_SOURCES, s && s.kind) ? s.kind : 'owner'; const p = LOGIN_SOURCES[src]; return { entry: name, field: 'password', kind: 'login', label: `${wl[2]} · ${wl[1].replace(/^https:\/\//, '')}`, detail: p.label, createdAt: at, ...(p.origin ? { origin: p.origin } : {}), ...(src !== 'owner' ? { provenance: { by: 'agent', prov: src, sawPlaintext: p.sawPlaintext, actor: (s && s.actor) || null } } : {}) }; }   // lane browser-login
+  if (wl) { const src = Object.prototype.hasOwnProperty.call(LOGIN_SOURCES, s && s.kind) ? s.kind : 'owner'; const p = LOGIN_SOURCES[src]; return { entry: name, field: 'password', kind: 'login', label: `${wl[2]} · ${wl[1].replace(/^https:\/\//, '')}`, detail: p.label, createdAt: at, ...(p.origin ? { origin: p.origin } : {}), ...(src !== 'owner' ? { provenance: { by: 'agent', prov: src, sawPlaintext: p.sawPlaintext, actor: (s && s.actor) || null, owner: (s && s.owner) || null } } : {}) }; }   // lane browser-login (+ lane vault-agent-own: the conversation that stored it, `owner`)
   if (FREE_ENTRY_RE.test(name)) {
     // lane vault-use-grants: an entry the owner filled at an agent's REQUEST says so — its origin «filled by you · asked for by
     // <the conversation>» and the hosts the request named (the search finds it by either; a vault-use grant's `@entry`)
@@ -113,7 +119,9 @@ function secretRowOf(s, { machineName = (k) => k } = {}) {
   if (am) {
     const prov = AGENT_PROV[s && s.prov] ? s.prov : 'stored';   // default-safe: an unknown provenance is treated as 'the agent saw it'
     const p = AGENT_PROV[prov];
-    return { entry: name, field: 'secret', kind: prov === 'minted' ? 'password' : 'secret', label: `Agent secret · ${am[2]}`, detail: p.label, createdAt: at, provenance: { by: 'agent', prov, sawPlaintext: p.sawPlaintext, actor: (s && s.actor) || null } };
+    // lane vault-agent-own: `origin` says mint or put (provenanceOf's chip read it, the row never carried it: a PUT showed «never
+    // shown»); `forHost` = the host a minted value was made for (the run door's one remaining question)
+    return { entry: name, field: 'secret', kind: prov === 'minted' ? 'password' : 'secret', label: `Agent secret · ${am[2]}`, detail: p.label, createdAt: at, origin: prov === 'minted' ? 'mint' : 'put', provenance: { by: 'agent', prov, sawPlaintext: p.sawPlaintext, actor: (s && s.actor) || null, ...(prov === 'minted' && s && s.forHost ? { forHost: String(s.forHost).slice(0, 200) } : {}) } };
   }
   return null;
 }
