@@ -2,7 +2,7 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
-## 2.369.361 — 2026-10-28
+## 2.369.361 — 2026-10-29
 
 ### Fixed
 - A Claude CLI update no longer quietly drops accounts from a pool: an unmeasured CLI version is explained in For you, and those accounts keep their logins.
