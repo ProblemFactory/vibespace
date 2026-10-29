@@ -175,6 +175,24 @@ export async function takeCspReports(match, { ms = 5000, step = 100, want = 1 } 
     await new Promise((r) => setTimeout(r, step));
   }
 }
+/** A SUITE'S OWN PROBE IS NEVER COUNTED AS THE APP'S (lane ci-mirror-hygiene, 2.369.362 — the mirror's Chrome 156 ran
+ *  test-chat-mermaid-chrome red on 2.369.361, both tries, on its OWN XSS probe). A hostile payload a suite plants ON THE
+ *  APP PAGE to prove the product drops it can still be REPORTED: the product's sanitizer parses it in an inert document,
+ *  and since Chrome 156 a dropped inline handler is reported when its attribute is SET (evalInBlankTab) — nothing ran.
+ *  One browser files that report, another does not, so it is EXPECTED — keyed by the probe's own payload: `key` names all
+ *  of PROBE_KEY_FIELDS (`sample` = the payload's handler text, the browser's ≤ 40-character cut; `source` = the code that
+ *  set it; `document` = the app page) and a line must match every one exactly; a key that names fewer throws (it would
+ *  take somebody else's report). Called once the reports have landed (a report-uri post takes ~0.4 s): the matching
+ *  lines are taken out of this suite's file → { taken, ok } — `ok` = none (a browser that does not report it, Chrome
+ *  154) or EXACTLY one. A line that differs in any field is not taken: the suite's legs and the teardown name it, red.
+ *  Never a wider policy, never a dropped probe, never a leg skipped by the browser's version. */
+export const PROBE_KEY_FIELDS = Object.freeze(['directive', 'blocked', 'sample', 'source', 'document']);
+export async function takeProbeCspReport(key, { ms = 0 } = {}) {
+  const missing = PROBE_KEY_FIELDS.filter((k) => typeof key?.[k] !== 'string' || !key[k]);
+  if (missing.length) throw new Error(`takeProbeCspReport: the key names no ${missing.join(' / ')} — a probe's report is keyed by its own payload`);
+  const taken = await takeCspReports((r) => PROBE_KEY_FIELDS.every((k) => r[k] === key[k]), { ms, want: 1 });
+  return { taken, ok: taken.length <= 1 };
+}
 /** WHAT a report line names, in words (lane chrome-156-drift — the runner's line «script-src-attr inline, line 1 column
  *  101, source ""» named no element): the directive, the code's own SAMPLE (src/app-csp.js 'report-sample'; a suite's hub
  *  keeps it), where the code that set it ran — a line with no source is a script with no URL, the SUITE's own

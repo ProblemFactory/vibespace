@@ -158,8 +158,8 @@ else { setInterval(() => {}, 1000); new Worker(new URL(import.meta.url)); consol
   ok(SHAPES.every((x) => rawText.includes(x)), 'CONTROL (RED): the same suite reported WITHOUT --report-exclude-env carries the planted token shapes — the census reads what it claims to');
   // WIRING: both tiers arm every suite, the heavy one per try, into the run's fail-log dir
   const CI = fs.readFileSync(path.join(REPO, 'scripts', 'ci.mjs'), 'utf-8');
-  ok(/const hangDir = path\.join\(markerDir\(\), 'fail-logs'\);/.test(CI) && /await runSuiteAsync\(s, \{ root: runRoot, absentIsSkip: !!isolate, sha, lane, inflight, hang: \{ dir: hangDir, attempt: 1 \} \}\)/.test(CI),
-    'WIRING: the fast tier arms every suite (its reports where the heavy tier keeps fail logs)');
+  ok(/const hangDir = fastFailDir\(\);/.test(CI) && /await runSuiteAsync\(s, \{ root: runRoot, absentIsSkip: !!isolate, sha, lane, inflight, hang: \{ dir: hangDir, attempt: 1 \} \}\)/.test(CI),
+    'WIRING: the fast tier arms every suite (its reports in its own fail-log dir, data/ci-fast/fail-logs — beside a red suite\'s whole output)');
   ok(/runSuiteAsync\(s, \{ root: runRoot, absentIsSkip: !!isolate, sha, lane, inflight, hang: \{ dir: path\.join\(d, 'fail-logs'\), attempt: 1 \} \}\)/.test(CI) && /runSuiteAsync\(s, \{ root: runRoot, sha, lane, inflight, hang: \{ dir: path\.join\(d, 'fail-logs'\), attempt: 2 \} \}\)/.test(CI),
     'WIRING: the heavy tier arms try 1 and the in-row retry (try 2) into <markers>/fail-logs — hub, hosted, the AIDev batch (ci-remote copies fail-logs back)');
 }
