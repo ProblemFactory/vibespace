@@ -138,7 +138,7 @@ check('files/errors/running composition', S.runSummaryLabel({ byKind: S.countKin
     && /commandHeadWords\(agentCommandText\(el\._rawMsg\?\.content\?\.\[0\]\?\.input\)\)/.test(read('src/lib/chat-view.js')));
 }
 check('mcpParts splits mcp__server__tool and rejects the rest', JSON.stringify(S.mcpParts('mcp__a__b_c')) === '{"server":"a","tool":"b_c"}' && S.mcpParts('Bash') === null && S.mcpParts('') === null);
-check('the pure module imports nothing but PURE rules (DOM-free by construction; B-40f8: src/assistant-note.js; lane exit-calls-in-history: src/exit-call.js; lane touch-chip-cause r2: src/channel-touch.js — where a command line runs the channels CLI)', (read('src/lib/chat-run-summary.js').match(/^\s*import .*$/gm) || []).every((l) => /from '\.\.\/(?:assistant-note|exit-call|channel-touch)\.js';/.test(l)));
+check('the pure module imports nothing but PURE rules (DOM-free by construction; B-40f8: src/assistant-note.js; lane exit-calls-in-history: src/exit-call.js; lane touch-chip-cause r2: where a command line runs the channels CLI — src/shell-words.js, the PURE scanner, never src/channel-touch.js)', (read('src/lib/chat-run-summary.js').match(/^\s*import .*$/gm) || []).every((l) => /from '\.\.\/(?:assistant-note|exit-call|shell-words)\.js';/.test(l)));
 
 // ── inc-mudv05ja-n5rv: WHEN THE FOLD PASS RUNS — the PURE classifier ─────────
 {
