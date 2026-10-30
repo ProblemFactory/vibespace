@@ -548,13 +548,28 @@ async function forceScope(why) {
 }
 // round 7: what OUR SIGTERM reached and when (`pid:start` → ms) — each process's grace runs from its own SIGTERM; a row of a fresh
 // /proc scan, its start re-read at the act (same). Round 9: ONE SIGNAL PER PID PER STOP STEP — EVERY delivery of the stop goes
-// through termOnce (the job's main its own signal, the group's, the scope's, a stopped service's escapees): recorded, a second
+// through termOnce (the group's, the scope's, a stopped service's escapees; round 10: the job's main through termMain, by its handle): recorded, a second
 // refused (round 8 forwarded the main's signal, then its group loop SIGTERMed it again 13 ms later — a graceful cleanup cut off,
 // code 143); true when it was delivered
 const termed = new Map();
 const termKey = ([pid, st]) => `${pid}:${st}`;
 const termOnce = (p, sig = 'SIGTERM') => { if (termed.has(termKey(p)) || !same(p)) return false; termed.set(termKey(p), Date.now()); try { process.kill(p[0], sig); return true; } catch { return false; } };
 const rowOf = (pid) => { const r = pid ? statOf(pid) : null; return r && r[0] !== 'Z' ? [Number(pid), Number(r[19]), Number(r[2])] : null; }; // [pid, start, pgid]
+// round 10: THE MAIN IS THE HANDLE WE SPAWNED — never a pid read again: signalled only while the handle is live (exitCode and
+// signalCode null: not reaped, so its pid is no other process's), nothing after its 'exit' (r9 re-read /proc/<pid>/stat after
+// the reap — a Stop racing the job's own end, a signal to us while we drained: whoever held that pid since got the job's stop,
+// recorded «mainBy wrapper»)
+const mainLive = () => !!child && !exited && child.exitCode === null && child.signalCode === null;
+const termMain = (p, sig) => { if (termed.has(termKey(p)) || !mainLive()) return false; termed.set(termKey(p), Date.now()); try { process.kill(child.pid, sig); return true; } catch { return false; } };
+// round 10: the manager's kill of the scope is a delivery too — recorded, once per stop step (r9 sent a natural end's leftovers
+// their SIGTERM by it unrecorded: a stop while they drained SIGTERMed them again)
+let scopeSent = 0;
+const scopeTerm = (sig) => { if (scopeSent) return Promise.resolve(false); scopeSent = Date.now(); return scopeKill(sig); };
+// round 10: A STOP GOES ONCE — what this wrapper delivers itself (its own stop step, or the drain of what its ended job left) is
+// said beside its stamp (stopping.json): the engine's stop then signals THIS process alone, the intent saying so (`alone`), and
+// the rest hears it through the one table — never the engine's group signal again on what already heard one (r9: Stop pressed
+// while a task's leftovers drained, or after an agent's SIGINT to us — a cleanup cut off by a second signal, code 143)
+const markStopping = (by) => { try { fs.writeFileSync(path.join(ctlDir, 'stopping.json'), JSON.stringify({ at: Date.now(), by })); } catch { } };
 const killNow = (p) => { if (!same(p)) return false; try { process.kill(p[0], 'SIGKILL'); return true; } catch { return false; } }; // round 8: by force, its start re-read
 // round 8: WHO SIGNALLED WHOM — the engine writes its intent (stop.json), THEN signals our whole group (we are in it): a signal our
 // handler hears beside a FRESH intent is the engine's, and every member heard it with us; a signal with no fresh intent is ours
@@ -570,23 +585,27 @@ let stopBy = '', heard = null, mainBy = '';
 function onStop(sig, at, by) {
   if (stopping) return;
   stopping = sig; stopAt = at; stopBy = by;
+  markStopping(by);
   // round 9: A SIGNAL GOES TO A PROVEN IDENTITY, NEVER ASSUMED DELIVERED — the engine's group signal reached what is in OUR group
   // NOW (its pgid ours, read at the stop): marked, never signalled again. Everything else hears the stop from us, once: the job's
   // main its own signal (round 8 assumed the engine's reached it — a main that left our group (setsid) was sent none, killed at
   // the grace under «did not end on SIGTERM»), then the rest SIGTERM. The cgroup rung: THE SCOPE IS THE GROUP — its processes one
   // by one through the same table (round 4's `systemctl kill` of the scope sent the stop AGAIN to all the engine's signal had
   // reached: the main heard it twice, 3 ms apart); a scope whose list cannot be read, the manager's kill (as before)
-  const main = rowOf(child && child.pid); // the main first — its own stat names its group (no walk before it hears the stop)
+  const main = mainLive() ? rowOf(child.pid) : null; // the main first — its own stat names its group (no walk before it hears the stop)
   if (main && by === 'engine' && main[2] === process.pid) termed.set(termKey(main), at);
-  mainBy = !main ? '' : termed.has(termKey(main)) ? 'engine' : termOnce(main, sig) ? 'wrapper' : '';
+  mainBy = main ? (termed.has(termKey(main)) ? 'engine' : termMain(main, sig) ? 'wrapper' : '') : child && !mainLive() ? 'ended' : '';
   const listed = scoped() ? scopeRows() : null;
   const rows = scoped() ? listed || [] : groupLeft().map(([p, st]) => [p, st, process.pid]); // our group's: its pgid ours
   if (by === 'engine') for (const p of rows) if (p[2] === process.pid && !termed.has(termKey(p))) termed.set(termKey(p), at);
-  const who = by === 'engine' ? `the engine signalled its process group${mainBy === 'wrapper' ? '; its main process had left that group — the wrapper signals it' : ''}` : by === 'intent' ? "the engine's stop never reached its group — the wrapper signals it" : 'a signal to the wrapper alone — the wrapper signals its group';
-  try { fs.writeSync(logFd, Buffer.from(`\n[job-wrapper] stop: ${sig} — ${stopMs / 1000} s to end (${who})\n`)); } catch { }
+  const who = by === 'engine' ? `the engine signalled its process group${mainBy === 'wrapper' ? '; its main process had left that group — the wrapper signals it' : ''}`
+    : by === 'intent' ? "the engine's stop never reached its group — the wrapper signals it"
+      : by === 'alone' ? "the engine's stop reached the wrapper alone, already stopping what its job left — the wrapper signals the rest, once"
+        : 'a signal to the wrapper alone — the wrapper signals its group';
+  try { fs.writeSync(logFd, Buffer.from(`\n[job-wrapper] stop: ${sig} — ${stopMs / 1000} s to end (${who}${mainBy === 'ended' ? '; its main process had already ended' : ''})\n`)); } catch { }
   for (const p of rows) termOnce(p); // what the engine's signal did not reach — every member, for a stop not the engine's
-  if (scoped() && !listed) scopeKill(sig);
-  const on = mainBy ? ` on ${sig}` : ''; // «did not end on SIGTERM» only when one reached it
+  if (scoped() && !listed) scopeTerm(sig);
+  const on = mainBy === 'engine' || mainBy === 'wrapper' ? ` on ${sig}` : ''; // «did not end on SIGTERM» only when one reached it
   const left = Math.max(0, at + stopMs - Date.now());
   if (!scoped()) { // round 6: a rung without a scope — the job's group is OURS to end at the grace, said (drainGroup takes what
     // the job left in it); the engine's kill step is a backstop for a wrapper that cannot (a second later). Round 7: the group
@@ -606,12 +625,12 @@ function scopeRows() {
 }
 for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => {
   const s = stopIntent(), engine = !!s && Date.now() - s.at <= INTENT_FRESH_MS; // round 8: the engine's — its clock is the intent's
-  onStop(sig, engine ? s.at : Date.now(), engine ? 'engine' : 'signal');
+  onStop(sig, engine ? s.at : Date.now(), engine ? (s.alone ? 'alone' : 'engine') : 'signal');
   if (heard) heard();
 });
 /** the engine's stop intent for THIS run (its ctl dir), or null */
 function stopIntent() {
-  try { const s = JSON.parse(fs.readFileSync(path.join(ctlDir, 'stop.json'), 'utf8')); return { sig: /^SIG[A-Z]{2,6}$/.test(s.sig) ? s.sig : 'SIGTERM', at: Number(s.at) > 0 && Number(s.at) <= Date.now() ? Number(s.at) : Date.now() }; } catch { return null; }
+  try { const s = JSON.parse(fs.readFileSync(path.join(ctlDir, 'stop.json'), 'utf8')); return { sig: /^SIG[A-Z]{2,6}$/.test(s.sig) ? s.sig : 'SIGTERM', at: Number(s.at) > 0 && Number(s.at) <= Date.now() ? Number(s.at) : Date.now(), alone: s.alone === true }; } catch { return null; }
 }
 // THE END IS WRITTEN ONCE THE SCOPE IS EMPTY (the cgroup rung): the keeper is let go (its events read), then — round 5, the
 // ruling of 2026-10-27 (a job's scope IS the job) — at a natural end what still runs in the scope is what the job LEFT: a
@@ -630,7 +649,7 @@ async function drainScope() {
     const rows = procs.map((p) => [Number(p), Number((statOf(p) || [])[19])]).filter((r) => r[1] > 0).slice(0, 64);
     return { left: { n: left, kept: true, pids: rows, boot: bootId(), ...(rows.length < left ? { recorded: rows.length } : {}) }, scopeEmpty: false };
   }
-  if (left) await scopeKill('SIGTERM');
+  if (left) { const rows = scopeRows(); if (rows) for (const p of rows) termOnce(p); else await scopeTerm('SIGTERM'); } // round 10: recorded, one by one
   const deadline = (stopping ? stopAt : Date.now()) + stopMs;
   while (procsOf(scopeDir).length && Date.now() < deadline) await nap(25);
   const still = procsOf(scopeDir).length, s = still === 1 ? '' : 'es', was = still === 1 ? 'was' : 'were';
@@ -711,6 +730,7 @@ async function drainGroup() {
 async function ended(code, signal) {
   if (exited) return;
   exited = true;
+  if (!stopping) markStopping('drain'); // round 10: what the job left hears its SIGTERM from us — the engine's stop then signals us alone
   // round 7: the stop in flight, whatever ran first. Round 8: the intent is a stop the engine MEANT — its group signal reaches us
   // too: waited a little; heard ⇒ the engine's (our handler said so); not heard ⇒ nobody delivered it — we do, the grace from now
   if (!stopping) {

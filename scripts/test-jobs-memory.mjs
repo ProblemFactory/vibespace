@@ -595,14 +595,15 @@ leg('§3 IN-PROCESS ㊳ A CUT SCAN PROVES NOTHING — AND IS AN ANSWER: what a s
   for (const x of [j, k]) MEMBERS.set(x.id, (q) => { walks[x.id]++; if (x === j) asked = q; return Object.assign([], { scan: cut[x.id] ? { scanned: 3000, total: 3100, unreadable: 0, others: 0, cut: true } : { scanned: 3100, total: 3100, unreadable: 3, others: 2, cut: false } }); });
   const notices = (x) => said.filter((n) => n.jobId === x.id && /cannot prove the previous run is gone/.test(n.text || '')).length;
   const doorW = (x) => new RegExp(`^cannot prove the previous run is gone \\(could not check 100 of 3100 processes for what it left running\\) — not restarted; if it is gone: vibespace-job stop ${x.id}, then start it again; if it runs: it keeps running$`);
-  const t0 = Date.now();
-  E.start(j); E.start(k); await until(() => !j._starting && !k._starting, 1500, 5);
-  const ms = Date.now() - t0, l = j.runs[0].left;
-  ok(walks[j.id] === 1 && ms < 1000 && !l.gone && !l.cleared && l.cut && l.cut.at > 0 && E._pending(j, j.runs[0]) && !E.spawned.length && E.events.filter((e) => e.jobId === j.id && doorW(j).test(e.what || '')).length === 1 && notices(j) === 1 && !!asked && JSON.stringify(asked.first) === JSON.stringify([DEAD]),
-    `ONE walk per decision, its answer STAMPED, the start refused at once by the doubt's door — ${walks[j.id]} walk(s), ${ms} ms of a 2 s grace, «${(E.events.find((e) => e.jobId === j.id && /cannot prove/.test(e.what || '')) || {}).what}», ONE For-you notice; the record's own pids asked first (887e8d66: two walks every 50 ms until the grace, then held unsaid by the door)`, { walks, ms, left: l, spawned: E.spawned });
-  const r2 = E.start(j); await until(() => !j._starting, 1500, 5);
-  ok(walks[j.id] === 2 && /cannot be proven gone \(could not check 100 of 3100 processes for what it left running\)/.test(r2.after || '') && !E.spawned.length && notices(j) === 1 && E.events.filter((e) => e.jobId === j.id && doorW(j).test(e.what || '')).length === 1,
-    `a later start is a new decision: ONE walk more — still cut, refused («${r2.after}»), nothing said twice, no second notice`, { walks, r2 });
+  // round 10: AT ONCE is the decision itself — the start's own ANSWER is the refusal (its one walk ran in its own tick), never a
+  // millisecond count (8ad58d8b timed it — a wall-clock bound in a fast suite, test-ci-gate §2e red)
+  const r1 = E.start(j), walked1 = walks[j.id]; E.start(k); await until(() => !j._starting && !k._starting, 1500, 5);
+  const l = j.runs[0].left;
+  ok(walked1 === 1 && doorW(j).test(r1.error || '') && !r1.ok && walks[j.id] === 1 && !l.gone && !l.cleared && l.cut && l.cut.at > 0 && E._pending(j, j.runs[0]) && !E.spawned.length && E.events.filter((e) => e.jobId === j.id && doorW(j).test(e.what || '')).length === 1 && notices(j) === 1 && !!asked && JSON.stringify(asked.first) === JSON.stringify([DEAD]),
+    `ONE walk per decision, its answer STAMPED, the start refused in its own answer by the doubt's door — ${walks[j.id]} walk(s), «${r1.error}» — the journal says the same once, ONE For-you notice; the record's own pids asked first (887e8d66: two walks every 50 ms until the grace, then held unsaid by the door; 8ad58d8b: answered «ok»)`, { walks: { ...walks }, r1, left: l, spawned: E.spawned });
+  const r2 = E.start(j), walked2 = walks[j.id]; await until(() => !j._starting, 1500, 5);
+  ok(walked2 === 2 && doorW(j).test(r2.error || '') && !r2.ok && !E.spawned.length && notices(j) === 1 && E.events.filter((e) => e.jobId === j.id && doorW(j).test(e.what || '')).length === 1,
+    `a later start is a new decision: ONE walk more — still cut, its answer the refusal («${r2.error}»), nothing said twice, no second notice (8ad58d8b: «ok — it starts only once it is», and nothing walked again)`, { walked2, r2 });
   cut[j.id] = false; // the next walk finishes
   E.start(j); await until(() => E.spawned.length, 1500, 5);
   ok(walks[j.id] === 3 && l.gone > 0 && !l.cut && E.spawned.length === 1 && E.spawned[0].id === j.id && journal(E, j, /^what its last run left running had already ended — nothing stopped \(its mark searched in 3100 processes; unreadable: 2 of other users, 1 of ours, not dumpable\)$/),
@@ -613,6 +614,57 @@ leg('§3 IN-PROCESS ㊳ A CUT SCAN PROVES NOTHING — AND IS AN ANSWER: what a s
   E.start(k); await until(() => E.spawned.length === 2, 1500, 5);
   ok(E.spawned.length === 2 && E.spawned[1].id === k.id && walks[k.id] === 3, 'then its start goes (its own walk once more: what can be found of it is stopped first)', { walks, spawned: E.spawned });
   for (const x of [j, k]) MEMBERS.delete(x.id);
+  stopEngine(E);
+});
+
+leg('§3 IN-PROCESS ㊵ A CUT WALK OF THE PARK\'S OR THE STOP\'S OWN CLEAR IS SAID AT ONCE — a service parked (its crashes, its memory) whose last run KEPT a process, the walk cut: the doubt\'s door says it in the journal and the log at once with ONE For-you notice, and the person\'s start then answers that refusal, nothing said twice; a service its owner stopped says the person\'s word ended it (8ad58d8b: stamped silently — nothing said until someone pressed start)', async (ok) => {
+  const dir = tmp('vs-jobs-mem-'), E = engine(dir, { memorySample: { stopMs: 2000 } });
+  const left = { n: 1, kept: true, pids: [[DEAD, 12345]], boot: BOOT };
+  const end = (id, how) => { // a run that ends NOW keeping a process — judged by the engine's own _finalizeRun
+    const j = deadJob(dir, id, { kind: 'service', desiredUp: how !== 'stopped', restart: 'on-failure', extra: { supervise: how === 'crash' ? { consecutiveFails: M.SUPERVISE.failCap - 1 } : how === 'memory' ? { consecutiveFails: 0, oomEnds: M.MEMORY.parkAfter - 1 } : { consecutiveFails: 0 } } });
+    j.runs[0].startedAt = Date.now() - 5000; const ctl = path.join(dir, 'job-logs', id, String(j.runs[0].startedAt)); fs.mkdirSync(ctl, { recursive: true });
+    fs.writeFileSync(path.join(ctl, 'pid.json'), JSON.stringify({ pid: DEAD, starttime: 1, bootId: BOOT, startedAt: j.runs[0].startedAt })); fs.writeFileSync(path.join(ctl, 'current.log'), ''); j.runs[0].log = path.join(ctl, 'current.log');
+    const exit = how === 'memory' ? { code: null, signal: 'SIGKILL', endedAt: Date.now(), memory: { by: 'rlimit', mb: 512, cause: 'oom-bound', how: 'rlimit' }, left } : { code: 1, signal: null, endedAt: Date.now(), memory: { by: 'none', mb: 0 }, left };
+    fs.writeFileSync(path.join(ctl, 'exit.json'), JSON.stringify(exit));
+    E.jobs.set(j.id, j); MEMBERS.set(j.id, () => Object.assign([], { scan: { scanned: 3000, total: 3100, unreadable: 0, others: 0, cut: true } }));
+    E._finalizeRun(j, j.runs[0], exit, 'sweep');
+    return j;
+  };
+  const door = (j) => new RegExp(`^cannot prove the previous run is gone \\(could not check 100 of 3100 processes for what it left running\\) — not restarted; if it is gone: vibespace-job stop ${j.id}, then start it again; if it runs: it keeps running$`);
+  const doubts = (j) => said.filter((n) => n.jobId === j.id && /cannot prove the previous run is gone/.test(n.text || '')).length;
+  const [c, m, s] = [end('jb-parkcut1', 'crash'), end('jb-parkcut2', 'memory'), end('jb-stopcut1', 'stopped')];
+  await until(() => doubts(c) && doubts(m) && s.runs[0].doubtOver, 1500, 5);
+  for (const j of [c, m]) {
+    const lines = E.events.filter((e) => e.jobId === j.id && door(j).test(e.what || '')).length;
+    ok(j.state === 'failed' && lines === 1 && logs.some((x) => x.includes(j.id) && /cannot prove the previous run is gone \(could not check 100 of 3100/.test(x)) && doubts(j) === 1,
+      `${j.id === c.id ? 'parked after its crashes' : 'parked out of memory'}, its leftovers' walk CUT: said at once — journal and log, ONE For-you notice (8ad58d8b: nothing anywhere)`, E.events.filter((e) => e.jobId === j.id).map((e) => e.what));
+  }
+  ok(journal(E, s, /^stopped by its owner — what its last run left was not proven gone \(could not check 100 of 3100 processes for what it left running\); it may start again$/) && !doubts(s),
+    'a service its owner stopped: said at once — the person\'s word ended the hold, no notice to the person who did it', E.events.filter((e) => e.jobId === s.id).map((e) => e.what));
+  const r = E.start(c); await until(() => !c._starting, 1500, 5);
+  ok(door(c).test(r.error || '') && !E.spawned.length && doubts(c) === 1 && E.events.filter((e) => e.jobId === c.id && door(c).test(e.what || '')).length === 1,
+    `the person's start then: its answer the same refusal («${r.error}»), nothing said twice, no second notice`, r);
+  for (const j of [c, m, s]) MEMBERS.delete(j.id);
+  stopEngine(E);
+});
+
+leg('§3 IN-PROCESS ㊼ A STOP STEP IS IDEMPOTENT, AND A STOP GOES ONCE — Stop pressed twice: one SIGTERM to the group, the second press delivers nothing and says «already stopping (k s left)»; a wrapper already delivering a stop step itself (its stopping.json — its own stop, or the drain of what its ended job left) is signalled ALONE, the intent saying so (8ad58d8b: the whole group signalled again on every press — a cleanup cut off by its second SIGTERM)', async (ok) => {
+  const dir = tmp('vs-jobs-mem-'), E = engine(dir, { memorySample: { stopMs: 2000 } });
+  // a wrapper no process is (its pid past pid_max): proven alive to THIS engine only, its signals recorded, never sent
+  const FAKE = DEAD + 47, calls = [], real = PIM.signalIdentity, alive = E._verifyAlive.bind(E);
+  E._verifyAlive = (st) => (!!st && st.pid === FAKE) || alive(st);
+  PIM.signalIdentity = (id, sig, o = {}) => (Number(id && id.pid) === FAKE ? (calls.push({ sig, group: !!o.group }), { ok: true, target: o.group ? -FAKE : FAKE }) : real(id, sig, o));
+  try {
+    const live = (id) => { const j = deadJob(dir, id); fs.writeFileSync(path.join(path.dirname(j.runs[0].log), 'pid.json'), JSON.stringify({ pid: FAKE, starttime: 1, bootId: BOOT, startedAt: j.runs[0].startedAt })); E.jobs.set(j.id, j); return j; };
+    const a = live('jb-stoptwice'), r1 = E.stop(a), r2 = E.stop(a);
+    ok(r1.ok && r1.hadProc && !r1.already && r2.ok && /^already stopping \(\d+ s left\)$/.test(r2.already || '') && calls.length === 1 && calls[0].group && calls[0].sig === 'SIGTERM',
+      `pressed twice: ONE SIGTERM to its group (${calls.length} sent), the second press «${r2.already}» (8ad58d8b: 2 — the group signalled again)`, { r1, r2, calls: [...calls] });
+    const b = live('jb-stopalone'), ctl = path.dirname(b.runs[0].log); calls.length = 0;
+    fs.writeFileSync(path.join(ctl, 'stopping.json'), JSON.stringify({ at: Date.now(), by: 'drain' })); // the wrapper drains what its ended job left
+    const r3 = E.stop(b), intent = JSON.parse(fs.readFileSync(path.join(ctl, 'stop.json'), 'utf8'));
+    ok(r3.ok && r3.hadProc && calls.length === 1 && !calls[0].group && calls[0].sig === 'SIGTERM' && intent.alone === true,
+      'a wrapper already delivering a stop step: the stop signals IT alone, the intent says so (`alone`) — its one table delivers the rest (8ad58d8b: the group again — a leftover mid-cleanup heard SIGTERM twice)', { r3, calls: [...calls], intent });
+  } finally { PIM.signalIdentity = real; }
   stopEngine(E);
 });
 

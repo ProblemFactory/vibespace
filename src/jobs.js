@@ -1114,7 +1114,14 @@ class JobManager {
    *  pid.json: the engine signals the wrapper's GROUP, so the wrapper may handle its child's end before its own signal handler
    *  runs — the intent tells it a stop is in flight all the same (a service's leftovers are stopped with it, not kept) */
   _termRun(job, run) {
-    if (run && !run.endedAt) { try { writeJsonAtomic(path.join(this._ctlDir(job, run.startedAt), 'stop.json'), { sig: 'SIGTERM', at: now() }); } catch { } }
+    if (run && !run.endedAt) {
+      // round 10: A STOP GOES ONCE — a wrapper already delivering a stop step itself (its stopping.json: its own stop, an agent's
+      // signal to it; or the drain of what its ended job left) is signalled ALONE, the intent saying so — it delivers the rest
+      // through its one table (round 9 signalled the whole group again: a process mid-cleanup heard SIGTERM twice, code 143)
+      const ctl = this._ctlDir(job, run.startedAt), alone = !!this._ctlJson(job, run, 'stopping.json');
+      try { writeJsonAtomic(path.join(ctl, 'stop.json'), { sig: 'SIGTERM', at: now(), ...(alone ? { alone: true } : {}) }); } catch { }
+      if (alone) { const stamp = this._readStamp(job); return this._verifyAlive(stamp) && PI.signalIdentity(stamp, 'SIGTERM', { what: `job ${job.id}'s wrapper` }).ok; }
+    }
     return this._killGroup(job, 'SIGTERM');
   }
   /** ITS WRAPPER IS PROVEN GONE (round 7) — a reap's precondition: the run's pid.json read and whole, and its process not there
@@ -1277,6 +1284,10 @@ class JobManager {
         return found;
       };
       term(recorded); term(scan());
+      // round 10: the first walk's answer is known NOW — a cut one stamped at once (the start that asked answers its refusal in
+      // its own tick, never «ok»), a finished one lifts an older stamp; the clear's end keeps it (said with what it then knew)
+      if (seen && seen.cut) l.cut = { at: now(), why: `could not check ${seen.total - seen.scanned} of ${seen.total} processes for what it left running${sent.size ? `; ${sent.size} found and stopped` : ''}` };
+      else delete l.cut;
       let live = [...sent.values()];
       while (live.length && now() < until) { await pause(50); live = live.filter((id) => PI.aliveIdentity(id) === true); }
       // round 9: the second walk only after a grace something lived through — nothing signalled, nothing could fork since: the
@@ -1296,7 +1307,7 @@ class JobManager {
     // hub's loop 91 % stalled). A later decision (a start, the person's stop, a boot) walks once more; a finished walk ends it
     run._clearSent = (run._clearSent || 0) + n; n = run._clearSent;
     if (seen && seen.cut) {
-      l.cut = { at: now(), why: `could not check ${seen.total - seen.scanned} of ${seen.total} processes for what it left running${n ? `; ${n} found and stopped` : ''}` };
+      if (!l.cut) l.cut = { at: now(), why: `could not check ${seen.total - seen.scanned} of ${seen.total} processes for what it left running${n ? `; ${n} found and stopped` : ''}` }; // the late walk's cut
       this._dirty = true;
       return;
     }
@@ -1344,8 +1355,8 @@ class JobManager {
    *  scope), or whose doubt a person's stop ended (`doubtOver`) is no doubt; a wrapper proven ALIVE is _besideLive's */
   _runDoubt(job, run) {
     if (!run || !run.endedAt || run.doubtOver) return '';
-    const l = run.left; // round 9: what it KEPT, searched in only part of /proc — the stamped answer of the last walk
-    if (l && l.kept && l.cut && !l.cleared && !l.gone) return String(l.cut.why || 'a search of /proc was cut short');
+    const cut = this._cutOf(run); // round 9: what it KEPT, searched in only part of /proc — the stamped answer of the last walk
+    if (cut) return cut;
     if (run._scopeEmpty) return '';
     if (this._readExit(job, run)) return '';
     const why = this._wrapperUnproven(this._ctlJson(job, run, 'pid.json'));
@@ -1355,12 +1366,21 @@ class JobManager {
    *  may still run (r7's _besideLive read the same unreadable stamp and answered «not live»: two wrappers, two scopes). Said
    *  once per run, and ONE For-you notice per run (kept on the run: a later boot files none). A doubt ends only by a look that
    *  CAN read the stamp (a boot, a start), the run's scope read empty (the person's systemctl kill), or the person's stop */
+  /** round 10: the stamped cut of what a run kept ('' when none, or a person's stop ended it) — ONE reader for the door and start */
+  _cutOf(run) {
+    const l = run && run.left;
+    return l && l.kept && l.cut && !l.cleared && !l.gone && !run.doubtOver ? String(l.cut.why || 'a search of /proc was cut short') : '';
+  }
+  /** round 10: the doubt's door in words — the journal line, the For-you notice and a refused start's answer say the same */
+  _ifGone(job, run) {
+    const scope = this._runScope(job, run);
+    return scope ? `systemctl --user kill --signal=KILL ${scope.unit} (or vibespace-job stop ${job.id})` : `vibespace-job stop ${job.id}`;
+  }
+  _doorWords(job, run, why) { return `cannot prove the previous run is gone (${why}) — not restarted; if it is gone: ${this._ifGone(job, run)}, then start it again; if it runs: it keeps running`; }
   _doubtBlocks(job, run, trigger) {
     const why = this._runDoubt(job, run);
     if (!why) return false;
-    const scope = this._runScope(job, run);
-    const ifGone = scope ? `systemctl --user kill --signal=KILL ${scope.unit} (or vibespace-job stop ${job.id})` : `vibespace-job stop ${job.id}`;
-    const what = `cannot prove the previous run is gone (${why}) — not restarted; if it is gone: ${ifGone}, then start it again; if it runs: it keeps running`;
+    const ifGone = this._ifGone(job, run), what = this._doorWords(job, run, why);
     if (run._doubtSaid !== why) { run._doubtSaid = why; this.d.log(`[jobs] ${job.id} ${what} (${trigger})`); this._touch(job, { what }); }
     if (!run.doubtNoticed) {
       run.doubtNoticed = now(); this._dirty = true;
@@ -1990,7 +2010,15 @@ class JobManager {
       if (!routineCronOk && job.state !== 'interrupted') this._notifyOwner(job, { what: evText });
     }
     // round 5 (the ruling): a service keeps what its run left only while it runs — stopped or parked, they are stopped too
-    if (job.kind === 'service' && left && left.kept && (!job.desiredUp || job.state === 'failed')) this._clearKept(job, run).catch(() => { });
+    if (job.kind === 'service' && left && left.kept && (!job.desiredUp || job.state === 'failed')) this._clearKept(job, run).then(() => this._cutSaid(job, run)).catch(() => { });
+  }
+  /** round 10: A CUT WALK OF THE PARK'S OR THE STOP'S OWN CLEAR IS SAID AT ONCE — never only when someone presses start (round 9
+   *  stamped it silently; the base said it): a parked service by the doubt's door (its journal line, ONE For-you notice — a later
+   *  start says nothing twice), a stopped one by the person's word (_stopDoubt: said, the hold ended) */
+  _cutSaid(job, run) {
+    if (!this._cutOf(run)) return;
+    if (job.state === 'failed') { this._doubtBlocks(job, run, 'parked'); return; }
+    return this._stopDoubt(job, run);
   }
 
   // ── sweeps ──────────────────────────────────────────────────────────────
@@ -2286,6 +2314,12 @@ class JobManager {
     job._stopRequested = true;
     if (job.kind === 'service') this._teardownPublish(job);
     const run = job.runs && job.runs[job.runs.length - 1];
+    // round 10: A STOP STEP IS IDEMPOTENT — pressed again while its SIGTERM's grace runs, it delivers nothing and says so (round 9
+    // and before signalled the whole group again on every press: a cleanup cut off by its second SIGTERM, code 143)
+    if (!force && job._termAt && this._runLive(job, run)) {
+      this._touch(job); this._save();
+      return { ok: true, hadProc: true, already: `already stopping (${Math.max(0, Math.ceil((job._termAt + this._killStepMs() - now()) / 1000))} s left)` };
+    }
     const scope = run && !run.endedAt ? this._runScope(job, run) : null; // round 4: the cgroup rung's group is its scope
     const hadProc = force && scope ? this._escalate(job, scope, undefined, run) : force ? this._killGroup(job, 'SIGKILL') : this._termRun(job, run); // round 7: its intent first
     if (force) job._stopForce = true; else if (hadProc) job._termAt = now(); // round 5: the stop's own clock (the sweep keeps it)
@@ -2320,10 +2354,16 @@ class JobManager {
       const vet = M.vetSpec(job);
       if (!vet.ok) { this._refuseRun(job, vet, 'manual'); return { error: vet.error }; }
       if (this._besideLive(job, 'manual')) return { error: `${job.id}'s last run is still running — stop it first` }; // round 7
-      const last = job.runs && job.runs[job.runs.length - 1], doubt = this._runDoubt(job, last); // round 8: checked first, never beside it
+      const last = job.runs && job.runs[job.runs.length - 1]; // round 8: its doubt checked first, never beside it
       try { this._startAfter(job, 'manual', () => job.desiredUp && !['up', 'starting'].includes(job.state)); } catch (e) { return { error: e.message }; }
       this._save();
-      return ['up', 'starting'].includes(job.state) ? { ok: true } : { ok: true, after: doubt ? `its previous run cannot be proven gone (${doubt}) — it starts only once it is (its events say)` : 'what its last run left running is stopped first' };
+      if (['up', 'starting'].includes(job.state)) return { ok: true };
+      // round 10: A START THAT WILL NOT HAPPEN IS ANSWERED BY ITS REFUSAL — the decision's one walk ran in this tick: a cut one is
+      // the doubt's door, in the words its journal line and its For-you notice carry (round 9 answered «ok — it starts only once
+      // it is», and nothing walked again: the service stayed down for good)
+      const cut = this._cutOf(last), doubt = this._runDoubt(job, last);
+      if (cut) return { error: this._doorWords(job, last, cut) };
+      return { ok: true, after: doubt ? `its previous run cannot be proven gone (${doubt}) — it starts if that is proven within ${this._graceMs() / 1000} s, else it is not started (its events say)` : 'what its last run left running is stopped first' };
     }
     try { this._spawn(job, 'manual'); } catch (e) { return { error: e.message }; } // B-f8c7: the run-time vet's refusal is an answer
     this._save();
