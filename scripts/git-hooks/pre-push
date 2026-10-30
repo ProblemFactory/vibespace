@@ -98,6 +98,9 @@ is_code_path() {
     # the communication-panel mockup (a page + its css + a module script): test-frame-host-viewers previews it in the code
     # editor with its folder (lane frame-host-preview — the repo's own pages are the preview's measure)
     docs/design-mockups/communication-panel|docs/design-mockups/communication-panel/*) return 0 ;;
+    # the relay login plugin's README: test-frps-plugin holds it to the plugin (the vouch REFUTED, the canary) — lane
+    # frp-token-proof r3
+    tools/frps-login-plugin/README.md) return 0 ;;
     # (b) documentation: nothing the gate reads.
     docs/*|*.md) return 1 ;;
   esac

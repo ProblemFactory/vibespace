@@ -376,7 +376,9 @@ console.log('⑦c THE CONTROL AFTER THE LOGIN — a stub frps 0.70.0 (the vouch 
     const endedPlain = await frps070(sn, { frpsToken: '', user: w2.A.id, token: w2.A.token, knock: '', ts: 1793300400, sub: 'vsowned00003' });
     ok(ended.proxy === 'accept' && endedPlain.proxy === 'accept', 'frps on auth.token = "" (the grace over): the token-less frpc publishes — with the vouch AND without it (the vouch is never what makes it work)', { ended, endedPlain });
   } finally { await sv.close(); await sn.close(); }
-  const RD = fs.readFileSync(path.join(DIR, 'README.md'), 'utf8');
+  // the README by its WHOLE repo-relative path (lane frp-token-proof r3): the push gate derives a suite's doc inputs from
+  // such literals (test-ci-gate-push) — a bare 'README.md' is the ROOT README to it, which this suite never reads
+  const RD = fs.readFileSync(path.join(REPO, 'tools/frps-login-plugin/README.md'), 'utf8');
   const sec = (RD.split(/^## /m).find((x) => /^Vouching/.test(x)) || '');
   ok(/REFUTED against frps 0\.70\.0/.test(sec.split('\n')[0]) && /keys the control connection AFTER the login/.test(sec), 'the README: the vouch section is headed REFUTED against frps 0.70.0 and says why (the control keyed with auth.token)', sec.split('\n')[0]);
   ok(/a `NewProxy` `accept` line for that instance in the audit AFTER the restart/.test(sec) && /`"vouched":true`[^.]*proves\s+nothing/.test(sec) && !/UNCONFIRMED/.test(RD), 'the README\'s check is a NewProxy accept after a restart with the vault locked — «vouched»:true proves nothing; no «UNCONFIRMED» left', sec.slice(0, 200));

@@ -367,11 +367,15 @@ process.exit(fs.existsSync(path.join(repo, 'FAST_RED')) ? 1 : 0);
     // loose version derived it, the anchored one does not). A bare name with
     // no directory component additionally has to sit on a line that reads
     // something — that is what separates `read('CLAUDE.md')` from
-    // `readCall.title === 'README.md'`.
+    // `readCall.title === 'README.md'`. A doc OUTSIDE docs/ is named by its
+    // whole path too (`tools/…/*.md` — lane frp-token-proof r3: test-frps-plugin
+    // reads tools/frps-login-plugin/README.md; spelled `path.join(DIR,
+    // 'README.md')` it was derived as the ROOT README.md, and as a path the
+    // hook's `*.md` called it docs — a push of that README alone skipped the gate).
     // BOTH TIERS, on purpose: a docs-only push exits before the heavy LAUNCH
     // too, so a heavy suite's doc input is exactly as unguarded.
     const LIT = /(['"`])((?:\\.|(?!\1)[^\\])*)\1/g;
-    const WHOLE = /^(?:\$\{[^}]*\}[:/])?((?:docs\/[A-Za-z0-9._/-]+)|(?:[A-Za-z0-9][A-Za-z0-9._-]*\.md))$/;
+    const WHOLE = /^(?:\$\{[^}]*\}[:/])?((?:docs\/[A-Za-z0-9._/-]+)|(?:tools\/[A-Za-z0-9._/-]+\.md)|(?:[A-Za-z0-9][A-Za-z0-9._-]*\.md))$/;
     const READ_CTX = /readFileSync|readdirSync|createReadStream|copyFileSync|cpSync|existsSync|statSync|path\.join|\bread\s*\(|\bgit\s*\(/;
     const gateInputs = new Map();   // repo-relative path → suites that read it
     const noteInput = (p, who) => { if (!gateInputs.has(p)) gateInputs.set(p, new Set()); gateInputs.get(p).add(who); };
@@ -438,6 +442,8 @@ process.exit(fs.existsSync(path.join(repo, 'FAST_RED')) ? 1 : 0);
       && namedBy('docs/examples/hello-plugin', 'test-plugin-loader')
       && namedBy('docs/agent/msg-manual.md', 'test-agent-msg'),
       'the derivation finds the incident\'s own paths, attributed to the suites that read them');
+    ok(namedBy('tools/frps-login-plugin/README.md', 'test-frps-plugin'),
+      'a doc outside docs/ is named by its PATH (tools/frps-login-plugin/README.md ← test-frps-plugin), never by its basename as the root README.md');
     ok(!gateInputs.has('README.md'),
       'and it does NOT drag in the root README.md (a fixture VALUE in test-image-cards / test-opencode-serve, not a path they read) — the escape hatch has to keep meaning something');
 
