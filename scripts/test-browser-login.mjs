@@ -22,10 +22,13 @@
 //      — r2c: counted in the WINDOW the leg marks on that socket (the stub's sequence number before, its own fence after — never a
 //      clock); what the watch sends on its own is NAMED (WATCH_OWN), and two REPLAYS of the slow box's one read put the passkey
 //      hook's look before the window (int361's red) and inside it — the leg as it was is red on both, the window green
+//      — r2d: WHO sent a call, never its name: the stub stamps the tab each call rides (on the tab the leg fills nothing is the
+//      watch's own) and the after-mark is the leg's own call, found by its CDP id; the pin reads fillLogin too, however quoted
 //   ⑧b lane engine-distribution: the NO-ECHO kernel (mode.omitFilledPassword — the real kernel sends no password while the box
 //      holds the vault's value): a pending register promoted · an existing login none · a typed-over value rides; a RED control
 //   ⑨ THE DOORS: the REAL route + the REAL CLI; the owner's card route refuses an agent; the Vault window's rows
-//   ⑩ RED controls: a fill verdict without the frame check, without the grant — each lets the bad fill through
+//   ⑩ RED controls: a fill verdict without the frame check, without the grant — each lets the bad fill through; (r2d) five watch
+//      copies whose fillLogin sends on the login tab before the gate (A1 A2 B B2 B3) — the window counts each — and the pin's own
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
@@ -297,10 +300,32 @@ const fresh = (X) => X.evs.length;
 // lane vault-login-chrome r2c: WHAT THE WATCH SENDS ON ITS OWN, by name (src/server/browser-dialogs.js) — a tab it arms: track
 // (Target.attachToTarget) → enable (Page.enable) → armPrompts (the file-chooser + sign-in hooks) → armHook (the passkey hook: a
 // binding, two scripts, Runtime.enable, then pkFind's ONE look — Runtime.evaluate('CredentialsContainer.prototype') — at every
-// document the stub had announced by then). The fill road (src/server/browser-login-fill.js) speaks none of these (pinned below).
+// document the stub had announced by then). The fill road (src/server/browser-login-fill.js, fillLogin in browser-dialogs.js) speaks
+// none of these (pinned below) — and a name is never the proof (r2d, mineOf).
 const WATCH_OWN = Object.freeze({ 'Target.attachToTarget': 'track', 'Page.enable': 'enable', 'Page.setInterceptFileChooserDialog': 'armPrompts', 'Fetch.enable': 'armPrompts', 'Runtime.addBinding': 'armHook', 'Page.addScriptToEvaluateOnNewDocument': 'armHook', 'Runtime.enable': 'armHook' });
 const PK_LOOK = 'CredentialsContainer.prototype';
 const ownOf = (c) => (c.method === 'Runtime.evaluate' ? (c.params && c.params.expression === PK_LOOK ? 'pkFind' : null) : Object.hasOwn(WATCH_OWN, c.method) ? WATCH_OWN[c.method] : null);
+// r2d WHO SENT IT (review r2c F1: seven of the names matched any params on any session — a fillLogin that sent armHook's script on
+// the login tab read as the watch's own): the stub stamps every call with the tab it rides. In the window the watch's own calls are
+// the ones that ARM a tab the stub announced after the first mark (the attach to it, then the named calls on its session); on a tab
+// that was there at the mark — the one the leg fills — nothing is anyone's own, whatever its name.
+const markOf = (X) => ({ from: X.k.mark(), tabs: new Set(X.k.targets().map((t) => t.targetId)) });
+const mineOf = (m) => (c) => (c.tab && !m.tabs.has(c.tab) ? ownOf(c) : null);
+// the fill road's CDP vocabulary as the product text says it — a Domain.method token however it is quoted (r2d: '…' "…" `…`, any
+// capitalised domain — a list leaves one out); fillLogin = the door's body in browser-dialogs.js (the gate, the dispatch) to its brace
+const CDP_TOKEN = /(['"`])([A-Z][A-Za-z]*\.[a-z][A-Za-z]*)\1/g;
+const vocabOf = (t) => [...new Set([...t.matchAll(CDP_TOKEN)].map((q) => q[2]))];
+const fillLoginOf = (t) => { const i = t.indexOf('  async function fillLogin('), j = i < 0 ? -1 : t.indexOf('\n  }\n', i); return j < 0 ? '' : t.slice(i, j); };
+/** The pin (r2c, widened r2d): every product text that sends on the login tab — browser-login-fill.js and fillLogin — says none of
+ *  the watch's names in any quoting and never pkFind's look, and every call site names its method (a literal; the door's pass-through
+ *  `m` carries the fill module's own literals) — a method built at run time is seen too. → what each text's call sites send. */
+function pinOf(lf, door) {
+  const lit = (a) => /^(['"`])[A-Za-z]+\.[A-Za-z]+\1$/.test(a), sent = (xs) => [...new Set(xs.filter(lit).map((a) => a.slice(1, -1)))].sort();
+  const sites = [...lf.matchAll(/(?<![.\w])send\(\s*([^,)]+)/g)].map((q) => q[1].trim()), doorSites = [...door.matchAll(/(?<![.\w])call\(w,\s*([^,)]+)/g)].map((q) => q[1].trim());
+  const hides = vocabOf(lf + '\n' + door).filter((m) => Object.hasOwn(WATCH_OWN, m));
+  const ok = door.includes('roadVerdict') && hides.length === 0 && !lf.includes(PK_LOOK) && !door.includes(PK_LOOK) && sites.length > 0 && sites.every(lit) && doorSites.length > 0 && doorSites.every((a) => lit(a) || a === 'm');
+  return { ok, sends: sent(sites), doorSends: sent(doorSites), hides, sites, doorSites };
+}
 // THE SLOW BOX'S READ, replayed (int361's red: 1 leg of 161 inside the 3-wide fast tier at load ~6, 0/5 alone): the watch reads
 // Runtime.enable's answer and the frame after it — the stub's executionContextCreated, 1 ms later — in ONE socket read; ws emits
 // both in one tick (allowSynchronousEvents), so armHook's `await Runtime.enable` resumes with the document already known and pkFind
@@ -319,25 +344,36 @@ class OneRead extends require('ws') {
   }
   send(d, ...r) { try { const m = JSON.parse(String(d)); if (m.method === 'Runtime.enable') this._enables.add(m.id); } catch { /* */ } return super.send(d, ...r); }
 }
-// THE AFTER-MARK: the leg's own FENCE on the watch's socket (pageAnswers — one bounded Runtime.evaluate '1' per tab, settled at the
-// first answer). One socket, in order: every command the watch sent before the fence is heard before it — its sequence number closes
-// the window (NaN = no fence heard: the leg is red, never green by default)
-async function fence(X) { const from = X.k.mark(); const a = await X.w.pageAnswers(TGT); const f = X.k.calls().find((c) => c.seq > from && c.method === 'Runtime.evaluate' && c.params.expression === '1'); return a.asked && f ? f.seq : NaN; }
+// THE AFTER-MARK: the leg's OWN fence on the watch's socket — ONE bounded Runtime.evaluate '1' on the filled tab (pageAnswers), found
+// on the stub by the CDP id the watch gave it, never by its look (r2d, review r2c F2: the first '1' after a mark was anyone's — a
+// road '1' still in flight closed the window and the road's calls after it escaped). One socket, in order: every command the watch
+// sent before the fence is heard before it — its sequence number closes the window (NaN = not found or not answered: red)
+async function fence(X) {
+  const tab = X.k.targets()[0].targetId, W = X.w._watches.get(PID), id = W ? W.id + 1 : NaN; // pageAnswers sends at once: the next id is its
+  const a = await X.w.pageAnswers(TGT, { targets: [tab] });
+  const f = X.k.calls().find((c) => c.id === id && c.tab === tab && c.method === 'Runtime.evaluate' && c.params.expression === '1');
+  return a.asked && a.pages.length === 1 && a.pages[0].answered === true && f ? f.seq : NaN;
+}
 const withdrawn = (r) => !r.ok && r.code === 'login_fill_withdrawn' && r.road === 'standard' && r.error === BL.roadVerdict(false).error;
 const roadCall = (c) => /^Input\./.test(c.method) || c.method === 'Runtime.evaluate';
-/** The four refused fills between the leg's two marks (`during(from)` runs inside the window first): the window, the watch's own
- *  calls in it by name, the rest (= the fill road's) — and `was`, the leg as it stood until r2c (`sent` from the length before, the
- *  whole socket's Input.* / Runtime.evaluate), read where it read them: right after the fills. */
+/** The window between the leg's two marks: the watch's own calls in it (mineOf — WHO, then the name), the rest = the fill road's. */
+function inWindow(X, m, to) {
+  const win = X.k.calls().filter((c) => c.seq > m.from && c.seq < to), mine = mineOf(m);
+  return { win, own: win.filter(mine).map((c) => `${mine(c)}:${c.method}#${c.seq}`), road: win.filter((c) => !mine(c)).map((c) => `${c.method}#${c.seq}`) };
+}
+const noRoad = (x) => Number.isFinite(x.to) && x.road.length === 0; // the leg's verdict: its fence found, nothing in the window the road's
+/** The four refused fills between the leg's two marks (`during(from)` runs inside the window first): the window — and `was`, the leg
+ *  as it stood until r2c (`sent` from the length before, the whole socket's Input.* / Runtime.evaluate), read where it read them:
+ *  right after the fills. */
 async function refusedFills(X, during = null) {
-  const from = X.k.mark();
+  const m = markOf(X), from = m.from;
   if (during) await during(from);
   const rs = [];
   for (const o of [{}, { origin: SITE, user: 'alice', submit: true }, { newUser: 'bob', generate: true, submit: true }, { generate: true }]) rs.push(await X.w.fillLogin(TGT, FILL(o)));
   const sent = X.k.calls().slice(from).map((c) => c.method), whole = X.k.calls().filter(roadCall);
   const was = { ok: sent.length === 0 && whole.length === 0, sent, whole: whole.map((c) => `${c.method}#${c.seq}${c.params.expression ? `(${String(c.params.expression).slice(0, 40)})` : ''}`) };
   const to = await fence(X);
-  const win = X.k.calls().filter((c) => c.seq > from && c.seq < to);
-  return { rs, from, to, win, own: win.filter(ownOf).map((c) => `${ownOf(c)}:${c.method}#${c.seq}`), road: win.filter((c) => !ownOf(c)).map((c) => `${c.method}#${c.seq}`), was };
+  return { rs, from, to, ...inWindow(X, m, to), was };
 }
 {
   const X = await world();
@@ -539,7 +575,7 @@ async function refusedFills(X, during = null) {
     ok(rs.every(withdrawn), 'standard Chrome ⇒ login_fill_withdrawn by name — login · --submit · --new-user --generate · --generate alike', rs);
     ok(reads.secretGet === 0 && reads.secretNames === 0 && reads.noteUse === 0 && S.audit().filter((l) => /^vault-(totp-)?use$/.test(l.event)).length === 0, '… 0 vault reads: secretGet / secretNames never called, the use-writer noteUse never called, no use line', reads);
     // lane vault-login-chrome r2c: the window the leg marks — never the whole socket (int361: a look the watch took while ARMING, before the first mark, read as the road's)
-    ok(Number.isFinite(x.to) && x.road.length === 0 && x.win.filter(roadCall).every((c) => ownOf(c) === 'pkFind'), '… 0 CDP commands for it: in the window between the leg\'s two marks on the stub\'s socket nothing but the watch\'s own calls by name — 0 Input.*, 0 Runtime.evaluate of the road', { from: x.from, to: x.to, own: x.own, road: x.road });
+    ok(noRoad(x), '… 0 CDP commands for it: in the window between the leg\'s two marks on the stub\'s socket nothing rides the login tab — 0 Input.*, 0 Runtime.evaluate, no name the watch also speaks (r2d: the watch\'s own only on a tab it arms there)', { from: x.from, to: x.to, own: x.own, road: x.road });
     ok(BL.loginText(rs[0]) === rs[0].error, '… the agent\'s sentence is the refusal\'s own words');
   } finally { await S.close(); }
   // r2c REPLAY ① — the recorded red, by the slow box's ONE read: the passkey hook's look lands while the watch ARMS, before the first mark
@@ -548,20 +584,21 @@ async function refusedFills(X, during = null) {
     const x = await refusedFills(S1);
     const pre = S1.k.calls().filter((c) => c.seq <= x.from && roadCall(c));
     ok(!x.was.ok && x.was.sent.length === 0 && x.was.whole.length === 1 && pre.length === 1 && ownOf(pre[0]) === 'pkFind', 'REPLAY ① the recorded shape: pkFind\'s ONE Runtime.evaluate(CredentialsContainer.prototype) while the watch arms, before the first mark — `sent` [] and the whole-socket count 1: the leg as it was is RED on it', x.was);
-    ok(x.rs.every(withdrawn) && Number.isFinite(x.to) && x.road.length === 0, '… the marked window is GREEN on it (the look is outside the window; the fills refused by name)', { own: x.own, road: x.road });
+    ok(x.rs.every(withdrawn) && noRoad(x), '… the marked window is GREEN on it (the look is outside the window; the fills refused by name)', { own: x.own, road: x.road });
   } finally { await S1.close(); }
   // r2c REPLAY ② — the same look INSIDE the window: a tab the page opens while the login is refused, armed by the watch through the one read
   const S2 = await world({ mode: { standard: true }, WebSocketImpl: OneRead });
   try {
-    const x = await refusedFills(S2, (from) => { S2.k.addTarget(SITE + '/popup'); return until(() => S2.k.calls().some((c) => c.seq > from && ownOf(c) === 'pkFind'), 3000); });
+    let pop = null;
+    const x = await refusedFills(S2, (from) => { pop = S2.k.addTarget(SITE + '/popup'); return until(() => S2.k.calls().some((c) => c.seq > from && c.tab === pop && ownOf(c) === 'pkFind'), 3000); });
     ok(!x.was.ok && x.was.sent.includes('Runtime.evaluate') && x.own.some((o) => o.startsWith('pkFind:')), 'REPLAY ② the same look INSIDE the window (a tab the page opens is armed while the login is refused): the leg as it was is RED on it', x.was);
-    ok(x.rs.every(withdrawn) && Number.isFinite(x.to) && x.road.length === 0 && x.own.length >= 2, '… the window names it — track · enable · armPrompts · armHook + pkFind, the watch\'s own — and the fill road still sent nothing', { own: x.own, road: x.road });
+    ok(x.rs.every(withdrawn) && noRoad(x) && x.own.length >= 2 && x.win.every((c) => c.tab === pop), '… the window names it — track · enable · armPrompts · armHook + pkFind, the watch\'s own, every one on the tab the page opened (r2d) — and the fill road still sent nothing', { own: x.own, road: x.road });
   } finally { await S2.close(); }
   {
-    // r2c: the names can never hide the fill road — its CDP vocabulary is none of the watch's own, pkFind's look is not its words; a RED control
-    const src = fs.readFileSync(path.join(REPO, 'src/server/browser-login-fill.js'), 'utf8');
-    const says = [...new Set((src.match(/'(?:Runtime|Input|Page|Target|DOM|Fetch|Emulation|Network|Browser)\.[A-Za-z]+'/g) || []).map((q) => q.slice(1, -1)))];
-    ok(says.includes('Input.insertText') && says.includes('Runtime.evaluate') && says.every((m) => !Object.hasOwn(WATCH_OWN, m)) && !src.includes(PK_LOOK), `… the names never hide the road: browser-login-fill.js says ${says.join(' · ')} — none of the watch's own, never pkFind's look`, says);
+    // r2c: the names can never hide the fill road — r2d: a second layer (the tab decides, mineOf) over EVERY product text that sends
+    // on the login tab: browser-login-fill.js and fillLogin in browser-dialogs.js, a method however quoted; the pin's RED controls in ⑩
+    const p = pinOf(fs.readFileSync(path.join(REPO, 'src/server/browser-login-fill.js'), 'utf8'), fillLoginOf(fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8')));
+    ok(p.ok && eq(p.sends, ['Input.insertText', 'Runtime.evaluate']) && eq(p.doorSends, ['VibeSpace.fillCredential']), `… the names never hide the road: browser-login-fill.js sends ${p.sends.join(' · ')}, fillLogin ${p.doorSends.join(' · ')} (+ the fill module's, passed through) — no name of the watch's in either text however quoted, never pkFind's look, every call site names its method`, p);
     ok([{ method: 'Input.insertText', params: { text: 'x' } }, { method: 'Runtime.evaluate', params: { expression: '(() => document.forms.length)()' } }].every((c) => ownOf(c) === null) && ownOf({ method: 'constructor', params: {} }) === null, 'RED control: a road call (Input.insertText, a Runtime.evaluate the watch does not name) is nobody\'s own — it counts');
   }
   const X = await world();
@@ -837,12 +874,41 @@ console.log('⑩ RED controls — each mutant lets the bad fill through');
   // no login in this vault — the copy can only READ the tab (the 2.369.363 form inspection), never type
   const S = MD ? await world({ mode: { standard: true }, Dmod: MD }) : null;
   try {
-    const from = S ? S.k.mark() : 0; // lane vault-login-chrome r2c: the same marked window the leg reads — a real leak is the road's, never a name's
+    const m = S ? markOf(S) : null; // lane vault-login-chrome r2c: the same marked window the leg reads — a real leak is the road's, never a name's
     const r = S ? await S.w.fillLogin(TGT, FILL()) : null;
     const to = S ? await fence(S) : NaN;
-    const road = S ? S.k.calls().filter((c) => c.seq > from && c.seq < to && !ownOf(c)).map((c) => c.method) : [];
-    ok(MD && r && r.code !== 'login_fill_withdrawn' && road.includes('Runtime.evaluate'), 'RED: a watch copy without the road gate sends Runtime.evaluate to a standard-Chrome tab — the marked window counts it as the road\'s (the real watch sends nothing)', { code: r && r.code, road });
+    const road = S ? inWindow(S, m, to).road : [];
+    ok(MD && r && r.code !== 'login_fill_withdrawn' && road.some((c) => c.startsWith('Runtime.evaluate#')), 'RED: a watch copy without the road gate sends Runtime.evaluate to a standard-Chrome tab — the marked window counts it as the road\'s (the real watch sends nothing)', { code: r && r.code, road });
   } finally { if (S) await S.close(); }
+  // lane vault-login-chrome r2d (review r2c F1 + F2): watch copies whose fillLogin sends on the login tab BEFORE the gate and still
+  // refuses by name (0 vault reads) — the window counts every one as the road's: a name the watch also speaks hides nothing on the
+  // login tab (B / B3 armHook's script, B2 pkFind's own look, C track's attach — a browser-level call rides the tab it names), and a
+  // '1' the road sent (A2, the fence's own expression) is no fence
+  const GATE = '    const road = BL().roadVerdict(w.kernel);';
+  const onTabs = (body) => `    if (!w.kernel) for (const e of w.targets.values()) if (e.sid) { ${body} }\n`;
+  const read = "call(w, 'Runtime.evaluate', { expression: 'document.forms.length', returnByValue: true }, e.sid);", script = "call(w, 'Page.addScriptToEvaluateOnNewDocument', { source: 'void 0' }, e.sid);";
+  for (const [name, what, body, method, n] of [
+    ['A1', 'a form read (not awaited)', read, 'Runtime.evaluate', 4],
+    ['A2', "a '1' — the fence's own expression — then a form read (neither awaited)", "call(w, 'Runtime.evaluate', { expression: '1', returnByValue: true }, e.sid); " + read, 'Runtime.evaluate', 8],
+    ['B', "armHook's method Page.addScriptToEvaluateOnNewDocument (awaited)", 'await ' + script, 'Page.addScriptToEvaluateOnNewDocument', 4],
+    ['B2', "pkFind's exact look (awaited)", `await call(w, 'Runtime.evaluate', { expression: '${PK_LOOK}' }, e.sid);`, 'Runtime.evaluate', 4],
+    ['B3', "armHook's method (not awaited)", script, 'Page.addScriptToEvaluateOnNewDocument', 4],
+    ['C', "track's method at the browser level — Target.attachToTarget, a second session on it (awaited)", "await call(w, 'Target.attachToTarget', { targetId: e.targetId, flatten: true });", 'Target.attachToTarget', 4],
+  ]) {
+    const src = DSRC.includes(GATE) ? DSRC.replace(GATE, onTabs(body) + GATE) : DSRC;
+    const MX = src !== DSRC ? MUT.load('src/server/browser-dialogs.js', src, 'r2d-' + name.toLowerCase()) : null;
+    const X = MX ? await world({ mode: { standard: true }, Dmod: MX }) : null;
+    try {
+      const x = X ? await refusedFills(X) : null;
+      ok(x && x.rs.every(withdrawn) && !noRoad(x) && x.road.length === n && x.road.every((c) => c.startsWith(method + '#')), `RED control ${name}: a watch copy whose fillLogin sends ${what} on the login tab before the gate (still refused by name) — the window counts all ${n} as the road's`, x && { to: x.to, own: x.own, road: x.road });
+    } finally { if (X) await X.close(); }
+  }
+  // the pin's own RED controls: a fillLogin that says armHook's method double-quoted, or builds it at run time, is seen
+  const LFS = fs.readFileSync(path.join(REPO, 'src/server/browser-login-fill.js'), 'utf8');
+  const named = pinOf(LFS, fillLoginOf(DSRC.replace(GATE, onTabs('call(w, "Page.addScriptToEvaluateOnNewDocument", { source: `void 0` }, e.sid);') + GATE)));
+  const built = pinOf(LFS, fillLoginOf(DSRC.replace(GATE, onTabs("const k = ['Page', 'addScriptToEvaluateOnNewDocument'].join('.'); call(w, k, {}, e.sid);") + GATE)));
+  ok(pinOf(LFS, fillLoginOf(DSRC)).ok && !named.ok && eq(named.hides, ['Page.addScriptToEvaluateOnNewDocument']) && !built.ok && built.hides.length === 0 && built.doorSites.includes('k') && eq(vocabOf('a("Input.dispatchKeyEvent") b(`DOMStorage.clear`)'), ['Input.dispatchKeyEvent', 'DOMStorage.clear']),
+    'RED control (the pin): a fillLogin that says the watch\'s method in double quotes, or builds a method at run time, is red — a double-quoted or template token of any domain is seen', { named: named.hides, built: built.doorSites });
 }
 
 console.log(`\n${fail ? `${fail} FAILED` : 'ALL PASS'} (${pass}${fail ? ' passed' : ''})`);

@@ -44,7 +44,9 @@
 // the echo the P3 suites were written on. `submissions()` = every credentialSubmitted sent: {surfaceId, hasPassword} — never a value.
 // lane vault-login-chrome r2c: every call heard carries `seq` (1, 2, … in the order this stub heard it, across its sockets) and `mark()` =
 // the last one heard — a leg scopes the socket to the window it measures by its own marks (never a clock: a slow box moves calls in
-// time, never in order).
+// time, never in order). r2d: + `id` (the CDP id its sender gave it — a leg finds its OWN call by it, never by its look) and `tab`
+// (the tab it rides: its session's target, a browser-level Target.* call's params.targetId, null = none — WHO a call is for, never
+// its method's name).
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -302,7 +304,8 @@ export async function startFakeKernel({ port = 0, dir = null, firstUrl = 'about:
     ws.on('close', () => { sockets.delete(ws); for (const [sid, s] of [...sessions]) if (s.ws === ws) { sessions.delete(sid); const x = targets.get(s.targetId); if (x) x.sessions.delete(sid); } });
     ws.on('message', (d) => {
       let m; try { m = JSON.parse(String(d)); } catch { return; }
-      calls.push({ seq: ++heard, method: m.method, session: !!m.sessionId, sessionId: m.sessionId || null, params: m.params || {} });
+      const on = m.sessionId ? sessions.get(m.sessionId) : null, tab = on ? on.targetId : !m.sessionId && /^Target\./.test(String(m.method)) && m.params && m.params.targetId ? String(m.params.targetId) : null;
+      calls.push({ seq: ++heard, id: Number.isInteger(m.id) ? m.id : null, method: m.method, session: !!m.sessionId, sessionId: m.sessionId || null, tab, params: m.params || {} });
       if (logFile) { try { fs.appendFileSync(logFile, JSON.stringify({ method: m.method, session: m.sessionId || null, params: m.params || {} }) + '\n'); } catch { /* best effort */ } }
       const r = answer(ws, m);
       if (r && r.__noreply) return;
