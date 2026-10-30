@@ -1735,5 +1735,18 @@ console.log('㉖ THE ATTENTION DOCK (lane needs-card-tail r10) — a layout of t
   ok(/this\._dockPass\(plan\.waiting\);/.test(CARD) && /const plan = flowPlan\(open, transcript,/.test(CARD) && /const open = keys \? needsOf\(todos\.open, keys\) : \[\];/.test(CARD), 'wiring: the strip and the cards are ONE pass over ONE list (needsOf over the store\'s snapshot → flowPlan → the cards + _dockPass)');
 }
 
+console.log('㉗ THE ANNOUNCE (lane needs-card-tail r10 addendum) — an arrival that waits for the owner flashes its window (THE waiting blink) and stands as a card at the For-you button; one mechanism, one door');
+{
+  const P = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-panel.js'), 'utf8'), ST = fs.readFileSync(path.join(ROOT, 'public/style.css'), 'utf8'), CC = fs.readFileSync(path.join(ROOT, 'public/chat.css'), 'utf8');
+  const ap = P.slice(P.indexOf('  const apply = (next) => {'), P.indexOf('  // THE MODEL\'S THREE BROADCASTS'));
+  const an = P.slice(P.indexOf('  // ── THE ANNOUNCE (lane needs-card-tail r10 addendum'), P.indexOf('  const apply = (next) => {'));
+  ok(an.length > 2000 && /if \(announceWorthy\(i, \{ muted: !row \|\| row\.band === PARKED \|\| policyOf\(attnPolicy\(\)\)\.off\.has\(row\.band\) \}\)\) \{ announce\(i\); continue; \}/.test(ap) && ap.indexOf('announceWorthy(') < ap.indexOf('toastWorthy(') && /if \(prevKnown\.has\(i\.id\)\) continue;/.test(ap), 'the arrival path decides it (THE knownIds — a reload announces nothing old): a need (PURE announceWorthy, the owner\'s band switches and 搁置 respected) announces; every other arrival keeps the toast rule as it was');
+  ok(/w\.element\.classList\.add\('window-waiting', 'window-announce'\);/.test(an) && /w\._notifyChanged\?\.\(\);/.test(an) && !/blink-fade|setInterval\([^)]*window-waiting/.test(an), 'the flash is THE existing waiting blink (`window-waiting` + _notifyChanged: the title bar, the taskbar button, a tab\'s, a hidden desktop\'s) — never a second mechanism');
+  ok(/new MutationObserver\(\(\) => \{ if \(!w\.element\.classList\.contains\('window-waiting'\)\) annSeen\(w\); \}\);/.test(an) && /if \(answered && w\._annOwns && w\.element\.classList\.contains\('window-waiting'\)\)/.test(an), 'SEEN = the blink\'s own clear (the window touched / focused) or every item answered — and an answer clears only the blink the announce set (a turn\'s stays)');
+  ok(/annStack = createPopover\(a \|\| document\.body, 'ut-announce',/.test(an) && /annStack\._closeCtl\?\.abort\(\);/.test(an) && /if \(annCards\.has\(it\.id\)\) return; \/\/ one card per item/.test(an) && /jump\(live\.sessionKey, live\)/.test(an) && !/innerHTML = (?!UI_ICONS\.)/.test(an), 'the card: ONE createPopover stack at the For-you button (Esc closes it; no outside-press closer), one card per item, its press THE door (model.jump on the LIVE record), no peer string through innerHTML');
+  ok(/annRefresh\(\); \/\/ the announce's cards and flashes follow the store/.test(ap) && /if \(!it \|\| \(it\.status !== 'open' && !late\)\) \{ annDrop\(id\); continue; \}/.test(an), 'every snapshot re-reads the cards: answered anywhere ⇒ gone; expired ⇒ said and kept a while (a late card)');
+  ok(/\.window-announce \.chat-attn-dock \.cad-count \{[^}]*background: var\(--yellow\);/.test(CC) && /\.ut-announce \{/.test(ST) && /\n  \.ut-announce :is\(button, \[role="button"\]\),\n/.test(ST) && !/\.uta-[\w-]+[^{]*\{[^}]*(#[0-9a-fA-F]{3,8}\b|rgba?\()/.test(ST), 'the strip\'s count wears the attention fill while an item is unseen; the stack\'s rules use theme vars only and JOIN the touch scale (44 px targets)');
+}
+
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

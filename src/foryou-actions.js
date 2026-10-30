@@ -64,6 +64,8 @@
  *   filingIndex(item, readPage, o) → the index of the record that filed it ABOVE a loaded window (the landing's read upward)
  *   dockWords(needs, t)          → {text, title, n} | null — «waiting for you · an approval» / «· 3 approvals» / «· 3»
  *   dockOf(waiting, t)           → {n, newest, words} | null — THE ATTENTION DOCK's model (lane needs-card-tail r10)
+ *   announceWorthy(item, {muted}) → does a NEW item announce itself (a need, never a notice) — r10's addendum
+ *   announceWords(item, o)       → {who, what, left, expired, clock} — its card's words and its clock
  *   settledWords(item, t)        → «approved» / «denied» / «saved to the vault» / «done» … (the quiet line's verb)
  *   surfaceOf(type | item)       → {at: 'card' | 'window' | 'owner' | 'notice', kind, on} — where it IS shown and answered
  *   filedLine(type | item, id, tray) → THE one line an agent can quote after a filing (the hub's words; a CLI prints it),
@@ -397,6 +399,27 @@ function dockOf(waiting, t = fmt) {
   if (!list.length) return null;
   const newest = list.reduce((a, e) => (!a || byCreated(e, a) > 0 ? e : a), null);
   return { n: list.length, newest: newest.item, kind: kindOf(newest), words: dockWords(list, t), more: list.length - 1 };
+}
+
+/** THE ANNOUNCE (lane needs-card-tail r10 addendum — the owner 2026-10-30 11:5x PDT: «有权限申请的时候窗口应该触发闪烁和 inbox 附近的
+ *  弹窗，有时候我都没发现有个后台任务才申请权限»): does a NEW open item announce itself — the asking window flashes, a card at the
+ *  For-you button? Only one that WAITS FOR THE OWNER: a need of this registry (needOf — an ask, an approval, a vault run, a
+ *  hub act, a question; never a notice, never a cleared item) — and never one the owner silenced (`muted`: its attention band
+ *  switched off, or 搁置 — src/attention-model.js's verdict, the caller's). */
+function announceWorthy(item, { muted = false } = {}) {
+  return !!item && item.status === 'open' && !muted && !!needOf(item);
+}
+
+/** …and its card's words: WHO asks (the conversation's name — the caller's nameFor), WHAT (the item's words — wordsOf), and the
+ *  CLOCK when the item carries a deadline (`expiresAt` — a held ask's: an exit run, a vault run, an automation ask): «42 s left»
+ *  while it runs, «expired» once past it or resolved as expired (the card stays a while as a late card, never vanishing like
+ *  one answered). → {who, what, left: seconds | null, expired, clock} */
+function announceWords(item, { who = '', what = '', now = Date.now(), t = fmt } = {}) {
+  const at = Number(item && item.expiresAt) || 0, by = item && item.resolvedBy;
+  const expired = (!!item && item.status !== 'open' && (by === 'expired' || by === 'ask-expired')) || (at > 0 && now >= at);
+  const left = !expired && at > 0 ? Math.max(1, Math.ceil((at - now) / 1000)) : null;
+  const clock = expired ? t('expired') : left == null ? '' : left >= 120 ? t('{n} min left', { n: Math.ceil(left / 60) }) : t('{n} s left', { n: left });
+  return { who: String(who || ''), what: String(what || ''), left, expired, clock };
 }
 
 /** THE END A RECORD SAYS (lane wake-approve-card r8 — the acceptance drove vault-agent-own 4ff55fb4's real door: its late
@@ -899,4 +922,4 @@ function filedLine(x, id, tray = null) {
   return fmt(FILED[s.at], { what: fmt(ONE[KINDS.includes(s.kind) ? s.kind : 'check']), tray: where, on: s.on || 'its own card in this conversation' }) + (id ? ` (${id})` : '');
 }
 
-module.exports = { ROWS, ROW_OF, ANSWERS, CARDS, ACTION_IDENTITY, WAIT_ACTIONS, CARD_ACTION_TYPES, ANSWER_ACTION_TYPES, KINDS, KIND_WORDS: ONE, SURFACES, BY_TYPE, BY_ORIGIN, IDENTITY_FIELDS, SKEW_MS, FILED_WINDOW_MS, needOf, needsOf, recordsOf, placementOf, flowPlan, drawnAt, filingIndex, dockWords, dockOf, settledWords, surfaceOf, FILED, filedLine, PERSON_DECIDES, DECISION_ROWS, DECISION_ENDS, endsOf, STAMPS, isDecisionRow, offersClosers, CLOSERS, HIDDEN_BY, POINTER_ROWS, isPointer, isHidden, closersOf, expiryWords, VIEWERS, VIEWER_ROLE, canDecide, clockWords, decidedStamp, decisionCard, grantLifeOf, grantWords, verbsOf, runCardOf, factsDroppedWords, FACTS_DROPPED_WORDS, RUN_ALWAYS_WHY, RUN_WHY_AGAIN, RUN_HOSTS_WHY, RUN_MASKING, RUN_SHAPE, RUN_CMD_BODY_MAX, RUN_CMD_MAX, deadlineOf, DEADLINE_WORDS, DEADLINE_LIVE_MS, DEADLINE_WARN_MS, OUTCOME_ENDS, endOf, ruledOf };
+module.exports = { ROWS, ROW_OF, ANSWERS, CARDS, ACTION_IDENTITY, WAIT_ACTIONS, CARD_ACTION_TYPES, ANSWER_ACTION_TYPES, KINDS, KIND_WORDS: ONE, SURFACES, BY_TYPE, BY_ORIGIN, IDENTITY_FIELDS, SKEW_MS, FILED_WINDOW_MS, needOf, needsOf, recordsOf, placementOf, flowPlan, drawnAt, filingIndex, dockWords, dockOf, announceWorthy, announceWords, settledWords, surfaceOf, FILED, filedLine, PERSON_DECIDES, DECISION_ROWS, DECISION_ENDS, endsOf, STAMPS, isDecisionRow, offersClosers, CLOSERS, HIDDEN_BY, POINTER_ROWS, isPointer, isHidden, closersOf, expiryWords, VIEWERS, VIEWER_ROLE, canDecide, clockWords, decidedStamp, decisionCard, grantLifeOf, grantWords, verbsOf, runCardOf, factsDroppedWords, FACTS_DROPPED_WORDS, RUN_ALWAYS_WHY, RUN_WHY_AGAIN, RUN_HOSTS_WHY, RUN_MASKING, RUN_SHAPE, RUN_CMD_BODY_MAX, RUN_CMD_MAX, deadlineOf, DEADLINE_WORDS, DEADLINE_LIVE_MS, DEADLINE_WARN_MS, OUTCOME_ENDS, endOf, ruledOf };

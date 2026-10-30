@@ -1178,6 +1178,7 @@ const CACHES = {
   'src/lib/user-todos-actions.js|replyFailures': 'id → THIS page\'s last refused reply {code, why} — the route\'s / the create\'s own reason (lane inbox-reply-dead-session), never an item\'s words; deleted on the next sent reply',
   'src/lib/user-todos-panel.js|bandOpen': 'band number → its open ids the last paint listed, folded ones included — what that band\'s Mark all seen resolves (lane foryou-folds; ids only)',
   'src/lib/user-todos-panel.js|armed': 'the press-armed buttons a row pass stamped (DOM nodes, no words) — what a scroll re-stamps; a node that left the page is dropped at the next pass or scroll (lane chat-needs-you-card, acceptance round 3 m4)',
+  'src/lib/user-todos-panel.js|annCards': 'item id → its announce card (DOM nodes + times; the words are the LIVE record\'s, re-read on every snapshot — a clear is said there): dropped when its item is answered, its time is up, ✕, a press, or Esc closes the stack (lane needs-card-tail r10 addendum; ids only)',
   'src/lib/task-log.js|picked': 'selected entry ids',
   'src/lib/task-log.js|openIds': 'expanded entry ids',
   'src/lib/task-log.js|userClosed': 'entry ids the user closed',

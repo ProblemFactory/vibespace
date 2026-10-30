@@ -674,6 +674,9 @@
 }
 .chat-attn-dock[hidden] { display: none; }
 .cad-head { display: inline-flex; align-items: center; gap: 6px; flex: none; min-height: 26px; color: var(--yellow); font-weight: 600; white-space: nowrap; }
+/* r10 addendum: while an item the announce flashed this window for is UNSEEN (user-todos-panel.js `window-announce`, cleared with
+   the waiting blink), the count wears the attention fill */
+.window-announce .chat-attn-dock .cad-count { padding: 0 8px; border-radius: 999px; background: var(--yellow); color: var(--bg-window); }
 .cad-icon svg { width: 14px; height: 14px; display: block; }
 .cad-rows { flex: 1 1 0; min-width: 0; }
 .cad-all { flex: none; min-height: 26px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text); font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
@@ -702,7 +705,7 @@
 .cad-rows .ut-body > :is(.ut-exit-cmd, .ut-proposal-plan) { order: 4; flex: 1 1 100%; min-width: 0; max-height: none; margin: 0; padding: 0; border: none; background: none; font-size: 11px; line-height: 16px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .cad-rows .ut-body > :is(.ut-exit-answer, .ut-reconnect-row) { order: 5; flex: none; margin: 0; display: inline-flex; gap: 4px; }
 .cad-rows .ut-body > .ut-opts { order: 6; flex: 1 1 0; min-width: 0; margin: 0; display: flex; flex-wrap: nowrap; gap: 4px; overflow-x: auto; scrollbar-width: thin; }
-.cad-rows .ut-opt { flex: none; font-size: 12px; padding: 2px 10px; white-space: nowrap; max-width: 24em; overflow: hidden; text-overflow: ellipsis; }
+.cad-rows .ut-opt { flex: none; min-height: 24px; box-sizing: border-box; font-size: 12px; padding: 2px 10px; white-space: nowrap; max-width: 24em; overflow: hidden; text-overflow: ellipsis; }
 .cad-rows .ut-body > :is(.ut-reply, .ut-secret) { order: 7; flex: 1 1 100%; }
 /* the waiting chip's jump lands here — one pulse, then still */
 .chat-ask-flash { animation: chat-ask-flash-anim 1.6s ease-out; }
