@@ -57,7 +57,9 @@ if [ "$KIND" = developer-id ]; then
   # the designated requirement the file carries must be THE Developer ID one (src/mac-helper-identity.js designatedRequirement —
   # what tccd keys the Screen Recording grant on and what the agent reads back with the same command before taking the prebuilt)
   DR=$(codesign -dr - "$WORK/vibespace-screen" 2>/dev/null | sed -n 's/^designated => //p' | head -n 1)
-  WANT="identifier \"$IDENTIFIER\" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */ and certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and certificate leaf[subject.OU] = $TEAM"
+  # the dumper QUOTES a value that cannot be a bare identifier — a Team ID that starts with a digit (src/mac-helper-identity.js ouText; round 3)
+  case "$TEAM" in [0-9]*) OU="\"$TEAM\"" ;; *) OU="$TEAM" ;; esac
+  WANT="identifier \"$IDENTIFIER\" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] /* exists */ and certificate leaf[field.1.2.840.113635.100.6.1.13] /* exists */ and certificate leaf[subject.OU] = $OU"
   [ "$DR" = "$WANT" ] || { echo "build-mac-helper: the designated requirement is not the Developer ID one the agent keys the grant on (got: ${DR:-none})" >&2; exit 1; }
 fi
 NOTARIZED=false

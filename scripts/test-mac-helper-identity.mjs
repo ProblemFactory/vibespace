@@ -20,10 +20,14 @@
 //   ⑩ ROUND 2: `codesign -dr -` parsed as its own shape (parseDesignatedRequirement: the `designated =>` line — implicit `#`, cdhash
 //      per slice vs identifier + anchor apple generic + the two Developer ID OIDs + the leaf's OU), our DR = Chrome's field for field
 //      with the identifier group and the Team ID substituted, requirementVerdict (the agent's question after a developer-id verdict:
-//      a cdhash / another team's / an extra clause ⇒ refused) + a RED control, the agent's third run.
+//      a cdhash / another team's / an extra clause ⇒ refused) + a RED control, the agent's third run;
+//   ⑪ ROUND 3 (acceptance r1 M2): a DIGIT-FIRST Team ID — codesign's dumper quotes it (SYNTHETIC from the rule: no such capture
+//      yet), the agent compares MEANING (requirementTokens), designatedRequirement emits the dumper's form, the release script's
+//      own check too (both evaluated in bash); two RED controls (bytes-only compare; round 2's bare emission = a0d876c5f).
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { execFileSync } from 'node:child_process';
 import * as CS from './fixtures/stream/codesign-outputs.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
@@ -121,6 +125,8 @@ console.log('— ④ swapVerdict: the design\'s §2.3 table —');
   ok(adhocPinned.take === false && adhocPinned.code === 'helper_unsigned' && /ad-hoc signed; this agent pins Team ID VSTEAM0001/.test(adhocPinned.why) && /a build made here stays the fallback/.test(adhocPinned.why), 'pinned: an ad-hoc push is refused by name — the local build stays the fallback', adhocPinned);
   for (const k of ['other', 'unsigned']) ok(S(null, id(k, { why: 'x' }), PIN).code === 'helper_unsigned', `pinned: ${k} ⇒ refused helper_unsigned`);
   ok(MI.swapVerdict({ incoming: { version: 'v' } }).code === 'helper_unsigned' && MI.swapVerdict({}).code === 'helper_unsigned', 'no verdict at all ⇒ refused (fail closed)');
+  const devNoPin = S(null, DEV, []), devOther = S(null, DEV, [CS.OTHER_TEAM]);
+  ok(devNoPin.take === false && devNoPin.code === 'helper_unsigned' && /signed by team VSTEAM0001; this agent pins no Team ID yet/.test(devNoPin.why) && devOther.take === false && /signed by team VSTEAM0001, not the pinned ZZOTHER002/.test(devOther.why), 'ROUND 3 (acceptance r1 minor): the table itself refuses a developer-id identity under an EMPTY or non-matching pin set — never only identityVerdict upstream');
 }
 
 console.log('— ⑤ the re-grant and wantSigned —');
@@ -160,8 +166,11 @@ console.log('— ⑦ the argvs and the release script —');
   ok(/codesign --sign "\$SIGN" --options runtime --timestamp --identifier "\$IDENTIFIER" --force/.test(sh) && /codesign --verify --strict --verbose=2/.test(sh) && /codesign -s - -f/.test(sh), 'its signed branch is signArgs\'s argv and verifies strictly; its default branch is the ad-hoc one (unchanged)');
   ok(/vibespace-screen\.identity\.json/.test(sh) && /notarized: notarized === 'true'/.test(sh) && /xcrun notarytool submit .* --keychain-profile "\$NOTARIZE" --wait/.test(sh) && /notarization did not succeed — the signed helper ships without it/.test(sh), 'it writes the identity record (version, sha256, kind, teamId, identifier, notarized) and a failed notarization never fails the build');
   ok(/Authority=Developer ID Application:/.test(sh) && /the signature names no Team ID/.test(sh) && /--notarize needs --sign/.test(sh), 'it refuses by name: a --sign identity that is not Developer ID Application, a signature without a Team ID, --notarize without --sign');
-  const want = /\n\s*WANT="([^\n]*)"\n/.exec(sh);
-  ok(/codesign -dr - "\$WORK\/vibespace-screen"/.test(sh) && want && want[1].replace(/\\"/g, '"').replace('$IDENTIFIER', CS.IDENTIFIER).replace('$TEAM', CS.TEAM) === MI.designatedRequirement({ teamId: CS.TEAM }) && /the designated requirement is not the Developer ID one the agent keys the grant on/.test(sh), 'ROUND 2: the release script reads the signed prebuilt\'s requirement back (`codesign -dr -`) and refuses by name unless it is designatedRequirement\'s text — the same text the agent will read on the Mac', want && want[1]);
+  const want = /\n\s*(WANT="[^\n]*")\n/.exec(sh), ouCase = /\n\s*(case "\$TEAM" in \[0-9\]\*\) OU=[^\n]*esac)\n/.exec(sh);
+  const wantOf = (team) => execFileSync('bash', ['-c', `IDENTIFIER=${JSON.stringify(MI.HELPER_IDENTIFIER)}; TEAM=${JSON.stringify(team)}; ${ouCase[1]}; ${want[1]}; printf '%s' "$WANT"`]).toString();
+  ok(/codesign -dr - "\$WORK\/vibespace-screen"/.test(sh) && want && ouCase && wantOf(CS.TEAM) === MI.designatedRequirement({ teamId: CS.TEAM }) && wantOf(CS.DIGIT_TEAM) === MI.designatedRequirement({ teamId: CS.DIGIT_TEAM }) && / = "0VSTEAM002"$/.test(wantOf(CS.DIGIT_TEAM)) && /the designated requirement is not the Developer ID one the agent keys the grant on/.test(sh), 'ROUND 2 + 3: the release script reads the signed prebuilt\'s requirement back (`codesign -dr -`) and refuses by name unless it is designatedRequirement\'s text — evaluated in bash for a letter-first AND a digit-first team (the OU quoted, as the dumper prints it)', { want: want && want[1], digit: want && ouCase ? wantOf(CS.DIGIT_TEAM) : null });
+  const mode = fs.statSync(path.join(REPO, 'scripts/build-mac-helper.sh')).mode & 0o111;
+  ok(mode !== 0, 'build-mac-helper.sh is executable (round 3: the rewrite had dropped its bit; no census leg over scripts/*.sh exists — this one stands for it)');
   const sm = fs.readFileSync(path.join(REPO, 'src/agentd/stream-mac.js'), 'utf8');
   const ensure = sm.slice(sm.indexOf('function ensure()'), sm.indexOf('/** What the facts saw'));
   const iJudge = ensure.indexOf('await identityOf(pushed)'), iPlace = ensure.indexOf('fs.renameSync(pushed, P.bin)');
@@ -222,8 +231,26 @@ console.log('— ⑩ ROUND 2: codesign -dr - parsed as its own shape —');
   const iGate = idf.indexOf("if (id.kind !== 'developer-id') return id;"), iParse = idf.indexOf('MI.parseDesignatedRequirement('), iJudge = idf.indexOf('MI.requirementVerdict(');
   ok(iGate > 0 && iParse > iGate && iJudge > iParse && /requirement: req\.designated/.test(idf) && /kind: 'other'/.test(idf) && !/MI\.designatedRequirement\(/.test(sm.slice(sm.indexOf('function ensure()'))), 'the agent asks `-dr -` only after a developer-id verdict, judges it with requirementVerdict (a refusal is `other` ⇒ helper_unsigned) and records the requirement it READ — ensure() no longer assumes one');
   // RED control: the equality dropped ⇒ another team's requirement passes as ours
-  const noEq = SRC_TEXT.replace('if (req.designated === expect) return null;', 'return null;');
+  const noEq = SRC_TEXT.replace('if (sameRequirement(req.designated, expect)) return null; // by meaning: the dumper\'s quoting is not a difference', 'return null;');
   ok(noEq !== SRC_TEXT && load(noEq).requirementVerdict(ours, { teamId: CS.OTHER_TEAM }) === null && MI.requirementVerdict(ours, { teamId: CS.OTHER_TEAM }) !== null, 'RED: with the text equality dropped, a requirement naming ANOTHER team passes as ours — the comparison is what bites');
+}
+
+console.log('— ⑪ ROUND 3: a digit-first Team ID — the dumper quotes it; the agent compares meaning —');
+{
+  const RV = (req, o) => MI.requirementVerdict(req, o) || '';
+  const dq = MI.parseDesignatedRequirement(CS.designatedDumped({ team: CS.DIGIT_TEAM })), db = MI.parseDesignatedRequirement(CS.designated({ team: CS.DIGIT_TEAM }));
+  ok(/^[0-9]/.test(CS.DIGIT_TEAM) && / = "0VSTEAM002"$/.test(dq.designated) && / = 0VSTEAM002$/.test(db.designated) && dq.kind === 'developer-id' && db.kind === 'developer-id' && dq.teamId === CS.DIGIT_TEAM && db.teamId === CS.DIGIT_TEAM && CS.designatedDumped({ team: CS.TEAM }) === CS.designated({ team: CS.TEAM }), 'SYNTHETIC from the dumper\'s rule (no digit-first capture exists yet): a digit-first team\'s requirement in BOTH forms — the OU quoted (what `codesign -dr -` prints) and bare — parses to developer-id by that team; a letter-first team\'s dumped form IS the capture\'s', { dq: dq.designated, db: db.designated });
+  ok(MI.requirementVerdict(dq, { teamId: CS.DIGIT_TEAM }) === null, 'the QUOTED form (the dumper\'s) is THE requirement for that team — accepted (a0d876c5f refused it as «extra clauses»)');
+  ok(MI.requirementVerdict(db, { teamId: CS.DIGIT_TEAM }) === null && MI.requirementVerdict(MI.parseDesignatedRequirement(CS.designated({ team: CS.TEAM }).replace(` = ${CS.TEAM}\n`, ` = "${CS.TEAM}"\n`)), { teamId: CS.TEAM }) === null, 'the BARE form means the same — accepted; a letter-first team quoted (a dumper that quoted everything) means the same too');
+  ok(/ = "0VSTEAM002"$/.test(MI.designatedRequirement({ teamId: CS.DIGIT_TEAM })) && / = VSTEAM0001$/.test(MI.designatedRequirement({ teamId: CS.TEAM })) && same(MI.requirementTokens(dq.designated), MI.requirementTokens(db.designated)) && MI.requirementTokens('identifier "a b" and cdhash H"ab" and certificate 1[field.1.2] /* exists */').join('|') === 'identifier|a b|and|cdhash|H"ab"|and|certificate|1|[field.1.2]|/* exists */' && MI.requirementTokens('').length === 0, 'designatedRequirement EMITS the dumper\'s form (quoted for a digit-first team, bare otherwise — so the release script\'s check passes); requirementTokens: a quoted value equals its bare value, H"…" / [selectors] / comments stay whole; empty ⇒ no tokens (never equal)');
+  ok(/it names com\.problemfactory\.vibespace\.screen by team 0VSTEAM002, not com\.problemfactory\.vibespace\.screen by team VSTEAM0001/.test(RV(dq, { teamId: CS.TEAM })) && /extra clauses/.test(RV(MI.parseDesignatedRequirement(CS.designatedDumped({ team: CS.DIGIT_TEAM }).replace(/\n$/, ' and certificate leaf[subject.CN] = "x"\n')), { teamId: CS.DIGIT_TEAM })) && /it names x by team 0VSTEAM002/.test(RV(MI.parseDesignatedRequirement(CS.designatedDumped({ team: CS.DIGIT_TEAM, identifier: 'x' })), { teamId: CS.DIGIT_TEAM })), 'the quoted form still refuses by name: another team, an extra clause, another identifier');
+  // RED controls — a bytes-only compare refuses the bare form of a digit-first team as «extra clauses»; round 2's bare emission + bytes-only
+  // compare refuses what codesign actually prints for such a team: a0d876c5f's defect, by name
+  const EQ = 'if (sameRequirement(req.designated, expect)) return null; // by meaning: the dumper\'s quoting is not a difference';
+  const bytesOnly = SRC_TEXT.replace(EQ, 'if (req.designated === expect) return null;');
+  const round2 = bytesOnly.replace('certificate leaf[subject.OU] = ${ouText(teamId)}`;', 'certificate leaf[subject.OU] = ${teamId}`;');
+  ok(SRC_TEXT.includes(EQ) && bytesOnly !== SRC_TEXT && /extra clauses/.test(load(bytesOnly).requirementVerdict(db, { teamId: CS.DIGIT_TEAM }) || '') && load(bytesOnly).requirementVerdict(dq, { teamId: CS.DIGIT_TEAM }) === null, 'RED: a bytes-only compare refuses the BARE form of a digit-first team as «extra clauses» — the tokens are what bite');
+  ok(round2 !== bytesOnly && /extra clauses/.test(load(round2).requirementVerdict(dq, { teamId: CS.DIGIT_TEAM }) || '') && / = 0VSTEAM002$/.test(load(round2).designatedRequirement({ teamId: CS.DIGIT_TEAM })) && load(round2).requirementVerdict(MI.parseDesignatedRequirement(CS.designated({ team: CS.TEAM })), { teamId: CS.TEAM }) === null, 'RED (a0d876c5f): round 2\'s bare emission + bytes-only compare refuses what the dumper prints for a digit-first team (and still passes a letter-first one — the one capture it generalised from)');
 }
 
 console.log(`\n${fail ? '✗' : '✓'} test-mac-helper-identity: ${pass} passed, ${fail} failed`);

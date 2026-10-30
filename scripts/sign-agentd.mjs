@@ -19,6 +19,8 @@
 // (scripts/build-mac-helper.sh, run on the owner's Mac) WITH its .identity.json, the record also signs a `helper` row — its version,
 // sha256 and identity (developer-id + Team ID + identifier, or adhoc) — so a hub pushes only the prebuilt the release named. A
 // prebuilt whose record does not describe it (a stale pair) is refused by name; no prebuilt ⇒ no row (the record is as before).
+// Round 3 (THE LAW): the row rides its OWN signature (`helperSig`, the same key) — the bundle's `sig` is over the message every
+// older agent rebuilds, so a release with a prebuilt lands on agents that never heard of the row.
 //
 // Refuses (exit 2, by name): CI set; a running instance's checkout (data/auth.json …); a key inside the repo, readable by
 // others, or not ed25519; a key whose public half is not in src/agentd/release-keys.js; a bundle that is not this
@@ -74,5 +76,5 @@ console.log(`signed vibespace-agentd ${version}
   sha256 ${manifest.sha256}
   key    ${keyId}${manifest.chain.length ? ` (chain: ${manifest.chain.length} entr${manifest.chain.length > 1 ? 'ies' : 'y'})` : ''}${allowDowngradeTo ? `
   ROLLBACK devices that already ran a newer agent land ${version} once (allowDowngradeTo, signed)` : ''}${helper ? `
-  helper ${helper.version} ${helper.identity.kind}${helper.identity.teamId ? ` by team ${helper.identity.teamId}` : ''} (sha256 ${helper.sha256.slice(0, 12)}…) — the Mac screen helper's row, signed` : ''}
+  helper ${helper.version} ${helper.identity.kind}${helper.identity.teamId ? ` by team ${helper.identity.teamId}` : ''} (sha256 ${helper.sha256.slice(0, 12)}…) — the Mac screen helper's row, signed beside the bundle (helperSig; agents before 2.369.363 verify the bundle as before)` : ''}
   wrote  release/agentd/manifest.json — commit it with the release (git add release/agentd/manifest.json)`);

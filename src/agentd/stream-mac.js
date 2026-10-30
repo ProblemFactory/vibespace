@@ -25,6 +25,11 @@
  *   Developer ID helper on its requirement (identifier + Team ID), so every later version keeps the grant (regrantVerdict). The
  *   facts carry `helper.identity` + `helper.wantSigned`; the offer answer carries them too and the hub pushes its signed prebuilt
  *   once (src/server/desktop-webrtc.js). The fast path (version file + binary, nothing pushed) still runs NOTHING.
+ *   A REFUSAL IS ABOUT BYTES (round 3, acceptance r1 M1): `.state.json` keeps `refused: { version, sha256, code, why, at, agent }` —
+ *   the same bytes pushed again stand refused without a codesign run; other bytes, another helper version or an upgraded agent
+ *   (the pin commit) are judged afresh. A codesign run that answered nothing (killed by its timeout) is NO verdict: the file stays
+ *   (`pending`, judged at the next ensure(); the UNJUDGED_MAX-th time counts as refused). The `helper_unsigned` answer names the
+ *   refused bytes, so the hub sends a DIFFERENT prebuilt or says why the same one is not re-sent (pushMacHelper).
  * FACTS (`stream-facts` on a Mac): the helper's own (run disclaimed, so its TCC answer is ITS grant) — displays, windows, TCC,
  *   the lock, its version — and the helper's state; kept FACTS_MS (a window source re-reads once when its window is not in them).
  *   THE GRANT'S EVENTS (lane stream-mac-ax-respawn): the helper keeps the last tcc a facts read saw; every read, and the
@@ -62,16 +67,22 @@ const SRC = require('./mac-helper-source.js');
 const MI = require('../mac-helper-identity.js'); // lane apple-signing: who signed a pushed helper, and whether it goes to the fixed path
 const SND = require('../sound-model.js'); // lane speaker-passthrough-v1: the sound's limits + the Opus packet's samples
 const MW = require('../machine-window.js');
+const crypto = require('crypto'); // lane apple-signing round 3: a refusal names the BYTES it judged (sha256 of the pushed file)
+const AGENT_VERSION = process.env.VIBESPACE_AGENTD_VERSION || require('./version.js').VERSION; // …and the agent that judged them (an upgraded agent judges afresh)
 
 const FACTS_MS = 30000;
 const RUN_MS = 20000;          // one facts run
 const BUILD_MS = 120000;       // one swiftc slice at most (measured ≈ 4–6 s a slice on an M4 Pro)
 const TAIL = 3;
+const UNJUDGED_MAX = 3;        // round 3: codesign runs that answered NOTHING on the same bytes before they count as refused
 const named = (code, error, extra) => ({ ok: false, code, error, ...(extra || {}) });
 const RECIPE = 'on the Mac: `xcode-select --install` (the Command Line Tools — the agent then builds its screen helper itself), or put the release\'s prebuilt helper in the hub\'s data/bin/helpers/';
+/** What a hub needs to know about a judged push (round 3): the refused bytes (never sent again — a DIFFERENT prebuilt is judged afresh)
+ *  or the bytes still being judged. */
+const pushWord = (h) => ({ ...(h && h.refused ? { refused: { version: h.refused.version, sha256: h.refused.sha256, code: h.refused.code, why: h.refused.why, agent: h.refused.agent } } : {}), ...(h && h.pending ? { pending: { version: h.pending.version, sha256: h.pending.sha256, tries: h.pending.tries } } : {}) });
 
 /** THE HELPER of this Mac: its fixed place, version, build / prebuilt, TCC memory. */
-function createMacHelper({ execFile, fs, home, log = () => { }, now = Date.now, version = SRC.VERSION, source = SRC.SOURCE, env = process.env, teamIds = MI.HELPER_TEAM_IDS, codesign = MI.MAC_CODESIGN } = {}) {
+function createMacHelper({ execFile, fs, home, log = () => { }, now = Date.now, version = SRC.VERSION, source = SRC.SOURCE, env = process.env, teamIds = MI.HELPER_TEAM_IDS, codesign = MI.MAC_CODESIGN, agentVersion = AGENT_VERSION } = {}) {
   const P = SP.macHelperPaths(home);
   let building = null;
   const run = (file, args, timeout = RUN_MS, more = null) => new Promise((resolve) => {
@@ -81,6 +92,12 @@ function createMacHelper({ execFile, fs, home, log = () => { }, now = Date.now, 
   const installed = () => { try { return fs.readFileSync(P.version, 'utf8').trim() || null; } catch { return null; } };
   const readState = () => { try { const o = JSON.parse(fs.readFileSync(P.state, 'utf8')); return o && typeof o === 'object' ? o : {}; } catch { return {}; } };
   const writeState = (o) => { try { fs.mkdirSync(P.dir, { recursive: true }); fs.writeFileSync(P.state + '.tmp', JSON.stringify(o)); fs.renameSync(P.state + '.tmp', P.state); } catch (e) { log(`[stream] mac helper state not written (${e && e.code})`); } };
+  const sha256Of = (f) => { try { return crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex'); } catch { return null; } };
+  /** A refusal / a pending judgment is a fact about BYTES of THIS helper version judged by THIS agent (round 3) — any other is stale. */
+  const own = (r) => (r && typeof r === 'object' && r.version === version && r.agent === agentVersion && typeof r.sha256 === 'string' ? r : null);
+  /** A codesign run that answered NOTHING (killed by its timeout) is no verdict about the file (round 3, acceptance r1 M1). */
+  const timedOut = (r) => !!(r.err && (r.err.killed === true || r.err.signal));
+  const unjudged = (what, r) => ({ kind: 'unjudged', teamId: null, identifier: null, cdhash: null, authority: [], why: `codesign ${what} answered nothing in 30 s (${(r.err && r.err.signal) || 'timeout'})` });
   /** A compiler on this Mac — by FILE (the Command Line Tools or Xcode under `xcode-select -p`). → '/usr/bin/swiftc' | null */
   async function compiler() {
     const r = await run('/usr/bin/xcode-select', ['-p'], 5000);
@@ -94,11 +111,14 @@ function createMacHelper({ execFile, fs, home, log = () => { }, now = Date.now, 
   async function identityOf(file) {
     const [vf, dv, dr] = MI.verifyPlan(file, codesign);
     const v = await run(vf.file, vf.args, 30000);
+    if (timedOut(v)) return unjudged('--verify --strict', v);
     if (v.err) return { kind: 'unsigned', teamId: null, identifier: null, cdhash: null, authority: [], why: `codesign --verify refused it (${(v.stderr.trim().split('\n').pop() || v.err.message || '').slice(0, 160)})` };
     const d = await run(dv.file, dv.args, 30000);
+    if (timedOut(d)) return unjudged('-dv', d);
     const id = MI.identityVerdict(MI.parseCodesignInfo(d.stderr || d.stdout), { teamIds });
     if (id.kind !== 'developer-id') return id; // an ad-hoc requirement is its cdhash by construction; other / unsigned are refused already
     const r = await run(dr.file, dr.args, 30000);
+    if (timedOut(r)) return unjudged('-dr -', r);
     const req = MI.parseDesignatedRequirement(`${r.stderr || ''}\n${r.stdout || ''}`);
     const bad = r.err ? `codesign -dr failed (${(r.stderr.trim().split('\n').pop() || r.err.message || '').slice(0, 160)})` : MI.requirementVerdict(req, { teamId: id.teamId, identifier: id.identifier });
     if (bad) return { ...id, kind: 'other', why: `its designated requirement is not the Developer ID one the grant must key on — ${bad}` };
@@ -124,7 +144,7 @@ function createMacHelper({ execFile, fs, home, log = () => { }, now = Date.now, 
   function view(extra = {}) {
     const st = readState();
     const identity = st.identity && typeof st.identity === 'object' ? st.identity : null;
-    return { state: 'ready', bin: P.bin, dir: P.dir, version, have: installed(), how: st.how || null, buildMs: st.buildMs == null ? null : st.buildMs, regrant: !!st.regrant, granted: !!st.granted, identity, wantSigned: MI.wantSigned(identity, teamIds), refused: st.refused || null, ...extra };
+    return { state: 'ready', bin: P.bin, dir: P.dir, version, have: installed(), how: st.how || null, buildMs: st.buildMs == null ? null : st.buildMs, regrant: !!st.regrant, granted: !!st.granted, identity, wantSigned: MI.wantSigned(identity, teamIds), refused: own(st.refused), pending: own(st.pending), ...extra };
   }
   /** → { state: 'ready', bin, … } | { state: 'missing', code: 'no_helper' | 'helper_unsigned', error, dir, version, have, canBuild } */
   function ensure() {
@@ -137,24 +157,47 @@ function createMacHelper({ execFile, fs, home, log = () => { }, now = Date.now, 
       const st = readState();
       const wasGranted = !!(have && st.version === have && (st.granted || st.regrant));
       const from = have && st.version === have && st.identity && typeof st.identity === 'object' ? st.identity : null;
-      let how = null, ms = null, why = null, identity = null, refused = !hasPushed && st.refused && typeof st.refused === 'object' ? st.refused : null; // a refusal stands until a push is judged again
+      // ROUND 3 (acceptance r1 M1): a refusal is a fact about the BYTES this agent judged — { version, sha256, code, why, at, agent }:
+      // the same bytes pushed again stand refused (nothing re-run); other bytes, another helper version or an upgraded agent are
+      // judged afresh. A codesign run that answered nothing is NO verdict: the file stays (pending) up to UNJUDGED_MAX times.
+      let how = null, ms = null, why = null, identity = null, refused = own(st.refused), pending = own(st.pending);
       try { fs.mkdirSync(P.dir, { recursive: true }); } catch { /* the build says it */ }
       if (hasPushed) { // lane apple-signing: JUDGED before it is put in place — never exec'd first
-        const v = await identityOf(pushed);
-        const sv = MI.swapVerdict({ installed: have ? { version: have, identity: from } : null, incoming: { version, identity: v }, teamIds });
-        if (sv.take) {
-          try { fs.chmodSync(pushed, 0o755); fs.renameSync(pushed, P.bin); how = 'prebuilt'; identity = v; } catch (e) { why = `the pushed helper could not be put in place (${e && e.code})`; } // a Developer ID identity carries the requirement READ from the file (identityOf) — what tccd keys the grant on rides the state
-        } else {
+        const sha = sha256Of(pushed);
+        if (refused && refused.sha256 === sha) { // the hub re-sent the very bytes this agent refused: the verdict stands, nothing runs
           try { fs.unlinkSync(pushed); } catch { /* gone already */ }
-          if (sv.code) { refused = { code: sv.code, why: sv.why, at: now() }; log(`[stream] mac screen helper ${version}: a pushed helper was refused (${sv.code} — ${sv.why})`); }
+          log(`[stream] mac screen helper ${version}: the pushed helper is the one refused before (sha256 ${String(sha).slice(0, 12)}…) — ${refused.code}: ${refused.why}`);
+        } else {
+          refused = null;
+          const v = await identityOf(pushed);
+          if (v.kind === 'unjudged') {
+            const tries = (pending && pending.sha256 === sha ? pending.tries : 0) + 1;
+            pending = null;
+            if (tries >= UNJUDGED_MAX) { try { fs.unlinkSync(pushed); } catch { /* gone already */ } refused = { version, sha256: sha, code: 'helper_unsigned', why: `codesign could not judge it ${tries} times (${v.why})`, at: now(), agent: agentVersion }; log(`[stream] mac screen helper ${version}: a pushed helper was refused after ${tries} unanswered codesign runs (${v.why})`); }
+            else { pending = { version, sha256: sha, tries, why: v.why, at: now(), agent: agentVersion }; log(`[stream] mac screen helper ${version}: the pushed helper could not be judged yet (${v.why}; try ${tries} of ${UNJUDGED_MAX}) — kept, judged again at the next check`); }
+          } else {
+            pending = null;
+            const sv = MI.swapVerdict({ installed: have ? { version: have, identity: from } : null, incoming: { version, identity: v }, teamIds });
+            if (sv.take) {
+              try { fs.chmodSync(pushed, 0o755); fs.renameSync(pushed, P.bin); how = 'prebuilt'; identity = v; } catch (e) { why = `the pushed helper could not be put in place (${e && e.code})`; } // a Developer ID identity carries the requirement READ from the file (identityOf) — what tccd keys the grant on rides the state
+            } else {
+              try { fs.unlinkSync(pushed); } catch { /* gone already */ }
+              if (sv.code) { refused = { version, sha256: sha, code: sv.code, why: sv.why, at: now(), agent: agentVersion }; log(`[stream] mac screen helper ${version}: a pushed helper was refused (${sv.code} — ${sv.why})`); }
+            }
+          }
         }
       }
-      if (!how && have === version && isFile(P.bin)) { if (refused) writeState({ ...st, refused }); return view(); } // the installed one stays (nothing to swap, or the swap was refused)
+      const pushFacts = { refused: refused || null, pending: pending || null }; // what the state says about pushes — a no-op push clears an old refusal too (round 3)
+      const keep = () => { if (hasPushed || (st.refused || null) !== pushFacts.refused || (st.pending || null) !== pushFacts.pending) writeState({ ...st, ...pushFacts }); }; // written only when something changed (a stale one dropped counts)
+      if (!how && have === version && isFile(P.bin)) { keep(); return view(); } // the installed one stays (nothing to swap, the swap was refused, or the judge has not answered)
       const swiftc = how ? null : await compiler();
       if (!how && swiftc) { const b = await build(swiftc); if (b.ok) { how = 'built'; ms = b.ms; identity = { kind: 'adhoc', teamId: null, identifier: null, cdhash: null, authority: [], why: 'built here (codesign -s -)' }; } else why = b.error; }
       if (!how) {
-        if (refused) { if (hasPushed) writeState({ ...st, refused }); return { state: 'missing', code: 'helper_unsigned', error: `${SP.MAC_WHY.helper_unsigned} (${refused.why})`, dir: P.dir, version, have, canBuild: !!swiftc, archs: SP.MAC_HELPER.archs, refused }; }
-        return { state: 'missing', code: 'no_helper', error: why || `the Mac has no screen helper ${version} and no compiler to build it — ${RECIPE}`, dir: P.dir, version, have, canBuild: !!swiftc, archs: SP.MAC_HELPER.archs };
+        const miss = { dir: P.dir, version, have, canBuild: !!swiftc, archs: SP.MAC_HELPER.archs };
+        if (refused) { keep(); return { state: 'missing', code: 'helper_unsigned', error: `${SP.MAC_WHY.helper_unsigned} (${refused.why})`, ...miss, refused }; }
+        if (pending) { keep(); return { state: 'missing', code: 'no_helper', error: `the pushed screen helper could not be judged yet (${pending.why}; try ${pending.tries} of ${UNJUDGED_MAX}) — it is judged again at the next check`, ...miss, pending }; }
+        keep();
+        return { state: 'missing', code: 'no_helper', error: why || `the Mac has no screen helper ${version} and no compiler to build it — ${RECIPE}`, ...miss };
       }
       try { fs.writeFileSync(P.version + '.tmp', version); fs.renameSync(P.version + '.tmp', P.version); } catch (e) { return { state: 'missing', code: 'no_helper', error: `the helper's version could not be written (${e && e.code})`, dir: P.dir, version, have, canBuild: !!swiftc }; }
       const regrant = MI.regrantVerdict({ wasGranted, from, to: identity });
@@ -188,8 +231,8 @@ function createMacHelper({ execFile, fs, home, log = () => { }, now = Date.now, 
   return { paths: P, version, ensure, sawTcc, sawDoor, onTcc, rowAsked, spawnPlan, installed, run };
 }
 
-function createMacScreen({ spawn, execFile, env = process.env, fs = require('fs'), log = () => { }, now = Date.now, home = null, helper = null, codesign = MI.MAC_CODESIGN } = {}) {
-  const H = helper || createMacHelper({ execFile, fs, home: home || (env && env.HOME) || require('os').homedir(), log, now, env, codesign });
+function createMacScreen({ spawn, execFile, env = process.env, fs = require('fs'), log = () => { }, now = Date.now, home = null, helper = null, codesign = MI.MAC_CODESIGN, agentVersion = AGENT_VERSION } = {}) {
+  const H = helper || createMacHelper({ execFile, fs, home: home || (env && env.HOME) || require('os').homedir(), log, now, env, codesign, agentVersion });
   let memo = null, inflight = null;
   async function readFacts() {
     const h = await H.ensure();
@@ -217,7 +260,7 @@ function createMacScreen({ spawn, execFile, env = process.env, fs = require('fs'
     let plan = f.ok ? SP.planScreen(f, { ...want, kbps: maxKbps }) : f;
     if (!plan.ok && f.ok) { f = await facts({ force: true }); plan = f.ok ? SP.planScreen(f, { ...want, kbps: maxKbps }) : f; } // a refusal re-reads once (a window opened a second ago, a grant just given)
     if (!plan.ok) {
-      if (plan.code === 'no_helper' && f.helper) return { ...plan, helper: { dir: f.helper.dir, version: f.helper.version, archs: SP.MAC_HELPER.archs } };
+      if ((plan.code === 'no_helper' || plan.code === 'helper_unsigned') && f.helper) return { ...plan, helper: { dir: f.helper.dir, version: f.helper.version, archs: SP.MAC_HELPER.archs, ...pushWord(f.helper) } }; // round 3: a refusal / a pending judgment names its bytes — the hub sends a DIFFERENT prebuilt or says why not
       if ((plan.code === 'screen_permission' || plan.code === 'helper_changed_regrant' || plan.code === 'helper_signed_regrant') && !H.rowAsked()) registerRow(f);
       return plan;
     }
@@ -434,7 +477,7 @@ function createMacScreen({ spawn, execFile, env = process.env, fs = require('fs'
       /** Where the picture sits on the Mac (the helper's started / frame lines) — the injector maps picture pixels with it. */
       inputTarget() { return target; },
       // lane apple-signing: the helper's identity facts ride the offer answer — the hub pushes its SIGNED prebuilt once when `wantSigned`
-      helper: { dir: H.paths.dir, version: H.version, identity: (f.helper && f.helper.identity) || null, wantSigned: !!(f.helper && f.helper.wantSigned) },
+      helper: { dir: H.paths.dir, version: H.version, identity: (f.helper && f.helper.identity) || null, wantSigned: !!(f.helper && f.helper.wantSigned), ...pushWord(f.helper) },
       // lane desktop-handover: ONE still (`desktop-grab`) is the helper's to take, and the helper has no still verb yet — a new verb
       // is a new helper VERSION, and a new version asks the owner to switch Screen Recording on again: it rides the helper's next
       // version, refused by name until then (the hand-over's input works: the session's own sink above)
@@ -445,4 +488,4 @@ function createMacScreen({ spawn, execFile, env = process.env, fs = require('fs'
   return { facts, source, windows, restore, look, starts, openSettings, helper: H };
 }
 
-module.exports = { createMacScreen, createMacHelper, FACTS_MS, RECIPE };
+module.exports = { createMacScreen, createMacHelper, FACTS_MS, RECIPE, AGENT_VERSION, UNJUDGED_MAX };

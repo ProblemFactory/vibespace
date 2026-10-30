@@ -13,7 +13,10 @@
  * judged BEFORE it is put at the fixed path (= before any exec) by `codesign --verify --strict` + `codesign -dv --verbose=4`
  * read through parseCodesignInfo → identityVerdict → swapVerdict (the table in the design's §2.3) — and a Developer ID verdict
  * by `codesign -dr -` read through parseDesignatedRequirement → requirementVerdict: the requirement tccd will key the grant on
- * must be THE one below (a custom `-r`, a cdhash one or another team's would lose the grant at the next build).
+ * must be THE one below (a custom `-r`, a cdhash one or another team's would lose the grant at the next build) — compared by
+ * MEANING (round 3, acceptance r1 M2): codesign's requirement dumper QUOTES a value that cannot be a bare identifier (a Team ID
+ * that starts with a digit — about 28 % of them), so the text is tokenized and a quoted value equals its bare value; the text
+ * this file emits is the dumper's own form (quoted iff digit-first), so the release script's byte check passes too.
  *   HELPER_TEAM_IDS empty (today)  ad-hoc taken as before · a Developer ID of ANY team / other / unsigned ⇒ helper_unsigned
  *   HELPER_TEAM_IDS pinned          Developer ID by a pinned team with THE identifier taken — also over an installed ad-hoc
  *                                   build of the same version · ad-hoc / other / unsigned ⇒ helper_unsigned (the local build
@@ -42,11 +45,26 @@ const OID_DEVELOPER_ID_LEAF = '1.2.840.113635.100.6.1.13';
 /** The designated requirement codesign writes for a Developer ID signature of `identifier` by `teamId` — what tccd stores. The
  *  text is codesign's own shape (the leaf's OU unquoted, `/* exists *\/` after each OID) so that what the agent reads back with
  *  `codesign -dr -` compares equal. */
+/** The leaf's OU as codesign's requirement dumper prints it (Security's reqdumper: a bare identifier cannot start with a digit —
+ *  such a value is printed QUOTED; letters first ⇒ bare, as in the Chrome capture). Synthetic rule, no digit-first capture yet. */
+const ouText = (teamId) => (/^[0-9]/.test(teamId) ? `"${teamId}"` : teamId);
 function designatedRequirement({ teamId, identifier = HELPER_IDENTIFIER } = {}) {
   if (!TEAM_RE.test(String(teamId || ''))) throw new Error('mac-helper-identity: a Team ID is 10 capitals / digits');
   if (!IDENT_RE.test(String(identifier || ''))) throw new Error('mac-helper-identity: not a code identifier');
-  return `identifier "${identifier}" and anchor apple generic and certificate 1[field.${OID_DEVELOPER_ID_CA}] /* exists */ and certificate leaf[field.${OID_DEVELOPER_ID_LEAF}] /* exists */ and certificate leaf[subject.OU] = ${teamId}`;
+  return `identifier "${identifier}" and anchor apple generic and certificate 1[field.${OID_DEVELOPER_ID_CA}] /* exists */ and certificate leaf[field.${OID_DEVELOPER_ID_LEAF}] /* exists */ and certificate leaf[subject.OU] = ${ouText(teamId)}`;
 }
+
+/** A requirement's MEANING (round 3): its tokens — a quoted value and the same value bare are ONE token (the dumper quotes what
+ *  cannot be a bare identifier), `H"…"` hashes, `/* … *\/` comments and `[…]` selectors stay whole. → string[] */
+function requirementTokens(text) {
+  const out = [];
+  for (const m of String(text || '').matchAll(/H"[0-9a-f]+"|"(?:[^"\\]|\\.)*"|\/\*.*?\*\/|\[[^\]]*\]|[A-Za-z0-9_.]+|[^\s]/g)) {
+    const t = m[0];
+    out.push(t[0] === '"' && t.length >= 2 ? t.slice(1, -1).replace(/\\(.)/g, '$1') : t);
+  }
+  return out;
+}
+const sameRequirement = (a, b) => { const x = requirementTokens(a), y = requirementTokens(b); return x.length > 0 && x.length === y.length && x.every((t, i) => t === y[i]); };
 
 /** The codesign runs that judge a file (in this order): the strict verification, the facts, and — only after a developer-id
  *  verdict (an ad-hoc signature's requirement is its cdhash by construction) — the designated requirement. → [{ file, args }] */
@@ -137,7 +155,7 @@ function requirementVerdict(req, { teamId, identifier = HELPER_IDENTIFIER } = {}
   if (req.kind === 'cdhash') return `a cdhash requirement (${req.implicit ? 'implicit — ' : ''}the grant would die with the next build)`;
   if (req.kind !== 'developer-id') return `not the Developer ID shape (${req.designated.slice(0, 160)})`;
   let expect; try { expect = designatedRequirement({ teamId, identifier }); } catch (e) { return e.message; }
-  if (req.designated === expect) return null;
+  if (sameRequirement(req.designated, expect)) return null; // by meaning: the dumper's quoting is not a difference
   if (req.identifiers.length === 1 && req.identifiers[0] === identifier && req.teamId === teamId) return 'extra clauses: not the plain Developer ID requirement';
   return `it names ${req.identifiers.join(' / ')} by team ${req.teamId}, not ${identifier} by team ${teamId}`;
 }
@@ -158,6 +176,7 @@ function swapVerdict({ installed = null, incoming, teamIds = HELPER_TEAM_IDS } =
     return { take: true, code: null, why: 'ad-hoc, as before (no Team ID pinned yet)' };
   }
   if (id.kind !== 'developer-id') return refuse(`the pushed helper's signature could not be judged (${id.kind})`);
+  if (!pins.includes(id.teamId)) return refuse(pins.length ? `the pushed helper is signed by team ${id.teamId || '?'}, not the pinned ${pins.join(' / ')}` : `the pushed helper is signed by team ${id.teamId || '?'}; this agent pins no Team ID yet`); // round 3 (acceptance r1 minor): the table fails closed by itself, never only through identityVerdict upstream
   if (same && installed.identity && installed.identity.kind === 'developer-id') return { take: false, code: null, why: 'the signed helper of this version is installed already' };
   return { take: true, code: null, why: same ? 'the signed build replaces the ad-hoc one of the same version (the last re-grant)' : `the signed build (${id.why})` };
 }
@@ -195,4 +214,4 @@ function helperRowShape(row) {
 /** The row's line inside the signed message (src/agentd-signature.js bundleMessage) — present iff the record carries it. */
 const helperRowLine = (row) => `helper ${row.version} ${row.sha256} ${row.identity.kind} ${row.identity.teamId || '-'} ${row.identity.identifier || '-'}`;
 
-module.exports = { HELPER_IDENTIFIER, HELPER_TEAM_IDS, KINDS, MAC_CODESIGN, designatedRequirement, verifyPlan, signArgs, parseCodesignInfo, identityVerdict, parseDesignatedRequirement, requirementVerdict, swapVerdict, regrantVerdict, wantSigned, helperRow, helperRowShape, helperRowLine };
+module.exports = { HELPER_IDENTIFIER, HELPER_TEAM_IDS, KINDS, MAC_CODESIGN, designatedRequirement, verifyPlan, signArgs, parseCodesignInfo, identityVerdict, parseDesignatedRequirement, requirementTokens, requirementVerdict, swapVerdict, regrantVerdict, wantSigned, helperRow, helperRowShape, helperRowLine };

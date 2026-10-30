@@ -95,6 +95,15 @@ export const developerId = ({ file = '/Users/me/.vibespace/helpers/vibespace-scr
 export const designated = ({ identifier = IDENTIFIER, team = TEAM, file = HELPER_FILE } = {}) =>
   sub(CHROME_DR, [[CHROME_FILE, file], ['(identifier "com.google.Chrome" or identifier "com.google.Chrome.beta" or identifier "com.google.Chrome.dev" or identifier "com.google.Chrome.canary")', `identifier "${identifier}"`], [CHROME_TEAM, team]]);
 
+/** ROUND 3 (acceptance r1 M2) — SYNTHETIC, not a capture: a digit-first Team ID. Security's requirement dumper prints a value that
+ *  cannot be a bare identifier (one starting with a digit) QUOTED; letters-first bare (the Google capture above). The owner's real
+ *  Team ID is not known yet — when the first signed cut exists, its real `codesign -dr -` replaces this (the kb's open item). */
+export const DIGIT_TEAM = '0VSTEAM002';
+/** The leaf's OU as the dumper prints it for `team`. */
+export const dumpedOu = (team) => (/^[0-9]/.test(team) ? `"${team}"` : team);
+/** designated() in the DUMPER'S form: the OU quoted iff the team starts with a digit (the rule; for a letter-first team it IS the capture's form). */
+export const designatedDumped = ({ identifier = IDENTIFIER, team = TEAM, file = HELPER_FILE } = {}) => designated({ identifier, team, file }).replace(` = ${team}\n`, ` = ${dumpedOu(team)}\n`);
+
 /** `codesign -dr -` writes the Executable line to stderr and the requirement to stdout — the fakes answer the same way. */
 export const drSplit = (text) => {
   const ls = String(text).split('\n').filter(Boolean);

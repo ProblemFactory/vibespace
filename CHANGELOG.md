@@ -2,10 +2,10 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
-## 2.369.362 — 2026-10-29
+## 2.369.363 — 2026-10-29
 
 ### Changed
-- The Mac screen helper is signed with a Developer ID: Screen Recording is granted once, and later updates of the helper no longer ask again.
+- VibeSpace now checks the Mac screen helper's signature before installing it; a signed helper comes with the Team ID.
 
 ## 2.369.361 — 2026-10-29
 
