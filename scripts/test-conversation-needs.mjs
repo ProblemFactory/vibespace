@@ -339,7 +339,7 @@ ok(/const fresh = open\.filter\(\(e\) => !this\._seen\.has\(e\.item\.id\)\);\n\s
 // acceptance round 3 — the accordion's slot law, the tap's hold on a pinned view, the box kept across a resolve, the pass a frame
 ok(!/this\._pick|this\._newest/.test(CARD) && /this\._seen\.clear\(\); \/\/ nothing waits/.test(CARD) && /if \(el\.classList\.contains\('cn-fold'\)\) \{ this\._slot = el\.dataset\.item; this\.render\(\{ hold: true \}\); \}/.test(CARD), '#3 the slot moves on a FILING, a tap or the chip — never on a resolution (no «newest changed ⇒ the pick goes» left)');
 { const oc = CARD.slice(CARD.indexOf('  openCard(id'), CARD.indexOf('  jumpToNewest()'));
-  ok(/view\._noteUserNav\?\.\('needsOpen'\);\n\s+this\._slot = id;\n\s+this\.render\(\{ hold: true \}\);/.test(oc) && /if \(view\._pinned && placed && !hold\) view\._scrollToBottom\?\.\(\);/.test(CARD) && !/_fsbEpoch|_fsbActive/.test(CARD), '#2 an open in place goes through the VIEW\'s door (_noteUserNav cancels its bottom-follow chain) before the pass, and that pass starts none — no private copy of the epoch'); }
+  ok(/view\._noteTailPress\?\.\('needsOpen'\);\n\s+view\._cancelForcedScroll\?\.\('needsOpen'\);\n\s+this\._slot = id;\n\s+this\.render\(\{ hold: true \}\);/.test(oc) && /if \(view\._pinned && placed && !hold\) view\._scrollToBottom\?\.\(\);/.test(CARD) && !/_fsbEpoch|_fsbActive/.test(CARD), '#2 an open in place goes through the VIEW\'s door (its stamp and the view\'s own chain cancel — r9: _noteTailPress + _cancelForcedScroll, THE RULE deciding the rest where it lands) before the pass, and that pass starts none — no private copy of the epoch'); }
 { const res = CARD.slice(CARD.indexOf('    if (e.resolved) {'), CARD.indexOf('    let head = card.querySelector'));
   ok(/if \(rows && boxInUse\(rows\.querySelector\('\.ut-reply'\)\)\) \{/.test(res) && /this\.app\.foryouRows\?\.reconcile\(rows, \[\{ item: e\.item, resolved: true \}\]\);/.test(res) && res.indexOf('this.app.foryouRows?.stash?.(card);') > 0 && res.indexOf('this.app.foryouRows?.stash?.(card);') < res.indexOf('card.innerHTML ='), '#4 THE row\'s keep rule: a resolved card keeps a box in use (the row resolved AROUND it), and the typed text is a draft BEFORE any innerHTML write');
   ok(/stash: stashDrafts,/.test(PANEL) && /fold: \(box\) => foldBox\(box\),/.test(PANEL) && /this\.app\.foryouRows\?\.fold\?\.\(box\);/.test(CARD), '#4 …the drafts are the panel\'s (stashDrafts / foldBox through app.foryouRows) — a box kept on an answered card folds, its text a draft, when the person leaves it'); }
@@ -354,7 +354,7 @@ ok(/if \(!document\.hidden\) raf = requestAnimationFrame\(run\);\n\s+const tm = 
 { const oc = CARD.slice(CARD.indexOf('  openCard(id'), CARD.indexOf('  jumpToNewest()'));
   ok(/\nconst lineOf = \(c\) => \(c && c\.querySelector\(':scope > \.cn-rows > \.ut-item \.ut-text'\)\) \|\| c;/.test(CARD) && /const was = at\(\), before = lineOf\(was\)\?\.getBoundingClientRect\(\)\.top, row = was\?\.getBoundingClientRect\(\);/.test(oc) && /const lr = list\.getBoundingClientRect\(\), line = lineOf\(el\);\n\s+const shift = before == null \? 0 : line\.getBoundingClientRect\(\)\.top - before;/.test(oc) && !/const before = at\(\)\?\.getBoundingClientRect/.test(oc), 'R4 #1(a) the hold anchors the row\'s TEXT LINE (its question\'s first line) — never the card\'s box, which the head and the padding grow inside');
   ok(/\} else \{\n\s+const verbs = \[\.\.\.el\.querySelectorAll\(':scope > \.cn-rows :is\(button, textarea\)'\)\][^\n]*\n\s+const low = [^\n]*\n\s+const lineTop = [^\n]*\n\s+if \(low > lr\.bottom\) reveal = Math\.min\(Math\.ceil\(low - lr\.bottom\), /.test(oc) && /el\._openedAt = performance\.now\(\);/.test(oc) && /if \(pressVerdict\(\{ since: card\._openedAt, now: performance\.now\(\) \}\)\.ok\) \{ card\._openedAt = null; return; \}\n\s+ev\.stopPropagation\(\); ev\.preventDefault\(\);/.test(CARD) && /import \{ pressVerdict \} from '\.\/press-arm\.js';/.test(CARD), 'R4 #1(b) a pointer open whose lowest verb lies below the list brings it inside by the MINIMUM scroll — and what that moved under the pointer answers nothing for ARM_MS (the press arm\'s verdict, on every verb of the card)');
-  ok(/const room = Math\.min\(list\.scrollHeight, end\) - list\.clientHeight - list\.scrollTop;\n\s+if \(move > room \+ 1\) this\._lend\(list, Math\.ceil\(move - room\), el\);\n\s+if \(Math\.abs\(move\) > 1\) list\.scrollTop \+= move;/.test(oc) && !/_giveBack\(\); placed/.test(CARD) && /if \(view\._pinned && !\(view\._atLiveTail \? view\._atLiveTail\(list\.scrollTop, list\.scrollHeight, list\.clientHeight\)/.test(oc), 'R4 #1(a) at the END of the transcript the hold borrows the room it lacks below the last record — given back once a scroll leaves all of it out of sight (its going moves nothing); the pin follows the landing (the chat\'s PINNED ⇔ AT THE LIVE TAIL)'); }
+  ok(/const room = Math\.min\(list\.scrollHeight, end\) - list\.clientHeight - list\.scrollTop;\n\s+if \(move > room \+ 1\) this\._lend\(list, Math\.ceil\(move - room\), el\);\n\s+if \(Math\.abs\(move\) > 1\) list\.scrollTop \+= move;/.test(oc) && !/_giveBack\(\); placed/.test(CARD) && /const atTail = view\._atLiveTail \? view\._atLiveTail\(list\.scrollTop, list\.scrollHeight, list\.clientHeight\) : [^\n]*\n\s+if \(!atTail\) \{ view\._noteUserNav\?\.\('needsOpen'\); if \(view\._pinned\) view\._setPinned\?\.\(false, 'needsOpen'\); \}/.test(oc), 'R4 #1(a) at the END of the transcript the hold borrows the room it lacks below the last record — given back once a scroll leaves all of it out of sight (its going moves nothing); the pin follows the landing (the chat\'s PINNED ⇔ AT THE LIVE TAIL)'); }
 { const fb = PANEL.slice(PANEL.indexOf('  const foldBox = (box'), PANEL.indexOf('  const sendReply = async'));
   ok(/row\?\.dispatchEvent\(new CustomEvent\('ut-box-left', \{ bubbles: true \}\)\);/.test(fb) && /if \(row && ta && ta\.value && !sent\) drafts\.set/.test(fb) && /if \(box\) foldBox\(box, \{ sent: true \}\);/.test(PANEL) && (PANEL.match(/\bbox\.remove\(\)/g) || []).length === 1 && fb.includes('box.remove()'), 'R4 #2 ONE exit from a reply box — Esc, the fold verb, a blur, a sent reply all go through foldBox (the draft, the box gone, `ut-box-left`); no other road removes a box');
   ok(/this\.view\._messageList\.addEventListener\('ut-box-left', go, \{ signal: own \}\);/.test(CARD) && !/this\.app\.foryouRows\?\.fold\?\.\(box\);\n\s+this\.schedule\(\);/.test(CARD), 'R4 #2 …and the card hears that exit (its next pass ends the kept state) — its blur road no longer schedules a pass of its own'); }
@@ -570,11 +570,16 @@ console.log('⑩b THE TAIL r2 — the end is the display order\'s; the landing r
   { const SRC = read('src/lib/chat-needs-card.js');
     for (const p of Object.keys(STUBS)) for (const m of SRC.matchAll(new RegExp(`import \\{([^}]*)\\} from '${p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}'`, 'g')))
       for (const name of m[1].split(',').map((x) => x.trim().split(/\s+as\s+/)[0]).filter(Boolean)) if (!new RegExp(`export const ${name}\\b`).test(STUBS[p])) STUBS[p] += ` export const ${name} = () => '';`; }
+  const stubPlugin = { name: 'stub', setup(b) { b.onResolve({ filter: /^\.\/(i18n|utils|press-arm|icons|user-todos-actions|user-todos-row)\.js$/ }, (a) => ({ path: a.path, namespace: 'stub' })); b.onLoad({ filter: /.*/, namespace: 'stub' }, (a) => ({ contents: STUBS[a.path], loader: 'js' })); } };
+  /** r9: a MUTANT chat-needs-card.js's own NeedsCards — the same stubs, built in memory (~7 ms once esbuild is warm) */
+  const bundleCards = async (contents) => {
+    const r = await esbuild.build({ stdin: { contents, resolveDir: path.join(ROOT, 'src/lib'), sourcefile: 'chat-needs-card.js', loader: 'js' }, bundle: true, format: 'esm', platform: 'node', write: false, logLevel: 'silent', plugins: [stubPlugin] });
+    return (await import('data:text/javascript;base64,' + Buffer.from(r.outputFiles[0].text).toString('base64'))).NeedsCards;
+  };
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'needs-tail-bundle-'));
   let NeedsCards = null;
   try {
-    await esbuild.build({ entryPoints: [path.join(ROOT, 'src/lib/chat-needs-card.js')], bundle: true, format: 'esm', platform: 'node', outfile: path.join(tmp, 'cn.mjs'), logLevel: 'silent',
-      plugins: [{ name: 'stub', setup(b) { b.onResolve({ filter: /^\.\/(i18n|utils|press-arm|icons|user-todos-actions|user-todos-row)\.js$/ }, (a) => ({ path: a.path, namespace: 'stub' })); b.onLoad({ filter: /.*/, namespace: 'stub' }, (a) => ({ contents: STUBS[a.path], loader: 'js' })); } }] });
+    await esbuild.build({ entryPoints: [path.join(ROOT, 'src/lib/chat-needs-card.js')], bundle: true, format: 'esm', platform: 'node', outfile: path.join(tmp, 'cn.mjs'), logLevel: 'silent', plugins: [stubPlugin] });
     ({ NeedsCards } = await import(path.join(tmp, 'cn.mjs')));
   } catch (e) { console.log('    (bundle: ' + (e && e.message) + ')'); }
   finally { fs.rmSync(tmp, { recursive: true, force: true }); }
@@ -635,8 +640,8 @@ console.log('⑩b THE TAIL r2 — the end is the display order\'s; the landing r
     return v;
   }
   const cardsOf = (v) => v._messageList.querySelectorAll(':scope > * > .cn-cards > .cn-card').map((c) => ({ id: c.dataset.item, at: c.parentNode.parentNode.dataset.msgId, docked: c.classList.contains('cn-docked') }));
-  const cardsFor = (v) => {
-    const nc = new NeedsCards(v);
+  const cardsFor = (v, NC = NeedsCards) => {
+    const nc = new NC(v);
     nc.keys = () => KEYS10;
     nc.render = function ({ hold = false } = {}) { this._pass({ hold }); };
     nc._create = function (e) { const c = new El(); c.dataset.item = e.item.id; this._patch(c, e); return c; };
@@ -1177,11 +1182,16 @@ console.log('⑩b THE TAIL r2 — the end is the display order\'s; the landing r
         _noteTailPress: methodOf(src.CVS, '  _noteTailPress(via) {', '  /** An explicit reader NAVIGATION'), _endResumeSettle: methodOf(src.CVS, '  _endResumeSettle() {', '  /** A READER TOUCHED'),
         _clearResumeRetail: methodOf(src.CVS, '  _clearResumeRetail() {', '  /** A POSITIONING act'), _readerActs: methodOf(src.CVS, '  _readerActs(', '  /** Is an atBottom→false transition'),
         _navigatedSince: methodOf(src.CVS, '  _navigatedSince(since) {', '  /** …or did a jump'), _positionedSince: methodOf(src.CVS, '  _positionedSince(since) {', '  /** THE READER'),
-        _seekTeleport: methodOf(src.SEEKS, '    async _seekTeleport(line) {', '    async jumpToFileMatch(match) {') };
+        _seekTeleport: methodOf(src.SEEKS, '    async _seekTeleport(line) {', '    async jumpToFileMatch(match) {'),
+        // r9: where a press LEFT the view decides its side of THE RULE — the chat's own pin predicate (PINNED ⇔ AT THE LIVE
+        // TAIL); the chain's cancel (the run bar and a card's open run it first); the needs cards' class (a mutant's own bundle)
+        _atLiveTail: methodOf(src.CVS, '  _atLiveTail(scrollTop, scrollHeight, clientHeight) {', '  /** THE PIN CHANGES IN ONE PLACE'), _cancelForcedScroll: methodOf(src.CVS, '  _cancelForcedScroll(via) {', '  // Render a message into elements'),
+        NC: src.NC || NeedsCards };
     };
     const R7 = doorsOf({ CVS, SEEKS, SRCH });
-    ok(Object.values(R7).every((f) => typeof f === 'function'), 'the REAL doors are read out of the sources: the minimap\'s two wirings, the ↓, the send, the search\'s onNav wiring (chat-view.js); jumpToIndex / jumpToBottom / jumpToPendingAsk / _landOnHeader / _noteUserNav / _notePositioning; _jumpToFileTime / jumpToFileMatch (chat-view-seek.js); _jumpToSearchResult / _revealInEl / _revealNearest (chat-search.js); r8: _noteTailPress / _endResumeSettle / _clearResumeRetail / _readerActs / _navigatedSince / _positionedSince (chat-view.js), _seekTeleport (chat-view-seek.js)', Object.keys(R7).filter((k) => typeof R7[k] !== 'function'));
+    ok(Object.values(R7).every((f) => typeof f === 'function'), 'the REAL doors are read out of the sources: the minimap\'s two wirings, the ↓, the send, the search\'s onNav wiring (chat-view.js); jumpToIndex / jumpToBottom / jumpToPendingAsk / _landOnHeader / _noteUserNav / _notePositioning; _jumpToFileTime / jumpToFileMatch (chat-view-seek.js); _jumpToSearchResult / _revealInEl / _revealNearest (chat-search.js); r8: _noteTailPress / _endResumeSettle / _clearResumeRetail / _readerActs / _navigatedSince / _positionedSince (chat-view.js), _seekTeleport (chat-view-seek.js); r9: _atLiveTail / _cancelForcedScroll (chat-view.js), the NeedsCards class (chat-needs-card.js, bundled)', Object.keys(R7).filter((k) => typeof R7[k] !== 'function'));
     const raf7 = globalThis.requestAnimationFrame; globalThis.requestAnimationFrame = () => 0; // (the REAL centring loops: their first step only)
+    const gcs7 = globalThis.getComputedStyle; globalThis.getComputedStyle = () => ({ paddingBottom: '0', direction: 'ltr' }); // (r9: a card's open runs to its end)
     try {
       /** the person's search over a view — the REAL ChatSearch steps, wired as chat-view.js wires them; `file` = a huge session's
        *  full-file road (the hit in the loaded slab), else the in-page road (the hit at c120, in the window 100..150) */
@@ -1254,28 +1264,38 @@ console.log('⑩b THE TAIL r2 — the end is the display order\'s; the landing r
         const R = doorsOf(src), out = [];
         const hang = () => new Promise(() => { });
         const arm = () => { const at = Date.now(); return { _resumeAt: at - 300, _resumeSettleUntil: at + 940, _pinnedAtSuspend: true, _resumeRetailTimers: ['rung', 'rung', 'horizon'] }; };
+        const bottom = (v) => { const l = v._messageList; l.scrollTop = l.scrollHeight - l.clientHeight; };
         const view = (o = {}) => {
           const v = { log: [], _lastNavAt: 0, _lastPositionAt: 0, _lastTailPressAt: 0, _lastUserScrollAt: 0, _lastJumpAt: 0, _total: 310, _windowStart: 100, _windowEnd: 150, _teleported: false, _pinned: false, _canPaginate: true,
             _elements: new Map(), _messages: [], _renderedMsgIds: new Set(), _runs: [], _tailCall: 0, _tailHold: null, _windowGen: 0, _search: null, _pendingAsks: [], _askElement: () => null,
             _messageList: { scrollTop: 0, scrollHeight: 9000, clientHeight: 600, querySelector: () => null, querySelectorAll: () => [], getBoundingClientRect: () => ({ top: 0, bottom: 600, left: 0, right: 0, width: 10, height: 600 }) },
             _container: { classList: { contains: () => false, add() { }, remove() { } } }, _scrollBtn: { classList: { add() { }, remove() { }, toggle() { } } },
             _trace(k, d) { if (k === 'userNav') v.log.push(`nav:${d && d.via}`); }, _traceExpect() { }, _cancelForcedScroll() { }, _clearWheelCarry() { }, _beginHistoryLoad: () => () => { }, _showHistoryStatus() { },
-            _setPinned(p) { v._pinned = !!p; }, _forceScrollToBottom() { }, _scrollToBottom() { }, _scrollElStable() { v._lastJumpAt = Date.now(); }, _reportVisibleTsRange() { }, _scheduleAxSync() { }, _releaseTailHold() { },
+            _setPinned(p) { v._pinned = !!p; }, _forceScrollToBottom() { bottom(v); }, _scrollToBottom() { bottom(v); }, _scheduleRunBar() { }, _scrollElStable() { v._lastJumpAt = Date.now(); }, _reportVisibleTsRange() { }, _scheduleAxSync() { }, _releaseTailHold() { },
             _fetchMessagePage: hang, _fetchMessages: hang, _seekTeleport: hang, _scrollToNearestTs: () => false, _gapElForLine: () => null, _nearestElByTs: () => null, _tsOfRenderedEl: () => 0,
             _onCreateMessage() { }, _resetGapAfterJump() { }, _updateRuns() { }, _setRunOpen() { }, ...arm() };
-          Object.assign(v, { _noteUserNav: R._noteUserNav, _notePositioning: R._notePositioning, _noteTailPress: R._noteTailPress, _endResumeSettle: R._endResumeSettle, _clearResumeRetail: R._clearResumeRetail,
+          Object.assign(v, { _noteUserNav: R._noteUserNav, _notePositioning: R._notePositioning, _noteTailPress: R._noteTailPress, _endResumeSettle: R._endResumeSettle, _clearResumeRetail: R._clearResumeRetail, _atLiveTail: R._atLiveTail,
             _navigatedSince: R._navigatedSince, _positionedSince: R._positionedSince,
             jumpToIndex: R.jumpToIndex, jumpToBottom: R.jumpToBottom, jumpToPendingAsk: R.jumpToPendingAsk, _landOnHeader: R._landOnHeader, _jumpToFileTime: R._jumpToFileTime, jumpToFileMatch: R.jumpToFileMatch }, o);
           v._readerActs = R._readerActs || ACTS;
           return v;
         };
         /** what the press wrote (one of the list — a press's stale and a landing's gone() see it), what the resume asks of it,
-         *  and what is left of the repair */
-        const judge = (v) => ({ stamped: !!R._navigatedSince?.call(v, 0), positioned: !!R._positionedSince?.call(v, v._resumeAt), repair: v._pinnedAtSuspend === true && (v._resumeRetailTimers || []).length === 3 });
-        const verdict = (j, keeps) => (keeps ? j.stamped && j.repair && !j.positioned : j.stamped && j.positioned);
-        const press = (f) => { try { const r = f(); if (r && typeof r.catch === 'function') r.catch(() => { }); } catch { /* a fake this door outran: the stamp is read all the same */ } };
-        /** `door` · `site` (where its stamp is written) · `go(v)` presses it · `keeps` = a press that keeps the tail */
-        const row = (door, site, go, o = {}, keeps = false) => { const v = view(o); press(() => go(v)); const j = judge(v); out.push({ door, site, keeps, ok: verdict(j, keeps), ...j, navs: v.log.slice() }); };
+         *  what is left of the repair — and WHERE THE PRESS LEFT THE VIEW (r9): pinned at the live tail (the chat's own
+         *  predicate, _atLiveTail) ⇔ it kept the tail. The side of THE RULE a press is judged by is READ from that state, never
+         *  declared (r8 hard-coded the needs cards' doors «leaves» on a stub stamp and never saw them end the repair) */
+        const judge = (v) => ({ stamped: !!R._navigatedSince?.call(v, 0), positioned: !!R._positionedSince?.call(v, v._resumeAt), repair: v._pinnedAtSuspend === true && (v._resumeRetailTimers || []).length === 3,
+          keeps: !!v._pinned && !!R._atLiveTail?.call(v, v._messageList.scrollTop, v._messageList.scrollHeight, v._messageList.clientHeight) });
+        const verdict = (j) => (j.keeps ? j.stamped && j.repair && !j.positioned : j.stamped && j.positioned);
+        const press = (f) => { try { const r = f(); if (r && typeof r.catch === 'function') r.catch(() => { }); return true; } catch { return false; /* a fake this door outran: the stamp is read all the same */ } };
+        /** THE DOOR TABLE's row (docs/kb-bugfix-invariants.md — r9): `door` · `site` (where its stamp is written) · `kind` =
+         *  'keeps' / 'leaves' the tail, or 'both' — judged where it lands, pressed at the live tail AND off it (the first must
+         *  keep, the second leave; a press judged where it lands runs to its end). Every press by THE RULE on the side its
+         *  state shows, and that side the table's */
+        const put = (door, site, kind, js) => out.push({ door, site, kind, ok: js.every((j) => verdict(j) && !j.threw) && (kind === 'both' ? js.length === 2 && js[0].keeps && !js[1].keeps : js.every((j) => j.keeps === (kind === 'keeps'))), ...js[0], js });
+        const one = (go, o = {}, strict = false) => { const v = view(o); const done = press(() => go(v)); return { ...judge(v), threw: strict && !done, navs: v.log.slice() }; };
+        const row = (door, site, go, o = {}, kind = 'leaves') => put(door, site, kind, [one(go, o)]);
+        const row2 = (door, site, [go, o], [go2, o2]) => put(door, site, 'both', [one(go, o, true), one(go2, o2, true)]);
         const el = () => ({ isConnected: true, classList: { add() { }, remove() { } }, offsetWidth: 1, style: {}, closest: () => null, getClientRects: () => [{}], scrollIntoView() { } });
         const search = (v, file) => { v._search = { _messageList: { querySelectorAll: () => Array.from({ length: 50 }, () => ({ contains: () => false, scrollIntoView() { }, querySelectorAll: () => [] })), getBoundingClientRect: () => ({ top: 0, height: 600 }) },
           _fullFileMode: file, _serverSearchResults: [file ? { line: 4000, ts: NOW - 5 } : { index: v._searchAt ?? 120 }], _highlightRanges: [], _lastRevealAt: 0,
@@ -1284,12 +1304,13 @@ console.log('⑩b THE TAIL r2 — the end is the display order\'s; the landing r
           _revealInEl: R._revealInEl, _revealNearest: R._revealNearest, _jumpToSearchResult: R._jumpToSearchResult }; return v._search._jumpToSearchResult(0); };
         row('the minimap (an index)', "chat-view.js the ChatMinimap wiring: _noteUserNav('minimap'), then jumpToIndex's own first line", (v) => R.minimapIdx.call(v)(200));
         row('the minimap (a time)', "chat-view.js the ChatMinimap wiring: _noteUserNav('minimap-time'); chat-view-seek.js _jumpToFileTime's first line ('jumpToFileTime')", (v) => R.minimapTime.call(v)(NOW - 9 * M, 200));
-        row('the run bar', "chat-view.js _landOnHeader: _noteUserNav('runBar') (after its header guard, before any scroll)", (v) => v._landOnHeader({ header: { isConnected: true, getBoundingClientRect: () => ({ top: 0, height: 20 }) }, members: [] }));
-        row('↓ at the live tail', "chat-view.js the ↓'s onclick: _noteTailPress('scrollBtn') — KEEPS the tail (r8: the stamp only; a click on its own button, it ends the settle window)", (v) => R.scrollBtn.call(v), { _windowStart: 260, _windowEnd: 310 }, true);
+        { const bar = (top) => (v) => v._landOnHeader({ header: { isConnected: true, offsetTop: top, getBoundingClientRect: () => ({ top: 0, height: 20 }) }, members: [] });
+          row2('the run bar', "chat-view.js _landOnHeader: judged where it lands (r9) — at the live tail _noteTailPress('runBar') (the stamp only), off it _noteUserNav('runBar') (ends the repair); no await in it", [bar(8400), { _windowStart: 260, _windowEnd: 310, _pinned: true }], [bar(0), {}]); }
+        row('↓ at the live tail', "chat-view.js the ↓'s onclick: _noteTailPress('scrollBtn') — KEEPS the tail (r8: the stamp only; a click on its own button, it ends the settle window)", (v) => R.scrollBtn.call(v), { _windowStart: 260, _windowEnd: 310 }, 'keeps');
         row('↓ paged out of the tail', "chat-view.js jumpToBottom's first line ('jumpToBottom' — a person's: `user`; its page is the road to the tail)", (v) => R.scrollBtn.call(v));
         row('↓ on a seek slab (return to latest)', "chat-view.js jumpToBottom's first line ('jumpToBottom')", (v) => R.scrollBtn.call(v), { _teleported: true });
         row('a send paged out of the tail', "chat-view.js onSend → jumpToBottom({ send: true })'s first line ('jumpToBottom')", (v) => R.onSend.call(v));
-        row('a send at the live tail', "chat-view.js onSend: _noteTailPress('send') — KEEPS the tail (r7's stamp; r8: the stamp only, the repair left armed)", (v) => R.onSend.call(v), { _windowStart: 260, _windowEnd: 310, _pinned: true }, true);
+        row('a send at the live tail', "chat-view.js onSend: _noteTailPress('send') — KEEPS the tail (r7's stamp; r8: the stamp only, the repair left armed)", (v) => R.onSend.call(v), { _windowStart: 260, _windowEnd: 310, _pinned: true }, 'keeps');
         row('jumpToIndex (the minimap, a paged ask, a search hit paged in, a landing)', "chat-view.js jumpToIndex's first line ('jumpToIndex')", (v) => v.jumpToIndex(200));
         row('the waiting chip, its ask on screen (jumpToPendingAsk)', "chat-view.js jumpToPendingAsk: _noteUserNav('jumpToAsk') — no await before it", (v) => v.jumpToPendingAsk(), { _pendingAsks: [{ requestId: 'rq', msgIndex: 120 }], _askElement: () => el() });
         row('the waiting chip, its ask paged in (jumpToPendingAsk)', "chat-view.js jumpToPendingAsk → jumpToIndex's first line (r6: never again at the landing)", (v) => v.jumpToPendingAsk(), { _pendingAsks: [{ requestId: 'rq', msgIndex: 200 }] });
@@ -1305,26 +1326,42 @@ console.log('⑩b THE TAIL r2 — the end is the display order\'s; the landing r
           try { await fail(v); } catch { /* the failure is the point */ }
           Object.assign(v, { _lastNavAt: 0, _lastPositionAt: 0, _lastTailPressAt: 0, _lastJumpAt: 0, _fetchMessagePage: hang, _fetchMessages: hang, _gapFetch: hang }, arm());
           if (retry) press(() => retry());
-          const j = judge(v); out.push({ door, site, keeps: false, ok: !!retry && verdict(j, false), ...j, armed: !!retry, navs: v.log.slice() });
+          put(door, site, 'leaves', [{ ...judge(v), threw: !retry, armed: !!retry, navs: v.log.slice() }]);
         };
         const boom = async () => { throw new Error('the page could not be read'); };
         await retried('the Retry on «Couldn\'t jump there» (a failed teleport: a minimap time jump, a full-file hit)', "chat-view-seek.js _seekTeleport's failure notice: retry → _noteUserNav('teleportRetry'), then _seekTeleport (r8 — it called _seekTeleport bare: no stamp on any tree)",
           (v) => v._seekTeleport(4000), { _seekTeleport: R._seekTeleport, _gapQueryBase: () => 'q=1', _gapFetch: async () => ({ ok: false }) });
         await retried('the Retry on «Couldn\'t load that part of the conversation» (jumpToIndex)', "chat-view.js jumpToIndex's failure notice: retry → jumpToIndex's first line", (v) => v.jumpToIndex(200), { _fetchMessages: boom });
         await retried('the Retry on «Couldn\'t load the latest messages» (the tail road)', "chat-view.js jumpToBottom's failure notice: retry → jumpToBottom's first line ('jumpToBottom' — its page is the road to the tail)", (v) => v.jumpToBottom(), { _fetchMessagePage: boom });
-        // the needs cards' two doors (the bundled module: the same in a mutant of the three sources above)
-        const card = (door, site, go, C, A, s, e, o = {}) => {
-          const v = fakeView(C, [A], s, e), nc = cardsFor(v); Object.assign(v, o); nc._pass();
-          Object.assign(v, { _lastNavAt: 0, _readerActs: R._readerActs || ACTS, _navigatedSince: R._navigatedSince, _positionedSince: R._positionedSince }, arm()); press(() => go(nc));
-          const j = judge(v); out.push({ door, site, keeps: false, ok: verdict(j, false), ...j });
+        // the needs cards' two doors (the bundled module — r9: a mutant's own bundle, R.NC), on the REAL stamps and the REAL repair
+        // (r8 ran them on fakeView's stub _noteUserNav — it never ended the repair — and hard-coded them «leaves»), pressed at
+        // the live tail (a one-screen tail, pinned) and off it: the landing's show (its record on screen), the open whose card
+        // grew below the list's edge
+        const TAIL = { scrollTop: 0, scrollHeight: 600, clientHeight: 600 }, BELOW = { scrollTop: 0, scrollHeight: 1200, clientHeight: 600 };
+        const card = (at, go, geo, o = {}) => {
+          const C = conv(310, [at]), A = askOf(C, at), v = fakeView(C, [A], 260, 310), nc = cardsFor(v, R.NC); Object.assign(v, o); nc._pass();
+          Object.assign(v._messageList, geo);
+          Object.assign(v, { _lastNavAt: 0, _lastTailPressAt: 0, _readerActs: R._readerActs || ACTS, _navigatedSince: R._navigatedSince, _positionedSince: R._positionedSince,
+            _noteUserNav: R._noteUserNav, _noteTailPress: R._noteTailPress, _endResumeSettle: R._endResumeSettle, _clearResumeRetail: R._clearResumeRetail, _cancelForcedScroll: R._cancelForcedScroll,
+            _atLiveTail: R._atLiveTail, _clearWheelCarry() { }, _trace(k, d) { if (k === 'userNav') v.log.push(`nav:${d && d.via}`); } }, arm());
+          const done = press(() => go(nc, A.id));
+          return { ...judge(v), threw: !done, navs: v.log.slice() };
         };
-        { const C = conv(310, [10]); card('a needs card landing (the «waiting for you» chip, its rows, every For-you door)', "chat-needs-card.js land: _noteUserNav('needsLand') — before its first read", (nc) => nc.land(askOf(C, 10).id), C, askOf(C, 10), 260, 310, { _fetchMessages: hang }); }
-        { const C = conv(310, [300]); card('a needs card opened', "chat-needs-card.js openCard: _noteUserNav('needsOpen') — before its pass", (nc) => nc.openCard(askOf(C, 300).id), C, askOf(C, 300), 260, 310); }
+        put('a needs card landing (the «waiting for you» chip, its rows, every For-you door)', "chat-needs-card.js land: _noteTailPress('needsLand') as it starts — the stamp only (r9): it keeps the tail until a road leaves it, and each road that leaves stamps its own navigation as it starts (jumpToIndex / jumpToBottom's first line, _show's 'jumpToAsk')", 'both',
+          [card(10, (nc, id) => nc.land(id), TAIL, { _fetchMessages: hang }), card(300, (nc, id) => nc.land(id), TAIL)]);
+        put('a needs card opened', "chat-needs-card.js openCard: _noteTailPress('needsOpen') as it starts; judged where it lands (r9) — off the tail _noteUserNav('needsOpen') (ends the repair), at the tail its stamp alone", 'both',
+          [card(300, (nc, id) => nc.openCard(id), TAIL), card(300, (nc, id) => nc.openCard(id), BELOW)]);
         return out;
       };
       const rows = await census({ CVS, SEEKS, SRCH });
-      for (const r of rows) console.log(`    door ${r.ok ? '✓' : '✗'} ${r.door} — ${r.keeps ? 'KEEPS the tail: stamped, the repair left armed, the resume\'s question false' : 'stamped, the resume stands down'} — ${r.site}`);
-      ok(rows.length === 21 && rows.every((r) => r.ok), `RED-able (r7 — 15475151: ✗ search in-page (a hit in the window), search full-file, the search's callers, a send at the live tail; r8 — fdf241de: ✗ ↓ and a send at the live tail (they ENDED the repair), the Retry on «Couldn't jump there» (no stamp)): THE DOOR CENSUS — every one of the ${rows.length} doors a person presses writes its reader-act stamp before its first await, and keeps THE RULE inside a resume (each named above with its stamp site)`, rows.filter((r) => !r.ok).map((r) => ({ door: r.door, stamped: r.stamped, positioned: r.positioned, repair: r.repair })));
+      for (const r of rows) console.log(`    door ${r.ok ? '✓' : '✗'} ${r.door} — ${r.kind === 'both' ? 'BOTH, judged where it lands: at the live tail it KEEPS it (stamped, the repair left armed, the resume\'s question false); off it, stamped and the resume stands down' : r.kind === 'keeps' ? 'KEEPS the tail: stamped, the repair left armed, the resume\'s question false' : 'LEAVES the tail: stamped, the resume stands down'} — ${r.site}`);
+      ok(rows.length === 21 && rows.every((r) => r.ok), `RED-able (r7 — 15475151: ✗ search in-page (a hit in the window), search full-file, the search's callers, a send at the live tail; r8 — fdf241de: ✗ ↓ and a send at the live tail (they ENDED the repair), the Retry on «Couldn't jump there» (no stamp); r9 — 215604e74: ✗ the run bar, a needs card landing, a needs card opened (at the live tail they ENDED the repair)): THE DOOR CENSUS — every one of the ${rows.length} doors a person presses writes its reader-act stamp before its first await, and keeps THE RULE inside a resume on the side its state shows — the table's (each named above with its stamp site)`, rows.filter((r) => !r.ok).map((r) => ({ door: r.door, kind: r.kind, js: r.js.map((j) => ({ keeps: j.keeps, stamped: j.stamped, positioned: j.positioned, repair: j.repair, threw: j.threw })) })));
+      // r9: THE DOOR TABLE in the kb is the census's own (the operating manual — docs/kb-bugfix-invariants.md): its 21 rows, the
+      // same doors in the same order with the same kind (read as bytes, the table's slice alone decoded)
+      { const KB = fs.readFileSync(path.join(ROOT, 'docs/kb-bugfix-invariants.md')), a = KB.indexOf('<!-- door-table: the census of test-conversation-needs ⑩g -->'), b = a < 0 ? -1 : KB.indexOf('<!-- /door-table -->', a);
+        const kb = a < 0 || b < 0 ? [] : [...KB.toString('utf8', a, b).matchAll(/^\| (\d+) \| (.+?) \| \*\*(keeps|leaves|both)\*\* \|/gm)].map((m) => [Number(m[1]), m[2], m[3]]);
+        const ours = rows.map((r, i) => [i + 1, r.door, r.kind]);
+        ok(kb.length === 21 && JSON.stringify(kb) === JSON.stringify(ours), 'r9: THE DOOR TABLE in docs/kb-bugfix-invariants.md is the census\'s — the same 21 doors, in its order, each with its kind (keeps / leaves / both)', JSON.stringify(kb.length === 21 ? kb.filter((x, i) => JSON.stringify(x) !== JSON.stringify(ours[i])) : { rows: kb.length }).slice(0, 600)); }
       const redOf = async (srcs) => (await census({ CVS, SEEKS, SRCH, ...srcs })).filter((r) => !r.ok).map((r) => r.door);
       const STAMP = "    this._onNav?.('search');\n", MUT = SRCH.replace(STAMP, '');
       const red = await redOf({ SRCH: MUT });
@@ -1333,10 +1370,18 @@ console.log('⑩b THE TAIL r2 — the end is the display order\'s; the landing r
       // reading the press that keeps the tail, the «Couldn't jump there» Retry unstamped (every tree before r8)
       const M1 = CVS.replace("this._noteTailPress('send');", "this._noteUserNav('send');"), M2 = CVS.replace('this._readerActs({ tail: false })', 'this._readerActs()'), M3 = SEEKS.replace("this._noteUserNav('teleportRetry'); ", '');
       const red1 = await redOf({ CVS: M1 }), red2 = await redOf({ CVS: M2 }), red3 = await redOf({ SEEKS: M3 });
-      ok(M1 !== CVS && M2 !== CVS && M3 !== SEEKS && JSON.stringify(red1) === JSON.stringify(['a send at the live tail']) && JSON.stringify(red2) === JSON.stringify(['↓ at the live tail', 'a send at the live tail'])
+      const NEEDS = ['a needs card landing (the «waiting for you» chip, its rows, every For-you door)', 'a needs card opened'];
+      ok(M1 !== CVS && M2 !== CVS && M3 !== SEEKS && JSON.stringify(red1) === JSON.stringify(['a send at the live tail']) && JSON.stringify(red2) === JSON.stringify(['the run bar', '↓ at the live tail', 'a send at the live tail', ...NEEDS])
         && JSON.stringify(red3) === JSON.stringify(['the Retry on «Couldn\'t jump there» (a failed teleport: a minimap time jump, a full-file hit)']),
-        '…and THE RULE BITES BY NAME (r8): the send at the live tail stamped through the whole _noteUserNav again (r7) — red: that send; the resume\'s question reading the press that keeps the tail — red: the ↓ and the send at the live tail; the Retry on «Couldn\'t jump there» unstamped — red: that Retry', { red1, red2, red3 });
-    } finally { if (raf7 === undefined) delete globalThis.requestAnimationFrame; else globalThis.requestAnimationFrame = raf7; }
+        '…and THE RULE BITES BY NAME (r8): the send at the live tail stamped through the whole _noteUserNav again (r7) — red: that send; the resume\'s question reading the press that keeps the tail — red: every door that keeps it (r9: the run bar and the needs cards\' two at the tail too); the Retry on «Couldn\'t jump there» unstamped — red: that Retry', { red1, red2, red3 });
+      // r9: and the doors judged where they land bite by name — the run bar's landing and the needs cards' two back on the whole
+      // _noteUserNav at both sides (r8 and every tree before): red, those three — the cards' from the mutant's own bundle
+      const M4 = CVS.replace("if (atBottom) this._noteTailPress('runBar'); else this._noteUserNav('runBar');", "this._noteUserNav('runBar');");
+      const CNC = read('src/lib/chat-needs-card.js'), CARD4 = CNC.replace("view._noteTailPress?.('needsOpen');", "view._noteUserNav?.('needsOpen');").replace("view._noteTailPress?.('needsLand');", "view._noteUserNav?.('needsLand');");
+      let NC4 = null; try { NC4 = CARD4 !== CNC ? await bundleCards(CARD4) : null; } catch (e) { console.log('    (mutant bundle: ' + (e && e.message) + ')'); }
+      const red4 = M4 !== CVS && NC4 ? await redOf({ CVS: M4, NC: NC4 }) : null;
+      ok(JSON.stringify(red4) === JSON.stringify(['the run bar', ...NEEDS]), '…and THE DOORS JUDGED WHERE THEY LAND BITE BY NAME (r9): the run bar\'s landing and the needs cards\' landing and open stamped through the whole _noteUserNav again (r8, every tree before) — red: those three, the cards\' from the mutant chat-needs-card.js\'s own bundle', red4);
+    } finally { if (raf7 === undefined) delete globalThis.requestAnimationFrame; else globalThis.requestAnimationFrame = raf7; if (gcs7 === undefined) delete globalThis.getComputedStyle; else globalThis.getComputedStyle = gcs7; }
     ok(/onNav: \(via = 'search-reveal'\) => this\._noteUserNav\(via\),/.test(CVS) && /if \(!replay\) \{ this\._lastRevealAt = Date\.now\(\); this\._onNav\?\.\(\); \}/.test(SRCH) && /this\._noteTailPress\('send'\);\n\s+this\._setPinned\(true, 'send'\);\n\s+this\._scrollToBottom\(\);/.test(CVS),
       'r7: the search\'s wiring names its press (\'search\') and keeps the reveal\'s own (\'search-reveal\', with its _lastRevealAt — chat-view-seek\'s c-v restore reads its arm by it); the send at the live tail stamps before it pins (r8: as a press that KEEPS the tail — the stamp only)');
     // ── ⑩h THE TAIL, ROUND 8 (the r7 delta verdict on fdf241de): THE RETRY ON «Couldn't jump there» IS A PRESS — it called

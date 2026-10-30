@@ -308,10 +308,17 @@ ok('…and the reader-position test generalises the seek idiom over every POSITI
   && /_readerActs\(\{ scroll = true, tail = true \} = \{\}\) \{\s*return \[this\._lastNavAt \|\| 0, scroll \? this\._lastPositionAt \|\| 0 : 0, this\._search\?\._lastRevealAt \|\| 0, tail \? this\._lastTailPressAt \|\| 0 : 0\];\s*\}/.test(cv)
   && /_positionedSince\(since\) \{\s*return Math\.max\(\.\.\.this\._readerActs\(\{ tail: false \}\)\) > since \|\| \(this\._lastJumpAt \|\| 0\) > since;\s*\}/.test(cv)
   && !/_navigatedSince\(since\) \{[^}]*_lastUserScrollAt/.test(cv) && !/_readerActs\(\{ scroll = true, tail = true \} = \{\}\) \{[^}]*_lastUserScrollAt/.test(cv) && !/_positionedSince\(since\) \{[^}]*_lastUserScrollAt/.test(cv));
-ok('A PRESS THAT KEEPS THE TAIL STAMPS ONLY (lane needs-card-tail r8 — r7 stamped the send at the live tail through the whole _noteUserNav and switched the resume repair off): _noteTailPress writes _lastTailPressAt and nothing the repair keeps (no _endResumeSettle, no _lastNavAt, no snapshot, no series); the send at the live tail and the ↓ on a window that ends there are its only callers, and the ↓ — a click on its own button — ends the settle WINDOW only',
+ok('A PRESS THAT KEEPS THE TAIL STAMPS ONLY (lane needs-card-tail r8; r9: every door judged where it lands — the run bar\'s landing and a needs card\'s open at the live tail, a needs card landing until its road leaves; five callers, each named — r7 stamped the send at the live tail through the whole _noteUserNav and switched the resume repair off): _noteTailPress writes _lastTailPressAt and nothing the repair keeps (no _endResumeSettle, no _lastNavAt, no snapshot, no series); the send at the live tail and the ↓ on a window that ends there are its only callers, and the ↓ — a click on its own button — ends the settle WINDOW only',
   /  _noteTailPress\(via\) \{\n\s+this\._lastTailPressAt = Date\.now\(\);\n\s+this\._trace\?\.\('userNav', \{ via, keepsTail: true \}\);\n\s+this\._clearWheelCarry\?\.\(via\);[^\n]*\n  \}/.test(cv)
   && /this\._noteTailPress\('scrollBtn'\);\n\s+this\._resumeSettleUntil = 0;\n\s+this\._setPinned\(true, 'scrollBtn'\);/.test(cv)
-  && (cv.match(/this\._noteTailPress\(/g) || []).length === 2);
+  // r9: …and the doors judged where they land — the run bar's landing at the live tail (chat-view.js), a needs card opened
+  // and a needs card landing (chat-needs-card.js: the open's own landing decides the rest; the landing's roads stamp theirs)
+  && /if \(atBottom\) this\._noteTailPress\('runBar'\); else this\._noteUserNav\('runBar'\);\n\s+this\._setPinned\(atBottom, 'runLand'\);/.test(cv)
+  && (cv.match(/this\._noteTailPress\(/g) || []).length === 3
+  && (() => { const nc = fs.readFileSync(path.join(REPO, 'src/lib/chat-needs-card.js'), 'utf8');
+    return /view\._noteTailPress\?\.\('needsOpen'\);\n\s+view\._cancelForcedScroll\?\.\('needsOpen'\);/.test(nc) && /if \(!atTail\) \{ view\._noteUserNav\?\.\('needsOpen'\); if \(view\._pinned\) view\._setPinned\?\.\(false, 'needsOpen'\); \}/.test(nc)
+      && /const filing = this\._flying = filingOf\(item\);\n(?:\s+\/\/[^\n]*\n)*\s+view\._noteTailPress\?\.\('needsLand'\);/.test(nc) && !/_noteUserNav\?\.\('needs(?:Open|Land)'\);\n\s+(?:this\._slot|let mark)/.test(nc)
+      && (nc.match(/_noteTailPress\?\.\(/g) || []).length === 2; })());
 ok('the resume re-tail BAILS when the reader navigated after the resume (never yank a reader back to the tail)',
   /const resumeAt = this\._resumeAt;[\s\S]{0,400}if \(this\._positionedSince\(resumeAt\)\) return;/.test(cv) && /return !this\._positionedSince\(at\);/.test(cv)); // (r6: an act of the reader's OR the landing of one)
 ok('every off-list navigation surface stamps: minimap (index + time), search reveal, run-bar landing, jumpToIndex, user jumpToBottom; a send at the live tail too (lane needs-card-tail r7 — r8: as a press that KEEPS the tail)',
@@ -319,7 +326,7 @@ ok('every off-list navigation surface stamps: minimap (index + time), search rev
   && /_noteUserNav\('minimap-time'\); return this\._jumpToFileTime/.test(cv)
   && /onNav: \(via = 'search-reveal'\) => this\._noteUserNav\(via\)/.test(cv) // (r7: the search's press names itself — 'search')
   && /this\._noteTailPress\('send'\);\n\s+this\._setPinned\(true, 'send'\);/.test(cv)
-  && /_landOnHeader\(run\) \{[\s\S]{0,400}this\._noteUserNav\('runBar'\);/.test(cv)
+  && /_landOnHeader\(run\) \{[\s\S]{0,1600}if \(atBottom\) this\._noteTailPress\('runBar'\); else this\._noteUserNav\('runBar'\);\n\s+this\._setPinned\(atBottom, 'runLand'\);/.test(cv) // (r9: judged where it lands)
   && /async jumpToIndex\(targetIdx(?:, \{ land = null(?:, stale = null)? \} = \{\})?\) \{\s*this\._noteUserNav\('jumpToIndex'\);/.test(cv) // (lane needs-card-tail: its optional `land` — the needs cards' landing — and r2's `stale` never move the stamp off the first line)
   && /async jumpToBottom\(\{ user = true(?:, land = null, stale = null(?:, send = false)?)? \} = \{\}\) \{\s*if \(user\) this\._noteUserNav\('jumpToBottom'\);/.test(cv)); // (lane needs-card-tail r3: the landing's `land` / `stale` never move the stamp off the first line; r5: nor the send's `send`)
 {
@@ -550,10 +557,24 @@ if (typeof globalThis.requestAnimationFrame !== 'function') globalThis.requestAn
     const a = cv.indexOf("    let scrollTick = false;\n    this._messageList.addEventListener('scroll', () => {"), b = a < 0 ? -1 : cv.indexOf('    }, { passive: true });', a);
     let listen = null; try { listen = a < 0 || b < 0 ? null : new Function('window', `return (function () {${cv.slice(a, b + '    }, { passive: true });'.length)}\n});`)({}); } catch { } // (its input-resize guard reads a page global)
     if (!onSend || !downBtn || !listen) return { missing: { onSend: !!onSend, downBtn: !!downBtn, listen: !!listen } };
+    // r9: THE LEG'S CLOCK IS THE PRODUCT'S — the settle, the two re-tail rungs and the displacement horizon read from
+    // chat-view.js (r8's «send at +1900, displaced at +2000» sat ON the second rung: when the rung's _scrollToBottom ran
+    // between the displacement and the rAF-coalesced decision, the handler traced nothing and the leg went red with the
+    // pin HELD — 2 of 8 under load). Every displacement stands in a gap's middle, ≥ 300 ms from each rung
+    const K = (() => { try { return new Function(`${(cv.match(/^const RESUME_[A-Z_]+ = [^\n]+;$/gm) || []).join('\n')}\nreturn { settle: RESUME_SETTLE_MS, rungs: RESUME_RETAIL_AT_MS, horizon: RESUME_DISPLACEMENT_MS };`)(); } catch { return null; } })();
+    const { NeedsCards } = await import(path.join(REPO, 'src/lib/chat-needs-card.js'));   // (chat-view.js's own import: cached)
+    if (!K || !Array.isArray(K.rungs) || K.rungs.length !== 2 || !(K.rungs[0] < K.rungs[1] && K.rungs[1] < K.horizon) || typeof NeedsCards !== 'function') return { missing: { constants: K, NeedsCards: typeof NeedsCards } };
+    const [r1, r2] = K.rungs, gap = (lo, hi, f) => Math.round(lo + (hi - lo) * f);
     const view = (pinned) => {
-      const list = { _st: 4618, scrollHeight: 5320, clientHeight: 702, childElementCount: 156, _l: {},
+      const list = { _st: 4618, scrollHeight: 5320, clientHeight: 702, childElementCount: 156, clientTop: 0, _l: {},
         get scrollTop() { return this._st; }, set scrollTop(x) { this._st = Math.max(0, Math.min(x, this.scrollHeight - this.clientHeight)); },
-        addEventListener(t, fn) { this._l[t] = fn; }, fire(t) { this._l[t]?.(); } };
+        addEventListener(t, fn) { this._l[t] = fn; }, fire(t) { this._l[t]?.(); },
+        // (r9: what a needs card's open reads — one folded card at the very bottom of the live tail: the open moves nothing)
+        getBoundingClientRect() { return { top: 0, bottom: 702, left: 0, right: 800, width: 800, height: 702 }; },
+        querySelectorAll(sel) { return /cn-card/.test(sel) ? [card] : []; }, querySelector() { return null; },
+        get lastElementChild() { return { getBoundingClientRect: () => ({ top: 600, bottom: 702 }) }; } };
+      const card = { dataset: { item: 'ask-1' }, classList: { contains: () => false, add() {}, remove() {} },
+        getBoundingClientRect() { return { top: 600, bottom: 700, left: 0, right: 800, width: 800, height: 100 }; }, querySelector() { return null; }, querySelectorAll() { return []; } };
       const traces = [];
       const v = Object.assign(Object.create(ChatView.prototype), {
         _messageList: list, _suspended: false, _disposed: false, _pinned: pinned, _teleported: false,
@@ -567,32 +588,45 @@ if (typeof globalThis.requestAnimationFrame !== 'function') globalThis.requestAn
       });
       if (!pinned) list.scrollTop = 3000;   // a reader up in the live window: the ↓ shows
       listen.call(v);
-      return { v, list, traces };
+      const nc = Object.assign(Object.create(NeedsCards.prototype), { view: v, app: {}, render() {} });
+      return { v, list, traces, nc };
+    };
+    /** the REAL door, pressed: the send, the ↓, a needs card opened (the REAL openCard), the run bar landing at the live tail */
+    const PRESS = {
+      send: (v) => onSend.call(v), down: (v) => downBtn.call(v),
+      open: (v, list, nc) => { const g = globalThis.getComputedStyle; globalThis.getComputedStyle = () => ({ paddingBottom: '0', direction: 'ltr' }); try { nc.openCard('ask-1'); } finally { if (g === undefined) delete globalThis.getComputedStyle; else globalThis.getComputedStyle = g; } },
+      bar: (v, list) => v._landOnHeader({ header: { isConnected: true, offsetTop: list.scrollHeight - list.clientHeight } }),
     };
     /** hidden, shown, `press` at `pressAt` ms after the resume (`unpinAt`: the re-measure took the live flag first — the one
-     *  the re-tail never trusts), the re-measure's displacement at `at`; read 0.4 s after it */
-    const leg = async ({ press = null, pressAt = 300, at = 1400, pinned = true, unpinAt = null }) => {
-      const { v, list, traces } = view(pinned);
+     *  the re-tail never trusts), the re-measure's displacement at `at`; THE STATE read 50 ms after it (the decision's frame
+     *  has run; the next rung is ≥ 300 ms away) and 0.4 s after it */
+    const leg = async ({ press = null, pressAt = Math.round(K.settle / 4), at = gap(r1, r2, 0.5), pinned = true, unpinAt = null }) => {
+      const { v, list, traces, nc } = view(pinned);
       v.setSuspended(true); v.setSuspended(false);
       const t0 = v._resumeAt, wait = (ms) => nap(Math.max(0, ms - (Date.now() - t0)));
+      const state = () => ({ pinned: v._pinned, fromBottom: list.scrollHeight - list.scrollTop - list.clientHeight });
       if (unpinAt != null) { await wait(unpinAt); v._pinned = false; }
       let afterPress = null;
       if (press) {
-        await wait(pressAt); (press === 'send' ? onSend : downBtn).call(v);
+        await wait(pressAt); PRESS[press](v, list, nc);
         afterPress = { pinnedAtSuspend: v._pinnedAtSuspend, series: (v._resumeRetailTimers || []).length, settle: (v._resumeSettleUntil || 0) > Date.now(),
           positioned: v._positionedSince(t0), stamped: v._navigatedSince(t0) };
       }
       await wait(at); list.scrollHeight = 4339; list.scrollTop = 0; list.fire('scroll');
+      await wait(at + 50); const mid = state();
       await wait(at + 400);
-      return { press, pressAt, at, wasPinned: pinned, afterPress, pinned: v._pinned, fromBottom: list.scrollHeight - list.scrollTop - list.clientHeight, traces: [...new Set(traces)] };
+      return { press, pressAt, at, wasPinned: pinned, afterPress, mid, ...state(), traces: [...new Set(traces)] };
     };
     return Promise.all([
-      leg({}),                                                   // the control: no press
-      leg({ press: 'send', pressAt: 300, at: 1400 }), leg({ press: 'send', pressAt: 300, at: 1900 }),
-      leg({ press: 'send', pressAt: 1400, at: 1500 }), leg({ press: 'send', pressAt: 1900, at: 2000 }),
-      leg({ press: 'down', pressAt: 350, at: 1400, unpinAt: 300 }), // the ↓ on a window the re-measure unpinned
-      leg({ press: 'down', pressAt: 300, at: 450, pinned: false }),  // the ↓ in a window that had no repair
-    ]);
+      leg({}),                                                                  // the control: no press
+      leg({ press: 'send' }), leg({ press: 'send', at: gap(r2, K.horizon, 0.5) }), // a send 0.3 s after: displaced between the rungs, and after the last
+      leg({ press: 'send', pressAt: gap(r1, r2, 0.2), at: gap(r1, r2, 0.5) }),  // a send past the settle window, displaced between the rungs
+      leg({ press: 'send', pressAt: gap(r2, K.horizon, 0.2), at: gap(r2, K.horizon, 0.5) }), // …and past the last rung, inside the horizon
+      leg({ press: 'send', pressAt: r2 - 100, at: r2 }),                        // ON the second rung, by name (r8's leg): either order holds
+      leg({ press: 'down', pressAt: Math.round(K.settle / 4) + 50, unpinAt: Math.round(K.settle / 4) }), // the ↓ on a window the re-measure unpinned
+      leg({ press: 'down', at: Math.round(K.settle / 4) + 150, pinned: false }), // the ↓ in a window that had no repair
+      leg({ press: 'open' }), leg({ press: 'bar' }),                            // r9: a needs card opened, a run-bar landing — at the live tail
+    ]).then((legs) => Object.assign(legs, { K }));
   })();
   const snap = mkView(); snap.setSuspended(true);
   ok('setSuspended(true) SNAPSHOTS the pin — the last honest reading before the geometry starts lying', snap._pinnedAtSuspend === true);
@@ -733,18 +767,27 @@ if (typeof globalThis.requestAnimationFrame !== 'function') globalThis.requestAn
   const R8 = await r8Legs;
   if (R8.missing) ok('r8: the REAL scroll listener, onSend and ↓ are read out of chat-view.js', false, JSON.stringify(R8.missing));
   else {
-    const [ctl, s300a, s300b, s1400, s1900, downA, downB] = R8;
-    const held = (r) => r.pinned === true && r.fromBottom <= 1 && r.traces.includes('unpinSkipResume') && !r.traces.includes('unpin/scrolledAway');
+    const [ctl, sA, sB, sG1, sG2, sRung, downA, downB, open, bar] = R8, { K } = R8, [r1, r2] = K.rungs;
+    // THE ORACLE IS THE STATE (r9): the pin held and the view at the bottom 50 ms after the displacement (before any later rung
+    // could repair it) and at the end, and the setter's own unpin never written — `unpinSkipResume` is evidence (printed),
+    // never the pass condition: a rung that re-asserts the bottom first leaves the handler nothing to trace
+    const held = (r) => r.mid.pinned === true && r.mid.fromBottom <= 1 && r.pinned === true && r.fromBottom <= 1 && !r.traces.some((x) => /^unpin\//.test(x));
     const armed = (r) => !!r.afterPress && r.afterPress.pinnedAtSuspend === true && r.afterPress.series === 3 && r.afterPress.positioned === false && r.afterPress.stamped === true;
-    ok('r8 control: no press — the resume\'s own displacement at +1400 ms keeps the pin (unpinSkipResume, the bottom re-asserted)', held(ctl), JSON.stringify(ctl));
-    ok('RED-able (r8 — fdf241de: scrolledAway, 3637 px up in history; 15475151 kept the pin and stamped nothing): A SEND AT THE LIVE TAIL 0.3 s after the window is shown again is stamped and leaves the resume repair armed — the snapshot, the series, the settle; the resume\'s question false — so the displacement at +1400 / +1900 ms keeps the pin',
-      [s300a, s300b].every((r) => armed(r) && r.afterPress.settle === true && held(r)), JSON.stringify([s300a, s300b]));
-    ok('RED-able (r8 — fdf241de: scrolledAway; 15475151: unstamped): …and a send 1.4 / 1.9 s after it (past the settle window, inside the 2.8 s horizon) — the displacement 0.1 s later keeps the pin',
-      [s1400, s1900].every((r) => armed(r) && held(r)), JSON.stringify([s1400, s1900]));
-    ok('RED-able (r8 — 15475151 and fdf241de alike: the ↓ ran the whole _noteUserNav): THE ↓ AT THE TAIL keeps the tail too — on a window the re-measure unpinned (the live flag the re-tail never trusts) it is stamped, leaves the repair armed and the displacement at +1400 ms keeps the pin; a click on its own button, it ends the settle WINDOW',
+    const clock = `the clock read from chat-view.js: settle ${K.settle} ms, rungs ${r1} / ${r2} ms, horizon ${K.horizon} ms`;
+    const seen = R8.filter((r) => r.traces.includes('unpinSkipResume')).length;
+    console.log(`    r8/r9 legs — ${clock}; unpinSkipResume traced in ${seen} of ${R8.length} (evidence: a rung that re-asserted the bottom first leaves none)`);
+    ok(`r8 control: no press — the resume's own displacement at +${ctl.at} ms keeps the pin (the state: pinned at the bottom, no unpin; ${clock})`, held(ctl), JSON.stringify(ctl));
+    ok(`RED-able (r8 — fdf241de: scrolledAway, 3637 px up in history; 15475151 kept the pin and stamped nothing): A SEND AT THE LIVE TAIL ${sA.pressAt} ms after the window is shown again is stamped and leaves the resume repair armed — the snapshot, the series, the settle; the resume's question false — so the displacement at +${sA.at} / +${sB.at} ms (between the rungs, after the last) keeps the pin`,
+      [sA, sB].every((r) => armed(r) && r.afterPress.settle === true && held(r)), JSON.stringify([sA, sB]));
+    ok(`RED-able (r8 — fdf241de: scrolledAway; 15475151: unstamped): …and a send ${sG1.pressAt} / ${sG2.pressAt} ms after it (past the settle window, between the rungs / past the last, inside the horizon — r9: the clock from the product's constants, never a literal ON a rung) — the displacement at +${sG1.at} / +${sG2.at} ms keeps the pin`,
+      [sG1, sG2].every((r) => armed(r) && held(r)), JSON.stringify([sG1, sG2]));
+    ok(`r9: …and a displacement ON the second rung (+${sRung.at} ms = RESUME_RETAIL_AT_MS[1], by name — r8's leg that flaked on its trace) keeps the pin in EITHER order: the oracle is the state`, armed(sRung) && held(sRung), JSON.stringify(sRung));
+    ok(`RED-able (r8 — 15475151 and fdf241de alike: the ↓ ran the whole _noteUserNav): THE ↓ AT THE TAIL keeps the tail too — on a window the re-measure unpinned (the live flag the re-tail never trusts) it is stamped, leaves the repair armed and the displacement at +${downA.at} ms keeps the pin; a click on its own button, it ends the settle WINDOW`,
       armed(downA) && downA.afterPress.settle === false && held(downA), JSON.stringify(downA));
     ok('…while behind a ↓ in a window that had NO repair (unpinned when it was hidden) the re-measure\'s displacement unpins honestly (scrolledAway, the ↓ back) — as on every tree: no pinned window left displaced with the ↓ hidden',
       !!downB.afterPress && downB.afterPress.stamped && downB.pinned === false && downB.traces.includes('unpin/scrolledAway'), JSON.stringify(downB));
+    ok(`RED-able (r9 — 215604e74 and every tree before: scrolledAway, 3637 px up): A NEEDS CARD OPENED and A RUN-BAR LANDING at the live tail ${open.pressAt} ms after the window is shown again keep the tail — stamped, the repair left armed (the REAL openCard and _landOnHeader judge it where they land) — so the displacement at +${open.at} ms keeps the pin`,
+      [open, bar].every((r) => armed(r) && held(r)), JSON.stringify([open, bar]));
   }
 }
 
