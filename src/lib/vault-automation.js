@@ -616,16 +616,19 @@ export function showGrantPicker(key, data, { refresh } = {}) {
     const reach = rows.value();
     const except = exceptNow();
     if (add.length && reach === null) { showToast(t('Pick at least one Task Group'), { type: 'error' }); return false; }
+    // «除了» on the Task Group / All-agents grants this save keeps — written only where it changed
+    const wire = JSON.stringify(except);
+    const exceptOn = always.filter((g) => sel.has(g.subject) && (g.subject.startsWith('group:') || g.subject === EVERYONE_SUBJECT) && JSON.stringify(g.except || []) !== wire);
     // lane key-grant-everyone: the reach rows are the reach of the grants this save ADDS — changed while it adds none, the
-    // save said 已保存 and wrote nothing (the owner's 「没有办法保存给整个 vibespace」); now refused by name, the dialog kept
-    if (!add.length && JSON.stringify(reach) !== JSON.stringify('opened')) { showToast(t('This reach is for the grants you add — pick whom to grant the key to (All agents is the first row), or change an existing grant\'s reach on its chip'), { type: 'error' }); return false; }
+    // save said 已保存 and wrote nothing (the owner's 「没有办法保存给整个 vibespace」). Refused by name, the dialog kept —
+    // r2: only when the save changes NOTHING but the reach; a removal or a «除了» edit goes through and says the reach was not used
+    const reachUnused = !add.length && JSON.stringify(reach) !== JSON.stringify('opened');
+    if (reachUnused && !drop.length && !exceptOn.length) { showToast(t('This reach is for the grants you add — pick whom to grant the key to (All agents is the first row), or change an existing grant\'s reach on its chip'), { type: 'error' }); return false; }
     let bad = null;
     if (add.length) { const r = await post(`/api/automation/keys/${encodeURIComponent(key.id)}/grants`, { subjects: add, reach, except }); if (!r || !r.ok) bad = r || {}; }
     for (const gid of drop) { const r = await fetchJson(`/api/automation/grants/${encodeURIComponent(gid)}`, { method: 'DELETE' }); if (!r || !r.ok) bad = r || {}; }
-    // «除了» on the Task Group grants this save keeps — written only where it changed
-    const wire = JSON.stringify(except);
-    for (const g of always) if (sel.has(g.subject) && (g.subject.startsWith('group:') || g.subject === EVERYONE_SUBJECT) && JSON.stringify(g.except || []) !== wire) { const r = await post(`/api/automation/grants/${encodeURIComponent(g.id)}/except`, { except }); if (!r || !r.ok) bad = r || {}; }
-    if (bad) showToast(failWords(bad), { type: 'error' }); else showToast(t('Saved'));
+    for (const g of exceptOn) { const r = await post(`/api/automation/grants/${encodeURIComponent(g.id)}/except`, { except }); if (!r || !r.ok) bad = r || {}; }
+    if (bad) showToast(failWords(bad), { type: 'error' }); else showToast(reachUnused ? t('Saved — the reach you picked was not used: it is for the grants a save adds; change an existing grant\'s reach on its chip') : t('Saved'));
     close();
     refresh?.();
     return true;

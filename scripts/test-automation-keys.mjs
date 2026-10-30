@@ -63,6 +63,11 @@
 //      conversation, an excepted conversation refused with no card then lifted, the once rule, the card's All-agents line;
 //      text pins (the picker's row, 「所有 agent」, the reach-only save refused, the CLI's words). RED on 91bf7e18: the base
 //      refuses everyone:* (bad_args) — the report runs this section on a base archive
+//   ㉑b r2 (the acceptance of 01b6db270): THE ONCE RESERVATION — three conversations opening at once on ONE once-grant to All
+//      agents ⇒ one runs, two are asked (RED on 01b6db270: all three ran), the base's two-parallel-opens race closes too,
+//      MUTANT (the reservation after the limits' await) ⇒ RED; a refused open RELEASES it (audit once: released); a Task Group
+//      «除了» with the caller's Task Groups UNREADABLE ⇒ groups_unreadable by name, no card (PURE, pickKey, the engine,
+//      keysFor; MUTANT without the fact ⇒ the left-out conversation admitted ⇒ RED); the wiring says a failed read
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -855,7 +860,7 @@ console.log('⑫b MUTANT — the limits judged AFTER the spend authorizer (insid
   const judge = `    let runArgs = v0.args;
     if (verb === 'conversations.open') {
       const lim = await limitsJudge(keyById(key.id) || key, v0.args);
-      if (!lim.ok) return done(lim, key.id, asked ? { ask: asked } : {});
+      if (!lim.ok) return done(lim, key.id, { ...(asked ? { ask: asked } : {}), ...(held ? { once: release() } : {}) });
       runArgs = lim.args;
     }`;
   const act = '    try { result = await impl(runArgs, { caller, keyId: key.id, identity: A.identityOf(key.id), grant: verdict.grant, reach }); }';
@@ -1690,6 +1695,90 @@ console.log('㉑ ALL AGENTS — a key granted to every conversation (lane key-gr
   ok(srr.ok && rr.ok && seen.at(-1).caller === 'conv-r' && seen.at(-1).other.ok === true && seen.at(-1).other.by === 'instance' && !!rrow && JSON.stringify(rrow.to) === '[{"kind":"everyone"}]' && w.engine.list().keys.find((k) => k.name === 'reacher').grants[0].reach === 'instance',
     'PIN (R3, 91bf7e18 passes it): a conversation\'s grant set to 整个 VibeSpace keeps its reach row {to:[{kind:everyone}]} in the store, the list says instance, and its use reaches a conversation of ANOTHER Task Group', { srr, rrow, last: seen.at(-1) });
 }
+// ㉑b (lane key-grant-everyone r2 — the acceptance's four minors): THE ONCE RESERVATION under concurrency, its release by a
+// refused open, a Task Group «除了» when the caller's Task Groups cannot be read
+console.log('㉑b THE ONCE RESERVATION + UNREADABLE TASK GROUPS (lane key-grant-everyone r2 — the acceptance of 01b6db270)');
+{
+  const ALL = 'everyone:*';
+  // the race: three conversations open at once on ONE once-grant to All agents ⇒ exactly one runs, the other two are asked
+  // (RED on 01b6db270: all three ran — the spend was written after the limits' await)
+  const race = async (Mod, tag, subjects, callers) => {
+    const ran = [];
+    const w = await mkWorld(tag, { verbs: { 'conversations.open': async (args, ctx) => { ran.push(ctx.caller.conversationId); return { ok: true, sessionId: 'w-' + ran.length }; } } });
+    const engine = Mod === ENG ? w.engine : Mod.create({ dataDir: w.dir, vault: w.vault, userTodos: w.userTodos, now: w.now, verbs: { 'conversations.open': async (args, ctx) => { ran.push(ctx.caller.conversationId); return { ok: true, sessionId: 'w-' + ran.length }; } } });
+    const m = engine.mint({ name: 'k', scopes: ['conversations.open'], limits: OPEN_LIMITS, by: 'user' });
+    const g = engine.grant(m.key.id, subjects, { by: 'user', mode: 'once' });
+    const ps = callers.map((c) => engine.use({ caller: caller({ conversationId: c, sessionKey: `claude:${c}`, name: c }), verb: 'conversations.open', args: { cwd: '/tmp', permission: 'default' } }));
+    const want = callers.length - 1;
+    for (let i = 0; i < 200 && cards(w).length < want && ran.length < callers.length; i++) await new Promise((r) => setTimeout(r, 10));
+    const carded = cards(w).length;
+    for (const c of cards(w)) engine.answer(c.action.askId, { answer: 'deny' });
+    const rs = await Promise.race([Promise.all(ps), new Promise((r) => setTimeout(() => r(null), 5000))]);
+    return { g, ran, carded, codes: rs ? rs.map((r) => (r.ok ? 'ok' : r.code)) : ['still waiting'], spent: (engine.list().keys[0].grants[0] || {}).spentAt || null };
+  };
+  const r3 = await race(ENG, 'race-all', [ALL], ['conv-a', 'conv-b', 'conv-c']);
+  ok(r3.g.ok && r3.ran.length === 1 && r3.carded === 2 && r3.codes.filter((c) => c === 'ok').length === 1 && r3.codes.filter((c) => c === 'ask_denied').length === 2 && !!r3.spent,
+    'THE RACE: three conversations open at once on ONE once-grant to All agents ⇒ exactly ONE runs, the other two are asked (two cards; denied here) — RED on 01b6db270 (all three ran)', r3);
+  const r2s = await race(ENG, 'race-session', ['session:conv-a'], ['conv-a', 'conv-a']);
+  ok(r2s.ran.length === 1 && r2s.carded === 1 && r2s.codes.filter((c) => c === 'ok').length === 1, '…and the base\'s own race closes with it: two parallel opens of ONE conversation on its once-grant ⇒ one runs, the other is asked', r2s);
+  const ESRC = fs.readFileSync(path.join(ROOT, 'src/server/automation-engine.js'), 'utf8');
+  const RES = '    let held = null;\n    if (verdict.spend) {\n';
+  ok(ESRC.split(RES).length === 2, 'ANCHOR: the once reservation, spelled once');
+  if (ESRC.split(RES).length === 2) {
+    const MX = M.load('src/server/automation-engine.js', ESRC.replace(RES, "    let held = null;\n    if (verb === 'conversations.open') await limitsJudge(keyById(key.id) || key, v0.args);\n    if (verdict.spend) {\n"), 'reserve-after-judge');
+    const mx = await race(MX, 'race-mutant', [ALL], ['conv-a', 'conv-b', 'conv-c']);
+    ok(mx.ran.length === 3, `MUTANT RED: the reservation written AFTER the limits' await (01b6db270's order — a check-then-write across an await) ⇒ ${mx.ran.length} opens ran on ONE once-grant`, mx);
+  }
+  // the release: an open the limits refuse gives the once-grant back (its audit line says so); the next caller spends it
+  {
+    const ran = [];
+    const w = await mkWorld('release', { verbs: { 'conversations.open': async (args, ctx) => { ran.push(ctx.caller.conversationId); return { ok: true, sessionId: 'w-' + ran.length }; } } });
+    const m = w.engine.mint({ name: 'k', scopes: ['conversations.open'], limits: LIM_OPEN, by: 'user' });
+    const g = w.engine.grant(m.key.id, [ALL], { by: 'user', mode: 'once' });
+    const out = await w.engine.use({ caller: caller({ conversationId: 'conv-out', sessionKey: 'claude:conv-out', name: 'conv-out' }), verb: 'conversations.open', args: { cwd: LOUT, permission: 'default' } });
+    const after = w.engine.list().keys[0].grants[0];
+    const line = auditOf(w).filter((l) => l.verb === 'conversations.open').at(-1);
+    const pn = w.engine.use({ caller: caller({ conversationId: 'conv-next', sessionKey: 'claude:conv-next', name: 'conv-next' }), verb: 'conversations.open', args: { cwd: IN, permission: 'default' } });
+    await cardSoon(w, 20);
+    for (const c of cards(w)) w.engine.answer(c.action.askId, { answer: 'deny' });   // never left waiting (an unanswered card's timer is unref'd)
+    const nxt = await pn;
+    ok(g.ok && out.code === 'cwd_outside_roots' && after && !after.spentAt && line && line.code === 'cwd_outside_roots' && line.once === 'released' && nxt.ok && ran.join() === 'conv-next' && !!w.engine.list().keys[0].grants[0].spentAt,
+      'an open the limits refuse RELEASES the once-grant it reserved (the audit line: once released) — nothing ran, and the next conversation spends it', { out: out.code, after, line, nxt: nxt.ok, ran });
+  }
+  // UNREADABLE TASK GROUPS, PURE: a Task Group «除了» on All agents is never judged against [] (it admitted the conversation left out)
+  const GEX = G({ subject: ALL, use: { door: 'automation-key-use', resource: 'ag-000000000001', to: [{ kind: 'everyone' }], except: [{ kind: 'group', id: 'T-out' }] } });
+  const GEC = G({ subject: ALL, use: { door: 'automation-key-use', resource: 'ag-000000000001', to: [{ kind: 'everyone' }], except: [{ kind: 'conversation', key: 'conv-out' }] } });
+  const uv = (Mod, grants, cid, o = {}) => Mod.useVerdict({ key: K(), grants, subject: `session:${cid}`, subjectGroups: [], verb: 'conversations.rename', vaultState: 'unlocked', ...o });
+  ok(uv(A, [GEX], 'conv-m', { subjectGroupsUnreadable: true }).code === 'groups_unreadable' && A.CODES.groups_unreadable === 409, 'All agents «除了» a Task Group, the caller\'s Task Groups unreadable ⇒ refused BY NAME groups_unreadable (409) — never admitted as «in no Task Group»');
+  ok(uv(A, [GEX], 'conv-m', { subjectGroups: ['T-in'] }).ok && uv(A, [GEC], 'conv-m', { subjectGroupsUnreadable: true }).ok && uv(A, [G({ subject: ALL, use: { door: 'automation-key-use', resource: 'ag-000000000001', to: [{ kind: 'everyone' }], except: [] } })], 'conv-m', { subjectGroupsUnreadable: true }).ok,
+    '…read, the same caller is admitted; unreadable, a grant no Task Group decides (a conversation exception, none) still admits');
+  ok(uv(A, [GEX, G({ n: 2, subject: 'session:conv-m' })], 'conv-m', { subjectGroupsUnreadable: true }).ok, '…and the caller\'s OWN grant still counts (rows add)');
+  ok(A.pickKey({ keys: [K()], grants: [GEX], subject: 'session:conv-m', subjectGroups: [], subjectGroupsUnreadable: true, verb: 'conversations.rename' }).ask === true && A.pickKey({ keys: [K()], grants: [GEX], subject: 'session:conv-m', subjectGroups: [], verb: 'conversations.rename' }).ask === false,
+    'pickKey reads the same fact: an undecided grant is no grant to pick by');
+  const UNEEDLE = 'groupIds: Array.isArray(subjectGroups) ? subjectGroups : [], groupsUnreadable: !!subjectGroupsUnreadable };';
+  ok(SRC.split(UNEEDLE).length === 2, 'ANCHOR: useVerdict hands the unreadable fact to the ONE admission — spelled once');
+  if (SRC.split(UNEEDLE).length === 2) {
+    const Au = M.load('src/automation-keys.js', SRC.replace(UNEEDLE, 'groupIds: Array.isArray(subjectGroups) ? subjectGroups : [] };'), 'groups-unreadable-dropped');
+    const mv = uv(Au, [GEX], 'conv-m', { subjectGroupsUnreadable: true });
+    ok(mv.ok === true, 'MUTANT RED: the fact dropped (01b6db270\'s shape) ⇒ the conversation the owner left out of All agents is ADMITTED while its Task Groups are unreadable', mv);
+  }
+  // …ON THE ENGINE: refused by name, no first-use card (never a question about a conversation the owner may have left out)
+  {
+    const w = await mkWorld('unreadable', { verbs: { 'conversations.rename': async () => ({ ok: true }) } });
+    const m = w.engine.mint({ name: 'all-but-group', scopes: ['conversations.rename'], by: 'user' });
+    const g = w.engine.grant(m.key.id, [ALL], { by: 'user', except: [{ kind: 'group', id: 'T-out' }] });
+    const ru = await w.engine.use({ caller: caller({ conversationId: 'conv-m', groups: [], groupsUnreadable: true }), verb: 'conversations.rename', args: { name: 'u' } });
+    const rr = await w.engine.use({ caller: caller({ conversationId: 'conv-m', groups: ['T-in'] }), verb: 'conversations.rename', args: { name: 'r' } });
+    const ro = await w.engine.use({ caller: caller({ conversationId: 'conv-m', groups: ['T-out'] }), verb: 'conversations.rename', args: { name: 'o' } });
+    const line = auditOf(w).find((l) => l.code === 'groups_unreadable');
+    ok(g.ok && ru.code === 'groups_unreadable' && /Task Groups could not be read just now/.test(ru.why || '') && !cards(w).length && !!line && rr.ok && ro.code === 'excepted',
+      'the engine: the caller\'s Task Groups unreadable ⇒ groups_unreadable by name, the why says so, NO card, its audit line; read ⇒ admitted (T-in) / excepted (T-out)', { ru, rr: rr.ok, ro: ro.code, line });
+    ok(!w.engine.keysFor({ conversationId: 'conv-m', groups: [], groupsUnreadable: true }).length && w.engine.keysFor({ conversationId: 'conv-m', groups: ['T-in'] }).length === 1, 'keysFor: a key an unreadable Task Group decides is not listed (the agent never reads it as held)');
+  }
+  // the WIRING: the caller's Task Groups read SAYS a failed read (the hub's one reading of a session token)
+  const WIRE = fs.readFileSync(path.join(ROOT, 'src/server/mounts-plugins-wiring.js'), 'utf8');
+  ok(/catch \{ return \{ ids: \[\], unreadable: true \}; \} \};/.test(WIRE) && /groups: g\.ids, groupsUnreadable: g\.unreadable\b/.test(WIRE), 'the wiring: a Task Group read that throws is { unreadable: true } and the caller carries groupsUnreadable (it was [] — «in no Task Group»)');
+}
 // R2 + R4, text pins: the window's picker offers the row; its chip / the audit / the CLI say the words
 {
   const VA = fs.readFileSync(path.join(ROOT, 'src/lib/vault-automation.js'), 'utf8');
@@ -1697,7 +1786,8 @@ console.log('㉑ ALL AGENTS — a key granted to every conversation (lane key-gr
   ok(/everyone: \{ key: EVERYONE_SUBJECT \}, except: \{ selected: exPick\.except/.test(VA) && /selected: \[\.\.\.had\.keys\(\)\]\.filter\(\(k\) => k === EVERYONE_SUBJECT \|\|/.test(VA), '授权给… passes the All-agents row (everyone: {key: everyone:*}) and keeps a stored grant to it picked');
   ok(/if \(subject === EVERYONE_SUBJECT\) return t\('All agents'\);/.test(VA) && /if \(g\.subject === EVERYONE_SUBJECT\) return t\('All agents'\);/.test(VA), 'the key row\'s grant and the audit view name it 「所有 agent」 (t(\'All agents\')) — never the bare subject');
   ok(/\(g\.subject\.startsWith\('group:'\) \|\| g\.subject === EVERYONE_SUBJECT\) && JSON\.stringify\(g\.except/.test(VA), '«除了» is written for a kept grant to All agents as for a Task Group');
-  ok(/if \(!add\.length && JSON\.stringify\(reach\) !== JSON\.stringify\('opened'\)\) \{ showToast\(t\('This reach is for the grants you add/.test(VA), 'a 保存 whose reach rows changed while it adds NO grant is refused by name (it said 已保存 and wrote nothing — the chrome leg is its RED)');
+  ok(/const reachUnused = !add\.length && JSON\.stringify\(reach\) !== JSON\.stringify\('opened'\);\n    if \(reachUnused && !drop\.length && !exceptOn\.length\) \{ showToast\(t\('This reach is for the grants you add/.test(VA), 'a 保存 that changes NOTHING but the reach rows is refused by name (it said 已保存 and wrote nothing — the chrome leg is its RED); r2: a removal or a «除了» edit is no reach-only save');
+  ok(/showToast\(reachUnused \? t\('Saved — the reach you picked was not used: it is for the grants a save adds/.test(VA), '…such a save goes through and its toast says the reach was not used (the chrome legs drive all three shapes)');
   ok(/v\.subject === 'everyone:\*' \? 'all agents \(everyone:\*\)' : v\.subject/.test(CLI), '`vibespace-api keys` says «via all agents (everyone:*)»');
 }
 

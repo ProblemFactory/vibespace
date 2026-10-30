@@ -11055,4 +11055,5 @@ export default {
   "Long-lived token in its folder: claude {cli} prints no quota lines for it — refreshes when a session uses it": "长期 token 在它的文件夹里：claude {cli} 不会为它显示额度——有会话用到它时才会刷新",
   "This reach is for the grants you add — pick whom to grant the key to (All agents is the first row), or change an existing grant's reach on its chip": "这个作用范围只用于这次新加的授权——先选授权给谁（第一行是「所有 agent」），已有授权的作用范围在它的标签上改",
   "Always grants it to this conversation only — to let every conversation here use it without asking, grant the key to All agents on its row in the Vault window.": "「一直」只授权给这个会话——要让这里的每个会话都不用问就能用，在保险库窗口该 key 的行里把它授权给「所有 agent」。",
+  "Saved — the reach you picked was not used: it is for the grants a save adds; change an existing grant's reach on its chip": "已保存——你选的作用范围没有用上：它只用于这次新加的授权；已有授权的作用范围在它的标签上改",
 };

@@ -34,6 +34,8 @@
 //      once (no card); a SECOND conversation started after the save uses the key with no card (the real CLI), `keys` says
 //      «via all agents (everyone:*)»; R3 — the two in different Task Groups: 只有它开的会话 ⇒ the stranger may not rename the
 //      live one; the reach dialog's 整个 VibeSpace + 保存 + a RELOAD ⇒ the red chip, the store's reach row, and it may.
+//      r2: the reach rows alone with a grant kept ⇒ still refused; a «除了» edit / a removal with the reach rows changed go
+//      through (the toast: the reach was not used); an add rides the reach (instance, a plain 已保存).
 //      Every press through the real-click door; AK_FONT=dejavu runs Chrome under the hosted runner's fontconfig and
 //      VS_CPU_THROTTLE=4 throttles this leg's page 4× (the lane's robustness runs before the pin)
 //   UNSAVED (lane dialog-unsaved-guard, B-bc31): 编辑… with a verb taken away asks on ✕ / Esc (继续编辑 / 放弃 / 保存) — 放弃 writes
@@ -739,6 +741,50 @@ try {
   await shot('ak-6d-reach-instance.png');
   const after = await cli(['conversations', 'rename', LIVE_SID, '被别组改名', '--key', 'Everyone key'], { token: stoken });
   check('…and the stranger (Task Group B) now renames the live conversation of Task Group A — reached through 整个 VibeSpace', after.code === 0 && /被别组改名/.test(after.out), after);
+  // r2 (the acceptance of 01b6db270, minor 3): the refusal is for a save that changes NOTHING but the reach rows — a «除了» edit
+  // and a removal go through as on the base (the reach unused, the toast says so), an add rides the reach; the reach alone is
+  // still refused with a grant KEPT
+  await clearToasts();
+  const UNUSED = '已保存——你选的作用范围没有用上';
+  const savedToast = () => until(`(() => { if (document.querySelector('#vault-ak-grant')) return null; const t = [...document.querySelectorAll('.global-toast')].map((x) => x.textContent).join(' | '); return t || null; })()`, 8000);
+  const openGrant = async () => { await RCK(`${EROW} .vw-ak-grant`); await until(visible('#vault-ak-grant .pp-input'), 8000); await RCK('#vault-ak-grant .vw-ak-reach-row.vw-ak-reach-instance'); };
+  await openGrant();
+  await RCK('.vw-ak-save');
+  const kept0 = await until(`(() => { const t = [...document.querySelectorAll('.global-toast')].map((x) => x.textContent).join(' | '); return t ? { toasts: t, open: !!document.querySelector('#vault-ak-grant .pp-input') } : null; })()`, 6000);
+  const kg0 = await keyNow();
+  check('r2 — the reach rows ALONE with a grant kept (所有 agent, «除了» the live conversation) + 保存 ⇒ still refused by name, the dialog kept, the grant untouched',
+    !!kept0 && kept0.open && /这个作用范围只用于这次新加的授权/.test(kept0.toasts) && !!kg0 && kg0.grants.length === 1 && kg0.grants[0].except.length === 1, { kept0, grants: kg0 && kg0.grants });
+  await clearToasts();
+  // shape «除了»: the live conversation's exception lifted (its chip's ✕), the reach rows still at 整个 VibeSpace
+  const exChipX = `#vault-ak-grant .pp-except-picker .pp-chip[data-key="session:${LIVE_SID}"] .pp-chip-x`;
+  await until(visible(exChipX), 6000);
+  await RCK(exChipX);
+  await RCK('.vw-ak-save');
+  const s1 = await savedToast();
+  const kg1 = await keyNow();
+  check('r2 shape «除了»: an exception edited with the reach rows changed and nothing added ⇒ 保存 goes through (as on the base) — the hub\'s grant has no exception now, nothing added, and the toast says the reach was not used',
+    !!s1 && s1.includes(UNUSED) && !!kg1 && kg1.grants.length === 1 && kg1.grants[0].subject === 'everyone:*' && kg1.grants[0].except.length === 0, { s1, grants: kg1 && kg1.grants });
+  await clearToasts();
+  // shape REMOVE: the grant to 所有 agent taken back (its chip's ✕), the reach rows at 整个 VibeSpace
+  await openGrant();
+  await RCK('#vault-ak-grant .pp-chip.pp-chip-everyone .pp-chip-x');
+  await RCK('.vw-ak-save');
+  const s2 = await savedToast();
+  const kg2 = await keyNow();
+  check('r2 shape REMOVE: a grant taken back with the reach rows changed ⇒ 保存 goes through (as on the base) — the key holds no grant, and the toast says the reach was not used',
+    !!s2 && s2.includes(UNUSED) && !!kg2 && kg2.grants.length === 0, { s2, grants: kg2 && kg2.grants });
+  await clearToasts();
+  // shape ADD: 所有 agent picked again with 整个 VibeSpace — the reach rides the grant this save adds
+  await openGrant();
+  await RCK('#vault-ak-grant .pp-input');
+  await until(visible('#vault-ak-grant .pp-row[data-key="everyone:*"]'), 8000);
+  await RCK('#vault-ak-grant .pp-row[data-key="everyone:*"]');
+  await RCK('.vw-ak-save');
+  const s3 = await savedToast();
+  const kg3 = await keyNow();
+  check('r2 shape ADD: 所有 agent added with 整个 VibeSpace ⇒ the grant lands with reach instance, the toast a plain 已保存 (the reach was used)',
+    !!s3 && /已保存/.test(s3) && !s3.includes(UNUSED) && !!kg3 && kg3.grants.length === 1 && kg3.grants[0].subject === 'everyone:*' && kg3.grants[0].reach === 'instance', { s3, grants: kg3 && kg3.grants });
+  await shot('ak-6e-save-shapes.png');
   if (THROTTLE > 1) await cdp('Emulation.setCPUThrottlingRate', { rate: 1 });
 
   console.log('⑩ the words in Japanese');

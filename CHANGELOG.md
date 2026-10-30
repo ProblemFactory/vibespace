@@ -8,7 +8,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - An automation key can be granted to All agents — every conversation of this VibeSpace, the ones started later included — with the exceptions you choose.
 
 ### Fixed
-- Grant to… no longer says Saved when only the reach was changed and nobody was added — it asks you to pick whom to grant the key to first.
+- Grant to… no longer says Saved when only the reach changed — it asks whom to grant the key to first; removing a grant or editing its exceptions still saves.
 
 ## 2.369.361 — 2026-10-29
 

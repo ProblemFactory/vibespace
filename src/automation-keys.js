@@ -181,6 +181,9 @@ const CODES = Object.freeze({
   maintainer_key_scope: 403, maintainer_key_unknown: 401,
   // lane grants-unify: the owner LEFT THIS CONVERSATION OUT of the Task Group grant (or the reach) that would have covered it
   excepted: 403,
+  // lane key-grant-everyone r2: the caller's Task Groups could not be read while a grant's Task Group (in `to` or «除了»)
+  // decides — never judged as «in no Task Group» (that admitted a conversation left out of All agents); call again
+  groups_unreadable: 409,
 });
 
 /** A key record off disk → its shape (null = not a record). Copies NAMED fields only — never a spread. */
@@ -323,12 +326,14 @@ function reachVerdict({ keyId = '', caller = '', target = {}, grants = [], opene
 /**
  * THE JUDGMENT OF ONE USE (on the hub, before anything runs). `key` = the key named / chosen (null = none), `grants` =
  * every grant of the store, `subject` = the caller (`session:<id>` or `external`), `subjectGroups` = the Task Group ids the
- * caller belongs to (a session), `subjectLive` = the caller's conversation still runs, `vaultState` = the vault's state.
+ * caller belongs to (a session), `subjectGroupsUnreadable` = those could not be read (lane key-grant-everyone r2: a grant
+ * a Task Group decides — in `to` or in «除了» — is then `groups_unreadable`, never judged against []; any other grant that
+ * admits still counts), `subjectLive` = the caller's conversation still runs, `vaultState` = the vault's state.
  * → { ok: true, grant, spend, reach } (`spend` = a once-grant this use consumes; `reach` = the reach this use rides — the
  * widest of the caller's always-grants, else the once-grant's — lane key-instance-scope) | { ok: false, code } — in this
  * order: the vault (everything stops while it is locked), the key, its scope, the caller, the grant.
  */
-function useVerdict({ key = null, grants = [], subject = '', subjectGroups = [], subjectLive = true, verb = '', vaultState = 'locked' } = {}) {
+function useVerdict({ key = null, grants = [], subject = '', subjectGroups = [], subjectGroupsUnreadable = false, subjectLive = true, verb = '', vaultState = 'locked' } = {}) {
   if (vaultState !== 'unlocked') return { ok: false, code: 'vault_locked' };
   const k = keyOf(key);
   if (!k) return { ok: false, code: 'not_granted' };
@@ -339,17 +344,17 @@ function useVerdict({ key = null, grants = [], subject = '', subjectGroups = [],
   if (!external && !subjectLive) return { ok: false, code: 'subject_ended' };
   // an outside caller is judged by `external` grants ONLY; a conversation by THE ONE ADMISSION over each grant's use row
   // (lane grants-unify: its own conversation, one of its Task Groups, All agents — minus the members the owner left out) — never the other's
-  const facts = { conversationKeys: [str(subject).slice('session:'.length)], groupIds: Array.isArray(subjectGroups) ? subjectGroups : [] };
+  const facts = { conversationKeys: [str(subject).slice('session:'.length)], groupIds: Array.isArray(subjectGroups) ? subjectGroups : [], groupsUnreadable: !!subjectGroupsUnreadable };
   const cands = [];
-  let excepted = false;
+  let excepted = false, unreadable = false;
   for (const g of (Array.isArray(grants) ? grants : []).map(grantOf)) {
     if (!g || g.keyId !== k.id) continue;
     if (external) { if (g.subject === 'external') cands.push(g); continue; }
     if (g.subject === 'external') continue;
     const v = GM.admits([useRowOf(g)].filter(Boolean), facts);
-    if (v.ok) cands.push(g); else if (v.code === 'excepted') excepted = true;
+    if (v.ok) cands.push(g); else if (v.code === 'excepted') excepted = true; else if (v.code === 'groups_unreadable') unreadable = true;
   }
-  if (!cands.length) return { ok: false, code: excepted ? 'excepted' : 'not_granted' };
+  if (!cands.length) return { ok: false, code: unreadable ? 'groups_unreadable' : excepted ? 'excepted' : 'not_granted' };
   const always = cands.filter((g) => g.mode === 'always');
   if (always.length) return { ok: true, grant: always[0], spend: false, reach: widestReach(always.map((g) => g.reach)), reachRows: always.map(reachRowOf).filter(Boolean) };
   const once = cands.find((g) => g.mode === 'once' && !g.spentAt);
@@ -363,7 +368,7 @@ function useVerdict({ key = null, grants = [], subject = '', subjectGroups = [],
  * Without `want`: a key that already lets this caller use the verb wins (an `always` grant first, then the oldest key);
  * else the ONE live key whose scope holds the verb is asked for; none ⇒ not_granted; several ⇒ key_ambiguous (`names`).
  */
-function pickKey({ keys = [], grants = [], want = null, subject = '', subjectGroups = [], verb = '' } = {}) {
+function pickKey({ keys = [], grants = [], want = null, subject = '', subjectGroups = [], subjectGroupsUnreadable = false, verb = '' } = {}) {
   const all = (Array.isArray(keys) ? keys : []).map(keyOf).filter(Boolean);
   const live = all.filter((k) => !k.revokedAt && k.scopes.includes(verb));
   if (want != null && want !== '') {
@@ -371,7 +376,7 @@ function pickKey({ keys = [], grants = [], want = null, subject = '', subjectGro
     const k = all.find((x) => x.id === w) || all.filter((x) => x.name === w).sort((a, b) => (a.revokedAt ? 1 : 0) - (b.revokedAt ? 1 : 0))[0] || null;
     return k ? { ok: true, key: k, ask: false } : { ok: false, code: 'not_found' };
   }
-  const v = (k) => useVerdict({ key: k, grants, subject, subjectGroups, verb, vaultState: 'unlocked' });
+  const v = (k) => useVerdict({ key: k, grants, subject, subjectGroups, subjectGroupsUnreadable, verb, vaultState: 'unlocked' });
   const granted = live.filter((k) => v(k).ok);
   if (granted.length) {
     const always = granted.filter((k) => v(k).grant.mode === 'always');
@@ -382,7 +387,7 @@ function pickKey({ keys = [], grants = [], want = null, subject = '', subjectGro
   if (!live.length) {
     // lane key-folder-picker-all: a verb the owner took off the keys THIS caller holds is refused by name (verb_not_in_scope,
     // the keys named) — never a not_granted that reads as «ask for a grant»
-    const held = all.filter((k) => !k.revokedAt && useVerdict({ key: k, grants, subject, subjectGroups, verb: k.scopes[0], vaultState: 'unlocked' }).ok);
+    const held = all.filter((k) => !k.revokedAt && useVerdict({ key: k, grants, subject, subjectGroups, subjectGroupsUnreadable, verb: k.scopes[0], vaultState: 'unlocked' }).ok);
     return held.length ? { ok: false, code: 'verb_not_in_scope', names: held.map((k) => k.name).slice(0, 20) } : { ok: false, code: 'not_granted' };
   }
   return { ok: false, code: 'key_ambiguous', names: live.map((k) => k.name).slice(0, 20) };
@@ -690,9 +695,9 @@ function argsSummary(verb, args) {
   return out;
 }
 /** ONE audit line (data/automation-audit.jsonl): {at, key, subject, verb, args, ok, code, by?, ask?, note?}. */
-function auditLine({ at, keyId = null, subject = '', verb = '', args = null, ok = false, code = null, by = null, ask = null, note = null } = {}) {
+function auditLine({ at, keyId = null, subject = '', verb = '', args = null, ok = false, code = null, by = null, ask = null, once = null, note = null } = {}) {
   return { at: new Date(Number(at) || 0).toISOString(), key: KEY_ID_RE.test(str(keyId)) ? keyId : null, subject: isSubject(subject) ? subject : clean(subject, 80) || null,
-    verb: VERBS.includes(verb) ? verb : clean(verb, 60), args: argsSummary(verb, args), ok: !!ok, code: ok ? null : clean(code, 40) || 'failed', ...(by ? { by: clean(by, 60) } : {}), ...(ask ? { ask: clean(ask, 20) } : {}), ...(note ? { note: clean(note, 300) } : {}) };   // note: an owner's edit in words (key.scopes)
+    verb: VERBS.includes(verb) ? verb : clean(verb, 60), args: argsSummary(verb, args), ok: !!ok, code: ok ? null : clean(code, 40) || 'failed', ...(by ? { by: clean(by, 60) } : {}), ...(ask ? { ask: clean(ask, 20) } : {}), ...(once ? { once: clean(once, 20) } : {}), ...(note ? { note: clean(note, 300) } : {}) };   // note: an owner's edit in words (key.scopes) · once: a refused open's reserved once-grant 'released' / 'kept' (lane key-grant-everyone r2)
 }
 
 module.exports = {
