@@ -15,6 +15,9 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 ### Security
 - Vault sign-in on standard Chrome is paused until it's fixed; the agent asks you through the Vault or to take over, and the custom browser kernel still signs in.
 
+### Fixed
+- A restart with the vault locked no longer makes VibeSpace forget its relay token; public URLs come back when you unlock it.
+
 ## 2.369.363 — 2026-10-29
 
 ### Added
