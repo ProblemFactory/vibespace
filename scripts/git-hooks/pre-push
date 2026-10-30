@@ -101,6 +101,11 @@ is_code_path() {
     # the relay login plugin's README: test-frps-plugin holds it to the plugin (the vouch REFUTED, the canary) — lane
     # frp-token-proof r3
     tools/frps-login-plugin/README.md) return 0 ;;
+    # docs OUTSIDE docs/ that suites read (lane frp-token-proof r3c — test-ci-gate-push derives them by their whole path,
+    # a directory read included): test-helm-render + test-integration-registry hold deploy/README.md (its values, its
+    # generated redirect block); every fixture is a suite's input — test-doc-wheel reads doc-wheel/ whole, test-doc-window
+    # (-width) read doc-print/lane-brief.md + doc-wheel/31-, 32-, test-record-shape's census walks the directory
+    deploy/README.md|scripts/fixtures/*) return 0 ;;
     # (b) documentation: nothing the gate reads.
     docs/*|*.md) return 1 ;;
   esac

@@ -368,26 +368,51 @@ process.exit(fs.existsSync(path.join(repo, 'FAST_RED')) ? 1 : 0);
     // no directory component additionally has to sit on a line that reads
     // something — that is what separates `read('CLAUDE.md')` from
     // `readCall.title === 'README.md'`. A doc OUTSIDE docs/ is named by its
-    // whole path too (`tools/…/*.md` — lane frp-token-proof r3: test-frps-plugin
-    // reads tools/frps-login-plugin/README.md; spelled `path.join(DIR,
-    // 'README.md')` it was derived as the ROOT README.md, and as a path the
-    // hook's `*.md` called it docs — a push of that README alone skipped the gate).
+    // whole repo-relative path, WHATEVER its directory (lane frp-token-proof r3c;
+    // r3 had added `tools/…/*.md` alone, and deploy/README.md + three
+    // scripts/fixtures docs that suites read stayed docs to the hook): a
+    // `<dir>/…/*.md` literal is that doc, and a `<dir>/…` literal naming a
+    // DIRECTORY is every `.md` it holds (test-doc-wheel reads
+    // scripts/fixtures/doc-wheel whole). Only a `.md` matters out there — any
+    // other path outside docs/ is code to the hook already. (r3: test-frps-plugin
+    // spelled `path.join(DIR, 'README.md')`, derived as the ROOT README.md, and a
+    // push of the plugin README alone skipped the gate.)
     // BOTH TIERS, on purpose: a docs-only push exits before the heavy LAUNCH
     // too, so a heavy suite's doc input is exactly as unguarded.
     const LIT = /(['"`])((?:\\.|(?!\1)[^\\])*)\1/g;
-    const WHOLE = /^(?:\$\{[^}]*\}[:/])?((?:docs\/[A-Za-z0-9._/-]+)|(?:tools\/[A-Za-z0-9._/-]+\.md)|(?:[A-Za-z0-9][A-Za-z0-9._-]*\.md))$/;
+    const WHOLE = /^(?:\$\{[^}]*\}[:/])?((?:docs\/[A-Za-z0-9._/-]+)|(?:[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9._/-]+)|(?:[A-Za-z0-9][A-Za-z0-9._-]*\.md))$/;
     const READ_CTX = /readFileSync|readdirSync|createReadStream|copyFileSync|cpSync|existsSync|statSync|path\.join|\bread\s*\(|\bgit\s*\(/;
     const gateInputs = new Map();   // repo-relative path → suites that read it
     const noteInput = (p, who) => { if (!gateInputs.has(p)) gateInputs.set(p, new Set()); gateInputs.get(p).add(who); };
-    const docLiterals = (src) => {
+    /** The `.md` files a directory outside docs/ holds (its dot-dirs and node_modules not entered, symlinks not followed). */
+    const mdUnder = (root, dir) => {
+      const out = [];
+      const walk = (rel) => {
+        for (const e of fs.readdirSync(path.join(root, rel), { withFileTypes: true })) {
+          if (e.name.startsWith('.') || e.name === 'node_modules') continue;
+          if (e.isDirectory()) walk(rel + '/' + e.name);
+          else if (e.isFile() && e.name.endsWith('.md')) out.push(rel + '/' + e.name);
+        }
+      };
+      walk(dir);
+      return out;
+    };
+    const docLiterals = (src, root = REPO) => {
       const out = [];
       const code = src.replace(/\/\*[\s\S]*?\*\//g, '').split('\n').map((l) => l.replace(/(^|\s)\/\/.*$/, '$1'));
       for (const line of code) {
         for (const m of line.matchAll(LIT)) {
           const w = WHOLE.exec(m[2]);
           if (!w) continue;
-          if (!fs.existsSync(path.join(REPO, w[1]))) continue;
-          out.push({ p: w[1], line, reads: READ_CTX.test(line) });
+          const abs = path.join(root, w[1]);
+          if (!fs.existsSync(abs)) continue;
+          const reads = READ_CTX.test(line);
+          if (w[1].startsWith('docs/') || !w[1].includes('/')) { out.push({ p: w[1], line, reads }); continue; }
+          // outside docs/ (r3c): a .md by its path, a directory by the .md files it holds; anything else is code already
+          if (/^node_modules\//.test(w[1])) continue;
+          const st = fs.statSync(abs);
+          if (st.isFile() && w[1].endsWith('.md')) out.push({ p: w[1], line, reads });
+          else if (st.isDirectory()) for (const p of mdUnder(root, w[1].replace(/\/+$/, ''))) out.push({ p, line, reads });
         }
       }
       return out;
@@ -457,10 +482,44 @@ process.exit(fs.existsSync(path.join(repo, 'FAST_RED')) ? 1 : 0);
       // …and ordinary documentation still skips, or the escape hatch is gone.
       // (docs/getting-started.md left this list in 2.369.166: test-xpra-client reads its "## HTTPS for seamless copy"
       // section — the link target of the desktop copy hint — so it is a gate input now, derived above.)
-      const docs = ['README.md', 'docs/sessions.md', 'docs/terminal.md', 'docs/screenshots/overview.png', 'docs/window-manager.md'];
+      // (deploy/frp/README.md + scripts/api-specs/SOURCES.md, r3c: documentation OUTSIDE docs/ that no suite reads still skips —
+      // the general rule below names docs by what suites READ, never by the directory they sit in)
+      const docs = ['README.md', 'docs/sessions.md', 'docs/terminal.md', 'docs/screenshots/overview.png', 'docs/window-manager.md', 'deploy/frp/README.md', 'scripts/api-specs/SOURCES.md'];
       const dv = classifyWith(shipped, docs);
       ok(dv.every((v) => v === 'DOCS'), `real documentation is still documentation (${docs.join(', ')})`);
       ok(classifyWith(shipped, ['src/a.js', 'server.js', 'package.json']).every((v) => v === 'CODE'), 'and code is still code');
+      // THE RULE IS GENERAL — one row per doc OUTSIDE docs/ a suite reads (lane frp-token-proof r3c; r3 named only
+      // tools/, and each of these four was documentation to the hook — a push touching only it skipped the suites that
+      // read it): derived by its whole path, attributed to its readers, and CODE to the shipped hook.
+      const OUTSIDE = [
+        ['deploy/README.md', ['test-helm-render', 'test-integration-registry']],
+        ['scripts/fixtures/doc-print/lane-brief.md', ['test-doc-window', 'test-doc-window-width']],
+        ['scripts/fixtures/doc-wheel/31-table-inline-html.md', ['test-doc-window', 'test-doc-window-width']],
+        ['scripts/fixtures/doc-wheel/32-table-placeholder-cells.md', ['test-doc-window']],
+      ];
+      const ov = classifyWith(shipped, OUTSIDE.map(([p]) => p));
+      OUTSIDE.forEach(([p, by], i) => {
+        const missed = by.filter((s) => !namedBy(p, s));
+        ok(!missed.length && ov[i] === 'CODE',
+          `a doc outside docs/ is a gate input by its path: ${p} ← ${by.join(', ')}${missed.length ? ' — NOT derived for ' + missed.join(', ') : ''} — ${ov[i]} to the shipped hook`);
+      });
+      // …a doc read through its DIRECTORY too: test-doc-wheel reads scripts/fixtures/doc-wheel whole (its 30-odd fixtures).
+      const wheel = [...gateInputs.keys()].filter((p) => p.startsWith('scripts/fixtures/doc-wheel/') && namedBy(p, 'test-doc-wheel')).sort();
+      const wv = classifyWith(shipped, wheel), wheelDocs = wheel.filter((p, i) => wv[i] !== 'CODE');
+      ok(wheel.length >= 30 && !wheelDocs.length,
+        `a doc read through its DIRECTORY is a gate input too: test-doc-wheel reads scripts/fixtures/doc-wheel — ${wheel.length} fixtures derived${wheel.length < 30 ? ' (the directory read is NOT expanded to its docs)' : wheelDocs.length ? ', STILL DOCS: ' + wheelDocs.join(', ') : ', every one CODE to the shipped hook'}`);
+      // …and the rule is no list of directories: a README planted where no rule has ever looked, read by a scratch
+      // suite, is derived by its path — and the shipped hook calls it documentation until it is attributed.
+      const plant = mktmp('plant');
+      // (spelled by its whole path even here: a bare 'README.md' on a path.join line is the ROOT README to the rule, and
+      // this suite's own scan above would say it reads one)
+      fs.mkdirSync(path.join(plant, 'zz-planted/notes'), { recursive: true });
+      fs.writeFileSync(path.join(plant, 'zz-planted/notes/README.md'), '# planted\n');
+      const planted = docLiterals("const RD = fs.readFileSync(path.join(REPO, 'zz-planted/notes/README.md'), 'utf8');", plant).map((h) => h.p);
+      const attributed = shipped.replace('case "$1" in\n', 'case "$1" in\n    zz-planted/notes/README.md) return 0 ;;\n');
+      const plv = [...classifyWith(shipped, planted), ...classifyWith(attributed, planted)];
+      ok(planted.join() === 'zz-planted/notes/README.md' && plv.join() === 'DOCS,CODE',
+        `a README planted in a directory no rule names (zz-planted/notes/README.md, read by a scratch suite) is derived by its path${planted.length ? ` and is ${plv[0]} to the shipped hook until it is attributed, then ${plv[1]}` : ' — NOT derived'}`);
       // NEGATIVE CONTROL — the pre-round-5 classifier, verbatim: every one of
       // those gate inputs was documentation to it, which is the defect.
       const preFix = 'is_code_path() {\n  case "$1" in\n    docs/*|*.md) return 1 ;;\n  esac\n  return 0\n}\n';
