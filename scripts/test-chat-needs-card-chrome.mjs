@@ -55,6 +55,11 @@
 //     the LAST displayed record, and is there back at the bottom; the chip's walk (the oldest, then one filed BELOW that window)
 //     lands at its record; a slow landing (2.5 s pages) never overrules the newer press; the DOCKED ask answered on another
 //     client moves a scrolled reader 0 px; the door of an answered ask whose record is folded opens the run and lands on it.
+//   LANE NEEDS-CARD-TAIL r10 (each RED on bd5c5fd98 — the owner 2026-10-30: «…不要停靠在聊天内容本身里了，而是体现出"这是专门停靠
+//     等我操作的事情，不会随着 chatview 浮动"的一个 UI»): THE ATTENTION DOCK replaces the docked card AND the bar's chip — ⑬/⑭: no
+//     card at the end, the strip «· N» shows the newest, a tap on its question lands it, an ask with no record lands at the
+//     live end and is SAID; ⑰ the strip's stress shapes (1 / 3 / 30 items, a 400-char question, six options, an answer on
+//     the phone, a 320 px window, a 6-line composer, a filing 5000 px up, the strip never moving with a scroll) + its shots.
 //   SHOTS (desktop 1280 + phone 375): the watch request card, the ask with its chips, a resolved card, the accordion; ⑬'s
 //     desktop-1280-tail / phone-390-tail / desktop-1280-chip-list / -chip-landed / -door-landed / -no-record-docked; ⑭'s
 //     desktop-1280-r2-after-4-wheels / -back-at-bottom / -below-window / -race / -folded-door.
@@ -106,6 +111,9 @@ const VERBS = {
   request: ['vibespace-channels', ['request', ${JSON.stringify(CONV)}, 'I watch the ops room for outages while you are away']],
   watch: ['vibespace-channels', ['watch', ${JSON.stringify(CONV)}, '--mode', 'wake', '--why', 'wake me on outages so I can open an incident']],
   tall: ['vibespace-ask', ['Before I merge the reports page tonight, which of the five rollout plans do we take, given that the payments fix already went out this morning, the team is away until Monday, the on-call rota has one person on it, and the last staged rollout took four hours to finish?', '--detail', 'Each plan is written up in the release notes. I recommend B.', '--options', 'Plan A — ship it all|Plan B — staged|Plan C — behind a flag|Plan D — wait a day|Plan E — ask the team']],
+  // lane needs-card-tail r10 (⑰): a 400-character question, and one with six options
+  big: ['vibespace-ask', ["Before we cut the release tonight, which of the rollout plans do we take for the reports page, given that the payments fix went out this morning, the team is away until Monday, the on-call rota has one person on it, the last staged rollout took four hours to finish, two customers asked for the export button by Friday, the database migration is still running on the replica, and the notes for support are not written yet?", '--detail', 'Plan A ships tonight; plan B waits for Monday. I recommend B.', '--options', 'A — tonight|B — Monday']],
+  six: ['vibespace-ask', ['Which region do we open next?', '--detail', 'Six regions are ready; one at a time.', '--options', 'Frankfurt|Tokyo|São Paulo|Sydney|Toronto|Mumbai']],
 };
 let n = 0, buf = '', chain = Promise.resolve();
 const turn = (line) => {
@@ -113,10 +121,10 @@ const turn = (line) => {
   // lane needs-card-tail: «do:fill150» = 150 steps in this one turn, each a line of text + a tiny tool call (a text record and
   // a tool card — consecutive text alone merges into one record): the history that puts what came before far above the
   // window a chat loads at its tail (the window walks back to 24 text cards)
-  const fill = /do:fill(\\d+)/.exec(line);
+  const fill = /do:fill(\\d+)(t?)/.exec(line); // (lane needs-card-tail r10: «t» = a tall line — ⑰'s reader 5000 px up)
   if (fill) {
     for (let j = 0; j < Number(fill[1]); j++) {
-      out({ type: 'assistant', session_id: SID, uuid: 'a-f' + k + '-' + j, message: { id: 'mf' + k + '_' + j, type: 'message', role: 'assistant', model: 'claude-fable-5-1', content: [{ type: 'text', text: 'Filler line ' + j + ' of a long history.' }] } });
+      out({ type: 'assistant', session_id: SID, uuid: 'a-f' + k + '-' + j, message: { id: 'mf' + k + '_' + j, type: 'message', role: 'assistant', model: 'claude-fable-5-1', content: [{ type: 'text', text: fill[2] ? ('Filler line ' + j + ' of a long history, written long enough to wrap. ').repeat(14) : 'Filler line ' + j + ' of a long history.' }] } });
       out({ type: 'assistant', session_id: SID, uuid: 'a-ft' + k + '-' + j, message: { id: 'mft' + k + '_' + j, type: 'message', role: 'assistant', model: 'claude-fable-5-1', content: [{ type: 'tool_use', id: 'toolu_f' + k + '_' + j, name: 'Bash', input: { command: 'echo ' + j } }] } });
       out({ type: 'user', session_id: SID, uuid: 'u-ft' + k + '-' + j, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_f' + k + '_' + j, content: String(j), is_error: false }] } });
     }
@@ -127,6 +135,24 @@ const turn = (line) => {
   // the stress shape (acceptance round 2): «do:q3 do:q4 …» = one ask per number, each its own Bash call in this ONE turn
   // (lane needs-card-tail: «do:h73» = a stress question whose tool output keeps the item's id to itself — no record NAMES it)
   const calls = verb ? [[verb, ...VERBS[verb]]] : [...line.matchAll(/do:([qlh])(\\d+)/g)].map((m) => [m[1] + m[2], 'vibespace-ask', [(m[1] === 'l' ? 'Longer question ' + m[2] + ': ship change ' + m[2] + ' today, once the reports page and the payments fix are both merged and the notes are written?' : 'Stress question ' + m[2] + ': ship change ' + m[2] + ' today?'), '--detail', 'Change ' + m[2] + ' is ready and tested. I recommend yes.', '--options', 'yes|no']]);
+  // lane needs-card-tail r10 (⑰'s thirty): «do:par» files the turn's asks SIX at a time (one Bash card each, the same
+  // records — the results land when their batch has run); a serial turn of 29 real CLI calls took ~90 s of the suite's clock
+  if (/do:par/.test(line)) {
+    const { spawn } = require('child_process');
+    const one = ([vb, cli, argv], j) => new Promise((res) => {
+      const tid = 'toolu_cn' + k + '_' + j;
+      const command = cli + ' ' + argv.map((a) => (/^[\\w./:-]+$/.test(a) ? a : JSON.stringify(a))).join(' ');
+      out({ type: 'assistant', session_id: SID, uuid: 'a-t' + k + '-' + j, message: { id: 'mt' + k + '_' + j, type: 'message', role: 'assistant', model: 'claude-fable-5-1', content: [{ type: 'tool_use', id: tid, name: 'Bash', input: { command, description: 'file it for the user' } }] } });
+      const ch = spawn(process.execPath, [BIN + '/' + cli, ...argv], { env: process.env }); let text = '';
+      ch.stdout.on('data', (d) => { text += d; }); ch.stderr.on('data', (d) => { text += d; });
+      ch.on('close', (code) => { require('fs').appendFileSync(${JSON.stringify(path.join(stubDir, 'cli.log'))}, '### ' + vb + ' rc=' + code + '\\n' + text + '\\n'); out({ type: 'user', session_id: SID, uuid: 'u-t' + k + '-' + j, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: tid, content: text || '(no output)', is_error: code !== 0 }] } }); res(); });
+    });
+    return (async () => {
+      for (let b = 0; b < calls.length; b += 6) await Promise.all(calls.slice(b, b + 6).map((c, i) => one(c, b + i)));
+      out({ type: 'assistant', session_id: SID, uuid: 'a-' + k, message: { id: 'm' + k, type: 'message', role: 'assistant', model: 'claude-fable-5-1', content: [{ type: 'text', text: 'Filed them for you — they wait on your answer.' }] } });
+      out({ type: 'result', subtype: 'success', is_error: false, duration_ms: 200, num_turns: 1, result: 'done', session_id: SID, total_cost_usd: 0.001, usage: { input_tokens: 10, output_tokens: 12 } });
+    })();
+  }
   calls.forEach(([vb, cli, argv], j) => {
     const tid = 'toolu_cn' + k + '_' + j;
     const command = cli + ' ' + argv.map((a) => (/^[\\w./:-]+$/.test(a) ? a : JSON.stringify(a))).join(' ');
@@ -139,7 +165,7 @@ const turn = (line) => {
   out({ type: 'assistant', session_id: SID, uuid: 'a-' + k, message: { id: 'm' + k, type: 'message', role: 'assistant', model: 'claude-fable-5-1', content: [{ type: 'text', text: calls.length ? 'Filed it for you — it waits on your answer.' : 'ok' }] } });
   out({ type: 'result', subtype: 'success', is_error: false, duration_ms: 200, num_turns: 1, result: 'done', session_id: SID, total_cost_usd: 0.001, usage: { input_tokens: 10, output_tokens: 12 } });
 };
-process.stdin.on('data', (d) => { buf += d; let i; while ((i = buf.indexOf('\\n')) >= 0) { const line = buf.slice(0, i); buf = buf.slice(i + 1); let m = null; try { m = JSON.parse(line); } catch {} if (!m || m.type !== 'user') continue; const c = m.message && m.message.content; const txt = typeof c === 'string' ? c : Array.isArray(c) ? c.map((x) => x && x.text || '').join(' ') : ''; chain = chain.then(() => new Promise((res) => setTimeout(() => { turn(txt); res(); }, 120))); } });
+process.stdin.on('data', (d) => { buf += d; let i; while ((i = buf.indexOf('\\n')) >= 0) { const line = buf.slice(0, i); buf = buf.slice(i + 1); let m = null; try { m = JSON.parse(line); } catch {} if (!m || m.type !== 'user') continue; const c = m.message && m.message.content; const txt = typeof c === 'string' ? c : Array.isArray(c) ? c.map((x) => x && x.text || '').join(' ') : ''; chain = chain.then(() => new Promise((res) => setTimeout(() => { Promise.resolve(turn(txt)).then(res, res); }, 120))); } });
 process.stdin.on('end', () => setTimeout(() => process.exit(0), 300));
 `, { mode: 0o755 });
 
@@ -220,7 +246,9 @@ const PENDS = new Map();
 // needs-card-tail r5: a run by hand took the 300 s default, and its own clock fired at 270 s, 23 s into ⑬, on a suite that
 // runs ~430 s alone (int361's direct run of 497beb03; the gate's runs were green)
 const BARE = !process.env.VIBESPACE_SUITE_BUDGET_MS;
-const WD = armWatchdog({ capMs: 600e3, env: BARE ? { ...process.env, VIBESPACE_SUITE_BUDGET_MS: '900000' } : process.env, exit: (code) => process.exit(code), pending: () => [...PENDS.values()].map((x) => `CDP ${x.method} (${((Date.now() - x.at) / 1000).toFixed(1)} s)`) });
+// (lane needs-card-tail r10: ⑰ — the strip's stress shapes, two pages, ~40 real CLI filings — lifts the suite's own ceiling
+// 600 → 840 s, inside its row's 900 s budget less the watchdog's 30 s)
+const WD = armWatchdog({ capMs: 840e3, env: BARE ? { ...process.env, VIBESPACE_SUITE_BUDGET_MS: '900000' } : process.env, exit: (code) => process.exit(code), pending: () => [...PENDS.values()].map((x) => `CDP ${x.method} (${((Date.now() - x.at) / 1000).toFixed(1)} s)`) });
 console.log(`watchdog: ${Math.round(WD.deadline.ms / 1000)} s (${WD.deadline.capped ? "the suite's own ceiling" : 'the budget − 30 s'}; the budget ${Math.round(WD.deadline.budgetMs / 1000)} s — ${BARE ? "a bare run: its ci.mjs row's" : "the gate's"})`);
 for (let i = 0; i < 120; i++) { try { await fetch(`${ORIGIN}/api/home`); break; } catch { await sleep(250); } }
 
@@ -321,7 +349,8 @@ const CARD = (id) => `(() => { const c = document.querySelector('.cn-card[data-i
     rect: { top: Math.round(b.top), bottom: Math.round(b.bottom), h: Math.round(b.height) }, list: lr ? { top: Math.round(lr.top), bottom: Math.round(lr.bottom) } : null, flash: c.classList.contains('chat-ask-flash'), el: !!c }; })()`;
 /** the conversation's ChatView in the page (its needs cards, its list) */
 const VIEW = `(() => { for (const v of app.sessions?.values?.() || []) if (v && v._needsCards && v._messageList?.isConnected) return v; return null; })()`;
-const CHIP = `(() => { const c = document.querySelector('.chat-status-foryou'); if (!c || !c.offsetParent) return null; return { text: c.textContent.trim(), title: c.title, clickable: c.classList.contains('chat-status-clickable') }; })()`;
+/** lane needs-card-tail r10: THE ATTENTION DOCK's count (the strip above the message box — the bar's chip is gone) */
+const CHIP = `(() => { const c = document.querySelector('.chat-attn-dock:not([hidden]) .cad-count'); if (!c || !c.offsetParent) return null; return { text: c.textContent.trim(), title: c.title, clickable: !!c.closest('.chat-attn-dock').querySelector('.cad-rows .ut-text[role="button"]') }; })()`;
 /** THE PERSON'S PRESS AFTER A SCROLL: the transcript moves the card's Approve (the row pass stamped it before), rests 1.5 s
  *  (past ARM_MS), then a real click where it stands — → {moved, at, toast} */
 const scrollThenPress = async (P, id) => {
@@ -359,9 +388,9 @@ try {
     mutant = { bundle: MUT_BUNDLE };
     await A.device(1280, 800, { mouse: true }); await A.load(); await openChat(A);
     await A.waitFor(`!!${CHAT(SID)} && document.querySelectorAll('.chat-msg-tool-result').length >= 2`, 15000); await sleep(1500);
-    const r = await A.evalJs(`({ cards: document.querySelectorAll('.cn-card').length, chip: !!document.querySelector('.chat-status-foryou'), open: (app._inboxModel?.todos.open || []).length })`);
+    const r = await A.evalJs(`({ cards: document.querySelectorAll('.cn-card').length, chip: !!document.querySelector('.chat-attn-dock:not([hidden]) .cad-count'), open: (app._inboxModel?.todos.open || []).length })`);
     await A.shot('red-desktop-1280-no-card.png');
-    check('RED CONTROL: the base\'s chat shows NO card and NO «waiting for you» chip while its ask is open in the tray (the owner\'s gap)', r.cards === 0 && !r.chip && r.open >= 1, r);
+    check('RED CONTROL: the base\'s chat shows NO card and NO «waiting for you» strip while its ask is open in the tray (the owner\'s gap)', r.cards === 0 && !r.chip && r.open >= 1, r);
   } catch (e) { fail++; console.log('  ✗ ⓪ threw: ' + (e?.message || e)); } finally { mutant = null; }
   lap('⓪ done');
 
@@ -410,16 +439,14 @@ try {
   await A.front();
   lap('① done');
 
-  console.log('② THE CHIP «waiting for you · N»: the kinds named, its click lands the newest card and flashes it');
+  console.log('② THE STRIP «waiting for you · N» (lane needs-card-tail r10 — the attention dock above the message box): the kinds named, a tap on its question lands the newest card and flashes it');
   const chip = await A.evalJs(CHIP);
-  check('the status bar\'s chip: «waiting for you · 2» naming an approval and a question, clickable', !!chip && chip.text === 'waiting for you · 2' && /an approval/.test(chip.title) && /a question/.test(chip.title) && chip.clickable, chip);
+  check('the strip above the message box: «waiting for you · 2» naming an approval and a question; its question a button', !!chip && chip.text === 'waiting for you · 2' && /an approval/.test(chip.title) && /a question/.test(chip.title) && chip.clickable, chip);
   await A.evalJs(`(() => { const l = ${CHAT(SID)} && app.sessions.get(${CHAT(SID)}.id)._messageList; l.scrollTop = 0; return true; })()`); await sleep(500);
-  await A.press('.chat-status-foryou', { touch: false }); await sleep(700);
-  // lane needs-card-tail: the chip is THE INDEX — two waiting ⇒ its click lists them, newest first; the newest row lands it
-  const listed = await A.evalJs(`[...document.querySelectorAll('.chat-status-dropdown.chat-needs-list .chat-needs-pick')].map((b) => b.dataset.item)`);
-  if (listed.length) { await A.press(`.chat-needs-list .chat-needs-pick[data-item="${listed[0]}"]`, { touch: false }); await sleep(700); }
+  const shown = await A.evalJs(`(document.querySelector('.chat-attn-dock:not([hidden]) .cad-rows > .ut-item') || {}).dataset?.id || null`);
+  await A.press('.chat-attn-dock .cad-rows .ut-item .ut-text', { touch: false }); await sleep(700);
   const land = await A.evalJs(CARD(wr && wr.id));
-  check('…its click lists both (newest first) and the newest row lands the NEWEST card (the watch request) in view and flashes it', listed.length === 2 && listed[0] === (wr && wr.id) && !!land && land.flash && land.list && land.rect.top >= land.list.top - 2 && land.rect.bottom <= land.list.bottom + 2, { listed, land });
+  check('…the strip shows the NEWEST (the watch request) and a tap on its question lands its card in view and flashes it (THE ONE LANDING)', shown === (wr && wr.id) && !!land && land.flash && land.list && land.rect.top >= land.list.top - 2 && land.rect.bottom <= land.list.bottom + 2, { shown, land });
   // acceptance round 4 (#3): A PASS THAT CHANGED NO CARD READS NO LAYOUT — the pass a broadcast runs, over cards already what
   // the store says (the watch request's Approve on screen): every rect read during it counted (the first three commits'
   // reconcile re-stamped every Allow of the page, a rect per hit, inside every card's patch)
@@ -547,12 +574,12 @@ try {
     if (d) await P.tapAt(d.x, d.y);
     await P.waitFor(`!app.phoneHome?.shown?.()`, 6000); await openChat(P);
   };
-  const HIT = `(() => { const c = document.querySelector('.chat-status-foryou'); if (!c || !c.offsetParent) return null; const r = c.getBoundingClientRect(); const on = (x, y) => { const h = document.elementFromPoint(x, y); return !!h && (h === c || c.contains(h)); };
+  const HIT = `(() => { const c = document.querySelector('.chat-attn-dock:not([hidden]) .cad-rows .ut-text'); if (!c || !c.offsetParent) return null; const r = c.getBoundingClientRect(); const on = (x, y) => { const h = document.elementFromPoint(x, y); return !!h && (h === c || c.contains(h)); };
     const cx = r.left + r.width / 2, cy = r.top + r.height / 2; let up = 0, dn = 0, lf = 0, rt = 0; while (up < 60 && on(cx, cy - up - 1)) up++; while (dn < 60 && on(cx, cy + dn + 1)) dn++; while (lf < 400 && on(cx - lf - 1, cy)) lf++; while (rt < 400 && on(cx + rt + 1, cy)) rt++;
-    return { text: c.textContent.trim(), box: Math.round(r.width) + '×' + Math.round(r.height), hitW: lf + rt + 1, hitH: up + dn + 1, centre: on(cx, cy), bar: Math.round(c.parentElement.getBoundingClientRect().height) }; })()`;
+    return { text: (document.querySelector('.chat-attn-dock .cad-count') || {}).textContent || '', box: Math.round(r.width) + '×' + Math.round(r.height), hitW: lf + rt + 1, hitH: up + dn + 1, centre: on(cx, cy), bar: Math.round((document.querySelector('.chat-view .chat-status-bar') || c).getBoundingClientRect().height) }; })()`;
   /** the .358 mouse-target census (test-desktop-small-chrome ⑧), over the cards and the chip */
   const CARD_HITS = `(() => { const out = []; const clickable = (e) => { const cs = getComputedStyle(e); return cs.cursor === 'pointer' && cs.visibility !== 'hidden' && cs.pointerEvents !== 'none'; };
-    for (const e of document.querySelectorAll('.cn-cards button, .cn-cards [role=button], .chat-status-foryou')) { if (!clickable(e) || e.disabled) continue; const r = e.getBoundingClientRect(); if (r.width < 1 || r.height < 1 || r.bottom <= 0 || r.top >= innerHeight || r.right <= 0 || r.left >= innerWidth) continue;
+    for (const e of document.querySelectorAll('.cn-cards button, .cn-cards [role=button], .chat-attn-dock button, .chat-attn-dock [role=button]')) { if (!clickable(e) || e.disabled) continue; const r = e.getBoundingClientRect(); if (r.width < 1 || r.height < 1 || r.bottom <= 0 || r.top >= innerHeight || r.right <= 0 || r.left >= innerWidth) continue;
       const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); if (!hit || (hit !== e && !e.contains(hit) && !hit.contains(e))) continue; if (r.width >= 23.5 && r.height >= 23.5) continue;
       let a = e.parentElement, ok = false; while (a && a !== document.body) { const ar = a.getBoundingClientRect(); if ((a.tagName === 'BUTTON' || a.getAttribute('role') === 'button') && clickable(a) && ar.width >= 24 && ar.height >= 24) { ok = true; break; } a = a.parentElement; }
       if (!ok) out.push(String(e.className || e.tagName).split(' ').slice(0, 2).join('.') + ' ' + Math.round(r.width) + '×' + Math.round(r.height)); }
@@ -575,10 +602,10 @@ try {
   const p = await A.evalJs(ACC), pf = p.filter((c) => c.fold);
   check(`375 touch: ONE open card — the newest — and five folded rows, each the sheet's row: the question on one line + its age, nothing else (rows ${pf.map((c) => c.h).join('/')} px, targets ${pf.map((c) => c.rowH).join('/')} px)`, p.length === 6 && openOnes(p).length === 1 && openOnes(p)[0].id === q(6) && openOnes(p)[0].verbs > 0 && openOnes(p)[0].open && pf.length === 5 && pf.every((c) => c.h <= 60 && c.rowH >= 43.5 && c.textLines === 1 && c.verbs === 0 && !c.head && c.role === 'button' && !c.open && /ago|now/.test(c.meta)), p);
   const hp = await A.evalJs(HIT);
-  check(`⑦ THE CHIP at 375 touch: a ≥ 44 × 44 target by hit-testing (${hp && hp.hitW}×${hp && hp.hitH}; box ${hp && hp.box}, the bar ${hp && hp.bar} px)`, !!hp && hp.centre && hp.hitW >= 44 && hp.hitH >= 44 && /waiting for you · 6 questions/.test(hp.text), hp);
+  check(`⑦ THE STRIP's question at 375 touch (r10 — the chip's place): a ≥ 44 × 44 target by hit-testing (${hp && hp.hitW}×${hp && hp.hitH}; box ${hp && hp.box}, the bar ${hp && hp.bar} px)`, !!hp && hp.centre && hp.hitW >= 44 && hp.hitH >= 44 && /waiting for you · 6 questions/.test(hp.text), hp);
   // acceptance round 3 (m3): the bar grew 40 → 44 the instant a filing landed (the composer 4 px under a finger) — it keeps its
   // 40 px (the one-line bar of test-turn-truth-ui) with the chip on show, the 44 px hit area reaching past its edges
-  check(`m3 the phone bar stays ${hp && hp.bar} px with the chip on show (≤ 40 — the bar's height never changes when a filing lands or the last card resolves), the hit area still 44 tall`, !!hp && hp.bar <= 40 && hp.hitH >= 44, hp);
+  check(`m3 the phone's status bar stays ${hp && hp.bar} px (≤ 40 — r10: nothing that waits on the person rides it; the strip above the message box carries it), the strip's target 44 tall`, !!hp && hp.bar <= 40 && hp.hitH >= 44, hp);
   await A.evalJs(`document.querySelector('.cn-card[data-item="${q(1)}"]')?.scrollIntoView({ block: 'start' }); true`); await sleep(300);
   await A.shot('phone-375-accordion.png');
   const a3 = await aimAt(A, q(3)); await sleep(250);
@@ -600,7 +627,7 @@ try {
   const d = await A.evalJs(ACC), df = d.filter((c) => c.fold);
   check(`1280: ONE open card — the newest — and five ONE-LINE rows: the question and « · age» on one line, no verb, no head, the row a ≥ 24 px target (rows ${df.map((c) => c.h).join('/')} px)`, d.length === 6 && openOnes(d).length === 1 && openOnes(d)[0].id === q(6) && openOnes(d)[0].verbs > 0 && df.length === 5 && df.every((c) => c.h <= 30 && c.rowH >= 23.5 && c.textLines === 1 && c.sameLine && c.verbs === 0 && !c.head && c.role === 'button' && /ago|now/.test(c.meta)), d);
   const hd = await A.evalJs(HIT), census = await A.evalJs(CARD_HITS);
-  check(`⑦ THE CHIP at 1280: a ≥ 24 × 24 target by hit-testing (${hd && hd.hitW}×${hd && hd.hitH}; box ${hd && hd.box}) — and every visible clickable in the cards ≥ 24 × 24 (${census.length} under)`, !!hd && hd.centre && hd.hitW >= 24 && hd.hitH >= 24 && census.length === 0, { hd, census });
+  check(`⑦ THE STRIP's question at 1280: a ≥ 24 × 24 target by hit-testing (${hd && hd.hitW}×${hd && hd.hitH}; box ${hd && hd.box}) — and every visible clickable in the cards and the strip ≥ 24 × 24 (${census.length} under)`, !!hd && hd.centre && hd.hitW >= 24 && hd.hitH >= 24 && census.length === 0, { hd, census });
   const a2 = await aimAt(A, q(2)); await sleep(250);
   if (a2) await A.clickAt(a2.x, a2.y);
   await sleep(300);
@@ -677,7 +704,7 @@ try {
 
   console.log('⑧ THE COUNT IS ONE SOURCE: a frame sampler while a 7th question is filed, then Mark done on it');
   const SAMPLE = `(() => { window.__cnFrames = []; let last = ''; window.__cnSampling = true; const gen = (window.__cnGen = (window.__cnGen || 0) + 1); // one sampler at a time
-    const tick = () => { const c = document.querySelector('.chat-status-foryou'); const s = c && c.offsetParent ? c.textContent.trim() : ''; const m = /· (\\d+)/.exec(s); const n = !s ? 0 : m ? Number(m[1]) : 1;
+    const tick = () => { const c = document.querySelector('.chat-attn-dock:not([hidden]) .cad-count'); const s = c && c.offsetParent ? c.textContent.trim() : ''; const m = /· (\\d+)/.exec(s); const n = !s ? 0 : m ? Number(m[1]) : 1;
       const cards = [...document.querySelectorAll('.cn-card.cn-open')].filter((x) => x.getClientRects().length > 0).length; const k = n + '/' + cards;
       if (k !== last) { last = k; window.__cnFrames.push(k); } if (window.__cnSampling && window.__cnGen === gen) requestAnimationFrame(tick); };
     requestAnimationFrame(tick); return true; })()`;
@@ -686,14 +713,14 @@ try {
   say('one more do:q7');
   const seven = await stress(7);
   const q7 = seven.find((i) => /^Stress question 7:/.test(i.text));
-  await A.waitFor(`document.querySelectorAll('.cn-card.cn-open').length >= 7 && /· 7 /.test(document.querySelector('.chat-status-foryou')?.textContent || '')`, 10000);
+  await A.waitFor(`document.querySelectorAll('.cn-card.cn-open').length >= 7 && /· 7 /.test(document.querySelector('.chat-attn-dock:not([hidden]) .cad-count')?.textContent || '')`, 10000);
   const f1 = await frames();
   const op7 = openOnes(await A.evalJs(ACC));
   check(`a filing ⇒ the chip and the cards move TOGETHER, frame by frame (${f1.join(' → ')}): 6/6 → 7/7, never one without the other — and the new one takes the open slot`, !!q7 && f1.length >= 2 && f1[0] === '6/6' && f1[f1.length - 1] === '7/7' && f1.every((k) => k.split('/')[0] === k.split('/')[1]) && op7.length === 1 && op7[0].id === q7.id, { f1, op7, q7: q7 && q7.id });
   await A.evalJs(SAMPLE);
   await A.press(`.cn-card[data-item="${q7 && q7.id}"] .ut-done`, { touch: false });
   const q7Done = await (async () => { for (let i = 0; i < 40; i++) { const r = (await api()).resolved.find((x) => x.id === (q7 && q7.id)); if (r) return r; await sleep(150); } return null; })();
-  await A.waitFor(`document.querySelector('.cn-card[data-item="${q7 && q7.id}"]')?.classList.contains('cn-done') && /· 6 /.test(document.querySelector('.chat-status-foryou')?.textContent || '')`, 8000);
+  await A.waitFor(`document.querySelector('.cn-card[data-item="${q7 && q7.id}"]')?.classList.contains('cn-done') && /· 6 /.test(document.querySelector('.chat-attn-dock:not([hidden]) .cad-count')?.textContent || '')`, 8000);
   const f2 = await frames();
   check(`Mark done on it ⇒ both N again in the same frame (${f2.join(' → ')}): 7/7 → 6/6`, !!q7Done && f2.length >= 2 && f2[0] === '7/7' && f2[f2.length - 1] === '6/6' && f2.every((k) => k.split('/')[0] === k.split('/')[1]), { f2, q7Done: q7Done && q7Done.status });
   lap('⑧ done');
@@ -947,50 +974,50 @@ try {
     const page = async (offset, limit) => { try { return await (await fetch(`${ORIGIN}/api/session-messages?backend=claude&backendSessionId=${encodeURIComponent(bsid)}&cwd=${encodeURIComponent(WORK)}&offset=${offset}&limit=${limit}`)).json(); } catch { return {}; } };
     let total = 0;
     for (let i = 0; i < 150 && total < 300; i++) { total = (await page(0, 1)).total || 0; if (total < 300) await sleep(200); }
-    const TAILQ = `(() => { const v = ${VIEW}; if (!v) return null; const l = v._messageList, cards = [...l.querySelectorAll(':scope > * > .cn-cards > .cn-card.cn-open')], last = [...l.querySelectorAll(':scope > .chat-msg')].pop(), chip = document.querySelector('.chat-status-foryou'), d = l.querySelector('.cn-dock');
-      return { ws: v._windowStart, we: v._windowEnd, total: v._total, n: cards.length, ids: cards.map((c) => c.dataset.item), atLast: cards.filter((c) => c.closest('.chat-msg') === last).length, docked: cards.filter((c) => c.classList.contains('cn-docked')).map((c) => c.dataset.item), dock: d ? d.textContent : '', dockShown: !!d && d.getClientRects().length > 0, chip: chip && chip.offsetParent ? chip.textContent.trim() : '', open: cards.filter((c) => !c.classList.contains('cn-fold')).map((c) => c.dataset.item) }; })()`;
-    const atTail = (P, n) => P.waitFor(`(() => { const v = ${VIEW}, c = document.querySelector('.chat-status-foryou'); return !!v && v._total >= ${total} && v._windowEnd >= v._total && !!c && new RegExp('· ${n} ').test(c.textContent + ' '); })()`, 15000);
+    const TAILQ = `(() => { const v = ${VIEW}; if (!v) return null; const l = v._messageList, cards = [...l.querySelectorAll(':scope > * > .cn-cards > .cn-card.cn-open')], last = [...l.querySelectorAll(':scope > .chat-msg')].pop(), chip = document.querySelector('.chat-attn-dock:not([hidden]) .cad-count'), d = v._attnDock, srow = d && !d.hidden ? d.querySelector('.cad-rows > .ut-item') : null;
+      return { strip: srow ? srow.dataset.id : null, ws: v._windowStart, we: v._windowEnd, total: v._total, n: cards.length, ids: cards.map((c) => c.dataset.item), atLast: cards.filter((c) => c.closest('.chat-msg') === last).length, docked: cards.filter((c) => c.classList.contains('cn-docked')).map((c) => c.dataset.item), dock: d ? d.textContent : '', dockShown: !!d && d.getClientRects().length > 0, chip: chip && chip.offsetParent ? chip.textContent.trim() : '', open: cards.filter((c) => !c.classList.contains('cn-fold')).map((c) => c.dataset.item) }; })()`;
+    const atTail = (P, n) => P.waitFor(`(() => { const v = ${VIEW}, c = document.querySelector('.chat-attn-dock:not([hidden]) .cad-count'); return !!v && v._total >= ${total} && v._windowEnd >= v._total && !!c && new RegExp('· ${n} ').test(c.textContent + ' '); })()`, 15000);
     // R1 at 1280 — THE OWNER'S SHAPE: the window at the tail, six asks whose records are far above it
     await toConv(A, sid, [], 1280, 800, false); await atTail(A, 6); await sleep(1200);
     const t0 = await A.evalJs(TAILQ);
     await A.shot('desktop-1280-tail.png');
     check(`setup: six asks, then ${total - 11} records of history — the window loaded at the tail (records ${t0 && t0.ws}–${t0 && t0.we} of ${t0 && t0.total}), the asks' records far above it`, ids.length === 6 && total >= 300 && !!t0 && t0.ws > 200 && t0.we === t0.total, { ids: ids.length, total, t0 });
-    check(`R1 (RED on 90c995a3: six cards stacked at the end) the end holds ONE docked card — the NEWEST (${t0 && t0.ids.join(',')}), open, its dock line «${t0 && t0.dock}»; the chip «${t0 && t0.chip}»`, !!t0 && t0.n === 1 && t0.atLast === 1 && t0.docked[0] === ids[5] && t0.open[0] === ids[5] && /further up the conversation · 6 waiting — the status bar lists them all/.test(t0.dock) && t0.dockShown && /· 6 questions/.test(t0.chip), t0);
+    check(`r10 R1 (RED on 90c995a3: six cards stacked at the end; on bd5c5fd98: ONE docked card, «停靠在末尾 — 它是在对话更上面提出的 · 共 6 个在等你») the end holds NO card (${t0 && t0.n} open in the window, ${t0 && t0.atLast} under the last record); the strip «${t0 && t0.chip}» shows the NEWEST`, !!t0 && t0.n === 0 && t0.atLast === 0 && t0.strip === ids[5] && /· 6 questions/.test(t0.chip), t0);
     // R1 at 390×844 (the phone): the same
     await toConv(A, sid, [], 390, 844, true); await atTail(A, 6); await sleep(1200);
     const p0 = await A.evalJs(TAILQ);
     await A.shot('phone-390-tail.png');
-    check(`R1 at 390×844 touch: ONE docked card at the end (${p0 && p0.ids.join(',')}), its dock line shown; the chip «${p0 && p0.chip}»`, !!p0 && p0.n === 1 && p0.atLast === 1 && p0.docked[0] === ids[5] && p0.dockShown && /· 6 /.test(p0.chip + ' '), p0);
-    // R2 — THE CHIP IS THE INDEX: its click lists all six, newest first, «the question · its age», the age kept
+    check(`r10 R1 at 390×844 touch: NO card at the end (${p0 && p0.n}); the strip «${p0 && p0.chip}» shows the newest`, !!p0 && p0.n === 0 && p0.atLast === 0 && p0.strip === ids[5] && /· 6 /.test(p0.chip + ' '), p0);
+    // R2 (r10) — the strip's question lands the NEWEST ask (its record ~300 records above the window: the window loaded up to
+    //      it); the OLDEST through its For-you door (the For-you window is the index of every ask now — «View all»)
     await toConv(A, sid, [], 1280, 800, false); await atTail(A, 6); await sleep(900);
     await A.evalJs(`(() => { window.__cnFlash = []; new MutationObserver((ms) => { for (const m of ms) if (m.target.classList?.contains('chat-ask-flash') && m.target.dataset?.item) window.__cnFlash.push(m.target.dataset.item); }).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['class'] }); return 1; })()`);
-    await A.press('.chat-status-foryou', { touch: false }); await sleep(600);
-    const LIST = `(() => { const d = document.querySelector('.chat-status-dropdown.chat-needs-list'); if (!d) return null; return [...d.querySelectorAll('.chat-needs-pick')].map((b) => { const r = b.getBoundingClientRect(), w = b.querySelector('.chat-needs-pick-words'), a = b.querySelector('.chat-needs-pick-ago').getBoundingClientRect(); return { id: b.dataset.item, h: Math.round(r.height), ageKept: a.width > 8 && a.right <= r.right + 0.5 && a.left >= w.getBoundingClientRect().right - 0.5, cut: w.scrollWidth > w.clientWidth + 1, text: b.textContent.trim() }; }); })()`;
-    const rows = await A.evalJs(LIST);
-    await A.shot('desktop-1280-chip-list.png');
-    check(`R2 (RED on 90c995a3: the click lands the newest, no list) the chip's click LISTS all six, newest first — «the question · its age», the age kept at the line's end (${rows ? rows.filter((r) => r.cut).length : 0} questions cut, never the age), rows ≥ 24 px`, !!rows && rows.length === 6 && J(rows.map((r) => r.id)) === J([...ids].reverse()) && rows.every((r) => r.ageKept && r.h >= 24), rows);
-    // …choosing the OLDEST (its record ~300 records above the window) LOADS THE WINDOW UP TO IT and opens its card there
-    if (rows && rows.length) await A.press(`.chat-needs-list .chat-needs-pick[data-item="${ids[0]}"]`, { touch: false });
+    await A.press('.chat-attn-dock .cad-rows .ut-item .ut-text', { touch: false });
     const INPLACE = (id) => `(() => { const v = ${VIEW}, c = document.querySelector('.cn-card[data-item="${id}"]'); if (!v || !c) return null; const raw = c.closest('.chat-msg')?._rawMsg, lr = v._messageList.getBoundingClientRect(), r = c.getBoundingClientRect();
       return { ws: v._windowStart, we: v._windowEnd, total: v._total, cmd: raw && raw.content && raw.content[0] && raw.content[0].input ? String(raw.content[0].input.command || '').slice(0, 60) : '', open: !c.classList.contains('cn-fold') && c.classList.contains('cn-open'), docked: c.classList.contains('cn-docked'), inView: r.top >= lr.top - 1 && r.bottom <= lr.bottom + 1, docks: document.querySelectorAll('.cn-card.cn-docked').length, st: Math.round(v._messageList.scrollTop) }; })()`;
-    const landed = (id, q) => A.waitFor(`(() => { const x = ${INPLACE(id)}; return !!x && x.open && x.inView && !x.docked && /Stress question ${q}/.test(x.cmd); })()`, 15000);
+    const landed = (id, q) => A.waitFor(`(() => { const x = ${INPLACE(id)}; return !!x && x.open && x.inView && !x.docked && /(Stress|Longer) question ${q}/.test(x.cmd); })()`, 15000);
+    await landed(ids[5], 76); await sleep(900);
+    const l6 = await A.evalJs(INPLACE(ids[5])), fl6 = await A.evalJs('window.__cnFlash || []');
+    await A.shot('desktop-1280-dock-landed.png');
+    check(`r10 R2 (RED on bd5c5fd98: no strip — the chip listed them) a tap on the strip's question loads the window UP to the newest ask (records ${l6 && l6.ws}–${l6 && l6.we} of ${l6 && l6.total}) and opens its card IN ITS tool card («${l6 && l6.cmd}»), whole in view, flashed`, !!l6 && l6.ws < t0.ws && /Longer question 76/.test(l6.cmd) && l6.open && l6.inView && fl6.includes(ids[5]), { l6, fl6 });
+    await A.evalJs(`(() => { const it = app._inboxModel.byId(${J(ids[0])}); window.__cnFlash = []; app._inboxModel.jump(it.sessionKey, it); return 1; })()`);
     await landed(ids[0], 71); await sleep(900);
     const l1 = await A.evalJs(INPLACE(ids[0])), fl1 = await A.evalJs('window.__cnFlash || []');
-    await A.shot('desktop-1280-chip-landed.png');
-    check(`R2 choosing the OLDEST row loads the window UP to it (records ${l1 && l1.ws}–${l1 && l1.we} of ${l1 && l1.total}) and opens its card IN ITS tool card («${l1 && l1.cmd}»), whole in view, flashed once; no dock in a window that ends mid-history`, !!l1 && l1.we < l1.total && l1.ws < t0.ws && /Stress question 71/.test(l1.cmd) && l1.open && l1.inView && l1.docks === 0 && fl1.includes(ids[0]), { l1, fl1 });
+    await A.shot('desktop-1280-door-oldest-landed.png');
+    check(`R2 the OLDEST ask's For-you door loads the window UP to it (records ${l1 && l1.ws}–${l1 && l1.we} of ${l1 && l1.total}) and opens its card IN ITS tool card («${l1 && l1.cmd}»), whole in view, flashed once; no dock in a window that ends mid-history`, !!l1 && l1.we < l1.total && l1.ws < t0.ws && /Stress question 71/.test(l1.cmd) && l1.open && l1.inView && l1.docks === 0 && fl1.includes(ids[0]), { l1, fl1 });
     // R4 — A FOLDED ROW KEEPS ITS AGE: the window narrowed to 380 px (the questions must give way) — each folded card in the
     //      landed window is ONE line, the question cut if it must, its age whole and the last thing on it
     await A.evalJs(`(() => { const w = ${CHAT(sid)}; if (!w) return false; if (w.isMaximized) app.wm.toggleMaximize(w.id); app.wm.resizeWindowTo(w.id, { w: 380, h: 720 }); return true; })()`); await sleep(900);
     const folds = await A.evalJs(`[...document.querySelectorAll('.cn-card.cn-fold')].filter((c) => c.getClientRects().length).map((c) => { const row = c.querySelector('.cn-rows > .ut-item'), tx = row && row.querySelector('.ut-text'), m = row && row.querySelector('.ut-meta'); if (!row || !tx || !m) return { id: c.dataset.item, ok: false }; const r = row.getBoundingClientRect(), a = m.getBoundingClientRect(), q = tx.getBoundingClientRect(); return { id: c.dataset.item, ok: a.width > 8 && a.right <= r.right + 0.5 && a.left >= q.right - 0.5 && Math.abs(a.bottom - q.bottom) < 6, cut: tx.scrollWidth > tx.clientWidth + 1, age: m.textContent.trim(), w: Math.round(r.width) }; })`);
     await A.shot('desktop-380-folded-ages.png');
     check(`R4 a folded row keeps its age: ${folds.length} folded cards in a 380 px window, ${folds.filter((f) => f.cut).length} questions cut — every age whole, the last thing on its one line («${folds.map((f) => f.age).join('», «')}»)`, folds.length >= 2 && folds.some((f) => f.cut) && folds.every((f) => f.ok), folds);
-    // R3 — the docked ask answered elsewhere: the dock goes to the next newest IN THE SAME FRAME the chip says 5
+    // R3 (r10) — the newest answered elsewhere: the strip's row goes to the next newest IN THE SAME FRAME its count says 5
     await toConv(A, sid, [], 1280, 800, false); await atTail(A, 6); await sleep(900);
-    await A.evalJs(`(() => { window.__cnTail = []; const t0 = performance.now(); const f = () => { const c = document.querySelector('.chat-status-foryou'), d = document.querySelector('.cn-card.cn-docked'); window.__cnTail.push(((c && c.offsetParent ? (/· (\\d+)/.exec(c.textContent) || [])[1] : '0') || '?') + '/' + (d ? d.dataset.item : '')); if (performance.now() - t0 < 3000) requestAnimationFrame(f); }; requestAnimationFrame(f); return 1; })()`);
+    await A.evalJs(`(() => { window.__cnTail = []; const t0 = performance.now(); const f = () => { const c = document.querySelector('.chat-attn-dock:not([hidden]) .cad-count'), d = document.querySelector('.chat-attn-dock:not([hidden]) .cad-rows > .ut-item'); window.__cnTail.push(((c && c.offsetParent ? (/· (\\d+)/.exec(c.textContent) || [])[1] : '0') || '?') + '/' + (d ? d.dataset.id : '')); if (performance.now() - t0 < 3000) requestAnimationFrame(f); }; requestAnimationFrame(f); return 1; })()`);
     const st = await A.evalJs(`fetch('/api/user-todos/' + encodeURIComponent(${J(ids[5])}), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'done' }) }).then((r) => r.status)`);
     await sleep(3300);
     const states = [...new Set(await A.evalJs('window.__cnTail || []'))];
-    check(`R3 the docked ask answered (another client, POST ${st}) ⇒ the dock goes to the next newest and the chip says 5 in the SAME frame (frames: ${states.join(' → ')})`, st === 200 && states.length === 2 && states[0] === '6/' + ids[5] && states[1] === '5/' + ids[4], states);
+    check(`r10 R3 the newest ask answered (another client, POST ${st}) ⇒ the strip's row goes to the next newest and its count says 5 in the SAME frame (frames: ${states.join(' → ')})`, st === 200 && states.length === 2 && states[0] === '6/' + ids[5] && states[1] === '5/' + ids[4], states);
     // R5 (a) — THE TRAY ROW'S DOOR (its conversation's name) for an ask ~300 records above the window: the view lands there
     const door = async (id) => {
       await A.press('#taskbar-user-todos', { touch: false });
@@ -1010,11 +1037,12 @@ try {
     // (this page's store copy — every snapshot read through it, so a refresh the tray's open fetches cannot undo the shift)
     const shifted = await A.evalJs(`(() => { const m = app._inboxModel, get = Object.getOwnPropertyDescriptor(m, 'todos').get, id = ${J(ids[2])}, at = ${firstTs} - 3600e3;
       Object.defineProperty(m, 'todos', { configurable: true, get() { const t = get.call(m); for (const i of t.open || []) if (i.id === id) i.createdAt = at; return t; } }); ${VIEW}._needsCards.schedule(); return !!m.todos.open.find((i) => i.id === id && i.createdAt === at); })()`);
+    await A.evalJs(`(() => { window.__cnToast = []; new MutationObserver(() => { for (const x of document.querySelectorAll('.global-toast')) if (!window.__cnToast.includes(x.textContent)) window.__cnToast.push(x.textContent); }).observe(document.body, { subtree: true, childList: true, characterData: true }); return 1; })()`);
     await door(ids[2]);
-    await A.waitFor(`(() => { const c = document.querySelector('.cn-card[data-item="${ids[2]}"]'); return !!c && c.classList.contains('cn-docked') && !c.classList.contains('cn-fold'); })()`, 15000); await sleep(900);
-    const n1 = await A.evalJs(`(() => { const v = ${VIEW}, c = document.querySelector('.cn-card[data-item="${ids[2]}"]'); if (!c) return null; const lr = v._messageList.getBoundingClientRect(), r = c.getBoundingClientRect(), last = [...v._messageList.querySelectorAll(':scope > .chat-msg')].pop(); return { atEnd: v._windowEnd >= v._total, atLast: c.closest('.chat-msg') === last, open: !c.classList.contains('cn-fold'), inView: r.top >= lr.top - 1 && r.bottom <= lr.bottom + 1, dock: (c.querySelector('.cn-dock') || {}).textContent || '', docks: document.querySelectorAll('.cn-card.cn-docked').length }; })()`);
-    await A.shot('desktop-1280-no-record-docked.png');
-    check(`R5 / R2 an ask with no record at all ⇒ the door docks IT at the end (the live end loaded), open, its dock line says why («${n1 && n1.dock}»); still ONE dock`, shifted && firstTs > 0 && !!n1 && n1.atEnd && n1.atLast && n1.open && n1.inView && n1.docks === 1 && /asked before this conversation's record was kept/.test(n1.dock), n1);
+    await A.waitFor(`(() => { const v = ${VIEW}; return !!v && v._windowEnd >= v._total && (window.__cnToast || []).some((x) => /record was kept/.test(x)); })()`, 15000); await sleep(900);
+    const n1 = await A.evalJs(`(() => { const v = ${VIEW}, l = v._messageList; return { atEnd: v._windowEnd >= v._total, gap: Math.round(l.scrollHeight - l.clientHeight - l.scrollTop), card: !!document.querySelector('.cn-card[data-item="${ids[2]}"]'), toast: (window.__cnToast || []).join(' | '), strip: !!v._attnDock && !v._attnDock.hidden }; })()`);
+    await A.shot('desktop-1280-no-record-said.png');
+    check(`r10 R5 an ask with no record at all (RED on bd5c5fd98: the door DOCKED it at the end, «asked before this conversation's record was kept») ⇒ the door lands at the live END and SAYS it («${n1 && n1.toast}»); no card for it anywhere in the flow; the strip stands`, shifted && firstTs > 0 && !!n1 && n1.atEnd && n1.gap <= 2 && !n1.card && /Asked before this conversation's record was kept/.test(n1.toast) && n1.strip, n1);
     // R5 (c) — AN OPEN CONVERSATION THE PERSON SCROLLED: a broadcast (a new filing) never moves it; a press on a door lands
     const lc = await A.evalJs(`(() => { const r = ${VIEW}._messageList.getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()`);
     for (let i = 0; i < 4; i++) { await A.cdp('Input.dispatchMouseEvent', { type: 'mouseWheel', x: lc.x, y: lc.y, deltaX: 0, deltaY: -240 }); await sleep(120); }
@@ -1025,7 +1053,7 @@ try {
     // the For-you store's broadcast — this conversation's ask answered on another client (the chip and the dock re-drawn, no
     // new turn: a new turn folds the turn before it, chat-view's own run fold, whatever the landing does)
     const st5 = await A.evalJs(`fetch('/api/user-todos/' + encodeURIComponent(${J(ids[4])}), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'done' }) }).then((r) => r.status)`);
-    await A.waitFor(`/· 3 /.test((document.querySelector('.chat-status-foryou') || {}).textContent + ' ')`, 8000); await sleep(1200);
+    await A.waitFor(`/· 3 /.test((document.querySelector('.chat-attn-dock:not([hidden]) .cad-count') || {}).textContent + ' ')`, 8000); await sleep(1200);
     const s1 = await A.evalJs(READ(s0.id));
     check(`R5 a BROADCAST (this conversation's ask answered on another client — POST ${st5}, the chip «· 3») never moves a reader who scrolled — the record at the reader's line stays (${s0.id} at ${s0.top} → ${s1.top} px), unpinned`, st5 === 200 && !!s0.id && !s0.pinned && !s1.pinned && s1.id === s0.id && Math.abs(s0.top - s1.top) <= 1, { s0, s1 });
     await door(ids[3]);
@@ -1060,11 +1088,11 @@ try {
     const where = q.map((it) => (it ? all.findIndex((m) => m.role === 'tool' && JSON.stringify(m.content || '').includes(it.id)) : -1));
     check(`setup: three asks spread over ${total} records — their records at ${where.join(' · ')}`, q.every(Boolean) && total >= 900 && where.every((k) => k >= 0) && where[1] > 250 && where[2] > 550 && where[2] < total - 250, { total, where });
     const ids = q.map((it) => it && it.id);
-    const DOMQ = `(() => { const v = ${VIEW}, l = v._messageList; const kids = [...l.querySelectorAll(':scope > .chat-msg:not(.chat-gap-msg)')], lastKid = kids[kids.length - 1]; const cards = [...l.querySelectorAll(':scope > * > .cn-cards > .cn-card.cn-open')]; const lr = l.getBoundingClientRect(), chip = document.querySelector('.chat-status-foryou');
+    const DOMQ = `(() => { const v = ${VIEW}, l = v._messageList; const kids = [...l.querySelectorAll(':scope > .chat-msg:not(.chat-gap-msg)')], lastKid = kids[kids.length - 1]; const cards = [...l.querySelectorAll(':scope > * > .cn-cards > .cn-card.cn-open')]; const lr = l.getBoundingClientRect(), chip = document.querySelector('.chat-attn-dock:not([hidden]) .cad-count');
       return { ws: v._windowStart, we: v._windowEnd, total: v._total, pinned: v._pinned, gap: Math.round(l.scrollHeight - l.clientHeight - l.scrollTop), nDom: kids.length, chip: chip ? chip.textContent.trim() : '',
         cards: cards.map((c) => { const h = c.closest('.chat-msg'), r = c.getBoundingClientRect(); return { id: c.dataset.item, docked: c.classList.contains('cn-docked'), host: (h?.dataset.msgId || '').replace(/^.*:(m|t):/, '$1:'), hostDomIdx: kids.indexOf(h), atDomEnd: h === lastKid, dock: (c.querySelector('.cn-dock') || {}).textContent || '', shown: c.getClientRects().length > 0 && r.height > 0, inView: r.bottom > lr.top && r.top < lr.bottom }; }) }; })()`;
     const wheel = async (n, dy) => { const lc = await A.evalJs(`(() => { const r = ${VIEW}._messageList.getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) }; })()`); for (let i = 0; i < n; i++) { await A.cdp('Input.dispatchMouseEvent', { type: 'mouseWheel', x: lc.x, y: lc.y, deltaX: 0, deltaY: dy }); await sleep(120); } await sleep(2500); };
-    const atTailN = (n) => A.waitFor(`(() => { const v = ${VIEW}, c = document.querySelector('.chat-status-foryou'); return !!v && v._total >= ${total} && v._windowEnd >= v._total && !!c && new RegExp('· ${n} ').test(c.textContent + ' '); })()`, 20000);
+    const atTailN = (n) => A.waitFor(`(() => { const v = ${VIEW}, c = document.querySelector('.chat-attn-dock:not([hidden]) .cad-count'); return !!v && v._total >= ${total} && v._windowEnd >= v._total && !!c && new RegExp('· ${n} ').test(c.textContent + ' '); })()`, 20000);
     const docked = (w) => w.cards.filter((c) => c.docked);
     // #1 THE END IS THE DISPLAY ORDER'S: at the tail, then one older page loaded by the reader's own wheel, then back down
     await toConv(A, sid, [], 1280, 800, false); await atTailN(3); await sleep(1500);
@@ -1111,7 +1139,7 @@ try {
     const READ = (id) => `(() => { const v = ${VIEW}, l = v._messageList, lr = l.getBoundingClientRect(), mid = lr.top + lr.height / 2; const m = ${J(id)} ? [...l.querySelectorAll(':scope > .chat-msg')].find((x) => x.dataset.msgId === ${J(id)}) : [...l.querySelectorAll(':scope > .chat-msg')].find((x) => { const r = x.getBoundingClientRect(); return r.height > 0 && r.bottom > mid; }); return { st: Math.round(l.scrollTop), pinned: v._pinned, id: m ? m.dataset.msgId : null, top: m ? Math.round(m.getBoundingClientRect().top * 10) / 10 : null }; })()`;
     const b0 = await A.evalJs(READ(null)), d0 = await A.evalJs(DOMQ);
     const stc = await A.evalJs(`fetch('/api/user-todos/' + encodeURIComponent(${J(ids[2])}), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'done' }) }).then((r) => r.status)`);
-    await A.waitFor(`/· 2 /.test((document.querySelector('.chat-status-foryou') || {}).textContent + ' ')`, 8000); await sleep(1500);
+    await A.waitFor(`/· 2 /.test((document.querySelector('.chat-attn-dock:not([hidden]) .cad-count') || {}).textContent + ' ')`, 8000); await sleep(1500);
     const b1 = await A.evalJs(READ(b0.id)), d1 = await A.evalJs(DOMQ);
     check(`minor (RED on 9de5c902: 87 px — the misplaced dock above the reader shrank) the DOCKED ask answered on another client (POST ${stc}, the chip «${d1.chip}») moves the scrolled reader 0 px (${b0.id} at ${b0.top} → ${b1.top}); the dock went to the next newest, still at the end`, stc === 200 && !!b0.id && !b0.pinned && b1.id === b0.id && Math.round(Math.abs(b0.top - b1.top)) === 0 && docked(d1).length === 1 && docked(d1)[0].id === ids[1] && docked(d1)[0].atDomEnd, { b0, b1, d0, d1 });
     // #4 A LANDING UNFOLDS WHAT IT LANDS ON: q83 answered — its quiet record sits in its Bash card, folded by default; the
@@ -1249,7 +1277,154 @@ try {
   } catch (e) { fail++; console.log('  ✗ ⑭/⑮/⑯ threw: ' + (e?.message || e)); }
   lap('⑭ ⑮ ⑯ done');
 
-  check('the shots are written (desktop 1280 + phone 375)', ['desktop-1280-watch-request.png', 'desktop-1280-ask-chips.png', 'desktop-1280-resolved.png', 'phone-375-watch-request.png', 'phone-375-ask-chips.png', 'phone-375-resolved.png', 'phone-375-accordion.png', 'phone-375-accordion-opened.png', 'desktop-1280-accordion.png'].every((f) => fs.existsSync(path.join(SHOTS, f))));
+  // ── ⑰ THE ATTENTION DOCK (lane needs-card-tail r10 — the owner 2026-10-30 on the ONE card r1–r9 docked at the end: «你没解决
+  // 这个问题啊，只是加了一句话？如果历史对话里的内容就别停靠了呗，或者就不要停靠在聊天内容本身里了，而是体现出"这是专门停靠等我操作的
+  // 事情，不会随着 chatview 浮动"的一个 UI»). THE RULE: a thing waiting for the owner is WINDOW CHROME, never a chat row. One
+  // conversation of its own; the brief's stress shapes one after another, each read off the RENDERED page, each a shot ──
+  console.log('⑰ THE ATTENTION DOCK — a fixed strip between the transcript and the message box: 1 / 3 / 30 items, a 400-char question, six options, an answer on the phone, 320 px, a 6-line composer, a filing 5000 px up');
+  try {
+    const done = (id) => A.evalJs(`fetch('/api/user-todos/' + encodeURIComponent(${J(id)}), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'done' }) }).then((r) => r.status)`);
+    for (const it of (await api()).open) await done(it.id);
+    const sid = await newConv('dock'); await sleep(600);
+    await A.front(); // (a page in the background gets no frames: the composer's rAF autosize, the cards' pass frame)
+    /** the strip as rendered: where it stands (the list above it, the message box below), what it says, its targets */
+    const DOCK = `(() => { const v = ${VIEW}; const d = v && v._attnDock; if (!d) return null;
+      const box = (e) => { if (!e) return null; const r = e.getBoundingClientRect(); return { top: Math.round(r.top), bottom: Math.round(r.bottom), left: Math.round(r.left), right: Math.round(r.right), h: Math.round(r.height), w: Math.round(r.width) }; };
+      const vis = (e) => !!e && e.getClientRects().length > 0 && getComputedStyle(e).visibility !== 'hidden';
+      const row = d.querySelector('.cad-rows > .ut-item'), q = row && row.querySelector(':scope > .ut-body > .ut-text'), all = d.querySelector('.cad-all'), comp = d.parentElement && d.parentElement.querySelector(':scope > .chat-input-area'), cs = q ? getComputedStyle(q) : null;
+      const targets = [...d.querySelectorAll('button, [role="button"]')].filter(vis).map((b) => ({ k: (b.getAttribute('data-label') || b.textContent || '').trim().slice(0, 24), chip: b.classList.contains('ut-opt'), ...box(b) }));
+      const opts = d.querySelector('.cad-rows .ut-opts');
+      return { shown: !d.hidden && d.getClientRects().length > 0, inList: v._messageList.contains(d), count: ((d.querySelector('.cad-count') || {}).textContent || '').trim(), all: all && !all.hidden ? all.textContent : null,
+        rows: d.querySelectorAll('.cad-rows > .ut-item').length, id: row ? row.dataset.id : null, q: q ? q.textContent.slice(0, 60) : null, qPx: cs ? parseFloat(cs.fontSize) : 0, qCut: !!q && q.scrollWidth > q.clientWidth + 1, qH: q ? Math.round(q.getBoundingClientRect().height) : 0,
+        dock: box(d), list: box(v._messageList), comp: box(comp), over: d.scrollWidth - d.clientWidth, targets, optsScroll: !!opts && getComputedStyle(opts).overflowX === 'auto' && opts.scrollWidth > opts.clientWidth, chips: [...d.querySelectorAll('.ut-opt')].filter(vis).map((c) => box(c)), pinned: !!v._pinned, tag: d.__tag17 || 0 }; })()`;
+    const between = (x) => !!x && x.shown && !x.inList && !!x.list && !!x.comp && x.dock.top >= x.list.bottom - 1 && x.dock.bottom <= x.comp.top + 1;
+    const dockIs = (P, id, n, ms = 10000) => P.waitFor(`(() => { const x = ${DOCK}; return !!x && x.shown && x.id === ${J(id)} && new RegExp(${J(n)}).test(x.count); })()`, ms);
+    const VERBS4 = (x) => ['Reply', 'Open', 'Mark done', 'Dismiss'].every((k) => x.targets.some((y) => y.k === k));
+    // (1) ONE item ⇒ one row, no door
+    sayTo(sid, 'one ask do:q201');
+    const [a1] = await byText(/^Stress question 201:/, 1);
+    await toConv(A, sid, a1 ? [a1.id] : [], 1280, 800, false);
+    await dockIs(A, a1 && a1.id, 'a question'); await sleep(400);
+    const d1 = await A.evalJs(DOCK);
+    await A.shot('desktop-1280-dock-one.png');
+    check(`r10 (RED on bd5c5fd98: no strip — the count was a status-bar chip) ONE item ⇒ the strip stands BETWEEN the transcript and the message box (dock ${d1 && d1.dock.top}–${d1 && d1.dock.bottom}, list ends ${d1 && d1.list.bottom}, box starts ${d1 && d1.comp && d1.comp.top}; never inside the list): «${d1 && d1.count}» · «${d1 && d1.q}» on ONE line (${d1 && d1.qH} px), its verbs (${d1 && d1.targets.map((x) => x.k).join(' / ')}), no «View all»`,
+      between(d1) && d1.rows === 1 && d1.id === a1.id && d1.all === null && /waiting for you · a question/.test(d1.count) && d1.qH <= 30 && VERBS4(d1), d1);
+    const s1 = await A.evalJs(`document.querySelectorAll('.chat-status-foryou').length`);
+    check('r10 …and the status bar carries no «waiting for you» chip any more (ONE place says it: the strip)', s1 === 0, s1);
+    // (2) THREE ⇒ the count, the newest, the door
+    sayTo(sid, 'two more do:q202 do:q203');
+    const [, a2, a3] = await byText(/^Stress question 20[123]:/, 3);
+    await dockIs(A, a3 && a3.id, '3 questions'); await sleep(400);
+    await A.evalJs(`(() => { const d = ${VIEW}._attnDock; d.__tag17 = 3; return 1; })()`);
+    const d3 = await A.evalJs(DOCK);
+    await A.shot('desktop-1280-dock-three.png');
+    check(`r10 THREE ⇒ the count «${d3 && d3.count}», the NEWEST (${d3 && d3.q}), «${d3 && d3.all}» — one row, never a «show more» in the strip; the same height as one (${d1 && d1.dock.h} → ${d3 && d3.dock.h} px)`,
+      between(d3) && d3.rows === 1 && d3.id === a3.id && /^View all · 3$/.test(d3.all || '') && Math.abs(d3.dock.h - d1.dock.h) <= 2, d3);
+    // «View all» ⇒ the For-you window scoped to THIS conversation
+    await A.evalJs(`(() => { for (const w of [...app.wm.windows.values()]) if (w.type === 'inbox') app.wm.closeWindow(w.id); return 1; })()`);
+    await A.press('.chat-attn-dock .cad-all', { touch: false });
+    const iw = await A.waitFor(`[...app.wm.windows.values()].some((w) => w.type === 'inbox' && (w._openSpec || {}).sessionKey === ${J(a1 && a1.sessionKey)})`, 6000);
+    await A.shot('desktop-1280-dock-view-all.png');
+    check('r10 «View all» opens the For-you window scoped to THIS conversation (the cross-conversation list stays the tray\'s)', iw === true, iw);
+    await A.evalJs(`(() => { for (const w of [...app.wm.windows.values()]) if (w.type === 'inbox') app.wm.closeWindow(w.id); return 1; })()`);
+    await openOnly(A, sid); await sleep(600);
+    // a tap on the question lands the ORIGINAL card (THE ONE LANDING: a navigation the owner asked for)
+    await A.evalJs(`(() => { window.__d17 = []; new MutationObserver((ms) => { for (const m of ms) if (m.target.classList?.contains('chat-ask-flash') && m.target.dataset?.item) window.__d17.push(m.target.dataset.item); }).observe(document.body, { subtree: true, attributes: true, attributeFilter: ['class'] }); return 1; })()`);
+    await A.press('.chat-attn-dock .cad-rows .ut-item .ut-text', { touch: false }); await sleep(900);
+    const fl = await A.evalJs('window.__d17 || []'), c3 = await A.evalJs(CARD(a3 && a3.id));
+    check(`r10 a tap on the strip's question lands the ORIGINAL card in the flow — its card open in its tool card, in view, flashed (${J(fl)})`, fl.includes(a3.id) && !!c3 && c3.open && c3.rect.top >= c3.list.top - 1 && c3.rect.bottom <= c3.list.bottom + 1, { fl, c3 });
+    // ONE PRESS ANSWERS, the strip updates IN PLACE (the same element, the next newest)
+    await A.press('.chat-attn-dock .cad-rows .ut-item .ut-done', { touch: false });
+    await dockIs(A, a2 && a2.id, '2 questions'); await sleep(300);
+    const d2 = await A.evalJs(DOCK), gone3 = !(await api()).open.some((i) => i.id === a3.id);
+    check(`r10 ONE PRESS on the strip's ✓ answers it (resolved on the hub: ${gone3}) and the strip updates IN PLACE — the same element (tag ${d2 && d2.tag}), the next newest «${d2 && d2.q}», «${d2 && d2.count}»`, gone3 && !!d2 && d2.tag === 3 && d2.id === a2.id, d2);
+    // (3) ANSWERED ON THE PHONE while the desktop shows it — B at 390×844 touch, the same conversation
+    await B.front(); await toConv(B, sid, [], 390, 844, true);
+    await dockIs(B, a2 && a2.id, '2 questions'); await sleep(500);
+    const p2 = await B.evalJs(DOCK);
+    await B.shot('phone-390-dock-two.png');
+    const small = p2 ? p2.targets.filter((x) => x.h < 44 || x.w < 44) : [];
+    check(`r10 THE PHONE (390×844 touch): the same strip above the message box — its question ${p2 && p2.qPx} px (≥ 16), every target ≥ 44 × 44 with its word (${p2 && p2.targets.map((x) => x.k + ' ' + x.w + '×' + x.h).join(', ')})`,
+      between(p2) && p2.qPx >= 16 && small.length === 0 && VERBS4(p2), { p2, small });
+    await A.evalJs(`(() => { window.__d17s = []; const f = () => { const d = ${VIEW}._attnDock, r = d.querySelector('.cad-rows > .ut-item'); window.__d17s.push((r ? r.dataset.id : '-') + '/' + ((d.querySelector('.cad-count') || {}).textContent || '')); if (window.__d17s.length < 400) setTimeout(f, 10); }; f(); return 1; })()`);
+    await B.press('.chat-attn-dock .cad-rows .ut-item .ut-done', { touch: true });
+    await A.front(); const moved = await dockIs(A, a1 && a1.id, 'a question');
+    const seen = [...new Set(await A.evalJs('window.__d17s || []'))];
+    check(`r10 the item answered ON THE PHONE leaves the desktop's strip live — the next one, the count in the same pass (${seen.join(' → ')})`, moved === true && seen.length === 2 && seen[0].startsWith(a2.id + '/') && seen[1].startsWith(a1.id + '/'), seen);
+    // (4) MANY ⇒ still ONE row, the same height. THE STORE'S FLOOD GUARD caps a conversation's OWN open items at 20
+    //     (src/user-todos.js MAX_OPEN_PER_SESSION — an agent looping on add); 29 more asked ⇒ 19 taken, 10 refused by the
+    //     store (said to the agent, by name). Thirty in one strip needs items filed ABOUT it under another key — PURE ④'s
+    //     dockOf leg holds 30; here the most one conversation can ask of its own
+    sayTo(sid, 'twenty-nine more do:par ' + Array.from({ length: 29 }, (_, k) => 'do:q' + (204 + k)).join(' '));
+    const t20 = await byText(/^Stress question 2(0[1-9]|[123]\d):/, 20, 120000);
+    await logHas(/already has 20 open items/, 60000);
+    const newest20 = t20.reduce((x, i) => (!x || i.createdAt >= x.createdAt ? i : x), null);
+    await dockIs(A, newest20 && newest20.id, '20 questions', 20000); await sleep(600);
+    const d30 = await A.evalJs(DOCK);
+    await A.shot('desktop-1280-dock-twenty.png');
+    const refused = (cliLog().match(/already has 20 open items/g) || []).length;
+    check(`r10 MANY (29 more asked: the store took ${t20.length - 1}, refused ${refused} — its flood guard, 20 open per conversation) ⇒ «${d30 && d30.count}» + the newest + «${d30 && d30.all}» — still ONE row, the same height (${d30 && d30.dock.h} px)`, t20.length === 20 && refused === 10 && between(d30) && d30.rows === 1 && d30.id === newest20.id && /^View all · 20$/.test(d30.all || '') && Math.abs(d30.dock.h - d1.dock.h) <= 2, { n: t20.length, refused, d30 });
+    await B.front(); await toConv(B, sid, [], 390, 844, true); await dockIs(B, newest20 && newest20.id, '20 questions'); await sleep(400);
+    await B.shot('phone-390-dock-twenty.png'); await A.front();
+    for (const it of t20.slice(0, 5)) await done(it.id); // (room for the shapes below: 15 open)
+    await dockIs(A, newest20 && newest20.id, '15 questions');
+    // (5) A 400-CHARACTER QUESTION ⇒ one line, cut — the strip never grows with the words
+    sayTo(sid, 'a long one do:big');
+    const [big] = await byText(/^Before we cut the release/, 1, 60000);
+    await dockIs(A, big && big.id, '16 questions'); await sleep(400);
+    const dB = await A.evalJs(DOCK);
+    await A.shot('desktop-1280-dock-400-chars.png');
+    check(`r10 a ${big ? big.text.length : 0}-character question ⇒ ONE line in the strip, cut (${dB && dB.qCut}), the strip's height unchanged (${dB && dB.dock.h} px)`, !!big && big.text.length >= 400 && between(dB) && dB.qCut && dB.qH <= 30 && Math.abs(dB.dock.h - d1.dock.h) <= 2, dB);
+    // (6) SIX OPTIONS ⇒ the chips on ONE line beside the question's row (sideways if they must), never a wall
+    sayTo(sid, 'six choices do:six');
+    const [six] = await byText(/^Which region do we open next/, 1, 60000);
+    await dockIs(A, six && six.id, '17 questions'); await sleep(400);
+    const d6 = await A.evalJs(DOCK);
+    await A.shot('desktop-1280-dock-six-options.png');
+    const oneLine = (x) => !!x && x.chips.length === 6 && x.chips.every((c) => Math.abs(c.top - x.chips[0].top) <= 1);
+    check(`r10 SIX OPTIONS ⇒ six chips on ONE line (tops ${d6 && d6.chips.map((c) => c.top).join(',')}), the strip two lines at most (${d6 && d6.dock.h} px)`, between(d6) && oneLine(d6) && d6.dock.h <= 2 * d1.dock.h + 8, d6);
+    await B.front(); await toConv(B, sid, [], 390, 844, true); await dockIs(B, six && six.id, '17 questions'); await sleep(400);
+    const p6 = await B.evalJs(DOCK);
+    await B.shot('phone-390-dock-six-options.png'); await A.front(); await sleep(300);
+    check(`r10 …on the phone the six chips stay ONE line (sideways, ${p6 && p6.chips.length} chips, ${p6 && p6.chips.filter((c) => c.h >= 44).length} at ≥ 44 px), no giant chips; the strip ${p6 && p6.dock.h} px`, between(p6) && oneLine(p6) && p6.chips.every((c) => c.h >= 44 && c.h <= 52) && p6.dock.h <= 260, p6);
+    // (7) A WINDOW 320 px WIDE ⇒ the row under the head, nothing past the strip's edge
+    await A.evalJs(`(() => { const w = ${CHAT(sid)}; if (!w) return false; if (w.isMaximized) app.wm.toggleMaximize(w.id); app.wm.resizeWindowTo(w.id, { w: 320, h: 700 }); return true; })()`); await sleep(900);
+    const dN = await A.evalJs(DOCK);
+    await A.shot('desktop-320-dock.png');
+    const outside = dN ? dN.targets.filter((x) => !x.chip && (x.left < dN.dock.left - 1 || x.right > dN.dock.right + 1)) : [];
+    check(`r10 a window 320 px wide: the strip fits (overflow ${dN && dN.over} px, ${outside.length} verbs past its edge — the six chips ride ONE line that scrolls sideways: ${dN && dN.optsScroll}), still between the transcript and the message box`, between(dN) && dN.over <= 1 && outside.length === 0 && dN.optsScroll && dN.dock.w <= 322, { dN, outside });
+    await A.evalJs(`(() => { const w = ${CHAT(sid)}; if (w && !w.isMaximized) app.wm.toggleMaximize(w.id); return 1; })()`); await sleep(700);
+    // (8) THE COMPOSER GROWN TO 6 LINES ⇒ the strip rides above it, whole
+    await A.evalJs(`(() => { const ta = document.querySelector(${J('.chat-input-area textarea')}); ta.focus(); ta.value = 'one\\ntwo\\nthree\\nfour\\nfive\\nsix'; ta.dispatchEvent(new Event('input', { bubbles: true })); return 1; })()`); await sleep(700);
+    const dC = await A.evalJs(DOCK);
+    await A.shot('desktop-1280-dock-composer-6-lines.png');
+    check(`r10 the message box grown to 6 lines (${dC && dC.comp && dC.comp.h} px): the strip stands above it, whole (${dC && dC.dock.h} px)`, between(dC) && dC.comp.h > 120 && Math.abs(dC.dock.h - d6.dock.h) <= 2, dC);
+    await A.evalJs(`(() => { const ta = document.querySelector(${J('.chat-input-area textarea')}); ta.value = ''; ta.dispatchEvent(new Event('input', { bubbles: true })); ta.blur(); return 1; })()`); await sleep(500);
+    // (9) A FILING WHILE THE OWNER IS 5000 px UP ⇒ the strip shows it, the flow is untouched, no scroll jump; the strip never
+    //     moves when the transcript scrolls
+    sayTo(sid, 'a long history do:fill150t');
+    await A.waitFor(`(() => { const v = ${VIEW}; return !!v && v._total >= 340 && v._pinned; })()`, 30000); await sleep(1500);
+    const lc = await A.evalJs(`(() => { const r = ${VIEW}._messageList.getBoundingClientRect(); return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2), st: Math.round(${VIEW}._messageList.scrollTop) }; })()`);
+    const dS0 = await A.evalJs(DOCK);
+    for (let i = 0; i < 90; i++) { await A.cdp('Input.dispatchMouseEvent', { type: 'mouseWheel', x: lc.x, y: lc.y, deltaX: 0, deltaY: -400 }); await sleep(90); if (i > 10 && (await A.evalJs(`(() => { const l = ${VIEW}._messageList; return l.scrollHeight - l.scrollTop - l.clientHeight; })()`)) >= 5200) break; }
+    await sleep(2500);
+    const READ17 = (id) => `(() => { const v = ${VIEW}, l = v._messageList, lr = l.getBoundingClientRect(); const els = [...l.querySelectorAll(':scope > .chat-msg')].filter((x) => x.getClientRects().length); const m = ${J(id)} ? els.find((x) => x.dataset.msgId === ${J(id)}) : els.find((x) => x.getBoundingClientRect().bottom > lr.top + 40); if (!m) return null; const seen = [...l.querySelectorAll('.cn-card')].filter((c) => { const r = c.getBoundingClientRect(); return r.height > 0 && r.bottom > lr.top && r.top < lr.bottom; }).length; return { id: m.dataset.msgId, top: Math.round(m.getBoundingClientRect().top), st: Math.round(l.scrollTop), fromBottom: Math.round(l.scrollHeight - l.scrollTop - l.clientHeight), pinned: !!v._pinned, cards: seen }; })()`;
+    const r0 = await A.evalJs(READ17(null)), dS1 = await A.evalJs(DOCK);
+    check(`r10 THE STRIP NEVER MOVES WHEN THE TRANSCRIPT SCROLLS — the reader ${r0 && r0.fromBottom} px above the live end, the strip at ${dS0 && dS0.dock.top}–${dS0 && dS0.dock.bottom} → ${dS1 && dS1.dock.top}–${dS1 && dS1.dock.bottom}`, !!r0 && r0.fromBottom >= 5000 && !r0.pinned && !!dS1 && dS1.dock.top === dS0.dock.top && dS1.dock.bottom === dS0.dock.bottom, { lc, r0, dS0: dS0 && dS0.dock, dS1: dS1 && dS1.dock });
+    sayTo(sid, 'one more do:q240');
+    const [a240] = await byText(/^Stress question 240:/, 1);
+    await dockIs(A, a240 && a240.id, '18 questions'); await sleep(1500);
+    const r1 = await A.evalJs(READ17(r0 && r0.id)), dS2 = await A.evalJs(DOCK);
+    await A.shot('desktop-1280-dock-5000-up.png');
+    check(`r10 a needs card asked while the owner is ${r0 && r0.fromBottom} px up: the strip shows it («${dS2 && dS2.count}», ${dS2 && dS2.q}); the flow untouched — the record at the reader's line stays (${r0 && r0.id} at ${r0 && r0.top} → ${r1 && r1.top} px), unpinned, the cards on screen unchanged (${r0 && r0.cards} → ${r1 && r1.cards})`,
+      !!a240 && !!r1 && !!r0 && r1.id === r0.id && Math.abs(r1.top - r0.top) <= 2 && !r1.pinned && r1.cards === r0.cards && dS2.id === a240.id && dS2.dock.bottom === dS0.dock.bottom, { r0, r1 });
+    for (const it of (await api()).open) await done(it.id);
+    const dE = await A.waitFor(`(() => { const x = ${DOCK}; return !!x && !x.shown; })()`, 8000);
+    check('r10 nothing waiting ⇒ the strip is ABSENT (no empty chrome)', dE === true, dE);
+  } catch (e) { fail++; console.log('  ✗ ⑰ threw: ' + (e?.message || e)); }
+  lap('⑰ done');
+
+  check('the shots are written (desktop 1280 + phone 375)', ['desktop-1280-watch-request.png', 'desktop-1280-ask-chips.png', 'desktop-1280-resolved.png', 'phone-375-watch-request.png', 'phone-375-ask-chips.png', 'phone-375-resolved.png', 'phone-375-accordion.png', 'phone-375-accordion-opened.png', 'desktop-1280-accordion.png', 'desktop-1280-tail.png', 'phone-390-tail.png', 'desktop-1280-dock-one.png', 'desktop-1280-dock-three.png', 'desktop-1280-dock-twenty.png', 'desktop-1280-dock-400-chars.png', 'desktop-1280-dock-six-options.png', 'desktop-320-dock.png', 'desktop-1280-dock-composer-6-lines.png', 'desktop-1280-dock-5000-up.png', 'phone-390-dock-two.png', 'phone-390-dock-twenty.png', 'phone-390-dock-six-options.png'].every((f) => fs.existsSync(path.join(SHOTS, f)))); // (+ lane needs-card-tail r10: the strip's shots — the UI verdict is visual)
   check('no page error', pageErrors.length === 0, pageErrors.slice(0, 5));
 } catch (e) { fail++; console.log('  ✗ threw: ' + (e?.stack || e)); }
 

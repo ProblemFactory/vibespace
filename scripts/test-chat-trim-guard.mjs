@@ -313,7 +313,7 @@ ok('A PRESS THAT KEEPS THE TAIL STAMPS ONLY (lane needs-card-tail r8; r9: every 
   && /this\._noteTailPress\('scrollBtn'\);\n\s+this\._resumeSettleUntil = 0;\n\s+this\._setPinned\(true, 'scrollBtn'\);/.test(cv)
   // r9: …and the doors judged where they land — the run bar's landing at the live tail (chat-view.js), a needs card opened
   // and a needs card landing (chat-needs-card.js: the open's own landing decides the rest; the landing's roads stamp theirs)
-  && /if \(atBottom\) this\._noteTailPress\('runBar'\); else this\._noteUserNav\('runBar'\);\n\s+this\._setPinned\(atBottom, 'runLand'\);/.test(cv)
+  && /if \(atBottom\) \{ this\._noteTailPress\('runBar'\); this\._resumeSettleUntil = 0; \} else this\._noteUserNav\('runBar'\);\n\s+this\._setPinned\(atBottom, 'runLand'\);/.test(cv)
   && (cv.match(/this\._noteTailPress\(/g) || []).length === 3
   && (() => { const nc = fs.readFileSync(path.join(REPO, 'src/lib/chat-needs-card.js'), 'utf8');
     return /view\._noteTailPress\?\.\('needsOpen'\);\n\s+view\._cancelForcedScroll\?\.\('needsOpen'\);/.test(nc) && /if \(!atTail\) \{ view\._noteUserNav\?\.\('needsOpen'\); if \(view\._pinned\) view\._setPinned\?\.\(false, 'needsOpen'\); \}/.test(nc)
@@ -326,9 +326,28 @@ ok('every off-list navigation surface stamps: minimap (index + time), search rev
   && /_noteUserNav\('minimap-time'\); return this\._jumpToFileTime/.test(cv)
   && /onNav: \(via = 'search-reveal'\) => this\._noteUserNav\(via\)/.test(cv) // (r7: the search's press names itself — 'search')
   && /this\._noteTailPress\('send'\);\n\s+this\._setPinned\(true, 'send'\);/.test(cv)
-  && /_landOnHeader\(run\) \{[\s\S]{0,1600}if \(atBottom\) this\._noteTailPress\('runBar'\); else this\._noteUserNav\('runBar'\);\n\s+this\._setPinned\(atBottom, 'runLand'\);/.test(cv) // (r9: judged where it lands)
+  && /_landOnHeader\(run\) \{[\s\S]{0,2000}if \(atBottom\) \{ this\._noteTailPress\('runBar'\); this\._resumeSettleUntil = 0; \} else this\._noteUserNav\('runBar'\);\n\s+this\._setPinned\(atBottom, 'runLand'\);/.test(cv) // (r9: judged where it lands; r10: a keeps-door outside the list ends the settle WINDOW)
   && /async jumpToIndex\(targetIdx(?:, \{ land = null(?:, stale = null)? \} = \{\})?\) \{\s*this\._noteUserNav\('jumpToIndex'\);/.test(cv) // (lane needs-card-tail: its optional `land` — the needs cards' landing — and r2's `stale` never move the stamp off the first line)
   && /async jumpToBottom\(\{ user = true(?:, land = null, stale = null(?:, send = false)?)? \} = \{\}\) \{\s*if \(user\) this\._noteUserNav\('jumpToBottom'\);/.test(cv)); // (lane needs-card-tail r3: the landing's `land` / `stale` never move the stamp off the first line; r5: nor the send's `send`)
+// r10 (the r9 acceptance, minor): the run bar's chain cancel runs BEFORE the landing's programmatic mute — a running chain's
+// cancel resets _programmaticScroll, so a cancel deleted or moved after the mute leaves the landing's own scrollTop write to
+// be decided as a reader's scroll (B-9702's class). The source's order, and the REAL _landOnHeader pressed off the tail while
+// a bottom-follow chain of ours runs: the mute held after the press
+{
+  const lh = cv.slice(cv.indexOf('  _landOnHeader(run) {'), cv.indexOf('  _collapseRunTo(run) {'));
+  const order = /\n    this\._cancelForcedScroll\('runBar'\);\n    this\._programmaticScroll = true;\n/.test(lh) && (lh.match(/_cancelForcedScroll\(/g) || []).length === 1;
+  const raf0 = globalThis.requestAnimationFrame; if (typeof raf0 !== 'function') globalThis.requestAnimationFrame = (fn) => setTimeout(fn, 0);
+  let held = null;
+  try {
+    const v = Object.assign(Object.create(ChatView.prototype), { _messageList: { scrollTop: 0, scrollHeight: 5320, clientHeight: 702 }, _pinned: true, _teleported: false, _windowEnd: 5029, _total: 5029, _newMsgCount: 0,
+      _scrollBtn: { classList: { add() {}, remove() {} } }, _scheduleRunBar() {}, _traceExpect() {}, _clearWheelCarry() {}, _trace() {},
+      _fsbActive: true, _fsbEpoch: 7, _programmaticScroll: true });   // a bottom-follow chain of ours mid-flight (a pinned, streaming view)
+    v._landOnHeader({ header: { isConnected: true, offsetTop: 1200 } }); // a header well above the live tail: the landing leaves it
+    held = { mute: v._programmaticScroll, chain: v._fsbActive, pinned: v._pinned }; clearTimeout(v._jumpGuardTimer);
+  } catch (e) { held = { threw: String(e && e.message || e) }; } finally { if (typeof raf0 !== 'function') delete globalThis.requestAnimationFrame; }
+  ok('r10: THE RUN BAR\'S CHAIN CANCEL PRECEDES ITS MUTE — _landOnHeader cancels our bottom-follow chain (_cancelForcedScroll(\'runBar\'), once) on the line before `_programmaticScroll = true`; pressed off the tail while a chain runs, the mute HOLDS after the press (a mutant that deletes the cancel or moves it after the mute: LOST)',
+    order && held && held.mute === true && held.chain === false && held.pinned === false, JSON.stringify({ order, held }));
+}
 {
   const sch = fs.readFileSync(path.join(REPO, 'src/lib/chat-search.js'), 'utf8');
   ok('…and ChatSearch actually calls it on a REVEAL (the reveal scrolls the list from outside its own listeners)',
@@ -524,13 +543,13 @@ if (typeof globalThis.requestAnimationFrame !== 'function') globalThis.requestAn
     await nap(5);
     const ENTRY = /\.(_seekTeleport|jumpToIndex|_jumpToIndex|_jumpToTime|jumpToBottom|_jumpToFileTime|jumpToFileMatch|_jumpToFileMatch|_jumpToSearchResult|jumpToPendingAsk|_landOnHeader|land|landOnItem|jumpToNewest|openCard)\??\.?\(/g;
     const NAMED = {
-      'chat-view.js': { jumpToPendingAsk: [2, 'the waiting chip; the stream label\'s «waiting»'], land: [2, 'the chip\'s needs; landOnItem — every For-you door'], jumpToNewest: [1, 'the chip'],
+      'chat-view.js': { jumpToPendingAsk: [2, 'the waiting chip; the stream label\'s «waiting»'], land: [1, 'landOnItem — every For-you door'],
         jumpToIndex: [4, 'the minimap; the search\'s paged-in hit; its Retry; jumpToPendingAsk\'s paged-in ask'], _jumpToFileTime: [1, 'the minimap (a time)'],
         jumpToBottom: [5, '↓ on a slab; ↓ paged out; a send paged out; the resume re-tail (nobody\'s press: user false); its Retry'], jumpToFileMatch: [1, 'the search\'s full-file road'], _landOnHeader: [2, 'the run bar: its click, its top'] },
       'chat-view-seek.js': { _seekTeleport: [3, 'jumpToFileMatch\'s road; the «Couldn\'t jump there» Retry; _jumpToFileTime\'s road'] },
       'chat-search.js': { _jumpToSearchResult: [4, 'the typed query; the stream\'s first hit; ↑ / ↓ between hits; the seek'], _jumpToFileMatch: [1, 'its full-file road'], _jumpToIndex: [1, 'its paged-in road'] },
       'chat-minimap.js': { _jumpToIndex: [3, 'its click / drag — the minimap\'s index wiring'], _jumpToTime: [3, 'its click / drag — the minimap\'s time wiring'] },
-      'chat-needs-card.js': { openCard: [1, 'a card\'s click / keys'], land: [1, 'jumpToNewest'], jumpToBottom: [3, 'the landing\'s tail road; its put-back'], jumpToIndex: [2, 'the landing\'s index road; its put-back'] },
+      'chat-needs-card.js': { openCard: [1, 'a card\'s click / keys'], land: [1, 'the attention dock\'s question — its click / keys (lane needs-card-tail r10; the chip\'s jumpToNewest and onJumpToNeed are gone)'], jumpToBottom: [3, 'the landing\'s tail road; its put-back'], jumpToIndex: [2, 'the landing\'s index road; its put-back'] },
       'user-todos-actions.js': { landOnItem: [1, 'every For-you door'], jumpToPendingAsk: [1, 'a For-you ask that waits'] },
     };
     const unnamed = [], LIB = path.join(REPO, 'src/lib');
@@ -626,6 +645,7 @@ if (typeof globalThis.requestAnimationFrame !== 'function') globalThis.requestAn
       leg({ press: 'down', pressAt: Math.round(K.settle / 4) + 50, unpinAt: Math.round(K.settle / 4) }), // the ↓ on a window the re-measure unpinned
       leg({ press: 'down', at: Math.round(K.settle / 4) + 150, pinned: false }), // the ↓ in a window that had no repair
       leg({ press: 'open' }), leg({ press: 'bar' }),                            // r9: a needs card opened, a run-bar landing — at the live tail
+      leg({ press: 'bar', at: Math.round(K.settle / 4) + 600, pinned: false }), // r10: the run bar in a window that had no repair (the ↓'s downB) — displaced past the landing's 400 ms mute, inside the settle window
     ]).then((legs) => Object.assign(legs, { K }));
   })();
   const snap = mkView(); snap.setSuspended(true);
@@ -767,7 +787,7 @@ if (typeof globalThis.requestAnimationFrame !== 'function') globalThis.requestAn
   const R8 = await r8Legs;
   if (R8.missing) ok('r8: the REAL scroll listener, onSend and ↓ are read out of chat-view.js', false, JSON.stringify(R8.missing));
   else {
-    const [ctl, sA, sB, sG1, sG2, sRung, downA, downB, open, bar] = R8, { K } = R8, [r1, r2] = K.rungs;
+    const [ctl, sA, sB, sG1, sG2, sRung, downA, downB, open, bar, barB] = R8, { K } = R8, [r1, r2] = K.rungs;
     // THE ORACLE IS THE STATE (r9): the pin held and the view at the bottom 50 ms after the displacement (before any later rung
     // could repair it) and at the end, and the setter's own unpin never written — `unpinSkipResume` is evidence (printed),
     // never the pass condition: a rung that re-asserts the bottom first leaves the handler nothing to trace
@@ -788,6 +808,8 @@ if (typeof globalThis.requestAnimationFrame !== 'function') globalThis.requestAn
       !!downB.afterPress && downB.afterPress.stamped && downB.pinned === false && downB.traces.includes('unpin/scrolledAway'), JSON.stringify(downB));
     ok(`RED-able (r9 — 215604e74 and every tree before: scrolledAway, 3637 px up): A NEEDS CARD OPENED and A RUN-BAR LANDING at the live tail ${open.pressAt} ms after the window is shown again keep the tail — stamped, the repair left armed (the REAL openCard and _landOnHeader judge it where they land) — so the displacement at +${open.at} ms keeps the pin`,
       [open, bar].every((r) => armed(r) && held(r)), JSON.stringify([open, bar]));
+    ok(`RED-able (r10 — the r9 acceptance's MAJOR: bd5c5fd98 left the settle WINDOW open at the bar, pinned 3637 px up with the ↓ hidden): THE RUN BAR AT THE TAIL ends the settle WINDOW as the ↓ does (a keeps-door outside the list — a click on the list ends it through _noteUserInput) — the repair kept (pinned window: the displacement at +${bar.at} ms holds), and behind a bar landing in a window that had NO repair the re-measure's displacement at +${barB.at} ms unpins honestly (scrolledAway, the ↓ back)`,
+      bar.afterPress.settle === false && !!barB.afterPress && barB.afterPress.stamped && barB.afterPress.settle === false && barB.pinned === false && barB.traces.includes('unpin/scrolledAway'), JSON.stringify([bar.afterPress, barB]));
   }
 }
 

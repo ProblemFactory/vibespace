@@ -8,11 +8,15 @@
 //   · WHERE — inside the record that filed it (placementOf: the tool card whose result names it, else the producer's CLI
 //     call just before it, else the record at the filing, else the end of the last turn), like S1's box inside its Agent
 //     card: it trims, pages and folds WITH that record (a run never folds a card that waits — chat-view.js's fold rule);
-//   · THE TAIL (lane needs-card-tail, the owner 2026-10-28 on 2.369.360: «这个应该同时堆叠在页面最下吗？» — six asks filed
-//     days ago stood stacked under the newest message): a card whose record is NOT on screen is not drawn at the end — at
-//     most ONE docks there (PURE tailPlan: the person's pick, else the NEWEST of them; the next newest takes the dock when
-//     it is answered; none in a window that ends mid-history) and says so (its dock line: where it was asked, how many
-//     wait, where — the chip); every other one waits in the chip;
+//   · THE FLOW IS HISTORY (lane needs-card-tail, the owner 2026-10-28 on 2.369.360: «这个应该同时堆叠在页面最下吗？» — six
+//     asks filed days ago stood stacked under the newest message; r10, 2026-10-30, on the ONE docked card r1–r9 left: «如果
+//     历史对话里的内容就别停靠了呗，或者就不要停靠在聊天内容本身里了，而是体现出"这是专门停靠等我操作的事情，不会随着 chatview
+//     浮动"的一个 UI»): a card stands at the record that filed it and scrolls with it like any message; one whose record is
+//     NOT on screen is drawn NOWHERE in the flow (PURE flowPlan) — nothing is re-docked into the transcript;
+//   · THE ATTENTION DOCK (r10 — THE RULE: a thing waiting for the owner is WINDOW CHROME, never a chat row): the window's
+//     fixed strip between the transcript and the message box (chat-view.js `_attnDock`, outside the virtual-scroll list —
+//     it never moves when the transcript scrolls) — «waiting for you · N», the NEWEST one's row with its verbs, «View all»
+//     when several wait (the For-you window scoped to this conversation); a tap on its question lands the original card;
 //   · WHAT — THE row (src/lib/user-todos-row.js renderRow / patchRow through the panel's app.foryouRows — the mini inbox's
 //     context): the row's words, its detail fold, its options as chips, its Reply / Allow / Deny / Mark done / Dismiss —
 //     and the SAME verbs and routes (the panel's rowClick({mini: true}), wired per card) — never a second implementation;
@@ -20,14 +24,11 @@
 //     anywhere (the tray, a phone, another page) is PATCHED in place — keyed by the item id, never the transcript
 //     re-rendered — and stays a quiet one-line record («approved · 2 min ago», settledWords) while the snapshot's resolved
 //     tail holds it;
-//   · THE CHIP — the status bar's «waiting for you · N» (chipWords) — THE INDEX (lane needs-card-tail): it counts and
-//     lists EVERY open ask of the conversation, newest first (the question · its age); one ⇒ its click lands it, several ⇒
-//     its click lists them and choosing one lands it (THE ONE LANDING, `land` — also every For-you door to this
-//     conversation, user-todos-actions.js jump: its card where it stands, else the history read upward to its record and
-//     the window loaded there, else the dock at the end saying it has none) whole, flashed (S1's attention flash); it
-//     stands after a reload (the store is fetched on boot). ONE PASS (acceptance round 2, P3): the chip's list and the cards
-//     come from the same pass, so they change in the same frame (a filing ⇒ N+1 and its card, an answer ⇒ N and the dock
-//     moved);
+//   · THE ONE LANDING (`land` — the dock's tap and every For-you door to this conversation, user-todos-actions.js jump):
+//     its card where it stands, else the history read upward to its record and the window loaded there, else said (no
+//     record: asked before the conversation's record was kept) — whole, flashed (S1's attention flash). The dock stands
+//     after a reload (the store is fetched on boot). ONE PASS (acceptance round 2, P3): the dock and the cards come from
+//     the same pass, so they change in the same frame (a filing ⇒ N+1 and its card, an answer ⇒ N and the dock's newest);
 //   · THE ACCORDION (acceptance round 2, P2 — the owner's accordion law in the chat): ONE card is open — the NEWEST, or the
 //     one the person opened — and every other waiting card of the conversation is a folded one-line row (its question +
 //     « · age»; on a touch screen the sheet's 44 px folded row), the whole row the tap that opens it in place and folds the
@@ -63,7 +64,8 @@ import { pressVerdict } from './press-arm.js'; // round 4 (#1): what an open mov
 import { UI_ICONS } from './icons.js';
 import { inboxModel } from './user-todos-actions.js';
 import { agoText, boxInUse, endCodeOf } from './user-todos-row.js';
-import { needsOf, recordsOf, placementOf, tailPlan, drawnAt, filingIndex, chipWords, settledWords, KIND_WORDS, decidedStamp, decisionCard, VIEWER_ROLE } from '../foryou-actions.js'; // PURE: THE For-you action registry — which items, where, the words
+import { enterSubmits, imeOwnsKey } from './chat-enter-keys.js'; // the house Enter guard (an IME's own Enter answers nothing — test-enter-census)
+import { needsOf, recordsOf, placementOf, flowPlan, drawnAt, filingIndex, dockOf, settledWords, KIND_WORDS, decidedStamp, decisionCard, VIEWER_ROLE } from '../foryou-actions.js'; // PURE: THE For-you action registry — which items, where, the words
 
 /** A chat record as the PURE placement reads it: {id, ts, role, tool, cmd (a Bash call's command), out (its result)}. */
 export function leanRecord(m) {
@@ -107,8 +109,7 @@ export class NeedsCards {
     this._openIds = '';
     this._seen = new Set(); // the open ids the last pass saw — an id not in it is a FILING (it takes the open slot)
     this._slot = null;      // THE ACCORDION's open slot: the id of the one open card (a resolved id ⇒ every card folded)
-    this._dockPick = null;  // THE TAIL's dock when the person landed an ask with no record there (else the newest loose one)
-    this._dockNoRecord = false; // …and that landing's read reached the conversation's first record: it has none (judged per landing, r2)
+    this._dockItem = null;  // THE ATTENTION DOCK's row: the copy it last drew (r10 — a row kept for its box after the item left the snapshot)
     this._landGen = 0;      // THE DISPLACEMENT LAW (r2): the newest landing's generation — an older one never moves the reader
     this._placeSig = '';    // what the last pass placed where — a pass that moves no card reads no layout
     this._filed = new Map(); // what a landing's read PROVED: a FILING (id + createdAt, r4) → the record that filed it (r3 — a fact
@@ -146,6 +147,8 @@ export class NeedsCards {
     // a record landing, a page loading, a trim: the cards' anchors may have arrived or left
     this._mo = new MutationObserver(() => { if (this._lent) this._watchTail(); go(); });
     this._mo.observe(this.view._messageList, { childList: true });
+    // r10: THE ATTENTION DOCK — a box left in the dock's row ends its keep the same way (the dock lives outside the list)
+    this.view._attnDock?.addEventListener('ut-box-left', go, { signal: own });
     this.schedule();
   }
 
@@ -153,6 +156,7 @@ export class NeedsCards {
     try { this._giveBack(); } catch { } // the room a hold borrowed never outlives the view (round 5, #3)
     try { this._ctl?.abort(); } catch { }
     try { this._mo?.disconnect(); } catch { }
+    try { this._dockRO?.disconnect(); } catch { }
     this._mo = null;
   }
 
@@ -294,7 +298,7 @@ export class NeedsCards {
       const drop = [...view._messageList.querySelectorAll(':scope > * > .cn-cards')].filter((c) => !boxInUse(c.querySelector('.ut-reply')));
       const keep = drop.length && !hold && !view._pinned ? this._readerLine() : null;
       for (const c of drop) c.remove();
-      view._statusBar?.setNeeds?.(null);
+      this._dockPass([]); // THE ATTENTION DOCK: nothing waits ⇒ no strip (a row kept for its box stays until it is left)
       this._seen.clear(); // nothing waits: whatever is filed next is a filing
       this._placeSig = '';
       for (const k of this._filed?.keys() || []) if (k !== this._flying) this._filed.delete(k);
@@ -302,37 +306,26 @@ export class NeedsCards {
       this._keepReader(keep);
       return 0;
     }
-    // THE END is the DISPLAY order's last DRAWN record (r2 — the insertion order's last was an older page's, mid-history; a
-    // record drawn as nothing at the end left the dock nowhere)
+    // THE FLOW IS HISTORY (lane needs-card-tail — the base docked EVERY card whose record was not on screen: six old asks
+    // stacked under the newest message; r1–r9 docked ONE; r10: none): a card whose record is on screen stands there, the
+    // rest are in the attention dock only (window chrome — _dockPass, below, from this same pass)
     const transcript = this._records();
     const drawn = (id) => this._onScreen(id);
-    let lastId = null;
-    for (let k = transcript.length - 1; k >= 0 && lastId == null; k--) if (drawn(transcript[k].id)) lastId = transcript[k].id;
-    // THE TAIL (lane needs-card-tail — the base docked EVERY card whose record was not on screen: six old asks stacked under
-    // the newest message): a card whose record is on screen stands there; of the rest at most ONE docks at the END (the
-    // person's pick, else the newest) and only in a window that reaches the live end; every one is in the chip
     const atEnd = !view._teleported && !(view._windowEnd < view._total);
-    const plan = tailPlan(open, transcript, { rendered: drawn, atEnd, pick: this._dockPick, known: this._provedOf(open) });
-    if (this._dockPick != null && !plan.loose.includes(this._dockPick)) { this._dockPick = null; this._dockNoRecord = false; } // the pick answered, or its record on screen: the newest docks again
+    const plan = flowPlan(open, transcript, { rendered: drawn, atEnd, known: this._provedOf(open) });
     // THE ACCORDION: the open slot moves on a FILING only — an id this view has not seen waiting (the newest of them; a
     // view's first pass sees every one as new); a resolution never moves it (round 3, #3)
     const fresh = open.filter((e) => !this._seen.has(e.item.id));
     if (fresh.length) this._slot = newestOf(fresh).item.id;
     this._seen = new Set(open.map((e) => e.item.id));
     const openSlot = this._slot;
-    // every card → its element: its record when on screen, the END for the ONE docked (its dock line says so), none for the
-    // rest (the chip lists them); a resolved one only at its record (history stays history)
-    const want = new Map(); // anchor element → [{item, kind, resolved, dock}]
+    // every card → its element: its record when on screen, none for the rest (the dock holds them); a resolved one only at
+    // its record (history stays history)
+    const want = new Map(); // anchor element → [{item, kind, resolved}]
     for (const e of [...open.map((x) => ({ ...x, resolved: false, fold: x.item.id !== openSlot })), ...done.map((x) => ({ ...x, resolved: true }))]) {
       let el = null;
       if (e.resolved) { const p = placementOf(e.item, transcript, { resolved: true, more: !atEnd }); const at = drawnAt(transcript, p.at != null ? p.at : this._knownAt(e.item, transcript), drawn); el = at != null ? view._elements.get(at) : null; }
       else if (plan.at.has(e.item.id)) el = view._elements.get(plan.at.get(e.item.id));
-      else if (plan.dock === e.item.id && lastId != null) {
-        el = view._elements.get(lastId);
-        // no record at all: the whole conversation is loaded (a tail window from its first record), or THIS landing's read
-        // reached the first record — judged per landing, never kept (r2: a set of «no record» ids lived for the view's life)
-        e.dock = { n: open.length, noRecord: (this._dockPick === e.item.id && this._dockNoRecord) || !(view._windowStart > 0) };
-      }
       if (!el || !el.isConnected || el.parentNode !== view._messageList) continue;
       if (!want.has(el)) want.set(el, []);
       want.get(el).push(e);
@@ -344,7 +337,7 @@ export class NeedsCards {
     // moved a scrolled reader 87 px): a pass that moves, adds, removes or re-states a card while the reader is scrolled away
     // (not following the tail, not a landing's own pass) keeps the reader's top record where it stood — read only when the
     // placement changed, so a pass that changes no card still reads no layout
-    const sig = [...want].map(([el, es]) => `${el.dataset.msgId}=${es.map((e) => `${e.item.id}:${e.resolved ? 'r' + (e.item.status || '') : e.fold ? 'f' : 'o'}${e.dock ? ':d' + e.dock.n + (e.dock.noRecord ? 'x' : '') : ''}`).join(',')}`).join('|') + '#' + [...have.keys()].join(',');
+    const sig = [...want].map(([el, es]) => `${el.dataset.msgId}=${es.map((e) => `${e.item.id}:${e.resolved ? 'r' + (e.item.status || '') : e.fold ? 'f' : 'o'}`).join(',')}`).join('|') + '#' + [...have.keys()].join(',');
     const keep = sig !== this._placeSig && !hold && !view._pinned ? this._readerLine() : null;
     this._placeSig = sig;
     const placed = new Set();
@@ -367,9 +360,9 @@ export class NeedsCards {
     }
     for (const [id, card] of have) if (!placed.has(id) && !boxInUse(card.querySelector('.ut-reply'))) card.remove();
     for (const h of view._messageList.querySelectorAll(':scope > * > .cn-cards')) if (!h.firstElementChild) h.remove();
-    // THE CHIP (the status bar) — THE INDEX of every open ask, newest first, from this same pass as the cards (lane
-    // needs-card-tail) — + a fold that must open for a card that waits
-    view._statusBar?.setNeeds?.(this._chipOf(plan));
+    // THE ATTENTION DOCK (r10) — every open ask's count and the newest's row, from this same pass as the cards — + a fold
+    // that must open for a card that waits
+    this._dockPass(plan.waiting);
     // the run fold keeps a record holding an open card or a kept box (chat-view.js) — re-decided when either set changes, and
     // when an open card now stands in ANOTHER record (lane needs-card-tail: a landing's jumpToIndex folds the new window's runs
     // before its cards are drawn — the landed card stood inside a folded run, out of sight)
@@ -420,13 +413,98 @@ export class NeedsCards {
     return !!el && el.isConnected && el.parentNode === this.view._messageList;
   }
 
-  /** THE CHIP's words + its rows (the index): every open ask, newest first — {id, words, ago, where: 'here' | 'end' | 'away'}. */
-  _chipOf(plan) {
-    const w = chipWords(plan.waiting, t);
-    if (!w) return null;
-    const model = inboxModel(this.app);
-    w.rows = plan.waiting.map((e) => ({ id: e.item.id, words: model.wordsOf(e.item), ago: agoText(e.item.createdAt, t), where: plan.at.has(e.item.id) ? 'here' : plan.dock === e.item.id ? 'end' : 'away' }));
-    return w;
+  /** THE ATTENTION DOCK (lane needs-card-tail r10 — the owner 2026-10-30: «…不要停靠在聊天内容本身里了，而是体现出"这是专门停靠
+   *  等我操作的事情，不会随着 chatview 浮动"的一个 UI»; THE RULE: a thing waiting for the owner is WINDOW CHROME, never a chat
+   *  row): the view's strip between the transcript and the message box (`view._attnDock`, outside the virtual-scroll list),
+   *  drawn by THIS pass from THIS pass's list — the cards and the strip change in the same frame. PURE dockOf decides:
+   *  nothing waits ⇒ no strip (`hidden` — no empty chrome); else «waiting for you · N» + the NEWEST one's row — THE row
+   *  (foryouRows.reconcile: renderRow / patchRow; its verbs through foryouRows.wire — the tray's routes, ONE answer writer;
+   *  an answer anywhere drops it here in the pass the store's broadcast schedules) — + «View all · N» when several wait
+   *  (the For-you window scoped to this conversation; never a «show more» inside the strip). THE ROW'S KEEP RULE: a row
+   *  whose reply box is in use stays under the typist — its item, open or answered, until the box is left (`ut-box-left`).
+   *  A pinned view stays at the live tail while the strip changes size (_dockRO); a reader in history keeps their top
+   *  line (the list shrinks below it). `waiting` = flowPlan's (newest first). */
+  _dockPass(waiting) {
+    const dock = this.view._attnDock;
+    if (!dock || !this.app.foryouRows) return; // (THE row is the panel's — the strip waits for it, as the cards do)
+    const list = Array.isArray(waiting) ? waiting : [];
+    const d = dockOf(list, t);
+    const rows = this._dockBuild(dock);
+    const cur = rows.querySelector(':scope > .ut-item');
+    const kept = cur && boxInUse(cur.querySelector('.ut-reply')) ? cur.dataset.id : null;
+    let entry = d ? { item: d.newest } : null;
+    if (kept && (!entry || entry.item.id !== kept)) {
+      const open = list.find((e) => e.item.id === kept), todos = inboxModel(this.app).todos || {};
+      entry = open ? { item: open.item } : { item: (todos.resolved || []).find((i) => i.id === kept) || (this._dockItem && this._dockItem.id === kept ? this._dockItem : { ...cur._item }), resolved: true };
+    }
+    const sig = entry ? `${entry.item.id}\u0000${entry.resolved ? 'r' : 'o'}\u0000${d ? d.n : 0}` : '';
+    if (!entry) {
+      if (!dock.hidden) { dock.hidden = true; rows.replaceChildren(); }
+      this._dockItem = null; this._dockSig = '';
+      return;
+    }
+    this._dockItem = entry.item;
+    const count = dock.querySelector(':scope > .cad-head > .cad-count'), all = dock.querySelector(':scope > .cad-all');
+    const words = d ? d.words : null;
+    if (count.textContent !== (words ? words.text : '')) count.textContent = words ? words.text : '';
+    if (count.title !== (words ? words.title : '')) count.title = words ? words.title : '';
+    all.hidden = !(d && d.n > 1);
+    if (d && d.n > 1) { const w = t('View all · {n}', { n: d.n }); if (all.textContent !== w) all.textContent = w; }
+    this.app.foryouRows?.reconcile(rows, [entry]);
+    const row = rows.querySelector(':scope > .ut-item'), q = row?.querySelector(':scope > .ut-body > .ut-text');
+    if (row) row._item = entry.item;
+    // the question is the door to its card (a navigation the owner asked for) — a button for the keyboard too
+    if (q && q.getAttribute('role') !== 'button') { q.setAttribute('role', 'button'); q.tabIndex = 0; q.title = t('Show it in the conversation'); }
+    if (dock.hidden) dock.hidden = false;
+    if (sig !== this._dockSig) { this._dockSig = sig; this.app.foryouRows?.arm?.(dock); } // what appeared under the pointer answers nothing for ARM_MS (the press arm)
+  }
+
+  /** The strip's parts, built once a view: the head (icon + count), the row's holder, «View all»; its one wiring — THE verbs
+   *  (foryouRows.wire, the mini inbox's), the question's landing, the door, and the pin kept through its size. → the rows. */
+  _dockBuild(dock) {
+    let rows = dock.querySelector(':scope > .cad-rows');
+    if (rows) { if (!this._dockWired) this._dockWire(dock); return rows; }
+    const head = document.createElement('div'); head.className = 'cad-head';
+    head.innerHTML = `<span class="cad-icon" aria-hidden="true">${UI_ICONS.inbox}</span><span class="cad-count"></span>`;
+    rows = document.createElement('div'); rows.className = 'cad-rows';
+    const all = document.createElement('button'); all.type = 'button'; all.className = 'cad-all'; all.hidden = true;
+    all.title = t('Open everything this conversation is waiting on in the For-you window');
+    dock.replaceChildren(head, rows, all);
+    this._dockWire(dock);
+    return rows;
+  }
+
+  _dockWire(dock) {
+    const own = this._ctl?.signal;
+    if (!this.app.foryouRows || !own) return; // (wired on the pass after the panel and the view's start)
+    this._dockWired = true;
+    this.app.foryouRows.wire(dock, { close: () => {} });
+    const landIt = (ev, q) => {
+      const row = q.closest('.ut-item'), item = row && row._item;
+      if (!item || row.classList.contains('ut-item-resolved') || String(window.getSelection?.() || '')) return;
+      if (inboxModel(this.app).isDoor?.(item.sessionKey, item)) return; // an item whose answer is its own door: the row's tap opens it (rowClick)
+      ev.preventDefault();
+      this.land(item.id).catch(() => {});
+    };
+    dock.addEventListener('click', (ev) => {
+      if (ev.target.closest('.cad-all')) {
+        const keys = this.keys() || [];
+        if (keys.length) this.app.openInbox?.({ sessionKey: this.app.foryouRows?.primaryKey?.(keys) || keys[0] });
+        return;
+      }
+      if (ev.target.closest('.fy-link, .ut-art, button, textarea, input, summary')) return;
+      const q = ev.target.closest('.cad-rows .ut-item > .ut-body > :is(.ut-text, .ut-meta)');
+      if (q) landIt(ev, q);
+    }, { signal: own });
+    // the question by its keys (a role=button — never a text box: the reply box answers its own keys through the panel)
+    dock.addEventListener('keydown', (ev) => {
+      const q = ev.target;
+      if (!(enterSubmits(ev) || (ev.key === ' ' && !imeOwnsKey(ev))) || !q.classList?.contains('ut-text') || q.getAttribute('role') !== 'button') return;
+      landIt(ev, q);
+    }, { signal: own });
+    // the strip's size moved the list's bottom edge: a pinned view stays at the live tail (a reader in history keeps the
+    // line they read — the list shrinks below it, scrollTop unchanged)
+    if (typeof ResizeObserver === 'function') (this._dockRO = new ResizeObserver(() => { const v = this.view; if (v._pinned && !v._disposed) v._scrollToBottom?.(); })).observe(dock);
   }
 
   /** The card of item `id` in this list, or null. */
@@ -539,16 +617,6 @@ export class NeedsCards {
       head.dataset.words = hw;
       head.innerHTML = `<span class="cn-icon" aria-hidden="true">${UI_ICONS.inbox}</span><span class="cn-head-words">${escHtml(hw)}</span><span class="cn-head-also">${escHtml(t('also in For you'))}</span>`;
     }
-    // THE DOCK (lane needs-card-tail): the one card standing at the end for an ask whose record is not on screen says so —
-    // where it was asked, how many wait and where (the chip) — open or folded (the fold hides the head, never this line)
-    let dock = card.querySelector(':scope > .cn-dock');
-    if (e.dock) {
-      const where = e.dock.noRecord ? t('Docked here — asked before this conversation\'s record was kept') : t('Docked here — it was asked further up the conversation');
-      const words = e.dock.n > 1 ? `${where} · ${t('{n} waiting — the status bar lists them all', { n: e.dock.n })}` : where;
-      if (!dock) { dock = document.createElement('div'); dock.className = 'cn-dock'; head.after(dock); }
-      if (dock.textContent !== words) dock.textContent = words;
-    } else dock?.remove();
-    card.classList.toggle('cn-docked', !!e.dock);
     this.app.foryouRows?.reconcile(rows, [{ item: e.item }]);
     // THE ACCORDION: folded = the row's question + « · age», the whole row one button (style.css / chat.css .cn-fold); open =
     // the row whole (.ut-open — the tray's own open state). A reply box in use is never folded under the typist.
@@ -627,22 +695,16 @@ export class NeedsCards {
     if (keys) el.querySelector('.ut-opt:not(:disabled), .ut-actions > button:not(:disabled)')?.focus({ preventScroll: true });
   }
 
-  /** THE CHIP's click with no row chosen: the newest waiting ask, landed (THE ONE LANDING). → a promise of where. */
-  jumpToNewest() {
-    const model = inboxModel(this.app), keys = this.keys();
-    const open = keys && model.loaded ? needsOf((model.todos || {}).open || [], keys) : [];
-    return open.length ? this.land(open[open.length - 1].item) : Promise.resolve(null);
-  }
-
-  /** THE ONE LANDING (lane needs-card-tail — R2: the chip's rows; R5: every For-you door to this conversation, the owner
-   *  2026-10-28: «inbox点消息跳转会对话的时候，可以考虑直接跳转到对应的上下文»): `x` = an item (or its id), landed at the
-   *  record that filed it, opened, flashed:
+  /** THE ONE LANDING (lane needs-card-tail — R2: the chip's rows, r10: the attention dock's question; R5: every For-you
+   *  door to this conversation, the owner 2026-10-28: «inbox点消息跳转会对话的时候，可以考虑直接跳转到对应的上下文»): `x` = an
+   *  item (or its id), landed at the record that filed it, opened, flashed:
    *   ① its card where it stands now (at its record) → opened, the others folded;
    *   ② its record on screen with no card (a notice, an answered item out of the quiet tail) → that record;
    *   ③ its record ABOVE what is loaded → the history read upward to the filing (PURE placementOf over each page, `_anchorIndex`)
    *     and the window loaded there (jumpToIndex — the road S1's waiting chip takes), then ① / ②;
-   *   ④ no record at all (filed before the conversation's first record) → an open card takes the dock at the END (the live
-   *     end loaded first) and its dock line says why; anything else lands at the end.
+   *   ④ no record at all (filed before the conversation's first record — a fact of THIS read), unknown (a read cut short),
+   *     or anything else → the END (the live end loaded first); an open card with no record is SAID there (r10: the flow is
+   *     history — r1–r9 docked it at the end; it waits in the attention dock and in For you, never in the transcript).
    *  A press is intent (the view's door, _noteUserNav): no resume re-tail or bottom-follow overrules it — and nothing but a
    *  press calls it (a broadcast never moves a reader).
    *  THE DISPLACEMENT LAW (r2 — a slow read upward finished after a newer press and dragged the view to the stale target):
@@ -665,7 +727,7 @@ export class NeedsCards {
    *  again (r5: the rebuilt window folds every run; the record had no box and nothing was put back), else its run's fold
    *  line, else the nearest drawn record. THE ONE ROAD THAT DOES NOT PUT BACK is a teleported reader's (a seek slab has no
    *  index space to return to): the live end the jump loaded stays, and the toast says the record is not drawn. The
-   *  accordion's slot moves only for a show that lands (_show). → 'card' | 'record' | 'dock' | 'end' | null */
+   *  accordion's slot moves only for a show that lands (_show). → 'card' | 'record' | 'end' | null */
   async land(x, { since = null } = {}) {
     const view = this.view;
     if (view._disposed || !view._messageList) return null;
@@ -697,7 +759,7 @@ export class NeedsCards {
     const here = () => {
       this.render({ hold: true });
       const card = this._cardOf(item.id);
-      if (card && !card.classList.contains('cn-docked')) return show(card) ? 'card' : null;
+      if (card) return show(card) ? 'card' : null;
       const rows = this._records();
       const atEnd = !view._teleported && !(view._windowEnd < view._total);
       const p = placementOf(item, rows, { resolved: true, more: !atEnd });
@@ -764,20 +826,11 @@ export class NeedsCards {
         if (missed) { await putBack(back); return gone() ? null : said(); } // the jump rebuilt the window, the show failed: put back (r4)
       }
     }
-    // ④ no record (−1: filed before the conversation's first record — a fact of THIS read), or unknown: an open card takes
-    //   the dock at the END (the live end loaded first) and its dock line says which; anything else, the end
-    const tail = () => {
-      const t3 = here();
-      if (t3 || !isCard || missed) return t3;
-      const was = [this._dockPick, this._dockNoRecord];
-      this._dockPick = item.id;
-      this._dockNoRecord = idx === -1;
-      this.render({ hold: true });
-      const card = this._cardOf(item.id);
-      if (card && show(card)) return 'dock';
-      [this._dockPick, this._dockNoRecord] = was; this.render({ hold: true }); // a dock that did not land keeps no pick (r4)
-      return null;
-    };
+    // ④ no record (−1: filed before the conversation's first record — a fact of THIS read), unknown, or anything else: the END
+    //   (the live end loaded first); an open card with no record is SAID there (r10 — the flow is history: r1–r9 docked it at
+    //   the end; it waits in the attention dock and in For you, never in the transcript)
+    const tail = () => here();
+    const atEndSaid = () => { if (isCard && idx === -1) showToast(t('Asked before this conversation\'s record was kept — there is no card for it in the chat; answer it in the strip above the message box or in For you'), { type: 'info' }); return 'end'; };
     let tried = false;
     if (view._teleported || view._windowEnd < view._total) {
       let landed = null;
@@ -790,7 +843,7 @@ export class NeedsCards {
     if (!tried) { const t4 = tail(); if (t4) return t4; }
     if (missed) return said();
     view._scrollToBottom?.();
-    return 'end';
+    return atEndSaid();
   }
 
   /** Land `el` whole (fit) and flash it once — the product's attention flash (S1's jump); a card first takes the open slot. */
