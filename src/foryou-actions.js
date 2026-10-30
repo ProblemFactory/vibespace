@@ -713,6 +713,7 @@ const RUN_DECIDES = Object.freeze({ 'destination-unknown': 'hosts', redirect: 'h
 const RUN_ROWS = Object.freeze(['hosts', 'program', 'folder', 'secrets']);
 const RUN_LABEL = Object.freeze({ hosts: i18nKey('Sends to'), program: i18nKey('Program'), folder: i18nKey('Working folder'), secrets: i18nKey('Secrets') });
 function runCardOf(item, { t = fmt } = {}) {
+  if (item && item.action && item.action.type === 'vault-grant-ask') return standingCardOf(item, { t });   // lane vault-standing-request r2: an agent's standing request, drawn the same way
   const f = item && item.action && item.action.type === 'vault-run-ask' && item.facts && typeof item.facts === 'object' && (item.facts.v === 1 || item.facts.v === 2) ? item.facts : null;   // r8: v 2 = vault-agent-own r23 (the chunked folds, env, the templates' text, the reason)
   if (!f) return null;
   const str = (x) => (typeof x === 'string' ? x : '');
@@ -774,7 +775,8 @@ function runCardOf(item, { t = fmt } = {}) {
     .filter((k) => k !== 'folder' || folder).filter((k) => k !== 'secrets' || groups.length)
     .map((key) => ({ key, label: t(RUN_LABEL[key]), lines: lines[key], warn: key === decides || (key === 'hosts' && !known) }));
   const cmdA = a.command && typeof a.command === 'object' && a.command.offered === true ? a.command : null;   // lane vault-standing-request: «Always (this command)» — the plain words beside it
-  const hint = cmdA ? [{ mono: str(cmdA.words) ? String(cmdA.words) : '' }, { text: ` — ${t(COMMAND_ALWAYS_WORDS)}` }] : a.offered === true ? null : [{ text: t('No «Always»: {why}', { why: own(RUN_ALWAYS_WHY, a.why) ? t(RUN_ALWAYS_WHY[a.why]) : '' }).replace(/[:：]\s*$/, (m) => m.trimEnd()) }, ...(a.why && !own(RUN_ALWAYS_WHY, a.why) ? [{ code: String(a.why) }] : []), ...(str(a.directive) ? [{ mono: wholeOf(a, 'directive').shown }] : [])];
+  const rp = cmdA && cmdA.replaces && typeof cmdA.replaces === 'object' && Number(cmdA.replaces.until) > 0 ? cmdA.replaces : null;   // r2 (JUDGE 4): «Always (this command)» beside a TIMED grant makes it permanent — said beside the button
+  const hint = cmdA ? [{ mono: str(cmdA.words) ? String(cmdA.words) : '' }, { text: ` — ${t(COMMAND_ALWAYS_WORDS)}` }, ...(rp ? [{ text: ` ${t(REPLACES_WORDS, { scope: str(rp.scope), when: clockWords(rp.until) })}` }] : [])] : a.offered === true ? null : [{ text: t('No «Always»: {why}', { why: own(RUN_ALWAYS_WHY, a.why) ? t(RUN_ALWAYS_WHY[a.why]) : '' }).replace(/[:：]\s*$/, (m) => m.trimEnd()) }, ...(a.why && !own(RUN_ALWAYS_WHY, a.why) ? [{ code: String(a.why) }] : []), ...(str(a.directive) ? [{ mono: wholeOf(a, 'directive').shown }] : [])];
   const templates = (Array.isArray(f.templates) ? f.templates : []).filter((x) => x && typeof x === 'object');
   // r8 (a store clips and says, never throws): a command longer than the body's RUN_CMD_BODY_MAX — `cmd` its start, `cmdCut`,
   // the whole (≤ RUN_CMD_MAX) in `cmdFull` (chunks — r23's shape; the store folds an older producer's the same way); the body
@@ -826,6 +828,42 @@ function runCardOf(item, { t = fmt } = {}) {
   const cutText = !full ? null : !foldCut ? t('The command is {n} characters long; the card shows its first {m} — the whole command is under “{fold}”.', { n: total, m: shown, fold: t('Technical details') })
     : t('The command is over {max} characters, so the whole command was not kept: see its run record in the Vault window. The card shows its first {m}.', { max: full.length, m: shown });   // r12: the cut point is what ARRIVED (the store's 4 096) — no producer states a total past it
   return { headline, cmd, cut: full ? { n: total, whole: !foldCut, shown, text: cutText } : null, again, rows, always: { offered: a.offered === true, hint }, fold };
+}
+/** lane vault-standing-request r2 (VISUAL — 主开发's read of the standing card's shots: PROSE, the raw vault:// reference in
+ *  its first line and half linkified on the phone; the run card already had the right shape): AN AGENT'S STANDING REQUEST
+ *  drawn as the run card is — the door's `facts` (vault-run-door standingFactsOf: {v: 1, kind: 'standing', who, secret,
+ *  purpose, ref, hosts, command, switchOn, replaces}) → the model runFactsHtml draws: a headline, LABEL ROWS (密钥 = the
+ *  entry's NAME, 用途, 主机 or 命令, 运行 = the program, 期限 — a timed grant it replaces and a closed entry's switch said as
+ *  marked rows) and ONE 技术细节 fold (the reference as code, the program / options / script paths, how it ends). No command
+ *  box (it asks for a grant; nothing runs). null = no facts this client reads (a plain request, an older record): the prose. */
+const STANDING_LABEL = Object.freeze({ secret: i18nKey('Secret'), purpose: i18nKey('Purpose'), hosts: i18nKey('Hosts'), command: i18nKey('Command'), program: i18nKey('Runs'), until: i18nKey('Until'), switch: i18nKey('Also') });
+const STANDING_COMMAND_WORDS = i18nKey('VibeSpace cannot see where it sends the secret — Allow means you trust this command itself; a changed program or script asks again.');
+const REPLACES_WORDS = i18nKey('This replaces the time-limited grant this conversation holds on it ({scope}, until {when}) with one that has no end.');   // = vault-run-door REPLACES_LINE
+const STANDING_SWITCH_WORDS = i18nKey('Allow also turns on «Usable by agent runs» for this entry — it opens it for THIS conversation; any grants you paused stay paused.');   // = vault-run-door STANDING_SWITCH_LINE
+const STANDING_ENDS_WORDS = i18nKey('Until you revoke it — the same as «Who may use it…» on its row in ⚙ System ▸ Vault…, which lists it and takes it back. A lock does not end it (nothing runs while it is locked). Allow asks for the second password.');
+function standingCardOf(item, { t = fmt } = {}) {
+  const f = item && item.action && item.action.type === 'vault-grant-ask' && item.facts && typeof item.facts === 'object' && item.facts.v === 1 && item.facts.kind === 'standing' ? item.facts : null;
+  if (!f) return null;
+  const str = (x) => (typeof x === 'string' ? x : '');
+  const who = str(f.who) || t('An agent'), secret = str(f.secret) || t('a stored secret');
+  const hosts = (Array.isArray(f.hosts) ? f.hosts : []).filter((h) => h && typeof h === 'object' && str(h.host));
+  const c = f.command && typeof f.command === 'object' && str(f.command.program) ? f.command : null;
+  const pre = c && Array.isArray(c.pre) ? c.pre.filter((w) => typeof w === 'string' && w) : [];
+  const rp = f.replaces && typeof f.replaces === 'object' && Number(f.replaces.until) > 0 ? f.replaces : null;
+  const rows = [
+    { key: 'secret', lines: [[{ text: secret }]] },
+    ...(str(f.purpose) ? [{ key: 'purpose', lines: [[{ text: str(f.purpose) }]] }] : []),
+    ...(hosts.length ? [{ key: 'hosts', lines: hosts.map((h) => [{ mono: str(h.host) }, ...(str(h.tool) ? [{ text: ' ' }, { aside: t('(via {tool})', { tool: str(h.tool) }) }] : [])]) }] : []),
+    ...(c ? [{ key: 'command', lines: [[{ mono: str(c.words) }], [{ text: t(STANDING_COMMAND_WORDS) }]] }, { key: 'program', lines: [[{ mono: str(c.program) }]] }] : []),
+    { key: 'until', lines: [[{ text: t('until you revoke it') }], ...(rp ? [[{ text: t(REPLACES_WORDS, { scope: str(rp.scope), when: clockWords(rp.until) }) }]] : [])], warn: !!rp },
+    ...(f.switchOn === true ? [{ key: 'switch', lines: [[{ text: t(STANDING_SWITCH_WORDS) }]], warn: true }] : []),
+  ].map((r) => ({ key: r.key, label: t(STANDING_LABEL[r.key]), lines: r.lines, warn: !!r.warn }));
+  const fold = [
+    ...(str(f.ref) ? [{ label: t('Reference'), lines: [[{ code: str(f.ref) }]] }] : []),   // a vault reference is never a link: code, under the fold
+    ...(c ? [{ label: t('Program'), lines: [[{ mono: str(c.program) }]] }, ...(pre.length ? [{ label: t('Options'), lines: [[{ mono: pre.join(' ') }]] }] : []), { label: t('Script'), lines: [[{ mono: str(c.script) }]] }] : []),
+    { label: t('How it ends'), lines: [[{ text: t(STANDING_ENDS_WORDS) }]] },
+  ];
+  return { headline: t('{who} asks for a standing grant on “{secret}”', { who, secret }), cmd: '', cut: null, again: null, rows, always: { offered: false, hint: null }, fold };
 }
 /** r9 (a store says when it DROPS): a run card whose facts the store dropped files a stub `{dropped, cut: ['facts']}` (no `v` —
  *  runCardOf reads it as no facts: the prose, as before) and its card says so in ONE line above the text. → words | null */
@@ -892,4 +930,4 @@ function filedLine(x, id, tray = null) {
   return fmt(FILED[s.at], { what: fmt(ONE[KINDS.includes(s.kind) ? s.kind : 'check']), tray: where, on: s.on || 'its own card in this conversation' }) + (id ? ` (${id})` : '');
 }
 
-module.exports = { ROWS, ROW_OF, ANSWERS, CARDS, ACTION_IDENTITY, WAIT_ACTIONS, CARD_ACTION_TYPES, ANSWER_ACTION_TYPES, KINDS, KIND_WORDS: ONE, SURFACES, BY_TYPE, BY_ORIGIN, IDENTITY_FIELDS, SKEW_MS, FILED_WINDOW_MS, needOf, needsOf, recordsOf, placementOf, tailPlan, drawnAt, filingIndex, chipWords, settledWords, surfaceOf, FILED, filedLine, PERSON_DECIDES, DECISION_ROWS, DECISION_ENDS, endsOf, STAMPS, isDecisionRow, offersClosers, CLOSERS, HIDDEN_BY, POINTER_ROWS, isPointer, isHidden, closersOf, expiryWords, VIEWERS, VIEWER_ROLE, canDecide, clockWords, decidedStamp, decisionCard, grantLifeOf, grantWords, verbsOf, runCardOf, factsDroppedWords, FACTS_DROPPED_WORDS, RUN_ALWAYS_WHY, RUN_WHY_AGAIN, RUN_HOSTS_WHY, RUN_MASKING, RUN_SHAPE, RUN_CMD_BODY_MAX, RUN_CMD_MAX, deadlineOf, DEADLINE_WORDS, DEADLINE_LIVE_MS, DEADLINE_WARN_MS, OUTCOME_ENDS, endOf, ruledOf };
+module.exports = { ROWS, ROW_OF, ANSWERS, CARDS, ACTION_IDENTITY, WAIT_ACTIONS, CARD_ACTION_TYPES, ANSWER_ACTION_TYPES, KINDS, KIND_WORDS: ONE, SURFACES, BY_TYPE, BY_ORIGIN, IDENTITY_FIELDS, SKEW_MS, FILED_WINDOW_MS, needOf, needsOf, recordsOf, placementOf, tailPlan, drawnAt, filingIndex, chipWords, settledWords, surfaceOf, FILED, filedLine, PERSON_DECIDES, DECISION_ROWS, DECISION_ENDS, endsOf, STAMPS, isDecisionRow, offersClosers, CLOSERS, HIDDEN_BY, POINTER_ROWS, isPointer, isHidden, closersOf, expiryWords, VIEWERS, VIEWER_ROLE, canDecide, clockWords, decidedStamp, decisionCard, grantLifeOf, grantWords, verbsOf, runCardOf, standingCardOf, factsDroppedWords, FACTS_DROPPED_WORDS, RUN_ALWAYS_WHY, RUN_WHY_AGAIN, RUN_HOSTS_WHY, RUN_MASKING, RUN_SHAPE, RUN_CMD_BODY_MAX, RUN_CMD_MAX, deadlineOf, DEADLINE_WORDS, DEADLINE_LIVE_MS, DEADLINE_WARN_MS, OUTCOME_ENDS, endOf, ruledOf };

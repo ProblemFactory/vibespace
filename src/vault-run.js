@@ -322,6 +322,81 @@ const REFUSING = TOOL_ROWS;
 const SHELLS = Object.freeze(['sh', 'bash', 'zsh', 'dash', 'ksh', 'mksh', 'ash', 'fish', 'csh', 'tcsh', 'pwsh', 'powershell', 'cmd']);
 const INTERPRETERS = Object.freeze(['node', 'nodejs', 'deno', 'bun', 'python', 'pypy', 'perl', 'ruby', 'php', 'lua', 'luajit', 'tclsh', 'wish', 'rscript', 'julia', 'java', 'dotnet']);   // a Mac's interpreters come with the device road (P1 vault-run-device)
 
+// lane vault-standing-request r2 (MAJOR 2 — the acceptance: `request --standing --command "deno eval"` with a planted file named
+// `eval` pinned that dummy, the card read «it runs …/deno …/work/eval», and `deno eval '<any code>'` then ran with the secret and
+// no card; `python3 -c`, `node -e`, `ruby -e`, `perl -e`, `sh -c` are the same class): THE PIN GRAMMAR — per shell and
+// interpreter, the ONLY command lines the hub can PIN WHAT RUNS for: the program, then only the options its row names in
+// `flags` / `flagRe` (each runs no other code), an optional subcommand that runs a FILE (`sub`: deno `run`, dotnet `exec`) or
+// a file option (`fileFlags`: java `-jar`), then THE SCRIPT — an existing file with one of the row's script extensions — and
+// the rest of the line free (the script's own arguments). Every door that carries code or names a module (`-c`, `-e`,
+// `--eval`, `eval`, `-m`, `-r`, `--require` …) is listed in `inline` — never pinned (the census plants a file named like each
+// one and proves it); an option the row does not name is not pinned either (an unknown option is a door until reviewed). A
+// row with `none` is a program whose grammar cannot pin what runs (its words say why): its runs keep once / deny. EVERY name
+// of SHELLS and INTERPRETERS has a row (test-vault-standing-request ⑥). The shape a standing grant names = the program + the
+// words up to and including the script (`pre` + the script), never argv[1] alone.
+const SH_FLAGS = Object.freeze(['-e', '-u', '-x', '-v', '-eu', '-ue', '-ex', '-xe', '-eux']);
+const PIN_GRAMMAR = Object.freeze({
+  sh: { flags: SH_FLAGS, inline: ['-c', '-s', '-i', '-'], ext: ['.sh'] },
+  dash: { flags: SH_FLAGS, inline: ['-c', '-s', '-i', '-'], ext: ['.sh'] },
+  ash: { flags: SH_FLAGS, inline: ['-c', '-s', '-i', '-'], ext: ['.sh'] },
+  bash: { flags: [...SH_FLAGS, '--norc', '--noprofile'], inline: ['-c', '-s', '-i', '-', '--init-file', '--rcfile', '-O', '-o', '--debugger'], ext: ['.sh', '.bash'] },
+  zsh: { flags: SH_FLAGS, inline: ['-c', '-s', '-i', '-', '-o'], ext: ['.sh', '.zsh'] },
+  ksh: { flags: SH_FLAGS, inline: ['-c', '-s', '-i', '-', '-o'], ext: ['.sh', '.ksh'] },
+  mksh: { flags: SH_FLAGS, inline: ['-c', '-s', '-i', '-', '-o'], ext: ['.sh', '.ksh', '.mksh'] },
+  fish: { flags: ['--no-config', '-N'], inline: ['-c', '--command', '-C', '--init-command', '-i', '-'], ext: ['.fish'] },
+  csh: { flags: ['-f'], inline: ['-c', '-s', '-i', '-'], ext: ['.csh'] },
+  tcsh: { flags: ['-f'], inline: ['-c', '-s', '-i', '-'], ext: ['.csh', '.tcsh'] },
+  pwsh: { none: 'PowerShell reads any prefix of -Command (-c, -co, -com …) and -EncodedCommand as inline code', inline: ['-c', '-Command', '-EncodedCommand', '-e'] },
+  powershell: { none: 'PowerShell reads any prefix of -Command (-c, -co, -com …) and -EncodedCommand as inline code', inline: ['-c', '-Command', '-EncodedCommand', '-e'] },
+  cmd: { none: 'cmd runs a line of inline code (/c, /k)', inline: ['/c', '/k'] },
+  node: { flags: ['--no-warnings', '--enable-source-maps', '--trace-warnings', '--no-deprecation', '--trace-uncaught'], inline: ['-e', '--eval', '-p', '--print', '-r', '--require', '--import', '--loader', '--experimental-loader', '-i', '--interactive', '-', '--input-type', '-C', '--conditions'], ext: ['.js', '.mjs', '.cjs'] },
+  nodejs: { flags: ['--no-warnings', '--enable-source-maps', '--trace-warnings', '--no-deprecation', '--trace-uncaught'], inline: ['-e', '--eval', '-p', '--print', '-r', '--require', '--import', '--loader', '--experimental-loader', '-i', '--interactive', '-', '--input-type', '-C', '--conditions'], ext: ['.js', '.mjs', '.cjs'] },
+  deno: { sub: ['run'], flagRe: /^(?:-A|--allow-all|--allow-(?:net|env|read|write|sys|ffi|run|hrtime|import)(?:=[^\s=]+)?|-q|--quiet|--no-prompt|--no-check)$/, inline: ['eval', 'repl', 'task', 'x', 'serve', 'test', 'bench', 'compile', 'install', '-e', '--eval', '--preload', '--import-map', '--config', '-c', '--env-file', '-'], ext: ['.ts', '.tsx', '.mts', '.cts', '.js', '.jsx', '.mjs', '.cjs'] },
+  bun: { none: 'bun runs a package.json script of that name before a file, and bunfig.toml preloads code first — what runs cannot be pinned to a script', inline: ['run', 'x', 'exec', '-e', '--eval', '-p', '--print', '-r', '--preload'] },
+  python: { flags: ['-u', '-B', '-O', '-OO', '-E', '-s', '-S', '-I', '-q', '-b', '-bb', '-v', '-P', '-R'], inline: ['-c', '-m', '-', '-i', '-X', '-W'], ext: ['.py', '.pyw'] },
+  pypy: { flags: ['-u', '-B', '-O', '-OO', '-E', '-s', '-S', '-I', '-q', '-b', '-bb', '-v', '-P', '-R'], inline: ['-c', '-m', '-', '-i', '-X', '-W'], ext: ['.py', '.pyw'] },
+  perl: { flags: ['-w', '-W', '-X', '-T', '-t'], inline: ['-e', '-E', '-M', '-m', '-I', '-n', '-p', '-x', '-i', '-'], ext: ['.pl'] },
+  ruby: { flags: ['-w', '-W0', '-W1', '-W2'], inline: ['-e', '-r', '-I', '-n', '-p', '-x', '-S', '-C', '-'], ext: ['.rb'] },
+  php: { flags: ['-n', '-q', '-H'], inline: ['-r', '-a', '-B', '-R', '-F', '-E', '-d', '-c', '-S', '-t', '-'], ext: ['.php'] },
+  lua: { flags: ['-E', '-W'], inline: ['-e', '-l', '-i', '-'], ext: ['.lua'] },
+  luajit: { flags: ['-E'], inline: ['-e', '-l', '-i', '-j', '-O', '-b', '-'], ext: ['.lua'] },
+  tclsh: { flags: [], inline: ['-encoding', '-'], ext: ['.tcl'] },
+  wish: { flags: [], inline: ['-display', '-use', '-'], ext: ['.tcl', '.tk'] },
+  rscript: { flags: ['--vanilla', '--no-environ', '--no-site-file', '--no-init-file', '--no-restore', '--verbose'], inline: ['-e', '--default-packages', '-'], ext: ['.R', '.r'] },
+  julia: { flags: ['-q', '--quiet', '--startup-file=no', '--color=yes', '--color=no'], inline: ['-e', '--eval', '-E', '--print', '-L', '--load', '-i', '-J', '--sysimage', '--project', '-'], ext: ['.jl'] },
+  java: { flags: [], fileFlags: { '-jar': ['.jar'] }, inline: ['-cp', '-classpath', '--class-path', '-m', '--module', '-p', '--module-path', '--source', '-javaagent', '-agentlib', '-agentpath', '-D'], ext: ['.java'] },
+  dotnet: { sub: ['exec'], flags: [], inline: ['run', 'build', 'test', 'tool', 'new', 'fsi', 'watch', 'msbuild', 'publish', 'pack', 'restore', 'add', 'nuget', 'workload', 'sln', '--info'], ext: ['.dll'] },
+});
+const PIN_WHY = Object.freeze(['inline', 'option', 'no-script', 'not-a-script', 'no-grammar', 'program']);
+/** THE PIN of a shell's / an interpreter's command line (`name` = toolNameOf; argv[0] = the program) → { ok: true, pre, arg,
+ *  at } (the words before the script, the script word, its index) | { ok: false, why: PIN_WHY, word?, words? } — PURE: the
+ *  door reads the script's real path and bytes. */
+function pinOf(name, argv) {
+  const n = String(name || ''), g = PIN_GRAMMAR[n] || PIN_GRAMMAR[n.replace(/[\d.]+$/, '')] || null;
+  if (!g) return { ok: false, why: 'program' };
+  if (g.none) return { ok: false, why: 'no-grammar', words: g.none };
+  const words = Array.isArray(argv) ? argv.map(String) : [];
+  const isInline = (w) => g.inline.some((d) => w === d || w.startsWith(d + '=') || (/^-[A-Za-z]$/.test(d) && w.startsWith(d)));   // `--eval=…`, an attached short door (`-Mstrict`, `-cprint(1)`)
+  const fileAt = (k, exts, pre) => {
+    const f = words[k];
+    if (f == null || f === '') return { ok: false, why: 'no-script' };
+    const b = f.split('/').pop();
+    if (f.includes('://') || !exts.some((e) => b.length > e.length && b.endsWith(e))) return { ok: false, why: isInline(f) ? 'inline' : 'not-a-script', word: f, ext: exts.slice() };
+    return { ok: true, pre, arg: f, at: k };
+  };
+  const pre = [];
+  let i = 1;
+  if (g.sub && g.sub.includes(words[i])) pre.push(words[i++]);
+  for (; i < words.length; i++) {
+    const w = words[i];
+    if (g.fileFlags && Object.prototype.hasOwnProperty.call(g.fileFlags, w)) return fileAt(i + 1, g.fileFlags[w], [...pre, w]);
+    if (w[0] !== '-' && !(w[0] === '/' && g.inline.includes(w))) break;
+    if ((g.flags || []).includes(w) || (g.flagRe && g.flagRe.test(w))) { pre.push(w); continue; }
+    return { ok: false, why: isInline(w) ? 'inline' : 'option', word: w };
+  }
+  return fileAt(i, g.ext, pre);
+}
+
 // ── THE KNOWN TOOLS (§8.4 — P1 vault-run-egress fences the `proxyEnv` ones) ──
 const SSH_VALUE_FLAGS = ['-b', '-c', '-D', '-E', '-e', '-F', '-I', '-i', '-J', '-L', '-l', '-m', '-O', '-o', '-p', '-P', '-Q', '-R', '-S', '-W', '-w', '-B'];
 const SSH_KEYED = ['-o', '-F', '-J', '-W', '-L', '-R', '-D', '-S', '-I'];   // lane vault-run-door: where the connection goes / what it runs (ProxyCommand) — the value is the shape; round 11 (MAJOR): `-I <pkcs11.so>` loads agent-written code with the secret in env ⇒ opaque (its value was consumed but never read before)
@@ -1162,20 +1237,17 @@ function shapeOf(run) {
   };
 }
 /** lane vault-standing-request (the owner 2026-10-30, four «允许一次» cards in two minutes for `python3 transcribe.py partNN.mp3`):
- *  THE COMMAND SHAPE a standing grant may name where the hub CANNOT read the destination — the program and its FIRST argument,
- *  the rest free (`partNN.mp3`). Offered only when no host can be read (never beside a hosts «Always»: a known tool's
- *  destination is its hosts) and only where the shape is a program the owner can name: a shell or an interpreter running a
- *  SCRIPT FILE (argv[1] a path, never a flag — `-c`/`-e`/`-m` inline code is any code; no argument = code on stdin), or a
- *  program outside the tool table (its first argument as it is, or none). → { program, arg, file, kind } (the door reads the
- *  real paths and the bytes: `file` ⇒ arg must be a regular file, pinned by its sha256) | null. */
+ *  THE COMMAND SHAPE a standing grant may name where the hub CANNOT read the destination — the program and the words up to and
+ *  including its SCRIPT, the rest free (`partNN.mp3`). Offered only when no host can be read (never beside a hosts «Always»: a
+ *  known tool's destination is its hosts) and only where the hub can PIN WHAT RUNS (r2, MAJOR 2): a shell or an interpreter
+ *  whose PIN_GRAMMAR row reads a script file (pinOf) — inline code (`-c` / `-e` / `eval` / `-m` …), an option the row does not
+ *  name, code on stdin, a file that is no script of that interpreter, and a program outside both tables (it may run code its
+ *  arguments name — `uv run`, `make`, `ipython -c`) have no shape. → { program, pre, arg, file: true, kind } (the door reads
+ *  the script's real path and its bytes — pinned by its sha256) | null. */
 function commandCandidateOf(spec, shape) {
   if (!spec || !shape || shape.always || shape.destKnown) return null;
-  const argv = Array.isArray(spec.argv) ? spec.argv : [], first = argv.length > 1 ? String(argv[1]) : null;
-  if (shape.kind !== 'tool') {   // a shell or an interpreter (toolKindOf's other two kinds)
-    if (first == null || first === '' || first[0] === '-') return null;   // inline code / a flag first / code on stdin — no shape to trust
-    return { program: spec.tool, arg: first, file: true, kind: shape.kind };
-  }
-  return shape.known ? null : { program: spec.tool, arg: first, file: false, kind: shape.kind };
+  const pin = shape.kind !== 'tool' ? pinOf(shape.name, Array.isArray(spec.argv) ? spec.argv : []) : null;   // a shell or an interpreter (toolKindOf's other two kinds)
+  return pin && pin.ok ? { program: spec.tool, pre: pin.pre, arg: pin.arg, file: true, kind: shape.kind } : null;
 }
 /** THE KEY a remembered «always» is stored under — everything decision ④ says, nothing positional. */
 const shapeKeyOf = (s) => `${SHAPE_V}:${JSON.stringify([s.tool, s.sub, s.flags, s.args, s.hosts, s.entries, s.injection, s.env, s.templates, s.on, s.script, s.keyed])}`;
@@ -1776,6 +1848,6 @@ module.exports = {
   INJECTIONS, injectionOf, ENV_HIJACK, ENV_CONFIG, envRefusedOf,
   TOOL_ROWS, SHELLS, INTERPRETERS, KNOWN_TOOLS, toolNameOf, knownToolOf, refusedTool, toolKindOf, targetOf, conninfoHosts, urlHosts, urlParse, configNestedFile,
   RUN_FLAGS, parseRunArgs, timeoutOf, planOf, materialize,
-  shapeOf, shapeKeyOf, commandCandidateOf, destinationsOf, routeTargetsOf, sshTargetHost, readSshOpt, targetOf, urlParse, splitAuthority, normHost, SSH_OPT_TABLE, SSH_LOCAL_O, SSH_LOCAL_PROGRAM_KW, SSH_KW_ALIAS, SSH_HOST_OPTS, cardFactsOf, CARD_STRING_MAX, ALWAYS_WHY, HOSTS_WHY, MASKING, CARD_SHAPES, WHY_AGAIN, CARD_FACTS_CODES, OWN_DOORS, RUNNABLE_STORES, ownDoorOf, awayOf, runVerdict,
+  shapeOf, shapeKeyOf, commandCandidateOf, PIN_GRAMMAR, PIN_WHY, pinOf, destinationsOf, routeTargetsOf, sshTargetHost, readSshOpt, targetOf, urlParse, splitAuthority, normHost, SSH_OPT_TABLE, SSH_LOCAL_O, SSH_LOCAL_PROGRAM_KW, SSH_KW_ALIAS, SSH_HOST_OPTS, cardFactsOf, CARD_STRING_MAX, ALWAYS_WHY, HOSTS_WHY, MASKING, CARD_SHAPES, WHY_AGAIN, CARD_FACTS_CODES, OWN_DOORS, RUNNABLE_STORES, ownDoorOf, awayOf, runVerdict,
   FORMS, FORM_ROWS, VIEWS, formsOf, createMasker, createRunMasker, maskText,
 };

@@ -11619,4 +11619,17 @@ export default {
   "{name} may run: {commands} (kept)": "{name} 可以运行：{commands}（保留）", // lane vault-standing-request
   "{who} asks for a standing grant on a stored secret": "{who} 请求一条常驻授权，用保险库里的一个密钥", // lane vault-standing-request
   "«Always» on a card": "卡片上的总是", // lane vault-standing-request
+  "Purpose": "用途", // lane vault-standing-request r2
+  "Hosts": "主机", // lane vault-standing-request r2
+  "Runs": "运行", // lane vault-standing-request r2
+  "Also": "另外", // lane vault-standing-request r2
+  "Reference": "引用", // lane vault-standing-request r2
+  "How it ends": "如何结束", // lane vault-standing-request r2
+  "a stored secret": "一个保存的密钥", // lane vault-standing-request r2
+  "until you revoke it": "直到你收回", // lane vault-standing-request r2
+  "(via {tool})": "（经由 {tool}）", // lane vault-standing-request r2
+  "{who} asks for a standing grant on “{secret}”": "{who} 请求常驻使用「{secret}」", // lane vault-standing-request r2
+  "VibeSpace cannot see where it sends the secret — Allow means you trust this command itself; a changed program or script asks again.": "VibeSpace 看不到它把密钥发往哪里——「允许」表示你信任这条命令本身；换了程序或脚本会再问。", // lane vault-standing-request r2
+  "This replaces the time-limited grant this conversation holds on it ({scope}, until {when}) with one that has no end.": "这会把这个对话在它上面已有的限时授权（{scope}，到 {when}）换成没有期限的授权。", // lane vault-standing-request r2
+  "Allow also turns on «Usable by agent runs» for this entry — it opens it for THIS conversation; any grants you paused stay paused.": "「允许」同时会打开这个条目的「可供 agent 运行使用」——只为这个对话打开；你暂停的授权保持暂停。", // lane vault-standing-request r2
 };

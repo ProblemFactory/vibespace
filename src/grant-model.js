@@ -149,24 +149,28 @@ function hostTokenOk(h) {
   if (!bare.includes('.') && !bare.includes(':') && !bare.startsWith('*') && SCHEME_WORD_HOSTS.has(bare)) return null;   // round 5 item 5: a single label that IS a URL scheme word is not grantable
   return n;
 }
-/** lane vault-standing-request: ONE COMMAND SHAPE a vault-use member may run — `{program, arg, sha, psha}`: the program's real
- *  path (absolute), its first argument (the script's real path, or a literal word, or null), the sha256 of that script's
- *  bytes (null when the argument is no file) and of the program's bytes (null when only root can write it). Closed keys, each
- *  bounded; → the normal token | null (refused at a write, dropped at a read). */
+/** lane vault-standing-request: ONE COMMAND SHAPE a vault-use member may run — `{program, pre, arg, sha, psha}`: the program's
+ *  real path (absolute), the words between it and the script (`pre` — the options / the subcommand its pin grammar admits,
+ *  src/vault-run.js PIN_GRAMMAR; [] for none), the SCRIPT's real path, the sha256 of the script's bytes and of the program's
+ *  (null when only root can write it). r2 (MAJOR 2 — the acceptance pinned a dummy file named `eval` for `deno eval <code>`):
+ *  a token pins a script FILE by its bytes — never a literal word, never argv[1] alone. Closed keys, each bounded; → the
+ *  normal token | null (refused at a write, dropped at a read). */
 const COMMANDS_MAX = 16;
+const PRE_MAX = 8;
 const SHA_RE = /^[0-9a-f]{64}$/;
 const pathish = (v, abs) => typeof v === 'string' && v.length > 0 && v.length <= 400 && !/[\u0000-\u001f\u007f]/.test(v) && (!abs || v[0] === '/');
 function commandTokenOk(c) {
   if (!c || typeof c !== 'object' || Array.isArray(c)) return null;
-  if (Object.keys(c).some((k) => !['program', 'arg', 'sha', 'psha'].includes(k))) return null;
+  if (Object.keys(c).some((k) => !['program', 'pre', 'arg', 'sha', 'psha'].includes(k))) return null;
   if (!pathish(c.program, true)) return null;
-  if (c.arg != null && !pathish(c.arg, false)) return null;
-  for (const k of ['sha', 'psha']) if (c[k] != null && !SHA_RE.test(String(c[k]))) return null;
-  if (c.sha != null && !(c.arg != null && String(c.arg)[0] === '/')) return null;   // a script's digest pins a FILE — a real path
-  return { program: c.program, arg: c.arg == null ? null : c.arg, sha: c.sha == null ? null : String(c.sha), psha: c.psha == null ? null : String(c.psha) };
+  const pre = c.pre == null ? [] : c.pre;
+  if (!Array.isArray(pre) || pre.length > PRE_MAX || pre.some((w) => typeof w !== 'string' || !w || w.length > 200 || /[\u0000-\u001f\u007f]/.test(w))) return null;
+  if (!pathish(c.arg, true) || !SHA_RE.test(String(c.sha))) return null;   // r2: the script's real path + its digest — a FILE, always
+  if (c.psha != null && !SHA_RE.test(String(c.psha))) return null;
+  return { program: c.program, pre: pre.slice(), arg: c.arg, sha: String(c.sha), psha: c.psha == null ? null : String(c.psha) };
 }
-/** A command token's identity (dedup + the exact match a run is judged by). */
-const commandKeyOf = (c) => JSON.stringify([c.program, c.arg == null ? null : c.arg, c.sha == null ? null : c.sha, c.psha == null ? null : c.psha]);
+/** A command token's identity (dedup + the exact match a run is judged by) — every word up to and including the script. */
+const commandKeyOf = (c) => JSON.stringify([c.program, Array.isArray(c.pre) ? c.pre : [], c.arg == null ? null : c.arg, c.sha == null ? null : c.sha, c.psha == null ? null : c.psha]);
 /** A `commands` value → its normal list (deduplicated, ≤ COMMANDS_MAX) | null when it is not a non-empty list of tokens. */
 function commandListOf(v) {
   if (!Array.isArray(v) || !v.length || v.length > COMMANDS_MAX) return null;

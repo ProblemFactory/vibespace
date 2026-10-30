@@ -168,7 +168,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     const run = runCardOf(i, { t }); // r7: a run card reads its headline, its command under it (never the old clients' prose)
     const words = run ? run.headline : model.wordsOf(i);
     const sub = rowPreview(model.detailOf(i), 160); // the CUT form — the pane has the whole text
-    const cut = run ? rowPreview(run.cmd, 160) : sub; // r7: a run card's preview is its command
+    const cut = run && run.cmd ? rowPreview(run.cmd, 160) : sub; // r7: a run card's preview is its command (lane vault-standing-request r2: a standing request has none — its words)
     const bits = [];
     if (!st.scopeKey || e.notice || e.tail) bits.push(model.nameFor(i.sessionKey, [i]));
     bits.push(agoText(e.resolved ? (i.resolvedAt || i.createdAt) : i.createdAt, t));

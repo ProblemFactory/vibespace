@@ -215,7 +215,7 @@ export function runFactsHtml(i, t, { buttons = true } = {}) {
   const fold = v.fold.length ? `<details class="ut-detail-exp ut-run-fold"><summary>${escHtml(t('Technical details'))}</summary><div class="ut-run-tech">${v.fold.map((f) => `<div class="ut-run-row"><span class="ut-run-lbl">${escHtml(f.label)}</span><span class="ut-run-val">${f.cmd != null ? `<pre class="ut-run-cmd ut-run-cmd-full">${escHtml(f.cmd)}</pre>` : linesHtml(f.lines)}</span></div>`).join('')}</div></details>` : '';
   const cut = v.cut ? `<div class="ut-run-cut">${escHtml(v.cut.text)}</div>` : ''; // r8: a command longer than the body's bound says it is a cut (the whole: the fold)
   const again = v.again ? `<div class="ut-run-again">${segHtml(v.again)}</div>` : ''; // r11: a near-identical rerun names the ONE way it differs (the door's whyAgain)
-  return `<div class="ut-run"><pre class="ut-run-cmd">${escHtml(v.cmd)}</pre>${cut}${again}<div class="ut-run-facts">${rows}</div>${row}${fold}</div>`;
+  return `<div class="ut-run">${v.cmd ? `<pre class="ut-run-cmd">${escHtml(v.cmd)}</pre>` : ''}${cut}${again}<div class="ut-run-facts">${rows}</div>${row}${fold}</div>`;
 }
 
 /** A CARD WITH A DEADLINE SHOWS IT (r7 addendum): THE model's line (foryou-actions deadlineOf) under the question — «valid for

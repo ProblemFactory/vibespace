@@ -11618,4 +11618,17 @@ export default {
   "{name} may run: {commands} (kept)": "{name} が実行できるもの：{commands}（そのまま）", // lane vault-standing-request
   "{who} asks for a standing grant on a stored secret": "{who} が保管庫のシークレットの常設の許可を求めています", // lane vault-standing-request
   "«Always» on a card": "カードの「常に」", // lane vault-standing-request
+  "Purpose": "用途", // lane vault-standing-request r2
+  "Hosts": "ホスト", // lane vault-standing-request r2
+  "Runs": "実行", // lane vault-standing-request r2
+  "Also": "あわせて", // lane vault-standing-request r2
+  "Reference": "参照", // lane vault-standing-request r2
+  "How it ends": "終わり方", // lane vault-standing-request r2
+  "a stored secret": "保管庫のシークレット", // lane vault-standing-request r2
+  "until you revoke it": "あなたが取り消すまで", // lane vault-standing-request r2
+  "(via {tool})": "（{tool} 経由）", // lane vault-standing-request r2
+  "{who} asks for a standing grant on “{secret}”": "{who} が「{secret}」の常設の許可を求めています", // lane vault-standing-request r2
+  "VibeSpace cannot see where it sends the secret — Allow means you trust this command itself; a changed program or script asks again.": "VibeSpace にはシークレットの送り先が見えません。「許可」はこのコマンド自体を信頼するという意味です。プログラムやスクリプトが変わるともう一度確認します。", // lane vault-standing-request r2
+  "This replaces the time-limited grant this conversation holds on it ({scope}, until {when}) with one that has no end.": "この会話がこれに持っている期限付きの許可（{scope}、{when} まで）を、期限のない許可に置き換えます。", // lane vault-standing-request r2
+  "Allow also turns on «Usable by agent runs» for this entry — it opens it for THIS conversation; any grants you paused stay paused.": "「許可」するとこの項目の「エージェントの実行で使用可」もオンになります——この会話にだけ開き、一時停止した許可は停止したままです。", // lane vault-standing-request r2
 };

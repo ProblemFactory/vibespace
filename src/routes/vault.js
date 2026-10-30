@@ -490,7 +490,7 @@ function registerRunRoutes(app, { run, activeSessions, getJobs, contents, who, p
     if (!caller) return refusal(res, { code: 'unauthorized', words: DOOR.MORE_WORDS.unauthorized });
     const b = req.body && typeof req.body === 'object' ? req.body : {};
     let r;
-    try { r = await run.request({ caller, entry: typeof b.entry === 'string' ? b.entry : '', purpose: typeof b.purpose === 'string' ? b.purpose : '', standing: b.standing === true, hosts: Array.isArray(b.hosts) ? b.hosts : null, command: typeof b.command === 'string' ? b.command : null, cwd: typeof b.cwd === 'string' ? b.cwd : null }); }   // lane vault-standing-request: --standing [--host …] [--command …] (+ the CLI's folder, where a relative script is read)
+    try { r = await run.request({ caller, entry: typeof b.entry === 'string' ? b.entry : '', purpose: typeof b.purpose === 'string' ? b.purpose : '', standing: b.standing === true, hosts: Array.isArray(b.hosts) ? b.hosts : null, command: typeof b.command === 'string' ? b.command : null, tool: typeof b.tool === 'string' ? b.tool : null, cwd: typeof b.cwd === 'string' ? b.cwd : null }); }   // lane vault-standing-request: --standing [--host … [--tool …]] [--command …] (+ the CLI's folder, where a relative script is read)
     catch (e) { return refusal(res, { code: 'failed', words: DOOR.MORE_WORDS.failed }); }
     return r && r.ok ? res.json({ ...r, ...(r.todoId ? { filed: CN.filedLine('vault-grant-ask', r.todoId, OF.tray()) } : {}) }) : refusal(res, r || { code: 'failed' });
   });

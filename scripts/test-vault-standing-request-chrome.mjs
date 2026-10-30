@@ -13,6 +13,10 @@
 //   ④ THE CARD'S «总是（这条命令）»: a run of ANOTHER script draws its card with the button and its plain words; Always (验证是你)
 //      ⇒ the next run of it goes with no card; the chip says «卡片上的总是»
 //   ⑤ THE PHONE (390 px): a second standing card and the Vault row at phone width
+//   ⑥ (r2, MAJOR 3) THE AGENT'S OWN ENTRY: «总是（这条命令）» on a run with the conversation's MINTED entry ⇒ its Vault row draws
+//      the member (chip + ✕, no «谁可以用…»); ✕ takes it back
+//   r2 (主开发's visual read): the standing card = label rows (密钥 = the NAME, 用途, 命令 / 主机, 运行, 期限 …) + ONE 技术细节 fold —
+//      the vault:// reference only there, as code, never a link (desktop and phone)
 //   --shots <dir> keeps vsr-*.png. RED CONTROL: this suite over the base tree (4ef7e9494) — ② the request files a PLAIN card
 //   (once / 8h), ③ no command chip, ④ no «总是（这条命令）».
 // Run: node scripts/test-vault-standing-request-chrome.mjs [--shots <dir>]   (SKIPs without chrome or python3)
@@ -140,6 +144,7 @@ try {
   const reveal = async () => { const rs = await A.api('POST', '/api/vault/reveal-session', { password: SECOND }); return rs.json && rs.json.page; };
   const openTray = async () => { await A.evalJs(`(() => { const p = document.getElementById('user-todos-popup'); if (!p || p.classList.contains('hidden')) document.getElementById('taskbar-user-todos').click(); return true; })()`); await A.until(visible('#user-todos-popup .ut-item'), { timeout: 8000 }); await A.evalJs(`(() => { for (const d of document.querySelectorAll('#user-todos-popup details.ut-detail-exp')) d.open = true; return true; })()`); await sleep(350); };
   const closeTray = () => A.evalJs(`document.getElementById('user-todos-popup')?.classList.add('hidden'); true`);
+  const cardView = (re) => A.evalJs(`(() => { const it = ${ITEM(re)}; if (!it) return null; it.scrollIntoView({ block: 'center' }); const fold = it.querySelector('details.ut-run-fold'); const foldText = fold ? fold.textContent : ''; const rows = [...it.querySelectorAll('.ut-run-facts .ut-run-row')].map((r) => ({ k: r.dataset.fact, l: (r.querySelector('.ut-run-lbl') || {}).textContent || '', v: (r.querySelector('.ut-run-val') || {}).textContent || '', warn: r.classList.contains('ut-run-warn') })); const codes = fold ? [...fold.querySelectorAll('code')].map((c) => c.textContent) : []; const out = { text: it.textContent, face: it.textContent.replace(foldText, ''), rows, codes, links: [...it.querySelectorAll('.fy-link')].map((a) => a.textContent), buttons: [...it.querySelectorAll('button')].map((b) => b.textContent.trim()).filter(Boolean) }; if (fold) fold.open = false; return out; })()`);   // r2: the standing card's label rows + its ONE fold (closed for the shot — the face is what the owner reads)
 
   console.log('② THE STANDING REQUEST — one card, its two answers; Allow (验证是你) ⇒ the segments run with no card');
   let rq = null;
@@ -148,8 +153,11 @@ try {
   const sc = (await openOf('vault-grant-ask'))[0];
   check('ONE card in For you, marked standing', !!sc && sc.action.standing === true, sc && sc.action);
   await openTray();
-  const view = await A.evalJs(`(() => { const it = ${ITEM('/常驻授权/')}; if (!it) return null; it.scrollIntoView({ block: 'center' }); return { text: it.textContent, buttons: [...it.querySelectorAll('button')].map((b) => b.textContent.trim()).filter(Boolean) }; })()`);
-  check('its words in 中文: who asks, a STANDING grant, the command python3 transcribe.py, «直到你收回»', !!view && /Transcriber/.test(view.text) && /请求一条常驻授权/.test(view.text) && /python3 transcribe\.py/.test(view.text) && /直到你收回/.test(view.text), view && view.text.slice(0, 600));
+  const view = await cardView('/常驻使用/');
+  const rowOf = (v, k) => (v && v.rows.find((r) => r.k === k)) || null;
+  check('its words in 中文: who asks for a STANDING grant on WHICH secret (its name), the command python3 transcribe.py, «直到你收回»', !!view && /Transcriber 请求常驻使用「TTS API key」/.test(view.text) && /python3 transcribe\.py/.test((rowOf(view, 'command') || {}).v || '') && /直到你收回/.test((rowOf(view, 'until') || {}).v || ''), view && view.text.slice(0, 600));
+  check('r2 (visual): LABEL ROWS — 密钥 = the entry\'s NAME, 用途, 命令, 运行 = the program\'s real path, 期限, and (a closed entry) 另外: Allow turns «可供 agent 运行使用» on', !!view && view.rows.map((r) => r.k).join() === 'secret,purpose,command,program,until,switch' && rowOf(view, 'secret').l === '密钥' && rowOf(view, 'secret').v === LABEL && rowOf(view, 'purpose').l === '用途' && rowOf(view, 'command').l === '命令' && rowOf(view, 'program').l === '运行' && rowOf(view, 'program').v.includes(fs.realpathSync(PY)) && rowOf(view, 'switch').warn && /可供 agent 运行使用/.test(rowOf(view, 'switch').v), view && view.rows);
+  check('r2 (visual): the vault:// reference is NOT on the face — only under «技术细节», as code; nothing on the card is a link', !!view && !view.face.includes('vault://') && view.codes.includes(REF) && !view.links.length, view && { codes: view.codes, links: view.links });
   check('its answers: «允许（常驻）» and «拒绝» — never 允许一次 / 8 小时', !!view && view.buttons.includes('允许（常驻）') && view.buttons.includes('拒绝') && !view.buttons.includes('允许一次') && !view.buttons.includes('8 小时'), view && view.buttons);
   await A.shot('vsr-1-standing-card-desktop.png');
   await closeTray();
@@ -205,8 +213,10 @@ try {
   const rq2 = await cli('vibespace-vault', ['request', REF, '--standing', '--host', 'api.tts.example', '--for', 'call the speech API for the narration'], TOKEN);
   check('a second standing request (a hosts scope) ⇒ filed', rq2.code === 0, rq2.out);
   await openTray();
-  const pv = await A.evalJs(`(() => { const it = ${ITEM('/api\\.tts\\.example/')}; if (!it) return null; it.scrollIntoView({ block: 'center' }); const r = it.getBoundingClientRect(); const btns = [...it.querySelectorAll('button')].filter((b) => /允许（常驻）|拒绝/.test(b.textContent)); return { w: r.width, overflow: it.scrollWidth > it.clientWidth + 1, buttons: btns.map((b) => { const q = b.getBoundingClientRect(); return { t: b.textContent.trim(), h: Math.round(q.height), inside: q.left >= r.left - 1 && q.right <= r.right + 1 }; }), hosts: /用于连往 api\\.tts\\.example 的命令/.test(it.textContent) }; })()`);
-  check('at 390 px the card fits (no sideways overflow), its scope reads «用于连往 api.tts.example 的命令», both answers inside the card and ≥ 32 px tall', !!pv && !pv.overflow && pv.hosts && pv.buttons.length === 2 && pv.buttons.every((b) => b.inside && b.h >= 32), pv);
+  const pview = await cardView('/api\\.tts\\.example/');
+  check('r2 (visual, phone): the hosts card — 主机 row api.tts.example; the reference only under the fold as code; NO link anywhere on it (the phone linkified «://secrets/secret:…» before)', !!pview && /api\.tts\.example/.test((pview.rows.find((r) => r.k === 'hosts') || {}).v || '') && (pview.rows.find((r) => r.k === 'hosts') || {}).l === '主机' && !pview.face.includes('vault://') && pview.codes.includes(REF) && !pview.links.length, pview && { rows: pview.rows, links: pview.links, codes: pview.codes });
+  const pv = await A.evalJs(`(() => { const it = ${ITEM('/api\\.tts\\.example/')}; if (!it) return null; it.scrollIntoView({ block: 'center' }); const r = it.getBoundingClientRect(); const btns = [...it.querySelectorAll('button')].filter((b) => /允许（常驻）|拒绝/.test(b.textContent)); return { w: r.width, overflow: it.scrollWidth > it.clientWidth + 1, buttons: btns.map((b) => { const q = b.getBoundingClientRect(); return { t: b.textContent.trim(), h: Math.round(q.height), inside: q.left >= r.left - 1 && q.right <= r.right + 1 }; }), hosts: /主机api\\.tts\\.example/.test(it.textContent) }; })()`);
+  check('at 390 px the card fits (no sideways overflow), its scope reads «主机 api.tts.example», both answers inside the card and ≥ 32 px tall', !!pv && !pv.overflow && pv.hosts && pv.buttons.length === 2 && pv.buttons.every((b) => b.inside && b.h >= 32), pv);
   await A.shot('vsr-5-standing-card-phone.png');
   await closeTray();
   await A.evalJs(`app.replayOpenSpec({ action: 'openVault' })`);
@@ -214,6 +224,37 @@ try {
   check('at 390 px the Vault row\'s chip stays inside the screen', !!pchip && pchip.right <= pchip.vw + 1, pchip);
   await sleep(300);
   await A.shot('vsr-6-vault-row-phone.png');
+  await A.cdp('Emulation.clearDeviceMetricsOverride', {});
+  await A.cdp('Page.navigate', { url: URL });
+  await A.until(`!!(window.app && app.replayOpenSpec)`, { timeout: 30000 });
+  await A.until(`!document.getElementById('loading-screen')`, { timeout: 30000 });
+  if (await A.evalJs(`!!document.getElementById('vault-unlock-dialog')`)) { await A.api('POST', '/api/vault/unlock', { password: SECOND }); await sleep(300); }
+
+  console.log('⑥ (r2, MAJOR 3) THE AGENT\'S OWN ENTRY — a standing member on it is SEEN and ✕-able in its Vault row');
+  const mt = await cli('vibespace-vault', ['mint', 'tts-own', '--for', 'api.tts.example'], TOKEN);
+  const OWN = (String(mt.out).match(/vault:\/\/agent:[^\s]+/) || [])[0] || null;
+  check('the agent mints its own entry', mt.code === 0 && !!OWN, mt.out);
+  const ownP = cli('vibespace-vault', ['run', '--env', `T=${OWN}`, '--', 'python3', 'transcribe.py', 'own01.mp3'], TOKEN, { timeout: 70000 });
+  let oc = null;
+  for (let i = 0; i < 60 && !oc; i++) { oc = (await openOf('vault-run-ask')).find((x) => x.action && x.action.command) || null; if (!oc) await sleep(200); }
+  const page3 = await reveal();
+  const oa = oc && await A.api('POST', `/api/vault/run/asks/${oc.action.askId}`, { answer: 'always' }, { 'X-Vault-Page': page3 || '' });
+  const oRun = await ownP;
+  check('its card offers «总是（这条命令）»; Always (验证是你) ⇒ ok', !!oc && !!oa && oa.status === 200 && oa.json.ok && oRun.code === 0, { action: oc && oc.action, oa: oa && oa.json, out: oRun.out.slice(0, 200) });
+  await A.evalJs(`app.replayOpenSpec({ action: 'openVault' })`);
+  const OWN_ROW = `[...document.querySelectorAll('.vw-list .vw-row')].find((r) => r.isConnected && String(r.dataset.id || '').startsWith('secrets:agent:') && String(r.dataset.id).includes('/tts-own#'))`;
+  const own = await A.until(`(() => { const r = ${OWN_ROW}; const c = r && r.querySelector('.vw-use-chip'); if (!c) return null; c.scrollIntoView({ block: 'center' }); const g = r.querySelector('.vw-use-grant'); return { chip: c.textContent, x: !!c.querySelector('.vw-use-x'), add: !!(g && !g.hidden && g.getBoundingClientRect().width > 0) }; })()`, { timeout: 15000 });
+  check(`its Vault row now SHOWS the member: «Transcriber · 命令 ${PYN} transcribe.py · 已用 1 次 · 卡片上的总是 · HH:MM ✕» — with its ✕, and no «谁可以用…» (only its conversation may use it)`, !!own && new RegExp(`^Transcriber · 命令 ${reEsc(PYN)} transcribe\\.py(?: · 已用 \\d+ 次)? · 卡片上的总是 · \\d\\d:\\d\\d✕$`).test(own.chip) && own.x && !own.add, own);
+  await sleep(300);
+  await A.shot('vsr-7-own-entry-row-desktop.png');
+  await A.evalJs(`(() => { const r = ${OWN_ROW}; const x = r && r.querySelector('.vw-use-chip .vw-use-x'); if (x) x.click(); return !!x; })()`);
+  const gone = await A.until(`(() => { const r = ${OWN_ROW}; return r && !r.querySelector('.vw-use-chip') ? true : null; })()`, { timeout: 10000 });
+  const ownP2 = cli('vibespace-vault', ['run', '--env', `T=${OWN}`, '--', 'python3', 'transcribe.py', 'own02.mp3'], TOKEN, { timeout: 70000 });
+  let oc2 = null;
+  for (let i = 0; i < 60 && !oc2; i++) { oc2 = (await openOf('vault-run-ask'))[0] || null; if (!oc2) await sleep(200); }
+  if (oc2) await A.api('POST', `/api/vault/run/asks/${oc2.action.askId}`, { answer: 'deny' });
+  await ownP2;
+  check('its ✕ takes it back: the chip goes, and the next run of it draws its card again', gone === true && !!oc2, { gone, card: !!oc2 });
   await A.evalJs(`localStorage.setItem('vibespace.lang', 'auto'); true`);
 } catch (e) {
   check('the run did not throw', false, e && e.stack);

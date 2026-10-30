@@ -34,8 +34,9 @@ const oneHostWord = (h, entryHosts, tool = null) => {
 const hostsWord = (hosts, entryHosts, toolFor = null) => (hosts || []).map((h) => oneHostWord(h, entryHosts, toolFor && toolFor[h])).join(', ');
 // lane vault-standing-request: a member's COMMAND SHAPES («the command python3 transcribe.py») and who wrote it, when
 const baseOf = (p) => String(p == null ? '' : p).replace(/\/+$/, '').split('/').pop();
-const commandWord = (c) => (c && c.program ? [baseOf(c.program), c.arg == null ? '' : String(c.arg)[0] === '/' ? baseOf(c.arg) : String(c.arg)].filter(Boolean).join(' ') : '');
-const commandTitle = (c) => [c.program, c.arg].filter((x) => x != null && x !== '').join(' ');
+const preOf = (c) => (c && Array.isArray(c.pre) ? c.pre.filter((w) => typeof w === 'string' && w) : []);   // r2: the options / subcommand it pins before the script
+const commandWord = (c) => (c && c.program ? [baseOf(c.program), ...preOf(c), c.arg == null ? '' : String(c.arg)[0] === '/' ? baseOf(c.arg) : String(c.arg)].filter(Boolean).join(' ') : '');
+const commandTitle = (c) => [c.program, ...preOf(c), c.arg].filter((x) => x != null && x !== '').join(' ');
 const clockOf = (ms) => { try { return new Date(ms).toTimeString().slice(0, 5); } catch { return ''; } };
 const sourceWord = (m) => { const at = Number(m.at) > 0 ? clockOf(m.at) : ''; const w = m.source === 'request' ? t('asked by the agent') : m.source === 'card' ? t('«Always» on a card') : m.source === 'owner' ? t('set by you') : ''; return w && at ? `${w} · ${at}` : w; };
 
@@ -65,6 +66,7 @@ export function useExtras(row, { app = null, refresh = () => {} } = {}) {
     cur = r;
     host.textContent = '';
     const u = (r && r.run && r.run.use) || null;
+    useB.hidden = !!(u && u.own);   // lane vault-standing-request r2 (MAJOR 3): an agent's OWN entry shows the standing grants it holds (chips + ✕) — nobody else may use it, so there is no «Who may use it…» to add with
     if (!u) return;
     if (u.unknown) { host.append(el('div', 'vw-use-bad', t('Who may use it could not be read — it is refused as it is (never read wider). Save it again to repair it.'))); return; }
     const live = (u.to || []).filter(Boolean);
@@ -203,7 +205,7 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
       const h = hosts.length ? hosts : was ? (was.hosts || []) : [];
       const cmds = was && Array.isArray(was.commands) ? was.commands : [];   // lane vault-standing-request: a member's command shapes ride the Save unchanged
       if (!h.length && !cmds.length) { err.textContent = t('Name the hosts it may be used for — a host name or address each (never «any host»)'); return false; }
-      const m = { ...p, ...(was && was.name && !p.name ? { name: was.name } : {}), ...(h.length ? { hosts: h } : {}), ...(cmds.length ? { commands: cmds.map((c) => ({ program: c.program, arg: c.arg == null ? null : c.arg, sha: c.sha || null, psha: c.psha || null })) } : {}), ...(was && was.source ? { source: was.source, ...(Number(was.at) > 0 ? { at: was.at } : {}) } : {}) };
+      const m = { ...p, ...(was && was.name && !p.name ? { name: was.name } : {}), ...(h.length ? { hosts: h } : {}), ...(cmds.length ? { commands: cmds.map((c) => ({ program: c.program, pre: preOf(c), arg: c.arg == null ? null : c.arg, sha: c.sha || null, psha: c.psha || null })) } : {}), ...(was && was.source ? { source: was.source, ...(Number(was.at) > 0 ? { at: was.at } : {}) } : {}) };
       // lane vault-use-grants round 5 (MAJOR item 4): carry the per-host tool scope back — a wildcard host (`*.amazonaws.com`)
       // keeps the CLI that minted it, so a whole-row Save never silently re-scopes it to every tool. The store refuses a
       // wildcard host with no tool by name (`tool_required`).

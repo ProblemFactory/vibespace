@@ -142,10 +142,13 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
   /** THE QUESTION before a card: may THIS caller use entry `id` for this run with no card? (U.useVerdict) */
   const verdictFor = (id, facts = {}, run = {}) => U.useVerdict(rowsOf(id), facts, { ...run, now: now() });
 
-  /** THE PICKER's save — the whole row. */
-  function setRow(id, { to = [], except = [] } = {}, { by = 'user', reauthed = false } = {}) {
-    if (!okId(id)) return named('bad_resource');
-    if (!unlocked()) return named('vault_locked');   // round 4 (item 4): a locked vault never writes mac:null — refuse by name
+  /** THE ROW RULES — what makes a row one the owner could SAVE (lane vault-standing-request r2, MAJOR 1: an agent's standing
+   *  `--host '*.github.io'` went through addMember with no tool, so the stored member covered that domain for EVERY program
+   *  and every later Save of the row failed `tool_required`). ONE validator: setRow (the owner's Save), addMember (every press,
+   *  request, carry) and judgeMember (an agent's standing request, BEFORE its card is filed) read it — a row the owner could
+   *  not save is never written. Every member names hosts or commands (never «any»); the model's own write rules; a wildcard
+   *  host carries the tool that uses it. → { ok: true, row } | a named refusal. */
+  function rowRules(id, { to = [], except = [] } = {}) {
     // lane vault-standing-request: a member names hosts, commands or both — an empty list is the field left out (never «any»)
     to = (Array.isArray(to) ? to : []).map((e) => { if (!e || typeof e !== 'object') return e; const x = { ...e }; for (const f of ['hosts', 'commands']) if (Array.isArray(x[f]) && !x[f].length) delete x[f]; return x; });
     for (const e of to) if (!GM.hostListOf(e && e.hosts) && !GM.commandListOf(e && e.commands)) return named('hosts_required', { principal: GM.principalKey(GM.bareOf(e)) });
@@ -155,6 +158,14 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
     // drops `toolFor` (the r4 picker rebuilt each member from principal + name + hosts + end only) is refused BY NAME, never
     // silently re-scoping `*.amazonaws.com` from aws to every tool.
     for (const e of v.row.to) for (const h of e.hosts || []) if (String(h).startsWith('*.') && !(e.toolFor && e.toolFor[h])) return named('tool_required', { principal: GM.principalKey(GM.bareOf(e)), host: h });
+    return { ok: true, row: v.row };
+  }
+  /** THE PICKER's save — the whole row. */
+  function setRow(id, { to = [], except = [] } = {}, { by = 'user', reauthed = false } = {}) {
+    if (!okId(id)) return named('bad_resource');
+    if (!unlocked()) return named('vault_locked');   // round 4 (item 4): a locked vault never writes mac:null — refuse by name
+    const v = rowRules(id, { to, except });
+    if (!v.ok) return v;
     const was = rowOf(id);
     if (widens(was, v.row) && !reauthed) return named('reveal_needs_password');
     // lane vault-standing-request: a member this Save ADDS is the owner's («你设置的», now); one already there keeps its source
@@ -173,13 +184,23 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
     if (!unlocked()) return named('vault_locked');
     const plan = U.withMember(verifiedRow(rowOf(id)), principal, { hosts, until, tool, commands, source, at: now() });
     if (!plan.ok) return named(plan.code);
-    const v = GM.validateWrite(U.DOOR, String(id), { to: plan.to, except: plan.except });   // round 5 (MINOR): validate the plan BEFORE any generation move (a bad plan never bumps the gen)
-    if (!v.ok) return named(v.code, { error: v.error });
+    const v = rowRules(id, { to: plan.to, except: plan.except });   // round 5 (MINOR): validate the plan BEFORE any generation move (a bad plan never bumps the gen); r2 (MAJOR 1): the SAME rules the owner's Save reads
+    if (!v.ok) return v;
     const g = store();
     const gen = nextGen();
     const w = g.set(U.DOOR, String(id), { to: stamp(id, plan.to, plan.except, gen), except: plan.except }, by);
     if (w && w.ok) commitGen(id, gen);
     return landed(w, { id: String(id), grant: U.grantIdOf(String(id), GM.principalKey(GM.bareOf(principal))), widened: plan.widened, added: plan.added });
+  }
+  /** r2 (MAJOR 1): THE QUESTION BEFORE A STANDING REQUEST'S CARD — would addMember write this member? (the plan + the row
+   *  rules, nothing written) → { ok: true } | the named refusal the Allow would meet. */
+  function judgeMember(id, principal, { hosts = [], until = null, tool = null, commands = null, source = null } = {}) {
+    if (!okId(id)) return named('bad_resource');
+    if (!unlocked()) return named('vault_locked');
+    const plan = U.withMember(verifiedRow(rowOf(id)), principal, { hosts, until, tool, commands, source, at: now() });
+    if (!plan.ok) return named(plan.code);
+    const v = rowRules(id, { to: plan.to, except: plan.except });
+    return v.ok ? { ok: true } : v;
   }
   /** ONE member out (a click: a narrowing). */
   function revoke(id, principalKey, { by = 'user' } = {}) {
@@ -211,7 +232,7 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
     const plan = U.alwaysCarry(always, { now: now(), resourceOf });
     let carried = 0, failed = 0;
     for (const m of plan.members) {
-      const r = addMember(m.resource, m.principal, { hosts: m.hosts, until: m.until }, { by: 'migration' });
+      const r = addMember(m.resource, m.principal, { hosts: m.hosts, until: m.until, tool: m.tool || null }, { by: 'migration' });   // r2: a carried wildcard keeps the CLI it was minted by (the row rules refuse one without)
       if (r.ok) carried++; else { failed++; log(`[vault-use] an «always» row could not be carried (${m.resource}: ${r.code})`); }
     }
     return { carried, expired: plan.expired, hostless: plan.hostless, failed };
@@ -231,11 +252,11 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
     const out = [];
     for (const row of store().rowsOfDoor(U.DOOR)) {
       const v = U.useVerdict([verifiedRow(row)], facts, { destinationKnown: false, now: now() });
-      if (U.holds(v)) out.push({ id: row.resource, grant: v.member.id, hosts: v.member.hosts, commands: v.member.commands, source: v.member.source, at: v.member.at, until: v.member.until });   // lane vault-standing-request: the scope + who wrote it + since when
+      if (U.holds(v)) out.push({ id: row.resource, grant: v.member.id, hosts: v.member.hosts, toolFor: v.member.toolFor || null, commands: v.member.commands, source: v.member.source, at: v.member.at, until: v.member.until });   // lane vault-standing-request: the scope + who wrote it + since when
     }
     return out;
   }
-  return { rowsOf, verdictFor, heldBy, setRow, addMember, revoke, drop, carry, publicFor, statusOf: (code) => STATUS[code] || 400, words: (code) => WORDS[code] || code };
+  return { rowsOf, verdictFor, heldBy, setRow, addMember, judgeMember, revoke, drop, carry, publicFor, statusOf: (code) => STATUS[code] || 400, words: (code) => WORDS[code] || code };
 }
 
 module.exports = { create, widens, STATUS, WORDS };

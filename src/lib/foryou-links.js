@@ -15,15 +15,17 @@ const URL_RE = /\b(?:https?:\/\/|mailto:)[^\s<>"'`]+/g;
 const MAIL_RE = /(?<![\w.+-])[\w.+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+/g;
 const PAGE_RE = /(?<![="'\w/])\/p\/pg[a-z0-9]{10}(?![A-Za-z0-9_-])/g;
 const CODE_RE = /`([^`\n]+)`/g;
+const VAULT_RE = /\bvault:\/\/[^\s<>"'`]+/g;   // lane vault-standing-request r2: a vault reference is NEVER a link (the phone linkified «://secrets/secret:7…» out of one) — a span no other hit may start inside
 const LEAD = /^[([{"'“‘「『（]+/;
 const FILE_TAIL = /\.[A-Za-z0-9]{1,8}$/;
-const RANK = { url: 0, mail: 1, page: 2, path: 3 };
+const RANK = { vault: -1, url: 0, mail: 1, page: 2, path: 3 };
 const ESC = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ESC[c]);
 
 /** Prose spans: [{start, end, kind, ref}] — the earliest wins; one starting inside an earlier one is dropped. */
 function proseHits(s) {
   const hits = [];
+  for (const m of s.matchAll(VAULT_RE)) hits.push({ start: m.index, end: m.index + m[0].length, kind: 'vault', ref: m[0] });
   for (const m of s.matchAll(URL_RE)) { const ref = cleanPath(m[0]); if (ref.length > 8) hits.push({ start: m.index, end: m.index + ref.length, kind: ref.startsWith('mailto:') ? 'mail' : 'url', ref }); }
   for (const m of s.matchAll(MAIL_RE)) { const ref = cleanPath(m[0]); hits.push({ start: m.index, end: m.index + ref.length, kind: 'mail', ref: 'mailto:' + ref }); }
   for (const m of s.matchAll(PAGE_RE)) hits.push({ start: m.index, end: m.index + m[0].length, kind: 'page', ref: m[0] });
@@ -56,7 +58,7 @@ function proseSegments(s, segs) {
   let at = 0;
   for (const h of hits) {
     if (h.start > at) segs.push({ t: 'text', s: s.slice(at, h.start) });
-    segs.push({ t: 'link', s: s.slice(h.start, h.end), kind: h.kind, ref: h.ref });
+    segs.push(h.kind === 'vault' ? { t: 'text', s: s.slice(h.start, h.end) } : { t: 'link', s: s.slice(h.start, h.end), kind: h.kind, ref: h.ref });
     at = h.end;
   }
   if (at < s.length) segs.push({ t: 'text', s: s.slice(at) });
@@ -73,7 +75,7 @@ export function segmentText(text) {
     const before = segs.length;
     segs.push({ t: 'text', s: '`' });
     proseSegments(inner, segs);
-    if (!segs.slice(before + 1).some((x) => x.t === 'link') && looksRelPath(inner.trim())) {
+    if (!segs.slice(before + 1).some((x) => x.t === 'link') && !/^vault:\/\//.test(inner.trim()) && looksRelPath(inner.trim())) {
       segs.length = before + 1;
       const lead = inner.length - inner.trimStart().length, core = inner.trim();
       if (lead) segs.push({ t: 'text', s: inner.slice(0, lead) });

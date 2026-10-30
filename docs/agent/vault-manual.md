@@ -28,7 +28,7 @@ vibespace-vault run [--env NAME=vault://…]… [--file NAME=vault://…|@<templ
 vibespace-vault list                what you may use in a run: your own entries, entries the user opened for runs or granted to you
 vibespace-vault request <vault://…> --for "<purpose>"
                                     ask the user for an entry, with what you will run with it
-vibespace-vault request <vault://…> --standing --for "<purpose>" [--host <h>[,<h>…]] [--command "<program> <script>"]
+vibespace-vault request <vault://…> --standing --for "<purpose>" [--host <h>[,<h>…] [--tool <cli>]] [--command "<program> [options] <script>"]
                                     ask ONCE for a STANDING grant — the same as the user setting «Who may use it…» on its row
 vibespace-vault request "<what you need>" --purpose "<why>" [--into <row>.<field> | --kind api-key|password|secret] [--name <label>] [--host <h>[,<h>…]]
                                     ask the user to PASTE a secret you do not have — a masked box in their For you tray
@@ -97,21 +97,30 @@ exactly the standing permission they would otherwise configure by hand on the en
     vibespace-vault request vault://app-secrets/tts/apiKey --standing --command "python3 transcribe.py" --for "transcribe the 40 interview segments"
 
 - `--host` — where your commands **connect** with it (a host name or address, e.g. `api.openai.com`, `192.168.1.1`; never «any
-  host»). Use it for a tool whose destination VibeSpace reads from the command (curl, gh, ssh, psql …).
-- `--command "<program> <script>"` — for a program whose destination VibeSpace **cannot** read: an interpreter and its script
-  (`python3 transcribe.py`, `node upload.js`, `bash sync.sh`) or a program outside its tool table. Name the program and its
-  first argument as you run them, from the folder you run them in — the hub resolves the program on your PATH and pins the
-  script by its real path and the sha256 of its bytes. The rest of the command line is free (`part01.mp3`, `part02.mp3` …).
-  Inline code (`python3 -c …`) cannot be granted; a known tool asks with `--host` (`command_has_hosts`).
-  **If you change the script (or the program), it is a new command** — its next run shows the user a card again.
+  host»). Use it for a tool whose destination VibeSpace reads from the command (curl, gh, ssh, psql …). A **wildcard** host
+  (`*.example.com`) is for ONE tool — name it: `--host '*.example.com' --tool curl` (without `--tool` it is refused
+  `tool_required`, with this very recipe); the grant then covers that tool only.
+- `--command "<program> [options] <script>"` — for a program whose destination VibeSpace **cannot** read: a shell or an
+  interpreter running a SCRIPT FILE (`python3 transcribe.py`, `python3 -u transcribe.py`, `node upload.js`, `bash sync.sh`,
+  `deno run -A main.ts`, `dotnet app.dll`). Name it as you run it, up to and including the script, from the folder you run it
+  in — the hub resolves the program on your PATH and pins every word up to the script plus the script's real path and the
+  sha256 of its bytes. What follows the script is free (`part01.mp3`, `part02.mp3` …). Only the options the interpreter's
+  pin grammar names are pinned; **inline code or a module run is never pinned** (`-c`, `-e`, `--eval`, `eval`, `-m`, `-r`
+  …: `command_not_pinnable` — «write the code to a file and run that»), nor an option the grammar does not know, code on
+  stdin, a file that is not that interpreter's script, `bun` / `pwsh` / `cmd`, or a program outside the shell and
+  interpreter tables (it may run code its arguments name — run a script through its interpreter, or ask with `--host`).
+  A known tool asks with `--host` (`command_has_hosts`). **If you change the script (or the program, or its options), it
+  is a new command** — its next run shows the user a card again.
 
 That files **one** card: «<this conversation> asks for a standing grant on a stored secret» with your purpose, the scope
 («for commands to api.tts.example» / «for the command python3 transcribe.py — VibeSpace cannot see where it sends the
 secret; Allow means you trust this command itself») and «until you revoke it». Nothing waits on it. The user answers
-**Allow (standing)** (with the second password) or **Deny** (that same ask is quiet for 10 minutes). Their Allow is the
+**Allow (standing)** (with the second password) or **Deny** (every ask you make for that entry — standing or plain, any
+scope — is then quiet for 10 minutes: `request_quiet`; ask once after it, with the scope you want). Their Allow is the
 entry's own row: it has no end and a lock does not end it (a locked vault runs nothing; once unlocked, your runs go on with
 no card); they see it on the row — «agent 申请 · 11:46» — and ✕ takes it back. The same scope is asked once while open
-(`request_pending`); one you already hold answers that you hold it. `list` and `uses` show it «standing · <scope> · since
+(`request_pending`); one you already hold answers that you hold it (`already: 'timed'` + its end when what you hold is
+time-limited — the user's card says so if a standing grant would replace it). `list` and `uses` show it «standing · <scope> · since
 <when>». A run outside the scope (another host, another script, another program) still shows its card — and that card's
 **«Always (this command)»** (offered where VibeSpace cannot read the destination) writes the same kind of grant from the
 user's side.
@@ -263,7 +272,9 @@ password you were handed in the chat when they can.
 | `entry_has_its_own_door` | a sign-in / pairing / channel token, a passkey, a key | the door the answer names (Channels panel, Accounts…) |
 | `entry_unknown` | no such entry (any more) | — (`vibespace-vault list`) |
 | `request_pending` · `request_quiet` | you already asked for that entry / the user said no a moment ago (10 minutes) | For you (the open question) |
-| `scope_required` · `command_unreadable` · `command_has_hosts` · `standing_bad_host` | a standing request named no scope / a `--command` that is not a program + its script file (inline code, a missing or 1 MiB+ script) / a known tool (ask `--host`) / not a host | — (fix the words) |
+| `scope_required` · `command_unreadable` · `command_has_hosts` · `standing_bad_host` | a standing request named no scope / a `--command` whose script is missing or over 1 MiB / a known tool (ask `--host`) / not a host | — (fix the words) |
+| `command_not_pinnable` (+ `why`) | the `--command` cannot be pinned to what runs: inline code or a module (`-c` / `-e` / `eval` / `-m` …), an option the interpreter's grammar does not name, no script, a file that is not its script, an interpreter with no grammar, a program outside the tables | write the code to a file and ask for «<interpreter> <file>» — or ask with `--host` |
+| `tool_required` · `standing_bad_tool` | a wildcard `--host` with no `--tool` / a `--tool` that is not a CLI whose destination VibeSpace reads | add `--tool <the CLI you run>` (curl, gh, aws …) |
 | `ask_pending` · `ask_denied` · `ask_expired` · `ask_unfiled` · `ask_changed` | the run card waits / said no / got no answer in 60 s / could not be filed / changed after it was shown — nothing ran | For you (the run card) |
 | `not_granted` (totp) | the user has not granted this two-step code to this conversation (a code you added yourself needs no grant) | the Vault window ▸ the code's 用于… |
 | `exists` · `login_exists` | `totp add` / `login add`: that name or that account is in the vault already | — (another name; the user deletes) |

@@ -199,14 +199,14 @@ function alwaysCarry(always, { now = 0, resourceOf = (id) => id } = {}) {
   for (const a of Array.isArray(always) ? always : []) {
     if (!a || typeof a.conv !== 'string' || !a.conv || typeof a.key !== 'string') continue;
     if (a.until != null && !(Number(a.until) > now)) { expired++; continue; }
-    let hosts = null;
-    try { const arr = JSON.parse(a.key.slice(a.key.indexOf(':') + 1)); hosts = GM.hostListOf(Array.isArray(arr) ? arr[4] : null); } catch { hosts = null; }
+    let hosts = null, tool = null;
+    try { const arr = JSON.parse(a.key.slice(a.key.indexOf(':') + 1)); hosts = GM.hostListOf(Array.isArray(arr) ? arr[4] : null); tool = Array.isArray(arr) && typeof arr[0] === 'string' ? (String(arr[0]).split(/[\\/]/).pop().toLowerCase().replace(/\.exe$/, '') || null) : null; } catch { hosts = null; }   // r2: the shape key's tool — a carried wildcard keeps its CLI
     if (!hosts) { hostless++; continue; }
     const principal = GM.bareOf({ kind: 'conversation', key: a.conv });
     if (!principal) continue;
     for (const id of Array.isArray(a.entries) ? a.entries : []) {
       const resource = resourceOf(String(id));
-      if (resource && GM.resourceShapeOk(DOOR, resource)) members.push({ resource, principal, hosts, until: a.until == null ? null : Number(a.until) });
+      if (resource && GM.resourceShapeOk(DOOR, resource)) members.push({ resource, principal, hosts, until: a.until == null ? null : Number(a.until), ...(tool && hosts.some((h) => String(h).startsWith('*.')) ? { tool } : {}) });
     }
   }
   return { members, expired, hostless };
@@ -242,6 +242,6 @@ function standingLines(verdicts, { always = false } = {}) {
 /** lane vault-standing-request: a command token in words — the program's name and its first argument's (`python3
  *  transcribe.py`); the whole paths ride the token. */
 const baseOf = (p) => String(p == null ? '' : p).replace(/\/+$/, '').split('/').pop();
-const commandWords = (c) => (c && c.program ? [baseOf(c.program), c.arg == null ? '' : String(c.arg)[0] === '/' ? baseOf(c.arg) : String(c.arg)].filter(Boolean).join(' ') : '');
+const commandWords = (c) => (c && c.program ? [baseOf(c.program), ...(Array.isArray(c.pre) ? c.pre : []), c.arg == null ? '' : String(c.arg)[0] === '/' ? baseOf(c.arg) : String(c.arg)].filter(Boolean).join(' ') : '');   // r2: + the options it pins before the script
 
 module.exports = { DOOR, ENTRY_HOSTS, ID_RE, CODES, SOURCES, commandWords, grantIdOf, hostCovers, runHostsOf, effectiveHosts, missingHosts, useVerdict, holds, withMember, withoutMember, alwaysCarry, publicGrants, standingLines };
