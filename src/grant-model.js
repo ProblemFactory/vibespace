@@ -494,10 +494,12 @@ function fromWindowRecord(rec) {
   }
   return { to };
 }
-/** An automation grant's subject (`session:<cid>` | `group:<id>` | `external`) → a principal (null for external —
- *  an outside caller is not a conversation; automation judges it by its own rule). */
+/** An automation grant's subject (`session:<cid>` | `group:<id>` | `everyone:*` | `external`) → a principal (null for
+ *  external — an outside caller is not a conversation; automation judges it by its own rule). `everyone:*` = ALL AGENTS
+ *  (lane key-grant-everyone: every conversation, the ones started later included — the picker's row key, one spelling). */
 function fromSubject(s) {
   const t = str(s);
+  if (t === 'everyone:*') return { kind: 'everyone' };
   if (/^group:/.test(t)) return bareOf({ kind: 'group', id: t.slice('group:'.length) });
   const k = keyFromSubject(t);
   return k ? { kind: 'conversation', key: k } : null;

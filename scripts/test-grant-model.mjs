@@ -152,6 +152,9 @@ console.log('③ the legacy mappers: the pre-unify reader ≡ admits over the ma
     diff(`automation reach ${J(r)}`, (p) => GM.LEGACY.automationReach(r, p.groups), m && !m.unknown ? [row(m.to, [], 'automation-key-reach', 'ag-1')] : []);
   }
   ok(GM.fromAutomationReach({ taskGroups: 'g1' }).unknown && GM.fromAutomationGrant({ subject: 'external' }) === null, 'a damaged reach ⇒ unknown (the old reader voided the grant); an outside caller is no conversation (its own rule)');
+  // lane key-grant-everyone: ALL AGENTS as an automation subject — ONE spelling (everyone:*), the model's own principal
+  ok(J(GM.fromSubject('everyone:*')) === J({ kind: 'everyone' }) && J(GM.fromAutomationGrant({ subject: 'everyone:*' })) === J({ to: [{ kind: 'everyone' }] }) && GM.fromSubject('everyone') === null && GM.fromSubject('everyone:x') === null && GM.admits([{ door: 'automation-key-use', resource: 'ag-9', ...GM.fromAutomationGrant({ subject: 'everyone:*' }), except: [{ kind: 'conversation', key: 'm2' }] }], { conversationKey: 'm9' }).via === 'everyone',
+    'fromSubject(everyone:*) ⇒ {kind:everyone} (its use row admits any conversation, its «除了» still subtracts); `everyone` / `everyone:x` map to nothing');
   const ak = GM.rowsOfAutomationGrants([{ id: 'ag-3', subject: 'group:g1', reach: 'instance' }, { id: 'ag-4', subject: 'external' }, { id: 'ag-5', subject: 'session:m1', reach: { taskGroups: 7 } }]);
   ok(ak.rows.length === 2 && ak.external === 1 && J(ak.unknown) === J(['ag-5']), 'rowsOfAutomationGrants: use + reach rows; the outside caller counted, the damaged named', ak);
   // channels

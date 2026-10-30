@@ -24,7 +24,20 @@
 //      作用范围 beside its answers — 只有它开的会话 (checked) · 整个 VibeSpace (red, its title says it reaches your own conversations
 //      too; no Task Group row for a conversation in none); ⑥ the key row's 授权给 chip carries the reach as a chip — a click opens
 //      the reach dialog, 整个 VibeSpace + 保存 ⇒ the chip is red with its title and the hub's grant row says instance; a grant the
-//      picker adds reads 只有它开的会话; ⑩ the chip's Japanese word
+//      picker adds reads 只有它开的会话; ⑩ the chip's Japanese word; lane key-grant-everyone: after a RELOAD the chip still reads
+//      整个 VibeSpace and the grants store holds its reach row (a PIN — 91bf7e18 passes it)
+//   ⑫ ALL AGENTS (lane key-grant-everyone — the owner 2026-10-26: 「Vault 里的自动化 key 没有办法保存给整个 vibespace 这个权限」):
+//      READING B as the owner met it — 授权给… with 整个 VibeSpace picked and NOBODY added said 已保存 and wrote nothing (RED on
+//      91bf7e18) ⇒ refused by name, the dialog kept; READING A — the picker's FIRST row 「所有 agent」 (RED on 91bf7e18: none),
+//      its «除了» leaves the live conversation out ⇒ 保存 ⇒ the hub's grant everyone:* + the store's use row; a RELOAD ⇒ the
+//      fold's first row 「所有 agent」 «除了：1 个已排除», 审计… «→ 所有 agent»; the left-out conversation refused BY NAME at
+//      once (no card); a SECOND conversation started after the save uses the key with no card (the real CLI), `keys` says
+//      «via all agents (everyone:*)»; R3 — the two in different Task Groups: 只有它开的会话 ⇒ the stranger may not rename the
+//      live one; the reach dialog's 整个 VibeSpace + 保存 + a RELOAD ⇒ the red chip, the store's reach row, and it may.
+//      r2: the reach rows alone with a grant kept ⇒ still refused; a «除了» edit / a removal with the reach rows changed go
+//      through (the toast: the reach was not used); an add rides the reach (instance, a plain 已保存).
+//      Every press through the real-click door; AK_FONT=dejavu runs Chrome under the hosted runner's fontconfig and
+//      VS_CPU_THROTTLE=4 throttles this leg's page 4× (the lane's robustness runs before the pin)
 //   UNSAVED (lane dialog-unsaved-guard, B-bc31): 编辑… with a verb taken away asks on ✕ / Esc (继续编辑 / 放弃 / 保存) — 放弃 writes
 //      nothing, 保存 writes the dialog's own Save; a clean 编辑… closes at once
 //   ⑥b 编辑… (lane key-folder-picker-all — the owner 2026-10-21): the key's row edits its VERBS — the mint's 9 checkboxes, its own
@@ -51,7 +64,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, endRootedProcesses } from './scratch.mjs';
+import { freePorts, scratch, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, realClicker, runnerFontEnv } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium'].find((p) => fs.existsSync(p));
@@ -60,6 +73,8 @@ const VNC_ENV = await vncEnv();
 const [PORT, CDP_PORT] = await freePorts(2);
 const BASE = `http://127.0.0.1:${PORT}`;
 const wt = scratch('ak-chrome-wt'), stubDir = scratch('ak-chrome-stub'), fakeHome = scratch('ak-chrome-home'), CWD = scratch('ak-chrome-cwd');
+// lane key-grant-everyone: AK_FONT=dejavu ⇒ Chrome under the hosted runner's fontconfig (scratch.mjs runnerFontEnv)
+const fontDir = process.env.AK_FONT === 'dejavu' ? scratch('ak-chrome-font') : null;
 const SHOTS = process.env.AK_SHOTS ? path.resolve(process.env.AK_SHOTS) : '';
 for (const d of [stubDir, fakeHome, CWD, ...(SHOTS ? [SHOTS] : [])]) fs.mkdirSync(d, { recursive: true });
 let failed = 0, passed = 0;
@@ -81,12 +96,13 @@ const args = process.argv.slice(2);
 if (args.includes('--version')) { console.log('2.1.274 (Claude Code) stub'); process.exit(0); }
 if (args.includes('--help')) { console.log('Usage: claude [options]'); process.exit(0); }
 fs.writeFileSync(${JSON.stringify(stubDir)} + '/env-' + process.pid + '.json', JSON.stringify(process.env));
-process.stdout.write(JSON.stringify({ type: 'system', subtype: 'init', session_id: ${JSON.stringify(LIVE_SID)}, model: 'claude-fable-5', cwd: ${JSON.stringify(CWD)}, tools: [], permissionMode: 'default', claude_code_version: '2.1.274' }) + '\\n');
+const SID = (() => { try { return fs.readFileSync(${JSON.stringify(stubDir)} + '/next-sid', 'utf8').trim() || ${JSON.stringify(LIVE_SID)}; } catch { return ${JSON.stringify(LIVE_SID)}; } })();   // ⑫: a SECOND conversation's own id
+process.stdout.write(JSON.stringify({ type: 'system', subtype: 'init', session_id: SID, model: 'claude-fable-5', cwd: ${JSON.stringify(CWD)}, tools: [], permissionMode: 'default', claude_code_version: '2.1.274' }) + '\\n');
 process.stdin.on('data', () => {});
 process.stdin.on('end', () => process.exit(0));
 `, { mode: 0o755 });
 const srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: '' }, stdio: 'ignore' });
-const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--disable-background-timer-throttling', `--user-data-dir=${wt}-chrome`, 'about:blank'], { stdio: 'ignore' });
+const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage', '--disable-background-timer-throttling', `--user-data-dir=${wt}-chrome`, 'about:blank'], { stdio: 'ignore', env: { ...process.env, ...(fontDir ? (fs.mkdirSync(fontDir, { recursive: true }), runnerFontEnv(fontDir)) : {}) } });
 let cleaned = false;
 const cleanup = () => {
   if (cleaned) return; cleaned = true;
@@ -94,7 +110,7 @@ const cleanup = () => {
   try { srv.kill('SIGKILL'); } catch {}
   for (const root of [wt, fakeHome, stubDir]) { try { endRootedProcesses(root); } catch {} }
   try { execSync(`git worktree remove --force ${wt}`, { cwd: repo, stdio: 'ignore' }); } catch {}
-  for (const d of [wt, `${wt}-chrome`, fakeHome, stubDir, CWD]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
+  for (const d of [wt, `${wt}-chrome`, fakeHome, stubDir, CWD, ...(fontDir ? [fontDir] : [])]) { try { fs.rmSync(d, { recursive: true, force: true }); } catch {} }
 };
 process.on('exit', cleanup);
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => { cleanup(); process.exit(1); });
@@ -225,6 +241,12 @@ try {
   const grantNow = (((await api('GET', '/api/automation/keys')).json || {}).keys || []).find((k) => k.name === 'Lane dispatch');
   check('整个 VibeSpace + 保存 ⇒ the chip is RED and its title says what it means; the hub\'s grant row holds reach: instance', chip1 && chip1.text === '整个 VibeSpace' && chip1.reach === 'instance' && chip1.title === '这把 key 可以对这里的每一个会话动手，包括你自己的' && grantNow && grantNow.grants[0] && grantNow.grants[0].reach === 'instance', { chip1, grants: grantNow && grantNow.grants });
   await shot('ak-3c-reach-chip.png');
+  // lane key-grant-everyone (R3 — reading B on the reach dialog): the reach SAVED survives a RELOAD — the chip re-read from the hub,
+  // the grants store's reach row {to:[{kind:everyone}]} (a PIN: 91bf7e18 passes it — the dialog's road was never the broken one)
+  await load(); await openWindow();
+  const chipR0 = await until(`(() => { const b = document.querySelector(${JSON.stringify(ROW + ' .vw-ak-grants-chip')}); const f = document.querySelector(${JSON.stringify(ROW + ' .vw-ak-gfold')}); if (b && f && f.hidden) b.click(); const c = document.querySelector(${JSON.stringify(ROW + ' .vw-ak-g .vw-ak-reach')}); return c && c.getBoundingClientRect().height > 0 ? { text: c.textContent, reach: c.dataset.reach } : null; })()`, 10000);
+  const rrow0 = (() => { try { const gid = grantNow && grantNow.grants[0] && grantNow.grants[0].id; return JSON.parse(fs.readFileSync(path.join(wt, 'data', 'grants.json'), 'utf8')).rows.find((r) => r.door === 'automation-key-reach' && r.resource === gid) || null; } catch { return null; } })();
+  check('PIN (reading B, the reach dialog): after a RELOAD the chip still reads 整个 VibeSpace and the grants store holds the reach row {to:[{kind:everyone}]} (91bf7e18 passes this leg too)', !!chipR0 && chipR0.text === '整个 VibeSpace' && chipR0.reach === 'instance' && !!rrow0 && JSON.stringify(rrow0.to) === '[{"kind":"everyone"}]', { chipR0, rrow0 });
   // lane grants-unify: 授权给… is THE principal picker (it was a checkbox list) — a granted conversation is a CHIP, its ✕
   // takes the grant back at 保存, a row of the list grants it again
   await click(ROW + ' .vw-ak-grant');
@@ -607,6 +629,163 @@ try {
     }
     await cdp('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
   }
+
+  console.log('⑫ ALL AGENTS (lane key-grant-everyone — the owner 2026-10-26: 「Vault 里的自动化 key 没有办法保存给整个 vibespace 这个权限」): 授权给… offers it, it saves, a conversation that was not running then uses the key; the reach 整个 VibeSpace saved, reloaded, read');
+  // the presses after a measure go through the real-click door (scratch.mjs realClicker: measured, hit-tested at press time)
+  const RCK = realClicker({ evalJs, cdp });
+  const THROTTLE = Number(process.env.VS_CPU_THROTTLE) > 1 ? Number(process.env.VS_CPU_THROTTLE) : 1;
+  if (THROTTLE > 1) { await cdp('Emulation.setCPUThrottlingRate', { rate: THROTTLE }); console.log(`  (this leg runs with the page's CPU throttled ${THROTTLE}×)`); }
+  const clearToasts = () => evalJs(`(() => { const p = document.getElementById('user-todos-popup'); if (p && !p.classList.contains('hidden')) document.getElementById('taskbar-user-todos').click(); for (const t of document.querySelectorAll('.global-toast')) t.remove(); return true; })()`);
+  await clearToasts();
+  const ek = await api('POST', '/api/automation/keys', { name: 'Everyone key', scopes: ['conversations.rename'] });
+  const EK = ek.json && ek.json.key && ek.json.key.id;
+  const keyNow = async () => (((await api('GET', '/api/automation/keys')).json || {}).keys || []).find((k) => k.id === EK) || null;
+  const storeRows = (door) => { try { return JSON.parse(fs.readFileSync(path.join(wt, 'data', 'grants.json'), 'utf8')).rows.filter((r) => r.door === door); } catch { return []; } };
+  await closeWindows(); await openWindow();
+  const erowId = await until(`(() => { const r = [...document.querySelectorAll(${JSON.stringify(ROW)})].find((x) => (x.querySelector('.vw-label') || {}).textContent === 'Everyone key'); return r ? r.dataset.id : null; })()`, 10000);
+  const EROW = `${ROW}[data-id=${JSON.stringify(String(erowId))}]`;
+  check('a fresh key for the leg («Everyone key» — 给对话改名), its row in the window', !!EK && !!erowId, { ek: ek.json, erowId });
+  // READING B as the owner met it: 授权给… — the reach rows say 整个 VibeSpace, nobody added, 保存
+  await RCK(`${EROW} .vw-ak-grant`);
+  await until(visible('#vault-ak-grant .pp-input'), 8000);
+  await RCK('#vault-ak-grant .vw-ak-reach-row.vw-ak-reach-instance');
+  await RCK('.vw-ak-save');
+  const noop = await until(`(() => { const t = [...document.querySelectorAll('.global-toast')].map((x) => x.textContent).join(' | '); return t ? { toasts: t, open: !!document.querySelector('#vault-ak-grant .pp-input') } : null; })()`, 6000);
+  const k0 = await keyNow();
+  check('READING B (the owner\'s): 整个 VibeSpace picked in 授权给… with NOBODY added + 保存 ⇒ refused BY NAME, the dialog kept, nothing written — never 已保存 over nothing (RED on 91bf7e18: 已保存, the dialog closed, no grant)',
+    !!noop && noop.open && /这个作用范围只用于这次新加的授权/.test(noop.toasts) && !/已保存/.test(noop.toasts) && !!k0 && k0.grants.length === 0, { noop, grants: k0 && k0.grants });
+  await shot('ak-6a-reach-alone.png');
+  await clearToasts();
+  // READING A: the WHO 所有 agent — the picker's FIRST row
+  await RCK('#vault-ak-grant .vw-ak-reach-row.vw-ak-reach-opened');
+  await RCK('#vault-ak-grant .pp-input');
+  const allRow = await until(`(() => { const rows = [...document.querySelectorAll('#vault-ak-grant .pp-row')].filter((r) => !r.closest('.pp-except-picker')); const a = document.querySelector('#vault-ak-grant .pp-row[data-key="everyone:*"]'); return a && a.getBoundingClientRect().height > 0 ? { first: rows[0] === a, text: a.textContent } : null; })()`, 8000);
+  check('READING A: 授权给… offers ALL AGENTS — its FIRST row, 「所有 agent」 (RED on 91bf7e18: the picker lists conversations and Task Groups only)', !!allRow && allRow.first && /所有 agent/.test(allRow.text), allRow);
+  await RCK('#vault-ak-grant .pp-row[data-key="everyone:*"]');
+  const allChip = await until(`(() => { const c = document.querySelector('#vault-ak-grant .pp-chip[data-key="everyone:*"]'); const x = document.querySelector('#vault-ak-grant .pp-except-toggle'); return c && x && x.getBoundingClientRect().height > 0 ? { chip: c.textContent, toggle: x.textContent } : null; })()`, 6000);
+  check('picked ⇒ its chip 「所有 agent」 and the «除了（可选）» row beside it (the same picker road as a Task Group)', !!allChip && /所有 agent/.test(allChip.chip), allChip);
+  // «除了»: the live conversation left out
+  await RCK('#vault-ak-grant .pp-except-toggle');
+  await until(visible('#vault-ak-grant .pp-except-picker .pp-input'), 6000);
+  await RCK('#vault-ak-grant .pp-except-picker .pp-input');
+  const exSel = `#vault-ak-grant .pp-except-picker .pp-row[data-key="session:${LIVE_SID}"]`;
+  await until(visible(exSel), 8000);
+  await RCK(exSel);
+  check('…«除了» offers every conversation under All agents; the live one picked ⇒ «除了：1 个已排除»', !!(await until(`/1/.test((document.querySelector('#vault-ak-grant .pp-except-toggle') || {}).textContent || '')`, 6000)));
+  await shot('ak-6b-all-agents-picker.png');
+  await RCK('.vw-ak-save');
+  await until(`!document.querySelector('#vault-ak-grant')`, 8000);
+  const k1 = await keyNow();
+  const g1 = k1 && k1.grants.find((g) => g.subject === 'everyone:*');
+  const useRow1 = g1 ? storeRows('automation-key-use').find((r) => r.resource === g1.id) : null;
+  check('保存 ⇒ the hub holds ONE grant to everyone:* (always, 只有它开的会话) with the live conversation in its «除了»; the grants store\'s use row is {to:[{kind:everyone}], except:[that conversation]}',
+    !!g1 && k1.grants.length === 1 && g1.mode === 'always' && g1.reach === 'opened' && g1.except.length === 1 && g1.except[0].key === LIVE_SID && !!useRow1 && JSON.stringify(useRow1.to) === '[{"kind":"everyone"}]' && useRow1.except.length === 1 && useRow1.except[0].key === LIVE_SID, { g1, useRow1 });
+  // a RELOAD: the chip is there — the first row of the grants fold, in words, never the bare subject
+  await clearToasts();
+  await load(); await openWindow();
+  await until(visible(`${EROW} .vw-ak-grants-chip`), 10000);
+  await RCK(`${EROW} .vw-ak-grants-chip`);
+  const chipA = await until(`(() => { const g = document.querySelector(${JSON.stringify(EROW + ' .vw-ak-g')}); if (!g || g.getBoundingClientRect().height === 0) return null; return { all: g.classList.contains('vw-ak-g-everyone'), name: (g.querySelector('.vw-ak-gname') || {}).textContent, title: (g.querySelector('.vw-ak-gname') || {}).title, state: !!g.querySelector('.vw-ak-gstate'), except: (g.querySelector('.vw-ak-gexcept') || {}).textContent, reach: (g.querySelector('.vw-ak-reach') || {}).textContent, head: (document.querySelector(${JSON.stringify(EROW + ' .vw-ak-grants-chip')}) || {}).textContent, bare: /everyone:\\*/.test(document.querySelector(${JSON.stringify(EROW)}).textContent) }; })()`, 10000);
+  check('after a reload: the grants fold\'s FIRST row 「所有 agent」 (its title: every conversation, now and later), no running / ended state, «除了：1 个已排除», reach 只有它开的会话 — never the bare everyone:*',
+    !!chipA && chipA.all && chipA.name === '所有 agent' && /每个会话，现在和以后/.test(chipA.title || '') && !chipA.state && chipA.except === '除了：1 个已排除' && chipA.reach === '只有它开的会话' && chipA.head === '授权给 1 个' && !chipA.bare, chipA);
+  await shot('ak-6c-all-agents-row.png');
+  // 审计… says it in words
+  await RCK(`${EROW} .vw-ak-audit`);
+  const auditA = await until(`(() => { const l = document.querySelector('#vault-ak-audit .vw-ak-audit-line[data-verb="key.grant"]'); return l ? l.textContent : null; })()`, 8000);
+  check('审计… names the grant 「→ 所有 agent」 — never everyone:*', !!auditA && /→ 所有 agent/.test(auditA) && !/everyone/.test(auditA), auditA);
+  await cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  await cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  await until(`!document.querySelector('#vault-ak-audit')`, 5000);
+  // the left-out conversation: refused BY NAME at once (no card — a card would hold the call up to 60 s)
+  const t0x = Date.now();
+  const outCall = await cli(['call', 'conversations.rename', '--name', '不该改', '--key', 'Everyone key'], { token });
+  check('the live conversation LEFT OUT of All agents is refused BY NAME (excepted) at once — no first-use card', outCall.code !== 0 && /excepted/.test(outCall.err + outCall.out) && Date.now() - t0x < 15000, { outCall, ms: Date.now() - t0x });
+  // A CONVERSATION THAT WAS NOT RUNNING when the grant was saved: a second conversation through the real spawn
+  const STRANGER_SID = crypto.randomUUID();
+  const envBefore = new Set(fs.readdirSync(stubDir).filter((x) => x.startsWith('env-')));
+  fs.writeFileSync(path.join(stubDir, 'next-sid'), STRANGER_SID);
+  ws.send(JSON.stringify({ type: 'create', backend: 'claude', mode: 'chat', cwd: CWD, reqId: 'ak-everyone' }));
+  let stoken = null;
+  for (let i = 0; i < 80 && !stoken; i++) { for (const f of fs.readdirSync(stubDir).filter((x) => x.startsWith('env-') && !envBefore.has(x))) { try { const e = JSON.parse(fs.readFileSync(path.join(stubDir, f), 'utf8')); if (e.VIBESPACE_SESSION_TOKEN && e.VIBESPACE_SESSION_TOKEN !== token) stoken = e.VIBESPACE_SESSION_TOKEN; } catch {} } if (!stoken) await sleep(250); }
+  fs.rmSync(path.join(stubDir, 'next-sid'), { force: true });
+  const strangerLive = async () => { for (let i = 0; i < 80; i++) { const s = [...frames].reverse().find((m) => m && m.type === 'active-sessions'); const me = s && (s.sessions || []).find((x) => x && (x.backendSessionId === STRANGER_SID || x.claudeSessionId === STRANGER_SID)); if (me) return me; await sleep(250); } return null; };
+  check('a SECOND conversation starts after the grant (the real spawn; its own vsst_, its own conversation id)', !!stoken && stoken.startsWith('vsst_') && !!(await strangerLive()), { stoken: !!stoken });
+  const sCall = await cli(['call', 'conversations.rename', '--name', '陌生人', '--key', 'Everyone key'], { token: stoken });
+  check('…it uses the key AT ONCE — no card (it was not in the roster when 所有 agent was saved): the CLI prints ok', sCall.code === 0 && /ok — conversations\.rename with key "Everyone key": now "陌生人"/.test(sCall.out), sCall);
+  const sKeys = await cli(['keys'], { token: stoken });
+  check('`vibespace-api keys` for it: «Everyone key … via all agents (everyone:*)»', sKeys.code === 0 && /Everyone key .* — via all agents \(everyone:\*\)/.test(sKeys.out), sKeys);
+  // R3 — THE REACH 整个 VibeSpace: the two conversations in DIFFERENT Task Groups; the stranger renames the live one
+  const tA = await api('POST', '/api/tasks', { title: '岗位 everyone A', sessions: [`claude:${LIVE_SID}`] });
+  const tB = await api('POST', '/api/tasks', { title: '岗位 everyone B', sessions: [`claude:${STRANGER_SID}`] });
+  check('the live conversation in Task Group A, the stranger in Task Group B', !!(tA.json && tA.json.task) && !!(tB.json && tB.json.task), { tA: tA.json, tB: tB.json });
+  const before = await cli(['conversations', 'rename', LIVE_SID, '被别组改名', '--key', 'Everyone key'], { token: stoken });
+  check('reach 只有它开的会话: the stranger may NOT rename the live conversation of another Task Group (All agents is a WHO, never a reach)', before.code !== 0 && /not_granted/.test(before.err + before.out), before);
+  await closeWindows(); await openWindow();
+  await until(visible(`${EROW} .vw-ak-grants-chip`), 10000);
+  if (!(await evalJs(`(() => { const f = document.querySelector(${JSON.stringify(EROW + ' .vw-ak-gfold')}); return !!f && !f.hidden; })()`))) await RCK(`${EROW} .vw-ak-grants-chip`);
+  await until(visible(`${EROW} .vw-ak-g-everyone .vw-ak-reach`), 8000);
+  await RCK(`${EROW} .vw-ak-g-everyone .vw-ak-reach`);
+  await until(visible('#vault-ak-reach .vw-ak-reach-row.vw-ak-reach-instance'), 6000);
+  await RCK('#vault-ak-reach .vw-ak-reach-row.vw-ak-reach-instance');
+  await RCK('.vw-ak-reach-save');
+  await until(`!document.querySelector('#vault-ak-reach')`, 8000);
+  await clearToasts();
+  await load(); await openWindow();
+  await until(visible(`${EROW} .vw-ak-grants-chip`), 10000);
+  await RCK(`${EROW} .vw-ak-grants-chip`);
+  const chipR = await until(`(() => { const c = document.querySelector(${JSON.stringify(EROW + ' .vw-ak-g-everyone .vw-ak-reach')}); return c && c.getBoundingClientRect().height > 0 ? { text: c.textContent, red: c.classList.contains('vw-ak-reach-instance'), title: c.title } : null; })()`, 10000);
+  const g2 = (await keyNow() || { grants: [] }).grants.find((g) => g.subject === 'everyone:*');
+  const reachRow = g2 ? storeRows('automation-key-reach').find((r) => r.resource === g2.id) : null;
+  check('R3: the reach dialog\'s 整个 VibeSpace + 保存 ⇒ after a RELOAD the chip reads 整个 VibeSpace (red, its title: every conversation here, yours included); the hub says instance; the grants store holds the reach row {to:[{kind:everyone}]}',
+    !!chipR && chipR.text === '整个 VibeSpace' && chipR.red && chipR.title === '这把 key 可以对这里的每一个会话动手，包括你自己的' && !!g2 && g2.reach === 'instance' && !!reachRow && JSON.stringify(reachRow.to) === '[{"kind":"everyone"}]', { chipR, g2, reachRow });
+  await shot('ak-6d-reach-instance.png');
+  const after = await cli(['conversations', 'rename', LIVE_SID, '被别组改名', '--key', 'Everyone key'], { token: stoken });
+  check('…and the stranger (Task Group B) now renames the live conversation of Task Group A — reached through 整个 VibeSpace', after.code === 0 && /被别组改名/.test(after.out), after);
+  // r2 (the acceptance of 01b6db270, minor 3): the refusal is for a save that changes NOTHING but the reach rows — a «除了» edit
+  // and a removal go through as on the base (the reach unused, the toast says so), an add rides the reach; the reach alone is
+  // still refused with a grant KEPT
+  await clearToasts();
+  const UNUSED = '已保存——你选的作用范围没有用上';
+  const savedToast = () => until(`(() => { if (document.querySelector('#vault-ak-grant')) return null; const t = [...document.querySelectorAll('.global-toast')].map((x) => x.textContent).join(' | '); return t || null; })()`, 8000);
+  const openGrant = async () => { await RCK(`${EROW} .vw-ak-grant`); await until(visible('#vault-ak-grant .pp-input'), 8000); await RCK('#vault-ak-grant .vw-ak-reach-row.vw-ak-reach-instance'); };
+  await openGrant();
+  await RCK('.vw-ak-save');
+  const kept0 = await until(`(() => { const t = [...document.querySelectorAll('.global-toast')].map((x) => x.textContent).join(' | '); return t ? { toasts: t, open: !!document.querySelector('#vault-ak-grant .pp-input') } : null; })()`, 6000);
+  const kg0 = await keyNow();
+  check('r2 — the reach rows ALONE with a grant kept (所有 agent, «除了» the live conversation) + 保存 ⇒ still refused by name, the dialog kept, the grant untouched',
+    !!kept0 && kept0.open && /这个作用范围只用于这次新加的授权/.test(kept0.toasts) && !!kg0 && kg0.grants.length === 1 && kg0.grants[0].except.length === 1, { kept0, grants: kg0 && kg0.grants });
+  await clearToasts();
+  // shape «除了»: the live conversation's exception lifted (its chip's ✕), the reach rows still at 整个 VibeSpace
+  const exChipX = `#vault-ak-grant .pp-except-picker .pp-chip[data-key="session:${LIVE_SID}"] .pp-chip-x`;
+  await until(visible(exChipX), 6000);
+  await RCK(exChipX);
+  await RCK('.vw-ak-save');
+  const s1 = await savedToast();
+  const kg1 = await keyNow();
+  check('r2 shape «除了»: an exception edited with the reach rows changed and nothing added ⇒ 保存 goes through (as on the base) — the hub\'s grant has no exception now, nothing added, and the toast says the reach was not used',
+    !!s1 && s1.includes(UNUSED) && !!kg1 && kg1.grants.length === 1 && kg1.grants[0].subject === 'everyone:*' && kg1.grants[0].except.length === 0, { s1, grants: kg1 && kg1.grants });
+  await clearToasts();
+  // shape REMOVE: the grant to 所有 agent taken back (its chip's ✕), the reach rows at 整个 VibeSpace
+  await openGrant();
+  await RCK('#vault-ak-grant .pp-chip.pp-chip-everyone .pp-chip-x');
+  await RCK('.vw-ak-save');
+  const s2 = await savedToast();
+  const kg2 = await keyNow();
+  check('r2 shape REMOVE: a grant taken back with the reach rows changed ⇒ 保存 goes through (as on the base) — the key holds no grant, and the toast says the reach was not used',
+    !!s2 && s2.includes(UNUSED) && !!kg2 && kg2.grants.length === 0, { s2, grants: kg2 && kg2.grants });
+  await clearToasts();
+  // shape ADD: 所有 agent picked again with 整个 VibeSpace — the reach rides the grant this save adds
+  await openGrant();
+  await RCK('#vault-ak-grant .pp-input');
+  await until(visible('#vault-ak-grant .pp-row[data-key="everyone:*"]'), 8000);
+  await RCK('#vault-ak-grant .pp-row[data-key="everyone:*"]');
+  await RCK('.vw-ak-save');
+  const s3 = await savedToast();
+  const kg3 = await keyNow();
+  check('r2 shape ADD: 所有 agent added with 整个 VibeSpace ⇒ the grant lands with reach instance, the toast a plain 已保存 (the reach was used)',
+    !!s3 && /已保存/.test(s3) && !s3.includes(UNUSED) && !!kg3 && kg3.grants.length === 1 && kg3.grants[0].subject === 'everyone:*' && kg3.grants[0].reach === 'instance', { s3, grants: kg3 && kg3.grants });
+  await shot('ak-6e-save-shapes.png');
+  if (THROTTLE > 1) await cdp('Emulation.setCPUThrottlingRate', { rate: 1 });
 
   console.log('⑩ the words in Japanese');
   await evalJs(`(() => { localStorage.setItem('vibespace.lang', 'ja'); return true; })()`);

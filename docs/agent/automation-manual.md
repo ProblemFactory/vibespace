@@ -1,8 +1,10 @@
 # vibespace-api — VibeSpace's own automation API
 
 The user mints **automation keys** in the Vault window (⚙ System ▸ Vault contents… ▸ «Automation keys»). Each key holds a
-closed list of **verbs**. The user **grants** a key to a conversation or to a Task Group, and then any conversation the
-grant covers can call those verbs.
+closed list of **verbs**. The user **grants** a key to a conversation, to a Task Group or to **All agents** (every
+conversation on this VibeSpace, the ones started later too), and then any conversation the grant covers can call those
+verbs. A grant to a Task Group or to All agents may leave conversations and Task Groups **out** (the user's «除了» —
+except): a conversation left out never uses the key through that grant.
 
 You never see, hold or pass a key's value. Every call carries only your own session token. The hub judges each call
 (the grant × the verb × the vault's state), runs it, and writes one audit line.
@@ -15,9 +17,12 @@ vibespace-api audit [--key <name|id>] [--since <ISO time>] [--limit N]   this co
 
 ## Keys and grants
 
-- **keys** — the keys a grant lets this conversation use now: its own grants and its Task Groups'. Each line shows the
-  key's name and id, its verbs, and the grant it comes through (`session:<id>` or `group:<task id>`, and `once` for a
-  one-time grant). A key's value is never printed; no command and no route returns it.
+- **keys** — the keys a grant lets this conversation use now: its own grants, its Task Groups' and All agents'. Each
+  line shows the key's name and id, its verbs, and the grant it comes through (`session:<id>`, `group:<task id>` or
+  `all agents (everyone:*)`, and `once` for a one-time grant). A key you were left out of is not listed. A key's value is
+  never printed; no command and no route returns it.
+- **A one-time grant to All agents** is one use, not one per conversation: the first call of any conversation spends it,
+  and the next caller is asked again. Calls racing for it get one run; the others are asked.
 - **No grant yet?** Call the verb anyway. If exactly one key holds that verb, the hub files an **urgent card** in the
   user's For you tray ("<this conversation> wants to use the automation key …") and your call **waits** (≤ 60 s).
   - The user can answer **Allow once** (this call only), **Always for this conversation** (a grant they can take back in
@@ -136,6 +141,8 @@ vibespace-api conversations archive <conversation id>                 when the l
 |---|---|
 | `vault_locked` (423) | the vault is locked — every call waits until the user unlocks it on the page. The user has already been told (For you names this conversation and the verb): never ask them to unlock it or for the password — wait, or do other work (exit code 3) |
 | `not_granted` | no grant lets this conversation use the key, or a `--target` is outside the grant's reach (the message names the reach and the door that widens it) |
+| `excepted` | the user left this conversation (or one of its Task Groups) out of the key's grant to a Task Group or to All agents — no card is filed; ask the user to lift the exception or to grant the key to this conversation |
+| `groups_unreadable` (409) | this conversation's Task Groups could not be read just now, and a grant's Task Group (or its exception) decides — nothing ran; call again in a moment |
 | `key_revoked` / `verb_not_in_scope` | the user revoked the key / the key does not hold this verb — the keys granted to this conversation are named; the user adds a verb to a key with Edit… on its row in the Vault window (its grants then cover it, no new question) |
 | `ask_denied` / `ask_expired` / `ask_quiet` | the user refused / nobody answered in 60 s / a refusal is still in its 10 minutes |
 | `once_spent` | a one-time grant was used; the next call asks again |

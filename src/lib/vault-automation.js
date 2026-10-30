@@ -19,6 +19,10 @@
 // 没法改变"能做什么"」): 编辑… on every key changes its verbs (the mint's checkboxes) and — while 开一个对话 is ticked — its
 // limits, through the mint's own rules (POST …/keys/:id/edit); the folders offer 「所有路径」 (exactly `['/']`, red-tinted)
 // or 「只有这些文件夹（含子文件夹）」 (the browser), and every folder says it covers its subfolders.
+// Lane key-grant-everyone (the owner 2026-10-26: 「Vault 里的自动化 key 没有办法保存给整个 vibespace 这个权限」): 授权给… offers ALL
+// AGENTS (the picker's first row — subject `everyone:*`: every conversation here, the ones started later included; its «除了»
+// leaves members out), drawn as the grants list's FIRST row 「所有 agent」 (never the bare subject — the audit says it too); and
+// a 保存 whose reach rows changed while it ADDS no grant is refused by name — it used to say 已保存 and write nothing.
 // Lane vault-key-row-compact (the owner 2026-10-21 05:4xZ: 「授权很多的时候，这个界面需要优化一下」 — two grants already made the row
 // a wall of text): the row is a HEAD + folds, bounded. The head's chips COUNT — 「N 个动作」 (the verbs open as a popover grouped
 // by family, 编辑… beside) and 「授权给 N 个」 (the grants open IN PLACE as a bounded list: about five rows, the rest scroll, a
@@ -26,7 +30,7 @@
 // line of words where an unrestricted set says 任何 and more than three picks say 「N 种」 (the names in its title).
 import { t } from './i18n.js';
 import { fetchJson, showToast, showConfirmDialog, createModalShell, createPopover } from './utils.js';
-import { SCOPES, ALL_PATHS, limitSetView, verbFamilies, grantOrder } from '../automation-keys.js'; // PURE: the closed table of verbs (their words); `/` = 「所有路径」; lane vault-key-row-compact: a limit's set in words, the verbs' families, the grants' order
+import { SCOPES, ALL_PATHS, limitSetView, verbFamilies, grantOrder, EVERYONE_SUBJECT } from '../automation-keys.js'; // PURE: the closed table of verbs (their words); `/` = 「所有路径」; lane vault-key-row-compact: a limit's set in words, the verbs' families, the grants' order
 import { BACKEND_META } from './agent-meta.js';
 import { enterSubmits } from './chat-enter-keys.js'; // an Enter that ends an IME composition never submits
 import { vaultWaitLine } from './vault-unlock.js'; // lane vault-slow-load: the audit says it is reading
@@ -305,8 +309,10 @@ export async function loadAutomation() {
   const r = await fetchJson('/api/automation/keys');
   return r && r.ok ? r : null;
 }
-/** A subject's name for a chip: a conversation's / a Task Group's own name (the picker's list), else its id. */
+/** A subject's name for a chip: a conversation's / a Task Group's own name (the picker's list), 「所有 agent」 for All agents,
+ *  else its id. */
 function subjectName(subject, data) {
+  if (subject === EVERYONE_SUBJECT) return t('All agents');
   const all = [...((data && data.subjects && data.subjects.sessions) || []), ...((data && data.subjects && data.subjects.groups) || [])];
   const hit = all.find((s) => s.subject === subject);
   if (hit) return hit.name;
@@ -327,9 +333,11 @@ function glyph(shapes) {
 }
 const GROUP_GLYPH = [['rect', { x: 2, y: 2, width: 12, height: 12, rx: 1.5 }], ['path', { d: 'M5 6h6M5 9h6M5 12h3' }]];
 const CHAT_GLYPH = [['path', { d: 'M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z' }]];
+const EVERYONE_GLYPH = [['circle', { cx: 6, cy: 5.5, r: 2.2 }], ['path', { d: 'M2 13.5c.5-2.4 2-3.7 4-3.7s3.5 1.3 4 3.7' }], ['circle', { cx: 11.4, cy: 6.2, r: 1.8 }], ['path', { d: 'M10.4 9.9c2-.3 3.3.9 3.7 3.1' }]];
 /** A grant's name: the conversation's / the Task Group's own (the picker's live list), an ended conversation's the name the
  *  sidebar kept (the hub sends it), else the id — a conversation's shortened to 8 characters. */
 function grantName(g, data) {
+  if (g.subject === EVERYONE_SUBJECT) return t('All agents');
   const all = [...((data && data.subjects && data.subjects.sessions) || []), ...((data && data.subjects && data.subjects.groups) || [])];
   const hit = all.find((s) => s.subject === g.subject);
   if (hit) return hit.name;
@@ -343,13 +351,14 @@ function grantName(g, data) {
  *  changes it — lane key-instance-scope), ✕ (takes it back). → { node, words } (`words` = what the filter matches). */
 function grantRow(g, key, data, { refresh } = {}) {
   const isGroup = String(g.subject).startsWith('group:');
-  const r = el('div', `vw-ak-g${g.ended ? ' vw-ak-g-ended' : ''}`);
+  const isAll = g.subject === EVERYONE_SUBJECT;   // lane key-grant-everyone: 所有 agent — every conversation, now and later
+  const r = el('div', `vw-ak-g${g.ended ? ' vw-ak-g-ended' : ''}${isAll ? ' vw-ak-g-everyone' : ''}`);
   r.dataset.subject = g.subject; r.setAttribute('role', 'listitem');
   const nm = el('span', 'vw-ak-gname', g.name + (g.mode === 'once' ? ` (${t('once')}${g.spentAt ? ', ' + t('used') : ''})` : ''));
-  nm.title = isGroup ? `${t('Task group')} · ${g.name}` : g.name === String(g.subject).replace(/^session:/, '') ? g.name : `${g.name} · ${String(g.subject).replace(/^session:/, '')}`;
-  r.append(glyph(isGroup ? GROUP_GLYPH : CHAT_GLYPH), nm);
-  if (!isGroup) r.append(el('span', `vw-ak-gstate${g.ended ? ' vw-ak-gstate-ended' : ''}`, g.ended ? t('ended') : t('Live')));
-  if (isGroup && Array.isArray(g.except) && g.except.length) r.append(el('span', 'vw-ak-gexcept', t('Except: {n} left out', { n: g.except.length })));   // lane grants-unify: «除了» (授权给… edits it)
+  nm.title = isAll ? `${g.name} · ${t('every conversation, now and later')}` : isGroup ? `${t('Task group')} · ${g.name}` : g.name === String(g.subject).replace(/^session:/, '') ? g.name : `${g.name} · ${String(g.subject).replace(/^session:/, '')}`;
+  r.append(glyph(isAll ? EVERYONE_GLYPH : isGroup ? GROUP_GLYPH : CHAT_GLYPH), nm);
+  if (!isGroup && !isAll) r.append(el('span', `vw-ak-gstate${g.ended ? ' vw-ak-gstate-ended' : ''}`, g.ended ? t('ended') : t('Live')));
+  if ((isGroup || isAll) && Array.isArray(g.except) && g.except.length) r.append(el('span', 'vw-ak-gexcept', t('Except: {n} left out', { n: g.except.length })));   // lane grants-unify: «除了» (授权给… edits it)
   const kind = kindOf(g.reach), ids = groupsOf(g.reach);
   const rc = el('button', `vw-ak-reach vw-ak-reach-${kind}`, reachWord(kind));
   rc.type = 'button'; rc.dataset.reach = kind;
@@ -561,10 +570,11 @@ export function showReachDialog(key, g, data, { refresh } = {}) {
   body.parentNode.append(f);
 }
 
-/** 授权给…: THE principal picker (lane grants-unify — it was a hand-made checkbox list) over every live conversation and
- *  Task Group, multi-select; picked = granted (a chip removed takes that grant back). With a Task Group picked, its
- *  folded «除了» row leaves members OUT — they never use the key through that group (each Task Group grant's row of the
- *  ONE grants store; a member's own grant still counts). */
+/** 授权给…: THE principal picker (lane grants-unify — it was a hand-made checkbox list) over ALL AGENTS (lane
+ *  key-grant-everyone — the first row, `everyone:*`), every live conversation and Task Group, multi-select; picked =
+ *  granted (a chip removed takes that grant back). With a Task Group or All agents picked, its folded «除了» row leaves
+ *  members OUT — they never use the key through that grant (its row of the ONE grants store; a member's own grant still
+ *  counts). */
 export function showGrantPicker(key, data, { refresh } = {}) {
   // lane dialog-unsaved-guard: a pick or the new grants' reach changed and not saved ⇒ ✕ / Esc / the backdrop asks
   let picker = null;
@@ -589,9 +599,9 @@ export function showGrantPicker(key, data, { refresh } = {}) {
   for (const g of always) for (const x of g.except || []) if (!storedExcept.some((y) => JSON.stringify(y) === JSON.stringify(x))) storedExcept.push(x);
   const exPick = rowToPick({ to: [], except: storedExcept }, live, { notRunning: t('not running now'), deletedGroup: t('a deleted Task Group') });
   const exRows = () => [...live, ...exPick.extra];
-  picker = principalPicker({ items: () => live, multi: true, selected: [...had.keys()].filter((k) => live.some((r) => r.key === k)), autofocus: true,
+  picker = principalPicker({ items: () => live, multi: true, selected: [...had.keys()].filter((k) => k === EVERYONE_SUBJECT || live.some((r) => r.key === k)), autofocus: true,
     placeholder: t('Search sessions and groups…'), label: t('Grant "{name}" to', { name: key.name }), emptyText: t('Nothing to pick: no conversation is running and there is no task group'),
-    except: { selected: exPick.except, extra: exPick.extra } });
+    everyone: { key: EVERYONE_SUBJECT }, except: { selected: exPick.except, extra: exPick.extra } });
   body.append(picker.el);
   // lane key-instance-scope: the reach of the grants this save ADDS (an existing grant's reach is its chip's)
   body.append(el('div', 'vw-ak-sec', t('Reach of the grants you add')));
@@ -613,13 +623,19 @@ export function showGrantPicker(key, data, { refresh } = {}) {
     const reach = rows.value();
     const except = exceptNow();
     if (add.length && reach === null) { showToast(t('Pick at least one Task Group'), { type: 'error' }); return false; }
+    // «除了» on the Task Group / All-agents grants this save keeps — written only where it changed
+    const wire = JSON.stringify(except);
+    const exceptOn = always.filter((g) => sel.has(g.subject) && (g.subject.startsWith('group:') || g.subject === EVERYONE_SUBJECT) && JSON.stringify(g.except || []) !== wire);
+    // lane key-grant-everyone: the reach rows are the reach of the grants this save ADDS — changed while it adds none, the
+    // save said 已保存 and wrote nothing (the owner's 「没有办法保存给整个 vibespace」). Refused by name, the dialog kept —
+    // r2: only when the save changes NOTHING but the reach; a removal or a «除了» edit goes through and says the reach was not used
+    const reachUnused = !add.length && JSON.stringify(reach) !== JSON.stringify('opened');
+    if (reachUnused && !drop.length && !exceptOn.length) { showToast(t('This reach is for the grants you add — pick whom to grant the key to (All agents is the first row), or change an existing grant\'s reach on its chip'), { type: 'error' }); return false; }
     let bad = null;
     if (add.length) { const r = await post(`/api/automation/keys/${encodeURIComponent(key.id)}/grants`, { subjects: add, reach, except }); if (!r || !r.ok) bad = r || {}; }
     for (const gid of drop) { const r = await fetchJson(`/api/automation/grants/${encodeURIComponent(gid)}`, { method: 'DELETE' }); if (!r || !r.ok) bad = r || {}; }
-    // «除了» on the Task Group grants this save keeps — written only where it changed
-    const wire = JSON.stringify(except);
-    for (const g of always) if (sel.has(g.subject) && g.subject.startsWith('group:') && JSON.stringify(g.except || []) !== wire) { const r = await post(`/api/automation/grants/${encodeURIComponent(g.id)}/except`, { except }); if (!r || !r.ok) bad = r || {}; }
-    if (bad) showToast(failWords(bad), { type: 'error' }); else showToast(t('Saved'));
+    for (const g of exceptOn) { const r = await post(`/api/automation/grants/${encodeURIComponent(g.id)}/except`, { except }); if (!r || !r.ok) bad = r || {}; }
+    if (bad) showToast(failWords(bad), { type: 'error' }); else showToast(reachUnused ? t('Saved — the reach you picked was not used: it is for the grants a save adds; change an existing grant\'s reach on its chip') : t('Saved'));
     close();
     refresh?.();
     return true;

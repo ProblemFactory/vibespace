@@ -54,6 +54,20 @@
 //      a scope refusal audited and nothing run, an unknown key answered and never audited; THE SHA ONLY (no file under the
 //      data dir holds the value or the sha; env is the one place) · the doors (vsmk_ on the verb door, the two GETs refused
 //      by name, an owner door human_only) · the real CLI (`list --open`, `handled`, PORT's default door, refusals)
+//   ㉑ ALL AGENTS (lane key-grant-everyone — the owner 2026-10-26: 「Vault 里的自动化 key 没有办法保存给整个 vibespace 这个权限」):
+//      the subject everyone:* (SUBJECT_RE, grant-model fromSubject, the use row {to:[everyone]}); useVerdict admits ANY live
+//      conversation (a stranger, another Task Group), never an ended one or an outside caller; «除了» refused BY NAME (a
+//      member's own grant still counts); a ONCE grant spent by the first use, whoever makes it; reachVerdict's (b) never counts
+//      All agents (MUTANT without the carve-out ⇒ RED); grantOrder first; THE ENGINE: grant → the store row, a waiting card
+//      settles, a stranger runs with no card, the reach 整个 VibeSpace saved (setReach) reaches another Task Group's
+//      conversation, an excepted conversation refused with no card then lifted, the once rule, the card's All-agents line;
+//      text pins (the picker's row, 「所有 agent」, the reach-only save refused, the CLI's words). RED on 91bf7e18: the base
+//      refuses everyone:* (bad_args) — the report runs this section on a base archive
+//   ㉑b r2 (the acceptance of 01b6db270): THE ONCE RESERVATION — three conversations opening at once on ONE once-grant to All
+//      agents ⇒ one runs, two are asked (RED on 01b6db270: all three ran), the base's two-parallel-opens race closes too,
+//      MUTANT (the reservation after the limits' await) ⇒ RED; a refused open RELEASES it (audit once: released); a Task Group
+//      «除了» with the caller's Task Groups UNREADABLE ⇒ groups_unreadable by name, no card (PURE, pickKey, the engine,
+//      keysFor; MUTANT without the fact ⇒ the left-out conversation admitted ⇒ RED); the wiring says a failed read
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -811,7 +825,7 @@ console.log('⑫d B-dbba — `conversations open --name` names the conversation 
   const p = e.use({ caller: caller({ conversationId: 'conv-8', sessionKey: 'claude:conv-8', name: 'Worker eight' }), verb: 'conversations.open', args: { cwd: IN, name: 'lane foo' }, want: k.key.id });
   await cardSoon(w);   // 2.369.359: the open's card lands after its off-thread read
   const c = cards(w);
-  ok(c.length === 1 && c[0].detail.startsWith(`This call would open "lane foo" in ${IN}.\nThe key's folders: ${LROOT} (with their subfolders).\n`) && c[0].i18n.detail.length === 4 && c[0].i18n.detail[0].params.name === 'lane foo' && c[0].i18n.detail[0].params.cwd === IN
+  ok(c.length === 1 && c[0].detail.startsWith(`This call would open "lane foo" in ${IN}.\nThe key's folders: ${LROOT} (with their subfolders).\n`) && c[0].i18n.detail.length === 5 && c[0].i18n.detail[0].params.name === 'lane foo' && c[0].i18n.detail[0].params.cwd === IN
     && c[0].i18n.detail[1].key === "The key's folders: {roots} (with their subfolders)." && c[0].i18n.detail[1].params.roots === LROOT && /^Allow once/.test(c[0].i18n.detail[2].key) && /^The reach says/.test(c[0].i18n.detail[3].key),
     'the card\'s words say the name and the folder, the KEY\'s folders with their subfolders (lane key-folder-picker-all), then the three answers, then the reach (lane key-instance-scope)', c[0] && { detail: c[0].detail, i18n: c[0].i18n.detail });
   e.answer(c[0].action.askId, { answer: 'deny' });
@@ -846,7 +860,7 @@ console.log('⑫b MUTANT — the limits judged AFTER the spend authorizer (insid
   const judge = `    let runArgs = v0.args;
     if (verb === 'conversations.open') {
       const lim = await limitsJudge(keyById(key.id) || key, v0.args);
-      if (!lim.ok) return done(lim, key.id, asked ? { ask: asked } : {});
+      if (!lim.ok) return done(lim, key.id, { ...(asked ? { ask: asked } : {}), ...(held ? { once: release() } : {}) });
       runArgs = lim.args;
     }`;
   const act = '    try { result = await impl(runArgs, { caller, keyId: key.id, identity: A.identityOf(key.id), grant: verdict.grant, reach }); }';
@@ -1064,7 +1078,7 @@ console.log('⑰b THE CARD\'S REACH (lane key-instance-scope) — the first-use 
   const p1 = w.engine.use({ caller: CG(), verb: 'conversations.rename', args: { name: 'x' } });
   await new Promise((r) => setImmediate(r));
   const c = cards(w)[0];
-  ok(c && c.action.groups === 'T-7 T-8' && c.i18n.detail.length === 2 && /The reach says which other conversations/.test(c.i18n.detail[1].key), 'the card carries the caller\'s Task Group ids (action.groups, space-joined) and its words say what the reach is', c && c.action);
+  ok(c && c.action.groups === 'T-7 T-8' && c.i18n.detail.length === 3 && /The reach says which other conversations/.test(c.i18n.detail[1].key), 'the card carries the caller\'s Task Group ids (action.groups, space-joined) and its words say what the reach is', c && c.action);
   ok(w.engine.answer(c.action.askId, { answer: 'always', reach: 'everything' }).code === 'bad_args' && cards(w).length === 1, 'an unknown reach ⇒ bad_args, the card still up');
   const a1 = w.engine.answer(c.action.askId, { answer: 'always', reach: 'groups', answeredBy: 'user' });
   const g1 = w.engine.list().keys[0].grants[0];
@@ -1311,7 +1325,7 @@ console.log('⑰ 编辑… — a minted key\'s verbs and limits after minting (l
   const ka = e.mint({ name: 'anywhere', scopes: ['conversations.open'], limits: ALL });
   const pc = e.use({ caller: caller(), verb: 'conversations.open', args: { cwd: IN, name: 'w' }, want: ka.key.id });
   const c = await cardSoon(w2);   // 2.369.359: the open's card lands after its off-thread read
-  ok(c.length === 1 && c[0].i18n.detail.length === 4 && /^The reach says/.test(c[0].i18n.detail[3].key) && c[0].i18n.detail[1].key === "The key's folders: all paths — any folder on this VibeSpace." && !c[0].i18n.detail[1].params && c[0].detail.includes("\nThe key's folders: all paths — any folder on this VibeSpace.\n"),
+  ok(c.length === 1 && c[0].i18n.detail.length === 5 && /^The reach says/.test(c[0].i18n.detail[3].key) && c[0].i18n.detail[1].key === "The key's folders: all paths — any folder on this VibeSpace." && !c[0].i18n.detail[1].params && c[0].detail.includes("\nThe key's folders: all paths — any folder on this VibeSpace.\n"),
     'the first-use card of an all-paths key says 「所有路径」 (its own line, i18n — never a bare `/`)', c[0] && c[0].i18n.detail);
   e.answer(c[0].action.askId, { answer: 'deny' });
   ok((await pc).code === 'ask_denied' && !rig.calls.length, '…denied: nothing opened');
@@ -1574,6 +1588,207 @@ console.log('⑳ «除了» ON BOTH KEY DOORS (verify grants-verify mutation gap
     const red = runKeyLegs(Ax);
     ok(want.every((n) => red.includes(n)), `MUTANT ${tag} RED (${what}): the key doors' own legs go red — ${want.map((n) => n.split(':')[0]).join(' + ')}`, red);
   }
+}
+
+console.log('㉑ ALL AGENTS — a key granted to every conversation (lane key-grant-everyone — the owner 2026-10-26: 「Vault 里的自动化 key 没有办法保存给整个 vibespace 这个权限」)');
+{
+  const ALL = 'everyone:*';
+  const GMOD = R('src/grant-model.js');
+  // R1, PURE: the subject, the model's principal, the stored row read back
+  ok(A.isSubject(ALL) && !A.isSubject('everyone') && !A.isSubject('everyone:x') && !A.isSubject('everyone:**'), 'the subject everyone:* IS a grant subject (SUBJECT_RE); `everyone`, `everyone:x`, `everyone:**` are not');
+  eq(GMOD.fromSubject(ALL), { kind: 'everyone' }, 'grant-model fromSubject(everyone:*) ⇒ {kind:\'everyone\'}');
+  eq(A.useRowForSubject(ALL), { to: [{ kind: 'everyone' }], except: [] }, 'the use row a grant to All agents writes: {to:[{kind:everyone}], except:[]}');
+  ok(A.subjectOfRow({ door: 'automation-key-use', resource: 'ag-1', to: [{ kind: 'everyone' }], except: [] }) === ALL, 'a stored everyone row reads back as the subject everyone:*');
+  const GE = (o = {}) => G({ subject: ALL, use: { door: 'automation-key-use', resource: 'ag-000000000001', to: [{ kind: 'everyone' }], except: [] }, ...o });
+  const uv = (grants, cid, groups = [], o = {}) => A.useVerdict({ key: K(), grants, subject: `session:${cid}`, subjectGroups: groups, verb: 'conversations.rename', vaultState: 'unlocked', ...o });
+  ok(uv([GE()], 'conv-never-seen').ok && uv([GE()], 'conv-other', ['T-9']).ok, 'useVerdict: ANY live conversation is admitted through a grant to All agents — one that never existed when it was made, one in another Task Group');
+  ok(uv([GE()], 'conv-x', [], { subjectLive: false }).code === 'subject_ended' && A.useVerdict({ key: K(), grants: [GE()], subject: 'external', verb: 'conversations.rename', vaultState: 'unlocked' }).code === 'not_granted', '…never an ended conversation (its token is gone) and never an outside caller (`external` rides external grants only)');
+  const GEX = GE({ use: { door: 'automation-key-use', resource: 'ag-000000000001', to: [{ kind: 'everyone' }], except: [{ kind: 'conversation', key: 'conv-out' }, { kind: 'group', id: 'T-out' }] } });
+  ok(uv([GEX], 'conv-out').code === 'excepted' && uv([GEX], 'conv-m', ['T-out']).code === 'excepted' && uv([GEX], 'conv-in').ok, '«除了»: a conversation and a Task Group left out of All agents are refused BY NAME (excepted); everyone else is admitted');
+  ok(uv([GEX, G({ n: 2, subject: 'session:conv-out' })], 'conv-out').ok, '…a left-out conversation\'s OWN grant still counts (rows add; an exception subtracts only its own row)');
+  // THE ONCE RULE: one use, whoever makes it
+  const GO = GE({ mode: 'once' });
+  const v1 = uv([GO], 'conv-a');
+  ok(v1.ok && v1.spend === true && uv([{ ...GO, spentAt: NOW }], 'conv-b').code === 'once_spent' && uv([{ ...GO, spentAt: NOW }], 'conv-a').code === 'once_spent', 'a ONCE grant to All agents is spent by the FIRST use, whoever makes it — every later caller (that one too) finds it spent');
+  // THE REACH: a grant to All agents names nobody for reachVerdict's (b)
+  const rv = (Mod, reach, target) => Mod.reachVerdict({ keyId: 'ak-000000000001', caller: 'coord', target, grants: [GE({ reach })], opened: [], reach });
+  const tOther = { conversationId: 'conv-target', groups: ['T-other'] };
+  ok(rv(A, 'opened', tOther).code === 'not_granted', 'reachVerdict: a grant to All agents whose reach is 只有它开的会话 does NOT reach every conversation — (b) counts a grant that NAMES the target, never All agents (the reach chip decides that)');
+  ok(rv(A, 'instance', tOther).ok === true && rv(A, 'instance', tOther).by === 'instance', '…its reach 整个 VibeSpace reaches a conversation of another Task Group (by: instance)');
+  const BFROM = "return v.ok && v.via !== 'everyone'; })) return { ok: true, by: 'grant' };";
+  ok(SRC.split(BFROM).length === 2, 'ANCHOR: reachVerdict (b) carves All agents out — spelled once');
+  if (SRC.split(BFROM).length === 2) {
+    const Ab = M.load('src/automation-keys.js', SRC.replace(BFROM, "return v.ok; })) return { ok: true, by: 'grant' };"), 'b-everyone');
+    const mv = rv(Ab, 'opened', tOther);
+    ok(mv.ok === true && mv.by === 'grant', 'MUTANT RED: (b) without the carve-out ⇒ a 只有它开的会话 grant to All agents reaches conv-target «by grant» — the reach chip would lie', mv);
+  }
+  // the order + the audit's word + never ended
+  eq(A.grantOrder([{ subject: 'session:c1', name: 'a' }, { subject: 'group:T-1', name: 'b' }, { subject: ALL, name: 'z' }]).map((r) => r.subject), [ALL, 'group:T-1', 'session:c1'], 'grantOrder: All agents FIRST, then Task Groups, then conversations');
+  ok(A.auditLine({ at: NOW, keyId: 'ak-000000000001', subject: ALL, verb: 'key.grant', ok: true }).subject === ALL && !A.grantEnded({ subject: ALL }, new Set()), 'the audit line names everyone:* (the window words it 「所有 agent」); a grant to All agents never «ends»');
+
+  // R1 ON THE ENGINE — a real vault, a real For-you store, the ONE grants store
+  const seen = [];
+  const w = await mkWorld('everyone', { verbs: { 'conversations.rename': (args, ctx) => { seen.push({ caller: ctx.caller.conversationId, other: ctx.reach({ conversationId: 'conv-target', groups: ['T-other'] }) }); return { ok: true, name: args.name }; } } });
+  const CA = (cid, o = {}) => caller({ conversationId: cid, sessionKey: `claude:${cid}`, name: cid, ...o });
+  const m = w.engine.mint({ name: 'all', scopes: ['conversations.rename'], by: 'user' });
+  const pz = w.engine.use({ caller: CA('conv-z'), verb: 'conversations.rename', args: { name: 'z' } });
+  await new Promise((r) => setImmediate(r));
+  ok(cards(w).length === 1, 'no grant yet ⇒ conv-z waits on its first-use card');
+  const g = w.engine.grant(m.key.id, [ALL], { by: 'user' });
+  const rz = await Promise.race([pz, new Promise((r) => setTimeout(() => r({ code: 'still waiting' }), 2000))]);
+  const gid = g && g.added && g.added[0] ? g.added[0].id : null;
+  ok(g.ok && !!gid && g.added[0].subject === ALL && rz.ok && !cards(w).length, 'engine.grant(key, [everyone:*]) lands (RED on the base: bad_args); the waiting card settles — the owner granted every conversation — and conv-z\'s call runs', { g, rz });
+  const rows = (() => { try { return JSON.parse(fs.readFileSync(path.join(w.dir, 'grants.json'), 'utf8')).rows.filter((r) => r.door === 'automation-key-use' && r.resource === gid); } catch { return []; } })();
+  ok(rows.length === 1 && JSON.stringify(rows[0].to) === '[{"kind":"everyone"}]' && JSON.stringify(rows[0].except) === '[]', 'the ONE grants store (data/grants.json) holds its use row {to:[{kind:everyone}], except:[]}', rows);
+  if (!gid) ok(false, 'THE ENGINE LEGS BELOW need the grant to All agents — not run (the base refuses everyone:* with bad_args)');
+  else {
+  const rs = await w.engine.use({ caller: CA('conv-stranger', { groups: ['T-new'] }), verb: 'conversations.rename', args: { name: 's' } });
+  ok(rs.ok && !cards(w).length, 'a STRANGER conversation (started after the grant, in a Task Group nobody granted) uses the key at once — no card', rs);
+  ok(seen.length && seen.at(-1).caller === 'conv-stranger' && seen.at(-1).other.ok === false, '…while the grant\'s reach stays 只有它开的会话: the stranger may not touch conv-target (All agents is a WHO, not a reach)', seen.at(-1));
+  ok(w.engine.keysFor({ conversationId: 'conv-stranger', groups: [] }).some((k) => k.name === 'all' && k.via.some((v) => v.subject === ALL)), 'keysFor: the stranger holds the key via everyone:*');
+  const lines = auditOf(w);
+  ok(lines.some((l) => l.verb === 'key.grant' && l.subject === ALL && l.ok) && lines.some((l) => l.verb === 'conversations.rename' && l.subject === 'session:conv-stranger' && l.ok), 'the audit: key.grant names everyone:*; the stranger\'s use names its own conversation');
+  // R3 on the engine: the reach 整个 VibeSpace (POST …/reach {reach:'instance'} = setReach) ⇒ a conversation of another Task Group is reached
+  const sr = gid ? w.engine.setReach(gid, 'instance', { by: 'user' }) : { ok: false };
+  const reachRows = (() => { try { return JSON.parse(fs.readFileSync(path.join(w.dir, 'grants.json'), 'utf8')).rows.filter((r) => r.door === 'automation-key-reach' && r.resource === gid); } catch { return []; } })();
+  const rs2 = await w.engine.use({ caller: CA('conv-stranger-2', { groups: ['T-new'] }), verb: 'conversations.rename', args: { name: 's2' } });
+  ok(sr.ok && reachRows.length === 1 && JSON.stringify(reachRows[0].to) === '[{"kind":"everyone"}]' && rs2.ok && seen.at(-1).other.ok === true && seen.at(-1).other.by === 'instance' && w.engine.list().keys.find((k) => k.name === 'all').grants[0].reach === 'instance',
+    'the reach 整个 VibeSpace saves: the reach row {to:[{kind:everyone}]} in the store, the list says instance, and a caller now reaches conv-target of ANOTHER Task Group (by: instance)', { sr, reachRows, last: seen.at(-1) });
+  // «除了» on the engine
+  const m2 = w.engine.mint({ name: 'all-but', scopes: ['conversations.rename'], by: 'user' });
+  const g2 = w.engine.grant(m2.key.id, [ALL], { by: 'user', except: [{ kind: 'conversation', key: 'conv-out' }] });
+  const ro = await w.engine.use({ caller: CA('conv-out'), verb: 'conversations.rename', args: { name: 'o' }, want: 'all-but' });
+  ok(g2.ok && ro.code === 'excepted' && /grant to a Task Group or to all agents/.test(ro.why || '') && !cards(w).length, 'a conversation LEFT OUT of All agents is refused BY NAME (excepted — the why says which grant) — never a first-use card', ro);
+  const ri = await w.engine.use({ caller: CA('conv-in'), verb: 'conversations.rename', args: { name: 'i' }, want: 'all-but' });
+  const lift = g2.ok ? w.engine.setExcept(g2.added[0].id, { except: [] }) : { ok: false };
+  const ro2 = await w.engine.use({ caller: CA('conv-out'), verb: 'conversations.rename', args: { name: 'o2' }, want: 'all-but' });
+  ok(ri.ok && lift.ok && ro2.ok, '…every other conversation uses it; the exception lifted (setExcept) ⇒ the left-out one does too', { ri, lift, ro2 });
+  // the once rule on the engine
+  const m3 = w.engine.mint({ name: 'all-once', scopes: ['conversations.rename'], by: 'user' });
+  const g3 = w.engine.grant(m3.key.id, [ALL], { by: 'user', mode: 'once' });
+  const r3a = await w.engine.use({ caller: CA('conv-first'), verb: 'conversations.rename', args: { name: 'f' }, want: 'all-once' });
+  const spent = w.engine.list().keys.find((k) => k.name === 'all-once');
+  const p3b = w.engine.use({ caller: CA('conv-second'), verb: 'conversations.rename', args: { name: 'g' }, want: 'all-once' });
+  await new Promise((r) => setImmediate(r));
+  const c3 = cards(w).find((i) => i.action && i.action.subject === 'session:conv-second');
+  if (c3) w.engine.answer(c3.action.askId, { answer: 'deny' });
+  const r3b = await Promise.race([p3b, new Promise((r) => setTimeout(() => r({ code: 'still waiting' }), 2000))]);
+  ok(g3.ok && r3a.ok && spent && spent.grants[0] && spent.grants[0].spentAt && !!c3 && r3b.code === 'ask_denied', 'a ONCE grant to All agents: the first conversation\'s use spends it; the next conversation is asked again (its card; denied here)', { r3a, grant: spent && spent.grants[0], r3b });
+  // the card names the WHO it does not offer (R4): its last line — All agents on the key's row
+  const pc = w.engine.use({ caller: CA('conv-card'), verb: 'conversations.rename', args: { name: 'c' }, want: 'all-once' });
+  await new Promise((r) => setImmediate(r));
+  const cc = cards(w).find((i) => i.action && i.action.subject === 'session:conv-card');
+  ok(cc && /grant the key to All agents on its row in the Vault window\.$/.test(cc.i18n.detail.at(-1).key) && /All agents/.test(cc.detail) && !/everyone:\*/.test(JSON.stringify(cc)), 'the first-use card says how to let EVERY conversation use the key — «All agents» on its row (i18n; never a bare everyone:*)', cc && cc.i18n.detail);
+  if (cc) w.engine.answer(cc.action.askId, { answer: 'deny' });
+  await pc;
+  // a person's door only: the subject is refused anywhere else
+  }
+  ok(w.engine.grant(m.key.id, ['everyone']).code === 'bad_args' && w.engine.grant(m.key.id, ['everyone:x']).code === 'bad_args', 'the bare `everyone` and `everyone:x` stay refused (one spelling: everyone:*)');
+  // R3 PIN (reading B on the engine — 91bf7e18 passes it): a conversation's grant whose reach is 整个 VibeSpace (setReach = the
+  // reach dialog's POST …/reach {reach:'instance'}) keeps the reach row {to:[{kind:everyone}]} and reaches ANOTHER Task Group's conversation
+  const mr = w.engine.mint({ name: 'reacher', scopes: ['conversations.rename'], by: 'user' });
+  const gr = w.engine.grant(mr.key.id, ['session:conv-r'], { by: 'user' });
+  const grid = gr.ok && gr.added && gr.added[0] ? gr.added[0].id : null;
+  const srr = grid ? w.engine.setReach(grid, 'instance', { by: 'user' }) : { ok: false };
+  const rr = await w.engine.use({ caller: CA('conv-r', { groups: ['T-mine'] }), verb: 'conversations.rename', args: { name: 'r' }, want: 'reacher' });
+  const rrow = (() => { try { return JSON.parse(fs.readFileSync(path.join(w.dir, 'grants.json'), 'utf8')).rows.find((r) => r.door === 'automation-key-reach' && r.resource === grid) || null; } catch { return null; } })();
+  ok(srr.ok && rr.ok && seen.at(-1).caller === 'conv-r' && seen.at(-1).other.ok === true && seen.at(-1).other.by === 'instance' && !!rrow && JSON.stringify(rrow.to) === '[{"kind":"everyone"}]' && w.engine.list().keys.find((k) => k.name === 'reacher').grants[0].reach === 'instance',
+    'PIN (R3, 91bf7e18 passes it): a conversation\'s grant set to 整个 VibeSpace keeps its reach row {to:[{kind:everyone}]} in the store, the list says instance, and its use reaches a conversation of ANOTHER Task Group', { srr, rrow, last: seen.at(-1) });
+}
+// ㉑b (lane key-grant-everyone r2 — the acceptance's four minors): THE ONCE RESERVATION under concurrency, its release by a
+// refused open, a Task Group «除了» when the caller's Task Groups cannot be read
+console.log('㉑b THE ONCE RESERVATION + UNREADABLE TASK GROUPS (lane key-grant-everyone r2 — the acceptance of 01b6db270)');
+{
+  const ALL = 'everyone:*';
+  // the race: three conversations open at once on ONE once-grant to All agents ⇒ exactly one runs, the other two are asked
+  // (RED on 01b6db270: all three ran — the spend was written after the limits' await)
+  const race = async (Mod, tag, subjects, callers) => {
+    const ran = [];
+    const w = await mkWorld(tag, { verbs: { 'conversations.open': async (args, ctx) => { ran.push(ctx.caller.conversationId); return { ok: true, sessionId: 'w-' + ran.length }; } } });
+    const engine = Mod === ENG ? w.engine : Mod.create({ dataDir: w.dir, vault: w.vault, userTodos: w.userTodos, now: w.now, verbs: { 'conversations.open': async (args, ctx) => { ran.push(ctx.caller.conversationId); return { ok: true, sessionId: 'w-' + ran.length }; } } });
+    const m = engine.mint({ name: 'k', scopes: ['conversations.open'], limits: OPEN_LIMITS, by: 'user' });
+    const g = engine.grant(m.key.id, subjects, { by: 'user', mode: 'once' });
+    const ps = callers.map((c) => engine.use({ caller: caller({ conversationId: c, sessionKey: `claude:${c}`, name: c }), verb: 'conversations.open', args: { cwd: '/tmp', permission: 'default' } }));
+    const want = callers.length - 1;
+    for (let i = 0; i < 200 && cards(w).length < want && ran.length < callers.length; i++) await new Promise((r) => setTimeout(r, 10));
+    const carded = cards(w).length;
+    for (const c of cards(w)) engine.answer(c.action.askId, { answer: 'deny' });
+    const rs = await Promise.race([Promise.all(ps), new Promise((r) => setTimeout(() => r(null), 5000))]);
+    return { g, ran, carded, codes: rs ? rs.map((r) => (r.ok ? 'ok' : r.code)) : ['still waiting'], spent: (engine.list().keys[0].grants[0] || {}).spentAt || null };
+  };
+  const r3 = await race(ENG, 'race-all', [ALL], ['conv-a', 'conv-b', 'conv-c']);
+  ok(r3.g.ok && r3.ran.length === 1 && r3.carded === 2 && r3.codes.filter((c) => c === 'ok').length === 1 && r3.codes.filter((c) => c === 'ask_denied').length === 2 && !!r3.spent,
+    'THE RACE: three conversations open at once on ONE once-grant to All agents ⇒ exactly ONE runs, the other two are asked (two cards; denied here) — RED on 01b6db270 (all three ran)', r3);
+  const r2s = await race(ENG, 'race-session', ['session:conv-a'], ['conv-a', 'conv-a']);
+  ok(r2s.ran.length === 1 && r2s.carded === 1 && r2s.codes.filter((c) => c === 'ok').length === 1, '…and the base\'s own race closes with it: two parallel opens of ONE conversation on its once-grant ⇒ one runs, the other is asked', r2s);
+  const ESRC = fs.readFileSync(path.join(ROOT, 'src/server/automation-engine.js'), 'utf8');
+  const RES = '    let held = null;\n    if (verdict.spend) {\n';
+  ok(ESRC.split(RES).length === 2, 'ANCHOR: the once reservation, spelled once');
+  if (ESRC.split(RES).length === 2) {
+    const MX = M.load('src/server/automation-engine.js', ESRC.replace(RES, "    let held = null;\n    if (verb === 'conversations.open') await limitsJudge(keyById(key.id) || key, v0.args);\n    if (verdict.spend) {\n"), 'reserve-after-judge');
+    const mx = await race(MX, 'race-mutant', [ALL], ['conv-a', 'conv-b', 'conv-c']);
+    ok(mx.ran.length === 3, `MUTANT RED: the reservation written AFTER the limits' await (01b6db270's order — a check-then-write across an await) ⇒ ${mx.ran.length} opens ran on ONE once-grant`, mx);
+  }
+  // the release: an open the limits refuse gives the once-grant back (its audit line says so); the next caller spends it
+  {
+    const ran = [];
+    const w = await mkWorld('release', { verbs: { 'conversations.open': async (args, ctx) => { ran.push(ctx.caller.conversationId); return { ok: true, sessionId: 'w-' + ran.length }; } } });
+    const m = w.engine.mint({ name: 'k', scopes: ['conversations.open'], limits: LIM_OPEN, by: 'user' });
+    const g = w.engine.grant(m.key.id, [ALL], { by: 'user', mode: 'once' });
+    const out = await w.engine.use({ caller: caller({ conversationId: 'conv-out', sessionKey: 'claude:conv-out', name: 'conv-out' }), verb: 'conversations.open', args: { cwd: LOUT, permission: 'default' } });
+    const after = w.engine.list().keys[0].grants[0];
+    const line = auditOf(w).filter((l) => l.verb === 'conversations.open').at(-1);
+    const pn = w.engine.use({ caller: caller({ conversationId: 'conv-next', sessionKey: 'claude:conv-next', name: 'conv-next' }), verb: 'conversations.open', args: { cwd: IN, permission: 'default' } });
+    await cardSoon(w, 20);
+    for (const c of cards(w)) w.engine.answer(c.action.askId, { answer: 'deny' });   // never left waiting (an unanswered card's timer is unref'd)
+    const nxt = await pn;
+    ok(g.ok && out.code === 'cwd_outside_roots' && after && !after.spentAt && line && line.code === 'cwd_outside_roots' && line.once === 'released' && nxt.ok && ran.join() === 'conv-next' && !!w.engine.list().keys[0].grants[0].spentAt,
+      'an open the limits refuse RELEASES the once-grant it reserved (the audit line: once released) — nothing ran, and the next conversation spends it', { out: out.code, after, line, nxt: nxt.ok, ran });
+  }
+  // UNREADABLE TASK GROUPS, PURE: a Task Group «除了» on All agents is never judged against [] (it admitted the conversation left out)
+  const GEX = G({ subject: ALL, use: { door: 'automation-key-use', resource: 'ag-000000000001', to: [{ kind: 'everyone' }], except: [{ kind: 'group', id: 'T-out' }] } });
+  const GEC = G({ subject: ALL, use: { door: 'automation-key-use', resource: 'ag-000000000001', to: [{ kind: 'everyone' }], except: [{ kind: 'conversation', key: 'conv-out' }] } });
+  const uv = (Mod, grants, cid, o = {}) => Mod.useVerdict({ key: K(), grants, subject: `session:${cid}`, subjectGroups: [], verb: 'conversations.rename', vaultState: 'unlocked', ...o });
+  ok(uv(A, [GEX], 'conv-m', { subjectGroupsUnreadable: true }).code === 'groups_unreadable' && A.CODES.groups_unreadable === 409, 'All agents «除了» a Task Group, the caller\'s Task Groups unreadable ⇒ refused BY NAME groups_unreadable (409) — never admitted as «in no Task Group»');
+  ok(uv(A, [GEX], 'conv-m', { subjectGroups: ['T-in'] }).ok && uv(A, [GEC], 'conv-m', { subjectGroupsUnreadable: true }).ok && uv(A, [G({ subject: ALL, use: { door: 'automation-key-use', resource: 'ag-000000000001', to: [{ kind: 'everyone' }], except: [] } })], 'conv-m', { subjectGroupsUnreadable: true }).ok,
+    '…read, the same caller is admitted; unreadable, a grant no Task Group decides (a conversation exception, none) still admits');
+  ok(uv(A, [GEX, G({ n: 2, subject: 'session:conv-m' })], 'conv-m', { subjectGroupsUnreadable: true }).ok, '…and the caller\'s OWN grant still counts (rows add)');
+  ok(A.pickKey({ keys: [K()], grants: [GEX], subject: 'session:conv-m', subjectGroups: [], subjectGroupsUnreadable: true, verb: 'conversations.rename' }).ask === true && A.pickKey({ keys: [K()], grants: [GEX], subject: 'session:conv-m', subjectGroups: [], verb: 'conversations.rename' }).ask === false,
+    'pickKey reads the same fact: an undecided grant is no grant to pick by');
+  const UNEEDLE = 'groupIds: Array.isArray(subjectGroups) ? subjectGroups : [], groupsUnreadable: !!subjectGroupsUnreadable };';
+  ok(SRC.split(UNEEDLE).length === 2, 'ANCHOR: useVerdict hands the unreadable fact to the ONE admission — spelled once');
+  if (SRC.split(UNEEDLE).length === 2) {
+    const Au = M.load('src/automation-keys.js', SRC.replace(UNEEDLE, 'groupIds: Array.isArray(subjectGroups) ? subjectGroups : [] };'), 'groups-unreadable-dropped');
+    const mv = uv(Au, [GEX], 'conv-m', { subjectGroupsUnreadable: true });
+    ok(mv.ok === true, 'MUTANT RED: the fact dropped (01b6db270\'s shape) ⇒ the conversation the owner left out of All agents is ADMITTED while its Task Groups are unreadable', mv);
+  }
+  // …ON THE ENGINE: refused by name, no first-use card (never a question about a conversation the owner may have left out)
+  {
+    const w = await mkWorld('unreadable', { verbs: { 'conversations.rename': async () => ({ ok: true }) } });
+    const m = w.engine.mint({ name: 'all-but-group', scopes: ['conversations.rename'], by: 'user' });
+    const g = w.engine.grant(m.key.id, [ALL], { by: 'user', except: [{ kind: 'group', id: 'T-out' }] });
+    const ru = await w.engine.use({ caller: caller({ conversationId: 'conv-m', groups: [], groupsUnreadable: true }), verb: 'conversations.rename', args: { name: 'u' } });
+    const rr = await w.engine.use({ caller: caller({ conversationId: 'conv-m', groups: ['T-in'] }), verb: 'conversations.rename', args: { name: 'r' } });
+    const ro = await w.engine.use({ caller: caller({ conversationId: 'conv-m', groups: ['T-out'] }), verb: 'conversations.rename', args: { name: 'o' } });
+    const line = auditOf(w).find((l) => l.code === 'groups_unreadable');
+    ok(g.ok && ru.code === 'groups_unreadable' && /Task Groups could not be read just now/.test(ru.why || '') && !cards(w).length && !!line && rr.ok && ro.code === 'excepted',
+      'the engine: the caller\'s Task Groups unreadable ⇒ groups_unreadable by name, the why says so, NO card, its audit line; read ⇒ admitted (T-in) / excepted (T-out)', { ru, rr: rr.ok, ro: ro.code, line });
+    ok(!w.engine.keysFor({ conversationId: 'conv-m', groups: [], groupsUnreadable: true }).length && w.engine.keysFor({ conversationId: 'conv-m', groups: ['T-in'] }).length === 1, 'keysFor: a key an unreadable Task Group decides is not listed (the agent never reads it as held)');
+  }
+  // the WIRING: the caller's Task Groups read SAYS a failed read (the hub's one reading of a session token)
+  const WIRE = fs.readFileSync(path.join(ROOT, 'src/server/mounts-plugins-wiring.js'), 'utf8');
+  ok(/catch \{ return \{ ids: \[\], unreadable: true \}; \} \};/.test(WIRE) && /groups: g\.ids, groupsUnreadable: g\.unreadable\b/.test(WIRE), 'the wiring: a Task Group read that throws is { unreadable: true } and the caller carries groupsUnreadable (it was [] — «in no Task Group»)');
+}
+// R2 + R4, text pins: the window's picker offers the row; its chip / the audit / the CLI say the words
+{
+  const VA = fs.readFileSync(path.join(ROOT, 'src/lib/vault-automation.js'), 'utf8');
+  const CLI = fs.readFileSync(path.join(ROOT, 'data/bin/vibespace-api'), 'utf8');
+  ok(/everyone: \{ key: EVERYONE_SUBJECT \}, except: \{ selected: exPick\.except/.test(VA) && /selected: \[\.\.\.had\.keys\(\)\]\.filter\(\(k\) => k === EVERYONE_SUBJECT \|\|/.test(VA), '授权给… passes the All-agents row (everyone: {key: everyone:*}) and keeps a stored grant to it picked');
+  ok(/if \(subject === EVERYONE_SUBJECT\) return t\('All agents'\);/.test(VA) && /if \(g\.subject === EVERYONE_SUBJECT\) return t\('All agents'\);/.test(VA), 'the key row\'s grant and the audit view name it 「所有 agent」 (t(\'All agents\')) — never the bare subject');
+  ok(/\(g\.subject\.startsWith\('group:'\) \|\| g\.subject === EVERYONE_SUBJECT\) && JSON\.stringify\(g\.except/.test(VA), '«除了» is written for a kept grant to All agents as for a Task Group');
+  ok(/const reachUnused = !add\.length && JSON\.stringify\(reach\) !== JSON\.stringify\('opened'\);\n    if \(reachUnused && !drop\.length && !exceptOn\.length\) \{ showToast\(t\('This reach is for the grants you add/.test(VA), 'a 保存 that changes NOTHING but the reach rows is refused by name (it said 已保存 and wrote nothing — the chrome leg is its RED); r2: a removal or a «除了» edit is no reach-only save');
+  ok(/showToast\(reachUnused \? t\('Saved — the reach you picked was not used: it is for the grants a save adds/.test(VA), '…such a save goes through and its toast says the reach was not used (the chrome legs drive all three shapes)');
+  ok(/v\.subject === 'everyone:\*' \? 'all agents \(everyone:\*\)' : v\.subject/.test(CLI), '`vibespace-api keys` says «via all agents (everyone:*)»');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
