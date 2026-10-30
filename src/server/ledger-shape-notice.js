@@ -57,6 +57,13 @@
  * is kept as «Earlier» with «whether they were recorded is not known» (`maybe`: each such count by its generation, beside
  * `ended`); r9–r14 said every ended count «counted, never recorded» — r14's set-aside road turned the item's «some of them
  * may already be recorded» into that while the rids that could check it were moved away unread.
+ * Round 16 (WHAT BLOCKS IS NAMED; AN ITEM'S WORDS UPDATE, NEVER RE-FILE): the hold-read notice names every file that keeps
+ * the month waiting (`files` — usage-history judges it over the whole hold: a segment it cannot read, its set only when the
+ * set itself would keep the month waiting; a set the disk refused is set aside once the rest reads, and told by the
+ * set-aside notice) — and when that changes (one fixed, another still in the way) the SAME item is re-worded in place:
+ * said once per item, not per text; a retry never reopens one the owner closed. The set-aside notice names EVERY file one
+ * read set aside (the live one first; bounded — the server log names the rest): r12–r15 re-worded it per file, and only
+ * the last one judged was named.
  * `wire({usageHistory, userTodos})` = server.js's one line (it sets `usageHistory.onShape`, reconciles 3 s after boot).
  */
 const INBOX_KEY = 'usage-ledger';
@@ -97,12 +104,19 @@ const D_READ = [
   i18nKey('What happens now: VibeSpace reads the file again by itself — after a few seconds, then less often (at most once a minute); this notice closes when it is read.'),
   i18nKey('What to do: check the file\'s permissions and the disk that holds VibeSpace\'s data folder. If this notice is still here in an hour, send feedback from the gear menu.'),
 ];
+// r16: more than one file keeps the month waiting — the rest named (bounded: READ_LIST_MAX, then «(+n)»)
+const D_READ_ALSO = i18nKey('Not the only one: {files} in the same folder could not be read either — the events of {month} wait until every one of them is read.');
+const READ_LIST_MAX = 4;
 // r12: a held set file's line that is no record — SET ASIDE (the file as it was, its bytes intact), the hold going on: ONE
 // notice per hold, re-said in place at each setting-aside, closed by the owner (nothing waits)
 const ASIDE_KEY = 'set-aside';
 const TEXT_ASIDE = i18nKey('A held usage file of {machine} for {month} had a line that is no record — set aside; nothing waits');
 const TEXT_ASIDE_PAST = i18nKey('A held usage file of {machine} for {month} had a line that is no record — read past it; nothing waits'); // r14: no copy made (the folder at its bound, a copy that failed): the line read past
 const TEXT_ASIDE_UNREAD = i18nKey('A held usage file of {machine} for {month} could not be read ({code}) — set aside unread; nothing waits'); // a set the disk would not read (r14: either road — the classifier is the error's, never the file's age): moved aside unread
+// r16: one read set aside more than one file of the hold — each named (bounded: ASIDE_LIST_MAX, then how many more)
+const TEXT_ASIDE_MANY = i18nKey('{count} held usage files of {machine} for {month} had a line that is no record or could not be read — each is said below; nothing waits');
+const D_ASIDE_MORE = i18nKey('And {more} more file(s) of this hold, in the same read — the server log says what was done with each.');
+const ASIDE_LIST_MAX = 4;
 const D_ASIDE_WHAT = {
   aside: i18nKey('What: line {line} of data/usage-history/_held/{file} is no record VibeSpace writes. VibeSpace kept every other record of the file and set the line aside: the file as it was, bytes intact, is data/usage-history/_set-aside/{aside}.'),
   over: i18nKey('What: line {line} of data/usage-history/_held/{file} is no record VibeSpace writes. VibeSpace kept every other record of the file and removed the line — data/usage-history/_set-aside already holds {over} files, so no copy of it was kept.'),
@@ -117,6 +131,7 @@ const D_ASIDE_WHAT = {
 };
 const D_ASIDE_TWICE = i18nKey('It could not be read at the start before this one either ({code}), so VibeSpace takes it for the disk\'s answer, not an error that passes.'); // r14: an EIO-like error met at two starts
 const D_ASIDE_NOW_UNREAD = i18nKey('What happens now: nothing waits — the held events of {month} are recorded as usual; a count of dropped events said for {month} misses the ones this file named.'); // r14: a whole file unread (r12 said «a line» of it)
+const D_ASIDE_NOW_UNREAD_MANY = i18nKey('What happens now: nothing waits — the held events of {month} are recorded as usual; a count of dropped events said for {month} misses the ones these files named.'); // r16: more than one unread
 const D_ASIDE_NOW = i18nKey('What happens now: nothing waits — the held events of {month} are recorded as usual. A line VibeSpace cannot read names no held event; at most, a count of dropped events said for {month} misses what it named.');
 const D_ASIDE_TODO = i18nKey('What to do: nothing — close this notice once you have read it. If it comes back, send feedback from the gear menu: the set-aside file shows what was written.');
 const D_ASIDE_TODO_NOCOPY = i18nKey('What to do: nothing — close this notice once you have read it. If it comes back, send feedback from the gear menu.'); // r14: no copy was kept — none to look at
@@ -232,12 +247,15 @@ function droppedNoticeOf({ hostName, host, shard, month, dropped, unchecked = fa
     i18n: { text: { key: TEXT_DROPPED, params: { machine: p.machine, name, tag: t, month: p.month, shard: p.shard, dropped: p.dropped, host: String(host || '').slice(0, 160), why: 'drain', exact: '', ...genParams(gen, earlier, ended, maybe) } }, detail: lines },
   };
 }
-/** r9: the words of a hold whose file could not be read back (PURE). */
-function readNoticeOf({ hostName, host, shard, month, file, code, since, tag = '' } = {}) {
+/** r9: the words of a hold whose file could not be read back (PURE). r16: `files` — every file that keeps the month waiting
+ *  ([{file, code}], the first = `file`): the rest named on a line of their own. */
+function readNoticeOf({ hostName, host, shard, month, file, code, since, files = null, tag = '' } = {}) {
   const sh = String(shard || '').slice(0, 60), mo = /^\d{4}-\d{2}$/.test(String(month || '')) ? String(month) : (/(\d{4}-\d{2})/.exec(sh) || [])[1] || 'this month';
   const name = String(hostName || host || 'a machine').slice(0, 80), t = String(tag || '').slice(0, 24);
   const p = { machine: t ? `${name} (${t})` : name, month: mo, file: String(file || '').slice(0, 120), code: String(code || 'an error').slice(0, 40), since: since ? hhmm(since) : 'a while' };
   const lines = D_READ.map((key, i) => (i === 0 ? { key, params: { file: p.file, code: p.code, since: p.since, month: p.month, machine: p.machine } } : { key }));
+  const rest = (Array.isArray(files) ? files.slice(1) : []).map((b) => `${String((b && b.file) || '').slice(0, 120)} (${String((b && b.code) || 'an error').slice(0, 40)})`);
+  if (rest.length) lines.splice(1, 0, { key: D_READ_ALSO, params: { files: rest.slice(0, READ_LIST_MAX).join(', ') + (rest.length > READ_LIST_MAX ? ` (+${rest.length - READ_LIST_MAX})` : ''), month: p.month } });
   return { text: fillOf(TEXT_READ, p), detail: lines.map((l) => fillOf(l.key, { ...p, ...(l.params || {}) })).join('\n'), i18n: { text: { key: TEXT_READ, params: { machine: p.machine, name, tag: t, month: p.month, shard: sh, host: String(host || '').slice(0, 160), code: p.code } }, detail: lines } };
 }
 /** r12: the words of a held set file's line set aside — or an older one the disk would not read, moved aside unread (PURE):
@@ -248,16 +266,24 @@ function readNoticeOf({ hostName, host, shard, month, file, code, since, tag = '
  *  chose the words from `aside`/`over` alone and told the owner what was meant, not done («set aside» when the copy failed,
  *  «removed the line» when the rewrite failed, «kept every other record» for a file deleted). */
 const didOf = ({ aside, over, error, stale }) => (stale ? (aside ? 'moved' : over && !error ? 'removed' : 'kept') : (aside || over) && !error ? 'rewritten' : 'kept');
-function asideNoticeOf({ hostName, host, shard, month, file, lines, aside, over, code, error, did = null, twice = false, stale = false, tag = '' } = {}) {
+/** r16: `files` — EVERY file one read set aside ([{file, lines, aside, over, code, error, did, twice, stale}], the live one
+ *  first; none: the one the event's own fields name): each its own «What» line (ASIDE_LIST_MAX of them, then how many
+ *  more), one «what happens now», one «what to do». */
+function asideNoticeOf({ hostName, host, shard, month, files = null, tag = '', ...one } = {}) {
   const sh = String(shard || '').slice(0, 60), mo = /^\d{4}-\d{2}$/.test(String(month || '')) ? String(month) : (/(\d{4}-\d{2})/.exec(sh) || [])[1] || 'this month';
-  const name = String(hostName || host || 'a machine').slice(0, 80), t = String(tag || '').slice(0, 24);
-  const p = { machine: t ? `${name} (${t})` : name, month: mo, file: String(file || '').slice(0, 120), line: String(lines || '').slice(0, 60), aside: String(aside || '').slice(0, 160), over: String(Math.max(0, Number(over) || 0)), code: String(code || '').slice(0, 40), error: String(error || 'an error').slice(0, 40) };
-  const unread = !lines && !!code, d = did || didOf({ aside, over, error, stale });
-  const head = unread ? TEXT_ASIDE_UNREAD : aside ? TEXT_ASIDE : TEXT_ASIDE_PAST; // «set aside» only when a copy of it IS there
-  const what = unread ? D_ASIDE_WHAT.unread : d === 'moved' ? D_ASIDE_WHAT.moved : d === 'removed' ? D_ASIDE_WHAT.removed
-    : d === 'rewritten' ? (aside ? D_ASIDE_WHAT.aside : D_ASIDE_WHAT.over) : aside ? D_ASIDE_WHAT.copied : over ? D_ASIDE_WHAT.keptOver : D_ASIDE_WHAT.kept;
-  const rows = [{ key: what, params: { line: p.line, file: p.file, aside: p.aside, over: p.over, error: p.error, code: p.code, month: p.month } }, ...(unread && twice ? [{ key: D_ASIDE_TWICE, params: { code: p.code } }] : []), { key: unread ? D_ASIDE_NOW_UNREAD : D_ASIDE_NOW, params: { month: p.month } }, { key: aside ? D_ASIDE_TODO : D_ASIDE_TODO_NOCOPY }];
-  return { text: fillOf(head, p), detail: rows.map((l) => fillOf(l.key, { ...p, ...(l.params || {}) })).join('\n'), i18n: { text: { key: head, params: { machine: p.machine, name, tag: t, month: p.month, shard: sh, host: String(host || '').slice(0, 160), code: p.code } }, detail: rows } };
+  const name = String(hostName || host || 'a machine').slice(0, 80), t = String(tag || '').slice(0, 24), machine = t ? `${name} (${t})` : name;
+  const all = (Array.isArray(files) && files.length ? files : [one]).map((x) => {
+    const p = { machine, month: mo, file: String(x.file || '').slice(0, 120), line: String(x.lines || '').slice(0, 60), aside: String(x.aside || '').slice(0, 160), over: String(Math.max(0, Number(x.over) || 0)), code: String(x.code || '').slice(0, 40), error: String(x.error || 'an error').slice(0, 40) };
+    const unread = !x.lines && !!x.code, d = x.did || didOf(x);
+    const what = unread ? D_ASIDE_WHAT.unread : d === 'moved' ? D_ASIDE_WHAT.moved : d === 'removed' ? D_ASIDE_WHAT.removed
+      : d === 'rewritten' ? (x.aside ? D_ASIDE_WHAT.aside : D_ASIDE_WHAT.over) : x.aside ? D_ASIDE_WHAT.copied : x.over ? D_ASIDE_WHAT.keptOver : D_ASIDE_WHAT.kept;
+    return { p, unread, aside: !!x.aside, rows: [{ key: what, params: { line: p.line, file: p.file, aside: p.aside, over: p.over, error: p.error, code: p.code, month: p.month } }, ...(unread && x.twice ? [{ key: D_ASIDE_TWICE, params: { code: p.code } }] : [])] };
+  });
+  const first = all[0], many = all.length > 1, shown = all.slice(0, ASIDE_LIST_MAX), unreadN = all.filter((x) => x.unread).length;
+  const p = { ...first.p, count: String(all.length) };
+  const head = many ? TEXT_ASIDE_MANY : first.unread ? TEXT_ASIDE_UNREAD : first.aside ? TEXT_ASIDE : TEXT_ASIDE_PAST; // «set aside» only when a copy of it IS there
+  const rows = [...shown.flatMap((x) => x.rows), ...(all.length > shown.length ? [{ key: D_ASIDE_MORE, params: { more: String(all.length - shown.length) } }] : []), { key: unreadN > 1 ? D_ASIDE_NOW_UNREAD_MANY : unreadN ? D_ASIDE_NOW_UNREAD : D_ASIDE_NOW, params: { month: p.month } }, { key: all.some((x) => x.aside) ? D_ASIDE_TODO : D_ASIDE_TODO_NOCOPY }];
+  return { text: fillOf(head, p), detail: rows.map((l) => fillOf(l.key, { ...p, ...(l.params || {}) })).join('\n'), i18n: { text: { key: head, params: { machine: p.machine, name, tag: t, month: p.month, shard: sh, host: String(host || '').slice(0, 160), code: p.code, ...(many ? { count: p.count } : {}) } }, detail: rows } };
 }
 /** r8: the words of the `_held/` listing that failed (PURE). */
 function listNoticeOf({ code, since } = {}) {
@@ -418,7 +444,14 @@ function wire({ usageHistory, userTodos, log = (m) => console.log('[usage]', m),
         const pause = itemOf(ev.host, ev.shard), name = (ev.hostName && ev.hostName !== ev.host ? ev.hostName : nameOf(pause)) || ev.host;
         const w = readNoticeOf({ ...ev, hostName: name });
         if (!it) { fileItem(w, k); return; }
-        if (it.status === 'open') return; // said once
+        // r16: SAID ONCE PER ITEM, its words following what blocks — an open one re-worded in place when the files it names
+        // changed (the same id, never a second; the same files say nothing: r9's once); a retry's (`again`) never reopens
+        // one the owner closed; a new failure reopens it (r9)
+        if (it.status === 'open' || ev.again) {
+          if (it.status !== 'open' || namedOf(it) === namedOf(w)) return;
+          userTodos.reshapeItems((x) => { if (x.id !== it.id) return false; x.text = w.text; x.detail = w.detail; x.i18n = w.i18n; return true; });
+          return;
+        }
         userTodos.reshapeItems((x, now) => { if (x.id !== it.id) return false; x.text = w.text; x.detail = w.detail; x.i18n = w.i18n; x.urgency = 'high'; x.status = 'open'; x.resolvedAt = null; x.resolvedBy = null; x.expiresAt = null; x.createdAt = now; delete x.judged; return true; });
       } catch (e) { log(`the unreadable hold's notice was not filed: ${e.message}`); }
     } else if (ev.kind === 'set-aside') {
@@ -427,7 +460,8 @@ function wire({ usageHistory, userTodos, log = (m) => console.log('[usage]', m),
       try {
         const k = `${ASIDE_KEY}\n${ev.host}\n${ev.shard}`, it = keyedItem(k);
         const pause = itemOf(ev.host, ev.shard), name = (ev.hostName && ev.hostName !== ev.host ? ev.hostName : nameOf(pause)) || ev.host;
-        if (ev.code && !ev.lines && !ev.stale && ev.aside && pause) keepLost(pause, ev); // r14: the LIVE set moved aside unread
+        const live = (Array.isArray(ev.files) && ev.files.length ? ev.files : [ev]).find((x) => x && x.code && !x.lines && !x.stale && x.aside);
+        if (live && pause) keepLost(pause, { ...ev, ...live }); // r14: the LIVE set moved aside unread (r16: one of the read's files)
         const w = asideNoticeOf({ ...ev, hostName: name });
         if (!it) { fileItem(w, k, 'normal'); return; }
         userTodos.reshapeItems((x, now) => {
@@ -463,6 +497,8 @@ function wire({ usageHistory, userTodos, log = (m) => console.log('[usage]', m),
   /** r8: the item filed by `itemKey` (the listing's ONE — r9: a hold read-back's ONE). */
   const keyedItem = (k) => { const ids = typeof userTodos.idsWhere === 'function' ? userTodos.idsWhere((i) => ours(i) && i.itemKey === k) : []; return ids.map((x) => userTodos.get(x)).filter(Boolean).sort((a, b) => (Number(a.createdAt) || 0) - (Number(b.createdAt) || 0)).pop() || null; };
   const listItem = () => keyedItem(LIST_KEY);
+  /** r16: the files a hold-read item (or words) names — its first line's file and code, and its «not the only one» line. */
+  const namedOf = (x) => { const d = (x && x.i18n && Array.isArray(x.i18n.detail)) ? x.i18n.detail : [], q = (d[0] && d[0].params) || {}, a = d.find((l) => l && l.key === D_READ_ALSO); return JSON.stringify([q.file || '', q.code || '', (a && a.params && a.params.files) || '']); };
   const isRead = (it) => String((it && it.itemKey) || '').startsWith(READ_KEY + '\n');
   const isAside = (it) => String((it && it.itemKey) || '').startsWith(ASIDE_KEY + '\n'); // r12
   /** r8: a count said where no open pause carries it — the item of (host, file) says it already (open or closed: its line
@@ -542,4 +578,4 @@ function wire({ usageHistory, userTodos, log = (m) => console.log('[usage]', m),
   return { open, reconcile };
 }
 
-module.exports = { wire, noticeOf, droppedNoticeOf, listNoticeOf, readNoticeOf, asideNoticeOf, INBOX_KEY, LIST_KEY, READ_KEY, ASIDE_KEY, TEXT, TEXT_DRAIN, TEXT_DROPPED, TEXT_LIST, TEXT_READ, TEXT_ASIDE, TEXT_ASIDE_PAST, TEXT_ASIDE_UNREAD, D_ASIDE_WHAT, D_ASIDE_TWICE, D_ASIDE_NOW, D_ASIDE_NOW_UNREAD, D_ASIDE_TODO, D_ASIDE_TODO_NOCOPY, D_WHAT, D_HELD, D_DROPPED, D_DROPPED_MAYBE, D_DROPPED_EARLIER, D_DROPPED_EARLIER_MAYBE, D_DROPPED_EARLIER_SOME, D_DROPPED_WHAT, D_TODO_READ, D_LIST, D_READ, D_NOW, D_DRAIN_FAILED, D_TODO };
+module.exports = { wire, noticeOf, droppedNoticeOf, listNoticeOf, readNoticeOf, asideNoticeOf, INBOX_KEY, LIST_KEY, READ_KEY, ASIDE_KEY, TEXT, TEXT_DRAIN, TEXT_DROPPED, TEXT_LIST, TEXT_READ, TEXT_ASIDE, TEXT_ASIDE_PAST, TEXT_ASIDE_UNREAD, TEXT_ASIDE_MANY, D_ASIDE_WHAT, D_ASIDE_TWICE, D_ASIDE_MORE, D_ASIDE_NOW, D_ASIDE_NOW_UNREAD, D_ASIDE_NOW_UNREAD_MANY, D_ASIDE_TODO, D_ASIDE_TODO_NOCOPY, D_WHAT, D_HELD, D_DROPPED, D_DROPPED_MAYBE, D_DROPPED_EARLIER, D_DROPPED_EARLIER_MAYBE, D_DROPPED_EARLIER_SOME, D_DROPPED_WHAT, D_TODO_READ, D_LIST, D_READ, D_READ_ALSO, D_NOW, D_DRAIN_FAILED, D_TODO };

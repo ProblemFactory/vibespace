@@ -552,19 +552,25 @@ class UsageHoldRoad {
    *  the For-you notice `hold-read` naming the file), read again on its own timer (HOLD_LIST_RETRY_MS doubling to
    *  …_MAX_MS), never at an ingest (r8 started a new read-back at every try of every batch and answered every month of it
    *  `deferred` — 2 warn lines a batch, 0 of 6 November batches recorded); while it fails `_holdOf` throws its error: a
-   *  month that needs that hold answers `holdFailed` + `retryAfter`, one in shape and not paused goes. */
+   *  month that needs that hold answers `holdFailed` + `retryAfter`, one in shape and not paused goes. r16: WHAT BLOCKS
+   *  THE MONTH IS NAMED, RE-JUDGED AT EVERY TRY — `blocks` (`_unreadHold`: every file that keeps the month waiting, in the
+   *  order read); the same blockers say nothing again (r9's once), a change (a file fixed, another still in the way) is
+   *  said once more (`again`: the same notice re-worded in place, never a second). r15 said the first error once and never
+   *  again: beside a refused segment it named the set, the owner fixed it, and the notice kept naming a file that read. */
   _readFailed(key, shard, host, e) {
     const prev = this._readFail.get(key), now = Date.now(), tries = (prev ? prev.tries : 0) + 1;
     const wait = Math.min(this.holdListRetryMaxMs || HOLD_LIST_RETRY_MAX_MS, (this.holdListRetryMs || HOLD_LIST_RETRY_MS) * 2 ** (tries - 1));
-    const code = String((e && e.code) || (e && e.message) || e).slice(0, 40), file = path.basename(String((e && e.path) || key));
+    const blocks = e && Array.isArray(e.blocks) && e.blocks.length ? e.blocks : [{ file: path.basename(String((e && e.path) || key)), code: errCode(e) }];
+    const { code, file } = blocks[0], said = blocks.map((b) => `${b.code}: ${b.file}`).join(', ');
     if (prev && prev.timer) clearTimeout(prev.timer);
-    const f = { error: e, code, file, shard, host: String(host), since: prev ? prev.since : now, tries, nextAt: now + wait, nextWait: Math.min(this.holdListRetryMaxMs || HOLD_LIST_RETRY_MAX_MS, wait * 2), retrying: false, timer: null };
+    const f = { error: e, code, file, blocks, said, shard, host: String(host), since: prev ? prev.since : now, tries, nextAt: now + wait, nextWait: Math.min(this.holdListRetryMaxMs || HOLD_LIST_RETRY_MAX_MS, wait * 2), retrying: false, timer: null };
     f.timer = setTimeout(() => { if (this._readFail.get(key) !== f) return; f.retrying = true; try { this._holdOf(shard, host); } catch { } }, wait); f.timer.unref?.();
     this._readFail.set(key, f);
-    if (prev) return;
+    if (prev && prev.said === said) return;
     const base = path.basename(shard);
-    console.warn(`[usage] the hold ${key} could not be read (${code}: ${file}) — ${base.slice(7, 14)} of ${host} waits, unacked (its machine sends it again) unless its file is in shape; every other month is recorded; read again in ${Math.round(wait / 1000)} s, then less often (every ${Math.round((this.holdListRetryMaxMs || HOLD_LIST_RETRY_MAX_MS) / 1000)} s at most)`);
-    this._emitShape({ kind: 'hold-read', state: 'failed', host: String(host), hostName: String(host), shard: base, month: base.slice(7, 14), file, code, since: f.since });
+    if (prev) console.warn(`[usage] the hold ${key} still cannot be read — now (${said}), no longer (${prev.said}); ${base.slice(7, 14)} of ${host} waits for those`);
+    else console.warn(`[usage] the hold ${key} could not be read (${said}) — ${base.slice(7, 14)} of ${host} waits, unacked (its machine sends it again) unless its file is in shape; every other month is recorded; read again in ${Math.round(wait / 1000)} s, then less often (every ${Math.round((this.holdListRetryMaxMs || HOLD_LIST_RETRY_MAX_MS) / 1000)} s at most)`);
+    this._emitShape({ kind: 'hold-read', state: 'failed', host: String(host), hostName: String(host), shard: base, month: base.slice(7, 14), file, code, files: blocks, since: f.since, again: !!prev });
   }
   /** r9: the read-back that failed works now — its state gone, its notice closed. r10: A NOTICE CLOSES WHEN WHAT IT NAMES IS
    *  READ — across a restart too: EVERY read-back that works says so (`hold-read` ok), whether or not this process saw it
@@ -608,11 +614,12 @@ class UsageHoldRoad {
    *  and its count, unless its end retired it (said then), SAID — an older generation's count is its notice's «Earlier»
    *  line — and only once it is on disk does the file go (r9 deleted it unread: with two set files at a boot the older
    *  one's 33 was said only if an item already named it); a set that cannot be read, or whose count the notice store
-   *  refused, stays for the next start. A job of the hold's road. r15: what an older set needs DECIDED — one whose read
-   *  threw, one with lines that are no record — is queued on `later` (the read-back's: run once the hold is read whole;
-   *  none ⇒ now): a hold whose live files cannot all be read decides nothing of it (kept as it is, unmarked, read again with
-   *  the hold — never «set aside; nothing waits» beside «that month waits»). */
-  async _dropStale(h, later = null) {
+   *  refused, stays for the next start. A job of the hold's road. r16: NOTHING OF IT IS SAID OR DECIDED BEFORE THE HOLD IS
+   *  READ WHOLE — the load job runs it after `_holdRead` (a hold that cannot be read whole never reaches it: the older set
+   *  kept as it is, unread, unmarked, read again with the hold), before the live set's own decisions (r10's order: its count
+   *  before this one's). r15 queued only its decisions (`later`) and said its count first — at every retry of a hold that
+   *  kept failing: an owner-closed month item reopened each time. */
+  async _dropStale(h) {
     const key = h.key, gens = this._dropFiles.get(key) || [];
     if (!gens.length) return;
     const left = new Set();
@@ -628,14 +635,11 @@ class UsageHoldRoad {
       // DECIDES (`_setUnread`, the live road's own): one that passes (EMFILE, ESTALE …) is KEPT, said once, read again at
       // the next start and its count said then (r12 moved every one aside unread: one EMFILE at a boot lost its count)
       let st; try { st = await this._readSet(df); } catch (e) {
-        const judge = async () => {
-          const v = await this._setUnread(df, e);
-          if (!v.aside) { this._saidKept(h, g, df, v); return; }
-          const a = await this._setAsideFile(df, true);
-          if (a.copy) { gone(); await this._unmark(df); }
-          this._saidAside(h, g, df, a, { code: v.code, twice: v.twice, stale: true, did: a.copy ? 'moved' : 'kept' });
-        };
-        if (later) later.push(judge); else await judge();
+        const v = await this._setUnread(df, e);
+        if (!v.aside) { this._saidKept(h, g, df, v); continue; }
+        const a = await this._setAsideFile(df, true);
+        if (a.copy) { gone(); await this._unmark(df); }
+        this._saidAside(h, g, df, a, { code: v.code, twice: v.twice, stale: true, did: a.copy ? 'moved' : 'kept' });
         continue;
       }
       if (this._marked(df)) await this._unmark(df); // r14: read — its mark of a failed read goes
@@ -648,15 +652,12 @@ class UsageHoldRoad {
       // bound it is unlinked FIRST, then said removed (or kept, its unlink failed); r12 said it before the unlink, as
       // «kept every other record … removed the line» for a file that was then deleted
       if (st.bad.length) {
-        const aside = async () => {
-          const a = await this._setAsideFile(df, true);
-          if (a.copy) { gone(); this._saidAside(h, g, df, a, { st, stale: true, did: 'moved' }); return; }
-          if (!a.over) { this._saidAside(h, g, df, a, { st, stale: true, did: 'kept' }); return; }
-          const err = await this._heldUnlinkCode(df);
-          if (!err) gone();
-          this._saidAside(h, g, df, err ? { ...a, error: err } : a, { st, stale: true, did: err ? 'kept' : 'removed' });
-        };
-        if (later) later.push(aside); else await aside();
+        const a = await this._setAsideFile(df, true);
+        if (a.copy) { gone(); this._saidAside(h, g, df, a, { st, stale: true, did: 'moved' }); continue; }
+        if (!a.over) { this._saidAside(h, g, df, a, { st, stale: true, did: 'kept' }); continue; }
+        const err = await this._heldUnlinkCode(df);
+        if (!err) gone();
+        this._saidAside(h, g, df, err ? { ...a, error: err } : a, { st, stale: true, did: err ? 'kept' : 'removed' });
         continue;
       }
       if (await this._heldUnlink(df)) gone();
@@ -704,12 +705,19 @@ class UsageHoldRoad {
    *  start names too: `twice`); else it is KEPT and read again — marked the first time an EIO-like error meets it (a mark
    *  that cannot be written leaves it unmarked: kept, never set aside on a guess). */
   async _setUnread(df, e) {
+    const v = this._setVerdict(df, e);
+    if (v.cls !== 'once' || v.aside) return v;
+    const made = this._marksMade || (this._marksMade = new Set());
+    if (!made.has(df)) { try { await this._holdIO('mark', df, fs.promises.writeFile(df + '.unread', JSON.stringify({ unread: v.code, at: new Date().toISOString() }) + '\n')); made.add(df); } catch { } }
+    return v;
+  }
+  /** r16: the classifier's verdict on the set `df` whose read threw — `_setUnread`'s, with nothing written (no mark) →
+   *  {code, cls, aside, twice}: what a hold not read whole yet asks of its set (does the set itself keep the month waiting?). */
+  _setVerdict(df, e) {
     const code = errCode(e), cls = readClassOf(e);
     if (cls !== 'once') return { code, cls, aside: cls === 'refused', twice: false };
-    if (this._unreadMarks && this._unreadMarks.has(df)) return { code, cls, aside: true, twice: true };
-    const made = this._marksMade || (this._marksMade = new Set());
-    if (!made.has(df)) { try { await this._holdIO('mark', df, fs.promises.writeFile(df + '.unread', JSON.stringify({ unread: code, at: new Date().toISOString() }) + '\n')); made.add(df); } catch { } }
-    return { code, cls, aside: false, twice: false };
+    const twice = !!(this._unreadMarks && this._unreadMarks.has(df));
+    return { code, cls, aside: twice, twice };
   }
   /** r14: does a mark of a failed read name the set `df` (one an earlier start left, or this one's)? */
   _marked(df) { return !!((this._unreadMarks && this._unreadMarks.has(df)) || (this._marksMade && this._marksMade.has(df))); }
@@ -790,7 +798,22 @@ class UsageHoldRoad {
         : did === 'rewritten' ? `the set rewritten from its ${st.records} record(s) — the hold goes on` : `read past those lines (the file kept as it is${a.rewrite ? `: its rewrite failed, ${a.rewrite}` : ''}; set aside at its next read) — the hold goes on`;
     console.warn(`[usage] the hold ${h.key}: ${what} — ${done}; ${then}`);
     if (!st && !a.copy) return;
-    this._emitShape({ kind: 'set-aside', host: h.host, hostName: h.hostName || h.host, shard: base, month: base.slice(7, 14), file, gen: g, lines: lines || null, aside: a.copy || null, over: a.over || null, code, error: a.error || a.rewrite || null, stale, read: st ? st.records : null, did: did || (a.copy ? 'moved' : 'kept'), twice: !!twice }); // r14: `did` — what was done to the file, the words' one source
+    const one = { file, gen: g, lines: lines || null, aside: a.copy || null, over: a.over || null, code, error: a.error || a.rewrite || null, stale, read: st ? st.records : null, did: did || (a.copy ? 'moved' : 'kept'), twice: !!twice }; // r14: `did` — what was done to the file, the words' one source
+    if (h.asides) { h.asides.push(one); return; } // r16: one of the read's (`_asidePass`)
+    this._emitShape({ kind: 'set-aside', host: h.host, hostName: h.hostName || h.host, shard: base, month: base.slice(7, 14), ...one });
+  }
+  /** r16: EVERY FILE SET ASIDE IN ONE READ OF A HOLD IS NAMED — a job of its road (`fn`) collects them (`h.asides`) and they
+   *  are said as ONE event once it ends, however it ends: the live generation's first, then the older ones in the order
+   *  judged (`files`; its first one's fields at the top, r14's shape). The journal said each as it was done. r12–r15 said
+   *  one event per file into the hold's ONE notice, each re-wording it in place: only the last one judged was named
+   *  (f3027952 the live set, r15 the older one — the live set's copy named nowhere). */
+  async _asidePass(h, fn) {
+    h.asides = [];
+    try { return await fn(); } finally {
+      const all = h.asides || [], base = h.base + '.ndjson'; h.asides = null;
+      const files = [...all.filter((x) => !x.stale), ...all.filter((x) => x.stale)];
+      if (files.length) this._emitShape({ kind: 'set-aside', host: h.host, hostName: h.hostName || h.host, shard: base, month: base.slice(7, 14), ...files[0], files });
+    }
   }
   /** The hold of (shard, host) → its record | NO_HOLD (nothing held; `create` makes the record) | null (a hold on disk is
    *  being read back — `.loading` on the record; the caller waits for it). A hold on disk is read back ONCE, on the async
@@ -816,16 +839,15 @@ class UsageHoldRoad {
     const seqs = listed.filter((q) => holdGenOf(q) === gen), old = listed.filter((q) => holdGenOf(q) !== gen);
     h = { key, gen, base: path.basename(shard, '.ndjson'), host: String(host), hostName: null, segs: [], nextSeq: gen * HOLD_GEN_SPAN, gone: new Set(), goneBytes: 0, goneTorn: false, below: 0, retired: false, stale: false, unchecked: false, unsaid: false, compactAt: DROP_COMPACT_MIN, loading: null, draining: null, ending: null, io: Promise.resolve(), pending: 0, waiting: 0, waitEnds: [], step: null };
     this._holds.set(key, h);
-    if (!onDisk) { this._holdJob(h, () => this._dropStale(h)); return h; }
-    h.loading = this._holdJob(h, async () => {
+    if (!onDisk) { this._holdJob(h, () => this._asidePass(h, () => this._dropStale(h))); return h; }
+    h.loading = this._holdJob(h, () => this._asidePass(h, async () => {
       for (const q of old) await this._heldUnlink(path.join(this.heldDir, `${key}.${q}.ndjson`));
-      // r10: an older generation's set read and its count said before it goes — before this one's. r15: what an older set
-      // needs decided (unreadable; lines that are no record) waits until the hold is read whole (`later`)
-      const later = [];
-      await this._dropStale(h, later);
-      await this._holdLoad(h, seqs); // r9: a set-only generation too (its count) — r15: read whole, or it throws having decided nothing
-      for (const f of later) await f();
-    }).then(() => {
+      // r16: READ WHOLE FIRST (or it throws, naming what blocks, having said and decided nothing), then each older
+      // generation's set read, said and gone (r10: before this one's), then this generation's decisions
+      const r = await this._holdRead(h, seqs);
+      await this._dropStale(h);
+      await this._holdLoad(h, seqs, r); // r9: a set-only generation too (its count)
+    })).then(() => {
       h.loading = null;
       this._readBack(key, h);
       if (this._holds.get(key) !== h) return;
@@ -864,19 +886,21 @@ class UsageHoldRoad {
   /** r8: a hold being read back — the generation's set first (`gone` adds, `back` removes — in their order; `below`: every
    *  segment numbered under it is done; `retired`: the whole generation is), then each live segment's rows. On the async
    *  road: a slice per read (≤ LD.STEP_BYTES), the loop free between them. r15: THE HOLD IS READ WHOLE BEFORE ANYTHING IS
-   *  DECIDED — its set and every live segment are READ first; only then is anything set aside, rewritten, marked or
-   *  unlinked: a segment that cannot be read fails the WHOLE hold (thrown — the first error in the order read, the set's
-   *  before a segment's: `_readFailed`, ONE notice, read again by its timer; the set kept as it is, never moved, rewritten
-   *  or marked); a hold read whole judges its set (`_judgeLive`: a set the disk refused is set aside unread and the hold
-   *  goes on) and its lines that are no record (`_setAsideLive`). r14 set a refused set aside BEFORE the segments were
-   *  read: in the common EACCES (a root-run server's 0600 files — the set and its segments alike) the segment then failed
-   *  the hold, the set was gone for good while the month still waited, and the owner read «set aside unread; nothing
-   *  waits» beside «that month waits». */
-  async _holdLoad(h, seqs) {
+   *  DECIDED — its set and every live segment are READ first (`_holdRead`); only then is anything set aside, rewritten,
+   *  marked or unlinked (`_holdLoad`). r14 set a refused set aside BEFORE the segments were read: in the common EACCES (a
+   *  root-run server's 0600 files — the set and its segments alike) the segment then failed the hold, the set was gone for
+   *  good while the month still waited, and the owner read «set aside unread; nothing waits» beside «that month waits».
+   *  r16: WHAT BLOCKS THE MONTH IS JUDGED OVER THE WHOLE HOLD — every live segment is read whatever another one threw;
+   *  any that cannot be, or a set the classifier KEEPS (an error that passes; EIO-like at its first start), fails the hold
+   *  NAMING THEM (`_unreadHold` → `_readFailed`: ONE notice, read again by its timer) with nothing decided — the set kept
+   *  as it is, unmarked; a set the disk REFUSED blocks nothing (set aside once the hold reads whole: its own notice), so
+   *  beside a refused segment the segment is named (r15 threw the set's error first: the owner fixed the file named and
+   *  the month still waited). Read whole with the set alone in the way, it is judged as r14 (`_setUnread`: kept, marked
+   *  the first time an EIO-like error meets it) → {df, s, setErr, read}. */
+  async _holdRead(h, seqs) {
     const df = this._dropFile(h.key, h.gen);
     let s, setErr = null;
-    try { s = await this._readSet(df, h.gone); if (this._marked(df)) await this._unmark(df); } catch (e) { setErr = e; h.gone.clear(); s = { gone: h.gone, retired: false, checked: false, below: 0, end: 0, lineEnd: 0, torn: false, cut: 0, bad: [], records: 0 }; } // r15: judged once the hold is read whole; what a read cut short had added cleared
-    const checked = s.checked; // r9: `checked` — every dropped row checked (r10: `_readSet`, the one parse)
+    try { s = await this._readSet(df, h.gone); } catch (e) { setErr = e; h.gone.clear(); s = { gone: h.gone, retired: false, checked: false, below: 0, end: 0, lineEnd: 0, torn: false, cut: 0, bad: [], records: 0 }; } // r15: judged once the hold is read whole; what a read cut short had added cleared
     h.below = Math.max(h.below, s.below); if (s.retired) h.retired = true;
     h.goneBytes = s.end; h.goneTorn = s.end > s.lineEnd; // a crash mid-append: the next line starts on a line of its own
     const live = seqs.filter((q) => q >= h.below);
@@ -884,6 +908,42 @@ class UsageHoldRoad {
     // end wrote `below` before each drained segment's unlink) — else it is no record of ours: the generation reads back
     // LIVE (r7 honoured it blindly: an injected line deleted 12 held + 8 dropped rows, 0/20 recorded)
     if (h.retired && live.length) { console.warn(`[usage] the hold ${h.key}: its set says «retired» while ${live.length} of its segment(s) are past its \`below\` (${h.below}) — not a record its end wrote; read back as a live hold`); h.retired = false; }
+    // r15: every live segment READ — nothing is decided before the last one is (r16: each read whatever another one threw —
+    // what blocks is named whole; a retired generation has none live: its files are unlinked unread by `_holdLoad`)
+    const read = [], unread = [];
+    for (const seq of live) {
+      const seg = { seq, rows: 0, bytes: 0, at: 0, rids: new Set(), done: new Set(), torn: false, sealed: false };
+      let r;
+      try {
+        r = await LD.eachLineAsync(this._holdFile(h, seq), 0, (buf, a, b) => {
+          const x = rowStart(buf, a, b); // r7: a torn line is no row
+          const rid = x < 0 ? null : LD.ridAt(buf, x, b);
+          if (rid) { seg.rows++; seg.rids.add(rid); }
+        }, { io: this._ioOf('read-back') });
+      } catch (e) { unread.push({ seq, e }); continue; }
+      seg.bytes = r.end; seg.torn = r.end > r.lineEnd;
+      read.push(seg);
+    }
+    const keeps = !!setErr && !this._setVerdict(df, setErr).aside;
+    if (unread.length || keeps) {
+      if (!unread.length) await this._setUnread(df, setErr); // read whole, the set alone in the way: r14's judgement (its mark)
+      throw this._unreadHold(h, df, keeps ? setErr : null, unread);
+    }
+    return { df, s, setErr, read };
+  }
+  /** r16: a hold that cannot be read whole → the error it fails with (the first blocker's), naming EVERY file that keeps
+   *  its month waiting (`blocks`: [{file, code}] in the order read — the set only when `setErr` is given: one the
+   *  classifier keeps, then each segment that could not be read). */
+  _unreadHold(h, df, setErr, unread) {
+    const blocks = [...(setErr ? [{ file: path.basename(df), code: errCode(setErr) }] : []), ...unread.map((u) => ({ file: path.basename(this._holdFile(h, u.seq)), code: errCode(u.e) }))];
+    return Object.assign(setErr || unread[0].e, { blocks });
+  }
+  /** r16: the hold read whole (`_holdRead`'s `r`) — DECIDED (r15's `_holdLoad`, its second half): a retired generation's
+   *  files unlinked unread; else its set judged (`_judgeLive`: a set the disk refused is set aside unread and the hold goes
+   *  on), its lines that are no record set aside (`_setAsideLive`), the segments' own unlinks, what is held. */
+  async _holdLoad(h, seqs, { df, s, setErr, read }) {
+    const checked = s.checked; // r9: `checked` — every dropped row checked (r10: `_readSet`, the one parse)
+    if (!setErr && this._marked(df)) await this._unmark(df); // r14: read — its mark of a failed read goes
     // r7: a RETIRED generation (its end recorded; an unlink failed — EBUSY): every file of it unlinked unread, nothing held,
     // nothing counted (its count was said before it retired); r8: its set stays while one of its segments does
     if (h.retired) {
@@ -894,22 +954,7 @@ class UsageHoldRoad {
       h.gone.clear();
       return;
     }
-    // r15: every live segment READ — nothing is decided before the last one is (a segment's error fails the hold whole)
-    const read = [];
-    for (const seq of live) {
-      const seg = { seq, rows: 0, bytes: 0, at: 0, rids: new Set(), done: new Set(), torn: false, sealed: false };
-      let r;
-      try {
-        r = await LD.eachLineAsync(this._holdFile(h, seq), 0, (buf, a, b) => {
-          const x = rowStart(buf, a, b); // r7: a torn line is no row
-          const rid = x < 0 ? null : LD.ridAt(buf, x, b);
-          if (rid) { seg.rows++; seg.rids.add(rid); }
-        }, { io: this._ioOf('read-back') });
-      } catch (e) { throw setErr || e; }
-      seg.bytes = r.end; seg.torn = r.end > r.lineEnd;
-      read.push(seg);
-    }
-    // read whole: the set judged (one that throws on fails the hold — nothing else decided yet), its lines that are no record
+    // read whole: the set judged (one that cannot be moved throws on — `_readFailed` names it), its lines that are no record
     // set aside (r12: the hold goes on — r11: the read-back threw, for ever), then the segments' own unlinks
     if (setErr) await this._judgeLive(h, df, setErr);
     if (s.bad.length) await this._setAsideLive(h, df, s);
