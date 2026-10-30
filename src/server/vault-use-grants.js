@@ -32,9 +32,11 @@ function writeJsonAtomic(file, obj) {
   fs.renameSync(tmp, file);
 }
 
-const STATUS = Object.freeze({ hosts_required: 400, tool_required: 400, too_many_hosts: 400, bad_principal: 400, bad_resource: 400, bad_except: 400, except_conflicts: 400, too_many: 400, bad_row: 400, unknown_shape: 409, reveal_needs_password: 403, vault_locked: 423, not_written: 500, store_unreadable: 503, entry_unknown: 404 });
+const STATUS = Object.freeze({ command_unreadable: 400, too_many_commands: 400, hosts_required: 400, tool_required: 400, too_many_hosts: 400, bad_principal: 400, bad_resource: 400, bad_except: 400, except_conflicts: 400, too_many: 400, bad_row: 400, unknown_shape: 409, reveal_needs_password: 403, vault_locked: 423, not_written: 500, store_unreadable: 503, entry_unknown: 404 });
 const WORDS = Object.freeze({
-  hosts_required: 'name the hosts it may be used for — a host name or address each (or «the hosts it was stored for»); never «any host»',
+  hosts_required: 'name the hosts it may be used for — a host name or address each (or «the hosts it was stored for»), or the command it may run; never «any host»',
+  command_unreadable: 'that command could not be read as a program and its script — name them as they run (the program and its first argument)',
+  too_many_commands: `at most ${GM.COMMANDS_MAX} commands per member`,
   tool_required: 'a wildcard host (like *.example.com) is scoped to the tool that first used it — it cannot be saved without one; add it from a run card with «Always»',
   too_many_hosts: `at most ${GM.HOSTS_MAX} hosts per member`,
   unknown_shape: 'that grant could not be read — it is refused as it is, never read wider; remove it and grant again',
@@ -53,6 +55,8 @@ function widens(was, next) {
     const o = byKey.get(GM.principalKey(e));
     if (!o) return true;
     if ((e.hosts || []).some((h) => !(o.hosts || []).includes(h))) return true;
+    const oc = new Set((o.commands || []).map((c) => GM.commandKeyOf(c)));   // lane vault-standing-request: a command it could not run before widens too
+    if ((e.commands || []).some((c) => !oc.has(GM.commandKeyOf(c)))) return true;
     const oe = Number(o.until) > 0 ? Number(o.until) : null, ne = Number(e.until) > 0 ? Number(e.until) : null;
     if (oe != null && (ne == null || ne > oe)) return true;
     // lane vault-use-grants round 5 (MAJOR item 4): a wildcard's minting TOOL dropped or changed widens who may use it (one
@@ -107,7 +111,10 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
   const nextGen = () => { loadGen(); return Math.max(genSeq, markGen) + 1; };
   const commitGen = (id, gen) => { const g = Number(gen) || 0; genSeq = Math.max(genSeq, g); genByRes[String(id)] = g; staleNoted.delete(String(id)); saveGen(); return g; };   // a fresh owner write clears the stale notice for this resource
 
-  const canonMember = (id, e, xc, gen) => JSON.stringify([String(id), GM.principalKey(GM.bareOf(e)) || '', (e.hosts || []).map(String).slice().sort(), e.toolFor && typeof e.toolFor === 'object' && !Array.isArray(e.toolFor) ? Object.keys(e.toolFor).sort().map((k) => [k, String(e.toolFor[k]).toLowerCase()]) : null, Number(e.until) > 0 ? Math.floor(Number(e.until)) : null, typeof e.name === 'string' ? e.name : null, Array.isArray(xc) ? xc : [], Number(gen) || 0]);
+  // lane vault-standing-request: a member's COMMANDS and its SOURCE (+ its `at`) are under the mac too — appended ONLY when the
+  // member has them, so every member written before keeps the very canon (and mac) it was stamped with.
+  const canonExtra = (e) => { const cs = Array.isArray(e.commands) ? e.commands.map((c) => GM.commandKeyOf(c)).sort() : []; return cs.length || e.source ? [{ c: cs, s: e.source || null, a: e.source && Number(e.at) > 0 ? Math.floor(Number(e.at)) : null }] : []; };
+  const canonMember = (id, e, xc, gen) => JSON.stringify([String(id), GM.principalKey(GM.bareOf(e)) || '', (e.hosts || []).map(String).slice().sort(), e.toolFor && typeof e.toolFor === 'object' && !Array.isArray(e.toolFor) ? Object.keys(e.toolFor).sort().map((k) => [k, String(e.toolFor[k]).toLowerCase()]) : null, Number(e.until) > 0 ? Math.floor(Number(e.until)) : null, typeof e.name === 'string' ? e.name : null, Array.isArray(xc) ? xc : [], Number(gen) || 0, ...canonExtra(e)]);
   const macFor = (id, e, xc, gen) => { try { return vault && typeof vault.macOf === 'function' ? vault.macOf('vault-use', canonMember(id, e, xc, gen)) : null; } catch { return null; } };
   // re-stamp every member over the WHOLE row (except + gen changed); a locked vault yields no mac (but a locked write is
   // refused before this). round 5 (MINOR, item 6): the mac is computed over the member AS THE STORE WILL KEEP IT — each is run
@@ -139,7 +146,9 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
   function setRow(id, { to = [], except = [] } = {}, { by = 'user', reauthed = false } = {}) {
     if (!okId(id)) return named('bad_resource');
     if (!unlocked()) return named('vault_locked');   // round 4 (item 4): a locked vault never writes mac:null — refuse by name
-    for (const e of Array.isArray(to) ? to : []) if (!GM.hostListOf(e && e.hosts)) return named('hosts_required', { principal: GM.principalKey(GM.bareOf(e)) });
+    // lane vault-standing-request: a member names hosts, commands or both — an empty list is the field left out (never «any»)
+    to = (Array.isArray(to) ? to : []).map((e) => { if (!e || typeof e !== 'object') return e; const x = { ...e }; for (const f of ['hosts', 'commands']) if (Array.isArray(x[f]) && !x[f].length) delete x[f]; return x; });
+    for (const e of to) if (!GM.hostListOf(e && e.hosts) && !GM.commandListOf(e && e.commands)) return named('hosts_required', { principal: GM.principalKey(GM.bareOf(e)) });
     const v = GM.validateWrite(U.DOOR, String(id), { to, except });
     if (!v.ok) return named(v.code, { error: v.error });
     // lane vault-use-grants round 5 (MAJOR item 4): a wildcard host MUST carry the tool that minted it — a whole-row Save that
@@ -148,17 +157,21 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
     for (const e of v.row.to) for (const h of e.hosts || []) if (String(h).startsWith('*.') && !(e.toolFor && e.toolFor[h])) return named('tool_required', { principal: GM.principalKey(GM.bareOf(e)), host: h });
     const was = rowOf(id);
     if (widens(was, v.row) && !reauthed) return named('reveal_needs_password');
+    // lane vault-standing-request: a member this Save ADDS is the owner's («你设置的», now); one already there keeps its source
+    const before = new Set(((was && GM.publicRow(was).to) || []).map((e) => GM.principalKey(e)));
+    const rowTo = v.row.to.map((e) => (before.has(GM.principalKey(e)) ? e : { ...e, source: e.source || 'owner', at: Number(e.at) > 0 ? e.at : now() }));
     const g = store();
     const gen = nextGen();
-    const w = v.row.to.length || v.row.except.length ? g.set(U.DOOR, String(id), { to: stamp(id, v.row.to, v.row.except, gen), except: v.row.except }, by) : g.remove(U.DOOR, String(id), by);
+    const w = rowTo.length || v.row.except.length ? g.set(U.DOOR, String(id), { to: stamp(id, rowTo, v.row.except, gen), except: v.row.except }, by) : g.remove(U.DOOR, String(id), by);
     if (w && w.ok) commitGen(id, gen);
     return landed(w, { id: String(id), members: v.row.to.length });
   }
-  /** ONE member added or widened (the card's «Always», the request default, the carry). `tool` scopes a wildcard PER HOST. */
-  function addMember(id, principal, { hosts = [], until = null, tool = null } = {}, { by = 'user' } = {}) {
+  /** ONE member added or widened (the card's «Always», the request default, the carry, an agent's standing request the owner
+   *  allowed). `tool` scopes a wildcard PER HOST; `commands` (lane vault-standing-request) the command shapes; `source` who. */
+  function addMember(id, principal, { hosts = [], until = null, tool = null, commands = null, source = null } = {}, { by = 'user' } = {}) {
     if (!okId(id)) return named('bad_resource');
     if (!unlocked()) return named('vault_locked');
-    const plan = U.withMember(verifiedRow(rowOf(id)), principal, { hosts, until, tool });
+    const plan = U.withMember(verifiedRow(rowOf(id)), principal, { hosts, until, tool, commands, source, at: now() });
     if (!plan.ok) return named(plan.code);
     const v = GM.validateWrite(U.DOOR, String(id), { to: plan.to, except: plan.except });   // round 5 (MINOR): validate the plan BEFORE any generation move (a bad plan never bumps the gen)
     if (!v.ok) return named(v.code, { error: v.error });
@@ -218,7 +231,7 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
     const out = [];
     for (const row of store().rowsOfDoor(U.DOOR)) {
       const v = U.useVerdict([verifiedRow(row)], facts, { destinationKnown: false, now: now() });
-      if (U.holds(v)) out.push({ id: row.resource, grant: v.member.id, hosts: v.member.hosts, until: v.member.until });
+      if (U.holds(v)) out.push({ id: row.resource, grant: v.member.id, hosts: v.member.hosts, commands: v.member.commands, source: v.member.source, at: v.member.at, until: v.member.until });   // lane vault-standing-request: the scope + who wrote it + since when
     }
     return out;
   }

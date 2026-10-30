@@ -106,7 +106,7 @@ const ENTRY_FIELDS = Object.freeze({
   'channel-api': Object.freeze({ tier: Object.freeze(['none', 'read', 'write-ask', 'write-auto', 'write-all']), perDay: 'count' }),
   window: Object.freeze({ origin: Object.freeze(['user', 'request', 'self-open']) }),
   'group-visibility': Object.freeze({ level: Object.freeze(['visible', 'messageable']) }),
-  'vault-use': Object.freeze({ hosts: 'hosts', until: 'time', tool: 'tool', toolFor: 'toolmap', mac: 'mac' }),   // lane vault-use-grants (round 3: `tool` scopes a wildcard default to its CLI; round 4 item 3: `toolFor` scopes PER HOST — a wildcard row carries the tool that minted it, never rewritten by a later «Always» from another CLI; `mac` is the vault's HMAC so a forged row is dropped)
+  'vault-use': Object.freeze({ hosts: 'hosts', until: 'time', tool: 'tool', toolFor: 'toolmap', mac: 'mac', commands: 'commands', source: Object.freeze(['owner', 'request', 'card']) }),   // lane vault-standing-request: `commands` = the COMMAND SHAPES a member may run (a program whose destination the hub cannot read — the owner trusts the command itself), `source` = who wrote the member last (the owner's row, an agent's standing request he allowed, a card's «Always»)   // lane vault-use-grants (round 3: `tool` scopes a wildcard default to its CLI; round 4 item 3: `toolFor` scopes PER HOST — a wildcard row carries the tool that minted it, never rewritten by a later «Always» from another CLI; `mac` is the vault's HMAC so a forged row is dropped)
   'vault-job': Object.freeze({ jobs: 'jobs' }),   // lane vault-job-road: the job ids the member's approval names (src/vault-job.js approvedBy)
 });
 /** lane vault-use-grants: ONE destination a vault-use entry may name — EVERY shape the run card can name (round 2 MAJOR):
@@ -148,6 +148,31 @@ function hostTokenOk(h) {
   }
   if (!bare.includes('.') && !bare.includes(':') && !bare.startsWith('*') && SCHEME_WORD_HOSTS.has(bare)) return null;   // round 5 item 5: a single label that IS a URL scheme word is not grantable
   return n;
+}
+/** lane vault-standing-request: ONE COMMAND SHAPE a vault-use member may run — `{program, arg, sha, psha}`: the program's real
+ *  path (absolute), its first argument (the script's real path, or a literal word, or null), the sha256 of that script's
+ *  bytes (null when the argument is no file) and of the program's bytes (null when only root can write it). Closed keys, each
+ *  bounded; → the normal token | null (refused at a write, dropped at a read). */
+const COMMANDS_MAX = 16;
+const SHA_RE = /^[0-9a-f]{64}$/;
+const pathish = (v, abs) => typeof v === 'string' && v.length > 0 && v.length <= 400 && !/[\u0000-\u001f\u007f]/.test(v) && (!abs || v[0] === '/');
+function commandTokenOk(c) {
+  if (!c || typeof c !== 'object' || Array.isArray(c)) return null;
+  if (Object.keys(c).some((k) => !['program', 'arg', 'sha', 'psha'].includes(k))) return null;
+  if (!pathish(c.program, true)) return null;
+  if (c.arg != null && !pathish(c.arg, false)) return null;
+  for (const k of ['sha', 'psha']) if (c[k] != null && !SHA_RE.test(String(c[k]))) return null;
+  if (c.sha != null && !(c.arg != null && String(c.arg)[0] === '/')) return null;   // a script's digest pins a FILE — a real path
+  return { program: c.program, arg: c.arg == null ? null : c.arg, sha: c.sha == null ? null : String(c.sha), psha: c.psha == null ? null : String(c.psha) };
+}
+/** A command token's identity (dedup + the exact match a run is judged by). */
+const commandKeyOf = (c) => JSON.stringify([c.program, c.arg == null ? null : c.arg, c.sha == null ? null : c.sha, c.psha == null ? null : c.psha]);
+/** A `commands` value → its normal list (deduplicated, ≤ COMMANDS_MAX) | null when it is not a non-empty list of tokens. */
+function commandListOf(v) {
+  if (!Array.isArray(v) || !v.length || v.length > COMMANDS_MAX) return null;
+  const out = [], seen = new Set();
+  for (const x of v) { const c = commandTokenOk(x); if (!c) return null; const k = commandKeyOf(c); if (!seen.has(k)) { seen.add(k); out.push(c); } }
+  return out;
 }
 /** A `hosts` value → its normal list (lower-cased, a trailing dot and IPv6 brackets dropped, deduplicated, ≤ HOSTS_MAX) |
  *  null when it is not a non-empty list of host tokens (the entry is then refused at a write, dropped at a read). */
@@ -197,6 +222,7 @@ function normEntry(e, door) {
     if (allowed === 'count') { const n = Math.floor(Number(e[f])); if (!(n > 0) || n > 100000) return null; out[f] = n; continue; }
     if (allowed === 'jobs') { const v = e[f]; if (!Array.isArray(v) || !v.length || v.length > JOBS_MAX || !v.every((x) => JOB_ID_RE.test(String(x)))) return null; out[f] = [...new Set(v.map(String))]; continue; }   // lane vault-job-road
     if (allowed === 'hosts') { const h = hostListOf(e[f]); if (!h) return null; out[f] = h; continue; }   // lane vault-use-grants
+    if (allowed === 'commands') { const c = commandListOf(e[f]); if (!c) return null; out[f] = c; continue; }   // lane vault-standing-request
     if (allowed === 'tool') { const t = String(e[f]).toLowerCase(); if (!/^[a-z0-9][a-z0-9.+-]{0,39}$/.test(t)) return null; out[f] = t; continue; }   // lane vault-use-grants round 3: the CLI a wildcard default is granted to
     if (allowed === 'toolmap') { const v = e[f]; if (!v || typeof v !== 'object' || Array.isArray(v)) return null; const keys = Object.keys(v); if (keys.length > HOSTS_MAX) return null; const m = {}; for (const k of keys) { const hk = hostTokenOk(String(k).trim().toLowerCase()); const tv = String(v[k]).toLowerCase(); if (hk === null || hk === '@entry' || !/^[a-z0-9][a-z0-9.+-]{0,39}$/.test(tv)) return null; m[hk] = tv; } if (Object.keys(m).length) out[f] = m; continue; }   // lane vault-use-grants round 4 item 3: host → the CLI that minted its wildcard grant
     if (allowed === 'mac') { if (!/^[0-9a-f]{64}$/.test(String(e[f]))) return null; out[f] = String(e[f]); continue; }   // lane vault-use-grants round 3: the vault's HMAC over the canonical member
@@ -702,7 +728,7 @@ const LEGACY = Object.freeze({
 });
 
 module.exports = {
-  DOORS, PRINCIPAL_KINDS, REFUSALS, WRITE_REFUSALS, LIST_MAX, ENTRY_FIELDS, GROUP_ID_RE, CONVERSATION_KEY_RE, RESOURCE_SHAPES, resourceShapeOk, HOST_TOKEN_RE, HOSTS_MAX, hostListOf,
+  DOORS, PRINCIPAL_KINDS, REFUSALS, WRITE_REFUSALS, LIST_MAX, ENTRY_FIELDS, GROUP_ID_RE, CONVERSATION_KEY_RE, RESOURCE_SHAPES, resourceShapeOk, HOST_TOKEN_RE, HOSTS_MAX, hostListOf, COMMANDS_MAX, commandListOf, commandKeyOf,
   principalKey, bareOf, normEntry, normExcept, normRow, validateWrite, factsOf, admits, hitsOf, sharesGroup, names, namesNow,
   publicRow, rowKey, conversationKeyOf, conversationKeysOf, keyFromSessionKey, keyFromSubject,
   fromSessionPrincipal, fromExitGrant, fromHostExit, browserKeyResolver, fromBrowserOwner, fromWindowRecord, fromSubject, fromAutomationGrant,

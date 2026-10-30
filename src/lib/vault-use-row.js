@@ -32,6 +32,12 @@ const oneHostWord = (h, entryHosts, tool = null) => {
   return h;
 };
 const hostsWord = (hosts, entryHosts, toolFor = null) => (hosts || []).map((h) => oneHostWord(h, entryHosts, toolFor && toolFor[h])).join(', ');
+// lane vault-standing-request: a member's COMMAND SHAPES («the command python3 transcribe.py») and who wrote it, when
+const baseOf = (p) => String(p == null ? '' : p).replace(/\/+$/, '').split('/').pop();
+const commandWord = (c) => (c && c.program ? [baseOf(c.program), c.arg == null ? '' : String(c.arg)[0] === '/' ? baseOf(c.arg) : String(c.arg)].filter(Boolean).join(' ') : '');
+const commandTitle = (c) => [c.program, c.arg].filter((x) => x != null && x !== '').join(' ');
+const clockOf = (ms) => { try { return new Date(ms).toTimeString().slice(0, 5); } catch { return ''; } };
+const sourceWord = (m) => { const at = Number(m.at) > 0 ? clockOf(m.at) : ''; const w = m.source === 'request' ? t('asked by the agent') : m.source === 'card' ? t('«Always» on a card') : m.source === 'owner' ? t('set by you') : ''; return w && at ? `${w} · ${at}` : w; };
 
 /** A member's name: its stored name, the live roster's, else its id (never markup — textContent only). */
 function nameOf(m, app) {
@@ -71,13 +77,15 @@ export function useExtras(row, { app = null, refresh = () => {} } = {}) {
         const chip = el('span', `vw-ak-chip vw-use-chip${m.expired ? ' vw-use-expired' : ''}${pausedM ? ' vw-use-chip-paused' : ''}`);
         chip.dataset.grant = m.id || '';
         chip.dataset.principal = m.principal || '';
-        const bits = [nameOf(m, app), hostsWord(m.hosts, u.entryHosts, m.toolFor)];
+        const cmds = Array.isArray(m.commands) ? m.commands : [];
+        const bits = [nameOf(m, app), ...((m.hosts || []).length ? [hostsWord(m.hosts, u.entryHosts, m.toolFor)] : []), ...(cmds.length ? [t('the command {command}', { command: cmds.map(commandWord).join(', ') })] : [])];
+        if (sourceWord(m)) bits.push(sourceWord(m));
         if (m.uses) bits.push(t('used {n}×', { n: m.uses }));
         if (m.expired) bits.push(t('expired'));
         else if (m.until) bits.push(t('until {when}', { when: dateOf(m.until) }));
         if (pausedM) bits.push(t('paused by you'));
         chip.append(el('span', 'vw-use-words', bits.join(' · ')));
-        chip.title = `${m.id || ''}${m.convs > 1 ? ' · ' + t('{n} conversations', { n: m.convs }) : ''}`;
+        chip.title = `${m.id || ''}${m.convs > 1 ? ' · ' + t('{n} conversations', { n: m.convs }) : ''}${cmds.length ? '\n' + cmds.map(commandTitle).join('\n') : ''}`;   // lane vault-standing-request: the whole program + script paths
         if (pausedM) {   // un-pause ONE member — a widening, so it asks for the second password (验证是你)
           const rs = el('button', 'vw-ak-x vw-use-resume', '↻');
           rs.type = 'button'; rs.title = t('Un-pause this — let it be used again'); rs.setAttribute('aria-label', rs.title);
@@ -137,6 +145,8 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
   // THE HOSTS: one list for the members this save writes; the entry's own («the hosts it was stored for») when it has them
   const common = (() => { if (!members.length) return null; const k = JSON.stringify(members[0].hosts || []); return members.every((m) => JSON.stringify(m.hosts || []) === k) ? members[0].hosts || [] : null; })();
   body.append(el('div', 'vw-ak-sec', t('For which hosts')));
+  // lane vault-standing-request (B-eba2 — the owner: 「主机是什么东西？我该怎么填」): what a host IS, said where it is typed
+  body.append(el('div', 'vw-ak-hint vw-use-hosts-what', t('A host is where a command connects to with it — e.g. api.openai.com for an API key, 192.168.1.1 for a router. A program whose destination VibeSpace cannot read (a script) is allowed by its command instead, from its run card.')));
   if (entryHosts.length) {
     const lab = el('label', 'vw-ak-pick vw-use-own');
     ownBox = el('input'); ownBox.type = 'checkbox';
@@ -164,6 +174,14 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
   polIn.placeholder = t('e.g. only 192.168.1.1, read-only status calls to read the WAN status');
   polIn.value = (u.policy && u.policy.text) || '';
   body.append(polIn, el('div', 'vw-ak-hint', u.judge === 'on' ? t('The policy judge is ON: a run its grants do not cover is judged against these words by the decision API; a yes runs it (recorded in For you), anything else shows you the card. It never sees the value.') : t('The policy judge is OFF (Settings ▸ Integration ▸ «Let the policy judge approve vault uses») — the words are kept for when you turn it on.')));
+  // lane vault-standing-request: the commands a member may run are kept as they are (a card's «Always (this command)» or an
+  // agent's standing request wrote them); ✕ on its chip takes the member back
+  const withCmds = members.filter((m) => Array.isArray(m.commands) && m.commands.length);
+  if (withCmds.length) body.append(el('div', 'vw-ak-hint vw-use-cmds', withCmds.map((m) => t('{name} may run: {commands} (kept)', { name: nameOf(m, app), commands: m.commands.map(commandWord).join(', ') })).join(' · ')));
+  // «让 agent 自己申请»: the agent can ask for exactly this grant — one card to allow
+  const askAgent = el('div', 'vw-ak-hint vw-use-ask-agent');
+  askAgent.append(el('b', null, t('Not sure what to fill in? Let the agent ask.')), document.createTextNode(' ' + t('It asks with vibespace-vault request {ref} --standing (--host … or --command …), and you get ONE card with exactly this grant to allow.', { ref: u.ref || 'vault://…' })));
+  body.append(askAgent);
   const err = el('div', 'vault-secret-error'); err.setAttribute('role', 'status');
   body.append(err);
   const f = el('div', 'dialog-footer');
@@ -182,9 +200,10 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
     const to = [];
     for (const p of pick.to) {
       const was = had.get(keyOf(p));
-      const h = hosts.length ? hosts : was ? was.hosts : [];
-      if (!h.length) { err.textContent = t('Name the hosts it may be used for — a host name or address each (never «any host»)'); return false; }
-      const m = { ...p, ...(was && was.name && !p.name ? { name: was.name } : {}), hosts: h };
+      const h = hosts.length ? hosts : was ? (was.hosts || []) : [];
+      const cmds = was && Array.isArray(was.commands) ? was.commands : [];   // lane vault-standing-request: a member's command shapes ride the Save unchanged
+      if (!h.length && !cmds.length) { err.textContent = t('Name the hosts it may be used for — a host name or address each (never «any host»)'); return false; }
+      const m = { ...p, ...(was && was.name && !p.name ? { name: was.name } : {}), ...(h.length ? { hosts: h } : {}), ...(cmds.length ? { commands: cmds.map((c) => ({ program: c.program, arg: c.arg == null ? null : c.arg, sha: c.sha || null, psha: c.psha || null })) } : {}), ...(was && was.source ? { source: was.source, ...(Number(was.at) > 0 ? { at: was.at } : {}) } : {}) };
       // lane vault-use-grants round 5 (MAJOR item 4): carry the per-host tool scope back — a wildcard host (`*.amazonaws.com`)
       // keeps the CLI that minted it, so a whole-row Save never silently re-scopes it to every tool. The store refuses a
       // wildcard host with no tool by name (`tool_required`).

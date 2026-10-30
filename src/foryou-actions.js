@@ -594,7 +594,7 @@ const STAMPS = Object.freeze({
   allow: Object.freeze({ allowed: i18nKey('allowed by you'), 'allowed:late': i18nKey('let through once by you · waiting for it to run again'), always: i18nKey('always allowed by you'), denied: i18nKey('denied by you') }),   // r7c: a LATE Allow (`resolvedFact.late`) — the agent's next run of the command goes through once
   store: Object.freeze({ stored: i18nKey('stored'), denied: i18nKey('refused by you') }),
   deliver: Object.freeze({ delivered: i18nKey('delivered by you'), discarded: i18nKey('discarded by you') }),   // r6: a held digest's Deliver / Discard
-  grant: Object.freeze({ 'granted:once': i18nKey('allowed once by you'), 'granted:8h': i18nKey('allowed by you for 8 h'), denied: i18nKey('denied by you') }),   // r4: vault-grant-ask's three verbs — r6: keyed `granted:<grantedFor>` (the record's fact); an old `granted` (no duration) has no stamp — its own words, «allowed»
+  grant: Object.freeze({ 'granted:once': i18nKey('allowed once by you'), 'granted:8h': i18nKey('allowed by you for 8 h'), 'granted:standing': i18nKey('allowed by you until you revoke it'), denied: i18nKey('denied by you') }),   // lane vault-standing-request: + a STANDING request's Allow   // r4: vault-grant-ask's three verbs — r6: keyed `granted:<grantedFor>` (the record's fact); an old `granted` (no duration) has no stamp — its own words, «allowed»
 });
 /** THE GRANT'S LIFE (lane wake-approve-card r6 — 主开发: «a card's state follows the grant's life»; the record was a decision
  *  log that never fell: «allowed by you for 8 h · 09:38» at +9 h, +3 d and after a lock). An agent's request for a stored
@@ -611,7 +611,7 @@ function grantLifeOf(item, now = Date.now()) {
   const run = !!(item && item.action && item.action.type === 'vault-run-ask' && item.resolvedBy === 'always');
   if (!req && !run) return null;
   const f = item.resolvedFact && typeof item.resolvedFact === 'object' ? item.resolvedFact : {};
-  const grantedFor = run ? 'always' : f.grantedFor === 'once' || f.grantedFor === '8h' ? f.grantedFor : null;
+  const grantedFor = run ? 'always' : f.grantedFor === 'once' || f.grantedFor === '8h' || f.grantedFor === 'standing' ? f.grantedFor : null;   // lane vault-standing-request: + 'standing' (no `until` — it lives until revoked)
   const until = Number(f.until) > 0 ? Number(f.until) : null;
   const endedAt = Number(f.endedAt) > 0 ? Number(f.endedAt) : null;
   if (endedAt && f.endedBy === 'revoked') return { state: 'revoked', at: endedAt, grantedFor, until };
@@ -621,7 +621,7 @@ function grantLifeOf(item, now = Date.now()) {
 }
 /** A row's own two verbs (`verbs` — the held digest's Deliver / Discard), or null (Approve / Deny). */
 const verbsOf = (type) => (ROW_OF[type] && ROW_OF[type].verbs) || null;
-const GRANT_VERB = Object.freeze({ '8h': i18nKey('allowed for 8 hours'), once: i18nKey('allowed once'), always: i18nKey('always allowed') });
+const GRANT_VERB = Object.freeze({ '8h': i18nKey('allowed for 8 hours'), once: i18nKey('allowed once'), always: i18nKey('always allowed'), standing: i18nKey('allowed until revoked') });
 /** A granted record in words, its life said: «allowed for 8 hours» / «allowed once» / «allowed» (no duration on the record),
  *  «allowed for 8 hours · ended 17:41», «allowed · revoked 17:41». → {verb, when, text, state} | null (not a grant). */
 function grantWords(item, { t = fmt, now = Date.now() } = {}) {
@@ -641,7 +641,7 @@ function decidedStamp(item, { t = fmt, now = Date.now() } = {}) {
   const gw = by === 'granted' || by === 'always' ? grantWords(item, { t, now }) : null;
   if (gw && gw.state !== 'live') return { verb: gw.verb, time: gw.when, text: gw.text, denied: false, ended: gw.state };
   const words = STAMPS[ROW_OF[item.action.type].stamp] || STAMPS.approve;
-  const key = by === 'granted' && fact && (fact.grantedFor === 'once' || fact.grantedFor === '8h') ? `granted:${fact.grantedFor}` : by === 'allowed' && fact && fact.late === true ? 'allowed:late' : by;
+  const key = by === 'granted' && fact && (fact.grantedFor === 'once' || fact.grantedFor === '8h' || fact.grantedFor === 'standing') ? `granted:${fact.grantedFor}` : by === 'allowed' && fact && fact.late === true ? 'allowed:late' : by;
   if (!Object.prototype.hasOwnProperty.call(words, key)) return null;
   if (!fact || fact.decidedBy !== 'person') return null;
   const verb = t(words[key]);
@@ -674,6 +674,9 @@ function decidedStamp(item, { t = fmt, now = Date.now() } = {}) {
  *  src/user-todos.js clips at the write (never throws); the door clips at the same bound. */
 const RUN_CMD_BODY_MAX = 2000;
 const RUN_CMD_MAX = 4096;
+/** lane vault-standing-request: the run card's words beside «Always (this command)» — the SAME key the door's detail line uses
+ *  (src/server/vault-run-door.js COMMAND_ALWAYS_LINE). */
+const COMMAND_ALWAYS_WORDS = i18nKey('VibeSpace cannot see where this program sends the secret; «Always (this command)» means you trust this command itself. A changed program or script asks again.');
 const RUN_ALWAYS_WHY = Object.freeze({   // = vault-run.js's ALWAYS_WHY (int-C: its export is the census's list)
   'destination-unknown': i18nKey('where it sends what it reads is unknown'),
   'program-writable': i18nKey('the program sits in a folder an agent can write'),
@@ -770,7 +773,8 @@ function runCardOf(item, { t = fmt } = {}) {
   const rows = [...(decides ? [decides] : []), ...RUN_ROWS.filter((k) => k !== decides)]
     .filter((k) => k !== 'folder' || folder).filter((k) => k !== 'secrets' || groups.length)
     .map((key) => ({ key, label: t(RUN_LABEL[key]), lines: lines[key], warn: key === decides || (key === 'hosts' && !known) }));
-  const hint = a.offered === true ? null : [{ text: t('No «Always»: {why}', { why: own(RUN_ALWAYS_WHY, a.why) ? t(RUN_ALWAYS_WHY[a.why]) : '' }).replace(/[:：]\s*$/, (m) => m.trimEnd()) }, ...(a.why && !own(RUN_ALWAYS_WHY, a.why) ? [{ code: String(a.why) }] : []), ...(str(a.directive) ? [{ mono: wholeOf(a, 'directive').shown }] : [])];
+  const cmdA = a.command && typeof a.command === 'object' && a.command.offered === true ? a.command : null;   // lane vault-standing-request: «Always (this command)» — the plain words beside it
+  const hint = cmdA ? [{ mono: str(cmdA.words) ? String(cmdA.words) : '' }, { text: ` — ${t(COMMAND_ALWAYS_WORDS)}` }] : a.offered === true ? null : [{ text: t('No «Always»: {why}', { why: own(RUN_ALWAYS_WHY, a.why) ? t(RUN_ALWAYS_WHY[a.why]) : '' }).replace(/[:：]\s*$/, (m) => m.trimEnd()) }, ...(a.why && !own(RUN_ALWAYS_WHY, a.why) ? [{ code: String(a.why) }] : []), ...(str(a.directive) ? [{ mono: wholeOf(a, 'directive').shown }] : [])];
   const templates = (Array.isArray(f.templates) ? f.templates : []).filter((x) => x && typeof x === 'object');
   // r8 (a store clips and says, never throws): a command longer than the body's RUN_CMD_BODY_MAX — `cmd` its start, `cmdCut`,
   // the whole (≤ RUN_CMD_MAX) in `cmdFull` (chunks — r23's shape; the store folds an older producer's the same way); the body

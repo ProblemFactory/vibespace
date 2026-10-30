@@ -141,6 +141,7 @@ function usesOf(text, conv, limit = USES_MAX) {
       door: DOOR_RE.test(String(o.door || '')) ? String(o.door) : null,
       outcome: outcomeOf(o.outcome),
       receipt: RECEIPT_RE.test(String(o.receipt || '')) ? String(o.receipt) : null,
+      grant: GRANT_ID_RE.test(String(o.grant || '')) ? String(o.grant) : null,   // lane vault-standing-request: the use says the STANDING grant (a vault-use member — the owner's row) it rode: «by grant · standing»
     });
   }
   return out;

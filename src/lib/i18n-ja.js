@@ -11596,4 +11596,25 @@ export default {
   "No rollback point names the conversation of “{name}”.": "「{name}」の会話を記録しているロールバックポイントはありません。",
   "“{name}” cannot be reopened: closing deletes it from this desktop’s layout for good. Only an older rollback point (Restore a previous layout…) still holds it.": "「{name}」は開き直せません。閉じるとこのデスクトップのレイアウトから完全に削除されます。残るのは古いロールバックポイント（以前のレイアウトを復元…）だけです。",
   "{n} of these cannot be reopened ({names}): closing deletes them from this desktop’s layout for good. Only an older rollback point (Restore a previous layout…) still holds them.": "このうち {n} 個は開き直せません（{names}）。閉じるとこのデスクトップのレイアウトから完全に削除されます。残るのは古いロールバックポイント（以前のレイアウトを復元…）だけです。",
+  "A host is where a command connects to with it — e.g. api.openai.com for an API key, 192.168.1.1 for a router. A program whose destination VibeSpace cannot read (a script) is allowed by its command instead, from its run card.": "ホストとは、コマンドがこれを持って接続する先です——例：API キーなら api.openai.com、ルーターなら 192.168.1.1。VibeSpace が送り先を読めないプログラム（スクリプト）は、実行カードからコマンド単位で許可します。", // lane vault-standing-request
+  "A standing approval for this command — the Vault window lists it; a changed program or script asks again": "このコマンドを常設で許可しました——保管庫ウィンドウに表示されます。プログラムやスクリプトが変わればまた確認します", // lane vault-standing-request
+  "A standing approval for this command: this conversation runs it with these secrets without asking until you take it back — VibeSpace cannot see where it sends them; a changed program or script asks again. Asks for the second password first": "このコマンドの常設許可：取り消すまで、この会話はこれらのシークレットで確認なしに実行します——VibeSpace は送り先を見られません。プログラムやスクリプトが変わればまた確認します。先に第 2 パスワードを求めます", // lane vault-standing-request
+  "A standing grant, the same as «Who may use it…» on its row — until you take it back there; asks for the second password first": "常設の許可。その行の「誰が使えるか…」と同じです——そこで取り消すまで有効。先に第 2 パスワードを求めます", // lane vault-standing-request
+  "Allow (standing)": "許可（常設）", // lane vault-standing-request
+  "Allowed until you take it back — its row in the Vault window lists it": "取り消すまで許可しました——保管庫ウィンドウのその行に表示されます", // lane vault-standing-request
+  "Always (this command)": "常に（このコマンド）", // lane vault-standing-request
+  "For commands to {hosts} — the hosts a command may connect to.": "{hosts} へ接続するコマンドに——コマンドが接続してよいホストです。", // lane vault-standing-request
+  "For the command {command} — it runs {program} {arg}. VibeSpace cannot see where it sends the secret; Allow means you trust this command itself. A changed program or script asks again.": "コマンド {command} に——実行するのは {program} {arg} です。VibeSpace はシークレットの送り先を見られません。「許可」はこのコマンドそのものを信頼するという意味です。プログラムやスクリプトが変わればまた確認します。", // lane vault-standing-request
+  "It asks with vibespace-vault request {ref} --standing (--host … or --command …), and you get ONE card with exactly this grant to allow.": "エージェントが vibespace-vault request {ref} --standing（--host … または --command …）で申請し、まさにこの許可を求めるカードが 1 枚だけ届きます。", // lane vault-standing-request
+  "Not sure what to fill in? Let the agent ask.": "何を入れればいいか分からない？エージェントに申請させましょう。", // lane vault-standing-request
+  "Until you revoke it — the same as «Who may use it…» on its row in ⚙ System ▸ Vault…, which lists it and takes it back. A lock does not end it (nothing runs while it is locked). Allow asks for the second password.": "取り消すまで有効——⚙ システム ▸ 保管庫… のその行の「誰が使えるか…」と同じで、そこに表示され、そこで取り消せます。ロックしても終わりません（ロック中は何も実行されません）。「許可」には第 2 パスワードが必要です。", // lane vault-standing-request
+  "VibeSpace cannot see where this program sends the secret; «Always (this command)» means you trust this command itself. A changed program or script asks again.": "VibeSpace はこのプログラムがシークレットをどこへ送るか見られません。「常に（このコマンド）」はこのコマンドそのものを信頼するという意味です。プログラムやスクリプトが変わればまた確認します。", // lane vault-standing-request
+  "allowed by you until you revoke it": "取り消すまであなたが許可しました", // lane vault-standing-request
+  "allowed until revoked": "取り消すまで許可", // lane vault-standing-request
+  "asked by the agent": "エージェントの申請", // lane vault-standing-request
+  "set by you": "あなたが設定", // lane vault-standing-request
+  "the command {command}": "コマンド {command}", // lane vault-standing-request
+  "{name} may run: {commands} (kept)": "{name} が実行できるもの：{commands}（そのまま）", // lane vault-standing-request
+  "{who} asks for a standing grant on a stored secret": "{who} が保管庫のシークレットの常設の許可を求めています", // lane vault-standing-request
+  "«Always» on a card": "カードの「常に」", // lane vault-standing-request
 };

@@ -28,14 +28,18 @@ vibespace-vault run [--env NAME=vault://…]… [--file NAME=vault://…|@<templ
 vibespace-vault list                what you may use in a run: your own entries, entries the user opened for runs or granted to you
 vibespace-vault request <vault://…> --for "<purpose>"
                                     ask the user for an entry, with what you will run with it
+vibespace-vault request <vault://…> --standing --for "<purpose>" [--host <h>[,<h>…]] [--command "<program> <script>"]
+                                    ask ONCE for a STANDING grant — the same as the user setting «Who may use it…» on its row
 vibespace-vault request "<what you need>" --purpose "<why>" [--into <row>.<field> | --kind api-key|password|secret] [--name <label>] [--host <h>[,<h>…]]
                                     ask the user to PASTE a secret you do not have — a masked box in their For you tray
-vibespace-vault uses                your grants, your open requests, your own uses (entry, purpose, when, outcome, receipt)
+vibespace-vault uses                your grants (standing ones too), your open requests, your own uses (entry, purpose, when, outcome, receipt)
 ```
 
 ## When a run card goes unanswered
 
 If the user does not answer your run card within its minute, your `vibespace-vault run` is refused `ask_expired` — but the card does **not** disappear. It stays in their For you tray as a *late* card for 24 hours, and if they allow it late, **your next run of that exact command passes once** with no new card (round 23: the pass is for THAT command — a different command, even of the same program, draws its own card); then it is spent — run it again and a fresh card appears. So on `ask_expired`, do not re-file a `vibespace-ask` or nag in chat: do other work and simply run the same command again later — a late allow will let that next run through. A late deny, a lock, or the 24 hours ends it.
+
+If the same command will run many times (a loop over 40 files), the refusal — and a run the user let through once (`# vibespace-vault run: …` on stderr) — names the better road: **ask once for a standing grant** (next section). One card instead of forty.
 
 ## When the vault is locked
 
@@ -79,9 +83,38 @@ entry does — or **Deny**.
 A grant opens the entry for this conversation the way «Usable by agent runs» opens it for everyone: each NEW kind of
 command still shows the user its run card first. A lock ends every grant.
 
-`vibespace-vault uses` prints what you hold now and what you did: your live grants (entry, purpose, until), your requests
-still waiting, and your own uses newest first — entry, purpose, when, door, outcome, receipt. Never a value; never another
-conversation's.
+`vibespace-vault uses` prints what you hold now and what you did: your live grants (entry, purpose, until), your standing
+grants («standing · <scope> · since <when>»), your requests still waiting, and your own uses newest first — entry, purpose,
+when, door, outcome, receipt, and «by grant · standing vg-…» when a standing grant let it through. Never a value; never
+another conversation's.
+
+## Asking ONCE for a standing grant — `request --standing`
+
+When you will use an entry again and again (a script over many files, a deploy you run every hour), ask the user ONCE for
+exactly the standing permission they would otherwise configure by hand on the entry's row («Who may use it…»):
+
+    vibespace-vault request vault://app-secrets/tts/apiKey --standing --host api.tts.example --for "call the TTS API for the narration"
+    vibespace-vault request vault://app-secrets/tts/apiKey --standing --command "python3 transcribe.py" --for "transcribe the 40 interview segments"
+
+- `--host` — where your commands **connect** with it (a host name or address, e.g. `api.openai.com`, `192.168.1.1`; never «any
+  host»). Use it for a tool whose destination VibeSpace reads from the command (curl, gh, ssh, psql …).
+- `--command "<program> <script>"` — for a program whose destination VibeSpace **cannot** read: an interpreter and its script
+  (`python3 transcribe.py`, `node upload.js`, `bash sync.sh`) or a program outside its tool table. Name the program and its
+  first argument as you run them, from the folder you run them in — the hub resolves the program on your PATH and pins the
+  script by its real path and the sha256 of its bytes. The rest of the command line is free (`part01.mp3`, `part02.mp3` …).
+  Inline code (`python3 -c …`) cannot be granted; a known tool asks with `--host` (`command_has_hosts`).
+  **If you change the script (or the program), it is a new command** — its next run shows the user a card again.
+
+That files **one** card: «<this conversation> asks for a standing grant on a stored secret» with your purpose, the scope
+(«for commands to api.tts.example» / «for the command python3 transcribe.py — VibeSpace cannot see where it sends the
+secret; Allow means you trust this command itself») and «until you revoke it». Nothing waits on it. The user answers
+**Allow (standing)** (with the second password) or **Deny** (that same ask is quiet for 10 minutes). Their Allow is the
+entry's own row: it has no end and a lock does not end it (a locked vault runs nothing; once unlocked, your runs go on with
+no card); they see it on the row — «agent 申请 · 11:46» — and ✕ takes it back. The same scope is asked once while open
+(`request_pending`); one you already hold answers that you hold it. `list` and `uses` show it «standing · <scope> · since
+<when>». A run outside the scope (another host, another script, another program) still shows its card — and that card's
+**«Always (this command)»** (offered where VibeSpace cannot read the destination) writes the same kind of grant from the
+user's side.
 
 ## A secret you do not have — `request "<what>"` (the paste box)
 
@@ -230,6 +263,7 @@ password you were handed in the chat when they can.
 | `entry_has_its_own_door` | a sign-in / pairing / channel token, a passkey, a key | the door the answer names (Channels panel, Accounts…) |
 | `entry_unknown` | no such entry (any more) | — (`vibespace-vault list`) |
 | `request_pending` · `request_quiet` | you already asked for that entry / the user said no a moment ago (10 minutes) | For you (the open question) |
+| `scope_required` · `command_unreadable` · `command_has_hosts` · `standing_bad_host` | a standing request named no scope / a `--command` that is not a program + its script file (inline code, a missing or 1 MiB+ script) / a known tool (ask `--host`) / not a host | — (fix the words) |
 | `ask_pending` · `ask_denied` · `ask_expired` · `ask_unfiled` · `ask_changed` | the run card waits / said no / got no answer in 60 s / could not be filed / changed after it was shown — nothing ran | For you (the run card) |
 | `not_granted` (totp) | the user has not granted this two-step code to this conversation (a code you added yourself needs no grant) | the Vault window ▸ the code's 用于… |
 | `exists` · `login_exists` | `totp add` / `login add`: that name or that account is in the vault already | — (another name; the user deletes) |

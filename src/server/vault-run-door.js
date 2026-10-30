@@ -149,6 +149,7 @@ const HC = require('../hidden-chars.js');
 const DOOR = require('../mount-door.js');   // B-afc4: a blocked storage path is answered by name, never read (a cwd, a tool, a template)
 const PI = require('../proc-identity.js');   // a run folder's hub: its identity, never a bare pid (the boot sweep)
 const VUG = require('../vault-use-grant.js');   // lane vault-use-grants: PURE — a standing approval's verdict and the card's words
+const GM = require('../grant-model.js');   // lane vault-standing-request: PURE — a command token's one spelling (commandListOf / commandKeyOf)
 const DM = require('../decision-model.js');   // lane vault-use-grants (R4): PURE — the policy's spelling, its question, the threshold
 
 const SETROW_RAW = new WeakMap();   // lane vault-use-grants round 9: useGrants instance → its UNWRAPPED setRow, so a second door built over the same instance (a test's `mk()`) re-uses the one wrapper and gets the true raw writer for its rollback — held OFF the instance in a WeakMap (an underscore-prefixed property assignment on it would read as a session field to the test-session-schema census)
@@ -156,7 +157,8 @@ const ACTION_TYPE = 'vault-run-ask';
 const REQUEST_TYPE = 'vault-grant-ask';      // lane vault-manual-and-lock: an agent's request for an entry (its For-you ask)
 const PURPOSE_MAX = 200;                     // the request's purpose, in the agent's own words (one line)
 const GRANT_MS = 8 * 3600e3;                 // a grant lives ≤ 8 hours (once: until its run; 8h: every run) — and never past a lock
-const GRANT_ANSWERS = Object.freeze(['once', '8h', 'deny']);
+const GRANT_ANSWERS = Object.freeze(['once', '8h', 'deny', 'standing']);   // lane vault-standing-request: + `standing` — the answer of a STANDING request (`request --standing`), never of a plain one (and once / 8h never of a standing one)
+const SCRIPT_PIN_MAX = 1024 * 1024;   // lane vault-standing-request: a command shape pins its script by the sha256 of its bytes — a script over 1 MiB is no shape (the card asks each run)
 // B-4934 (q-043 verify L2): the hub-wide bound counts CONVERSATIONS, not requests — 64 requests hub-wide let eight
 // conversations × 8 open asks fill the table, and a ninth conversation's honest first ask answered too_many_requests
 const REQUESTS_PER_CALLER = 8, REQUEST_CALLERS_MAX = 32;
@@ -193,6 +195,7 @@ const STATUS = Object.freeze({
   spawn_failed: 500, failed: 500, storage_blocked: 503, request_too_large: 400, run_path_unsafe: 500, git_not_on_seal: 500,
   request_pending: 409, request_quiet: 429, purpose_required: 400, purpose_too_long: 400, too_many_requests: 429,   // lane vault-manual-and-lock
   too_many_askers: 429,   // B-4934
+  scope_required: 400, command_unreadable: 400, command_has_hosts: 400, standing_bad_host: 400,   // lane vault-standing-request
 });
 const MORE_WORDS = Object.freeze({
   hidden_chars: 'the command holds characters that show differently than they run (control or direction marks) — refused',
@@ -214,6 +217,11 @@ const MORE_WORDS = Object.freeze({
   too_many_requests: `this conversation already has ${REQUESTS_PER_CALLER} questions waiting on the user — wait for their answers (\`vibespace-vault uses\` lists them)`,
   too_many_askers: `${REQUEST_CALLERS_MAX} other conversations are waiting on the user's answers already — nothing was filed; ask again once some are answered`,   // B-4934
   request_quiet: 'the user said no to that a moment ago — do not ask again for 10 minutes; do other work',
+  // lane vault-standing-request: a STANDING request's own codes
+  scope_required: 'a standing request names what it is for: --host <host>[,<host>…] (the hosts its commands connect to) and/or --command "<program> <script or first argument>" (a program whose destination VibeSpace cannot read)',
+  command_unreadable: 'that --command could not be read as a program and its script — name the program and its first argument as you run them (e.g. --command "python3 transcribe.py"), from the folder you run them in; the script must be a file of at most 1 MiB, and a shell or interpreter needs a script (never -c / -e / -m)',
+  command_has_hosts: 'that program is one whose destination VibeSpace reads from the command — ask with --host <the hosts it connects to> instead of --command',
+  standing_bad_host: 'a --host is a host name or address the command connects to (e.g. api.openai.com) — never «any host», never a URL with a path',
 });
 const named = (code, extra = {}) => (MORE_WORDS[code] ? { ok: false, code, words: MORE_WORDS[code], ...extra } : VR.refusalOf(code, extra));
 const NO_ALWAYS = Object.freeze({
@@ -230,6 +238,10 @@ const NO_ALWAYS = Object.freeze({
 // localizes every card detail line through t(), zh + ja below), not a hard-coded English+Chinese string. It says «Always»
 // opens the entry for THIS conversation only: the grants the owner paused with an OFF stay paused.
 const ALWAYS_SWITCH_LINE = '«Always» (with the second password) also turns on «Usable by agent runs» for this entry — it opens it for THIS conversation; any grants you paused stay paused.';
+// lane vault-standing-request (the owner 2026-10-30: «发往 未知 … 不提供「总是允许」» on four cards in two minutes): a command whose
+// destination the hub cannot read is offered «Always (this command)» — a standing grant on the COMMAND SHAPE (the program's real
+// path + its script / first argument). ONE fixed i18n key (the client localizes the card's detail lines through t()).
+const COMMAND_ALWAYS_LINE = 'VibeSpace cannot see where this program sends the secret; «Always (this command)» means you trust this command itself. A changed program or script asks again.';
 
 // THE ENGINE'S ENTRY-CLASS CHECK (decision ⑤ — the second of two that say no, beside the model's ownDoorOf): the stores whose
 // rows a person may open for runs, by THIS file's own table; every other store's class is named; a sign-in token's kind is
@@ -385,6 +397,25 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   // a digest→version LABEL for the drift line ONLY (the lane fixture's seam, named as such — the door NEVER gates on it; an
   // unknown sha RUNS and is labelled by its short sha). The shipped gh row seeds it with the lane's bundled gh.
   const ghVersionOf = (sha) => { try { const r = VR.knownToolOf('gh'); return (r && r.toolSha256 && r.toolSha256 === sha) ? (r.grammarVersion || null) : null; } catch { return null; } };
+  // lane vault-standing-request: THE COMMAND TOKEN of a candidate (VR.commandCandidateOf) — {program, arg, sha, psha}: the
+  // program's real path (+ its sha256 when an agent could rewrite it — programWritable), the first argument as a script's REAL
+  // path + the sha256 of its bytes (≤ 1 MiB, read through one O_NOFOLLOW fd, never a FIFO's wait), or as the literal word. A
+  // candidate whose script cannot be read, or a program whose bytes cannot be hashed, has NO token (the card asks each run).
+  const progDigest = async (p) => { let fd = null; try { fd = fs.openSync(p, 'r'); const st = fstatOf(fd); return st && st.isFile() ? await digestOf(fd, st) : null; } catch { return null; } finally { if (fd != null) { try { fs.closeSync(fd); } catch { } } } };
+  async function commandTokenOf(cand, cwd, { programWritable = false } = {}) {
+    if (!cand || typeof cand.program !== 'string' || cand.program[0] !== '/') return null;
+    let arg = cand.arg == null ? null : String(cand.arg), sha = null;
+    if (arg != null) {
+      const abs = path.resolve(String(cwd || '/'), arg);
+      let real = null; if (!DOOR.blocked(abs)) { try { real = fs.realpathSync(abs); } catch { real = null; } }   // storage_blocked's rule: a blocked path is never stat'ed
+      if (real && !DOOR.blocked(real)) { try { sha = crypto.createHash('sha256').update(readBounded(real, SCRIPT_PIN_MAX)).digest('hex'); arg = real; } catch { sha = null; } }
+      if (cand.file && !sha) return null;   // a shell / an interpreter runs a SCRIPT — one that cannot be read pins nothing
+    }
+    let psha = null;
+    if (programWritable) { psha = await progDigest(cand.program); if (!psha) return null; }
+    const ok = GM.commandListOf([{ program: cand.program, arg, sha, psha }]);
+    return ok ? ok[0] : null;
+  }
   const digestOf = (fd, st) => { const key = st ? `${st.dev}:${st.ino}:${st.size}:${st.mtimeMs}:${st.ctimeMs}` : null; if (key && digestMemo.has(key)) return digestMemo.get(key); const p = Promise.resolve(toolDigest(fd)); if (key) { if (digestMemo.size > 64) digestMemo.clear(); digestMemo.set(key, p); } return p; };
   const driftNote = (toolPath, st, sha, head, toolName) => {
     if (!sha) return;   // couldn't hash — nothing to record; the run still proceeds (the SEAL is the fence)
@@ -631,7 +662,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     // own entry (only its conversation uses it: the door's `granted` rule)
     const grantable = !!(useGrants && c.runnable && c.cls !== 'agent-entry');
     let use = null;
-    if (grantable) { try { const r = ref && VR.refFor(ref.store, ref.entry, ref.field); const counts = typeof vault.useCounts === 'function' ? vault.useCounts() : {}; use = { ...useGrants.publicFor(row.id, r ? counts[r.ref] : null), entryHosts: Array.isArray(row.hosts) ? row.hosts : [], used: r && counts[r.ref] ? { uses: counts[r.ref].uses, convs: counts[r.ref].convs } : { uses: 0, convs: 0 } }; } catch { use = { unknown: true, to: [], except: [] }; } }
+    if (grantable) { try { const r = ref && VR.refFor(ref.store, ref.entry, ref.field); const counts = typeof vault.useCounts === 'function' ? vault.useCounts() : {}; use = { ...useGrants.publicFor(row.id, r ? counts[r.ref] : null), entryHosts: Array.isArray(row.hosts) ? row.hosts : [], used: r && counts[r.ref] ? { uses: counts[r.ref].uses, convs: counts[r.ref].convs } : { uses: 0, convs: 0 }, ref: r ? r.ref : null }; } catch { use = { unknown: true, to: [], except: [] }; } }   // lane vault-standing-request: `ref` — the row's «let the agent ask» hint names the reference
     // lane vault-use-grants round 7 (MAJOR item 2): when a PRESS opened the entry (`opened[id]`), every member it did NOT
     // resume carries `paused: <when the press opened it>` — the window greys that chip and offers an un-pause (↻). An OFF entry
     // is greyed whole (the entry-level `paused` below, no per-member ↻ — the fix there is the switch); an owner-opened entry
@@ -835,7 +866,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       const memberPaused = !!(hd && onNow && pressOpened(d, id) && !memberUsable(d, id, hd.grant));   // round 7 (MAJOR item 2, invariant iii): the entry is ON by another conversation's PRESS and THIS member was never resumed — the list reads the SAME `opened` fact the judge does, so it can never say «yours to use» while the door refuses it
       const paused = memberPaused || (!onNow && !g && (refused || !!(d.suspended && d.suspended.has(id)) || !!hd));   // round 3 (A6): say PAUSED for a turned-OFF entry; round 4 (A7 + item 4): a standing grant is PAUSED until the switch is ON (never «yours to use» without it)
       const pv = (owns(ref) && row.provenance) || {};
-      out.push({ ref: r ? r.ref : null, store: ref.store, label: row.label, kind: row.kind, field: ref.field, ...(paused ? { paused: true } : {}), ...(owns(ref) ? { by: 'own', ...(pv.prov === 'minted' ? { minted: true, for: VR.forHostOf(pv.forHost) } : {}) } : g ? { by: 'grant', once: g.once, until: new Date(g.until).toISOString() } : hd ? { by: 'standing', grant: hd.grant, hosts: hd.hosts, paused, ...(hd.until ? { until: new Date(hd.until).toISOString() } : {}) } : {}) });
+      out.push({ ref: r ? r.ref : null, store: ref.store, label: row.label, kind: row.kind, field: ref.field, ...(paused ? { paused: true } : {}), ...(owns(ref) ? { by: 'own', ...(pv.prov === 'minted' ? { minted: true, for: VR.forHostOf(pv.forHost) } : {}) } : g ? { by: 'grant', once: g.once, until: new Date(g.until).toISOString() } : hd ? { by: 'standing', grant: hd.grant, hosts: hd.hosts, commands: (hd.commands || []).map((c) => VUG.commandWords(c)), source: hd.source || null, ...(hd.at ? { since: new Date(hd.at).toISOString() } : {}), paused, ...(hd.until ? { until: new Date(hd.until).toISOString() } : {}) } : {}) });   // lane vault-standing-request: the scope (hosts / commands), who wrote it, since when
     }
     return { ok: true, entries: out.filter((x) => x.ref) };
   }
@@ -856,7 +887,40 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     try { q.resolve({ outcome, askId: q.askId }); } catch { }
     return true;
   }
-  function ask({ caller, run, shape, key, exactKey = null, exactParts = null, detail, facts = null, signal, always = null }) {
+  /** A STANDING GRANT WRITTEN BY AN OWNER'S PRESS (the run card's «Always» — its hosts or, lane vault-standing-request, its
+   *  command shape — and the Allow of an agent's standing request): ONE vault-use member per entry (`principal` × `grant` =
+   *  { hosts?, commands?, until, tool?, source }) through the ONE writer, the entry's switch flipped in the SAME act
+   *  (`keepPaused`: a PRESS opens it — only this member is resumed, the grants the owner paused stay paused). ALL-OR-NOTHING
+   *  (round 7/9 item 3): every entry is judged FIRST (exists, runnable), every row and switch SNAPSHOT before the first write,
+   *  and a write that fails partway RESTORES the snapshot (rows through the raw writer — a narrowing that never resumes —,
+   *  switches + press markers, the restore PUSHED to open Vault windows as the flip was).
+   *  → { ok: true, grants } | { ok: false, judged: <named refusal>, why } (an entry gone / with its own door — nothing written)
+   *  | { ok: false, code } (a write failed — everything restored). */
+  function standOpen(ids, principal, grant, by) {
+    for (const id of ids) { const ref = VI.parseRef(id), row = ref && rowOf(ref), c = ref && classOf(ref, row); if (!row || !c || !c.runnable) return { ok: false, why: 'entry_unknown', judged: c && !c.runnable ? named('entry_has_its_own_door', { door: c.door }) : named('entry_unknown') }; }
+    const d0 = load();
+    const prior = { runnable: new Set(d0.runnable), suspended: new Set(d0.suspended), opened: d0.opened || {} };
+    const rowSnap = new Map();   // entry id → its whole prior row { to, except } (the members the act may widen or add)
+    for (const id of ids) { try { const p = useGrants.publicFor(id); rowSnap.set(id, { to: (p && p.to) || [], except: (p && p.except) || [] }); } catch { rowSnap.set(id, { to: [], except: [] }); } }
+    const touched = [], made = []; let failCode = null;
+    for (const id of ids) {
+      touched.push(id);
+      const sr = setRunnable({ id, on: true, reauthed: true, by: String(by).slice(0, 40), keepPaused: true });
+      if (!sr.ok) { failCode = sr.code; break; }
+      const w = useGrants.addMember(id, principal, grant, { by: String(by).slice(0, 40) });
+      if (!w.ok) { failCode = w.code; break; }
+      made.push(w.grant);
+      resumeMember(id, w.grant);   // round 7 (MAJOR item 2): resume ONLY this member — the owner's OTHER paused grants on this entry stay paused
+    }
+    if (failCode) {
+      for (const id of touched) { const s = rowSnap.get(id); if (s && rawSetRow) { try { rawSetRow(id, { to: s.to, except: s.except }, { by: String(by).slice(0, 40), reauthed: true }); } catch { } } }   // every row back to its prior members — a narrowing, so it never needs 验证是你; the raw writer, so the restore does not RESUME
+      try { save({ runnable: prior.runnable, suspended: prior.suspended, always: (load() || {}).always || [], opened: prior.opened }); } catch { }   // every switch + every press marker back to its prior state
+      try { vault.contentsChanged && vault.contentsChanged('switch'); } catch { }   // PUSH the restore like the flip was pushed — open Vault windows show the switch as it is on disk
+      return { ok: false, code: failCode };
+    }
+    return { ok: true, grants: made };
+  }
+  function ask({ caller, run, shape, key, exactKey = null, exactParts = null, detail, facts = null, signal, always = null, command = null }) {
     const pair = pairOf(caller.conversationId, key);
     if (byPair.has(pair) && asks.has(byPair.get(pair))) return Promise.resolve({ outcome: 'pending', askId: byPair.get(pair) });
     if (signal && signal.aborted) return Promise.resolve({ outcome: 'gone', askId: null });
@@ -866,7 +930,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       const tpls = (run.files || []).filter((f) => f.template != null && typeof f.text === 'string');   // round 17 (item 1): the template(s) the card renders IN FULL — their hash + byte count ride the «always» row for lane vault-use-grants (matching stays byte-exact via the shape key, which carries the template text)
       const templateHash = tpls.length ? crypto.createHash('sha256').update(JSON.stringify(tpls.map((f) => [f.name, f.text]))).digest('hex') : null;
       const templateBytes = tpls.length ? tpls.reduce((n, f) => n + Buffer.byteLength(f.text, 'utf8'), 0) : null;
-      const q = { askId, pair, conv: caller.conversationId, sessionKey: caller.sessionKey, who, key, exactKey, exactParts, always: always == null ? !!shape.always : !!always, detail, entries: run.refs.map((r) => r.id), head: cmdText(run.argv).slice(0, 80), facts, askedAt: now(), todoId: null, timer: null, resolve, templateHash, templateBytes, hosts: VR.destinationsOf(shape).hosts.slice(), tool: shape.name || null };   // hosts: lane vault-use-grants («Always» = a grant for the run's DESTINATIONS — round 2 BLOCKER); tool: round 3 (item 5) scopes a wildcard default to its CLI
+      const q = { askId, pair, conv: caller.conversationId, sessionKey: caller.sessionKey, who, key, exactKey, exactParts, always: always == null ? !!shape.always : !!always, detail, entries: run.refs.map((r) => r.id), head: cmdText(run.argv).slice(0, 80), facts, askedAt: now(), todoId: null, timer: null, resolve, templateHash, templateBytes, hosts: VR.destinationsOf(shape).hosts.slice(), tool: shape.name || null, command: command || null };   // hosts: lane vault-use-grants («Always» = a grant for the run's DESTINATIONS — round 2 BLOCKER); tool: round 3 (item 5) scopes a wildcard default to its CLI
       asks.set(askId, q); byPair.set(pair, askId);
       if (userTodos) {
         try {
@@ -875,7 +939,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
             text: `${who} wants to run a command with a stored secret`,
             detail,   // THE WHOLE RUN as the owner approves it — the command (references, never a value), the secrets, how, the hosts, the folder
             i18n: { text: { key: '{who} wants to run a command with a stored secret', params: { who } } },   // round 6 (MINOR item 3): the whole run detail stays a plain string (its lines are mostly dynamic — command, hosts, folder); the client localizes each line through t(), so the fixed «Always» switch line (zh + ja below) shows in the owner's language
-            action: { type: 'vault-run-ask', askId, always: q.always, tool: String(shape.name || '').slice(0, 40) },   // = ACTION_TYPE (spelled for the approval census's grep)
+            action: { type: 'vault-run-ask', askId, always: q.always || !!q.command, ...(q.command && !q.always ? { command: true } : {}), tool: String(shape.name || '').slice(0, 40) },   // = ACTION_TYPE (spelled for the approval census's grep); lane vault-standing-request: `command` — its «Always» is «Always (this command)» (a standing grant on the command shape: no host can be read)
             ...(facts ? { facts } : {}),   // lane vault-agent-own r20: the structured card (lane wake-approve-card's user-todos.js keeps `facts` and renders it with t() keys; this tree's store drops it until then, and the record keeps today's `detail`)
           });
           q.todoId = it && it.id;
@@ -900,7 +964,8 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     if (now() - q.askedAt >= VR.ASK_TTL_MS) { goLate(q); const lq = lateAsks.get(id); if (lq) return answerLate(lq, { answer: a, reauthed, by }); return { ok: false, code: 'ask_expired' }; }   // lane vault-agent-own r20b: a live card answered in the 60 s→go-late race is answered as the late card it just became
     if (!['once', 'always', 'deny'].includes(a)) return { ok: false, code: 'bad_answer' };
     if (a === 'deny') { settle(q, 'denied', 'answered', mark()); return { ok: true, outcome: 'denied' }; }   // `outcome` (the route lays the vault's facts — its `state` — over the answer)
-    if (a === 'always' && !q.always) return { ok: false, code: 'always_not_offered' };
+    if (a === 'always' && !q.always && !q.command) return { ok: false, code: 'always_not_offered' };
+    const byCommand = a === 'always' && !!q.command && !q.always;   // lane vault-standing-request: «Always (this command)» — the command shape, no end, until the owner takes it back
     if (a === 'always' && !Object.prototype.hasOwnProperty.call(VR.ALWAYS_TTLS, ttl)) return { ok: false, code: 'bad_answer' };
     if (a === 'always' && !reauthed) return { ok: false, code: 'reveal_needs_password' };
     if (vaultState() !== 'unlocked') { settle(q, 'vault_locked'); return { ok: false, code: 'vault_locked' }; }
@@ -916,38 +981,16 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       // entry of the run (added, or WIDENED to this run's hosts) through the ONE writer; the Vault window lists it, ✕ takes it back.
       // The switch flips in the SAME act (r5 item 3: a vault-use member stands only when the switch is ON), carrying `keepPaused`
       // (round 7 item 2: a PRESS opens it — only this card's member is resumed, so the grants the owner paused stay paused).
-      const ms = VR.ALWAYS_TTLS[ttl], until = ms == null ? null : now() + ms;
-      if (!q.hosts.length) return { ok: false, code: 'always_not_offered' };
-      // round 7/9 (MAJOR item 3): «Always» is ALL-OR-NOTHING across the card's entries. JUDGE every entry FIRST (exists &
-      // runnable) — a deleted / own-door entry (the two-entry card where #2 was dropped while it waited) draws its refusal and
-      // writes NOTHING. Then SNAPSHOT every member the act will touch (the whole row of each entry) BEFORE the first write.
-      // If a flip or a member write fails partway (a patched flip, too_many at the host/member cap), RESTORE the SNAPSHOT:
-      // every row back to its exact prior members (a WIDENED existing member narrowed back, not just an ADDED one revoked —
-      // r7 revoked only `added` members, so a conversation that already had a member on #1 kept the widening when #2 refused and
-      // ran to the new host by:grant though the card was DENIED), every switch back to its prior state, AND the restore is
-      // PUSHED to open Vault windows exactly as the flip was (r7's bare save() told no window, so #2 showed ON while OFF on disk).
-      for (const id of q.entries) { const ref = VI.parseRef(id), row = ref && rowOf(ref), c = ref && classOf(ref, row); if (!row || !c || !c.runnable) { settle(q, 'denied', 'entry_unknown'); return c && !c.runnable ? named('entry_has_its_own_door', { door: c.door }) : named('entry_unknown'); } }
-      const d0 = load();
-      const prior = { runnable: new Set(d0.runnable), suspended: new Set(d0.suspended), opened: d0.opened || {} };
-      const rowSnap = new Map();   // entry id → its whole prior row { to, except } (the members the act may widen or add)
-      for (const id of q.entries) { try { const p = useGrants.publicFor(id); rowSnap.set(id, { to: (p && p.to) || [], except: (p && p.except) || [] }); } catch { rowSnap.set(id, { to: [], except: [] }); } }
-      const touched = [], madeGrants = []; let failCode = null;
-      for (const id of q.entries) {
-        touched.push(id);
-        const sr = setRunnable({ id, on: true, reauthed: true, by: String(by).slice(0, 40), keepPaused: true });
-        if (!sr.ok) { failCode = sr.code; break; }
-        const w = useGrants.addMember(id, { kind: 'conversation', key: q.conv, name: q.who }, { hosts: q.hosts, until, tool: q.tool }, { by: String(by).slice(0, 40) });
-        if (!w.ok) { failCode = w.code; break; }
-        madeGrants.push(w.grant);
-        resumeMember(id, w.grant);   // round 7 (MAJOR item 2): resume ONLY this card's member — the owner's OTHER paused grants on this entry stay paused
-      }
-      if (failCode) {
-        for (const id of touched) { const s = rowSnap.get(id); if (s && rawSetRow) { try { rawSetRow(id, { to: s.to, except: s.except }, { by: String(by).slice(0, 40), reauthed: true }); } catch { } } }   // every row back to its prior members — a narrowing, so it never needs 验证是你; the raw writer, so the restore does not RESUME
-        try { save({ runnable: prior.runnable, suspended: prior.suspended, always: (load() || {}).always || [], opened: prior.opened }); } catch { }   // every switch + every press marker back to its prior state
-        try { vault.contentsChanged && vault.contentsChanged('switch'); } catch { }   // PUSH the restore like the flip was pushed — open Vault windows show the switch as it is on disk
-        settle(q, 'denied', failCode); return { ok: false, code: failCode };
-      }
-      audit('vault-run-always', { by: String(by).slice(0, 40), conv: q.conv, shapeId: shapeIdOf(q.key), ttl, until, grants: madeGrants, hosts: q.hosts });
+      const ms = VR.ALWAYS_TTLS[ttl], until = byCommand ? null : ms == null ? null : now() + ms;
+      if (!q.hosts.length && !byCommand) return { ok: false, code: 'always_not_offered' };
+      // round 7/9 (MAJOR item 3): «Always» is ALL-OR-NOTHING across the card's entries — judged first, snapshot, restore on a
+      // partial failure (standOpen). lane vault-standing-request: «Always (this command)» writes the COMMAND SHAPE (no host can
+      // be read) with no end; either way the member says it came from a card.
+      const so = standOpen(q.entries, { kind: 'conversation', key: q.conv, name: q.who }, byCommand ? { commands: [q.command], until: null, source: 'card' } : { hosts: q.hosts, until, tool: q.tool, source: 'card' }, by);
+      if (!so.ok && so.judged) { settle(q, 'denied', so.why); return so.judged; }
+      if (!so.ok) { settle(q, 'denied', so.code); return { ok: false, code: so.code }; }
+      const madeGrants = so.grants;
+      audit('vault-run-always', { by: String(by).slice(0, 40), conv: q.conv, shapeId: shapeIdOf(q.key), ttl: byCommand ? 'forever' : ttl, until, grants: madeGrants, ...(byCommand ? { command: VUG.commandWords(q.command) } : { hosts: q.hosts }) });
     } else if (a === 'always') {
       const ms = VR.ALWAYS_TTLS[ttl], until = ms == null ? null : now() + ms;
       // r6: the «always» row remembers its card's record (`todoId`) — its END is written there (a switch OFF, a lock, its time)
@@ -962,8 +1005,8 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     }
     seen.set(q.pair, { at: now(), entries: q.entries });
     // r6: an «always» record carries its grant's facts (`alwaysFor` = the ttl, `until`) — its card follows the grant's life
-    settle(q, a === 'always' ? 'always' : 'allowed', 'answered', a === 'always' ? { ...(mark() || {}), alwaysFor: ttl, until: VR.ALWAYS_TTLS[ttl] == null ? null : now() + VR.ALWAYS_TTLS[ttl] } : mark());
-    return { ok: true, outcome: a === 'always' ? 'always' : 'allowed', ...(a === 'always' ? { ttl } : {}) };
+    settle(q, a === 'always' ? 'always' : 'allowed', 'answered', a === 'always' ? { ...(mark() || {}), alwaysFor: byCommand ? 'forever' : ttl, until: byCommand || VR.ALWAYS_TTLS[ttl] == null ? null : now() + VR.ALWAYS_TTLS[ttl], ...(byCommand ? { command: true } : {}) } : mark());
+    return { ok: true, outcome: a === 'always' ? 'always' : 'allowed', ...(a === 'always' ? { ttl: byCommand ? 'forever' : ttl } : {}), ...(byCommand ? { command: VUG.commandWords(q.command) } : {}) };
   }
   // THE ITEM AND THE ASK ARE ONE STATE: the item leaving 'open' by another door settles the ask refused; a reopen of an ask that is over goes back to done
   if (userTodos && typeof userTodos.onStatus === 'function') {
@@ -1118,7 +1161,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
    * `purpose` = one line. → { ok: true, askId } (ONE For-you ask filed — nothing waits on it) | { ok: true, already: 'open' |
    * 'granted', … } | a named refusal.
    */
-  function request({ caller = {}, entry = '', purpose = '' } = {}) {
+  function request({ caller = {}, entry = '', purpose = '', standing = false, hosts = null, command = null, cwd = null } = {}) {
     if (caller.job) return named('job_no_use');
     const scope = scopeOf(caller);
     if (!scope || !caller.conversationId) return named('unauthorized');
@@ -1141,6 +1184,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     const sc = VR.agentScopeOf(ref);
     if (sc && VR.ownsAgentEntry(ref, caller)) { const pv = row.provenance || {}; return { ok: true, already: 'own', ref: ref.ref, ...(pv.prov === 'minted' ? { minted: true, for: VR.forHostOf(pv.forHost) } : {}) }; }   // lane vault-agent-own: what it stored itself is its own to use — nothing to ask (round 2: a MINTED one still asks off its host)
     if (sc) return named('use_not_granted', { ref: ref.ref });   // another conversation's own entry is its own
+    if (standing === true) return requestStanding({ caller, scope, ref, row, said, hosts, command, cwd });   // lane vault-standing-request
     const pair = pairOf(scope, ref.id);
     const g = grantOf(scope, ref.id);
     if (g) return { ok: true, already: 'granted', ref: ref.ref, once: g.once, until: g.until };
@@ -1179,6 +1223,90 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     audit('vault-request', { by: { kind: 'agent', key: caller.sessionKey || null, name: caller.name || null }, conv: scope, entry: ref.ref, purpose: said, askId });
     return { ok: true, askId, ref: ref.ref, todoId: q.todoId || null };   // lane chat-needs-you-card: the item the agent's line names
   }
+  /** lane vault-standing-request (the owner 2026-10-30: 「能不能让 agent 自行申请权限 … 我的意思是常驻的，跟我配"谁可以用"等效的权限」):
+   *  `request <vault://…> --standing --for "<why>" [--host h,…] [--command "<program> <script>"]` — ONE For-you ask for the
+   *  STANDING grant the owner would set on the entry's row («谁可以用…»): this conversation × the hosts (the destinations its
+   *  commands connect to) and/or the COMMAND SHAPE (a program whose destination VibeSpace cannot read — the token the run door
+   *  reads: the program's real path, the script's real path + the sha256 of its bytes). The owner's Allow (验证是你) writes the
+   *  vault-use member (source 'request'), no end — a lock does not end it (the lock refuses the run); ✕ on the row takes it
+   *  back. Deny quiets the same ask 10 minutes; the same (conversation, entry, scope) is asked once while open.
+   *  → Promise<{ ok, askId } | { ok, already: 'standing' } | a named refusal>. */
+  const splitCommand = (s) => { const out = []; let cur = '', q = null, any = false; for (const ch of String(s)) { if (q) { if (ch === q) q = null; else cur += ch; continue; } if (ch === '"' || ch === "'") { q = ch; any = true; continue; } if (ch === '\\') return null; if (/\s/.test(ch)) { if (cur || any) out.push(cur); cur = ''; any = false; continue; } cur += ch; } if (q) return null; if (cur || any) out.push(cur); return out; };
+  const standingWords = (r) => [
+    { key: 'Secret: {label} — {ref}', params: { label: r.label, ref: r.ref } },
+    { key: 'What for, in the agent\'s words: {purpose}', params: { purpose: r.purpose } },
+    ...(r.hosts.length ? [{ key: 'For commands to {hosts} — the hosts a command may connect to.', params: { hosts: r.hosts.join(', ') } }] : []),
+    ...(r.command ? [{ key: 'For the command {command} — it runs {program} {arg}. VibeSpace cannot see where it sends the secret; Allow means you trust this command itself. A changed program or script asks again.', params: { command: r.commandWords, program: r.command.program, arg: r.command.arg == null ? '' : r.command.arg } }] : []),
+    { key: 'Until you revoke it — the same as «Who may use it…» on its row in ⚙ System ▸ Vault…, which lists it and takes it back. A lock does not end it (nothing runs while it is locked). Allow asks for the second password.' },
+  ];
+  async function requestStanding({ caller, scope, ref, row, said, hosts, command, cwd }) {
+    if (!useGrants) return named('failed');
+    if (hosts != null && (!Array.isArray(hosts) || hosts.length > GM.HOSTS_MAX || hosts.some((h) => typeof h !== 'string'))) return named('standing_bad_host');
+    const hl = (hosts || []).map((h) => h.trim()).filter(Boolean);
+    const gh = hl.length ? GM.hostListOf(hl) : [];
+    if (gh === null) return named('standing_bad_host');
+    let token = null, typed = null;
+    if (command != null && String(command).trim()) {
+      const words = String(command).length > 600 ? null : splitCommand(String(command).trim());
+      if (!words || !words.length || words.length > 2 || words.some((w) => !w)) return named('command_unreadable');
+      const place = fenced(String(cwd || caller.cwd || ''), caller.cwd);
+      if (!place) return named('cwd_refused');
+      const resolved = resolveTool(words[0], place, agentEnv());
+      if (!resolved) return VR.refusedTool(words[0]) || named('tool_not_found', { tool: VR.toolNameOf(words[0]) });
+      const refusedT = VR.refusedTool(words[0], { resolved });
+      if (refusedT) return refusedT;   // a tool the run door refuses is refused here by the same name
+      const name = VR.toolNameOf(words[0], resolved), kind = VR.toolKindOf(name);
+      if (kind === 'tool' && VR.knownToolOf(name)) return named('command_has_hosts');   // its destination is read from the command — a hosts grant
+      const cand = { program: resolved, arg: words.length > 1 ? words[1] : null, file: kind !== 'tool', kind };
+      if (cand.file && (cand.arg == null || cand.arg[0] === '-')) return named('command_unreadable');
+      token = await commandTokenOf(cand, place, { programWritable: !(isRootOwned(resolved) && isRootOwned(path.dirname(resolved))) });   // the run door's own programWritable rule — the same token a run reads
+      if (!token) return named('command_unreadable');
+      typed = words.map(argWord).join(' ');
+      if (vaultState() !== 'unlocked') return named('vault_locked');   // re-read after the read
+    }
+    if (!gh.length && !token) return named('scope_required');
+    const scopeKey = JSON.stringify([gh.slice().sort(), token ? GM.commandKeyOf(token) : null]);
+    const pair = `${pairOf(scope, ref.id)}\nstanding\n${scopeKey}`;
+    // already held: a USABLE member of this conversation covers every named host and the command — nothing to ask
+    try {
+      const uf = useFacts(caller) || {};
+      const d0 = load();
+      const h = useGrants.heldBy({ ...uf, conversationKeys: [...new Set([caller.conversationId, ...(uf.conversationKeys || [])].filter(Boolean).map(String))] }).find((x) => x.id === ref.id);
+      if (h && d0 && memberUsable(d0, ref.id, h.grant) && gh.every((x) => (h.hosts || []).includes(x)) && (!token || (h.commands || []).some((c) => GM.commandKeyOf(c) === GM.commandKeyOf(token)))) return { ok: true, already: 'standing', ref: ref.ref, grant: h.grant };
+    } catch { /* unreadable: ask */ }
+    const up = reqByPair.get(pair);
+    if (up && requests.has(up)) return named('request_pending', { ref: ref.ref });
+    const qu = reqQuiet.get(pair);
+    if (qu && qu > now()) return named('request_quiet', { ref: ref.ref, until: new Date(qu).toISOString() });
+    const askers = new Set([...requests.values()].map((x) => x.scope));
+    if ([...requests.values()].filter((x) => x.scope === scope).length >= REQUESTS_PER_CALLER) return named('too_many_requests');
+    if (askers.size >= REQUEST_CALLERS_MAX && !askers.has(scope)) return named('too_many_askers');   // the same two caps as a plain request (B-4934: callers, never requests)
+    const askId = randomBytes(16).toString('hex');
+    const who = String(VB.actorName(caller.name, 'a conversation')).slice(0, 80);
+    const q = { askId, pair, scope, conv: caller.conversationId, sessionKey: caller.sessionKey || null, who, ref: ref.ref, id: ref.id, label: String(row.label || ref.label).slice(0, 120), purpose: said, detail: '', askedAt: now(), todoId: null, standing: true, hosts: gh, command: token, commandWords: typed };
+    const lines = standingWords(q);
+    q.detail = lines.map(fill).join('\n');
+    if (q.detail.length > DETAIL_MAX) return named('card_too_long');
+    if (userTodos) {
+      try {
+        const it = userTodos.add(caller.sessionKey || 'vault', {
+          origin: 'vault', urgency: 'high', kind: 'action', by: 'agent', sessionName: who,   // NO expiresAt: it waits for the owner (a lock withdraws it)
+          text: `${who} asks for a standing grant on a stored secret`,
+          detail: q.detail,
+          i18n: { text: { key: '{who} asks for a standing grant on a stored secret', params: { who } }, detail: lines },
+          action: { type: 'vault-grant-ask', askId, standing: true },   // = REQUEST_TYPE; `standing`: its answers are Allow (standing) / Deny
+        });
+        q.todoId = it && it.id;
+      } catch (e) {
+        log(`${who}: the standing request could not be filed in For you: ${e.message}`);
+        return named('ask_unfiled');
+      }
+    }
+    requests.set(askId, q); reqByPair.set(pair, askId);
+    askingLine();
+    audit('vault-request', { by: { kind: 'agent', key: caller.sessionKey || null, name: caller.name || null }, conv: scope, entry: ref.ref, purpose: said, askId, standing: true, ...(gh.length ? { hosts: gh } : {}), ...(typed ? { command: typed } : {}) });
+    return { ok: true, askId, ref: ref.ref, todoId: q.todoId || null, standing: true, ...(gh.length ? { hosts: gh } : {}), ...(typed ? { command: typed } : {}) };
+  }
   /** A PERSON's answer to a request (src/routes/vault.js: people only): once | 8h | deny → the grant row. A grant opens a
    *  closed entry for a conversation — the per-row switch's job — so it needs the switch's 验证是你 (`reauthed`: this page's
    *  window, the second password again; the review: a click alone is a header a local process can forge on a hub with no
@@ -1188,6 +1316,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     const q = requests.get(id);
     if (!q) return { ok: false, code: settled.has(id) ? 'ask_settled' : 'ask_unknown' };
     if (!GRANT_ANSWERS.includes(a)) return { ok: false, code: 'bad_grant_answer' };
+    if (a !== 'deny' && !!q.standing !== (a === 'standing')) return { ok: false, code: 'bad_grant_answer' };   // lane vault-standing-request: a standing request is answered Allow (standing) / Deny; a plain one once / 8h / Deny
     const said = { by: String(by).slice(0, 40), conv: q.scope, entry: q.ref, askId: q.askId };
     const mark = () => (person ? { decidedBy: 'person', decidedAt: now() } : null);   // r4: the person verdict's mark (the route's `person`)
     if (a === 'deny') { settleRequest(q, 'denied', 'answered', mark()); audit('vault-grant', { ...said, answer: 'deny' }); return { ok: true, outcome: 'denied' }; }
@@ -1203,6 +1332,16 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     const ref = VR.parseRef(q.ref), row = ref && rowOf(ref);
     if (!row) { settleRequest(q, 'denied', 'entry gone'); return { ok: false, code: 'entry_unknown' }; }
     if (!classOf(ref, row).runnable) { settleRequest(q, 'denied', 'its own door'); return { ok: false, code: 'entry_has_its_own_door' }; }
+    if (q.standing) {
+      // lane vault-standing-request: THE OWNER'S ROW — the very vault-use member «谁可以用…» writes (this conversation × the hosts /
+      // the command shape, no end, source 'request'), the switch opened in the same act (a press: only this member resumed)
+      const so = standOpen([q.id], { kind: 'conversation', key: q.conv, name: q.who }, { hosts: q.hosts, commands: q.command ? [q.command] : null, until: null, source: 'request' }, said.by);
+      if (!so.ok && so.judged) { settleRequest(q, 'denied', so.why); return so.judged; }
+      if (!so.ok) { settleRequest(q, 'denied', so.code); return { ok: false, code: so.code }; }
+      audit('vault-grant', { ...said, answer: 'standing', grants: so.grants, ...(q.hosts.length ? { hosts: q.hosts } : {}), ...(q.commandWords ? { command: q.commandWords } : {}) });
+      settleRequest(q, 'granted', 'answered', { ...(mark() || {}), grantedFor: 'standing', until: null });
+      return { ok: true, outcome: 'granted', grantedFor: 'standing', grant: so.grants[0] || null };
+    }
     const t = now(), until = t + GRANT_MS;
     const prev = grants.get(q.pair);
     if (prev) grantEnded(prev, 'replaced', t);
@@ -1233,6 +1372,17 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     audit('vault-grant', { by: String(by).slice(0, 40), conv: String(scope), entry: r.ref, answer: 'pasted', hosts: gh, requestId, until });
     return { ok: true, until, hours: GRANT_MS / 3600e3, hosts: gh };
   }
+  /** lane vault-standing-request: the standing (vault-use) grants THIS caller holds, as `uses` / `list` say them. */
+  function standingOf(caller) {
+    if (!useGrants || !caller || !caller.conversationId) return [];
+    try {
+      const uf = useFacts(caller) || {}, d = load();
+      const refOfId = (id) => { const r = VI.parseRef(id); const x = r && VR.refFor(r.store, r.entry, r.field); return x ? x.ref : null; };
+      return useGrants.heldBy({ ...uf, conversationKeys: [...new Set([caller.conversationId, ...(uf.conversationKeys || [])].filter(Boolean).map(String))] })
+        .map((h) => ({ entry: refOfId(h.id), grant: h.grant, hosts: h.hosts || [], commands: (h.commands || []).map((c) => VUG.commandWords(c)), source: h.source || null, since: h.at ? new Date(h.at).toISOString() : null, until: h.until ? new Date(h.until).toISOString() : null, paused: !(d && memberUsable(d, h.id, h.grant)) }))
+        .filter((x) => x.entry);
+    } catch { return []; }
+  }
   /** `vibespace-vault uses` (design D4): THIS conversation's grants, its open requests and its own use lines (the engine reads
    *  the audit file's tail) — references, purposes, times, outcomes, receipts; never a value, never another conversation's. */
   function usesFor(caller = {}) {
@@ -1246,7 +1396,8 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       ok: true,
       state: vaultState(),
       grants: mine.map((g) => ({ entry: refOfId(g.entries[0]), purpose: g.purpose, once: g.once, until: new Date(g.until).toISOString(), at: new Date(g.at).toISOString() })),
-      requests: [...requests.values()].filter((q) => q.scope === scope).map((q) => ({ entry: q.ref, purpose: q.purpose, at: new Date(q.askedAt).toISOString() })),
+      requests: [...requests.values()].filter((q) => q.scope === scope).map((q) => ({ entry: q.ref, purpose: q.purpose, at: new Date(q.askedAt).toISOString(), ...(q.standing ? { standing: true, hosts: q.hosts, ...(q.commandWords ? { command: q.commandWords } : {}) } : {}) })),
+      standing: standingOf(caller),   // lane vault-standing-request: the STANDING grants this conversation holds — «standing · <scope> · since <when>»
       uses: typeof vault.usesOf === 'function' ? vault.usesOf(scope) : [],
     };
   }
@@ -1315,10 +1466,22 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     L.push(`Folder: ${cwd}`);
     for (const f of run.files) if (f.template != null) L.push(`Template ${f.name} (@${f.template}):`, String(f.text).replace(/\s+$/, ''));   // round 18 (item 2): a template is shown IN FULL \u2014 an over-bound one is refused card_too_long before this card is built (never a note that hides it while the run proceeds)
     L.push(`This shape = ${shape.kind === 'tool' ? 'the tool + its flags + the hosts + the secrets; positional arguments may change' : 'this whole command line'}.`);
-    if (!shape.always) L.push(`«Always» is not offered: ${shape.configReads ? `the template's \`${shape.configReads}\` directive reads a file, routes to a host or redirects in a way this card cannot vouch for \u2014 the agent can change it after you approve` : (NO_ALWAYS[shape.noAlways] || shape.noAlways)}.`);   // round 18/19 (item 3/4): a shown config template whose directive nests a file, routes off the URL's host, redirects or expands a {{var}} at run time names that directive, so the owner sees why a template the card DID show still cannot be «always»
+    if (!shape.always && !(asks && asks.command)) L.push(`«Always» is not offered: ${shape.configReads ? `the template's \`${shape.configReads}\` directive reads a file, routes to a host or redirects in a way this card cannot vouch for \u2014 the agent can change it after you approve` : (NO_ALWAYS[shape.noAlways] || shape.noAlways)}.`);   // round 18/19 (item 3/4): a shown config template whose directive nests a file, routes off the URL's host, redirects or expands a {{var}} at run time names that directive, so the owner sees why a template the card DID show still cannot be «always»
     return L.join('\n').trim();
   }
 
+  // lane vault-standing-request: THE RECIPE the agent is told when a card asked for its run — ask ONCE for the standing grant
+  // the owner would set on the entry's row: `--command "<program> <script>"` where no host can be read (the token), `--host`
+  // where the hosts are read. Its words ride a card refusal nobody answered in time and a run the owner let through once.
+  const argWord = (a) => (/^[\w@%+=:,./-]+$/.test(String(a)) ? String(a) : !String(a).includes("'") ? `'${a}'` : JSON.stringify(String(a)));
+  function standingRecipeOf(spec, shape, cand, token, dest) {
+    const refs = (spec.refs || []).map((r) => r.ref), ref = refs.length === 1 ? refs[0] : '<vault://…>';
+    const each = refs.length > 1 ? ` — one request per secret (${refs.join(', ')})` : '';
+    if (cand && token) { const typed = [spec.argv[0], ...(cand.arg != null ? [cand.arg] : [])].map(argWord).join(' '); return { kind: 'command', command: typed, words: `the user is asked on a card for each run of this command; ask them ONCE for a standing grant on it instead (no card for it again until they take it back): vibespace-vault request ${ref} --standing --command ${JSON.stringify(typed)} --for "<what it is for>"${each}` }; }
+    if (shape.always && dest && dest.hosts.length) return { kind: 'hosts', hosts: dest.hosts.slice(), words: `to stop the card for commands to these hosts, ask the user ONCE for a standing grant: vibespace-vault request ${ref} --standing --host ${dest.hosts.join(',')} --for "<what it is for>"${each}` };
+    return null;
+  }
+  const withRecipe = (r, recipe) => (recipe && r && r.ok === false ? { ...r, words: `${r.words || r.error || r.code} — ${recipe.words}`, standing: { kind: recipe.kind, ...(recipe.command ? { command: recipe.command } : { hosts: recipe.hosts }) } } : r);
   const forWords = (h) => (h ? ` for ${h}` : ' with no host named');
   // ── THE RUN ──
   const callerRuns = (conv) => [...runs].filter((r) => r.conv === conv).length;
@@ -1449,6 +1612,13 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     const foreign = spec.refs.find((r) => VR.agentScopeOf(r) && !VR.ownsAgentEntry(r, caller));
     if (foreign) { note('use_not_granted', { ...head, ref: foreign.ref }); return named('use_not_granted', { ref: foreign.ref }); }
     const dest = VR.destinationsOf(shape);   // lane vault-use-grants round 2 (BLOCKER): the grant covers the run's DESTINATIONS, judged by the reader the card uses
+    // lane vault-standing-request: where NO host can be read (an interpreter + its script, a program outside the tool table), the
+    // run's COMMAND TOKEN — what a standing grant on «this command» names (the program's real path, the script's real path + the
+    // sha256 of its bytes). The vault state and the caller are re-read after the read (a lock / a gone caller meanwhile).
+    const cmdCand = useGrants ? VR.commandCandidateOf(spec, shape) : null;
+    const cmdToken = cmdCand ? await commandTokenOf(cmdCand, place, { programWritable: !!spec.programWritable }) : null;
+    if (cmdCand && signal && signal.aborted) { note('caller_gone', head); return named('caller_gone'); }
+    const recipe = standingRecipeOf(spec, shape, cmdCand, cmdToken, dest);   // the agent is told the road, never only the refusal
     // lane vault-use-grants: THE STANDING APPROVAL of each entry for THIS caller and THIS run's hosts (the grant door's PURE verdict —
     // a Task Group's members read now); a member that does not cover the run is named on the card
     const standing = new Map();
@@ -1456,7 +1626,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       let uf = null;
       try { uf = useFacts(caller) || {}; } catch { uf = { groupsUnreadable: true }; }
       const facts = { ...uf, conversationKeys: [...new Set([caller.conversationId, ...(Array.isArray(uf.conversationKeys) ? uf.conversationKeys : [])].filter(Boolean).map(String))], groupIds: Array.isArray(uf.groupIds) ? uf.groupIds : [], groupsUnreadable: !!uf.groupsUnreadable };
-      for (const r of spec.refs) { const row = rowOf(r); if (row) { try { standing.set(r.id, useGrants.verdictFor(r.id, facts, { hosts: dest.hosts, destinationKnown: !!shape.destKnown, entryHosts: row.hosts || [], tool: shape.name })); } catch { /* unreadable: no standing approval */ } } }   // round 3 (item 5): `tool` scopes a wildcard default to its CLI; round 9 (seam ruling C): a standing grant covers the run when the reader READ every destination (`destKnown`), NOT when «always» would be offered (`shape.always`) — the two are decoupled so a keyed routing flag whose host is read is still coverable by a grant naming it
+      for (const r of spec.refs) { const row = rowOf(r); if (row) { try { standing.set(r.id, useGrants.verdictFor(r.id, facts, { hosts: dest.hosts, destinationKnown: !!shape.destKnown, entryHosts: row.hosts || [], tool: shape.name, command: cmdToken })); } catch { /* unreadable: no standing approval */ } } }   // round 3 (item 5): `tool` scopes a wildcard default to its CLI; round 9 (seam ruling C): a standing grant covers the run when the reader READ every destination (`destKnown`), NOT when «always» would be offered (`shape.always`) — the two are decoupled so a keyed routing flag whose host is read is still coverable by a grant naming it
     }
     // THE FACTS the verdict reads: each entry's row (exists), its switch (open), its class (the engine's check) and its length
     const d = load();
@@ -1479,7 +1649,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     }
     // lane vault-use-grants round 5 (item 3): when «Always» is offered on an entry that is NOT already switched on, the card
     // says pressing «Always» (with 验证是你) ALSO opens it for agent runs — the switch flips in the same act (option b).
-    const switchNote = useGrants && shape.always && entries.some((e) => e.exists && !e.on) ? ALWAYS_SWITCH_LINE : null;   // int361: joined to the card where it is drawn (vault-agent-own r19) —   // round 5 (item 3) + round 6 (MINOR item 3): ONE key, localized by the client through t() (zh + ja); round 6 (MAJOR item 4): it opens the entry for THIS conversation — the grants the owner paused stay paused
+    const switchNote = useGrants && (shape.always || cmdToken) && entries.some((e) => e.exists && !e.on) ? ALWAYS_SWITCH_LINE : null;   // int361: joined to the card where it is drawn (vault-agent-own r19) —   // round 5 (item 3) + round 6 (MINOR item 3): ONE key, localized by the client through t() (zh + ja); round 6 (MAJOR item 4): it opens the entry for THIS conversation — the grants the owner paused stay paused
     const pair = pairOf(caller.conversationId, key);
     const stored = d ? d.always.find((a) => a.conv === caller.conversationId && a.key === key) : null;
     const short = shortAlways.get(pair);
@@ -1594,16 +1764,16 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
         // round 18/19 (item 2 + item 5): a template over the card render bound ⇒ card_too_long — but ONLY here, where a card is DRAWN (an owner entry needing approval). An own-entry run or a remembered pass returned verdict.ok above and never reached this bound (base ran an own 7 KB body by:own; daade1a7 refused it with words about an approval that never happens on that road).
         if (shape.cardTooLong) { const c = shape.cardTooLong; return named('card_too_long', { template: c.name, words: `this run needs your approval, and the template ${c.name} (@${c.template}) is ${c.bytes} bytes — longer than ${VR.TEMPLATE_CARD_MAX} bytes, so the card cannot show it in full and you would be approving a run you cannot read; shorten the template (or pass its bytes a smaller way) — nothing ran` }); }
         if (callerRuns(caller.conversationId) >= RUNS_PER_CALLER || runs.size >= RUNS_MAX) return named('too_many_runs');
-        const shown = [detailOf(spec, shape, place, { facts: entries, why: verdict.why || [], away: verdict.away || [] }), ...VUG.standingLines([...standing.values()], { always: !!shape.always }), ...(useGrants && shape.always ? [`«Always» = a standing approval: this conversation may use ${spec.refs.length > 1 ? 'these secrets' : 'this secret'} for ${dest.hosts.join(', ')} without asking (the Vault window lists it and takes it back).`] : []), ...(switchNote ? [switchNote] : []), ...policyNotes].join('\n');   // lane vault-agent-own: + who stored each entry, why it asks   // lane vault-use-grants: + the standing approvals, the «Always» line and the policy judge's word (int361: only where a card is drawn)
+        const shown = [detailOf(spec, shape, place, { facts: entries, why: verdict.why || [], away: verdict.away || [], command: !!cmdToken }), ...VUG.standingLines([...standing.values()], { always: !!shape.always }), ...(cmdToken && !shape.always ? [COMMAND_ALWAYS_LINE] : []), ...(useGrants && shape.always ? [`«Always» = a standing approval: this conversation may use ${spec.refs.length > 1 ? 'these secrets' : 'this secret'} for ${dest.hosts.join(', ')} without asking (the Vault window lists it and takes it back).`] : []), ...(switchNote ? [switchNote] : []), ...policyNotes].join('\n');   // lane vault-agent-own: + who stored each entry, why it asks   // lane vault-use-grants: + the standing approvals, the «Always» line and the policy judge's word (int361: only where a card is drawn)
         if (shown.length > DETAIL_MAX) return named('card_too_long');
         // lane vault-agent-own r20 (the owner «这个卡片的可读性很差»): the SAME run as STRUCTURED FACTS (codes, never prose) the client renders in the viewer's language — rides the ask record beside `detail`; `detail` stays byte-unchanged for older clients
-        const facts = VR.cardFactsOf(spec, shape, place, { who: String(caller.name || caller.sessionKey || caller.conversationId), home, cmd: cmdText(spec.argv), entries: nameById, refsInfo: entries, away: verdict.away || [], notOwn: (verdict.why || []).includes('not-own') });   // round 23: who is bounded IN the model (a marker, never a lone surrogate); cmd is the RAW command (a $VAULT ref is a placeholder — the value masker finds nothing to mask; the agent's own `-d password=…` the child receives is shown, where the name belt used to hide it); refsInfo/away/notOwn carry the reason CODES
+        const facts = VR.cardFactsOf(spec, shape, place, { who: String(caller.name || caller.sessionKey || caller.conversationId), home, cmd: cmdText(spec.argv), entries: nameById, refsInfo: entries, away: verdict.away || [], notOwn: (verdict.why || []).includes('not-own'), ...(cmdToken && !shape.always ? { command: VUG.commandWords(cmdToken) } : {}) });   // round 23: who is bounded IN the model (a marker, never a lone surrogate); cmd is the RAW command (a $VAULT ref is a placeholder — the value masker finds nothing to mask; the agent's own `-d password=…` the child receives is shown, where the name belt used to hide it); refsInfo/away/notOwn carry the reason CODES
         if (whyAgain) facts.whyAgain = whyAgain;   // round 25 (minor 6b): the ONE dimension this near-identical rerun differs from the last late-allowed command — a CODE (VR.WHY_AGAIN) the client renders («与上次放行的命令不同：参数顺序 / 多了一个空格 / 文件夹不同 / 环境变量 X 变了»)
-        const a = await ask({ caller, run: spec, shape, key, exactKey: ek, exactParts: exactPartsOf(spec, place), detail: shown, facts, signal, always: verdict.offers.includes('always') });
+        const a = await ask({ caller, run: spec, shape, key, exactKey: ek, exactParts: exactPartsOf(spec, place), detail: shown, facts, signal, always: verdict.offers.includes('always'), command: cmdToken && !shape.always ? cmdToken : null });
         asked = a.outcome; askId = a.askId;
-        if (asked === 'pending') { note('ask_pending', { ...head, askId }); return named('ask_pending'); }
+        if (asked === 'pending') { note('ask_pending', { ...head, askId }); return withRecipe(named('ask_pending'), recipe); }
         const outcome = { gone: 'caller_gone', unfiled: 'ask_unfiled', denied: 'ask_denied', expired: 'ask_expired', changed: 'ask_changed', vault_locked: 'vault_locked' }[asked];
-        if (outcome) { note(outcome, { ...head, askId }); return named(outcome); }
+        if (outcome) { note(outcome, { ...head, askId }); return ['ask_expired', 'ask_unfiled'].includes(outcome) ? withRecipe(named(outcome), recipe) : named(outcome); }   // lane vault-standing-request: a card nobody answered in time names the standing road
         // allowed / always — the verdict AGAIN over the facts as they stand NOW (a lock, a switch closed while the card waited)
         const answered = (verdict.away || []).map((x) => ({ id: x.id, host: x.pass }));   // THIS 允许 — for this run, whatever is kept
         for (const x of verdict.away || []) if (x.keep) hostPasses.set(`${scope}\n${x.id}\n${x.pass}`, { scope, id: x.id, host: x.pass, at: now() });   // lane vault-agent-own: ONCE per host (or, on a local instance, where the destination cannot be told, per command shape) — the 允许 is that pass for that entry; a cluster keeps no shape pass (round 2)
@@ -1632,7 +1802,8 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       if (sealedTool && toolFd != null && !toolSealed(spec.tool, toolFd)) { note('tool_not_sealed', { ...head, tool: toolName, why: 'ownership changed between the hash and the spawn' }); return restoreOnce(named('tool_not_sealed', { tool: toolName, words: "the tool's ownership changed between the hub's check and the run — a root-owned program became writable before it could start, so it was not run; nothing ran" })); }   // round 15: tool_changed's one remaining case — a sealed tool whose fstat ownership moved before the exec; round 16 (MINOR): a refusal AFTER the spend restores the once-grant (nothing ran), and the words say THIS path's cause
       fdHandedOff = true;
       const out = spawnRun({ caller, spec, shape, head, verdict, askId, place, base, signal, t0, note, receipt: runReceipt, toolFd, closeTool, toolName });
-      return out && typeof out.then === 'function' ? out.then(restoreOnce) : restoreOnce(out);
+      const nextOf = (r) => (r && r.ok && recipe && (verdict.by === 'once' || verdict.by === 'late') ? { ...r, next: recipe.words } : r);   // lane vault-standing-request: a run the owner let through ONCE says the standing road
+      return out && typeof out.then === 'function' ? out.then(restoreOnce).then(nextOf) : nextOf(restoreOnce(out));
     } finally {
       if (!fdHandedOff) closeTool();   // round 14: an early return before the hand-off releases the open tool fd
     }

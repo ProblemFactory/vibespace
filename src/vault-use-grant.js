@@ -8,11 +8,20 @@
  *   · `hosts` — the destinations the use may reach: host names / addresses, or `@entry` («the hosts the entry was stored
  *     for»: an owner-filled request's named hosts — resolved at USE time, so a re-labelled entry is read as it is now);
  *     NEVER «any host» (no wildcard is a value of the field) — a use whose destination cannot be told is never admitted;
- *   · `until` — an optional end (ms); past it the entry admits nothing (the card asks again, the window says «expired»).
+ *   · `until` — an optional end (ms); past it the entry admits nothing (the card asks again, the window says «expired»);
+ *   · `commands` (lane vault-standing-request, the owner 2026-10-30 「能不能让 agent 自行申请权限 … 常驻的，跟我配"谁可以用"等效的权限」)
+ *     — the COMMAND SHAPES the member may run where the hub cannot read the destination (an interpreter and its script, a
+ *     program outside the tool table): `{program, arg, sha, psha}` (src/grant-model.js commandListOf) — the program's real path,
+ *     its first argument (the script's real path + the sha256 of its bytes), the program's own sha256 when an agent could
+ *     rewrite it. The owner trusts THE COMMAND ITSELF: a run is admitted only by the EXACT token (another program, another
+ *     script, a script whose bytes changed ⇒ another shape ⇒ the card). A member carries hosts, commands, or both — never none;
+ *   · `source` — who wrote the member last: 'owner' (the row's «谁可以用…»), 'request' (an agent's standing request the owner
+ *     allowed), 'card' (a run card's «Always»); `at` its time. A standing grant is the OWNER's row whoever asked for it.
  *
  * THE VERDICT `useVerdict(rows, facts, run)` — membership is the MODEL's (`GM.admits`: 给谁 / 除了, a Task Group's members
  * read at use time, every refusal by name); this file only reads the admitting entries' own settings:
- *   → { ok: true, id, via, entry, hosts }  (the MOST SPECIFIC live entry whose hosts cover every host of the run)
+ *   → { ok: true, id, via, entry, hosts, scope }  (the MOST SPECIFIC live entry whose hosts cover every host of the run —
+ *     scope 'hosts' — or whose `commands` hold the run's exact command token — scope 'command')
  *   | { ok: false, code, member?, missing? } — admits' codes (not_granted · excepted · groups_unreadable · unknown_shape ·
  *     fork_pending), or `expired` (every admitting entry is past its end), `destination_unknown` (the run's shape cannot
  *     tell where the value goes — a shell, an interpreter, a config file, a tool naming no host, a program an agent could
@@ -34,6 +43,7 @@ const GM = require('./grant-model.js');
 const DOOR = 'vault-use';
 const ENTRY_HOSTS = '@entry';
 const ID_RE = /^vg-[0-9a-f]{8}$/;
+const SOURCES = Object.freeze(['owner', 'request', 'card']);
 const CODES = Object.freeze(['not_granted', 'excepted', 'groups_unreadable', 'unknown_shape', 'fork_pending', 'expired', 'destination_unknown', 'outside_hosts']);
 
 /** FNV-1a (32 bit) over `resource` NUL `principalKey` → `vg-xxxxxxxx`. */
@@ -88,10 +98,13 @@ const missingHosts = (entry, run, runTool = null, entryHosts = []) => {
   return runHostsOf(run).filter((h) => !(list || []).some((g) => coversForTool(g, h, member ? toolOfHost(member, g) : null, runTool)));
 };
 const live = (e, now) => !(e && Number(e.until) > 0 && Number(e.until) <= now);
-const memberOf = (hit, entryHosts) => (hit ? { id: grantIdOf(hit.row.resource, GM.principalKey(hit.entry)), via: hit.entry.kind, principal: GM.principalKey(hit.entry), hosts: effectiveHosts(hit.entry.hosts, entryHosts), declared: (hit.entry.hosts || []).slice(), tool: hit.entry.tool || null, toolFor: hit.entry.toolFor || null, until: Number(hit.entry.until) > 0 ? Number(hit.entry.until) : null } : null);
+/** lane vault-standing-request: does member `e` hold the run's EXACT command token? (null token ⇒ never) */
+const commandHeld = (e, command) => { if (!command || !e || !Array.isArray(e.commands)) return false; const c = GM.commandListOf([command]); if (!c) return false; const k = GM.commandKeyOf(c[0]); return e.commands.some((x) => { const n = GM.commandListOf([x]); return !!n && GM.commandKeyOf(n[0]) === k; }); };
+const memberOf = (hit, entryHosts) => (hit ? { id: grantIdOf(hit.row.resource, GM.principalKey(hit.entry)), via: hit.entry.kind, principal: GM.principalKey(hit.entry), hosts: effectiveHosts(hit.entry.hosts, entryHosts), declared: (hit.entry.hosts || []).slice(), commands: Array.isArray(hit.entry.commands) ? hit.entry.commands.slice() : [], source: hit.entry.source || null, at: Number(hit.entry.at) > 0 ? Number(hit.entry.at) : null, tool: hit.entry.tool || null, toolFor: hit.entry.toolFor || null, until: Number(hit.entry.until) > 0 ? Number(hit.entry.until) : null } : null);
 
-/** THE VERDICT of one use of one entry (see the head). `run` = { hosts, destinationKnown, entryHosts, tool, now }. */
-function useVerdict(rows, facts = {}, { hosts = [], destinationKnown = false, entryHosts = [], tool = null, now = 0 } = {}) {
+/** THE VERDICT of one use of one entry (see the head). `run` = { hosts, destinationKnown, entryHosts, tool, command, now } —
+ *  `command` (lane vault-standing-request) = the run's command token when its destination cannot be read (else null). */
+function useVerdict(rows, facts = {}, { hosts = [], destinationKnown = false, entryHosts = [], tool = null, command = null, now = 0 } = {}) {
   const v = GM.admits(rows, facts);
   if (!v.ok) return { ok: false, code: v.code, ...(v.entry ? { except: GM.principalKey(v.entry) } : {}) };
   const alive = v.hits.filter((h) => live(h.entry, now));
@@ -100,7 +113,8 @@ function useVerdict(rows, facts = {}, { hosts = [], destinationKnown = false, en
   let best = null, bestMissing = null;
   for (const h of alive) {   // admits' hits: the most specific first (its own › a group's › everyone)
     const miss = missingHosts(h.entry, run, tool, entryHosts);
-    if (destinationKnown === true && run.length && !miss.length) return { ok: true, id: grantIdOf(h.row.resource, GM.principalKey(h.entry)), via: h.entry.kind, entry: h.entry, hosts: effectiveHosts(h.entry.hosts, entryHosts) };
+    if (destinationKnown === true && run.length && !miss.length) return { ok: true, id: grantIdOf(h.row.resource, GM.principalKey(h.entry)), via: h.entry.kind, entry: h.entry, hosts: effectiveHosts(h.entry.hosts, entryHosts), scope: 'hosts' };
+    if (destinationKnown !== true && commandHeld(h.entry, command)) return { ok: true, id: grantIdOf(h.row.resource, GM.principalKey(h.entry)), via: h.entry.kind, entry: h.entry, hosts: effectiveHosts(h.entry.hosts, entryHosts), scope: 'command' };   // lane vault-standing-request: the EXACT command the owner trusted — only where the hub cannot read the destination (a known destination is judged by its hosts)
     if (!best || miss.length < bestMissing.length) { best = h; bestMissing = miss; }
   }
   const member = memberOf(best, entryHosts);
@@ -115,14 +129,23 @@ const rowLists = (row) => { const p = row ? GM.publicRow(row) : { to: [], except
 /** Add — or WIDEN — ONE member: `principal` (a bare principal), `hosts` (a list of host tokens), `until` (ms | null = no
  *  end). A member already there keeps its entry, its hosts gain the new ones (∪) and its end becomes the later of the two
  *  (no end wins); it leaves `except`. → { ok: true, to, except, widened, added } | { ok: false, code } (`unknown_shape`:
- *  the row cannot be read — nothing is read wider; `bad_principal`; `hosts_required`; `too_many_hosts`). */
-function withMember(row, principal, { hosts = [], until = null, tool = null } = {}) {
+ *  the row cannot be read — nothing is read wider; `bad_principal`; `hosts_required`; `too_many_hosts`).
+ *  lane vault-standing-request: `commands` (command tokens) widen the member the same way (∪, ≤ GM.COMMANDS_MAX —
+ *  `too_many_commands`); a member gets hosts, commands or both (neither ⇒ `hosts_required`; a bad token ⇒
+ *  `command_unreadable`). `source` + `at` say who wrote it — set when the member is added or widened. */
+function withMember(row, principal, { hosts = [], until = null, tool = null, commands = null, source = null, at = null } = {}) {
   const cur = rowLists(row);
   if (!cur) return { ok: false, code: 'unknown_shape' };
   const b = GM.bareOf(principal), key = b && GM.principalKey(b);
   if (!key) return { ok: false, code: 'bad_principal' };
-  const add = GM.hostListOf(Array.isArray(hosts) ? hosts : []);
-  if (!add) return { ok: false, code: 'hosts_required' };
+  const wantCmds = Array.isArray(commands) && commands.length > 0;
+  const cmds = wantCmds ? GM.commandListOf(commands) : null;
+  if (wantCmds && !cmds) return { ok: false, code: 'command_unreadable' };
+  const hostsGiven = Array.isArray(hosts) && hosts.length > 0;
+  const add = hostsGiven ? GM.hostListOf(hosts) : [];
+  if (!add || (!add.length && !cmds)) return { ok: false, code: 'hosts_required' };
+  const src = SOURCES.includes(source) ? source : null, stampAt = Number(at) > 0 ? Math.floor(Number(at)) : null;
+  const stampOf = (e) => { if (src) e.source = src; if (src && stampAt) e.at = stampAt; return e; };
   const end = Number(until) > 0 ? Math.floor(Number(until)) : null;
   const tl = tool ? String(tool).toLowerCase() : null;   // round 4 (item 3): the CLI a wildcard THIS «Always» mints is scoped to — PER HOST
   const i = cur.to.findIndex((e) => GM.principalKey(e) === key);
@@ -136,21 +159,26 @@ function withMember(row, principal, { hosts = [], until = null, tool = null } = 
     if (was.tool) for (const h of (was.hosts || [])) if (String(h).startsWith('*.') && !(h in toolFor)) toolFor[h] = String(was.tool).toLowerCase();
     for (const h of add) if (!merged.includes(h)) { merged.push(h); widened = true; if (tl && String(h).startsWith('*.')) toolFor[h] = tl; }
     if (merged.length > GM.HOSTS_MAX) return { ok: false, code: 'too_many_hosts' };
+    const wasCmds = Array.isArray(was.commands) ? (GM.commandListOf(was.commands) || []) : [], mergedCmds = wasCmds.slice();
+    for (const c of cmds || []) if (!mergedCmds.some((x) => GM.commandKeyOf(x) === GM.commandKeyOf(c))) { mergedCmds.push(c); widened = true; }
+    if (mergedCmds.length > GM.COMMANDS_MAX) return { ok: false, code: 'too_many_commands' };
     const wasEnd = Number(was.until) > 0 ? Number(was.until) : null;
     const nextEnd = wasEnd == null || end == null ? null : Math.max(wasEnd, end);
     if (nextEnd !== wasEnd) widened = true;
-    const next = { ...was, hosts: merged };
+    const next = { ...was, ...(merged.length ? { hosts: merged } : {}) };
+    if (!merged.length) delete next.hosts;   // a commands-only member keeps no empty hosts list
+    if (mergedCmds.length) next.commands = mergedCmds; else delete next.commands;
     if (nextEnd == null) delete next.until; else next.until = nextEnd;
     delete next.tool;   // replaced by the per-host `toolFor`
     if (Object.keys(toolFor).length) next.toolFor = toolFor; else delete next.toolFor;
-    to[i] = next;
+    to[i] = widened ? stampOf(next) : next;
   } else {
-    const e = { ...b, ...(principal.name ? { name: String(principal.name) } : {}), hosts: add };
+    const e = { ...b, ...(principal.name ? { name: String(principal.name) } : {}), ...(add.length ? { hosts: add } : {}), ...(cmds ? { commands: cmds } : {}) };
     if (end != null) e.until = end;
     const toolFor = {};
     if (tl) for (const h of add) if (String(h).startsWith('*.')) toolFor[h] = tl;   // only a WILDCARD carries a tool; a plain host is tool-agnostic
     if (Object.keys(toolFor).length) e.toolFor = toolFor;
-    to.push(e);
+    to.push(stampOf(e));
   }
   return { ok: true, to, except: cur.except.filter((x) => GM.principalKey(x) !== key), widened, added: i < 0 };
 }
@@ -191,7 +219,7 @@ function publicGrants(row, { now = 0 } = {}) {
   if (!p) return { to: [], except: [] };
   if (p.unknown) return { unknown: true, why: p.why, to: [], except: [] };
   return {
-    to: (p.to || []).map((e) => ({ ...e, id: grantIdOf(p.resource, GM.principalKey(e)), principal: GM.principalKey(e), hosts: (e.hosts || []).slice(), tool: e.tool || null, toolFor: e.toolFor || null, until: Number(e.until) > 0 ? Number(e.until) : null, expired: !live(e, now) })),
+    to: (p.to || []).map((e) => ({ ...e, id: grantIdOf(p.resource, GM.principalKey(e)), principal: GM.principalKey(e), hosts: (e.hosts || []).slice(), commands: Array.isArray(e.commands) ? e.commands.slice() : [], source: e.source || null, at: Number(e.at) > 0 ? Number(e.at) : null, tool: e.tool || null, toolFor: e.toolFor || null, until: Number(e.until) > 0 ? Number(e.until) : null, expired: !live(e, now) })),
     except: p.except || [],
   };
 }
@@ -203,11 +231,17 @@ function standingLines(verdicts, { always = false } = {}) {
   const out = [];
   for (const v of Array.isArray(verdicts) ? verdicts : []) {
     if (!v || v.ok || !v.member) continue;
-    const on = v.member.hosts.length ? v.member.hosts.join(', ') : 'no host';
+    const cw = (v.member.commands || []).map((c) => commandWords(c)).join(', ');
+    const on = [v.member.hosts.length ? v.member.hosts.join(', ') : '', cw ? `the command ${cw}` : ''].filter(Boolean).join('; ') || 'no host';
     if (v.code === 'outside_hosts') out.push(`A standing approval exists for this conversation (${v.member.id}: ${on}) — this run is outside it: ${v.missing.join(', ')}.${always ? ` «Always» widens it to ${v.missing.join(', ')}.` : ''}`);
-    else if (v.code === 'destination_unknown') out.push(`A standing approval exists for this conversation (${v.member.id}: ${on}) — where this run sends it cannot be told, so it asks.`);
+    else if (v.code === 'destination_unknown') out.push(`A standing approval exists for this conversation (${v.member.id}: ${on}) — where this run sends it cannot be told${cw ? ' and it is not that command' : ''}, so it asks.`);
   }
   return [...new Set(out)];
 }
 
-module.exports = { DOOR, ENTRY_HOSTS, ID_RE, CODES, grantIdOf, hostCovers, runHostsOf, effectiveHosts, missingHosts, useVerdict, holds, withMember, withoutMember, alwaysCarry, publicGrants, standingLines };
+/** lane vault-standing-request: a command token in words — the program's name and its first argument's (`python3
+ *  transcribe.py`); the whole paths ride the token. */
+const baseOf = (p) => String(p == null ? '' : p).replace(/\/+$/, '').split('/').pop();
+const commandWords = (c) => (c && c.program ? [baseOf(c.program), c.arg == null ? '' : String(c.arg)[0] === '/' ? baseOf(c.arg) : String(c.arg)].filter(Boolean).join(' ') : '');
+
+module.exports = { DOOR, ENTRY_HOSTS, ID_RE, CODES, SOURCES, commandWords, grantIdOf, hostCovers, runHostsOf, effectiveHosts, missingHosts, useVerdict, holds, withMember, withoutMember, alwaysCarry, publicGrants, standingLines };

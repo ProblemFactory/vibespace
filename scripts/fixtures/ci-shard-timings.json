@@ -322,6 +322,8 @@
   "test-vault-login-chrome": 213,
   "test-vault-paste-chrome": 22317,
   "test-vault-run-wire": 75,
+  "test-vault-standing-request": 600,
+  "test-vault-standing-request-chrome": 40000,
   "test-vault-totp-add-chrome": 23130,
   "test-vault-use-grants": 17037,
   "test-vault-use-grants-chrome": 34548,

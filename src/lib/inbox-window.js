@@ -357,11 +357,13 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     // q-053 P0b (decision ①): a pool's move to another provider — Always lets THIS pool make such a move by itself from now on
     'pool-always': () => actBtn('pool-always', UI_ICONS.check, t('Always for this pool'), t('Lets this pool move a conversation to another provider by itself from now on, with a line in the conversation each time'), 'iw-act-exit'),
     // lane vault-run-door: a held run's «always» = this command SHAPE for this conversation, 30 days — the second password again first
-    'shape-always': () => actBtn('shape-always', UI_ICONS.check, t('Always let this conversation use it (these hosts)'), t('A standing approval: this conversation runs commands with these secrets for these hosts without asking for 30 days — the Vault window lists it and takes it back; asks for the second password first'), 'iw-act-exit'),   // lane vault-use-grants: «Always» = a vault-use grant
+    'shape-always': (it) => (it && it.action && it.action.command ? actBtn('shape-always', UI_ICONS.check, t('Always (this command)'), t('A standing approval for this command: this conversation runs it with these secrets without asking until you take it back — VibeSpace cannot see where it sends them; a changed program or script asks again. Asks for the second password first'), 'iw-act-exit') : actBtn('shape-always', UI_ICONS.check, t('Always let this conversation use it (these hosts)'), t('A standing approval: this conversation runs commands with these secrets for these hosts without asking for 30 days — the Vault window lists it and takes it back; asks for the second password first'), 'iw-act-exit')),   // lane vault-use-grants: «Always» = a vault-use grant; lane vault-standing-request: «Always (this command)» where no host can be read
     // lane vault-manual-and-lock: an agent's request for a stored secret — For 8 hours = every run of that conversation with it for 8 hours (a lock ends it)
     // lane vault-paste-request: an agent's request for a secret — Paste… opens THE paste box (the tray's, as a dialog); Refuse tells the agent
     'secret-paste': () => actBtn('secret-paste', UI_ICONS.check, t('Paste and save…'), t('Opens a masked box — what you paste goes straight into the vault; the agent is told only that it is there'), 'iw-act-primary iw-act-exit'),
     'secret-deny': () => actBtn('secret-deny', UI_ICONS.close, t('Refuse'), t('The agent is told you refused, on its next turn'), 'iw-act-exit'),
+    // lane vault-standing-request: an agent's STANDING request — Allow writes the owner's «Who may use it…» row (until he takes it back)
+    'grant-standing': () => actBtn('grant-standing', UI_ICONS.check, t('Allow (standing)'), t('A standing grant, the same as «Who may use it…» on its row — until you take it back there; asks for the second password first'), 'iw-act-primary iw-act-exit'),
     'grant-8h': () => actBtn('grant-8h', UI_ICONS.check, t('For 8 hours'), t('Every run of this conversation with this secret, for 8 hours — a new kind of command still shows its card; locking the vault ends it'), 'iw-act-exit'),
     // lane browser-propose: the agent's browser proposal — ONE primary Approve (runs exactly what the item says), a quiet Reject
     'proposal-approve': () => actBtn('proposal-approve', UI_ICONS.check, t('Approve'), t('Runs exactly what this card says'), 'iw-act-primary iw-act-exit'),
@@ -537,7 +539,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     // …and, last, Clear content… on an item that still has words (a cleared one has nothing left to clear)
     const acts = model.isCleared(it) || v.actions.includes('more') ? v.actions : [...v.actions, 'clear']; // a card's Clear content… is in its ⋯
     // r7: beside a run card's missing «Always», why it is not offered (the model's words, in the answers' row)
-    const hint = run && !v.resolved && acts.includes('hub-once') && !acts.includes('shape-always') ? run.always.hint : null;
+    const hint = run && !v.resolved && acts.includes('hub-once') && (!acts.includes('shape-always') || (it && it.action && it.action.command)) ? run.always.hint : null;   // lane vault-standing-request: «Always (this command)» keeps its plain words
     const actSig = acts.join(',') + '\u0000' + JSON.stringify(hint);
     if (c.sig.actions !== actSig) {
       c.actions.replaceChildren(...acts.map((a) => ACT[a](it)));
@@ -770,11 +772,11 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
       if (await model.runAction(it, a === 'proposal-approve' ? 'approve' : 'reject')) advance(id);
       return;
     }
-      if (a === 'hub-once' || a === 'hub-always' || a === 'hub-deny' || a === 'auto-always' || a === 'pool-always' || a === 'shape-always' || a === 'grant-8h') {
+      if (a === 'hub-once' || a === 'hub-always' || a === 'hub-deny' || a === 'auto-always' || a === 'pool-always' || a === 'shape-always' || a === 'grant-8h' || a === 'grant-standing') {
       // lane hub-act-ask: the same arm as every Allow (a pane shown ARM_MS ago or less is not the one the user read)
       if (a !== 'hub-deny') { const pv = pressVerdict({ since: st.armId === id ? st.armAt : null, now: performance.now() }); if (!pv.ok) { showToast(t('That Allow moved under the pointer just now — read it, then press it again')); return; } }
         const reachPick = st.cur && st.cur.id === id ? st.cur.reach.querySelector('input:checked') : null;   // lane key-instance-scope: the pane's picked reach rides an automation answer
-        if (await model.runAction(it, a === 'auto-always' || a === 'pool-always' || a === 'shape-always' ? 'always' : a === 'grant-8h' ? '8h' : a.slice(4), reachPick ? { reach: reachPick.value } : {})) advance(id);
+        if (await model.runAction(it, a === 'auto-always' || a === 'pool-always' || a === 'shape-always' ? 'always' : a === 'grant-8h' ? '8h' : a === 'grant-standing' ? 'standing' : a.slice(4), reachPick ? { reach: reachPick.value } : {})) advance(id);
       return;
     }
     if (a === 'secret-paste') { showSecretPasteDialog(model, it, { words: model.wordsOf(it), detail: model.detailOf(it) }); return; }   // lane vault-paste-request: the box as a dialog (the store resolves the item — the pane follows)

@@ -1161,6 +1161,22 @@ function shapeOf(run) {
     blind: kind !== 'tool' || !known || !hosts.size || unread || routesOpaque.length > 0 || configFile || !!(row && (row.runsProject || row.confDest)) || !!run.programWritable,   // round 26: a NON-routing keyed flag (wget -e robots=off) no longer blinds a known destination
   };
 }
+/** lane vault-standing-request (the owner 2026-10-30, four «允许一次» cards in two minutes for `python3 transcribe.py partNN.mp3`):
+ *  THE COMMAND SHAPE a standing grant may name where the hub CANNOT read the destination — the program and its FIRST argument,
+ *  the rest free (`partNN.mp3`). Offered only when no host can be read (never beside a hosts «Always»: a known tool's
+ *  destination is its hosts) and only where the shape is a program the owner can name: a shell or an interpreter running a
+ *  SCRIPT FILE (argv[1] a path, never a flag — `-c`/`-e`/`-m` inline code is any code; no argument = code on stdin), or a
+ *  program outside the tool table (its first argument as it is, or none). → { program, arg, file, kind } (the door reads the
+ *  real paths and the bytes: `file` ⇒ arg must be a regular file, pinned by its sha256) | null. */
+function commandCandidateOf(spec, shape) {
+  if (!spec || !shape || shape.always || shape.destKnown) return null;
+  const argv = Array.isArray(spec.argv) ? spec.argv : [], first = argv.length > 1 ? String(argv[1]) : null;
+  if (shape.kind !== 'tool') {   // a shell or an interpreter (toolKindOf's other two kinds)
+    if (first == null || first === '' || first[0] === '-') return null;   // inline code / a flag first / code on stdin — no shape to trust
+    return { program: spec.tool, arg: first, file: true, kind: shape.kind };
+  }
+  return shape.known ? null : { program: spec.tool, arg: first, file: false, kind: shape.kind };
+}
 /** THE KEY a remembered «always» is stored under — everything decision ④ says, nothing positional. */
 const shapeKeyOf = (s) => `${SHAPE_V}:${JSON.stringify([s.tool, s.sub, s.flags, s.args, s.hosts, s.entries, s.injection, s.env, s.templates, s.on, s.script, s.keyed])}`;
 
@@ -1305,7 +1321,7 @@ function cardFactsOf(spec, shape, cwd, names = {}) {
     env,
     hosts: known ? { known: true, list: [...shape.routeHosts] } : { known: false, list: [], why: hostsWhyOf(shape) },
     shape: shape.kind === 'tool' ? 'tool' : 'line',
-    always: { offered: !!shape.always, why: shape.always ? null : alwaysWhyOf(shape), ...(shape.configReads ? clipFold('directive', String(shape.configReads)) : { directive: null }) },
+    always: { offered: !!shape.always, why: shape.always ? null : alwaysWhyOf(shape), ...(shape.configReads ? clipFold('directive', String(shape.configReads)) : { directive: null }), ...(names.command ? { command: { offered: true, words: clipStr(String(names.command)).text } } : {}) },   // lane vault-standing-request: «Always (this command)» — a standing grant on the command shape where no host can be read
     reason: (away.length || names.notOwn) ? { notOwn: !!names.notOwn, away: away.map((a) => ({ ...clipFold('ref', a.ref || ''), forHost: a.forHost || null, host: a.unknown ? null : a.host || null, unknown: !!a.unknown, keep: !!a.keep })) } : null,
     templates,
     masking: 'common-encodings',
@@ -1760,6 +1776,6 @@ module.exports = {
   INJECTIONS, injectionOf, ENV_HIJACK, ENV_CONFIG, envRefusedOf,
   TOOL_ROWS, SHELLS, INTERPRETERS, KNOWN_TOOLS, toolNameOf, knownToolOf, refusedTool, toolKindOf, targetOf, conninfoHosts, urlHosts, urlParse, configNestedFile,
   RUN_FLAGS, parseRunArgs, timeoutOf, planOf, materialize,
-  shapeOf, shapeKeyOf, destinationsOf, routeTargetsOf, sshTargetHost, readSshOpt, targetOf, urlParse, splitAuthority, normHost, SSH_OPT_TABLE, SSH_LOCAL_O, SSH_LOCAL_PROGRAM_KW, SSH_KW_ALIAS, SSH_HOST_OPTS, cardFactsOf, CARD_STRING_MAX, ALWAYS_WHY, HOSTS_WHY, MASKING, CARD_SHAPES, WHY_AGAIN, CARD_FACTS_CODES, OWN_DOORS, RUNNABLE_STORES, ownDoorOf, awayOf, runVerdict,
+  shapeOf, shapeKeyOf, commandCandidateOf, destinationsOf, routeTargetsOf, sshTargetHost, readSshOpt, targetOf, urlParse, splitAuthority, normHost, SSH_OPT_TABLE, SSH_LOCAL_O, SSH_LOCAL_PROGRAM_KW, SSH_KW_ALIAS, SSH_HOST_OPTS, cardFactsOf, CARD_STRING_MAX, ALWAYS_WHY, HOSTS_WHY, MASKING, CARD_SHAPES, WHY_AGAIN, CARD_FACTS_CODES, OWN_DOORS, RUNNABLE_STORES, ownDoorOf, awayOf, runVerdict,
   FORMS, FORM_ROWS, VIEWS, formsOf, createMasker, createRunMasker, maskText,
 };

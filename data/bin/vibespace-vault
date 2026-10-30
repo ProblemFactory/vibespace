@@ -25,6 +25,10 @@ CC.cliStart({ tool: 'vibespace-vault', flags: ['--call-timeout'] });
 // is for (ONE question in their For you tray — nothing waits on it); their answer is a grant (one run, or every run for 8
 // hours; a lock ends it). `uses` = this conversation's grants, its open requests and its own uses (entry, purpose, when,
 // outcome, receipt) — names and codes, never a value.
+// lane vault-standing-request (the owner 2026-10-30: 「能不能让 agent 自行申请权限 … 常驻的，跟我配"谁可以用"等效的权限」): `request
+// <vault://…> --standing --for "<purpose>" [--host <h>[,<h>…]] [--command "<program> <script>"]` asks ONCE for the STANDING grant
+// the user would set on the entry's row — for commands to those hosts, or (a program whose destination VibeSpace cannot read, like
+// `python3 transcribe.py`) for that command itself; their Allow keeps it until they take it back (a lock does not end it).
 // lane vault-agent-own (the owner 2026-10-26: 「它自己存的使用为啥还要我的允许？」): what THIS conversation stored itself (mint / put,
 // `totp add`, `login add`) is its own to use — no switch, no grant, no card (a minted value going to another host than its
 // `--for` asks the user once per host). A seed or a password you hold goes in as ITS KIND: `totp add` (the vault computes the
@@ -57,6 +61,13 @@ const USAGE = [
   '  vibespace-vault request <vault://…> --for "<purpose>"',
   '                             ask the user for an entry, with what you will run with it: ONE question in their For you tray;',
   '                             nothing waits on it — `uses` shows their answer (once: your next run · 8h: every run for 8 hours)',
+  '  vibespace-vault request <vault://…> --standing --for "<purpose>" [--host <h>[,<h>…]] [--command "<program> <script>"]',
+  '                             ask ONCE for a STANDING grant — the same as the user setting «Who may use it…» on its row: no card',
+  '                             for commands to those hosts (--host: where the command connects, e.g. api.openai.com), or for THAT',
+  '                             command (--command: a program whose destination VibeSpace cannot read — an interpreter and its',
+  '                             script, read from this folder; a changed program or script asks again). It stays until the user',
+  '                             takes it back (a lock does not end it — nothing runs while it is locked). `uses` / `list` show it.',
+  '                             When a card asks for each run of a command, this is the way to stop it — ask once.',
   '  vibespace-vault request "<what you need, in the user\'s words>" --purpose "<what you will do with it>"',
   '                             [--into <row>.<field> | --kind api-key|password|secret] [--name <label>] [--host <h>[,<h>…]]',
   '                             ask the user to PASTE a secret you do not have (a password, an API key): ONE item in their For you',
@@ -145,7 +156,8 @@ async function callCoded(method, route, body, verb) {
 }
 
 async function requestCmd(rest) {
-  const { out, positional } = parseFlags(rest, { '--for': 'value', '--purpose': 'value', '--into': 'value', '--kind': 'value', '--name': 'value', '--host': 'value' });
+  const { out, positional } = parseFlags(rest, { '--for': 'value', '--purpose': 'value', '--into': 'value', '--kind': 'value', '--name': 'value', '--host': 'value', '--standing': 'bool', '--command': 'value' });
+  if (out['--standing'] || out['--command'] !== undefined) return standingCmd(positional, out);   // lane vault-standing-request
   // lane vault-paste-request: words (not a vault:// reference) ⇒ the PASTE shape — the user pastes a secret you do not have
   if (positional.length === 1 && !positional[0].startsWith('vault://')) return pasteCmd(positional[0], out);
   if (out['--into'] !== undefined || out['--kind'] !== undefined || out['--name'] !== undefined || out['--host'] !== undefined) { console.error('vibespace-vault: --into / --kind / --name / --host belong to a paste request: vibespace-vault request "<what you need>" --purpose "<why>" — for a stored entry it is: request <vault://…> --for "<purpose>"'); process.exit(2); }
@@ -160,6 +172,23 @@ async function requestCmd(rest) {
   else console.log(`asked the user for ${d.ref} — the question is in their For you tray; nothing waits on it`);
   console.log('  their answer: once (your next run with it) · 8h (every run for 8 hours) · deny; a lock ends a grant');
   console.log('  `vibespace-vault uses` shows it when it comes; do other work meanwhile, and do not ask again in the chat');
+}
+
+/** lane vault-standing-request: ask ONCE for a STANDING grant on a stored entry — hosts and/or a command shape. */
+async function standingCmd(positional, out) {
+  const usage = 'vibespace-vault: request <vault://…> --standing --for "<what it is for>" [--host <h>[,<h>…]] [--command "<program> <script>"] — name the hosts its commands connect to, or the command (a program whose destination VibeSpace cannot read)';
+  if (!out['--standing']) { console.error('vibespace-vault: --command belongs to a standing request: ' + usage.slice('vibespace-vault: '.length)); process.exit(2); }
+  if (positional.length !== 1 || !positional[0].startsWith('vault://') || out['--into'] !== undefined || out['--kind'] !== undefined || out['--name'] !== undefined) { console.error(usage); process.exit(2); }
+  const why = out['--for'] !== undefined ? out['--for'] : out['--purpose'];
+  if (why === undefined || (out['--host'] === undefined && out['--command'] === undefined)) { console.error(usage); process.exit(2); }
+  const hosts = out['--host'] !== undefined ? String(out['--host']).split(',').map((h) => h.trim()).filter(Boolean) : null;
+  const d = await callCoded('POST', '/api/agent/vault/request', { entry: positional[0], purpose: why, standing: true, ...(hosts ? { hosts } : {}), ...(out['--command'] !== undefined ? { command: out['--command'] } : {}), cwd: process.cwd() }, 'request');
+  if (d.already === 'own') { console.log(`${d.ref} is this conversation's own — it stored it, so it runs without asking anyone: vibespace-vault run --env NAME=${d.ref} -- <command>`); return; }
+  if (d.already === 'standing') { console.log(`${d.ref}: this conversation already holds that standing grant (${d.grant}) — run it`); return; }
+  if (d.filed) { console.log(`asked the user ONCE for a standing grant on ${d.ref}; nothing waits on it`); console.log(d.filed); }
+  else console.log(`asked the user ONCE for a standing grant on ${d.ref} — the question is in their For you tray; nothing waits on it`);
+  console.log(`  for: ${[...(d.hosts && d.hosts.length ? [`commands to ${d.hosts.join(', ')}`] : []), ...(d.command ? [`the command ${d.command}`] : [])].join(' · ')} — until they take it back`);
+  console.log('  their answer: Allow (standing) · deny; `vibespace-vault uses` shows it when it comes; do other work meanwhile, and do not ask again in the chat');
 }
 
 /** lane vault-paste-request: ask the user to PASTE a secret (the hub files ONE For-you item with a masked box; the value never
@@ -190,14 +219,17 @@ async function usesCmd() {
   console.log('grants (this conversation):');
   if (!d.grants || !d.grants.length) console.log('  none');
   for (const g of d.grants || []) console.log(`  ${g.entry}  ${g.once ? 'one run' : 'every run'} until ${whenAt(g.until)}  for: ${g.purpose || '-'}`);
+  for (const s of d.standing || []) console.log(`  ${s.entry}  standing · ${standingScope(s)} · since ${s.since ? whenAt(s.since) : '?'}${s.until ? ` · until ${whenAt(s.until)}` : ''}${s.paused ? ' · PAUSED (the user turned the entry off)' : ''}  (${s.grant})`);   // lane vault-standing-request
   console.log('requests waiting on the user:');
   if (!d.requests || !d.requests.length) console.log('  none');
-  for (const q of d.requests || []) console.log(`  ${q.entry}  asked ${whenAt(q.at)}  for: ${q.purpose || '-'}`);
+  for (const q of d.requests || []) console.log(`  ${q.entry}  asked ${whenAt(q.at)}${q.standing ? ` (standing · ${standingScope(q)})` : ''}  for: ${q.purpose || '-'}`);
   for (const q of d.pastes || []) console.log(`  ${q.requestId}  paste «${q.words}» → ${q.place || '-'}  for: ${q.purpose || '-'}`);   // lane vault-paste-request: a paste box waiting in their tray
   console.log('uses (newest first):');
   if (!d.uses || !d.uses.length) console.log('  none');
-  for (const u of d.uses || []) console.log(`  ${whenAt(u.at)}  ${u.entry || '-'}  via ${u.door || '-'}  ${u.outcome}${u.receipt ? '  receipt ' + u.receipt : ''}${u.purpose ? '  for: ' + u.purpose : ''}`);
+  for (const u of d.uses || []) console.log(`  ${whenAt(u.at)}  ${u.entry || '-'}  via ${u.door || '-'}  ${u.outcome}${u.grant ? `  by grant${u.standing ? ' · standing' : ''} ${u.grant}` : ''}${u.receipt ? '  receipt ' + u.receipt : ''}${u.purpose ? '  for: ' + u.purpose : ''}`);
 }
+/** lane vault-standing-request: a standing grant's scope in words — «hosts a, b» / «the command python3 transcribe.py». */
+const standingScope = (s) => [...(s.hosts && s.hosts.length ? [`hosts ${s.hosts.join(', ')}`] : []), ...(s.commands && s.commands.length ? [`the command ${s.commands.join(', ')}`] : s.command ? [`the command ${s.command}`] : [])].join(' + ') || '-';
 
 async function runCmd(rest) {
   // the hub parses the words (the CLI ships to other hosts — one spelling of the flags, src/vault-run.js parseRunArgs)
@@ -213,6 +245,7 @@ async function runCmd(rest) {
   if (d.truncated) said.push('the output was cut at 2 MiB');
   if (d.timedOut) said.push('stopped at its timeout');
   if (said.length) console.error(`# vibespace-vault run: ${said.join(' · ')}`);
+  if (d.next) console.error(`# vibespace-vault run: ${d.next}`);   // lane vault-standing-request: a run the user let through once names the standing road
   if (d.receipt) console.error(`# vibespace-vault run: receipt ${d.receipt}`);   // the audit line the user sees carries the same one
   const signals = require('os').constants.signals || {};
   process.exit(d.timedOut ? 124 : Number.isInteger(d.exit) ? d.exit : d.signal && signals[d.signal] ? 128 + signals[d.signal] : 1);
@@ -334,7 +367,7 @@ async function main() {
   if (cmd === 'list') {
     const d = await call('GET', '/api/agent/vault/runnable');
     if (!d.entries || !d.entries.length) { console.log('no stored secret is open for your runs — ask the user for one with its purpose: vibespace-vault request <vault://…> --for "<why>" (they open it in ⚙ System ▸ Vault…, or grant it to you from For you)'); return; }
-    for (const e of d.entries) console.log(`${e.ref}  ${e.label} (${e.kind})${e.by === 'own' ? (e.minted ? `  yours: minted${e.for ? ` for ${e.for} — runs there without asking` : ''}; another host or a command whose destination cannot be told asks the user` : '  yours: this conversation stored it — runs without asking') : e.by === 'grant' ? `  granted to you: ${e.once ? 'one run' : 'every run'} until ${whenAt(e.until)}` : e.by === 'standing' ? `  yours to use with no card for ${(e.hosts || []).join(', ')}${e.until ? ` until ${whenAt(e.until)}` : ''} (${e.grant})` : ''}`);   // own: lane vault-agent-own · standing: lane vault-use-grants
+    for (const e of d.entries) console.log(`${e.ref}  ${e.label} (${e.kind})${e.by === 'own' ? (e.minted ? `  yours: minted${e.for ? ` for ${e.for} — runs there without asking` : ''}; another host or a command whose destination cannot be told asks the user` : '  yours: this conversation stored it — runs without asking') : e.by === 'grant' ? `  granted to you: ${e.once ? 'one run' : 'every run'} until ${whenAt(e.until)}` : e.by === 'standing' ? `  standing · ${standingScope(e)} · since ${e.since ? whenAt(e.since) : '?'}${e.until ? ` · until ${whenAt(e.until)}` : ''}${e.paused ? ' · PAUSED (the user turned the entry off)' : ' — yours to use with no card'} (${e.grant})` : ''}`);   // own: lane vault-agent-own · standing: lane vault-use-grants
     return;
   }
   if (cmd === 'uses') return usesCmd();

@@ -11597,4 +11597,25 @@ export default {
   "No rollback point names the conversation of “{name}”.": "没有哪个回滚点记着「{name}」的会话。",
   "“{name}” cannot be reopened: closing deletes it from this desktop’s layout for good. Only an older rollback point (Restore a previous layout…) still holds it.": "「{name}」无法重新打开：关闭会把它从这个桌面的布局中永久删除。只有更早的回滚点（恢复之前的布局…）还保留着它。",
   "{n} of these cannot be reopened ({names}): closing deletes them from this desktop’s layout for good. Only an older rollback point (Restore a previous layout…) still holds them.": "其中 {n} 个无法重新打开（{names}）：关闭会把它们从这个桌面的布局中永久删除。只有更早的回滚点（恢复之前的布局…）还保留着它们。",
+  "A host is where a command connects to with it — e.g. api.openai.com for an API key, 192.168.1.1 for a router. A program whose destination VibeSpace cannot read (a script) is allowed by its command instead, from its run card.": "主机就是命令带着它连去的地方——比如 API 密钥连 api.openai.com，路由器连 192.168.1.1。VibeSpace 读不出去向的程序（脚本）改为按命令放行，在它的运行卡片上点「总是（这条命令）」。", // lane vault-standing-request
+  "A standing approval for this command — the Vault window lists it; a changed program or script asks again": "已为这条命令设为常驻授权——保险库窗口里能看到它；换了程序或脚本会再问", // lane vault-standing-request
+  "A standing approval for this command: this conversation runs it with these secrets without asking until you take it back — VibeSpace cannot see where it sends them; a changed program or script asks again. Asks for the second password first": "这条命令的常驻授权：这个对话用这些密钥运行它不再问你，直到你收回——VibeSpace 看不到它把密钥发往哪里；换了程序或脚本会再问。会先要第二密码", // lane vault-standing-request
+  "A standing grant, the same as «Who may use it…» on its row — until you take it back there; asks for the second password first": "常驻授权，和它那一行的「谁可以用…」一样——直到你在那里收回；会先要第二密码", // lane vault-standing-request
+  "Allow (standing)": "允许（常驻）", // lane vault-standing-request
+  "Allowed until you take it back — its row in the Vault window lists it": "已允许，直到你收回——保险库窗口里它那一行列着它", // lane vault-standing-request
+  "Always (this command)": "总是（这条命令）", // lane vault-standing-request
+  "For commands to {hosts} — the hosts a command may connect to.": "用于连往 {hosts} 的命令——即命令可以连接的主机。", // lane vault-standing-request
+  "For the command {command} — it runs {program} {arg}. VibeSpace cannot see where it sends the secret; Allow means you trust this command itself. A changed program or script asks again.": "用于命令 {command}——它运行 {program} {arg}。VibeSpace 看不到它把密钥发往哪里；「允许」表示你信任这条命令本身。换了程序或脚本会再问。", // lane vault-standing-request
+  "It asks with vibespace-vault request {ref} --standing (--host … or --command …), and you get ONE card with exactly this grant to allow.": "它用 vibespace-vault request {ref} --standing（--host … 或 --command …）来申请，你只会收到一张卡片，允许的正是这条授权。", // lane vault-standing-request
+  "Not sure what to fill in? Let the agent ask.": "不知道怎么填？让 agent 自己申请。", // lane vault-standing-request
+  "Until you revoke it — the same as «Who may use it…» on its row in ⚙ System ▸ Vault…, which lists it and takes it back. A lock does not end it (nothing runs while it is locked). Allow asks for the second password.": "直到你收回——和 ⚙ 系统 ▸ 保险库… 里它那一行的「谁可以用…」一样，那里列着它，也在那里收回。上锁不会结束它（锁着时什么都不运行）。「允许」会要第二密码。", // lane vault-standing-request
+  "VibeSpace cannot see where this program sends the secret; «Always (this command)» means you trust this command itself. A changed program or script asks again.": "VibeSpace 看不到这个程序把密钥发往哪里；「总是（这条命令）」表示你信任这条命令本身。换了程序或脚本会再问。", // lane vault-standing-request
+  "allowed by you until you revoke it": "你已允许，直到你收回", // lane vault-standing-request
+  "allowed until revoked": "已允许，直到收回", // lane vault-standing-request
+  "asked by the agent": "agent 申请", // lane vault-standing-request
+  "set by you": "你设置的", // lane vault-standing-request
+  "the command {command}": "命令 {command}", // lane vault-standing-request
+  "{name} may run: {commands} (kept)": "{name} 可以运行：{commands}（保留）", // lane vault-standing-request
+  "{who} asks for a standing grant on a stored secret": "{who} 请求一条常驻授权，用保险库里的一个密钥", // lane vault-standing-request
+  "«Always» on a card": "卡片上的总是", // lane vault-standing-request
 };
