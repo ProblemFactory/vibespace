@@ -2107,6 +2107,9 @@ const I_RECV = {
   // lane stream-p1b-screen: the screen source's journal line names its encoder — a fixed ladder label, never a record's words
   'src/agentd/stream-screen.js|plan.encoder': ['harness', 'the encoder ladder rung\'s fixed label (NVENC / AMF / Quick Sync / x264 — src/stream-plan.js ENCODER_LADDER)'],
   'src/agentd/stream-window-source.js|plan.encoder': ['harness', 'the encoder ladder rung\'s fixed label (NVENC / AMF / Quick Sync / x264 — src/stream-plan.js ENCODER_LADDER), the window source\'s start line (lane stream-p2w-build)'],
+  // lane apple-signing: the hub's Mac screen helper push (src/server/desktop-webrtc.js pushMacHelper) — a push verdict's own words and the Mac agent's helper answer, never a record of the five kinds
+  'src/server/desktop-webrtc.js|p': ['words', 'a helper push verdict\'s own sentence (`note`: the signed release that names the bytes, or «unsigned prebuilt» + its sha256) on the hub journal line — the hub\'s own words, never a record'],
+  'src/server/desktop-webrtc.js|need': ['words', 'the Mac agent\'s helper answer — its `pending` is the judgment in progress on a pushed file (version, sha256, tries; src/agentd/stream-mac.js), read into the push\'s refusal sentence — a device fact, never a record'],
   // lane stream-mac-ax-respawn: the Mac injector's replacement line names the grant's two values, never a record's words
   'src/input-inject.js|r.replace': ['harness', 'THE RESPAWN RULE\'s verdict — the Accessibility grant\'s from / to (granted · denied · unknown — src/input-inject.js macRespawn)'],
   // lane voice-teach-skips: the settings list's 加入 toast names why Dropline skipped the word — the vendor's skip CODE
