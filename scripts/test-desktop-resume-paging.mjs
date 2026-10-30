@@ -358,15 +358,17 @@ const SCENARIO = `(async () => {
     // reader, i.e. a chain with all 10 frames still ahead of it.
     if (armChain) view._scrollToBottom();
     let traces = [];
-    // 2.369.130 r2 (the Actions mirror on 2.369.129): the chain's effect is SAMPLED, not read
-    // off the settled snapshot — _extendTop now grows by height (several passes per gesture,
-    // each with its own anchored restore) and a trim past three viewports can drop the tail,
-    // so "dragged back to the live tail" is a moment, not an end state. minFromBottom = the
-    // closest the reader came to the tail from the first wheel on.
-    let minFromBottom = Infinity;
-    const sampler = setInterval(() => { const fb = snap().fromBottom; if (fb < minFromBottom) minFromBottom = fb; }, 40);
+    // THE CHAIN'S WRITES, COUNTED (int365 seam C, B-fa30 / B-893d): "dragged back to the live tail" is the chain writing
+    // scrollTop = scrollHeight AFTER the reader's wheel — every such write stamps its author first (_traceExpect('fsb'),
+    // src/lib/chat-view.js _forceScrollToBottom's step), so the leg counts them on the instance from the first wheel on.
+    // It was a 40 ms SAMPLE of fromBottom (2.369.130 r2: the grow loop makes the drag a moment, not an end state) — the
+    // .360 mirror's run 40662629945 sampled past that moment 2/2 with the cancel neutered (the control RED, the chain wrote).
+    let fsbAfterWheel = 0, wheeled = false;
+    const realExpect = view._traceExpect;
+    view._traceExpect = function (by) { if (wheeled && by === 'fsb') fsbAfterWheel++; return realExpect.call(this, by); };
     for (let i = 0; i < 6; i++) {
       list.scrollTop = 0;
+      wheeled = true;
       list.dispatchEvent(new WheelEvent('wheel', { deltaY: -300, bubbles: true }));
       await sleep(700);
       traces = (view._traceRing || []).map((e) => e.tag);
@@ -374,8 +376,8 @@ const SCENARIO = `(async () => {
     }
     const now = snap();
     await sleep(1500);                     // …and it must STILL be there once every rung has fired
-    clearInterval(sampler);
-    return { pre, now, settled: snap(), traces, minFromBottom };
+    delete view._traceExpect;              // the prototype's own again
+    return { pre, now, settled: snap(), traces, fsbAfterWheel };
   };
   const resumeWheel = { ...await wheelLeg(1400) };
   //    …and the same gesture with the chain armed by hand — the mechanism
@@ -576,12 +578,22 @@ if (good?.ok) {
   // POSITION, not the pin flag (same reading as the drag control): with the
   // cancel neutered the chain drags the reader back to the live tail whether
   // or not the mute lets the pin re-engage on the way.
-  check('…and its control proves the leg touches the path: with _cancelForcedScroll neutered the SAME wheel-up IS dragged to the live tail at some moment of the chain (sampled — the grow loop may move the reader again afterwards)',
-    good.chainWheelControl.minFromBottom <= 8,
+  check(`…and its control proves the leg touches the path: with _cancelForcedScroll neutered the SAME wheel-up IS dragged to the live tail — the chain wrote scrollTop = scrollHeight ×${good.chainWheelControl.fsbAfterWheel} after the reader's wheel (counted at its own write stamp, never sampled)`,
+    good.chainWheelControl.fsbAfterWheel >= 1,
     JSON.stringify(good.chainWheelControl).slice(0, 600));
-  check('…while with the cancel in place the reader is NEVER brought to the tail, not even for a frame (sampled from the first wheel on)',
-    good.chainWheel.minFromBottom > 8,
+  check(`…while with the cancel in place the chain NEVER writes after the wheel — not one frame (×${good.chainWheel.fsbAfterWheel}; fsbCancel ends it at the wheel)`,
+    good.chainWheel.fsbAfterWheel === 0 && good.chainWheel.traces.includes('fsbCancel'),
     JSON.stringify(good.chainWheel).slice(0, 600));
+  // THE REPLAY (seam C): the .360 mirror (run 40662629945 attempt 1, heavy 1/6) recorded this control red 2/2 as
+  // {"minFromBottom":300, traces: userPos, unpin, wheelTop, scroll, scroll, trimSkipZone, wheelCarry, extendTop:done, scroll,
+  // axBand} — the ring holds a big move between the wheel and the anchored restore (the chain's write), yet the 40 ms sample
+  // never saw the reader at the tail: the restore came back inside one sampling window. The sampled rule is RED on that
+  // record whatever the chain did; the count above reads the write itself.
+  const sampledRule = (r) => r.minFromBottom <= 8;
+  const rec360 = { minFromBottom: 300, traces: ['userPos', 'unpin', 'wheelTop', 'scroll', 'scroll', 'trimSkipZone', 'wheelCarry', 'extendTop:done', 'scroll', 'axBand'] };
+  const between = rec360.traces.slice(rec360.traces.indexOf('wheelTop') + 1, rec360.traces.indexOf('extendTop:done')).filter((t) => t === 'scroll').length;
+  check(`…the replay: the .360 mirror's recorded control (minFromBottom ${rec360.minFromBottom}; ${between} big moves between the wheel and extendTop:done) is RED under the sampled rule — the clock sample, not the chain, decided it`,
+    !sampledRule(rec360) && between >= 2, JSON.stringify(rec360));
 }
 
 // ── 4b. ROUND 3, THE MAJOR — TRUSTED INPUT. Everything above dispatches

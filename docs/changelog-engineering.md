@@ -4,6 +4,13 @@ This file is the engineers' record of every release: the lanes, the verification
 
 `CHANGELOG.md` (with `CHANGELOG.zh.md` and `CHANGELOG.ja.md`) is the user's: what changed for the person using VibeSpace, one plain line per change, in the interface's language — the rules are in docs/changelog-style.md. From 2.369.199 on, every release also writes its section here, under the same `## <version> — <date>` heading as its user entry and in the same commit, newest first above the verbatim record.
 
+## 2.369.365 — 2026-10-30
+
+### int365 — the train's own test-only seams (the .363 / .364 CI mirror reds; no user line)
+- **Seam A — the gate pins the tool it reviews:** the fast job installs gh 2.102.0 (the release tarball, its sha256 a literal in .github/workflows/ci.yml, checked on every run; cached; first on PATH) — the runner image had rolled gh to 2.103.2 and test-vault-run-model's gh grammar census, REQUIRED on the gate, refused the unreviewed tool (the .364 mirror's fast job). test-ci-gate §2h's stall control now targets the fonts cache step (a first-match replace had reached the new gh cache).
+- **Seam B — one unit, not one pixel:** test-fold-ux's UI-scale leg compared the strip's minimum at 60 % with 100 % to ±1 CSS px; the runner's fonts drift 2 px at zoom 0.6 (201 vs 199, red on the .363 and .364 mirrors). The leg now allows the drift a scale has (2 % of the 100 % minimum) and proves the unit mix it exists for (on-screen px written as CSS px, the zoom's factor) stays outside it; a PURE control replays the runner's numbers.
+- **Seam C — a control asserts the mechanism, never a clock sample (B-fa30 / B-893d):** test-cache-bounds §13 judged «off the loop» by the walk's longest stall against its own hook work + half a fold (the r2 control flipped on the .347 branch run: 73 ≤ 96 + 22); it now counts — the ledger folded on the main-thread instance ×0 and a worker walk ×≥ 1 (one predicate: the product passes, the r2rung mutant that folds on the loop is RED; the replay of the .347 numbers beside it). test-desktop-resume-paging's live-tail control sampled fromBottom every 40 ms (red 2/2 on the .360 mirror, minFromBottom 300 — the anchored restore came back inside one sample); it now counts the chain's own scrollTop writes after the reader's wheel at their author stamp (`_traceExpect('fsb')`): ×0 with the cancel, ×≥ 1 with `_cancelForcedScroll` neutered.
+
 ## 2.369.364 — 2026-10-30
 
 ### jobs-memory-bound — round 9, HOTFIX of 2.369.363 (the post-ship acceptance of r8 887e8d66: three MAJORS on a rung without a scope, a fourth the lane found on the cgroup rung — the owner's hub)

@@ -55,24 +55,11 @@ function spyReads() {
   o.restore = () => { fs.readSync = rs; fs.readFileSync = rf; fs.promises.readFile = prf; fs.promises.open = po; };
   return o;
 }
-/** The loop's longest stall, counting the gap still PENDING at stop() (verify #7: a same-task sync block). */
-function lagProbe() {
-  let last = performance.now(), max = 0;
-  const iv = setInterval(() => { const n = performance.now(); max = Math.max(max, n - last - 5); last = n; }, 5);
-  return { stop() { const n = performance.now(); max = Math.max(max, n - last - 5); clearInterval(iv); return max; } };
-}
-/** A timing bound's same-box CONTROL (rel254 mirror: a fixed `stall < 100` went red at 101/111 ms on a loaded 4-core runner
- *  while the fold witness held): the longest stall while the test's OWN work runs `n` times, one task each, without the product. */
-async function directStall(work, n) {
-  const p = lagProbe();
-  for (let k = 0; k < n; k++) { work(); await new Promise((r) => setTimeout(r, 10)); }
-  return p.stop();
-}
-/** The rule: stall <= control + HALF a sync fold of the same query, timed on this box in this run (median of 3). Neither a
- *  fixed margin nor a ratio bites here — measured, the r2rung mutant's fold on the loop adds ~23 ms over a ~11 ms control
- *  (+50 ms passes it, ×3.1 sits on a 3× line) — while a margin in folds scales with the box's load and bites by design. */
-const foldMs = (fn) => { const ms = []; for (let k = 0; k < 3; k++) { const t0 = performance.now(); fn(); ms.push(performance.now() - t0); } return ms.sort((x, y) => x - y)[1]; };
-const stallOk = (stall, control, fold) => stall <= control + fold / 2;
+/** OFF THE LOOP, BY ITS MECHANISM (int365 seam C, B-fa30): the cold walk runs in a worker — the main-thread instance's
+ *  `_allRows` (the ledger fold) is called ZERO times and a worker walk ran (`_coldWalks` +≥ 1). It was a clock sample
+ *  (the walk's longest stall ≤ its own hook work's + half a fold): the .347 branch run's fast job flipped the r2 control
+ *  under load — «73 ms > 96 ms + 22 ms» — while the fold witness held. A count cannot drift with the box's load. */
+const offLoop = (loopFolds, walks) => loopFolds === 0 && walks >= 1;
 const boundLine = (tag, measured, control, rule) => console.log(`  ${tag} bound: measured ${Math.round(measured)} ms / control ${Math.round(control)} ms / rule ${rule}`);
 
 console.log('§1 PURE cache-bounds');
@@ -386,20 +373,18 @@ let month30Prep = null, month30Run = null;
   writeRows(t.dir, all.filter((e) => typeof e.i !== 'string'));
   t.warm();
   let allRowsCalls = 0; const realAll = t._allRows.bind(t); t._allRows = function* (...a) { allRowsCalls++; yield* realAll(...a); };
-  // §13 (verify #0/#9): appends on EVERY try — one walk, as-of its start, never a loop fold. The claim is the witness
-  // (_allRows ×0); the stall is judged against the SAME hook work driven directly on a copy of the fixture (directStall),
-  // and the probe starts after the test's own sync answer (sync0 is the reference, not the product's walk)
-  const q = { pivots: [['day', 'account']] }, sync0 = t.aggregate(q), fold = foldMs(() => t.aggregate(q)); allRowsCalls = 0;
+  // §13 (verify #0/#9): appends on EVERY try — one walk, as-of its start, never a loop fold. The claim is the MECHANISM
+  // (seam C, B-fa30): the ledger is folded on the loop ×0 and the walk ran in a worker; the hook's work is a COUNTED step
+  // (tries13), never timed — sync0 is the reference answer, taken before the walk
+  const q = { pivots: [['day', 'account']] }, sync0 = t.aggregate(q); allRowsCalls = 0;
   const append = (u) => { writeRows(u.dir, [mkRow(NOW - 1000)]); u._evCache.checkedAt = 0; u._loadEvents(); };
-  const tc = mkUh('r3c', 40 * DAY, 60 * 1024); fs.cpSync(t.dir, tc.dir, { recursive: true }); tc.warm();
   let tries13 = 0; t.walkHook = () => { tries13++; append(t); };
-  const probe = lagProbe();
+  const w13 = t._coldWalks || 0;
   const a = await t.aggregateAsync(q); t.walkHook = null;
-  const stall = probe.stop(), control = await directStall(() => append(tc), tries13);
+  const walks13 = (t._coldWalks || 0) - w13;
   eq(a, sync0, '§13 appends on every try: the answer = the sync answer at the walk start');
   ok(allRowsCalls === 0, `§13 no fold of the ledger on the loop (_allRows ×${allRowsCalls})`);
-  boundLine('§13', stall, control, `stall <= control + fold/2, fold ${Math.round(fold)} ms (${tries13} tries)`);
-  ok(stallOk(stall, control, fold), `§13 the walk's longest stall ${Math.round(stall)} ms <= its own hook work's ${Math.round(control)} ms + half a fold (${Math.round(fold / 2)} ms)`);
+  ok(tries13 >= 1 && offLoop(allRowsCalls, walks13), `§13 OFF THE LOOP by its mechanism: the hook's work ran ×${tries13} (each try appended), the walk ran in a worker ×${walks13}, the ledger folded on the loop ×${allRowsCalls}`);
   // rewrites on every try ⇒ the worker re-runs (≤ 3), then an ERROR — still never the loop
   const swapTwo = () => { const f = path.join(t.dir, fs.readdirSync(t.dir).filter((x) => x.startsWith('events-')).sort()[0]); const ls = fs.readFileSync(f, 'utf8').split('\n'); [ls[0], ls[1]] = [ls[1], ls[0]]; fs.writeFileSync(f, ls.join('\n')); t._evCache.checkedAt = 0; t._loadEvents(); };
   t.walkHook = swapTwo; let err13 = null; allRowsCalls = 0;
@@ -412,13 +397,17 @@ let month30Prep = null, month30Run = null;
   const t2 = new UH2({ dataDir: path.join(tmp, 'r3'), homeDir: tmp }); t2.ledgerWindowMs = 40 * DAY; t2.ledgerHotMaxBytes = 60 * 1024; t2.warm();
   let n2 = 0; const real2 = t2._allRows.bind(t2); t2._allRows = function* (...x) { n2++; yield* real2(...x); };
   const swap = (u) => { const f = path.join(u.dir, fs.readdirSync(u.dir).filter((x) => x.startsWith('events-')).sort()[0]); const ls = fs.readFileSync(f, 'utf8').split('\n'); [ls[0], ls[1]] = [ls[1], ls[0]]; fs.writeFileSync(f, ls.join('\n')); u._evCache.checkedAt = 0; u._loadEvents(); };
-  const tc2 = mkUh('r3c2', 40 * DAY, 60 * 1024); fs.cpSync(t2.dir, tc2.dir, { recursive: true }); tc2.warm();
   let tries2 = 0; t2.walkHook = () => { tries2++; swap(t2); };
-  const probe2 = lagProbe();
+  const w2 = t2._coldWalks || 0;
   await t2.aggregateAsync({ to: NOW - 3 }).catch(() => null); t2.walkHook = null;
-  const stall2 = probe2.stop(), control2 = await directStall(() => swap(tc2), tries2), fold2 = foldMs(() => tc2.aggregate({ to: NOW - 3 }));
-  boundLine('§13 r2rung', stall2, control2, `stall <= control + fold/2 must FAIL, fold ${Math.round(fold2)} ms (${tries2} tries)`);
-  ok(r2rung !== uhSrc && n2 > 0 && !stallOk(stall2, control2, fold2), `control (the r2 last rung): the ledger folded on the loop ×${n2}, longest stall ${Math.round(stall2)} ms > its hook work's ${Math.round(control2)} ms + half a fold (${Math.round(fold2 / 2)} ms) ⇒ RED`);
+  const walks2 = (t2._coldWalks || 0) - w2;
+  ok(r2rung !== uhSrc && tries2 >= 1 && n2 > 0 && !offLoop(n2, walks2), `control (the r2 last rung): the ledger folded on the loop ×${n2} after ${tries2} tries (worker walks ×${walks2}) ⇒ §13's off-the-loop predicate is RED`);
+  // the REPLAY (seam C): the .347 branch run's fast job recorded this control's clock sample as «longest stall 73 ms > its
+  // hook work's 96 ms + half a fold (22 ms)» — the old rule `stall <= control + fold / 2` held there (73 ≤ 118), so the
+  // control went RED on a box under load while the mutant folded on the loop as always; the counts judge the same run
+  const oldRule = (stall, control, fold) => stall <= control + fold / 2;
+  ok(oldRule(73, 96, 44) && !offLoop(1, 0) && !offLoop(3, 1) && offLoop(0, 1) && !offLoop(0, 0),
+    'the clock-sample rule was satisfiable by a box under load (the .347 numbers: 73 ≤ 96 + 22 ⇒ the control RED) — the mechanism rule is not: a loop fold (×1, ×3) is RED at any load, a walk that never ran (×0 walks) is RED too, only «0 folds, ≥ 1 walk» is off the loop');
   // §14 (verify #1/#12): a worker that runs out of memory ⇒ an error, fast; the next request gets a new worker
   // (a fold worker that allocates 200 MB under a 32 MB cap — a cap below ~16 MB kills the WHOLE process while
   // V8 deserializes the isolate, measured: never set one that low)
