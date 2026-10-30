@@ -1479,7 +1479,7 @@ try {
   // (c) THE PAGE: the press road (the chat card and the tray) toasts both refusals in the owner's language — who, how many, why
   const UA = read('src/lib/user-todos-actions.js');
   const KEYS10 = ['{agent} is not running — the {n} messages stay held: Deliver once it runs, or Discard them', '{agent} is not woken by this rule now (not in its group, or left out of it) — the {n} messages stay held: Deliver once it is, or Discard them', 'the access they were held under was removed — {n} messages discarded', 'the rule they were held for was removed — {n} messages discarded'];
-  const branch = /if \(held && r && r\.code === 'not-in-effect'\) \{ showToast\(r\.why === 'not-running' \? t\('\{agent\} is not running/.test(UA) && /if \(held && r && r\.code === 'rule-gone'\) \{ showToast\(r\.why === 'access-removed' \? t\('the access they were held under was removed/.test(UA);
+  const branch = /if \(held && r && r\.code === 'not-in-effect'\) \{ showToast\(\(?r\.why === 'not-running' \? t\('\{agent\} is not running/.test(UA)   // r15: r13 put the ternary in parentheses (+ droppedWords) — the pin had gone stale on 3928de8bd && /if \(held && r && r\.code === 'rule-gone'\) \{ showToast\(r\.why === 'access-removed' \? t\('the access they were held under was removed/.test(UA);
   const missing = KEYS10.filter((k) => !UA.includes(`t('${k}'`) || !(k in DICT8.zh) || !(k in JA9));
   ok(branch && !missing.length, `(c) the press road toasts \`not-in-effect\` («${Z(KEYS10[0], { agent: 'Worker', n: 30 })}») and \`rule-gone\` in the owner's language — ${KEYS10.length} keys, each with zh + ja`, J({ branch, missing }));
 } catch (e) { ok(false, '⑱ (c) threw on this tree: ' + ((e && e.stack) || e)); }
@@ -1655,7 +1655,7 @@ try {
   const seen = { en: [both(del, tt3), both(dis, tt3), both(all, tt3)], zh: [both(del, Z), both(all, Z)], ja: [both(del, JA)] };
   const SRVK = read('src/server/channels-access.js'), UA = read('src/lib/user-todos-actions.js');
   const keyed = KEYS12.filter((k) => !(k in DICT8.zh) || !(k in JA9) || !(SRVK.includes(`i18nKey('${k}')`) || UA.includes(`t('${k}'`) || read('src/foryou-actions.js').includes(`t('${k}'`)));
-  const toast = /const droppedWords = dd \? ' · ' \+ \(r\.dropped\.why === 'not-covered' \? t\('the rule no longer covers \{k\} of \{m\} conversations — \{d\} held messages dropped', dd\) : t\('\{k\} of \{m\} conversations no longer wake \{agent\} — \{d\} held messages dropped', dd\)\)/.test(UA) && /\+ droppedWords \+ pendingWords \+ skippedWords/.test(UA);   // r13: computed once for both toasts (the not-in-effect one says it too)
+  const toast = /const droppedWords = dd \? ' · ' \+ \(r\.dropped\.why === 'not-covered' \? t\('the rule no longer covers \{k\} of \{m\} conversations — \{d\} held messages dropped', dd\) : t\('\{k\} of \{m\} conversations no longer wake \{agent\} — \{d\} held messages dropped', dd\)\)/.test(UA) && /\+ droppedWords \+ (?:pendingWords|stillWords) \+ skippedWords/.test(UA);   // r13: computed once for both toasts; r15: the still-held words in pendingWords' place (the not-in-effect one says it too)
   const head = Z(KEYS12[0], { n: 30, agent: 'Worker', date: '2026-10-26 17:01 PT', k: 1, m: 2, d: 30 });
   ok(J(seen.en[0]) === J(Array(2).fill('delivered · the rule no longer covers 1 of 2 conversations — 30 held messages dropped'))
     && J(seen.en[1]) === J(Array(2).fill('discarded — nothing was sent · 1 of 2 conversations no longer wake Worker — 30 held messages dropped'))
@@ -1705,16 +1705,40 @@ try {
     '(c) pathTail with no folderFull ⇒ the program path is said cut, the rest not available — never «folder clip + tail» drawn as whole', J(pf));
 } catch (e) { ok(false, '㉑ (c) threw on this tree: ' + ((e && e.stack) || e)); }
 try {
-  // (d) ONE PRESS, ONE TURN, SAID (M2 + the minor): the press road's toast says what is still pending after the one block and, on a
-  // not-in-effect answer, the part the same press dropped — each key with zh + ja
+  // (d) ONE PRESS, ONE TURN, SAID (M2 + the minor; r15 restated): the press road's toast says what stays held on the card after the
+  // one block (r13 said «still wait for its next delivery» for rows r15 keeps in the request) and, on a not-in-effect answer, the part
+  // the same press dropped — each key with zh + ja
   const UA = read('src/lib/user-todos-actions.js');
-  const KEY = '{n} held messages still wait for its next delivery';
-  const pendingToast = /const pendingWords = Number\(r\.pending\) > 0 \? ' · ' \+ t\('\{n\} held messages still wait for its next delivery', \{ n: Number\(r\.pending\) \}\) : '';/.test(UA) && /\+ droppedWords \+ pendingWords \+ skippedWords/.test(UA);
+  const KEY = '{n} held messages stay on the card — Deliver again, or Discard them';
+  const stillToast = /const stillWords = still > 0 && r\.delivered \? ' · ' \+ t\('\{n\} held messages stay on the card — Deliver again, or Discard them', \{ n: still \}\) : '';/.test(UA) && /\+ droppedWords \+ stillWords \+ skippedWords/.test(UA) && !/r\.pending/.test(UA);
   const notInEffect = /Deliver once it is, or Discard them', \{ agent: r\.agent \|\| '', n: Number\(r\.n\) \|\| 0 \}\)\) \+ droppedWords, \{ type: 'error' \}\)/.test(UA);
   const CARD = read('src/server/channels-access.js');
-  ok(pendingToast && notInEffect && (KEY in DICT8.zh) && (KEY in JA9) && Z(KEY, { n: 30 }) === '还有 30 条搁置的消息等它下一次投递' && /Deliver sends them to \$\{who\} now, as one block \(a billed turn\)/.test(CARD),
-    `(d) the press road says what the ONE block did not carry («${Z(KEY, { n: 30 })}») and, when its watcher is not woken now, the part the press dropped; the card still promises ONE block (true since r13)`, J({ pendingToast, notInEffect }));
+  ok(stillToast && notInEffect && (KEY in DICT8.zh) && (KEY in JA9) && Z(KEY, { n: 30 }) === '还有 30 条搁置的消息留在卡片上 — 再次投递，或丢弃它们' && /Deliver sends them to \$\{who\} now, as one block \(a billed turn\)/.test(CARD),
+    `(d) the press road says what stays held on the card after the ONE block («${Z(KEY, { n: 30 })}») and, when its watcher is not woken now, the part the press dropped; the card still promises ONE block (true since r13)`, J({ stillToast, notInEffect }));
 } catch (e) { ok(false, '㉑ (d) threw on this tree: ' + ((e && e.stack) || e)); }
+
+// ── ㉒ ROUND 15 ──────────────────────────────────────────────────────────────────────────────────────────────────────
+console.log('㉒ ROUND 15 — what a press did not get to the agent stays on its card, said; a conversation one block carries for another road names that road');
+try {
+  // (a) THE PRESS ROAD'S TWO r15 SENTENCES: a delivered press with a part left on the card, and a refused block whose rows came
+  // back to the card (never «they go with its next delivery» for rows the request holds again) — each with zh + ja
+  const UA = read('src/lib/user-todos-actions.js');
+  const K1 = '{n} held messages stay on the card — Deliver again, or Discard them', K2 = 'Not delivered now ({why}) — the {n} messages stay held: Deliver again, or Discard them';
+  const refusedBack = /still > 0 && !r\.stashed \? t\('Not delivered now \(\{why\}\) — the \{n\} messages stay held: Deliver again, or Discard them', \{ why: r\.why \|\| t\('refused'\), n: still \}\)/.test(UA);
+  const words = [K1, K2].every((k) => UA.includes(`t('${k}'`) && (k in DICT8.zh) && (k in JA9));
+  const gone = !('{n} held messages still wait for its next delivery' in DICT8.zh) && !('{n} held messages still wait for its next delivery' in JA9);
+  ok(refusedBack && words && gone && Z(K2, { why: 'x', n: 60 }) === '现在没有投递（x）— 这 60 条消息继续保留：再次投递，或丢弃它们' && JA9[K1] === '保留中のメッセージ {n} 件はカードに残っています — もう一度届けるか、破棄してください',
+    `(a) the press road: «${Z(K1, { n: 30 })}» beside a delivered part, «${Z(K2, { why: '…', n: 60 })}» for a refused block whose rows came back; r13's «still wait for its next delivery» is gone from the dictionaries`, J({ refusedBack, words, gone }));
+} catch (e) { ok(false, '㉒ (a) threw on this tree: ' + ((e && e.stack) || e)); }
+try {
+  // (b) THE ROAD, PURE: renderScopeDigestBlock says `via` under a group's heading — and nothing for a group without one
+  const F22 = require(path.join(SRC, 'channel-filter.js'));
+  const hit = (id) => ({ record: { id, text: 'hello', at: Date.UTC(2026, 9, 30), author: { name: 'Ann' } }, why: [] });
+  const tx = F22.renderScopeDigestBlock({ adapterLabel: 'Lark', scopeLabel: 'the conversations matching a rule (title contains "Ops")', groups: [{ title: 'Ops room', convId: 'c-ops', hits: [hit('1')] }, { title: 'Announcements', convId: 'c-ann', hits: [hit('2')], via: 'the whole account' }] });
+  const ls = tx.split('\n'), iO = ls.indexOf('#### Ops room — c-ops'), iA = ls.indexOf('#### Announcements — c-ann');
+  ok(iO > 0 && iA > 0 && ls[iA + 1] === '(you are watching this one through the whole account, not the scope above)' && !/^\(you are watching/.test(ls[iO + 1]),
+    `(b) a group carried for another road says «${ls[iA + 1]}» under its heading; the scope's own group says nothing`, J(ls.slice(0, 8)));
+} catch (e) { ok(false, '㉒ (b) threw on this tree: ' + ((e && e.stack) || e)); }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

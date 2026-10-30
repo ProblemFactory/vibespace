@@ -695,6 +695,15 @@ question about another machine is the failure the rule exists to stop.
   after the block — only when there are any) and, for a block the ladder refused, **`stashed: true`** («kept for its next turn») or
   **`held: true`** (still pending). A conversation dropped earlier that a later boot re-holds is live again (`dropped` is a row fact).
   The 409 `not-in-effect` `error` ends with the dropped part («· the rule no longer covers 1 of 2 conversations — 30 held messages dropped»).
+  **r15:** the block HOLDS every chain it reads (each of its conversations' own chain, then every scope chain its conversations are
+  woken through — the engine's `billedWake({roads})`), so no window or conversation flush reads the same rows while it waits on the
+  ladder. **`n` = what went** (released by this press and no longer pending — carried or stashed). What the press did NOT get to the
+  agent stays in the request: rows of a refused block that were not stashed come back, and with no scope road left ONE conversation
+  goes per press, the rest are never released. Then the request is **open again** (`request.status: 'open'`), its card stays open
+  with the count left, and the 200 says **`stillHeld`** (messages still held) + **`stillHeldConvs`** (in how many conversations);
+  a refused block that was not stashed answers `delivered: false`, `n: 0`, `note: 'not delivered now — the messages stay held on the
+  card'`. r13's `pending` and the refused `held: true` are gone. The record closes `delivered` only once nothing is left, with `n` =
+  what went; a decision ENDED by the system counts every part it dropped over its life (a re-held conversation's earlier part included).
 
 - **P1a — the adapter's own consent flow and options** (design §10.1, §12.4,
   §13; every failure answers `{error, code, detail}` with a status BY CODE:

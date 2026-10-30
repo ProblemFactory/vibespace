@@ -7883,13 +7883,18 @@ function create(deps = {}) {
   async function flushScope(rec, source, patternId = null, pk = null, opts = {}) {
     if (stopped) return { ok: false, why: 'stopped' };
     const sKey = `${source === 'account' ? `acct:${rec.id}` : `pat:${patternId}`}|${pk}`;
+    if (opts.also && opts.also.size) {   // r15: the held decision's ONE block holds the chain of every conversation it reads (see billedWake `roads`)
+      const convs = [...opts.also].sort();
+      const roads = () => { const sc = new Set([sKey]); for (const k of convs) { const eff = wakeEffOf(store.index.peek(k)); const item = eff ? eff.watchers.find((x) => itemIs(x, pk)) : null; const sk = item ? scopeKeyOf(item, rec) : null; if (sk) sc.add(sk); } return { convs, scopes: [...sc].sort() }; };
+      return billedWake({ roads }, (held) => flushScopeNow(rec, source, patternId, pk, sKey, { ...opts, holds: held.holds }));
+    }
     return billedWake({ scopeOf: () => sKey }, () => flushScopeNow(rec, source, patternId, pk, sKey, opts));
   }
   /** The scope digest's SECTION BODY — reached only through `billedWake` (see `flushScope`). `also` (lane wake-approve-card r13 —
    *  a held decision's Deliver is ONE block, one billed turn): conversation keys that ride THIS block whatever grain wakes their
    *  watcher now (a held digest's conversation the account still wakes after its rule was narrowed); this scope's watcher
    *  paces, targets and books it. */
-  async function flushScopeNow(rec, source, patternId, pk, sKey, { startedAt = null, also = null } = {}) {
+  async function flushScopeNow(rec, source, patternId, pk, sKey, { startedAt = null, also = null, holds = null } = {}) {
     {
       if (stopped) return { ok: false, why: 'stopped', held: true };   // the hits are pending already; the next boot delivers them
       const t = now();
@@ -7903,12 +7908,16 @@ function create(deps = {}) {
         if (!en || en.adapterId !== rec.id || !Array.isArray(en.pending) || !en.pending.length) continue;
         const eff = wakeEffOf(en);
         const item = eff ? eff.watchers.find((x) => itemIs(x, pk)) : null;
-        if (!item || ((item.source !== source || (source === 'pattern' && item.patternId !== patternId)) && !(also && also.has(en.key)))) continue;
+        const ownRoad = !!item && item.source === source && (source !== 'pattern' || item.patternId === patternId);
+        if (!item || (!ownRoad && !(also && also.has(en.key)))) continue;
+        const road = ownRoad ? null : scopeKeyOf(item, rec);
+        if (!ownRoad && (!holds || (road && !holds.has(road)))) continue;   // r15: never a read outside the chains this block holds (its conversation's own chain is held for every `also` key)
         const pend = pendingOf(en, pk, eff);
         if (!pend.hits.length && !pend.elided) continue;
         if (pendingRoadOf(item.watcher, pend) !== 'wake') continue;   // THE ROAD (lane boot-flush-next-turn): next-turn hits wait for the boot flush's free stash, never a billed digest
         if (!others) others = othersFor(eff, pk);
-        groups.push({ title: humanNameOf(rec, en) || en.id, convId: en.id, hits: pend.hits, elided: pend.elided });   // B-c127: the ladder
+        const via = ownRoad ? null : item.source === 'account' ? 'the whole account' : item.source === 'pattern' ? `the conversations matching a rule (${F.patternSummary((patternById(item.patternId) || {}).pattern || { rules: [] })})` : 'a notification set on this conversation itself';   // r15: a conversation pulled in through another road says THAT road, never the block's
+        groups.push({ title: humanNameOf(rec, en) || en.id, convId: en.id, hits: pend.hits, elided: pend.elided, ...(via ? { via } : {}) });   // B-c127: the ladder
         held.push({ key: en.key, id: en.id, eff, carried: pend, admit: wakeAdmitOf(en, item, { rec }) });
       }
       if (!groups.length) return { ok: false, why: 'nothing-pending' };
@@ -8095,7 +8104,26 @@ function create(deps = {}) {
   // every section body is called only as `billedWake`'s `fn`.
   const SCOPE_MOVED = Symbol('scope-moved');
   const SCOPE_BOUNCE_MAX = 4;
-  function billedWake({ conv = null, scopeOf = null }, fn) {
+  // ONE BLOCK OVER SEVERAL ROADS (lane wake-approve-card r15 — the r13 acceptance, skep-r13-race.mjs: a held decision's ONE
+  // Deliver block read the rows of conversations whose watcher is woken through ANOTHER chain — the account's scope, or a
+  // conversation row's own — while holding only its own scope's; a window flush on that chain read the same rows during the
+  // ladder's await, and the same held messages went out in TWO billed turns). `roads()` names every chain the block reads
+  // NOW — `convs`: each of its conversations' own chains (fixed: the decision's), `scopes`: the block's scope + each
+  // conversation's road scope — and they are taken ONE fixed order: every conversation chain (sorted), then every scope
+  // chain (sorted, resolved inside — the order above: conversation, then scope). A scope that moved while the block waited is
+  // re-taken (SCOPE_BOUNCE_MAX); `fn` gets the scope chains it HOLDS (`holds`) and reads no conversation outside them.
+  function billedWake({ conv = null, scopeOf = null, roads = null }, fn) {
+    if (typeof roads === 'function') {
+      const take = (keys, i, run) => (i < keys.length ? serialWake(keys[i], () => take(keys, i + 1, run)) : run());
+      const inside = async () => {
+        for (let bounce = 0; ; bounce++) {
+          const want = roads().scopes;
+          const r = await take(want.map((k) => `scope:${k}`), 0, () => (bounce < SCOPE_BOUNCE_MAX && roads().scopes.join('\n') !== want.join('\n') ? SCOPE_MOVED : fn({ conv: null, scope: null, holds: new Set(want) })));
+          if (r !== SCOPE_MOVED) return r;
+        }
+      };
+      return take(roads().convs, 0, inside);
+    }
     const inner = async () => {
       for (let bounce = 0; ; bounce++) {
         const sk = typeof scopeOf === 'function' ? scopeOf() : null;

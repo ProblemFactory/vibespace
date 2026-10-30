@@ -1821,7 +1821,8 @@ function othersLine(others) {
  * delivers ONCE per window — every conversation of its scope that had hits,
  * one short section each (title + at most 3 records), inside the same byte
  * budget; what does not fit is COUNTED, never silently dropped.
- * `groups` = `[{title, convId, hits:[{record, why}], elided?}]`.
+ * `groups` = `[{title, convId, hits:[{record, why}], elided?, via?}]` (`via` — lane wake-approve-card r15: the road a
+ * conversation is watched through when it differs from the block's scope, said under its heading).
  */
 function renderScopeDigestBlock({ adapterLabel = 'channel', scopeLabel = '', groups = [], windowMinutes = DEFAULT_DIGEST_MINUTES, elidedConversations = 0, others = null, since = null } = {}, { perConversation = 3, maxChars = 200, budget = BLOCK_MAX_BYTES } = {}) {
   const list = (Array.isArray(groups) ? groups : []).filter((g) => g && Array.isArray(g.hits) && g.hits.length);
@@ -1841,6 +1842,7 @@ function renderScopeDigestBlock({ adapterLabel = 'channel', scopeLabel = '', gro
     const recs = g.hits.slice(-perConversation);
     const more = g.hits.length - recs.length + (Number(g.elided) || 0);
     const sec = [`#### ${safeInline(g.title || g.convId, 120)} — ${safeInline(g.convId, 200)}`]
+      .concat(g.via ? [`(you are watching this one through ${safeInline(g.via, 160)}, not ${scopeLabel ? 'the scope above' : 'this digest\'s scope'})`] : [])   // lane wake-approve-card r15: a conversation one block carries for another road names that road
       .concat(recs.map((h) => `from ${safeInline((h.record.author && (h.record.author.display || h.record.author.name || h.record.author.id)) || '(no sender)', 80)} at ${stamp(h.record.at)}\n${safeLine(h.record.text, maxChars)}`));
     if (more > 0) sec.push(`(${more} more in this conversation)`);
     const next = out + '\n' + sec.join('\n');

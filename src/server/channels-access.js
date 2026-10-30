@@ -1195,8 +1195,14 @@ function create(engineCtx) {
    *  dropped entry by key and pushed NEW rows into it — the reach, the delivery and «in effect» skipped it, so its rows were
    *  counted as delivered, returned to pending and dropped unsaid): holdAside CLEARS the mark when it fills the entry again (the
    *  conversation is live: judged, delivered or dropped again like any other — the card's part counts only what is out now),
-   *  and an entry is SPENT only while it is dropped AND holds nothing. */
-  const heldSpent = (c) => !!(c && c.dropped) && !(Array.isArray(c.rows) && c.rows.length) && !(Number(c.elided) > 0);
+   *  and an entry is SPENT only while it is dropped AND holds nothing. r15: the earlier part is never LOST (the r13 acceptance,
+   *  skep-r13-race.mjs leg 4: the ended record said 60 for a decision that discarded 90) — the re-hold moves it into
+   *  `dropEarlier` (summed: heldDroppedSumOf), a re-drop adds it back into `dropped.n`; and an entry a press SENT while the
+   *  request stays open for the rest (`sent` — the no-scope road, deliverPlanOf) is spent the same way. */
+  const heldSpent = (c) => !!(c && (c.dropped || c.sent)) && !(Array.isArray(c.rows) && c.rows.length) && !(Number(c.elided) > 0);
+  /** r15: EVERY row a held decision dropped over its life — the parts of conversations out now (`dropped.n`) and the earlier
+   *  parts of conversations a later boot filled again (`dropEarlier`): the ended record's count is the SUM of its parts. */
+  const heldDroppedSumOf = (r2) => heldConvsOf(r2).reduce((x, c) => x + (c.dropped && typeof c.dropped === 'object' ? Number(c.dropped.n) || 0 : 0) + (Number(c.dropEarlier) || 0), 0);
   const heldWho = (w) => (w.principal.kind === 'everyone' ? 'all agents' : String(w.principal.name || w.principal.id));
   /** r12: the PART of a held decision dropped because its watcher is no longer woken there (dropHeld — each dropped
    *  conversation keeps `dropped {n, why, at}`) → `{n, k, of, why, agent}` | null; the card, the press's answer and the record say it. */
@@ -1282,7 +1288,8 @@ function create(engineCtx) {
         was.rows.push(...rows.map(({ aside, ...p }) => ({ ...p, for: pk })));
         if (was.rows.length > HELD_ROWS_MAX) { el += was.rows.length - HELD_ROWS_MAX; was.rows = was.rows.slice(-HELD_ROWS_MAX); }   // the oldest past the bound: counted, said
         was.elided += el; was.n = was.rows.length;
-        if (was.dropped && rows.length + el > 0) delete was.dropped;   // r13: `dropped` is a fact about ROWS — an entry a later boot fills again is live again (its earlier drop was said then)
+        if (was.dropped && rows.length + el > 0) { was.dropEarlier = (Number(was.dropEarlier) || 0) + (Number(was.dropped.n) || 0); delete was.dropped; }   // r13: `dropped` is a fact about ROWS — an entry a later boot fills again is live again (its earlier drop was said then); r15: its count kept (summed)
+        if (was.sent && rows.length + el > 0) delete was.sent;   // r15: a conversation a partial press sent, filled again — live again
         moved += rows.length + el;
       }
       r2.held.n = heldCountOf(r2);
@@ -1364,57 +1371,130 @@ function create(engineCtx) {
       }
     }
     const t = now();
-    let applied = false, touched = 0, skipped = 0, dropped = null;
+    // r15 — THE PRESS'S PLAN before anything moves (deliverPlanOf — the r13 acceptance: with no scope road left the press sent ONE
+    // conversation and answered «delivered 60», the other 30 in live pending with no card): the conversations its ONE block
+    // carries are released; the rest never leave the request — the card stays open for them, said
+    const rec = approve ? adapterRecords().adapters.find((r) => r.id === req0.adapterId) || null : null;
+    const plan = !approve ? null : rec ? deliverPlanOf(rec, req0) : { carry: heldConvsOf(req0).filter((c) => !heldSpent(c)), rest: [], via: null };
+    const only = plan ? new Set(plan.carry.map((c) => c.key)) : null;
+    let applied = false, touched = 0, skipped = 0, dropped = null, released = null;
     await store.index.update((ix) => {
       const r2 = (Array.isArray(ix.watchRequests) ? ix.watchRequests : []).find((r) => r && r.id === req0.id);
       if (!r2 || r2.status !== 'open') return;
-      applied = true; r2.status = approve ? 'approved' : 'denied'; r2.decidedAt = t; r2.decidedBy = person ? 'person' : by;
-      touched = releaseAside(r2, !!approve);
-      r2.held.n = touched;   // the record keeps what the decision touched
+      applied = true; r2.status = approve ? 'approved' : 'denied'; r2.decidedAt = t; r2.decidedBy = person ? 'person' : by;   // a press in flight is decided: a second press (another window) is refused, never a second block
+      if (approve) released = heldIdsOf(r2, only);   // r15: exactly the rows this press puts back in play
+      touched = releaseAside(r2, !!approve, only);
+      if (approve) for (const c of heldConvsOf(r2)) if (only.has(c.key)) c.sent = { at: t };
+      r2.held.n = touched;   // the record keeps what the decision touched (r15: a Deliver's, what went — below)
       skipped = Number(r2.held.skipped) || 0;
       dropped = heldDroppedOf(r2);   // r12: the part dropped before it (its conversations' watcher no longer woken there) — said with it
     });
     if (!applied) return { ok: false, code: 'bad-state', error: 'request already decided (in another window, a moment ago)' };
-    try { store.audit({ kind: 'watch', op: approve ? 'held-deliver' : 'held-discard', principal: req0.principal, scope: req0.scope, requestId: req0.id, n: touched, at: t, by }); } catch {}
-    if (req0.todoId && userTodos && typeof userTodos.get === 'function') {
-      try { const it = userTodos.get(req0.todoId); if (it && it.status === 'open') userTodos.resolveAnswered([req0.todoId], approve ? 'delivered' : 'discarded', { ...(person ? { decidedBy: 'person', decidedAt: t } : {}), n: touched, ...(dropped ? { dropped } : {}) }); } catch {}
+    const resolve = (fact) => { if (req0.todoId && userTodos && typeof userTodos.get === 'function') { try { const it = userTodos.get(req0.todoId); if (it && it.status === 'open') userTodos.resolveAnswered([req0.todoId], approve ? 'delivered' : 'discarded', { ...(person ? { decidedBy: 'person', decidedAt: t } : {}), ...fact, ...(dropped ? { dropped } : {}) }); } catch {} } };
+    if (!approve) {
+      try { store.audit({ kind: 'watch', op: 'held-discard', principal: req0.principal, scope: req0.scope, requestId: req0.id, n: touched, at: t, by }); } catch {}
+      resolve({ n: touched });
     }
     let delivery = null;
-    if (approve && touched) {
-      const rec = adapterRecords().adapters.find((r) => r.id === req0.adapterId);
-      try { if (rec) delivery = await deliverHeld(rec, req0); } catch (e) { delivery = { ok: false, why: (e && e.message) || String(e) }; }
+    if (approve && touched && rec) { try { delivery = await deliverHeld(rec, req0, plan); } catch (e) { delivery = { ok: false, why: (e && e.message) || String(e) }; } }
+    // r15 — NEVER «delivered» FOR A ROW STILL PENDING: what this press released and nothing carried (the block refused — the daily
+    // cap, nobody live —, or a conversation it could not read) comes back into THIS request; with the rest of its conversations
+    // (the no-scope road) the request is OPEN again and its card says the count left. «n» = what went.
+    let back = 0, reopened = false, still = 0, stillConvs = 0;
+    if (approve) {
+      await store.index.update((ix) => {
+        const r2 = (Array.isArray(ix.watchRequests) ? ix.watchRequests : []).find((r) => r && r.id === req0.id);
+        if (!r2 || r2.status !== 'approved' || !r2.held) return;
+        back = reholdLeft(r2, released, !(delivery && (delivery.ok || delivery.stashed)));
+        still = heldCountOf(r2);
+        stillConvs = heldConvsOf(r2).filter((c) => !heldSpent(c) && heldCountOf({ held: { convs: [c] } }) > 0).length;
+        if (still > 0) { reopened = true; r2.status = 'open'; r2.decidedAt = null; delete r2.decidedBy; r2.held.n = still; }
+        else r2.held.n = touched - back;
+      });
+    }
+    const went = touched - back;
+    if (approve) {
+      try { store.audit({ kind: 'watch', op: 'held-deliver', principal: req0.principal, scope: req0.scope, requestId: req0.id, n: went, ...(reopened ? { stillHeld: still } : {}), at: t, by }); } catch {}
+      if (!reopened) resolve({ n: went });
+      else if (req0.todoId && userTodos && typeof userTodos.reshapeItems === 'function') {
+        const rq = reqNow(), who = heldWho({ principal: rq.principal || {} }), day = rq.held.since ? OF.when(rq.held.since) : 'an unknown date', drop = heldDroppedOf(rq), line = heldLine(still, who, day, drop), key = heldKey(still, who, day, drop);
+        try { userTodos.reshapeItems((it) => { if (it.id !== rq.todoId || it.status !== 'open' || it.text === line) return false; it.text = line; if (it.i18n) it.i18n = { ...it.i18n, text: key }; return true; }); } catch {}
+      }
     }
     notify([]);
-    const held = req0.held ? { ...req0.held, n: touched, convs: heldConvsOf(req0).map(({ rows, ...c }) => c) } : undefined;   // the answer never echoes the records
-    const out = { ok: true, request: { ...req0, ...(held ? { held } : {}), status: approve ? 'approved' : 'denied' }, ...(skipped ? { skipped } : {}), ...(dropped ? { dropped } : {}) };   // r9: unreadable rows skipped — said; r12: the part dropped — said
+    const rq = reqNow();
+    const held = rq.held ? { ...rq.held, convs: heldConvsOf(rq).map(({ rows, ...c }) => c) } : undefined;   // the answer never echoes the records
+    const out = { ok: true, request: { ...rq, ...(held ? { held } : {}), status: reopened ? 'open' : approve ? 'approved' : 'denied' }, ...(skipped ? { skipped } : {}), ...(dropped ? { dropped } : {}) };   // r9: unreadable rows skipped — said; r12: the part dropped — said
     if (!approve) return { ...out, discarded: touched };
-    if (!touched) return { ...out, delivered: false, n: 0, why: 'nothing-left', note: 'nothing was left to deliver — its conversations are gone' };
-    const carried = delivery && delivery.ok && Number(delivery.n) > touched ? { carried: Number(delivery.n) } : {};   // the same block took the watcher's newer hits too — said, never folded into «n»
-    // r13: what is STILL pending for this watcher in the decision's conversations after the one block — said, never «0/0» beside
-    // «nothing delivered» (a refused block the ladder stashed went to the agent's next turn: `stashed`, nothing left pending)
-    const pk0 = (req0.held || {}).pk;
-    const left = heldConvsOf(req0).reduce((x, c) => { const en = store.index.peek(c.key); return x + (en && Array.isArray(en.pending) ? en.pending.filter((p) => p && p.for === pk0 && !p.aside).length : 0); }, 0);
-    const refused = delivery && !delivery.ok ? (delivery.stashed ? { why: String(delivery.why || 'refused'), stashed: true, note: 'not delivered now — kept for its next turn' } : { why: String(delivery.why || 'refused'), held: true, note: 'not delivered now — the hits stay pending for the next delivery' }) : {};
-    return { ...out, delivered: !!(delivery && delivery.ok), n: touched, ...carried, ...refused, ...(left ? { pending: left } : {}) };
+    if (!touched && !reopened) return { ...out, delivered: false, n: 0, why: 'nothing-left', note: 'nothing was left to deliver — its conversations are gone' };
+    const carried = delivery && delivery.ok && Number(delivery.n) > went ? { carried: Number(delivery.n) } : {};   // the same block took the watcher's newer hits too — said, never folded into «n»
+    const refused = !delivery || delivery.ok ? {} : delivery.stashed ? { why: String(delivery.why || 'refused'), stashed: true, note: 'not delivered now — kept for its next turn' } : { why: String(delivery.why || 'refused'), note: 'not delivered now — the messages stay held on the card' };
+    return { ...out, delivered: !!(delivery && delivery.ok) && went > 0, n: went, ...carried, ...refused, ...(reopened ? { stillHeld: still, stillHeldConvs: stillConvs } : {}) };
+  }
+  /** r15: the record ids (and elided counts) a press releases, per conversation key → `Map(key → {ids, elided})` — the request's
+   *  own rows and its r6 in-place `aside` rows; read BEFORE releaseAside empties them. */
+  function heldIdsOf(r2, only) {
+    const out = new Map();
+    for (const c of heldConvsOf(r2)) {
+      if (only && !only.has(c.key)) continue;
+      const ids = new Set((Array.isArray(c.rows) ? c.rows : []).filter((p) => p && p.record && p.record.id).map((p) => p.record.id));
+      const e2 = store.index.peek(c.key);
+      for (const p of (e2 && Array.isArray(e2.pending) ? e2.pending : [])) if (p && p.aside === r2.id && p.record && p.record.id) ids.add(p.record.id);
+      out.set(c.key, { ids, elided: Number(c.elided) || 0 });
+    }
+    return out;
+  }
+  /** r15: inside an index update — the rows a press released (`released`, heldIdsOf) that are STILL in their conversation's live
+   *  pending go back into the request (its `sent` mark gone: the entry is live again); `nothingWent` (the block carried and stashed
+   *  nothing) also takes back the elided count it put out. → how many hits came back. */
+  function reholdLeft(r2, released, nothingWent) {
+    const pk = r2.held.pk;
+    let back = 0;
+    for (const c of heldConvsOf(r2)) {
+      const rel = released && released.get(c.key);
+      if (!rel) continue;
+      const e2 = store.index.entry(r2.adapterId, c.id, { create: false });
+      if (!e2 || !Array.isArray(e2.pending)) continue;
+      healP2(e2);
+      const take = (p) => p && !p.aside && p.record && rel.ids.has(p.record.id) && (!p.for || p.for === pk);
+      const rows = e2.pending.filter(take);
+      let el = 0;
+      if (nothingWent && rel.elided > 0 && e2.pendingElidedBy) { el = Math.min(rel.elided, Number(e2.pendingElidedBy[pk]) || 0); if (el) e2.pendingElidedBy[pk] = (Number(e2.pendingElidedBy[pk]) || 0) - el; }
+      if (!rows.length && !el) continue;
+      e2.pending = e2.pending.filter((p) => !take(p));
+      c.rows = [...(Array.isArray(c.rows) ? c.rows : []), ...rows.map(({ aside, ...p }) => ({ ...p, for: pk }))];
+      c.elided = (Number(c.elided) || 0) + el; c.n = c.rows.length;
+      delete c.sent;
+      back += rows.length + el;
+    }
+    return back;
   }
   /** DELIVER A HELD DECISION'S RELEASED ROWS — ONE PRESS, ONE BLOCK, ONE BILLED TURN (r12: on the road that wakes their watcher
    *  NOW; r13 — the r12 acceptance, corr-probe-multiroad.mjs: r12 sent one block PER ROAD, so one press became several billed
-   *  turns while the card and the toast promised one, and a press whose second block was refused answered «nothing delivered»
-   *  with nothing left pending). A conversation decision: its conversation's own flush (any grain). A scope digest: ONE block —
-   *  the held scope's when its watcher still stands, else the first account / rule grain that wakes one of its conversations now
-   *  — that also carries every one of its conversations woken through ANOTHER grain now (flushScope's `also`). Only when no
-   *  scope grain is left (each conversation woken through its own conversation row alone) does the press deliver ONE
-   *  conversation and leave the rest in their conversations' pending — said by the answer's `pending`, never billed twice. */
-  async function deliverHeld(rec, r) {
+   *  turns while the card and the toast promised one). `deliverPlanOf` reads the press's plan BEFORE anything is released
+   *  (r15): a conversation decision — its conversation (its own flush, any grain); a scope digest — ONE block, the held scope's
+   *  when its watcher still stands, else the first account / rule grain that wakes one of its conversations now, carrying every
+   *  one of them (flushScope's `also`) and HOLDING every chain it reads (r15 — the r13 acceptance, skep-r13-race.mjs: the
+   *  block held only its own scope's chain, so a window flush on the account's chain or a conversation's own flush read the same
+   *  rows during the ladder's await — the same held messages billed twice); no scope grain left (each conversation woken
+   *  through its own row alone) — ONE conversation per press, the rest stay in the request and on the card (r15: r13 left
+   *  them in live pending with the card closed «delivered 60»). → `{carry, rest, via}`. */
+  function deliverPlanOf(rec, r) {
     const h = r.held || {};
     const convs = heldConvsOf(r).filter((c) => !heldSpent(c));
-    if (h.via !== 'scope') return convs[0] ? flushPending(rec, convs[0].id, { kind: 'boot', pk: h.pk }) : null;
+    if (h.via !== 'scope') return { carry: convs.slice(0, 1), rest: convs.slice(1), via: null };
     const items = convs.map((c) => { const eff = wakeEffOf(store.index.peek(c.key)); return eff ? eff.watchers.find((x) => itemIs(x, h.pk)) || null : null; });
     const own = storedWatcherFor(h.source === 'account' ? accountGrainOf(rec.id) : patternById(h.patternId), h.pk);
     const via = own ? { source: h.source, patternId: h.patternId || null } : (() => { const it = items.find((x) => x && x.source !== 'conversation'); return it ? { source: it.source, patternId: it.patternId || null } : null; })();
-    if (via) return flushScope(rec, via.source, via.patternId, h.pk, { also: new Set(convs.map((c) => c.key)) });
-    const k = items.findIndex(Boolean);
-    return k < 0 ? { ok: false, why: 'nothing-pending' } : flushPending(rec, convs[k].id, { kind: 'boot', pk: h.pk });
+    if (via) return { carry: convs, rest: [], via };
+    const k = items.findIndex(Boolean);   // r15: no scope road — ONE conversation per press, the rest stay on the card
+    return k < 0 ? { carry: [], rest: convs, via: null } : { carry: [convs[k]], rest: convs.filter((_, i) => i !== k), via: null };
+  }
+  async function deliverHeld(rec, r, plan) {
+    const h = r.held || {};
+    if (!plan || !plan.carry.length) return { ok: false, why: 'nothing-pending' };
+    if (plan.via) return flushScope(rec, plan.via.source, plan.via.patternId, h.pk, { also: new Set(plan.carry.map((c) => c.key)) });   // r15: the block holds every road it reads (the engine's billedWake `roads`)
+    return flushPending(rec, plan.carry[0].id, { kind: 'boot', pk: h.pk });
   }
   // THE ITEM AND THE REQUEST ARE ONE STATE (lane wake-approve-card — exit-proxy verify-r2 ask-b's law, which the hub-act,
   // automation and vault asks keep). Acceptance round 2: a wake request's item is a DECISION ROW — the store lets it leave
@@ -2228,7 +2308,7 @@ function create(engineCtx) {
       const r2 = (Array.isArray(ix.watchRequests) ? ix.watchRequests : []).find((r) => r && r.id === r0.id);
       if (!r2 || r2.status !== 'open') return;
       r2.status = 'denied'; r2.decidedAt = t; r2.decidedBy = why;
-      before = (heldDroppedOf(r2) || { n: 0 }).n;
+      before = heldDroppedSumOf(r2);   // r15: every part dropped before — a re-held conversation's earlier part included
       touched = releaseAside(r2, false);
       r2.held.n = touched;
     });
@@ -2257,7 +2337,8 @@ function create(engineCtx) {
       for (const c of heldConvsOf(r2)) {
         if (!ruleOf.has(c.key) || heldSpent(c)) continue;
         const k = releaseAside(r2, false, new Set([c.key]));
-        c.dropped = { n: (c.dropped && Number(c.dropped.n) || 0) + k, why: heldEndOf(ruleOf.get(c.key)).why, at: t };   // r13: a re-dropped entry adds up
+        c.dropped = { n: (Number(c.dropEarlier) || 0) + k, why: heldEndOf(ruleOf.get(c.key)).why, at: t };   // r13: a re-dropped entry adds up — r15: its earlier part (dropEarlier) back in its count
+        delete c.dropEarlier;
         n += k;
       }
       r2.held.n = heldCountOf(r2);

@@ -101,14 +101,15 @@ ok(ACL.validateDirectory({ singles: true }).ok && ACL.validateDirectory({ single
 const A = 'fake-poll', C = 'fake-poll-ops', KEY = `${A}/${C}`;
 const AG = { kind: 'agent', id: 'agent-1', name: 'Worker', groups: [], msgLevelFor: () => 'none' };
 function dayStartClock() { const t0 = Date.now(); const day0 = Math.floor(t0 / 86400e3) * 86400e3 + 60e3; let skew = 0; const f = () => day0 + (Date.now() - t0) + skew; f.advance = (ms) => { skew += ms; }; return f; }
-function mkEngine(name, { ENGM = ENG, live = null, sendHook = null, decisionEngine = null, lines = null, refuse = null } = {}) {
+function mkEngine(name, { ENGM = ENG, live = null, sendHook = null, decisionEngine = null, lines = null, refuse = null, gate = null } = {}) {
   const dataDir = path.join(ROOT, name);
   const clock = dayStartClock();
   const userTodos = new UserTodoManager({ dataDir, now: clock });
   const delivered = [], stashed = [];
   const deliver = {
     // r13 `refuse(k)`: the ladder refuses the k-th call (a daily cap) — the refused block is still recorded (`refused: true`)
-    deliverToConversation: async (cid, text, o) => { const no = !!(refuse && refuse(delivered.length)); delivered.push({ cid, text, o, ...(no ? { refused: true } : {}) }); return no ? { ok: false, reason: 'the daily cap', refused: 'cap' } : { ok: true, lane: 'message' }; },
+    // r15 `gate(k)`: the k-th call waits on the promise it returns (a SLOW ladder — the press's block holds its chains meanwhile)
+    deliverToConversation: async (cid, text, o) => { const no = !!(refuse && refuse(delivered.length)); delivered.push({ cid, text, o, ...(no ? { refused: true } : {}) }); const g = gate ? gate(delivered.length - 1) : null; if (g) await g; return no ? { ok: false, reason: 'the daily cap', refused: 'cap' } : { ok: true, lane: 'message' }; },
     stashFor: (cid, e) => { stashed.push({ cid, ...e }); return { stored: true }; },
   };
   // the fake world follows THIS clock (a later pass sees the day's later records — new messages)
@@ -1783,7 +1784,7 @@ const C2_13 = 'fake-poll-announce', K2_13 = `${A}/${C2_13}`;
 const BOTH13 = { match: 'any', rules: [{ kind: 'title', value: 'Ops' }, { kind: 'title', value: 'Announce' }] }, OPS13 = { match: 'any', rules: [{ kind: 'title', value: 'Ops' }] }, ANN13 = { match: 'any', rules: [{ kind: 'title', value: 'Announce' }] };
 const pend13 = (eng, key) => ((eng.store.index.peek(key) || {}).pending || []).filter((p) => p && p.for === 'agent:agent-1' && !p.aside).length;
 async function inject13(m, cv, tag, pk = 'agent:agent-1') { const t0 = m.clock(); await m.eng.store.index.update(() => { const e2 = m.eng.store.index.entry(A, cv, { create: true }); if (!Array.isArray(e2.pending)) e2.pending = []; for (let i = 0; i < 30; i++) e2.pending.push({ record: { id: `${cv}-${tag}13-${i}`, text: `old message ${i}`, at: t0 - 3 * 86400e3 }, why: [], at: t0 - 3 * 86400e3, road: 'wake', for: pk }); }); }
-async function boot13(name, { ENGM = ENG, live, refuse = null } = {}) { const m = mkEngine(name, { ENGM, live, refuse }); m.eng.start(); await new Promise((r) => setTimeout(r, 30)); if (m.eng.settleWakes) await m.eng.settleWakes(); return m; }
+async function boot13(name, { ENGM = ENG, live, refuse = null, gate = null } = {}) { const m = mkEngine(name, { ENGM, live, refuse, gate }); m.eng.start(); await new Promise((r) => setTimeout(r, 30)); if (m.eng.settleWakes) await m.eng.settleWakes(); return m; }
 const req13 = (m) => (m.eng.store.index.table('watchRequests') || []).find((r) => r && r.kind === 'held');
 const st13 = (m) => { const r = req13(m); const it = r && r.todoId ? m.userTodos.get(r.todoId) : null; return { status: r && r.status, rows: Object.fromEntries(((r && r.held && r.held.convs) || []).map((c) => { const n = Array.isArray(c.rows) ? c.rows.length : 0; return [c.id, c.dropped ? `${n} dropped ${c.dropped.n}` : n]; })), card: it ? (it.status === 'open' ? it.text : FA.settledWords(it, SAID10)) : null }; };
 async function digestWorld13(ENGM, name, { live, account = false, who = AGENT } = {}) {
@@ -1830,9 +1831,9 @@ try {
   const g = await reholdLeg13(ENG, 'e13-rehold', OPS13);
   const PART = (n) => ` · the rule no longer covers 1 of 2 conversations — ${n} held messages dropped`;
   ok(J2s(g.narrowed.rows) === J2s({ 'fake-poll-ops': 30, 'fake-poll-announce': '0 dropped 30' }) && J2s(g.reheld.rows) === J2s({ 'fake-poll-ops': 30, 'fake-poll-announce': 30 }) && /^60 messages for Worker held since .* — deliver or discard$/.test(g.reheld.card)
-    && J2s(g.narrowedAgain.rows) === J2s({ 'fake-poll-ops': 30, 'fake-poll-announce': '0 dropped 30' }) && g.narrowedAgain.card.endsWith(PART(30)),
-    `(a) M1 — \`dropped\` is a ROW fact: a later boot re-holds 30 new Announce hits into the dropped entry ⇒ it is LIVE again («${g.reheld.card && g.reheld.card.replace(/since .* —/, 'since … —')}»); narrowed again ⇒ THOSE 30 drop by name («…${PART(30)}») (b15a3cab4: skipped as spent — the 30 never dropped)`, J2s({ narrowed: g.narrowed, reheld: g.reheld, narrowedAgain: g.narrowedAgain }));
-  ok(g.press.ok && g.press.delivered === true && g.press.n === 30 && J2s(g.blocks) === J2s([{ ops: true, ann: false }]) && g.after.card === `delivered${PART(30)}` && J2s(g.pend) === J2s({ ops: 0, ann: 0 }) && J2s(g.next) === J2s({ ops: 0, ann: 0 }) && !g.press.pending,
+    && J2s(g.narrowedAgain.rows) === J2s({ 'fake-poll-ops': 30, 'fake-poll-announce': '0 dropped 60' }) && g.narrowedAgain.card.endsWith(PART(60)),
+    `(a) M1 — \`dropped\` is a ROW fact: a later boot re-holds 30 new Announce hits into the dropped entry ⇒ it is LIVE again («${g.reheld.card && g.reheld.card.replace(/since .* —/, 'since … —')}»); narrowed again ⇒ THOSE 30 drop by name, and the part says ALL Announce dropped over the decision's life («…${PART(60)}» — r15: 3928de8bd said 30, its earlier 30 lost at the re-hold) (b15a3cab4: skipped as spent — the 30 never dropped)`, J2s({ narrowed: g.narrowed, reheld: g.reheld, narrowedAgain: g.narrowedAgain }));
+  ok(g.press.ok && g.press.delivered === true && g.press.n === 30 && J2s(g.blocks) === J2s([{ ops: true, ann: false }]) && g.after.card === `delivered${PART(60)}` && J2s(g.pend) === J2s({ ops: 0, ann: 0 }) && J2s(g.next) === J2s({ ops: 0, ann: 0 }) && !g.press.pending && !g.press.stillHeld,
     `(a) Deliver ⇒ n ${g.press.n} in ONE block (Ops only), the record «${g.after.card}», nothing returned to pending (b15a3cab4: «delivered 60» — Announce's 30 back in pending, dropped unsaid at the next write)`, J2s({ press: g.press, blocks: g.blocks, pend: g.pend, next: g.next }));
   const h = await reholdLeg13(ENG, 'e13-rehold-ann', ANN13);
   ok(J2s(h.narrowedAgain.rows) === J2s({ 'fake-poll-ops': '0 dropped 30', 'fake-poll-announce': 30 }) && h.narrowedAgain.status === 'open' && h.press.ok && h.press.n === 30 && J2s(h.blocks) === J2s([{ ops: false, ann: true }]) && J2s(h.pend) === J2s({ ops: 0, ann: 0 }),
@@ -1868,7 +1869,9 @@ try {
     `(b) the ONE block refused by the ladder (its daily cap) ⇒ «${r.press.note}» (stashed for the agent's next turn), nothing pending and none claimed; one call, never a second (b15a3cab4: one block went, the other refused ⇒ «not delivered now — the hits stay pending» with pending 0/0)`, J2s(r));
 } catch (e) { ok(false, '⑪ (b) threw on this tree: ' + ((e && e.stack) || e)); }
 // (c) NO SCOPE ROAD LEFT: the held rule removed while each conversation still wakes Worker through its OWN conversation row ⇒ the
-// press delivers ONE conversation (one turn) and SAYS the rest wait for their next delivery (`pending`) — never two billed turns
+// press delivers ONE conversation (one turn); r15 (the r13 acceptance: 3928de8bd answered «delivered 60» with Announcements' 30 in
+// live pending and the card closed) — the rest never leave the request: the card stays OPEN with them, the answer says `stillHeld`,
+// and the next press delivers the next conversation (one turn each); n = what went
 try {
   const live = [];
   const { pid } = await digestWorld13(ENG, 'e13-convonly', { live });
@@ -1882,9 +1885,18 @@ try {
     const before = m2.delivered.length;
     const d = await m2.eng.decideRequest(r0.id, true, 'user', { person: true });
     if (m2.eng.settleWakes) await m2.eng.settleWakes();
-    const calls = m2.delivered.slice(before).length;
-    ok(rm.ok && r0.held.via === 'scope' && after.status === 'open' && d.ok && d.delivered === true && d.n === 60 && calls === 1 && d.pending === 30,
-      `(c) no scope road left (the rule removed; each conversation woken by its own row) ⇒ ONE billed call (${calls}), and the answer says ${d.pending} still wait for their next delivery (b15a3cab4: one call PER conversation)`, J2s({ via: r0.held.via, after, d: { ok: d.ok, delivered: d.delivered, n: d.n, pending: d.pending }, calls }));
+    const calls = m2.delivered.slice(before).map((x) => ({ ops: /Ops room/.test(x.text), ann: /Announcements/.test(x.text) }));
+    const mid = st13(m2), pendMid = { ops: pend13(m2.eng, KEY), ann: pend13(m2.eng, K2_13) };
+    ok(rm.ok && r0.held.via === 'scope' && after.status === 'open' && d.ok && d.delivered === true && d.n === 30 && d.stillHeld === 30 && d.stillHeldConvs === 1 && d.request.status === 'open' && !d.pending
+      && J2s(calls) === J2s([{ ops: true, ann: false }]) && mid.status === 'open' && J2s(mid.rows) === J2s({ 'fake-poll-ops': 0, 'fake-poll-announce': 30 }) && /^30 messages for Worker held since .* — deliver or discard$/.test(mid.card || '') && J2s(pendMid) === J2s({ ops: 0, ann: 0 }),
+      `(c) no scope road left (the rule removed; each conversation woken by its own row) ⇒ ONE billed call (Ops), n ${d.n} = what went; Announcements' ${d.stillHeld} stay in the request, its card OPEN «${(mid.card || '').replace(/since .* —/, 'since … —')}», nothing in live pending (3928de8bd: «delivered 60», pending 30, the card closed «delivered»)`, J2s({ via: r0.held.via, after, d: { ok: d.ok, delivered: d.delivered, n: d.n, stillHeld: d.stillHeld, status: d.request && d.request.status }, calls, mid, pendMid }));
+    const b2 = m2.delivered.length;
+    const d2 = await m2.eng.decideRequest(r0.id, true, 'user', { person: true });
+    if (m2.eng.settleWakes) await m2.eng.settleWakes();
+    const calls2 = m2.delivered.slice(b2).map((x) => ({ ops: /Ops room/.test(x.text), ann: /Announcements/.test(x.text) }));
+    const end = st13(m2);
+    ok(d2.ok && d2.delivered === true && d2.n === 30 && !d2.stillHeld && d2.request.status === 'approved' && J2s(calls2) === J2s([{ ops: false, ann: true }]) && end.status === 'approved' && end.card === 'delivered' && pend13(m2.eng, K2_13) === 0,
+      `(c) the next press delivers the next conversation (Announcements, one call), n ${d2.n}; the request ends «${end.card}» — never two billed turns for one press`, J2s({ d2: { ok: d2.ok, delivered: d2.delivered, n: d2.n, stillHeld: d2.stillHeld, status: d2.request && d2.request.status }, calls2, end }));
   } finally { m2.eng.stop(); }
 } catch (e) { ok(false, '⑪ (c) threw on this tree: ' + ((e && e.stack) || e)); }
 // (d) THE MINOR — a press that drops a part and then finds its watcher not running says the part in its own answer (an All-agents
@@ -1901,6 +1913,119 @@ try {
       `(d) the not-in-effect answer says the part the same press dropped: «${d.error}» (b15a3cab4: «… the 30 messages stay held …» alone)`, J2s(d));
   } finally { m2.eng.stop(); }
 } catch (e) { ok(false, '⑪ (d) threw on this tree: ' + ((e && e.stack) || e)); }
+
+console.log('⑫ ROUND 15 (lane wake-approve-card) — the ONE block HOLDS every chain it reads; what a press did not get to the agent stays on its card; a decision\'s count is the sum of its parts; a road is named');
+// (a) / (b) THE RACE (repro/accept-r13/skep-r13-race.mjs; the lane's repro/r15/race.mjs): Deliver's ONE block waits on a SLOW ladder
+// while (a) the account's own window flush (what queueScopeWindow's timer calls — Announcements woken through the account) or (b)
+// Announcements' own conversation flush (woken by its own row) runs ⇒ that flush WAITS for the block's chain and finds nothing; ONE
+// billed call carries each row set (3928de8bd: the block held only the rule's chain — two calls both carrying Announcements' 30)
+async function raceLeg15(ENGM, name, road) {
+  const live = [];
+  const { pid } = await digestWorld13(ENGM, name, { live, account: road === 'account' });
+  let open = () => {}, inLadder = () => {};
+  const gateP = new Promise((r) => { open = r; }), entered = new Promise((r) => { inLadder = r; });
+  const m2 = await boot13(name, { ENGM, live, gate: (k) => (k === 0 ? (inLadder(), gateP) : null) });
+  live.push({ cid: 'agent-1', name: 'Worker', groups: [] }, { cid: 'agent-2', name: 'Other', groups: [] });
+  try {
+    if (road === 'conversation') { const cw = await m2.eng.setGrain(A, { kind: 'conversation', convId: C2_13 }, { watchers: [{ principal: AGENT, delivery: 'wake', notify: 'wake', dailyWakeCap: 5 }] }, { person: true }); if (!cw.ok) throw new Error('setup (conversation): ' + J2s(cw)); }
+    await m2.eng.setGrain(A, { kind: 'pattern', id: pid }, { pattern: OPS13 }, { person: true });
+    const before = m2.delivered.length;
+    const press = m2.eng.decideRequest(req13(m2).id, true, 'user', { person: true });
+    await entered;   // the press's ONE block is inside the ladder now
+    let done = false;
+    const other = (road === 'account' ? m2.eng.flushScope(A, 'account', null, 'agent:agent-1') : m2.eng.flushPending(A, C2_13, { pk: 'agent:agent-1' })).then((x) => { done = true; return x; });
+    await new Promise((r) => setTimeout(r, 25));
+    const waited = !done;
+    open();
+    const d = await press, o = await other;
+    if (m2.eng.settleWakes) await m2.eng.settleWakes();
+    const calls = m2.delivered.slice(before).map((x) => ({ ops: /Ops room/.test(x.text), ann: /Announcements/.test(x.text), spend: x.o && x.o.spendReason }));
+    return { press: PRESS10(d), other: { ok: !!(o && o.ok), why: (o && o.why) || null }, waited, calls, after: st13(m2), pend: { ops: pend13(m2.eng, KEY), ann: pend13(m2.eng, K2_13) } };
+  } finally { open(); m2.eng.stop(); }
+}
+// THE MUTANT «one chain» (3928de8bd's block: the held scope's chain only, every `also` conversation read whatever chain owns it)
+function oneChainMutant15() {
+  const src = engineSource(REPO);
+  const A15 = '    if (opts.also && opts.also.size) {   // r15:', H15 = "if (!ownRoad && (!holds || (road && !holds.has(road)))) continue;";
+  return { src, cut: src.split(A15).length === 2 && src.split(H15).length === 2 ? src.replace(A15, '    if (false) {   // r15:').replace(H15, 'if (false) continue;') : src };
+}
+for (const road of ['account', 'conversation']) {
+  const L15 = road === 'account' ? '(a)' : '(b)';
+  try {
+    const g = await raceLeg15(ENG, `e15-race-${road}`, road);
+    ok(g.press.ok && g.press.delivered === true && g.press.n === 60 && g.waited && !g.other.ok && g.other.why === 'nothing-pending'
+      && J2s(g.calls) === J2s([{ ops: true, ann: true, spend: 'channel-message' }]) && J2s(g.pend) === J2s({ ops: 0, ann: 0 }) && g.after.card === 'delivered',
+      `${L15} THE RACE on ${road === 'account' ? "the ACCOUNT's chain (its window flush while the block waits on the ladder)" : "Announcements' OWN chain (its conversation flush while the block waits)"} ⇒ the flush waited for the block's chain and found ${g.other.why}; ONE billed call (${g.calls.length}, ${g.calls.filter((x) => x.spend === 'channel-message').length} channel-message) carries Ops + Announcements, n ${g.press.n} (3928de8bd: 2 calls, Announcements' 30 billed twice)`, J2s(g));
+    if (road === 'account') {
+      const m = oneChainMutant15();
+      const r = await raceLeg15(MUT.load('src/server/channels-engine.js', m.cut, 'held-one-chain'), 'e15-race-red', road);
+      ok(m.cut !== m.src && r.calls.filter((x) => x.ann).length === 2 && !r.waited,
+        `CONTROL «one chain» (3928de8bd's block: the held scope's chain only): the same race ⇒ ${r.calls.length} calls, Announcements carried by ${r.calls.filter((x) => x.ann).length} — the same held messages billed twice`, J2s({ calls: r.calls, waited: r.waited, other: r.other }));
+    }
+  } catch (e) { ok(false, `⑫ ${L15} threw on this tree: ` + ((e && e.stack) || e)); }
+}
+// (c) NEVER «delivered» FOR A ROW STILL PENDING: the ONE block refused WITHOUT a stash (the watcher's own daily cap, spent by a
+// window that went earlier — the pace refuses before the ladder) ⇒ the 60 the press released come BACK into the request, the card
+// stays open with them, the answer «not delivered now — the messages stay held on the card», n 0 (3928de8bd: the record closed
+// «delivered 60», the rows in live pending with no card)
+try {
+  const live = [];
+  const { pid } = await digestWorld13(ENG, 'e15-paced', { live });
+  const m2 = await boot13('e15-paced', { live });
+  live.push({ cid: 'agent-1', name: 'Worker', groups: [] }, { cid: 'agent-2', name: 'Other', groups: [] });
+  try {
+    const cap = await m2.eng.setGrain(A, { kind: 'pattern', id: pid }, { watchers: [{ principal: AGENT, delivery: 'wake', notify: 'digest', digestMinutes: 60, dailyWakeCap: 1 }] }, { person: true });
+    await inject13(m2, C, 'fresh');   // 30 more, live — the rule's window delivers them and spends the day's one wake
+    const w0 = await m2.eng.flushScope(A, 'pattern', pid, 'agent:agent-1');
+    const before = m2.delivered.length;
+    const d = await m2.eng.decideRequest(req13(m2).id, true, 'user', { person: true });
+    if (m2.eng.settleWakes) await m2.eng.settleWakes();
+    const after = st13(m2);
+    ok(cap.ok && w0.ok && d.ok && d.delivered === false && d.n === 0 && d.stillHeld === 60 && /daily wake cap reached/.test(d.why || '') && d.note === 'not delivered now — the messages stay held on the card' && !d.stashed
+      && m2.delivered.length === before && after.status === 'open' && J2s(after.rows) === J2s({ 'fake-poll-ops': 30, 'fake-poll-announce': 30 }) && /^60 messages for Worker held since .* — deliver or discard$/.test(after.card || '') && pend13(m2.eng, KEY) === 0 && pend13(m2.eng, K2_13) === 0,
+      `(c) the block refused by the watcher's daily cap (no ladder call, no stash) ⇒ the 60 come back into the request, its card open «${(after.card || '').replace(/since .* —/, 'since … —')}», n ${d.n}, «${d.note}» (3928de8bd: «delivered» with the rows in live pending)`, J2s({ w0: w0 && { ok: w0.ok }, d: { ok: d.ok, delivered: d.delivered, n: d.n, stillHeld: d.stillHeld, why: d.why, note: d.note }, after }));
+  } finally { m2.eng.stop(); }
+} catch (e) { ok(false, '⑫ (c) threw on this tree: ' + ((e && e.stack) || e)); }
+// (d) A DECISION'S COUNT IS THE SUM OF ITS PARTS (skep-r13-race.mjs leg 4): Announce's 30 dropped at a narrow, the rule widened, a
+// later boot re-holds 30 NEW Announce hits, then the rule is REMOVED ⇒ the ended record counts 30 + 60 = 90 (3928de8bd: 60 — the
+// re-hold had cleared the earlier part)
+try {
+  const live = [];
+  const { pid } = await digestWorld13(ENG, 'e15-sum', { live });
+  const m2 = await boot13('e15-sum', { live });
+  await m2.eng.setGrain(A, { kind: 'pattern', id: pid }, { pattern: OPS13 }, { person: true });
+  await m2.eng.setGrain(A, { kind: 'pattern', id: pid }, { pattern: BOTH13 }, { person: true });
+  await inject13(m2, C2_13, 'b'); m2.userTodos._flush(); m2.eng.stop(); await new Promise((r) => setTimeout(r, 10));
+  const m3 = await boot13('e15-sum', { live });
+  live.push({ cid: 'agent-1', name: 'Worker', groups: [] }, { cid: 'agent-2', name: 'Other', groups: [] });
+  try {
+    const r1 = req13(m3), reheld = st13(m3);
+    await m3.eng.removePattern(A, pid);
+    const it = r1.todoId ? m3.userTodos.get(r1.todoId) : null, end = st13(m3);
+    ok(J2s(reheld.rows) === J2s({ 'fake-poll-ops': 30, 'fake-poll-announce': 30 }) && end.status === 'denied' && it && it.resolvedBy === 'discarded' && it.resolvedFact && it.resolvedFact.n === 90 && it.resolvedFact.why === 'watch-removed' && it.resolvedFact.convs === 2,
+      `(d) dropped 30 at a narrow, 30 re-held, then the rule removed ⇒ the ended record counts ${it && it.resolvedFact && it.resolvedFact.n} = 30 + 60 («${end.card}») (3928de8bd: 60)`, J2s({ reheld, end, fact: it && it.resolvedFact }));
+  } finally { m3.eng.stop(); }
+} catch (e) { ok(false, '⑫ (d) threw on this tree: ' + ((e && e.stack) || e)); }
+// (e) A ROAD IS NAMED (skep-r13-race.mjs leg 5): the ONE block carries Announcements for the ACCOUNT's road under the rule's scope
+// ⇒ Announcements' section says it is watched through the whole account; Ops (the rule's own) says nothing (3928de8bd: «you are
+// watching the conversations matching a rule (title contains "Ops")» over both)
+try {
+  const live = [];
+  const { pid } = await digestWorld13(ENG, 'e15-label', { live, account: true });
+  const m2 = await boot13('e15-label', { live });
+  live.push({ cid: 'agent-1', name: 'Worker', groups: [] }, { cid: 'agent-2', name: 'Other', groups: [] });
+  try {
+    await m2.eng.setGrain(A, { kind: 'pattern', id: pid }, { pattern: OPS13 }, { person: true });
+    const before = m2.delivered.length;
+    const d = await m2.eng.decideRequest(req13(m2).id, true, 'user', { person: true });
+    if (m2.eng.settleWakes) await m2.eng.settleWakes();
+    const tx = (m2.delivered[before] || {}).text || '', ls = tx.split('\n');
+    const at = (re) => ls.findIndex((l) => re.test(l));
+    const iOps = at(/^#### Ops room — /), iAnn = at(/^#### Announcements — /), VIA = '(you are watching this one through the whole account, not the scope above)';
+    ok(d.ok && d.n === 60 && m2.delivered.length - before === 1 && /^you are watching the conversations matching a rule \(title contains "Ops"\)$/m.test(tx) && iAnn > 0 && ls[iAnn + 1] === VIA && iOps > 0 && ls[iOps + 1] !== VIA && ls.filter((l) => l === VIA).length === 1,
+      `(e) the block's Announcements section names its road «${VIA}»; Ops (the rule's own) does not`, J2s({ head: ls.filter((l) => /^(you are watching|#### |\(you are watching)/.test(l)) }));
+  } finally { m2.eng.stop(); }
+} catch (e) { ok(false, '⑫ (e) threw on this tree: ' + ((e && e.stack) || e)); }
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
