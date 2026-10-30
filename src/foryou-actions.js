@@ -726,7 +726,10 @@ function runCardOf(item, { t = fmt } = {}) {
   const said = (table, code) => (own(table, code) ? [{ text: t(table[code]) }] : code ? [{ code: String(code) }] : []);
   const list = (xs) => xs.flatMap((x, k) => (k ? [{ text: t(', ') }, ...x] : x));
   const tool = f.tool && typeof f.tool === 'object' ? f.tool : {};
-  const folderW = wholeOf(f, 'folder'), pathW = wholeOf(tool, 'path');   // r12: the producer folds both (clipFold) like an env value
+  const folderW = wholeOf(f, 'folder'), tailW = wholeOf(tool, 'pathTail'), pathW0 = wholeOf(tool, 'path');   // r12: the producer folds both (clipFold) like an env value
+  // r13 (r27 folds a long path ONCE): a program inside the working folder carries only its tail past the folder (`pathTail`) — its
+  // whole is the folder's whole + '/' + the tail; either fold missing ⇒ cut, the rest not available
+  const pathW = pathW0.cut && typeof tool.pathTail === 'string' ? (folderW.lost || tailW.lost ? { ...pathW0, whole: pathW0.shown, lost: true } : { shown: pathW0.shown, whole: folderW.whole + '/' + tailW.whole, cut: true, lost: false }) : pathW0;
   const folder = folderW.whole;
   const asOf = (a) => {
     const kind = a && typeof a === 'object' ? str(a.kind) : '', name = a && typeof a === 'object' ? str(a.name) : '';

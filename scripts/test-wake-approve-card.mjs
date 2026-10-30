@@ -1605,7 +1605,7 @@ try {
   const strip = (f, drop) => { const x = JSON.parse(J(f)); drop(x); return x; };
   const fe = strip(LV.fold, (x) => { delete x.env[0].valueFull; delete x.secrets[0].nameFull; });
   const fd = strip(LV['directive-long'], (x) => { delete x.always.directiveFull; });
-  const ff = strip(LV['folder-long'], (x) => { delete x.folderFull; delete x.tool.pathFull; });
+  const ff = strip(LV['folder-long'], (x) => { delete x.folderFull; });   // r13: the path folds ONCE (pathTail past the folder) — no folder fold ⇒ the path cannot be whole either
   const ve = FA.runCardOf(runItem(fe), { t: tt3 }), vd = FA.runCardOf(runItem(fd), { t: tt3 }), vf = FA.runCardOf(runItem(ff), { t: tt3 }), vz = FA.runCardOf(runItem(fe), { t: Z });
   const LOST = '(cut — the rest is not available)';
   const envLine = ve.fold.find((x) => x.label === 'Environment').lines[0], secLine = ve.fold.find((x) => x.label === 'Secrets').lines[0];
@@ -1624,18 +1624,19 @@ try {
   // of their own; a 2 100-character reason reference whole on its line
   const { m, done } = storeWith(FA);
   try {
-    const f = LV['folder-long'], folderWhole = f.folderFull.join(''), pathWhole = f.tool.pathFull.join('');
+    const f = LV['folder-long'], folderWhole = f.folderFull.join(''), pathWhole = folderWhole + '/' + f.tool.pathTail;   // r13: r27 folds the path once
     const it = m.get(m.add('claude:r12-folder', { text: 'folder', origin: 'vault', action: { type: 'vault-run-ask', askId: '3'.repeat(32) }, facts: f }).id);
     const v = FA.runCardOf(it, { t: Z }), html = ROW3.runFactsHtml(it, Z);
     const fr = v.rows.find((r) => r.key === 'folder').lines[0], pr = v.rows.find((r) => r.key === 'program').lines[0];
     const fb = v.fold.find((x) => x.label === '工作文件夹（完整）'), pb = v.fold.find((x) => x.label === '程序');
     const ar = LV['away-ref-long'], refWhole = ar.reason.away[0].refFull.join('');
-    const va = FA.runCardOf(runItem(ar), { t: tt3 }), why = va.fold.find((x) => x.label === 'Why it asks');
-    ok(J(it.facts) === J(f) && f.folderCut === true && f.tool.pathCut === true && folderWhole.endsWith('/evil-tail') && pathWhole.endsWith('/evil-tail/run.sh')
+    const arIt = m.get(m.add('claude:r12-ref', { text: 'ref', origin: 'vault', action: { type: 'vault-run-ask', askId: '4'.repeat(32) }, facts: ar }).id);   // r13: THROUGH the store (r12 drew it from the raw facts — the store's depth-4 walk cut it there)
+    const va = FA.runCardOf(arIt, { t: tt3 }), why = va.fold.find((x) => x.label === 'Why it asks');
+    ok(J(it.facts) === J(f) && J(arIt.facts) === J(ar) && f.folderCut === true && f.tool.pathCut === true && f.tool.pathTail === 'run.sh' && !('pathFull' in f.tool) && folderWhole.endsWith('/evil-tail') && pathWhole.endsWith('/evil-tail/run.sh')
       && fr[0].mono === f.folder + '…' && fr[1] && fr[1].aside === '（已截短 — 完整路径在「技术细节」里）' && pr[0].mono === 'run.sh'
       && fb && fb.cmd === folderWhole && pb && pb.cmd === pathWhole && html.includes(`<pre class="ut-run-cmd ut-run-cmd-full">${pathWhole}</pre>`)
       && ar.reason.away[0].refCut === true && refWhole.length === 2100 && why && why.lines.some((l) => l[0].mono === refWhole),
-      `(c) THE FOLDER AND THE PATH FOLDED: a ${folderWhole.length}-character folder — the face «${fr[0].mono.slice(0, 16)}…${fr[0].mono.slice(-12)} ${fr[1] && fr[1].aside}», the program row «${pr[0].mono}» (relative to the WHOLE folder), the fold «${fb && fb.label}» + «${pb && pb.label}» WHOLE (…/evil-tail/run.sh); a ${refWhole.length}-character reason reference whole on its line (1ad060a82 + the train's producer: a 2 000-character folder, no «…», no tail)`, J({ face: [fr[0].mono.length, pr[0].mono], boxes: [fb && fb.cmd.length, pb && pb.cmd.length] }));
+      `(c) THE FOLDER AND THE PATH FOLDED (both through the store): a ${folderWhole.length}-character folder — the face «${fr[0].mono.slice(0, 16)}…${fr[0].mono.slice(-12)} ${fr[1] && fr[1].aside}», the program row «${pr[0].mono}» (relative to the WHOLE folder), the fold «${fb && fb.label}» + «${pb && pb.label}» WHOLE (…/evil-tail/run.sh); a ${refWhole.length}-character reason reference whole on its line (1ad060a82 + the train's producer: a 2 000-character folder, no «…», no tail)`, J({ face: [fr[0].mono.length, pr[0].mono], boxes: [fb && fb.cmd.length, pb && pb.cmd.length] }));
   } finally { done(); }
 } catch (e) { ok(false, '⑳ (c) threw on this tree: ' + ((e && e.stack) || e)); }
 try {
@@ -1654,7 +1655,7 @@ try {
   const seen = { en: [both(del, tt3), both(dis, tt3), both(all, tt3)], zh: [both(del, Z), both(all, Z)], ja: [both(del, JA)] };
   const SRVK = read('src/server/channels-access.js'), UA = read('src/lib/user-todos-actions.js');
   const keyed = KEYS12.filter((k) => !(k in DICT8.zh) || !(k in JA9) || !(SRVK.includes(`i18nKey('${k}')`) || UA.includes(`t('${k}'`) || read('src/foryou-actions.js').includes(`t('${k}'`)));
-  const toast = /const droppedWords = d \? ' · ' \+ \(r\.dropped\.why === 'not-covered' \? t\('the rule no longer covers \{k\} of \{m\} conversations — \{d\} held messages dropped', d\) : t\('\{k\} of \{m\} conversations no longer wake \{agent\} — \{d\} held messages dropped', d\)\)/.test(UA) && /\+ droppedWords \+ skippedWords/.test(UA);
+  const toast = /const droppedWords = dd \? ' · ' \+ \(r\.dropped\.why === 'not-covered' \? t\('the rule no longer covers \{k\} of \{m\} conversations — \{d\} held messages dropped', dd\) : t\('\{k\} of \{m\} conversations no longer wake \{agent\} — \{d\} held messages dropped', dd\)\)/.test(UA) && /\+ droppedWords \+ pendingWords \+ skippedWords/.test(UA);   // r13: computed once for both toasts (the not-in-effect one says it too)
   const head = Z(KEYS12[0], { n: 30, agent: 'Worker', date: '2026-10-26 17:01 PT', k: 1, m: 2, d: 30 });
   ok(J(seen.en[0]) === J(Array(2).fill('delivered · the rule no longer covers 1 of 2 conversations — 30 held messages dropped'))
     && J(seen.en[1]) === J(Array(2).fill('discarded — nothing was sent · 1 of 2 conversations no longer wake Worker — 30 held messages dropped'))
@@ -1664,6 +1665,56 @@ try {
     && head === '30 条给 Worker 的消息自 2026-10-26 17:01 PT 起被搁置 — 投递还是丢弃 · 规则已不再覆盖 2 个会话中的 1 个 — 已丢弃 30 条搁置的消息' && !keyed.length && toast,
     `(d) PER CONVERSATION, SAID: the open card «${head}»; the record and the tray row «${seen.en[0][0]}» / «${seen.zh[0][0]}» / «${seen.ja[0][0]}»; a digest whose every conversation went «${seen.en[2][0]}»; the press road toasts the part (1ad060a82: «delivered» for 60 with 30 of them dropped unsaid)`, J({ seen, keyed, toast }));
 } catch (e) { ok(false, '⑳ (d) threw on this tree: ' + ((e && e.stack) || e)); }
+
+// ── ㉑ ROUND 13 ──────────────────────────────────────────────────────────────────────────────────────────────────────
+console.log('㉑ ROUND 13 — every fold survives the store (its depth bound 5, its own leg); a deep folder stays under the 24 KB bound (the path folded once); one press, one turn, said');
+try {
+  // (a) THE STORE KEEPS EVERY FOLD (M3 — the r12 acceptance, corr-probe-store-fold.cjs: the store's depth-4 walk cut
+  // reason.away[k].refFull, so the card ALWAYS said the reference was cut): every legs variant through UserTodoManager.add comes back
+  // byte-identical but the store's own 4 096 cut (clip-5037: `cut` names cmdFull); the bound itself — a depth-6 value is still cut
+  // and named at depth 5
+  const { m, done } = storeWith(FA);
+  try {
+    const back = LEGS.variants.map((v, k) => { const it = m.get(m.add('claude:r13-' + k, { text: v.name, origin: 'vault', action: { type: 'vault-run-ask', askId: String(k % 10).repeat(32) }, facts: v.facts }).id); const { cut, ...rest } = it.facts || {}; return { name: v.name, same: J(rest) === J(v.facts), cut: cut || [] }; });
+    const bad = back.filter((x) => !(x.same && J(x.cut) === J(x.name === 'clip-5037' ? ['cmdFull'] : [])) && !(x.name === 'clip-5037' && J(x.cut) === J(['cmdFull'])));
+    const deep = m.get(m.add('claude:r13-deep', { text: 'deep', origin: 'vault', action: { type: 'vault-run-ask', askId: 'd'.repeat(32) }, facts: { ...LV.ops, deep: { a: { b: { c: { d: { e: 'x' } } } } } } }).id);
+    const ref = m.get(m.add('claude:r13-ref', { text: 'ref', origin: 'vault', action: { type: 'vault-run-ask', askId: 'e'.repeat(32) }, facts: LV['away-ref-long'] }).id);
+    ok(!bad.length && J(deep.facts.deep) === J({ a: { b: { c: { d: null } } } }) && (deep.facts.cut || []).includes('deep.a.b.c.d') && Array.isArray(ref.facts.reason.away[0].refFull) && ref.facts.reason.away[0].refFull.join('').length === 2100,
+      `(a) THE STORE KEEPS EVERY FOLD: all ${back.length} legs variants come back as filed (clip-5037: the store's own cmdFull cut, named); reason.away[0].refFull survives (2 100) — the walk's depth bound is 5 (b15a3cab4: 4 — refFull null, \`cut\` named it, the card «cut — the rest is not available»); a depth-6 value is still cut and named at «deep.a.b.c.d»`, J({ bad, deep: deep.facts.deep, deepCut: deep.facts.cut }));
+  } finally { done(); }
+} catch (e) { ok(false, '㉑ (a) threw on this tree: ' + ((e && e.stack) || e)); }
+try {
+  // (b) THE SIZE BOUND (the r12 acceptance, corr-probe-size2.cjs): a run in a 4 000-character folder (its program inside it), a
+  // 4 000-character argument and two 2 100-character env values — the producer folds the path ONCE (r27: pathTail), so the card
+  // stays under the store's 24 000-character whole bound and is drawn as facts (cf4e30bfe's whole-path fold: 26 909 — the prose stub)
+  const { m, done } = storeWith(FA);
+  try {
+    const f = LV['size-bound'], it = m.get(m.add('claude:r13-size', { text: 'size', origin: 'vault', action: { type: 'vault-run-ask', askId: 's'.repeat(32) }, facts: f }).id);
+    const v = FA.runCardOf(it, { t: tt3 }), size = J(f).length;
+    const fb = v && v.fold.find((x) => x.label === 'Working folder (whole)'), pr = v && v.rows.find((r) => r.key === 'program');
+    const fw = f.folderFull.join('');   // home-relative («~/workspace/ops/…»): the 4 000-character folder is 3 991 here
+    ok(fw.length > 3900 && fw.startsWith('~/workspace/ops/') && f.tool.pathTail === 'run.sh' && size < 24000 && !(it.facts && it.facts.dropped) && J(it.facts) === J(f) && !!v && fb && fb.cmd === fw && pr && pr.lines[0][0].mono === 'run.sh' && FA.factsDroppedWords(it, { t: tt3 }) === null,
+      `(b) THE SIZE BOUND: a 4 000-character folder + a 4 000-character argument + two 2 100-character env values = ${size} characters of facts — kept whole by the store and drawn (the folder whole in its box, the program «${pr && pr.lines[0][0].mono}»), never the prose stub`, J({ size, dropped: it.facts && it.facts.dropped }));
+  } finally { done(); }
+} catch (e) { ok(false, '㉑ (b) threw on this tree: ' + ((e && e.stack) || e)); }
+try {
+  // (c) A path whose folder fold did not arrive cannot be whole: pathTail without folderFull ⇒ «cut — the rest is not available»
+  const x = JSON.parse(J(LV['folder-long'])); delete x.folderFull;
+  const v = FA.runCardOf(runItem(x), { t: tt3 }), pf = v.fold.find((y) => y.label === 'Program');
+  ok(pf && pf.cmd == null && pf.lines[0].some((y) => y.aside === '(cut — the rest is not available)') && !v.fold.some((y) => y.label === 'Working folder (whole)'),
+    '(c) pathTail with no folderFull ⇒ the program path is said cut, the rest not available — never «folder clip + tail» drawn as whole', J(pf));
+} catch (e) { ok(false, '㉑ (c) threw on this tree: ' + ((e && e.stack) || e)); }
+try {
+  // (d) ONE PRESS, ONE TURN, SAID (M2 + the minor): the press road's toast says what is still pending after the one block and, on a
+  // not-in-effect answer, the part the same press dropped — each key with zh + ja
+  const UA = read('src/lib/user-todos-actions.js');
+  const KEY = '{n} held messages still wait for its next delivery';
+  const pendingToast = /const pendingWords = Number\(r\.pending\) > 0 \? ' · ' \+ t\('\{n\} held messages still wait for its next delivery', \{ n: Number\(r\.pending\) \}\) : '';/.test(UA) && /\+ droppedWords \+ pendingWords \+ skippedWords/.test(UA);
+  const notInEffect = /Deliver once it is, or Discard them', \{ agent: r\.agent \|\| '', n: Number\(r\.n\) \|\| 0 \}\)\) \+ droppedWords, \{ type: 'error' \}\)/.test(UA);
+  const CARD = read('src/server/channels-access.js');
+  ok(pendingToast && notInEffect && (KEY in DICT8.zh) && (KEY in JA9) && Z(KEY, { n: 30 }) === '还有 30 条搁置的消息等它下一次投递' && /Deliver sends them to \$\{who\} now, as one block \(a billed turn\)/.test(CARD),
+    `(d) the press road says what the ONE block did not carry («${Z(KEY, { n: 30 })}») and, when its watcher is not woken now, the part the press dropped; the card still promises ONE block (true since r13)`, J({ pendingToast, notInEffect }));
+} catch (e) { ok(false, '㉑ (d) threw on this tree: ' + ((e && e.stack) || e)); }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

@@ -11339,6 +11339,7 @@ export default {
   "Sends them now, as one block — a billed turn": "现在作为一个消息块发送 — 一次计费的回合",
   "Discarded {n} messages — nothing was sent": "已丢弃 {n} 条 — 没有发送任何内容",
   "Delivered {n} messages — one turn for the agent": "已投递 {n} 条 — 助手多了一个回合",
+  "{n} held messages still wait for its next delivery": "还有 {n} 条搁置的消息等它下一次投递",
   "Delivered {n} held messages with {m} newer ones — one turn for the agent": "已投递 {n} 条积压消息，连同 {m} 条较新的 — 助手多了一个回合",
   "Nothing was left to deliver — its conversations are gone": "没有可投递的了 — 它们所在的会话已不存在",
   "Not delivered now ({why}) — they go with its next delivery": "现在没有投递（{why}）— 它们会随下一次投递一起发送",

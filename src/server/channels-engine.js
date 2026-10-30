@@ -7885,8 +7885,11 @@ function create(deps = {}) {
     const sKey = `${source === 'account' ? `acct:${rec.id}` : `pat:${patternId}`}|${pk}`;
     return billedWake({ scopeOf: () => sKey }, () => flushScopeNow(rec, source, patternId, pk, sKey, opts));
   }
-  /** The scope digest's SECTION BODY — reached only through `billedWake` (see `flushScope`). */
-  async function flushScopeNow(rec, source, patternId, pk, sKey, { startedAt = null } = {}) {
+  /** The scope digest's SECTION BODY — reached only through `billedWake` (see `flushScope`). `also` (lane wake-approve-card r13 —
+   *  a held decision's Deliver is ONE block, one billed turn): conversation keys that ride THIS block whatever grain wakes their
+   *  watcher now (a held digest's conversation the account still wakes after its rule was narrowed); this scope's watcher
+   *  paces, targets and books it. */
+  async function flushScopeNow(rec, source, patternId, pk, sKey, { startedAt = null, also = null } = {}) {
     {
       if (stopped) return { ok: false, why: 'stopped', held: true };   // the hits are pending already; the next boot delivers them
       const t = now();
@@ -7900,7 +7903,7 @@ function create(deps = {}) {
         if (!en || en.adapterId !== rec.id || !Array.isArray(en.pending) || !en.pending.length) continue;
         const eff = wakeEffOf(en);
         const item = eff ? eff.watchers.find((x) => itemIs(x, pk)) : null;
-        if (!item || item.source !== source || (source === 'pattern' && item.patternId !== patternId)) continue;
+        if (!item || ((item.source !== source || (source === 'pattern' && item.patternId !== patternId)) && !(also && also.has(en.key)))) continue;
         const pend = pendingOf(en, pk, eff);
         if (!pend.hits.length && !pend.elided) continue;
         if (pendingRoadOf(item.watcher, pend) !== 'wake') continue;   // THE ROAD (lane boot-flush-next-turn): next-turn hits wait for the boot flush's free stash, never a billed digest

@@ -246,7 +246,7 @@ function normalizeCardFacts(x) {
     if (v === null || typeof v === 'boolean') return v;
     if (typeof v === 'number') { if (Number.isFinite(v)) return v; said(at); return null; }
     if (typeof v === 'string') { if (v.length > RUN_CMD_BODY_MAX) said(at); return clipText(v, RUN_CMD_BODY_MAX); }
-    if (depth >= 4 || typeof v !== 'object') { said(at); return null; }
+    if (depth >= 5 || typeof v !== 'object') { said(at); return null; }   // r13 (lane wake-approve-card): 5 — a reason reference's fold (reason.away[k].refFull) sits at 4; depth 4 cut it, so the card always said it was cut
     if (Array.isArray(v)) { if (v.length > 64) said(at); return v.slice(0, 64).map((y, k) => walk(y, depth + 1, `${at}[${k}]`)); }
     const out = {};
     let n = 0;

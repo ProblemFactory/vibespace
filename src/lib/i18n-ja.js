@@ -11338,6 +11338,7 @@ export default {
   "Sends them now, as one block — a billed turn": "今すぐ 1 つのブロックとして送信します — 課金されるターンです",
   "Discarded {n} messages — nothing was sent": "{n} 件を破棄しました — 何も送信していません",
   "Delivered {n} messages — one turn for the agent": "{n} 件を配信しました — エージェントに 1 ターン",
+  "{n} held messages still wait for its next delivery": "保留中のメッセージ {n} 件が次の配信を待っています",
   "Delivered {n} held messages with {m} newer ones — one turn for the agent": "保留中の {n} 件を新しい {m} 件と一緒に配信しました — エージェントに 1 ターン",
   "Nothing was left to deliver — its conversations are gone": "配信するものが残っていません — その会話はもうありません",
   "Not delivered now ({why}) — they go with its next delivery": "今は配信されませんでした（{why}）— 次の配信と一緒に送られます",

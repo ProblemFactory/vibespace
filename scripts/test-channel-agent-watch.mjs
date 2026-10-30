@@ -101,13 +101,14 @@ ok(ACL.validateDirectory({ singles: true }).ok && ACL.validateDirectory({ single
 const A = 'fake-poll', C = 'fake-poll-ops', KEY = `${A}/${C}`;
 const AG = { kind: 'agent', id: 'agent-1', name: 'Worker', groups: [], msgLevelFor: () => 'none' };
 function dayStartClock() { const t0 = Date.now(); const day0 = Math.floor(t0 / 86400e3) * 86400e3 + 60e3; let skew = 0; const f = () => day0 + (Date.now() - t0) + skew; f.advance = (ms) => { skew += ms; }; return f; }
-function mkEngine(name, { ENGM = ENG, live = null, sendHook = null, decisionEngine = null, lines = null } = {}) {
+function mkEngine(name, { ENGM = ENG, live = null, sendHook = null, decisionEngine = null, lines = null, refuse = null } = {}) {
   const dataDir = path.join(ROOT, name);
   const clock = dayStartClock();
   const userTodos = new UserTodoManager({ dataDir, now: clock });
   const delivered = [], stashed = [];
   const deliver = {
-    deliverToConversation: async (cid, text, o) => { delivered.push({ cid, text, o }); return { ok: true, lane: 'message' }; },
+    // r13 `refuse(k)`: the ladder refuses the k-th call (a daily cap) — the refused block is still recorded (`refused: true`)
+    deliverToConversation: async (cid, text, o) => { const no = !!(refuse && refuse(delivered.length)); delivered.push({ cid, text, o, ...(no ? { refused: true } : {}) }); return no ? { ok: false, reason: 'the daily cap', refused: 'cap' } : { ok: true, lane: 'message' }; },
     stashFor: (cid, e) => { stashed.push({ cid, ...e }); return { stored: true }; },
   };
   // the fake world follows THIS clock (a later pass sees the day's later records — new messages)
@@ -1774,6 +1775,132 @@ try {
       `(d) the rest goes out too ⇒ the decision ends, said for the whole digest: «${words}» (the 30 dropped before counted with the 30 now)`, J2s({ status: r2.status, by: r2.decidedBy, fact: it && it.resolvedFact, words }));
   } finally { m2.eng.stop(); }
 } catch (e) { ok(false, '⑩ (d) threw on this tree: ' + ((e && e.stack) || e)); }
+
+console.log('⑪ ROUND 13 (lane wake-approve-card) — `dropped` is a fact about ROWS; ONE press, ONE block, ONE billed turn; the answer says what went, what was stashed, what still waits');
+// THE DIGEST WORLD over two conversations (Ops + Announcements), 30 aged hits each for Worker — boot(name) restarts the engine on the
+// same data (a boot holds what is aged), inject(m, conv) parks 30 more aged hits; refuse / live as mkEngine's
+const C2_13 = 'fake-poll-announce', K2_13 = `${A}/${C2_13}`;
+const BOTH13 = { match: 'any', rules: [{ kind: 'title', value: 'Ops' }, { kind: 'title', value: 'Announce' }] }, OPS13 = { match: 'any', rules: [{ kind: 'title', value: 'Ops' }] }, ANN13 = { match: 'any', rules: [{ kind: 'title', value: 'Announce' }] };
+const pend13 = (eng, key) => ((eng.store.index.peek(key) || {}).pending || []).filter((p) => p && p.for === 'agent:agent-1' && !p.aside).length;
+async function inject13(m, cv, tag, pk = 'agent:agent-1') { const t0 = m.clock(); await m.eng.store.index.update(() => { const e2 = m.eng.store.index.entry(A, cv, { create: true }); if (!Array.isArray(e2.pending)) e2.pending = []; for (let i = 0; i < 30; i++) e2.pending.push({ record: { id: `${cv}-${tag}13-${i}`, text: `old message ${i}`, at: t0 - 3 * 86400e3 }, why: [], at: t0 - 3 * 86400e3, road: 'wake', for: pk }); }); }
+async function boot13(name, { ENGM = ENG, live, refuse = null } = {}) { const m = mkEngine(name, { ENGM, live, refuse }); m.eng.start(); await new Promise((r) => setTimeout(r, 30)); if (m.eng.settleWakes) await m.eng.settleWakes(); return m; }
+const req13 = (m) => (m.eng.store.index.table('watchRequests') || []).find((r) => r && r.kind === 'held');
+const st13 = (m) => { const r = req13(m); const it = r && r.todoId ? m.userTodos.get(r.todoId) : null; return { status: r && r.status, rows: Object.fromEntries(((r && r.held && r.held.convs) || []).map((c) => { const n = Array.isArray(c.rows) ? c.rows.length : 0; return [c.id, c.dropped ? `${n} dropped ${c.dropped.n}` : n]; })), card: it ? (it.status === 'open' ? it.text : FA.settledWords(it, SAID10)) : null }; };
+async function digestWorld13(ENGM, name, { live, account = false, who = AGENT } = {}) {
+  const m1 = mkEngine(name, { ENGM, live });
+  await m1.eng.pass(A, { force: true });
+  await m1.eng.setGrain(A, { kind: 'account' }, { access: [acc(who), acc(OTHER)] });
+  const pr = await m1.eng.setGrain(A, { kind: 'pattern' }, { pattern: BOTH13, access: [acc(OTHER)], watchers: [{ principal: who, delivery: 'wake', notify: 'digest', digestMinutes: 60, dailyWakeCap: 5 }] });
+  if (!pr.ok) throw new Error('setup: ' + J2s(pr));
+  if (account) { const ar = await m1.eng.setGrain(A, { kind: 'account' }, { watchers: [{ principal: who, delivery: 'wake', notify: 'digest', digestMinutes: 60, dailyWakeCap: 5 }] }, { person: true }); if (!ar.ok) throw new Error('setup (account): ' + J2s(ar)); }
+  for (const cv of [C, C2_13]) await inject13(m1, cv, 'a', who.kind === 'everyone' ? 'everyone:*>agent-1' : 'agent:agent-1');
+  m1.userTodos._flush(); m1.eng.stop(); await new Promise((r) => setTimeout(r, 10));
+  return { pid: pr.grain.id };
+}
+// (a) M1 — THE RE-HOLD (repro/accept-r12/corr-probe-rehold.mjs): narrowed ⇒ Announce dropped; widened, a later boot re-holds 30 NEW
+// aged Announce hits into the same decision ⇒ the entry is LIVE again; narrowed again ⇒ those 30 drop by name; Deliver ⇒ 30 in ONE block
+async function reholdLeg13(ENGM, name, lastNarrow) {
+  const live = [];
+  const { pid } = await digestWorld13(ENGM, name, { live });
+  const m2 = await boot13(name, { ENGM, live });
+  const out = { held: st13(m2) };
+  await m2.eng.setGrain(A, { kind: 'pattern', id: pid }, { pattern: OPS13 }, { person: true });
+  out.narrowed = st13(m2);
+  await m2.eng.setGrain(A, { kind: 'pattern', id: pid }, { pattern: BOTH13 }, { person: true });
+  await inject13(m2, C2_13, 'b');
+  m2.userTodos._flush(); m2.eng.stop(); await new Promise((r) => setTimeout(r, 10));
+  const m3 = await boot13(name, { ENGM, live });
+  live.push({ cid: 'agent-1', name: 'Worker', groups: [] }, { cid: 'agent-2', name: 'Other', groups: [] });
+  try {
+    out.reheld = st13(m3);
+    await m3.eng.setGrain(A, { kind: 'pattern', id: pid }, { pattern: lastNarrow }, { person: true });
+    out.narrowedAgain = st13(m3);
+    const before = m3.delivered.length;
+    const d = await m3.eng.decideRequest(req13(m3).id, true, 'user', { person: true });
+    if (m3.eng.settleWakes) await m3.eng.settleWakes();
+    out.press = { ...PRESS10(d), dropped: d && d.dropped, pending: d && d.pending };
+    out.blocks = m3.delivered.slice(before).map((x) => ({ ops: /Ops room/.test(x.text), ann: /Announcements/.test(x.text) }));
+    out.after = st13(m3); out.pend = { ops: pend13(m3.eng, KEY), ann: pend13(m3.eng, K2_13) };
+    await m3.eng.setGrain(A, { kind: 'account' }, { access: [acc(AGENT), acc(OTHER), acc({ kind: 'agent', id: 'agent-3', name: 'Third' })] });
+    out.next = { ops: pend13(m3.eng, KEY), ann: pend13(m3.eng, K2_13) };
+    return out;
+  } finally { m3.eng.stop(); }
+}
+try {
+  const g = await reholdLeg13(ENG, 'e13-rehold', OPS13);
+  const PART = (n) => ` · the rule no longer covers 1 of 2 conversations — ${n} held messages dropped`;
+  ok(J2s(g.narrowed.rows) === J2s({ 'fake-poll-ops': 30, 'fake-poll-announce': '0 dropped 30' }) && J2s(g.reheld.rows) === J2s({ 'fake-poll-ops': 30, 'fake-poll-announce': 30 }) && /^60 messages for Worker held since .* — deliver or discard$/.test(g.reheld.card)
+    && J2s(g.narrowedAgain.rows) === J2s({ 'fake-poll-ops': 30, 'fake-poll-announce': '0 dropped 30' }) && g.narrowedAgain.card.endsWith(PART(30)),
+    `(a) M1 — \`dropped\` is a ROW fact: a later boot re-holds 30 new Announce hits into the dropped entry ⇒ it is LIVE again («${g.reheld.card && g.reheld.card.replace(/since .* —/, 'since … —')}»); narrowed again ⇒ THOSE 30 drop by name («…${PART(30)}») (b15a3cab4: skipped as spent — the 30 never dropped)`, J2s({ narrowed: g.narrowed, reheld: g.reheld, narrowedAgain: g.narrowedAgain }));
+  ok(g.press.ok && g.press.delivered === true && g.press.n === 30 && J2s(g.blocks) === J2s([{ ops: true, ann: false }]) && g.after.card === `delivered${PART(30)}` && J2s(g.pend) === J2s({ ops: 0, ann: 0 }) && J2s(g.next) === J2s({ ops: 0, ann: 0 }) && !g.press.pending,
+    `(a) Deliver ⇒ n ${g.press.n} in ONE block (Ops only), the record «${g.after.card}», nothing returned to pending (b15a3cab4: «delivered 60» — Announce's 30 back in pending, dropped unsaid at the next write)`, J2s({ press: g.press, blocks: g.blocks, pend: g.pend, next: g.next }));
+  const h = await reholdLeg13(ENG, 'e13-rehold-ann', ANN13);
+  ok(J2s(h.narrowedAgain.rows) === J2s({ 'fake-poll-ops': '0 dropped 30', 'fake-poll-announce': 30 }) && h.narrowedAgain.status === 'open' && h.press.ok && h.press.n === 30 && J2s(h.blocks) === J2s([{ ops: false, ann: true }]) && J2s(h.pend) === J2s({ ops: 0, ann: 0 }),
+    `(a) the variant (corr-probe-rehold-ann.mjs): narrowed to Announce ⇒ Ops drops, the re-held Announce stays and is delivered (n ${h.press.n}, one block) (b15a3cab4: the decision ended «the rule no longer covers its 2 conversations — 90 messages discarded» while the rule covered Announce)`, J2s({ narrowedAgain: h.narrowedAgain, press: h.press, blocks: h.blocks }));
+} catch (e) { ok(false, '⑪ (a) threw on this tree: ' + ((e && e.stack) || e)); }
+// (b) M2 — ONE PRESS, ONE BLOCK (corr-probe-multiroad.mjs): Worker on the rule digest AND the account digest; the rule narrowed to
+// Ops ⇒ Announce is woken through the account — Deliver sends BOTH in ONE block (one billed turn); the same block refused by the
+// ladder ⇒ «not delivered now — kept for its next turn» (stashed), nothing said to be pending that is not
+async function multiroadLeg13(ENGM, name, refuse = null) {
+  const live = [];
+  const { pid } = await digestWorld13(ENGM, name, { live, account: true });
+  const m2 = await boot13(name, { ENGM, live, refuse });
+  live.push({ cid: 'agent-1', name: 'Worker', groups: [] }, { cid: 'agent-2', name: 'Other', groups: [] });
+  try {
+    await m2.eng.setGrain(A, { kind: 'pattern', id: pid }, { pattern: OPS13 }, { person: true });
+    const out = { after: st13(m2) };
+    const before = m2.delivered.length, s0 = m2.stashed.length;
+    const d = await m2.eng.decideRequest(req13(m2).id, true, 'user', { person: true });
+    if (m2.eng.settleWakes) await m2.eng.settleWakes();
+    out.press = { ...PRESS10(d), stashed: d && d.stashed, held: d && d.held, note: d && d.note, pending: d && d.pending };
+    out.calls = m2.delivered.slice(before).map((x) => ({ ops: /Ops room/.test(x.text), ann: /Announcements/.test(x.text), spend: x.o && x.o.spendReason, refused: !!x.refused }));
+    out.stashes = m2.stashed.length - s0;
+    out.pend = { ops: pend13(m2.eng, KEY), ann: pend13(m2.eng, K2_13) };
+    return out;
+  } finally { m2.eng.stop(); }
+}
+try {
+  const g = await multiroadLeg13(ENG, 'e13-multiroad');
+  ok(J2s(g.after.rows) === J2s({ 'fake-poll-ops': 30, 'fake-poll-announce': 30 }) && g.press.ok && g.press.delivered === true && g.press.n === 60 && J2s(g.calls) === J2s([{ ops: true, ann: true, spend: 'channel-message', refused: false }]) && J2s(g.pend) === J2s({ ops: 0, ann: 0 }),
+    `(b) M2 — ONE press, ONE block: the rule narrowed, Announce now woken through the account ⇒ Deliver sends Ops AND Announcements in ONE block (${g.calls.length} billed call), n ${g.press.n} (b15a3cab4: two deliverToConversation calls — two billed turns for one press, the toast «one turn»)`, J2s(g));
+  const r = await multiroadLeg13(ENG, 'e13-multiroad-refused', (k) => k === 0);
+  ok(r.press.ok && r.press.delivered === false && r.press.stashed === true && r.press.note === 'not delivered now — kept for its next turn' && !r.press.pending && r.calls.length === 1 && r.calls[0].refused && r.stashes === 1 && J2s(r.pend) === J2s({ ops: 0, ann: 0 }),
+    `(b) the ONE block refused by the ladder (its daily cap) ⇒ «${r.press.note}» (stashed for the agent's next turn), nothing pending and none claimed; one call, never a second (b15a3cab4: one block went, the other refused ⇒ «not delivered now — the hits stay pending» with pending 0/0)`, J2s(r));
+} catch (e) { ok(false, '⑪ (b) threw on this tree: ' + ((e && e.stack) || e)); }
+// (c) NO SCOPE ROAD LEFT: the held rule removed while each conversation still wakes Worker through its OWN conversation row ⇒ the
+// press delivers ONE conversation (one turn) and SAYS the rest wait for their next delivery (`pending`) — never two billed turns
+try {
+  const live = [];
+  const { pid } = await digestWorld13(ENG, 'e13-convonly', { live });
+  const m2 = await boot13('e13-convonly', { live });
+  live.push({ cid: 'agent-1', name: 'Worker', groups: [] }, { cid: 'agent-2', name: 'Other', groups: [] });
+  try {
+    const r0 = req13(m2);   // held as ONE rule digest; THEN each conversation gets Worker on its own row, and the rule goes
+    for (const cv of [C, C2_13]) { const cw = await m2.eng.setGrain(A, { kind: 'conversation', convId: cv }, { watchers: [{ principal: AGENT, delivery: 'wake', notify: 'wake', dailyWakeCap: 5 }] }, { person: true }); if (!cw.ok) throw new Error('setup (conversation): ' + J2s(cw)); }
+    const rm = await m2.eng.removePattern(A, pid);
+    const after = st13(m2);
+    const before = m2.delivered.length;
+    const d = await m2.eng.decideRequest(r0.id, true, 'user', { person: true });
+    if (m2.eng.settleWakes) await m2.eng.settleWakes();
+    const calls = m2.delivered.slice(before).length;
+    ok(rm.ok && r0.held.via === 'scope' && after.status === 'open' && d.ok && d.delivered === true && d.n === 60 && calls === 1 && d.pending === 30,
+      `(c) no scope road left (the rule removed; each conversation woken by its own row) ⇒ ONE billed call (${calls}), and the answer says ${d.pending} still wait for their next delivery (b15a3cab4: one call PER conversation)`, J2s({ via: r0.held.via, after, d: { ok: d.ok, delivered: d.delivered, n: d.n, pending: d.pending }, calls }));
+  } finally { m2.eng.stop(); }
+} catch (e) { ok(false, '⑪ (c) threw on this tree: ' + ((e && e.stack) || e)); }
+// (d) THE MINOR — a press that drops a part and then finds its watcher not running says the part in its own answer (an All-agents
+// digest held for the running agent-1, which then STOPS — r10's «in effect»)
+try {
+  const live = [{ cid: 'agent-1', name: 'Worker', groups: [] }];
+  await digestWorld13(ENG, 'e13-noteffect', { live, who: EVERY10 });
+  const m2 = await boot13('e13-noteffect', { live });
+  live.length = 0; live.push({ cid: 'agent-2', name: 'Other', groups: [] });   // agent-1 stopped
+  try {
+    await m2.eng.store.index.update(() => { const e2 = m2.eng.store.index.entry(A, C2_13, { create: false }); e2.title = 'Deploy notes'; });   // renamed out of the rule's reach — no write, no prune
+    const d = await m2.eng.decideRequest(req13(m2).id, true, 'user', { person: true });
+    ok(!d.ok && d.code === 'not-in-effect' && d.why === 'not-running' && d.n === 30 && d.dropped && d.dropped.n === 30 && / · the rule no longer covers 1 of 2 conversations — 30 held messages dropped$/.test(d.error || ''),
+      `(d) the not-in-effect answer says the part the same press dropped: «${d.error}» (b15a3cab4: «… the 30 messages stay held …» alone)`, J2s(d));
+  } finally { m2.eng.stop(); }
+} catch (e) { ok(false, '⑪ (d) threw on this tree: ' + ((e && e.stack) || e)); }
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

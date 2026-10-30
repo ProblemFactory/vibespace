@@ -123,6 +123,13 @@ export function legsOf(root = HERE, { commit = null } = {}) {
     `r12: a ${LONGCWD.length}-character working folder and its ${LONGCWD.length + '/run.sh'.length}-character program at the tail — folderCut + folderFull, tool.pathCut + pathFull`);
   const LONGREF = ('vault://secrets/unifi-account/' + 'p'.repeat(2100)).slice(0, 2100);
   add('away-ref-long', factsOf(unifi(), { ...uNames, away: [{ ...UAWAY[0], ref: LONGREF }] }), 'r12: a reason line whose reference is 2 100 characters — reason.away[].refCut + refFull');
+  // r13 (the r12 acceptance, corr-probe-size2.cjs): THE SIZE BOUND — a run in a 4 000-character folder (its program inside it), a
+  // 4 000-character argument and two 2 100-character env values: r27 folds the path ONCE (its tail past the folder), so the card
+  // stays under the For-you store's 24 000-character whole bound (folding the whole path again made 26 909 — dropped to the prose)
+  const BIGCWD = (`${CWD}/` + Array.from({ length: 400 }, (_, k) => `nested-level-${String(k).padStart(3, '0')}-dir`).join('/')).slice(0, 4000 - '/tail'.length) + '/tail';
+  if (BIGCWD.length !== 4000) throw new Error(`BIGCWD ${BIGCWD.length}`);
+  add('size-bound', factsOf(unifi(['./run.sh', 'PUT', 'x'.repeat(4000)], [UENV[0], ['NOTE', 'n'.repeat(2100)], ['NOTE2', 'm'.repeat(2100)]], `${BIGCWD}/run.sh`), uNames, { cwd: BIGCWD }),
+    'r13: the size bound — a 4 000-character folder (program inside: pathTail), a 4 000-character argument, two 2 100-character env values');
   const legs = {
     v: 2,
     _: 'GENERATED — never hand-edit: node scripts/make-vault-run-card-legs.mjs --write (test-wake-approve-card ⑳ re-derives it from the producer wherever the tree carries one). Lane wake-approve-card r11–r12: every facts object a run-card leg injects (test-wake-approve-card, test-wake-approve-card-chrome), made by the PRODUCER (lane vault-agent-own src/vault-run.js cardFactsOf over real plans; the door\'s own whyAgainOf / exactPartsOf / cmdText for `whyAgain`, set as the door sets it). `codes` = VR.CARD_FACTS_CODES, the contract export.',
