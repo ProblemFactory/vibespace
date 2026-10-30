@@ -296,7 +296,13 @@ module.exports = {
      *  later); a record an older build wrote (no `frpcKnockless`) counts as the lock's unless a trial began that run */
     const lockStarted = (p) => (p.frpcKnockless ? p.frpcKnockless === 'locked'
       : !(p.knockTrialAt && p.frpcRun && p.frpcRun.at >= p.knockTrialAt && p.frpcRun.at - p.knockTrialAt < 60e3));
-    const restartsAtUnlock = (p) => p.frpcKnock === false && lockStarted(p) && !knocklessProven(p) && !p.relayUpgradedAt && !ranThisRun();
+    // r3b: ONE predicate for the status, the card and the unlock — and it needs a shared token HELD (sealed in the vault, even
+    // while LOCKED; the plaintext override; the cluster's): production's retired hub holds none, so nothing restarts there
+    const restartsAtUnlock = (p) => {
+      if (!(p.frpcKnock === false && lockStarted(p) && !knocklessProven(p) && !p.relayUpgradedAt && !ranThisRun())) return false;
+      const s = tokenState();
+      return !!s.token || !!s.locked;
+    };
     /** THE DROPPED LOGIN (lane frp-token-proof; r2 — a RATE and an OUTCOME, never a count): the running frpc started WITHOUT
      *  the shared token, a publish in this run tried ONE NewProxy that the relay never answered (`relayTry` {run, at} — the
      *  episode's first; publish() always tries before it refuses), and frpc keeps logging in (RT.droppedOf: DROP_LOGINS
@@ -456,7 +462,9 @@ module.exports = {
         upgradedAt: p.relayUpgradedAt || (knocklessProven(p) ? p.relayKnocklessAt : null), publishedAt: p.relayPublishedAt || null, retired: p.legacyRetired || null,
         // lane frp-token-proof: the running frpc's run — what its log counts; the dropped login by name; a frpc the lock started
         // without the shared token says its restart at the unlock is EXPECTED (the unlock takes it unless a proxy ran — never a trial)
-        run: running ? { at: (p.frpcRun && p.frpcRun.at) || null, knock: p.frpcKnock !== false, logins: runScan().logins, proxies: runScan().proxies } : null,
+        // r3b: `answered` = the relay answered a NewProxy in this run (only that earns «the relay knows it» on the card — a login
+        // never does); `minute` = the logins of the last 60 s since its last answer (the card's neutral words before a try)
+        run: running ? (() => { const sc = runScan(), now = Date.now(); return { at: (p.frpcRun && p.frpcRun.at) || null, knock: p.frpcKnock !== false, logins: sc.logins, proxies: sc.proxies, answered: sc.proxies > 0 || Number.isFinite(sc.answeredAt), minute: sc.recent.filter((x) => Number.isFinite(x) && now - x <= 60e3).length }; })() : null,
         dropped: running && dropped ? { logins: dropped.logins, since: dropped.since, why: dropped.why } : null,
         restartAtUnlock: !!(running && restartsAtUnlock(p)),   // r2: the same predicate the unlock acts on (never a trial)
       };
@@ -515,7 +523,7 @@ module.exports = {
         // run (a login proves nothing: frps 0.70.0 takes a vouched login and drops it); r2: never a TRIAL run (restartsAtUnlock)
         try { retireLegacy(); } catch (e) { console.warn('[plugins] frp: the shared relay token was not retired:', e.message); }
         const p = h.peek();
-        if (frpDaemonPid() && restartsAtUnlock(p) && frpCfg().token) {
+        if (frpDaemonPid() && restartsAtUnlock(p)) {   // r3b: the one predicate (unlocked now: the token is readable)
           restartSoon({}, 'with the shared token');
           return sealed;
         }

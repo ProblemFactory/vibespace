@@ -197,7 +197,7 @@ console.log('⑧b the run\'s log — a login is no proof; a drop is a RATE and a
   const AT = T0 + 93800 + 9;   // the file's mtime: its newest line written
   const runOf = typeof RT.runOf === 'function' ? RT.runOf : () => null, droppedOf = typeof RT.droppedOf === 'function' ? RT.droppedOf : () => null;
   const r = runOf(INCIDENT, null, { at: AT }) || {};
-  ok(r.logins === 12 && r.proxies === 0 && r.unanswered === 12 && Array.isArray(r.recent) && r.recent.length === RT.DROP_LOGINS, 'runOf over the incident\'s transcript: 12 logins, 0 proxies started, 12 since the relay last answered a NewProxy', r);
+  ok(r.logins === 12 && r.proxies === 0 && r.unanswered === 12 && Array.isArray(r.recent) && r.recent.length === Math.min(12, RT.RECENT_KEEP || 0), 'runOf over the incident\'s transcript: 12 logins, 0 proxies started, 12 since the relay last answered a NewProxy (their times kept, ≤ RECENT_KEEP)', r);
   ok(r.since === T0 + 1019 && r.recent[r.recent.length - 1] === AT, 'the log\'s own clock (PDT) maps onto the hub\'s by the file\'s mtime — whatever frpc\'s time zone', { since: r.since, want: T0 + 1019 });
   const tried = T0 + 2500;   // the boot replay's publish tried ONE NewProxy 2.5 s after the start — never answered
   ok(droppedOf(r, { knock: false, triedAt: tried, now: AT + 5e3 }) === true, 'THE DROPPED LOGIN: no shared token, a publish WANTED and never answered, 3 logins within 60 s since the relay last answered, frpc still redialling ⇒ dropped');

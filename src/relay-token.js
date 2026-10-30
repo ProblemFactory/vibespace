@@ -172,10 +172,12 @@ function loginOf(logText) {
  *  frpc.log text (a run's, read forward; `prev` = the state so far; `at` = when the text's last line was written — the file's
  *  mtime — so each line's own clock maps onto the hub's whatever frpc's time zone; no `at` ⇒ the log's clock as is) →
  *  { logins, proxies, unanswered, since, recent, answeredAt } — `unanswered` = the logins since the relay last answered a
- *  NewProxy, `since` the first of them, `recent` the times of the newest DROP_LOGINS of them, `answeredAt` the last answer */
+ *  NewProxy, `since` the first of them, `recent` the times of the newest RECENT_KEEP of them (r3b: the card counts the last
+ *  minute's), `answeredAt` the last answer */
 const LOGIN_OK_RE = /login to (?:the )?server success/i;
 const PROXY_OK_RE = /\bstart proxy success\b/;
 const PROXY_ANSWER_RE = /\] start (?:proxy success|error:)/;
+const RECENT_KEEP = 32;
 const LOG_TS_RE = /^(\d{4})-(\d\d)-(\d\d) (\d\d):(\d\d):(\d\d)(?:\.(\d{1,3}))?/;
 const logClockOf = (l) => { const m = LOG_TS_RE.exec(l); return m ? Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6], Number((m[7] || '0').padEnd(3, '0'))) : null; };
 function runOf(logText, prev = null, { at = null } = {}) {
@@ -188,7 +190,7 @@ function runOf(logText, prev = null, { at = null } = {}) {
   let recent = Array.isArray(p.recent) ? p.recent.slice() : [];
   for (const l of lines) {
     const c = logClockOf(l), t = c !== null ? c + off : Number.isFinite(at) ? at : null;
-    if (LOGIN_OK_RE.test(l)) { logins++; unanswered++; if (since === null) since = t; recent.push(t); if (recent.length > DROP_LOGINS) recent = recent.slice(-DROP_LOGINS); }
+    if (LOGIN_OK_RE.test(l)) { logins++; unanswered++; if (since === null) since = t; recent.push(t); if (recent.length > RECENT_KEEP) recent = recent.slice(-RECENT_KEEP); }
     else if (PROXY_ANSWER_RE.test(l)) { if (PROXY_OK_RE.test(l)) proxies++; unanswered = 0; since = null; recent = []; answeredAt = t; }
   }
   return { logins, proxies, unanswered, since, recent, answeredAt };
@@ -255,5 +257,5 @@ function alertOf(ref, { name = '' } = {}) {
 module.exports = {
   V, FILE, TOKEN_ENV, CLUSTER_TOKEN_ENV, KNOCK_ENV, RELAY_ENV_KEEP, TOKEN_PREFIX, ID_RE, TOKEN_RE, HASH_RE, LABEL_RE, SUB_RE, CLUSTER_USER_RE, PREFIXES, SUBS_MAX, REASONS, ALERTS,
   labelOf, clusterUserOf, mint, rotate, revoke, withSub, parse, serialize, identityOf, registrationLine, frpcLines, relayEnv, strippedName, nameVerdict, refusalOf, loginOf, alertOf,
-  DROP_LOGINS, DROP_WINDOW, DROP_QUIET, DROPPED_TEXT, DROPPED_DETAIL, RETIRED_TEXT, RETIRED_DETAIL, runOf, droppedOf, droppedAlertOf, retiredAlertOf,   // lane frp-token-proof
+  DROP_LOGINS, DROP_WINDOW, DROP_QUIET, RECENT_KEEP, DROPPED_TEXT, DROPPED_DETAIL, RETIRED_TEXT, RETIRED_DETAIL, runOf, droppedOf, droppedAlertOf, retiredAlertOf,   // lane frp-token-proof
 };

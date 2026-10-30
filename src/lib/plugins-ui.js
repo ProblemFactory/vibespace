@@ -43,6 +43,9 @@ function relayFactWords(r) {
   if (r.kind !== 'instance') return null;
   const parts = [t('Own relay token')];   // its id is the sheet's (the row is narrow)
   if (r.dropped) parts.push(t('the relay drops its login — no proxy started'));   // lane frp-token-proof: a login it closes at once is no «knows it»
+  // r3b: a LOGIN never earns «knows it» (the incident's misread) — only a NewProxy the relay answered in this run; before one, the
+  // logins-only fact in neutral words (the drop verdict waits for a tried publish)
+  else if (r.login && r.login.ok && r.run && !r.run.answered) parts.push(r.run.minute > 1 ? t('logged in {n}× in 60 s, nothing published yet — the relay has not answered a proxy', { n: r.run.minute }) : t('logged in, nothing published yet — the relay has not answered a proxy'));
   else if (r.login && r.login.ok) parts.push(t('the relay knows it'));
   else if (r.login && RELAY_LOGIN_WORDS[r.login.code]) parts.push(RELAY_LOGIN_WORDS[r.login.code]());
   if (r.knock === 'locked') parts.push(t('the shared token waits for the vault'));

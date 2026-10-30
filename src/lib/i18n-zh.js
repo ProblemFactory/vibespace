@@ -9750,6 +9750,8 @@ export default {
   "The shared relay token ({entry}) left this instance": "共享中继 token（{entry}）已从这台实例移除", // lane frp-token-proof
   "A public URL ran on a frpc started without it ({at}), so the relay no longer asks for it. If public URLs fail later, set the relay token again in Plugins › Public URLs.": "一个公网 URL 在未带它启动的 frpc 上跑通了（{at}），说明中继已不再要求它。如果之后公网 URL 失败，请在 插件 › 公网 URL 里重新设置中继 token。", // lane frp-token-proof
   "the relay drops its login — no proxy started": "中继随即断开登录——没有代理启动", // lane frp-token-proof
+  "logged in {n}× in 60 s, nothing published yet — the relay has not answered a proxy": "60 秒内登录 {n} 次，尚未发布——中继还没有应答过代理",
+  "logged in, nothing published yet — the relay has not answered a proxy": "已登录，尚未发布——中继还没有应答过代理",
   "A person stored it — in this window, a card or Settings": "由人存入——在这个窗口、卡片或设置里", // lane vault-window-v2
   "A person scanned or pasted it": "由人扫码或粘贴存入", // lane vault-window-v2
   "VibeSpace made it itself — nobody typed it in": "VibeSpace 自己生成——没有人输入过它", // lane vault-window-v2

@@ -32,6 +32,10 @@
 //         silently ⇒ its publish TRIES and runs, no item (r1 refused it as relay_login_dropped for the rest of the run)
 //      i THE TRIAL (r2 — acceptance r1 finding 2): a relay past its grace refuses the shared token; the watch's trial frpc has
 //         run no proxy; the vault locks and unlocks ⇒ no restart WITH the refused token, the status agrees, the URL runs.
+//      j THE UPGRADE ROAD (r3b — acceptance r2 finding 2): records without frpcKnockless (.364 lock-started / trial / no token,
+//         production's .363 shape) ⇒ status.restartAtUnlock and the unlock agree (ONE predicate: the lock started it AND a
+//         shared token is held); the drop words read what the instance holds now. h also runs the CARD's own code before any
+//         try (r3b finding 1): logins alone never say «the relay knows it».
 //         RED/GREEN tables: frp-token-proof/report.md (round 1 vs 4ef7e9494, round 2 vs 4c57acebb)
 //   ①p the SAME hub launched from a POLLUTED env (lane frp-spawn-env-allowlist — planted now, whatever env the suite runs from:
 //      an agent conversation's session tokens, the cluster's shared token, a cloud key, proxies): frpc's env holds the kept
@@ -217,6 +221,16 @@ async function hubLegs() {
   };
   const recOf = (D) => { try { return RT.parse(fs.readFileSync(path.join(D, RT.FILE), 'utf8')); } catch { return null; } };
   const pjOf = (D) => { try { return JSON.parse(fs.readFileSync(path.join(D, 'plugins.json'), 'utf8')).plugins.frp || {}; } catch { return {}; } };
+  /** THE CARD'S OWN WORDS (lane frp-token-proof r3b): src/lib/plugins-ui.js `RELAY_LOGIN_WORDS` + `relayFactWords` lifted from its
+   *  text and run over the plugin's status with a t() that fills its params — the card's code, never a copy of its branches */
+  const cardWords = (() => {
+    const src = fs.readFileSync(path.join(REPO, 'src/lib/plugins-ui.js'), 'utf8');
+    const a = src.indexOf('const RELAY_LOGIN_WORDS'), b = a < 0 ? -1 : src.indexOf('\n});', a);
+    const c = src.indexOf('function relayFactWords('), d = c < 0 ? -1 : src.indexOf('\n}\n', c);
+    if (b < 0 || d < 0) return () => null;
+    const tt = (k, p) => (p ? String(k).replace(/\{(\w+)\}/g, (m, x) => (x in p ? String(p[x]) : m)) : String(k));
+    return new Function('t', `${src.slice(a, b + 4)}\n${src.slice(c, d + 2)}\nreturn relayFactWords;`)(tt);
+  })();
   /** a hub's FIRST boot: the vault set up, the shared token sealed (the owner's override), the relay started, one publish */
   async function firstBoot(tag, { def = null, ut = null } = {}) {
     const D = path.join(ROOT, tag, 'data'); fs.mkdirSync(D, { recursive: true });
@@ -234,7 +248,7 @@ async function hubLegs() {
     return { D, v, pm, saw, rec: recOf(D), pub, pubErr, sub: pub && pub.subdomain };
   }
   /** the hub RESTARTS (a new engine — LOCKED — and a new manager over the same data dir) after frpc died with the machine */
-  async function restart(prev, { askKnock, def = null, ut = null, mode = {} }) {
+  async function restart(prev, { askKnock, def = null, ut = null, mode = {}, publish = true }) {
     await killFrpc();
     try { prev.v.close(); } catch { }
     setMode({ askKnock, prefix: true, ...mode });
@@ -244,7 +258,7 @@ async function hubLegs() {
     pm.bootReplay();
     const saw = await nextSaw(n, 4000);
     let pub = null, pubErr = null;
-    if (saw) { try { pub = await pm.frpPublish('vibespace-instance', 3456, { proto: 'http', preferSub: prev.sub || '' }); } catch (e) { pubErr = e; } }
+    if (saw && publish) { try { pub = await pm.frpPublish('vibespace-instance', 3456, { proto: 'http', preferSub: prev.sub || '' }); } catch (e) { pubErr = e; } }
     return { D: prev.D, v, pm, st0, saw, pub, pubErr, sub: prev.sub };
   }
   const ut = new UserTodoManager({ dataDir: path.join(ROOT, 'todos'), expirySweepMs: 0 });
@@ -563,7 +577,11 @@ async function hubLegs() {
         check('h0 the hub\'s first life: the shared token sealed, frpc WITH it, a publish runs (relayPublishedAt — the proof\'s half the old code paired with a login)', !!H0.pub && !!pjOf(H0.D).relayPublishedAt && !!H0.saw && H0.saw.knockSha === sha(KNOCK), H0.pubErr ? H0.pubErr.message : H0.pub);
         const logs0 = logs.length;
         // THE MACHINE WENT DOWN (the user manager died at 02:55): frpc died with it; the new hub boots with the vault LOCKED
-        const H = await restart(H0, { askKnock: false, ut: utH, mode: { dropKnockless: true } });
+        const H = await restart(H0, { askKnock: false, ut: utH, mode: { dropKnockless: true }, publish: false });
+        await sleep(1500);   // frpc logs in at the incident's cadence; nothing has published yet
+        const card0 = cardWords(H.pm.status('frp').relay) || '';
+        check(`④ r3b BEFORE ANY TRY the card never says «the relay knows it» on logins alone — it says the logins-only fact: «${card0}»`, !/the relay knows it/.test(card0) && /logged in \d+× in 60 s, nothing published yet — the relay has not answered a proxy/.test(card0) && !H.pm.status('frp').relay.dropped, card0);
+        try { H.pub = await H.pm.frpPublish('vibespace-instance', 3456, { proto: 'http', preferSub: H0.sub }); } catch (e) { H.pubErr = e; }   // the boot's publish: ONE try
         check('h1 the boot replay starts frpc with the vault LOCKED — its own token, NO shared token (the relay vouches it in)', !!H.saw && H.saw.knockSha === null && H.saw.relaySha === sha(H0.rec.token) && H.v.state() === 'locked', H.saw && { knock: H.saw.knockSha });
         const stH = H.pm.status('frp');
         check('③ NO KNOWINGLY TOKEN-LESS START: the status says frpc runs without the shared token while the vault is locked AND that the unlock restarts it with it (relay.restartAtUnlock, knock locked) — and the journal says so', stH.relay.knock === 'locked' && stH.relay.restartAtUnlock === true && logs.slice(logs0).some((l) => /frpc starts without the shared relay token \(the vault is locked\)/.test(l)), { knock: stH.relay.knock, restartAtUnlock: stH.relay.restartAtUnlock });
@@ -672,6 +690,51 @@ async function hubLegs() {
         const pubT = await timedR2(I0.pm.frpPublish('vibespace-instance', 3456, { proto: 'http', preferSub: I0.sub }), 8000);
         check(`② r2 …and the public URL is back on the trial run (${Date.now() - t0} ms; its own token only — README «Ending the grace»), the SAME address`, !!pubT.v && pubT.v.url === I0.pub.url, pubT.v ? pubT.v.url : pubT.timeout ? 'timeout' : pubT.e && pubT.e.message);
       } finally { global.setInterval = SI; await killFrpc(); try { I0 && I0.v.close(); } catch { } }
+    }
+
+    console.log('  j — THE UPGRADE ROAD (r3b — acceptance r2 finding 2): a frpc an older build started survives into this one, its record has no frpcKnockless — ONE predicate for the status and the unlock; the drop words read what the instance holds now');
+    {
+      const FRP = R('src/plugins/frp.js');
+      const SHAPES = [
+        ['A', '.364, the LOCK started it (the shared token sealed, the vault locked)', { locked: true }, { status: true, restart: true, why: /because the vault was locked when it started/ }],
+        ['B', '.364, a TRIAL (knockTrialAt 2 s before its start)', { trialAt: 2000 }, { status: false, restart: false }],
+        ['C', '.364, no shared token held', { noToken: true }, { status: false, restart: false }],
+        ['D', 'production (.363: no frpcRun, the misread stamp, retired, frp:token gone)', { v363: true, noToken: true }, { status: false, restart: false, why: /and this instance holds none\. Set the relay token again/ }],
+      ];
+      for (const [tag, label, shape, want] of SHAPES) {
+        const JR = path.join(ROOT, 'upgrade-' + tag), dir = path.join(JR, 'frp'), dataDir = path.join(JR, 'data'), MODEJ = path.join(JR, 'mode.json'), SAWJ = path.join(JR, 'saw.jsonl');
+        fs.mkdirSync(path.join(dir, 'bin'), { recursive: true }); fs.mkdirSync(dataDir, { recursive: true });
+        fs.writeFileSync(MODEJ, JSON.stringify({ dropKnockless: true, prefix: true }));   // the grace relay: a frpc without the token is vouched in and dropped
+        fs.writeFileSync(path.join(dir, 'bin', 'frpc'), fakeFrpc(MODEJ, SAWJ), { mode: 0o755 });
+        const sawJ = () => { try { return fs.readFileSync(SAWJ, 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)); } catch { return []; } };
+        let state = 'unlocked';
+        const entries = new Map([['frp:token', KNOCK]]);
+        const vault = { state: () => state, secretGet: (k) => (state !== 'unlocked' ? { ok: false, code: 'key-unreadable:vault_locked' } : { ok: true, value: entries.has(k) ? Buffer.from(entries.get(k)) : null }), secretPut: (k, val) => { entries.set(k, String(val)); return { ok: true }; }, secretDrop: (k) => { entries.delete(k); return { ok: true }; }, blocked() { } };
+        const rec = { config: { tokenSealed: true } };
+        const utJ = { add: (sk, it) => ({ id: 'ut-j', ...it }), get: () => null, setStatus() { } };
+        const v = FRP.create({ dir, dataDir, peek: () => rec, rec: () => rec, save() { }, notify() { }, settings: () => ({ serverAddr: '127.0.0.1', serverPort: 9 }), writeSettings() { }, opts: { forYou: () => utJ }, vault: () => vault, probeProto: async () => 'tcp' });
+        try {
+          v.start(); await sleep(300); v.stop(); await sleep(300);   // the first life mints the identity
+          state = shape.locked ? 'locked' : 'unlocked';
+          if (shape.noToken) { delete rec.config; entries.delete('frp:token'); }
+          v.start({ knock: false }); await sleep(400);   // the frpc an older build left running without the shared token
+          delete rec.frpcKnockless;                       // .364 and .363 never wrote it
+          if (shape.trialAt) rec.knockTrialAt = rec.frpcRun.at - shape.trialAt;
+          if (shape.v363) { delete rec.frpcRun; rec.relayKnocklessAt = Date.now() - 3600e3; rec.legacyRetired = { id: '2026-10-relay-token-per-instance', at: Date.now() - 1800e3 }; }
+          const st = v.status().relay;
+          let words = null;
+          if (want.why) { try { await v.publish('pf-local-4100', 4100, { proto: 'tcp' }); } catch (e) { words = e.code === 'relay_login_dropped' ? e.message : `${e.code}: ${e.message}`; } }
+          const n0 = sawJ().length;
+          state = 'unlocked'; v.sealSecrets(); await sleep(1500);
+          const after = sawJ().slice(n0);
+          check(`j ${tag} ${label}: status.restartAtUnlock ${want.status} and the unlock ${want.restart ? 'restarts frpc WITH the token' : 'restarts nothing'} — one predicate`, st.restartAtUnlock === want.status && (want.restart ? after.length === 1 && after[0].knockSha === sha(KNOCK) : after.length === 0), { status: st.restartAtUnlock, restarts: after.map((x) => !!x.knockSha) });
+          if (want.why) check(`j ${tag} …its dropped login (after one try) says why in the right words for a record without frpcKnockless`, !!words && want.why.test(words), words);
+        } finally {
+          try { v.stop(); } catch { }
+          for (const s of sawJ()) if (alive(s.pid)) { try { process.kill(s.pid, 'SIGKILL'); } catch { } }   // the fakes this leg spawned
+          for (let i = 0; i < 100 && sawJ().some((s) => alive(s.pid)); i++) await sleep(20);
+        }
+      }
     }
   } catch (e) {
     check('the legs threw', false, e && e.stack);

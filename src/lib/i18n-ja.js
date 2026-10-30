@@ -9749,6 +9749,8 @@ export default {
   "The shared relay token ({entry}) left this instance": "共有リレートークン（{entry}）はこのインスタンスから削除されました", // lane frp-token-proof
   "A public URL ran on a frpc started without it ({at}), so the relay no longer asks for it. If public URLs fail later, set the relay token again in Plugins › Public URLs.": "トークンなしで起動した frpc で公開 URL が動いた（{at}）ため、リレーはもうそれを求めていません。後で公開 URL が失敗したら、プラグイン › 公開 URL でリレートークンを設定し直してください。", // lane frp-token-proof
   "the relay drops its login — no proxy started": "リレーはログイン直後に切断 — プロキシは起動していません", // lane frp-token-proof
+  "logged in {n}× in 60 s, nothing published yet — the relay has not answered a proxy": "60 秒で {n} 回ログイン、まだ公開なし — リレーはプロキシにまだ応答していません",
+  "logged in, nothing published yet — the relay has not answered a proxy": "ログイン済み、まだ公開なし — リレーはプロキシにまだ応答していません",
   "A person stored it — in this window, a card or Settings": "人が保存しました——このウィンドウ、カード、または設定で", // lane vault-window-v2
   "A person scanned or pasted it": "人がスキャンまたは貼り付けで保存しました", // lane vault-window-v2
   "VibeSpace made it itself — nobody typed it in": "VibeSpace が自分で生成しました——誰も入力していません", // lane vault-window-v2
