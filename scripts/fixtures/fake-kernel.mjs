@@ -42,6 +42,9 @@
 // credentialSubmitted while the box still holds the value fillCredential wrote (its kernel-private filledByVibeSpaceValue); a value
 // anyone else typed rides as before (`typeCredential({surfaceId, fieldId, value})` = someone typing over the box). Default false =
 // the echo the P3 suites were written on. `submissions()` = every credentialSubmitted sent: {surfaceId, hasPassword} — never a value.
+// lane vault-login-chrome r2c: every call heard carries `seq` (1, 2, … in the order this stub heard it, across its sockets) and `mark()` =
+// the last one heard — a leg scopes the socket to the window it measures by its own marks (never a clock: a slow box moves calls in
+// time, never in order).
 import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -79,6 +82,7 @@ export async function startFakeKernel({ port = 0, dir = null, firstUrl = 'about:
   const submitted = [];        // lane engine-distribution: every credentialSubmitted sent: {surfaceId, hasPassword} — never a value
   const feats = () => [...(Array.isArray(mode.features) ? mode.features : FEATURES)];
   const calls = [];
+  let heard = 0; // lane vault-login-chrome r2c: the sequence number of the last call heard (mark())
   const logFile = dir ? path.join(dir, 'fake-kernel-calls.log') : null;
   const sockets = new Set();
   let seq = 0, sseq = 0;
@@ -298,7 +302,7 @@ export async function startFakeKernel({ port = 0, dir = null, firstUrl = 'about:
     ws.on('close', () => { sockets.delete(ws); for (const [sid, s] of [...sessions]) if (s.ws === ws) { sessions.delete(sid); const x = targets.get(s.targetId); if (x) x.sessions.delete(sid); } });
     ws.on('message', (d) => {
       let m; try { m = JSON.parse(String(d)); } catch { return; }
-      calls.push({ method: m.method, session: !!m.sessionId, sessionId: m.sessionId || null, params: m.params || {} });
+      calls.push({ seq: ++heard, method: m.method, session: !!m.sessionId, sessionId: m.sessionId || null, params: m.params || {} });
       if (logFile) { try { fs.appendFileSync(logFile, JSON.stringify({ method: m.method, session: m.sessionId || null, params: m.params || {} }) + '\n'); } catch { /* best effort */ } }
       const r = answer(ws, m);
       if (r && r.__noreply) return;
@@ -310,7 +314,7 @@ export async function startFakeKernel({ port = 0, dir = null, firstUrl = 'about:
   const wsPath = `/devtools/browser/${browserId}`;
   if (dir) { try { fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(path.join(dir, 'DevToolsActivePort'), `${bound}\n${wsPath}`); } catch { /* the caller reads stderr then */ } }
   async function close() { for (const ws of sockets) { try { ws.terminate(); } catch { /* gone */ } } await new Promise((r) => server.close(() => r())); }
-  return { port: bound, wsUrl: `ws://127.0.0.1:${bound}${wsPath}`, calls: () => calls.slice(), close,
+  return { port: bound, wsUrl: `ws://127.0.0.1:${bound}${wsPath}`, calls: () => calls.slice(), mark: () => heard, close, // lane vault-login-chrome r2c: + mark()
     // lane browser-surfaces: the suites' hands on the surface protocol
     mode, targets: () => [...targets.values()].map(info), addTarget: (url) => { const x = newTarget(url); all({ method: 'Target.targetCreated', params: { targetInfo: info(x) } }); return x.targetId; },
     openSurface, updateSurface, closeSurface, surfaces: () => [...surfaces.values()], answers: () => answered.slice(), failNext: (code) => failQueue.push(String(code)),
