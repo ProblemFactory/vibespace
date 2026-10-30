@@ -1192,8 +1192,18 @@ function create(engineCtx) {
   }
   const heldCountOf = (r2) => heldConvsOf(r2).reduce((n, c) => n + (Array.isArray(c.rows) ? c.rows.length : Number(c.n) || 0) + (Number(c.elided) || 0), 0);
   const heldWho = (w) => (w.principal.kind === 'everyone' ? 'all agents' : String(w.principal.name || w.principal.id));
-  const heldLine = (n, who, day) => `${n} messages for ${who} held since ${day} — deliver or discard`;
-  const heldKey = (n, who, day) => ({ key: i18nKey('{n} messages for {agent} held since {date} — deliver or discard'), params: { n, agent: who, date: day } });
+  /** r12: the PART of a held decision dropped because its watcher is no longer woken there (dropHeld — each dropped
+   *  conversation keeps `dropped {n, why, at}`) → `{n, k, of, why, agent}` | null; the card, the press's answer and the record say it. */
+  const heldDroppedOf = (r2) => {
+    const all = heldConvsOf(r2), gone = all.filter((c) => c.dropped && typeof c.dropped === 'object');
+    if (!gone.length) return null;
+    const last = gone.reduce((a, c) => (Number(c.dropped.at) >= Number(a.dropped.at) ? c : a));
+    return { n: gone.reduce((x, c) => x + (Number(c.dropped.n) || 0), 0), k: gone.length, of: all.length, why: String(last.dropped.why), agent: heldWho({ principal: r2.principal || {} }) };
+  };
+  const heldDropLine = (d) => (d.why === 'not-covered' ? `the rule no longer covers ${d.k} of ${d.of} conversations — ${d.n} held messages dropped` : `${d.k} of ${d.of} conversations no longer wake ${d.agent} — ${d.n} held messages dropped`);
+  const heldLine = (n, who, day, drop = null) => `${n} messages for ${who} held since ${day} — deliver or discard${drop ? ` · ${heldDropLine(drop)}` : ''}`;
+  const heldKey = (n, who, day, drop = null) => (!drop ? { key: i18nKey('{n} messages for {agent} held since {date} — deliver or discard'), params: { n, agent: who, date: day } }
+    : { key: drop.why === 'not-covered' ? i18nKey('{n} messages for {agent} held since {date} — deliver or discard · the rule no longer covers {k} of {m} conversations — {d} held messages dropped') : i18nKey('{n} messages for {agent} held since {date} — deliver or discard · {k} of {m} conversations no longer wake {agent} — {d} held messages dropped'), params: { n, agent: who, date: day, k: drop.k, m: drop.of, d: drop.n } });
   /** THE HELD CARD, from its REQUEST ROW (r9 — the acceptance: a truncated user-todos.json started For you empty and the held
    *  decision lost its card, said nowhere): holdAside files it when it sets the hits aside; the boot reconcile files it AGAIN
    *  for an open held request whose item is gone (reconcileAsks). → the item id | null (no store). */
@@ -1206,13 +1216,14 @@ function create(engineCtx) {
     const where = scope.kind === 'adapter' ? `the whole account ${rec.label || rec.id}` : scope.kind === 'pattern' ? `the rule ${F.patternSummary((patternById(h.patternId) || {}).pattern || { rules: [] })} (${rec.label || rec.id})` : `${title} (${rec.label || rec.id})`;
     const day = h.since ? OF.when(h.since) : 'an unknown date';   // the owner's zone, named (owner-facts — never a sliced ISO time)
     const ttlDays = Math.round(F.WATCH_REQUEST_TTL_MS / DAY_MS);
+    const drop = heldDroppedOf(req);   // r12: a card filed again from its request row says what part was dropped
     const it = userTodos.add(INBOX_KEY, {
       origin: 'channels', by: 'system', sessionName: 'Channels', urgency: 'normal', openCap: HELD_OPEN_CAP,
-      text: heldLine(n, who, day),
+      text: heldLine(n, who, day, drop),
       detail: `They were held for ${who} on ${where} while it could not be woken (a restart, its daily cap, nobody running) — the oldest from ${day}. A delivery that old is never sent by itself.\nDeliver sends them to ${who} now, as one block (a billed turn). Discard drops them — nothing is sent.\nUnanswered, it expires in ${ttlDays} days — they are discarded then.`,
       action: { type: 'channel-held-digest', id: req.id }, expiresAt: req.expiresAt,
       i18n: {
-        text: heldKey(n, who, day),
+        text: heldKey(n, who, day, drop),
         detail: [
           { key: i18nKey('They were held for {agent} on {where} while it could not be woken (a restart, its daily cap, nobody running) — the oldest from {date}. A delivery that old is never sent by itself.'), params: { agent: who, where, date: day } },
           { key: i18nKey('Deliver sends them to {agent} now, as one block (a billed turn). Discard drops them — nothing is sent.'), params: { agent: who } },
@@ -1273,7 +1284,7 @@ function create(engineCtx) {
     });
     // a second boot JOINED an open decision: its card says the new count (THE request's store — heldCountOf)
     if (open && open.todoId && userTodos && typeof userTodos.reshapeItems === 'function') {
-      const day2 = req.held.since ? OF.when(req.held.since) : 'an unknown date', line = heldLine(req.held.n, who, day2), key = heldKey(req.held.n, who, day2);
+      const day2 = req.held.since ? OF.when(req.held.since) : 'an unknown date', drop = heldDroppedOf(req), line = heldLine(req.held.n, who, day2, drop), key = heldKey(req.held.n, who, day2, drop);
       try { userTodos.reshapeItems((it) => { if (it.id !== open.todoId || it.status !== 'open' || it.text === line) return false; it.text = line; if (it.i18n) it.i18n = { ...it.i18n, text: key }; return true; }); } catch {}
     }
     try { store.audit({ kind: 'watch', op: 'held-aside', principal: w.principal, scope, requestId: req.id, n: moved, since, at: t, by: 'system' }); } catch {}
@@ -1283,14 +1294,16 @@ function create(engineCtx) {
   }
   /** A held request's hits back in play (`keep`: its rows into the live list, its elided counts restored) or dropped —
    *  inside an index update (`r2` = the live request row). Exactly the request's own store (+ an r6 in-place `aside` row).
-   *  → how many hits it touched (= heldCountOf before). */
-  function releaseAside(r2, keep) {
+   *  → how many hits it touched (= heldCountOf before). r12: `only` (a Set of keys) narrows it to those conversations —
+   *  dropHeld's part; the unreadable entries are counted by the release of the whole. */
+  function releaseAside(r2, keep, only = null) {
     const h = r2 && r2.held;
     if (!h) return 0;
     let n = 0, skipped = 0;
     const convs = heldConvsOf(r2);   // r10: THE one walker — an entry that is not a record is skipped and said there, counted here
     const entries = (Array.isArray(h.convs) ? h.convs.length : 0) - convs.length;
     for (const c of convs) {
+      if (only && !only.has(c.key)) continue;
       const rows0 = Array.isArray(c.rows) ? c.rows : [];
       const rows = rows0.filter((p) => p && typeof p === 'object');   // r9: a row that is not one (a hand edit, a torn write) is skipped and SAID — never a throw that sticks the request 'approved'
       skipped += rows0.length - rows.length;
@@ -1308,36 +1321,42 @@ function create(engineCtx) {
       c.n = 0; c.elided = 0; c.rows = [];   // the store is spent — the request keeps its decision, never the records
     }
     if (skipped) log.warn(`[channels] ${r2.id}: ${skipped} held row(s) unreadable (not a record) — skipped, the rest ${keep ? 'delivered' : 'discarded'}`);
-    if (skipped + entries) h.skipped = (Number(h.skipped) || 0) + skipped + entries;
+    if (skipped + (only ? 0 : entries)) h.skipped = (Number(h.skipped) || 0) + skipped + (only ? 0 : entries);
     return n;
   }
   /** THE OWNER'S DECISION on a held digest (the decide route — the person verdict): Deliver puts the request's hits back and
    *  flushes them NOW through the one flush (a billed turn: the ladder's spend authorizer; a refusal there — the daily cap,
    *  nobody live — keeps them pending for the next delivery, said); Discard drops them. Both touch exactly the card's count. */
   async function decideHeld(req0, approve, by, { person = false } = {}) {
+    const reqNow = () => (store.index.table('watchRequests') || []).find((r) => r && r.id === req0.id) || req0;
     if (approve) {
       // r10 — Deliver delivers only what CAN be: a rule that is GONE ends the decision as the prune would (said); a rule that
       // stands but cannot wake its watcher NOW (heldInEffect) keeps it open, its rows in the request (was: released into pending
       // for a fan-out target that had stopped — «they go with its next delivery», the card «delivered», the next prune dropped them)
-      const rule = heldRuleOf(req0);
-      if (rule !== 'stands') {
-        const { why, words } = heldEndOf(rule);
-        const n = await endHeld(req0, why);
+      // r12 — by THE ONE REACH, per conversation (heldReachOf, the live prune's own fact): none left ⇒ the decision ends by
+      // name (409 rule-gone); SOME out ⇒ those drop with their count (dropHeld — said on the card and in this answer), the rest
+      // are delivered (was: r11 read the rule's pattern alone — 30 dropped while the account still woke Worker — and per
+      // decision — «delivered 60» with 30 of them returned to pending, dropped unsaid at the next write)
+      const reach = heldReachOf(req0);
+      if (reach.out.length && !reach.kept.length) {
+        const { why, words } = heldEndOf(reach.out[0].rule, reach.of);
+        const n = await endHeld(req0, why, reach);
         notify([]);
-        if (n !== null) return { ok: false, code: 'rule-gone', why, n, error: `${words} — ${n} messages discarded, nothing was sent` };
+        if (n !== null) return { ok: false, code: 'rule-gone', why, n, ...(reach.of > 1 ? { convs: reach.of } : {}), error: `${words} — ${n} messages discarded, nothing was sent` };
         return { ok: false, code: 'bad-state', error: 'request already decided (in another window, a moment ago)' };
       }
+      if (reach.out.length) { await dropHeld(req0, reach); req0 = reqNow(); }
       if (!heldInEffect(req0)) {
         const p = req0.principal || {};
         const cid = String(p.target || (p.kind === 'agent' ? p.id : '') || '');
         const why = cid && !fanTargets().some((x) => x.cid === cid) ? 'not-running' : 'not-admitted';
         const who = p.member || (p.target && p.name) || heldWho({ principal: p });
-        const n = heldCountOf(req0);
-        return { ok: false, code: 'not-in-effect', why, agent: who, n, error: why === 'not-running' ? `${who} is not running — the ${n} messages stay held: Deliver once it runs, or Discard them` : `${who} is not woken by this rule now (not in its group, or left out of it) — the ${n} messages stay held: Deliver once it is, or Discard them` };
+        const n = heldCountOf(req0), dropped = heldDroppedOf(req0);
+        return { ok: false, code: 'not-in-effect', why, agent: who, n, ...(dropped ? { dropped } : {}), error: why === 'not-running' ? `${who} is not running — the ${n} messages stay held: Deliver once it runs, or Discard them` : `${who} is not woken by this rule now (not in its group, or left out of it) — the ${n} messages stay held: Deliver once it is, or Discard them` };
       }
     }
     const t = now();
-    let applied = false, touched = 0, skipped = 0;
+    let applied = false, touched = 0, skipped = 0, dropped = null;
     await store.index.update((ix) => {
       const r2 = (Array.isArray(ix.watchRequests) ? ix.watchRequests : []).find((r) => r && r.id === req0.id);
       if (!r2 || r2.status !== 'open') return;
@@ -1345,28 +1364,53 @@ function create(engineCtx) {
       touched = releaseAside(r2, !!approve);
       r2.held.n = touched;   // the record keeps what the decision touched
       skipped = Number(r2.held.skipped) || 0;
+      dropped = heldDroppedOf(r2);   // r12: the part dropped before it (its conversations' watcher no longer woken there) — said with it
     });
     if (!applied) return { ok: false, code: 'bad-state', error: 'request already decided (in another window, a moment ago)' };
     try { store.audit({ kind: 'watch', op: approve ? 'held-deliver' : 'held-discard', principal: req0.principal, scope: req0.scope, requestId: req0.id, n: touched, at: t, by }); } catch {}
     if (req0.todoId && userTodos && typeof userTodos.get === 'function') {
-      try { const it = userTodos.get(req0.todoId); if (it && it.status === 'open') userTodos.resolveAnswered([req0.todoId], approve ? 'delivered' : 'discarded', person ? { decidedBy: 'person', decidedAt: t, n: touched } : { n: touched }); } catch {}
+      try { const it = userTodos.get(req0.todoId); if (it && it.status === 'open') userTodos.resolveAnswered([req0.todoId], approve ? 'delivered' : 'discarded', { ...(person ? { decidedBy: 'person', decidedAt: t } : {}), n: touched, ...(dropped ? { dropped } : {}) }); } catch {}
     }
     let delivery = null;
     if (approve && touched) {
-      const h = req0.held || {};
       const rec = adapterRecords().adapters.find((r) => r.id === req0.adapterId);
-      try {
-        if (rec && h.via === 'scope') delivery = await flushScope(rec, h.source, h.patternId, h.pk, {});
-        else if (rec && heldConvsOf(req0)[0]) delivery = await flushPending(rec, heldConvsOf(req0)[0].id, { kind: 'boot', pk: h.pk });
-      } catch (e) { delivery = { ok: false, why: (e && e.message) || String(e) }; }
+      try { if (rec) delivery = await deliverHeld(rec, req0); } catch (e) { delivery = { ok: false, why: (e && e.message) || String(e) }; }
     }
     notify([]);
     const held = req0.held ? { ...req0.held, n: touched, convs: heldConvsOf(req0).map(({ rows, ...c }) => c) } : undefined;   // the answer never echoes the records
-    const out = { ok: true, request: { ...req0, ...(held ? { held } : {}), status: approve ? 'approved' : 'denied' }, ...(skipped ? { skipped } : {}) };   // r9: unreadable rows skipped — said
+    const out = { ok: true, request: { ...req0, ...(held ? { held } : {}), status: approve ? 'approved' : 'denied' }, ...(skipped ? { skipped } : {}), ...(dropped ? { dropped } : {}) };   // r9: unreadable rows skipped — said; r12: the part dropped — said
     if (!approve) return { ...out, discarded: touched };
     if (!touched) return { ...out, delivered: false, n: 0, why: 'nothing-left', note: 'nothing was left to deliver — its conversations are gone' };
     const carried = delivery && delivery.ok && Number(delivery.n) > touched ? { carried: Number(delivery.n) } : {};   // the same block took the watcher's newer hits too — said, never folded into «n»
     return { ...out, delivered: !!(delivery && delivery.ok), n: touched, ...carried, ...(delivery && !delivery.ok ? { why: String(delivery.why || 'refused'), held: true, note: 'not delivered now — the hits stay pending for the next delivery' } : {}) };
+  }
+  /** DELIVER A HELD DECISION'S RELEASED ROWS ON THE ROAD THAT WAKES THEIR WATCHER NOW (r12 — the r11 acceptance: a held rule
+   *  digest whose conversation the account still woke Worker for was released into pending and flushed through the RULE's
+   *  scope, which carried nothing — «nothing-pending»). A conversation decision: its conversation's own flush (any grain). A
+   *  scope digest: the conversations still woken through ITS grain in its ONE block (flushScope, as before); one woken there
+   *  through ANOTHER grain now goes in THAT grain's block (or the conversation's own flush) — never put back for a block that
+   *  will not carry it. → the flush answer, several folded: `{ok, n, why?}`. */
+  async function deliverHeld(rec, r) {
+    const h = r.held || {};
+    const convs = heldConvsOf(r).filter((c) => !c.dropped);
+    if (h.via !== 'scope') return convs[0] ? flushPending(rec, convs[0].id, { kind: 'boot', pk: h.pk }) : null;
+    const roads = new Map();   // the held scope's own road first, then each other grain's (a road only where a conversation is)
+    for (const c of convs) {
+      const eff = wakeEffOf(store.index.peek(c.key));
+      const item = eff ? eff.watchers.find((x) => itemIs(x, h.pk)) : null;
+      if (!item || (item.source === h.source && (h.source !== 'pattern' || item.patternId === h.patternId))) { roads.set('held', { source: h.source, patternId: h.patternId || null }); continue; }
+      const sk = scopeKeyOf(item, rec);
+      roads.set(sk || `conv:${c.id}`, sk ? { source: item.source, patternId: item.patternId || null } : { convId: c.id });
+    }
+    if (roads.size === 1 && roads.has('held')) return flushScope(rec, h.source, h.patternId, h.pk, {});
+    const outs = [];
+    for (const x of roads.values()) {
+      const d = x.convId ? await flushPending(rec, x.convId, { kind: 'boot', pk: h.pk }) : await flushScope(rec, x.source, x.patternId, h.pk, {});
+      if (d && !(d.ok === false && d.why === 'nothing-pending')) outs.push(d);   // a road with nothing of this decision on it carried nothing
+    }
+    if (!outs.length) return { ok: false, why: 'nothing-pending' };
+    const bad = outs.find((d) => !d.ok);
+    return { ok: !bad, n: outs.reduce((x, d) => x + (d.ok ? Number(d.n) || 0 : 0), 0), ...(bad ? { why: bad.why } : {}) };
   }
   // THE ITEM AND THE REQUEST ARE ONE STATE (lane wake-approve-card — exit-proxy verify-r2 ask-b's law, which the hub-act,
   // automation and vault asks keep). Acceptance round 2: a wake request's item is a DECISION ROW — the store lets it leave
@@ -2110,32 +2154,54 @@ function create(engineCtx) {
    *     for a conversation's) — a stopped target, a member not running or out of its group, one left out: not now.
    *  Only a rule that is gone ends the decision (pruneHeld / Deliver); one merely not in effect keeps it open with its rows —
    *  Deliver says why it cannot now, Discard still drops them.
-   *  r11 — a rule's REACH is a fact of the rule (主开发: «one fact, one road»; the acceptance: a rule edited so it no longer
-   *  matched the held conversation kept the decision open for ever, its Deliver refused «not in its group» while the same
-   *  write's live prune dropped that conversation's pending hits for the same watcher): a rule's held decision whose every
-   *  held conversation the rule no longer MATCHES (wakeEffOf's own test — F.matchConversation over convFacts) is
-   *  'not-covered' and ends by name; a conversation the index cannot read is never judged out of reach. */
-  function heldRuleOf(r) {
+   *  r11 — a rule's REACH is a fact of the rule (主开发: «one fact, one road»).
+   *  r12 — THE ONE REACH, PER CONVERSATION (the r11 acceptance: r11 read the held RULE's pattern alone — Worker, watching
+   *  through the rule AND the account, lost 30 held messages at the rule's edit while his live hits stayed and a new message
+   *  woke him; and per DECISION — a digest over two conversations, the rule narrowed to one, answered «delivered 60», the
+   *  other 30 returned to pending and dropped unsaid at the next write): heldReachOf asks, for EACH held conversation, the
+   *  live prune's own question — is this watcher still woken here through ANY grain (effectiveFor = effectiveGrants, the
+   *  reading wakeEffOf starts from; the roster it adds after — who runs, who is in its group now — is «in effect», read
+   *  apart: heldInEffect). heldRuleOf is now the HELD GRAIN's own fact only (for the conversation grain, that
+   *  conversation's row) — it names WHY an out-of-reach conversation ended ('not-covered' while the grain stands). */
+  function heldRuleOf(r, en = null) {
     const h = (r && r.held) || {};
     const fan = F.fanOfKey(h.pk);
     const root = fan ? fan.root : h.pk;
     const names = (rows) => (Array.isArray(rows) ? rows : []).some((w) => w && pkOf(w.principal) === root);
     const judge = (g) => (!g ? 'removed' : names(g.watchers) ? 'stands' : names(g.stored) ? 'no-access' : 'removed');
     if (h.source === 'account') return judge(readGrainHolder(r.adapterId, 'account', accountGrainOf(r.adapterId)));
-    if (h.source === 'pattern') {
-      const pa = h.patternId ? patternById(h.patternId) : null;
-      const v = judge(pa && pa.adapterId === r.adapterId ? readGrainHolder(r.adapterId, 'pattern', pa) : null);
-      const reach = (c) => { const en = store.index.peek(c.key); return !en || !!(pa.pattern && F.matchConversation(pa.pattern, convFacts(en)).hit); };
-      const convs = heldConvsOf(r);
-      return v !== 'stands' || !convs.length || convs.some(reach) ? v : 'not-covered';
+    if (h.source === 'pattern') { const pa = h.patternId ? patternById(h.patternId) : null; return judge(pa && pa.adapterId === r.adapterId ? readGrainHolder(r.adapterId, 'pattern', pa) : null); }
+    return judge(readGrainHolder(r.adapterId, 'conversation', en));   // a conversation's own row
+  }
+  /** THE ONE REACH of a held decision, per conversation (r12) → `{kept, out: [{c, rule}], of}`: `kept` = the held
+   *  conversations whose watcher (a fan-out item's ROOT) the conversation still wakes through ANY grain — exactly the
+   *  watchers whose live hits the prune keeps (effectiveFor, wakeEffOf's first line); `out` = the ones it no longer does,
+   *  each with the held grain's fact ('removed' | 'no-access', else 'not-covered'); a conversation the index cannot read is
+   *  judged by the held grain alone (never out of reach while it stands); one already dropped (`c.dropped`) is spent. */
+  function heldReachOf(r) {
+    const h = (r && r.held) || {};
+    const fan = F.fanOfKey(h.pk);
+    const root = fan ? fan.root : h.pk;
+    const convs = heldConvsOf(r);
+    if (!convs.length) { const rule = heldRuleOf(r, null); return { kept: [], out: rule === 'stands' ? [] : [{ c: null, rule }], of: 0 }; }   // no readable entry: the held grain's fact alone (r10)
+    const kept = [], out = [];
+    for (const c of convs) {
+      if (c.dropped) continue;
+      const en = store.index.peek(c.key);
+      const rule = heldRuleOf(r, en);
+      const eff = en ? effectiveFor(en) : null;
+      const woken = en ? !!eff && eff.watchers.some((x) => pkOf(x.watcher.principal) === root) : rule === 'stands';   // THE reach: any grain
+      if (woken) kept.push(c);
+      else out.push({ c, rule: rule === 'stands' ? 'not-covered' : rule });
     }
-    const v = heldConvsOf(r).map((c) => judge(readGrainHolder(r.adapterId, 'conversation', store.index.peek(c.key))));   // a conversation's own row: it stands while one of its held conversations still stores it
-    return v.includes('stands') ? 'stands' : v.includes('no-access') ? 'no-access' : 'removed';
+    return { kept, out, of: convs.length };
   }
   function heldInEffect(r) {
     const h = (r && r.held) || {};
-    if (h.via === 'scope') return !!storedWatcherFor(h.source === 'account' ? accountGrainOf(r.adapterId) : patternById(h.patternId), h.pk);
-    return heldConvsOf(r).some((c) => { const eff = wakeEffOf(store.index.peek(c.key)); return !!eff && eff.watchers.some((x) => itemIs(x, h.pk)); });
+    // r12: a conversation still held (never one dropped) whose watcher a wake reaches NOW through any grain — deliverHeld takes that road
+    const wokenNow = () => heldConvsOf(r).some((c) => { if (c.dropped) return false; const eff = wakeEffOf(store.index.peek(c.key)); return !!eff && eff.watchers.some((x) => itemIs(x, h.pk)); });
+    if (h.via === 'scope') return !!storedWatcherFor(h.source === 'account' ? accountGrainOf(r.adapterId) : patternById(h.patternId), h.pk) || wokenNow();
+    return wokenNow();
   }
   /** Why a held decision ENDS, by its rule's fact (heldRuleOf) — the record's `why` and the words an API answer says (the
    *  client words the `why` itself: foryou-actions settledWords, user-todos-row, the press toast). */
@@ -2144,38 +2210,74 @@ function create(engineCtx) {
     'no-access': Object.freeze({ why: 'access-removed', words: 'the access they were held under was removed' }),
     'not-covered': Object.freeze({ why: 'not-covered', words: 'the rule no longer covers this conversation' }),   // r11: out of the rule's reach
   });
-  const heldEndOf = (rule) => HELD_END[rule] || HELD_END.removed;
-  /** ONE held decision ENDED by the system because its rule is gone (`why` 'watch-removed' | 'access-removed' | r11
-   *  'not-covered'): its rows dropped (releaseAside), the request `denied` by `why`, the card «… — N messages discarded» (no
-   *  person mark: nobody decided). → the hits it touched | null (it was no longer open). */
-  async function endHeld(r0, why) {
+  const heldEndOf = (rule, of = 1) => (rule === 'not-covered' && of > 1 ? { why: 'not-covered', words: `the rule no longer covers its ${of} conversations` } : HELD_END[rule] || HELD_END.removed);   // r12: a digest's every conversation
+  /** ONE held decision ENDED by the system because its watcher is woken by NONE of its conversations any more (`why`
+   *  'watch-removed' | 'access-removed' | r11 'not-covered'): its rows dropped (releaseAside), the request `denied` by `why`,
+   *  the card «… — N messages discarded» (no person mark: nobody decided; r12: N counts a part dropped before, and a digest
+   *  over several conversations says how many — `convs`). → the hits it discarded, with a part dropped before | null (it was
+   *  no longer open). */
+  async function endHeld(r0, why, reach = null) {
     const t = now();
-    let touched = null;
+    let touched = null, before = 0;
     await store.index.update((ix) => {
       const r2 = (Array.isArray(ix.watchRequests) ? ix.watchRequests : []).find((r) => r && r.id === r0.id);
       if (!r2 || r2.status !== 'open') return;
       r2.status = 'denied'; r2.decidedAt = t; r2.decidedBy = why;
+      before = (heldDroppedOf(r2) || { n: 0 }).n;
       touched = releaseAside(r2, false);
       r2.held.n = touched;
     });
     if (touched === null) return null;
+    const of = reach && reach.of > 1 ? reach.of : 0;
     try { store.audit({ kind: 'watch', op: 'held-discard', principal: r0.principal, scope: r0.scope, requestId: r0.id, n: touched, at: t, by: 'system', why }); } catch {}
     const what = why === 'access-removed' ? 'the access its watcher lived by' : why === 'not-covered' ? 'the rule\'s reach over its conversation' : 'the rule';
     if (r0.todoId && userTodos && typeof userTodos.get === 'function') {
-      try { const it = userTodos.get(r0.todoId); if (it && it.status === 'open') userTodos.resolveAnswered([r0.todoId], 'discarded', { n: touched, why }); } catch (e) { log.warn(`[channels] ${r0.id}: ${what} is gone and its ${touched} held hit(s) were discarded, but the card could not be closed (${(e && e.message) || e})`); }
+      try { const it = userTodos.get(r0.todoId); if (it && it.status === 'open') userTodos.resolveAnswered([r0.todoId], 'discarded', { n: touched + before, why, ...(of ? { convs: of } : {}) }); } catch (e) { log.warn(`[channels] ${r0.id}: ${what} is gone and its ${touched} held hit(s) were discarded, but the card could not be closed (${(e && e.message) || e})`); }
     }
     log.log(`[channels] ${r0.id}: ${what} its ${touched} held hit(s) waited for (${(r0.held && r0.held.pk) || '?'}) is gone — discarded, the card says so`);
-    return touched;
+    return touched + before;   // r12: the decision's whole count (a part dropped before it was said then, and is said again here)
+  }
+  /** PART of a held decision ends (r12 — THE ONE REACH, per conversation): the conversations its watcher is no longer woken
+   *  by (heldReachOf `out`) drop THEIR rows by name, each keeping `dropped {n, why, at}` (spent — never judged again); the
+   *  rest stay held, the request open; the card says the new count AND the part («30 messages … — deliver or discard · the
+   *  rule no longer covers 1 of 2 conversations — 30 held messages dropped»), audited and journaled. → the hits dropped | null. */
+  async function dropHeld(r0, reach) {
+    const t = now();
+    const ruleOf = new Map(reach.out.map((o) => [o.c.key, o.rule]));
+    let n = null, req = null;
+    await store.index.update((ix) => {
+      const r2 = (Array.isArray(ix.watchRequests) ? ix.watchRequests : []).find((r) => r && r.id === r0.id);
+      if (!r2 || r2.status !== 'open') return;
+      n = 0;
+      for (const c of heldConvsOf(r2)) {
+        if (!ruleOf.has(c.key) || c.dropped) continue;
+        const k = releaseAside(r2, false, new Set([c.key]));
+        c.dropped = { n: k, why: heldEndOf(ruleOf.get(c.key)).why, at: t };
+        n += k;
+      }
+      r2.held.n = heldCountOf(r2);
+      req = r2;
+    });
+    if (n === null || !req) return null;
+    const drop = heldDroppedOf(req), who = heldWho({ principal: req.principal || {} });
+    try { store.audit({ kind: 'watch', op: 'held-discard', principal: r0.principal, scope: r0.scope, requestId: r0.id, n, at: t, by: 'system', why: drop.why, part: { convs: reach.out.map((o) => o.c.key), of: reach.of } }); } catch {}
+    if (req.todoId && userTodos && typeof userTodos.reshapeItems === 'function') {
+      const day = req.held.since ? OF.when(req.held.since) : 'an unknown date', line = heldLine(req.held.n, who, day, drop), key = heldKey(req.held.n, who, day, drop);
+      try { userTodos.reshapeItems((it) => { if (it.id !== req.todoId || it.status !== 'open' || it.text === line) return false; it.text = line; if (it.i18n) it.i18n = { ...it.i18n, text: key }; return true; }); } catch {}
+    }
+    log.log(`[channels] ${r0.id}: ${who} is no longer woken by ${reach.out.length} of its ${reach.of} held conversation(s) (${reach.out.map((o) => `${o.c.key} ${o.rule}`).join(', ')}) — their ${n} held hit(s) dropped, the other ${req.held.n} stay held; the card says so`);
+    return n;
   }
   async function pruneHeld(adapterId) {
-    const gone = [];
+    const gone = [], part = [];
     for (const r of store.index.table('watchRequests') || []) {
       if (!(r && r.kind === 'held' && r.status === 'open' && r.adapterId === adapterId)) continue;
-      const rule = heldRuleOf(r);
-      if (rule !== 'stands') gone.push({ r, why: heldEndOf(rule).why });
+      const reach = heldReachOf(r);
+      if (reach.out.length) (reach.kept.length ? part : gone).push({ r, reach });
     }
-    for (const g of gone) await endHeld(g.r, g.why);
-    if (gone.length) notify([]);
+    for (const g of gone) await endHeld(g.r, heldEndOf(g.reach.out[0].rule).why, g.reach);
+    for (const p of part) await dropHeld(p.r, p.reach);
+    if (gone.length || part.length) notify([]);
   }
   /** Pending hits wait for a WATCHER; one no watcher in effect names any more
    *  (it was removed, or its principal lost access) would sit in the count

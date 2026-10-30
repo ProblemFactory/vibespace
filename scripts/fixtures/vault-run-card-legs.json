@@ -1,10 +1,10 @@
 {
   "v": 2,
-  "_": "GENERATED — never hand-edit. Lane wake-approve-card r11: every facts object a run-card leg injects (test-wake-approve-card, test-wake-approve-card-chrome), made by the PRODUCER (lane vault-agent-own src/vault-run.js cardFactsOf over real plans; the door's own whyAgainOf / exactPartsOf / cmdText for `whyAgain`, set as the door sets it) on a scratch copy of the train tip. `codes` = VR.CARD_FACTS_CODES, the contract export.",
+  "_": "GENERATED — never hand-edit: node scripts/make-vault-run-card-legs.mjs --write (test-wake-approve-card ⑳ re-derives it from the producer wherever the tree carries one). Lane wake-approve-card r11–r12: every facts object a run-card leg injects (test-wake-approve-card, test-wake-approve-card-chrome), made by the PRODUCER (lane vault-agent-own src/vault-run.js cardFactsOf over real plans; the door's own whyAgainOf / exactPartsOf / cmdText for `whyAgain`, set as the door sets it). `codes` = VR.CARD_FACTS_CODES, the contract export.",
   "producer": {
-    "commit": "fc4cadefe",
-    "src/vault-run.js": "9b03bf1e59dd",
-    "src/server/vault-run-door.js": "ac9258204888"
+    "commit": "978300a0a + vault-agent-own r27 cf4e30bfe",
+    "src/vault-run.js": "6f7baca962fa",
+    "src/server/vault-run-door.js": "a0a0dc019c41"
   },
   "codes": {
     "always": [
@@ -1003,6 +1003,166 @@
             ]
           }
         ],
+        "masking": "common-encodings"
+      }
+    },
+    {
+      "name": "folder-long",
+      "why": "r12: a 2207-character working folder and its 2214-character program at the tail — folderCut + folderFull, tool.pathCut + pathFull",
+      "facts": {
+        "v": 2,
+        "who": "ops watch",
+        "tool": {
+          "name": "run.sh",
+          "path": "~/workspace/ops/nested-level-000-dir/nested-level-001-dir/nested-level-002-dir/nested-level-003-dir/nested-level-004-dir/nested-level-005-dir/nested-level-006-dir/nested-level-007-dir/nested-level-008-dir/nested-level-009-dir/nested-level-010-dir/nested-level-011-dir/nested-level-012-dir/nested-level-013-dir/nested-level-014-dir/nested-level-015-dir/nested-level-016-dir/nested-level-017-dir/nested-level-018-dir/nested-level-019-dir/nested-level-020-dir/nested-level-021-dir/nested-level-022-dir/nested-level-023-dir/nested-level-024-dir/nested-level-025-dir/nested-level-026-dir/nested-level-027-dir/nested-level-028-dir/nested-level-029-dir/nested-level-030-dir/nested-level-031-dir/nested-level-032-dir/nested-level-033-dir/nested-level-034-dir/nested-level-035-dir/nested-level-036-dir/nested-level-037-dir/nested-level-038-dir/nested-level-039-dir/nested-level-040-dir/nested-level-041-dir/nested-level-042-dir/nested-level-043-dir/nested-level-044-dir/nested-level-045-dir/nested-level-046-dir/nested-level-047-dir/nested-level-048-dir/nested-level-049-dir/nested-level-050-dir/nested-level-051-dir/nested-level-052-dir/nested-level-053-dir/nested-level-054-dir/nested-level-055-dir/nested-level-056-dir/nested-level-057-dir/nested-level-058-dir/nested-level-059-dir/nested-level-060-dir/nested-level-061-dir/nested-level-062-dir/nested-level-063-dir/nested-level-064-dir/nested-level-065-dir/nested-level-066-dir/nested-level-067-dir/nested-level-068-dir/nested-level-069-dir/nested-level-070-dir/nested-level-071-dir/nested-level-072-dir/nested-level-073-dir/nested-level-074-dir/nested-level-075-dir/nested-level-076-dir/nested-level-077-dir/nested-level-078-dir/nested-level-079-dir/nested-level-080-dir/nested-level-081-dir/nested-level-082-dir/nested-level-083-dir/nested-level-084-dir/nested-level-085-dir/nested-level-086-dir/nested-level-087-dir/nested-level-088-dir/nested-level-089-dir/nested-level-090-dir/nested-level-091-dir/nested-level-092-dir/nested-level-093-dir/nested-lev",
+          "pathCut": true,
+          "pathFull": [
+            "~/workspace/ops/nested-level-000-dir/nested-level-001-dir/nested-level-002-dir/nested-level-003-dir/nested-level-004-dir/nested-level-005-dir/nested-level-006-dir/nested-level-007-dir/nested-level-008-dir/nested-level-009-dir/nested-level-010-dir/nested-level-011-dir/nested-level-012-dir/nested-level-013-dir/nested-level-014-dir/nested-level-015-dir/nested-level-016-dir/nested-level-017-dir/nested-level-018-dir/nested-level-019-dir/nested-level-020-dir/nested-level-021-dir/nested-level-022-dir/nested-level-023-dir/nested-level-024-dir/nested-level-025-dir/nested-level-026-dir/nested-level-027-dir/nested-level-028-dir/nested-level-029-dir/nested-level-030-dir/nested-level-031-dir/nested-level-032-dir/nested-level-033-dir/nested-level-034-dir/nested-level-035-dir/nested-level-036-dir/nested-level-037-dir/nested-level-038-dir/nested-level-039-dir/nested-level-040-dir/nested-level-041-dir/nested-level-042-dir/nested-level-043-dir/nested-level-044-dir/nested-level-045-dir/nested-level-046-dir/nested-level-047-dir/nested-level-048-dir/nested-level-049-dir/nested-level-050-dir/nested-level-051-dir/nested-level-052-dir/nested-level-053-dir/nested-level-054-dir/nested-level-055-dir/nested-level-056-dir/nested-level-057-dir/nested-level-058-dir/nested-level-059-dir/nested-level-060-dir/nested-level-061-dir/nested-level-062-dir/nested-level-063-dir/nested-level-064-dir/nested-level-065-dir/nested-level-066-dir/nested-level-067-dir/nested-level-068-dir/nested-level-069-dir/nested-level-070-dir/nested-level-071-dir/nested-level-072-dir/nested-level-073-dir/nested-level-074-dir/nested-level-075-dir/nested-level-076-dir/nested-level-077-dir/nested-level-078-dir/nested-level-079-dir/nested-level-080-dir/nested-level-081-dir/nested-level-082-dir/nested-level-083-dir/nested-level-084-dir/nested-level-085-dir/nested-level-086-dir/nested-level-087-dir/nested-level-088-dir/nested-level-089-dir/nested-level-090-dir/nested-level-091-dir/nested-level-092-dir/nested-level-093-dir/nested-lev",
+            "el-094-dir/nested-level-095-dir/nested-level-096-dir/nested-level-097-dir/nested-level-098-dir/nested-level-099-dir/nested-level-100-dir/nested-level-101-dir/nested-level-102-dir/nested-le/evil-tail/run.sh"
+          ],
+          "writable": true
+        },
+        "cmd": "./run.sh PUT",
+        "folder": "~/workspace/ops/nested-level-000-dir/nested-level-001-dir/nested-level-002-dir/nested-level-003-dir/nested-level-004-dir/nested-level-005-dir/nested-level-006-dir/nested-level-007-dir/nested-level-008-dir/nested-level-009-dir/nested-level-010-dir/nested-level-011-dir/nested-level-012-dir/nested-level-013-dir/nested-level-014-dir/nested-level-015-dir/nested-level-016-dir/nested-level-017-dir/nested-level-018-dir/nested-level-019-dir/nested-level-020-dir/nested-level-021-dir/nested-level-022-dir/nested-level-023-dir/nested-level-024-dir/nested-level-025-dir/nested-level-026-dir/nested-level-027-dir/nested-level-028-dir/nested-level-029-dir/nested-level-030-dir/nested-level-031-dir/nested-level-032-dir/nested-level-033-dir/nested-level-034-dir/nested-level-035-dir/nested-level-036-dir/nested-level-037-dir/nested-level-038-dir/nested-level-039-dir/nested-level-040-dir/nested-level-041-dir/nested-level-042-dir/nested-level-043-dir/nested-level-044-dir/nested-level-045-dir/nested-level-046-dir/nested-level-047-dir/nested-level-048-dir/nested-level-049-dir/nested-level-050-dir/nested-level-051-dir/nested-level-052-dir/nested-level-053-dir/nested-level-054-dir/nested-level-055-dir/nested-level-056-dir/nested-level-057-dir/nested-level-058-dir/nested-level-059-dir/nested-level-060-dir/nested-level-061-dir/nested-level-062-dir/nested-level-063-dir/nested-level-064-dir/nested-level-065-dir/nested-level-066-dir/nested-level-067-dir/nested-level-068-dir/nested-level-069-dir/nested-level-070-dir/nested-level-071-dir/nested-level-072-dir/nested-level-073-dir/nested-level-074-dir/nested-level-075-dir/nested-level-076-dir/nested-level-077-dir/nested-level-078-dir/nested-level-079-dir/nested-level-080-dir/nested-level-081-dir/nested-level-082-dir/nested-level-083-dir/nested-level-084-dir/nested-level-085-dir/nested-level-086-dir/nested-level-087-dir/nested-level-088-dir/nested-level-089-dir/nested-level-090-dir/nested-level-091-dir/nested-level-092-dir/nested-level-093-dir/nested-lev",
+        "folderCut": true,
+        "folderFull": [
+          "~/workspace/ops/nested-level-000-dir/nested-level-001-dir/nested-level-002-dir/nested-level-003-dir/nested-level-004-dir/nested-level-005-dir/nested-level-006-dir/nested-level-007-dir/nested-level-008-dir/nested-level-009-dir/nested-level-010-dir/nested-level-011-dir/nested-level-012-dir/nested-level-013-dir/nested-level-014-dir/nested-level-015-dir/nested-level-016-dir/nested-level-017-dir/nested-level-018-dir/nested-level-019-dir/nested-level-020-dir/nested-level-021-dir/nested-level-022-dir/nested-level-023-dir/nested-level-024-dir/nested-level-025-dir/nested-level-026-dir/nested-level-027-dir/nested-level-028-dir/nested-level-029-dir/nested-level-030-dir/nested-level-031-dir/nested-level-032-dir/nested-level-033-dir/nested-level-034-dir/nested-level-035-dir/nested-level-036-dir/nested-level-037-dir/nested-level-038-dir/nested-level-039-dir/nested-level-040-dir/nested-level-041-dir/nested-level-042-dir/nested-level-043-dir/nested-level-044-dir/nested-level-045-dir/nested-level-046-dir/nested-level-047-dir/nested-level-048-dir/nested-level-049-dir/nested-level-050-dir/nested-level-051-dir/nested-level-052-dir/nested-level-053-dir/nested-level-054-dir/nested-level-055-dir/nested-level-056-dir/nested-level-057-dir/nested-level-058-dir/nested-level-059-dir/nested-level-060-dir/nested-level-061-dir/nested-level-062-dir/nested-level-063-dir/nested-level-064-dir/nested-level-065-dir/nested-level-066-dir/nested-level-067-dir/nested-level-068-dir/nested-level-069-dir/nested-level-070-dir/nested-level-071-dir/nested-level-072-dir/nested-level-073-dir/nested-level-074-dir/nested-level-075-dir/nested-level-076-dir/nested-level-077-dir/nested-level-078-dir/nested-level-079-dir/nested-level-080-dir/nested-level-081-dir/nested-level-082-dir/nested-level-083-dir/nested-level-084-dir/nested-level-085-dir/nested-level-086-dir/nested-level-087-dir/nested-level-088-dir/nested-level-089-dir/nested-level-090-dir/nested-level-091-dir/nested-level-092-dir/nested-level-093-dir/nested-lev",
+          "el-094-dir/nested-level-095-dir/nested-level-096-dir/nested-level-097-dir/nested-level-098-dir/nested-level-099-dir/nested-level-100-dir/nested-level-101-dir/nested-level-102-dir/nested-le/evil-tail"
+        ],
+        "secrets": [
+          {
+            "name": "UniFi 账号 · 用户名",
+            "entry": "unifi-account",
+            "ref": "vault://secrets/unifi-account/username",
+            "as": {
+              "kind": "env",
+              "name": "UNIFI_USER"
+            },
+            "own": true,
+            "provenance": "stored",
+            "forHost": null,
+            "sendsTo": null
+          },
+          {
+            "name": "UniFi 账号 · 密码",
+            "entry": "unifi-account",
+            "ref": "vault://secrets/unifi-account/password",
+            "as": {
+              "kind": "env",
+              "name": "UNIFI_PASS"
+            },
+            "own": true,
+            "provenance": "stored",
+            "forHost": null,
+            "sendsTo": null
+          }
+        ],
+        "env": [],
+        "hosts": {
+          "known": false,
+          "list": [],
+          "why": "tool-names-none"
+        },
+        "shape": "tool",
+        "always": {
+          "offered": false,
+          "why": "destination-unknown",
+          "directive": null
+        },
+        "reason": {
+          "notOwn": false,
+          "away": [
+            {
+              "ref": "vault://secrets/unifi-account/username",
+              "forHost": null,
+              "host": null,
+              "unknown": true,
+              "keep": false
+            },
+            {
+              "ref": "vault://secrets/unifi-account/password",
+              "forHost": null,
+              "host": null,
+              "unknown": true,
+              "keep": false
+            }
+          ]
+        },
+        "templates": [],
+        "masking": "common-encodings"
+      }
+    },
+    {
+      "name": "away-ref-long",
+      "why": "r12: a reason line whose reference is 2 100 characters — reason.away[].refCut + refFull",
+      "facts": {
+        "v": 2,
+        "who": "ops watch",
+        "tool": {
+          "name": "unifi-api.sh",
+          "path": "~/workspace/ops/office-net/unifi-api.sh",
+          "writable": true
+        },
+        "cmd": "./office-net/unifi-api.sh PUT /proxy/network/api/s/default/rest/networkconf/5f9c3a6e8b2d4c0012a7e1f4 /tmp/unifi-work/wan2-primary.json",
+        "folder": "~/workspace/ops",
+        "secrets": [
+          {
+            "name": "UniFi 账号 · 用户名",
+            "entry": "unifi-account",
+            "ref": "vault://secrets/unifi-account/username",
+            "as": {
+              "kind": "env",
+              "name": "UNIFI_USER"
+            },
+            "own": true,
+            "provenance": "stored",
+            "forHost": null,
+            "sendsTo": null
+          },
+          {
+            "name": "UniFi 账号 · 密码",
+            "entry": "unifi-account",
+            "ref": "vault://secrets/unifi-account/password",
+            "as": {
+              "kind": "env",
+              "name": "UNIFI_PASS"
+            },
+            "own": true,
+            "provenance": "stored",
+            "forHost": null,
+            "sendsTo": null
+          }
+        ],
+        "env": [],
+        "hosts": {
+          "known": false,
+          "list": [],
+          "why": "tool-names-none"
+        },
+        "shape": "tool",
+        "always": {
+          "offered": false,
+          "why": "destination-unknown",
+          "directive": null
+        },
+        "reason": {
+          "notOwn": false,
+          "away": [
+            {
+              "ref": "vault://secrets/unifi-account/pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp",
+              "refCut": true,
+              "refFull": [
+                "vault://secrets/unifi-account/pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp",
+                "pppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp"
+              ],
+              "forHost": null,
+              "host": null,
+              "unknown": true,
+              "keep": false
+            }
+          ]
+        },
+        "templates": [],
         "masking": "common-encodings"
       }
     }

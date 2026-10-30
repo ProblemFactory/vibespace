@@ -1483,10 +1483,11 @@ async function fanStopLeg(ENGM, name) {
   } finally { w.eng.stop(); }
 }
 // THE MUTANT «the prune reads in effect» (r9's line): pruneHeld judging by heldInEffect instead of the rule's existence
+// (r12: restated on the reach reader's line — pruneHeld reads heldReachOf)
 function inEffectMutant() {
   const src = engineSource(REPO);
-  const fixed = '      const rule = heldRuleOf(r);\n';
-  return { src, cut: src.split(fixed).length === 2 ? src.replace(fixed, "      const rule = heldInEffect(r) ? 'stands' : 'removed';\n") : src };
+  const fixed = '      const reach = heldReachOf(r);\n';
+  return { src, cut: src.split(fixed).length === 2 ? src.replace(fixed, "      const reach = heldInEffect(r) ? { kept: [1], out: [], of: 1 } : { kept: [], out: [{ rule: 'removed' }], of: 1 };\n") : src };
 }
 try {
   const g = await fanStopLeg(ENG, 'e10-fan');
@@ -1601,11 +1602,12 @@ async function reachLeg11(ENGM, name, notify, { rename = false } = {}) {
     return out;
   } finally { w.eng.stop(); }
 }
-// THE MUTANT «the rule is judged without its reach» (704a0f4c's heldRuleOf for a rule)
+// THE MUTANT «the rule is judged without its reach» (704a0f4c's heldRuleOf for a rule: the held grain's fact alone)
+// (r12: restated on THE reach line — heldReachOf's `woken`)
+const REACH12 = "      const woken = en ? !!eff && eff.watchers.some((x) => pkOf(x.watcher.principal) === root) : rule === 'stands';   // THE reach: any grain\n";
 function reachMutant11() {
   const src = engineSource(REPO);
-  const fixed = "      return v !== 'stands' || !convs.length || convs.some(reach) ? v : 'not-covered';\n";
-  return { src, cut: src.split(fixed).length === 2 ? src.replace(fixed, '      return v;\n') : src };
+  return { src, cut: src.split(REACH12).length === 2 ? src.replace(REACH12, "      const woken = rule === 'stands';\n") : src };
 }
 const GONE11 = 'the rule no longer covers this conversation — 30 messages discarded';
 try {
@@ -1632,6 +1634,146 @@ try {
   ok(!g.press.ok && g.press.code === 'rule-gone' && g.press.why === 'not-covered' && g.press.n === 30 && g.after.request === 'denied' && g.after.by === 'not-covered' && g.after.card && g.after.card.words === GONE11 && g.woken === 0,
     `(c) the conversation renamed out of the rule's reach (no write, no prune): Deliver ⇒ 409 ${g.press.code} / ${g.press.why} (n ${g.press.n}), the card «${g.after.card && g.after.card.words}», nobody woken (704a0f4c: 409 not-in-effect «not in its group», open for ever)`, J2s({ press: g.press, after: g.after, woken: g.woken }));
 } catch (e) { ok(false, '⑨ (c) threw on this tree: ' + ((e && e.stack) || e)); }
+
+console.log('⑩ ROUND 12 (lane wake-approve-card) — THE ONE REACH, per conversation: a held decision ends on exactly the fact that ends a live hit');
+// THE r11 acceptance's two MAJORS (repro/accept-r11/probe-reach-other-route.mjs, probe-partial-reach.mjs): r11's «not-covered» read
+// the held RULE's pattern alone — never whether the watcher is still woken there through ANOTHER grain — and per DECISION, never
+// per conversation. r12: heldReachOf asks the live prune's own question for EACH held conversation (effectiveFor — any grain);
+// the still-covered ones stay held (the card's count updated and said), the others end by name with THEIR count; Deliver
+// delivers each on the road that wakes it now and says what it could not.
+const DROPPED12 = (n, k, m) => `the rule no longer covers ${k} of ${m} conversations — ${n} held messages dropped`;
+// (a)/(b) THE OTHER ROUTE: Worker watches through the rule «title: Ops» AND the account (wake); the 30 hits are held at boot (the
+// rule's grain wins the precedence: source 'pattern'); the rule is edited to «title: Deploy» ⇒ the account still wakes Worker there
+async function otherRouteLeg12(ENGM, name, notify, { remove = false } = {}) {
+  const live = [];
+  const w = await heldWorld10(name, { ENGM, live, setup: async (eng) => {
+    await eng.setGrain(A, { kind: 'account' }, { access: [acc(AGENT), acc(OTHER)] });
+    const pr = await eng.setGrain(A, { kind: 'pattern' }, { pattern: { match: 'any', rules: [{ kind: 'title', value: 'Ops' }] }, access: [acc(OTHER)], watchers: [{ principal: AGENT, delivery: 'wake', notify, ...(notify === 'digest' ? { digestMinutes: 60 } : {}), dailyWakeCap: 5 }] });
+    if (!pr.ok) throw new Error('setup: ' + J2s(pr));
+    const ar = await eng.setGrain(A, { kind: 'account' }, { watchers: [{ principal: AGENT, delivery: 'wake', notify: 'wake', dailyWakeCap: 5 }] }, { person: true });
+    if (!ar.ok) throw new Error('setup (account watch): ' + J2s(ar));
+  }, park: (e2, base, t0) => { if (!e2.pending.length) for (let i = 0; i < 30; i++) e2.pending.push({ record: { ...base, id: `inj12-${i}`, text: `old message ${i}` }, why: [], at: t0, road: 'wake', for: 'agent:agent-1' }); } });
+  live.push({ cid: 'agent-1', name: 'Worker', groups: [] }, { cid: 'agent-2', name: 'Other', groups: [] });
+  try {
+    const req = w.reqOf();
+    const out = { via: req && req.held.via, source: req && req.held.source, held: w.state() };
+    const t1 = w.m2.clock();
+    await w.eng.store.index.update(() => { const e2 = w.eng.store.index.entry(A, C, { create: false }); for (let i = 0; i < 3; i++) e2.pending.push({ record: { id: `fresh12-${i}`, text: 'fresh' }, why: [], at: t1, road: 'wake', for: 'agent:agent-1' }); });
+    const live1 = () => (w.eng.store.index.peek(KEY).pending || []).filter((p) => p && p.for === 'agent:agent-1' && !p.aside).length;
+    out.liveBefore = live1();
+    const ed = remove ? await w.eng.removePattern(A, req.held.patternId) : await w.eng.setGrain(A, { kind: 'pattern', id: req.held.patternId }, { pattern: { match: 'any', rules: [{ kind: 'title', value: 'Deploy' }] } }, { person: true });
+    out.edit = !!(ed && ed.ok); out.after = w.state(); out.liveAfter = live1();
+    const before = w.m2.delivered.length;
+    out.press = PRESS10(await w.eng.decideRequest(req.id, true, 'user', { person: true }));
+    if (w.eng.settleWakes) await w.eng.settleWakes();
+    out.afterPress = w.state();
+    const sent = w.m2.delivered.slice(before);
+    out.wokenByPress = sent.length; out.oldInWake = sent.reduce((x, d) => x + (String(d.text).match(/old message \d+/g) || []).length, 0);
+    return out;
+  } finally { w.eng.stop(); }
+}
+// THE MUTANT «the pattern-only reach» (1ad060a82's r11 reading: the held rule's own pattern, per conversation)
+function patternOnlyMutant12() {
+  const src = engineSource(REPO);
+  return { src, cut: src.split(REACH12).length === 2 ? src.replace(REACH12, "      const pa12 = h.source === 'pattern' && h.patternId ? patternById(h.patternId) : null;\n      const woken = rule === 'stands' && (!en || h.source !== 'pattern' || !!(pa12 && pa12.pattern && F.matchConversation(pa12.pattern, convFacts(en)).hit));\n") : src };
+}
+for (const notify of ['wake', 'digest']) {
+  const L12 = notify === 'wake' ? '(a)' : '(b)';
+  try {
+    const g = await otherRouteLeg12(ENG, `e12-route-${notify}`, notify);
+    ok(g.source === 'pattern' && g.via === (notify === 'wake' ? 'conversation' : 'scope') && g.held.rows === 30 && g.edit && g.after.request === 'open' && g.after.rows === 30 && g.after.card && g.after.card.status === 'open' && g.liveBefore === 3 && g.liveAfter === 3,
+      `${L12} THE OTHER ROUTE (${notify === 'wake' ? 'a conversation plan' : 'a rule DIGEST, a scope plan'}): Worker watches through the rule AND the account; the rule edited off the conversation ⇒ ONE fact, ONE road — his live hits stay (${g.liveBefore} → ${g.liveAfter}) AND the held decision stays open with its ${g.after.rows} rows, the card «${g.after.card && g.after.card.words}» (1ad060a82: denied 'not-covered', «the rule no longer covers this conversation — 30 messages discarded»)`, J2s({ held: g.held, after: g.after, live: [g.liveBefore, g.liveAfter] }));
+    ok(g.press.ok && g.press.delivered === true && g.press.n === 30 && g.afterPress.request === 'approved' && g.afterPress.card && g.afterPress.card.by === 'delivered' && g.wokenByPress === 1 && g.oldInWake > 0,
+      `${L12} Deliver delivers the 30 on the road that wakes Worker NOW (the account's) — ok, n ${g.press.n}, ONE turn (${g.wokenByPress})${notify === 'digest' ? ' (was, on 704a0f4c: «nothing-pending» — the rule\'s scope carried nothing)' : ''}`, J2s({ press: g.press, afterPress: g.afterPress, woken: g.wokenByPress, old: g.oldInWake }));
+    if (notify === 'wake') {
+      const m = patternOnlyMutant12();
+      const r = await otherRouteLeg12(MUT.load('src/server/channels-engine.js', m.cut, 'held-pattern-only'), 'e12-route-red', 'wake');
+      ok(m.cut !== m.src && r.after.request === 'denied' && r.after.by === 'not-covered' && r.after.rows === 0 && r.liveAfter === 3 && !r.press.ok,
+        `CONTROL «the pattern-only reach» (1ad060a82's): the same edit ⇒ ${r.after.request} ${r.after.by}, ${r.after.rows} rows, while the live hits stay ${r.liveAfter} — two answers to one fact`, J2s({ after: r.after, liveAfter: r.liveAfter, press: r.press }));
+    }
+  } catch (e) { ok(false, `⑩ ${L12} threw on this tree: ` + ((e && e.stack) || e)); }
+}
+// (e) THE HELD RULE REMOVED (not edited) while the account still wakes Worker there: the same fact as a live hit — the decision
+// stays open with its 30, «in effect» reads the account's road (not only the removed rule's watcher), Deliver delivers them there
+try {
+  const g = await otherRouteLeg12(ENG, 'e12-route-removed', 'digest', { remove: true });
+  ok(g.edit && g.after.request === 'open' && g.after.rows === 30 && g.liveAfter === 3 && g.press.ok && g.press.delivered === true && g.press.n === 30 && g.wokenByPress === 1 && g.afterPress.card && g.afterPress.card.by === 'delivered',
+    `(e) the held rule REMOVED while the account still wakes Worker there ⇒ the decision stays open (${g.after.rows} rows, live hits ${g.liveBefore} → ${g.liveAfter}); Deliver delivers ${g.press.n} in ONE turn on the account's road (1ad060a82: denied 'watch-removed', «the rule they were held for was removed — 30 messages discarded»)`, J2s({ after: g.after, press: g.press, woken: g.wokenByPress }));
+} catch (e) { ok(false, '⑩ (e) threw on this tree: ' + ((e && e.stack) || e)); }
+// (c) PER CONVERSATION: a rule DIGEST over «Ops room» + «Announcements», 30 held each (60); the rule narrowed to «title: Ops» ⇒
+// Announcements' 30 drop BY NAME with their count, Ops' 30 stay held (the card's count updated and said); Deliver delivers 30 and
+// says the 30 it could not; nothing returns to pending. Then the rule edited off Ops too ⇒ the decision ends: «… its 2 conversations»
+async function partialLeg12(ENGM, name) {
+  const C2 = 'fake-poll-announce', K2 = `${A}/${C2}`;
+  const live = [];
+  const pendFor = (eng, key) => ((eng.store.index.peek(key) || {}).pending || []).filter((p) => p && p.for === 'agent:agent-1').length;
+  const m1 = mkEngine(name, { ENGM, live });
+  await m1.eng.pass(A, { force: true });
+  await m1.eng.setGrain(A, { kind: 'account' }, { access: [acc(AGENT), acc(OTHER)] });
+  const pr = await m1.eng.setGrain(A, { kind: 'pattern' }, { pattern: { match: 'any', rules: [{ kind: 'title', value: 'Ops' }, { kind: 'title', value: 'Announce' }] }, access: [acc(OTHER)], watchers: [{ principal: AGENT, delivery: 'wake', notify: 'digest', digestMinutes: 60, dailyWakeCap: 5 }] });
+  if (!pr.ok) throw new Error('setup: ' + J2s(pr));
+  const t0 = m1.clock();
+  for (const cv of [C, C2]) await m1.eng.store.index.update(() => { const e2 = m1.eng.store.index.entry(A, cv, { create: true }); if (!Array.isArray(e2.pending)) e2.pending = []; for (let i = 0; i < 30; i++) e2.pending.push({ record: { id: `${cv}-inj12-${i}`, text: `old message ${i}`, at: t0 - 3 * 86400e3 }, why: [], at: t0 - 3 * 86400e3, road: 'wake', for: 'agent:agent-1' }); });
+  m1.eng.stop(); await new Promise((r) => setTimeout(r, 10));
+  const m2 = mkEngine(name, { ENGM, live });
+  m2.eng.start(); await new Promise((r) => setTimeout(r, 30));
+  if (m2.eng.settleWakes) await m2.eng.settleWakes();
+  live.push({ cid: 'agent-1', name: 'Worker', groups: [] }, { cid: 'agent-2', name: 'Other', groups: [] });
+  const reqOf = () => (m2.eng.store.index.table('watchRequests') || []).find((r) => r && r.kind === 'held');
+  const st = () => { const r = reqOf(); const it = r && r.todoId ? m2.userTodos.get(r.todoId) : null; return { request: r && r.status, by: (r && r.decidedBy) || null, rows: Object.fromEntries(((r && r.held && r.held.convs) || []).map((c) => [c.id, Array.isArray(c.rows) ? c.rows.length : 0])), dropped: Object.fromEntries(((r && r.held && r.held.convs) || []).filter((c) => c.dropped).map((c) => [c.id, c.dropped.n + ' ' + c.dropped.why])), card: it ? { status: it.status, by: it.resolvedBy || null, words: it.status === 'open' ? it.text : FA.settledWords(it, SAID10), zh: it.i18n && it.i18n.text && it.i18n.text.key } : null }; };
+  try {
+    const req = reqOf();
+    const out = { via: req && req.held.via, held: st() };
+    const ed = await m2.eng.setGrain(A, { kind: 'pattern', id: req.held.patternId }, { pattern: { match: 'any', rules: [{ kind: 'title', value: 'Ops' }] } });
+    out.edit = !!(ed && ed.ok); out.after = st(); out.pendAfterEdit = { ops: pendFor(m2.eng, KEY), ann: pendFor(m2.eng, K2) };
+    const before = m2.delivered.length;
+    const d = await m2.eng.decideRequest(req.id, true, 'user', { person: true });
+    if (m2.eng.settleWakes) await m2.eng.settleWakes();
+    out.press = { ...PRESS10(d), dropped: d && d.dropped };
+    out.afterPress = st(); out.pendAfterPress = { ops: pendFor(m2.eng, KEY), ann: pendFor(m2.eng, K2) };
+    out.wakes = m2.delivered.slice(before).map((x) => ({ ops: /Ops room/.test(x.text), ann: /Announcements/.test(x.text) }));
+    await m2.eng.setGrain(A, { kind: 'account' }, { access: [acc(AGENT), acc(OTHER), acc({ kind: 'agent', id: 'agent-3', name: 'Third' })] });
+    out.pendAfterNextWrite = { ops: pendFor(m2.eng, KEY), ann: pendFor(m2.eng, K2) };
+    return out;
+  } finally { m2.eng.stop(); }
+}
+try {
+  const g = await partialLeg12(ENG, 'e12-partial');
+  ok(g.via === 'scope' && J2s(g.held.rows) === J2s({ 'fake-poll-ops': 30, 'fake-poll-announce': 30 }) && /^60 messages for Worker held since /.test(g.held.card.words) && g.edit && g.after.request === 'open'
+    && J2s(g.after.rows) === J2s({ 'fake-poll-ops': 30, 'fake-poll-announce': 0 }) && J2s(g.after.dropped) === J2s({ 'fake-poll-announce': '30 not-covered' })
+    && /^30 messages for Worker held since .* — deliver or discard · the rule no longer covers 1 of 2 conversations — 30 held messages dropped$/.test(g.after.card.words) && J2s(g.pendAfterEdit) === J2s({ ops: 0, ann: 0 }),
+    `(c) PER CONVERSATION: the rule narrowed to one of the digest's two conversations ⇒ the other's 30 drop BY NAME with their count, the covered 30 stay held — the card «${g.after.card && g.after.card.words}» (1ad060a82: «60 messages … — deliver or discard», unchanged)`, J2s({ held: g.held, after: g.after, pend: g.pendAfterEdit }));
+  ok(g.press.ok && g.press.delivered === true && g.press.n === 30 && g.press.dropped && g.press.dropped.n === 30 && g.press.dropped.k === 1 && g.press.dropped.of === 2 && g.press.dropped.why === 'not-covered'
+    && g.afterPress.request === 'approved' && g.afterPress.card.words === `delivered · ${DROPPED12(30, 1, 2)}` && J2s(g.pendAfterPress) === J2s({ ops: 0, ann: 0 }) && J2s(g.wakes) === J2s([{ ops: true, ann: false }]) && J2s(g.pendAfterNextWrite) === J2s({ ops: 0, ann: 0 }),
+    `(c) Deliver says what it delivered AND what it could not: ok, n ${g.press.n}, dropped ${J2s(g.press.dropped && { n: g.press.dropped.n, k: g.press.dropped.k, of: g.press.dropped.of })}; the record «${g.afterPress.card && g.afterPress.card.words}»; ONE wake carrying Ops only; nothing returned to pending (1ad060a82: «delivered 60», the card «delivered», Announcements' 30 back in pending, dropped unsaid at the next write)`, J2s({ press: g.press, afterPress: g.afterPress, pend: g.pendAfterPress, wakes: g.wakes, next: g.pendAfterNextWrite }));
+} catch (e) { ok(false, '⑩ (c) threw on this tree: ' + ((e && e.stack) || e)); }
+// (d) THE REST GOES OUT TOO: the same digest narrowed to Ops (Announcements dropped), then the rule edited to «title: Deploy» ⇒ the
+// decision ends, said for the whole digest — «the rule no longer covers its 2 conversations — 60 messages discarded»
+try {
+  const C2 = 'fake-poll-announce';
+  const live = [];
+  const m1 = mkEngine('e12-allout', { live });
+  await m1.eng.pass(A, { force: true });
+  await m1.eng.setGrain(A, { kind: 'account' }, { access: [acc(AGENT), acc(OTHER)] });
+  const pr = await m1.eng.setGrain(A, { kind: 'pattern' }, { pattern: { match: 'any', rules: [{ kind: 'title', value: 'Ops' }, { kind: 'title', value: 'Announce' }] }, access: [acc(OTHER)], watchers: [{ principal: AGENT, delivery: 'wake', notify: 'digest', digestMinutes: 60, dailyWakeCap: 5 }] });
+  const t0 = m1.clock();
+  for (const cv of [C, C2]) await m1.eng.store.index.update(() => { const e2 = m1.eng.store.index.entry(A, cv, { create: true }); if (!Array.isArray(e2.pending)) e2.pending = []; for (let i = 0; i < 30; i++) e2.pending.push({ record: { id: `${cv}-all12-${i}`, text: `old message ${i}`, at: t0 - 3 * 86400e3 }, why: [], at: t0 - 3 * 86400e3, road: 'wake', for: 'agent:agent-1' }); });
+  m1.eng.stop(); await new Promise((r) => setTimeout(r, 10));
+  const m2 = mkEngine('e12-allout', { live });
+  m2.eng.start(); await new Promise((r) => setTimeout(r, 30));
+  if (m2.eng.settleWakes) await m2.eng.settleWakes();
+  live.push({ cid: 'agent-1', name: 'Worker', groups: [] });
+  try {
+    const req = (m2.eng.store.index.table('watchRequests') || []).find((r) => r && r.kind === 'held');
+    await m2.eng.setGrain(A, { kind: 'pattern', id: pr.grain.id }, { pattern: { match: 'any', rules: [{ kind: 'title', value: 'Ops' }] } });
+    await m2.eng.setGrain(A, { kind: 'pattern', id: pr.grain.id }, { pattern: { match: 'any', rules: [{ kind: 'title', value: 'Deploy' }] } });
+    const r2 = (m2.eng.store.index.table('watchRequests') || []).find((r) => r && r.id === req.id);
+    const it = m2.userTodos.get(req.todoId);
+    const words = it ? FA.settledWords(it, SAID10) : null;
+    ok(r2.status === 'denied' && r2.decidedBy === 'not-covered' && it && it.resolvedBy === 'discarded' && it.resolvedFact && it.resolvedFact.n === 60 && it.resolvedFact.convs === 2 && words === 'the rule no longer covers its 2 conversations — 60 messages discarded',
+      `(d) the rest goes out too ⇒ the decision ends, said for the whole digest: «${words}» (the 30 dropped before counted with the 30 now)`, J2s({ status: r2.status, by: r2.decidedBy, fact: it && it.resolvedFact, words }));
+  } finally { m2.eng.stop(); }
+} catch (e) { ok(false, '⑩ (d) threw on this tree: ' + ((e && e.stack) || e)); }
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -684,6 +684,12 @@ question about another machine is the failure the rule exists to stop.
   **r11:** a rule's reach is part of the rule — a decision held for a rule that no longer matches ANY of its held conversations
   (the rule edited, the conversation renamed) is ended as gone, `why: 'not-covered'` («the rule no longer covers this conversation —
   N messages discarded»), at the rule's edit or by a Deliver that finds it so (409 `rule-gone` `{why: 'not-covered', n}`).
+  **r12:** the reach is judged PER CONVERSATION by the live prune's own reading (is the watcher still woken there through ANY
+  grain — effectiveFor), never the held rule's pattern alone: a conversation the agent is still woken for (the account, another
+  rule) stays held; when only SOME went, they drop by name and the decision stays open (its card «… · the rule no longer covers
+  k of m conversations — d held messages dropped»), and every answer of the decide route carries **`dropped`** `{n, k, of, why,
+  agent}` (the 200 beside `n` / `discarded`, the 409 `not-in-effect`); a 409 `rule-gone` for a digest whose every conversation
+  went adds **`convs`** (m) and its `n` counts the part dropped before. Deliver sends each conversation on the road that wakes it now.
 
 - **P1a — the adapter's own consent flow and options** (design §10.1, §12.4,
   §13; every failure answers `{error, code, detail}` with a status BY CODE:

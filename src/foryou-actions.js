@@ -419,6 +419,14 @@ function ruledOf(item) {
   return e && e.mapped ? { ...item, resolvedBy: e.by, resolvedFact: { ...item.resolvedFact, ...(e.late ? { late: true } : {}) } } : item;
 }
 
+/** r12: the PART of a held decision dropped before it was decided (its watcher no longer woken by those conversations —
+ *  the server's heldDroppedOf `{n, k, of, why, agent}` on the record's resolvedFact) → « · <its words>» | ''. */
+function heldDropTail(item, t = fmt) {
+  const d = item && item.resolvedFact && item.resolvedFact.dropped;
+  if (!d || typeof d !== 'object' || !(Number(d.k) > 0)) return '';
+  const p = { k: Number(d.k) || 0, m: Number(d.of) || 0, d: Number(d.n) || 0, agent: String(d.agent || '') };
+  return ' · ' + (d.why === 'not-covered' ? t('the rule no longer covers {k} of {m} conversations — {d} held messages dropped', p) : t('{k} of {m} conversations no longer wake {agent} — {d} held messages dropped', p));
+}
 /** The quiet record's VERB — how a resolved card reads in its line («approved · 2 min ago»). */
 function settledWords(item, t = fmt, kind = null) {
   const end = endOf(item);
@@ -434,11 +442,11 @@ function settledWords(item, t = fmt, kind = null) {
   if (by === 'stored') return t('saved to the vault');
   if (by === 'always') { const gw = grantWords(item, { t }); return gw ? gw.text : t(GRANT_VERB.always); }   // r8: the run card's «always» without the person mark — its grant's words (was «done»)
   if (by === 'granted') { const gw = grantWords(item, { t }); return gw ? gw.text : t('allowed'); }   // r4: an agent's request for a stored secret, answered — r6: the duration its record carries (none ⇒ «allowed») and the grant's LIFE (ended / revoked)
-  if (by === 'delivered') return t('delivered');   // r6: a held digest the owner released
+  if (by === 'delivered') return t('delivered') + heldDropTail(item, t);   // r6: a held digest the owner released (r12: the part dropped before, said)
   if (by === 'discarded' && item && item.resolvedFact && item.resolvedFact.why === 'watch-removed') return t('the rule they were held for was removed — {n} messages discarded', { n: Number(item.resolvedFact.n) || 0 });   // r9: no watcher left to deliver to — the store ended it, said
   if (by === 'discarded' && item && item.resolvedFact && item.resolvedFact.why === 'access-removed') return t('the access they were held under was removed — {n} messages discarded', { n: Number(item.resolvedFact.n) || 0 });   // r10: its row stands, inert — the grant it lived by was revoked
-  if (by === 'discarded' && item && item.resolvedFact && item.resolvedFact.why === 'not-covered') return t('the rule no longer covers this conversation — {n} messages discarded', { n: Number(item.resolvedFact.n) || 0 });   // r11: the rule stands, its reach no longer takes the held conversation
-  if (by === 'discarded') return t('discarded — nothing was sent');
+  if (by === 'discarded' && item && item.resolvedFact && item.resolvedFact.why === 'not-covered') return Number(item.resolvedFact.convs) > 1 ? t('the rule no longer covers its {m} conversations — {n} messages discarded', { m: Number(item.resolvedFact.convs), n: Number(item.resolvedFact.n) || 0 }) : t('the rule no longer covers this conversation — {n} messages discarded', { n: Number(item.resolvedFact.n) || 0 });   // r11: the rule stands, its reach no longer takes the held conversation (r12: a digest's every one)
+  if (by === 'discarded') return t('discarded — nothing was sent') + heldDropTail(item, t);
   if (by === 'expired' && item && item.action && item.action.type === 'channel-held-digest') return t('expired — discarded, nothing was sent');   // r6: its end discards
   if (by === 'ask-expired' && item && item.action) return t(DEADLINE_WORDS['timed-out']);   // r7 addendum: a held ask nobody answered in time (a command: exit / run / hub act / automation) keeps its place with its outcome
   if (by === 'expired' || by === 'ask-expired') return isDecisionRow(item) ? t('expired · the agent can ask again') : t('expired');   // r2: a decision's end
@@ -653,12 +661,16 @@ function decidedStamp(item, { t = fmt, now = Date.now() } = {}) {
  *  ONLY author of what a run card says; this model draws the facts as they carry them and nothing it reads elsewhere (no
  *  live session name — a fallback that reads the hub is a fact nobody produced): `who`; every clipped string's `<key>Cut`
  *  marker with its `<key>Full` chunks reassembled under the fold (r25's clipFold — a secret's name / entry / ref, an env
- *  name / value, the «Always» directive; `whoCut` has no fold); `whyAgain` — the ONE dimension named. */
+ *  name / value, the «Always» directive; r12: the working folder and the program's path; `whoCut` has no fold); `whyAgain` —
+ *  the ONE dimension named. r12 — a `<key>Cut` that arrives WITHOUT its `<key>Full` is drawn as what it is — cut, the rest not
+ *  available — never as «its whole value» (the acceptance: a producer rename showed a 2 000-character clip as whole, with
+ *  its length); the card reads no field the producer does not emit (no `cmdLen`: a cut fold says «over N»). */
 /** THE ONE BOUND of a run card's command (r8 — /var/tmp/vibespace-lanes/vault-card-contract.md, both lanes): the body shows
  *  ≤ RUN_CMD_BODY_MAX characters (a longer one: its start + «…», `cmdCut: true`), the fold holds the whole ≤ RUN_CMD_MAX
  *  (`cmdFull`); a longer whole is cut THERE and said — r9: the door sends the QUOTED argv (1 000 single quotes make a
  *  2 035-byte argv a 5 037-character cmd), so the fold can be cut: `cut` names cmdFull and the card's line states only a
- *  total it can prove (the door's `cmdLen`, else «over 4 096»); every other facts string ≤ RUN_CMD_BODY_MAX.
+ *  total it can prove (the whole fold's own length, else «over 4 096» — r12: never a `cmdLen`, a field no producer emits);
+ *  every other facts string ≤ RUN_CMD_BODY_MAX.
  *  src/user-todos.js clips at the write (never throws); the door clips at the same bound. */
 const RUN_CMD_BODY_MAX = 2000;
 const RUN_CMD_MAX = 4096;
@@ -702,13 +714,20 @@ function runCardOf(item, { t = fmt } = {}) {
   if (!f) return null;
   const str = (x) => (typeof x === 'string' ? x : '');
   const joined = (x) => (Array.isArray(x) ? x.filter((c) => typeof c === 'string').join('') : str(x));
-  // r11 (r25's clipFold): a clipped field → what the card's face draws (its clip + «…») and the WHOLE (its fold reassembled)
-  const wholeOf = (o, k) => { const x = o && typeof o === 'object' ? o : {}, shown = str(x[k]), cut = x[k + 'Cut'] === true; return { shown: cut && shown && !shown.endsWith('\u2026') ? shown + '\u2026' : shown, whole: (cut && joined(x[k + 'Full'])) || shown, cut }; };
+  // r11 (r25's clipFold): a clipped field → what the card's face draws (its clip + «…») and the WHOLE (its fold reassembled);
+  // r12: `lost` — cut, and its fold did not arrive: `whole` is then the clip WITH its «…», never a whole it is not
+  const wholeOf = (o, k) => {
+    const x = o && typeof o === 'object' ? o : {}, raw = str(x[k]), cut = x[k + 'Cut'] === true, fold = cut ? joined(x[k + 'Full']) : '';
+    const shown = cut && raw && !raw.endsWith('\u2026') ? raw + '\u2026' : raw;
+    return { shown, whole: fold || (cut ? shown : raw), cut, lost: cut && !fold };
+  };
+  const LOST = i18nKey('(cut — the rest is not available)');
   const own = (table, code) => typeof code === 'string' && Object.prototype.hasOwnProperty.call(table, code);
   const said = (table, code) => (own(table, code) ? [{ text: t(table[code]) }] : code ? [{ code: String(code) }] : []);
   const list = (xs) => xs.flatMap((x, k) => (k ? [{ text: t(', ') }, ...x] : x));
   const tool = f.tool && typeof f.tool === 'object' ? f.tool : {};
-  const folder = str(f.folder);
+  const folderW = wholeOf(f, 'folder'), pathW = wholeOf(tool, 'path');   // r12: the producer folds both (clipFold) like an env value
+  const folder = folderW.whole;
   const asOf = (a) => {
     const kind = a && typeof a === 'object' ? str(a.kind) : '', name = a && typeof a === 'object' ? str(a.name) : '';
     if (kind === 'env') return [{ mono: name }];
@@ -727,20 +746,22 @@ function runCardOf(item, { t = fmt } = {}) {
     g.names.push(name); g.as.push(asOf(s.as));
   }
   const entryName = (g) => (g.names.length === 1 ? g.names[0] : g.names.every((n) => headOf(n) === headOf(g.names[0])) ? headOf(g.names[0]) : g.names.join(t(', ')));
-  const who = wholeOf(f, 'who').shown || t('An agent'), toolName = str(tool.name) || str(tool.path);   // r11: the facts' own `who` — never the record's live session name
+  const who = wholeOf(f, 'who').shown || t('An agent'), toolName = str(tool.name) || pathW.shown;   // r11: the facts' own `who` — never the record's live session name
   const headline = groups.length ? t('{who} wants to run {tool} with “{entries}”', { who, tool: toolName, entries: groups.map(entryName).join(t(', ')) }) : t('{who} wants to run {tool}', { who, tool: toolName });
   const a = f.always && typeof f.always === 'object' ? f.always : {};
   const h = f.hosts && typeof f.hosts === 'object' ? f.hosts : {};
   const hosts = (Array.isArray(h.list) ? h.list : []).filter((x) => typeof x === 'string' && x);
   const known = h.known === true && hosts.length > 0;
   const hostWhy = own(RUN_HOSTS_WHY, h.why) ? [{ text: t('unknown ({why})', { why: t(RUN_HOSTS_WHY[h.why]) }) }] : h.why ? [{ text: t('unknown') }, { text: ' ' }, { code: String(h.why) }] : [{ text: t('unknown') }];
-  const path = str(tool.path) || toolName;
-  const rel = folder && path.startsWith(folder + '/') ? path.slice(folder.length + 1) : path;
+  const path = pathW.whole || toolName;
+  const rel0 = folder && path.startsWith(folder + '/') ? path.slice(folder.length + 1) : path;
+  const rel = rel0.length > RUN_CMD_BODY_MAX ? rel0.slice(0, RUN_CMD_BODY_MAX) + '\u2026' : rel0;   // r12: the program relative to the WHOLE folder (a long folder's tail named: «evil-tail/run.sh»)
+  const longAside = (w) => (!w.cut ? [] : [{ aside: w.lost ? t(LOST) : t('(shortened — the whole path is under “{fold}”)', { fold: t('Technical details') }) }]);
   const decides = a.offered === true ? null : RUN_DECIDES[a.why] || null;
   const lines = {
     hosts: [known ? list(hosts.map((x) => [{ mono: x }])) : hostWhy],
-    program: [[{ mono: rel }, ...(tool.writable === true ? [{ aside: t('(in a folder an agent can write)') }] : [])]],
-    folder: [[{ mono: folder }]],
+    program: [[{ mono: rel }, ...(rel0 !== rel || (pathW.lost && rel0 === path) ? longAside(pathW) : []), ...(tool.writable === true ? [{ aside: t('(in a folder an agent can write)') }] : [])]],
+    folder: [[{ mono: folderW.shown }, ...longAside(folderW)]],   // r12: a long folder's clip on the face, said; the whole under the fold
     secrets: groups.map((g) => [{ text: entryName(g) }, { text: ' → ' }, ...list(g.as.filter((x) => x.length))]),
   };
   const rows = [...(decides ? [decides] : []), ...RUN_ROWS.filter((k) => k !== decides)]
@@ -754,11 +775,10 @@ function runCardOf(item, { t = fmt } = {}) {
   const full = f.cmdCut === true && joined(f.cmdFull) ? joined(f.cmdFull) : null;
   // r9 (a store never states a length it cannot prove — the acceptance: a 2 035-byte argv with 1 000 quotes is a 5 037-char
   // quoted cmd; the store kept 4 096 and the line said «命令共 4096 个字符 … 完整命令在「技术细节」里»): the fold is CUT when a
-  // store cut it (`cut` names cmdFull) or the door's own total (`cmdLen`, its fact) is longer than what arrived; the total is
-  // the door's cmdLen, else the chunks' sum only while the fold is whole — a cut fold with no cmdLen says «over {max}»
-  const cmdLen = Number.isInteger(f.cmdLen) && f.cmdLen > 0 ? f.cmdLen : null;
-  const foldCut = !!full && ((Array.isArray(f.cut) && f.cut.includes('cmdFull')) || (cmdLen != null && cmdLen > full.length));
-  const total = !full ? null : cmdLen != null && cmdLen >= full.length ? cmdLen : foldCut ? null : full.length;
+  // store cut it (`cut` names cmdFull); the total is the chunks' sum only while the fold is whole — a cut fold says «over {max}»
+  // r12: no `cmdLen` — no producer emits one (the acceptance: r11's «cut at K» branch was reached only by a hand-built field)
+  const foldCut = !!full && Array.isArray(f.cut) && f.cut.includes('cmdFull');
+  const total = !full || foldCut ? null : full.length;
   // r8: WHY IT ASKS (r23 `reason`): a secret another conversation stored, a value minted for one host that this run sends to another
   const rs = f.reason && typeof f.reason === 'object' ? f.reason : null;
   const away = (rs && Array.isArray(rs.away) ? rs.away : []).filter((x) => x && typeof x === 'object');
@@ -769,7 +789,7 @@ function runCardOf(item, { t = fmt } = {}) {
     return to ? t('was minted for {host} — this run sends it to {to}', { host: fh, to }) : t('was minted for {host} — where this run sends it cannot be told', { host: fh });
   };
   const why = [...(rs && rs.notOwn === true ? [[{ text: t('it uses a secret another conversation stored') }]] : []),
-    ...away.map((x) => [{ mono: str(x.ref) }, { text: ' ' }, { text: awayWords(x) }])];
+    ...away.map((x) => { const rf = wholeOf(x, 'ref'); return [{ mono: rf.whole }, ...(rf.lost ? [{ aside: t(LOST) }] : []), { text: ' ' }, { text: awayWords(x) }]; })];   // r12: a long reference whole (r27's refFull)
   const cut = (Array.isArray(f.cut) ? f.cut : []).filter((x) => typeof x === 'string' && x).slice(0, 16);
   const env = (Array.isArray(f.env) ? f.env : []).filter((x) => x && typeof x === 'object' && str(x.name)).map((x) => ({ name: wholeOf(x, 'name').whole, value: wholeOf(x, 'value') }));   // r8: a run's plain (not secret) --env, when the door says it; r11: a clipped value is said and its whole is a box of its own
   const directive = wholeOf(a, 'directive');
@@ -782,11 +802,12 @@ function runCardOf(item, { t = fmt } = {}) {
     ...(why.length ? [{ label: t('Why it asks'), lines: why }] : []),
     ...(full ? [{ label: foldCut ? t('Command (its first {n} characters)', { n: full.length }) : t('Whole command'), lines: [], cmd: full }] : []),
     ...(cut.length ? [{ label: t('Shortened'), lines: [[{ text: t('too long to keep whole, cut at the card\'s bound:') }, { text: ' ' }, ...list(cut.map((x) => [{ code: x }]))]] }] : []),
-    { label: t(RUN_LABEL.program), lines: [[{ mono: path }]] },
-    ...(env.length ? [{ label: t('Environment'), lines: env.map((x) => (x.value.cut ? [{ mono: `${x.name}=` }, { aside: t('(its value is {n} characters — shortened on the card, the whole value below)', { n: x.value.whole.length }) }] : [{ mono: `${x.name}=${x.value.whole}` }])) }] : []),
-    ...env.filter((x) => x.value.cut).map((x) => ({ label: t('{name} (its whole value)', { name: x.name }), lines: [], cmd: x.value.whole })),   // r11: a clipped env value WHOLE, in its own scrolling box
-    ...(secrets.length ? [{ label: t(RUN_LABEL.secrets), lines: secrets.map((s) => { const nm = wholeOf(s, 'name'), rf = wholeOf(s, 'ref'), en = wholeOf(s, 'entry'); return [{ text: nm.whole }, { text: ' — ' }, { mono: rf.whole }, { text: ' → ' }, ...asOf(s.as), ...(nm.cut || rf.cut || en.cut ? [{ aside: t('(shortened on the card — whole here)') }] : [])]; }) }] : []),
-    ...(directive.cut ? [{ label: t('Its config directive (whole)'), lines: [], cmd: directive.whole }] : []),   // r11: the «Always» hint's directive, whole
+    pathW.cut && !pathW.lost ? { label: t(RUN_LABEL.program), lines: [], cmd: path } : { label: t(RUN_LABEL.program), lines: [[{ mono: path }, ...(pathW.lost ? [{ aside: t(LOST) }] : [])]] },   // r12: a long path WHOLE, in its own box
+    ...(folderW.cut && !folderW.lost ? [{ label: t('Working folder (whole)'), lines: [], cmd: folderW.whole }] : []),   // r12: a long folder WHOLE (its tail is where the program runs)
+    ...(env.length ? [{ label: t('Environment'), lines: env.map((x) => (x.value.lost ? [{ mono: `${x.name}=${x.value.whole}` }, { aside: t(LOST) }] : x.value.cut ? [{ mono: `${x.name}=` }, { aside: t('(its value is {n} characters — shortened on the card, the whole value below)', { n: x.value.whole.length }) }] : [{ mono: `${x.name}=${x.value.whole}` }])) }] : []),
+    ...env.filter((x) => x.value.cut && !x.value.lost).map((x) => ({ label: t('{name} (its whole value)', { name: x.name }), lines: [], cmd: x.value.whole })),   // r11: a clipped env value WHOLE, in its own scrolling box (r12: only when its fold arrived)
+    ...(secrets.length ? [{ label: t(RUN_LABEL.secrets), lines: secrets.map((s) => { const nm = wholeOf(s, 'name'), rf = wholeOf(s, 'ref'), en = wholeOf(s, 'entry'); return [{ text: nm.whole }, { text: ' — ' }, { mono: rf.whole }, { text: ' → ' }, ...asOf(s.as), ...(nm.lost || rf.lost || en.lost ? [{ aside: t(LOST) }] : nm.cut || rf.cut || en.cut ? [{ aside: t('(shortened on the card — whole here)') }] : [])]; }) }] : []),
+    ...(directive.cut && !directive.lost ? [{ label: t('Its config directive (whole)'), lines: [], cmd: directive.whole }] : []),   // r11: the «Always» hint's directive, whole
     ...(known ? [{ label: t(RUN_LABEL.hosts), lines: hosts.map((x) => [{ mono: x }]) }] : []),
     ...(f.shape ? [{ label: t('Shape'), lines: [said(RUN_SHAPE, f.shape)] }] : []),
     ...(f.masking ? [{ label: t('Output'), lines: [said(RUN_MASKING, f.masking)] }] : []),
@@ -796,8 +817,7 @@ function runCardOf(item, { t = fmt } = {}) {
   const cmd0 = str(f.cmd), shown = full ? cmd0.replace(/\u2026$/, '').length : cmd0.length;
   const cmd = full && !/\u2026$/.test(cmd0) ? cmd0 + '\u2026' : cmd0;   // the body's cut is drawn as one
   const cutText = !full ? null : !foldCut ? t('The command is {n} characters long; the card shows its first {m} — the whole command is under “{fold}”.', { n: total, m: shown, fold: t('Technical details') })
-    : total != null ? t('The command is {n} characters long — cut at {k}, so the whole command was not kept: see its run record in the Vault window. The card shows its first {m}.', { n: total, k: full.length, m: shown })   // r11: the cut point is what ARRIVED (the store's 4 096, or the door's own cut) — never «over 4 096» below it
-      : t('The command is over {max} characters, so the whole command was not kept: see its run record in the Vault window. The card shows its first {m}.', { max: full.length, m: shown });
+    : t('The command is over {max} characters, so the whole command was not kept: see its run record in the Vault window. The card shows its first {m}.', { max: full.length, m: shown });   // r12: the cut point is what ARRIVED (the store's 4 096) — no producer states a total past it
   return { headline, cmd, cut: full ? { n: total, whole: !foldCut, shown, text: cutText } : null, again, rows, always: { offered: a.offered === true, hint }, fold };
 }
 /** r9 (a store says when it DROPS): a run card whose facts the store dropped files a stub `{dropped, cut: ['facts']}` (no `v` —

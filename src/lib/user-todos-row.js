@@ -75,6 +75,14 @@ export function endCodeOf(i) {
   const end = endOf(i);
   return end && end.unknown ? end.unknown : '';
 }
+/** r12: a held decision's PART dropped before it was decided (its watcher no longer woken by those conversations — the
+ *  server's heldDroppedOf on the record's resolvedFact) → « · <its words>» | '' (the twin of foryou-actions settledWords'). */
+function heldDropTail(item, t) {
+  const d = item && item.resolvedFact && item.resolvedFact.dropped;
+  if (!d || typeof d !== 'object' || !(Number(d.k) > 0)) return '';
+  const p = { k: Number(d.k) || 0, m: Number(d.of) || 0, d: Number(d.n) || 0, agent: String(d.agent || '') };
+  return ' · ' + (d.why === 'not-covered' ? t('the rule no longer covers {k} of {m} conversations — {d} held messages dropped', p) : t('{k} of {m} conversations no longer wake {agent} — {d} held messages dropped', p));
+}
 /** Who resolved it, in words ('expired' = the store's sweep, 'reply' = the
  *  user's own inbox reply, design-user-inbox-reply D1.4). `item` = the
  *  resolved item, for a resolution worded with its fact ('resumed'). */
@@ -104,11 +112,11 @@ export function resolvedByText(by, t, item = null) {
   if (by === 'hidden') return ''; // r3: a hidden pointer's status word says it all (statusWords) — nothing was decided
   if (by === 'conversation-gone') return t('the conversation ended before you answered');
   if (by === 'stored') return t('saved to the vault'); // lane vault-paste-request: a paste request answered by its paste
-  if (by === 'delivered') return t('delivered'); // r6: a held digest the owner released (Deliver)
+  if (by === 'delivered') return t('delivered') + heldDropTail(item, t); // r6: a held digest the owner released (Deliver) — r12: the part dropped before, said
   if (by === 'discarded' && item && item.resolvedFact && item.resolvedFact.why === 'watch-removed') return t('the rule they were held for was removed — {n} messages discarded', { n: Number(item.resolvedFact.n) || 0 }); // r9: no watcher left to deliver to
   if (by === 'discarded' && item && item.resolvedFact && item.resolvedFact.why === 'access-removed') return t('the access they were held under was removed — {n} messages discarded', { n: Number(item.resolvedFact.n) || 0 }); // r10: the grant its watcher lived by was revoked
-  if (by === 'discarded' && item && item.resolvedFact && item.resolvedFact.why === 'not-covered') return t('the rule no longer covers this conversation — {n} messages discarded', { n: Number(item.resolvedFact.n) || 0 }); // r11: out of the rule's reach (its rules edited, the conversation renamed)
-  if (by === 'discarded') return t('discarded — nothing was sent'); // …or dropped (Discard)
+  if (by === 'discarded' && item && item.resolvedFact && item.resolvedFact.why === 'not-covered') return Number(item.resolvedFact.convs) > 1 ? t('the rule no longer covers its {m} conversations — {n} messages discarded', { m: Number(item.resolvedFact.convs), n: Number(item.resolvedFact.n) || 0 }) : t('the rule no longer covers this conversation — {n} messages discarded', { n: Number(item.resolvedFact.n) || 0 }); // r11: out of the rule's reach (its rules edited, the conversation renamed) — r12: a digest's every one
+  if (by === 'discarded') return t('discarded — nothing was sent') + heldDropTail(item, t); // …or dropped (Discard)
   if (by === 'granted') { const gw = item ? grantWords(item, { t }) : null; return gw ? gw.text : t('allowed'); } // r4: an agent's request for a stored secret (vault-grant-ask) answered — r6: the duration its record carries (none ⇒ «allowed») and the grant's life (ended / revoked), THE reader foryou-actions grantWords
   // B-2198 part 2: a raw-API proposal's item is answered BY its outcome (the card's words: Ran · 200 · 1.2 KB / Rejected by you)
   if (by === 'channel-api' && item && item.resolvedFact && item.resolvedFact.apiOutcome) return t(item.resolvedFact.apiOutcome.key, item.resolvedFact.apiOutcome.params || {});
