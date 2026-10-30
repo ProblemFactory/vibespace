@@ -27,13 +27,15 @@
  *     tell where the value goes — a shell, an interpreter, a config file, a tool naming no host, a program an agent could
  *     have written: the card asks), `outside_hosts` (a host of the run is not covered — `missing` names it). `member` = the
  *     caller HOLDS a live grant of this entry (its id, hosts, end): the entry is open to it, and the card names the grant
- *     («a standing approval exists … this run is outside it: host Y») and its «Always» widens it.
+ *     («a standing approval exists … this run is outside it: host Y»); its «Always» replaces it, or adds to one with the same
+ *     end (lane vault-standing-request r3b — the card says which).
  *   A host covers itself and — a DNS name only — every host under it (`example.com` covers `api.example.com`; an address
  *   covers only itself).
  * THE ID `grantIdOf(resource, principalKey)` = `vg-` + 8 hex (FNV-1a over the two) — what the run line, the use line, the
  * card and the window name; the same member of the same entry keeps its id across widenings.
  * THE PLANS (the writer applies them): `withMember` (add or WIDEN one member: hosts ∪, the later end, out of `except`;
- * lane vault-standing-request r3: never INTO an expired member, and a standing write REPLACES a member that has an end),
+ * lane vault-standing-request r3/r3b: a write never WIDENS a member — it adds to it only when both have the same end (none),
+ * otherwise it REPLACES it with exactly the asked scope and end; never into an expired member),
  * `withoutMember` (revoke one), `alwaysCarry` (data/vault-run.json's «always» rows, the shape keys of 2.369.359 and
  * before, as members — the hosts read off the shape key; a row with no host cannot be carried and is counted),
  * `withWildTools` (r3: a carried wildcard with no tool gets the CLI the tool table names for it, else stays LEGACY).
@@ -128,14 +130,18 @@ const holds = (verdict) => !!(verdict && (verdict.ok || verdict.member));
 
 // ── THE PLANS (src/server/vault-use-grants.js writes them through the ONE writer) ──
 const rowLists = (row) => { const p = row ? GM.publicRow(row) : { to: [], except: [] }; return p.unknown ? null : { to: p.to || [], except: p.except || [] }; };
-/** Add — or WIDEN — ONE member: `principal` (a bare principal), `hosts` (a list of host tokens), `until` (ms | null = no
- *  end). A member already there keeps its entry, its hosts gain the new ones (∪) and its end becomes the later of the two
- *  (no end wins); it leaves `except`. → { ok: true, to, except, widened, added } | { ok: false, code } (`unknown_shape`:
+/** Add ONE member, or add to it — or REPLACE it: `principal` (a bare principal), `hosts` (a list of host tokens), `until`
+ *  (ms | null = no end). lane vault-standing-request r3b (主开发: «a write replaces or adds a member with exactly the asked
+ *  scope and end; it never merges hosts or drops an end into an existing member»): a member already there whose end is the
+ *  write's own (both none) keeps its entry and gains the new hosts / commands (∪ — nothing's end moves); one whose end
+ *  DIFFERS (8 h vs 30 days vs none) or has passed is REPLACED by exactly the asked scope and end (`replaced` names what went:
+ *  its hosts, commands, end, whether it had expired — the cards say it). `carry` (the migration only): ∪ with the EARLIER
+ *  end, never a later one. The member leaves `except`. → { ok: true, to, except, widened, added } | { ok: false, code } (`unknown_shape`:
  *  the row cannot be read — nothing is read wider; `bad_principal`; `hosts_required`; `too_many_hosts`).
  *  lane vault-standing-request: `commands` (command tokens) widen the member the same way (∪, ≤ GM.COMMANDS_MAX —
  *  `too_many_commands`); a member gets hosts, commands or both (neither ⇒ `hosts_required`; a bad token ⇒
  *  `command_unreadable`). `source` + `at` say who wrote it — set when the member is added or widened. */
-function withMember(row, principal, { hosts = [], until = null, tool = null, commands = null, source = null, at = null, now = 0, standing = false } = {}) {
+function withMember(row, principal, { hosts = [], until = null, tool = null, commands = null, source = null, at = null, now = 0, carry = false } = {}) {
   const cur = rowLists(row);
   if (!cur) return { ok: false, code: 'unknown_shape' };
   const b = GM.bareOf(principal), key = b && GM.principalKey(b);
@@ -154,14 +160,16 @@ function withMember(row, principal, { hosts = [], until = null, tool = null, com
   const to = cur.to.slice();
   let widened = false;
   // r3 (MAJOR 2 — the acceptance: an EXPIRED 8-hour member on old.example came back PERMANENT, its hosts included, after a
-  // standing Allow merged into it): a write never revives or outlives a member's own end —
+  // standing Allow merged into it) + r3b (a card's timed «Always» onto a LIVE member made its hosts outlive their end): a write
+  // never revives, outlives or shortens a member's own end —
   //   · an EXPIRED member (its end ≤ `now`) is never merged by ANY write: the write REPLACES it (its scope stays ended);
-  //   · a STANDING write (`standing`, no end: an agent's standing request, «Always (this command)») REPLACES a member that has an
-  //     end, live or expired — the new member holds ONLY the asked scope (the card said so: the door's endedOf).
+  //   · a member whose end is NOT the write's (live 8 h under a 30-day or a no-end write; a no-end member under a timed one) is
+  //     REPLACED — the new member holds ONLY the asked scope, until the asked end (the cards said so: the door's endedOf);
+  //   · the same end (both none) adds — what the two would be as two members.
   //   `replaced` names what went (its hosts, commands, end, whether it had expired) for the card's words and the audit line.
   const wasEnd0 = i >= 0 && Number(cur.to[i].until) > 0 ? Number(cur.to[i].until) : null;
   const gone = wasEnd0 != null && Number(now) > 0 && wasEnd0 <= Number(now);
-  const replaced = wasEnd0 != null && (gone || (standing && end == null)) ? { hosts: (cur.to[i].hosts || []).slice(), commands: Array.isArray(cur.to[i].commands) ? cur.to[i].commands.slice() : [], until: wasEnd0, expired: gone } : null;
+  const replaced = i >= 0 && (gone || (!carry && wasEnd0 !== end)) ? { hosts: (cur.to[i].hosts || []).slice(), commands: Array.isArray(cur.to[i].commands) ? cur.to[i].commands.slice() : [], until: wasEnd0, expired: gone } : null;
   if (i >= 0 && !replaced) {
     const was = to[i], merged = [...(was.hosts || [])];
     // round 4 (item 3): the tool is PER HOST. Carry the member's existing per-host scopes forward (migrating a legacy single
@@ -174,7 +182,7 @@ function withMember(row, principal, { hosts = [], until = null, tool = null, com
     for (const c of cmds || []) if (!mergedCmds.some((x) => GM.commandKeyOf(x) === GM.commandKeyOf(c))) { mergedCmds.push(c); widened = true; }
     if (mergedCmds.length > GM.COMMANDS_MAX) return { ok: false, code: 'too_many_commands' };
     const wasEnd = Number(was.until) > 0 ? Number(was.until) : null;
-    const nextEnd = wasEnd == null || end == null ? null : Math.max(wasEnd, end);
+    const nextEnd = !carry ? wasEnd : wasEnd == null ? end : end == null ? wasEnd : Math.min(wasEnd, end);   // r3b: the same end (a carry: the EARLIER one — never a later end)
     if (nextEnd !== wasEnd) widened = true;
     const next = { ...was, ...(merged.length ? { hosts: merged } : {}) };
     if (!merged.length) delete next.hosts;   // a commands-only member keeps no empty hosts list
@@ -268,7 +276,7 @@ function standingLines(verdicts, { always = false } = {}) {
     if (!v || v.ok || !v.member) continue;
     const cw = (v.member.commands || []).map((c) => commandWords(c)).join(', ');
     const on = [v.member.hosts.length ? v.member.hosts.join(', ') : '', cw ? `the command ${cw}` : ''].filter(Boolean).join('; ') || 'no host';
-    if (v.code === 'outside_hosts') out.push(`A standing approval exists for this conversation (${v.member.id}: ${on}) — this run is outside it: ${v.missing.join(', ')}.${always ? ` «Always» widens it to ${v.missing.join(', ')}.` : ''}`);
+    if (v.code === 'outside_hosts') out.push(`A standing approval exists for this conversation (${v.member.id}: ${on}) — this run is outside it: ${v.missing.join(', ')}.`);   // r3b: «Always» no longer widens it — the door's replace / add line says what it does
     else if (v.code === 'destination_unknown') out.push(`A standing approval exists for this conversation (${v.member.id}: ${on}) — where this run sends it cannot be told${cw ? ' and it is not that command' : ''}, so it asks.`);
   }
   return [...new Set(out)];

@@ -187,11 +187,11 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
   }
   /** ONE member added or widened (the card's «Always», the request default, the carry, an agent's standing request the owner
    *  allowed). `tool` scopes a wildcard PER HOST; `commands` (lane vault-standing-request) the command shapes; `source` who. */
-  function addMember(id, principal, { hosts = [], until = null, tool = null, commands = null, source = null, standing = false, legacy = false } = {}, { by = 'user' } = {}) {
+  function addMember(id, principal, { hosts = [], until = null, tool = null, commands = null, source = null, legacy = false } = {}, { by = 'user' } = {}) {
     if (!okId(id)) return named('bad_resource');
     if (!unlocked()) return named('vault_locked');
     const was = verifiedRow(rowOf(id));
-    const plan = U.withMember(was, principal, { hosts, until, tool, commands, source, at: now(), now: now(), standing });   // r3 (MAJOR 2): `now` — an expired member is never merged; `standing` — a member with an end is replaced
+    const plan = U.withMember(was, principal, { hosts, until, tool, commands, source, at: now(), now: now(), carry: by === 'migration' });   // r3 (MAJOR 2): `now` — an expired member is never merged; r3b: a member with another end is REPLACED (exactly the asked scope and end) — the carry alone adds with the earlier end
     if (!plan.ok) return named(plan.code);
     const v = rowRules(id, { to: plan.to, except: plan.except }, { was, legacy: legacy && by === 'migration' });   // round 5 (MINOR): validate the plan BEFORE any generation move (a bad plan never bumps the gen); r2 (MAJOR 1): the SAME rules the owner's Save reads; r3: judged on what THIS write brings
     if (!v.ok) return v;
@@ -203,11 +203,11 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
   }
   /** r2 (MAJOR 1): THE QUESTION BEFORE A STANDING REQUEST'S CARD — would addMember write this member? (the plan + the row
    *  rules, nothing written) → { ok: true } | the named refusal the Allow would meet. */
-  function judgeMember(id, principal, { hosts = [], until = null, tool = null, commands = null, source = null, standing = false } = {}) {
+  function judgeMember(id, principal, { hosts = [], until = null, tool = null, commands = null, source = null } = {}) {
     if (!okId(id)) return named('bad_resource');
     if (!unlocked()) return named('vault_locked');
     const was = verifiedRow(rowOf(id));
-    const plan = U.withMember(was, principal, { hosts, until, tool, commands, source, at: now(), now: now(), standing });
+    const plan = U.withMember(was, principal, { hosts, until, tool, commands, source, at: now(), now: now() });
     if (!plan.ok) return named(plan.code);
     const v = rowRules(id, { to: plan.to, except: plan.except }, { was });   // r3: THIS member, the row as it becomes through it — never another member's legacy wildcard
     return v.ok ? { ok: true, ...(plan.replaced ? { replaced: plan.replaced } : {}) } : v;

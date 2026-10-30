@@ -11629,7 +11629,8 @@ export default {
   "(via {tool})": "（{tool} 経由）", // lane vault-standing-request r2
   "{who} asks for a standing grant on “{secret}”": "{who} が「{secret}」の常設の許可を求めています", // lane vault-standing-request r2
   "VibeSpace cannot see where it sends the secret — Allow means you trust this command itself; a changed program or script asks again.": "VibeSpace にはシークレットの送り先が見えません。「許可」はこのコマンド自体を信頼するという意味です。プログラムやスクリプトが変わるともう一度確認します。", // lane vault-standing-request r2
-  "This replaces the time-limited grant this conversation holds on it ({scope}, until {when}): that grant ends when you allow, and the new one holds only what this card names, with no end.": "この会話がこれに持っている期限付きの許可（{scope}、{when} まで）を置き換えます。許可するとその許可は終わり、新しい許可はこのカードに書かれた内容だけを期限なしで含みます。", // lane vault-standing-request r3
+  "This replaces the time-limited grant this conversation holds on it ({scope}, until {when}): that grant ends when you allow, and the new one holds only what this card names.": "この会話がこれに持っている期限付きの許可（{scope}、{when} まで）を置き換えます。許可するとその許可は終わり、新しい許可はこのカードに書かれた内容だけを含みます。", // lane vault-standing-request r3b
+  "«Always» replaces the grant with no end this conversation holds on it ({scope}): that grant ends, and the new one holds only this run's hosts, for {days} days.": "「常に」は、この会話がこれに持っている期限のない許可（{scope}）を置き換えます。その許可は終わり、新しい許可はこの実行のホストだけを {days} 日間含みます。", // lane vault-standing-request r3b
   "This replaces the grant this conversation held on it that has ended ({scope}, ended {when}): it stays ended, and the new one holds only what this card names.": "この会話がこれに持っていた、すでに終わった許可（{scope}、{when} に終了）を置き換えます。それは終わったままで、新しい許可はこのカードに書かれた内容だけを含みます。", // lane vault-standing-request r3
   "{hostword} (via {tool})": "{hostword}（{tool} 経由）", // lane vault-standing-request r3 (the round-4 chip word had no zh / ja)
   "{hostword} (legacy wildcard: any tool)": "{hostword}（旧形式のワイルドカード：どのツールでも）", // lane vault-standing-request r3

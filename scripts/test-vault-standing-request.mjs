@@ -34,6 +34,9 @@
  *   ⑯ (MAJOR 3, pin-doors) a script word is pinned only where the interpreter reads that file — a URI scheme never; a POSIX
  *     shell only `./job.sh`; a census over every row;
  *   ⑰ (item 4, pin-doors C — reproduced) every pinned row names its startup-code env doors and every one is refused.
+ * ROUND 3b (主开发's ruling on the flagged one — RED on 6665607bf by name):
+ *   ⑱ a run card's own «Always» onto a LIVE member never widens it: another end ⇒ a REPLACEMENT that says so (exactly the
+ *     asked hosts and end — never A+B with no end); the same end (both none) adds.
  * Each leg is guarded (a base tree without the feature fails BY NAME, never by a crash) — the RED control runs this file
  * against the base's src (report.md).
  */
@@ -99,7 +102,7 @@ async function world({ instance = 'cluster', timers, bin = BIN } = {}) {
 const openOf = (w, type) => (w.userTodos.snapshot().open || []).filter((i) => i.action && i.action.type === type);
 const cardsOf = (w) => openOf(w, 'vault-run-ask');
 const RUN = (ref, ...argv) => ['--env', `T=${ref}`, '--', ...argv];
-async function runAnswered(w, args, { answer = null, reauthed = false, caller = w.caller(), door = w.door, leave = false } = {}) {
+async function runAnswered(w, args, { answer = null, reauthed = false, caller = w.caller(), door = w.door, leave = false, ttl } = {}) {
   let settled = false;
   const before = new Set(cardsOf(w).map((c) => c.id));
   const p = door.run({ caller, args, cwd: w.work }).then((r) => { settled = true; return r; });
@@ -107,7 +110,7 @@ async function runAnswered(w, args, { answer = null, reauthed = false, caller = 
   const t = Date.now();
   while (!settled && Date.now() - t < 3000) { const c = cardsOf(w).filter((x) => !before.has(x.id)); if (c.length) { card = c[c.length - 1]; break; } await sleep(5); }
   let a = null;
-  if (card && answer) a = door.answer(card.action.askId, { answer, reauthed });
+  if (card && answer) a = door.answer(card.action.askId, { answer, reauthed, ...(ttl ? { ttl } : {}) });
   if (card && !leave && (!answer || (a && !a.ok))) door.answer(card.action.askId, { answer: 'deny' });
   return { r: await p, card, a };
 }
@@ -364,7 +367,7 @@ await leg('⑨ timed replaced', async () => {
   w.useGrants.addMember(w.e.id, { kind: 'conversation', key: CID, name: 'Transcriber' }, { hosts: ['api.tts.example'], until, source: 'card' });
   const q = await w.door.request({ caller: w.caller(), entry: w.e.ref, purpose: 'transcribe', standing: true, command: 'python3 transcribe.py', cwd: w.work });
   const card = openOf(w, 'vault-grant-ask').find((i) => q && i.action.askId === q.askId);
-  ok(!!(card && card.facts && card.facts.replaces && card.facts.replaces.until === until && card.facts.replaces.scope === 'api.tts.example' && !card.facts.replaces.expired && /This replaces the time-limited grant this conversation holds on it \(api\.tts\.example, until [^)]*\): that grant ends when you allow, and the new one holds only what this card names, with no end\./.test(card.detail)), '⑨a P2 (request road): the standing card over a 30-day member SAYS it replaces that time-limited grant — it ends, the new one holds only what the card names (detail + facts)', card && { facts: card.facts, detail: card.detail });
+  ok(!!(card && card.facts && card.facts.replaces && card.facts.replaces.until === until && card.facts.replaces.scope === 'api.tts.example' && !card.facts.replaces.expired && /This replaces the time-limited grant this conversation holds on it \(api\.tts\.example, until [^)]*\): that grant ends when you allow, and the new one holds only what this card names\./.test(card.detail)), '⑨a P2 (request road): the standing card over a 30-day member SAYS it replaces that time-limited grant — it ends, the new one holds only what the card names (detail + facts)', card && { facts: card.facts, detail: card.detail });
   const model = card && FA.runCardOf(card, {});
   ok(!!(model && model.rows.some((r) => r.key === 'until' && r.warn && JSON.stringify(r.lines).includes('This replaces'))), '⑨b … the card draws it as a marked row', model && model.rows);
   const y = q && q.askId && w.door.answerRequest(q.askId, { answer: 'standing', reauthed: true });
@@ -518,7 +521,7 @@ await leg('⑮ never revived', async () => {
   w4.useGrants.addMember(w4.e.id, X, { hosts: ['new.example'], until: Date.now() + 8 * 3600e3, source: 'card' });
   w4.useGrants.addMember(w4.e.id, { kind: 'conversation', key: 'cid-live', name: 'L' }, { hosts: ['b.example'], until: later, source: 'card' });
   const mx = memberOf(w4), ml = memberOf(w4, 'cid-live');
-  ok(!!(mx && (mx.hosts || []).join() === 'new.example' && ml && (ml.hosts || []).join() === 'a.example,b.example' && ml.until === later), '⑮d EVERY writer: an EXPIRED member is never merged — a timed «Always» onto it holds only its own hosts; onto a LIVE member it still widens as before (hosts ∪, the later end)', { mx, ml });
+  ok(!!(mx && (mx.hosts || []).join() === 'new.example' && ml && (ml.hosts || []).join() === 'b.example' && ml.until === later), '⑮d EVERY writer: an EXPIRED member is never merged — a timed «Always» onto it holds only its own hosts; r3b: onto a LIVE member with another end it REPLACES it too (exactly b.example until its own end — never a ∪ with the later end)', { mx, ml });
   const w5 = await world();
   w5.door.setRunnable({ id: w5.e.id, on: true, reauthed: true });
   w5.useGrants.addMember(w5.e.id, X, { hosts: ['api.tts.example'], source: 'owner' });
@@ -578,6 +581,30 @@ await leg('⑰ env doors', async () => {
   const code = ['os', 'execute("true")'].join('.');
   const r1 = await runAnswered(w, ['--env', `T=${w.e.ref}`, '--env', `LUA_INIT=${code}`, '--', 'lua', 'job.lua']);
   ok(!!(y && y.ok && r0.r.ok && !r0.card && !r1.r.ok && r1.r.code === 'env_refused' && r1.r.name === 'LUA_INIT' && !r1.card), '⑰b the reviewer\'s probe: a `lua job.lua` standing grant admits its run — and the same run with --env LUA_INIT=<code> is refused env_refused naming LUA_INIT (no card; nothing ran)', { r0: { ok: r0.r.ok, card: !!r0.card }, r1: { ok: r1.r.ok, code: r1.r.code, name: r1.r.name, card: !!r1.card } });
+});
+
+console.log('⑱ (r3b — 主开发: «a write replaces or adds a member with exactly the asked scope and end») A CARD\'S OWN «ALWAYS» ONTO A LIVE MEMBER NEVER WIDENS IT');
+await leg('⑱ card Always never widens', async () => {
+  const X = { kind: 'conversation', key: CID, name: 'Transcriber' };
+  const w = await world();
+  w.door.setRunnable({ id: w.e.id, on: true, reauthed: true });
+  const aEnd = Date.now() + 8 * 3600e3;
+  w.useGrants.addMember(w.e.id, X, { hosts: ['a.tts.example'], until: aEnd, source: 'card' });   // hosts A, 8 hours, live
+  const r = await runAnswered(w, RUN(w.e.ref, 'curl', 'https://b.tts.example/v1'), { answer: 'always', reauthed: true });   // the card's «Always» for host B (its 30 days)
+  const rp = r.card && r.card.facts && r.card.facts.always && r.card.facts.always.replaces;
+  const hint = r.card && (FA.runCardOf(r.card, {}) || { always: {} }).always.hint;
+  ok(!!(rp && rp.until === aEnd && rp.scope === 'a.tts.example' && /This replaces the time-limited grant this conversation holds on it \(a\.tts\.example, until [^)]*\): that grant ends when you allow/.test(r.card.detail) && JSON.stringify(hint || '').includes('This replaces the time-limited grant') && !/widens it/.test(r.card.detail)), '⑱a the card over a LIVE 8-hour member (hosts A) SAYS its «Always» for host B replaces it — in the detail, the facts and the words beside the button; never «widens it»', { rp, hint });
+  const m = memberOf(w);
+  const vA = w.useGrants.verdictFor(w.e.id, { conversationKeys: [CID], groupIds: [] }, { hosts: ['a.tts.example'], destinationKnown: true });
+  ok(!!(r.a && r.a.ok && r.r.ok && m && (m.hosts || []).join() === 'b.tts.example' && Math.abs(m.until - (Date.now() + 30 * 86400e3)) < 60e3 && vA && !vA.ok), '⑱b … and its press writes exactly B with B\'s own end (30 days) — never one member with A+B and no (or a later) end: A ended, as the card said', { m, vA: vA && vA.code });
+  const w2 = await world();
+  w2.door.setRunnable({ id: w2.e.id, on: true, reauthed: true });
+  w2.useGrants.addMember(w2.e.id, X, { hosts: ['a.tts.example'], source: 'owner' });   // hosts A, no end
+  const r2 = await runAnswered(w2, RUN(w2.e.ref, 'curl', 'https://b.tts.example/v1'), { answer: 'always', reauthed: true, ttl: 'forever' });
+  const m2 = memberOf(w2);
+  const r3 = await runAnswered(w2, RUN(w2.e.ref, 'curl', 'https://c.tts.example/v1'), { answer: 'always', reauthed: true });
+  const m3 = memberOf(w2);
+  ok(!!(r2.a && r2.a.ok && m2 && (m2.hosts || []).join() === 'a.tts.example,b.tts.example' && !m2.until && r3.card && r3.card.detail.includes('«Always» replaces the grant with no end this conversation holds on it (a.tts.example, b.tts.example): that grant ends, and the new one holds only this run\'s hosts, for 30 days.') && r3.a && r3.a.ok && m3 && (m3.hosts || []).join() === 'c.tts.example' && m3.until > Date.now()), '⑱c the SAME end adds (a «No end» press onto a member with no end: A+B, no end — what two members would be); the card\'s own 30-day press onto it REPLACES it and says so («replaces the grant with no end … for 30 days»)', { m2, m3, line: r3.card && r3.card.detail.split('\n').filter((l) => /replaces/.test(l)) });
 });
 
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);

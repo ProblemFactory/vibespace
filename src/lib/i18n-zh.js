@@ -11630,7 +11630,8 @@ export default {
   "(via {tool})": "（经由 {tool}）", // lane vault-standing-request r2
   "{who} asks for a standing grant on “{secret}”": "{who} 请求常驻使用「{secret}」", // lane vault-standing-request r2
   "VibeSpace cannot see where it sends the secret — Allow means you trust this command itself; a changed program or script asks again.": "VibeSpace 看不到它把密钥发往哪里——「允许」表示你信任这条命令本身；换了程序或脚本会再问。", // lane vault-standing-request r2
-  "This replaces the time-limited grant this conversation holds on it ({scope}, until {when}): that grant ends when you allow, and the new one holds only what this card names, with no end.": "这会替换这个对话在它上面已有的限时授权（{scope}，到 {when}）：你允许后那个授权就结束，新的授权只包括这张卡片写明的内容，没有期限。", // lane vault-standing-request r3
+  "This replaces the time-limited grant this conversation holds on it ({scope}, until {when}): that grant ends when you allow, and the new one holds only what this card names.": "这会替换这个对话在它上面已有的限时授权（{scope}，到 {when}）：你允许后那个授权就结束，新的授权只包括这张卡片写明的内容。", // lane vault-standing-request r3b
+  "«Always» replaces the grant with no end this conversation holds on it ({scope}): that grant ends, and the new one holds only this run's hosts, for {days} days.": "「总是」会替换这个对话在它上面没有期限的授权（{scope}）：那个授权结束，新的授权只包括这次运行的主机，为期 {days} 天。", // lane vault-standing-request r3b
   "This replaces the grant this conversation held on it that has ended ({scope}, ended {when}): it stays ended, and the new one holds only what this card names.": "这会替换这个对话在它上面已经结束的授权（{scope}，结束于 {when}）：它保持结束，新的授权只包括这张卡片写明的内容。", // lane vault-standing-request r3
   "{hostword} (via {tool})": "{hostword}（经由 {tool}）", // lane vault-standing-request r3 (the round-4 chip word had no zh / ja)
   "{hostword} (legacy wildcard: any tool)": "{hostword}（旧版通配：任何工具）", // lane vault-standing-request r3

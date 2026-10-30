@@ -14,7 +14,8 @@
 //      the counts («used N× by M conversations»); outside the hosts / a shell / an expired grant / another conversation ⇒ the
 //      card (naming the standing approval and what is outside it); a Task Group grant follows the membership NOW
 //   ⑤ «ALWAYS» WRITES A GRANT — the card's «Always» = this conversation × these hosts × the TTL (one member per entry); the next
-//      run of ANOTHER shape to the same host asks nothing; a wider host's card names the grant, its «Always» widens it
+//      run of ANOTHER shape to the same host asks nothing; a wider host's card names the grant, its «Always» REPLACES it (lane
+//      vault-standing-request r3b: a write never widens a member — the same end adds, another end replaces, the card says so)
 //   ⑥ THE CARRY — data/vault-run.json's «always» rows (marked, verified) become members at the first read; the store keeps
 //      none; a hostless / expired row is counted, not carried; a forged (unmarked) row carries nothing
 //   ⑦ THE REQUEST DEFAULT — `--host` on a paste request: the card SAYS the conversation that asked will be allowed for those
@@ -116,8 +117,13 @@ console.log('② THE VERDICT — membership is the model\'s; hosts and the end a
   ok(U.useVerdict([ent], { conversationKeys: ['cid-1'] }, run(['unifi.lan'], { entryHosts: ['unifi.lan'] })).ok && !U.useVerdict([ent], { conversationKeys: ['cid-1'] }, run(['unifi.lan'], { entryHosts: [] })).ok, '@entry = the hosts the entry was stored for, read at use time (none ⇒ it covers nothing)');
   const none = U.useVerdict([], { conversationKeys: ['cid-1'] }, run(['192.168.1.1']));
   ok(!none.ok && none.code === 'not_granted' && !U.holds(none), 'no row ⇒ not_granted');
+  // lane vault-standing-request r3b (restated — 主开发: «a write replaces or adds a member with exactly the asked scope and end; it
+  // never merges hosts or drops an end into an existing member»): the old leg pinned «hosts ∪, the later end (no end wins)»
   const wd = U.withMember(row, { kind: 'conversation', key: 'cid-1' }, { hosts: ['10.0.0.9'], until: NOW + 5 });
-  ok(wd.ok && wd.widened && !wd.added && wd.to.find((e) => e.key === 'cid-1').hosts.join() === '192.168.1.1,10.0.0.9' && !('until' in wd.to.find((e) => e.key === 'cid-1')), 'WIDEN: hosts ∪, the later end (no end wins — a 30-day «Always» never shortens a grant with no end)', wd);
+  const wdm = wd.to && wd.to.find((e) => e.key === 'cid-1');
+  ok(wd.ok && !wd.added && wdm.hosts.join() === '10.0.0.9' && wdm.until === NOW + 5 && wd.replaced && wd.replaced.hosts.join() === '192.168.1.1' && wd.replaced.until === null, 'r3b: a write whose END differs from the member\'s (a 30-day «Always» onto a grant with no end) REPLACES it — exactly the asked hosts and end; `replaced` names what went (never ∪ with no end)', wd);
+  const wd3 = U.withMember(row, { kind: 'conversation', key: 'cid-1' }, { hosts: ['10.0.0.9'] });
+  ok(wd3.ok && wd3.widened && !wd3.replaced && wd3.to.find((e) => e.key === 'cid-1').hosts.join() === '192.168.1.1,10.0.0.9' && !('until' in wd3.to.find((e) => e.key === 'cid-1')), 'r3b: the SAME end (both none) adds — hosts ∪, nothing\'s end moves (what two members would be)', wd3);
   const wd2 = U.withMember(row, { kind: 'conversation', key: 'cid-left-out' }, { hosts: ['a.lan'] });
   ok(wd2.ok && wd2.added && !wd2.except.length, 'adding a member takes it out of 除了');
   ok(!U.withMember(row, { kind: 'conversation', key: 'cid-1' }, { hosts: [] }).ok && U.withMember(row, { kind: 'conversation', key: 'cid-1' }, { hosts: [] }).code === 'hosts_required', 'a member with no host ⇒ hosts_required (never «any host»)');
@@ -128,7 +134,7 @@ console.log('② THE VERDICT — membership is the model\'s; hosts and the end a
   const c = U.alwaysCarry([{ conv: 'cid-1', key: key(['api.x.com']), until: null, entries: [RES] }, { conv: 'cid-1', key: key([]), until: null, entries: [RES] }, { conv: 'cid-2', key: key(['b.lan']), until: NOW - 1, entries: [RES] }], { now: NOW });
   ok(c.members.length === 1 && c.members[0].hosts.join() === 'api.x.com' && c.members[0].principal.key === 'cid-1' && c.hostless === 1 && c.expired === 1, 'THE CARRY: an «always» row → a member (the conversation × the shape key\'s hosts); hostless and expired rows are counted, not carried', c);
   const sl = U.standingLines([v2], { always: true });
-  ok(sl.length === 1 && sl[0].includes(v1.id) && sl[0].includes('192.168.1.1') && sl[0].includes('outside it: 10.0.0.9') && /widens it to 10\.0\.0\.9/.test(sl[0]), 'the card\'s line: «a standing approval exists … this run is outside it: host Y» + «Always» widens it', sl);
+  ok(sl.length === 1 && sl[0].includes(v1.id) && sl[0].includes('192.168.1.1') && sl[0].includes('outside it: 10.0.0.9') && !/widens/.test(sl[0]), 'the card\'s line: «a standing approval exists … this run is outside it: host Y» — r3b (restated): no ««Always» widens it» (it replaces; the door\'s own line says so)', sl);
 }
 
 // ── A WORLD: a real engine (set up, unlocked), a real grants store on disk, the ONE writer, the run door (a CLUSTER instance:
@@ -236,7 +242,7 @@ const E4 = entryOf(W4);
   ok(mine && mine.uses === 3 && mine.convs === 1 && pub.used.uses === 3 && pub.used.convs === 1, 'the window\'s row: «used 3× by 1 conversation» on the member, and on the entry', pub);
   const out = await runAnswered(w, CURL(e.ref, 'https://10.0.0.9/'));
   ok(out.card && !out.r.ok && out.r.code === 'ask_denied', 'ANOTHER host ⇒ the card (today\'s) — denied here', { card: !!out.card, code: out.r.code });
-  ok(out.card && out.card.detail.includes(`A standing approval exists for this conversation (${g.grant}: 192.168.1.1) — this run is outside it: 10.0.0.9.`) && /«Always» widens it to 10\.0\.0\.9/.test(out.card.detail), 'the card NAMES the standing approval and what is outside it (host 10.0.0.9) — and that «Always» widens it', out.card && out.card.detail);
+  ok(out.card && out.card.detail.includes(`A standing approval exists for this conversation (${g.grant}: 192.168.1.1) — this run is outside it: 10.0.0.9.`) && out.card.detail.includes('«Always» replaces the grant with no end this conversation holds on it (192.168.1.1): that grant ends, and the new one holds only this run\'s hosts, for 30 days.') && !/widens it/.test(out.card.detail) && out.card.facts && out.card.facts.always && out.card.facts.always.replaces && out.card.facts.always.replaces.until === null, 'the card NAMES the standing approval and what is outside it (host 10.0.0.9) — r3b (restated): and that «Always» REPLACES it (a grant with no end, under a 30-day «Always»), never «widens it»', out.card && out.card.detail);
   const sh = await runAnswered(w, ['--env', `T=${e.ref}`, '--', 'sh', '-c', 'curl https://192.168.1.1/']);
   ok(sh.card && sh.card.detail.includes('where this run sends it cannot be told'), 'a SHELL (its destination cannot be told) ⇒ the card — naming the standing approval it cannot apply', sh.card && sh.card.detail.split('\n').slice(-3));
   const other = await runAnswered(w, CURL(e.ref, 'https://192.168.1.1/'), { caller: w.caller('cid-other-2', 'Other lane') });
@@ -272,7 +278,7 @@ console.log('⑤ «ALWAYS» WRITES A GRANT — this conversation × these hosts;
   const id = U.grantIdOf(e.id, 'conversation:cid-asker-1');
   ok(wide.card && wide.card.detail.includes(`(${id}: 192.168.1.1) — this run is outside it: 192.168.1.2`), 'a wider host\'s card names the grant and what is outside it', wide.card && wide.card.detail.split('\n').filter((l) => /standing/.test(l)));
   const m2 = ROW(w, e).to.find((x) => x.key === 'cid-asker-1');
-  ok(wide.r.ok && m2.hosts.join() === '192.168.1.1,192.168.1.2' && U.grantIdOf(e.id, 'conversation:cid-asker-1') === id, 'its «Always» WIDENS the same member (hosts ∪ — the same grant id)', m2);
+  ok(wide.r.ok && m2.hosts.join() === '192.168.1.2' && Math.abs(m2.until - (Date.now() + VR.ALWAYS_TTLS['30d'])) < 60e3 && U.grantIdOf(e.id, 'conversation:cid-asker-1') === id && wide.card.detail.includes('This replaces the time-limited grant this conversation holds on it (192.168.1.1, until '), 'r3b (restated — it was «WIDENS the same member, hosts ∪»): its «Always» (another end) REPLACES the member — exactly 192.168.1.2 for 30 days, the same grant id — and its card SAID so', m2);
   const al = linesOf(w, 'vault-run-always').pop();
   ok(al && Array.isArray(al.grants) && al.grants[0] === id && al.hosts.join() === '192.168.1.2', 'the «always» audit line names the grant and the hosts', al);
 }
@@ -756,14 +762,23 @@ console.log('㉑ ROUND 3 (MAJOR item 5) — a grant names its TOOL: a wildcard d
   const evil = await runAnswered(w, CURL(e.ref, 'https://abc123.execute-api.us-east-1.amazonaws.com/collect'));
   ok(evil.card && evil.r.by !== 'grant', 'a `curl` to an execute-api.amazonaws.com endpoint ⇒ the CARD (the aws wildcard is not granted to curl — by: grant on be0f025f)', { by: evil.r.by, card: !!evil.card });
   // round 4 (MAJOR item 3): a later «Always» on curl for ANOTHER host must NOT re-scope the aws wildcard to curl, and the aws grant must keep working
-  const al2 = await runAnswered(w, CURL(e.ref, 'https://127.0.0.5:9/status'), { answer: 'always', reauthed: true, ttl: '30d' });
+  const al2 = await runAnswered(w, CURL(e.ref, 'https://127.0.0.5:9/status'), { answer: 'always', reauthed: true, ttl: '30d' });   // r3b: a 30-day press onto the aws member (another end) REPLACES it — the per-host tool is tested below where the ends match
   ok(al2.r.ok && al2.r.by === 'always', '«Always» on `curl https://127.0.0.5:9/status` ⇒ a standing grant for that host', { by: al2.r.by });
   const row2 = w.useGrants.rowsOf(e.id)[0];
-  ok(row2 && row2.to[0].toolFor && row2.to[0].toolFor['*.amazonaws.com'] === 'aws' && !row2.to[0].toolFor['127.0.0.5:9'] && row2.to[0].hosts.slice().sort().join() === '*.amazonaws.com,127.0.0.5:9', 'the curl «Always» ADDS a plain host row; the aws wildcard keeps its tool (never rewritten)', row2 && row2.to[0]);
+  ok(row2 && row2.to[0].hosts.join() === '127.0.0.5:9' && !(row2.to[0].toolFor || {})['127.0.0.5:9'], 'r3b (restated — it was «ADDS a plain host row»): the 30-day curl «Always» onto the 30-day aws member (another end) REPLACES it — exactly 127.0.0.5:9, no tool on a plain host', row2 && row2.to[0]);
   const evil2 = await runAnswered(w, CURL(e.ref, 'https://abc123.execute-api.us-east-1.amazonaws.com/collect'));
   ok(evil2.card && evil2.r.by !== 'grant', 'after the curl «Always», `curl` to execute-api STILL draws the card (the aws wildcard was not re-scoped to curl)', { by: evil2.r.by, card: !!evil2.card });
-  const awsStill = await runAnswered(w, RUNTOOL(e.ref, 'aws', 's3', 'ls'));
-  ok(awsStill.r.ok && awsStill.r.by === 'grant', 'after the curl «Always», `aws s3 ls` is STILL by: grant (the owner\'s aws grant did not silently stop)', { by: awsStill.r.by });
+  const awsGone = await runAnswered(w, RUNTOOL(e.ref, 'aws', 's3', 'ls'));
+  ok(!awsGone.r.ok && awsGone.r.by !== 'grant' && !!awsGone.card && al2.card.detail.includes('This replaces the time-limited grant this conversation holds on it (*.amazonaws.com, until '), 'r3b (restated — it was «STILL by: grant»): the aws grant was REPLACED — the curl card SAID so — and `aws s3 ls` draws its card again', { by: awsGone.r.by, card: !!awsGone.card });
+  // the round-4 rule itself, where the ends MATCH (both none — a press with no end adds): a later curl «Always» never re-scopes the aws wildcard
+  const w9 = await world(); const e9 = entryOf(w9);
+  w9.door.setRunnable({ id: e9.id, on: true, reauthed: true });
+  const a9 = await runAnswered(w9, RUNTOOL(e9.ref, 'aws', 's3', 'ls'), { answer: 'always', reauthed: true, ttl: 'forever' });
+  const c9 = await runAnswered(w9, CURL(e9.ref, 'https://127.0.0.5:9/status'), { answer: 'always', reauthed: true, ttl: 'forever' });
+  const row9 = w9.useGrants.rowsOf(e9.id)[0];
+  const aws9 = await runAnswered(w9, RUNTOOL(e9.ref, 'aws', 's3', 'ls'));
+  const evil9 = await runAnswered(w9, CURL(e9.ref, 'https://abc123.execute-api.us-east-1.amazonaws.com/collect'));
+  ok(a9.r.ok && c9.r.ok && row9 && row9.to[0].toolFor && row9.to[0].toolFor['*.amazonaws.com'] === 'aws' && !row9.to[0].toolFor['127.0.0.5:9'] && row9.to[0].hosts.slice().sort().join() === '*.amazonaws.com,127.0.0.5:9' && aws9.r.ok && aws9.r.by === 'grant' && evil9.card && evil9.r.by !== 'grant', 'round 4 (item 3), where the ends match (both «No end»): the curl «Always» ADDS its plain host; the aws wildcard keeps its tool — `aws s3 ls` is still by: grant, curl to execute-api still cards', row9 && row9.to[0]);
 }
 
 console.log('㉒ ROUND 3 (MAJOR item 7) — a vault-use member is MARKED: a row an agent forged into data/grants.json is dropped');
@@ -1042,7 +1057,7 @@ console.log('㉞ ROUND 9 (MAJOR item 3) — «Always» is ALL-OR-NOTHING: a refu
   ok(gi && w.door.answerRequest(gi.action.askId, { answer: '8h', reauthed: true }).ok, 'A holds an 8-hour grant on E2 (so the two-entry run draws a card)');
   const hostsOf = (E) => (((w.useGrants.publicFor(E.id) || {}).to || []).find((m) => m.key === 'cid-A') || {}).hosts;
   whys.length = 0;
-  const x = await runAnswered(w, ['--env', `T1=${e1.ref}`, '--env', `T2=${e2.ref}`, '--', 'curl', 'https://b.example/x'], { answer: 'always', reauthed: true, ttl: '30d', caller: A });
+  const x = await runAnswered(w, ['--env', `T1=${e1.ref}`, '--env', `T2=${e2.ref}`, '--', 'curl', 'https://b.example/x'], { answer: 'always', reauthed: true, ttl: 'forever', caller: A });   // r3b: «No end» — the SAME end as the seeded members, so it ADDS (∪) and overflows E2 (a 30-day press would REPLACE them)
   ok(x.a && !x.a.ok && x.a.code === 'too_many_hosts', 'the two-entry «Always» toward b.example is refused (too_many_hosts at E2)', x.a);
   const st = JSON.parse(fs.readFileSync(path.join(w.dataDir, 'vault-run.json'), 'utf8'));
   ok((hostsOf(e1) || []).join() === 'a.example', 'E1\'s member is NARROWED BACK to [a.example] — the refused «Always» left no widening (r7 kept it ⇒ by:grant to b.example)', { e1: hostsOf(e1) });
