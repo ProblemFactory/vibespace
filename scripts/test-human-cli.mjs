@@ -43,11 +43,14 @@
 //      as the history's ONLY source (no transcript — every codex / acp / agy chat) is printed with no U+FFFD and every
 //      message exact; a CJK prompt matched by the union's person's-words key is shown once; WHAT THIS CLI SENT IS NEVER
 //      PRINTED AGAIN by a late baseline with no history (by the frame's id, by the person's words, an older line with the
-//      same words kept). §12a and §12c each with its mutant RED (round 8: U+FFFD, the sent line twice).
+//      same words kept). §12a and §12c each with its mutant RED (round 8: U+FFFD, the sent line twice). Round 10: AN ID
+//      DECIDES ALONE — with this CLI's copy not in that baseline, the same words from another sender (its own id), a peer, a
+//      codex-shaped line or the person's own older line are each shown; another sender's line right after ours is shown in
+//      its own place; two records with no id at all for one line sent are doubt, both shown. With its mutant RED.
 // RED on the base (6428c67e): no data/bin/vibespace, no index; RED on round 1 (5a0b2463): §0, the live-hub attach, the
 // receipt, the piped number, the bare refusal; RED on round 3 (ea0cecce): §7 and the killed session's .receipts (§2);
 // RED on round 4 (ad114fd78): §8. RED on round 5 (bd110027f): §9. RED on round 6 (74cf819d2): §10a, §10b's second half, §10c. RED on round 7 (cd2239445): §10b's
-// second half, §10c, §11a–§11d. RED on round 8 (eb2ecc5df): §12a–§12c.
+// second half, §10c, §11a–§11d. RED on round 8 (eb2ecc5df): §12a–§12c. RED on round 9 (c4a3ffa4c): §12c's round 10 legs.
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -716,6 +719,35 @@ console.log('§7 round 4 — the follower keys on identity, the baseline before 
     ok('WHAT THIS CLI SENT IS NEVER PRINTED AGAIN (round 9): a line piped into a late baseline with no history — shown ONCE (its echo) by the frame\'s id and by the person\'s words alone, the reply once, acknowledged; the person\'s OLDER line with the same words is the history\'s and is shown; the late print as round 8 had it (a mutant) shows the line twice',
       L(i) === 1 && R(i) === 1 && lateW(i) && i.code === 0 && L(w) === 1 && R(w) === 1 && L(o) === 2 && keptOlder(o) && L(m) === 2,
       `id ${L(i)}×/${R(i)}× exit ${i.code} · words ${L(w)}×/${R(w)}× · older ${L(o)}× kept ${keptOlder(o)} · mutant ${L(m)}× | ${i.out.slice(-360)}`);
+    // §12c round 10 — AN ID DECIDES ALONE: this CLI's own copy NOT in the late baseline (claude's idle frame is never copied:
+    // the stand-in acks the line and writes only the reply), the baseline holding the same words from someone else — another
+    // sender's line (its own msgId), a peer's message (acp `peer`), a codex-shaped line (`payload.webui_msg_id`), the
+    // person's own older line (a uuid): each shown, before its reply; our copy (our id) with another sender's line right after
+    // it: ours dropped, the other's shown in ITS place (after our reply); two records with NO id at all for one line sent
+    // (another's and ours): doubt — both shown (round 9: the first four once each, the fifth ours in the other's place, the
+    // sixth once)
+    const RO = said('OTHER-REPLY HCR10', { uuid: 'u10-or' }), H = said('HISTORY-0 HCR8', { uuid: 'u8-0' });
+    const ackOnly = (l, { bf, rc }) => { let x = null; try { x = JSON.parse(l); } catch { } if (!x || !x.msgId) return; fs.appendFileSync(rc, rec({ type: '_stdin_ack', timestamp: Date.now(), msg_id: x.msgId }) + '\n'); fs.appendFileSync(bf, R2 + '\n'); };
+    const copyThen = (after, noid = false) => (l, x) => { answer(noid)(l, x); fs.appendFileSync(x.bf, after.map((y) => y + '\n').join('')); };
+    const typedLine = (extra) => rec({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: LINE }] }, ...extra });
+    const other = typedLine({ _fromWebui: true, msgId: 'web-o10' });
+    const legs10 = {
+      other: late({ answer: ackOnly, bufInit: [H, other, RO], wait: 2 }),
+      peer: late({ answer: ackOnly, bufInit: [H, rec({ ts: Date.now(), type: 'acp', kind: 'user', msgId: '', content: [{ type: 'text', text: LINE }], peer: { name: 'agent-b', body: null, kind: 'agent' } }), RO], wait: 2 }),
+      codex: late({ answer: ackOnly, bufInit: [H, rec({ timestamp: new Date().toISOString(), type: 'response_item', payload: { type: 'message', role: 'user', webui_msg_id: 'web-c10', content: [{ type: 'input_text', text: LINE }] } }), RO], wait: 2 }),
+      older: late({ answer: ackOnly, bufInit: [H, rec({ type: 'user', uuid: 'p10-old', message: { role: 'user', content: LINE } }), RO], wait: 2 }),
+      newer: late({ answer: copyThen([other, RO]), wait: 2 }),
+      doubt: late({ answer: copyThen([], true), bufInit: [H, typedLine({ _fromWebui: true }), RO], wait: 2 }),
+    };
+    const g = {}; for (const [k, sh] of Object.entries(legs10)) g[k] = await held8(CLI, 'sess-r10-' + k, sh);
+    const mw = await mutantRun('wordsall', [['|| rec.peer || rec.webui_peer || p.webui_peer) return;', ') return;'], ['if (mid) { if (ids.has(mid)) { rows[i] = \'\'; byId.add(mid); } return; }', 'if (mid && ids.has(mid)) { rows[i] = \'\'; byId.add(mid); return; }'], ["if (typeof rec.uuid !== 'string' || !rec.uuid) noId.push(", 'noId.push(']], (f, id) => held8(f, id, legs10.other));
+    const tailOf = (x) => { const k = x.out.indexOf('answered after the 2 s'); return k < 0 ? '' : x.out.slice(k); };
+    const inPlace = (x) => { const t = tailOf(x); return count(t, LINE) === 1 && t.indexOf(LINE) < t.indexOf('OTHER-REPLY HCR10'); };
+    const order = (x) => { const t = tailOf(x), r = t.indexOf('REPLY-R2 HCR8'), l = t.indexOf(LINE); return count(t, LINE) === 1 && r >= 0 && r < l && l < t.indexOf('OTHER-REPLY HCR10'); };
+    const shown4 = ['other', 'peer', 'codex', 'older'];
+    ok('AN ID DECIDES ALONE (round 10): this CLI\'s copy not in the late baseline — the same words from another sender (its own id), a peer, a codex-shaped line (its payload id) and the person\'s own older line (a uuid) are each SHOWN (the echo + that line, before its reply); another sender\'s line right after our copy is shown in ITS place (after our reply); two records with no id at all for one line sent are doubt — both shown; every line acknowledged; round 9\'s words road (a mutant) drops the other sender\'s line',
+      shown4.every((k) => L(g[k]) === 2 && inPlace(g[k])) && L(g.newer) === 2 && order(g.newer) && L(g.doubt) === 3 && Object.values(g).every((x) => x.code === 0) && L(mw) === 1,
+      Object.entries(g).map(([k, x]) => `${k} ${L(x)}×${shown4.includes(k) ? ' in place ' + inPlace(x) : k === 'newer' ? ' order ' + order(x) : ''} exit ${x.code}`).join(' · ') + ` · mutant ${L(mw)}× | ${tailOf(g.newer).slice(0, 300)}`);
   }
   for (const k of kids) { try { if (k.exitCode == null && k.signalCode == null) k.kill('SIGKILL'); } catch { } }   // only this section's own children
   for (const s of servers) { try { s.close(); } catch { } }

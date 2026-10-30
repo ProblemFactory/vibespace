@@ -697,17 +697,31 @@ async function cmdChat(q, opts) {
   const stallWords = (on) => dim(on ? `  (the session's buffer ${tildeOf(row.buffer)} stopped answering — its mount? replies will show once it answers)` : '  (the buffer answers again)');
   const idle = { stop() { }, ready: Promise.resolve({ last: null, blind: false, text: null }) };
   // What THIS CLI sent is never printed by it again (round 9 — a line piped at the deadline was in that baseline, and shown
-  // twice): the anchor's rule for the late print too — the person's record holding the frame's id (the wrapper copies it:
-  // msgId), else the person's words; each sent line once, the newest record first (an older line with the same words is
-  // the history's, and stays)
+  // twice): the anchor's rule for the late print too. AN ID DECIDES ALONE (round 10 — round 9 let a record holding ANOTHER
+  // sender's id fall through to the person's words, and counted a peer's message as the person's: with this CLI's own copy
+  // not in that baseline — it lands after the read; claude's idle frames are never copied — the newest line with the same
+  // words was dropped: another sender's, a peer's, the person's own older one). The frame's id as the wrapper copies it
+  // (claude's webui_copy and acp / agy `msgId`, a frame-file body's `webui_msg_id`, codex `payload.webui_msg_id`): ours, or
+  // never ours; a record with a uuid is the agent's own (never a wrapper's copy of a frame); a peer's message (`peer`, codex
+  // `webui_peer`) is never ours. The person's words only for a record with NO id at all (a wrapper that keeps none): a sent
+  // line's words take as many such records as lines with those words are left — MORE such records than that is doubt, and
+  // none is dropped (both printed: another sender's line is never hidden on a guess)
+  const idOfCopy = (rec) => { const p = rec.payload && typeof rec.payload === 'object' ? rec.payload : {}; return [rec.msgId, rec.webui_msg_id, p.webui_msg_id].find((v) => typeof v === 'string' && v) || null; };
   const notSent = (text) => {
-    const rows = text.split('\n'), left = sent.map((x) => ({ ...x, used: false }));
-    for (let i = rows.length - 1; i >= 0 && left.some((x) => !x.used); i--) {
-      let rec = null; try { rec = JSON.parse(rows[i]); } catch { continue; }
-      const ls = LI.recordLines(rec); if (!ls.length || ls.some((m) => m.who !== 'you')) continue;
-      const mid = rec && typeof rec.msgId === 'string' && rec.msgId ? rec.msgId : null, shown = ls.map((m) => m.text).join('\n');
-      const x = (mid && left.find((y) => !y.used && y.ids.includes(mid))) || left.slice().reverse().find((y) => !y.used && y.shown === shown);
-      if (x) { x.used = true; rows[i] = ''; }
+    const rows = text.split('\n'), ids = new Set(sent.flatMap((x) => x.ids)), byId = new Set(), noId = [];
+    rows.forEach((ln, i) => {
+      let rec = null; try { rec = JSON.parse(ln); } catch { return; }
+      if (!rec || typeof rec !== 'object') return;
+      const ls = LI.recordLines(rec), p = rec.payload && typeof rec.payload === 'object' ? rec.payload : {};
+      if (!ls.length || ls.some((m) => m.who !== 'you') || rec.peer || rec.webui_peer || p.webui_peer) return;   // a peer's message is never ours
+      const mid = idOfCopy(rec);
+      if (mid) { if (ids.has(mid)) { rows[i] = ''; byId.add(mid); } return; }   // an id decides ALONE: ours, or never ours
+      if (typeof rec.uuid !== 'string' || !rec.uuid) noId.push([i, ls.map((m) => m.text).join('\n')]);   // a uuid: the agent's own record
+    });
+    const left = sent.filter((x) => !x.ids.some((id) => byId.has(id)));
+    for (const shown of new Set(noId.map((r) => r[1]))) {
+      const recs = noId.filter((r) => r[1] === shown);
+      if (recs.length <= left.filter((x) => x.shown === shown).length) for (const [i] of recs) rows[i] = '';   // more than were sent: doubt — none dropped
     }
     return rows.filter((r) => r).join('\n') + '\n';
   };
