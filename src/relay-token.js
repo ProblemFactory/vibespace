@@ -162,6 +162,23 @@ function loginOf(logText) {
   }
   return null;
 }
+/** THE RUN'S LOG (lane frp-token-proof, 2026-10-30 — the hub deleted its own relay token after misreading a login): frps
+ *  0.70.0 encrypts the control connection after a login with auth.token as the key on BOTH sides, so a frpc WITHOUT the key
+ *  frps holds is taken (the relay's plugin vouches the instance's own token) and dropped ~16 ms later — frpc logs `login to
+ *  server success` again at its backoff and nothing else at info level. A login is never a proof; a proxy that STARTED is.
+ *  frpc.log text (a run's, read forward; `prev` = the counts so far) → { logins, proxies, unanswered } — `unanswered` = the
+ *  logins since the relay last answered (a proxy started, or a [W]/[E] line: a refusal, a lost connection) */
+const LOGIN_OK_RE = /login to (?:the )?server success/i;
+const PROXY_OK_RE = /\bstart proxy success\b/;
+function runOf(logText, prev = null) {
+  let logins = (prev && prev.logins) || 0, proxies = (prev && prev.proxies) || 0, unanswered = (prev && prev.unanswered) || 0;
+  for (const l of String(logText || '').split('\n')) {
+    if (LOGIN_OK_RE.test(l)) { logins++; unanswered++; }
+    else if (PROXY_OK_RE.test(l)) { proxies++; unanswered = 0; }
+    else if (/\[[WE]\]/.test(l)) unanswered = 0;
+  }
+  return { logins, proxies, unanswered };
+}
 /** the ONE For-you item a name refusal files (never the token; the dedupe key is the text: one item per name) */
 const ALERT_DETAIL = {
   name_in_use: 'The relay refused it for this instance. Either this instance\'s relay token leaked and another login took the name, or a copy of data/ runs elsewhere. If neither is expected: Rotate the relay token in Plugins › Public URLs and send the new registration line to the relay admin.',
@@ -183,4 +200,5 @@ function alertOf(ref, { name = '' } = {}) {
 module.exports = {
   V, FILE, TOKEN_ENV, CLUSTER_TOKEN_ENV, KNOCK_ENV, RELAY_ENV_KEEP, TOKEN_PREFIX, ID_RE, TOKEN_RE, HASH_RE, LABEL_RE, SUB_RE, CLUSTER_USER_RE, PREFIXES, SUBS_MAX, REASONS, ALERTS,
   labelOf, clusterUserOf, mint, rotate, revoke, withSub, parse, serialize, identityOf, registrationLine, frpcLines, relayEnv, strippedName, nameVerdict, refusalOf, loginOf, alertOf,
+  runOf,   // lane frp-token-proof
 };
