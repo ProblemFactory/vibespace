@@ -2515,6 +2515,30 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     ok(rd3?.status === 'ran' && nd3.length === 1 && nd3[0]?.id === itD.id && /^A plain file kept secrets/.test(nd3[0]?.text || '') && /It holds 1 name\(s\): A_KEY —/.test(nd3[0]?.detail || ''),
       '…one moved aside ⇒ the next boot renames the other and the SAME item (one id) now says the retired file\'s words', { status: rd3?.status, n: nd3.length, same: nd3[0]?.id === itD.id });
     tdD.stop();
+    // (6b) r4 (review R3-F2): a state with nothing left to tell SETTLES the «Two files…» item — it never stays open over files
+    // the owner already removed: both removed (`absent`), the one left an EMPTY store (no name), a non-file by the name. The
+    // resolve is on disk before the row is recorded (that row never runs again)
+    const twoThen = (tag, fix) => {
+      const x = seedJS('two-' + tag, { A_KEY: V[0] });
+      fs.writeFileSync(x.ret, JSON.stringify({ B_KEY: V[1] }), { mode: 0o600 });
+      const tx = new UserTodoManager({ dataDir: x.dataDir, expirySweepMs: 0 });
+      const r1 = boot(x, { userTodos: tx });
+      const it1 = notesOf(tx)[0] || {};
+      fix(x);
+      const r2 = boot(x, { userTodos: tx });
+      const t2 = new UserTodoManager({ dataDir: x.dataDir, expirySweepMs: 0 });
+      const out = { filed: r1?.status === 'failed' && /^Two files hold secrets/.test(it1.text || ''), store: r2?.report?.store, recorded: r2?.status === 'ran' && !!x.ledger().applied[ID], item: tx.get(it1.id)?.status, open: notesOf(tx).length, onDisk: t2.get(it1.id)?.status };
+      t2.stop(); tx.stop();
+      return out;
+    };
+    for (const [tag, fix, store, words] of [
+      ['gone', (x) => { fs.rmSync(x.src); fs.rmSync(x.ret); }, 'absent', 'both files removed'],
+      ['empty', (x) => { fs.rmSync(x.ret); fs.writeFileSync(x.src, '{}'); }, 'renamed', 'the one left an EMPTY store (it held no name)'],
+      ['dir', (x) => { fs.rmSync(x.src); fs.rmSync(x.ret); fs.mkdirSync(x.src); }, 'not-a-file', 'both removed and a directory by the name'],
+    ]) {
+      const o = twoThen(tag, fix);
+      ok(o.filed && o.store === store && o.recorded && o.item === 'done' && o.open === 0 && o.onDisk === 'done', `«Two files…» filed, then ${words} ⇒ the next boot (\`${store}\`) RESOLVES that item — on disk, never left open over files that are gone`, o);
+    }
     // (7) a store that is not a JSON object: renamed and told — its names could not be read
     const u = seedJS('unread', 'not json ' + V[2]);
     const tu = new UserTodoManager({ dataDir: u.dataDir, expirySweepMs: 0 });
@@ -2612,6 +2636,78 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const warns = [];
     const r7 = runMigrations({ ledgerPath: path.join(dir2, 'm2.json'), migrations: [{ id: '2099-01-runner-y', run() { throw new Error('no'); } }, { id: '2099-01-runner-z', run() { return null; } }], todos: { add() { throw new Error('the store refused it'); } }, log: () => { }, warn: (l) => warns.push(l) });
     ok(r7.map((x) => x.status).join() === 'failed,ran' && warns.some((l) => /2099-01-runner-y: its For-you notice was not filed — the store refused it/.test(l)), 'a store that refuses the item ⇒ a warn line by name, never a failed boot — the next row still runs', { statuses: r7.map((x) => x.status), warns: warns.length });
+    // r4 (review R3-F1): the belt sees the WHOLE line, THEN the cut — a token straddling character 300 was no longer a shape the
+    // belt knows once cut first (r3 showed ghp_ + 14 of its 36; 31 of a prefix-free 40). Each: no run of ≥ 6 of it visible
+    const { redactSecrets } = require('../src/secret-shapes.js');
+    const an = (k, set = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789') => Array.from(crypto.randomBytes(k), (b) => set[b % set.length]).join('');
+    const visible = (secret, text) => { for (let L = secret.length; L >= 6; L--) for (let s = 0; s + L <= secret.length; s++) if (String(text).includes(secret.slice(s, s + L))) return L; return 0; };
+    const dirC = path.join(tmp, 'runner-cut');
+    fs.mkdirSync(dirC, { recursive: true });
+    const tc = new UserTodoManager({ dataDir: dirC, expirySweepMs: 0 });
+    for (const [name, secret, before] of [['ghp_ + 36', ['gh', 'p_'].join('') + an(36), 18], ['a prefix-free 40-char key', an(37) + 'Qz7', 31]]) {
+      const id = `2099-01-runner-cut-${before}`;
+      const msg = ('the shard could not be read:' + ' .'.repeat(150)).slice(0, 300 - before) + secret + ' — and the rest of that first line\nthe second line';
+      const r = runMigrations({ ledgerPath: path.join(dirC, 'migrations.json'), migrations: [{ id, run() { throw new Error(msg); } }], todos: tc, ...quiet })[0];
+      tc.flush();
+      const it = tc.forSession('migrations').find((x) => x.itemKey === id) || {};
+      const blob = JSON.stringify(it) + (fs.existsSync(path.join(dirC, 'user-todos.json')) ? fs.readFileSync(path.join(dirC, 'user-todos.json'), 'utf8') : '');
+      const cutFirst = visible(secret, redactSecrets(msg.split('\n')[0].slice(0, 300), { runs: true }).text);   // r3's order — the control
+      const line = R.failedLine?.(new Error(msg)) ?? '';
+      ok(r?.status === 'failed' && !!it.id && visible(secret, blob) === 0 && visible(secret, line) === 0 && line.length <= 300 && cutFirst >= 8, `a token straddling the 300-char cut (${name}) ⇒ 0 chars of it in the item + data/user-todos.json — the belt sees the whole line, then the cut (r3's order showed ${cutFirst} of ${secret.length})`, { status: r?.status, filed: !!it.id, visible: visible(secret, blob), cutFirst, len: line.length });
+    }
+    tc.stop();
+  }
+
+  // ── THE `migration-failed:` TOAST CARRIES THE BELTED LINE (lane job-secrets-retire r4, review N3): a serverNotice reaches every
+  // connected client's screen — a stepped migration's later failure does — so its error is the runner's `failedLine` (the
+  // secret-shapes belt over the whole first line, then the cut), as the For-you item's is; only the journal keeps it whole.
+  // Every road with a token in the thrown error (built at runtime, never printed): 0 chars of it in the toast ──
+  {
+    const an = (k, set = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789') => Array.from(crypto.randomBytes(k), (b) => set[b % set.length]).join('');
+    const visible = (secret, text) => { for (let L = secret.length; L >= 6; L--) for (let s = 0; s + L <= secret.length; s++) if (String(text).includes(secret.slice(s, s + L))) return L; return 0; };
+    const TOKN = ['gh', 'p_'].join('') + an(36);
+    const hush = async (fn) => {   // the journal lines carry the raw token — kept off this suite's output, counted
+      const o = [console.log, console.warn, console.error], said = [];
+      console.log = console.warn = console.error = (...a) => said.push(a.join(' '));
+      try { await fn(); } finally { [console.log, console.warn, console.error] = o; }
+      return said;
+    };
+    const toastOf = (list, id) => list.filter(([k]) => k === 'migration-failed:' + id).map(([, t]) => String(t)).join('\n');
+    const MS = fs.readFileSync(path.join(REPO_ROOT, 'src/server/migrations.js'), 'utf8').split('\n').filter((l) => l.includes("'migration-failed:'"));
+    ok(MS.length === 3 && MS.every((l) => /failedLine\((e|r\.error)\)/.test(l) && !/\$\{(e\.message|r\.error)\}/.test(l)), `every \`migration-failed:\` toast in src/server/migrations.js (${MS.length}) carries its error through the runner's failedLine — never the raw line`, MS.map((l) => l.trim().slice(0, 100)));
+    // (a) the boot's sync failure — the job-secrets one-shot whose own notice the store refused with a token in its words
+    const JID = '2026-10-job-secrets-retired';
+    const dA = path.join(tmp, 'toast-sync', 'data');
+    fs.mkdirSync(dA, { recursive: true });
+    fs.writeFileSync(path.join(dA, 'job-secrets.json'), JSON.stringify({ BOT_TOKEN: crypto.randomBytes(12).toString('hex') }), { mode: 0o600 });
+    const toastsA = []; let resA = null;
+    const saidA = await hush(() => { resA = create({ rootDir: path.dirname(dA), homeDir: scratchHomeDir, serverNotice: (k, t) => toastsA.push([k, t]), userTodos: { add() { throw new Error('the vault section refused it: ' + TOKN); }, flush() { } } }).runLocalMigrations({ only: [JID] }).find((x) => x.id === JID); });
+    const tA = toastOf(toastsA, JID);
+    ok(resA?.status === 'failed' && String(resA?.error).includes(TOKN) && tA.includes(JID) && /the vault section refused it/.test(tA) && visible(TOKN, tA) === 0 && saidA.some((l) => l.includes(TOKN)),
+      'the boot\'s sync failure: a token in the thrown error (the raw r.error carries it) ⇒ 0 chars of it in the `migration-failed:` toast, its id and words kept; the journal keeps the line whole', { status: resA?.status, toast: !!tA, visible: visible(TOKN, tA), journal: saidA.filter((l) => l.includes(TOKN)).length });
+    // (b) a STEPPED migration's later failure (onLate — clients are connected by then): the ledger dedup over a shard of repeated
+    // rows, through a usageHistory whose dedupShard rejects with a token in its words
+    const LID = '2026-10-usage-ledger-dedup';
+    const dB = path.join(tmp, 'toast-stepped', 'data');
+    fs.mkdirSync(path.join(dB, 'usage-history'), { recursive: true });
+    fs.writeFileSync(path.join(dB, 'usage-history', 'events-2026-10.ndjson'), ['{"rid":"r-1"}', '{"rid":"r-1"}', '{"rid":"r-1"}', '{"rid":"r-2"}'].join('\n') + '\n');
+    const toastsB = []; let resB = null;
+    const saidB = await hush(async () => {
+      resB = create({ rootDir: path.dirname(dB), homeDir: scratchHomeDir, serverNotice: (k, t) => toastsB.push([k, t]), usageHistory: { dedupShard: () => Promise.reject(new Error('the shard could not be rewritten: ' + TOKN)) } }).runLocalMigrations({ only: [LID] }).find((x) => x.id === LID);
+      for (let i = 0; i < 400 && !toastOf(toastsB, LID); i++) await new Promise((r) => setTimeout(r, 5));
+    });
+    const tB = toastOf(toastsB, LID);
+    ok(resB?.status === 'started' && tB.includes(LID) && /the shard could not be rewritten/.test(tB) && visible(TOKN, tB) === 0 && saidB.some((l) => l.includes(TOKN)),
+      'a STEPPED migration that rejects after the boot (onLate): 0 chars of the token in its `migration-failed:` toast; the journal keeps the line whole', { status: resB?.status, toast: !!tB, visible: visible(TOKN, tB), journal: saidB.filter((l) => l.includes(TOKN)).length });
+    // (c) the grants REARM (data/grants.json deleted after its row ran) whose store refuses with a token: the toast AND ⚙ Diagnostics
+    const dC = path.join(tmp, 'toast-rearm', 'data');
+    fs.mkdirSync(dC, { recursive: true });
+    const refusing = new Proxy({}, { get: (t, k) => (k === 'onDisk' ? () => false : k === 'then' ? undefined : () => { throw new Error('the grants store refused it: ' + TOKN); }) });
+    const toastsC = [], diag = []; let resC = null;
+    const saidC = await hush(() => { resC = create({ rootDir: path.dirname(dC), homeDir: scratchHomeDir, grants: refusing, note: (l) => diag.push(String(l)), serverNotice: (k, t) => toastsC.push([k, t]) }).grantsStoreBoot(); });
+    const tC = toastOf(toastsC, '2026-10-grants-unify');
+    ok(resC?.status === 'failed' && String(resC?.error).includes(TOKN) && /the grants store refused it/.test(tC) && /rearmed .*FAILED: the grants store refused it/.test(diag.join('\n')) && visible(TOKN, tC + '\n' + diag.join('\n')) === 0 && saidC.some((l) => l.includes(TOKN)),
+      'the grants rearm that fails: 0 chars of the token in its `migration-failed:` toast and its ⚙ Diagnostics line; the journal keeps it whole', { status: resC?.status, toast: !!tC, diag: diag.length, visible: visible(TOKN, tC + diag.join('')), journal: saidC.filter((l) => l.includes(TOKN)).length });
   }
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true });

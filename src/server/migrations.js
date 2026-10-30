@@ -9,7 +9,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { runMigrations } = require('../migration-runner.js');
+const { runMigrations, failedLine } = require('../migration-runner.js'); // failedLine: an error's first line as a screen may carry it
 const { RETIRED_SETTING_KEYS, stripRetiredSettings } = require('../retired-settings.js'); // PURE: the one retired-key list (the schema re-exports it)
 const { redactSecrets } = require('../secret-shapes.js'); // PURE: the one secret-shape rule (2026-10-job-secrets-retired shows no name it flags)
 
@@ -818,7 +818,7 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
     },
     {
       id: '2026-10-job-secrets-retired',
-      note: "A SECRET AT REST NAMES ITS VAULT ENTRY — OR THE OWNER IS TOLD (lane job-secrets-retire r2, design-vault-service-secret D10): data/job-secrets.json was a PLAINTEXT store of a job's secrets (the old GET / POST /api/jobs-secrets — no client ever wrote it; the engine read it into a job's env as envFrom). From this release nothing reads it and its routes are gone, so a store an owner once filled by hand would sit in data/ in the clear with no door and nobody told. This one-shot RENAMES it to data/job-secrets.retired.json (0600 — the owner's bytes, KEPT: never deleted by us) and files ONE For-you notice under Vault naming the file, the names it held (names only, never a value) and the recipe (each into the vault as a secret entry, then delete the file; a job reads one with --vault). src/vault.js SECRETS_AT_REST names the retired file until the owner deletes it. No file ⇒ nothing. A run that renamed and then failed to file the notice is not recorded: the next boot finds the retired file and files it (ONE item, keyed by this migration). Both names present ⇒ FAILS by name, nothing moved (never over the owner's bytes) — and the same For-you item says so first (r3: the runner runs before any client connects, so a journal line alone reached nobody).",
+      note: "A SECRET AT REST NAMES ITS VAULT ENTRY — OR THE OWNER IS TOLD (lane job-secrets-retire r2, design-vault-service-secret D10): data/job-secrets.json was a PLAINTEXT store of a job's secrets (the old GET / POST /api/jobs-secrets — no client ever wrote it; the engine read it into a job's env as envFrom). From this release nothing reads it and its routes are gone, so a store an owner once filled by hand would sit in data/ in the clear with no door and nobody told. This one-shot RENAMES it to data/job-secrets.retired.json (0600 — the owner's bytes, KEPT: never deleted by us) and files ONE For-you notice under Vault naming the file, the names it held (names only, never a value) and the recipe (each into the vault as a secret entry, then delete the file; a job reads one with --vault). src/vault.js SECRETS_AT_REST names the retired file until the owner deletes it. No file ⇒ nothing. A run that renamed and then failed to file the notice is not recorded: the next boot finds the retired file and files it (ONE item, keyed by this migration). Both names present ⇒ FAILS by name, nothing moved (never over the owner's bytes) — and the same For-you item says so first (r3: the runner runs before any client connects, so a journal line alone reached nobody). A state with nothing left to tell — no file, a non-file, an empty store — settles that item (r4).",
       run() {
         const from = path.join(dataDir, JOB_SECRETS_FILE), to = path.join(dataDir, JOB_SECRETS_RETIRED);
         const fill = (l) => l.key.replace(/\{(\w+)\}/g, (m, k) => (l.params && l.params[k] != null ? String(l.params[k]) : m));
@@ -838,9 +838,21 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
             return { notice: it && it.id ? 'filed' : 'not filed', via: priv ? 'private' : 'live' };
           } finally { if (priv) { try { store.stop(); } catch { } } }
         };
+        // a state with nothing left to tell (no file, a non-file, an empty store) SETTLES the one item an earlier boot filed —
+        // «Two files…» never stays open over files the owner already removed (r4, review R3-F2). The LIVE store only (a fresh
+        // install still makes no data/user-todos.json), flushed before the runner records the row — the row never runs again
+        const settle = (rep) => {
+          try {
+            const live = typeof userTodos === 'function' ? userTodos() : userTodos;
+            const ids = live?.idsWhere?.((i) => i.sessionKey === 'vault' && i.itemKey === JOB_SECRETS_ITEM && i.status === 'open') || [];
+            for (const x of ids) live.setStatus(x, 'done', 'system');
+            if (ids.length) live.flush?.();
+          } catch { }
+          return rep;
+        };
         let st = null;
         try { st = fs.lstatSync(from); } catch { /* absent — nothing was stored, or an earlier run renamed it */ }
-        if (st && !st.isFile() && !st.isSymbolicLink()) return { store: 'not-a-file' };   // a directory / socket by that name was never the store
+        if (st && !st.isFile() && !st.isSymbolicLink()) return settle({ store: 'not-a-file' });   // a directory / socket by that name was never the store
         if (st) {
           if (fs.existsSync(to)) {
             // r3 (review F2): the runner runs inside hub.listen's callback, before any client connects — the failure is said
@@ -850,13 +862,13 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
             throw Object.assign(new Error(`data/${JOB_SECRETS_RETIRED} already exists beside data/${JOB_SECRETS_FILE} — nothing moved (never over the owner's bytes); move one of them aside and restart`), { told });
           }
           fs.renameSync(from, to);
-        } else if (!fs.existsSync(to)) return { store: 'absent' };
+        } else if (!fs.existsSync(to)) return settle({ store: 'absent' });
         if (fs.lstatSync(to).isFile()) fs.chmodSync(to, 0o600);   // a symlink's target is not ours to chmod
         // its NAMES only — the values are parsed to find the names and never leave this function (no log, no ledger, no notice)
         let names = null;
         try { if (fs.statSync(to).size <= 1024 * 1024) { const doc = JSON.parse(fs.readFileSync(to, 'utf-8')); if (doc && typeof doc === 'object' && !Array.isArray(doc)) names = Object.keys(doc); } } catch { names = null; }
         const rep = { store: st ? 'renamed' : 'renamed-earlier', to: 'data/' + JOB_SECRETS_RETIRED, names: names ? names.length : null };
-        if (names && !names.length) { console.log('[migrate] job-secrets-retired:', JSON.stringify(rep)); return { ...rep, notice: 'none (it held no name)' }; }
+        if (names && !names.length) { console.log('[migrate] job-secrets-retired:', JSON.stringify(rep)); return settle({ ...rep, notice: 'none (it held no name)' }); }
         // a name is SHOWN only when it is shaped like an environment-variable name AND the secret-shapes belt finds nothing in it
         // (r3, review F1: most tokens fit a variable's shape — ghp_…, npm_…, hf_…, AKIA…, a hex run); anything else — a value
         // pasted into the name field, the accident class — is counted, never shown
@@ -914,9 +926,10 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
       try { serverNotice?.('grants_store_missing', `Access lists: ${line}.`, { level: 'warn' }); } catch { }
       return { missing: 'grants_store_missing' };
     } catch (e) {
-      const line = `[migrate] ${id} rearmed (data/grants.json was missing) and FAILED: ${e.message}`;
-      console.warn(line); say(line);
-      try { serverNotice?.('migration-failed:' + id, `Data migration ${id} ran again because data/grants.json was missing, and failed: ${e.message}`, { level: 'warn' }); } catch { }
+      // the journal keeps the error whole; ⚙ Diagnostics and the toast are screens — its first line through the runner's belt (r4)
+      const line = `[migrate] ${id} rearmed (data/grants.json was missing) and FAILED: `;
+      console.warn(line + e.message); say(line + failedLine(e));
+      try { serverNotice?.('migration-failed:' + id, `Data migration ${id} ran again because data/grants.json was missing, and failed: ${failedLine(e)}`, { level: 'warn' }); } catch { }
       return { status: 'failed', rearmed: true, error: e.message };
     }
   }
@@ -1121,13 +1134,14 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
   function runLocalMigrations({ only = null } = {}) {   // `only` = ids (a suite's one boot of one migration)
     // `todos` (r3, review F2b): a failed row is ONE For-you item keyed by its id, resolved by the run that succeeds (the runner's)
     const results = runMigrations({ ledgerPath: path.join(dataDir, 'migrations.json'), migrations: Array.isArray(only) ? MIGRATIONS.filter((m) => only.includes(m.id)) : MIGRATIONS, todos: userTodos, onLate: (r) => {
-      // a stepped migration that ended after the boot's pass (lane ledger-dedup-law): its failure is said like a sync one's
-      if (r.status === 'failed') { try { serverNotice?.('migration-failed:' + r.id, `Data migration ${r.id} failed (${r.error}) — will retry on next restart.`, { level: 'warn' }); } catch { } }
+      // a stepped migration that ended after the boot's pass (lane ledger-dedup-law): its failure is said like a sync one's.
+      // A toast reaches every client's screen: its error is the runner's failedLine — belted whole, then cut (r4, review N3)
+      if (r.status === 'failed') { try { serverNotice?.('migration-failed:' + r.id, `Data migration ${r.id} failed (${failedLine(r.error)}) — will retry on next restart.`, { level: 'warn' }); } catch { } }
     } });
     for (const r of results) if (r.id === '2026-10-grants-unify' && r.status === 'already') Object.assign(r, grantsStoreBoot());   // verify F2: the ledger stamped, the store deleted
     for (const r of results) {
       if (r.status === 'failed') {
-        try { serverNotice?.('migration-failed:' + r.id, `Data migration ${r.id} failed (${r.error}) — will retry on next restart.`, { level: 'warn' }); } catch { }
+        try { serverNotice?.('migration-failed:' + r.id, `Data migration ${r.id} failed (${failedLine(r.error)}) — will retry on next restart.`, { level: 'warn' }); } catch { }
       }
     }
     return results;

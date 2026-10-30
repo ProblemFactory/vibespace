@@ -16,8 +16,9 @@
 //     inside hub.listen's callback, before any client connected, so the warn line and the host's notice reached nobody —
 //     a failed boot migration was a journal line. With `todos` (the hub's For-you store or a getter; a device daemon passes
 //     none) a failed row files ONE notice keyed by its id (`itemKey`: one item across boots, re-worded with the latest
-//     error's first line, belted by the secret-shapes rule) and the run that succeeds resolves it. A migration that said its
-//     failure in its own For-you words throws with `told: true` — no second item. A notice that cannot be filed is a warn line
+//     error's first line — `failedLine`: the secret-shapes belt over the WHOLE line, THEN the cut, r4) and the run that
+//     succeeds resolves it. A migration that said its failure in its own For-you words throws with `told: true` — no second
+//     item. A notice that cannot be filed is a warn line. The hub's `migration-failed:` toast carries the same `failedLine`
 //   · a STEPPED migration (lane ledger-dedup-law, 2026-10-27 — a 23.8 GiB
 //     ledger shard cannot be rewritten inside one boot tick): its run()
 //     returns a PROMISE; the boot goes on at once (results say `started`),
@@ -38,12 +39,15 @@ const FAILED_WORDS = Object.freeze({
   retry: i18nKey('Nothing was recorded — it retries at the next start; the server log has the whole line.'),
   source: i18nKey('Migrations'), // the tray group's name (zh / ja)
 });
+// an error's FIRST line as a screen may carry it (the For-you item, the hub's toast): the belt sees the WHOLE line, THEN the
+// cut (r4, review R3-F1: a token cut at 300 first is no longer a shape the belt knows — secret-shapes: never cut inside a value)
+function failedLine(e) { return redactSecrets(String((e && e.message) || e).split('\n')[0], { runs: true }).text.slice(0, 300); }
 function inboxOf(todos) { try { const t = typeof todos === 'function' ? todos() : todos; return t && typeof t.add === 'function' ? t : null; } catch { return null; } }
 function sayFailed(todos, id, e, warn) {
   const store = inboxOf(todos);
   if (!store || (e && e.told)) return;
   try {
-    const error = redactSecrets(String((e && e.message) || e).split('\n')[0].slice(0, 300), { runs: true }).text;
+    const error = failedLine(e);
     const head = { key: FAILED_WORDS.text, params: { id } }, lines = [{ key: FAILED_WORDS.error, params: { error } }, { key: FAILED_WORDS.retry }];
     const fill = (l) => l.key.replace(/\{(\w+)\}/g, (m, k) => (l.params && l.params[k] != null ? String(l.params[k]) : m));
     store.add(FAILED_INBOX_KEY, { origin: 'server', kind: 'notice', urgency: 'high', by: 'system', sessionName: 'Migrations', itemKey: id, text: fill(head), detail: lines.map(fill).join('\n'), i18n: { text: head, detail: lines, source: { key: FAILED_WORDS.source } } });
@@ -127,4 +131,4 @@ function runMigrations({ ledgerPath, migrations, log = console.log, warn = conso
   return results;
 }
 
-module.exports = { runMigrations, FAILED_INBOX_KEY, FAILED_WORDS };
+module.exports = { runMigrations, failedLine, FAILED_INBOX_KEY, FAILED_WORDS };
