@@ -123,7 +123,7 @@ export function pressedDelivery(button) { return button && button.dataset && but
 /** Every visible agent-draft primary on this page follows the remembered choice, words and fact together. */
 export function relabelPrimaries(want = rememberedDelivery(), root = document) {
   for (const b of root.querySelectorAll('.chan-prop button[data-approve][data-deliver]')) {
-    if (b.dataset.deliver === want) continue;
+    if (b.dataset.deliverFixed || b.dataset.deliver === want) continue;   // a reaction / recall: always next-turn
     b.dataset.deliver = want;
     const card = b.closest('.chan-prop');
     b.textContent = approveLabel(want, { edited: !!(card && card.querySelector('.chan-prop-edit')) });
@@ -332,6 +332,11 @@ export function cardArmed(card, ev) {
   }
   return v.armed;
 }
+/** EVERY decision button on an armed card is bound through this ONE helper (acceptance r2 of lane reaction-approve-shown:
+ *  the reaction / recall road armed its Approve but not its Reject… nor the reject box's Reject, so a press inside the
+ *  window acted) — a press while the card arms nudges it and does nothing else; test-channel-outbox's census holds every
+ *  decision binding of the card to it, so no road can forget a button. */
+const armedOnly = (card, fn) => (ev) => (cardArmed(card, ev) ? fn(ev) : undefined);
 
 const stamp = (ms) => {
   if (!ms) return '';
@@ -382,6 +387,14 @@ async function post(pathname, body) {
   const r = await fetchJson(pathname, { method: 'POST', headers: JSON_HDR, body: JSON.stringify(body || {}) });
   if (!r || r.error) { showToast(routeErrorText(r), { type: 'error' }); return null; }
   return r;
+}
+/** THE ONE APPROVE (lane reaction-approve-shown — the owner's hub, 2026-10-28: an agent's proposed 👍 was refused on
+ *  every press since 2.369.197, «shown is required … reload the page»): every road that approves a proposal — a text,
+ *  a reaction, a recall, with edits, without the files — posts HERE, and every approval carries `shown` = the PURE
+ *  digest of the record the card was drawn from (r6 verify F6). The reaction / recall road had its own POST without it:
+ *  two roads, one drifted. test-channel-outbox's census holds every outbox approve POST in the client tree to this one. */
+function approveProposal(p, body) {
+  return post(`/api/channels/outbox/${encodeURIComponent(p.id)}/approve`, { ...body, shown: P.shownDigest(p) });
 }
 
 /**
@@ -585,34 +598,39 @@ export function renderProposalCard(app, p, { compact = false, line = false, onLi
       const approveR = btn(toAgent ? approveLabel('next-turn') : t('Approve'), null, 'mounts-btn-primary');
       approveR.dataset.approve = '1';
       approveR.dataset.deliver = 'next-turn';
-      approveR.onclick = async () => {
+      // lane reaction-approve-shown: its receipt ALWAYS rides the next turn (the engine never wakes for one), so its words
+      // never follow this device's remembered «wake now» — `relabelPrimaries` and a kept card's patch skip it (the owner's
+      // reaction card read «批准并立即唤醒 agent» while its press posted next-turn)
+      approveR.dataset.deliverFixed = '1';
+      approveR.onclick = armedOnly(card, async () => {   // r6 F6: armed only, like every Approve
         for (const b of act.querySelectorAll('button')) b.disabled = true;
-        const r = await post(`/api/channels/outbox/${encodeURIComponent(p.id)}/approve`, { expectWakes: 0, ...(toAgent ? { deliver: 'next-turn' } : {}) });
+        const r = await approveProposal(p, { expectWakes: 0, ...(toAgent ? { deliver: 'next-turn' } : {}) });
         if (!r) { for (const b of act.querySelectorAll('button')) b.disabled = false; return; }
         const sent = !!(r.proposal && r.proposal.state === 'sent');
         const o = r.proposal ? (r.proposal.outcome || P.outcomeOf(r.proposal)) : null;
         showToast(sent ? (recall ? t('Message taken back') : t('Reaction added')) : t('Not sent: {why}', { why: (o && P.outcomeText(o, { t, errorCodeText: chanCaps.errorCodeText })) || routeErrorText(r) }), { type: sent ? 'info' : 'error' });
-      };
-      reject.onclick = () => {
+      });
+      reject.onclick = armedOnly(card, () => {
         const old = card.querySelector('.chan-prop-rejectbox');
         if (old) old.remove();
         const box = el('div', 'chan-prop-rejectbox');
         const inp = el('input', 'chan-opt-input');
         inp.type = 'text'; inp.placeholder = t('Reason (the agent reads it)');
         const go = btn(t('Reject'), null, 'mounts-btn-primary');
-        go.onclick = async () => {
+        go.onclick = armedOnly(card, async () => {
           go.disabled = true;
           const r = await post(`/api/channels/outbox/${encodeURIComponent(p.id)}/reject`, { reason: inp.value, ...(toAgent ? { deliver: 'next-turn', expectWakes: 0 } : {}) });
           if (!r) { go.disabled = false; return; }
           showToast(t('Rejected'));
-        };
+        });
         inp.addEventListener('keydown', (e) => { if (enterSubmits(e)) go.click(); });   // an input method's committing Enter is its own (inc-mv7mdv6b-emxq)
         box.append(inp, go);
         act.after(box);
         inp.focus();
-      };
+      });
       act.append(reject, approveR);
       card.appendChild(act);
+      armCard(card);
       return card;
     }
     const approve = btn(toAgent ? approveLabel(rememberedDelivery()) : t('Approve'), null, 'mounts-btn-primary');
@@ -628,9 +646,9 @@ export function renderProposalCard(app, p, { compact = false, line = false, onLi
       const text = editor ? editor.value : null;
       // r3: a send that starts a turn echoes the count the card SAID (`expectWakes`) — and a receipt woken now is one more
       const woke = toAgent && deliver === 'wake-now' ? 1 : 0;
-      // r6 verify F6: `shown` = the digest of the record THIS card was drawn from — the engine refuses the
-      // approval (409 changed-since-shown, nothing sent) when the proposal is no longer that record
-      const r = await post(`/api/channels/outbox/${encodeURIComponent(p.id)}/approve`, { ...(text !== null && text !== p.text ? { text } : {}), expectWakes: (Number(p.wakes) || 0) + woke, ...(toAgent ? { deliver } : {}), ...(noFile ? { withoutFiles: true } : {}), shown: P.shownDigest(p) });
+      // r6 verify F6: `shown` (approveProposal adds it) = the digest of the record THIS card was drawn from — the engine
+      // refuses the approval (409 changed-since-shown, nothing sent) when the proposal is no longer that record
+      const r = await approveProposal(p, { ...(text !== null && text !== p.text ? { text } : {}), expectWakes: (Number(p.wakes) || 0) + woke, ...(toAgent ? { deliver } : {}), ...(noFile ? { withoutFiles: true } : {}) });
       if (!r) { lock(false); return; }
       const sent = !!(r.proposal && r.proposal.state === 'sent');
       const o = r.proposal ? (r.proposal.outcome || P.outcomeOf(r.proposal)) : null;
@@ -639,7 +657,7 @@ export function renderProposalCard(app, p, { compact = false, line = false, onLi
       else showToast(sent ? t('Sent') : t('Not sent: {why}', { why: (o && P.outcomeText(o, { t, errorCodeText: chanCaps.errorCodeText, sendWhyText: chanCaps.sendWhyText })) || routeErrorText(r) }), { type: sent ? 'info' : 'error' });
       if (woke && r.proposal && r.proposal.receiptChoicePaced) showToast(t('The agent was not woken (paced: {why}) — it hears with its next message', { why: r.proposal.receiptChoicePaced }), { type: 'warn' });
     };
-    approve.onclick = (ev) => { if (cardArmed(card, ev)) doApprove(toAgent ? pressedDelivery(approve) : null); };   // verify r3: what the button SAYS; r6 F6: armed only
+    approve.onclick = armedOnly(card, () => doApprove(toAgent ? pressedDelivery(approve) : null));   // verify r3: what the button SAYS; r6 F6: armed only
     edit.onclick = () => {
       if (editor) return;
       editor = el('textarea', 'chan-prop-edit');
@@ -658,21 +676,20 @@ export function renderProposalCard(app, p, { compact = false, line = false, onLi
       inp.type = 'text'; inp.placeholder = t('Reason (the agent reads it)');
       const go = btn(toAgent ? rejectLabel(deliver, { box: true }) : t('Reject'), null, 'mounts-btn-primary');
       if (toAgent) go.dataset.deliver = deliver;
-      go.onclick = async (ev) => {
-        if (!cardArmed(card, ev)) return;
+      go.onclick = armedOnly(card, async () => {
         go.disabled = true;
         const woke = toAgent && deliver === 'wake-now' ? 1 : 0;
         const r = await post(`/api/channels/outbox/${encodeURIComponent(p.id)}/reject`, { reason: inp.value, ...(toAgent ? { deliver, expectWakes: woke } : {}) });
         if (!r) { go.disabled = false; return; }
         showToast(t('Rejected'));
         if (woke && r.proposal && r.proposal.receiptChoicePaced) showToast(t('The agent was not woken (paced: {why}) — it hears with its next message', { why: r.proposal.receiptChoicePaced }), { type: 'warn' });
-      };
+      });
       inp.addEventListener('keydown', (e) => { if (enterSubmits(e)) go.click(); });   // an input method's committing Enter is its own (inc-mv7mdv6b-emxq)
       box.append(inp, go);
       act.after(box);
       inp.focus();
     };
-    reject.onclick = (ev) => { if (cardArmed(card, ev)) openReject(toAgent ? rememberedDelivery() : null); };
+    reject.onclick = armedOnly(card, () => openReject(toAgent ? rememberedDelivery() : null));
     /** THE ▾ HALF of a split button: the menu of delivery choices. */
     const chevron = (kind, items) => {
       const c = document.createElement('button');
@@ -682,14 +699,13 @@ export function renderProposalCard(app, p, { compact = false, line = false, onLi
       c.title = kind === 'approve' ? t('More ways to approve') : t('More ways to reject');
       c.setAttribute('aria-label', c.title);
       c.appendChild(icon('chevronDown', 11));
-      c.onclick = (ev) => {
-        ev.stopPropagation();
-        if (!cardArmed(card, ev)) return;
+      const openMenu = armedOnly(card, () => {
         const r = c.getBoundingClientRect();
         // ONE class name (the item class is derived from it); the modifier after
         const menu = showContextMenu(r.left, r.bottom + 2, items());
         if (menu) { menu.classList.add('chan-split-menu'); menu.dataset.menu = kind; }
-      };
+      });
+      c.onclick = (ev) => { ev.stopPropagation(); openMenu(ev); };
       return c;
     };
     if (toAgent) {
@@ -844,7 +860,7 @@ function keyedCard(app, p, prev, { compact = false, line = false, onLine = null,
     // does the new one — patch the words in place, the editor untouched
     const want = rememberedDelivery();
     const approveBtn = prev.querySelector(':scope > .chan-prop-actions button[data-approve]');
-    if (approveBtn && p.draftedBy && p.draftedBy.kind === 'agent' && approveBtn.dataset.deliver !== want) {
+    if (approveBtn && !approveBtn.dataset.deliverFixed && p.draftedBy && p.draftedBy.kind === 'agent' && approveBtn.dataset.deliver !== want) {
       approveBtn.dataset.deliver = want;
       approveBtn.textContent = approveLabel(want, { edited: !!prev.querySelector('.chan-prop-edit') });
     }

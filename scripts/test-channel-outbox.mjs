@@ -1445,11 +1445,11 @@ async function durableLeg(ladderMod, name) {
 // primary's delivery is read off its OWN data-deliver, and a menu pick relabels every primary on the page
 {
   // r6 F6: the press is also ARMED only (`cardArmed` — a card that just appeared / moved takes no person's click)
-  const PIN1 = "    approve.onclick = (ev) => { if (cardArmed(card, ev)) doApprove(toAgent ? pressedDelivery(approve) : null); };";
+  const PIN1 = "    approve.onclick = armedOnly(card, () => doApprove(toAgent ? pressedDelivery(approve) : null));";
   const PIN2 = "export function pressedDelivery(button) { return button && button.dataset && button.dataset.deliver === 'wake-now' ? 'wake-now' : 'next-turn'; }";
   const PIN3 = "      const pick = (v) => { rememberDelivery(v); relabelPrimaries(v); };";
   ok(csrcV3.includes(PIN1) && csrcV3.includes(PIN2) && csrcV3.includes(PIN3) && !/doApprove\(toAgent \? rememberedDelivery\(\)/.test(csrcV3) && csrcV3.includes("approveLabel(pressedDelivery(approve), { edited: true })"), 'PIN: the primary Approve posts the delivery its OWN button carries (never the remembered choice at click time); a menu pick relabels every primary; the editor\'s label follows the button');
-  ok(/doApprove\(toAgent \? rememberedDelivery\(\)/.test(csrcV3.replace(PIN1, "    approve.onclick = (ev) => { if (cardArmed(card, ev)) doApprove(toAgent ? rememberedDelivery() : null); };")), 'CONTROL: the pre-fix line (the remembered choice at click time) fails the pin');
+  ok(/doApprove\(toAgent \? rememberedDelivery\(\)/.test(csrcV3.replace(PIN1, "    approve.onclick = armedOnly(card, () => doApprove(toAgent ? rememberedDelivery() : null));")), 'CONTROL: the pre-fix line (the remembered choice at click time) fails the pin');
 }
 
 console.log('§6 r6 verify (2026-09-28, "what you approve is what runs"): the reply\'s anchor (F1), its recipients (F3), the card (F4), the digest + the arming (F6), the hidden characters (O1)');
@@ -1760,6 +1760,10 @@ async function ccReachLeg(engine, tag) {
   const r1 = await call('/api/channels/outbox/:id/approve', { id: p2.proposal.id }, { shown: 'v1:0000000000000000:1' });
   const r2 = await call('/api/channels/outbox/:id/approve', { id: p2.proposal.id }, { shown: P.shownDigest(p2.proposal) });
   ok(r0.status === 400 && r0.body.code === 'bad-request' && r0.body.why === 'shown-required' && r1.status === 409 && r1.body.code === 'changed-since-shown' && r2.status === 200 && r2.body.proposal.state === 'sent', 'F6 route: no `shown` ⇒ 400 shown-required; a stale one ⇒ 409 changed-since-shown; the card\'s own ⇒ sent', JSON.stringify([r0.status, r0.body.why, r1.status, r1.body.code, r2.status]));
+  // lane reaction-approve-shown: the refusal names WHAT is missing, never a cause the route cannot see — no request and no
+  // WS hello carries the bundle's version, so it never says «reload» (the old words sent the owner to reload a current tab)
+  const saysMissing = (w) => /did not send the digest of what it shows/.test(String(w)) && !/reload/i.test(String(w));
+  ok(saysMissing(r0.body.error) && !saysMissing('shown is required — the digest of the card being approved (reload the page if this tab is from before the update)'), 'reaction-approve-shown route: no `shown` ⇒ the words say the card did not send its digest, and never «reload» (CONTROL: the old words fail the same judge)', r0.body.error);
   eng.stop();
   // CONTROL: the engine without the comparison sends the mismatched approval
   const SHOWN = "      if (String(shown) !== now0) return { ok: false, code: 'changed-since-shown',";
@@ -2182,7 +2186,72 @@ async function chatReadLegs(ENGmod, name) {
           'lane channels-proposals-recall (real card): a recall QUOTES the user\'s message it takes back, says it acts as the user and why it waits; no Edit; its Outbox row reads the same sentence', JSON.stringify(said));
         rcard._all().find((e) => e.dataset.approve === '1').click();
         await new Promise((r) => setTimeout(r, 0));
-        ok(posts.length === n1 + 1 && /\/api\/channels\/outbox\/p-rc1\/approve$/.test(posts[n1].url) && posts[n1].body.expectWakes === 0 && posts[n1].body.deliver === 'next-turn', '…its Approve posts the approval with no wake (the receipt rides the next turn)', JSON.stringify(posts[n1]));
+        ok(posts.length === n1 + 1 && /\/api\/channels\/outbox\/p-rc1\/approve$/.test(posts[n1].url) && posts[n1].body.expectWakes === 0 && posts[n1].body.deliver === 'next-turn' && posts[n1].body.shown === P.shownDigest(rq), '…its Approve posts the approval with no wake (the receipt rides the next turn) and the digest of what the card showed (lane reaction-approve-shown: this road posted none)', JSON.stringify(posts[n1]));
+      }
+      // lane reaction-approve-shown (the owner's hub, 2026-10-28: «提案 · 一个表情回应 · 待批准», every Approve refused «shown
+      // is required … reload the page»): a REACTION card's Approve is THE approve — armed like every Approve, it posts the
+      // digest of what it showed; its words never follow a remembered «wake now» (its receipt always rides the next turn);
+      // a refusal for a missing digest says what is missing, never «reload»
+      {
+        const rx = { id: 'p-rx1', kind: 'reaction', adapterId: 'lark', adapterLabel: 'Lark', convId: 'oc_1', title: 'Ops room', state: 'awaiting-approval', text: '', draftedBy: { kind: 'agent', id: 'agent-1', name: 'Worker' }, reaction: { op: 'add', key: 'THUMBSUP', glyph: '👍', msg: 'om_1', quote: { author: 'Ada', text: 'ship it' } }, policy: { mode: 'review', reasons: ['reaction-policy'] }, sendAs: 'user', at: 1, ttlAt: clock0 + 86400e3 };
+        const n2 = posts.length;
+        const xcard = CO.renderProposalCard(app, rx);
+        const xbtn = xcard._all().find((e) => e.dataset.approve === '1');
+        await xbtn.onclick({ isTrusted: true });
+        const held = posts.length === n2 && xcard._cls.has('chan-prop-arming');
+        clock0 += P.ARM_MS;
+        await xbtn.onclick({ isTrusted: true });
+        await new Promise((r) => setTimeout(r, 0));
+        const xp = posts[n2];
+        ok(held && posts.length === n2 + 1 && /\/api\/channels\/outbox\/p-rx1\/approve$/.test(xp.url) && xp.body.shown === P.shownDigest(rx) && xp.body.expectWakes === 0 && xp.body.deliver === 'next-turn',
+          'reaction-approve-shown (real card): a REACTION\'s Approve is armed like every Approve (a person\'s click on the fresh card posts nothing), then posts the digest of what the card showed', JSON.stringify({ held, body: xp && xp.body }));
+        // the words: a remembered «wake now» relabels a text card's primary (CONTROL) and never the reaction's
+        const tcard = CO.renderProposalCard(app, { ...rp, id: 'p-rx-t' });
+        const tbtn = tcard._all().find((e) => e.dataset.approve === '1');
+        const both = document.createElement('div'); both.appendChild(xcard); both.appendChild(tcard);
+        CO.relabelPrimaries('wake-now', both);
+        ok(xbtn.textContent === CO.approveLabel('next-turn') && xbtn.dataset.deliver === 'next-turn' && tbtn.textContent === CO.approveLabel('wake-now') && tbtn.dataset.deliver === 'wake-now',
+          'reaction-approve-shown: a remembered «wake now» relabels a text card\'s Approve (CONTROL) and never a reaction\'s — its receipt always rides the next turn, and its words say so', JSON.stringify([xbtn.textContent, tbtn.textContent]));
+        // the refusal (a route answering 400 shown-required) in the card's toast: what is missing, never «reload»
+        const f0 = globalThis.fetch;
+        def('fetch', async () => ({ json: async () => ({ ok: false, code: 'bad-request', why: 'shown-required', error: 'this card did not send the digest of what it shows (shown) — nothing was approved' }) }));
+        const ycard = CO.renderProposalCard(app, { ...rx, id: 'p-rx2' });
+        ycard._all().find((e) => e.dataset.approve === '1').click();
+        await new Promise((r) => setTimeout(r, 0));
+        def('fetch', f0);
+        const said = texts(body).filter((x) => /digest/.test(x));
+        ok(said.includes('This card did not send the digest of what it shows — nothing was approved') && !said.some((x) => /reload/i.test(x)), 'reaction-approve-shown: the refused Approve\'s toast names what is missing (in the interface\'s words) and never says «reload»', JSON.stringify(said));
+        // acceptance r2: EVERY decision button of the armed card asks the arming — this road armed its Approve but not its
+        // Reject… nor the reject box's Reject, so a person's press inside the window opened the box / rejected
+        const n3 = posts.length;
+        const zsec = CO.renderInlineProposals(app, [{ ...rx, id: 'p-rx3' }], null);
+        const zc = zsec.children.find((c) => c.dataset.proposal === 'p-rx3');
+        const zrej = zc._all().find((e) => e.dataset.reject === '1');
+        zc._cls.delete('chan-prop-arming-nudge');
+        await zrej.onclick({ isTrusted: true });
+        const rejHeld = { posted: posts.length - n3, box: find(zc, 'chan-prop-rejectbox').length, nudged: zc._cls.has('chan-prop-arming-nudge') };
+        const qc = CO.renderProposalCard(app, { ...rx, id: 'p-rc3', kind: 'recall', reaction: undefined, recall: { msg: 'om_mine', quote: { author: 'me', text: 'the numbers are wrong' } }, policy: { mode: 'review', reasons: ['recall'] } });
+        await qc._all().find((e) => e.dataset.reject === '1').onclick({ isTrusted: true });
+        const recallHeld = { box: find(qc, 'chan-prop-rejectbox').length, nudged: qc._cls.has('chan-prop-arming-nudge') };
+        clock0 += P.ARM_MS;
+        await zrej.onclick({ isTrusted: true });
+        const zbox = find(zc, 'chan-prop-rejectbox')[0] || null;
+        const zgo = zbox && zbox._all().find((e) => e.tagName === 'BUTTON');
+        const zinp = zbox && zbox._all().find((e) => e.tagName === 'INPUT');
+        if (zinp) zinp.value = 'not this one';
+        // a proposal inserted on top MOVES the card (the box open under the pointer) — it arms again
+        CO.renderInlineProposals(app, [{ ...rx, id: 'p-rx3' }, { ...rp, id: 'p-rx3-top', at: 50 }], zsec);
+        const rearmed = zsec.children.includes(zc) && zbox && zbox.parentNode === zc && !P.armVerdict({ armedAt: Number(zc.dataset.armedAt), now: clock0 }).armed;
+        zc._cls.delete('chan-prop-arming-nudge');
+        if (zgo) await zgo.onclick({ isTrusted: true });
+        const goHeld = { posted: posts.length - n3, nudged: zc._cls.has('chan-prop-arming-nudge') };
+        clock0 += P.ARM_MS;
+        if (zgo) await zgo.onclick({ isTrusted: true });
+        await new Promise((r) => setTimeout(r, 0));
+        const zr = posts[n3];
+        ok(rejHeld.posted === 0 && rejHeld.box === 0 && rejHeld.nudged && recallHeld.box === 0 && recallHeld.nudged && !!zgo && rearmed && goHeld.posted === 0 && goHeld.nudged
+          && posts.length === n3 + 1 && /\/api\/channels\/outbox\/p-rx3\/reject$/.test(zr.url) && zr.body.reason === 'not this one' && zr.body.deliver === 'next-turn' && zr.body.expectWakes === 0,
+          'reaction-approve-shown r2 (real card): a person\'s press on a fresh reaction\'s (and a recall\'s) Reject… inside the arming window opens nothing and nudges the card; the reject box\'s Reject on a card that moved (armed again) posts nothing and nudges; past the window it rejects, next turn, no wake', JSON.stringify({ rejHeld, recallHeld, rearmed, goHeld, body: zr && zr.body }));
       }
       // ── B-f467 (userW 2026-10-03: "no visual centre of gravity — some things I want to see at a glance"; his
       // screenshot = the All view with a Gmail compose awaiting + a sent Lark card): ONE ROW PER PROPOSAL in the channel
@@ -2512,7 +2581,135 @@ async function chatReadLegs(ENGmod, name) {
   ok(clips('.chan-prop-where { font-size: 11px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }'), 'CONTROL: the pre-fix one-line rule is caught by the same census');
   // the client wiring pins (the card's press is armed; the approve body carries the digest)
   const csrc = fs.readFileSync(path.join(REPO, 'src/lib/channel-outbox.js'), 'utf-8');
-  ok(/shown: P\.shownDigest\(p\)/.test(csrc) && (csrc.match(/if \(!cardArmed\(card, ev\)\) return;|if \(cardArmed\(card, ev\)\)/g) || []).length >= 4 && /placeArmed\(sec,/.test(csrc) && /placeArmed\(list, nodes\)/.test(csrc) && !/el\('div', 'chan-prop-text', p\.text/.test(csrc), 'PINS: the approve POST carries `shown`; Approve, Reject, both chevrons and the reject box are armed-only; both containers re-arm moved cards; the body is revealed, never raw');
+  ok(/shown: P\.shownDigest\(p\)/.test(csrc) && (csrc.match(/\.onclick = armedOnly\(card, /g) || []).length >= 6 && /const openMenu = armedOnly\(card, /.test(csrc) && /placeArmed\(sec,/.test(csrc) && /placeArmed\(list, nodes\)/.test(csrc) && !/el\('div', 'chan-prop-text', p\.text/.test(csrc), 'PINS: the approve POST carries `shown`; Approve, Reject, both chevrons and the reject box are armed-only; both containers re-arm moved cards; the body is revealed, never raw');
+  // ── lane reaction-approve-shown (the owner's hub, 2026-10-28: an agent's proposed 👍 refused on every press since
+  //    2.369.197 — the card's reaction / recall road posted no `shown`): THE APPROVE CENSUS, grep-derived over the
+  //    client tree. It classifies each URL EXPRESSION — every string / template literal on a non-comment line, a template
+  //    whole with its `${…}` raw — never the line (acceptance r2: a whole line exempted by one family's prefix hid
+  //    whatever else it built, and a verb computed in a `${…}` was never matched). A literal that names an approve (a
+  //    `/approve` segment, or `'approve'` computed inside a `${…}`) is another family's by the PREFIX of the literal
+  //    itself (its own route and rules); a literal under `/api/channels/outbox` has its verb READ — a computed or
+  //    concatenated verb is unclassified. An outbox approve must send `shown: P.shownDigest(` on its line and be THE ONE
+  //    (the card's door `approveProposal`, called by every road). Unclassified and planted sites are red by name. ──
+  {
+    const OTHER_APPROVES = ['/api/channels/api/proposals/', '/api/browser/proposals/', '/api/browser/logins/cards/', '/api/browser/surfaces/', '/api/apps/proposals/', '/api/channels/reach-requests/'];
+    const OUTBOX = '/api/channels/outbox';
+    const clientFiles = () => {
+      const out = [['src/client.js', fs.readFileSync(path.join(REPO, 'src/client.js'), 'utf-8')]];
+      for (const f of fs.readdirSync(path.join(REPO, 'src/lib'), { recursive: true }).map(String).filter((f) => f.endsWith('.js')).sort()) out.push([`src/lib/${f}`, fs.readFileSync(path.join(REPO, 'src/lib', f), 'utf-8')]);
+      return out;
+    };
+    // the literals of one line (a `//` outside a literal ends the code); a template keeps its `${…}` raw, the quotes and
+    // templates nested inside an expression followed to their own ends
+    const literalsOf = (line) => {
+      const n = line.length, out = [];
+      const close = (q, j) => {
+        while (j < n) {
+          const ch = line[j];
+          if (ch === '\\') { j += 2; continue; }
+          if (ch === q) return j + 1;
+          if (q === '`' && ch === '$' && line[j + 1] === '{') {
+            let depth = 1; j += 2;
+            while (j < n && depth) {
+              const c2 = line[j];
+              if (c2 === "'" || c2 === '"' || c2 === '`') { j = close(c2, j + 1); continue; }
+              if (c2 === '{') depth++; else if (c2 === '}') depth--;
+              j++;
+            }
+            continue;
+          }
+          j++;
+        }
+        return n + 1;
+      };
+      for (let i = 0; i < n; i++) {
+        const ch = line[i];
+        if (ch === '/' && line[i + 1] === '/') break;
+        if (ch === "'" || ch === '"' || ch === '`') { const e = close(ch, i + 1); out.push(line.slice(i + 1, Math.min(e - 1, n))); i = e - 1; }
+      }
+      return out;
+    };
+    const namesApprove = (s) => /\/approve\b/.test(s) || /\$\{[^]*['"`]approve['"`]/.test(s);
+    // an outbox literal's verb, READ: the segment after the id; '' = the list read; null = computed / concatenated
+    const outboxVerb = (s) => {
+      if (s === OUTBOX || s.startsWith(OUTBOX + '?')) return '';
+      const m = /^\/api\/channels\/outbox\/(?:\$\{(?:[^{}]|\{[^{}]*\})*\}|[^/$?#`'"]+)\/([a-z][a-z-]*)(?=$|[/?#])/.exec(s);
+      return m ? m[1] : null;
+    };
+    const approveCensus = (files) => {
+      const sites = [], bad = [], unclassified = [];
+      let other = 0;
+      for (const [rel, src] of files) if (src.includes('approve') || src.includes('/channels/outbox')) src.split('\n').forEach((line, i) => {
+        if (!/approve|\/channels\/outbox/.test(line) || /^\s*(\/\/|\*|\/\*)/.test(line)) return;
+        const at = `${rel}:${i + 1}`;
+        for (const lit of literalsOf(line)) {
+          if (lit.includes('/channels/outbox')) {
+            const verb = lit.startsWith(OUTBOX) ? outboxVerb(lit) : null;
+            if (verb === null) { unclassified.push(at); continue; }
+            if (verb !== 'approve') continue;
+            sites.push(at);
+            if (!/\bshown: P\.shownDigest\(/.test(line)) bad.push(at);
+          } else if (namesApprove(lit)) {
+            if (OTHER_APPROVES.some((x) => lit.startsWith(x))) other++;
+            else unclassified.push(at);
+          }
+        }
+      });
+      return { sites, bad, unclassified, other };
+    };
+    const files = clientFiles();
+    const real = approveCensus(files);
+    const door = csrc.split('\n').findIndex((l) => /^function approveProposal\(p, body\) \{$/.test(l));
+    const roads = (csrc.match(/await approveProposal\(p, \{/g) || []).length;
+    ok(files.length > 100 && real.bad.length === 0 && real.unclassified.length === 0 && real.sites.length === 1 && real.sites[0] === `src/lib/channel-outbox.js:${door + 2}` && roads === 2,
+      `APPROVE CENSUS (${files.length} client files): ONE outbox approve POST — the door approveProposal, sending \`shown\` — and both card roads (text; reaction / recall) call it; every other approve URL is another family's`, JSON.stringify({ ...real, door: door + 2, roads }));
+    const planted = approveCensus([...files, ['src/lib/zz-planted.js', "  const r = await fetchJson(`/api/channels/outbox/${encodeURIComponent(id)}/approve`, { method: 'POST', headers: JSON_HDR, body: JSON.stringify({ expectWakes: 0 }) });"]]);
+    ok(planted.bad.length === 1 && planted.bad[0] === 'src/lib/zz-planted.js:1', 'CONTROL: a planted outbox approve POST without `shown` is RED BY NAME (src/lib/zz-planted.js:1)', JSON.stringify(planted.bad));
+    // the base's shape (2.369.197 → .360): the reaction / recall road with its own POST, no digest — a mutant of THIS source
+    const ROAD = 'const r = await approveProposal(p, { expectWakes: 0, ';
+    const mut = csrc.replace(ROAD, 'const r = await post(`/api/channels/outbox/${encodeURIComponent(p.id)}/approve`, { expectWakes: 0, ');
+    const mline = csrc.split('\n').findIndex((l) => l.includes(ROAD)) + 1;
+    const base = approveCensus(files.map(([rel, src]) => [rel, rel === 'src/lib/channel-outbox.js' ? mut : src]));
+    ok(csrc.split(ROAD).length === 2 && base.bad.length === 1 && base.bad[0] === `src/lib/channel-outbox.js:${mline}` && base.sites.length === 2, `CONTROL: the base's reaction / recall road (its own approve POST, no digest) is RED BY NAME (src/lib/channel-outbox.js:${mline})`, JSON.stringify(base));
+    const unk = approveCensus([...files, ['src/lib/zz-other.js', "  await fetchJson(`/api/zz/${id}/approve`, { method: 'POST' });"]]);
+    ok(unk.unclassified.length === 1 && unk.unclassified[0] === 'src/lib/zz-other.js:1', 'CONTROL: an approve URL of no known family is RED BY NAME until it is classified (src/lib/zz-other.js:1)', JSON.stringify(unk.unclassified));
+    // acceptance r2: the shapes a LINE census could not see — each RED BY NAME (r1's census passed every one but the last)
+    const PLANTS = [
+      ['zz-ternary', 'bad', "  const r = await post(cond ? '/api/channels/outbox/x/approve' : '/api/apps/proposals/x/approve', {});"],
+      ['zz-verb', 'unclassified', "  await post(`/api/channels/outbox/${encodeURIComponent(id)}/${ok ? 'approve' : 'reject'}`, { shown: P.shownDigest(p) });"],
+      ['zz-exempt', 'unclassified', "  await fetchJson(`/api/apps/proposals/${id}/approve`, {}); await post(`/api/channels/outbox/${id}/${verb}`, {});"],
+      ['zz-concat', 'unclassified', "  await post('/api/channels/outbox/' + id + '/approve', {});"],
+    ];
+    for (const [name, list, line] of PLANTS) {
+      const c = approveCensus([...files, [`src/lib/${name}.js`, line]]);
+      ok(c[list].includes(`src/lib/${name}.js:1`) && real[list].length === 0, `CONTROL r2: ${line.trim().slice(0, 96)} — RED BY NAME in ${list} (src/lib/${name}.js:1)`, JSON.stringify({ bad: c.bad, unclassified: c.unclassified }));
+    }
+    // acceptance r2: THE DECISION-BINDING CENSUS over the awaiting card — every click binding goes through THE ONE arming
+    // helper `armedOnly` (Edit… decides nothing: the one exemption); the reaction / recall road bound Reject… and the
+    // reject box's Reject bare, so a person's press inside the arming window acted
+    const DECIDES_NOTHING = ['edit'];
+    const bindCensus = (src) => {
+      const ls = src.split('\n');
+      const fn = ls.findIndex((l) => l.startsWith('export function renderProposalCard('));
+      const from = ls.findIndex((l, i) => i > fn && l === "  if (p.state === 'awaiting-approval') {");
+      const to = ls.findIndex((l, i) => i > from && l === '}');
+      const binds = [], bare = [];
+      for (let i = from; fn >= 0 && from > fn && i < to; i++) {
+        const m = /\b([A-Za-z_$][\w$]*)\.onclick = (.*)$/.exec(ls[i]);
+        if (!m || DECIDES_NOTHING.includes(m[1])) continue;
+        binds.push(`src/lib/channel-outbox.js:${i + 1}`);
+        if (!/^armedOnly\(card, /.test(m[2]) && m[2] !== '(ev) => { ev.stopPropagation(); openMenu(ev); };') bare.push(`src/lib/channel-outbox.js:${i + 1}`);
+      }
+      const inner = ls.slice(from, to).join('\n');
+      return { binds, bare, helper: /const openMenu = armedOnly\(card, /.test(inner), bypass: (inner.match(/\bcardArmed\(/g) || []).length };
+    };
+    const bc = bindCensus(csrc);
+    ok(bc.binds.length === 7 && bc.bare.length === 0 && bc.helper && bc.bypass === 0, 'DECISION-BINDING CENSUS: every decision button of the awaiting card (a reaction / recall\'s Approve, Reject… and box Reject; a text\'s Approve, Reject…, box Reject and both chevrons) is bound through THE ONE arming helper — no road calls cardArmed itself', JSON.stringify(bc));
+    const RREJ = '      reject.onclick = armedOnly(card, () => {';
+    const rline = csrc.split('\n').findIndex((l) => l === RREJ) + 1;
+    const bm = bindCensus(csrc.replace(RREJ, '      reject.onclick = () => {'));
+    ok(csrc.split(RREJ).length === 2 && bm.bare.length === 1 && bm.bare[0] === `src/lib/channel-outbox.js:${rline}`, `CONTROL: 084487bc's reaction / recall Reject… (bound bare) is RED BY NAME (src/lib/channel-outbox.js:${rline})`, JSON.stringify(bm));
+  }
 }
 for (const r of copiesCensusR6(MR6.files, MR6.dir, REPO, { minCopies: 5 })) ok(r.pass, r.name, r.detail);
 
@@ -2616,6 +2813,48 @@ const RX_KEY = 'hourglass';   // never seeded (the seed draws from the first 12 
   await eng.react(A, C, target.vendorId, 'gift');   // the lost request DID land
   const rc2 = await eng.reconcile(u2.proposal.id);
   ok(rc2.ok && rc2.resolved && rc2.state === 'sent' && rc2.answer === 'landed', 'unknown → sent: the list shows it — it landed (one list call, never a second POST)', JSON.stringify(rc2));
+  eng.stop();
+}
+// ── lane reaction-approve-shown (the owner's hub, 2026-10-28: an agent's 👍 refused on every Approve since 2.369.197): a
+//    REACTION and a RECALL approved THROUGH THE ROUTE the card posts to, with the body the card posts. Every leg above
+//    approves with `eng.approve`, which takes a missing digest — the card's reaction / recall road never met the route
+//    that refuses one. No `shown` ⇒ 400 in words that name what is missing (never «reload»), nothing moves; the digest of
+//    the proposal as the Outbox lists it (what the card is drawn from) ⇒ sent, the vendor told ──
+{
+  const revf = path.join(ROOT, 'ras-revisions.json');
+  fs.writeFileSync(revf, '{"revisions":{}}');
+  const registry = CH.createChannelRegistry();
+  registry.register(fake.makeFakeAdapter({ kind: A, receive: 'poll', sendAs: ['user'], revisionsFile: revf }));
+  const W = mkEngine({ name: 'ras', registry });
+  const { eng } = W;
+  await prime(eng);
+  await eng.store.appendRecords(A, C, [{ vendorId: 'm-ras-mine', convId: C, at: Date.now() - 600e3, author: { id: 'ou_me', name: 'me', isSelf: true, isBot: false }, text: 'the numbers are wrong' }]);
+  const target = eng.store.readTail(A, C, { limit: 50 }).find((r) => r && r.vendorId && !(r.author && r.author.isSelf));
+  const rxp = await eng.proposeReaction(AGENT, A, C, { msg: target.vendorId, key: RX_KEY });
+  const rcp = await eng.proposeRecall(AGENT, A, C, { msg: 'm-ras-mine' });
+  ok(rxp.ok && rxp.proposal.state === 'awaiting-approval' && rcp.ok && rcp.proposal.state === 'awaiting-approval', 'FIXTURE: an agent\'s reaction and recall, each awaiting approval', JSON.stringify([rxp.code || rxp.error, rcp.code || rcp.error]));
+  const routes = require(path.join(REPO, 'src/routes/channels.js'));
+  routes.setup({ getEngine: () => eng, authEnabled: () => true });
+  const call = (url, params, body) => new Promise((resolve) => {
+    const req = { method: 'POST', url, params, query: {}, body: body || {} };
+    const res = { statusCode: 200, status(c) { this.statusCode = c; return this; }, json(payload) { resolve({ status: this.statusCode, body: payload }); return this; }, setHeader() {} };
+    const layer = routes.router.stack.find((l) => l.route && l.route.path === url && l.route.methods.post);
+    Promise.resolve(layer.route.stack[0].handle(req, res, () => {})).catch((err) => resolve({ status: 500, body: { error: String(err && err.message) } }));
+  });
+  const saysMissing = (w) => /did not send the digest of what it shows/.test(String(w)) && !/reload/i.test(String(w));
+  const asListed = (id) => eng.outboxView().proposals.find((x) => x.id === id);
+  const rows = [];
+  for (const [what, id] of [['reaction', rxp.proposal && rxp.proposal.id], ['recall', rcp.proposal && rcp.proposal.id]]) {
+    if (!id) continue;
+    const bare = await call('/api/channels/outbox/:id/approve', { id }, { expectWakes: 0, deliver: 'next-turn' });   // the base's reaction / recall road
+    const still = eng.store.outbox.snapshot().proposals[id].state;
+    const card = await call('/api/channels/outbox/:id/approve', { id }, { expectWakes: 0, deliver: 'next-turn', shown: P.shownDigest(asListed(id)) });
+    rows.push({ what, bare: bare.status, why: bare.body.why, words: saysMissing(bare.body.error), still, card: card.status, state: card.body.proposal && card.body.proposal.state });
+  }
+  ok(rows.length === 2 && rows.every((r) => r.bare === 400 && r.why === 'shown-required' && r.words && r.still === 'awaiting-approval'), 'reaction-approve-shown route: a reaction\'s and a recall\'s Approve WITHOUT the digest (the base card\'s body) ⇒ 400 shown-required in words naming what is missing (never «reload»), still awaiting', JSON.stringify(rows));
+  const fold = eng.reactionsRead(A, C, [target.vendorId]).reactions[target.vendorId] || [];
+  let revs = {}; try { revs = JSON.parse(fs.readFileSync(revf, 'utf8')).revisions || {}; } catch {}
+  ok(rows.length === 2 && rows.every((r) => r.card === 200 && r.state === 'sent') && fold.some((x) => x.key === RX_KEY && x.mine) && (revs['m-ras-mine'] || {}).state === 'recalled', 'reaction-approve-shown route: the SAME Approve with the digest of the card as the Outbox lists it ⇒ sent — the reaction is the account\'s own, the message taken back at the vendor', JSON.stringify({ rows, fold, revs }));
   eng.stop();
 }
 // sending → unknown: the adapter THREW mid-react (the answer lost) — never retried; the card offers Check outcome

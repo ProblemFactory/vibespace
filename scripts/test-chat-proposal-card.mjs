@@ -21,7 +21,16 @@
 //   ⑤ the chat read LATER (a fresh page): both rows' chips say what became of them — from the server's record
 //   ⑥ THE ACCESS RULE: the owner removes the agent's access ⇒ the chat's read (`?ids=`) answers neither proposal (the
 //      Outbox still lists both — CONTROL) and a fresh chat draws no card and no chip
-// PNGs: $CPC_SHOTS (default: the scratch dir) chat-card-zh.png, chat-card-sent-zh.png, chat-card-phone-zh.png.
+//   ⑦ A REACTION IS APPROVED (lane reaction-approve-shown — the owner's hub, 2026-10-28: «提案 · 一个表情回应 · 待批准»,
+//      every Approve refused «shown is required … reload the page», since 2.369.197): access given back, this device
+//      remembering «wake now», turn 3 proposes three reactions. The chat card's Approve says the receipt rides the next
+//      turn (never «立即唤醒»); a REAL click ⇒ «已添加表情回应», sent, the vendor holds the account's own reaction; a REAL
+//      Reject on the second ⇒ «你拒绝了» (that road unchanged); the THIRD approved in the Outbox window (its row's 「批准…」
+//      opens the card) ⇒ «已添加表情回应», sent, the chat's copy says so too. RED on 90c995a3: the toast is the refusal.
+//      (A recall cannot be proposed on this fake hub — the fake vendor's messages are never the user's own; its road is
+//      test-channel-outbox's: the real card posts the digest, the real route + engine + fake vendor take it back.)
+// PNGs: $CPC_SHOTS (default: the scratch dir) chat-card-zh.png, chat-card-sent-zh.png, chat-card-phone-zh.png,
+// chat-reaction-card-zh.png, chat-reaction-sent-zh.png, outbox-reaction-sent-zh.png.
 // Requires google-chrome + dtach (SKIP without). Run: node scripts/test-chat-proposal-card.mjs
 import { execSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
@@ -69,6 +78,17 @@ const TURNS = {
   ] },
   'draft another': { k: 2, text: 'Drafted a second reply.', calls: [
     { id: 'toolu_cpc2a', command: `vibespace-channels reply ${CONV} "A second draft"`, argvs: [['reply', CONV, 'A second draft']] },
+  ] },
+  // ⑦ three reactions, each after a read (fake-poll-ops m1–m3 carry none of the account's own: the seed is fixed). Each
+  // react follows a read: two touches of one op on one conversation within MERGE_MS are ONE touch (channel-touch
+  // appendTouch) and keep the FIRST proposalId — back-to-back reacts would file one card (reported, not this lane's)
+  'react to three': { k: 3, text: 'Proposed three reactions.', calls: [
+    { id: 'toolu_cpc3a', command: `vibespace-channels read ${CONV}`, argvs: [['read', CONV]] },
+    { id: 'toolu_cpc3b', command: `vibespace-channels react ${CONV} fake-poll-ops-m1 thumbsup`, argvs: [['react', CONV, 'fake-poll-ops-m1', 'thumbsup']] },
+    { id: 'toolu_cpc3c', command: `vibespace-channels read ${CONV}`, argvs: [['read', CONV]] },
+    { id: 'toolu_cpc3d', command: `vibespace-channels react ${CONV} fake-poll-ops-m2 rocket`, argvs: [['react', CONV, 'fake-poll-ops-m2', 'rocket']] },
+    { id: 'toolu_cpc3e', command: `vibespace-channels read ${CONV}`, argvs: [['read', CONV]] },
+    { id: 'toolu_cpc3f', command: `vibespace-channels react ${CONV} fake-poll-ops-m3 wave`, argvs: [['react', CONV, 'fake-poll-ops-m3', 'wave']] },
   ] },
 };
 const stubPath = path.join(stubDir, 'claude');
@@ -342,6 +362,68 @@ try {
   await sleep(1200);
   const none = await evalJs(`({ cards: document.querySelectorAll('.chat-msg .chat-chan-props .chan-prop').length, chips: document.querySelectorAll('.chat-msg .cct-prop').length, rows: document.querySelectorAll('.chat-msg .chat-channel-touch').length })`);
   check('…a fresh chat draws no card and no chip (the rows stay — the witness saw the calls)', none.cards === 0 && none.chips === 0 && none.rows >= 2, none);
+
+  // ── ⑦ a reaction approved (lane reaction-approve-shown) ──
+  console.log('⑦ the agent proposes three reactions: one approved in the chat, one rejected there, one approved in the Outbox window');
+  const a2 = await api('PUT', '/api/channels/adapters/fake-poll/access', { access: [{ principal, authority: 'draft' }] });
+  check('the agent\'s access is given back', a2.status === 200, a2);
+  // this device remembers «wake now» (the owner's did: his reaction card read «批准并立即唤醒 agent»); every toast is kept
+  await evalJs(`localStorage.setItem('vibespace.channels.receiptDeliver', 'wake-now'); window.__toasts = []; new MutationObserver((ms) => { for (const m of ms) for (const n of m.addedNodes) if (n.nodeType === 1 && n.classList.contains('global-toast')) window.__toasts.push(n); }).observe(document.body, { childList: true, subtree: true }); true`);
+  const toasts = () => evalJs('window.__toasts.map((n) => n.textContent)');   // a toast\'s text ends with its close glyph
+  await evalJs(`app.ws.send({ type: 'chat-input', sessionId: ${JSON.stringify(sid)}, text: 'react to three' }); true`);
+  const rx = await waitFor(`(async () => { const r = await fetch('/api/channels/outbox?conv=${encodeURIComponent(CONV)}').then((x) => x.json()); const by = (m) => (r.proposals || []).find((q) => q.kind === 'reaction' && q.reaction && q.reaction.msg === m && q.state === 'awaiting-approval'); const a = by('fake-poll-ops-m1'), b = by('fake-poll-ops-m2'), c = by('fake-poll-ops-m3'); return a && b && c ? [a.id, b.id, c.id] : null; })()`, 40000);
+  check('turn 3 filed THREE reaction proposals awaiting approval (the store\'s)', !!rx, turnsLog().split('\n').filter((l) => l.startsWith('toolu_cpc3')).map((l) => l.slice(0, 300)));
+  const [rx1, rx2, rx3] = rx || ['x', 'x', 'x'];
+  // the chat's card BY ITS PROPOSAL (in this stub world a touch draws on the NEXT call naming the conversation — turn 1's
+  // reply row carries its read's row too — so the call row is not the address; the card is the store's, once in the chat)
+  const CHATP = (pid) => `.chat-msg .chat-chan-props > .chan-prop[data-proposal="${pid}"]`;
+  const CMSG = (pid) => `.chat-msg:has(.chan-prop[data-proposal="${pid}"])`;
+  const RAPP = (pid) => `${CHATP(pid)} .chan-prop-actions button[data-approve]`;
+  const got3 = await waitFor(`!!document.querySelector(${JSON.stringify(RAPP(rx1))}) && !!document.querySelector(${JSON.stringify(RAPP(rx2))})`, 20000);
+  const vr = await evalJs(`(() => { const c = document.querySelector(${JSON.stringify(CHATP(rx1))}); const b = c && c.querySelector('.chan-prop-actions button[data-approve]'); return c ? { n: document.querySelectorAll(${JSON.stringify(CHATP(rx1))}).length, text: (c.querySelector('.chan-prop-text') || {}).textContent || '', label: b ? b.textContent : null, deliver: b ? b.dataset.deliver : null } : null; })()`);
+  const why3 = got3 && vr ? null : await evalJs(`[...document.querySelectorAll('.chat-msg[data-tool-id]')].map((e) => [e.dataset.toolId, [...e.querySelectorAll('.chan-prop')].map((c) => c.dataset.proposal)])`);
+  check('the reaction\'s card is drawn in the chat ONCE (chatProposalCards — the Outbox\'s own card): the agent\'s 👍 on the message it quotes', got3 && !!vr && /👍/.test(vr.text) && vr.n === 1, { vr, why3, turns: turnsLog().split('\n').filter((l) => l.startsWith('toolu_cpc3')).map((l) => l.slice(0, 400)) });
+  check('…and its Approve says the receipt rides the agent\'s NEXT message — never «立即唤醒» though this device remembers «wake now»', !!vr && !/唤醒/.test(vr.label || '') && vr.deliver === 'next-turn', vr);
+  await sleep(900);   // the card's arming (P.ARM_MS) — a reaction's Approve is armed like every Approve
+  check('chat-reaction-card-zh.png', await shot('chat-reaction-card-zh.png', CMSG(rx1), 10));
+  check('a REAL click on the reaction card\'s Approve (in the chat)', await realClick(RAPP(rx1)), lastMiss);
+  const sent7 = await waitFor(`(() => { const c = document.querySelector(${JSON.stringify(CHATP(rx1))}); return !!c && c.classList.contains('chan-prop-sent'); })()`, 15000);
+  const t7 = await toasts();
+  const st7 = (await api('GET', '/api/channels/outbox')).body?.proposals?.find((q) => q.id === rx1);
+  check('APPROVED: the toast «已添加表情回应», no refusal — the store says sent and the chat card too', sent7 && t7.some((x) => x.startsWith('已添加表情回应')) && !t7.some((x) => /请求被拒绝|shown/.test(x)) && st7 && st7.state === 'sent', { toasts: t7, state: st7 && st7.state, reason: st7 && st7.reason });
+  const rxs = await waitFor(`(async () => { const r = await fetch('/api/channels/fake-poll/fake-poll-ops/reactions?ids=fake-poll-ops-m1').then((x) => x.json()).catch(() => null); return r ? JSON.stringify(r).slice(0, 600) : null; })()`, 5000);
+  check('…the vendor holds the account\'s own 👍 on that message (the engine\'s reaction fold)', !!rxs && /thumbsup/.test(rxs) && /"mine":true/.test(rxs), rxs);
+  await sleep(400);
+  check('chat-reaction-sent-zh.png', await shot('chat-reaction-sent-zh.png', CMSG(rx1), 10));
+  // the second card was kept through that broadcast: its words still say next turn
+  const v2 = await evalJs(`(() => { const b = document.querySelector(${JSON.stringify(RAPP(rx2))}); return b ? { label: b.textContent, deliver: b.dataset.deliver } : null; })()`);
+  check('the second reaction\'s card, KEPT through the re-render, still says next turn (the patch never moves a reaction\'s words)', !!v2 && !/唤醒/.test(v2.label) && v2.deliver === 'next-turn', v2);
+  // the reject road, unchanged
+  check('a REAL click on the second card\'s Reject… opens its reason box', await realClick(`${CHATP(rx2)} .chan-prop-actions button[data-reject]`) && await waitFor(`!!document.querySelector(${JSON.stringify(CHATP(rx2) + ' .chan-prop-rejectbox input')})`, 5000), lastMiss);
+  await evalJs(`document.querySelector(${JSON.stringify(CHATP(rx2) + ' .chan-prop-rejectbox input')}).focus(); true`);
+  await realType('not this one');
+  check('…and a REAL click on its Reject sends the decision', await realClick(`${CHATP(rx2)} .chan-prop-rejectbox button`), lastMiss);
+  const rj7 = await waitFor(`(() => { const c = document.querySelector(${JSON.stringify(CHATP(rx2))}); return !!c && c.classList.contains('chan-prop-rejected'); })()`, 15000);
+  const rj7s = (await api('GET', '/api/channels/outbox')).body?.proposals?.find((q) => q.id === rx2);
+  check('REJECTED: the store says rejected with the owner\'s reason, the card its line (the reject road takes no digest)', rj7 && rj7s && rj7s.state === 'rejected' && /not this one/.test(JSON.stringify(rj7s)), rj7s && { state: rj7s.state });
+  // the Outbox window: the third, from its row
+  await evalJs(`window.__toasts.length = 0; app.openChannelOutbox(); true`);
+  const orow = await waitFor(`!!document.querySelector('[data-orow="${rx3}"] button[data-review]')`, 15000);
+  check('the Outbox window lists the third reaction with its 「批准…」', orow);
+  check('a REAL click on 「批准…」 opens its card under the row', await realClick(`[data-orow="${rx3}"] button[data-review]`) && await waitFor(`!!document.querySelector('.chan-outbox .chan-prop[data-proposal="${rx3}"] .chan-prop-actions button[data-approve]')`, 5000), lastMiss);
+  await sleep(900);
+  const ob3 = await evalJs(`(() => { const b = document.querySelector('.chan-outbox .chan-prop[data-proposal="${rx3}"] .chan-prop-actions button[data-approve]'); return b ? { label: b.textContent, deliver: b.dataset.deliver } : null; })()`);
+  check('the Outbox card\'s Approve says next turn too', !!ob3 && !/唤醒/.test(ob3.label) && ob3.deliver === 'next-turn', ob3);
+  check('a REAL click on the Outbox card\'s Approve', await realClick(`.chan-outbox .chan-prop[data-proposal="${rx3}"] .chan-prop-actions button[data-approve]`), lastMiss);
+  const sent8 = await waitFor(`(async () => { const r = await fetch('/api/channels/outbox').then((x) => x.json()); const p = (r.proposals || []).find((q) => q.id === ${JSON.stringify(rx3)}); return p && p.state === 'sent'; })()`, 15000);
+  const t8 = await toasts();
+  check('APPROVED in the Outbox: «已添加表情回应», no refusal, the store says sent', sent8 && t8.some((x) => x.startsWith('已添加表情回应')) && !t8.some((x) => /请求被拒绝|shown/.test(x)), t8);
+  const all8 = await waitFor(`(() => { const r = document.querySelector('[data-orow="${rx3}"]'); return !!r && r.classList.contains('chan-orow-sent'); })()`, 10000);
+  check('the Outbox row says sent', all8);
+  check('outbox-reaction-sent-zh.png', await shot('outbox-reaction-sent-zh.png', '.chan-outbox', 4));
+  await evalJs(`(() => { const w = [...app.sessions.entries()].find(([, v]) => v && v.sessionId === ${JSON.stringify(sid)}); app.wm.focusWindow(w[0]); for (const [id, x] of app.wm.windows) if (x && x.type === 'channel-outbox') app.wm.closeWindow(id); return true; })()`);
+  const chat8 = await waitFor(`(() => { const c = document.querySelector(${JSON.stringify(CHATP(rx3))}); return !!c && c.classList.contains('chan-prop-sent'); })()`, 10000);
+  check('…and the chat\'s copy of that card says sent (one record)', chat8);
 
   check('no page exception', pageErrors.length === 0, pageErrors.slice(0, 5));
 } catch (e) {
