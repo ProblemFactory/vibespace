@@ -126,7 +126,9 @@ const until = async (fn, ms = 5000) => { const end = Date.now() + ms; while (Dat
   ok(capLines().length === n0 + 1 && /"text":"plain words typed into a raw dtach attach"/.test(capLines()[n0]), 'a line with NO JSON in it is still taken as typed text (the raw-attach door is unchanged)');
   const rf = { type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'from the person\'s CLI' }] }, webui_msg_id: 'vs-cli-77', webui_receipt: true };
   w.stdin.write(JSON.stringify(rf) + '\n');
-  await until(() => capLines().length >= n0 + 2 && /"msg_id":"vs-cli-77"/.test(rcptText()));
+  // the wait names everything the leg asserts — the wrapper writes the receipts file BEFORE the stdout ack, so a starved test
+  // that waited on the file alone asserted the ack before its pipe was read (the .363 CI mirror's red, one core: ~1 in 10)
+  await until(() => capLines().length >= n0 + 2 && /"msg_id":"vs-cli-77"/.test(rcptText()) && /"type":"_stdin_ack"[^\n]*"msg_id":"vs-cli-77"/.test(wout));
   const fwd = capLines()[n0 + 1] || '';
   ok(/"msg_id":"vs-cli-77"/.test(rcptText()) && /"type":"_stdin_ack"[^\n]*"msg_id":"vs-cli-77"/.test(wout) && /from the person's CLI/.test(fwd) && !/webui_receipt/.test(fwd) && /"webui_msg_id":"vs-cli-77"/.test(fwd),
     `a RECEIPT: the ack names the frame (msg_id) on stdout AND in the receipts file; Claude gets the frame without the receipt key (${fwd.slice(0, 120)})`);
