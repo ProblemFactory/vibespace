@@ -179,6 +179,36 @@ function runOf(logText, prev = null) {
   }
   return { logins, proxies, unanswered };
 }
+/** THE DROPPED LOGIN (`relay_login_dropped`): a frpc started WITHOUT the shared token that keeps logging in — DROP_LOGINS
+ *  logins in a row no answer followed — and started no proxy in its run. A frpc that sends the token is not judged here. */
+const DROP_LOGINS = 3;
+const droppedOf = (run, { knock = true } = {}) => !knock && !!run && run.proxies === 0 && run.unanswered >= DROP_LOGINS;
+/** the owner's words for it (ONE For-you item; the publish error and the jobs' / forwards' status say the same) — why frpc
+ *  runs without the token: `locked` (the vault was locked when it started) | `none` (this instance holds no shared token) |
+ *  `off` (it holds one but does not send it: the relay was taken to no longer ask, or it refused the one held) */
+const DROPPED_TEXT = 'The relay accepts this instance\'s login but closes the connection right after ({n} logins since {since}, no proxy started)';
+const DROPPED_DETAIL = {
+  locked: 'The relay still requires the shared relay token, and this frpc runs without it because the vault was locked when it started. Unlock the vault with the second password, or set the relay token again in Plugins › Public URLs.',
+  none: 'The relay still requires the shared relay token, and this instance holds none. Set the relay token again in Plugins › Public URLs.',
+  off: 'The relay still requires the shared relay token, and this frpc runs without it (the relay was taken to no longer ask for it). Set the relay token again in Plugins › Public URLs.',
+};
+/** → { text, detail, i18n, message } — `since` an ISO time (the run's start), never a token */
+function droppedAlertOf({ logins = 0, since = 0, why = 'locked' } = {}) {
+  const n = Math.max(0, Math.floor(Number(logins) || 0));
+  const at = Number(since) > 0 ? new Date(Number(since)).toISOString().slice(0, 16).replace('T', ' ') + 'Z' : '?';
+  const detail = DROPPED_DETAIL[why] || DROPPED_DETAIL.locked;
+  const text = DROPPED_TEXT.replace('{n}', String(n)).replace('{since}', at);
+  return { text, detail, i18n: { text: { key: DROPPED_TEXT, params: { n, since: at } }, detail: [{ key: detail }] }, message: `${text[0].toLowerCase()}${text.slice(1)} — ${detail[0].toLowerCase()}${detail.slice(1)}` };
+}
+/** A DROP IS SAID (lane frp-token-proof): the shared token's vault entry left this instance — the For-you line names the entry
+ *  and why (a proxy ran on a frpc started without it, run `<pid>@<start>`) */
+const RETIRED_TEXT = 'The shared relay token ({entry}) left this instance';
+const RETIRED_DETAIL = 'A public URL ran on a frpc started without it ({at}), so the relay no longer asks for it. If public URLs fail later, set the relay token again in Plugins › Public URLs.';
+function retiredAlertOf({ entry = 'frp:token', at = 0 } = {}) {
+  const e = String(entry || '').replace(/[^A-Za-z0-9:._-]+/g, '-').slice(0, 60) || 'frp:token';
+  const when = Number(at) > 0 ? new Date(Number(at)).toISOString().slice(0, 16).replace('T', ' ') + 'Z' : '?';
+  return { text: RETIRED_TEXT.replace('{entry}', e), detail: RETIRED_DETAIL.replace('{at}', when), i18n: { text: { key: RETIRED_TEXT, params: { entry: e } }, detail: [{ key: RETIRED_DETAIL, params: { at: when } }] } };
+}
 /** the ONE For-you item a name refusal files (never the token; the dedupe key is the text: one item per name) */
 const ALERT_DETAIL = {
   name_in_use: 'The relay refused it for this instance. Either this instance\'s relay token leaked and another login took the name, or a copy of data/ runs elsewhere. If neither is expected: Rotate the relay token in Plugins › Public URLs and send the new registration line to the relay admin.',
@@ -200,5 +230,5 @@ function alertOf(ref, { name = '' } = {}) {
 module.exports = {
   V, FILE, TOKEN_ENV, CLUSTER_TOKEN_ENV, KNOCK_ENV, RELAY_ENV_KEEP, TOKEN_PREFIX, ID_RE, TOKEN_RE, HASH_RE, LABEL_RE, SUB_RE, CLUSTER_USER_RE, PREFIXES, SUBS_MAX, REASONS, ALERTS,
   labelOf, clusterUserOf, mint, rotate, revoke, withSub, parse, serialize, identityOf, registrationLine, frpcLines, relayEnv, strippedName, nameVerdict, refusalOf, loginOf, alertOf,
-  runOf,   // lane frp-token-proof
+  DROP_LOGINS, DROPPED_TEXT, DROPPED_DETAIL, RETIRED_TEXT, RETIRED_DETAIL, runOf, droppedOf, droppedAlertOf, retiredAlertOf,   // lane frp-token-proof
 };

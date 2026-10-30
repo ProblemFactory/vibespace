@@ -7,7 +7,12 @@
 // every restart); the vault's unlock re-publishes NOW; the relay's success elsewhere (the heal sweep's republish, the
 // Ports panel) is the job's state in the same tick; `show` says the cause, since when, how many attempts; the owner's own
 // subscription filter shapes its auto-notify; a deliberate stop ends the episode; the RED control: a patched copy with the
-// pre-fix per-attempt notice says five.
+// pre-fix per-attempt notice says five. §3 THE DROPPED LOGIN (lane frp-token-proof, 2026-10-30 — the relay took this
+// instance's login and closed it at once; the hub said «is the domain / DNS set up?» / «could not allocate a public port» per
+// forward per sweep): its own class, never said per job (the frp plugin's ONE For-you item carries it), the job's status
+// waits for the relay with the relay's words; the Ports manager's re-publish says it ONCE per episode, each forward's error
+// carries the words, another failure still per forward. RED on the base: the class is `other:…` (said per job) and the
+// Ports manager logs a line per forward per sweep.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -25,6 +30,10 @@ console.log('§1 the verdict (src/job-notice.js)');
 const LOCKED = () => Object.assign(new Error('the vault is locked — the relay token opens after the owner unlocks it with the second password (the relay does not start until then)'), { code: 'vault_locked' });
 const UNREACH = (n) => new Error(`frpc reload failed: connect ECONNREFUSED 127.0.0.1:${7400 + n}`);
 const NOPORT = () => new Error('could not allocate a public port on the relay (busy)');
+// lane frp-token-proof: the frp plugin's publish error for THE DROPPED LOGIN (src/relay-token.js droppedAlertOf's message, spelled
+// here so the base — which has no such words — runs the same rows)
+const DROPPED_MSG = (n) => `the relay accepts this instance's login but closes the connection right after (${n} logins since 2026-10-30 12:00Z, no proxy started) — the relay still requires the shared relay token, and this frpc runs without it because the vault was locked when it started. Unlock the vault with the second password, or set the relay token again in Plugins › Public URLs.`;
+const DROPPED = (n = 3) => Object.assign(new Error(DROPPED_MSG(n)), { code: 'relay_login_dropped' });
 const URL0 = 'https://vs1785a95b84.relay.test/', URL1 = 'https://vsfeedbeef00.relay.test/';
 // run a sequence of outcomes through a verdict → the notices it says, the last record
 const play = (verdict, outcomes, url = URL0) => {
@@ -39,6 +48,7 @@ const TABLE = [
   ['failed(X) → failed(Y): the new cause is said once', [...fails(UNREACH, 3), ...fails(NOPORT, 3)], ['down', 'down']],
   ['failed → published: the recovery once', [...fails(UNREACH, 4), { ok: true, url: URL0 }, { ok: true, url: URL0 }], ['down', 'recovered']],
   ['the vault class is NEVER said per job (×5, then published: nothing)', [...fails(LOCKED, 5), { ok: true, url: URL0 }], []],
+  ['the dropped login is NEVER said per job — the frp plugin\'s ONE For-you item carries it (×5 with a moving count, then published: nothing)', [...fails((i) => DROPPED(3 + i * 40), 5), { ok: true, url: URL0 }], []],
   ['said X → the vault → published: the recovery is still said once (said is sticky)', [...fails(UNREACH, 2), ...fails(LOCKED, 3), { ok: true, url: URL0 }], ['down', 'recovered']],
   ['two episodes: down, back, down, back — four notices, never a repeat', [...fails(UNREACH, 3), { ok: true, url: URL0 }, ...fails(UNREACH, 3), { ok: true, url: URL0 }], ['down', 'recovered', 'down', 'recovered']],
 ];
@@ -71,7 +81,17 @@ ok(badPre.length >= 4 && badPre.includes(TABLE[0][0]) && badPre.includes(TABLE[3
   ok(C(new Error('could not publish the subdomain on the relay (is the domain / DNS set up?)')) === 'subdomain_refused' && C(new Error('the forward is not active (is the machine online?)')) === 'forward_inactive', 'causeOf: the subdomain refused, the forward inactive');
   ok(C(UNREACH(1)) === C(UNREACH(9)) && C(UNREACH(1)) === 'relay_unreachable', 'causeOf: the relay unreachable (its port number is not a new cause)');
   ok(C(new Error('odd failure 12 at 07:13')) === C(new Error('odd failure 99 at 08:41')) && C(new Error('odd failure 1')) !== C(new Error('another failure 1')), 'causeOf: any other sentence is its own cause, numbers folded');
-  ok(JN.CLASSES.includes('vault_locked') && !JN.SAID_PER_JOB('vault_locked') && JN.SAID_PER_JOB('relay_unreachable'), 'the vault class is the one class never said per job');
+  ok(JN.CLASSES.includes('vault_locked') && !JN.SAID_PER_JOB('vault_locked') && JN.SAID_PER_JOB('relay_unreachable'), 'the vault class is never said per job');
+  // lane frp-token-proof: THE DROPPED LOGIN — its own class (by code, and by its words), before the generic texts
+  ok(C(DROPPED(3)) === 'relay_login_dropped' && C(DROPPED(2459)) === 'relay_login_dropped' && C(new Error(DROPPED_MSG(7))) === 'relay_login_dropped', 'causeOf: the dropped login is its own class (by code, by its words; its count is not a new cause) — never subdomain_refused / port_in_use', C(DROPPED(3)));
+  ok(JN.CLASSES.includes('relay_login_dropped') && JN.SAID_PER_JOB('relay_login_dropped') === false, 'the dropped login is never said per job (the owner has ONE item)');
+  const dr = play(JN.noticeVerdict, fails((i) => DROPPED(3 + i), 4));
+  ok(dr.said.length === 0 && dr.rec.cause === 'relay_login_dropped' && dr.rec.attempts === 4 && /^waiting for the relay — it drops this instance's login/.test(JN.whyOf(dr.rec) || '') && /closes the connection right after/.test(JN.whyOf(dr.rec) || ''), 'the dropped login: counted, never said; the status waits for the relay with the relay\'s words', JN.whyOf(dr.rec));
+  {
+    const RT = require('../src/relay-token.js');
+    const a = typeof RT.droppedAlertOf === 'function' ? RT.droppedAlertOf({ logins: 3, since: Date.parse('2026-10-30T12:00:05Z'), why: 'locked' }) : null;
+    ok(!!a && a.message === DROPPED_MSG(3), 'the words spelled here are src/relay-token.js droppedAlertOf\'s message (the plugin\'s publish error)', a && a.message);
+  }
 }
 
 // ── §2 THE REAL ENGINE over the real Ports manager and a fake relay ──────────────────────────────────────────────────
@@ -257,6 +277,39 @@ try {
 } finally {
   for (const sv of servers) try { sv.close(); } catch { }
   fs.rmSync(dir, { recursive: true, force: true });
+}
+
+// ── §3 THE DROPPED LOGIN in the Ports manager's re-publish (lane frp-token-proof) ────────────────────────────────────────
+console.log('§3 the dropped login — the Ports manager says it ONCE per episode, never a line per forward per sweep');
+{
+  const { PortForwardManager } = require('../src/port-forward.js');
+  const d3 = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-job-notice-pf-'));
+  const svcs = [0, 1, 2].map(() => http.createServer((q, r) => r.end('ok')));
+  try {
+    for (const sv of svcs) await new Promise((r) => sv.listen(0, '127.0.0.1', r));
+    const relay = { mode: 'dropped', n: 0 };
+    const plugins = {
+      async frpPublish(name) { relay.n++; if (relay.mode === 'dropped') throw DROPPED(3 + relay.n); if (relay.mode === 'unreachable') throw UNREACH(relay.n); return { name, subdomain: 'vs' + name.slice(-10).replace(/[^a-z0-9]/g, '0'), proto: 'http', url: 'https://' + name.replace(/[^a-z0-9-]/g, '-') + '.relay.test/' }; },
+      async frpUnpublish() { return { ok: true }; },
+    };
+    const lines = [];
+    const pf = new PortForwardManager({ hosts: { list: () => [] }, dataDir: d3, plugins, broadcast: () => { }, log: (l) => lines.push(String(l)), getJobs: () => null });
+    clearInterval(pf._watch);
+    const recs = [];
+    for (let i = 0; i < 3; i++) { const r = await pf.forward('__local__', svcs[i].address().port, { label: 'svc ' + i }); const rec = pf._state.forwards.find((x) => x.id === r.id); rec.publicUrl = 'https://old' + i + '.relay.test/'; recs.push(rec); }
+    for (let sweep = 0; sweep < 3; sweep++) for (const r of recs) await pf._republish(r);
+    const dropLines = lines.filter((l) => /closes the connection right after/.test(l));
+    ok(relay.n === 9 && dropLines.length === 1, `three forwards × three sweeps against the dropped relay ⇒ ONE journal line (was one per forward per sweep: ${relay.n} attempts, ${dropLines.length} line(s))`, JSON.stringify(dropLines.map((l) => l.slice(0, 80))));
+    ok(recs.every((r) => /^public URL down — the relay accepts this instance's login but closes the connection right after/.test(r.error || '')), 'each forward\'s error carries the relay\'s words (never «retrying republish» alone, never «DNS»)', JSON.stringify(recs.map((r) => r.error)));
+    ok(!lines.some((l) => /DNS|could not allocate a public port/.test(l)), 'no line says «DNS» or «a public port» — nothing was refused');
+    relay.mode = 'ok'; await pf._republish(recs[0]);
+    relay.mode = 'dropped'; await pf._republish(recs[1]);
+    ok(lines.filter((l) => /closes the connection right after/.test(l)).length === 2, 'a publish that ran ends the episode: the next drop is said again (once)');
+    relay.mode = 'unreachable'; lines.length = 0;
+    for (const r of recs) await pf._republish(r);
+    ok(lines.filter((l) => /^re-publish pf-/.test(l)).length === 3, 'any other failure is still said per forward (the drop alone is the relay\'s state)', JSON.stringify(lines));
+    for (const r of recs) { const l = pf._live.get(r.id); if (l) { try { l.server.close(); } catch { } for (const so of l.sockets) try { so.destroy(); } catch { } } }
+  } finally { for (const sv of svcs) try { sv.close(); } catch { } fs.rmSync(d3, { recursive: true, force: true }); }
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

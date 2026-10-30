@@ -21,8 +21,12 @@
 //      g MUTANTS ⇒ RED: the token written into frpc.toml · the old locked-vault rule at start · the knock retired early
 //      h THE INCIDENT (lane frp-token-proof, 2026-10-30 — frps 0.70.0 behind a VOUCHING plugin: a frpc without the shared
 //         token is taken and dropped at once; the fake frpc logs `login to server success` at its backoff, no proxy starts):
-//         the hub restarts with the vault LOCKED ⇒ ① nothing recorded, nothing retired, the vault entry KEPT; ② the unlock
-//         restarts frpc WITH the token, the URL is back. The base (4ef7e9494) fails h by name
+//         the hub restarts with the vault LOCKED ⇒ ③ the status EXPECTS the restart at the unlock; ④ every publish fails BY
+//         NAME at once (relay_login_dropped, the owner's words — never «DNS», no TCP port walk), ONE For-you item (the Public
+//         URLs door), one journal line; the Ports manager and instance-url over the real plugin say the words, the Ports
+//         manager once; ① nothing recorded, nothing retired, the vault entry KEPT; ② the unlock restarts frpc WITH the
+//         token, the URL is back, the item done. (c above: ⑤ the retirement is SAID — one item naming frp:token.) The base
+//         (4ef7e9494) fails h by name: its RED/GREEN table is frp-token-proof/report.md
 //   ①p the SAME hub launched from a POLLUTED env (lane frp-spawn-env-allowlist — planted now, whatever env the suite runs from:
 //      an agent conversation's session tokens, the cluster's shared token, a cloud key, proxies): frpc's env holds the kept
 //      names + the two relay variables only, none of the planted names or values — MUTANT the pre-fix copy of process.env ⇒ RED
@@ -420,6 +424,8 @@ async function hubLegs() {
     const pjC2 = pjOf(C.D);
     check('the next unlock RETIRES the knock: the vault\'s frp:token dropped, tokenSealed gone, RETIRE_ID recorded', !C.v.secretGet('frp:token').value && !(pjC2.config || {}).tokenSealed && pjC2.legacyRetired && pjC2.legacyRetired.id === '2026-10-relay-token-per-instance', pjC2);
     check('the card says knock off + the retirement; frpc stayed up (no restart for a relay that already took it)', C.pm.status('frp').relay.knock === 'off' && !!C.pm.status('frp').relay.retired && C.pm.status('frp').running, C.pm.status('frp').relay);
+    const retiredItems = ut.snapshot().open.filter((i) => i.origin === 'plugin' && i.plugin === 'frp' && /left this instance/.test(i.text));
+    check('⑤ A DROP IS SAID: the retirement files ONE For-you item naming the vault entry (frp:token) and why — never silently (lane frp-token-proof)', retiredItems.length === 1 && retiredItems[0].text === 'The shared relay token (frp:token) left this instance' && /ran on a frpc started without it/.test(retiredItems[0].detail || '') && !leaks(JSON.stringify(retiredItems), [KNOCK]), retiredItems.map((i) => i.text));
     const n3 = sawAll().length;
     C.pm.stop('frp'); await sleep(150); C.pm.start('frp');
     const sawC3 = await nextSaw(n3);
@@ -544,6 +550,42 @@ async function hubLegs() {
         // THE MACHINE WENT DOWN (the user manager died at 02:55): frpc died with it; the new hub boots with the vault LOCKED
         const H = await restart(H0, { askKnock: false, ut: utH, mode: { dropKnockless: true } });
         check('h1 the boot replay starts frpc with the vault LOCKED — its own token, NO shared token (the relay vouches it in)', !!H.saw && H.saw.knockSha === null && H.saw.relaySha === sha(H0.rec.token) && H.v.state() === 'locked', H.saw && { knock: H.saw.knockSha });
+        const stH = H.pm.status('frp');
+        check('③ NO KNOWINGLY TOKEN-LESS START: the status says frpc runs without the shared token while the vault is locked AND that the unlock restarts it with it (relay.restartAtUnlock, knock locked) — and the journal says so', stH.relay.knock === 'locked' && stH.relay.restartAtUnlock === true && logs.slice(logs0).some((l) => /frpc starts without the shared relay token \(the vault is locked\)/.test(l)), { knock: stH.relay.knock, restartAtUnlock: stH.relay.restartAtUnlock });
+        check('④ the publish at the boot fails BY NAME — relay_login_dropped, the owner\'s words; never «is the domain / DNS set up?»', !!H.pubErr && H.pubErr.code === 'relay_login_dropped' && OWNER.test(H.pubErr.message) && !/DNS|public port/.test(H.pubErr.message), H.pubErr && { code: H.pubErr.code, msg: H.pubErr.message });
+        const t1 = Date.now();
+        const p2 = await timed(H.pm.frpPublish('vibespace-instance', 3456, { proto: 'http', preferSub: H0.sub }), 8000);
+        const t2 = Date.now();
+        const p3 = await timed(H.pm.frpPublish('pf-local-4000', 4000, { proto: 'tcp' }), 8000);
+        const t3 = Date.now();
+        check(`④ every later publish is refused AT ONCE (${t2 - t1} ms) — no 5 s poll per name — and a TCP publish walks no ports (${t3 - t2} ms; was «could not allocate a public port» after 10 × 4.8 s)`, !!p2.e && p2.e.code === 'relay_login_dropped' && t2 - t1 < 1500 && !!p3.e && p3.e.code === 'relay_login_dropped' && OWNER.test(p3.e.message) && t3 - t2 < 1500, { p2: p2.timeout ? 'timeout' : p2.e && p2.e.message, p3: p3.timeout ? 'timeout' : p3.e && p3.e.message, ms: [t2 - t1, t3 - t2] });
+        const itemsH = () => utH.snapshot().open.filter((i) => i.origin === 'plugin' && i.plugin === 'frp');
+        const dropItems = itemsH().filter((i) => /closes the connection right after/.test(i.text));
+        check('④ ONE For-you item (high, notice): «The relay accepts this instance\'s login but closes the connection right after (N logins since <time>, no proxy started)» + why + what to do, its click opens Plugins › Public URLs', dropItems.length === 1 && /^The relay accepts this instance's login but closes the connection right after \(\d+ logins since .+, no proxy started\)$/.test(dropItems[0].text) && /vault was locked when it started\. Unlock the vault with the second password, or set the relay token again in Plugins › Public URLs\./.test(dropItems[0].detail || '') && dropItems[0].urgency === 'high' && JSON.stringify(dropItems[0].open) === JSON.stringify({ kind: 'plugin-settings', plugin: 'frp' }), itemsH().map((i) => [i.text, i.open]));
+        const dropLines = logs.slice(logs0).filter((l) => /^\[plugins\]/.test(l) && /closes the connection right after/.test(l));   // the plugin's journal (the suite's own ✓ lines ride the same wrapper)
+        check(`④ ONE journal line for the episode (three publishes: ${dropLines.length}) — never a line per forward per minute`, dropLines.length === 1, dropLines.map((l) => l.slice(0, 160)));
+        const stD = H.pm.status('frp');
+        check('④ the card reads the drop (relay.dropped: logins, since, why locked) — never «the relay knows it» on a login it closes', !!stD.relay.dropped && stD.relay.dropped.logins >= 3 && stD.relay.dropped.why === 'locked' && stD.relay.run && stD.relay.run.proxies === 0, stD.relay.dropped);
+        // the re-publish loops over the REAL plugin: the Ports manager (heal sweep's _republish) and instance-url (restore)
+        const { PortForwardManager } = R('src/port-forward.js');
+        const pfLines = [];
+        const pfDir = path.join(ROOT, 'incident', 'pf'); fs.mkdirSync(pfDir, { recursive: true });
+        const pf = new PortForwardManager({ hosts: { list: () => [] }, dataDir: pfDir, plugins: H.pm, broadcast: () => { }, log: (l) => pfLines.push(String(l)), getJobs: () => null });
+        clearInterval(pf._watch);
+        const recsH = [];
+        for (const port of [4101, 4102]) { const r = await pf.forward('__local__', port, { label: 'svc' }); const rec = pf._state.forwards.find((x) => x.id === r.id); rec.publicUrl = `http://relay.example.invalid:${20000 + port}/`; rec.publicProto = 'tcp'; recsH.push(rec); }
+        for (let i = 0; i < 2; i++) for (const r of recsH) await timed(pf._republish(r), 8000);
+        check('④ the Ports manager over the real plugin: two forwards × two sweeps ⇒ ONE line, each forward\'s error = the relay\'s words (no «DNS», no «public port»)', pfLines.filter((l) => /closes the connection right after/.test(l)).length === 1 && !pfLines.some((l) => /DNS|could not allocate/.test(l)) && recsH.every((r) => /closes the connection right after/.test(r.error || '')), { lines: pfLines.map((l) => l.slice(0, 120)), errors: recsH.map((r) => r.error) });
+        const SV = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
+        const HANDED = (SV.match(/require\('\.\/src\/server\/instance-url\.js'\)\.create\(\{[^\n]*?\bplugins: (\{[^{}\n]*\})/) || [])[1] || null;
+        const IU = R('src/server/instance-url.js');
+        fs.writeFileSync(path.join(H.D, 'instance-url.json'), JSON.stringify({ desired: true, sub: H0.sub }));
+        const iu = HANDED ? IU.create({ dataDir: H.D, port: 3456, plugins: new Function('plugins', `return (${HANDED});`)(H.pm), serverSetting: () => null, authEnabled: () => true, log: () => { } }) : null;
+        if (iu) iu.restore({ retries: 1, firstMs: 5 });
+        let si = iu ? iu.status() : null;
+        for (let i = 0; iu && i < 100 && !si.error; i++) { await sleep(100); si = iu.status(); }
+        if (iu) iu.stop();
+        check('④ instance-url\'s restore over the real plugin (server.js\'s object) says the relay\'s words — never «DNS»', !!si && OWNER.test(si.error || '') && !/DNS/.test(si.error || ''), si && si.error);
         const pjH = pjOf(H.D);
         check('① PROOF IS A PROXY THAT RAN: a vouched login recorded NOTHING — no relayKnocklessAt, no run, nothing retired; the vault entry is still sealed', !pjH.relayKnocklessAt && !pjH.relayKnocklessRun && !pjH.legacyRetired && (pjH.config || {}).tokenSealed === true, { knocklessAt: pjH.relayKnocklessAt || null, retired: pjH.legacyRetired || null });
         // THE OWNER UNLOCKS (09:17:53 in the incident)
@@ -556,6 +598,9 @@ async function hubLegs() {
         check('② AT UNLOCK THE TOKEN IS PUT BACK: frpc restarted WITH the shared token (its env carries it, frpc.toml has the auth.token template)', !!sawU && sawU.knockSha === sha(KNOCK) && /^auth\.token = "\{\{ \.Envs\.VIBESPACE_FRP_AUTH_TOKEN \}\}"$/m.test(sawU.conf), sawU && { knock: sawU.knockSha === sha(KNOCK) });
         const pubU = sawU ? await timed(H.pm.frpPublish('vibespace-instance', 3456, { proto: 'http', preferSub: H0.sub }), 8000) : { e: new Error('no frpc') };
         check('② …and the public URL is back, the SAME address', !!pubU.v && pubU.v.url === H0.pub.url, pubU.v ? pubU.v.url : (pubU.e && pubU.e.message) || 'timeout');
+        const after = [...utH.snapshot().open, ...utH.snapshot().resolved];
+        const di = after.find((i) => /closes the connection right after/.test(i.text || ''));
+        check('④ the dropped-login item is DONE once a proxy ran (no open item left for it); the card no longer reads a drop', !!di && di.status === 'done' && !H.pm.status('frp').relay.dropped, { items: after.filter((i) => /closes the connection/.test(i.text || '')).map((i) => [i.id, i.status]), said: pjOf(H.D).relayDropSaid || null, dropped: H.pm.status('frp').relay.dropped });
         await killFrpc(); try { H.v.close(); } catch { }
       } finally { try { utH.stop(); } catch { } }
     }

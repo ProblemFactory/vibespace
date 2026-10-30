@@ -147,7 +147,11 @@ const ROWS = {
   'src/channels/index.js': [['the vault is locked', 'match', 'recognises a sign-in the vault keeps closed (its words are agentWords below)']],
   'src/routes/vault.js': [['unlock the vault', 'label', 'the PURPOSE word of a bearer\'s refused knock on the unlock door (its vault-use line) — no reader acts on it']],
   'src/server/integration-store.js': [['a person unlocks the vault on the page', 'log', 'the integrations journal line for a row the locked vault keeps closed (once per transition)']],
-  'src/plugins/frp.js': [['the relay token opens after the owner unlocks it', 'carried', 'the relay\'s refusal in its own error and journal', { via: 'src/lib/plugins-ui.js' }]],
+  'src/plugins/frp.js': [
+    ['the relay token opens after the owner unlocks it', 'carried', 'the relay\'s refusal in its own error and journal', { via: 'src/lib/plugins-ui.js' }],
+    ['frpc starts without the shared relay token (the vault is locked)', 'log', 'the journal line when the lock starts frpc without the shared token (lane frp-token-proof) — the status (relay.restartAtUnlock) and, if the relay drops it, the For-you item say it to the owner'],
+  ],
+  'src/relay-token.js': [['because the vault was locked when it started', 'foryou', 'THE DROPPED-LOGIN For-you item\'s detail (lane frp-token-proof): the frp plugin\'s item IS the telling; the door — the second password, or the relay token again']],
   'src/key-file.js': [['the vault is locked — ', 'carried', 'the key-file law\'s refusal in a store\'s own error (key-unreadable:vault_locked)', { via: 'src/lib/key-file-words.js' }]],
   'src/secret-box.js': [['the vault is locked — ', 'carried', 'the at-rest cipher\'s refusal (key-unreadable:vault_locked)', { via: 'src/lib/key-file-words.js' }]],
   'src/server/sealed-json.js': [['the vault is locked — ', 'carried', 'a sealed JSON file (the voice pair) read while locked', { via: 'src/voice-model.js' }]],

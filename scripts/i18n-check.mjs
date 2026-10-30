@@ -33,7 +33,14 @@ const DICTS = ['i18n-zh.js', 'i18n-ja.js'].map((f) => path.join(lib, f));
 // the server surfaces whose literal notice keys are FOR the owner (widen as other surfaces adopt the i18n-notice shape)
 const NOTICE_SRC = ['src/server/vault-run-door.js', 'src/server/jobs-wiring.js', 'src/jobs.js'].map((p) => path.join(path.dirname(fileURLToPath(import.meta.url)), '..', p));
 // …and the server's key TABLES (each value a key the client words with t()): the jobs engine's For-you templates
-export const noticeKeyTables = () => [{ name: 'src/job-model.js FOR_YOU_WORDS', keys: Object.values(createRequire(import.meta.url)('../src/job-model.js').FOR_YOU_WORDS) }];
+export const noticeKeyTables = () => {
+  const req = createRequire(import.meta.url), RT = req('../src/relay-token.js');
+  return [
+    { name: 'src/job-model.js FOR_YOU_WORDS', keys: Object.values(req('../src/job-model.js').FOR_YOU_WORDS) },
+    // lane frp-token-proof: the frp plugin's For-you words (the dropped login, the retirement) are constants in src/relay-token.js
+    { name: 'src/relay-token.js DROPPED_TEXT / DROPPED_DETAIL / RETIRED_TEXT / RETIRED_DETAIL', keys: [RT.DROPPED_TEXT, ...Object.values(RT.DROPPED_DETAIL), RT.RETIRED_TEXT, RT.RETIRED_DETAIL] },
+  ];
+};
 
 /** every `key:` / `detail:` sentence-shaped string literal in server source — single/double/backtick-quoted; a `${…}` template
  *  (a key built at run time) is skipped, a short identifier is skipped. Round 19: `detail:` and backtick quotes are now seen. */

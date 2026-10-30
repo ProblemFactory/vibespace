@@ -42,7 +42,8 @@ function relayFactWords(r) {
   if (r.kind === 'revoked') return t('Relay token revoked — mint a new one');
   if (r.kind !== 'instance') return null;
   const parts = [t('Own relay token')];   // its id is the sheet's (the row is narrow)
-  if (r.login && r.login.ok) parts.push(t('the relay knows it'));
+  if (r.dropped) parts.push(t('the relay drops its login — no proxy started'));   // lane frp-token-proof: a login it closes at once is no «knows it»
+  else if (r.login && r.login.ok) parts.push(t('the relay knows it'));
   else if (r.login && RELAY_LOGIN_WORDS[r.login.code]) parts.push(RELAY_LOGIN_WORDS[r.login.code]());
   if (r.knock === 'locked') parts.push(t('the shared token waits for the vault'));
   return parts.join(' · ');

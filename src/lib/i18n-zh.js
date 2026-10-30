@@ -9743,6 +9743,13 @@ export default {
   "The relay holds a different name list for this instance — its record here or at the relay was changed. Rotate the relay token in Plugins › Public URLs and send the new registration line to the relay admin.": "中继为这台实例登记的名字列表不同——本地或中继上的记录被改过。在 插件 › 公网 URL 里轮换中继 token，并把新登记行发给中继管理员。", // lane relay-token-per-instance
   "Relay token revoked — mint a new one": "中继 token 已吊销——铸造一个新的", // lane relay-token-per-instance
   "Own relay token": "本实例的中继 token", // lane relay-token-per-instance
+  "The relay accepts this instance's login but closes the connection right after ({n} logins since {since}, no proxy started)": "中继接受了这台实例的登录，但随即断开连接（自 {since} 起登录 {n} 次，没有一个代理启动）", // lane frp-token-proof
+  "The relay still requires the shared relay token, and this frpc runs without it because the vault was locked when it started. Unlock the vault with the second password, or set the relay token again in Plugins › Public URLs.": "中继仍要求共享中继 token，而这个 frpc 启动时保险库是锁着的，所以它没有带上这个 token。请用第二密码解锁保险库，或在 插件 › 公网 URL 里重新设置中继 token。", // lane frp-token-proof
+  "The relay still requires the shared relay token, and this instance holds none. Set the relay token again in Plugins › Public URLs.": "中继仍要求共享中继 token，而这台实例没有保存它。请在 插件 › 公网 URL 里重新设置中继 token。", // lane frp-token-proof
+  "The relay still requires the shared relay token, and this frpc runs without it (the relay was taken to no longer ask for it). Set the relay token again in Plugins › Public URLs.": "中继仍要求共享中继 token，而这个 frpc 没有带上它（此前以为中继已不再要求）。请在 插件 › 公网 URL 里重新设置中继 token。", // lane frp-token-proof
+  "The shared relay token ({entry}) left this instance": "共享中继 token（{entry}）已从这台实例移除", // lane frp-token-proof
+  "A public URL ran on a frpc started without it ({at}), so the relay no longer asks for it. If public URLs fail later, set the relay token again in Plugins › Public URLs.": "一个公网 URL 在未带它启动的 frpc 上跑通了（{at}），说明中继已不再要求它。如果之后公网 URL 失败，请在 插件 › 公网 URL 里重新设置中继 token。", // lane frp-token-proof
+  "the relay drops its login — no proxy started": "中继随即断开登录——没有代理启动", // lane frp-token-proof
   "A person stored it — in this window, a card or Settings": "由人存入——在这个窗口、卡片或设置里", // lane vault-window-v2
   "A person scanned or pasted it": "由人扫码或粘贴存入", // lane vault-window-v2
   "VibeSpace made it itself — nobody typed it in": "VibeSpace 自己生成——没有人输入过它", // lane vault-window-v2

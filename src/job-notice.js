@@ -12,12 +12,15 @@
 //   · failed → published     ONE «back UP» notice — only when a DOWN was said in this episode (`said`, sticky)
 //   · none → published       nothing here (a URL that CHANGED is said by the job's own adopt, as before)
 // THE VAULT CLASS IS NEVER SAID PER JOB: the vault's own For-you item carries it (the owner is the one who can clear it);
-// the job's status says it is waiting for the vault. Causes are CLASSES by name (`causeOf`), so a relay sentence that
+// the job's status says it is waiting for the vault. Nor is THE DROPPED LOGIN (lane frp-token-proof — the relay takes this
+// instance's login and closes it at once: frpc runs without the shared token it still requires): the frp plugin's ONE
+// For-you item carries it, the job's status says it is waiting for the relay — never «DNS» nor «a port in use». Causes are CLASSES by name (`causeOf`), so a relay sentence that
 // carries a port number or a time is still the same cause on the next attempt.
 // PURE: imports nothing (scripts/test-architecture.mjs PURE set); unit-pinned by scripts/test-job-notice.mjs.
 
 const CAUSE_RULES = [   // first match wins; the sentences are src/plugins/frp.js's and src/port-forward.js's own
   ['vault_locked', (code, msg) => code === 'vault_locked' || /\bvault is locked\b/i.test(msg)],
+  ['relay_login_dropped', (code, msg) => code === 'relay_login_dropped' || /closes the connection right after/i.test(msg)],   // before the generic texts: nothing was refused
   ['relay_not_configured', (code, msg) => /relay is not configured|public URLs are not available/i.test(msg)],
   ['port_in_use', (code, msg) => /could not allocate a public port/i.test(msg)],
   ['subdomain_refused', (code, msg) => /could not publish the subdomain/i.test(msg)],
@@ -25,9 +28,12 @@ const CAUSE_RULES = [   // first match wins; the sentences are src/plugins/frp.j
   ['relay_unreachable', (code, msg) => /frpc (reload failed|not installed)|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EHOSTUNREACH|ENOTFOUND|timed? ?out/i.test(msg)],
 ];
 const CLASSES = Object.freeze(CAUSE_RULES.map(([c]) => c));
-const SAID_PER_JOB = (cause) => cause !== 'vault_locked';
+const OWNER_CLASSES = ['vault_locked', 'relay_login_dropped'];   // the owner already has ONE item for each — never said per job
+const SAID_PER_JOB = (cause) => !OWNER_CLASSES.includes(cause);
 // the status words of the vault class (the agent is told the owner already has it — never asked to pass it on)
 const VAULT_WAIT = 'waiting for the vault — it is locked; the owner has the unlock item (For you) and unlocks it on this instance\'s page; this republishes by itself when it opens';
+// lane frp-token-proof: the dropped login's — the relay's own words (the error) follow it
+const RELAY_WAIT = 'waiting for the relay — it drops this instance\'s login (frpc runs without the shared relay token it still requires); the owner has the item (For you); this republishes by itself once frpc carries the token';
 const ERROR_MAX = 300;
 
 const clip = (s, n) => ([...String(s)].length <= n ? String(s) : [...String(s)].slice(0, n - 1).join('') + '…');
@@ -45,7 +51,7 @@ function causeOf(err) {
 /** what a job's status says about its down record: the cause's words (the relay's sentence; the vault class its wait) */
 function whyOf(rec) {
   if (!rec || !rec.cause) return null;
-  return rec.cause === 'vault_locked' ? VAULT_WAIT : (rec.error || rec.cause);
+  return rec.cause === 'vault_locked' ? VAULT_WAIT : rec.cause === 'relay_login_dropped' ? `${RELAY_WAIT} (${rec.error || rec.cause})` : (rec.error || rec.cause);
 }
 
 /**
@@ -73,4 +79,4 @@ function noticeVerdict({ prev = null, next, url = null, at = 0 } = {}) {
   return { record, notice: say ? { kind: 'down', cause, what: `public URL ${url} is DOWN — publish failed: ${error} (said once: the next notice is when it is back, or a different cause)` } : null };
 }
 
-module.exports = { causeOf, whyOf, noticeVerdict, CLASSES, VAULT_WAIT, SAID_PER_JOB };
+module.exports = { causeOf, whyOf, noticeVerdict, CLASSES, VAULT_WAIT, RELAY_WAIT, SAID_PER_JOB };

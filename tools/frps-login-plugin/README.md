@@ -62,30 +62,44 @@ grace: { open, until }, lastLegacyAt, since }`.
 A revoke cannot cut a login that is already live (frps has no per-client kick): it ends at that client's next reconnect,
 or now with `sudo systemctl restart frps` (a 5–30 s blip for every public URL).
 
-## Vouching (optional): no shared token even during the grace
+## Vouching (`--knock-file`): REFUTED against frps 0.70.0 — do not use it
 
-frps checks its own `auth.token` AFTER this plugin, on the login the plugin hands back. Started with
-`--knock-file /etc/frp/knock` (a 0600 file holding frps's `auth.token`, readable by the `frps-plugin` user), the
-plugin hands a login it accepted by the instance's OWN token back with frp's privilege key for frps's token
-(`md5(token + timestamp)`, frp's token auth) — so a registered instance never needs the shared token, and a restart
-re-publishes with its vault locked from the day it is registered. Legacy logins are handed back unchanged (frps
-judges their knock). The plugin re-reads the knock file whenever it changes (no restart): emptied, it vouches with the
-empty token frps takes once `auth.token = ""`; removed, it vouches no more. Keep `auth.additionalScopes` empty while vouching (frps would check work connections against the
-shared token too). **UNCONFIRMED against a real frps 0.70.0** — check it on the canary: register it, restart its hub
-with the vault locked; its card must turn green and the audit show `"vouched":true`. Without the flag nothing
-changes (the plugin answers `unchange`).
+**REFUTED (2026-10-30, a production incident).** frps 0.70.0 keys the control connection AFTER the login with its own
+`auth.token`, and frpc keys it with ITS `auth.token` (frp v0.70.0: `server/service.go` `newControlReadWriter(conn,
+svr.auth.EncryptionKey())`, `client/control_session.go` `newControlReadWriter(…, d.auth.EncryptionKey())`, `pkg/auth`
+`key: []byte(token)`). The vouch only rewrites the login's `privilege_key` — it cannot change that key. So while frps
+holds a non-empty `auth.token`, a frpc started without it (a hub restarted with its vault locked) is TAKEN — the audit
+says `"vouched":true` — and frps drops the connection about 16 ms later, unable to read its first frame: no `NewProxy`
+ever reaches this plugin, frps logs `client exit success`, frpc logs `login to server success` again every 1–20 s and
+nothing else. Once frps runs on `auth.token = ""`, a frpc without the shared token logs in by itself. The vouch works
+only when frps's `auth.token` is empty — and then it is not needed.
+
+Without the flag the same frpc is REFUSED at the login (`token in login doesn't match token from configuration`) — a
+refusal the hub reads by name; with it the frpc is taken and dropped in silence. Run the plugin WITHOUT `--knock-file`:
+if it was added to the unit's `ExecStart`, remove it, `sudo systemctl daemon-reload && sudo systemctl restart frps-plugin`.
+The flag still works as before (test-frps-plugin ⑦b) so that removing it is the relay admin's own step.
+
+**The check (the canary for any change to how an instance logs in):** register an instance, restart its hub with the
+vault LOCKED, publish — then look for a `NewProxy` `accept` line for that instance in the audit AFTER the restart. A
+`Login` `accept`, `"vouched":true` or `login to server success` proves nothing. The hub reads it the same way since
+2.369.365 (lane frp-token-proof): only a proxy that ran on a frpc started without the shared token — the same frpc run —
+tells it the relay no longer asks for it; a frpc the lock started without the token is restarted with it at the unlock;
+a frpc whose logins the relay keeps dropping is ONE For-you item («the relay accepts this instance's login but closes
+the connection right after»). test-frps-plugin ⑦c models frps 0.70.0's keyed control on a stub frps (no frps binary).
 
 ## Ending the grace
 
 1. `relay-admin legacy` shows no use for 24 h and `curl 127.0.0.1:7001/healthz` shows `"legacyLive":0`.
-2. Vouching (`--knock-file`)? Empty the knock file FIRST: `sudo sh -c ': > /etc/frp/knock'` — the plugin re-reads it at the
-   next login and vouches with the empty token frps takes from step 3 on (skipped, every registered instance would be
-   refused until the plugin restarts).
+2. Was the plugin started with `--knock-file`? Remove the flag first (see «Vouching» — REFUTED); if it must stay until
+   step 3, empty the knock file FIRST: `sudo sh -c ': > /etc/frp/knock'` — the plugin re-reads it at the next login and
+   vouches with the empty token frps takes from step 3 on.
 3. `relay-admin grace off`, then set `auth.token = ""` in `/etc/frp/frps.toml` and `sudo systemctl restart frps`.
 4. Each instance stops sending the shared token by itself within about a minute: its frp plugin reads the relay
    refusing it in frpc's log and restarts frpc without it (the card's 「The relay no longer asks the shared token」
-   does the same by hand). Once a proxy ran and a login succeeded without it, the instance drops its vault entry
-   `frp:token` (at the next unlock when the vault is locked). Nothing shared is left.
+   does the same by hand) — WITHOUT `--knock-file` only: a vouching plugin takes that login and frps (on `auth.token =
+   ""`) drops the frpc still keying with the shared token, so nothing is refused for the hub to read. Once a proxy RAN on
+   a frpc started without the shared token (a login is no proof), the instance drops its vault entry `frp:token` (at the
+   next unlock when the vault is locked) and says so in For you. Nothing shared is left.
 
 ## Rollback
 

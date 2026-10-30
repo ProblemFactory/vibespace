@@ -15,13 +15,13 @@
 //             by ANOTHER owner ⇒ `name_in_use:<its label>` + a `conflict` audit line; one nobody holds ⇒ this owner's from
 //             now on (the first claim, persisted — a restart keeps its names). A legacy login never takes a held name.
 //   CloseProxy the live list forgets the proxy (the name stays its owner's).
-// VOUCH (opt-in, --knock-file <frps's auth.token in a 0600 file>): frps runs its OWN auth.token check after this plugin, on
-// the login this plugin hands back — a login accepted by the instance's OWN token gets frp's privilege key for that token
-// (md5(token + timestamp), frp's token auth), so an instance never needs the shared token, not even during the grace (a
-// restart re-publishes with the vault locked from the day it is registered). Legacy logins are handed back unchanged
-// (frps judges their knock). The file is re-read whenever it changes: emptied at the grace's end it vouches with the empty
-// token frps then takes (README «Ending the grace» step 1). UNCONFIRMED against a real frps 0.70.0 — the rollout's
-// canary checks it (README); without the flag the plugin answers `unchange` and frps keeps asking the shared token.
+// VOUCH (opt-in, --knock-file <frps's auth.token in a 0600 file>) — REFUTED against frps 0.70.0 (lane frp-token-proof,
+// 2026-10-30, a production incident): a login accepted by the instance's OWN token gets frp's privilege key for frps's
+// token (md5(token + timestamp)), so frps's own auth.token check passes — but frps then keys the CONTROL connection with
+// its auth.token and frpc with its own, so a frpc without the shared token is taken and dropped ~16 ms later (no NewProxy
+// ever reaches this plugin). It works only once frps's auth.token is empty — when no vouch is needed. Without the flag
+// that frpc is refused at the login, by name. Kept working as it was (the relay admin removes the flag — README
+// «Vouching»); legacy logins are handed back unchanged; the file is re-read whenever it changes (q-052).
 // Every refusal is named; an unreadable table, a malformed body, an op we were not built for ⇒ refused (fail closed).
 // The audit (JSONL, 0600) never holds a token nor a hash. Node ≥ 20, no dependencies (./table.js).
 // Run: node plugin.js --table /var/lib/frps-plugin/relay-instances.json --listen 127.0.0.1:7001 --audit /var/log/frps-plugin/audit.jsonl

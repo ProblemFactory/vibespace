@@ -225,18 +225,26 @@ module.exports = {
     };
     const logSize = () => { try { return fs.statSync(path.join(frpDir(), 'frpc.log')).size; } catch { return 0; } };
     const forYou = () => { try { return h.opts && typeof h.opts.forYou === 'function' ? h.opts.forYou() : null; } catch { return null; } };
+    /** THE PLUGIN'S ONE For-you door (origin plugin · frp — never a token): a name the relay refused, the dropped login, the
+     *  shared token's retirement. `itemKey` = one item whatever its words say (the dropped login's count moves); `open` = the
+     *  click goes to Plugins › Public URLs. → the item, or null (no store wired: the caller's journal line says it) */
+    const fileItem = (a, { itemKey = null, open = null } = {}) => {
+      const ut = forYou();
+      if (!ut || typeof ut.add !== 'function') return null;
+      try { return ut.add('frp', { origin: 'plugin', plugin: 'frp', kind: 'notice', urgency: 'high', by: 'agent', sessionName: 'Public URLs (frp)', text: a.text, detail: a.detail, i18n: a.i18n, ...(itemKey ? { itemKey } : {}), ...(open ? { open } : {}) }); } catch (e) { console.warn('[plugins] frp: a For-you item was not filed:', e.message); return null; }
+    };
+    const PUBLIC_URLS_DOOR = { kind: 'plugin-settings', plugin: 'frp' };
     /** a public name the relay refused (name_in_use / name_not_yours) ⇒ ONE For-you item per name — never the token */
     const relayAlert = (ref, name) => {
       const a = RT.alertOf(ref, { name });
       if (!a) return;
-      const ut = forYou();
-      if (!ut || typeof ut.add !== 'function') { console.warn(`[plugins] frp: the relay refused the public name ${name} (${ref.code}) — no For-you store is wired, so only this journal says so`); return; }
-      try { ut.add('frp', { origin: 'plugin', plugin: 'frp', kind: 'notice', urgency: 'high', by: 'agent', sessionName: 'Public URLs (frp)', text: a.text, detail: a.detail, i18n: a.i18n }); } catch (e) { console.warn('[plugins] frp: the relay name alert was not filed:', e.message); }
+      if (!fileItem(a)) console.warn(`[plugins] frp: the relay refused the public name ${name} (${ref.code}) — no For-you item was filed, so only this journal says so`);
     };
     /** THE KNOCK'S RETIREMENT (design q-051 §3 ②, RETIRE_ID): once a proxy RAN on a frpc started WITHOUT the shared token —
      *  both facts of ONE run (`relayKnocklessRun`, lane frp-token-proof; a login is no proof) — the relay no longer asks and
      *  the shared token leaves this instance: the vault's `frp:token` entry dropped (at the next unlock when LOCKED now), a
-     *  plaintext override too. The cluster's env token is the cluster's (it is simply no longer sent). */
+     *  plaintext override too — and SAID (one For-you item naming the entry and why: a drop is never silent). The cluster's
+     *  env token is the cluster's (it is simply no longer sent). */
     const retireLegacy = () => {
       const p = h.peek();
       if (!knocklessProven(p) || !p.relayPublishedAt || p.legacyRetired) return false;
@@ -248,10 +256,12 @@ module.exports = {
         if (!r.ok) { console.warn(`[plugins] frp: the shared relay token was not dropped from the vault (${r.code}) — the next unlock retries`); return false; }
       }
       const w = h.rec();
+      const held = c.tokenSealed ? FRP_ENTRY : c.token ? 'plugins.json' : null;   // what this instance held (the cluster's env token: nothing to drop)
       if (w.config) { delete w.config.token; delete w.config.tokenSealed; if (!Object.keys(w.config).length) delete w.config; }
       w.legacyRetired = { id: RETIRE_ID, at: Date.now(), run: p.relayKnocklessRun };
       h.save(); h.notify();
       console.log(`[plugins] frp: the shared relay token left this instance (${RETIRE_ID}) — a proxy ran without it (frpc run ${p.relayKnocklessRun}); it logs in with its own token only`);
+      if (held) fileItem(RT.retiredAlertOf({ entry: held, at: p.relayKnocklessAt }), { open: PUBLIC_URLS_DOOR });
       return true;
     };
     /** THE RUN'S LOG (lane frp-token-proof): frpc.log read FORWARD from where this run began (`frpcLogFrom`), new bytes only
@@ -280,18 +290,42 @@ module.exports = {
     };
     /** a proxy started in THIS run (the hub saw one run, or frpc's log says one started) — the unlock's restart reads it */
     const ranThisRun = () => { const p = h.peek(), rid = runIdOf(p.frpcRun); return !!(rid && p.frpcProxyRun === rid) || runScan().proxies > 0; };
-    /** what the running frpc's login says, acted on: the relay refusing the knock while this instance holds its own token ⇒
-     *  ONE restart without it (≤ 1 per 10 min). A login never records the relay as no longer asking (lane frp-token-proof:
-     *  frps 0.70.0 takes a vouched login and drops it — only a proxy that ran does: relayPublished). */
+    /** THE DROPPED LOGIN (lane frp-token-proof): the running frpc started WITHOUT the shared token and the relay takes its
+     *  logins and closes each at once (RT.droppedOf over this run's log) ⇒ `dropped` = { run, logins, since, why } — read by
+     *  publish (its error at once: never a 5 s poll per name, never «is the domain / DNS set up?»), the card and the status;
+     *  ONE For-you item per run (its count refreshed ≤ every 10 min while it is open), done once a proxy runs */
+    let dropped = null;
+    const droppedWhy = (p) => (p.frpcKnockless === 'locked' ? 'locked' : p.frpcKnockless === 'none' ? 'none' : 'off');
+    const noteRun = () => {
+      const p = h.peek(), sc = runScan();
+      if (!frpDaemonPid() || !RT.droppedOf(sc, { knock: p.frpcKnock !== false })) { dropped = null; return null; }
+      const run = runIdOf(p.frpcRun) || sc.run;
+      dropped = { run, logins: sc.logins, since: (p.frpcRun && p.frpcRun.at) || null, why: droppedWhy(p) };
+      const said = p.relayDropSaid || {};
+      const due = said.run !== run || (said.itemId && Date.now() - (said.at || 0) >= 600e3 && (() => { try { const it = forYou().get(said.itemId); return !!it && it.status === 'open'; } catch { return false; } })());
+      if (due) {
+        const a = RT.droppedAlertOf({ logins: sc.logins, since: dropped.since, why: dropped.why });
+        const item = fileItem(a, { itemKey: 'relay-login-dropped', open: PUBLIC_URLS_DOOR });
+        if (said.run !== run) console.warn(`[plugins] frp: ${a.message}${item ? ' (one For-you item)' : ''}`);
+        const w = h.rec(); w.relayDropSaid = { run, at: Date.now(), itemId: item ? item.id : null }; h.save();
+      }
+      return dropped;
+    };
+    const droppedError = () => Object.assign(new Error(RT.droppedAlertOf({ logins: dropped.logins, since: dropped.since, why: dropped.why }).message), { code: 'relay_login_dropped' });
+    /** what the running frpc's log says, acted on (once a minute and before a publish): the relay refusing the knock while this
+     *  instance holds its own token ⇒ ONE restart without it (≤ 1 per 10 min); the dropped login ⇒ its named state. A login
+     *  never records the relay as no longer asking (lane frp-token-proof — only a proxy that ran does: relayPublished). */
     const observe = () => {
       const p = h.peek();
-      if (!frpDaemonPid() || !['instance', 'cluster'].includes(p.frpcIdentity)) return null;
+      if (!frpDaemonPid() || !['instance', 'cluster'].includes(p.frpcIdentity)) { dropped = null; return null; }
       const ls = loginState();
       if (ls && !ls.ok && ls.code === 'knock_refused' && p.frpcKnock === true && !(Date.now() - (p.knockTrialAt || 0) < 600e3)) {
         const w = h.rec(); w.knockTrialAt = Date.now(); h.save();
         console.log('[plugins] frp: the relay refused the shared token — restarting frpc with this instance\'s own token only');
         restartSoon({ knock: false }, 'without the shared token');
+        return ls;
       }
+      noteRun();
       return ls;
     };
     /** a restart that waits for the old frpc to leave (its admin port) — never blocking the loop */
@@ -321,6 +355,8 @@ module.exports = {
       if (!w.relayPublishedAt) { w.relayPublishedAt = Date.now(); dirty = true; }
       if (thisRun && w.frpcProxyRun !== rid) { w.frpcProxyRun = rid; dirty = true; }
       if (thisRun && w.frpcKnock === false && !knocklessProven(w)) { w.relayKnocklessAt = Date.now(); w.relayKnocklessRun = rid; dirty = true; console.log(`[plugins] frp: a proxy ran on a frpc started without the shared token (run ${rid}) — the relay no longer asks for it`); }
+      if (w.relayDropSaid && w.relayDropSaid.itemId) { const id = w.relayDropSaid.itemId; delete w.relayDropSaid; dirty = true; try { const it = forYou().get(id); if (it && it.status === 'open') forYou().setStatus(id, 'done', 'frp'); } catch { } }
+      dropped = null;
       if (dirty) h.save();
       if (sub && p.frpcIdentity === 'instance') { const r = relayRead().rec; if (r && r.token && !r.subdomains.includes(sub)) { try { relayWrite(RT.withSub(r, sub)); } catch (e) { console.warn('[plugins] frp: the relay record kept no subdomain:', e.message); } } }
       retireLegacy();
@@ -369,15 +405,20 @@ module.exports = {
     };
     /** the Relay card's facts — never the token (the registration line carries its sha256 only) */
     const relayStatus = (c) => {
-      const r = relayRead(), rec = r.rec, ident = c.ident, p = h.peek();
+      const r = relayRead(), rec = r.rec, ident = c.ident, p = h.peek(), running = !!frpDaemonPid();
       const lines = !rec ? [] : rec.revokedAt ? [RT.registrationLine(rec, sha256, 'revoke')] : [RT.registrationLine(rec, sha256, 'add'), ...(rec.rotatedAt ? [RT.registrationLine(rec, sha256, 'rotate')] : [])];
       return {
         kind: ident.kind, file: r.state, user: ident.user || null, instanceId: rec ? rec.instanceId : null, label: rec ? rec.label : null,
         prefixes: ident.prefixes, subdomains: rec ? rec.subdomains : [], mintedAt: rec ? rec.mintedAt : null, rotatedAt: rec ? rec.rotatedAt : null, revokedAt: rec ? rec.revokedAt : null,
         lines: ident.kind === 'instance' || ident.kind === 'revoked' ? lines.filter(Boolean) : [],
-        login: frpDaemonPid() ? loginState() : null,
+        login: running ? loginState() : null,
         knock: c.knockOff ? 'off' : c.knockLocked ? 'locked' : c.token ? 'on' : 'none',
         upgradedAt: p.relayUpgradedAt || (knocklessProven(p) ? p.relayKnocklessAt : null), publishedAt: p.relayPublishedAt || null, retired: p.legacyRetired || null,
+        // lane frp-token-proof: the running frpc's run — what its log counts; the dropped login by name; a frpc the lock started
+        // without the shared token says its restart at the unlock is EXPECTED (the unlock takes it unless a proxy ran)
+        run: running ? { at: (p.frpcRun && p.frpcRun.at) || null, knock: p.frpcKnock !== false, logins: runScan().logins, proxies: runScan().proxies } : null,
+        dropped: running && dropped ? { logins: dropped.logins, since: dropped.since, why: dropped.why } : null,
+        restartAtUnlock: !!(running && p.frpcKnock === false && p.frpcKnockless === 'locked' && !knocklessProven(p) && !ranThisRun()),
       };
     };
 
@@ -508,8 +549,12 @@ module.exports = {
         const rec = h.rec();
         rec.desiredUp = true;
         rec.frpcKnock = !!knock; rec.frpcIdentity = cfg.ident.token ? cfg.ident.kind : 'none'; rec.frpcLogFrom = logFrom;   // what THIS frpc logs in with
-        rec.frpcRun = { pid: child.pid, at: Date.now() };   // lane frp-token-proof: THIS run — the proof is stamped with it
+        // lane frp-token-proof: THIS run (the proof is stamped with it) and why it sends no knock — `locked` = the vault kept
+        // the shared token closed: during the grace the relay drops such a frpc, so the unlock restarts it WITH the token
+        rec.frpcRun = { pid: child.pid, at: Date.now() };
+        if (knock) delete rec.frpcKnockless; else rec.frpcKnockless = cfg.knockLocked ? 'locked' : cfg.knockOff ? 'off' : !withKnock && cfg.token ? 'trial' : 'none';
         h.save();
+        if (!knock && cfg.knockLocked) console.log('[plugins] frp: frpc starts without the shared relay token (the vault is locked) — the relay may drop it until the unlock, which restarts frpc with the token');
         watchLogin(true);
         setTimeout(() => h.notify(), 1200);
         return { starting: true };
@@ -517,6 +562,7 @@ module.exports = {
 
       stop() {
         watchLogin(false);
+        dropped = null;
         const pid = frpDaemonPid();
         if (pid) { try { process.kill(pid, 'SIGTERM'); } catch { } }
         try { fs.unlinkSync(frpPidFile()); } catch { }
@@ -566,6 +612,7 @@ module.exports = {
         if (!frpConfigured()) throw new Error('public URLs are not available — the frp relay is not configured on this instance');
         if (!frpDaemonPid()) { verbs.start(); await new Promise((r) => setTimeout(r, 1500)); }
         try { observe(); } catch { }
+        if (dropped) throw droppedError();   // lane frp-token-proof: no proxy can start on this run — said at once, by name
         const cfg = frpCfg();
         const safe = String(name).replace(/[^\w-]/g, '_').slice(0, 60);
         const file = path.join(frpProxiesDir(), safe + '.toml');
@@ -605,6 +652,8 @@ module.exports = {
           }
           try { fs.unlinkSync(file); await frpReload(); } catch { }
           if (refused) throw Object.assign(new Error(`the relay refused ${sub}: ${refused}`), { code: 'relay_refused' });
+          try { noteRun(); } catch { }
+          if (dropped) throw droppedError();   // nothing was refused: the relay dropped the login — never «DNS»
           throw new Error('could not publish the subdomain on the relay (is the domain / DNS set up?)');
         }
 
@@ -637,8 +686,11 @@ module.exports = {
             }
             if (p && (p.status === 'error' || p.status === 'closed' || p.status === 'start error')) { const why = refusal(p, safe); lastErr = why || p.err || 'port unavailable'; break; }
           }
+          try { noteRun(); } catch { }
+          if (dropped) break;   // lane frp-token-proof: the port is not the cause — no other port is tried
         }
         try { fs.unlinkSync(file); await frpReload(); } catch { }
+        if (dropped) throw droppedError();
         throw new Error('could not allocate a public port on the relay' + (lastErr ? ' (' + lastErr + ')' : ''));
       },
 

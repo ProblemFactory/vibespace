@@ -9742,6 +9742,13 @@ export default {
   "The relay holds a different name list for this instance — its record here or at the relay was changed. Rotate the relay token in Plugins › Public URLs and send the new registration line to the relay admin.": "リレーに登録されたこのインスタンスの名前一覧が違います — こちらかリレー側の記録が変更されています。プラグイン › 公開 URL でリレートークンをローテーションし、新しい登録行をリレー管理者に送ってください。", // lane relay-token-per-instance
   "Relay token revoked — mint a new one": "リレートークンは取り消されました — 新しく発行してください", // lane relay-token-per-instance
   "Own relay token": "自分のリレートークン", // lane relay-token-per-instance
+  "The relay accepts this instance's login but closes the connection right after ({n} logins since {since}, no proxy started)": "リレーはこのインスタンスのログインを受け付けますが、直後に接続を閉じます（{since} 以降 {n} 回ログイン、プロキシは一つも起動していません）", // lane frp-token-proof
+  "The relay still requires the shared relay token, and this frpc runs without it because the vault was locked when it started. Unlock the vault with the second password, or set the relay token again in Plugins › Public URLs.": "リレーはまだ共有リレートークンを必要としていますが、この frpc は起動時に保管庫がロックされていたためトークンなしで動いています。第二パスワードで保管庫のロックを解除するか、プラグイン › 公開 URL でリレートークンを設定し直してください。", // lane frp-token-proof
+  "The relay still requires the shared relay token, and this instance holds none. Set the relay token again in Plugins › Public URLs.": "リレーはまだ共有リレートークンを必要としていますが、このインスタンスはそれを持っていません。プラグイン › 公開 URL でリレートークンを設定し直してください。", // lane frp-token-proof
+  "The relay still requires the shared relay token, and this frpc runs without it (the relay was taken to no longer ask for it). Set the relay token again in Plugins › Public URLs.": "リレーはまだ共有リレートークンを必要としていますが、この frpc はトークンなしで動いています（リレーがもう求めないと判断されていました）。プラグイン › 公開 URL でリレートークンを設定し直してください。", // lane frp-token-proof
+  "The shared relay token ({entry}) left this instance": "共有リレートークン（{entry}）はこのインスタンスから削除されました", // lane frp-token-proof
+  "A public URL ran on a frpc started without it ({at}), so the relay no longer asks for it. If public URLs fail later, set the relay token again in Plugins › Public URLs.": "トークンなしで起動した frpc で公開 URL が動いた（{at}）ため、リレーはもうそれを求めていません。後で公開 URL が失敗したら、プラグイン › 公開 URL でリレートークンを設定し直してください。", // lane frp-token-proof
+  "the relay drops its login — no proxy started": "リレーはログイン直後に切断 — プロキシは起動していません", // lane frp-token-proof
   "A person stored it — in this window, a card or Settings": "人が保存しました——このウィンドウ、カード、または設定で", // lane vault-window-v2
   "A person scanned or pasted it": "人がスキャンまたは貼り付けで保存しました", // lane vault-window-v2
   "VibeSpace made it itself — nobody typed it in": "VibeSpace が自分で生成しました——誰も入力していません", // lane vault-window-v2

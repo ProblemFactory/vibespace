@@ -20,6 +20,14 @@
 //      field as frps sent it); a legacy login is handed back unchanged; no flag ⇒ unchange. q-052: the knock file is
 //      re-read on change — the grace's end with the plugin running (emptied file, frps on auth.token = "") still lets a
 //      registered instance in (a fake frps verifies the key); RED control = the pre-fix read-once
+//   ⑦c THE CONTROL AFTER THE LOGIN (lane frp-token-proof, 2026-10-30 — the vouch REFUTED by a production incident): a stub
+//      frps modelled on frp v0.70.0 (server/service.go: the plugin, then its own privilege-key check, then the control
+//      connection KEYED with its auth.token — frpc keys it with its own; different keys ⇒ the first frame is unreadable, the
+//      connection dropped, no NewProxy reaches the plugin). A frpc WITHOUT the shared token, vouched, frps on the shared
+//      token: Login accept + "vouched":true, NO NewProxy — the old canary criterion («vouched»:true) passes on that very
+//      transcript, the new one (a NewProxy accept after the locked restart) fails it; with the token: a NewProxy accept;
+//      without the flag: the login REFUSED by name; frps on auth.token = "": accepted with or without the vouch. The
+//      README marks the vouch REFUTED and names the new check (RED on the base README)
 //   ⑧ MUTANTS (compiled in memory at the real path) ⇒ RED: no revoke check · no name ownership · the grace for ever
 // Run: node scripts/test-frps-plugin.mjs
 import fs from 'node:fs';
@@ -324,6 +332,55 @@ console.log('⑦b VOUCH (opt-in --knock-file)');
   ok(geM.before && !geM.after, 'RED control: the pre-fix read-once knock still vouches md5(<old token> + ts) — frps on auth.token = "" refuses the registered instance', geM);
   const bad = spawnSync(process.execPath, [PLUGIN, '--table', w2.file, '--listen', '127.0.0.1:0', '--knock-file', path.join(w2.d, 'no-such-knock')], { encoding: 'utf8', timeout: 5000 });
   ok(bad.status === 1 && /--knock-file .*ENOENT/.test(bad.stderr), 'a --knock-file that cannot be read at start fails the start by name (exit 1)', { status: bad.status, err: bad.stderr });
+}
+
+console.log('⑦c THE CONTROL AFTER THE LOGIN — a stub frps 0.70.0 (the vouch REFUTED)');
+{
+  const md5 = (t) => crypto.createHash('md5').update(String(t)).digest('hex');
+  /** THE STUB frps 0.70.0 — one frpc connection: Login (the plugin, then frps's own privilege-key check against ITS auth.token),
+   *  then the control connection keyed with frps's auth.token on its side and frpc's auth.token (`knock`) on the client's:
+   *  different keys ⇒ frps cannot read the client's first frame (its NewProxy) and closes ("client exit success") */
+  async function frps070(s, { frpsToken, user, token, knock, ts, sub }) {
+    const c = { ...login(user, token), timestamp: ts, privilege_key: md5(knock + ts) };
+    const r = await s.op('Login', c);
+    if (r.reject) return { login: 'rejected', reason: r.reject_reason };
+    const m = r.unchange ? c : r.content;
+    if (md5(frpsToken + m.timestamp) !== m.privilege_key) return { login: 'refused', reason: 'token in login doesn\'t match token from configuration' };
+    if (knock !== frpsToken) return { login: 'ok', control: 'dropped' };   // the stream key: frps's auth.token vs frpc's — never the plugin's
+    const np = await s.op('NewProxy', proxy(user, token, `${user}.vibespace-instance`, { subdomain: sub }));
+    return { login: 'ok', control: 'held', proxy: np.reject ? np.reject_reason : 'accept' };
+  }
+  const KNOCK = 'shared-knock-' + crypto.randomBytes(6).toString('hex');
+  const w = world();
+  const kf = path.join(w.d, 'knock'); fs.writeFileSync(kf, KNOCK + '\n', { mode: 0o600 });
+  const sv = await serve(w, require(PLUGIN), { knockFile: kf });
+  const w2 = world();
+  const sn = await serve(w2);
+  try {
+    // the hub restarted with its vault LOCKED: frpc logs in with its own token, no shared token (frpc's auth.token = '')
+    const t0 = auditOf(w).length;
+    const locked = await frps070(sv, { frpsToken: KNOCK, user: w.A.id, token: w.A.token, knock: '', ts: 1793300000, sub: 'vsowned00002' });
+    const tr = auditOf(w).slice(t0);
+    ok(locked.login === 'ok' && locked.control === 'dropped', 'a frpc WITHOUT the shared token, vouched, frps still on the shared token: the login passes frps\'s check — then the keyed control is dropped (the incident: 2459 logins, 0 proxies)', locked);
+    ok(tr.some((x) => x.op === 'Login' && x.verdict === 'accept' && x.vouched === true) && !tr.some((x) => x.op === 'NewProxy'), '…the audit: `Login accept "vouched":true` and NO NewProxy — the plugin never hears one', tr.map((x) => `${x.op}:${x.verdict}${x.vouched ? ':vouched' : ''}`));
+    const oldCheck = (rows, id) => rows.some((x) => x.op === 'Login' && x.user === id && x.vouched === true);   // the README's old canary («"vouched":true»)
+    const newCheck = (rows, id) => rows.some((x) => x.op === 'NewProxy' && x.user === id && x.verdict === 'accept');   // THE CHECK: a NewProxy accept after the locked restart
+    ok(oldCheck(tr, w.A.id) === true && newCheck(tr, w.A.id) === false, 'THE CANARY: the old criterion («"vouched":true») PASSES on this transcript while nothing published — the new one (a NewProxy accept after the locked restart) fails it', { old: oldCheck(tr, w.A.id), new: newCheck(tr, w.A.id) });
+    const t1 = auditOf(w).length;
+    const knocked = await frps070(sv, { frpsToken: KNOCK, user: w.A.id, token: w.A.token, knock: KNOCK, ts: 1793300100, sub: 'vsowned00002' });
+    ok(knocked.control === 'held' && knocked.proxy === 'accept' && newCheck(auditOf(w).slice(t1), w.A.id), 'the same frpc WITH the shared token: the control holds, its NewProxy is accepted (the check passes)', knocked);
+    const plain = await frps070(sn, { frpsToken: KNOCK, user: w2.A.id, token: w2.A.token, knock: '', ts: 1793300200, sub: 'vsowned00003' });
+    ok(plain.login === 'refused' && /token in login doesn't match/.test(plain.reason), 'WITHOUT --knock-file the token-less frpc is REFUSED at the login, by name (frpc logs it; the hub reads it) — the vouch turned that refusal into a silent drop', plain);
+    fs.writeFileSync(kf, '');
+    const ended = await frps070(sv, { frpsToken: '', user: w.A.id, token: w.A.token, knock: '', ts: 1793300300, sub: 'vsowned00002' });
+    const endedPlain = await frps070(sn, { frpsToken: '', user: w2.A.id, token: w2.A.token, knock: '', ts: 1793300400, sub: 'vsowned00003' });
+    ok(ended.proxy === 'accept' && endedPlain.proxy === 'accept', 'frps on auth.token = "" (the grace over): the token-less frpc publishes — with the vouch AND without it (the vouch is never what makes it work)', { ended, endedPlain });
+  } finally { await sv.close(); await sn.close(); }
+  const RD = fs.readFileSync(path.join(DIR, 'README.md'), 'utf8');
+  const sec = (RD.split(/^## /m).find((x) => /^Vouching/.test(x)) || '');
+  ok(/REFUTED against frps 0\.70\.0/.test(sec.split('\n')[0]) && /keys the control connection AFTER the login/.test(sec), 'the README: the vouch section is headed REFUTED against frps 0.70.0 and says why (the control keyed with auth.token)', sec.split('\n')[0]);
+  ok(/a `NewProxy` `accept` line for that instance in the audit AFTER the restart/.test(sec) && /`"vouched":true`[^.]*proves\s+nothing/.test(sec) && !/UNCONFIRMED/.test(RD), 'the README\'s check is a NewProxy accept after a restart with the vault locked — «vouched»:true proves nothing; no «UNCONFIRMED» left', sec.slice(0, 200));
+  ok(/REFUTED against frps 0\.70\.0/.test(fs.readFileSync(PLUGIN, 'utf8').split('\nconst http')[0]), 'the plugin\'s header says REFUTED too');
 }
 
 console.log('⑧ MUTANTS ⇒ RED');

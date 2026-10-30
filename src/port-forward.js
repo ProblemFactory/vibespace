@@ -129,6 +129,7 @@ class PortForwardManager {
     rec.publicSub = r.subdomain || rec.publicSub || null;
     rec.publicPort = r.remotePort || rec.publicPort || null;
     this._published.add(rec.id);
+    this._dropSaid = false;   // lane frp-token-proof: the relay takes a login again — the next drop is a new episode
     // lane job-notice-dedupe (fb-666f37fd38): the relay's success is THE fact a service job's public-URL state follows — told
     // here, in the same tick, whoever published (the heal sweep, a restore, a machine link, the Ports panel, the job itself)
     try { const jm = this.getJobs && this.getJobs(); if (jm && typeof jm.relayPublished === 'function') jm.relayPublished(rec, r.url || null); } catch (e) { this.log('jobs follow ' + rec.id + ': ' + e.message); }
@@ -686,10 +687,14 @@ class PortForwardManager {
       this._adoptPublish(rec, r);
       return true;
     } catch (e) {
-      this.log('re-publish ' + rec.id + ': ' + e.message);
+      // lane frp-token-proof: THE DROPPED LOGIN is the relay's state, not this forward's — ONE journal line per episode (the
+      // frp plugin's For-you item carries it), never a line per forward per sweep; the forward's error is its words
+      const dropped = e && e.code === 'relay_login_dropped';
+      if (!dropped) this.log('re-publish ' + rec.id + ': ' + e.message);
+      else if (!this._dropSaid) { this._dropSaid = true; this.log('re-publish: ' + e.message + ' (said once — every published forward waits for it)'); }
       this._published.delete(rec.id);
       try { await this.plugins.frpUnpublish(rec.publicName || rec.id); } catch { }
-      rec.error = 'public URL down — retrying republish';
+      rec.error = dropped ? 'public URL down — ' + e.message : 'public URL down — retrying republish';
       return false;
     }
   }
