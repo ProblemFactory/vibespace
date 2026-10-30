@@ -267,9 +267,7 @@ function retireDuplicate(sockFile, socketPath, id, claudeSessionId) {
     }
   }, () => { });
   try { fs.unlinkSync(socketPath); } catch {}
-  try { fs.unlinkSync(path.join(BUFFERS_DIR, id + '.buf')); } catch {}
-  fs.rm(path.join(BUFFERS_DIR, id + '.img'), { recursive: true, force: true }, () => { }); // the copies' kept pictures go with the buffer (r5; off the loop, r6)
-  try { fs.unlinkSync(path.join(BUFFERS_DIR, id + '.json')); } catch {}
+  require('./wrapper-files.js').removeWrapperFiles(BUFFERS_DIR, id); // THE ONE LIST (lane human-cli r5): round 4 left this path's .receipts to the 7-day sweep
   deleteSessionMeta(sockFile);
 }
 

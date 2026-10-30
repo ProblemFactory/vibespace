@@ -206,7 +206,7 @@ function pickCodexThreadCandidate({ activeSessions, webuiSessionId, cwd, created
 // on the STREAM (2.241.1 rule: pipe errors arrive as stream 'error' events).
 const { REMOTE_PRELUDE, nodeFinder, buildRemoteExec } = require('./remote-shell.js');
 const { sweepWriters } = require('./writer-sweep.js');
-const { wrapperCaps, notificationSteerOf, LEGACY_QUEUE_VERBS, QUEUE_EDIT_MAX_CHARS, QUEUE_OP_MAX_BYTES } = require('./server/wrapper-files.js');
+const { wrapperCaps, notificationSteerOf, LEGACY_QUEUE_VERBS, QUEUE_EDIT_MAX_CHARS, QUEUE_OP_MAX_BYTES, removeWrapperFiles } = require('./server/wrapper-files.js');
 // perf lane chunk D: resume BY SEQ — the attach's rung (PURE) + the entry's capability/arming state
 const { armResume, clientCaps, resumeFor, attachedFrameText } = require('./server/session-broadcast.js');
 // perf r1: the slab an attach asked for (`slab:'floor'|'text'`) → the text window's opts
@@ -367,11 +367,9 @@ function registerWsHandler(wss, ctx) {
       }
       if (session.pty) session.pty.kill();
       if (session.sockName) deleteSessionMeta(session.sockName);
-      // Clean up wrapper buffer files
-      fs.unlink(path.join(BUFFERS_DIR, data.sessionId + '.receipts'), () => { }); // the wrapper's receipts (lane human-cli r4): its own exit removes them, not when it is killed past that — off the loop
-      try { fs.unlinkSync(path.join(BUFFERS_DIR, data.sessionId + '.json')); } catch {}
-      try { fs.unlinkSync(path.join(BUFFERS_DIR, data.sessionId + '.buf')); } catch {}
-      fs.rm(path.join(BUFFERS_DIR, data.sessionId + '.img'), { recursive: true, force: true }, () => { }); // the copies' kept pictures (lane claude-steer-inject r5) go with the buffer — off the loop (r6)
+      // Clean up wrapper buffer files — THE ONE LIST (src/server/wrapper-files.js, lane human-cli r5): .buf, .json, and the
+      // .receipts a wrapper killed past its own exit handler leaves (off the loop)
+      removeWrapperFiles(BUFFERS_DIR, data.sessionId);
       // Per-session agentd attach cfg (0600 — vsht_ host token + full
       // spawn command) accumulated forever (audit #16/#53). The path is
       // derivable, so a restart-restored session (in-memory field lost)

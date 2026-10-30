@@ -1008,9 +1008,11 @@ function tombTeardown(eng, id, metaObj) {
   const stdoutSrc = read('src/server/session-stdout.js');
   {
     const CATCH = '      } catch { /* no buffer / read failed — nothing to keep */ }\n';
-    const SWEEP_END = '      } catch {}\n      try { fs.unlinkSync(path.join(BUFFERS_DIR, id + \'.buf\')); } catch {}\n';
+    // the line after the tomb sweep: the wrapper files' removal — THE ONE LIST since lane human-cli r5 (it was the .buf unlink)
+    const AFTER = "      require('./wrapper-files.js').removeWrapperFiles(BUFFERS_DIR, id);";
+    const SWEEP_END = '      } catch {}\n' + AFTER;
     const inside = stdoutSrc.includes(CATCH) && stdoutSrc.includes(SWEEP_END)
-      ? stdoutSrc.replace(CATCH, '').replace(SWEEP_END, '      } catch {}\n' + CATCH + '      try { fs.unlinkSync(path.join(BUFFERS_DIR, id + \'.buf\')); } catch {}\n') : stdoutSrc;
+      ? stdoutSrc.replace(CATCH, '').replace(SWEEP_END, '      } catch {}\n' + CATCH + AFTER) : stdoutSrc;
     ok(inside !== stdoutSrc, 'control (no-buf): the patch applies (tomb write + sweep moved back inside the .buf try)');
     const id = 'sess-xf-tomb-nobuf-ctl', pair = oldPairOf('nobuf-ctl');
     noBufTeardown(makeEngine(M.write('src/server/session-stdout.js', inside, 'bufcatch')), id, pair);

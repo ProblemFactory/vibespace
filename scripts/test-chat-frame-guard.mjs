@@ -345,13 +345,35 @@ setInterval(() => {}, 1e3);
   ok(ws.includes('chat-input REFUSED'), 'every refusal leaves a server-side journal line (the 2.364.1 forensics gap: nothing in the journal)');
   const sv = fs.readFileSync(path.join(REPO, 'server.js'), 'utf8');
   ok(sv.includes("'chat-frames'") && sv.includes('48 * 3600 * 1000'), 'orphaned chat-frames swept age-based (old wrappers never unlink)');
-  // lane human-cli r4: a wrapper killed past its exit handler leaves <id>.receipts — the age sweep (inline in server.js here;
-  // src/server/wrapper-files.js AGED_WRAPPER_FILE once it moved there) and the kill-path teardown take it with the buffer
+  // lane human-cli r4 → r5: a wrapper killed past its exit handler leaves <id>.receipts — THE ONE LIST of a wrapper's files
+  // (src/server/wrapper-files.js WRAPPER_FILE_KINDS) is what the age sweep's pattern AND every end path read (r4 hand-added
+  // .receipts to two end paths and missed boot-restore's retireDuplicate)
   const wfSrc = fs.readFileSync(path.join(REPO, 'src/server/wrapper-files.js'), 'utf8');
-  const sweepPat = (/fn\.match\((\/\^\(\.\+\)\\\.\([^)]*\)\$\/)\);/.exec(sv) || /const AGED_WRAPPER_FILE = (\/[^\n;]*\/);/.exec(wfSrc) || [])[1] || '';
-  ok(!!sweepPat && new RegExp(sweepPat.slice(1, -1)).test('sess-1-2.receipts'), `the age sweep's pattern takes <id>.receipts (${sweepPat || 'no sweep pattern found'})`);
-  ok(fs.readFileSync(path.join(REPO, 'src/server/session-stdout.js'), 'utf8').includes("fs.unlink(path.join(BUFFERS_DIR, id + '.receipts'), () => { });") && fs.readFileSync(path.join(REPO, 'src/ws-handler.js'), 'utf8').includes("fs.unlink(path.join(BUFFERS_DIR, data.sessionId + '.receipts'), () => { });"),
-    'a session\'s end removes <id>.receipts with its buffer (off the loop): the exit teardown (session-stdout) AND the kill (ws-handler endSession)');
+  const WF = require(path.join(REPO, 'src/server/wrapper-files.js'));
+  const kinds = WF.WRAPPER_FILE_KINDS || [];
+  ok(kinds.includes('receipts') && !!WF.AGED_WRAPPER_FILE && kinds.every((k) => WF.AGED_WRAPPER_FILE.test(`sess-1-2.${k}`)) && !WF.AGED_WRAPPER_FILE.test('sess-1-2.bufx'),
+    `the age sweep's pattern is THE ONE LIST's — every kind matches, <id>.receipts among them (${kinds.join(', ') || 'no list'} · ${WF.AGED_WRAPPER_FILE})`);
+  ok(!/\/\^\(\.\+\)\\\.\(buf\|/.test(sv) && !/AGED_WRAPPER_FILE = \//.test(wfSrc), 'no sweep spells a pattern of its own (server.js reads the list\'s; wrapper-files builds it from the list)');
+  const endPaths = [['src/ws-handler.js', 'data.sessionId'], ['src/server/session-stdout.js', 'id'], ['src/server/boot-restore.js', 'id']];
+  const ownList = endPaths.filter(([f, v]) => { const t = fs.readFileSync(path.join(REPO, f), 'utf8'); return !t.includes(`removeWrapperFiles(BUFFERS_DIR, ${v});`) || /\b(unlink|unlinkSync|rm|rmSync)\(path\.join\(BUFFERS_DIR, [\w.]+ \+ '\.(buf|json|receipts|img)'\)/.test(t); }).map(([f]) => f);
+  ok(!ownList.length, `every end path removes THE ONE LIST and spells none of its own — the kill (ws-handler endSession), the exit teardown (session-stdout), a duplicate retired at boot (boot-restore retireDuplicate) (off: ${ownList.join(', ') || 'none'})`);
+  {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-cfg-wf-'));
+    for (const k of [...kinds, 'other']) fs.writeFileSync(path.join(d, `sess-9-9.${k}`), '{}\n');
+    fs.writeFileSync(path.join(d, 'sess-9-99.buf'), '');
+    WF.removeWrapperFiles(d, 'sess-9-9');
+    const atOnce = fs.readdirSync(d);
+    await until(() => fs.readdirSync(d).length === 2, 2000);
+    const later = fs.readdirSync(d).sort().join(', ');
+    fs.rmSync(d, { recursive: true, force: true });
+    ok(!atOnce.includes('sess-9-9.buf') && !atOnce.includes('sess-9-9.json') && later === 'sess-9-9.other, sess-9-99.buf',
+      `removeWrapperFiles takes every kind of THE ONE LIST for that id — the buffer and the sidecar at once (as every end path did), the rest off the loop — and nothing else (left: ${later})`);
+  }
+  // lane human-cli r5: a PLACEHOLDER uuid is never a record's id — src/message-manager.js recordKey's rule, MIRRORED in the
+  // person's CLI (its realUuid + its follower child, which hold no hub module): the three spellings are one
+  const mmSrc = fs.readFileSync(path.join(REPO, 'src/message-manager.js'), 'utf8'), cliSrc = fs.readFileSync(path.join(REPO, 'data/bin/vibespace'), 'utf8');
+  const rkRe = (/if \(u && !(\/[^/\n]+\/)\.test\(u\)\) return 'u:'/.exec(mmSrc) || [])[1], cliRe = (/const PLACEHOLDER_UUID = (\/[^/\n]+\/);/.exec(cliSrc) || [])[1], childRe = (/&& !(\/[^/\n]+\/)\.test\(o\.uuid\)\) return 'uuid\|'/.exec(cliSrc) || [])[1];
+  ok(!!rkRe && rkRe === cliRe && rkRe === childRe, `the placeholder rule is recordKey's, spelled once more in the CLI and once in its follower child — the same (${rkRe} · ${cliRe} · ${childRe})`);
   // ONE receipts grammar across the FOUR chat wrappers: advertised, a torn line nacked, the 250 ms window opened only by an ack asked for
   const four = ['chat-wrapper.js', 'codex-chat-wrapper.js', 'acp-wrapper.js', 'agy-wrapper.js'].map((f) => [f, fs.readFileSync(path.join(REPO, 'data/bin', f), 'utf8')]);
   const offGrammar = four.filter(([, s]) => !(/receipts(: | = )true/.test(s) && s.includes("type: '_stdin_nack'") && s.includes("if (rec.type === '_stdin_ack') lastReceiptAt = Date.now();") && !/^\s*lastReceiptAt = Date\.now\(\);/m.test(s))).map(([f]) => f);

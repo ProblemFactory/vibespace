@@ -143,12 +143,27 @@ function notificationSteerOf(wc, { inBand = null, published = false } = {}) {
   return published ? false : null;
 }
 
+/** THE ONE LIST of the files a chat wrapper keeps beside its session's buffer (lane human-cli r5): the age sweep's
+ *  pattern (AGED_WRAPPER_FILE) and every end path — a kill (ws-handler endSession), the wrapper's exit teardown
+ *  (session-stdout), a duplicate retired at boot (boot-restore retireDuplicate) — read THIS, never a list of their own
+ *  (round 4 added `.receipts` to two of the three end paths by hand and missed the third). */
+const WRAPPER_FILE_KINDS = ['buf', 'json', 'img', 'receipts'];   // img = the copies' kept pictures (lane claude-steer-inject r5): a folder
+const SAME_BREATH = new Set(['buf', 'json']);   // removed at once, as every end path always did (test-exit-forensics §4 reads their absence on the next line)
+/** A session's wrapper files go with it: the buffer and the sidecar at once, every other kind OFF THE LOOP (`fs.rm` with
+ *  a callback — a file or a folder alike); one already gone is no error. */
+function removeWrapperFiles(BUFFERS_DIR, id) {
+  for (const k of WRAPPER_FILE_KINDS) {
+    const f = path.join(BUFFERS_DIR, `${id}.${k}`);
+    if (SAME_BREATH.has(k)) { try { fs.unlinkSync(f); } catch { } } else fs.rm(f, { recursive: true, force: true }, () => { });
+  }
+}
+
 /** THE AGE SWEEP OF THE WRAPPERS' FILES (2.89.1's law; moved here out of server.js's boot by ci358-reds round 2 so a
  *  leg drives the code the hub runs): <id>.buf, <id>.json and <id>.json.<pid>.tmp — the temp a wrapper's persistMeta
  *  renames over its sidecar (ci358-reds item 7), left behind when the wrapper is killed between its write and its rename.
  *  A file is unlinked only when untouched since `cutoff` AND its id is not live: a dead wrapper's files stop being
  *  written, so age is race-free by construction. Returns the count unlinked. */
-const AGED_WRAPPER_FILE = /^(.+)\.(buf|json|json\.\d+\.tmp|img|receipts)$/; // .img = the copies' kept pictures (lane claude-steer-inject r5): a folder, same rule; .receipts (lane human-cli r4): the wrapper's own exit removes it — never when it was killed past that (int362: r4's server.js sweep rule lands here, the ONE sweep)
+const AGED_WRAPPER_FILE = new RegExp(`^(.+)\\.(${[...WRAPPER_FILE_KINDS, 'json\\.\\d+\\.tmp'].join('|')})$`); // THE ONE LIST's kinds (lane human-cli r5) + the json.<pid>.tmp a wrapper killed between its sidecar temp and the rename leaves (ci358-reds item 7)
 function sweepAgedWrapperFiles(BUFFERS_DIR, { cutoff, isActive = () => false } = {}) {
   let swept = 0, names;
   try { names = fs.readdirSync(BUFFERS_DIR); } catch { return 0; }
@@ -164,4 +179,4 @@ function sweepAgedWrapperFiles(BUFFERS_DIR, { cutoff, isActive = () => false } =
   return swept;
 }
 
-module.exports = { resolveWrapperFiles, wrapperCaps, notificationSteerOf, sweepAgedWrapperFiles, LEGACY_QUEUE_VERBS, QUEUE_EDIT_MAX_CHARS, QUEUE_OP_MAX_BYTES };
+module.exports = { resolveWrapperFiles, wrapperCaps, notificationSteerOf, sweepAgedWrapperFiles, LEGACY_QUEUE_VERBS, QUEUE_EDIT_MAX_CHARS, QUEUE_OP_MAX_BYTES, WRAPPER_FILE_KINDS, AGED_WRAPPER_FILE, removeWrapperFiles };

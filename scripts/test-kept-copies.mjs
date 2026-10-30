@@ -121,7 +121,13 @@ for (const n of ['old-1', 'young-1', 'live-1']) { fs.mkdirSync(path.join(sw, n +
 const past = (Date.now() - 9 * 86400000) / 1000; fs.utimesSync(path.join(sw, 'old-1.img'), past, past); fs.utimesSync(path.join(sw, 'live-1.img'), past, past);
 WF.sweepAgedWrapperFiles(sw, { cutoff: Date.now() - 7 * 86400000, isActive: (id) => id === 'live-1' });
 ok(!fs.existsSync(path.join(sw, 'old-1.img')) && fs.existsSync(path.join(sw, 'young-1.img')) && fs.existsSync(path.join(sw, 'live-1.img')), 'the 7-day sweep takes an old <id>.img folder, never a young or a live one');
-ok(/fs\.rm\(path\.join\(BUFFERS_DIR, id \+ '\.img'\)/.test(read('src/server/session-stdout.js')) && /fs\.rm\(path\.join\(BUFFERS_DIR, id \+ '\.img'\)/.test(read('src/server/boot-restore.js')) && /fs\.rm\(path\.join\(BUFFERS_DIR, data\.sessionId \+ '\.img'\)/.test(read('src/ws-handler.js')), 'the kill path, retireDuplicate and ws close take <id>.img beside <id>.buf — off the loop (fs.rm)');
+ok((WF.WRAPPER_FILE_KINDS || []).includes('img') && ['src/server/session-stdout.js', 'src/server/boot-restore.js', 'src/ws-handler.js'].every((f) => /removeWrapperFiles\(BUFFERS_DIR, /.test(read(f))), 'the kill path, retireDuplicate and ws close take <id>.img beside <id>.buf — THE ONE LIST of a wrapper\'s files (src/server/wrapper-files.js WRAPPER_FILE_KINDS, lane human-cli r5), off the loop (fs.rm)');
+{
+  const rw = scratch('kept-copies-remove'); fs.mkdirSync(path.join(rw, 'gone-1.img'), { recursive: true }); fs.writeFileSync(path.join(rw, 'gone-1.img', 'a.png'), 'x');
+  WF.removeWrapperFiles(rw, 'gone-1');
+  for (let i = 0; i < 100 && fs.existsSync(path.join(rw, 'gone-1.img')); i++) await new Promise((r) => setTimeout(r, 20));
+  ok(!fs.existsSync(path.join(rw, 'gone-1.img')), '…removeWrapperFiles takes an <id>.img FOLDER whole (fs.rm recursive, off the loop)');
+}
 
 console.log('⑦ a reference opens only its OWN session\'s file');
 const od = KC.keptDirOf(dir, OTHER);

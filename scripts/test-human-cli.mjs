@@ -20,8 +20,12 @@
 //      stream: each reply once, a shown record's edit said «(updated)»); the baseline BEFORE the history (a FROZEN hub's 2 s:
 //      the record persisted meanwhile shown once); the REAL agy-wrapper's receipts (a hub that answers: sent + acked, a torn
 //      line nacked, its receipts file gone with it); the 250 ms persist window only on a receipt asked for
+//   §8 round 5: ONE clock (a buffer that does not answer is said in 2 s, not two clocks in a row); THE GAP RULE on every
+//      record the follower reports (a reply the transcript history showed, persisted after it, shown once — until a newer
+//      one); its edges (gapFilter); a placeholder uuid is never a record's id (a new reply is never «(updated)»)
 // RED on the base (6428c67e): no data/bin/vibespace, no index; RED on round 1 (5a0b2463): §0, the live-hub attach, the
-// receipt, the piped number, the bare refusal; RED on round 3 (ea0cecce): §7 and the killed session's .receipts (§2).
+// receipt, the piped number, the bare refusal; RED on round 3 (ea0cecce): §7 and the killed session's .receipts (§2);
+// RED on round 4 (ad114fd78): §8.
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -393,6 +397,63 @@ console.log('§7 round 4 — the follower keys on identity, the baseline before 
     ok('…a frame that ASKS for a receipt (a person\'s CLI follows) opens it: its reply is in the buffer well inside the 2 s cadence', followedMs < 1500, `${followedMs} ms`);
     w.kill('SIGTERM');
     await until(() => w.exitCode != null || w.signalCode != null, 5000);
+  }
+  console.log('§8 round 5 — one clock, the gap rule on every record, a placeholder uuid is never a record\'s id');
+  { // §8a ONE CLOCK — the buffer does not answer (a FIFO: stat answers, open waits — a file on a mount that stopped)
+    const id = 'sess-r5-stall', buf = path.join(BUFS7, id + '.buf'), sock = path.join(R4, 's5.sock');
+    await master(sock); const hub = await fakeHub(false);
+    index7([row7(id, { socketPath: sock })], hub.address().port);
+    execFileSync('mkfifo', [buf]);
+    const t0 = Date.now(); let first = null, o = '';
+    const ch = spawn(process.execPath, [CLI, 'chat', id, '--wait', '0'], { env: { ...CLI_ENV, HOME: H7 }, stdio: ['pipe', 'pipe', 'pipe'] });
+    kids.push(ch);
+    ch.stdout.on('data', (d) => { if (first == null) first = Date.now() - t0; o += d; }); ch.stderr.on('data', (d) => { o += d; });
+    ch.stdin.end();
+    await new Promise((r) => { const t = setTimeout(() => { try { ch.kill('SIGKILL'); } catch { } r(); }, 15000); ch.on('exit', () => { clearTimeout(t); r(); }); });
+    fs.rmSync(buf, { force: true });
+    ok('ONE CLOCK (round 5): chat on a session whose buffer does not answer (a FIFO — a file on a mount that stopped) says so inside ONE 2 s clock — its first line ≤ 2.3 s, «no answer in 2 s» (round 4: the history read waited out the follower\'s own 2 s first, ~4 s)',
+      first != null && first <= 2300 && /no answer in 2 s/.test(o), `${first} ms | ${o.slice(-400)}`);
+  }
+  { // §8b THE GAP RULE ON EVERY RECORD — the history from the TRANSCRIPT (claude writes it at once); the wrapper persists the
+    // same reply 1 s later (its cadence while no receipt is asked), after the history is printed
+    const id = 'sess-r5-gap', buf = path.join(BUFS7, id + '.buf'), tr = path.join(R4, 'r5-transcript.jsonl'), sock = path.join(R4, 'g5.sock');
+    await master(sock); const hub = await fakeHub(false);
+    index7([row7(id, { socketPath: sock }, { transcript: tr })], hub.address().port);
+    fs.writeFileSync(tr, [said('HISTORY-0 HCR5', { uuid: 'u5-0' }), said('REPLY-R1 HCR5', { uuid: 'u5-1' })].join('\n') + '\n');
+    fs.writeFileSync(buf, said('HISTORY-0 HCR5', { uuid: 'u5-0' }) + '\n');
+    const run = cli7(['chat', id, '--wait', '3']);
+    await sleep(1000); fs.appendFileSync(buf, said('REPLY-R1 HCR5', { uuid: 'u5-1' }) + '\n');
+    await sleep(1000); fs.appendFileSync(buf, said('REPLY-R2 HCR5', { uuid: 'u5-2' }) + '\n' + said('REPLY-R1 HCR5', { uuid: 'u5-3' }) + '\n');   // a newer reply, then the same words as a NEW record
+    const r = await run;
+    ok('THE GAP RULE ON EVERY RECORD (round 5): a reply the history already showed (the transcript) that the wrapper persists AFTER the history is printed is not shown again — until the follower is past it: a newer reply once, the same words written as a new record once more (round 4: the first printed twice)',
+      count(r.out, 'HISTORY-0 HCR5') === 1 && count(r.out, 'REPLY-R2 HCR5') === 1 && count(r.out, 'REPLY-R1 HCR5') === 2, r.out.slice(-700));
+  }
+  { // §8c THE GAP RULE, its edges — data/bin/vibespace gapFilter, the rule cmdChat applies to every record the follower reports
+    const V = require(CLI);
+    const P = 'aaaaaaaa-bbbb-cccc-dddd-000000000001';
+    const A = said('A', { uuid: 'b-1' }), B = said('B', { uuid: 'b-2' }), Cc = rec({ type: 'queue_changed', items: [] }), D = said('D', { uuid: 'b-4' });
+    const fb = V.gapFilter({ kind: 'buffer', seen: V.seenOf([A, B, Cc].join('\n') + '\n') });
+    const seqB = [[B], [Cc], [D], [Cc]].map(([l]) => fb(JSON.parse(l), { raw: l }));
+    const T1 = said('T1', { uuid: 't-1' }), T1buf = said('T1', { uuid: 't-1', parent_tool_use_id: null }), T2 = rec({ type: 'user', uuid: 't-2', message: { role: 'user', content: 'hi' } });
+    const ft = V.gapFilter({ kind: 'transcript', seen: V.seenOf([T1, T2].join('\n') + '\n') });
+    const seqT = [rec({ type: 'stream_event', uuid: 's-1', event: {} }), T1buf, rec({ type: 'result', uuid: 'r-1', subtype: 'success' }), said('T1', { uuid: P }), said('T3', { uuid: 't-3' }), T1buf].map((l) => ft(JSON.parse(l), { raw: l }));
+    ok('THE GAP RULE\'s edges (round 5): a buffer history — the lines it held are not shown, the first it did not hold is past it, after which a line written again is shown; a transcript history — a message it held is not shown (by uuid), the stream\'s and the wrapper\'s records (no transcript holds them) never say the follower is past it, a placeholder uuid never matches, the first newer message does',
+      seqB.join() === 'false,false,true,true' && seqT.join() === 'true,false,true,true,true,true' && V.realUuid(P) === null && V.realUuid('t-1') === 't-1' && !V.seenOf(said('X', { uuid: P })).has('uuid|' + P),
+      JSON.stringify({ seqB, seqT }));
+  }
+  { // §8d A PLACEHOLDER UUID IS NEVER A RECORD'S ID — across reads as within one
+    const id = 'sess-r5-ph', buf = path.join(BUFS7, id + '.buf'), sock = path.join(R4, 'p5.sock');
+    await master(sock); const hub = await fakeHub(false);
+    index7([row7(id, { socketPath: sock })], hub.address().port);
+    const P = 'aaaaaaaa-bbbb-cccc-dddd-000000000001';
+    const tool = (n) => rec({ type: 'user', uuid: 'tr5-' + n, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't' + n, content: 'x'.repeat(200) }] } });
+    fs.writeFileSync(buf, [said('FIRST-REPLY HCPH', { uuid: P }), tool(1)].join('\n') + '\n');
+    const run = cli7(['chat', id, '--wait', '2']);
+    await sleep(1200);
+    fs.writeFileSync(buf, [tool(1), tool(2), said('SECOND-REPLY HCPH', { uuid: P })].join('\n') + '\n');   // the head cut takes the first reply in the rewrite that appends the next — the same placeholder
+    const r = await run;
+    ok('A PLACEHOLDER UUID IS NEVER A RECORD\'S ID (round 5): a NEW reply carrying the placeholder a cut one carried is shown as new, never «(updated)» (round 4\'s guard spanned one read)',
+      count(r.out, 'FIRST-REPLY HCPH') === 1 && count(r.out, 'SECOND-REPLY HCPH') === 1 && !/\(updated\)/.test(r.out), r.out.slice(-500));
   }
   for (const k of kids) { try { if (k.exitCode == null && k.signalCode == null) k.kill('SIGKILL'); } catch { } }   // only this section's own children
   for (const s of servers) { try { s.close(); } catch { } }

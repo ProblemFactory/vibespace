@@ -118,6 +118,8 @@ try {
   const live = R.add(21), dead = R.add(22), mute = R.add(23);
   const cid = '5f0c2a8e-7d41-4b9a-9e36-0c1d2b3a4f50';
   const dOld = R.add(24, { backend: 'claude', claudeSessionId: cid, name: 'claude older' }), dNew = R.add(25, { backend: 'claude', claudeSessionId: cid, name: 'claude newer' });
+  const dOldRcpt = dOld.buf.replace(/\.buf$/, '.receipts');
+  fs.writeFileSync(dOldRcpt, '{"type":"_stdin_ack","msg_id":"vs-cli-1"}\n');   // lane human-cli r5: a person's CLI chatted with it — its wrapper's receipts
   mode('cut', 'hang'); // the fd scan (the duplicates' liveness question) never answers either
   const rP = R.api.probeSockets();
 
@@ -178,6 +180,7 @@ try {
     ok(!fs.existsSync(dOld.sockPath) && !fs.existsSync(dOld.meta) && !fs.existsSync(dOld.buf) && !R.activeSessions.has(dOld.id) && r.lines.some((l) => l.includes(`⤫ Duplicate of ${cid} — retiring stale ${dOld.sock}`))
       && signals.some(([pid, sig]) => pid === victim.pid && sig === 'SIGTERM') && !alive(victim.pid),
       'the older duplicate ⇒ the boot\'s own duplicate retire: SIGTERM to the pid its pgrep answer named (the husk is gone), socket + buffer + meta gone', { signals });
+    ok(!fs.existsSync(dOldRcpt), '…and its <id>.receipts with them (lane human-cli r5: THE ONE LIST of a wrapper\'s files — round 4 left this end path\'s to the 7-day sweep)');
     ok(R.activeSessions.has(live.id) && R.activeSessions.has(dNew.id) && R.activeSessions.has(mute.id) && [live, dNew, mute].every((x) => fs.existsSync(x.sockPath)), 'the alive, the winner and the still-mute session stay adopted, their sockets in place');
     ok(R.ended.slice().sort().join() === [dead.id, dOld.id].sort().join(), `each un-adopted session ends through the exit proxy's onSessionEnd, as any ended one (${R.ended.join(', ')})`, R.ended);
     ok([...R.api.probePending()].map(([s, q]) => s + ':' + q.join()).join() === `${mute.sock}:alive`, 'only the still-mute socket keeps its mark');
