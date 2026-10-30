@@ -14,9 +14,9 @@
 //   ⑦ THE STALE INDEX: the hub died; each row judged by the kernel, never by the hub's word
 //   ⑧ the table (numbers, widths, CJK, ~, THE ESC BELT), ⑨ the pick (a number only at a terminal; one list over every hub),
 //   ⑩ the dtach packet, ⑪ the chat frames = the adapters' own ENTER frame (filled templates), ⑫ the records → lines + the
-//   wrapper's receipts, ⑬ the hub's unit (its own main process only), ⑭ the writer (one file per hub root, off the loop,
+//   wrapper's receipts + THE UNION of a conversation's two reads (round 8), ⑬ the hub's unit (its own main process only), ⑭ the writer (one file per hub root, off the loop,
 //   coalesced, 0600, a sweep, stop, a throwaway's own root, a symlinked / squatted rung), ⑮ the CLI (the refusal FIRST,
-//   never a second reader), ⑯ RED controls: five patched copies of the PURE module, each caught
+//   never a second reader; the union's keys), ⑯ RED controls: seven patched copies of the PURE module, each caught
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -235,6 +235,28 @@ ok('the last N only', (call(LI.historyOf, tr.map((r) => JSON.stringify(r)).join(
 ok('RECEIPTS: an ack names its frame (msg_id); a nack names a torn line (no id — its line did not parse); anything else is no receipt',
   deq(call(LI.receiptOf, tr[16]), { kind: 'ack', id: 'vs-cli-1', at: 1 }) && deq(call(LI.receiptOf, tr[17]), { kind: 'nack', reason: 'torn', bytes: 99, at: 2 }) && call(LI.receiptOf, tr[0]) === null && call(LI.receiptOf, { type: '_stdin_ack' }).id === null && LI.RECEIPT_FLAG === 'webui_receipt'
   && call(LI.receiptsFileOf, '/d/b/sess-1-2.buf') === '/d/b/sess-1-2.receipts');   // r3: a receipt rides its own file — never the buffer a conversation replays
+// lane human-cli r8: THE UNION — a conversation's transcript read and its buffer as the CLI's follower read it, as ONE history
+const kU = (rec, line) => ({ strong: ['l|' + line].concat(rec.uuid ? ['u|' + rec.uuid] : [], rec.message && rec.message.id ? ['m|' + rec.message.id] : []), weak: rec.type === 'user' && typeof rec.message.content === 'string' ? ['p|' + rec.message.content] : [] });
+const sA = (text, x = {}) => JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] }, ...x });
+const sU = (text, x = {}) => JSON.stringify({ type: 'user', message: { role: 'user', content: text }, ...x });
+const JU = (...l) => l.join('\n') + '\n';
+const shownU = (u) => (u ? (call(LI.historyOf, u.text, { max: 50 }) || []).map((m) => m.text).join(',') : String(u));
+const UN = {
+  order: call(LI.unionOf, JU(sA('H0', { uuid: 'a' }), sU('P1', { uuid: 'p' })), JU(sA('H0', { uuid: 'a' }), sA('R1', { uuid: 'r' })), kU),
+  strong: call(LI.unionOf, JU(sA('X', { uuid: 'x' }), sA('H0', { uuid: 'a' })), JU(sA('H0', { uuid: 'a' }), sA('X', { uuid: 'x' }), sA('R1', { uuid: 'r' })), kU),
+  weakNew: call(LI.unionOf, JU(sU('continue', { uuid: 'p0' }), sA('H0', { uuid: 'a' })), JU(sA('H0', { uuid: 'a' }), sU('continue')), kU),
+  weakOnce: call(LI.unionOf, JU(sA('H0', { uuid: 'a' }), sU('go', { uuid: 'p1' })), JU(sA('H0', { uuid: 'a' }), sU('go'), sU('go')), kU),
+  none: call(LI.unionOf, JU(sA('OTHER', { uuid: 'o' })), JU(sA('H0', { uuid: 'a' })), kU),
+  nothing: call(LI.unionOf, JU(sA('H0', { uuid: 'a' }), sA('R1', { uuid: 'r' })), JU(sA('H0', { uuid: 'a' })), kU),
+};
+ok('THE UNION (round 8): the transcript\'s records, then what the buffer holds after the last record the two share that the transcript does not — the transcript\'s typed prompt before the buffer\'s reply, each once',
+  shownU(UN.order) === 'H0,P1,R1' && UN.order.added.length === 1, shownU(UN.order));
+ok('the union: a STRONG key is matched over the whole transcript — a record it holds before the anchor is never added again',
+  shownU(UN.strong) === 'X,H0,R1' && UN.strong.added.length === 1, shownU(UN.strong));
+ok('the union: a person\'s words (a WEAK key) match only after the anchor and each match takes one — the same words typed again later are a new line',
+  shownU(UN.weakNew) === 'continue,H0,continue' && shownU(UN.weakOnce) === 'H0,go,go' && UN.weakOnce.added.length === 1, `${shownU(UN.weakNew)} · ${shownU(UN.weakOnce)}`);
+ok('the union: two reads that share no record are never guessed together (null); a buffer holding nothing newer adds nothing',
+  UN.none === null && UN.nothing && UN.nothing.added.length === 0 && shownU(UN.nothing) === 'H0,R1', `${shownU(UN.none)} · ${shownU(UN.nothing)}`);
 
 console.log('⑬ the hub\'s unit (its log is that unit\'s journal) — only its OWN main process owns it');
 ok('a user unit, a system unit, a shell (none)',
@@ -342,6 +364,21 @@ if (CLI) {
   ok('flags: --json, -n N (bounded), --wait S (a script), --take, the positional session', deq(CLI.parseArgs(['3', '--json', '-n', '9999', '--wait', '2', '--take']), { json: true, n: 500, wait: 2, waitGiven: true, take: true, pos: ['3'] }), CLI.parseArgs(['3', '--json', '-n', '9999', '--wait', '2', '--take']));
   const hs = CLI.historySources({ backend: 'claude', transcript: '/h/.claude/projects/-w-a-b/c.jsonl', conversationId: 'c', cwd: '/w/a b', buffer: '/d/x.buf' });
   ok('a chat\'s history: the transcript at the harness\'s path rule (the person\'s words are there), then the buffer', deq(hs, [['transcript', '/h/.claude/projects/-w-a-b/c.jsonl'], ['buffer', '/d/x.buf']]), hs);
+  // round 8: THE UNION's keys are the CLI's (it alone knows claude's placeholder uuid): a placeholder'd stdout copy and its
+  // transcript record share the MESSAGE key (one reply, shown once); a frame the wrapper copied (no uuid of the CLI's) is
+  // matched by the person's words; a union history is checked by uuid AND by line (gapFilter)
+  if (typeof CLI.keysOf === 'function' && typeof LI.unionOf === 'function') {
+    const R1T = JSON.stringify({ type: 'assistant', uuid: 'real-1', message: { id: 'msg_1', role: 'assistant', content: [{ type: 'text', text: 'R1' }] } });
+    const R1P = JSON.stringify({ type: 'assistant', uuid: 'aaaaaaaa-bbbb-cccc-dddd-000000000001', message: { id: 'msg_1', role: 'assistant', content: [{ type: 'text', text: 'R1' }] } });
+    const R1B = JSON.stringify({ type: 'assistant', uuid: 'aaaaaaaa-bbbb-cccc-dddd-000000000001', message: { id: 'msg_1', role: 'assistant', content: [{ type: 'text', text: 'R1 — another block' }] } });
+    const H = JSON.stringify({ type: 'assistant', uuid: 'h-0', message: { role: 'assistant', content: [{ type: 'text', text: 'H0' }] } });
+    const FT = JSON.stringify({ type: 'user', uuid: 'cli-p', message: { role: 'user', content: 'a frame HC8' } }), FB = JSON.stringify({ type: 'user', _fromWebui: true, message: { role: 'user', content: [{ type: 'text', text: 'a frame HC8' }] } });
+    const kP = CLI.keysOf(JSON.parse(R1P), R1P), uP = LI.unionOf([H, R1T].join('\n'), [H, R1P, R1B].join('\n'), CLI.keysOf), uF = LI.unionOf([H, FT].join('\n'), [H, FB].join('\n'), CLI.keysOf);
+    ok('THE UNION\'s keys (round 8): a placeholder uuid is never a key; the placeholder\'d stdout copy and its transcript record are ONE reply by the message key (message.id + what it shows — another block of the same message is its own); a frame the wrapper copied is matched by the person\'s words',
+      !kP.strong.some((k) => k.startsWith('u|')) && uP && uP.added.length === 1 && uP.added[0].line === R1B && uF && uF.added.length === 0, JSON.stringify({ kP, uP: uP && uP.added.map((a) => a.line), uF: uF && uF.added.length }));
+    const fU = CLI.gapFilter({ kind: 'union', seen: CLI.seenOf([H, R1T, R1P].join('\n') + '\n') });
+    ok('a UNION history meets the gap rule by uuid (as a transcript one) and by line (as a buffer one)', fU(JSON.parse(R1T), { raw: 'x' }) === false && fU(JSON.parse(R1P), { raw: R1P }) === false && fU(JSON.parse(H), { raw: 'y' }) === false);
+  } else ok('the CLI exports keysOf and its PURE half unionOf (round 8)', false);
   ok('a socket on a stalled mount is said as such, never as «gone»', /not answering/.test(CLI.goneWords({ socket: '/x' }, 'no-answer')) && /gone/.test(CLI.goneWords({ socket: '/x' }, 'missing')));
   ok('dtach is never looked up under the hub\'s checkout (it may be the stalled mount)', /[\s\S]*hubRoot[\s\S]*startsWith\(hubRoot \+ '\/'\)/.test(fs.readFileSync(path.join(REPO, 'data/bin/vibespace'), 'utf8')));
   const cliCode = fs.readFileSync(path.join(REPO, 'data/bin/vibespace'), 'utf8').replace(/^\s*\/\/.*$/gm, '');
@@ -369,7 +406,11 @@ ok('M3 a place ladder that ignores the mount type is caught by ① (the index on
 const M4 = mutant('string', '    const land = landedPathOf(dir, { lstat, readlink, mountinfo });', '    const land = { path: dir };');
 ok('M4 a ladder that reads the path STRING (no landing) is caught by ① G1 (the symlinked home taken as own disk)', M4 && M4.indexPlaceOf({ home: '/home/u', uid: 1000, mountinfo: LOCAL_MI, xdgRuntimeDir: '/run/user/1000', lstat: lst, readlink: rdl }).via === 'home');
 const M5 = mutant('numbers', "  if (m && !numbers) return { code: 'number_not_tty', n: Number(m[1]) };\n", '');
+const M6 = mutant('weak-anywhere', '  for (let i = place + 1; i < A.length; i++) for (const k of A[i].k.weak)', '  for (let i = 0; i < A.length; i++) for (const k of A[i].k.weak)');
+const M7 = mutant('first-anchor', '  for (let j = Z.length - 1; j >= 0 && anchor < 0; j--)', '  for (let j = 0; j < Z.length && anchor < 0; j++)');
 ok('M5 a pick that takes a number from a script is caught by ⑨', M5 && M5.pickSession(rows, '2', { numbers: false }).row && M5.pickSession(rows, '2', { numbers: false }).row.id === 'sess-2-200');
+ok('M6 a union matching a person\'s words anywhere is caught by ⑫ (the «continue» typed again later dropped)', M6 && shownU(M6.unionOf(JU(sU('continue', { uuid: 'p0' }), sA('H0', { uuid: 'a' })), JU(sA('H0', { uuid: 'a' }), sU('continue')), kU)) === 'continue,H0');
+ok('M7 a union anchored on the FIRST record the two share is caught by ⑫ (a record the transcript holds added twice)', M7 && shownU(M7.unionOf(JU(sA('X', { uuid: 'x' }), sA('H0', { uuid: 'a' })), JU(sA('H0', { uuid: 'a' }), sA('X', { uuid: 'x' }), sA('R1', { uuid: 'r' })), kU)) === 'X,H0,X,R1');
 
 fs.rmSync(DIR, { recursive: true, force: true });
 console.log(`\ntest-local-index: ${pass} passed, ${fail} failed`);

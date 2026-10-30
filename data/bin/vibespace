@@ -192,7 +192,7 @@ async function readTail(file, bytes = CHUNK, timeoutMs = PROBE_MS) {
   if (!file) return { ok: false, why: 'no file' };
   const r = await nodeChild(TAIL_CHILD, [file, bytes], { timeoutMs });
   if (r.ok) return { ok: true, text: r.out };
-  return { ok: false, why: r.late ? (timeoutMs >= PROBE_MS / 2 ? `no answer in ${secs(timeoutMs)} (its file system is not answering)` : `no answer in the ${secs(timeoutMs)} left of the ${PROBE_MS / 1000} s clock`) : r.err === 'ENOENT' ? 'it does not exist' : (r.err || 'unreadable') };
+  return { ok: false, late: !!r.late, why: r.late ? (timeoutMs >= PROBE_MS / 2 ? `no answer in ${secs(timeoutMs)} (its file system is not answering)` : `no answer in the ${secs(timeoutMs)} left of the ${PROBE_MS / 1000} s clock`) : r.err === 'ENOENT' ? 'it does not exist' : (r.err || 'unreadable') };
 }
 /** A short command's output in a child with a clock → text | null. */
 function runShort(cmd, args, timeoutMs = PROBE_MS) {
@@ -429,7 +429,7 @@ function seenOf(text) {
  *  history. → (rec, how) ⇒ show it? */
 function gapFilter(hist) {
   let seen = hist && hist.seen && hist.seen.size ? hist.seen : null;
-  const transcript = !!hist && hist.kind === 'transcript';
+  const transcript = !!hist && (hist.kind === 'transcript' || hist.kind === 'union');   // a union (round 8): both
   return (rec, how = {}) => {
     if (!seen) return true;
     const u = realUuid(rec && rec.uuid);
@@ -439,39 +439,72 @@ function gapFilter(hist) {
     return true;
   };
 }
-/** A history source read AT ONCE and HELD (round 7): `r` is its answer once it is in, `p` the wait for it. */
-function hold(file, ms) { const h = { r: null }; h.p = readTail(file, CHUNK, ms).then((r) => (h.r = r)); return h; }
-/** The last messages — inside chat's ONE deadline, EACH SOURCE ON ITS OWN CLOCK (round 7). The transcript is read EARLY — at
- *  the deadline's start, beside the follower, on what the deadline holds — and HELD (`held`): a buffer whose follower is
- *  late, or takes no baseline at all, never shortens it (round 6 began that read at the baseline: a stalled buffer left a
- *  healthy transcript 250 ms and no history was printed). It is called once the follower has its baseline (`base`), or at
- *  the deadline with none (null), and CHECKS the held read against the baseline's last message of the main thread
- *  (`base.last`): in it ⇒ every message the follower will not report is in it, it is the history; not in it (a reply
- *  landed between the early read and the baseline — the r5 verdict's case B) ⇒ the transcript is read once more. The
- *  buffer is read at the baseline BESIDE the transcript's answer (never after it: a stalled transcript never eats its
- *  time) and is the history when the transcript gives none; with no baseline it is not read again (no second clock). A
- *  read after the baseline gets what is left of the deadline, at least FLOOR_MS — each its own. → {msgs, kind, file,
- *  tried, seen, base, behind} — `behind`: the held read is the history though the baseline's last message is not in it
- *  (neither source answered again in time: said so where it is printed). */
-async function historyOf(row, max, deadline = Date.now() + PROBE_MS, held = null, base = { last: null }) {
+/** A history source read AT ONCE and HELD (round 7): `r` is its answer once it is in, `p` the wait for it, `at` when it began. */
+function hold(file, ms) { const h = { r: null, at: Date.now() }; h.p = readTail(file, CHUNK, ms).then((r) => (h.r = r)); return h; }
+/** A record's keys for THE UNION (round 8) → {strong, weak}. STRONG: its line; its REAL uuid; its MESSAGE key (claude's
+ *  message.id + what it shows — one message's blocks are separate records; a placeholder'd stdout copy and its transcript
+ *  record share it: src/session-store.js dedups that pair by message.id). WEAK: a person's words — a frame the wrapper
+ *  copied into its buffer carries none of the CLI's uuids — matched only after the anchor (LI.unionOf: the same words
+ *  typed again later are a new line). */
+function keysOf(rec, line) {
+  const strong = ['l|' + line], weak = [];
+  const u = realUuid(rec && rec.uuid);
+  if (u) strong.push('u|' + u);
+  const shown = LI.recordLines(rec).map((m) => m.who + ':' + m.text).join('\n');
+  const mid = rec && rec.message && typeof rec.message.id === 'string' ? rec.message.id : '';
+  if (mid) strong.push('m|' + mid + '|' + shown);
+  if (rec && rec.type === 'user' && shown) weak.push('p|' + shown);
+  return { strong, weak };
+}
+/** The last messages — inside chat's ONE deadline (round 8: THE EARLY READ IS A HEAD START, NEVER THE ANSWER). The
+ *  transcript is read at the deadline's start and HELD (`held` — round 7: a late or absent baseline never shortens it);
+ *  at the PRINT MOMENT — the follower's baseline (`base`), or the deadline when it took none (null) — it is READ AGAIN, on
+ *  what is left of the deadline, at least FLOOR_MS (round 7 printed the held read as it was at t0: a reply that landed in
+ *  the 2 s was shown nowhere — 0/0/0 against rounds 4 and 6's 1/1/1 — and said nowhere). The FRESHER answers: the read
+ *  again when it is in in time, else the held one (`stale`: how old it is, said where it is printed). The baseline's CHECK
+ *  applies to whichever is printed: it holds the baseline's last message of the main thread by its REAL uuid
+ *  (`base.last`; a newest message with none — claude's stdout placeholder, a copy line — is `base.blind` and never
+ *  satisfies it). When it does not, NO SOURCE IS DISCARDED: the history is the UNION (LI.unionOf by keysOf) of the
+ *  transcript's read and the buffer AS THE FOLLOWER READ IT at its baseline (`base.text`: what it will never report — it
+ *  holds that message by construction; round 7 printed the transcript read again unchecked and dropped the buffer's read:
+ *  the message lost, nothing said). With no baseline the buffer is not read (no second clock). → {msgs, kind ('transcript'
+ *  | 'buffer' | 'union'), file, text, tried, seen, base, stale, added, alone, behind} — `alone`: the two reads share no
+ *  record (never guessed together: the buffer's is shown); `behind`: the check failed and the buffer shows nothing */
+async function historyOf(row, max, deadline = Date.now() + PROBE_MS, held = null, base = null) {
   const tried = [], left = () => Math.max(FLOOR_MS, deadline - Date.now()), src = Object.fromEntries(historySources(row)), T = src.transcript, B = src.buffer;
   const of = (kind, file, r) => {
-    if (!r.ok) { tried.push(`${kind} ${tildeOf(file)}: ${r.why}`); return null; }
+    if (!r || !r.ok) return null;
     const msgs = LI.historyOf(r.text, { max });
-    if (!msgs.length) { tried.push(`${kind} ${tildeOf(file)}: no messages`); return null; }
-    return { msgs, kind, file, tried, seen: seenOf(r.text), base, behind: false };
+    return msgs.length ? { msgs, kind, file, text: r.text, tried, seen: seenOf(r.text), base, stale: 0, added: 0, alone: false, behind: false } : null;
   };
-  const holds = (h) => !base || !base.last || h.seen.has('uuid|' + base.last);   // the baseline's last message is in it
-  const early = T ? (held || hold(T, left())) : null;
-  let e = early && early.r ? of('transcript', T, early.r) : undefined;
-  const bufRead = !B || (e && holds(e)) ? null : base ? readTail(B, CHUNK, left()) : Promise.resolve({ ok: false, why: `no answer in ${PROBE_MS / 1000} s (its file system is not answering)` });
-  if (early && e === undefined) e = of('transcript', T, await early.p);
-  if (e && holds(e)) return e;
-  if (e) { const again = of('transcript', T, await readTail(T, CHUNK, left())); if (again) return again; }   // once more, after the baseline
-  const b = bufRead ? of('buffer', B, await bufRead) : null;
-  if (b) return b;
-  if (e) return { ...e, behind: true };
-  return { msgs: [], kind: null, file: null, tried, seen: new Set(), base, behind: false };
+  const why = (kind, file, r) => tried.push(`${kind} ${tildeOf(file)}: ${!r ? 'not read' : r.ok ? 'no messages' : r.why}`);
+  let tr = null;
+  if (T) {
+    const early = held || hold(T, left());
+    // AT the print moment — the early read is a head start. Not at the deadline after a held read that had the whole clock
+    // and got no answer: that file system is not answering, and it is never given a second clock (as the buffer)
+    const mute = !base && (!early.r || early.r.late === true);
+    const again = mute ? null : await readTail(T, CHUNK, left());
+    tr = of('transcript', T, again);
+    if (!tr) {
+      const h = early.r || await early.p;
+      tr = of('transcript', T, h);
+      if (tr) tr.stale = Date.now() - early.at;   // the read again was not in in time: the held one, and how old it is
+      else why('transcript', T, again && again.ok ? again : h);
+    }
+  }
+  const holds = (h) => !base || (!base.blind && (!base.last || h.seen.has('uuid|' + base.last)));
+  if (tr && holds(tr)) return tr;
+  const bt = B && base && typeof base.text === 'string' ? { ok: true, text: base.text } : null;
+  const bu = B ? of('buffer', B, bt) : null;
+  if (B && !bu) why('buffer', B, bt || { ok: false, why: base ? 'its follower kept no baseline' : `no answer in ${PROBE_MS / 1000} s (its file system is not answering)` });
+  if (!tr) return bu || { msgs: [], kind: null, file: null, text: '', tried, seen: new Set(), base, stale: 0, added: 0, alone: false, behind: false };
+  if (!bu) return { ...tr, behind: true };
+  const u = LI.unionOf(tr.text, base.text, keysOf);
+  if (!u) return { ...bu, alone: true };
+  const seen = new Set([...tr.seen, ...bu.seen]);
+  if (!u.added.length) return { ...tr, seen };
+  return { ...tr, kind: 'union', msgs: LI.historyOf(u.text, { max }), text: u.text, seen, added: u.added.length };
 }
 const COLOR = process.stdout.isTTY && !process.env.NO_COLOR;
 const dim = (s) => (COLOR ? `\x1b[2m${s}\x1b[0m` : s);
@@ -496,13 +529,15 @@ const HELD_WORDS = { 'vault-locked': 'the hub\'s vault is locked and the session
  *  mirrored: realUuid above). Every line not seen before is said once; a known record whose line changed
  *  is said as `updated`; a line seen before (moved, or the head cut) never again. The baseline is two reads one tick apart
  *  (one may catch a rewrite half-done), then `ready` — carrying the baseline's last MESSAGE of the main thread (round 7:
- *  chat's history must hold it, or a message the follower will not report would be shown nowhere); what is known is
- *  forgotten by READS, never by time (an idle session's lines stay known). */
+ *  chat's history must hold it, or a message the follower will not report would be shown nowhere) and the baseline's
+ *  TEXT (round 8: the buffer as the follower read it — chat's history is its union with the transcript when the check
+ *  fails, and a baseline later than chat's deadline is shown beyond the history); what is known is forgotten by READS,
+ *  never by time (an idle session's lines stay known). */
 const FOLLOW_CHILD = `
 const fs = require('fs');
 const p = JSON.parse(process.argv[1]);
 const known = new Map(), ids = new Map();   // a line (its text; #n for a repeat within one read) → {id, at} · a record's id → {at}
-let reads = 0, sig = '', last = null;
+let reads = 0, sig = '', last = null, blind = false;
 const say = (s) => { try { fs.writeSync(1, s + '\\n'); } catch { process.exit(0); } };
 const own = (s) => Buffer.from(s).toString();   // a key of its own (a slice of the read would hold the whole read alive)
 function idOf(ln) {
@@ -514,12 +549,14 @@ function idOf(ln) {
   if (typeof o.uuid === 'string' && o.uuid && !/-0{11,}1?$/.test(o.uuid)) return 'uuid|' + o.type + '|' + o.uuid;
   return '';
 }
-// a message a transcript writes, of the MAIN thread — assistant / user, a real uuid (idOf's), no subagent's: the records
-// gapFilter lets move the horizon, mirrored → its uuid | null
+// a message a transcript writes, of the MAIN thread — assistant / user, no subagent's: the records gapFilter lets move
+// the horizon, mirrored → {u: its REAL uuid (idOf's) | null} | null (not one). u null — claude's stdout PLACEHOLDER, a
+// copy line's msgId, no uuid at all: such a newest message is BLIND (round 8 — round 7 skipped it and judged the history
+// by an OLDER message's uuid, which the held read held: a reply in neither, nothing said)
 function mainOf(ln, id) {
-  if (!id.startsWith('uuid|assistant|') && !id.startsWith('uuid|user|')) return null;
   let o = null; try { o = JSON.parse(ln); } catch { return null; }
-  return o.isSidechain || o.parent_tool_use_id ? null : o.uuid;
+  if (!o || (o.type !== 'assistant' && o.type !== 'user') || !o.message || o.isSidechain || o.parent_tool_use_id) return null;
+  return { u: id.startsWith('uuid|') ? o.uuid : null };
 }
 function tick() {
   let st = null; try { st = fs.statSync(p); } catch { }
@@ -546,25 +583,26 @@ function tick() {
       if (reads <= 2) continue;            // the baseline
       say(was ? '{"_follow":"updated","line":' + ln + '}' : ln);   // the same record rewritten in place, or a new one
     }
-    if (reads <= 2) for (let i = rows.length - 1; i >= 0; i--) { const u = mainOf(rows[i][1], rows[i][2]); if (u) { last = u; break; } }
-    if (reads === 2) say('{"_follow":"ready","last":' + JSON.stringify(last) + '}');
+    if (reads <= 2) { last = null; blind = false; for (let i = rows.length - 1; i >= 0; i--) { const m = mainOf(rows[i][1], rows[i][2]); if (m) { last = m.u; blind = !m.u; break; } } }
+    // the baseline: its last message of the main thread — and its TEXT, the file as this child read it: what it will never
+    // report (round 8: chat's history is checked against it, and is its UNION with the transcript when the check fails)
+    if (reads === 2) say('{"_follow":"ready","last":' + JSON.stringify(last) + ',"blind":' + blind + ',"text":' + JSON.stringify(t.slice(0, end + 1)) + '}');
     if (reads % 20 === 0) for (const m of [known, ids]) for (const [k, e] of m) if (reads - e.at > 50) m.delete(k);
   }
   say('{"_follow":"pulse"}');
 }
 tick(); setInterval(tick, ${POLL_MS});`;
 const UPDATED = '{"_follow":"updated","line":';   // FOLLOW_CHILD's own spelling: what follows it is the record's raw line
-function follow(file, onRecord, onStall, deadline = Date.now() + PROBE_MS) {
-  let ch, buf = '', last = Date.now(), stalled = false, isReady = null;
+function follow(file, onRecord, onStall, deadline = Date.now() + PROBE_MS, onLate = () => { }) {
+  let ch, buf = '', last = Date.now(), stalled = false, isReady = null, late = false;
   // READY = the child took its baseline (its `ready`, after two reads): a line sent before it could be acked INTO the
   // baseline and never reported — every send waits on it, and chat prints the history after it. It resolves with the
-  // baseline then — {last}: its last message of the main thread (round 7), which the history must hold — or null at
-  // chat's ONE deadline (round 6): a child with no baseline by then got no answer from the file. BASED = the baseline
-  // whenever it comes (one later than the deadline is checked against the history already printed)
-  let isBased = null;
-  const based = new Promise((r) => { isBased = r; });
-  const ready = new Promise((r) => { isReady = r; setTimeout(() => r(null), Math.max(0, deadline - Date.now())).unref(); });
-  try { ch = cp.spawn(process.execPath, ['-e', FOLLOW_CHILD, JSON.stringify(file)], { stdio: ['ignore', 'pipe', 'ignore'], env: {} }); } catch { const none = Promise.resolve({ last: null }); return { stop() { }, ready: none, based: none }; }
+  // baseline then — {last, blind, text}: its last message of the main thread (round 7), which the history must hold, and
+  // the file as the child read it (round 8) — or null at chat's ONE deadline (round 6): a child with no baseline by then
+  // got no answer from the file. A baseline LATER than that goes to onLate, in the order the child says it (before the
+  // records after it — round 8: what it holds beyond the history is shown; round 7 only said its last message)
+  const ready = new Promise((r) => { isReady = r; setTimeout(() => { late = true; r(null); }, Math.max(0, deadline - Date.now())).unref(); });
+  try { ch = cp.spawn(process.execPath, ['-e', FOLLOW_CHILD, JSON.stringify(file)], { stdio: ['ignore', 'pipe', 'ignore'], env: {} }); } catch { return { stop() { }, ready: Promise.resolve({ last: null, blind: false, text: null }) }; }
   ch.stdout.on('data', (d) => {
     last = Date.now(); if (stalled) { stalled = false; onStall(false); }
     buf += d;
@@ -573,7 +611,7 @@ function follow(file, onRecord, onStall, deadline = Date.now() + PROBE_MS) {
       const ln = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
       if (!ln || ln[0] !== '{') continue;
       let rec; try { rec = JSON.parse(ln); } catch { continue; }
-      if (rec._follow === 'ready') { const b = { last: realUuid(rec.last) }; isReady(b); isBased(b); continue; }
+      if (rec._follow === 'ready') { const b = { last: realUuid(rec.last), blind: rec.blind === true, text: typeof rec.text === 'string' ? rec.text : null }; if (late) onLate(b); else isReady(b); continue; }
       if (rec._follow === 'updated') { if (rec.line && typeof rec.line === 'object') onRecord(rec.line, { updated: true, raw: ln.slice(UPDATED.length, -1).trim() }); continue; }
       if (rec._follow) continue;
       onRecord(rec, { raw: ln });
@@ -581,7 +619,7 @@ function follow(file, onRecord, onStall, deadline = Date.now() + PROBE_MS) {
   });
   const watch = setInterval(() => { if (!stalled && Date.now() - last > 3 * PROBE_MS) { stalled = true; onStall(true); } }, 1000);
   watch.unref(); ch.unref();
-  return { stop() { clearInterval(watch); abandon(ch); }, ready, based };
+  return { stop() { clearInterval(watch); abandon(ch); }, ready };
 }
 /** ONE frame to the session's socket and let go: a dtach PUSH-only client (never MSG_ATTACH — never a reader), in a
  *  child with a clock (a connect to a socket on a stalled mount waits in the kernel). → {ok} | {ok: false, why}. */
@@ -635,28 +673,49 @@ async function cmdChat(q, opts) {
       out(msgText(m, agentName));
     }
   };
-  // ONE DEADLINE, THE TRANSCRIPT EARLY, NOTHING PRINTED BEFORE THE BASELINE (rounds 6–7): the transcript's read, both
-  // followers and the hub's ask all start at once, on ONE 2 s deadline; the transcript's answer is HELD — each source on
-  // its own clock (round 6 began that read at the buffer's baseline: a stalled buffer left it 250 ms, and no history). The
-  // history is PRINTED the moment the follower has its baseline — checked against it (historyOf: the baseline's last
-  // message not in the held read ⇒ the transcript once more) — or at the deadline when it got none (nothing to protect:
-  // the buffer is not answering — said so, never read again: no second clock; a baseline that comes later is checked
-  // against what was printed). Round 5 read the history at HALF the clock: on a slow mount that still answers, a record
-  // landing between that read and the follower's second baseline read was in neither (0 of 1 printed); round 4 chained a
-  // fresh 2 s after the follower's (~4 s). Checked against the baseline, the history holds every record the follower will
-  // not report, and THE GAP RULE (gapFilter) drops what it reports that the history already showed. What the follower
-  // reports until the history is printed waits here.
+  // ONE DEADLINE, THE TRANSCRIPT EARLY AND AGAIN, NOTHING PRINTED BEFORE THE BASELINE (rounds 6–8): the transcript's read,
+  // both followers and the hub's ask all start at once, on ONE 2 s deadline; the transcript's answer is HELD — each source
+  // on its own clock (round 6 began that read at the buffer's baseline: a stalled buffer left it 250 ms, and no history).
+  // The history is PRINTED the moment the follower has its baseline, or at the deadline when it got none — and at that
+  // moment the transcript is READ AGAIN (round 8: the held read is a head start — round 7 printed it as it was at t0); the
+  // fresher of the two is checked against the baseline (historyOf: its last message held by real uuid, else the UNION with
+  // the buffer as the follower read it). With no baseline the buffer is not answering — said so, never read again: no
+  // second clock; a baseline that comes later shows what it holds beyond the history. Round 5 read the history at HALF the
+  // clock: on a slow mount that still answers, a record landing between that read and the follower's second baseline read
+  // was in neither (0 of 1 printed); round 4 chained a fresh 2 s after the follower's (~4 s). Checked against the baseline,
+  // the history holds every record the follower will not report, and THE GAP RULE (gapFilter) drops what it reports that
+  // the history already showed. What the follower reports until the history is printed waits here.
   const deadline = Date.now() + PROBE_MS;
   const trFile = Object.fromEntries(historySources(row)).transcript, held = trFile ? hold(trFile, deadline - Date.now()) : null;
   const early = [];
   let fresh = () => true;
   const onTail = (rec, how) => { if (!histDone) early.push([rec, how]); else if (fresh(rec, how)) onRecord(rec, how); };
   const stallWords = (on) => dim(on ? `  (the session's buffer ${tildeOf(row.buffer)} stopped answering — its mount? replies will show once it answers)` : '  (the buffer answers again)');
-  const idle = { stop() { }, ready: Promise.resolve({ last: null }), based: Promise.resolve({ last: null }) };
-  const tail = row.buffer ? follow(row.buffer, onTail, (on) => (histDone ? out(stallWords(on)) : early.push([null, { stall: on }])), deadline) : idle;
+  const idle = { stop() { }, ready: Promise.resolve({ last: null, blind: false, text: null }) };
+  // a baseline LATER than the deadline (round 8 — round 7 only SAID its last message, and a line sent meanwhile had its
+  // reply inside it: the follower never reports a baseline's records): what the buffer holds beyond the history printed is
+  // SHOWN, once — the union of the history's read and the baseline, its records from the buffer; with no history printed,
+  // the baseline's own last messages. Two reads that share no record are never guessed together: then it is said
+  const lateBase = (b) => {
+    if (leaving || !b || typeof b.text !== 'string') return;
+    const from = `its buffer ${tildeOf(row.buffer)} answered after the ${PROBE_MS / 1000} s`;
+    if (!hist.msgs.length) {
+      const m = LI.historyOf(b.text, { max: opts.n });
+      if (m.length) { out(dim(`  (${from} — its last ${m.length} message(s):)`)); for (const x of m) out(msgText(x, agentName)); }
+      return;
+    }
+    const u = LI.unionOf(hist.text, b.text, keysOf);
+    if (!u) { if (b.blind || (b.last && !hist.seen.has('uuid|' + b.last))) out(unshown(`answered after the ${PROBE_MS / 1000} s, holding a newer message than the history above`)); return; }
+    if (u.added.some((a) => LI.recordLines(a.rec).some((m) => m.who !== 'you'))) out(dim(`  (${from} — what it holds beyond the history above:)`));
+    for (const a of u.added) if (fresh(a.rec, { raw: a.line })) onRecord(a.rec, { raw: a.line });
+  };
+  const tail = row.buffer ? follow(row.buffer, onTail, (on) => (histDone ? out(stallWords(on)) : early.push([null, { stall: on }])), deadline, (b) => (histDone ? lateBase(b) : early.push([null, { base: b }]))) : idle;
   // the wrapper's receipts ride their own file (never the replay buffer): only a receipt is read there — it waits for
-  // nothing (a waiter exists only once a line is sent, after the history) and never meets the gap rule
-  let rtail = row.buffer ? follow(LI.receiptsFileOf(row.buffer), (rec) => { if (LI.receiptOf(rec)) onRecord(rec); }, () => { }, deadline) : idle;
+  // nothing (a waiter exists only once a line is sent, after the history) and never meets the gap rule. Its baseline
+  // LATER than the deadline (round 8): an ack in it names its frame — a line sent meanwhile still learns it was taken (a
+  // nack there names none: never guessed onto a waiter)
+  const lateAcks = (b) => { for (const ln of String((b && b.text) || '').split('\n')) { let rec = null; try { rec = JSON.parse(ln); } catch { continue; } const rc = LI.receiptOf(rec); if (rc && rc.kind === 'ack') onRecord(rec); } };
+  let rtail = row.buffer ? follow(LI.receiptsFileOf(row.buffer), (rec) => { if (LI.receiptOf(rec)) onRecord(rec); }, () => { }, deadline, lateAcks) : idle;
   const [hist, judged] = await Promise.all([tail.ready.then((base) => historyOf(row, opts.n, deadline, held, base)), judgeAll([pick.doc], { ask: true, reads: metaFile ? [metaFile] : [] })]);
   const fact = row.socket ? judged.facts.sock.get(row.socket) : null;
   const hub = judged.hubs[0];
@@ -671,8 +730,12 @@ async function cmdChat(q, opts) {
   say(dim(`${label(row)} · ${agentName} · ${tildeOf(row.cwd || '')} · ${hub.hub.state === 'none' ? 'no hub on record' : `the hub is ${hub.hub.state}`}`));
   const unshown = (what) => dim(`  (its buffer ${what} — that message is not shown here; \`vibespace chat\` again shows it)`);
   if (hist.msgs.length) {
-    say(dim(`the last ${hist.msgs.length} message(s), from its ${hist.kind} ${tildeOf(hist.file)}:`)); for (const m of hist.msgs) say(msgText(m, agentName));
-    if (hist.behind) say(unshown(`already holds a newer message than the history above, and neither file answered again inside the ${PROBE_MS / 1000} s`));
+    // the words say which source answered (round 8): the transcript, the buffer, or both — and how old a held read is
+    const from = hist.kind === 'union' ? `its transcript ${tildeOf(hist.file)} and its buffer ${tildeOf(row.buffer)} (${hist.added} newer record(s) only the buffer holds yet)` : `its ${hist.kind} ${tildeOf(hist.file)}`;
+    say(dim(`the last ${hist.msgs.length} message(s), from ${from}:`)); for (const m of hist.msgs) say(msgText(m, agentName));
+    if (hist.alone) say(dim(`  (its transcript ${tildeOf(row.transcript)} holds none of the records its buffer holds — the history above is the buffer's)`));
+    if (hist.stale) say(dim(`  (its transcript did not answer again in time — the history above is as it read ${secs(hist.stale)} ago: a newer message may be missing; \`vibespace chat\` again shows it)`));
+    if (hist.behind) say(unshown('already holds a newer message than the history above'));
   }
   else say(dim(`no earlier messages could be read${hist.tried.length ? ' (' + hist.tried.join('; ') + ')' : ''}`));
   if (!row.socket) { tail.stop(); rtail.stop(); warn(`vibespace: ${label(row)} has no dtach socket (a daemon pipe session) — only the hub reaches it; read-only`); return 1; }
@@ -687,12 +750,9 @@ async function cmdChat(q, opts) {
   fresh = gapFilter(hist);
   histDone = true;
   for (const [rec, how] of early.splice(0)) {
-    if (!rec) { out(stallWords(how.stall)); continue; }
+    if (!rec) { if (how.base) lateBase(how.base); else out(stallWords(how.stall)); continue; }
     if (fresh(rec, how)) onRecord(rec, how);
   }
-  // a baseline that comes AFTER the history was printed (a buffer slower than the deadline, round 7): its last message
-  // not in the history is said, never silent — the follower will not report it
-  if (!hist.base && hist.kind === 'transcript') tail.based.then((b) => { if (b && b.last && !hist.seen.has('uuid|' + b.last) && !leaving) out(unshown(`answered after the ${PROBE_MS / 1000} s, holding a newer message than the history above`)); });
   out(dim(readOnly ? `read-only: ${readOnly}` : `type a line + Enter to send it · ${tty ? 'Esc or ' : ''}/stop = Stop the running turn · ${tty ? 'Ctrl-C' : 'end of input'} = leave (the session keeps running)${live ? ' · the hub\'s page shows the reply, not your line' : ''}`));
 
   const leave = (code = 0, words = null) => {
@@ -782,4 +842,4 @@ async function main() {
 }
 // a verb that answered ends the process: nothing it gave up on (a child in a mount's kernel wait) may hold it
 if (require.main === module) main().then((code) => { if (typeof code === 'number') { process.exitCode = code; setTimeout(() => process.exit(code), 500).unref(); } }, (e) => { warn('vibespace: ' + (e && e.stack || e)); process.exit(1); });
-module.exports = { parseArgs, historySources, goneWords, dtachBin, USAGE, TAKE_WORDS, seenOf, gapFilter, realUuid, PLACEHOLDER_UUID };
+module.exports = { parseArgs, historySources, goneWords, dtachBin, USAGE, TAKE_WORDS, seenOf, gapFilter, realUuid, PLACEHOLDER_UUID, keysOf };

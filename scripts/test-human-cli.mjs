@@ -32,9 +32,17 @@
 //      early read and the baseline is shown once (the buffer read at the baseline) or SAID when neither file answers again
 //      in time; a baseline later than the deadline is checked against what was printed (said, never silent); §9a's
 //      second mutant — the held read printed without the check — shows case B's reply 0 times
+//   §11 round 8: THE EARLY READ IS A HEAD START — the transcript is read AGAIN at the print moment (a stalled buffer, a reply
+//      landing in the transcript inside the 2 s: shown once; a read again not in time: the held one, SAID as how old); a
+//      failed check is the UNION of the transcript's read and the buffer as the follower read it (a transcript lagging the
+//      buffer: the reply shown once, from the buffer); a newest message with no real uuid never satisfies the check (a
+//      placeholder'd copy, its transcript record late: shown once); a baseline LATER than the deadline shows what it holds
+//      beyond the history, and a line sent meanwhile gets its ack from the late receipts baseline. Each with its mutant RED.
+//      §10 as round 8 prints it: §10b/§10c's reply SHOWN once (round 7 said it was not)
 // RED on the base (6428c67e): no data/bin/vibespace, no index; RED on round 1 (5a0b2463): §0, the live-hub attach, the
 // receipt, the piped number, the bare refusal; RED on round 3 (ea0cecce): §7 and the killed session's .receipts (§2);
-// RED on round 4 (ad114fd78): §8. RED on round 5 (bd110027f): §9. RED on round 6 (74cf819d2): §10a, §10b's second half, §10c.
+// RED on round 4 (ad114fd78): §8. RED on round 5 (bd110027f): §9. RED on round 6 (74cf819d2): §10a, §10b's second half, §10c. RED on round 7 (cd2239445): §10b's
+// second half, §10c, §11a–§11d.
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -493,19 +501,24 @@ console.log('§7 round 4 — the follower keys on identity, the baseline before 
     clearInterval(feeder); fs.rmSync(buf, { force: true });
     return { n: count(r, 'REPLY-R1 HCR6'), out: r };
   };
+  // a MUTANT of this CLI beside it (its PURE half is there): each [from, to] once, run by `run(file, id)`, removed after
+  const CLI_SRC = fs.readFileSync(CLI, 'utf8');
+  const HOLDS_SRC = "const holds = (h) => !base || (!base.blind && (!base.last || h.seen.has('uuid|' + base.last)));";
+  const AGAIN_SRC = 'const again = mute ? null : await readTail(T, CHUNK, left());';
+  const mutantRun = async (name, pairs, run) => {
+    let s = CLI_SRC;
+    for (const [A, B] of pairs) { if (s.split(A).length !== 2) return { n: -1, r1: -1, out: 'the anchor moved: ' + A }; s = s.split(A).join(B); }
+    const MUT = path.join(path.dirname(CLI), 'vibespace-mutant-' + name);
+    fs.writeFileSync(MUT, s);
+    try { return await run(MUT, 'sess-mut-' + name); } finally { fs.rmSync(MUT, { force: true }); }
+  };
   { // §9a THE HISTORY NEVER BEFORE THE BASELINE — the mutant that prints it at half the clock (round 5's race) and the one
-    // that prints the early transcript read at the baseline WITHOUT the baseline's check (round 7's held read, unchecked)
+    // that prints the early transcript read at the baseline as the answer, WITHOUT the baseline's check (round 7's
+    // «read early + print after» alone — round 8 reads it again and keeps the check: either one alone shows case B's reply)
     const r = await slowBaseline(CLI, 'sess-r6-slow');
-    const src = fs.readFileSync(CLI, 'utf8');
-    const mutant = async (name, A, B) => {
-      if (src.split(A).length !== 2) return { n: -1, out: 'the anchor moved: ' + A };
-      const MUT = path.join(path.dirname(CLI), 'vibespace-mutant-' + name);
-      fs.writeFileSync(MUT, src.split(A).join(B));
-      try { return await slowBaseline(MUT, 'sess-mut-' + name); } finally { fs.rmSync(MUT, { force: true }); }
-    };
-    const half = await mutant('half', 'tail.ready.then((base) => historyOf(', 'Promise.race([tail.ready, new Promise((r) => setTimeout(() => r({ last: null }), PROBE_MS / 2))]).then((base) => historyOf(');
-    const nocheck = await mutant('nocheck', "const holds = (h) => !base || !base.last || h.seen.has('uuid|' + base.last);", 'const holds = () => true;');
-    ok('ONE DEADLINE, THE HISTORY NEVER BEFORE THE BASELINE (rounds 6–7): a buffer on a slow mount that still answers (its follower\'s reads answered at 1.0 s and 1.4 s) — the reply that lands in the transcript between is shown ONCE (round 5 read the history at half the clock: 0 times); the same CLI printing at half the clock shows it 0 times, and printing the early transcript read without the baseline\'s check 0 times',
+    const half = await mutantRun('half', [['tail.ready.then((base) => historyOf(', 'Promise.race([tail.ready, new Promise((r) => setTimeout(() => r({ last: null }), PROBE_MS / 2))]).then((base) => historyOf(']], (m, id) => slowBaseline(m, id));
+    const nocheck = await mutantRun('r7literal', [[AGAIN_SRC, 'const again = null;'], [HOLDS_SRC, 'const holds = () => true;']], (m, id) => slowBaseline(m, id));
+    ok('ONE DEADLINE, THE HISTORY NEVER BEFORE THE BASELINE (rounds 6–8): a buffer on a slow mount that still answers (its follower\'s reads answered at 1.0 s and 1.4 s) — the reply that lands in the transcript between is shown ONCE (round 5 read the history at half the clock: 0 times); the same CLI printing at half the clock shows it 0 times, and printing the early transcript read as the answer and unchecked (round 7\'s «read early + print after» alone) 0 times',
       r.n === 1 && half.n === 0 && nocheck.n === 0, `this CLI ${r.n}× · half ${half.n}× · nocheck ${nocheck.n}× | ${r.out.slice(-300)} | ${half.out.slice(-160)} | ${nocheck.out.slice(-160)}`);
   }
   { // §9b EACH HISTORY SOURCE ITS OWN ANSWER — the transcript does not answer (a FIFO), the buffer answers in 0.4 s (a slow
@@ -572,22 +585,94 @@ console.log('§7 round 4 — the follower keys on identity, the baseline before 
     // 800 / 1500 ms (the hub down because data/ sits on a stalled mount, the transcript on a slow but healthy disk)
     const runs = [];
     for (const ms of [300, 800, 1500]) runs.push({ ms, ...(await held7('sess-r7-held-' + ms, { TR: ms, stalled: true })) });
-    ok('THE TRANSCRIPT READ EARLY AND HELD (round 7): a buffer that does not answer never starves a slow-but-healthy transcript — at 300 / 800 / 1500 ms its history is shown, first line ≤ 2.3 s (round 6 began that read at the deadline: 250 ms, no history)',
-      runs.every((r) => r.src === 'transcript' && count(r.out, 'HISTORY-0 HCR7') === 1 && r.first != null && r.first <= 2300), runs.map((r) => `${r.ms}: ${r.src} ${r.first} ms`).join(' · ') + ' | ' + runs.map((r) => r.out.slice(0, 220)).join(' | '));
+    ok('THE TRANSCRIPT READ EARLY AND HELD (rounds 7–8): a buffer that does not answer never starves a slow-but-healthy transcript — at 300 / 800 / 1500 ms its history is shown (round 6 began that read at the deadline: 250 ms, no history); the read again at the deadline gets its 250 ms floor and is not in in time, so the held read is shown and SAID as how old it is — first line ≤ 2.6 s',
+      runs.every((r) => r.src === 'transcript' && count(r.out, 'HISTORY-0 HCR7') === 1 && r.first != null && r.first <= 2600 && /did not answer again in time — the history above is as it read [\d.]+ s ago/.test(r.out)), runs.map((r) => `${r.ms}: ${r.src} ${r.first} ms`).join(' · ') + ' | ' + runs.map((r) => r.out.slice(0, 220)).join(' | '));
   }
   { // §10b THE BASELINE'S CHECK — the follower's baseline (~1.6 s) holds a reply the early transcript read (0.9 s) does not;
     // the transcript read again gets the ~0.4 s left (< its 0.9 s): the buffer, read at the baseline beside it, holds it. With
     // the buffer's read held 0.9 s too, neither answers again in time: the held read is shown and SAYS what it lacks
     const g = await held7('sess-r7-gap', { TR: 900, FOL: 1300, plant: true });
     const b = await held7('sess-r7-behind', { TR: 900, BUF: 900, FOL: 1300, plant: true });
-    ok('THE BASELINE\'S CHECK (round 7): a reply that landed between the early transcript read and the baseline is shown ONCE (from the buffer read at the baseline; the transcript read again had ~0.4 s for its 0.9 s); with neither answering again in time the held read is shown and says a newer message is not (never silent)',
-      g.src === 'buffer' && g.r1 === 1 && b.src === 'transcript' && b.r1 === 0 && /already holds a newer message than the history above/.test(b.out), `gap: ${g.src} R1 ${g.r1}× ${g.first} ms · behind: ${b.src} R1 ${b.r1}× | ${g.out.slice(0, 300)} | ${b.out.slice(0, 420)}`);
+    ok('THE BASELINE\'S CHECK (rounds 7–8): a reply that landed between the early transcript read and the baseline is shown ONCE — the transcript read again had ~0.4 s for its 0.9 s, the held read lacks the baseline\'s last message: the UNION with the buffer as the follower read it at its baseline (round 8 — no buffer read of its own: one held 0.9 s too changes nothing; round 7 then said the reply was not shown)',
+      [g, b].every((x) => x.src === 'transcript' && x.r1 === 1 && /only the buffer holds yet/.test(x.out) && /did not answer again in time/.test(x.out)) && !/not shown here/.test(g.out + b.out), `gap: ${g.src} R1 ${g.r1}× ${g.first} ms · behind: ${b.src} R1 ${b.r1}× | ${g.out.slice(0, 300)} | ${b.out.slice(0, 420)}`);
   }
   { // §10c A BASELINE LATER THAN THE DEADLINE — the follower held 2.3 s (its baseline ~2.6 s, holding a reply that landed
     // after the early read): the history is printed at the deadline, and the late baseline's message it lacks is SAID
     const l = await held7('sess-r7-late', { FOL: 2300, plant: true, wait: 2 });
-    ok('A BASELINE LATER THAN THE DEADLINE (round 7): the history is printed inside the deadline (≤ 2.3 s), and the late baseline\'s newer message — which no follower will report — is said, never silent (round 6: neither shown nor said)',
-      l.src === 'transcript' && l.first != null && l.first <= 2300 && l.r1 === 0 && /answered after the 2 s, holding a newer message than the history above/.test(l.out), `${l.src} ${l.first} ms R1 ${l.r1}× | ${l.out.slice(0, 520)}`);
+    ok('A BASELINE LATER THAN THE DEADLINE (rounds 7–8): the history is printed inside the deadline (≤ 2.3 s), and what the late baseline holds beyond it — which no follower will report — is SHOWN, once (round 7 said it was not shown; round 6: neither shown nor said)',
+      l.src === 'transcript' && l.first != null && l.first <= 2300 && l.r1 === 1 && /answered after the 2 s — what it holds beyond the history above/.test(l.out) && !/not shown here/.test(l.out), `${l.src} ${l.first} ms R1 ${l.r1}× | ${l.out.slice(0, 520)}`);
+  }
+  console.log('§11 round 8 — the early read a head start, the union, a blind baseline, a late baseline shown');
+  // held7 grown: the follower plants into one file (`buf` / `tr`), the transcript gets `later` LAG ms after that (a transcript
+  // behind its buffer), this process appends `trAt` to the transcript at a time, the receipts follower held RFOL ms, and a
+  // piped line the stand-in master `answer`s (an ack into the receipts file + a reply into the buffer, as a wrapper does)
+  const held8 = async (cli, id, { FOL = 0, RFOL = 0, stalled = false, buf: pb = [], tr: pt = [], later = [], LAG = 0, trAt = null, line = null, answer = null, wait = 0 }) => {
+    const bf = path.join(BUFS7, id + '.buf'), tr = path.join(R4, id + '.jsonl'), sock = path.join(R4, id + '.sock'), rc = LI.receiptsFileOf(bf);
+    await master(sock, (l) => { if (answer) answer(l, { bf, rc }); }); const hub = await fakeHub(false);
+    const input = { line: { type: 'user', message: { role: 'user', content: [{ type: 'text', text: LI.FRAME_TEXT }] } }, stop: { type: 'control_request', request_id: LI.FRAME_ID, request: { subtype: 'interrupt' } } };
+    index7([row7(id, { socketPath: sock }, { transcript: tr, input })], answer ? null : hub.address().port);
+    const H0 = said('HISTORY-0 HCR8', { uuid: 'u8-0' });
+    fs.writeFileSync(tr, H0 + '\n');
+    if (stalled) execFileSync('mkfifo', [bf]); else fs.writeFileSync(bf, H0 + '\n');
+    if (answer) { fs.writeFileSync(bf.replace(/\.buf$/, '.json'), JSON.stringify({ caps: { receipts: true } })); fs.writeFileSync(rc, ''); }
+    const W = (ms) => (ms ? `Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ${ms});` : '');
+    const L = (a) => JSON.stringify(a.map((x) => x + '\n').join(''));
+    const P = `{const f=require('fs');` + (pt.length ? `f.appendFileSync(${JSON.stringify(tr)}, ${L(pt)});` : '') + (pb.length ? `f.appendFileSync(${JSON.stringify(bf)}, ${L(pb)});` : '')
+      + (later.length ? `setTimeout(()=>f.appendFileSync(${JSON.stringify(tr)}, ${L(later)}), ${LAG});` : '') + `}`;
+    const PRE = path.join(R4, id + '-hold8.cjs');
+    fs.writeFileSync(PRE, `const cp = require('child_process'), o = cp.spawn, BUF = ${JSON.stringify(bf)}, RC = ${JSON.stringify(rc)};\ncp.spawn = function (cmd, args, opts) {\n  if (Array.isArray(args) && args[0] === '-e' && /_follow/.test(String(args[1]))) {\n    const a = String(args[2] || ''), pre = a.includes(BUF) ? ${JSON.stringify(W(FOL) + P)} : a.includes(RC) ? ${JSON.stringify(W(RFOL))} : '';\n    if (pre) args = ['-e', pre + args[1], ...args.slice(2)];\n  }\n  return o.call(this, cmd, args, opts);\n};\n`);
+    const t0 = Date.now(); let first = null;
+    const tk2 = trAt ? setTimeout(() => fs.appendFileSync(tr, trAt.recs.map((x) => x + '\n').join('')), trAt.at) : null;
+    const out = await new Promise((resolve) => {
+      const ch = spawn(process.execPath, ['-r', PRE, cli, 'chat', id, '--wait', String(wait)], { env: { ...CLI_ENV, HOME: H7 }, stdio: ['pipe', 'pipe', 'pipe'] });
+      kids.push(ch);
+      let o = ''; ch.stdout.on('data', (d) => { if (first == null) first = Date.now() - t0; o += d; }); ch.stderr.on('data', (d) => { o += d; });
+      ch.stdin.end(line || '');
+      const tk = setTimeout(() => { try { ch.kill('SIGKILL'); } catch { } }, 20000);
+      ch.on('exit', (code) => { clearTimeout(tk); resolve(o + `\n[exit ${code}]`); });
+    });
+    if (tk2) clearTimeout(tk2);
+    fs.rmSync(bf, { force: true });
+    return { first, out, src: (/from its (transcript|buffer)/.exec(out) || [])[1] || 'none', r1: count(out, 'REPLY-R1 HCR8'), code: Number((/\[exit (\d+)\]$/.exec(out) || [])[1]) };
+  };
+  const R8 = said('REPLY-R1 HCR8', { uuid: 'u8-1' });
+  { // §11a THE EARLY READ IS A HEAD START — the buffer does not answer (no baseline), a reply lands in the transcript at 1.2 s:
+    // the transcript read AGAIN at the deadline holds it (round 7 printed its t0 read: 0 times, nothing said)
+    const shape = { stalled: true, trAt: { at: 1200, recs: [R8] } };
+    const a = await held8(CLI, 'sess-r8-again', shape), m = await mutantRun('noreread', [[AGAIN_SRC, 'const again = null;']], (f, id) => held8(f, id, shape));
+    ok('THE EARLY READ IS A HEAD START (round 8): with a buffer that does not answer, a reply landing in the transcript inside the 2 s is shown ONCE — the transcript is read again at the deadline (first line ≤ 2.6 s, nothing said stale); the mutant printing the held read as the answer shows it 0 times (round 7: 0, against rounds 4 and 6\'s 1)',
+      a.src === 'transcript' && a.r1 === 1 && a.first != null && a.first <= 2600 && !/did not answer again in time/.test(a.out) && m.r1 === 0, `${a.src} R1 ${a.r1}× ${a.first} ms · mutant ${m.r1}× | ${a.out.slice(0, 400)}`);
+  }
+  { // §11b NO SOURCE IS DISCARDED — the reply lands in the buffer just before the follower's baseline, the transcript gets it
+    // 1.5 s later (its write behind the stdout frame): the check fails on the read again too ⇒ the UNION — shown once, from the
+    // buffer (round 7 returned the read again unchecked: 0 times, nothing said)
+    const shape = { FOL: 300, buf: [R8], later: [R8], LAG: 1500 };
+    const u = await held8(CLI, 'sess-r8-union', shape), m = await mutantRun('nocheck8', [[HOLDS_SRC, 'const holds = () => true;']], (f, id) => held8(f, id, shape));
+    ok('NO SOURCE IS DISCARDED (round 8): a transcript behind its buffer — the history is the UNION of the transcript\'s read and the buffer as the follower read it at its baseline: the reply shown ONCE and said as the buffer\'s; the read again printed unchecked (a mutant) shows it 0 times',
+      u.r1 === 1 && /from its transcript .* and its buffer .*\(1 newer record\(s\) only the buffer holds yet\)/.test(u.out) && m.r1 === 0, `R1 ${u.r1}× · mutant ${m.r1}× | ${u.out.slice(0, 420)}`);
+  }
+  { // §11c A BLIND BASELINE — the buffer's newest message carries claude's stdout PLACEHOLDER uuid (a CLI that writes it), its
+    // transcript record (the real uuid, the same message.id) 1.5 s behind: never «held» by an OLDER message's uuid
+    const P8 = rec({ type: 'assistant', uuid: 'aaaaaaaa-bbbb-cccc-dddd-000000000001', message: { id: 'msg_hcr8', role: 'assistant', content: [{ type: 'text', text: 'REPLY-R1 HCR8' }] } });
+    const T8 = rec({ type: 'assistant', uuid: 'u8-1t', message: { id: 'msg_hcr8', role: 'assistant', content: [{ type: 'text', text: 'REPLY-R1 HCR8' }] } });
+    const shape = { FOL: 300, buf: [P8], later: [T8], LAG: 1500 }, both = { FOL: 300, buf: [P8], tr: [T8] };
+    const b = await held8(CLI, 'sess-r8-blind', shape), b2 = await held8(CLI, 'sess-r8-blind2', both);
+    const m = await mutantRun('noblind', [["return { u: id.startsWith('uuid|') ? o.uuid : null };", "return id.startsWith('uuid|') ? { u: o.uuid } : null;"]], (f, id) => held8(f, id, shape));
+    ok('A PLACEHOLDER NEVER SATISFIES THE CHECK (round 8): a newest message with no real uuid makes the baseline BLIND — the union shows the reply ONCE (transcript behind: from the buffer; both in time: the placeholder\'d copy and its record ONE by the message key); the mutant judging by the older message\'s uuid shows it 0 times',
+      b.r1 === 1 && b2.r1 === 1 && m.r1 === 0, `behind ${b.r1}× · both ${b2.r1}× · mutant ${m.r1}× | ${b.out.slice(0, 300)} | ${b2.out.slice(0, 300)}`);
+  }
+  { // §11d A BASELINE LATER THAN THE DEADLINE, WITH A LINE SENT — both followers held 2.3 s; a piped line goes at the deadline
+    // and the stand-in wrapper acks it into the receipts file and writes the reply into the buffer at once (both inside the
+    // late baselines): the reply SHOWN once beyond the history, the line ACKNOWLEDGED (round 7: «not acknowledged», exit 1)
+    const R2 = said('REPLY-R2 HCR8', { uuid: 'u8-2' });
+    const answer = (l, { bf, rc }) => { let mid = null; try { mid = JSON.parse(l).msgId; } catch { } if (!mid) return; fs.appendFileSync(rc, rec({ type: '_stdin_ack', timestamp: Date.now(), msg_id: mid }) + '\n'); fs.appendFileSync(bf, R2 + '\n'); };
+    const shape = { FOL: 2300, RFOL: 2300, line: 'a line sent at the deadline HCR8\n', answer, wait: 4 };
+    const s = await held8(CLI, 'sess-r8-late', shape);
+    const m1 = await mutantRun('nolate', [['const lateBase = (b) => {\n', 'const lateBase = (b) => { return;\n']], (f, id) => held8(f, id, shape));
+    const m2 = await mutantRun('nolateacks', [['const lateAcks = (b) => {', 'const lateAcks = (b) => { return;']], (f, id) => held8(f, id, shape));
+    const r2 = (x) => count(x.out, 'REPLY-R2 HCR8');
+    ok('A LATE BASELINE IS SHOWN, A LATE RECEIPT HEARD (round 8 — the residual round 7 left: a send waits on a `ready` the deadline resolves): the reply in the late buffer baseline is shown ONCE beyond the history and the ack in the late receipts baseline names the line (exit 0); without the late baseline 0 replies, without the late acks «not acknowledged»',
+      r2(s) === 1 && !/not acknowledged/.test(s.out) && s.code === 0 && r2(m1) === 0 && /not acknowledged/.test(m2.out), `R2 ${r2(s)}× exit ${s.code} · nolate ${r2(m1)}× · nolateacks acked=${!/not acknowledged/.test(m2.out)} | ${s.out.slice(-420)}`);
   }
   for (const k of kids) { try { if (k.exitCode == null && k.signalCode == null) k.kill('SIGKILL'); } catch { } }   // only this section's own children
   for (const s of servers) { try { s.close(); } catch { } }

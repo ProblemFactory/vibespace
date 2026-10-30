@@ -555,6 +555,41 @@ function historyOf(text, { max = 20 } = {}) {
   return msgs.filter((m) => !m.chunk || m.text.trim()).map((m) => (m.chunk ? { who: m.who, text: m.text.trim() } : m)).slice(-Math.max(1, max));
 }
 
+/** THE UNION (lane human-cli round 8): ONE conversation's two reads — its transcript's (`first`) and its buffer's as the
+ *  CLI's follower read it (`then`) — as one history: no record twice, none dropped (round 7 printed a transcript read
+ *  that lacked the buffer's newest message and dropped the buffer's read). The ANCHOR is the last record of `then` a
+ *  STRONG key of which `first` holds (so none after it holds one); what `then` holds after it that `first` does not —
+ *  by a weak key matched only after the anchor's place in `first` (the same words typed again later are a new line; each
+ *  match takes one) — is NEWER than all `first` holds (a transcript is written in order): `first`'s records, then those, in
+ *  `then`'s order. `keysOf(rec, line)` → {strong: [...], weak: [...]} (the CLI's: it alone knows a placeholder uuid).
+ *  → {text, added: [{rec, line}]} | null — no anchor: the two reads share no record, never guessed together. */
+function unionOf(first, then, keysOf) {
+  const rows = (text) => {
+    const out = [];
+    for (const raw of String(text || '').split('\n')) {
+      const line = raw.replace(/\r$/, '').trim();
+      if (!line || line[0] !== '{') continue;
+      let rec; try { rec = JSON.parse(line); } catch { continue; }
+      if (rec && typeof rec === 'object') out.push({ rec, line, k: keysOf(rec, line) });
+    }
+    return out;
+  };
+  const A = rows(first), Z = rows(then), at = new Map();   // a strong key of `first` → the place of its last record holding it
+  A.forEach((r, i) => { for (const k of r.k.strong) at.set(k, i); });
+  let anchor = -1, place = -1;
+  for (let j = Z.length - 1; j >= 0 && anchor < 0; j--) for (const k of Z[j].k.strong) if (at.has(k)) { anchor = j; place = at.get(k); break; }
+  if (anchor < 0) return null;
+  const weak = new Map();
+  for (let i = place + 1; i < A.length; i++) for (const k of A[i].k.weak) weak.set(k, (weak.get(k) || 0) + 1);
+  const added = [];
+  for (const r of Z.slice(anchor + 1)) {   // none of them holds a strong key of `first` (the anchor is the LAST that does)
+    const w = r.k.weak.find((k) => weak.get(k) > 0);
+    if (w) { weak.set(w, weak.get(w) - 1); continue; }
+    added.push({ rec: r.rec, line: r.line });
+  }
+  return { text: A.map((r) => r.line).concat(added.map((r) => r.line)).join('\n') + '\n', added };
+}
+
 /** /proc/<pid>/cgroup text → the systemd unit the process runs in ({unit, user}) — the hub's log is that unit's journal.
  *  The cgroup alone over-attributes (round 2): a hub started INSIDE a session of the unit's hub sits in the unit's cgroup
  *  too — the writer attributes the unit only when this process IS the unit's main process (unitOwnedBy). */
@@ -579,5 +614,5 @@ module.exports = {
   INDEX_VERSION, INDEX_KIND, INDEX_FILE_RE, OWN_ROOT_DIR, SWEEP_MS, HEARTBEAT_MS, FRESH_MS, NET_FSTYPE, ROW_KEYS, HUB_KEYS, SOCKET_FACTS, DTACH, TURN_WORDS,
   FRAME_TEXT, FRAME_ID, RECEIPT_FLAG, receiptsFileOf, indexFileOf, mountOf, landedPathOf, indexPlaceOf, rungFolderOf, inputHeldOf, rowOf, docOf, parseIndex, procStat,
   procVerdict, socketFactOf, judgeRow, judgeHub, clean, ageWords, orderRows, orderHubs, entriesOf, pickSession, cellWidth, fitCell, tableOf,
-  dtachPacket, dtachPush, dtachAttach, frameTemplatesOf, fillFrame, receiptOf, toolLine, personText, recordLines, historyOf, unitOfCgroup, unitOwnedBy,
+  dtachPacket, dtachPush, dtachAttach, frameTemplatesOf, fillFrame, receiptOf, toolLine, personText, recordLines, historyOf, unionOf, unitOfCgroup, unitOwnedBy,
 };

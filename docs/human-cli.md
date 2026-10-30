@@ -52,7 +52,11 @@ or a unique part of its name — the command then shows the name and asks before
 - **chat** never stays connected to the session: each line is handed over and the connection let go, and the reply is
   read from the session's own log file. Each line is confirmed by the session («not acknowledged in 6 s» if it is
   not); Stop says «Stop taken» only once the session confirms it. Every reply is shown once; one the session changes
-  after it was shown is shown again, marked «(updated)».
+  after it was shown is shown again, marked «(updated)». The last messages come from the conversation's own file, read
+  again at the moment they are printed; when the session's log already holds a newer message that file does not have
+  yet, both are shown together and the line above them says so. If that file did not answer in time, the line under
+  the messages says how old they are; if the log answers only after the first 2 s, what it holds beyond them is shown
+  then.
 
 ## Over ssh
 
