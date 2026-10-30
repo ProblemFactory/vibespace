@@ -6,6 +6,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 
 ### Fixed
 - While public URLs are down because the relay keeps dropping the connection, For you says why; publishing tries once first, and no longer asks about DNS.
+- A Mac screen that waits while Hub automation asks you (VibeSpace sending the Mac its screen helper) no longer closes after 30 s; it opens once you allow it.
 
 ## 2.369.364 — 2026-10-30
 
