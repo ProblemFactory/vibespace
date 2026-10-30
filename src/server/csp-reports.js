@@ -35,7 +35,10 @@
 //     on disk now (its site; a line keeps no `?v=`, so a build whose site moved leaves it the app's). One the sanitizer
 //     explains is rewritten as a `sanitizer-parse` line (`rejudged`, no `noticed`: its pair may file again for a real
 //     gap), the For-you notice it filed (its own words) is closed, and that is said ONCE — one log line; the next boot
-//     finds nothing to re-judge. The store not up at boot ⇒ the first report tries again.
+//     finds nothing to re-judge. The lines FIRST, the notice LAST: a file that cannot be rewritten closes nothing (its
+//     line still says what the notice says; the next boot tries again). Only with the For-you store up: none yet — a
+//     getter that answers null or throws (server.js makes its store after the sink) — rewrites nothing, and the boot
+//     tries again each second (and at each report) until the store answers (lane csp-mermaid-sites r3).
 //   · THE COUNT (主开发's ruling 2): reports since this boot and lines on disk, the app page's apart from the frames' and
 //     the sanitizer's — `GET /api/csp-reports` (behind the sign-in, like every read) answers it; the Diagnostics report
 //     shows it as a chip (the sanitizer's own chip only when it has a line).
@@ -53,6 +56,7 @@ const PACE_PER_MIN = 60;
 const PACE_ADDRS = 1000;       // addresses the pace remembers (the oldest minute is forgotten first)
 const KEYS_MAX = 20000;        // line keys kept in memory (past it the set restarts — a repeat may be written once more)
 const NOTICES_PER_DAY = 10;
+const RETRY_MS = 1000;         // the boot's re-judge, the For-you store not up yet: tried again this often
 const NOTICE_KEY = 'csp-report';
 if (C.REPORT_PATH !== '/api/csp-report') throw new Error('csp-reports: register() writes the report path as a literal — move it with C.REPORT_PATH');
 
@@ -67,7 +71,7 @@ function recheckOf(r) {
   try { const s = new URL(r.source), d = new URL(r.document); return s.origin === d.origin && C.PARSE_SCRIPTS.includes(s.pathname) ? s.pathname : null; } catch { return null; }
 }
 
-function create({ dataDir, file: fileOpt = null, publicDir = PUBLIC, getUserTodos = () => null, now = Date.now, log = console, fileMax = FILE_MAX, bodyMax = BODY_MAX, pacePerMin = PACE_PER_MIN, noticesPerDay = NOTICES_PER_DAY } = {}) {
+function create({ dataDir, file: fileOpt = null, publicDir = PUBLIC, getUserTodos = () => null, now = Date.now, log = console, retryMs = RETRY_MS, fileMax = FILE_MAX, bodyMax = BODY_MAX, pacePerMin = PACE_PER_MIN, noticesPerDay = NOTICES_PER_DAY } = {}) {
   // `file`: the scratch hubs of a chrome suite write where the suite reads (scripts/scratch.mjs, VIBESPACE_CSP_REPORTS_FILE)
   const file = fileOpt || path.join(dataDir, FILE), rotated = file + '.1';
   const samples = !!fileOpt; // a chrome suite's file keeps the sample (above); a hub's own data/ never
@@ -148,37 +152,47 @@ function create({ dataDir, file: fileOpt = null, publicDir = PUBLIC, getUserTodo
     }
     return reports;
   }
-  /** A HUB THAT MET THE BUG (above): the lines on disk a sanitizer explains → `sanitizer-parse` lines, the notices they
-   *  filed closed, said once → { lines, closed }. Once per boot (the store not up yet: tried again at the next report). */
-  let rejudging = null;
+  /** A HUB THAT MET THE BUG (above): the lines on disk a sanitizer explains → `sanitizer-parse` lines, THEN the notices
+   *  they filed closed, said once → { lines, closed }. Once per boot, with the For-you store up — none yet ⇒ nothing
+   *  rewritten, `later: true`, tried again in `retryMs` (and by the next report). */
+  let rejudging = null, retry = null;
+  const storeUp = () => { try { const t = getUserTodos && getUserTodos(); return t && typeof t.idsWhere === 'function' && typeof t.setStatusMany === 'function' ? t : null; } catch { return null; } };
+  function later() {
+    if (!retry) { retry = setTimeout(() => { retry = null; rejudge(); }, retryMs); if (retry.unref) retry.unref(); }
+    return Promise.resolve({ lines: 0, closed: 0, later: true });
+  }
   function rejudge() {
     if (rejudging) return rejudging;
     if (!stale.length) return (rejudging = Promise.resolve({ lines: 0, closed: 0 }));
-    let todos;
-    try { todos = getUserTodos && getUserTodos(); } catch { return Promise.resolve({ lines: 0, closed: 0, later: true }); }
+    const todos = storeUp();
+    if (!todos) return later(); // null and a throw are one fact (no store yet): a line rewritten now could never close its notice
     rejudging = (async () => {
       const hits = [];
       for (const c of stale) { try { if ((await (await parseSites(c.script)).sites).has(`${c.r.line}:${c.r.column}`)) hits.push(c); } catch { /* no such script on disk: the line stays */ } }
       if (!hits.length) return { lines: 0, closed: 0 };
-      // the notice a line filed carries its words (noticeWords) — a later filing of the pair names another place, and stays
-      const words = new Set(hits.filter((h) => h.r.noticed).map((h) => { const w = C.noticeWords(h.r); return `${w.text}\u0000${w.detail}`; }));
-      let closed = 0;
-      if (words.size && todos && typeof todos.idsWhere === 'function') {
-        const ids = todos.idsWhere((i) => i.sessionKey === NOTICE_KEY && i.status === 'open' && words.has(`${i.text}\u0000${i.detail}`));
-        if (ids.length) { try { closed = todos.setStatusMany(ids, 'done', 'system').changed.length; } catch (e) { log.warn?.(`[csp] the For-you notice was not closed — ${e && e.message}`); } }
-      }
-      const raws = new Set(hits.map((h) => h.raw)), at = new Date(now()).toISOString();
+      // THE LINES FIRST — each file read, rewritten and renamed in one synchronous step (no append falls between); a line
+      // is re-judged once its file is renamed
+      const raws = new Set(hits.map((h) => h.raw)), landed = new Set(), at = new Date(now()).toISOString();
       for (const f of [rotated, file]) {
         const t = textOf(f);
         if (t == null) continue;
         const was = t.split('\n'), out = was.map((l) => { if (!raws.has(l)) return l; const { noticed: _n, ...r } = JSON.parse(l); return JSON.stringify({ ...r, kind: C.KIND_SANITIZER, rejudged: at }); });
         if (out.every((l, i) => l === was[i])) continue;
-        try { fs.writeFileSync(f + '.rejudge', out.join('\n'), { mode: 0o600 }); fs.renameSync(f + '.rejudge', f); } catch (e) { log.warn?.(`[csp] data/${FILE} was not re-judged — ${e && e.code || e && e.message}`); }
+        try { fs.writeFileSync(f + '.rejudge', out.join('\n'), { mode: 0o600 }); fs.renameSync(f + '.rejudge', f); for (const l of was) if (raws.has(l)) landed.add(l); } catch (e) { log.warn?.(`[csp] data/${FILE} was not re-judged — ${e && e.code || e && e.message} (its notice stays; the next boot tries again)`); }
       }
       load();
-      stats.rejudged += hits.length;
-      log.log?.(`[csp] ${hits.length} line(s) an earlier version filed as the app page's were the sanitizer's parse (${[...new Set(hits.map((h) => h.script))].join(', ')}, re-judged against app-csp PARSE_SCRIPTS): counted as the sanitizer's now; ${closed} For-you notice(s) they filed closed`);
-      return { lines: hits.length, closed };
+      const done = hits.filter((h) => landed.has(h.raw));
+      if (!done.length) return { lines: 0, closed: 0 };
+      // THE NOTICE LAST — the one a rewritten line filed carries its words (noticeWords); a later filing of the pair names
+      // another place, and stays
+      const words = new Set(done.filter((h) => h.r.noticed).map((h) => { const w = C.noticeWords(h.r); return `${w.text}\u0000${w.detail}`; }));
+      let closed = 0;
+      if (words.size) {
+        try { const ids = todos.idsWhere((i) => i.sessionKey === NOTICE_KEY && i.status === 'open' && words.has(`${i.text}\u0000${i.detail}`)); if (ids.length) closed = todos.setStatusMany(ids, 'done', 'system').changed.length; } catch (e) { log.warn?.(`[csp] the For-you notice was not closed — ${e && e.message}`); }
+      }
+      stats.rejudged += done.length;
+      log.log?.(`[csp] ${done.length} line(s) an earlier version filed as the app page's were the sanitizer's parse (${[...new Set(done.map((h) => h.script))].join(', ')}, re-judged against app-csp PARSE_SCRIPTS): counted as the sanitizer's now; ${closed} For-you notice(s) they filed closed`);
+      return { lines: done.length, closed };
     })();
     return rejudging;
   }
@@ -221,7 +235,7 @@ function create({ dataDir, file: fileOpt = null, publicDir = PUBLIC, getUserTodo
       // report (measured: a chrome suite's teardown read 17 lines one run, 1 the next)
       if (got.some((r) => !lines.has(C.lineKey(r))) && !paceOk(String(req.socket && req.socket.remoteAddress || '?'))) { stats.paced++; return res.status(429).json({ error: 'too many reports' }); }
       if (!got.some((r) => r.site)) { record(got); res.status(204).end(); return; }
-      rejudge(); // a hub that met the bug: done at boot, unless the store was not up yet
+      rejudge(); // a hub that met the bug: done at boot — the For-you store not up yet, tried here too
       classify(got).then(() => { record(got); res.status(204).end(); });
     });
     req.on('error', () => { /* the browser went away */ });
