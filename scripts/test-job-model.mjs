@@ -138,6 +138,24 @@ ok(M.vetSpec({ cmd: { argv: ['npm', 'run', 'dev'] } }).ok, 'ordinary spec passes
   }
   const both = M.vetSpec({ kind: 'task', cmd: { argv: ['sh', '-c', 'jq .t ~/.claude/.credentials.json'] }, envFrom: ['GITHUB_TOKEN'] });
   ok(!both.ok && both.code === 'envfrom_retired', 'envfrom_retired: a spec that also reads a sign-in is named by the retired road first — one refusal, one name', both.error);
+  // r2 (accept-r1 finding 2): THE MANUAL THE REFUSAL POINTS TO teaches the road it names. `vibespace-docs jobs` is resolved the
+  // way the docs route resolves it (the registry's topic → its manual file); its §9 (the job's environment) says the secret
+  // comes from the vault (`--vault NAME=vault://…`, the subsection «A stored secret from the vault» L1a writes under it) and
+  // never teaches the retired road — no `--env-from` (a flag
+  // vibespace-job never had), no «⚙→Background Work» value store, no literal-redaction promise for log tails (the redaction
+  // read the deleted store), and the vetted pieces carry no envFrom row. RED on 052f524ba by those stale words.
+  {
+    const REG = require('../src/agent-cli-registry.js');
+    const row = REG.ROWS.find((r) => r.topic === 'jobs' || (r.aliases || []).includes('jobs'));
+    const file = row && [].concat(row.manual)[0];
+    const man = file ? fs.readFileSync(path.join(__dirname_jm, '..', 'docs/agent', file), 'utf8') : '';
+    const s9 = (man.match(/\n## 9\. [^\n]*\n([\s\S]*?)(?=\n## (?!9\. ))/) || [])[1] || '';
+    ok(/see vibespace-docs jobs$/.test(WORDS) && file === 'background-work-manual.md' && s9.length > 200, `the refusal's pointer resolves: vibespace-docs jobs → docs/agent/${file} §9 (${s9.length} chars)`);
+    ok(/comes from the vault/.test(s9) && s9.includes('--vault NAME=vault://…') && /«A stored secret from the vault»/.test(s9) && /envfrom_retired/.test(s9), '§9 teaches the ONE road: the secret comes from the vault (--vault NAME=vault://…, «A stored secret from the vault») — a named envFrom is refused envfrom_retired');
+    const stale = [[/--env-from/, '`--env-from` (a flag vibespace-job never had)'], [/⚙→Background Work/, '«user manages values in ⚙→Background Work»'], [/literal-redacted|redacted from\s+log tails/, 'the literal-redaction promise for log tails'], [/an `?--env-from`? name/, 'an --env-from name as a vetted piece']];
+    const found = stale.filter(([re]) => re.test(man)).map(([, what]) => what);
+    ok(found.length === 0, 'the whole manual teaches none of the retired road: ' + stale.map(([, what]) => what).join(' · '), found);
+  }
 }
 
 // ── schedules ──

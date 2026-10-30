@@ -15,6 +15,18 @@ const { RETIRED_SETTING_KEYS, stripRetiredSettings } = require('../retired-setti
 /** 2026-09-runaway-parks-void: the old guard's sentence and what replaces it. */
 const OLD_RUNAWAY_PREFIX = 'stopped as a runaway: RSS ';
 const RUNAWAY_VOID_TEXT = 'stopped by the old resource guard (a per-process RSS sum — retired in 2.369.171)';
+// 2026-10-job-secrets-retired (lane job-secrets-retire r2): the retired store's two names and its ONE For-you notice's words —
+// structure the client words with t() (zh + ja in src/lib/i18n-*.js); the English is the store's dedupe key
+const i18nKey = (s) => s; // extraction marker (scripts/i18n-extract.mjs)
+const JOB_SECRETS_FILE = 'job-secrets.json';
+const JOB_SECRETS_RETIRED = 'job-secrets.retired.json';
+const JOB_SECRETS_WORDS = Object.freeze({
+  text: i18nKey('A plain file kept secrets for background jobs outside the vault: {file} — put each into the vault, then delete the file.'),
+  names: i18nKey('It holds {n} name(s): {names} — the values are not shown here.'),
+  more: i18nKey('…and {n} more not shown (past the first 20, or not a variable name).'),
+  unread: i18nKey('Its names could not be read — open the file to see what it holds.'),
+  recipe: i18nKey('VibeSpace no longer reads this file and never deletes it. Add each value to the vault as a secret entry, then delete the file; a job reads a stored secret with --vault NAME=vault://… (vibespace-docs jobs).'),
+});
 
 // `homeDir` is a PARAMETER, not an ambient fact: a migration that reads the
 // transcript tree (the origin backfill) must be drivable against a scratch
@@ -800,6 +812,52 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
         })();
       },
     },
+    {
+      id: '2026-10-job-secrets-retired',
+      note: "A SECRET AT REST NAMES ITS VAULT ENTRY — OR THE OWNER IS TOLD (lane job-secrets-retire r2, design-vault-service-secret D10): data/job-secrets.json was a PLAINTEXT store of a job's secrets (the old GET / POST /api/jobs-secrets — no client ever wrote it; the engine read it into a job's env as envFrom). From this release nothing reads it and its routes are gone, so a store an owner once filled by hand would sit in data/ in the clear with no door and nobody told. This one-shot RENAMES it to data/job-secrets.retired.json (0600 — the owner's bytes, KEPT: never deleted by us) and files ONE For-you notice under Vault naming the file, the names it held (names only, never a value) and the recipe (each into the vault as a secret entry, then delete the file; a job reads one with --vault). src/vault.js SECRETS_AT_REST names the retired file until the owner deletes it. No file ⇒ nothing. A run that renamed and then failed to file the notice is not recorded: the next boot finds the retired file and files it (the store dedupes by its text). Both names present ⇒ FAILS by name, nothing moved (never over the owner's bytes).",
+      run() {
+        const from = path.join(dataDir, JOB_SECRETS_FILE), to = path.join(dataDir, JOB_SECRETS_RETIRED);
+        let st = null;
+        try { st = fs.lstatSync(from); } catch { /* absent — nothing was stored, or an earlier run renamed it */ }
+        if (st && !st.isFile() && !st.isSymbolicLink()) return { store: 'not-a-file' };   // a directory / socket by that name was never the store
+        if (st) {
+          if (fs.existsSync(to)) throw new Error(`data/${JOB_SECRETS_RETIRED} already exists beside data/${JOB_SECRETS_FILE} — nothing moved (never over the owner's bytes); move one of them aside and restart`);
+          fs.renameSync(from, to);
+        } else if (!fs.existsSync(to)) return { store: 'absent' };
+        if (fs.lstatSync(to).isFile()) fs.chmodSync(to, 0o600);   // a symlink's target is not ours to chmod
+        // its NAMES only — the values are parsed to find the names and never leave this function (no log, no ledger, no notice)
+        let names = null;
+        try { if (fs.statSync(to).size <= 1024 * 1024) { const doc = JSON.parse(fs.readFileSync(to, 'utf-8')); if (doc && typeof doc === 'object' && !Array.isArray(doc)) names = Object.keys(doc); } } catch { names = null; }
+        const rep = { store: st ? 'renamed' : 'renamed-earlier', to: 'data/' + JOB_SECRETS_RETIRED, names: names ? names.length : null };
+        if (names && !names.length) { console.log('[migrate] job-secrets-retired:', JSON.stringify(rep)); return { ...rep, notice: 'none (it held no name)' }; }
+        // an environment-variable name is shown; anything else (a pasted value in the name field — the accident class) is counted
+        const shown = (names || []).filter((n) => /^[A-Za-z_][A-Za-z0-9_]{0,63}$/.test(n)).slice(0, 20);
+        const lines = names
+          ? [{ key: JOB_SECRETS_WORDS.names, params: { n: names.length, names: shown.join(', ') || '—' } }, ...(names.length > shown.length ? [{ key: JOB_SECRETS_WORDS.more, params: { n: names.length - shown.length } }] : [])]
+          : [{ key: JOB_SECRETS_WORDS.unread }];
+        lines.push({ key: JOB_SECRETS_WORDS.recipe });
+        const head = { key: JOB_SECRETS_WORDS.text, params: { file: 'data/' + JOB_SECRETS_RETIRED } };
+        const fill = (l) => l.key.replace(/\{(\w+)\}/g, (m, k) => (l.params && l.params[k] != null ? String(l.params[k]) : m));
+        // THROUGH the live inbox store (it holds data/user-todos.json in memory); without one a PRIVATE store on the same file,
+        // flushed before the runner records the row (a throw fails the run — retried next boot)
+        const live = typeof userTodos === 'function' ? userTodos() : userTodos;
+        let store = live, priv = false;
+        if (!store || typeof store.add !== 'function') {
+          const { UserTodoManager } = require('../user-todos.js');
+          store = new UserTodoManager({ dataDir, expirySweepMs: 0 });
+          priv = true;
+        }
+        try {
+          const it = store.add('vault', { origin: 'vault', kind: 'notice', urgency: 'high', by: 'system', sessionName: 'Vault', text: fill(head), detail: lines.map(fill).join('\n'), i18n: { text: head, detail: lines } });
+          store.flush();
+          rep.notice = it && it.id ? 'filed' : 'not filed';
+          rep.via = priv ? 'private' : 'live';
+        } finally { if (priv) { try { store.stop(); } catch { } } }
+        if (rep.notice !== 'filed') throw new Error('the For-you notice was not filed — retried next boot (the file is renamed and kept)');
+        console.log('[migrate] job-secrets-retired:', JSON.stringify(rep));
+        return rep;
+      },
+    },
   ];
 
   /** 2026-10-grants-unify: every pre-unify who-list → rows of THE grants store (src/server/grants-migration.js). `ensure`
@@ -1064,4 +1122,4 @@ function create({ rootDir, serverNotice, homeDir = os.homedir(), channels = null
   return { runLocalMigrations, MIGRATIONS, grantsStoreBoot };
 }
 
-module.exports = { create, OLD_RUNAWAY_PREFIX, RUNAWAY_VOID_TEXT };
+module.exports = { create, OLD_RUNAWAY_PREFIX, RUNAWAY_VOID_TEXT, JOB_SECRETS_FILE, JOB_SECRETS_RETIRED, JOB_SECRETS_WORDS };

@@ -5814,6 +5814,23 @@ function makeFlow93(acorn) {
   const inString = (line, idx) => { const h = line.slice(0, idx); return ((h.split('"').length - 1 - (h.split('\\"').length - 1)) % 2 !== 0) || ((h.split('`').length - 1) % 2 !== 0); };
   // git-derived: trackedFiles()/`git ls-files` on the line, or the readdir intersected with a tracked set built from one
   const gated96 = (line, window) => /trackedFiles\s*\(|ls-files/.test(line) || (/\btracked\.(?:has|includes)\s*\(/.test(line) && /ls-files/.test(window));
+  // r2 (lane job-secrets-retire, accept-r1 finding 4): the readdir's argument may be a VARIABLE — a local walker
+  // (`const files = (dir) => fs.readdirSync(dir, …)`, `function walk(d) { … readdirSync(d …`) CALLED with the data/bin path is a
+  // data/bin listing like any other (that lane's first test-vault-secrets ⑧ census read the untracked rclone ELF this way and
+  // the direct-call regex above never saw it). A suite's walkers = the names bound to a function that hands its FIRST
+  // parameter to a readdir within its first five lines; a call of one whose argument is the data/bin path is judged as above.
+  const DBIN_ARG = String.raw`(?:path\.(?:posix\.)?join\(\s*(?:REPO|ROOT|repo|root)\s*,\s*['"]data(?:\/bin['"]|['"]\s*,\s*['"]bin['"])|['"]data\/bin['"])`;
+  const walkersOf = (lines) => {
+    const out = new Set();
+    lines.forEach((line, i) => {
+      const m = /\b(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s*)?(?:function\s*\w*\s*)?\(\s*(\w+)|\bfunction\s+(\w+)\s*\(\s*(\w+)/.exec(line);
+      if (!m) return;
+      const [name, param] = m[1] ? [m[1], m[2]] : [m[3], m[4]];
+      if (new RegExp(String.raw`(?:readdirSync|opendirSync|fs\.promises\.readdir|fs\.readdir)\s*\(\s*` + param + String.raw`\b`).test(lines.slice(i, i + 5).join('\n'))) out.add(name);
+    });
+    return out;
+  };
+  const walkerCall = (line, walkers) => { for (const w of walkers) { const m = new RegExp(String.raw`(?<![\w$])(?<![^.]\.)` + w + String.raw`\s*\(\s*` + DBIN_ARG).exec(line); if (m) return m; } return null; };   // a spread `...walk(` is a call, `obj.walk(` is not
   // the declared exceptions — each a data/bin walk that is SAFE or an accepted residual, keyed by a unique line needle
   // (robust to line moves). A row whose needle no longer names a live data/bin readdir is a DEAD exception (RED below).
   const CENSUS_WALK_EXCEPTIONS = [
@@ -5823,14 +5840,19 @@ function makeFlow93(acorn) {
     { file: 'scripts/test-browser-human.mjs', needle: "const clis = fs.readdirSync(path.join(REPO, 'data/bin'))", reason: 'PREFIX filter /^vibespace-/ + isFile — rclone / rclone-dl.zip / vibespace-agentd.js do not match; reads the shipped CLIs for a forbidden-call grep' },
     { file: 'scripts/test-reset-credit-ui.mjs', needle: "walk('src'), ...fs.readdirSync(path.join(REPO, 'data/bin'))", reason: '.js-only filter — the untracked artifacts (rclone, rclone-dl.zip) are not .js; a CONTENTS grep' },
     { file: 'scripts/test-vault-law.mjs', needle: "for (const f of fs.readdirSync(path.join(REPO, 'data/bin'))) {", reason: 'SIZE-CAP (skips files > 400 KB) + shebang/.js filter — the 64 MB rclone is skipped; a CONTENTS grep for the vault law' },
+    // r2 (lane job-secrets-retire): the two LOCAL-WALKER listings the widened scan found — both keep .js/.mjs names only (the
+    // rclone ELF and rclone-dl.zip never enter the list) and drop the generated agentd bundle before any read
+    { file: 'scripts/test-harness-contract.mjs', needle: "const allFiles = [...walk(path.join(REPO, 'src')), path.join(REPO, 'server.js'), ...walk(path.join(REPO, 'data/bin'))];", reason: 'a local walker that keeps .js/.mjs names only (rclone / rclone-dl.zip never listed) and GENERATED (the agentd bundle) is filtered before the read — the auto-resume CONTENTS census' },
+    { file: 'scripts/test-helper-ask.mjs', needle: "...walk(path.join(REPO, 'data/bin'))].filter((p) => !GENERATED.test(p))", reason: 'a local walker that keeps .js/.mjs/.cjs names only (rclone / rclone-dl.zip never listed) and GENERATED (the agentd bundle) is filtered before the read — the answer-side CONTENTS census (⑲)' },
   ];
   const suiteFiles = fs.readdirSync(path.join(REPO, 'scripts')).filter((f) => /^(?:test-.*|.*-census)\.mjs$/.test(f));
   const offenders = [];
   for (const f of suiteFiles) {
     const rel = 'scripts/' + f;
     const lines = read(rel).split('\n');
+    const walkers = walkersOf(lines);
     lines.forEach((line, i) => {
-      const m = DBIN.exec(line);
+      const m = DBIN.exec(line) || walkerCall(line, walkers);
       if (!m || inString(line, m.index)) return;
       const window = lines.slice(Math.max(0, i - 8), i + 2).join('\n');
       if (gated96(line, window)) return;
@@ -5841,7 +5863,7 @@ function makeFlow93(acorn) {
   ok(!offenders.length, `§96 every data/bin listing in a census suite is git ls-files-derived or a declared exception (${suiteFiles.length} suites, ${CENSUS_WALK_EXCEPTIONS.length} exceptions)`, offenders);
 
   // no DEAD exception (each needle still names a live, string-free data/bin readdir) — a dead row hides the next walk
-  const deadEx = CENSUS_WALK_EXCEPTIONS.filter((e) => !read(e.file).split('\n').some((l) => { const m = DBIN.exec(l); return m && !inString(l, m.index) && l.includes(e.needle); }));
+  const deadEx = CENSUS_WALK_EXCEPTIONS.filter((e) => { const ls = read(e.file).split('\n'), w = walkersOf(ls); return !ls.some((l) => { const m = DBIN.exec(l) || walkerCall(l, w); return m && !inString(l, m.index) && l.includes(e.needle); }); });
   ok(!deadEx.length, '§96 no dead CENSUS_WALK_EXCEPTIONS row (each still names a live data/bin walk)', deadEx.map((e) => `${e.file} :: ${e.needle}`));
 
   // THE MUTANT: a census switched to a working-tree readdir of data/bin ⇒ RED; the trackedFiles()/git ls-files form ⇒
@@ -5852,6 +5874,13 @@ function makeFlow93(acorn) {
   const flag96 = (line, exc = []) => { const m = DBIN.exec(line); return !!m && !gated96(line, line) && !exc.some((n) => line.includes(n)); };
   ok(flag96(MUT_WALK) && !flag96(MUT_GIT) && !flag96(MUT_WALK, ["fs.readdirSync(path.join(REPO, 'data/bin'))"]),
     '§96 MUTANT: a census whose data/bin listing is a working-tree readdir is RED; the trackedFiles() / git ls-files form is green; a declared CENSUS_WALK_EXCEPTIONS needle turns it green');
+  // r2: the LOCAL-WALKER shape (the readdir's argument a variable) — RED through the walker; the direct regex alone missed it
+  const MUT_VAR = ["  const files = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? files(path.join(dir, e.name)) : [path.join(dir, e.name)]));",
+    "  const hits = [...files(path.join(REPO, 'src')), ...files(path.join(REPO, 'data/bin'))].filter((f) => /job-secrets/.test(fs.readFileSync(f, 'utf8')));"];
+  const MUT_VAR_GIT = [MUT_VAR[0], "  const hits = [...files(path.join(REPO, 'src')), ...trackedFiles(REPO, 'data/bin').map((f) => path.join(REPO, f))].filter((f) => /job-secrets/.test(fs.readFileSync(f, 'utf8')));"];
+  const flagVar = (ls) => { const w = walkersOf(ls); return ls.some((l) => { const m = DBIN.exec(l) || walkerCall(l, w); return !!m && !gated96(l, l); }); };
+  ok(flagVar(MUT_VAR) && !MUT_VAR.some((l) => DBIN.test(l)) && !flagVar(MUT_VAR_GIT) && walkersOf(MUT_VAR).has('files'),
+    '§96 r2 MUTANT: a data/bin listing through a LOCAL WALKER (`files(path.join(REPO, \'data/bin\'))` — the readdir\'s argument a variable) is RED, the direct-call regex alone misses it, and the git form is green');
   // and the helper itself exists and is git-derived (not a readdir)
   const tf = read('scripts/tracked-files.mjs');
   ok(/export function trackedFiles\(/.test(tf) && /git'[^)]*'ls-files'/.test(tf) && /gitEnvFrom/.test(tf) && !DBIN.test(tf), '§96 the shared trackedFiles() helper lists via `git ls-files` through the sanitized gitEnvFrom (no readdir of a root)');

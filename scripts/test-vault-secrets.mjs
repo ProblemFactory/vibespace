@@ -41,6 +41,7 @@ import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
+import { trackedFiles } from './tracked-files.mjs';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 const ROOT = scratch('vault-secrets');
@@ -649,6 +650,11 @@ console.log('⑧ THE MIGRATION TABLE — a production-shaped data dir, every r2 
   // vault. Planted in this production-shaped dir: the REAL jobs wiring on a REAL express app answers GET / POST
   // /api/jobs-secrets 404 (no name, no value, the file byte-identical after), and NO READER IS LEFT — no file under src/,
   // server.js or data/bin names the store or its routes outside a comment (the engine's runs: test-jobs-engine §14).
+  // r2 (accept-r1): a store an owner once filled by hand is RETIRED, never silently kept or deleted — the one-shot
+  // 2026-10-job-secrets-retired renames it to data/job-secrets.retired.json (0600, kept) and tells the owner (its legs:
+  // test-migrations); here the retired name is a KNOWN secret at rest: SECRETS_AT_REST names it, and after the one-shot a
+  // planted value is in that ONE file and nowhere else under data/. The census names exactly two files beside a comment —
+  // the one-shot and the row — and lists data/bin through git (law B-abd8: never a working-tree walk).
   {
     const JV = 'job-sec-' + crypto.randomBytes(10).toString('hex');   // built at runtime: no secret-shaped literal in the tree
     const jsf = path.join(D, 'job-secrets.json');
@@ -666,11 +672,31 @@ console.log('⑧ THE MIGRATION TABLE — a production-shaped data dir, every r2 
     await new Promise((r) => srv.close(r));
     ok(g.status === 404 && pp.status === 404 && ![gt, pt].some((t) => t.includes('PLANTED_TOKEN') || t.includes(JV)) && fs.readFileSync(jsf).equals(was),
       'data/job-secrets.json (planted, retired): GET and POST /api/jobs-secrets on the REAL jobs wiring answer 404 — no name, no value, the file untouched', { get: g.status, post: pp.status, body: gt.slice(0, 120) });
+    // src/ is walked (a new, not-yet-committed source file counts); data/bin is git's list (its untracked rclone ELF and the
+    // generated agentd bundle are not source — test-architecture §96)
     const files = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? files(path.join(dir, e.name)) : e.isFile() ? [path.join(dir, e.name)] : []));
     const code = (f) => fs.readFileSync(f, 'utf8').replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '');
-    const readers = [...files(path.join(REPO, 'src')).filter((f) => f.endsWith('.js')), path.join(REPO, 'server.js'), ...files(path.join(REPO, 'data/bin'))]
-      .filter((f) => /job-secrets\.json|\/api\/jobs-secrets/.test(code(f))).map((f) => path.relative(REPO, f));
-    ok(readers.length === 0, 'NO READER LEFT: no file under src/, server.js or data/bin names data/job-secrets.json or /api/jobs-secrets outside a comment', readers);
+    const scope = [...files(path.join(REPO, 'src')).filter((f) => f.endsWith('.js')), path.join(REPO, 'server.js'), ...trackedFiles(REPO, 'data/bin').map((f) => path.join(REPO, f))];
+    const naming = (re) => scope.filter((f) => re.test(code(f))).map((f) => path.relative(REPO, f)).sort();
+    const KNOWN = new Map([
+      ['src/server/migrations.js', 'the one-shot 2026-10-job-secrets-retired: it RENAMES the store and tells the owner — never into a job, never a value said'],
+      ['src/vault.js', 'SECRETS_AT_REST: the retired file is a known secret at rest until the owner deletes it'],
+    ]);
+    const readers = naming(/job-secrets\.json|\/api\/jobs-secrets/);
+    ok(scope.length > 100 && readers.join() === [...KNOWN.keys()].sort().join(), `NO READER LEFT: outside a comment only the two named files name data/job-secrets.json or /api/jobs-secrets (${[...KNOWN].map(([f, why]) => f + ' — ' + why).join('; ')})`, readers);
+    ok(naming(/job-secrets\.retired\.json/).join() === [...KNOWN.keys()].sort().join(), 'the retired name is KNOWN: the one-shot writes it, SECRETS_AT_REST names it — no other file', naming(/job-secrets\.retired\.json/));
+    const row = R('src/vault.js').SECRETS_AT_REST.find((r) => /data\/job-secrets\.retired\.json/.test(r.where || ''));
+    ok(!!row && /0600/.test(row.where) && /OWNER/.test(row.exception || '') && /never a value/.test(row.exception || '') && /into the vault/.test(row.exception || ''),
+      'SECRETS_AT_REST names data/job-secrets.retired.json (0600) as an EXCEPTION with its reason: the owner\'s bytes, kept until they delete them; the notice names them (never a value) and the recipe', row);
+    // the one-shot over a production-shaped root: the planted value ends in the retired file ONLY (0600) — the notice, the
+    // inbox store and the ledger hold none of it
+    const JR = dirOf('jsr-root'), JD = path.join(JR, 'data'); fs.mkdirSync(JD, { recursive: true });
+    fs.writeFileSync(path.join(JD, 'job-secrets.json'), JSON.stringify({ PLANTED_TOKEN: JV }), { mode: 0o644 });
+    const ran = R('src/server/migrations.js').create({ rootDir: JR, homeDir: dirOf('jsr-home'), serverNotice: () => { } }).runLocalMigrations({ only: ['2026-10-job-secrets-retired'] })[0];
+    const where = hitsIn(JD, [JV]).map((h) => h.f);
+    const retMode = fs.existsSync(path.join(JD, 'job-secrets.retired.json')) ? fs.statSync(path.join(JD, 'job-secrets.retired.json')).mode & 0o777 : null;
+    ok(ran && ran.status === 'ran' && where.length > 0 && where.every((f) => f === 'job-secrets.retired.json') && retMode === 0o600 && !fs.existsSync(path.join(JD, 'job-secrets.json')),
+      'after the one-shot a planted value is in ONE file under data/ — job-secrets.retired.json (0600), the row\'s file — and in no notice, inbox store or ledger', { ran: ran && ran.status, where, retMode });
   }
   for (const [what, , , good] of TABLE) void what, void good;
 }

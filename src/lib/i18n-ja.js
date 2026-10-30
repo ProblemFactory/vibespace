@@ -11559,4 +11559,10 @@ export default {
   "This reach is for the grants you add — pick whom to grant the key to (All agents is the first row), or change an existing grant's reach on its chip": "この対象範囲は今回追加する付与だけに使われます——まず付与先を選んでください（最初の行が「すべてのエージェント」）。既存の付与の対象範囲は、そのチップで変えられます",
   "Always grants it to this conversation only — to let every conversation here use it without asking, grant the key to All agents on its row in the Vault window.": "「常に」はこの会話だけに付与します——ここのすべての会話が確認なしで使えるようにするには、保管庫ウィンドウでこのキーの行から「すべてのエージェント」に付与してください。",
   "Saved — the reach you picked was not used: it is for the grants a save adds; change an existing grant's reach on its chip": "保存しました——選んだ対象範囲は使われていません。今回追加する付与だけに使われます。既存の付与の対象範囲は、そのチップで変えられます",
+  // lane job-secrets-retire r2: the For-you notice of the one-shot 2026-10-job-secrets-retired (src/server/migrations.js)
+  "A plain file kept secrets for background jobs outside the vault: {file} — put each into the vault, then delete the file.": "平文ファイルがバックグラウンド作業の秘密を保管庫の外に保存していました：{file}——それぞれを保管庫に入れてから、このファイルを削除してください。",
+  "It holds {n} name(s): {names} — the values are not shown here.": "{n} 個の名前があります：{names}——値はここには表示しません。",
+  "…and {n} more not shown (past the first 20, or not a variable name).": "…ほかに {n} 個は表示していません（先頭 20 個より後、または変数名ではありません）。",
+  "Its names could not be read — open the file to see what it holds.": "名前を読み取れませんでした——ファイルを開いて中身を確認してください。",
+  "VibeSpace no longer reads this file and never deletes it. Add each value to the vault as a secret entry, then delete the file; a job reads a stored secret with --vault NAME=vault://… (vibespace-docs jobs).": "VibeSpace はこのファイルをもう読まず、削除することもありません。それぞれの値をシークレットとして保管庫に入れてから、このファイルを削除してください。ジョブは --vault NAME=vault://… で保存したシークレットを読みます（vibespace-docs jobs）。",
 };

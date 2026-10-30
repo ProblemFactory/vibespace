@@ -290,14 +290,20 @@ control; `subscribe` needs view only.
 ## 9. Environment inside a job process
 
 `VIBESPACE_API` · `VIBESPACE_JOB_ID` · `VIBESPACE_JOB_TOKEN` (acts on THIS
-job only: progress/ask/announce) · secrets you referenced with `--env-from`
-(user manages values in ⚙→Background Work; values are literal-redacted from
-log tails) · `data/bin` on PATH. Ambient vendor credentials are STRIPPED, and a job
+job only: progress/ask/announce) · `data/bin` on PATH.
+
+**A secret the job needs comes from the vault — and only from there:** declare
+it at creation with `--vault NAME=vault://…` («A stored secret from the vault»,
+just below, says how the job reads it). There is no second road: a spec that names
+`envFrom` (the retired plain-file store) is refused `envfrom_retired` at create,
+at start and at every run, and VibeSpace reads no secrets file for a job.
+
+Ambient vendor credentials are STRIPPED, and a job
 whose command obviously reads a subscription sign-in — Claude's
 `.credentials.json`, codex's `auth.json`, OpenCode's login file, VibeSpace's
 account folders, the macOS keychain item, an OAuth token variable or a pasted
 token — is refused at create, at start and at every run (its cmd, cwd, a
-health probe, an `--env-from` name, a scheduled run's command): background use
+health probe, a scheduled run's command): background use
 of a subscription login is the class that got a subscription banned. Calling
 any API with your own key is fine. This is a reminder against obvious reads of
 sign-in files, NOT a sandbox.

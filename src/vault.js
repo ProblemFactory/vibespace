@@ -243,6 +243,7 @@ const SECRETS_AT_REST = Object.freeze([
   { what: 'the OTLP ingest token', where: 'data/usage-history/otel-token', exception: 'opens only the hub\'s own loopback telemetry door; the surviving sessions\' exporters hold it (a per-boot one would 403 them)' },
   { what: 'the feedback origin key (fk_, lane feedback-forward)', where: 'data/feedback-outbox.json key (0600)', exception: 'it names THIS instance to the maintainer hub (the fleet shares ONE forward token) and opens only the marks on the reports this instance forwarded (ids, a release, a note); the forward and its boot pull run before any unlock — the hub keeps its sha256 only' },
   { what: 'an ssh install\'s staged token', where: '$TMPDIR/vs-agentd-stage-* (removed after the tar)', exception: 'transient: the tar that carries it rides ssh stdin, the stage is removed in the same call' },
+  { what: 'a background job\'s retired plain secrets (lane job-secrets-retire)', where: 'data/job-secrets.retired.json (0600)', exception: 'the OWNER\'s bytes, kept until they delete them: the one-shot 2026-10-job-secrets-retired renamed data/job-secrets.json (a store no client wrote — the old POST /api/jobs-secrets, gone with it) here and filed ONE For-you notice naming the file, its names (never a value) and the recipe — each into the vault as a secret entry, then delete the file; nothing in VibeSpace reads it' },
 ]);
 
 module.exports = {

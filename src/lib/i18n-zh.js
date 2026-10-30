@@ -11560,4 +11560,10 @@ export default {
   "This reach is for the grants you add — pick whom to grant the key to (All agents is the first row), or change an existing grant's reach on its chip": "这个作用范围只用于这次新加的授权——先选授权给谁（第一行是「所有 agent」），已有授权的作用范围在它的标签上改",
   "Always grants it to this conversation only — to let every conversation here use it without asking, grant the key to All agents on its row in the Vault window.": "「一直」只授权给这个会话——要让这里的每个会话都不用问就能用，在保险库窗口该 key 的行里把它授权给「所有 agent」。",
   "Saved — the reach you picked was not used: it is for the grants a save adds; change an existing grant's reach on its chip": "已保存——你选的作用范围没有用上：它只用于这次新加的授权；已有授权的作用范围在它的标签上改",
+  // lane job-secrets-retire r2: the For-you notice of the one-shot 2026-10-job-secrets-retired (src/server/migrations.js)
+  "A plain file kept secrets for background jobs outside the vault: {file} — put each into the vault, then delete the file.": "一个明文文件把后台工作任务的密钥存在了保险库之外：{file}——请把每一项放进保险库，然后删除这个文件。",
+  "It holds {n} name(s): {names} — the values are not shown here.": "它存有 {n} 个名称：{names}——这里不显示它们的值。",
+  "…and {n} more not shown (past the first 20, or not a variable name).": "……另有 {n} 个没有显示（排在前 20 个之后，或不是变量名）。",
+  "Its names could not be read — open the file to see what it holds.": "读不出它存的名称——打开这个文件看看里面有什么。",
+  "VibeSpace no longer reads this file and never deletes it. Add each value to the vault as a secret entry, then delete the file; a job reads a stored secret with --vault NAME=vault://… (vibespace-docs jobs).": "VibeSpace 不再读取这个文件，也绝不会删除它。把每个值作为密钥条目放进保险库，然后删除这个文件；任务用 --vault NAME=vault://… 读取保存的密钥（vibespace-docs jobs）。",
 };

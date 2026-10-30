@@ -323,7 +323,12 @@ same-origin, no cookies) with a tiny postMessage bridge (`vsui.submit(obj)`,
   NAME=vault://… — see vibespace-docs jobs») at every door the one vet runs:
   create, start, and every spawn (a keep-up restart, a boot replay, a cron's
   fire). `GET/POST /api/jobs-secrets` are gone (404) and nothing reads the
-  file. Records keep `envFrom: []` and run unchanged (no migration); `show`
+  file; one an owner once filled is not left in silence (r2): the one-shot
+  `2026-10-job-secrets-retired` RENAMES it to `data/job-secrets.retired.json`
+  (0600, kept — VibeSpace never deletes it; a `SECRETS_AT_REST` row) and files
+  ONE For-you notice under Vault naming the file, its names (never a value) and
+  the recipe (each into the vault, then delete the file). Records keep
+  `envFrom: []` and run unchanged (no record migration); `show`
   prints `envFrom:[…]` only for a record that still names one. cmd.env values
   render to owner/user only. M2 remote jobs get a
   security subsection before implementation (device-side 0600 files over the
@@ -663,8 +668,9 @@ their flat rendering.
 
 The one-shot row for `failed | missed | interrupted` shows the exit code and
 the LAST NON-EMPTY LINE of its log (`run.lastLine`, computed ONCE at
-finalize from the log file, ≤ 200 code points, passed through the existing
-secret literal-redaction), so the expanded content is actionable. The
+finalize from the log file, ≤ 200 code points — the job's own words as
+written: the literal-redaction that re-read a plaintext store is retired with
+it, §7), so the expanded content is actionable. The
 detail view is unchanged.
 
 ### 13.5 Archival (ORCH `src/jobs.js`)

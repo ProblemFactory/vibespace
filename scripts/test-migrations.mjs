@@ -2428,6 +2428,96 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     ok(rn.status === 'ran' && rn.report.store === 'absent', 'no channels data ⇒ nothing to do (recorded)', rn.report);
     } catch (e) { ok(false, '2026-10-closed-access-pointers-hidden threw on this tree (the migration it asks for is missing): ' + ((e && e.message) || e)); }
   }
+
+  // ── 2026-10-job-secrets-retired (lane job-secrets-retire r2): data/job-secrets.json — the plaintext store of a job's secrets
+  // nothing reads any more (its routes are gone) — is RENAMED to data/job-secrets.retired.json (0600, its bytes KEPT — never
+  // deleted by us) and the owner is told ONCE in For you (origin vault): the file, the names it held (NEVER a value) and the
+  // recipe. No file ⇒ nothing; a second boot ⇒ nothing again; a failed notice ⇒ not recorded, the next boot files it. Every
+  // leg reads `?.` so a tree without the migration is RED leg by leg, never one throw. ──
+  {
+    const ID = '2026-10-job-secrets-retired';
+    const { UserTodoManager } = require('../src/user-todos.js');
+    const SRC = 'job-secrets.json', RET = 'job-secrets.retired.json';
+    const seedJS = (name, store, mode = 0o644) => {
+      const root = path.join(tmp, 'jsr-' + name), dataDir = path.join(root, 'data');
+      fs.mkdirSync(dataDir, { recursive: true });
+      if (store !== undefined) fs.writeFileSync(path.join(dataDir, SRC), typeof store === 'string' ? store : JSON.stringify(store), { mode });
+      return { root, dataDir, src: path.join(dataDir, SRC), ret: path.join(dataDir, RET), ledger: () => { try { return JSON.parse(fs.readFileSync(path.join(dataDir, 'migrations.json'), 'utf8')); } catch { return { applied: {} }; } } };
+    };
+    const boot = (r, opts = {}) => create({ rootDir: r.root, homeDir: scratchHomeDir, serverNotice: () => { }, ...opts }).runLocalMigrations({ only: [ID] }).find((x) => x.id === ID);
+    const V = ['gh', 'npm', 'pasted', 'bot'].map((w) => `${w}-${crypto.randomBytes(12).toString('hex')}`);   // values built at runtime
+    const PASTED_NAME = 'sk-' + crypto.randomBytes(16).toString('hex');   // a VALUE pasted into the name field — the accident class
+    const notesOf = (store) => store.forSession('vault');
+    const leaks = (text) => [...V, PASTED_NAME].filter((x) => String(text).includes(x));
+    ok(create({ rootDir: tmp, homeDir: scratchHomeDir, serverNotice: () => { } }).MIGRATIONS.some((m) => m.id === ID), `the registry carries ${ID} (append-only, dated)`);
+    // (1) a planted store, the LIVE inbox store
+    const a = seedJS('live', { GH_TOKEN: V[0], NPM_TOKEN: V[1], [PASTED_NAME]: V[2] });
+    const bytes = fs.readFileSync(a.src);
+    const live = new UserTodoManager({ dataDir: a.dataDir, expirySweepMs: 0 });
+    const ra = boot(a, { userTodos: live });
+    const retMode = fs.existsSync(a.ret) ? fs.statSync(a.ret).mode & 0o777 : null;
+    ok(ra?.status === 'ran' && !fs.existsSync(a.src) && fs.existsSync(a.ret) && fs.readFileSync(a.ret).equals(bytes) && retMode === 0o600,
+      'a planted data/job-secrets.json (0644) ⇒ RENAMED to data/job-secrets.retired.json — its bytes KEPT, 0600', { ra, retMode });
+    const na = notesOf(live), it = na[0] || {};
+    ok(na.length === 1 && it.origin === 'vault' && it.kind === 'notice' && it.urgency === 'high' && it.status === 'open' && it.text.includes('data/job-secrets.retired.json') && /put each into the vault, then delete the file/.test(it.text),
+      'ONE For-you notice (origin vault, a notice): it names the file and says put each into the vault, then delete it', it);
+    ok(/It holds 3 name\(s\): GH_TOKEN, NPM_TOKEN —/.test(it.detail || '') && /…and 1 more not shown/.test(it.detail || '') && /--vault NAME=vault:\/\/… \(vibespace-docs jobs\)/.test(it.detail || '') && /never deletes it/.test(it.detail || ''),
+      '…its detail: the 3 names it held (the 2 variable names shown, the one shaped like a pasted value COUNTED, never shown) and the recipe (a secret entry in the vault; a job reads --vault)', it.detail);
+    ok(it.i18n?.text?.key && Array.isArray(it.i18n?.detail) && it.i18n.detail.length === 3, '…and its words ride as structure (the client says them in zh / ja)', it.i18n);
+    const todosText = fs.existsSync(path.join(a.dataDir, 'user-todos.json')) ? fs.readFileSync(path.join(a.dataDir, 'user-todos.json'), 'utf8') : '';
+    ok(todosText.includes('job-secrets.retired.json') && leaks(JSON.stringify(na)).length === 0 && leaks(todosText).length === 0,
+      'NO VALUE in the notice (text, detail, i18n) nor in data/user-todos.json — flushed before the ledger row', leaks(JSON.stringify(na)).length + leaks(todosText).length);
+    const la = a.ledger();
+    ok(!!la.applied[ID] && la.reports?.[ID]?.names === 3 && la.reports?.[ID]?.store === 'renamed' && leaks(JSON.stringify(la)).length === 0 && !JSON.stringify(la).includes('GH_TOKEN'),
+      'the ledger row: applied, its report a COUNT (names: 3) — never a name or a value', la.reports?.[ID]);
+    // (2) a second boot ⇒ nothing again
+    const again = boot(a, { userTodos: live });
+    ok(again?.status === 'already' && notesOf(live).length === 1 && fs.existsSync(a.ret) && fs.readFileSync(a.ret).equals(bytes), 'a second boot ⇒ nothing again (the ledger: already; still ONE notice; the retired file untouched)', again);
+    live.stop();
+    // (3) no file ⇒ nothing
+    const n = seedJS('none');
+    const rn = boot(n);
+    ok(rn?.status === 'ran' && rn?.report?.store === 'absent' && !fs.existsSync(n.ret) && !fs.existsSync(path.join(n.dataDir, 'user-todos.json')), 'no file ⇒ nothing (no file made, no notice — recorded)', rn);
+    // (4) no live store: a private one on the same file, flushed before the row
+    const b = seedJS('file', { API_KEY: V[3] }, 0o600);
+    const rb = boot(b);
+    const fileStore = new UserTodoManager({ dataDir: b.dataDir, expirySweepMs: 0 });
+    const nb = notesOf(fileStore);
+    ok(rb?.status === 'ran' && rb?.report?.via === 'private' && nb.length === 1 && /It holds 1 name\(s\): API_KEY —/.test(nb[0]?.detail || '') && leaks(JSON.stringify(nb)).length === 0, 'without a live store: a PRIVATE store on the same file — the notice is on disk when the row is recorded', rb);
+    fileStore.stop();
+    // (5) the notice FAILS ⇒ the run is not recorded (the file renamed and kept); the next boot files it from the retired file
+    const c = seedJS('retry', { BOT_TOKEN: V[3] });
+    const rc1 = boot(c, { userTodos: { add() { throw new Error('the store refused it'); }, flush() { } } });
+    ok(rc1?.status === 'failed' && !c.ledger().applied[ID] && !fs.existsSync(c.src) && fs.existsSync(c.ret), 'the notice cannot be filed ⇒ the run FAILS (not recorded; said at boot) — the file already renamed and KEPT', rc1);
+    const liveC = new UserTodoManager({ dataDir: c.dataDir, expirySweepMs: 0 });
+    const rc2 = boot(c, { userTodos: liveC });
+    ok(rc2?.status === 'ran' && rc2?.report?.store === 'renamed-earlier' && notesOf(liveC).length === 1 && /BOT_TOKEN/.test(notesOf(liveC)[0]?.detail || '') && !!c.ledger().applied[ID], '…the next boot finds the retired file, files the ONE notice and records the row', rc2);
+    liveC.stop();
+    // (6) both names present ⇒ FAILS by name, nothing moved, nothing filed
+    const d = seedJS('both', { A_KEY: V[0] });
+    fs.writeFileSync(d.ret, JSON.stringify({ B_KEY: V[1] }), { mode: 0o600 });
+    const dBefore = [fs.readFileSync(d.src), fs.readFileSync(d.ret)];
+    const rd = boot(d);
+    ok(rd?.status === 'failed' && /already exists/.test(rd?.error || '') && fs.readFileSync(d.src).equals(dBefore[0]) && fs.readFileSync(d.ret).equals(dBefore[1]) && !fs.existsSync(path.join(d.dataDir, 'user-todos.json')),
+      'both names present ⇒ FAILS by name — nothing moved, never over the owner\'s bytes, nothing filed', rd);
+    // (7) a store that is not a JSON object: renamed and told — its names could not be read
+    const u = seedJS('unread', 'not json ' + V[2]);
+    const tu = new UserTodoManager({ dataDir: u.dataDir, expirySweepMs: 0 });
+    const ru = boot(u, { userTodos: tu });
+    ok(ru?.status === 'ran' && ru?.report?.names === null && fs.existsSync(u.ret) && /Its names could not be read/.test(notesOf(tu)[0]?.detail || '') && leaks(JSON.stringify(notesOf(tu))).length === 0, 'a store that is not a JSON object ⇒ renamed, and the notice says its names could not be read (no byte of it shown)', ru);
+    tu.stop();
+    // (8) an EMPTY store: renamed (kept), nothing to tell
+    const e0 = seedJS('empty', {});
+    const te = new UserTodoManager({ dataDir: e0.dataDir, expirySweepMs: 0 });
+    const re = boot(e0, { userTodos: te });
+    ok(re?.status === 'ran' && re?.report?.names === 0 && fs.existsSync(e0.ret) && notesOf(te).length === 0, 'an empty store ⇒ renamed (kept), no notice — it held no name', re);
+    te.stop();
+    // (9) the words: each key is a dict ENTRY in zh AND ja (the client words the notice; the build's lint does not scan this file)
+    const { dictHasEntry } = await import('./i18n-check.mjs');
+    const W = (() => { try { return Object.values(require('../src/server/migrations.js').JOB_SECRETS_WORDS || {}); } catch { return []; } })();
+    const dicts = ['zh', 'ja'].map((l) => fs.readFileSync(path.join(REPO_ROOT, `src/lib/i18n-${l}.js`), 'utf8'));
+    ok(W.length === 5 && W.every((k) => dicts.every((dt) => dictHasEntry(dt, k))), `the notice's ${W.length} keys are entries in BOTH dicts (zh, ja)`, W.filter((k) => !dicts.every((dt) => dictHasEntry(dt, k))));
+  }
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true });
 }
