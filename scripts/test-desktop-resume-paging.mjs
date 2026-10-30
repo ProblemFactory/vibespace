@@ -198,6 +198,11 @@ const evaljs = async (expr) => {
 await cdp('Runtime.enable');
 await cdp('Page.enable');
 
+// ROUND 8 (lane needs-card-tail): the REAL onSend body, read out of the tree under test — this harness window is a view-only
+// one (no composer) — and r7's (the same body with the whole _noteUserNav at the live tail) as the send leg's control
+const SEND_LANE = (/\n {6}onSend: \(\) => (\{[\s\S]*?\n {6}\}),\n {6}onInterrupt:/.exec(fs.readFileSync(path.join(repo, 'src/lib/chat-view.js'), 'utf8')) || [])[1] || '{ throw new Error("onSend not found"); }';
+const SEND_R7 = SEND_LANE.replace("this._noteTailPress('send');", "this._noteUserNav('send');");
+
 // ── 3. THE SCENARIO, as one page-side script so every step is same-tab ──
 const SCENARIO = `(async () => {
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -334,6 +339,30 @@ const SCENARIO = `(async () => {
     await sleep(1500);
     sweep.push({ off, at, ...snap(), traces: (view._traceRing || []).map((e) => e.tag) });
   }
+
+  // ── ROUND 8 (lane needs-card-tail, the r7 delta verdict's MAJOR): A SEND AT THE LIVE TAIL inside the horizon. r7 stamped
+  //    it through the whole _noteUserNav, which ends the resume repair (the settle, the pin snapshot, the re-tail series)
+  //    and makes the resume's own question true: a send 0.3 s after the window was shown again, then the re-measure's
+  //    input-less displacement, unpinned it 3637 px up in history (userNav:send, unpin/scrolledAway). A press that KEEPS
+  //    the tail stamps only. The REAL onSend body on the REAL view; the control is r7's body on this same build.
+  const SENDS = { lane: (function () ${SEND_LANE}), r7: (function () ${SEND_R7}) };
+  const sendLeg = async (send, off) => {
+    await toTail();
+    await dm.switchTo(deskA); await sleep(1200);
+    await dm.switchTo(deskB);
+    view._traceRing = [];                  // own ring per leg
+    await waitTo(300);
+    const sentAt = sinceResume(), atTail = !view._teleported && view._windowEnd >= view._total;
+    send.call(view);
+    const afterSend = { pinnedAtSuspend: !!view._pinnedAtSuspend, series: (view._resumeRetailTimers || []).length };
+    await waitTo(off);
+    const at = sinceResume();
+    list.scrollTop = 0;                    // zero user input — the sweep's own displacement
+    await sleep(1500);
+    return { off, sentAt, atTail, afterSend, at, ...snap(),
+      traces: (view._traceRing || []).map((e) => e.tag + (e.via ? ':' + e.via : '') + (e.why ? '/' + e.why : '')).filter((x) => /unpin|repin|userNav|resumeRetail|pin/.test(x)).slice(0, 24) };
+  };
+  const sendLegs = window.__vsLeg === 'fixed' ? [await sendLeg(SENDS.lane, 1400), await sendLeg(SENDS.lane, 1900), await sendLeg(SENDS.r7, 1400)] : null;
 
   // ── …and a REAL reader INSIDE that same horizon still unpins and pages: the
   //    unpin gate must refuse displacement, never a reader — AND THE PAGE-UP
@@ -482,7 +511,7 @@ const SCENARIO = `(async () => {
   };
 
   return { ok: true, before, after, samples, traces, probeTraces, retail, wheelTraces, wheelState,
-    nav, sweep, resumeWheel, chainWheel, chainWheelControl, navControl, cliffControl };
+    nav, sweep, sendLegs, resumeWheel, chainWheel, chainWheelControl, navControl, cliffControl };
 })()`;
 
 const run = async (label) => {
@@ -500,6 +529,7 @@ const run = async (label) => {
   if (!booted) return { ok: false, why: 'the client never booted' };
   await evaljs('window.app.ready').catch(() => {});
   await sleep(1500);
+  await evaljs(`window.__vsLeg = ${JSON.stringify(label)}`).catch(() => {});   // (r8: the send legs run on the fixed build only)
   const r = await evaljs(SCENARIO).catch((e) => ({ ok: false, why: String(e.message || e).slice(0, 300) }));
   console.log(`  [${label}] ${r?.ok ? JSON.stringify({ before: r.before, after: r.after, wheelState: r.wheelState }) : JSON.stringify(r)}`);
   if (r?.ok) console.log(`  [${label}] traces: ${JSON.stringify(r.traces.map((e) => e.dt + ':' + e.tag + (e.why ? '/' + e.why : '')))}`);
@@ -537,6 +567,13 @@ if (good?.ok) {
     JSON.stringify(good.navControl).slice(0, 500));
   check('DISPLACEMENT SWEEP: an input-less scrollTop→0 at 1240/1400/1900/2400ms after the resume ALL end pinned at the tail (the settle alone was a one-shot cliff)',
     good.sweep.length === 4 && good.sweep.every((s) => s.pinned === true && s.fromBottom <= 8), JSON.stringify(good.sweep));
+  // ── ROUND 8 ──
+  check('A SEND AT THE LIVE TAIL INSIDE THE RESUME (lane needs-card-tail r8): a send 0.3 s after the window is shown again, then the re-measure\'s input-less displacement at +1400 / +1900 ms — the window ENDS PINNED at the tail, the repair still armed after the send (r7 stranded it 3637 px up: userNav:send, unpin/scrolledAway)',
+    !!good.sendLegs && good.sendLegs.slice(0, 2).every((l) => l.atTail && l.afterSend.pinnedAtSuspend && l.afterSend.series > 0 && l.pinned === true && l.fromBottom <= 8 && !l.traces.includes('unpin/scrolledAway')),
+    JSON.stringify(good.sendLegs).slice(0, 900));
+  check('…and its control proves the leg touches the path: with r7\'s send (the whole _noteUserNav at the live tail) on the SAME build, the SAME +1400 ms displacement strands the window',
+    !!good.sendLegs && good.sendLegs[2].atTail && good.sendLegs[2].afterSend.pinnedAtSuspend === false && (good.sendLegs[2].pinned === false || good.sendLegs[2].fromBottom > 8),
+    JSON.stringify(good.sendLegs && good.sendLegs[2]).slice(0, 600));
   check('…and its control proves the leg touches the path: with the unpin gate off and a one-shot re-tail, the SAME +1900ms displacement strands the window',
     good.cliffControl.pinned === false || good.cliffControl.fromBottom > 8, JSON.stringify(good.cliffControl));
   // …and WHICH mechanism carries each offset, measured rather than assumed:

@@ -304,6 +304,9 @@ class ChatView {
     // `_lastPositionAt` answers "did the reader MOVE it" — only the second may
     // cancel the resume repair (round-3 verifier's MAJOR).
     this._lastPositionAt = 0;
+    // A press that KEEPS the tail (a send at the live tail, the ↓ on a window that ends there — lane needs-card-tail r8):
+    // a reader act every press's stale reads, and one the resume's own question does not (it goes where the repair goes).
+    this._lastTailPressAt = 0;
     // The view's OWN replays (chat-view-seek's c-v restore re-running the last jump target or search reveal) stamp here and
     // nowhere else — no reader-act predicate reads it (_readerActs; lane needs-card-tail r5).
     this._lastReplayAt = 0;
@@ -595,7 +598,11 @@ class ChatView {
       // LIVE window at the tail used to refetch too — a full DOM rebuild that
       // re-folded the run the owner had open, for nothing the view lacked.
       if (!(this._windowEnd < this._total && this._canPaginate)) {
-        this._noteUserNav('scrollBtn');
+        // A PRESS THAT KEEPS THE TAIL (lane needs-card-tail r8): stamped, the resume repair left armed (the pin snapshot,
+        // the re-tail series, the unpin gate) — and, a click on its own button, it ends the settle WINDOW as every click
+        // does (round 3): behind a ↓ in a window that had no repair, the re-measure's displacement unpins honestly, ↓ back
+        this._noteTailPress('scrollBtn');
+        this._resumeSettleUntil = 0;
         this._setPinned(true, 'scrollBtn');
         this._forceScrollToBottom();
       } else {
@@ -1026,8 +1033,10 @@ class ChatView {
           this.jumpToBottom({ send: true });
         } else {
           // …and at the live tail it is stamped as it starts, like the ↓'s (lane needs-card-tail r7 — a needs card landing
-          // whose read was out took the reader off the sent message: its gone() saw no act)
-          this._noteUserNav('send');
+          // whose read was out took the reader off the sent message: its gone() saw no act) — A PRESS THAT KEEPS THE TAIL
+          // (r8): the stamp only, never the resume repair (r7's whole _noteUserNav ended it — a send within 2.8 s of the
+          // window being shown again let the resume's own displacement unpin it, 3637 px up in history)
+          this._noteTailPress('send');
           this._setPinned(true, 'send');
           this._scrollToBottom();
         }
@@ -2758,13 +2767,28 @@ class ChatView {
     return Math.abs(scrollTop - (this._pointerDownScrollTop || 0)) > POINTER_DRAG_PX;
   }
 
+  /** A PRESS THAT KEEPS THE TAIL (lane needs-card-tail r8) — a send at the live tail, the ↓ on a window that ends there:
+   *  the person's act, stamped as it starts (`_lastTailPressAt`, one of _readerActs — a needs card landing's gone() and
+   *  every press's stale see it), and NOTHING ELSE: it goes where the resume repair goes, so it ends none of it — the
+   *  settle window, the pin snapshot, the re-tail series and the unpin gate stay armed, and the resume's own question
+   *  (_positionedSince) leaves its stamp out. r7 ran the whole _noteUserNav at the send: a send within 2.8 s of a window
+   *  being shown again let the resume's input-less displacement unpin it (`scrolledAway`, 3637 px up in history, the reply
+   *  streaming below the fold). A press that LEAVES the tail — a jump, and the ↓ and the send that refetch the tail (their
+   *  page is the road there: a re-tail rung must not race it) — ends the repair (_noteUserNav). */
+  _noteTailPress(via) {
+    this._lastTailPressAt = Date.now();
+    this._trace?.('userNav', { via, keepsTail: true });
+    this._clearWheelCarry?.(via);    // a carried notch is stale now (r1)
+  }
+
   /** An explicit reader NAVIGATION that the message list's own listeners can
    *  never see: the minimap (pointer events on the container), a search's
    *  press (as its jump starts — r7) and its reveal, the floating run bar (on
-   *  this._container), jumpToIndex / jumpToBottom, a send at the live tail
-   *  (r7). Stamps, and ends the resume settle exactly like a wheel —
+   *  this._container), jumpToIndex / jumpToBottom, the Retry on «Couldn't
+   *  jump there» (r8). Stamps, and ends the resume settle exactly like a wheel —
    *  round-2 verifier's MAJOR: without this the 1240ms re-tail yanked such a
-   *  reader back to the live tail. */
+   *  reader back to the live tail. A press that KEEPS the tail is not one
+   *  (_noteTailPress — lane needs-card-tail r8). */
   _noteUserNav(via) {
     this._lastNavAt = Date.now();
     this._trace?.('userNav', { via });
@@ -2775,7 +2799,8 @@ class ChatView {
 
   /** Did the READER position this view after `since`? — did a person ACT: a
    *  stamp of _readerActs written since (a positioning act — wheel/touch/nav
-   *  key/scrollbar drag —, explicit nav, a search reveal). A press asks this
+   *  key/scrollbar drag —, explicit nav, a search reveal, a press that keeps
+   *  the tail — r8). A press asks this
    *  (a needs card's landing: the displacement law), and a press loses only to
    *  a NEWER act: a jump's LANDING is not one (lane needs-card-tail r6 — an
    *  older jump's page landing late dropped a newer ↓ or send). NONE of the
@@ -2791,9 +2816,11 @@ class ChatView {
    *  (_scrollElStable's `_lastJumpAt` — a jump pressed before the resume whose
    *  page lands after it is a chosen destination too). The chat-view-seek
    *  `userScrolled = (this._lastUserScrollAt||0) > Math.max(jumpAt, revealAt)`
-   *  idiom, generalised. A replay writes neither (r5). */
+   *  idiom, generalised. A replay writes neither (r5). A press that KEEPS the
+   *  tail is not read (lane needs-card-tail r8 — `tail: false`): the repair goes
+   *  there too, and a send at the live tail switched it off. */
   _positionedSince(since) {
-    return this._navigatedSince(since) || (this._lastJumpAt || 0) > since;
+    return Math.max(...this._readerActs({ tail: false })) > since || (this._lastJumpAt || 0) > since;
   }
 
   /** THE READER'S ACTS (lane needs-card-tail r5) — the ONE place that names the stamps only a person's act writes: a
@@ -2808,9 +2835,11 @@ class ChatView {
    *  writes `_lastReplayAt` instead, which nothing reads — a replay 1.6 s after a teleport dropped a ↓ or a send pressed in
    *  its window (r4's default read the reveal's stamps). `_lastUserScrollAt` is not one: a click is not a positioning act
    *  (round 3). `scroll: false` leaves the positioning out — A SEND (B-172e: a scroll during its fetch never cancels it).
+   *  A press that KEEPS the tail (`_lastTailPressAt` — a send at the live tail, the ↓ on a window that ends there; r8) is
+   *  one; `tail: false` leaves it out — THE RESUME'S question (_positionedSince: it goes where the repair goes).
    *  → the stamps, in a fixed order (_navigatedSince takes their max; jumpToBottom's default compares their values) */
-  _readerActs({ scroll = true } = {}) {
-    return [this._lastNavAt || 0, scroll ? this._lastPositionAt || 0 : 0, this._search?._lastRevealAt || 0];
+  _readerActs({ scroll = true, tail = true } = {}) {
+    return [this._lastNavAt || 0, scroll ? this._lastPositionAt || 0 : 0, this._search?._lastRevealAt || 0, tail ? this._lastTailPressAt || 0 : 0];
   }
 
   /** Is an atBottom→false transition the RESUME's own re-measure rather than

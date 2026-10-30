@@ -52,7 +52,7 @@ ok('_extendTop measures the fresh slab and folds INSIDE the anchored landing, an
 ok('_extendBottom folds BEFORE its trim and re-folds after one (the downward mirror of the 2.369.129 order defect — the owner\'s `trimTop removed:351 anchored:false`)', /this\._reserveFreshHeights\(fresh\);[\s\S]{0,500}this\._updateRuns\(\);\s*\{ const before = this\._windowStart; this\._trimTop\(\); if \(this\._windowStart !== before\) this\._updateRuns\(\); \}/.test(cv));
 ok('the trim trace tags survive with their decision inputs (the capture channel that caught all three)', cv.includes("'trimBottom' : 'trimTop'") && /zone: \[Math\.round\(zone\.top\), Math\.round\(zone\.bottom\)\]/.test(cv) && cv.includes("_trace('extendTop:done'") && cv.includes("_trace('trimSkipZone'"));
 ok('a fresh slab is rendered ONCE at insert so the landing and the zone read MEASURED heights (content-visibility placeholders are estimates) — the override comes off two frames later, after the remembered size is recorded', /_reserveFreshHeights\(els(, \{ live = false \} = \{\})?\) \{/.test(cv) && /el\.style\.contentVisibility = 'visible';/.test(cv) && /requestAnimationFrame\(\(\) => requestAnimationFrame\(\(\) => \{/.test(cv));
-ok('PINNED ⇔ AT THE LIVE TAIL: the pin predicate carries windowEnd ≥ total and not-teleported, and every pin site reads it (scroll handler, run-bar landing, the read-only scroll button)', /_atLiveTail\(scrollTop, scrollHeight, clientHeight\) \{\s*return !this\._teleported && this\._windowEnd >= this\._total && scrollHeight - scrollTop - clientHeight < 50;/.test(cv) && /const atTail = atBottom && this\._atLiveTail\(scrollTop, scrollHeight, clientHeight\);\s*const repin = this\._repinVerdict\(atTail\);/.test(cv) && /_repinVerdict\(atTail\) \{\s*if \(!atTail \|\| this\._pinned\) return null;/.test(cv) && /const atBottom = this\._atLiveTail\(list\.scrollTop, list\.scrollHeight, list\.clientHeight\);/.test(cv) && /if \(!\(this\._windowEnd < this\._total && this\._canPaginate\)\) \{\s*this\._noteUserNav\('scrollBtn'\);\s*this\._setPinned\(true, 'scrollBtn'\);/.test(cv)); // inc-mvl02dkn-gop0: ANY view at the tail pins and scrolls (a live one no longer refetches)
+ok('PINNED ⇔ AT THE LIVE TAIL: the pin predicate carries windowEnd ≥ total and not-teleported, and every pin site reads it (scroll handler, run-bar landing, the read-only scroll button)', /_atLiveTail\(scrollTop, scrollHeight, clientHeight\) \{\s*return !this\._teleported && this\._windowEnd >= this\._total && scrollHeight - scrollTop - clientHeight < 50;/.test(cv) && /const atTail = atBottom && this\._atLiveTail\(scrollTop, scrollHeight, clientHeight\);\s*const repin = this\._repinVerdict\(atTail\);/.test(cv) && /_repinVerdict\(atTail\) \{\s*if \(!atTail \|\| this\._pinned\) return null;/.test(cv) && /const atBottom = this\._atLiveTail\(list\.scrollTop, list\.scrollHeight, list\.clientHeight\);/.test(cv) && /if \(!\(this\._windowEnd < this\._total && this\._canPaginate\)\) \{\s*(?:\/\/[^\n]*\n\s*)*this\._noteTailPress\('scrollBtn'\);\s*this\._resumeSettleUntil = 0;\s*this\._setPinned\(true, 'scrollBtn'\);/.test(cv)); // inc-mvl02dkn-gop0: ANY view at the tail pins and scrolls (a live one no longer refetches); lane needs-card-tail r8: a press that keeps the tail
 ok('the viewport anchor never picks the seek sentinel (a huge session\'s first child) — at the top edge it is the first VISIBLE card, delta included', /const skip = \(c\) => runChrome\(c\) \|\| c\._isSeekSentinel;/.test(cv) && !/\} else if \(list\.children\.length\) \{/.test(cv) && /if \(!el && list\.children\.length\) \{ el = list\.children\[0\]; delta = 0; \}/.test(cv));
 // ── SHORT-VIEW RESCUE after attach (2.369.43) ───────────────────────────────
 // The 2.369.36 gate `_windowStart > 0 && rendered < 30 && sh <= ch` was
@@ -303,18 +303,22 @@ ok('…and the press is CLEARED on pointerup/pointercancel, window-scoped on the
 // re-tail compares nav-vs-resume: the chat-view-seek `userScrolled` idiom.
 ok('there is ONE navigation stamp (_noteUserNav) and it ends the settle like a wheel does',
   /_noteUserNav\(via\) \{[\s\S]{0,220}this\._lastNavAt = Date\.now\(\);[\s\S]{0,220}this\._endResumeSettle\(\);/.test(cv));
-ok('…and the reader-position test generalises the seek idiom over every POSITIONING stamp (positioning act, nav, jump landing, search reveal) — and reads _lastUserScrollAt NOWHERE, because a click is not one (round 3; lane needs-card-tail r5: the stamps are THE one list, _readerActs — jumpToBottom\'s default reads it too; r6: a reader act is stamped when it STARTS — the jump LANDING is not in the list, only the resume\'s _positionedSince reads it)',
+ok('…and the reader-position test generalises the seek idiom over every POSITIONING stamp (positioning act, nav, jump landing, search reveal) — and reads _lastUserScrollAt NOWHERE, because a click is not one (round 3; lane needs-card-tail r5: the stamps are THE one list, _readerActs — jumpToBottom\'s default reads it too; r6: a reader act is stamped when it STARTS — the jump LANDING is not in the list, only the resume\'s _positionedSince reads it; r8: a press that KEEPS the tail is one of them, and the resume\'s question leaves it out — `tail: false`)',
   /_navigatedSince\(since\) \{\s*return Math\.max\(\.\.\.this\._readerActs\(\)\) > since;\s*\}/.test(cv)
-  && /_readerActs\(\{ scroll = true \} = \{\}\) \{\s*return \[this\._lastNavAt \|\| 0, scroll \? this\._lastPositionAt \|\| 0 : 0, this\._search\?\._lastRevealAt \|\| 0\];\s*\}/.test(cv)
-  && /_positionedSince\(since\) \{\s*return this\._navigatedSince\(since\) \|\| \(this\._lastJumpAt \|\| 0\) > since;\s*\}/.test(cv)
-  && !/_navigatedSince\(since\) \{[^}]*_lastUserScrollAt/.test(cv) && !/_readerActs\(\{ scroll = true \} = \{\}\) \{[^}]*_lastUserScrollAt/.test(cv) && !/_positionedSince\(since\) \{[^}]*_lastUserScrollAt/.test(cv));
+  && /_readerActs\(\{ scroll = true, tail = true \} = \{\}\) \{\s*return \[this\._lastNavAt \|\| 0, scroll \? this\._lastPositionAt \|\| 0 : 0, this\._search\?\._lastRevealAt \|\| 0, tail \? this\._lastTailPressAt \|\| 0 : 0\];\s*\}/.test(cv)
+  && /_positionedSince\(since\) \{\s*return Math\.max\(\.\.\.this\._readerActs\(\{ tail: false \}\)\) > since \|\| \(this\._lastJumpAt \|\| 0\) > since;\s*\}/.test(cv)
+  && !/_navigatedSince\(since\) \{[^}]*_lastUserScrollAt/.test(cv) && !/_readerActs\(\{ scroll = true, tail = true \} = \{\}\) \{[^}]*_lastUserScrollAt/.test(cv) && !/_positionedSince\(since\) \{[^}]*_lastUserScrollAt/.test(cv));
+ok('A PRESS THAT KEEPS THE TAIL STAMPS ONLY (lane needs-card-tail r8 — r7 stamped the send at the live tail through the whole _noteUserNav and switched the resume repair off): _noteTailPress writes _lastTailPressAt and nothing the repair keeps (no _endResumeSettle, no _lastNavAt, no snapshot, no series); the send at the live tail and the ↓ on a window that ends there are its only callers, and the ↓ — a click on its own button — ends the settle WINDOW only',
+  /  _noteTailPress\(via\) \{\n\s+this\._lastTailPressAt = Date\.now\(\);\n\s+this\._trace\?\.\('userNav', \{ via, keepsTail: true \}\);\n\s+this\._clearWheelCarry\?\.\(via\);[^\n]*\n  \}/.test(cv)
+  && /this\._noteTailPress\('scrollBtn'\);\n\s+this\._resumeSettleUntil = 0;\n\s+this\._setPinned\(true, 'scrollBtn'\);/.test(cv)
+  && (cv.match(/this\._noteTailPress\(/g) || []).length === 2);
 ok('the resume re-tail BAILS when the reader navigated after the resume (never yank a reader back to the tail)',
   /const resumeAt = this\._resumeAt;[\s\S]{0,400}if \(this\._positionedSince\(resumeAt\)\) return;/.test(cv) && /return !this\._positionedSince\(at\);/.test(cv)); // (r6: an act of the reader's OR the landing of one)
-ok('every off-list navigation surface stamps: minimap (index + time), search reveal, run-bar landing, jumpToIndex, user jumpToBottom, a send at the live tail (lane needs-card-tail r7)',
+ok('every off-list navigation surface stamps: minimap (index + time), search reveal, run-bar landing, jumpToIndex, user jumpToBottom; a send at the live tail too (lane needs-card-tail r7 — r8: as a press that KEEPS the tail)',
   /_noteUserNav\('minimap'\); return this\.jumpToIndex/.test(cv)
   && /_noteUserNav\('minimap-time'\); return this\._jumpToFileTime/.test(cv)
   && /onNav: \(via = 'search-reveal'\) => this\._noteUserNav\(via\)/.test(cv) // (r7: the search's press names itself — 'search')
-  && /this\._noteUserNav\('send'\);\n\s+this\._setPinned\(true, 'send'\);/.test(cv)
+  && /this\._noteTailPress\('send'\);\n\s+this\._setPinned\(true, 'send'\);/.test(cv)
   && /_landOnHeader\(run\) \{[\s\S]{0,400}this\._noteUserNav\('runBar'\);/.test(cv)
   && /async jumpToIndex\(targetIdx(?:, \{ land = null(?:, stale = null)? \} = \{\})?\) \{\s*this\._noteUserNav\('jumpToIndex'\);/.test(cv) // (lane needs-card-tail: its optional `land` — the needs cards' landing — and r2's `stale` never move the stamp off the first line)
   && /async jumpToBottom\(\{ user = true(?:, land = null, stale = null(?:, send = false)?)? \} = \{\}\) \{\s*if \(user\) this\._noteUserNav\('jumpToBottom'\);/.test(cv)); // (lane needs-card-tail r3: the landing's `land` / `stale` never move the stamp off the first line; r5: nor the send's `send`)
@@ -325,6 +329,8 @@ ok('every off-list navigation surface stamps: minimap (index + time), search rev
   ok('…and on its PRESS, as the search\'s jump starts — both roads, before any await (lane needs-card-tail r7: a full-file hit with no rendered range stamped nothing)',
     /async _jumpToSearchResult\(idx\) \{\n\s+const results = this\._serverSearchResults;\n\s+if \(!results \|\| idx < 0 \|\| idx >= results\.length\) return;\n(?:\s+\/\/[^\n]*\n)*\s+this\._onNav\?\.\('search'\);/.test(sch));
   ok('…and the minimap time landing stamps in the seek module too', /_jumpToFileTime\(ts, line\) \{\s*this\._noteUserNav\('jumpToFileTime'\);/.test(sk));
+  ok('…and so does the Retry on «Couldn\'t jump there», as it starts (lane needs-card-tail r8: it called _seekTeleport bare — no stamp at all)',
+    /retry: \(\) => \{ this\._noteUserNav\('teleportRetry'\); return this\._seekTeleport\(line\); \}/.test(sk));
 }
 ok('INVARIANT a pinned view never loses its tail: _extendTop skips trimBottom while pinned',
   /if \(this\._pinned\) this\._trace\('trimSkipPinned'[\s\S]{0,200}else \{ const before = this\._windowEnd; this\._trimBottom\(\);/.test(cv));
@@ -503,6 +509,91 @@ if (typeof globalThis.requestAnimationFrame !== 'function') globalThis.requestAn
     await nap(1500);                                 // past RESUME_SETTLE_MS + the slack
     return { v, retailed: retails(v) > baseline };
   };
+  // THE DOOR LIST IS THE SOURCE'S (lane needs-card-tail r8 — the door census, test-conversation-needs ⑩g, was a fixed list,
+  // and the Retry on «Couldn't jump there» was a door it never named): every call of a jump entry point in src/lib is named
+  // here — a door of that census, or a road inside one; a call nobody named is red BY ITS FILE until it is (a new door: its
+  // census row first). It reads all of src/lib, so it runs inside the legs' sleep below.
+  const doorList = (async () => {
+    await nap(5);
+    const ENTRY = /\.(_seekTeleport|jumpToIndex|_jumpToIndex|_jumpToTime|jumpToBottom|_jumpToFileTime|jumpToFileMatch|_jumpToFileMatch|_jumpToSearchResult|jumpToPendingAsk|_landOnHeader|land|landOnItem|jumpToNewest|openCard)\??\.?\(/g;
+    const NAMED = {
+      'chat-view.js': { jumpToPendingAsk: [2, 'the waiting chip; the stream label\'s «waiting»'], land: [2, 'the chip\'s needs; landOnItem — every For-you door'], jumpToNewest: [1, 'the chip'],
+        jumpToIndex: [4, 'the minimap; the search\'s paged-in hit; its Retry; jumpToPendingAsk\'s paged-in ask'], _jumpToFileTime: [1, 'the minimap (a time)'],
+        jumpToBottom: [5, '↓ on a slab; ↓ paged out; a send paged out; the resume re-tail (nobody\'s press: user false); its Retry'], jumpToFileMatch: [1, 'the search\'s full-file road'], _landOnHeader: [2, 'the run bar: its click, its top'] },
+      'chat-view-seek.js': { _seekTeleport: [3, 'jumpToFileMatch\'s road; the «Couldn\'t jump there» Retry; _jumpToFileTime\'s road'] },
+      'chat-search.js': { _jumpToSearchResult: [4, 'the typed query; the stream\'s first hit; ↑ / ↓ between hits; the seek'], _jumpToFileMatch: [1, 'its full-file road'], _jumpToIndex: [1, 'its paged-in road'] },
+      'chat-minimap.js': { _jumpToIndex: [3, 'its click / drag — the minimap\'s index wiring'], _jumpToTime: [3, 'its click / drag — the minimap\'s time wiring'] },
+      'chat-needs-card.js': { openCard: [1, 'a card\'s click / keys'], land: [1, 'jumpToNewest'], jumpToBottom: [3, 'the landing\'s tail road; its put-back'], jumpToIndex: [2, 'the landing\'s index road; its put-back'] },
+      'user-todos-actions.js': { landOnItem: [1, 'every For-you door'], jumpToPendingAsk: [1, 'a For-you ask that waits'] },
+    };
+    const unnamed = [], LIB = path.join(REPO, 'src/lib');
+    for (const f of fs.readdirSync(LIB).filter((x) => x.endsWith('.js'))) {
+      const text = fs.readFileSync(path.join(LIB, f), 'utf8'), n = {}, want = NAMED[f] || {};
+      for (const m of text.matchAll(ENTRY)) {   // a call on a comment line, or behind a ` // `, is no call
+        const line = text.slice(text.lastIndexOf('\n', m.index) + 1, m.index);
+        if (!/^\s*(\/\/|\*|\/\*)/.test(line) && !/\s\/\/\s/.test(line)) n[m[1]] = (n[m[1]] || 0) + 1;
+      }
+      for (const k of new Set([...Object.keys(n), ...Object.keys(want)])) if ((n[k] || 0) !== (want[k] ? want[k][0] : 0)) unnamed.push(`${f} .${k}(): ${n[k] || 0} call(s), the census names ${want[k] ? want[k][0] + ' — ' + want[k][1] : 'none'}`);
+    }
+    return unnamed;
+  })();
+  // ── ROUND 8 (lane needs-card-tail, the r7 delta verdict's MAJOR): A PRESS THAT KEEPS THE TAIL NEVER ENDS THE RESUME
+  // REPAIR. r7 stamped a send at the live tail through the whole _noteUserNav, which ends the settle, drops the pin snapshot
+  // and the re-tail series and makes the resume's own _positionedSince true: a send within 2.8 s of the window being shown
+  // again let the resume's input-less displacement unpin it (`scrolledAway`, 3637 px up in history — in-process and in real
+  // headless Chrome). THE REAL scroll listener (cut out of the constructor), the REAL onSend and ↓ bodies, the REAL
+  // setSuspended on the REAL prototype; the displacement is test-desktop-resume-paging's own (scrollTop 0 at a scrollHeight
+  // the re-measure shrank). Started here, read at the end of this block — its clock runs beside the legs below.
+  const r8Legs = (async () => {
+    const grab = (re) => { const m = re.exec(cv); try { return m ? new Function(`return (function () ${m[1]});`)() : null; } catch { return null; } };
+    const onSend = grab(/\n {6}onSend: \(\) => (\{[\s\S]*?\n {6}\}),\n {6}onInterrupt:/), downBtn = grab(/this\._scrollBtn\.onclick = \(\) => (\{[\s\S]*?\n {4}\});/);
+    const a = cv.indexOf("    let scrollTick = false;\n    this._messageList.addEventListener('scroll', () => {"), b = a < 0 ? -1 : cv.indexOf('    }, { passive: true });', a);
+    let listen = null; try { listen = a < 0 || b < 0 ? null : new Function('window', `return (function () {${cv.slice(a, b + '    }, { passive: true });'.length)}\n});`)({}); } catch { } // (its input-resize guard reads a page global)
+    if (!onSend || !downBtn || !listen) return { missing: { onSend: !!onSend, downBtn: !!downBtn, listen: !!listen } };
+    const view = (pinned) => {
+      const list = { _st: 4618, scrollHeight: 5320, clientHeight: 702, childElementCount: 156, _l: {},
+        get scrollTop() { return this._st; }, set scrollTop(x) { this._st = Math.max(0, Math.min(x, this.scrollHeight - this.clientHeight)); },
+        addEventListener(t, fn) { this._l[t] = fn; }, fire(t) { this._l[t]?.(); } };
+      const traces = [];
+      const v = Object.assign(Object.create(ChatView.prototype), {
+        _messageList: list, _suspended: false, _disposed: false, _pinned: pinned, _teleported: false,
+        _windowStart: 4873, _windowEnd: 5029, _total: 5029, _newMsgCount: 0, _canPaginate: true, _loading: false,
+        _scrollBtn: { classList: { add() {}, remove() {} } }, _chatMinimap: { setViewport() {} },
+        _updateRunBar() {}, _scheduleRunBar() {}, _tickCollab() {}, _scheduleAxSync() {}, _updatePosIndicator() {}, _traceExpect() {},
+        _trace(k, d) { traces.push(k + (d?.why ? '/' + d.why : d?.via ? ':' + d.via : '')); },
+        _scrollToBottom() { list.scrollTop = list.scrollHeight; },
+        jumpToBottom() { traces.push('jumpToBottom'); this._pinned = true; this._scrollToBottom(); },
+        _maybeSeekEarlier() { traces.push('SEEK-EARLIER'); }, _extendTop() { traces.push('EXTEND-TOP'); }, _hasEarlier() { return true; },
+      });
+      if (!pinned) list.scrollTop = 3000;   // a reader up in the live window: the ↓ shows
+      listen.call(v);
+      return { v, list, traces };
+    };
+    /** hidden, shown, `press` at `pressAt` ms after the resume (`unpinAt`: the re-measure took the live flag first — the one
+     *  the re-tail never trusts), the re-measure's displacement at `at`; read 0.4 s after it */
+    const leg = async ({ press = null, pressAt = 300, at = 1400, pinned = true, unpinAt = null }) => {
+      const { v, list, traces } = view(pinned);
+      v.setSuspended(true); v.setSuspended(false);
+      const t0 = v._resumeAt, wait = (ms) => nap(Math.max(0, ms - (Date.now() - t0)));
+      if (unpinAt != null) { await wait(unpinAt); v._pinned = false; }
+      let afterPress = null;
+      if (press) {
+        await wait(pressAt); (press === 'send' ? onSend : downBtn).call(v);
+        afterPress = { pinnedAtSuspend: v._pinnedAtSuspend, series: (v._resumeRetailTimers || []).length, settle: (v._resumeSettleUntil || 0) > Date.now(),
+          positioned: v._positionedSince(t0), stamped: v._navigatedSince(t0) };
+      }
+      await wait(at); list.scrollHeight = 4339; list.scrollTop = 0; list.fire('scroll');
+      await wait(at + 400);
+      return { press, pressAt, at, wasPinned: pinned, afterPress, pinned: v._pinned, fromBottom: list.scrollHeight - list.scrollTop - list.clientHeight, traces: [...new Set(traces)] };
+    };
+    return Promise.all([
+      leg({}),                                                   // the control: no press
+      leg({ press: 'send', pressAt: 300, at: 1400 }), leg({ press: 'send', pressAt: 300, at: 1900 }),
+      leg({ press: 'send', pressAt: 1400, at: 1500 }), leg({ press: 'send', pressAt: 1900, at: 2000 }),
+      leg({ press: 'down', pressAt: 350, at: 1400, unpinAt: 300 }), // the ↓ on a window the re-measure unpinned
+      leg({ press: 'down', pressAt: 300, at: 450, pinned: false }),  // the ↓ in a window that had no repair
+    ]);
+  })();
   const snap = mkView(); snap.setSuspended(true);
   ok('setSuspended(true) SNAPSHOTS the pin — the last honest reading before the geometry starts lying', snap._pinnedAtSuspend === true);
   const snapOff = mkView({ _pinned: false }); snapOff.setSuspended(true);
@@ -634,6 +725,26 @@ if (typeof globalThis.requestAnimationFrame !== 'function') globalThis.requestAn
       const bordered = mkList({ clientWidth: 785, __b: 4 });
       ok('unit: a BORDER is not a scrollbar — the gutter is measured inside it', onSb(100 + 792, 300, bordered) === true && onSb(100 + 700, 300, bordered) === false);
     } finally { globalThis.getComputedStyle = prev; }
+  }
+
+  // ROUND 8: the door list and the legs started above
+  const unnamed = await doorList;
+  ok('r8: THE DOOR LIST IS THE SOURCE\'S — every call of a jump entry point in src/lib (the view\'s jumps, the seek, the search\'s roads, the minimap\'s wiring, the needs cards\' landing, the For-you doors) is a door of test-conversation-needs ⑩g\'s census or a road inside one, by name; a call nobody named is red by its file', unnamed.length === 0, JSON.stringify(unnamed));
+  const R8 = await r8Legs;
+  if (R8.missing) ok('r8: the REAL scroll listener, onSend and ↓ are read out of chat-view.js', false, JSON.stringify(R8.missing));
+  else {
+    const [ctl, s300a, s300b, s1400, s1900, downA, downB] = R8;
+    const held = (r) => r.pinned === true && r.fromBottom <= 1 && r.traces.includes('unpinSkipResume') && !r.traces.includes('unpin/scrolledAway');
+    const armed = (r) => !!r.afterPress && r.afterPress.pinnedAtSuspend === true && r.afterPress.series === 3 && r.afterPress.positioned === false && r.afterPress.stamped === true;
+    ok('r8 control: no press — the resume\'s own displacement at +1400 ms keeps the pin (unpinSkipResume, the bottom re-asserted)', held(ctl), JSON.stringify(ctl));
+    ok('RED-able (r8 — fdf241de: scrolledAway, 3637 px up in history; 15475151 kept the pin and stamped nothing): A SEND AT THE LIVE TAIL 0.3 s after the window is shown again is stamped and leaves the resume repair armed — the snapshot, the series, the settle; the resume\'s question false — so the displacement at +1400 / +1900 ms keeps the pin',
+      [s300a, s300b].every((r) => armed(r) && r.afterPress.settle === true && held(r)), JSON.stringify([s300a, s300b]));
+    ok('RED-able (r8 — fdf241de: scrolledAway; 15475151: unstamped): …and a send 1.4 / 1.9 s after it (past the settle window, inside the 2.8 s horizon) — the displacement 0.1 s later keeps the pin',
+      [s1400, s1900].every((r) => armed(r) && held(r)), JSON.stringify([s1400, s1900]));
+    ok('RED-able (r8 — 15475151 and fdf241de alike: the ↓ ran the whole _noteUserNav): THE ↓ AT THE TAIL keeps the tail too — on a window the re-measure unpinned (the live flag the re-tail never trusts) it is stamped, leaves the repair armed and the displacement at +1400 ms keeps the pin; a click on its own button, it ends the settle WINDOW',
+      armed(downA) && downA.afterPress.settle === false && held(downA), JSON.stringify(downA));
+    ok('…while behind a ↓ in a window that had NO repair (unpinned when it was hidden) the re-measure\'s displacement unpins honestly (scrolledAway, the ↓ back) — as on every tree: no pinned window left displaced with the ↓ hidden',
+      !!downB.afterPress && downB.afterPress.stamped && downB.pinned === false && downB.traces.includes('unpin/scrolledAway'), JSON.stringify(downB));
   }
 }
 
