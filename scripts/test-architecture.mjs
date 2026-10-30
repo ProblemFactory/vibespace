@@ -4610,7 +4610,20 @@ console.log('§82 CLAUDE.md is an index of ≤ 100 000 bytes; the moved per-file
   const h82 = (s) => crypto.createHash('sha256').update(s).digest('hex').slice(0, 10);
   const fx82 = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/claude-md-moved.json'), 'utf8'));
   const region82 = regionMoved, census82 = (block, lines) => censusMoved(fx82, block, lines);
-  const over300 = (block, lines) => {
+  // int365 seam D (.365): a moved row exempts a line from the 300-character cap ONLY while the line is VERBATIM (its
+  // whole-line hash); a HEAD match says which moved row an edited line descends from (§82 ④), never that its length is
+  // free — wake r15's 342-character line passed on its own tree through the head match and went red only beside other
+  // lanes. The lines edited after the move BEFORE this seam (31, all file-index) are a FROZEN debt held by their current
+  // whole-line hash in scripts/fixtures/kb-index-over300-debt.json: a further edit changes the hash ⇒ the cap; a paid
+  // entry must leave the list (it only falls).
+  const debt82 = JSON.parse(fs.readFileSync(path.join(REPO, 'scripts/fixtures/kb-index-over300-debt.json'), 'utf8'));
+  const DEBT82_MAX = 31;
+  const over300 = (block, lines, debtRows = debt82.rows) => {
+    const verbatim = new Set(block ? block.rows.map((r) => r.split(':')[1]) : []);
+    const owed = new Set((debtRows || []).filter((d) => block && d.block === block.name).map((d) => d.h));
+    return lines.filter((l) => [...l].length > 300 && !verbatim.has(h82(l)) && !owed.has(h82(l)));
+  };
+  const headOnly300 = (block, lines) => {   // the rule before seam D — kept ONLY as the control's «before»
     const moved = new Set(block ? block.rows.flatMap((r) => r.split(':')) : []);
     return lines.filter((l) => [...l].length > 300 && !moved.has(h82(l)) && !moved.has(h82([...l].slice(0, fx82.keyChars).join(''))));
   };
@@ -4664,6 +4677,16 @@ console.log('§82 CLAUDE.md is an index of ≤ 100 000 bytes; the moved per-file
   // index line, a dangling pointer, a CLAUDE.md one byte over the ratchet
   const bug = fx82.blocks.find((b) => b.name === 'bugfix-index'), fsb = fx82.blocks.find((b) => b.name === 'file-index');
   const bl = homes.get('bugfix-index').lines || [], fl = homes.get('file-index').lines || [];
+  // seam D's plants (on scratch copies of the region's lines — the files are never touched)
+  const fslVerbatim = new Set(fsb.rows.map((r) => r.split(':')[1]));
+  const short82 = fl.find((l) => fslVerbatim.has(h82(l)) && [...l].length <= 300 && [...l].length > fx82.keyChars) || '';
+  const grow82 = short82 ? short82 + ' ' + 'x'.repeat(342 - [...short82].length - 1) : '';
+  const debtLine82 = fl.find((l) => debt82.rows.some((d) => d.block === 'file-index' && d.h === h82(l))) || '';
+  const verbatimLong82 = fl.find((l) => fslVerbatim.has(h82(l)) && [...l].length > 300) || '';
+  // THE DEBT ONLY FALLS: every listed row is a line still owed (in its block, over 300, not verbatim); never more than 31
+  const owedNow82 = (d) => { const b = fx82.blocks.find((x) => x.name === d.block), ls = (homes.get(d.block) || {}).lines || [], vb = new Set(b ? b.rows.map((r) => r.split(':')[1]) : []); return ls.some((l) => h82(l) === d.h && [...l].length > 300 && !vb.has(h82(l))); };
+  const paid82 = debt82.rows.filter((d) => !owedNow82(d));
+  ok(debt82.rows.length <= DEBT82_MAX && paid82.length === 0, `§82 ③ seam D: the frozen over-300 debt only falls — ${debt82.rows.length} ≤ ${DEBT82_MAX} lines edited after the move, each still owed${paid82.length ? ' — PAID BUT STILL LISTED (remove them): ' + paid82.map((d) => `${d.h} «${d.head.slice(0, 40)}»`).join(' | ') : ''}`);
   const mid = bl.findIndex((l, i) => i > bl.length / 2 && l.startsWith('- '));
   const midRow = bug.rows.findIndex((r) => r.startsWith(h82([...(bl[mid] || '')].slice(0, fx82.keyChars).join('')) + ':'));
   const ret82 = { ...bug, retired: [{ head: bug.rows[midRow].split(':')[0], why: 'a §82 control: this line was removed', at: '2026-10-08' }] };
@@ -4677,6 +4700,10 @@ console.log('§82 CLAUDE.md is an index of ≤ 100 000 bytes; the moved per-file
     ['a dead retirement (its line still there)', judgeMoved(fx82, ret82, bl).said.some((x) => x.startsWith('dead retirement: bugfix-index row ')), true],
     ['a lost line said in words', judgeMoved(fx82, bug, drop).said.some((x) => x === `lost: bugfix-index row ${midRow + 1}: "${bug.heads[midRow]}"`), true],
     ['a new 301-character index line', over300(bug, [...bl, '- ' + 'x'.repeat(299)]).length === 1, true],
+    // seam D: the wake r15 shape — a moved line (its head intact) EDITED past 300 — is RED now, where the head-only rule spared it
+    ['an EDITED moved line grown to 342 characters (head intact) — the head-only rule spared it', headOnly300(fsb, [...fl, grow82]).length === headOnly300(fsb, fl).length && over300(fsb, [...fl, grow82]).length === over300(fsb, fl).length + 1, true],
+    ['a frozen debt line edited once more loses its exemption', !!debtLine82 && over300(fsb, fl.map((l) => (l === debtLine82 ? l + ' (edited)' : l))).length === over300(fsb, fl).length + 1, true],
+    ['a verbatim moved line over 300 stays exempt (frozen, never edited)', !!verbatimLong82 && over300(fsb, [...fl.filter((l) => l !== verbatimLong82), verbatimLong82]).length > over300(fsb, fl).length, false],
     ['a dangling pointer', pointers82(md + '\nnew line ⇒ kb-nope.md\n').some((k) => !fs.existsSync(path.join(REPO, 'docs', k + '.md'))), true],
     ['one byte over the ratchet', Buffer.byteLength(md + 'x'.repeat(CLAUDE_MD_MAX_BYTES - bytes + 1)) > CLAUDE_MD_MAX_BYTES, true],
     // round 9 (MINOR): §82 ⑥'s OWN predicate (strandedDated) judges a plant — not a regex re-declared here (the tautology §82

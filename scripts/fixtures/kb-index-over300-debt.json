@@ -1,0 +1,191 @@
+{
+ "about": "§82 ③'s FROZEN DEBT (int365 seam D, .365): the INDEX lines over 300 characters that were EDITED after the claude-md-diet move — a moved row's 48-character head with a different whole line. They passed only because the head matched (the gap that let a 342-character lane line through). Each is held by its CURRENT whole-line hash (h10); a further edit changes the hash ⇒ the cap applies; a paid entry (the line gone or ≤ 300) must leave this list — it only falls. Never add a row.",
+ "rows": [
+  {
+   "block": "file-index",
+   "h": "5140e9a62b",
+   "chars": 380,
+   "head": "src/channel-filter.js — PURE THE FILTER + the grain model (§"
+  },
+  {
+   "block": "file-index",
+   "h": "95deaf7145",
+   "chars": 427,
+   "head": "scripts/test-reset-credit-verdict.mjs (fast) + test-reset-cr"
+  },
+  {
+   "block": "file-index",
+   "h": "f70aea64d6",
+   "chars": 969,
+   "head": "scripts/ci.mjs — THE RELEASE GATE, TWO TIERS (B-4c5a, 2026-0"
+  },
+  {
+   "block": "file-index",
+   "h": "c532d07334",
+   "chars": 366,
+   "head": "src/server/browser-keeper.js — ORCH profile registry, leases"
+  },
+  {
+   "block": "file-index",
+   "h": "cf07ecea53",
+   "chars": 350,
+   "head": "src/lib/desktop-record.js — PURE (CJS) a desktop's RECORD: m"
+  },
+  {
+   "block": "file-index",
+   "h": "d0c57d3a29",
+   "chars": 464,
+   "head": "ws-handler.js        — WebSocket protocol handler (all WS"
+  },
+  {
+   "block": "file-index",
+   "h": "f9017dbb2a",
+   "chars": 1147,
+   "head": "account-material.js  — Device-tier credential-MATERIAL mec"
+  },
+  {
+   "block": "file-index",
+   "h": "f68bc3c960",
+   "chars": 508,
+   "head": "login-expiry.js — PURE (零依赖) 登录会话寿命判定 (2026-09-07): `claud"
+  },
+  {
+   "block": "file-index",
+   "h": "ba6a420f1f",
+   "chars": 394,
+   "head": "server/login-expiry-watch.js — 被动巡检(boot+5min, 只读文件, §ban-"
+  },
+  {
+   "block": "file-index",
+   "h": "cb731a3ec5",
+   "chars": 413,
+   "head": "agent-tool-rules.js — PURE (lane L) VibeSpace's own tools"
+  },
+  {
+   "block": "file-index",
+   "h": "60f7ffd2f4",
+   "chars": 338,
+   "head": "permission-rules.js — PURE model + DOM-free tree renderer"
+  },
+  {
+   "block": "file-index",
+   "h": "a86ea0cece",
+   "chars": 318,
+   "head": "server/permission-rules.js — the READ-ONLY rule READER + t"
+  },
+  {
+   "block": "file-index",
+   "h": "3902291bc4",
+   "chars": 301,
+   "head": "server/channels-engine.js + channels-wiring.js + routes/ch"
+  },
+  {
+   "block": "file-index",
+   "h": "c8c26dffe5",
+   "chars": 407,
+   "head": "desktop-apps.js — PURE (imports only keeper-limits) the de"
+  },
+  {
+   "block": "file-index",
+   "h": "2313fe1193",
+   "chars": 607,
+   "head": "desktop-display.js — SHARED (node builtins + cli-identity)"
+  },
+  {
+   "block": "file-index",
+   "h": "da0f31763a",
+   "chars": 540,
+   "head": "discovery-facts.js — Shared discovery INTERPRETATION (2.27"
+  },
+  {
+   "block": "file-index",
+   "h": "9d573189d7",
+   "chars": 481,
+   "head": "lib/incident-recorder.js — \"Report a problem\" panic button"
+  },
+  {
+   "block": "file-index",
+   "h": "1e53fe9c35",
+   "chars": 1039,
+   "head": "manage-agents.js — installManageAgents(App): Manage-Agen"
+  },
+  {
+   "block": "file-index",
+   "h": "dae43f34c2",
+   "chars": 415,
+   "head": "browser-new-profile.js + browser-new-profile-model.js —"
+  },
+  {
+   "block": "file-index",
+   "h": "46f1be62b3",
+   "chars": 381,
+   "head": "window.js          — WindowManager (drag/resize/snap/gri"
+  },
+  {
+   "block": "file-index",
+   "h": "3e4e35ef1c",
+   "chars": 470,
+   "head": "sidebar-rail.js — Sidebar activity rail (2.176.0, vscode"
+  },
+  {
+   "block": "file-index",
+   "h": "63c2c07330",
+   "chars": 379,
+   "head": "session-props.js     — Session Properties window (2.49.0"
+  },
+  {
+   "block": "file-index",
+   "h": "91c3be5d78",
+   "chars": 455,
+   "head": "channel-outbox.js + channel-reach-editor.js — CLIENT (§8"
+  },
+  {
+   "block": "file-index",
+   "h": "ad9fa0a4bc",
+   "chars": 357,
+   "head": "setup-flows.js     — installSetupFlows(App): onboarding"
+  },
+  {
+   "block": "file-index",
+   "h": "678d06c02b",
+   "chars": 393,
+   "head": "file-viewer.js     — FileViewer (dispatch by type via fi"
+  },
+  {
+   "block": "file-index",
+   "h": "8cd2942e96",
+   "chars": 378,
+   "head": "design-canvas.js + design-canvas-model.js — THE DESIGN C"
+  },
+  {
+   "block": "file-index",
+   "h": "69e24ad7a5",
+   "chars": 446,
+   "head": "chat-view.js       — ChatView controller (virtual scroll"
+  },
+  {
+   "block": "file-index",
+   "h": "038fcd956c",
+   "chars": 429,
+   "head": "chat-run-summary.js — PURE run-fold classifier + summary"
+  },
+  {
+   "block": "file-index",
+   "h": "0b48b95af6",
+   "chars": 451,
+   "head": "xpra-client.js     — the DOM-free xpra session over the"
+  },
+  {
+   "block": "file-index",
+   "h": "ffef968d19",
+   "chars": 404,
+   "head": "outside-press.js   — PURE (imports nothing, lane M) the"
+  },
+  {
+   "block": "file-index",
+   "h": "b512e954c0",
+   "chars": 478,
+   "head": "settings-schema.js — Settings schema (types, defaults, c"
+  }
+ ]
+}
