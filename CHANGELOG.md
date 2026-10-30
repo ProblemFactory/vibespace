@@ -2,6 +2,11 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.365 — 2026-10-30
+
+### Fixed
+- While public URLs are down because the relay keeps dropping the connection, For you says why; publishing tries once first, and no longer asks about DNS.
+
 ## 2.369.364 — 2026-10-30
 
 ### Fixed
