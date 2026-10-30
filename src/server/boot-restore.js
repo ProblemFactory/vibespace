@@ -59,6 +59,18 @@ function persistNoStart(sockFile, meta, { readSessionMeta, writeSessionMeta }) {
   } catch { return false; }
 }
 
+/** The conversation a session meta names (claude's legacy field first), or null. */
+function conversationIdOf(meta) {
+  const id = meta && (meta.claudeSessionId || meta.backendSessionId);
+  return id && typeof id === 'string' ? id : null;
+}
+/** tmp + rename (the atomic-persistence law): a crash mid-write leaves the old file or none, never a torn one. */
+function writeJsonAtomic(file, obj) {
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(obj));
+  fs.renameSync(tmp, file);
+}
+
 function create({ rootDir, PORT, BUFFERS_DIR, META_DIR, SOCKETS_DIR, DTACH_CMD,
   NODE_CMD, CHAT_WRAPPER, activeSessions, sessionCounterRef,
   attachToDtach, setupSessionPty, readSessionMeta, writeSessionMeta,
@@ -233,8 +245,9 @@ function probeFacts(o) {
 
 // THE TWO RETIRES — ONE function each, called by restoreSessions AND by its deferred re-probe (B-92a4), so a socket the
 // re-probe settles dead / a duplicate it settles losing goes exactly the way the boot would have sent it.
-/** A dead dtach socket: the socket goes; a REMOTE session's meta is kept as an orphan for the re-adopt; a LOCAL one's is kept as
- *  STOPPED while its conversation has a transcript (`<sock>.json.stopped`, stoppedAt), deleted only when none exists. */
+/** A dead dtach socket: the socket goes; a REMOTE session's meta is kept as an orphan for the re-adopt; a LOCAL one that names a
+ *  conversation is kept as STOPPED (`<sock>.json.stopped`, stoppedAt) and deleted only when its harness answers that no
+ *  transcript exists (settleStopped, off the loop); one that names none (a shell) is deleted as before. */
 function retireDeadSocket(sockFile, socketPath) {
   console.log(`  ✗ Dead socket: ${sockFile} — cleaning up`);
   try { fs.unlinkSync(socketPath); } catch {}
@@ -259,26 +272,36 @@ function retireDeadSocket(sockFile, socketPath) {
     // the record and the session is resumable (the sidebar lists it stopped from that transcript, the resume-all offer resumes
     // it); its meta — the session's name, account, groups, model / effort, browser key — is kept beside it as STOPPED, out of
     // every live reader's `*.json` scan. Deleted only when no transcript exists (a shell, a conversation that never spoke).
-    if (!dm.orphanedAt && hasTranscript(dm)) {
-      const op = path.join(META_DIR, sockFile + '.json');
-      fs.writeFileSync(op + '.stopped', JSON.stringify({ ...dm, stoppedAt: Date.now() }));
-      try { fs.unlinkSync(op); } catch { }
-      console.log(`    ↳ local session meta kept as stopped (${dm.backend || 'claude'} ${String(dm.claudeSessionId || dm.backendSessionId).slice(0, 8)}…: its transcript is the record)`);
+    // r2 — KEPT FIRST, LOOKED FOR OFF THE LOOP (§19): the boot never walks a transcript store (the claude projects scan, the
+    // codex rollout walk) per dead socket on its loop — the meta is kept now (an atomic write; the live `.json` goes through
+    // the ONE delete road, whose tombstone stops a straggler writer resurrecting it) and its harness's own locate answers in
+    // the transcript worker; only its «no transcript» deletes the stopped meta, no answer keeps it.
+    const cid = conversationIdOf(dm);
+    if (!dm.orphanedAt && cid) {
+      const stopped = path.join(META_DIR, sockFile + '.json.stopped');
+      writeJsonAtomic(stopped, { ...dm, stoppedAt: Date.now() });
+      deleteSessionMeta(sockFile);
+      console.log(`    ↳ local session meta kept as stopped (${dm.backend || 'claude'} ${cid.slice(0, 8)}…: its transcript is looked for off the loop)`);
+      settleStopped(sockFile, stopped, dm);
       return;
     }
   } catch { }
   deleteSessionMeta(sockFile);
 }
-/** Does the conversation a LOCAL meta names have a transcript here? Its harness's own store answers (descriptor
- *  `store.locate(id, cwd)` — claude: the CLI's path rule, then the projects scan; codex: its rollout); a harness with no
- *  store (a shell) has none. */
-function hasTranscript(meta) {
-  const id = meta && (meta.claudeSessionId || meta.backendSessionId);
-  if (!id || typeof id !== 'string') return false;
-  try {
-    const h = harnessList().find((x) => x && x.id === (meta.backend || 'claude'));
-    return !!(h && h.store && typeof h.store.locate === 'function' && h.store.locate(id, meta.cwd || ''));
-  } catch { return false; }
+/** The one question a kept meta leaves: does its conversation have a transcript here? Its harness descriptor's own
+ *  `store.locate(id, cwd)`, run in the transcript worker (adapters/codex.js transcriptWorkerCall, op `locate`, 20 s bound);
+ *  `false` deletes the stopped meta, `true` / no answer (the pool down, past its bound) keeps it — never deleted on a guess. */
+const settling = new Set();
+function settleStopped(sockFile, file, meta) {
+  const p = (async () => {
+    let found = null;
+    try { found = await require('../adapters/codex.js').transcriptWorkerCall('locate', { backend: meta.backend || 'claude', id: conversationIdOf(meta), cwd: meta.cwd || '' }, () => null); } catch { found = null; }
+    if (found !== false) return found;
+    await new Promise((r) => fs.unlink(file, () => r()));
+    console.log(`    ↳ ${sockFile}: no transcript — its stopped meta deleted`);
+    return false;
+  })();
+  settling.add(p); p.finally(() => settling.delete(p));
 }
 /** A stale duplicate of a conversation another socket owns: SIGTERM its dtach session (claude, if any, is the older/losing
  *  writer — the pids from a pgrep CHILD, never a sync ask) and clean socket + buffer + meta. */
@@ -882,6 +905,7 @@ async function readoptOrphanKeeperSessions() {
 }
 
   return { migrateLegacyHomeProjects, restoreSessions, restoreAgentdPipeSessions,
-    readoptOrphanKeeperSessions, probeSockets, probeFacts, reprobePending, probePending: () => new Map([...pendingProbes].map(([f, p]) => [f, [...p.q]])) };
+    readoptOrphanKeeperSessions, probeSockets, probeFacts, reprobePending, probePending: () => new Map([...pendingProbes].map(([f, p]) => [f, [...p.q]])),
+    stoppedSettled: () => Promise.all([...settling]) }; // the kept metas' transcript answers (settleStopped) — a test's wait
 }
 module.exports = { create, heldOriginOf, persistNoStart }; // r5: the two held-origin helpers are PURE over a meta + store (test-codex-pool §R17b)

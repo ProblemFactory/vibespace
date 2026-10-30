@@ -467,7 +467,7 @@ function _transcriptPoolGet() {
         workerPath: path.join(__dirname, '..', 'transcript-worker.js'), name: 'transcript',
         poolSize: 2,
         inlineRun: runOp,
-        timeouts: { default: 60000, gapInfo: 120000, lineRange: 60000, userTurns: 120000, boundedParsed: 60000, jsonlTail: 60000, codexThreadMetas: 30000, codexOpenThreads: 15000 },
+        timeouts: { default: 60000, gapInfo: 120000, lineRange: 60000, userTurns: 120000, boundedParsed: 60000, jsonlTail: 60000, codexThreadMetas: 30000, codexOpenThreads: 15000, locate: 20000 },
       });
     } catch (e) {
       _transcriptPool = false; // construction failed once — stay inline forever

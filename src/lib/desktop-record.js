@@ -33,9 +33,11 @@
 //   server session (isNameless): it takes the name of the named entry this write drops that it replaced — the evidence entry
 //   whose `by` names it, else the ONE dropped entry of its name (namesOf: the title without its " — <cwd>" tail, and the
 //   openSpec's name; one-to-one, two windows of one name are never guessed) — and with none it is left out of THIS write
-//   (`withheld`, said by the writer). carryName(from, next) copies the conversation (backend, the id, claudeSessionId, cwd),
-//   never the old window's server session or openSpec. mergeDesktopRecord's `replaced` ([[newId, oldId]]) is the client's
-//   twin: a moved window that `replaces` an entry takes that entry's name in the held record.
+//   (`withheld`, said by the writer). carryName(from, next) copies the conversation (backend, the id, claudeSessionId, cwd)
+//   AND ITS HOST (r2, the CS-separation law: hostOf(from) — the recipe's host, else the entry's own `hostId` — written as the
+//   entry's `hostId`; keepIdentity carries it with the conversation it names), never the old window's server session or
+//   openSpec. mergeDesktopRecord's `replaced` ([[newId, oldId]]) is the client's twin: a moved window that `replaces` an
+//   entry takes that entry's name in the held record.
 //
 //   shrinkVerdict({prev, next, evidence, alive, min, recent}) — the SERVER BELT (ws-handler layout-sync): a sync
 //     that drops ≥ `min` (2) windows of the stored record that nothing explains is refused for that desktop. A drop
@@ -148,6 +150,15 @@ const sessionOf = (w) => {
 /** What names a session window's conversation — kept from the record by a capture that does not know it (yet). */
 const IDENTITY = ['serverSessionId', 'backend', 'backendSessionId', 'claudeSessionId', 'cwd'];
 const blank = (v) => v == null || v === '';
+/** The machine a session entry's conversation lives on (null = this hub): the host its recipe names, else the entry's own
+ *  `hostId` — a window named before its create answered (a resume's birth name, a carried name) has no recipe yet (lane
+ *  layout-stopped-window r2: the CS-separation law — the host is part of the name, never dropped). */
+const hostOf = (w) => {
+  if (!w || typeof w !== 'object' || (w.type !== 'chat' && w.type !== 'terminal')) return null;
+  const spec = w.openSpec && typeof w.openSpec === 'object' ? w.openSpec : {};
+  const h = !blank(spec.hostId) ? spec.hostId : w.hostId;
+  return blank(h) ? null : String(h);
+};
 
 function keepIdentity(prev, next) {
   if (!prev || !next || typeof prev !== 'object' || typeof next !== 'object' || prev === next) return next;
@@ -157,6 +168,8 @@ function keepIdentity(prev, next) {
   let out = null;
   const put = (k, v) => { if (!out) out = { ...next }; out[k] = v; };
   for (const k of IDENTITY) if (blank(next[k]) && !blank(prev[k])) put(k, prev[k]);
+  // the host rides WITH the conversation it names (lane layout-stopped-window r2): the same conversation, never another's
+  if (blank(next.hostId) && !blank(prev.hostId) && conversationOf(out || next) === conversationOf(prev)) put('hostId', prev.hostId);
   const ps = prev.openSpec, ns = next.openSpec;
   if (ns && typeof ns === 'object' && ns.action === 'attachSession' && blank(ns.backendSessionId)
     && ps && typeof ps === 'object' && ps.action === 'attachSession' && !blank(ps.backendSessionId)) {
@@ -198,7 +211,8 @@ function namesOf(w) {
   if (typeof spec.name === 'string' && spec.name.trim()) out.add(spec.name.trim());
   return out;
 }
-/** `next` takes `from`'s conversation — never its server session (the attach was the old window's) nor its openSpec. */
+/** `next` takes `from`'s conversation — {backend, backendSessionId, hostId} as ONE unit, its cwd beside it — never its
+ *  server session (the attach was the old window's) nor its openSpec (the host it named rides as the entry's `hostId`). */
 function carryName(from, next) {
   const cid = conversationOf(from);
   if (!cid || !isSession(next) || from.type !== next.type || conversationOf(next)) return next;
@@ -208,6 +222,7 @@ function carryName(from, next) {
   pick('backend', from.backend); pick('backend', spec.backend);
   pick('claudeSessionId', from.claudeSessionId);
   pick('cwd', from.cwd); pick('cwd', spec.cwd);
+  pick('hostId', hostOf(from));
   return out;
 }
 
@@ -353,7 +368,7 @@ const ARRANGEMENT = ['zIndex', 'z', 'gridBounds', 'isMaximized', 'isMinimized', 
 const LAYERS = Object.freeze([
   Object.freeze({ layer: 'workspace', fields: Object.freeze([
     'current', 'autoSave', 'saved', 'desktopMeta', 'desktops', 'windows', // the document + a record's window list
-    'winId', 'id', 'type', 'title', 'openSpec', 'serverSessionId', 'backend', 'backendSessionId', 'claudeSessionId', 'cwd',
+    'winId', 'id', 'type', 'title', 'openSpec', 'serverSessionId', 'backend', 'backendSessionId', 'claudeSessionId', 'cwd', 'hostId',
     'terminalOverrides', 'editorState', 'explorerPath', 'explorerHost', 'filePath', 'fileName', 'browserUrl', 'isTabGuest',
     'tabChain', 'tabChain.tabs', 'tabChain.order', 'tabChain.active', 'tabChain.layout', 'tabChain.split',
   ]) }),
@@ -474,4 +489,4 @@ function desktopChanges(prev, next) {
   return out;
 }
 
-module.exports = { mergeDesktopRecord, shrinkVerdict, desktopChanges, windowIds, idOf, captureForViewport, ARRANGEMENT, PHONE_KEEPS, LAYERS, layerOf, PHONE_SHOWS, applyForViewport, arrangementFor, layerGate, sessionOf, IDENTITY, keepIdentity, keepIdentities, foreignStamp, staleVerdict, isSession, conversationOf, isNameless, namesOf, carryName, keepNames };
+module.exports = { mergeDesktopRecord, shrinkVerdict, desktopChanges, windowIds, idOf, captureForViewport, ARRANGEMENT, PHONE_KEEPS, LAYERS, layerOf, PHONE_SHOWS, applyForViewport, arrangementFor, layerGate, sessionOf, IDENTITY, keepIdentity, keepIdentities, foreignStamp, staleVerdict, isSession, conversationOf, isNameless, namesOf, carryName, keepNames, hostOf };

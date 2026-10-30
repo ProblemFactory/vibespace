@@ -189,11 +189,13 @@ function realShapeDoc() {
   const host = { winId: 'w-web', title: 'Docs', type: 'browser', openSpec: { action: 'openBrowser', url: 'https://example.com/' }, zIndex: 7, gridBounds: box(0.25, 0.25), isMaximized: false, isMinimized: false, browserUrl: 'https://example.com/', tabChain: chain(), isTabGuest: false };
   const guest = { winId: 'w-ed', title: 'draft.md', type: 'editor', openSpec: { action: 'openEditor', path: '/home/u/draft.md' }, zIndex: 7, gridBounds: box(0.25, 0.25), isMaximized: false, isMinimized: false, filePath: '/home/u/draft.md', fileName: 'draft.md', tabChain: chain(), isTabGuest: true };
   const record = (windows, o = {}) => ({ windows, grid: { rows: 1, cols: 3 }, sidebarOpen: true, theme: 'dark', globalFontSize: 14, globalFontFamily: 'monospace', taskbarHeight: 40, toolbarScale: 1.2, toolbarHeight: 48, viewport: 'phone', updatedAt: 1790000000000, ...o });
+  // a resume window captured before its create answered (lane layout-stopped-window): its conversation AND its host, no recipe yet
+  const born = { winId: 'w-born', title: 'Remote job', type: 'chat', backend: 'claude', backendSessionId: 'bs-3', claudeSessionId: 'bs-3', cwd: '/srv/remote', hostId: 'h-1', zIndex: 6, gridBounds: box(0, 0), isMaximized: false, isMinimized: false };
   const legacy = { windows: [{ id: 'w-old', title: 'Old', type: 'files', openSpec: { action: 'openFileExplorer', path: '/' }, z: 3, gridBounds: box(0, 0), isMaximized: false, min: true, snap: true, snapBounds: box(0, 0) }], grid: null, sidebarOpen: false, theme: 'light', taskbarHeight: 36, toolbarHeight: 40, updatedAt: 1700000000000 };
   return {
     current: 'Work',
     autoSave: legacy,
-    saved: { Work: record([chat, files], { viewport: 'desktop' }) },
+    saved: { Work: record([chat, files, born], { viewport: 'desktop' }) },
     customGrids: [{ rows: 3, cols: 3 }],
     desktopMeta: [{ id: 'd-1', name: 'One' }, { id: 'd-2', name: 'Two' }, { id: 'd-3', name: 'Three' }],
     desktops: { 'd-1': { autoSave: record([chat, term, files]) }, 'd-2': { autoSave: record([viewer, host, guest], { viewport: 'desktop', toolbarScale: null }) }, 'd-3': { autoSave: record([], { grid: null }) } },

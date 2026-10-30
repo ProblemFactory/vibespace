@@ -432,7 +432,13 @@ export class DesktopManager {
     for (const ws of state?.windows || []) {
       const winId = ws.winId || ws.id;
       if (!winId || this.app.wm.windows.has(winId)) continue;
-      if (!ws.openSpec && isSession(ws)) { bySession.push(ws); continue; } // lane layout-stopped-window: built by its identity — attached, read-only or a placeholder, never 'unbuilt'
+      if (!ws.openSpec && isSession(ws)) {
+        // lane layout-stopped-window: built by its identity — attached, read-only or a placeholder, never 'unbuilt'; one already
+        // being built (an earlier replay whose reads are still out — r2: two doors 50 ms apart built every window twice) is left to it
+        const a = this._buildAttempts.get(String(winId));
+        if (!(a && a.desk === desktopId && now - a.at <= BUILD_GRACE_MS)) bySession.push(ws);
+        continue;
+      }
       if (!ws.openSpec) { noSpec.push(winId); continue; } // nothing to build it from: settled at once (dropped as before, with evidence)
       // …nor can a second window of a session this page already shows live: settled at once too (verify r1: it
       // lingered as a build attempt for the whole 20 s grace — a record entry nobody could build, which the server

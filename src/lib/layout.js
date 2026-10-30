@@ -7,7 +7,7 @@ import { legacyIdFor } from './agent-meta.js';
 import { wordlessTitleOf } from '../record-clear.js'; // PURE: the title a layout RECORD keeps for a window drawn from a record's words (lane-redact verify r7)
 import { chainSyncKey, ratioDiffers, heldRatio, releaseRatio, withoutMembers, restoreVerdict } from './chain-layout.js'; // agent browser P7 (§4.6): the sync key carries the layout; the ratio applies in place (unless a local divider drag holds it — v2 verify r1 ①)
 import { writerClass, deferKey, deferKeysOf, releaseNext, noteApplied, recordStamp, behindStamp, noteStamp } from './layout-model.js'; // B-4767: the deferred records — one slot per desktop AND writer class, released in arrival order (PURE)
-import { conversationOf } from './desktop-record.js'; // PURE (lane layout-stopped-window): the conversation a session entry names — a placeholder's door
+import { conversationOf, hostOf } from './desktop-record.js'; // PURE (lane layout-stopped-window): the conversation a session entry names — a placeholder's door
 import { applyForViewport, arrangementFor } from './desktop-record.js'; // THE LAYER LAW's read half (design q-039 P0, §6b item 10): every read site of a record takes this page's subsets of it here (PURE)
 
 // The MEMBERS of a chain (host first) — NOT a sync key (chainSyncKey is): two
@@ -112,11 +112,11 @@ export function scanStoppedInDesktopStates(data, activeId, live, all, getCustomN
       if (stoppedMatch) {
         out.push({ sessionId: stoppedMatch.sessionId, cwd: stoppedMatch.cwd,
           name: customName || stoppedMatch.name || savedWindowName(ws) || 'Session',
-          opts: { backend, backendSessionId, hostId: ws.openSpec?.hostId || undefined, winBounds } });
-      } else if (ws.openSpec?.hostId) {
+          opts: { backend, backendSessionId, hostId: hostOf(ws) || undefined, winBounds } });
+      } else if (hostOf(ws)) {
         out.push({ sessionId: backendSessionId, cwd: ws.cwd || '',
           name: customName || savedWindowName(ws) || 'Session',
-          opts: { backend, backendSessionId, hostId: ws.openSpec.hostId, winBounds } });
+          opts: { backend, backendSessionId, hostId: hostOf(ws), winBounds } });
       }
     }
   }
@@ -1037,7 +1037,9 @@ class LayoutManager {
     const tile = document.createElement(cid ? 'button' : 'div');
     tile.className = 'session-placeholder' + (cid ? ' can-resume' : '');
     tile.dataset.placeholder = cid ? 'stopped' : 'unavailable';
-    const name = document.createElement('div'); name.className = 'session-placeholder-name'; name.textContent = titleNameOf(entry) || t('Session');
+    const host = hostOf(entry); // a REMOTE conversation's tile names its machine (r2): «<title> · <host>», and its press resumes there
+    const name = document.createElement('div'); name.className = 'session-placeholder-name'; name.textContent = (titleNameOf(entry) || t('Session')) + (host ? ' · ' + (this.app._hostLabel?.(host) || host) : '');
+    if (host) tile.dataset.host = host;
     const say = document.createElement('div'); say.className = 'session-placeholder-say'; say.textContent = cid ? t('Session stopped — click to resume') : t('Session unavailable');
     tile.append(name, say);
     if (cid) tile.onclick = () => this._resumePlaceholder(win);
@@ -1053,7 +1055,7 @@ class LayoutManager {
     const backend = e.backend || e.openSpec?.backend || 'claude';
     const bounds = this.app._snapshotWinBounds?.(win);
     this.app.wm.closeWindow(win.id);
-    this.app.resumeSession?.(cid, e.cwd || e.openSpec?.cwd || '', titleNameOf(e) || 'Session', { backend, backendSessionId: cid, hostId: e.openSpec?.hostId || undefined, winBounds: bounds ? { ...bounds, winId: win.id } : undefined });
+    this.app.resumeSession?.(cid, e.cwd || e.openSpec?.cwd || '', titleNameOf(e) || 'Session', { backend, backendSessionId: cid, hostId: hostOf(e) || undefined, winBounds: bounds ? { ...bounds, winId: win.id } : undefined });
   }
 
   /** A placeholder leaves IN PLACE for the window a newer record can build under the same id — closed INSIDE the apply (the
@@ -1067,10 +1069,11 @@ class LayoutManager {
   _liveSpecOf(rw) {
     const cid = conversationOf(rw);
     if (!cid || rw.openSpec) return null;
-    const backend = rw.backend || 'claude';
-    const live = (this.app.sidebar?._allSessions || []).find((s) => s && s.webuiId && (s.backend || 'claude') === backend && (s.backendSessionId || s.sessionId) === cid);
+    const backend = rw.backend || 'claude', host = hostOf(rw);
+    const live = (this.app.sidebar?._allSessions || []).find((s) => s && s.webuiId && (s.backend || 'claude') === backend && (s.backendSessionId || s.sessionId) === cid && (!host || (s.host || null) === host));
     if (!live) return null;
-    return { action: 'attachSession', serverId: live.webuiId, backend, backendSessionId: cid, sessionKey: `${backend}:${cid}`, name: titleNameOf(rw), cwd: rw.cwd || live.cwd || '', mode: rw.type === 'terminal' ? 'terminal' : 'chat' };
+    // the row's host is the recipe's (r2 — never dropped); a remote row's cwd is a DISPLAY key («host: /path»), never a recipe's
+    return { action: 'attachSession', serverId: live.webuiId, backend, backendSessionId: cid, hostId: live.host || null, sessionKey: `${backend}:${cid}`, name: titleNameOf(rw), cwd: rw.cwd || (live.host ? '' : live.cwd || ''), mode: rw.type === 'terminal' ? 'terminal' : 'chat' };
   }
 
   /** restoreState's door: a session entry it could not build becomes a placeholder, placed by the record. */
@@ -1192,6 +1195,7 @@ class LayoutManager {
         winState.backendSessionId = win._conversation.backendSessionId;
         winState.claudeSessionId = legacyIdFor(winState.backend, winState.backendSessionId);
         if (!winState.cwd) winState.cwd = win._conversation.cwd || '';
+        if (win._conversation.hostId && !win._openSpec) winState.hostId = win._conversation.hostId; // its host WITH it (r2 — hostOf: a recipe names its own)
       }
       // For file explorers, save current path (+ which host it browses)
       if (win.type === 'files' && win._explorerPath) {
@@ -1332,6 +1336,10 @@ class LayoutManager {
     this.app.wm._restoring = true; // batch mode: suppress per-window O(all-windows) bookkeeping (see window.js _notify)
     try {
     for (const ws of state.windows) {
+      // A WINDOW IS NEVER BUILT TWICE FOR ONE ENTRY (lane layout-stopped-window r2): every caller hands entries this page has
+      // not built; one another door built while the reads above were out (an overlapping replay — a refusal's reconcile, a
+      // switch back) stands — a second build would re-key over it in wm.windows and orphan the first one's element
+      if (ws.winId && this.app.wm.windows.has(String(ws.winId))) continue;
       if (ws.type === 'terminal') {
         const backend = ws.backend || ws.openSpec?.backend || 'claude';
         const backendSessionId = ws.backendSessionId || ws.claudeSessionId || ws.openSpec?.backendSessionId;
@@ -1362,17 +1370,17 @@ class LayoutManager {
             (s.backendSessionId || s.sessionId) === backendSessionId && (s.backend || 'claude') === backend
           );
           if (stoppedMatch) {
-            const rOpts = { backend, backendSessionId, hostId: ws.openSpec?.hostId || undefined };
+            const rOpts = { backend, backendSessionId, hostId: hostOf(ws) || undefined };
             const viewWin = this.app.viewSession(stoppedMatch.sessionId, stoppedMatch.cwd, customName || stoppedMatch.name || savedWindowName(ws) || 'Session', rOpts);
             if (viewWin) applyPosition(viewWin, ws);
             collectStopped(stoppedMatch.sessionId, stoppedMatch.cwd, customName || stoppedMatch.name || savedWindowName(ws) || 'Session', rOpts);
-          } else if (ws.openSpec?.hostId) {
+          } else if (hostOf(ws)) {
             // REMOTE session: /api/sessions is LOCAL discovery only, so a
             // remote session can never stoppedMatch — restore it view-only
             // from the openSpec identity (viewSession is host-capable and
             // prefetches the transcript); dropping it silently lost the
             // window on every restore (audit 2.192.0)
-            const rOpts = { backend, backendSessionId, hostId: ws.openSpec.hostId };
+            const rOpts = { backend, backendSessionId, hostId: hostOf(ws) }; // the recipe's host, else the entry's own (a born / carried name — r2)
             const viewWin = this.app.viewSession(backendSessionId, cwd, customName || savedWindowName(ws) || 'Session', rOpts);
             if (viewWin) applyPosition(viewWin, ws);
             collectStopped(backendSessionId, cwd, customName || savedWindowName(ws) || 'Session', rOpts);
@@ -1408,17 +1416,17 @@ class LayoutManager {
             (s.backendSessionId || s.sessionId) === backendSessionId && (s.backend || 'claude') === backend
           );
           if (stoppedMatch) {
-            const rOpts = { backend, backendSessionId, hostId: ws.openSpec?.hostId || undefined };
+            const rOpts = { backend, backendSessionId, hostId: hostOf(ws) || undefined };
             const viewWin = this.app.viewSession(stoppedMatch.sessionId, stoppedMatch.cwd, customName || stoppedMatch.name || savedWindowName(ws) || 'Session', rOpts);
             if (viewWin) applyPosition(viewWin, ws);
             collectStopped(stoppedMatch.sessionId, stoppedMatch.cwd, customName || stoppedMatch.name || savedWindowName(ws) || 'Session', rOpts);
-          } else if (ws.openSpec?.hostId) {
+          } else if (hostOf(ws)) {
             // REMOTE session: /api/sessions is LOCAL discovery only, so a
             // remote session can never stoppedMatch — restore it view-only
             // from the openSpec identity (viewSession is host-capable and
             // prefetches the transcript); dropping it silently lost the
             // window on every restore (audit 2.192.0)
-            const rOpts = { backend, backendSessionId, hostId: ws.openSpec.hostId };
+            const rOpts = { backend, backendSessionId, hostId: hostOf(ws) }; // the recipe's host, else the entry's own (a born / carried name — r2)
             const viewWin = this.app.viewSession(backendSessionId, cwd, customName || savedWindowName(ws) || 'Session', rOpts);
             if (viewWin) applyPosition(viewWin, ws);
             collectStopped(backendSessionId, cwd, customName || savedWindowName(ws) || 'Session', rOpts);
@@ -1858,7 +1866,7 @@ class LayoutManager {
               this.app.resumeSession(stoppedMatch.sessionId, stoppedMatch.cwd, customName || stoppedMatch.name, {
                 backend,
                 backendSessionId,
-                hostId: ws.openSpec?.hostId || undefined, // remote sessions resume ON their host
+                hostId: hostOf(ws) || undefined, // remote sessions resume ON their host
               });
               // resumeSession creates window asynchronously; find it after a delay
               const capturedWs = ws;

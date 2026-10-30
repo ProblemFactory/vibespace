@@ -31,6 +31,13 @@
 //      other desktops as they are now, 'layout-restored' told, the forced point names it; the 06:50 point's 个人 (twelve) restored
 //      on a hub whose sessions are stopped builds twelve windows, not 0; the dialog's per-desktop doors and every new word in zh + ja
 //   §5 CONTROL: the server's keepNames taken out of the handler ⇒ §1's write is stored nameless (RED)
+//   §6 ROUND 2 (the r1 acceptance, each RED on 77dc65619): ① a replay is idempotent — two replays of a desktop's spec-less session
+//      entries 50 ms apart (the reads still out) build each window ONCE, nothing outside wm.windows; the restore's own belt too
+//      (two overlapping restores); ② the host rides with the name (the CS-separation law) — a resume window's birth name and a
+//      carried name keep {backend, backendSessionId, hostId} as one unit, the server's write stores it, a restore views it ON
+//      its host, a placeholder names its host and its press resumes there, a live row's recipe keeps its host (and never its
+//      display cwd); §3 (③ ④) the dead socket's meta is kept FIRST (atomic, the one delete road) and its transcript looked
+//      for OFF the loop (no harness locate on the main thread), a «no transcript» deleting it once answered
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -73,7 +80,8 @@ globalThis.getComputedStyle = () => ({ getPropertyValue: () => '' });
 Object.defineProperty(globalThis, 'navigator', { value: { language: 'en', userAgent: 'node' }, configurable: true });
 globalThis.requestAnimationFrame = (fn) => setTimeout(fn, 0); globalThis.cancelAnimationFrame = (id) => clearTimeout(id);
 const answers = { '/api/active': { sessions: [] }, '/api/sessions': { sessions: [] } }; // a hub whose every session is stopped, no transcript of them here
-globalThis.fetch = async (url) => ({ ok: true, json: async () => JSON.parse(J(answers[String(url).split('?')[0]] || {})) });
+const delays = {}; // a read still out (r2 ①: a second door fires while the first one's reads are out)
+globalThis.fetch = async (url) => { const k = String(url).split('?')[0]; if (delays[k]) await tick(delays[k]); return { ok: true, json: async () => JSON.parse(J(answers[k] || {})) }; };
 
 // ── the measured shapes, invented words ──
 const GB = (i) => ({ left: (i % 4) / 4, top: Math.floor(i / 4) / 3, width: 0.25, height: 1 / 3 });
@@ -363,20 +371,33 @@ await section('§3 A DEAD LOCAL SESSION IS A STOPPED SESSION — the real boot-r
     const shell = add(3, { name: 'shell', cwd, backend: 'shell', mode: 'terminal' });
     const pdir = path.join(home, '.claude', 'projects', SS.cwdToProjectDir(cwd)); fs.mkdirSync(pdir, { recursive: true });
     fs.writeFileSync(path.join(pdir, CID(0) + '.jsonl'), J({ type: 'user', sessionId: CID(0), cwd, timestamp: '2026-10-30T09:00:00.000Z', message: { role: 'user', content: 'hello' } }) + '\n');
-    const lines = [];
+    const lines = [], deleted = [];
     const meta = (s) => { try { return JSON.parse(fs.readFileSync(path.join(META, s + '.json'), 'utf8')); } catch { return {}; } };
+    // r2 ③: the boot's loop never walks a transcript store — every harness locate made on the MAIN thread is counted (the
+    // transcript worker has its own module instance)
+    const CL = require(path.join(REPO, 'src/harnesses')).get('claude');
+    const locate0 = CL.store.locate; let mainLocates = 0;
+    CL.store.locate = (...a) => { mainLocates++; return locate0(...a); };
     const api = BRm.create({ rootDir: d, PORT: 0, BUFFERS_DIR: BUF, META_DIR: META, SOCKETS_DIR: SOCK, DTACH_CMD: 'dtach', NODE_CMD: process.execPath, CHAT_WRAPPER: '',
       activeSessions: new Map(), sessionCounterRef: { value: 0 }, attachToDtach: () => {}, setupSessionPty: () => {},
-      readSessionMeta: meta, writeSessionMeta: (s, m) => fs.writeFileSync(path.join(META, s + '.json'), J(m)), deleteSessionMeta: (s) => { try { fs.unlinkSync(path.join(META, s + '.json')); } catch {} },
+      readSessionMeta: meta, writeSessionMeta: (s, m) => fs.writeFileSync(path.join(META, s + '.json'), J(m)), deleteSessionMeta: (s) => { deleted.push(s); try { fs.unlinkSync(path.join(META, s + '.json')); } catch {} },
       broadcastToSession: () => {}, broadcastActiveSessions: () => {}, refreshWebuiPids: () => {}, sbNoteServerOp: () => {}, getHosts: () => null, getDialBridge: () => null, note: () => {} });
     console.log = (...a) => lines.push(a.join(' ')); console.warn = (...a) => lines.push(a.join(' '));
-    try { await api.probeSockets(); await api.restoreSessions(); } finally { console.log = REAL.log; console.warn = REAL.warn; }
+    let syncLocates = -1, early = null;
+    try {
+      await api.probeSockets(); await api.restoreSessions();
+      syncLocates = mainLocates; early = fs.existsSync(path.join(META, noT + '.json.stopped'));
+      await api.stoppedSettled?.(); // the kept metas' transcript answers (off the loop)
+    } finally { console.log = REAL.log; console.warn = REAL.warn; CL.store.locate = locate0; }
+    ok(syncLocates === 0 && mainLocates === 0, `§3 ③ the boot walks NO transcript store on its loop — 0 harness locates on the main thread (77dc65619: ${2} — one sync projects scan / rollout walk per dead socket; here ${mainLocates})`);
+    ok(deleted.includes(withT) && deleted.includes(noT) && !fs.readdirSync(META).some((f) => f.endsWith('.tmp')), '§3 ④ a kept meta\'s live .json goes through the ONE delete road (deleteSessionMeta — its tombstone stops a straggler writer resurrecting it), the stopped copy written tmp + rename (no .tmp left)', { deleted, files: fs.readdirSync(META) });
+    ok(early === true, '§3 ③ a conversation\'s meta is kept FIRST — the «no transcript» answer, not the boot\'s loop, deletes it', { early });
     const kept = path.join(META, withT + '.json.stopped');
     const k = fs.existsSync(kept) ? JSON.parse(fs.readFileSync(kept, 'utf8')) : null;
     ok(lines.filter((l) => /✗ Dead socket: cw-/.test(l)).length === 3 && [withT, noT, shell].every((s) => !fs.existsSync(path.join(SOCK, s))), '§3 the three dead sockets are retired (the Dead line, the socket gone)', lines.filter((l) => /Dead|meta/.test(l)));
     ok(k && k.name === 'Ledger' && k.claudeSessionId === CID(0) && k.accountId === 'acct-x' && J(k.taskIds) === J(['T-1']) && typeof k.stoppedAt === 'number' && !fs.existsSync(path.join(META, withT + '.json')), '§3 a claude session whose transcript exists KEEPS its meta as STOPPED (<sock>.json.stopped, stoppedAt; its name, account, groups kept) — out of every live reader\'s *.json scan (2.369.363 deleted it)', { k, json: fs.existsSync(path.join(META, withT + '.json')) });
-    ok(!fs.existsSync(path.join(META, noT + '.json')) && !fs.existsSync(path.join(META, noT + '.json.stopped')) && !fs.existsSync(path.join(META, shell + '.json')) && !fs.existsSync(path.join(META, shell + '.json.stopped')), '§3 one with NO transcript, and a shell, are deleted as before');
-    ok(lines.some((l) => /local session meta kept as stopped \(claude c0ffee00…: its transcript is the record\)/.test(l)), '§3 the journal says which meta was kept and why', lines.filter((l) => /↳/.test(l)));
+    ok(!fs.existsSync(path.join(META, noT + '.json')) && !fs.existsSync(path.join(META, noT + '.json.stopped')) && !fs.existsSync(path.join(META, shell + '.json')) && !fs.existsSync(path.join(META, shell + '.json.stopped')), '§3 one with NO transcript (once its harness answered, off the loop), and a shell (at once), are deleted as before', fs.readdirSync(META));
+    ok(lines.some((l) => /local session meta kept as stopped \(claude c0ffee00…: its transcript is looked for off the loop\)/.test(l)) && lines.some((l) => new RegExp(noT + ': no transcript — its stopped meta deleted').test(l)), '§3 the journal says which meta was kept, and which one its answer deleted', lines.filter((l) => /↳/.test(l)));
     // what the SIDEBAR shows: the claude store's discovery lists the conversation from its TRANSCRIPT — the meta is not read
     const H = require(path.join(REPO, 'src/harnesses')).get('claude');
     const rows = await H.store.discover({ activeSessions: new Map(), webuiPids: new Map() });
@@ -427,6 +448,78 @@ await section('§4 THE DOOR TO RECOVER — one desktop restored alone (the real 
   const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
   const keys = ['Session stopped — click to resume', 'Session unavailable', 'Press a desktop to restore it alone — your other desktops stay as they are now.', 'Restore only “{desktop}”', 'Restore only “{desktop}” as it was then? Your other desktops stay as they are now; the current layout becomes a rollback point too, so this is undoable.', '“{desktop}” restored — reloading…'];
   ok(keys.every((k) => zh.includes(J(k) + ':') && ja.includes(J(k) + ':')) && zh.includes('"Session stopped — click to resume": "会话已停止 — 点击恢复"') && zh.includes('"Session unavailable": "会话不可用"'), '§4 every new word has a zh AND a ja entry (会话已停止 — 点击恢复 / 会话不可用)', keys.filter((k) => !zh.includes(J(k) + ':') || !ja.includes(J(k) + ':')));
+});
+
+await section('§6 r2 ① A REPLAY IS IDEMPOTENT — two replays 50 ms apart build each window once, nothing outside wm.windows', async () => {
+  answers['/api/sessions'] = { sessions: [0, 1, 2].map((i) => ({ sessionId: CID(i), backendSessionId: CID(i), backend: 'claude', cwd: CWD(i), name: NAMES[i], status: 'stopped' })) };
+  answers['/api/active'] = { sessions: [] };
+  const ent = () => [0, 1, 2].map((i) => { const { openSpec, serverSessionId, ...e } = named(i); return e; }); // a carried name's shape: a conversation, no recipe
+  const counted = (W) => { const made = []; let n = 0; W.app.viewSession = (sid, cwd, name, o) => { const w = W.mkWin('view-' + (++n), W.dm.activeDesktopId, { type: 'chat', title: `${name} — ${cwd}`, _openSpec: { action: 'viewSession', sessionId: sid, backend: o && o.backend, backendSessionId: sid, cwd, name } }); made.push(w); return w; }; return made; };
+  const judge = (W, made) => { const inMap = new Set(W.wins.values()); return { made: made.length, inMap: made.filter((w) => inMap.has(w)).length, orphans: made.filter((w) => !inMap.has(w)).map((w) => w.id), ids: [0, 1, 2].map((i) => W.wins.get('win-old-' + i)?._openSpec?.action || null) }; };
+  delays['/api/sessions'] = 150;
+  try {
+    // the door: _replayMissing (a refusal's reconcile, a switch back) — the second within the first one's reads
+    const W = world({ records: { 'desk-w': [], 'desk-p': ent(), 'desk-r': [] }, active: 'desk-p' });
+    const made = counted(W);
+    const r1 = W.dm._replayMissing('desk-p', W.dm._savedStates.get('desk-p'));
+    await tick(50);
+    const r2 = W.dm._replayMissing('desk-p', W.dm._savedStates.get('desk-p'));
+    await tick(400);
+    const j = judge(W, made);
+    ok(j.made === 3 && j.inMap === 3 && !j.orphans.length && j.ids.every((a) => a === 'viewSession') && r1 === 3 && r2 === 0, `§6 ① two replays 50 ms apart ⇒ THREE windows, zero orphans; the second leaves the three to the first (77dc65619: six built, three orphaned outside wm.windows)`, { r1, r2, ...j });
+    // the restore's own belt: two overlapping restores of the same entries (the door's guard not asked) — an entry built
+    // meanwhile by another door is never built again
+    const V = world({ records: { 'desk-w': [], 'desk-p': [], 'desk-r': [] }, active: 'desk-p' });
+    const made2 = counted(V);
+    const a = V.lm.restoreState({ windows: ent() });
+    await tick(50);
+    const b = V.lm.restoreState({ windows: ent() });
+    await Promise.all([a, b]); await tick(20);
+    const j2 = judge(V, made2);
+    ok(j2.made === 3 && !j2.orphans.length && j2.ids.every((x) => x === 'viewSession'), '§6 ① restoreState\'s belt: two overlapping restores of the same three entries build three windows — the later one skips what the earlier built (77dc65619: six, three orphaned)', j2);
+  } finally { delays['/api/sessions'] = 0; answers['/api/sessions'] = { sessions: [] }; }
+});
+
+await section('§6 r2 ② THE HOST RIDES WITH THE NAME — {backend, backendSessionId, hostId} as one unit (the CS-separation law)', async () => {
+  const DR = require(MODEL);
+  answers['/api/sessions'] = { sessions: [] }; answers['/api/active'] = { sessions: [] };
+  const old = named(8, { openSpec: { ...named(8).openSpec, hostId: 'host-a' } }); // a REMOTE conversation's entry before the outage
+  // born: the resume window, captured before its create answered (session-lifecycle createSession's `_conversation`)
+  const W = world({ records: { 'desk-w': [], 'desk-p': [], 'desk-r': [] }, active: 'desk-p' });
+  const born = W.mkWin('win-born', 'desk-p', { type: 'chat', title: NAMES[8], _conversation: { backend: 'claude', backendSessionId: CID(8), cwd: CWD(8), hostId: 'host-a' } });
+  const cap = W.lm.captureWin(born);
+  ok(cap && cap.backendSessionId === CID(8) && cap.hostId === 'host-a' && DR.hostOf(cap) === 'host-a', '§6 ② born: a remote resume\'s window, captured before its create answers, names its conversation WITH its host (77dc65619: no host)', cap && { bsid: cap.backendSessionId, hostId: cap.hostId ?? null });
+  // carried: PURE carryName / keepIdentity, and the REAL server write (the 09:18:22 shape, one of the eleven remote)
+  const carried = DR.carryName(old, bare(8));
+  ok(carried.backendSessionId === CID(8) && carried.hostId === 'host-a' && !carried.openSpec && !carried.serverSessionId && DR.hostOf(carried) === 'host-a', '§6 ② carried: carryName takes the old entry\'s host with its conversation (its recipe\'s hostId as the entry\'s own) — never its openSpec or server session (77dc65619: no host)', carried);
+  const same = DR.keepIdentity(carried, { ...bare(8) }), other = DR.keepIdentity(carried, { ...bare(8), backendSessionId: CID(9) });
+  ok(same.hostId === 'host-a' && same.backendSessionId === CID(8) && other.hostId === undefined, '§6 ② keepIdentity carries the host WITH the conversation it names — never onto another conversation', { same: same.hostId, other: other.hostId ?? null });
+  const seed = P_BEFORE().map((w, i) => (i === 8 ? old : w));
+  const H = hub(loadHandler(), DOC(seed)); const S = H.connect();
+  await S.send({ ...W0(), state: { windows: P_SENT(), grid: null } });
+  const st = H.layouts().desktops['desk-p'].autoSave.windows.find((w) => w.backendSessionId === CID(8) && !w.openSpec);
+  ok(st && st.hostId === 'host-a' && DR.hostOf(st) === 'host-a', '§6 ② the server\'s write stores the carried entry WITH its host (the record keeps hostId through the write)', st && { winId: st.winId, hostId: st.hostId ?? null });
+  // restored: no local transcript (a remote conversation never stoppedMatches LOCAL discovery) ⇒ viewed ON its host, as the old entry is
+  let viewed = null;
+  W.app.viewSession = (sid, cwd, name, o) => { viewed = o; return W.mkWin('view-r', 'desk-p', { type: 'chat' }); };
+  await W.lm.restoreState({ windows: [carried] });
+  ok(viewed && viewed.hostId === 'host-a' && !W.wins.get('win-new-8')?._placeholderOf, '§6 ② restored: the carried entry is viewed read-only ON its host, the old entry\'s road (77dc65619: a LOCAL «stopped» tile)', viewed);
+  // a placeholder (a remote apply, no live row): names its host; the press resumes on that host; its capture keeps the host
+  const V = world({ records: { 'desk-w': [], 'desk-p': [], 'desk-r': [] }, active: 'desk-p', extra: { _hostLabel: (h) => (h === 'host-a' ? 'gpu-box' : h) } });
+  V.lm._applyRemoteState({ windows: [carried] }, { writer: 'desktop' });
+  const ph = V.wins.get('win-new-8');
+  const words = wordsOf(ph);
+  ok(ph?._placeholderOf && tileOf(ph)?.dataset?.host === 'host-a' && words[0] === `${NAMES[8]} · gpu-box` && words[1] === 'Session stopped — click to resume', '§6 ② a remote conversation\'s placeholder names its machine — «<title> · <host>» over «Session stopped — click to resume» (77dc65619: no host)', { words, host: tileOf(ph)?.dataset?.host ?? null });
+  const pc = ph && V.lm.captureWin(ph);
+  ok(pc && pc.hostId === 'host-a' && pc.backendSessionId === CID(8), '§6 ② the placeholder\'s capture keeps the host (the record keeps it through every write)', pc && { hostId: pc.hostId ?? null });
+  tileOf(ph)?.onclick?.();
+  const call = V.resumed.at(-1);
+  ok(call && call[0] === CID(8) && call[3] && call[3].hostId === 'host-a', '§6 ② the press resumes the conversation ON that host — resumeSession(…, {hostId}) (77dc65619: hostId undefined ⇒ this hub)', call && { cid: call[0], hostId: call[3] && call[3].hostId });
+  // a live row's recipe (the conversation runs again on its host): the row's host, never its display cwd «host: /path»
+  V.app.sidebar._allSessions = [{ webuiId: 'sess-r8', backend: 'claude', backendSessionId: CID(8), sessionId: CID(8), host: 'host-a', hostName: 'gpu-box', cwd: 'gpu-box: ' + CWD(8), status: 'live' }];
+  const spec = V.lm._liveSpecOf(carried), specNoCwd = V.lm._liveSpecOf({ ...carried, cwd: '' });
+  const elsewhere = V.lm._liveSpecOf({ ...carried, hostId: 'host-b' });
+  ok(spec && spec.serverId === 'sess-r8' && spec.hostId === 'host-a' && spec.cwd === CWD(8) && specNoCwd && specNoCwd.cwd === '' && elsewhere === null, '§6 ② a live row\'s attach recipe keeps the row\'s host and never its display cwd; a row on ANOTHER host is not this entry\'s', { spec, specNoCwd: specNoCwd && specNoCwd.cwd, elsewhere });
 });
 
 await section('§5 CONTROL — the server\'s keepNames taken out of the handler', async () => {

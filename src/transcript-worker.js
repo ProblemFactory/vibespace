@@ -86,6 +86,15 @@ function runOp(op, payload = {}) {
       for (const p of listOpenCodexRolloutPaths({ sessionsDir: CODEX_SESSIONS_DIR })) { const t = codexThreadIdOf(p); if (t) ids.add(t); }
       return { result: [...ids] };
     }
+    case 'locate': {
+      // lane layout-stopped-window r2: does a conversation have a transcript HERE — its harness descriptor's own
+      // `store.locate(id, cwd)` (claude: the path rule, then the projects scan; codex: the rollout walk), run where a walk may
+      // take its time (boot-restore's dead-socket retire asks it). On the main thread (the pool down) it answers null =
+      // unknown: never a sync walk on the loop.
+      if (isMainThread) return { result: null };
+      const h = require('./harnesses').list().find((x) => x && x.id === payload.backend);
+      return { result: !!(h && h.store && typeof h.store.locate === 'function' && h.store.locate(payload.id, payload.cwd || '')) };
+    }
     case '__sleep': { // test hook (deadline/restart path)
       const until = Date.now() + (payload.ms || 1000);
       while (Date.now() < until) { /* burn */ }
