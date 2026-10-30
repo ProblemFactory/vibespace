@@ -167,6 +167,32 @@ console.log('⑤b THE ATTENTION DOCK\'s actions — every chat row stands in the
   { const c2 = census(ROWSRC, CSS.replace('.ut-exit-answer, .ut-reconnect-row, .ut-app-card, ', '')); ok(c2.hidden.includes('ut-exit-answer'), 'RED: the strip\'s whitelist without the answer row (Allow / Deny / Approve) names it', c2.hidden); }
 }
 
+// ── ⑤c ────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+// lane needs-card-tail r10 ADDENDUM (the owner 2026-10-30: «有权限申请的时候窗口应该触发闪烁和 inbox 附近的弹窗»): a NEW item that waits
+// for the owner announces itself (the window flashes, a card at the For-you button). Its rows: every registry row whose item is a
+// need announces (a vault run, an exit / hub-act ask, a grant, a question …); a notice, a cleared item, a muted band never; and
+// the card's clock follows the item's own deadline (expiresAt) — «N s left», «N min left», «expired» (late, never gone).
+console.log('⑤c THE ANNOUNCE\'s rows — every need announces itself, a notice / a cleared item / a muted band never; the card\'s clock is the item\'s deadline');
+{
+  const has = typeof FA.announceWorthy === 'function' && typeof FA.announceWords === 'function';
+  ok(has, 'PURE announceWorthy + announceWords exist (src/foryou-actions.js — the arrival announce\'s rows)');
+  if (has) {
+    const items = FA.ROWS.map((r, k) => ({ id: 'ut-a' + String(k).padStart(9, '0'), status: 'open', kind: 'action', origin: 'agent', text: r.type, createdAt: k + 1, sessionKey: 'claude:c0ffee', action: { type: r.type } }));
+    const needs = items.filter((i) => FA.needOf(i)), silent = items.filter((i) => !FA.needOf(i));
+    const bad = needs.filter((i) => !FA.announceWorthy(i)).map((i) => i.action.type);
+    ok(needs.length >= 20 && !bad.length, `every row whose item is a need announces itself (${needs.length} rows — ${needs.filter((i) => FA.ROW_OF?.[i.action.type]?.waits).length} of them hold an agent's call)`, bad);
+    ok(silent.every((i) => !FA.announceWorthy(i)), `…and a row that is no need never does (${silent.length}: ${silent.map((i) => i.action.type).join(', ') || 'none'})`);
+    const one = needs[0];
+    ok(!FA.announceWorthy({ ...one, kind: 'notice' }) && !FA.announceWorthy({ ...one, clearedAt: 5 }) && !FA.announceWorthy({ ...one, status: 'done' }) && !FA.announceWorthy(one, { muted: true }) && !FA.announceWorthy(null), 'never: a notice, a cleared item, one already answered, a band the owner switched off or 搁置 (muted), nothing');
+    const T0 = 1_800_000_000_000, W2 = (o, now) => FA.announceWords({ ...one, ...o }, { who: 'ops', what: 'run python3', now });
+    const a = W2({ expiresAt: T0 + 42e3 }, T0), b = W2({ expiresAt: T0 + 5 * 60e3 }, T0), c = W2({ expiresAt: T0 - 1 }, T0), d = W2({ status: 'done', resolvedBy: 'ask-expired' }, T0), e = W2({}, T0);
+    ok(a.clock === '42 s left' && a.left === 42 && !a.expired && b.clock === '5 min left' && c.expired && c.clock === 'expired' && d.expired && d.clock === 'expired' && e.clock === '' && e.left === null && a.who === 'ops' && a.what === 'run python3',
+      `the clock is the item's deadline: «${a.clock}» · «${b.clock}» · past it «${c.clock}» · resolved as expired «${d.clock}» · none «${e.clock}»`, { a, b, c, d, e });
+    const zh = { '{n} s left': '还剩 {n} 秒', expired: '已过期' }, tz = (k, p) => (zh[k] || k).replace(/\{(\w+)\}/g, (_, x) => (p && p[x] != null ? p[x] : ''));
+    ok(FA.announceWords({ ...one, expiresAt: T0 + 42e3 }, { now: T0, t: tz }).clock === '还剩 42 秒', 'the client\'s t() words the clock (zh: «还剩 42 秒»)');
+  }
+}
+
 // ── ⑥ ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 console.log('⑥ bandDoorsOf\'s types are rows; every field from its closed set; the CLI line each row declares');
 {

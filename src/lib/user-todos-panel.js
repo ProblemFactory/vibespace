@@ -28,13 +28,14 @@
 // it (mobile-back.js: HOME = the page while the list has rows, else the conversation list); ☰ still opens the list.
 import { t, tc } from './i18n.js';
 import { SHEET_ROOTS, personDialogOf } from './form-yield.js'; // PURE (lane dialog-yield r2): the ONE dialog predicate set
-import { rowOf as attentionRow, toastWorthy, PARKED, FOLD_HEAD, settingsPolicy, bandKey, BANDS, CAP_KEY } from '../attention-model.js'; // PURE: THE attention list (lane foryou-folds) — an arrival's band (the toast rule), the 搁置 band, the fold's words; the owner's switches + cap (lane attention-predicate-shared, settingsPolicy — their ONE reader)
+import { rowOf as attentionRow, toastWorthy, policyOf, PARKED, FOLD_HEAD, settingsPolicy, bandKey, BANDS, CAP_KEY } from '../attention-model.js'; // PURE: THE attention list (lane foryou-folds) — an arrival's band (the toast rule), the 搁置 band, the fold's words; the owner's switches + cap (lane attention-predicate-shared, settingsPolicy — their ONE reader)
 import { sortGroups, openLayout, nextLayout, entriesFor, splitNotices, badgeOf, bandLayout, bandEntries, inboxBadgeFor, miniInboxEntries, noticeGroups, noticeChips, noticeFilterFor, tabCounts, NOTICE_FILTER_KEY, HISTORY_SEEN_KEY, noticeReadAll, openCount, sessionMark, firstLine } from './user-todos-layout.js'; // PURE: the append-only order while the popup is open (inc-mtw02kbq-kj96) — the notices' groups and the bands' slots (lane foryou-folds); notices split (2.369.118); notices by origin + the tab counts (B-328d)
 import { inboxModel, tierCounts, actionWords } from './user-todos-actions.js'; // THE client model (§9): the store, the live facts (the running dot + the reply verdict, D1.5/D1.7), the words, every verb — shared with the For-you window
 import { trayWhere } from './user-todos-layout.js'; // lane S3: the new-item toast names the corner the tray sits in on this device
 import { renderRow, patchRow, applyLive, replyBoxEl, reconcileKeyed, agoText as agoTextOf } from './user-todos-row.js'; // THE row renderer (one spelling of a row; keyed patching keeps a reply box alive)
-import { anchorFixedPopup, copyText, createPopover, escHtml, fetchJson, getToastHistory, isTouchDevice, onOutsidePress, showContextMenu, showToast, stripLegacyRecordToasts } from './utils.js';
+import { anchorFixedPopup, copyText, createPopover, escHtml, fetchJson, getToastHistory, isTouchDevice, onOutsidePress, showContextMenu, showToast, stripLegacyRecordToasts, uiScale } from './utils.js';
 import { UI_ICONS } from './icons.js';
+import { announceWorthy, announceWords } from '../foryou-actions.js'; // PURE (lane needs-card-tail r10 addendum): which arrival announces itself, and its card's words + clock
 import { filesCard } from './phone-files.js'; // lane phone-files-door: the 文件 card under the phone page's bands
 import { BACK_DISMISS_EVENT } from './back-guard.js'; // lane mobile-back-guard: the phone's back closes this sheet through hidePopup
 import { pressVerdict, armAfterLayout } from './press-arm.js'; // verify-r6 V1: an Allow counts only once it sat still where it was read
@@ -1271,6 +1272,126 @@ export function installUserTodos(app) {
     }
     return null;
   };
+  // ── THE ANNOUNCE (lane needs-card-tail r10 addendum — the owner 2026-10-30 11:5x PDT: «有权限申请的时候窗口应该触发闪烁和 inbox
+  // 附近的弹窗，有时候我都没发现有个后台任务才申请权限»): an ARRIVAL (the toast rule's own knownIds — a reload announces nothing old)
+  // that waits for the owner (PURE announceWorthy: a need of the registry, never a notice; a band switched off or 搁置 stays quiet)
+  // announces itself ONCE on this client:
+  //  ① the asking window FLASHES — THE existing waiting blink (`window-waiting`: its title bar, its taskbar button, a tab group's
+  //     tab, a hidden desktop's tab), never a second mechanism — until it is SEEN: the blink's own clear (the window touched or
+  //     focused — chat-view _clearWaiting, a tab activated) or the item answered (the blink this set goes; one a turn set stays);
+  //     `window-announce` beside it fills the window's strip count (the attention dock) while an unseen item stands;
+  //  ② a CARD in ONE stack at the For-you button (createPopover ⇒ data-popover: Esc closes it; no outside-press closer — it is
+  //     not in anyone's way; under the phone's top bar there): who asks · what · its clock while it has one; one press opens it
+  //     (THE door, model.jump); one card per item, the newest ANN_SHOWN shown + «N more waiting»; answered anywhere ⇒ gone;
+  //     past its deadline ⇒ «expired», kept a while (a late card); else transient (ANN_MS, held while the pointer is on it);
+  //  ③ the button pulses once (the arrival's ut-blink — the phone's nav button too).
+  const ANN_MS = 20000, ANN_SHOWN = 3;
+  let annStack = null, annTimer = 0;
+  const annCards = new Map(); // item id → { el, until, expiredAt }
+  const annAnchor = () => [btn, mBtn].find((b) => b && b.getClientRects().length > 0) || null;
+  const annWords = (it) => announceWords(it, { who: nameFor(it.sessionKey, [it]), what: wordsOf(it), now: Date.now(), t });
+  const annPlace = () => {
+    if (!annStack || !annStack.isConnected) return;
+    const a = annAnchor(), Z = uiScale(), vw = window.innerWidth, vh = window.innerHeight, pr = annStack.getBoundingClientRect();
+    if (!a) { annStack.style.left = (Math.max(4, (vw - pr.width) / 2) / Z) + 'px'; annStack.style.top = (8 / Z) + 'px'; return; }
+    const r = a.getBoundingClientRect(), up = r.top > vh / 2; // the taskbar at the bottom: above it; the phone's top bar: below it
+    annStack.style.top = (Math.max(4, Math.min(vh - pr.height - 4, up ? r.top - pr.height - 6 : r.bottom + 6)) / Z) + 'px';
+    annStack.style.left = (Math.max(4, Math.min(vw - pr.width - 4, r.right - pr.width)) / Z) + 'px';
+  };
+  const annDrop = (id) => { const c = annCards.get(id); if (c) c.el.remove(); annCards.delete(id); };
+  const annLayout = () => {
+    if (annStack && !annStack.isConnected) { annCards.clear(); annStack = null; } // Esc closed the stack: every card with it
+    if (!annCards.size) { annStack?.remove(); annStack = null; clearInterval(annTimer); annTimer = 0; return; }
+    const order = [...annCards.values()].sort((x, y) => y.filed - x.filed || y.at - x.at); // the newest FILING first (a burst arrives in one snapshot)
+    order.forEach((c, k) => { c.el.hidden = k >= ANN_SHOWN; });
+    const more = annStack.querySelector(':scope > .uta-more'), n = order.length - ANN_SHOWN;
+    more.hidden = n <= 0;
+    if (n > 0) { const w = t('{n} more waiting — open For you', { n }); if (more.textContent !== w) more.textContent = w; }
+    const kids = [...annStack.querySelectorAll(':scope > .uta-card')]; // moved only when the order changed (a card under the pointer stays put)
+    if (kids.length !== order.length || kids.some((e, k) => e !== order[k].el)) for (const c of order) annStack.insertBefore(c.el, more);
+    annPlace();
+  };
+  const annPaint = (c, it) => {
+    const w = annWords(it);
+    for (const [cls, text] of [['uta-who', w.who], ['uta-what', w.what], ['uta-clock', w.clock]]) { const e = c.el.querySelector('.' + cls); if (e.textContent !== text) e.textContent = text; }
+    c.el.querySelector('.uta-clock').hidden = !w.clock;
+    c.el.classList.toggle('uta-expired', w.expired);
+    if (w.expired && !c.expiredAt) { c.expiredAt = Date.now(); c.until = Math.max(c.until, c.expiredAt + ANN_MS); } // a late card stays a while
+  };
+  /** Every snapshot and every second while a card stands: answered elsewhere ⇒ gone; re-worded from the CURRENT record (a
+   *  clear's sentence, the clock); its time up ⇒ gone; and the flashing windows whose items were all answered stop. */
+  const annRefresh = () => {
+    const now = Date.now();
+    for (const [id, c] of [...annCards]) {
+      const it = byId(id);
+      const late = it && it.status !== 'open' && (it.resolvedBy === 'expired' || it.resolvedBy === 'ask-expired');
+      if (!it || (it.status !== 'open' && !late)) { annDrop(id); continue; }
+      annPaint(c, it);
+      if (now > c.until && !c.el.matches(':hover')) annDrop(id);
+    }
+    for (const w of app.wm?.windows?.values?.() || []) {
+      if (!w._annIds) continue;
+      for (const id of [...w._annIds]) if (!todos.open.some((i) => i.id === id)) w._annIds.delete(id);
+      if (!w._annIds.size) annSeen(w, { answered: true });
+    }
+    annLayout();
+  };
+  /** The window SEEN (the blink's own clear) or every item it flashed for answered (`answered`: the blink THIS set goes). */
+  const annSeen = (w, { answered = false } = {}) => {
+    if (answered && w._annOwns && w.element.classList.contains('window-waiting')) { w.element.classList.remove('window-waiting'); w._notifyChanged?.(); }
+    w.element.classList.remove('window-announce');
+    w._annMO?.disconnect(); w._annMO = null; w._annIds = null; w._annOwns = false;
+  };
+  const annFlash = (it) => {
+    for (const w of app.wm?.windows?.values?.() || []) {
+      const keys = keysForWin(w.id);
+      if (!keys || !(keys.includes(it.sessionKey) || (it.about && keys.includes(it.about)))) continue;
+      if (w.element.classList.contains('window-active') && document.hasFocus() && !document.hidden) continue; // in front of the owner: seen
+      if (!w._annIds) {
+        w._annIds = new Set(); w._annOwns = !w.element.classList.contains('window-waiting');
+        // SEEN = the waiting blink's own clear (the window touched or focused, a tab activated) — read off the element itself
+        w._annMO = new MutationObserver(() => { if (!w.element.classList.contains('window-waiting')) annSeen(w); });
+        w._annMO.observe(w.element, { attributes: true, attributeFilter: ['class'] });
+      }
+      w._annIds.add(it.id);
+      w.element.classList.add('window-waiting', 'window-announce');
+      w._notifyChanged?.(); // the taskbar button, a tab group's tab, a hidden desktop's tab
+    }
+  };
+  const annCard = (it) => {
+    if (annCards.has(it.id)) return; // one card per item
+    if (!annStack || !annStack.isConnected) {
+      const a = annAnchor();
+      annStack = createPopover(a || document.body, 'ut-announce', a ? { toggle: false } : { position: 'cursor', x: 8, y: 8, toggle: false });
+      annStack._closeCtl?.abort(); // never closed by a press elsewhere (Esc — data-popover — still closes it)
+      annStack.setAttribute('role', 'status'); annStack.setAttribute('aria-live', 'polite'); annStack.setAttribute('aria-label', t('Waiting for you'));
+      const more = mk('button', 'uta-more'); more.type = 'button'; more.hidden = true;
+      more.onclick = () => { const a2 = annAnchor(); annCards.clear(); annLayout(); if (a2 && popup.classList.contains('hidden')) togglePopup(a2); };
+      annStack.append(more);
+    }
+    const el = mk('div', 'uta-card'); el.dataset.id = it.id;
+    const go = mk('button', 'uta-go'); go.type = 'button'; go.title = t('Open it');
+    const icon = mk('span', 'uta-icon'); icon.innerHTML = UI_ICONS.inbox; icon.setAttribute('aria-hidden', 'true');
+    const txt = mk('span', 'uta-text');
+    txt.append(mk('span', 'uta-who'), mk('span', 'uta-what'), mk('span', 'uta-clock'));
+    go.append(icon, txt);
+    const x = mk('button', 'uta-x'); x.type = 'button'; x.innerHTML = UI_ICONS.close; x.title = t('Dismiss'); x.setAttribute('aria-label', t('Dismiss'));
+    el.append(go, x);
+    // the press keeps the item's ID, never the item (the arrival toast's rule): it opens the LIVE record through THE door
+    const id = it.id;
+    go.onclick = () => { const live = byId(id); annDrop(id); annLayout(); if (live) jump(live.sessionKey, live); };
+    x.onclick = () => { annDrop(id); annLayout(); };
+    const c = { el, at: Date.now(), filed: Number(it.createdAt) || Date.now(), until: Date.now() + ANN_MS, expiredAt: 0 };
+    if (Number(it.expiresAt) > c.at) c.until = Math.max(c.until, Number(it.expiresAt) + ANN_MS);
+    annCards.set(id, c);
+    annPaint(c, it);
+    annLayout();
+    if (!annTimer) annTimer = setInterval(annRefresh, 1000);
+  };
+  const announce = (it) => {
+    annFlash(it); annCard(it);
+    for (const b of [btn, mBtn]) if (b) { b.classList.remove('ut-blink'); void b.offsetWidth; b.classList.add('ut-blink'); } // ③ one pulse
+  };
   const apply = (next) => {
     const prevKnown = knownIds;
     todos = next || { open: [], resolved: [] };
@@ -1283,6 +1404,9 @@ export function installUserTodos(app) {
       const now = Date.now();
       for (const i of todos.open) {
         if (prevKnown.has(i.id)) continue;
+        // lane needs-card-tail r10 addendum: an arrival that WAITS FOR THE OWNER announces itself (above) — the flash, its card
+        const row = attentionRow(i, now);
+        if (announceWorthy(i, { muted: !row || row.band === PARKED || policyOf(attnPolicy()).off.has(row.band) })) { announce(i); continue; }
         // lane foryou-folds (design q-044 §2): only an arrival in band 1 or 2 (urgent, someone waiting) raises a toast and
         // blinks the button — every other one moves a number (39 toasts a day ⇒ about 3)
         if (!toastWorthy(attentionRow(i, now), attnPolicy())) continue; // (the panel's own `rowOf` is a DOM helper — the attention row is imported under its own name; a band switched off never toasts)
@@ -1313,6 +1437,7 @@ export function installUserTodos(app) {
       if (b.textContent !== want) b.textContent = want;
     }
     renderBtn(); renderPanel(); renderMini(); scheduleBadges(); renderHome();
+    annRefresh(); // the announce's cards and flashes follow the store (answered anywhere ⇒ gone; expired ⇒ said)
   };
 
   // THE MODEL'S THREE BROADCASTS (§9 — the subscriptions, the reconnect resync and
