@@ -616,9 +616,12 @@ class UsageHoldRoad {
    *  one's 33 was said only if an item already named it); a set that cannot be read, or whose count the notice store
    *  refused, stays for the next start. A job of the hold's road. r16: NOTHING OF IT IS SAID OR DECIDED BEFORE THE HOLD IS
    *  READ WHOLE — the load job runs it after `_holdRead` (a hold that cannot be read whole never reaches it: the older set
-   *  kept as it is, unread, unmarked, read again with the hold), before the live set's own decisions (r10's order: its count
-   *  before this one's). r15 queued only its decisions (`later`) and said its count first — at every retry of a hold that
-   *  kept failing: an owner-closed month item reopened each time. */
+   *  kept as it is, unread, unmarked, read again with the hold). r15 queued only its decisions (`later`) and said its count
+   *  first — at every retry of a hold that kept failing: an owner-closed month item reopened each time. r17: AFTER THE LIVE
+   *  GENERATION IS DECIDED (`_holdLoad`: its set judged first — the last _set-aside slot is the live set's; a live set that
+   *  cannot be moved fails the hold before an older set is said or moved). r16 ran it before `_holdLoad`: an older set took
+   *  the last slot, the live set could not be moved, and the month waited beside a «nothing waits» notice. Its count is
+   *  still said before this one's (r10's order: the live count is said once the load job ends, `_afterHoldLoad`). */
   async _dropStale(h) {
     const key = h.key, gens = this._dropFiles.get(key) || [];
     if (!gens.length) return;
@@ -842,11 +845,12 @@ class UsageHoldRoad {
     if (!onDisk) { this._holdJob(h, () => this._asidePass(h, () => this._dropStale(h))); return h; }
     h.loading = this._holdJob(h, () => this._asidePass(h, async () => {
       for (const q of old) await this._heldUnlink(path.join(this.heldDir, `${key}.${q}.ndjson`));
-      // r16: READ WHOLE FIRST (or it throws, naming what blocks, having said and decided nothing), then each older
-      // generation's set read, said and gone (r10: before this one's), then this generation's decisions
+      // r16: READ WHOLE FIRST (or it throws, naming what blocks, having said and decided nothing). r17: then THIS
+      // generation's decisions (its set's slot first), then each older generation's set read, said and gone (r10: its
+      // count before this one's — said once the job ends)
       const r = await this._holdRead(h, seqs);
-      await this._dropStale(h);
       await this._holdLoad(h, seqs, r); // r9: a set-only generation too (its count)
+      await this._dropStale(h);
     })).then(() => {
       h.loading = null;
       this._readBack(key, h);
@@ -896,11 +900,15 @@ class UsageHoldRoad {
    *  as it is, unmarked; a set the disk REFUSED blocks nothing (set aside once the hold reads whole: its own notice), so
    *  beside a refused segment the segment is named (r15 threw the set's error first: the owner fixed the file named and
    *  the month still waited). Read whole with the set alone in the way, it is judged as r14 (`_setUnread`: kept, marked
-   *  the first time an EIO-like error meets it) → {df, s, setErr, read}. */
+   *  the first time an EIO-like error meets it) → {df, s, setErr, read}. r17: A SET THAT READS LOSES ITS MARK AT ONCE,
+   *  whatever its segments do — a mark is a fact about the SET's reads (its last one failed), never the hold's: r16 unmarked
+   *  it only once the hold read whole, so a segment that failed the hold kept the mark of a set that had read, and the
+   *  set's next EIO was taken for its «second start» (set aside unread, its count not known). */
   async _holdRead(h, seqs) {
     const df = this._dropFile(h.key, h.gen);
     let s, setErr = null;
     try { s = await this._readSet(df, h.gone); } catch (e) { setErr = e; h.gone.clear(); s = { gone: h.gone, retired: false, checked: false, below: 0, end: 0, lineEnd: 0, torn: false, cut: 0, bad: [], records: 0 }; } // r15: judged once the hold is read whole; what a read cut short had added cleared
+    if (!setErr && this._marked(df)) await this._unmark(df); // r14: read — its mark of a failed read goes (r17: now, as r15)
     h.below = Math.max(h.below, s.below); if (s.retired) h.retired = true;
     h.goneBytes = s.end; h.goneTorn = s.end > s.lineEnd; // a crash mid-append: the next line starts on a line of its own
     const live = seqs.filter((q) => q >= h.below);
@@ -940,10 +948,10 @@ class UsageHoldRoad {
   }
   /** r16: the hold read whole (`_holdRead`'s `r`) — DECIDED (r15's `_holdLoad`, its second half): a retired generation's
    *  files unlinked unread; else its set judged (`_judgeLive`: a set the disk refused is set aside unread and the hold goes
-   *  on), its lines that are no record set aside (`_setAsideLive`), the segments' own unlinks, what is held. */
+   *  on), its lines that are no record set aside (`_setAsideLive`), the segments' own unlinks, what is held. r17: before
+   *  any older generation's set (`_dropStale` runs after it); the mark of a set that read went with its read. */
   async _holdLoad(h, seqs, { df, s, setErr, read }) {
     const checked = s.checked; // r9: `checked` — every dropped row checked (r10: `_readSet`, the one parse)
-    if (!setErr && this._marked(df)) await this._unmark(df); // r14: read — its mark of a failed read goes
     // r7: a RETIRED generation (its end recorded; an unlink failed — EBUSY): every file of it unlinked unread, nothing held,
     // nothing counted (its count was said before it retired); r8: its set stays while one of its segments does
     if (h.retired) {

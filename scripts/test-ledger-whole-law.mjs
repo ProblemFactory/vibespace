@@ -122,6 +122,11 @@
 //     an older set is said before the hold is read whole (an owner-closed month item stays closed through every retry);
 //     every file set aside in one read is named, the live one first, bounded
 //   ㉕ (1, the journal of the failed read) PINS NOW: a refused set beside a segment whose read passes names the SEGMENT
+// ROUND 17 (the acceptance of 14f0647b — ㉗ fails on 14f0647b):
+//   ㉗ a set that reads loses its mark at once — a segment that fails the hold keeps no mark of a set that read (its next
+//     EIO is its first start again: kept, never set aside as «the disk's answer»), across starts and in one process; the
+//     live generation is decided first — the last _set-aside slot is the live set's, and a live set that cannot be moved
+//     fails the hold before anything of an older set is decided or said
 // In-process, no server; sparse files for every big shape (fs.truncateSync / a write at an offset — no disk, no load).
 import fs from 'node:fs';
 import os from 'node:os';
@@ -2830,6 +2835,154 @@ await leg('㉖', async () => {
     ok(good,
       `㉖ (3) every file set aside in one read is named — the live set and an older one both refused: ${got.items} set-aside item(s), «${got.text.slice(0, 48)}…», the live one ${at2 >= 0 ? `named (line ${at2 + 1})` : 'NOT named'}, the older one ${at0 >= 0 ? `named (line ${at0 + 1})` : 'NOT named'}, ${got.asides} in _set-aside · PURE: six files ⇒ ${pure.sixWhat} named + «${pure.sixMore.slice(0, 30)}…»; one file ⇒ ${pure.oneSame ? 'its words as before' : 'OTHER words for a list of one'}; five blockers ⇒ «${pure.rdAlso.slice(0, 60)}…» (f3027952: only the live one named; b553b51b: only the older one)`,
       { got, pure });
+  }
+});
+// lane ledger-dedup-law r17 (the acceptance of 14f0647b — ㉗ fails on 14f0647b): A SET THAT READS LOSES ITS MARK AT ONCE · THE
+// LIVE GENERATION IS DECIDED FIRST
+await leg('㉗', async () => {
+  console.log('㉗ A SET THAT READS LOSES ITS MARK AT ONCE (a fact about the SET\'s reads, never the hold\'s) · THE LIVE GENERATION IS DECIDED FIRST — the last _set-aside slot is the live set\'s; nothing of an older set is decided before it');
+  const RD = require(REPO + '/src/usage-hold-road.js'), MAX = RD.SET_ASIDE_MAX || 64;
+  const seams = (uh) => { uh.shapeMaxBytes = 64 * KiB; uh.holdListRetryMs = 60; uh.holdListRetryMaxMs = 120; uh.dedupShard = (f) => { const p = new Promise(() => { }); uh._dedupJobs.set(f, p); return p; }; return uh; };
+  const world = (name) => {
+    const d = dirOf(name), sh = shardOf(d);
+    fs.writeFileSync(sh, Array.from({ length: 400 }, (_, i) => row(i)).join('\n') + '\n');
+    const todos = new UserTodoManager({ dataDir: d, expirySweepMs: 0 });
+    const W = { d, sh, todos, heldDir: path.join(d, 'usage-history', '_held'), asideDir: path.join(d, 'usage-history', '_set-aside') };
+    W.items = () => todos._state.items.filter((i) => i.sessionKey === 'usage-ledger');
+    W.of = (kind) => W.items().filter((i) => String(i.itemKey || '').startsWith(kind + '\n'));
+    W.life = () => { const uh = seams(newUh(d)); const wired = LSN.wire({ usageHistory: uh, userTodos: todos, log: () => { }, reconcileAfterMs: null }); const evs = []; const on = uh.onShape; uh.onShape = (ev) => { evs.push(ev); return on(ev); }; return { uh, wired, evs }; };
+    W.held = () => (fs.existsSync(W.heldDir) ? fs.readdirSync(W.heldDir).sort() : []);
+    W.aside = () => { try { return fs.readdirSync(W.asideDir).sort(); } catch { return []; } };
+    return W;
+  };
+  const lines = (ids) => ids.map((i) => remote(i)).join('\n') + '\n';
+  const die = (uh) => { for (const h of uh._holds.values()) h.io = new Promise(() => { }); uh._holds.clear(); const i = ALL_UH.indexOf(uh); if (i >= 0) ALL_UH.splice(i, 1); if (uh._inflight) uh._inflight.clear(); uh.onShape = null; for (const f of (uh._readFail || new Map()).values()) clearTimeout(f.timer); for (const m of [uh._lines, uh._retries]) for (const s of (m || new Map()).values()) if (s && s.timer) clearTimeout(s.timer); };
+  const realOpen = fs.promises.open;
+  /** every open of each file in `faults` (file → code; LIVE — a file deleted from it is «fixed») refused → undo */
+  const deny = (faults) => { fs.promises.open = function (f, ...a) { const x = faults.get(String(f)); if (x && fs.existsSync(String(f))) return Promise.reject(Object.assign(new Error(`${x}: injected, open '${f}'`), { code: x, path: String(f) })); return realOpen.call(this, f, ...a); }; return () => { fs.promises.open = realOpen; }; };
+  const host = 'host-x', base = `events-2026-10~${host}`, B = (f) => path.basename(f);
+  const tries = (uh) => { const f = uh._readFail.get(base); return f ? f.tries : 0; };
+  /** the timer's next read of the failing hold done (its tries counted up, or the hold read) */
+  const retried = async (uh) => { const n = tries(uh); for (let t = 0; t < 3000; t += 20) { await sleep(20); await settle(); if (!uh._readFail.has(base) || tries(uh) > n) break; } await settle(); };
+  const loaded = async (uh, ms = 3000) => { for (let t = 0; t < ms; t += 20) { const h = uh._holds.get(base); if (h && !h.loading && !uh._readFail.has(base)) return h; await sleep(20); await settle(); } return uh._holds.get(base) || null; };
+  const first = (it) => (it ? (it.detail.split('\n')[0] || '').replace(/ since [^—]*—.*/, '') : 'NO ITEM');
+  const acked = (x) => !!(x && x.ack) && !((x && x.holdFailed) || []).length;
+  const blocksOf = (uh) => { const rf = uh._readFail.get(base); return rf ? (rf.blocks || [{ file: rf.file }]).map((x) => x.file) : []; };
+  /** a live hold of 20 rows (one segment), 3 dropped → {df, seg} */
+  const liveHold = async (W) => {
+    const L1 = W.life(); await quiet(() => L1.uh.ingestRemoteEvents(host, 'X', lines(Array.from({ length: 20 }, (_, k) => 9300 + k)))); die(L1.uh);
+    const segName = W.held().find((f) => f.endsWith('.ndjson')), gen = Math.floor(Number(segName.split('.')[1]) / 1e6);
+    const df = path.join(W.heldDir, `${base}.${gen}.dropped`), seg = path.join(W.heldDir, segName);
+    fs.appendFileSync(df, JSON.stringify({ gone: [1, 2, 3].map((k) => hidOf(8800 + k, host)) }) + '\n');
+    return { df, seg };
+  };
+  /** one start of the server (a new process) with `faults` → what `fn` returned, its journal; the process ended */
+  const start = async (W, faults, fn) => {
+    const L = W.life(), undo = deny(faults);
+    try { const [v, out] = await quiet(async () => { L.wired.reconcile(); await sleep(60); await settle(); return fn(L); }); return { v, out }; } finally { undo(); die(L.uh); }
+  };
+
+  // ── 1. A SET THAT READS LOSES ITS MARK AT ONCE (probe-flap-mark P1 / P1b — 14f0647b unmarked it only once the hold read
+  // whole: a segment that failed the hold kept the mark of a set that had read, and the set's next EIO was its «second
+  // start» — set aside unread, its 3 dropped «not known») ──
+  {
+    const got = {};
+    // (a) three starts: the set EIO + the segment readable ⇒ kept, MARKED (its first start) · the set reads + the segment EIO
+    // ⇒ the hold fails on the segment, the mark GONE · the set EIO again ⇒ its first start again: kept, marked — then read
+    {
+      const W = world('w27a-flap-starts'), { df, seg } = await liveHold(W);
+      const mark = (uh) => ({ disk: fs.existsSync(df + '.unread'), mem: !!(uh._unreadMarks && uh._unreadMarks.has(df)) });
+      const s1 = await start(W, new Map([[df, 'EIO']]), (L) => ({ failing: L.uh._readFail.has(base), named: first(W.of('hold-read')[0]), ...mark(L.uh) }));
+      const s2 = await start(W, new Map([[seg, 'EIO']]), (L) => ({ failing: L.uh._readFail.has(base), blocks: blocksOf(L.uh), ...mark(L.uh) }));
+      const f3 = new Map([[df, 'EIO']]);
+      const s3 = await start(W, f3, async (L) => {
+        const at = { failing: L.uh._readFail.has(base), blocks: blocksOf(L.uh), setOnDisk: fs.existsSync(df), asides: W.aside().length, ...mark(L.uh) };
+        f3.clear(); await loaded(L.uh); await settle(); // the mount settles
+        const ack = await L.uh.ingestRemoteEvents(host, 'X', lines([9402])); await settle();
+        const h = L.uh._holds.get(base);
+        return { ...at, ack: acked(ack), gone: h ? h.gone.size : null, after: fs.existsSync(df + '.unread') };
+      });
+      got.starts = { s1: s1.v, s2: s2.v, s3: s3.v, twice: s3.out.filter((l) => /the disk's answer/.test(l)).length, df: B(df), seg: B(seg), setAside: W.of('set-aside').length };
+    }
+    // (b) the flap in ONE process (P1): start 1 as (a); start 2 the segment EIO (the mark gone), then the mount flaps — the set
+    // EIO, the segment readable ⇒ kept (the first start of that error again), never set aside; the mount settles ⇒ read, 3
+    {
+      const W = world('w27b-flap-in'), { df, seg } = await liveHold(W);
+      await start(W, new Map([[df, 'EIO']]), () => null);
+      const f2 = new Map([[seg, 'EIO']]);
+      const s2 = await start(W, f2, async (L) => {
+        const before = { failing: L.uh._readFail.has(base), disk: fs.existsSync(df + '.unread') };
+        f2.delete(seg); f2.set(df, 'EIO'); await retried(L.uh); await retried(L.uh);
+        const flap = { failing: L.uh._readFail.has(base), blocks: blocksOf(L.uh), setOnDisk: fs.existsSync(df), asides: W.aside().length };
+        f2.clear(); await loaded(L.uh); await settle();
+        const ack = await L.uh.ingestRemoteEvents(host, 'X', lines([9402])); await settle();
+        const h = L.uh._holds.get(base);
+        return { before, flap, ack: acked(ack), gone: h ? h.gone.size : null };
+      });
+      got.inProcess = { ...s2.v, twice: s2.out.filter((l) => /the disk's answer/.test(l)).length, df: B(df), setAside: W.of('set-aside').length };
+    }
+    const a = got.starts, b = got.inProcess;
+    const okA = a.s1.failing && a.s1.disk && a.s1.named.endsWith(`_held/${a.df} could not be read (EIO)`)
+      && a.s2.failing && a.s2.blocks.join() === a.seg && !a.s2.disk && !a.s2.mem
+      && a.s3.failing && a.s3.blocks.join() === a.df && a.s3.setOnDisk && !a.s3.asides && a.s3.disk && a.s3.ack && a.s3.gone === 3 && !a.s3.after && !a.twice && !a.setAside;
+    const okB = b.before.failing && !b.before.disk && b.flap.failing && b.flap.blocks.join() === b.df && b.flap.setOnDisk && !b.flap.asides && b.ack && b.gone === 3 && !b.twice && !b.setAside;
+    ok(okA && okB,
+      `㉗ (1) a set that reads loses its mark at once — start 1 the set EIO, its segment readable ⇒ ${a.s1.failing ? 'kept' : 'NOT kept'}, ${a.s1.disk ? 'marked' : 'NOT marked'} · start 2 the set reads, the segment EIO ⇒ the hold fails on «${a.s2.blocks.join(', ')}», the set's mark ${!a.s2.disk && !a.s2.mem ? 'GONE' : `KEPT (${a.s2.disk ? 'on disk' : ''}${a.s2.mem ? ' in memory' : ''})`} · start 3 the set EIO again ⇒ ${a.s3.asides ? 'SET ASIDE as «the disk\'s answer»' : a.s3.failing ? 'its first start again: kept' : '—'}${a.s3.disk && !a.s3.asides ? ', marked' : ''}; the mount settles ⇒ ${a.s3.ack ? 'acked' : 'NOT acked'}, gone ${a.s3.gone} · in ONE process (the segment EIO, then the set EIO) ⇒ ${b.flap.asides ? 'SET ASIDE' : 'kept'}, then ${b.ack ? 'acked' : 'NOT acked'}, gone ${b.gone} (14f0647b: the mark kept through the segment's failure — the set set aside unread at its next EIO, gone 0)`,
+      got);
+  }
+
+  // ── 2. THE LIVE GENERATION IS DECIDED FIRST (probe-flap-mark P2 — 14f0647b decided the older sets first: one took the last
+  // _set-aside slot, the live set could not be moved, and the month waited beside a «nothing waits» notice) ──
+  {
+    const got = {};
+    const gens = async (W) => {
+      const { df, seg } = await liveHold(W);
+      const seg2 = seg.replace(/\.(\d+)\.ndjson$/, (_, q) => `.${2e6 + (Number(q) % 1e6)}.ndjson`), df2 = path.join(W.heldDir, `${base}.2.dropped`), old = path.join(W.heldDir, `${base}.0.dropped`);
+      fs.renameSync(seg, seg2); fs.renameSync(df, df2);
+      return { df2, old };
+    };
+    const fill = (W, n) => { fs.mkdirSync(W.asideDir, { recursive: true }); for (let k = 0; k < n; k++) fs.writeFileSync(path.join(W.asideDir, `filler-${k}`), 'x'); };
+    // (a) the last slot: _set-aside holds SET_ASIDE_MAX-1; the live set and an older one both refused (EACCES), the live
+    // segment readable ⇒ the live set takes the slot, the month acked, ONE notice (the live set's); the older set kept for
+    // the next start (said in the journal: not copied, the bound)
+    {
+      const W = world('w27c-slot'), { df2, old } = await gens(W);
+      fs.writeFileSync(old, JSON.stringify({ gone: [1, 2, 3, 4, 5, 6, 7].map((k) => hidOf(9100 + k, host)) }) + '\n');
+      fill(W, MAX - 1);
+      const r = await start(W, new Map([[df2, 'EACCES'], [old, 'EACCES']]), async (L) => {
+        const ack = await L.uh.ingestRemoteEvents(host, 'X', lines([9400])); await settle(); await sleep(150); await settle();
+        return { ack: acked(ack), waits: L.uh._readFail.has(base), evs: L.evs.filter((e) => e.kind === 'set-aside').map((e) => (e.files || [e]).map((x) => x.file).join(' + ')) };
+      });
+      const sa = W.of('set-aside');
+      got.slot = { ...r.v, live: W.aside().some((f) => f.startsWith(B(df2) + '.')), older: W.aside().some((f) => f.startsWith(B(old) + '.')), oldKept: fs.existsSync(old), reads: W.of('hold-read').filter((i) => i.status === 'open').length, asideItems: sa.length, asideText: sa[0] ? sa[0].text : '', asideNames: sa[0] ? [B(df2), B(old)].filter((f) => sa[0].detail.includes(`_held/${f} `)) : [], bound: r.out.some((l) => /generation 0 \(an older one\) could not be read \(EACCES: [^)]*\) — not copied \([^)]*its bound\); kept, read again at the next start/.test(l)) };
+    }
+    // (b) the live set cannot be moved at all (_set-aside full) beside an older set (7, a line that is no record) ⇒ the hold
+    // fails naming the live set, and NOTHING of the older set is decided or said through the retries (kept, its 7 unsaid,
+    // no «nothing waits» notice); a slot freed ⇒ the live set moved, then the older one read, its 7 said once — ONE notice
+    // naming both, the live one first — the month acked
+    {
+      const W = world('w27d-full'), { df2, old } = await gens(W);
+      fs.writeFileSync(old, JSON.stringify({ gone: [1, 2, 3, 4, 5, 6, 7].map((k) => hidOf(9100 + k, host)) }) + '\n' + 'OLD-GARBAGE\n');
+      fill(W, MAX);
+      const r = await start(W, new Map([[df2, 'EACCES']]), async (L) => {
+        await retried(L.uh); await retried(L.uh); await retried(L.uh);
+        const said0 = () => L.evs.filter((e) => e.kind === 'dropped' && String(e.gen) === '0').length, asides = () => L.evs.filter((e) => e.kind === 'set-aside');
+        const under = { tries: tries(L.uh), waits: L.uh._readFail.has(base), blocks: blocksOf(L.uh), said0: said0(), events: asides().length, oldKept: fs.existsSync(old), asideItems: W.of('set-aside').length, read: first(W.of('hold-read')[0]) };
+        fs.unlinkSync(path.join(W.asideDir, 'filler-0')); await loaded(L.uh); await settle(); // the owner frees a slot
+        const ack = await L.uh.ingestRemoteEvents(host, 'X', lines([9400])); await settle();
+        const ev = asides();
+        return { under, after: { ack: acked(ack), said0: said0(), events: ev.length, files: ev.length ? (ev[ev.length - 1].files || []).map((x) => x.file) : [], live: W.aside().some((f) => f.startsWith(B(df2) + '.')), oldGone: !fs.existsSync(old) } };
+      });
+      const sa = W.of('set-aside').filter((i) => i.status === 'open');
+      got.full = { ...r.v, df2: B(df2), old: B(old), asideOpen: sa.length, asideText: sa[0] ? sa[0].text : '', readOpen: W.of('hold-read').filter((i) => i.status === 'open').length };
+    }
+    const a = got.slot, b = got.full, u = b.under, f = b.after;
+    const okA = a.ack && !a.waits && a.live && !a.older && a.oldKept && !a.reads && a.asideItems === 1 && a.asideNames.join() === `${base}.2.dropped` && /^A held usage file of \S+ for 2026-10 could not be read \(EACCES\) — set aside unread; nothing waits$/.test(a.asideText) && a.bound && a.evs.length === 1;
+    const okB = u.tries >= 3 && u.waits && u.blocks.join() === b.df2 && u.read.endsWith(`_held/${b.df2} could not be read (EACCES)`) && !u.said0 && !u.events && u.oldKept && !u.asideItems
+      && f.ack && f.said0 === 1 && f.events === 1 && f.files.join() === `${b.df2},${b.old}` && f.live && f.oldGone && b.asideOpen === 1 && /^2 held usage files of \S+ for 2026-10 /.test(b.asideText) && !b.readOpen;
+    ok(okA && okB,
+      `㉗ (2) the live generation is decided first — _set-aside one slot short of its bound, the live set and an older one refused: the slot ${a.live ? "is the live set's" : a.older ? "the OLDER set's" : 'nobody\'s'}, the month ${a.ack ? 'acked' : 'WAITS'}, ${a.reads} hold-read open, ${a.asideItems} set-aside notice naming «${a.asideNames.join(', ')}»; the older set ${a.oldKept ? 'kept for the next start' : 'GONE'}${a.bound ? ' (its bound said)' : ''} · _set-aside full, the live set refused beside an older one (7, a bad line): the hold fails on «${u.blocks.join(', ')}» over ${u.tries} tries; the older set ${u.said0 ? `SAID ${u.said0}×` : 'unsaid'}, ${u.oldKept ? 'kept' : 'GONE'}, ${u.events} set-aside event(s) · a slot freed ⇒ ${f.ack ? 'acked' : 'NOT acked'}, its 7 said ${f.said0}×, one notice naming «${f.files.join(', ')}» (14f0647b: the older set took the slot — the month waited beside «nothing waits»)`,
+      got);
   }
 });
 fs.rmSync(tmp, { recursive: true, force: true }); // after the last leg (r8: ⑲ ran after it and left its scratch behind)
