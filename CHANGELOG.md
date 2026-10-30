@@ -11,12 +11,10 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A parked service whose leftovers can't all be checked now says so right away, not only when it is started again.
 - A stopped job's card and history now say when some of its processes got less than the full time to stop, as its log already did.
 - A job stopped just as it ends can no longer send the stop signal to an unrelated process that has since taken over its process ID.
+- A restart with the vault locked no longer makes VibeSpace forget its relay token; public URLs come back when you unlock it.
 
 ### Security
 - Vault sign-in on standard Chrome is paused until it's fixed; the agent asks you through the Vault or to take over, and the custom browser kernel still signs in.
-
-### Fixed
-- A restart with the vault locked no longer makes VibeSpace forget its relay token; public URLs come back when you unlock it.
 
 ## 2.369.363 — 2026-10-29
 
