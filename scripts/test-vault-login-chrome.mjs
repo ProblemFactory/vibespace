@@ -1,21 +1,22 @@
 #!/usr/bin/env node
-// test-vault-login-chrome — lane vault-login-chrome / vault-login-fill (heavy, run ALONE, D-Bus unset):
-// On standard Chrome (`chromium` provider, `w.kernel === false`), `vibespace-browser login [<origin>] [--user <name>] [--submit]`
-// inspects the current tab's form read-only (`src/server/browser-login-fill.js`, never reading `.value`) and types the vault
-// login's secret values from the hub over CDP (`Input.insertText` + prototype value tracker support + `.value` getter mask):
-//   ① RED baseline control (6428c67e's `!loginSinks(w)` guard) answers `login_no_form` on `/one`; `/plain` (a search box) answers
-//     `login_no_form` on the real tree.
-//   ② One-step form (`/one`): ungranted ⇒ `login_not_granted`; granted `login` (no `--submit`) fills username + password (`step:
-//     'password'`), `snapshot` shows `••••`, `screenshot` renders masked dots (0 bytes of PW), `get value #p` and `eval
-//     document.querySelector('#p').value` return `••••••••`; `login --submit --json` submits the real password to `/done/one`
-//     and returns `{filled, step:'password', submitted:true, receipt}`.
-//   ③ Google-like multi-step form (`/two` → `/two/challenge/pwd` → `/totp`) with a paired two-step entry:
-//     step 1 fills only the email (`step: 'email'`), step 2 fills only the password (`step: 'password'`), step 3 computes and
-//     fills the 6-digit TOTP code (`step: 'totp'`, ONE `vault-totp-use` line `via: 'browser-login'`).
-//   ④ React/Closure controlled form (`/react`, `VALUE_TRACKER`): `login --submit` fills and submits the real credentials.
-//   ⑤ R4 ZERO-LEAKAGE SWEEP across every output surface (CLI stdout/stderr, snapshot, get value, eval, hub logs, dialog trace,
-//     browser audit, vault-audit.jsonl) + RED mutant control that leaks the password onto an output surface and is caught by the
-//     same sweep function.
+// test-vault-login-chrome — lane vault-login-chrome (heavy, run ALONE, D-Bus unset). HOTFIX 2.369.364 (fixups r2): the vault
+// login fill on standard Chrome that 2.369.363 shipped is WITHDRAWN — its post-ship acceptance (accept-r1) found the origin gate
+// read from the page's own script world, a fallback that put the secret in a Runtime.evaluate string, and the agent's own read
+// roads past the mask. On REAL headless Chrome (`chromium` provider — the watch's kernel fact `false`) with a REAL vault holding a
+// GRANTED login of the page's own site and its paired two-step entry, `vibespace-browser login` is refused BY NAME before
+// anything is read:
+//   ① the watch records standard Chrome and the road row reads `standard` (fills: false, withdrawn in 2.369.364); RED control
+//     (the vault still EMPTY, on /plain — no form, nothing that could be typed): a watch copy without the road gate reads the
+//     tab through the withdrawn reader (Runtime.evaluate on its socket); the real watch on the same tab sends nothing
+//   ② every page (/one, /two, /totp, /react, /plain) × the verb's shapes (login · --submit --json · <origin> --user --submit ·
+//     --new-user --generate --submit · --generate) ⇒ exit 1 `[login_fill_withdrawn]` (the JSON shape too), the hub's words
+//   ③ 0 vault reads (secretGet / secretNames / the use-writer noteUse never called; planFill / noteFill never called; no
+//     vault-use or vault-totp-use line), the hub-side reader + writer (src/server/browser-login-fill.js) never called, 0 CDP
+//     Input.* / Runtime.evaluate commands on the watch's socket, the pages received nothing, /one's password box is empty, and
+//     accept-r1's four eval roads past the old mask (prototype getter · FormData · a listener installed before · delete
+//     el.value) read nothing — the fill never happened
+//   ④ the zero-leak sweep over every output surface (CLI stdout/stderr, hub logs, dialog trace, browser audit, vault audit)
+// fixups r2 item 5: the fixture server closes its open connections (Chrome keeps them alive), so this suite exits with its verdict.
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
@@ -35,6 +36,7 @@ const Ff = require('../src/browser-facts.js');
 const D = require('../src/server/browser-dialogs.js');
 const L = require('../src/server/browser-logins.js');
 const LF = require('../src/server/browser-login-fill.js');
+const BL = require('../src/browser-login.js');
 const VE = require('../src/server/vault-engine.js');
 const GS = require('../src/server/grants-store.js');
 const VT = require('../src/server/vault-totp.js');
@@ -80,6 +82,25 @@ const sweepSurfaces = (surfaces, secrets) => {
 const MUT = mutantCopies('vlogin-chrome', REPO);
 const pages = await startLoginPages();
 
+// The watch's socket, counted: every CDP command the hub sends to Chrome (the agent's own CLI talks to Chrome on its own),
+// each TAGGED by its call stack — `login` = sent from the login road (`fillLogin`, src/server/browser-login-fill.js). The watch's
+// own work keeps running beside a login (its passkey hook re-armed on every new document, its liveness probes `1`); those are
+// not the login's, and the RED copy below proves the tag sees a login-road command when one is sent.
+const WSBase = require('ws').WebSocket;
+const LOGIN_ROAD = /browser-login-fill\.js|\bfillLogin\b/;
+const countingWS = (sent) => class extends WSBase {
+  send(data, ...rest) {
+    try {
+      const m = JSON.parse(String(data));
+      if (m && m.method) { const lim = Error.stackTraceLimit; Error.stackTraceLimit = 60; const st = String(new Error().stack || ''); Error.stackTraceLimit = lim; sent.push({ method: m.method, login: LOGIN_ROAD.test(st), text: String(data) }); }
+    } catch { }
+    return super.send(data, ...rest);
+  }
+};
+const loginRoad = (cmds) => cmds.filter((c) => c.login);
+const inputs = (cmds) => cmds.filter((c) => /^Input\./.test(c.method));
+const methodsOf = (cmds) => [...new Set(cmds.map((c) => c.method))];
+
 async function world(tag, { Dmod = D } = {}) {
   const W = path.join(ROOT, tag);
   const KH = path.join(W, 'h'), KXD = path.join(W, 'x'), VD = path.join(W, 'vault');
@@ -117,8 +138,9 @@ async function world(tag, { Dmod = D } = {}) {
     agentToken: TOKEN, _browserKey: KEY, _browserVariant: 'D', _browserEnv: null,
     name: 'Chat ' + tag, cwd: W, backendSessionId: 'conv-1',
   }]]);
+  const cdpSent = [];
   const dialogs = Dmod.create({
-    keeper: kk,
+    keeper: kk, WebSocketImpl: countingWS(cdpSent),
     log: { warn: (l) => logs.push(String(l)), log: (l) => logs.push(String(l)) },
     leaseCountOf: (pid) => new Set(((kk.list().leases) || []).filter((l) => l && l.profileId === pid && l.browserKey).map((l) => l.browserKey)).size,
     holdersOf: () => [{ browserKey: KEY, sessionId: 'sess-' + tag }],
@@ -145,9 +167,13 @@ async function world(tag, { Dmod = D } = {}) {
   });
   const vaultAuditRaw = () => { try { return fs.readFileSync(path.join(VD, VE.AUDIT_FILE), 'utf8'); } catch { return ''; } };
   const vaultAudit = () => vaultAuditRaw().split('\n').filter(Boolean).map((l) => JSON.parse(l));
-  const close = async () => { dialogs.shutdown(); kk.shutdown(); eng.close(); await new Promise((r) => srv.close(() => r())); };
-  return { kk, prof, eng, grants, totp, logins, dialogs, cli, logs, traced, audited, vaultAuditRaw, vaultAudit, close };
+  const close = async () => { dialogs.shutdown(); kk.shutdown(); eng.close(); await new Promise((r) => { srv.close(() => r()); srv.closeAllConnections(); }); };
+  return { kk, prof, eng, grants, totp, logins, dialogs, cli, logs, traced, audited, cdpSent, vaultAuditRaw, vaultAudit, close };
 }
+
+// a spy that counts the calls of obj[name] (the module objects and the vault engine are plain objects)
+const spyOn = (obj, names) => { const n = Object.fromEntries(names.map((k) => [k, 0])); for (const k of names) { const f = obj[k]; obj[k] = function (...a) { n[k]++; return f.apply(this, a); }; } return n; };
+const lastJson = (r) => { try { return JSON.parse(r.out.trim().split('\n').pop()); } catch { return null; } };
 
 try {
   ok(!('DBUS_SESSION_BUS_ADDRESS' in BASE_ENV), 'D-Bus session bus address is unset in the heavy suite environment');
@@ -157,142 +183,105 @@ try {
     const SITE = pages.origin;
     const USER = 'alice@example.test';
     const PW = pwOf('chrome-pw');
-    const SEED_BYTES = crypto.randomBytes(20);
-    const SEED_B32 = T.base32Encode(SEED_BYTES);
+    const SEED_B32 = T.base32Encode(crypto.randomBytes(20));
     const cliTranscripts = [];
     const run = async (args) => { const r = await w.cli(args); cliTranscripts.push(`${args.join(' ')}\nOUT:${r.out}\nERR:${r.err}`); return r; };
+    const lf = spyOn(LF, ['inspectTabLoginForm', 'fillVaultLogin']);
 
-    console.log('① RED baseline control (6428c67e) + /plain non-login page');
+    console.log('① standard Chrome, the road row + RED control (the vault still empty, /plain: nothing that could be typed)');
     {
+      let r = await run(['open', `${SITE}/plain`]);
+      ok(r.code === 0, 'opened loopback /plain in real Chrome', r);
+      ok(w.dialogs.kernelFactOf(w.prof.id) === false, 'the watch probed VibeSpace.getVersion and recorded standard Chrome (kernelFactOf === false)');
+      const road = BL.roadVerdict(w.dialogs.kernelFactOf(w.prof.id));
+      ok(!road.ok && road.code === 'login_fill_withdrawn' && road.road === 'standard' && road.withdrawnIn === '2.369.364' && BL.ROADS.standard.fills === false, 'the road row for this browser: standard — fills:false, withdrawn in 2.369.364', road);
       const dsrc = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
-      const anchor = 'if (w.kernel && !loginSinks(w))';
-      const oldD = dsrc.replace(anchor, 'if (!loginSinks(w))');
-      ok(oldD !== dsrc, 'control anchor found in src/server/browser-dialogs.js');
-      const D6428 = MUT.load('src/server/browser-dialogs.js', oldD, 'base6428');
-      let r = await run(['open', `${SITE}/one`]);
-      ok(r.code === 0, 'opened loopback /one in real Chrome', r);
-      ok(w.dialogs.kernelFactOf(w.prof.id) === false, 'watch probed VibeSpace.getVersion and recorded standard Chrome (kernelFactOf === false)');
-      // Evaluate the 6428c67e watch copy over the same live Chrome endpoint
-      const wOld = D6428.create({
-        keeper: { cdpEndpointFor: (pid) => w.kk.cdpEndpointFor(pid), onLease: () => () => { } },
+      const noGate = dsrc.replace('    if (!road.ok) return road;\n', '    if (false) return road;\n');
+      ok(noGate !== dsrc, 'control anchor (the road gate) found in src/server/browser-dialogs.js');
+      const Dng = MUT.load('src/server/browser-dialogs.js', noGate, 'nogate');
+      const redSent = [];
+      const wRed = Dng.create({
+        keeper: { cdpEndpointFor: (pid) => w.kk.cdpEndpointFor(pid), onLease: () => () => { } }, WebSocketImpl: countingWS(redSent),
         log: { warn() { }, log() { } }, logins: w.logins, holdersOf: () => [{ browserKey: 'bk-0000f1a1', sessionId: 'sess-main' }],
       });
-      await wOld.arm(w.prof.id);
-      const redRes = await wOld.fillLogin({ profileId: w.prof.id, browserKey: 'bk-0000f1a1' }, { origin: SITE });
-      wOld.shutdown();
-      ok(!redRes.ok && redRes.code === 'login_no_form' && /standard Chrome/.test(redRes.error), 'RED on 6428c67e: standard Chrome answers login_no_form before our hub-side reader', redRes);
-
-      r = await run(['open', `${SITE}/plain`]);
-      const rp = await run(['login']);
-      ok(r.code === 0 && rp.code === 1 && /\[login_no_form\]/.test(rp.err), 'a non-login page (/plain with a Search input) ⇒ [login_no_form]', rp);
-    }
-
-    console.log('② One-step form (/one): grant check → fill (no submit) → masked snapshot / get value / eval → fill --submit');
-    {
-      ok(w.totp.addEntry({ seed: SEED_B32, name: 'google-like' }, { who: 'owner' }).ok, 'owner sealed a two-step TOTP entry in the vault');
-      ok(w.logins.addOwn({ origin: SITE, username: USER, password: PW, totpName: 'google-like' }).ok, 'owner sealed the web login paired with the two-step entry');
-      await run(['open', `${SITE}/one`]);
-      let r = await run(['login']);
-      ok(r.code === 1 && /\[login_not_granted\]/.test(r.err), 'before grant ⇒ exit 1 [login_not_granted]', r);
-      ok(w.logins.grant(`web-login:${SITE}#${USER}`, 'this-account', 'session:conv-1').ok, 'owner granted the login to this conversation');
-
-      pages.clear();
+      await wRed.arm(w.prof.id);
+      const i0 = lf.inspectTabLoginForm, s0 = redSent.length;
+      const redRes = await wRed.fillLogin({ profileId: w.prof.id, browserKey: 'bk-0000f1a1' }, { origin: SITE });
+      const redCalls = redSent.slice(s0);
+      wRed.shutdown();
+      const redLogin = loginRoad(redCalls);
+      ok(!redRes.ok && redRes.code !== 'login_fill_withdrawn' && lf.inspectTabLoginForm > i0 && redLogin.some((c) => c.method === 'Runtime.evaluate') && lf.fillVaultLogin === 0,
+        'RED: a watch copy without the road gate READS the standard-Chrome tab through the withdrawn reader — a Runtime.evaluate tagged as the login road\'s on its socket (no form, so nothing typed)', { code: redRes.code, inspect: lf.inspectTabLoginForm - i0, login: methodsOf(redLogin), all: methodsOf(redCalls) });
+      const c0 = w.cdpSent.length, i1 = lf.inspectTabLoginForm;
       r = await run(['login']);
-      ok(r.code === 0 && /Filled the user name and the password/.test(r.out) && /NOT submitted/.test(r.out) && /Step: password\./.test(r.out) && /Receipt vr-[0-9a-f]{12}\./.test(r.out) && pages.received().length === 0,
-        'login without --submit fills username + password (Step: password) and does NOT submit the form', r);
-
-      const snap = await run(['snapshot']);
-      ok(snap.code === 0 && snap.out.includes('••••') && !snap.out.includes(PW), 'snapshot of the filled password field shows •••• and never the password', snap.out);
-      const shotPath = path.join(ROOT, 'main', 'one-filled.png');
-      const shot = await run(['screenshot', shotPath]);
-      const shotBytes = fs.existsSync(shotPath) ? fs.readFileSync(shotPath) : Buffer.alloc(0);
-      ok(shot.code === 0 && shotBytes.length > 100 && !shotBytes.includes(Buffer.from(PW, 'utf8')),
-        'screenshot of the filled password field renders a PNG with 0 occurrences of the password bytes', { code: shot.code, bytes: shotBytes.length, err: shot.err });
-      const gv = await run(['get', 'value', '#p']);
-      const ev = await run(['eval', 'document.querySelector("#p").value']);
-      ok(gv.code === 0 && gv.out.trim() === LF.MASK && ev.code === 0 && ev.out.includes(LF.MASK) && !gv.out.includes(PW) && !ev.out.includes(PW),
-        'get value #p and eval document.querySelector("#p").value return masked •••••••• (never the password)', { gv: gv.out, ev: ev.out });
-
-      r = await run(['login', SITE, '--user', USER, '--submit', '--json']);
-      const j = (() => { try { return JSON.parse(r.out.trim().split('\n').pop()); } catch { return null; } })();
-      const gotOne = await until(() => pages.received().find((x) => x.path === '/done/one'), 4000);
-      ok(r.code === 0 && j && j.success && eq(j.data.filled, ['username', 'password']) && j.data.step === 'password' && j.data.submitted === true && /^vr-[0-9a-f]{12}$/.test(j.data.receipt) && gotOne && gotOne.body.username === USER && gotOne.body.password === PW,
-        'login --submit --json submits the real username + password to /done/one and returns {filled, step:"password", submitted:true, receipt}', { j, gotOne });
+      const win = w.cdpSent.slice(c0);
+      ok(r.code === 1 && /\[login_fill_withdrawn\]/.test(r.err) && lf.inspectTabLoginForm === i1 && loginRoad(win).length === 0 && inputs(win).length === 0,
+        `the real watch on the same tab: [login_fill_withdrawn], the reader never called, 0 commands from the login road and 0 Input.* on its socket (the watch's own beside it: ${win.length} — ${methodsOf(win).join(', ') || 'none'})`, { r, login: loginRoad(win).map((c) => c.method) });
     }
 
-    console.log('③ Google-like multi-step form (/two → /two/challenge/pwd → /totp): email step → password step → TOTP step');
+    console.log('② a GRANTED login of the page\'s own site in the vault — every page × every shape refused by name');
+    const reads = spyOn(w.eng, ['secretGet', 'secretNames', 'noteUse']);
+    const plans = spyOn(w.logins, ['planFill', 'noteFill']);
+    const lf0 = { ...lf }, c0 = w.cdpSent.length;
     {
+      ok(w.totp.addEntry({ seed: SEED_B32, name: 'google-like' }, { who: 'owner' }).ok, 'the owner sealed a two-step entry in the vault');
+      ok(w.logins.addOwn({ origin: SITE, username: USER, password: PW, totpName: 'google-like' }).ok, 'the owner sealed the web login of this site, paired with the two-step entry');
+      ok(w.logins.grant(`web-login:${SITE}#${USER}`, 'this-account', 'session:conv-1').ok, 'the owner granted the login to this conversation');
+      for (const k of Object.keys(reads)) reads[k] = 0;   // the owner's own seal above is not the agent's road
       pages.clear();
-      await run(['open', `${SITE}/two`]);
-      // Step 1: email / identifier
-      const r1 = await run(['login', '--submit', '--json']);
-      const j1 = (() => { try { return JSON.parse(r1.out.trim().split('\n').pop()); } catch { return null; } })();
-      const seenId = await until(() => pages.received().find((x) => x.path === '/seen/two-id'), 4000);
-      ok(r1.code === 0 && j1 && j1.success && eq(j1.data.filled, ['username']) && j1.data.step === 'email' && j1.data.submitted === true && seenId && seenId.body.identifier === USER,
-        'step 1 (/two): fills ONLY the visible email field (step:"email") and clicks Next', { j1, seenId });
-
-      // Step 2: password (now visible under /two/challenge/pwd)
-      const r2 = await run(['login', '--submit', '--json']);
-      const j2 = (() => { try { return JSON.parse(r2.out.trim().split('\n').pop()); } catch { return null; } })();
-      const doneTwo = await until(() => pages.received().find((x) => x.path === '/done/two'), 4000);
-      ok(r2.code === 0 && j2 && j2.success && eq(j2.data.filled, ['password']) && j2.data.step === 'password' && j2.data.submitted === true && doneTwo && doneTwo.body.identifier === USER && doneTwo.body.Passwd === PW,
-        'step 2 (/two/challenge/pwd): fills ONLY the visible password field (step:"password") and submits to /totp', { j2, doneTwo: doneTwo && { ...doneTwo, body: { ...doneTwo.body, Passwd: '<ok>' } } });
-
-      // Wait for navigation to /totp to settle
-      await until(async () => { const u = await w.cli(['get', 'url']); return /\/totp\b/.test(u.out); }, 4000);
-      const r3 = await run(['login', '--submit', '--json']);
-      const j3 = (() => { try { return JSON.parse(r3.out.trim().split('\n').pop()); } catch { return null; } })();
-      const doneTotp = await until(() => pages.received().find((x) => x.path === '/done/totp'), 4000);
-      ok(r3.code === 0 && j3 && j3.success && eq(j3.data.filled, ['otp']) && j3.data.step === 'totp' && j3.data.submitted === true && doneTotp && /^\d{6}$/.test(String(doneTotp.body.code || '')),
-        'step 3 (/totp): computes and fills the 6-digit TOTP code (step:"totp") and advances to /welcome', { j3, codeLen: doneTotp && String(doneTotp.body.code || '').length });
-
-      const totpUses = w.vaultAudit().filter((l) => l.event === 'vault-totp-use');
-      ok(totpUses.length === 1 && totpUses[0].via === 'browser-login' && totpUses[0].ok === true,
-        'vault-totp-use audit row recorded once (on the /totp step only) with via:"browser-login"', totpUses);
+      const SHAPES = [['login'], ['login', '--submit', '--json'], ['login', SITE, '--user', USER, '--submit'], ['login', SITE, '--new-user', 'bob@example.test', '--generate', '--submit'], ['login', '--generate']];
+      const PAGES = [['/one', SHAPES], ['/two', SHAPES.slice(0, 2)], ['/totp', SHAPES.slice(0, 2)], ['/react', SHAPES.slice(0, 2)], ['/plain', SHAPES.slice(0, 2)]];
+      const bad = []; let n = 0;
+      for (const [p, shapes] of PAGES) {
+        const o = await run(['open', `${SITE}${p}`]);
+        if (o.code !== 0) { bad.push({ p, open: o.err }); continue; }
+        for (const args of shapes) {
+          const r = await run(args); n++;
+          const j = args.includes('--json') ? lastJson(r) : null;
+          const named = r.code === 1 && /\[login_fill_withdrawn\]/.test(r.err) && /withdrawn in 2\.369\.364/.test(r.err) && /vibespace-vault request/.test(r.err) && /ask-human/.test(r.err) && /nothing was read from the vault and nothing was typed/.test(r.err);
+          const jsonOk = !args.includes('--json') || (j && j.success === false && j.data === null && j.code === 'login_fill_withdrawn');
+          if (!named || !jsonOk) bad.push({ p, args, code: r.code, err: r.err.slice(0, 300), j });
+        }
+      }
+      ok(bad.length === 0 && n === 13, `${n} logins on 5 pages (one-step, Google-like identifier, two-step code, controlled, plain) ⇒ each exit 1 [login_fill_withdrawn] with the hub's words; --json says {success:false, code:"login_fill_withdrawn"}`, bad);
     }
 
-    console.log('④ Controlled React/Closure form (/react, VALUE_TRACKER)');
+    console.log('③ what the refusal did NOT do');
     {
-      pages.clear();
-      await run(['open', `${SITE}/react`]);
-      const r = await run(['login', '--submit', '--json']);
-      const j = (() => { try { return JSON.parse(r.out.trim().split('\n').pop()); } catch { return null; } })();
-      const doneReact = await until(() => pages.received().find((x) => x.path === '/done/react'), 4000);
-      ok(r.code === 0 && j && j.success && eq(j.data.filled, ['username', 'password']) && j.data.step === 'password' && j.data.submitted === true && doneReact && doneReact.body.username === USER && doneReact.body.password === PW,
-        'controlled input (/react): prototype clear + CDP Input.insertText triggers VALUE_TRACKER and submits the real credentials', { j, doneReact: doneReact && { path: doneReact.path, user: doneReact.body.username } });
+      ok(reads.secretGet === 0 && reads.secretNames === 0 && reads.noteUse === 0, '0 vault reads: secretGet / secretNames never called, the use-writer noteUse never called', reads);
+      ok(plans.planFill === 0 && plans.noteFill === 0, 'the logins module was never asked: planFill / noteFill never called', plans);
+      const uses = w.vaultAudit().filter((l) => l.event === 'vault-use' || l.event === 'vault-totp-use');
+      ok(uses.length === 0, 'no vault-use / vault-totp-use line in the vault audit', uses);
+      ok(lf.inspectTabLoginForm === lf0.inspectTabLoginForm && lf.fillVaultLogin === 0, 'the hub-side Chrome reader and writer (src/server/browser-login-fill.js) were never called', lf);
+      const sent = w.cdpSent.slice(c0);
+      ok(loginRoad(sent).length === 0 && inputs(sent).length === 0, `0 commands from the login road (no Runtime.evaluate of its reader, no Input.*) on the watch's socket across the refusals — the watch's own beside them: ${sent.length} (${methodsOf(sent).join(', ') || 'none'})`, { login: loginRoad(sent).map((c) => c.method), inputs: inputs(sent).map((c) => c.method) });
+      ok(sweepSurfaces({ cdp: w.cdpSent.map((c) => c.text).join('\n') }, [PW, SEED_B32]).length === 0 && w.cdpSent.length > 0, `no command the hub sent to Chrome (${w.cdpSent.length} in all) carries the password or the two-step seed, in any encoding`);
+      ok(pages.received().length === 0, 'the pages received nothing (no identifier, no password, no code was posted)', pages.received().map((x) => x.path));
+      await run(['open', `${SITE}/one`]);
+      // accept-r1's capture road: a listener the agent installs BEFORE the login (its own `eval`)
+      const cap = await run(['eval', "(() => { window.__vsCap = []; document.addEventListener('input', (e) => { try { window.__vsCap.push(String(e.target.value)); } catch { } }, true); return 'armed'; })()"]);
+      await run(['login', '--submit']);
+      const gv = await run(['get', 'value', '#p']), gu = await run(['get', 'value', '#u']);
+      ok(cap.code === 0 && gv.code === 0 && gv.out.trim() === '' && gu.code === 0 && gu.out.trim() === '', '/one after a refused login --submit: its user and password boxes are empty (nothing was typed)', { cap: cap.out, gv: gv.out, gu: gu.out });
+      // accept-r1's four read roads past the 2.369.363 mask, on the agent's own `eval`: after a refused fill there is nothing to
+      // read — each answers empty, 0 password occurrences (counts only, never a value)
+      const ROADS4 = [
+        ['the prototype getter', "Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').get.call(document.querySelector('#p'))"],
+        ['FormData', "String(new FormData(document.querySelector('#f')).get('password') || '')"],
+        ['the listener installed before the login', "(window.__vsCap || []).join('')"],
+        ['delete el.value', "(() => { const el = document.querySelector('#p'); delete el.value; return el.value; })()"],
+      ];
+      const roadOut = [];
+      for (const [name, expr] of ROADS4) { const r = await run(['eval', expr]); roadOut.push({ name, code: r.code, empty: r.out.trim().replace(/^"(.*)"$/, '$1') === '', pw: (r.out + r.err).split(PW).length - 1 }); }
+      ok(roadOut.every((x) => x.code === 0 && x.empty && x.pw === 0), "accept-r1's four eval roads (prototype getter · FormData · a listener installed before · delete el.value) read nothing: the fill never happened", roadOut);
     }
 
-    console.log('⑤ R4 zero-leakage sweep across all output surfaces + RED mutant control');
+    console.log('④ the zero-leak sweep');
     {
-      const surfaces = {
-        cli: cliTranscripts.join('\n'),
-        hubLogs: w.logs.join('\n'),
-        dialogTrace: JSON.stringify(w.traced),
-        browserAudit: JSON.stringify(w.audited),
-        vaultAudit: w.vaultAuditRaw(),
-      };
+      const surfaces = { cli: cliTranscripts.join('\n'), hubLogs: w.logs.join('\n'), dialogTrace: JSON.stringify(w.traced), browserAudit: JSON.stringify(w.audited), vaultAudit: w.vaultAuditRaw() };
       const hits = sweepSurfaces(surfaces, [PW, SEED_B32]);
-      ok(hits.length === 0, 'ZERO LEAKAGE: 0 occurrences of the password or TOTP seed across CLI stdout/stderr, snapshot, get value, eval, hub logs, dialog trace, browser audit, and vault-audit.jsonl', hits);
-
-      const useRows = w.vaultAudit().filter((l) => l.event === 'vault-use' && l.door === 'browser-login' && l.outcome === 'ok');
-      ok(useRows.length >= 6 && useRows.every((l) => /^vr-[0-9a-f]{12}$/.test(l.receipt || '') && l.purpose === `sign in at ${SITE}`),
-        `THE USE LAW: all ${useRows.length} successful fills recorded a vault-use line with purpose + receipt`, useRows.length);
-
-      // RED mutant control: a copy of browser-login-fill.js that includes the secret value in its return object is caught by sweepSurfaces
-      const lfSrc = fs.readFileSync(path.join(REPO, 'src/server/browser-login-fill.js'), 'utf8');
-      const lfAnchor = "return { ok: true, filled: loginId || (curForm && curForm.id) || 'login', step: resolvedStep, submitted };";
-      const lfMutSrc = lfSrc.replace(lfAnchor, "return { ok: true, filled: loginId || 'login', leaked: entries.map((x) => x[0]).join(','), step: resolvedStep, submitted };")
-        .replace('entries[i][1] = null; // drop reference as soon as read', 'entries[i][0] = val;');
-      ok(lfMutSrc !== lfSrc, 'RED mutant anchor found in src/server/browser-login-fill.js');
-      const LFm = MUT.load('src/server/browser-login-fill.js', lfMutSrc, 'leakfill');
-      const mutRes = await LFm.fillVaultLogin({
-        call: async (m) => (m === 'Runtime.evaluate' ? { result: { result: { value: { ok: true, pageOrigin: SITE, frameOrigin: SITE, fields: [{ fieldId: 'vs-f-0', type: 'password', visible: true }] } } } } : { result: {} }),
-        origin: SITE,
-        values: { 'vs-f-0': PW },
-        form: { id: 'f', pageOrigin: SITE, frameOrigin: SITE, step: 'password', fields: [{ fieldId: 'vs-f-0', type: 'password' }] },
-      });
-      const mutHits = sweepSurfaces({ mutantReturn: JSON.stringify(mutRes) }, [PW]);
-      ok(mutHits.length > 0, 'RED CONTROL: a mutant fillVaultLogin that leaks the secret into its return surface is caught by sweepSurfaces', mutHits);
+      ok(hits.length === 0, '0 occurrences of the password or the two-step seed (raw, hex, base64, base64url) across CLI stdout/stderr, hub logs, dialog trace, browser audit and the vault audit', hits);
+      ok(sweepSurfaces({ control: `x${Buffer.from(PW).toString('hex')}x` }, [PW]).length >= 1, 'the sweep itself sees a planted encoding (its control)');
     }
 
     await w.close();

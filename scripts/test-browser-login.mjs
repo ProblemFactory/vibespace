@@ -17,6 +17,8 @@
 //   ⑦ the words (the agent's sentence never holds a value; the owner's notice in en / zh / ja)
 //   ⑧ THE WATCH over the fake kernel + a REAL vault: detect → fill → submit (login, two-step, signup, change, agent-typed, a person's
 //      own in a takeover, the vault locked, a kernel without the feature, standard Chrome, the kernel's stale_origin, http-auth)
+//      — lane vault-login-chrome r2 (HOTFIX 2.369.364): on standard Chrome the road is refused by name (login_fill_withdrawn)
+//      with a granted login in the vault: 0 vault reads (noteUse never called), 0 CDP commands (counted on the stub's socket)
 //   ⑧b lane engine-distribution: the NO-ECHO kernel (mode.omitFilledPassword — the real kernel sends no password while the box
 //      holds the vault's value): a pending register promoted · an existing login none · a typed-over value rides; a RED control
 //   ⑨ THE DOORS: the REAL route + the REAL CLI; the owner's card route refuses an agent; the Vault window's rows
@@ -140,8 +142,19 @@ const FORM = (o = {}) => BL.formOf({ surfaceId: 'surf-cred-1', targetId: 'T1', p
 }
 
 // ═══ ④ THE FILL VERDICT ═══
-console.log('④ the fill verdict — form · phishing · ambiguity · grant · vault (in that order)');
+console.log('④ the fill verdict — the road · form · phishing · ambiguity · grant · vault (in that order)');
 const ME = { conversationKeys: ['conv-1'], groupIds: ['tg-1'] };
+{
+  // lane vault-login-chrome r2 (HOTFIX 2.369.364): THE ROAD first — the browser's capability row, never a provider id
+  ok(eq(Object.keys(BL.ROADS), ['kernel', 'kernel-no-credentials', 'standard']) && BL.ROADS.kernel.fills === true && BL.ROADS['kernel-no-credentials'].code === 'login_no_form' && BL.ROADS.standard.fills === false && BL.ROADS.standard.code === 'login_fill_withdrawn' && BL.ROADS.standard.withdrawnIn === '2.369.364' && BL.WITHDRAWN_IN === '2.369.364' && BL.REFUSALS.includes('login_fill_withdrawn'),
+    'the road rows: a kernel with credentials fills; a kernel without them has no form; standard Chrome is WITHDRAWN in 2.369.364 by name');
+  ok(BL.roadOf({ protocol: 1, kinds: [], features: ['surfaces', 'credentials'] }) === 'kernel' && BL.roadOf({ protocol: 1, kinds: [], features: ['surfaces', 'webauthn'] }) === 'kernel-no-credentials' && BL.roadOf(false) === 'standard' && BL.roadOf(null) === 'standard' && BL.roadOf(undefined) === 'standard' && BL.roadOf('custom-kernel') === 'standard' && BL.roadOf({ provider: 'custom-kernel', features: ['surfaces'] }) === 'kernel-no-credentials',
+    'roadOf reads the kernel fact\'s features alone: standard Chrome (false) and a fact not asked yet (null) are one road; a provider name never opens one');
+  const wd = BL.roadVerdict(false), wn = BL.roadVerdict(null), nc = BL.roadVerdict({ protocol: 1, features: ['surfaces'] }), kr = BL.roadVerdict({ protocol: 1, features: ['surfaces', 'credentials'] });
+  ok(!wd.ok && wd.code === 'login_fill_withdrawn' && wd.road === 'standard' && wd.withdrawnIn === '2.369.364' && eq(wn, wd) && /withdrawn in 2\.369\.364/.test(wd.error) && /claim another site's origin/.test(wd.error) && /secret in a script/.test(wd.error) && /vibespace-vault request/.test(wd.error) && /ask-human/.test(wd.error) && /nothing was read from the vault and nothing was typed/.test(wd.error),
+    'roadVerdict(standard Chrome) ⇒ login_fill_withdrawn: why (the origin, the script), what was not done, the two doors (vibespace-vault request · ask-human)', wd);
+  ok(!nc.ok && nc.code === 'login_no_form' && /standard Chrome/.test(nc.error) && kr.ok === true && kr.road === 'kernel', 'roadVerdict: a kernel without credentials ⇒ login_no_form (its words unchanged); a kernel with them ⇒ the road is open');
+}
 const rowsFrom = (rows) => (res) => rows.filter((r) => r.resource === res);
 const ROW = (resource, to, except = []) => ({ door: 'browser-login', resource, to, except });
 const ENT = [{ origin: SITE, user: 'alice' }];
@@ -257,7 +270,7 @@ console.log('⑦ the words');
 console.log('⑧ the dialog watch over the FAKE KERNEL + the logins module over a REAL vault');
 const PID = 'bp-e0000b01', KEY = 'bk-0000b10c';
 const TGT = { profileId: PID, browserKey: KEY, ephemeral: true };
-async function world({ mode = {}, takeover = () => false, kernel = startFakeKernel } = {}) {
+async function world({ mode = {}, takeover = () => false, kernel = startFakeKernel, Dmod = D } = {}) {
   const d = path.join(ROOT, 'w-' + crypto.randomBytes(3).toString('hex')); fs.mkdirSync(d, { recursive: true });
   const eng = VE.create({ dataDir: d, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false });
   const VPW = ['vault', crypto.randomBytes(4).toString('hex'), 'second'].join(' ');
@@ -268,7 +281,7 @@ async function world({ mode = {}, takeover = () => false, kernel = startFakeKern
   const logins = L.create({ vault: eng, grants: () => grants, totpCode: (n, o) => totp.codeForLogin(n, o), forYou: { add: (pid, it) => { fy.push({ pid, it }); return 'fy-' + fy.length; }, resolve: (id) => resolved.push(id) } });
   const k = await kernel({ firstUrl: SITE + '/login', mode });
   const evs = [], logs = [];
-  const w = D.create({ keeper: { cdpEndpointFor: async () => ({ ok: true, url: k.wsUrl }), onLease: () => () => { } }, log: { warn: (l) => logs.push(String(l)), log() { } }, enableTimeoutMs: 300, holdersOf: () => [{ browserKey: KEY, sessionId: 'sess-1', ephemeral: true }], leaseCountOf: () => 1, labelOf: () => 'Work',
+  const w = Dmod.create({ keeper: { cdpEndpointFor: async () => ({ ok: true, url: k.wsUrl }), onLease: () => () => { } }, log: { warn: (l) => logs.push(String(l)), log() { } }, enableTimeoutMs: 300, holdersOf: () => [{ browserKey: KEY, sessionId: 'sess-1', ephemeral: true }], leaseCountOf: () => 1, labelOf: () => 'Work',
     logins, conversationOf: () => ({ cid: 'conv-1', name: 'Chat One' }), takeoverOf: () => takeover(), forYou: { add: () => null, resolve() { } } });
   w.onChange((e) => evs.push(e));
   await w.arm(PID, { budgetMs: 3000 });
@@ -469,7 +482,20 @@ const fresh = (X) => X.evs.length;
     ok(A.w.loginForms(PID).length === 0 && !r.ok && r.code === 'login_no_form' && /standard Chrome/.test(r.error) && A.logs.some((l) => /does not list the credentials feature/.test(l)), 'a kernel whose features do not list credentials: no form is kept, `login` ⇒ login_no_form (one journal line)');
   } finally { await A.close(); }
   const S = await world({ mode: { standard: true } });
-  try { const r = await S.w.fillLogin(TGT, FILL()); ok(!r.ok && r.code === 'login_no_form', 'standard Chrome ⇒ login_no_form (no form is ever reported)'); } finally { await S.close(); }
+  try {
+    // lane vault-login-chrome r2 (HOTFIX 2.369.364): a login the vault keeps AND its grant — only the road keeps it unread
+    ok(S.logins.addOwn({ origin: SITE, username: 'Alice', password: pwOf('std') }).ok && S.logins.grant(`web-login:${SITE}#alice`, 'this-account', 'session:conv-1').ok, 'standard Chrome: the owner keeps a login of the site and grants it to this conversation');
+    const reads = { secretGet: 0, secretNames: 0, noteUse: 0 };
+    for (const m of Object.keys(reads)) { const f = S.eng[m].bind(S.eng); S.eng[m] = (...a) => { reads[m]++; return f(...a); }; }
+    const c0 = S.k.calls().length;
+    const rs = [];
+    for (const o of [{}, { origin: SITE, user: 'alice', submit: true }, { newUser: 'bob', generate: true, submit: true }, { generate: true }]) rs.push(await S.w.fillLogin(TGT, FILL(o)));
+    const sent = S.k.calls().slice(c0).map((c) => c.method);
+    ok(rs.every((r) => !r.ok && r.code === 'login_fill_withdrawn' && r.road === 'standard' && r.error === BL.roadVerdict(false).error), 'standard Chrome ⇒ login_fill_withdrawn by name — login · --submit · --new-user --generate · --generate alike', rs);
+    ok(reads.secretGet === 0 && reads.secretNames === 0 && reads.noteUse === 0 && S.audit().filter((l) => /^vault-(totp-)?use$/.test(l.event)).length === 0, '… 0 vault reads: secretGet / secretNames never called, the use-writer noteUse never called, no use line', reads);
+    ok(sent.length === 0 && S.k.calls().filter((c) => /^Input\./.test(c.method) || c.method === 'Runtime.evaluate').length === 0, '… 0 CDP commands for it (0 Input.*, 0 Runtime.evaluate on the stub\'s whole socket)', sent);
+    ok(BL.loginText(rs[0]) === rs[0].error, '… the agent\'s sentence is the refusal\'s own words');
+  } finally { await S.close(); }
   const X = await world();
   try {
     const tid = X.k.targets()[0].targetId;
@@ -731,6 +757,23 @@ console.log('⑩ RED controls — each mutant lets the bad fill through');
   ok(M4 && M4.fillVerdict({ forms: [FORM()], entries: ownEnt, grantRows: () => [], facts: ME, owners: ['conv-2'], vaultState: 'unlocked' }).ok === true && BL.fillVerdict({ forms: [FORM()], entries: ownEnt, grantRows: () => [], facts: ME, owners: ['conv-2'], vaultState: 'unlocked' }).code === 'login_not_granted' && BL.fillVerdict({ forms: [FORM()], entries: ownEnt, grantRows: () => [], facts: ME, owners: ['conv-1'], vaultState: 'unlocked' }).ok === true,
     'RED: a copy that reads any caller as the owner fills an agent\'s own login for another conversation (the real one: its owner only, by name)');
   ok(M3 && M3.fillVerdict({ forms: [p8443], entries: ENT, grantRows: rowsFrom([ROW('*', [{ kind: 'everyone' }])]), facts: ME, vaultState: 'unlocked' }).ok === true, 'RED: a copy matching by host alone offers the :443 login on a :8443 page (the real one is exact to the port)');
+  // lane vault-login-chrome r2 (HOTFIX 2.369.364): the row and the gate each hold the withdrawn road shut
+  const reopened = SRC.replace("standard: Object.freeze({ fills: false,", "standard: Object.freeze({ fills: true,");
+  const M5 = reopened !== SRC ? MUT.load('src/browser-login.js', reopened, 'reopened') : null;
+  ok(M5 && M5.roadVerdict(false).ok === true && BL.roadVerdict(false).code === 'login_fill_withdrawn', 'RED: a copy whose standard row fills opens the withdrawn road (the real row refuses it)');
+}
+{
+  const DSRC = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
+  const noGate = DSRC.replace('    if (!road.ok) return road;\n', '    if (false) return road;\n');
+  const MD = noGate !== DSRC ? MUT.load('src/server/browser-dialogs.js', noGate, 'nogate') : null;
+  // no login in this vault — the copy can only READ the tab (the 2.369.363 form inspection), never type
+  const S = MD ? await world({ mode: { standard: true }, Dmod: MD }) : null;
+  try {
+    const c0 = S ? S.k.calls().length : 0;
+    const r = S ? await S.w.fillLogin(TGT, FILL()) : null;
+    const sent = S ? S.k.calls().slice(c0).map((c) => c.method) : [];
+    ok(MD && r && r.code !== 'login_fill_withdrawn' && sent.includes('Runtime.evaluate'), 'RED: a watch copy without the road gate sends Runtime.evaluate to a standard-Chrome tab (the real watch sends nothing)', { code: r && r.code, sent });
+  } finally { if (S) await S.close(); }
 }
 
 console.log(`\n${fail ? `${fail} FAILED` : 'ALL PASS'} (${pass}${fail ? ' passed' : ''})`);

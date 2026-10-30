@@ -154,6 +154,8 @@ PAGE VERBS (your own browser, or the attachment you name):
                                                   "create a passkey"; each sign-in follows the policy the owner set per key
   vibespace-browser login [<origin>] [--user <name>] [--submit]   on the custom browser kernel: a login the owner keeps
                                                   in the vault is filled into the page's form — you never see the password
+                                                  (standard Chrome: withdrawn in 2.369.364 [login_fill_withdrawn] — ask the
+                                                  owner with vibespace-vault request, or ask-human)
   vibespace-browser login [<origin>] --new-user <name> --generate   register an account THROUGH the vault (it makes the
                                                   password; the login is saved for the owner automatically)
   vibespace-browser permission <kind> allow|deny [origin] [lat,lon]   every page permission is DENIED ahead (no prompt
@@ -1260,7 +1262,8 @@ async function runOursPage(cls, { r, head, profileId, wantsJson }) {
     process.exit(0);
   }
   // lane browser-login: `login [<origin>] [--user <u>] [--submit]` · `login [<origin>] --new-user <u> --generate` — a login the
-  // VAULT keeps, filled by the custom kernel on your own tab (you never see a value: the answer says what was filled + a receipt)
+  // VAULT keeps, filled by the custom kernel on your own tab (you never see a value: the answer says what was filled + a receipt);
+  // lane vault-login-chrome r2: on standard Chrome the hub refuses it by name (login_fill_withdrawn, 2.369.364) before any vault read
   if (verbName === 'login') {
     const pos = []; let user = null, newUser = null, submit = false, generate = false;
     for (let i = 1; i < cls.argv.length; i++) {

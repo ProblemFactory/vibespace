@@ -214,7 +214,7 @@ const STATUS = { // lane browser-profile-clone: the copy's refusals by name
   // form that is not the site's own (or not https), several logins (--user), the owner's grant, the vault locked, the site's
   // password rules a strong password cannot meet, no such login, an account already kept, a bad origin / user name, the kernel's
   // refusal; the owner's save card answered on a changed / gone card
-  login_no_form: 409, login_phishing: 403, login_ambiguous: 409, login_not_granted: 403, vault_locked: 423, password_rules_unsupported: 422, login_no_entry: 404, login_exists: 409,
+  login_fill_withdrawn: 409, login_no_form: 409, login_phishing: 403, login_ambiguous: 409, login_not_granted: 403, vault_locked: 423, password_rules_unsupported: 422, login_no_entry: 404, login_exists: 409,
   login_bad_origin: 400, login_bad_user: 400, login_failed: 502, not_written: 503, card_changed: 409, card_gone: 410,
   // lane browser-admin 2a: which Chrome build a profile runs (src/browser-builds.js BUILD_CODES) + Change build…'s own
   browser_choice_invalid: 400, browser_choice_user_only: 403, browser_choice_provider: 400, builds_unsupported: 409, builds_unreadable: 503,

@@ -58,5 +58,5 @@ export function startLoginPages() {
     if (!p) { res.writeHead(404); return res.end('nope'); }
     res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' }); res.end(p());
   });
-  return new Promise((ok) => srv.listen(0, '127.0.0.1', () => ok({ origin: `http://127.0.0.1:${srv.address().port}`, port: srv.address().port, received: () => got.slice(), clear: () => { got.length = 0; }, close: () => new Promise((r) => srv.close(() => r())) })));
+  return new Promise((ok) => srv.listen(0, '127.0.0.1', () => ok({ origin: `http://127.0.0.1:${srv.address().port}`, port: srv.address().port, received: () => got.slice(), clear: () => { got.length = 0; }, close: () => new Promise((r) => { srv.close(() => r()); srv.closeAllConnections(); }) })));
 }

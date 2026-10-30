@@ -12,6 +12,9 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A stopped job's card and history now say when some of its processes got less than the full time to stop, as its log already did.
 - A job stopped just as it ends can no longer send the stop signal to an unrelated process that has since taken over its process ID.
 
+### Security
+- Vault sign-in on standard Chrome is paused until it's fixed; the agent asks you through the Vault or to take over, and the custom browser kernel still signs in.
+
 ## 2.369.363 — 2026-10-29
 
 ### Added

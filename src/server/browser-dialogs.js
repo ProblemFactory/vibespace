@@ -2200,14 +2200,16 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     for (const e of w.targets.values()) if (inScope(scope, e.targetId)) for (const f of e.forms || []) out.push({ id: f.id, targetId: e.targetId, kind: f.kind, origin: f.pageOrigin, fields: f.fields.map((x) => x.type) });
     return out;
   }
-  /** THE `login` DOOR: the conversation's own tabs' forms (+ a held http-auth surface; or on standard Chrome, hub-side read-only
-   *  DOM inspection via `src/server/browser-login-fill.js`) → the logins module's plan → the kernel or hub fills (or the surface is
-   *  answered) → ONE use line → the agent's answer: what was filled, never a value. */
+  /** THE `login` DOOR: the road (src/browser-login.js roadVerdict — the standard-Chrome road through
+   *  `src/server/browser-login-fill.js` is WITHDRAWN in 2.369.364, refused by name before anything below runs; its branches stay
+   *  for the root fix to re-open) → the conversation's own tabs' forms (+ a held http-auth surface) → the logins module's plan →
+   *  the kernel fills (or the surface is answered) → ONE use line → the agent's answer: what was filled, never a value. */
   async function fillLogin({ profileId, browserKey = '', sessionId = null, ephemeral = false } = {}, { origin = null, user = null, newUser = null, generate = false, submit = false, facts = {}, conv = null, actor = null, owners = [] } = {}) {
     const pid = String(profileId || ''); const w = watches.get(pid);
     if (!logins) return { ok: false, code: 'not_watched', error: 'VibeSpace keeps no web logins on this server' };
     if (!w || w.state !== 'open') return { ok: false, code: 'not_watched', error: 'VibeSpace is not watching this browser' };
-    if (w.kernel && !loginSinks(w)) return { ok: false, code: 'login_no_form', error: 'this browser does not report login forms (standard Chrome) — only the custom browser kernel does; the owner can sign in by hand in the live view' };
+    const road = BL().roadVerdict(w.kernel);   // lane vault-login-chrome r2 (HOTFIX 2.369.364): the road FIRST, from the capability row — standard Chrome (login_fill_withdrawn) and a kernel without `credentials` (login_no_form) are refused here, before a form is read, the vault is opened or a CDP command is sent
+    if (!road.ok) return road;
     const scope = scopeFor({ profileId: pid, browserKey, sessionId, ephemeral });
     const forms = [];
     if (w.kernel) {

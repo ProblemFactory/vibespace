@@ -13,6 +13,12 @@
  *     pending?, previous?, lastUsedAt}. `publicOf` = the record without a password (the Vault window's facts).
  *   · THE FORM — `VibeSpace.credentialFormDetected` → formOf (fieldId kernel-private, passed back verbatim — Q5; each password
  *     field's `constraints` — Q5b); a held http-auth surface's credential fields → formOfSurface (the same road answers it).
+ *   · THE ROAD (roadVerdict — lane vault-login-chrome r2, HOTFIX 2.369.364) — FIRST, before any form read, vault read or CDP
+ *     call: the browser's CAPABILITY ROW (the watch's kernel fact — VibeSpace.getVersion's `features`), never a provider id
+ *     (the backend-caps pattern). ROADS: `kernel` (its features list `credentials`) fills · `kernel-no-credentials` ⇒
+ *     login_no_form · `standard` (every other browser — standard Chrome, a fact not known yet) ⇒ login_fill_withdrawn by
+ *     name: the hub-side CDP fill of 2.369.363 is withdrawn (accept-r1: the page reported its own origin, a fallback put the
+ *     secret in a script string, the agent's read roads saw past the mask); it returns when the root fix is accepted.
  *   · THE FILL VERDICT (fillVerdict) — in order: a form on the tab · THE PHISHING RULE (pageOrigin === frameOrigin === the
  *     entry's origin, exact to the port, never the registrable domain; https, or http on localhost only) · ONE entry (several ⇒
  *     login_ambiguous) · THE GRANT (door `browser-login`: the rows of `<origin>#<user>`, `<origin>#*` and `*` ADD — GM.admits,
@@ -30,7 +36,8 @@
  *     the owner's notice (noticeWords: i18n keys + params).
  *
  * Gate: scripts/test-browser-login.mjs (fast — every row here + the fake kernel's credentialFormDetected → fillCredential →
- * credentialSubmitted leg).
+ * credentialSubmitted leg; the standard-Chrome stub's refusal with its CDP calls counted) + scripts/test-vault-login-chrome.mjs
+ * (heavy — real Chrome: refused by name, 0 vault reads, nothing typed).
  */
 const GM = require('./grant-model.js');
 
@@ -51,7 +58,7 @@ const SOURCES = Object.freeze(['owner', 'vault-minted', 'agent-typed']);
 const STRENGTHS = Object.freeze(['generated', 'unknown']);
 const SAVE_STATES = Object.freeze(['new', 'same', 'update', 'agent-typed', 'owner-card', 'none']);
 /** Every refusal of the road, by name (the routes' STATUS table carries each). */
-const REFUSALS = Object.freeze(['login_no_form', 'login_phishing', 'login_ambiguous', 'login_not_granted', 'vault_locked', 'password_rules_unsupported', 'login_no_entry', 'login_exists', 'login_bad_origin', 'login_bad_user']);
+const REFUSALS = Object.freeze(['login_fill_withdrawn', 'login_no_form', 'login_phishing', 'login_ambiguous', 'login_not_granted', 'vault_locked', 'password_rules_unsupported', 'login_no_entry', 'login_exists', 'login_bad_origin', 'login_bad_user']);
 const HOST = '(?:[a-z0-9-]{1,63}(?:\\.[a-z0-9-]{1,63}){0,20}|\\[[0-9a-f:.]{2,45}\\])';
 const ORIGIN_SRC = `https?:\\/\\/${HOST}(?::\\d{1,5})?`;
 const USER_SRC = '[^\\s#\\u0000-\\u001f\\u007f]{1,160}';
@@ -269,6 +276,31 @@ function constraintsFor(form, plan) {
   return { minLength: mins.length ? Math.max(...mins) : null, maxLength: maxs.length ? Math.min(...maxs) : null, patterns };
 }
 
+// ── the road (lane vault-login-chrome r2, HOTFIX 2.369.364) ──────────────────
+const WITHDRAWN_IN = '2.369.364';
+/** One row per fill road — the suites read it. A road that does not fill names its refusal; `standard` names the release that
+ *  withdrew it. Flipping `standard.fills` back is the root fix's job (its acceptance), never a hotfix's. */
+const ROADS = Object.freeze({
+  kernel: Object.freeze({ fills: true }),
+  'kernel-no-credentials': Object.freeze({ fills: false, code: 'login_no_form' }),
+  standard: Object.freeze({ fills: false, code: 'login_fill_withdrawn', withdrawnIn: WITHDRAWN_IN }),
+});
+const NO_CREDENTIALS = 'this browser does not report login forms (standard Chrome) — only the custom browser kernel does; the owner can sign in by hand in the live view';
+const WITHDRAWN = `the vault login fill on standard Chrome is withdrawn in ${WITHDRAWN_IN} (a page could claim another site's origin; a fallback put the secret in a script) — nothing was read from the vault and nothing was typed. Ask the owner through the vault (vibespace-vault request "<what you need>" --purpose "<why>") or ask a person to take over (vibespace-browser ask-human "<what you need>"); the fill returns when its fix is accepted`;
+/** The browser's capability row → its road. `kernel` = the watch's fact: `{protocol, kinds, features}` (a custom kernel),
+ *  `false` (no VibeSpace surfaces — standard Chrome) or `null` (not asked yet) — the last two are the same road. */
+function roadOf(kernel) {
+  if (!kernel || typeof kernel !== 'object') return 'standard';
+  return Array.isArray(kernel.features) && kernel.features.includes('credentials') ? 'kernel' : 'kernel-no-credentials';
+}
+/** May a login be filled on this browser at all? → `{ok:true, road}` | `{ok:false, code, error, road}` — asked FIRST, before
+ *  the tab's forms are read, the vault is opened or a CDP command is sent. */
+function roadVerdict(kernel) {
+  const road = roadOf(kernel), row = ROADS[road];
+  if (row.fills) return { ok: true, road };
+  return no(row.code, row.code === 'login_fill_withdrawn' ? WITHDRAWN : NO_CREDENTIALS, { road, ...(row.withdrawnIn ? { withdrawnIn: row.withdrawnIn } : {}) });
+}
+
 // ── the fill verdict ───────────────────────────────────────────────────────
 const LOCKED = 'the vault is locked — the owner has already been told; a person unlocks it on this instance\'s page, and nothing is filled until then (do not ask them to)';
 function grantWords(code, origin) {
@@ -447,9 +479,9 @@ function noticeWords(state, { origin = '', username = '', conversation = '' } = 
 
 module.exports = {
   PREFIX, DOOR, USER_MAX, FORMS_MAX, FIELDS_MAX, PATTERN_MAX, GENERATED_LEN, GENERATED_MIN, GENERATED_MAX, TEXT_MAX, FORM_KINDS, FIELD_TYPES, STEPS, BY, SOURCES, STRENGTHS, SAVE_STATES, REFUSALS,
-  NAME_RE, ORIGIN_RE, CLASSES, LADDER, NOTICE, LOCKED,
+  NAME_RE, ORIGIN_RE, CLASSES, LADDER, NOTICE, LOCKED, ROADS, WITHDRAWN_IN,
   originOf, hostOf, secureOrigin, userOf, entryName, parseName, isEntryName, grantResources, resourceOk, scopeOf,
   recordOf, textOf, publicOf, newRecord, changedRecord,
-  formOf, formOfSurface, keepForm, stepOfForm, classifyLoginField, classifyChromeForm, planOf, constraintsFor, fillVerdict, valuesOf,
+  formOf, formOfSurface, keepForm, stepOfForm, classifyLoginField, classifyChromeForm, planOf, constraintsFor, roadOf, roadVerdict, fillVerdict, valuesOf,
   generatePassword, patternOf, saveVerdict, nextRecord, loginText, noticeWords,
 };
