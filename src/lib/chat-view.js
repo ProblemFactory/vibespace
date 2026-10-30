@@ -2767,14 +2767,16 @@ class ChatView {
     return Math.abs(scrollTop - (this._pointerDownScrollTop || 0)) > POINTER_DRAG_PX;
   }
 
-  /** A PRESS THAT KEEPS THE TAIL (lane needs-card-tail r8) — a send at the live tail, the ↓ on a window that ends there:
-   *  the person's act, stamped as it starts (`_lastTailPressAt`, one of _readerActs — a needs card landing's gone() and
+  /** A PRESS THAT KEEPS THE TAIL (lane needs-card-tail r8) — a send at the live tail, the ↓ on a window that ends there;
+   *  r9: a run-bar landing AT the live tail, a needs card opened at the tail, a needs card landing until its road leaves
+   *  (each judged where it lands — chat-needs-card.js openCard / land, _landOnHeader): the person's act, stamped as it starts (`_lastTailPressAt`, one of _readerActs — a needs card landing's gone() and
    *  every press's stale see it), and NOTHING ELSE: it goes where the resume repair goes, so it ends none of it — the
    *  settle window, the pin snapshot, the re-tail series and the unpin gate stay armed, and the resume's own question
    *  (_positionedSince) leaves its stamp out. r7 ran the whole _noteUserNav at the send: a send within 2.8 s of a window
    *  being shown again let the resume's input-less displacement unpin it (`scrolledAway`, 3637 px up in history, the reply
    *  streaming below the fold). A press that LEAVES the tail — a jump, and the ↓ and the send that refetch the tail (their
-   *  page is the road there: a re-tail rung must not race it) — ends the repair (_noteUserNav). */
+   *  page is the road there: a re-tail rung must not race it), a run-bar landing or a card's open off the tail, a needs
+   *  card landing's show — ends the repair (_noteUserNav). THE DOOR TABLE: docs/kb-bugfix-invariants.md (r9). */
   _noteTailPress(via) {
     this._lastTailPressAt = Date.now();
     this._trace?.('userNav', { via, keepsTail: true });
@@ -2783,7 +2785,7 @@ class ChatView {
 
   /** An explicit reader NAVIGATION that the message list's own listeners can
    *  never see: the minimap (pointer events on the container), a search's
-   *  press (as its jump starts — r7) and its reveal, the floating run bar (on
+   *  press (as its jump starts — r7) and its reveal, the floating run bar's landing off the tail (r9 — on
    *  this._container), jumpToIndex / jumpToBottom, the Retry on «Couldn't
    *  jump there» (r8). Stamps, and ends the resume settle exactly like a wheel —
    *  round-2 verifier's MAJOR: without this the 1240ms re-tail yanked such a
@@ -7572,9 +7574,10 @@ class ChatView {
     const list = this._messageList;
     if (!run?.header?.isConnected || !list) return;
     // the floating run bar and the run footer live on this._container, so this
-    // landing reaches the list only as a scrollTop write — stamp it as the
-    // navigation it is (round-2 verifier's MAJOR)
-    this._noteUserNav('runBar');
+    // landing reaches the list only as a scrollTop write — a navigation (round-2
+    // verifier's MAJOR): a bottom-follow chain loses to it now; its stamp waits
+    // for where it lands (THE RULE, below — lane needs-card-tail r9)
+    this._cancelForcedScroll('runBar');
     this._programmaticScroll = true;
     clearTimeout(this._jumpGuardTimer);
     this._jumpGuardTimer = setTimeout(() => { this._programmaticScroll = false; }, 400);
@@ -7582,6 +7585,11 @@ class ChatView {
     list.scrollTop = run.header.offsetTop;
     this._lastStructuralAt = Date.now(); this._lastStructuralDir = null;
     const atBottom = this._atLiveTail(list.scrollTop, list.scrollHeight, list.clientHeight); // the DOM edge is not the tail (inc-mubvu3a4-x8sb)
+    // THE RULE (lane needs-card-tail r9 — r8's, for a press that keeps the tail): a landing AT the live tail keeps it, its
+    // stamp alone (_noteTailPress — the resume repair left armed); one off it is the reader's position and ends the repair
+    // (_noteUserNav). r8 and every tree before ended it on both: a collapse from the bar that landed at the tail within
+    // 2.8 s of the window being shown again was stranded 3637 px up by the resume's own displacement
+    if (atBottom) this._noteTailPress('runBar'); else this._noteUserNav('runBar');
     this._setPinned(atBottom, 'runLand'); // the landing decides, honestly — at the live tail it stays pinned (inc-mvl02dkn-gop0: NaN bounds made every run-bar landing an unpin)
     this._trace('runLand', { st: Math.round(list.scrollTop), pin: this._pinned ? 1 : 0 });
     this._scheduleRunBar();

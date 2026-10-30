@@ -576,9 +576,11 @@ export class NeedsCards {
     const view = this.view, list = view._messageList;
     const at = () => list && [...list.querySelectorAll(':scope > * > .cn-cards > .cn-card')].find((c) => c.dataset.item === id);
     const was = at(), before = lineOf(was)?.getBoundingClientRect().top, row = was?.getBoundingClientRect(); // the line, the row pressed
-    // a READER act: the view's own door cancels a bottom-follow chain already running (round 3, #2 — the pinned view's
-    // chain wrote scrollTop = scrollHeight one frame after the hold), and the pass below starts none
-    view._noteUserNav?.('needsOpen');
+    // a READER act, stamped as it starts — its stamp alone (_noteTailPress), THE RULE deciding the rest where the open
+    // lands (below — lane needs-card-tail r9); the view's own door cancels a bottom-follow chain already running (round 3,
+    // #2 — the pinned view's chain wrote scrollTop = scrollHeight one frame after the hold), and the pass below starts none
+    view._noteTailPress?.('needsOpen');
+    view._cancelForcedScroll?.('needsOpen');
     this._slot = id;
     this.render({ hold: true });
     const el = at();
@@ -614,8 +616,13 @@ export class NeedsCards {
     if (keys || before == null || Math.abs(landed - before) > 1 || under) el._openedAt = performance.now();
     // THE PIN FOLLOWS THE LANDING HONESTLY (the chat's own law — PINNED ⇔ AT THE LIVE TAIL, < 50 px; the run bar's landing
     // keeps it the same way, inc-mvl02dkn-gop0): an open that leaves the view off the live tail (the card grown below the
-    // edge) is a reader's position; one that leaves it AT the tail (the line held by the borrowed room) stays a tail
-    if (view._pinned && !(view._atLiveTail ? view._atLiveTail(list.scrollTop, list.scrollHeight, list.clientHeight) : list.scrollHeight - list.scrollTop - list.clientHeight <= 1)) view._setPinned?.(false, 'needsOpen');
+    // edge) is a reader's position; one that leaves it AT the tail (the line held by the borrowed room) stays a tail. THE
+    // RESUME REPAIR FOLLOWS IT THE SAME WAY (THE RULE, lane needs-card-tail r9 — a press that KEEPS the tail never ends it,
+    // one that LEAVES the tail does): an open off the tail is a navigation (_noteUserNav ends the repair); one at the tail
+    // is its stamp alone — r8 and every tree before ended the repair at every open, and a card opened at the tail within
+    // 2.8 s of the window being shown again was stranded 3637 px up by the resume's own displacement
+    const atTail = view._atLiveTail ? view._atLiveTail(list.scrollTop, list.scrollHeight, list.clientHeight) : list.scrollHeight - list.scrollTop - list.clientHeight <= 1;
+    if (!atTail) { view._noteUserNav?.('needsOpen'); if (view._pinned) view._setPinned?.(false, 'needsOpen'); }
     this.app.foryouRows?.arm?.(list);
     if (keys) el.querySelector('.ut-opt:not(:disabled), .ut-actions > button:not(:disabled)')?.focus({ preventScroll: true });
   }
@@ -669,7 +676,13 @@ export class NeedsCards {
     if (since != null && view._navigatedSince?.(since)) return null;
     const gen = this._landGen = (this._landGen || 0) + 1;
     const filing = this._flying = filingOf(item);
-    view._noteUserNav?.('needsLand');
+    // THE PRESS, stamped as it starts — its stamp alone (THE RULE, lane needs-card-tail r9): a landing keeps the tail until
+    // it leaves it, and every road that leaves stamps its own navigation as it starts (jumpToIndex / jumpToBottom's first
+    // line, _show's 'jumpToAsk'), which ends the resume repair there; a landing whose read is out, one that ends at the
+    // live end ('end') and one that moves nothing (said, a page that could not be read) end none of it — r8 and every
+    // tree before ran the whole _noteUserNav here: a chip pressed within 2.8 s of the window being shown again left the
+    // window to the resume's own displacement while its read was out (3637 px up, for good when the landing moved nothing)
+    view._noteTailPress?.('needsLand');
     let mark = Date.now();
     const gone = () => gen !== this._landGen || !!view._disposed || !!view._navigatedSince?.(mark);
     const ours = (p) => { mark = Date.now(); return p; }; // this landing's own jump stamps the view's navigation as it starts
