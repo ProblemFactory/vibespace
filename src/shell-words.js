@@ -20,6 +20,13 @@
  * literal the reader can compare (a `{NAME}>` redirection writes NAME too); arithmetic anywhere bash evaluates it (a
  * subscript, `$[ ]`, `${x:off}`, `[[ -eq ]]`, an integer name) and an expansion that evaluates a value (`${x@P}`, zsh
  * `(e)`) end nothing; a carriage return is a word's own character (a CRLF line's `wait\r` is no `wait`).
+ * r12: UNKNOWN ⇒ STOP — a construct the scan does not parse ends nothing (a `(` glued to a word, a `[[ … ]]` its
+ * operators split, `((` wherever it stands, bash 5.3's `${ …; }`), never a longer allowlist; a continuation after `|`,
+ * `|&`, `&&`, `||` whatever stood on its left; a construct after an opener (`then for IFS in …`, `if [[ i -eq 0 ]]`,
+ * `then wait () { …; }`) is read as at a command's start; an indirection (`${!x}`), a compound assignment's subscript
+ * and the text a builtin expands in the shell itself (a heredoc, a here-string) end nothing; a builtin that evaluates
+ * text it is given (mapfile / readarray `-C`, complete, bind, fc, sched) is UNSURE; a redirection target is a
+ * descriptor only in the dup form (`>&2`; `> 2` is a file named 2).
  *
  * lane touch-chip-cause (the .362 train fix, 2026-10-29): moved out of src/channel-touch.js — chat-run-summary (the
  * client's run summary, which imports nothing but PURE rule modules: test-collab-live-counter, test-fold-ux and
@@ -34,6 +41,12 @@ const CLI = 'vibespace-channels';
 const SHELLS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh']);
 /** words after which the next word is again a command word */
 const OPENERS = new Set(['then', 'do', 'else', 'elif', 'if', 'while', 'until', '!', '{', '}', 'fi', 'done', 'esac', 'coproc']);
+/** r12: the words of a simple command after its OPENERS (`then`, `do`, `!`, `{` …) — where a construct stands that
+ *  the scan reads at a command's start (W2 / W3: never `words[0]` only) */
+const afterOpeners = (w) => { const h = w.findIndex((x) => x.q || !OPENERS.has(x.v)); return h < 0 ? [] : w.slice(h); };
+/** r12: a `[[ … ]]` the scan SPLIT — its `(`, `)`, `&&`, `||` end a simple command, so one command holds a `[[` with no
+ *  `]]` after it or a `]]` with none before it (`[[ 1 && i -eq 0 ]]`, `[[ ( i -eq 0 ) ]]`): not parsed — a STOP */
+const splitCond = (w) => { const a = w.findIndex((x) => !x.q && x.v === '[['), b = w.findIndex((x) => !x.q && x.v === ']]'); return (a >= 0 || b >= 0) && !(a >= 0 && b > a); };
 /** words that open a construct whose words are data (`for c in …`) */
 const DATA_HEADS = new Set(['for', 'case', 'select', 'function']);
 /** wrappers that run their operand as a command — the options that take an argument (skipped with it). r3: + command
@@ -177,11 +190,14 @@ function shellCommands(src, owner = null, depth = 0, offset = 0) {
   // r6: `mine` = this shell's own commands (a span's are its own shell's); `andOr` = the next command runs on a condition
   // (after `&&` / `||`); `span.docs` = the heredoc bodies read inside `$( … )` spans
   // r8: `coproc` = a `coproc` read, its list not ended yet ({depth, from}); r9: `stops` = where an `(( … ))` stands
-  let words = [], pending = [], redirect = false, pipe = null, skipped = 0, list = 0, andOr = false, coproc = null;
+  // r12: `cont` = the last token was `|`, `|&`, `&&` or `||` (whatever stood on its left — a word, a subshell, a group);
+  // `op` = the redirection operator whose target comes next; `stops` also = where a construct the scan does not parse
+  // stands (UNKNOWN ⇒ STOP)
+  let words = [], pending = [], redirect = false, pipe = null, skipped = 0, list = 0, andOr = false, coproc = null, cont = false, op = '';
   const groups = [], mine = [], span = { docs: 0 }, stops = [];
   const end = () => {
     const c = words.length ? { words, owner, src: s, pipeFrom: pipe } : null;
-    if (c) { out.push(c); mine.push(c); words.depth = groups.length; words.andOr = andOr; andOr = false; }
+    if (c) { out.push(c); mine.push(c); words.depth = groups.length; words.andOr = andOr; andOr = false; if (splitCond(words)) stops.push(words[0].at); }
     words = []; pipe = null;
     return c;
   };
@@ -231,6 +247,7 @@ function shellCommands(src, owner = null, depth = 0, offset = 0) {
         for (; j < s.length && s[j] !== '"'; j++) {
           if (s[j] === '\\') { v += s[j + 1] || ''; j++; continue; }
           if (s[j] === '$' && s[j + 1] === '(' && s[j + 2] === '(') { const e = spanEnd(s, j + 1, '(', ')', false); j = e; v += '$(())'; continue; }
+          if (s[j] === '$' && s[j + 1] === '{' && FUNSUB.test(s[j + 2] || '')) { const e = spanEnd(s, j + 1, '{', '}'); nested(s.slice(j + 3, e), at); v += s.slice(j, e + 1); j = e; continue; }   // r12
           if (s[j] === '$' && s[j + 1] === '(') { const e = spanEnd(s, j + 1, '(', ')', true, span); nested(s.slice(j + 2, e), at); v += '$()'; j = e; continue; }
           if (s[j] === '`') { const e = spanEnd(s, j, '`', '`'); nested(s.slice(j + 1, e), at); v += '$()'; j = e; continue; }
           v += s[j];
@@ -240,7 +257,9 @@ function shellCommands(src, owner = null, depth = 0, offset = 0) {
       }
       if (ch === '$' && s[i + 1] === '(' && s[i + 2] === '(') { const e = spanEnd(s, i + 1, '(', ')', false); v += '$(())'; i = e + 1; continue; }
       if (ch === '$' && s[i + 1] === '(') { const e = spanEnd(s, i + 1, '(', ')', true, span); nested(s.slice(i + 2, e), at); v += '$()'; i = e + 1; continue; }
-      if (ch === '$' && s[i + 1] === '{') { const e = spanEnd(s, i + 1, '{', '}'); v += s.slice(i, e + 1); i = e + 1; continue; }
+      if (ch === '$' && s[i + 1] === '{' && FUNSUB.test(s[i + 2] || '')) { const e = spanEnd(s, i + 1, '{', '}'); nested(s.slice(i + 3, e), at); v += s.slice(i, e + 1); i = e + 1; continue; }   // r12
+      // r12: a parameter's own words run their substitutions (`${x:-$(C &)}`) — scanned like a heredoc's
+      if (ch === '$' && s[i + 1] === '{') { const e = spanEnd(s, i + 1, '{', '}'); substitutions(s.slice(i + 2, e), at); v += s.slice(i, e + 1); i = e + 1; continue; }
       if (ch === '`') { const e = spanEnd(s, i, '`', '`'); nested(s.slice(i + 1, e), at); v += '$()'; i = e + 1; continue; }
       v += ch;
       i++;
@@ -253,8 +272,9 @@ function shellCommands(src, owner = null, depth = 0, offset = 0) {
     if (ch === '\n') {
       // r11: a newline after `|`, `|&`, `&&` or `||` CONTINUES the pipeline or the and-or list on the next line (every
       // shell — the lexer's continuation, like a backslash-newline: `C |⏎ tee x &` sends C to the background, `cat <<EOF
-      // &&⏎ … EOF⏎ echo ok &` the heredoc's substitutions); a heredoc's body is still read here
-      const more = !words.length && (pipe !== null || andOr);
+      // &&⏎ … EOF⏎ echo ok &` the heredoc's substitutions); a heredoc's body is still read here — r12: whatever stood on
+      // the left of the operator (W1: `( C ) |⏎ cat &` — after a subshell `pipe` is null, the list went on regardless)
+      const more = !words.length && (cont || pipe !== null || andOr);
       if (!more) { lone(end(), 'fg'); closeCoproc(); }   // r8: a coproc's list ends
       i++;
       for (const h of pending) {   // the heredoc's lines: up to the delimiter line, whatever their length (r4: no shell)
@@ -266,6 +286,8 @@ function shellCommands(src, owner = null, depth = 0, offset = 0) {
         else if (!h.quoted) {
           // r10: the body is expanded by the process that runs the command it feeds — sent to the background before the
           // body was read (`cat <<EOF > o.txt &`), its substitutions run in that job
+          // r12: a builtin's is expanded by the shell itself (`: <<EOF⏎$((IFS=…))⏎EOF`) — kept for `arithmetic`
+          (h.words.expands || (h.words.expands = [])).push(b.body);
           const from = out.length;
           substitutions(b.body, h.at);
           if (h.words.bg) for (let k = from; k < out.length; k++) { const w = out[k].words; w.bg = true; w.jobs = [...(w.jobs || []), ...h.words.jobs]; }
@@ -278,11 +300,13 @@ function shellCommands(src, owner = null, depth = 0, offset = 0) {
     if (ch === ' ' || ch === '\t') { i++; continue; }
     if (ch === '\\' && s[i + 1] === '\n') { i += 2; continue; }
     if (ch === '#') { while (i < s.length && s[i] !== '\n') i++; continue; }   // a word's start: a comment to the line's end
-    if (ch === '&' && s[i + 1] === '>') { i += s[i + 2] === '>' ? 3 : 2; redirect = true; continue; }
-    if (ch === '(' && s[i + 1] === '(' && !words.length) { const e = spanEnd(s, i, '(', ')', false); stops.push(i); i = e + 1; continue; }   // `(( … ))` arithmetic (r9: a stop)
-    if (ch === '|' && s[i + 1] === '&') { pipe = end(); redirect = false; i += 2; continue; }   // `|&`: a pipe (stderr too)
-    if (ch === '(' && /^[ \t]*\)/.test(s.slice(i + 1, i + 64)) && (words.length === 1 || (words.length === 2 && words[0].v === 'function')) && words.every((x) => !x.q) && /^[\w.:@+-]+$/.test(words[words.length - 1].v)) {
-      const c = end();   // r7: `name ()` / `function name ()` — a definition: its body next
+    cont = false;   // r12: a token — the separators below say whether it continues the list past a newline
+    if (ch === '&' && s[i + 1] === '>') { op = s[i + 2] === '>' ? '&>>' : '&>'; i += op.length; redirect = true; continue; }
+    // `(( … ))` arithmetic (r9: a stop) — r12: wherever it stands (`then (( i ))`, `while (( i ))`, `for (( i; 0; ))`)
+    if (ch === '(' && s[i + 1] === '(') { const e = spanEnd(s, i, '(', ')', false); stops.push(i); i = e + 1; continue; }
+    if (ch === '|' && s[i + 1] === '&') { pipe = end(); redirect = false; i += 2; cont = true; continue; }   // `|&`: a pipe (stderr too)
+    if (ch === '(' && /^[ \t]*\)/.test(s.slice(i + 1, i + 64)) && [1, 2].includes(afterOpeners(words).length) && (afterOpeners(words).length === 1 || afterOpeners(words)[0].v === 'function') && words.every((x) => !x.q) && /^[\w.:@+-]+$/.test(words[words.length - 1].v)) {
+      const c = end();   // r7: `name ()` / `function name ()` — a definition: its body next (r12: after an opener too)
       if (c) c.words.def = true;
       list = out.length;
       i = s.indexOf(')', i) + 1;
@@ -290,6 +314,13 @@ function shellCommands(src, owner = null, depth = 0, offset = 0) {
     }
     if (';&|()'.includes(ch)) {
       const two = (ch === '&' || ch === '|' || ch === ';') && s[i + 1] === ch;
+      // r12: a `(` GLUED to a word is no subshell — a compound assignment `a=(…)` / `a+=(…)`, zsh's glob qualifier
+      // `*(e:…:)` (it runs code), an extglob `@(…)`: only a compound assignment with no `[` in it is read on (its
+      // elements as words); any other is a STOP (W4: `a=([i]=x)` evaluates i)
+      if (ch === '(' && words.length && words[words.length - 1].end === i) {
+        const g = words[words.length - 1];
+        if (g.q || !/^[A-Za-z_][A-Za-z0-9_]*\+?=$/.test(g.v) || s.slice(i + 1, spanEnd(s, i, '(', ')')).includes('[')) stops.push(i);
+      }
       const c = end();
       if (ch === ';' || ch === '&' || (two && ch === '|')) closeCoproc();   // r8: a coproc's list ends
       if (ch === '&' && !two) {   // `… &` — its whole and-or list to the background: r6 — ONE job of this shell, launched here
@@ -306,6 +337,7 @@ function shellCommands(src, owner = null, depth = 0, offset = 0) {
       else if (ch === '(') { groups.push({ close: ')', outer: list }); list = out.length; }
       else if (ch === ';' || (ch === '&' && !two)) list = out.length;
       redirect = false;
+      cont = ch === '|' || (two && ch === '&');   // r12: `|`, `||`, `&&`
       i += two ? 2 : 1;
       continue;
     }
@@ -323,6 +355,7 @@ function shellCommands(src, owner = null, depth = 0, offset = 0) {
       const w = readWord(i);
       i = w.end > i ? w.end : i + 1;
       (words.herestrings || (words.herestrings = [])).push(w.v);
+      (words.expands || (words.expands = [])).push(s.slice(w.at, w.end).replace(/'[^']*'/g, "''"));   // r12: the shell expands it
       continue;
     }
     if (ch === '<' && s[i + 1] === '<') {   // a heredoc: its delimiter, its lines after this line
@@ -336,12 +369,12 @@ function shellCommands(src, owner = null, depth = 0, offset = 0) {
       if (w.v) pending.push({ delim: w.v, strip, quoted: w.q, words, at });
       continue;
     }
-    if (ch === '<' || ch === '>') { i++; while ('<>&|'.includes(s[i] || '_')) i++; redirect = true; continue; }
+    if (ch === '<' || ch === '>') { const o = i; i++; while ('<>&|'.includes(s[i] || '_')) i++; op = s.slice(o, i); redirect = true; continue; }
     const w = readWord(i);
     i = w.end > i ? w.end : i + 1;
-    if (redirect) { redirect = false; (words.targets || (words.targets = [])).push(w); continue; }   // r9: a target, kept
+    if (redirect) { redirect = false; w.op = op; (words.targets || (words.targets = [])).push(w); continue; }   // r9: a target, kept (r12: with its operator)
     if (/^\d+$/.test(w.v) && (s[i] === '<' || s[i] === '>')) continue;   // a file descriptor before a redirection
-    if (!w.q && w.v === '{' && words.length === 2 && words[0].v === 'function') end();   // r7: `function name {`
+    if (!w.q && w.v === '{' && afterOpeners(words).length === 2 && afterOpeners(words)[0].v === 'function') end();   // r7: `function name {` (r12: after an opener)
     // r8: `coproc NAME { … }` — the name before a compound command is no command word
     const named = words.length === 2 && words[0].v === 'coproc' && !words[0].q && !words[1].q && /^[A-Za-z_][A-Za-z0-9_]*$/.test(words[1].v) && GROUP_OPEN.has(w.v);
     if (!w.q && (named || words.every((x) => OPENERS.has(x.v)))) {   // r4: a compound command's own words, where a command word stands
@@ -409,9 +442,11 @@ const SHELL_OWN = new Set(['.', ':', 'source', 'eval', 'exec', 'exit', 'return',
  *  evals text the line cannot read, or may change what `wait` / `kill` mean (`alias`, `enable`, `disable`, `builtin`);
  *  r10: or what a word runs (`hash`, `functions`, `autoload`, `zmodload`); r11: or does arithmetic (`let "$n=1"`), or
  *  writes names its own syntax gives (zsh's `zparseopts` specs, `zformat -f`, `zstyle -s`, `zregexparse`, `getln`;
- *  bash's `compgen -V`) */
+ *  bash's `compgen -V`); r12: or evaluates text it is given — mapfile / readarray `-C` (a callback run every few lines:
+ *  W6 `mapfile -C 'IFS=…'`), `complete -C` / `-F`, `bind -x`, `fc` (re-runs a command), zsh's `sched` */
 const UNSURE = new Set(['set', 'setopt', 'unsetopt', 'shopt', 'emulate', 'trap', 'source', '.', 'eval', 'alias', 'enable', 'disable', 'builtin',
-  'hash', 'functions', 'autoload', 'zmodload', 'let', 'zparseopts', 'zformat', 'zstyle', 'zregexparse', 'getln', 'compgen']);
+  'hash', 'functions', 'autoload', 'zmodload', 'let', 'zparseopts', 'zformat', 'zstyle', 'zregexparse', 'getln', 'compgen',
+  'mapfile', 'readarray', 'complete', 'bind', 'fc', 'sched']);
 /** r10: a word that EXPANDS NOTHING (r9's `quiet`, closed tighter): no `$` (a parameter, a span, arithmetic — `$(( 1/0 ))`
  *  ends both shells), no glob or pattern character (zsh ends the shell on a pattern that matches nothing — `*` `?` `[`,
  *  `#` / `^` / `~` under EXTENDED_GLOB, a `<1-9>` range), no brace expansion, no `~` and no leading `=` (zsh: an unknown
@@ -462,9 +497,11 @@ const literal = (t) => { const u = t.replace(/'[^']*'/g, ''); return !/[$`]/.tes
 function writesKnown(c, cw) {
   const w = c.words, raw = (x) => c.src.slice(x.at, x.end), seen = (x) => literal(raw(x)) && !reserved(x.v.replace(/[[=?+][^]*$/, ''));
   const aName = (x) => !!x && seen(x) && /^[A-Za-z_][A-Za-z0-9_]*$/.test(x.v);
-  if (w.length > 1 && !w[0].q && LOOPS.has(w[0].v)) {   // `for NAME in …` / zsh `for a b (…)`: every name before `in` / `do`
-    for (let k = 1; k < w.length && !['in', 'do'].includes(w[k].v); k++) if (!aName(w[k])) return false;
-    return true;
+  // `for NAME in …` / zsh `for a b (…)`: every name before `in` / `do` — r12: wherever the loop's word stands (after
+  // `then`, `{`, `!`, `time`: W2 `then for IFS in 0123456789`), never words[0] only
+  for (let h = 0; h < w.length; h++) {
+    if (w[h].q || !LOOPS.has(w[h].v)) continue;
+    for (let k = h + 1; k < w.length && !['in', 'do'].includes(w[k].v); k++) if (!aName(w[k])) return false;
   }
   if (!cw) return true;
   const ops = w.slice(cw.k + 1);
@@ -513,6 +550,12 @@ const BETWEEN = new Map([
  *  a regular builtin's failed redirection does not (`true >&9`, `false >&9`, `echo hi >&9`, `cd / >&9`, `x=1 >&9`:
  *  v10a D3, v10b D4 / D5, v10c D12 / D13 / D14 end) */
 const SPECIAL = new Set(['.', ':', 'break', 'continue', 'eval', 'exec', 'exit', 'export', 'readonly', 'return', 'set', 'shift', 'times', 'trap', 'unset']);
+/** r12: a redirection the reader can follow — /dev/null opened as a FILE (`>`, `>>`, `<`) or a DESCRIPTOR in the dup form
+ *  (`>&N`, `<&N`, `N>&M`, `>&-`): `> 2` opens a FILE named 2 (W7: a directory named 2 — the redirection fails and the
+ *  command never runs; `wait < 0` with no file 0), `&>` is `&` then `>` to dash (`wait &> f` sends the wait to the
+ *  background), `<&/dev/null` is no descriptor */
+const FILE_OPS = new Set(['>', '>>', '<']), DUP_OPS = new Set(['>&', '<&']);
+const followed = (x, fds) => (FILE_OPS.has(x.op) && x.v === '/dev/null') || (DUP_OPS.has(x.op) && fds.test(x.v));
 /** r10: …and an ASSIGNMENT-only command (`x=1 y=two`) of plain words to LOWER-case names the shells do not keep, in a
  *  line that declares nothing — 'r10: C & x=1; wait', 'r10: C & x=1 y=two; wait' (every upper-case name may be one of
  *  either shell's own: `UID=0` and `SECONDS=1/0` end zsh) */
@@ -533,20 +576,28 @@ const varfd = (c, x) => { const m = !x.q && VARFD.exec(x.v); return !!m && /^[<>
  *  (`i='IFS=1234567890'; a[i]=x`). So any such place holding more than an integer literal (`@` / `*` for a subscript)
  *  makes the line end nothing (r11 A rows: `echo $[IFS=…]`, `a[IFS=…]=x`, `${x:IFS=…}`, `declare -i n; n=IFS=…`,
  *  `i=IFS=…; [[ i -eq 0 ]]` … — `wait $!` splits the pid and returns at once in bash). So does an expansion that
- *  EVALUATES a value: bash's `${x@P}` (r11 E: `x='$((IFS=…))'`), zsh's `(e)` flag. */
+ *  EVALUATES a value: bash's `${x@P}` (r11 E: `x='$((IFS=…))'`), zsh's `(e)` flag; r12: an INDIRECTION `${!x}` (W5: x='a[IFS=…]'
+ *  — the name's subscript is evaluated; `${!}` is `$!`), bash 5.3's `${ …; }` / `${| …; }` (its commands run in the
+ *  shell itself), a compound assignment's subscript (`a=([i]=x)`: the scan's glued `(`), and the same places in the
+ *  text a builtin expands in the shell itself — an unquoted heredoc's body, a here-string (`: <<EOF⏎$((IFS=…))⏎EOF`,
+ *  `read y <<< "${!x}"`). */
 const SUB_EXP = /\$\{[#!]?[A-Za-z_][A-Za-z0-9_]*\[(?!\s*(-?\d+|@|\*)\s*\])/;
 const SUB_NAME = /^[A-Za-z_][A-Za-z0-9_]*\[(?!\s*(-?\d+|@|\*)\s*\])/;
 const SUBSTR = /\$\{[#!]?([A-Za-z_][A-Za-z0-9_]*|[0-9@*])(\[[^\]]*\])?:(?![-=?+])(?!\s*-?\d+\s*(:\s*-?\d+\s*)?\})/;
-const EVALS = /\$\[|\$\{[^}]*@P\}|\$\{\([^)]*e[^)]*\)/;
+const EVALS = /\$\[|\$\{[^}]*@P\}|\$\{\([^)]*e[^)]*\)|\$\{!(?!\})|\$\{[\s|]/;
+/** r12: bash 5.3's function substitution — `${ cmd; }` / `${| cmd; }` (a blank, a newline or `|` after the brace) */
+const FUNSUB = /[ \t\n|]/;
 const ARITH_OPS = new Set(['-eq', '-ne', '-lt', '-le', '-gt', '-ge']);
 const INDEXED = new Set(['unset', 'test', '[', '[[', 'wait', 'getopts', 'vared']);
 function arithmetic(c, cw) {
   const w = c.words, raw = (x) => String(c.src || '').slice(x.at, x.end).replace(/'[^']*'/g, "''");
-  if ([...w, ...(w.targets || [])].some((x) => { const r = raw(x); return SUB_EXP.test(r) || SUBSTR.test(r) || EVALS.test(r); })) return true;
+  if ([...w, ...(w.targets || [])].some((x) => { const r = raw(x); return SUB_EXP.test(r) || SUBSTR.test(r) || EVALS.test(r) || /\$\(\(/.test(r); })) return true;   // r12: `$((` inside a `${…}` too
+  if ((w.expands || []).some((t) => /\$\(\(/.test(t) || SUB_EXP.test(t) || SUBSTR.test(t) || EVALS.test(t) || SETS_IN_WORD.test(t) || INDIRECT.test(t))) return true;   // r12
   if (w.some((x) => SUB_NAME.test(x.v) && /\]\+?=/.test(x.v))) return true;   // `a[i]=x` (an assignment word — commandWord reads it as a command)
-  if (w.length && !w[0].q && w[0].v === '[[') {
-    if (w.some((x) => SUB_NAME.test(x.v))) return true;
-    for (let k = 1; k < w.length - 1; k++) if (ARITH_OPS.has(w[k].v) && !(/^-?\d+$/.test(w[k - 1].v) && /^-?\d+$/.test(w[k + 1].v))) return true;
+  const cond = w.findIndex((x) => !x.q && x.v === '[[');   // r12: wherever it stands (`if [[ i -eq 0 ]]`, `! [[ …`: W3)
+  if (cond >= 0) {
+    if (w.slice(cond + 1).some((x) => SUB_NAME.test(x.v))) return true;
+    for (let k = cond + 1; k < w.length - 1; k++) if (ARITH_OPS.has(w[k].v) && !(/^-?\d+$/.test(w[k - 1].v) && /^-?\d+$/.test(w[k + 1].v))) return true;
   }
   if (cw && (WRITERS.has(cw.base) || INDEXED.has(cw.base)) && w.slice(cw.k + 1).some((x) => SUB_NAME.test(x.v))) return true;
   if (cw && (cw.base === 'integer' || cw.base === 'float' || (DECLARE.has(cw.base) && w.slice(cw.k + 1).some((x) => /^[-+][a-zA-Z]*[iEF]/.test(x.v))))) return true;
@@ -587,19 +638,19 @@ function endJobs(cmds, stops = [], all = cmds) {
   let declares = false;
   for (const c of cmds) {
     const w = c.words, cw = commandWord(w), ws = [...w, ...(w.targets || [])];
-    if (w.def || (w.length > 1 && !w[0].q && w[0].v === 'function')) return false;   // r10: a definition
+    if (w.def || w.some((x, k) => k < w.length - 1 && !x.q && x.v === 'function')) return false;   // r10: a definition (r12: after an opener too)
     if (cw && UNSURE.has(cw.base)) return false;
     if (ws.some((x) => x.v.includes('$(())') || SETS_IN_WORD.test(x.v) || INDIRECT.test(x.v) || varfd(c, x) || ((m) => !!m && reserved(m[1]))(NAME_SET.exec(x.v)))) return false;
     if (!writesKnown(c, cw)) return false;   // r11: a name it cannot see, or one the shells keep
     if (arithmetic(c, cw)) return false;   // r11: arithmetic or an evaluation it cannot read
     if (cw && DECLARE.has(cw.base)) declares = true;
   }
-  // r10: the zsh range `<n-m>` / `<->` — the scan reads it as redirections (`echo a<1-9>b`: a target `1-9`)
+  // r10: the zsh range `<1-9>` / `<->` — the scan reads it as redirections (`echo a<1-9>b`: a target `1-9`)
   const ranges = (c) => { const ws = [...c.words, ...(c.words.targets || [])]; return /<\d*-/.test(c.src.slice(Math.min(...ws.map((x) => x.at)), Math.max(...ws.map((x) => x.end)))); };
   const clean = (c) => !c.words.heredocs && !c.words.herestrings && !c.words.procsub && !ranges(c);
   // a STEP of the allowlist: a row's bare word with plain operands, or plain assignments
   const step = (c, cw) => {
-    if (!clean(c) || !c.words.every(plainWord) || !(c.words.targets || []).every((x) => /^(\/dev\/null|\d+)$/.test(x.v))) return false;
+    if (!clean(c) || !c.words.every(plainWord) || !(c.words.targets || []).every((x) => followed(x, /^\d+$/))) return false;   // r12: `followed`
     if (!cw) return !declares && c.words.every((x) => { const m = PLAIN_SET.exec(x.v); return !!m && !reserved(m[1]); });
     const row = BETWEEN.get(c.words[0].v);
     if (SPECIAL.has(c.words[0].v) && (c.words.targets || []).length) return false;   // r11: dash exits at `: >&9`
@@ -625,7 +676,7 @@ function endJobs(cmds, stops = [], all = cmds) {
       continue;
     }
     if (how === 'fg' && step(c, cw)) continue;   // a step of the allowlist: nothing changes
-    if (how === 'fg' && cw && cw.k === 0 && REAPERS.includes(cw.base) && clean(c) && (c.words.targets || []).every((x) => /^(\/dev\/null|[0-2]|-)$/.test(x.v))) {
+    if (how === 'fg' && cw && cw.k === 0 && REAPERS.includes(cw.base) && clean(c) && (c.words.targets || []).every((x) => followed(x, /^([0-2]|-)$/))) {
       const args = c.words.slice(cw.k + 1).map((x) => x.v);
       if (cw.base === 'wait' && !args.length) { for (const o of open) o.job.ended = 'wait'; open = []; continue; }
       const by = (args.length === 1 || (cw.base === 'kill' && args.length === 2 && args[0] === '-TERM')) && BANG.includes(args[args.length - 1]);
