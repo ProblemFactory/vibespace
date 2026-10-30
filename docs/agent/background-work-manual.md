@@ -238,14 +238,17 @@ it, a limit on the user slice does (`show` names which).
   shut down cleanly — ONE clock for all of it; a process that ignores SIGTERM is killed when the 10 s run out (its run
   says «stopped by force: it did not end on SIGTERM in 10 s …»), and one the job starts DURING the stop gets only what is
   left of them («… (1 process got less than the full grace)»). A SIGTERM to the job's wrapper alone (`kill <pid>`) stops
-  it the same way: the wrapper sends it on to the whole group.
+  it the same way: the wrapper sends it on to the job's main process and SIGTERM to the rest of its group. Every process
+  gets ONE stop signal (a program that cleans up on the first is never cut off by a second), and a main process that
+  started its own session (`setsid prog`) still gets it from the wrapper.
 - **What a TASK leaves running is stopped when it ends** (`nohup x &`, a background daemon): its run says «the job left
   1 process running — it was stopped; to keep a daemon, run it as a service job». A **service** keeps what it starts
   until its NEXT START — your `start`, its restart policy's, or the replay after VibeSpace restarts or updates — or its
   stop, park or removal; then they are stopped (SIGTERM, 10 s, then by force; said, and `show` says when — or that they
   had already ended on their own) and its next run starts only once they are gone. A search that could not finish
-  proves nothing: the next run waits («could not check 100 of 3100 processes … — not restarted») and the next start
-  searches again. On a cluster pod a process that
+  proves nothing — and is searched once per start, never again while that start waits: the start is refused at once
+  («cannot prove the previous run is gone (could not check 100 of 3100 processes for what it left running) — not
+  restarted; …», ONE For-you notice); the next start searches again, and `vibespace-job stop <id>` ends the wait. On a cluster pod a process that
   LEAVES the job's process group (`setsid`) cannot be stopped from there: a task's is named — «1 process left its group
   — not stopped; run it as a service job» — and a service keeps it with the rest. It is found by the job's mark in its
   environment (`VIBESPACE_JOB_ID`): a program that detaches itself AND clears its environment (`setsid env -i …`) is

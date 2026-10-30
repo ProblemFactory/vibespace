@@ -1279,7 +1279,9 @@ class JobManager {
       term(recorded); term(scan());
       let live = [...sent.values()];
       while (live.length && now() < until) { await pause(50); live = live.filter((id) => PI.aliveIdentity(id) === true); }
-      const late = scan().filter((id) => !sent.has(id.pid)); // forked during the grace: by force with the rest
+      // round 9: the second walk only after a grace something lived through — nothing signalled, nothing could fork since: the
+      // first walk's answer stands (never two walks back to back on the event loop)
+      const late = sent.size ? scan().filter((id) => !sent.has(id.pid)) : []; // forked during the grace: by force with the rest
       for (const id of late) sent.set(id.pid, id);
       live.push(...late.filter((id) => PI.aliveIdentity(id) === true));
       n = sent.size;
@@ -1287,14 +1289,18 @@ class JobManager {
     }
     // round 7: `cleared` only when something was stopped — what had already ended on its own is said so, never «stopped at».
     // Round 8: A CUT SCAN PROVES NOTHING — «none found» in part of /proc is no «none left»: neither `gone` nor `cleared`, the next
-    // start held (_pending) and said once; a later attempt scans again (what this one stopped is counted on). What could not be
-    // read is said by its owner — «of other users» only when there are any
+    // start held (_pending); what this walk stopped is counted on. What could not be read is said by its owner — «of other
+    // users» only when there are any. Round 9: A CUT WALK IS AN ANSWER — «cannot prove», STAMPED on the record (`cut`: its time,
+    // its reason) and asked no more inside that decision: the start that asked is refused at once by the doubt's door
+    // (_runDoubt: said, ONE For-you notice) — round 8 walked /proc twice every 50 ms for the whole grace (38 walks at 10 s, the
+    // hub's loop 91 % stalled). A later decision (a start, the person's stop, a boot) walks once more; a finished walk ends it
     run._clearSent = (run._clearSent || 0) + n; n = run._clearSent;
     if (seen && seen.cut) {
-      const what = `could not check ${seen.total - seen.scanned} of ${seen.total} processes for what its last run left running${n ? ` (${n} found and stopped)` : ''} — not restarted`;
-      if (!run._cutSaid) { run._cutSaid = true; this.d.log(`[jobs] ${job.id} ${what}`); this._touch(job, { what }); }
+      l.cut = { at: now(), why: `could not check ${seen.total - seen.scanned} of ${seen.total} processes for what it left running${n ? `; ${n} found and stopped` : ''}` };
+      this._dirty = true;
       return;
     }
+    delete l.cut;
     const others = (seen && seen.others) || 0, ours = seen ? Math.max(0, (seen.unreadable || 0) - others) : 0;
     const scanned = others || ours ? ` (its mark searched in ${seen.scanned} processes; unreadable: ${[others ? `${others} of other users` : '', ours ? `${ours} of ours, not dumpable` : ''].filter(Boolean).join(', ')})` : '';
     this._dirty = true;
@@ -1337,7 +1343,10 @@ class JobManager {
    *  it): '' or why. A run that wrote its end (exit.json), whose scope was read empty (nothing of it runs — the job IS its
    *  scope), or whose doubt a person's stop ended (`doubtOver`) is no doubt; a wrapper proven ALIVE is _besideLive's */
   _runDoubt(job, run) {
-    if (!run || !run.endedAt || run.doubtOver || run._scopeEmpty) return '';
+    if (!run || !run.endedAt || run.doubtOver) return '';
+    const l = run.left; // round 9: what it KEPT, searched in only part of /proc — the stamped answer of the last walk
+    if (l && l.kept && l.cut && !l.cleared && !l.gone) return String(l.cut.why || 'a search of /proc was cut short');
+    if (run._scopeEmpty) return '';
     if (this._readExit(job, run)) return '';
     const why = this._wrapperUnproven(this._ctlJson(job, run, 'pid.json'));
     return why === 'alive' ? '' : why;
@@ -1363,6 +1372,13 @@ class JobManager {
    *  carrying the job's mark (its wrapper among them: it then drains its own group) — SIGTERM, the grace, then by force; the
    *  doubt is over only when the mark's scan finished (a cut one proves nothing), and said */
   async _stopDoubt(job, run) {
+    const l = run.left;
+    if (l && l.kept && l.cut && !l.cleared && !l.gone) { // round 9: what it kept — the stop's own clear walked /proc once just now
+      run.doubtOver = { by: 'stop', at: now() }; this._dirty = true;
+      const what = `stopped by its owner — what its last run left was not proven gone (${l.cut.why}); it may start again`;
+      this.d.log(`[jobs] ${job.id} ${what}`); this._touch(job, { what });
+      return;
+    }
     const scope = this._runScope(job, run);
     const killed = scope && scope.dir ? await this._within(this._killScope(scope), this.d.reapReadMs ?? REAP_READ_MS) : null;
     const found = PI.membersOf({ mark: `VIBESPACE_JOB_ID=${job.id}` }), scan = found.scan || {};
@@ -1373,9 +1389,10 @@ class JobManager {
     for (const id of live) PI.signalIdentity(id, 'SIGKILL');
     const n = found.length, es = (k) => (k === 1 ? '' : 'es');
     const did = `${killed === 'killed' ? 'its scope killed, ' : ''}${n} process${es(n)} carrying its mark stopped${live.length ? ` (${live.length} by force)` : ''}`;
-    if (scan.cut) { const what = `stopped by its owner — ${did}; could not check ${scan.total - scan.scanned} of ${scan.total} processes: the previous run is still not proven gone`; this.d.log(`[jobs] ${job.id} ${what}`); this._touch(job, { what }); return; }
-    run.doubtOver = { by: 'stop', at: now() };
-    const what = `stopped by its owner — the previous run was not proven gone: ${did}; it may start again`;
+    // round 9 (the ruling of choice 5): the person's word ends it — a cut scan is said, never a doubt with no way out (the
+    // notice tells them «stop it, then start it again»)
+    run.doubtOver = { by: 'stop', at: now() }; this._dirty = true;
+    const what = `stopped by its owner — the previous run was not proven gone: ${did}${scan.cut ? `; could not check ${scan.total - scan.scanned} of ${scan.total} processes` : ''}; it may start again`;
     this.d.log(`[jobs] ${job.id} ${what}`); this._touch(job, { what });
   }
   /** what a service's next start waits for (round 6): processes its last run KEPT and not yet stopped; a reap of its scope in
@@ -1393,10 +1410,14 @@ class JobManager {
   }
   /** true: the start may go; false: it may not (round 8 — a run that may still run, what it kept not proven ended), said */
   async _clearBefore(job, run, trigger) {
+    // round 9: ONE /proc WALK PER DECISION — what it kept is cleared ONCE, before the wait (round 8 cleared inside it: a cut walk
+    // re-ran every 50 ms for the whole grace); the wait re-reads only kept facts — the reap, the doubt, the record's stamps. ONE
+    // clock: the grace runs from the start asked, the clear's inside it
     const until = now() + this._graceMs();
+    await this._clearKept(job, run).catch(() => { });
     for (;;) {
-      await this._clearKept(job, run);
-      const l = run.left, kept = !!(l && l.kept && !l.cleared && !l.gone); // round 8: a cut scan holds it (said by the clear)
+      const l = run.left, kept = !!(l && l.kept && !l.cleared && !l.gone && !(l.cut && run.doubtOver)); // a cut the person's stop ended: not held
+      if (kept && l.cut) { this._doubtBlocks(job, run, trigger); return false; } // a cut walk's answer — refused at once, by the doubt's door
       const reaped = await this._reapScope(job, run); // round 6: a reap that does not finish here stays enqueued — a later tick reaps it
       if (!kept && reaped && !this._runDoubt(job, run)) return true;
       if (now() >= until) {
@@ -2272,8 +2293,9 @@ class JobManager {
     // to THIS run — it never reaches a run started again inside the grace
     if ((hadProc || scope) && !force && this._runLive(job, run)) this._armKillStep(job, run, scope);
     // round 5 (the ruling): a service whose last run ENDED keeping what it left — its stop stops them, said
-    if (run && run.endedAt) this._clearKept(job, run).catch(() => { });
-    if (run && run.endedAt && this._runDoubt(job, run)) this._stopDoubt(job, run).catch(() => { }); // round 8: the person's word ends a doubt
+    // round 8: the person's word ends a doubt — round 9: after its clear (ONE walk of /proc per decision: a doubt over what it
+    // kept is ended by the walk just made, never a second)
+    if (run && run.endedAt) this._clearKept(job, run).then(() => { if (this._runDoubt(job, run)) return this._stopDoubt(job, run); }).catch(() => { });
     if (!hadProc && job.kind === 'cron') { job.state = 'down'; }
     this._touch(job);
     this._save();

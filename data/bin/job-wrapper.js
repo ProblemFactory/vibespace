@@ -547,10 +547,14 @@ async function forceScope(why) {
   if (procsOf(scopeDir).length) { try { fs.writeFileSync(path.join(scopeDir, 'cgroup.kill'), '1'); } catch { } } // no manager answered: the kernel's own
 }
 // round 7: what OUR SIGTERM reached and when (`pid:start` → ms) — each process's grace runs from its own SIGTERM; a row of a fresh
-// /proc scan, its start re-read at the act (same)
+// /proc scan, its start re-read at the act (same). Round 9: ONE SIGNAL PER PID PER STOP STEP — EVERY delivery of the stop goes
+// through termOnce (the job's main its own signal, the group's, the scope's, a stopped service's escapees): recorded, a second
+// refused (round 8 forwarded the main's signal, then its group loop SIGTERMed it again 13 ms later — a graceful cleanup cut off,
+// code 143); true when it was delivered
 const termed = new Map();
 const termKey = ([pid, st]) => `${pid}:${st}`;
-const termOnce = (p) => { if (termed.has(termKey(p)) || !same(p)) return; termed.set(termKey(p), Date.now()); try { process.kill(p[0], 'SIGTERM'); } catch { } };
+const termOnce = (p, sig = 'SIGTERM') => { if (termed.has(termKey(p)) || !same(p)) return false; termed.set(termKey(p), Date.now()); try { process.kill(p[0], sig); return true; } catch { return false; } };
+const rowOf = (pid) => { const r = pid ? statOf(pid) : null; return r && r[0] !== 'Z' ? [Number(pid), Number(r[19]), Number(r[2])] : null; }; // [pid, start, pgid]
 const killNow = (p) => { if (!same(p)) return false; try { process.kill(p[0], 'SIGKILL'); return true; } catch { return false; } }; // round 8: by force, its start re-read
 // round 8: WHO SIGNALLED WHOM — the engine writes its intent (stop.json), THEN signals our whole group (we are in it): a signal our
 // handler hears beside a FRESH intent is the engine's, and every member heard it with us; a signal with no fresh intent is ours
@@ -559,29 +563,46 @@ const killNow = (p) => { if (!same(p)) return false; try { process.kill(p[0], 'S
 // (a stop before our stamp, an engine gone between the two) is a stop nobody delivered — we deliver it. Said in the job's log and
 // in exit.json (`stopBy`: engine | signal | intent)
 const INTENT_FRESH_MS = 2000;
-let stopBy = '', heard = null;
+let stopBy = '', heard = null, mainBy = '';
 // THE STOP — the engine's signal to our group, or (round 7) ITS INTENT: stop.json beside pid.json, written before it signals. The
 // child's end and our own handler land at once, in either order: a wrapper that handles the end first still knows a stop is in
 // flight (a service's leftovers stopped with it — never kept, unsaid: heavy ㉒, 1 pair in 12). Said in the job's log
 function onStop(sig, at, by) {
   if (stopping) return;
   stopping = sig; stopAt = at; stopBy = by;
-  const who = by === 'engine' ? 'the engine signalled its process group' : by === 'intent' ? "the engine's stop never reached its group — the wrapper signals it" : 'a signal to the wrapper alone — the wrapper signals its group';
+  // round 9: A SIGNAL GOES TO A PROVEN IDENTITY, NEVER ASSUMED DELIVERED — the engine's group signal reached what is in OUR group
+  // NOW (its pgid ours, read at the stop): marked, never signalled again. Everything else hears the stop from us, once: the job's
+  // main its own signal (round 8 assumed the engine's reached it — a main that left our group (setsid) was sent none, killed at
+  // the grace under «did not end on SIGTERM»), then the rest SIGTERM. The cgroup rung: THE SCOPE IS THE GROUP — its processes one
+  // by one through the same table (round 4's `systemctl kill` of the scope sent the stop AGAIN to all the engine's signal had
+  // reached: the main heard it twice, 3 ms apart); a scope whose list cannot be read, the manager's kill (as before)
+  const main = rowOf(child && child.pid); // the main first — its own stat names its group (no walk before it hears the stop)
+  if (main && by === 'engine' && main[2] === process.pid) termed.set(termKey(main), at);
+  mainBy = !main ? '' : termed.has(termKey(main)) ? 'engine' : termOnce(main, sig) ? 'wrapper' : '';
+  const listed = scoped() ? scopeRows() : null;
+  const rows = scoped() ? listed || [] : groupLeft().map(([p, st]) => [p, st, process.pid]); // our group's: its pgid ours
+  if (by === 'engine') for (const p of rows) if (p[2] === process.pid && !termed.has(termKey(p))) termed.set(termKey(p), at);
+  const who = by === 'engine' ? `the engine signalled its process group${mainBy === 'wrapper' ? '; its main process had left that group — the wrapper signals it' : ''}` : by === 'intent' ? "the engine's stop never reached its group — the wrapper signals it" : 'a signal to the wrapper alone — the wrapper signals its group';
   try { fs.writeSync(logFd, Buffer.from(`\n[job-wrapper] stop: ${sig} — ${stopMs / 1000} s to end (${who})\n`)); } catch { }
-  if (by !== 'engine') { try { child.kill(sig); } catch { } } // the engine's reached it with us
+  for (const p of rows) termOnce(p); // what the engine's signal did not reach — every member, for a stop not the engine's
+  if (scoped() && !listed) scopeKill(sig);
+  const on = mainBy ? ` on ${sig}` : ''; // «did not end on SIGTERM» only when one reached it
   const left = Math.max(0, at + stopMs - Date.now());
   if (!scoped()) { // round 6: a rung without a scope — the job's group is OURS to end at the grace, said (drainGroup takes what
     // the job left in it); the engine's kill step is a backstop for a wrapper that cannot (a second later). Round 7: the group
     // heard the stop with us (the engine signals it) — its grace runs from the stop; a SERVICE's processes that left the group
     // (its mark) hear it NOW, with the main — round 6 signalled them only once the main ended, against what was left of the grace
-    // round 8: only the ENGINE's signal reached them — any other stop, our own SIGTERM to each (the base's)
-    for (const p of groupLeft()) { if (by !== 'engine') termOnce(p); else if (!termed.has(termKey(p))) termed.set(termKey(p), at); }
     if (keeps) for (const p of escapedOf()) termOnce(p);
-    const t = setTimeout(() => { if (exited) return; if (!forced) forced = `it did not end on ${sig} in ${stopMs / 1000} s — its process group was killed`; try { child.kill('SIGKILL'); } catch { } }, left); t.unref?.();
+    const t = setTimeout(() => { if (exited) return; if (!forced) forced = `it did not end${on} in ${stopMs / 1000} s — its process group was killed`; try { child.kill('SIGKILL'); } catch { } }, left); t.unref?.();
     return;
   }
-  scopeKill(sig);
-  const t = setTimeout(() => { if (!exited) forceScope(`it did not end on ${sig} in ${stopMs / 1000} s — its scope was killed`); }, left); t.unref?.();
+  const t = setTimeout(() => { if (!exited) forceScope(`it did not end${on} in ${stopMs / 1000} s — its scope was killed`); }, left); t.unref?.();
+}
+/** round 9: the scope's processes as rows ([pid, start, pgid]) — never the keeper; null when its list cannot be read */
+function scopeRows() {
+  let t;
+  try { t = fs.readFileSync(path.join(scopeDir, 'cgroup.procs'), 'utf8'); } catch { return null; }
+  return t.split('\n').filter((l) => /^\d+$/.test(l) && Number(l) !== process.pid && !isKeeper(l)).map(rowOf).filter(Boolean);
 }
 for (const sig of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(sig, () => {
   const s = stopIntent(), engine = !!s && Date.now() - s.at <= INTENT_FRESH_MS; // round 8: the engine's — its clock is the intent's
@@ -706,7 +727,7 @@ async function ended(code, signal) {
     : memory.cause === 'oom' ? ` — killed: out of memory (${memory.how})` : '';
   const end = drained.left ? ` — ${leftWords(drained.left)}` : forced ? ` — stopped by force: ${forced}` : '';
   try { fs.writeSync(logFd, Buffer.from(`\n[job-wrapper] exit code=${code} signal=${signal || ''}${named}${end}\n`)); } catch { }
-  writeExit({ code, signal: signal || null, endedAt: Date.now(), memory, ...(stopping ? { stop: stopping, stopBy } : {}), ...(forced ? { forced: `stopped by force: ${forced}` } : {}), ...(drained.left ? { left: drained.left } : {}), ...(scoped() ? { scopeEmpty: drained.scopeEmpty } : {}) });
+  writeExit({ code, signal: signal || null, endedAt: Date.now(), memory, ...(stopping ? { stop: stopping, stopBy, ...(mainBy ? { mainBy } : {}) } : {}), ...(forced ? { forced: `stopped by force: ${forced}` } : {}), ...(drained.left ? { left: drained.left } : {}), ...(scoped() ? { scopeEmpty: drained.scopeEmpty } : {}) });
   process.exit(code === null ? 143 : code);
 }
 launch();

@@ -18,7 +18,10 @@
 //            a 1 s grace — never a sleep); ㉟ a stop's intent written before its signal; ROUND 8: ㊱ A STOP HAS ONE CLOCK (at
 //            the production ratio — the wrapper's grace = the engine's, 0.4 s, 2 s and 10 s at once: the wrapper's end comes
 //            before the engine's kill step); ㊶ who signalled whom (a wrapper signalled alone, an intent nobody delivered);
-//            ㊷ UNKNOWN blocks a spawn (a live service whose pid.json the next boot can never read)
+//            ㊷ UNKNOWN blocks a spawn (a live service whose pid.json the next boot can never read); ROUND 9: ㊸ a main that
+//            LEFT the wrapper's group (setsid) hears the engine's stop from the wrapper; ㊹ ONE SIGNAL PER PID PER STOP STEP (a
+//            main whose cleanup a second signal cuts: the wrapper signalled alone, the engine's stop — the pod's rung and the
+//            cgroup rung)
 //   §4 REAL  the park law through the engine's own doors (a boot replay counts like a run; a restart resets it — a service, a cron)
 //   §5 REAL  the boot's judge over a fake cgroup (the instance's OOM count rose; a rolling update; a SIGKILL from outside)
 // RED on ef0012b5 (round 5): ㉑ the new run killed at the first stop's grace, labelled; ㉒ the deaf member survived the stop,
@@ -27,7 +30,11 @@
 // ⑭ waits for a «stop:» line no wrapper writes; ㉟ kept, no `cleared`; ㊱ the escapee's SIGTERM and SIGKILL 17 ms apart; its own
 // copy of ⑭ (a 50 ms sleep into a 0.15 s window) red in 4 of 5 pairs started 0.25 s apart. RED on e7147b71 (round 7): ㊱ at 2 s
 // and 10 s the engine killed the wrapper mid-drain (no exit.json, the escapee alive); ㊶ the helper never heard a SIGTERM (killed
-// at the grace under words claiming one); ㊷ a second run beside the live one. Earlier rounds: the report.
+// at the grace under words claiming one); ㊷ a second run beside the live one. RED on 887e8d66 = 4ef7e9494 (round 8, shipped in
+// 2.369.363): ㊸ the setsid main never heard a SIGTERM — SIGKILLed at the grace under «did not end on SIGTERM»; ㊹ the main
+// signalled twice — the pod's rung, a wrapper signalled alone (its forward, then its group loop 13 ms later); the cgroup rung,
+// the engine's own stop and a SIGINT to the wrapper (the group's signal, then the scope's) — code 143 mid-cleanup. Earlier
+// rounds: the report.
 // Load: each job allocates ≤ 512 MB once (most far less, the cgroup legs stop at 256 MB), no busy loop; the legs run at once
 // (the longest: ㊱'s 10 s grace — the production one — about 11 s); scratch dataDirs under os.tmpdir(), one per leg.
 import fs from 'node:fs';
@@ -1000,6 +1007,57 @@ leg('§3 REAL ㊷ UNKNOWN BLOCKS A SPAWN — a live service on the cgroup rung w
   try { process.kill(-st.pid, 'SIGKILL'); } catch { }
   killScopeOf(b.unit);
   stopEngine(E2);
+});
+
+leg('§3 REAL ㊸ A SIGNAL GOES TO A PROVEN IDENTITY — a pod\'s task whose MAIN left the wrapper\'s process group (`setsid` execs in place): the engine\'s stop signals the wrapper\'s group, the wrapper finds its main outside it and signals it itself; it ends cleanly, the record names the sender (887e8d66: the main never heard a SIGTERM — SIGKILLed at the grace under «did not end on SIGTERM», none sent)', async (ok) => {
+  if (!realOf('prlimit') || !realOf('setsid')) { skip++; ok.say('  - SKIP the setsid-main leg: no prlimit or setsid here'); return; }
+  const dir = scratch(), termF = path.join(dir, 'main.term');
+  const E = engineIn(dir)({ memoryRungs: ['rlimit-data'], memorySample: { stopMs: 2000 } });
+  const j = E.jobs.get(E.create({ kind: 'task', name: 'setsid-main', cmd: { argv: ['setsid', 'sh', '-c', `trap 'date +%s%N > ${termF}; exit 0' TERM; echo ready; while :; do sleep 0.1; done`] }, memoryMb: 1024, owner }, caller).job.id);
+  await until(() => ready(j), 4000, 10);
+  const st = E._readStamp(j), main = Number((() => { try { return fs.readFileSync(`/proc/${st.pid}/task/${st.pid}/children`, 'utf8').trim().split(/\s+/)[0]; } catch { return 0; } })());
+  const mainPgrp = (() => { try { const t = fs.readFileSync(`/proc/${main}/stat`, 'utf8'); return Number(t.slice(t.lastIndexOf(')') + 2).split(' ')[2]); } catch { return 0; } })();
+  const t0 = Date.now();
+  E.stop(j);
+  await until(() => fs.existsSync(exitOf(j)) && !alive(st.pid), 5000, 10);
+  const termAt = (() => { try { return Math.round(Number(fs.readFileSync(termF, 'utf8').trim()) / 1e6); } catch { return 0; } })();
+  const ex = readJson(exitOf(j)) || {}, said = (fs.readFileSync(lastRun(j).log, 'utf8').match(/\[job-wrapper\] stop: [^\n]*/) || [''])[0];
+  if (alive(main)) { try { process.kill(main, 'SIGKILL'); } catch { } }
+  stopEngine(E);
+  const R = { main, mainPgrp, wrapper: st.pid, heardIn: termAt ? termAt - t0 : -1, code: ex.code, signal: ex.signal, stopBy: ex.stopBy, mainBy: ex.mainBy, forced: ex.forced || null, said };
+  ok(main > 0 && mainPgrp === main && R.heardIn >= 0 && R.heardIn < 1000 && ex.code === 0 && !ex.signal && !ex.forced && ex.stopBy === 'engine' && ex.mainBy === 'wrapper' && /\(the engine signalled its process group; its main process had left that group — the wrapper signals it\)$/.test(said),
+    `its main (its own group ${mainPgrp}, the wrapper's ${st.pid}) heard SIGTERM ${R.heardIn} ms after the stop and ended cleanly — code ${ex.code}, stopBy ${ex.stopBy}, mainBy ${ex.mainBy}: «${said}» (887e8d66: never heard — SIGKILL at 2 s, «did not end on SIGTERM»)`, R);
+});
+
+leg('§3 REAL ㊹ ONE SIGNAL PER PID PER STOP STEP — a main that cleans up 0.3 s on its first signal and dies on a second: a wrapper signalled alone (SIGINT, SIGTERM) and the engine\'s own stop, on the pod\'s rung and the cgroup rung — each main hears ONE signal and ends cleanly (887e8d66: the pod\'s rung signalled alone — the forward, then the group loop 13 ms later; the cgroup rung — the group\'s signal, then the scope\'s: code 143 mid-cleanup)', async (ok) => {
+  const rungs = [...(realOf('prlimit') ? ['rlimit-data'] : []), ...(userSystemd ? ['cgroup'] : [])];
+  if (!rungs.length) { skip++; ok.say('  - SKIP the one-signal leg: neither prlimit nor a user systemd here'); return; }
+  const SIGMAIN = (f) => `const fs=require('fs'),f=${JSON.stringify(f)},log=(s)=>fs.appendFileSync(f,Date.now()+' '+s+'\\n');let g=false;for(const s of ['SIGINT','SIGTERM','SIGHUP'])process.on(s,()=>{log(s);if(g){log('hard-exit');process.exit(143)}g=true;setTimeout(()=>{log('graceful-exit');process.exit(0)},300)});console.log('ready');setInterval(()=>{},1000)`;
+  const one = async (rung, how) => {
+    const dir = scratch(), f = path.join(dir, 'main.signals'), calls = path.join(dir, 'systemctl.calls');
+    // the scope rung: a FAKE manager over the real one (the job's PATH meets it first) — every call the wrapper makes logged, then
+    // passed through: the stop step's delivery is pinned by what the wrapper ASKED, not only by what the main lived to hear
+    if (rung === 'cgroup') fake(dir, 'systemctl', `printf '%s\\n' "$*" >> ${calls}\nexec ${CTL} "$@"`);
+    const E = engineIn(dir)({ memoryRungs: [rung], memorySample: { stopMs: 2000 } });
+    const j = E.jobs.get(E.create({ kind: 'task', name: `one-${how}`, cmd: { argv: [NODE, '-e', SIGMAIN(f)] }, memoryMb: 1024, owner }, caller).job.id);
+    await until(() => ready(j), 6000, 10);
+    const st = E._readStamp(j), b = readJson(path.join(ctlOf(j), 'bound.json')) || {};
+    if (how === 'engine') E.stop(j); else process.kill(st.pid, how); // the engine's stop — or the wrapper ALONE
+    await until(() => fs.existsSync(exitOf(j)) && !alive(st.pid), 5000, 10);
+    const heard = (() => { try { return fs.readFileSync(f, 'utf8').trim().split('\n').map((l) => l.split(' ')[1]); } catch { return []; } })();
+    const ex = readJson(exitOf(j)) || {};
+    const scopeKills = (() => { try { return fs.readFileSync(calls, 'utf8').split('\n').filter((l) => /^--user kill --signal=SIG(TERM|INT|HUP) /.test(l)).length; } catch { return 0; } })();
+    try { process.kill(-st.pid, 'SIGKILL'); } catch { }
+    killScopeOf(b.unit);
+    stopEngine(E);
+    return { rung: b.by || rung, how, heard: heard.join(','), code: ex.code, stopBy: ex.stopBy || null, mainBy: ex.mainBy || null, scopeKills };
+  };
+  const R = await Promise.all(rungs.flatMap((r) => (r === 'cgroup' ? ['engine', 'SIGINT'] : ['SIGINT', 'SIGTERM', 'engine']).map((how) => one(r, how))));
+  for (const r of R) {
+    const sig = r.how === 'engine' ? 'SIGTERM' : r.how;
+    ok(r.heard === `${sig},graceful-exit` && r.code === 0 && r.stopBy === (r.how === 'engine' ? 'engine' : 'signal') && r.mainBy === (r.how === 'engine' ? 'engine' : 'wrapper') && !r.scopeKills,
+      `${r.rung}, ${r.how === 'engine' ? "the engine's stop" : `${r.how} to the wrapper alone`}: its main heard ${r.heard} — code ${r.code}, stopBy ${r.stopBy}, mainBy ${r.mainBy}${r.rung === 'cgroup' ? `; the scope-wide kill asked of the manager at the stop step: ${r.scopeKills}` : ''} (887e8d66: ${r.rung === 'cgroup' ? `${sig} twice, 3 ms apart — the scope's \`systemctl --user kill --signal=${sig}\` after the group's` : r.how === 'engine' ? 'one (the control)' : `${sig}, then SIGTERM 13 ms later`}${r.rung === 'rlimit-data' && r.how === 'engine' ? '' : ' — code 143 mid-cleanup'})`, r);
+  }
 });
 
 try {

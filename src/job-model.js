@@ -294,7 +294,9 @@ function leftRecord(l) {
   const n = Math.min(l.n, 9999), recorded = pids.length && Number.isInteger(l.recorded) && l.recorded < n ? l.recorded : 0;
   const cleared = l.kept && Number.isFinite(l.cleared) && l.cleared > 0 ? l.cleared : 0;
   const gone = l.kept && !cleared && Number.isFinite(l.gone) && l.gone > 0 ? l.gone : 0;
-  const short = (cleared || (!l.kept && l.force)) && Number.isInteger(l.short) && l.short > 0 ? Math.min(l.short, n) : 0; // round 8
+  // round 8; round 9: ONE SOURCE — the wrapper's count, kept whenever it said one (round 8 kept it only beside force: the job's log
+  // said «2 processes got less than the full grace», the card, the journal and show/poll said nothing)
+  const short = (cleared || !l.kept) && Number.isInteger(l.short) && l.short > 0 ? Math.min(l.short, n) : 0;
   return { n, ...(l.kept ? { kept: true } : l.force ? { force: true } : {}), ...(escaped ? { escaped } : {}), ...(pids.length ? { pids, boot: typeof l.boot === 'string' ? clip(l.boot, 64) : '' } : {}), ...(recorded ? { recorded } : {}), ...(cleared ? { cleared } : {}), ...(gone ? { gone } : {}), ...(short ? { short } : {}) };
 }
 /** «the job left 1 process running — it was stopped; to keep a daemon, run it as a service job» · «… stopped by force …» ·

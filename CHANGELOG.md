@@ -2,6 +2,14 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.364 — 2026-10-30
+
+### Fixed
+- Stopping a background job sends each of its processes the stop signal once, so a program that tidies up when stopped is no longer cut off by a second one.
+- On a cluster, a job whose program detaches into its own session now gets the stop signal and can finish cleanly, instead of being killed after 10 s.
+- On a busy cluster, starting a service whose leftovers can't all be checked no longer freezes VibeSpace for 10 s; it waits, and For you says how to check.
+- A stopped job's card and history now say when some of its processes got less than the full time to stop, as its log already did.
+
 ## 2.369.363 — 2026-10-29
 
 ### Added

@@ -23,8 +23,9 @@
 //            words; ㉞ nothing stopped is never «stopped at»; ROUND 8: ㊲ UNKNOWN blocks a spawn (a run whose wrapper is proven
 //            neither gone nor alive: the replay and a person's start never start beside it — one notice; its scope read empty
 //            or the person's stop ends it); ㊳ a cut scan proves nothing; ㊴ the scan's bound spent where it matters (the
-//            record's pids and their children first; the unreadable told by owner); the cap as the engine states it (uncapped
-//            or capped — run both)
+//            record's pids and their children first; the unreadable told by owner); ROUND 9: ㊳ a cut walk is an ANSWER — ONE
+//            /proc walk per decision (a stub that answers cut, its calls counted), the start refused at once by the doubt's
+//            door, the person's stop ends it; the cap as the engine states it (uncapped or capped — run both)
 //   §6       the doors where the job is — and the one road of the park law (src/jobs.js counts every end in ONE place)
 // RED on 6428c67e (the base): no rung, no named end, no park. RED on 0259f1ea / 8a2727c8 / 222f7f5d / b8d2a3a0: see the lane's
 // report (rounds 1–5). RED on ef0012b5 (round 5): the boot's reap past its read's bound is dropped (⑮), a gone scope is said
@@ -35,7 +36,9 @@
 // «stopped at» for what had already ended (㉞); the advice twice on the card (§1). RED on e7147b71 (round 7): a run whose
 // pid.json stays unreadable — the replay waited its grace, said «did not answer» and started beside it (㊲); `gone` off a cut
 // scan, the next start released (㊳); the bound spent in readdir order, the recorded process past it never found (㊴); no
-// «got less than the full grace» words (§1).
+// «got less than the full grace» words (§1). RED on 887e8d66 = 4ef7e9494 (round 8, shipped in 2.369.363): a cut walk re-run
+// every 50 ms for the whole grace, never refused by the doubt's door (㊳); the record drops «got less than the full grace» for a
+// stop that needed no force (§1).
 // Load: none — no process is started; scratch dataDirs under os.tmpdir(), removed at the end.
 import fs from 'node:fs';
 import os from 'node:os';
@@ -175,8 +178,9 @@ console.log('§1 PURE — THE LADDER, the size verdict, the rung record, the nam
   // ROUND 8 — a stop has ONE clock: what was first seen after it got only what was LEFT of its grace, and the words say how many
   ok(lw({ n: 2, kept: true, cleared: at, short: 1 }) === 'it left 2 processes running — stopped at 14:05 (1 process got less than the full grace)' && lw({ n: 3, force: true, short: 2 }) === 'the job left 3 processes running — they were stopped by force (2 processes got less than the full grace); to keep a daemon, run it as a service job'
     && rlw({ left: { n: 2, kept: true, cleared: at, short: 1 } }, t) === 'left 2 running — stopped at 14:05 · 1 got less than the full grace' && (lr({ n: 2, kept: true, pids: [[2, 1]], cleared: at, short: 1 }) || {}).short === 1 && !('short' in (lr({ n: 2, kept: true, pids: [[2, 1]], short: 1 }) || {})) && (lr({ n: 1, force: true, short: 5 }) || {}).short === 1
+    && (lr({ n: 2, short: 2 }) || {}).short === 2 && M.leftWords(lr({ n: 2, short: 2 }) || {}) === WF('leftWords')({ n: 2, short: 2 })
     && typeof JW.leftWords === 'function' && [{ n: 2, kept: true, cleared: at, short: 1 }, { n: 3, force: true, short: 2 }].every((l) => WF('leftWords')(l) === lw(l)),
-    'round 8: «… (1 process got less than the full grace)» — show / poll, the card, the record (a stop\'s end only, never more than were left), the twins', [lw({ n: 2, kept: true, cleared: at, short: 1 }), rlw({ left: { n: 2, kept: true, cleared: at, short: 1 } }, t)]);
+    'round 8: «… (1 process got less than the full grace)» — show / poll, the card, the record (a stop\'s end only, never more than were left), the twins; round 9: ONE SOURCE — a stop that needed no force keeps the wrapper\'s count (887e8d66: the job\'s log said it, the record dropped it)', [lw({ n: 2, kept: true, cleared: at, short: 1 }), rlw({ left: { n: 2, kept: true, cleared: at, short: 1 } }, t)]);
   // the words exist in every language the card speaks (the i18n tables carry each key)
   const keys = ['stopped: used more than {size}', 'parked: out of memory twice — raise its bound or fix the job', 'killed: the instance ran out of memory', 'unbounded — this host cannot enforce a bound', '{name}: parked — out of memory twice. Raise its bound or fix the job, then start it again', 'Memory bound of a background job (MB)', 'capped by the instance’s {size} limit',
     'capped by the user slice’s {size} limit', 'capped by {name}’s {size} limit', 'effective {size}', 'the instance’s limit {size}', 'the user slice’s limit {size}', '{name}’s limit {size}',
@@ -583,23 +587,32 @@ leg('§3 IN-PROCESS ㊲ UNKNOWN BLOCKS A SPAWN — a service whose last run\'s w
   stopEngine(E);
 });
 
-leg('§3 IN-PROCESS ㊳ A CUT SCAN PROVES NOTHING — what a service kept, searched in only part of /proc: never «had already ended», its next start held and said once; a finished scan then proves it (e7147b71: `gone` stamped off a cut scan, the next start released while a marked process ran)', async (ok) => {
-  const dir = tmp('vs-jobs-mem-'), E = engine(dir, { memorySample: { stopMs: 15 } });
-  const j = deadJob(dir, 'jb-cutscan1', { kind: 'service', state: 'down' });
-  j.runs[0].endedAt = Date.now() - 1000; j.runs[0].cause = 'ok';
-  j.runs[0].left = { n: 1, kept: true, pids: [[DEAD, 12345]], boot: BOOT };
-  E.jobs.set(j.id, j);
+leg('§3 IN-PROCESS ㊳ A CUT SCAN PROVES NOTHING — AND IS AN ANSWER: what a service kept, searched in only part of /proc — never «had already ended»; ONE walk per decision, its answer stamped (`cut`) and the start refused AT ONCE by the doubt\'s door (said, ONE For-you notice); a later start walks once more and a FINISHED walk proves it; the person\'s stop ends it with no second walk (e7147b71: `gone` stamped off a cut scan, the next start released; 887e8d66: the walk re-run every 50 ms for the whole grace — 38 walks at 10 s, the hub\'s loop 91 % stalled)', async (ok) => {
+  const dir = tmp('vs-jobs-mem-'), E = engine(dir, { memorySample: { stopMs: 2000 } }); // a grace the start must NOT wait out
+  const kept = (id) => { const j = deadJob(dir, id, { kind: 'service', state: 'down', desiredUp: false }); Object.assign(j.runs[0], { endedAt: Date.now() - 1000, cause: 'ok', left: { n: 1, kept: true, pids: [[DEAD, 12345]], boot: BOOT } }); E.jobs.set(j.id, j); return j; };
+  const j = kept('jb-cutscan1'), k = kept('jb-cutscan2'), walks = { [j.id]: 0, [k.id]: 0 }, cut = { [j.id]: true, [k.id]: true };
   let asked = null;
-  MEMBERS.set(j.id, (q) => { asked = q; return Object.assign([], { scan: { scanned: 3000, total: 3100, unreadable: 0, others: 0, cut: true } }); }); // the bound spent
-  E.start(j); await until(() => !j._starting, 400, 5);
-  const l = j.runs[0].left, cutW = /^could not check 100 of 3100 processes for what its last run left running — not restarted$/;
-  ok(!l.gone && !l.cleared && E._pending(j, j.runs[0]) && !E.spawned.length && E.events.filter((e) => e.jobId === j.id && cutW.test(e.what || '')).length === 1 && !!asked && JSON.stringify(asked.first) === JSON.stringify([DEAD]),
-    `a cut scan: no \`gone\`, the start held — «${(E.events.find((e) => e.jobId === j.id && /could not check/.test(e.what || '')) || {}).what}», said once over its retries; the record's own pids asked first (${asked && JSON.stringify(asked.first)})`, { left: l, spawned: E.spawned });
-  MEMBERS.set(j.id, () => Object.assign([], { scan: { scanned: 3100, total: 3100, unreadable: 3, others: 2, cut: false } })); // the scan finished
-  E.start(j); await until(() => E.spawned.length, 400, 5);
-  ok(l.gone > 0 && E.spawned.length === 1 && journal(E, j, /^what its last run left running had already ended — nothing stopped \(its mark searched in 3100 processes; unreadable: 2 of other users, 1 of ours, not dumpable\)$/),
-    'a FINISHED scan proves it: `gone`, the start goes — what it could not read said by owner («of other users» only for theirs)', { left: l, spawned: E.spawned });
-  MEMBERS.delete(j.id);
+  for (const x of [j, k]) MEMBERS.set(x.id, (q) => { walks[x.id]++; if (x === j) asked = q; return Object.assign([], { scan: cut[x.id] ? { scanned: 3000, total: 3100, unreadable: 0, others: 0, cut: true } : { scanned: 3100, total: 3100, unreadable: 3, others: 2, cut: false } }); });
+  const notices = (x) => said.filter((n) => n.jobId === x.id && /cannot prove the previous run is gone/.test(n.text || '')).length;
+  const doorW = (x) => new RegExp(`^cannot prove the previous run is gone \\(could not check 100 of 3100 processes for what it left running\\) — not restarted; if it is gone: vibespace-job stop ${x.id}, then start it again; if it runs: it keeps running$`);
+  const t0 = Date.now();
+  E.start(j); E.start(k); await until(() => !j._starting && !k._starting, 1500, 5);
+  const ms = Date.now() - t0, l = j.runs[0].left;
+  ok(walks[j.id] === 1 && ms < 1000 && !l.gone && !l.cleared && l.cut && l.cut.at > 0 && E._pending(j, j.runs[0]) && !E.spawned.length && E.events.filter((e) => e.jobId === j.id && doorW(j).test(e.what || '')).length === 1 && notices(j) === 1 && !!asked && JSON.stringify(asked.first) === JSON.stringify([DEAD]),
+    `ONE walk per decision, its answer STAMPED, the start refused at once by the doubt's door — ${walks[j.id]} walk(s), ${ms} ms of a 2 s grace, «${(E.events.find((e) => e.jobId === j.id && /cannot prove/.test(e.what || '')) || {}).what}», ONE For-you notice; the record's own pids asked first (887e8d66: two walks every 50 ms until the grace, then held unsaid by the door)`, { walks, ms, left: l, spawned: E.spawned });
+  const r2 = E.start(j); await until(() => !j._starting, 1500, 5);
+  ok(walks[j.id] === 2 && /cannot be proven gone \(could not check 100 of 3100 processes for what it left running\)/.test(r2.after || '') && !E.spawned.length && notices(j) === 1 && E.events.filter((e) => e.jobId === j.id && doorW(j).test(e.what || '')).length === 1,
+    `a later start is a new decision: ONE walk more — still cut, refused («${r2.after}»), nothing said twice, no second notice`, { walks, r2 });
+  cut[j.id] = false; // the next walk finishes
+  E.start(j); await until(() => E.spawned.length, 1500, 5);
+  ok(walks[j.id] === 3 && l.gone > 0 && !l.cut && E.spawned.length === 1 && E.spawned[0].id === j.id && journal(E, j, /^what its last run left running had already ended — nothing stopped \(its mark searched in 3100 processes; unreadable: 2 of other users, 1 of ours, not dumpable\)$/),
+    'a FINISHED walk proves it: `gone`, the stamp lifted, the start goes — what it could not read said by owner («of other users» only for theirs)', { left: l, spawned: E.spawned });
+  E.stop(k); await until(() => k.runs[0].doubtOver, 1500, 5); // the person's stop: its clear walks ONCE (still cut) — the person's word ends it
+  ok(walks[k.id] === 2 && k.runs[0].doubtOver && k.runs[0].doubtOver.by === 'stop' && journal(E, k, /^stopped by its owner — what its last run left was not proven gone \(could not check 100 of 3100 processes for what it left running\); it may start again$/),
+    `the person's stop ends a cut hold — its own clear's ONE walk, no second (${walks[k.id] - 1} for the stop), said`, { walks, over: k.runs[0].doubtOver });
+  E.start(k); await until(() => E.spawned.length === 2, 1500, 5);
+  ok(E.spawned.length === 2 && E.spawned[1].id === k.id && walks[k.id] === 3, 'then its start goes (its own walk once more: what can be found of it is stopped first)', { walks, spawned: E.spawned });
+  for (const x of [j, k]) MEMBERS.delete(x.id);
   stopEngine(E);
 });
 
