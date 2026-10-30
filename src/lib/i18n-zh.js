@@ -11605,7 +11605,8 @@ export default {
   "Allowed until you take it back — its row in the Vault window lists it": "已允许，直到你收回——保险库窗口里它那一行列着它", // lane vault-standing-request
   "Always (this command)": "总是（这条命令）", // lane vault-standing-request
   "For commands to {hosts} — the hosts a command may connect to.": "用于连往 {hosts} 的命令——即命令可以连接的主机。", // lane vault-standing-request
-  "For the command {command} — it runs {program} {arg}. VibeSpace cannot see where it sends the secret; Allow means you trust this command itself. A changed program or script asks again.": "用于命令 {command}——它运行 {program} {arg}。VibeSpace 看不到它把密钥发往哪里；「允许」表示你信任这条命令本身。换了程序或脚本会再问。", // lane vault-standing-request
+  "For the command {command} — VibeSpace cannot see where it sends the secret; Allow means you trust this command itself. A changed program or script asks again.": "用于命令 {command}——VibeSpace 看不到它把密钥发往哪里；「允许」表示你信任这条命令本身。换了程序或脚本会再问。", // lane vault-standing-request
+  "It runs: {program} {arg}": "它运行：{program} {arg}", // lane vault-standing-request
   "It asks with vibespace-vault request {ref} --standing (--host … or --command …), and you get ONE card with exactly this grant to allow.": "它用 vibespace-vault request {ref} --standing（--host … 或 --command …）来申请，你只会收到一张卡片，允许的正是这条授权。", // lane vault-standing-request
   "Not sure what to fill in? Let the agent ask.": "不知道怎么填？让 agent 自己申请。", // lane vault-standing-request
   "Until you revoke it — the same as «Who may use it…» on its row in ⚙ System ▸ Vault…, which lists it and takes it back. A lock does not end it (nothing runs while it is locked). Allow asks for the second password.": "直到你收回——和 ⚙ 系统 ▸ 保险库… 里它那一行的「谁可以用…」一样，那里列着它，也在那里收回。上锁不会结束它（锁着时什么都不运行）。「允许」会要第二密码。", // lane vault-standing-request

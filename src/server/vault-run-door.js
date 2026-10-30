@@ -1236,7 +1236,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     { key: 'Secret: {label} — {ref}', params: { label: r.label, ref: r.ref } },
     { key: 'What for, in the agent\'s words: {purpose}', params: { purpose: r.purpose } },
     ...(r.hosts.length ? [{ key: 'For commands to {hosts} — the hosts a command may connect to.', params: { hosts: r.hosts.join(', ') } }] : []),
-    ...(r.command ? [{ key: 'For the command {command} — it runs {program} {arg}. VibeSpace cannot see where it sends the secret; Allow means you trust this command itself. A changed program or script asks again.', params: { command: r.commandWords, program: r.command.program, arg: r.command.arg == null ? '' : r.command.arg } }] : []),
+    ...(r.command ? [{ key: 'For the command {command} — VibeSpace cannot see where it sends the secret; Allow means you trust this command itself. A changed program or script asks again.', params: { command: r.commandWords } }, { key: 'It runs: {program} {arg}', params: { program: r.command.program, arg: r.command.arg == null ? '' : r.command.arg } }] : []),   // the real paths on their own line (a path the card links never runs into a sentence)
     { key: 'Until you revoke it — the same as «Who may use it…» on its row in ⚙ System ▸ Vault…, which lists it and takes it back. A lock does not end it (nothing runs while it is locked). Allow asks for the second password.' },
   ];
   async function requestStanding({ caller, scope, ref, row, said, hosts, command, cwd }) {

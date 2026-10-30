@@ -226,7 +226,7 @@ async function usesCmd() {
   for (const q of d.pastes || []) console.log(`  ${q.requestId}  paste «${q.words}» → ${q.place || '-'}  for: ${q.purpose || '-'}`);   // lane vault-paste-request: a paste box waiting in their tray
   console.log('uses (newest first):');
   if (!d.uses || !d.uses.length) console.log('  none');
-  for (const u of d.uses || []) console.log(`  ${whenAt(u.at)}  ${u.entry || '-'}  via ${u.door || '-'}  ${u.outcome}${u.grant ? `  by grant${u.standing ? ' · standing' : ''} ${u.grant}` : ''}${u.receipt ? '  receipt ' + u.receipt : ''}${u.purpose ? '  for: ' + u.purpose : ''}`);
+  for (const u of d.uses || []) console.log(`  ${whenAt(u.at)}  ${u.entry || '-'}  via ${u.door || '-'}  ${u.outcome}${u.grant ? `  by grant · standing ${u.grant}` : ''}${u.receipt ? '  receipt ' + u.receipt : ''}${u.purpose ? '  for: ' + u.purpose : ''}`);
 }
 /** lane vault-standing-request: a standing grant's scope in words — «hosts a, b» / «the command python3 transcribe.py». */
 const standingScope = (s) => [...(s.hosts && s.hosts.length ? [`hosts ${s.hosts.join(', ')}`] : []), ...(s.commands && s.commands.length ? [`the command ${s.commands.join(', ')}`] : s.command ? [`the command ${s.command}`] : [])].join(' + ') || '-';

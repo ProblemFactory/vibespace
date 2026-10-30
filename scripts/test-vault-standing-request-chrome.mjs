@@ -29,6 +29,8 @@ const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr
 if (!CHROME) { console.log('SKIP: no chrome/chromium'); process.exit(0); }
 const PY = ['/usr/bin/python3'].find((p) => fs.existsSync(p));
 if (!PY) { console.log('SKIP: no system python3'); process.exit(0); }
+const PYN = path.basename(fs.realpathSync(PY));   // the program's REAL name — what the grant pins and the row says (python3 is a link: python3.14)
+const reEsc = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const VNC_ENV = await vncEnv();
 const [PORT, CDP_PORT] = await freePorts(2);
 const wt = scratch('vsr-wt'), PROFILE = process.env.VSR_CHROME_PROFILE || scratch('vsr-chrome'), fakeHome = scratch('vsr-home'), stubDir = scratch('vsr-stub');   // VSR_CHROME_PROFILE: a lane keeps the profile under its worktree
@@ -158,17 +160,19 @@ try {
   const r2 = await cli('vibespace-vault', ['run', '--env', `T=${REF}`, '--', 'python3', 'transcribe.py', 'part02.mp3'], TOKEN, { timeout: 70000 });
   check('two segments run with NO card (the real python3 had the key; no value in the output)', r1.code === 0 && r2.code === 0 && /transcribed \['part01\.mp3'\] key set/.test(r1.out) && /part02/.test(r2.out) && !r1.out.includes(VALUE) && (await openOf('vault-run-ask')).length === 0, { r1: r1.out.slice(0, 200), r2: r2.out.slice(0, 200) });
   const uses = await cli('vibespace-vault', ['uses'], TOKEN);
-  check('`vibespace-vault uses`: «standing · the command python3 transcribe.py · since …» and «by grant · standing vg-…»', /standing · the command python3 transcribe\.py · since /.test(uses.out) && /by grant · standing vg-[0-9a-f]{8}/.test(uses.out), uses.out.slice(0, 900));
+  check(`\`vibespace-vault uses\`: «standing · the command ${PYN} transcribe.py · since …» and «by grant · standing vg-…»`, new RegExp(`standing · the command ${reEsc(PYN)} transcribe\\.py · since `).test(uses.out) && /by grant · standing vg-[0-9a-f]{8}/.test(uses.out), uses.out.slice(0, 900));
 
   console.log('③ THE VAULT ROW — the chip says the command and who asked; 「谁可以用…」 explains 主机 and «让 agent 自己申请»');
   await A.evalJs(`app.replayOpenSpec({ action: 'openVault' })`);
   const chip = await A.until(`(() => { const r = ${LIST_ROW(LABEL)}; const c = r && [...r.querySelectorAll('.vw-use-chip')].find((x) => /Transcriber/.test(x.textContent)); if (!c) return null; c.scrollIntoView({ block: 'center' }); return c.textContent; })()`, { timeout: 15000 });
-  check('the chip: «Transcriber · 命令 python3 transcribe.py · agent 申请 · HH:MM ✕»', /^Transcriber · 命令 python3 transcribe\.py · agent 申请 · \d\d:\d\d✕$/.test(String(chip)), chip);
+  check(`the chip: «Transcriber · 命令 ${PYN} transcribe.py · 已用 2 次 · agent 申请 · HH:MM ✕» (the real program; the source and its time last)`, new RegExp(`^Transcriber · 命令 ${reEsc(PYN)} transcribe\\.py · 已用 2 次 · agent 申请 · \\d\\d:\\d\\d✕$`).test(String(chip)), chip);
   await sleep(300);
   await A.shot('vsr-2-vault-row-desktop.png');
   await A.evalJs(`(() => { const r = ${LIST_ROW(LABEL)}; const b = r && r.querySelector('.vw-use-grant'); if (b) b.click(); return !!b; })()`);
-  const dlg = await A.until(`(() => { const d = document.getElementById('vault-use-grant'); if (!d) return null; const w = d.querySelector('.vw-use-hosts-what'), a = d.querySelector('.vw-use-ask-agent'), c = d.querySelector('.vw-use-cmds'); return w && a ? { what: w.textContent, ask: a.textContent, cmds: c ? c.textContent : '' } : null; })()`, { timeout: 6000 });
-  check('「谁可以用…」 says what a 主机 is (e.g. api.openai.com) and «不知道怎么填？让 agent 自己申请。» naming the request; the command member is kept', !!dlg && /主机就是命令带着它连去的地方/.test(dlg.what) && /api\.openai\.com/.test(dlg.what) && /不知道怎么填？让 agent 自己申请。/.test(dlg.ask) && /--standing/.test(dlg.ask) && /python3 transcribe\.py（保留）/.test(dlg.cmds), dlg);
+  const dlg = await A.until(`(() => { const d = document.getElementById('vault-use-grant'); if (!d) return null; const w = d.querySelector('.vw-use-hosts-what'), a = d.querySelector('.vw-use-ask-agent'), c = d.querySelector('.vw-use-cmds'), h = d.querySelector('.vw-use-hosts'); return w && a ? { what: w.textContent, ask: a.textContent, cmds: c ? c.textContent : '', order: !!(h && (h.compareDocumentPosition(a) & Node.DOCUMENT_POSITION_FOLLOWING) && (w.compareDocumentPosition(h) & Node.DOCUMENT_POSITION_FOLLOWING)) } : null; })()`, { timeout: 6000 });
+  check('「谁可以用…」 says what a 主机 is (e.g. api.openai.com), and «不知道怎么填？让 agent 自己申请。» naming the request sits right under the host field; the command member is kept', !!dlg && /主机就是命令带着它连去的地方/.test(dlg.what) && /api\.openai\.com/.test(dlg.what) && /不知道怎么填？让 agent 自己申请。/.test(dlg.ask) && /--standing/.test(dlg.ask) && new RegExp(`${reEsc(PYN)} transcribe\\.py（保留）`).test(dlg.cmds) && dlg.order === true, dlg);
+  await A.evalJs(`(() => { const a = document.querySelector('#vault-use-grant .vw-use-ask-agent'); if (a) a.scrollIntoView({ block: 'center' }); return true; })()`);
+  await sleep(200);
   await A.shot('vsr-3-who-may-use-dialog-desktop.png');
   await A.evalJs(`(() => { const d = document.getElementById('vault-use-grant'); const b = d && [...d.querySelectorAll('button')].find((x) => x.classList.contains('btn-cancel')); if (b) b.click(); return true; })()`);
   await sleep(300);
@@ -185,12 +189,12 @@ try {
   await closeTray();
   const page2 = await reveal();
   const al = await A.api('POST', `/api/vault/run/asks/${rc.action.askId}`, { answer: 'always' }, { 'X-Vault-Page': page2 || '' });
-  check('«Always (this command)» (验证是你) ⇒ ok, a command grant with no end', al.status === 200 && al.json.ok && al.json.outcome === 'always' && al.json.ttl === 'forever' && al.json.command === 'python3 upload.py', al.json);
+  check('«Always (this command)» (验证是你) ⇒ ok, a command grant with no end', al.status === 200 && al.json.ok && al.json.outcome === 'always' && al.json.ttl === 'forever' && al.json.command === `${PYN} upload.py`, al.json);
   const ra = await runP;
   const rb = await cli('vibespace-vault', ['run', '--env', `T=${REF}`, '--', 'python3', 'upload.py'], TOKEN, { timeout: 70000 });
   check('that run went, and the next one of it runs with no card', ra.code === 0 && rb.code === 0 && /uploaded key set/.test(rb.out) && (await openOf('vault-run-ask')).length === 0, { ra: ra.out.slice(0, 200), rb: rb.out.slice(0, 200) });
   const chip2 = await A.until(`(() => { const r = ${LIST_ROW(LABEL)}; const c = r && [...r.querySelectorAll('.vw-use-chip')].find((x) => /upload\\.py/.test(x.textContent)); return c ? c.textContent : null; })()`, { timeout: 8000 });
-  check('the chip now names both commands and the latest source «卡片上的总是»', /^Transcriber · 命令 python3 transcribe\.py, python3 upload\.py · 卡片上的总是 · \d\d:\d\d✕$/.test(String(chip2)), chip2);
+  check('the chip now names both commands and the latest source «卡片上的总是»', new RegExp(`^Transcriber · 命令 ${reEsc(PYN)} transcribe\\.py, ${reEsc(PYN)} upload\\.py · 已用 \\d+ 次 · 卡片上的总是 · \\d\\d:\\d\\d✕$`).test(String(chip2)), chip2);
 
   console.log('⑤ THE PHONE (390 px) — a standing card and the Vault row');
   await A.cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });

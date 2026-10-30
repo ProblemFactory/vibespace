@@ -79,11 +79,11 @@ export function useExtras(row, { app = null, refresh = () => {} } = {}) {
         chip.dataset.principal = m.principal || '';
         const cmds = Array.isArray(m.commands) ? m.commands : [];
         const bits = [nameOf(m, app), ...((m.hosts || []).length ? [hostsWord(m.hosts, u.entryHosts, m.toolFor)] : []), ...(cmds.length ? [t('the command {command}', { command: cmds.map(commandWord).join(', ') })] : [])];
-        if (sourceWord(m)) bits.push(sourceWord(m));
         if (m.uses) bits.push(t('used {n}×', { n: m.uses }));
         if (m.expired) bits.push(t('expired'));
         else if (m.until) bits.push(t('until {when}', { when: dateOf(m.until) }));
         if (pausedM) bits.push(t('paused by you'));
+        if (sourceWord(m)) bits.push(sourceWord(m));   // lane vault-standing-request: who wrote it and when — last, its time beside it
         chip.append(el('span', 'vw-use-words', bits.join(' · ')));
         chip.title = `${m.id || ''}${m.convs > 1 ? ' · ' + t('{n} conversations', { n: m.convs }) : ''}${cmds.length ? '\n' + cmds.map(commandTitle).join('\n') : ''}`;   // lane vault-standing-request: the whole program + script paths
         if (pausedM) {   // un-pause ONE member — a widening, so it asks for the second password (验证是你)
@@ -159,6 +159,10 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
   hostsIn.placeholder = common === null && members.length ? t('Each keeps its own hosts — or type hosts for all') : t('Host names or addresses, e.g. 192.168.1.1, router.lan');
   hostsIn.value = common && !(common.length === 1 && common[0] === ENTRY_HOSTS) ? common.filter((h) => h !== ENTRY_HOSTS).join(', ') : '';
   body.append(hostsIn);
+  // «让 agent 自己申请» (B-eba2): right under the field the owner could not fill — the agent can ask for exactly this grant, one card to allow
+  const askAgent = el('div', 'vw-ak-hint vw-use-ask-agent');
+  askAgent.append(el('b', null, t('Not sure what to fill in? Let the agent ask.')), document.createTextNode(' ' + t('It asks with vibespace-vault request {ref} --standing (--host … or --command …), and you get ONE card with exactly this grant to allow.', { ref: u.ref || 'vault://…' })));
+  body.append(askAgent);
   const syncOwn = () => { hostsIn.hidden = !!(ownBox && ownBox.checked); };
   if (ownBox) { ownBox.onchange = syncOwn; syncOwn(); }
   // THE END
@@ -178,10 +182,6 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
   // agent's standing request wrote them); ✕ on its chip takes the member back
   const withCmds = members.filter((m) => Array.isArray(m.commands) && m.commands.length);
   if (withCmds.length) body.append(el('div', 'vw-ak-hint vw-use-cmds', withCmds.map((m) => t('{name} may run: {commands} (kept)', { name: nameOf(m, app), commands: m.commands.map(commandWord).join(', ') })).join(' · ')));
-  // «让 agent 自己申请»: the agent can ask for exactly this grant — one card to allow
-  const askAgent = el('div', 'vw-ak-hint vw-use-ask-agent');
-  askAgent.append(el('b', null, t('Not sure what to fill in? Let the agent ask.')), document.createTextNode(' ' + t('It asks with vibespace-vault request {ref} --standing (--host … or --command …), and you get ONE card with exactly this grant to allow.', { ref: u.ref || 'vault://…' })));
-  body.append(askAgent);
   const err = el('div', 'vault-secret-error'); err.setAttribute('role', 'status');
   body.append(err);
   const f = el('div', 'dialog-footer');

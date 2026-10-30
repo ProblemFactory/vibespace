@@ -11604,7 +11604,8 @@ export default {
   "Allowed until you take it back — its row in the Vault window lists it": "取り消すまで許可しました——保管庫ウィンドウのその行に表示されます", // lane vault-standing-request
   "Always (this command)": "常に（このコマンド）", // lane vault-standing-request
   "For commands to {hosts} — the hosts a command may connect to.": "{hosts} へ接続するコマンドに——コマンドが接続してよいホストです。", // lane vault-standing-request
-  "For the command {command} — it runs {program} {arg}. VibeSpace cannot see where it sends the secret; Allow means you trust this command itself. A changed program or script asks again.": "コマンド {command} に——実行するのは {program} {arg} です。VibeSpace はシークレットの送り先を見られません。「許可」はこのコマンドそのものを信頼するという意味です。プログラムやスクリプトが変わればまた確認します。", // lane vault-standing-request
+  "For the command {command} — VibeSpace cannot see where it sends the secret; Allow means you trust this command itself. A changed program or script asks again.": "コマンド {command} に——VibeSpace はシークレットの送り先を見られません。「許可」はこのコマンドそのものを信頼するという意味です。プログラムやスクリプトが変わればまた確認します。", // lane vault-standing-request
+  "It runs: {program} {arg}": "実行するもの：{program} {arg}", // lane vault-standing-request
   "It asks with vibespace-vault request {ref} --standing (--host … or --command …), and you get ONE card with exactly this grant to allow.": "エージェントが vibespace-vault request {ref} --standing（--host … または --command …）で申請し、まさにこの許可を求めるカードが 1 枚だけ届きます。", // lane vault-standing-request
   "Not sure what to fill in? Let the agent ask.": "何を入れればいいか分からない？エージェントに申請させましょう。", // lane vault-standing-request
   "Until you revoke it — the same as «Who may use it…» on its row in ⚙ System ▸ Vault…, which lists it and takes it back. A lock does not end it (nothing runs while it is locked). Allow asks for the second password.": "取り消すまで有効——⚙ システム ▸ 保管庫… のその行の「誰が使えるか…」と同じで、そこに表示され、そこで取り消せます。ロックしても終わりません（ロック中は何も実行されません）。「許可」には第 2 パスワードが必要です。", // lane vault-standing-request
