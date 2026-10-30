@@ -38,6 +38,9 @@
 //   entry's `hostId`; keepIdentity carries it with the conversation it names), never the old window's server session or
 //   openSpec. mergeDesktopRecord's `replaced` ([[newId, oldId]]) is the client's twin: a moved window that `replaces` an
 //   entry takes that entry's name in the held record.
+//   THE WAY BACK (r3 — a window saved nameless is a «Session unavailable» tile): namedTwinIn(list, entry) finds, in another
+//   record of its desktop (a rollback point's), the entry that names a conversation for the same slot — the same id, else the
+//   ONE session entry of its name; the server's /api/layout-history answers the newest point that holds one (its `pick`).
 //
 //   shrinkVerdict({prev, next, evidence, alive, min, recent}) — the SERVER BELT (ws-handler layout-sync): a sync
 //     that drops ≥ `min` (2) windows of the stored record that nothing explains is refused for that desktop. A drop
@@ -224,6 +227,22 @@ function carryName(from, next) {
   pick('cwd', from.cwd); pick('cwd', spec.cwd);
   pick('hostId', hostOf(from));
   return out;
+}
+
+/** THE WAY BACK for a window that names no conversation (lane layout-stopped-window r3 — the «Session unavailable» tile's door
+ *  «Restore a previous layout…»): in another record of its desktop (a rollback point's), the entry that names a conversation
+ *  for the SAME SLOT — the same id, else the ONE session entry of its type whose name the person read is its name (namesOf;
+ *  two of one name are never guessed, keepNames' rule). null = none there. */
+function namedTwinIn(list, entry) {
+  if (!isSession(entry)) return null;
+  const named = listOf(list).filter((w) => isSession(w) && w.type === entry.type && conversationOf(w));
+  const id = idOf(entry);
+  const same = id ? named.find((w) => idOf(w) === id) : null;
+  if (same) return same;
+  const mine = namesOf(entry);
+  if (!mine.size) return null;
+  const hits = named.filter((w) => { for (const n of namesOf(w)) if (mine.has(n)) return true; return false; });
+  return hits.length === 1 ? hits[0] : null;
 }
 
 function keepNames({ prev = [], next = [], evidence = [] } = {}) {
@@ -489,4 +508,4 @@ function desktopChanges(prev, next) {
   return out;
 }
 
-module.exports = { mergeDesktopRecord, shrinkVerdict, desktopChanges, windowIds, idOf, captureForViewport, ARRANGEMENT, PHONE_KEEPS, LAYERS, layerOf, PHONE_SHOWS, applyForViewport, arrangementFor, layerGate, sessionOf, IDENTITY, keepIdentity, keepIdentities, foreignStamp, staleVerdict, isSession, conversationOf, isNameless, namesOf, carryName, keepNames, hostOf };
+module.exports = { mergeDesktopRecord, shrinkVerdict, desktopChanges, windowIds, idOf, captureForViewport, ARRANGEMENT, PHONE_KEEPS, LAYERS, layerOf, PHONE_SHOWS, applyForViewport, arrangementFor, layerGate, sessionOf, IDENTITY, keepIdentity, keepIdentities, foreignStamp, staleVerdict, isSession, conversationOf, isNameless, namesOf, carryName, keepNames, hostOf, namedTwinIn };

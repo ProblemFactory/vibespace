@@ -698,8 +698,9 @@ class Sidebar {
     if (!container) return;
     container.innerHTML = '';
     const filters = [...this._statusFilter];
-    // Only show tabs if enabled and more than 1 filter is selected
-    if (!enabled || filters.length <= 1) return;
+    // Only show tabs if enabled and more than 1 filter is selected — or while a view is narrowed (a door's: showStopped), so
+    // its ALL is there to undo it
+    if ((!enabled && !this._activeView) || filters.length <= 1) return;
 
     const labelMap = { live: tr('LIVE'), tmux: tr('TMUX'), external: tr('EXT'), stopped: tr('STOP'), archived: tr('ARCH') };
     const colorMap = { live: 'var(--green)', tmux: 'var(--blue)', external: 'var(--yellow)', stopped: 'var(--text-dim)', archived: 'var(--text-dim)' };
@@ -924,6 +925,20 @@ class Sidebar {
     this._railApplyCollapsed?.(); // rail strip may persist through a collapse
     this._applySidebarLayoutWidth(this.el.offsetWidth);
     setTimeout(() => this._fitVisibleSessions(), 250);
+  }
+
+  /** THE WAY BACK from a window that lost its conversation (lane layout-stopped-window r3, the «Session unavailable» tile's
+   *  «Open the session list»): the list opened on this page — the sessions tab, the Stopped view, searched by the window's
+   *  name — where the person opens the conversation by hand. Both are the list's own visible controls (ALL, the search box). */
+  showStopped(query = '') {
+    if (this._activeTab !== 'folders') { this._activeTab = 'folders'; this._updateTabs(); }
+    this._statusFilter.add('stopped');
+    this._activeView = 'stopped';
+    const f = document.getElementById('session-filter');
+    if (f) f.value = String(query || '');
+    this.toggle(true);
+    this._renderQuickTabs();
+    this._render();
   }
 
   async _poll() {

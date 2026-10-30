@@ -463,18 +463,25 @@ export function installSetupFlows(App) {
   // damage emptied a desktop the pre-damage mapping was simply gone). The
   // server writes a rollback point before every layout SHAPE change; this is
   // the one click that uses them.
-  async _showLayoutHistory() {
+  // A TILE'S DOOR (lane layout-stopped-window r3): `slot` = {desktopId, entry, name} of a «Session unavailable» window — the server
+  // answers the newest point that still names a conversation for it (`pick`), and the dialog opens with that desktop selected.
+  async _showLayoutHistory(slot = null) {
     // one subject: this hub’s one layout history
     const { body, close, raised } = createModalShell({ id: 'layout-history-dialog', title: t('Restore a previous layout'), minWidth: '460px', escapeToClose: true, kind: 'form' });
     if (raised) return null;   // raised: the same subject's form, as it was
     body.innerHTML = `<div class="empty-hint">${escHtml(t('Loading…'))}</div>`;
-    const r = await fetchJson('/api/layout-history').catch(() => null);
+    const e0 = slot && slot.desktopId && slot.entry && typeof slot.entry === 'object' ? slot.entry : null;
+    const q = e0 ? '?' + new URLSearchParams({ desktop: String(slot.desktopId), win: String(e0.winId || e0.id || ''), type: e0.type === 'terminal' ? 'terminal' : 'chat', title: String(e0.title || ''), cwd: String(e0.cwd || e0.openSpec?.cwd || ''), name: typeof e0.openSpec?.name === 'string' ? e0.openSpec.name : '' }).toString() : '';
+    const r = await fetchJson('/api/layout-history' + q).catch(() => null);
     const entries = r?.entries || [];
+    const pick = e0 && r?.pick && typeof r.pick === 'object' ? r.pick : null;
     if (!entries.length) {
       body.innerHTML = `<div class="usage-note">${escHtml(t('No rollback points yet — one is written whenever your window layout changes shape.'))}</div>`;
       return;
     }
-    body.innerHTML = `
+    const slotName = String((slot && slot.name) || '');
+    const slotNote = e0 ? `<div class="usage-note lh-slot">${escHtml(pick ? t('Selected: the newest point that still names the conversation of “{name}” — press it to restore that desktop as it was then.', { name: slotName }) : t('No rollback point names the conversation of “{name}”.', { name: slotName }))}</div>` : '';
+    body.innerHTML = `${slotNote}
       <div class="usage-note">${escHtml(t('Each entry is the layout as it was BEFORE a change. Restoring reloads the page; your sessions are not touched.'))} ${escHtml(t('Press a desktop to restore it alone — your other desktops stay as they are now.'))}</div>
       <div class="lh-list">${entries.map((e) => {
         const per = Object.entries(e.summary || {}).map(([n, c]) => `${escHtml(n)} ${c}`).join(' · ');
@@ -524,6 +531,8 @@ export function installSetupFlows(App) {
         setTimeout(() => location.reload(), 800);
       };
     });
+    const picked = pick ? [...body.querySelectorAll('.lh-desk')].find((b) => b.dataset.id === pick.id && b.dataset.desk === pick.desk) : null;
+    if (picked) { picked.classList.add('is-picked'); picked.setAttribute('aria-current', 'true'); picked.closest('.lh-row')?.classList.add('is-picked'); picked.scrollIntoView?.({ block: 'nearest' }); picked.focus?.(); }
   },
 
     async _openDiagnostics() {

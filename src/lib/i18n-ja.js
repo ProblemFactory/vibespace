@@ -11578,4 +11578,14 @@ export default {
   "Restore only “{desktop}”": "「{desktop}」だけを復元",
   "Restore only “{desktop}” as it was then? Your other desktops stay as they are now; the current layout becomes a rollback point too, so this is undoable.": "「{desktop}」だけを当時の状態に復元しますか？ほかのデスクトップは今のままです。現在のレイアウトもロールバックポイントになるので、元に戻せます。",
   "“{desktop}” restored — reloading…": "「{desktop}」を復元しました — 再読み込み中…",
+  // lane layout-stopped-window r3: the «Session unavailable» tile says why and offers its doors
+  "Its machine “{host}” is not paired with this hub.": "このウィンドウのマシン「{host}」はこのハブとペアリングされていません。",
+  "The record of its conversation is gone from this hub.": "この会話の記録はもうこのハブにありません。",
+  "This window was saved without its conversation, so it cannot be reopened from here.": "このウィンドウは会話を記録せずに保存されたため、ここから開き直せません。",
+  "This window was saved without its conversation or its folder, so it cannot be reopened from here.": "このウィンドウは会話もフォルダーも記録せずに保存されたため、ここから開き直せません。",
+  "Open the session list": "セッション一覧を開く",
+  "Remove this window?": "このウィンドウを削除しますか？",
+  "“{name}” is deleted from this desktop’s layout for good. Only an older rollback point (Restore a previous layout…) still holds it.": "「{name}」はこのデスクトップのレイアウトから完全に削除されます。残るのは古いロールバックポイント（以前のレイアウトを復元…）だけです。",
+  "Selected: the newest point that still names the conversation of “{name}” — press it to restore that desktop as it was then.": "選択済み：「{name}」の会話をまだ記録している最新のロールバックポイントです — 押すとそのデスクトップを当時の状態に戻します。",
+  "No rollback point names the conversation of “{name}”.": "「{name}」の会話を記録しているロールバックポイントはありません。",
 };

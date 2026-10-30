@@ -11579,4 +11579,14 @@ export default {
   "Restore only “{desktop}”": "只恢复「{desktop}」",
   "Restore only “{desktop}” as it was then? Your other desktops stay as they are now; the current layout becomes a rollback point too, so this is undoable.": "只把「{desktop}」恢复成当时的样子？其他桌面保持现在的样子；当前布局也会成为一个回滚点，所以可以撤销。",
   "“{desktop}” restored — reloading…": "「{desktop}」已恢复 — 正在刷新…",
+  // lane layout-stopped-window r3: the «Session unavailable» tile says why and offers its doors
+  "Its machine “{host}” is not paired with this hub.": "它所在的机器「{host}」没有与这台 hub 配对。",
+  "The record of its conversation is gone from this hub.": "它的会话记录已经不在这台 hub 上了。",
+  "This window was saved without its conversation, so it cannot be reopened from here.": "这个窗口保存时没有记下它的会话，所以无法从这里重新打开。",
+  "This window was saved without its conversation or its folder, so it cannot be reopened from here.": "这个窗口保存时没有记下它的会话和文件夹，所以无法从这里重新打开。",
+  "Open the session list": "打开会话列表",
+  "Remove this window?": "移除这个窗口？",
+  "“{name}” is deleted from this desktop’s layout for good. Only an older rollback point (Restore a previous layout…) still holds it.": "「{name}」会从这个桌面的布局中永久删除。只有更早的回滚点（恢复之前的布局…）还保留着它。",
+  "Selected: the newest point that still names the conversation of “{name}” — press it to restore that desktop as it was then.": "已选中：仍记着「{name}」的会话的最新回滚点 — 点它就能把那个桌面恢复成当时的样子。",
+  "No rollback point names the conversation of “{name}”.": "没有哪个回滚点记着「{name}」的会话。",
 };

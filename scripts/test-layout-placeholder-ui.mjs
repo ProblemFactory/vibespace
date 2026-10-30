@@ -11,6 +11,11 @@
 //   ④ the door: ⚙ → System → 恢复之前的布局… lists the 06:50 rollback point with each desktop its own button; 个人's press (and
 //      its confirm) restores 个人 ALONE — twelve windows on every page after the reload (eleven placeholders + the file window),
 //      工作 / 研究 as they were
+// ROUND 3 (the r2 acceptance): the record also holds ONE remote-shaped entry (a fake host id, a 60-char title, its session gone)
+//   ⑤ every «会话不可用» tile says why and offers three doors (≥ 44 px) at 1440; the remote tile's machine is its own line, seen
+//      whole while the title is cut; «打开会话列表» opens the list on the stopped sessions searched by the name; ✕ asks first —
+//      cancel keeps the entry, «移除» removes it (②); on the phone every word is ≥ 16 px and the doors ≥ 44 px (③); the dialog
+//      opened from a tile's «恢复之前的布局…» has the 06:50 point's 个人 SELECTED (④)
 // Screenshots go to $LSW_SHOTS_DIR when set (the lane's report), else nowhere.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -54,6 +59,10 @@ const named = (i) => ({ winId: 'win-p-' + i, title: `${NAMES[i]} — ${CWD(i)}`,
 const bare = (i) => ({ winId: 'win-p-' + i, title: NAMES[i], type: 'chat', isMinimized: false, isMaximized: false, gridBounds: GB(i), zIndex: 100 + i });
 const filesWin = (id, dir, gb) => ({ winId: id, title: path.basename(dir), type: 'files', isMinimized: false, isMaximized: false, gridBounds: gb, zIndex: 300, openSpec: { action: 'openFileExplorer', path: dir }, explorerPath: dir });
 const META = [{ id: 'desk-p', name: '个人' }, { id: 'desk-w', name: '工作' }, { id: 'desk-r', name: '研究' }];
+// r3: a REMOTE-shaped entry — a fake machine (no paired host is needed to draw it), a 60-char title, its session gone from this hub
+const LONG = 'Investigate why the nightly integration build fails on main.';
+const remote = { winId: 'win-p-r', title: LONG, type: 'chat', isMinimized: false, isMaximized: false, gridBounds: GB(11), zIndex: 111, hostId: 'host-gpu', cwd: '/srv/remote/build',
+  openSpec: { action: 'attachSession', serverId: 'sess-gone-77', hostId: 'host-gpu', mode: 'chat', cwd: '/srv/remote/build' } };
 
 const CHROME = ['/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/usr/bin/chromium', '/usr/bin/chromium-browser'].find((p) => fs.existsSync(p));
 let dtachOk = false; try { execFileSync('/usr/bin/which', ['dtach'], { stdio: 'ignore' }); dtachOk = true; } catch { }
@@ -74,7 +83,7 @@ else await (async () => {
   ok(fs.statSync(path.join(wt, 'public/bundle.js')).size > 500000, 'the worktree built its own bundle (esbuild JS API)');
 
   const dir = (n) => { const d = path.join(ROOT, 'files', n); fs.mkdirSync(d, { recursive: true }); fs.writeFileSync(path.join(d, n + '.txt'), n); return d; };
-  const NOW = NAMES.map((_, i) => (i < 4 ? named(i) : bare(i)));
+  const NOW = [...NAMES.map((_, i) => (i < 4 ? named(i) : bare(i))), remote];
   const layouts = { current: null, autoSave: null, saved: {}, customGrids: [], desktopMeta: META.map((m) => ({ ...m })), desktops: {
     'desk-p': { autoSave: { windows: NOW, grid: null, updatedAt: 1000 } },
     'desk-w': { autoSave: { windows: [filesWin('w-1', dir('w1'), GB(0)), filesWin('w-2', dir('w2'), GB(1))], grid: null, updatedAt: 1000 } },
@@ -121,7 +130,11 @@ else await (async () => {
       if (up) await ev('window.app.ready');
       return up;
     };
-    X.tiles = () => ev(`[...document.querySelectorAll('.session-placeholder')].map((t) => { const w = t.closest('.window'), r = t.getBoundingClientRect(), wr = w ? w.getBoundingClientRect() : null; return { kind: t.dataset.placeholder, name: t.querySelector('.session-placeholder-name')?.textContent || '', say: t.querySelector('.session-placeholder-say')?.textContent || '', tag: t.tagName, id: w ? [...app.wm.windows.values()].find((x) => x.element === w)?.id : null, w: Math.round(r.width), h: Math.round(r.height), inside: !!wr && r.left >= wr.left - 1 && r.right <= wr.right + 1 && r.top >= wr.top - 1 && r.bottom <= wr.bottom + 1, shown: r.width > 0 && r.height > 0 && getComputedStyle(w).visibility !== 'hidden' }; })`);
+    X.tiles = () => ev(`[...document.querySelectorAll('.session-placeholder')].map((t) => { const w = t.closest('.window'), r = t.getBoundingClientRect(), wr = w ? w.getBoundingClientRect() : null; const q = (c) => t.querySelector(c); const nm = q('.session-placeholder-name'), hs = q('.session-placeholder-host'); const hr = hs ? hs.getBoundingClientRect() : null;
+      return { kind: t.dataset.placeholder, name: nm?.textContent || '', say: q('.session-placeholder-say')?.textContent || '', why: q('.session-placeholder-why')?.textContent || '', where: q('.session-placeholder-where')?.textContent || '', tag: t.tagName, id: w ? [...app.wm.windows.values()].find((x) => x.element === w)?.id : null, w: Math.round(r.width), h: Math.round(r.height), inside: !!wr && r.left >= wr.left - 1 && r.right <= wr.right + 1 && r.top >= wr.top - 1 && r.bottom <= wr.bottom + 1, shown: r.width > 0 && r.height > 0 && getComputedStyle(w).visibility !== 'hidden',
+        nameCut: !!nm && nm.scrollWidth > nm.clientWidth + 1, nameShown: !!nm && (() => { const nr = nm.getBoundingClientRect(); return nr.height >= 10 && nr.top >= r.top - 1 && nr.bottom <= r.bottom + 1; })(), fits: t.scrollHeight <= t.clientHeight + 1, host: hs?.textContent || '', hostWhole: !!hs && hs.scrollWidth <= hs.clientWidth + 1 && hr.width > 0 && hr.left >= r.left - 1 && hr.right <= r.right + 1 && getComputedStyle(hs).visibility !== 'hidden',
+        doors: [...t.querySelectorAll('.session-placeholder-door')].map((b) => { const br = b.getBoundingClientRect(); return { door: b.dataset.door, text: b.textContent, w: Math.round(br.width), h: Math.round(br.height), px: parseFloat(getComputedStyle(b).fontSize) }; }),
+        minPx: Math.min(...[...t.querySelectorAll('div,button')].filter((e) => e.childElementCount === 0 && e.textContent.trim()).map((e) => parseFloat(getComputedStyle(e).fontSize))) }; })`);
     X.shot = async (name) => { if (!SHOTS) return null; await until(() => ev("(() => { const s = document.getElementById('loading-screen'); if (!s || !s.isConnected) return true; const c = getComputedStyle(s); return c.display === 'none' || c.visibility === 'hidden' || +c.opacity < 0.05; })()").catch(() => true), 20000, 200); await sleep(300); const r = await send('Page.captureScreenshot', { format: 'png' }); const f = path.join(SHOTS, name + '.png'); fs.writeFileSync(f, Buffer.from(r.data, 'base64')); return f; };
     X.click = async (expr) => { const p = await ev(`(() => { const e = ${expr}; if (!e) return null; e.scrollIntoView?.({ block: 'center' }); const r = e.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`); if (!p) return false; for (const type of ['mouseMoved', 'mousePressed', 'mouseReleased']) await send('Input.dispatchMouseEvent', { type, x: p.x, y: p.y, button: 'left', buttons: type === 'mousePressed' ? 1 : 0, clickCount: 1 }); return true; };
     return X;
@@ -132,40 +145,72 @@ else await (async () => {
   try {
     // ① the desktop page
     const want = (X, n) => until(async () => (await X.tiles()).length === n, 20000, 200);
-    ok(await P1.boot() && await want(P1, 11), '① the desktop page (zh) booted on 个人 and built ELEVEN placeholder tiles (2.369.363: none — the record\'s eleven were unbuildable)', await P1.tiles().catch((e) => e.message));
+    ok(await P1.boot() && await want(P1, 12), '① the desktop page (zh) booted on 个人 and built TWELVE placeholder tiles (2.369.363: none — the record\'s windows were unbuildable)', await P1.tiles().catch((e) => e.message));
     const t1 = await P1.tiles();
     const stopped = t1.filter((t) => t.kind === 'stopped'), gone = t1.filter((t) => t.kind === 'unavailable');
-    ok(stopped.length === 4 && gone.length === 7 && stopped.every((t) => t.say === '会话已停止 — 点击恢复' && t.tag === 'BUTTON') && gone.every((t) => t.say === '会话不可用' && t.tag === 'DIV'), `① four «会话已停止 — 点击恢复» (buttons) + seven «会话不可用» (${stopped.length} + ${gone.length})`, t1.map((t) => [t.kind, t.say]));
-    ok(t1.every((t) => NAMES.includes(t.name) && t.inside && t.shown && t.w >= 120 && t.h >= 60), '① each tile says its window\'s NAME (the title\'s, not the first message) and sits inside its window, drawn (≥ 120×60)', t1.map((t) => [t.name, t.w, t.h, t.inside, t.shown]));
+    ok(stopped.length === 4 && gone.length === 8 && stopped.every((t) => t.say === '会话已停止 — 点击恢复' && t.tag === 'BUTTON') && gone.every((t) => t.say === '会话不可用' && t.tag === 'DIV'), `① four «会话已停止 — 点击恢复» (buttons) + eight «会话不可用» (the seven nameless + the remote one) (${stopped.length} + ${gone.length})`, t1.map((t) => [t.kind, t.say]));
+    ok(t1.every((t) => [...NAMES, LONG].includes(t.name) && t.inside && t.shown && t.w >= 120 && t.h >= 60), '① each tile says its window\'s NAME (the title\'s, not the first message) and sits inside its window, drawn (≥ 120×60)', t1.map((t) => [t.name, t.w, t.h, t.inside, t.shown]));
+    // ⑤ r3: why, and the three doors — every «会话不可用» tile
+    const WHY = ['这个窗口保存时没有记下它的会话和文件夹，所以无法从这里重新打开。', '它的会话记录已经不在这台 hub 上了。', '它所在的机器「host-gpu」没有与这台 hub 配对。'];
+    ok(gone.every((t) => WHY.includes(t.why) && t.doors.length === 3 && t.doors.map((d) => d.text).join('|') === '恢复之前的布局…|打开会话列表|移除' && t.doors.every((d) => d.h >= 44 && d.w >= 44)), '⑤ every «会话不可用» tile SAYS WHY in one line and offers three doors — 恢复之前的布局… · 打开会话列表 · 移除 — each ≥ 44 px (2.369.365 r2: none)', gone.map((t) => [t.name, t.why, t.doors.map((d) => [d.text, d.w, d.h])]));
+    ok(t1.every((t) => t.fits && t.nameShown), '⑤ at 1440 every tile FITS its window and shows its name (r3 run 1: the remote tile overflowed and its name line had shrunk away — the name now never shrinks, the tile scrolls from its top)', t1.filter((t) => !t.fits || !t.nameShown).map((t) => [t.id, t.fits, t.nameShown]));
+    const rt = t1.find((t) => t.id === 'win-p-r');
+    ok(rt && rt.name === LONG && rt.nameCut && rt.host === '在 host-gpu' && rt.hostWhole && rt.where === '/srv/remote/build' && ['它的会话记录已经不在这台 hub 上了。', '它所在的机器「host-gpu」没有与这台 hub 配对。'].includes(rt.why), '⑤ the REMOTE tile: its 60-char title is cut by the ellipsis, its machine «在 host-gpu» is its OWN line, seen whole (r2: « · host-gpu» was cut off with the title), its folder shown, its reason the record\'s (gone) or the hub\'s (not paired)', rt);
+    const st0 = t1.find((t) => t.id === 'win-p-0');
+    ok(st0 && st0.where === '/srv/u/proj-0' && gone.find((t) => t.id === 'win-p-4')?.where === '', '⑤ the folder the record holds is on the tile (the stopped one\'s); a nameless record holds none and its reason says so', { st: st0 && st0.where, un: gone.find((t) => t.id === 'win-p-4') });
     await P1.shot('desktop-zh-1440');
+    // ⑤ «打开会话列表»: the list opens on the stopped sessions, searched by the window's name
+    const sbOpen0 = await P1.ev('!!app.sidebar.isOpen');
+    ok(await P1.click(`app.wm.windows.get('win-p-5')?.element.querySelector('[data-door="sessions"]')`) && await until(() => P1.ev(`app.sidebar.isOpen !== false && app.sidebar._activeView === 'stopped' && document.getElementById('session-filter').value === ${J(NAMES[5])}`), 5000), '⑤ «打开会话列表» opens the session list on the STOPPED view, searched by the window\'s name («Van build»)', await P1.ev(`({ open: app.sidebar.isOpen, view: app.sidebar._activeView, q: document.getElementById('session-filter').value, quick: [...document.querySelectorAll('#status-quick-tabs .status-quick-tab')].map((b) => b.textContent + (b.classList.contains('active') ? '*' : '')) })`).catch((e) => e.message));
+    await P1.shot('sessions-zh-1440');
+    await P1.ev(`(() => { app.sidebar._activeView = null; document.getElementById('session-filter').value = ''; app.sidebar._renderQuickTabs(); app.sidebar._render(); app.sidebar.toggle(${sbOpen0}); return true; })()`); // the list as it was (open, it narrows the grid)
+    await sleep(800);
     // the grace: nothing dropped
     await sleep(22000);
     await P1.ev('(async () => { const lm = app.layoutManager; lm._userDirty = true; lm._lastUserInputAt = Date.now(); lm._lastSentJson = null; await lm._doAutoSave(); return true; })()');
     await sleep(1500);
     const rec1 = (await api('/api/layouts')).desktops['desk-p'].autoSave.windows;
-    ok(rec1.length === 11 && rec1.filter((w) => w.backendSessionId).length === 4, `① past the 20 s grace (and a save) the server's 个人 still holds ELEVEN — none dropped as 'unbuilt' (${rec1.length})`, rec1.map((w) => w.winId));
+    ok(rec1.length === 12 && rec1.filter((w) => w.backendSessionId).length === 4, `① past the 20 s grace (and a save) the server's 个人 still holds TWELVE — none dropped as 'unbuilt' (${rec1.length})`, rec1.map((w) => w.winId));
     // ② a second desktop page; a close on the first reaches it live
     P2 = await newPage({ lang: 'zh' });
-    ok(!!P2 && await P2.boot() && await want(P2, 11), '② a second desktop page shows the same eleven placeholders');
-    const target = gone[0].id;
-    ok(await P1.click(`app.wm.windows.get(${J(target)})?.element.querySelector('.win-close')`), '② the first page presses ✕ on an unavailable tile (its only door)');
-    ok(await until(async () => (await api('/api/layouts')).desktops['desk-p'].autoSave.windows.length === 10, 8000), '② the server\'s record holds TEN (the person\'s close is the one way a placeholder leaves)');
-    ok(await until(async () => (await P2.tiles()).length === 10 && !(await P2.tiles()).some((t) => t.id === target), 8000), '② …and the second page\'s tile closed LIVE (the record without it ⇒ it closes there) — its four «stopped» tiles stay tiles (the record\'s same dead attach is no new recipe)', await P2.tiles());
+    ok(!!P2 && await P2.boot() && await want(P2, 12), '② a second desktop page shows the same twelve placeholders');
+    const target = gone.find((t) => t.id !== 'win-p-r' && t.id !== 'win-p-4' && t.id !== 'win-p-5').id;
+    const confirmUp = () => P1.ev(`(() => { const d = [...document.querySelectorAll('.dialog')].find((x) => x.querySelector('h3')?.textContent === '移除这个窗口？'); return d ? { msg: d.querySelector('.dialog-hint')?.textContent || d.textContent, ok: d.querySelector('.btn-create')?.textContent, cancel: d.querySelector('.btn-cancel')?.textContent } : null; })()`);
+    await P1.ev(`(() => { app.wm.focusWindow(${J(target)}); return true; })()`); // its frame on top: the ✕ a person sees
+    ok(await P1.click(`app.wm.windows.get(${J(target)})?.element.querySelector('.win-close')`) && await until(async () => !!(await confirmUp()), 5000), '② ✕ on an unavailable tile ASKS first: «移除这个窗口？» (r2: closed at once — the entry gone from the record)', await confirmUp());
+    const cu = await confirmUp();
+    ok(cu && /永久删除/.test(cu.msg) && cu.ok === '移除' && cu.cancel === '取消', '② …the confirm says the entry is deleted FOR GOOD (only an older rollback point still holds it); 移除 / 取消', cu);
+    await P1.shot('confirm-remove-zh');
+    ok(await P1.click(`[...document.querySelectorAll('.dialog')].find((x) => x.querySelector('h3')?.textContent === '移除这个窗口？')?.querySelector('.btn-cancel')`) && await until(async () => !(await confirmUp()), 3000), '② cancel closes the confirm');
+    await sleep(2500);
+    ok((await api('/api/layouts')).desktops['desk-p'].autoSave.windows.length === 12 && (await P1.tiles()).some((t) => t.id === target), '② …and KEEPS the entry: the tile stays, the server\'s 个人 still holds twelve');
+    ok(await P1.click(`app.wm.windows.get(${J(target)})?.element.querySelector('[data-door="remove"]')`) && await until(async () => !!(await confirmUp()), 5000) && await P1.click(`[...document.querySelectorAll('.dialog')].find((x) => x.querySelector('h3')?.textContent === '移除这个窗口？')?.querySelector('.btn-create')`), '② «移除» asks the same confirm, and 移除 is pressed');
+    ok(await until(async () => (await api('/api/layouts')).desktops['desk-p'].autoSave.windows.length === 11, 8000), '② the server\'s record holds ELEVEN (the person\'s confirmed close is the one way a nameless placeholder leaves)');
+    ok(await until(async () => (await P2.tiles()).length === 11 && !(await P2.tiles()).some((t) => t.id === target), 8000), '② …and the second page\'s tile closed LIVE (the record without it ⇒ it closes there) — its four «stopped» tiles stay tiles (the record\'s same dead attach is no new recipe)', await P2.tiles());
     await P2.shot('desktop2-zh-after-close');
     // ③ the phone
     PH = await newPage({ lang: 'zh', phone: true });
     ok(!!PH && await PH.boot() && await until(async () => (await PH.ev('app.isMobile')) && (await PH.tiles()).some((t) => t.shown), 20000, 200), '③ a phone (390×844, touch, zh) booted as a phone and shows its window on show as a placeholder tile');
+    await PH.ev(`(() => { app.wm.focusWindow('win-p-r'); return true; })()`);
+    await until(async () => (await PH.tiles()).some((t) => t.shown && t.id === 'win-p-r'), 5000, 200);
     const ph = (await PH.tiles()).filter((t) => t.shown);
     ok(ph.length >= 1 && ph[0].w >= 300 && ph[0].h >= 300 && ph[0].inside && ['会话已停止 — 点击恢复', '会话不可用'].includes(ph[0].say), '③ the phone\'s tile fills its window (≥ 300×300), words in zh', ph);
+    const pr = ph.find((t) => t.id === 'win-p-r');
+    ok(pr && pr.minPx >= 16 && pr.doors.length === 3 && pr.doors.every((d) => d.h >= 44 && d.w >= 44 && d.px >= 16) && pr.hostWhole && pr.host === '在 host-gpu' && pr.nameShown, '③ on the phone the «会话不可用» tile\'s every word is ≥ 16 px and its three doors ≥ 44 px; its machine is seen whole', pr && { minPx: pr.minPx, doors: pr.doors, host: pr.host, hostWhole: pr.hostWhole });
     await PH.shot('phone-zh-390');
     PJ = await newPage({ lang: 'ja', phone: true });
     ok(!!PJ && await PJ.boot() && await until(async () => (await PJ.tiles()).some((t) => t.shown && ['セッションは停止しています — クリックで再開', 'セッションを利用できません'].includes(t.say)), 20000, 200), '③ …and in ja (セッションは停止しています — クリックで再開 / セッションを利用できません)', await PJ.tiles().catch(() => []));
+    await PJ.ev(`(() => { app.wm.focusWindow('win-p-r'); return true; })()`);
+    ok(await until(async () => (await PJ.tiles()).some((t) => t.shown && t.id === 'win-p-r' && t.doors.map((d) => d.text).join('|') === '以前のレイアウトを復元…|セッション一覧を開く|削除'), 5000, 200), '③ …its doors in ja (以前のレイアウトを復元… · セッション一覧を開く · 削除)', (await PJ.tiles().catch(() => [])).filter((t) => t.shown));
     await PJ.shot('phone-ja-390');
     PH.close(); PJ.close();
-    // ④ the door
-    await P1.ev('app._showLayoutHistory()');
+    // ④ the door — from a «会话不可用» tile (r3): the dialog opens ON the newest point that still names its conversation
+    ok(await P1.click(`app.wm.windows.get('win-p-4')?.element.querySelector('[data-door="rollback"]')`), '④ the «Trip planner» tile\'s «恢复之前的布局…» is pressed');
     const deskBtn = `.lh-desk[data-id="${POINT}"][data-desk="个人"]`; // THE 06:50 row's 个人 (the close above wrote a newer point — its row comes first)
-    ok(await until(() => P1.ev(`!!document.querySelector('${deskBtn}')`), 8000), '④ ⚙ → System → 恢复之前的布局… lists the 06:50 point with each desktop its own button (个人 / 工作 / 研究)', await P1.ev(`[...document.querySelectorAll('.lh-desk')].map((b) => b.textContent)`).catch(() => null));
+    ok(await until(() => P1.ev(`!!document.querySelector('${deskBtn}')`), 8000), '④ the dialog (⚙ → System → 恢复之前的布局…\'s) lists the 06:50 point with each desktop its own button (个人 / 工作 / 研究)', await P1.ev(`[...document.querySelectorAll('.lh-desk')].map((b) => b.textContent)`).catch(() => null));
+    const picked = await P1.ev(`[...document.querySelectorAll('.lh-desk.is-picked')].map((b) => ({ id: b.dataset.id, desk: b.dataset.desk, current: b.getAttribute('aria-current'), focused: document.activeElement === b }))`);
+    const note = await P1.ev(`document.querySelector('.lh-slot')?.textContent || ''`);
+    ok(picked.length === 1 && picked[0].id === POINT && picked[0].desk === '个人' && picked[0].current === 'true' && /Trip planner/.test(note), '④ …with the 06:50 point\'s 个人 SELECTED (the newest point whose 个人 still names «Trip planner»\'s conversation — the newer ones hold it nameless) and a line that says so', { picked, note, rows: await P1.ev(`[...document.querySelectorAll('.lh-row')].length`) });
     const deskWords = await P1.ev(`[...document.querySelectorAll('.lh-desk')].map((b) => [b.textContent, b.title])`);
     const w0650 = await P1.ev(`(() => { const b = document.querySelector('${deskBtn}'); return b ? [b.textContent, b.title] : null; })()`);
     ok(w0650 && /^个人 12/.test(w0650[0]) && w0650[1] === '只恢复「个人」', '④ the 06:50 row\'s button says the desktop and its count («个人 12 …»), its title «只恢复「个人」»', { w0650, all: deskWords });

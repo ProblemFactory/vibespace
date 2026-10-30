@@ -1,13 +1,13 @@
 import { track } from './telemetry-client.js';
 import { bootJson } from './boot-splash.js';
-import { cssVarDefault, showToast } from './utils.js';
+import { cssVarDefault, showToast, showConfirmDialog } from './utils.js';
 import { t } from './i18n.js';
 import { isTransientWindowType } from './window-types.js';
 import { legacyIdFor } from './agent-meta.js';
 import { wordlessTitleOf } from '../record-clear.js'; // PURE: the title a layout RECORD keeps for a window drawn from a record's words (lane-redact verify r7)
 import { chainSyncKey, ratioDiffers, heldRatio, releaseRatio, withoutMembers, restoreVerdict } from './chain-layout.js'; // agent browser P7 (§4.6): the sync key carries the layout; the ratio applies in place (unless a local divider drag holds it — v2 verify r1 ①)
 import { writerClass, deferKey, deferKeysOf, releaseNext, noteApplied, recordStamp, behindStamp, noteStamp } from './layout-model.js'; // B-4767: the deferred records — one slot per desktop AND writer class, released in arrival order (PURE)
-import { conversationOf, hostOf } from './desktop-record.js'; // PURE (lane layout-stopped-window): the conversation a session entry names — a placeholder's door
+import { conversationOf, hostOf, sessionOf } from './desktop-record.js'; // PURE (lane layout-stopped-window): the conversation a session entry names — a placeholder's door
 import { applyForViewport, arrangementFor } from './desktop-record.js'; // THE LAYER LAW's read half (design q-039 P0, §6b item 10): every read site of a record takes this page's subsets of it here (PURE)
 
 // The MEMBERS of a chain (host first) — NOT a sync key (chainSyncKey is): two
@@ -77,6 +77,16 @@ export function titleNameOf(ws) {
   let n = String(ws?.title || '');
   while (tail && n.length > tail.length && n.endsWith(tail)) n = n.slice(0, -tail.length);
   return n.trim() || savedWindowName(ws);
+}
+/** WHY a placeholder has no press (lane layout-stopped-window r3 — every refusal names why and a next step): 'host' = its machine
+ *  is not paired with this hub (the hub's machine list is read and the entry's host is not in it; an unread list claims
+ *  nothing), 'gone' = the record names a session of this hub that is gone and no conversation, 'nameless' = it was saved
+ *  without its conversation; null = it names one (its press resumes it). */
+export function placeholderWhy(entry, hosts) {
+  if (conversationOf(entry)) return null;
+  const host = hostOf(entry);
+  if (host && Array.isArray(hosts) && !hosts.some((h) => h && h.id === host)) return 'host';
+  return sessionOf(entry) ? 'gone' : 'nameless';
 }
 const PLACEHOLDER_PAGE_KEYS = ['winId', 'isMinimized', 'isMaximized', 'gridBounds', 'zIndex', 'isSnapped', 'preSnapBounds', 'tabChain', 'isTabGuest'];
 export function placeholderCapture(entry, winState) {
@@ -1015,8 +1025,9 @@ class LayoutManager {
   /** UNBUILT IS NOT DROPPED (lane layout-stopped-window, the owner 2026-10-30 «我的个人桌面丢了很多窗口»): a SESSION window this
    *  page cannot build — its conversation stopped with no transcript here, or the entry names none — is a PLACEHOLDER tile
    *  under the entry's own id: the window's name and «会话已停止 — 点击恢复» (a press resumes the conversation in its place)
-   *  or «会话不可用». Its capture IS the entry (placeholderCapture), so the record keeps it, identity and all; only the
-   *  person's close removes it; a newer record that can build it replaces it (_applyRemoteState). Returns the window. */
+   *  or «会话不可用» (r3: with why, and three doors — the rollback dialog on the point that names it, the session list, remove).
+   *  Its capture IS the entry (placeholderCapture), so the record keeps it, identity and all; only the person's close removes
+   *  it (a nameless one's asks first); a newer record that can build it replaces it (_applyRemoteState). Returns the window. */
   placeholderFor(entry) {
     const id = String((entry && (entry.winId || entry.id)) || '');
     if (!id || (entry.type !== 'chat' && entry.type !== 'terminal') || this.app.wm.windows.has(id)) return null;
@@ -1034,16 +1045,60 @@ class LayoutManager {
     const box = win.content;
     if (!box) return;
     box.textContent = '';
+    const line = (cls, text) => { const d = document.createElement('div'); d.className = cls; d.textContent = text; return d; };
+    // a STOPPED tile is one press (its conversation resumes in place); an UNAVAILABLE one is a group of doors (r3) — a button
+    // never holds buttons
     const tile = document.createElement(cid ? 'button' : 'div');
-    tile.className = 'session-placeholder' + (cid ? ' can-resume' : '');
+    tile.className = 'session-placeholder' + (cid ? ' can-resume' : ' is-unavailable');
     tile.dataset.placeholder = cid ? 'stopped' : 'unavailable';
-    const host = hostOf(entry); // a REMOTE conversation's tile names its machine (r2): «<title> · <host>», and its press resumes there
-    const name = document.createElement('div'); name.className = 'session-placeholder-name'; name.textContent = (titleNameOf(entry) || t('Session')) + (host ? ' · ' + (this.app._hostLabel?.(host) || host) : '');
-    if (host) tile.dataset.host = host;
-    const say = document.createElement('div'); say.className = 'session-placeholder-say'; say.textContent = cid ? t('Session stopped — click to resume') : t('Session unavailable');
-    tile.append(name, say);
-    if (cid) tile.onclick = () => this._resumePlaceholder(win);
+    const name = titleNameOf(entry) || t('Session');
+    tile.append(line('session-placeholder-name', name));
+    // a REMOTE conversation's tile names its machine (r2) ON ITS OWN LINE (r3: appended to the one-line name, the ellipsis of a
+    // normal-length title hid it), and its press resumes there
+    const host = hostOf(entry);
+    if (host) { tile.dataset.host = host; tile.append(line('session-placeholder-host', t('on {host}', { host: this.app._hostLabel?.(host) || host }))); }
+    // the folder the record holds, on both kinds (r3); a record that holds none says so in its reason
+    const cwd = String(entry.cwd || entry.openSpec?.cwd || '');
+    if (cwd) tile.append(line('session-placeholder-where', cwd));
+    tile.append(line('session-placeholder-say', cid ? t('Session stopped — click to resume') : t('Session unavailable')));
+    win.onCloseRequest = () => this._closeAsks(win); // the ✕ of a tile that names no conversation asks first (r3)
+    if (cid) { tile.onclick = () => this._resumePlaceholder(win); box.appendChild(tile); return; }
+    // NO PRESS, THEREFORE DOORS (r3 — these are the windows the owner lost): why, in one line, and the three ways forward
+    const why = placeholderWhy(entry, this.app.sidebar?._hostsData?.hosts || null);
+    tile.setAttribute('role', 'group'); tile.setAttribute('aria-label', name);
+    tile.append(line('session-placeholder-why', why === 'host' ? t('Its machine “{host}” is not paired with this hub.', { host: this.app._hostLabel?.(host) || host })
+      : why === 'gone' ? t('The record of its conversation is gone from this hub.')
+        : cwd ? t('This window was saved without its conversation, so it cannot be reopened from here.')
+          : t('This window was saved without its conversation or its folder, so it cannot be reopened from here.')));
+    const door = (key, text, fn) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'agent-btn session-placeholder-door'; b.dataset.door = key; b.textContent = text; b.onclick = (e) => { e?.stopPropagation?.(); fn(); }; return b; };
+    const doors = document.createElement('div'); doors.className = 'session-placeholder-doors';
+    doors.append(
+      // an older rollback point may still name its conversation: the dialog opens ON the newest one that does (the server reads them)
+      door('rollback', t('Restore a previous layout…'), () => this.app._showLayoutHistory?.({ desktopId: win._desktopId || this.app.desktopManager?.activeDesktopId || null, entry: win._placeholderOf, name })),
+      // the session list, on the stopped sessions, searched by the window's name — the conversation is opened there by hand
+      door('sessions', t('Open the session list'), () => this.app.sidebar?.showStopped?.(name)),
+      door('remove', t('Remove'), () => this._askRemovePlaceholder(win)));
+    tile.append(doors);
     box.appendChild(tile);
+  }
+
+  /** A user close of a placeholder (requestClose's `onCloseRequest`): a tile that names no conversation asks first — its entry
+   *  leaves the record for good (r3: never a silent permanent delete); a stopped tile's conversation stays in the list, it closes. */
+  _closeAsks(win) {
+    if (!win || win._removeConfirmed || conversationOf(win._placeholderOf)) return true;
+    this._askRemovePlaceholder(win);
+    return false;
+  }
+  async _askRemovePlaceholder(win) {
+    const id = win.id, name = titleNameOf(win._placeholderOf) || t('Session');
+    const yes = await this.confirmRemovePlaceholder({ name });
+    if (!yes || this.app.wm.windows.get(id) !== win) return false;
+    win._removeConfirmed = true;
+    this.app.wm.requestClose(id); // the person's close (the record drops it as 'closed'; every client closes it)
+    return true;
+  }
+  confirmRemovePlaceholder({ name }) {
+    return showConfirmDialog({ title: t('Remove this window?'), message: t('“{name}” is deleted from this desktop’s layout for good. Only an older rollback point (Restore a previous layout…) still holds it.', { name }), confirmText: t('Remove'), danger: true });
   }
 
   /** The placeholder's press: the conversation resumes IN ITS PLACE (its box, its desktop) — the placeholder closes as the

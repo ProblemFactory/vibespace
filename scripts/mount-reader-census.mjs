@@ -77,7 +77,7 @@ export const ROWS = [
   ['src/routes/browser-trace.js', 'own-tree', 2, null, DATA],
   ['src/routes/channels.js', 'own-tree', 5, null, DATA],
   ['src/routes/files.js', 'user-path', 43, 'mounts\\.pathBlocked\\(p\\)', 'the explorer + every file op: the route middleware 503 by name, then SafeFs.call refuses at the pool door'],
-  ['src/routes/persistence.js', 'own-tree', 15, null, DATA],
+  ['src/routes/persistence.js', 'own-tree', 16, null, `${DATA}; lane layout-stopped-window r3 +1: a rollback point read for a tile's slot (fs.promises.readFile of data/layout-history/<point> — namedPointFor, off the loop)`],
   ['src/routes/sessions.js', 'user-path', 27, 'DOOR\\.blocked\\(', 'a session cwd realpath (sync, main thread): null, not cached'],
   ['src/routes/window-targets.js', 'own-tree', 1, null, DATA],
   ['src/safe-fs-worker.js', 'exempt', 43, null, 'the SafeFs worker: it runs a path SafeFs.call already asked the door about (src/safe-fs.js _blocked); lane hub-fuse-sync-guard +4: the Task Group context table\'s walk + text read of a row on a storage mount (contextFiles / textHead)'],

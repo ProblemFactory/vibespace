@@ -38,6 +38,12 @@
 //      its host, a placeholder names its host and its press resumes there, a live row's recipe keeps its host (and never its
 //      display cwd); §3 (③ ④) the dead socket's meta is kept FIRST (atomic, the one delete road) and its transcript looked
 //      for OFF the loop (no harness locate on the main thread), a «no transcript» deleting it once answered
+//   §7 ROUND 3 (the r2 acceptance, each RED on 5e0cb138e): THE TILE WITH NO PRESS HAS A WAY FORWARD — a nameless entry's tile
+//      says why in one line (saved without its conversation / its folder · its conversation's record gone · its machine not
+//      paired) and offers three doors: «Restore a previous layout…» (the dialog asks the REAL persistence router for the newest
+//      point that still names a conversation for this slot — PURE namedTwinIn — and selects it), «Open the session list» (the
+//      REAL Sidebar.showStopped: the Stopped view searched by the window's name) and «Remove», asked first; the ✕ of a nameless
+//      tile asks the same confirm (cancel keeps the entry); a remote tile's machine is ITS OWN LINE under a 60-char title
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -81,7 +87,8 @@ Object.defineProperty(globalThis, 'navigator', { value: { language: 'en', userAg
 globalThis.requestAnimationFrame = (fn) => setTimeout(fn, 0); globalThis.cancelAnimationFrame = (id) => clearTimeout(id);
 const answers = { '/api/active': { sessions: [] }, '/api/sessions': { sessions: [] } }; // a hub whose every session is stopped, no transcript of them here
 const delays = {}; // a read still out (r2 ①: a second door fires while the first one's reads are out)
-globalThis.fetch = async (url) => { const k = String(url).split('?')[0]; if (delays[k]) await tick(delays[k]); return { ok: true, json: async () => JSON.parse(J(answers[k] || {})) }; };
+const asked = []; // every url a client module fetched (r3: the dialog's slot query)
+globalThis.fetch = async (url) => { asked.push(String(url)); const k = String(url).split('?')[0]; if (delays[k]) await tick(delays[k]); return { ok: true, json: async () => JSON.parse(J(answers[k] || {})) }; };
 
 // ── the measured shapes, invented words ──
 const GB = (i) => ({ left: (i % 4) / 4, top: Math.floor(i / 4) / 3, width: 0.25, height: 1 / 3 });
@@ -149,6 +156,7 @@ function world({ records, active = 'desk-w', extra = {} } = {}) {
       toggleMaximize(id) { const w = wins.get(id); if (w) w.isMaximized = !w.isMaximized; }, minimize(id) { const w = wins.get(id); if (w) w.isMinimized = true; }, restore() {}, _notify() {}, _scheduleOverlapUpdate() {}, syncHiddenViews() {},
       createWindow: ({ title, type, syncId }) => mkWin(syncId || ('win-n' + (++seq)), dm.activeDesktopId, { type, title }),
       closeWindow: (id) => { if (!wins.has(id)) return; wins.delete(id); closed.push(id); dm.purgeClosedWindow(id); lm.noteClosed?.(id, null); },
+      requestClose(id) { const w = wins.get(id); if (!w) return false; if (typeof w.onCloseRequest === 'function' && w.onCloseRequest() === false) return false; this.closeWindow(id); return true; }, // window.js requestClose's shape
       setTitle(id, t) { const w = wins.get(id); if (w) w.title = t; } },
     themeManager: { current: 'dark', apply() {} }, _fontSize: 14, _fontFamily: 'mono', sidebar: { isOpen: false, _allSessions: [], toggle() {}, getCustomName: () => null },
     updateTaskbar() {}, _checkWelcome() {},
@@ -236,6 +244,23 @@ async function loadLifecycle() {
   try { return (await import(pathToFileURL(f).href)).installSessionLifecycle; } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
 
+/** The REAL setup-flows (`_showLayoutHistory`), every relative import stubbed: the modal shell and fetchJson are the test's
+ *  (globalThis.__lswShell / __lswFetch), t interpolates, escHtml escapes — the dialog's own code builds its query and selects. */
+async function loadFlows() {
+  const src = fs.readFileSync(path.join(LIB, 'setup-flows.js'), 'utf8');
+  const map = {};
+  for (const m of src.matchAll(/^import\s*\{([^}]*)\}\s*from\s*'([^']+)';/gm)) { (map[m[2]] = map[m[2]] || new Set()); for (const n of m[1].split(',').map((x) => x.trim().split(/\s+as\s+/)[0]).filter(Boolean)) map[m[2]].add(n); }
+  const special = { t: "export const t = (s, v) => String(s).replace(/\\{(\\w+)\\}/g, (m, k) => (v && k in v ? String(v[k]) : m));", escHtml: "export const escHtml = (x) => String(x ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/\"/g, '&quot;').replace(/'/g, '&#39;');",
+    createModalShell: 'export const createModalShell = (o) => globalThis.__lswShell(o);', fetchJson: 'export const fetchJson = (u, o) => globalThis.__lswFetch(u, o);' };
+  const STUBS = {};
+  for (const [p, names] of Object.entries(map)) STUBS[p] = [...names].map((n) => special[n] || `export const ${n} = function () { return null; };`).join('\n').replace(/export const (TerminalSession|SignInCard) = function \(\) \{ return null; \};/g, 'export class $1 {}');
+  const r = await esbuild.build({ stdin: { contents: "export { installSetupFlows } from './setup-flows.js';", resolveDir: LIB, sourcefile: 'entry.js', loader: 'js' }, bundle: true, write: false, format: 'esm', platform: 'neutral', logLevel: 'silent',
+    plugins: [{ name: 'stubs', setup(b) { b.onResolve({ filter: /^\.\.?\// }, (a) => (a.importer.endsWith('setup-flows.js') ? { path: a.path, namespace: 'stub' } : null)); b.onLoad({ filter: /.*/, namespace: 'stub' }, (a) => ({ contents: STUBS[a.path] || 'export {};', loader: 'js' })); } }] });
+  const dir = scratchDir('lsw-flows'), f = path.join(dir, 'flows.mjs');
+  fs.writeFileSync(f, r.outputFiles[0].text);
+  try { return (await import(pathToFileURL(f).href)).installSetupFlows; } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+}
+
 await section('§1b THE DOOR — the real resumeSession → createSession over the real desktop / layout managers', async () => {
   const install = await loadLifecycle();
   class Life {} install(Life);
@@ -312,7 +337,7 @@ await section('§2 the boot restore of that record on a hub whose sessions are s
   const gone = built.map((w) => W.wins.get(w.winId)).filter((w) => tileOf(w)?.dataset?.placeholder === 'unavailable');
   ok(built.length === 11, `§2 all ELEVEN windows are built (2.369.363 built ${0}: none alive, no transcript here — here ${built.length})`, built.map((w) => w.winId));
   ok(stopped.length === 4 && gone.length === 7, `§2 four «Session stopped — click to resume» (a conversation id, no transcript here) + seven «Session unavailable» (nameless) placeholders (${stopped.length} + ${gone.length})`);
-  ok(J(wordsOf(stopped[0])) === J([NAMES[0], 'Session stopped — click to resume']) && J(wordsOf(gone[0])) === J([NAMES[4], 'Session unavailable']) && tileOf(stopped[0]).tagName === 'BUTTON' && tileOf(gone[0]).tagName === 'DIV', '§2 a tile says the window\'s NAME and its state; the stopped one is a button, the unavailable one is not', [wordsOf(stopped[0]), wordsOf(gone[0])]);
+  ok(J(wordsOf(stopped[0])) === J([NAMES[0], CWD(0), 'Session stopped — click to resume']) && J(wordsOf(gone[0]).slice(0, 2)) === J([NAMES[4], 'Session unavailable']) && tileOf(stopped[0]).tagName === 'BUTTON' && tileOf(gone[0]).tagName === 'DIV', '§2 a tile says the window\'s NAME, the folder its record holds, and its state; the stopped one is ONE press (a button), the unavailable one a group of doors (§7)', [wordsOf(stopped[0]), wordsOf(gone[0])]);
   W.dm._noteAttempts('desk-p', rec.map((w) => w.winId), { at: Date.now() - 21000 }); // the 20 s grace is long past
   const r = W.dm.recordFor('desk-p');
   ok(r.windows.length === 11 && !W.dm.evidence().some((e) => e.why === 'unbuilt'), '§2 past the grace the record keeps all ELEVEN — no \'unbuilt\' evidence (2.369.363 dropped the seven)', { n: r.windows.length, ev: W.dm.evidence() });
@@ -322,7 +347,7 @@ await section('§2 the boot restore of that record on a hub whose sessions are s
   tileOf(stopped[1]).onclick();
   const call = W.resumed.at(-1);
   ok(call && call[0] === CID(1) && call[1] === CWD(1) && call[2] === NAMES[1] && call[3].backendSessionId === CID(1) && call[3].winBounds?.winId === 'win-new-1' && call[3].winBounds?.desktopId === 'desk-p' && W.closed.includes('win-new-1'), '§2 the stopped tile\'s press resumes its conversation in its place (its id, cwd, name, box and desktop); the placeholder closes as the person\'s act', call);
-  ok(tileOf(gone[1]).onclick == null, '§2 the unavailable tile has no press (nothing names a conversation) — only its close');
+  ok(tileOf(gone[1]).onclick == null, '§2 the unavailable tile itself is no press (nothing names a conversation) — its doors are (§7)');
 });
 
 await section('§2 the live record\'s door — a placeholder broadcast live, rebuilt in place, closed with its entry', async () => {
@@ -509,7 +534,7 @@ await section('§6 r2 ② THE HOST RIDES WITH THE NAME — {backend, backendSess
   V.lm._applyRemoteState({ windows: [carried] }, { writer: 'desktop' });
   const ph = V.wins.get('win-new-8');
   const words = wordsOf(ph);
-  ok(ph?._placeholderOf && tileOf(ph)?.dataset?.host === 'host-a' && words[0] === `${NAMES[8]} · gpu-box` && words[1] === 'Session stopped — click to resume', '§6 ② a remote conversation\'s placeholder names its machine — «<title> · <host>» over «Session stopped — click to resume» (77dc65619: no host)', { words, host: tileOf(ph)?.dataset?.host ?? null });
+  ok(ph?._placeholderOf && tileOf(ph)?.dataset?.host === 'host-a' && words[0] === NAMES[8] && words[1] === 'on gpu-box' && words.at(-1) === 'Session stopped — click to resume', '§6 ② a remote conversation\'s placeholder names its machine — the title, «on <host>» (its own line since r3), «Session stopped — click to resume» (77dc65619: no host)', { words, host: tileOf(ph)?.dataset?.host ?? null });
   const pc = ph && V.lm.captureWin(ph);
   ok(pc && pc.hostId === 'host-a' && pc.backendSessionId === CID(8), '§6 ② the placeholder\'s capture keeps the host (the record keeps it through every write)', pc && { hostId: pc.hostId ?? null });
   tileOf(ph)?.onclick?.();
@@ -520,6 +545,126 @@ await section('§6 r2 ② THE HOST RIDES WITH THE NAME — {backend, backendSess
   const spec = V.lm._liveSpecOf(carried), specNoCwd = V.lm._liveSpecOf({ ...carried, cwd: '' });
   const elsewhere = V.lm._liveSpecOf({ ...carried, hostId: 'host-b' });
   ok(spec && spec.serverId === 'sess-r8' && spec.hostId === 'host-a' && spec.cwd === CWD(8) && specNoCwd && specNoCwd.cwd === '' && elsewhere === null, '§6 ② a live row\'s attach recipe keeps the row\'s host and never its display cwd; a row on ANOTHER host is not this entry\'s', { spec, specNoCwd: specNoCwd && specNoCwd.cwd, elsewhere });
+});
+
+await section('§7 r3 THE TILE WITH NO PRESS HAS A WAY FORWARD — why, in one line, and three doors', async () => {
+  const { placeholderWhy } = await import(pathToFileURL(path.join(LIB, 'layout.js')).href);
+  const doorsOf = (w) => { const g = (tileOf(w)?.children || []).find((c) => c.className === 'session-placeholder-doors'); return g ? g.children : []; };
+  const lineOf = (w, cls) => (tileOf(w)?.children || []).find((c) => c.className === cls)?.textContent ?? null;
+  const rec = NAMES.map((_, i) => (i < 4 ? answered(i) : bare(i)));
+  const W = world({ records: { 'desk-w': [], 'desk-p': rec, 'desk-r': [] }, active: 'desk-p' });
+  const histCalls = [], listCalls = [], confirms = [];
+  W.app._showLayoutHistory = (slot) => { histCalls.push(slot); return null; };
+  W.app.sidebar.showStopped = (q) => listCalls.push(q);
+  let answer = false;
+  W.lm.confirmRemovePlaceholder = async ({ name }) => { confirms.push(name); return answer; };
+  await W.lm.restoreState({ windows: rec });
+  const t4 = W.wins.get('win-new-4');
+  const d = doorsOf(t4);
+  ok(tileOf(t4)?.dataset?.placeholder === 'unavailable' && lineOf(t4, 'session-placeholder-why') === 'This window was saved without its conversation or its folder, so it cannot be reopened from here.', '§7 a nameless entry\'s tile SAYS WHY in one line — saved without its conversation (and its folder: the record holds none) (5e0cb138e: «Session unavailable» alone)', wordsOf(t4));
+  ok(d.length === 3 && d.every((b) => b.tagName === 'BUTTON' && typeof b.onclick === 'function') && J(d.map((b) => b.dataset.door)) === J(['rollback', 'sessions', 'remove']) && J(d.map((b) => b.textContent)) === J(['Restore a previous layout…', 'Open the session list', 'Remove']), '§7 …and offers THREE doors, each a button: «Restore a previous layout…» · «Open the session list» · «Remove» (5e0cb138e: none — its only control was the window\'s ✕)', d.map((b) => [b.tagName, b.dataset.door, b.textContent]));
+  d[0].onclick({ stopPropagation() {} });
+  const slot = histCalls.at(-1);
+  ok(slot && slot.desktopId === 'desk-p' && slot.entry?.winId === 'win-new-4' && slot.name === NAMES[4], '§7 the rollback door opens the dialog FOR THIS SLOT (its desktop, its entry, its name)', slot && { desktopId: slot.desktopId, win: slot.entry?.winId, name: slot.name });
+  d[1].onclick({ stopPropagation() {} });
+  ok(J(listCalls) === J([NAMES[4]]), '§7 the session-list door opens the list searched by the window\'s name', listCalls);
+  // the reasons, as the record shows them (PURE placeholderWhy) and as the tile says them
+  const gone = { ...bare(5), openSpec: { action: 'attachSession', serverId: 'sess-gone-5', mode: 'chat' } };
+  const far = { ...bare(6), hostId: 'host-z', cwd: '/srv/u/far' };
+  ok(placeholderWhy(bare(4), null) === 'nameless' && placeholderWhy(gone, null) === 'gone' && placeholderWhy(far, [{ id: 'host-a' }]) === 'host' && placeholderWhy(far, null) === 'nameless' && placeholderWhy(far, [{ id: 'host-z' }]) === 'nameless' && placeholderWhy(named(1), null) === null, '§7 PURE placeholderWhy: nameless · gone (the record names a session of this hub that is gone) · host (its machine is not in the hub\'s machine list — an unread list claims nothing) · null when it names a conversation');
+  const V = world({ records: { 'desk-w': [], 'desk-p': [gone, far, { ...bare(7), cwd: CWD(7) }], 'desk-r': [] }, active: 'desk-p', extra: { _hostLabel: (h) => (h === 'host-z' ? 'far-box' : h) } });
+  V.app.sidebar._hostsData = { hosts: [{ id: 'host-a', name: 'gpu-box' }] };
+  await V.lm.restoreState({ windows: [gone, far, { ...bare(7), cwd: CWD(7) }] });
+  ok(lineOf(V.wins.get('win-new-5'), 'session-placeholder-why') === 'The record of its conversation is gone from this hub.' && lineOf(V.wins.get('win-new-6'), 'session-placeholder-why') === 'Its machine “far-box” is not paired with this hub.' && lineOf(V.wins.get('win-new-7'), 'session-placeholder-why') === 'This window was saved without its conversation, so it cannot be reopened from here.', '§7 …each tile says its own: the conversation\'s record gone · its machine «far-box» not paired · saved without its conversation (its folder known)', ['win-new-5', 'win-new-6', 'win-new-7'].map((id) => lineOf(V.wins.get(id), 'session-placeholder-why')));
+  ok(lineOf(V.wins.get('win-new-7'), 'session-placeholder-where') === CWD(7) && lineOf(V.wins.get('win-new-6'), 'session-placeholder-host') === 'on far-box' && lineOf(W.wins.get('win-new-0'), 'session-placeholder-where') === CWD(0), '§7 the folder the record holds is shown on BOTH kinds (r3 ③), the machine on its own line');
+  // ✕ ⇒ the confirm; cancel keeps the entry
+  const ask = (id) => W.app.wm.requestClose(id);
+  ok(ask('win-new-4') === false && W.wins.has('win-new-4') && J(confirms) === J([NAMES[4]]), '§7 the ✕ of a nameless tile ASKS first — the window stays while the confirm is up (5e0cb138e: closed at once, the entry gone from the record)', { confirms, has: W.wins.has('win-new-4') });
+  await tick(5);
+  ok(W.wins.has('win-new-4') && W.dm.recordFor('desk-p').windows.some((w) => w.winId === 'win-new-4') && !W.dm.evidence().some((e) => e.id === 'win-new-4' && e.why === 'closed'), '§7 …cancel KEEPS it: the tile, the entry in the record, no \'closed\' evidence', W.dm.evidence().filter((e) => e.id === 'win-new-4'));
+  answer = true; d[2].onclick({ stopPropagation() {} }); await tick(5);
+  ok(!W.wins.has('win-new-4') && J(confirms) === J([NAMES[4], NAMES[4]]) && W.dm.evidence().some((e) => e.id === 'win-new-4' && e.why === 'closed') && !W.dm.recordFor('desk-p').windows.some((w) => w.winId === 'win-new-4'), '§7 «Remove» asks the same confirm; yes = the person\'s close (the record drops it as \'closed\', every client closes it)', { confirms, ev: W.dm.evidence().filter((e) => e.id === 'win-new-4') });
+  answer = true; ask('win-new-5'); await tick(5);
+  ok(!W.wins.has('win-new-5') && confirms.length === 3, '§7 …and the ✕ with a yes closes it');
+  const n0 = confirms.length;
+  ok(ask('win-new-0') === true && !W.wins.has('win-new-0') && confirms.length === n0, '§7 a STOPPED tile\'s ✕ closes without asking (its conversation stays in the session list)', { left: W.wins.has('win-new-0'), confirms });
+  // the confirm's words: deleted for good, and where it still lives
+  const L = read('src/lib/layout.js');
+  ok(/confirmRemovePlaceholder\(\{ name \}\) \{\n\s*return showConfirmDialog\(\{ title: t\('Remove this window\?'\), message: t\('“\{name\}” is deleted from this desktop’s layout for good\. Only an older rollback point \(Restore a previous layout…\) still holds it\.', \{ name \}\), confirmText: t\('Remove'\), danger: true \}\);/.test(L), '§7 the confirm says the entry is deleted FOR GOOD (and that only an older rollback point still holds it) — the house dialog, danger');
+  // a 60-char title + a host: the host is NOT inside the one-line (ellipsized) name
+  const long = 'Investigate why the nightly integration build fails on main.'; // 60 chars
+  const R = world({ records: { 'desk-w': [], 'desk-p': [], 'desk-r': [] }, active: 'desk-p', extra: { _hostLabel: (h) => (h === 'host-a' ? 'gpu-box' : h) } });
+  R.lm._applyRemoteState({ windows: [{ ...named(8), winId: 'win-long', title: long + ' — ' + CWD(8), openSpec: undefined, serverSessionId: undefined, hostId: 'host-a' }, { ...bare(9), winId: 'win-long-u', title: long, hostId: 'host-a' }] }, { writer: 'desktop' });
+  const lp = R.wins.get('win-long'), lu = R.wins.get('win-long-u');
+  ok(long.length === 60 && [lp, lu].every((w) => lineOf(w, 'session-placeholder-name') === long && lineOf(w, 'session-placeholder-host') === 'on gpu-box') && tileOf(lp).dataset.placeholder === 'stopped' && tileOf(lu).dataset.placeholder === 'unavailable', '§7 a 60-char title + a host ⇒ the host is its OWN line under the title, never inside the ellipsized name — stopped and unavailable alike (5e0cb138e: «<title> · gpu-box» cut by the ellipsis)', [wordsOf(lp), wordsOf(lu)]);
+  const css = read('public/style.css');
+  ok(/\.session-placeholder-name \{[^}]*text-overflow: ellipsis; white-space: nowrap; flex-shrink: 0; \}/.test(css) && /\.session-placeholder > :first-child \{ margin-top: auto; \}\n\.session-placeholder > :last-child \{ margin-bottom: auto; \}/.test(css) && /\.session-placeholder \{[^}]*justify-content: flex-start;[^}]*overflow: auto;/.test(css) && /\.session-placeholder-host \{[^}]*flex-shrink: 0;/.test(css) && /\.agent-btn\.session-placeholder-door \{ min-height: 44px;/.test(css) && /@media \(max-width: 768px\), \(pointer: coarse\) and \(max-width: 1023px\) \{\n  \.session-placeholder-name \{ font-size: 18px; \}\n  \.session-placeholder-host, \.session-placeholder-where, \.session-placeholder-say, \.session-placeholder-why, \.agent-btn\.session-placeholder-door \{ font-size: 16px; \}/.test(css) && !/var\(--bg-secondary/.test(css.slice(css.indexOf('.session-placeholder {'), css.indexOf('.session-placeholder {') + 600)), '§7 the CSS: the name ellipsized and never shrunk away, the tile centred by auto margins (a tall one scrolls from its top), the host its own unshrunk line, doors ≥ 44 px, every word ≥ 16 px on the phone; no --bg-secondary (not a token here)');
+});
+
+await section('§7 r3 the rollback door opens the dialog ON the newest point that names this slot (the REAL router)', async () => {
+  const DR = require(MODEL);
+  ok(typeof DR.namedTwinIn === 'function', '§7 desktop-record.js exports namedTwinIn (PURE)');
+  const tw = DR.namedTwinIn;
+  ok(tw(P_BEFORE(), bare(4))?.winId === 'win-old-4' && tw(P_BEFORE(), { ...bare(4), winId: 'win-old-4', title: 'renamed' })?.winId === 'win-old-4' && tw(P_SENT(), bare(4)) === null
+    && tw([named(0, { title: 'Twin — x' }), named(1, { title: 'Twin — y' })], { ...bare(0), title: 'Twin' }) === null && tw([{ ...named(4), type: 'terminal' }], bare(4)) === null && tw(P_BEFORE(), files('x', 1)) === null && tw('garbage', bare(4)) === null,
+  '§7 PURE namedTwinIn: the slot\'s named entry by its id, else by the ONE entry of its name (the title without its cwd tail); a nameless one is no twin; two of one name are never guessed; another type, a window that is no session, garbage ⇒ null');
+  const dd = scratchDir('lsw-pick');
+  try {
+    delete require.cache[require.resolve(path.join(REPO, 'src/routes/persistence.js'))]; // §4 set up another data dir on the cached module
+    const p = require(path.join(REPO, 'src/routes/persistence.js'));
+    p.setup({ dataDir: dd, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null });
+    const R = p.router;
+    fs.mkdirSync(path.join(dd, 'layout-history'), { recursive: true });
+    const put = (id, at, p) => { const doc = DOC(p), sum = { 工作: 5, 个人: p.length, 研究: 6 }; fs.writeFileSync(path.join(dd, 'layout-history', id), J({ at, summary: sum, totalWindows: 11 + p.length, change: null, layouts: doc })); fs.writeFileSync(path.join(dd, 'layout-history', id.replace(/\.json$/, '.meta.json')), J({ at, summary: sum, totalWindows: 11 + p.length, change: null })); };
+    const OLD = 'layout-2026-10-30T06-50-53-927Z-1h.json', MID = 'layout-2026-10-30T09-18-22-111Z-2h.json', NEW = 'layout-2026-10-30T09-19-35-222Z-3h.json';
+    put(OLD, 1793343053927, P_BEFORE()); // 06:50 — all eleven named
+    put(MID, 1793352000000, P_BEFORE().slice(0, 6)); // a point that names some of them (Trip planner = 4, Van build = 5)
+    put(NEW, 1793353000000, P_SENT()); // 09:18:22's write — the seven nameless
+    const route = R.stack.find((l) => l.route && l.route.path === '/api/layout-history' && l.route.methods.get);
+    const call = async (query) => { let out = null; await route.route.stack[0].handle({ query }, { json: (j) => { out = j; } }); return out; };
+    // the REAL dialog (its imports stubbed) asks for THIS SLOT and selects what the router answers
+    class A {} (await loadFlows())(A);
+    const dialog = async (slot) => {
+      const made = [], urls = [];
+      const body = { _h: '', set innerHTML(v) { this._h = String(v); }, get innerHTML() { return this._h; },
+        querySelectorAll(sel) { if (sel !== '.lh-desk') return []; return [...this._h.matchAll(/<button class="lh-desk" data-id="([^"]*)" data-desk="([^"]*)"/g)].map((m) => { const b = { dataset: { id: m[1], desk: m[2] }, cls: [], attrs: {}, focused: false, classList: { add: (c) => b.cls.push(c) }, setAttribute: (k, v) => { b.attrs[k] = v; }, closest: () => ({ classList: { add: (c) => { b.row = c; } } }), scrollIntoView() { b.seen = true; }, focus() { b.focused = true; } }; made.push(b); return b; }); } };
+      globalThis.__lswShell = () => ({ body, close() {}, raised: false });
+      globalThis.__lswFetch = async (u) => { urls.push(u); return call(Object.fromEntries(new URL(u, 'http://x').searchParams)); };
+      await A.prototype._showLayoutHistory.call(new A(), slot);
+      return { urls, html: body._h, picked: made.filter((b) => b.cls.includes('is-picked')) };
+    };
+    const D1 = await dialog({ desktopId: 'desk-p', entry: bare(4), name: NAMES[4] });
+    const q1 = D1.urls[0] ? Object.fromEntries(new URL(D1.urls[0], 'http://x').searchParams) : null;
+    ok(q1 && q1.desktop === 'desk-p' && q1.win === 'win-new-4' && q1.type === 'chat' && q1.title === NAMES[4], '§7 the dialog asks the history for THIS SLOT (?desktop=&win=&type=&title=&cwd=&name= — the tile\'s entry)', D1.urls);
+    const a = await call(q1 || {});
+    ok(a && a.entries.length === 3 && a.pick && a.pick.id === MID && a.pick.desk === '个人', '§7 the router answers the NEWEST point whose 个人 still names a conversation for it (09:18:22\'s own point holds it nameless — skipped)', a && { pick: a.pick, ids: a.entries.map((e) => e.id) });
+    const p1 = D1.picked;
+    ok(p1.length === 1 && p1[0].dataset.id === MID && p1[0].dataset.desk === '个人' && p1[0].attrs['aria-current'] === 'true' && p1[0].focused && p1[0].row === 'is-picked' && D1.html.includes('Selected: the newest point that still names the conversation of “Trip planner” — press it to restore that desktop as it was then.'), '§7 …and the dialog opens WITH THAT POINT\'S 个人 SELECTED (is-picked, aria-current, focused) and says so (5e0cb138e: no slot — the newest row first, the one that holds the seven nameless)', { picked: p1.map((b) => b.dataset), note: (D1.html.match(/lh-slot">([^<]*)/) || [])[1] });
+    const b = await call({ desktop: 'desk-p', win: 'win-new-9', type: 'chat', title: NAMES[9] });
+    ok(b && b.pick && b.pick.id === OLD && b.pick.desk === '个人', '§7 …a window the middle point does not hold is found further back (06:50)', b && b.pick);
+    const c = await call({ desktop: 'desk-p', win: 'win-new-x', type: 'chat', title: 'Nobody' }), e = await call({ desktop: 'desk-q', win: 'win-new-4', type: 'chat', title: NAMES[4] });
+    const bare0 = await call({});
+    const D2 = await dialog({ desktopId: 'desk-p', entry: { ...bare(4), winId: 'win-new-x', title: 'Nobody' }, name: 'Nobody' });
+    const D3 = await dialog(null);
+    ok(c && c.pick === null && e && e.pick === null && bare0 && !('pick' in bare0) && bare0.entries.length === 3 && !D2.picked.length && D2.html.includes('No rollback point names the conversation of “Nobody”.') && D3.urls[0] === '/api/layout-history' && !D3.html.includes('lh-slot'), '§7 …no point names it ⇒ pick null and the dialog SAYS so; another desktop ⇒ null; the bare list (⚙ → System) is as before — no slot, no pick', { c: c && c.pick, e: e && e.pick, bare: bare0 && Object.keys(bare0), d3: D3.urls });
+    const SF = read('src/lib/setup-flows.js');
+    ok(/const picked = pick \? \[\.\.\.body\.querySelectorAll\('\.lh-desk'\)\]\.find\(\(b\) => b\.dataset\.id === pick\.id && b\.dataset\.desk === pick\.desk\) : null;\n\s*if \(picked\) \{ picked\.classList\.add\('is-picked'\); picked\.setAttribute\('aria-current', 'true'\);/.test(SF), '§7 the dialog SELECTS that point\'s desktop button (is-picked, aria-current, focus) — the chrome heavy sees it');
+  } finally { fs.rmSync(dd, { recursive: true, force: true }); }
+});
+
+await section('§7 r3 the session-list door — the REAL Sidebar.showStopped', async () => {
+  const { Sidebar } = await import(pathToFileURL(path.join(LIB, 'sidebar.js')).href);
+  const input = { value: '' }, calls = [];
+  const gid = document.getElementById; document.getElementById = (id) => (id === 'session-filter' ? input : gid(id));
+  try {
+    const me = { _activeTab: 'tasks', _statusFilter: new Set(['live']), _activeView: null, _updateTabs() { calls.push('tabs'); }, toggle(f) { calls.push('open:' + f); }, _renderQuickTabs() { calls.push('quick'); }, _render() { calls.push('render'); } };
+    Sidebar.prototype.showStopped.call(me, NAMES[4]);
+    ok(me._activeTab === 'folders' && me._statusFilter.has('stopped') && me._activeView === 'stopped' && input.value === NAMES[4] && calls.includes('open:true') && calls.at(-1) === 'render', '§7 «Open the session list»: the sessions tab, the Stopped view, the search box holding the window\'s name, the list opened (a phone\'s drawer too)', { me: { tab: me._activeTab, view: me._activeView, filter: [...me._statusFilter] }, q: input.value, calls });
+    ok(/if \(\(!enabled && !this\._activeView\) \|\| filters\.length <= 1\) return;/.test(read('src/lib/sidebar.js')), '§7 …the narrowed view shows its quick tabs (ALL undoes it) even where the tabs are off');
+  } finally { document.getElementById = gid; }
+  const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
+  const keys = ['Its machine “{host}” is not paired with this hub.', 'The record of its conversation is gone from this hub.', 'This window was saved without its conversation, so it cannot be reopened from here.', 'This window was saved without its conversation or its folder, so it cannot be reopened from here.', 'Open the session list', 'Remove this window?', '“{name}” is deleted from this desktop’s layout for good. Only an older rollback point (Restore a previous layout…) still holds it.', 'Selected: the newest point that still names the conversation of “{name}” — press it to restore that desktop as it was then.', 'No rollback point names the conversation of “{name}”.', 'on {host}', 'Remove', 'Restore a previous layout…'];
+  ok(keys.every((k) => zh.includes(J(k) + ':') && ja.includes(J(k) + ':')) && zh.includes('"Open the session list": "打开会话列表"') && zh.includes('"Remove": "移除"') && zh.includes('"Restore a previous layout…": "恢复之前的布局…"'), '§7 every word of the tile and the dialog has a zh AND a ja entry (恢复之前的布局… / 打开会话列表 / 移除)', keys.filter((k) => !zh.includes(J(k) + ':') || !ja.includes(J(k) + ':')));
 });
 
 await section('§5 CONTROL — the server\'s keepNames taken out of the handler', async () => {

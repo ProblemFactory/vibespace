@@ -13,6 +13,7 @@ const os = require('os');
 const { listCodexThreads } = require('../codex-session-store');
 const { desktopChanges } = require('../lib/desktop-record.js'); // PURE: a rollback point names the change that followed it (userW inc-mun7qjmw-iksh)
 const { windowIds } = require('../lib/desktop-record.js'); // PURE (lane layout-stopped-window): one desktop restored alone takes its windows back from the others
+const { namedTwinIn } = require('../lib/desktop-record.js'); // PURE (lane layout-stopped-window r3): the point that still names a nameless window's conversation
 const { RETIRED_SETTING_KEYS } = require('../retired-settings.js'); // PURE: the retired settings keys (B-df40 part 1) — one may LEAVE data/settings.json, never re-enter it
 
 const router = express.Router();
@@ -342,7 +343,41 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
   // Layout rollback points. A layout-destroying bug is otherwise
   // unrecoverable (see LAYOUT HISTORY above) — this is what turns a support
   // incident into one click.
-  router.get('/api/layout-history', (req, res) => res.json({ entries: listLayoutHistory() }));
+  /** A desktop id → its rollback row's summary key in `data` (desktopIdOfKey's inverse: the name, `name (abcd)` repeated). */
+  function keyOfDesktopId(data, desktopId) {
+    const seen = new Set();
+    for (const [dk] of Object.entries(data?.desktops || {})) {
+      let k = (data.desktopMeta || []).find((m) => m.id === dk)?.name || dk;
+      if (seen.has(k)) k += ` (${dk.slice(-4)})`;
+      seen.add(k);
+      if (dk === desktopId) return k;
+    }
+    return null;
+  }
+  /** THE WAY BACK for a window that names no conversation (lane layout-stopped-window r3 — the «Session unavailable» tile's
+   *  «Restore a previous layout…»): the NEWEST point whose record of that desktop holds a named entry for the window's slot
+   *  (PURE namedTwinIn), read newest first OFF the loop (a point is a whole layouts.json); {id, desk: the row's key, at} or null. */
+  async function namedPointFor(entries, desktopId, entry) {
+    for (const e of entries) {
+      let saved = null;
+      try { saved = JSON.parse(await fs.promises.readFile(path.join(HISTORY_DIR, e.id), 'utf-8')); } catch { continue; }
+      const list = saved?.layouts?.desktops?.[desktopId]?.autoSave?.windows;
+      if (!Array.isArray(list) || !namedTwinIn(list, entry)) continue;
+      const desk = keyOfDesktopId(saved.layouts, desktopId);
+      if (desk != null && e.summary && Object.prototype.hasOwnProperty.call(e.summary, desk)) return { id: e.id, desk, at: e.at };
+    }
+    return null;
+  }
+  // `?desktop=<id>&win=&type=&title=&cwd=&name=` (a tile's slot) adds `pick` — the point to select (r3); bare = the list as before
+  router.get('/api/layout-history', async (req, res) => {
+    const entries = listLayoutHistory();
+    const q = req.query || {};
+    if (typeof q.desktop !== 'string' || !q.desktop) return res.json({ entries });
+    const entry = { type: q.type === 'terminal' ? 'terminal' : 'chat', winId: String(q.win || ''), title: String(q.title || ''), cwd: String(q.cwd || ''), ...(q.name ? { openSpec: { name: String(q.name) } } : {}) };
+    let pick = null;
+    try { pick = await namedPointFor(entries, q.desktop, entry); } catch { pick = null; }
+    res.json({ entries, pick });
+  });
   router.post('/api/layout-history/:id/restore', (req, res) => {
     const id = String(req.params.id || '');
     if (!/^layout-[\w.-]+\.json$/.test(id)) return res.status(400).json({ error: 'bad id' });
