@@ -820,20 +820,48 @@ const SSH_OPT_TABLE = Object.freeze([
 ]);
 const SSH_OPAQUE_O = SSH_OPT_TABLE.filter((r) => r.mode === 'opaque').map((r) => r.o);
 const SSH_OPAQUE_FLAGS = new Set(SSH_OPT_TABLE.filter((r) => r.mode === 'opaque').map((r) => r.flag));   // ssh -S/-L/-R/-D — DERIVED from the table above, never a hand-kept second copy
-const SSH_LOCAL_O = new Set([...SSH_OPAQUE_O, 'proxycommand', 'localcommand', 'knownhostscommand', 'permitlocalcommand', 'match']);   // ssh -o keys that redirect / run a LOCAL command — the forward long forms (controlpath/localforward/remoteforward/dynamicforward) are the table's opaque rows, so `-o ControlPath=` is opaque exactly as `-S` is
+// lane vault-use-grants round 12 (MAJOR M2): the `-o` keywords whose VALUE names a PROGRAM ssh runs, or a LIBRARY it dlopen()s,
+// LOCALLY — with the staged secret in the child's environment. A CENSUS from OpenSSH 10.2p1 readconf.c's keyword table, each
+// cross-checked against `ssh -F /dev/null -G` (it prints the keyword's own canonical name; `XAuthLocation` → `xauthlocation`,
+// the xauth program ssh runs for X11 forwarding — r11 missed it, and DISPLAY is not in ENV_HIJACK, so an agent could supply it).
+// Every one ⇒ OPAQUE (the card, «always» withheld), never «no option». The oracle rows AND the door legs are GENERATED from
+// THIS table (test-vault-run-model / test-vault-use-grants), so a keyword opaque here but unlegged — or dropped from here — is
+// RED by name. OUT of the class, with the reason: IdentityAgent (names a SOCKET to an agent, not a program ssh execs — it
+// cannot run agent-chosen code with the secret in env); ControlMaster / ProxyUseFdpass (a mode / boolean, meaningful only with
+// the already-opaque ControlPath / ProxyCommand). DISPLAY stays OUT of ENV_HIJACK: by itself it only invokes the FIXED system
+// xauth, never agent-chosen code — the agent's road to a chosen program is XAuthLocation, which this census now makes opaque.
+const SSH_LOCAL_PROGRAM_KW = Object.freeze({
+  proxycommand: 'ssh runs it through /bin/sh to reach the host',
+  localcommand: 'ssh runs it locally after connecting (needs PermitLocalCommand)',
+  permitlocalcommand: 'enables LocalCommand — it unlocks a local run',
+  knownhostscommand: 'ssh runs it to obtain known-hosts lines',
+  xauthlocation: 'ssh runs this xauth program for X11 forwarding (round 12 M2)',
+  pkcs11provider: 'ssh dlopen()s this PKCS#11 .so with the secret in env',
+  securitykeyprovider: 'ssh dlopen()s this FIDO middleware .so',
+  match: 'Match exec runs a command to decide the block',
+});
+const SSH_LOCAL_O = new Set([...SSH_OPAQUE_O, ...Object.keys(SSH_LOCAL_PROGRAM_KW)]);   // ssh -o keys that redirect / run a LOCAL command or load a library ⇒ opaque — the forward long forms (controlpath/localforward/remoteforward/dynamicforward) are the table's opaque rows (`-o ControlPath=` opaque exactly as `-S`), and the program/library rows are SSH_LOCAL_PROGRAM_KW (round 12 M2 added XAuthLocation; r11's PKCS11Provider/SecurityKeyProvider moved here — ONE home for every «ssh loads/runs local code» keyword)
 // lane vault-use-grants round 6 (BLOCKER item 1): the `-o` keys whose VALUE is a host the ssh family resolves through
 // ~/.ssh/config (from `ssh -G`'s keywords) — subject to the alias law, read by the ONE reader `addSshHost`. `-J` and `-W`
 // are short spellings of the same destination family (`ssh -G -J router` prints `proxyjump router`, identical to
 // `-o ProxyJump=router`). A missed spelling is a missing ROW here (or a short flag routed to addSshHost), never a branch
 // that forgot the alias check — so a single-label jump host can no longer slip past with `always:true`.
 const SSH_HOST_OPTS = new Set([...SSH_OPT_TABLE.filter((r) => r.mode === 'host').map((r) => r.o), 'hostname']);
-// lane vault-use-grants round 11 (MAJOR): `-o` keywords that change the destination or load code the reader cannot vouch for.
+// lane vault-use-grants round 11/12 (MAJOR): `-o` keywords that change the connect DESTINATION the reader cannot resolve.
 // CanonicalDomains / CanonicalizeHostname rewrite the connect host through a domain LIST the reader cannot resolve (a grant
-// names the pre-canonical host, ssh dials the post-canonical one). PKCS11Provider / SecurityKeyProvider name a shared library
-// (.so) ssh dlopen()s with the staged secret in the child's environment — code the agent can write. Both ⇒ OPAQUE (the card,
-// «always» withheld), never read as «no option». The command-line `-I` (PKCS11 identity) is the same class — handled in
-// routeTargetsOf (it is a flag, not an `-o` keyword). Pinned vs `ssh -F /dev/null -G` in the oracle.
-const SSH_OPAQUE_KW = new Set(['canonicaldomains', 'canonicalizehostname', 'pkcs11provider', 'securitykeyprovider']);
+// names the pre-canonical host, ssh dials the post-canonical one) ⇒ OPAQUE (the card, «always» withheld), never «no option».
+// (r11's PKCS11Provider / SecurityKeyProvider are now in the SSH_LOCAL_PROGRAM_KW census above — they load local code, not
+// rewrite the host. The command-line `-I` (PKCS11 identity) is that class too — handled in routeTargetsOf, it is a flag.)
+const SSH_OPAQUE_KW = new Set(['canonicaldomains', 'canonicalizehostname']);
+// lane vault-use-grants round 12 (MAJOR M1): OpenSSH reads a keyword by its CANONICAL name — several spellings map to the SAME
+// readconf.c opcode. SmartcardDevice is the obsolete alias of PKCS11Provider (`ssh -F /dev/null -G -o SmartcardDevice=x.so` prints
+// `pkcs11provider x.so` on 10.2p1), so it must draw the card exactly as PKCS11Provider does — r11 missed it («no option» ⇒ by:grant,
+// the .so loaded with the secret in env). readSshOpt CANONICALIZES the keyword (after the control-char check, BEFORE the opaque /
+// host / forward checks). Sourced from readconf.c's keyword[] table AND verified per-spelling against `ssh -G`: among the keywords
+// this reader classes specially, SmartcardDevice is the ONLY alias in 10.2p1 — ProxyJump, HostName, the Canonical* pair, the
+// providers, the forwards and the local-command keywords each printed their OWN single canonical name. A mutant that drops the
+// alias row is RED by name (test-vault-run-model's alias/census leg; door leg ㉝).
+const SSH_KW_ALIAS = Object.freeze({ smartcarddevice: 'pkcs11provider' });
 // lane vault-use-grants round 9 (BLOCKER item 2): read an `ssh -o <string>` keyword the way OpenSSH's strdelim (readconf.c)
 // does — NOT a bare cut at the first `=`/space. ssh: a token ends at unquoted whitespace OR a single `=`; a `"` begins a run
 // whose bytes (incl. ws and `=`) are literal and whose quotes are STRIPPED (around the keyword AND inside it: `Host"Name"` =
@@ -891,9 +919,10 @@ function readSshOpt(val) {
   const key = kw ? kw.tok.toLowerCase() : '';
   if (!key) return {};   // no keyword (a second empty token, `==HostName=`) ⇒ ssh applies nothing, nothing routes
   if (SSH_OPT_CTRL.test(key)) return { opaque: true };
-  if (SSH_LOCAL_O.has(key)) return { opaque: true };
-  if (SSH_OPAQUE_KW.has(key)) return { opaque: true };   // round 11 (MAJOR): CanonicalDomains / CanonicalizeHostname rewrite the host through a list the reader cannot resolve; PKCS11Provider / SecurityKeyProvider load agent-written code (a .so) with the secret in the child's env ⇒ the card, «always» withheld (a plain `-o HostName=` these are not — opaque, not a named host)
-  if (SSH_HOST_OPTS.has(key)) {
+  const canon = SSH_KW_ALIAS[key] || key;   // round 12 (M1): resolve an OpenSSH keyword alias to its canonical name (SmartcardDevice → pkcs11provider) BEFORE the opaque / host / forward checks, so the alias draws the card its canonical does
+  if (SSH_LOCAL_O.has(canon)) return { opaque: true };   // a forward socket, or a keyword that runs/loads LOCAL code (SSH_LOCAL_PROGRAM_KW — ProxyCommand/LocalCommand/KnownHostsCommand/XAuthLocation/PKCS11Provider/SecurityKeyProvider/Match) ⇒ the card, «always» withheld
+  if (SSH_OPAQUE_KW.has(canon)) return { opaque: true };   // round 11/12 (MAJOR): CanonicalDomains / CanonicalizeHostname rewrite the host through a list the reader cannot resolve ⇒ the card (a plain `-o HostName=` this is not — opaque, not a named host)
+  if (SSH_HOST_OPTS.has(canon)) {
     const v = argvValue(kw.next);   // the value — read with argv_split (NOT strdelim): a glued quote stays part of the host
     if (v.bad) return { opaque: true };
     const raw = v.arg;
@@ -1723,6 +1752,6 @@ module.exports = {
   INJECTIONS, injectionOf, ENV_HIJACK, ENV_CONFIG, envRefusedOf,
   TOOL_ROWS, SHELLS, INTERPRETERS, KNOWN_TOOLS, toolNameOf, knownToolOf, refusedTool, toolKindOf, targetOf, conninfoHosts, urlHosts, urlParse, configNestedFile,
   RUN_FLAGS, parseRunArgs, timeoutOf, planOf, materialize,
-  shapeOf, shapeKeyOf, destinationsOf, routeTargetsOf, sshTargetHost, readSshOpt, targetOf, urlParse, splitAuthority, normHost, SSH_OPT_TABLE, SSH_LOCAL_O, SSH_HOST_OPTS, cardFactsOf, CARD_STRING_MAX, ALWAYS_WHY, HOSTS_WHY, MASKING, CARD_SHAPES, WHY_AGAIN, CARD_FACTS_CODES, OWN_DOORS, RUNNABLE_STORES, ownDoorOf, awayOf, runVerdict,
+  shapeOf, shapeKeyOf, destinationsOf, routeTargetsOf, sshTargetHost, readSshOpt, targetOf, urlParse, splitAuthority, normHost, SSH_OPT_TABLE, SSH_LOCAL_O, SSH_LOCAL_PROGRAM_KW, SSH_KW_ALIAS, SSH_HOST_OPTS, cardFactsOf, CARD_STRING_MAX, ALWAYS_WHY, HOSTS_WHY, MASKING, CARD_SHAPES, WHY_AGAIN, CARD_FACTS_CODES, OWN_DOORS, RUNNABLE_STORES, ownDoorOf, awayOf, runVerdict,
   FORMS, FORM_ROWS, VIEWS, formsOf, createMasker, createRunMasker, maskText,
 };

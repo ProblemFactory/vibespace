@@ -416,21 +416,26 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   // drops from BOTH ⇒ reloads OFF (the owner re-opens) — a paused member is never silently un-paused by a restart. round 10
   // (MINOR): the cut drops the OLDEST past the cap, never the entry the owner JUST toggled on; `save` rebuilds the live sets
   // from the PERSISTED (capped) body, so the bound bites in MEMORY immediately — r9 kept the uncapped set as `db`, so a past-cap
-  // entry ran ON until the next reload, then OFF. round 11 (MINOR): ONE eviction order on disk AND in memory, by the entry's
-  // opened-at stamp (newest kept, oldest dropped; ties by id). r10 used `slice(-ENTRY_MAX)` over Set insertion order, which did
-  // NOT survive a reload (load rebuilds the Set from the lexicographically-SORTED disk array, so the next cut dropped the
-  // smallest id, not the oldest); and `suspended` was kept lexicographically-FIRST on disk (`sort().slice(0,…)`) but newest-in
-  // -memory — the «paused» words flipped across a restart. The stamp rides `opened[id].at` and PERSISTS, so the order a restart
-  // restores IS the order memory trims by; a no-press entry (manual ON, or any suspended entry) has stamp 0 and sorts by id —
-  // deterministic and identical in both places. The serialized array stays sorted lexicographically so the mark verifies.
-  const stampAt = (opened, id) => (opened && opened[id] && Number(opened[id].at)) || 0;
-  const keepNewest = (ids, opened, max) => [...ids].sort((a, b) => (stampAt(opened, a) - stampAt(opened, b)) || (a < b ? -1 : a > b ? 1 : 0)).slice(-max);
-  const bodyOf = (d) => { const runSorted = keepNewest(d.runnable, d.opened, ENTRY_MAX).sort(); const runSet = new Set(runSorted); return JSON.stringify({ v: 1, gen: Number(d.gen) || 0, runnable: runSorted, ...(d.suspended && d.suspended.size ? { suspended: keepNewest(d.suspended, d.opened, ENTRY_MAX).sort() } : {}), always: d.always.slice().sort((a, b) => (a.conv + a.key).localeCompare(b.conv + b.key)),
+  // entry ran ON until the next reload, then OFF. round 11 (MINOR): ONE eviction order on disk AND in memory (newest kept,
+  // oldest dropped; ties by id) — r10 used `slice(-ENTRY_MAX)` over Set insertion order, which did NOT survive a reload (load
+  // rebuilds the Set from the lexicographically-SORTED disk array, so the next cut dropped the smallest id, not the oldest), and
+  // `suspended` was kept lexicographically-FIRST on disk but newest-in-memory — the «paused» words flipped across a restart.
+  // round 12 (MAJOR M3, the r11 regression): the stamp is the entry's LAST TOGGLE time, in a dedicated `touched` map (id → ms)
+  // that rides the mark and covers runnable AND suspended — NOT `opened[id].at` (r11 read that, but a MANUAL ON deletes the
+  // `opened` record, so its stamp was 0 ⇒ sorted oldest ⇒ the entry the owner just switched on was evicted at the cap while
+  // setRunnable answered open:true, and every suspended entry — `opened` is runnable-only — had stamp 0 so its trim kept the
+  // largest ids, not the newest). `setRunnable` stamps `touched[id] = now()` on EVERY toggle (press ON, manual ON, OFF), so the
+  // entry an action just touched is the NEWEST and is never the one that action evicts; a no-toggle-yet entry (a pre-r12 store)
+  // is stamp 0 and sorts by id. The serialized array stays sorted lexicographically so the mark verifies.
+  const stampAt = (at, id) => (at && Number(at[id])) || 0;
+  const keepNewest = (ids, at, max) => [...ids].sort((a, b) => (stampAt(at, a) - stampAt(at, b)) || (a < b ? -1 : a > b ? 1 : 0)).slice(-max);
+  const bodyOf = (d) => { const runSorted = keepNewest(d.runnable, d.touched, ENTRY_MAX).sort(); const runSet = new Set(runSorted); const suspSorted = d.suspended && d.suspended.size ? keepNewest(d.suspended, d.touched, ENTRY_MAX).sort() : []; const keepId = new Set([...runSorted, ...suspSorted]); return JSON.stringify({ v: 1, gen: Number(d.gen) || 0, runnable: runSorted, ...(suspSorted.length ? { suspended: suspSorted } : {}), always: d.always.slice().sort((a, b) => (a.conv + a.key).localeCompare(b.conv + b.key)),
     ...(d.policies && Object.keys(d.policies).length ? { policies: Object.fromEntries(Object.keys(d.policies).sort().slice(0, ENTRY_MAX).map((k) => [k, d.policies[k]])) } : {}),   // lane vault-use-grants (R4): only when there is one — a body without them is marked as before
     ...(d.policyRevoked && d.policyRevoked.length ? { policyRevoked: d.policyRevoked.slice().sort((a, b) => (a.conv + a.key).localeCompare(b.conv + b.key)).slice(0, REVOKE_MAX) } : {}),
     ...(d.policyApproved && Object.keys(d.policyApproved).length ? { policyApproved: Object.fromEntries(Object.keys(d.policyApproved).sort().slice(0, ENTRY_MAX).map((k) => [k, { n: Number(d.policyApproved[k].n) || 0, lastAt: Number(d.policyApproved[k].lastAt) || 0, shapes: (d.policyApproved[k].shapes || []).slice(-AP_MAX).map((s) => ({ conv: s.conv, key: s.key, ...(s.shape ? { shape: s.shape } : {}) })), items: (d.policyApproved[k].items || []).slice(-AP_MAX) }])) } : {}),   // lane vault-use-grants round 2 (MAJOR): the judge's approvals ride the marked store so a Revoke survives a restart — ONE canonical key order AND cap so save and load serialize identically (the mark verifies); `shape` = the coarse shape key the Revoke covers (round 3)
     ...(d.policyHours && Object.keys(d.policyHours).length ? { policyHours: Object.fromEntries(Object.keys(d.policyHours).sort().slice(0, HOUR_MAX).map((k) => [k, (d.policyHours[k] || []).map((t) => Math.floor(Number(t)) || 0).slice(-POLICY_PER_HOUR)])) } : {}),   // round 4 (item 5): the per-hour judge COUNTER rides the marked store too — a restart inside the hour does not reset it (an in-memory counter is a free bypass by restart); same canonical order + cap so the mark verifies
-    ...(d.opened && Object.keys(d.opened).length ? { opened: Object.fromEntries(Object.keys(d.opened).filter((k) => runSet.has(k)).sort().slice(0, ENTRY_MAX).map((k) => [k, { at: Math.floor(Number(d.opened[k] && d.opened[k].at)) || 0, resumed: Object.fromEntries(Object.keys((d.opened[k] && d.opened[k].resumed) || {}).sort().slice(0, AP_MAX).map((g) => [g, Math.floor(Number(d.opened[k].resumed[g])) || 0])) }])) } : {}) }); };   // round 7 (MAJOR item 2): HOW each ON entry is open — `opened[id]` exists ONLY when a PRESS («Always» for one conversation) flipped the switch; it holds the RESUMED grant-ids (the card's own + each ↻ + a member the owner adds while open). Its absence while ON = the owner opened it (every member usable). What is STORED is the RESUMED set, so a cap drop PAUSES (fail closed) — never un-pauses. round 9: ONLY a kept-runnable entry rides (an entry dropped from the capped `runnable` drops its press marker too — it reloads OFF, never ON-without-a-marker). Rides the mark; same canonical order + cap so it verifies.
+    ...(d.opened && Object.keys(d.opened).length ? { opened: Object.fromEntries(Object.keys(d.opened).filter((k) => runSet.has(k)).sort().slice(0, ENTRY_MAX).map((k) => [k, { at: Math.floor(Number(d.opened[k] && d.opened[k].at)) || 0, resumed: Object.fromEntries(Object.keys((d.opened[k] && d.opened[k].resumed) || {}).sort().slice(0, AP_MAX).map((g) => [g, Math.floor(Number(d.opened[k].resumed[g])) || 0])) }])) } : {}),
+    ...(d.touched && Object.keys(d.touched).length ? { touched: Object.fromEntries(Object.keys(d.touched).filter((k) => keepId.has(k)).sort().map((k) => [k, Math.floor(Number(d.touched[k])) || 0])) } : {}) }); };   // round 12 (MAJOR M3): `touched` = each entry's last-toggle clock (id → ms), filtered to the kept runnable ∪ suspended, sorted + floored so the mark verifies — the ONE stamp keepNewest evicts by (never `opened[id].at`, which a manual ON drops ⇒ r11 evicted the just-toggled entry). round 7 (MAJOR item 2): HOW each ON entry is open — `opened[id]` exists ONLY when a PRESS («Always» for one conversation) flipped the switch; it holds the RESUMED grant-ids (the card's own + each ↻ + a member the owner adds while open). Its absence while ON = the owner opened it (every member usable). What is STORED is the RESUMED set, so a cap drop PAUSES (fail closed) — never un-pauses. round 9: ONLY a kept-runnable entry rides (an entry dropped from the capped `runnable` drops its press marker too — it reloads OFF, never ON-without-a-marker). Rides the mark; same canonical order + cap so it verifies.
   const okPolicy = (x) => x && typeof x === 'object' && typeof x.text === 'string' && x.text.length > 0 && x.text.length <= DM.VAULT_POLICY_MAX;
   const policiesOf = (raw) => { const out = {}; if (raw && typeof raw === 'object' && !Array.isArray(raw)) for (const [k, x] of Object.entries(raw).slice(0, ENTRY_MAX)) if (VI.parseRef(k) && okPolicy(x)) out[k] = { text: x.text, at: Number(x.at) || null, by: String(x.by || 'user').slice(0, 40) }; return out; };
   const revokedOf = (raw) => (Array.isArray(raw) ? raw : []).filter((x) => x && typeof x.conv === 'string' && typeof x.key === 'string').slice(0, REVOKE_MAX).map((x) => ({ conv: x.conv, key: x.key }));
@@ -447,6 +452,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   const hoursOf = (raw) => { const out = {}; if (raw && typeof raw === 'object' && !Array.isArray(raw)) for (const [k, v] of Object.entries(raw).slice(0, HOUR_MAX)) if (typeof k === 'string' && Array.isArray(v)) out[k] = v.map((t) => Math.floor(Number(t)) || 0).filter((t) => t > 0).slice(-POLICY_PER_HOUR); return out; };
   // round 6 (MAJOR item 4): the per-member PAUSE marks — { resourceId: { grantId: whenMs } } (a grant the owner's OFF paused).
   const openedOf = (raw) => { const out = {}; if (raw && typeof raw === 'object' && !Array.isArray(raw)) for (const [k, v] of Object.entries(raw).slice(0, ENTRY_MAX)) if (VI.parseRef(k) && v && typeof v === 'object' && !Array.isArray(v)) { const resumed = {}; const rr = v.resumed && typeof v.resumed === 'object' && !Array.isArray(v.resumed) ? v.resumed : {}; for (const [g, t] of Object.entries(rr).slice(0, AP_MAX)) if (VUG.ID_RE ? VUG.ID_RE.test(g) : typeof g === 'string') resumed[g] = Math.floor(Number(t)) || 0; out[k] = { at: Math.floor(Number(v.at)) || 0, resumed }; } return out; };
+  const touchedOf = (raw) => { const out = {}; if (raw && typeof raw === 'object' && !Array.isArray(raw)) for (const [k, t] of Object.entries(raw).slice(0, 2 * ENTRY_MAX)) if (VI.parseRef(k)) out[k] = Math.floor(Number(t)) || 0; return out; };   // round 12 (M3): the last-toggle clock parsed back; `2 * ENTRY_MAX` — it covers runnable AND suspended (each capped ENTRY_MAX). bodyOf re-filters to the kept set, so the mark verifies whatever extra a hand-edited file carried
   // round 7 (MAJOR item 2): THE ONE fact the judge, the list (runnableFor) and the window (rowFacts) read — is a member usable
   // right now? The entry must be ON (`runnable`, the allow-list). `opened[id]` means a PRESS opened it ⇒ only a RESUMED grant-id
   // is usable; its absence while ON means the OWNER opened it (manual ON ⇒ every member usable). A paused member is NEVER
@@ -519,16 +525,31 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       });
     } catch (e) { log(`the grant-stale notice could not be filed (${e.message})`); }
   }
+  // round 12 (MAJOR M3): a switch-ON that put the run list over its cap turned the OLDEST entries (by last toggle) OFF — a
+  // no-silent-failures telling. ONE For-you notice names how many and which; the owner re-opens any they still need. No action
+  // type (the Vault window is where they switch back on, as the notice says) — kept off the For-you action registry's census.
+  function noteEvicted(ids) {
+    if (!userTodos || !Array.isArray(ids) || !ids.length) return;
+    const n = ids.length, list = ids.slice(0, 12).join(', ') + (ids.length > 12 ? ', …' : '');
+    try {
+      userTodos.add(VAULT_INBOX_KEY, {
+        origin: 'vault', kind: 'notice', urgency: 'high', by: 'system', sessionName: 'Vault',
+        text: 'Vault entries were switched off — the run list was full',
+        detail: `Switching an entry on for agent runs put the list over its limit of ${ENTRY_MAX}, so the ${n} oldest (by when you last switched them on) turned off: ${list}. Nothing ran for them; switch any you still need on again in the Vault window. No value was given out.`,
+        i18n: { text: { key: 'Vault entries were switched off — the run list was full' }, detail: [{ key: 'Switching an entry on for agent runs put the list over its limit of {max}, so the {n} oldest (by when you last switched them on) turned off: {list}. Nothing ran for them; switch any you still need on again in the Vault window. No value was given out.', params: { max: ENTRY_MAX, n, list } }] },
+      });
+    } catch (e) { log(`the eviction notice could not be filed (${e.message})`); }
+  }
   /** The store as the vault vouches for it — null unless unlocked. Read once per unlock (the epoch), kept in memory. */
   function load() {
     if (vaultState() !== 'unlocked') return null;
     if (db && dbEpoch === vault.epoch()) return db;
     let raw = null, why = null;
     try { raw = JSON.parse(readBounded(FILE, STORE_MAX).toString('utf8')); } catch (e) { if (!(e && e.code === 'ENOENT')) why = `unreadable (${e.code || 'not JSON'})`; }
-    let next = { gen: lastGen, runnable: new Set(), suspended: new Set(), always: [], policies: {}, policyRevoked: [], policyApproved: {}, policyHours: {}, opened: {} };
+    let next = { gen: lastGen, runnable: new Set(), suspended: new Set(), always: [], policies: {}, policyRevoked: [], policyApproved: {}, policyHours: {}, opened: {}, touched: {} };
     if (raw && !why) {
       try {
-        const cand = { gen: Number.isSafeInteger(raw.gen) && raw.gen >= 0 ? raw.gen : -1, runnable: new Set((Array.isArray(raw.runnable) ? raw.runnable : []).filter((id) => typeof id === 'string' && VI.parseRef(id))), suspended: new Set((Array.isArray(raw.suspended) ? raw.suspended : []).filter((id) => typeof id === 'string' && VI.parseRef(id))), always: (Array.isArray(raw.always) ? raw.always : []).filter(okAlways).map((a) => ({ conv: a.conv, key: a.key, until: a.until, entries: a.entries.filter((x) => typeof x === 'string').slice(0, 64), at: Number(a.at) || null, by: String(a.by || 'user').slice(0, 40), ...(typeof a.templateHash === 'string' ? { templateHash: a.templateHash, templateBytes: Number(a.templateBytes) || 0 } : {}), ...(typeof a.todoId === 'string' && /^ut-[\w-]{1,40}$/.test(a.todoId) ? { todoId: a.todoId } : {}) })), policies: policiesOf(raw.policies), policyRevoked: revokedOf(raw.policyRevoked), policyApproved: approvedOf(raw.policyApproved), policyHours: hoursOf(raw.policyHours), opened: openedOf(raw.opened) };
+        const cand = { gen: Number.isSafeInteger(raw.gen) && raw.gen >= 0 ? raw.gen : -1, runnable: new Set((Array.isArray(raw.runnable) ? raw.runnable : []).filter((id) => typeof id === 'string' && VI.parseRef(id))), suspended: new Set((Array.isArray(raw.suspended) ? raw.suspended : []).filter((id) => typeof id === 'string' && VI.parseRef(id))), always: (Array.isArray(raw.always) ? raw.always : []).filter(okAlways).map((a) => ({ conv: a.conv, key: a.key, until: a.until, entries: a.entries.filter((x) => typeof x === 'string').slice(0, 64), at: Number(a.at) || null, by: String(a.by || 'user').slice(0, 40), ...(typeof a.templateHash === 'string' ? { templateHash: a.templateHash, templateBytes: Number(a.templateBytes) || 0 } : {}), ...(typeof a.todoId === 'string' && /^ut-[\w-]{1,40}$/.test(a.todoId) ? { todoId: a.todoId } : {}) })), policies: policiesOf(raw.policies), policyRevoked: revokedOf(raw.policyRevoked), policyApproved: approvedOf(raw.policyApproved), policyHours: hoursOf(raw.policyHours), opened: openedOf(raw.opened), touched: touchedOf(raw.touched) };
         const want = vault.macOf(MARK_LABEL, bodyOf(cand));
         const got = typeof raw.mark === 'string' && /^[0-9a-f]{64}$/.test(raw.mark) ? raw.mark : null;   // the review: a non-hex mark threw in timingSafeEqual
         if (!(want && got && cand.gen >= 0 && crypto.timingSafeEqual(Buffer.from(got, 'hex'), Buffer.from(want, 'hex')))) why = 'its mark does not verify';
@@ -559,7 +580,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     log(`data/${STORE_FILE}: ${c.carried} «always» member(s) carried into the vault-use grants (${c.expired} expired, ${c.hostless} with no host)${r.ok ? '' : ' — the store could not be rewritten; carried again at the next read'}`);
   }
   function save(next0) {
-    const next = { suspended: (db && db.suspended) || new Set(), policies: (db && db.policies) || {}, policyRevoked: (db && db.policyRevoked) || [], policyApproved: (db && db.policyApproved) || {}, policyHours: (db && db.policyHours) || {}, opened: (db && db.opened) || {}, ...next0, gen: Math.max(lastGen, Number(db && db.gen) || 0) + 1 };   // lane vault-use-grants (R4): a save that names no policy / per-hour counter keeps them; (round 2) a save that names no `suspended` keeps it; (round 7) a save that names no `opened` keeps it
+    const next = { suspended: (db && db.suspended) || new Set(), policies: (db && db.policies) || {}, policyRevoked: (db && db.policyRevoked) || [], policyApproved: (db && db.policyApproved) || {}, policyHours: (db && db.policyHours) || {}, opened: (db && db.opened) || {}, touched: (db && db.touched) || {}, ...next0, gen: Math.max(lastGen, Number(db && db.gen) || 0) + 1 };   // lane vault-use-grants (R4): a save that names no policy / per-hour counter keeps them; (round 2) a save that names no `suspended` keeps it; (round 7) a save that names no `opened` keeps it; (round 12) a save that names no `touched` clock keeps it
     // round 7 (MAJOR item 2, bound invariant): if a stored RESUMED set would be truncated, NAME it — the dropped marks fail
     // CLOSED (those members become paused on the next read), never an un-pause, so a cap is safe but never silent.
     for (const k of Object.keys(next.opened || {})) { const n = Object.keys((next.opened[k] && next.opened[k].resumed) || {}).length; if (n > AP_MAX) audit('vault-run-pause-bound', { store: STORE_FILE, entry: k, resumed: n, cap: AP_MAX, dropped: n - AP_MAX, effect: 'the marks past the cap fail closed (those members stay paused)' }); }
@@ -574,9 +595,14 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     // 11 (MINOR): trim the live sets with the SAME `keepNewest` bodyOf uses — by the opened-at stamp (oldest dropped, never the entry
     // the owner just toggled), reconcile `opened` to the kept `runnable` (fail closed) — so memory and disk keep the SAME set and the
     // same order a restart restores (r10's `slice(-ENTRY_MAX)` over insertion order diverged from the sorted disk array on reload).
-    if (db.runnable.size > ENTRY_MAX) { db.runnable = new Set(keepNewest(db.runnable, db.opened, ENTRY_MAX)); db.opened = Object.fromEntries(Object.entries(db.opened || {}).filter(([k]) => db.runnable.has(k))); }
-    if (db.suspended && db.suspended.size > ENTRY_MAX) db.suspended = new Set(keepNewest(db.suspended, db.opened, ENTRY_MAX));
-    return { ok: true };
+    // round 12 (MAJOR M3): evict by the `touched` clock (the LAST toggle — never `opened[id].at`, 0 for a manual ON); NAME what
+    // the cap dropped so setRunnable answers the truth AFTER the trim and the owner is told in For you; reconcile `touched` to the
+    // kept runnable ∪ suspended so memory == disk (bodyOf already filtered it the same way).
+    let evicted = [];
+    if (db.runnable.size > ENTRY_MAX) { const kept = new Set(keepNewest(db.runnable, db.touched, ENTRY_MAX)); evicted = [...db.runnable].filter((k) => !kept.has(k)); db.runnable = kept; db.opened = Object.fromEntries(Object.entries(db.opened || {}).filter(([k]) => kept.has(k))); }
+    if (db.suspended && db.suspended.size > ENTRY_MAX) db.suspended = new Set(keepNewest(db.suspended, db.touched, ENTRY_MAX));
+    db.touched = Object.fromEntries(Object.entries(db.touched || {}).filter(([k]) => db.runnable.has(k) || (db.suspended && db.suspended.has(k))));
+    return { ok: true, ...(evicted.length ? { evicted } : {}) };
   }
 
   // ── THE ROWS a run may reference (each store lists its own; a value is read only for a run) ──
@@ -637,6 +663,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     if (!!on === wasRun && !on === wasSusp && !(on && !keepPaused && pressOpened(d, key))) return { ok: true, id: key, open: wasRun, already: true };   // a MANUAL ON of a press-opened entry still runs (it converts it to owner-opened)
     const runnable = new Set(d.runnable), suspended = new Set(d.suspended);
     let opened = d.opened || {};
+    const touched = { ...(d.touched || {}), [key]: now() };   // round 12 (MAJOR M3): stamp the LAST toggle (press ON, manual ON, OFF) for EVERY entry — never 0, so this entry is the NEWEST and keepNewest never evicts the one the owner just touched
     if (on) {
       runnable.add(key); suspended.delete(key);
       if (keepPaused) { if (!opened[key]) opened = { ...opened, [key]: { at: now(), resumed: {} } }; }   // «Always»: a PRESS opens it — only the members it resumes are usable
@@ -649,11 +676,12 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     const always = on ? d.always : d.always.filter((a) => !a.entries.includes(key));
     if (!on) for (const a of d.always) if (a.entries.includes(key)) grantEnded(a, 'revoked');   // r6: each «always» record says «revoked»
     if (!on) { for (const [p, x] of shortAlways) if (x.entries.includes(key)) { shortAlways.delete(p); grantEnded(x, 'revoked'); } for (const [p, x] of seen) if (x.entries.includes(key)) seen.delete(p); for (const [p, x] of grants) if (x.entries.includes(key)) { grants.delete(p); grantEnded(x, 'revoked'); } }   // + the grants (lane vault-manual-and-lock: OFF = closed for every conversation; r6: each grant's record says «revoked»)
-    const r = save({ runnable, suspended, always, opened });
+    const r = save({ runnable, suspended, always, opened, touched });
     if (!r.ok) return r;
     audit('vault-run-switch', { by: String(by).slice(0, 40), store: ref.store, entry: ref.entry, field: ref.field, open: !!on });
+    if (r.evicted && r.evicted.length) noteEvicted(r.evicted);   // round 12 (MAJOR M3): the cap turned some OTHER entry OFF to keep this one — tell the owner (never silent), and the answer below reads the truth AFTER the trim
     try { vault.contentsChanged && vault.contentsChanged('switch'); } catch { }   // lane vault-use-grants: every open Vault window shows the switch
-    return { ok: true, id: key, open: !!on };
+    return { ok: true, id: key, open: !!(db && db.runnable.has(key)), ...(r.evicted && r.evicted.length ? { evicted: r.evicted } : {}) };   // round 12 (MAJOR M3): the TRUTH after the trim — `db` is the trimmed memory store, so `open` is never a false success for an entry the cap dropped (r11 answered `!!on` though the just-toggled entry was evicted)
   }
   /** A PERSON's per-member «un-pause» (round 7, item 2): a grant paused under a press-opened entry is RESUMED — a WIDENING, so
    *  it needs this page's 验证是你 window (`reauthed`). The OTHER paused members stay paused. (A no-op on an owner-opened or OFF
