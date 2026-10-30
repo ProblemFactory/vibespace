@@ -12,6 +12,7 @@ const fs = require('fs');
 const os = require('os');
 const { listCodexThreads } = require('../codex-session-store');
 const { desktopChanges } = require('../lib/desktop-record.js'); // PURE: a rollback point names the change that followed it (userW inc-mun7qjmw-iksh)
+const { windowIds } = require('../lib/desktop-record.js'); // PURE (lane layout-stopped-window): one desktop restored alone takes its windows back from the others
 const { RETIRED_SETTING_KEYS } = require('../retired-settings.js'); // PURE: the retired settings keys (B-df40 part 1) — one may LEAVE data/settings.json, never re-enter it
 
 const router = express.Router();
@@ -251,6 +252,17 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     if (_layoutsSaveTimer) clearTimeout(_layoutsSaveTimer);
     _layoutsSaveTimer = setTimeout(flushLayouts, 500);
   }
+  /** A rollback row's summary key (layoutSummary's: the desktop's name, `name (abcd)` for a repeated one) → the desktop id. */
+  function desktopIdOfKey(data, key) {
+    const seen = new Set();
+    for (const [dk] of Object.entries(data?.desktops || {})) {
+      let k = (data.desktopMeta || []).find((m) => m.id === dk)?.name || dk;
+      if (seen.has(k)) k += ` (${dk.slice(-4)})`;
+      seen.add(k);
+      if (k === key) return dk;
+    }
+    return null;
+  }
   function listLayoutHistory() {
     try {
       return fs.readdirSync(HISTORY_DIR)
@@ -338,6 +350,41 @@ function setup({ dataDir, wss, WS_OPEN, getSyncStore, activeSessions, auth, getH
     try { saved = JSON.parse(fs.readFileSync(path.join(HISTORY_DIR, id), 'utf-8')); }
     catch { return res.status(404).json({ error: 'not found' }); }
     if (!saved?.layouts) return res.status(400).json({ error: 'entry has no layout' });
+    // ONE DESKTOP (lane layout-stopped-window — the owner's 个人 lost seven windows while 工作 and 研究 had moved on): the body's
+    // `desktop` (a row's summary key — the desktop's name, `name (abcd)` for a repeated one) or `desktopId` restores that
+    // desktop's record ALONE — the point's windows there, stamped now; every other desktop stays as it is NOW, minus a window
+    // the point holds on this one (it moves back); a desktop deleted since comes back under its name. Undoable like the rest.
+    const want = req.body && typeof req.body === 'object' ? req.body : {};
+    if (want.desktop != null || want.desktopId != null) {
+      const only = typeof want.desktopId === 'string' && want.desktopId ? want.desktopId : desktopIdOfKey(saved.layouts, String(want.desktop));
+      const rec = only ? saved.layouts.desktops?.[only]?.autoSave : null;
+      if (!rec || typeof rec !== 'object') return res.status(404).json({ error: 'that desktop is not in this rollback point' });
+      readLayouts();
+      if (!_lastGood) _lastGood = detach(_layoutsCache);
+      snapshotLayout(_lastGood, '\u0000force-' + Date.now(), null, { writer: { via: 'restore', from: id, desktop: only, at: Date.now() }, refused: _ringNotes.refused });
+      const doc = readLayouts();
+      const now = Date.now();
+      const back = new Set(windowIds(rec));
+      for (const [dk, v] of Object.entries(doc.desktops || {})) {
+        if (dk === only || !v || !v.autoSave || !Array.isArray(v.autoSave.windows)) continue;
+        if (!v.autoSave.windows.some((w) => back.has(String(w && (w.winId || w.id))))) continue;
+        v.autoSave = { ...v.autoSave, windows: v.autoSave.windows.filter((w) => !back.has(String(w && (w.winId || w.id)))), updatedAt: Math.max(now, (Number(v.autoSave.updatedAt) || 0) + 1) };
+      }
+      if (!doc.desktops) doc.desktops = {};
+      doc.desktops[only] = { ...(doc.desktops[only] || {}), autoSave: { ...detach(rec), updatedAt: Math.max(now, (Number(doc.desktops[only]?.autoSave?.updatedAt) || 0) + 1) } };
+      if (Array.isArray(doc.desktopMeta) && !doc.desktopMeta.some((d) => d && d.id === only)) {
+        const m = (saved.layouts.desktopMeta || []).find((d) => d && d.id === only);
+        doc.desktopMeta.push(m ? { ...m } : { id: only, name: only });
+      }
+      noteLayout({ via: 'restore', from: id, desktop: only });
+      writeLayouts(doc);
+      flushLayouts();
+      try {
+        const j = JSON.stringify({ type: 'layout-restored' });
+        wss?.clients?.forEach((c) => { if (c.readyState === WS_OPEN) { try { c.send(j); } catch {} } });
+      } catch {}
+      return res.json({ success: true, desktopId: only, windows: back.size, restoredFrom: saved.at });
+    }
     // Warm the cache first: a restore issued before anything else read layouts
     // (server restarted while the tab stayed open — the usual sequence right
     // after a layout bug) left _lastGood null, so no rollback point was

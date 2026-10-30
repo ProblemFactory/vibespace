@@ -115,6 +115,11 @@ export function installSessionLifecycle(App, ctx = {}) {
     const winType = sessionMode === 'chat' ? 'chat' : 'terminal';
     const titleMeta = this._buildTitleMeta({ backend, agentKind, agentRole, agentNickname, sourceKind, parentThreadId });
     const winInfo = this.wm.createWindow({ title: sessionName, type: winType, syncId, titleMeta });
+    // THE WINDOW KNOWS ITS CONVERSATION FROM BIRTH (lane layout-stopped-window — the owner's 个人, 2026-10-30 09:18:22): a create
+    // that CONTINUES a conversation (a resume; never a fork, which mints its own) names it before 'created' answers — resume
+    // placement captures the window into its desktop's record at once (moveWindowToDesktop `replaces`), and before this it
+    // went in with no identity, in place of the named entry it replaced. layout.js captureWin reads it.
+    if (resumeId && !fork && winInfo) winInfo._conversation = { backend, backendSessionId: backendSessionId || resumeId, cwd: cwd || '', hostId: hostId || null };
     // Geometry carried over from a window this session replaces (billing
     // switch kill+resume, resume of a terminated read-only window) — without
     // it the conversation "moves" into a default-sized centered window.

@@ -1,0 +1,442 @@
+#!/usr/bin/env node
+// A WINDOW NEVER LOSES ITS NAME · UNBUILT IS NOT DROPPED · A DEAD LOCAL SESSION IS A STOPPED ONE · ONE PRESS RESTORES ONE
+// DESKTOP — the fast gate of lane layout-stopped-window (the owner 2026-10-30 09:19 PDT «我的个人桌面丢了很多窗口», 2.369.363).
+// The ring, measured: 02:55 every dtach session died; at the 04:59 boot each dead LOCAL session's meta was deleted; 09:18:22 the
+// owner pressed the resume-all offer: each stopped conversation opened in a NEW window (a new winId, titled with the bare name,
+// no identity until its create answered) and resume placement captured it into its desktop's record IN PLACE of the named
+// entry it replaced — 个人 was written with seven of its eleven windows nameless (the server's per-id identity carry had no id
+// to match); 09:19:35 a new page built none of the seven and dropped them as 'unbuilt' (11 → 4). The records below have the
+// measured SHAPES (eleven chat windows, four whose creates answered, seven nameless; a first-message openSpec name that is not
+// the title) with invented titles — the public repo carries no word of the owner's.
+// No DOM, no ports — the real modules:
+//   §1 THE NAME on the REAL ws-handler (registerWsHandler on a fake wss): the 09:18:22 write — eleven new winIds, seven of them
+//      nameless, the eleven old ones as 'replaced' — is stored with every window NAMED (the conversation carried, never the old
+//      server session); the evidence's `by` pairs where a name cannot (two windows of one name); a nameless newcomer that
+//      replaced nothing named is left out of the write and said; PURE keepNames' table.
+//   §1b THE DOOR on the real classes: the REAL session-lifecycle resumeSession → createSession (an esbuild bundle, its imports
+//      stubbed) over the real DesktopManager + LayoutManager — the resumed window is captured NAMED before its create answers
+//      and the record of the desktop it lands on (resume placement's `replaces`) names it; a bare spec-less window moved in
+//      place of a named entry takes its name at the writer (mergeDesktopRecord `replaced`); a nameless newcomer on the desktop
+//      on show is left out of the write ('nameless' evidence)
+//   §2 UNBUILT on the real handler: the 09:19:35 write (11 → 4, seven 'unbuilt') is REFUSED, the seven named by title; PURE
+//      shrinkVerdict's rows (a duplicate leaves, a window that is no session stays explained, a LIVE one is the 10-22 'live').
+//      On the real classes: the boot restore of that record on a hub whose sessions are all stopped builds ELEVEN windows — four
+//      «Session stopped — click to resume» placeholders, seven «Session unavailable» — and the record keeps all eleven past the
+//      grace, each entry as it was (identity and all); the press resumes in place; the live record's door (a spec-less session
+//      entry ⇒ a placeholder; a newer entry with an openSpec ⇒ rebuilt in place under the same id; a record without it ⇒ it closes)
+//   §3 A DEAD LOCAL SESSION (the real boot-restore over a scratch data dir, fake fuser / pgrep that answer «nobody»): a claude
+//      session whose transcript exists keeps its meta as `<sock>.json.stopped` (stoppedAt, every field kept); one with no
+//      transcript and a shell are deleted; the sidebar's row (the claude store's discovery) is the transcript's either way
+//   §4 THE DOOR TO RECOVER (the real persistence router): a rollback row's desktop restores ALONE (`desktop` in the body) — the
+//      other desktops as they are now, 'layout-restored' told, the forced point names it; the 06:50 point's 个人 (twelve) restored
+//      on a hub whose sessions are stopped builds twelve windows, not 0; the dialog's per-desktop doors and every new word in zh + ja
+//   §5 CONTROL: the server's keepNames taken out of the handler ⇒ §1's write is stored nameless (RED)
+import fs from 'node:fs';
+import path from 'node:path';
+import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
+import { scratchDir, scratchHome } from './scratch.mjs';
+const require = createRequire(import.meta.url);
+const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+const LIB = path.join(REPO, 'src/lib');
+const read = (f) => fs.readFileSync(path.join(REPO, f), 'utf8');
+const J = JSON.stringify;
+let pass = 0, fail = 0;
+const ok = (c, n, extra) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n + (extra !== undefined ? '\n    ' + String(typeof extra === 'string' ? extra : J(extra)).slice(0, 900) : '')); } return !!c; };
+const section = async (title, fn) => { console.log('— ' + title); try { await fn(); } catch (e) { ok(false, title + ' — threw', e && e.stack ? e.stack.split('\n').slice(0, 4).join(' | ') : String(e)); } };
+const tick = (ms = 0) => new Promise((r) => setTimeout(r, ms));
+const REAL = { log: console.log, warn: console.warn }; // every quiet stretch restores THESE (two overlapping ones must never leave the console swapped)
+
+// ── a fake DOM just wide enough for the client modules (the placeholder tile is counted node by node) ──
+const store = new Map();
+globalThis.localStorage = { getItem: (k) => (store.has(k) ? store.get(k) : null), setItem: (k, v) => store.set(k, String(v)), removeItem: (k) => store.delete(k) };
+const mkEl = (tag = 'div') => {
+  const el = { tagName: String(tag).toUpperCase(), style: {}, dataset: {}, children: [], className: '', title: '', _text: '', parent: null, onclick: null,
+    classList: { add(c) { el.className += ' ' + c; }, remove() {}, toggle() {}, contains: () => false },
+    append(...c) { for (const x of c) { if (x && typeof x === 'object') x.parent = el; el.children.push(x); } }, appendChild(c) { el.append(c); return c; },
+    remove() { if (el.parent) el.parent.children = el.parent.children.filter((x) => x !== el); el.removed = true; },
+    setAttribute() {}, getAttribute: () => null, removeAttribute() {}, addEventListener() {}, removeEventListener() {}, querySelector: () => null, querySelectorAll: () => [], contains: () => false,
+    getBoundingClientRect: () => ({ left: 0, top: 0, width: 100, height: 100, right: 100, bottom: 100 }) };
+  Object.defineProperty(el, 'textContent', { get: () => el._text + el.children.map((c) => (c && c.textContent) || '').join(''), set: (v) => { el._text = String(v); el.children = []; } });
+  Object.defineProperty(el, 'innerHTML', { get: () => '', set: () => { el.children = []; } });
+  Object.defineProperty(el, 'firstChild', { get: () => el.children[0] });
+  return el;
+};
+let previews = mkEl();
+globalThis.document = { createElement: mkEl, getElementById: (id) => (id === 'desktop-previews' ? previews : null), querySelector: () => null, querySelectorAll: () => [], body: mkEl(), documentElement: { style: { getPropertyValue: () => '', setProperty() {} } }, addEventListener() {}, removeEventListener() {}, activeElement: null, hidden: false, visibilityState: 'visible' };
+globalThis.window = globalThis;
+globalThis.addEventListener = () => {}; globalThis.removeEventListener = () => {}; globalThis.dispatchEvent = () => true;
+globalThis.CustomEvent = class { constructor(type) { this.type = type; } };
+globalThis.innerWidth = 1600; globalThis.innerHeight = 1000;
+globalThis.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} });
+globalThis.getComputedStyle = () => ({ getPropertyValue: () => '' });
+Object.defineProperty(globalThis, 'navigator', { value: { language: 'en', userAgent: 'node' }, configurable: true });
+globalThis.requestAnimationFrame = (fn) => setTimeout(fn, 0); globalThis.cancelAnimationFrame = (id) => clearTimeout(id);
+const answers = { '/api/active': { sessions: [] }, '/api/sessions': { sessions: [] } }; // a hub whose every session is stopped, no transcript of them here
+globalThis.fetch = async (url) => ({ ok: true, json: async () => JSON.parse(J(answers[String(url).split('?')[0]] || {})) });
+
+// ── the measured shapes, invented words ──
+const GB = (i) => ({ left: (i % 4) / 4, top: Math.floor(i / 4) / 3, width: 0.25, height: 1 / 3 });
+const NAMES = ['Ledger', 'Tutor', 'Ops desk', 'Coursework', 'Trip planner', 'Van build', 'Butler', 'Colony game', 'Game monitor', 'Cluster admin', 'Quiz maker'];
+const CWD = (i) => '/srv/u/proj-' + i;
+const CID = (i) => `c0ffee${String(i).padStart(2, '0')}-0000-4000-8000-0000000000${String(i).padStart(2, '0')}`;
+const BACK = (i) => (i === 4 || i === 5 ? 'codex' : 'claude');
+/** a window the record named before the outage: its conversation, its (now dead) server session, a first-message openSpec name */
+const named = (i, o = {}) => ({ winId: 'win-old-' + i, title: `${NAMES[i]} — ${CWD(i)}`, type: 'chat', isMinimized: false, isMaximized: false, gridBounds: GB(i), zIndex: 7000 + i,
+  openSpec: { action: 'attachSession', serverId: `sess-${i + 12}-17000`, backend: BACK(i), backendSessionId: CID(i), sessionKey: `${BACK(i)}:${CID(i)}`, name: 'the first message of ' + i, cwd: CWD(i), mode: 'chat', hostId: null },
+  backend: BACK(i), backendSessionId: CID(i), ...(BACK(i) === 'claude' ? { claudeSessionId: CID(i) } : {}), serverSessionId: `sess-${i + 12}-17000`, cwd: CWD(i), ...o });
+/** the resume-all's new window whose create answered before the capture (named) */
+const answered = (i) => ({ ...named(i), winId: 'win-new-' + i, serverSessionId: `sess-${i + 1}-18000`, openSpec: { ...named(i).openSpec, serverId: `sess-${i + 1}-18000` } });
+/** the resume-all's new window captured before its create answered: the bare name, no identity, no openSpec */
+const bare = (i) => ({ winId: 'win-new-' + i, title: NAMES[i], type: 'chat', isMinimized: false, isMaximized: false, gridBounds: GB(i), zIndex: 7100 + i });
+const P_BEFORE = () => NAMES.map((_, i) => named(i));                                         // 个人 before 09:18:22 (eleven, all named)
+const P_SENT = () => NAMES.map((_, i) => (i < 4 ? answered(i) : bare(i)));                   // the 09:18:22 write (eleven new ids, seven nameless)
+const isNamed = (w) => !!(w && (w.backendSessionId || w.claudeSessionId || w.openSpec?.backendSessionId || w.serverSessionId || w.openSpec?.serverId));
+const DESKS = [{ id: 'desk-w', name: '工作' }, { id: 'desk-p', name: '个人' }, { id: 'desk-r', name: '研究' }];
+const files = (id, i) => ({ winId: id, title: 'notes-' + i + '.md', type: 'viewer', isMinimized: false, isMaximized: false, gridBounds: GB(i), zIndex: 10 + i, openSpec: { action: 'openFile', path: '/srv/u/notes-' + i + '.md' }, filePath: '/srv/u/notes-' + i + '.md', fileName: 'notes-' + i + '.md' });
+const DOC = (p) => ({ desktopMeta: DESKS.map((d) => ({ ...d })), current: null, saved: {}, customGrids: [], desktops: {
+  'desk-w': { autoSave: { windows: [0, 1, 2, 3, 4].map((i) => files('w-' + i, i)), grid: null, updatedAt: 1000 } },
+  'desk-p': { autoSave: { windows: p, grid: null, updatedAt: 1000 } },
+  'desk-r': { autoSave: { windows: [0, 1, 2, 3, 4, 5].map((i) => files('r-' + i, i)), grid: null, updatedAt: 1000 } } } });
+
+// ── the REAL ws-handler on a fake wss (test-desktop-record's harness), layouts.json in memory ──
+const WSH_PATH = require.resolve(path.join(REPO, 'src/ws-handler.js'));
+const MODEL = path.join(REPO, 'src/lib/desktop-record.js');
+const loadHandler = (over = {}) => {
+  const DR = require(MODEL), saved = {};
+  delete require.cache[WSH_PATH];
+  for (const [k, v] of Object.entries(over)) { saved[k] = DR[k]; DR[k] = v; }
+  try { return require(WSH_PATH); } finally { Object.assign(DR, saved); delete require.cache[WSH_PATH]; }
+};
+function hub(WSH, seed, { alive = [] } = {}) {
+  let layouts = JSON.parse(J(seed)), writes = 0;
+  const logs = [];
+  const quietly = async (fn) => { console.warn = (...a) => logs.push(a.map(String).join(' ')); console.log = (...a) => logs.push(a.map(String).join(' ')); try { return await fn(); } finally { console.warn = REAL.warn; console.log = REAL.log; } };
+  const ctx = new Proxy({ telemetry: { record() {} }, activeSessionsPayload: () => [], serverNotice: () => {}, activeSessions: new Map(alive.map((sid) => [sid, {}])), WS_OPEN: 1, readLayouts: () => JSON.parse(J(layouts)), writeLayouts: (d) => { writes++; layouts = JSON.parse(J(d)); } }, { has: () => true, get: (t, k) => (k in t ? t[k] : undefined) });
+  const on = {};
+  const wss = { _heartbeatTimer: true, clients: new Set(), on: (ev, fn) => { on[ev] = fn; } };
+  WSH.registerWsHandler(wss, ctx);
+  const connect = () => {
+    const h = {}, frames = [];
+    const sock = { readyState: 1, send: (s) => frames.push(JSON.parse(s)), on: (ev, fn) => { h[ev] = fn; } };
+    wss.clients.add(sock); console.warn = () => {}; try { on.connection(sock); } finally { console.warn = REAL.warn; }
+    return { frames, send: (m) => quietly(() => h.message(J(m))) };
+  };
+  return { connect, layouts: () => layouts, writes: () => writes, logs };
+}
+const W0 = () => ({ type: 'layout-sync', desktopId: 'desk-p', state: { windows: P_SENT(), grid: null }, evidence: P_BEFORE().map((w) => ({ id: w.winId, why: 'replaced' })), base: 1000, sentAt: 1, viewport: 'desktop' });
+
+// ── the real client classes over a fake app (test-desktop-record's world, trimmed) ──
+const { DesktopManager: DM } = await import(pathToFileURL(path.join(LIB, 'desktop-manager.js')).href);
+const { LayoutManager: LM } = await import(pathToFileURL(path.join(LIB, 'layout.js')).href);
+function world({ records, active = 'desk-w', extra = {} } = {}) {
+  const sent = [], handlers = [], closed = [], resumed = [], replayed = [];
+  const wins = new Map();
+  let dm = null, lm = null, seq = 0;
+  const mkWin = (id, desk, o = {}) => { const el = mkEl(); el.style.zIndex = '10'; const w = { id, type: 'files', title: id, _desktopId: desk, gridBounds: null, isMinimized: false, isMaximized: false, element: el, content: mkEl(), titleBar: mkEl(), titleSpan: mkEl(), _bornAt: Date.now(), ...o }; wins.set(id, w); return w; };
+  const app = {
+    ws: { onGlobal: (fn) => handlers.push(fn), onStateChange() {}, connected: true, send: (m) => { const c = JSON.parse(J(m)); sent.push(c); if (c.type === 'layout-sync') setTimeout(() => { for (const h of handlers) h({ type: 'layout-sync-ack', desktopId: c.desktopId || null, sentAt: c.sentAt ?? null, seq: ++seq }); }, 5); }, request: () => () => {}, attachesInFlight: () => 0 },
+    settings: { get: () => null, on() {} }, sessions: new Map(), stage: null, isMobile: false,
+    wm: { windows: wins, grid: null, zIndex: 100, _restoring: false, activeWindowId: null, setGrid() {}, _reflowWindows() {}, _applyGridBounds() {}, _captureGridBounds(w) { if (!w.gridBounds) w.gridBounds = { left: 0.3, top: 0.3, width: 0.4, height: 0.4 }; }, focusWindow() {}, setWindowHidden(w, r = {}) { if (w && 'desktop' in r) w._hiddenByDesktop = !!r.desktop; },
+      toggleMaximize(id) { const w = wins.get(id); if (w) w.isMaximized = !w.isMaximized; }, minimize(id) { const w = wins.get(id); if (w) w.isMinimized = true; }, restore() {}, _notify() {}, _scheduleOverlapUpdate() {}, syncHiddenViews() {},
+      createWindow: ({ title, type, syncId }) => mkWin(syncId || ('win-n' + (++seq)), dm.activeDesktopId, { type, title }),
+      closeWindow: (id) => { if (!wins.has(id)) return; wins.delete(id); closed.push(id); dm.purgeClosedWindow(id); lm.noteClosed?.(id, null); },
+      setTitle(id, t) { const w = wins.get(id); if (w) w.title = t; } },
+    themeManager: { current: 'dark', apply() {} }, _fontSize: 14, _fontFamily: 'mono', sidebar: { isOpen: false, _allSessions: [], toggle() {}, getCustomName: () => null },
+    updateTaskbar() {}, _checkWelcome() {},
+    replayOpenSpec: (spec, winId) => { replayed.push([winId, spec && spec.action]); mkWin(winId, dm.activeDesktopId, { type: spec && /Session$/.test(spec.action) ? 'chat' : 'viewer', _openSpec: spec }); },
+    attachSession: (sid, name, cwd, o) => mkWin('att-' + sid, dm.activeDesktopId, { type: 'chat', title: name, _openSpec: { action: 'attachSession', serverId: sid, backendSessionId: o && o.backendSessionId } }),
+    viewSession: (sid, cwd, name, o) => mkWin('view-' + sid, dm.activeDesktopId, { type: 'chat', title: `${name} — ${cwd}`, _openSpec: { action: 'viewSession', sessionId: sid, backend: o && o.backend, backendSessionId: (o && o.backendSessionId) || sid, cwd, name } }),
+    openEditor: (fp, name) => mkWin('ed-' + fp, dm.activeDesktopId, { type: 'editor', title: name, _filePath: fp, _fileName: name, _openSpec: { action: 'openEditor', path: fp, name } }),
+    resumeSession: (...a) => resumed.push(a),
+    _snapshotWinBounds: (w) => ({ gridBounds: w.gridBounds, desktopId: w._desktopId }),
+    ...extra,
+  };
+  lm = new LM(app); app.layoutManager = lm;
+  dm = new DM(app); app.desktopManager = dm;
+  dm._desktops = DESKS.map((d) => ({ ...d })); dm._activeId = active;
+  for (const [d, ws] of Object.entries(records)) { const rec = { windows: ws, grid: null }; dm._setRecord(d, rec); dm.noteWire(d, rec); }
+  lm._restoring = false; lm._userDirty = true; lm._lastUserInputAt = Date.now();
+  return { app, dm, lm, wins, sent, mkWin, handlers, closed, resumed, replayed, syncs: (d) => sent.filter((m) => m.type === 'layout-sync' && m.desktopId === d) };
+}
+const tileOf = (w) => (w && w.content && w.content.children[0]) || null;
+const wordsOf = (w) => { const t = tileOf(w); return t ? t.children.map((c) => c.textContent) : []; };
+
+// ════════════════════════════════════════════════════════════════════════════════════════════════════════════════════
+await section('§1 A WINDOW NEVER LOSES ITS NAME — the 09:18:22 write on the REAL ws-handler', async () => {
+  const H = hub(loadHandler(), DOC(P_BEFORE()));
+  const S = H.connect();
+  await S.send(W0());
+  const p = H.layouts().desktops['desk-p'].autoSave.windows;
+  const nameless = p.filter((w) => !isNamed(w));
+  ok(p.length === 11 && !nameless.length, `§1 个人's eleven new windows are stored NAMED — none nameless (2.369.363: ${7} of 11 nameless; here ${nameless.length})`, nameless.map((w) => w.title));
+  const seven = p.filter((w) => !w.openSpec);
+  ok(seven.length === 7 && seven.every((w) => { const i = NAMES.indexOf(w.title); return i >= 4 && w.backendSessionId === CID(i) && w.backend === BACK(i) && w.cwd === CWD(i); }), '§1 each of the seven took the conversation of the window it replaced (its id, its harness, its cwd) — matched by the title\'s name, not the openSpec\'s first message', seven.map((w) => [w.title, w.backendSessionId, w.backend]));
+  ok(seven.every((w) => !w.serverSessionId && !w.openSpec), '§1 …never the old window\'s server session nor its openSpec (the attach was the old window\'s)', seven.map((w) => [w.serverSessionId, !!w.openSpec]));
+  ok(H.logs.some((l) => /7 window\(s\) took the name of the window they replaced/.test(l)), '§1 the journal says it: «7 window(s) took the name of the window they replaced»', H.logs.filter((l) => /layout-sync/.test(l)));
+  // two windows of ONE name: the name never guesses — neither is paired, both are left out; the evidence's `by` pairs the one it
+  // names, and the other is then the only one left (one-to-one)
+  const twins = () => DOC([named(0, { title: 'Twin — ' + CWD(0) }), named(1, { title: 'Twin — ' + CWD(1) }), named(2)]);
+  const twinWrite = (evidence, sentAt) => ({ type: 'layout-sync', desktopId: 'desk-p', state: { windows: [{ ...bare(0), title: 'Twin' }, { ...bare(1), title: 'Twin' }, named(2)], grid: null }, evidence, base: 1000, sentAt, viewport: 'desktop' });
+  const H2 = hub(loadHandler(), twins()); const S2 = H2.connect();
+  await S2.send(twinWrite([{ id: 'win-old-0', why: 'replaced' }, { id: 'win-old-1', why: 'replaced' }], 2));
+  const p2 = H2.layouts().desktops['desk-p'].autoSave.windows;
+  ok(J(p2.map((w) => w.winId)) === J(['win-old-2']) && H2.logs.some((l) => /2 with no name left out of this write \(Twin · Twin\)/.test(l)), '§1 two windows of ONE name and nothing else to tell them apart: neither is guessed — both left out of THIS write and named in the journal (never stored nameless)', { ids: p2.map((w) => w.winId), log: H2.logs.filter((l) => /layout-sync/.test(l)) });
+  const H2b = hub(loadHandler(), twins()); const S2b = H2b.connect();
+  await S2b.send(twinWrite([{ id: 'win-old-0', why: 'replaced', by: 'win-new-0' }, { id: 'win-old-1', why: 'replaced' }], 3));
+  const p2b = H2b.layouts().desktops['desk-p'].autoSave.windows;
+  ok(p2b.find((w) => w.winId === 'win-new-0')?.backendSessionId === CID(0) && p2b.find((w) => w.winId === 'win-new-1')?.backendSessionId === CID(1), '§1 …the evidence\'s `by` pairs the one it names; the other twin is then the only one left (one-to-one)', p2b.map((w) => [w.winId, w.backendSessionId || null]));
+  // a nameless newcomer that replaced nothing named (a new session whose create has not answered, an older bundle)
+  const H3 = hub(loadHandler(), DOC([named(0)])); const S3 = H3.connect();
+  await S3.send({ type: 'layout-sync', desktopId: 'desk-p', state: { windows: [named(0), bare(9)], grid: null }, evidence: [], base: 1000, sentAt: 3, viewport: 'desktop' });
+  ok(J(H3.layouts().desktops['desk-p'].autoSave.windows.map((w) => w.winId)) === J(['win-old-0']), '§1 a nameless newcomer that replaced nothing named is not written (the record stays [win-old-0])', H3.layouts().desktops['desk-p'].autoSave.windows.map((w) => w.winId));
+  // the record's own nameless entry (the incident's leftovers) is the record's — a write that keeps it keeps it
+  const H4 = hub(loadHandler(), DOC([named(0), bare(5)])); const S4 = H4.connect();
+  await S4.send({ type: 'layout-sync', desktopId: 'desk-p', state: { windows: [named(0), bare(5)], grid: null }, evidence: [], base: 1000, sentAt: 4, viewport: 'desktop' });
+  ok(H4.layouts().desktops['desk-p'].autoSave.windows.length === 2, '§1 a nameless entry the record ALREADY holds stays (a placeholder shows it; only the person\'s close removes it)');
+});
+
+await section('§1 PURE keepNames / carryName (src/lib/desktop-record.js)', async () => {
+  const DR = require(MODEL);
+  ok(typeof DR.keepNames === 'function' && typeof DR.isNameless === 'function' && typeof DR.carryName === 'function', '§1 desktop-record.js exports keepNames / isNameless / carryName');
+  const r = DR.keepNames({ prev: P_BEFORE(), next: P_SENT(), evidence: [] });
+  ok(r.carried.length === 7 && r.carried.every((c) => c.how === 'name') && !r.withheld.length && r.windows.every(isNamed), '§1 keepNames on the 09:18:22 shape: seven carried by NAME, none withheld, all named', r.carried);
+  ok(DR.isNameless(bare(4)) && !DR.isNameless(named(4)) && !DR.isNameless({ ...bare(4), serverSessionId: 'sess-9' }) && !DR.isNameless(files('x', 1)), '§1 isNameless: a session entry with no conversation AND no server session; never a window that is no session');
+  const c = DR.carryName(named(6), bare(6));
+  ok(c.backendSessionId === CID(6) && c.claudeSessionId === CID(6) && c.cwd === CWD(6) && c.backend === 'claude' && !c.serverSessionId && !c.openSpec && c.winId === 'win-new-6' && c.title === NAMES[6], '§1 carryName copies the conversation (backend, the id, claudeSessionId, cwd) — never the server session, the openSpec, the id or the title', c);
+  const prevM = [named(0)], nextM = [bare(0)];
+  const m = DR.mergeDesktopRecord({ record: { windows: prevM }, add: nextM, remove: ['win-old-0'], replaced: [['win-new-0', 'win-old-0']] });
+  ok(m.windows.length === 1 && m.windows[0].winId === 'win-new-0' && m.windows[0].backendSessionId === CID(0), '§1 mergeDesktopRecord `replaced`: the moved window takes the replaced entry\'s name in the held record', m.windows);
+  const frozen = J(P_BEFORE()); DR.keepNames({ prev: P_BEFORE(), next: P_SENT() }); let threw = null;
+  try { DR.keepNames({}); DR.keepNames({ prev: 'x', next: [null, 3, { winId: 'a' }] }); } catch (e) { threw = e.message; }
+  ok(!threw && J(P_BEFORE()) === frozen, '§1 garbage never throws; inputs never mutated', threw);
+});
+
+// ── the REAL session-lifecycle (resumeSession → createSession), its relative imports stubbed (test-attach-dedupe's loader) ──
+const esbuild = (await import(pathToFileURL(path.join(REPO, 'node_modules/esbuild/lib/main.js')).href)).default;
+async function loadLifecycle() {
+  const src = fs.readFileSync(path.join(LIB, 'session-lifecycle.js'), 'utf8');
+  const map = {};
+  for (const m of src.matchAll(/^import\s*\{([^}]*)\}\s*from\s*'([^']+)';/gm)) { (map[m[2]] = map[m[2]] || new Set()); for (const n of m[1].split(',').map((s) => s.trim().split(/\s+as\s+/)[0]).filter(Boolean)) map[m[2]].add(n); }
+  const special = { t: 'export const t = (s) => s;', stripCwdHostLabel: 'export const stripCwdHostLabel = (c) => c;', attachSlab: "export const attachSlab = () => 'floor';", resumeSpawnPick: "export const resumeSpawnPick = () => ({ value: undefined, origin: 'none' });", uiRow: 'export const uiRow = () => ({});', legacyIdFor: "export const legacyIdFor = (b, id) => ((b || 'claude') === 'claude' ? id : null);", viewIdFor: "export const viewIdFor = (b, id) => 'view-' + id;", terminalOnly: 'export const terminalOnly = () => false;', carriedGeometry: 'export const carriedGeometry = (g) => g;', backendFeatureCaps: 'export const backendFeatureCaps = () => ({});' };
+  const STUBS = {};
+  for (const [p, names] of Object.entries(map)) STUBS[p] = [...names].map((n) => special[n] || `export const ${n} = function () { return null; };`).join('\n').replace(/export const (ChatView|TerminalSession) = function \(\) \{ return null; \};/g, 'export class $1 {}');
+  const r = await esbuild.build({ stdin: { contents: "export { installSessionLifecycle } from './session-lifecycle.js';", resolveDir: LIB, sourcefile: 'entry.js', loader: 'js' }, bundle: true, write: false, format: 'esm', platform: 'neutral', logLevel: 'silent',
+    plugins: [{ name: 'stubs', setup(b) { b.onResolve({ filter: /^\.\.?\// }, (a) => (a.importer.endsWith('session-lifecycle.js') && STUBS[a.path] ? { path: a.path, namespace: 'stub' } : null)); b.onLoad({ filter: /.*/, namespace: 'stub' }, (a) => ({ contents: STUBS[a.path], loader: 'js' })); } }] });
+  const dir = scratchDir('lsw-lifecycle'), f = path.join(dir, 'lifecycle.mjs');
+  fs.writeFileSync(f, r.outputFiles[0].text);
+  try { return (await import(pathToFileURL(f).href)).installSessionLifecycle; } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+}
+
+await section('§1b THE DOOR — the real resumeSession → createSession over the real desktop / layout managers', async () => {
+  const install = await loadLifecycle();
+  class Life {} install(Life);
+  const proto = Life.prototype;
+  // the resume-all of 个人 (not on show — the page shows 工作): the conversation of win-old-6 resumes in a NEW window whose
+  // create never answers (a stopped session on a hub that came back half-updated)
+  const requests = [];
+  const W = world({ records: { 'desk-w': [], 'desk-p': [named(5), named(6)], 'desk-r': [] }, active: 'desk-w', extra: {
+    _hideWelcome() {}, _buildTitleMeta: () => ({}), _hostLabel: () => '', _getBackendSessionDefaults: () => ({}), _closeSidebarOnMobile() {},
+  } });
+  for (const k of ['resumeSession', 'createSession', '_windowPending']) W.app[k] = proto[k].bind(W.app);
+  W.app.ws.request = (msg) => { requests.push(msg); return () => {}; };
+  W.app.sidebar.getSessionConfig = () => ({}); W.app.sidebar._getSessionTasks = () => [];
+  W.app.resumeSession(CID(6), CWD(6), NAMES[6], { backend: 'claude', backendSessionId: CID(6), winBounds: { gridBounds: GB(6), desktopId: 'desk-p', winId: 'win-old-6' } });
+  const E = [...W.wins.values()].find((w) => w.type === 'chat');
+  ok(!!E && requests.some((m) => m.type === 'create' && m.resumeId === CID(6)) && E._desktopId === 'desk-p', '§1b the resume sent its create (never answered) and its window landed on 个人 (resume placement)', { E: E && E.id, desk: E && E._desktopId, req: requests.map((m) => m.type) });
+  const cap = W.lm.captureWin(E, E.id);
+  ok(cap && cap.backendSessionId === CID(6) && cap.backend === 'claude' && cap.cwd === CWD(6) && !cap.openSpec, '§1b THE WINDOW KNOWS ITS CONVERSATION FROM BIRTH: captured before its create answers it names the conversation (2.369.363: no identity — the title alone)', cap);
+  const held = W.dm._savedStates.get('desk-p').windows;
+  ok(held.length === 2 && !held.some((w) => w.winId === 'win-old-6') && held.find((w) => w.winId === E.id)?.backendSessionId === CID(6), '§1b 个人\'s held record: the new window in place of win-old-6, NAMED', held.map((w) => [w.winId, w.backendSessionId || null]));
+  await W.lm._doAutoSave();
+  const out = W.syncs('desk-p').at(-1);
+  ok(out && out.state.windows.every(isNamed) && out.state.windows.some((w) => w.winId === E.id && w.backendSessionId === CID(6)), '§1b the next autosave sends 个人 with every window named (the resumed one by its conversation)', out && out.state.windows.map((w) => [w.winId, w.backendSessionId || null]));
+  ok(out && out.evidence.some((e) => e.id === 'win-old-6' && e.why === 'replaced' && e.by === E.id), '§1b …and its evidence says which window replaced which (`by` — the server pairs them)', out && out.evidence);
+  // AT THE WRITER, NOT PER CALLER: a bare window (no birth identity — another door, an older bundle's shape) moved in place of a named entry
+  const W2 = world({ records: { 'desk-w': [], 'desk-p': [named(7)], 'desk-r': [] }, active: 'desk-w' });
+  const B = W2.mkWin('win-new-7', 'desk-w', { type: 'chat', title: NAMES[7] });
+  W2.dm.moveWindowToDesktop(B.id, 'desk-p', { replaces: 'win-old-7' });
+  await W2.lm._doAutoSave();
+  const o2 = W2.syncs('desk-p').at(-1);
+  ok(o2 && o2.state.windows.length === 1 && o2.state.windows[0].winId === 'win-new-7' && o2.state.windows[0].backendSessionId === CID(7), '§1b a BARE window moved in place of a named entry takes its name at the writer (mergeDesktopRecord `replaced`) — 2.369.363 sent it nameless', o2 && o2.state.windows);
+  // a nameless newcomer on the desktop on show (the active desktop's resume — its read-only window closed, the new one bare)
+  const W3 = world({ records: { 'desk-w': [named(8)], 'desk-p': [], 'desk-r': [] }, active: 'desk-w' });
+  W3.mkWin('win-old-8', 'desk-w', { type: 'chat', title: named(8).title, _openSpec: named(8).openSpec });
+  W3.app.wm.closeWindow('win-old-8');
+  W3.mkWin('win-new-8', 'desk-w', { type: 'chat', title: NAMES[8] });
+  await W3.lm._doAutoSave();
+  const o3 = W3.syncs('desk-w').at(-1);
+  ok(o3 && !o3.state.windows.some((w) => w.winId === 'win-new-8') && o3.evidence.some((e) => e.id === 'win-new-8' && e.why === 'nameless'), '§1b a nameless newcomer on the desktop on show is LEFT OUT of the write and said (evidence \'nameless\') — never saved nameless', o3 && { windows: o3.state.windows.map((w) => w.winId), evidence: o3.evidence });
+  W3.wins.get('win-new-8')._conversation = { backend: 'claude', backendSessionId: CID(8), cwd: CWD(8) }; // its name arrives
+  W3.lm._userDirty = true; W3.lm._lastUserInputAt = Date.now(); W3.lm._lastSentJson = null;
+  await W3.lm._doAutoSave();
+  const o4 = W3.syncs('desk-w').at(-1);
+  ok(o4 && o4.state.windows.some((w) => w.winId === 'win-new-8' && w.backendSessionId === CID(8)), '§1b …the first write after its name arrives carries it', o4 && o4.state.windows.map((w) => w.winId));
+});
+
+await section('§2 UNBUILT IS NOT DROPPED — the 09:19:35 write on the REAL ws-handler; PURE shrinkVerdict', async () => {
+  const before = NAMES.map((_, i) => (i < 4 ? answered(i) : bare(i))); // 个人 as 09:18:22 left it on 2.369.363
+  const H = hub(loadHandler(), DOC(before)); const S = H.connect();
+  await S.send({ type: 'layout-sync', desktopId: 'desk-p', state: { windows: before.slice(0, 4), grid: null }, evidence: before.slice(4).map((w) => ({ id: w.winId, why: 'unbuilt' })), base: 1000, sentAt: 5, viewport: 'desktop' });
+  const kept = H.layouts().desktops['desk-p'].autoSave.windows;
+  const refused = S.frames.find((f) => f.type === 'layout-sync-refused');
+  ok(kept.length === 11 && refused && refused.reason === 'shrink-without-close' && (refused.unexplained || []).length === 7, `§2 个人 11 → 4 with seven 'unbuilt' is REFUSED — the server keeps 11 (2.369.363 wrote 4; here ${kept.length})`, { refused, n: kept.length });
+  const warn = H.logs.find((l) => /REFUSED a record of desktop "个人"/.test(l)) || '';
+  ok(NAMES.slice(4).every((n) => warn.includes(n)) && /7 stopped \/ unknown session window\(s\) dropped as 'unbuilt'/.test(warn), '§2 the refusal NAMES the seven by title — never a count', warn);
+  const { shrinkVerdict } = require(MODEL);
+  const ev = (ws, why) => ws.map((w) => ({ id: w.winId, why }));
+  const one = shrinkVerdict({ prev: [named(9), named(10)], next: [named(10)], evidence: ev([named(9)], 'unbuilt'), alive: () => false });
+  ok(!one.ok && J(one.unbuilt) === J(['win-old-9']), '§2 ONE stopped session window dropped as \'unbuilt\' is refused (any count)', one);
+  const dup = shrinkVerdict({ prev: [named(9), named(10)], next: [{ ...named(9), winId: 'w-dup' }, named(10)], evidence: ev([named(9)], 'unbuilt'), alive: () => false });
+  ok(dup.ok, '§2 …a DUPLICATE (another entry still shows its session) still leaves', dup);
+  ok(shrinkVerdict({ prev: [files('a', 1), files('b', 2), files('c', 3)], next: [], evidence: ev([files('a', 1), files('b', 2), files('c', 3)], 'unbuilt') }).ok, '§2 …a window that is no session stays explained by \'unbuilt\'');
+  const live = shrinkVerdict({ prev: [named(9)], next: [], evidence: ev([named(9)], 'unbuilt'), alive: (s) => s === named(9).serverSessionId });
+  ok(!live.ok && J(live.live) === J(['win-old-9']) && !(live.unbuilt || []).length, '§2 …a LIVE one is refused as before (the 10-22 rule: `live`)', live);
+  ok(shrinkVerdict({ prev: [named(9), named(10)], next: [], evidence: ev([named(9), named(10)], 'closed'), alive: () => false }).ok, '§2 …the person\'s CLOSE of stopped session windows passes');
+});
+
+await section('§2 the boot restore of that record on a hub whose sessions are stopped — placeholders, kept past the grace', async () => {
+  const rec = NAMES.map((_, i) => (i < 4 ? answered(i) : bare(i)));
+  const W = world({ records: { 'desk-w': [], 'desk-p': rec, 'desk-r': [] }, active: 'desk-p' });
+  await W.lm.restoreState({ windows: rec });
+  const built = rec.filter((w) => W.wins.has(w.winId));
+  const stopped = built.map((w) => W.wins.get(w.winId)).filter((w) => tileOf(w)?.dataset?.placeholder === 'stopped');
+  const gone = built.map((w) => W.wins.get(w.winId)).filter((w) => tileOf(w)?.dataset?.placeholder === 'unavailable');
+  ok(built.length === 11, `§2 all ELEVEN windows are built (2.369.363 built ${0}: none alive, no transcript here — here ${built.length})`, built.map((w) => w.winId));
+  ok(stopped.length === 4 && gone.length === 7, `§2 four «Session stopped — click to resume» (a conversation id, no transcript here) + seven «Session unavailable» (nameless) placeholders (${stopped.length} + ${gone.length})`);
+  ok(J(wordsOf(stopped[0])) === J([NAMES[0], 'Session stopped — click to resume']) && J(wordsOf(gone[0])) === J([NAMES[4], 'Session unavailable']) && tileOf(stopped[0]).tagName === 'BUTTON' && tileOf(gone[0]).tagName === 'DIV', '§2 a tile says the window\'s NAME and its state; the stopped one is a button, the unavailable one is not', [wordsOf(stopped[0]), wordsOf(gone[0])]);
+  W.dm._noteAttempts('desk-p', rec.map((w) => w.winId), { at: Date.now() - 21000 }); // the 20 s grace is long past
+  const r = W.dm.recordFor('desk-p');
+  ok(r.windows.length === 11 && !W.dm.evidence().some((e) => e.why === 'unbuilt'), '§2 past the grace the record keeps all ELEVEN — no \'unbuilt\' evidence (2.369.363 dropped the seven)', { n: r.windows.length, ev: W.dm.evidence() });
+  const strip = (w) => { const o = { ...w }; for (const k of ['gridBounds', 'zIndex', 'isMinimized', 'isMaximized']) delete o[k]; return J(o); };
+  ok(rec.every((w) => strip(r.windows.find((x) => x.winId === w.winId)) === strip(w)), '§2 each placeholder\'s capture IS its entry — identity, openSpec, title as the record holds them (the arrangement is the page\'s)', r.windows.filter((x) => strip(x) !== strip(rec.find((w) => w.winId === x.winId))).slice(0, 1).map((x) => [strip(x), strip(rec.find((w) => w.winId === x.winId))]));
+  // the press: the conversation resumes IN PLACE
+  tileOf(stopped[1]).onclick();
+  const call = W.resumed.at(-1);
+  ok(call && call[0] === CID(1) && call[1] === CWD(1) && call[2] === NAMES[1] && call[3].backendSessionId === CID(1) && call[3].winBounds?.winId === 'win-new-1' && call[3].winBounds?.desktopId === 'desk-p' && W.closed.includes('win-new-1'), '§2 the stopped tile\'s press resumes its conversation in its place (its id, cwd, name, box and desktop); the placeholder closes as the person\'s act', call);
+  ok(tileOf(gone[1]).onclick == null, '§2 the unavailable tile has no press (nothing names a conversation) — only its close');
+});
+
+await section('§2 the live record\'s door — a placeholder broadcast live, rebuilt in place, closed with its entry', async () => {
+  const W = world({ records: { 'desk-w': [], 'desk-p': [], 'desk-r': [] }, active: 'desk-p' });
+  const e6 = bare(6), e7 = { ...named(7), openSpec: undefined, winId: 'win-x-7' };
+  W.lm._applyRemoteState({ windows: [e6, e7] }, { writer: 'desktop' });
+  ok(W.wins.get('win-new-6')?._placeholderOf && W.wins.get('win-x-7')?._placeholderOf && tileOf(W.wins.get('win-x-7'))?.dataset?.placeholder === 'stopped', '§2 another client\'s record with two spec-less session entries ⇒ two placeholders here (2.369.363: nothing — «no spec = can\'t recreate»)', [...W.wins.keys()]);
+  await tick(1100); // the apply's cooldown
+  W.lm._applyRemoteState({ windows: [e6, { ...e7, openSpec: { ...named(7).openSpec, serverId: 'sess-77' } }] }, { writer: 'desktop' });
+  const w7 = W.wins.get('win-x-7');
+  ok(w7 && !w7._placeholderOf && w7._openSpec?.serverId === 'sess-77' && W.replayed.some(([id]) => id === 'win-x-7'), '§2 a newer record whose entry has an openSpec (the resume answered on its page) REBUILDS it in place under the same id', { w7: w7 && { ph: !!w7._placeholderOf, spec: w7._openSpec }, replayed: W.replayed });
+  await tick(1100);
+  W.lm._applyRemoteState({ windows: [{ ...e7, openSpec: { ...named(7).openSpec, serverId: 'sess-77' } }] }, { writer: 'desktop' });
+  ok(!W.wins.has('win-new-6'), '§2 a record without the placeholder\'s entry (the owner closed it elsewhere) closes it here', [...W.wins.keys()]);
+  // the SAME recipe again (it is a placeholder BECAUSE its attach is dead and no transcript is here): it stays one — only a new
+  // recipe (an openSpec it lacked, another server session) is built in place (the chrome leg ② caught the first cut rebuilding it)
+  const D = world({ records: { 'desk-w': [], 'desk-p': [named(3)], 'desk-r': [] }, active: 'desk-p' });
+  await D.lm.restoreState({ windows: [named(3)] });
+  const before3 = D.wins.get('win-old-3');
+  D.lm._applyRemoteState({ windows: [named(3)] }, { writer: 'desktop' });
+  ok(before3?._placeholderOf && D.wins.get('win-old-3') === before3 && D.wins.get('win-old-3')._placeholderOf && !D.replayed.length, '§2 a placeholder whose newer entry carries the SAME (dead) recipe stays the same placeholder — nothing replayed', { replayed: D.replayed });
+  // a spec-less entry whose conversation RUNS (another page's resume, recorded before its create answered): attached, never «stopped»
+  const L = world({ records: { 'desk-w': [], 'desk-p': [], 'desk-r': [] }, active: 'desk-p' });
+  L.app.sidebar._allSessions = [{ webuiId: 'sess-live-9', backendSessionId: CID(9), backend: 'claude', cwd: CWD(9) }];
+  L.lm._applyRemoteState({ windows: [{ ...named(9), winId: 'win-r-9', openSpec: undefined, serverSessionId: undefined }] }, { writer: 'desktop' });
+  const r9 = L.wins.get('win-r-9');
+  ok(r9 && !r9._placeholderOf && r9._openSpec?.action === 'attachSession' && r9._openSpec.serverId === 'sess-live-9' && r9._openSpec.backendSessionId === CID(9), '§2 a spec-less entry whose conversation RUNS now (the sidebar\'s live row) is ATTACHED under its id — never a «stopped» tile for a live session', r9 && { ph: !!r9._placeholderOf, spec: r9._openSpec });
+});
+
+await section('§3 A DEAD LOCAL SESSION IS A STOPPED SESSION — the real boot-restore over a scratch data dir', async () => {
+  const BRm = require(path.join(REPO, 'src/server/boot-restore.js'));
+  const SS = require(path.join(REPO, 'src/session-store.js'));
+  const d = scratchDir('lsw-boot');
+  const home = scratchHome('lsw-home', fs);
+  const bin = path.join(d, 'bin'); fs.mkdirSync(bin, { recursive: true });
+  for (const b of ['fuser', 'pgrep']) fs.writeFileSync(path.join(bin, b), '#!/bin/sh\nexit 1\n', { mode: 0o755 }); // «nobody holds it»: every socket is dead
+  const SOCK = path.join(d, 'sockets'), META = path.join(d, 'meta'), BUF = path.join(d, 'buffers');
+  for (const x of [SOCK, META, BUF]) fs.mkdirSync(x, { recursive: true });
+  const env0 = { PATH: process.env.PATH, HOME: process.env.HOME };
+  process.env.PATH = bin + ':' + process.env.PATH; process.env.HOME = home;
+  try {
+    const cwd = '/srv/u/ledger';
+    const add = (n, meta) => { const sock = `cw-${n}-${1793300000000 + n}`; fs.writeFileSync(path.join(SOCK, sock), ''); fs.writeFileSync(path.join(META, sock + '.json'), J({ webuiSessionId: 'sess-' + sock.slice(3), createdAt: 1793300000000, ...meta })); return sock; };
+    const withT = add(1, { name: 'Ledger', cwd, backend: 'claude', mode: 'chat', claudeSessionId: CID(0), accountId: 'acct-x', taskIds: ['T-1'] });
+    const noT = add(2, { name: 'Ghost', cwd, backend: 'claude', mode: 'chat', claudeSessionId: CID(1) });
+    const shell = add(3, { name: 'shell', cwd, backend: 'shell', mode: 'terminal' });
+    const pdir = path.join(home, '.claude', 'projects', SS.cwdToProjectDir(cwd)); fs.mkdirSync(pdir, { recursive: true });
+    fs.writeFileSync(path.join(pdir, CID(0) + '.jsonl'), J({ type: 'user', sessionId: CID(0), cwd, timestamp: '2026-10-30T09:00:00.000Z', message: { role: 'user', content: 'hello' } }) + '\n');
+    const lines = [];
+    const meta = (s) => { try { return JSON.parse(fs.readFileSync(path.join(META, s + '.json'), 'utf8')); } catch { return {}; } };
+    const api = BRm.create({ rootDir: d, PORT: 0, BUFFERS_DIR: BUF, META_DIR: META, SOCKETS_DIR: SOCK, DTACH_CMD: 'dtach', NODE_CMD: process.execPath, CHAT_WRAPPER: '',
+      activeSessions: new Map(), sessionCounterRef: { value: 0 }, attachToDtach: () => {}, setupSessionPty: () => {},
+      readSessionMeta: meta, writeSessionMeta: (s, m) => fs.writeFileSync(path.join(META, s + '.json'), J(m)), deleteSessionMeta: (s) => { try { fs.unlinkSync(path.join(META, s + '.json')); } catch {} },
+      broadcastToSession: () => {}, broadcastActiveSessions: () => {}, refreshWebuiPids: () => {}, sbNoteServerOp: () => {}, getHosts: () => null, getDialBridge: () => null, note: () => {} });
+    console.log = (...a) => lines.push(a.join(' ')); console.warn = (...a) => lines.push(a.join(' '));
+    try { await api.probeSockets(); await api.restoreSessions(); } finally { console.log = REAL.log; console.warn = REAL.warn; }
+    const kept = path.join(META, withT + '.json.stopped');
+    const k = fs.existsSync(kept) ? JSON.parse(fs.readFileSync(kept, 'utf8')) : null;
+    ok(lines.filter((l) => /✗ Dead socket: cw-/.test(l)).length === 3 && [withT, noT, shell].every((s) => !fs.existsSync(path.join(SOCK, s))), '§3 the three dead sockets are retired (the Dead line, the socket gone)', lines.filter((l) => /Dead|meta/.test(l)));
+    ok(k && k.name === 'Ledger' && k.claudeSessionId === CID(0) && k.accountId === 'acct-x' && J(k.taskIds) === J(['T-1']) && typeof k.stoppedAt === 'number' && !fs.existsSync(path.join(META, withT + '.json')), '§3 a claude session whose transcript exists KEEPS its meta as STOPPED (<sock>.json.stopped, stoppedAt; its name, account, groups kept) — out of every live reader\'s *.json scan (2.369.363 deleted it)', { k, json: fs.existsSync(path.join(META, withT + '.json')) });
+    ok(!fs.existsSync(path.join(META, noT + '.json')) && !fs.existsSync(path.join(META, noT + '.json.stopped')) && !fs.existsSync(path.join(META, shell + '.json')) && !fs.existsSync(path.join(META, shell + '.json.stopped')), '§3 one with NO transcript, and a shell, are deleted as before');
+    ok(lines.some((l) => /local session meta kept as stopped \(claude c0ffee00…: its transcript is the record\)/.test(l)), '§3 the journal says which meta was kept and why', lines.filter((l) => /↳/.test(l)));
+    // what the SIDEBAR shows: the claude store's discovery lists the conversation from its TRANSCRIPT — the meta is not read
+    const H = require(path.join(REPO, 'src/harnesses')).get('claude');
+    const rows = await H.store.discover({ activeSessions: new Map(), webuiPids: new Map() });
+    const row = (rows || []).find((s) => (s.backendSessionId || s.sessionId) === CID(0));
+    ok(row && row.status !== 'live', `§3 the sidebar's row for it is the transcript's — a STOPPED row (status ${row && row.status}), the same with the meta kept or deleted; the resume-all offer lists it from the layout + this row`, row && { status: row.status, cwd: row.cwd });
+    console.log('    §3 sidebar row: ' + J(row && { status: row.status, name: row.name || row.summary || null, cwd: row.cwd }));
+  } finally { process.env.PATH = env0.PATH; process.env.HOME = env0.HOME; fs.rmSync(d, { recursive: true, force: true }); fs.rmSync(home, { recursive: true, force: true }); }
+});
+
+await section('§4 THE DOOR TO RECOVER — one desktop restored alone (the real persistence router)', async () => {
+  const dd = scratchDir('lsw-restore');
+  try {
+    const p = require(path.join(REPO, 'src/routes/persistence.js'));
+    const heard = [];
+    p.setup({ dataDir: dd, wss: { clients: new Set([{ readyState: 1, send: (s) => heard.push(JSON.parse(s)) }]) }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null });
+    const R = p.router;
+    // the 06:50Z point: 个人 TWELVE (eleven named + an editor), 工作 six, 研究 six — as a rollback point on disk
+    const editor = { winId: 'win-ed', title: '…/notes/plan.md', type: 'editor', isMinimized: false, isMaximized: false, gridBounds: GB(11), zIndex: 7200, openSpec: { action: 'openEditor', path: '/srv/u/notes/plan.md', name: 'plan.md' }, filePath: '/srv/u/notes/plan.md', fileName: 'plan.md' };
+    const point = DOC([...P_BEFORE(), editor]);
+    point.desktops['desk-w'].autoSave.windows.push(files('w-5', 5));
+    fs.mkdirSync(path.join(dd, 'layout-history'), { recursive: true });
+    const id = 'layout-2026-10-30T06-50-53-927Z-1h.json';
+    fs.writeFileSync(path.join(dd, 'layout-history', id), J({ at: 1793343053927, summary: { 工作: 6, 个人: 12, 研究: 6 }, totalWindows: 24, change: [['个人', 12, 11]], layouts: point }));
+    fs.writeFileSync(path.join(dd, 'layout-history', id.replace(/\.json$/, '.meta.json')), J({ at: 1793343053927, summary: { 工作: 6, 个人: 12, 研究: 6 }, totalWindows: 24, change: [['个人', 12, 11]] }));
+    // NOW: 个人 four (the 09:19:35 shape), 工作 five, 研究 six
+    const now = DOC(NAMES.slice(0, 4).map((_, i) => answered(i)));
+    R.writeLayouts(now); R.flushLayouts?.(); await tick(5);
+    const route = R.stack.find((l) => l.route && l.route.path === '/api/layout-history/:id/restore');
+    let answer = null;
+    await route.route.stack[0].handle({ params: { id }, body: { desktop: '个人' } }, { json: (j) => { answer = j; }, status: () => ({ json: (j) => { answer = j; } }) });
+    await tick(5);
+    const back = R.readLayouts();
+    ok(answer && answer.success && back.desktops['desk-p'].autoSave.windows.length === 12 && J(back.desktops['desk-p'].autoSave.windows.map((w) => w.winId)) === J([...P_BEFORE(), editor].map((w) => w.winId)), '§4 the row\'s 个人 restores ALONE: the point\'s twelve windows', { answer, p: back.desktops['desk-p'].autoSave.windows.length });
+    ok(back.desktops['desk-w'].autoSave.windows.length === 5 && back.desktops['desk-r'].autoSave.windows.length === 6 && !back.desktops['desk-w'].autoSave.windows.some((w) => w.winId === 'w-5'), '§4 …工作 and 研究 stay as they are NOW (5 / 6 — the point held 工作 six; 2.369.363 restored every desktop)', { w: back.desktops['desk-w'].autoSave.windows.length, r: back.desktops['desk-r'].autoSave.windows.length });
+    const pts = R.listLayoutHistory();
+    ok(heard.some((m) => m.type === 'layout-restored') && pts.some((x) => x.writer && x.writer.via === 'restore' && x.writer.desktop === 'desk-p'), '§4 every client is told (layout-restored) and the forced rollback point names the restore and the desktop — undoable', pts.map((x) => x.writer));
+    let miss = null;
+    await route.route.stack[0].handle({ params: { id }, body: { desktop: 'Nowhere' } }, { json: (j) => { miss = j; }, status: (c) => ({ json: (j) => { miss = { ...j, code: c }; } }) });
+    ok(miss && miss.code === 404, '§4 a desktop the point does not hold is a 404, nothing written', miss);
+    // the 06:50Z 个人 restored, on a hub whose sessions are all stopped: twelve windows, not 0
+    const W = world({ records: { 'desk-w': [], 'desk-p': back.desktops['desk-p'].autoSave.windows, 'desk-r': [] }, active: 'desk-p' });
+    await W.lm.restoreState({ windows: back.desktops['desk-p'].autoSave.windows });
+    const shown = back.desktops['desk-p'].autoSave.windows.filter((w) => W.wins.has(w.winId)).map((w) => W.wins.get(w.winId));
+    ok(shown.length === 12 && shown.filter((w) => w._placeholderOf).length === 11 && shown.some((w) => w.type === 'editor'), `§4 restoring the 06:50Z 个人 on a hub whose sessions are stopped builds TWELVE windows — eleven placeholders + the editor (2.369.363: the editor alone; here ${shown.length})`, shown.map((w) => [w.id, w.type, !!w._placeholderOf]));
+  } finally { fs.rmSync(dd, { recursive: true, force: true }); }
+  const SF = read('src/lib/setup-flows.js');
+  ok(/class="lh-desk" data-id="\$\{escHtml\(e\.id\)\}" data-desk="\$\{escHtml\(n\)\}"/.test(SF) && /body: JSON\.stringify\(\{ desktop: desk \}\)/.test(SF) && /registerMenuItem\(\{ menu: M, parent: 'system', order: 40,[^\n]*Restore a previous layout…/.test(read('src/lib/gear-menu.js')), '§4 the door: ⚙ → System → «Restore a previous layout…» (恢复之前的布局…) lists each point with its desktops — each desktop a button posting { desktop } to its restore');
+  const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
+  const keys = ['Session stopped — click to resume', 'Session unavailable', 'Press a desktop to restore it alone — your other desktops stay as they are now.', 'Restore only “{desktop}”', 'Restore only “{desktop}” as it was then? Your other desktops stay as they are now; the current layout becomes a rollback point too, so this is undoable.', '“{desktop}” restored — reloading…'];
+  ok(keys.every((k) => zh.includes(J(k) + ':') && ja.includes(J(k) + ':')) && zh.includes('"Session stopped — click to resume": "会话已停止 — 点击恢复"') && zh.includes('"Session unavailable": "会话不可用"'), '§4 every new word has a zh AND a ja entry (会话已停止 — 点击恢复 / 会话不可用)', keys.filter((k) => !zh.includes(J(k) + ':') || !ja.includes(J(k) + ':')));
+});
+
+await section('§5 CONTROL — the server\'s keepNames taken out of the handler', async () => {
+  const H = hub(loadHandler({ keepNames: ({ next }) => ({ windows: next, carried: [], withheld: [] }) }), DOC(P_BEFORE()));
+  const S = H.connect();
+  await S.send(W0());
+  const n = H.layouts().desktops['desk-p'].autoSave.windows.filter((w) => !isNamed(w)).length;
+  ok(n === 7, `§5 without keepNames the 09:18:22 write is stored with seven nameless windows (§1 can go RED: ${n})`);
+  ok(/\{ name: 'test-layout-stopped-window', tier: 'fast'/.test(read('scripts/ci.mjs')), '§5 ci.mjs carries test-layout-stopped-window in the fast tier');
+});
+
+console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
+process.exit(fail ? 1 : 0);

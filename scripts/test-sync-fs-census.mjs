@@ -201,7 +201,7 @@ const ROWS = [
   ["src/server/auto-resume.js", "*", 3, "local-only", "file = <dataDir>/auto-resume.json (server.js passes <checkout>/data)"],
   ["src/server/auto-update.js", "*", 2, "local-only", "repoDir = the checkout: copies a tracked file into <checkout>/data/auto-update/<name>.pre-reset"],
   ["src/server/automation-engine.js", "*", 7, "local-only", "FILE/AUDIT = <checkout>/data/automation-keys.json + automation-audit.jsonl (mounts-plugins-wiring dataDir)"],
-  ["src/server/boot-restore.js", "*", 16, "local-only", "SOCKETS_DIR / META_DIR / BUFFERS_DIR = <checkout>/data/{sockets,session-meta,session-buffers} (server.js); /proc-resolved wrapper files are dtach .buf there"],
+  ["src/server/boot-restore.js", "*", 18, "local-only", "SOCKETS_DIR / META_DIR / BUFFERS_DIR = <checkout>/data/{sockets,session-meta,session-buffers} (server.js); /proc-resolved wrapper files are dtach .buf there; lane layout-stopped-window +2: retireDeadSocket keeps a dead LOCAL session's meta as <sock>.json.stopped in META_DIR (one write + the .json unlink, once per dead socket at the boot)"],
   ["src/server/browser-attach-launch.js", "chromeExecutable", 2, "local-only", "PATH dirs of the keeper's sanitised base env + the Chrome binary names"],
   ["src/server/browser-attach-launch.js", "ownedDir", 4, "local-only", "socket dirs /tmp/vs-ab-<uid>[/<profileId>] (AT.attachSocketDir over B.SOCKET_DIR_BASE = \"/tmp\")"],
   ["src/server/browser-attach-launch.js", "readPortFile", 2, "local-only", "DevToolsActivePort in the profile's dir (keeper p.dir: ~/.agent-browser/vs-bp-*)"],

@@ -1482,7 +1482,10 @@ function ringPureLegs(P, { quiet = false } = {}) {
   const v = shrinkVerdict({ prev: WORK().map(nameless), next: [], evidence: unbuiltEv(WORK()), alive });
   leg(!v.ok && v.reason === 'shrink-without-close' && J(v.unexplained) === J(ids(WORK())) && J(v.live) === J(ids(WORK())), '§10b THE RING 00:17:31: 工作 (stored nameless) sent with its 5 live windows as \'unbuilt\' ⇒ REFUSED, all 5 unexplained (2.369.340 took 5 → 0)', J(v));
   leg(!shrinkVerdict({ prev: WORK(), next: WORK().slice(1), evidence: unbuiltEv(WORK().slice(0, 1)), alive }).ok, '§10b …ONE live window dropped as \'unbuilt\' is refused too (any count — the page could not build it, the session is there)');
-  leg(shrinkVerdict({ prev: WORK(), next: [], evidence: unbuiltEv(WORK()), alive: () => false }).ok && shrinkVerdict({ prev: WORK(), next: [], evidence: WORK().map((w) => ({ id: w.winId, why: 'closed' })), alive }).ok, '§10b …their sessions GONE ⇒ the drop is explained; the person\'s CLOSE of five live windows passes');
+  // UNBUILT IS NOT DROPPED (lane layout-stopped-window, 2.369.365): a SESSION window whose session is gone (stopped, unknown) is
+  // no longer explained by 'unbuilt' either — the page shows it as a placeholder; the belt refuses it, named in `unbuilt`
+  const gone = shrinkVerdict({ prev: WORK(), next: [], evidence: unbuiltEv(WORK()), alive: () => false });
+  leg(!gone.ok && J(gone.unbuilt) === J(ids(WORK())) && shrinkVerdict({ prev: WORK(), next: [], evidence: WORK().map((w) => ({ id: w.winId, why: 'closed' })), alive }).ok, '§10b …their sessions GONE ⇒ still REFUSED (UNBUILT IS NOT DROPPED — lane layout-stopped-window: named in `unbuilt`); the person\'s CLOSE of five live windows passes', J(gone));
   const dup = shrinkVerdict({ prev: WORK(), next: [CH('w-1b', 1)], evidence: unbuiltEv(WORK().slice(0, 1)), alive: (s) => s === 'sess-1' });
   leg(dup.ok, '§10b …a live window dropped as \'unbuilt\' while ANOTHER entry of the record shows its session (a duplicate the page settled at once) passes', J(dup));
   leg(shrinkVerdict({ prev: [R('hr-1'), R('hr-2'), R('hr-3')], next: [], evidence: [{ id: 'hr-1', why: 'moved' }, { id: 'hr-2', why: 'replaced' }, { id: 'hr-3', why: 'unbuilt' }] }).ok, '§10b …a window that is no session stays explained by \'unbuilt\' (§2 unchanged)');
@@ -1592,7 +1595,9 @@ async function ringDoorLegs(DM, LM, WSH, { quiet = false, legs = null } = {}) {
     W.dm._noteAttempts('desk-work', ids(WORK()), { at: Date.now() - 30000 }); // the boot's attempts, past the 20 s grace
     dirty(W); await W.dm.switchTo('desk-res'); W.dm._restoring = false; await tick(60);
     const r = sock.frames.find((f) => f.type === 'layout-sync-refused' && f.desktopId === 'desk-work');
-    leg(r && r.reason === 'shrink-without-close' && work(H).windows.length === 5, '§10e THE RING 00:17:31: the woken DESKTOP (built none of 工作\'s nameless five) switches to 研究 — its 工作 = [] with five \'unbuilt\' is REFUSED; the server keeps 5 (2.369.340: 5 → 0)', J({ refused: r && r.reason, n: work(H).windows.length }));
+    // UNBUILT IS NOT DROPPED at the PAGE too since lane layout-stopped-window (2.369.365): a session window it could not build stays
+    // in its record — no 'unbuilt' drop is sent at all (the belt above still refuses one from an older bundle: §10b / §10d)
+    leg(work(H).windows.length === 5 && !W.dm.evidence().some((e) => e.why === 'unbuilt') && (!r || r.reason === 'shrink-without-close'), '§10e THE RING 00:17:31: the woken DESKTOP (built none of 工作\'s nameless five) switches to 研究 — its 工作 write keeps all five (no \'unbuilt\' drop since lane layout-stopped-window); the server keeps 5 (2.369.340: 5 → 0)', J({ refused: r && r.reason, n: work(H).windows.length, ev: W.dm.evidence() }));
     await W.dm.switchTo('desk-work'); W.dm._restoring = false; await tick(700);
     const onWork = [...W.wins.values()].filter((w) => w._desktopId === 'desk-work').map((w) => w.id).sort();
     leg(J(onWork) === J(ids(WORK())), '§10e …and switched back, the page BUILDS the five (the refusal forgot their failed attempts; the record kept them)', J(onWork));
@@ -2054,8 +2059,8 @@ console.log('— §7 negative controls (patched copies, scripts/mutant-copy.mjs)
     const Mx = M.load(MODEL, PSRC.replace(find, '    if (ev.has(id)) continue;'), 'ring-unbuilt-explains-live');
     const f = ringPureLegs(Mx, { quiet: true });
     const WSHx = loadHandler(null, { shrinkVerdict: Mx.shrinkVerdict });
-    const h = await ringHubLegs(WSHx, { quiet: true }), d = await ringDoorLegs(RealDM, RealLM, WSHx, { quiet: true, legs: ['desk'] });
-    ok(f.some((n) => /THE RING 00:17:31/.test(n)) && h.some((n) => /THE RING 00:17:31 on the real handler/.test(n)) && d.some((n) => /THE RING 00:17:31: the woken DESKTOP/.test(n)), `control ring-unbuilt-explains-live (2.369.340's belt: 'unbuilt' explains a live window): the woken desktop's 工作 = [] is WRITTEN — 5 → 0 (RED ${f.length}/${h.length}/${d.length})`);
+    const h = await ringHubLegs(WSHx, { quiet: true }); // (the door's page no longer SENDS the drop — lane layout-stopped-window: the PURE and the hub legs carry this control)
+    ok(f.some((n) => /THE RING 00:17:31/.test(n)) && h.some((n) => /THE RING 00:17:31 on the real handler/.test(n)), `control ring-unbuilt-explains-live (2.369.340's belt: 'unbuilt' explains a live window): the woken desktop's 工作 = [] is WRITTEN — 5 → 0 (RED ${f.length}/${h.length})`);
   }
   {
     const find = "    windows.push(page.has(id) ? keepIdentity(w, page.get(id)) : w);";

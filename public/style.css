@@ -5883,6 +5883,18 @@ button.am-cap { cursor: pointer; }
 .lh-main { flex: 1; min-width: 0; font-size: 12px; }
 .lh-sub { color: var(--text-secondary); font-size: 11px; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lh-change { color: var(--text); } /* what changed right after this point ("HR 3 → 1") — the row a loss follows */
+/* one press restores one desktop (lane layout-stopped-window): each desktop of a rollback point is its own door */
+.lh-desks { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
+.lh-desk { font-size: 11px; padding: 2px 8px; border-radius: 10px; border: 1px solid var(--border); background: transparent; color: var(--text); cursor: pointer; min-height: 24px; }
+.lh-desk:hover, .lh-desk:focus-visible { border-color: var(--accent); color: var(--accent); }
+/* UNBUILT IS NOT DROPPED (lane layout-stopped-window): a session window this page cannot build is a placeholder tile — its
+   name and «会话已停止 — 点击恢复» (a press resumes it) or «会话不可用»; only the person's close removes it */
+.session-placeholder { box-sizing: border-box; width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 16px; border: 1px dashed var(--border); border-radius: 6px; background: var(--bg-secondary, transparent); color: var(--text-secondary); font: inherit; text-align: center; }
+button.session-placeholder { cursor: pointer; }
+button.session-placeholder:hover, button.session-placeholder:focus-visible { border-color: var(--accent); color: var(--text); }
+.session-placeholder-name { color: var(--text); font-weight: 600; font-size: 14px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-placeholder-say { font-size: 12px; }
+button.session-placeholder .session-placeholder-say { color: var(--accent); }
 .lh-restore { flex-shrink: 0; }
 
 /* ── Background Work (2.342.x) ── */

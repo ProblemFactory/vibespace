@@ -7,6 +7,7 @@ import { legacyIdFor } from './agent-meta.js';
 import { wordlessTitleOf } from '../record-clear.js'; // PURE: the title a layout RECORD keeps for a window drawn from a record's words (lane-redact verify r7)
 import { chainSyncKey, ratioDiffers, heldRatio, releaseRatio, withoutMembers, restoreVerdict } from './chain-layout.js'; // agent browser P7 (§4.6): the sync key carries the layout; the ratio applies in place (unless a local divider drag holds it — v2 verify r1 ①)
 import { writerClass, deferKey, deferKeysOf, releaseNext, noteApplied, recordStamp, behindStamp, noteStamp } from './layout-model.js'; // B-4767: the deferred records — one slot per desktop AND writer class, released in arrival order (PURE)
+import { conversationOf } from './desktop-record.js'; // PURE (lane layout-stopped-window): the conversation a session entry names — a placeholder's door
 import { applyForViewport, arrangementFor } from './desktop-record.js'; // THE LAYER LAW's read half (design q-039 P0, §6b item 10): every read site of a record takes this page's subsets of it here (PURE)
 
 // The MEMBERS of a chain (host first) — NOT a sync key (chainSyncKey is): two
@@ -63,6 +64,30 @@ export function savedWindowName(ws) {
   const tail = cwd ? ' — ' + cwd : '';
   while (tail && name.length > tail.length && name.endsWith(tail)) name = name.slice(0, -tail.length);
   return name;
+}
+
+/** A PLACEHOLDER's capture (lane layout-stopped-window): the record entry it stands for — identity, openSpec, title, paths
+ *  as the record holds them — with this page's arrangement and tab chain (`winState`, captureWin's own) in place of the
+ *  entry's. The record never learns the window was a placeholder here. */
+/** The name the person READ on a window: its title without the " — <cwd>" tail — a placeholder's words (savedWindowName prefers
+ *  the openSpec's name, which is the conversation's FIRST message; a custom name lives in the title). */
+export function titleNameOf(ws) {
+  const cwd = String(ws?.cwd || ws?.openSpec?.cwd || '');
+  const tail = cwd ? ' — ' + cwd : '';
+  let n = String(ws?.title || '');
+  while (tail && n.length > tail.length && n.endsWith(tail)) n = n.slice(0, -tail.length);
+  return n.trim() || savedWindowName(ws);
+}
+const PLACEHOLDER_PAGE_KEYS = ['winId', 'isMinimized', 'isMaximized', 'gridBounds', 'zIndex', 'isSnapped', 'preSnapBounds', 'tabChain', 'isTabGuest'];
+export function placeholderCapture(entry, winState) {
+  const src = JSON.parse(JSON.stringify(entry || {})), page = winState || {}, out = {};
+  for (const k of Object.keys(src)) { // the entry's own order (a record diff shows only what moved)
+    if (k === 'id' || k === 'z' || k === 'min' || k === 'snap' || k === 'snapBounds') continue; // legacy spellings: the page's canonical ones below
+    if (PLACEHOLDER_PAGE_KEYS.includes(k)) { if (k in page) out[k] = page[k]; continue; }
+    out[k] = src[k];
+  }
+  for (const k of PLACEHOLDER_PAGE_KEYS) if (k in page && !(k in out)) out[k] = page[k];
+  return out;
 }
 
 export function scanStoppedInDesktopStates(data, activeId, live, all, getCustomName) {
@@ -418,6 +443,14 @@ class LayoutManager {
             this._createRemoteWindow(rw, { arrangement: a });
             continue;
           }
+          // A PLACEHOLDER (lane layout-stopped-window) stands for the record's entry: a NEW recipe for it (an openSpec it lacked, or
+          // another session — the resumed window's create answered on its page) is built in place; the SAME recipe is why this page
+          // shows a placeholder (a dead attach, no transcript here) — it keeps it, holding the newest entry
+          if (win._placeholderOf) {
+            const was = win._placeholderOf.openSpec, now = rw.openSpec;
+            if (now && (!was || was.action !== now.action || (was.serverId || null) !== (now.serverId || null) || (was.backendSessionId || null) !== (now.backendSessionId || null))) { this._dropPlaceholder(win); this._createRemoteWindow(rw, { arrangement: a }); continue; }
+            win._placeholderOf = { ...win._placeholderOf, ...JSON.parse(JSON.stringify(rw)) };
+          }
           // THE HELD MOVE (verify r2): this page moved the window AFTER the record arrived (a drop on a preview at
           // the very pointerup the record waited for) — the record cannot know it; nothing of its entry applies,
           // and the move goes out once more below. (r1's move-in below re-adopted the window onto the desktop the
@@ -502,7 +535,7 @@ class LayoutManager {
             // Windows without an openSpec can't have been replayed remotely —
             // e.g. a createSession window still waiting for its 'created' reply.
             // Closing it here would KILL the just-created session.
-            if (!win?._openSpec) continue;
+            if (!win?._openSpec && !win?._placeholderOf) continue; // …a placeholder is the record's entry: it leaves with it
             // THE HELD MOVE (verify r2): this page moved the window HERE after the record arrived — it stays
             if (this.actHeld(win._movedAt, receivedAt, win)) { heldMoved = true; continue; }
             // A WINDOW BORN AFTER THE RECORD ARRIVED (2.369.199 integration): a record deferred under a gate — the boot's 5 s
@@ -946,8 +979,17 @@ class LayoutManager {
   // entry, applyForViewport's subset via arrangementFor; null = none)
   _createRemoteWindow(rw, { arrangement = null } = {}) {
     const winId = rw.winId || rw.id;
-    const spec = rw.openSpec;
-    if (!spec) return; // no spec = can't recreate
+    const spec = rw.openSpec || this._liveSpecOf(rw); // lane layout-stopped-window: an entry named by its conversation alone (a resume whose create had not answered on its page) attaches the live session
+    if (!spec) { // no spec = can't recreate — a SESSION entry is shown as a placeholder (lane layout-stopped-window), placed by this page's arrangement of it
+      const ph = rw.type === 'chat' || rw.type === 'terminal' ? this.placeholderFor(rw) : null;
+      if (ph && arrangement) {
+        if (arrangement.gridBounds) { ph.gridBounds = arrangement.gridBounds; this.app.wm._applyGridBounds(ph); }
+        if (arrangement.isSnapped) { ph._isSnapped = true; ph._preSnapBounds = arrangement.preSnapBounds; }
+        if (arrangement.isMaximized) this.app.wm.toggleMaximize(ph.id);
+        if (arrangement.isMinimized) this.app.wm.minimize(ph.id);
+      }
+      return;
+    }
     // a phone keeps ITS window on show when another client opens one (§6b guard 10): the replay's focus is handed back
     const wm = this.app.wm, shown = this.app.isMobile ? wm.activeWindowId : null;
     const keepShown = () => { if (shown && wm.activeWindowId !== shown && wm.windows.has(shown)) wm.focusWindow(shown); };
@@ -968,6 +1010,73 @@ class LayoutManager {
         if (arrangement.isMinimized) this.app.wm.minimize(winInfo.id);
       }, 500);
     } catch {}
+  }
+
+  /** UNBUILT IS NOT DROPPED (lane layout-stopped-window, the owner 2026-10-30 «我的个人桌面丢了很多窗口»): a SESSION window this
+   *  page cannot build — its conversation stopped with no transcript here, or the entry names none — is a PLACEHOLDER tile
+   *  under the entry's own id: the window's name and «会话已停止 — 点击恢复» (a press resumes the conversation in its place)
+   *  or «会话不可用». Its capture IS the entry (placeholderCapture), so the record keeps it, identity and all; only the
+   *  person's close removes it; a newer record that can build it replaces it (_applyRemoteState). Returns the window. */
+  placeholderFor(entry) {
+    const id = String((entry && (entry.winId || entry.id)) || '');
+    if (!id || (entry.type !== 'chat' && entry.type !== 'terminal') || this.app.wm.windows.has(id)) return null;
+    const win = this.app.wm.createWindow({ title: String(entry.title || '') || titleNameOf(entry) || t('Session'), type: entry.type, syncId: id });
+    if (!win) return null;
+    win._placeholderOf = JSON.parse(JSON.stringify(entry));
+    this._paintPlaceholder(win);
+    try { track('event', 'window-placeholder:' + (conversationOf(entry) ? 'stopped' : 'unavailable')); } catch {}
+    return win;
+  }
+
+  _paintPlaceholder(win) {
+    const entry = win._placeholderOf || {};
+    const cid = conversationOf(entry);
+    const box = win.content;
+    if (!box) return;
+    box.textContent = '';
+    const tile = document.createElement(cid ? 'button' : 'div');
+    tile.className = 'session-placeholder' + (cid ? ' can-resume' : '');
+    tile.dataset.placeholder = cid ? 'stopped' : 'unavailable';
+    const name = document.createElement('div'); name.className = 'session-placeholder-name'; name.textContent = titleNameOf(entry) || t('Session');
+    const say = document.createElement('div'); say.className = 'session-placeholder-say'; say.textContent = cid ? t('Session stopped — click to resume') : t('Session unavailable');
+    tile.append(name, say);
+    if (cid) tile.onclick = () => this._resumePlaceholder(win);
+    box.appendChild(tile);
+  }
+
+  /** The placeholder's press: the conversation resumes IN ITS PLACE (its box, its desktop) — the placeholder closes as the
+   *  person's act, the resumed window names the conversation from birth (session-lifecycle createSession's `_conversation`). */
+  _resumePlaceholder(win) {
+    const e = win && win._placeholderOf;
+    const cid = conversationOf(e);
+    if (!cid || !this.app.wm.windows.has(win.id)) return;
+    const backend = e.backend || e.openSpec?.backend || 'claude';
+    const bounds = this.app._snapshotWinBounds?.(win);
+    this.app.wm.closeWindow(win.id);
+    this.app.resumeSession?.(cid, e.cwd || e.openSpec?.cwd || '', titleNameOf(e) || 'Session', { backend, backendSessionId: cid, hostId: e.openSpec?.hostId || undefined, winBounds: bounds ? { ...bounds, winId: win.id } : undefined });
+  }
+
+  /** A placeholder leaves IN PLACE for the window a newer record can build under the same id — closed INSIDE the apply (the
+   *  apply's own close: no held close, nothing owed — guard 1), the record that names it rebuilt at once by the caller. */
+  _dropPlaceholder(win) {
+    this.app.wm.closeWindow(win.id);
+  }
+
+  /** The attach recipe for a spec-less SESSION entry whose conversation runs now (the sidebar's live row names it) — the
+   *  window a resume on another page opened, recorded by its conversation before its create answered; null when none runs. */
+  _liveSpecOf(rw) {
+    const cid = conversationOf(rw);
+    if (!cid || rw.openSpec) return null;
+    const backend = rw.backend || 'claude';
+    const live = (this.app.sidebar?._allSessions || []).find((s) => s && s.webuiId && (s.backend || 'claude') === backend && (s.backendSessionId || s.sessionId) === cid);
+    if (!live) return null;
+    return { action: 'attachSession', serverId: live.webuiId, backend, backendSessionId: cid, sessionKey: `${backend}:${cid}`, name: titleNameOf(rw), cwd: rw.cwd || live.cwd || '', mode: rw.type === 'terminal' ? 'terminal' : 'chat' };
+  }
+
+  /** restoreState's door: a session entry it could not build becomes a placeholder, placed by the record. */
+  _placeholderAt(ws, applyPosition) {
+    const ph = this.placeholderFor(ws);
+    if (ph) applyPosition(ph, ws);
   }
 
   // Capture current workspace state (complete)
@@ -1076,6 +1185,14 @@ class LayoutManager {
         winState.claudeSessionId = legacyIdFor(winState.backend, winState.backendSessionId);
         if (!winState.cwd) winState.cwd = win._openSpec.cwd || '';
       }
+      // …and a window born for a KNOWN conversation (a resume — session-lifecycle createSession's `_conversation`) names it
+      // before its create answers (lane layout-stopped-window: the resume-all's new windows were captured with no identity)
+      if ((win.type === 'chat' || win.type === 'terminal') && !winState.backendSessionId && win._conversation?.backendSessionId) {
+        winState.backend = win._conversation.backend || 'claude';
+        winState.backendSessionId = win._conversation.backendSessionId;
+        winState.claudeSessionId = legacyIdFor(winState.backend, winState.backendSessionId);
+        if (!winState.cwd) winState.cwd = win._conversation.cwd || '';
+      }
       // For file explorers, save current path (+ which host it browses)
       if (win.type === 'files' && win._explorerPath) {
         winState.explorerPath = win._explorerPath;
@@ -1102,6 +1219,7 @@ class LayoutManager {
         const pc = this.pendingChainOf(id); // a member of a chain still waiting for its last member: the RECORD's chain, never flat
         if (pc) { winState.tabChain = JSON.parse(JSON.stringify(pc)); winState.isTabGuest = pc.tabs[0] !== id; }
       }
+      if (win._placeholderOf) return placeholderCapture(win._placeholderOf, winState); // lane layout-stopped-window: the record's entry, as it is
       return winState;
     }
   }
@@ -1258,8 +1376,8 @@ class LayoutManager {
             const viewWin = this.app.viewSession(backendSessionId, cwd, customName || savedWindowName(ws) || 'Session', rOpts);
             if (viewWin) applyPosition(viewWin, ws);
             collectStopped(backendSessionId, cwd, customName || savedWindowName(ws) || 'Session', rOpts);
-          }
-        }
+          } else this._placeholderAt(ws, applyPosition); // UNBUILT IS NOT DROPPED (lane layout-stopped-window): no transcript here — a placeholder (a press resumes)
+        } else this._placeholderAt(ws, applyPosition); // …nothing names its conversation (a nameless entry): a placeholder with its name
       } else if (ws.type === 'chat') {
         const backend = ws.backend || ws.openSpec?.backend || 'claude';
         const bsid0 = ws.backendSessionId || ws.claudeSessionId || ws.openSpec?.backendSessionId; // see terminal branch
@@ -1304,8 +1422,8 @@ class LayoutManager {
             const viewWin = this.app.viewSession(backendSessionId, cwd, customName || savedWindowName(ws) || 'Session', rOpts);
             if (viewWin) applyPosition(viewWin, ws);
             collectStopped(backendSessionId, cwd, customName || savedWindowName(ws) || 'Session', rOpts);
-          }
-        }
+          } else this._placeholderAt(ws, applyPosition); // UNBUILT IS NOT DROPPED (lane layout-stopped-window): see the terminal branch
+        } else this._placeholderAt(ws, applyPosition); // …a nameless entry (09:18:22's seven): a placeholder, never 'unbuilt'
       } else if (ws.type === 'files') {
         const winInfo = this.app.openFileExplorer(ws.explorerPath, { host: ws.explorerHost });
         applyPosition(winInfo, ws);

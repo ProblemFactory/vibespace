@@ -233,7 +233,8 @@ function probeFacts(o) {
 
 // THE TWO RETIRES — ONE function each, called by restoreSessions AND by its deferred re-probe (B-92a4), so a socket the
 // re-probe settles dead / a duplicate it settles losing goes exactly the way the boot would have sent it.
-/** A dead dtach socket: the socket goes; a REMOTE session's meta is kept as an orphan for the re-adopt, a local one's is deleted. */
+/** A dead dtach socket: the socket goes; a REMOTE session's meta is kept as an orphan for the re-adopt; a LOCAL one's is kept as
+ *  STOPPED while its conversation has a transcript (`<sock>.json.stopped`, stoppedAt), deleted only when none exists. */
 function retireDeadSocket(sockFile, socketPath) {
   console.log(`  ✗ Dead socket: ${sockFile} — cleaning up`);
   try { fs.unlinkSync(socketPath); } catch {}
@@ -253,8 +254,31 @@ function retireDeadSocket(sockFile, socketPath) {
       console.log(`    ↳ remote session meta preserved as orphan (${dm.keeperSid || dm.dialDeviceId || dm.host})`);
       return;
     }
+    // A DEAD LOCAL SESSION IS A STOPPED SESSION, NOT A DELETED ONE (lane layout-stopped-window — 2026-10-30 02:55 the owner's
+    // user manager died with every dtach session, and the 04:59 boot deleted each local meta): the conversation's transcript is
+    // the record and the session is resumable (the sidebar lists it stopped from that transcript, the resume-all offer resumes
+    // it); its meta — the session's name, account, groups, model / effort, browser key — is kept beside it as STOPPED, out of
+    // every live reader's `*.json` scan. Deleted only when no transcript exists (a shell, a conversation that never spoke).
+    if (!dm.orphanedAt && hasTranscript(dm)) {
+      const op = path.join(META_DIR, sockFile + '.json');
+      fs.writeFileSync(op + '.stopped', JSON.stringify({ ...dm, stoppedAt: Date.now() }));
+      try { fs.unlinkSync(op); } catch { }
+      console.log(`    ↳ local session meta kept as stopped (${dm.backend || 'claude'} ${String(dm.claudeSessionId || dm.backendSessionId).slice(0, 8)}…: its transcript is the record)`);
+      return;
+    }
   } catch { }
   deleteSessionMeta(sockFile);
+}
+/** Does the conversation a LOCAL meta names have a transcript here? Its harness's own store answers (descriptor
+ *  `store.locate(id, cwd)` — claude: the CLI's path rule, then the projects scan; codex: its rollout); a harness with no
+ *  store (a shell) has none. */
+function hasTranscript(meta) {
+  const id = meta && (meta.claudeSessionId || meta.backendSessionId);
+  if (!id || typeof id !== 'string') return false;
+  try {
+    const h = harnessList().find((x) => x && x.id === (meta.backend || 'claude'));
+    return !!(h && h.store && typeof h.store.locate === 'function' && h.store.locate(id, meta.cwd || ''));
+  } catch { return false; }
 }
 /** A stale duplicate of a conversation another socket owns: SIGTERM its dtach session (claude, if any, is the older/losing
  *  writer — the pids from a pgrep CHILD, never a sync ask) and clean socket + buffer + meta. */

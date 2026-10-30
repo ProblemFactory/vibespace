@@ -24,6 +24,18 @@
 //   none of them. keepIdentity(prev, next): a captured entry keeps each IDENTITY field it lacks (and its openSpec's
 //   backendSessionId) from the record's entry of the same session; a capture that names ANOTHER session keeps its own.
 //   keepIdentities(prevList, nextList) does it per id (the server's write, ws-handler layout-sync).
+//   A WINDOW NEVER LOSES ITS NAME (lane layout-stopped-window, the owner 2026-10-30 «我的个人桌面丢了很多窗口»): the resume-all
+//   after a hub restart opened each stopped conversation in a NEW window (a new winId), titled with the bare name and with no
+//   identity until its create answered; resume placement captured it into its desktop's record IN PLACE of the named entry it
+//   replaced, and the per-id carry above had nothing to match — 个人 was written with seven of its eleven windows nameless
+//   (09:18:22) and the next page dropped them as 'unbuilt' (09:19:35, 11 → 4). keepNames({prev, next, evidence}) → {windows,
+//   carried, withheld} is the writer's rule for a NEW entry (an id `prev` does not hold) that names no conversation and no
+//   server session (isNameless): it takes the name of the named entry this write drops that it replaced — the evidence entry
+//   whose `by` names it, else the ONE dropped entry of its name (namesOf: the title without its " — <cwd>" tail, and the
+//   openSpec's name; one-to-one, two windows of one name are never guessed) — and with none it is left out of THIS write
+//   (`withheld`, said by the writer). carryName(from, next) copies the conversation (backend, the id, claudeSessionId, cwd),
+//   never the old window's server session or openSpec. mergeDesktopRecord's `replaced` ([[newId, oldId]]) is the client's
+//   twin: a moved window that `replaces` an entry takes that entry's name in the held record.
 //
 //   shrinkVerdict({prev, next, evidence, alive, min, recent}) — the SERVER BELT (ws-handler layout-sync): a sync
 //     that drops ≥ `min` (2) windows of the stored record that nothing explains is refused for that desktop. A drop
@@ -36,6 +48,10 @@
 //     session is ALIVE (sessionOf: its serverSessionId, else the server session its openSpec attaches to) unless another
 //     window of the record still shows that session — such a drop is refused at ANY count and named in `unexplained`
 //     (`live` lists them): the woken desktops of 00:17 / 00:19 sent 工作 with its five live windows dropped as 'unbuilt'.
+//     UNBUILT IS NOT DROPPED (lane layout-stopped-window): nor a SESSION window whose session is stopped, unknown or nameless —
+//     a page that cannot build it shows it as a placeholder until the person closes it; dropped as 'unbuilt' it is refused at
+//     ANY count and named in `unbuilt` (09:19:35: 个人 11 → 4 with seven 'unbuilt'). A duplicate (another entry still shows
+//     its session) still leaves; a window that is no session stays explained by 'unbuilt'.
 //
 //   staleVerdict({writes, who, storedAt, base}) — THE STALENESS GATE (lane layout-stale-record-sync, §6b guard 11): a
 //     record never goes backwards. Every write names `base` — the server stamp (`updatedAt`) of the newest record of that
@@ -157,6 +173,80 @@ function keepIdentities(prevList, nextList) {
   return listOf(nextList).map((w) => { const id = idOf(w); return id && byId.has(id) ? keepIdentity(byId.get(id), w) : w; });
 }
 
+/** A session window's entry (chat / terminal) — the windows a conversation names. */
+const isSession = (w) => !!w && typeof w === 'object' && (w.type === 'chat' || w.type === 'terminal');
+/** The conversation a session entry names (its id, else the one its openSpec names), or null. */
+const conversationOf = (w) => {
+  if (!isSession(w)) return null;
+  const spec = w.openSpec && typeof w.openSpec === 'object' ? w.openSpec : {};
+  const id = !blank(w.backendSessionId) ? w.backendSessionId : !blank(w.claudeSessionId) ? w.claudeSessionId : spec.backendSessionId;
+  return blank(id) ? null : String(id);
+};
+/** A session entry nothing can rebuild: no conversation and no server session (the restore matches by one of them). */
+const isNameless = (w) => isSession(w) && !conversationOf(w) && !sessionOf(w);
+/** What the person reads as the window's name: its title without the " — <cwd>" tail (layout.js savedWindowName's rule)
+ *  and its openSpec's name — both (the title carries a custom name, the openSpec the first message's). */
+function namesOf(w) {
+  const out = new Set();
+  if (!w || typeof w !== 'object') return out;
+  const spec = w.openSpec && typeof w.openSpec === 'object' ? w.openSpec : {};
+  const cwd = String(w.cwd || spec.cwd || '');
+  const tail = cwd ? ' — ' + cwd : '';
+  let t = String(w.title || '');
+  while (tail && t.length > tail.length && t.endsWith(tail)) t = t.slice(0, -tail.length);
+  if (t.trim()) out.add(t.trim());
+  if (typeof spec.name === 'string' && spec.name.trim()) out.add(spec.name.trim());
+  return out;
+}
+/** `next` takes `from`'s conversation — never its server session (the attach was the old window's) nor its openSpec. */
+function carryName(from, next) {
+  const cid = conversationOf(from);
+  if (!cid || !isSession(next) || from.type !== next.type || conversationOf(next)) return next;
+  const spec = from.openSpec && typeof from.openSpec === 'object' ? from.openSpec : {};
+  const out = { ...next, backendSessionId: cid };
+  const pick = (k, v) => { if (blank(out[k]) && !blank(v)) out[k] = v; };
+  pick('backend', from.backend); pick('backend', spec.backend);
+  pick('claudeSessionId', from.claudeSessionId);
+  pick('cwd', from.cwd); pick('cwd', spec.cwd);
+  return out;
+}
+
+function keepNames({ prev = [], next = [], evidence = [] } = {}) {
+  const prevList = Array.isArray(prev) ? prev : listOf(prev && prev.windows);
+  const nextList = Array.isArray(next) ? next : listOf(next && next.windows);
+  const prevIds = new Set(windowIds(prevList)), nextIds = new Set(windowIds(nextList));
+  // the NAMED entries this write drops — what a nameless newcomer may have replaced
+  const dropped = prevList.filter((w) => { const id = idOf(w); return id && !nextIds.has(id) && conversationOf(w); });
+  const droppedBy = new Map(dropped.map((w) => [idOf(w), w]));
+  const link = new Map(); // newcomer id → the dropped entry the evidence says it replaced (`by`)
+  for (const e of listOf(evidence)) if (e && typeof e === 'object' && e.by != null && droppedBy.has(idOf(e))) link.set(String(e.by), droppedBy.get(idOf(e)));
+  const fresh = nextList.filter((w) => { const id = idOf(w); return id && !prevIds.has(id) && isNameless(w); });
+  const used = new Set([...link.values()].map(idOf));
+  const overlaps = (a, b) => { for (const n of a) if (b.has(n)) return true; return false; };
+  const pairs = new Map();
+  for (const w of fresh) {
+    const id = idOf(w);
+    if (link.has(id)) { pairs.set(id, { from: link.get(id), how: 'evidence' }); continue; }
+    const mine = namesOf(w);
+    if (!mine.size) continue;
+    const cands = dropped.filter((p) => !used.has(idOf(p)) && p.type === w.type && overlaps(namesOf(p), mine));
+    if (cands.length !== 1) continue;
+    const theirs = namesOf(cands[0]);
+    if (fresh.some((x) => x !== w && !link.has(idOf(x)) && x.type === w.type && overlaps(namesOf(x), theirs))) continue; // two windows of one name: neither is guessed
+    used.add(idOf(cands[0]));
+    pairs.set(id, { from: cands[0], how: 'name' });
+  }
+  const windows = [], carried = [], withheld = [];
+  for (const w of nextList) {
+    const id = idOf(w);
+    const p = id ? pairs.get(id) : null;
+    if (p) { windows.push(carryName(p.from, w)); carried.push({ id, from: idOf(p.from), how: p.how }); continue; }
+    if (id && !prevIds.has(id) && isNameless(w)) { withheld.push({ id, title: String(w.title || '') }); continue; }
+    windows.push(w);
+  }
+  return { windows, carried, withheld };
+}
+
 /** The newest record of a desktop ANOTHER writer stored (see staleVerdict). */
 function foreignStamp(writes, who, storedAt) {
   const list = listOf(writes);
@@ -178,8 +268,14 @@ function staleVerdict({ writes = [], who = null, storedAt = 0, base = null } = {
   return { ok: true, judged: true, held, base: b };
 }
 
-function mergeDesktopRecord({ record = null, built = [], add = [], remove = [] } = {}) {
+function mergeDesktopRecord({ record = null, built = [], add = [], remove = [], replaced = [] } = {}) {
   const base = record && typeof record === 'object' ? record : {};
+  const was = new Map(); // a newcomer → the record's entry it replaces (lane layout-stopped-window: it takes that entry's name)
+  for (const pair of listOf(replaced)) {
+    const [n, o] = Array.isArray(pair) ? pair : [];
+    const p = o == null ? null : listOf(base.windows).find((w) => idOf(w) === String(o));
+    if (n != null && p) was.set(String(n), p);
+  }
   const gone = new Set(listOf(remove).map((x) => (typeof x === 'object' ? idOf(x) : (x == null ? null : String(x)))).filter(Boolean));
   const page = new Map();
   for (const w of [...listOf(built), ...listOf(add)]) {
@@ -198,7 +294,7 @@ function mergeDesktopRecord({ record = null, built = [], add = [], remove = [] }
   for (const [id, w] of page) {
     if (seen.has(id)) continue;
     seen.add(id);
-    windows.push(w);
+    windows.push(was.has(id) ? carryName(was.get(id), w) : w);
   }
   return { ...base, windows };
 }
@@ -224,6 +320,7 @@ function shrinkVerdict({ prev = [], next = [], evidence = [], alive = () => true
   const rec = recent instanceof Set ? recent : new Set(listOf(recent).map((x) => (x == null ? null : String(x))).filter(Boolean));
   const dropped = [];
   const unexplained = [];
+  const unbuilt = [];
   for (const w of prevList) {
     const id = idOf(w);
     if (!id || nextIds.has(id)) continue;
@@ -231,6 +328,9 @@ function shrinkVerdict({ prev = [], next = [], evidence = [], alive = () => true
     const sid = sessionOf(w);
     // 'unbuilt' is the page's failure, never the workspace's truth: a window whose session is ALIVE stays (unless another
     // entry still shows that session — a duplicate the page settled at once)
+    // UNBUILT IS NOT DROPPED (lane layout-stopped-window): a SESSION window whose session is stopped, unknown or nameless —
+    // the page shows a placeholder for it; only the person's close removes it (a duplicate still leaves; a live one: below)
+    if (ev.has(id) && why.get(id) === 'unbuilt' && isSession(w) && !(sid && (nextSessions.has(sid) || alive(sid)))) { unexplained.push(id); unbuilt.push(id); continue; }
     if (ev.has(id) && !(why.get(id) === 'unbuilt' && sid && !nextSessions.has(sid) && alive(sid))) continue;
     if (ev.has(id)) { unexplained.push(id); live.push(id); continue; }
     if (sid && !alive(sid)) continue; // its session is gone (killed / exited) — the window leaving is its session's end
@@ -240,8 +340,8 @@ function shrinkVerdict({ prev = [], next = [], evidence = [], alive = () => true
   // a base older than its arrival (lane desktop-move verify r1: the moved window, dropped by a client that had missed
   // the broadcast); one of them is enough, the ≥ `min` rule is for the rest
   const arrived = unexplained.filter((id) => rec.has(id));
-  if (unexplained.length >= min || arrived.length || live.length) return { ok: false, reason: 'shrink-without-close', dropped, unexplained, arrived, live };
-  return { ok: true, dropped, unexplained, arrived, live };
+  if (unexplained.length >= min || arrived.length || live.length || unbuilt.length) return { ok: false, reason: 'shrink-without-close', dropped, unexplained, arrived, live, unbuilt };
+  return { ok: true, dropped, unexplained, arrived, live, unbuilt };
 }
 
 /** Per desktop whose window SET differs between two layouts.json documents: [name, before, after] (a desktop only in
@@ -374,4 +474,4 @@ function desktopChanges(prev, next) {
   return out;
 }
 
-module.exports = { mergeDesktopRecord, shrinkVerdict, desktopChanges, windowIds, idOf, captureForViewport, ARRANGEMENT, PHONE_KEEPS, LAYERS, layerOf, PHONE_SHOWS, applyForViewport, arrangementFor, layerGate, sessionOf, IDENTITY, keepIdentity, keepIdentities, foreignStamp, staleVerdict };
+module.exports = { mergeDesktopRecord, shrinkVerdict, desktopChanges, windowIds, idOf, captureForViewport, ARRANGEMENT, PHONE_KEEPS, LAYERS, layerOf, PHONE_SHOWS, applyForViewport, arrangementFor, layerGate, sessionOf, IDENTITY, keepIdentity, keepIdentities, foreignStamp, staleVerdict, isSession, conversationOf, isNameless, namesOf, carryName, keepNames };

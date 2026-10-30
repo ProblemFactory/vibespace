@@ -11571,4 +11571,11 @@ export default {
   "Its error: {error}": "エラー：{error}",
   "Nothing was recorded — it retries at the next start; the server log has the whole line.": "何も記録していません——次回の起動時に再試行します。サーバーログに行全体があります。",
   "Migrations": "データ移行", // lane job-secrets-retire r3: the For-you group of a failed boot migration (src/migration-runner.js)
+  // lane layout-stopped-window: the placeholder tile + one desktop restored alone
+  "Session stopped — click to resume": "セッションは停止しています — クリックで再開",
+  "Session unavailable": "セッションを利用できません",
+  "Press a desktop to restore it alone — your other desktops stay as they are now.": "デスクトップを押すとそれだけを復元します — ほかのデスクトップは今のままです。",
+  "Restore only “{desktop}”": "「{desktop}」だけを復元",
+  "Restore only “{desktop}” as it was then? Your other desktops stay as they are now; the current layout becomes a rollback point too, so this is undoable.": "「{desktop}」だけを当時の状態に復元しますか？ほかのデスクトップは今のままです。現在のレイアウトもロールバックポイントになるので、元に戻せます。",
+  "“{desktop}” restored — reloading…": "「{desktop}」を復元しました — 再読み込み中…",
 };

@@ -18,6 +18,7 @@ const { pidsMatchingCmdline } = require('./cli-identity'); // THE process reader
 const PI = require('./proc-identity'); // the ssh kill compares the meta's recorded birth (vs_same_proc, B-5ee1)
 const { shrinkVerdict, windowIds, layerGate } = require('./lib/desktop-record.js'); // PURE (userW inc-mun7qjmw-iksh): the layout-sync shrink belt + the layer gate (design q-039 P1)
 const { staleVerdict, keepIdentities } = require('./lib/desktop-record.js'); // PURE (lane layout-stale-record-sync): a record never goes backwards; a write never forgets who a window is
+const { keepNames } = require('./lib/desktop-record.js'); // PURE (lane layout-stopped-window): a window that replaced a named one takes its name — never written nameless
 const { beltValue: putbackBelt } = require('./queue-putback.js'); // PURE (lane stop-refills-composer): the server belt of a Stop put-back — a draft set that never saw it keeps it in front
 
 /** The sentence a harness-level verb refusal carries. Every branch says what
@@ -296,6 +297,19 @@ function registerWsHandler(wss, ctx) {
   // the rollback ring names what it saw (lane layout-stale-record-sync): the next point's meta carries the write that made
   // it (`writer`) and the refusals since the last one (`refused`) — routes/persistence.js writeLayouts.note
   const noteToRing = (entry) => { try { writeLayouts.note?.(entry); } catch { } };
+  // THE RING NAMES THE WINDOWS (lane layout-stopped-window — 09:19:35 read «unbuilt: 7» and nobody could tell which seven): a write's
+  // evidence, per reason, as the windows' titles (the record before the write, else after it, else the id; 12 per reason, then «+N»)
+  const ringEvidence = (evidence, before, after) => {
+    const title = (id) => { for (const l of [before, after]) { const w = (Array.isArray(l) ? l : []).find((x) => x && (x.winId || x.id) === id); if (w && w.title) return String(w.title).slice(0, 48); } return String(id); };
+    const out = {};
+    for (const e of Array.isArray(evidence) ? evidence : []) {
+      const k = (e && typeof e === 'object' && typeof e.why === 'string' && e.why) || 'id';
+      const id = e && typeof e === 'object' ? (e.winId || e.id) : e;
+      const l = out[k] || (out[k] = []);
+      if (l.length < 12) l.push(title(id)); else if (typeof l[12] === 'string' && /^\+\d+$/.test(l[12])) l[12] = '+' + (Number(l[12].slice(1)) + 1); else l.push('+1');
+    }
+    return out;
+  };
   const noteArrivals = (desktopId, prevIds, nextIds, ws) => {
     let m = layoutArrivals.get(desktopId); if (!m) { m = new Map(); layoutArrivals.set(desktopId, m); }
     const prev = new Set(prevIds), next = new Set(nextIds), at = Date.now(), by = layoutClientOf(ws);
@@ -1599,12 +1613,16 @@ function registerWsHandler(wss, ctx) {
           if (desktopId && layoutData.desktops?.[desktopId]?.autoSave && data.state && Array.isArray(data.state.windows)) {
             const stored = layoutData.desktops[desktopId].autoSave;
             const v = shrinkVerdict({ prev: stored.windows, next: data.state.windows, evidence: data.evidence, alive: (sid) => activeSessions.has(sid), recent: recentArrivals(desktopId, ws) });
+            // UNBUILT IS NOT DROPPED (lane layout-stopped-window): the session windows a page dropped as 'unbuilt' are NAMED — titles, never a count
+            const unbuiltTitles = (v.unbuilt || []).map((id) => { const w = (stored.windows || []).find((x) => x && (x.winId || x.id) === id); return String(w && w.title ? w.title : id).slice(0, 48); });
+            const unbuiltSaid = unbuiltTitles.length ? `; ${unbuiltTitles.length} stopped / unknown session window(s) dropped as 'unbuilt' — a page shows them as placeholders: ${unbuiltTitles.join(' · ')}` : '';
+            const ringUnbuilt = unbuiltTitles.length ? { unbuilt: unbuiltTitles } : {};
             if (!v.ok) {
               const name = (layoutData.desktopMeta || []).find((d) => d.id === desktopId)?.name || desktopId;
               const arrived = (v.arrived?.length ? `; ${v.arrived.length} of them (${v.arrived.join(', ')}) arrived from another client lately — this record was written from an older base` : '') + (v.live?.length ? `; ${v.live.length} LIVE (the sender could not build them)` : '');
-              console.warn(`[layout-sync] REFUSED a record of desktop "${name}" (${desktopId}): it drops ${v.unexplained.length} window(s) with no close/move/kill (${v.unexplained.join(', ')}) — ${(stored.windows || []).length} → ${data.state.windows.length}${arrived}; the server keeps its record`);
+              console.warn(`[layout-sync] REFUSED a record of desktop "${name}" (${desktopId}): it drops ${v.unexplained.length} window(s) with no close/move/kill (${v.unexplained.join(', ')}) — ${(stored.windows || []).length} → ${data.state.windows.length}${arrived}${unbuiltSaid}; the server keeps its record`);
               try { telemetry?.record?.({ kind: 'event', name: 'layout-sync-refused', detail: `${v.reason} ${v.unexplained.length}/${(stored.windows || []).length}${v.arrived?.length ? ' arrived=' + v.arrived.length : ''}` }); } catch { }
-              noteToRing({ refused: v.reason, desktopId, viewport: data.viewport || null, n: v.unexplained.length, live: v.live?.length || 0 });
+              noteToRing({ refused: v.reason, desktopId, viewport: data.viewport || null, n: v.unexplained.length, live: v.live?.length || 0, ...ringUnbuilt });
               try { ws.send(JSON.stringify({ type: 'layout-sync-refused', desktopId, reason: v.reason, unexplained: v.unexplained, arrived: v.arrived || [], state: stored, sentAt: data.sentAt ?? null })); } catch { }
               break;
             }
@@ -1637,7 +1655,15 @@ function registerWsHandler(wss, ctx) {
           // attach answered names no session (a phone woke and saved within a second: 工作's five windows went nameless and
           // no desktop could build them) — the stored entry's identity stays, IN PLACE (the relay below carries it too)
           const replacedAt = desktopId ? Number(layoutData.desktops?.[desktopId]?.autoSave?.updatedAt) || 0 : 0;
+          const prevWins = desktopId ? layoutData.desktops?.[desktopId]?.autoSave?.windows || [] : []; // the ring names the windows of this write's evidence by title (lane layout-stopped-window)
           if (desktopId && Array.isArray(data.state?.windows) && layoutData.desktops?.[desktopId]?.autoSave) data.state.windows = keepIdentities(layoutData.desktops[desktopId].autoSave.windows, data.state.windows);
+          // A WINDOW NEVER LOSES ITS NAME (lane layout-stopped-window — the owner's 个人, 2026-10-30 09:18:22: a resume-all's NEW windows,
+          // captured before their creates answered, written in place of the seven named ones they replaced): a NEW entry that names no
+          // conversation and no server session takes the name of the entry it replaced (the evidence's `by`, else the one dropped entry
+          // of its name); one that replaced nothing named is left out of THIS write — said in the journal and the ring. PURE keepNames.
+          const named = desktopId && Array.isArray(data.state?.windows) ? keepNames({ prev: layoutData.desktops?.[desktopId]?.autoSave?.windows || [], next: data.state.windows, evidence: data.evidence }) : null;
+          if (named) data.state.windows = named.windows;
+          if (named && (named.carried.length || named.withheld.length)) console.log(`[layout-sync] desktop ${desktopId}: ${named.carried.length} window(s) took the name of the window they replaced${named.withheld.length ? `; ${named.withheld.length} with no name left out of this write (${named.withheld.map((w) => w.title.slice(0, 48)).join(' · ')})` : ''}`);
           if (desktopId) {
             // Per-desktop save
             if (!layoutData.desktops) layoutData.desktops = {};
@@ -1650,7 +1676,7 @@ function registerWsHandler(wss, ctx) {
           }
           const stampNow = desktopId ? layoutData.desktops[desktopId].autoSave.updatedAt : layoutData.autoSave.updatedAt; // the server's stamp: rides the relay and the ack (each page's next `base`)
           if (desktopId) noteLayoutWrite(desktopId, ws, stampNow, replacedAt);
-          noteToRing({ wrote: desktopId || null, viewport, windows: Array.isArray(data.state?.windows) ? data.state.windows.length : null, evidence: (Array.isArray(data.evidence) ? data.evidence : []).reduce((o, e) => { const k = (e && typeof e === 'object' && typeof e.why === 'string' && e.why) || 'id'; o[k] = (o[k] || 0) + 1; return o; }, {}), base: typeof data.base === 'number' ? data.base : null });
+          noteToRing({ wrote: desktopId || null, viewport, windows: Array.isArray(data.state?.windows) ? data.state.windows.length : null, evidence: ringEvidence(data.evidence, prevWins, data.state?.windows), ...(named && (named.carried.length || named.withheld.length) ? { named: { carried: named.carried.length, withheld: named.withheld.map((w) => w.title.slice(0, 48)) } } : {}), base: typeof data.base === 'number' ? data.base : null });
           writeLayouts(layoutData);
           // Broadcast to other clients (sender excluded) — include desktopMeta
           const syncMsg = JSON.stringify({ type: 'layout-sync', seq: ++layoutSyncSeqRef.value, desktopId, state: data.state, updatedAt: stampNow, desktopMeta: layoutData.desktopMeta || [], ...(viewport ? { viewport } : {}) });

@@ -11572,4 +11572,11 @@ export default {
   "Its error: {error}": "它的错误：{error}",
   "Nothing was recorded — it retries at the next start; the server log has the whole line.": "没有记录任何内容——下次启动时会重试；服务器日志里有完整的一行。",
   "Migrations": "数据迁移", // lane job-secrets-retire r3: the For-you group of a failed boot migration (src/migration-runner.js)
+  // lane layout-stopped-window: the placeholder tile + one desktop restored alone
+  "Session stopped — click to resume": "会话已停止 — 点击恢复",
+  "Session unavailable": "会话不可用",
+  "Press a desktop to restore it alone — your other desktops stay as they are now.": "点一个桌面只恢复它——其他桌面保持现在的样子。",
+  "Restore only “{desktop}”": "只恢复「{desktop}」",
+  "Restore only “{desktop}” as it was then? Your other desktops stay as they are now; the current layout becomes a rollback point too, so this is undoable.": "只把「{desktop}」恢复成当时的样子？其他桌面保持现在的样子；当前布局也会成为一个回滚点，所以可以撤销。",
+  "“{desktop}” restored — reloading…": "「{desktop}」已恢复 — 正在刷新…",
 };

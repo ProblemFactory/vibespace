@@ -475,16 +475,20 @@ export function installSetupFlows(App) {
       return;
     }
     body.innerHTML = `
-      <div class="usage-note">${escHtml(t('Each entry is the layout as it was BEFORE a change. Restoring reloads the page; your sessions are not touched.'))}</div>
+      <div class="usage-note">${escHtml(t('Each entry is the layout as it was BEFORE a change. Restoring reloads the page; your sessions are not touched.'))} ${escHtml(t('Press a desktop to restore it alone — your other desktops stay as they are now.'))}</div>
       <div class="lh-list">${entries.map((e) => {
         const per = Object.entries(e.summary || {}).map(([n, c]) => `${escHtml(n)} ${c}`).join(' · ');
+        // ONE PRESS RESTORES ONE DESKTOP (lane layout-stopped-window — the owner's 个人 lost seven windows while 工作 / 研究 had
+        // moved on): each desktop of the point is its own door (its summary key; the legacy top-level record has none)
+        const desks = Object.entries(e.summary || {}).filter(([n]) => n).map(([n, c]) => `<button class="lh-desk" data-id="${escHtml(e.id)}" data-desk="${escHtml(n)}" title="${escHtml(t('Restore only “{desktop}”', { desktop: n }))}">${escHtml(n)} ${escHtml(t('{n} windows', { n: c }))}</button>`).join('');
         // what changed right after this point ("HR 3 → 1") — the row a loss FOLLOWS is the one to restore (userW
         // inc-mun7qjmw-iksh); a point from before the field existed has none
         const change = Array.isArray(e.change) && e.change.length
           ? e.change.map(([n, a, b]) => `${n || t('Desktop')} ${a} → ${b}`).join(' · ') : '';
         return `<div class="lh-row"><div class="lh-main"><b>${escHtml(new Date(e.at).toLocaleString())}</b>
             <div class="lh-sub">${escHtml(t('{n} windows', { n: e.totalWindows || 0 }))}${per ? ' — ' + escHtml('') + per : ''}</div>${change ? `
-            <div class="lh-sub lh-change">${escHtml(t('Then: {changes}', { changes: change }))}</div>` : ''}</div>
+            <div class="lh-sub lh-change">${escHtml(t('Then: {changes}', { changes: change }))}</div>` : ''}${desks ? `
+            <div class="lh-desks">${desks}</div>` : ''}</div>
           <button class="agent-btn lh-restore" data-id="${escHtml(e.id)}">${escHtml(t('Restore'))}</button></div>`;
       }).join('')}</div>`;
     body.querySelectorAll('.lh-restore').forEach((b) => {
@@ -502,6 +506,21 @@ export function installSetupFlows(App) {
         if (!res?.success) { showToast(res?.error || t('Restore failed'), { type: 'error' }); return; }
         close();
         showToast(t('Layout restored — reloading…'));
+        setTimeout(() => location.reload(), 800);
+      };
+    });
+    body.querySelectorAll('.lh-desk').forEach((b) => {
+      b.onclick = async () => {
+        const desk = b.dataset.desk;
+        if (!(await showConfirmDialog({
+          title: t('Restore a previous layout'),
+          message: t('Restore only “{desktop}” as it was then? Your other desktops stay as they are now; the current layout becomes a rollback point too, so this is undoable.', { desktop: desk }),
+          confirmText: t('Restore only “{desktop}”', { desktop: desk }),
+        }))) return;
+        const res = await fetchJson('/api/layout-history/' + encodeURIComponent(b.dataset.id) + '/restore', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ desktop: desk }) }).catch(() => null);
+        if (!res?.success) { showToast(res?.error || t('Restore failed'), { type: 'error' }); return; }
+        close();
+        showToast(t('“{desktop}” restored — reloading…', { desktop: desk }));
         setTimeout(() => location.reload(), 800);
       };
     });

@@ -7,7 +7,8 @@ import { desktopDoors, doorItems } from '../desktop-switch.js'; // lane desktop-
 import { UI_ICONS } from './icons.js'; // a compact-list row's ⋯ (lane desktop-small r2 ①)
 import { menuPlace } from './menu-place.js'; // PURE: THE ONE placement — the compact list at its open and after every patch (lane desktop-doors-table r4)
 import { stageRefusalSentence } from './stage-rules.js'; // inc-muly2izg-cks3: the Stage's move refusal, in words (PURE)
-import { mergeDesktopRecord, windowIds, captureForViewport, PHONE_KEEPS } from './desktop-record.js'; // userW inc-mun7qjmw-iksh: a held record is a VIEW — every write merges (PURE)
+import { mergeDesktopRecord, windowIds, captureForViewport, PHONE_KEEPS } from './desktop-record.js';
+import { isNameless, isSession } from './desktop-record.js'; // PURE (lane layout-stopped-window): a window never written nameless; a session window never 'unbuilt' // userW inc-mun7qjmw-iksh: a held record is a VIEW — every write merges (PURE)
 import { deferKeysOf } from './layout-model.js'; // B-4767: a desktop's deferred records wait in one slot per writer class (PURE)
 import { noteStamp } from './layout-model.js'; // lane layout-stale-record-sync: the newest server stamp seen per desktop — each write's `base` (PURE)
 
@@ -276,7 +277,16 @@ export class DesktopManager {
     // PHONE_KEEPS) — are the held record's, verbatim (PURE captureForViewport; the server's layerGate refuses anything else)
     const viewport = this.app.isMobile ? 'phone' : 'desktop';
     const built = this.captureBuilt(desktopId, held);
-    const rec = mergeDesktopRecord({ record: held, built, remove: [...unbuilt, ...elsewhere] });
+    const merged = mergeDesktopRecord({ record: held, built, remove: [...unbuilt, ...elsewhere] });
+    // A WINDOW NEVER LOSES ITS NAME (lane layout-stopped-window): a session window this page built that names no conversation and
+    // no server session yet (a new session whose create has not answered) and that the last record on the wire did not list is
+    // left out of THIS write — said in the evidence ('nameless'); the first write after its name arrives carries it (a desktop
+    // not on show stays owed). One the wire listed nameless is the record's own (a placeholder shows it) and stays.
+    const wire = this._wireIds.get(desktopId);
+    const nameless = windowIds((merged.windows || []).filter((w) => isNameless(w) && !(wire && wire.has(String(w.winId || w.id)))));
+    for (const id of nameless) this._noteDeparted(id, 'nameless');
+    if (nameless.length && desktopId !== this._activeId) this._dirtyDesks.add(desktopId);
+    const rec = nameless.length ? mergeDesktopRecord({ record: merged, remove: nameless }) : merged;
     const { grid, ...chrome } = lm.captureChrome();
     if (viewport === 'phone') for (const k of PHONE_KEEPS) delete chrome[k];
     Object.assign(rec, chrome);
@@ -340,16 +350,16 @@ export class DesktopManager {
     const now = Date.now(), out = [];
     for (const [id, e] of this._departed) {
       if (now - e.at > DEPARTED_TTL_MS) { this._departed.delete(id); continue; }
-      out.push({ id, why: e.why });
+      out.push(e.by ? { id, why: e.why, by: e.by } : { id, why: e.why }); // `by`: the window that replaced it (lane layout-stopped-window)
     }
     return out;
   }
 
-  _noteDeparted(winId, why) {
+  _noteDeparted(winId, why, by = null) {
     if (winId == null) return;
     const id = String(winId);
     this._departed.delete(id);
-    this._departed.set(id, { why, at: Date.now() });
+    this._departed.set(id, by != null ? { why, at: Date.now(), by: String(by) } : { why, at: Date.now() });
     while (this._departed.size > DEPARTED_CAP) this._departed.delete(this._departed.keys().next().value);
   }
 
@@ -365,7 +375,14 @@ export class DesktopManager {
       const a = this._buildAttempts.get(id);
       if (!a) continue;
       if (this.app.wm.windows.has(id)) { this._buildAttempts.delete(id); continue; }
-      if (a.desk === desktopId && now - a.at > BUILD_GRACE_MS) { out.push(id); this._noteDeparted(id, 'unbuilt'); }
+      if (a.desk === desktopId && now - a.at > BUILD_GRACE_MS) {
+        // UNBUILT IS NOT DROPPED (lane layout-stopped-window): a SESSION window stays in the record (the restore shows it as a
+        // placeholder); only a duplicate of a session this page already shows live is settled (as before)
+        const entry = (held.windows || []).find((w) => String(w && (w.winId || w.id)) === id);
+        const dup = entry?.openSpec?.action === 'attachSession' && entry.openSpec.serverId && [...this.app.wm.windows.values()].some((w) => w._openSpec?.serverId === entry.openSpec.serverId);
+        if (isSession(entry) && !dup) { this._buildAttempts.delete(id); continue; } // kept as the record holds it: the next build of this desktop (a visit, a reload) shows it
+        out.push(id); this._noteDeparted(id, 'unbuilt');
+      }
     }
     return out;
   }
@@ -405,7 +422,7 @@ export class DesktopManager {
   _replayMissing(desktopId, state) {
     let n = 0;
     const now = Date.now();
-    const noSpec = [], building = [];
+    const noSpec = [], building = [], bySession = [];
     // a webui SESSION already open on this page under ANOTHER window id: attachSession's "already open in a live
     // window" shortcut (_focusExistingSession, keyed on the server session id) focuses that window and builds
     // nothing. The key is the session's `serverId`, never the conversation id (verify r2): a fork's window carries
@@ -415,6 +432,7 @@ export class DesktopManager {
     for (const ws of state?.windows || []) {
       const winId = ws.winId || ws.id;
       if (!winId || this.app.wm.windows.has(winId)) continue;
+      if (!ws.openSpec && isSession(ws)) { bySession.push(ws); continue; } // lane layout-stopped-window: built by its identity — attached, read-only or a placeholder, never 'unbuilt'
       if (!ws.openSpec) { noSpec.push(winId); continue; } // nothing to build it from: settled at once (dropped as before, with evidence)
       // …nor can a second window of a session this page already shows live: settled at once too (verify r1: it
       // lingered as a build attempt for the whole 20 s grace — a record entry nobody could build, which the server
@@ -439,6 +457,16 @@ export class DesktopManager {
       }, 500);
     }
     this._noteAttempts(desktopId, noSpec, { at: 0 });
+    if (bySession.length) {
+      const sids = windowIds(bySession);
+      this._noteAttempts(desktopId, sids, { at: now });
+      building.push(...sids); n += sids.length;
+      // the restore's session door (layout.js restoreState: alive ⇒ attached, stopped ⇒ read-only, else a placeholder); its
+      // windows are this desktop's whatever is on show when its reads answer
+      Promise.resolve(this.app.layoutManager?.restoreState?.({ windows: bySession })).then(() => {
+        for (const id of sids) { const w = this.app.wm.windows.get(id); if (w && w._desktopId !== desktopId) { w._desktopId = desktopId; if (desktopId !== this._activeId) this._hideWin(w); } }
+      }).catch(() => {});
+    }
     // the record's tab groups (lane split-restore-hidden, userW inc-muundq37-cjay): a first visit after a reload built
     // every member as a plain window and the next save wrote the split away — each chain waits for its last member.
     // Only a chain naming a window THIS replay builds (int214: this runs on every switch — a chain whose members all stand
@@ -686,11 +714,12 @@ export class DesktopManager {
     // born on the phone: no box, on top of both) — never the phone's own z / full-screen box (phone-arrangement-verify F3)
     const src = (from && this._savedStates.get(from)) || { windows: [] }, dst = this._savedStates.get(desktopId) || { windows: [] };
     const moved = this.captureBuilt(desktopId, { windows: [...(src.windows || []), ...(dst.windows || [])] }, ids);
-    this._setRecord(desktopId, mergeDesktopRecord({ record: this._savedStates.get(desktopId) || { windows: [] }, add: moved, remove: replaces }));
+    const replaced = ids.length === 1 ? replaces.map((r) => [ids[0], r]) : []; // lane layout-stopped-window: the resumed window takes the replaced entry's name
+    this._setRecord(desktopId, mergeDesktopRecord({ record: this._savedStates.get(desktopId) || { windows: [] }, add: moved, remove: replaces, replaced }));
     if (from && from !== desktopId && this._savedStates.has(from)) this._setRecord(from, mergeDesktopRecord({ record: this._savedStates.get(from), remove: ids }));
     for (const d of [desktopId, from]) if (d && d !== this._activeId && d !== '__stage__') this._dirtyDesks.add(d);
     for (const id of ids) { this._buildAttempts.delete(String(id)); this._noteDeparted(id, 'moved'); }
-    for (const id of replaces) { this._buildAttempts.delete(String(id)); this._noteDeparted(id, 'replaced'); }
+    for (const id of replaces) { this._buildAttempts.delete(String(id)); this._noteDeparted(id, 'replaced', ids.length === 1 ? ids[0] : null); }
   }
 
   // ── Remote sync ──
