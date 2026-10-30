@@ -384,12 +384,17 @@ On the custom kernel the password manager is the owner's vault (lane browser-log
 shows, and `login` has the kernel fill it with a login the vault keeps — you never see the password or the two-step code, so
 never ask the owner for one.
 
+On standard Chrome `login` is WITHDRAWN in 2.369.364: it answers `login_fill_withdrawn` before anything is read from the
+vault, and nothing is typed (a page could claim another site's origin; a fallback put the secret in a script). Ask the
+owner through the vault (`vibespace-vault request "<what you need>" --purpose "<why>"`) or ask a person to take over
+(`vibespace-browser ask-human "<what you need>"`) — never retry `login` there; it returns when its fix is accepted.
+
 * `vibespace-browser login [<origin>] [--user <name>] [--submit]` — fill the login form on your tab (no origin = the form on
   your tab; `--user` when the vault keeps several logins of that site; `--submit` submits it too, else press its button).
-  The answer names what was filled and a receipt. Refusals by name: `login_no_form` (open the sign-in page first — standard
-  Chrome reports no forms), `login_phishing` (a login is filled only on its own site: exact origin and port, https, never a
-  frame of another site), `login_not_granted` (the owner grants it in the Vault window — tell them which site),
-  `login_no_entry`, `login_ambiguous`, `vault_locked` (the owner already knows — do not ask them to unlock).
+  The answer names what was filled and a receipt. Refusals by name: `login_no_form` (open the sign-in page first),
+  `login_fill_withdrawn` (standard Chrome — above), `login_phishing` (a login is filled only on its own site: exact origin
+  and port, https, never a frame of another site), `login_not_granted` (the owner grants it in the Vault window — tell
+  them which site), `login_no_entry`, `login_ambiguous`, `vault_locked` (the owner already knows — do not ask them to unlock).
 * `vibespace-browser login [<origin>] --new-user <name> --generate [--submit]` — register an account THROUGH the vault: the
   vault makes a strong password that fits the site's rules (`password_rules_unsupported` when none can), the kernel fills it,
   and when the page takes the form the login is saved for the owner automatically (they get one notice). Use this instead of
