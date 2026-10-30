@@ -109,6 +109,9 @@ exactly the standing permission they would otherwise configure by hand on the en
   …: `command_not_pinnable` — «write the code to a file and run that»), nor an option the grammar does not know, code on
   stdin, a file that is not that interpreter's script, `bun` / `pwsh` / `cmd`, or a program outside the shell and
   interpreter tables (it may run code its arguments name — run a script through its interpreter, or ask with `--host`).
+  A word with a URI scheme is a module the interpreter resolves itself, never a file (`deno run npm:pkg/main.ts`,
+  `jsr:`, `file:`, `data:`: `why: 'specifier'`); a shell script is named by its path (`bash ./sync.sh`, not `bash sync.sh`
+  — a bare name may be looked up on PATH: `why: 'path-search'`).
   A known tool asks with `--host` (`command_has_hosts`). **If you change the script (or the program, or its options), it
   is a new command** — its next run shows the user a card again.
 
@@ -120,7 +123,8 @@ scope — is then quiet for 10 minutes: `request_quiet`; ask once after it, with
 entry's own row: it has no end and a lock does not end it (a locked vault runs nothing; once unlocked, your runs go on with
 no card); they see it on the row — «agent 申请 · 11:46» — and ✕ takes it back. The same scope is asked once while open
 (`request_pending`); one you already hold answers that you hold it (`already: 'timed'` + its end when what you hold is
-time-limited — the user's card says so if a standing grant would replace it). `list` and `uses` show it «standing · <scope> · since
+time-limited). A standing grant REPLACES a time-limited (or ended) grant you hold on that entry: it holds only what you
+asked for now, and the user's card says what it replaces. `list` and `uses` show it «standing · <scope> · since
 <when>». A run outside the scope (another host, another script, another program) still shows its card — and that card's
 **«Always (this command)»** (offered where VibeSpace cannot read the destination) writes the same kind of grant from the
 user's side.
@@ -182,7 +186,8 @@ for the entry. The answer then says `by: grant` / `by: policy`. Another host, or
   transforms, packs, copies or traces what it reads (`cat`, `echo`, `env`, `base64`, `xxd`, `tar`, `openssl`, `cp`, `tee`,
   `strace` …: `tool_prints_secrets`); a wrapper (`sudo`, `xargs`, `timeout`, `nohup` …: `tool_wraps_another`); VibeSpace's
   own CLIs; env names that change what the tool loads or obeys (`LD_PRELOAD`, `NODE_OPTIONS`, `GIT_SSH_COMMAND`, `PATH`, a
-  proxy …: `env_refused`); a value under 8 bytes (`entry_too_short_to_mask`).
+  proxy, an interpreter's own startup-code variable — `LUA_INIT`, `PHPRC`, `DOTNET_STARTUP_HOOKS`, `R_PROFILE_USER`,
+  `JULIA_DEPOT_PATH`, `PYTHONWARNINGS` …: `env_refused`); a value under 8 bytes (`entry_too_short_to_mask`).
 - **It runs on this instance**, in your folder (the project, the temp folder or ~/Downloads), 120 s by default
   (`--timeout`, ≤ 600 s), output ≤ 2 MiB; the exit code is the command's. When it ends, anything it left running ends
   too. A remote conversation and `--on` are not here yet (`device_road_later`).

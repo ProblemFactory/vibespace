@@ -32,9 +32,11 @@
  *   covers only itself).
  * THE ID `grantIdOf(resource, principalKey)` = `vg-` + 8 hex (FNV-1a over the two) — what the run line, the use line, the
  * card and the window name; the same member of the same entry keeps its id across widenings.
- * THE PLANS (the writer applies them): `withMember` (add or WIDEN one member: hosts ∪, the later end, out of `except`),
+ * THE PLANS (the writer applies them): `withMember` (add or WIDEN one member: hosts ∪, the later end, out of `except`;
+ * lane vault-standing-request r3: never INTO an expired member, and a standing write REPLACES a member that has an end),
  * `withoutMember` (revoke one), `alwaysCarry` (data/vault-run.json's «always» rows, the shape keys of 2.369.359 and
- * before, as members — the hosts read off the shape key; a row with no host cannot be carried and is counted).
+ * before, as members — the hosts read off the shape key; a row with no host cannot be carried and is counted),
+ * `withWildTools` (r3: a carried wildcard with no tool gets the CLI the tool table names for it, else stays LEGACY).
  * Gate: scripts/test-vault-use-grants.mjs (fast — every verdict code, hosts + expiry + Task Group membership, the plans,
  * the carry, patched-copy controls). Imports only the PURE grant model (scripts/test-architecture.mjs PURE set; §97 reader).
  */
@@ -133,7 +135,7 @@ const rowLists = (row) => { const p = row ? GM.publicRow(row) : { to: [], except
  *  lane vault-standing-request: `commands` (command tokens) widen the member the same way (∪, ≤ GM.COMMANDS_MAX —
  *  `too_many_commands`); a member gets hosts, commands or both (neither ⇒ `hosts_required`; a bad token ⇒
  *  `command_unreadable`). `source` + `at` say who wrote it — set when the member is added or widened. */
-function withMember(row, principal, { hosts = [], until = null, tool = null, commands = null, source = null, at = null } = {}) {
+function withMember(row, principal, { hosts = [], until = null, tool = null, commands = null, source = null, at = null, now = 0, standing = false } = {}) {
   const cur = rowLists(row);
   if (!cur) return { ok: false, code: 'unknown_shape' };
   const b = GM.bareOf(principal), key = b && GM.principalKey(b);
@@ -151,7 +153,16 @@ function withMember(row, principal, { hosts = [], until = null, tool = null, com
   const i = cur.to.findIndex((e) => GM.principalKey(e) === key);
   const to = cur.to.slice();
   let widened = false;
-  if (i >= 0) {
+  // r3 (MAJOR 2 — the acceptance: an EXPIRED 8-hour member on old.example came back PERMANENT, its hosts included, after a
+  // standing Allow merged into it): a write never revives or outlives a member's own end —
+  //   · an EXPIRED member (its end ≤ `now`) is never merged by ANY write: the write REPLACES it (its scope stays ended);
+  //   · a STANDING write (`standing`, no end: an agent's standing request, «Always (this command)») REPLACES a member that has an
+  //     end, live or expired — the new member holds ONLY the asked scope (the card said so: the door's endedOf).
+  //   `replaced` names what went (its hosts, commands, end, whether it had expired) for the card's words and the audit line.
+  const wasEnd0 = i >= 0 && Number(cur.to[i].until) > 0 ? Number(cur.to[i].until) : null;
+  const gone = wasEnd0 != null && Number(now) > 0 && wasEnd0 <= Number(now);
+  const replaced = wasEnd0 != null && (gone || (standing && end == null)) ? { hosts: (cur.to[i].hosts || []).slice(), commands: Array.isArray(cur.to[i].commands) ? cur.to[i].commands.slice() : [], until: wasEnd0, expired: gone } : null;
+  if (i >= 0 && !replaced) {
     const was = to[i], merged = [...(was.hosts || [])];
     // round 4 (item 3): the tool is PER HOST. Carry the member's existing per-host scopes forward (migrating a legacy single
     // `tool` onto its wildcard rows), then scope ONLY the hosts THIS «Always» adds — an existing row's tool is never rewritten.
@@ -178,9 +189,9 @@ function withMember(row, principal, { hosts = [], until = null, tool = null, com
     const toolFor = {};
     if (tl) for (const h of add) if (String(h).startsWith('*.')) toolFor[h] = tl;   // only a WILDCARD carries a tool; a plain host is tool-agnostic
     if (Object.keys(toolFor).length) e.toolFor = toolFor;
-    to.push(stampOf(e));
+    if (i >= 0) { to[i] = stampOf(e); widened = true; } else to.push(stampOf(e));   // r3: a replaced member keeps its place (its id is the principal's)
   }
-  return { ok: true, to, except: cur.except.filter((x) => GM.principalKey(x) !== key), widened, added: i < 0 };
+  return { ok: true, to, except: cur.except.filter((x) => GM.principalKey(x) !== key), widened, added: i < 0, ...(replaced ? { replaced } : {}) };
 }
 /** Revoke ONE member (`principalKey`) — its exceptions stay with the row. → { ok, to, except, removed } | unknown_shape. */
 function withoutMember(row, principalKey) {
@@ -189,11 +200,34 @@ function withoutMember(row, principalKey) {
   const to = cur.to.filter((e) => GM.principalKey(e) !== String(principalKey || ''));
   return { ok: true, to, except: to.length ? cur.except : [], removed: to.length !== cur.to.length };
 }
+/** r3 (MAJOR 1 — the acceptance: the 2.369.363/.364 carry wrote legacy aws «always» rows as `*.amazonaws.com` members with NO
+ *  tool, and r2's row rules then refused every OTHER conversation's write on that entry): A LEGACY WILDCARD IS A MIGRATION
+ *  FACT. Each member's wildcard host with no tool gets the CLI the tool table names for it (`toolOfWild(h)` — aws for
+ *  `*.amazonaws.com`: the only road a wildcard ever entered a shape); one the table cannot name stays as it is, a LEGACY
+ *  wildcard (any tool) — the Vault row names it (publicGrants `legacy`), the owner is told once. → { ok, to, except, healed:
+ *  [{principal, host, tool}], legacy: [{principal, host}] } | unknown_shape. */
+function withWildTools(row, toolOfWild) {
+  const cur = rowLists(row);
+  if (!cur) return { ok: false, code: 'unknown_shape' };
+  const healed = [], legacy = [];
+  const to = cur.to.map((e) => {
+    const add = {};
+    for (const h of e.hosts || []) {
+      if (!String(h).startsWith('*.') || toolOfHost(e, h)) continue;
+      const t = typeof toolOfWild === 'function' ? toolOfWild(h) : null;
+      if (t) { add[h] = String(t).toLowerCase(); healed.push({ principal: GM.principalKey(e), host: h, tool: add[h] }); } else legacy.push({ principal: GM.principalKey(e), host: h });
+    }
+    return Object.keys(add).length ? { ...e, toolFor: { ...(e.toolFor || {}), ...add } } : e;
+  });
+  return { ok: true, to, except: cur.except, healed, legacy };
+}
+/** A member's wildcard hosts that carry NO tool (a legacy carried member — any tool): what its chip names. */
+const legacyWildOf = (e) => (e && Array.isArray(e.hosts) ? e.hosts.filter((h) => String(h).startsWith('*.') && !toolOfHost(e, h)) : []);
 /** THE CARRY of data/vault-run.json's «always» rows (each `{conv, key: <shape key>, until, entries}` — a command SHAPE a
  *  conversation was let run without asking) into members: per entry of the row, the conversation × the shape key's HOSTS
  *  (src/vault-run.js shapeKeyOf: `<v>:[tool, sub, flags, args, hosts, …]`) × the row's end. An expired row, or one whose
  *  shape names no host, is not carried (counted). → { members: [{resource, principal, hosts, until}], expired, hostless }. */
-function alwaysCarry(always, { now = 0, resourceOf = (id) => id } = {}) {
+function alwaysCarry(always, { now = 0, resourceOf = (id) => id, toolOfWild = null } = {}) {
   const members = [];
   let expired = 0, hostless = 0;
   for (const a of Array.isArray(always) ? always : []) {
@@ -206,7 +240,8 @@ function alwaysCarry(always, { now = 0, resourceOf = (id) => id } = {}) {
     if (!principal) continue;
     for (const id of Array.isArray(a.entries) ? a.entries : []) {
       const resource = resourceOf(String(id));
-      if (resource && GM.resourceShapeOk(DOOR, resource)) members.push({ resource, principal, hosts, until: a.until == null ? null : Number(a.until), ...(tool && hosts.some((h) => String(h).startsWith('*.')) ? { tool } : {}) });
+      const wild = hosts.filter((h) => String(h).startsWith('*.')), wt = tool || (wild.length && typeof toolOfWild === 'function' ? toolOfWild(wild[0]) : null);   // r3: the shape key's tool, else the one the tool table names for its wildcard
+      if (resource && GM.resourceShapeOk(DOOR, resource)) members.push({ resource, principal, hosts, until: a.until == null ? null : Number(a.until), ...(wild.length ? (wt ? { tool: wt } : { legacy: true }) : {}) });   // r3 (MAJOR 1): a wildcard whose CLI nobody can name is carried as a LEGACY member (named on its row), never dropped
     }
   }
   return { members, expired, hostless };
@@ -219,7 +254,7 @@ function publicGrants(row, { now = 0 } = {}) {
   if (!p) return { to: [], except: [] };
   if (p.unknown) return { unknown: true, why: p.why, to: [], except: [] };
   return {
-    to: (p.to || []).map((e) => ({ ...e, id: grantIdOf(p.resource, GM.principalKey(e)), principal: GM.principalKey(e), hosts: (e.hosts || []).slice(), commands: Array.isArray(e.commands) ? e.commands.slice() : [], source: e.source || null, at: Number(e.at) > 0 ? Number(e.at) : null, tool: e.tool || null, toolFor: e.toolFor || null, until: Number(e.until) > 0 ? Number(e.until) : null, expired: !live(e, now) })),
+    to: (p.to || []).map((e) => ({ ...e, id: grantIdOf(p.resource, GM.principalKey(e)), principal: GM.principalKey(e), hosts: (e.hosts || []).slice(), commands: Array.isArray(e.commands) ? e.commands.slice() : [], source: e.source || null, at: Number(e.at) > 0 ? Number(e.at) : null, tool: e.tool || null, toolFor: e.toolFor || null, legacy: legacyWildOf(e), until: Number(e.until) > 0 ? Number(e.until) : null, expired: !live(e, now) })),   // r3: `legacy` — its wildcard hosts with no tool (any tool)
     except: p.except || [],
   };
 }
@@ -244,4 +279,4 @@ function standingLines(verdicts, { always = false } = {}) {
 const baseOf = (p) => String(p == null ? '' : p).replace(/\/+$/, '').split('/').pop();
 const commandWords = (c) => (c && c.program ? [baseOf(c.program), ...(Array.isArray(c.pre) ? c.pre : []), c.arg == null ? '' : String(c.arg)[0] === '/' ? baseOf(c.arg) : String(c.arg)].filter(Boolean).join(' ') : '');   // r2: + the options it pins before the script
 
-module.exports = { DOOR, ENTRY_HOSTS, ID_RE, CODES, SOURCES, commandWords, grantIdOf, hostCovers, runHostsOf, effectiveHosts, missingHosts, useVerdict, holds, withMember, withoutMember, alwaysCarry, publicGrants, standingLines };
+module.exports = { DOOR, ENTRY_HOSTS, ID_RE, CODES, SOURCES, commandWords, grantIdOf, hostCovers, toolOfHost, legacyWildOf, runHostsOf, effectiveHosts, missingHosts, useVerdict, holds, withMember, withoutMember, withWildTools, alwaysCarry, publicGrants, standingLines };

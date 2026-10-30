@@ -15,6 +15,9 @@
 //   ⑤ THE PHONE (390 px): a second standing card and the Vault row at phone width
 //   ⑥ (r2, MAJOR 3) THE AGENT'S OWN ENTRY: «总是（这条命令）» on a run with the conversation's MINTED entry ⇒ its Vault row draws
 //      the member (chip + ✕, no «谁可以用…»); ✕ takes it back
+//   ⑦ (r3, MAJOR 1) A LEGACY WILDCARD: the 2.369.363/.364 carry's members (a wildcard host, NO tool — written into the hub's data/
+//      under its own vault mark while it is stopped) ⇒ after the restart's unlock the aws one names its tool «（经由 aws）», the one
+//      no tool row names is marked «（旧版通配：任何工具）» on its chip, and ONE For-you notice tells the owner (desktop + phone)
 //   r2 (主开发's visual read): the standing card = label rows (密钥 = the NAME, 用途, 命令 / 主机, 运行, 期限 …) + ONE 技术细节 fold —
 //      the vault:// reference only there, as code, never a link (desktop and phone)
 //   --shots <dir> keeps vsr-*.png. RED CONTROL: this suite over the base tree (4ef7e9494) — ② the request files a PLAIN card
@@ -255,6 +258,52 @@ try {
   if (oc2) await A.api('POST', `/api/vault/run/asks/${oc2.action.askId}`, { answer: 'deny' });
   await ownP2;
   check('its ✕ takes it back: the chip goes, and the next run of it draws its card again', gone === true && !!oc2, { gone, card: !!oc2 });
+
+  console.log('⑦ (r3, MAJOR 1) A LEGACY WILDCARD — carried from an older version with no tool: named on its row, the owner told once');
+  await stopServer();
+  {   // the hub is stopped: write what the shipped carry wrote — its own vault's mark over the writer's canon (a fresh entry: generation 0)
+    const VE = require(path.join(wt, 'src/server/vault-engine.js')), GS = require(path.join(wt, 'src/server/grants-store.js'));
+    const dataDir = path.join(wt, 'data');
+    const hv = VE.create({ dataDir, log: { log() {}, warn() {} }, idleTimer: false, register: false, bcast: () => {} });
+    await hv.unlock(SECOND);
+    const lname = 'secret:' + crypto.randomBytes(5).toString('hex');
+    hv.secretPut(lname, ['cloud', 'key', crypto.randomBytes(6).toString('hex')].join('-'), { prov: 'owner', label: 'Cloud deploy key', kind: 'api-key', hosts: [] });
+    const lid = `secrets:${lname}#secret`;
+    const mac = (key, name, hosts) => hv.macOf('vault-use', JSON.stringify([lid, `conversation:${key}`, hosts.slice().sort(), null, null, name, [], 0]));
+    const w = GS.create({ dataDir }).set('vault-use', lid, { to: [{ kind: 'conversation', key: 'cid-older-1', name: 'Deployer', hosts: ['*.amazonaws.com'], mac: mac('cid-older-1', 'Deployer', ['*.amazonaws.com']) }, { kind: 'conversation', key: 'cid-older-2', name: 'Publisher', hosts: ['*.legacy.example'], mac: mac('cid-older-2', 'Publisher', ['*.legacy.example']) }], except: [] }, 'migration');
+    check('(the setup) two members as the 2.369.363/.364 carry stored them — a wildcard host, no tool', !!(w && w.ok), w);
+    globalThis.__LID = lid;
+    hv.lock('test');
+  }
+  startServer();
+  check('the hub boots again', await ready());
+  await A.evalJs(`fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: ${JSON.stringify(SIGN_IN)} }) }).then((r) => r.status)`);
+  await A.cdp('Page.navigate', { url: URL });
+  await A.until(`!!(window.app && app.replayOpenSpec)`, { timeout: 30000 });
+  await A.until(`!document.getElementById('loading-screen')`, { timeout: 30000 });
+  const ul = await A.api('POST', '/api/vault/unlock', { password: SECOND });
+  const page4 = await reveal();
+  const on = await A.api('POST', '/api/vault/runnable', { id: globalThis.__LID, on: true }, { 'X-Vault-Page': page4 || '' });
+  check('unlocked; the entry switched on (its chips are live, not paused)', ul.status === 200 && on.status === 200 && on.json.ok, { ul: ul.json, on: on.json });
+  const LEG_ROW = LIST_ROW('Cloud deploy key');
+  const legacyRow = async () => { await A.evalJs(`app.replayOpenSpec({ action: 'openVault' })`); return A.until(`(() => { const r = ${LEG_ROW}; const cs = r ? [...r.querySelectorAll('.vw-use-chip')] : []; if (cs.length < 2) return null; r.scrollIntoView({ block: 'center' }); return cs.map((c) => ({ text: c.textContent, legacy: c.classList.contains('vw-use-legacy'), title: c.title, x: !!c.querySelector('.vw-use-x') })); })()`, { timeout: 15000 }); };
+  const chips = await legacyRow();
+  const aws = chips && chips.find((c) => /^Deployer/.test(c.text)), old = chips && chips.find((c) => /^Publisher/.test(c.text));
+  check('the aws member now names its tool «（经由 aws）» (the unlock\'s wildcard carry); the one no tool row names says «（旧版通配：任何工具）» on a marked chip, its title says how to set the tool, its ✕ is there', !!(aws && /（经由 aws）/.test(aws.text) && !aws.legacy && old && /\*\.legacy\.example 下的每个主机（旧版通配：任何工具）/.test(old.text) && old.legacy && /ANY program|任何程序/.test(old.title) && old.x), chips);
+  const notes = ((await todo()).open || []).filter((i) => /An older «Always» lets any program reach a wildcard host/.test(i.text));
+  check('ONE For-you notice tells the owner — it names *.legacy.example and the entry', notes.length === 1 && /\*\.legacy\.example \(Cloud deploy key\)/.test(notes[0].detail), notes.map((i) => i.detail));
+  await sleep(300);
+  await A.shot('vsr-8-legacy-chip-desktop.png');
+  await A.cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
+  await A.cdp('Page.navigate', { url: URL });
+  await A.until(`!!(window.app && app.replayOpenSpec)`, { timeout: 30000 });
+  await A.until(`!document.getElementById('loading-screen')`, { timeout: 30000 });
+  if (await A.evalJs(`!!document.getElementById('vault-unlock-dialog')`)) { await A.api('POST', '/api/vault/unlock', { password: SECOND }); await sleep(300); }
+  const pchips = await legacyRow();
+  check('the phone (390 px) draws the same marked chip', !!(pchips && pchips.some((c) => c.legacy && /旧版通配/.test(c.text))), pchips);
+  await sleep(300);
+  await A.shot('vsr-9-legacy-chip-phone.png');
+  await A.cdp('Emulation.clearDeviceMetricsOverride', {});
   await A.evalJs(`localStorage.setItem('vibespace.lang', 'auto'); true`);
 } catch (e) {
   check('the run did not throw', false, e && e.stack);

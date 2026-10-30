@@ -26,6 +26,14 @@
  *   ⑩ (MINOR 5) a closed entry's standing card says the Allow turns its switch on; ⑪ (MINOR 6) a Deny quiets the
  *     (conversation, entry) pair for every ask kind and scope; ⑫ (below the cut) `already: 'timed'` + its end; `uses`
  *     carries the STORED grant; ⑬ (VISUAL) the standing card is label rows + ONE fold, a vault reference never a link.
+ * ROUND 3 (the r2 acceptance's three majors + the env door it could not verify — reproduced) — each RED on 99ecf78e4 by name:
+ *   ⑭ (MAJOR 1, legacy-wild / legacy-wild-e2e) a legacy wildcard (carried with no tool) is a MIGRATION fact: the rules judge
+ *     THIS write; the unlock carry gives it the CLI the tool table names; one nobody can name is named on its row + told once;
+ *   ⑮ (MAJOR 2, expired-revived) a standing write never widens: it REPLACES a member with an end (the card says so, only then);
+ *     an expired member is never merged by any write;
+ *   ⑯ (MAJOR 3, pin-doors) a script word is pinned only where the interpreter reads that file — a URI scheme never; a POSIX
+ *     shell only `./job.sh`; a census over every row;
+ *   ⑰ (item 4, pin-doors C — reproduced) every pinned row names its startup-code env doors and every one is refused.
  * Each leg is guarded (a base tree without the feature fails BY NAME, never by a crash) — the RED control runs this file
  * against the base's src (report.md).
  */
@@ -59,7 +67,7 @@ fs.rmSync(ROOT, { recursive: true, force: true }); fs.mkdirSync(ROOT, { recursiv
 const PW = 'second password for the standing-request suite';
 const BIN = path.join(ROOT, 'bin');
 fs.mkdirSync(BIN, { recursive: true });
-for (const t of ['curl', 'wget', 'python3', 'sh', 'deno', 'mytool']) fs.writeFileSync(path.join(BIN, t), `#!${process.execPath}\nprocess.stdout.write('${t} ran ' + (process.env.T ? 'with T' : 'without T') + ' for ' + process.argv.slice(2).join(' ') + '\\n');\n`, { mode: 0o555 });
+for (const t of ['curl', 'wget', 'python3', 'sh', 'bash', 'deno', 'lua', 'mytool']) fs.writeFileSync(path.join(BIN, t), `#!${process.execPath}\nprocess.stdout.write('${t} ran ' + (process.env.T ? 'with T' : 'without T') + ' for ' + process.argv.slice(2).join(' ') + '\\n');\n`, { mode: 0o555 });
 fs.chmodSync(BIN, 0o555);   // read-only, declared root-owned below: programWritable is false (psha null)
 process.on('exit', () => { try { fs.chmodSync(BIN, 0o755); fs.rmSync(ROOT, { recursive: true, force: true }); } catch { } });
 const VALUE = ['tts', 'api', 'key', crypto.randomBytes(8).toString('hex')].join('-');   // built at runtime (never a literal secret)
@@ -106,6 +114,10 @@ async function runAnswered(w, args, { answer = null, reauthed = false, caller = 
 const memberOf = (w, cid = CID) => { const [row] = w.grants.rowsFor('vault-use', w.e.id); return row ? (row.to || []).find((m) => m.key === cid) || null : null; };
 const useLines = (w) => { try { return fs.readFileSync(path.join(w.dataDir, 'vault-audit.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((x) => x.event === 'vault-use'); } catch { return []; } };
 const sha = (p) => crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');
+/** r3: plant a row of LEGACY members exactly as the 2.369.363/.364 carry stored them — a wildcard host, NO tool, no source —
+ *  under the vault's own mark over the writer's canon at generation 0 (a fresh row: no generation yet). The same member the
+ *  reviewer's probe wrote with the base's own code; it verifies on every tree since (the canon appends only when present). */
+const plantLegacy = (w, members) => w.grants.set('vault-use', w.e.id, { to: members.map(({ key, name, hosts }) => ({ kind: 'conversation', key, name, hosts, mac: w.vault.macOf('vault-use', JSON.stringify([w.e.id, `conversation:${key}`, hosts.slice().sort(), null, null, name, [], 0])) })), except: [] }, 'migration');
 
 console.log('① A STANDING REQUEST — one card, the owner\'s Allow writes THE row «谁可以用» writes (source request, no end)');
 await leg('① standing request', async () => {
@@ -344,7 +356,7 @@ await leg('⑧ seen and revoked', async () => {
   ok(!direct.length && /if \(row\.run && row\.run\.use\) \{ const ux = useExtras\(/.test(win) && /'vw-ak-x vw-use-x'/.test(ux) && /useB\.hidden = !!\(u && u\.own\)/.test(ux) && /if \(VR\.agentScopeOf\(ref\)\) \{ const use = ownUseOf\(row, ref\);/.test(dr), '⑧d grep: no file but the ONE writer (vault-use-grants.js) writes a vault-use row; the window draws every row whose facts carry `use` — no class left out — each member with its ✕; an own entry hides only «Who may use it…»', direct);
 });
 
-console.log('⑨ (r2 JUDGE 4 — reproduced, probe P2) A STANDING WRITE BESIDE A TIMED MEMBER SAYS IT REPLACES IT');
+console.log('⑨ (r2 JUDGE 4 — reproduced, probe P2; r3 MAJOR 2) A STANDING WRITE BESIDE A TIMED MEMBER REPLACES IT — AND SAYS SO');
 await leg('⑨ timed replaced', async () => {
   const w = await world();
   w.door.setRunnable({ id: w.e.id, on: true, reauthed: true });
@@ -352,12 +364,13 @@ await leg('⑨ timed replaced', async () => {
   w.useGrants.addMember(w.e.id, { kind: 'conversation', key: CID, name: 'Transcriber' }, { hosts: ['api.tts.example'], until, source: 'card' });
   const q = await w.door.request({ caller: w.caller(), entry: w.e.ref, purpose: 'transcribe', standing: true, command: 'python3 transcribe.py', cwd: w.work });
   const card = openOf(w, 'vault-grant-ask').find((i) => q && i.action.askId === q.askId);
-  ok(!!(card && card.facts && card.facts.replaces && card.facts.replaces.until === until && card.facts.replaces.scope === 'api.tts.example' && /This replaces the time-limited grant this conversation holds on it \(api\.tts\.example, until /.test(card.detail)), '⑨a P2 (request road): the standing card over a 30-day member SAYS it replaces that time-limited grant with one that has no end (detail + facts)', card && { facts: card.facts, detail: card.detail });
+  ok(!!(card && card.facts && card.facts.replaces && card.facts.replaces.until === until && card.facts.replaces.scope === 'api.tts.example' && !card.facts.replaces.expired && /This replaces the time-limited grant this conversation holds on it \(api\.tts\.example, until [^)]*\): that grant ends when you allow, and the new one holds only what this card names, with no end\./.test(card.detail)), '⑨a P2 (request road): the standing card over a 30-day member SAYS it replaces that time-limited grant — it ends, the new one holds only what the card names (detail + facts)', card && { facts: card.facts, detail: card.detail });
   const model = card && FA.runCardOf(card, {});
   ok(!!(model && model.rows.some((r) => r.key === 'until' && r.warn && JSON.stringify(r.lines).includes('This replaces'))), '⑨b … the card draws it as a marked row', model && model.rows);
   const y = q && q.askId && w.door.answerRequest(q.askId, { answer: 'standing', reauthed: true });
   const m = memberOf(w);
-  ok(!!(y && y.ok && m && !m.until && (m.hosts || []).join() === 'api.tts.example' && (m.commands || []).length === 1), '⑨c … and the Allow does exactly what the card said (one member, one end: none) — the write is unchanged (an invariant: the rule chose «the card says it»)', m);
+  const tts = await runAnswered(w, RUN(w.e.ref, 'curl', 'https://api.tts.example/v1'));
+  ok(!!(y && y.ok && m && !m.until && !m.hosts && (m.commands || []).length === 1 && tts.card), '⑨c r3 (MAJOR 2: a standing write never widens) … the Allow does what the card said: ONE member holding ONLY the command, no end — the 30-day hosts are NOT made permanent (a curl to api.tts.example draws its card)', { m, card: !!tts.card });
   const w2 = await world();
   w2.door.setRunnable({ id: w2.e.id, on: true, reauthed: true });
   w2.useGrants.addMember(w2.e.id, { kind: 'conversation', key: CID, name: 'Transcriber' }, { hosts: ['api.tts.example'], until, source: 'card' });
@@ -434,6 +447,137 @@ await leg('⑬ the card', async () => {
   const linked = segs.filter((g) => g.t === 'link' && /vault:|:\/\/|secrets\//.test(g.s));
   const s2 = FL.segmentText(`Secret: K — ${w.e.ref} · \`${w.e.ref}\``);
   ok(!linked.length && !s2.some((g) => g.t === 'link') && segs.map((g) => g.s).join('') === card.detail, '⑬b a vault reference is NEVER a link (the phone linkified «://secrets/secret:…» out of one): the segmenter keeps it text, in prose and in a code span', linked);
+});
+
+console.log('⑭ (r3 MAJOR 1, legacy-wild + legacy-wild-e2e) A LEGACY WILDCARD IS A MIGRATION FACT — never a refusal for another member');
+await leg('⑭ legacy wildcard', async () => {
+  const A = { kind: 'conversation', key: 'cid-A', name: 'A' }, B = { kind: 'conversation', key: 'cid-B', name: 'B' };
+  const w = await world();
+  plantLegacy(w, [{ key: 'cid-A', name: 'A', hosts: ['*.amazonaws.com'] }]);   // what the 2.369.363/.364 carry wrote
+  const vA = (w.useGrants.publicFor(w.e.id).to || []).find((m) => m.key === 'cid-A');
+  ok(!!(vA && !vA.toolFor && (vA.hosts || []).join() === '*.amazonaws.com'), '⑭a (the setup) the shipped carry\'s member: conversation A × *.amazonaws.com with NO tool — it verifies (the reader keeps it)', vA);
+  const b = w.useGrants.addMember(w.e.id, B, { hosts: ['api.example.com'], source: 'card' });
+  const j = w.useGrants.judgeMember(w.e.id, { kind: 'conversation', key: 'cid-C', name: 'C' }, { hosts: ['api.other.example'], source: 'request', standing: true });
+  const aw = w.useGrants.addMember(w.e.id, A, { hosts: ['api.a.example'], source: 'card' });
+  const mA2 = memberOf(w, 'cid-A');
+  const nb = w.useGrants.addMember(w.e.id, B, { hosts: ['*.github.io'], source: 'card' });
+  ok(!!(b && b.ok && j && j.ok && aw && aw.ok && mA2 && (mA2.hosts || []).includes('*.amazonaws.com') && !((mA2.toolFor || {})['*.amazonaws.com']) && nb && !nb.ok && nb.code === 'tool_required' && nb.host === '*.github.io'), '⑭b legacy-wild: the rules judge THIS write — B\'s member is added, C\'s standing member is judged ok, A\'s own widening keeps its legacy wildcard as it was; a NEW wildcard with no tool is still refused tool_required, naming ITS host', { b, j, aw, nb });
+  const pub = w.useGrants.publicFor(w.e.id);
+  const save = w.useGrants.setRow(w.e.id, { to: (pub.to || []).map((x) => ({ kind: x.kind, key: x.key, name: x.name, hosts: x.hosts, ...(x.toolFor ? { toolFor: x.toolFor } : {}), source: x.source, at: x.at })), except: [] }, { reauthed: true });
+  ok(!!(save && save.ok), '⑭c the owner\'s Save of that row as it stands goes through (the legacy member kept as it was is not the Save\'s to refuse)', save);
+  const w2 = await world();
+  plantLegacy(w2, [{ key: 'cid-A', name: 'A', hosts: ['*.amazonaws.com'] }, { key: 'cid-Z', name: 'Z', hosts: ['*.legacy.example'] }]);
+  w2.door.setRunnable({ id: w2.e.id, on: true, reauthed: true });   // the unlock's first read: the carries run
+  const wa = memberOf(w2, 'cid-A'), wz = memberOf(w2, 'cid-Z');
+  ok(!!(wa && (wa.toolFor || {})['*.amazonaws.com'] === 'aws' && wz && !wz.toolFor), '⑭d THE WILDCARD CARRY at unlock: A\'s *.amazonaws.com now names aws (the CLI the tool table names for it); *.legacy.example, which no row names, stays as it was', { wa, wz });
+  const rb = await runAnswered(w2, RUN(w2.e.ref, 'python3', 'other.py', 'seg1'), { caller: w2.caller('cid-B', 'B'), answer: 'always', reauthed: true });
+  const qc = await w2.door.request({ caller: w2.caller('cid-C', 'C'), entry: w2.e.ref, purpose: 'probe', standing: true, hosts: ['api.example.com'], cwd: w2.work });
+  ok(!!(rb.card && rb.card.action.command && rb.a && rb.a.ok && rb.r.ok && qc && qc.ok && qc.askId), '⑭e legacy-wild-e2e: B\'s «Always (this command)» on that entry is written and its run goes through; C\'s `request --standing --host api.example.com` is judged on ITS member only — its card is filed', { a: rb.a, r: { ok: rb.r.ok, code: rb.r.code }, qc });
+  const pub2 = w2.useGrants.publicFor(w2.e.id);
+  const z = (pub2.to || []).find((m) => m.key === 'cid-Z'), a = (pub2.to || []).find((m) => m.key === 'cid-A');
+  const notes = () => (w2.userTodos.snapshot().open || []).filter((i) => /An older «Always» lets any program reach a wildcard host/.test(i.text));
+  const n1 = notes();
+  w2.vault.lock('test'); await w2.vault.unlock(PW); w2.door.setRunnable({ id: w2.e.id, on: true, reauthed: true });
+  ok(!!(z && JSON.stringify(z.legacy) === '["*.legacy.example"]' && a && Array.isArray(a.legacy) && !a.legacy.length && n1.length === 1 && n1[0].kind === 'notice' && n1[0].detail.includes('*.legacy.example') && notes().length === 1), '⑭f the legacy member is NAMED on its row (publicFor `legacy` — its chip: «legacy wildcard: any tool») and the owner is told ONCE (one For-you notice naming the host; a relock + unlock files no second)', { z: z && z.legacy, notes: n1.map((i) => i.detail) });
+  const w3 = await world();
+  const keyOf = (hosts) => 'v9:' + JSON.stringify([null, null, [], [], hosts]);
+  const c = w3.useGrants.carry([{ conv: 'cid-L', key: keyOf(['*.legacy.example']), entries: [w3.e.id], until: null }, { conv: 'cid-M', key: keyOf(['*.amazonaws.com']), entries: [w3.e.id], until: null }], { toolOfWild: VR.wildcardToolOf });
+  const mL = memberOf(w3, 'cid-L'), mM = memberOf(w3, 'cid-M');
+  ok(!!(c && c.carried === 2 && c.failed === 0 && mL && !mL.toolFor && mM && (mM.toolFor || {})['*.amazonaws.com'] === 'aws'), '⑭g the carry of an «always» row not carried yet: a wildcard whose CLI the key does not say gets the one the tool table names (aws); one nobody can name is CARRIED as a legacy member — never dropped', { c, mL, mM });
+});
+
+console.log('⑮ (r3 MAJOR 2, expired-revived) A STANDING WRITE NEVER WIDENS — an expired member stays expired, a scope is never revived');
+await leg('⑮ never revived', async () => {
+  const X = { kind: 'conversation', key: CID, name: 'Transcriber' };
+  const w = await world();
+  w.door.setRunnable({ id: w.e.id, on: true, reauthed: true });
+  w.useGrants.addMember(w.e.id, X, { hosts: ['old.example'], until: Date.now() + 150, source: 'owner' });
+  await sleep(300);
+  const q = await w.door.request({ caller: w.caller(), entry: w.e.ref, purpose: 'probe', standing: true, command: 'python3 other.py', cwd: w.work });
+  const card = openOf(w, 'vault-grant-ask').find((i) => q && i.action.askId === q.askId);
+  const model = card && FA.runCardOf(card, {});
+  ok(!!(card && card.facts && card.facts.replaces && card.facts.replaces.expired === true && card.facts.replaces.scope === 'old.example' && /This replaces the grant this conversation held on it that has ended \(old\.example, ended [^)]*\): it stays ended/.test(card.detail) && model && model.rows.some((r) => r.key === 'until' && r.warn && JSON.stringify(r.lines).includes('that has ended'))), '⑮a expired-revived: the standing card over an EXPIRED 8-hour member says it replaces that ENDED grant — it stays ended (detail, facts, a marked row)', card && { facts: card.facts, detail: card.detail });
+  const y = q && q.askId && w.door.answerRequest(q.askId, { answer: 'standing', reauthed: true });
+  const m = memberOf(w);
+  const v = w.useGrants.verdictFor(w.e.id, { conversationKeys: [CID], groupIds: [] }, { hosts: ['old.example'], destinationKnown: true });
+  const c = await runAnswered(w, RUN(w.e.ref, 'curl', 'https://old.example/x'));
+  ok(!!(y && y.ok && m && !m.hosts && !m.until && (m.commands || []).length === 1 && v && !v.ok && c.card), '⑮b … its Allow writes ONLY the asked scope (the command, no end): old.example is NOT revived — a curl to it draws its card', { m, v });
+  const w3 = await world();
+  w3.door.setRunnable({ id: w3.e.id, on: true, reauthed: true });
+  w3.useGrants.addMember(w3.e.id, X, { hosts: ['old.example'], until: Date.now() + 150, source: 'owner' });
+  await sleep(300);
+  const r = await runAnswered(w3, RUN(w3.e.ref, 'python3', 'other.py', 's.mp3'), { answer: 'always', reauthed: true });
+  const ca = r.card && r.card.facts && r.card.facts.always && r.card.facts.always.command;
+  const m3 = memberOf(w3);
+  ok(!!(ca && ca.replaces && ca.replaces.expired === true && /that has ended \(old\.example/.test(r.card.detail) && r.a && r.a.ok && m3 && !m3.hosts && !m3.until && (m3.commands || []).length === 1), '⑮c the card road: «Always (this command)» beside an EXPIRED member says it replaces the ended grant, and its press writes only the command', { ca, m3 });
+  const w4 = await world();
+  w4.useGrants.addMember(w4.e.id, X, { hosts: ['old.example'], until: Date.now() + 150, source: 'card' });
+  w4.useGrants.addMember(w4.e.id, { kind: 'conversation', key: 'cid-live', name: 'L' }, { hosts: ['a.example'], until: Date.now() + 8 * 3600e3, source: 'card' });
+  await sleep(300);
+  const later = Date.now() + 30 * 86400e3;
+  w4.useGrants.addMember(w4.e.id, X, { hosts: ['new.example'], until: Date.now() + 8 * 3600e3, source: 'card' });
+  w4.useGrants.addMember(w4.e.id, { kind: 'conversation', key: 'cid-live', name: 'L' }, { hosts: ['b.example'], until: later, source: 'card' });
+  const mx = memberOf(w4), ml = memberOf(w4, 'cid-live');
+  ok(!!(mx && (mx.hosts || []).join() === 'new.example' && ml && (ml.hosts || []).join() === 'a.example,b.example' && ml.until === later), '⑮d EVERY writer: an EXPIRED member is never merged — a timed «Always» onto it holds only its own hosts; onto a LIVE member it still widens as before (hosts ∪, the later end)', { mx, ml });
+  const w5 = await world();
+  w5.door.setRunnable({ id: w5.e.id, on: true, reauthed: true });
+  w5.useGrants.addMember(w5.e.id, X, { hosts: ['api.tts.example'], source: 'owner' });
+  const q5 = await w5.door.request({ caller: w5.caller(), entry: w5.e.ref, purpose: 'transcribe', standing: true, command: 'python3 transcribe.py', cwd: w5.work });
+  const card5 = openOf(w5, 'vault-grant-ask').find((i) => q5 && i.action.askId === q5.askId);
+  const y5 = q5 && q5.askId && w5.door.answerRequest(q5.askId, { answer: 'standing', reauthed: true });
+  const m5 = memberOf(w5);
+  ok(!!(card5 && card5.facts && card5.facts.replaces === null && !/This replaces/.test(card5.detail) && y5 && y5.ok && m5 && (m5.hosts || []).join() === 'api.tts.example' && (m5.commands || []).length === 1 && !m5.until), '⑮e the card says it replaces ONLY when it replaces: beside a member with NO end there is nothing to replace — no line, and the Allow adds the command to it', { facts: card5 && card5.facts, m5 });
+});
+
+console.log('⑯ (r3 MAJOR 3, pin-doors) A SCRIPT WORD IS PINNED ONLY WHERE THE INTERPRETER READS THAT FILE');
+await leg('⑯ specifiers', async () => {
+  const w = await world();
+  w.door.setRunnable({ id: w.e.id, on: true, reauthed: true });
+  const planted = ['npm:evil-pkg/main.ts', 'jsr:@evil/pkg/mod.ts', 'file:other.ts', 'data:application/typescript,console.log(1)//x.ts'];
+  for (const p of planted) { const f = path.resolve(w.work, p); fs.mkdirSync(path.dirname(f), { recursive: true }); fs.writeFileSync(f, 'console.log("a harmless local file")\n'); }
+  const res = [];
+  for (const p of planted) { const q = await w.door.request({ caller: w.caller(), entry: w.e.ref, purpose: 'x', standing: true, command: `deno run '${p}'`, cwd: w.work }); res.push({ p, code: q && q.code, why: q && q.why, words: q && q.words }); }
+  fs.writeFileSync(path.join(w.work, 'main.ts'), 'console.log(1)\n');
+  const plain = await w.door.request({ caller: w.caller(), entry: w.e.ref, purpose: 'the deno job', standing: true, command: 'deno run main.ts', cwd: w.work });
+  ok(res.every((r) => r.code === 'command_not_pinnable' && r.why === 'specifier' && /URI scheme/.test(String(r.words || ''))) && !!(plain && plain.ok && plain.command === 'deno run main.ts'), '⑯a pin-doors: npm:, jsr:, file:, data: — each planted as a local file of that name — are refused command_not_pinnable (a module SPECIFIER deno resolves itself, never the planted file); a plain relative file is pinned', { res, plain });
+  const r = await runAnswered(w, RUN(w.e.ref, 'deno', 'run', 'npm:evil-pkg/main.ts'));
+  ok(!!(r.card && !r.card.action.command && !r.r.ok), '⑯b its run draws a card that offers no «Always (this command)» (the run\'s own candidate reads the same grammar)', r.card && r.card.action);
+  const bad = [];
+  for (const [n, g] of Object.entries(VR.PIN_GRAMMAR || {})) {
+    if (g.none) continue;
+    if (!['path', 'slash'].includes(g.files)) bad.push({ n, files: g.files });
+    for (const s of ['npm:x/m', 'jsr:@x/m', 'file:m', 'data:t,c//m', 'https://x.example/m', 'C:m']) { const argv = [n, ...(g.sub ? [g.sub[0]] : []), s + ((g.ext || ['.x'])[0])]; const p = VR.pinOf(n, argv); if (!p || p.ok) bad.push({ n, argv }); }
+  }
+  const sh = VR.pinOf('bash', ['bash', 'job.sh']), sh2 = VR.pinOf('bash', ['bash', './job.sh']);
+  ok(!bad.length && sh && sh.why === 'path-search' && sh2 && sh2.ok, '⑯c CENSUS: every row says which word shapes are files (`files`: path | slash), and NO row pins a word with a URI scheme; a POSIX shell pins `./job.sh`, never a bare `job.sh` (it may be looked up on PATH)', { bad: bad.slice(0, 6), sh, sh2 });
+  fs.writeFileSync(path.join(w.work, 'job.sh'), 'echo job\n');
+  const s1 = await w.door.request({ caller: w.caller('cid-sh', 'S'), entry: w.e.ref, purpose: 'the job', standing: true, command: 'bash job.sh', cwd: w.work });
+  const s2 = await w.door.request({ caller: w.caller('cid-sh', 'S'), entry: w.e.ref, purpose: 'the job', standing: true, command: 'bash ./job.sh', cwd: w.work });
+  ok(!!(s1 && s1.code === 'command_not_pinnable' && s1.why === 'path-search' && /\.\/job\.sh/.test(String(s1.words || '')) && s2 && s2.ok), '⑯d the door: `--command "bash job.sh"` is refused by name with the recipe (`./job.sh`); `bash ./job.sh` is filed', { s1, s2 });
+});
+
+console.log('⑰ (r3 item 4 — reproduced: pin-doors C) EVERY PINNED ROW NAMES ITS STARTUP-CODE ENV DOORS; EVERY ONE IS REFUSED');
+await leg('⑰ env doors', async () => {
+  const rows = Object.entries(VR.PIN_GRAMMAR || {}).filter(([, g]) => !g.none);
+  const noRow = rows.filter(([, g]) => !Array.isArray(g.env)).map(([n]) => n);
+  const leaks = [];
+  let names = 0;
+  for (const [n, g] of rows) for (const e of g.env || []) {
+    const base = String(e).replace(/\*$/, '');
+    for (const name of [...(base.endsWith('_') ? [] : [base]), ...(String(e).endsWith('*') ? [base + (base.endsWith('_') ? 'x' : '_5_4')] : [])]) { names++; if (!VR.envRefusedOf(name, 'plain') || !VR.envRefusedOf(name, 'env')) leaks.push({ n, name }); }
+  }
+  const seven = ['LUA_INIT', 'LUA_INIT_5_4', 'PHPRC', 'PHP_INI_SCAN_DIR', 'DOTNET_STARTUP_HOOKS', 'R_PROFILE_USER', 'JULIA_DEPOT_PATH'];
+  const per = Object.fromEntries(['lua', 'php', 'dotnet', 'rscript', 'julia'].map((n) => [n, ((VR.PIN_GRAMMAR || {})[n] || {}).env || null]));
+  ok(rows.length >= 26 && !noRow.length && !leaks.length && names > 60 && seven.every((n) => VR.envRefusedOf(n)) && Object.values(per).every((l) => Array.isArray(l) && l.length), `⑰a CENSUS: every one of the ${rows.length} pinned rows names its startup-code env doors (\`env\`), and every one (${names} names) is refused for every run — the reviewer's seven among them`, { noRow, leaks: leaks.slice(0, 8), per });
+  const w = await world();
+  w.door.setRunnable({ id: w.e.id, on: true, reauthed: true });
+  fs.writeFileSync(path.join(w.work, 'job.lua'), 'print("job")\n');
+  const q = await w.door.request({ caller: w.caller(), entry: w.e.ref, purpose: 'the lua job', standing: true, command: 'lua job.lua', cwd: w.work });
+  const y = q && q.askId && w.door.answerRequest(q.askId, { answer: 'standing', reauthed: true });
+  const r0 = await runAnswered(w, RUN(w.e.ref, 'lua', 'job.lua'));
+  const code = ['os', 'execute("true")'].join('.');
+  const r1 = await runAnswered(w, ['--env', `T=${w.e.ref}`, '--env', `LUA_INIT=${code}`, '--', 'lua', 'job.lua']);
+  ok(!!(y && y.ok && r0.r.ok && !r0.card && !r1.r.ok && r1.r.code === 'env_refused' && r1.r.name === 'LUA_INIT' && !r1.card), '⑰b the reviewer\'s probe: a `lua job.lua` standing grant admits its run — and the same run with --env LUA_INIT=<code> is refused env_refused naming LUA_INIT (no card; nothing ran)', { r0: { ok: r0.r.ok, card: !!r0.card }, r1: { ok: r1.r.ok, code: r1.r.code, name: r1.r.name, card: !!r1.card } });
 });
 
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);

@@ -776,7 +776,7 @@ function runCardOf(item, { t = fmt } = {}) {
     .map((key) => ({ key, label: t(RUN_LABEL[key]), lines: lines[key], warn: key === decides || (key === 'hosts' && !known) }));
   const cmdA = a.command && typeof a.command === 'object' && a.command.offered === true ? a.command : null;   // lane vault-standing-request: «Always (this command)» — the plain words beside it
   const rp = cmdA && cmdA.replaces && typeof cmdA.replaces === 'object' && Number(cmdA.replaces.until) > 0 ? cmdA.replaces : null;   // r2 (JUDGE 4): «Always (this command)» beside a TIMED grant makes it permanent — said beside the button
-  const hint = cmdA ? [{ mono: str(cmdA.words) ? String(cmdA.words) : '' }, { text: ` — ${t(COMMAND_ALWAYS_WORDS)}` }, ...(rp ? [{ text: ` ${t(REPLACES_WORDS, { scope: str(rp.scope), when: clockWords(rp.until) })}` }] : [])] : a.offered === true ? null : [{ text: t('No «Always»: {why}', { why: own(RUN_ALWAYS_WHY, a.why) ? t(RUN_ALWAYS_WHY[a.why]) : '' }).replace(/[:：]\s*$/, (m) => m.trimEnd()) }, ...(a.why && !own(RUN_ALWAYS_WHY, a.why) ? [{ code: String(a.why) }] : []), ...(str(a.directive) ? [{ mono: wholeOf(a, 'directive').shown }] : [])];
+  const hint = cmdA ? [{ mono: str(cmdA.words) ? String(cmdA.words) : '' }, { text: ` — ${t(COMMAND_ALWAYS_WORDS)}` }, ...(rp ? [{ text: ` ${t(rp.expired === true ? REPLACES_ENDED_WORDS : REPLACES_WORDS, { scope: str(rp.scope), when: clockWords(rp.until) })}` }] : [])] : a.offered === true ? null : [{ text: t('No «Always»: {why}', { why: own(RUN_ALWAYS_WHY, a.why) ? t(RUN_ALWAYS_WHY[a.why]) : '' }).replace(/[:：]\s*$/, (m) => m.trimEnd()) }, ...(a.why && !own(RUN_ALWAYS_WHY, a.why) ? [{ code: String(a.why) }] : []), ...(str(a.directive) ? [{ mono: wholeOf(a, 'directive').shown }] : [])];
   const templates = (Array.isArray(f.templates) ? f.templates : []).filter((x) => x && typeof x === 'object');
   // r8 (a store clips and says, never throws): a command longer than the body's RUN_CMD_BODY_MAX — `cmd` its start, `cmdCut`,
   // the whole (≤ RUN_CMD_MAX) in `cmdFull` (chunks — r23's shape; the store folds an older producer's the same way); the body
@@ -838,7 +838,8 @@ function runCardOf(item, { t = fmt } = {}) {
  *  box (it asks for a grant; nothing runs). null = no facts this client reads (a plain request, an older record): the prose. */
 const STANDING_LABEL = Object.freeze({ secret: i18nKey('Secret'), purpose: i18nKey('Purpose'), hosts: i18nKey('Hosts'), command: i18nKey('Command'), program: i18nKey('Runs'), until: i18nKey('Until'), switch: i18nKey('Also') });
 const STANDING_COMMAND_WORDS = i18nKey('VibeSpace cannot see where it sends the secret — Allow means you trust this command itself; a changed program or script asks again.');
-const REPLACES_WORDS = i18nKey('This replaces the time-limited grant this conversation holds on it ({scope}, until {when}) with one that has no end.');   // = vault-run-door REPLACES_LINE
+const REPLACES_WORDS = i18nKey('This replaces the time-limited grant this conversation holds on it ({scope}, until {when}): that grant ends when you allow, and the new one holds only what this card names, with no end.');   // = vault-run-door REPLACES_LINE (r3: a standing write REPLACES — it never widens)
+const REPLACES_ENDED_WORDS = i18nKey('This replaces the grant this conversation held on it that has ended ({scope}, ended {when}): it stays ended, and the new one holds only what this card names.');   // = vault-run-door REPLACES_ENDED_LINE (r3, MAJOR 2: an expired grant is never revived)
 const STANDING_SWITCH_WORDS = i18nKey('Allow also turns on «Usable by agent runs» for this entry — it opens it for THIS conversation; any grants you paused stay paused.');   // = vault-run-door STANDING_SWITCH_LINE
 const STANDING_ENDS_WORDS = i18nKey('Until you revoke it — the same as «Who may use it…» on its row in ⚙ System ▸ Vault…, which lists it and takes it back. A lock does not end it (nothing runs while it is locked). Allow asks for the second password.');
 function standingCardOf(item, { t = fmt } = {}) {
@@ -855,7 +856,7 @@ function standingCardOf(item, { t = fmt } = {}) {
     ...(str(f.purpose) ? [{ key: 'purpose', lines: [[{ text: str(f.purpose) }]] }] : []),
     ...(hosts.length ? [{ key: 'hosts', lines: hosts.map((h) => [{ mono: str(h.host) }, ...(str(h.tool) ? [{ text: ' ' }, { aside: t('(via {tool})', { tool: str(h.tool) }) }] : [])]) }] : []),
     ...(c ? [{ key: 'command', lines: [[{ mono: str(c.words) }], [{ text: t(STANDING_COMMAND_WORDS) }]] }, { key: 'program', lines: [[{ mono: str(c.program) }]] }] : []),
-    { key: 'until', lines: [[{ text: t('until you revoke it') }], ...(rp ? [[{ text: t(REPLACES_WORDS, { scope: str(rp.scope), when: clockWords(rp.until) }) }]] : [])], warn: !!rp },
+    { key: 'until', lines: [[{ text: t('until you revoke it') }], ...(rp ? [[{ text: t(rp.expired === true ? REPLACES_ENDED_WORDS : REPLACES_WORDS, { scope: str(rp.scope), when: clockWords(rp.until) }) }]] : [])], warn: !!rp },
     ...(f.switchOn === true ? [{ key: 'switch', lines: [[{ text: t(STANDING_SWITCH_WORDS) }]], warn: true }] : []),
   ].map((r) => ({ key: r.key, label: t(STANDING_LABEL[r.key]), lines: r.lines, warn: !!r.warn }));
   const fold = [

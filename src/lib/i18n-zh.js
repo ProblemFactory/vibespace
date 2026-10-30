@@ -11630,6 +11630,12 @@ export default {
   "(via {tool})": "（经由 {tool}）", // lane vault-standing-request r2
   "{who} asks for a standing grant on “{secret}”": "{who} 请求常驻使用「{secret}」", // lane vault-standing-request r2
   "VibeSpace cannot see where it sends the secret — Allow means you trust this command itself; a changed program or script asks again.": "VibeSpace 看不到它把密钥发往哪里——「允许」表示你信任这条命令本身；换了程序或脚本会再问。", // lane vault-standing-request r2
-  "This replaces the time-limited grant this conversation holds on it ({scope}, until {when}) with one that has no end.": "这会把这个对话在它上面已有的限时授权（{scope}，到 {when}）换成没有期限的授权。", // lane vault-standing-request r2
+  "This replaces the time-limited grant this conversation holds on it ({scope}, until {when}): that grant ends when you allow, and the new one holds only what this card names, with no end.": "这会替换这个对话在它上面已有的限时授权（{scope}，到 {when}）：你允许后那个授权就结束，新的授权只包括这张卡片写明的内容，没有期限。", // lane vault-standing-request r3
+  "This replaces the grant this conversation held on it that has ended ({scope}, ended {when}): it stays ended, and the new one holds only what this card names.": "这会替换这个对话在它上面已经结束的授权（{scope}，结束于 {when}）：它保持结束，新的授权只包括这张卡片写明的内容。", // lane vault-standing-request r3
+  "{hostword} (via {tool})": "{hostword}（经由 {tool}）", // lane vault-standing-request r3 (the round-4 chip word had no zh / ja)
+  "{hostword} (legacy wildcard: any tool)": "{hostword}（旧版通配：任何工具）", // lane vault-standing-request r3
+  "Carried from an older version: this wildcard host is open to ANY program. Take it back (✕) and press «Always» on the next run of its tool — the new grant names its tool.": "从旧版本带过来的：这个通配主机对任何程序都开放。收回它（✕），在它的工具下一次运行时按「总是」——新的授权会写明它的工具。", // lane vault-standing-request r3
+  "An older «Always» lets any program reach a wildcard host — set its tool": "一个旧版的「总是」让任何程序都能访问通配主机——请设定它的工具", // lane vault-standing-request r3
+  "A grant carried from an older version covers {where} for ANY program: it was stored before a wildcard host named the one tool that uses it. Its chip in the Vault window says «legacy wildcard: any tool». Take it back (✕) and press «Always» on the next run of that tool — the new grant names its tool. No value was given out.": "一个从旧版本带过来的授权让任何程序都能用于 {where}：它保存时，通配主机还不写明使用它的那一个工具。它在密钥库窗口里的标签写着「旧版通配：任何工具」。收回它（✕），在那个工具下一次运行时按「总是」——新的授权会写明它的工具。没有给出任何值。", // lane vault-standing-request r3
   "Allow also turns on «Usable by agent runs» for this entry — it opens it for THIS conversation; any grants you paused stay paused.": "「允许」同时会打开这个条目的「可供 agent 运行使用」——只为这个对话打开；你暂停的授权保持暂停。", // lane vault-standing-request r2
 };

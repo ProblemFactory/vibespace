@@ -8920,6 +8920,8 @@ button.vw-chip { cursor: pointer; }
 .vw-use-host { display: flex; flex-direction: column; gap: 3px; }
 .vw-use .vw-use-grant { align-self: flex-start; }
 .vw-use-expired { opacity: 0.6; text-decoration: line-through; }
+.vw-use-legacy { border-color: var(--warn-text); }   /* r3 (MAJOR 1): a carried wildcard open to any program — marked, its words say it */
+.vw-use-legacy .vw-use-words { color: var(--warn-text); }
 .vw-use-except { color: var(--text-dim); }
 .vw-use-paused { opacity: 0.5; }
 .vw-use-paused-note { color: var(--text-dim); font-size: max(0.85em, 12px); margin-top: 2px; }   /* round 3 (MINOR): never shrink the note below a readable floor on a narrow phone */

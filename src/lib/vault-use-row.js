@@ -26,12 +26,12 @@ const endWord = (id) => ({ keep: t('As each has it now'), none: t('No end'), '8h
 const dateOf = (ms) => { try { return new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }); } catch { return ''; } };
 // round 3 (item 5): a WILDCARD host is said in words — and a multi-tenant base (where unrelated parties share the domain) warns
 const MULTI_TENANT = /^(?:amazonaws\.com|googleapis\.com|github\.io|gitlab\.io|herokuapp\.com|cloudfront\.net|blob\.core\.windows\.net|azurewebsites\.net|web\.app|pages\.dev|workers\.dev|vercel\.app|netlify\.app|appspot\.com|firebaseapp\.com)$/i;
-const oneHostWord = (h, entryHosts, tool = null) => {
+const oneHostWord = (h, entryHosts, tool = null, legacy = false) => {
   if (h === ENTRY_HOSTS) return t('the hosts it was stored for ({hosts})', { hosts: (entryHosts || []).join(', ') || t('none') });
-  if (String(h).startsWith('*.')) { const base = String(h).slice(2); const w = MULTI_TENANT.test(base) ? t('every {host} host (incl. other customers’ endpoints)', { host: h }) : t('every {host} host', { host: h }); return tool ? t('{hostword} (via {tool})', { hostword: w, tool }) : w; }   // round 4 (item 3): a wildcard carries the ONE CLI that minted it — shown per host
+  if (String(h).startsWith('*.')) { const base = String(h).slice(2); const w = MULTI_TENANT.test(base) ? t('every {host} host (incl. other customers’ endpoints)', { host: h }) : t('every {host} host', { host: h }); return tool ? t('{hostword} (via {tool})', { hostword: w, tool }) : legacy ? t('{hostword} (legacy wildcard: any tool)', { hostword: w }) : w; }   // round 4 (item 3): a wildcard carries the ONE CLI that minted it — shown per host; r3 (MAJOR 1): a carried one with no tool says so
   return h;
 };
-const hostsWord = (hosts, entryHosts, toolFor = null) => (hosts || []).map((h) => oneHostWord(h, entryHosts, toolFor && toolFor[h])).join(', ');
+const hostsWord = (hosts, entryHosts, toolFor = null, legacy = null) => (hosts || []).map((h) => oneHostWord(h, entryHosts, toolFor && toolFor[h], Array.isArray(legacy) && legacy.includes(h))).join(', ');
 // lane vault-standing-request: a member's COMMAND SHAPES («the command python3 transcribe.py») and who wrote it, when
 const baseOf = (p) => String(p == null ? '' : p).replace(/\/+$/, '').split('/').pop();
 const preOf = (c) => (c && Array.isArray(c.pre) ? c.pre.filter((w) => typeof w === 'string' && w) : []);   // r2: the options / subcommand it pins before the script
@@ -76,18 +76,19 @@ export function useExtras(row, { app = null, refresh = () => {} } = {}) {
       chips.append(el('span', 'vw-ak-to vw-use-to', t('Used with no card by:')));
       for (const m of live) {
         const pausedM = !!m.paused;   // round 7 (MAJOR item 2): the entry is ON by another conversation's PRESS and THIS member was never resumed — the owner's pause stands (the ↻ un-pauses it). No date: the inverted model keeps no per-member pause time, so none can go stale.
-        const chip = el('span', `vw-ak-chip vw-use-chip${m.expired ? ' vw-use-expired' : ''}${pausedM ? ' vw-use-chip-paused' : ''}`);
+        const legacyW = Array.isArray(m.legacy) ? m.legacy : [];   // r3 (MAJOR 1): a wildcard carried from an older version with no tool — open to ANY program until the owner re-mints it
+        const chip = el('span', `vw-ak-chip vw-use-chip${m.expired ? ' vw-use-expired' : ''}${pausedM ? ' vw-use-chip-paused' : ''}${legacyW.length ? ' vw-use-legacy' : ''}`);
         chip.dataset.grant = m.id || '';
         chip.dataset.principal = m.principal || '';
         const cmds = Array.isArray(m.commands) ? m.commands : [];
-        const bits = [nameOf(m, app), ...((m.hosts || []).length ? [hostsWord(m.hosts, u.entryHosts, m.toolFor)] : []), ...(cmds.length ? [t('the command {command}', { command: cmds.map(commandWord).join(', ') })] : [])];
+        const bits = [nameOf(m, app), ...((m.hosts || []).length ? [hostsWord(m.hosts, u.entryHosts, m.toolFor, legacyW)] : []), ...(cmds.length ? [t('the command {command}', { command: cmds.map(commandWord).join(', ') })] : [])];
         if (m.uses) bits.push(t('used {n}×', { n: m.uses }));
         if (m.expired) bits.push(t('expired'));
         else if (m.until) bits.push(t('until {when}', { when: dateOf(m.until) }));
         if (pausedM) bits.push(t('paused by you'));
         if (sourceWord(m)) bits.push(sourceWord(m));   // lane vault-standing-request: who wrote it and when — last, its time beside it
         chip.append(el('span', 'vw-use-words', bits.join(' · ')));
-        chip.title = `${m.id || ''}${m.convs > 1 ? ' · ' + t('{n} conversations', { n: m.convs }) : ''}${cmds.length ? '\n' + cmds.map(commandTitle).join('\n') : ''}`;   // lane vault-standing-request: the whole program + script paths
+        chip.title = `${m.id || ''}${m.convs > 1 ? ' · ' + t('{n} conversations', { n: m.convs }) : ''}${cmds.length ? '\n' + cmds.map(commandTitle).join('\n') : ''}${legacyW.length ? '\n' + t('Carried from an older version: this wildcard host is open to ANY program. Take it back (✕) and press «Always» on the next run of its tool — the new grant names its tool.') : ''}`;   // lane vault-standing-request: the whole program + script paths
         if (pausedM) {   // un-pause ONE member — a widening, so it asks for the second password (验证是你)
           const rs = el('button', 'vw-ak-x vw-use-resume', '↻');
           rs.type = 'button'; rs.title = t('Un-pause this — let it be used again'); rs.setAttribute('aria-label', rs.title);

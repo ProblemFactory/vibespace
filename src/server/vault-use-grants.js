@@ -147,8 +147,14 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
    *  and every later Save of the row failed `tool_required`). ONE validator: setRow (the owner's Save), addMember (every press,
    *  request, carry) and judgeMember (an agent's standing request, BEFORE its card is filed) read it — a row the owner could
    *  not save is never written. Every member names hosts or commands (never «any»); the model's own write rules; a wildcard
-   *  host carries the tool that uses it. → { ok: true, row } | a named refusal. */
-  function rowRules(id, { to = [], except = [] } = {}) {
+   *  host carries the tool that uses it. → { ok: true, row } | a named refusal.
+   *  r3 (MAJOR 1 — the acceptance: the shipped 2.369.363/.364 carry wrote legacy aws «always» members as `*.amazonaws.com` with
+   *  NO tool, and r2 refused EVERY later write on that entry — another conversation's «Always» became a denied run, an agent's
+   *  standing request was told to add a --tool it never asked about): the rules judge WHAT THIS WRITE BRINGS — the row as it
+   *  becomes through it. A wildcard with no tool is refused only where the write puts it there; one the stored row (`was`)
+   *  already held on the SAME member with no tool is a LEGACY member (a migration fact the carry names, never a refusal for
+   *  anyone). `legacy` (the carry only): the write may itself carry a wildcard whose CLI nobody can name, as a legacy member. */
+  function rowRules(id, { to = [], except = [] } = {}, { was = null, legacy = false } = {}) {
     // lane vault-standing-request: a member names hosts, commands or both — an empty list is the field left out (never «any»)
     to = (Array.isArray(to) ? to : []).map((e) => { if (!e || typeof e !== 'object') return e; const x = { ...e }; for (const f of ['hosts', 'commands']) if (Array.isArray(x[f]) && !x[f].length) delete x[f]; return x; });
     for (const e of to) if (!GM.hostListOf(e && e.hosts) && !GM.commandListOf(e && e.commands)) return named('hosts_required', { principal: GM.principalKey(GM.bareOf(e)) });
@@ -157,16 +163,18 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
     // lane vault-use-grants round 5 (MAJOR item 4): a wildcard host MUST carry the tool that minted it — a whole-row Save that
     // drops `toolFor` (the r4 picker rebuilt each member from principal + name + hosts + end only) is refused BY NAME, never
     // silently re-scoping `*.amazonaws.com` from aws to every tool.
-    for (const e of v.row.to) for (const h of e.hosts || []) if (String(h).startsWith('*.') && !(e.toolFor && e.toolFor[h])) return named('tool_required', { principal: GM.principalKey(GM.bareOf(e)), host: h });
+    const held = new Set();   // r3: the stored row's own toolless wildcards — principal × host, as they were before this write
+    for (const e of (was && Array.isArray(was.to) ? was.to : [])) for (const h of U.legacyWildOf(e)) held.add(`${GM.principalKey(GM.bareOf(e))}\n${h}`);
+    for (const e of v.row.to) for (const h of e.hosts || []) if (String(h).startsWith('*.') && !U.toolOfHost(e, h) && !legacy && !held.has(`${GM.principalKey(GM.bareOf(e))}\n${h}`)) return named('tool_required', { principal: GM.principalKey(GM.bareOf(e)), host: h });
     return { ok: true, row: v.row };
   }
   /** THE PICKER's save — the whole row. */
   function setRow(id, { to = [], except = [] } = {}, { by = 'user', reauthed = false } = {}) {
     if (!okId(id)) return named('bad_resource');
     if (!unlocked()) return named('vault_locked');   // round 4 (item 4): a locked vault never writes mac:null — refuse by name
-    const v = rowRules(id, { to, except });
-    if (!v.ok) return v;
     const was = rowOf(id);
+    const v = rowRules(id, { to, except }, { was: verifiedRow(was) });   // r3: a Save that keeps a legacy wildcard as it was is a Save the owner can make
+    if (!v.ok) return v;
     if (widens(was, v.row) && !reauthed) return named('reveal_needs_password');
     // lane vault-standing-request: a member this Save ADDS is the owner's («你设置的», now); one already there keeps its source
     const before = new Set(((was && GM.publicRow(was).to) || []).map((e) => GM.principalKey(e)));
@@ -179,28 +187,30 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
   }
   /** ONE member added or widened (the card's «Always», the request default, the carry, an agent's standing request the owner
    *  allowed). `tool` scopes a wildcard PER HOST; `commands` (lane vault-standing-request) the command shapes; `source` who. */
-  function addMember(id, principal, { hosts = [], until = null, tool = null, commands = null, source = null } = {}, { by = 'user' } = {}) {
+  function addMember(id, principal, { hosts = [], until = null, tool = null, commands = null, source = null, standing = false, legacy = false } = {}, { by = 'user' } = {}) {
     if (!okId(id)) return named('bad_resource');
     if (!unlocked()) return named('vault_locked');
-    const plan = U.withMember(verifiedRow(rowOf(id)), principal, { hosts, until, tool, commands, source, at: now() });
+    const was = verifiedRow(rowOf(id));
+    const plan = U.withMember(was, principal, { hosts, until, tool, commands, source, at: now(), now: now(), standing });   // r3 (MAJOR 2): `now` — an expired member is never merged; `standing` — a member with an end is replaced
     if (!plan.ok) return named(plan.code);
-    const v = rowRules(id, { to: plan.to, except: plan.except });   // round 5 (MINOR): validate the plan BEFORE any generation move (a bad plan never bumps the gen); r2 (MAJOR 1): the SAME rules the owner's Save reads
+    const v = rowRules(id, { to: plan.to, except: plan.except }, { was, legacy: legacy && by === 'migration' });   // round 5 (MINOR): validate the plan BEFORE any generation move (a bad plan never bumps the gen); r2 (MAJOR 1): the SAME rules the owner's Save reads; r3: judged on what THIS write brings
     if (!v.ok) return v;
     const g = store();
     const gen = nextGen();
     const w = g.set(U.DOOR, String(id), { to: stamp(id, plan.to, plan.except, gen), except: plan.except }, by);
     if (w && w.ok) commitGen(id, gen);
-    return landed(w, { id: String(id), grant: U.grantIdOf(String(id), GM.principalKey(GM.bareOf(principal))), widened: plan.widened, added: plan.added });
+    return landed(w, { id: String(id), grant: U.grantIdOf(String(id), GM.principalKey(GM.bareOf(principal))), widened: plan.widened, added: plan.added, ...(plan.replaced ? { replaced: plan.replaced } : {}) });
   }
   /** r2 (MAJOR 1): THE QUESTION BEFORE A STANDING REQUEST'S CARD — would addMember write this member? (the plan + the row
    *  rules, nothing written) → { ok: true } | the named refusal the Allow would meet. */
-  function judgeMember(id, principal, { hosts = [], until = null, tool = null, commands = null, source = null } = {}) {
+  function judgeMember(id, principal, { hosts = [], until = null, tool = null, commands = null, source = null, standing = false } = {}) {
     if (!okId(id)) return named('bad_resource');
     if (!unlocked()) return named('vault_locked');
-    const plan = U.withMember(verifiedRow(rowOf(id)), principal, { hosts, until, tool, commands, source, at: now() });
+    const was = verifiedRow(rowOf(id));
+    const plan = U.withMember(was, principal, { hosts, until, tool, commands, source, at: now(), now: now(), standing });
     if (!plan.ok) return named(plan.code);
-    const v = rowRules(id, { to: plan.to, except: plan.except });
-    return v.ok ? { ok: true } : v;
+    const v = rowRules(id, { to: plan.to, except: plan.except }, { was });   // r3: THIS member, the row as it becomes through it — never another member's legacy wildcard
+    return v.ok ? { ok: true, ...(plan.replaced ? { replaced: plan.replaced } : {}) } : v;
   }
   /** ONE member out (a click: a narrowing). */
   function revoke(id, principalKey, { by = 'user' } = {}) {
@@ -228,14 +238,39 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
   }
   /** THE CARRY: data/vault-run.json's «always» rows (read by the run door, its mark verified) → members, through the ONE
    *  writer, by 'migration'. → { carried, expired, hostless, failed }. */
-  function carry(always, { resourceOf = (x) => x } = {}) {
-    const plan = U.alwaysCarry(always, { now: now(), resourceOf });
-    let carried = 0, failed = 0;
+  function carry(always, { resourceOf = (x) => x, toolOfWild = null } = {}) {
+    const plan = U.alwaysCarry(always, { now: now(), resourceOf, toolOfWild });
+    let carried = 0, failed = 0, legacy = 0;
     for (const m of plan.members) {
-      const r = addMember(m.resource, m.principal, { hosts: m.hosts, until: m.until, tool: m.tool || null }, { by: 'migration' });   // r2: a carried wildcard keeps the CLI it was minted by (the row rules refuse one without)
-      if (r.ok) carried++; else { failed++; log(`[vault-use] an «always» row could not be carried (${m.resource}: ${r.code})`); }
+      const r = addMember(m.resource, m.principal, { hosts: m.hosts, until: m.until, tool: m.tool || null, legacy: !!m.legacy }, { by: 'migration' });   // r2: a carried wildcard keeps the CLI it was minted by; r3: one whose CLI nobody can name is carried as a LEGACY member
+      if (r.ok) { carried++; if (m.legacy) legacy++; } else { failed++; log(`[vault-use] an «always» row could not be carried (${m.resource}: ${r.code})`); }
     }
-    return { carried, expired: plan.expired, hostless: plan.hostless, failed };
+    return { carried, expired: plan.expired, hostless: plan.hostless, failed, legacy };
+  }
+  /** r3 (MAJOR 1): THE WILDCARD CARRY — every stored member's wildcard host with NO tool (the 2.369.363/.364 carry wrote them)
+   *  gets the CLI the tool table names for it (`toolOfWild`), through the ONE writer, by 'migration'; one the table cannot name
+   *  stays a LEGACY member (named on its row; the door tells the owner once). Run by the door at each unlock, after the carry.
+   *  → { ok, healed: [{resource, principal, host, tool}], legacy: [{resource, principal, host}], failed } | vault_locked. */
+  function carryWildcards(toolOfWild, { by = 'migration' } = {}) {
+    if (!unlocked()) return named('vault_locked');
+    const healed = [], legacy = []; let failed = 0;
+    for (const raw of store().rowsOfDoor(U.DOOR)) {
+      const id = raw && raw.resource;
+      if (!okId(id)) continue;
+      const was = verifiedRow(raw);
+      const plan = U.withWildTools(was, toolOfWild);
+      if (!plan.ok) continue;
+      for (const l of plan.legacy) legacy.push({ resource: String(id), ...l });
+      if (!plan.healed.length) continue;
+      const v = rowRules(id, { to: plan.to, except: plan.except }, { was });
+      if (!v.ok) { failed++; log(`[vault-use] a legacy wildcard could not be given its tool (${id}: ${v.code})`); continue; }
+      const g = store();
+      const gen = nextGen();
+      const w = g.set(U.DOOR, String(id), { to: stamp(id, plan.to, plan.except, gen), except: plan.except }, by);
+      if (w && w.ok) { commitGen(id, gen); for (const h of plan.healed) healed.push({ resource: String(id), ...h }); } else { failed++; log(`[vault-use] a legacy wildcard could not be given its tool (${id}: ${(w && w.code) || 'not_written'})`); }
+    }
+    if (healed.length) said();
+    return { ok: true, healed, legacy, failed };
   }
   /** The row as the window draws it (+ «used N× by M conversations» per member, from `counts` = VU.countsOf's entry row). */
   function publicFor(id, counts = null) {
@@ -256,7 +291,7 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
     }
     return out;
   }
-  return { rowsOf, verdictFor, heldBy, setRow, addMember, judgeMember, revoke, drop, carry, publicFor, statusOf: (code) => STATUS[code] || 400, words: (code) => WORDS[code] || code };
+  return { rowsOf, verdictFor, heldBy, setRow, addMember, judgeMember, revoke, drop, carry, carryWildcards, publicFor, statusOf: (code) => STATUS[code] || 400, words: (code) => WORDS[code] || code };
 }
 
 module.exports = { create, widens, STATUS, WORDS };
