@@ -18,6 +18,9 @@
 //      outputs.mjs) BEFORE it is put in place; the design's §2.3 table through the real ensure(); helper_unsigned by name; the
 //      LAST re-grant (helper_signed_regrant); a RED control: a copy of stream-mac.js that skips the verdict takes an unsigned push
 //       round 4 (acceptance r3): (m) a pending judgment is tied to its FILE, (n) the unanswered-runs refusal has a door (until + boot); §6 the hub's FOUR ROADS
+//       round 5 (acceptance r4, §6 ROUND 5): a record present but unreadable is refused by name (+ a mutant control), the bytes SENT are the bytes
+//       named (a prebuilt replaced under the push ⇒ refused, the Mac asked to drop it), a device `until` outside Date's range, the signed row's
+//       kind over the record's, the signed re-push when the Mac's door opens — bounded (SIGNED_PUSH_MAX)
 //   §3 THE HELPER'S PLACE: ready at the shipped version (nothing run); none + no compiler ⇒ no_helper (the trampoline is never
 //      run); the hub's pushed prebuilt is put in place; a compiler ⇒ built (both slices at once, then lipo, codesign); a
 //      REPLACED helper that held its grant ⇒ regrant until the facts see the grant again; never rebuilt at the same version
@@ -902,7 +905,7 @@ const pictures = (rtp) => { const out = []; let cur = []; for (const p of rtp) {
       fs.rmSync(hb + '.identity.json');
       fs.writeFileSync(manF, JSON.stringify({ v: 1, version: '9.9.9', helper: { version: SRC.VERSION, sha256: sha(hb), identity: { kind: 'adhoc', teamId: null, identifier: null } } }));
       const w1 = await DW.pushMacHelper(dmF, need, hubBin, { manifestFile: manF });
-      ok(w1.ok === true && w1.identity === null && /^named by the signed release 9\.9\.9 \(sha256 [0-9a-f]{12}…\)$/.test(w1.note) && writes.length === 2, 'road 1 — the signed release\'s row names this prebuilt (version + sha256) ⇒ pushed, even without an identity record (the workflow\'s two assets; acceptance r3: 808126df3 refused for the missing file); the words name the release', w1);
+      ok(w1.ok === true && w1.identity === 'adhoc' && /^named by the signed release 9\.9\.9 \(sha256 [0-9a-f]{12}…\)$/.test(w1.note) && writes.length === 2, 'road 1 — the signed release\'s row names this prebuilt (version + sha256) ⇒ pushed, even without an identity record (the workflow\'s two assets; acceptance r3: 808126df3 refused for the missing file); the words name the release, the identity is the row\'s kind (round 5)', w1);
       // road 2 — a row that names another version, or other bytes than the file ⇒ refused by name (the ONE refusal the r1 brief asked for)
       ident({});
       fs.writeFileSync(manF, JSON.stringify({ v: 1, version: '9.9.9', helper: { version: 'vs-other', sha256: sha(hb), identity: { kind: 'adhoc', teamId: null, identifier: null } } }));
@@ -944,6 +947,73 @@ const pictures = (rtp) => { const out = []; let cur = []; for (const p of rtp) {
     ok(s1.take === true && s2.take === true && writes.length === 2 && logs3.filter((m) => /pushed this hub's signed prebuilt/.test(m)).length === 1, 'an offer answer whose helper says wantSigned ⇒ the hub pushes its signed prebuilt ONCE per machine (a second start pushes nothing; the manifest copy beside the bundle is absent in a worktree, so the identity record decides)', { writes: writes.length, logs3 });
     for (const k of [s1.key, s2.key]) if (k) await hub3.stop(k, 'stopped').catch(() => { });
     hub3.shutdown?.();
+    { // ROUND 5 (acceptance r4 — r4 held; five minors, all the hub's push edges)
+      const w0 = writes.length;
+      // leg «r5 record unreadable»: a record that EXISTS but is not a JSON object (truncated / an array / null) is refused by name — never taken for absent (808126df3 refused it; round 4 pushed with words that said «no record»); a record without a sha256 is malformed
+      const idp = hb + '.identity.json', rec = {};
+      for (const [k, text] of [['truncated', '{"version":"vs-other","sha256":"'], ['array', '[1]'], ['null', 'null'], ['nosha', JSON.stringify({ version: SRC.VERSION, kind: 'adhoc' })]]) { fs.writeFileSync(idp, text); rec[k] = await DW.pushMacHelper(dmF, need, hubBin, { manifestFile: noMan }); }
+      ok(['truncated', 'array', 'null'].every((k) => rec[k].ok === false && rec[k].code === 'helper_unsigned' && /vibespace-screen\.identity\.json unreadable: /.test(rec[k].error) && !/no vibespace-screen\.identity\.json beside it/.test(rec[k].error)) && /unreadable: not a JSON object \(an array\)/.test(rec.array.error) && /unreadable: not a JSON object \(null\)/.test(rec.null.error) && rec.nosha.ok === false && rec.nosha.code === 'helper_unsigned' && /malformed identity record \(vibespace-screen\.identity\.json names no sha256\)/.test(rec.nosha.error) && !/vs undefined/.test(rec.nosha.error) && writes.length === w0, 'r5 record unreadable — an identity record that is THERE but cannot be read (truncated, an array, null) is refused by name «vibespace-screen.identity.json unreadable: <why>», never taken for absent (acceptance r4: c9a6b6ede pushed and said «no record»); one that names no sha256 is called malformed (was «vs undefined»)', rec);
+      { // the mutant control: a copy of desktop-webrtc.js whose unreadable-record refusal is skipped takes the truncated record for absent — pushes, and says «no record»
+        const hubSrc = fs.readFileSync(path.join(REPO, 'src/server/desktop-webrtc.js'), 'utf8');
+        const mutText = hubSrc.replace('if (identBad !== null) return refuse(', 'if (false && identBad !== null) return refuse(').replace(/require\('\.\.\/([^']+)'\)/g, (m, f) => `require(${JSON.stringify(path.join(REPO, 'src', f))})`);
+        const mutFile = path.join(home('smac-hubmut'), 'desktop-webrtc-mutant.js'); fs.writeFileSync(mutFile, mutText);
+        const MUT = require(mutFile);
+        fs.writeFileSync(idp, '{"version":"vs-other","sha256":"');
+        const rm = await MUT.pushMacHelper(dmF, need, hubBin, { manifestFile: noMan });
+        ok(mutText !== hubSrc && rm.ok === true && /no vibespace-screen\.identity\.json beside it/.test(rm.note) && writes.length === w0 + 1, 'RED CONTROL: the copy whose unreadable-record refusal is skipped PUSHES the prebuilt under a truncated record and says «no vibespace-screen.identity.json beside it» (round 4\'s words) — the leg above would fail on it', rm);
+      }
+      ident({});
+      // leg «r5 bytes sent»: the bytes SENT are hashed as they go and must be the bytes NAMED — a prebuilt replaced under the push (an operator's drop into data/bin/helpers/ while the device link opens) is refused by name, the Mac asked to drop what it got
+      const A = fs.readFileSync(hb), modeA = fs.statSync(hb).mode, B = Buffer.concat([A.subarray(0, A.length - 1), Buffer.from([A[A.length - 1] ^ 0x01])]); // the same size, other bytes
+      fs.writeFileSync(manF, JSON.stringify({ v: 1, version: '9.9.9', helper: { version: SRC.VERSION, sha256: sha(hb), identity: { kind: 'developer-id', teamId: CS.TEAM, identifier: CS.IDENTIFIER } } }));
+      const other = path.join(hubBin, 'vibespace-screen.new'); fs.writeFileSync(other, B, { mode: modeA });
+      const rms = [], gotT = [];
+      const dmT = { fsWriteStream: async (p2, o) => { if (fs.existsSync(other)) fs.renameSync(other, hb); writes.push(p2); const ch = []; for await (const c of o.source) ch.push(c); gotT.push(crypto.createHash('sha256').update(Buffer.concat(ch)).digest('hex')); return { size: o.size, sha256: gotT[gotT.length - 1] }; }, fsRm: async (p2, recursive, o) => { rms.push({ p2, recursive, by: o && o.by }); return { ok: true }; } };
+      const rt = await DW.pushMacHelper(dmT, need, hubBin, { manifestFile: manF });
+      const shaA = crypto.createHash('sha256').update(A).digest('hex'), shaB = crypto.createHash('sha256').update(B).digest('hex');
+      ok(gotT[0] === shaB && rt.ok === false && rt.code === 'helper_unsigned' && String(rt.error).includes(`changed under the push: the bytes sent (sha256 ${shaB.slice(0, 12)}…) are not the ones named (sha256 ${shaA.slice(0, 12)}…)`) && /the Mac dropped them/.test(rt.error) && rms.length === 1 && rms[0].p2 === PP.incoming(SRC.VERSION) && rms[0].recursive === false && rms[0].by === 'system:desktop-webrtc' && writes.length === w0 + 2, 'r5 bytes sent — the prebuilt replaced (same size, other bytes) between the hub\'s digest and its push: the bytes SENT are hashed as they go and are NOT the ones named ⇒ refused by name (both sha256s), the Mac asked to drop the file it got (fsRm by system:desktop-webrtc); nothing is claimed for bytes nobody checked (acceptance r4: c9a6b6ede pushed B under «named by the signed release (sha256 A…)»)', { rt, rms, gotT });
+      fs.writeFileSync(hb, A, { mode: modeA }); ident({});
+      const rt2 = await DW.pushMacHelper(dmT, need, hubBin, { manifestFile: manF }).catch((e) => ({ threw: String(e) }));
+      ok(rt2.ok === true && rt2.sha256 === shaA && gotT[1] === shaA && rms.length === 1 && writes.length === w0 + 3, '…the restored prebuilt (the row names it) is pushed, the result names the sha256 of the bytes sent (= the bytes named; no rename happened — the .new file is gone)', rt2);
+      // leg «r5 until range»: a device-sent `until` outside Date's range (toISOString would throw) — a refusal of OTHER bytes still pushes; of THESE bytes the words say «tried again later»; through start() the stream verdict is the refusal's, never offer_failed «Invalid time value»
+      const ru1 = await DW.pushMacHelper(dmF, { ...need, refused: { version: SRC.VERSION, sha256: 'b'.repeat(64), code: 'helper_unsigned', why: 'other bytes', until: 1e16 } }, hubBin, { manifestFile: noMan }).catch((e) => ({ threw: String(e) }));
+      const ru2 = await DW.pushMacHelper(dmF, { ...need, refused: { version: SRC.VERSION, sha256: shaA, code: 'helper_unsigned', why: 'codesign did not answer 3 times', until: 1e300 } }, hubBin, { manifestFile: noMan }).catch((e) => ({ threw: String(e) }));
+      const ru3 = await DW.pushMacHelper(dmF, { ...need, refused: { version: SRC.VERSION, sha256: shaA, code: 'helper_unsigned', why: 'x', until: Date.UTC(2031, 5, 6, 7, 8, 9) } }, hubBin, { manifestFile: noMan });
+      const dmU = { ...dmF, streamOffer: async () => ({ ok: false, code: 'helper_unsigned', error: 'the screen helper the hub pushed was refused', helper: { dir: PP.dir, version: SRC.VERSION, refused: { version: SRC.VERSION, sha256: 'b'.repeat(64), code: 'helper_unsigned', why: 'other bytes', until: 1e16 } } }), streamStop: async () => ({ ok: true }) };
+      const logsU = []; const hubU = DW.create({ access: { streamRung: async () => ({ take: true, source: 'screen', dm: dmU, platform: 'darwin' }) }, relay: false, udpLeg: false, helpersDir: hubBin, log: { log: (m) => logsU.push(m), warn: (m) => logsU.push(m) } });
+      const sU = await hubU.start('host-until'); hubU.shutdown?.();
+      ok(ru1.ok === true && ru2.ok === false && ru2.code === 'helper_unsigned' && /not sent again, tried again later or at the agent's next start \(the Mac named no legible time\)/.test(ru2.error) && ru2.until === undefined && ru3.ok === false && /not sent again before 2031-06-06T07:08:09\.000Z or the agent's next start/.test(ru3.error) && ru3.until === Date.UTC(2031, 5, 6, 7, 8, 9) && sU.take === false && sU.code === 'helper_unsigned' && !/Invalid time value/.test(String(sU.why)) && logsU.some((m) => /pushed this hub's prebuilt/.test(m)) && writes.length === w0 + 5, 'r5 until range — a device `until` beyond Date\'s range: a refusal of OTHER bytes still pushes (acceptance r4: c9a6b6ede threw «Invalid time value» and start() answered offer_failed), a refusal of THESE bytes says «tried again later» (no `until` in the result); a legible time is named and rides the result (`until`); start() pushes and its verdict is the refusal\'s', { ru1, ru2: ru2.error, ru3: ru3.error, sU, logsU });
+      // leg «r5 row kind»: signedOnly reads the SIGNED row's identity.kind when there is a row (the row wins), the unsigned record's otherwise
+      fs.rmSync(idp);
+      fs.writeFileSync(manF, JSON.stringify({ v: 1, version: '9.9.9', helper: { version: SRC.VERSION, sha256: shaA, identity: { kind: 'developer-id', teamId: CS.TEAM, identifier: CS.IDENTIFIER } } }));
+      const rk1 = await DW.pushMacHelper(dmF, need, hubBin, { manifestFile: manF, signedOnly: true });
+      fs.writeFileSync(manF, JSON.stringify({ v: 1, version: '9.9.9', helper: { version: SRC.VERSION, sha256: shaA, identity: { kind: 'adhoc', teamId: null, identifier: null } } }));
+      ident({});
+      const rk2 = await DW.pushMacHelper(dmF, need, hubBin, { manifestFile: manF, signedOnly: true });
+      ident({ kind: 'adhoc', teamId: null, identifier: null });
+      const rk3 = await DW.pushMacHelper(dmF, need, hubBin, { manifestFile: noMan, signedOnly: true });
+      ok(rk1.ok === true && rk1.identity === 'developer-id' && /^named by the signed release 9\.9\.9/.test(rk1.note) && rk2.ok === false && rk2.code === 'helper_unsigned' && /is adhoc \(per the signed release\), not a Developer ID build/.test(rk2.error) && rk3.ok === false && /is adhoc \(per its identity record\), not a Developer ID build/.test(rk3.error) && writes.length === w0 + 6, 'r5 row kind — signedOnly judges the build\'s kind by the SIGNED row when there is one (developer-id without a record ⇒ pushed; adhoc with a record that says developer-id ⇒ refused — the row wins) and by the record otherwise (acceptance r4: the unsigned record outranked the signed statement)', { rk1, rk2: rk2.error, rk3: rk3.error });
+      ident({});
+      // leg «r5 signed re-push» + leg «r5 re-push bound»: the signed push comes AGAIN when the Mac's hold on those bytes (a refusal with a door / a judgment in progress) is gone from its answer — its door opened (`until` passed, or the agent started anew) — else after SIGNED_RETRY_MS; SIGNED_PUSH_MAX attempts per machine per hub life
+      let clock = Date.UTC(2031, 0, 1), hold = null;
+      const dmS = { ...dmF, streamOffer: async () => ({ ok: true, sid: 'sx', offer: { type: 'offer', sdp: 'v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n' }, source: { kind: 'screen', origin: { x: 0, y: 0 } }, helper: { dir: PP.dir, version: SRC.VERSION, identity: { kind: 'adhoc' }, wantSigned: true, ...(hold ? { refused: hold } : {}) } }), streamStop: async () => ({ ok: true }) };
+      const logsS = []; const hubS = DW.create({ access: { streamRung: async () => ({ take: true, source: 'screen', dm: dmS, platform: 'darwin' }) }, relay: false, udpLeg: false, helpersDir: hubBin, now: () => clock, log: { log: (m) => logsS.push(m), warn: (m) => logsS.push(m) } });
+      const pushesS = () => logsS.filter((m) => /pushed this hub's signed prebuilt/.test(m)).length, keysS = [];
+      const startS = async () => { const x = await hubS.start('host-door'); if (x.key) keysS.push(x.key); return x; };
+      await startS(); const n1 = pushesS(); await startS(); const n2 = pushesS();                                   // once; the same instant: not again
+      hold = { version: SRC.VERSION, sha256: shaA, code: 'helper_unsigned', why: 'codesign did not answer 3 times (timeout); it will be tried again at 2031-01-01T00:20:00.000Z, or at the agent\'s next start', until: clock + 20 * 60 * 1000 };
+      clock += 5 * 60 * 1000; await startS(); const n3 = pushesS(); const heldLog = logsS.filter((m) => /the Mac holds this hub's signed prebuilt/.test(m));
+      clock += 10 * 60 * 1000; await startS(); const n4 = pushesS();                                                // the hold still stands (15 min): nothing
+      hold = null; clock += 1 * 60 * 1000; await startS(); const n5 = pushesS();                                    // the door opened (the Mac's refusal gone — until passed or the agent started anew): pushed again, at once
+      ok(n1 === 1 && n2 === 1 && n3 === 1 && heldLog.length === 1 && /sha256 [0-9a-f]{12}…\): codesign did not answer 3 times/.test(heldLog[0]) && /pushed again when that is over/.test(heldLog[0]) && n4 === 1 && n5 === 2 && /try 2 of 8/.test(logsS.filter((m) => /pushed this hub's signed prebuilt/.test(m)).pop()) && writes.length === w0 + 8, 'r5 signed re-push — the signed prebuilt is pushed once; while the Mac holds those very bytes (a refusal with a door) nothing more (one log line names the hold); the hold GONE from the Mac\'s answer (its door opened: `until` passed, or the agent started anew) ⇒ pushed AGAIN at once (acceptance r4: c9a6b6ede pushed once per hub life, so the 30-minute retry never came)', { n1, n2, n3, n4, n5, heldLog, last: logsS.filter((m) => /pushed this hub's signed prebuilt/.test(m)).pop() });
+      clock += 29 * 60 * 1000; await startS(); const n6 = pushesS();                                                // 29 min after the second push, no hold reported: not yet
+      clock += 2 * 60 * 1000; await startS(); const n7 = pushesS();                                                 // 31 min: the hub's own interval (the Mac judged nothing it told of)
+      for (let i = 0; i < 12; i++) { clock += 31 * 60 * 1000; await startS(); }                                     // the bound: SIGNED_PUSH_MAX attempts per machine per hub life
+      const n8 = pushesS(), lastWords = logsS.filter((m) => /pushed this hub's signed prebuilt/.test(m)).pop();
+      ok(DW.SIGNED_RETRY_MS === 30 * 60 * 1000 && DW.SIGNED_PUSH_MAX === 8 && n6 === 2 && n7 === 3 && n8 === 8 && /not again in this hub's life \(8 tries\)/.test(lastWords) && writes.length === w0 + 6 + 8, 'r5 re-push bound — without a hold the Mac told of, a signed push is tried again at the first stream start after SIGNED_RETRY_MS (30 min — the agent\'s own door interval), and at most SIGNED_PUSH_MAX (8) attempts per machine per hub life: the eighth says «not again in this hub\'s life», twelve more starts push nothing', { n6, n7, n8, lastWords });
+      for (const k of keysS) await hubS.stop(k, 'stopped').catch(() => { });
+      hubS.shutdown?.();
+    }
   }
   if (sp.key) await hub2.stop(sp.key, 'stopped').catch(() => { });
   hub2.shutdown?.();
