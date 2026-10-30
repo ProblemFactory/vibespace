@@ -568,7 +568,8 @@ console.log('③d a handler the sanitizer\'s inert parse set and dropped is `san
         return f.join('; ');
       };
       const tick = (ms) => new Promise((r) => setTimeout(r, ms));
-      const until = async (H, ms) => { const t0 = Date.now(); while (!H.sink.stats().rejudged && Date.now() - t0 < ms) await tick(5); return Date.now() - t0; };
+      const seen = async (done, ms) => { const t0 = Date.now(); while (!done() && Date.now() - t0 < ms) await tick(5); return Date.now() - t0; };
+      const until = (H, ms) => seen(() => H.sink.stats().rejudged, ms);
       const srcK = readRepo('src/server/csp-reports.js'), TRIG = ['  if (stale.length) setImmediate(rejudge);\n', '      rejudge(); // a hub that met the bug'];
       ok(TRIG.every((t) => srcK.split(t).length === 2), 'the mutant\'s anchors: the re-judge\'s two triggers in the sink, the boot\'s setImmediate and the report\'s call');
       const NB = load(path.join(REPO, 'src/server/csp-reports.js'), srcK.replace(TRIG[0], '').replace(TRIG[1], '      // cut'));
@@ -589,11 +590,12 @@ console.log('③d a handler the sanitizer\'s inert parse set and dropped is `san
       await H2.close();
       // NO FOR-YOU STORE AT BOOT (r3): a getter that answers null and one that throws (server.js's const read before it is
       // set) are one fact — nothing rewritten (a line rewritten then could never close its notice); once the store answers
-      // the re-judge runs by itself: null ⇒ the boot's retry (no report), a throw ⇒ the next report (its retry a minute off)
+      // the re-judge runs by itself: null ⇒ the boot's retry (no report), a throw ⇒ the next report (its retry a minute off).
+      // Judged by EVENTS, never a fixed delay (r4): the getter's asks (the boot's, a retry's) and the mutant's rewrite
       const lateBoot = async (mod, home, first, o = {}) => {
-        const told = [], st = new UserTodoManager({ dataDir: path.join(home, 'data'), expirySweepMs: 0 }); let up = false;
-        const H = await hub({ dir: path.join(home, 'data'), sinkModule: mod, publicDir: PUB, getUserTodos: () => (up ? st : first(st)), log: { log: (x) => told.push(String(x)), warn: (x) => told.push(String(x)) }, ...o });
-        return { ...H, store: st, told, home, up: () => { up = true; }, close: () => { st.stop(); return H.close(); } };
+        const told = [], st = new UserTodoManager({ dataDir: path.join(home, 'data'), expirySweepMs: 0 }); let up = false, asked = 0;
+        const H = await hub({ dir: path.join(home, 'data'), sinkModule: mod, publicDir: PUB, getUserTodos: () => (asked++, up ? st : first(st)), log: { log: (x) => told.push(String(x)), warn: (x) => told.push(String(x)) }, ...o });
+        return { ...H, store: st, told, home, asked: () => asked, up: () => { up = true; }, close: () => { st.stop(); return H.close(); } };
       };
       const early = (H) => { const l = linesOf(path.join(H.home, 'data', SINK.FILE))[0], n = openOf(H.store); return [l && (l.kind || !l.noticed) ? 'the probe\'s line was rewritten with no store to close its notice' : '', n !== 1 ? `For you holds ${n} (want its 1 open)` : '', H.told.length ? `said «${H.told.join(' | ')}»` : ''].filter(Boolean).join('; '); };
       const NUL = () => null, THROW = () => { throw new ReferenceError("Cannot access 'userTodos' before initialization"); };
@@ -601,15 +603,15 @@ console.log('③d a handler the sanitizer\'s inert parse set and dropped is `san
       ok(srcK.split(ANCHOR).length === 2, 'the mutant\'s anchor: the re-judge asks whether the For-you store is up');
       const MN = load(path.join(REPO, 'src/server/csp-reports.js'), srcK.replace(ANCHOR, 'const todos = storeUp() || { idsWhere: () => [], setStatusMany: () => ({ changed: [] }) };'));
       const [HN, HT, HX] = await Promise.all([lateBoot(SINK, homes.null, NUL, { retryMs: 20 }), lateBoot(SINK, homes.throw, THROW, { retryMs: 60e3 }), lateBoot(MN, homes.mutnull, NUL, { retryMs: 20 })]);
-      await tick(45); // the boot's tick and a retry, the store still not up
+      const [, , tX] = await Promise.all([seen(() => HN.asked() >= 2, 3000), seen(() => HT.asked() >= 1, 3000), until(HX, 3000)]); // null: the boot's ask and a retry's; a throw: the boot's; the mutant: its rewrite — the store still not up
       const eN = early(HN), eT = early(HT), eX = early(HX);
-      ok(!eN && !eT && !HN.sink.stats().rejudged && !HT.sink.stats().rejudged, 'NO STORE AT BOOT — a getter that answers null, one that throws: nothing rewritten, the notice still open, nothing said', { eN, eT });
+      ok(!eN && !eT && !HN.sink.stats().rejudged && !HT.sink.stats().rejudged && HN.asked() >= 2 && HT.asked() >= 1, 'NO STORE AT BOOT — a getter that answers null (asked at the boot and again by its retry), one that throws (asked at the boot): nothing rewritten, the notice still open, nothing said', { eN, eT, asked: [HN.asked(), HT.asked()] });
       HN.up(); HT.up(); HX.up();
       await post(HT, PROBE);
       await Promise.all([until(HN, 3000), until(HT, 3000)]); await tick(25);
       const fN = bootFault(HN), fT = bootFault(HT), fX = bootFault(HX);
       ok(!fN && !fT, 'the store answers ⇒ the re-judge runs by itself (null: the boot\'s retry, no report; a throw: the next report) — the line the sanitizer\'s, its notice CLOSED, said once', { fN, fT });
-      ok(/rewritten with no store/.test(eX) && /For you still holds 1/.test(fX), `MUTANT (a store not up taken as an empty one — r2's null) ⇒ RED by name: «${eX}», and once the store answers «${fX}»`, { eX, fX });
+      ok(/rewritten with no store/.test(eX) && /For you still holds 1/.test(fX), `MUTANT (a store not up taken as an empty one — r2's null; judged once its rewrite is seen, ${HX.sink.stats().rejudged ? `at ${tX} ms` : `NOT in ${tX} ms`}) ⇒ RED by name: «${eX}», and once the store answers «${fX}»`, { eX, fX });
       await Promise.all([HN.close(), HT.close(), HX.close()]);
       // THE LINES FIRST, THE NOTICE LAST (r3): a file that cannot be rewritten (its temp name taken) closes nothing — its
       // line still the app page's, its notice open, a warning; the next boot (the way clear) does both
