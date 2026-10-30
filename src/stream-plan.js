@@ -783,7 +783,9 @@ function flvReader() {
 // posts the viewer's input. THE TCC LAW: macOS keys Screen Recording / Accessibility on the RESPONSIBLE process — a plain
 // child of the agent is the agent's node BY PATH — so the helper is spawned DISCLAIMED (its own `--disclaim` re-spawn), lives
 // at a FIXED path with its own version and is replaced only when the shipped version differs (an ad-hoc grant is keyed to
-// path + cdhash: a new binary must be granted again — helper_changed_regrant). It never asks for a grant and never prompts
+// path + cdhash: a new binary must be granted again — helper_changed_regrant; lane apple-signing: a DEVELOPER ID signed helper is
+// keyed on its designated requirement — identifier + Team ID, src/mac-helper-identity.js — so a signed build keeps the grant across
+// versions, and the ONE re-grant left is the signed build replacing the ad-hoc one: helper_signed_regrant). It never asks for a grant and never prompts
 // (a background agent cannot: tccd "does not allow prompting"); a refusal names the Settings pane (MAC_SETTINGS).
 const MAC_HELPER = Object.freeze({ name: 'vibespace-screen', dir: Object.freeze(['.vibespace', 'helpers']), target: 'macos15.0', archs: Object.freeze(['arm64', 'x86_64']) });
 const MAC_SETTINGS = Object.freeze({
@@ -869,8 +871,12 @@ const MAC_WHY = Object.freeze({
   no_helper: 'the Mac has no screen helper yet and cannot build one (no Command Line Tools: run `xcode-select --install` on the Mac, or let the hub push its prebuilt helper)',
   screen_permission: 'Screen Recording is off for vibespace-screen — on the Mac: System Settings → Privacy & Security → Screen & System Audio Recording → turn on vibespace-screen',
   helper_changed_regrant: 'the screen helper was updated, so macOS asks for its permission again — on the Mac: System Settings → Privacy & Security → Screen & System Audio Recording → turn vibespace-screen off and on',
+  helper_signed_regrant: 'the signed screen helper replaced the old one, so macOS asks for its permission ONE LAST time — on the Mac: System Settings → Privacy & Security → Screen & System Audio Recording → turn vibespace-screen off and on (a Developer ID helper keeps the grant from now on)',
+  helper_unsigned: 'the screen helper the hub pushed was refused: it is not signed by the VibeSpace release team (unsigned, ad-hoc or a foreign signature) — the Mac keeps the helper it has, or builds its own where the Command Line Tools exist',
   accessibility_permission: 'Accessibility is off for vibespace-screen (macOS drops its keys and clicks) — on the Mac: System Settings → Privacy & Security → Accessibility → turn on vibespace-screen',
 });
+/** The re-grant's name (lane apple-signing): a Developer ID helper's is the LAST one — tccd keys it on identifier + Team ID. */
+const macRegrantCode = (h) => (h && h.identity && h.identity.kind === 'developer-id' ? 'helper_signed_regrant' : 'helper_changed_regrant');
 /**
  * The Mac's plan (planScreen's darwin branch). `facts` = the agent's darwin stream-facts { platform: 'darwin', helper: {
  * state: 'ready' | …, code?, regrant, bin }, tcc, displays, windows }; `display` = a display id (null = the main one) or
@@ -882,7 +888,7 @@ function planMacScreen(facts, { display = null, window = null, fps = null, kbps 
   const h = f.helper || {};
   if (h.state !== 'ready' || !h.bin) return { ok: false, code: h.code || 'no_helper', error: h.error || MAC_WHY.no_helper };
   const tcc = (f.tcc && f.tcc.screen) || 'unknown';
-  if (tcc !== 'granted') return { ok: false, code: h.regrant ? 'helper_changed_regrant' : 'screen_permission', error: h.regrant ? MAC_WHY.helper_changed_regrant : MAC_WHY.screen_permission, settings: MAC_SETTINGS.screen };
+  if (tcc !== 'granted') { const rc = h.regrant ? macRegrantCode(h) : 'screen_permission'; return { ok: false, code: rc, error: MAC_WHY[rc], settings: MAC_SETTINGS.screen }; }
   const ds = Array.isArray(f.displays) ? f.displays : [], ws = Array.isArray(f.windows) ? f.windows : [];
   let kind = 'display', d = null, w = null, pw, ph;
   if (window != null) {
@@ -1027,7 +1033,7 @@ module.exports = {
   ENCODER_LADDER, pickEncoder, FFMPEG_MIN_MAJOR, ffmpegCandidates, parseFfmpegFacts, ffmpegVerdict, STREAM_FACTS_PS, parseStreamFacts, unthrottlePs, parseUnthrottle, screenDisplayRows, MAPPED_MIN_W, mappedStepOf, scaledInputOf,
   SCREEN_DEFAULTS, planScreen, captureArgv, encodeArgv, directArgv, stillArgv, stillHalfArgv, rgbFromHalf, pngOf, pngSize, KBPS_RULE, kbpsDecision, MAC_KBPS_RULE, flvReader,
   KBPS_FLOOR, kbpsFloor, RATE_RULE, MAC_RATE_RULE, rateDecision, rateFollower, twccPackets, sendEstimator, GONE_RULE, displaySeen, judgeGone, captureRestart,
-  MAC_HELPER, MAC_SETTINGS, MAC_LADDER, MAC_WHY, macHelperPaths, macHelperSourceFile, macBuildPlan, macHelperSpawn, parseMacFacts, windowSourceOf, macDisplayOf, macWindowRows,
+  MAC_HELPER, MAC_SETTINGS, MAC_LADDER, MAC_WHY, macRegrantCode, macHelperPaths, macHelperSourceFile, macBuildPlan, macHelperSpawn, parseMacFacts, windowSourceOf, macDisplayOf, macWindowRows,
   macRungOf, planMacScreen, macInputTarget, macPoint,
   WGC_HELPER, WGC_RECIPE, wgcBuildPlan, wgcHead, wgcLine, WINDOW_DEFAULTS, WINDOW_REFRESH, windowIntervalMs, planWindow, wgcCaptureArgv, windowEncodeArgv,
 };

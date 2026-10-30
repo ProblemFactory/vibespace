@@ -23,8 +23,14 @@
 //                                  framed Opus packets) as FLV AUDIO tags (0x91 'Opus' + the packet — the real helper's shape) every
 //                                  20 ms beside the pictures; `--audio` = on from the start (its `started` line says audio: true)
 //   MAC_FACTS                      the canned facts (two 4K displays at 2×, two windows — names invented)
+//   writeFakeCodesign(dir)         lane apple-signing: a fake /usr/bin/codesign for the daemon legs (the bundle copy's literal is
+//                                  pointed at it): `--verify` / `-dv` / `-dr -` judge a file by a marker line
+//                                  `VS_FAKE_IDENTITY <kind> [<team>] [dr=cdhash]` inside it (none = ad-hoc, today's helper;
+//                                  cfg.identityLine writes one into a fake helper; dr=cdhash = a Developer ID signature with a
+//                                  custom cdhash requirement); `-s -` signs nothing; every argv is appended to <bin>.log
 import fs from 'node:fs';
 import path from 'node:path';
+import * as CS from './codesign-outputs.mjs'; // lane apple-signing: what codesign -dv prints
 
 export const MAC_FACTS = Object.freeze({
   os: '26.5.2', arch: 'arm64', locked: false, front: 501, pid: 900,
@@ -46,7 +52,7 @@ export function writeFakeMacHelper(home, cfg) {
   const bin = path.join(dir, 'vibespace-screen');
   fs.writeFileSync(bin, `#!${process.execPath}
 'use strict';
-const fs = require('fs');
+${cfg.identityLine ? `// VS_FAKE_IDENTITY ${cfg.identityLine}\n` : ''}const fs = require('fs');
 const cfg = JSON.parse(fs.readFileSync(${JSON.stringify(cfgFile)}, 'utf8'));
 let a = process.argv.slice(2);
 const log = (o) => { if (cfg.log) fs.appendFileSync(cfg.log, JSON.stringify(o) + '\\n'); };
@@ -104,3 +110,30 @@ if (a[0] === 'input') {
 
 /** The fake helper's record: [{ argv } | { ctl } | { input }]. */
 export function helperLog(file) { return fs.existsSync(file) ? fs.readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) : []; }
+
+/** lane apple-signing: THE FAKE CODESIGN of the daemon legs (see the header). → { bin, log } */
+export function writeFakeCodesign(dir) {
+  fs.mkdirSync(dir, { recursive: true });
+  const bin = path.join(dir, 'codesign'), log = bin + '.log';
+  const FIX = { adhoc: CS.adhoc({ file: '%F' }), 'developer-id': CS.developerId({ file: '%F', team: '%T' }), other: CS.developerId({ file: '%F', team: CS.OTHER_TEAM }), unsigned: CS.unsigned({ file: '%F' }) };
+  const DR = { adhoc: CS.adhocDr({ file: '%F' }), cdhash: CS.adhocDr({ file: '%F' }), 'developer-id': CS.designated({ file: '%F', team: '%T' }), other: CS.designated({ file: '%F', team: CS.OTHER_TEAM }) }; // round 2: what `-dr -` answers
+  fs.writeFileSync(bin, `#!${process.execPath}
+'use strict';
+const fs = require('fs');
+const a = process.argv.slice(2);
+fs.appendFileSync(${JSON.stringify(log)}, JSON.stringify(a) + '\\n');
+const file = a[a.length - 1];
+let text = ''; try { text = fs.readFileSync(file, 'utf8'); } catch { process.stderr.write(file + ': No such file or directory\\n'); process.exit(1); }
+const m = /VS_FAKE_IDENTITY[^\\n]*/.exec(text), toks = m ? m[0].split(/\\s+/).slice(1) : [];
+const kind = toks[0] || 'adhoc', team = toks.find((t) => /^[A-Z0-9]{10}$/.test(t)) || ${JSON.stringify(CS.TEAM)}, dr = (toks.find((t) => t.startsWith('dr=')) || '').slice(3) || kind;
+const FIX = ${JSON.stringify(FIX)}, DR = ${JSON.stringify(DR)};
+const fill = (t) => t.split('%F').join(file).split('%T').join(team);
+const out = fill(FIX[kind] || FIX.unsigned);
+if (kind === 'unsigned') { process.stderr.write(out); process.exit(1); }
+if (a[0] === '--verify' || a[0] === '-s') process.exit(0);
+if (a[0] === '-dv') { process.stderr.write(out); process.exit(0); }
+if (a[0] === '-dr') { const ls = fill(DR[dr] || DR.adhoc).split('\\n').filter(Boolean); process.stderr.write(ls.filter((l) => l.startsWith('Executable=')).join('\\n') + '\\n'); process.stdout.write(ls.filter((l) => !l.startsWith('Executable=')).join('\\n') + '\\n'); process.exit(0); }
+process.stderr.write('fake codesign: unknown argv\\n'); process.exit(2);
+`, { mode: 0o755 });
+  return { bin, log };
+}

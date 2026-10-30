@@ -511,6 +511,7 @@ export function openMachineDesktop(app, m, { display, mode: askedMode, streamDis
     const pane = code === 'accessibility_permission' ? 'accessibility' : 'screen';
     tccLink = MAC_PANES[pane]; tccPane = pane;
     tccText.textContent = code === 'helper_changed_regrant' ? t('The Mac’s screen helper was updated: turn vibespace-screen off and on again under Screen & System Audio Recording')
+      : code === 'helper_signed_regrant' ? t('The Mac’s signed screen helper is in place: turn vibespace-screen off and on under Screen & System Audio Recording — the last time, a signed helper keeps the permission across updates') // lane apple-signing
       : pane === 'accessibility' ? t('The Mac takes no keys or clicks until Accessibility is on for vibespace-screen')
         : t('The Mac shows no picture until Screen Recording is on for vibespace-screen');
     tccEl.title = tccLink; tccEl.hidden = false;
@@ -542,6 +543,7 @@ export function openMachineDesktop(app, m, { display, mode: askedMode, streamDis
     // lane stream-p3m-build: a Mac's (its screen helper — src/agentd/stream-mac.js)
     no_helper: () => t('the Mac has no screen helper yet — install the Command Line Tools there (xcode-select --install) or update VibeSpace'),
     screen_permission: () => t('Screen Recording is off for vibespace-screen on the Mac'), helper_changed_regrant: () => t('the Mac’s screen helper was updated and needs its Screen Recording switch again'),
+    helper_signed_regrant: () => t('the Mac’s signed screen helper replaced the old one and needs its Screen Recording switch one last time'), helper_unsigned: () => t('the screen helper the hub offered the Mac was refused: it is not signed by the VibeSpace release team'), // lane apple-signing
     window_minimized: () => t('the window is minimized — restore it to stream'), window_gone: () => t('the window it showed is gone'),
     encoder_failed: () => t('the machine’s video encoder stopped'), no_window_source: () => t('the machine’s agent cannot stream one window yet'),
   };
@@ -651,7 +653,7 @@ export function openMachineDesktop(app, m, { display, mode: askedMode, streamDis
     for (const [did, x] of [...many]) { many.delete(did); x.dispose(); }
     panes.dispose(); held = null;
     refusedWhy = STREAM_WHY[code] ? streamWords(code, info) : why || streamWords(code); // the page words a known code in its own language; else the machine's sentence
-    if (code === 'screen_permission' || code === 'helper_changed_regrant') showTcc(code); // lane stream-p3m-build: which switch on the Mac
+    if (code === 'screen_permission' || code === 'helper_changed_regrant' || code === 'helper_signed_regrant') showTcc(code); // lane stream-p3m-build: which switch on the Mac (lane apple-signing: the signed helper's last one)
     if (taken && !pressed) note(t('Stream stopped ({why}) — showing the VNC picture', { why: streamWords(code, info) }), why || code);
     chip.title = [scope, t('Not streamed: {why}', { why: refusedWhy })].join('\n');
     if (syncId && !taken && !pressed) { askVnc(t('Not streamed: {why}', { why: refusedWhy })); return; }

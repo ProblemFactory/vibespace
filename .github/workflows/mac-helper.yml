@@ -1,8 +1,10 @@
 # lane stream-p3m-build: THE PREBUILT MAC SCREEN HELPER. A macOS runner builds it (scripts/build-mac-helper.sh — universal
 # arm64 + x86_64, ad-hoc signed) whenever its source changes on master and keeps it as an artifact; a published release gets
-# it as two assets (vibespace-screen + vibespace-screen.version). A hub serves them from data/bin/helpers/ to a paired Mac
-# whose agent has no compiler (src/server/desktop-webrtc.js pushMacHelper) — getting the release's assets into a hub's
-# data/bin/helpers/ is the publish step's.
+# it as THREE assets (vibespace-screen + vibespace-screen.version + vibespace-screen.identity.json — the identity record the
+# script writes beside it: lane apple-signing round 4, so the signed road has it when the Team ID lands). A hub serves them from
+# data/bin/helpers/ to a paired Mac whose agent has no compiler (src/server/desktop-webrtc.js pushMacHelper: the hub pushes what
+# it has; the record and the signed release's row are checks when present; the Mac judges the bytes by codesign) — getting the
+# release's assets into a hub's data/bin/helpers/ is the publish step's.
 name: mac-helper
 on:
   push:
@@ -34,4 +36,4 @@ jobs:
         if: github.event_name == 'release'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ github.event.release.tag_name }}" data/bin/helpers/vibespace-screen data/bin/helpers/vibespace-screen.version --clobber
+        run: gh release upload "${{ github.event.release.tag_name }}" data/bin/helpers/vibespace-screen data/bin/helpers/vibespace-screen.version data/bin/helpers/vibespace-screen.identity.json --clobber

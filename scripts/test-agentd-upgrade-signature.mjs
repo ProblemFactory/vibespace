@@ -18,6 +18,8 @@
 // key set; a pinned device never re-TOFUs), a successor JOINS the pin (a signed retirement drops one), ③b the SSH ROAD
 // lands through the host's own agent (`--land-upgrade` = the same landBundle), the hub's downgrade / first-trust doors,
 // the release scripts' --allow-downgrade-to / --retire / --encrypt.
+// Lane apple-signing round 3 (acceptance r1 B1): the Mac screen helper row rides its OWN signature (helperSig) — the bundle message
+// never changes shape; the CROSS-VERSION leg proves the 2.369.361 verifier takes a record with the row (a golden sig + a RED control).
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -80,6 +82,43 @@ try {
   ok(/is not the signed release/.test(SIG.manifestMatches(good, { sha256: 'f'.repeat(64), version: '1.2.3' }).why), 'hub: another build\'s bytes ⇒ unsigned-local-build');
   ok(SIG.manifestMatches(good, { sha256: good.sha256, version: '1.2.4' }).signed === false && SIG.manifestMatches(good, { sha256: good.sha256, version: '1.2.3' }).signed === true, 'hub: the version must match too; these bytes + this version ⇒ signed');
   ok(JSON.stringify(SIG.parseTrust(SIG.trustText([row(K1)], { from: 'bundle', at: 'x' }))) === JSON.stringify([row(K1)]) && SIG.parseTrust('{}') === null && SIG.parseTrust('junk') === null, 'trusted-keys.json round-trips; junk is no pin');
+  // ── lane apple-signing: the release's prebuilt Mac screen helper rides the record as a row + its OWN signature (helperSig) ──
+  //    THE LAW (round 3, acceptance r1 B1): the bundle message never changes shape, so every older device verifies as before
+  const HROW = { version: 'vs-11f32156ba0a', sha256: 'c'.repeat(64), identity: { kind: 'developer-id', teamId: 'VSTEAM0001', identifier: 'com.problemfactory.vibespace.screen' } };
+  const hr = SIG.sign(K1.privateKeyPem, B, '1.2.3', { ...C, helper: HROW });
+  const vh = SIG.verify([row(K1)], B, '1.2.3', hr, C);
+  const bm = (r) => SIG.bundleMessage('1.2.3', r.sha256, r.keyId, r).toString();
+  ok(vh.ok && JSON.stringify(vh.helper) === JSON.stringify(HROW) && JSON.stringify(hr.helper) === JSON.stringify(HROW) && typeof hr.helperSig === 'string' && hr.sig === good.sig && bm(hr) === bm(good) && !/helper/.test(bm(hr)) && /^vibespace-agentd-helper\/v1\n1\.2\.3\n[0-9a-f]{64}\n[0-9a-f]{16}\nhelper vs-11f32156ba0a c{64} developer-id VSTEAM0001 com\.problemfactory\.vibespace\.screen\n$/.test(SIG.helperMessage('1.2.3', hr.sha256, hr.keyId, hr.helper).toString()), 'lane apple-signing: a record with the helper row verifies and hands the row back; its `sig` is the SAME bytes as the row-less record\'s (the bundle message never names the helper); the row is bound to this release by its own statement — domain, version, digest, key, row — under helperSig', { sig: hr.sig === good.sig, msg: bm(hr) });
+  const tam = SIG.verify([row(K1)], B, '1.2.3', { ...hr, helper: { ...HROW, sha256: 'd'.repeat(64) } }, C);
+  const addNoSig = SIG.verify([row(K1)], B, '1.2.3', { ...good, helper: HROW }, C), addStranger = SIG.verify([row(K1)], B, '1.2.3', { ...good, helper: HROW, helperSig: SIG.sign(KX.privateKeyPem, B, '1.2.3', { ...C, helper: HROW }).helperSig }, C);
+  const moved = SIG.verify([row(K1)], B, '1.2.3', { ...hr, helperSig: SIG.sign(K1.privateKeyPem, Buffer.from('other bytes'), '1.2.3', { ...C, helper: HROW }).helperSig }, C);
+  ok(tam.code === 'bad-signature' && /the Mac screen helper row \(helper vs-11f32156ba0a dddddddddddd… developer-id\) is not what [0-9a-f]{16} signed for this release/.test(tam.why) && addNoSig.code === 'malformed' && /carries no signature/.test(addNoSig.why) && addStranger.code === 'bad-signature' && /helper row/.test(addStranger.why) && moved.code === 'bad-signature', 'a TAMPERED row, a row ADDED without a signature (malformed), one added under a stranger\'s key, or a helperSig moved from another release\'s record (bound to the digest) ⇒ refused BY NAME — the hub is misbuilt or compromised', { tam: tam.why, addNoSig: addNoSig.why, addStranger: addStranger.why, moved: moved.why });
+  const dangling = SIG.verify([row(K1)], B, '1.2.3', { ...hr, helper: undefined }, C), stripped = SIG.verify([row(K1)], B, '1.2.3', { ...hr, helper: undefined, helperSig: undefined }, C);
+  ok(dangling.code === 'malformed' && /without a helper row/.test(dangling.why) && stripped.ok === true && stripped.helper === null, 'a row REMOVED with its signature left behind ⇒ malformed; the row AND its signature stripped = a record without a helper (THE LAW\'s residue — the old message cannot commit to the row; the hub then pushes nothing: its rule is never to push bytes no record names)', { dangling: dangling.why, stripped });
+  ok(SIG.verify([row(K1)], B, '1.2.3', { ...hr, helper: { ...HROW, identity: { kind: 'nope' } } }, C).code === 'malformed' && SIG.verify([row(K1)], B, '1.2.3', { ...hr, helper: 'x' }, C).code === 'malformed' && SIG.verify([row(K1)], B, '1.2.3', { ...hr, helper: { ...HROW, identity: { kind: 'developer-id', teamId: null, identifier: null } } }, C).code === 'malformed', 'a malformed helper row (an unknown kind, not an object, a Developer ID row without its team / identifier) ⇒ malformed');
+  ok(SIG.verify([row(K1)], B, '1.2.3', SIG.sign(K1.privateKeyPem, B, '1.2.3', { ...C, helper: { version: 'vs-x', sha256: 'c'.repeat(64), identity: { kind: 'adhoc' } } }), C).ok && (() => { try { SIG.sign(K1.privateKeyPem, B, '1.2.3', { ...C, helper: { version: 'v', sha256: 'bad' } }); return false; } catch (e) { return /names no sha256/.test(e.message); } })(), 'an ad-hoc row (no team, no identifier) signs and verifies; sign() refuses a malformed row by name');
+  // THE CROSS-VERSION LEG (acceptance r1's harness, repro/accept-r1/old-device-vs-helper-row.cjs): an OLD device is the 2.369.361
+  // verifier = ed25519 over ITS bundle message (the builder below is that file's, verbatim) under the record's key. It must take
+  // r3's record WITH a helper row. Golden: a seed-derived key (no key material in any file), fixed bytes, and the `sig` the base
+  // module (git show 5055b9ad6:src/agentd-signature.js) wrote for these inputs — ed25519 is deterministic, so the signatures are
+  // equal iff the messages are.
+  const OLD_MESSAGE = (version, sha256, keyId, extra = {}) => Buffer.from(`vibespace-agentd-bundle/v1\n${version}\n${sha256}\n${keyId}\n` + (Array.isArray(extra.keys) ? `keys ${extra.keys.map((k) => `${k.keyId}:${k.publicKey}`).join(' ')}\n` : '') + (extra.allowDowngradeTo != null ? `allow-downgrade-to ${extra.allowDowngradeTo}\n` : ''), 'utf8'); // 2.369.361's bundleMessage, verbatim
+  const KS = crypto.createPrivateKey({ key: Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), crypto.createHash('sha256').update('vibespace test key: apple-signing cross-version leg').digest()]), format: 'der', type: 'pkcs8' });
+  const XB = Buffer.from('the bundle bytes of the cross-version leg\n');
+  const GOLDEN = { keyId: '404f305a7a9f9b6f', sig: 'mvTEihq2CRwrKoZ4i5kMPiTZ1mppXfeNmN2fThkYPTNuJFCwkgJFdFio3GEwR92p8zBgYGCdCaiR2uqVyEgWAg==' }; // the base module's sign(KS, XB, '2.369.363', { keys: null }).sig
+  const AROW = { version: 'vs-11f32156ba0a', sha256: 'c'.repeat(64), identity: { kind: 'adhoc', teamId: null, identifier: null } };
+  const oldVerify = (rec) => { try { return crypto.verify(null, OLD_MESSAGE('2.369.363', crypto.createHash('sha256').update(XB).digest('hex'), rec.keyId, rec), crypto.createPublicKey(KS), Buffer.from(rec.sig, 'base64')); } catch { return false; } };
+  const xr = SIG.sign(KS, XB, '2.369.363', { ...C, keys: null, helper: AROW });
+  ok(xr.keyId === GOLDEN.keyId && xr.sig === GOLDEN.sig && oldVerify(xr) === true && SIG.verify([{ keyId: xr.keyId, publicKey: SIG.publicKeyOf(KS, C) }], XB, '2.369.363', xr, C).ok === true, 'CROSS-VERSION (acceptance r1 B1): r3\'s record WITH a helper row carries the very `sig` the 2.369.361 module wrote for these inputs (golden) and the OLD verifier — the base\'s bundle message verbatim — takes it; the new verifier too', { keyId: xr.keyId, sig: xr.sig });
+  // RED control: a copy of the module with round 1's line (the helper row INSIDE the bundle message) ⇒ the old verifier refuses it
+  const SRC_SIG = fs.readFileSync(path.join(REPO, 'src/agentd-signature.js'), 'utf8');
+  const R1_LINE = "+ (extra.allowDowngradeTo != null ? `allow-downgrade-to ${extra.allowDowngradeTo}\\n` : ''), 'utf8');";
+  const R1_EXTRA = "const extra = { ...(keys ? { keys } : {}), ...(opts.allowDowngradeTo != null ? { allowDowngradeTo: version } : {}) };";
+  const r1Text = SRC_SIG.replace(R1_LINE, "+ (extra.allowDowngradeTo != null ? `allow-downgrade-to ${extra.allowDowngradeTo}\\n` : '') + (extra.helper != null ? `${helperLine(extra.helper)}\\n` : ''), 'utf8');").replace(R1_EXTRA, "const extra = { ...(keys ? { keys } : {}), ...(opts.allowDowngradeTo != null ? { allowDowngradeTo: version } : {}), ...(helper ? { helper } : {}) };"); // a0d876c5f's two lines: the row in `extra` and in the message
+  const r1File = path.join(tmp, 'agentd-signature-round1.js'); fs.writeFileSync(r1File, r1Text);
+  const SIGR1 = require(r1File);
+  const xr1 = SIGR1.sign(KS, XB, '2.369.363', { ...C, keys: null, helper: AROW });
+  ok(r1Text !== SRC_SIG && SRC_SIG.includes(R1_LINE) && SRC_SIG.includes(R1_EXTRA) && xr1.sig !== GOLDEN.sig && oldVerify(xr1) === false && SIGR1.verify([{ keyId: xr1.keyId, publicKey: SIG.publicKeyOf(KS, C) }], XB, '2.369.363', xr1, C).ok === true, 'RED CONTROL: a copy of the module that puts the helper row inside the bundle message (round 1, a0d876c5f) signs a record its OWN verifier takes and the 2.369.361 verifier refuses — the message shape is what bites');
   // ── fix r2: the floor + the signed rollback (RED-1), trust on first use (RED-2), the chain keeps siblings (low ④) ──
   console.log('— ① fix r2: the version floor, the signed rollback, trust on first use, a rotation keeps the siblings —');
   const Fo = (o) => ({ ...C, ...o });
@@ -516,6 +555,21 @@ try {
   const rBytes = fs.readFileSync(path.join(R, 'data/bin/vibespace-agentd.js'));
   ok(ss.status === 0 && man && SIG.verify([{ keyId: rowM[1], publicKey: rowM[2] }], rBytes, '3.0.1', man, C).ok && fs.existsSync(path.join(R, 'data/bin/vibespace-agentd.manifest.json')), 'sign-agentd writes release/agentd/manifest.json that verifies (and the copy beside the bundle)', ss.stdout + ss.stderr);
   ok(man && JSON.stringify(man.keys) === JSON.stringify([{ keyId: rowM[1], publicKey: rowM[2] }]) && SIG.verify([], rBytes, '3.0.1', man, { ...C, tofu: true }).tofu === true, 'fix r2: the manifest SIGNS the release key set (RELEASE_KEYS) — a device that trusts no key can take it on first use');
+  ok(man && man.helper === undefined, 'lane apple-signing: no prebuilt Mac screen helper in data/bin/helpers ⇒ no helper row (the record as before)');
+  { // lane apple-signing: the prebuilt + its identity record in data/bin/helpers ⇒ the row is signed into the record; a record that does not describe the bytes is refused by name
+    const hd = path.join(R, 'data/bin/helpers'); fs.mkdirSync(hd, { recursive: true });
+    const hbytes = Buffer.from('#!/bin/sh\necho a fake universal helper\n');
+    fs.writeFileSync(path.join(hd, 'vibespace-screen'), hbytes); fs.writeFileSync(path.join(hd, 'vibespace-screen.version'), 'vs-11f32156ba0a\n');
+    const hsha = crypto.createHash('sha256').update(hbytes).digest('hex');
+    fs.writeFileSync(path.join(hd, 'vibespace-screen.identity.json'), JSON.stringify({ version: 'vs-11f32156ba0a', sha256: hsha, kind: 'developer-id', teamId: 'VSTEAM0001', identifier: 'com.problemfactory.vibespace.screen', notarized: true, at: 'x' }));
+    const sh = run('sign-agentd.mjs');
+    const manH = (() => { try { return JSON.parse(fs.readFileSync(path.join(R, 'release/agentd/manifest.json'), 'utf8')); } catch { return null; } })();
+    ok(sh.status === 0 && manH && JSON.stringify(manH.helper) === JSON.stringify({ version: 'vs-11f32156ba0a', sha256: hsha, identity: { kind: 'developer-id', teamId: 'VSTEAM0001', identifier: 'com.problemfactory.vibespace.screen' } }) && SIG.verify([{ keyId: rowM[1], publicKey: rowM[2] }], rBytes, '3.0.1', manH, C).ok && typeof manH.helperSig === 'string' && /helper vs-11f32156ba0a developer-id by team VSTEAM0001/.test(sh.stdout) && /helperSig/.test(sh.stdout), 'sign-agentd signs the helper row (version, sha256, identity — never the notarization flag or the date) from data/bin/helpers into helperSig and says so', sh.stdout + sh.stderr);
+    fs.writeFileSync(path.join(hd, 'vibespace-screen.identity.json'), JSON.stringify({ version: 'vs-11f32156ba0a', sha256: 'f'.repeat(64), kind: 'developer-id', teamId: 'VSTEAM0001', identifier: 'com.problemfactory.vibespace.screen' }));
+    const shBad = run('sign-agentd.mjs');
+    ok(shBad.status === 2 && /the helper's identity record describes sha256 ffffffffffff…, the prebuilt is/.test(shBad.stderr), 'an identity record that does not describe the prebuilt (a stale pair) is refused by name — nothing signed', shBad.stderr);
+    fs.rmSync(hd, { recursive: true, force: true });
+  }
   const rbBad = run('sign-agentd.mjs', ['--allow-downgrade-to', '3.0.0']);
   ok(rbBad.status === 2 && /--allow-downgrade-to 3\.0\.0 is not this bundle's version 3\.0\.1/.test(rbBad.stderr), 'sign-agentd --allow-downgrade-to naming another version is refused (exit 2, by name)', rbBad.stderr);
   const rbOk = run('sign-agentd.mjs', ['--allow-downgrade-to', '3.0.1']);
