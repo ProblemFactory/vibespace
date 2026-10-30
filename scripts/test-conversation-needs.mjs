@@ -1150,6 +1150,153 @@ console.log('⑩b THE TAIL r2 — the end is the display order\'s; the landing r
     ok(!!ACTS && !/_lastJumpAt/.test(String(ACTS)) && /_positionedSince\(since\) \{\s*return this\._navigatedSince\(since\) \|\| \(this\._lastJumpAt \|\| 0\) > since;/.test(CVS)
       && (CVS.match(/this\._positionedSince\((?:resumeAt|at)\)/g) || []).length === 3 && /if \(!paged\) this\._noteUserNav\?\.\('jumpToAsk'\);/.test(CVS) && MINIMAP,
       'r6: the reader-act list holds no landing stamp (_lastJumpAt — read only by the resume\'s _positionedSince, at its three automatic sites); the waiting chip stamps a paged ask once, as its jump starts; the minimap\'s two jumps carry no `stale` of their own (the race above is the product\'s wiring)');
+    // ── ⑩g THE TAIL, ROUND 7 (the r6 delta verdict on 15475151): EVERY JUMP A PERSON MAKES IS STAMPED AS IT STARTS — r6 took the
+    // landing's _lastJumpAt out of the one list on that premise, and the SEARCH broke it: a huge session's full-file hit
+    // (jumpToFileMatch) whose words are not rendered text (_revealNearest's fallback — no range, no reveal stamp) was no act at
+    // all, and an OLDER ↓ / send / needs card landing whose page answered after it pulled the reader off the hit (d5ab5a88
+    // dropped the older press by the landing's stamp); the in-page road's hit in the window was the same (_revealInEl's
+    // fallback), and a send at the live tail stamped nothing a landing's gone() could see. The REAL _jumpToSearchResult /
+    // _revealNearest / _revealInEl (chat-search.js), the REAL jumpToFileMatch (chat-view-seek.js), the search's wiring and the
+    // send read out of chat-view.js; THE DOOR CENSUS: every door a person presses writes its stamp before its first await
+    console.log('⑩g THE TAIL r7 — every jump a person makes is stamped as it starts: a search hit with no rendered range drops an older ↓ / send / card landing; a send at the live tail too; the door census');
+    /** the REAL doors out of a set of sources (`src` = { CVS, SEEKS, SRCH }) — the census reads a mutant's the same way */
+    const doorsOf = (src) => {
+      const own = (re, args) => { const m = re.exec(src.CVS); return m ? m.slice(1).map((body) => { try { return new Function(`return function (${args}) { return (${body}); };`)(); } catch { return null; } }) : [null, null]; }; // an arrow wired in the constructor, `this` bound by the call
+      const [minimapIdx, minimapTime] = own(/new ChatMinimap\(container, this\._messageList,\n\s+(\(idx\) => \{[^\n]*\}),\n\s+(\(ts, line\) => \{[^\n]*\})\);/, '');
+      const [onNav] = own(/\n\s+onNav: (\([^)]*\) => this\._noteUserNav\([^)]*\)),\n/, '');
+      const fn = (re) => { const m = re.exec(src.CVS); try { return m ? new Function(`return (function () ${m[1]});`)() : null; } catch { return null; } };
+      return { minimapIdx, minimapTime, onNav, scrollBtn: fn(/this\._scrollBtn\.onclick = \(\) => (\{[\s\S]*?\n {4}\});/), onSend: fn(/\n {6}onSend: \(\) => (\{[\s\S]*?\n {6}\}),\n {6}onInterrupt:/),
+        _noteUserNav: methodOf(src.CVS, '  _noteUserNav(via) {', '  /** Did the READER position'), _notePositioning: methodOf(src.CVS, '  _notePositioning(via) {', '  /** Did this press land on the list'),
+        jumpToIndex: methodOf(src.CVS, '  async jumpToIndex(', '  // Jump to the bottom of the conversation.'), jumpToBottom: methodOf(src.CVS, '  async jumpToBottom(', '  /** Replay the live ops a tail fetch held'),
+        jumpToPendingAsk: methodOf(src.CVS, '  async jumpToPendingAsk(', '  /** A helper card\'s lifecycle chip'), _landOnHeader: methodOf(src.CVS, '  _landOnHeader(run) {', '  // Collapse from the bar/footer'),
+        _jumpToFileTime: methodOf(src.SEEKS, '    async _jumpToFileTime(ts, line) {', '    _scrollElStable(el, '), jumpToFileMatch: methodOf(src.SEEKS, '    async jumpToFileMatch(match) {', '    _scrollToNearestTs('),
+        _jumpToSearchResult: methodOf(src.SRCH, '  async _jumpToSearchResult(idx) {', '  // ── Highlight Layer'), _revealInEl: methodOf(src.SRCH, '  _revealInEl(el) {', '  /**\n   * Full-file jumps land'),
+        _revealNearest: methodOf(src.SRCH, '  _revealNearest(el) {', '  /**\n   * Bring a highlight range') };
+    };
+    const R7 = doorsOf({ CVS, SEEKS, SRCH });
+    ok(Object.values(R7).every((f) => typeof f === 'function'), 'the REAL doors are read out of the sources: the minimap\'s two wirings, the ↓, the send, the search\'s onNav wiring (chat-view.js); jumpToIndex / jumpToBottom / jumpToPendingAsk / _landOnHeader / _noteUserNav / _notePositioning; _jumpToFileTime / jumpToFileMatch (chat-view-seek.js); _jumpToSearchResult / _revealInEl / _revealNearest (chat-search.js)', Object.keys(R7).filter((k) => typeof R7[k] !== 'function'));
+    const raf7 = globalThis.requestAnimationFrame; globalThis.requestAnimationFrame = () => 0; // (the REAL centring loops: their first step only)
+    try {
+      /** the person's search over a view — the REAL ChatSearch steps, wired as chat-view.js wires them; `file` = a huge session's
+       *  full-file road (the hit in the loaded slab), else the in-page road (the hit at c120, in the window 100..150) */
+      const searchOf = (v, { file, rendered }) => {
+        const els = Array.from({ length: 50 }, (_, k) => ({ id: `c${100 + k}`, isConnected: true, contains: (n) => n === v.range?.startContainer, scrollIntoView() { v.log.push('scrollIntoView'); }, querySelectorAll: () => [], getBoundingClientRect: () => ({ top: 0, bottom: 0, height: 0, width: 0 }) }));
+        const own = Object.assign(v._search || {}, { _fullFileMode: !!file, _serverSearchResults: [file ? { line: 4000, ts: NOW - 5 } : { index: 120 }], _highlightRanges: [], hasHighlight: false, _lastRevealAt: 0,
+          _jumpToFileMatch: (m) => v.jumpToFileMatch(m), _jumpToIndex: (i) => v.jumpToIndex(i), _getWindowBounds: () => ({ windowStart: v._windowStart, windowEnd: v._windowEnd }),
+          _onNav: R7.onNav.call(v), _onReveal() { }, _expandEl() { }, _setCurrentHighlight() { }, applyHighlightLayer() { this._highlightRanges = rendered && v.range ? [v.range] : []; },
+          _revealInEl: R7._revealInEl, _revealNearest: R7._revealNearest, _jumpToSearchResult: R7._jumpToSearchResult });
+        if (!file) own._messageList = { querySelectorAll: () => els, getBoundingClientRect: () => ({ top: 0, height: 600 }) };
+        return (v._search = own);
+      };
+      /** press 1 = the OLDER ↓ or send (its tail page held); press 2 while it is out = the person's search, its words not rendered
+       *  text (`rendered` false — no range to reveal) */
+      const searchRace = async ({ file, press, rendered }) => {
+        const C = conv(310, []), v = replayView(C);
+        if (!file) Object.assign(v, { _teleported: false, _windowStart: 100, _windowEnd: 150 });
+        v.target.scrollIntoView = () => v.log.push('scrollIntoView'); v.target.contains = (n) => n === v.range.startContainer;
+        Object.assign(v, { jumpToFileMatch: R7.jumpToFileMatch, _gapElForLine: () => v.target, _nearestElByTs: () => v.target, _reportVisibleTsRange() { }, _tsOfRenderedEl: () => 0, _lastJumpAt: 0, _noteUserNav(via) { REAL5._noteUserNav.call(this, via); v.log.push(`nav:${via}`); } });
+        const S = searchOf(v, { file, rendered });
+        v.tailGate = deferred();
+        const p = v.jumpToBottom(press === 'send' ? sendArgs : undefined);
+        await until(v, /^fetchPage/); await tick(2);        // (a person's two presses never share a millisecond — both write _lastNavAt)
+        await S._jumpToSearchResult(0);
+        const at = { teleported: v._teleported, window: `${v._windowStart}..${v._windowEnd}` };
+        v.tailGate.open(); v.tailGate = null;
+        const moved = await p;
+        return { file: !!file, press, rendered, moved, stale: v.log.includes('trace:jumpToBottom:stale'), at, window: `${v._windowStart}..${v._windowEnd}`, teleported: v._teleported, pinned: v._pinned, reveal: S._lastRevealAt > 0, navs: v.log.filter((l) => l.startsWith('nav:')) };
+      };
+      const stays = (r) => r.moved === false && r.stale && !r.pinned && r.window === r.at.window && r.teleported === r.at.teleported;
+      const fileDown = await searchRace({ file: true, press: 'down', rendered: false });
+      ok(stays(fileDown) && fileDown.teleported && !fileDown.reveal && fileDown.navs.includes('nav:search'), 'RED-able (r7 — 15475151: LANDED, the reader pulled off the hit to the live tail 260..310, pinned; d5ab5a88 kept the hit by the landing\'s _lastJumpAt and stamped no press): a huge session\'s full-file search hit whose words are not rendered text (no range, no reveal) drops an OLDER ↓ whose tail page answers after it — the hit STAYS (the slab, unpinned); the search stamped its press as it started', fileDown);
+      const fileSend = await searchRace({ file: true, press: 'send', rendered: false });
+      ok(stays(fileSend) && fileSend.teleported, 'RED-able (r7 — 15475151: LANDED at the live tail, the hit left): …and an OLDER send\'s landing the same way (B-172e r5: a newer PRESS during its fetch answers for the view)', fileSend);
+      const fileRange = await searchRace({ file: true, press: 'down', rendered: true });
+      ok(stays(fileRange) && fileRange.reveal, '…the control: a hit WITH a rendered range (its reveal stamps) drops the older ↓ on every tree', fileRange);
+      const pageDown = await searchRace({ file: false, press: 'down', rendered: false });
+      ok(stays(pageDown) && pageDown.window === '100..150' && !pageDown.reveal && pageDown.navs.includes('nav:search'), 'RED-able (r7 — 15475151 and d5ab5a88 alike: LANDED at 260..310, pinned): the IN-PAGE road\'s hit in the window (c120), its words not rendered text (_revealInEl\'s fallback: no reveal) — the older ↓ dropped, the reader stays at the hit (100..150); both roads stamp at ONE site, the search\'s press', pageDown);
+      // a NEEDS CARD landing in flight (its read out) vs a NEWER press that has no page of its own: the search hit with no
+      // range (the full-file road, its hit at c120 on screen) and a send at the live tail — the card's gone() must see both
+      const cardRace = async (newer) => {
+        const C = conv(310, [10]), A = askOf(C, 10);
+        const v = roads(fakeView(C, [A], newer === 'send' ? 260 : 100, newer === 'send' ? 310 : 150), C), nc = cardsFor(v);
+        const gate = deferred(); let calls = 0;
+        Object.assign(v, { _scrollElStable: REAL5._scrollElStable, _navigatedSince: REAL5._navigatedSince, _lastJumpAt: 0, jumpToFileMatch: R7.jumpToFileMatch,
+          _nearestElByTs: () => v._elements.get('c120'), _tsOfRenderedEl: () => 0, _gapElForLine: () => null, _reportVisibleTsRange() { }, _scrollToBottom() { v.log.push('scrollToBottom'); } });
+        for (const el of v._elements.values()) { el.scrollIntoView = () => v.log.push('scrollIntoView'); el.contains = () => false; }
+        if (newer === 'search') { v._elements.get('c120').dataset.ts = String(C[120].ts); searchOf(v, { file: true, rendered: false }); v._search._messageList = v._messageList; v._search._serverSearchResults = [{ line: 4000, ts: C[120].ts }]; }
+        v._fetchMessages = async (o, l) => { calls++; v.log.push(`fetch(${o},${l})`); await gate.p; return C.slice(o, o + l); };
+        v._pinned = newer === 'send'; nc._pass();
+        const card = nc.land(A.id);                                  // the OLDER press: the card's landing, its read out
+        for (let i = 0; i < 60 && calls < 1; i++) await tick(2);
+        await tick(3);                                               // (gone() compares times)
+        if (newer === 'search') await v._search._jumpToSearchResult(0); else R7.onSend.call(v);
+        gate.open(); const res = await card;
+        return { newer, res, window: `${v._windowStart}..${v._windowEnd}`, pinned: v._pinned, navs: v.log.filter((l) => l.startsWith('nav:')), atHit: v.log.includes('scrollIntoView') };
+      };
+      const vsSearch = await cardRace('search');
+      ok(vsSearch.res === null && vsSearch.window === '100..150' && vsSearch.atHit, 'RED-able (r7 — 15475151: \'card\', the reader taken off the hit to 0..50): a NEWER full-file search hit with no rendered range cancels an OLDER needs card landing — the reader stays on the hit (100..150)', vsSearch);
+      const vsSend = await cardRace('send');
+      ok(vsSend.res === null && vsSend.window === '260..310' && vsSend.pinned && vsSend.navs.includes('nav:send'), 'RED-able (r7 — 15475151 and d5ab5a88 alike: \'card\', the reader taken off the sent message to 0..50): a SEND at the live tail cancels an OLDER needs card landing whose read was out — the reader stays at the live tail, pinned (the send stamps as it starts, like the ↓)', vsSend);
+      // THE DOOR CENSUS: each door a person presses, called on a view where every page / read / teleport is out for good — its
+      // stamp (_lastNavAt; a positioning's _lastPositionAt) is written before its first await, or it is red BY NAME
+      const census = (src) => {
+        const R = doorsOf(src), out = [];
+        const hang = () => new Promise(() => { });
+        const view = (o = {}) => {
+          const v = { log: [], _lastNavAt: 0, _lastPositionAt: 0, _lastUserScrollAt: 0, _lastJumpAt: 0, _total: 310, _windowStart: 100, _windowEnd: 150, _teleported: false, _pinned: false, _canPaginate: true,
+            _elements: new Map(), _messages: [], _renderedMsgIds: new Set(), _runs: [], _tailCall: 0, _tailHold: null, _windowGen: 0, _search: null, _pendingAsks: [], _askElement: () => null,
+            _messageList: { scrollTop: 0, scrollHeight: 9000, clientHeight: 600, querySelector: () => null, querySelectorAll: () => [], getBoundingClientRect: () => ({ top: 0, bottom: 600, left: 0, right: 0, width: 10, height: 600 }) },
+            _container: { classList: { contains: () => false, add() { }, remove() { } } }, _scrollBtn: { classList: { add() { }, remove() { }, toggle() { } } },
+            _trace(k, d) { if (k === 'userNav') v.log.push(`nav:${d && d.via}`); }, _traceExpect() { }, _cancelForcedScroll() { }, _clearWheelCarry() { }, _endResumeSettle() { }, _beginHistoryLoad: () => () => { }, _showHistoryStatus() { },
+            _setPinned(p) { v._pinned = !!p; }, _forceScrollToBottom() { }, _scrollToBottom() { }, _scrollElStable() { v._lastJumpAt = Date.now(); }, _reportVisibleTsRange() { }, _scheduleAxSync() { },
+            _fetchMessagePage: hang, _fetchMessages: hang, _seekTeleport: hang, _scrollToNearestTs: () => false, _gapElForLine: () => null, _nearestElByTs: () => null, _tsOfRenderedEl: () => 0,
+            _onCreateMessage() { }, _resetGapAfterJump() { }, _updateRuns() { }, _setRunOpen() { } };
+          Object.assign(v, { _noteUserNav: R._noteUserNav, _notePositioning: R._notePositioning, jumpToIndex: R.jumpToIndex, jumpToBottom: R.jumpToBottom, jumpToPendingAsk: R.jumpToPendingAsk,
+            _landOnHeader: R._landOnHeader, _jumpToFileTime: R._jumpToFileTime, jumpToFileMatch: R.jumpToFileMatch }, o);
+          if (ACTS) v._readerActs = ACTS;
+          return v;
+        };
+        const press = (f) => { try { const r = f(); if (r && typeof r.catch === 'function') r.catch(() => { }); } catch { /* a fake this door outran: the stamp is read all the same */ } };
+        /** `door` · `site` (where its stamp is written) · `go(v)` presses it · `stamp` = which stamp it writes */
+        const row = (door, site, go, o = {}, stamp = '_lastNavAt') => { const v = view(o); press(() => go(v)); out.push({ door, site, ok: !!(v[stamp] > 0), navs: v.log.slice() }); };
+        const el = () => ({ isConnected: true, classList: { add() { }, remove() { } }, offsetWidth: 1, style: {}, closest: () => null, getClientRects: () => [{}], scrollIntoView() { } });
+        const search = (v, file) => { v._search = { _messageList: { querySelectorAll: () => Array.from({ length: 50 }, () => ({ contains: () => false, scrollIntoView() { }, querySelectorAll: () => [] })), getBoundingClientRect: () => ({ top: 0, height: 600 }) },
+          _fullFileMode: file, _serverSearchResults: [file ? { line: 4000, ts: NOW - 5 } : { index: v._searchAt ?? 120 }], _highlightRanges: [], _lastRevealAt: 0,
+          _jumpToFileMatch: (m) => v.jumpToFileMatch(m), _jumpToIndex: (i) => v.jumpToIndex(i), _getWindowBounds: () => ({ windowStart: v._windowStart, windowEnd: v._windowEnd }),
+          _onNav: R.onNav ? R.onNav.call(v) : null, _onReveal() { }, _expandEl() { }, _setCurrentHighlight() { }, applyHighlightLayer() { this._highlightRanges = []; },
+          _revealInEl: R._revealInEl, _revealNearest: R._revealNearest, _jumpToSearchResult: R._jumpToSearchResult }; return v._search._jumpToSearchResult(0); };
+        row('the minimap (an index)', "chat-view.js the ChatMinimap wiring: _noteUserNav('minimap'), then jumpToIndex's own first line", (v) => R.minimapIdx.call(v)(200));
+        row('the minimap (a time)', "chat-view.js the ChatMinimap wiring: _noteUserNav('minimap-time'); chat-view-seek.js _jumpToFileTime's first line ('jumpToFileTime')", (v) => R.minimapTime.call(v)(NOW - 9 * M, 200));
+        row('the run bar', "chat-view.js _landOnHeader: _noteUserNav('runBar') (after its header guard, before any scroll)", (v) => v._landOnHeader({ header: { isConnected: true, getBoundingClientRect: () => ({ top: 0, height: 20 }) }, members: [] }));
+        row('↓ at the live tail', "chat-view.js the ↓'s onclick: _noteUserNav('scrollBtn')", (v) => R.scrollBtn.call(v), { _windowStart: 260, _windowEnd: 310 });
+        row('↓ paged out of the tail', "chat-view.js jumpToBottom's first line ('jumpToBottom' — a person's: `user`)", (v) => R.scrollBtn.call(v));
+        row('↓ on a seek slab (return to latest)', "chat-view.js jumpToBottom's first line ('jumpToBottom')", (v) => R.scrollBtn.call(v), { _teleported: true });
+        row('a send paged out of the tail', "chat-view.js onSend → jumpToBottom({ send: true })'s first line ('jumpToBottom')", (v) => R.onSend.call(v));
+        row('a send at the live tail', "chat-view.js onSend: _noteUserNav('send') (r7)", (v) => R.onSend.call(v), { _windowStart: 260, _windowEnd: 310 });
+        row('jumpToIndex (the minimap, a paged ask, a search hit paged in, a landing)', "chat-view.js jumpToIndex's first line ('jumpToIndex')", (v) => v.jumpToIndex(200));
+        row('the waiting chip, its ask on screen (jumpToPendingAsk)', "chat-view.js jumpToPendingAsk: _noteUserNav('jumpToAsk') — no await before it", (v) => v.jumpToPendingAsk(), { _pendingAsks: [{ requestId: 'rq', msgIndex: 120 }], _askElement: () => el() });
+        row('the waiting chip, its ask paged in (jumpToPendingAsk)', "chat-view.js jumpToPendingAsk → jumpToIndex's first line (r6: never again at the landing)", (v) => v.jumpToPendingAsk(), { _pendingAsks: [{ requestId: 'rq', msgIndex: 200 }] });
+        row('positioning (a wheel, a touch, a nav key, a scrollbar drag, PageUp/PageDown in the box)', "chat-view.js _notePositioning (`_lastPositionAt`) — written by the event itself", (v) => { if (['wheel', 'touch', 'key', 'scrollbar-drag'].every((w) => src.CVS.includes(`this._notePositioning('${w}')`)) && /onPageKey: \(dir\) => \{ this\._notePositioning\('key'\);/.test(src.CVS)) v._notePositioning('wheel'); }, {}, '_lastPositionAt');
+        row('search in-page, a hit in the window', "chat-search.js _jumpToSearchResult: _onNav('search') → _noteUserNav (r7 — _revealInEl's fallback, no range, stamped nothing)", (v) => search(v, false));
+        row('search in-page, a hit paged in', "chat-search.js _jumpToSearchResult: _onNav('search'), then jumpToIndex's first line", (v) => search(v, false), { _searchAt: 20 });
+        row('search full-file (a huge session)', "chat-search.js _jumpToSearchResult: _onNav('search') (r7 — jumpToFileMatch stamped only its landing's _lastJumpAt, out of the list since r6)", (v) => search(v, true), { _teleported: true });
+        row('Search everything, the typed query, the stream\'s first hit, ↑ / ↓ between hits', "chat-search.js — every caller of _jumpToSearchResult; its stamp is the first statement after its guard", (v) => { if (/async _jumpToSearchResult\(idx\) \{\n\s+const results = this\._serverSearchResults;\n\s+if \(!results \|\| idx < 0 \|\| idx >= results\.length\) return;\n(?:\s+\/\/[^\n]*\n)*\s+this\._onNav\?\.\('search'\);/.test(src.SRCH)) v._lastNavAt = Date.now(); });
+        // the needs cards' two doors (the bundled module: the same in a mutant of the three sources above)
+        { const C = conv(310, [10]), A = askOf(C, 10), v = fakeView(C, [A], 260, 310), nc = cardsFor(v); v._fetchMessages = hang; nc._pass();
+          press(() => nc.land(A.id)); out.push({ door: 'a needs card landing (the «waiting for you» chip, its rows, every For-you door)', site: "chat-needs-card.js land: _noteUserNav('needsLand') — before its first read", ok: v._lastNavAt > 0 }); }
+        { const C = conv(310, [300]), A = askOf(C, 300), v = fakeView(C, [A], 260, 310), nc = cardsFor(v); nc._pass(); v._lastNavAt = 0;
+          press(() => nc.openCard(A.id)); out.push({ door: 'a needs card opened', site: "chat-needs-card.js openCard: _noteUserNav('needsOpen') — before its pass", ok: v._lastNavAt > 0 }); }
+        return out;
+      };
+      const rows = census({ CVS, SEEKS, SRCH });
+      for (const r of rows) console.log(`    door ${r.ok ? '✓' : '✗'} ${r.door} — ${r.site}`);
+      ok(rows.length === 18 && rows.every((r) => r.ok), `RED-able (r7 — 15475151: ✗ search in-page (a hit in the window), search full-file, the search's callers, a send at the live tail): THE DOOR CENSUS — every one of the ${rows.length} doors a person presses writes its reader-act stamp before its first await (each named above with its stamp site)`, rows.filter((r) => !r.ok).map((r) => r.door));
+      const STAMP = "    this._onNav?.('search');\n", MUT = SRCH.replace(STAMP, '');
+      const red = census({ CVS, SEEKS, SRCH: MUT }).filter((r) => !r.ok).map((r) => r.door);
+      ok(MUT !== SRCH && JSON.stringify(red) === JSON.stringify(['search in-page, a hit in the window', 'search full-file (a huge session)', 'Search everything, the typed query, the stream\'s first hit, ↑ / ↓ between hits']), '…and the census BITES: a mutant of chat-search.js dropping the search\'s press stamp is red BY NAME — the in-page hit in the window, the full-file road, the search\'s callers (the paged-in hit stays green: jumpToIndex stamps its own start)', red);
+    } finally { if (raf7 === undefined) delete globalThis.requestAnimationFrame; else globalThis.requestAnimationFrame = raf7; }
+    ok(/onNav: \(via = 'search-reveal'\) => this\._noteUserNav\(via\),/.test(CVS) && /if \(!replay\) \{ this\._lastRevealAt = Date\.now\(\); this\._onNav\?\.\(\); \}/.test(SRCH) && /this\._noteUserNav\('send'\);\n\s+this\._setPinned\(true, 'send'\);\n\s+this\._scrollToBottom\(\);/.test(CVS),
+      'r7: the search\'s wiring names its press (\'search\') and keeps the reveal\'s own (\'search-reveal\', with its _lastRevealAt — chat-view-seek\'s c-v restore reads its arm by it); the send at the live tail stamps before it pins');
   }
   // THE WIRING (source pins)
   const CV = read('src/lib/chat-view.js'), CARD = read('src/lib/chat-needs-card.js'), UTA = read('src/lib/user-todos-actions.js');

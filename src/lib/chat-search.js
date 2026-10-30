@@ -438,6 +438,11 @@ class ChatSearch {
   async _jumpToSearchResult(idx) {
     const results = this._serverSearchResults;
     if (!results || idx < 0 || idx >= results.length) return;
+    // A SEARCH'S JUMP IS THE PERSON'S ACT, STAMPED AS IT STARTS (lane needs-card-tail r7), on both roads, here: a hit whose
+    // words are not rendered text has no range to reveal (_revealNearest / _revealInEl's fallback writes no reveal), and the
+    // full-file road stamped nothing at all — an older ↓, send or needs card landing whose page answered after it pulled the
+    // reader off the hit. The reveal still writes its own _lastRevealAt (chat-view-seek's c-v restore reads its arm by it)
+    this._onNav?.('search');
 
     // Full-file mode (huge sessions): matches carry {line, ts} instead of a
     // window index — delegate the seek/scroll to ChatView, then reveal the

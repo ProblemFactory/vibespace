@@ -1025,6 +1025,9 @@ class ChatView {
         if (this._teleported || this._windowEnd < this._total) { // B-172e ②
           this.jumpToBottom({ send: true });
         } else {
+          // …and at the live tail it is stamped as it starts, like the ↓'s (lane needs-card-tail r7 — a needs card landing
+          // whose read was out took the reader off the sent message: its gone() saw no act)
+          this._noteUserNav('send');
           this._setPinned(true, 'send');
           this._scrollToBottom();
         }
@@ -2372,7 +2375,8 @@ class ChatView {
       // the revealed card stays in the accessibility tree even when a settle
       // leaves it just outside the reader's band (_syncAxExposure)
       onReveal: (el) => { this._axRevealEl = el; this._axRevealAt = Date.now(); },
-      onNav: () => this._noteUserNav('search-reveal'),
+      // …and a search's press, as its jump starts (`'search'` — lane needs-card-tail r7: both roads stamp there)
+      onNav: (via = 'search-reveal') => this._noteUserNav(via),
     });
     container.insertBefore(this._search.element, this._messageList);
 
@@ -2755,9 +2759,10 @@ class ChatView {
   }
 
   /** An explicit reader NAVIGATION that the message list's own listeners can
-   *  never see: the minimap (pointer events on the container), a search
-   *  reveal, the floating run bar (on this._container), jumpToIndex /
-   *  jumpToBottom. Stamps, and ends the resume settle exactly like a wheel —
+   *  never see: the minimap (pointer events on the container), a search's
+   *  press (as its jump starts — r7) and its reveal, the floating run bar (on
+   *  this._container), jumpToIndex / jumpToBottom, a send at the live tail
+   *  (r7). Stamps, and ends the resume settle exactly like a wheel —
    *  round-2 verifier's MAJOR: without this the 1240ms re-tail yanked such a
    *  reader back to the live tail. */
   _noteUserNav(via) {
@@ -2797,7 +2802,8 @@ class ChatView {
    *  STAMPED WHEN IT STARTS, NEVER WHEN ITS PAGE LANDS (r6): a jump's landing (`_lastJumpAt`, _scrollElStable) is the
    *  view's own effect of an older press, like a replay — it is not here (r5 had put it back: the minimap's jumpToIndex,
    *  the waiting chip, a minimap time jump landing late dropped a ↓ or a send pressed while their page was out, and caught
-   *  no newer press — every jump a person makes stamps `_lastNavAt` as it starts); only the resume's _positionedSince reads
+   *  no newer press — every jump a person makes stamps `_lastNavAt` as it starts: r7, the search's too — its full-file road,
+   *  a hit with no rendered range, stamped nothing once this left the list); only the resume's _positionedSince reads
    *  it. Every replay the view performs for itself (chat-view-seek's c-v restore: the jump target, the search reveal)
    *  writes `_lastReplayAt` instead, which nothing reads — a replay 1.6 s after a teleport dropped a ↓ or a send pressed in
    *  its window (r4's default read the reveal's stamps). `_lastUserScrollAt` is not one: a click is not a positioning act

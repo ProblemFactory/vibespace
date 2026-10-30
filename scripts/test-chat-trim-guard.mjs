@@ -310,10 +310,11 @@ ok('…and the reader-position test generalises the seek idiom over every POSITI
   && !/_navigatedSince\(since\) \{[^}]*_lastUserScrollAt/.test(cv) && !/_readerActs\(\{ scroll = true \} = \{\}\) \{[^}]*_lastUserScrollAt/.test(cv) && !/_positionedSince\(since\) \{[^}]*_lastUserScrollAt/.test(cv));
 ok('the resume re-tail BAILS when the reader navigated after the resume (never yank a reader back to the tail)',
   /const resumeAt = this\._resumeAt;[\s\S]{0,400}if \(this\._positionedSince\(resumeAt\)\) return;/.test(cv) && /return !this\._positionedSince\(at\);/.test(cv)); // (r6: an act of the reader's OR the landing of one)
-ok('every off-list navigation surface stamps: minimap (index + time), search reveal, run-bar landing, jumpToIndex, user jumpToBottom',
+ok('every off-list navigation surface stamps: minimap (index + time), search reveal, run-bar landing, jumpToIndex, user jumpToBottom, a send at the live tail (lane needs-card-tail r7)',
   /_noteUserNav\('minimap'\); return this\.jumpToIndex/.test(cv)
   && /_noteUserNav\('minimap-time'\); return this\._jumpToFileTime/.test(cv)
-  && /onNav: \(\) => this\._noteUserNav\('search-reveal'\)/.test(cv)
+  && /onNav: \(via = 'search-reveal'\) => this\._noteUserNav\(via\)/.test(cv) // (r7: the search's press names itself — 'search')
+  && /this\._noteUserNav\('send'\);\n\s+this\._setPinned\(true, 'send'\);/.test(cv)
   && /_landOnHeader\(run\) \{[\s\S]{0,400}this\._noteUserNav\('runBar'\);/.test(cv)
   && /async jumpToIndex\(targetIdx(?:, \{ land = null(?:, stale = null)? \} = \{\})?\) \{\s*this\._noteUserNav\('jumpToIndex'\);/.test(cv) // (lane needs-card-tail: its optional `land` — the needs cards' landing — and r2's `stale` never move the stamp off the first line)
   && /async jumpToBottom\(\{ user = true(?:, land = null, stale = null(?:, send = false)?)? \} = \{\}\) \{\s*if \(user\) this\._noteUserNav\('jumpToBottom'\);/.test(cv)); // (lane needs-card-tail r3: the landing's `land` / `stale` never move the stamp off the first line; r5: nor the send's `send`)
@@ -321,6 +322,8 @@ ok('every off-list navigation surface stamps: minimap (index + time), search rev
   const sch = fs.readFileSync(path.join(REPO, 'src/lib/chat-search.js'), 'utf8');
   ok('…and ChatSearch actually calls it on a REVEAL (the reveal scrolls the list from outside its own listeners)',
     /this\._onNav = onNav \|\| null;/.test(sch) && /this\._lastRevealAt = Date\.now\(\);\s*this\._onNav\?\.\(\);/.test(sch));
+  ok('…and on its PRESS, as the search\'s jump starts — both roads, before any await (lane needs-card-tail r7: a full-file hit with no rendered range stamped nothing)',
+    /async _jumpToSearchResult\(idx\) \{\n\s+const results = this\._serverSearchResults;\n\s+if \(!results \|\| idx < 0 \|\| idx >= results\.length\) return;\n(?:\s+\/\/[^\n]*\n)*\s+this\._onNav\?\.\('search'\);/.test(sch));
   ok('…and the minimap time landing stamps in the seek module too', /_jumpToFileTime\(ts, line\) \{\s*this\._noteUserNav\('jumpToFileTime'\);/.test(sk));
 }
 ok('INVARIANT a pinned view never loses its tail: _extendTop skips trimBottom while pinned',
