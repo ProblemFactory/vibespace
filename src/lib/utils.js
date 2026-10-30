@@ -608,7 +608,7 @@ export function toastDeskSpot({ rect = null, avoid = [], topY = 0, vh = 0, scale
 /** what the desktop tier's stack must not stand on: every open menu / float and every composer shown (viewport px) */
 function _toastAvoid() {
   const out = [];
-  for (const el of document.querySelectorAll('.context-menu, .taskbar-context-menu, [data-popover], .chat-input-area')) {
+  for (const el of document.querySelectorAll('.context-menu, .taskbar-context-menu, [data-popover], .chat-input-area, .ut-announce')) { // (.ut-announce — the For-you announce's stack, no popover since lane needs-card-tail r11)
     if (el.id === 'global-toasts' || el.closest('#global-toasts')) continue;
     if (typeof el.checkVisibility === 'function' && !el.checkVisibility({ visibilityProperty: true })) continue; // a window on another desktop is visibility:hidden
     const r = el.getBoundingClientRect();

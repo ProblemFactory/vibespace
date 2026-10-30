@@ -28,14 +28,14 @@
 // it (mobile-back.js: HOME = the page while the list has rows, else the conversation list); ☰ still opens the list.
 import { t, tc } from './i18n.js';
 import { SHEET_ROOTS, personDialogOf } from './form-yield.js'; // PURE (lane dialog-yield r2): the ONE dialog predicate set
-import { rowOf as attentionRow, toastWorthy, policyOf, PARKED, FOLD_HEAD, settingsPolicy, bandKey, BANDS, CAP_KEY } from '../attention-model.js'; // PURE: THE attention list (lane foryou-folds) — an arrival's band (the toast rule), the 搁置 band, the fold's words; the owner's switches + cap (lane attention-predicate-shared, settingsPolicy — their ONE reader)
+import { rowOf as attentionRow, toastWorthy, PARKED, FOLD_HEAD, settingsPolicy, bandKey, BANDS, CAP_KEY } from '../attention-model.js'; // PURE: THE attention list (lane foryou-folds) — an arrival's band (the toast rule), the 搁置 band, the fold's words; the owner's switches + cap (lane attention-predicate-shared, settingsPolicy — their ONE reader)
 import { sortGroups, openLayout, nextLayout, entriesFor, splitNotices, badgeOf, bandLayout, bandEntries, inboxBadgeFor, miniInboxEntries, noticeGroups, noticeChips, noticeFilterFor, tabCounts, NOTICE_FILTER_KEY, HISTORY_SEEN_KEY, noticeReadAll, openCount, sessionMark, firstLine } from './user-todos-layout.js'; // PURE: the append-only order while the popup is open (inc-mtw02kbq-kj96) — the notices' groups and the bands' slots (lane foryou-folds); notices split (2.369.118); notices by origin + the tab counts (B-328d)
 import { inboxModel, tierCounts, actionWords } from './user-todos-actions.js'; // THE client model (§9): the store, the live facts (the running dot + the reply verdict, D1.5/D1.7), the words, every verb — shared with the For-you window
 import { trayWhere } from './user-todos-layout.js'; // lane S3: the new-item toast names the corner the tray sits in on this device
-import { renderRow, patchRow, applyLive, replyBoxEl, reconcileKeyed, agoText as agoTextOf } from './user-todos-row.js'; // THE row renderer (one spelling of a row; keyed patching keeps a reply box alive)
+import { renderRow, patchRow, applyLive, replyBoxEl, reconcileKeyed, agoText as agoTextOf, reachFor, pickReach, forgetReachPicks } from './user-todos-row.js'; // THE row renderer (one spelling of a row; keyed patching keeps a reply box alive)
 import { anchorFixedPopup, copyText, createPopover, escHtml, fetchJson, getToastHistory, isTouchDevice, onOutsidePress, showContextMenu, showToast, stripLegacyRecordToasts, uiScale } from './utils.js';
 import { UI_ICONS } from './icons.js';
-import { announceWorthy, announceWords } from '../foryou-actions.js'; // PURE (lane needs-card-tail r10 addendum): which arrival announces itself, and its card's words + clock
+import { announceWords, newestFirst } from '../foryou-actions.js'; // PURE (lane needs-card-tail r10 addendum, r11): the announce card's words + clock, its stack's newest-first order (WHICH arrival announces: toastWorthy — one policy)
 import { filesCard } from './phone-files.js'; // lane phone-files-door: the 文件 card under the phone page's bands
 import { BACK_DISMISS_EVENT } from './back-guard.js'; // lane mobile-back-guard: the phone's back closes this sheet through hidePopup
 import { pressVerdict, armAfterLayout } from './press-arm.js'; // verify-r6 V1: an Allow counts only once it sat still where it was read
@@ -663,6 +663,7 @@ export function installUserTodos(app) {
   // defers to any [data-popover]).
   let mini = null; // {pop, winId, keys, layout, rows, dot, name, empty} while open
   const miniCtx = { ...rowCtx, mini: true };
+  const dockCtx = { ...miniCtx, noPick: true }; // lane needs-card-tail r11: the attention dock — the summary + the plain buttons, never a pick (one form per item)
   /** The item keys a window answers for: the live payload's own sessionKey for
    *  its webui id, the openSpec's key (a view-only window of a stopped
    *  conversation has only that), and `webui:<id>` (an item filed before the CLI
@@ -761,6 +762,7 @@ export function installUserTodos(app) {
       replyKeys(e);
     });
     root.addEventListener('input', growOnInput);
+    root.addEventListener('change', reachChange); // lane needs-card-tail r11: a reach picked on a card / the mini inbox is the item's
     root.addEventListener('contextmenu', rowMenu);
   }
   // lane chat-needs-you-card: the chat's needs cards draw THE rows (renderRow / patchRow, the mini inbox's context) and wire
@@ -768,6 +770,7 @@ export function installUserTodos(app) {
   app.foryouRows = {
     wire: wireMiniRows,
     reconcile: (container, entries) => reconcileRows(container, entries, null, miniCtx, { arm: false }), // round 4 (#3): the card stamps once per pass that changed
+    reconcileDock: (container, entries) => reconcileRows(container, entries, null, dockCtx, { arm: false }), // lane needs-card-tail r11: the attention dock's rows — THE renderer, the summary + the plain buttons, never a pick (one form per item)
     keysForWin,
     primaryKey, // lane needs-card-tail r10: the attention dock's «View all» scopes the For-you window as the mini inbox's ⤢ does
     arm: (root) => armExitButtons(root), // acceptance round 2: a card the accordion opened shows its Allow just now — armed afresh (round 4: its list's only)
@@ -919,8 +922,12 @@ export function installUserTodos(app) {
     }
   }
   const growOnInput = (e) => { if (e.target?.classList?.contains('ut-reply-input')) growBox(e.target); };
+  // lane needs-card-tail r11: THE REACH PICK IS THE ITEM'S — a radio pressed on any copy (the tray, a card, the phone's home)
+  // writes the one pick (user-todos-row.js pickReach) and every copy on the page follows; the answer reads it from there
+  function reachChange(e) { const r = e.target; if (r && r.type === 'radio' && r.closest?.('.ut-ak-reach')) { const id = r.closest('.ut-item')?.dataset.id; if (id) pickReach(id, r.value); } }
   popup.addEventListener('keydown', replyKeys);
   popup.addEventListener('input', growOnInput);
+  popup.addEventListener('change', reachChange);
   // A ROW'S MENU (right-click; a long-press on touch is a contextmenu too — utils
   // installLongPressContextMenu): "Clear content…" (2026-09-28) through THE model's
   // verb (the ONE confirm dialog, then the store's broadcast repaints the row in place).
@@ -1104,10 +1111,11 @@ export function installUserTodos(app) {
     }
     if (exitBtn) {
       // lane-pairing ⑥: an exit's "ask me" answered where it appears (Allow / Deny)
-      // lane key-instance-scope: an automation card's answer carries the REACH the owner picked (the card's radios; absent = opened)
-      const reachPick = exitBtn.closest('.ut-item')?.querySelector('.ut-ak-reach input:checked');
+      // lane key-instance-scope: an automation card's answer carries the REACH the owner picked (absent = opened) — r11: THE
+      // ITEM'S pick (user-todos-row.js reachFor), never read off this copy: the card, the dock, the tray and the phone send one
+      const rec = todos.open.find((i) => i.id === id), reach = reachFor(rec);
       exitBtn.disabled = true;
-      Promise.resolve(model.runAction(todos.open.find((i) => i.id === id), exitBtn.dataset.answer, reachPick ? { reach: reachPick.value } : {})).finally(() => { exitBtn.disabled = false; });
+      Promise.resolve(model.runAction(rec, exitBtn.dataset.answer, reach ? { reach } : {})).finally(() => { exitBtn.disabled = false; });
       return;
     }
     if (e.target.closest('.ut-done')) model.resolveOne(id, 'done'); // lane foryou-honest (P3-2): ONE toast with Undo for 6 s (the ↺ road)
@@ -1238,6 +1246,7 @@ export function installUserTodos(app) {
       replyKeys(e);
     });
     home.addEventListener('input', growOnInput);
+    home.addEventListener('change', reachChange);
     home.addEventListener('contextmenu', rowMenu);
     /** THE PHONE OPENS ON THE ATTENTION LIST — once, after the boot's restore (app.ready) and the store's first snapshot;
      *  never when a `?` link opened a place, over the first-run wizard, or after the person already pressed something.
@@ -1273,21 +1282,29 @@ export function installUserTodos(app) {
     return null;
   };
   // ── THE ANNOUNCE (lane needs-card-tail r10 addendum — the owner 2026-10-30 11:5x PDT: «有权限申请的时候窗口应该触发闪烁和 inbox
-  // 附近的弹窗，有时候我都没发现有个后台任务才申请权限»): an ARRIVAL (the toast rule's own knownIds — a reload announces nothing old)
-  // that waits for the owner (PURE announceWorthy: a need of the registry, never a notice; a band switched off or 搁置 stays quiet)
-  // announces itself ONCE on this client:
+  // 附近的弹窗，有时候我都没发现有个后台任务才申请权限»): THE BAND 1–2 ARRIVAL'S TOAST, GROWN — ONE attention policy (r11, the r10
+  // acceptance: r10 ran its own rule BEFORE the toast's gate and let bands 3–5 announce — Dropline's band-5 dictionary reminder,
+  // a plain question, a vault-rotate suggestion: the owner's «一天到晚有这个 Dropline 让我发信息的消息» and q-044 §2's budget):
+  // an arrival the toast rule raises (toastWorthy(attentionRow, attnPolicy()) — its knownIds: a reload announces nothing old)
+  // keeps its toast (its words, its history entry, its tap — unchanged) and ALSO, once on this client:
   //  ① the asking window FLASHES — THE existing waiting blink (`window-waiting`: its title bar, its taskbar button, a tab group's
   //     tab, a hidden desktop's tab), never a second mechanism — until it is SEEN: the blink's own clear (the window touched or
-  //     focused — chat-view _clearWaiting, a tab activated) or the item answered (the blink this set goes; one a turn set stays);
+  //     focused — chat-view _clearWaiting, a tab activated) or the item answered. THE BLINK HAS REASONS (r11 — r10 decided once
+  //     whose blink it was, so an answer elsewhere cleared a turn's «finished» that came AFTER): `w._waitWhy` — 'turn' (chat-view's
+  //     turn_complete), 'ask' (this), 'other' (a blink standing before with no reason told); an answer drops 'ask' and the blink
+  //     goes only when no reason is left; seeing the window acknowledges them all;
   //     `window-announce` beside it fills the window's strip count (the attention dock) while an unseen item stands;
-  //  ② a CARD in ONE stack at the For-you button (createPopover ⇒ data-popover: Esc closes it; no outside-press closer — it is
-  //     not in anyone's way; under the phone's top bar there): who asks · what · its clock while it has one; one press opens it
-  //     (THE door, model.jump); one card per item, the newest ANN_SHOWN shown + «N more waiting»; answered anywhere ⇒ gone;
-  //     past its deadline ⇒ «expired», kept a while (a late card); else transient (ANN_MS, held while the pointer is on it);
-  //  ③ the button pulses once (the arrival's ut-blink — the phone's nav button too).
+  //  ② a CARD in ONE stack at the For-you button (under the phone's top bar there) — a transient, non-blocking toast, NOT a
+  //     popover (r11: r10's createPopover made it a [data-popover] — it took the first Esc, the phone's back press and the
+  //     autohide taskbar while it stood): its own X and an answer anywhere close it; the global toasts stand clear of it (utils
+  //     _toastAvoid). Who asks · what · its clock while it has one; one press opens it (THE door, model.jump); one card per
+  //     item, the newest ANN_SHOWN (newestFirst: a same-ms tie by id) shown + «N more waiting» — a resync's burst is that one
+  //     stack, never a storm; answered anywhere, or no longer inside the policy ⇒ gone; past its deadline ⇒ «expired», kept a
+  //     while (a late card); else transient (ANN_MS, held while the pointer is on it);
+  //  ③ the phone's nav button pulses once too (the tray button's pulse is the toast's own line).
   const ANN_MS = 20000, ANN_SHOWN = 3;
   let annStack = null, annTimer = 0;
-  const annCards = new Map(); // item id → { el, until, expiredAt }
+  const annCards = new Map(); // item id → { el, key: {id, createdAt}, until, expiredAt }
   const annAnchor = () => [btn, mBtn].find((b) => b && b.getClientRects().length > 0) || null;
   const annWords = (it) => announceWords(it, { who: nameFor(it.sessionKey, [it]), what: wordsOf(it), now: Date.now(), t });
   const annPlace = () => {
@@ -1302,7 +1319,7 @@ export function installUserTodos(app) {
   const annLayout = () => {
     if (annStack && !annStack.isConnected) { annCards.clear(); annStack = null; } // Esc closed the stack: every card with it
     if (!annCards.size) { annStack?.remove(); annStack = null; clearInterval(annTimer); annTimer = 0; return; }
-    const order = [...annCards.values()].sort((x, y) => y.filed - x.filed || y.at - x.at); // the newest FILING first (a burst arrives in one snapshot)
+    const order = [...annCards.values()].sort((x, y) => newestFirst(x.key, y.key)); // the newest FILING first, a same-ms tie by id (r11 — a burst arrives in one snapshot)
     order.forEach((c, k) => { c.el.hidden = k >= ANN_SHOWN; });
     const more = annStack.querySelector(':scope > .uta-more'), n = order.length - ANN_SHOWN;
     more.hidden = n <= 0;
@@ -1318,6 +1335,9 @@ export function installUserTodos(app) {
     c.el.classList.toggle('uta-expired', w.expired);
     if (w.expired && !c.expiredAt) { c.expiredAt = Date.now(); c.until = Math.max(c.until, c.expiredAt + ANN_MS); } // a late card stays a while
   };
+  /** THE POLICY, asked again (r11): an item still open whose band the toast rule no longer raises (a band switched off since, a
+   *  record re-filed lower) is announced no more — its card goes, its window's flash with it. */
+  const annInPolicy = (it, now) => toastWorthy(attentionRow(it, now), attnPolicy());
   /** Every snapshot and every second while a card stands: answered elsewhere ⇒ gone; re-worded from the CURRENT record (a
    *  clear's sentence, the clock); its time up ⇒ gone; and the flashing windows whose items were all answered stop. */
   const annRefresh = () => {
@@ -1325,22 +1345,28 @@ export function installUserTodos(app) {
     for (const [id, c] of [...annCards]) {
       const it = byId(id);
       const late = it && it.status !== 'open' && (it.resolvedBy === 'expired' || it.resolvedBy === 'ask-expired');
-      if (!it || (it.status !== 'open' && !late)) { annDrop(id); continue; }
+      if (!it || (it.status !== 'open' && !late) || (it.status === 'open' && !annInPolicy(it, now))) { annDrop(id); continue; }
       annPaint(c, it);
       if (now > c.until && !c.el.matches(':hover')) annDrop(id);
     }
     for (const w of app.wm?.windows?.values?.() || []) {
       if (!w._annIds) continue;
-      for (const id of [...w._annIds]) if (!todos.open.some((i) => i.id === id)) w._annIds.delete(id);
+      for (const id of [...w._annIds]) if (!todos.open.some((i) => i.id === id && annInPolicy(i, now))) w._annIds.delete(id);
       if (!w._annIds.size) annSeen(w, { answered: true });
     }
     annLayout();
   };
-  /** The window SEEN (the blink's own clear) or every item it flashed for answered (`answered`: the blink THIS set goes). */
+  /** The window SEEN (the blink's own clear: every reason acknowledged) or every item it flashed for answered (`answered`: the
+   *  reason 'ask' goes — the blink with it only when no other reason stands: a turn's «finished» stays, r11). */
   const annSeen = (w, { answered = false } = {}) => {
-    if (answered && w._annOwns && w.element.classList.contains('window-waiting')) { w.element.classList.remove('window-waiting'); w._notifyChanged?.(); }
+    const why = w._waitWhy;
+    if (!answered) why?.clear();
+    else {
+      why?.delete('ask');
+      if (!why?.size && w.element.classList.contains('window-waiting')) { w.element.classList.remove('window-waiting'); w._notifyChanged?.(); }
+    }
     w.element.classList.remove('window-announce');
-    w._annMO?.disconnect(); w._annMO = null; w._annIds = null; w._annOwns = false;
+    w._annMO?.disconnect(); w._annMO = null; w._annIds = null;
   };
   const annFlash = (it) => {
     for (const w of app.wm?.windows?.values?.() || []) {
@@ -1348,12 +1374,16 @@ export function installUserTodos(app) {
       if (!keys || !(keys.includes(it.sessionKey) || (it.about && keys.includes(it.about)))) continue;
       if (w.element.classList.contains('window-active') && document.hasFocus() && !document.hidden) continue; // in front of the owner: seen
       if (!w._annIds) {
-        w._annIds = new Set(); w._annOwns = !w.element.classList.contains('window-waiting');
+        w._annIds = new Set();
+        const why = w._waitWhy || (w._waitWhy = new Set()); // THE BLINK'S REASONS (r11; chat-view's turn_complete adds 'turn')
+        if (!w.element.classList.contains('window-waiting')) why.clear(); // a reason outlives no blink (a tab switch cleared it)
+        else if (!why.size) why.add('other'); // a blink standing with no reason told (another writer's) — never ended by an answer
         // SEEN = the waiting blink's own clear (the window touched or focused, a tab activated) — read off the element itself
         w._annMO = new MutationObserver(() => { if (!w.element.classList.contains('window-waiting')) annSeen(w); });
         w._annMO.observe(w.element, { attributes: true, attributeFilter: ['class'] });
       }
       w._annIds.add(it.id);
+      w._waitWhy.add('ask');
       w.element.classList.add('window-waiting', 'window-announce');
       w._notifyChanged?.(); // the taskbar button, a tab group's tab, a hidden desktop's tab
     }
@@ -1361,9 +1391,10 @@ export function installUserTodos(app) {
   const annCard = (it) => {
     if (annCards.has(it.id)) return; // one card per item
     if (!annStack || !annStack.isConnected) {
-      const a = annAnchor();
-      annStack = createPopover(a || document.body, 'ut-announce', a ? { toggle: false } : { position: 'cursor', x: 8, y: 8, toggle: false });
-      annStack._closeCtl?.abort(); // never closed by a press elsewhere (Esc — data-popover — still closes it)
+      // r11: a transient, non-blocking card — no [data-popover] (Esc, the phone's back press, the autohide taskbar are the real
+      // popover's / window's), no outside-press closer; fixed where annPlace puts it (public/style.css .ut-announce)
+      annStack = mk('div', 'ut-announce');
+      document.body.append(annStack);
       annStack.setAttribute('role', 'status'); annStack.setAttribute('aria-live', 'polite'); annStack.setAttribute('aria-label', t('Waiting for you'));
       const more = mk('button', 'uta-more'); more.type = 'button'; more.hidden = true;
       more.onclick = () => { const a2 = annAnchor(); annCards.clear(); annLayout(); if (a2 && popup.classList.contains('hidden')) togglePopup(a2); };
@@ -1381,7 +1412,7 @@ export function installUserTodos(app) {
     const id = it.id;
     go.onclick = () => { const live = byId(id); annDrop(id); annLayout(); if (live) jump(live.sessionKey, live); };
     x.onclick = () => { annDrop(id); annLayout(); };
-    const c = { el, at: Date.now(), filed: Number(it.createdAt) || Date.now(), until: Date.now() + ANN_MS, expiredAt: 0 };
+    const c = { el, key: { id, createdAt: Number(it.createdAt) || Date.now() }, at: Date.now(), until: Date.now() + ANN_MS, expiredAt: 0 };
     if (Number(it.expiresAt) > c.at) c.until = Math.max(c.until, Number(it.expiresAt) + ANN_MS);
     annCards.set(id, c);
     annPaint(c, it);
@@ -1390,7 +1421,7 @@ export function installUserTodos(app) {
   };
   const announce = (it) => {
     annFlash(it); annCard(it);
-    for (const b of [btn, mBtn]) if (b) { b.classList.remove('ut-blink'); void b.offsetWidth; b.classList.add('ut-blink'); } // ③ one pulse
+    if (mBtn) { mBtn.classList.remove('ut-blink'); void mBtn.offsetWidth; mBtn.classList.add('ut-blink'); } // ③ the phone's nav button (the tray button: the toast's line)
   };
   const apply = (next) => {
     const prevKnown = knownIds;
@@ -1404,9 +1435,6 @@ export function installUserTodos(app) {
       const now = Date.now();
       for (const i of todos.open) {
         if (prevKnown.has(i.id)) continue;
-        // lane needs-card-tail r10 addendum: an arrival that WAITS FOR THE OWNER announces itself (above) — the flash, its card
-        const row = attentionRow(i, now);
-        if (announceWorthy(i, { muted: !row || row.band === PARKED || policyOf(attnPolicy()).off.has(row.band) })) { announce(i); continue; }
         // lane foryou-folds (design q-044 §2): only an arrival in band 1 or 2 (urgent, someone waiting) raises a toast and
         // blinks the button — every other one moves a number (39 toasts a day ⇒ about 3)
         if (!toastWorthy(attentionRow(i, now), attnPolicy())) continue; // (the panel's own `rowOf` is a DOM helper — the attention row is imported under its own name; a band switched off never toasts)
@@ -1424,9 +1452,11 @@ export function installUserTodos(app) {
         if (el) { const id = i.id, key = i.sessionKey; el.style.cursor = 'pointer'; el.onclick = () => jump(key, byId(id)); }
         if (el) el.querySelector('.global-toast-body').classList.add('global-toast-tap');   // B-a42d: the ONE toast a body tap opens — its words, never the whole toast
         btn.classList.remove('ut-blink'); void btn.offsetWidth; btn.classList.add('ut-blink');
+        announce(i); // lane needs-card-tail r11: THE TOAST, GROWN — the flash + the card by the tray (above); the same gate, nothing else
       }
     }
     knownIds = new Set([...todos.open, ...todos.resolved].map((i) => i.id));
+    forgetReachPicks(todos.open); // r11: a reach pick lives while its item is open
     // A TOAST ON SCREEN IS A SURFACE TOO (lane-redact verify r5): an arrival toast keyed on its item is re-worded from the
     // CURRENT record on every snapshot — a cleared item's toast reads the sentence for the rest of its life (≤ 60 s)
     for (const el of document.querySelectorAll('#global-toasts > .global-toast[data-todo-id]')) {
