@@ -20,13 +20,19 @@
 //      census: the instance tokens in data/relay-token.json alone, the shared one in no file in the clear, no journal line
 //      g MUTANTS ⇒ RED: the token written into frpc.toml · the old locked-vault rule at start · the knock retired early
 //      h THE INCIDENT (lane frp-token-proof, 2026-10-30 — frps 0.70.0 behind a VOUCHING plugin: a frpc without the shared
-//         token is taken and dropped at once; the fake frpc logs `login to server success` at its backoff, no proxy starts):
-//         the hub restarts with the vault LOCKED ⇒ ③ the status EXPECTS the restart at the unlock; ④ every publish fails BY
-//         NAME at once (relay_login_dropped, the owner's words — never «DNS», no TCP port walk), ONE For-you item (the Public
-//         URLs door), one journal line; the Ports manager and instance-url over the real plugin say the words, the Ports
-//         manager once; ① nothing recorded, nothing retired, the vault entry KEPT; ② the unlock restarts frpc WITH the
-//         token, the URL is back, the item done. (c above: ⑤ the retirement is SAID — one item naming frp:token.) The base
-//         (4ef7e9494) fails h by name: its RED/GREEN table is frp-token-proof/report.md
+//         token is taken and dropped at once; the fake frpc logs what frpc 0.70.0 logs at info with tcpMux — `try to connect`
+//         + `login to server success` at the incident's backoff, local-time stamps, nothing when the control closes):
+//         the hub restarts with the vault LOCKED ⇒ ③ the status EXPECTS the restart at the unlock; ④ every publish TRIES one
+//         NewProxy, then fails BY NAME (relay_login_dropped, the owner's words — never «DNS», one TCP port, never ten), ONE
+//         For-you item (the Public URLs door), one journal line; the Ports manager and instance-url over the real plugin say
+//         the words, the Ports manager once; ① nothing recorded, nothing retired, the vault entry KEPT; ② the unlock restarts
+//         frpc WITH the token, the item DONE at once (r2: the episode ends by any road — no publish needed), the URL is back.
+//         (c above: ⑤ the retirement is SAID — one item naming frp:token.) The base (4ef7e9494) fails h by name
+//      h2 THE LATCH (r2 — acceptance r1 finding 1): a HEALTHY relay, a proxy-less frpc without the token that reconnected twice
+//         silently ⇒ its publish TRIES and runs, no item (r1 refused it as relay_login_dropped for the rest of the run)
+//      i THE TRIAL (r2 — acceptance r1 finding 2): a relay past its grace refuses the shared token; the watch's trial frpc has
+//         run no proxy; the vault locks and unlocks ⇒ no restart WITH the refused token, the status agrees, the URL runs.
+//         RED/GREEN tables: frp-token-proof/report.md (round 1 vs 4ef7e9494, round 2 vs 4c57acebb)
 //   ①p the SAME hub launched from a POLLUTED env (lane frp-spawn-env-allowlist — planted now, whatever env the suite runs from:
 //      an agent conversation's session tokens, the cluster's shared token, a cloud key, proxies): frpc's env holds the kept
 //      names + the two relay variables only, none of the planted names or values — MUTANT the pre-fix copy of process.env ⇒ RED
@@ -117,15 +123,24 @@ const inc = (text.match(/^includes = \\["(.*)\\/\\*\\.toml"\\]$/m) || [])[1];
 const knockSent = /^auth\\.token = /m.test(text) && !!knock;
 const mode = () => { try { return JSON.parse(fs.readFileSync(${JSON.stringify(MODE)}, 'utf8')); } catch { return {}; } };
 const m0 = mode();
-const loggedIn = !(m0.askKnock && !knockSent);
+// refuseKnock (lane frp-token-proof r2): the relay's grace is OVER (frps auth.token = "") — the shared token refused by name
+const loggedIn = !(m0.askKnock && !knockSent) && !(m0.refuseKnock && knockSent);
 // lane frp-token-proof: frps 0.70.0 behind a VOUCHING plugin — a frpc WITHOUT the shared token is taken, then dropped at once
-// (the control is keyed with auth.token): frpc logs the next login at its fast backoff, and no proxy ever starts
+// (the control is keyed with auth.token): frpc logs the next login at its backoff, and no proxy ever starts
 const dropped = !!m0.dropKnockless && !knockSent;
-const LOGIN = '2026-10-30 05:00:06.000 [I] [client/service.go:328] [fake] login to server success, get run id [fake]\\n';
+// frpc 0.70.0 at info level with tcpMux (r2): its local-time stamp; a redial = «try to connect» + «login to server success»;
+// a control the relay closes logs NOTHING at info (Debug only) — never a [W] heartbeat line (the heartbeat is off)
+const ts = () => { const d = new Date(), z = (n, w) => String(n).padStart(w || 2, '0'); return d.getFullYear() + '-' + z(d.getMonth() + 1) + '-' + z(d.getDate()) + ' ' + z(d.getHours()) + ':' + z(d.getMinutes()) + ':' + z(d.getSeconds()) + '.' + z(d.getMilliseconds(), 3); };
+const L = (line) => fs.appendFileSync(log, ts() + ' ' + line + '\\n');
+const LOGIN = () => { L('[I] [client/service.go:308] try to connect to server...'); L('[I] [client/service.go:328] [fake] login to server success, get run id [fake]'); };
 fs.appendFileSync(${JSON.stringify(SAW)}, JSON.stringify({ pid: process.pid, argv: process.argv.slice(1), knockSha: sha(knock), relaySha: sha(relay), user, conf: text, tokenEnv: Object.keys(process.env).filter((k) => /TOKEN/.test(k)).sort(), envKeys: Object.keys(process.env).sort(), envSha: Object.values(process.env).map(sha).filter(Boolean) }) + '\\n');
-fs.appendFileSync(log, loggedIn ? '2026-10-20 08:00:00.000 [I] [client/service.go:310] login to server success, get run id [fake]\\n' : "2026-10-20 08:00:00.000 [W] [client/service.go:301] connect to server error: token in login doesn't match token from configuration\\n");
-if (dropped) { let k = 0; const t = setInterval(() => { fs.appendFileSync(log, LOGIN); if (++k >= 200) clearInterval(t); }, 100); }
+if (loggedIn) LOGIN(); else { L('[I] [client/service.go:308] try to connect to server...'); L("[W] [client/service.go:319] connect to server error: token in login doesn't match token from configuration"); }
+// the incident's cadence (3 fast retries ~200 ms, then 1 s, then the cap — frpc's 20 s scaled to 2 s), until frpc is stopped
+if (dropped) { const gaps = [200, 200, 200, 1000]; let k = 0; const next = () => setTimeout(() => { LOGIN(); next(); }, gaps[k++] || 2000); next(); }
 const started = new Set();
+// reconnects (r2 — the acceptance's LATCH): a HEALTHY relay closes the control N times right after the start; frpc redials
+// silently (no [W]) and re-sends the proxies it holds — each one answered
+if (loggedIn && !dropped && m0.reconnects) { let k = 0; const t = setInterval(() => { LOGIN(); for (const n of started) L('[I] [client/control.go:165] [fake] [' + n + '] start proxy success'); if (++k >= m0.reconnects) clearInterval(t); }, 40); }
 const proxies = () => { if (!inc) return []; const out = []; for (const f of fs.readdirSync(inc).filter((x) => x.endsWith('.toml'))) { const t = fs.readFileSync(path.join(inc, f), 'utf8'); out.push({ name: (t.match(/^name = "(.*)"$/m) || [])[1], type: (t.match(/^type = "(.*)"$/m) || [])[1], sub: (t.match(/^subdomain = "(.*)"$/m) || [])[1] }); } return out; };
 const srv = http.createServer((q, s) => {
   const m = mode();
@@ -138,7 +153,7 @@ const srv = http.createServer((q, s) => {
         : p.sub && m.taken && m.taken[p.sub] ? { name: shown, type: p.type, status: 'start error', err: 'new proxy [' + shown + '] error: name_in_use:' + m.taken[p.sub] }
           : { name: shown, type: p.type, status: 'running', err: '' };
       (st[p.type] = st[p.type] || []).push(row);
-      if (row.status === 'running' && !started.has(shown)) { started.add(shown); fs.appendFileSync(log, '2026-10-30 05:00:07.000 [I] [client/control.go:165] [fake] [' + shown + '] start proxy success\\n'); }
+      if (row.status === 'running' && !started.has(shown)) { started.add(shown); L('[I] [client/control.go:165] [fake] [' + shown + '] start proxy success'); }
     }
     s.setHeader('content-type', 'application/json'); s.end(JSON.stringify(st)); return;
   }
@@ -558,7 +573,7 @@ async function hubLegs() {
         const t2 = Date.now();
         const p3 = await timed(H.pm.frpPublish('pf-local-4000', 4000, { proto: 'tcp' }), 8000);
         const t3 = Date.now();
-        check(`④ every later publish is refused AT ONCE (${t2 - t1} ms) — no 5 s poll per name — and a TCP publish walks no ports (${t3 - t2} ms; was «could not allocate a public port» after 10 × 4.8 s)`, !!p2.e && p2.e.code === 'relay_login_dropped' && t2 - t1 < 1500 && !!p3.e && p3.e.code === 'relay_login_dropped' && OWNER.test(p3.e.message) && t3 - t2 < 1500, { p2: p2.timeout ? 'timeout' : p2.e && p2.e.message, p3: p3.timeout ? 'timeout' : p3.e && p3.e.message, ms: [t2 - t1, t3 - t2] });
+        check(`④ every later publish TRIES one NewProxy, then is refused BY NAME (${t2 - t1} ms — one 4.8 s poll, r2: never a refusal before a try) — and a TCP publish tries ONE port (${t3 - t2} ms; was «could not allocate a public port» after 10 × 4.8 s)`, !!p2.e && p2.e.code === 'relay_login_dropped' && t2 - t1 >= 4000 && t2 - t1 < 6500 && !!p3.e && p3.e.code === 'relay_login_dropped' && OWNER.test(p3.e.message) && t3 - t2 >= 4000 && t3 - t2 < 6500, { p2: p2.timeout ? 'timeout' : p2.e && p2.e.message, p3: p3.timeout ? 'timeout' : p3.e && p3.e.message, ms: [t2 - t1, t3 - t2] });
         const itemsH = () => utH.snapshot().open.filter((i) => i.origin === 'plugin' && i.plugin === 'frp');
         const dropItems = itemsH().filter((i) => /closes the connection right after/.test(i.text));
         check('④ ONE For-you item (high, notice): «The relay accepts this instance\'s login but closes the connection right after (N logins since <time>, no proxy started)» + why + what to do, its click opens Plugins › Public URLs', dropItems.length === 1 && /^The relay accepts this instance's login but closes the connection right after \(\d+ logins since .+, no proxy started\)$/.test(dropItems[0].text) && /vault was locked when it started\. Unlock the vault with the second password, or set the relay token again in Plugins › Public URLs\./.test(dropItems[0].detail || '') && dropItems[0].urgency === 'high' && JSON.stringify(dropItems[0].open) === JSON.stringify({ kind: 'plugin-settings', plugin: 'frp' }), itemsH().map((i) => [i.text, i.open]));
@@ -594,15 +609,69 @@ async function hubLegs() {
         const sawU = await nextSaw(n7, 6000);
         await sleep(150);
         const pjU = pjOf(H.D);
+        const atU = [...utH.snapshot().open, ...utH.snapshot().resolved].filter((i) => /closes the connection right after/.test(i.text || ''));
+        check('④ r2 THE EPISODE ENDS BY ANY ROAD: at the unlock (frpc restarted WITH the token) the dropped-login item is DONE with no publish, the card reads no drop, the try is forgotten', atU.length === 1 && atU[0].status === 'done' && !H.pm.status('frp').relay.dropped && !pjU.relayDropSaid && !pjU.relayTry, { items: atU.map((i) => [i.id, i.status]), said: pjU.relayDropSaid || null, tried: pjU.relayTry || null, dropped: H.pm.status('frp').relay.dropped });
         check('① at the unlock nothing is dropped: frp:token still in the vault, legacyRetired unset, knock not off', !!(H.v.secretGet('frp:token').value || '').toString() && H.v.secretGet('frp:token').value.toString() === KNOCK && !pjU.legacyRetired && H.pm.status('frp').relay.knock === 'on', { retired: pjU.legacyRetired || null, knock: H.pm.status('frp').relay.knock });
         check('② AT UNLOCK THE TOKEN IS PUT BACK: frpc restarted WITH the shared token (its env carries it, frpc.toml has the auth.token template)', !!sawU && sawU.knockSha === sha(KNOCK) && /^auth\.token = "\{\{ \.Envs\.VIBESPACE_FRP_AUTH_TOKEN \}\}"$/m.test(sawU.conf), sawU && { knock: sawU.knockSha === sha(KNOCK) });
         const pubU = sawU ? await timed(H.pm.frpPublish('vibespace-instance', 3456, { proto: 'http', preferSub: H0.sub }), 8000) : { e: new Error('no frpc') };
         check('② …and the public URL is back, the SAME address', !!pubU.v && pubU.v.url === H0.pub.url, pubU.v ? pubU.v.url : (pubU.e && pubU.e.message) || 'timeout');
         const after = [...utH.snapshot().open, ...utH.snapshot().resolved];
         const di = after.find((i) => /closes the connection right after/.test(i.text || ''));
-        check('④ the dropped-login item is DONE once a proxy ran (no open item left for it); the card no longer reads a drop', !!di && di.status === 'done' && !H.pm.status('frp').relay.dropped, { items: after.filter((i) => /closes the connection/.test(i.text || '')).map((i) => [i.id, i.status]), said: pjOf(H.D).relayDropSaid || null, dropped: H.pm.status('frp').relay.dropped });
+        check('④ the dropped-login item stays DONE once a proxy ran (one row — no second item); the card no longer reads a drop', !!di && di.status === 'done' && after.filter((i) => /closes the connection/.test(i.text || '')).length === 1 && !H.pm.status('frp').relay.dropped, { items: after.filter((i) => /closes the connection/.test(i.text || '')).map((i) => [i.id, i.status]), said: pjOf(H.D).relayDropSaid || null, dropped: H.pm.status('frp').relay.dropped });
         await killFrpc(); try { H.v.close(); } catch { }
       } finally { try { utH.stop(); } catch { } }
+    }
+
+    const timedR2 = (p, ms) => Promise.race([p.then((v) => ({ v }), (e) => ({ e })), sleep(ms).then(() => ({ timeout: true }))]);
+    const dropOpen = (u) => u.snapshot().open.filter((i) => /closes the connection right after/.test(i.text || ''));
+    console.log('  h2 — THE LATCH (acceptance r1 finding 1): a HEALTHY relay, a proxy-less frpc without the shared token that reconnected twice silently (lane frp-token-proof r2)');
+    {
+      fs.mkdirSync(path.join(ROOT, 'todos-h2'), { recursive: true });
+      const utL = new UserTodoManager({ dataDir: path.join(ROOT, 'todos-h2'), expirySweepMs: 0 });
+      let L0 = null;
+      try {
+        L0 = await firstBoot('latch', { ut: utL });
+        for (const f of fs.readdirSync(path.join(PDIR, 'proxies'))) fs.rmSync(path.join(PDIR, 'proxies', f), { force: true });   // nothing published: no proxy to re-send
+        setMode({ askKnock: false, prefix: true, reconnects: 2 });
+        const n = sawAll().length;
+        L0.pm.setConfig('frp', { relay: 'upgraded' });   // the owner says «upgraded»: frpc restarts WITHOUT the shared token (the knockless steady state)
+        const s1 = await nextSaw(n, 6000);
+        await sleep(400);
+        const st = L0.pm.status('frp');
+        const t0 = Date.now();
+        const pub = await timedR2(L0.pm.frpPublish('pf-local-4000', 4000, { proto: 'tcp' }), 8000);
+        const ms = Date.now() - t0;
+        check(`h2 THE LATCH: frpc without the token, 3 logins and no proxy in its run (2 silent reconnects) — its publish TRIES and runs (${ms} ms): never relay_login_dropped`, !!s1 && s1.knockSha === null && !!st.relay.run && st.relay.run.logins >= 3 && st.relay.run.proxies === 0 && !!pub.v && /^tcp:\/\//.test(pub.v.url), { knock: s1 && s1.knockSha, run: st.relay.run, pub: pub.v ? pub.v.url : pub.timeout ? 'timeout' : pub.e && `${pub.e.code}: ${pub.e.message}` });
+        check('h2 …no dropped-login item is filed, the card reads no drop, no try is held', dropOpen(utL).length === 0 && !L0.pm.status('frp').relay.dropped && !pjOf(L0.D).relayTry, { items: dropOpen(utL).map((i) => i.text), tried: pjOf(L0.D).relayTry || null });
+      } finally { await killFrpc(); try { L0 && L0.v.close(); } catch { } try { utL.stop(); } catch { } }
+    }
+
+    console.log('  i — THE TRIAL (acceptance r1 finding 2): a relay past its grace refuses the shared token; the WATCH\'s trial frpc has run no proxy; the vault locks and unlocks (lane frp-token-proof r2)');
+    {
+      const SI = global.setInterval;
+      global.setInterval = (fn, ms, ...a) => SI(fn, ms === 60e3 ? 250 : ms, ...a);   // the plugin's 60-s login watch, quick: the trial is the WATCH's (no publish in flight)
+      let I0 = null;
+      try {
+        I0 = await firstBoot('trial');
+        for (const f of fs.readdirSync(path.join(PDIR, 'proxies'))) fs.rmSync(path.join(PDIR, 'proxies', f), { force: true });   // nothing published: the trial run starts no proxy
+        await killFrpc();
+        setMode({ refuseKnock: true, prefix: true });   // the grace ended: frps auth.token = "" — the shared token refused by name, a frpc without it taken
+        const n = sawAll().length;
+        I0.pm.bootReplay();   // frpc WITH the token (the vault is unlocked) — refused; the watch reads it and starts the trial without it
+        const trial = await nextSaw(n + 1, 8000);
+        await sleep(300);
+        const pjT = pjOf(I0.D), stT = I0.pm.status('frp');
+        check('i0 the watch reads the refusal by name and restarts frpc WITHOUT the token — the TRIAL (frpcKnockless trial); no proxy runs in it', !!trial && trial.knockSha === null && pjT.frpcKnockless === 'trial' && !!stT.relay.run && stT.relay.run.proxies === 0, { trial: trial && trial.knockSha, knockless: pjT.frpcKnockless, run: stT.relay.run });
+        check('i1 the status says NO restart at the unlock for a trial (relay.restartAtUnlock false) — and the unlock agrees (below)', stT.relay.restartAtUnlock === false, stT.relay.restartAtUnlock);
+        const n2 = sawAll().length;
+        I0.v.lock('door');
+        await I0.v.unlock(PW, {});
+        const again = await nextSaw(n2, 2500);
+        check('② r2 AT THE UNLOCK a TRIAL is never restarted WITH the token the relay refused (no new frpc; frpcKnock stays false)', !again && pjOf(I0.D).frpcKnock === false, again ? { restarted: true, withToken: again.knockSha === sha(KNOCK) } : { frpcKnock: pjOf(I0.D).frpcKnock });
+        const t0 = Date.now();
+        const pubT = await timedR2(I0.pm.frpPublish('vibespace-instance', 3456, { proto: 'http', preferSub: I0.sub }), 8000);
+        check(`② r2 …and the public URL is back on the trial run (${Date.now() - t0} ms; its own token only — README «Ending the grace»), the SAME address`, !!pubT.v && pubT.v.url === I0.pub.url, pubT.v ? pubT.v.url : pubT.timeout ? 'timeout' : pubT.e && pubT.e.message);
+      } finally { global.setInterval = SI; await killFrpc(); try { I0 && I0.v.close(); } catch { } }
     }
   } catch (e) {
     check('the legs threw', false, e && e.stack);

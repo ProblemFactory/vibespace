@@ -265,16 +265,17 @@ module.exports = {
       return true;
     };
     /** THE RUN'S LOG (lane frp-token-proof): frpc.log read FORWARD from where this run began (`frpcLogFrom`), new bytes only
-     *  (≤ SCAN_MAX a pass — the counts are then «at least»), counted by RT.runOf: logins, proxies started, logins unanswered */
+     *  (≤ SCAN_MAX a pass — the counts are then «at least»), read by RT.runOf: logins, proxies started, and the logins since the
+     *  relay last answered a NewProxy (their times on the hub's clock — the file's mtime dates the newest line) */
     const SCAN_MAX = 1 << 20;
     let scan = null;
     const runScan = () => {
       const p = h.peek(), rid = runIdOf(p.frpcRun) || `log@${Number(p.frpcLogFrom) || 0}`;
-      if (!scan || scan.run !== rid) scan = { run: rid, offset: Number(p.frpcLogFrom) || 0, rest: '', logins: 0, proxies: 0, unanswered: 0 };
+      if (!scan || scan.run !== rid) scan = { run: rid, offset: Number(p.frpcLogFrom) || 0, rest: '', logins: 0, proxies: 0, unanswered: 0, since: null, recent: [], answeredAt: null };
       let fd = null;
       try {
         fd = fs.openSync(path.join(frpDir(), 'frpc.log'), 'r');
-        const size = fs.fstatSync(fd).size;
+        const st = fs.fstatSync(fd), size = st.size;
         if (size < scan.offset) { scan.offset = 0; scan.rest = ''; }   // rotated / truncated: the new file from its start
         if (size - scan.offset > SCAN_MAX) { scan.offset = size - SCAN_MAX; scan.rest = ''; }
         if (size > scan.offset) {
@@ -283,28 +284,68 @@ module.exports = {
           scan.offset = size;
           const text = scan.rest + b.toString('utf8'), cut = text.lastIndexOf('\n');
           scan.rest = cut < 0 ? text : text.slice(cut + 1);
-          if (cut >= 0) Object.assign(scan, RT.runOf(text.slice(0, cut), scan));
+          if (cut >= 0) Object.assign(scan, RT.runOf(text.slice(0, cut), scan, { at: Math.round(st.mtimeMs) }));   // the log's clock mapped onto the hub's
         }
       } catch { } finally { if (fd !== null) try { fs.closeSync(fd); } catch { } }
       return scan;
     };
     /** a proxy started in THIS run (the hub saw one run, or frpc's log says one started) — the unlock's restart reads it */
     const ranThisRun = () => { const p = h.peek(), rid = runIdOf(p.frpcRun); return !!(rid && p.frpcProxyRun === rid) || runScan().proxies > 0; };
-    /** THE DROPPED LOGIN (lane frp-token-proof): the running frpc started WITHOUT the shared token and the relay takes its
-     *  logins and closes each at once (RT.droppedOf over this run's log) ⇒ `dropped` = { run, logins, since, why } — read by
-     *  publish (its error at once: never a 5 s poll per name, never «is the domain / DNS set up?»), the card and the status;
-     *  ONE For-you item per run (its count refreshed ≤ every 10 min while it is open), done once a proxy runs */
+    /** THE UNLOCK PUTS THE TOKEN BACK (rule ②) only on a run the LOCK started without it (lane frp-token-proof r2 — never a
+     *  TRIAL: the relay refused the token there, and sending it again keeps the relay down until the next trial ≤ 10 min
+     *  later); a record an older build wrote (no `frpcKnockless`) counts as the lock's unless a trial began that run */
+    const lockStarted = (p) => (p.frpcKnockless ? p.frpcKnockless === 'locked'
+      : !(p.knockTrialAt && p.frpcRun && p.frpcRun.at >= p.knockTrialAt && p.frpcRun.at - p.knockTrialAt < 60e3));
+    const restartsAtUnlock = (p) => p.frpcKnock === false && lockStarted(p) && !knocklessProven(p) && !p.relayUpgradedAt && !ranThisRun();
+    /** THE DROPPED LOGIN (lane frp-token-proof; r2 — a RATE and an OUTCOME, never a count): the running frpc started WITHOUT
+     *  the shared token, a publish in this run tried ONE NewProxy that the relay never answered (`relayTry` {run, at} — the
+     *  episode's first; publish() always tries before it refuses), and frpc keeps logging in (RT.droppedOf: DROP_LOGINS
+     *  logins within DROP_WINDOW since the relay last answered, the newest ≤ DROP_QUIET ago) ⇒ `dropped` = { run, logins,
+     *  since, why } — read by publish (after its one try: never «is the domain / DNS set up?», never a 10-port walk), the
+     *  card and the status. ONE For-you item per EPISODE (its count refreshed ≤ every 10 min while it is open); the episode
+     *  — and its item — END by ANY road: a NewProxy answered (a proxy ran or was refused), the token came back (a run that
+     *  sends it), frpc stopped redialling for DROP_QUIET (the relay changed), a new run, the relay stopped. */
     let dropped = null;
-    const droppedWhy = (p) => (p.frpcKnockless === 'locked' ? 'locked' : p.frpcKnockless === 'none' ? 'none' : 'off');
+    const droppedWhy = (p) => {
+      const k = p.frpcKnockless;
+      if (k === 'locked' || k === 'none') return k;
+      if (k) return 'off';
+      const c = frpCfg();   // a record an older build wrote: why it sends no token is read off what this instance holds NOW
+      return c.knockLocked ? 'locked' : c.token || c.knockOff ? 'off' : 'none';
+    };
+    /** not dropped (now): the item said for it is done — the card and the tray agree; `forget` = the episode is OVER (its try
+     *  forgotten too: a later healthy reconnect is never judged against an old try) */
+    const endDrop = ({ forget = true } = {}) => {
+      dropped = null;
+      const p = h.peek();
+      if (!p.relayDropSaid && !(forget && p.relayTry)) return;
+      const said = p.relayDropSaid, w = h.rec();
+      delete w.relayDropSaid;
+      if (forget) delete w.relayTry;
+      h.save();
+      if (said && said.itemId) { try { const it = forYou().get(said.itemId); if (it && it.status === 'open') forYou().setStatus(said.itemId, 'done', 'frp'); } catch { } }
+    };
+    /** a publish's ONE NewProxy went unanswered (neither started nor refused) — the episode's first try in this run is kept */
+    const noteTry = (at) => {
+      const p = h.peek(), run = runIdOf(p.frpcRun) || runScan().run;
+      if (p.frpcKnock !== false || (p.relayTry && p.relayTry.run === run)) return;   // a frpc that sends the token is not judged
+      const w = h.rec(); w.relayTry = { run, at }; h.save();
+    };
     const noteRun = () => {
-      const p = h.peek(), sc = runScan();
-      if (!frpDaemonPid() || !RT.droppedOf(sc, { knock: p.frpcKnock !== false })) { dropped = null; return null; }
+      const p = h.peek(), sc = runScan(), now = Date.now();
       const run = runIdOf(p.frpcRun) || sc.run;
-      dropped = { run, logins: sc.logins, since: (p.frpcRun && p.frpcRun.at) || null, why: droppedWhy(p) };
+      const t = p.relayTry && p.relayTry.run === run ? p.relayTry.at : null;
+      const newest = sc.recent.length ? sc.recent[sc.recent.length - 1] : null;
+      const over = t === null || (Number.isFinite(sc.answeredAt) && sc.answeredAt >= t) || (now - t > RT.DROP_QUIET && !(Number.isFinite(newest) && now - newest <= RT.DROP_QUIET));
+      if (!frpDaemonPid() || over || !RT.droppedOf(sc, { knock: p.frpcKnock !== false, triedAt: t, now })) {
+        endDrop({ forget: over || !frpDaemonPid() || p.frpcKnock !== false });
+        return null;
+      }
+      dropped = { run, logins: sc.unanswered, since: Number.isFinite(sc.since) ? sc.since : (p.frpcRun && p.frpcRun.at) || null, why: droppedWhy(p) };
       const said = p.relayDropSaid || {};
       const due = said.run !== run || (said.itemId && Date.now() - (said.at || 0) >= 600e3 && (() => { try { const it = forYou().get(said.itemId); return !!it && it.status === 'open'; } catch { return false; } })());
       if (due) {
-        const a = RT.droppedAlertOf({ logins: sc.logins, since: dropped.since, why: dropped.why });
+        const a = RT.droppedAlertOf({ logins: dropped.logins, since: dropped.since, why: dropped.why });
         const item = fileItem(a, { itemKey: 'relay-login-dropped', open: PUBLIC_URLS_DOOR });
         if (said.run !== run) console.warn(`[plugins] frp: ${a.message}${item ? ' (one For-you item)' : ''}`);
         const w = h.rec(); w.relayDropSaid = { run, at: Date.now(), itemId: item ? item.id : null }; h.save();
@@ -317,7 +358,7 @@ module.exports = {
      *  never records the relay as no longer asking (lane frp-token-proof — only a proxy that ran does: relayPublished). */
     const observe = () => {
       const p = h.peek();
-      if (!frpDaemonPid() || !['instance', 'cluster'].includes(p.frpcIdentity)) { dropped = null; return null; }
+      if (!frpDaemonPid() || !['instance', 'cluster'].includes(p.frpcIdentity)) { endDrop(); return null; }
       const ls = loginState();
       if (ls && !ls.ok && ls.code === 'knock_refused' && p.frpcKnock === true && !(Date.now() - (p.knockTrialAt || 0) < 600e3)) {
         const w = h.rec(); w.knockTrialAt = Date.now(); h.save();
@@ -355,9 +396,8 @@ module.exports = {
       if (!w.relayPublishedAt) { w.relayPublishedAt = Date.now(); dirty = true; }
       if (thisRun && w.frpcProxyRun !== rid) { w.frpcProxyRun = rid; dirty = true; }
       if (thisRun && w.frpcKnock === false && !knocklessProven(w)) { w.relayKnocklessAt = Date.now(); w.relayKnocklessRun = rid; dirty = true; console.log(`[plugins] frp: a proxy ran on a frpc started without the shared token (run ${rid}) — the relay no longer asks for it`); }
-      if (w.relayDropSaid && w.relayDropSaid.itemId) { const id = w.relayDropSaid.itemId; delete w.relayDropSaid; dirty = true; try { const it = forYou().get(id); if (it && it.status === 'open') forYou().setStatus(id, 'done', 'frp'); } catch { } }
-      dropped = null;
       if (dirty) h.save();
+      endDrop();   // the episode ends: a proxy ran
       if (sub && p.frpcIdentity === 'instance') { const r = relayRead().rec; if (r && r.token && !r.subdomains.includes(sub)) { try { relayWrite(RT.withSub(r, sub)); } catch (e) { console.warn('[plugins] frp: the relay record kept no subdomain:', e.message); } } }
       retireLegacy();
     };
@@ -415,10 +455,10 @@ module.exports = {
         knock: c.knockOff ? 'off' : c.knockLocked ? 'locked' : c.token ? 'on' : 'none',
         upgradedAt: p.relayUpgradedAt || (knocklessProven(p) ? p.relayKnocklessAt : null), publishedAt: p.relayPublishedAt || null, retired: p.legacyRetired || null,
         // lane frp-token-proof: the running frpc's run — what its log counts; the dropped login by name; a frpc the lock started
-        // without the shared token says its restart at the unlock is EXPECTED (the unlock takes it unless a proxy ran)
+        // without the shared token says its restart at the unlock is EXPECTED (the unlock takes it unless a proxy ran — never a trial)
         run: running ? { at: (p.frpcRun && p.frpcRun.at) || null, knock: p.frpcKnock !== false, logins: runScan().logins, proxies: runScan().proxies } : null,
         dropped: running && dropped ? { logins: dropped.logins, since: dropped.since, why: dropped.why } : null,
-        restartAtUnlock: !!(running && p.frpcKnock === false && p.frpcKnockless === 'locked' && !knocklessProven(p) && !ranThisRun()),
+        restartAtUnlock: !!(running && restartsAtUnlock(p)),   // r2: the same predicate the unlock acts on (never a trial)
       };
     };
 
@@ -472,10 +512,10 @@ module.exports = {
         }
         // lane relay-token-per-instance: the knock's retirement waits for an unlock when the vault holds it; a frpc the LOCK
         // started without the knock (its own token only) gets it back now — lane frp-token-proof: unless a proxy RAN in this
-        // run (a login proves nothing: frps 0.70.0 takes a vouched login and drops it)
+        // run (a login proves nothing: frps 0.70.0 takes a vouched login and drops it); r2: never a TRIAL run (restartsAtUnlock)
         try { retireLegacy(); } catch (e) { console.warn('[plugins] frp: the shared relay token was not retired:', e.message); }
         const p = h.peek();
-        if (frpDaemonPid() && p.frpcKnock === false && !knocklessProven(p) && !p.relayUpgradedAt && frpCfg().token && !ranThisRun()) {
+        if (frpDaemonPid() && restartsAtUnlock(p) && frpCfg().token) {
           restartSoon({}, 'with the shared token');
           return sealed;
         }
@@ -562,7 +602,7 @@ module.exports = {
 
       stop() {
         watchLogin(false);
-        dropped = null;
+        endDrop();   // the episode ends with its run (a restart WITH the token, a settings change, the relay stopped)
         const pid = frpDaemonPid();
         if (pid) { try { process.kill(pid, 'SIGTERM'); } catch { } }
         try { fs.unlinkSync(frpPidFile()); } catch { }
@@ -611,8 +651,7 @@ module.exports = {
         if (cfg0.ident.kind === 'revoked') throw Object.assign(new Error(revokedWords), { code: 'relay_revoked' });
         if (!frpConfigured()) throw new Error('public URLs are not available — the frp relay is not configured on this instance');
         if (!frpDaemonPid()) { verbs.start(); await new Promise((r) => setTimeout(r, 1500)); }
-        try { observe(); } catch { }
-        if (dropped) throw droppedError();   // lane frp-token-proof: no proxy can start on this run — said at once, by name
+        try { observe(); } catch { }   // r2: no refusal before a try — publish() always tries ONE NewProxy (a proxy that runs ends the episode)
         const cfg = frpCfg();
         const safe = String(name).replace(/[^\w-]/g, '_').slice(0, 60);
         const file = path.join(frpProxiesDir(), safe + '.toml');
@@ -640,6 +679,7 @@ module.exports = {
           const sub = /^[a-z0-9][a-z0-9-]{1,62}$/.test(preferSub) ? preferSub
             : 'vs' + require('crypto').randomBytes(5).toString('hex'); // e.g. vs3f9a1c2b4d
           let refused = '';
+          const tried = Date.now();
           const toml = `[[proxies]]\nname = "${safe}"\ntype = "http"\nsubdomain = "${sub}"\nlocalIP = "127.0.0.1"\nlocalPort = ${localPort}\nhostHeaderRewrite = "127.0.0.1"\n`;
           fs.writeFileSync(file, toml, { mode: 0o600 });
           try { await frpReload(); } catch (e) { throw new Error('frpc reload failed: ' + e.message); }
@@ -651,8 +691,8 @@ module.exports = {
             if (p && (p.status === 'error' || p.status === 'closed' || p.status === 'start error')) { refused = refusal(p, sub); break; }
           }
           try { fs.unlinkSync(file); await frpReload(); } catch { }
-          if (refused) throw Object.assign(new Error(`the relay refused ${sub}: ${refused}`), { code: 'relay_refused' });
-          try { noteRun(); } catch { }
+          if (refused) { endDrop(); throw Object.assign(new Error(`the relay refused ${sub}: ${refused}`), { code: 'relay_refused' }); }   // an answer: the control is keyed right
+          try { noteTry(tried); noteRun(); } catch { }   // the ONE NewProxy went unanswered
           if (dropped) throw droppedError();   // nothing was refused: the relay dropped the login — never «DNS»
           throw new Error('could not publish the subdomain on the relay (is the domain / DNS set up?)');
         }
@@ -667,6 +707,8 @@ module.exports = {
         let lastErr = '';
         for (const remotePort of cand) {
           const toml = `[[proxies]]\nname = "${safe}"\ntype = "tcp"\nlocalIP = "127.0.0.1"\nlocalPort = ${localPort}\nremotePort = ${remotePort}\n`;
+          const tried = Date.now();
+          let answered = false;
           fs.writeFileSync(file, toml, { mode: 0o600 });
           try { await frpReload(); } catch (e) { lastErr = e.message; continue; }
           // poll the proxy's run state — 'running' = the relay accepted the port
@@ -684,9 +726,10 @@ module.exports = {
               const url = proto === 'tcp' ? `tcp://${cfg.serverAddr}:${remotePort}` : `${scheme}://${cfg.serverAddr}:${remotePort}/`;
               return { name: safe, remotePort, proto, url, publicHost: cfg.serverAddr };
             }
-            if (p && (p.status === 'error' || p.status === 'closed' || p.status === 'start error')) { const why = refusal(p, safe); lastErr = why || p.err || 'port unavailable'; break; }
+            if (p && (p.status === 'error' || p.status === 'closed' || p.status === 'start error')) { const why = refusal(p, safe); lastErr = why || p.err || 'port unavailable'; answered = true; break; }
           }
-          try { noteRun(); } catch { }
+          if (answered) endDrop();   // the relay answered (a refused port): the control is keyed right — no drop
+          else { try { noteTry(tried); noteRun(); } catch { } }
           if (dropped) break;   // lane frp-token-proof: the port is not the cause — no other port is tried
         }
         try { fs.unlinkSync(file); await frpReload(); } catch { }

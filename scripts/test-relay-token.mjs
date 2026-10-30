@@ -15,10 +15,12 @@
 //   ⑧ refusalOf / loginOf read the relay's words out of frpc's (a proxy's start error, frpc.log); alertOf files ONE item per
 //      name, never the token
 //   ⑧b THE RUN'S LOG (lane frp-token-proof, 2026-10-30 — the hub dropped its own shared token after misreading a login):
-//      runOf counts a run's logins / proxies started / logins no answer followed over THE INCIDENT'S TRANSCRIPT (frpc 0.70.0
-//      lines as frpc.log had them: «login to server success» at the backoff, nothing else); droppedOf = a frpc WITHOUT the
-//      shared token, ≥ 3 unanswered logins, no proxy started — a proxy start or a [W] line (the relay answered) resets it, a
-//      frpc that sends the token is never judged; the owner's words (droppedAlertOf / retiredAlertOf) carry no token
+//      runOf reads a run's logins / proxies started / the logins since the relay last answered a NewProxy (their times on the
+//      hub's clock — the file's mtime) over THE INCIDENT'S TRANSCRIPT as frpc 0.70.0 logs it at info with tcpMux (try + login at
+//      its backoff, nothing when the relay closes the control); r2: droppedOf is a RATE and an OUTCOME, never a count — no
+//      shared token, a publish tried and never answered, 3 logins within 60 s, frpc still redialling. The LATCH (a healthy
+//      proxy-less frpc's silent reconnects), logins days apart, a refused NewProxy (an answer), healthy reconnects: never
+//      dropped; the owner's words (droppedAlertOf / retiredAlertOf) carry no token
 //   ⑨ CENSUS: the env names VIBESPACE_RELAY_TOKEN / VIBESPACE_FRP_AUTH_TOKEN are spelled in src/relay-token.js only; the ONE
 //      frpc spawn env is RT.relayEnv(process.env, …) in src/plugins/frp.js, which copies process.env nowhere; src/relay-token.js
 //      requires nothing
@@ -178,28 +180,54 @@ const al = RT.alertOf({ code: 'name_in_use', owner: 'other-hub' }, { name: 'vs12
 ok(al && al.text === 'The public name vs1234567890 is held by “other-hub” on the relay' && al.i18n.text.params.owner === 'other-hub' && Array.isArray(al.i18n.detail) && !leaks(JSON.stringify(al), a.token), 'alertOf name_in_use: the name + the owner, i18n lines, never a token', al && al.text);
 ok(RT.alertOf({ code: 'name_not_yours' }, { name: 'pf-x' }).text.includes('pf-x') && RT.alertOf({ code: 'bad_token' }) === null && RT.alertOf(null) === null, 'alertOf: the two name refusals only (a login refusal is the card\'s, not the tray\'s)');
 
-console.log('⑧b the run\'s log — a login is no proof (lane frp-token-proof)');
+console.log('⑧b the run\'s log — a login is no proof; a drop is a RATE and an OUTCOME (lane frp-token-proof, r2)');
 {
-  // THE INCIDENT'S TRANSCRIPT (frpc.log since 05:00:05, the shape the forensic verdict quotes; run ids masked): a vouched login,
-  // then the relay drops the control it cannot decrypt — frpc logs the next login at its fast backoff, never a proxy start
-  const at = (s) => `2026-10-30 05:${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}.000`;
-  const login = (s) => `${at(s)} [I] [client/service.go:308] try to connect to server...\n${at(s)} [I] [client/service.go:328] [9f2146966359774] login to server success, get run id [9f2146966359774]`;
-  const INCIDENT = [login(6), login(6), login(7), login(9), login(13), login(21), login(41)].join('\n');
-  const runOf = typeof RT.runOf === 'function' ? RT.runOf : null, droppedOf = typeof RT.droppedOf === 'function' ? RT.droppedOf : null;
-  const r = runOf ? runOf(INCIDENT) : null;
-  ok(!!r && r.logins === 7 && r.proxies === 0 && r.unanswered === 7, 'runOf over the incident\'s transcript: 7 logins, 0 proxies started, 7 unanswered', r);
-  ok(!!droppedOf && droppedOf(r, { knock: false }) === true, 'THE DROPPED LOGIN: a frpc without the shared token, 7 logins no answer followed, no proxy ⇒ dropped');
+  // frpc 0.70.0 AT INFO LEVEL WITH tcpMux (its heartbeat off — the plugin's frpc.toml): a control the relay closes is logged at
+  // Debug only («control message dispatcher exited»); the redial logs `try to connect to server...` + `login to server success`
+  // at its backoff (3 fast retries ~200 ms apart in the first minute, then 1 s doubling to 20 s). frpc's clock is the machine's
+  // local time (PDT on 10-30); the hub's is UTC here — the file's mtime ties them.
+  const T0 = Date.UTC(2026, 9, 30, 12, 0, 5);   // 05:00:05 PDT: the boot replay starts frpc with the vault LOCKED
+  const local = (ms) => new Date(ms - 7 * 3600e3).toISOString().replace('T', ' ').slice(0, 23);
+  const login = (ms) => `${local(T0 + ms)} [I] [client/service.go:308] try to connect to server...\n${local(T0 + ms + 9)} [I] [client/service.go:328] [9f2146966359774] login to server success, get run id [9f2146966359774]`;
+  const started = (ms, name = 'vibespace-instance') => `${local(T0 + ms)} [I] [client/control.go:165] [9f2146966359774] [vi-x.${name}] start proxy success`;
+  // THE INCIDENT'S TRANSCRIPT (the forensic verdict: frps logged «client exit success» 16 ms after each login, every 1–20 s; frpc
+  // logged the logins and nothing else — 2459 of them by the unlock, 0 «start proxy success»)
+  const INC = [1010, 1240, 1450, 1710, 2800, 4900, 9000, 17100, 33300, 53500, 73600, 93800];
+  const INCIDENT = INC.map(login).join('\n');
+  const AT = T0 + 93800 + 9;   // the file's mtime: its newest line written
+  const runOf = typeof RT.runOf === 'function' ? RT.runOf : () => null, droppedOf = typeof RT.droppedOf === 'function' ? RT.droppedOf : () => null;
+  const r = runOf(INCIDENT, null, { at: AT }) || {};
+  ok(r.logins === 12 && r.proxies === 0 && r.unanswered === 12 && Array.isArray(r.recent) && r.recent.length === RT.DROP_LOGINS, 'runOf over the incident\'s transcript: 12 logins, 0 proxies started, 12 since the relay last answered a NewProxy', r);
+  ok(r.since === T0 + 1019 && r.recent[r.recent.length - 1] === AT, 'the log\'s own clock (PDT) maps onto the hub\'s by the file\'s mtime — whatever frpc\'s time zone', { since: r.since, want: T0 + 1019 });
+  const tried = T0 + 2500;   // the boot replay's publish tried ONE NewProxy 2.5 s after the start — never answered
+  ok(droppedOf(r, { knock: false, triedAt: tried, now: AT + 5e3 }) === true, 'THE DROPPED LOGIN: no shared token, a publish WANTED and never answered, 3 logins within 60 s since the relay last answered, frpc still redialling ⇒ dropped');
+  ok(droppedOf(r, { knock: false, triedAt: null, now: AT + 5e3 }) === false, '…no publish wanted (nothing tried) ⇒ not judged — the OUTCOME is part of the verdict');
+  ok(droppedOf(r, { knock: false, triedAt: tried, now: AT + RT.DROP_QUIET + 1 }) === false, '…frpc stopped redialling for DROP_QUIET (a dropped frpc redials ≤ 20 s apart; one that holds its control logs nothing) ⇒ over');
+  ok(droppedOf(r, { knock: true, triedAt: tried, now: AT }) === false && droppedOf(runOf(`${login(1010)}\n${login(1240)}`, null, { at: T0 + 1249 }), { knock: false, triedAt: T0 + 1300, now: T0 + 2e3 }) === false, 'a frpc that SENDS the shared token is never judged here; two logins are not yet a pattern (DROP_LOGINS = 3)');
   ok(JSON.stringify(RT.loginOf(INCIDENT)) === JSON.stringify({ ok: true }), '…while loginOf — the newest login event — still reads «ok»: a login is no proof (the hub took this as «the relay no longer asks»)', RT.loginOf(INCIDENT));
-  const HEALTHY = `${login(6)}\n${at(6)} [I] [proxy/proxy_manager.go:156] [9f21] [vi-x.vibespace-instance] start proxy success\n${login(400)}\n${login(401)}\n${at(401)} [I] [client/control.go:165] [9f21] [vi-x.pf-__local__-8128] start proxy success`;
-  const h = runOf ? runOf(HEALTHY) : null;
-  ok(!!h && h.logins === 3 && h.proxies === 2 && h.unanswered === 0 && droppedOf(h, { knock: false }) === false, 'a run whose proxies start: never dropped (a reconnect re-starts its proxies)', h);
-  const FLAP = [login(6), `${at(30)} [W] [client/control.go:263] [9f21] heartbeat timeout`, login(31), `${at(50)} [W] [client/service.go:319] connect to server error: dial tcp: i/o timeout`, login(60)].join('\n');
-  const f = runOf ? runOf(FLAP) : null;
-  ok(!!f && f.logins === 3 && f.unanswered === 1 && droppedOf(f, { knock: false }) === false, 'a flapping network ([W] between the logins — the relay answered, the line was lost): not dropped', f);
-  ok(!!droppedOf && droppedOf(r, { knock: true }) === false && droppedOf(runOf('' + login(1) + '\n' + login(2)), { knock: false }) === false, 'a frpc that SENDS the shared token is never judged here; two logins are not yet a pattern (DROP_LOGINS = 3)');
-  const inc = runOf ? runOf(INCIDENT.split('\n').slice(0, 6).join('\n')) : null;
-  const inc2 = runOf ? runOf(INCIDENT.split('\n').slice(6).join('\n'), inc) : null;
-  ok(!!inc2 && JSON.stringify(inc2) === JSON.stringify(r), 'runOf reads FORWARD: the counts of two halves = the counts of the whole (the hub reads new bytes only)', inc2);
+  // THE LATCH (acceptance r1, finding 1): a HEALTHY relay, a proxy-less frpc without the token that reconnected twice SILENTLY
+  const l = runOf([login(1000), login(400000), login(400300)].join('\n'), null, { at: T0 + 400309 }) || {};
+  ok(l.unanswered === 3 && droppedOf(l, { knock: false, triedAt: null, now: T0 + 401e3 }) === false, 'THE LATCH: a healthy proxy-less frpc, 2 silent reconnects (3 logins in a row), nothing tried yet ⇒ NOT dropped (r1 refused every publish here, for the rest of the run)', l);
+  const l2 = runOf(started(401000, 'pf-__local__-4000'), l, { at: T0 + 401000 }) || {};
+  ok(l2.proxies === 1 && l2.unanswered === 0 && l2.answeredAt === T0 + 401000 && droppedOf(l2, { knock: false, triedAt: T0 + 400500, now: T0 + 402e3 }) === false, '…its publish TRIES one NewProxy and the relay answers (start proxy success) ⇒ no episode', l2);
+  const e = runOf(`${local(T0 + 401000)} [W] [client/control.go:163] [9f2146966359774] [vi-x.pf-__local__-4000] start error: port already used`, l, { at: T0 + 401000 }) || {};
+  ok(e.proxies === 0 && e.unanswered === 0 && droppedOf(e, { knock: false, triedAt: T0 + 400500, now: T0 + 402e3 }) === false, 'a REFUSED NewProxy is an answer too (the relay read the frame: its control is keyed right) ⇒ not dropped', e);
+  // THE RATE: logins far apart are no flap
+  const SLOW = ['2026-10-20', '2026-10-24', '2026-10-29'].map((d) => `${d} 08:00:00.000 [I] [client/service.go:328] [a] login to server success, get run id [a]`).join('\n');
+  const sl = runOf(SLOW, null, { at: Date.UTC(2026, 9, 29, 15) }) || {};
+  ok(sl.unanswered === 3 && droppedOf(sl, { knock: false, triedAt: Date.UTC(2026, 9, 29, 15), now: Date.UTC(2026, 9, 29, 15, 0, 5) }) === false, 'THE RATE: 3 logins over 9 days with a try unanswered ⇒ not dropped (r1 judged it so: a count with no time)', sl);
+  const sp = runOf([login(1000), login(70000), login(140000)].join('\n'), null, { at: T0 + 140009 }) || {};
+  ok(droppedOf(sp, { knock: false, triedAt: T0 + 2e3, now: T0 + 141e3 }) === false && droppedOf(runOf(login(141000), sp, { at: T0 + 141009 }), { knock: false, triedAt: T0 + 2e3, now: T0 + 142e3 }) === false, 'logins more than DROP_WINDOW (60 s) apart, three or four of them ⇒ not dropped');
+  // HEALTHY RECONNECTS: two reconnects, a proxy that ran after each (frpc re-sends its proxies on every new control) ⇒ silent
+  const hh = runOf([login(6000), started(6100), login(400000), started(400100), login(400300), started(400400)].join('\n'), null, { at: T0 + 400400 }) || {};
+  ok(hh.logins === 3 && hh.proxies === 3 && hh.unanswered === 0 && droppedOf(hh, { knock: false, triedAt: T0 + 5e3, now: T0 + 401e3 }) === false, 'HEALTHY reconnects (two, a proxy that ran) ⇒ never dropped', hh);
+  // an episode that ENDS: the incident, then the relay answers
+  const end = runOf(started(94000), r, { at: T0 + 94000 }) || {};
+  ok(end.unanswered === 0 && droppedOf(end, { knock: false, triedAt: tried, now: T0 + 95e3 }) === false, 'a proxy that runs ends the episode (the relay answered after the try)', end);
+  const half = INCIDENT.split('\n');
+  const h1 = runOf(half.slice(0, 10).join('\n'), null, { at: T0 + 2809 });
+  const h2 = runOf(half.slice(10).join('\n'), h1, { at: AT });
+  ok(!!h2 && JSON.stringify(h2) === JSON.stringify(r), 'runOf reads FORWARD: two halves (each dated by its own mtime) = the whole (the hub reads new bytes only)', h2);
   const a = typeof RT.droppedAlertOf === 'function' ? RT.droppedAlertOf({ logins: 2459, since: Date.parse('2026-10-30T12:00:05Z'), why: 'locked' }) : null;
   ok(!!a && a.text === 'The relay accepts this instance\'s login but closes the connection right after (2459 logins since 2026-10-30 12:00Z, no proxy started)', 'the owner\'s words: «the relay accepts this instance\'s login but closes the connection right after (N logins since <time>, no proxy started)»', a && a.text);
   ok(!!a && /still requires the shared relay token, and this frpc runs without it because the vault was locked when it started\. Unlock the vault with the second password, or set the relay token again in Plugins › Public URLs\./.test(a.detail) && !/DNS|domain|public port/.test(a.text + a.detail + a.message), '…why and what to do (unlock the vault with the second password, or set the relay token again) — never «DNS» nor «a public port»', a && a.detail);

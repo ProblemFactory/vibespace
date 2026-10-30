@@ -164,25 +164,50 @@ function loginOf(logText) {
 }
 /** THE RUN'S LOG (lane frp-token-proof, 2026-10-30 — the hub deleted its own relay token after misreading a login): frps
  *  0.70.0 encrypts the control connection after a login with auth.token as the key on BOTH sides, so a frpc WITHOUT the key
- *  frps holds is taken (the relay's plugin vouches the instance's own token) and dropped ~16 ms later — frpc logs `login to
- *  server success` again at its backoff and nothing else at info level. A login is never a proof; a proxy that STARTED is.
- *  frpc.log text (a run's, read forward; `prev` = the counts so far) → { logins, proxies, unanswered } — `unanswered` = the
- *  logins since the relay last answered (a proxy started, or a [W]/[E] line: a refusal, a lost connection) */
+ *  frps holds is taken (the relay's plugin vouches the instance's own token) and dropped ~16 ms later. At info level, with
+ *  tcpMux on (its heartbeat off), frpc logs a control the relay closed NOT AT ALL — only the redial: `try to connect to
+ *  server...` + `login to server success` at its backoff (3 fast retries ~200 ms apart within the first minute, then 1 s
+ *  doubling to 20 s). A login is never a proof. A NewProxy ANSWER is — `[name] start proxy success`, or `[name] start error:`
+ *  (the relay read the frame, so the control is keyed right).
+ *  frpc.log text (a run's, read forward; `prev` = the state so far; `at` = when the text's last line was written — the file's
+ *  mtime — so each line's own clock maps onto the hub's whatever frpc's time zone; no `at` ⇒ the log's clock as is) →
+ *  { logins, proxies, unanswered, since, recent, answeredAt } — `unanswered` = the logins since the relay last answered a
+ *  NewProxy, `since` the first of them, `recent` the times of the newest DROP_LOGINS of them, `answeredAt` the last answer */
 const LOGIN_OK_RE = /login to (?:the )?server success/i;
 const PROXY_OK_RE = /\bstart proxy success\b/;
-function runOf(logText, prev = null) {
-  let logins = (prev && prev.logins) || 0, proxies = (prev && prev.proxies) || 0, unanswered = (prev && prev.unanswered) || 0;
-  for (const l of String(logText || '').split('\n')) {
-    if (LOGIN_OK_RE.test(l)) { logins++; unanswered++; }
-    else if (PROXY_OK_RE.test(l)) { proxies++; unanswered = 0; }
-    else if (/\[[WE]\]/.test(l)) unanswered = 0;
+const PROXY_ANSWER_RE = /\] start (?:proxy success|error:)/;
+const LOG_TS_RE = /^(\d{4})-(\d\d)-(\d\d) (\d\d):(\d\d):(\d\d)(?:\.(\d{1,3}))?/;
+const logClockOf = (l) => { const m = LOG_TS_RE.exec(l); return m ? Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6], Number((m[7] || '0').padEnd(3, '0'))) : null; };
+function runOf(logText, prev = null, { at = null } = {}) {
+  const lines = String(logText || '').split('\n');
+  let last = null;
+  for (let i = lines.length - 1; i >= 0 && last === null; i--) last = logClockOf(lines[i]);
+  const off = Number.isFinite(at) && last !== null ? at - last : 0;
+  const p = prev || {};
+  let logins = p.logins || 0, proxies = p.proxies || 0, unanswered = p.unanswered || 0, since = Number.isFinite(p.since) ? p.since : null, answeredAt = Number.isFinite(p.answeredAt) ? p.answeredAt : null;
+  let recent = Array.isArray(p.recent) ? p.recent.slice() : [];
+  for (const l of lines) {
+    const c = logClockOf(l), t = c !== null ? c + off : Number.isFinite(at) ? at : null;
+    if (LOGIN_OK_RE.test(l)) { logins++; unanswered++; if (since === null) since = t; recent.push(t); if (recent.length > DROP_LOGINS) recent = recent.slice(-DROP_LOGINS); }
+    else if (PROXY_ANSWER_RE.test(l)) { if (PROXY_OK_RE.test(l)) proxies++; unanswered = 0; since = null; recent = []; answeredAt = t; }
   }
-  return { logins, proxies, unanswered };
+  return { logins, proxies, unanswered, since, recent, answeredAt };
 }
-/** THE DROPPED LOGIN (`relay_login_dropped`): a frpc started WITHOUT the shared token that keeps logging in — DROP_LOGINS
- *  logins in a row no answer followed — and started no proxy in its run. A frpc that sends the token is not judged here. */
-const DROP_LOGINS = 3;
-const droppedOf = (run, { knock = true } = {}) => !knock && !!run && run.proxies === 0 && run.unanswered >= DROP_LOGINS;
+/** THE DROPPED LOGIN (`relay_login_dropped`) — a judgment about a RATE and an OUTCOME, never a count (acceptance r1: a healthy
+ *  frpc's silent reconnects are logins too): a frpc started WITHOUT the shared token; a publish WANTED in this run that the
+ *  relay never answered (`triedAt` — one NewProxy tried, neither started nor refused, and no answer since); and since the
+ *  relay last answered, DROP_LOGINS logins within DROP_WINDOW, the newest ≤ DROP_QUIET before `now` (a dropped frpc redials
+ *  ≤ 20 s apart; one that stopped redialling holds its control) and not before the try's window. A frpc that sends the token
+ *  is not judged here. */
+const DROP_LOGINS = 3, DROP_WINDOW = 60e3, DROP_QUIET = 120e3;
+function droppedOf(run, { knock = true, triedAt = null, now = Date.now() } = {}) {
+  if (knock || !run || !Number.isFinite(triedAt)) return false;
+  if (Number.isFinite(run.answeredAt) && run.answeredAt >= triedAt) return false;
+  const r = (run.recent || []).filter(Number.isFinite);
+  if (r.length < DROP_LOGINS) return false;
+  const first = r[r.length - DROP_LOGINS], newest = r[r.length - 1];
+  return newest - first <= DROP_WINDOW && newest >= triedAt - DROP_WINDOW && now - newest <= DROP_QUIET;
+}
 /** the owner's words for it (ONE For-you item; the publish error and the jobs' / forwards' status say the same) — why frpc
  *  runs without the token: `locked` (the vault was locked when it started) | `none` (this instance holds no shared token) |
  *  `off` (it holds one but does not send it: the relay was taken to no longer ask, or it refused the one held) */
@@ -230,5 +255,5 @@ function alertOf(ref, { name = '' } = {}) {
 module.exports = {
   V, FILE, TOKEN_ENV, CLUSTER_TOKEN_ENV, KNOCK_ENV, RELAY_ENV_KEEP, TOKEN_PREFIX, ID_RE, TOKEN_RE, HASH_RE, LABEL_RE, SUB_RE, CLUSTER_USER_RE, PREFIXES, SUBS_MAX, REASONS, ALERTS,
   labelOf, clusterUserOf, mint, rotate, revoke, withSub, parse, serialize, identityOf, registrationLine, frpcLines, relayEnv, strippedName, nameVerdict, refusalOf, loginOf, alertOf,
-  DROP_LOGINS, DROPPED_TEXT, DROPPED_DETAIL, RETIRED_TEXT, RETIRED_DETAIL, runOf, droppedOf, droppedAlertOf, retiredAlertOf,   // lane frp-token-proof
+  DROP_LOGINS, DROP_WINDOW, DROP_QUIET, DROPPED_TEXT, DROPPED_DETAIL, RETIRED_TEXT, RETIRED_DETAIL, runOf, droppedOf, droppedAlertOf, retiredAlertOf,   // lane frp-token-proof
 };
