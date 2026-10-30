@@ -1266,7 +1266,10 @@ function hostsWhyOf(shape) {
  * [{ id, own, prov, forHost, open }]; `away` the verdict's [{ id, ref, forHost, host, unknown, keep }] (a minted value minted for
  * X, this run sends it to Y); `notOwn` another conversation stored it. The facts carry EVERYTHING the approval rests on — each
  * shown template's TEXT, the plain env the child gets, the reasons as CODES — so a facts client (which never shows `detail`) shows
- * the same card. Every string is bounded to CARD_STRING_MAX, a longer one cut (marker) with the whole value in a chunked fold.
+ * the same card. Every string is bounded to CARD_STRING_MAX, a longer one cut (marker) with the whole value in a chunked fold —
+ * r27 (by lane wake-approve-card; the wake r11 acceptance): `folder`, `tool.path` and a reason's `away[].ref` too (clipFold), so
+ * NO facts string is clipped without its marker and its fold; a program inside the folder folds only its tail (`pathTail` — the
+ * folder's fold carries the prefix once).
  * → EXACTLY the contract object (the fixture).
  */
 function cardFactsOf(spec, shape, cwd, names = {}) {
@@ -1286,19 +1289,24 @@ function cardFactsOf(spec, shape, cwd, names = {}) {
   const known = (shape.routeHosts || []).length > 0;
   const templates = (spec.files || []).filter((f) => f.template != null && typeof f.text === 'string')
     .map((f) => { const text = String(f.text), b = bytesOf(text), shown = b <= TEMPLATE_CARD_MAX, c = clipStr(text); return { label: f.name || null, bytes: b, shown, text: shown ? c.text : '', ...(shown && c.cut ? { textFull: chunkStr(text) } : {}) }; });   // a shown template's TEXT rides the card (chunked when long); an over-bound one (> TEMPLATE_CARD_MAX ⇒ card_too_long, never a card) carries no text, shown:false
-  const env = (spec.plainEnv || []).map((e) => ({ ...clipFold('name', e.name), ...clipFold('value', e.value) }));   // the plain (non-secret) env the child gets; round 25 (minor 6a): a clipped name / value carries its *Cut marker + its *Full fold (the store no longer sees a bare 2000-char string and names nothing)
+  const env = (spec.plainEnv || []).map((e) => ({ ...clipFold('name', e.name), ...clipFold('value', e.value) }));
+  // r27 (by wake-approve-card): a long path folds ONCE — a program inside the working folder carries only its TAIL past the folder
+  // (`pathTail`, itself folded when long; the client joins folderFull + '/' + the tail), never the folder's prefix a second time
+  // (the r12 acceptance: a 3 000-character folder made a card 24.9 KB — past the store's 24 KB bound, the whole card dropped)
+  const folderRaw = homeRel(cwd, home), pathRaw = homeRel(spec.tool, home), pathC = clipStr(pathRaw);
+  const pathFold = !pathC.cut ? { path: pathC.text } : folderRaw && pathRaw.startsWith(folderRaw + '/') ? { path: pathC.text, pathCut: true, ...clipFold('pathTail', pathRaw.slice(folderRaw.length + 1)) } : clipFold('path', pathRaw);   // the plain (non-secret) env the child gets; round 25 (minor 6a): a clipped name / value carries its *Cut marker + its *Full fold (the store no longer sees a bare 2000-char string and names nothing)
   return {
     v: 2,
     who: whoC.text, ...(whoC.cut ? { whoCut: true } : {}),
-    tool: { name: baseName(spec.tool), path: clipStr(homeRel(spec.tool, home)).text, writable: !!spec.programWritable },
+    tool: { name: baseName(spec.tool), ...pathFold, writable: !!spec.programWritable },   // r27 (by wake-approve-card): a long path carries pathCut + pathFull — or, inside the folder, pathCut + pathTail (was clipped with no marker — the card showed the clip as the whole path)
     cmd: cmdC.text, ...(cmdC.cut ? { cmdCut: true, cmdFull: chunkStr(cmdRaw) } : {}),
-    folder: clipStr(homeRel(cwd, home)).text,
+    ...clipFold('folder', folderRaw),   // r27: a long working folder carries folderCut + folderFull (its tail — where the program runs — was lost unsaid)
     secrets,
     env,
     hosts: known ? { known: true, list: [...shape.routeHosts] } : { known: false, list: [], why: hostsWhyOf(shape) },
     shape: shape.kind === 'tool' ? 'tool' : 'line',
     always: { offered: !!shape.always, why: shape.always ? null : alwaysWhyOf(shape), ...(shape.configReads ? clipFold('directive', String(shape.configReads)) : { directive: null }) },
-    reason: (away.length || names.notOwn) ? { notOwn: !!names.notOwn, away: away.map((a) => ({ ref: clipStr(a.ref || '').text, forHost: a.forHost || null, host: a.unknown ? null : a.host || null, unknown: !!a.unknown, keep: !!a.keep })) } : null,
+    reason: (away.length || names.notOwn) ? { notOwn: !!names.notOwn, away: away.map((a) => ({ ...clipFold('ref', a.ref || ''), forHost: a.forHost || null, host: a.unknown ? null : a.host || null, unknown: !!a.unknown, keep: !!a.keep })) } : null,
     templates,
     masking: 'common-encodings',
   };

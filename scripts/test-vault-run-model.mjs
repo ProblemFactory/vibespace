@@ -1415,6 +1415,25 @@ console.log('⑫ THE CARD FACTS — cardFactsOf (lane vault-agent-own r20): stru
     ok(!!ev && ev.value.length === V.CARD_STRING_MAX && ev.valueCut === true && Array.isArray(ev.valueFull) && ev.valueFull.join('') === big && ev.valueFull.every((c) => c.length <= V.CARD_STRING_MAX),
       'round 25 (item 6a): a 2100-char plain-env value is clipped to CARD_STRING_MAX with valueCut + a valueFull fold that reassembles it (the directive / secret name/entry/ref ride the same clipFold) — a1f79c42 clipped silently and the store named nothing', { vlen: ev && ev.value.length, cut: ev && ev.valueCut, chunks: ev && ev.valueFull && ev.valueFull.length }); }
 
+  // r27 (by lane wake-approve-card — its r11 acceptance, probe-producer-unmarked-clips.cjs): `folder`, `tool.path` and a reason's
+  // `away[].ref` ride the SAME clipFold — a run in a 2 207-character folder (its program at the tail, «…/evil-tail/run.sh») and a
+  // 2 100-character reference carry their *Cut marker + *Full fold (RED on b034bdf64: each clipped to exactly 2 000, no marker —
+  // the card showed the clip as the whole path and the folder's tail appeared nowhere)
+  { const f27 = foldFacts27(V), bad = foldLeg27(V);
+    ok(!bad.length && f27.folderCut === true && f27.tool.pathCut === true && f27.reason.away[0].refCut === true && f27.folderFull.join('').endsWith('/evil-tail') && f27.tool.pathTail === 'run.sh',
+      'r27 (by wake-approve-card): a 2 207-character folder, its program at the tail and a 2 100-character reason reference carry folderCut + folderFull, tool.pathCut + its TAIL past the folder (pathTail — the prefix folded once), away[].refCut + refFull — each reassembles the whole (b034bdf64: clipped to 2 000 with no marker)', { bad, folder: f27.folder.length, path: f27.tool.path.length }); }
+
+  // r27 (by wake-approve-card — the r12 acceptance, corr-probe-size2.cjs): THE SIZE BOUND — a run in a 4 000-character folder (its
+  // program inside it), a 4 000-character argument and two 2 100-character env values: the facts stay under the For-you store's
+  // 24 000-character whole bound (src/user-todos.js normalizeCardFacts — past it the whole card is dropped to the prose stub);
+  // with the path folded whole beside the folder (cf4e30bfe) the same run made 26 909
+  { const HOME = '/home/user', CWD = (HOME + '/workspace/ops/' + Array.from({ length: 400 }, (_, k) => `nested-level-${String(k).padStart(3, '0')}-dir`).join('/')).slice(0, 4000 - '/tail'.length) + '/tail';
+    const sp = V.planOf({ argv: ['./run.sh', 'PUT', 'x'.repeat(4000)], env: [['A', 'vault://secrets/e/f'], ['NOTE', 'n'.repeat(2100)], ['NOTE2', 'm'.repeat(2100)]], resolved: CWD + '/run.sh', programWritable: true });
+    const fz = V.cardFactsOf(sp, V.shapeOf(sp), CWD, { who: 'ops watch', home: HOME, cmd: './run.sh PUT ' + "'" + 'x'.repeat(4000) + "'", entries: {} });
+    const size = JSON.stringify(fz).length;
+    ok(CWD.length === 4000 && size < 24000 && fz.folderCut === true && fz.tool.pathTail === 'run.sh' && !('pathFull' in fz.tool),
+      `r27 (by wake-approve-card): THE SIZE BOUND — a run in a 4 000-character folder (+ a 4 000-character argument, two 2 100-character env values) makes ${size} characters of facts, under the store's 24 000 (the folder folded once, the program its tail «run.sh»; cf4e30bfe: 26 909, dropped to the prose stub)`, { size }); }
+
   // round 23 (MAJOR #4): every facts string is bounded to CARD_STRING_MAX, a long command rides cmdFull chunks (the client store refuses a string > 2000 ⇒ ask_unfiled on 4ff55fb4, where facts.cmd was head.cmd up to 4096)
   const bigCmd = 'curl -s -d ' + 'x'.repeat(2400) + ' https://api.ok.example/v1/items';
   const fb = V.cardFactsOf(V.planOf({ argv: ['curl', '-s', 'https://api.ok.example/x'], env: [['T', M1]] }), V.shapeOf(V.planOf({ argv: ['curl', '-s', 'https://api.ok.example/x'], env: [['T', M1]] })), '/home/user', { who: 'a', home: '/home/user', cmd: bigCmd, entries: {} });
@@ -1432,6 +1451,24 @@ function routeClean(Vm) {
     if (Vm.urlHosts(url).length || !Vm.urlHostsBad(url) || sh.routeHosts.length) bad.push([url, { urlHosts: Vm.urlHosts(url), bad: Vm.urlHostsBad(url), routeHosts: sh.routeHosts }]);
   }
   return bad;
+}
+// r27 (by lane wake-approve-card): THE FOLD LEG — a long working folder, its program at the tail, a long reason reference: each
+// facts string past CARD_STRING_MAX carries its *Cut marker and a *Full fold that reassembles it (→ the escapes; [] = clean)
+function foldFacts27(M) {
+  const HOME = '/home/user', CWD = (HOME + '/workspace/ops/' + Array.from({ length: 120 }, (_, k) => `nested-level-${String(k).padStart(3, '0')}-dir`).join('/')).slice(0, 2197) + '/evil-tail';
+  const REF = ('vault://secrets/e/' + 'p'.repeat(2100)).slice(0, 2100);
+  const sp = M.planOf({ argv: ['./run.sh', 'PUT'], env: [['A', 'vault://secrets/e/f']], resolved: CWD + '/run.sh', programWritable: true });
+  return M.cardFactsOf(sp, M.shapeOf(sp), CWD, { who: 'a', home: HOME, entries: {}, away: [{ id: 'x', ref: REF, forHost: null, unknown: true, keep: false }] });
+}
+function foldLeg27(M) {
+  const f = foldFacts27(M), out = [];
+  const folded = (o, k) => o[k + 'Cut'] === true && Array.isArray(o[k + 'Full']) && o[k + 'Full'].join('').startsWith(o[k]) && o[k + 'Full'].join('').length > M.CARD_STRING_MAX && o[k + 'Full'].every((c) => c.length <= M.CARD_STRING_MAX);
+  if (!folded(f, 'folder')) out.push(['folder', f.folder.length, !!f.folderCut]);
+  // the program sits INSIDE the folder: its path folds once — pathCut + its tail past the folder (pathTail), never the prefix again
+  const whole = f.tool.pathCut === true && typeof f.tool.pathTail === 'string' && Array.isArray(f.folderFull) ? f.folderFull.join('') + '/' + (f.tool.pathTailCut ? f.tool.pathTailFull.join('') : f.tool.pathTail) : null;
+  if (!(whole && whole.endsWith('/evil-tail/run.sh') && whole.startsWith(f.tool.path) && !('pathFull' in f.tool))) out.push(['tool.path', f.tool.path.length, !!f.tool.pathCut, 'pathFull' in f.tool]);
+  if (!(f.reason && f.reason.away[0] && folded(f.reason.away[0], 'ref'))) out.push(['reason.away[].ref', f.reason && f.reason.away[0] && f.reason.away[0].ref.length]);
+  return out;
 }
 console.log('⑧ MUTANTS — patched copies of src/vault-run.js must go RED');
 {
@@ -1520,6 +1557,11 @@ console.log('⑧ MUTANTS — patched copies of src/vault-run.js must go RED');
     // ROUND 20 — the closed code tables are load-bearing: a `why` outside its table is a code the client cannot key
     ['a hosts `why` outside HOSTS_WHY is emitted (round 20 — the closed table)', "return 'tool-names-none';", "return 'made-up-host-why';", factsLeg],
     ['an `always` `why` outside ALWAYS_WHY is emitted (round 20 — the closed table)', "case 'unknown-destination': return 'destination-unknown';", "case 'unknown-destination': return 'made-up-always-why';", factsLeg],
+    // r27 (by wake-approve-card) — each new fold is load-bearing: clip it the old way (no marker, no fold) and the fold leg goes RED
+    ['a long folder clipped with no marker (r27 — b034bdf64)', "...clipFold('folder', folderRaw),", 'folder: clipStr(folderRaw).text,', foldLeg27],
+    ['a long program path clipped with no marker (r27 — b034bdf64)', 'tool: { name: baseName(spec.tool), ...pathFold, writable', 'tool: { name: baseName(spec.tool), path: pathC.text, writable', foldLeg27],
+    ['a program inside the folder folding the prefix AGAIN (r27 — the r12 acceptance: 24.9 KB past the store\'s bound)', "folderRaw && pathRaw.startsWith(folderRaw + '/') ?", 'false ?', foldLeg27],
+    ['a long reason reference clipped with no marker (r27 — b034bdf64)', "away: away.map((a) => ({ ...clipFold('ref', a.ref || ''),", "away: away.map((a) => ({ ref: clipStr(a.ref || '').text,", foldLeg27],
   ];
   const cleanLeg = new Map();   // the clean leg(V) is the SAME every mutant (V never changes) — run it ONCE per leg function (ownRoad is one reference, ~50 mutants), not ~50× (round 6 speedup; the scrubber legs memoise through once() already)
   for (const [name, from, to, leg] of LEGS) {

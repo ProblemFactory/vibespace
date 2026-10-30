@@ -604,6 +604,19 @@ console.log('⑫ THE CARD FACTS (lane vault-agent-own r20; the owner «这个卡
     && f.secrets.length === 1 && f.secrets[0].entry === 'm1' && f.secrets[0].name === 'my bucket' && f.secrets[0].ref === 'vault://mounts/m1/secretKey' && EQ(f.secrets[0].as, { kind: 'env', name: 'T' }) && f.secrets[0].provenance === 'granted' && f.secrets[0].sendsTo === null,
     'round 23: the door hands userTodos.add a structured `facts` (v2) beside `detail`: who, tool, the RAW command (the agent\'s own bytes shown, value-based), the secret\'s { kind, name }+provenance, plain env, reason, hosts, «always», masking — codes, never prose', f);
   ok(!!f && !leaks(JSON.stringify(f), VALUE).length, 'the facts carry no byte of the value — a reference, a display name and a host are not the secret');
+  // r27 (by lane wake-approve-card — its r11 acceptance): a run in a LONG working folder — the door's facts carry the folder's
+  // whole through the producer's clipFold (folderCut + folderFull; b034bdf64: clipped to 2 000 with no marker, its tail lost)
+  { const deep = path.join(w.work, ...Array.from({ length: 140 }, (_, k) => `nested-level-${String(k).padStart(3, '0')}-dir`));
+    fs.mkdirSync(deep, { recursive: true });
+    const before = added.length, ac2 = new AbortController();
+    const p2 = capDoor.run({ caller: w.caller, args: CURLARGS, cwd: deep, signal: ac2.signal });
+    let it2 = null; const t2 = Date.now();
+    while (!it2 && Date.now() - t2 < 3000) { it2 = added.slice(before).find((x) => x.action && x.action.type === 'vault-run-ask'); if (!it2) await sleep(5); }
+    const f2 = it2 && it2.facts;
+    ac2.abort(); await p2.catch(() => {});
+    const whole = f2 && Array.isArray(f2.folderFull) ? f2.folderFull.join('') : '';
+    ok(!!f2 && deep.length > VR.CARD_STRING_MAX && f2.folder.length === VR.CARD_STRING_MAX && f2.folderCut === true && whole.length > VR.CARD_STRING_MAX && whole.endsWith('/nested-level-139-dir') && f2.folderFull.every((c) => c.length <= VR.CARD_STRING_MAX),
+      `r27 (by wake-approve-card): a run in a ${deep.length}-character folder — the door's facts carry folderCut + a folderFull that ends at the folder's own tail (b034bdf64: «folder» clipped to ${VR.CARD_STRING_MAX}, no marker, the tail nowhere)`, f2 && { folder: f2.folder.length, cut: f2.folderCut, whole: whole.length }); }
   ok(!!f && (f.always.why === null || VR.ALWAYS_WHY.includes(f.always.why)) && (f.hosts.known || VR.HOSTS_WHY.includes(f.hosts.why)) && VR.MASKING.includes(f.masking) && VR.CARD_SHAPES.includes(f.shape) && f.secrets.every((x) => ['env', 'file', 'stdin', 'arg'].includes(x.as.kind)),
     'every code the door emits is a member of its exported table (the keys wake-approve-card r7 must carry: always.why ∈ ALWAYS_WHY, hosts.why ∈ HOSTS_WHY, masking ∈ MASKING, shape ∈ CARD_SHAPES, as.kind ∈ env/file/stdin/arg)');
   // DETAIL UNCHANGED (the control): the real For-you record keeps today's prose `detail` byte-for-byte — a change to detail (e.g. replacing it with `facts`) fails here and in ③; facts is ADDITIVE
