@@ -133,6 +133,10 @@ const vaultRun = require('./vault-run-door.js').create({ dataDir: path.join(root
   liveOf: (cid) => { for (const s of activeSessions.values()) if (s && cid && (s.backendSessionId || s.claudeSessionId) === cid) return true; return false; } });
 try { const n = vaultRun.sweep(); if (n) console.log(`[vault-run] ${n} run folder(s) a previous process left were shredded`); } catch { }
 process.once('exit', () => { try { vaultRun.closeAll(); } catch { } });
+// lane vault-job-road (design-vault-service-secret L1a): a Background Work job's `--vault` values — the engine asks this door at
+// EVERY spawn (locked or unapproved ⇒ the job waits; an unlock or a `vault-job` grant row starts it), the values ride the
+// wrapper's fd 3 and the job's fd 4+ (src/server/vault-job-door.js over PURE src/vault-job.js) — never env, argv or a file
+try { const jm = getJobs && getJobs(); if (jm && typeof jm.setVaultJob === 'function') jm.setVaultJob(require('./vault-job-door.js').create({ vault, grants: () => require('./grants-store.js').store(), log: (m) => console.log(m) })); } catch (e) { console.error('[vault-job] the job door could not be wired:', e.message); }
 setTimeout(() => { try { const n = vaultRun.reconcile(); if (n) console.log(`[vault-run] ${n} run card(s) from before the restart resolved expired`); } catch { } }, 3000).unref?.();
 // design q-047 L1 (lane vault-totp): TWO-STEP CODES — the vault's `totp:<name>` entries (src/server/vault-totp.js over PURE
 // src/totp.js): a person sees the CODE (no 「验证是你」, audited); a conversation — THIS RUN of it (its token's digest) — or a

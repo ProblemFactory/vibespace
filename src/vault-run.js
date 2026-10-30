@@ -133,7 +133,7 @@ const WORDS = Object.freeze({
   entry_too_short_to_mask: `that value is shorter than ${MIN_MASK_BYTES} bytes and cannot be scrubbed from the output — it is never referenced`,
   use_not_granted: 'this conversation may not use that entry — ask the user for it with its purpose: vibespace-vault request <vault://…> --for "<why>" (another conversation\'s own entry stays its own)',
   // ── THE DOOR's codes (lane vault-run-door, P0-f — src/server/vault-run-door.js) ──
-  job_no_use: 'a Background Work job never runs with a stored secret — run it from the conversation itself',
+  job_no_use: 'a Background Work job never calls the vault itself — its values are declared when the job is created (vibespace-job run … --vault NAME=vault://…) and handed to it at every start on fd $NAME_FD',   // lane vault-job-road
   device_road_later: 'a run on a paired machine (a remote conversation, --on) is not here yet — a run starts on this instance only',
   cwd_refused: 'a run starts in the conversation\'s project folder, the temp folder or ~/Downloads — cd there first',
   tool_not_found: 'no such program on this instance\'s PATH (a bare name is never looked up in the current folder)',

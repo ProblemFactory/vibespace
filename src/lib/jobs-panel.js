@@ -13,8 +13,8 @@ import { registerWindowType } from './window-types.js';
 import { badgeCounts, foldTasks, pruneFolds, heldText, ackableIds, isFoldKey, memoryChip, memoryEndWords, memorySourceWords, memoryWords, memoryFieldValue, memorySetValue, memoryCapWords, memoryEffectiveWords, runLeftWords } from './jobs-layout.js';
 import { attachDictation, voiceField } from './voice-input.js'; // lane voice-everywhere: the microphone on every message box
 
-const GLYPH = { 'awaiting-user': '⚑', failed: '✖', unverified: '?', missed: '✖', up: '●', starting: '◌', down: '○', scheduled: '◷', interrupted: '⚠', done: '✔' }; // text glyphs only — emoji ban
-const SEV = { failed: 'bad', missed: 'bad', unverified: 'bad', 'awaiting-user': 'warn', interrupted: 'warn', up: 'ok', starting: 'ok', scheduled: 'idle', down: 'idle', done: 'idle' };
+const GLYPH = { 'awaiting-user': '⚑', failed: '✖', unverified: '?', missed: '✖', up: '●', starting: '◌', waiting: '◌', down: '○', scheduled: '◷', interrupted: '⚠', done: '✔' }; // text glyphs only — emoji ban
+const SEV = { failed: 'bad', missed: 'bad', unverified: 'bad', 'awaiting-user': 'warn', interrupted: 'warn', up: 'ok', starting: 'ok', waiting: 'warn', scheduled: 'idle', down: 'idle', done: 'idle' };
 const KIND_ICON = {
   service: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="6" rx="1.5"/><rect x="3" y="14" width="18" height="6" rx="1.5"/><circle cx="6.5" cy="7" r=".9" fill="currentColor"/><circle cx="6.5" cy="17" r=".9" fill="currentColor"/></svg>',
   task: '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M8 5l10 7-10 7z"/></svg>',
@@ -150,7 +150,7 @@ function actionButtons(app, j, refresh, { compact } = {}) {
     return b;
   };
   if (j.pendingPanel) out.push(mk(compact ? '⚑' : t('Open panel'), 'panel', 'jobs-btn-warn'));
-  if (['up', 'starting', 'awaiting-user'].includes(j.state) || (j.kind === 'cron' && j.desiredUp && j.state === 'scheduled')) out.push(mk(compact ? '■' : t('Stop'), 'stop'));
+  if (['up', 'starting', 'awaiting-user', 'waiting'].includes(j.state) || (j.kind === 'cron' && j.desiredUp && j.state === 'scheduled')) out.push(mk(compact ? '■' : t('Stop'), 'stop'));
   if (['down', 'failed', 'missed'].includes(j.state) || (j.kind === 'cron' && !j.desiredUp)) out.push(mk(compact ? '▸' : t('Start'), 'start', 'jobs-btn-ok'));
   if (['done', 'interrupted', 'failed', 'missed'].includes(j.state) && !compact) out.push(mk('✕', 'rm'));
   return out;

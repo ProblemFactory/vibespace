@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Background Work job wrapper (STATIC tracked; docs/design-background-work.md §5).
-// argv: node job-wrapper.js <ctlDir> <specPath> --proto=2 (the protocol the server speaks — below)
+// argv: node job-wrapper.js <ctlDir> <specPath> --proto=3 (the protocol the server speaks — below)
 //   ctlDir holds: pid.json (OUR first act — the identity stamp), current.log,
 //   exit.json (written on child exit), answers.jsonl (tailed → child stdin when
 //   stdinOpen). specPath = <ctlDir>/spec.<runTs>.json = {argv, cwd, env,
@@ -16,6 +16,11 @@
 // THE MEMORY BOUND (lane jobs-memory-bound, 2026-10-26): spec.memory = {mb, unit, rungs} — the bound the server resolved; the
 // rung that holds the child is PROVEN here before the job runs and said (bound.json, then exit.json `memory`), a refused rung
 // falls to the next, and an end by the bound is named (below, THE MEMORY BOUND).
+// THE VAULT VALUES (lane vault-job-road, protocol 3 — design-vault-service-secret D3/D5): a job that declared `--vault` gets
+// its values from the hub on OUR fd 3 as one frame (src/vault-job.js; the spec names them and their fds, never a value). We
+// drain it (≤ 64 KiB, ≤ 5 s — else the run is not started) and CLOSE it before anything is spawned (a gate, systemd-run,
+// prlimit, the job: none inherits it), then hand each value to the job on a fresh pipe at fd 4 + i on every rung we try; the
+// job's env gets `NAME_FD=<n>` only. We hold this run's values to MASK ITS LOG — never a DEK — and zero them at exit.
 'use strict';
 const fs = require('fs');
 const path = require('path');
@@ -102,7 +107,7 @@ if (!ctlDir) { process.stderr.write('[job-wrapper] refused: no ctl dir on argv\n
 // caller's spec off argv for the update's window was removed as scheduled — every hub of the fleet is ≥ .331. Such an
 // argument is judged by its SHAPE alone (base64 of a JSON object), never decoded, never kept, and the run ends «not
 // started», update_window; test-job-model pins the removal.
-const PROTO = 2;
+const PROTO = 3;
 const ofCtl = !!specPath && path.dirname(path.resolve(specPath)) === path.resolve(ctlDir);
 const said = /^--proto=(\d{1,6})$/.exec(protoArg || '');
 const v1 = !said && !ofCtl && /^eyJ[A-Za-z0-9+/]*={0,2}$/.test(specPath || '') && specPath.length % 4 === 0; // `{"` in base64 — a ≤ .330 caller
@@ -122,6 +127,13 @@ else {
 }
 if (!refusal && !(spec && Array.isArray(spec.argv) && spec.argv.length)) refusal = 'the spec carries no argv';
 if (!refusal && !(spec.env && typeof spec.env === 'object')) refusal = 'the spec carries no env (a job never runs on the wrapper\'s own)';
+// THE VAULT VALUES (protocol 3): the masker is loaded BEFORE anything runs — a job given values never runs without it
+let VJ = null, VR = null, VPLAN = null;
+if (!refusal && spec.vault !== undefined) {
+  try { VJ = require(path.join(__dirname, '..', '..', 'src', 'vault-job.js')); VR = require(path.join(__dirname, '..', '..', 'src', 'vault-run.js')); } catch { VJ = VR = null; }
+  if (!VJ || !VR || typeof VR.createRunMasker !== 'function') refusal = 'the log masker (src/vault-run.js) could not be loaded — a job given vault values is not started without it: they would reach its log in the clear';
+  else if (!(VPLAN = VJ.planOfSpec(spec.vault))) refusal = 'the spec names its vault values in a shape this wrapper does not read';
+}
 const logCap = (spec && spec.logCapBytes) || 50 * 1024 * 1024;
 const logPath = path.join(ctlDir, 'current.log');
 
@@ -176,9 +188,11 @@ function writeLog(buf) {
 
 // lane agent-output-sinks (design q-043 D3 ③): a secret an agent's job prints never lands in the log in the clear —
 // every chunk passes the SHAPE census (src/secret-shapes.js R1–R8: a bearer, a known prefix, a PEM block, a JWT, a
-// `KEY=value` …) before it is written. SHAPES ONLY: the wrapper is a detached process with no vault (no DEK, so no
-// live-value masker — and a background job can never hold a stored value anyway, the q-043 ① law; a `vibespace-vault
-// run` child's live values are masked by the hub that spawns it, P0-f). Residuals (said in the design §8.6 ③): a value
+// `KEY=value` …) before it is written. THE WRAPPER NEVER HOLDS A DEK (it is a detached process beside the vault): a job
+// given vault values (protocol 3, lane vault-job-road — design-vault-service-secret D5; q-043 ① reworded: a job holds a
+// stored value only once the owner approved it for that job — or it is its own conversation's PUT value — and the value
+// passes nothing that prints by accident) is masked by VALUE first — THIS run's values, every spelling of
+// src/vault-run.js's FORMS over one window for both pipes — then by shape; a job with none by shape alone. Residuals (said in the design §8.6 ③): a value
 // split across two reads, or between stdout and stderr, and a non-UTF-8 (binary) chunk pass — a credential is text, and
 // mangling binary output would break a legitimate job. Best-effort: if the module cannot be required the write is never
 // lost (the masker is a hardening layer, not the log's existence).
@@ -192,6 +206,41 @@ function maskChunk(buf) {
   try { for (let i = 0; i < text.length; i += SHAPE_MAX) out += SHAPE(text.slice(i, i + SHAPE_MAX)).text; } catch { return buf; }
   return out === text ? buf : Buffer.from(out, 'utf8');
 }
+// THE VALUE MASKER (protocol 3): this run's values in every spelling, both pipes in arrival order (createRunMasker — the run
+// door's own), then the shapes; what it keeps back (the tail a value could still begin in) is flushed MASKED after a short
+// quiet and at the end; a fresh masker takes what comes after (the residual: a value the job writes in two pieces with a
+// quiet between them is two pieces to the masker — the run door's own floor, design §8.6 ③). Text only: a
+// job given values has its log decoded as UTF-8 (a value is text).
+let VAL = null, vmask = null, vdec = null, vquiet = null;
+const { StringDecoder } = require('string_decoder');
+function vaultMasker() {
+  if (!vmask) {
+    vmask = VR.createRunMasker(VAL.map((v, i) => ({ ref: { label: VPLAN[i].name }, value: v.toString('utf8') })), ['out', 'err']);
+    vdec = { out: new StringDecoder('utf8'), err: new StringDecoder('utf8') };
+  }
+  return vmask;
+}
+const shaped = (t) => (t ? maskChunk(Buffer.from(t, 'utf8')) : Buffer.alloc(0));
+function flushMask() {
+  if (vquiet) { clearTimeout(vquiet); vquiet = null; }
+  if (!vmask) return Buffer.alloc(0);
+  const m = vmask, rest = { out: vdec.out.end(), err: vdec.err.end() };
+  vmask = null; vdec = null;
+  let t = '';
+  for (const k of ['out', 'err']) if (rest[k]) { const o = m.push(k, rest[k]); t += (o.out || '') + (o.err || ''); }
+  const o = m.end(false); // a natural end, never a cut: a trailing text that merely BEGINS like a value is the job's own words
+  return shaped(t + (o.out || '') + (o.err || ''));
+}
+function maskOut(k, b) {
+  if (!VAL) return maskChunk(b);
+  let o;
+  try { const m = vaultMasker(); const text = vdec[k].write(b); o = text ? m.push(k, text) : {}; }
+  catch { return Buffer.from('[job-wrapper] output withheld: the value masker failed on it\n'); }
+  if (vquiet) clearTimeout(vquiet);
+  vquiet = setTimeout(() => { vquiet = null; const f = flushMask(); if (f.length) writeLog(f); }, 400); vquiet.unref?.();
+  return shaped((o.out || '') + (o.err || ''));
+}
+process.on('exit', () => { if (VAL) for (const v of VAL) v.fill(0); });
 
 // ── THE MEMORY BOUND (lane jobs-memory-bound, F6 of B-7f9e, 2026-10-26; acceptance rounds 2–4, 2026-10-27) ──────────────────
 // A fleet pod's cgroup has memory.oom.group=1: ONE process past the container's limit kills the whole pod, the hub with it.
@@ -282,7 +331,7 @@ function rungPlan() {
   }
   return plan;
 }
-const plan = rungPlan();
+let plan = null; // computed at begin(): rungPlan asks this host (spawnSync) — never while the hub's fd 3 is open (protocol 3)
 function whyOf(r) {
   if (r.why) return r.why;
   const before = misses.join('; ');
@@ -327,11 +376,14 @@ function launch() {
   child = spawn(argv[0], argv.slice(1), {
     cwd: spec.cwd || process.cwd(),
     env: spec.env,
-    stdio: [spec.stdinOpen ? 'pipe' : 'ignore', 'pipe', 'pipe', ...(gated ? ['pipe'] : [])],
+    stdio: [spec.stdinOpen ? 'pipe' : 'ignore', 'pipe', 'pipe', ...(gated ? ['pipe'] : VAL ? ['ignore'] : []), ...(VAL ? VAL.map(() => 'pipe') : [])],
   });
   const c = child;
-  child.stdout.on('data', (b) => writeLog(maskChunk(b)));
-  child.stderr.on('data', (b) => writeLog(maskChunk(b)));
+  // protocol 3: each value on its own fresh pipe at fd 4 + i — written and ended now (every rung we try gets its own: a gate
+  // that fell through never ran the job, nobody read the last one); the job reads it once
+  if (VAL) for (let i = 0; i < VAL.length; i++) { const v = c.stdio[VJ.FD_BASE + i]; if (!v) continue; v.on('error', () => { }); try { v.end(VAL[i]); } catch { } }
+  child.stdout.on('data', (b) => writeLog(maskOut('out', b)));
+  child.stderr.on('data', (b) => writeLog(maskOut('err', b)));
   child.stdout.on('data', keepTail);
   child.stderr.on('data', keepTail);
   child.on('exit', (code, signal) => { if (c === child && (proven || !gated)) ended(code, signal); });
@@ -740,6 +792,7 @@ async function drainGroup() {
 async function ended(code, signal) {
   if (exited) return;
   exited = true;
+  if (VAL) { const f = flushMask(); if (f.length) writeLog(f); } // protocol 3: what the value masker held back, masked
   if (!stopping) markStopping('drain'); // round 10: what the job left hears its SIGTERM from us — the engine's stop then signals us alone
   // round 7: the stop in flight, whatever ran first. Round 8: the intent is a stop the engine MEANT — its group signal reaches us
   // too: waited a little; heard ⇒ the engine's (our handler said so); not heard ⇒ nobody delivered it — we do, the grace from now
@@ -756,8 +809,50 @@ async function ended(code, signal) {
   const named = memory.cause === 'oom-bound' ? ` — stopped: used more than ${memory.mb >= 1024 ? Math.round(memory.mb / 102.4) / 10 + ' GB' : memory.mb + ' MB'} (${memory.how})`
     : memory.cause === 'oom' ? ` — killed: out of memory (${memory.how})` : '';
   const end = drained.left ? ` — ${leftWords(drained.left)}` : forced ? ` — stopped by force: ${forced}` : '';
+  if (VAL) { const f = flushMask(); if (f.length) writeLog(f); } // …and what came on the pipes after the exit event, masked
   try { fs.writeSync(logFd, Buffer.from(`\n[job-wrapper] exit code=${code} signal=${signal || ''}${named}${end}\n`)); } catch { }
   writeExit({ code, signal: signal || null, endedAt: Date.now(), memory, ...(stopping ? { stop: stopping, stopBy, ...(mainBy ? { mainBy } : {}) } : {}), ...(forced ? { forced: `stopped by force: ${forced}` } : {}), ...(drained.left ? { left: drained.left } : {}), ...(scoped() ? { scopeEmpty: drained.scopeEmpty } : {}) });
   process.exit(code === null ? 143 : code);
 }
-launch();
+// THE START (protocol 3): the values first — drained from OUR fd 3 (a socket the hub wrote and ended) on a non-blocking handle
+// (a blocked read on the threadpool would hold our exit for ever), bounded in bytes and time, and the fd CLOSED (its 'close')
+// before rungPlan asks this host anything or a rung is spawned; a frame that does not read, comes late or too large: not started
+function notStarted(why) {
+  const line = `[job-wrapper] refused: ${why} — the job was not started\n`;
+  try { fs.writeSync(logFd, Buffer.from(line)); } catch { }
+  try { process.stderr.write(line); } catch { }
+  writeExit({ code: 2, signal: null, endedAt: Date.now() });
+  process.exit(2);
+}
+function drainValues() {
+  return new Promise((resolve) => {
+    let sock;
+    try { sock = new (require('net').Socket)({ fd: 3, readable: true, writable: false }); } catch (e) { resolve({ why: `the hub's channel for its vault values is not open (${(e && e.code) || 'error'})` }); return; }
+    const chunks = [];
+    let got = 0, why = null, timer = null;
+    const zero = () => { for (const b of chunks) b.fill(0); };
+    const cut = (w) => { if (why === null) why = w; try { sock.destroy(); } catch { } };
+    timer = setTimeout(() => cut(`the vault values did not arrive within ${VJ.DRAIN_MS / 1000} s`), VJ.DRAIN_MS);
+    sock.on('data', (b) => { got += b.length; chunks.push(b); if (got > VJ.PAYLOAD_MAX) cut(`the vault values were larger than ${VJ.PAYLOAD_MAX / 1024} KiB`); });
+    sock.on('end', () => { if (why === null) why = ''; try { sock.destroy(); } catch { } });
+    sock.on('error', (e) => cut(`the vault values could not be read (${(e && e.code) || 'error'})`));
+    sock.on('close', () => { // the fd is closed now — nothing spawned after this inherits it
+      clearTimeout(timer);
+      if (why) { zero(); resolve({ why }); return; }
+      const buf = Buffer.concat(chunks); zero();
+      const r = VJ.decodeFrame(buf, VPLAN); buf.fill(0);
+      resolve(r.ok ? { values: r.values } : { why: r.why });
+    });
+  });
+}
+function begin() {
+  if (stopping) { // stopped while its values were on their way: it never ran
+    try { fs.writeSync(logFd, Buffer.from(`[job-wrapper] stopped (${stopping}) before the job started\n`)); } catch { }
+    writeExit({ code: null, signal: stopping, endedAt: Date.now(), stop: stopping, stopBy });
+    process.exit(143);
+  }
+  plan = rungPlan();
+  launch();
+}
+if (VPLAN) drainValues().then((r) => { if (r.why) notStarted(r.why); VAL = r.values; begin(); }, () => notStarted('the vault values could not be read'));
+else begin();

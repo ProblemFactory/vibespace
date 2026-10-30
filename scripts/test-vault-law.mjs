@@ -692,6 +692,46 @@ console.log('⑨ THE USE LAW (lane vault-use-law — design q-043 D1 「用途�
   const cliCopy = path.join(ROOT8, 'vibespace-vault-peek'); fs.writeFileSync(cliCopy, plantedCli, { mode: 0o700 }); fs.copyFileSync(path.join(REPO, 'src/cli-call.js'), path.join(ROOT8, 'cli-call.js'));   // lane cli-call-timeouts: a copy outside the checkout reads THE ONE CALL beside it
   const s2 = await sweep(reg8, { cli: cliCopy });
   ok(s2.leaks.some((l) => /vibespace-vault peek ⇒ link token \(own machine\)/.test(l)), `MUTANT RED (c): the planted verb run against the real doors prints the machine's link token ⇒ ${s2.leaks[0] || 'GREEN'}`);
+  // (e) THE JOB ROAD (lane vault-job-road, design-vault-service-secret L1a): a Background Work job is GIVEN a value at each start —
+  // the create route's `vault` is a PURPOSE-DOOR field (references in; the answer is the job's snapshot: names and references);
+  // src/jobs.js names no engine key (its ONE road is src/server/vault-job-door.js); the door reaches only what a spawn needs; and
+  // the sweep adds THE JOB'S OWN PROCESSES: the free entry's sentinel handed to a real job (an approval row naming it) is in no
+  // environ, no argv (the job's, the wrapper's), no snapshot, no frame — and in the job's own read of its fd (the positive control)
+  {
+    const ar = tree.get('src/agent-routes.js'), js = tree.get('src/jobs.js'), jd = tree.get('src/server/vault-job-door.js');
+    const h = ar.slice(ar.indexOf("app.post('/api/agent/jobs',"), ar.indexOf("app.get('/api/agent/jobs',"));
+    ok(/\n {4}vault: b\.vault,/.test(h) && !/secretGet|getVault|\bvault\.[a-z]/i.test(h.replace(/\n {4}vault: b\.vault,[^\n]*/, '')), '(e) the create route carries `vault` — REFERENCES, a purpose-door field (the hub hands the values at each start; the answer is the snapshot) — and reaches no vault key itself');
+    ok(!/\b(secretGet|secretNames|keyFor|noteUse|secretPut)\b/.test(js) && /door\.payload\(v\)/.test(js), '(e) src/jobs.js names no engine key — the job door is its one road');
+    const reach = [...new Set([...jd.matchAll(/\bvault\.([A-Za-z]+)\(/g)].map((m) => m[1]))].sort();
+    ok(reach.join() === 'blocked,noteUse,onUnlock,secretGet,secretNames,state', `(e) the job door reaches only secretGet (the spawn's frame), noteUse, blocked, secretNames, state, onUnlock — never a store key, a reveal, a write or the unlock (${reach.join(', ')})`);
+    const J8 = path.join(ROOT8, 'jobroot'), jd8 = path.join(J8, 'data');
+    fs.mkdirSync(path.join(jd8, 'bin'), { recursive: true }); fs.mkdirSync(path.join(J8, 'out'));
+    fs.symlinkSync(path.join(REPO, 'src'), path.join(J8, 'src'));   // the wrapper's masker beside it, as on a hub
+    fs.copyFileSync(path.join(REPO, 'data/bin/job-wrapper.js'), path.join(jd8, 'bin', 'job-wrapper.js'));
+    fs.writeFileSync(path.join(J8, 'prog.js'), "const fs = require('fs'); const v = fs.readFileSync(Number(process.env.K_FD), 'latin1'); fs.writeFileSync(process.argv[2] + '/got-' + process.pid, v); for (let i = 0; i < 200 && !fs.existsSync(process.argv[2] + '/release'); i++) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 15);\n");
+    const jframes = [];
+    const gs8 = require(path.join(REPO, 'src/server/grants-store.js')).create({ memory: true });
+    const JM8 = require(path.join(REPO, 'src/jobs.js')).JobManager;
+    const jm8 = new JM8({ dataDir: jd8, broadcast: (t, pl) => jframes.push(JSON.stringify(pl || {})), notifyUser() { return { ok: true }; }, log() { }, memoryRungs: [] });
+    jm8.init(); jm8.setVaultJob(require(path.join(REPO, 'src/server/vault-job-door.js')).create({ vault: eng8, grants: () => gs8 }));
+    if (eng8.state() !== 'unlocked') await eng8.unlock(PW8, {});
+    const cj = jm8.create({ kind: 'task', name: 'law job', cmd: { argv: [process.execPath, path.join(J8, 'prog.js'), path.join(J8, 'out')], cwd: J8 }, owner: { conversation: { id: 'c-law' }, sessionId: 's-law', createdBy: 'agent', groupsSnapshot: [] }, vault: [['K=vault://secrets/', 'secret', ':0a1b2c3d4e/secret'].join('')] }, { conversationId: 'c-law', groups: new Set() });
+    const lj = cj.job && jm8.jobs.get(cj.job.id);
+    ok(!!lj && lj.state === 'waiting' && lj.waitFor === 'approval', '(e) a free entry waits for the owner\'s approval');
+    gs8.set('vault-job', 'secrets:secret:0a1b2c3d4e#secret', { to: [{ kind: 'conversation', key: 'c-law', jobs: [lj.id] }] }, 'law');
+    const gotOf = () => fs.readdirSync(path.join(J8, 'out')).filter((f) => f.startsWith('got-'));
+    for (let i = 0; i < 300 && !gotOf().length; i++) await new Promise((r) => setTimeout(r, 15));
+    const g = gotOf()[0], jpid = g ? Number(g.slice(4)) : 0, wpid = lj.proc && lj.proc.pid;
+    const procText = [`/proc/${jpid}/environ`, `/proc/${jpid}/cmdline`, `/proc/${wpid}/environ`, `/proc/${wpid}/cmdline`].map((f) => { try { return fs.readFileSync(f, 'latin1'); } catch { return ''; } });
+    const free = (sentinels.find(([l]) => l === 'free entry') || [])[1];
+    ok(!!g && !!free && fs.readFileSync(path.join(J8, 'out', g), 'latin1') === free.toString('latin1'), '(e) THE POSITIVE CONTROL: the job read the free entry\'s sentinel off its fd (the sweep sees a value where one is)');
+    const jl = [...procText, JSON.stringify(jm8.snapshot(lj)), ...jframes, ...frames].map(hitsOf).flat();
+    ok(procText[0].length > 0 && procText[2].length > 0 && !jl.length, `(e) THE JOB'S PROCESSES: its environ and argv and the wrapper's, its snapshot, every jobs-updated and vault frame ⇒ 0 hits in any form${jl.length ? ' — ' + [...new Set(jl)].join(', ') : ''}`);
+    fs.writeFileSync(path.join(J8, 'out', 'release'), '1');
+    for (let i = 0; i < 300 && lj.state !== 'done'; i++) { try { await jm8._sweep(); } catch { } await new Promise((r) => setTimeout(r, 15)); }
+    for (const t of jm8._timers || []) clearInterval(t);
+    jm8.readOnly = true; jm8.shutdown();
+  }
   eng8.close();
   fs.rmSync(ROOT8, { recursive: true, force: true });
 }

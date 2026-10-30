@@ -16,6 +16,7 @@ const { withoutNoticeHead } = require('./notification-senders.js'); // lane noti
 const textDigest = (t) => crypto.createHash('sha256').update(String(t)).digest('hex'); // a flood floor's memory of a text (verify r9)
 const { spawn, execFile } = require('child_process');
 const M = require('./job-model.js');
+const VJ = require('./vault-job.js'); // PURE (lane vault-job-road): a job's --vault values — the grammar, the verdict at every spawn, the fd plan, the frame
 const JN = require('./job-notice.js'); // PURE (lane job-notice-dedupe): a published service's notice is a STATE CHANGE — the verdict over its down record
 const { credentialEnvNames } = require('./harness-env.js'); // PURE: B-6be2 — the job door's credential strip, derived from the descriptors
 const { list: harnessList } = require('./harnesses');
@@ -109,7 +110,8 @@ function wrapperEnv(jobId, base = process.env) {
 // writes the new data/bin/job-wrapper.js minutes before it restarts the server, and this process spawns whatever is on
 // disk. Equal to the wrapper's own PROTO (test-jobs-engine §12 pins the pair): bump BOTH when the spec's road changes.
 // A wrapper that does not speak it never starts the job and says so (exit.json reason update_window) — _finalizeRun.
-const WRAPPER_PROTO = 2;
+// 3 (lane vault-job-road): a job's vault values ride the wrapper's fd 3 as ONE frame (src/vault-job.js) — the spec names them
+const WRAPPER_PROTO = 3;
 // how long after the wrapper changed on disk a mismatch is still the update's window (its restart is on the way: 45 s
 // measured on the owner's hub; an install + build bounded at minutes) — past it, the install itself is broken: a fault
 const UPDATE_WINDOW_MS = 15 * 60 * 1000;
@@ -1469,9 +1471,84 @@ class JobManager {
     this.d.log(`[jobs] ${job.id} refused to run (${trigger}) — ${vet.code || 'vendor/credential pattern'}`);   // lane job-secrets-retire: a refusal with a name (envfrom_retired) journals it
     this._save();
   }
+  // ── THE VAULT VALUES (lane vault-job-road, design-vault-service-secret L1a) ─────────────────────────────────────────────
+  /** the door (src/server/vault-job-door.js), wired once the vault exists (the mounts wiring) — never before: a job that needs
+   *  its values meanwhile WAITS for the vault, exactly as when it is locked */
+  setVaultJob(door) {
+    this._vaultJob = door || null;
+    if (door && typeof door.onChange === 'function') door.onChange((why) => this.vaultChanged(why));
+    this.vaultChanged('wired');
+  }
+  /** an unlock, an approval (a `vault-job` row changed), the door wired: every WAITING job is judged again — a start through
+   *  _startAfter (never beside what its last run left); a job still unable to start waits on, said once */
+  vaultChanged(why) {
+    if (this.readOnly || !this.ready) return;
+    const trigger = why === 'vault-approved' ? 'vault-approved' : 'vault-unlocked';
+    for (const job of this.jobs.values()) {
+      if (job.state !== 'waiting') continue;
+      if (!this._waitLive(job)) { this._settleWait(job, 'its schedule was stopped or removed while it waited'); continue; }
+      try { this._startAfter(job, trigger, () => this._waitLive(job)); } catch (e) { this.d.log(`[jobs] ${trigger} start of ${job.id} refused:`, e.message); }
+    }
+  }
+  /** a waiting job may still start: the engine's, still waiting — and a scheduled run's cron still on (the review: a cron stopped
+   *  or removed while its run waited never starts that run, whatever an unlock or an approval says later) */
+  _waitLive(job) {
+    if (job.state !== 'waiting' || this.jobs.get(job.id) !== job) return false;
+    if (!job.cronParent) return true;
+    const p = this.jobs.get(job.cronParent);
+    return !!p && p.desiredUp !== false && p.state !== 'failed';
+  }
+  /** a wait that will never start: it ends, said once (a task's never ran — interrupted; a service's — down) */
+  _settleWait(job, why) {
+    if (job.state !== 'waiting') return;
+    job.state = job.kind === 'task' ? 'interrupted' : 'down'; delete job.waitFor;
+    this._touch(job, { what: `not started: ${why}` });
+    this._save();
+  }
+  /** THE GATE of one spawn → the verdict with its frame (go) | false (it waits — said) | throws (refused — said, parked) */
+  _vaultGate(job, trigger) {
+    const door = this._vaultJob || this.d.vaultJob || null;
+    let v = door ? door.gate(job) : { wait: 'vault' };
+    if (v.go) { const p = door.payload(v); if (p.ok) { p.frame.fill(0); return { ...v, door }; } v = p; } // every value opened and checked — the frame itself is built where it is handed (_spawn)
+    if (v.wait) { this._waitFor(job, v.wait, door); return false; }
+    const words = `${v.words || v.code}${v.key ? ` (--vault ${v.key})` : ''}`;
+    const parent = job.cronParent ? this.jobs.get(job.cronParent) : null;
+    for (const j of parent ? [job, parent] : [job]) {
+      j.state = 'failed'; j.desiredUp = false; delete j.waitFor;
+      if (j.kind === 'cron') j.nextFireAt = null;
+      if (j.kind === 'service') this._teardownPublish(j);
+      this._touch(j, { what: `refused to run (${trigger}): ${words}` });
+    }
+    this.d.log(`[jobs] ${job.id} refused to run (${trigger}) — its vault values (${v.code})`);
+    this._save();
+    throw new Error(words);
+  }
+  /** A WAIT, NEVER A COUNTED FAILURE (kb §18: «a lock is a wait»): no run, the supervisor's count untouched; a locked vault's
+   *  ONE helper names the job (the lock's one For-you item — never a new one); the state line says it once */
+  _waitFor(job, why, door) {
+    const again = job.state === 'waiting' && job.waitFor === why;
+    job.state = 'waiting'; job.waitFor = why; job.proc = null;
+    if (why === 'vault' && door) door.blocked(`Background job ${this.labelOf(job)}`);
+    this._touch(job, again ? undefined : { what: VJ.waitWords(why) });
+    this._save();
+  }
+  /** the frame to the wrapper's fd 3 — written, ended, zeroed (on its write, an error or the close); ONE use line per value */
+  _handValues(child, job, vj, frame) {
+    const s = child.stdio && child.stdio[3];
+    const zero = () => frame.fill(0);
+    if (!s) { zero(); return; }
+    s.on('error', zero); // a wrapper gone before it read: its exit.json says the run never started
+    s.on('close', zero);
+    s.end(frame, () => { zero(); try { s.destroy(); } catch { } });
+    try { vj.door.noteUses(job, vj, `Background job ${this.labelOf(job)}`); } catch { }
+  }
   _spawn(job, trigger) {
     const vet = M.vetSpec(job);
     if (!vet.ok) { this._refuseRun(job, vet, trigger); throw new Error(vet.error); }
+    // THE VAULT VALUES (lane vault-job-road): a job that declared --vault starts WITH its values or not at all — locked or
+    // unapproved ⇒ it WAITS (no run, no counted failure; an unlock or an approval starts it — vaultChanged); an entry gone ⇒ refused
+    const vj = VJ.refsOf(job).length ? this._vaultGate(job, trigger) : null;
+    if (vj === false) return;
     const runTs = now();
     const ctl = this._ctlDir(job, runTs);
     fs.mkdirSync(ctl, { recursive: true, mode: 0o700 });
@@ -1493,11 +1570,12 @@ class JobManager {
     // VIBESPACE_JOB_CWD: vibespace-browser's write fence lets a job save a screenshot / download there
     const spec = {
       argv: job.cmd.argv, cwd: job.cmd.cwd || process.cwd(),
-      env: jobEnv({ ...(job.cmd.env || {}), VIBESPACE_API: this.d.apiBase || `http://127.0.0.1:${process.env.PORT || 3456}`, VIBESPACE_JOB_ID: job.id, VIBESPACE_JOB_TOKEN: this._jobToken(job), ...(typeof job.cmd.cwd === 'string' && job.cmd.cwd[0] === '/' ? { VIBESPACE_JOB_CWD: job.cmd.cwd } : {}), PATH: path.join(this.d.dataDir, 'bin') + ':' + (process.env.PATH || '') }),
+      env: jobEnv({ ...(job.cmd.env || {}), ...(vj ? VJ.envOf(vj.plan) : {}), VIBESPACE_API: this.d.apiBase || `http://127.0.0.1:${process.env.PORT || 3456}`, VIBESPACE_JOB_ID: job.id, VIBESPACE_JOB_TOKEN: this._jobToken(job), ...(typeof job.cmd.cwd === 'string' && job.cmd.cwd[0] === '/' ? { VIBESPACE_JOB_CWD: job.cmd.cwd } : {}), PATH: path.join(this.d.dataDir, 'bin') + ':' + (process.env.PATH || '') }),
       logCapBytes: 50 * 1024 * 1024, stdinOpen: !!job.stdinOpen,
       kind: job.kind === 'service' ? 'service' : 'task', // round 5 (the ruling): a service keeps what its run leaves running, a task's are stopped
       // round 4: the ASKED bound rides too — the cgroup rung caps it by what contains ITS scope, read once the scope exists
       memory: { mb: hub.mb, askedMb: hub.askedMb !== undefined ? hub.askedMb : hub.mb, cap: hub.cap || null, capRule: { minMb: M.MEMORY.minMb, hubShareMinMb: M.MEMORY.hubShareMinMb, hubShareRatio: M.MEMORY.hubShareRatio }, unit: `${this.d.memoryUnitPrefix || 'vibespace-job'}-${job.id}-${runTs}`, rungs: this.d.memoryRungs || M.MEMORY_RUNGS, ...(this.d.memorySample ? this.d.memorySample : {}) },
+      ...(vj ? { vault: VJ.specOf(vj.plan) } : {}), // lane vault-job-road: the NAMES and their fds — the values ride the wrapper's fd 3, never this file
     };
     // A SECRET NEVER RIDES ARGV (lane job-spec-off-argv, 2026-10-20): the spec carries the job's secrets and its jbt_
     // token, and /proc/<pid>/cmdline is readable by every local user for the wrapper's whole life — so the spec rides a
@@ -1506,12 +1584,15 @@ class JobManager {
     const specPath = path.join(ctl, `spec.${runTs}.json`);
     const fd = fs.openSync(specPath, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, 0o600); // EEXIST ⇒ no start (that name is not ours to remove)
     const wrapper = path.join(this.d.dataDir, 'bin', 'job-wrapper.js');
-    let child;
+    let child, frame = null;
     try {
       try { fs.writeFileSync(fd, JSON.stringify(spec)); } finally { fs.closeSync(fd); }
-      child = spawn(process.execPath, [wrapper, ctl, specPath, '--proto=' + WRAPPER_PROTO], { detached: true, stdio: 'ignore', env: wrapperEnv(job.id) });
-    } catch (e) { try { fs.unlinkSync(specPath); } catch { } throw e; } // a failed write or spawn leaves no spec behind
+      // lane vault-job-road: the values' frame is built LAST — nothing that can throw stands between it and its hand-off but the spawn
+      if (vj) { const p = vj.door.payload(vj); if (!p.ok) throw new Error(p.words || 'the vault values could not be read'); frame = p.frame; }
+      child = spawn(process.execPath, [wrapper, ctl, specPath, '--proto=' + WRAPPER_PROTO], { detached: true, stdio: vj ? ['ignore', 'ignore', 'ignore', 'pipe'] : 'ignore', env: wrapperEnv(job.id) });
+    } catch (e) { try { fs.unlinkSync(specPath); } catch { } if (frame) frame.fill(0); throw e; } // a failed write or spawn leaves no spec behind (nor a frame)
     child.unref();
+    if (vj) this._handValues(child, job, vj, frame);
     job.state = 'up';
     job.proc = { pid: child.pid };
     this._touch(job);
@@ -1788,6 +1869,7 @@ class JobManager {
       try {
         const replays = () => job.kind === 'service' && job.desiredUp && job.state === 'down' && !(job.supervise && job.supervise.parkedAt);
         if (replays()) this._startAfter(job, 'boot', replays); // round 5: never beside what its last run left (its reap awaited)
+        else if (job.state === 'waiting') { if (this._waitLive(job)) this._startAfter(job, 'boot', () => this._waitLive(job)); else this._settleWait(job, 'its schedule was stopped or removed while it waited'); } // lane vault-job-road: judged again (locked at every boot ⇒ it waits on)
         // lane job-wrapper-update-window: a one-shot task an update's window interrupted NEVER RAN — the restarted server
         // runs it once; a cron child waits for its next fire (its schedule owns when it runs)
         else if (job.kind === 'task' && !job.cronParent && job.state === 'interrupted' && (job.runs || []).length && job.runs[job.runs.length - 1].cause === 'update_window') this._spawn(job, 'update-rerun');
@@ -2275,6 +2357,14 @@ class JobManager {
       memMb = mv.mb;
     }
     if (task) { if (memMb === null) delete task.memoryMb; else task.memoryMb = memMb; }
+    // THE VAULT VALUES (lane vault-job-road): `--vault NAME=vault://…` — the grammar and the entry's FAMILY judged here (PURE
+    // src/vault-job.js); the record keeps the REFERENCES only; whether the value may be handed is judged again at EVERY spawn
+    const vsrc = task ? (task.vault !== undefined ? task.vault : spec.vault) : spec.vault;
+    if (spec.kind === 'cron' && !task && vsrc !== undefined && vsrc !== null && (!Array.isArray(vsrc) || vsrc.length)) return { error: 'a --vault value is for a job that runs a command — a notify cron runs none' };
+    const vp = VJ.parseVault(vsrc, { env: ((task ? task.cmd : spec.cmd) || {}).env || null });
+    if (!vp.ok) return { error: `refused: ${vp.words}${vp.at ? ` (the --vault value #${vp.at})` : ''}`, code: vp.code };
+    for (const r of vp.refs) { const f = VJ.familyOf(r.ref, VJ.ownerOf({ owner: spec.owner })); if (!f.ok) return { error: `refused: ${f.words} (--vault ${r.name})`, code: f.code }; }
+    if (task) { if (vp.refs.length) task.vault = vp.refs; else delete task.vault; }
     const visNames = new Set(M.visibleJobs([...this.jobs.values()], caller).map((j) => j.name));
     const { name, renamed } = M.resolveName(spec.name, visNames, { mask: (t) => this._agentWords(t) });   // r7: the belt on the WHOLE name, then the cut
     const job = {
@@ -2292,6 +2382,7 @@ class JobManager {
       state: spec.kind === 'cron' ? 'scheduled' : 'starting', proc: null, supervise: { consecutiveFails: 0, parkedAt: null },
       runs: [], createdAt: now(),
       ...(memMb !== null && !task ? { memoryMb: memMb } : {}),
+      ...(vp.refs.length && !task ? { vault: vp.refs } : {}),
     };
     this.jobs.set(job.id, job);
     if (job.kind !== 'cron') {
@@ -2323,6 +2414,8 @@ class JobManager {
     // kept is ended by the walk just made, never a second)
     if (run && run.endedAt) this._clearKept(job, run).then(() => { if (this._runDoubt(job, run)) return this._stopDoubt(job, run); }).catch(() => { });
     if (!hadProc && job.kind === 'cron') { job.state = 'down'; }
+    if (job.state === 'waiting') { job.state = job.kind === 'task' ? 'interrupted' : 'down'; delete job.waitFor; } // lane vault-job-road: it never ran — it waits no more
+    if (job.kind === 'cron') for (const k of this.jobs.values()) if (k.cronParent === job.id) this._settleWait(k, 'its schedule was stopped'); // …nor does its scheduled run
     this._touch(job);
     this._save();
     return { ok: true, hadProc };
@@ -2392,6 +2485,7 @@ class JobManager {
     if (alive && orphan) this.d.log(`[jobs] ${job.id} ORPHANED by request — live pid abandoned`);
     const last = job.runs && job.runs[job.runs.length - 1];
     if (last && last.endedAt) this._clearKept(job, last).catch(() => { }); // round 5: a removed service keeps nothing running
+    if (job.kind === 'cron') for (const k of this.jobs.values()) if (k.cronParent === job.id) this._settleWait(k, 'its schedule was removed'); // lane vault-job-road: a removed cron's waiting run never starts
     this.jobs.delete(job.id); this._dirty = true; this._save();
     try { this.d.resolveJobAsk && this.d.resolveJobAsk(job.id, { onlyAsk: false }); } catch { } // removed job leaves no orphan inbox items
     try { this.d.broadcast('jobs-updated', { id: job.id, removed: true }); } catch { }
@@ -2473,6 +2567,7 @@ class JobManager {
       // full creation parameters (2.347.0, owner ask: agents must be able to
       // re-inspect what they registered) — env VALUES stay out (names only)
       cmd: job.cmd ? { argv: job.cmd.argv, cwd: job.cmd.cwd || null, envKeys: Object.keys(job.cmd.env || {}) } : null,
+      vault: VJ.refsOf(job).map((r) => ({ name: r.name, ref: r.ref })), waitFor: job.state === 'waiting' ? job.waitFor || null : null, waitWords: job.state === 'waiting' ? VJ.waitWords(job.waitFor) : null, // lane vault-job-road: REFERENCES only, never a value
       // a cron's action TYPE (an enum: 'notify' | 'spawn-task' | null) — the panel words what --notify-user does per kind
       // (lane job-notify-user r2: the snapshot carried no action, so a notify cron read «when each run ends»)
       actionType: (job.action && typeof job.action.type === 'string' && job.action.type) || null,

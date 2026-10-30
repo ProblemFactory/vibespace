@@ -30,6 +30,7 @@ function agentJobView(snap, { mine = false } = {}) {
   if (snap.cmd && typeof snap.cmd === 'object') out.cmd = { ...snap.cmd, argv: Array.isArray(snap.cmd.argv) ? snap.cmd.argv.map((a) => line(String(a), 4096)) : snap.cmd.argv, cwd: line(snap.cmd.cwd, 4096), envKeys: Array.isArray(snap.cmd.envKeys) ? snap.cmd.envKeys.map((k) => line(String(k), 200)) : snap.cmd.envKeys };
   if (Array.isArray(snap.envFrom)) out.envFrom = snap.envFrom.map((k) => line(String(k), 200));
   if (typeof snap.actionText === 'string') out.actionText = line(snap.actionText, 500);   // lane job-notify-user r3: a notify cron's --text, another lineage's words
+  if (Array.isArray(snap.vault)) out.vault = snap.vault.map((r) => ({ name: line(String((r && r.name) || ''), 64), ref: line(String((r && r.ref) || ''), 800) }));   // lane vault-job-road: its --vault NAMEs and references (another lineage's words — never a value)
   if (snap.run && typeof snap.run === 'object') out.run = { ...snap.run, lastLine: line(snap.run.lastLine, 2000) };
   if (typeof snap.logTail === 'string' && snap.logTail) out.logTail = toAgentText(snap.logTail, { kind: 'block' });
   // verify r6 F2 (lane peer-census): the ANSWERS to the job's panel are the USER's values under the KEYS the job's PROCESS
@@ -397,8 +398,8 @@ function resolveName(wanted, visibleNames, { mask = shapesBelt } = {}) {
 }
 
 // ── injection renderers (prototype-validated 2026-08-17) ──────────────────
-const GLYPH = { 'awaiting-user': '✋', failed: '✖', unverified: '?', missed: '✖', up: '●', starting: '◌', down: '○', scheduled: '⏰', interrupted: '⚠', done: '✔' };
-const ORDER = { 'awaiting-user': 0, failed: 1, unverified: 1, missed: 1, up: 2, starting: 2, down: 3, scheduled: 4, interrupted: 5, done: 6 };
+const GLYPH = { 'awaiting-user': '✋', failed: '✖', unverified: '?', missed: '✖', up: '●', starting: '◌', waiting: '◌', down: '○', scheduled: '⏰', interrupted: '⚠', done: '✔' };
+const ORDER = { 'awaiting-user': 0, failed: 1, unverified: 1, missed: 1, up: 2, starting: 2, waiting: 2, down: 3, scheduled: 4, interrupted: 5, done: 6 };
 // A RECORD NEVER CROSSES INTO A RENDERER RAW (lane job-notify-user r6, accept-r5 confirmed 0): the digest's ROWS are the
 // engine's (src/jobs.js digestFor: {id, kind, state, ageHint, label}) — `label` is the ONE accessor's (jm.labelOf: belted on
 // the WHOLE name, then cut here — the cut never precedes the mask). r5 handed this renderer the record and it cut `j.name` to
@@ -906,7 +907,7 @@ function heldDigest(pending) {
 /** B-70f9 ② (design-background-work §9 "Session Properties gains 'Background work': jobs owned by this conversation"):
  *  the jobs `/api/jobs` lists whose OWNER conversation is `cid`, attention first (the panel's ORDER), then name — each
  *  `{id, name, kind, state, glyph, words}` with `words` the state as an English t() key. PURE. */
-const STATE_WORDS = Object.freeze({ 'awaiting-user': 'waiting for you', failed: 'failed', unverified: 'unverified', missed: 'missed', up: 'running', starting: 'starting', down: 'stopped', scheduled: 'scheduled', interrupted: 'interrupted', done: 'done' });
+const STATE_WORDS = Object.freeze({ 'awaiting-user': 'waiting for you', failed: 'failed', unverified: 'unverified', missed: 'missed', up: 'running', starting: 'starting', waiting: 'waiting', down: 'stopped', scheduled: 'scheduled', interrupted: 'interrupted', done: 'done' });
 function ownedJobsView(jobs, cid) {
   if (!cid) return [];
   return (Array.isArray(jobs) ? jobs : [])

@@ -223,8 +223,9 @@ const CHECK = {
     return VI.revealableOf(store0, f.sample) === v ? null : `revealableOf(${store0}, ${f.sample}) says ${!v} — the registry says ${v}`;
   },
   use(f, v, { mounted }) {
-    if (!v || typeof v.route !== 'string') return 'use is { route } (an agent\'s door), { system } (VibeSpace uses it itself) or NONE(why)';
-    return mounted(v.route) ? null : `the agent's door «${v.route}» is not mounted`;
+    if (!v || typeof v.route !== 'string' || (v.also !== undefined && !(Array.isArray(v.also) && v.also.every((r) => typeof r === 'string')))) return 'use is { route, also? } (an agent\'s door, and the other doors that use it), { system } (VibeSpace uses it itself) or NONE(why)';
+    const gone = [v.route, ...(v.also || [])].find((r) => !mounted(r));   // lane vault-job-road: every door that uses it is mounted
+    return gone ? `the agent's door «${gone}» is not mounted` : null;
   },
   delete(f, v, { store0, mounted, facts }) {
     const d = VI.doorsOf({ store: store0, entry: f.sample, field: 'census' }).delete;

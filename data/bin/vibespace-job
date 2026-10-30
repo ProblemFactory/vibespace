@@ -32,11 +32,27 @@ for (let i = 0; i < args.length; i++) {
   const a = args[i];
   if (a.startsWith('--')) {
     const k = a.slice(2);
-    if (i + 1 < args.length && !args[i + 1].startsWith('--')) { flags[k] = args[++i]; }
+    if (k === 'vault') { if (i + 1 < args.length && !args[i + 1].startsWith('--')) (flags.vault = flags.vault || []).push(args[++i]); else flags.vault = true; } // repeatable (lane vault-job-road)
+    else if (i + 1 < args.length && !args[i + 1].startsWith('--')) { flags[k] = args[++i]; }
     else flags[k] = true;
   } else pos.push(a);
 }
 const verb = pos[0];
+// lane vault-job-road (L0's acceptance, 2026-10-30 — «no silent failures»): THE FLAGS `run` / `notify-cron` read — every other one
+// is refused BY NAME with this list, exit 2, nothing sent. The parser above keeps any `--x` it meets, so a flag this CLI does not read (mistyped, or one an older CLI
+// never learned — `--vault` before it existed) was SWALLOWED and the job started without it. test-jobs-cli-body pins this list
+// to the usage the CLI prints and the flags the branch reads.
+const RUN_FLAGS = Object.freeze(['name', 'note', 'context', 'cwd', 'until', 'timeout', 'stdin-open', 'notify', 'notify-user', 'notify-ok', 'memory',
+  'keep-up', 'restart', 'port', 'publish', 'view', 'control', 'stop-with-owner', 'every', 'jitter', 'cron', 'at', 'text', 'urgency', 'vault']);
+// a --vault is a REFERENCE (NAME=vault://…): anything else is refused HERE, before anything is sent — a value typed where a
+// reference belongs never leaves this command line (refused at its position, its text never echoed). The hub judges the rest.
+function vaultRefusal(v, isNotify) {
+  if (v === undefined) return '';
+  if (isNotify) return 'vibespace-job notify-cron: --vault is for a job that runs a command — a notify cron runs none; nothing was created';
+  const list = v === true ? [''] : v;
+  const at = list.findIndex((x) => !/^[A-Z][A-Z0-9_]{0,63}=vault:\/\/\S+$/.test(String(x)));
+  return at < 0 ? '' : `vibespace-job run: the --vault value #${at + 1} is not NAME=vault://… (NAME upper case) — refused before anything was sent. A value never rides a command line: store it with vibespace-vault put, then pass the reference it prints`;
+}
 
 function dur(v) { // 30s/10m/6h/2d → ms
   const m = /^(\d+(?:\.\d+)?)(s|m|h|d)?$/.exec(String(v || ''));
@@ -105,11 +121,20 @@ function memLine(j) {
     : j.oomEnds ? ` · ${j.oomEnds} out-of-memory end in a row (2 park it)` : '';
   return head + rung + end + park;
 }
+// lane vault-job-road: the job's vault values by NAME and REFERENCE (never a value — the hub hands each on fd $NAME_FD at every
+// start) and what a waiting job waits for
+function vaultLine(j) {
+  const v = Array.isArray(j.vault) ? j.vault : [];
+  if (!v.length && j.state !== 'waiting') return '';
+  const wait = j.state === 'waiting' && j.waitWords ? ` — ${j.waitWords}` : ''; // the hub's own words (what it waits for, and who was told)
+  return `vault: ${v.map((r) => `${r.name}=${r.ref} (read fd $${r.name}_FD)`).join(' · ') || '—'}${wait}`;
+}
 function printJob(j, tailLines) {
   const run = j.run || {};
   const dur_ = run.startedAt ? (run.endedAt ? ` ran ${hum(run.endedAt - run.startedAt)}` : ` up ${hum(Date.now() - run.startedAt)}`) : '';
   console.log(`${j.id} ${j.name} [${j.kind}] state=${j.state}${run.exit !== null && run.exit !== undefined ? ' exit=' + run.exit : ''}${run.cause ? ' cause=' + run.cause : ''}${dur_}${j.nextFireAt ? ' next=' + hum(j.nextFireAt - Date.now()) : ''}${j.progress ? '\nprogress: ' + j.progress : ''}`);
   if (j.context && j.context.payload) console.log('context: ' + j.context.payload);
+  if (vaultLine(j)) console.log(vaultLine(j));
   // lane job-notify-user r3: a notify cron's reminder, as the snapshot keeps it
   if (j.actionText) console.log('text: ' + j.actionText);
   if (pubLine(j)) console.log(pubLine(j));
@@ -126,6 +151,7 @@ function printJob(j, tailLines) {
 const USAGE = `vibespace-job — background work that OUTLIVES this conversation (services · long tasks · cron)
 create:  vibespace-job run "CMD" --name NAME [--context "brief (echoed at poll, survives your compaction)"]
            [--cwd DIR] [--until "MARKER"] [--timeout 6h] [--stdin-open] [--notify-user] [--notify on|off]
+           [--vault NAME=vault://…]… ← a vault value, read ONCE by the job from fd $NAME_FD (never env/argv/disk; ≤ 8 — docs vault)
            [--memory 8G]   ← its memory bound (default: the owner's setting, else the cluster's, else 4G); past it the job is
                              stopped by name, and two such ends in a row park it
            [--keep-up [--restart on-failure|always|never] [--port N] [--publish]]     ← service
@@ -169,6 +195,10 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
   switch (verb) {
     case 'run': case 'notify-cron': {
       const isNotify = verb === 'notify-cron';
+      const unknown = Object.keys(flags).filter((k) => !RUN_FLAGS.includes(k));
+      if (unknown.length) { console.error(`vibespace-job ${verb}: ${unknown.length === 1 ? 'an unknown flag' : `${unknown.length} unknown flags`} (${unknown.map((k) => (/^[a-z][a-z0-9-]{0,39}$/.test(k) ? '--' + k : 'a flag of another shape')).join(', ')}) — nothing was sent. The flags ${verb} knows: ${RUN_FLAGS.map((f) => '--' + f).join(' ')}`); process.exit(2); }
+      const vaultBad = vaultRefusal(flags.vault, isNotify);
+      if (vaultBad) { console.error(vaultBad); process.exit(2); }
       const cmdStr = pos[1];
       if (!isNotify && !cmdStr) { console.error('usage: vibespace-job run "CMD" --name NAME [flags] — run with no args for full usage'); process.exit(1); }
       // --at forms: epoch ms | RELATIVE "+2m"/"+1h30m" (unambiguous — prefer
@@ -223,6 +253,7 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
           stdinOpen: !!flags['stdin-open'], memoryMb: typeof flags.memory === 'string' ? flags.memory : undefined,
           notifyOk: !!flags['notify-ok'] || echoReminder, restart: flags.restart || 'on-failure',
           ports: [].concat(flags.port || []).filter(Boolean).map(Number), publish: !!flags.publish,
+          ...(flags.vault ? { vault: flags.vault === true ? [''] : flags.vault } : {}), // lane vault-job-road: NAME=vault://… references — the hub judges them
         };
         // THE COMPATIBILITY COPY (lane job-notify-user r2): an engine of 2.369.360 or older builds a cron's run from
         // `{...a.task}` and never reads the top-level field — this copy is what tells the user on such a hub (a device
@@ -291,6 +322,7 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
       console.log(`params: restart=${j.restart} timeout=${j.timeoutMs || '—'} until=${j.untilOutput || '—'} singleInstance=${j.singleInstance} stopWithOwner=${j.stopWithOwner} notifyOk=${j.notifyOk} notifyUser=${j.kind === 'service' ? 'n/a (a service never tells at its end)' : j.notifyUser}`);
       if (forYouLine(j)) console.log(forYouLine(j));
       if (memLine(j)) console.log(memLine(j));
+      if (vaultLine(j)) console.log(vaultLine(j));
       console.log(`access: view=${j.access.view} control=${j.access.control}${j.access.lockedBy ? ' (locked by user)' : ''} · notify=${j.notify}${j.lastNotify ? ' last=' + j.lastNotify.lane + (j.lastNotify.ok ? '✓' : '✗') : ''} · subscribers=${j.subscribersCount}${j.mySubscription ? ' (you' + (j.mySubscription.filter ? ', filter=' + j.mySubscription.filter : '') + ')' : ''}`);
       if (j.context && j.context.payload) console.log('context: ' + j.context.payload);
       if (pubLine(j)) console.log(pubLine(j));

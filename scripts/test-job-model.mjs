@@ -570,7 +570,7 @@ console.log('B-70f9 ② ownedJobsView — the jobs a conversation OWNS, attentio
   ok(JSON.stringify(v.map((j) => j.id)) === '["j4","j2","j1","j5"]', 'only c-A\'s jobs, attention first: waiting for you · failed · running · scheduled (the panel\'s ORDER)', v.map((j) => j.id));
   ok(v[0].words === 'waiting for you' && v[0].glyph === '✋' && v[1].words === 'failed' && v[2].words === 'running' && v.every((j) => typeof j.words === 'string' && j.words), 'each row carries the panel glyph and the state as an English t() key');
   ok(M.ownedJobsView(jobs, '').length === 0 && M.ownedJobsView(null, 'c-A').length === 0 && M.ownedJobsView(jobs, 'c-none').length === 0, 'no conversation id / no list / nothing owned ⇒ empty');
-  ok(Object.keys(M.STATE_WORDS).length === 10, 'every engine state has its words (10)');
+  ok(Object.keys(M.STATE_WORDS).length === 11, 'every engine state has its words (11 — lane vault-job-road: + waiting, for the vault or an approval)');
   const sp = require('fs').readFileSync(require('path').join(__dirname_jm, '..', 'src/lib/session-props.js'), 'utf-8');
   ok(/import \{ ownedJobsView \} from '\.\.\/job-model\.js';/.test(sp) && /const oj = ownedJobs\(conv, \(\) => \{ if \(root\.isConnected\) render\(\); \}\);/.test(sp) && /a\.onclick = \(\) => app\.openJobs\?\.\(\{ focusJobId: j\.id \}\);/.test(sp) && /fetchJson\('\/api\/jobs'\)\.then\(\(r\) => \{\s*\n\s*if \(gen !== ownedJobsGen\) return;\s*\n\s*const rows = r && !r\.error && Array\.isArray\(r\.jobs\) \? ownedJobsView\(r\.jobs, conv\)/.test(sp),
     'PIN: Session Properties lists the owned jobs through THE pure view (memoised ask of /api/jobs, a re-render only when the list moved) and a row opens the panel at its job');
@@ -618,7 +618,7 @@ console.log('B-70f9 ② ownedJobsView — the jobs a conversation OWNS, attentio
   const code = (src) => src.split('\n').map((l) => l.replace(/^\s*\/\/.*$/, '').replace(/\s\/\/ .*$/, '')).join('\n'); // comments out: the header RECORDS the removal
   const removed = (src) => !/\bCOMPAT_PROTO_1\b|\bargvSpec\b|\batob\(|Buffer\.from\([^\n]*?['"]base64['"]\)/.test(code(src));
   ok(removed(wrap), 'the job wrapper reads no protocol-1 spec — no COMPAT_PROTO_1, no argvSpec, no base64 decode of an argument (removed at 2.369.340 as scheduled; a ≤ .330 call ends «not started», update_window)');
-  const AT = 'const PROTO = 2;\n';
+  const AT = 'const PROTO = 3;\n';   // lane vault-job-road: protocol 3 (the vault values on fd 3)
   const OLD = "const COMPAT_PROTO_1 = true;\nfunction argvSpec(a) { // the ≤ .330 caller's spec: base64 JSON carrying an argv — anything else is not one\n  try { const s = JSON.parse(Buffer.from(String(a), 'base64').toString('utf-8')); return s && typeof s === 'object' && Array.isArray(s.argv) ? s : null; } catch { return null; }\n}\n";
   const V1 = 'else if (v1) {';
   const plants = [

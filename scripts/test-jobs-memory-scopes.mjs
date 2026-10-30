@@ -54,7 +54,7 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const REPO = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const M = require('../src/job-model.js');
-const { JobManager } = require('../src/jobs.js');
+const { JobManager, WRAPPER_PROTO } = require('../src/jobs.js');   // lane vault-job-road: the wrapper is called with the server's own protocol
 const L = await import(new URL('../src/lib/jobs-layout.js', import.meta.url));
 // the wrapper's PURE judges: a require() with no ctl dir on argv (an older wrapper has none — and would exit: not required)
 const WRAPPER_SRC = fs.readFileSync(path.join(REPO, 'data/bin/job-wrapper.js'), 'utf8');
@@ -1115,7 +1115,7 @@ const oK=process.kill;process.kill=function(pid,sig){if(main&&reaped&&pid===main
     const argv = how === 'intent' ? ['sh', '-c', 'sleep 0.4'] : ['sh', '-c', '(trap "" TERM; exec sleep 3) & sleep 0.2; exit 0'];
     const specPath = path.join(ctl, 'spec.json');
     fs.writeFileSync(specPath, JSON.stringify({ argv, cwd: dir, env: { PATH: process.env.PATH, VIBESPACE_JOB_ID: `jb-reuse-${how}` }, kind: 'task', memory: { mb: 0, askedMb: 0, rungs: [], stopMs: 2000 } }));
-    const w = spawn(NODE, ['-r', pre, path.join(dir, 'bin', 'job-wrapper.js'), ctl, specPath, '--proto=2'], { detached: true, stdio: 'ignore', env: { PATH: process.env.PATH, HOME: dir, VIBESPACE_SKIP_AGENT_HOOKS: '1', REUSE_LOG: logF, REUSE_HOLDER: String(holder.pid) } });
+    const w = spawn(NODE, ['-r', pre, path.join(dir, 'bin', 'job-wrapper.js'), ctl, specPath, '--proto=' + WRAPPER_PROTO], { detached: true, stdio: 'ignore', env: { PATH: process.env.PATH, HOME: dir, VIBESPACE_SKIP_AGENT_HOOKS: '1', REUSE_LOG: logF, REUSE_HOLDER: String(holder.pid) } });
     let wEnd = false; w.on('exit', () => { wEnd = true; });
     if (how === 'intent') { await sleep(150); fs.writeFileSync(path.join(ctl, 'stop.json'), JSON.stringify({ sig: 'SIGTERM', at: Date.now() })); } // the engine's intent; its group signal never comes
     else { await until(() => { try { return fs.readFileSync(logF, 'utf8').includes('main-exit'); } catch { return false; } }, 4000, 10); await sleep(300); try { process.kill(w.pid, 'SIGTERM'); } catch { } } // while it drains the deaf leftover

@@ -21,7 +21,8 @@
  *     NONE(why) — not this kind's, in words. `add` = { door, order }: the 添加… menu's door id (registerVaultAdd in
  *     src/lib/vault-window.js — the doors stay the implementation; this table says which must exist, and their order);
  *     `row` = 'base' or { module, exports } (the window's row extras); `reveal` = true | false (the row's 「显示」);
- *     `use` = { route } (an agent's door) or { system } (VibeSpace uses it itself, in words); `delete` = { method, path } (the
+ *     `use` = { route, also? } (an agent's door — `also`: the other agent doors that use it, lane vault-job-road: a job's
+ *     `--vault`) or { system } (VibeSpace uses it itself, in words); `delete` = { method, path } (the
  *     row's 删除, src/vault-inventory.js doorsOf) or { open } or { module, route }; `cli` = { bin, verbs } (in that CLI's
  *     usage); `route` = the person's routes ('METHOD /path', mounted); `doc` = the words of its docs/kb-features.md line;
  *   · `deferred` = { <surface>: { lane, backlog, why? } } — a surface still owed: `lane` = the lane's name (a-z, 0-9 and '-',
@@ -65,7 +66,7 @@ const fam = (row) => Object.freeze({ ...row, surfaces: Object.freeze(row.surface
 const FAMILIES = Object.freeze([
   fam({ id: 'agent-secret', label: 'An agent\'s own secret (mint / put)', category: 'agents', stores: null, entryRe: /^agent:/, sample: 'agent:conv-census/sample',
     surfaces: { list: true, row: 'base', add: NONE('an agent puts it in (vibespace-vault mint / put) — a person never adds one'), reveal: true,
-      use: { route: 'POST /api/agent/vault/run' }, cli: { bin: 'vibespace-vault', verbs: ['mint', 'put'] },
+      use: { route: 'POST /api/agent/vault/run', also: ['POST /api/agent/jobs'] }, cli: { bin: 'vibespace-vault', verbs: ['mint', 'put'] },   // lane vault-job-road: + a Background Work job (--vault, its own conversation's)
       route: ['POST /api/agent/vault/mint', 'POST /api/agent/vault/put'], doc: '**Agents put their OWN secrets in' },
     // found by this registry's census; no lane holds it yet (the coordinator took the backlog item, 2026-10-26)
     deferred: { delete: { lane: 'unscheduled', backlog: 'B-3fb5', why: 'design q-047 §3.3 lists 删除 for an agent\'s entry; no route drops one yet' } } }),
@@ -109,7 +110,7 @@ const FAMILIES = Object.freeze([
       use: { route: 'GET /api/agent/vault/totp/:name' }, delete: { method: 'DELETE', path: '/api/vault/totp/' }, cli: { bin: 'vibespace-vault', verbs: ['totp'] },
       route: ['GET /api/vault/totp', 'POST /api/vault/totp', 'GET /api/vault/totp/:name', 'DELETE /api/vault/totp/:name', 'POST /api/vault/totp/:name/grants'], doc: '**Two-step codes (TOTP)**' } }),
   fam({ id: 'free-secret', label: 'A key or password no card holds', category: 'keys', stores: ['secrets'], entryRe: /^secret:/, sample: 'secret:census', confirmKey: 'secret',
-    surfaces: { list: true, row: 'base', add: { door: 'secret', order: 50 }, reveal: true, use: { route: 'POST /api/agent/vault/run' },
+    surfaces: { list: true, row: 'base', add: { door: 'secret', order: 50 }, reveal: true, use: { route: 'POST /api/agent/vault/run', also: ['POST /api/agent/jobs'] },   // lane vault-job-road: + a Background Work job (--vault, the owner approves it)
       delete: { method: 'DELETE', path: '/api/vault/secrets/' }, cli: { bin: 'vibespace-vault', verbs: ['run', 'request'] }, route: ['POST /api/vault/secrets', 'DELETE /api/vault/secrets/:id'], doc: '**「其他密钥或密码…」' } }),
   fam({ id: 'sealed-file-key', label: 'A sealed file\'s key', category: 'other', stores: ['secrets'], entryRe: /^file:/, sample: 'file:census',
     surfaces: { list: true, row: 'base', add: NONE('VibeSpace makes it when it seals the file'), reveal: false, use: SYSTEM('VibeSpace opens the file with it'),

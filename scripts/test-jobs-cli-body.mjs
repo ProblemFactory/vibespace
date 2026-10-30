@@ -162,6 +162,7 @@ const server = http.createServer((req, res) => {
 });
 await new Promise((r) => server.listen(0, '127.0.0.1', r));
 const API = `http://127.0.0.1:${server.address().port}`;
+const PASTED = ['sk', '-live-', 'q'.repeat(20), '7f3'].join('');   // lane vault-job-road: a value an agent pasted where a --vault reference belongs
 const cli = (argv, { leg = 'census', bin = CLI } = {}) => new Promise((resolve) => {
   const p = spawn(process.execPath, [bin, ...argv], { cwd: CWD, env: { PATH: process.env.PATH || '/usr/bin:/bin', HOME: tmp, LANG: 'C.UTF-8', VIBESPACE_API: API, VIBESPACE_SESSION_TOKEN: `vsst_${leg}` } });
   let out = '', err = '';
@@ -185,7 +186,7 @@ const readFlags = (src) => new Set([...branchOf(src).matchAll(/flags\.([a-z][a-z
 const INV = {
   svc: ['run', 'sleep 60', '--name', 'census-svc', '--note', 'a note', '--context', 'ctx words', '--cwd', CWD, '--until', 'READY', '--timeout', '6h', '--stdin-open', '--notify', 'on',
     '--view', 'all', '--control', 'group', '--stop-with-owner', '--keep-up', '--restart', 'always', '--port', '8123', '--publish', '--memory', '8G'],
-  task: ['run', 'true', '--name', 'census-task', '--notify-user'],
+  task: ['run', 'true', '--name', 'census-task', '--notify-user', '--vault', 'TOK=vault://agent:conv-census/tok'],
   every: ['run', 'echo hi', '--name', 'census-every', '--every', '30m', '--jitter', '5', '--notify-ok', '--notify-user'],
   cron: ['run', 'true', '--name', 'census-cron', '--cron', '41 9 * * *'],
   nc: ['notify-cron', '--name', 'census-nc', '--at', '+5m', '--text', 'census reminder', '--urgency', 'high', '--notify-user'],
@@ -197,6 +198,7 @@ const PINS = {
   '--cwd': [['svc', 'cmd.cwd', CWD]], '--until': [['svc', 'untilOutput', 'READY']], '--timeout': [['svc', 'timeoutMs', 6 * 3600e3]],
   '--stdin-open': [['svc', 'stdinOpen', true]],
   '--memory': [['svc', 'memoryMb', '8G']],   // the seam with jobs-memory-bound: the CLI sends the flag's own string
+  '--vault': [['task', 'vault', ['TOK=vault://agent:conv-census/tok']]],   // lane vault-job-road: the REFERENCES as typed (repeatable — a list); the engine judges them
   // every shape that tells the user (a plain task, a scheduled run, notify-cron) — top-level; a scheduled run ALSO carries
   // the compatibility copy in its task (an engine ≤ 2.369.360 reads only that); a service refuses the flag (leg (1))
   '--notify-user': [['task', 'notifyUser', true], ['every', 'notifyUser', true], ['every', 'action.task.notifyUser', true], ['nc', 'notifyUser', true]],
@@ -256,14 +258,16 @@ const R = await all({
   nobelt: cli(['notify-cron', '--name', 'nobelt', '--at', '+5m', '--text', SECRET_TEXT], { leg: 'nobelt' }),
   full: cli(['notify-cron', '--name', 'full', '--at', '+5m', '--text', 'please renew the cert', '--notify-user'], { leg: 'full' }),
   svc0: cli(['run', 'sleep 60', '--name', 'svc0', '--keep-up'], { leg: 'svc0' }),
+  unk: cli(['run', './bot.sh', '--name', 'unk', '--vualt', 'API_KEY=x'], { leg: 'unk' }),   // lane vault-job-road: an unknown flag
+  pv: cli(['run', './bot.sh', '--name', 'pv', '--vault', 'API_KEY=' + PASTED], { leg: 'pv' }),   // …and a VALUE where a reference belongs
   askc: cli(['renew the cert?', '--urgency', 'critical'], { bin: ASK }),
   asku: cli(['renew the cert now?', '--urgency', 'urgent'], { bin: ASK }),
 });
 const SHOW_IDS = Object.fromEntries(['nc1', 'nc0', 'at1', 'at0'].map((n) => [n, ([...REAL.jm.jobs.values()].find((j) => j.name === n && !j.cronParent) || {}).id]));
 const SHOW_SVC = ['svc0', 'svc1'].map((n) => [...REAL.jm.jobs.values()].find((j) => j.name === n && !j.cronParent));
 const SHOWS = Promise.all([...Object.entries(SHOW_IDS).map(([n, id]) => cli(['show', id], { leg: n })), cli(['show', SHOW_SVC[0] && SHOW_SVC[0].id], { leg: 'svc0' }), cli(['show', SHOW_SVC[1] && SHOW_SVC[1].id], { leg: 'svc1' })]);
-const CENSUS_RUNS = [...Object.keys(INV).map((k) => `inv:${k}`), 'dropped'], REFUSED = ['urgc', 'svcn', 'askc'];
-const cliBad = Object.entries(R).filter(([k, r]) => (CENSUS_RUNS.includes(k) ? !/census: recorded, not created/.test(r.err) : REFUSED.includes(k) ? r.code !== 1 : r.code !== 0));
+const CENSUS_RUNS = [...Object.keys(INV).map((k) => `inv:${k}`), 'dropped'], REFUSED = ['urgc', 'svcn', 'askc'], NOT_SENT = ['unk', 'pv'];   // lane vault-job-road: refused at the prompt with exit 2 (nothing sent)
+const cliBad = Object.entries(R).filter(([k, r]) => (CENSUS_RUNS.includes(k) ? !/census: recorded, not created/.test(r.err) : REFUSED.includes(k) ? r.code !== 1 : NOT_SENT.includes(k) ? r.code !== 2 : r.code !== 0));
 ok(!cliBad.length && urgRaw.status === 200 && svcRaw.status === 200, `every CLI call reached the route (${Object.keys(R).length} calls: the census ones refused after recording, two refused at the prompt, the fire legs created) + the agent's own two POSTs`, cliBad.map(([k, r]) => `${k}: ${r.code} ${r.err}`).join(' | ') + ` ${urgRaw.status} ${svcRaw.status}`);
 
 console.log('(1) WIRE — the real CLI\'s POST body, three shapes; two refusals said at the prompt');
@@ -308,6 +312,18 @@ ok(!lost.length, `every pin lands: ${Object.keys(PINS).length} flags in the POST
   ok(same(planted.unpinned, ['--frobnicate']), 'CONTROL: a flag planted in a copy of the usage is red BY NAME', JSON.stringify(planted));
   const read = censusFindings(SRC.replace("stdinOpen: !!flags['stdin-open'],", "stdinOpen: !!flags['stdin-open'], shadow: flags['shadow-flag'],"));
   ok(same(read.unpinned, ['--shadow-flag']), 'CONTROL: a flag the branch starts reading (and the usage never prints) is red by name too', JSON.stringify(read));
+  // lane vault-job-road (L0's acceptance): RUN_FLAGS — the flags the CLI ACCEPTS for run / notify-cron (every other one refused
+  // by name, nothing created) — is exactly what the usage prints and the branch reads; a drift either way is red
+  const runFlags = (src) => { const m = /const RUN_FLAGS = Object\.freeze\(\[([\s\S]*?)\]\)/.exec(src); return m ? new Set([...m[1].matchAll(/'([a-z][a-z-]*)'/g)].map((x) => '--' + x[1])) : null; };
+  const drift = (src) => { const rf = runFlags(src); if (!rf) return ['(no RUN_FLAGS)']; const named = new Set([...printedFlags(src), ...readFlags(src)]); return [...[...named].filter((f) => !rf.has(f)), ...[...rf].filter((f) => !named.has(f))].sort(); };
+  ok(!drift(SRC).length, `RUN_FLAGS (the flags run accepts — ${runFlags(SRC) ? runFlags(SRC).size : 0}) is exactly the usage's and the branch's`, drift(SRC));
+  ok(same(drift(SRC.replace('[--stdin-open]', '[--stdin-open] [--frobnicate]')), ['--frobnicate']), 'CONTROL: a flag the usage starts printing but RUN_FLAGS does not accept is red by name');
+  // …and on the wire: an unknown flag ⇒ exit 2, named with the flags run knows, the body NEVER sent; a pasted value ⇒ exit 2, nothing
+  // sent, never echoed; the ROUTE refuses a field it does not copy (an older hub meeting a newer CLI says so — 400 unknown_field)
+  ok(R.unk.code === 2 && /an unknown flag \(--vualt\)/.test(R.unk.err) && /The flags run knows: [^\n]*--vault/.test(R.unk.err) && !bodyOf('unk'), 'an unknown flag (--vualt) ⇒ exit 2, named with the flags run knows — the body is never sent', JSON.stringify({ code: R.unk.code, sent: !!bodyOf('unk'), err: R.unk.err.slice(0, 200) }));
+  ok(R.pv.code === 2 && !bodyOf('pv') && ![R.pv.err, R.pv.out].some((t) => t.includes(PASTED)), 'a VALUE where a --vault reference belongs ⇒ exit 2, nothing sent, the value never echoed', JSON.stringify({ code: R.pv.code, sent: !!bodyOf('pv') }));
+  const uf = await post('census', { kind: 'task', name: 'uf', cmd: { argv: ['true'] }, envFromX: ['A'] });
+  ok(uf.status === 400 && uf.j.code === 'unknown_field' && same(uf.j.fields, ['envFromX']) && /unknown field: envFromX/.test(uf.j.error), 'the route refuses a field it does not copy BY NAME (400 unknown_field) — nothing created', JSON.stringify(uf));
   const envBack = censusFindings(SRC.replace('        schedule,\n', '        env: [].concat(flags.env || []).length ? undefined : undefined,\n        schedule,\n'));
   ok(same(envBack.unpinned, ['--env']), 'CONTROL: the dead --env read put back is red by name (no row can declare it off the wire)', JSON.stringify(envBack));
   const dropped = landing('--notify-user', { ...bodies, nc: bodyOf('census-nc-dropped') }, null);

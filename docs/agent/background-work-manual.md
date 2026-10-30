@@ -308,6 +308,10 @@ of a subscription login is the class that got a subscription banned. Calling
 any API with your own key is fine. This is a reminder against obvious reads of
 sign-in files, NOT a sandbox.
 
+### A stored secret from the vault — `--vault NAME=vault://…`
+
+A job that needs a key at every start (a bot's token, an API key for a cron) declares it at creation: `vibespace-job run "…" --name X --keep-up --vault API_KEY=vault://…` (repeatable, ≤ 8; the reference `vibespace-vault list` / `put` / `mint` print — the full rules in `vibespace-vault docs`). The hub hands the value at EVERY start on a read-once fd: the env carries `API_KEY_FD=4` only. Read it once, early — python `open(int(os.environ["API_KEY_FD"]), "rb").read()`, sh `$(cat <&4)`, node `fs.readFileSync(Number(process.env.API_KEY_FD))`; a second read is empty. Never put it back on a command line (`curl -H "…$KEY"` is argv — any `ps` shows it) or into an `export`. A start while the vault is locked, or before the user approved a key you did not store yourself, is `waiting` (`show` says for what) — never a failure — and starts by itself. The job's log is masked by the value and by shape.
+
 ### The agent browser inside a job
 
 A job may use the agent browser as its owner conversation: the same profile,

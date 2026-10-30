@@ -5420,8 +5420,11 @@ function makeFlow93(acorn) {
   ok(JSON.stringify(callers93) === JSON.stringify(EXPECTED93), `§93 the belt's callers are EXACTLY the six sink writers${callers93.join() !== EXPECTED93.join() ? ` — got: ${callers93.join(', ') || '(none)'}` : ''}`);
   for (const f of EXPECTED93) ok(/require\('[^']*agent-output-belt\.js'\)/.test(read(f)), `§93 ${f} requires the belt`);
   const jw93 = read('data/bin/job-wrapper.js');
-  ok(/secret-shapes\.js/.test(jw93) && /child\.stdout\.on\('data', \(b\) => writeLog\(maskChunk\(b\)\)\)/.test(jw93),
-    '§93 the detached job wrapper masks the child output through the shape census (shapes only — no engine in a wrapper process)');
+  // lane vault-job-road (protocol 3): a job GIVEN vault values is masked by its values first (this run's own — the run door's
+  // createRunMasker; the wrapper holds them to mask its log, never a DEK), then by the shape census; a job with none, by shapes
+  ok(/secret-shapes\.js/.test(jw93) && /child\.stdout\.on\('data', \(b\) => writeLog\(maskOut\('out', b\)\)\)/.test(jw93) && /child\.stderr\.on\('data', \(b\) => writeLog\(maskOut\('err', b\)\)\)/.test(jw93)
+    && /function maskOut\(k, b\) \{\n  if \(!VAL\) return maskChunk\(b\);/.test(jw93) && /const shaped = \(t\) => \(t \? maskChunk\(/.test(jw93) && !/vault-engine|secret-box|lawfulKey/.test(jw93),
+    '§93 the detached job wrapper masks the child output through the shape census — after THIS run\'s vault values when it was given any (protocol 3) — and holds no engine, no DEK');
   // THE JOBS ROAD (lane job-notify-user r2 → r3): src/server/jobs-wiring.js files a job's For-you copy with origin 'jobs' — an
   // AGENT-FIELDS origin (src/inbox-origin.js AGENT_FIELDS_ORIGINS): the store belts each FIELD (the i18n params, the label's
   // job name) on its own and never the product's sentence (r2 belted the whole text: «Task refresh-token: «redacted»»)

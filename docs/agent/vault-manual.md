@@ -177,6 +177,28 @@ or in a host list (`postgresql://a,b/db`) is read like any other. So name the ho
 `curl https://<its host>/…`, `psql -h <its host>` — never a script. Every use is still recorded (`uses`), scrubbed and refused
 by the same tables.
 
+## A Background Work job that needs a secret — `vibespace-job run … --vault`
+
+A job that runs after this conversation (a bot, a sync, a cron) needs its key at EVERY start — after a crash, after VibeSpace restarts, at each fire. Declare it when you create the job; the hub hands it over each time:
+
+```
+vibespace-job run "python3 bot.py" --name tg-bot --keep-up --vault TG_TOKEN=vault://agent:<this conversation>/tg-token
+```
+
+- `--vault NAME=vault://…` — up to 8 per job; NAME is upper case (`^[A-Z][A-Z0-9_]{0,63}$`). The job's record and `vibespace-job show` keep the REFERENCE, never the value.
+- **Which entries:** your OWN entry (what `put` / `mint` made in this conversation) or a key the user stored for agents (`vault://secrets/secret:<id>/secret`). Another conversation's entry is refused `use_not_granted`; a sign-in, a pairing, a channel or a store key `entry_not_for_jobs`.
+- **Who approves:** a value you PUT (you saw it) needs nobody. A value the hub MINTED, or a key the user stored, waits for the user's approval of THIS job (state `waiting`, `show` says what for) — asked once per job, never per start — and starts by itself once they approve.
+- **How the job reads it:** its env holds only `TG_TOKEN_FD=4` (the first value fd 4, the next 5 …). Read that fd ONCE, early:
+  - python: `token = open(int(os.environ["TG_TOKEN_FD"]), "rb").read().decode()`
+  - sh: `TOKEN=$(cat <&4)` (the number `$TG_TOKEN_FD` names)
+  - node: `const token = require('fs').readFileSync(Number(process.env.TG_TOKEN_FD), 'utf8')`
+  A second read is empty, and `/dev/fd/4` cannot be opened (it is a socket) — read the NUMBER. A program that re-execs itself or starts a reloader (Flask / uvicorn `--reload`, a `subprocess` with `close_fds`) does not hand the fd on: read the value first and keep it in memory.
+- **Where it never is:** the job's env, its argv, its spec file, data/, the hub's journal, the audit (one `vault-use` line per start: its name, the door `service`, a receipt), a card or any answer to you. The job's log is masked by the VALUE (every spelling `run` knows) and by shape before it is written — a job given values is never started without that masker.
+- **Your program's own side:** in sh, `curl -H "Authorization: Bearer $TOKEN"` puts the value on curl's ARGV (any `ps` shows it) — hand it on stdin or a file the tool reads (`curl -H @-`); an `export` puts it in the env of every child. Where the program keeps it after reading is the program's.
+- **Locked:** a start while the vault is locked WAITS — never a failed run, never a park — and starts by itself when a person unlocks it; the user's unlock item names the job. Locking the vault does not stop a job that runs.
+- **What it does not promise:** this keeps a value from being SHOWN by accident. An agent that changes the program can make it print the value, and a value already given cannot be taken back — to retire a key, rotate it at its provider.
+- A job never calls the vault itself: `vibespace-vault run / request / uses` with a job's token answer `job_no_use`.
+
 ## A seed or a login you hold — `totp add` and `login add`
 
 **A two-step seed or a website password goes in as ITS KIND — never as a free `put`.** The vault then does the work and you
@@ -211,7 +233,7 @@ password you were handed in the chat when they can.
 | `not_granted` (totp) | the user has not granted this two-step code to this conversation (a code you added yourself needs no grant) | the Vault window ▸ the code's 用于… |
 | `exists` · `login_exists` | `totp add` / `login add`: that name or that account is in the vault already | — (another name; the user deletes) |
 | `argv_refused` · `tool_prints_secrets` · `tool_wraps_another` · `env_refused` · `entry_too_short_to_mask` · `cwd_refused` | the run's plan is refused | — (change the command) |
-| `job_no_use` | a Background Work job never uses a stored secret | run it from the conversation |
+| `job_no_use` | a Background Work job never calls the vault itself | declare its values when you create it: `vibespace-job run … --vault NAME=vault://…` (below) |
 | `device_road_later` | a run on a paired machine is not here yet | — |
 | `too_many_runs` · `too_many_requests` · `too_many_askers` | too many at once (4 runs, or 8 open requests, per conversation; 32 conversations asking at once) | — (wait) |
 | `bad_name` · `value_in_argv` · `bad_length` · `bad_charset` | mint / put's own words | — |

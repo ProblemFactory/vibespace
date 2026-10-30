@@ -637,6 +637,7 @@ console.log('⑧ THE MIGRATION TABLE — a production-shaped data dir, every r2 
       ['src/server/vault-contents.js', 'the reveal door (secretSource): ONE value behind the second password — a totp entry as its otpauth link'],
       ['src/server/automation-engine.js', 'apikey:<id> only (A.entryOf)'], ['src/server/host-tokens.js', 'host:<id> only'], ['src/plugins/frp.js', 'frp:token only'], ['src/server/sealed-json.js', 'file:<name> only'],
       ['src/server/browser-logins.js', 'web-login:<origin>#<user> only (lane browser-login — the ONE writer): ONE entry opened for ONE fill the kernel makes (its values to the kernel on the loopback socket, never in an answer) or a save verdict'],
+      ['src/server/vault-job-door.js', 'secret:<id> / agent:<scope>/<name> only (lane vault-job-road): a Background Work job\'s --vault values, opened at ONE spawn the verdict allowed, framed for the wrapper\'s fd 3 and zeroed — never an answer, never a file'],
     ]);
     const walkJs = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walkJs(path.join(dir, e.name)) : e.name.endsWith('.js') ? [path.join(dir, e.name)] : []));
     const callers = [...walkJs(path.join(REPO, 'src')), path.join(REPO, 'server.js')].filter((f) => /\bsecretGet\(/.test(fs.readFileSync(f, 'utf8').replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, ''))).map((f) => path.relative(REPO, f)).filter((f) => f !== 'src/server/vault-engine.js').sort();
