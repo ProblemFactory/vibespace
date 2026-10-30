@@ -57,11 +57,15 @@ function posixShellFailed(info, cmd, r) {
 
 /** lane apple-signing r10: a throw of connect() marked `stage: 'connect'` (the error itself; a value that cannot take the mark — not an object,
  *  frozen — is wrapped, its code kept, as `cause`). Idempotent: connect()'s one exit marks it, and so does fsWriteStream's first line — whatever
- *  connect() is there (a subclass's, a suite's stand-in). */
-function connectFailure(e) {
-  if (e && typeof e === 'object') { try { e.stage = 'connect'; if (e.stage === 'connect') return e; } catch { /* frozen: wrapped below */ } }
-  return Object.assign(new Error(String((e && e.message) || e || 'connect failed')), { ...(e && typeof e === 'object' && e.code ? { code: e.code } : {}), stage: 'connect', cause: e });
+ *  connect() is there (a subclass's, a suite's stand-in). r11: its twin `stage: 'gate'` — a refusal at the send point, before any channel opens
+ *  (the capability gate, no `by`, the device's allow list judged here, the owner's Hub automation gate): marked where it is born, so a caller tells
+ *  «never sent» by WHERE it was thrown, whatever its code — one the asker adds later included (src/server/desktop-webrtc.js). */
+function stageMark(e, stage) {
+  if (e && typeof e === 'object') { try { e.stage = stage; if (e.stage === stage) return e; } catch { /* frozen: wrapped below */ } }
+  return Object.assign(new Error(String((e && e.message) || e || `${stage} failed`)), { ...(e && typeof e === 'object' && e.code ? { code: e.code } : {}), ...(e && typeof e === 'object' && typeof e.ask === 'string' ? { ask: e.ask } : {}), stage, cause: e });
 }
+const connectFailure = (e) => stageMark(e, 'connect');
+const gateRefusal = (e) => stageMark(e, 'gate');
 
 class DeviceManager {
   /**
@@ -671,7 +675,7 @@ class DeviceManager {
     // sent. `asked` = the caller judged it already (a stream's request, a write-stream's open)
     const facts = asked !== undefined ? asked : act && DA.auditable(payload) ? await this._gate(payload, { consent }) : null;
     const conn = await this.connect();
-    const noFlag = this._policyError(conn, payload, true); if (noFlag) return Promise.reject(noFlag); // lane device-allow-flags: never travels
+    const noFlag = this._policyError(conn, payload, true); if (noFlag) return Promise.reject(gateRefusal(noFlag)); // lane device-allow-flags: never travels (r11: marked so)
     const id = conn.nextId++;
     const line = audit && act && DA.auditable(payload);
     const t0 = Date.now();
@@ -720,7 +724,7 @@ class DeviceManager {
     if (!this._actGate) return null;
     // int316: the device's OWN allow list (device-allow-flags) is judged BEFORE the owner is asked — a card never asks about
     // an act the device would refuse (the list the live link stated; no link yet ⇒ the send point's own check after connect)
-    const noFlag = this._conn ? this._policyError(this._conn, payload, true) : null; if (noFlag) throw noFlag;
+    const noFlag = this._conn ? this._policyError(this._conn, payload, true) : null; if (noFlag) throw gateRefusal(noFlag);
     let g = null;
     try { g = await this._actGate.check(payload, { consent }); }
     catch (e) { g = { ok: false, code: 'hub_act_denied', error: `this act could not be judged (${String(e && e.message).slice(0, 120)}) — nothing was done`, ask: 'error' }; }
@@ -728,14 +732,7 @@ class DeviceManager {
     const l = DA.lineOf({ at: Date.now(), payload, by: payload.by, ok: false, code: g.code, ask: g.ask, answeredBy: g.answeredBy });
     try { this._log(`[device-acts] NOT SENT ${l.op} by ${l.by} — ${g.code}: ${l.summary}`); } catch { }
     if (this._onAct) { try { this._onAct(l); } catch { } }
-    throw Object.assign(new Error(g.error || g.code), { code: g.code, ...(typeof g.ask === 'string' ? { ask: g.ask } : {}) }); // lane apple-signing r10: + the asker's own word (never / denied / expired / unfiled / quiet / error) — what the owner's gate came to, by its word, never by a message
-  }
-  /** lane apple-signing r10: the machine's 「Hub 自动化」 verdict of an act NOW — the gate's sync verdict: nothing asked, nothing filed, nothing sent
-   *  (null when no gate is wired) → { verdict: allow | ask | deny, reason, policy, source, join } — the hub's signed-helper push reads whether the
-   *  policy an owner's answer was given under still stands, and whether a card for this machine's acts of that kind is up. */
-  actVerdict(payload) {
-    if (!this._actGate || typeof this._actGate.verdict !== 'function') return null;
-    try { const v = this._actGate.verdict(payload); return v && typeof v === 'object' ? { verdict: v.verdict, reason: v.reason, policy: v.policy, source: v.source, join: v.join === true } : null; } catch { return null; }
+    throw Object.assign(new Error(g.error || g.code), { code: g.code, ...(typeof g.ask === 'string' ? { ask: g.ask } : {}), stage: 'gate' }); // lane apple-signing r10: + the asker's own word (never / denied / expired / unfiled / quiet / standing / error); r11: + WHERE — refused at the send point, nothing sent, whatever the code
   }
   /** lane hub-act-ask: the hello's update verdict (sync) → null (push it now) | 'ask' | 'deny' (said once, the agent kept). */
   _upgradeHeld(from) {
@@ -772,7 +769,7 @@ class DeviceManager {
     const l = DA.lineOf({ at: Date.now(), payload, by: null, ok: false, code: 'act_without_by' });
     try { this._log(`[device-acts] REFUSED ${l.op} with no "by" (who asked) — never sent: ${l.summary}`); } catch { }
     if (this._onAct) { try { this._onAct(l); } catch { } }
-    return Promise.reject(Object.assign(new Error(`act_without_by: ${l.op} was not sent — the hub names who asked for every act on a device`), { code: 'act_without_by' }));
+    return Promise.reject(Object.assign(new Error(`act_without_by: ${l.op} was not sent — the hub names who asked for every act on a device`), { code: 'act_without_by', stage: 'gate' })); // r11: marked where it is born — never sent
   }
 
   /** Kill a daemon pipe session by sid without attaching (the dial-chat
@@ -864,7 +861,7 @@ class DeviceManager {
    *  window (8 MiB) — a throw (the grant revoked, the caller gone) aborts. Any failure removes the part. → `{size, sha256}`. */
   async fsWriteStream(p, { source, size, overwrite = false, check = null, windowBytes = 8 * 1024 * 1024, by, consent = false } = {}) {
     let conn; try { conn = await this.connect(); } catch (e) { throw connectFailure(e); } // lane apple-signing r10: before any channel — `stage: 'connect'`
-    if (!conn.info?.capabilities?.includes?.('fs-write-stream')) { const e = new Error('daemon lacks fs-write-stream (capabilities gate) -- upgrade the agent on this machine'); e.code = 'host_needs_daemon'; throw e; }
+    if (!conn.info?.capabilities?.includes?.('fs-write-stream')) { const e = new Error('daemon lacks fs-write-stream (capabilities gate) -- upgrade the agent on this machine'); e.code = 'host_needs_daemon'; throw gateRefusal(e); }
     if (!DA.validBy(by)) return this._refuseAct({ op: 'fs-op', action: 'write-stream', step: 'open', path: p, size }); // lane device-act-audit: before the channel opens (after the capability gate — §74)
     const asked = await this._gate({ op: 'fs-op', action: 'write-stream', step: 'open', path: p, size, overwrite: !!overwrite, by }, { consent }); // lane hub-act-ask: before the channel opens (a refusal sends nothing, not even an abort)
     const chan = conn.nextChan++;
@@ -1033,7 +1030,7 @@ class DeviceManager {
     const line = DA.auditable(req), t0 = Date.now();
     let head = [], headLen = 0;
     const conn = await this.connect();
-    const noFlag = this._policyError(conn, req, true); if (noFlag) throw noFlag; // lane device-allow-flags: before the channel opens
+    const noFlag = this._policyError(conn, req, true); if (noFlag) throw gateRefusal(noFlag); // lane device-allow-flags: before the channel opens
     const chan = conn.nextChan++;
     let exitR;
     const done = new Promise((r) => { exitR = r; });

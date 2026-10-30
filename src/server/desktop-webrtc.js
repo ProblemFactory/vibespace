@@ -29,10 +29,10 @@
  *                            per hub life (round 5; the host claimed before the push's await, round 6; the Mac's hold is a fact about BYTES —
  *                            judged against the prebuilt the hub has NOW, a different one goes at once, round 7; a try is spent only by a push SENT,
  *                            a look at bytes the Mac newly names sends nothing and comes once per SIGNED_RETRY_MS, the hold line names the door by
- *                            the refusal's kind, round 8; a try is a DELIVERY — the device client's refusals before the channel opens, by their
- *                            code, spend none, round 9; the owner's answer is REMEMBERED — a Deny or «Never» on these bytes is not asked again in
- *                            this hub's life while the prebuilt and the machine's Hub automation policy stand, an unanswered ask comes again at most
- *                            once per ASK_AGAIN_MS and never while a card is up; a throw of the device link's connect() spends no try, round 10)
+ *                            the refusal's kind, round 8; a try is a DELIVERY — the device client's refusals before the channel opens spend none,
+ *                            round 9 — whatever their code: the client marks where it threw, round 11; a throw of the device link's connect()
+ *                            spends no try, round 10; what the owner's Hub automation came to is the asker's alone — one standing notice per
+ *                            subject, a stored Deny (src/server/hub-act-ask.js) — this file keeps none of it, round 11)
  *                            — the agent judges it and swaps. A session whose start() has not answered is never idle (the page has no key to
  *                            poll yet — the owner's card, connect()'s backoffs, the bytes); one ended while it started stops the Mac's offer (round 10)
  *   • poll(key, n, seq)      THE LONG POLL (src/server/machine-app.js's shape): the agent's trickled candidates the page has not
@@ -84,6 +84,7 @@ const os = require('os');
 const path = require('path');
 const { Transform } = require('stream');
 const SM = require('../stream-model.js');
+const P = require('../hub-act-policy.js'); // round 11: the asker's own refusal table (REFUSALS)
 
 const L = SM.STREAM_LIMITS;
 const STALL_MS = 50;
@@ -122,34 +123,32 @@ const pendingNext = (hold) => { const k = pendingTries(hold); return k === null 
 const DATE_RANGE_MS = 8.64e15; // Date's range (ECMA-262 §21.4.1.1): a time outside it has no ISO form — toISOString throws
 const timeOf = (t) => (typeof t === 'number' && Number.isFinite(t) && Math.abs(t) <= DATE_RANGE_MS ? t : null); // a device-sent time — a NUMBER in Date's range — or null (round 5: a bad `until` is tolerated, never thrown on; round 6: null / '' / false / [] / true are no time at all, not epoch 0)
 const SIGNED_RETRY_MS = 30 * 60 * 1000; // round 5: the signed push is tried again after this when the Mac named no sooner door (the agent's own UNANSWERED_RETRY_MS)
-const SIGNED_PUSH_MAX = 8; // round 5: signed pushes per machine per hub life — bounded; round 8: pushes SENT (bytes went to the Mac, or were refused at its door) — a refusal on the hub's side spends none; round 9: DELIVERIES — the device link took the push (the open travelled: bytes went, the Mac's door refused it, the link dropped under it); a refusal before the channel opened (PUSH_REFUSED_ON_HUB) spends none
-// ROUND 9 (acceptance r8): the device client refuses ON THE HUB, before any channel opens, in these cases — src/agentd/client.js fsWriteStream's
-// first lines: the capability gate (`host_needs_daemon`), an act with no `by` (`act_without_by`, src/device-acts.js), the machine's «Hub automation»
-// gate (src/server/hub-act-ask.js: `hub_act_denied` — the list says nobody / the user denied / the quiet window; `ask_expired` — the user's card got
-// no answer in 60 s; `ask_unfiled` — the card could not be filed), the device's allow list judged on the hub (`op-not-allowed`, src/device-policy.js;
-// the hub's half runs first — the device's own answer with that code, a list changed since its hello, is read the same way). Nothing went to the
-// Mac: no try (round 8 marked every throw of fsWriteStream `sent` — eight paced refusals by the owner's gate shut the host for the hub's life, and the
-// Developer ID build never went once the owner allowed it). Every OTHER failure came after the link took the push — the open refused at the Mac's
-// door («another transfer is writing», `op-refused` without a code, `link_lost`, a timeout), the bytes stalled (`stalled`), the count wrong
-// (`size_changed`), the prebuilt vanished under the push — a DELIVERY: the try is spent. A CODE, never a message's words, says which.
-const PUSH_REFUSED_ON_HUB = new Set(['host_needs_daemon', 'act_without_by', 'hub_act_denied', 'ask_expired', 'ask_unfiled', 'op-not-allowed']);
-// ROUND 10 (acceptance r9 finding 3): the device client's connect() throws BEFORE any channel — a locked vault (the link token's function:
-// `vault_locked`), «auth failed» of a dialed device, «cannot reach the local daemon» after the backoffs, «stopped» — and only some carry a code; the
-// client marks every throw of connect() `stage: 'connect'` at its one exit (src/agentd/client.js connect): a refusal on the hub's side like the codes
-// above — nothing went, no try, said once (round 9 counted them deliveries: eight link drops after an offer shut the host for the hub's life). The
-// end of a push never redials (fsWriteStream sends it on the link the bytes went on, or fails `stalled`), so this shape is never a push that went.
-// ROUND 10 (acceptance r9 M1): the owner's «Hub automation» gate ASKS — on a cluster instance by default: an URGENT For-you card that holds the push
-// up to 60 s. Round 9 spent no try on its refusals and bounded nothing else: a Deny was asked again at every paced push — 48 cards a day for the hub's
-// life, one about every quiet window under a hold on the hub's own bytes (round 9's words said «the asker's quiet window paces the cards»: false —
-// QUIET_MS is 10 min, SIGNED_RETRY_MS 30). Now the owner's ANSWER is remembered: a Deny (the asker's `denied` — the Deny button, the card put away
-// by the owner's hand) or the list «Never» (`never`) on THESE bytes is not asked again in this hub's life while the prebuilt and the machine's Hub
-// automation policy stand (another prebuilt, or the policy changed, asks once more); an UNANSWERED ask (`expired` — no answer in 60 s; `ask_unfiled` —
-// For you could not file the card) is asked again at most once per ASK_AGAIN_MS, never while a card for this machine's file acts is up. What the gate
-// came to is read off the refusal's CODE and the asker's own word (`ask`, src/server/hub-act-ask.js, carried on the thrown error by src/agentd/
-// client.js _gate) — never a message's words; a `quiet` refusal (another act's card was not allowed minutes ago) filed no card and is no answer.
-const ASK_AGAIN_MS = 6 * 60 * 60 * 1000;
-const ownerAnswered = (p) => !!p && p.refusedOnHub === 'hub_act_denied' && (p.ask === 'denied' || p.ask === 'never'); // the owner's Deny (or the card put away by the owner), or the list says Never
-const unanswered = (p) => !!p && ((p.refusedOnHub === 'ask_expired' && p.ask === 'expired') || p.refusedOnHub === 'ask_unfiled'); // a card nobody answered in 60 s, or one For you could not file
+const SIGNED_PUSH_MAX = 8; // round 5: signed pushes per machine per hub life — bounded; round 8: pushes SENT (bytes went to the Mac, or were refused at its door) — a refusal on the hub's side spends none; round 9: DELIVERIES — the device link took the push (the open travelled: bytes went, the Mac's door refused it, the link dropped under it); a refusal before the channel opened (refusedOnHub — round 11: by where the device client threw, whatever the code) spends none
+// ROUND 9 (acceptance r8) — ROUND 11 (acceptance r10 M1): the device client refuses ON THE HUB, before any channel opens — src/agentd/client.js
+// fsWriteStream's first lines: the capability gate (`host_needs_daemon`), an act with no `by` (`act_without_by`, src/device-acts.js), the device's
+// allow list judged on the hub (`op-not-allowed`, src/device-policy.js), the owner's «Hub automation» gate (src/server/hub-act-ask.js — every code
+// of the asker's own table, src/hub-act-policy.js REFUSALS: the list Never or the owner's Deny `hub_act_denied`, no answer in 60 s `ask_expired`,
+// For you refused the item `ask_unfiled`, a background subject's later act while its standing notice is up `ask_standing` — and any it adds).
+// Round 9 kept these codes in a set by hand; the asker the tree ships added `ask_standing` beside it (lane ledger-dedup-law) and every paced push
+// spent a try on it — eight, no byte sent, then the host shut for the hub's life even after Always allow. Now WHERE the client threw says it, never
+// which code: it marks every refusal before the channel `stage: 'gate'` (_gate, _refuseAct, the capability gate, the allow list at the send
+// point) and every throw of connect() `stage: 'connect'` (round 10: a locked vault's `vault_locked`, «auth failed», «cannot reach the local
+// daemon», «stopped»); an error that reached here without the mark is read by its code — the asker's own table, and the device client's own two
+// (`host_needs_daemon`, `op-not-allowed` — the device's own answer with that code, its list changed since its hello, is the same list as the hub's
+// half: round 9). Nothing went to the Mac: no try, said once. Every
+// OTHER failure came after the link took the push — the open refused at the Mac's door («another transfer is writing», `op-refused` without a
+// code, `link_lost`, a timeout), the bytes stalled (`stalled` — the end of a push never redials, round 10), the count wrong (`size_changed`), the
+// prebuilt vanished under the push — a DELIVERY: the try is spent.
+// ROUND 11 (acceptance r10 M1–3): what the owner's gate came to is the ASKER's, and this file keeps NONE of it. Round 10 remembered a Deny per
+// bytes «for the hub's life» and paced an unanswered ask 6 h beside an asker that already keeps ONE standing notice per subject (machine × kind ×
+// who asks — this push is `system:desktop-webrtc`'s file acts on that Mac): its first act is held 60 s, every later one is refused AT ONCE
+// (`ask_standing`) and counted on that notice — no new card, for another prebuilt as well; the owner's Deny is stored per subject and holds through
+// a restart until the owner allows it (the machine's Hub automation set to Always allow). So each paced push simply asks the gate, and the gate
+// answers at once; a new 60-s hold comes only once the asker ended the subject's notice (its list allowed it or said Never and then asked again,
+// a week with no act).
+const CLIENT_REFUSALS = Object.freeze(['host_needs_daemon', 'op-not-allowed']); // the device client's own, beside the asker's table (src/agentd/client.js fsWriteStream's capability gate; src/device-policy.js)
+const refusedOnHub = (e) => (!e || typeof e !== 'object' ? null : e.stage === 'connect' ? 'connect'
+  : e.stage === 'gate' || P.REFUSALS.includes(e.code) || CLIENT_REFUSALS.includes(e.code) ? String(e.code || 'gate').slice(0, 40) : null);
 /** Push this hub's prebuilt Mac screen helper to an agent that asked for `need` = { dir, version } (its no_helper / helper_unsigned
  *  answer — or, with `signedOnly`, its offer's `helper.wantSigned`: lane apple-signing). THE RULE (round 4, acceptance r3): the hub
  *  pushes the prebuilt it HAS — it can always name the bytes by sha256; the release record's `helper` row and the identity record
@@ -164,12 +163,12 @@ const unanswered = (p) => !!p && ((p.refusedOnHub === 'ask_expired' && p.ask ===
  *  identity, note } | { ok: false, code: 'no_helper' | 'helper_unsigned', error, held? (the sha256 the Mac still holds — these very bytes),
  *  hold? (the Mac's record the judge compared), until? (its door, when it named a legible one), sent? (true once the device link TOOK the push —
  *  bytes went, the open was refused at the Mac's door, the link dropped under it: the hub's try, rounds 8 + 9), refusedOnHub? (round 9: the device
- *  client refused before the channel opened — its code, PUSH_REFUSED_ON_HUB, or 'connect' (round 10: a throw of its connect()); nothing went, no
- *  `sent`; with `ask` — the owner's gate's own word — and `sha256`, the bytes it was for), looked? (`lookOnly`: the digest compared, nothing sent),
- *  withheld? + door? (round 10: `withhold` named these bytes — or any — and nothing was asked, nothing sent) }.
+ *  client refused before the channel opened — its code, or 'connect' (round 10: a throw of its connect()); round 11: by where it threw, whatever the
+ *  code (refusedOnHub, above); nothing went, no `sent`; with `ask` — the asker's own word — and `sha256`, the bytes it was for), looked? (`lookOnly`:
+ *  the digest compared, nothing sent) }.
  *  Round 8 (acceptance r7): `lookOnly` digests and compares against the Mac's hold and sends nothing — start()'s look at bytes the Mac newly
  *  names (the push keeps its pacing). */
-async function pushMacHelper(dm, need, helpersDir = HELPERS_DIR, { signedOnly = false, manifestFile = MANIFEST_COPY, lookOnly = false, withhold = null } = {}) {
+async function pushMacHelper(dm, need, helpersDir = HELPERS_DIR, { signedOnly = false, manifestFile = MANIFEST_COPY, lookOnly = false } = {}) {
   const bin = path.join(helpersDir, 'vibespace-screen');
   let have = null, st = null, ident = null, identBad = null, row = null;
   try { have = fs.readFileSync(bin + '.version', 'utf8').trim(); st = fs.statSync(bin); } catch { return { ok: false, code: 'no_helper', error: 'this hub has no prebuilt Mac screen helper (data/bin/helpers/vibespace-screen)' }; }
@@ -215,11 +214,6 @@ async function pushMacHelper(dm, need, helpersDir = HELPERS_DIR, { signedOnly = 
   const again = untilMs !== null ? ` before ${new Date(untilMs).toISOString()} or the agent's next start` : need.refused && need.refused.until !== undefined ? ', tried again later or at the agent\'s next start (the Mac named no legible time)' : '';
   if (held(need.refused)) return { ...refuse(`the Mac refused this very prebuilt (sha256 ${sha256.slice(0, 12)}…): ${String(need.refused.why || need.refused.code || '').slice(0, 240)} — not sent again${again} (a different prebuilt would be judged afresh)`), held: sha256, hold: need.refused, ...(untilMs !== null ? { until: untilMs } : {}) }; // `held` (round 6): the bytes the Mac holds — start()'s record of them when the hold was told of by a refusal it did not know of (another hub life's push)
   if (held(need.pending)) return { ok: false, code: 'no_helper', error: `the Mac holds this prebuilt already and judges it at its next check (codesign answered nothing ${pendingTries(need.pending) ?? '?'} of 3 times so far; the next check is try ${pendingNext(need.pending)} of 3) — not sent again`, held: sha256, hold: need.pending }; // `hold` (round 7): the Mac's record the judge compared — start()'s words; round 9: the agent's `tries` counts the runs that went unanswered (src/agentd/stream-mac.js), the next check is one more
-  // round 10 (acceptance r9): the owner is not asked about these bytes now — start()'s `withhold` (the owner's answer on these very bytes; a card
-  // that is up; an unanswered ask within ASK_AGAIN_MS), judged against the prebuilt the hub has NOW like the Mac's hold: a different prebuilt passes
-  // a withhold that names other bytes
-  const w = Array.isArray(withhold) ? withhold.find((x) => x && typeof x === 'object' && (x.sha256 == null || x.sha256 === sha256)) : null;
-  if (w) return { ok: false, code: 'no_helper', error: String(w.why || '').slice(0, 400), withheld: sha256, door: String(w.door || '') };
   if (lookOnly) return { ok: false, code: 'no_helper', error: `the Mac's hold (sha256 ${[need.refused, need.pending].map((o) => (o && typeof o === 'object' && typeof o.sha256 === 'string' ? `${o.sha256.slice(0, 12)}…` : null)).filter(Boolean).join(', ')}) is not on this hub's prebuilt (sha256 ${sha256.slice(0, 12)}…)`, looked: sha256 }; // round 8: a look only — start() asked whether the Mac holds THESE bytes; it does not, and the push keeps its pacing
   if (!dm || typeof dm.fsWriteStream !== 'function') return { ok: false, code: 'no_helper', error: 'the Mac\'s agent cannot take a pushed file' };
   // ROUND 5 (acceptance r4): the bytes SENT are hashed as they go — the digest above named them, the push must send those very bytes
@@ -237,8 +231,8 @@ async function pushMacHelper(dm, need, helpersDir = HELPERS_DIR, { signedOnly = 
   src.pipe(tee);
   let pushErr = null;
   try { await dm.fsWriteStream(dst, { source: tee, size: st.size, overwrite: true, by: 'system:desktop-webrtc' }); } catch (e) { pushErr = e || new Error('the push failed'); } finally { src.destroy(); tee.destroy(); }
-  const how = pushErr === null ? null : PUSH_REFUSED_ON_HUB.has(pushErr.code) ? pushErr.code : pushErr.stage === 'connect' ? 'connect' : null; // round 9 (acceptance r8): the device client refused BEFORE the channel opened — the owner's gate, the allow list, no `by`, an old agent: nothing went to the Mac, the hub's try is not spent (the bound counts deliveries); start() says it once; round 10 (acceptance r9): a throw of its connect() too (`stage: 'connect'` — the link never came up for the push)
-  if (how !== null) return { ok: false, code: 'no_helper', error: how === 'connect' ? `the push never left this hub — the device link did not connect (${pushErr.code || 'no code'}: ${String(pushErr.message || pushErr).slice(0, 240)})` : `this hub refused the push before the device link opened (${pushErr.code}: ${String(pushErr.message || pushErr).slice(0, 240)})`, refusedOnHub: how, ...(typeof pushErr.ask === 'string' ? { ask: pushErr.ask.slice(0, 20) } : {}), sha256 };
+  const how = pushErr === null ? null : refusedOnHub(pushErr); // round 9 (acceptance r8): the device client refused BEFORE the channel opened — nothing went to the Mac, the hub's try is not spent (the bound counts deliveries); start() says it once; round 10: a throw of its connect() too; round 11 (acceptance r10 M1): by where it threw, whatever the code (an asker's `ask_standing`, a code it adds later)
+  if (how !== null) return { ok: false, code: 'no_helper', error: how === 'connect' ? `the push never left this hub — the device link did not connect (${pushErr.code || 'no code'}: ${String(pushErr.message || pushErr).slice(0, 240)})` : `this hub refused the push before the device link opened (${how}: ${String(pushErr.message || pushErr).slice(0, 240)})`, refusedOnHub: how, ...(typeof pushErr.ask === 'string' ? { ask: pushErr.ask.slice(0, 20) } : {}), sha256 };
   if (readErr) return { ...refuse(`this hub's prebuilt Mac screen helper vanished under the push (prebuilt vanished: ${String((readErr && readErr.code) || (readErr && readErr.message) || readErr).slice(0, 80)}) — nothing landed in full (the Mac's agent drops a part); what the hub has when a push is next tried is judged afresh`), sent: true }; // `sent` (round 8): the device link took the push — the hub's try is spent, whatever came of it (round 9: a gate that refused it first is `refusedOnHub`, above)
   if (pushErr) return { ok: false, code: 'no_helper', error: `the prebuilt helper did not reach the Mac (${(pushErr && pushErr.message) || pushErr})`, sent: true }; // the open refused at the Mac's door, the link dropped or stalled under the bytes, the count wrong: the link took the push — a delivery (round 9)
   const sent = sentHash.digest('hex');
@@ -407,38 +401,17 @@ function create({ access, log = console, now = Date.now, idleMs = L.idleMs, gone
         const due = !prev || prev.held !== null || own(prev.sent) || t >= prev.dueAt;
         const fresh = prev !== null && named !== null && named !== prev.seen && (prev.seenAt === null || t >= prev.seenAt + SIGNED_RETRY_MS);
         if (!prev || (!prev.busy && prev.n < SIGNED_PUSH_MAX && (due || fresh))) {
-          // ROUND 10 (acceptance r9 M1): would this push ASK the owner? — the machine's «Hub automation» verdict NOW (the device client's sync read:
-          // nothing asked, nothing filed, nothing sent). The owner's answer stands while the policy it was given under stands (the list set to another
-          // mode, the instance's default changed ⇒ asked once more); a Deny / Never names its bytes. An unanswered ask withholds every push for
-          // ASK_AGAIN_MS unless the gate lets it go WITHOUT an ask (the list set to everyone) — the asker's quiet window after our own card is that
-          // same ask refused again (a gate this hub cannot read may ask)
-          const act = { op: 'fs-op', action: 'write-stream', step: 'open', path: `${r.helper.dir}/vibespace-screen-${r.helper.version}`, overwrite: true, by: 'system:desktop-webrtc' };
-          const gateNow = () => { try { return typeof v.dm.actVerdict === 'function' ? v.dm.actVerdict(act) : null; } catch { return null; } };
-          const policyKey = (g) => (g && typeof g.policy === 'string' ? `${g.policy}/${g.source}` : null);
-          const g0 = gateNow(), goes = g0 !== null && g0.verdict === 'allow';
-          const standing = prev && prev.answer && prev.answer.policy === policyKey(g0) ? prev.answer : null;
-          const withhold = !due ? null : [
-            standing ? { sha256: standing.sha256, door: 'answer', why: `the owner refused the push of these very bytes (sha256 ${standing.sha256.slice(0, 12)}…: ${standing.ask === 'never' ? 'the machine\'s Hub automation list is Never' : 'the user denied it'})` } : null,
-            g0 && g0.join ? { sha256: null, door: 'card', why: 'a For you card about changing files on this machine is up — this push files none and joins none' } : null,
-            !goes && prev && prev.askedAt !== null && t < prev.askedAt + ASK_AGAIN_MS ? { sha256: null, door: 'unanswered', why: `nobody answered the ask of ${new Date(prev.askedAt).toISOString()} to push this hub's signed prebuilt (its card got no answer, or For you could not file it)` } : null,
-          ].filter(Boolean);
-          const claim = { n: prev ? prev.n : 0, busy: true, dueAt: prev ? prev.dueAt : t + SIGNED_RETRY_MS, held: prev ? prev.held : null, sent: prev ? prev.sent : null, seen: named, seenAt: due ? (prev ? prev.seenAt : null) : t, said: prev ? prev.said : null, answer: standing, askedAt: prev ? prev.askedAt : null }; // THE CLAIM — synchronous, before the await: a start in flight for this Mac sees it and pushes nothing (round 10: and asks nothing — no second card while one is up)
+          const claim = { n: prev ? prev.n : 0, busy: true, dueAt: prev ? prev.dueAt : t + SIGNED_RETRY_MS, held: prev ? prev.held : null, sent: prev ? prev.sent : null, seen: named, seenAt: due ? (prev ? prev.seenAt : null) : t, said: prev ? prev.said : null }; // THE CLAIM — synchronous, before the await: a start in flight for this Mac sees it and pushes nothing (nor asks: the owner's gate is asked by one push at a time)
           signedPushed.set(hostId, claim);
           let p;
-          try { p = await pushMacHelper(v.dm, r.helper, helpersDir, { signedOnly: true, lookOnly: !due, withhold }); } finally { claim.busy = false; }
+          try { p = await pushMacHelper(v.dm, r.helper, helpersDir, { signedOnly: true, lookOnly: !due }); } finally { claim.busy = false; }
           const heldNow = !p.ok && typeof p.held === 'string' ? p.held : null; // the Mac holds the very bytes the hub has now (the judge's one comparison): nothing sent, no try spent — looked at again at the next start
           const went = p.ok || p.sent === true; // round 8: bytes went to the Mac (or were refused at its door) — the one thing that spends a try; a refusal on the hub's side spends none (the bound counts deliveries); round 9: pushMacHelper marks `sent` only once the device link took the push — a refusal before the channel opened (`refusedOnHub`) is a refusal on the hub's side like any other
           const n = claim.n + (went ? 1 : 0);
           const kind = heldNow === null ? null : p.hold && p.hold.tries != null ? 'pending' : p.hold && p.hold.until !== undefined ? 'unanswered' : 'verdict'; // the Mac's record: a judgment in progress; a refusal born of unanswered codesign runs (it has a door); a codesign verdict (it has none)
           const held = heldNow !== null ? heldNow : !went && own(claim.held) ? claim.held : null; // round 8: a look that sent nothing (a refusal on the hub's side — a drop half landed, a wrong-kind build) keeps the hold it knew of while the Mac's answer still names those bytes: the next start looks again
-          // round 10: what the owner's gate came to — a Deny / Never on these bytes is KEPT (`answer`, with the policy it was given under — read after
-          // the answer: a list changed while the card was up is the policy it answered under); a card nobody answered paces the next ask (`askedAt`); a delivery clears both
-          const answered = !went && ownerAnswered(p) && typeof p.sha256 === 'string' ? { sha256: p.sha256, ask: p.ask, policy: policyKey(gateNow()) } : null;
-          const answer = went ? null : answered || claim.answer;
-          const askedAt = went ? null : unanswered(p) ? t : claim.askedAt;
-          const door = answered || p.door === 'answer' ? 'answer' : unanswered(p) || p.door === 'unanswered' ? 'unanswered' : p.door === 'card' ? 'card' : null;
-          const said = went ? null : heldNow !== null ? `held ${kind} ${heldNow}${kind === 'pending' ? ` ${pendingTries(p.hold)}` : ''}` : door === 'answer' && answer ? `answer ${answer.sha256} ${answer.ask}` : door === 'unanswered' ? `unanswered ${askedAt}` : door === 'card' ? 'card' : String(p.error || ''); // what this look came to — a hold (its bytes and kind; a judgment in progress with its count — round 9: told again when the count advances), the owner's answer kept / an unanswered ask / a card up (round 10: by the fact, so the starts it withholds say nothing more), a refusal (its words): told once, again when it changes
-          signedPushed.set(hostId, { n, busy: false, dueAt: went || (heldNow === null && due) ? t + SIGNED_RETRY_MS : claim.dueAt, held, sent: p.ok ? p.sha256 : claim.sent, seen: named, seenAt: claim.seenAt, said, answer, askedAt });
+          const said = went ? null : heldNow !== null ? `held ${kind} ${heldNow}${kind === 'pending' ? ` ${pendingTries(p.hold)}` : ''}` : String(p.error || ''); // what this look came to — a hold (its bytes and kind; a judgment in progress with its count — round 9: told again when the count advances), a refusal (its words — round 11: the asker's own sentence; its first hold's «no answer in 60 s», then «counted on its notice»): told once, again when it changes
+          signedPushed.set(hostId, { n, busy: false, dueAt: went || (heldNow === null && due) ? t + SIGNED_RETRY_MS : claim.dueAt, held, sent: p.ok ? p.sha256 : claim.sent, seen: named, seenAt: claim.seenAt, said });
           if (heldNow !== null) {
             if (claim.said !== said) { // noted once per hold — its bytes and its kind (a judgment in progress that became a verdict is told again, with the verdict's door)
               const hold = p.hold && typeof p.hold === 'object' ? p.hold : {};
@@ -452,12 +425,10 @@ function create({ access, log = console, now = Date.now, idleMs = L.idleMs, gone
             const then = n >= SIGNED_PUSH_MAX ? `not again in this hub's life (${SIGNED_PUSH_MAX} tries)` : `try ${n} of ${SIGNED_PUSH_MAX} — not sent again while the Mac's answer names its hold on these bytes (the hold line at the next stream start names that hold's door; another prebuilt in this hub's helpers dir goes at that start); with no hold named, pushed again at the first stream start after ${new Date(t + SIGNED_RETRY_MS).toISOString()} while the Mac still wants a signed build`;
             log.log?.(`[stream] ${hostId}: the Mac's screen helper is ${r.helper.identity ? r.helper.identity.kind : 'unjudged'} — ${p.ok ? `pushed this hub's signed prebuilt (${p.size} bytes; ${p.note}); the agent takes it at its next check (one last Screen Recording re-grant)` : p.error}; ${then}`);
           } else if (claim.said !== said) { // round 8: a refusal on the hub's side — nothing sent, no try spent — says itself once; the next line when its words change
-            const at = new Date(due ? t + SIGNED_RETRY_MS : claim.dueAt).toISOString();
-            // round 10: the words by what the gate came to — round 9 promised «looked at again …, then once per 30 min» of a Deny, and asked it again each time
-            const again = door === 'answer' ? `the owner's answer is kept — these bytes are not asked about again in this hub's life while the machine's Hub automation policy stands (a change of that policy asks once more; another prebuilt in this hub's helpers dir is asked about once, looked for at the first stream start after ${at}, then once per ${SIGNED_RETRY_MS / 60000} min)`
-              : door === 'unanswered' ? `asked again no sooner than ${new Date(askedAt + ASK_AGAIN_MS).toISOString()} — at most once per ${ASK_AGAIN_MS / 3600000} h while nobody answers, never while a card is up (set to Always allow, the machine's Hub automation sends it without an ask)`
-                : door === 'card' ? `looked at again at the first stream start after ${at}, when no card is up`
-                  : `looked at again ${held !== null ? `at every stream start while the Mac holds the prebuilt this hub had (sha256 ${held.slice(0, 12)}…)` : `at the first stream start after ${at}, then once per ${SIGNED_RETRY_MS / 60000} min, while the Mac still wants a signed build`}`;
+            // round 11 (acceptance r10 minor): the words name only the doors this tree has — the hub's own pacing; what the owner's gate does with the
+            // next push is the asker's sentence in `p.error` (round 10 promised re-asks of «another prebuilt» and of «a changed policy», and a 6-h one, that
+            // the asker never makes)
+            const again = `looked at again ${held !== null ? `at every stream start while the Mac holds the prebuilt this hub had (sha256 ${held.slice(0, 12)}…)` : `at the first stream start after ${new Date(due ? t + SIGNED_RETRY_MS : claim.dueAt).toISOString()}, then once per ${SIGNED_RETRY_MS / 60000} min, while the Mac still wants a signed build`}`;
             log.log?.(`[stream] ${hostId}: the Mac's screen helper is ${r.helper.identity ? r.helper.identity.kind : 'unjudged'} — ${p.error}; nothing sent, no try spent (${n} of ${SIGNED_PUSH_MAX} spent); ${again} (said once — the next line when this answer changes)`);
           }
         } else if (prev.n >= SIGNED_PUSH_MAX && named !== null && named !== prev.seen && (prev.seenAt === null || t >= prev.seenAt + SIGNED_RETRY_MS)) { // after the bound the hub looks no more — a hold the Mac names is noted once per SIGNED_RETRY_MS (round 8: round 7 noted every change, a line per start under an answer that rotates), nothing promised (round 6's words)
@@ -577,4 +548,4 @@ function create({ access, log = console, now = Date.now, idleMs = L.idleMs, gone
   return { start, answer, candidate, restart, sound, poll, pollGone, notePath, stop, stopWindow, facts, device, nudge, shutdown };
 }
 
-module.exports = { create, hubIps, stripHosts, withRelay, pushMacHelper, HELPERS_DIR, MANIFEST_COPY, SIGNED_RETRY_MS, SIGNED_PUSH_MAX, ASK_AGAIN_MS };
+module.exports = { create, hubIps, stripHosts, withRelay, pushMacHelper, HELPERS_DIR, MANIFEST_COPY, SIGNED_RETRY_MS, SIGNED_PUSH_MAX };
