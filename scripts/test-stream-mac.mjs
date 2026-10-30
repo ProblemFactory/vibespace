@@ -40,6 +40,8 @@
 //       is the ASKER's — a Deny stored per subject (no hold for another prebuilt, none in the next hub life), an unanswered ask ONE standing notice that
 //       counts every later refusal (never asked again); a refusal on the hub's side spends no try whatever its code (every code of hub-act-policy REFUSALS,
 //       one it does not have yet); every wait bounded — a hang fails its leg by name
+//       round 12 (acceptance r11, §6 ROUND 10 r12 legs): a refusal's door is never cut (the gate's sentence whole in start()'s `why` and the
+//       [stream] line, machines named with 3 / 21 / 70 chars); the own-sent refusal line names the cadence the hub keeps (asked at each start)
 //   §3 THE HELPER'S PLACE: ready at the shipped version (nothing run); none + no compiler ⇒ no_helper (the trampoline is never
 //      run); the hub's pushed prebuilt is put in place; a compiler ⇒ built (both slices at once, then lipo, codesign); a
 //      REPLACED helper that held its grant ⇒ regrant until the facts see the grant again; never rebuilt at the same version
@@ -1269,15 +1271,15 @@ const pictures = (rtp) => { const out = []; let cur = []; for (const p of rtp) {
       const nap10 = (ms) => new Promise((r) => setTimeout(r, ms));
       const within11 = (p, what) => { let t; return Promise.race([Promise.resolve(p).finally(() => clearTimeout(t)), new Promise((r) => { t = setTimeout(() => r({ hung: what }), 20000); })]); }; // the bound of a wait that could hang: the leg FAILS by name, the suite goes on
       const stores11 = [];
-      // one Mac on a CLUSTER instance (its Hub automation «ask» by default): the Mac a stub that takes the bytes; the owner's hand when the push is held (`hand`): deny | once | none (the hold's 60-s timer fired) | manual (the leg's own); `todos` + `clk`: the NEXT hub life on the same For-you store
+      // one Mac on a CLUSTER instance (its Hub automation «ask» by default), named `name` (r12; «mac»): the Mac a stub that takes the bytes; the owner's hand when the push is held (`hand`): deny | once | none (the hold's 60-s timer fired) | manual (the leg's own); `todos` + `clk`: the NEXT hub life on the same For-you store
       const realMac11 = (hostId, o = {}) => {
         const clk = o.clk || { t: Date.UTC(2032, 0, 1) };
-        const st = { clk, get clock() { return clk.t; }, set clock(v) { clk.t = v; }, t0: clk.t, hand: o.hand || 'none', list: o.list || null, setting: o.setting || 'auto', unfiled: false, timers: [], holds: [], hung: null, logs: [], devLog: [], opens: 0, ends: 0, macSids: new Set(), sidN: 0 };
+        const st = { clk, get clock() { return clk.t; }, set clock(v) { clk.t = v; }, t0: clk.t, hand: o.hand || 'none', list: o.list || null, setting: o.setting || 'auto', unfiled: false, refused: null, timers: [], holds: [], hung: null, logs: [], devLog: [], opens: 0, ends: 0, macSids: new Set(), sidN: 0 };
         const dir = path.join(d10, 'todos-' + hostId); fs.mkdirSync(dir, { recursive: true });
         const store = o.todos || new UTM11({ dataDir: dir, expirySweepMs: 0, now: () => clk.t }); if (!o.todos) stores11.push(store);
         st.todos = store;
         const todos = new Proxy(store, { get: (t, k) => (k === 'add' ? (...a) => { if (st.unfiled) throw new Error('For you is full'); return t.add(...a); } : typeof t[k] === 'function' ? t[k].bind(t) : t[k]) }); // `unfiled`: the store refuses the item
-        st.asker = HA.create({ hosts: { get: (id) => (id === hostId ? { id: hostId, name: 'mac', ...(st.list ? { exit: { hub: { mode: st.list } } } : {}) } : null) }, userTodos: todos, now: () => clk.t, instanceKind: 'cluster', settingOf: () => st.setting,
+        st.asker = HA.create({ hosts: { get: (id) => (id === hostId ? { id: hostId, name: o.name || 'mac', ...(st.list ? { exit: { hub: { mode: st.list } } } : {}) } : null) }, userTodos: todos, now: () => clk.t, instanceKind: 'cluster', settingOf: () => st.setting,
           setHubPolicy: async (h, mode) => { st.list = mode; },
           timers: { set: (fn, ms) => { const x = { fn, due: clk.t + ms }; st.timers.push(x); return x; }, clear: (x) => { st.timers = st.timers.filter((y) => y !== x); } } });
         st.tick = (ms) => { clk.t += ms; const due = st.timers.filter((x) => x.due <= clk.t); st.timers = st.timers.filter((x) => x.due > clk.t); for (const x of due) { try { x.fn(); } catch { } } };
@@ -1285,7 +1287,7 @@ const pictures = (rtp) => { const out = []; let cur = []; for (const p of rtp) {
         const conn = { info: { capabilities: ['fs-write-stream'], platform: 'darwin' }, nextChan: 1, sessions: new Map(), mux: { data: () => true } };
         dm._conn = conn; dm.connect = async () => conn;
         dm._request = async (req) => { if (req.step === 'open') st.opens++; if (req.step === 'end') { st.ends++; return { size: req.sent, sha256: req.sha256 }; } return { ok: true }; };
-        dm.streamOffer = async () => { if (o.noHelper && st.ends === 0) return { ok: false, code: 'no_helper', error: 'the Mac has no screen helper and no compiler', helper: { dir: PP.dir, version: SRC.VERSION } }; const sid = 'm' + (++st.sidN); st.macSids.add(sid); return { ok: true, sid, offer: { type: 'offer', sdp: SDP10 }, source: { kind: 'screen', origin: { x: 0, y: 0 } }, helper: { dir: PP.dir, version: SRC.VERSION, identity: { kind: 'adhoc' }, wantSigned: !o.noHelper } }; };
+        dm.streamOffer = async () => { if (o.noHelper && st.ends === 0) return { ok: false, code: 'no_helper', error: 'the Mac has no screen helper and no compiler', helper: { dir: PP.dir, version: SRC.VERSION } }; const sid = 'm' + (++st.sidN); st.macSids.add(sid); return { ok: true, sid, offer: { type: 'offer', sdp: SDP10 }, source: { kind: 'screen', origin: { x: 0, y: 0 } }, helper: { dir: PP.dir, version: SRC.VERSION, identity: { kind: 'adhoc' }, wantSigned: !o.noHelper, ...(st.refused ? { refused: st.refused } : {}) } }; }; // `refused` (r12): the Mac's answer names bytes it refused
         dm.streamStop = async (sid) => ({ ok: true, stopped: st.macSids.delete(sid) });
         st.hub = DW.create({ access: { streamRung: async () => ({ take: true, source: 'screen', dm, platform: 'darwin' }) }, relay: false, udpLeg: false, helpersDir: hubBin, now: () => clk.t, ...(o.sweepMs ? { sweepMs: o.sweepMs } : {}), log: { log: (m) => st.logs.push(m), warn: (m) => st.logs.push(m) } });
         // one stream start: when the push is HELD (the asker's list names it) the owner's hand settles it — never a wait on a hold the asker did not file
@@ -1368,6 +1370,34 @@ const pictures = (rtp) => { const out = []; let cur = []; for (const p of rtp) {
       }
       const gDoor11 = gRows11.find((r) => r.name === 'mac-door'), gHub11 = gRows11.filter((r) => r !== gDoor11);
       ok(HP.REFUSALS.includes('ask_standing') && gHub11.length === HP.REFUSALS.length + 3 && gHub11.every((r) => r.refusedOnHub === (r.name === 'old-agent' ? 'host_needs_daemon' : r.name === 'allow-list' ? 'op-not-allowed' : r.name) && !r.sent && r.tries === 0 && r.said === 1 && r.opens === 0) && gRows11.find((r) => r.name === 'ask_standing').ask === 'standing' && gDoor11 && gDoor11.sent && gDoor11.refusedOnHub === null && gDoor11.tries === 8 && gDoor11.opens === 9, `r11 a refusal on the hub's side spends no try, whatever its code — every code of the asker's own table (${HP.REFUSALS.join(', ')}), one it does not have yet, an old agent, the device's allow list: refused before the channel (\`stage: 'gate'\`), no \`sent\`, 9 paced starts spend none and say it once; the open refused at the Mac's door stays a delivery — 8 tries (acceptance r10 M1: \`ask_standing\` spent eight tries, 0 bytes, then the host shut)`, gRows11);
+      // leg «r12 a refusal's door is never cut» (acceptance r11 minor 1 — the LIVE no-helper road): the push's refusal on the hub's side carries the gate's sentence WHOLE — its door ends it («… on the machine row (Remote tab) → Hub automation») — in start()'s `why` (the API answer a person's page shows) and in the hub's [stream] line; machines named with 3, 21 and 70 chars (the asker folds a name to 60): nobody answers (ask_expired, then ask_standing), the owner denies (hub_act_denied, then the stored Deny's), the list says Never (hub_act_denied, nobody). 170b0f715 cut the sentence at 240 chars — the ask_standing door mid-word («→ Hub au»)
+      const dRows12 = [];
+      for (const name of ['mac', 'design-studio-mac-pro', 'render-farm-mac-studio-' + 'r'.repeat(47)]) {
+        for (const road of [{ hand: 'none', codes: [['ask_expired', ''], ['ask_standing', '']] }, { hand: 'deny', codes: [['hub_act_denied', ''], ['hub_act_denied', '']] }, { list: 'nobody', codes: [['hub_act_denied', 'nobody'], ['hub_act_denied', 'nobody']] }]) {
+          const hostId = `host-r12-door-${name.length}-${road.hand || road.list}`;
+          const D = realMac11(hostId, { name, noHelper: true, hand: road.hand || 'none', list: road.list || null });
+          const xs = []; for (let k = 0; k < 2; k++) xs.push(await D.start(D.t0 + k * 5 * 60e3));
+          D.hub.shutdown();
+          xs.forEach((x, k) => {
+            const [code, reason] = road.codes[k], sentence = HP.refusalText(code, { machine: name, kind: 'files', reason }), whole = `(${code}: ${sentence})`;
+            dRows12.push({ name: name.length, road: road.hand || road.list, k, code, len: sentence.length, take: x.take, whyWhole: typeof x.why === 'string' && x.why.endsWith(whole), lineWhole: D.logs.some((m) => m.includes(whole)), door: sentence.endsWith(HP.WAY_OUT), tail: String(x.why || x.hung || '').slice(-40) });
+          });
+        }
+      }
+      ok(dRows12.length === 18 && dRows12.every((r) => r.take === false && r.door && r.whyWhole && r.lineWhole) && dRows12.some((r) => r.len > 240), 'r12 a refusal\'s door is never cut — on the no-helper road the push\'s refusal on the hub\'s side carries the gate\'s sentence WHOLE, its door at the end («… on the machine row (Remote tab) → Hub automation»), in start()\'s `why` and in the hub\'s [stream] line: machines named with 3, 21 and 70 chars × nobody answers (ask_expired, then ask_standing) / the owner denies (hub_act_denied, then the stored Deny) / the list says Never (hub_act_denied, nobody); 170b0f715 cut it at 240 chars (the ask_standing door «→ Hub au»)', dRows12.filter((r) => !(r.take === false && r.door && r.whyWhole && r.lineWhole)));
+      // leg «r12 the own-sent refusal line names the cadence the hub keeps» (acceptance r11 minor 2 — the push-line truth rule): the hub delivered X (the list said Always allow); the Mac's answer then names X refused (a hold on the hub's OWN bytes), a corrected prebuilt Y is dropped in, and the owner sets the machine's list back to «ask» ⇒ 10 starts one minute apart: the gate is asked at EVERY start (10 refusals counted on its notice, nothing sent, no try spent) and the line says so — «asked at each stream start until the machine's list changes» — never «then once per 30 min» (170b0f715's words, a pace the code does not keep; no pace is added — the asker's standing refusal answers at once); a refusal with no gate in it (Y an ad-hoc build, the list Always allow) says «looked at again at every stream start while the Mac's answer names the bytes this hub sent»
+      const O12 = realMac11('host-r12-ownsent', { list: 'everyone', hand: 'none' });
+      const shaO12 = sha(hb); await O12.start(O12.t0);
+      const oTry12 = O12.tries(), oOpens12 = O12.opens;
+      O12.refused = { sha256: shaO12, code: 'helper_unsigned', why: 'codesign: not the pinned team' }; putY();
+      O12.list = 'ask'; O12.asker.onPolicyChanged('host-r12-ownsent');
+      for (let k = 1; k <= 10; k++) await O12.start(O12.t0 + k * 60e3);
+      const oR12 = O12.refusals(), oNot12 = O12.notSent(), oSt12 = O12.asker.standingList();
+      ident({ kind: 'adhoc' }); O12.list = 'everyone'; O12.asker.onPolicyChanged('host-r12-ownsent'); await O12.start(O12.t0 + 11 * 60e3);
+      const oR12b = O12.refusals().slice(oR12.length);
+      O12.hub.shutdown(); putX();
+      const cadence12 = /asked at each stream start until the machine's list changes \(the Mac's answer names the bytes this hub sent, sha256 [0-9a-f]{12}…: looked at at every start — no pace of the hub's own\) \(said once/;
+      ok(!O12.hung && oTry12 === 1 && oOpens12 === 1 && oR12.length === 2 && /\(ask_expired: /.test(oR12[0]) && /\(ask_standing: /.test(oR12[1]) && oR12.every((m) => cadence12.test(m) && m.includes(`sha256 ${shaO12.slice(0, 12)}…`) && !/once per 30 min|first stream start after/.test(m)) && oNot12 === 10 && oSt12.length === 1 && oSt12[0].count === 10 && O12.tries() === 1 && O12.opens === 1 && oR12b.length === 1 && /not a Developer ID build/.test(oR12b[0]) && oR12b[0].includes(`looked at again at every stream start while the Mac's answer names the bytes this hub sent (sha256 ${shaO12.slice(0, 12)}…)`) && !/once per 30 min|asked at each/.test(oR12b[0]), 'r12 the own-sent refusal line names the cadence the hub keeps — X delivered (try 1 of 8), the Mac\'s answer names X refused, Y dropped in, the list back to «ask» ⇒ 10 starts a minute apart: the gate asked at EVERY start (10 refusals on its one notice, nothing sent, no try spent), the line «asked at each stream start until the machine\'s list changes» — never «then once per 30 min» (170b0f715); a refusal with no gate in it (an ad-hoc Y) «looked at again at every stream start while the Mac\'s answer names the bytes this hub sent»', { tries: oTry12, opens: O12.opens, notSent: oNot12, standing: oSt12.map((x) => x.count), lines: [...oR12, ...oR12b].map((m) => m.slice(-260)) });
       // leg «r10 a throw of connect() spends no try» (rule 2): the REAL connect() throws before any channel — the link token's function (`vault_locked`: a locked vault), a dialed device that refused the host key («auth failed»), a client stopped («stopped», no code) — marked `stage: 'connect'` at its one exit: the signed push says it once («the push never left this hub — the device link did not connect (<code>: …)») and spends no try over 9 paced starts; the link back ⇒ pushed, try 1 of 8 (a74960179: «try 1 … 7 of 8», then «not again in this hub's life» with nothing sent)
       const cRows10 = [];
       for (const mode of ['vault_locked', 'auth_failed', 'stopped']) {
