@@ -10,6 +10,10 @@
  * r8: UNSURE ⇒ IT LINGERS — `ended` is said only where every shell the agent may run (bash, zsh) surely ended the job.
  * r9: STOP READING THE SHELL — a job ends only in the PLAINEST shape (a lone top-level `C &`, a lone top-level `wait` /
  * `wait $!` / `kill $!` / `kill -TERM $!` after it, nothing but plain commands between); everything else lingers.
+ * r10: what may stand BETWEEN the job and its reaper is a CLOSED allowlist (BETWEEN); a `kill` ends a job only when the
+ * job's own command IS the CLI; a line that writes a name the shells keep (RESERVED), defines a function, does
+ * arithmetic or sends anything else to the background ends nothing; a heredoc's substitutions run in the job of the
+ * command it feeds.
  *
  * lane touch-chip-cause (the .362 train fix, 2026-10-29): moved out of src/channel-touch.js — chat-run-summary (the
  * client's run summary, which imports nothing but PURE rule modules: test-collab-live-counter, test-fold-ux and
@@ -250,7 +254,13 @@ function shellCommands(src, owner = null, depth = 0, offset = 0) {
         i = b.end;
         (h.words.heredocs || (h.words.heredocs = [])).push(b.body);
         if (!b.closed) out.blind.push(b.body);   // an UNCLOSED heredoc — its body is blind text
-        else if (!h.quoted) substitutions(b.body, h.at);
+        else if (!h.quoted) {
+          // r10: the body is expanded by the process that runs the command it feeds — sent to the background before the
+          // body was read (`cat <<EOF > o.txt &`), its substitutions run in that job
+          const from = out.length;
+          substitutions(b.body, h.at);
+          if (h.words.bg) for (let k = from; k < out.length; k++) { const w = out[k].words; w.bg = true; w.jobs = [...(w.jobs || []), ...h.words.jobs]; }
+        }
       }
       pending = [];
       list = out.length;
@@ -335,7 +345,7 @@ function shellCommands(src, owner = null, depth = 0, offset = 0) {
   lone(end(), 'fg');
   closeCoproc();   // r8: the line's coproc ends
   // r9: a line the reader cannot be sure of ends none of its jobs — nor a job of a span inside it
-  if (!endJobs(mine, stops)) { out.unsure = true; for (const c of out) for (const j of c.words.jobs || []) j.ended = false; }
+  if (!endJobs(mine, stops, out)) { out.unsure = true; for (const c of out) for (const j of c.words.jobs || []) j.ended = false; }
   if (i < s.length) out.blind.push(s.slice(i));   // the shell past SCAN_MAX — blind
   for (const h of pending) { (h.words.heredocs || (h.words.heredocs = [])).push(''); out.blind.push(''); }   // a heredoc with no line after it
   return out;
@@ -387,12 +397,66 @@ const SHELL_OWN = new Set(['.', ':', 'source', 'eval', 'exec', 'exit', 'return',
   'time', 'noglob', 'nocorrect', '-', '[[', 'function', 'select']);
 /** r9: the words that make a line UNSURE wherever they stand (a function's body too) — it sets the shell's options or
  *  traps (`set -e` / `-u` / `-o errexit` / zsh's `setopt err_exit`: any later command may end the shell), sources or
- *  evals text the line cannot read, or may change what `wait` / `kill` mean (`alias`, `enable`, `disable`, `builtin`) */
-const UNSURE = new Set(['set', 'setopt', 'unsetopt', 'shopt', 'emulate', 'trap', 'source', '.', 'eval', 'alias', 'enable', 'disable', 'builtin']);
-/** r9: a word that EXPANDS NOTHING — no `$` (a parameter, a span, arithmetic: `$(( 1/0 ))` ends both shells), no glob
- *  character (zsh ends the shell on a pattern that matches nothing; `#` / `^` under EXTENDED_GLOB), no `~` and no
- *  leading `=` (zsh: an unknown user / command ends it) */
-const quiet = (w) => !/[$*?[~#^]/.test(w.v) && w.v[0] !== '=';
+ *  evals text the line cannot read, or may change what `wait` / `kill` mean (`alias`, `enable`, `disable`, `builtin`);
+ *  r10: or what a word runs (`hash`, `functions`, `autoload`, `zmodload`) */
+const UNSURE = new Set(['set', 'setopt', 'unsetopt', 'shopt', 'emulate', 'trap', 'source', '.', 'eval', 'alias', 'enable', 'disable', 'builtin',
+  'hash', 'functions', 'autoload', 'zmodload']);
+/** r10: a word that EXPANDS NOTHING (r9's `quiet`, closed tighter): no `$` (a parameter, a span, arithmetic — `$(( 1/0 ))`
+ *  ends both shells), no glob or pattern character (zsh ends the shell on a pattern that matches nothing — `*` `?` `[`,
+ *  `#` / `^` / `~` under EXTENDED_GLOB, a `<1-9>` range), no brace expansion, no `~` and no leading `=` (zsh: an unknown
+ *  user / command ends it), no quote or escape left in it */
+const plainWord = (w) => !/[$*?[\]~#^{}<>()|&;!`\\"']/.test(w.v) && w.v[0] !== '=';
+/** r10: THE NAMES THE SHELLS KEEP — a line that WRITES one (`x=…`, `x+=…`, `x[k]=…` as a word anywhere, an operand of
+ *  WRITERS, `${x:=…}`) ends nothing: zsh 5.9's own parameters (every module loaded: `typeset` flags special / read-only /
+ *  integer / float / tied) and bash 5.3's (`env -i bash -c 'compgen -v'`), with the ones both manuals name that are unset
+ *  until set. Writing one may END the shell before a `wait` (zsh: `read status`, `printf -v status`, `print -v status` —
+ *  read-only; `read UID` — it tries to change user; `SECONDS=1/0` — arithmetic; both: `UID=0`), set an option
+ *  (`options[errexit]=on`), change what a word runs (`PATH`, `path`, `commands`, `aliases`, `functions`, `EXECIGNORE`) or
+ *  how `$!` splits (`IFS=0123456789; C & wait $!` — bash's `wait` returns at once, the CLI outlives). A hook array
+ *  (`chpwd_functions` …) too (`reserved`). */
+const RESERVED = new Set(('_ ARGC BASH BASHOPTS BASHPID BASH_ALIASES BASH_ARGC BASH_ARGV BASH_ARGV0 BASH_CMDS BASH_COMMAND BASH_COMPAT BASH_ENV ' +
+  'BASH_EXECUTION_STRING BASH_LINENO BASH_LOADABLES_PATH BASH_MONOSECONDS BASH_SOURCE BASH_SUBSHELL BASH_VERSINFO BASH_VERSION BASH_XTRACEFD CDPATH ' +
+  'CHILD_MAX COLUMNS COMPREPLY COMP_WORDBREAKS COPROC CPUTYPE DIRSTACK DIRSTACKSIZE EGID ENV EPOCHREALTIME EPOCHSECONDS ERRNO EUID EXECIGNORE FCEDIT ' +
+  'FIGNORE FPATH FUNCNAME FUNCNEST GID GLOBIGNORE GLOBSORT GROUPS HISTCHARS HISTCMD HISTCONTROL HISTFILE HISTFILESIZE HISTIGNORE HISTSIZE ' +
+  'HISTTIMEFORMAT HOME HOST HOSTFILE HOSTNAME HOSTTYPE IFS IGNOREEOF INPUTRC KEYBOARD_HACK KEYTIMEOUT LANG LINENO LINES LISTMAX LOGCHECK LOGNAME ' +
+  'MACHTYPE MAIL MAILCHECK MAILPATH MANPATH MAPFILE MATCH MBEGIN MEND MODULE_PATH NULLCMD OLDPWD OPTARG OPTERR OPTIND OSTYPE PATH PERIOD PIPESTATUS ' +
+  'POSIXLY_CORRECT PPID PROMPT PROMPT2 PROMPT3 PROMPT4 PROMPT_COMMAND PROMPT_DIRTRIM PS0 PS1 PS2 PS3 PS4 PSVAR PWD RANDOM READNULLCMD REPLY ' +
+  'REPORTTIME SAVEHIST SECONDS SHELL SHELLOPTS SHLVL SPROMPT SRANDOM TERM TIMEFMT TIMEFORMAT TMOUT TMPDIR TMPPREFIX TRY_BLOCK_ERROR ' +
+  'TRY_BLOCK_INTERRUPT TTY TTYIDLE UID USERNAME VENDOR WATCH WORDCHARS ZCURSES_COLORS ZCURSES_COLOR_PAIRS ZDOTDIR ZFTP_SESSION ZFTP_TMOUT ' +
+  'ZSH_ARGZERO ZSH_EVAL_CONTEXT ZSH_EXECUTION_STRING ZSH_NAME ZSH_PATCHLEVEL ZSH_SCRIPT ZSH_SUBSHELL ZSH_VERSION aliases argv auto_resume builtins ' +
+  'cdpath commands dirstack dis_aliases dis_builtins dis_functions dis_functions_source dis_galiases dis_patchars dis_reswords dis_saliases ' +
+  'epochtime errnos fignore fpath funcfiletrace funcsourcetrace funcstack functions functions_source functrace galiases histchars history ' +
+  'historywords jobdirs jobstates jobtexts keymaps langinfo mailpath manpath mapfile match mbegin mend module_path modules nameddirs options ' +
+  'parameters patchars path pipestatus prompt psvar reply reswords saliases signals status sysparams termcap terminfo userdirs usergroups watch ' +
+  'widgets zcurses_attrs zcurses_colors zcurses_keycodes zcurses_windows zgdbm_tied zle_bracketed_paste zle_highlight zsh_eval_context ' +
+  'zsh_scheduled_events').split(' '));
+const reserved = (n) => RESERVED.has(n) || /_functions$/.test(n);
+/** r10: the commands that DECLARE a name (after one, an assignment may meet a read-only or an integer name —
+ *  `readonly x; … x=1` ends zsh) and the ones that WRITE the names they are given */
+const DECLARE = new Set(['local', 'declare', 'typeset', 'export', 'readonly', 'integer', 'float', 'private']);
+const WRITERS = new Set(['read', 'printf', 'print', 'getopts', 'vared', 'mapfile', 'readarray', 'zparseopts', ...DECLARE]);
+/** r10: THE ALLOWLIST — the ONLY commands that may stand BETWEEN a lone job and its reaper: shell builtins (and `sleep`)
+ *  that expand nothing and cannot end the shell, written as the bare word, every word `plainWord`, redirected (if at all)
+ *  to /dev/null or a descriptor. [word, its operands, the shells' truth behind the row — test-channel-touch ⑬'s rows:
+ *  bash · zsh · zsh in the agent tool's form, every one ENDED]. Anything else between — an external command
+ *  (`python3 -c "…os.kill(os.getppid(), 9)"` ends its parent: x9-38 outlives in both shells), a reserved word
+ *  (`repeat 1 exit`: x9-31, `time`), a builtin that writes a name (`read status`, `printf -v status`: x9-36, x9-39), a
+ *  pattern (`echo a<1-9>b`: x9-32) — is a STOP. A comment or an empty line is no command at all (a9-01, a9-02). */
+const BETWEEN = new Map([
+  ['true', [() => true, 'r9: C & true ⏎ wait']],
+  ['false', [() => true, 'A0 control: C & false; wait']],
+  [':', [() => true, 'r10: C & : plain; wait']],
+  ['echo', [() => true, 'r9: C & echo started; wait · a9-03 · r10: C & echo hi >&2; wait · C & echo hi > /dev/null; wait']],
+  ['sleep', [(a) => a.length === 1 && /^\d+(\.\d+)?$/.test(a[0]), 'a9-05 C & sleep 1; wait · 39: C & sleep 1 & wait (a job between) · r10: C & sleep 0.1 & wait']],
+  ['cd', [(a) => a.length === 1 && !/^[-+]/.test(a[0]), 'r9: C & cd /; wait · S2 C & cd /nonexistentzz; wait (cd fails, the shell goes on)']],
+]);
+/** r10: …and an ASSIGNMENT-only command (`x=1 y=two`) of plain words to LOWER-case names the shells do not keep, in a
+ *  line that declares nothing — 'r10: C & x=1; wait', 'r10: C & x=1 y=two; wait' (every upper-case name may be one of
+ *  either shell's own: `UID=0` and `SECONDS=1/0` end zsh) */
+const PLAIN_SET = /^([a-z_][a-z0-9_]*)=/;
+/** r10: a word that WRITES a name — `x=…`, `x+=…`, `x[k]=…` — and a `${x:=…}` / `${x=…}` anywhere in a word */
+const NAME_SET = /^([A-Za-z_][A-Za-z0-9_]*)(\[[^\]]*\])?\+?=/;
+const SETS_IN_WORD = /\$\{[#!]?[A-Za-z_][A-Za-z0-9_]*(\[[^\]]*\])?:{0,2}=/;
 /** r9: THE JOBS A LINE ENDS ITSELF — STOP READING THE SHELL: a line ENDS a job only in the PLAINEST shape; everything
  *  else LINGERS (unsure ⇒ it lingers — r6, r7 and r8 each read more of the shell and each added a regression the next
  *  round found; the question «does the CLI's job outlive its call?» needs no shell interpreter). A job ends only when
@@ -400,34 +464,69 @@ const quiet = (w) => !/[$*?[~#^]/.test(w.v) && w.v[0] !== '=';
  *  - THE JOB is a LONE command at the line's top level (`words.lone` 'job': the only command of its list — no `&&` /
  *    `||`, no pipe — outside every group, branch, loop, subshell and function body) sent to the background by its own
  *    single `&` (never zsh's `&!` / `&|`), with nothing but assignments before its command word (no wrapper, no `!`,
- *    no `coproc`), its command word no SHELL_OWN word and no function the line defines, no process substitution;
+ *    no `coproc`), its command word no SHELL_OWN word, no process substitution;
  *  - THE REAPER is a later LONE foreground `wait` (no operand — every such job before it) or `wait $!` / `kill $!` /
  *    `kill -TERM $!` (the latest job, only while no other `&` came after it), nothing before its word, its
- *    redirections to /dev/null or a descriptor only;
- *  - BETWEEN them stand only other such jobs and LONE foreground commands that expand nothing (every word and
- *    redirection target `quiet`; no assignment, heredoc, here-string or process substitution), their command word no
- *    SHELL_OWN word and no function the line defines; no `(( … ))` (`stops`). Anything else — a definition, a call, a
- *    pipe, a branch, a group, a wrapper, `exit`, another reaper — is a STOP: no job launched before it ends after it;
- *  - THE LINE is not UNSURE: no UNSURE word anywhere in it, no function named `wait` / `kill` — such a line ends
- *    nothing (endJobs returns false; shellCommands then ends no job of a span inside it either).
- *  Marks `job.ended` = 'wait' | 'kill' (commandsRun: a `kill` reaches the job's own command only). PURE. */
-function endJobs(cmds, stops = []) {
-  const defs = new Set();
-  for (const c of cmds) { const w = c.words; if (w.def) defs.add(w[w.length - 1].v); else if (w.length > 1 && !w[0].q && w[0].v === 'function') defs.add(w[1].v); }
-  if (REAPERS.some((r) => defs.has(r)) || cmds.some((c) => { const cw = commandWord(c.words); return !!cw && UNSURE.has(cw.base); })) return false;
-  const runs = (c, cw) => !!cw && cw.split === undefined && !SHELL_OWN.has(cw.base) && !defs.has(cw.base) && !c.words.procsub;
-  const quietLine = (c) => !c.words.heredocs && !c.words.herestrings && c.words.every(quiet) && (c.words.targets || []).every(quiet);
-  let open = [], last = null, k = 0;
+ *    redirections to /dev/null or a descriptor only; r10: a `kill` reaches the job's own process only — it ends the job
+ *    only when that process IS the CLI (`./read-all.sh &`, `python3 x.py &`, `node poll.js &` … `kill $!` leaves the
+ *    CLI they started running: K1–K5); a `wait` waits for the whole job;
+ *  - BETWEEN them stand only rows of the allowlist (BETWEEN, PLAIN_SET) and other jobs whose command is the CLI or a
+ *    row of the allowlist (`safe`) — r10: a job with any other command (it may end the shell: `python3 kill-parent.py &`)
+ *    leaves no job before it to a reaper and lets no job beside it end while it runs. Anything else is a STOP: no job
+ *    launched before it ends after it;
+ *  - THE LINE is not UNSURE: no UNSURE word anywhere in it; r10: no function definition (zsh's `TRAPCHLD() { exit; }`
+ *    ends the shell when a child ends; a definition may shadow a word of the allowlist), no arithmetic (`(( … ))`,
+ *    `$(( … ))` may assign), no write of a RESERVED name, nothing sent to the background but its LONE top-level jobs (a
+ *    list, a pipeline, a group, a subshell, a function's or a span's own job, a coproc, a disowned job may outlive every
+ *    reaper and end the shell while the CLI runs: `( sleep 1; kill $$ ) &`), and nothing but `safe` commands in the
+ *    spans and heredoc substitutions of its jobs (`C "$(sleep 1; kill $$)" &`) — such a line ends nothing (endJobs
+ *    returns false; shellCommands then ends no job of a span inside it either).
+ *  `all` = every command of the line (its spans' too). Marks `job.ended` = 'wait' | 'kill' (commandsRun: a `kill` reaches
+ *  the job's own command only). PURE. */
+function endJobs(cmds, stops = [], all = cmds) {
+  if (stops.length) return false;
+  let declares = false;
   for (const c of cmds) {
-    const at = c.words[0].at, cw = commandWord(c.words), how = c.words.lone;
-    if (k < stops.length && stops[k] < at) { open = []; last = null; while (k < stops.length && stops[k] < at) k++; }
-    if (how === 'job' && runs(c, cw) && c.words.slice(0, cw.k).every((w) => ASSIGN_RE.test(w.v))) { last = c.words.jobs[c.words.jobs.length - 1]; open.push(last); continue; }
-    if (how === 'fg' && runs(c, cw) && cw.k === 0 && quietLine(c)) continue;   // a plain command: nothing changes
-    if (how === 'fg' && cw && cw.k === 0 && REAPERS.includes(cw.base) && !c.words.procsub && (c.words.targets || []).every((w) => /^(\/dev\/null|\d+|-)$/.test(w.v))) {
-      const args = c.words.slice(cw.k + 1).map((w) => w.v);
-      if (cw.base === 'wait' && !args.length) { for (const j of open) j.ended = 'wait'; open = []; continue; }
+    const w = c.words, cw = commandWord(w), ws = [...w, ...(w.targets || [])];
+    if (w.def || (w.length > 1 && !w[0].q && w[0].v === 'function')) return false;   // r10: a definition
+    if (cw && UNSURE.has(cw.base)) return false;
+    if (ws.some((x) => x.v.includes('$(())') || SETS_IN_WORD.test(x.v) || ((m) => !!m && reserved(m[1]))(NAME_SET.exec(x.v)))) return false;
+    if (cw && WRITERS.has(cw.base) && w.slice(cw.k + 1).some((x) => reserved(x.v.replace(/[[=?+][^]*$/, '')))) return false;
+    if (cw && DECLARE.has(cw.base)) declares = true;
+  }
+  // r10: the zsh range `<n-m>` / `<->` — the scan reads it as redirections (`echo a<1-9>b`: a target `1-9`)
+  const ranges = (c) => { const ws = [...c.words, ...(c.words.targets || [])]; return /<\d*-/.test(c.src.slice(Math.min(...ws.map((x) => x.at)), Math.max(...ws.map((x) => x.end)))); };
+  const clean = (c) => !c.words.heredocs && !c.words.herestrings && !c.words.procsub && !ranges(c);
+  // a STEP of the allowlist: a row's bare word with plain operands, or plain assignments
+  const step = (c, cw) => {
+    if (!clean(c) || !c.words.every(plainWord) || !(c.words.targets || []).every((x) => /^(\/dev\/null|\d+)$/.test(x.v))) return false;
+    if (!cw) return !declares && c.words.every((x) => { const m = PLAIN_SET.exec(x.v); return !!m && !reserved(m[1]); });
+    const row = BETWEEN.get(c.words[0].v);
+    return cw.k === 0 && !!row && row[0](c.words.slice(1).map((x) => x.v));
+  };
+  const runs = (c, cw) => !!cw && cw.split === undefined && !SHELL_OWN.has(cw.base) && !c.words.procsub;
+  const lone = cmds.filter((c) => c.words.lone === 'job'), tops = new Set(lone.map((c) => c.words.jobs[c.words.jobs.length - 1]));
+  // `safe` — what may run BESIDE a job and leave its reaping sure: the CLI itself or a row of the allowlist
+  const safe = (c, cw) => !!cw && ((cw.base === CLI && c.words.slice(0, cw.k).every((x) => ASSIGN_RE.test(x.v))) || step(c, cw));
+  // r10: a background the line cannot follow — a job that is no lone top-level one, or a command that runs beside the line
+  // inside a lone job (a span of its words, its heredoc's substitutions: `C "$(sleep 1; kill $$)" &`) and is not `safe`
+  for (const c of all) if (c.words.bg && (!(c.words.jobs || []).every((j) => tops.has(j)) || (!lone.includes(c) && !safe(c, commandWord(c.words))))) return false;
+  let open = [], last = null;
+  for (const c of cmds) {
+    const cw = commandWord(c.words), how = c.words.lone;
+    if (how === 'job' && runs(c, cw) && c.words.slice(0, cw.k).every((x) => ASSIGN_RE.test(x.v))) {
+      const j = { job: c.words.jobs[c.words.jobs.length - 1], safe: safe(c, cw), cli: cw.base === CLI };
+      if (!j.safe) open = [];   // r10: it may end the shell: no job before it ends
+      else if (open.some((o) => !o.safe)) { last = null; continue; }   // one that may end the shell runs beside it
+      open.push(j); last = j;
+      continue;
+    }
+    if (how === 'fg' && step(c, cw)) continue;   // a step of the allowlist: nothing changes
+    if (how === 'fg' && cw && cw.k === 0 && REAPERS.includes(cw.base) && clean(c) && (c.words.targets || []).every((x) => /^(\/dev\/null|\d+|-)$/.test(x.v))) {
+      const args = c.words.slice(cw.k + 1).map((x) => x.v);
+      if (cw.base === 'wait' && !args.length) { for (const o of open) o.job.ended = 'wait'; open = []; continue; }
       const by = (args.length === 1 || (cw.base === 'kill' && args.length === 2 && args[0] === '-TERM')) && BANG.includes(args[args.length - 1]);
-      if (by && last && open.includes(last)) { last.ended = cw.base; open = open.filter((j) => j !== last); continue; }
+      if (by && last && open.includes(last) && (cw.base === 'wait' || last.cli)) { last.job.ended = cw.base; open = open.filter((o) => o !== last); continue; }
     }
     open = []; last = null;   // a STOP
   }
@@ -556,5 +655,5 @@ function channelsRuns(cmd) { return cliRuns(commandsRun(cmd)); }
 
 module.exports = {
   CLI, SHELLS, OPENERS, DATA_HEADS, WRAPPERS, SCRIPT_RUNNERS, FIND_RUNS, ENV_SPLIT, SCAN_MAX, GROUP_OPEN, GROUP_CLOSE, RUNS_A_COMMAND, REAPERS, SHELL_OWN, UNSURE,
-  spanEnd, shellCommands, commandWord, endJobs, shellScripts, commandsRun, cliRuns, channelsRuns, searchWords,
+  RESERVED, BETWEEN, spanEnd, shellCommands, commandWord, endJobs, shellScripts, commandsRun, cliRuns, channelsRuns, searchWords,
 };
