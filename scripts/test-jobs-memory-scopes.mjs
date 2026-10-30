@@ -23,7 +23,8 @@
 //            main whose cleanup a second signal cuts: the wrapper signalled alone, the engine's stop — the pod's rung and the
 //            cgroup rung); ROUND 10: ㊺ A STOP GOES ONCE (Stop pressed twice; an agent's SIGINT, then the person's Stop; a Stop
 //            while the wrapper drains what an ended task left; a SIGTERM to the wrapper then — both rungs); ㊻ THE MAIN IS THE
-//            HANDLE the wrapper spawned (a reaped main's pid, held by another process since, is never signalled)
+//            HANDLE the wrapper spawned (a reaped main's pid, held by another process since, is never signalled); ROUND 10c:
+//            ㊱ at 0.1 s too — what got less than the full grace is counted OF WHAT IT LEFT, never more than it left
 //   §4 REAL  the park law through the engine's own doors (a boot replay counts like a run; a restart resets it — a service, a cron)
 //   §5 REAL  the boot's judge over a fake cgroup (the instance's OOM count rose; a rolling update; a SIGKILL from outside)
 // RED on ef0012b5 (round 5): ㉑ the new run killed at the first stop's grace, labelled; ㉒ the deaf member survived the stop,
@@ -39,7 +40,10 @@
 // 8ad58d8b (round 9, the hotfix's first cut): ㊺ a second signal on both rungs — the second press, the person's Stop after an
 // agent's SIGINT, a Stop while a task's leftover drained (the engine's group signal again); a SIGTERM to the wrapper then, on
 // the cgroup rung (the drain's `systemctl kill` unrecorded) — code 143 mid-cleanup; ㊻ the holder of the reaped main's pid
-// SIGTERMed (+0.5 s), recorded «mainBy wrapper». Earlier rounds: the report.
+// SIGTERMed (+0.5 s), recorded «mainBy wrapper». RED on 63a311ad0 (round 10, the hotfix's second cut): ㊱ «short 4» of n 3 —
+// `short` judged by 10 % of the grace over every SIGTERM of the run: the escapee the stop step reached 30–60 ms in and its
+// first child (ended before the drain) counted; at 0.1 s always (10 ms), at 0.4 s once the scan passes 40 ms (115/2 here, 56
+// ms). Earlier rounds: the report.
 // Load: each job allocates ≤ 512 MB once (most far less, the cgroup legs stop at 256 MB), no busy loop; the legs run at once
 // (the longest: ㊱'s 10 s grace — the production one — about 11 s); scratch dataDirs under os.tmpdir(), one per leg.
 import fs from 'node:fs';
@@ -934,7 +938,7 @@ leg('§3 REAL ㉟ A STOP\'S INTENT IS WRITTEN BEFORE ITS SIGNAL — a pod\'s ser
   stopEngine(E);
 });
 
-leg('§3 REAL ㊱ A STOP HAS ONE CLOCK — a pod\'s service whose main is deaf to the stop and whose setsid process forks again on its SIGTERM, at the PRODUCTION ratio (the wrapper\'s grace IS the engine\'s, its kill step a second later — no override; 0.4 s, 2 s and 10 s at once): the setsid process hears the stop with the main, what it forks after gets only what is LEFT of the grace and is said, and the wrapper ends — exit.json written, all of it dead — before the engine\'s kill step (e7147b71: a fresh grace at the drain ran to twice the grace, the engine killed the wrapper mid-drain — no exit.json, the escapee alive for ever; 336761e5: SIGTERM and SIGKILL back to back)', async (ok) => {
+leg('§3 REAL ㊱ A STOP HAS ONE CLOCK — a pod\'s service whose main is deaf to the stop and whose setsid process forks again on its SIGTERM, at the PRODUCTION ratio (the wrapper\'s grace IS the engine\'s, its kill step a second later — no override; 0.1 s, 0.4 s, 2 s and 10 s at once): the setsid process hears the stop with the main, what it forks after gets only what is LEFT of the grace and is said — of what it LEFT, never more than it left — and the wrapper ends — exit.json written, all of it dead — before the engine\'s kill step (e7147b71: a fresh grace at the drain ran to twice the grace, the engine killed the wrapper mid-drain — no exit.json, the escapee alive for ever; 336761e5: SIGTERM and SIGKILL back to back; 63a311ad0: «short» judged by a clock — 10 % of the grace — over every SIGTERM of the run: the escapee our scan reached 30–60 ms into a 0.1 s or 0.4 s grace and its first child, ended before the drain, counted — «short 4» of n 3, the cut of 2.369.364)', async (ok) => {
   if (!realOf('prlimit') || !realOf('setsid')) { skip++; ok.say('  - SKIP the one-clock leg: no prlimit or setsid here'); return; }
   const one = async (grace) => {
     const dir = scratch(), termF = path.join(dir, 'esc.term'), pidF = path.join(dir, 'esc.pid');
@@ -961,9 +965,9 @@ leg('§3 REAL ㊱ A STOP HAS ONE CLOCK — a pod\'s service whose main is deaf t
     stopEngine(E);
     return { grace, step, termIn: terms.length ? terms[0] - t0 : -1, deadIn: deadAt ? deadAt - t0 : -1, exitIn: exitAt ? exitAt - t0 : -1, goneIn: goneAt ? goneAt - t0 : -1, escAlive, stopBy: ex.stopBy || null, left: ex.left ? { ...ex.left, pids: undefined } : null, end: (snap.run && snap.run.endWords) || '' };
   };
-  for (const r of await Promise.all([400, 2000, 10000].map(one))) {
+  for (const r of await Promise.all([100, 400, 2000, 10000].map(one))) {
     ok(r.exitIn > 0 && r.exitIn < r.step && r.goneIn > 0 && r.goneIn < r.step && !r.escAlive && r.termIn >= 0 && r.termIn < 300 && r.deadIn >= r.grace * 0.9 && r.deadIn < r.step && r.stopBy === 'engine' && !!r.left && r.left.cleared > 0 && r.left.escaped >= 1 && r.left.short >= 1 && r.left.short < r.left.n && /\(\d+ process(es)? got less than the full grace\)$/.test(r.end),
-      `grace ${r.grace / 1000} s, the engine's kill step at ${r.step / 1000} s: the escapee's SIGTERM ${r.termIn} ms after the stop (with the main), its end ${r.deadIn} ms; exit.json at ${r.exitIn} ms, the wrapper gone at ${r.goneIn} ms — before the step; «${r.end}» (e7147b71 at 2 s and 10 s: no exit.json, the escapee alive at the end)`, r);
+      `grace ${r.grace / 1000} s, the engine's kill step at ${r.step / 1000} s: the escapee's SIGTERM ${r.termIn} ms after the stop (with the main), its end ${r.deadIn} ms; exit.json at ${r.exitIn} ms, the wrapper gone at ${r.goneIn} ms — before the step; «${r.end}» (e7147b71 at 2 s and 10 s: no exit.json, the escapee alive at the end; 63a311ad0: «short 4» of n 3 — at 0.1 s always, at 0.4 s once the scan passes 40 ms)`, r);
   }
 });
 

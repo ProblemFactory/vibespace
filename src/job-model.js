@@ -299,6 +299,13 @@ function leftRecord(l) {
   const short = (cleared || !l.kept) && Number.isInteger(l.short) && l.short > 0 ? Math.min(l.short, n) : 0;
   return { n, ...(l.kept ? { kept: true } : l.force ? { force: true } : {}), ...(escaped ? { escaped } : {}), ...(pids.length ? { pids, boot: typeof l.boot === 'string' ? clip(l.boot, 64) : '' } : {}), ...(recorded ? { recorded } : {}), ...(cleared ? { cleared } : {}), ...(gone ? { gone } : {}), ...(short ? { short } : {}) };
 }
+/** round 10c: THE RECORD'S COUNTS ARE SETS — of what a job left, how many got less than the full grace is never more than it
+ *  left (`short` ≤ `n`); a record that says more is a bug in its writer, named for the hub's log ('' = sound). leftRecord clamps
+ *  it all the same — the words never say more than were left */
+function leftRecordFault(l) {
+  if (!l || typeof l !== 'object' || !Number.isInteger(l.n) || l.n < 0 || !Number.isInteger(l.short) || l.short <= l.n) return '';
+  return `its exit record counts more than it left (short ${l.short} of n ${l.n}) — a bug in the wrapper's record, said as ${l.n}`;
+}
 /** «the job left 1 process running — it was stopped; to keep a daemon, run it as a service job» · «… stopped by force …» ·
  *  «it left 1 process running — kept: a service's own until it is stopped or started again» · round 6: «1 process left its
  *  group — not stopped; run it as a service job» (a task's setsid escapee) · «… (64 of 70 recorded)» · once the engine stopped
@@ -909,7 +916,7 @@ module.exports = {
   vetSpec, jobCommandParts, VENDOR_PATTERNS,
   parseCron, nextFire, validateSchedule, AGENT_MIN_EVERY_MS,
   SUPERVISE, onServiceExit, resolveName,
-  MEMORY, MEMORY_CAUSES, MEMORY_RUNGS, MEMORY_PARK_TEXT, memoryValueVerdict, memoryMbOf, instanceCapOf, limitHolder, capWords, boundRecord, boundWords, leftRecord, leftWords, runEndWords, memoryWords, memoryEndWhat, onMemoryEnd, bootEndCause,
+  MEMORY, MEMORY_CAUSES, MEMORY_RUNGS, MEMORY_PARK_TEXT, memoryValueVerdict, memoryMbOf, instanceCapOf, limitHolder, capWords, boundRecord, boundWords, leftRecord, leftRecordFault, leftWords, runEndWords, memoryWords, memoryEndWhat, onMemoryEnd, bootEndCause,
   renderJobsDigest, renderJobsUpdate, fitDigest, jobLine,
   validatePanel, validateAnswers, nextInteractionSeq, answerVersionVerdict, CONTEXT_PAYLOAD_CAP, clip,
   notifyEffective, notifyUserOf, spawnTaskOf, storedAction, renderOwnerNotify, renderNotifStash, FOR_YOU_WORDS, forYouCopy, mintedFor, legacyCopyFact, labelVia,

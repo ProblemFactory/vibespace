@@ -668,6 +668,21 @@ leg('§3 IN-PROCESS ㊼ A STOP STEP IS IDEMPOTENT, AND A STOP GOES ONCE — Stop
   stopEngine(E);
 });
 
+leg('§3 IN-PROCESS ㊽ A COUNT IN THE RECORD IS THE SIZE OF A SET — of what a job left, how many got less than the full grace is never more than it left: a record that says more is a bug in its writer, said in the hub\'s log ONCE, and its words say no more than were left (63a311ad0: «short 4» of n 3 clamped in silence — the cut of 2.369.364)', async (ok) => {
+  const F = M.leftRecordFault, dir = tmp('vs-jobs-mem-'), E = engine(dir), from = logs.length;
+  const bad = deadJob(dir, 'jb-short-over', { exit: { code: 0, endedAt: Date.now(), left: { n: 3, force: true, short: 4 } } });
+  const sound = deadJob(dir, 'jb-short-ok', { exit: { code: 0, endedAt: Date.now(), left: { n: 3, force: true, short: 2 } } });
+  E.jobs.set(bad.id, bad); E.jobs.set(sound.id, sound);
+  await E._sweep();
+  await until(() => lastRun(bad).endedAt && lastRun(sound).endedAt, 2000, 5);
+  const said = (j) => logs.slice(from).filter((x) => x.includes(j.id) && /counts more than it left/.test(x));
+  const words = M.runEndWords(lastRun(bad)) || '';
+  ok(typeof F === 'function' && /short 4 of n 3/.test(F({ n: 3, kept: true, cleared: 1, short: 4 })) && F({ n: 3, short: 3 }) === '' && F({ n: 3 }) === '' && F(null) === ''
+    && said(bad).length === 1 && said(sound).length === 0 && (lastRun(bad).left || {}).short === 3 && (lastRun(sound).left || {}).short === 2 && /\(3 processes got less than the full grace\)/.test(words),
+    `a record past its set is said once in the hub's log — «${(said(bad)[0] || '').replace(/^\[jobs\] \S+ /, '')}» — and its words say no more than it left: «${words}»; a sound record says nothing (63a311ad0: no such line — clamped in silence)`, { bad: said(bad), sound: said(sound), left: lastRun(bad).left });
+  stopEngine(E);
+});
+
 leg('§1b PURE ㊴ THE SCAN SPENDS ITS BOUND WHERE IT MATTERS — the job\'s own candidates (the pids its record names, and their children) first, outside the bound; the rest newest first; an unreadable environ told by its OWNER (e7147b71: the bound spent in readdir order — a recorded process past it never found)', async (ok) => {
   const root = tmp('vs-jobs-mem-proc-'), mark = 'VIBESPACE_JOB_ID=jb-scan0001', me = process.getuid();
   const proc = (pid, { env = '', uid = -1, unreadable = false, children = null } = {}) => { // a fake /proc row: stat (field 22 = 500), environ; status, children where read

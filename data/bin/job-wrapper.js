@@ -553,6 +553,11 @@ async function forceScope(why) {
 // code 143); true when it was delivered
 const termed = new Map();
 const termKey = ([pid, st]) => `${pid}:${st}`;
+// round 10c: what the STOP STEP itself reached (the engine's group signal, our own delivery to the main, the group, a service's
+// escapees) — those heard the stop; a process the record counts that is not here was first seen after it and got what was LEFT
+// of the grace. Never a clock (r10 judged «after the stop» by 10 % of the grace: an escapee our /proc scan reached 49 ms into a
+// 0.4 s grace was counted short — the cut's red)
+let heardAtStop = new Set();
 const termOnce = (p, sig = 'SIGTERM') => { if (termed.has(termKey(p)) || !same(p)) return false; termed.set(termKey(p), Date.now()); try { process.kill(p[0], sig); return true; } catch { return false; } };
 const rowOf = (pid) => { const r = pid ? statOf(pid) : null; return r && r[0] !== 'Z' ? [Number(pid), Number(r[19]), Number(r[2])] : null; }; // [pid, start, pgid]
 // round 10: THE MAIN IS THE HANDLE WE SPAWNED — never a pid read again: signalled only while the handle is live (exitCode and
@@ -612,6 +617,7 @@ function onStop(sig, at, by) {
     // heard the stop with us (the engine signals it) — its grace runs from the stop; a SERVICE's processes that left the group
     // (its mark) hear it NOW, with the main — round 6 signalled them only once the main ended, against what was left of the grace
     if (keeps) for (const p of escapedOf()) termOnce(p);
+    heardAtStop = new Set(termed.keys());
     const t = setTimeout(() => { if (exited) return; if (!forced) forced = `it did not end${on} in ${stopMs / 1000} s — its process group was killed`; try { child.kill('SIGKILL'); } catch { } }, left); t.unref?.();
     return;
   }
@@ -695,11 +701,14 @@ async function drainGroup() {
   const left = groupLeft();
   const out = escapedOf(), mine = keeps && stopping; // a service STOPPED: what it kept is its own, stopped with it — outside its group too
   if (!left.length && !out.length) return {};
-  const rows = keeps ? [...left, ...out] : left, n = rows.length;
-  const kept = keeps ? { kept: true, pids: rows.slice(0, 64), boot: bootId(), ...(out.length ? { escaped: out.length } : {}), ...(n > 64 ? { recorded: 64 } : {}) } : null;
+  // round 10c: EVERY COUNT IN THE RECORD IS THE SIZE OF ONE SET of processes (`pid:start`) — one both scans saw (it left our group
+  // between them) is one process, never two
+  const inGroup = new Set(left.map(termKey)), outside = out.filter((p) => !inGroup.has(termKey(p)));
+  const rows = keeps ? [...left, ...outside] : left, n = rows.length;
+  const kept = keeps ? { kept: true, pids: rows.slice(0, 64), boot: bootId(), ...(outside.length ? { escaped: outside.length } : {}), ...(n > 64 ? { recorded: 64 } : {}) } : null;
   if (keeps && !stopping) return { left: { n, ...kept } }; // kept: named by identity for the engine (its stop, park, removal, next start)
-  if (!n) return { left: { n: 0, escaped: out.length } }; // a task's that left its group: said, not stopped
-  if (mine) left.push(...out);
+  if (!n) return { left: { n: 0, escaped: outside.length } }; // a task's that left its group: said, not stopped
+  if (mine) left.push(...outside);
   // round 7: what our SIGTERM reaches only now hears it now (the group's and a stopped service's escapees' heard it at the stop).
   // Round 8: A STOP HAS ONE CLOCK — its grace runs from the stop, for every process: one first seen at the drain gets what is LEFT
   // of it, never a fresh grace (round 7's per-process deadline ran to twice the grace, past the engine's kill step a second after
@@ -717,14 +726,15 @@ async function drainGroup() {
     if (!more.length) break;
     for (const p of more) if (killNow(p)) killed.add(termKey(p));
   }
-  const still = killed.size, tol = Math.min(1000, stopMs / 10);
-  // what got less than the full grace: our SIGTERM came after the stop (it may have ended on it — its grace was cut all the same),
-  // or none came before its kill
-  const short = stopping ? [...termed.values()].filter((at) => at - stopAt > tol).length + [...killed].filter((k) => !termed.has(k)).length : 0;
+  const still = killed.size;
   if (still && !forced) forced = `${still} process${still === 1 ? '' : 'es'} it left ${still === 1 ? 'was' : 'were'} still running ${stopMs / 1000} s after ${stopping ? 'the stop' : 'its SIGTERM'} — killed`;
-  const seen = new Set(rows.map(termKey)), all = n + [...killed].filter((k) => !seen.has(k)).length; // forked while it drained: counted with the rest
+  const counted = new Set([...rows.map(termKey), ...killed]), all = counted.size; // forked while it drained: counted with the rest
+  // what got less than the full grace — OF WHAT IT LEFT (round 10c: r10 counted every SIGTERM of the run, one that ended before
+  // the drain too — 4 of 3): the stop step never reached it (first seen after it: our SIGTERM came at the drain — it may have ended
+  // on it, its grace was cut all the same — or none came before its kill)
+  const short = stopping ? [...counted].filter((k) => !heardAtStop.has(k)).length : 0;
   if (mine) return { left: { n: all, ...kept, ...(all > kept.pids.length && !kept.recorded ? { recorded: kept.pids.length } : {}), cleared: Date.now(), ...(short ? { short } : {}) } }; // recorded the way an end records them — and stopped with it
-  return { left: { n: all, ...(still ? { force: true } : {}), ...(out.length ? { escaped: out.length } : {}), ...(short ? { short } : {}) } };
+  return { left: { n: all, ...(still ? { force: true } : {}), ...(outside.length ? { escaped: outside.length } : {}), ...(short ? { short } : {}) } };
 }
 
 async function ended(code, signal) {

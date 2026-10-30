@@ -1946,7 +1946,8 @@ class JobManager {
     // in exit.json; else the engine's own kill step, its grace said) — never inferred from how the job died; `left` is what
     // the job left running (a task's: stopped; a service's: kept — the ruling)
     const forced = typeof exit.forced === 'string' && exit.forced ? M.clip(exit.forced, 200) : job._forced && job._forced.run === run.startedAt ? job._forced.words : '';
-    const left = M.leftRecord(exit.left);
+    const left = M.leftRecord(exit.left), fault = M.leftRecordFault(exit.left);
+    if (fault) this.d.log(`[jobs] ${job.id} ${fault}`); // round 10c: short ≤ n — a record past it is a bug, said
     if (forced) run.forced = forced;
     if (left) run.left = left;
     const endWords = left ? M.leftWords(left) : forced;
