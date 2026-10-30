@@ -39,6 +39,12 @@
 // «got less than the full grace» words (§1). RED on 887e8d66 = 4ef7e9494 (round 8, shipped in 2.369.363): a cut walk re-run
 // every 50 ms for the whole grace, never refused by the doubt's door (㊳); the record drops «got less than the full grace» for a
 // stop that needed no force (§1).
+// ROUND 11 (the CI runner at load 7.5; one core at 25 % here): A BOUND PASSES WHEN THE LEG SAYS — ⑩ ⑯ ㉝ waited for a fake
+// scope's REAL read inside a 5–40 ms REAL bound (red on the runner: «unread» for «nokill», survivors said nothing, a retry
+// deferred again); ㉚ swept «inside» a 25 ms wedge step the box could outrun. Now the engine's one bound (`_within`) is on the
+// leg's clock (legClock: it passes only on `pass()`), a held read / write opens when the leg opens its gate, a leg waits for
+// the engine's own in-flight reap — never a polling window; ㉚'s ladder bounds are out of real time's reach and the leg
+// ADVANCES the run's clock a step, then a wedge step.
 // Load: none — no process is started; scratch dataDirs under os.tmpdir(), removed at the end.
 import fs from 'node:fs';
 import os from 'node:os';
@@ -290,7 +296,7 @@ fs.promises.readFile = function (p, ...a) {
   const f = faultOf(p);
   if (f && f.onRead) f.onRead(p);
   const go = () => realRead.call(fs.promises, p, ...a).finally(() => { if (f) f.readAt = f.readAt || Date.now(); }).then((v) => { if (f && f.vanish && String(p).endsWith('cgroup.procs')) fs.rmSync(path.dirname(String(p)), { recursive: true, force: true }); return v; });
-  return f && f.readHang ? never() : f && f.readMs ? sleep(f.readMs).then(go) : go();
+  return f && f.readHang ? never() : f && f.readGate ? f.readGate.then(go) : f && f.readMs ? sleep(f.readMs).then(go) : go();
 };
 fs.promises.writeFile = function (p, ...a) {
   const f = faultOf(p);
@@ -307,6 +313,21 @@ const fakeScope = (root, name, { pids = [DEAD + 1], nokill = false } = {}) => {
   FAULTS.set(unit, {});
   return { unit, dir, cgroup: `/fake.slice/${unit}`, procs: () => { try { return fs.readFileSync(path.join(dir, 'cgroup.procs'), 'utf8').split('\n').filter(Boolean); } catch { return []; } } };
 };
+// round 11: A BOUND PASSES WHEN THE LEG SAYS — the engine's one bound (`_within`: a promise's answer, or null once its time
+// passed) on the leg's clock: after `pass()` every bound waiting and every one asked until `hold()` answers null (its time
+// passed); otherwise a bounded wait waits for its answer. NEVER is a deadline real time never reaches inside a leg (the
+// reap's `until`, read off the real clock): the leg's clock decides, never the box's speed
+const NEVER = 3600000;
+const legClock = (E) => {
+  const waiting = new Set();
+  let passed = false;
+  E._within = (p) => { let w; const bound = new Promise((res) => { w = () => res(null); if (passed) w(); else waiting.add(w); }); return Promise.race([p, bound]).finally(() => waiting.delete(w)); };
+  return { pass: () => { passed = true; for (const w of waiting) w(); waiting.clear(); }, hold: () => { passed = false; } };
+};
+// a held read / write that answers when the leg opens it (a busy threadpool that frees up — by state, never a delay)
+const gate = () => { let open; const p = new Promise((r) => { open = r; }); return { p, open }; };
+// the engine's own in-flight reap of these runs, awaited (its answer — never a polling window)
+const reapsOf = (E, runs) => Promise.all(runs.map((r) => (E._reaping && E._reaping.get(r)) || null));
 // a run a hub left behind, written by hand: its wrapper gone (a pid past pid_max), its bound naming a scope (or none)
 const deadJob = (dir, id, { kind = 'task', scope = null, exit = null, state = 'up', desiredUp = true, restart = 'never', extra = {} } = {}) => {
   const startedAt = Date.now() - 60000, ctl = path.join(dir, 'job-logs', id, String(startedAt));
@@ -329,26 +350,28 @@ const CLI = (() => { try { const src = read('data/bin/vibespace-job'), pick = (r
 leg('§3 IN-PROCESS ⑩ ONE JUDGE PER RUN END — five overlapping ticks while a scope\'s read is slow judge one ended run ONCE (round 4: once per tick — parked after a single OOM)', async (ok) => {
   // the reviewer's df2 repro, in-process and short: a service run whose wrapper is gone, its exit record oom-bound ONCE, its
   // bound naming a scope whose cgroup.procs read answers late (a busy threadpool — THIS scope only); the read's bound is the
-  // engine's seam (0.008 s for 2 s); five ticks land while the first pass waits
+  // engine's seam (0.008 s for 2 s); five ticks land while the first pass waits. Round 11: the read and the kill held by GATES,
+  // the bound passed by the leg the moment the read is asked (legClock) — the runner's load answered a 25 ms hold past an 8 ms
+  // bound all the same, but its retry read missed the 8 ms bound too (deferred again: red)
   const dir = tmp('vs-jobs-mem-'), root = tmp('vs-jobs-mem-cg-'), S = fakeScope(root, 'judge', { pids: [] });
-  const E = engine(dir, { reapReadMs: 8, reapConfirmMs: 10, cgroupRoot: root });
+  const E = engine(dir, { reapReadMs: 8, reapConfirmMs: 10, cgroupRoot: root }), clock = legClock(E), rg = gate(), wg = gate();
   const b = { by: 'cgroup', mb: 256, askedMb: 256, confirmed: true, maxBytes: 256 * MiB, unit: S.unit, cgroup: S.cgroup };
   const job = deadJob(dir, 'jb-judge001', { kind: 'service', scope: S, restart: 'always', exit: { code: null, signal: 'SIGKILL', endedAt: Date.now(), memory: { ...b, cause: 'oom-bound', how: 'its scope was killed at MemoryMax (oom-kill)' } } });
   E.jobs.set(job.id, job);
-  const f = Object.assign(FAULTS.get(S.unit), { readMs: 25, writeMs: 25 }); // its read and its kill held past their bound
-  let finals = 0, judgedAt = 0;
+  const f = Object.assign(FAULTS.get(S.unit), { readGate: rg.p, writeGate: wg.p, onRead: () => clock.pass() }); // its read and its kill held; the bound passes while they wait
+  let finals = 0, heldAtJudge = null;
   const fin = E._finalizeRun.bind(E);
-  E._finalizeRun = (...a) => { finals++; judgedAt = judgedAt || Date.now(); return fin(...a); };
-  const t0 = Date.now();
+  E._finalizeRun = (...a) => { finals++; if (heldAtJudge === null) heldAtJudge = !f.readAt; return fin(...a); };
   await Promise.all([1, 2, 3, 4, 5].map(() => E._sweep()));
-  await until(() => f.readAt && E._reapLater.size === 1, 500, 5); // the held read answers; the reap that did not finish waits
-  const readAt = f.readAt;
-  Object.assign(f, { readMs: 0, writeMs: 0 });
-  await E._sweep(); // a later tick (the threadpool free again): what did not finish is retried
-  const sup = job.supervise || {}, judgedIn = judgedAt - t0;
+  await reapsOf(E, [job.runs[0]]); // the reap that did not finish (its bound passed, its read still held): enqueued
+  const pending = E._reapLater.size, heldAfter = !f.readAt;
+  clock.hold(); f.onRead = null; rg.open(); wg.open(); // the threadpool is free again: the held read and kill answer
+  await (E._procReads && E._procReads.get(S.dir));
+  await E._sweep(); // a later tick: what did not finish is retried — every read answered (no bound passes now)
+  const sup = job.supervise || {};
   ok(finals === 1 && sup.oomEnds === 1 && !sup.parkedAt && job.state !== 'failed' && !said.some((n) => n.jobId === job.id && /parked/.test(n.text || '')), `one end, ONE judgment: five overlapping ticks ⇒ finalizeCalls ${finals}, oomEnds ${sup.oomEnds}, ${sup.parkedAt ? 'PARKED' : 'not parked'} (b8d2a3a0: one per tick — parked «out of memory twice» after a single OOM)`, { finals, sup, state: job.state });
-  ok(judgedAt && judgedAt < readAt && E._reapLater instanceof Map && E._reapLater.size === 0,
-    `the read past its bound never holds the judgment: judged from exit.json ${judgedIn} ms in, before the held read answered (${readAt - t0} ms); the reap that did not finish ran on a later tick`, { judgedIn, readIn: readAt - t0, reapLater: E._reapLater && E._reapLater.size });
+  ok(heldAtJudge === true && heldAfter && pending === 1 && E._reapLater instanceof Map && E._reapLater.size === 0,
+    'the read past its bound never holds the judgment: judged from exit.json while the read was still held; the reap that did not finish was enqueued (1) and ran on a later tick', { heldAtJudge, heldAfter, pending, reapLater: E._reapLater && E._reapLater.size });
   const before = JSON.stringify(job.supervise);
   fin(job, job.runs[0], { code: null, signal: 'SIGKILL', endedAt: Date.now(), memory: { ...b, cause: 'oom-bound' } }, 'sweep');
   ok(JSON.stringify(job.supervise) === before, 'a run already judged (endedAt) is never judged again — a second caller returns, oomEnds stays 1', job.supervise);
@@ -396,7 +419,8 @@ leg('§3 IN-PROCESS ⑮ A REAP THAT DID NOT FINISH IS ALWAYS RETRIED — the boo
 leg('§3 IN-PROCESS ⑯ TWO OUTCOMES, TWO WORDS — a scope that is gone is not a kernel without cgroup.kill', async (ok) => {
   const dir = tmp('vs-jobs-mem-'), root = tmp('vs-jobs-mem-cg-');
   const K = fakeScope(root, 'kill'), G = fakeScope(root, 'gone'), N = fakeScope(root, 'nokill', { nokill: true }), V = fakeScope(root, 'vanish');
-  const E = engine(dir, { reapReadMs: 10, reapConfirmMs: 10, cgroupRoot: root });
+  const E = engine(dir, { reapReadMs: NEVER, reapConfirmMs: 10, cgroupRoot: root }); // round 11: every read answers (the outcome's words are the subject, never a bound)
+  legClock(E);
   const sc = (s) => ({ unit: s.unit, dir: s.dir });
   fs.rmSync(G.dir, { recursive: true, force: true });
   const outs = [await E._killScope(sc(K)), await E._killScope(sc(G)), await E._killScope(sc(N))];
@@ -406,7 +430,7 @@ leg('§3 IN-PROCESS ⑯ TWO OUTCOMES, TWO WORDS — a scope that is gone is not 
   const v = deadJob(dir, 'jb-vanish01', { scope: V, exit: { code: 0, signal: null, endedAt: Date.now() } }), n = deadJob(dir, 'jb-nokill01', { scope: N, exit: { code: 0, signal: null, endedAt: Date.now() } });
   E.jobs.set(v.id, v); E.jobs.set(n.id, n);
   await E._sweep();
-  await until(() => !E._reaping || (!E._reaping.has(v.runs[0]) && !E._reaping.has(n.runs[0])), 500, 5);
+  await reapsOf(E, [v.runs[0], n.runs[0]]);
   ok(!v.runs[0].forced && !E.events.some((e) => e.jobId === v.id && /cgroup\.kill/.test(e.what || '')), `a scope gone before its kill: nothing killed, nothing said (ef0012b5: «${'not killed: this kernel has no cgroup.kill'}» on a 7.0 kernel)`, v.runs[0].forced);
   ok(/^its wrapper was gone and its scope still held 1 process — not killed: this kernel has no cgroup\.kill — systemctl --user kill --signal=KILL jobs-memory-bound-fast-nokill-\d+\.scope$/.test(n.runs[0].forced || '') && N.procs().length === 1, 'a scope that holds a process on a kernel with no cgroup.kill: said so, with the line to run', n.runs[0].forced);
   stopEngine(E);
@@ -466,24 +490,31 @@ leg('§3 IN-PROCESS ⑲ A KILL TIMER BELONGS TO ITS RUN — a stop\'s kill step 
 // ── ROUND 7 ───────────────────────────────────────────────────────────────────────────────────────────────────────────────
 leg('§3 IN-PROCESS ㉚ THE LADDER IS DRIVEN EVERY TICK — a timed-out task whose wrapper is wedged after its scope\'s kill: SIGTERM, the scope, then its wrapper with its group; the run ends «timeout» (336761e5: the step armed once — [SIGTERM, scope], «up» for ever)', async (ok) => {
   const dir = tmp('vs-jobs-mem-'), root = tmp('vs-jobs-mem-cg-'), S = fakeScope(root, 'ladder');
-  const E = engine(dir, { cgroupRoot: root, wedgeMs: 25 }); // WEDGE_MS 3 s, 0.025 s here
+  // round 11: THE LEG ADVANCES THE RUN'S CLOCK — the ladder's two bounds (its kill step, its wedge step) lie out of real time's
+  // reach (a minute each) and the leg moves the run's instants (its SIGTERM's, its scope kill's) a step back: a step passes only
+  // when the leg says (a 25 ms wedge step with ticks «inside» it: the box outran it under one core at 25 % — 3 of 8 red)
+  const STEP = 60000, WEDGE = 60000;
+  const E = engine(dir, { cgroupRoot: root, wedgeMs: WEDGE }); // WEDGE_MS 3 s
   const job = deadJob(dir, 'jb-ladder01', { scope: S, extra: { timeoutMs: 1000 } }); E.jobs.set(job.id, job); // started 60 s ago: past its time limit
   const kills = [];
   let wedged = true; // its wrapper: alive and wedged (it never writes its end) until its group is killed
   E._verifyAlive = (st) => !!st && wedged;
   E._killGroup = (j, sig) => { kills.push(`group:${sig}`); if (sig === 'SIGKILL') wedged = false; return true; };
-  const ks = E._killScope.bind(E); E._killScope = (s, o) => { kills.push('scope'); return ks(s, o); };
-  E._killStepMs = () => 10; // the grace's seam (10 s, a second more on every rung)
-  await E._sweep();                 // its time limit: SIGTERM, once
-  await sleep(15); await E._sweep(); // a step later: its scope
-  await E._sweep(); await E._sweep(); // inside the wedge step: nothing more
+  let scopeKill = null;
+  const ks = E._killScope.bind(E); E._killScope = (s, o) => { kills.push('scope'); return (scopeKill = ks(s, o)); };
+  E._killStepMs = () => STEP; // the grace's seam (10 s, a second more on every rung)
+  const advance = (ms) => { if (job._termAt) job._termAt -= ms; if (job._scopeKilled) job._scopeKilled.at -= ms; }; // the run's clock, moved on
+  await E._sweep();                          // its time limit: SIGTERM, once
+  advance(STEP); await E._sweep();           // a step later: its scope
+  await scopeKill;                           // its kill written (the fake kernel empties the scope)
+  await E._sweep(); await E._sweep();        // inside the wedge step: nothing more
   const before = [...kills];
-  await sleep(28); await E._sweep(); // its wrapper still there 0.025 s on: with its group
-  await E._sweep();                 // its wrapper gone: the run judged
+  advance(WEDGE); await E._sweep();          // its wrapper still there a wedge step on: with its group
+  await E._sweep();                          // its wrapper gone: the run judged
   const run = job.runs[0];
   ok(before[0] === 'group:SIGTERM' && kills.filter((k) => k === 'group:SIGTERM').length === 1, `rung 1: its SIGTERM, once — ${JSON.stringify(kills)}`, kills);
   ok(JSON.stringify(before) === JSON.stringify(['group:SIGTERM', 'scope']) && !S.procs().length, `rung 2: its scope killed ONCE, a kill step after the SIGTERM — ticks inside the wedge step write nothing more (${JSON.stringify(before)})`, before);
-  ok(kills[kills.length - 1] === 'group:SIGKILL' && run.cause === 'timeout' && job.state === 'failed' && /stopped by force: it did not end on SIGTERM in 10 s — its scope was killed, then its wrapper \(still there 0\.025 s later\) with its process group/.test(run.forced || ''),
+  ok(kills[kills.length - 1] === 'group:SIGKILL' && run.cause === 'timeout' && job.state === 'failed' && /stopped by force: it did not end on SIGTERM in 10 s — its scope was killed, then its wrapper \(still there 60 s later\) with its process group/.test(run.forced || ''),
     `rung 3: a wrapper still there a wedge step later is killed with its group, every tick until it is gone — the run ends «${run.cause}», «${run.forced}» (336761e5: [group:SIGTERM, scope] and «up» for ever)`, { kills, cause: run.cause, state: job.state, forced: run.forced });
   stopEngine(E);
 });
@@ -530,10 +561,11 @@ leg('§3 IN-PROCESS ㉝ THREE CAUSES, THREE WORDS — a dropped reap says why: n
   const R = fakeScope(root, 'refused', { nokill: true }), V = fakeScope(root, 'survived', { pids: [DEAD + 1, DEAD + 2] });
   fs.mkdirSync(path.join(R.dir, 'cgroup.kill')); // a write to it is REFUSED (EISDIR) — its reads answer every time
   FAULTS.get(V.unit).survive = true;               // its kill lands, its processes stay (a D-state process survives cgroup.kill)
-  const E = engine(dir, { reapReadMs: 40, reapConfirmMs: 20, reapTries: 2, cgroupRoot: root }); // a read answers well inside its bound (node 22 too)
+  const E = engine(dir, { reapReadMs: NEVER, reapConfirmMs: 20, reapTries: 2, cgroupRoot: root }); // round 11: every read answers (a 40 ms real bound missed under one core at 25 %: «did not answer» for the refused kill, nothing said for the survivors)
+  legClock(E);
   const r = deadJob(dir, 'jb-refused1', { scope: R, exit: { code: 0, signal: null, endedAt: Date.now() } }), v = deadJob(dir, 'jb-survive1', { scope: V, exit: { code: 0, signal: null, endedAt: Date.now() } });
   E.jobs.set(r.id, r); E.jobs.set(v.id, v);
-  for (let i = 0; i < 4; i++) { await E._sweep(); await until(() => !E._reaping || (!E._reaping.has(r.runs[0]) && !E._reaping.has(v.runs[0])), 200, 5); }
+  for (let i = 0; i < 4; i++) { await E._sweep(); await reapsOf(E, [r.runs[0], v.runs[0]]); }
   const said = (j) => (E.events.filter((e) => e.jobId === j.id && /not reaped/.test(e.what || '')).map((e) => e.what));
   ok(said(r).length === 1 && /^its wrapper was gone and its scope still held 1 process — its kill was refused \(EISDIR\) in 2 tries — not reaped: systemctl --user kill --signal=KILL jobs-memory-bound-fast-refused-\d+\.scope$/.test(said(r)[0]), `a refused kill: «${said(r)[0]}»`, said(r));
   ok(said(v).length === 1 && /^its wrapper was gone and 2 processes survived its kill in 2 tries — not reaped: /.test(said(v)[0]) && V.procs().length === 2, `processes that survived its kill: «${said(v)[0]}» (the unanswered read: ⑮ — «did not answer a read in 3 tries»)`, said(v));

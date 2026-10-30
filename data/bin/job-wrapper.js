@@ -81,7 +81,7 @@ function scopeEventsEnd(atGo, atEnd) {
 function leftWords(l) {
   const n = l.n || 0, es = (k) => (k === 1 ? '' : 'es');
   const hhmm = (ms) => { const d = new Date(ms); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
-  const sh = l.short ? ` (${l.short} process${es(l.short)} got less than the full grace)` : ''; // round 8: first seen after the stop
+  const sh = l.short ? ` (${l.short} process${es(l.short)} got less than the full grace)` : ''; // round 11: killed, no SIGTERM came
   if (l.cleared) return `it left ${n} process${es(n)} running — stopped at ${hhmm(l.cleared)}${sh}`;
   if (l.gone) return `it left ${n} process${es(n)} running — ${n === 1 ? 'it' : 'they'} had already ended by ${hhmm(l.gone)}`;
   if (l.kept) return `it left ${n} process${es(n)} running — kept: a service's own until it is stopped or started again${l.escaped ? ` (${l.escaped} outside its group)` : ''}${l.recorded ? ` (${l.recorded} of ${n} recorded)` : ''}`;
@@ -605,11 +605,10 @@ async function forceScope(why) {
 // code 143); true when it was delivered
 const termed = new Map();
 const termKey = ([pid, st]) => `${pid}:${st}`;
-// round 10c: what the STOP STEP itself reached (the engine's group signal, our own delivery to the main, the group, a service's
-// escapees) — those heard the stop; a process the record counts that is not here was first seen after it and got what was LEFT
-// of the grace. Never a clock (r10 judged «after the stop» by 10 % of the grace: an escapee our /proc scan reached 49 ms into a
-// 0.4 s grace was counted short — the cut's red)
-let heardAtStop = new Set();
+// round 11: THIS TABLE IS WHO HEARD THE STOP — every writer of it goes through it: the engine's group signal (marked), our own
+// SIGTERM at the stop step and at the drain; what got less than the full grace is what we KILLED that is not in it. One set, never
+// a copy, never a clock (r10 judged «after the stop» by 10 % of the grace — the cut's red; r10c read a copy taken at the end of the
+// stop step: a leftover the drain SIGTERMed 0.45 s into a 10 s grace, ended at once, was counted cut short)
 const termOnce = (p, sig = 'SIGTERM') => { if (termed.has(termKey(p)) || !same(p)) return false; termed.set(termKey(p), Date.now()); try { process.kill(p[0], sig); return true; } catch { return false; } };
 const rowOf = (pid) => { const r = pid ? statOf(pid) : null; return r && r[0] !== 'Z' ? [Number(pid), Number(r[19]), Number(r[2])] : null; }; // [pid, start, pgid]
 // round 10: THE MAIN IS THE HANDLE WE SPAWNED — never a pid read again: signalled only while the handle is live (exitCode and
@@ -669,7 +668,6 @@ function onStop(sig, at, by) {
     // heard the stop with us (the engine signals it) — its grace runs from the stop; a SERVICE's processes that left the group
     // (its mark) hear it NOW, with the main — round 6 signalled them only once the main ended, against what was left of the grace
     if (keeps) for (const p of escapedOf()) termOnce(p);
-    heardAtStop = new Set(termed.keys());
     const t = setTimeout(() => { if (exited) return; if (!forced) forced = `it did not end${on} in ${stopMs / 1000} s — its process group was killed`; try { child.kill('SIGKILL'); } catch { } }, left); t.unref?.();
     return;
   }
@@ -782,9 +780,10 @@ async function drainGroup() {
   if (still && !forced) forced = `${still} process${still === 1 ? '' : 'es'} it left ${still === 1 ? 'was' : 'were'} still running ${stopMs / 1000} s after ${stopping ? 'the stop' : 'its SIGTERM'} — killed`;
   const counted = new Set([...rows.map(termKey), ...killed]), all = counted.size; // forked while it drained: counted with the rest
   // what got less than the full grace — OF WHAT IT LEFT (round 10c: r10 counted every SIGTERM of the run, one that ended before
-  // the drain too — 4 of 3): the stop step never reached it (first seen after it: our SIGTERM came at the drain — it may have ended
-  // on it, its grace was cut all the same — or none came before its kill)
-  const short = stopping ? [...counted].filter((k) => !heardAtStop.has(k)).length : 0;
+  // the drain too — 4 of 3). Round 11: what we KILLED that NO step reached with SIGTERM (the stop step's, the drain's — the one
+  // table): it only ever got SIGKILL. One the drain SIGTERMed heard the stop — what was left of its grace was its to use, ended on
+  // it or not — never counted (r10c counted it: «1 process got less than the full grace» on a stop that cut nothing)
+  const short = stopping ? [...killed].filter((k) => !termed.has(k)).length : 0;
   if (mine) return { left: { n: all, ...kept, ...(all > kept.pids.length && !kept.recorded ? { recorded: kept.pids.length } : {}), cleared: Date.now(), ...(short ? { short } : {}) } }; // recorded the way an end records them — and stopped with it
   return { left: { n: all, ...(still ? { force: true } : {}), ...(outside.length ? { escaped: outside.length } : {}), ...(short ? { short } : {}) } };
 }
