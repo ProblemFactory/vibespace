@@ -9,8 +9,12 @@
 //      conversation, a cron's row for its run, an entry gone, one of two missing
 //   ④ THE FD PLAN — NAME → 4 + i (fd 3 is the memory gate's), the env holds NAME_FD only, the spec holds names and fds only
 //   ⑤ THE FRAME — the round trip, every bad shape refused in words that hold no byte of it, the 64 KiB bound
+//   ⑤b ROUND 2 (the acceptance) — THE WORDS OF A WAIT: the lock's name where a person unlocks it (and the TOLD clause); the
+//      approval's promise NO card this version lacks and name the door that works now. A USE IS A HAND-OVER THAT COMPLETED:
+//      the wrapper's exit record → `refused:<its code>` (an update window, a stop, a code, nothing written), never `ok`; such a
+//      line is never counted as the actor's failure (src/vault-use.js counts — a refusal of the actor's still is)
 //   ⑥ MUTANTS — each rule's copy (compiled at the real path) is RED: a lock that goes, a minted value as the agent's own, an
-//      approval of any job, the values at fd 3
+//      approval of any job, the values at fd 3, the approval's r1 words
 import { createRequire } from 'module';
 import path from 'path';
 import fs from 'fs';
@@ -105,6 +109,19 @@ console.log('⑤ THE FRAME');
   ok(big === 'payload_too_large', `a frame past ${VJ.PAYLOAD_MAX / 1024} KiB is refused`);
 }
 
+console.log('⑤b THE WORDS OF A WAIT · A USE IS A HAND-OVER THAT COMPLETED (round 2)');
+{
+  const VU = require(path.join(REPO, 'src/vault-use.js'));
+  const lock = VJ.waitWords('vault'), appr = VJ.waitWords('approval');
+  ok(/once a person unlocks it on this instance's page \(⚙ System ▸ Vault…\)/.test(lock) && /already been told/.test(lock) && /never a failure/.test(lock), 'the lock\'s wait names where a person unlocks it (⚙ System ▸ Vault…) and that the user was told — a wait, never a failure', lock);
+  ok(/arrives in a later VibeSpace update/.test(appr) && /nothing can approve it and the job does not start/.test(appr) && /vibespace-vault put <name> --stdin/.test(appr) && /vault:\/\/agent:<this conversation>\/<name>/.test(appr) && /a value the hub minted, which you never saw, cannot be put/.test(appr) && !/starts by itself once they do/.test(appr), 'the approval\'s wait promises NO card this version lacks — it says the job does not start, and names the door that works now (an entry the agent puts, referenced by vault://agent:…)', appr);
+  ok(VJ.ACK === 0x06, 'the hand-over\'s acknowledgement is ONE byte (0x06) — never a value');
+  const cases = [[null, 'refused:not_started'], [{ code: 75, reason: 'update_window' }, 'refused:update_window'], [{ code: null, stop: 'SIGTERM' }, 'refused:stopped'], [{ code: 2, refused: 'masker_missing' }, 'refused:masker_missing'], [{ code: 2, refused: 'Bad Code!' }, 'refused:not_started'], [{ code: 2 }, 'refused:not_started']];
+  const bad = typeof VJ.refusedOutcome !== 'function' ? ['(src/vault-job.js has no refusedOutcome — every start is written `ok`)'] : cases.filter(([e, want]) => VJ.refusedOutcome(e) !== want).map(([e, want]) => `${JSON.stringify(e)} → ${VJ.refusedOutcome(e)} (want ${want})`);
+  ok(!bad.length, 'a start the wrapper never acknowledged → `refused:<why>` from its exit record (an update window, a stop, its code; a code of another shape or no record: not_started) — never ok', bad.join(' | '));
+  ok(VU.outcomeOf('refused:masker_missing') === 'refused:masker_missing' && !VU.counts('refused:masker_missing') && !VU.counts('refused:update_window') && VU.counts('not_granted') && VU.counts('wrong_password'), 'a `refused:<code>` line is the hub\'s own (no program got the value) — never counted as the actor\'s failure; the actor\'s own refusals still are (the controls)');
+}
+
 console.log('⑥ MUTANTS (each a copy compiled at the real path — RED)');
 {
   const Module = require('module');
@@ -122,10 +139,11 @@ console.log('⑥ MUTANTS (each a copy compiled at the real path — RED)');
     ['a minted value is the agent\'s own', "e.prov !== 'minted'", 'true', (M) => !!M.verdictOf(job(), { state: 'unlocked', entryOf: () => minted, rowsFor: () => [] }).go],
     ['an approval of ANY job', 'h.entry.jobs.some((id) => jobIds.includes(id))', 'true', (M) => M.approvedBy([row('secrets:secret:k1#secret', [{ kind: 'conversation', key: 'conv-a', jobs: ['jb-0000bbbb'] }])], { keys: ['conv-a'], jobIds: ['jb-0000aaaa'] })],
     ['the values at fd 3 (the gate\'s)', 'const FD_BASE = 4;', 'const FD_BASE = 3;', (M) => M.fdPlan([{ name: 'A' }])[0].fd === 3],
+    ['round 2: r1\'s approval words (a promise of a card this version lacks)', "  wait_approval: 'waiting for the user\\'s approval", "  wait_approval: 'waiting for the owner to approve this job\\'s use of its vault values — it starts by itself once they do', _r1: 'waiting for the user\\'s approval", (M) => /starts by itself once they do/.test(M.waitWords('approval')) && !/later VibeSpace update/.test(M.waitWords('approval'))],
   ];
   for (const [n, from, to, red] of legs) {
     const M = mutant(from, to);
-    ok(M && !M.anchor && red(M) && !red(VJ), `CONTROL — ${n}: the copy is RED, the real module green`, M && M.anchor);
+    ok(M && M.anchor === undefined && red(M) && !red(VJ), `CONTROL — ${n}: the copy is RED, the real module green`, M && M.anchor !== undefined ? `its anchor found ${M.anchor}×` : undefined);   // an anchor found 0× is no copy
   }
 }
 

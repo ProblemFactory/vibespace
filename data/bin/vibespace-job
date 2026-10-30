@@ -264,7 +264,13 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
       }
       const r = await call('POST', '/api/agent/jobs', body, { cls: 'wake' });   // a run starts a job: a wake
       const j = r.job;
-      console.log(`started ${j.id} (${j.kind} ${j.name})${r.renamed ? ' — name was taken, auto-suffixed' : ''}`);
+      // lane vault-job-road r2 (the acceptance's MAJOR — «no silent failures»): a job that WAITS for its vault values (the vault
+      // locked; an approval this version cannot give) is never «started» — the first line says it waits, in the hub's words (the
+      // door that exists NOW); a scheduled job whose fires would wait says so beside «scheduled». Exit 0: the job exists
+      const renamed = r.renamed ? ' — name was taken, auto-suffixed' : '';
+      if (j.state === 'waiting') console.log(`waiting: ${j.id} (${j.kind} ${j.name}) was created and is NOT started${renamed} — ${j.waitWords || 'poll it for what it waits on'}`);
+      else if (r.vaultWait && r.vaultWait.words) console.log(`scheduled: ${j.id} (${j.kind} ${j.name})${renamed} — but each fire's run WAITS and is NOT started: ${r.vaultWait.words}`);
+      else console.log(`started ${j.id} (${j.kind} ${j.name})${renamed}`);
       // RESOLVED-TIME ECHO: always show WHEN it actually fires, absolute (the
       // owner's zone, named — B-7960) + countdown — a timezone mis-parse (bare
       // datetimes are server-local) must be visible the second the job is created.
@@ -349,7 +355,11 @@ must OUTLIVE the conversation → THIS · harness cron → never (expires) · da
     }
     case 'stop': case 'start': {
       const r = await call('POST', `/api/agent/jobs/${encodeURIComponent(pos[1] || JOBID)}/${verb}`, { force: !!flags.force });
-      console.log(verb === 'stop' ? 'stopped (services stay down until an explicit start)' : 'started');
+      // lane vault-job-road r2: a start that WAITS (its vault values) is said as one — never «started»
+      if (verb === 'stop') console.log('stopped (services stay down until an explicit start)');
+      else if (r.state === 'waiting') console.log(`waiting: NOT started — ${r.after || 'poll it for what it waits on'}`);
+      else if (r.vaultWait && r.vaultWait.words) console.log(`scheduled — but each fire's run WAITS and is NOT started: ${r.vaultWait.words}`);
+      else console.log('started');
       break;
     }
     case 'rm': {

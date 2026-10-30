@@ -55,8 +55,9 @@ function useOf(u, at = null) {
 }
 /** An outcome is 'ok' or a refusal's code — anything else is 'error' (a free sentence never rides as an outcome). */
 const outcomeOf = (x) => (x == null || x === true ? 'ok' : OUTCOME_RE.test(String(x)) ? String(x) : 'error');
-/** Does this outcome count toward the actor's daily failures? The vault's own state and the pace never do. */
-const counts = (x) => { const o = outcomeOf(x); return !UNCOUNTED.includes(o) && !o.includes('vault_locked'); };
+/** Does this outcome count toward the actor's daily failures? The vault's own state and the pace never do — nor (lane
+ *  vault-job-road r2) a start whose hand-over the hub's OWN wrapper refused (`refused:<its code>`: no program got the value). */
+const counts = (x) => { const o = outcomeOf(x); return !UNCOUNTED.includes(o) && !o.includes('vault_locked') && !o.startsWith('refused:'); };
 
 /** THE `vault-use` AUDIT LINE — the closed key set (LINE_KEYS, in that order), never a value. */
 function useLine({ at, entry, purpose, use, actor, outcome, receipt, ip, grant } = {}) {

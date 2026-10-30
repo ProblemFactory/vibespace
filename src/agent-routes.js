@@ -2643,7 +2643,7 @@ app.post('/api/agent/jobs', (req, res) => {
   // resume / off, with the deciding layer named.
   let notify = null;
   try { notify = a.jm.notifyPreview(a.jm.jobs.get(r.job.id)); } catch { }
-  res.json({ success: true, job: jobWhen(r.job), renamed: r.renamed, notify });
+  res.json({ success: true, job: jobWhen(r.job), renamed: r.renamed, notify, ...(r.vaultWait ? { vaultWait: r.vaultWait } : {}) });   // lane vault-job-road r2: a scheduled job whose fires would wait for their vault values
 });
 app.get('/api/agent/jobs', (req, res) => {
   const a = jobAuth(req, res); if (!a) return;

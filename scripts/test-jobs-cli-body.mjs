@@ -34,6 +34,13 @@
 //       notifyUser=n/a; the create echo names the user's copy beside auto-notify; a notify cron's show / poll print its
 //       reminder (whole for the author). The panel's words have zh + ja, and the always-line says, per kind, only what
 //       the engine does for that kind (r3: the panel's own expression over real snapshots, beside the engine's acts).
+//   (6) A JOB THAT WAITS IS NEVER «started» (lane vault-job-road r2 — the acceptance's MAJOR, «no silent failures»): the real
+//       CLI → the real route → a real JobManager with its REAL _spawn and the REAL vault-job door over a scripted vault (no
+//       process can start: the gate waits first, and its values could not be read anyway). The three waiting shapes — the
+//       vault locked · a value the hub minted with no vault-job row · a key the user stored (the owner's main case; this
+//       version has no approval writer) — print a FIRST line that says waiting + the door that exists now, exit 0; `start`
+//       on a waiting job says the same; a schedule whose fires would wait says so beside «scheduled». CONTROL: a job that
+//       runs prints «started» at its run and at its start.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -114,7 +121,7 @@ const todos = new UserTodoManager({ dataDir: WDIR, expirySweepMs: 0 });
 const WTOLD = [];
 
 // ── the sessions (one conversation per leg: the engine's 30 s per-conversation floor never joins two legs) ──
-const LEGS = ['census', 'nc1', 'nc0', 'at1', 'at0', 'ev1', 'tk1', 'tk0', 'ctl', 'old1', 'oldm', 'mask', 'nobelt', 'urg', 'full', 'svc0', 'svc1', 'sub', 'urgu', 'urgn', 'named'];
+const LEGS = ['census', 'nc1', 'nc0', 'at1', 'at0', 'ev1', 'tk1', 'tk0', 'ctl', 'old1', 'oldm', 'mask', 'nobelt', 'urg', 'full', 'svc0', 'svc1', 'sub', 'urgu', 'urgn', 'named', 'vwl', 'vwm', 'vws', 'vwc', 'vwr'];
 const cidOf = (leg) => `c0ffee00-0000-4000-8000-${String(LEGS.indexOf(leg)).padStart(12, '0')}`;
 const SESS = new Map(LEGS.map((leg) => [`w-${leg}`, { claudeSessionId: cidOf(leg), backend: 'claude', name: leg, mode: 'chat', cwd: CWD, agentToken: `vsst_${leg}`, createdAt: 1 }]));
 const wiring = JW.create({
@@ -124,7 +131,21 @@ const wiring = JW.create({
 });
 const WIRED = { jm: wiring.jm, told: WTOLD };
 stubSpawn(WIRED.jm);
-const ENGINE_OF = { census: CENSUS, ctl: NOHAND, old1: OLD, oldm: OLD, mask: WIRED, urg: WIRED, full: WIRED, nobelt: NOBELT, urgu: WIRED, named: WIRED };
+// lane vault-job-road r2 — leg (6)'s engines: the REAL _spawn (never stubbed) and the REAL vault-job door over a scripted vault:
+// locked, or unlocked holding a minted agent entry of leg vwm's conversation and a key the user stored (secretGet refuses — no
+// value exists, so nothing could ever be handed or spawned) and no vault-job row (this version has no writer)
+const VDOOR = require('../src/server/vault-job-door.js');
+function vaultEngine(name, state) {
+  const dir = path.join(tmp, name); fs.mkdirSync(dir);
+  const E = { inbox: [], told: [], specs: [] };
+  E.jm = new JobManager({ dataDir: dir, broadcast() { }, log() { }, notifyUser: (n) => E.inbox.push(n), deliverToConversation: async () => ({ ok: true, lane: 'message', peerName: 'owner' }), groupNotifyFor: () => null, notifyGlobal: () => true, peerReachable: () => true });
+  E.jm.init(); for (const t of E.jm._timers) clearInterval(t);
+  const vault = { state: () => state, secretNames: () => [{ name: 'agent:w-vwm/tok', prov: 'minted' }, { name: 'secret:k1', prov: 'stored' }], secretGet: () => ({ ok: false, code: 'scripted' }), noteUse() { }, blocked: () => true, onUnlock() { } };
+  E.jm.setVaultJob(VDOOR.create({ vault, grants: () => ({ rowsFor: () => [], onChange() { } }) }));
+  return E;
+}
+const VWL = vaultEngine('vault-locked', 'locked'), VWU = vaultEngine('vault-unlocked', 'unlocked');
+const ENGINE_OF = { census: CENSUS, ctl: NOHAND, old1: OLD, oldm: OLD, mask: WIRED, urg: WIRED, full: WIRED, nobelt: NOBELT, urgu: WIRED, named: WIRED, vwl: VWL, vwm: VWU, vws: VWU, vwc: VWU };
 for (let i = 0; i < 20; i++) todos.add(`claude:${cidOf('full')}`, { text: `an earlier ask ${i}`, origin: 'agent' });   // the conversation at its open cap
 const rts = {};
 const ap = { get: (p, h) => { rts[`GET ${p}`] = h; }, post: (p, h) => { rts[`POST ${p}`] = h; }, put() { }, delete() { }, use() { } };
@@ -150,13 +171,14 @@ const server = http.createServer((req, res) => {
     if (req.method === 'POST' && u.pathname === '/api/agent/jobs') wire.push({ token, body: JSON.parse(raw || '{}') });
     if (req.method === 'POST' && u.pathname === '/api/agent/user-todo') { askWire.push(body); res.writeHead(200, { 'content-type': 'application/json' }); return res.end(JSON.stringify({ success: true, item: { id: 'ut-0000000000', text: String(body.text || ''), urgency: body.urgency || 'normal', status: 'open' } })); }   // r4: vibespace-ask's body (a recorder, no store)
     const m = /^\/api\/agent\/jobs\/([^/]+)$/.exec(u.pathname);
-    const key = u.pathname === '/api/agent/jobs' ? `${req.method} /api/agent/jobs` : m && req.method === 'GET' ? 'GET /api/agent/jobs/:ref' : null;
+    const ma = /^\/api\/agent\/jobs\/([^/]+)\/([a-z-]+)$/.exec(u.pathname);   // lane vault-job-road r2: start / stop (leg 6)
+    const key = u.pathname === '/api/agent/jobs' ? `${req.method} /api/agent/jobs` : m && req.method === 'GET' ? 'GET /api/agent/jobs/:ref' : ma && req.method === 'POST' ? 'POST /api/agent/jobs/:ref/:act' : null;
     let code = 200, sent = false;
     const R = { status(c) { code = c; return R; }, json(o) { if (!sent) { sent = true; res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(o)); } return R; } };
     if (!key || !rts[key]) return R.status(404).json({ error: `no route ${req.method} ${u.pathname}` });
     // jobAuth reads getJobs() synchronously, before the handler's first await — the engine is the caller's leg's
     current = ENGINE_OF[token.replace(/^vsst_/, '')] || REAL;
-    Promise.resolve(rts[key]({ headers: req.headers, body, query: Object.fromEntries(u.searchParams), params: m ? { ref: decodeURIComponent(m[1]) } : {} }, R))
+    Promise.resolve(rts[key]({ headers: req.headers, body, query: Object.fromEntries(u.searchParams), params: m ? { ref: decodeURIComponent(m[1]) } : ma ? { ref: decodeURIComponent(ma[1]), act: ma[2] } : {} }, R))
       .catch((e) => R.status(500).json({ error: `route threw: ${e.message}` }));
   });
 });
@@ -489,9 +511,40 @@ console.log('(5) SHOW — the params line says what the flag does; the create ec
   ok(!wrong.length, 'the always-line, per kind, says only what the engine does for THAT kind — a task\'s asks; a service\'s asks and park; a cron\'s caught-up missed fire (never a notice) unless an --at time has catch-up off', wrong.join(' | '));
 }
 
+console.log('(6) A JOB THAT WAITS IS NEVER «started» — its first line says it waits and names the door that exists now (lane vault-job-road r2)');
+{
+  const FREE = 'KEY=vault://secrets/secret:k1/secret';
+  const W6 = await all({
+    vwl: cli(['run', 'sleep 60', '--name', 'vwl', '--keep-up', '--vault', FREE], { leg: 'vwl' }),   // the vault locked
+    vwm: cli(['run', 'sleep 60', '--name', 'vwm', '--keep-up', '--vault', 'KEY=vault://agent:w-vwm/tok'], { leg: 'vwm' }),   // a value the hub minted, no vault-job row
+    vws: cli(['run', 'sleep 60', '--name', 'vws', '--keep-up', '--vault', FREE], { leg: 'vws' }),   // a key the user stored — THE OWNER'S MAIN CASE
+    vwc: cli(['run', 'true', '--name', 'vwc', '--every', '30m', '--vault', FREE], { leg: 'vwc' }),   // a schedule whose fires would wait
+    vwr: cli(['run', 'sleep 60', '--name', 'vwr'], { leg: 'vwr' }),   // CONTROL: a job that runs
+  });
+  const first = (r) => String(r.out).split('\n')[0];
+  const LOCK = /the vault is locked — the job waits \(a wait, never a failure\) and starts by itself once a person unlocks it on this instance's page \(⚙ System ▸ Vault…\); the user has already been told/;
+  const APPR = /the approval card arrives in a later VibeSpace update, so in this version nothing can approve it and the job does not start; to run it now, store the key as this conversation's own entry \(vibespace-vault put <name> --stdin/;
+  const waits = (leg, E, door) => { const r = W6[leg], j = jobOf(E, leg); return r.code === 0 && new RegExp(`^waiting: jb-[0-9a-f]{8} \\(service ${leg}\\) was created and is NOT started — `).test(first(r)) && door.test(first(r)) && !/^started\b/m.test(r.out) && !!j && j.state === 'waiting' && j.runs.length === 0; };
+  const shown = (leg) => `${W6[leg].code}: ${first(W6[leg]) || W6[leg].err}`;
+  ok(waits('vwl', VWL, LOCK), 'the vault LOCKED ⇒ the first line says waiting (never «started») and the door: a person unlocks it on this instance\'s page (⚙ System ▸ Vault…), the user already told — exit 0, the job waits with no run', shown('vwl'));
+  ok(waits('vwm', VWU, APPR) && /a value the hub minted, which you never saw, cannot be put/.test(first(W6.vwm)), 'a value the hub MINTED, no vault-job row ⇒ the first line says waiting, the approval card does not exist in this version, and names the door that works now (an entry the agent puts — a minted value it never saw cannot be)', shown('vwm'));
+  ok(waits('vws', VWU, APPR), 'a key the USER stored (the owner\'s main case — no approval writer in this version) ⇒ the first line says waiting and the same truth, never a promise of a card that will not come', shown('vws'));
+  ok(W6.vwc.code === 0 && /^scheduled: jb-[0-9a-f]{8} \(cron vwc\) — but each fire's run WAITS and is NOT started: waiting for the user's approval/.test(first(W6.vwc)) && APPR.test(first(W6.vwc)), 'a SCHEDULE whose fires would wait says so beside «scheduled» at its create (never a bare «started»)', shown('vwc'));
+  ok(W6.vwr.code === 0 && /^started jb-[0-9a-f]{8} \(task vwr\)$/.test(first(W6.vwr)), 'CONTROL: a job that runs ⇒ «started» (its first line unchanged)', shown('vwr'));
+  const id = (E, leg) => (jobOf(E, leg) || {}).id || 'none';
+  const S6 = await all({ vwl: cli(['start', id(VWL, 'vwl')], { leg: 'vwl' }), vws: cli(['start', id(VWU, 'vws')], { leg: 'vws' }), vwc: cli(['start', id(VWU, 'vwc')], { leg: 'vwc' }) });
+  ok(S6.vwl.code === 0 && /^waiting: NOT started — /.test(first(S6.vwl)) && LOCK.test(first(S6.vwl)) && jobOf(VWL, 'vwl').state === 'waiting', '`start` on the job waiting for the vault ⇒ «waiting: NOT started — <the door>», never «started»', `${S6.vwl.code}: ${first(S6.vwl) || S6.vwl.err}`);
+  ok(S6.vws.code === 0 && /^waiting: NOT started — waiting for the user's approval/.test(first(S6.vws)) && APPR.test(first(S6.vws)), '`start` on the job waiting for an approval ⇒ the same honest wait', `${S6.vws.code}: ${first(S6.vws) || S6.vws.err}`);
+  ok(S6.vwc.code === 0 && /^scheduled — but each fire's run WAITS and is NOT started: /.test(first(S6.vwc)), '`start` on the schedule whose fires would wait ⇒ «scheduled — but each fire\'s run WAITS»', `${S6.vwc.code}: ${first(S6.vwc) || S6.vwc.err}`);
+  const vwr = jobOf(REAL, 'vwr');
+  if (vwr) endRun(REAL, vwr);   // its run ended (no process here: the engine's spawn is stubbed) — a start runs it again
+  const startR = await cli(['start', id(REAL, 'vwr')], { leg: 'vwr' });
+  ok(!!vwr && vwr.state === 'up' && startR.code === 0 && first(startR) === 'started', 'CONTROL: `start` of a job that runs ⇒ «started»', `${startR.code}: ${first(startR) || startR.err} (state ${vwr && vwr.state})`);
+}
+
 // ── teardown: the engines' stores flush synchronously; nothing outlives the scratch dir ──
 server.close();
-for (const E of [CENSUS, REAL, NOHAND, OLD, NOBELT, WIRED]) E.jm.shutdown();
+for (const E of [CENSUS, REAL, NOHAND, OLD, NOBELT, WIRED, VWL, VWU]) E.jm.shutdown();
 fs.rmSync(tmp, { recursive: true, force: true });
 console.log(`\ntest-jobs-cli-body: ${pass} passed, ${fail} failed`);
 console.log(fail ? 'FAILED' : `ALL PASS (${pass})`);

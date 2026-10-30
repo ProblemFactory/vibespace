@@ -113,7 +113,7 @@ const said = /^--proto=(\d{1,6})$/.exec(protoArg || '');
 const v1 = !said && !ofCtl && /^eyJ[A-Za-z0-9+/]*={0,2}$/.test(specPath || '') && specPath.length % 4 === 0; // `{"` in base64 — a ≤ .330 caller
 const proto = said ? Number(said[1]) : ofCtl ? PROTO : v1 ? 1 : 0;
 // the spec file is read ONCE, then unlinked — and only a file of OUR ctl dir (a path elsewhere is never read nor removed)
-let spec = null, refusal = '', windowEnd = false;
+let spec = null, refusal = '', windowEnd = false, refusedAs = 'spec_refused'; // lane vault-job-road r2: the refusal's CODE rides exit.json (`refused`) — the hub's use line names it
 if (protoArg !== undefined && !said) { refusal = 'the protocol argument is unreadable'; if (ofCtl) { try { fs.unlinkSync(specPath); } catch { } } }
 else if (v1) { // nothing read, nothing removed: the argument is no file, and its bytes are the job's secrets
   windowEnd = true; refusal = `the server spoke protocol 1 (a server older than 2.369.331) — this wrapper speaks ${PROTO}; an update in flight, or a server not restarted after one`;
@@ -131,8 +131,8 @@ if (!refusal && !(spec.env && typeof spec.env === 'object')) refusal = 'the spec
 let VJ = null, VR = null, VPLAN = null;
 if (!refusal && spec.vault !== undefined) {
   try { VJ = require(path.join(__dirname, '..', '..', 'src', 'vault-job.js')); VR = require(path.join(__dirname, '..', '..', 'src', 'vault-run.js')); } catch { VJ = VR = null; }
-  if (!VJ || !VR || typeof VR.createRunMasker !== 'function') refusal = 'the log masker (src/vault-run.js) could not be loaded — a job given vault values is not started without it: they would reach its log in the clear';
-  else if (!(VPLAN = VJ.planOfSpec(spec.vault))) refusal = 'the spec names its vault values in a shape this wrapper does not read';
+  if (!VJ || !VR || typeof VR.createRunMasker !== 'function') { refusal = 'the log masker (src/vault-run.js) could not be loaded — a job given vault values is not started without it: they would reach its log in the clear'; refusedAs = 'masker_missing'; }
+  else if (!(VPLAN = VJ.planOfSpec(spec.vault))) { refusal = 'the spec names its vault values in a shape this wrapper does not read'; refusedAs = 'vault_shape'; }
 }
 const logCap = (spec && spec.logCapBytes) || 50 * 1024 * 1024;
 const logPath = path.join(ctlDir, 'current.log');
@@ -168,7 +168,7 @@ if (refusal) {
   const line = windowEnd ? `[job-wrapper] not started: ${refusal}\n` : `[job-wrapper] refused: ${refusal}\n`;
   try { process.stderr.write(line); } catch { }
   try { fs.appendFileSync(logPath, line); } catch { }
-  writeExit(windowEnd ? { code: 75, signal: null, endedAt: Date.now(), reason: 'update_window', proto: { server: proto, wrapper: PROTO } } : { code: 2, signal: null, endedAt: Date.now() });
+  writeExit(windowEnd ? { code: 75, signal: null, endedAt: Date.now(), reason: 'update_window', proto: { server: proto, wrapper: PROTO } } : { code: 2, signal: null, endedAt: Date.now(), ...(spec && spec.vault !== undefined ? { refused: refusedAs } : {}) }); // the code only where the hub waits for an ACK (a job without values: its record as before)
   process.exit(windowEnd ? 75 : 2);
 }
 
@@ -816,43 +816,49 @@ async function ended(code, signal) {
 }
 // THE START (protocol 3): the values first — drained from OUR fd 3 (a socket the hub wrote and ended) on a non-blocking handle
 // (a blocked read on the threadpool would hold our exit for ever), bounded in bytes and time, and the fd CLOSED (its 'close')
-// before rungPlan asks this host anything or a rung is spawned; a frame that does not read, comes late or too large: not started
-function notStarted(why) {
+// before rungPlan asks this host anything or a rung is spawned; a frame that does not read, comes late or too large: not started.
+// Round 2 — THE HAND-OVER IS ACKNOWLEDGED: a frame read whole (and no stop meanwhile) is answered with ONE byte (VJ.ACK) before
+// the fd closes — the hub writes the start's use line on it. A refusal writes its record (exit.json `refused`: its code) and
+// exits, and only that exit closes the fd: the hub, seeing the channel close with no ACK, reads the code it names
+function notStarted(why, code = 'values_unreadable') {
   const line = `[job-wrapper] refused: ${why} — the job was not started\n`;
   try { fs.writeSync(logFd, Buffer.from(line)); } catch { }
   try { process.stderr.write(line); } catch { }
-  writeExit({ code: 2, signal: null, endedAt: Date.now() });
+  writeExit({ code: 2, signal: null, endedAt: Date.now(), refused: code });
   process.exit(2);
+}
+function stoppedBefore() { // stopped while its values were on their way: it never ran
+  try { fs.writeSync(logFd, Buffer.from(`[job-wrapper] stopped (${stopping}) before the job started\n`)); } catch { }
+  writeExit({ code: null, signal: stopping, endedAt: Date.now(), stop: stopping, stopBy });
+  process.exit(143);
 }
 function drainValues() {
   return new Promise((resolve) => {
     let sock;
-    try { sock = new (require('net').Socket)({ fd: 3, readable: true, writable: false }); } catch (e) { resolve({ why: `the hub's channel for its vault values is not open (${(e && e.code) || 'error'})` }); return; }
+    try { sock = new (require('net').Socket)({ fd: 3, readable: true, writable: true, allowHalfOpen: true }); } catch (e) { notStarted(`the hub's channel for its vault values is not open (${(e && e.code) || 'error'})`, 'no_channel'); return; }
     const chunks = [];
-    let got = 0, why = null, timer = null;
+    let got = 0, values = null;
     const zero = () => { for (const b of chunks) b.fill(0); };
-    const cut = (w) => { if (why === null) why = w; try { sock.destroy(); } catch { } };
-    timer = setTimeout(() => cut(`the vault values did not arrive within ${VJ.DRAIN_MS / 1000} s`), VJ.DRAIN_MS);
-    sock.on('data', (b) => { got += b.length; chunks.push(b); if (got > VJ.PAYLOAD_MAX) cut(`the vault values were larger than ${VJ.PAYLOAD_MAX / 1024} KiB`); });
-    sock.on('end', () => { if (why === null) why = ''; try { sock.destroy(); } catch { } });
-    sock.on('error', (e) => cut(`the vault values could not be read (${(e && e.code) || 'error'})`));
-    sock.on('close', () => { // the fd is closed now — nothing spawned after this inherits it
+    const refuse = (why, code) => { zero(); notStarted(why, code); }; // the record first; our exit closes the fd
+    const timer = setTimeout(() => refuse(`the vault values did not arrive within ${VJ.DRAIN_MS / 1000} s`, 'values_late'), VJ.DRAIN_MS);
+    sock.on('data', (b) => { got += b.length; chunks.push(b); if (got > VJ.PAYLOAD_MAX) refuse(`the vault values were larger than ${VJ.PAYLOAD_MAX / 1024} KiB`, 'values_too_large'); });
+    sock.on('end', () => { // the hub ended its side: the frame is whole
       clearTimeout(timer);
-      if (why) { zero(); resolve({ why }); return; }
       const buf = Buffer.concat(chunks); zero();
       const r = VJ.decodeFrame(buf, VPLAN); buf.fill(0);
-      resolve(r.ok ? { values: r.values } : { why: r.why });
+      if (!r.ok) refuse(r.why, 'values_unreadable');
+      if (stopping) { for (const v of r.values) v.fill(0); stoppedBefore(); }
+      values = r.values;
+      sock.end(Buffer.from([VJ.ACK])); // THE ACK — then our side ends, and the fd closes
     });
+    sock.on('error', (e) => { if (!values) refuse(`the vault values could not be read (${(e && e.code) || 'error'})`, 'values_unreadable'); }); // after the ACK: the hub went away — the values are ours
+    sock.on('close', () => { clearTimeout(timer); if (values) resolve({ values }); }); // the fd is closed now — nothing spawned after this inherits it
   });
 }
 function begin() {
-  if (stopping) { // stopped while its values were on their way: it never ran
-    try { fs.writeSync(logFd, Buffer.from(`[job-wrapper] stopped (${stopping}) before the job started\n`)); } catch { }
-    writeExit({ code: null, signal: stopping, endedAt: Date.now(), stop: stopping, stopBy });
-    process.exit(143);
-  }
+  if (stopping) stoppedBefore();
   plan = rungPlan();
   launch();
 }
-if (VPLAN) drainValues().then((r) => { if (r.why) notStarted(r.why); VAL = r.values; begin(); }, () => notStarted('the vault values could not be read'));
+if (VPLAN) drainValues().then((r) => { VAL = r.values; begin(); }, () => notStarted('the vault values could not be read'));
 else begin();

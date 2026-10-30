@@ -1532,16 +1532,37 @@ class JobManager {
     this._touch(job, again ? undefined : { what: VJ.waitWords(why) });
     this._save();
   }
-  /** the frame to the wrapper's fd 3 — written, ended, zeroed (on its write, an error or the close); ONE use line per value */
-  _handValues(child, job, vj, frame) {
+  /** the frame to the wrapper's fd 3 — written, ended, zeroed (on its write, an error or the close). ONE use line per value,
+   *  written when the hand-over ENDED (round 2 — the acceptance: a line written as the frame was queued counted a use for a run
+   *  the wrapper refused before it read, «used N×» with no program given the value): the wrapper's ACK (VJ.ACK, one byte back
+   *  once it read the frame whole) ⇒ `ok`; the channel closed with none ⇒ `refused:<why>` from the run's exit record (the
+   *  wrapper writes it before it exits — its exit is what closes the channel) */
+  _handValues(child, job, vj, frame, run) {
     const s = child.stdio && child.stdio[3];
     const zero = () => frame.fill(0);
-    if (!s) { zero(); return; }
+    let said = false;
+    const note = (outcome) => { if (said) return; said = true; try { vj.door.noteUses(job, vj, `Background job ${this.labelOf(job)}`, outcome); } catch { } };
+    if (!s) { zero(); note(VJ.refusedOutcome(null)); return; }
+    s.on('data', (b) => { if (Buffer.isBuffer(b) && b.includes(VJ.ACK)) note('ok'); });
     s.on('error', zero); // a wrapper gone before it read: its exit.json says the run never started
-    s.on('close', zero);
-    s.end(frame, () => { zero(); try { s.destroy(); } catch { } });
-    try { vj.door.noteUses(job, vj, `Background job ${this.labelOf(job)}`); } catch { }
+    s.on('close', () => { zero(); note(VJ.refusedOutcome(this._readExit(job, run))); });
+    s.end(frame, zero);
   }
+  /** round 2 — A WAIT IS ANSWERED AS ONE: a start that ended `waiting` says what it waits for (the hub's words: the door that
+   *  exists NOW), never «started» nor another start's reason */
+  _waitAnswer(job) { return { ok: true, state: 'waiting', waitFor: job.waitFor || null, after: VJ.waitWords(job.waitFor) }; }
+  /** round 2: would this job's values WAIT if it started now (its vault locked, an approval this version cannot give)? ⇒
+   *  { waitFor, words } | null — the gate's verdict read only (state, names, rows: nothing opened, nothing said) */
+  _vaultWaitOf(job) {
+    if (!VJ.refsOf(job).length) return null;
+    const door = this._vaultJob || this.d.vaultJob || null;
+    let v;
+    try { v = door ? door.gate(job) : { wait: 'vault' }; } catch { return null; }
+    return v && v.wait ? { waitFor: v.wait, words: VJ.waitWords(v.wait) } : null;
+  }
+  /** a SCHEDULED job's fires judged at its create / start — each would wait ⇒ said beside «scheduled» (a fire's wait is
+   *  otherwise heard only when it fires) */
+  _cronVaultWait(job) { return job.kind === 'cron' ? this._vaultWaitOf(job) : null; }
   _spawn(job, trigger) {
     const vet = M.vetSpec(job);
     if (!vet.ok) { this._refuseRun(job, vet, trigger); throw new Error(vet.error); }
@@ -1592,7 +1613,7 @@ class JobManager {
       child = spawn(process.execPath, [wrapper, ctl, specPath, '--proto=' + WRAPPER_PROTO], { detached: true, stdio: vj ? ['ignore', 'ignore', 'ignore', 'pipe'] : 'ignore', env: wrapperEnv(job.id) });
     } catch (e) { try { fs.unlinkSync(specPath); } catch { } if (frame) frame.fill(0); throw e; } // a failed write or spawn leaves no spec behind (nor a frame)
     child.unref();
-    if (vj) this._handValues(child, job, vj, frame);
+    if (vj) this._handValues(child, job, vj, frame, job.runs[job.runs.length - 1]);
     job.state = 'up';
     job.proc = { pid: child.pid };
     this._touch(job);
@@ -2389,6 +2410,8 @@ class JobManager {
       try { this._spawn(job, 'manual'); } catch (e) { job.state = 'failed'; this._touch(job); return { error: `spawn failed: ${e.message}`, job: this.snapshot(job, { author: true }) }; }
     } else { job.nextFireAt = M.nextFire(job.schedule, now()); this._touch(job); }
     this._save();
+    const vaultWait = this._cronVaultWait(job); // lane vault-job-road r2: its fires would wait — said at once, beside «scheduled»
+    if (vaultWait) return { job: this.snapshot(job, { author: true }), renamed, vaultWait };
     return { job: this.snapshot(job, { author: true }), renamed };   // the creator IS the author (r4: the record's own name — r7: belted at create)
   }
   stop(job, { force } = {}) {
@@ -2429,7 +2452,9 @@ class JobManager {
     if (job.kind === 'cron') {
       const vet = M.vetSpec(job); // B-f8c7: a cron spawns only at its next fire — reviving one the vet refuses answers NOW
       if (!vet.ok) { this._refuseRun(job, vet, 'manual'); return { error: vet.error }; }
-      job.state = 'scheduled'; job.nextFireAt = M.nextFire(job.schedule, now()); this._touch(job); this._save(); return { ok: true }; }
+      job.state = 'scheduled'; job.nextFireAt = M.nextFire(job.schedule, now()); this._touch(job); this._save();
+      const vaultWait = this._cronVaultWait(job); // round 2: its fires would wait — said, never a bare «ok»
+      return { ok: true, ...(vaultWait ? { vaultWait } : {}) }; }
     // a refusal names the job by ID (lane-redact verify r7): the panel toasts it and the device's toast history (the For-you
     // Notifications tab) keeps every toast — `<name> is already running` outlived the job's "Clear content…" there
     if (['up', 'starting'].includes(job.state)) return { error: `${job.id} is already running` }; // a live process is never re-judged into 'failed'
@@ -2443,16 +2468,22 @@ class JobManager {
       try { this._startAfter(job, 'manual', () => job.desiredUp && !['up', 'starting'].includes(job.state)); } catch (e) { return { error: e.message }; }
       this._save();
       if (['up', 'starting'].includes(job.state)) return { ok: true };
+      if (job.state === 'waiting') return this._waitAnswer(job); // lane vault-job-road r2: it waits for its values — nothing is «stopped first»
       // round 10: A START THAT WILL NOT HAPPEN IS ANSWERED BY ITS REFUSAL — the decision's one walk ran in this tick: a cut one is
       // the doubt's door, in the words its journal line and its For-you notice carry (round 9 answered «ok — it starts only once
       // it is», and nothing walked again: the service stayed down for good)
       const cut = this._cutOf(last), doubt = this._runDoubt(job, last);
       if (cut) return { error: this._doorWords(job, last, cut) };
-      return { ok: true, after: doubt ? `its previous run cannot be proven gone (${doubt}) — it starts if that is proven within ${this._graceMs() / 1000} s, else it is not started (its events say)` : 'what its last run left running is stopped first' };
+      const after = doubt ? `its previous run cannot be proven gone (${doubt}) — it starts if that is proven within ${this._graceMs() / 1000} s, else it is not started (its events say)` : 'what its last run left running is stopped first';
+      // lane vault-job-road r2 (the review): a start DEFERRED behind its last run whose values would wait now is a wait, said as
+      // one — never «started» for a run the gate will park
+      const vw = this._vaultWaitOf(job);
+      if (vw) return { ok: true, state: 'waiting', waitFor: vw.waitFor, after: `${after} — and its vault values would wait now: ${vw.words}` };
+      return { ok: true, after };
     }
     try { this._spawn(job, 'manual'); } catch (e) { return { error: e.message }; } // B-f8c7: the run-time vet's refusal is an answer
     this._save();
-    return { ok: true };
+    return job.state === 'waiting' ? this._waitAnswer(job) : { ok: true }; // lane vault-job-road r2: a wait is said as one
   }
   /** THE BOUND, CHANGED (lane jobs-memory-bound) — from the job's properties (the owner) or `vibespace-job memory` (its owner
    *  conversation): a per-job value, or null / 'inherit' = back to THE LADDER. It applies from the NEXT run (the running

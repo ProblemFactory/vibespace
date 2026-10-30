@@ -19,6 +19,16 @@
 //   ⑥ NO MASKER, NO START — a scratch root without src/vault-run.js: the wrapper refuses by name, the job never ran
 //   ⑦ MUTANTS (each RED, a patched copy — jobs.js compiled at its real path, the wrapper written into the scratch bin): the
 //      value in spec.env · in the spec file · on argv · fd 3 left open · no value masker · a lock counted · a locked boot starts it
+//   ⑧ ROUND 2 (the acceptance) — A USE IS A HAND-OVER THAT COMPLETED: a run the wrapper refuses before it reads (no masker; an
+//      update window's wrapper of another protocol) writes 0 `ok` lines and ONE `refused:<its code>` line (no «used N×»); a
+//      normal run's ONE `ok` is ①'s. A WAIT IS ANSWERED AS ONE: start() of a waiting service / task answers `state: waiting`
+//      and the hub's words (never «what its last run left running is stopped first»); the approval's words promise no card
+//      this version lacks and name the door that works now; a scheduled job whose fires would wait says so at its create;
+//      a start DEFERRED behind its last run whose values would wait answers the wait (the review); a stop that lands while
+//      the wrapper drains writes ONE `refused:stopped` and no `ok` (the job never ran).
+//      CONTROLS: r1's line written as the frame was queued · r1's start answer · a wrapper that ACKs before it reads the stop
+//   THE SCRATCH — every root a leg makes carries THIS run's pid in its name and is removed at the end (a failed leg too: the
+//   exit hook); the last line counts what is left of THIS run's prefix in the tmp dir — registered or not (0)
 import { createRequire } from 'module';
 import path from 'path';
 import fs from 'fs';
@@ -57,8 +67,14 @@ process.exit(Number(process.env.EXIT_CODE || 0));
 const jmOf = (src) => { if (!src) return JobManager; const m = new Module(JOBS, null); m.filename = JOBS; m.paths = Module._nodeModulePaths(path.dirname(JOBS)); m._compile(src, JOBS); return m.exports.JobManager; };
 const swap = (src, from, to) => { const n = src.split(from).length - 1; if (n !== 1) throw new Error(`mutant anchor ×${n}: ${from.slice(0, 60)}`); return src.replace(from, to); };
 
+// round 2 (the acceptance: ~15 roots per run left in /tmp, a tmpfs whose INODES ran out once): every root is ours to remove
+const ROOTS = new Set(), PREFIX = `vs-vjob-${process.pid}-`;
+const ours = () => { try { return fs.readdirSync(os.tmpdir()).filter((n) => n.startsWith(PREFIX)).map((n) => path.join(os.tmpdir(), n)); } catch { return []; } };   // the review: counted in the tmp dir, never only in the set
+const sweepRoots = () => { for (const r of new Set([...ROOTS, ...ours()])) { try { fs.rmSync(r, { recursive: true, force: true }); } catch { } } return ours().length; };
+process.on('exit', () => { sweepRoots(); });
 async function world(tag, { jobs = null, wrap = WRAP_SRC, masker = true, dataDir = null, vault = null } = {}) {
-  const root = dataDir ? path.dirname(dataDir) : fs.mkdtempSync(path.join(os.tmpdir(), `vs-vjob-${tag}-`));
+  const root = dataDir ? path.dirname(dataDir) : fs.mkdtempSync(path.join(os.tmpdir(), `${PREFIX}${tag}-`));
+  ROOTS.add(root);
   const dd = dataDir || path.join(root, 'data');
   if (!dataDir) {
     if (masker) fs.symlinkSync(path.join(REPO, 'src'), path.join(root, 'src'));
@@ -134,6 +150,9 @@ async function legLocked() {
   const job = W.jm.jobs.get(r.job.id);
   const blocked = JSON.stringify(W.vault.blockedSummary());
   row(job.state === 'waiting' && job.waitFor === 'vault' && job.runs.length === 0 && job.supervise.consecutiveFails === 0 && blocked.includes('Background job'), 'locked ⇒ waiting for the vault: no run, no counted failure, the lock\'s ONE helper names the job', { state: job.state, blocked });
+  const st = W.jm.start(job);
+  rows.startAnswer = st;
+  row(st.ok && st.state === 'waiting' && st.waitFor === 'vault' && st.after === VJ.waitWords('vault') && /⚙ System ▸ Vault…/.test(st.after) && job.state === 'waiting' && job.runs.length === 0, 'round 2: start() of the waiting service answers its WAIT — state waiting, the hub\'s words (where a person unlocks it) — never «what its last run left running is stopped first»', st);
   for (let i = 0; i < 6; i++) W.jm._spawn(job, 'restart-policy');
   row(job.state === 'waiting' && job.runs.length === 0 && job.supervise.consecutiveFails === 0 && !job.supervise.parkedAt, 'six more locked starts: still waiting — never parked by a lock');
   await W.vault.unlock(PW);
@@ -177,6 +196,8 @@ async function legApproval() {
   const r = W.create({});
   const job = W.jm.jobs.get(r.job.id);
   row(job.state === 'waiting' && job.waitFor === 'approval' && job.runs.length === 0, 'a value the hub MINTED waits for the owner\'s approval (no run)');
+  const st = W.jm.start(job), words = String(st.after || '');
+  row(st.ok && st.state === 'waiting' && st.waitFor === 'approval' && job.runs.length === 0 && /arrives in a later VibeSpace update/.test(words) && /nothing can approve it/.test(words) && /vibespace-vault put/.test(words) && !/starts by itself once they do/.test(words), 'round 2: start() of the waiting task answers its wait in words that promise NO card this version lacks — and name the door that works now (an entry the agent puts)', st);
   W.grants.set('vault-job', 'secrets:agent:conv-a/tok#secret', { to: [{ kind: 'conversation', key: 'conv-a', jobs: [job.id] }] }, 'test');
   await W.until(() => W.got().length === 1 && job.state === 'done');
   const minted = W.vault.secretGet('agent:conv-a/tok').value.toString();
@@ -192,6 +213,7 @@ async function legCronStopped(jobs = null) {
   const task = { cmd: { argv: [process.execPath, path.join(W.root, 'prog.js'), path.join(W.root, 'out')], cwd: W.root }, vault: ['TOK=vault://agent:conv-a/tok'] };
   const r = W.jm.create({ kind: 'cron', name: 'cron', schedule: { everyMs: 3600e3 }, action: { type: 'spawn-task', task }, owner: { conversation: { id: 'conv-a' }, sessionId: 'w-a', createdBy: 'agent', groupsSnapshot: [] } }, { conversationId: 'conv-a', groups: new Set(), isUser: true });
   const cron = W.jm.jobs.get(r.job && r.job.id);
+  row(!!r.vaultWait && r.vaultWait.waitFor === 'vault' && r.vaultWait.words === VJ.waitWords('vault'), 'round 2: a scheduled job created while its fires would wait says so at once (`vaultWait`: the hub\'s words beside «scheduled»)', r.vaultWait);
   W.jm._fireCron(cron, 'test');
   const child = [...W.jm.jobs.values()].find((j) => j.cronParent === (cron && cron.id));
   row(!!child && child.state === 'waiting' && child.waitFor === 'vault' && child.runs.length === 0, 'a scheduled run fired while locked waits (its cron\'s task carried the reference)', r.error || (child && child.state));
@@ -203,18 +225,79 @@ async function legCronStopped(jobs = null) {
   W.end();
   return rows;
 }
-async function legNoMasker() {
+async function legNoMasker(jobs = null) {
   const rows = [], row = (c, n, e) => rows.push([c, n, e]);
-  const W = await world('nomask', { masker: false }), S = SENT('nomask');
+  const W = await world(jobs ? 'nomaskm' : 'nomask', { masker: false, jobs }), S = SENT('nomask');
   W.put(S); W.release();
   const r = W.create({});
   const job = W.jm.jobs.get(r.job.id);
-  await W.until(() => ['done', 'failed'].includes(job.state));
+  await W.until(() => ['done', 'failed'].includes(job.state) && W.uses(job.id).length > 0);
   const log = fs.readFileSync(job.runs[0].log, 'utf8');
   row(W.got().length === 0 && /refused: the log masker \(src\/vault-run\.js\) could not be loaded/.test(log) && !log.includes(S), 'no masker beside the wrapper ⇒ not started, by name (the job never ran, its value never reached the log)', log.slice(0, 300));
+  const u = W.uses(job.id), counted = (W.vault.useCounts() || {})['agent:conv-a/tok'];
+  rows.okLines = u.filter((x) => x.outcome === 'ok').length;
+  row(u.length === 1 && u[0].outcome === 'refused:masker_missing' && rows.okLines === 0 && !(counted && counted.uses), 'round 2: …and its use line says so — 0 `ok` lines, ONE `refused:masker_missing` (the wrapper never acknowledged the frame; no «used N×»)', { u, counted });
   W.end();
   return rows;
 }
+async function legWindow() {
+  const rows = [], row = (c, n, e) => rows.push([c, n, e]);
+  const W = await world('window', { wrap: swap(WRAP_SRC, 'const PROTO = 3;', 'const PROTO = 4;') }), S = SENT('window');
+  W.put(S); W.release();
+  const r = W.create({});
+  const job = W.jm.jobs.get(r.job.id);
+  await W.until(() => !['up', 'starting'].includes(job.state) && W.uses(job.id).length > 0);
+  const u = W.uses(job.id);
+  row(W.got().length === 0 && u.length === 1 && u[0].outcome === 'refused:update_window' && !u.some((x) => x.outcome === 'ok'), 'round 2: a wrapper of another protocol (an update in flight) never read the frame ⇒ 0 `ok` lines, ONE `refused:update_window`', { u, state: job.state });
+  W.end();
+  return rows;
+}
+async function mutantStart() {
+  const name = 'CONTROL — r1\'s start answer (no wait answer): «what its last run left running is stopped first» for a waiting service — RED on the copy';
+  try {
+    const jobs = swap(swap(JOBS_SRC, "      if (job.state === 'waiting') return this._waitAnswer(job); // lane vault-job-road r2: it waits for its values — nothing is «stopped first»\n", ''), "      if (vw) return { ok: true, state: 'waiting', waitFor: vw.waitFor, after: `${after} — and its vault values would wait now: ${vw.words}` };\n", '');   // r1 had neither answer
+    const W = await world('mutstart', { jobs }); W.put(SENT('ms')); W.vault.lock('door');
+    const job = W.jm.jobs.get(W.create({ kind: 'service', restart: 'never' }).job.id);
+    const st = W.jm.start(job);
+    W.end();
+    return [st.state !== 'waiting' && /stopped first/.test(String(st.after)), name, st];
+  } catch (e) { return [false, name, `the copy could not be built (${e.message})`]; }
+}
+// the review: a start DEFERRED behind its last run (something it left still being cleared — `_pending`, held open here: the
+// deferral never fires) whose values would wait now answers the wait — r2's first cut answered «stopped first» and the CLI «started»
+async function legDeferred() {
+  const rows = [], row = (c, n, e) => rows.push([c, n, e]);
+  const W = await world('defer'); W.put(SENT('defer')); W.vault.lock('door');
+  const job = W.jm.jobs.get(W.create({ kind: 'service', restart: 'never' }).job.id);
+  W.jm.stop(job);
+  W.jm._pending = () => true; W.jm._clearBefore = () => new Promise(() => { });
+  const st = W.jm.start(job);
+  row(st.ok && st.state === 'waiting' && st.waitFor === 'vault' && String(st.after).endsWith(`and its vault values would wait now: ${VJ.waitWords('vault')}`) && job.state !== 'up' && job.runs.length === 0, 'round 2 (the review): a start deferred behind its last run whose values would wait now answers the WAIT (the CLI prints «waiting», never «started»)', st);
+  delete job._starting; W.end();
+  return rows;
+}
+// the review: a STOP that lands while the wrapper drains (the frame held back 600 ms in a jobs.js copy; the stop sent once the
+// wrapper's SIGTERM handler is installed — its SigCgt) ⇒ the job never ran, ONE `refused:stopped`, no `ok`
+const sigCaught = (pid, n) => { const m = /^SigCgt:\s*([0-9a-f]+)$/m.exec(procRead(pid, 'status')); return !!m && ((BigInt('0x' + m[1]) >> BigInt(n - 1)) & 1n) === 1n; };
+const HELD = (() => { try { return swap(JOBS_SRC, '    s.end(frame, zero);\n  }', '    setTimeout(() => s.end(frame, zero), 600);\n  }'); } catch { return null; } })();
+async function legStopDrain(wrap = WRAP_SRC) {
+  const rows = [], row = (c, n, e) => rows.push([c, n, e]);
+  if (!HELD) { row(false, 'round 2: a stop while the wrapper drains — the jobs.js copy could not be built (its anchor is missing)'); return rows; }
+  const W = await world(wrap === WRAP_SRC ? 'stopdrain' : 'stopdrainm', { jobs: HELD, wrap }); W.put(SENT('sd')); W.release();
+  const job = W.jm.jobs.get(W.create({}).job.id);
+  const wpid = job.proc && job.proc.pid;
+  for (let i = 0; i < 100 && !sigCaught(wpid, 15); i++) await nap(10);
+  const armed = sigCaught(wpid, 15);
+  W.jm.stop(job);
+  await W.until(() => W.uses(job.id).length > 0 && !['up', 'starting'].includes(job.state));
+  const u = W.uses(job.id);
+  rows.okLines = u.filter((x) => x.outcome === 'ok').length;
+  row(armed && W.got().length === 0 && u.length === 1 && u[0].outcome === 'refused:stopped' && rows.okLines === 0, 'round 2 (the review): a stop that lands while the wrapper drains ⇒ the job never ran, ONE `refused:stopped`, no `ok` (the ACK only after the stop is read)', { armed, u, got: W.got().length });
+  W.end();
+  return rows;
+}
+const EARLY_ACK = (() => { try { return swap(WRAP_SRC, '      if (stopping) { for (const v of r.values) v.fill(0); stoppedBefore(); }\n', '      try { fs.writeSync(3, Buffer.from([VJ.ACK])); } catch { }\n      if (stopping) { for (const v of r.values) v.fill(0); stoppedBefore(); }\n'); } catch { return null; } })();
+const QUEUED = (() => { try { return swap(JOBS_SRC, '    s.end(frame, zero);\n  }', "    s.end(frame, zero);\n    note('ok');\n  }"); } catch { return null; } })();   // r1's line, written as the frame was queued
 // ── ⑦ the mutants: each a world on a patched copy; red(…) = the rule broke ──
 async function mutant(name, { jobs = null, wrap = WRAP_SRC }, red) {
   try {
@@ -255,9 +338,9 @@ async function mutantLock() {
   return [red, 'CONTROL — a lock counted as a failure: RED on the copy (parked after six locked starts)'];
 }
 
-const [handed, locked, crash, boot, bootMut, approval, noMasker, mutLock, cronStopped, cronMut, ...muts] = await Promise.all([
+const [handed, locked, crash, boot, bootMut, approval, noMasker, noMaskerMut, windowRows, startMut, mutLock, deferred, stopDrain, stopDrainMut, cronStopped, cronMut, ...muts] = await Promise.all([
   legHanded(), legLocked(), legCrash(), legBoot(), legBoot(swap(JOBS_SRC, 'const vj = VJ.refsOf(job).length ? this._vaultGate(job, trigger) : null;', "const vj = VJ.refsOf(job).length && trigger !== 'boot' ? this._vaultGate(job, trigger) : null;")),
-  legApproval(), legNoMasker(), mutantLock(), legCronStopped(),
+  legApproval(), legNoMasker(), QUEUED ? legNoMasker(QUEUED) : { okLines: -1 }, legWindow(), mutantStart(), mutantLock(), legDeferred(), legStopDrain(), EARLY_ACK ? legStopDrain(EARLY_ACK) : { okLines: -1 }, legCronStopped(),
   legCronStopped(swap(swap(JOBS_SRC, '    if (!job.cronParent) return true;\n', '    return true;\n'), "    if (job.kind === 'cron') for (const k of this.jobs.values()) if (k.cronParent === job.id) this._settleWait(k, 'its schedule was stopped');", '')), ...MUTANTS.map(([n, o, red]) => mutant(n, o, red)),
 ]);
 let pass = 0, fail = 0;
@@ -272,10 +355,20 @@ ok(boot.after, 'the unlock starts it — with its value');
 print('⑤ AN APPROVAL', approval);
 print('⑥ NO MASKER, NO START', noMasker);
 print('⑥b A STOPPED SCHEDULE STARTS NOTHING', cronStopped);
+print('⑥c AN UPDATE WINDOW\'S WRAPPER (round 2)', windowRows);
+print('⑥d A DEFERRED START · A STOP WHILE IT DRAINS (round 2, the review)', [...deferred, ...stopDrain]);
 console.log('⑦ MUTANTS');
 ok(!bootMut.waited, 'CONTROL — a locked boot starts it (the gate skipped at the replay): RED on the copy');
 ok(mutLock[0], mutLock[1]);
 ok(!!cronMut.started, 'CONTROL — a stopped schedule\'s waiting run is still started at the unlock (its two guards removed): RED on the copy');
 for (const [c, n, e] of muts) ok(c, n, e);
+ok(noMaskerMut.okLines > 0, 'CONTROL — r1\'s use line (written as the frame was queued): an `ok` line for the run the wrapper refused — RED on the copy', QUEUED ? { okLines: noMaskerMut.okLines } : 'the copy could not be built (its anchor is missing)');
+ok(startMut[0], startMut[1], startMut[2]);
+ok(stopDrainMut.okLines > 0, 'CONTROL — a wrapper that ACKs before it reads the stop: an `ok` line for a job that never ran — RED on the copy', EARLY_ACK ? { okLines: stopDrainMut.okLines } : 'the copy could not be built (its anchor is missing)');
+// THE SCRATCH: the jobs this suite started have ended (each leg waits for its end or stops it); a wrapper still booting could make
+// its run dir again — swept twice, 300 ms apart, and what is left is counted
+let left = sweepRoots(); await nap(300); left = sweepRoots();
+ok(left === 0, `every scratch root this run made (${ROOTS.size} registered; ${PREFIX}* counted in the tmp dir, registered or not) is removed`, { left });
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
+console.log(`scratch roots left: ${left}`);
 process.exit(fail ? 1 : 0);

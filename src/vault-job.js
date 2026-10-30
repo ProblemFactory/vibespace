@@ -18,6 +18,9 @@
  *     itself (it saw it) ⇒ go; a value the hub MINTED (the agent never saw it) or a free entry ⇒ go only on a `vault-job` grant
  *     row (src/grant-model.js — ONE row per entry, the member = the job's owner conversation, its `jobs` naming THIS job — a
  *     scheduled run's: its cron), else WAIT `approval`. The row's writer is lane vault-job-approval; this file only reads it.
+ *     Round 2 (the acceptance's MAJOR — «no silent failures; every refusal names a door»): THIS version has no writer and no
+ *     card, so the approval wait's words say so and name the door that works NOW (an entry the agent PUT); the lock's words name
+ *     where a person unlocks it. The CLI's first line is the wait (never «started») — data/bin/vibespace-job.
  *   · THE HAND-OFF (`fdPlan`, `envOf`, `specOf`, `encodeFrame` / `decodeFrame`): the hub writes ONE frame to the wrapper's fd 3
  *     — the names and lengths in its head, the bytes raw (never a JSON string of a value: every copy can be zeroed); the wrapper
  *     gives NAME the job's fd FD_BASE + i (fd 3 is the memory gate's — data/bin/job-wrapper.js GATE_EXEC) and the env only
@@ -36,6 +39,8 @@ const DRAIN_MS = 5000;                  // the wrapper reads its frame within th
 const DOOR = 'vault-job';               // the grant door (src/grant-model.js DOORS) — an approval names the job
 const USE_DOOR = 'service';             // the `vault-use` line's door: a value handed to a job at a start
 const MAGIC = 'VSJ1';                   // the frame's first bytes (the protocol of the hand-off, never a value)
+const ACK = 0x06;                       // round 2: the wrapper's ONE byte back on fd 3 — the frame read whole (the hand-over completed)
+const REFUSED_RE = /^[a-z][a-z0-9_]{0,40}$/;   // the wrapper's refusal code (its exit.json `refused`)
 const RESERVED_RE = /^VIBESPACE_/;      // the hub's own env names
 const WAITS = Object.freeze(['vault', 'approval']);
 
@@ -53,8 +58,9 @@ const WORDS = Object.freeze({
   entry_too_short_to_mask: VR.WORDS.entry_too_short_to_mask,
   vault_not_set_up: 'the vault is not set up on this instance — there is no value to hand the job',
   payload_too_large: `the job's vault values are larger than ${PAYLOAD_MAX / 1024} KiB together — the job was not started`,
-  wait_vault: VB.agentWords('the job waits (a wait, never a failure) and starts by itself once a person unlocks it on this instance\'s page'),
-  wait_approval: 'waiting for the owner to approve this job\'s use of its vault values — it starts by itself once they do',
+  wait_vault: VB.agentWords('the job waits (a wait, never a failure) and starts by itself once a person unlocks it on this instance\'s page (⚙ System ▸ Vault…)'),
+  // round 2: THE TRUTH OF THIS VERSION — no approval card exists yet (lane vault-job-approval); never a promise of one that will not come
+  wait_approval: 'waiting for the user\'s approval of this job\'s vault values (a key the user stored, or a value the hub minted) — the approval card arrives in a later VibeSpace update, so in this version nothing can approve it and the job does not start; to run it now, store the key as this conversation\'s own entry (vibespace-vault put <name> --stdin — a value you put needs no approval; it takes the key in hand, so a value the hub minted, which you never saw, cannot be put), then rm this job and create it again with --vault NAME=vault://agent:<this conversation>/<name>',
 });
 
 const refuse = (code, extra = {}) => ({ ok: false, code, words: WORDS[code] || code, ...extra });
@@ -206,9 +212,19 @@ function decodeFrame(buf, plan) {
 
 /** The job's state line while it waits. */
 const waitWords = (w) => (w === 'approval' ? WORDS.wait_approval : WORDS.wait_vault);
+/** Round 2 — A USE IS A HAND-OVER THAT COMPLETED: a start the wrapper never acknowledged (no ACK before its fd 3 closed) → the
+ *  start's `vault-use` outcome from the wrapper's exit record (`exit` = its exit.json | null): `refused:update_window` (a
+ *  wrapper of another protocol — an update in flight), `refused:stopped` (a stop before it read), `refused:<its code>`
+ *  (masker_missing, vault_shape, spec_refused, values_late, values_too_large, values_unreadable, no_channel), else
+ *  `refused:not_started` (it wrote no record — killed). Never 'ok': no program was given the value. */
+function refusedOutcome(exit) {
+  const e = exit && typeof exit === 'object' ? exit : {};
+  const code = e.reason === 'update_window' ? 'update_window' : e.stop ? 'stopped' : REFUSED_RE.test(String(e.refused || '')) ? e.refused : 'not_started';
+  return `refused:${code}`;
+}
 
 module.exports = {
-  MAX, NAME_RE, FD_BASE, PAYLOAD_MAX, DRAIN_MS, DOOR, USE_DOOR, MAGIC, WAITS, WORDS,
+  MAX, NAME_RE, FD_BASE, PAYLOAD_MAX, DRAIN_MS, DOOR, USE_DOOR, MAGIC, ACK, WAITS, WORDS,
   refsOf, parseVault, ownerOf, ownerKeysOf, jobIdsOf, familyOf, approvedBy, verdictOf,
-  fdPlan, envOf, specOf, planOfSpec, encodeFrame, decodeFrame, waitWords,
+  fdPlan, envOf, specOf, planOfSpec, encodeFrame, decodeFrame, waitWords, refusedOutcome,
 };

@@ -11,9 +11,11 @@
  *   · `payload(v)` — the values read NOW (unlocked: `secretGet`, each a Buffer, the caller's copy) into ONE frame; every value
  *     buffer is zeroed once framed, and the frame is the spawner's to zero once the wrapper has it. A value under the scrubber's
  *     floor (MIN_MASK_BYTES) is refused: the wrapper could not mask it in the job's log.
- *   · `noteUses(job, v, actor)` — ONE `vault-use` line per value per start (door `service`, by `job`, the owner conversation,
- *     ONE receipt per start) through the engine's ONE writer (`noteUse`). The hub hands the value; whether the program reads it
- *     is the program's — the line says it was given, its outcome `ok`.
+ *   · `noteUses(job, v, actor, outcome)` — ONE `vault-use` line per value per start (door `service`, by `job`, the owner
+ *     conversation, ONE receipt per start) through the engine's ONE writer (`noteUse`), written once the hand-over ENDED
+ *     (round 2): `ok` (used) when the wrapper acknowledged the frame (VJ.ACK — it holds the values; whether the program reads
+ *     them is the program's), else `refused:<the wrapper's code>` (VJ.refusedOutcome — not used, no «last used», never counted
+ *     as the actor's failure: src/vault-use.js counts).
  *   · `blocked(actor)` — the lock's ONE helper (`vault.blocked`): the lock's one For-you item names the job (never a new item).
  *   · `onChange(fn)` — fn(why) after an unlock (`vault-unlocked`) and after a `vault-job` row changed (`vault-approved`): the
  *     engine re-judges every waiting job (src/jobs.js vaultChanged).
@@ -64,12 +66,13 @@ function create({ vault, grants = () => null, log = () => { } } = {}) {
     } finally { zero(); }
   }
 
-  function noteUses(job, v, actor) {
+  function noteUses(job, v, actor, outcome = 'ok') {
     if (typeof vault.noteUse !== 'function') return null;
     const receipt = `vr-${crypto.randomBytes(8).toString('hex')}`;
     const o = VJ.ownerOf(job);
+    const handed = outcome === 'ok';
     for (const r of v.refs) {
-      try { vault.noteUse(r.entry, { by: 'job', door: VJ.USE_DOOR, conv: o.conv || o.scope || null }, { outcome: 'ok', used: true, purpose: `Background job ${job.id}`, actor, receipt, store: 'secrets' }); }
+      try { vault.noteUse(r.entry, { by: 'job', door: VJ.USE_DOOR, conv: o.conv || o.scope || null }, { outcome: handed ? 'ok' : String(outcome), used: handed, purpose: `Background job ${job.id}`, actor, receipt, store: 'secrets' }); }
       catch (e) { log(`[vault-job] the use line of ${job.id} could not be written (${(e && e.code) || 'error'})`); }
     }
     return receipt;
