@@ -166,6 +166,7 @@ function probe({ sockets = [], stats = [], reads = [], timeoutMs = PROBE_MS } = 
     const end = () => { if (settled) return; settled = true; clearTimeout(t); abandon(ch); finish(); };
     try { ch = cp.spawn(process.execPath, ['-e', PROBE_CHILD, JSON.stringify({ sockets, stats, reads })], { stdio: ['ignore', 'pipe', 'ignore'], env: {} }); } catch { return finish(); }
     const t = setTimeout(end, timeoutMs);
+    ch.stdout.setEncoding('utf8');   // across chunks (round 9): a read's text is a file's
     ch.stdout.on('data', (d) => {
       buf += d;
       let i;
@@ -201,6 +202,7 @@ function runShort(cmd, args, timeoutMs = PROBE_MS) {
     const end = (v) => { if (settled) return; settled = true; clearTimeout(t); abandon(ch); resolve(v); };
     try { ch = cp.spawn(cmd, args, { stdio: ['ignore', 'pipe', 'ignore'], env: { PATH: process.env.PATH || '/usr/bin:/bin', HOME, LANG: process.env.LANG || 'C.UTF-8', XDG_RUNTIME_DIR: process.env.XDG_RUNTIME_DIR || '' } }); } catch { return resolve(null); }   // a named env (the spawn-env census §94): what journalctl needs, nothing else
     const t = setTimeout(() => end(out || null), timeoutMs);
+    ch.stdout.setEncoding('utf8');   // across chunks (round 9)
     ch.stdout.on('data', (d) => { out += d; });
     ch.on('exit', () => setImmediate(() => end(out)));
     ch.on('error', () => end(null));
@@ -603,6 +605,7 @@ function follow(file, onRecord, onStall, deadline = Date.now() + PROBE_MS, onLat
   // records after it — round 8: what it holds beyond the history is shown; round 7 only said its last message)
   const ready = new Promise((r) => { isReady = r; setTimeout(() => { late = true; r(null); }, Math.max(0, deadline - Date.now())).unref(); });
   try { ch = cp.spawn(process.execPath, ['-e', FOLLOW_CHILD, JSON.stringify(file)], { stdio: ['ignore', 'pipe', 'ignore'], env: {} }); } catch { return { stop() { }, ready: Promise.resolve({ last: null, blind: false, text: null }) }; }
+  ch.stdout.setEncoding('utf8');   // decoded ACROSS chunks (round 9): its `ready` carries the whole buffer, and a character split at a pipe chunk's edge decoded on its own is U+FFFD — in the history, and in the union's keys
   ch.stdout.on('data', (d) => {
     last = Date.now(); if (stalled) { stalled = false; onStall(false); }
     buf += d;
@@ -647,6 +650,7 @@ async function cmdChat(q, opts) {
   const metaFile = row.buffer ? row.buffer.replace(/\.buf$/, '.json') : null;
   let chunkOpen = false, leaving = false, rl = null, failed = 0, histDone = false;
   const waiters = [];   // {id, resolve} — a receipt for OUR frame (ack by id) or a torn line (nack) after our push
+  const sent = [];      // {ids, shown} — every line THIS CLI sent (echoed when sent): never printed again by a late baseline
   const out = (line) => {
     if (chunkOpen) { process.stdout.write('\n'); chunkOpen = false; }
     if (rl && tty) { readline.clearLine(process.stdout, 0); readline.cursorTo(process.stdout, 0); process.stdout.write(line + '\n'); rl.prompt(true); }
@@ -692,6 +696,21 @@ async function cmdChat(q, opts) {
   const onTail = (rec, how) => { if (!histDone) early.push([rec, how]); else if (fresh(rec, how)) onRecord(rec, how); };
   const stallWords = (on) => dim(on ? `  (the session's buffer ${tildeOf(row.buffer)} stopped answering — its mount? replies will show once it answers)` : '  (the buffer answers again)');
   const idle = { stop() { }, ready: Promise.resolve({ last: null, blind: false, text: null }) };
+  // What THIS CLI sent is never printed by it again (round 9 — a line piped at the deadline was in that baseline, and shown
+  // twice): the anchor's rule for the late print too — the person's record holding the frame's id (the wrapper copies it:
+  // msgId), else the person's words; each sent line once, the newest record first (an older line with the same words is
+  // the history's, and stays)
+  const notSent = (text) => {
+    const rows = text.split('\n'), left = sent.map((x) => ({ ...x, used: false }));
+    for (let i = rows.length - 1; i >= 0 && left.some((x) => !x.used); i--) {
+      let rec = null; try { rec = JSON.parse(rows[i]); } catch { continue; }
+      const ls = LI.recordLines(rec); if (!ls.length || ls.some((m) => m.who !== 'you')) continue;
+      const mid = rec && typeof rec.msgId === 'string' && rec.msgId ? rec.msgId : null, shown = ls.map((m) => m.text).join('\n');
+      const x = (mid && left.find((y) => !y.used && y.ids.includes(mid))) || left.slice().reverse().find((y) => !y.used && y.shown === shown);
+      if (x) { x.used = true; rows[i] = ''; }
+    }
+    return rows.filter((r) => r).join('\n') + '\n';
+  };
   // a baseline LATER than the deadline (round 8 — round 7 only SAID its last message, and a line sent meanwhile had its
   // reply inside it: the follower never reports a baseline's records): what the buffer holds beyond the history printed is
   // SHOWN, once — the union of the history's read and the baseline, its records from the buffer; with no history printed,
@@ -700,7 +719,7 @@ async function cmdChat(q, opts) {
     if (leaving || !b || typeof b.text !== 'string') return;
     const from = `its buffer ${tildeOf(row.buffer)} answered after the ${PROBE_MS / 1000} s`;
     if (!hist.msgs.length) {
-      const m = LI.historyOf(b.text, { max: opts.n });
+      const m = LI.historyOf(notSent(b.text), { max: opts.n });
       if (m.length) { out(dim(`  (${from} — its last ${m.length} message(s):)`)); for (const x of m) out(msgText(x, agentName)); }
       return;
     }
@@ -790,8 +809,10 @@ async function cmdChat(q, opts) {
     if (readOnly) { out(dim(`  (read-only: ${readOnly} — not sent)`)); failed++; return; }
     out(msgText({ who: 'you', text }, agentName));
     let id = newId();
+    const mine = { ids: [id], shown: LI.recordLines({ type: 'user', message: { role: 'user', content: text } }).map((m) => m.text).join('\n') };
+    sent.push(mine);
     let r = await sendOne(LI.fillFrame(row.input.line, { text, id }), id);
-    if (r === 'nack') { out(dim('  (the line arrived TORN — two senders at once? — and the wrapper refused it; sending it once more)')); id = newId(); r = await sendOne(LI.fillFrame(row.input.line, { text, id }), id); }
+    if (r === 'nack') { out(dim('  (the line arrived TORN — two senders at once? — and the wrapper refused it; sending it once more)')); id = newId(); mine.ids.push(id); r = await sendOne(LI.fillFrame(row.input.line, { text, id }), id); }
     if (r === 'ack' || r === 'no-receipts') { if (r === 'no-receipts') out(dim('  (sent — this session\'s wrapper writes no receipt; the reply below is the sign it arrived)')); return; }
     failed++;
     out(dim(r === 'nack' ? '  (torn again — the line did not reach the session; send it again)' : r === 'unsent' ? '  (the line was not sent)' : `  (not acknowledged in ${RECEIPT_MS / 1000} s — the line may not have reached the session)`));

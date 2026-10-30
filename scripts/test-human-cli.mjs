@@ -39,10 +39,15 @@
 //      placeholder'd copy, its transcript record late: shown once); a baseline LATER than the deadline shows what it holds
 //      beyond the history, and a line sent meanwhile gets its ack from the late receipts baseline. Each with its mutant RED.
 //      §10 as round 8 prints it: §10b/§10c's reply SHOWN once (round 7 said it was not)
+//   §12 round 9: THE BUFFER'S TEXT DECODED ACROSS PIPE CHUNKS — the follower's `ready` carries the whole buffer: a CJK buffer
+//      as the history's ONLY source (no transcript — every codex / acp / agy chat) is printed with no U+FFFD and every
+//      message exact; a CJK prompt matched by the union's person's-words key is shown once; WHAT THIS CLI SENT IS NEVER
+//      PRINTED AGAIN by a late baseline with no history (by the frame's id, by the person's words, an older line with the
+//      same words kept). §12a and §12c each with its mutant RED (round 8: U+FFFD, the sent line twice).
 // RED on the base (6428c67e): no data/bin/vibespace, no index; RED on round 1 (5a0b2463): §0, the live-hub attach, the
 // receipt, the piped number, the bare refusal; RED on round 3 (ea0cecce): §7 and the killed session's .receipts (§2);
 // RED on round 4 (ad114fd78): §8. RED on round 5 (bd110027f): §9. RED on round 6 (74cf819d2): §10a, §10b's second half, §10c. RED on round 7 (cd2239445): §10b's
-// second half, §10c, §11a–§11d.
+// second half, §10c, §11a–§11d. RED on round 8 (eb2ecc5df): §12a–§12c.
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -606,14 +611,14 @@ console.log('§7 round 4 — the follower keys on identity, the baseline before 
   // held7 grown: the follower plants into one file (`buf` / `tr`), the transcript gets `later` LAG ms after that (a transcript
   // behind its buffer), this process appends `trAt` to the transcript at a time, the receipts follower held RFOL ms, and a
   // piped line the stand-in master `answer`s (an ack into the receipts file + a reply into the buffer, as a wrapper does)
-  const held8 = async (cli, id, { FOL = 0, RFOL = 0, stalled = false, buf: pb = [], tr: pt = [], later = [], LAG = 0, trAt = null, line = null, answer = null, wait = 0 }) => {
+  const held8 = async (cli, id, { FOL = 0, RFOL = 0, stalled = false, buf: pb = [], tr: pt = [], later = [], LAG = 0, trAt = null, line = null, answer = null, wait = 0, trInit, bufInit, n = null }) => {
     const bf = path.join(BUFS7, id + '.buf'), tr = path.join(R4, id + '.jsonl'), sock = path.join(R4, id + '.sock'), rc = LI.receiptsFileOf(bf);
     await master(sock, (l) => { if (answer) answer(l, { bf, rc }); }); const hub = await fakeHub(false);
     const input = { line: { type: 'user', message: { role: 'user', content: [{ type: 'text', text: LI.FRAME_TEXT }] } }, stop: { type: 'control_request', request_id: LI.FRAME_ID, request: { subtype: 'interrupt' } } };
     index7([row7(id, { socketPath: sock }, { transcript: tr, input })], answer ? null : hub.address().port);
     const H0 = said('HISTORY-0 HCR8', { uuid: 'u8-0' });
-    fs.writeFileSync(tr, H0 + '\n');
-    if (stalled) execFileSync('mkfifo', [bf]); else fs.writeFileSync(bf, H0 + '\n');
+    if (trInit === 'fifo') execFileSync('mkfifo', [tr]); else if (trInit !== null) fs.writeFileSync(tr, (trInit || [H0]).map((x) => x + '\n').join(''));   // null = no transcript at all (round 9)
+    if (stalled) execFileSync('mkfifo', [bf]); else fs.writeFileSync(bf, (bufInit || [H0]).map((x) => x + '\n').join(''));
     if (answer) { fs.writeFileSync(bf.replace(/\.buf$/, '.json'), JSON.stringify({ caps: { receipts: true } })); fs.writeFileSync(rc, ''); }
     const W = (ms) => (ms ? `Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ${ms});` : '');
     const L = (a) => JSON.stringify(a.map((x) => x + '\n').join(''));
@@ -624,9 +629,9 @@ console.log('§7 round 4 — the follower keys on identity, the baseline before 
     const t0 = Date.now(); let first = null;
     const tk2 = trAt ? setTimeout(() => fs.appendFileSync(tr, trAt.recs.map((x) => x + '\n').join('')), trAt.at) : null;
     const out = await new Promise((resolve) => {
-      const ch = spawn(process.execPath, ['-r', PRE, cli, 'chat', id, '--wait', String(wait)], { env: { ...CLI_ENV, HOME: H7 }, stdio: ['pipe', 'pipe', 'pipe'] });
+      const ch = spawn(process.execPath, ['-r', PRE, cli, 'chat', id, '--wait', String(wait), ...(n ? ['-n', String(n)] : [])], { env: { ...CLI_ENV, HOME: H7 }, stdio: ['pipe', 'pipe', 'pipe'] });
       kids.push(ch);
-      let o = ''; ch.stdout.on('data', (d) => { if (first == null) first = Date.now() - t0; o += d; }); ch.stderr.on('data', (d) => { o += d; });
+      let o = ''; ch.stdout.setEncoding('utf8'); ch.stderr.setEncoding('utf8'); ch.stdout.on('data', (d) => { if (first == null) first = Date.now() - t0; o += d; }); ch.stderr.on('data', (d) => { o += d; });
       ch.stdin.end(line || '');
       const tk = setTimeout(() => { try { ch.kill('SIGKILL'); } catch { } }, 20000);
       ch.on('exit', (code) => { clearTimeout(tk); resolve(o + `\n[exit ${code}]`); });
@@ -673,6 +678,44 @@ console.log('§7 round 4 — the follower keys on identity, the baseline before 
     const r2 = (x) => count(x.out, 'REPLY-R2 HCR8');
     ok('A LATE BASELINE IS SHOWN, A LATE RECEIPT HEARD (round 8 — the residual round 7 left: a send waits on a `ready` the deadline resolves): the reply in the late buffer baseline is shown ONCE beyond the history and the ack in the late receipts baseline names the line (exit 0); without the late baseline 0 replies, without the late acks «not acknowledged»',
       r2(s) === 1 && !/not acknowledged/.test(s.out) && s.code === 0 && r2(m1) === 0 && /not acknowledged/.test(m2.out), `R2 ${r2(s)}× exit ${s.code} · nolate ${r2(m1)}× · nolateacks acked=${!/not acknowledged/.test(m2.out)} | ${s.out.slice(-420)}`);
+  }
+  console.log('§12 round 9 — the buffer decoded across pipe chunks; what this CLI sent never printed again');
+  const FOLLOW_DECODE = "ch.stdout.setEncoding('utf8');   // decoded ACROSS chunks";
+  const fffd = (x) => count(x, '�');
+  const cjk = (N, W) => Array.from({ length: N }, (_, i) => said(`M${i}-HCR9 ` + '中文消息内容测试'.repeat(Math.ceil(W / 8)).slice(0, W), { uuid: 'u9-' + i }));
+  const exact = (o, recs) => recs.filter((x) => o.includes(JSON.parse(x).message.content[0].text)).length;
+  { // §12a THE BUFFER THE ONLY SOURCE — no transcript (as for every codex / acp / agy chat), 100 CJK messages (~610 KB): the
+    // follower's `ready` line carries it through a pipe, many chunk edges inside a character (round 8: U+FFFD — r4 / r7 0)
+    const shape = { trInit: null, bufInit: cjk(100, 2000), n: 100 };
+    const a = await held8(CLI, 'sess-r9-utf8', shape), m = await mutantRun('nodecode', [[FOLLOW_DECODE, '//']], (f, id) => held8(f, id, shape));
+    ok('THE BUFFER\'S TEXT DECODED ACROSS PIPE CHUNKS (round 9): a CJK buffer as the history\'s only source is printed with NO U+FFFD and all 100 messages exact; the follower decoding each chunk on its own (a mutant — round 8) prints U+FFFD',
+      a.src === 'buffer' && fffd(a.out) === 0 && exact(a.out, shape.bufInit) === 100 && fffd(m.out) >= 1, `${a.src} U+FFFD ${fffd(a.out)} exact ${exact(a.out, shape.bufInit)}/100 · mutant U+FFFD ${fffd(m.out)} exact ${exact(m.out, shape.bufInit)}/100 | ${a.out.slice(0, 200)}`);
+  }
+  { // §12b THE UNION'S WEAK KEY ON CJK — a blind baseline (the newest buffer record a frame the wrapper copied, no uuid), the
+    // transcript holding the same prompt (70 000 CJK characters) with its uuid: matched by the person's words — shown once
+    const text = 'PROMPT-HCR9 ' + '中文消息内容测试'.repeat(8750) + ' END-HCR9', H0 = said('HISTORY-0 HCR8', { uuid: 'u8-0' });
+    const shape = { trInit: [H0, rec({ type: 'user', uuid: 'p9-1', message: { role: 'user', content: text } })], bufInit: [H0, rec({ type: 'user', _fromWebui: true, msgId: 'm9-1', message: { role: 'user', content: [{ type: 'text', text }] } })] };
+    const u = await held8(CLI, 'sess-r9-weak', shape), m = await mutantRun('nodecodeweak', [[FOLLOW_DECODE, '//']], (f, id) => held8(f, id, shape));
+    ok('THE UNION\'S PERSON\'S-WORDS KEY ON CJK (round 9): a blind baseline whose newest record is a copied frame of a 70 000-character CJK prompt — the transcript\'s record and the copy are ONE (shown once, from the transcript, no U+FFFD)',
+      count(u.out, 'PROMPT-HCR9') === 1 && fffd(u.out) === 0 && u.src === 'transcript' && !/only the buffer holds yet/.test(u.out), `PROMPT ${count(u.out, 'PROMPT-HCR9')}× U+FFFD ${fffd(u.out)} ${u.src} · mutant PROMPT ${count(m.out, 'PROMPT-HCR9')}× U+FFFD ${fffd(m.out)} | ${u.out.slice(0, 300)}`);
+  }
+  { // §12c WHAT THIS CLI SENT IS NEVER PRINTED AGAIN — no history at the deadline (the transcript a FIFO nobody writes), both
+    // followers held 2.3 s, a line piped at the deadline: the stand-in wrapper acks it and records it into its buffer as the
+    // person's message (acp-wrapper's record('user'), chat-wrapper's webui_copy: the frame's msgId — or none) + the reply,
+    // all inside the late baseline, whose own last messages are printed: the sent line ONCE (round 8: twice); the person's
+    // OLDER line with the same words is the history's — kept
+    const R2 = said('REPLY-R2 HCR8', { uuid: 'u8-2' }), LINE = '一行中文 A SENT LINE HCR9';
+    const answer = (noid) => (l, { bf, rc }) => { let o = null; try { o = JSON.parse(l); } catch { } if (!o || !o.msgId) return; fs.appendFileSync(rc, rec({ type: '_stdin_ack', timestamp: Date.now(), msg_id: o.msgId }) + '\n'); fs.appendFileSync(bf, rec({ type: 'user', _fromWebui: true, ...(noid ? {} : { msgId: o.msgId }), message: { role: 'user', content: [{ type: 'text', text: o.message.content[0].text }] } }) + '\n' + R2 + '\n'); };
+    const late = (o) => ({ trInit: 'fifo', FOL: 2300, RFOL: 2300, line: LINE + '\n', wait: 4, ...o });
+    const byId = late({ answer: answer(false) }), byWords = late({ answer: answer(true) });
+    const older = late({ answer: answer(false), bufInit: [said('HISTORY-0 HCR8', { uuid: 'u8-0' }), rec({ type: 'user', uuid: 'p9-old', message: { role: 'user', content: LINE } }), said('OLDER-REPLY HCR9', { uuid: 'u9-or' })] });
+    const i = await held8(CLI, 'sess-r9-echo', byId), w = await held8(CLI, 'sess-r9-echow', byWords), o = await held8(CLI, 'sess-r9-echoo', older);
+    const m = await mutantRun('rawlate', [['LI.historyOf(notSent(b.text), { max: opts.n })', 'LI.historyOf(b.text, { max: opts.n })']], (f, id) => held8(f, id, byId));
+    const L = (x) => count(x.out, LINE), R = (x) => count(x.out, 'REPLY-R2 HCR8'), lateW = (x) => /answered after the 2 s — its last \d+ message/.test(x.out);
+    const keptOlder = (x) => { const k = x.out.indexOf('answered after the 2 s'); return k >= 0 && count(x.out.slice(k), LINE) === 1 && x.out.indexOf(LINE, k) < x.out.indexOf('OLDER-REPLY HCR9'); };
+    ok('WHAT THIS CLI SENT IS NEVER PRINTED AGAIN (round 9): a line piped into a late baseline with no history — shown ONCE (its echo) by the frame\'s id and by the person\'s words alone, the reply once, acknowledged; the person\'s OLDER line with the same words is the history\'s and is shown; the late print as round 8 had it (a mutant) shows the line twice',
+      L(i) === 1 && R(i) === 1 && lateW(i) && i.code === 0 && L(w) === 1 && R(w) === 1 && L(o) === 2 && keptOlder(o) && L(m) === 2,
+      `id ${L(i)}×/${R(i)}× exit ${i.code} · words ${L(w)}×/${R(w)}× · older ${L(o)}× kept ${keptOlder(o)} · mutant ${L(m)}× | ${i.out.slice(-360)}`);
   }
   for (const k of kids) { try { if (k.exitCode == null && k.signalCode == null) k.kill('SIGKILL'); } catch { } }   // only this section's own children
   for (const s of servers) { try { s.close(); } catch { } }

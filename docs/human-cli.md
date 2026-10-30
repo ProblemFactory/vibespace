@@ -56,7 +56,7 @@ or a unique part of its name — the command then shows the name and asks before
   again at the moment they are printed; when the session's log already holds a newer message that file does not have
   yet, both are shown together and the line above them says so. If that file did not answer in time, the line under
   the messages says how old they are; if the log answers only after the first 2 s, what it holds beyond them is shown
-  then.
+  then. Your own line is shown once, when you send it.
 
 ## Over ssh
 
