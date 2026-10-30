@@ -589,7 +589,7 @@ require('./job-wrapper.real.js');
 const { JobManager } = require(jobsJs);
 const M = new JobManager({ dataDir, broadcast() { }, notifyUser() { }, log() { } }); M.init();
 const caller = { conversationId: 'conv-T', sessionId: 'sess-T', sessionCreatedAt: 1, groups: new Set(['T-g']) };
-const r = M.create({ kind: 'task', name: 'spec-probe', cmd: { argv: [process.execPath, probe, dump, release] }, envFrom: ['PROBE_SECRET'], restart: 'never', owner: ${JSON.stringify(owner)} }, caller);
+const r = M.create({ kind: 'task', name: 'spec-probe', cmd: { argv: [process.execPath, probe, dump, release], env: { PROBE_SECRET: ${JSON.stringify(SECRET)} } }, restart: 'never', owner: ${JSON.stringify(owner)} }, caller);
 const j = r.job && M.jobs.get(r.job.id);
 fs.writeFileSync(out, JSON.stringify(j ? { id: j.id, tokenHash: j.tokenHash, ctl: path.dirname(j.runs[j.runs.length - 1].log) } : { error: r.error }));
 setInterval(() => { }, 1000);
@@ -600,7 +600,6 @@ setInterval(() => { }, 1000);
       fs.mkdirSync(path.join(D, 'bin'), { recursive: true });
       fs.writeFileSync(path.join(D, 'bin', 'job-wrapper.js'), FRONT);
       fs.writeFileSync(path.join(D, 'bin', 'job-wrapper.real.js'), wrapperSrc);
-      fs.writeFileSync(path.join(D, 'job-secrets.json'), JSON.stringify({ PROBE_SECRET: SECRET }), { mode: 0o600 });
       const err = fs.openSync(path.join(D, 'hub.err'), 'w');
       const hub = spawn(process.execPath, [HUB, jobsJs, D, out, PROBE, dump, release], { env: { ...process.env, ...PLANT }, stdio: ['ignore', 'ignore', err] });
       fs.closeSync(err);
@@ -1123,6 +1122,111 @@ setInterval(() => { }, 1000);
         let leak16 = 0; for (let i = 0; i + 8 <= body16.length; i++) if (seen16.includes(body16.slice(i, i + 8))) leak16++;
         ok(cj.name === 'nightly-build-of-the-whole-staging-stack-ghp_«redacted»' && !leak16, 'r7 THE RECORD\'S NAME: belted WHOLE, then cut — no piece of a token the 64-char cut would split reaches the record, the author\'s echo, a viewer\'s snapshot or digest', JSON.stringify({ name: cj.name, leak16 })); }
       X.end();
+    }
+  }
+  // 14. lane job-secrets-retire (design-vault-service-secret D10): A JOB'S SECRET COMES FROM THE VAULT ONLY. The old road —
+  //     `envFrom` NAMES resolved at spawn from data/job-secrets.json (plaintext, 0600, no client ever wrote it) into the job's
+  //     ENV — is retired. The store PLANTED beside REAL runs: a spec naming envFrom is refused BY NAME at every door the vet
+  //     runs (create — agent and owner, start, a cron's fire, a keep-up restart, a boot replay) and never runs; nothing in
+  //     the engine opens the file (a read hook on fs, the engine in this process); a record with the empty list every
+  //     record carries loads and runs unchanged, its env and its log tail untouched by the store. RED on the base: create
+  //     succeeds and the child's env carries the planted value; the log tail reads the store.
+  {
+    const crypto = require('crypto');
+    const rdir = path.join(dir, 'secrets-retire');
+    fs.mkdirSync(path.join(rdir, 'bin'), { recursive: true });
+    fs.copyFileSync(new URL('../data/bin/job-wrapper.js', import.meta.url), path.join(rdir, 'bin', 'job-wrapper.js'));
+    const PLANTED = 'planted-' + crypto.randomBytes(12).toString('hex');   // built at runtime: no secret-shaped literal in the tree
+    fs.writeFileSync(path.join(rdir, 'job-secrets.json'), JSON.stringify({ PROBE_SECRET: PLANTED }), { mode: 0o600 });
+    const sha = (v) => crypto.createHash('sha256').update(String(v)).digest('hex');
+    const WORDS = "envfrom_retired: a job's secret comes from the vault: --vault NAME=vault://… — see vibespace-docs jobs";
+    // THE READ HOOK: every fs door that could open the store, counted by path — restored in the finally below
+    const opened = [], hooked = [];
+    const hook = (obj, name) => {
+      const orig = obj[name];
+      if (typeof orig !== 'function') return;
+      obj[name] = function (p, ...a) { if (/job-secrets\.json$/.test(String(p))) opened.push(name); return orig.call(this, p, ...a); };
+      hooked.push([obj, name, orig]);
+    };
+    for (const n of ['readFileSync', 'openSync', 'readFile', 'open', 'createReadStream']) hook(fs, n);
+    for (const n of ['readFile', 'open']) hook(fs.promises, n);
+    const rlog = [], rdeps = { ...deps, dataDir: rdir, log: (...a) => rlog.push(a.join(' ')) };
+    const engines14 = [];
+    const boot14 = () => { const e = new JobManager(rdeps); e.init(); engines14.push(e); return e; };
+    // the job: its env as names → value hashes (and its own words on the log), then it ends
+    const DUMP = (tag) => path.join(rdir, `env-${tag}.json`);
+    const probe = (tag) => ({ argv: [process.execPath, '-e', `const c = require('crypto'); require('fs').writeFileSync(${JSON.stringify(DUMP(tag))}, JSON.stringify(Object.fromEntries(Object.entries(process.env).map(([k, v]) => [k, c.createHash('sha256').update(v).digest('hex')])))); console.log('said: ' + (process.env.SHOWN || ''))`] });
+    // a leak = the store's NAME in the env, or its value under any key but SHOWN (the old-shape job's OWN cmd.env carries it there)
+    const leakOf = (tag) => { try { const e = JSON.parse(fs.readFileSync(DUMP(tag), 'utf8')); return 'PROBE_SECRET' in e || Object.entries(e).some(([k, h]) => k !== 'SHOWN' && h === sha(PLANTED)); } catch { return null; } };
+    const stamp = { owner, access: { view: 'group', control: 'session' }, supervise: { consecutiveFails: 0, parkedAt: null }, runs: [], createdAt: Date.now() };
+    try {
+      const R0 = boot14();
+      // (a) CREATE — the agent and the owner, every shape that can name it
+      const leaked = [];
+      for (const [who, cl] of [['agent', caller], ['owner', { isUser: true, groups: new Set() }]]) {
+        const shapes = {
+          task: { kind: 'task', cmd: probe(`create-${who}-task`), envFrom: ['PROBE_SECRET'], restart: 'never' },
+          service: { kind: 'service', cmd: probe(`create-${who}-service`), envFrom: ['PROBE_SECRET'], restart: 'never' },
+          '--every': { kind: 'cron', schedule: { everyMs: 3600e3 }, action: { type: 'spawn-task', task: { cmd: probe(`create-${who}-every`), envFrom: ['PROBE_SECRET'] } } },
+        };
+        for (const [shape, spec] of Object.entries(shapes)) {
+          const n0 = R0.jobs.size;
+          const r = R0.create({ ...spec, name: `retired-${who}-${shape}`, owner }, cl);
+          if (r.job && spec.kind !== 'cron') { await until(() => fs.existsSync(DUMP(`create-${who}-${shape}`)), 8000); if (leakOf(`create-${who}-${shape}`)) leaked.push(`${who} ${shape}`); }
+          ok(r.error === WORDS && !r.job && R0.jobs.size === n0, `envfrom_retired: the ${who}'s create of a ${shape} naming envFrom is refused BY NAME — no record, nothing runs`, r.error || `CREATED ${r.job && r.job.id}`);
+        }
+      }
+      ok(!leaked.length, 'envfrom_retired: the planted store reaches no job\'s env', `the child's env carried the planted value: ${leaked.join(', ')}`);
+      // (b) START — records persisted before the retirement (an older engine stored them): each refused by name, parked
+      const olds = {
+        task: { ...stamp, id: 'jb-0ld0e0f1', kind: 'task', name: 'old-envfrom-task', cmd: probe('start-task'), envFrom: ['PROBE_SECRET'], restart: 'never', desiredUp: false, state: 'done' },
+        service: { ...stamp, id: 'jb-0ld0e0f2', kind: 'service', name: 'old-envfrom-svc', cmd: probe('start-service'), envFrom: ['PROBE_SECRET'], restart: 'never', desiredUp: false, state: 'down' },
+        cron: { ...stamp, id: 'jb-0ld0e0f3', kind: 'cron', name: 'old-envfrom-cron', schedule: { everyMs: 3600e3 }, catchUp: 'once', action: { type: 'spawn-task', task: { cmd: probe('start-cron'), envFrom: ['PROBE_SECRET'] } }, desiredUp: false, state: 'stopped' },
+      };
+      for (const [shape, rec] of Object.entries(olds)) {
+        R0.jobs.set(rec.id, rec);
+        const r = R0.start(rec);
+        await sleep(300);
+        ok(r.error === WORDS && rec.state === 'failed' && rec.desiredUp === false && !(rec.runs || []).length && !fs.existsSync(DUMP(`start-${shape}`)), `envfrom_retired: start of an older ${shape} record naming envFrom is refused BY NAME — parked, no run`, `${JSON.stringify(r)} state=${rec.state} runs=${(rec.runs || []).length}`);
+      }
+      // (c) A CRON'S FIRE — a scheduled record persisted before: its child ({ ...action.task }) is refused at the spawn, both park
+      const cron = { ...stamp, id: 'jb-0ld0e0f4', kind: 'cron', name: 'old-envfrom-timer', schedule: { everyMs: 3600e3 }, catchUp: 'once', action: { type: 'spawn-task', task: { cmd: probe('fire'), envFrom: ['PROBE_SECRET'] } }, desiredUp: true, state: 'scheduled', nextFireAt: Date.now() - 1000 };
+      R0.jobs.set(cron.id, cron);
+      await R0._cronTick();
+      await sleep(800);
+      const kid = [...R0.jobs.values()].find((x) => x.cronParent === cron.id);
+      ok(cron.state === 'failed' && cron.desiredUp === false && cron.nextFireAt == null && kid && kid.state === 'failed' && !(kid.runs || []).length && !fs.existsSync(DUMP('fire'))
+        && R0.events.some((e) => e.jobId === kid.id && /^refused to run \((cron|boot)\): /.test(e.what || '') && (e.what || '').endsWith(WORDS)), 'envfrom_retired: a cron\'s fire of an older record naming envFrom is refused BY NAME at the spawn — child and timer park, nothing runs', `cron=${cron.state} kid=${kid && kid.state} runs=${kid && (kid.runs || []).length}`);
+      // (d) A KEEP-UP RESTART — the supervisor re-spawns the stored record: refused at the door, the service parks
+      const svc = { ...stamp, id: 'jb-0ld0e0f5', kind: 'service', name: 'old-envfrom-keepup', cmd: probe('restart'), envFrom: ['PROBE_SECRET'], restart: 'always', desiredUp: true, state: 'down' };
+      R0.jobs.set(svc.id, svc);
+      let threw = null;
+      try { R0._spawn(svc, 'restart-policy'); } catch (e) { threw = e.message; }
+      await sleep(300);
+      ok(threw === WORDS && svc.state === 'failed' && svc.desiredUp === false && !svc.runs.length && !fs.existsSync(DUMP('restart')), 'envfrom_retired: a keep-up restart of an older service naming envFrom is refused BY NAME at the door — parked', `threw=${threw} state=${svc.state}`);
+      ok(rlog.some((l) => /refused to run \(restart-policy\) — envfrom_retired$/.test(l)) && !rlog.some((l) => /refused to run .*vendor\/credential/.test(l)), 'envfrom_retired: the journal names the retired road, never the vendor pattern', rlog.filter((l) => /refused/.test(l)).join(' | '));
+      // (e) A BOOT REPLAY — a desiredUp service persisted before is not respawned by the next engine; and THE OLD SHAPE LOADS:
+      //     a record with the empty list (every fixture, every record written before) runs unchanged under the next engine
+      R0.jobs.set('jb-0ld0e0f6', { ...stamp, id: 'jb-0ld0e0f6', kind: 'service', name: 'old-envfrom-boot', cmd: probe('boot'), envFrom: ['PROBE_SECRET'], restart: 'always', desiredUp: true, state: 'down' });
+      R0.jobs.set('jb-0ld0e0f7', { ...stamp, id: 'jb-0ld0e0f7', kind: 'task', name: 'old-empty-list', cmd: { ...probe('empty'), env: { SHOWN: PLANTED } }, envFrom: [], restart: 'never', desiredUp: false, state: 'done' });
+      R0._save();
+      for (const t of R0._timers) clearInterval(t);
+      R0.shutdown();
+      const R1 = boot14();
+      await sleep(1500);
+      const boot = R1.jobs.get('jb-0ld0e0f6');
+      ok(R1.ready && boot && boot.state === 'failed' && boot.desiredUp === false && !(boot.runs || []).length && !fs.existsSync(DUMP('boot')), 'envfrom_retired: the boot replay of an older desiredUp service naming envFrom is refused BY NAME — nothing runs', `state=${boot && boot.state} runs=${boot && (boot.runs || []).length}`);
+      const empty = R1.jobs.get('jb-0ld0e0f7');
+      const st = R1.start(empty);
+      ok(!st.error && await until(() => empty.state === 'done' && fs.existsSync(DUMP('empty')), 15000), 'THE OLD SHAPE LOADS: a record with `envFrom: []` loads and runs unchanged — no migration', JSON.stringify(st) + ' state=' + (empty && empty.state));
+      ok(leakOf('empty') === false, 'THE OLD SHAPE LOADS: …and the planted store reaches none of its env', `leak=${leakOf('empty')}`);
+      const snap = R1.snapshot(empty, { tail: 5 });
+      ok(Array.isArray(snap.envFrom) && !snap.envFrom.length && (snap.logTail || '').split('\n').includes('said: ' + PLANTED) && !/\[secret\]/.test(snap.logTail || ''),
+        'NOTHING READS THE FILE: the job\'s own words reach its log tail as written — the retired store shapes no answer', JSON.stringify({ envFrom: snap.envFrom, tail: snap.logTail }));
+      ok(opened.length === 0, 'NOTHING READS THE FILE: through every door above (create, start, fire, restart, boot, a run, its log tail and last line) the engine opened data/job-secrets.json 0 times', `opened ${opened.length}× (${[...new Set(opened)].join(', ')})`);
+    } finally {
+      for (const e of engines14) { try { for (const t of e._timers || []) clearInterval(t); e.shutdown(); } catch { } }
+      for (const [obj, name, orig] of hooked) obj[name] = orig;
     }
   }
 } finally {

@@ -242,7 +242,6 @@
   "/api/integrations/:id",
   "/api/jobs",
   "/api/jobs-escapes",
-  "/api/jobs-secrets",
   "/api/jobs/:id",
   "/api/layout-history",
   "/api/layouts",

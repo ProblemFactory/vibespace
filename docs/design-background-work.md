@@ -70,7 +70,7 @@ retained logs and exit causes; boot = adopt-first; first-class visualization.
   it is NOT part of this design's M1–M3.
 - **§ban-safety by policy + guardrails** (red team: structure alone cannot see
   inside stored argv): refusal of every command a job can run — argv/env/cwd/
-  health-cmd/`envFrom` names, a schedule's `action.task` included (B-f8c7) — at
+  health-cmd (a named `envFrom` is refused by name since 2.369.365, §7), a schedule's `action.task` included (B-f8c7) — at
   create, at start and at every spawn (the one vet, `vetSpec`), matching an obvious read of a subscription
   sign-in (owner decision 2026-10-03, verify r3: every harness descriptor's
   account dir, auth file and credential-dir variable, the keychain item,
@@ -100,7 +100,7 @@ broadcast `jobs-updated`), per-run logs `data/job-logs/<jobId>/<runTs>.log`.
   "note": "…", "hostId": null,       // null = this instance; machine id in M2
 
   "cmd": { "argv": [...], "cwd": "/abs", "env": { /* NON-secret; values render to owner/user only, never in jobs-updated payloads */ } },
-  "envFrom": ["MY_TOKEN"],           // resolved at spawn from the user-managed secrets store (§7)
+  "envFrom": [],                     // RETIRED (2.369.365, §7): records keep the empty list; a named one is refused `envfrom_retired`
 
   // service
   "restart": "on-failure|always|never",
@@ -293,8 +293,7 @@ since blocks stack vertically) → user submits → answers append to
 with `--stdin-open`, each answer is also written to the job's stdin as one JSON
 line (covers curses-less simple scripts). Multi-round: post another panel.
 Everything renders escaped; the user's answers are visible to owner/user only
-(they may contain codes — treated like secrets in logs: literal-redacted if
-they match envFrom values, and never echoed in `list`).
+(they may contain codes — never echoed in `list`).
 
 **Tier 2 (M3, only if tier 1 proves insufficient): sandboxed HTML app** — agent
 writes an HTML file rendered in `<iframe sandbox="allow-scripts">` (no
@@ -306,17 +305,27 @@ same-origin, no cookies) with a tiny postMessage bridge (`vsui.submit(obj)`,
 - `view`/`control` ∈ session|group|all; agent defaults view=group (fallback
   `all` when ungrouped), control=session. Owner = conversation-lineage match,
   verified on the fast path; mismatch ⇒ surfaced for re-owning in the panel.
-- **Mutation ≠ control**: editing cmd/env/envFrom/action/schedule/panel = owner
+- **Mutation ≠ control**: editing cmd/env/action/schedule/panel = owner
   or user only; group/all control covers start/stop/kill/ack only (no
   cross-session prompt/argv injection).
 - **User locks stick**: `lockedBy:'user'` refuses agent access-edits (teaching
   error) and survives rm+recreate via a (scope,name) tombstone (30 d).
 - **Secrets, honest threat model**: same-UID processes can ultimately read
-  anything; `envFrom` keeps secrets out of argv//proc-cmdline, the store,
-  broadcasts, and the UI — not away from a determined same-UID reader. Secrets
-  file written from the user UI only (0600); server literal-redacts known
-  secret values from log tails/progress/answers before returning or
-  broadcasting; cmd.env values render to owner/user only. M2 remote jobs get a
+  anything — the defence is against ACCIDENT roads (a value shown in a
+  transcript, a tool's output, a log, env, argv, a file, a card), not against a
+  process that wants the value. **A job's secret comes from the vault only**
+  (design-vault-service-secret; lane job-secrets-retire, 2.369.365): the old
+  road — `envFrom` names resolved at spawn from a PLAINTEXT 0600
+  `data/job-secrets.json` (written by a cookie route no client ever called)
+  into the job's ENV, and literal-redacted from log tails by re-reading that
+  file — is RETIRED. A spec naming `envFrom` (itself or its `action.task`) is
+  refused `envfrom_retired` («a job's secret comes from the vault: --vault
+  NAME=vault://… — see vibespace-docs jobs») at every door the one vet runs:
+  create, start, and every spawn (a keep-up restart, a boot replay, a cron's
+  fire). `GET/POST /api/jobs-secrets` are gone (404) and nothing reads the
+  file. Records keep `envFrom: []` and run unchanged (no migration); `show`
+  prints `envFrom:[…]` only for a record that still names one. cmd.env values
+  render to owner/user only. M2 remote jobs get a
   security subsection before implementation (device-side 0600 files over the
   mux never argv; no subscription-account material in remote job env; watch
   re-arm on daemon reconnect as a three-touch assert).
@@ -348,7 +357,7 @@ CREATE (one verb; flags pick the kind)
       --cwd DIR              default: caller session cwd
       --context "TEXT"       amnesia-proof brief, ≤8KB, echoed on poll (@file to read from file)
       --env K=V …            non-secret env (repeatable)
-      --secret NAME …        envFrom reference (values managed in the panel UI, never via CLI)
+      (a secret: from the vault only — design-vault-service-secret; the `--secret` / envFrom road never shipped in the CLI and is retired, `envfrom_retired`, §7)
       --view session|group|all     default group
       --control session|group|all  default session
       --host MACHINE         M2; default local

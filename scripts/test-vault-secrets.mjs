@@ -644,6 +644,34 @@ console.log('⑧ THE MIGRATION TABLE — a production-shaped data dir, every r2 
   // the boundary, stated by the census: what stays a file (TLS key, vendor CLI files, …) is the exception list — none of it is planted here
   const VAULT_SRC = fs.readFileSync(path.join(REPO, 'src/vault.js'), 'utf8');
   ok(/SECRETS_AT_REST/.test(VAULT_SRC) && R('src/vault.js').SECRETS_AT_REST.filter((r) => r.exception).map((r) => r.what).join(' · ').length > 0, 'the exceptions are a NAMED list (src/vault.js SECRETS_AT_REST): ' + R('src/vault.js').SECRETS_AT_REST.filter((r) => r.exception).map((r) => r.what).join(' · '));
+  // lane job-secrets-retire (design-vault-service-secret D10): data/job-secrets.json — a PLAINTEXT 0600 store of a job's
+  // secrets that no client wrote and no SECRETS_AT_REST row named — is RETIRED, not migrated: a job's secret comes from the
+  // vault. Planted in this production-shaped dir: the REAL jobs wiring on a REAL express app answers GET / POST
+  // /api/jobs-secrets 404 (no name, no value, the file byte-identical after), and NO READER IS LEFT — no file under src/,
+  // server.js or data/bin names the store or its routes outside a comment (the engine's runs: test-jobs-engine §14).
+  {
+    const JV = 'job-sec-' + crypto.randomBytes(10).toString('hex');   // built at runtime: no secret-shaped literal in the tree
+    const jsf = path.join(D, 'job-secrets.json');
+    fs.writeFileSync(jsf, JSON.stringify({ PLANTED_TOKEN: JV }), { mode: 0o600 });
+    const was = fs.readFileSync(jsf);
+    const express = require('express');
+    const app = express(); app.use(express.json());
+    R('src/server/jobs-wiring.js').create({ app, dataDir: D, broadcastAll() {}, userTodos: { add() {}, resolveByJob() { return 0; } }, log() {}, serverSetting: () => undefined,
+      taskGroups: null, activeSessions: null, deliver: { peerReachable: () => false, deliverToConversation: async () => ({ ok: false, reason: 'no lane' }) } });   // routes only: no initAfterListen, no engine
+    const srv = http.createServer(app);
+    await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+    const at = `http://127.0.0.1:${srv.address().port}/api/jobs-secrets`;
+    const g = await fetch(at), gt = await g.text();
+    const pp = await fetch(at, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'PLANTED_TOKEN', value: 'over' }) }), pt = await pp.text();
+    await new Promise((r) => srv.close(r));
+    ok(g.status === 404 && pp.status === 404 && ![gt, pt].some((t) => t.includes('PLANTED_TOKEN') || t.includes(JV)) && fs.readFileSync(jsf).equals(was),
+      'data/job-secrets.json (planted, retired): GET and POST /api/jobs-secrets on the REAL jobs wiring answer 404 — no name, no value, the file untouched', { get: g.status, post: pp.status, body: gt.slice(0, 120) });
+    const files = (dir) => fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? files(path.join(dir, e.name)) : e.isFile() ? [path.join(dir, e.name)] : []));
+    const code = (f) => fs.readFileSync(f, 'utf8').replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '');
+    const readers = [...files(path.join(REPO, 'src')).filter((f) => f.endsWith('.js')), path.join(REPO, 'server.js'), ...files(path.join(REPO, 'data/bin'))]
+      .filter((f) => /job-secrets\.json|\/api\/jobs-secrets/.test(code(f))).map((f) => path.relative(REPO, f));
+    ok(readers.length === 0, 'NO READER LEFT: no file under src/, server.js or data/bin names data/job-secrets.json or /api/jobs-secrets outside a comment', readers);
+  }
   for (const [what, , , good] of TABLE) void what, void good;
 }
 

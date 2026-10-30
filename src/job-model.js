@@ -81,17 +81,25 @@ const VENDOR_PATTERNS = [/\.credentials\.json/i, /\.claude\/\.cred/i, /data\/sub
 // B-f8c7 (lane job-vendor-ban): THE CENSUS of what a job can RUN — the vet judged spec.cmd's argv/env alone, but a cron's
 // child is `{ ...action.task }` and the CLI's --every/--cron/--at shape carries its command ONLY there: `curl
 // api.anthropic.com` on a timer was created and fired while the same plain task was refused. Every command-bearing piece:
-// cmd WHOLE (argv, env, cwd), the health probe, the secret NAMES pulled in (--env-from), and action.task as a spec of its own.
+// cmd WHOLE (argv, env, cwd), the health probe, the secret NAMES pulled in (envFrom — retired below), and action.task as a spec of its own.
 function jobCommandParts(spec, depth = 0) {
   if (!spec || typeof spec !== 'object' || depth > 3) return [];
   const a = spec.action && typeof spec.action === 'object' ? spec.action : null;
   return [spec.cmd, spec.health, spec.envFrom, ...(a ? jobCommandParts(a.task, depth + 1) : [])];
 }
+// lane job-secrets-retire (design-vault-service-secret D10): A JOB'S SECRET COMES FROM THE VAULT ONLY. The old road —
+// `envFrom` NAMES resolved at spawn from data/job-secrets.json (a plaintext 0600 file outside the vault law, no client
+// ever wrote it) into the job's ENV — is retired: a spec that still names one, itself or in its action.task, is refused
+// BY NAME at every door the vet runs (create, start, every spawn: a restart, a boot replay, a cron's fire). An EMPTY list
+// (every record written before) runs unchanged — no migration.
+const namesEnvFrom = (spec, depth = 0) => !!spec && typeof spec === 'object' && depth <= 3
+  && ((Array.isArray(spec.envFrom) ? spec.envFrom.length > 0 : !!spec.envFrom) || namesEnvFrom(spec.action && spec.action.task, depth + 1));
 // the refusal names the credential in words (`platform.claude.com`), never the regex that caught it
 const vendorWord = (re) => re.word || re.source.replace(/\(\?!.*$/, '').replace(/\\b|\\/g, '').replace(/\}\?/g, '');
 // one vet, every door: create (agent or owner), start, and _spawn itself (src/jobs.js) — a keep-up restart, a boot replay,
 // a cron fire's child and a record persisted before this census widened are all judged where they would run
 function vetSpec(spec) {
+  if (namesEnvFrom(spec)) return { ok: false, code: 'envfrom_retired', error: "envfrom_retired: a job's secret comes from the vault: --vault NAME=vault://… — see vibespace-docs jobs" };
   const re = VENDOR_PATTERNS.find((r) => r.test(JSON.stringify(jobCommandParts(spec))));
   if (re) return { ok: false, error: `refused: job spec matches a vendor/credential pattern (${vendorWord(re)}) — the command reads a subscription sign-in, and background use of a subscription login is the §ban-safety class that got a subscription banned. Calling an API with your own key is fine; run anything that needs the sign-in from an interactive session.` };
   return { ok: true };

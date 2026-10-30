@@ -43,7 +43,7 @@ ok(M.vetSpec({ cmd: { argv: ['npm', 'run', 'dev'] } }).ok, 'ordinary spec passes
 {
   const sh = (bad) => ['sh', '-c', bad ? 'jq .t ~/.claude/.credentials.json' : 'curl https://example.com/health'];
   const cwd = (bad) => (bad ? '/srv/vibespace/data/subs' : '/srv/vibespace/data/logs');
-  const secret = (bad) => [bad ? 'CLAUDE_CODE_OAUTH_TOKEN' : 'GITHUB_TOKEN'];
+  const secret = (bad) => (bad ? ['CLAUDE_CODE_OAUTH_TOKEN'] : []);   // lane job-secrets-retire: ANY named envFrom is refused (below) — the clean twin is the empty list every record carries
   const task = (t) => ({ kind: 'cron', schedule: { cron: '7 * * * *' }, action: { type: 'spawn-task', task: t } });
   const shapes = {
     'spec.cmd.argv (a plain task)': (b) => ({ kind: 'task', cmd: { argv: sh(b) } }),
@@ -110,6 +110,34 @@ ok(M.vetSpec({ cmd: { argv: ['npm', 'run', 'dev'] } }).ok, 'ordinary spec passes
   ok(starts.length === 1 && door > 0 && starts[0].index > door && starts[0].index < doorEnd, 'census: jobs.js starts a process in ONE place, behind the vet as _spawn\'s first act', `starts=${starts.length} door=${door}`);
   ok(/  create\(spec, caller\) \{\n[^\n]*\n    const vet = M\.vetSpec\(spec\);\n    if \(!vet\.ok\) return \{ error: vet\.error \};/.test(src) && /    if \(job\.kind === 'cron'\) \{\n      const vet = M\.vetSpec\(job\);[^\n]*\n      if \(!vet\.ok\) \{ this\._refuseRun\(job, vet, 'manual'\); return \{ error: vet\.error \}; \}/.test(src) && /try \{ this\._spawn\(job, 'manual'\); \} catch \(e\) \{ return \{ error: e\.message \}; \}/.test(src), 'census: create vets before it touches the record; start answers a cron at once and a task/service through the door');
   ok(/child = \{ \.\.\.a\.task, id: rid\(\)/.test(src) && /return \[spec\.cmd, spec\.health, spec\.envFrom, \.\.\.\(a \? jobCommandParts\(a\.task, depth \+ 1\) : \[\]\)\];/.test(fs.readFileSync(new URL('../src/job-model.js', import.meta.url), 'utf8')), 'census: a cron child is { ...action.task } and the vet recurses into action.task');
+}
+
+// lane job-secrets-retire (design-vault-service-secret D10): A JOB'S SECRET COMES FROM THE VAULT ONLY. The old road (envFrom
+// NAMES resolved at spawn from a plaintext data/job-secrets.json into the job's ENV) is retired: a spec that names envFrom —
+// itself, in its action.task, a cron child built from one — is refused BY NAME at every door the vet runs, one sentence; the
+// empty list every record carries (and no field at all) runs. RED on the base: the vet passed every named envFrom.
+{
+  const WORDS = "envfrom_retired: a job's secret comes from the vault: --vault NAME=vault://… — see vibespace-docs jobs";
+  const task = (t, schedule = { cron: '7 * * * *' }) => ({ kind: 'cron', schedule, action: { type: 'spawn-task', task: t } });
+  const cmd = { argv: ['./poll.sh'] };
+  const doors = {
+    'a plain task': (e) => ({ kind: 'task', cmd, ...e }),
+    'a service (--keep-up)': (e) => ({ kind: 'service', cmd, restart: 'always', ...e }),
+    'a scheduled run (--cron: action.task)': (e) => task({ cmd, ...e }),
+    'a scheduled run (--at: action.task)': (e) => task({ cmd, ...e }, { at: '2099-01-01T00:00:00Z' }),
+    'a scheduled run (--every: action.task)': (e) => task({ cmd, ...e }, { everyMs: 3600e3, jitterPct: 10 }),
+    'a cron CHILD record ({ ...action.task, cronParent })': (e) => ({ kind: 'task', cronParent: 'jb-p', cmd, ...e }),
+    'a cron whose OWN record names it (the parent)': (e) => ({ ...task({ cmd }), ...e }),
+  };
+  for (const [door, mk] of Object.entries(doors)) {
+    for (const [form, envFrom] of [['a list', ['PROBE_SECRET']], ['a bare string', 'PROBE_SECRET']]) {
+      const v = M.vetSpec(mk({ envFrom }));
+      ok(!v.ok && v.code === 'envfrom_retired' && v.error === WORDS, `envfrom_retired: ${door} naming envFrom (${form}) is refused BY NAME, one sentence`, v.error || 'PASSES');
+    }
+    ok(M.vetSpec(mk({ envFrom: [] })).ok && M.vetSpec(mk({})).ok, `envfrom_retired: ${door} with the empty list every record carries (or no field) runs — no migration`, M.vetSpec(mk({ envFrom: [] })).error);
+  }
+  const both = M.vetSpec({ kind: 'task', cmd: { argv: ['sh', '-c', 'jq .t ~/.claude/.credentials.json'] }, envFrom: ['GITHUB_TOKEN'] });
+  ok(!both.ok && both.code === 'envfrom_retired', 'envfrom_retired: a spec that also reads a sign-in is named by the retired road first — one refusal, one name', both.error);
 }
 
 // ── schedules ──

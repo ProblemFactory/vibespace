@@ -1466,7 +1466,7 @@ class JobManager {
       if (j.kind === 'service') this._teardownPublish(j);
       this._touch(j, { what: `refused to run (${trigger}): ${vet.error}` });
     }
-    this.d.log(`[jobs] ${job.id} refused to run (${trigger}) — vendor/credential pattern`);
+    this.d.log(`[jobs] ${job.id} refused to run (${trigger}) — ${vet.code || 'vendor/credential pattern'}`);   // lane job-secrets-retire: a refusal with a name (envfrom_retired) journals it
     this._save();
   }
   _spawn(job, trigger) {
@@ -1493,7 +1493,7 @@ class JobManager {
     // VIBESPACE_JOB_CWD: vibespace-browser's write fence lets a job save a screenshot / download there
     const spec = {
       argv: job.cmd.argv, cwd: job.cmd.cwd || process.cwd(),
-      env: jobEnv({ ...(job.cmd.env || {}), ...this._secretsFor(job), VIBESPACE_API: this.d.apiBase || `http://127.0.0.1:${process.env.PORT || 3456}`, VIBESPACE_JOB_ID: job.id, VIBESPACE_JOB_TOKEN: this._jobToken(job), ...(typeof job.cmd.cwd === 'string' && job.cmd.cwd[0] === '/' ? { VIBESPACE_JOB_CWD: job.cmd.cwd } : {}), PATH: path.join(this.d.dataDir, 'bin') + ':' + (process.env.PATH || '') }),
+      env: jobEnv({ ...(job.cmd.env || {}), VIBESPACE_API: this.d.apiBase || `http://127.0.0.1:${process.env.PORT || 3456}`, VIBESPACE_JOB_ID: job.id, VIBESPACE_JOB_TOKEN: this._jobToken(job), ...(typeof job.cmd.cwd === 'string' && job.cmd.cwd[0] === '/' ? { VIBESPACE_JOB_CWD: job.cmd.cwd } : {}), PATH: path.join(this.d.dataDir, 'bin') + ':' + (process.env.PATH || '') }),
       logCapBytes: 50 * 1024 * 1024, stdinOpen: !!job.stdinOpen,
       kind: job.kind === 'service' ? 'service' : 'task', // round 5 (the ruling): a service keeps what its run leaves running, a task's are stopped
       // round 4: the ASKED bound rides too — the cgroup rung caps it by what contains ITS scope, read once the scope exists
@@ -1729,15 +1729,6 @@ class JobManager {
     const cron = job.cronParent ? this.jobs.get(job.cronParent) : null;
     if (cron) cron.forYouLast = { ...(cron.forYouLast || {}), [copy]: { ...last, run: job.id } };
     return v;
-  }
-  _secretsFor(job) {
-    if (!job.envFrom || !job.envFrom.length) return {};
-    try {
-      const store = JSON.parse(fs.readFileSync(path.join(this.d.dataDir, 'job-secrets.json'), 'utf-8'));
-      const out = {};
-      for (const k of job.envFrom) if (store[k] !== undefined) out[k] = String(store[k]);
-      return out;
-    } catch { return {}; }
   }
   _jobToken(job) {
     if (!job._tokenRaw) { job._tokenRaw = 'jbt_' + crypto.randomBytes(16).toString('hex'); job.tokenHash = crypto.createHash('sha256').update(job._tokenRaw).digest('hex'); }
@@ -2524,12 +2515,12 @@ class JobManager {
         const fd = fs.openSync(logPath, 'r');
         const buf = Buffer.alloc(len);
         fs.readSync(fd, buf, 0, len, st.size - len); fs.closeSync(fd);
-        out.logTail = this._redact(buf.toString('utf-8')).split('\n').slice(-tail).join('\n');
+        out.logTail = buf.toString('utf-8').split('\n').slice(-tail).join('\n');
       } catch { out.logTail = ''; }
     }
     return out;
   }
-  /** the last non-empty line of a run's log (≤200 cp, secret-redacted);
+  /** the last non-empty line of a run's log (≤200 cp);
    *  '' when the log is missing or empty. Reads only the log's last 16 KiB. */
   _lastLogLine(job, run) {
     try {
@@ -2540,15 +2531,8 @@ class JobManager {
       const fd = fs.openSync(logPath, 'r');
       const buf = Buffer.alloc(len);
       fs.readSync(fd, buf, 0, len, st.size - len); fs.closeSync(fd);
-      return M.lastLineOf(this._redact(buf.toString('utf-8')), 200);
+      return M.lastLineOf(buf.toString('utf-8'), 200);
     } catch { return ''; }
-  }
-  _redact(text) { // literal-redact known secret values (§7)
-    try {
-      const store = JSON.parse(fs.readFileSync(path.join(this.d.dataDir, 'job-secrets.json'), 'utf-8'));
-      for (const v of Object.values(store)) if (v && String(v).length >= 6) text = text.split(String(v)).join('[secret]');
-    } catch { }
-    return text;
   }
   // injection surfaces (agent-routes): caller-filtered, budgeted in the model
   digestFor(caller, existingBytes) {

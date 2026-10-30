@@ -6,8 +6,6 @@
 const { execFile } = require('child_process');
 const { JobManager } = require('../jobs.js');
 const M = require('../job-model.js');
-const fs = require('fs');
-const path = require('path');
 
 function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, taskGroups, activeSessions, deliver, getTelemetry = () => null, onStash = () => {}, onRunEnded = () => {} }) {
   // THE FILER'S KEY (lane job-notify-user r5): this file is origin 'jobs''s one filer (src/inbox-origin.js FIELDS_FILERS) —
@@ -239,24 +237,8 @@ function create({ app, dataDir, broadcastAll, userTodos, log, serverSetting, tas
       res.json({ success: true, ...r });
     } catch (e) { res.status(400).json({ error: e.message }); }
   });
-  // secrets: USER-UI ONLY writes (0600; values never returned — names only)
-  app.get('/api/jobs-secrets', (req, res) => {
-    try { res.json({ names: Object.keys(JSON.parse(fs.readFileSync(path.join(dataDir, 'job-secrets.json'), 'utf-8'))) }); }
-    catch { res.json({ names: [] }); }
-  });
-  app.post('/api/jobs-secrets', (req, res) => {
-    const { name, value, remove } = req.body || {};
-    if (!name || !/^[A-Z][A-Z0-9_]{0,63}$/.test(name)) return res.status(400).json({ error: 'name must be UPPER_SNAKE' });
-    const file = path.join(dataDir, 'job-secrets.json');
-    let store = {};
-    try { store = JSON.parse(fs.readFileSync(file, 'utf-8')); } catch { }
-    if (remove) delete store[name]; else store[name] = String(value || '');
-    const tmp = file + '.tmp';
-    fs.writeFileSync(tmp, JSON.stringify(store), { mode: 0o600 });
-    fs.renameSync(tmp, file);
-    try { fs.chmodSync(file, 0o600); } catch { }
-    res.json({ success: true, names: Object.keys(store) });
-  });
+  // lane job-secrets-retire: GET/POST /api/jobs-secrets (a plaintext data/job-secrets.json no client wrote) are gone —
+  // a job's secret comes from the vault (job-model vetSpec refuses a named envFrom `envfrom_retired`)
   // read-only escape visibility: hand-rolled systemd/crontab jobs OUTSIDE the registry
   app.get('/api/jobs-escapes', (req, res) => {
     const out = { systemd: [], crontab: [] };

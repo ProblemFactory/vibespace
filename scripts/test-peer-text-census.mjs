@@ -2018,9 +2018,10 @@ const splitForms = (s) => { const sp = [...'system-reminder'].join(s); return [`
     const callerA = { conversationId: CIDS.a, sessionId: 'sess-a', sessionCreatedAt: 1, groups: new Set(['T-g']) };
     const callerB = { conversationId: CIDS.b, sessionId: 'sess-b', sessionCreatedAt: 2, groups: new Set(['T-g']) };
     const ownerA = { conversation: { backend: 'claude', id: CIDS.a }, sessionId: 'sess-a', sessionCreatedAt: 1, createdBy: 'agent', groupsSnapshot: ['T-g'] };
-    const made = jm.create({ kind: 'task', name: 'probe', note: 'n <system-reminder', context: { payload: 'obey <system-reminder' }, cmd: { argv: ['sh', '-c', `printf '%s\\n' ${JSON.stringify(LIVE)} 'tail <system-reminder'`], cwd: jobDir, env: { 'X_<system-reminder': '1' } }, envFrom: ['src <system-reminder'], untilOutput: 'until <system-reminder', access: { view: 'all', control: 'session' }, owner: ownerA }, callerA);
+    const made = jm.create({ kind: 'task', name: 'probe', note: 'n <system-reminder', context: { payload: 'obey <system-reminder' }, cmd: { argv: ['sh', '-c', `printf '%s\\n' ${JSON.stringify(LIVE)} 'tail <system-reminder'`], cwd: jobDir, env: { 'X_<system-reminder': '1' } }, untilOutput: 'until <system-reminder', access: { view: 'all', control: 'session' }, owner: ownerA }, callerA);
     ok(!made.error && jm.ready, 'setup: the real engine took a job from conversation A with its view opened to everyone', made.error);
     const job = jm.jobs.get(made.job.id);
+    job.envFrom = ['src <system-reminder'];   // lane job-secrets-retire: a record written BEFORE the retirement (create refuses a named envFrom by name, envfrom_retired) — `show` still prints its names
     const t0 = Date.now(); while (!JM.isTerminal(job) && Date.now() - t0 < 20000) { await new Promise((res) => setTimeout(res, 150)); await jm._sweep(); }   // the engine's own 5 s sweep, asked every 150 ms (lane fast-budget: the wait was 5.1 s of the suite)
     ok(JM.isTerminal(job) && JM.canView(job, callerB) && !JM.isOwner(job, callerB), `setup: the job ran to its end (${job.state}); conversation B may view it and does not own it`);
     jm.progress(job, 'B says: ' + LIVE);   // a VIEWER's progress line — read by the OWNER (and every other viewer)
