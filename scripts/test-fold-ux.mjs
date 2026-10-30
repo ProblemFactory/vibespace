@@ -1400,6 +1400,18 @@ for (const [size, metrics] of [[1280, D1280], [390, P390]]) {
 // on-screen px written as a CSS min-width: at UI scale 80 % 129 px for a 156 px minimum, names cut below it; at 125 %
 // fewer chips than fit. The real setting (localStorage `vibespace.uiScale`, applied at boot as the body's zoom), 1280.
 {
+  // int365 seam B (.365 — the .363 and .364 CI mirrors, heavy 3/6, red twice each: «201 vs 199» at 60 %): «the SAME CSS px» means
+  // ONE UNIT, not the same pixel — the minimum is text laid out at the scale, and the runner's fonts (DejaVu) drift 2 CSS px at
+  // zoom 0.6 where this box's drift 0–1. The bug this leg exists for is a UNIT MIX (r1: on-screen px written as CSS px — 129 for
+  // a 156 minimum at 80 %), an error of the zoom's factor: so the tolerance is the drift a scale has (2 % of the 100 % minimum,
+  // ≥ 1 px) AND it must still separate the unit mix at that zoom (|min100 × zoom − min100| beyond it). PURE control below on the
+  // runner's recorded numbers: RED under the old ±1, GREEN under this; the r1 shapes RED under both.
+  const sameUnit = (min, min100, zoom) => { const tol = Math.max(1, Math.round(0.02 * min100)); return { tol, ok: Math.abs(min - min100) <= tol && Math.abs(min100 * zoom - min100) > tol }; };
+  const oldRule = (min, min100) => Math.abs(min - min100) <= 1;
+  check('UI SCALE — the same-unit rule (int365 seam B), PURE: the runner\'s 2026-10-30 numbers (201 vs 199 at 60 %) were RED under ±1 and pass now; the unit mix stays RED (199 × 0.6 = 119 and 199 / 0.6 = 332 at 60 %, 199 × 0.8 = 159 at 80 %, 199 × 1.25 = 249 at 125 %)',
+    !oldRule(201, 199) && sameUnit(201, 199, 0.6).ok && sameUnit(200, 199, 0.8).ok && sameUnit(199, 199, 1.25).ok
+      && !sameUnit(119, 199, 0.6).ok && !sameUnit(332, 199, 0.6).ok && !sameUnit(159, 199, 0.8).ok && !sameUnit(249, 199, 1.25).ok,
+    JSON.stringify({ runner: sameUnit(201, 199, 0.6), r1at60: sameUnit(119, 199, 0.6), r1at80: sameUnit(159, 199, 0.8) }));
   const z100 = (await (async () => { await tcLoad(cdp, evaljs, D1280); await evaljs('window.__tc.open({ maximize: true })'); return evaljs('window.__tc.strip(window.__tc.holder())'); })());
   for (const pct of [60, 80, 125]) {
     await evaljs(`localStorage.setItem('vibespace.uiScale', '${pct}'); true`);
@@ -1407,8 +1419,9 @@ for (const [size, metrics] of [[1280, D1280], [390, P390]]) {
     const o = await evaljs('window.__tc.open({ maximize: true })');
     const z = await evaljs('window.__tc.strip(window.__tc.holder())');
     if (pct === 80) await tcShot(cdp, evaljs, `touch-chip-cause-1280-ui${pct}.png`);
-    check(`UI SCALE ${pct} % (body zoom ${z?.zoom}): every visible chip of the 17 READABLE (${z?.facts?.map((f) => `${f.have}≥${f.need}`).join(', ')}), its minimum the SAME CSS px as at 100 % (${z?.mins?.[0]} vs ${z100?.mins?.[0]}), inside, one line, the fold whole; no chip folded that would fit`,
-      o?.ok && z && z.compact && z.n >= 1 && z.readable === z.n && z.inside && z.oneLine && z.moreWhole && !z.underFilled && z.more === `另有 ${17 - z.n} 个` && Math.abs((z.mins?.[0] || 0) - (z100?.mins?.[0] || -9)) <= 1, tcStrip(z) + ' ' + JSON.stringify({ zoom: z?.zoom, mins: z?.mins, under: z?.underFilled, boxCss: z?.boxCss }));
+    const su = sameUnit(z?.mins?.[0] || 0, z100?.mins?.[0] || -9, z?.zoom || 1);
+    check(`UI SCALE ${pct} % (body zoom ${z?.zoom}): every visible chip of the 17 READABLE (${z?.facts?.map((f) => `${f.have}≥${f.need}`).join(', ')}), its minimum the SAME CSS px as at 100 % — one unit (${z?.mins?.[0]} vs ${z100?.mins?.[0]}, ±${su.tol}), inside, one line, the fold whole; no chip folded that would fit`,
+      o?.ok && z && z.compact && z.n >= 1 && z.readable === z.n && z.inside && z.oneLine && z.moreWhole && !z.underFilled && z.more === `另有 ${17 - z.n} 个` && su.ok, tcStrip(z) + ' ' + JSON.stringify({ zoom: z?.zoom, mins: z?.mins, min100: z100?.mins?.[0], tol: su.tol, under: z?.underFilled, boxCss: z?.boxCss }));
   }
   await evaljs(`localStorage.removeItem('vibespace.uiScale'); true`);
   // THE FOLD CONTROL IS NEVER CLIPPED (unverified r1 finding, reproduced with this suite: an email-shaped account label at
