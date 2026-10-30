@@ -487,9 +487,12 @@ export function installChatSeek(ChatView) {
       this._trace?.('teleport:fail', { line, why: 'fetch' });
       // A minimap click / search jump that silently did nothing (the whole
       // teleport is the one jump primitive, so this is the entire "go there"
-      // gesture) — say it failed instead of leaving the user clicking.
+      // gesture) — say it failed instead of leaving the user clicking. Its Retry is the person's press again, stamped as it
+      // starts like every door (lane needs-card-tail r8 — it called _seekTeleport bare and wrote no stamp: an older ↓, send
+      // or needs card landing whose page answered after it took the reader off the slab it landed, and inside a resume the
+      // re-tail yanked it back to the live tail)
       this._showHistoryStatus(t('Couldn\'t jump there — the conversation history could not be read'), {
-        kind: 'error', autoHideMs: 8000, retry: () => this._seekTeleport(line),
+        kind: 'error', autoHideMs: 8000, retry: () => { this._noteUserNav('teleportRetry'); return this._seekTeleport(line); },
       });
       return null;
     }
