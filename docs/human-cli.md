@@ -76,7 +76,7 @@ session ends, so a script's line could reach another conversation.
   there only when the conversation reloads.
 - If you and the web send a line at the very same moment, the two can arrive torn. The session then refuses both and
   says so — the web shows «A message did not reach Claude…», `vibespace chat` sends its line once more. Sessions
-  started before 2.369.362 cannot refuse a torn line, so while the hub is up `vibespace chat` is read-only for them.
+  started before 2.369.363 cannot refuse a torn line, so while the hub is up `vibespace chat` is read-only for them.
 - It cannot answer a permission ask (Allow / Deny) in a chat: it says the agent is asking — the turn waits — and the
   hub's page answers it.
 - When you attach to a terminal, your window size becomes the session's size (the web's view of it follows).
