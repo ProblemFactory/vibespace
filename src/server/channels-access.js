@@ -1376,7 +1376,8 @@ function create(engineCtx) {
     // carries are released; the rest never leave the request — the card stays open for them, said
     const rec = approve ? adapterRecords().adapters.find((r) => r.id === req0.adapterId) || null : null;
     const plan = !approve ? null : rec ? deliverPlanOf(rec, req0) : { carry: heldConvsOf(req0).filter((c) => !heldSpent(c)), rest: [], via: null };
-    const only = plan ? new Set(plan.carry.map((c) => c.key)) : null;
+    const carryKeys = plan ? new Set(plan.carry.map((c) => c.key)) : null;
+    const only = plan && plan.rest.length ? carryKeys : null;   // r15: a press that releases the WHOLE request releases it as before (releaseAside counts its unreadable entries then — test-channel-agent-watch ⑧ (c)); only a partial press narrows
     let applied = false, touched = 0, skipped = 0, dropped = null, released = null;
     await store.index.update((ix) => {
       const r2 = (Array.isArray(ix.watchRequests) ? ix.watchRequests : []).find((r) => r && r.id === req0.id);
@@ -1384,7 +1385,7 @@ function create(engineCtx) {
       applied = true; r2.status = approve ? 'approved' : 'denied'; r2.decidedAt = t; r2.decidedBy = person ? 'person' : by;   // a press in flight is decided: a second press (another window) is refused, never a second block
       if (approve) released = heldIdsOf(r2, only);   // r15: exactly the rows this press puts back in play
       touched = releaseAside(r2, !!approve, only);
-      if (approve) for (const c of heldConvsOf(r2)) if (only.has(c.key)) c.sent = { at: t };
+      if (approve) for (const c of heldConvsOf(r2)) if (carryKeys.has(c.key)) c.sent = { at: t };
       r2.held.n = touched;   // the record keeps what the decision touched (r15: a Deliver's, what went — below)
       skipped = Number(r2.held.skipped) || 0;
       dropped = heldDroppedOf(r2);   // r12: the part dropped before it (its conversations' watcher no longer woken there) — said with it
