@@ -59,11 +59,9 @@
  *    lists it. A `delivery` touch always takes ③/④.
  *    A call LINGERS (its work outlives its card) when the normalizer says so (`producerOf`: run_in_background, the
  *    harness backgrounded it — until the end every close road writes) or its line sends work to the background the
- *    line does not end itself (r6: a job ends only by a FOREGROUND `wait` / `kill` of its pid after it — shell-words
- *    endJobs: never a backgrounded one, a `kill -0` probe, a trap, another job's pid, one after `&&` / `||`, another
- *    subshell's job; r7: never a disowned job, an orphan inside a backgrounded group, a pause or a request (`kill -STOP` /
- *    `-HUP`), a reaper through an external wrapper, a function's reaper until the function is called), or starts a
- *    `vibespace-job run`.
+ *    line does not end itself (r9 — shell-words endJobs: only in the PLAINEST shape — a lone top-level `C &`, then a lone
+ *    top-level `wait` / `wait $!` / `kill $!` / `kill -TERM $!` with nothing but plain commands between; every other
+ *    shape lingers, unsure ⇒ it lingers), or starts a `vibespace-job run`.
  *    THE SCANNER (PURE src/shell-words.js `shellCommands` / `commandsRun`, imported) reads enough shell to tell a command
  *    word from prose: a shell
  *    wrapper IS its script (`bash -c`, a re-joined codex argv read whole, a heredoc / here-string / pipe it reads),
@@ -416,10 +414,9 @@ function bindToCall(touches, calls, { notes = [], turns = [], skewMs = SKEW_MS, 
   // r3: a call never causes a touch of ANOTHER turn — a turn starts between the call's start and the touch; r4: a call that
   // OPENS its turn (the turn's start is its own) is inside it for the skew before it too — r6: only a call that NAMES the
   // touch (the previous turn's own call keeps its last touch otherwise) — r7: by its conversation, its proposal or its
-  // VERB (namesTouch: a turn-opening search / compose keeps its own early-stamped touches), never by neither — r8: never a
-  // touch stamped while a call of the turn before RAN (from its start to its stop: that turn's own call keeps it)
-  const ranAt = (at, u) => cs.some((p) => p.start < u && p.start <= at && (p.stop === null || at < p.stop));
-  const crossesTurn = (c, t, at) => { const lo = Math.min(c.start, at), hi = Math.max(c.start, at); return us.some((u) => u > lo && u <= hi && !(u === c.start && at < c.start && namesTouch(c.text, t, c.runs, c.kind) && !ranAt(at, u))); };
+  // VERB (namesTouch: a turn-opening search / compose keeps its own early-stamped touches), never by neither (r9: r8's
+  // window — never a touch stamped while a call of the turn before ran — is gone: an opener's own named touch is its own)
+  const crossesTurn = (c, t, at) => { const lo = Math.min(c.start, at), hi = Math.max(c.start, at); return us.some((u) => u > lo && u <= hi && !(u === c.start && at < c.start && namesTouch(c.text, t, c.runs, c.kind))); };
   const noteFor = (at) => {
     for (let k = ns.length - 1; k >= 0; k--) {
       const n = ns[k];
