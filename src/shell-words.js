@@ -27,6 +27,11 @@
  * and the text a builtin expands in the shell itself (a heredoc, a here-string) end nothing; a builtin that evaluates
  * text it is given (mapfile / readarray `-C`, complete, bind, fc, sched) is UNSURE; a redirection target is a
  * descriptor only in the dup form (`>&2`; `> 2` is a file named 2).
+ * r13: UNREAD TEXT IS NEVER INERT — a STOP keeps a line from ending its jobs, it never hides a command from the reading:
+ * `(( … ))` / `$(( … ))` is read as the shells expand it, as if double-quoted (`if (( $(C) > 0 ))` runs C), a `((`
+ * whose inner `(` closes short of its `))` is two subshells (`((C) | head)`); the words of an unquoted `${ … }` are read
+ * with the quotes the shells keep there (`${x:-'$(C)'}` prints `$(C)`); a trap's action and mapfile's `-C` callback are
+ * scripts the shell runs later.
  *
  * lane touch-chip-cause (the .362 train fix, 2026-10-29): moved out of src/channel-touch.js — chat-run-summary (the
  * client's run summary, which imports nothing but PURE rule modules: test-collab-live-counter, test-fold-ux and
@@ -47,6 +52,9 @@ const afterOpeners = (w) => { const h = w.findIndex((x) => x.q || !OPENERS.has(x
 /** r12: a `[[ … ]]` the scan SPLIT — its `(`, `)`, `&&`, `||` end a simple command, so one command holds a `[[` with no
  *  `]]` after it or a `]]` with none before it (`[[ 1 && i -eq 0 ]]`, `[[ ( i -eq 0 ) ]]`): not parsed — a STOP */
 const splitCond = (w) => { const a = w.findIndex((x) => !x.q && x.v === '[['), b = w.findIndex((x) => !x.q && x.v === ']]'); return (a >= 0 || b >= 0) && !(a >= 0 && b > a); };
+/** r13: the `((` at `i` opens ARITHMETIC — its inner `(` closes right before its outer `)`, `(( … ))`; otherwise it is
+ *  two subshells (`((C) | head)`, `$((C) | x)` — bash, zsh and dash run C), read as groups */
+const arithAt = (s, i) => { const e = spanEnd(s, i, '(', ')', false); return e < s.length && spanEnd(s, i + 1, '(', ')', false) === e - 1; };
 /** words that open a construct whose words are data (`for c in …`) */
 const DATA_HEADS = new Set(['for', 'case', 'select', 'function']);
 /** wrappers that run their operand as a command — the options that take an argument (skipped with it). r3: + command
@@ -162,7 +170,7 @@ function spanEnd(s, i, open, close, docs = open === '(', acc = null) {
  *  removed (`'…'`, `"…"`, `$'…'`), `at` / `end` its span in `src`, `q` whether it was quoted; ; & && || | ( ) newline end
  *  a simple command (a single `&` marks it `words.bg` — sent to the background; after a single `|` the next command's
  *  `pipeFrom` is this one); a `$( … )` / backtick / `<( … )` / `>( … )` span is a command line of its own (its commands'
- *  `owner` = the word holding it); `(( … ))` / `$(( … ))` is arithmetic, no command; a heredoc's lines are kept on the
+ *  `owner` = the word holding it); `(( … ))` / `$(( … ))` is arithmetic, no command (r13: its `$( … )` read); a heredoc's lines are kept on the
  *  command that reads them (`words.heredocs`; an UNQUOTED heredoc's `$( … )` runs — scanned), a here-string on
  *  `words.herestrings`; a # comment (at a word's start) and a redirection's target are no words; r4: a single `&` sends
  *  its whole AND-OR LIST to the background, as bash does — every command of `a | b &`, `cd x && ./run.sh &` and of a
@@ -220,18 +228,20 @@ function shellCommands(src, owner = null, depth = 0, offset = 0) {
   // never ended by the line
   const closeCoproc = () => { if (coproc && groups.length === coproc.depth) { launch({ ended: false }, coproc.from); coproc = null; } };
   const nested = (body, at) => { const r = shellCommands(body, owner === null ? offset + at : owner, depth + 1); for (const c of r) out.push(c); for (const b of r.blind) out.blind.push(b); };
-  // the command substitutions an UNQUOTED heredoc's body runs (`$( … )`, backticks — never `$(( … ))` arithmetic)
-  const substitutions = (body, at) => {
+  // the command substitutions an UNQUOTED heredoc's body runs (`$( … )`, backticks — never `$(( … ))` arithmetic, its
+  // text read on) — r13: and an ARITHMETIC span's text, which the shells expand as if double-quoted (`(( $(C) > 0 ))`
+  // runs C; a `'` there quotes nothing); `from` — where the body stands in the line (each owned by its own `$`)
+  const substitutions = (body, at, from = -1) => {
     for (let j = 0; j < body.length; j++) {
       if (body[j] === '\\') { j++; continue; }
-      if (body[j] === '$' && body[j + 1] === '(' && body[j + 2] !== '(') { const e = spanEnd(body, j + 1, '(', ')'); nested(body.slice(j + 2, e), at); j = e; continue; }
-      if (body[j] === '`') { const e = spanEnd(body, j, '`', '`'); nested(body.slice(j + 1, e), at); j = e; }
+      if (body[j] === '$' && body[j + 1] === '(' && !(body[j + 2] === '(' && arithAt(body, j + 1))) { const e = spanEnd(body, j + 1, '(', ')'); nested(body.slice(j + 2, e), from < 0 ? at : from + j); j = e; continue; }
+      if (body[j] === '`') { const e = spanEnd(body, j, '`', '`'); nested(body.slice(j + 1, e), from < 0 ? at : from + j); j = e; }
     }
   };
-  const readWord = (i) => {
+  // r13: `lim` — where the word must stop (the end of a `${ … }` it stands in), `at` — the word that owns its spans
+  const readWord = (i, lim = s.length, at = i) => {
     let v = '', q = false;
-    const at = i;
-    while (i < s.length) {
+    while (i < lim) {
       const ch = s[i];
       if (' \t\n;&|()<>'.includes(ch)) break;   // r11: a CR is no blank — `wait\r` is a command of its own (not found)
       if (ch === '\\') { if (s[i + 1] !== '\n') v += s[i + 1] || ''; i += 2; q = true; continue; }
@@ -246,7 +256,7 @@ function shellCommands(src, owner = null, depth = 0, offset = 0) {
         let j = i + 1;
         for (; j < s.length && s[j] !== '"'; j++) {
           if (s[j] === '\\') { v += s[j + 1] || ''; j++; continue; }
-          if (s[j] === '$' && s[j + 1] === '(' && s[j + 2] === '(') { const e = spanEnd(s, j + 1, '(', ')', false); j = e; v += '$(())'; continue; }
+          if (s[j] === '$' && s[j + 1] === '(' && s[j + 2] === '(' && arithAt(s, j + 1)) { const e = spanEnd(s, j + 1, '(', ')', false); substitutions(s.slice(j + 3, e - 1), at); j = e; v += '$(())'; continue; }   // r13: read
           if (s[j] === '$' && s[j + 1] === '{' && FUNSUB.test(s[j + 2] || '')) { const e = spanEnd(s, j + 1, '{', '}'); nested(s.slice(j + 3, e), at); v += s.slice(j, e + 1); j = e; continue; }   // r12
           if (s[j] === '$' && s[j + 1] === '(') { const e = spanEnd(s, j + 1, '(', ')', true, span); nested(s.slice(j + 2, e), at); v += '$()'; j = e; continue; }
           if (s[j] === '`') { const e = spanEnd(s, j, '`', '`'); nested(s.slice(j + 1, e), at); v += '$()'; j = e; continue; }
@@ -255,16 +265,28 @@ function shellCommands(src, owner = null, depth = 0, offset = 0) {
         i = j + 1; q = true;
         continue;
       }
-      if (ch === '$' && s[i + 1] === '(' && s[i + 2] === '(') { const e = spanEnd(s, i + 1, '(', ')', false); v += '$(())'; i = e + 1; continue; }
+      if (ch === '$' && s[i + 1] === '(' && s[i + 2] === '(' && arithAt(s, i + 1)) { const e = spanEnd(s, i + 1, '(', ')', false); substitutions(s.slice(i + 3, e - 1), at); v += '$(())'; i = e + 1; continue; }   // r13: read
       if (ch === '$' && s[i + 1] === '(') { const e = spanEnd(s, i + 1, '(', ')', true, span); nested(s.slice(i + 2, e), at); v += '$()'; i = e + 1; continue; }
       if (ch === '$' && s[i + 1] === '{' && FUNSUB.test(s[i + 2] || '')) { const e = spanEnd(s, i + 1, '{', '}'); nested(s.slice(i + 3, e), at); v += s.slice(i, e + 1); i = e + 1; continue; }   // r12
-      // r12: a parameter's own words run their substitutions (`${x:-$(C &)}`) — scanned like a heredoc's
-      if (ch === '$' && s[i + 1] === '{') { const e = spanEnd(s, i + 1, '{', '}'); substitutions(s.slice(i + 2, e), at); v += s.slice(i, e + 1); i = e + 1; continue; }
+      // r12: a parameter's own words run their substitutions (`${x:-$(C &)}`) — r13: read with the quotes the shells
+      // keep there (paramWord), never the heredoc's (`${x:-'$(C)'}` runs nothing)
+      if (ch === '$' && s[i + 1] === '{') { const e = spanEnd(s, i + 1, '{', '}'); paramWord(i + 2, e, at); v += s.slice(i, e + 1); i = e + 1; continue; }
       if (ch === '`') { const e = spanEnd(s, i, '`', '`'); nested(s.slice(i + 1, e), at); v += '$()'; i = e + 1; continue; }
       v += ch;
       i++;
     }
     return { v, at, end: i, q };
+  };
+  // r13: the text of an UNQUOTED `${ … }` (`${x:-word}`, `${x#word}`, `${x/a/b}` …) — its words read as words, with the
+  // quotes every shell keeps there: `'…'` / `$'…'` quote (`${x:-'$(C)'}` prints `$(C)` — bash, zsh, dash), `"…"` is a
+  // double quote, a `$( … )` / backtick / `$(( … ))` / `${ … }` read as in any word; bash runs a `<( … )` there (its
+  // `$!` — a stop; zsh refuses the line)
+  const paramWord = (j, e, at) => {
+    while (j < e) {
+      if ((s[j] === '<' || s[j] === '>') && s[j + 1] === '(') { const k = spanEnd(s, j + 1, '(', ')', true, span); nested(s.slice(j + 2, k), at); stops.push(j); j = k + 1; continue; }
+      if (' \t\n;&|()<>'.includes(s[j])) { j++; continue; }
+      j = readWord(j, e, at).end;
+    }
   };
   let i = 0;
   while (i < s.length && i - skipped - span.docs < SCAN_MAX) {
@@ -302,8 +324,13 @@ function shellCommands(src, owner = null, depth = 0, offset = 0) {
     if (ch === '#') { while (i < s.length && s[i] !== '\n') i++; continue; }   // a word's start: a comment to the line's end
     cont = false;   // r12: a token — the separators below say whether it continues the list past a newline
     if (ch === '&' && s[i + 1] === '>') { op = s[i + 2] === '>' ? '&>>' : '&>'; i += op.length; redirect = true; continue; }
-    // `(( … ))` arithmetic (r9: a stop) — r12: wherever it stands (`then (( i ))`, `while (( i ))`, `for (( i; 0; ))`)
-    if (ch === '(' && s[i + 1] === '(') { const e = spanEnd(s, i, '(', ')', false); stops.push(i); i = e + 1; continue; }
+    // `(( … ))` arithmetic (r9: a stop) — r12: wherever it stands (`then (( i ))`, `while (( i ))`, `for (( i; 0; ))`);
+    // r13: a stop for the jobs, READ for the commands — its text as the shells expand it (`if (( $(C) > 0 ))` runs C);
+    // a `((` that is two subshells (`then ((C) | head)`) is read on as groups (still a stop)
+    if (ch === '(' && s[i + 1] === '(') {
+      stops.push(i);
+      if (arithAt(s, i)) { const e = spanEnd(s, i, '(', ')', false); substitutions(s.slice(i + 2, e - 1), i, i + 2); i = e + 1; continue; }
+    }
     if (ch === '|' && s[i + 1] === '&') { pipe = end(); redirect = false; i += 2; cont = true; continue; }   // `|&`: a pipe (stderr too)
     if (ch === '(' && /^[ \t]*\)/.test(s.slice(i + 1, i + 64)) && [1, 2].includes(afterOpeners(words).length) && (afterOpeners(words).length === 1 || afterOpeners(words)[0].v === 'function') && words.every((x) => !x.q) && /^[\w.:@+-]+$/.test(words[words.length - 1].v)) {
       const c = end();   // r7: `name ()` / `function name ()` — a definition: its body next (r12: after an opener too)
@@ -747,6 +774,21 @@ function commandsRun(cmd, owner = null, depth = 0, offset = 0) {
     if (SHELLS.has(cw.base) && depth < 4) {
       const scripts = shellScripts(c, words, cw.k);
       if (scripts) { for (const sc of scripts) add(sc.joined && c.owner === null ? commandsRun(sc.text, null, depth + 1, offset + sc.at) : commandsRun(sc.text, at, depth + 1), bg, waited, sc.sure); return; }
+    }
+    // r13: `trap ACTION SIG …` — its action is a script the shell runs later (at EXIT, on a signal): its commands are read
+    // (`trap 'C &' EXIT` leaves C running — every shell), never ended by the line; one operand is a signal (bash: usage);
+    // so is mapfile / readarray's `-C CALLBACK` (bash runs it every quantum lines)
+    if (cw.base === 'trap' && depth < 4) {
+      const j = words[cw.k + 1] && words[cw.k + 1].v === '--' ? cw.k + 2 : cw.k + 1;
+      if (j + 1 < words.length && !words[j].v.startsWith('-')) add(commandsRun(words[j].v, at, depth + 1), bg, false);
+    }
+    if ((cw.base === 'mapfile' || cw.base === 'readarray') && depth < 4) {
+      for (let j = cw.k + 1; j < words.length && words[j].v.length > 1 && words[j].v[0] === '-' && words[j].v !== '--'; j++) {
+        const o = words[j].v, k = [...o.slice(1)].findIndex((x) => 'dnOsuCc'.includes(x)) + 1;
+        if (!k) continue;
+        const arg = o.length > k + 1 ? o.slice(k + 1) : words[++j] ? words[j].v : '';
+        if (o[k] === 'C' && arg) add(commandsRun(arg, at, depth + 1), bg, false);
+      }
     }
     const runner = SCRIPT_RUNNERS.get(cw.base);
     if (runner && depth < 4) {

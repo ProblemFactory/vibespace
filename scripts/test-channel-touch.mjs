@@ -1363,7 +1363,7 @@ await section('⑫', async () => {
 });
 
 // ═══ ⑬ ROUNDS 9 · 10 ═══
-console.log('⑬ ROUNDS 9 · 10 · 11 · 12 — stop reading the shell: a line ends a job only in the plainest shape, every other shape lingers — against the shells\' truth, one-sided; r10: only a closed allowlist between a job and its reaper, a kill ends only the CLI itself, a heredoc\'s substitutions run in its command\'s job; r11: a job neither the CLI nor a row taints the whole line, a list goes on past a newline after | / && / ||, a special builtin never redirected, a name written only where the reader sees it, no arithmetic it cannot read; the truth regenerated under the kill law; r12: unknown ⇒ stop — a construct the scan does not parse ends nothing, a construct after an opener read where it stands, a redirection followed only in its own form; a search\'s own words name its hits for good, a verb only until a later producer; a turn\'s opener keeps its own named touch');
+console.log('⑬ ROUNDS 9 · 10 · 11 · 12 · 13 — stop reading the shell: a line ends a job only in the plainest shape, every other shape lingers — against the shells\' truth, one-sided; r10: only a closed allowlist between a job and its reaper, a kill ends only the CLI itself, a heredoc\'s substitutions run in its command\'s job; r11: a job neither the CLI nor a row taints the whole line, a list goes on past a newline after | / && / ||, a special builtin never redirected, a name written only where the reader sees it, no arithmetic it cannot read; the truth regenerated under the kill law; r12: unknown ⇒ stop — a construct the scan does not parse ends nothing, a construct after an opener read where it stands, a redirection followed only in its own form; r13: unread text is never inert — a stop for the jobs never hides a command (`(( ))` / `$(( ))` read as the shells expand them, a `${ }`\'s word with its own quotes, a trap\'s action); a search\'s own words name its hits for good, a verb only until a later producer; a turn\'s opener keeps its own named touch');
 await section('⑬', async () => {
   const B9 = (TT, touches, calls, opts) => { const r = TT.bindToCall(touches, calls, opts); const ids = (o) => Object.fromEntries(Object.entries(o || {}).map(([k, v]) => [k, v.length])); return { by: ids(r.byCall), notes: ids(r.byNote), unbound: r.unbound.length }; };
   const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -1384,7 +1384,13 @@ await section('⑬', async () => {
   // shell, but a regeneration of this table runs every row in it. r12: the r11 verdict's rows (W1–W7) and r12's own,
   // appended by repro r12/regen-suite-r12.cjs from r12-shell-truth.cjs runs — r11b's harness with every probe's address
   // space capped at 2 GiB (`ulimit -v`: zsh's arrays are dense — the verdict's `a=([IFS=1234567890]=x)` grew a zsh to
-  // 24 GiB; W4's rows here end their subscript in `,1`, IFS still set)
+  // 24 GiB; W4's rows here end their subscript in `,1`, IFS still set); r13: the r12 verdict's rows and its claim
+  // re-run's (the CLI inside `(( … ))`, `$(( … ))`, a trap's action, bash's `<( … )` in a default; a `'…'` in an unquoted
+  // `${ … }`), appended by repro r13/regen-suite-r13.cjs from r13-shell-truth.cjs — r12's harness with each shell the
+  // child of a 25 s deadline inside the subreaper (the r12 claim re-run: r12's last resort, SIGKILL to the wrapper
+  // itself, orphaned a spinning `$(wait)` to systemd --user); two bash cells that re-run measured `lingers` where the
+  // table said `ended` (`read -aIFS <<< 0123456789; C & wait $!`, `read -a IFS …` — bash keeps the CLI in 2 of 4 runs,
+  // by the PID) re-measured 4 times each here and merged at their worst
   const TRUTH = [   // version 5.3.9(1)-release (x86_64-pc-linux-gnu) / zsh 5.9 (bash · zsh · zsh in the agent tool's form), 2026-10-30
     ["39: { C & } ; wait", "{ vibespace-channels read lark/inbox & } ; wait", "ended", "ended", "ended"],
     ["39: { C & wait; } & wait", "{ vibespace-channels read lark/inbox & wait; } & wait", "ended", "ended", "ended"],
@@ -1734,7 +1740,7 @@ await section('⑬', async () => {
     ["v10b K10 X=1 C < /dev/null > o.log 2>&1 & sleep 0.2; kill $!", "X=1 vibespace-channels read lark/inbox < /dev/null > o.log 2>&1 & sleep 0.2; kill $!", "ended", "ended", "ended"],
     ["v10b K11 C & sleep 0.2; kill $! 2>/dev/null; echo done", "vibespace-channels read lark/inbox & sleep 0.2; kill $! 2>/dev/null; echo done", "ended", "ended", "ended"],
     ["v10c B12 declare -n r=IFS; r=0123456789; C & wait $!", "declare -n r=IFS; r=0123456789; vibespace-channels read lark/inbox & wait $!", "lingers", "ended", "ended"],
-    ["v10c B13 read -aIFS <<< 0123456789; C & wait $!", "read -aIFS <<< 0123456789; vibespace-channels read lark/inbox & wait $!", "ended", "ended", "ended"],
+    ["v10c B13 read -aIFS <<< 0123456789; C & wait $!", "read -aIFS <<< 0123456789; vibespace-channels read lark/inbox & wait $!", "lingers", "ended", "ended"],
     ["v10c D12 sh -c \"C & cd / >&9; wait\"", "sh -c 'vibespace-channels read lark/inbox & cd / >&9; wait'", "ended", "ended", "ended"],
     ["v10c D13 sh -c \"C & sleep 0.1 >&9; wait\"", "sh -c 'vibespace-channels read lark/inbox & sleep 0.1 >&9; wait'", "ended", "ended", "ended"],
     ["v10c D14 sh -c \"C & false >&9; wait\"", "sh -c 'vibespace-channels read lark/inbox & false >&9; wait'", "ended", "ended", "ended"],
@@ -1906,7 +1912,7 @@ await section('⑬', async () => {
     ["r11 W: true {fd}>/dev/null; C & wait $! (a plain name, ctl)", "true {fd}>/dev/null; vibespace-channels read lark/inbox & wait $!", "ended", "ended", "ended"],
     ["r11 W: for IFS in 0123456789; do :; done; C & wait $!", "for IFS in 0123456789; do :; done; vibespace-channels read lark/inbox & wait $!", "lingers", "ended", "ended"],
     ["r11 W: for i in 1; do :; done; C & wait $! (ctl)", "for i in 1; do :; done; vibespace-channels read lark/inbox & wait $!", "ended", "ended", "ended"],
-    ["r11 W: read -a IFS <<< 0123456789; C & wait $!", "read -a IFS <<< 0123456789; vibespace-channels read lark/inbox & wait $!", "ended", "ended", "ended"],
+    ["r11 W: read -a IFS <<< 0123456789; C & wait $!", "read -a IFS <<< 0123456789; vibespace-channels read lark/inbox & wait $!", "lingers", "ended", "ended"],
     ["r11 W: unset IFS; : ${IFS:=0123456789}; C & wait $!", "unset IFS; : ${IFS:=0123456789}; vibespace-channels read lark/inbox & wait $!", "lingers", "ended", "ended"],
     ["r11 W: read -rIFS <<< x; C & wait $! (an attached option)", "read -rIFS <<< x; vibespace-channels read lark/inbox & wait $!", "ended", "ended", "ended"],
     ["r11 W: v=IFS; mapfile -t \"$v\" <<< 0123456789; C & wait $!", "v=IFS; mapfile -t \"$v\" <<< 0123456789; vibespace-channels read lark/inbox & wait $!", "lingers", "ended", "ended"],
@@ -2006,6 +2012,50 @@ await section('⑬', async () => {
     ["r12 P4: echo ${x:-$((IFS=1234567890))} > /dev/null; C & wait $!", "echo ${x:-$((IFS=1234567890))} > /dev/null; vibespace-channels read lark/inbox & wait $!", "lingers", "ended", "ended"],
     ["r12 P5 control: echo \"${x:-$(C > /dev/null &)}\" (quoted — scanned since r1)", "echo \"${x:-$(vibespace-channels read lark/inbox > /dev/null &)}\"", "lingers", "lingers", "lingers"],
     ["r12 P6 control: echo ${x:-$(C)} > /dev/null (the substitution waits)", "echo ${x:-$(vibespace-channels read lark/inbox)} > /dev/null", "ended", "ended", "ended"],
+    ["r13 A1: if (( $(C) > 0 )); then echo has; fi", "if (( $(vibespace-channels read lark/inbox) > 0 )); then echo has; fi", "ended", "ended", "ended"],
+    ["r13 A2: while (( $(C | wc -l) > 0 )); do break; done", "while (( $(vibespace-channels read lark/inbox | wc -l) > 0 )); do break; done", "ended", "ended", "ended"],
+    ["r13 A3: if true; then ((C) | head); fi", "if true; then ((vibespace-channels read lark/inbox) | head); fi", "ended", "ended", "ended"],
+    ["r13 A4: if (( $(C > /dev/null &) 1 )); then :; fi", "if (( $(vibespace-channels read lark/inbox > /dev/null &) 1 )); then :; fi", "lingers", "lingers", "lingers"],
+    ["r13 A5: while (( $(C > /dev/null &) 0 )); do :; done", "while (( $(vibespace-channels read lark/inbox > /dev/null &) 0 )); do :; done", "lingers", "lingers", "lingers"],
+    ["r13 A6: for (( ; $(C > /dev/null &)0; )); do :; done", "for (( ; $(vibespace-channels read lark/inbox > /dev/null &)0; )); do :; done", "lingers", "lingers", "lingers"],
+    ["r13 A7: for (( i=$(C > /dev/null &)0; 0; )); do :; done", "for (( i=$(vibespace-channels read lark/inbox > /dev/null &)0; 0; )); do :; done", "lingers", "lingers", "lingers"],
+    ["r13 A8: (( $(C > /dev/null &) 1 )) (a command's start)", "(( $(vibespace-channels read lark/inbox > /dev/null &) 1 ))", "lingers", "lingers", "lingers"],
+    ["r13 A9: ! (( $(C > /dev/null &) 1 ))", "! (( $(vibespace-channels read lark/inbox > /dev/null &) 1 ))", "lingers", "lingers", "lingers"],
+    ["r13 A10: (( $(C) > 0 )) && echo has", "(( $(vibespace-channels read lark/inbox) > 0 )) && echo has", "ended", "ended", "ended"],
+    ["r13 A11: if true; then ((C > /dev/null &) | cat); fi", "if true; then ((vibespace-channels read lark/inbox > /dev/null &) | cat); fi", "lingers", "lingers", "lingers"],
+    ["r13 A12 control: (( (C) )) (arithmetic — no subshell)", "(( (vibespace-channels read lark/inbox) ))", "none", "none", "none"],
+    ["r13 A13 control: if (( (C) )); then :; fi", "if (( (vibespace-channels read lark/inbox) )); then :; fi", "none", "none", "none"],
+    ["r13 B1: echo $(( $(C > /dev/null &) 1 )) > /dev/null", "echo $(( $(vibespace-channels read lark/inbox > /dev/null &) 1 )) > /dev/null", "lingers", "lingers", "lingers"],
+    ["r13 B2: : $(( $(C > /dev/null &) 1 ))", ": $(( $(vibespace-channels read lark/inbox > /dev/null &) 1 ))", "lingers", "lingers", "lingers"],
+    ["r13 B3: x=$(( $(C > /dev/null &) 1 ))", "x=$(( $(vibespace-channels read lark/inbox > /dev/null &) 1 ))", "lingers", "lingers", "lingers"],
+    ["r13 B4: echo $(( `C > /dev/null &` 1 )) > /dev/null", "echo $(( `vibespace-channels read lark/inbox > /dev/null &` 1 )) > /dev/null", "lingers", "lingers", "lingers"],
+    ["r13 B5: echo \"$(( $(C > /dev/null &) 1 ))\" > /dev/null", "echo \"$(( $(vibespace-channels read lark/inbox > /dev/null &) 1 ))\" > /dev/null", "lingers", "lingers", "lingers"],
+    ["r13 B6: [[ $(( $(C > /dev/null &) 1 )) -eq 1 ]]", "[[ $(( $(vibespace-channels read lark/inbox > /dev/null &) 1 )) -eq 1 ]]", "lingers", "lingers", "lingers"],
+    ["r13 B7: case $(( $(C > /dev/null &) 1 )) in *) ;; esac", "case $(( $(vibespace-channels read lark/inbox > /dev/null &) 1 )) in *) ;; esac", "lingers", "lingers", "lingers"],
+    ["r13 B8: cat <<< $(( $(C > /dev/null &) 1 )) > /dev/null", "cat <<< $(( $(vibespace-channels read lark/inbox > /dev/null &) 1 )) > /dev/null", "lingers", "lingers", "lingers"],
+    ["r13 B9: echo $(( $(C) + 1 )) > /dev/null", "echo $(( $(vibespace-channels read lark/inbox) + 1 )) > /dev/null", "ended", "ended", "ended"],
+    ["r13 B10: echo $((C > /dev/null &) | cat) > /dev/null (a substitution of a subshell)", "echo $((vibespace-channels read lark/inbox > /dev/null &) | cat) > /dev/null", "lingers", "lingers", "lingers"],
+    ["r13 B11 control: echo $(( (C) )) > /dev/null (arithmetic)", "echo $(( (vibespace-channels read lark/inbox) )) > /dev/null", "none", "none", "none"],
+    ["r13 D1 control: echo ${x:-'$(C > /dev/null &)'} (a quote there — literal)", "echo ${x:-'$(vibespace-channels read lark/inbox > /dev/null &)'}", "none", "none", "none"],
+    ["r13 D2 control: echo \"usage: \"${HINT:-'$(C)'}", "echo \"usage: \"${HINT:-'$(vibespace-channels read lark/inbox)'}", "none", "none", "none"],
+    ["r13 D3 control: echo ${x#'`C > /dev/null &`'}", "echo ${x#'`vibespace-channels read lark/inbox > /dev/null &`'}", "none", "none", "none"],
+    ["r13 D4: echo ${x:-\"$(C > /dev/null &)\"} (a double quote there)", "echo ${x:-\"$(vibespace-channels read lark/inbox > /dev/null &)\"}", "lingers", "lingers", "lingers"],
+    ["r13 D5: echo ${x:-<(C > /dev/null &)} > /dev/null (bash runs it)", "echo ${x:-<(vibespace-channels read lark/inbox > /dev/null &)} > /dev/null", "lingers", "none", "none"],
+    ["r13 D6 control: echo ${x:-$'$(C)'} (ANSI-C quote there)", "echo ${x:-$'$(vibespace-channels read lark/inbox)'}", "none", "none", "none"],
+    ["r13 D7 control: echo ${x:-${y:-'$(C)'}} (nested, quoted)", "echo ${x:-${y:-'$(vibespace-channels read lark/inbox)'}}", "none", "none", "none"],
+    ["r13 D8: echo ${x:-a'b'$(C > /dev/null &)} (after a closed quote)", "echo ${x:-a'b'$(vibespace-channels read lark/inbox > /dev/null &)}", "lingers", "lingers", "lingers"],
+    ["r13 T1: trap 'C > /dev/null &' EXIT", "trap 'vibespace-channels read lark/inbox > /dev/null &' EXIT", "lingers", "lingers", "lingers"],
+    ["r13 T2: trap \"C > /dev/null &\" EXIT", "trap \"vibespace-channels read lark/inbox > /dev/null &\" EXIT", "lingers", "lingers", "lingers"],
+    ["r13 T3: trap -- 'C > /dev/null &' EXIT", "trap -- 'vibespace-channels read lark/inbox > /dev/null &' EXIT", "lingers", "lingers", "lingers"],
+    ["r13 T4: trap 'C > /dev/null &' EXIT; echo hi > /dev/null", "trap 'vibespace-channels read lark/inbox > /dev/null &' EXIT; echo hi > /dev/null", "lingers", "lingers", "lingers"],
+    ["r13 T5: trap 'C' EXIT", "trap 'vibespace-channels read lark/inbox' EXIT", "ended", "ended", "ended"],
+    ["r13 T6 control: trap 'C > /dev/null &' (one operand — no signal)", "trap 'vibespace-channels read lark/inbox > /dev/null &'", "none", "none", "none"],
+    ["r13 T7 control: trap 'C > /dev/null &' USR1 (never sent)", "trap 'vibespace-channels read lark/inbox > /dev/null &' USR1", "none", "none", "none"],
+    ["r13 M1: mapfile -C 'C > /dev/null &' -c 1 a <<< x", "mapfile -C 'vibespace-channels read lark/inbox > /dev/null &' -c 1 a <<< x", "lingers", "none", "none"],
+    ["r13 M2: readarray -t -C 'C > /dev/null &' -c 1 a <<< x", "readarray -t -C 'vibespace-channels read lark/inbox > /dev/null &' -c 1 a <<< x", "lingers", "none", "none"],
+    ["r13 M3: mapfile -tC 'C > /dev/null &' -c 1 a <<< x (glued)", "mapfile -tC 'vibespace-channels read lark/inbox > /dev/null &' -c 1 a <<< x", "lingers", "none", "none"],
+    ["r13 M4: mapfile -C 'C' -c 1 a <<< x", "mapfile -C 'vibespace-channels read lark/inbox' -c 1 a <<< x", "ended", "none", "none"],
+    ["r13 M5 control: mapfile -C 'C > /dev/null &' -c 1 a < /dev/null (no line — never called)", "mapfile -C 'vibespace-channels read lark/inbox > /dev/null &' -c 1 a < /dev/null", "none", "none", "none"],
   ];
   // the rows whose CALL reads not lingering — the plain shape (generated with the table); every other row lingers
   const ENDED = [
@@ -2125,11 +2175,27 @@ await section('⑬', async () => {
     "r12 N13 control: x=a; echo \"${x}\" > /dev/null; C & wait $! (no indirection)",
     "r12 N14 control: C & wait ${!}",
     "r12 P6 control: echo ${x:-$(C)} > /dev/null (the substitution waits)",
+    "r13 A1: if (( $(C) > 0 )); then echo has; fi",
+    "r13 A2: while (( $(C | wc -l) > 0 )); do break; done",
+    "r13 A3: if true; then ((C) | head); fi",
+    "r13 A10: (( $(C) > 0 )) && echo has",
+    "r13 A12 control: (( (C) )) (arithmetic — no subshell)",
+    "r13 A13 control: if (( (C) )); then :; fi",
+    "r13 B9: echo $(( $(C) + 1 )) > /dev/null",
+    "r13 B11 control: echo $(( (C) )) > /dev/null (arithmetic)",
+    "r13 D1 control: echo ${x:-'$(C > /dev/null &)'} (a quote there — literal)",
+    "r13 D2 control: echo \"usage: \"${HINT:-'$(C)'}",
+    "r13 D3 control: echo ${x#'`C > /dev/null &`'}",
+    "r13 D6 control: echo ${x:-$'$(C)'} (ANSI-C quote there)",
+    "r13 D7 control: echo ${x:-${y:-'$(C)'}} (nested, quoted)",
+    "r13 T5: trap 'C' EXIT",
+    "r13 T6 control: trap 'C > /dev/null &' (one operand — no signal)",
+    "r13 M4: mapfile -C 'C' -c 1 a <<< x",
   ];
   // r10: the attack's rows — a shell lets the CLI outlive the call — pinned: the table may never lose them (r11: x9-38, a
   // program that kills its parent, left with the kill law); r11: the r10 verdict's and r11's own rows a shell lets outlive
   // that r10 (36e43d80b) read not lingering; r12: the r11 verdict's (W1–W7) and r12's own that r11 (5e3005190) read not
-  // lingering
+  // lingering; r13: the r12 verdict's and its claim re-run's that r12 (d5fa8a382) read not lingering
   const OUTLIVE = [
     "x9-31 C & repeat 1 exit; wait (zsh repeat)",
     "x9-32 C & echo a<1-9>b; wait (zsh numeric glob)",
@@ -2262,6 +2328,30 @@ await section('⑬', async () => {
     "r12 P2: : ${x:=$(C > /dev/null &)}",
     "r12 P3: echo ${x:-`C > /dev/null &`}",
     "r12 P4: echo ${x:-$((IFS=1234567890))} > /dev/null; C & wait $!",
+    "r13 A4: if (( $(C > /dev/null &) 1 )); then :; fi",
+    "r13 A5: while (( $(C > /dev/null &) 0 )); do :; done",
+    "r13 A6: for (( ; $(C > /dev/null &)0; )); do :; done",
+    "r13 A7: for (( i=$(C > /dev/null &)0; 0; )); do :; done",
+    "r13 A8: (( $(C > /dev/null &) 1 )) (a command's start)",
+    "r13 A9: ! (( $(C > /dev/null &) 1 ))",
+    "r13 A11: if true; then ((C > /dev/null &) | cat); fi",
+    "r13 B1: echo $(( $(C > /dev/null &) 1 )) > /dev/null",
+    "r13 B2: : $(( $(C > /dev/null &) 1 ))",
+    "r13 B3: x=$(( $(C > /dev/null &) 1 ))",
+    "r13 B4: echo $(( `C > /dev/null &` 1 )) > /dev/null",
+    "r13 B5: echo \"$(( $(C > /dev/null &) 1 ))\" > /dev/null",
+    "r13 B6: [[ $(( $(C > /dev/null &) 1 )) -eq 1 ]]",
+    "r13 B7: case $(( $(C > /dev/null &) 1 )) in *) ;; esac",
+    "r13 B8: cat <<< $(( $(C > /dev/null &) 1 )) > /dev/null",
+    "r13 B10: echo $((C > /dev/null &) | cat) > /dev/null (a substitution of a subshell)",
+    "r13 D5: echo ${x:-<(C > /dev/null &)} > /dev/null (bash runs it)",
+    "r13 T1: trap 'C > /dev/null &' EXIT",
+    "r13 T2: trap \"C > /dev/null &\" EXIT",
+    "r13 T3: trap -- 'C > /dev/null &' EXIT",
+    "r13 T4: trap 'C > /dev/null &' EXIT; echo hi > /dev/null",
+    "r13 M1: mapfile -C 'C > /dev/null &' -c 1 a <<< x",
+    "r13 M2: readarray -t -C 'C > /dev/null &' -c 1 a <<< x",
+    "r13 M3: mapfile -tC 'C > /dev/null &' -c 1 a <<< x (glued)",
   ];
   const t30 = [0, 1, 2].map((i) => rd('fx-' + i, 30 + i)), pyLate = one('PY', 'python3 tools/report.py --out /tmp/r.md', R0 + 20_000, R0 + 60_000);
   const bound = (TT, line) => B9(TT, t30, [one('LINE', line, R0 + 2_000, R0 + 2_400), pyLate], ctx);
@@ -2278,13 +2368,34 @@ await section('⑬', async () => {
   ok(TRUTH.length >= 300 && !unsafe.length && eq(ends, ENDED),
     `THE SHELLS' TRUTH, ONE-SIDED (r9 — the r8 verdict; r10 — the r9 verdict: zsh's numeric glob, \`repeat\`, a builtin writing a read-only name and an external command that kills its parent between the job and its reaper, a \`kill\` of a script's job, a heredoc's substitutions read in the foreground): ${TRUTH.length} shapes, each run by bash, zsh AND zsh in the agent tool's form — where any lets the CLI outlive the call, the call lingers and the later lone script never takes its reads (0 rows; c47557626, efe07c76 and 90179ed5 each had some); the call reads ended ONLY on the ${ENDED.length} rows listed (a lone top-level job, a lone top-level \`wait\` / \`wait $!\` — or \`kill $!\` of the CLI itself — only rows of the allowlist between; the foreground controls); ${cost.length} rows every shell ended read lingering — the cost, listed`, { unsafe, endsNotListed: ends.filter((x) => !ENDED.includes(x)), listedNotEnded: ENDED.filter((x) => !ends.includes(x)) });
   const pinned = OUTLIVE.filter((l) => { const r = rows.find((x) => x.label === l); return !!r && r.outlives && r.call === 'lingers'; });
-  ok(pinned.length === OUTLIVE.length && OUTLIVE.length === 131,
-    'THE ATTACK\'S ROWS STAY IN THE TABLE (r10 — the r9 verdict; r11 — the r10 verdict): the 6 zsh / read-only rows r9 read ended (`repeat 1 exit`, `echo a<1-9>b`, `echo nomatchzz<->`, `read status`, `printf -v status`, `echo hi > a<1-2>b`), the 5 killed script / interpreter jobs (K1–K5), the 3 backgrounded heredocs (H1, H2, H1-backtick) and the 68 rows a shell lets outlive that r10 read not lingering — a special builtin redirected (`sh -c "C & : >&9; wait"`), a reaper redirected to a closed descriptor (`wait 2>&3`), a list continued past a newline (`C |⏎ tee x &`, `C &&⏎ echo ok &`), a name written where the line cannot see it (`printf -vIFS`, `read "$v"`, `declare -n`, `{IFS}>`, `for IFS in`), arithmetic bash evaluates (`$[ ]`, `a[i]=`, `${x:off}`, `[[ -eq ]]`, `declare -i`), `${x@P}`, zsh\'s nested `(P)`, a CRLF line (`wait\\r`), a script named like the CLI; r12 — the r11 verdict: the 49 rows a shell lets outlive that r11 read not lingering — a continuation after a subshell (`( C ) |⏎ cat &`), a loop / `[[ -eq ]]` / `(( ))` / a definition after an opener, a split `[[ … ]]`, a compound assignment\'s subscript, an indirection, a builtin\'s heredoc or here-string, bash 5.3\'s `${ …; }`, a `${x:-$(C &)}` the scan never opened, mapfile\'s callback, a reaper redirected from or to a FILE, dash\'s `&>` — each present, outliving in a shell, read lingering');
+  ok(pinned.length === OUTLIVE.length && OUTLIVE.length === 155,
+    'THE ATTACK\'S ROWS STAY IN THE TABLE (r10 — the r9 verdict; r11 — the r10 verdict): the 6 zsh / read-only rows r9 read ended (`repeat 1 exit`, `echo a<1-9>b`, `echo nomatchzz<->`, `read status`, `printf -v status`, `echo hi > a<1-2>b`), the 5 killed script / interpreter jobs (K1–K5), the 3 backgrounded heredocs (H1, H2, H1-backtick) and the 68 rows a shell lets outlive that r10 read not lingering — a special builtin redirected (`sh -c "C & : >&9; wait"`), a reaper redirected to a closed descriptor (`wait 2>&3`), a list continued past a newline (`C |⏎ tee x &`, `C &&⏎ echo ok &`), a name written where the line cannot see it (`printf -vIFS`, `read "$v"`, `declare -n`, `{IFS}>`, `for IFS in`), arithmetic bash evaluates (`$[ ]`, `a[i]=`, `${x:off}`, `[[ -eq ]]`, `declare -i`), `${x@P}`, zsh\'s nested `(P)`, a CRLF line (`wait\\r`), a script named like the CLI; r12 — the r11 verdict: the 49 rows a shell lets outlive that r11 read not lingering — a continuation after a subshell (`( C ) |⏎ cat &`), a loop / `[[ -eq ]]` / `(( ))` / a definition after an opener, a split `[[ … ]]`, a compound assignment\'s subscript, an indirection, a builtin\'s heredoc or here-string, bash 5.3\'s `${ …; }`, a `${x:-$(C &)}` the scan never opened, mapfile\'s callback, a reaper redirected from or to a FILE, dash\'s `&>`; r13 — the r12 verdict and its claim re-run: the 24 rows a shell lets outlive that r12 read not lingering — the CLI inside `(( … ))` after an opener or at a command\'s start, a `((` that is two subshells, `$(( … ))` in a word, quoted, in a here-string, a `[[ ]]` or a `case`, a `$((` that is a substitution of a subshell, bash\'s `<( … )` in a default, a trap\'s action, mapfile\'s callback — each present, outliving in a shell, read lingering');
   // r11: THE LAW CAN FAIL (the RED control): a planted mis-row — `C & wait` marked «bash lets the CLI outlive» — is named by
   // the one-sided check, and only it
   const plant = { label: 'PLANTED: C & wait (marked bash lingers)', line: 'vibespace-channels read lark/inbox & wait', outlives: true };
   const plantUnsafe = [...rows, { ...plant, call: callOf(T, plant.line) }].filter((r) => r.outlives && r.call !== 'lingers').map((r) => r.label);
   ok(eq(plantUnsafe, [plant.label]), 'CONTROL a planted mis-row (r11): the table with `C & wait` marked «bash lets the CLI outlive» — the one-sided check names that row and no other', { plantUnsafe });
+  // r13: UNREAD TEXT IS NEVER INERT (the r12 verdict — r12 skipped a `(( … ))` after an opener unread, so the CLI inside
+  // vanished from the line's runs; its claim re-run: `$(( … ))`, a trap's action, bash's `<( … )` in a default). THE RUN
+  // SIDE, one-sided: no row where a shell RAN the CLI (it outlived or ended) reads as running nothing — bindToCall's
+  // `inert`, which sends the call's touches to the note row
+  const ranRows = TRUTH.filter((x) => x.slice(2).some((v) => v !== 'none'));
+  const inertRows = ranRows.filter((x) => T.runsNothing(x[1])).map((x) => x[0]);
+  console.log(`  · THE RUN SIDE: ${ranRows.length} rows a shell runs the CLI in — ${inertRows.length} read as running nothing`);
+  ok(ranRows.length >= 600 && !inertRows.length, `THE RUN SIDE, ONE-SIDED (r13 — the r12 verdict: unread text is never inert — a stop for the jobs never hides a command): over the table\'s ${ranRows.length} rows a shell runs the CLI in, none reads as running nothing — the CLI inside \`if (( $(C) > 0 ))\`, \`while (( $(C | wc -l) > 0 ))\`, \`then ((C) | head)\`, \`(( $(C) > 0 )) &&\`, \`$(( $(C) + 1 ))\`, \`trap 'C' EXIT\` is a run (r12: 22 rows inert)`, { inertRows });
+  const ifA = 'if (( $(vibespace-channels unread --count) > 0 )); then echo has; fi', whileA = 'while (( $(vibespace-channels unread | wc -l) > 0 )); do sleep 5; done', headA = 'if true; then ((vibespace-channels read lark/fx-1) | head -5); fi';
+  const t3 = [1, 2, 3].map((i) => rd('fx-' + i, 2 + i)), STATUS = one('S', 'vibespace-status working --reason triage', R0 + 1_040, R0 + 9_000);
+  const arith = (TT, text, beside) => B9(TT, t3, [one('A', text, R0 + 1_000, R0 + 9_000), ...(beside ? [STATUS] : [])], ctx);
+  ok(eq(T.channelsRuns(ifA), [{ at: 6, verb: 'unread' }]) && !T.runsNothing(ifA) && eq(T.channelsRuns(whileA), [{ at: 9, verb: 'unread' }]) && !T.runsNothing(whileA) && eq(T.channelsRuns(headA), [{ at: 16, verb: 'read' }]) && !T.runsNothing(headA),
+    'THE CLI INSIDE A CONDITION\'S `(( … ))` IS A RUN (r13 — the r12 verdict, MAJOR: r12 dropped the `((` branch\'s command-start guard and skipped the span unread): `if (( $(vibespace-channels unread --count) > 0 ))`, `while (( $(… | wc -l) > 0 ))` — the text as the shells expand it, as if double-quoted; `then ((vibespace-channels read …) | head)` — two subshells, read as groups (r12: no run, the line inert)', { ifA: T.channelsRuns(ifA), whileA: T.channelsRuns(whileA), headA: T.channelsRuns(headA) });
+  ok(eq(arith(T, ifA).by, { A: 3 }) && eq(arith(T, ifA, true).by, { A: 3 }) && eq(arith(T, whileA, true).by, { A: 3 }) && eq(arith(T, headA, true).by, { A: 3 }),
+    'ITS TOUCHES ARE THE CALL\'S (r13 — the r12 verdict, probe4): the lone `if (( $(C) > 0 ))` call keeps the 3 reads it made, alone and beside a `vibespace-status` started 40 ms later; the `while (( … ))` loop and `then ((C) | head)` likewise (r12: the note row, 3)', { lone: arith(T, ifA), beside: arith(T, ifA, true), whileA: arith(T, whileA, true), headA: arith(T, headA, true) });
+  const hint = "echo \"usage: \"${HINT:-'$(vibespace-channels read <id>)'}", loopL = 'for c in $(cat ids.txt); do vibespace-channels read "$c" > /dev/null; done';
+  const quoted = { sq: T.channelsRuns("echo ${x:-'$(vibespace-channels read y)'}"), hint: T.channelsRuns(hint), bt: T.channelsRuns("echo ${x#'`vibespace-channels read y`'}"), ansi: T.channelsRuns("echo ${x:-$'$(vibespace-channels read y)'}"), dq: T.channelsRuns('echo ${x:-"$(vibespace-channels read y)"}'), bare: T.channelsRuns('echo ${x:-$(vibespace-channels read y > /dev/null &)}'), after: T.channelsRuns("echo ${x:-a'b'$(vibespace-channels read y)}") };
+  ok(eq([quoted.sq, quoted.hint, quoted.bt, quoted.ansi], [[], [], [], []]) && eq([quoted.dq, quoted.bare, quoted.after], [[{ at: 5, verb: 'read' }], [{ at: 5, verb: 'read' }], [{ at: 5, verb: 'read' }]]),
+    'AN UNQUOTED `${ … }`\'S WORD IS READ WITH ITS OWN QUOTES (r13 — the r12 verdict, MINOR: r12 handed it to the heredoc scanner, which keeps no single quote): `${x:-\'$(C)\'}`, the usage hint `${HINT:-\'$(C read <id>)\'}`, a backtick in `${x#\'…\'}`, `${x:-$\'…\'}` — literal in bash, zsh and dash, no run; `${x:-"$(C)"}`, the unquoted `${x:-$(C &)}` (r12\'s worst case) and a substitution after a closed quote still read', quoted);
+  ok(eq(B9(T, t3, [one('L', loopL, R0 + 1_000, R0 + 9_000), one('E', hint, R0 + 1_030, R0 + 9_000)], ctx).by, { L: 3 }),
+    'THE LITERAL HINT NEVER TAKES THE LOOP\'S TOUCHES (r13 — the r12 verdict, probe5): a CLI loop and, 30 ms later, `echo "usage: "${HINT:-\'$(vibespace-channels read <id>)\'}` — the loop keeps its 3 reads (r12: the echo, 3)', B9(T, t3, [one('L', loopL, R0 + 1_000, R0 + 9_000), one('E', hint, R0 + 1_030, R0 + 9_000)], ctx));
   // ── 2. A VERB NAMES A TOUCH ONLY UNTIL A LATER PRODUCER (r8 M3, delta-attack.cjs A1 / refute-verb-search.cjs / attack-ab.cjs a3)
   const BGS = one('BGS', 'vibespace-channels search "budget" > /tmp/s.json &', R0 + 2_000, R0 + 2_100);
   const PY = one('PY', 'python3 tools/triage_inbox.py', R0 + 600_000, R0 + 900_000);
@@ -2439,17 +2550,43 @@ await section('⑬', async () => {
   const anyOp = sw('dup-form', "const followed = (x, fds) => (FILE_OPS.has(x.op) && x.v === '/dev/null') || (DUP_OPS.has(x.op) && fds.test(x.v));", "const followed = (x, fds) => x.v === '/dev/null' || fds.test(x.v);");
   ok(endsIn(anyOp, 'r12 W7: mkdir -p 2; C & wait > 2', 'r12 M30: C & wait < 0 (no file 0)', 'r12 M31: mkdir -p 1; C & wait 2> 1', 'r12 M32: mkdir -p 2; C & wait &> 2', "r12 N1: sh -c 'C & wait &> /dev/null' (dash: wait &)", "r12 N2: sh -c 'C & echo hi &> /dev/null; wait $!' (dash: echo &)", "r12 N3: sh -c 'C &⏎wait >&/dev/null' (dash: bad fd number)", 'r12 N4: C & wait <&/dev/null'),
     'CONTROL a redirection target read without its operator (r11 — the r11 verdict W7): `wait > 2` (a directory named 2), `wait < 0` (no file 0), `wait 2> 1`, `wait &> 2`, dash\'s `&>` (`wait &` — the wait goes to the background; `echo hi &` — `$!` is the echo) and `>&/dev/null` (bad fd number), `wait <&/dev/null` — the `wait` never runs');
-  const paramBlind = sw('param-subs', "{ const e = spanEnd(s, i + 1, '{', '}'); substitutions(s.slice(i + 2, e), at); v +=", "{ const e = spanEnd(s, i + 1, '{', '}'); v +=");
+  const paramBlind = sw('param-subs', "{ const e = spanEnd(s, i + 1, '{', '}'); paramWord(i + 2, e, at); v +=", "{ const e = spanEnd(s, i + 1, '{', '}'); v +=");
   ok(endsIn(paramBlind, 'r12 P1: echo ${x:-$(C > /dev/null &)}', 'r12 P2: : ${x:=$(C > /dev/null &)}', 'r12 P3: echo ${x:-`C > /dev/null &`}'), 'CONTROL an unquoted `${ … }` read as one opaque word (r1–r11): `${x:-$(C > /dev/null &)}`, `${x:=$(…)}`, a backtick in a default — the CLI the substitution starts is no run of the line, it outlives the call');
   const paramArith = sw('param-arith', ' || EVALS.test(r) || /\\$\\(\\(/.test(r); })) return true;', ' || EVALS.test(r); })) return true;');
   ok(endsIn(paramArith, 'r12 P4: echo ${x:-$((IFS=1234567890))} > /dev/null; C & wait $!'), 'CONTROL arithmetic inside a `${ … }` read as plain (r1–r11): `${x:-$((IFS=…))}` — the word holds no `$(())` mark, bash evaluates it, IFS = the digits');
+  // ── r13's conditions (the r12 verdict and its claim re-run — UNREAD TEXT IS NEVER INERT): each copy leaves a text the
+  // shells run unread — a row a shell runs the CLI in reads as running nothing, a row a shell lets it outlive reads not
+  // lingering; the quote copy names a CLI no shell runs
+  const inertOf = (TT, l) => { const ran = TT.commandsRun(l); return !ran.blind.length && ran.every((x) => !x.execs && (!!x.lookup || T.INERT_COMMANDS.includes(x.base))); };
+  const inertIn = (TT, ...labels) => labels.every((l) => TRUTH.some((x) => x[0] === l && x.slice(2).some((v) => v !== 'none')) && inertOf(TT, line(l)));
+  const namesIn = (TT, ...labels) => labels.every((l) => TRUTH.some((x) => x[0] === l && x.slice(2).every((v) => v === 'none')) && TT.channelsRuns(line(l)).length > 0);
+  const arithUnread = sw('arith-read', ' substitutions(s.slice(i + 2, e - 1), i, i + 2);', '');
+  ok(inertIn(arithUnread, 'r13 A1: if (( $(C) > 0 )); then echo has; fi', 'r13 A2: while (( $(C | wc -l) > 0 )); do break; done', 'r13 A10: (( $(C) > 0 )) && echo has') && endsIn(arithUnread, 'r13 A4: if (( $(C > /dev/null &) 1 )); then :; fi', 'r13 A5: while (( $(C > /dev/null &) 0 )); do :; done', 'r13 A6: for (( ; $(C > /dev/null &)0; )); do :; done', 'r13 A7: for (( i=$(C > /dev/null &)0; 0; )); do :; done', "r13 A8: (( $(C > /dev/null &) 1 )) (a command's start)", 'r13 A9: ! (( $(C > /dev/null &) 1 ))'),
+    'CONTROL a `(( … ))` skipped unread (r12 — the r12 verdict MAJOR): `if (( $(C) > 0 ))`, `while (( $(C | wc -l) > 0 ))`, `(( $(C) > 0 )) &&` read as running nothing; `if (( $(C &) 1 ))`, `while`, both `for (( ))` forms, a command\'s start, `!` — the CLI outlives, the call reads not lingering');
+  const arithAll = sw('arith-groups', 'if (arithAt(s, i)) {', 'if (true) {');
+  ok(inertIn(arithAll, 'r13 A3: if true; then ((C) | head); fi') && endsIn(arithAll, 'r13 A11: if true; then ((C > /dev/null &) | cat); fi'), 'CONTROL every `((` read as arithmetic (r13): `then ((C) | head)` — two subshells in bash, zsh and dash, read as running nothing; `((C &) | cat)` — the CLI outlives');
+  const dollarUnread = sw('dollar-arith', "substitutions(s.slice(i + 3, e - 1), at); v += '$(())'; i = e + 1;", "v += '$(())'; i = e + 1;");
+  ok(inertIn(dollarUnread, 'r13 B9: echo $(( $(C) + 1 )) > /dev/null') && endsIn(dollarUnread, 'r13 B1: echo $(( $(C > /dev/null &) 1 )) > /dev/null', 'r13 B2: : $(( $(C > /dev/null &) 1 ))', 'r13 B3: x=$(( $(C > /dev/null &) 1 ))', 'r13 B4: echo $(( `C > /dev/null &` 1 )) > /dev/null', 'r13 B6: [[ $(( $(C > /dev/null &) 1 )) -eq 1 ]]', 'r13 B7: case $(( $(C > /dev/null &) 1 )) in *) ;; esac', 'r13 B8: cat <<< $(( $(C > /dev/null &) 1 )) > /dev/null'),
+    'CONTROL a `$(( … ))` in a word skipped unread (r1–r12 — the r12 claim re-run): `echo $(( $(C) + 1 ))` reads as running nothing; `echo $(( $(C &) 1 ))`, `: $((…))`, `x=$((…))`, a backtick, `[[ $((…)) -eq 1 ]]`, `case $((…))`, `<<< $((…))` — the CLI outlives');
+  const dqUnread = sw('dq-arith', "substitutions(s.slice(j + 3, e - 1), at); j = e;", "j = e;");
+  ok(endsIn(dqUnread, 'r13 B5: echo "$(( $(C > /dev/null &) 1 ))" > /dev/null'), 'CONTROL a quoted `"$(( … ))"` skipped unread (r1–r12): `echo "$(( $(C &) 1 ))"` — the CLI outlives');
+  const dollarAll = sw2('dollar-groups', ["if (ch === '$' && s[i + 1] === '(' && s[i + 2] === '(' && arithAt(s, i + 1)) {", "if (ch === '$' && s[i + 1] === '(' && s[i + 2] === '(') {"]);
+  ok(endsIn(dollarAll, 'r13 B10: echo $((C > /dev/null &) | cat) > /dev/null (a substitution of a subshell)'), 'CONTROL every `$((` read as arithmetic (r1–r12): `$((C &) | cat)` is a command substitution of a subshell in bash and zsh — the CLI outlives');
+  const heredocWord = sw('param-quotes', "{ const e = spanEnd(s, i + 1, '{', '}'); paramWord(i + 2, e, at); v +=", "{ const e = spanEnd(s, i + 1, '{', '}'); substitutions(s.slice(i + 2, e), at); v +=");
+  ok(namesIn(heredocWord, "r13 D1 control: echo ${x:-'$(C > /dev/null &)'} (a quote there — literal)", "r13 D2 control: echo \"usage: \"${HINT:-'$(C)'}", "r13 D3 control: echo ${x#'`C > /dev/null &`'}", "r13 D7 control: echo ${x:-${y:-'$(C)'}} (nested, quoted)"), 'CONTROL an unquoted `${ … }`\'s word read by the heredoc scanner (r12 — the r12 verdict MINOR): `${x:-\'$(C &)\'}`, the usage hint, a backtick in `${x#\'…\'}`, a nested `${y:-\'$(C)\'}` — no shell runs the CLI, the copy names it as a run');
+  const procsubParam = sw('param-procsub', "      if ((s[j] === '<' || s[j] === '>') && s[j + 1] === '(') { const k = spanEnd(s, j + 1, '(', ')', true, span); nested(s.slice(j + 2, k), at); stops.push(j); j = k + 1; continue; }\n", '');
+  ok(endsIn(procsubParam, 'r13 D5: echo ${x:-<(C > /dev/null &)} > /dev/null (bash runs it)'), 'CONTROL a `<( … )` in a default read as text (r1–r12 — the r12 claim re-run d13): bash runs it, the CLI outlives');
+  const noTrap = sw('trap-action', "      if (j + 1 < words.length && !words[j].v.startsWith('-')) add(commandsRun(words[j].v, at, depth + 1), bg, false);\n", '');
+  const noCallback = sw('callback', "        if (o[k] === 'C' && arg) add(commandsRun(arg, at, depth + 1), bg, false);\n", '');
+  ok(endsIn(noCallback, "r13 M1: mapfile -C 'C > /dev/null &' -c 1 a <<< x", "r13 M2: readarray -t -C 'C > /dev/null &' -c 1 a <<< x", "r13 M3: mapfile -tC 'C > /dev/null &' -c 1 a <<< x (glued)"), 'CONTROL mapfile\'s callback read as a quoted argument (r1–r12): `mapfile -C \'C &\' -c 1`, `readarray -t -C …`, the glued `-tC` — bash runs it every line, the CLI outlives');
+  ok(endsIn(noTrap, "r13 T1: trap 'C > /dev/null &' EXIT", 'r13 T2: trap "C > /dev/null &" EXIT', "r13 T3: trap -- 'C > /dev/null &' EXIT", "r13 T4: trap 'C > /dev/null &' EXIT; echo hi > /dev/null"), 'CONTROL a trap\'s action read as a quoted argument (r1–r12 — the r12 claim re-run a24, t01–t03): `trap \'C &\' EXIT` — the shell runs it as it exits, the CLI outlives');
   const noQuery = copy('query', "  if (t.op !== 'search' || !t.query) return false;", '  return false;');
   ok(eq(m3(noQuery).queryPy.notes, { 'note:ctx': 3 }) && eq(m3(noQuery).queryVsVerb.by, { LATER: 1 }), 'CONTROL a search\'s own words never read: the `&` search loses its own "budget" hits to the note, the loop its "deadline" hit to the later verb');
   const verbFree = copy('verb-unbound', '      const verbal = cs.filter((c) => cand.has(c) && claims(c) && namesTouch(', '      const verbal = cs.filter((c) => cand.has(c) && namesTouch(');
   ok(eq(m3(verbFree).verbPy.by, { BGS: 3 }) && eq(m3(verbFree).verbSticky.by, { BGS: 7 }), 'CONTROL a verb unbounded (r7): the `&` search that finished ten minutes earlier takes the later script\'s "pairing" hits — 7 of 7');
   const verbRank = copy('verb-rank', 'const exact = cs.filter((c) => cand.has(c) && namesExactly(c, t));', 'const exact = cs.filter((c) => cand.has(c) && (namesExactly(c, t) || (claims(c) && namesTouch(c.text, t, c.runs, c.kind))));');
   ok(eq(m3(verbRank).queryVsVerb.by, { LATER: 1 }), 'CONTROL a verb ranked with an exact name (the latest wins): the later `search "budget"` takes the loop\'s "deadline" hit');
-  for (const c of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 48, label: '⑬ ' })) ok(c.pass, c.name, c.detail);
+  for (const c of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 57, label: '⑬ ' })) ok(c.pass, c.name, c.detail);
 });
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
