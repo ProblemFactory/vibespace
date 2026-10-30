@@ -175,7 +175,8 @@ console.log('— ⑦ the argvs and the release script —');
   const ensure = sm.slice(sm.indexOf('function ensure()'), sm.indexOf('/** What the facts saw'));
   const iJudge = ensure.indexOf('await identityOf(pushed)'), iPlace = ensure.indexOf('fs.renameSync(pushed, P.bin)');
   ok(iJudge > 0 && iPlace > iJudge && /MI\.swapVerdict\(/.test(ensure) && /fs\.unlinkSync\(pushed\)/.test(ensure) && /code: 'helper_unsigned'/.test(ensure), 'the agent\'s ensure(): the pushed file is JUDGED (identityOf → swapVerdict) before it is renamed to the fixed path; a refusal removes it and is named helper_unsigned — the census of the design\'s §2.3');
-  ok(/if \(have === version && isFile\(P\.bin\) && !hasPushed\) return Promise\.resolve\(view\(\)\);/.test(ensure), 'the fast path (the version file + the binary, nothing pushed) still runs nothing');
+  const fast = ensure.match(/if \(have === version && isFile\(P\.bin\) && !hasPushed\) \{(.*)\} \/\/ round 4/);
+  ok(fast && /return Promise\.resolve\(view\(\)\);/.test(fast[1]) && /pending: null/.test(fast[1]) && !/\b(run|identityOf|compiler|build|sha256Of)\(/.test(fast[1]), 'the fast path (the version file + the binary, nothing pushed) still runs nothing — round 4: it drops a stale pending judgment from the state (a state read, no process, no digest)', fast && fast[1]);
 }
 
 console.log('— ⑧ RED controls: patched copies of the module —');

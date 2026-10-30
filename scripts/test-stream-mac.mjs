@@ -17,6 +17,7 @@
 //   §3b lane apple-signing — THE IDENTITY: a pushed prebuilt is judged (fake codesign answers from scripts/fixtures/stream/codesign-
 //      outputs.mjs) BEFORE it is put in place; the design's §2.3 table through the real ensure(); helper_unsigned by name; the
 //      LAST re-grant (helper_signed_regrant); a RED control: a copy of stream-mac.js that skips the verdict takes an unsigned push
+//       round 4 (acceptance r3): (m) a pending judgment is tied to its FILE, (n) the unanswered-runs refusal has a door (until + boot); §6 the hub's FOUR ROADS
 //   §3 THE HELPER'S PLACE: ready at the shipped version (nothing run); none + no compiler ⇒ no_helper (the trampoline is never
 //      run); the hub's pushed prebuilt is put in place; a compiler ⇒ built (both slices at once, then lipo, codesign); a
 //      REPLACED helper that held its grant ⇒ regrant until the facts see the grant again; never rebuilt at the same version
@@ -322,7 +323,7 @@ console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§3b lane apple-s
   const rj1 = await Hj.ensure(), rj2 = await Hj.ensure();
   ok(rj1.state === 'missing' && rj1.code === 'no_helper' && rj1.pending && rj1.pending.tries === 1 && rj1.pending.sha256 === shaJ && /could not be judged yet/.test(rj1.error) && /try 1 of 3/.test(rj1.error) && !rj1.refused && fs.existsSync(j.P.incoming(SRC.VERSION)) && rj2.pending.tries === 2 && stateOf(j.P).pending.tries === 2 && !stateOf(j.P).refused, 'a codesign run killed by its timeout is NO verdict: no_helper naming the try, the pushed file KEPT, the pending count in the state; the next ensure() judges it again', { rj1: rj1.error, rj2: rj2.pending });
   const rj3 = await Hj.ensure();
-  ok(rj3.state === 'missing' && rj3.code === 'helper_unsigned' && rj3.refused && /could not judge it 3 times/.test(rj3.refused.why) && rj3.refused.sha256 === shaJ && rj3.refused.agent === '9.9.1' && rj3.refused.version === SRC.VERSION && !fs.existsSync(j.P.incoming(SRC.VERSION)) && !stateOf(j.P).pending && stateOf(j.P).refused.sha256 === shaJ, 'the third unanswered run on the SAME bytes is the refusal — of those bytes, by this agent (sha256, helper version, agent version recorded), the file removed', rj3.refused);
+  ok(rj3.state === 'missing' && rj3.code === 'helper_unsigned' && rj3.refused && /did not answer 3 times/.test(rj3.refused.why) && /tried again at/.test(rj3.refused.why) && rj3.refused.until > Date.now() && rj3.refused.sha256 === shaJ && rj3.refused.agent === '9.9.1' && rj3.refused.version === SRC.VERSION && !fs.existsSync(j.P.incoming(SRC.VERSION)) && !stateOf(j.P).pending && stateOf(j.P).refused.sha256 === shaJ, 'the third unanswered run on the SAME bytes is the refusal — of those bytes, by this agent (sha256, helper version, agent version recorded), the file removed', rj3.refused);
   fs.writeFileSync(j.P.incoming(SRC.VERSION), '#!/bin/sh\n');
   const xj4 = fakeExec({ identity: 'adhoc' });
   const rj4 = await MAC.createMacHelper({ execFile: xj4.ef, fs, home: j.h, teamIds: [], agentVersion: '9.9.1' }).ensure();
@@ -348,6 +349,45 @@ console.log(`[${((Date.now() - T0) / 1000).toFixed(1)} s] ` + '§3b lane apple-s
   fs.writeFileSync(Pl.state, JSON.stringify({ refused: { version: SRC.VERSION, sha256: 'e'.repeat(64), code: 'helper_unsigned', why: 'x', at: 1, agent: 'an-older-agent' } }));
   const nl2 = await MAC.createMacScreen({ spawn, execFile: fakeExec({}).ef, env: { HOME: l1, PATH: process.env.PATH }, fs }).source({ sourceKind: 'screen' });
   ok(nl2.ok === false && nl2.code === 'no_helper' && nl2.helper && !nl2.helper.refused, 'a refusal recorded by ANOTHER agent version is stale: no_helper again (the hub pushes; this agent judges afresh)', nl2);
+  // (m) ROUND 4 (acceptance r3 minor, pending-outlives-file): a pending judgment is about a FILE — the kept file gone (a cleanup, a disk
+  //     tool, a restore) ⇒ pending dropped, no_helper WITHOUT it (the hub re-sends), the same bytes pushed again judged afresh (try 1)
+  const m = mk('smac-idm', { pushed: true });
+  const xm = fakeExec({ identity: 'adhoc', timeout: true });
+  const rm1 = await MAC.createMacHelper({ execFile: xm.ef, fs, home: m.h, teamIds: [], agentVersion: '9.9.1' }).ensure();
+  fs.rmSync(m.P.incoming(SRC.VERSION));
+  const rm2 = await MAC.createMacHelper({ execFile: xm.ef, fs, home: m.h, teamIds: [], agentVersion: '9.9.1' }).ensure();
+  const runsM = xm.events.filter((e) => e[0] === 'start' && e[1] === 'codesign').length, pendM2 = stateOf(m.P).pending; // read before the re-push
+  fs.writeFileSync(m.P.incoming(SRC.VERSION), '#!/bin/sh\n'); // the same bytes pushed again
+  const rm3 = await MAC.createMacHelper({ execFile: xm.ef, fs, home: m.h, teamIds: [], agentVersion: '9.9.1' }).ensure();
+  ok(rm1.code === 'no_helper' && rm1.pending && rm1.pending.tries === 1 && rm2.code === 'no_helper' && !rm2.pending && !rm2.refused && pendM2 === null && runsM === 1 && rm3.code === 'no_helper' && rm3.pending && rm3.pending.tries === 1 && /try 1 of 3/.test(rm3.error), 'a pending judgment whose FILE is gone is dropped: no_helper without `pending` (the hub re-sends — acceptance r3: 808126df3 answered «holds this prebuilt already» for ever), no codesign run on nothing, the same bytes pushed again start at try 1', { rm2: rm2.error, rm3: rm3.pending });
+  const m2 = mk('smac-idm2', { installed: SRC.VERSION, state: { version: SRC.VERSION, granted: true, identity: { kind: 'adhoc' }, pending: { version: SRC.VERSION, sha256: 'd'.repeat(64), tries: 2, why: 'old', at: 1, agent: MAC.AGENT_VERSION } } });
+  const xm2 = fakeExec({});
+  const rm4 = await MAC.createMacHelper({ execFile: xm2.ef, fs, home: m2.h, teamIds: [] }).ensure();
+  ok(rm4.state === 'ready' && rm4.pending === null && stateOf(m2.P).pending === null && xm2.events.length === 0, 'the fast path (installed, nothing pushed) drops a stale pending from the state too — and still runs nothing', rm4);
+  // (n) ROUND 4 (acceptance r3 minor): three unanswered runs are a refusal WITH A DOOR — it names the time (UNANSWERED_RETRY_MS) and
+  //     this agent process; past the time, or at the agent's next start, the same bytes are judged afresh; the answers carry `until`
+  let clock = 1800000000000;
+  const n = mk('smac-idn', { pushed: true });
+  const xn = fakeExec({ identity: 'adhoc', timeout: true });
+  const Hn = () => MAC.createMacHelper({ execFile: xn.ef, fs, home: n.h, teamIds: [], now: () => clock });
+  await Hn().ensure(); await Hn().ensure(); const rn3 = await Hn().ensure();
+  const untilN = clock + MAC.UNANSWERED_RETRY_MS, atN = new Date(untilN).toISOString();
+  ok(rn3.code === 'helper_unsigned' && rn3.refused && rn3.refused.until === untilN && typeof rn3.refused.boot === 'string' && rn3.refused.agent === MAC.AGENT_VERSION && rn3.refused.why === `codesign did not answer 3 times (codesign --verify --strict answered nothing in 30 s (SIGTERM)); it will be tried again at ${atN}, or at the agent's next start` && rn3.error.includes(`tried again at ${atN}`) && stateOf(n.P).refused.until === untilN && !fs.existsSync(n.P.incoming(SRC.VERSION)), `the third unanswered run refuses WITH A DOOR: the why names the time (${MAC.UNANSWERED_RETRY_MS / 60000} min) and the next start — it rides the helper_unsigned answer (the stream verdict's detail), the state keeps until + boot`, rn3.refused);
+  fs.writeFileSync(n.P.incoming(SRC.VERSION), '#!/bin/sh\n'); clock += 60 * 1000;
+  const xn2 = fakeExec({ identity: 'adhoc' });
+  const rn4 = await MAC.createMacHelper({ execFile: xn2.ef, fs, home: n.h, teamIds: [], now: () => clock }).ensure();
+  const nlN = await MAC.createMacScreen({ spawn, execFile: xn2.ef, env: { HOME: n.h, PATH: process.env.PATH }, fs, now: () => clock }).source({ sourceKind: 'screen' });
+  ok(rn4.code === 'helper_unsigned' && !xn2.events.some((e) => e[1] === 'codesign') && !fs.existsSync(n.P.incoming(SRC.VERSION)) && nlN.ok === false && nlN.code === 'helper_unsigned' && nlN.helper && nlN.helper.refused && nlN.helper.refused.until === untilN && !nlN.helper.pending, 'a minute later in the same process the refusal stands (no run, the file removed) and the answer carries `until` — the hub says when it re-sends', { rn4: rn4.code, helper: nlN.helper });
+  fs.writeFileSync(n.P.incoming(SRC.VERSION), '#!/bin/sh\n'); clock = untilN + 1;
+  const rn5 = await MAC.createMacHelper({ execFile: xn2.ef, fs, home: n.h, teamIds: [], now: () => clock }).ensure();
+  ok(rn5.state === 'ready' && rn5.how === 'prebuilt' && rn5.refused === null && stateOf(n.P).refused == null && xn2.events.some((e) => e[1] === 'codesign'), `past the time (${MAC.UNANSWERED_RETRY_MS / 60000} min) the SAME bytes are judged afresh — codesign ran, the ad-hoc build taken, the refusal gone from the state (acceptance r3: 808126df3 refused them for the agent's life)`, rn5);
+  const n2 = mk('smac-idn2', { pushed: true });
+  const xn3 = fakeExec({ identity: 'adhoc', timeout: true }); clock = 1800000000000;
+  for (let i = 0; i < 3; i++) await MAC.createMacHelper({ execFile: xn3.ef, fs, home: n2.h, teamIds: [], now: () => clock, boot: 'boot-a' }).ensure();
+  fs.writeFileSync(n2.P.incoming(SRC.VERSION), '#!/bin/sh\n');
+  const xn4 = fakeExec({ identity: 'adhoc' });
+  const rn6 = await MAC.createMacHelper({ execFile: xn4.ef, fs, home: n2.h, teamIds: [], now: () => clock, boot: 'boot-b' }).ensure();
+  ok(stateOf(n2.P).refused == null && rn6.state === 'ready' && rn6.how === 'prebuilt' && xn4.events.some((e) => e[1] === 'codesign'), 'at the agent\'s next start (another process) the same bytes are judged afresh before the time — a refusal born of unanswered runs does not outlive the process that recorded it', rn6);
   // (h) RED control: a copy of stream-mac.js that skips the verdict puts the unsigned push in place
   const srcText = fs.readFileSync(path.join(REPO, 'src/agentd/stream-mac.js'), 'utf8');
   const mutantText = srcText.replace("const sv = MI.swapVerdict(", "const sv = { take: true, code: null, why: 'MUTANT' }; void MI.swapVerdict(").replace(/require\('\.\.\/([^']+)'\)/g, (m, f) => `require(${JSON.stringify(path.join(REPO, 'src', f))})`).replace(/require\('\.\/([^']+)'\)/g, (m, f) => `require(${JSON.stringify(path.join(REPO, 'src/agentd', f))})`);
@@ -823,7 +863,7 @@ const pictures = (rtp) => { const out = []; let cur = []; for (const p of rtp) {
   const hP = home('smac-push'), logP = path.join(hP, 'p.log'), PP = SP.macHelperPaths(hP), hubBin = path.join(hP, 'hub-helpers');
   const FP = writeFakeMacHelper(hP, { version: SRC.VERSION, facts: MAC_FACTS, tcc: { screen: 'granted' }, log: logP, flv: flvFile(hP), displayFrame: { x: 0, y: 0, w: 1920, h: 1080 } });
   fs.mkdirSync(hubBin, { recursive: true }); fs.renameSync(FP.bin, path.join(hubBin, 'vibespace-screen')); fs.renameSync(FP.bin + '.version', path.join(hubBin, 'vibespace-screen.version'));
-  fs.writeFileSync(path.join(hubBin, 'vibespace-screen.identity.json'), JSON.stringify({ version: SRC.VERSION, sha256: crypto.createHash('sha256').update(fs.readFileSync(path.join(hubBin, 'vibespace-screen'))).digest('hex'), kind: 'adhoc', teamId: null, identifier: null, notarized: false })); // round 3: a hub pushes only bytes a record names
+  fs.writeFileSync(path.join(hubBin, 'vibespace-screen.identity.json'), JSON.stringify({ version: SRC.VERSION, sha256: crypto.createHash('sha256').update(fs.readFileSync(path.join(hubBin, 'vibespace-screen'))).digest('hex'), kind: 'adhoc', teamId: null, identifier: null, notarized: false })); // an identity record beside the hub's prebuilt (round 4: advisory — present, it must name the bytes; the daemon leg keeps one)
   const dmp = deviceOn(hP, macBundle);
   const cp = await dmp.connect();
   const vp = SM.streamRungVerdict({ capabilities: cp.info.capabilities, desktop: true, platform: cp.info.platform });
@@ -857,26 +897,43 @@ const pictures = (rtp) => { const out = []; let cur = []; for (const p of rtp) {
     ident({ kind: 'adhoc', teamId: null, identifier: null });
     const r4 = await DW.pushMacHelper(dmF, need, hubBin, { manifestFile: noMan, signedOnly: true });
     ok(r4.ok === false && r4.code === 'helper_unsigned' && /not a Developer ID build/.test(r4.error) && writes.length === 1, 'signedOnly over an ad-hoc prebuilt pushes nothing (the Mac keeps the helper it has)', r4);
-    { // round 3 (acceptance r1 minors + M1): no identity record ⇒ refused naming the file; a release row of another version / no row ⇒ refused naming both; the bytes the Mac refused or still judges are not sent again
+    { // ROUND 4 (acceptance r3 M1 + M2) — THE RULE on the hub: the release row and the identity record are checks WHEN PRESENT, their absence is no refusal. THE FOUR ROADS:
+      // road 1 — a row that names this very prebuilt, and NO identity record (the mac-helper workflow's two assets) ⇒ pushed, the words name the release
       fs.rmSync(hb + '.identity.json');
-      const r5 = await DW.pushMacHelper(dmF, need, hubBin, { manifestFile: noMan });
-      ident({ version: 'vs-stale' });
-      const r5b = await DW.pushMacHelper(dmF, need, hubBin, { manifestFile: noMan });
-      ok(r5.ok === false && r5.code === 'helper_unsigned' && /vibespace-screen\.identity\.json is missing or unreadable/.test(r5.error) && r5b.code === 'helper_unsigned' && /identity record is for vs-stale/.test(r5b.error) && writes.length === 1, 'no identity record ⇒ nothing pushed, the missing file named; a record for another version ⇒ the stale pair named (a hub never pushes bytes no record names — acceptance r1: it pushed ANY bytes)', { r5: r5.error, r5b: r5b.error });
+      fs.writeFileSync(manF, JSON.stringify({ v: 1, version: '9.9.9', helper: { version: SRC.VERSION, sha256: sha(hb), identity: { kind: 'adhoc', teamId: null, identifier: null } } }));
+      const w1 = await DW.pushMacHelper(dmF, need, hubBin, { manifestFile: manF });
+      ok(w1.ok === true && w1.identity === null && /^named by the signed release 9\.9\.9 \(sha256 [0-9a-f]{12}…\)$/.test(w1.note) && writes.length === 2, 'road 1 — the signed release\'s row names this prebuilt (version + sha256) ⇒ pushed, even without an identity record (the workflow\'s two assets; acceptance r3: 808126df3 refused for the missing file); the words name the release', w1);
+      // road 2 — a row that names another version, or other bytes than the file ⇒ refused by name (the ONE refusal the r1 brief asked for)
       ident({});
       fs.writeFileSync(manF, JSON.stringify({ v: 1, version: '9.9.9', helper: { version: 'vs-other', sha256: sha(hb), identity: { kind: 'adhoc', teamId: null, identifier: null } } }));
-      const r6 = await DW.pushMacHelper(dmF, need, hubBin, { manifestFile: manF });
+      const w2a = await DW.pushMacHelper(dmF, need, hubBin, { manifestFile: manF });
+      fs.writeFileSync(manF, JSON.stringify({ v: 1, version: '9.9.9', helper: { version: SRC.VERSION, sha256: 'e'.repeat(64), identity: { kind: 'adhoc', teamId: null, identifier: null } } }));
+      const w2b = await DW.pushMacHelper(dmF, need, hubBin, { manifestFile: manF });
+      ok(w2a.ok === false && w2a.code === 'helper_unsigned' && /names Mac screen helper vs-other, this hub's prebuilt is/.test(w2a.error) && w2b.ok === false && w2b.code === 'helper_unsigned' && /not the release's \(sha256/.test(w2b.error) && writes.length === 2, 'road 2 — a row that names ANOTHER version, or OTHER bytes than the file ⇒ refused by name, nothing pushed', { w2a: w2a.error, w2b: w2b.error });
+      // road 3 — no row (every release signed on the Linux release machine) + an identity record ⇒ pushed, the words say unsigned
       fs.writeFileSync(manF, JSON.stringify({ v: 1, version: '9.9.9' }));
-      const r7 = await DW.pushMacHelper(dmF, need, hubBin, { manifestFile: manF });
-      ok(r6.ok === false && r6.code === 'helper_unsigned' && /names Mac screen helper vs-other, this hub's prebuilt is/.test(r6.error) && r7.code === 'helper_unsigned' && /release 9\.9\.9 names no Mac screen helper/.test(r7.error) && writes.length === 1, 'a signed release whose row names ANOTHER version, or no helper at all ⇒ nothing pushed, both named (acceptance r1: the row check was skipped when the versions differed)', { r6: r6.error, r7: r7.error });
+      const w3 = await DW.pushMacHelper(dmF, need, hubBin, { manifestFile: manF });
+      ok(w3.ok === true && w3.identity === 'developer-id' && /^unsigned prebuilt \(sha256 [0-9a-f]{12}…; the signed release 9\.9\.9 names no Mac screen helper\) — the device judges it$/.test(w3.note) && writes.length === 3, 'road 3 — a signed release whose record names NO helper + a prebuilt with its identity record ⇒ PUSHED (acceptance r3: 808126df3 refused — every release signed on the Linux release machine carries no row); the words say «unsigned prebuilt — the device judges it»', w3);
+      // road 4 — no row + no identity record (a dev hub fed the workflow's two assets) ⇒ pushed by sha256, the words say unsigned + unverified identity
+      fs.rmSync(hb + '.identity.json');
+      const w4 = await DW.pushMacHelper(dmF, need, hubBin, { manifestFile: noMan });
+      ok(w4.ok === true && w4.identity === null && /^unsigned prebuilt \(sha256 [0-9a-f]{12}…; no signed release record on this hub\) — the device judges it; its identity is unverified here \(no vibespace-screen\.identity\.json beside it\)$/.test(w4.note) && writes.length === 4, 'road 4 — no row and no identity record ⇒ PUSHED by sha256 (acceptance r3: 808126df3 refused the workflow\'s own assets); the words say unsigned + unverified identity', w4);
+      // the identity record is advisory: absent, a signedOnly push is refused (unrecorded identity); present, it must name the file (a stale version here; other bytes = r1 above)
+      const w5 = await DW.pushMacHelper(dmF, need, hubBin, { manifestFile: noMan, signedOnly: true });
+      ident({ version: 'vs-stale' });
+      const w5b = await DW.pushMacHelper(dmF, need, hubBin, { manifestFile: noMan });
+      ok(w5.ok === false && w5.code === 'helper_unsigned' && /of unrecorded identity \(no vibespace-screen\.identity\.json beside it\), not a Developer ID build/.test(w5.error) && w5b.ok === false && w5b.code === 'helper_unsigned' && /identity record is for vs-stale/.test(w5b.error) && writes.length === 4, 'the identity record is advisory: absent, a signedOnly push is refused (unrecorded identity — the signed road needs the third asset); present for another version ⇒ the stale pair named, nothing pushed', { w5: w5.error, w5b: w5b.error });
+      ident({});
+      // round 3 (acceptance r1 M1): the bytes the Mac refused or still judges are not sent again; round 4: a refusal with a door names the time
       const r8 = await DW.pushMacHelper(dmF, { ...need, refused: { version: SRC.VERSION, sha256: sha(hb), code: 'helper_unsigned', why: 'signed by team ZZOTHER002; this agent pins no Team ID yet' } }, hubBin, { manifestFile: noMan });
       const r9 = await DW.pushMacHelper(dmF, { ...need, refused: { version: SRC.VERSION, sha256: 'a'.repeat(64), code: 'helper_unsigned', why: 'x' } }, hubBin, { manifestFile: noMan });
       const r10 = await DW.pushMacHelper(dmF, { ...need, pending: { version: SRC.VERSION, sha256: sha(hb), tries: 2 } }, hubBin, { manifestFile: noMan });
-      ok(r8.ok === false && r8.code === 'helper_unsigned' && /refused this very prebuilt/.test(r8.error) && /pins no Team ID yet/.test(r8.error) && /not sent again/.test(r8.error) && r9.ok === true && r10.ok === false && r10.code === 'no_helper' && /holds this prebuilt already/.test(r10.error) && /try 2 of 3/.test(r10.error) && writes.length === 2, 'M1 on the hub: the bytes the Mac refused are not sent again (its why rides the answer); a refusal of OTHER bytes holds nothing back (pushed — judged afresh there); bytes the Mac still judges are not re-sent', { r8: r8.error, r9, r10: r10.error });
+      const r11 = await DW.pushMacHelper(dmF, { ...need, refused: { version: SRC.VERSION, sha256: sha(hb), code: 'helper_unsigned', why: 'codesign did not answer 3 times', until: Date.UTC(2030, 0, 2, 3, 4, 5) } }, hubBin, { manifestFile: noMan });
+      ok(r8.ok === false && r8.code === 'helper_unsigned' && /refused this very prebuilt/.test(r8.error) && /pins no Team ID yet/.test(r8.error) && /not sent again \(a different/.test(r8.error) && r9.ok === true && r10.ok === false && r10.code === 'no_helper' && /holds this prebuilt already/.test(r10.error) && /try 2 of 3/.test(r10.error) && r11.ok === false && r11.code === 'helper_unsigned' && /not sent again before 2030-01-02T03:04:05\.000Z or the agent's next start/.test(r11.error) && writes.length === 5, 'M1 on the hub: the bytes the Mac refused are not sent again (its why rides the answer); a refusal of OTHER bytes holds nothing back (pushed — judged afresh there); bytes the Mac still judges are not re-sent; a refusal with a door (`until`) says when the Mac judges them again', { r8: r8.error, r9, r10: r10.error, r11: r11.error });
       const dmR = (refusedSha) => ({ ...dmF, streamOffer: async () => ({ ok: false, code: 'helper_unsigned', error: 'the screen helper the hub pushed was refused', helper: { dir: PP.dir, version: SRC.VERSION, refused: { version: SRC.VERSION, sha256: refusedSha, code: 'helper_unsigned', why: 'signed by team ZZOTHER002; this agent pins no Team ID yet' } } }), streamStop: async () => ({ ok: true }) });
       const logs4 = []; const hub4 = DW.create({ access: { streamRung: async () => ({ take: true, source: 'screen', dm: dmR(sha(hb)), platform: 'darwin' }) }, relay: false, udpLeg: false, helpersDir: hubBin, log: { log: (m) => logs4.push(m), warn: (m) => logs4.push(m) } });
       const s4 = await hub4.start('host-refused'); hub4.shutdown?.();
-      ok(s4.take === false && s4.code === 'helper_unsigned' && /refused this very prebuilt/.test(s4.why) && /not sent again/.test(s4.why) && writes.length === 2 && logs4.some((m) => /refused a screen helper/.test(m) && /not sent again/.test(m)), 'start(): a Mac that REFUSED this hub\'s prebuilt gets it no second time — the refusal\'s why rides the stream verdict (the page\'s detail) and the log', { s4, logs4 });
+      ok(s4.take === false && s4.code === 'helper_unsigned' && /refused this very prebuilt/.test(s4.why) && /not sent again/.test(s4.why) && writes.length === 5 && logs4.some((m) => /refused a screen helper/.test(m) && /not sent again/.test(m)), 'start(): a Mac that REFUSED this hub\'s prebuilt gets it no second time — the refusal\'s why rides the stream verdict (the page\'s detail) and the log', { s4, logs4 });
       writes.length = 1; // the count the signed-push leg below expects (its pushes are its own)
     }
     ident({});

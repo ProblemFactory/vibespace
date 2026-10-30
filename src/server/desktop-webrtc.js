@@ -103,10 +103,12 @@ function withRelay(sdp, lines) {
 const HELPERS_DIR = path.join(__dirname, '..', '..', 'data', 'bin', 'helpers');
 const MANIFEST_COPY = path.join(__dirname, '..', '..', 'data', 'bin', 'vibespace-agentd.manifest.json'); // the signed release's record beside the bundle (scripts/agentd-release.mjs) — there only when this build IS the release
 const digestOf = (file) => new Promise((resolve, reject) => { const h = crypto.createHash('sha256'); fs.createReadStream(file).on('error', reject).on('data', (c) => h.update(c)).on('end', () => resolve(h.digest('hex'))); });
-/** Push this hub's prebuilt Mac screen helper to an agent that asked for `need` = { dir, version } (its no_helper refusal — or, with
- *  `signedOnly`, its offer's `helper.wantSigned`: lane apple-signing). The prebuilt must be the one its identity record
- *  (`.identity.json`, scripts/build-mac-helper.sh) and the release manifest's `helper` row describe — a hub never pushes bytes the
- *  release did not name; `signedOnly` pushes a Developer ID build only. → { ok, size, identity } | { ok: false, code: 'no_helper' | 'helper_unsigned', error } */
+/** Push this hub's prebuilt Mac screen helper to an agent that asked for `need` = { dir, version } (its no_helper / helper_unsigned
+ *  answer — or, with `signedOnly`, its offer's `helper.wantSigned`: lane apple-signing). THE RULE (round 4, acceptance r3): the hub
+ *  pushes the prebuilt it HAS — it can always name the bytes by sha256; the release record's `helper` row and the identity record
+ *  (`.identity.json`, scripts/build-mac-helper.sh) are ADDITIONAL checks WHEN PRESENT (version and sha256 must name this very file,
+ *  else refused by name), their absence is no refusal — the device judges the bytes by codesign under its pins; `signedOnly` pushes a
+ *  Developer ID build only. → { ok, size, identity, note } | { ok: false, code: 'no_helper' | 'helper_unsigned', error } */
 async function pushMacHelper(dm, need, helpersDir = HELPERS_DIR, { signedOnly = false, manifestFile = MANIFEST_COPY } = {}) {
   const bin = path.join(helpersDir, 'vibespace-screen');
   let have = null, st = null, ident = null, row = null;
@@ -117,27 +119,33 @@ async function pushMacHelper(dm, need, helpersDir = HELPERS_DIR, { signedOnly = 
   if (!need || !/^[A-Za-z0-9._-]{1,40}$/.test(String(need.version || '')) || !/^\/[^\0]{1,400}$/.test(String(need.dir || ''))) return { ok: false, code: 'no_helper', error: 'the agent did not say where its helper goes' };
   if (have !== need.version) return { ok: false, code: 'no_helper', error: `this hub's prebuilt Mac screen helper is ${have}; the Mac's agent needs ${need.version}` };
   const refuse = (error) => ({ ok: false, code: 'helper_unsigned', error });
-  // round 3 (acceptance r1 minors): a hub never pushes bytes no record names — the identity record is REQUIRED, and when this build IS
-  // the signed release (the manifest copy exists) the release's row must name this very prebuilt (its version too, not only its digest)
-  if (!ident || typeof ident !== 'object' || Array.isArray(ident) || typeof ident.sha256 !== 'string') return refuse('this hub\'s prebuilt Mac screen helper has no identity record (data/bin/helpers/vibespace-screen.identity.json is missing or unreadable — scripts/build-mac-helper.sh writes it; make the prebuilt again) — nothing pushed');
-  if (ident.version != null && ident.version !== have) return refuse(`this hub's prebuilt Mac screen helper says ${have} but its identity record is for ${String(ident.version).slice(0, 40)} — a stale pair, nothing pushed`);
-  const kind = typeof ident.kind === 'string' ? ident.kind.slice(0, 20) : null;
-  if (signedOnly && kind !== 'developer-id') return refuse(`this hub's prebuilt Mac screen helper is ${kind || 'of unrecorded identity'}, not a Developer ID build — the Mac keeps the helper it has`);
+  // ROUND 4 (acceptance r3 M1 + M2) — THE RULE: the hub pushes the prebuilt it HAS (the bytes are always named, by sha256). The signed
+  // release's `helper` row and the identity record are ADDITIONAL checks WHEN PRESENT — each must name this very prebuilt (version
+  // AND sha256), else refused by name; their ABSENCE is no refusal (every release signed on the Linux release machine carries no
+  // row; the mac-helper workflow's release assets carried no identity record before 2.369.363): the words say «unsigned prebuilt —
+  // the device judges it», and the Mac judges the bytes by codesign under its pins exactly as before. Four roads: test-stream-mac §6.
+  const hasIdent = !!(ident && typeof ident === 'object' && !Array.isArray(ident));
+  if (hasIdent && ident.version != null && ident.version !== have) return refuse(`this hub's prebuilt Mac screen helper says ${have} but its identity record is for ${String(ident.version).slice(0, 40)} — a stale pair, nothing pushed`);
+  const kind = hasIdent && typeof ident.kind === 'string' ? ident.kind.slice(0, 20) : null;
+  if (signedOnly && kind !== 'developer-id') return refuse(`this hub's prebuilt Mac screen helper is ${kind || 'of unrecorded identity (no vibespace-screen.identity.json beside it)'}, not a Developer ID build — the Mac keeps the helper it has`);
   let sha256 = null;
   try { sha256 = await digestOf(bin); } catch (e) { return { ok: false, code: 'no_helper', error: `this hub's prebuilt Mac screen helper could not be read (${(e && e.code) || e})` }; }
-  if (ident.sha256 !== sha256) return refuse(`this hub's prebuilt Mac screen helper is not the one its identity record describes (sha256 ${sha256.slice(0, 12)}… vs ${ident.sha256.slice(0, 12)}…) — nothing pushed`);
-  if (manifest) {
-    if (!row) return refuse(`the signed release${manifest.version ? ` ${String(manifest.version).slice(0, 20)}` : ''} names no Mac screen helper — this hub's prebuilt ${have} is not the release's, nothing pushed`);
+  if (hasIdent && ident.sha256 !== sha256) return refuse(`this hub's prebuilt Mac screen helper is not the one its identity record describes (sha256 ${sha256.slice(0, 12)}… vs ${String(ident.sha256).slice(0, 12)}…) — nothing pushed`);
+  if (row) { // the ONE refusal the r1 brief asked for: a release row that names another version, or other bytes than the file
     if (row.version !== have) return refuse(`the signed release names Mac screen helper ${String(row.version).slice(0, 40)}, this hub's prebuilt is ${have} — nothing pushed`);
     if (row.sha256 !== sha256) return refuse(`this hub's prebuilt Mac screen helper is not the release's (sha256 ${sha256.slice(0, 12)}… vs the manifest's ${String(row.sha256).slice(0, 12)}…) — nothing pushed`);
   }
-  // round 3 (acceptance r1 M1): the Mac said which bytes it refused / still judges — those are never sent again (a DIFFERENT prebuilt is judged afresh there)
+  const release = manifest && manifest.version ? ` ${String(manifest.version).slice(0, 20)}` : '';
+  const note = row ? `named by the signed release${release} (sha256 ${sha256.slice(0, 12)}…)` : `unsigned prebuilt (sha256 ${sha256.slice(0, 12)}…; ${manifest ? `the signed release${release} names no Mac screen helper` : 'no signed release record on this hub'}) — the device judges it${hasIdent ? '' : '; its identity is unverified here (no vibespace-screen.identity.json beside it)'}`;
+  // round 3 (acceptance r1 M1): the Mac said which bytes it refused / still judges — those are never sent again (a DIFFERENT prebuilt is judged afresh there);
+  // round 4: a refusal born of unanswered codesign runs names when the Mac judges those bytes again (`until`) — the words say so
   const held = (o) => !!(o && typeof o === 'object' && o.sha256 === sha256);
-  if (held(need.refused)) return refuse(`the Mac refused this very prebuilt (sha256 ${sha256.slice(0, 12)}…): ${String(need.refused.why || need.refused.code || '').slice(0, 240)} — not sent again (a different prebuilt would be judged afresh)`);
+  const again = need.refused && Number.isFinite(Number(need.refused.until)) ? ` before ${new Date(Number(need.refused.until)).toISOString()} or the agent's next start` : '';
+  if (held(need.refused)) return refuse(`the Mac refused this very prebuilt (sha256 ${sha256.slice(0, 12)}…): ${String(need.refused.why || need.refused.code || '').slice(0, 240)} — not sent again${again} (a different prebuilt would be judged afresh)`);
   if (held(need.pending)) return { ok: false, code: 'no_helper', error: `the Mac holds this prebuilt already and judges it at its next check (codesign answered nothing, try ${Number(need.pending.tries) || '?'} of 3) — not sent again` };
   if (!dm || typeof dm.fsWriteStream !== 'function') return { ok: false, code: 'no_helper', error: 'the Mac\'s agent cannot take a pushed file' };
   try { await dm.fsWriteStream(`${need.dir}/vibespace-screen-${need.version}`, { source: fs.createReadStream(bin), size: st.size, overwrite: true, by: 'system:desktop-webrtc' }); } catch (e) { return { ok: false, code: 'no_helper', error: `the prebuilt helper did not reach the Mac (${(e && e.message) || e})` }; }
-  return { ok: true, size: st.size, identity: kind };
+  return { ok: true, size: st.size, identity: kind, note };
 }
 
 function create({ access, log = console, now = Date.now, idleMs = L.idleMs, goneMs = L.goneMs, sweepMs = 5000, ips = hubIps, pollMaxMs = L.pollMaxMs, relay = true, direct = true, udpLeg = true, legMute = () => false, elect = SM.legElect, helpersDir = HELPERS_DIR, handover = null } = {}) {
@@ -284,7 +292,7 @@ function create({ access, log = console, now = Date.now, idleMs = L.idleMs, gone
       r = await offer();
       if (r && !r.ok && (r.code === 'no_helper' || r.code === 'helper_unsigned') && r.helper) { // a Mac without its screen helper — or one that refused a push (round 3: a DIFFERENT prebuilt is judged afresh there; the same one is never re-sent, the why rides the answer): this hub's prebuilt, then once more
         const p = await pushMacHelper(v.dm, r.helper, helpersDir);
-        log.log?.(`[stream] ${hostId}: the Mac ${r.code === 'helper_unsigned' ? 'refused a screen helper' : 'has no screen helper'} ${r.helper.version} — ${p.ok ? `pushed this hub's prebuilt (${p.size} bytes)` : p.error}`);
+        log.log?.(`[stream] ${hostId}: the Mac ${r.code === 'helper_unsigned' ? 'refused a screen helper' : 'has no screen helper'} ${r.helper.version} — ${p.ok ? `pushed this hub's prebuilt (${p.size} bytes; ${p.note})` : p.error}`);
         if (p.ok) r = await offer(); else r = { ...r, error: `${r.error} — ${p.error}` };
       }
       if (r && r.ok && r.helper && r.helper.wantSigned === true && !signedPushed.has(hostId)) { // lane apple-signing: the signed prebuilt wins over an ad-hoc build — pushed ONCE per machine; the agent judges it and swaps at its next check
