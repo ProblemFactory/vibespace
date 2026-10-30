@@ -984,19 +984,22 @@ await section('⑩', async () => {
   ok(longMsg.length > T.SCAN_MAX && T.runsNothing(longMsg) && T.channelsRuns(longMsg).length === 0 && eq(lm, NOTE3) && T.channelsRuns(cutCli).length === 0 && !T.runsNothing(cutCli) && eq(cb, NOTE3) && eq(B9(T, t6, [one('CUT', cutCli, R0 + 5040, R0 + 9000)], ctx).by, { CUT: 3 }),
     'BLIND TEXT IS NEVER A RUN (r4 MAJOR 1, hygiene-blind-rung1.cjs): a 9 KB `vibespace-msg send … <<\'EOF\' … EOF` is read to its EOF — a product CLI whose heredoc is data runs nothing and never takes `bash /tmp/read-all.sh`\'s rows (r3: MSG 3); the CLI\'s name in SHELL cut past SCAN_MAX makes the call «could run», never a command word: alone it keeps its rows, beside the script it is one of two that could run ⇒ the note', { lm, cb });
   // ── 3. A LINE ENDS ITS OWN JOBS — r6: only a FOREGROUND `wait` / `kill` of the job's pid (shell-words endJobs)
-  const reap = ['npm test & wait', './build.sh & sleep 1; wait', 'npm test & echo started; wait $!'];
+  // r11: a job whose command is neither the CLI nor a row of the allowlist makes the WHOLE line end nothing (it may end the
+  // shell while a later job runs) — `npm test & wait`, `./build.sh & sleep 1; wait` linger (r4–r10: ended); the CLI's own
+  // job, waited for, ends (its call finished before the reads)
+  const reap = ['vibespace-channels read lark/fx-9 > /tmp/i.json & wait', 'vibespace-channels read lark/fx-9 & sleep 1; wait', 'vibespace-channels read lark/fx-9 & echo started; wait $!'];
   // r9: past the plain shape — a `$PID`, a `%1`, a `( … & wait )` subshell — a job lingers (r6–r8: they ended); r10: a
   // second external job beside it, an external command between, a `kill` of a job whose command is not the CLI (r6–r9:
   // ended — the kill reaches node, a CLI it started outlives: K4)
-  const keep = ['npm test & npm run lint & wait', 'node server.js & sleep 2; curl -s https://fixture.example/health; kill $!', './build.sh & ./lint.sh & wait', 'node server.js & PID=$!; sleep 2; curl -s "$URL/health"; kill $PID', 'node server.js & sleep 2; curl -s "$URL/health"; kill %1', './build.sh & B=$!; ./lint.sh; wait "$B"', '( node a.js & wait )',
+  const keep = ['npm test & wait', './build.sh & sleep 1; wait', 'npm test & echo started; wait $!', 'npm test & npm run lint & wait', 'node server.js & sleep 2; curl -s https://fixture.example/health; kill $!', './build.sh & ./lint.sh & wait', 'node server.js & PID=$!; sleep 2; curl -s "$URL/health"; kill $PID', 'node server.js & sleep 2; curl -s "$URL/health"; kill %1', './build.sh & B=$!; ./lint.sh; wait "$B"', '( node a.js & wait )',
     'node a.js & wait -n; echo done', 'nohup node server.js > /tmp/s.log 2>&1 &', 'npm test; wait; node server.js &', 'node server.js & disown',
     "trap 'kill $(jobs -p)' EXIT; node server.js & sleep 2; curl -s \"$URL/health\"", 'node a.js & node b.js & wait -n; echo done', '( node a.js & node b.js & wait ) > /tmp/o 2>&1 &',
     'node server.js & P=$!\n{ sleep 3600; kill $P; } &', 'node server.js > /tmp/s.log 2>&1 &\nsleep 1; kill -0 $! && echo alive', 'sleep 1 & A=$!\nnode server.js &\nwait $A',
     'node server.js & PID=$!; curl -s "$URL/health" || kill $PID', '(setsid ./serve.sh > /tmp/s.log 2>&1 &)\nnpm run lint & wait'];
   const py = one('PY', 'python3 tools/triage_inbox.py', R0 + 20_000, null), t25 = tn(3, R0 + 25_000);
-  const rp = reap.map((x) => B9(T, t25, [one('PAR', x, R0, null), py], ctx)), kp = keep.map((x) => B9(T, t25, [one('PAR', x, R0, null), py], ctx));
+  const rp = reap.map((x) => B9(T, t25, [one('PAR', x, R0, R0 + 1_000), py], ctx)), kp = keep.map((x) => B9(T, t25, [one('PAR', x, R0, null), py], ctx));
   ok(rp.every((r) => eq(r.by, { PY: 3 })) && kp.every((r) => eq(r, NOTE3)),
-    'A LINE ENDS ITS OWN JOBS (r4 MAJOR 2 (i), linger-probe.cjs; r6 MAJOR, skeptic-reaper-bg.cjs; r9: only the PLAINEST shape): lone `&` jobs, then a lone FOREGROUND `wait` (every job before it) or `wait $!` after a row of the allowlist — the job does not outlive the card: a later lone python script keeps its reads (r3: the note); r10: `npm test & npm run lint & wait`, `./build.sh & ./lint.sh & wait` (an external job beside it may end the shell) and `node server.js & …; curl …; kill $!` (curl between; a kill reaches node only) linger (r4–r9: PY 3); r9: `kill $PID` (PID=$!), `kill %1`, `wait "$B"`, a `( … & wait )` subshell linger (r6–r8: ended — the safe side; r8: never `wait -n` — an error in zsh), `nohup … &`, a `wait` BEFORE the `&`, `& disown` and, r6, a `trap` (it ends nothing until it fires), `wait -n` over two jobs, a `wait` inside the backgrounded group, a backgrounded watchdog `kill`, a `kill -0` probe, a `wait` of another job\'s pid, a `kill` after `||`, another subshell\'s job — the job outlives the card ⇒ two that could run, the note (r4: PY 3 for these eight)', { rp: rp.map((r) => r.by), kp: kp.map((r) => r.notes) });
+    'A LINE ENDS ITS OWN JOBS (r4 MAJOR 2 (i), linger-probe.cjs; r6 MAJOR, skeptic-reaper-bg.cjs; r9: only the PLAINEST shape): lone `&` jobs, then a lone FOREGROUND `wait` (every job before it) or `wait $!` after a row of the allowlist — the job does not outlive the card: a later lone python script keeps its reads (r3: the note); r11: the CLI\'s own job — `npm test & wait`, `./build.sh & sleep 1; wait`, `npm test & echo started; wait $!` linger (a job that is neither the CLI nor a row of the allowlist may end the shell: the line ends nothing; r4–r10: PY 3); r10: `npm test & npm run lint & wait`, `./build.sh & ./lint.sh & wait` (an external job beside it may end the shell) and `node server.js & …; curl …; kill $!` (curl between; a kill reaches node only) linger (r4–r9: PY 3); r9: `kill $PID` (PID=$!), `kill %1`, `wait "$B"`, a `( … & wait )` subshell linger (r6–r8: ended — the safe side; r8: never `wait -n` — an error in zsh), `nohup … &`, a `wait` BEFORE the `&`, `& disown` and, r6, a `trap` (it ends nothing until it fires), `wait -n` over two jobs, a `wait` inside the backgrounded group, a backgrounded watchdog `kill`, a `kill -0` probe, a `wait` of another job\'s pid, a `kill` after `||`, another subshell\'s job — the job outlives the card ⇒ two that could run, the note (r4: PY 3 for these eight)', { rp: rp.map((r) => r.by), kp: kp.map((r) => r.notes) });
   // ── 4. A LINGERING CALL COMPETES LIKE A RUNNING ONE — the two mirrors, and what a lingering call never does
   const t30 = tn(3, R0 + 25_000);
   const loopBg = one('LOOP', LOOP, R0 + 5_000, R0 + 5_300, { background: true }), fgLoop = one('LOOP', LOOP, R0 + 20_000, null);
@@ -1183,8 +1186,8 @@ await section('⑪', async () => {
   const bgBind = (TT, x) => B9(TT, t30, [one('BG', x, R0 + 2_000, R0 + 2_400), pyLate], ctx);
   const rb = Object.fromEntries(Object.entries(shapes).map(([k, x]) => [k, bgBind(T, x)]));
   const LONE = 'vibespace-channels read lark/inbox > /tmp/poll.log 2>&1 &';
-  ok(Object.values(rb).every((r) => eq(r, NOTE3)) && eq(bgBind(T, LONE + '\nwait').by, { PY: 3 }) && eq(bgBind(T, POLL + '\nwait'), NOTE3) && T.commandsRun('npm test & wait').filter((r) => r.bg).every((r) => r.ended) && !T.commandsRun('npm test & npm run lint & wait').filter((r) => r.bg).every((r) => r.ended) && !T.commandsRun(shapes['bg loop + kill -0 probe']).some((r) => r.ended),
-    'A JOB ENDS ONLY BY A FOREGROUND wait / kill OF ITS PID (r6 MAJOR, skeptic-reaper-bg.cjs + refuter-reaper-bg-extra.cjs): a CLI group that waits inside its own `( … ) &`, a loop with a backgrounded watchdog `kill`, a `kill -0` probe, a `trap … INT`, a `wait` of another job — each outlives its card: the later lone python script never takes the loop\'s reads (r4: PY 3 for all but the watchdog) — two that could have produced them, the note (the loop\'s claim ends where the script starts, §2); a foreground `wait` ends a LONE `vibespace-channels read … &` ⇒ the script — r9: the backgrounded loop (a compound job) lingers past it, the note (r6–r8: the script)', Object.fromEntries(Object.entries(rb).map(([k, r]) => [k, r.by])));
+  ok(Object.values(rb).every((r) => eq(r, NOTE3)) && eq(bgBind(T, LONE + '\nwait').by, { PY: 3 }) && eq(bgBind(T, POLL + '\nwait'), NOTE3) && T.commandsRun('vibespace-channels read lark/a & wait').filter((r) => r.bg).every((r) => r.ended) && !T.commandsRun('npm test & wait').filter((r) => r.bg).every((r) => r.ended) && !T.commandsRun('npm test & npm run lint & wait').filter((r) => r.bg).every((r) => r.ended) && !T.commandsRun(shapes['bg loop + kill -0 probe']).some((r) => r.ended),
+    'A JOB ENDS ONLY BY A FOREGROUND wait / kill OF ITS PID (r6 MAJOR, skeptic-reaper-bg.cjs + refuter-reaper-bg-extra.cjs): a CLI group that waits inside its own `( … ) &`, a loop with a backgrounded watchdog `kill`, a `kill -0` probe, a `trap … INT`, a `wait` of another job — each outlives its card: the later lone python script never takes the loop\'s reads (r4: PY 3 for all but the watchdog) — two that could have produced them, the note (the loop\'s claim ends where the script starts, §2); a foreground `wait` ends a LONE `vibespace-channels read … &` ⇒ the script (r11: `npm test & wait` lingers — a job neither the CLI nor a row of the allowlist; r6–r10: ended) — r9: the backgrounded loop (a compound job) lingers past it, the note (r6–r8: the script)', Object.fromEntries(Object.entries(rb).map(([k, r]) => [k, r.by])));
   // ── 2. A LINGERING CLAIM IS BOUNDED BY ITS OWN RUN — skeptic-correctness-probe.cjs «cli & early + later lone python script», refute-amp-linger.cjs
   const BGCLI = one('BGCLI', 'vibespace-channels search "x" > /tmp/s.json &', R0 + 2_000, R0 + 2_100);
   const triage = (start, end) => one('PY', 'python3 tools/triage_inbox.py', start, end);
@@ -1298,6 +1301,8 @@ await section('⑫', async () => {
     'C &! ⏎ wait (zsh)': `${C} &!\nwait`,
     'C &| ⏎ wait (zsh)': `${C} &|\nwait`,
     'C & f() { wait; } (never called)': `${C} & f() { wait; }`,
+    // r11: a job whose command is a shell is no row of the allowlist — the line ends nothing (r7–r10: ended)
+    'bash -c "C & wait" & wait': `bash -c "${C} & wait" & wait`,
     'g() { C & } ⏎ g & wait': `g() { ${C} & }\ng & wait`,
     'C & timeout 5 wait $!': `${C} & timeout 5 wait $!`,
     'C & kill -STOP $!': `${C} & kill -STOP $!`,
@@ -1322,7 +1327,7 @@ await section('⑫', async () => {
     'C & wait': `${C} & wait`,
     'C & wait $!': `${C} & wait $!`,
     'C & kill -TERM $!': `${C} & kill -TERM $!`,
-    'bash -c "C & wait" & wait': `bash -c "${C} & wait" & wait`,
+    'bash -c "C & wait" (the shell in the foreground)': `bash -c "${C} & wait"`,
   };
   const cliEnded = (TT, x) => TT.commandsRun(x).filter((r) => r.base === 'vibespace-channels').every((r) => r.bg && r.ended);
   const cliLingers = (TT, x) => TT.commandsRun(x).some((r) => r.base === 'vibespace-channels' && r.bg && !r.ended);
@@ -1331,7 +1336,7 @@ await section('⑫', async () => {
   const lr = Object.fromEntries(Object.entries(linger).map(([k, x]) => [k, cliLingers(T, x) && eq(bgBind(T, x).notes, { 'note:ctx': 3 })]));
   const er = Object.fromEntries(Object.entries(ends).map(([k, x]) => [k, cliEnded(T, x) && eq(bgBind(T, x).by, { PY: 3 })]));
   ok(Object.values(lr).every(Boolean) && Object.values(er).every(Boolean),
-    'A JOB ENDS ONLY BY A WAIT / KILL THAT ENDS IT IN ITS OWN SHELL (r7 minors, hyg-endjobs-probes.cjs + rev6-disown.cjs + rerun6-endjobs-attack.cjs; bash\'s truth: repro r7-bash-truth.cjs): the orphans of a backgrounded `( … )`, `{ …; }`, loop or `bash -c` outlive a `wait` outside it, a disowned job (`disown`, zsh `&!` / `&|`), a `wait` in a function never called (or called with `&`), `timeout 5 wait $!`, `kill -STOP` / `-HUP` / `-s USR1`, `wait -n` / `wait %1` of a loop\'s jobs (a job per pass), `wait $P` once P is reassigned — r8: a body\'s `wait` beside the CALLER\'s job (never reached), `command wait` (zsh: not found) — each lingers: beside the later lone script, the note (r6: the script took the reads); r9: so do a `wait` inside the group, a CALLED body\'s `wait` after its own job, the caller\'s `wait` after the call, `kill -9 %1`, a plain `wait` of a loop\'s jobs (r7/r8: ended); a lone `C &` then a lone `wait`, `wait $!` or `kill -TERM $!` — in a `bash -c` script too — ends it ⇒ the script', { lingers: lr, ends: er });
+    'A JOB ENDS ONLY BY A WAIT / KILL THAT ENDS IT IN ITS OWN SHELL (r7 minors, hyg-endjobs-probes.cjs + rev6-disown.cjs + rerun6-endjobs-attack.cjs; bash\'s truth: repro r7-bash-truth.cjs): the orphans of a backgrounded `( … )`, `{ …; }`, loop or `bash -c` outlive a `wait` outside it, a disowned job (`disown`, zsh `&!` / `&|`), a `wait` in a function never called (or called with `&`), `timeout 5 wait $!`, `kill -STOP` / `-HUP` / `-s USR1`, `wait -n` / `wait %1` of a loop\'s jobs (a job per pass), `wait $P` once P is reassigned — r8: a body\'s `wait` beside the CALLER\'s job (never reached), `command wait` (zsh: not found) — each lingers: beside the later lone script, the note (r6: the script took the reads); r9: so do a `wait` inside the group, a CALLED body\'s `wait` after its own job, the caller\'s `wait` after the call, `kill -9 %1`, a plain `wait` of a loop\'s jobs (r7/r8: ended); a lone `C &` then a lone `wait`, `wait $!` or `kill -TERM $!` — in a foreground `bash -c` script too — ends it ⇒ the script; r11: `bash -c "C & wait" & wait` lingers (a job whose command is a shell: the line ends nothing)', { lingers: lr, ends: er });
   // ── A PATCHED COPY PER RULE
   const MUT = mutantCopies('channel-touch-r7', REPO);
   const src = read('src/channel-touch.js'), SW = read('src/shell-words.js');
@@ -1342,8 +1347,8 @@ await section('⑫', async () => {
   const convOnly = copy('opening-verb', ' && namesTouch(c.text, t, c.runs, c.kind))); };', ' && namesConv(c.text, t))); };');
   ok(eq(ob(convOnly, SEARCH, hits).by, { W: 3 }), 'CONTROL the opening skew by conversation only (r6): turn 1\'s script takes the opening search\'s own hits');
   // r9: orphan-scope / orphan-chain went with r7's scopes (a job inside a group is never read ended — ⑬'s top-level copy)
-  const nestedOuter = sw('nested-orphan', 'ended && (!x.bg || e) ?', 'ended ?');
-  ok(cliEnded(nestedOuter, linger['bash -c "C &" & wait']), 'CONTROL a shell\'s own background run given the outer verdict (r6): `bash -c "C &" & wait` ends the CLI');
+  // r11: nested-orphan went — a job whose command is a shell is never `safe`, so the line ends nothing and no shell's run is
+  // given an ended outer verdict (commandsRun keeps its guard as a second wall; the copy reads every row as the tree does)
   const noDisown = sw('disown', "  ['true', [() => true, 'r9: C & true ⏎ wait']],", "  ['disown', [() => true, '']],\n  ['true', [() => true, 'r9: C & true ⏎ wait']],");
   ok(cliEnded(noDisown, linger['C & disown; wait']), 'CONTROL `disown` read as a row of the allowlist between the job and its reaper (r6; r10: the copy adds the row): `wait` ends the disowned job');
   const noZsh = sw('zsh-disown', "lone(c, disowned ? 'disowned' : 'job');", "lone(c, 'job');");
@@ -1354,11 +1359,11 @@ await section('⑫', async () => {
   ok(cliEnded(anySignal, linger['C & kill -STOP $!']) && cliEnded(anySignal, linger['C & kill -HUP $!']), 'CONTROL every signal read as an end (r6): `kill -STOP` / `kill -HUP` end the job');
   const anyWrapper = sw('wrapper', "    if (how === 'fg' && cw && cw.k === 0 && REAPERS.includes(cw.base)", "    if (how === 'fg' && cw && REAPERS.includes(cw.base)");
   ok(cliEnded(anyWrapper, linger['C & timeout 5 wait $!']) && cliEnded(anyWrapper, linger['C & command wait']), 'CONTROL a reaper through a wrapper (r6): `timeout 5 wait $!` and `command wait` (zsh: not found) end the job');
-  for (const c of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 7, label: '⑫ ' })) ok(c.pass, c.name, c.detail);
+  for (const c of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 6, label: '⑫ ' })) ok(c.pass, c.name, c.detail);
 });
 
 // ═══ ⑬ ROUNDS 9 · 10 ═══
-console.log('⑬ ROUNDS 9 · 10 — stop reading the shell: a line ends a job only in the plainest shape, every other shape lingers — against the shells\' truth, one-sided; r10: only a closed allowlist between a job and its reaper, a kill ends only the CLI itself, a heredoc\'s substitutions run in its command\'s job; a search\'s own words name its hits for good, a verb only until a later producer; a turn\'s opener keeps its own named touch');
+console.log('⑬ ROUNDS 9 · 10 · 11 — stop reading the shell: a line ends a job only in the plainest shape, every other shape lingers — against the shells\' truth, one-sided; r10: only a closed allowlist between a job and its reaper, a kill ends only the CLI itself, a heredoc\'s substitutions run in its command\'s job; r11: a job neither the CLI nor a row taints the whole line, a list goes on past a newline after | / && / ||, a special builtin never redirected, a name written only where the reader sees it, no arithmetic it cannot read; the truth regenerated under the kill law; a search\'s own words name its hits for good, a verb only until a later producer; a turn\'s opener keeps its own named touch');
 await section('⑬', async () => {
   const B9 = (TT, touches, calls, opts) => { const r = TT.bindToCall(touches, calls, opts); const ids = (o) => Object.fromEntries(Object.entries(o || {}).map(([k, v]) => [k, v.length])); return { by: ids(r.byCall), notes: ids(r.byNote), unbound: r.unbound.length }; };
   const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -1366,13 +1371,17 @@ await section('⑬', async () => {
   const ctx = { notes: [{ id: 'note:ctx', at: R0 + 100 }], turns: [R0] };
   const one = (id, text, start, end, o = {}) => ({ id, start, end, text, kind: 'command', background: false, bgEnd: 0, ...o });
   const rd = (convId, s) => touch({ id: convId + '@' + s, adapterId: 'lark', convId, at: R0 + s * 1000 + 50 });
-  // ── 1. THE SHELLS' TRUTH, ONE-SIDED (r9; r10: three shells) — GENERATED by the lane's repro r10-shell-truth.cjs (r9's
-  // 212 shapes — r8's 114, the r8 reviewer's 42, the r8 skeptic's 32, r9's own — the r9 attack's 42, the r9 reviewer's
-  // 46, r10's own; each run by bash, by zsh and by zsh in the agent tool's own form — `setopt NO_EXTENDED_GLOB
-  // NO_BARE_GLOB_QUAL`, then `eval '<line>'` — each shell in a session of its own, with a probe CLI first on PATH;
-  // liveness read from /proc 300 ms after the shell returns; every probe waited for before the next shape), never edited
-  // by hand: [label, line, bash, zsh, tool] — `lingers` = the CLI outlived the call, `ended` = it did not, `none` = that
-  // shell never ran it
+  // ── 1. THE SHELLS' TRUTH, ONE-SIDED (r9; r10: three shells; r11: under THE KILL LAW) — GENERATED by the lane's repro
+  // r11-shell-truth.cjs (r9's 212 shapes — r8's 114, the r8 reviewer's 42, the r8 skeptic's 32, r9's own — the r9
+  // attack's 42, the r9 reviewer's 46, r10's own, the r10 verdict's and claim reviewer's 192, r11's own; each run by
+  // bash, by zsh and by zsh in the agent tool's own form — `setopt NO_EXTENDED_GLOB NO_BARE_GLOB_QUAL`, then
+  // `eval '<line>'` — each shell in a session of its own UNDER A SUBREAPER (bin/subreaper.py: an orphan is the wrapper's,
+  // never systemd's), with a probe CLI first on PATH; liveness read from /proc 300 ms after the shell exits; every probe
+  // waited for before the next shape), never edited by hand: [label, line, bash, zsh, tool] — `lingers` = the CLI
+  // outlived the call, `ended` = it did not, `none` = that shell never ran it. r11b: EVERY row passed audit-r11.cjs before
+  // the run (a row signals only its own live job: a top-level `kill … $!`); the rows that signalled a parent, `$$`,
+  // `getppid()`, `%n`, `$P` or through `timeout` (44 of the measured 526) are NOT in this table — the suite never runs a
+  // shell, but a regeneration of this table runs every row in it
   const TRUTH = [   // version 5.3.9(1)-release (x86_64-pc-linux-gnu) / zsh 5.9 (bash · zsh · zsh in the agent tool's form), 2026-10-30
     ["39: { C & } ; wait", "{ vibespace-channels read lark/inbox & } ; wait", "ended", "ended", "ended"],
     ["39: { C & wait; } & wait", "{ vibespace-channels read lark/inbox & wait; } & wait", "ended", "ended", "ended"],
@@ -1417,7 +1426,6 @@ await section('⑬', async () => {
     ["fn: throttle — wait, then launch the next", "throttle() { wait; vibespace-channels read lark/$1 > /dev/null & }\nthrottle a\nthrottle c", "lingers", "lingers", "lingers"],
     ["fn body: wait & (backgrounded reaper)", "f() { wait & }\nvibespace-channels read lark/inbox &\nf", "lingers", "lingers", "lingers"],
     ["fn body: [ -n \"$NOPE\" ] && wait", "f() { [ -n \"$NOPE\" ] && wait; }\nvibespace-channels read lark/inbox &\nf", "lingers", "lingers", "lingers"],
-    ["fn body: timeout 5 wait (wrapper)", "f() { timeout 5 wait; }\nvibespace-channels read lark/inbox &\nf", "lingers", "lingers", "lingers"],
     ["fn body: wait | cat (pipe)", "f() { wait | cat; }\nvibespace-channels read lark/inbox &\nf", "lingers", "lingers", "lingers"],
     ["fn body: wait BEFORE its own C &", "f() { wait; vibespace-channels read lark/inbox & }\nf", "lingers", "lingers", "lingers"],
     ["fn launches sleep after C; wait $!", "f() { sleep 0.1 & }\nvibespace-channels read lark/inbox &\nf\nwait $!", "lingers", "lingers", "lingers"],
@@ -1433,8 +1441,6 @@ await section('⑬', async () => {
     ["control: loop of C &; wait $! (inline)", "for x in c a; do vibespace-channels read lark/$x & done\nwait $!", "lingers", "lingers", "lingers"],
     ["control: fn body C & wait (its own job, after)", "f() { vibespace-channels read lark/inbox & wait; }\nf", "ended", "ended", "ended"],
     ["control: f; f; wait (two calls, a plain wait)", "f() { vibespace-channels read lark/$1 & }\nf c\nf a\nwait", "ended", "ended", "ended"],
-    ["fn body P=$! read at the definition; kill $P", "vibespace-channels read lark/inbox &\nf() { sleep 0.1 & P=$!; }\nf\nkill $P", "lingers", "lingers", "lingers"],
-    ["control: P=$! at top level; kill $P", "vibespace-channels read lark/inbox &\nsleep 0.1 &\nP=$!\nkill $P", "lingers", "lingers", "lingers"],
     ["pipe elem: printf | while read; do C & done; wait", "printf \"a\\nc\\n\" | while read x; do vibespace-channels read lark/$x & done\nwait", "lingers", "ended", "ended"],
     ["pipe elem: true | { C & }; wait", "true | { vibespace-channels read lark/inbox & }\nwait", "lingers", "ended", "ended"],
     ["pipe elem: { C & } | cat; wait", "{ vibespace-channels read lark/inbox & } | cat\nwait", "ended", "ended", "ended"],
@@ -1448,7 +1454,6 @@ await section('⑬', async () => {
     ["⑫: C &| ⏎ wait (zsh)", "vibespace-channels read lark/inbox &|\nwait", "none", "lingers", "lingers"],
     ["⑫: C & f() { wait; } (never called)", "vibespace-channels read lark/inbox & f() { wait; }", "lingers", "lingers", "lingers"],
     ["⑫: g() { C & } ⏎ g & wait", "g() { vibespace-channels read lark/inbox & }\ng & wait", "lingers", "lingers", "lingers"],
-    ["⑫: C & timeout 5 wait $!", "vibespace-channels read lark/inbox & timeout 5 wait $!", "lingers", "lingers", "lingers"],
     ["⑫: C & kill -HUP $!", "vibespace-channels read lark/inbox & sleep 0.2; kill -HUP $!", "ended", "ended", "ended"],
     ["⑫: C & kill -s USR1 $!", "vibespace-channels read lark/inbox & sleep 0.2; kill -s USR1 $!", "ended", "ended", "ended"],
     ["⑫: loop & ; wait -n", "for c in a b c; do vibespace-channels read lark/$c & done; wait -n", "lingers", "lingers", "lingers"],
@@ -1458,11 +1463,8 @@ await section('⑬', async () => {
     ["⑫: bash -c \"C & wait\" & wait", "bash -c \"vibespace-channels read lark/inbox & wait\" & wait", "ended", "ended", "ended"],
     ["⑫: C & ⏎ function g { ⏎ wait ⏎ } ⏎ g", "vibespace-channels read lark/inbox &\nfunction g {\n  wait\n}\ng", "ended", "ended", "ended"],
     ["⑫: C & kill -TERM $!", "vibespace-channels read lark/inbox & sleep 0.2; kill -TERM $!", "ended", "ended", "ended"],
-    ["⑫: C & kill -9 %1", "vibespace-channels read lark/inbox & sleep 0.2; kill -9 %1", "ended", "ended", "lingers"],
     ["⑫: loop & ; wait", "for c in a b c; do vibespace-channels read lark/$c & done; wait", "ended", "ended", "ended"],
     ["⑫: C & command wait", "vibespace-channels read lark/inbox & command wait", "ended", "lingers", "lingers"],
-    ["r8: C & if [ -n \"$NEVER\" ]; then kill $!; fi", "vibespace-channels read lark/inbox & if [ -n \"$NEVER\" ]; then kill $!; fi", "lingers", "lingers", "lingers"],
-    ["r8: C & case x in y) kill $!;; esac", "vibespace-channels read lark/inbox & case x in y) kill $!;; esac", "lingers", "lingers", "lingers"],
     ["r8: C & [ -n \"$NOPE\" ] && { :; wait; }", "vibespace-channels read lark/inbox & [ -n \"$NOPE\" ] && { :; wait; }", "lingers", "lingers", "lingers"],
     ["r8: C & for x in $EMPTY; do wait; done", "vibespace-channels read lark/inbox & for x in $EMPTY; do wait; done", "lingers", "lingers", "lingers"],
     ["r8: C & if true; then :; else wait; fi", "vibespace-channels read lark/inbox & if true; then :; else wait; fi", "lingers", "lingers", "lingers"],
@@ -1478,7 +1480,6 @@ await section('⑬', async () => {
     ["r8: C & P=$!; (( P = 1 )); wait \"$P\"", "vibespace-channels read lark/inbox & P=$!; (( P = 1 )); wait \"$P\" 2>/dev/null", "lingers", "lingers", "lingers"],
     ["r8: C & P=$!; f() { P=x; }; f; wait \"$P\"", "vibespace-channels read lark/inbox & P=$!; f() { P=x; }; f; wait \"$P\" 2>/dev/null", "lingers", "lingers", "lingers"],
     ["r8: f() { C & [ -n \"$NOPE\" ] && wait; }; f", "f() { vibespace-channels read lark/inbox & [ -n \"$NOPE\" ] && wait; }; f", "lingers", "lingers", "lingers"],
-    ["r8: C & D & kill %2 (the second job)", "vibespace-channels read lark/inbox & sleep 0.1 & kill %2", "lingers", "lingers", "none"],
     ["r8: f() { C > /dev/null & }; f | cat; wait", "f() { vibespace-channels read lark/inbox > /dev/null & }; f | cat; wait", "lingers", "lingers", "lingers"],
     ["control r8: if true; then C & wait; fi", "if true; then vibespace-channels read lark/inbox & wait; fi", "ended", "ended", "ended"],
     ["control r8: C & ! wait", "vibespace-channels read lark/inbox & ! wait", "ended", "ended", "ended"],
@@ -1500,13 +1501,10 @@ await section('⑬', async () => {
     ["A0 control: set -e; C & false || true; wait", "set -e; vibespace-channels read lark/inbox & false || true; wait", "ended", "ended", "ended"],
     ["B1 wait() { :; }; C & wait", "wait() { :; }; vibespace-channels read lark/inbox & wait", "lingers", "lingers", "lingers"],
     ["B2 function wait { :; } ⏎ C & wait", "function wait { :; }\nvibespace-channels read lark/inbox & wait", "lingers", "lingers", "lingers"],
-    ["B3 kill() { :; }; C & kill $!", "kill() { :; }; vibespace-channels read lark/inbox & kill $!", "lingers", "lingers", "lingers"],
-    ["C1 C | true & kill $!", "vibespace-channels read lark/inbox | true & kill $!", "lingers", "lingers", "lingers"],
     ["C2 C > /dev/null | cat & wait $!", "vibespace-channels read lark/inbox > /dev/null | cat & wait $!", "ended", "ended", "ended"],
     ["C3 C | true & wait $!", "vibespace-channels read lark/inbox | true & wait $!", "ended", "lingers", "lingers"],
     ["C4 ( C; true ) & kill $!", "( vibespace-channels read lark/inbox; true ) & sleep 0.2; kill $!", "lingers", "lingers", "lingers"],
     ["C5 { C; true; } & kill $!", "{ vibespace-channels read lark/inbox; true; } & sleep 0.2; kill $!", "lingers", "lingers", "lingers"],
-    ["C6 ( C; true ) & P=$!; kill $P", "( vibespace-channels read lark/inbox; true ) & P=$!; sleep 0.2; kill $P", "lingers", "lingers", "lingers"],
     ["C7 bash -c \"C; true\" & kill $!", "bash -c \"vibespace-channels read lark/inbox; true\" & sleep 0.2; kill $!", "lingers", "lingers", "lingers"],
     ["C0 control: C | cat & wait $!", "vibespace-channels read lark/inbox | cat & wait $!", "ended", "ended", "ended"],
     ["C0 control: ( C; true ) & wait $!", "( vibespace-channels read lark/inbox; true ) & wait $!", "ended", "ended", "ended"],
@@ -1517,7 +1515,6 @@ await section('⑬', async () => {
     ["D5 f() { C; }; export -f f; bash -c f &", "f() { vibespace-channels read lark/inbox; }; export -f f 2>/dev/null; bash -c f &", "lingers", "none", "none"],
     ["D6 f() if true; then C; fi; f &", "f() if true; then vibespace-channels read lark/inbox; fi; f &", "lingers", "lingers", "lingers"],
     ["E1 C & eval exit; wait", "vibespace-channels read lark/inbox & eval exit; wait", "lingers", "lingers", "lingers"],
-    ["E2 C & kill $$; wait", "vibespace-channels read lark/inbox & kill $$; wait", "lingers", "lingers", "lingers"],
     ["E3 C & builtin exit; wait", "vibespace-channels read lark/inbox & builtin exit; wait", "lingers", "lingers", "lingers"],
     ["F1 C & kill -INT $!", "vibespace-channels read lark/inbox & sleep 0.2; kill -INT $!", "lingers", "lingers", "lingers"],
     ["F2 C & kill -2 $!", "vibespace-channels read lark/inbox & sleep 0.2; kill -2 $!", "lingers", "lingers", "lingers"],
@@ -1527,7 +1524,6 @@ await section('⑬', async () => {
     ["W3 watch-free: sh -c \"C; :\" & kill $!", "sh -c \"vibespace-channels read lark/inbox; :\" & sleep 0.2; kill $!", "lingers", "lingers", "lingers"],
     ["W0 control: nice C & kill $!", "nice vibespace-channels read lark/inbox & sleep 0.2; kill $!", "ended", "ended", "ended"],
     ["W0 control: nohup C & kill $!", "nohup vibespace-channels read lark/inbox >/dev/null 2>&1 & sleep 0.2; kill $!", "ended", "ended", "ended"],
-    ["case (y) pattern: kill $!", "vibespace-channels read lark/inbox & case x in (y) kill $!;; esac", "lingers", "lingers", "lingers"],
     ["case (y) pattern: wait", "vibespace-channels read lark/inbox & case x in (y) wait;; esac", "lingers", "lingers", "lingers"],
     ["ctl case y) pattern: wait", "vibespace-channels read lark/inbox & case x in y) wait;; esac", "lingers", "lingers", "lingers"],
     ["true && f (f launches sleep); wait $!", "f() { sleep 0.1 & }\nvibespace-channels read lark/inbox &\ntrue && f\nwait $!", "lingers", "lingers", "lingers"],
@@ -1548,7 +1544,6 @@ await section('⑬', async () => {
     ["ctl C & wait $!", "vibespace-channels read lark/inbox & wait $!", "ended", "ended", "ended"],
     ["zsh last elem: printf | while read; do sleep & done; wait $!", "vibespace-channels read lark/inbox > in.txt &\nprintf 'a\\nb\\n' | while read x; do sleep 0.1 & done\nwait $!", "ended", "lingers", "lingers"],
     ["zsh last elem: true | { sleep & }; C & wait %1", "true | { sleep 0.3 & }\nvibespace-channels read lark/inbox > in.txt &\nwait %1", "ended", "ended", "lingers"],
-    ["zsh last elem: git log | { tail -f /dev/null & W=$!; }; …", "vibespace-channels read lark/inbox > in.txt &\ngit --version | { sleep 0.2 & }\nkill $!", "ended", "lingers", "lingers"],
     ["procsub in a loop redirect; wait $!", "vibespace-channels read lark/inbox > in.txt &\nwhile read -r l; do :; done < <(printf 'x\\n')\nwait $!", "lingers", "ended", "ended"],
     ["ctl: no pipe, { sleep & }; wait $!", "vibespace-channels read lark/inbox > in.txt &\n{ sleep 0.1 & }\nwait $!", "lingers", "lingers", "lingers"],
     ["nested exit: f exits, g calls f; C & g; wait", "f() { exit 1; }\ng() { f; }\nvibespace-channels read lark/inbox > in.txt &\ng\nwait", "lingers", "lingers", "lingers"],
@@ -1623,7 +1618,6 @@ await section('⑬', async () => {
     ["x9-35 C & printf %d 1/0; wait (math in printf)", "vibespace-channels read lark/inbox & printf %d 1/0; wait", "ended", "ended", "ended"],
     ["x9-36 C & read status < /dev/null; wait (read-only name)", "vibespace-channels read lark/inbox & read status < /dev/null; wait", "ended", "lingers", "lingers"],
     ["x9-37 C & getopts a status; wait (read-only name)", "vibespace-channels read lark/inbox & getopts a status; wait", "ended", "ended", "ended"],
-    ["x9-38 C & python3 kills its parent; wait", "vibespace-channels read lark/inbox & python3 -c \"import os;os.kill(os.getppid(),9)\"; wait", "lingers", "lingers", "lingers"],
     ["x9-39 C & printf -v status x; wait (read-only name)", "vibespace-channels read lark/inbox & printf -v status x; wait", "ended", "lingers", "lingers"],
     ["x9-40 C & ulimit -t 1/0; wait (math in ulimit)", "vibespace-channels read lark/inbox & ulimit -t 1/0; wait", "ended", "ended", "ended"],
     ["x9-41 C & echo hi > a<1-2>b; wait (zsh numeric glob target)", "vibespace-channels read lark/inbox & echo hi > a<1-2>b; wait", "ended", "lingers", "lingers"],
@@ -1665,7 +1659,6 @@ await section('⑬', async () => {
     ["ZG C & printf \"%d\" abc; wait", "vibespace-channels read lark/inbox & printf \"%d\" abc; wait", "ended", "ended", "ended"],
     ["E1 eval-wrapped (Claude Code form): C & read -r status < /dev/null; wait", "eval 'vibespace-channels read lark/inbox & read -r status < /dev/null; wait' < /dev/null && pwd -P > cwd.out", "ended", "lingers", "lingers"],
     ["E2 eval-wrapped: C & echo <1-10>; wait", "eval 'vibespace-channels read lark/inbox & echo <1-10>; wait' < /dev/null && pwd -P > cwd.out", "none", "lingers", "lingers"],
-    ["E3 eval-wrapped: node poll.js & sleep 0.5; kill $!", "eval 'node poll.js & sleep 0.5; kill $!' < /dev/null && pwd -P > cwd.out", "lingers", "lingers", "lingers"],
     ["E0 eval-wrapped ctl: C & wait", "eval 'vibespace-channels read lark/inbox & wait' < /dev/null && pwd -P > cwd.out", "ended", "ended", "ended"],
     ["H1 cat <<EOF > o.txt & ⏎ $(C) ⏎ EOF (no reaper)", "cat <<EOF > o.txt &\n$(vibespace-channels read lark/inbox)\nEOF\necho started", "lingers", "lingers", "lingers"],
     ["H2 cat <<EOF > o.txt & ⏎ $(C) ⏎ EOF ⏎ sleep 0.2; kill $!", "cat <<EOF > o.txt &\n$(vibespace-channels read lark/inbox)\nEOF\nsleep 0.2; kill $!", "lingers", "lingers", "lingers"],
@@ -1700,14 +1693,251 @@ await section('⑬', async () => {
     ["r10: C <<EOF & ⏎ $(D) ⏎ EOF ⏎ sleep 0.2; kill $!", "vibespace-channels read lark/inbox <<EOF &\n$(vibespace-channels read lark/a)\nEOF\nsleep 0.2; kill $!", "lingers", "lingers", "lingers"],
     ["r10: C <<EOF & ⏎ $(D) ⏎ EOF ⏎ wait", "vibespace-channels read lark/inbox <<EOF &\n$(vibespace-channels read lark/a)\nEOF\nwait", "ended", "ended", "ended"],
     ["r10: { cat <<EOF ⏎ $(C) ⏎ EOF ⏎ } & (a group)", "{ cat <<EOF\n$(vibespace-channels read lark/inbox)\nEOF\n} > o.txt &\necho started", "lingers", "lingers", "lingers"],
-    ["r10: C & python3 kills its parent & wait", "vibespace-channels read lark/inbox & python3 -c \"import os;os.kill(os.getppid(),9)\" & wait", "lingers", "lingers", "lingers"],
-    ["r10: python3 kills its parent (0.2 s) & C & wait", "python3 -c \"import os,time;time.sleep(0.2);os.kill(os.getppid(),9)\" & vibespace-channels read lark/inbox & wait", "lingers", "lingers", "lingers"],
-    ["r10: ( sleep 0.2; kill $$ ) & C & wait", "( sleep 0.2; kill $$ ) & vibespace-channels read lark/inbox & wait", "lingers", "lingers", "lingers"],
-    ["r10: C \"$(sleep 0.2; kill $$)\" & wait", "vibespace-channels read lark/inbox \"$(sleep 0.2; kill $$)\" & wait", "lingers", "lingers", "lingers"],
     ["r10: C \"$(D)\" & wait", "vibespace-channels read lark/inbox \"$(vibespace-channels read lark/a)\" & wait", "ended", "ended", "ended"],
     ["r10: C & echo hi > nomatch*zz; wait", "vibespace-channels read lark/inbox & echo hi > nomatch*zz; wait", "ended", "lingers", "lingers"],
     ["r10: read -r 'options[errexit]' <<< on; C & false; wait", "read -r 'options[errexit]' <<< on; vibespace-channels read lark/inbox & false; wait", "ended", "lingers", "ended"],
     ["r10: C & FOO=1; wait", "vibespace-channels read lark/inbox & FOO=1; wait", "ended", "ended", "ended"],
+    ["v10a B1 n=options[errexit]; : ${(P)n::=on}; C & false; wait", "n='options[errexit]'; : ${(P)n::=on}; vibespace-channels read lark/inbox & false; wait", "none", "lingers", "ended"],
+    ["v10a B2 print -voptions[errexit] on; C & false; wait", "print -v'options[errexit]' on; vibespace-channels read lark/inbox & false; wait", "ended", "lingers", "ended"],
+    ["v10a B3 n=IFS; printf -v \"$n\" 0123456789; C & wait $!", "n=IFS; printf -v \"$n\" 0123456789; vibespace-channels read lark/inbox & wait $!", "lingers", "ended", "ended"],
+    ["v10a B4 read -r \"$n\" <<< on (n=options[errexit]); C & false; wait", "n='options[errexit]'; read -r \"$n\" <<< on; vibespace-channels read lark/inbox & false; wait", "ended", "lingers", "ended"],
+    ["v10a B5 typeset -g \"options[errexit]\"=on? via export", "export 'options[errexit]=on'; vibespace-channels read lark/inbox & false; wait", "ended", "lingers", "ended"],
+    ["v10a C1 C |⏎ cat & (pipe continued on the next line)", "vibespace-channels read lark/inbox |\n  cat > /dev/null &\necho started", "lingers", "lingers", "lingers"],
+    ["v10a C2 C &&⏎ echo done &", "vibespace-channels read lark/inbox &&\n  echo done &\necho started", "lingers", "ended", "ended"],
+    ["v10a C3 cat <<EOF |⏎ $(C) ⏎ EOF ⏎ cat &", "cat <<EOF |\n$(vibespace-channels read lark/inbox)\nEOF\ncat > /dev/null &\necho started", "lingers", "lingers", "lingers"],
+    ["v10a D1 sh -c \"C & : >&9; wait\" (dash special builtin redir error)", "sh -c 'vibespace-channels read lark/inbox & : >&9; wait'", "lingers", "lingers", "lingers"],
+    ["v10a D2 C & : >&9; wait", "vibespace-channels read lark/inbox & : >&9; wait", "ended", "ended", "ended"],
+    ["v10a D3 sh -c \"C & true >&9; wait\"", "sh -c 'vibespace-channels read lark/inbox & true >&9; wait'", "ended", "ended", "ended"],
+    ["v10a F1 C & echo hi >&-; wait", "vibespace-channels read lark/inbox & echo hi >&-; wait", "ended", "ended", "ended"],
+    ["v10a F2 C & cd ..; wait", "vibespace-channels read lark/inbox & cd ..; wait", "ended", "ended", "ended"],
+    ["v10b D4 sh -c \"C & x=1 >&9; wait\"", "sh -c 'vibespace-channels read lark/inbox & x=1 >&9; wait'", "ended", "ended", "ended"],
+    ["v10b D5 sh -c \"C & echo hi >&9; wait\"", "sh -c 'vibespace-channels read lark/inbox & echo hi >&9; wait'", "ended", "ended", "ended"],
+    ["v10b D6 sh -c \"C & : 2>&9; wait\"", "sh -c 'vibespace-channels read lark/inbox & : 2>&9; wait'", "lingers", "lingers", "lingers"],
+    ["v10b D7 ctl sh -c \"C & : > /dev/null; wait\"", "sh -c 'vibespace-channels read lark/inbox & : > /dev/null; wait'", "ended", "ended", "ended"],
+    ["v10b D8 dash -c \"C & : <&9; wait\"", "dash -c 'vibespace-channels read lark/inbox & : <&9; wait'", "lingers", "lingers", "lingers"],
+    ["v10b D9 sh -c \"C & sleep 0.1; : >&8; wait\"", "sh -c \"vibespace-channels read lark/inbox & sleep 0.1; : >&8; wait\"", "lingers", "lingers", "lingers"],
+    ["v10b D10 ctl bash -c \"C & : >&9; wait\"", "bash -c 'vibespace-channels read lark/inbox & : >&9; wait'", "ended", "ended", "ended"],
+    ["v10b B6 v=IFS; read -r \"$v\" <<< 0123456789; C & wait $!", "v=IFS; read -r \"$v\" <<< 0123456789; vibespace-channels read lark/inbox & wait $!", "lingers", "ended", "ended"],
+    ["v10b B7 v=IFS; declare \"$v=0123456789\"; C & wait $!", "v=IFS; declare \"$v=0123456789\"; vibespace-channels read lark/inbox & wait $!", "lingers", "ended", "ended"],
+    ["v10b B10 printf -vIFS 0123456789; C & wait $!", "printf -vIFS 0123456789; vibespace-channels read lark/inbox & wait $!", "lingers", "ended", "ended"],
+    ["v10b B9 printf -voptions[errexit] on; C & false; wait", "printf -v'options[errexit]' on; vibespace-channels read lark/inbox & false; wait", "ended", "ended", "ended"],
+    ["v10b B11 n=options[errexit]; typeset -g \"$n\"=on; C & false; wait", "n='options[errexit]'; typeset -g \"$n\"=on; vibespace-channels read lark/inbox & false; wait", "ended", "lingers", "ended"],
+    ["v10b C4 C | ⏎ tee inbox.txt > /dev/null & ⏎ echo started", "vibespace-channels read lark/inbox |\n  tee inbox.txt > /dev/null &\necho started", "lingers", "lingers", "lingers"],
+    ["v10b C5 C || ⏎ echo failed & ⏎ echo started", "vibespace-channels read lark/inbox ||\n  echo failed &\necho started", "lingers", "ended", "ended"],
+    ["v10b C6 cat <<EOF && ⏎ $(C) ⏎ EOF ⏎ echo ok &", "cat <<EOF &&\n$(vibespace-channels read lark/inbox)\nEOF\n  echo ok > /dev/null &\necho started", "lingers", "ended", "ended"],
+    ["v10b C7 ctl C | tee inbox.txt > /dev/null & (one line)", "vibespace-channels read lark/inbox | tee inbox.txt > /dev/null &\necho started", "lingers", "lingers", "lingers"],
+    ["v10b H4 cat <<EOF > o.txt & wait ⏎ $(C) ⏎ EOF", "cat <<EOF > o.txt & wait\n$(vibespace-channels read lark/inbox)\nEOF", "ended", "ended", "ended"],
+    ["v10b K8 C \"$(D)\" & sleep 0.2; kill $!", "vibespace-channels read lark/inbox \"$(vibespace-channels read lark/a)\" & sleep 0.2; kill $!", "lingers", "lingers", "lingers"],
+    ["v10b K10 X=1 C < /dev/null > o.log 2>&1 & sleep 0.2; kill $!", "X=1 vibespace-channels read lark/inbox < /dev/null > o.log 2>&1 & sleep 0.2; kill $!", "ended", "ended", "ended"],
+    ["v10b K11 C & sleep 0.2; kill $! 2>/dev/null; echo done", "vibespace-channels read lark/inbox & sleep 0.2; kill $! 2>/dev/null; echo done", "ended", "ended", "ended"],
+    ["v10c B12 declare -n r=IFS; r=0123456789; C & wait $!", "declare -n r=IFS; r=0123456789; vibespace-channels read lark/inbox & wait $!", "lingers", "ended", "ended"],
+    ["v10c B13 read -aIFS <<< 0123456789; C & wait $!", "read -aIFS <<< 0123456789; vibespace-channels read lark/inbox & wait $!", "ended", "ended", "ended"],
+    ["v10c D12 sh -c \"C & cd / >&9; wait\"", "sh -c 'vibespace-channels read lark/inbox & cd / >&9; wait'", "ended", "ended", "ended"],
+    ["v10c D13 sh -c \"C & sleep 0.1 >&9; wait\"", "sh -c 'vibespace-channels read lark/inbox & sleep 0.1 >&9; wait'", "ended", "ended", "ended"],
+    ["v10c D14 sh -c \"C & false >&9; wait\"", "sh -c 'vibespace-channels read lark/inbox & false >&9; wait'", "ended", "ended", "ended"],
+    ["v10c D15 sh -c \"C & x=1; : 2>&3; wait\"", "sh -c 'vibespace-channels read lark/inbox & x=1; : 2>&3; wait'", "lingers", "lingers", "lingers"],
+    ["v10c C8 C 2>&1 | ⏎ grep -v debug > inbox.txt & ⏎ echo started", "vibespace-channels read lark/inbox 2>&1 |\n  grep -v debug > inbox.txt &\necho started", "lingers", "lingers", "lingers"],
+    ["rc10 RC2 sh -c C > in.json & : 2>&3; wait", "sh -c 'vibespace-channels read lark/inbox > in.json & : 2>&3; wait'", "lingers", "lingers", "lingers"],
+    ["rc10 RC4 ctl sh -c C & : ; wait", "sh -c 'vibespace-channels read lark/inbox & : ; wait'", "ended", "ended", "ended"],
+    ["rc10 RC5 ctl sh -c C & : >/dev/null; wait", "sh -c 'vibespace-channels read lark/inbox & : >/dev/null; wait'", "ended", "ended", "ended"],
+    ["nl10 N2 C 2>&1 |⏎ grep &", "vibespace-channels read lark/inbox 2>&1 |\n  grep -v debug > inbox.txt &", "lingers", "lingers", "lingers"],
+    ["nl10 N3 C ||⏎ echo failed &", "vibespace-channels read lark/inbox ||\n  echo failed &", "lingers", "ended", "ended"],
+    ["nl10 N4 C &&⏎ echo ok &", "vibespace-channels read lark/inbox &&\n  echo ok &", "lingers", "ended", "ended"],
+    ["nl10 N5 cat <<EOF &&⏎$(C)⏎EOF⏎ echo ok &", "cat <<EOF &&\n$(vibespace-channels read lark/inbox)\nEOF\n  echo ok > /dev/null &", "lingers", "ended", "ended"],
+    ["nl10 CTRL fg C⏎ echo", "vibespace-channels read lark/inbox\necho started", "ended", "ended", "ended"],
+    ["nlp10 control-or-1line", "vibespace-channels read lark/inbox || echo failed &", "lingers", "ended", "ended"],
+    ["nlp10 control-heredoc-and-1line", "cat <<EOF && echo ok > /dev/null &\n$(vibespace-channels read lark/inbox)\nEOF", "lingers", "ended", "ended"],
+    ["st10 ctl ls; C & wait (STOP, no unsafe job)", "ls; vibespace-channels read lark/inbox & wait", "ended", "ended", "ended"],
+    ["cr10 a01 C & :; wait", "vibespace-channels read lark/inbox & :; wait", "ended", "ended", "ended"],
+    ["cr10 a02 C & true; wait", "vibespace-channels read lark/inbox & true; wait", "ended", "ended", "ended"],
+    ["cr10 a03 C & echo plain words; wait", "vibespace-channels read lark/inbox & echo plain words; wait", "ended", "ended", "ended"],
+    ["cr10 a04 C & echo $((1+1)); wait", "vibespace-channels read lark/inbox & echo $((1+1)); wait", "ended", "ended", "ended"],
+    ["cr10 a05 C & echo ~; wait", "vibespace-channels read lark/inbox & echo ~; wait", "ended", "ended", "ended"],
+    ["cr10 a06 C & echo *; wait (matches files)", "vibespace-channels read lark/inbox & echo *; wait", "ended", "ended", "ended"],
+    ["cr10 a07 C & echo {a,b}; wait", "vibespace-channels read lark/inbox & echo {a,b}; wait", "ended", "ended", "ended"],
+    ["cr10 a08 C & X=$(true); wait", "vibespace-channels read lark/inbox & X=$(true); wait", "ended", "ended", "ended"],
+    ["cr10 a09 C & typeset -i n=1; wait", "vibespace-channels read lark/inbox & typeset -i n=1; wait", "ended", "ended", "ended"],
+    ["cr10 a10 C & local x; wait", "vibespace-channels read lark/inbox & local x; wait", "ended", "ended", "ended"],
+    ["cr10 a11 C & return; wait (top level)", "vibespace-channels read lark/inbox & return; wait", "ended", "lingers", "lingers"],
+    ["cr10 a12 C & exit 0 & wait", "vibespace-channels read lark/inbox & exit 0 & wait", "ended", "ended", "ended"],
+    ["cr10 a12b C & exit 0 &; wait (literal)", "vibespace-channels read lark/inbox & exit 0 &; wait", "none", "ended", "ended"],
+    ["cr10 a13 C & shift; wait (no args)", "vibespace-channels read lark/inbox & shift; wait", "ended", "ended", "ended"],
+    ["cr10 a14 C & cd /nonexistent; wait", "vibespace-channels read lark/inbox & cd /nonexistent; wait", "ended", "ended", "ended"],
+    ["cr10 a15 C & ulimit -n 1; wait", "vibespace-channels read lark/inbox & ulimit -n 1; wait", "ended", "ended", "ended"],
+    ["cr10 a16 C & umask 777; wait", "vibespace-channels read lark/inbox & umask 777; wait", "ended", "ended", "ended"],
+    ["cr10 a17 C & exec 3>&-; wait", "vibespace-channels read lark/inbox & exec 3>&-; wait", "ended", "ended", "ended"],
+    ["cr10 a18 C & exec; wait (bare)", "vibespace-channels read lark/inbox & exec; wait", "ended", "ended", "ended"],
+    ["cr10 a19 C & trap - TERM; wait", "vibespace-channels read lark/inbox & trap - TERM; wait", "ended", "ended", "ended"],
+    ["cr10 a20 C & times; wait", "vibespace-channels read lark/inbox & times; wait", "ended", "ended", "ended"],
+    ["cr10 a21 C & echo <&3; wait (bad fd)", "vibespace-channels read lark/inbox & echo <&3; wait", "ended", "ended", "ended"],
+    ["cr10 a22 C & echo a<-; wait", "vibespace-channels read lark/inbox & echo a<-; wait", "ended", "ended", "ended"],
+    ["cr10 a23 C & print -r -- <1-2>; wait", "vibespace-channels read lark/inbox & print -r -- <1-2>; wait", "none", "lingers", "lingers"],
+    ["cr10 a24 C & echo hi >&3; wait (bad fd, allowlisted target)", "vibespace-channels read lark/inbox & echo hi >&3; wait", "ended", "ended", "ended"],
+    ["cr10 a25 C & : >&3; wait (special builtin, bad fd)", "vibespace-channels read lark/inbox & : >&3; wait", "ended", "ended", "ended"],
+    ["cr10 a26 C & true <&3; wait", "vibespace-channels read lark/inbox & true <&3; wait", "ended", "ended", "ended"],
+    ["cr10 a28 C & echo hi 1>&2; wait", "vibespace-channels read lark/inbox & echo hi 1>&2; wait", "ended", "ended", "ended"],
+    ["cr10 a30 C & cd bin; wait", "vibespace-channels read lark/inbox & cd bin; wait", "ended", "ended", "ended"],
+    ["cr10 a31 C & sleep 0.1; wait", "vibespace-channels read lark/inbox & sleep 0.1; wait", "ended", "ended", "ended"],
+    ["cr10 a32 C & cd /; sleep 0.1; true; echo ok; x=1; wait (a chain of rows)", "vibespace-channels read lark/inbox & cd /; sleep 0.1; true; echo ok; x=1; wait", "ended", "ended", "ended"],
+    ["cr10 a33 C & echo exit; wait", "vibespace-channels read lark/inbox & echo exit; wait", "ended", "ended", "ended"],
+    ["cr10 a34 C & echo %1; wait", "vibespace-channels read lark/inbox & echo %1; wait", "ended", "ended", "ended"],
+    ["cr10 a35 C & echo status=1; wait", "vibespace-channels read lark/inbox & echo status=1; wait", "ended", "ended", "ended"],
+    ["cr10 a36 C & false; wait $!", "vibespace-channels read lark/inbox & false; wait $!", "ended", "ended", "ended"],
+    ["cr10 a37 C & x=1 & wait (an assignment job)", "vibespace-channels read lark/inbox & x=1 & wait", "ended", "none", "none"],
+    ["cr10 a38 C & : & wait", "vibespace-channels read lark/inbox & : & wait", "ended", "ended", "ended"],
+    ["cr10 a39 C & cd / & wait", "vibespace-channels read lark/inbox & cd / & wait", "ended", "ended", "ended"],
+    ["cr10 a40 C & echo hi >&3 & wait", "vibespace-channels read lark/inbox & echo hi >&3 & wait", "ended", "ended", "ended"],
+    ["cr10 a41 C & echo hi &> /dev/null; wait", "vibespace-channels read lark/inbox & echo hi &> /dev/null; wait", "ended", "ended", "ended"],
+    ["cr10 a42 C &> /dev/null; wait (no job: &> is a redirection)", "vibespace-channels read lark/inbox &> /dev/null; wait", "ended", "ended", "ended"],
+    ["cr10 a43 C & wait >&3 (bad fd on the reaper)", "vibespace-channels read lark/inbox & wait >&3", "lingers", "lingers", "lingers"],
+    ["cr10 a44 C & wait 2>&3", "vibespace-channels read lark/inbox & wait 2>&3", "lingers", "lingers", "lingers"],
+    ["cr10 a45 C & wait $! <&3", "vibespace-channels read lark/inbox & wait $! <&3", "lingers", "lingers", "lingers"],
+    ["cr10 a46 C & sleep 0.3; kill $! 2>&3", "vibespace-channels read lark/inbox & sleep 0.3; kill $! 2>&3", "lingers", "lingers", "lingers"],
+    ["cr10 a47 C & wait 9<&3", "vibespace-channels read lark/inbox & wait 9<&3", "lingers", "lingers", "lingers"],
+    ["cr10 a48 C & wait >&-", "vibespace-channels read lark/inbox & wait >&-", "ended", "ended", "ended"],
+    ["cr10 k01 node x.js &; kill $! (literal)", "node x.js &; kill $!", "none", "none", "none"],
+    ["cr10 k02 node x.js & sleep 0.5; kill $!", "node x.js & sleep 0.5; kill $!", "lingers", "lingers", "lingers"],
+    ["cr10 k03 vibespace-channels --foo & kill $!", "vibespace-channels --foo & kill $!", "none", "none", "none"],
+    ["cr10 k03b vibespace-channels --foo &; kill $! (literal)", "vibespace-channels --foo &; kill $!", "none", "none", "none"],
+    ["cr10 k03c vibespace-channels --foo & sleep 0.3; kill $!", "vibespace-channels --foo & sleep 0.3; kill $!", "ended", "ended", "ended"],
+    ["cr10 k04 ./vibespace-channels (a link to the CLI) & sleep 0.3; kill $!", "./vibespace-channels read lark/inbox & sleep 0.3; kill $!", "ended", "ended", "ended"],
+    ["cr10 k04b ./vibespace-channels &; kill $! (literal)", "./vibespace-channels read lark/inbox &; kill $!", "none", "none", "none"],
+    ["cr10 k05 ./wrap/vibespace-channels (a SCRIPT named like the CLI, runs it) & sleep 0.3; kill $!", "./wrap/vibespace-channels read lark/inbox & sleep 0.3; kill $!", "lingers", "lingers", "lingers"],
+    ["cr10 k05b ./wrap/vibespace-channels & wait (control)", "./wrap/vibespace-channels read lark/inbox & wait", "ended", "ended", "ended"],
+    ["cr10 k06 env C & sleep 0.3; kill $!", "env vibespace-channels read lark/inbox & sleep 0.3; kill $!", "ended", "ended", "ended"],
+    ["cr10 k06b env C &; kill $! (literal)", "env vibespace-channels read lark/inbox &; kill $!", "none", "none", "none"],
+    ["cr10 k07 command C & sleep 0.3; kill $!", "command vibespace-channels read lark/inbox & sleep 0.3; kill $!", "ended", "ended", "ended"],
+    ["cr10 k07b command C &; kill $! (literal)", "command vibespace-channels read lark/inbox &; kill $!", "none", "none", "none"],
+    ["cr10 k08 exec C & sleep 0.3; kill $!", "exec vibespace-channels read lark/inbox & sleep 0.3; kill $!", "ended", "ended", "ended"],
+    ["cr10 k08b exec C &; kill $! (literal)", "exec vibespace-channels read lark/inbox &; kill $!", "none", "none", "none"],
+    ["cr10 k09 nohup C > /dev/null 2>&1 & sleep 0.3; kill $!", "nohup vibespace-channels read lark/inbox > /dev/null 2>&1 & sleep 0.3; kill $!", "ended", "ended", "ended"],
+    ["cr10 k10 C & sleep 0.3; kill -0 $!", "vibespace-channels read lark/inbox & sleep 0.3; kill -0 $!", "lingers", "lingers", "lingers"],
+    ["cr10 k11 C & sleep 0.3; kill -CHLD $!", "vibespace-channels read lark/inbox & sleep 0.3; kill -CHLD $!", "lingers", "lingers", "lingers"],
+    ["cr10 k12 C & sleep 0.3; kill -s TERM $!", "vibespace-channels read lark/inbox & sleep 0.3; kill -s TERM $!", "ended", "ended", "ended"],
+    ["cr10 k13 C & sleep 0.3; kill -TERM $!", "vibespace-channels read lark/inbox & sleep 0.3; kill -TERM $!", "ended", "ended", "ended"],
+    ["cr10 k14 C & sleep 0.3; kill ${!}", "vibespace-channels read lark/inbox & sleep 0.3; kill ${!}", "ended", "ended", "ended"],
+    ["cr10 k15 C & sleep 0.3; kill \"$!\"", "vibespace-channels read lark/inbox & sleep 0.3; kill \"$!\"", "ended", "ended", "ended"],
+    ["cr10 k16 C | cat & sleep 0.3; kill $!", "vibespace-channels read lark/inbox | cat & sleep 0.3; kill $!", "lingers", "lingers", "lingers"],
+    ["cr10 k17 VAR=1 C & sleep 0.3; kill $!", "VAR=1 vibespace-channels read lark/inbox & sleep 0.3; kill $!", "ended", "ended", "ended"],
+    ["cr10 k18 C > /dev/null & sleep 0.3; kill $!", "vibespace-channels read lark/inbox > /dev/null & sleep 0.3; kill $!", "ended", "ended", "ended"],
+    ["cr10 k20 C & sleep 0.3; kill $! $!", "vibespace-channels read lark/inbox & sleep 0.3; kill $! $!", "ended", "ended", "ended"],
+    ["cr10 k23 bin/vibespace-channels (the CLI by a relative path) & sleep 0.3; kill $!", "bin/vibespace-channels read lark/inbox & sleep 0.3; kill $!", "ended", "ended", "ended"],
+    ["cr10 k24 ./vc (a link to the CLI, another name) & sleep 0.3; kill $!", "./vc read lark/inbox & sleep 0.3; kill $!", "ended", "ended", "ended"],
+    ["cr10 k25 sh -c \"C\" & sleep 0.3; kill $!", "sh -c \"vibespace-channels read lark/inbox\" & sleep 0.3; kill $!", "lingers", "lingers", "lingers"],
+    ["cr10 k26 C & D & sleep 0.3; kill $!", "vibespace-channels read lark/inbox & vibespace-channels read lark/a & sleep 0.3; kill $!", "lingers", "lingers", "lingers"],
+    ["cr10 h01 cat <<A > o.txt & cat <<B > p.txt ⏎ $(C) ⏎ A ⏎ $(D) ⏎ B (no reaper)", "cat <<A > o.txt & cat <<B > p.txt\n$(vibespace-channels read lark/inbox)\nA\n$(vibespace-channels read lark/a)\nB", "lingers", "lingers", "lingers"],
+    ["cr10 h02 h01 ⏎ wait", "cat <<A > o.txt & cat <<B > p.txt\n$(vibespace-channels read lark/inbox)\nA\n$(vibespace-channels read lark/a)\nB\nwait", "ended", "ended", "ended"],
+    ["cr10 h03 cat <<A > o.txt & cat <<B > p.txt ⏎ $(D) ⏎ A ⏎ $(C) ⏎ B (no reaper)", "cat <<A > o.txt & cat <<B > p.txt\n$(vibespace-channels read lark/a)\nA\n$(vibespace-channels read lark/inbox)\nB", "ended", "ended", "ended"],
+    ["cr10 h04 cat <<A > p.txt; cat <<B > o.txt & ⏎ $(C) ⏎ A ⏎ $(D) ⏎ B (no reaper)", "cat <<A > p.txt; cat <<B > o.txt &\n$(vibespace-channels read lark/inbox)\nA\n$(vibespace-channels read lark/a)\nB", "lingers", "lingers", "lingers"],
+    ["cr10 h06 cat <<A & ⏎ $(C) ⏎ A ⏎ wait", "cat <<A &\n$(vibespace-channels read lark/inbox)\nA\nwait", "ended", "ended", "ended"],
+    ["cr10 h07 cat <<'A' > o.txt & ⏎ $(C) ⏎ A (quoted: no expansion)", "cat <<'A' > o.txt &\n$(vibespace-channels read lark/inbox)\nA", "none", "none", "none"],
+    ["cr10 h08 cat <<-A > o.txt & ⏎ \\t$(C) ⏎ \\tA (no reaper)", "cat <<-A > o.txt &\n\t$(vibespace-channels read lark/inbox)\n\tA", "lingers", "lingers", "lingers"],
+    ["cr10 h09 cat <<< \"$(C)\" > o.txt & (here-string, no reaper)", "cat <<< \"$(vibespace-channels read lark/inbox)\" > o.txt &", "lingers", "lingers", "lingers"],
+    ["cr10 h10 cat <<< \"$(C)\" > o.txt & sleep 0.2; kill $!", "cat <<< \"$(vibespace-channels read lark/inbox)\" > o.txt & sleep 0.2; kill $!", "lingers", "lingers", "lingers"],
+    ["cr10 h11 cat <<A | cat > o.txt & ⏎ $(C) ⏎ A (bg pipeline, no reaper)", "cat <<A | cat > o.txt &\n$(vibespace-channels read lark/inbox)\nA", "lingers", "lingers", "lingers"],
+    ["cr10 h12 cat <<A > o.txt ⏎ $(C > /dev/null &) ⏎ A ⏎ wait", "cat <<A > o.txt\n$(vibespace-channels read lark/inbox > /dev/null &)\nA\nwait", "lingers", "lingers", "lingers"],
+    ["cr10 h13 cat <<A > o.txt & ⏎ $(C > /dev/null &) ⏎ A ⏎ wait", "cat <<A > o.txt &\n$(vibespace-channels read lark/inbox > /dev/null &)\nA\nwait", "lingers", "lingers", "lingers"],
+    ["cr10 h14 x=$(cat <<A ⏎ $(C > /dev/null &) ⏎ A ⏎ ); wait", "x=$(cat <<A\n$(vibespace-channels read lark/inbox > /dev/null &)\nA\n); wait", "lingers", "lingers", "lingers"],
+    ["cr10 h16 cat <<A <<B > o.txt & ⏎ $(D) ⏎ A ⏎ $(C) ⏎ B (two heredocs, no reaper)", "cat <<A <<B > o.txt &\n$(vibespace-channels read lark/a)\nA\n$(vibespace-channels read lark/inbox)\nB", "lingers", "lingers", "lingers"],
+    ["cr10 h17 cat <<A > p.txt && true & ⏎ $(C) ⏎ A (an && list in bg)", "cat <<A > p.txt && true &\n$(vibespace-channels read lark/inbox)\nA", "lingers", "ended", "ended"],
+    ["cr10 h18 cat <<A > p.txt || true & ⏎ $(C) ⏎ A", "cat <<A > p.txt || true &\n$(vibespace-channels read lark/inbox)\nA", "lingers", "ended", "ended"],
+    ["cr10 h19 true && cat <<A > p.txt & ⏎ $(C) ⏎ A", "true && cat <<A > p.txt &\n$(vibespace-channels read lark/inbox)\nA", "lingers", "lingers", "lingers"],
+    ["cr10 h20 { cat <<A > p.txt; } & ⏎ $(C) ⏎ A", "{ cat <<A > p.txt; } &\n$(vibespace-channels read lark/inbox)\nA", "lingers", "lingers", "lingers"],
+    ["cr10 h21 ( cat <<A > p.txt ) & ⏎ $(C) ⏎ A", "( cat <<A > p.txt ) &\n$(vibespace-channels read lark/inbox)\nA", "lingers", "lingers", "lingers"],
+    ["cr10 h22 if true; then cat <<A > p.txt; fi & ⏎ $(C) ⏎ A", "if true; then cat <<A > p.txt; fi &\n$(vibespace-channels read lark/inbox)\nA", "lingers", "lingers", "lingers"],
+    ["cr10 h23 for i in 1; do cat <<A > p.txt; done & ⏎ $(C) ⏎ A", "for i in 1; do cat <<A > p.txt; done &\n$(vibespace-channels read lark/inbox)\nA", "lingers", "lingers", "lingers"],
+    ["cr10 h24 f() { cat <<A > p.txt ⏎ $(C) ⏎ A ⏎ }; f &", "f() { cat <<A > p.txt\n$(vibespace-channels read lark/inbox)\nA\n}; f &", "lingers", "lingers", "lingers"],
+    ["cr10 h25 while read -r l; do :; done <<A & ⏎ $(C) ⏎ A", "while read -r l; do :; done <<A &\n$(vibespace-channels read lark/inbox)\nA", "lingers", "lingers", "lingers"],
+    ["cr10 h26 x=$(cat <<A ⏎ $(C) ⏎ A ⏎ ) & (an assignment job)", "x=$(cat <<A\n$(vibespace-channels read lark/inbox)\nA\n) &", "lingers", "none", "none"],
+    ["cr10 h27 cat <<A > o.txt &! ⏎ $(C) ⏎ A (zsh disown)", "cat <<A > o.txt &!\n$(vibespace-channels read lark/inbox)\nA", "lingers", "lingers", "lingers"],
+    ["cr10 h28 cat <<A > o.txt & ⏎ $(C) ⏎ A ⏎ wait $!", "cat <<A > o.txt &\n$(vibespace-channels read lark/inbox)\nA\nwait $!", "ended", "ended", "ended"],
+    ["cr10 h29 cat <<A > o.txt & echo started ⏎ `C` ⏎ A", "cat <<A > o.txt & echo started\n`vibespace-channels read lark/inbox`\nA", "lingers", "lingers", "lingers"],
+    ["cr10 h30 cat <<A > p.txt; C & wait ⏎ $(D) ⏎ A (fg heredoc, then a reaped job)", "cat <<A > p.txt; vibespace-channels read lark/inbox & wait\n$(vibespace-channels read lark/a)\nA", "ended", "ended", "ended"],
+    ["cr10 b01 C & wait 2>&1 (ctl: fd 1 open)", "vibespace-channels read lark/inbox & wait 2>&1", "ended", "ended", "ended"],
+    ["cr10 b02 C & wait >&2 (ctl: fd 2 open)", "vibespace-channels read lark/inbox & wait >&2", "ended", "ended", "ended"],
+    ["cr10 b04 C & sleep 0.3; kill $! 2>/dev/null (ctl)", "vibespace-channels read lark/inbox & sleep 0.3; kill $! 2>/dev/null", "ended", "ended", "ended"],
+    ["cr10 b05 C & sleep 0.3; kill -TERM $! >&4", "vibespace-channels read lark/inbox & sleep 0.3; kill -TERM $! >&4", "lingers", "lingers", "lingers"],
+    ["cr10 b06 C & wait $! 2>&5", "vibespace-channels read lark/inbox & wait $! 2>&5", "lingers", "lingers", "lingers"],
+    ["cr10 b07 C & wait 1>&7 ⏎ (newline) echo after", "vibespace-channels read lark/inbox & wait 1>&7\necho after", "lingers", "lingers", "lingers"],
+    ["cr10 b08 C & echo started; wait 2>&3", "vibespace-channels read lark/inbox & echo started; wait 2>&3", "lingers", "lingers", "lingers"],
+    ["cr10 b09 C & wait <&-", "vibespace-channels read lark/inbox & wait <&-", "ended", "ended", "ended"],
+    ["cr10 b10 C & sleep 0.3; kill $! >&-", "vibespace-channels read lark/inbox & sleep 0.3; kill $! >&-", "ended", "ended", "ended"],
+    ["cr10 b11 $PWD/wrap/vibespace-channels (absolute path to a script named like the CLI) & sleep 0.3; kill $!", "\"$PWD\"/wrap/vibespace-channels read lark/inbox & sleep 0.3; kill $!", "lingers", "lingers", "lingers"],
+    ["cr10 b12 wrap/vibespace-channels & sleep 0.3; kill -TERM $!", "wrap/vibespace-channels read lark/inbox & sleep 0.3; kill -TERM $!", "lingers", "lingers", "lingers"],
+    ["cr10 b13 ./wrap/vibespace-channels & wait $! (ctl)", "./wrap/vibespace-channels read lark/inbox & wait $!", "ended", "ended", "ended"],
+    ["r11 N: C | ⏎ tee o.txt &", "vibespace-channels read lark/inbox |\ntee o.txt &", "lingers", "lingers", "lingers"],
+    ["r11 N: C | ⏎ (blank) ⏎ tee o.txt &", "vibespace-channels read lark/inbox |\n\ntee o.txt &", "lingers", "lingers", "lingers"],
+    ["r11 N: C | # a note ⏎ tee o.txt &", "vibespace-channels read lark/inbox | # a note\ntee o.txt &", "lingers", "lingers", "lingers"],
+    ["r11 N: C |& ⏎ cat > o.txt &", "vibespace-channels read lark/inbox |&\ncat > o.txt &", "lingers", "lingers", "lingers"],
+    ["r11 N: C || ⏎ (blank) ⏎ echo failed &", "vibespace-channels read lark/inbox ||\n\necho failed &", "lingers", "ended", "ended"],
+    ["r11 N: echo hi | ⏎ C &", "echo hi |\nvibespace-channels read lark/inbox &", "lingers", "lingers", "lingers"],
+    ["r11 N: C | ⏎ tee o.txt & ⏎ wait (a reaper after)", "vibespace-channels read lark/inbox |\ntee o.txt &\nwait", "ended", "ended", "ended"],
+    ["r11 N: C && ⏎ echo ok ⏎ wait (the list in the foreground)", "vibespace-channels read lark/inbox &&\necho ok\nwait", "ended", "ended", "ended"],
+    ["r11 N: true && ⏎ C & wait", "true &&\nvibespace-channels read lark/inbox & wait", "ended", "ended", "ended"],
+    ["r11 N: x=$(C | ⏎ tee o.txt) (a span, foreground)", "x=$(vibespace-channels read lark/inbox |\ntee o.txt)", "ended", "ended", "ended"],
+    ["r11 N: bash -c \"C | ⏎ tee o.txt &\"", "bash -c \"vibespace-channels read lark/inbox |\ntee o.txt &\"", "lingers", "lingers", "lingers"],
+    ["r11 N: { C | ⏎ tee o.txt; } &", "{ vibespace-channels read lark/inbox |\ntee o.txt; } &", "lingers", "lingers", "lingers"],
+    ["r11 N: cat <<EOF | ⏎ $(C) ⏎ EOF ⏎ tee o.txt &", "cat <<EOF |\n$(vibespace-channels read lark/inbox)\nEOF\ntee o.txt &", "lingers", "lingers", "lingers"],
+    ["r11 N: C \\⏎ | tee o.txt & (a backslash-newline)", "vibespace-channels read lark/inbox \\\n| tee o.txt &", "lingers", "lingers", "lingers"],
+    ["r11 N: C && ⏎ D & ⏎ wait", "vibespace-channels read lark/inbox &&\nvibespace-channels read lark/a &\nwait", "ended", "ended", "ended"],
+    ["r11 N: C & ⏎ echo hi | ⏎ cat ⏎ wait", "vibespace-channels read lark/inbox &\necho hi |\ncat\nwait", "ended", "ended", "ended"],
+    ["r11 S: C & : 2>/dev/null; wait", "vibespace-channels read lark/inbox & : 2>/dev/null; wait", "ended", "ended", "ended"],
+    ["r11 S: sh -c \"C & : > /dev/null; sleep 0.1; wait\"", "sh -c \"vibespace-channels read lark/inbox & : > /dev/null; sleep 0.1; wait\"", "ended", "ended", "ended"],
+    ["r11 S: sh -c \"C & : ; wait\" (plain, ctl)", "sh -c \"vibespace-channels read lark/inbox & : ; wait\"", "ended", "ended", "ended"],
+    ["r11 S: sh -c \"C & echo hi 2>&9; wait\" (regular builtin)", "sh -c \"vibespace-channels read lark/inbox & echo hi 2>&9; wait\"", "ended", "ended", "ended"],
+    ["r11 S: sh -c \"C & false 2>&9; wait\"", "sh -c \"vibespace-channels read lark/inbox & false 2>&9; wait\"", "ended", "ended", "ended"],
+    ["r11 S: sh -c \"C & cd / 2>&9; wait\"", "sh -c \"vibespace-channels read lark/inbox & cd / 2>&9; wait\"", "ended", "ended", "ended"],
+    ["r11 S: sh -c \"C & sleep 0.1 2>&9; wait\"", "sh -c \"vibespace-channels read lark/inbox & sleep 0.1 2>&9; wait\"", "ended", "ended", "ended"],
+    ["r11 S: sh -c \"C & wait 2>&3\"", "sh -c \"vibespace-channels read lark/inbox & wait 2>&3\"", "lingers", "lingers", "lingers"],
+    ["r11 S: sh -c \"C & wait $! 2>&7\"", "sh -c 'vibespace-channels read lark/inbox & wait $! 2>&7'", "lingers", "lingers", "lingers"],
+    ["r11 S: C & wait 1>&2", "vibespace-channels read lark/inbox & wait 1>&2", "ended", "ended", "ended"],
+    ["r11 S: C & wait 3>&-", "vibespace-channels read lark/inbox & wait 3>&-", "ended", "ended", "ended"],
+    ["r11 S: C & wait 5> /dev/null", "vibespace-channels read lark/inbox & wait 5> /dev/null", "ended", "ended", "ended"],
+    ["r11 S: C & wait 0<&9", "vibespace-channels read lark/inbox & wait 0<&9", "lingers", "lingers", "lingers"],
+    ["r11 T: C & sleep 1 & kill $!; wait (the witness: a kill of its own child)", "vibespace-channels read lark/inbox & sleep 1 & kill $!; wait", "ended", "ended", "ended"],
+    ["r11 T: ./read-all.sh & ls > /dev/null; C & wait", "./read-all.sh & ls > /dev/null; vibespace-channels read lark/inbox & wait", "ended", "ended", "ended"],
+    ["r11 T: node x.js & echo $HOME > /dev/null; C & wait", "node x.js & echo $HOME > /dev/null; vibespace-channels read lark/inbox & wait", "ended", "ended", "ended"],
+    ["r11 T: python3 triage.py & ⏎ pwd ⏎ C & ⏎ wait", "python3 triage.py &\npwd\nvibespace-channels read lark/inbox &\nwait", "ended", "ended", "ended"],
+    ["r11 T: sleep 0.3 & ls > /dev/null; C & wait (a row of the allowlist, then a STOP)", "sleep 0.3 & ls > /dev/null; vibespace-channels read lark/inbox & wait", "ended", "ended", "ended"],
+    ["r11 W: true {IFS}>/dev/null; C & wait $!", "true {IFS}>/dev/null; vibespace-channels read lark/inbox & wait $!", "lingers", "ended", "ended"],
+    ["r11 W: true {fd}>/dev/null; C & wait $! (a plain name, ctl)", "true {fd}>/dev/null; vibespace-channels read lark/inbox & wait $!", "ended", "ended", "ended"],
+    ["r11 W: for IFS in 0123456789; do :; done; C & wait $!", "for IFS in 0123456789; do :; done; vibespace-channels read lark/inbox & wait $!", "lingers", "ended", "ended"],
+    ["r11 W: for i in 1; do :; done; C & wait $! (ctl)", "for i in 1; do :; done; vibespace-channels read lark/inbox & wait $!", "ended", "ended", "ended"],
+    ["r11 W: read -a IFS <<< 0123456789; C & wait $!", "read -a IFS <<< 0123456789; vibespace-channels read lark/inbox & wait $!", "ended", "ended", "ended"],
+    ["r11 W: unset IFS; : ${IFS:=0123456789}; C & wait $!", "unset IFS; : ${IFS:=0123456789}; vibespace-channels read lark/inbox & wait $!", "lingers", "ended", "ended"],
+    ["r11 W: read -rIFS <<< x; C & wait $! (an attached option)", "read -rIFS <<< x; vibespace-channels read lark/inbox & wait $!", "ended", "ended", "ended"],
+    ["r11 W: v=IFS; mapfile -t \"$v\" <<< 0123456789; C & wait $!", "v=IFS; mapfile -t \"$v\" <<< 0123456789; vibespace-channels read lark/inbox & wait $!", "lingers", "ended", "ended"],
+    ["r11 W: n=IFS; typeset -g $n=0123456789; C & wait $!", "n=IFS; typeset -g $n=0123456789; vibespace-channels read lark/inbox & wait $!", "lingers", "ended", "ended"],
+    ["r11 W: x=1; read -r x <<< 2; C & wait $! (a plain literal, ctl)", "x=1; read -r x <<< 2; vibespace-channels read lark/inbox & wait $!", "ended", "ended", "ended"],
+    ["r11 R: C & wait ⏎ (CRLF)", "vibespace-channels read lark/inbox & wait\r\n", "lingers", "lingers", "lingers"],
+    ["r11 R: C & wait\\r (a CR at the end)", "vibespace-channels read lark/inbox & wait\r", "lingers", "lingers", "lingers"],
+    ["r11 R: C & \\r⏎ wait (CRLF after the job)", "vibespace-channels read lark/inbox &\r\nwait\r\n", "lingers", "lingers", "lingers"],
+    ["r11 R: C & wait $!\\r", "vibespace-channels read lark/inbox & wait $!\r", "ended", "lingers", "lingers"],
+    ["r11 R: C | \\r⏎ tee o.txt & (CRLF after a pipe)", "vibespace-channels read lark/inbox |\r\ntee o.txt &", "ended", "ended", "ended"],
+    ["r11 R: C & echo hi\\r⏎ wait", "vibespace-channels read lark/inbox & echo hi\r\nwait", "ended", "ended", "ended"],
+    ["r11 R: C & wait \\t (a tab, ctl)", "vibespace-channels read lark/inbox & wait \t", "ended", "ended", "ended"],
+    ["r11 A: echo $[IFS=…] > /dev/null; C & wait $!", "echo $[IFS=1234567890] > /dev/null; vibespace-channels read lark/inbox & wait $!", "lingers", "ended", "ended"],
+    ["r11 A: a[IFS=…]=x; C & wait $!", "a[IFS=1234567890]=x; vibespace-channels read lark/inbox & wait $!", "lingers", "ended", "ended"],
+    ["r11 A: echo ${a[IFS=…]} > /dev/null; C & wait $!", "echo ${a[IFS=1234567890]} > /dev/null; vibespace-channels read lark/inbox & wait $!", "lingers", "ended", "ended"],
+    ["r11 A: x=abc; echo ${x:IFS=…} > /dev/null; C & wait $!", "x=abc; echo ${x:IFS=1234567890} > /dev/null; vibespace-channels read lark/inbox & wait $!", "lingers", "none", "none"],
+    ["r11 A: [[ IFS=… -eq 1234567890 ]]; C & wait $!", "[[ IFS=1234567890 -eq 1234567890 ]]; vibespace-channels read lark/inbox & wait $!", "lingers", "ended", "ended"],
+    ["r11 A: declare -i n; n=IFS=…; C & wait $!", "declare -i n; n=IFS=1234567890; vibespace-channels read lark/inbox & wait $!", "lingers", "ended", "ended"],
+    ["r11 A: i=IFS=…; a[i]=x; C & wait $!", "i=IFS=1234567890; a[i]=x; vibespace-channels read lark/inbox & wait $!", "lingers", "ended", "ended"],
+    ["r11 A: i=IFS=…; [[ i -eq 0 ]]; C & wait $!", "i=IFS=1234567890; [[ i -eq 0 ]]; vibespace-channels read lark/inbox & wait $!", "lingers", "ended", "ended"],
+    ["r11 A: x=abc; i=IFS=…; echo ${x:i} > /dev/null; C & wait $!", "x=abc; i=IFS=1234567890; echo ${x:i} > /dev/null; vibespace-channels read lark/inbox & wait $!", "lingers", "none", "none"],
+    ["r11 A: i=IFS=…; echo ${a[i]} > /dev/null; C & wait $!", "i=IFS=1234567890; echo ${a[i]} > /dev/null; vibespace-channels read lark/inbox & wait $!", "lingers", "ended", "ended"],
+    ["r11 A: a[1]=x; C & wait $! (a plain subscript, ctl)", "a[1]=x; vibespace-channels read lark/inbox & wait $!", "ended", "ended", "ended"],
+    ["r11 A: x=abc; echo ${x:1} > /dev/null; C & wait $! (ctl)", "x=abc; echo ${x:1} > /dev/null; vibespace-channels read lark/inbox & wait $!", "ended", "ended", "ended"],
+    ["r11 A: [[ 1 -eq 1 ]]; C & wait $! (ctl)", "[[ 1 -eq 1 ]]; vibespace-channels read lark/inbox & wait $!", "ended", "ended", "ended"],
+    ["r11 A: test 1 -eq 1; C & wait $! (ctl)", "test 1 -eq 1; vibespace-channels read lark/inbox & wait $!", "ended", "ended", "ended"],
+    ["r11 E: x='$((IFS=…))'; echo \"${x@P}\" > /dev/null; C & wait $!", "x='$((IFS=1234567890))'; echo \"${x@P}\" > /dev/null; vibespace-channels read lark/inbox & wait $!", "lingers", "none", "none"],
+    ["r11 E: zsh ${(e)x} of an assembled ${(P)n::=on}; C & false; wait", "n='options[errexit]'; a='${(P)n:'; b=':=on}'; x=$a$b; : ${(e)x}; vibespace-channels read lark/inbox & false; wait", "none", "lingers", "ended"],
+    ["r11 X: C \"$(ls > /dev/null)\" & wait (a span the line cannot follow)", "vibespace-channels read lark/inbox \"$(ls > /dev/null)\" & wait", "ended", "ended", "ended"],
+    ["r11 X: ( true ) & C & wait (a subshell job beside)", "( true ) & vibespace-channels read lark/inbox & wait", "ended", "ended", "ended"],
+    ["r11 X: { ls > /dev/null; } & C & wait (a group job beside)", "{ ls > /dev/null; } & vibespace-channels read lark/inbox & wait", "ended", "ended", "ended"],
+    ["r11 P: : ${(P)${:-options[errexit]}::=on}; C & false; wait (zsh)", ": ${(P)${:-options[errexit]}::=on}; vibespace-channels read lark/inbox & false; wait", "none", "lingers", "ended"],
+    ["r11 T: sh -c 'sleep 0.2' & echo $HOME > /dev/null; C & wait (KS's shape, nothing signalled)", "sh -c 'sleep 0.2' & echo $HOME > /dev/null; vibespace-channels read lark/inbox & wait", "ended", "ended", "ended"],
+    ["r11 T: sh -c 'sleep 0.2' & ⏎ pwd ⏎ C & ⏎ wait", "sh -c 'sleep 0.2' &\npwd\nvibespace-channels read lark/inbox &\nwait", "ended", "ended", "ended"],
   ];
   // the rows whose CALL reads not lingering — the plain shape (generated with the table); every other row lingers
   const ENDED = [
@@ -1715,7 +1945,6 @@ await section('⑬', async () => {
     "39: C & wait; disown -a",
     "39: C > a.log 2>&1 & wait",
     "⑫: C & wait",
-    "⑫: bash -c \"C & wait\" & wait",
     "⑫: C & kill -TERM $!",
     "control r8: [ -z \"$NOPE\" ] || exit; C & wait",
     "A0 control: C & false; wait",
@@ -1744,11 +1973,9 @@ await section('⑬', async () => {
     "a9-19 C 2>&1 & wait",
     "a9-21 C <<EOF & (a here-doc) ⏎ wait",
     "a9-29 C &; wait (zsh)",
-    "K0 ctl: ./read-all.sh & wait",
     "S1 sh -c \"C & cd /nonexistentzz; wait\"",
     "S2 C & cd /nonexistentzz; wait",
     "H0 ctl: cat <<EOF > o.txt ⏎ $(C) ⏎ EOF (fg)",
-    "H3 ctl: cat <<EOF > o.txt & ⏎ $(C) ⏎ EOF ⏎ wait",
     "r10: C & : plain; wait",
     "r10: C & x=1; wait",
     "r10: C & x=1 y=two; wait",
@@ -1756,17 +1983,85 @@ await section('⑬', async () => {
     "r10: C & echo hi > /dev/null; wait",
     "r10: C & sleep 0.1 & wait",
     "r10: C & false ⏎ sleep 0.1 ⏎ wait $!",
-    "r10: ./read-all.sh & wait $!",
     "r10: C <<EOF & ⏎ $(D) ⏎ EOF ⏎ wait",
     "r10: C \"$(D)\" & wait",
+    "v10a D3 sh -c \"C & true >&9; wait\"",
+    "v10a F2 C & cd ..; wait",
+    "v10b D4 sh -c \"C & x=1 >&9; wait\"",
+    "v10b D5 sh -c \"C & echo hi >&9; wait\"",
+    "v10b K10 X=1 C < /dev/null > o.log 2>&1 & sleep 0.2; kill $!",
+    "v10b K11 C & sleep 0.2; kill $! 2>/dev/null; echo done",
+    "v10c D12 sh -c \"C & cd / >&9; wait\"",
+    "v10c D13 sh -c \"C & sleep 0.1 >&9; wait\"",
+    "v10c D14 sh -c \"C & false >&9; wait\"",
+    "rc10 RC4 ctl sh -c C & : ; wait",
+    "nl10 CTRL fg C⏎ echo",
+    "st10 ctl ls; C & wait (STOP, no unsafe job)",
+    "cr10 a01 C & :; wait",
+    "cr10 a02 C & true; wait",
+    "cr10 a03 C & echo plain words; wait",
+    "cr10 a14 C & cd /nonexistent; wait",
+    "cr10 a21 C & echo <&3; wait (bad fd)",
+    "cr10 a24 C & echo hi >&3; wait (bad fd, allowlisted target)",
+    "cr10 a26 C & true <&3; wait",
+    "cr10 a28 C & echo hi 1>&2; wait",
+    "cr10 a30 C & cd bin; wait",
+    "cr10 a31 C & sleep 0.1; wait",
+    "cr10 a32 C & cd /; sleep 0.1; true; echo ok; x=1; wait (a chain of rows)",
+    "cr10 a33 C & echo exit; wait",
+    "cr10 a34 C & echo %1; wait",
+    "cr10 a36 C & false; wait $!",
+    "cr10 a39 C & cd / & wait",
+    "cr10 a40 C & echo hi >&3 & wait",
+    "cr10 a41 C & echo hi &> /dev/null; wait",
+    "cr10 a42 C &> /dev/null; wait (no job: &> is a redirection)",
+    "cr10 a48 C & wait >&-",
+    "cr10 k03 vibespace-channels --foo & kill $!",
+    "cr10 k03b vibespace-channels --foo &; kill $! (literal)",
+    "cr10 k03c vibespace-channels --foo & sleep 0.3; kill $!",
+    "cr10 k13 C & sleep 0.3; kill -TERM $!",
+    "cr10 k14 C & sleep 0.3; kill ${!}",
+    "cr10 k15 C & sleep 0.3; kill \"$!\"",
+    "cr10 k17 VAR=1 C & sleep 0.3; kill $!",
+    "cr10 k18 C > /dev/null & sleep 0.3; kill $!",
+    "cr10 h07 cat <<'A' > o.txt & ⏎ $(C) ⏎ A (quoted: no expansion)",
+    "cr10 h30 cat <<A > p.txt; C & wait ⏎ $(D) ⏎ A (fg heredoc, then a reaped job)",
+    "cr10 b01 C & wait 2>&1 (ctl: fd 1 open)",
+    "cr10 b02 C & wait >&2 (ctl: fd 2 open)",
+    "cr10 b04 C & sleep 0.3; kill $! 2>/dev/null (ctl)",
+    "cr10 b09 C & wait <&-",
+    "cr10 b10 C & sleep 0.3; kill $! >&-",
+    "r11 N: C && ⏎ echo ok ⏎ wait (the list in the foreground)",
+    "r11 N: x=$(C | ⏎ tee o.txt) (a span, foreground)",
+    "r11 S: sh -c \"C & : ; wait\" (plain, ctl)",
+    "r11 S: sh -c \"C & echo hi 2>&9; wait\" (regular builtin)",
+    "r11 S: sh -c \"C & false 2>&9; wait\"",
+    "r11 S: sh -c \"C & cd / 2>&9; wait\"",
+    "r11 S: sh -c \"C & sleep 0.1 2>&9; wait\"",
+    "r11 S: C & wait 1>&2",
+    "r11 S: C & wait 3>&-",
+    "r11 S: C & wait 5> /dev/null",
+    "r11 T: sleep 0.3 & ls > /dev/null; C & wait (a row of the allowlist, then a STOP)",
+    "r11 W: true {fd}>/dev/null; C & wait $! (a plain name, ctl)",
+    "r11 W: for i in 1; do :; done; C & wait $! (ctl)",
+    "r11 W: read -rIFS <<< x; C & wait $! (an attached option)",
+    "r11 W: x=1; read -r x <<< 2; C & wait $! (a plain literal, ctl)",
+    "r11 R: C | \\r⏎ tee o.txt & (CRLF after a pipe)",
+    "r11 R: C & echo hi\\r⏎ wait",
+    "r11 R: C & wait \\t (a tab, ctl)",
+    "r11 A: a[1]=x; C & wait $! (a plain subscript, ctl)",
+    "r11 A: x=abc; echo ${x:1} > /dev/null; C & wait $! (ctl)",
+    "r11 A: [[ 1 -eq 1 ]]; C & wait $! (ctl)",
+    "r11 A: test 1 -eq 1; C & wait $! (ctl)",
   ];
-  // r10: the attack's rows — a shell lets the CLI outlive the call — pinned: the table may never lose them
+  // r10: the attack's rows — a shell lets the CLI outlive the call — pinned: the table may never lose them (r11: x9-38, a
+  // program that kills its parent, left with the kill law); r11: the r10 verdict's and r11's own rows a shell lets outlive
+  // that r10 (36e43d80b) read not lingering
   const OUTLIVE = [
     "x9-31 C & repeat 1 exit; wait (zsh repeat)",
     "x9-32 C & echo a<1-9>b; wait (zsh numeric glob)",
     "x9-33 C & echo nomatchzz<->; wait (zsh numeric glob)",
     "x9-36 C & read status < /dev/null; wait (read-only name)",
-    "x9-38 C & python3 kills its parent; wait",
     "x9-39 C & printf -v status x; wait (read-only name)",
     "x9-41 C & echo hi > a<1-2>b; wait (zsh numeric glob target)",
     "K1 ./read-all.sh & sleep 0.3; kill $!",
@@ -1777,6 +2072,74 @@ await section('⑬', async () => {
     "H1 cat <<EOF > o.txt & ⏎ $(C) ⏎ EOF (no reaper)",
     "H2 cat <<EOF > o.txt & ⏎ $(C) ⏎ EOF ⏎ sleep 0.2; kill $!",
     "H1-backtick cat <<EOF > o.txt & ⏎ `C` ⏎ EOF",
+    "v10a B1 n=options[errexit]; : ${(P)n::=on}; C & false; wait",
+    "v10a B2 print -voptions[errexit] on; C & false; wait",
+    "v10a B3 n=IFS; printf -v \"$n\" 0123456789; C & wait $!",
+    "v10a B4 read -r \"$n\" <<< on (n=options[errexit]); C & false; wait",
+    "v10a C1 C |⏎ cat & (pipe continued on the next line)",
+    "v10a C2 C &&⏎ echo done &",
+    "v10a C3 cat <<EOF |⏎ $(C) ⏎ EOF ⏎ cat &",
+    "v10a D1 sh -c \"C & : >&9; wait\" (dash special builtin redir error)",
+    "v10b D6 sh -c \"C & : 2>&9; wait\"",
+    "v10b D8 dash -c \"C & : <&9; wait\"",
+    "v10b D9 sh -c \"C & sleep 0.1; : >&8; wait\"",
+    "v10b B6 v=IFS; read -r \"$v\" <<< 0123456789; C & wait $!",
+    "v10b B7 v=IFS; declare \"$v=0123456789\"; C & wait $!",
+    "v10b B10 printf -vIFS 0123456789; C & wait $!",
+    "v10b B11 n=options[errexit]; typeset -g \"$n\"=on; C & false; wait",
+    "v10b C4 C | ⏎ tee inbox.txt > /dev/null & ⏎ echo started",
+    "v10b C5 C || ⏎ echo failed & ⏎ echo started",
+    "v10b C6 cat <<EOF && ⏎ $(C) ⏎ EOF ⏎ echo ok &",
+    "v10c B12 declare -n r=IFS; r=0123456789; C & wait $!",
+    "v10c D15 sh -c \"C & x=1; : 2>&3; wait\"",
+    "v10c C8 C 2>&1 | ⏎ grep -v debug > inbox.txt & ⏎ echo started",
+    "rc10 RC2 sh -c C > in.json & : 2>&3; wait",
+    "nl10 N2 C 2>&1 |⏎ grep &",
+    "nl10 N3 C ||⏎ echo failed &",
+    "nl10 N4 C &&⏎ echo ok &",
+    "nl10 N5 cat <<EOF &&⏎$(C)⏎EOF⏎ echo ok &",
+    "cr10 a43 C & wait >&3 (bad fd on the reaper)",
+    "cr10 a44 C & wait 2>&3",
+    "cr10 a45 C & wait $! <&3",
+    "cr10 a46 C & sleep 0.3; kill $! 2>&3",
+    "cr10 a47 C & wait 9<&3",
+    "cr10 k05 ./wrap/vibespace-channels (a SCRIPT named like the CLI, runs it) & sleep 0.3; kill $!",
+    "cr10 b05 C & sleep 0.3; kill -TERM $! >&4",
+    "cr10 b06 C & wait $! 2>&5",
+    "cr10 b07 C & wait 1>&7 ⏎ (newline) echo after",
+    "cr10 b08 C & echo started; wait 2>&3",
+    "cr10 b11 $PWD/wrap/vibespace-channels (absolute path to a script named like the CLI) & sleep 0.3; kill $!",
+    "cr10 b12 wrap/vibespace-channels & sleep 0.3; kill -TERM $!",
+    "r11 N: C | ⏎ tee o.txt &",
+    "r11 N: C | ⏎ (blank) ⏎ tee o.txt &",
+    "r11 N: C | # a note ⏎ tee o.txt &",
+    "r11 N: C |& ⏎ cat > o.txt &",
+    "r11 N: C || ⏎ (blank) ⏎ echo failed &",
+    "r11 N: bash -c \"C | ⏎ tee o.txt &\"",
+    "r11 N: cat <<EOF | ⏎ $(C) ⏎ EOF ⏎ tee o.txt &",
+    "r11 S: sh -c \"C & wait 2>&3\"",
+    "r11 S: sh -c \"C & wait $! 2>&7\"",
+    "r11 S: C & wait 0<&9",
+    "r11 W: true {IFS}>/dev/null; C & wait $!",
+    "r11 W: for IFS in 0123456789; do :; done; C & wait $!",
+    "r11 W: v=IFS; mapfile -t \"$v\" <<< 0123456789; C & wait $!",
+    "r11 W: n=IFS; typeset -g $n=0123456789; C & wait $!",
+    "r11 R: C & wait ⏎ (CRLF)",
+    "r11 R: C & wait\\r (a CR at the end)",
+    "r11 R: C & \\r⏎ wait (CRLF after the job)",
+    "r11 R: C & wait $!\\r",
+    "r11 A: echo $[IFS=…] > /dev/null; C & wait $!",
+    "r11 A: a[IFS=…]=x; C & wait $!",
+    "r11 A: echo ${a[IFS=…]} > /dev/null; C & wait $!",
+    "r11 A: x=abc; echo ${x:IFS=…} > /dev/null; C & wait $!",
+    "r11 A: declare -i n; n=IFS=…; C & wait $!",
+    "r11 A: i=IFS=…; a[i]=x; C & wait $!",
+    "r11 A: i=IFS=…; [[ i -eq 0 ]]; C & wait $!",
+    "r11 A: x=abc; i=IFS=…; echo ${x:i} > /dev/null; C & wait $!",
+    "r11 A: i=IFS=…; echo ${a[i]} > /dev/null; C & wait $!",
+    "r11 E: x='$((IFS=…))'; echo \"${x@P}\" > /dev/null; C & wait $!",
+    "r11 E: zsh ${(e)x} of an assembled ${(P)n::=on}; C & false; wait",
+    "r11 P: : ${(P)${:-options[errexit]}::=on}; C & false; wait (zsh)",
   ];
   const t30 = [0, 1, 2].map((i) => rd('fx-' + i, 30 + i)), pyLate = one('PY', 'python3 tools/report.py --out /tmp/r.md', R0 + 20_000, R0 + 60_000);
   const bound = (TT, line) => B9(TT, t30, [one('LINE', line, R0 + 2_000, R0 + 2_400), pyLate], ctx);
@@ -1793,8 +2156,13 @@ await section('⑬', async () => {
   ok(TRUTH.length >= 300 && !unsafe.length && eq(ends, ENDED),
     `THE SHELLS' TRUTH, ONE-SIDED (r9 — the r8 verdict; r10 — the r9 verdict: zsh's numeric glob, \`repeat\`, a builtin writing a read-only name and an external command that kills its parent between the job and its reaper, a \`kill\` of a script's job, a heredoc's substitutions read in the foreground): ${TRUTH.length} shapes, each run by bash, zsh AND zsh in the agent tool's form — where any lets the CLI outlive the call, the call lingers and the later lone script never takes its reads (0 rows; c47557626, efe07c76 and 90179ed5 each had some); the call reads ended ONLY on the ${ENDED.length} rows listed (a lone top-level job, a lone top-level \`wait\` / \`wait $!\` — or \`kill $!\` of the CLI itself — only rows of the allowlist between; the foreground controls); ${cost.length} rows every shell ended read lingering — the cost, listed`, { unsafe, endsNotListed: ends.filter((x) => !ENDED.includes(x)), listedNotEnded: ENDED.filter((x) => !ends.includes(x)) });
   const pinned = OUTLIVE.filter((l) => { const r = rows.find((x) => x.label === l); return !!r && r.outlives && r.call === 'lingers'; });
-  ok(pinned.length === OUTLIVE.length && OUTLIVE.length === 15,
-    'THE ATTACK\'S ROWS STAY IN THE TABLE (r10 — the r9 verdict): the 7 rows a shell let outlive while r9 read ended (`repeat 1 exit`, `echo a<1-9>b`, `echo nomatchzz<->`, `read status`, `printf -v status`, `python3 -c "…os.kill(os.getppid(), 9)"`, `echo hi > a<1-2>b`), the 5 killed script / interpreter jobs (K1–K5) and the 3 backgrounded heredocs (H1, H2, H1-backtick) — each in the table, each outliving in a shell, each read lingering', { missing: OUTLIVE.filter((l) => !pinned.includes(l)) });
+  ok(pinned.length === OUTLIVE.length && OUTLIVE.length === 82,
+    'THE ATTACK\'S ROWS STAY IN THE TABLE (r10 — the r9 verdict; r11 — the r10 verdict): the 6 zsh / read-only rows r9 read ended (`repeat 1 exit`, `echo a<1-9>b`, `echo nomatchzz<->`, `read status`, `printf -v status`, `echo hi > a<1-2>b`), the 5 killed script / interpreter jobs (K1–K5), the 3 backgrounded heredocs (H1, H2, H1-backtick) and the 68 rows a shell lets outlive that r10 read not lingering — a special builtin redirected (`sh -c "C & : >&9; wait"`), a reaper redirected to a closed descriptor (`wait 2>&3`), a list continued past a newline (`C |⏎ tee x &`, `C &&⏎ echo ok &`), a name written where the line cannot see it (`printf -vIFS`, `read "$v"`, `declare -n`, `{IFS}>`, `for IFS in`), arithmetic bash evaluates (`$[ ]`, `a[i]=`, `${x:off}`, `[[ -eq ]]`, `declare -i`), `${x@P}`, zsh\'s nested `(P)`, a CRLF line (`wait\\r`), a script named like the CLI — each present, outliving in a shell, read lingering');
+  // r11: THE LAW CAN FAIL (the RED control): a planted mis-row — `C & wait` marked «bash lets the CLI outlive» — is named by
+  // the one-sided check, and only it
+  const plant = { label: 'PLANTED: C & wait (marked bash lingers)', line: 'vibespace-channels read lark/inbox & wait', outlives: true };
+  const plantUnsafe = [...rows, { ...plant, call: callOf(T, plant.line) }].filter((r) => r.outlives && r.call !== 'lingers').map((r) => r.label);
+  ok(eq(plantUnsafe, [plant.label]), 'CONTROL a planted mis-row (r11): the table with `C & wait` marked «bash lets the CLI outlive» — the one-sided check names that row and no other', { plantUnsafe });
   // ── 2. A VERB NAMES A TOUCH ONLY UNTIL A LATER PRODUCER (r8 M3, delta-attack.cjs A1 / refute-verb-search.cjs / attack-ab.cjs a3)
   const BGS = one('BGS', 'vibespace-channels search "budget" > /tmp/s.json &', R0 + 2_000, R0 + 2_100);
   const PY = one('PY', 'python3 tools/triage_inbox.py', R0 + 600_000, R0 + 900_000);
@@ -1856,20 +2224,55 @@ await section('⑬', async () => {
   ok(endsIn(anyTarget, 'r10: C & echo hi > nomatch*zz; wait'), 'CONTROL any redirection between read as plain: `echo hi > nomatch*zz` (zsh exits) — the `wait` after it reads as ending the CLI');
   const noRange = sw('ranges', "  const ranges = (c) => { const ws", "  const ranges = (c) => false, ranges0 = (c) => { const ws");
   ok(endsIn(noRange, 'r10: C & wait <->'), 'CONTROL zsh\'s numeric glob read as a redirection: `wait <->` (zsh: no matches found — it exits before waiting) reads as ending the CLI');
-  const killAny = sw('kill-cli', " && (cw.base === 'wait' || last.cli)) {", ") {");
-  ok(endsIn(killAny, 'K1 ./read-all.sh & sleep 0.3; kill $!', 'K3 python3 triage.py & sleep 0.5; kill $!', 'K4 node poll.js & sleep 0.5; kill $!'), 'CONTROL a `kill` read as ending a job whose command is not the CLI (r6–r9): `./read-all.sh &`, `python3 triage.py &`, `node poll.js &` then `kill $!` — the CLI they started outlives');
-  const beside = sw('beside', "      if (!j.safe) open = [];   // r10: it may end the shell: no job before it ends\n      else if (open.some((o) => !o.safe)) { last = null; continue; }   // one that may end the shell runs beside it\n", "");
-  ok(endsIn(beside, 'r10: C & python3 kills its parent & wait', 'r10: python3 kills its parent (0.2 s) & C & wait'), 'CONTROL a job with any command read as harmless beside another: `C & python3 … & wait`, `python3 … & C & wait` — the python job ends the shell, the `wait` never runs');
+  // r11: kill-cli went — a job neither the CLI nor a row of the allowlist taints the whole line (below), so a `kill` never
+  // meets a script's job; `cli` stays as a second wall (the copy reads every outliving row as the tree does). THE RULE
+  // CONTROLS (r11b): the rows that showed the taint and the background rule (a job, a subshell or a span that kills its
+  // parent shell: `python3 -c "…os.kill(os.getppid(), 9)" &`, `( sleep 0.2; kill $$ ) &`, the r10 verdict's KS rows)
+  // signal a parent — the kill law keeps every such row out of the table; each rule stays, and its copy shows it wired:
+  // the copy reads the rule's own rows ended where every shell ended them too (a cost the rule pays on purpose)
+  const ruleRows = (TT, ...labels) => labels.every((l) => TRUTH.some((x) => x[0] === l && !x.slice(2).includes('lingers')) && quiet(TT, line(l)) && !quiet(T, line(l)));
+  const noTaint = sw('taint', "  for (const c of lone) if (!safe(c, commandWord(c.words))) return false;\n", "");
+  ok(ruleRows(noTaint, "r11 T: sh -c 'sleep 0.2' & echo $HOME > /dev/null; C & wait (KS's shape, nothing signalled)", "r11 T: sh -c 'sleep 0.2' & ⏎ pwd ⏎ C & ⏎ wait", 'K0 ctl: ./read-all.sh & wait', '⑫: bash -c "C & wait" & wait'),
+    'RULE CONTROL a job neither the CLI nor a row read as harmless past a STOP (r10 forgot it at the next one — the r10 verdict\'s `KS & echo $HOME; C & wait`, KS = a job that kills its parent shell; no such row may run, r11b): KS\'s own shape with nothing signalled — `sh -c \'sleep 0.2\' & echo $HOME > /dev/null; C & wait`, the same past `pwd` —, `./read-all.sh & wait`, `bash -c "C & wait" & wait` read ended; the tree reads the whole line lingering');
   const follow = sw('wild', "  for (const c of all) if (c.words.bg && ", "  for (const c of all) if (false && ");
-  ok(endsIn(follow, 'r10: ( sleep 0.2; kill $$ ) & C & wait', 'r10: C "$(sleep 0.2; kill $$)" & wait'), 'CONTROL a background the line cannot follow read as harmless: `( sleep 0.2; kill $$ ) &` beside the job, `$(sleep 0.2; kill $$)` in its own words — the shell ends before its `wait`');
+  ok(ruleRows(follow, 'r11 X: C "$(ls > /dev/null)" & wait (a span the line cannot follow)', 'r11 X: ( true ) & C & wait (a subshell job beside)', 'r11 X: { ls > /dev/null; } & C & wait (a group job beside)'),
+    'RULE CONTROL a background the line cannot follow read as harmless (r10: `( sleep 0.2; kill $$ ) & C & wait`, `C "$(sleep 0.2; kill $$)" & wait` — no such row may run, r11b): `C "$(ls > /dev/null)" & wait`, `( true ) & C & wait`, `{ ls > /dev/null; } & C & wait` read ended; the tree reads them lingering');
+  const byPath = sw('bare', "  const bare = (c, cw) => !!cw && cw.base === CLI && c.words[cw.k].v === CLI;", "  const bare = (c, cw) => !!cw && cw.base === CLI;");
+  ok(endsIn(byPath, 'cr10 b12 wrap/vibespace-channels & sleep 0.3; kill -TERM $!', 'cr10 k05 ./wrap/vibespace-channels (a SCRIPT named like the CLI, runs it) & sleep 0.3; kill $!'),
+    'CONTROL the CLI known by its last path part (r11 — the r10 claim reviewer): `wrap/vibespace-channels … & sleep 0.3; kill -TERM $!` — a SCRIPT named like the CLI; the kill ends the script, the CLI it runs outlives');
   const noDefs = sw('defs', "    if (w.def || (w.length > 1 && !w[0].q && w[0].v === 'function')) return false;   // r10: a definition\n", "");
   ok(endsIn(noDefs, 'B1 wait() { :; }; C & wait', 'B2 function wait { :; } ⏎ C & wait'), 'CONTROL a line that defines a function read as sure: `wait() { :; }` / `function wait { :; }` shadow the builtin — the `wait` waits for nothing');
   const sureLine = sw('unsure', "    if (cw && UNSURE.has(cw.base)) return false;\n", "");
   ok(endsIn(sureLine, 'A1 set -e; C & false; wait'), 'CONTROL a line that sets options read as sure: `set -e; C & false; wait` reads ended — the shell exits at `false`');
   const anyName = sw('writes', " || ((m) => !!m && reserved(m[1]))(NAME_SET.exec(x.v)))) return false;", ")) return false;");
-  ok(endsIn(anyName, 'r10: options[errexit]=on; C & false; wait'), 'CONTROL a write of a name the shells keep read as harmless: `options[errexit]=on` (zsh sets the option — it exits at `false`)');
-  const anyWriter = sw('writers', "    if (cw && WRITERS.has(cw.base) && ", "    if (false && ");
-  ok(endsIn(anyWriter, "r10: read -r 'options[errexit]' <<< on; C & false; wait"), 'CONTROL a builtin that writes a name the shells keep read as harmless: `read -r \'options[errexit]\' <<< on` (zsh sets the option — it exits at `false`)');
+  ok(endsIn(anyName, 'r10: IFS=0123456789; C & wait $!'), 'CONTROL a write of a name the shells keep read as harmless: `IFS=0123456789` (bash splits `$!` on its digits — `wait` returns at once; r11: `options[errexit]=on` is a subscript too, read by the arithmetic rule)');
+  const anyWriter = sw('writes-known', "    if (!writesKnown(c, cw)) return false;   // r11: a name it cannot see, or one the shells keep\n", "");
+  ok(endsIn(anyWriter, 'v10b B10 printf -vIFS 0123456789; C & wait $!', 'v10a B3 n=IFS; printf -v "$n" 0123456789; C & wait $!'), 'CONTROL a builtin that writes a name read as harmless whatever the name (r11 — the r10 verdict): `printf -vIFS 0123456789`, `printf -v "$n" 0123456789` with n=IFS (bash splits `$!` — `wait` returns at once); r10\'s `read -r \'options[errexit]\'` is a subscript now — the arithmetic rule reads it too');
+  // ── r11's own conditions — each copy makes a row a shell lets outlive read not lingering at the CALL
+  const sw2 = (tag, ...pairs) => { let t = SW; for (const [from, to] of pairs) { if (t.split(from).length !== 2) anchorMissing(tag, 'src/shell-words.js (one occurrence)'); t = t.replace(from, () => to); } return MUT.load('src/shell-words.js', t, tag); };
+  const anyText = sw('literal', 'const literal = (t) => { const u', 'const literal = (t) => true, literal0 = (t) => { const u');
+  ok(endsIn(anyText, 'v10b B6 v=IFS; read -r "$v" <<< 0123456789; C & wait $!', 'v10b B7 v=IFS; declare "$v=0123456789"; C & wait $!', 'v10b B11 n=options[errexit]; typeset -g "$n"=on; C & false; wait'), 'CONTROL a written name read through its quotes and `$` (r11 — the r10 verdict): `read -r "$v"`, `declare "$v=…"`, `typeset -g "$n"=on` — the name is made when the line runs');
+  const glued = sw('attached', "      if (cw.base === 'printf' ? x.v !== '-v' : !/^-[a-zA-Z]*v$/.test(x.v)) return false;   // attached\n", "");
+  ok(endsIn(glued, 'v10a B2 print -voptions[errexit] on; C & false; wait'), 'CONTROL an option with its name attached read as an option (r11 — the r10 verdict): zsh `print -voptions[errexit] on` sets the option — it exits at `false`');
+  const nameref = sw('nameref', "(decl && x.v.includes('n')) || ", "");
+  ok(endsIn(nameref, 'v10c B12 declare -n r=IFS; r=0123456789; C & wait $!'), 'CONTROL a nameref read as a plain declaration (r11 — the r10 verdict): `declare -n r=IFS; r=0123456789` writes IFS');
+  const loopVar = sw('loops', '  if (w.length > 1 && !w[0].q && LOOPS.has(w[0].v)) {', '  if (false) {');
+  ok(endsIn(loopVar, 'r11 W: for IFS in 0123456789; do :; done; C & wait $!'), 'CONTROL a loop\'s variable read as no write (r11): `for IFS in 0123456789; do :; done` leaves IFS = the digits in bash');
+  const fdName = sw('varfd', ' || varfd(c, x)', '');
+  ok(endsIn(fdName, 'r11 W: true {IFS}>/dev/null; C & wait $!'), 'CONTROL a `{NAME}>` redirection read as no write (r11): `true {IFS}>/dev/null` sets IFS to the descriptor\'s number in bash');
+  const noArith = sw('arith', '    if (arithmetic(c, cw)) return false;   // r11: arithmetic or an evaluation it cannot read\n', '');
+  ok(endsIn(noArith, 'r11 A: echo $[IFS=…] > /dev/null; C & wait $!', 'r11 A: a[IFS=…]=x; C & wait $!', 'r11 A: x=abc; echo ${x:IFS=…} > /dev/null; C & wait $!', 'r11 A: declare -i n; n=IFS=…; C & wait $!', 'r11 A: i=IFS=…; a[i]=x; C & wait $!', 'r11 E: x=\'$((IFS=…))\'; echo "${x@P}" > /dev/null; C & wait $!'),
+    'CONTROL arithmetic outside `(( ))` read as plain (r11): `$[IFS=…]`, `a[IFS=…]=x`, `${x:IFS=…}`, `declare -i n; n=IFS=…`, `i=IFS=…; a[i]=x` (the value is evaluated again), `${x@P}` — bash writes IFS, `wait $!` returns at once');
+  const noIndirect = sw('indirect', ' || INDIRECT.test(x.v)', '');
+  ok(endsIn(noIndirect, 'r11 P: : ${(P)${:-options[errexit]}::=on}; C & false; wait (zsh)'), 'CONTROL zsh\'s `(P)` on a nested name read as plain (r11): `: ${(P)${:-options[errexit]}::=on}` sets the option — zsh exits at `false`');
+  const special = sw('special', "    if (SPECIAL.has(c.words[0].v) && (c.words.targets || []).length) return false;   // r11: dash exits at `: >&9`\n", "");
+  ok(endsIn(special, 'v10a D1 sh -c "C & : >&9; wait" (dash special builtin redir error)', 'v10b D8 dash -c "C & : <&9; wait"', 'v10c D15 sh -c "C & x=1; : 2>&3; wait"'), 'CONTROL a special builtin with a redirection read as a row (r10 — the regression vs r9, the r10 verdict): `sh -c "C & : >&9; wait"` — dash exits at the `:`, the `wait` never runs');
+  const anyFd = sw('reaper-fds', '(c.words.targets || []).every((x) => /^(\\/dev\\/null|[0-2]|-)$/.test(x.v))) {', '(c.words.targets || []).every((x) => /^(\\/dev\\/null|\\d+|-)$/.test(x.v))) {');
+  ok(endsIn(anyFd, 'cr10 a44 C & wait 2>&3', 'cr10 a43 C & wait >&3 (bad fd on the reaper)', 'r11 S: C & wait 0<&9'), 'CONTROL a reaper redirected to any descriptor (r11 — the r10 claim reviewer): `wait 2>&3` — fd 3 is not open, the redirection fails and the `wait` never runs');
+  const oneLine = sw('continuation', 'const more = !words.length && (pipe !== null || andOr);', 'const more = false;');
+  ok(endsIn(oneLine, 'v10a C1 C |⏎ cat & (pipe continued on the next line)', 'v10a C2 C &&⏎ echo done &', 'v10b C6 cat <<EOF && ⏎ $(C) ⏎ EOF ⏎ echo ok &', 'r11 N: C | ⏎ tee o.txt &'), 'CONTROL a newline after `|` / `&&` read as the list\'s end (r5–r10 — the r10 verdict): `C |⏎ cat &`, `C &&⏎ echo done &`, `cat <<EOF &&⏎ $(C) ⏎ EOF⏎ echo ok &` — the `&` sends C to the background, the call read it in the foreground');
+  const crBlank = sw2('cr', ["      if (' \\t\\n;&|()<>'.includes(ch)) break;", "      if (' \\t\\r\\n;&|()<>'.includes(ch)) break;"], ["    if (ch === ' ' || ch === '\\t') { i++; continue; }", "    if (ch === ' ' || ch === '\\t' || ch === '\\r') { i++; continue; }"]);
+  ok(endsIn(crBlank, 'r11 R: C & wait ⏎ (CRLF)', 'r11 R: C & wait\\r (a CR at the end)'), 'CONTROL a carriage return read as a blank (r1–r10): a CRLF line\'s `wait\\r` — bash and zsh run a command «wait\\r» that is not found, the CLI outlives');
   const noDeclare = sw('declares', "    if (cw && DECLARE.has(cw.base)) declares = true;\n", "");
   ok(endsIn(noDeclare, 'r10: readonly x; C & x=1; wait'), 'CONTROL an assignment between read as plain after a declaration: `readonly x; C & x=1; wait` (zsh: read-only variable — it exits)');
   const anyJob = sw('bang-latest', "      if (by && last && open.includes(last) && (cw.base === 'wait' || last.cli)) { last.job.ended = cw.base; open = open.filter((o) => o !== last); continue; }", "      if (by && open.length) { for (const o of open) o.job.ended = cw.base; open = []; continue; }");
@@ -1888,7 +2291,7 @@ await section('⑬', async () => {
   ok(eq(m3(verbFree).verbPy.by, { BGS: 3 }) && eq(m3(verbFree).verbSticky.by, { BGS: 7 }), 'CONTROL a verb unbounded (r7): the `&` search that finished ten minutes earlier takes the later script\'s "pairing" hits — 7 of 7');
   const verbRank = copy('verb-rank', 'const exact = cs.filter((c) => cand.has(c) && namesExactly(c, t));', 'const exact = cs.filter((c) => cand.has(c) && (namesExactly(c, t) || (claims(c) && namesTouch(c.text, t, c.runs, c.kind))));');
   ok(eq(m3(verbRank).queryVsVerb.by, { LATER: 1 }), 'CONTROL a verb ranked with an exact name (the latest wins): the later `search "budget"` takes the loop\'s "deadline" hit');
-  for (const c of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 21, label: '⑬ ' })) ok(c.pass, c.name, c.detail);
+  for (const c of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 32, label: '⑬ ' })) ok(c.pass, c.name, c.detail);
 });
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

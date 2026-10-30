@@ -14,6 +14,12 @@
  * job's own command IS the CLI; a line that writes a name the shells keep (RESERVED), defines a function, does
  * arithmetic or sends anything else to the background ends nothing; a heredoc's substitutions run in the job of the
  * command it feeds.
+ * r11: a newline after `|`, `|&`, `&&` or `||` continues the list; a special builtin (`:`) with a redirection is no row
+ * of the allowlist, a reaper's redirection reaches /dev/null, 0–2 or a close only; a job that is neither the CLI (its
+ * bare name) nor a row of the allowlist makes the WHOLE line end nothing; a name a command writes must be a plain
+ * literal the reader can compare (a `{NAME}>` redirection writes NAME too); arithmetic anywhere bash evaluates it (a
+ * subscript, `$[ ]`, `${x:off}`, `[[ -eq ]]`, an integer name) and an expansion that evaluates a value (`${x@P}`, zsh
+ * `(e)`) end nothing; a carriage return is a word's own character (a CRLF line's `wait\r` is no `wait`).
  *
  * lane touch-chip-cause (the .362 train fix, 2026-10-29): moved out of src/channel-touch.js — chat-run-summary (the
  * client's run summary, which imports nothing but PURE rule modules: test-collab-live-counter, test-fold-ux and
@@ -77,7 +83,7 @@ const RUNS_A_COMMAND = new Map(Object.entries({
  *  quoted, end}`. */
 function heredocDelim(s, i) {
   let d = '', q = false;
-  while (i < s.length && !' \t\r\n;&|()<>'.includes(s[i])) {
+  while (i < s.length && !' \t\n;&|()<>'.includes(s[i])) {   // r11: a CR is a word's own character (bash, zsh)
     const ch = s[i];
     if (ch === "'") { const k = s.indexOf("'", i + 1); const e = k < 0 ? s.length : k; d += s.slice(i + 1, e); i = e + 1; q = true; continue; }
     if (ch === '"') { let k = i + 1; for (; k < s.length && s[k] !== '"'; k++) { if (s[k] === '\\') k++; d += s[k] || ''; } i = k + 1; q = true; continue; }
@@ -211,7 +217,7 @@ function shellCommands(src, owner = null, depth = 0, offset = 0) {
     const at = i;
     while (i < s.length) {
       const ch = s[i];
-      if (' \t\r\n;&|()<>'.includes(ch)) break;
+      if (' \t\n;&|()<>'.includes(ch)) break;   // r11: a CR is no blank — `wait\r` is a command of its own (not found)
       if (ch === '\\') { if (s[i + 1] !== '\n') v += s[i + 1] || ''; i += 2; q = true; continue; }
       if (ch === "'") { const k = s.indexOf("'", i + 1); const e = k < 0 ? s.length : k; v += s.slice(i + 1, e); i = e + 1; q = true; continue; }
       if (ch === '$' && s[i + 1] === "'") {   // ANSI-C quoting: `$'don\'t …'` — a `\` escapes the next character
@@ -245,8 +251,11 @@ function shellCommands(src, owner = null, depth = 0, offset = 0) {
   while (i < s.length && i - skipped - span.docs < SCAN_MAX) {
     const ch = s[i];
     if (ch === '\n') {
-      lone(end(), 'fg');
-      closeCoproc();   // r8: a coproc's list ends
+      // r11: a newline after `|`, `|&`, `&&` or `||` CONTINUES the pipeline or the and-or list on the next line (every
+      // shell — the lexer's continuation, like a backslash-newline: `C |⏎ tee x &` sends C to the background, `cat <<EOF
+      // &&⏎ … EOF⏎ echo ok &` the heredoc's substitutions); a heredoc's body is still read here
+      const more = !words.length && (pipe !== null || andOr);
+      if (!more) { lone(end(), 'fg'); closeCoproc(); }   // r8: a coproc's list ends
       i++;
       for (const h of pending) {   // the heredoc's lines: up to the delimiter line, whatever their length (r4: no shell)
         const b = heredocBody(s, i, h);
@@ -263,10 +272,10 @@ function shellCommands(src, owner = null, depth = 0, offset = 0) {
         }
       }
       pending = [];
-      list = out.length;
+      if (!more) list = out.length;
       continue;
     }
-    if (ch === ' ' || ch === '\t' || ch === '\r') { i++; continue; }
+    if (ch === ' ' || ch === '\t') { i++; continue; }
     if (ch === '\\' && s[i + 1] === '\n') { i += 2; continue; }
     if (ch === '#') { while (i < s.length && s[i] !== '\n') i++; continue; }   // a word's start: a comment to the line's end
     if (ch === '&' && s[i + 1] === '>') { i += s[i + 2] === '>' ? 3 : 2; redirect = true; continue; }
@@ -398,9 +407,11 @@ const SHELL_OWN = new Set(['.', ':', 'source', 'eval', 'exec', 'exit', 'return',
 /** r9: the words that make a line UNSURE wherever they stand (a function's body too) — it sets the shell's options or
  *  traps (`set -e` / `-u` / `-o errexit` / zsh's `setopt err_exit`: any later command may end the shell), sources or
  *  evals text the line cannot read, or may change what `wait` / `kill` mean (`alias`, `enable`, `disable`, `builtin`);
- *  r10: or what a word runs (`hash`, `functions`, `autoload`, `zmodload`) */
+ *  r10: or what a word runs (`hash`, `functions`, `autoload`, `zmodload`); r11: or does arithmetic (`let "$n=1"`), or
+ *  writes names its own syntax gives (zsh's `zparseopts` specs, `zformat -f`, `zstyle -s`, `zregexparse`, `getln`;
+ *  bash's `compgen -V`) */
 const UNSURE = new Set(['set', 'setopt', 'unsetopt', 'shopt', 'emulate', 'trap', 'source', '.', 'eval', 'alias', 'enable', 'disable', 'builtin',
-  'hash', 'functions', 'autoload', 'zmodload']);
+  'hash', 'functions', 'autoload', 'zmodload', 'let', 'zparseopts', 'zformat', 'zstyle', 'zregexparse', 'getln', 'compgen']);
 /** r10: a word that EXPANDS NOTHING (r9's `quiet`, closed tighter): no `$` (a parameter, a span, arithmetic — `$(( 1/0 ))`
  *  ends both shells), no glob or pattern character (zsh ends the shell on a pattern that matches nothing — `*` `?` `[`,
  *  `#` / `^` / `~` under EXTENDED_GLOB, a `<1-9>` range), no brace expansion, no `~` and no leading `=` (zsh: an unknown
@@ -434,29 +445,113 @@ const reserved = (n) => RESERVED.has(n) || /_functions$/.test(n);
 /** r10: the commands that DECLARE a name (after one, an assignment may meet a read-only or an integer name —
  *  `readonly x; … x=1` ends zsh) and the ones that WRITE the names they are given */
 const DECLARE = new Set(['local', 'declare', 'typeset', 'export', 'readonly', 'integer', 'float', 'private']);
-const WRITERS = new Set(['read', 'printf', 'print', 'getopts', 'vared', 'mapfile', 'readarray', 'zparseopts', ...DECLARE]);
+const WRITERS = new Set(['read', 'printf', 'print', 'getopts', 'vared', 'mapfile', 'readarray', ...DECLARE]);
+/** r11: the option letters that take an ARGUMENT (bash's and zsh's) — attached to its letters (`read -aIFS`) the name
+ *  it writes cannot be compared */
+const WRITER_ARGS = { read: 'adinNptuk', mapfile: 'dnOsuCc', readarray: 'dnOsuCc', vared: 'Mmprif' };
+/** r11: the loops whose head writes a NAME (`for IFS in 0123456789; do :; done` — bash splits `$!` on digits after it) */
+const LOOPS = new Set(['for', 'select', 'foreach']);
+/** r11: shell text as WRITTEN is a plain literal — no `$` or backtick outside single quotes; no escape, glob, brace or
+ *  `~` outside quotes (a name made at run time — `read "$v"`, `declare "$v=…"` — cannot be compared) */
+const literal = (t) => { const u = t.replace(/'[^']*'/g, ''); return !/[$`]/.test(u) && !/[*?[{~\\]/.test(u.replace(/"[^"]*"/g, '')); };
+/** r11: does a command write only names the reader can SEE (each a plain literal, no RESERVED name) — WRITERS'
+ *  operands (a declaration's: its name before the `=`), `printf -v` / `print -v`'s name, a loop's variable? false when
+ *  a name cannot be known (the r10 verdict): an operand not a plain literal (`read "$v"`, `typeset -g "$n"=on`), an
+ *  option with its argument attached (`printf -vIFS`, `print -v'options[errexit]'`, `read -aIFS`), a nameref
+ *  (`declare -n r=IFS`), an option the reader cannot read (`printf "$f" …`), `wait -p NAME` (bash: the pid's digits) */
+function writesKnown(c, cw) {
+  const w = c.words, raw = (x) => c.src.slice(x.at, x.end), seen = (x) => literal(raw(x)) && !reserved(x.v.replace(/[[=?+][^]*$/, ''));
+  const aName = (x) => !!x && seen(x) && /^[A-Za-z_][A-Za-z0-9_]*$/.test(x.v);
+  if (w.length > 1 && !w[0].q && LOOPS.has(w[0].v)) {   // `for NAME in …` / zsh `for a b (…)`: every name before `in` / `do`
+    for (let k = 1; k < w.length && !['in', 'do'].includes(w[k].v); k++) if (!aName(w[k])) return false;
+    return true;
+  }
+  if (!cw) return true;
+  const ops = w.slice(cw.k + 1);
+  if (cw.base === 'wait') return !ops.some((x) => /^-[a-zA-Z]*p/.test(x.v));
+  if (!WRITERS.has(cw.base)) return true;
+  if (cw.base === 'printf' || cw.base === 'print') {   // only `-v NAME` writes; the options end at the first operand
+    for (let k = 0; k < ops.length; k++) {
+      const x = ops[k];
+      if (!literal(raw(x))) return false;   // it may expand to `-vIFS`
+      if (x.v === '--' || x.v === '-' || x.v[0] !== '-') break;
+      if (!x.v.includes('v')) continue;
+      if (cw.base === 'printf' ? x.v !== '-v' : !/^-[a-zA-Z]*v$/.test(x.v)) return false;   // attached
+      if (!aName(ops[++k])) return false;
+    }
+    return true;
+  }
+  const decl = DECLARE.has(cw.base), takes = WRITER_ARGS[cw.base] || '';
+  for (const x of ops) {
+    if (/^[-+]./.test(x.v) && literal(raw(x))) {   // an option
+      if (!/^[-+][a-zA-Z]+$/.test(x.v) || (decl && x.v.includes('n')) || [...x.v.slice(1, -1)].some((ch) => takes.includes(ch))) return false;
+      continue;
+    }
+    const r = raw(x), eq = decl ? r.indexOf('=') : -1;   // a name (an option's own argument too: compared as one)
+    if (!literal(eq >= 0 ? r.slice(0, eq) : r) || reserved(x.v.replace(/[[=?+][^]*$/, ''))) return false;
+  }
+  return true;
+}
 /** r10: THE ALLOWLIST — the ONLY commands that may stand BETWEEN a lone job and its reaper: shell builtins (and `sleep`)
  *  that expand nothing and cannot end the shell, written as the bare word, every word `plainWord`, redirected (if at all)
  *  to /dev/null or a descriptor. [word, its operands, the shells' truth behind the row — test-channel-touch ⑬'s rows:
  *  bash · zsh · zsh in the agent tool's form, every one ENDED]. Anything else between — an external command
  *  (`python3 -c "…os.kill(os.getppid(), 9)"` ends its parent: x9-38 outlives in both shells), a reserved word
  *  (`repeat 1 exit`: x9-31, `time`), a builtin that writes a name (`read status`, `printf -v status`: x9-36, x9-39), a
- *  pattern (`echo a<1-9>b`: x9-32) — is a STOP. A comment or an empty line is no command at all (a9-01, a9-02). */
+ *  pattern (`echo a<1-9>b`: x9-32) — is a STOP. A comment or an empty line is no command at all (a9-01, a9-02).
+ *  r11: a SPECIAL builtin (`:`) with any redirection is a STOP (SPECIAL). */
 const BETWEEN = new Map([
   ['true', [() => true, 'r9: C & true ⏎ wait']],
   ['false', [() => true, 'A0 control: C & false; wait']],
-  [':', [() => true, 'r10: C & : plain; wait']],
+  [':', [() => true, 'r10: C & : plain; wait · r11: never redirected (SPECIAL — v10a D1, rc10 RC2)']],
   ['echo', [() => true, 'r9: C & echo started; wait · a9-03 · r10: C & echo hi >&2; wait · C & echo hi > /dev/null; wait']],
   ['sleep', [(a) => a.length === 1 && /^\d+(\.\d+)?$/.test(a[0]), 'a9-05 C & sleep 1; wait · 39: C & sleep 1 & wait (a job between) · r10: C & sleep 0.1 & wait']],
   ['cd', [(a) => a.length === 1 && !/^[-+]/.test(a[0]), 'r9: C & cd /; wait · S2 C & cd /nonexistentzz; wait (cd fails, the shell goes on)']],
 ]);
+/** r11: the POSIX SPECIAL builtins — an error in one ENDS a POSIX shell (dash is `sh` here): `sh -c 'C & : >&9; wait'`
+ *  exits at the `:` (fd 9 not open) before its `wait` in every form (v10a D1, v10b D6 / D8 / D9, v10c D15, rc10 RC2);
+ *  a regular builtin's failed redirection does not (`true >&9`, `false >&9`, `echo hi >&9`, `cd / >&9`, `x=1 >&9`:
+ *  v10a D3, v10b D4 / D5, v10c D12 / D13 / D14 end) */
+const SPECIAL = new Set(['.', ':', 'break', 'continue', 'eval', 'exec', 'exit', 'export', 'readonly', 'return', 'set', 'shift', 'times', 'trap', 'unset']);
 /** r10: …and an ASSIGNMENT-only command (`x=1 y=two`) of plain words to LOWER-case names the shells do not keep, in a
  *  line that declares nothing — 'r10: C & x=1; wait', 'r10: C & x=1 y=two; wait' (every upper-case name may be one of
  *  either shell's own: `UID=0` and `SECONDS=1/0` end zsh) */
 const PLAIN_SET = /^([a-z_][a-z0-9_]*)=/;
 /** r10: a word that WRITES a name — `x=…`, `x+=…`, `x[k]=…` — and a `${x:=…}` / `${x=…}` anywhere in a word */
 const NAME_SET = /^([A-Za-z_][A-Za-z0-9_]*)(\[[^\]]*\])?\+?=/;
-const SETS_IN_WORD = /\$\{[#!]?[A-Za-z_][A-Za-z0-9_]*(\[[^\]]*\])?:{0,2}=/;
+const SETS_IN_WORD = /\$\{(\([^)]*\))?[#!^=~+]*[A-Za-z_][A-Za-z0-9_]*(\[[^\]]*\])?:{0,2}=/;
+/** r11: zsh's `(P)` flag — the name is another parameter's value (`: ${(P)n::=on}` sets `options[errexit]`) */
+const INDIRECT = /\$\{\([^)]*P/;
+/** r11: bash's `{NAME}>file` / `{NAME}<&0` — the redirection WRITES NAME (the descriptor's number, 10 and up): `true
+ *  {IFS}>/dev/null; C & wait $!` outlives in bash (`wait $!` splits the pid on 1 and 0 and returns at once) */
+const VARFD = /^\{([A-Za-z_][A-Za-z0-9_]*)\}$/;
+const varfd = (c, x) => { const m = !x.q && VARFD.exec(x.v); return !!m && /^[<>]/.test(String(c.src || '').slice(x.end)) && reserved(m[1]); };
+/** r11: ARITHMETIC THE LINE CANNOT READ — bash evaluates arithmetic (an assignment in it writes any name: IFS) beyond
+ *  `(( ))` / `$(( ))` / `let` (r10): the legacy `$[ … ]`, a SUBSCRIPT (`a[i]=x`, `${a[i]}`, an operand `read 'a[i]'`,
+ *  `unset 'a[i]'`, `[[ -v a[i] ]]`), a `${x:offset:length}`, the operands of `[[ … -eq … ]]`, an assignment to a name
+ *  declared integer (`declare -i`, `integer`, `float`) — and it evaluates AGAIN the value of a variable named there
+ *  (`i='IFS=1234567890'; a[i]=x`). So any such place holding more than an integer literal (`@` / `*` for a subscript)
+ *  makes the line end nothing (r11 A rows: `echo $[IFS=…]`, `a[IFS=…]=x`, `${x:IFS=…}`, `declare -i n; n=IFS=…`,
+ *  `i=IFS=…; [[ i -eq 0 ]]` … — `wait $!` splits the pid and returns at once in bash). So does an expansion that
+ *  EVALUATES a value: bash's `${x@P}` (r11 E: `x='$((IFS=…))'`), zsh's `(e)` flag. */
+const SUB_EXP = /\$\{[#!]?[A-Za-z_][A-Za-z0-9_]*\[(?!\s*(-?\d+|@|\*)\s*\])/;
+const SUB_NAME = /^[A-Za-z_][A-Za-z0-9_]*\[(?!\s*(-?\d+|@|\*)\s*\])/;
+const SUBSTR = /\$\{[#!]?([A-Za-z_][A-Za-z0-9_]*|[0-9@*])(\[[^\]]*\])?:(?![-=?+])(?!\s*-?\d+\s*(:\s*-?\d+\s*)?\})/;
+const EVALS = /\$\[|\$\{[^}]*@P\}|\$\{\([^)]*e[^)]*\)/;
+const ARITH_OPS = new Set(['-eq', '-ne', '-lt', '-le', '-gt', '-ge']);
+const INDEXED = new Set(['unset', 'test', '[', '[[', 'wait', 'getopts', 'vared']);
+function arithmetic(c, cw) {
+  const w = c.words, raw = (x) => String(c.src || '').slice(x.at, x.end).replace(/'[^']*'/g, "''");
+  if ([...w, ...(w.targets || [])].some((x) => { const r = raw(x); return SUB_EXP.test(r) || SUBSTR.test(r) || EVALS.test(r); })) return true;
+  if (w.some((x) => SUB_NAME.test(x.v) && /\]\+?=/.test(x.v))) return true;   // `a[i]=x` (an assignment word — commandWord reads it as a command)
+  if (w.length && !w[0].q && w[0].v === '[[') {
+    if (w.some((x) => SUB_NAME.test(x.v))) return true;
+    for (let k = 1; k < w.length - 1; k++) if (ARITH_OPS.has(w[k].v) && !(/^-?\d+$/.test(w[k - 1].v) && /^-?\d+$/.test(w[k + 1].v))) return true;
+  }
+  if (cw && (WRITERS.has(cw.base) || INDEXED.has(cw.base)) && w.slice(cw.k + 1).some((x) => SUB_NAME.test(x.v))) return true;
+  if (cw && (cw.base === 'integer' || cw.base === 'float' || (DECLARE.has(cw.base) && w.slice(cw.k + 1).some((x) => /^[-+][a-zA-Z]*[iEF]/.test(x.v))))) return true;
+  return false;
+}
 /** r9: THE JOBS A LINE ENDS ITSELF — STOP READING THE SHELL: a line ENDS a job only in the PLAINEST shape; everything
  *  else LINGERS (unsure ⇒ it lingers — r6, r7 and r8 each read more of the shell and each added a regression the next
  *  round found; the question «does the CLI's job outlive its call?» needs no shell interpreter). A job ends only when
@@ -467,16 +562,20 @@ const SETS_IN_WORD = /\$\{[#!]?[A-Za-z_][A-Za-z0-9_]*(\[[^\]]*\])?:{0,2}=/;
  *    no `coproc`), its command word no SHELL_OWN word, no process substitution;
  *  - THE REAPER is a later LONE foreground `wait` (no operand — every such job before it) or `wait $!` / `kill $!` /
  *    `kill -TERM $!` (the latest job, only while no other `&` came after it), nothing before its word, its
- *    redirections to /dev/null or a descriptor only; r10: a `kill` reaches the job's own process only — it ends the job
- *    only when that process IS the CLI (`./read-all.sh &`, `python3 x.py &`, `node poll.js &` … `kill $!` leaves the
- *    CLI they started running: K1–K5); a `wait` waits for the whole job;
- *  - BETWEEN them stand only rows of the allowlist (BETWEEN, PLAIN_SET) and other jobs whose command is the CLI or a
- *    row of the allowlist (`safe`) — r10: a job with any other command (it may end the shell: `python3 kill-parent.py &`)
- *    leaves no job before it to a reaper and lets no job beside it end while it runs. Anything else is a STOP: no job
- *    launched before it ends after it;
- *  - THE LINE is not UNSURE: no UNSURE word anywhere in it; r10: no function definition (zsh's `TRAPCHLD() { exit; }`
- *    ends the shell when a child ends; a definition may shadow a word of the allowlist), no arithmetic (`(( … ))`,
- *    `$(( … ))` may assign), no write of a RESERVED name, nothing sent to the background but its LONE top-level jobs (a
+ *    redirections to /dev/null, 0–2 or a close only (r11: a dup of a descriptor that is not open fails — the reaper
+ *    never runs: `wait 2>&3`); r10: a `kill` reaches the job's own process only — it ends the job only when that
+ *    process IS the CLI (`./read-all.sh &`, `python3 x.py &`, `node poll.js &` … `kill $!` leaves the CLI they started
+ *    running: K1–K5; r11: the CLI by its BARE name — `./wrap/vibespace-channels` may be a script that runs it); a
+ *    `wait` waits for the whole job;
+ *  - BETWEEN them stand only rows of the allowlist (BETWEEN, PLAIN_SET; r11: a SPECIAL builtin never redirected) and
+ *    other jobs whose command is the CLI or a row of the allowlist (`safe`). Anything else is a STOP: no job launched
+ *    before it ends after it;
+ *  - THE LINE is not UNSURE: no UNSURE word anywhere in it; r11: EVERY lone job of the line is `safe` — a job with any
+ *    other command (it may end the shell: `sh -c 'sleep 0.2; kill -9 $PPID' &`) taints the whole call, past every STOP
+ *    (r10 forgot it at the next one: `KS & echo $HOME; C & wait`); r10: no function definition (zsh's
+ *    `TRAPCHLD() { exit; }` ends the shell when a child ends; a definition may shadow a word of the allowlist), no
+ *    arithmetic (`(( … ))`, `$(( … ))` may assign), no write of a RESERVED name nor of a name it cannot see
+ *    (`writesKnown`), nothing sent to the background but its LONE top-level jobs (a
  *    list, a pipeline, a group, a subshell, a function's or a span's own job, a coproc, a disowned job may outlive every
  *    reaper and end the shell while the CLI runs: `( sleep 1; kill $$ ) &`), and nothing but `safe` commands in the
  *    spans and heredoc substitutions of its jobs (`C "$(sleep 1; kill $$)" &`) — such a line ends nothing (endJobs
@@ -490,8 +589,9 @@ function endJobs(cmds, stops = [], all = cmds) {
     const w = c.words, cw = commandWord(w), ws = [...w, ...(w.targets || [])];
     if (w.def || (w.length > 1 && !w[0].q && w[0].v === 'function')) return false;   // r10: a definition
     if (cw && UNSURE.has(cw.base)) return false;
-    if (ws.some((x) => x.v.includes('$(())') || SETS_IN_WORD.test(x.v) || ((m) => !!m && reserved(m[1]))(NAME_SET.exec(x.v)))) return false;
-    if (cw && WRITERS.has(cw.base) && w.slice(cw.k + 1).some((x) => reserved(x.v.replace(/[[=?+][^]*$/, '')))) return false;
+    if (ws.some((x) => x.v.includes('$(())') || SETS_IN_WORD.test(x.v) || INDIRECT.test(x.v) || varfd(c, x) || ((m) => !!m && reserved(m[1]))(NAME_SET.exec(x.v)))) return false;
+    if (!writesKnown(c, cw)) return false;   // r11: a name it cannot see, or one the shells keep
+    if (arithmetic(c, cw)) return false;   // r11: arithmetic or an evaluation it cannot read
     if (cw && DECLARE.has(cw.base)) declares = true;
   }
   // r10: the zsh range `<n-m>` / `<->` — the scan reads it as redirections (`echo a<1-9>b`: a target `1-9`)
@@ -502,12 +602,17 @@ function endJobs(cmds, stops = [], all = cmds) {
     if (!clean(c) || !c.words.every(plainWord) || !(c.words.targets || []).every((x) => /^(\/dev\/null|\d+)$/.test(x.v))) return false;
     if (!cw) return !declares && c.words.every((x) => { const m = PLAIN_SET.exec(x.v); return !!m && !reserved(m[1]); });
     const row = BETWEEN.get(c.words[0].v);
+    if (SPECIAL.has(c.words[0].v) && (c.words.targets || []).length) return false;   // r11: dash exits at `: >&9`
     return cw.k === 0 && !!row && row[0](c.words.slice(1).map((x) => x.v));
   };
   const runs = (c, cw) => !!cw && cw.split === undefined && !SHELL_OWN.has(cw.base) && !c.words.procsub;
   const lone = cmds.filter((c) => c.words.lone === 'job'), tops = new Set(lone.map((c) => c.words.jobs[c.words.jobs.length - 1]));
-  // `safe` — what may run BESIDE a job and leave its reaping sure: the CLI itself or a row of the allowlist
-  const safe = (c, cw) => !!cw && ((cw.base === CLI && c.words.slice(0, cw.k).every((x) => ASSIGN_RE.test(x.v))) || step(c, cw));
+  // `safe` — what may run BESIDE a job and leave its reaping sure: the CLI itself (r11: by its BARE name) or a row of the
+  // allowlist
+  const bare = (c, cw) => !!cw && cw.base === CLI && c.words[cw.k].v === CLI;
+  const safe = (c, cw) => !!cw && ((bare(c, cw) && c.words.slice(0, cw.k).every((x) => ASSIGN_RE.test(x.v))) || step(c, cw));
+  // r11: a lone job that is not `safe` may end the shell while any later job runs — the WHOLE line ends nothing
+  for (const c of lone) if (!safe(c, commandWord(c.words))) return false;
   // r10: a background the line cannot follow — a job that is no lone top-level one, or a command that runs beside the line
   // inside a lone job (a span of its words, its heredoc's substitutions: `C "$(sleep 1; kill $$)" &`) and is not `safe`
   for (const c of all) if (c.words.bg && (!(c.words.jobs || []).every((j) => tops.has(j)) || (!lone.includes(c) && !safe(c, commandWord(c.words))))) return false;
@@ -515,14 +620,12 @@ function endJobs(cmds, stops = [], all = cmds) {
   for (const c of cmds) {
     const cw = commandWord(c.words), how = c.words.lone;
     if (how === 'job' && runs(c, cw) && c.words.slice(0, cw.k).every((x) => ASSIGN_RE.test(x.v))) {
-      const j = { job: c.words.jobs[c.words.jobs.length - 1], safe: safe(c, cw), cli: cw.base === CLI };
-      if (!j.safe) open = [];   // r10: it may end the shell: no job before it ends
-      else if (open.some((o) => !o.safe)) { last = null; continue; }   // one that may end the shell runs beside it
-      open.push(j); last = j;
+      last = { job: c.words.jobs[c.words.jobs.length - 1], cli: bare(c, cw) };
+      open.push(last);
       continue;
     }
     if (how === 'fg' && step(c, cw)) continue;   // a step of the allowlist: nothing changes
-    if (how === 'fg' && cw && cw.k === 0 && REAPERS.includes(cw.base) && clean(c) && (c.words.targets || []).every((x) => /^(\/dev\/null|\d+|-)$/.test(x.v))) {
+    if (how === 'fg' && cw && cw.k === 0 && REAPERS.includes(cw.base) && clean(c) && (c.words.targets || []).every((x) => /^(\/dev\/null|[0-2]|-)$/.test(x.v))) {
       const args = c.words.slice(cw.k + 1).map((x) => x.v);
       if (cw.base === 'wait' && !args.length) { for (const o of open) o.job.ended = 'wait'; open = []; continue; }
       const by = (args.length === 1 || (cw.base === 'kill' && args.length === 2 && args[0] === '-TERM')) && BANG.includes(args[args.length - 1]);
@@ -655,5 +758,5 @@ function channelsRuns(cmd) { return cliRuns(commandsRun(cmd)); }
 
 module.exports = {
   CLI, SHELLS, OPENERS, DATA_HEADS, WRAPPERS, SCRIPT_RUNNERS, FIND_RUNS, ENV_SPLIT, SCAN_MAX, GROUP_OPEN, GROUP_CLOSE, RUNS_A_COMMAND, REAPERS, SHELL_OWN, UNSURE,
-  RESERVED, BETWEEN, spanEnd, shellCommands, commandWord, endJobs, shellScripts, commandsRun, cliRuns, channelsRuns, searchWords,
+  RESERVED, BETWEEN, SPECIAL, spanEnd, shellCommands, commandWord, endJobs, shellScripts, commandsRun, cliRuns, channelsRuns, searchWords,
 };
