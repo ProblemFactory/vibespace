@@ -18,7 +18,9 @@
 //   ⑧ the editor's Markdown preview of a .md with the same flowchart draws it · ⑨ the file viewer's markdown (by URL) too
 //   ⑩ the light theme re-draws the cards light · ⑪ a diagram naming a picture on another host is NOT drawn and fetches
 //     nothing · ⑫ every request the page made went to the hub (mermaid.js once, stamped ?v=) · zero CSP reports (scratch.mjs) but
-//     ⑦'s own: a browser that reports a dropped inline handler (Chrome ≥ 156) files the probe's — expected by its payload
+//     ⑦'s own: a browser that reports a dropped inline handler (Chrome ≥ 156) files the probe's — expected by its payload,
+//     and THE HUB'S VERDICT on it is the sanitizer's parse (kind sanitizer-parse, no notice, For you empty, Diagnostics'
+//     sanitizer count +1); an older one files none
 // PNGs: $VIBESPACE_CMM_PNG_DIR/{chat-dark,chat-source,chat-failed,chat-light,editor-preview,zoom-window}.png
 import { spawn, execSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -26,7 +28,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
-import { freePorts, scratch, scratchHome, fixtureSid, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, evalInBlankTab, CSP_REPORTS_FILE, takeProbeCspReport } from './scratch.mjs';
+import { freePorts, scratch, scratchHome, fixtureSid, ONBOARDED_SOURCE, vncEnv, endRootedProcesses, evalInBlankTab, CSP_REPORTS_FILE, takeProbeCspReport, probeVerdictFault } from './scratch.mjs';
 const require = createRequire(import.meta.url);
 const repo = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const WebSocket = require(path.join(repo, 'node_modules', 'ws'));
@@ -243,6 +245,7 @@ try {
   // ════ ⑦ the XSS probe ════
   console.log('── ⑦ the XSS probe ──');
   await ev('(window.__pwned = undefined, true)');
+  const cspBefore = await ev("fetch('/api/csp-reports').then((r) => r.json())"); // the count Diagnostics shows, before the probe (⑫)
   await ev(liveMsg('cmm-xss', fence(PROBE, 'A hostile one:')));
   const f7 = await until(async () => { const f = await facts(cardIn(msgSel('cmm-xss'))); return f && f.state !== 'loading' ? f : null; }, 30000);
   await sleep(800);
@@ -339,11 +342,18 @@ try {
   // 2.369.361, both tries): mermaid's sanitizer parses the probe's label in an inert document, and since Chrome 156 the
   // handler it drops is reported when its attribute is SET — nothing ran (⑦ «no handler ran»). That ONE report is
   // expected, keyed by the probe's payload (scripts/scratch.mjs takeProbeCspReport): Chrome 154 files none, 156 exactly
-  // it; any other line stays for the next leg and the teardown, red by name.
+  // it; any other line stays for the next leg and the teardown, red by name. THE HUB'S VERDICT on it (lane
+  // csp-mermaid-sites r2 — the take alone passed a NOTICED line too): it is mermaid's own DOMPurify's parse, so the
+  // sanitizer's — kind sanitizer-parse, no notice, no page-security notice in For you, Diagnostics' sanitizer count +1
+  // and the app page's +0 (scratch.mjs probeVerdictFault); a browser that reports none counts none.
   const browser = await fetch(`http://127.0.0.1:${CDP_PORT}/json/version`).then((r) => r.json()).then((v) => v.Browser, () => 'this browser');
+  const major = Number((/\/(\d+)\./.exec(browser) || [])[1]) || 0;
+  const cspAfter = await ev("fetch('/api/csp-reports').then((r) => r.json())");
+  const forYou = await ev("fetch('/api/user-todos').then((r) => r.json()).then((j) => ((j.todos && j.todos.open) || []).filter((x) => x.sessionKey === 'csp-report').map((x) => ({ text: x.text, status: x.status })))"); // the sink's NOTICE_KEY
   const probe = await takeProbeCspReport({ directive: 'script-src-attr', blocked: 'inline', sample: PROBE_HANDLER.slice(0, 40), source: `${ORIGIN}/mermaid.js`, document: `${ORIGIN}/` });
   const p0 = probe.taken[0];
-  check(`⑦'s own probe: ${browser} ${p0 ? `reported its dropped handler — EXPECTED, taken (script-src-attr inline «${p0.sample}», set by ${p0.source} at ${p0.line}:${p0.column}; the hub ${p0.noticed ? 'filed it as a notice' : 'filed no notice'}${p0.kind ? `, kind ${p0.kind}` : ''})` : 'reported nothing for it (it reports no dropped handler)'}`, probe.ok, probe.taken);
+  const fault = probeVerdictFault(probe, { major, forYou: Array.isArray(forYou) ? forYou : [{ text: `For you unread: ${JSON.stringify(forYou).slice(0, 200)}` }], count: { before: cspBefore, after: cspAfter } });
+  check(`⑦'s own probe: ${browser} ${p0 ? `reported its dropped handler — EXPECTED, taken (script-src-attr inline «${p0.sample}», set by ${p0.source} at ${p0.line}:${p0.column}); THE HUB'S VERDICT: ${probe.kind ? `kind ${probe.kind}` : 'the app page\'s'}, ${probe.noticed ? 'filed as a notice' : 'no notice'}, For you ${forYou && forYou.length ? `${forYou.length} page-security notice(s)` : 'empty'}, Diagnostics' sanitizer count +${(cspAfter?.sanitizer?.lines ?? NaN) - (cspBefore?.sanitizer?.lines ?? NaN)}` : `reported nothing for it (it reports no dropped handler; Diagnostics' sanitizer count +${(cspAfter?.sanitizer?.lines ?? NaN) - (cspBefore?.sanitizer?.lines ?? NaN)})`}`, probe.ok && !fault, fault || probe.taken);
   let csp = []; try { csp = fs.readFileSync(CSP_REPORTS_FILE, 'utf8').split('\n').filter(Boolean); } catch { }
   check('the app page reported nothing ELSE to its CSP (script-src \'self\': every script came from this origin)', csp.length === 0, csp.slice(0, 4));
   check('no uncaught page error', pageErrors.length === 0, pageErrors.slice(0, 3));

@@ -25,6 +25,17 @@
 //     the text dropped. A report AT one of that script's sites is a line of kind `sanitizer-parse`: no notice, its own
 //     count. No such script on disk, an unreadable one, any other position (another script's site too) ⇒ the report is
 //     what it always was. The sample is read to judge and never written (a chrome suite's file keeps it, as before).
+//     The `?v=` names the bytes that ran: a stale stamp on one of these scripts is redirected to its own (static-public).
+//     Chrome 156 posts source-file with NO query at all (measured: a classic script, a module, a redirected module) — no
+//     stamp to read, so the file on disk is judged: the bytes a lazy import fetches (express.static ignores the query).
+//   · A HUB THAT MET THE BUG (lane csp-mermaid-sites r2 — a hub that took mermaid's parse as the app's on .351–.361 kept
+//     «1 on the app page» and its For-you notice after the upgrade: the reclassified report shares the old line's key,
+//     so it was a duplicate, never written). At boot, a line on disk an earlier version judged the app page's — a
+//     script-src-attr inline line set by one of PARSE_SCRIPTS at a line and column — is re-judged against that script
+//     on disk now (its site; a line keeps no `?v=`, so a build whose site moved leaves it the app's). One the sanitizer
+//     explains is rewritten as a `sanitizer-parse` line (`rejudged`, no `noticed`: its pair may file again for a real
+//     gap), the For-you notice it filed (its own words) is closed, and that is said ONCE — one log line; the next boot
+//     finds nothing to re-judge. The store not up at boot ⇒ the first report tries again.
 //   · THE COUNT (主开发's ruling 2): reports since this boot and lines on disk, the app page's apart from the frames' and
 //     the sanitizer's — `GET /api/csp-reports` (behind the sign-in, like every read) answers it; the Diagnostics report
 //     shows it as a chip (the sanitizer's own chip only when it has a line).
@@ -48,6 +59,14 @@ if (C.REPORT_PATH !== '/api/csp-report') throw new Error('csp-reports: register(
 // the app page's scripts, as server.js serves them (public/ beside src/) — `publicDir` names another (test-csp-report)
 const PUBLIC = path.join(__dirname, '..', '..', 'public');
 
+/** A line on disk judged the app page's that one of PARSE_SCRIPTS may have set in the sanitizer's parse → its script, or
+ *  null: script-src-attr inline, no kind, the app page's (never a frame's), a line and a column, the script on the
+ *  document's origin. */
+function recheckOf(r) {
+  if (r.kind || r.directive !== 'script-src-attr' || r.blocked !== 'inline' || !C.noticeWorthy(r) || !(r.line > 0) || !(r.column > 0)) return null;
+  try { const s = new URL(r.source), d = new URL(r.document); return s.origin === d.origin && C.PARSE_SCRIPTS.includes(s.pathname) ? s.pathname : null; } catch { return null; }
+}
+
 function create({ dataDir, file: fileOpt = null, publicDir = PUBLIC, getUserTodos = () => null, now = Date.now, log = console, fileMax = FILE_MAX, bodyMax = BODY_MAX, pacePerMin = PACE_PER_MIN, noticesPerDay = NOTICES_PER_DAY } = {}) {
   // `file`: the scratch hubs of a chrome suite write where the suite reads (scripts/scratch.mjs, VIBESPACE_CSP_REPORTS_FILE)
   const file = fileOpt || path.join(dataDir, FILE), rotated = file + '.1';
@@ -57,16 +76,26 @@ function create({ dataDir, file: fileOpt = null, publicDir = PUBLIC, getUserTodo
   const zero = () => ({ app: 0, frames: 0, sanitizer: 0 });
   const since = zero(), disk = { [rotated]: zero(), [file]: zero() };
   const sideOf = C.sideOf;
-  for (const f of [rotated, file]) {
-    let t = '';
-    try { t = fs.readFileSync(f, 'utf8'); } catch { continue; }
-    for (const l of t.split('\n')) {
-      if (!l) continue;
-      try { const r = JSON.parse(l); if (!r || !r.directive) continue; lines.add(C.lineKey(r)); disk[f][sideOf(r)]++; if (r.noticed) noticed.add(C.pairKey(r)); } catch { /* a torn line */ }
+  let stale = []; // { raw, r, script }: lines an earlier version judged the app page's that a sanitizer may explain (above)
+  const textOf = (f) => { try { return fs.readFileSync(f, 'utf8'); } catch { return null; } }; // the line file (or its .1), or null
+  function load() {
+    lines.clear(); noticed.clear(); disk[rotated] = zero(); disk[file] = zero(); stale = [];
+    for (const f of [rotated, file]) {
+      const t = textOf(f);
+      if (t == null) continue;
+      for (const l of t.split('\n')) {
+        if (!l) continue;
+        try {
+          const r = JSON.parse(l); if (!r || !r.directive) continue;
+          lines.add(C.lineKey(r)); disk[f][sideOf(r)]++; if (r.noticed) noticed.add(C.pairKey(r));
+          const script = recheckOf(r); if (script) stale.push({ raw: l, r, script });
+        } catch { /* a torn line */ }
+      }
     }
   }
+  load();
   const pace = new Map(); // address → { min, n }
-  const stats = { received: 0, written: 0, duplicate: 0, refused: 0, paced: 0, noticed: 0, held: 0, sanitizer: 0, otherBuild: 0 };
+  const stats = { received: 0, written: 0, duplicate: 0, refused: 0, paced: 0, noticed: 0, held: 0, sanitizer: 0, otherBuild: 0, rejudged: 0 };
   let day = { day: '', n: 0 }, wrote = false;
 
   function paceOk(addr) {
@@ -119,6 +148,42 @@ function create({ dataDir, file: fileOpt = null, publicDir = PUBLIC, getUserTodo
     }
     return reports;
   }
+  /** A HUB THAT MET THE BUG (above): the lines on disk a sanitizer explains → `sanitizer-parse` lines, the notices they
+   *  filed closed, said once → { lines, closed }. Once per boot (the store not up yet: tried again at the next report). */
+  let rejudging = null;
+  function rejudge() {
+    if (rejudging) return rejudging;
+    if (!stale.length) return (rejudging = Promise.resolve({ lines: 0, closed: 0 }));
+    let todos;
+    try { todos = getUserTodos && getUserTodos(); } catch { return Promise.resolve({ lines: 0, closed: 0, later: true }); }
+    rejudging = (async () => {
+      const hits = [];
+      for (const c of stale) { try { if ((await (await parseSites(c.script)).sites).has(`${c.r.line}:${c.r.column}`)) hits.push(c); } catch { /* no such script on disk: the line stays */ } }
+      if (!hits.length) return { lines: 0, closed: 0 };
+      // the notice a line filed carries its words (noticeWords) — a later filing of the pair names another place, and stays
+      const words = new Set(hits.filter((h) => h.r.noticed).map((h) => { const w = C.noticeWords(h.r); return `${w.text}\u0000${w.detail}`; }));
+      let closed = 0;
+      if (words.size && todos && typeof todos.idsWhere === 'function') {
+        const ids = todos.idsWhere((i) => i.sessionKey === NOTICE_KEY && i.status === 'open' && words.has(`${i.text}\u0000${i.detail}`));
+        if (ids.length) { try { closed = todos.setStatusMany(ids, 'done', 'system').changed.length; } catch (e) { log.warn?.(`[csp] the For-you notice was not closed — ${e && e.message}`); } }
+      }
+      const raws = new Set(hits.map((h) => h.raw)), at = new Date(now()).toISOString();
+      for (const f of [rotated, file]) {
+        const t = textOf(f);
+        if (t == null) continue;
+        const was = t.split('\n'), out = was.map((l) => { if (!raws.has(l)) return l; const { noticed: _n, ...r } = JSON.parse(l); return JSON.stringify({ ...r, kind: C.KIND_SANITIZER, rejudged: at }); });
+        if (out.every((l, i) => l === was[i])) continue;
+        try { fs.writeFileSync(f + '.rejudge', out.join('\n'), { mode: 0o600 }); fs.renameSync(f + '.rejudge', f); } catch (e) { log.warn?.(`[csp] data/${FILE} was not re-judged — ${e && e.code || e && e.message}`); }
+      }
+      load();
+      stats.rejudged += hits.length;
+      log.log?.(`[csp] ${hits.length} line(s) an earlier version filed as the app page's were the sanitizer's parse (${[...new Set(hits.map((h) => h.script))].join(', ')}, re-judged against app-csp PARSE_SCRIPTS): counted as the sanitizer's now; ${closed} For-you notice(s) they filed closed`);
+      return { lines: hits.length, closed };
+    })();
+    return rejudging;
+  }
+  if (stale.length) setImmediate(rejudge);
+
   /** Reports (app-csp reportOf rows) → their lines + notices: { written, noticed }. */
   function record(reports, { at = now() } = {}) {
     let written = 0, filed = 0;
@@ -156,6 +221,7 @@ function create({ dataDir, file: fileOpt = null, publicDir = PUBLIC, getUserTodo
       // report (measured: a chrome suite's teardown read 17 lines one run, 1 the next)
       if (got.some((r) => !lines.has(C.lineKey(r))) && !paceOk(String(req.socket && req.socket.remoteAddress || '?'))) { stats.paced++; return res.status(429).json({ error: 'too many reports' }); }
       if (!got.some((r) => r.site)) { record(got); res.status(204).end(); return; }
+      rejudge(); // a hub that met the bug: done at boot, unless the store was not up yet
       classify(got).then(() => { record(got); res.status(204).end(); });
     });
     req.on('error', () => { /* the browser went away */ });
@@ -165,7 +231,7 @@ function create({ dataDir, file: fileOpt = null, publicDir = PUBLIC, getUserTodo
   const onDisk = (side) => disk[rotated][side] + disk[file][side];
   const summary = () => ({ policy: 'report-only', app: { reports: since.app, lines: onDisk('app') }, frames: { reports: since.frames, lines: onDisk('frames') }, sanitizer: { reports: since.sanitizer, lines: onDisk('sanitizer') }, noticed: noticed.size, refused: stats.refused, paced: stats.paced });
   return {
-    file, record, classify, handler, summary, stats: () => ({ ...stats, lines: lines.size, pairs: noticed.size }),
+    file, record, classify, handler, summary, rejudge, stats: () => ({ ...stats, lines: lines.size, pairs: noticed.size }),
     /** `POST /api/csp-report` — BEFORE the json body parser (the route reads its own ≤ 32 KB); `GET /api/csp-reports` = the count */
     register(app) {
       app.post('/api/csp-report', handler); // = C.REPORT_PATH, written as a literal: test-auth's route census reads the path

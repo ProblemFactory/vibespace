@@ -102,6 +102,7 @@ export const ROWS = [
   ['src/secret-file.js', 'own-tree', 5, null, DATA], // lane engine-distribution +3: shredFile's lstat / open (r+) / lstat of a git credential file in data/plugins-staging/<stage>/.cred-* // lane vault-e2e-password-fix-r2: replaceShredding opens the file it replaces (r+), to overwrite its old bytes (a data/ secret file); verify r2 +1: its lstat (a symlink is refused before the open — the overwrite would reach the target)
   ['src/server/host-tokens.js', 'own-tree', 7, null, DATA], // lane vault-e2e-password-fix-r2: data/agentd — the pre-vault host-<id>.token files (read / exists), the attach configs it strips, the dir listings, vault.json's presence (via secret-box)
   ['src/server/sealed-json.js', 'own-tree', 1, null, DATA], // lane vault-e2e-password-fix-r2: the sealed JSON file itself (data/dropline-oauth.json)
+  ['src/server/static-public.js', 'own-tree', 1, null, DATA], // lane csp-mermaid-sites r2: the stat of the checkout's own public/ script a request names (its build stamp, as the index route writes it) — never a user path
   ['src/server/auto-cli-loop.js', 'own-tree', 2, null, CLI],
   ['src/server/auto-resume.js', 'own-tree', 1, null, CLI],
   ['src/server/boot-restore.js', 'own-tree', 14, null, DATA], // B-1319: +1 = probeSockets' readdir of the sockets folder (the restore's probes, before listen)
