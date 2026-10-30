@@ -29,7 +29,7 @@ import { BEFORE_REF as BEFORE82, beforeBlocks, beforeText, census as censusMoved
 const REPO = path.resolve(new URL('..', import.meta.url).pathname);
 let pass = 0, fail = 0;
 const ROOT_DIR_DCHS = new URL('..', import.meta.url).pathname;
-const ok = (c, n) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; console.error('  ✗ ' + n); } };
+const ok = (c, n, d) => { if (c) { pass++; console.log('  ✓ ' + n); } else { fail++; let x = ''; try { x = d === undefined ? '' : ' — ' + (typeof d === 'string' ? d : JSON.stringify(d)); } catch { x = ' — ' + String(d); } console.error('  ✗ ' + n + x.slice(0, 4000)); } };   // a failure names its detail (lane job-secrets-retire r3, review N1: §96 named no offender)
 // §78's dead-code censuses take ~4 s (a raw scan of ~20 MB per unused-key candidate + two esbuild metafiles): they run as
 // a CHILD from here, alongside every other section, and §78 awaits the file it writes (no pipe: a busy parent never stalls it)
 const DEAD78 = (() => {

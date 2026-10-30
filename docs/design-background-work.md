@@ -326,7 +326,8 @@ same-origin, no cookies) with a tiny postMessage bridge (`vsui.submit(obj)`,
   file; one an owner once filled is not left in silence (r2): the one-shot
   `2026-10-job-secrets-retired` RENAMES it to `data/job-secrets.retired.json`
   (0600, kept — VibeSpace never deletes it; a `SECRETS_AT_REST` row) and files
-  ONE For-you notice under Vault naming the file, its names (never a value) and
+  ONE For-you notice under Vault naming the file, its names (never a value; a
+  name shaped like a token is counted, never shown — r3) and
   the recipe (each into the vault, then delete the file). Records keep
   `envFrom: []` and run unchanged (no record migration); `show`
   prints `envFrom:[…]` only for a record that still names one. cmd.env values

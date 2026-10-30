@@ -11563,7 +11563,13 @@ export default {
   // lane job-secrets-retire r2: the For-you notice of the one-shot 2026-10-job-secrets-retired (src/server/migrations.js)
   "A plain file kept secrets for background jobs outside the vault: {file} — put each into the vault, then delete the file.": "一个明文文件把后台工作任务的密钥存在了保险库之外：{file}——请把每一项放进保险库，然后删除这个文件。",
   "It holds {n} name(s): {names} — the values are not shown here.": "它存有 {n} 个名称：{names}——这里不显示它们的值。",
-  "…and {n} more not shown (past the first 20, or not a variable name).": "……另有 {n} 个没有显示（排在前 20 个之后，或不是变量名）。",
+  "…and {n} more not shown (past the first 20, or shaped like a value rather than a name).": "……另有 {n} 个没有显示（排在前 20 个之后，或看起来像一个值而不是名称）。",
   "Its names could not be read — open the file to see what it holds.": "读不出它存的名称——打开这个文件看看里面有什么。",
   "VibeSpace no longer reads this file and never deletes it. Add each value to the vault as a secret entry, then delete the file; a job reads a stored secret with --vault NAME=vault://… (vibespace-docs jobs).": "VibeSpace 不再读取这个文件，也绝不会删除它。把每个值作为密钥条目放进保险库，然后删除这个文件；任务用 --vault NAME=vault://… 读取保存的密钥（vibespace-docs jobs）。",
+  // lane job-secrets-retire r3: both names present (2026-10-job-secrets-retired) + a failed boot migration's ONE For-you item (src/migration-runner.js)
+  "Two files hold secrets for background jobs and nothing was moved: {from} and {to}. Move one of them out of data/ (or delete it), then restart — VibeSpace never chooses between your files.": "有两个文件存着后台工作任务的密钥，什么都没有移动：{from} 和 {to}。把其中一个移出 data/（或删除它），然后重启——VibeSpace 绝不替你在这两个文件之间做选择。",
+  "A data migration failed at startup: {id}": "一项数据迁移在启动时失败：{id}",
+  "Its error: {error}": "它的错误：{error}",
+  "Nothing was recorded — it retries at the next start; the server log has the whole line.": "没有记录任何内容——下次启动时会重试；服务器日志里有完整的一行。",
+  "Migrations": "数据迁移", // lane job-secrets-retire r3: the For-you group of a failed boot migration (src/migration-runner.js)
 };

@@ -2463,7 +2463,7 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       'ONE For-you notice (origin vault, a notice): it names the file and says put each into the vault, then delete it', it);
     ok(/It holds 3 name\(s\): GH_TOKEN, NPM_TOKEN —/.test(it.detail || '') && /…and 1 more not shown/.test(it.detail || '') && /--vault NAME=vault:\/\/… \(vibespace-docs jobs\)/.test(it.detail || '') && /never deletes it/.test(it.detail || ''),
       '…its detail: the 3 names it held (the 2 variable names shown, the one shaped like a pasted value COUNTED, never shown) and the recipe (a secret entry in the vault; a job reads --vault)', it.detail);
-    ok(it.i18n?.text?.key && Array.isArray(it.i18n?.detail) && it.i18n.detail.length === 3, '…and its words ride as structure (the client says them in zh / ja)', it.i18n);
+    ok(it.i18n?.text?.key && Array.isArray(it.i18n?.detail) && it.i18n.detail.length === 3 && it.i18n?.source?.key === 'Vault', '…and its words ride as structure (the client says them in zh / ja — the group\'s name too, r3)', it.i18n);
     const todosText = fs.existsSync(path.join(a.dataDir, 'user-todos.json')) ? fs.readFileSync(path.join(a.dataDir, 'user-todos.json'), 'utf8') : '';
     ok(todosText.includes('job-secrets.retired.json') && leaks(JSON.stringify(na)).length === 0 && leaks(todosText).length === 0,
       'NO VALUE in the notice (text, detail, i18n) nor in data/user-todos.json — flushed before the ledger row', leaks(JSON.stringify(na)).length + leaks(todosText).length);
@@ -2493,13 +2493,28 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const rc2 = boot(c, { userTodos: liveC });
     ok(rc2?.status === 'ran' && rc2?.report?.store === 'renamed-earlier' && notesOf(liveC).length === 1 && /BOT_TOKEN/.test(notesOf(liveC)[0]?.detail || '') && !!c.ledger().applied[ID], '…the next boot finds the retired file, files the ONE notice and records the row', rc2);
     liveC.stop();
-    // (6) both names present ⇒ FAILS by name, nothing moved, nothing filed
+    // (6) both names present ⇒ FAILS by name, nothing moved — and (r3, review F2: the runner runs inside hub.listen's callback,
+    // before any client connects) the Vault For-you item says it first: two files, nothing moved, move one out of data/. Its
+    // error is `told` (the runner files no second item); the boot after the owner moved one aside re-words that ONE item
     const d = seedJS('both', { A_KEY: V[0] });
     fs.writeFileSync(d.ret, JSON.stringify({ B_KEY: V[1] }), { mode: 0o600 });
     const dBefore = [fs.readFileSync(d.src), fs.readFileSync(d.ret)];
-    const rd = boot(d);
-    ok(rd?.status === 'failed' && /already exists/.test(rd?.error || '') && fs.readFileSync(d.src).equals(dBefore[0]) && fs.readFileSync(d.ret).equals(dBefore[1]) && !fs.existsSync(path.join(d.dataDir, 'user-todos.json')),
-      'both names present ⇒ FAILS by name — nothing moved, never over the owner\'s bytes, nothing filed', rd);
+    const rd = boot(d);   // no live store: the private one on the same file
+    ok(rd?.status === 'failed' && /already exists/.test(rd?.error || '') && fs.readFileSync(d.src).equals(dBefore[0]) && fs.readFileSync(d.ret).equals(dBefore[1]) && !d.ledger().applied[ID],
+      'both names present ⇒ FAILS by name — nothing moved, never over the owner\'s bytes, not recorded', rd);
+    const tdD = new UserTodoManager({ dataDir: d.dataDir, expirySweepMs: 0 });
+    const nd = notesOf(tdD), itD = nd[0] || {};
+    ok(nd.length === 1 && itD.origin === 'vault' && itD.kind === 'notice' && /^Two files hold secrets for background jobs and nothing was moved: data\/job-secrets\.json and data\/job-secrets\.retired\.json\. Move one of them out of data\//.test(itD.text || '') && itD.i18n?.text?.key === require('../src/server/migrations.js').JOB_SECRETS_WORDS?.both && leaks(JSON.stringify(nd)).length === 0,
+      '…and ONE Vault For-you notice says it where the owner looks — two files, nothing moved, move one out of data/ (no value)', { n: nd.length, text: itD.text });
+    const rd2 = boot(d, { userTodos: tdD });
+    ok(rd2?.status === 'failed' && notesOf(tdD).length === 1 && notesOf(tdD)[0]?.id === itD.id && tdD.forSession('migrations').length === 0,
+      'a second boot with both still there ⇒ still ONE item; the error is `told` — the runner files no second (generic) item for it', { n: notesOf(tdD).length, generic: tdD.forSession('migrations').length });
+    fs.rmSync(d.ret);   // the owner moved one aside
+    const rd3 = boot(d, { userTodos: tdD });
+    const nd3 = notesOf(tdD);
+    ok(rd3?.status === 'ran' && nd3.length === 1 && nd3[0]?.id === itD.id && /^A plain file kept secrets/.test(nd3[0]?.text || '') && /It holds 1 name\(s\): A_KEY —/.test(nd3[0]?.detail || ''),
+      '…one moved aside ⇒ the next boot renames the other and the SAME item (one id) now says the retired file\'s words', { status: rd3?.status, n: nd3.length, same: nd3[0]?.id === itD.id });
+    tdD.stop();
     // (7) a store that is not a JSON object: renamed and told — its names could not be read
     const u = seedJS('unread', 'not json ' + V[2]);
     const tu = new UserTodoManager({ dataDir: u.dataDir, expirySweepMs: 0 });
@@ -2516,7 +2531,87 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
     const { dictHasEntry } = await import('./i18n-check.mjs');
     const W = (() => { try { return Object.values(require('../src/server/migrations.js').JOB_SECRETS_WORDS || {}); } catch { return []; } })();
     const dicts = ['zh', 'ja'].map((l) => fs.readFileSync(path.join(REPO_ROOT, `src/lib/i18n-${l}.js`), 'utf8'));
-    ok(W.length === 5 && W.every((k) => dicts.every((dt) => dictHasEntry(dt, k))), `the notice's ${W.length} keys are entries in BOTH dicts (zh, ja)`, W.filter((k) => !dicts.every((dt) => dictHasEntry(dt, k))));
+    ok(W.length === 6 && W.every((k) => dicts.every((dt) => dictHasEntry(dt, k))), `the notice's ${W.length} keys are entries in BOTH dicts (zh, ja)`, W.filter((k) => !dicts.every((dt) => dictHasEntry(dt, k))));
+    const FW = Object.values(require('../src/migration-runner.js').FAILED_WORDS || {});
+    ok(FW.length === 4 && FW.every((k) => dicts.every((dt) => dictHasEntry(dt, k))), `the runner's failed-migration notice: its ${FW.length} keys are entries in BOTH dicts (zh, ja)`, FW.filter((k) => !dicts.every((dt) => dictHasEntry(dt, k))));
+    // (10) r3 (review F1): a TOKEN pasted as a NAME is never shown — six families built at runtime by concatenation; five of them
+    // fit an environment variable's shape (ghp_…, npm_…, hf_…, AKIA…, a 40-hex run). Ordinary names are still shown
+    const alnum = (k, set = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789') => Array.from(crypto.randomBytes(k), (b) => set[b % set.length]).join('');
+    const TOKENS = [
+      ['s', 'k-'].join('') + crypto.randomBytes(16).toString('hex'),
+      ['gh', 'p_'].join('') + alnum(36),
+      ['np', 'm_'].join('') + alnum(36),
+      ['h', 'f_'].join('') + alnum(34),
+      ['AK', 'IA'].join('') + alnum(16, 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'),
+      ['a', '1'].join('') + crypto.randomBytes(19).toString('hex'),
+    ];
+    const tk = seedJS('tokens', Object.fromEntries([['GH_TOKEN', V[0]], ['API_KEY', V[1]], ['PASSWORD', V[2]], ...TOKENS.map((t, i) => [t, V[i % V.length]])]));
+    const tt = new UserTodoManager({ dataDir: tk.dataDir, expirySweepMs: 0 });
+    const rt = boot(tk, { userTodos: tt });
+    tt.flush();
+    const nt = notesOf(tt), blobT = JSON.stringify(nt) + (fs.existsSync(path.join(tk.dataDir, 'user-todos.json')) ? fs.readFileSync(path.join(tk.dataDir, 'user-todos.json'), 'utf8') : '') + JSON.stringify(tk.ledger());
+    const shownT = TOKENS.filter((t) => blobT.includes(t)).length;
+    ok(rt?.status === 'ran' && nt.length === 1 && shownT === 0 && /It holds 9 name\(s\): GH_TOKEN, API_KEY, PASSWORD —/.test(nt[0]?.detail || '') && /…and 6 more not shown \(past the first 20, or shaped like a value rather than a name\)/.test(nt[0]?.detail || ''),
+      'six token families pasted as NAMES (sk-, ghp_, npm_, hf_, AKIA, a 40-hex run) ⇒ 0 shown, 6 counted; GH_TOKEN / API_KEY / PASSWORD shown', { status: rt?.status, notices: nt.length, tokensShown: shownT });
+    ok(shownT === 0 && leaks(blobT).length === 0, '…no token and no value in the notice, data/user-todos.json or the ledger', { tokens: shownT, values: leaks(blobT).length });
+    tt.stop();
+    // (11) r3 (review F2b) THE HUB'S WIRING: runLocalMigrations hands its live store to the runner — a run whose own notice could
+    // not be filed (not `told`) is the runner's ONE item under «migrations»; the boot that runs it resolves that item
+    const g = seedJS('wired', { BOT_TOKEN: V[3] });
+    const tg = new UserTodoManager({ dataDir: g.dataDir, expirySweepMs: 0 });
+    const half = { add: (k, o) => { if (k === 'vault') throw new Error('the vault section refused it'); return tg.add(k, o); }, flush: () => tg.flush(), idsWhere: (f) => tg.idsWhere(f), setStatus: (...a) => tg.setStatus(...a), get: (x) => tg.get(x) };
+    const rg1 = boot(g, { userTodos: half });
+    const sg1 = tg.forSession('migrations');
+    ok(rg1?.status === 'failed' && sg1.length === 1 && sg1[0]?.itemKey === ID && sg1[0]?.origin === 'server' && sg1[0]?.text === `A data migration failed at startup: ${ID}` && /Its error: the vault section refused it/.test(sg1[0]?.detail || '') && leaks(JSON.stringify(sg1)).length === 0,
+      'the hub\'s wiring: the one-shot fails (its own notice refused) ⇒ the runner files ONE For-you item naming it (origin server, no value)', { status: rg1?.status, n: sg1.length, text: sg1[0]?.text });
+    const rg2 = boot(g, { userTodos: tg });
+    ok(rg2?.status === 'ran' && tg.forSession('migrations').length === 0 && tg.get(sg1[0]?.id)?.status === 'done' && notesOf(tg).length === 1, '…the next boot runs it ⇒ the runner\'s item is RESOLVED and the ONE Vault notice is filed', { status: rg2?.status, item: tg.get(sg1[0]?.id)?.status });
+    tg.stop();
+  }
+
+  // ── THE SHARED RUNNER SAYS A FAILURE WHERE THE OWNER LOOKS (lane job-secrets-retire r3, review F2b): the hub runs its registry
+  // inside hub.listen's callback, before any client connects, so a failed boot migration was a journal line. With `todos` a
+  // failed row is ONE For-you item keyed by its id: a second failing boot is still ONE (the same id), the run that succeeds
+  // resolves it, a `told` failure files none, an error's token is masked; no store (a device daemon) ⇒ nothing, as before ──
+  {
+    const { UserTodoManager } = require('../src/user-todos.js');
+    const R = require('../src/migration-runner.js');
+    const dir = path.join(tmp, 'runner-said'), dir2 = path.join(tmp, 'runner-quiet');
+    fs.mkdirSync(dir, { recursive: true }); fs.mkdirSync(dir2, { recursive: true });
+    const ledgerPath = path.join(dir, 'migrations.json');
+    const td = new UserTodoManager({ dataDir: dir, expirySweepMs: 0 });
+    const TOK = ['gh', 'p_'].join('') + crypto.randomBytes(18).toString('hex');   // a token in an error line, built at runtime
+    let failing = true;
+    const M = [{ id: '2099-01-runner-said', run() { if (failing) throw new Error(`the store could not be read (${TOK})\nthe second line`); return { ok: 1 }; } }];
+    const said = () => td.forSession('migrations');
+    const quiet = { log: () => { }, warn: () => { } };
+    const r1 = runMigrations({ ledgerPath, migrations: M, todos: td, ...quiet })[0];
+    td.flush();
+    const s1 = said(), i1 = s1[0] || {};
+    ok(R.FAILED_INBOX_KEY === 'migrations' && r1?.status === 'failed' && s1.length === 1 && i1.origin === 'server' && i1.kind === 'notice' && i1.itemKey === '2099-01-runner-said' && i1.text === 'A data migration failed at startup: 2099-01-runner-said' && /Its error: the store could not be read/.test(i1.detail || '') && /it retries at the next start/.test(i1.detail || '') && !/the second line/.test(i1.detail || '') && i1.i18n?.text?.key === R.FAILED_WORDS?.text && i1.i18n?.source?.key === 'Migrations',
+      'a migration that throws ⇒ ONE For-you notice (origin server): the migration, its error\'s FIRST line, «it retries at the next start» — words as structure', { status: r1?.status, n: s1.length, text: i1.text });
+    const todosFile = () => (fs.existsSync(path.join(dir, 'user-todos.json')) ? fs.readFileSync(path.join(dir, 'user-todos.json'), 'utf8') : '');
+    ok(s1.length === 1 && !JSON.stringify(s1).includes(TOK) && todosFile().includes('2099-01-runner-said') && !todosFile().includes(TOK), '…a token in the error line is masked by the secret-shapes belt — never in the item nor in data/user-todos.json');
+    const r2 = runMigrations({ ledgerPath, migrations: M, todos: td, ...quiet })[0];
+    ok(r2?.status === 'failed' && said().length === 1 && said()[0]?.id === i1.id, 'a second failing boot ⇒ still ONE item (the same id), never a second', { n: said().length });
+    failing = false;
+    const r3 = runMigrations({ ledgerPath, migrations: M, todos: td, ...quiet })[0];
+    ok(r3?.status === 'ran' && said().length === 0 && td.get(i1.id)?.status === 'done', 'the boot that runs it ⇒ the item is RESOLVED', { status: r3?.status, item: td.get(i1.id)?.status });
+    const r4 = runMigrations({ ledgerPath, migrations: [{ id: '2099-01-runner-told', run() { throw Object.assign(new Error('said in its own words'), { told: true }); } }], todos: td, ...quiet })[0];
+    ok(r4?.status === 'failed' && said().length === 0, 'a failure the migration already said in its own For-you words (`told`) ⇒ no second item', { status: r4?.status, n: said().length });
+    const r5 = runMigrations({ ledgerPath, migrations: [{ id: '2099-01-runner-stepped', run: () => Promise.reject(new Error('a slice failed')) }], todos: td, ...quiet })[0];
+    await new Promise((res) => setImmediate(res));
+    ok(r5?.status === 'started' && said().length === 1 && said()[0]?.itemKey === '2099-01-runner-stepped', 'a STEPPED migration that rejects ⇒ the same ONE item', { n: said().length });
+    let late = null;
+    runMigrations({ ledgerPath, migrations: [{ id: '2099-01-runner-stepped', run: () => Promise.resolve({}) }], todos: td, onLate: (x) => { late = x; }, ...quiet });
+    await new Promise((res) => setImmediate(res));
+    ok(late?.status === 'ran' && said().length === 0, '…and the run of it that ends resolves it', { late: late?.status, n: said().length });
+    td.stop();
+    const r6 = runMigrations({ ledgerPath: path.join(dir2, 'migrations.json'), migrations: [{ id: '2099-01-runner-device', run() { throw new Error('no'); } }], ...quiet })[0];
+    ok(r6?.status === 'failed' && !fs.existsSync(path.join(dir2, 'user-todos.json')), 'no store (a device daemon passes none) ⇒ nothing filed — failed, not recorded, as before', r6);
+    const warns = [];
+    const r7 = runMigrations({ ledgerPath: path.join(dir2, 'm2.json'), migrations: [{ id: '2099-01-runner-y', run() { throw new Error('no'); } }, { id: '2099-01-runner-z', run() { return null; } }], todos: { add() { throw new Error('the store refused it'); } }, log: () => { }, warn: (l) => warns.push(l) });
+    ok(r7.map((x) => x.status).join() === 'failed,ran' && warns.some((l) => /2099-01-runner-y: its For-you notice was not filed — the store refused it/.test(l)), 'a store that refuses the item ⇒ a warn line by name, never a failed boot — the next row still runs', { statuses: r7.map((x) => x.status), warns: warns.length });
   }
 } finally {
   fs.rmSync(tmp, { recursive: true, force: true });

@@ -152,6 +152,14 @@ ok(M.vetSpec({ cmd: { argv: ['npm', 'run', 'dev'] } }).ok, 'ordinary spec passes
     const s9 = (man.match(/\n## 9\. [^\n]*\n([\s\S]*?)(?=\n## (?!9\. ))/) || [])[1] || '';
     ok(/see vibespace-docs jobs$/.test(WORDS) && file === 'background-work-manual.md' && s9.length > 200, `the refusal's pointer resolves: vibespace-docs jobs → docs/agent/${file} §9 (${s9.length} chars)`);
     ok(/comes from the vault/.test(s9) && s9.includes('--vault NAME=vault://…') && /«A stored secret from the vault»/.test(s9) && /envfrom_retired/.test(s9), '§9 teaches the ONE road: the secret comes from the vault (--vault NAME=vault://…, «A stored secret from the vault») — a named envFrom is refused envfrom_retired');
+    // r3 (review N2): …and on the PAIR the pointer points somewhere — L1a (vault-job-road) writes «### A stored secret from the
+    // vault» as a subsection of §9, right under this paragraph. L0 alone has no such text: SKIPPED BY NAME there (the marker is
+    // L1a's PURE module src/vault-job.js, never the heading itself), so L0 stays green and the pair is pinned
+    if (!fs.existsSync(path.join(__dirname_jm, '..', 'src/vault-job.js'))) console.log('  – §9 → «A stored secret from the vault» heading leg SKIPPED BY NAME — L1a (vault-job-road) is not in this tree (src/vault-job.js absent): the subsection is its text; on the pair this leg runs');
+    else {
+      const at = s9.search(/^### A stored secret from the vault — `--vault NAME=vault:\/\/…`$/m), para = s9.indexOf('«A stored secret from the vault»');
+      ok(at > 0 && para >= 0 && para < at && !/^#{2,3} /m.test(s9.slice(para, at)), `the pair: L1a's «### A stored secret from the vault — \`--vault NAME=vault://…\`» is IN §9, the next heading right after the paragraph that points to it (at ${at}, pointer at ${para})`);
+    }
     const stale = [[/--env-from/, '`--env-from` (a flag vibespace-job never had)'], [/⚙→Background Work/, '«user manages values in ⚙→Background Work»'], [/literal-redacted|redacted from\s+log tails/, 'the literal-redaction promise for log tails'], [/an `?--env-from`? name/, 'an --env-from name as a vetted piece']];
     const found = stale.filter(([re]) => re.test(man)).map(([, what]) => what);
     ok(found.length === 0, 'the whole manual teaches none of the retired road: ' + stale.map(([, what]) => what).join(' · '), found);

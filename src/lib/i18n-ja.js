@@ -11562,7 +11562,13 @@ export default {
   // lane job-secrets-retire r2: the For-you notice of the one-shot 2026-10-job-secrets-retired (src/server/migrations.js)
   "A plain file kept secrets for background jobs outside the vault: {file} — put each into the vault, then delete the file.": "平文ファイルがバックグラウンド作業の秘密を保管庫の外に保存していました：{file}——それぞれを保管庫に入れてから、このファイルを削除してください。",
   "It holds {n} name(s): {names} — the values are not shown here.": "{n} 個の名前があります：{names}——値はここには表示しません。",
-  "…and {n} more not shown (past the first 20, or not a variable name).": "…ほかに {n} 個は表示していません（先頭 20 個より後、または変数名ではありません）。",
+  "…and {n} more not shown (past the first 20, or shaped like a value rather than a name).": "…ほかに {n} 個は表示していません（先頭 20 個より後、または名前ではなく値のように見えます）。",
   "Its names could not be read — open the file to see what it holds.": "名前を読み取れませんでした——ファイルを開いて中身を確認してください。",
   "VibeSpace no longer reads this file and never deletes it. Add each value to the vault as a secret entry, then delete the file; a job reads a stored secret with --vault NAME=vault://… (vibespace-docs jobs).": "VibeSpace はこのファイルをもう読まず、削除することもありません。それぞれの値をシークレットとして保管庫に入れてから、このファイルを削除してください。ジョブは --vault NAME=vault://… で保存したシークレットを読みます（vibespace-docs jobs）。",
+  // lane job-secrets-retire r3: both names present (2026-10-job-secrets-retired) + a failed boot migration's ONE For-you item (src/migration-runner.js)
+  "Two files hold secrets for background jobs and nothing was moved: {from} and {to}. Move one of them out of data/ (or delete it), then restart — VibeSpace never chooses between your files.": "バックグラウンド作業の秘密を保存したファイルが 2 つあり、何も移動していません：{from} と {to}。どちらか一方を data/ の外へ移動（または削除）してから再起動してください——VibeSpace があなたのファイルのどちらかを選ぶことはありません。",
+  "A data migration failed at startup: {id}": "データ移行が起動時に失敗しました：{id}",
+  "Its error: {error}": "エラー：{error}",
+  "Nothing was recorded — it retries at the next start; the server log has the whole line.": "何も記録していません——次回の起動時に再試行します。サーバーログに行全体があります。",
+  "Migrations": "データ移行", // lane job-secrets-retire r3: the For-you group of a failed boot migration (src/migration-runner.js)
 };
