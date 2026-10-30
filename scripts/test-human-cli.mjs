@@ -23,9 +23,13 @@
 //   §8 round 5: ONE clock (a buffer that does not answer is said in 2 s, not two clocks in a row); THE GAP RULE on every
 //      record the follower reports (a reply the transcript history showed, persisted after it, shown once — until a newer
 //      one); its edges (gapFilter); a placeholder uuid is never a record's id (a new reply is never «(updated)»)
+//   §9 round 6: ONE DEADLINE — the history is never read before the follower's baseline (a slow FIFO buffer that answers:
+//      the reply that lands between is shown once; THE MUTANT reading at half the clock shows it 0 times); the history's
+//      sources each judged on its own answer (a stalled transcript leaves a slow-but-healthy buffer its time); the
+//      horizon: a subagent's record and an edit in place never move it
 // RED on the base (6428c67e): no data/bin/vibespace, no index; RED on round 1 (5a0b2463): §0, the live-hub attach, the
 // receipt, the piped number, the bare refusal; RED on round 3 (ea0cecce): §7 and the killed session's .receipts (§2);
-// RED on round 4 (ad114fd78): §8.
+// RED on round 4 (ad114fd78): §8. RED on round 5 (bd110027f): §9.
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -267,11 +271,11 @@ ok('inside an AGENT session (or a job) EVERY verb is refused FIRST — a bare `v
   agentLs.status === 2 && !/hc-term/.test(agentLs.stdout) && agentTry.status === 2 && /vibespace-msg send/.test(agentTry.stderr) && agentBare.status === 2 && agentBare.stdout === '' && !(fs.existsSync(CAPTURE) && fs.readFileSync(CAPTURE, 'utf8').includes('an agent typing')), JSON.stringify({ bare: [agentBare.status, agentBare.stdout.slice(0, 120)], chat: agentTry.stderr.slice(0, 120) }));
 const amb = runCli(['attach', 'hc-']);
 ok('a name part that matches two sessions: refused (a script takes an id or an exact name), nothing done', amb.status === 2 && /no session «hc-»/.test(amb.stderr), amb.stderr);
-// the terminal session dies (its dtach master, found by its own socket — this suite's)
-const masterPid = (() => { if (!rowT || !rowT.socket) return null; for (const d of fs.readdirSync('/proc').filter((x) => /^\d+$/.test(x))) { try { const a2 = fs.readFileSync(`/proc/${d}/cmdline`, 'utf8').split('\0'); if (a2[0].endsWith('dtach') && a2.includes('-c') && a2.includes(rowT.socket)) return Number(d); } catch { } } return null; })();
-ok('setup: the terminal\'s dtach master is found by its socket', !!masterPid);
-try { process.kill(masterPid, 'SIGTERM'); } catch { }
-if (masterPid) await until(() => { try { fs.statSync(rowT.socket); const r = spawnSync(process.execPath, ['-e', `require('net').createConnection(${JSON.stringify(rowT.socket)}).on('connect',()=>process.exit(0)).on('error',()=>process.exit(1))`], { timeout: 3000 }); return r.status === 1; } catch { return true; } }, 10000);
+// the terminal session dies: its login shell is told `exit` through the session's own socket (a MSG_PUSH — what a person's
+// typed `exit` is) and the session ends with its shell — round 6, the kill law: never a pid found by a scan of /proc
+const told = !!(rowT && rowT.socket) && spawnSync(process.execPath, ['-e', `const LI = require(${JSON.stringify(path.join(REPO, 'src/local-index.js'))}); const s = require('net').createConnection(${JSON.stringify(rowT.socket)}); s.on('connect', () => s.end(LI.dtachPush('exit\\n'), () => process.exit(0))); s.on('error', () => process.exit(1));`], { timeout: 5000 }).status === 0;
+ok('setup: the terminal\'s login shell is told `exit` through its own socket', told);
+if (told) await until(() => { try { fs.statSync(rowT.socket); const r = spawnSync(process.execPath, ['-e', `require('net').createConnection(${JSON.stringify(rowT.socket)}).on('connect',()=>process.exit(0)).on('error',()=>process.exit(1))`], { timeout: 3000 }); return r.status === 1; } catch { return true; } }, 10000);
 L = lsJson();
 ok('a session that died while the hub was down reads DEAD (its socket no longer answers)', stateOf(L, TID) === 'dead' && stateOf(L, CID) === 'alive', JSON.stringify(L.sessions && L.sessions.map((s) => [s.name, s.state, s.why])));
 const dead = runCli(['attach', 'hc-term']);
@@ -454,6 +458,78 @@ console.log('§7 round 4 — the follower keys on identity, the baseline before 
     const r = await run;
     ok('A PLACEHOLDER UUID IS NEVER A RECORD\'S ID (round 5): a NEW reply carrying the placeholder a cut one carried is shown as new, never «(updated)» (round 4\'s guard spanned one read)',
       count(r.out, 'FIRST-REPLY HCPH') === 1 && count(r.out, 'SECOND-REPLY HCPH') === 1 && !/\(updated\)/.test(r.out), r.out.slice(-500));
+  }
+  console.log('§9 round 6 — one deadline, the history never before the baseline; each history source its own answer; the horizon');
+  // a buffer on a slow mount that still answers: a FIFO this suite feeds — the follower's first read answered at 1.0 s, its
+  // second at 1.4 s, the reply landing in the transcript the instant before that second read (the r5 verdict's case B)
+  const slowBaseline = async (cli, id) => {
+    const buf = path.join(BUFS7, id + '.buf'), tr = path.join(R4, id + '.jsonl'), sock = path.join(R4, id + '.sock');
+    await master(sock); const hub = await fakeHub(false);
+    index7([row7(id, { socketPath: sock }, { transcript: tr })], hub.address().port);
+    const H0 = said('HISTORY-0 HCR6', { uuid: 'u6-0' }), R1 = said('REPLY-R1 HCR6', { uuid: 'u6-1' });
+    fs.writeFileSync(tr, H0 + '\n'); execFileSync('mkfifo', [buf]);
+    const t0 = Date.now(); let answers = 0;
+    const feeder = setInterval(() => {   // answers a reader waiting on the FIFO (an O_NONBLOCK writer opens only then)
+      const at = Date.now() - t0;
+      if ((answers === 0 && at < 1000) || (answers === 1 && at < 1400)) return;
+      let fd; try { fd = fs.openSync(buf, fs.constants.O_WRONLY | fs.constants.O_NONBLOCK); } catch { return; }
+      if (answers === 1) fs.appendFileSync(tr, R1 + '\n');
+      try { fs.writeSync(fd, H0 + '\n' + (answers ? R1 + '\n' : '')); } catch { }
+      fs.closeSync(fd); answers++;
+    }, 10);
+    const r = await new Promise((resolve) => {
+      const ch = spawn(process.execPath, [cli, 'chat', id, '--wait', '3'], { env: { ...CLI_ENV, HOME: H7 }, stdio: ['pipe', 'pipe', 'pipe'] });
+      kids.push(ch);
+      let out = ''; ch.stdout.on('data', (d) => { out += d; }); ch.stderr.on('data', (d) => { out += d; });
+      ch.stdin.end();
+      const tk = setTimeout(() => { try { ch.kill('SIGKILL'); } catch { } }, 30000);
+      ch.on('exit', () => { clearTimeout(tk); resolve(out); });
+    });
+    clearInterval(feeder); fs.rmSync(buf, { force: true });
+    return { n: count(r, 'REPLY-R1 HCR6'), out: r };
+  };
+  { // §9a THE HISTORY NEVER BEFORE THE BASELINE — and the mutant that reads it at half the clock (round 5's race) is RED
+    const r = await slowBaseline(CLI, 'sess-r6-slow');
+    const MUT = path.join(path.dirname(CLI), 'vibespace-r6-mutant'), src = fs.readFileSync(CLI, 'utf8');
+    const A = 'tail.ready.then((took) => historyOf(';
+    fs.writeFileSync(MUT, src.split(A).join('Promise.race([tail.ready, new Promise((r) => setTimeout(() => r(true), PROBE_MS / 2))]).then((took) => historyOf('));
+    const m = src.split(A).length === 2 ? await slowBaseline(MUT, 'sess-r6-mut') : { n: -1, out: 'the anchor moved: ' + A };
+    fs.rmSync(MUT, { force: true });
+    ok('ONE DEADLINE, THE HISTORY NEVER BEFORE THE BASELINE (round 6): a buffer on a slow mount that still answers (its follower\'s reads answered at 1.0 s and 1.4 s) — the reply that lands in the transcript between is shown ONCE (round 5 read the history at half the clock: 0 times); the same CLI reading at half the clock (the mutant) shows it 0 times',
+      r.n === 1 && m.n === 0, `this CLI ${r.n}× · the mutant ${m.n}× | ${r.out.slice(-300)} | ${m.out.slice(-200)}`);
+  }
+  { // §9b EACH HISTORY SOURCE ITS OWN ANSWER — the transcript does not answer (a FIFO), the buffer answers in 0.4 s (a slow
+    // but healthy mount: a preload in the CLI process holds its tail read): the buffer's history is shown inside the deadline
+    const id = 'sess-r6-src', buf = path.join(BUFS7, id + '.buf'), tr = path.join(R4, id + '.jsonl'), sock = path.join(R4, id + '.sock');
+    await master(sock); const hub = await fakeHub(false);
+    index7([row7(id, { socketPath: sock }, { transcript: tr })], hub.address().port);
+    fs.writeFileSync(buf, said('BUFFER-HISTORY HCR6', { uuid: 'u6-9' }) + '\n'); execFileSync('mkfifo', [tr]);
+    const PRE = path.join(R4, 'slow-tail.cjs');
+    fs.writeFileSync(PRE, `const cp = require('child_process'), o = cp.spawn;\ncp.spawn = function (cmd, args, opts) { if (Array.isArray(args) && args[0] === '-e' && !/_follow/.test(String(args[1])) && String(args[2] || '').includes(${JSON.stringify(buf)})) args = ['-e', 'Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 400);' + args[1], ...args.slice(2)]; return o.call(this, cmd, args, opts); };\n`);
+    const t0 = Date.now(); let first = null;
+    const out = await new Promise((resolve) => {
+      const ch = spawn(process.execPath, ['-r', PRE, CLI, 'chat', id, '--wait', '0'], { env: { ...CLI_ENV, HOME: H7 }, stdio: ['pipe', 'pipe', 'pipe'] });
+      kids.push(ch);
+      let o = ''; ch.stdout.on('data', (d) => { if (first == null) first = Date.now() - t0; o += d; }); ch.stderr.on('data', (d) => { o += d; });
+      ch.stdin.end();
+      const tk = setTimeout(() => { try { ch.kill('SIGKILL'); } catch { } }, 15000);
+      ch.on('exit', () => { clearTimeout(tk); resolve(o); });
+    });
+    fs.rmSync(tr, { force: true });
+    ok('EACH HISTORY SOURCE ITS OWN ANSWER (round 6): a transcript that does not answer no longer eats a slow-but-healthy buffer\'s time — the buffer\'s history (its read 0.4 s) is shown, first line ≤ 2.3 s (round 5 read them in turn: the buffer got a 250 ms floor and was said as «no answer in 2 s»)',
+      /from its buffer/.test(out) && count(out, 'BUFFER-HISTORY HCR6') === 1 && first != null && first <= 2300, `${first} ms | ${out.slice(0, 400)}`);
+  }
+  { // §9c THE HORIZON — data/bin/vibespace gapFilter: what can say the follower is past the history's last
+    const V = require(CLI);
+    const T = said('T main', { uuid: 'h-1' }), U = rec({ type: 'assistant', uuid: 'h-2', message: { role: 'assistant', content: [{ type: 'tool_use', name: 'Bash', input: { command: 'ls' } }] } });
+    const S = said('S subagent', { uuid: 'h-9', parent_tool_use_id: 'toolu_x' }), Sc = said('S sidechain', { uuid: 'h-8', isSidechain: true });
+    const ft = V.gapFilter({ kind: 'transcript', seen: V.seenOf([T, U].join('\n') + '\n') });
+    const seqS = [T, S, Sc, U].map((l) => ft(JSON.parse(l), { raw: l }));
+    const A = said('A', { uuid: 'b-1' }), Cc = said('C', { uuid: 'b-3' }), Ed = copyLine(1);
+    const fb = V.gapFilter({ kind: 'buffer', seen: V.seenOf([A, copyLine(0), Cc].join('\n') + '\n') });
+    const seqU = [[Ed, { updated: true }], [Cc, {}], [said('D', { uuid: 'b-4' }), {}], [Cc, {}]].map(([l, h]) => fb(JSON.parse(l), { raw: l, ...h }));
+    ok('THE HORIZON (round 6): a subagent\'s record (parent_tool_use_id / isSidechain — never in the main transcript) and an edit in place (an OLDER record) never say the follower is past the history: the held record after them is not shown again; a newer one is',
+      seqS.join() === 'false,true,true,false' && seqU.join() === 'true,false,true,true', JSON.stringify({ seqS, seqU }));
   }
   for (const k of kids) { try { if (k.exitCode == null && k.signalCode == null) k.kill('SIGKILL'); } catch { } }   // only this section's own children
   for (const s of servers) { try { s.close(); } catch { } }

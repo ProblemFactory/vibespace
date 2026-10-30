@@ -175,6 +175,9 @@ process.stdin.on('data', (d) => {
     }
   }
 });
+// it ends with its stdin — the wrapper's pipe: the leg SIGKILLs the wrapper, and a stub held by its timer alone outlived
+// every direct run of this suite (lane human-cli r6: 12 orphans under a lane's TMPDIR, where no scratch reaper looks)
+process.stdin.on('end', () => process.exit(0));
 setInterval(() => {}, 1e3);
 `;
   const w = spawn(process.execPath, [path.join(REPO, 'data/bin/codex-chat-wrapper.js'), buf, meta, process.execPath, '-e', STUB], {
