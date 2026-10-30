@@ -179,20 +179,41 @@ const HUB_ANSWERS = ['once', 'always', 'deny'];
 // lane vault-scrub-forms (q-043 verify M1): a RUN card says what the scrubbing does not promise — the owner reads the command
 // lane key-instance-scope: an AUTOMATION card offers the grant's REACH beside its answers — 只有它开的会话 (the default) · 这些岗位的会话
 // (only when the caller is in one: action.groups) · 整个 VibeSpace (red, its title says it reaches the owner's own conversations too);
-// the panel reads the checked choice when an answer is pressed (data-reach never rides the button: the radios are the state)
+// lane needs-card-tail r11 (the r10 acceptance — the attention dock drew a hidden copy of the row, radios of the SAME name, and
+// radios with one name and no form are ONE group: the copy drawn last took the check, so the card showed none and its Allow
+// sent no reach): THE PICK IS THE ITEM'S — kept here, one per item, never read off a copy in the DOM (the panel's answer
+// asks reachPickOf); every drawn copy's group is its OWN (`-<n>`, a sequence) and is drawn from the pick; a press on any copy
+// writes it (pickReach) and every copy on the page follows; the attention dock draws no pick at all (ctx.noPick)
+const REACH_PICKS = new Map(); // item id → the owner's pick ('opened' | 'groups' | 'instance'); an item no longer open is dropped (forgetReachPicks)
+let reachSeq = 0;
+export const reachPickOf = (id) => REACH_PICKS.get(String(id)) || 'opened';
+const drawsPick = (i) => !!(i && i.action && i.action.type === 'automation-ask' && i.action.askId); // the one item that offers a reach
+/** What an answer to `item` carries as its reach: the item's pick when it offers one, else null (nothing to carry). */
+export const reachFor = (item) => (drawsPick(item) ? reachPickOf(item.id) : null);
+export function pickReach(id, value) {
+  if (!REACH_CHOICES.includes(value)) return;
+  REACH_PICKS.set(String(id), value);
+  if (typeof document === 'undefined') return;
+  for (const r of document.querySelectorAll('.ut-ak-reach input[type="radio"]')) if (r.closest('.ut-item')?.dataset.id === String(id)) r.checked = r.value === value;
+}
+export function forgetReachPicks(open) {
+  const keep = (open || []).map((i) => i && String(i.id));
+  for (const id of [...REACH_PICKS.keys()]) if (!keep.includes(id)) REACH_PICKS.delete(id);
+}
 const reachPickHtml = (i, t) => {
   const groups = String(i.action.groups || '').split(' ').filter(Boolean);   // the caller's Task Group ids (space-joined by the engine)
-  const name = `ut-ak-reach-${String(i.id || i.action.askId || '')}`;
+  const name = `ut-ak-reach-${String(i.id || i.action.askId || '')}-${++reachSeq}`; // r11: this copy's own group
+  const picked = reachPickOf(i.id);
   return `<div class="ut-ak-reach" role="radiogroup" aria-label="${escHtml(t('Reach'))}"><span class="ut-ak-reach-lbl">${escHtml(t('Reach'))}</span>`
-    + REACH_CHOICES.filter((r) => r !== 'groups' || groups.length).map((r) => `<label class="ut-ak-reach-opt ut-ak-reach-${r}" title="${escHtml(reachTitle(r, groups.join(', ')))}"><input type="radio" name="${escHtml(name)}" value="${r}"${r === 'opened' ? ' checked' : ''}> ${escHtml(reachWord(r))}</label>`).join('')
+    + REACH_CHOICES.filter((r) => r !== 'groups' || groups.length).map((r) => `<label class="ut-ak-reach-opt ut-ak-reach-${r}" title="${escHtml(reachTitle(r, groups.join(', ')))}"><input type="radio" name="${escHtml(name)}" value="${r}"${r === picked ? ' checked' : ''}> ${escHtml(reachWord(r))}</label>`).join('')
     + '</div>';
 };
-const hubAskHtml = (i, t, detail) => (i && i.action && HELD_ASKS.includes(i.action.type)
+const hubAskHtml = (i, t, detail, noPick = false) => (i && i.action && HELD_ASKS.includes(i.action.type)
   ? runCardOf(i, { t }) ? runFactsHtml(i, t) // r7: the run card's FACTS, worded here (a record without them: its prose, below — unchanged)
   : (factsDroppedWords(i, { t }) ? `<div class="ut-run-cut ut-facts-dropped">${escHtml(factsDroppedWords(i, { t }))}</div>` : '') // r9: facts the store dropped — said above the text
     + `<div class="ut-proposal-plan">${escHtml(detail || '')}</div>`
     + (i.action.type === 'vault-run-ask' ? `<div class="ut-exit-note">${escHtml(t('The output is scrubbed of the secret\'s common spellings; a command that re-encodes it can still show it — read the whole command before you allow it.'))}</div>` : '')
-    + (i.action.type === 'automation-ask' && i.action.askId ? reachPickHtml(i, t) : '')
+    + (drawsPick(i) && !noPick ? reachPickHtml(i, t) : '') // r11: the dock draws no pick (one form per item)
     + (i.action.askId ? `<div class="ut-exit-answer ut-hub-answer">${heldAnswers(i).map((a) => `<button type="button" class="ut-act ut-action-exit ut-exit-${a === 'deny' ? 'deny' : 'allow'} ut-hub-${a}" data-answer="${a}">${escHtml(hubAnswerWord(a, t, i.action.type))}</button>`).join('')}</div>` : '')
   : '');
 
@@ -413,7 +434,7 @@ function partsOf(entry, ctx) {
   // RESOLVED in its band slot keeps it (acceptance round 2: nothing left to open — its door is its way to the conversation)
   const go = notice || entry.band ? `<button type="button" class="ut-go" title="${escHtml(t('Go to this session'))}" aria-label="${escHtml(t('Go to this session'))}" data-label="${escHtml(tc('inbox', 'Chat'))}">${UI_ICONS.chat}</button>` : '';
   const deadline = dline ? deadlineHtml(i, t, dline) : ''; // r7 addendum: the time left, under the question
-  const body = `${go}<div class="ut-text">${card ? escHtml(words) : wordsHtml(words)}</div>${deadline}${askChipsHtml(i, t)}${card ? appCardHtml(i, t, { lang, resolved }) : !resolved ? exitAskHtml(i, t) + hubAskHtml(i, t, detail) + proposalAskHtml(i, t, detail) + appAskHtml(i, t) + grantAskHtml(i, t) + secretAskHtml(i, t, detail) + reconnectHtml(i, t) : ''}${card ? '' : detailFold}${opts}<div class="ut-meta">${meta}</div>`;
+  const body = `${go}<div class="ut-text">${card ? escHtml(words) : wordsHtml(words)}</div>${deadline}${askChipsHtml(i, t)}${card ? appCardHtml(i, t, { lang, resolved }) : !resolved ? exitAskHtml(i, t) + hubAskHtml(i, t, detail, !!ctx.noPick) + proposalAskHtml(i, t, detail) + appAskHtml(i, t) + grantAskHtml(i, t) + secretAskHtml(i, t, detail) + reconnectHtml(i, t) : ''}${card ? '' : detailFold}${opts}<div class="ut-meta">${meta}</div>`;
   // ⤢ = THE For-you window ON this item (design-user-inbox-reply §9: long text at full width, reply / done there)
   // lane foryou-honest (the touch scale): every verb carries its WORD in data-label — a touch screen draws it under the icon
   // (style.css's touch block, ::after — never the button's text, so a title / aria / textContent reader is unchanged)
@@ -432,7 +453,8 @@ function partsOf(entry, ctx) {
       + (closers.includes('dismiss') ? `<button class="ut-act ut-dismiss" title="${escHtml(t('Dismiss (not going to act on this)'))}" data-label="${escHtml(tc('inbox', 'Dismiss'))}">✕</button>` : '')
       + (closers.includes('hide') ? `<button class="ut-act ut-dismiss ut-hide" title="${escHtml(t('Hide — decides nothing; what it points at stays open in the conversation'))}" data-label="${escHtml(t('Hide'))}">✕</button>` : '') + '</span>';
   // the deadline line's words, accent and state move every second (the ticker's) — the signature reads its facts only
-  const sigBody = deadline ? body.replace(deadline, deadline.replace(/>[^<]*<\/div>$/, '></div>').replace(/ ut-deadline-warn| data-state="[^"]*"/g, '')) : body;
+  const sigBody = (deadline ? body.replace(deadline, deadline.replace(/>[^<]*<\/div>$/, '></div>').replace(/ ut-deadline-warn| data-state="[^"]*"/g, '')) : body)
+    .replace(/ name="(ut-ak-reach-[^"]*)-\d+" value="(\w+)"(?: checked)?/g, ' name="$1" value="$2"'); // r11: a copy's own group and the pick are no change of the row (a pick never repaints the radio under the person)
   return { cls, dot, body, actions, deadline: !!deadline, sig: cls + '\u0000' + dot + '\u0000' + sigBody + '\u0000' + actions };
 }
 
@@ -599,7 +621,6 @@ export function patchRow(el, entry, ctx) {
   if (el.dataset.sig !== p.sig) {
     const detailOpen = !!el.querySelector(':scope > .ut-body > .ut-detail-exp[open]');
     const runOpen = !!el.querySelector('.ut-run-fold[open]'); // r7: an open «Technical details» stays open through a repaint
-    const reachPicked = (el.querySelector('.ut-ak-reach input:checked') || {}).value || null;   // lane key-instance-scope: a re-render keeps the owner's pick
     let body = el.querySelector(':scope > .ut-body');
     const box = body && body.querySelector(':scope > .ut-reply');
     // an open row keeps its box; a resolved row keeps it only while in use
@@ -627,7 +648,7 @@ export function patchRow(el, entry, ctx) {
     if (!keepS && !entry.resolved && isSecretAsk(entry.item)) body.append(secretBoxEl(entry.item));
     if (detailOpen) { const d = body.querySelector(':scope > .ut-detail-exp'); if (d) d.open = true; }
     if (runOpen) { const d = body.querySelector('.ut-run-fold'); if (d) d.open = true; }
-    if (reachPicked) { const r = body.querySelector(`.ut-ak-reach input[value="${reachPicked}"]`); if (r) r.checked = true; }
+    // (lane key-instance-scope: a re-render keeps the owner's pick — r11: drawn from the item's pick, reachPickOf, never re-read off this copy)
     el.dataset.sig = p.sig;
   }
   if (p.deadline) armDeadlines();

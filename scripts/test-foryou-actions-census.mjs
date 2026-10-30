@@ -169,21 +169,34 @@ console.log('⑤b THE ATTENTION DOCK\'s actions — every chat row stands in the
 
 // ── ⑤c ────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 // lane needs-card-tail r10 ADDENDUM (the owner 2026-10-30: «有权限申请的时候窗口应该触发闪烁和 inbox 附近的弹窗»): a NEW item that waits
-// for the owner announces itself (the window flashes, a card at the For-you button). Its rows: every registry row whose item is a
-// need announces (a vault run, an exit / hub-act ask, a grant, a question …); a notice, a cleared item, a muted band never; and
-// the card's clock follows the item's own deadline (expiresAt) — «N s left», «N min left», «expired» (late, never gone).
-console.log('⑤c THE ANNOUNCE\'s rows — every need announces itself, a notice / a cleared item / a muted band never; the card\'s clock is the item\'s deadline');
+// for the owner announces itself (the window flashes, a card at the For-you button). r11 (the r10 acceptance — r10's own rule
+// here, «every need announces», let bands 3–5 announce: Dropline's band-5 dictionary reminder, a plain question, a vault-rotate
+// suggestion — past the owner's toast budget): ONE attention policy — the announce is the band 1–2 arrival's toast, grown; the
+// registry keeps no rule of its own (no announceWorthy) and only words the card; WHICH arrival announces is attention-model's
+// toastWorthy. Its rows: the acceptance's shapes by band; every registry row ⇔ its band; the card's clock = the item's deadline.
+console.log('⑤c THE ANNOUNCE\'s rows — ONE policy (toastWorthy: bands 1–2, the owner\'s switches); bands 3–5 move a number only; the card\'s clock is the item\'s deadline');
 {
-  const has = typeof FA.announceWorthy === 'function' && typeof FA.announceWords === 'function';
-  ok(has, 'PURE announceWorthy + announceWords exist (src/foryou-actions.js — the arrival announce\'s rows)');
+  const AM = require(path.join(ROOT, 'src/attention-model.js'));
+  const has = typeof FA.announceWords === 'function';
+  ok(has && !('announceWorthy' in FA), 'RED-able (r11 — 7ec6c6dcf exports announceWorthy, «a need, never a notice»): the registry WORDS the announce (announceWords) and keeps no rule of its own — which arrival announces is the attention model\'s', Object.keys(FA).filter((k) => /announce/.test(k)));
   if (has) {
+    const NOW = Date.now(), ann = (i, policy = null) => AM.toastWorthy(AM.rowOf(i, NOW), policy), band = (i) => AM.rowOf(i, NOW).band;
+    const base = { status: 'open', kind: 'action', createdAt: NOW, sessionKey: 'claude:c0ffee' }, waitType = FA.WAIT_ACTIONS[0];
+    // the acceptance's shapes (repro/accept-r10/announce-bands.cjs) — and a date inside the 48 h window, an agent's call held on the owner
+    const shapes = [
+      ['Dropline\'s dictionary reminder (a plugin\'s, urgency low — lane voice-dictionary-nag: «no badge, no toast»)', { ...base, id: 'p1', origin: 'plugin', plugin: 'voice-input', urgency: 'low', text: 'Dropline suggests adding to your dictionary: CLAUDE.md', sessionKey: 'voice' }, 5, false],
+      ['an agent\'s plain question', { ...base, id: 'q1', origin: 'agent', text: 'which one?' }, 5, false],
+      ['a vault-rotate suggestion', { ...base, id: 'v1', origin: 'vault', text: 'rotate', action: { type: 'vault-rotate', entry: 'x' } }, 4, false],
+      ['a date inside 48 h', { ...base, id: 'd1', origin: 'agent', text: 'renew it', due: NOW + 3600e3 }, 3, false],
+      ['a permission ask (an exit run, urgent)', { ...base, id: 'e1', origin: 'machines', urgency: 'urgent', text: 'run', action: { type: 'exit-run-ask', askId: 'a' } }, 1, true],
+      [`an agent's call held on the owner (${waitType})`, { ...base, id: 'w1', origin: 'agent', text: 'held', action: { type: waitType, askId: 'b' } }, 2, true],
+    ];
+    for (const [what, it, b, want] of shapes) ok(band(it) === b && ann(it) === want, `${what}: band ${band(it)} ⇒ ${want ? 'ANNOUNCES (the toast, grown)' : 'moves a number only — no card, no flash, no pulse (7ec6c6dcf announced it: its panel asked its own rule first — the RED is test-user-todos-layout ㉘, the REAL arrival path)'}`, { band: band(it), toastWorthy: ann(it) });
+    ok(!ann(shapes[4][1], { off: [1] }) && !ann(shapes[5][1], { off: [2] }), 'a band the owner switched off announces nothing (its rows fall to band 5\'s order — decision 4)');
     const items = FA.ROWS.map((r, k) => ({ id: 'ut-a' + String(k).padStart(9, '0'), status: 'open', kind: 'action', origin: 'agent', text: r.type, createdAt: k + 1, sessionKey: 'claude:c0ffee', action: { type: r.type } }));
-    const needs = items.filter((i) => FA.needOf(i)), silent = items.filter((i) => !FA.needOf(i));
-    const bad = needs.filter((i) => !FA.announceWorthy(i)).map((i) => i.action.type);
-    ok(needs.length >= 20 && !bad.length, `every row whose item is a need announces itself (${needs.length} rows — ${needs.filter((i) => FA.ROW_OF?.[i.action.type]?.waits).length} of them hold an agent's call)`, bad);
-    ok(silent.every((i) => !FA.announceWorthy(i)), `…and a row that is no need never does (${silent.length}: ${silent.map((i) => i.action.type).join(', ') || 'none'})`);
-    const one = needs[0];
-    ok(!FA.announceWorthy({ ...one, kind: 'notice' }) && !FA.announceWorthy({ ...one, clearedAt: 5 }) && !FA.announceWorthy({ ...one, status: 'done' }) && !FA.announceWorthy(one, { muted: true }) && !FA.announceWorthy(null), 'never: a notice, a cleared item, one already answered, a band the owner switched off or 搁置 (muted), nothing');
+    const off = items.filter((i) => ann(i) !== [1, 2].includes(band(i)));
+    ok(items.length >= 20 && !off.length, `over every registry row (${items.length}): an arrival announces ⇔ its band is 1 or 2 (${items.filter((i) => ann(i)).length} rows do — an agent's call held on the owner) — the band decides, never the row`, off.map((i) => i.action.type));
+    const one = items.find((i) => FA.needOf(i));
     const T0 = 1_800_000_000_000, W2 = (o, now) => FA.announceWords({ ...one, ...o }, { who: 'ops', what: 'run python3', now });
     const a = W2({ expiresAt: T0 + 42e3 }, T0), b = W2({ expiresAt: T0 + 5 * 60e3 }, T0), c = W2({ expiresAt: T0 - 1 }, T0), d = W2({ status: 'done', resolvedBy: 'ask-expired' }, T0), e = W2({}, T0);
     ok(a.clock === '42 s left' && a.left === 42 && !a.expired && b.clock === '5 min left' && c.expired && c.clock === 'expired' && d.expired && d.clock === 'expired' && e.clock === '' && e.left === null && a.who === 'ops' && a.what === 'run python3',

@@ -64,7 +64,8 @@
  *   filingIndex(item, readPage, o) → the index of the record that filed it ABOVE a loaded window (the landing's read upward)
  *   dockWords(needs, t)          → {text, title, n} | null — «waiting for you · an approval» / «· 3 approvals» / «· 3»
  *   dockOf(waiting, t)           → {n, newest, words} | null — THE ATTENTION DOCK's model (lane needs-card-tail r10)
- *   announceWorthy(item, {muted}) → does a NEW item announce itself (a need, never a notice) — r10's addendum
+ *   newestFirst(a, b)            → the later filing first, a same-ms tie by the item's id (the dock's newest, the announce's
+ *                                  stack — lane needs-card-tail r11); WHICH arrival announces is the attention model's toastWorthy
  *   announceWords(item, o)       → {who, what, left, expired, clock} — its card's words and its clock
  *   settledWords(item, t)        → «approved» / «denied» / «saved to the vault» / «done» … (the quiet line's verb)
  *   surfaceOf(type | item)       → {at: 'card' | 'window' | 'owner' | 'notice', kind, on} — where it IS shown and answered
@@ -207,6 +208,10 @@ const keySet = (keys) => new Set((Array.isArray(keys) ? keys : [keys]).filter((k
 /** Is `item` THIS conversation's — produced by it (its sessionKey) or addressing it (`about`)? */
 const isTheirs = (item, set) => !!item && (set.has(item.sessionKey) || (typeof item.about === 'string' && set.has(item.about)));
 const byCreated = (a, b) => (Number(a.item.createdAt) || 0) - (Number(b.item.createdAt) || 0);
+/** NEWEST FIRST, deterministic (lane needs-card-tail r11 — the r10 heavy: a parallel batch files several asks in ONE ms, and
+ *  «the newest» was whichever the list held first, so the dock and the announce's stack could each pick a different twin): the
+ *  later filing first; a tie by the item's id, ascending — the tray's own tie (src/attention-model.js byNewest). Over items. */
+const newestFirst = (a, b) => ((Number(b && b.createdAt) || 0) - (Number(a && a.createdAt) || 0)) || String(a && a.id).localeCompare(String(b && b.id));
 function cardsWhere(items, keys, open) {
   const set = keySet(keys);
   if (!set.size || !Array.isArray(items)) return [];
@@ -294,7 +299,7 @@ function flowPlan(open, transcript, { rendered = () => true, atEnd = true, known
     if (el != null) at.set(e.item.id, el);
     else loose.push(e);
   }
-  return { at, waiting: [...list].reverse().sort((a, b) => byCreated(b, a)), loose: loose.map((e) => e.item.id) };
+  return { at, waiting: [...list].sort((a, b) => newestFirst(a.item, b.item)), loose: loose.map((e) => e.item.id) }; // r11: a same-ms tie by id
 }
 
 /** A card's anchor that is LOADED but drawn as nothing (a hidden unknown-record notice — chat-view keeps the record and
@@ -397,20 +402,15 @@ function dockWords(needs, t = fmt) {
 function dockOf(waiting, t = fmt) {
   const list = Array.isArray(waiting) ? waiting.filter((e) => e && e.item) : [];
   if (!list.length) return null;
-  const newest = list.reduce((a, e) => (!a || byCreated(e, a) > 0 ? e : a), null);
+  const newest = list.reduce((a, e) => (!a || newestFirst(e.item, a.item) < 0 ? e : a), null); // r11: a same-ms tie by id — never the list's order
   return { n: list.length, newest: newest.item, kind: kindOf(newest), words: dockWords(list, t), more: list.length - 1 };
 }
 
-/** THE ANNOUNCE (lane needs-card-tail r10 addendum — the owner 2026-10-30 11:5x PDT: «有权限申请的时候窗口应该触发闪烁和 inbox 附近的
- *  弹窗，有时候我都没发现有个后台任务才申请权限»): does a NEW open item announce itself — the asking window flashes, a card at the
- *  For-you button? Only one that WAITS FOR THE OWNER: a need of this registry (needOf — an ask, an approval, a vault run, a
- *  hub act, a question; never a notice, never a cleared item) — and never one the owner silenced (`muted`: its attention band
- *  switched off, or 搁置 — src/attention-model.js's verdict, the caller's). */
-function announceWorthy(item, { muted = false } = {}) {
-  return !!item && item.status === 'open' && !muted && !!needOf(item);
-}
-
-/** …and its card's words: WHO asks (the conversation's name — the caller's nameFor), WHAT (the item's words — wordsOf), and the
+/** THE ANNOUNCE's words (lane needs-card-tail r10 addendum — the owner 2026-10-30 11:5x PDT: «有权限申请的时候窗口应该触发闪烁和
+ *  inbox 附近的弹窗，有时候我都没发现有个后台任务才申请权限»). WHICH arrival announces is not this registry's to say (r11 — the r10
+ *  acceptance: r10's own rule here, «a need, never a notice», let bands 3–5 announce — Dropline's band-5 dictionary reminder, a
+ *  plain question, a vault-rotate suggestion — past the owner's toast budget): ONE attention policy, src/attention-model.js
+ *  toastWorthy — the band 1–2 arrival's toast, grown. Its card's words: WHO asks (the conversation's name — the caller's nameFor), WHAT (the item's words — wordsOf), and the
  *  CLOCK when the item carries a deadline (`expiresAt` — a held ask's: an exit run, a vault run, an automation ask): «42 s left»
  *  while it runs, «expired» once past it or resolved as expired (the card stays a while as a late card, never vanishing like
  *  one answered). → {who, what, left: seconds | null, expired, clock} */
@@ -922,4 +922,4 @@ function filedLine(x, id, tray = null) {
   return fmt(FILED[s.at], { what: fmt(ONE[KINDS.includes(s.kind) ? s.kind : 'check']), tray: where, on: s.on || 'its own card in this conversation' }) + (id ? ` (${id})` : '');
 }
 
-module.exports = { ROWS, ROW_OF, ANSWERS, CARDS, ACTION_IDENTITY, WAIT_ACTIONS, CARD_ACTION_TYPES, ANSWER_ACTION_TYPES, KINDS, KIND_WORDS: ONE, SURFACES, BY_TYPE, BY_ORIGIN, IDENTITY_FIELDS, SKEW_MS, FILED_WINDOW_MS, needOf, needsOf, recordsOf, placementOf, flowPlan, drawnAt, filingIndex, dockWords, dockOf, announceWorthy, announceWords, settledWords, surfaceOf, FILED, filedLine, PERSON_DECIDES, DECISION_ROWS, DECISION_ENDS, endsOf, STAMPS, isDecisionRow, offersClosers, CLOSERS, HIDDEN_BY, POINTER_ROWS, isPointer, isHidden, closersOf, expiryWords, VIEWERS, VIEWER_ROLE, canDecide, clockWords, decidedStamp, decisionCard, grantLifeOf, grantWords, verbsOf, runCardOf, factsDroppedWords, FACTS_DROPPED_WORDS, RUN_ALWAYS_WHY, RUN_WHY_AGAIN, RUN_HOSTS_WHY, RUN_MASKING, RUN_SHAPE, RUN_CMD_BODY_MAX, RUN_CMD_MAX, deadlineOf, DEADLINE_WORDS, DEADLINE_LIVE_MS, DEADLINE_WARN_MS, OUTCOME_ENDS, endOf, ruledOf };
+module.exports = { ROWS, ROW_OF, ANSWERS, CARDS, ACTION_IDENTITY, WAIT_ACTIONS, CARD_ACTION_TYPES, ANSWER_ACTION_TYPES, KINDS, KIND_WORDS: ONE, SURFACES, BY_TYPE, BY_ORIGIN, IDENTITY_FIELDS, SKEW_MS, FILED_WINDOW_MS, needOf, needsOf, recordsOf, placementOf, flowPlan, drawnAt, filingIndex, dockWords, dockOf, newestFirst, announceWords, settledWords, surfaceOf, FILED, filedLine, PERSON_DECIDES, DECISION_ROWS, DECISION_ENDS, endsOf, STAMPS, isDecisionRow, offersClosers, CLOSERS, HIDDEN_BY, POINTER_ROWS, isPointer, isHidden, closersOf, expiryWords, VIEWERS, VIEWER_ROLE, canDecide, clockWords, decidedStamp, decisionCard, grantLifeOf, grantWords, verbsOf, runCardOf, factsDroppedWords, FACTS_DROPPED_WORDS, RUN_ALWAYS_WHY, RUN_WHY_AGAIN, RUN_HOSTS_WHY, RUN_MASKING, RUN_SHAPE, RUN_CMD_BODY_MAX, RUN_CMD_MAX, deadlineOf, DEADLINE_WORDS, DEADLINE_LIVE_MS, DEADLINE_WARN_MS, OUTCOME_ENDS, endOf, ruledOf };

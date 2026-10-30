@@ -676,7 +676,11 @@
 .cad-head { display: inline-flex; align-items: center; gap: 6px; flex: none; min-height: 26px; color: var(--yellow); font-weight: 600; white-space: nowrap; }
 /* r10 addendum: while an item the announce flashed this window for is UNSEEN (user-todos-panel.js `window-announce`, cleared with
    the waiting blink), the count wears the attention fill */
-.window-announce .chat-attn-dock .cad-count { padding: 0 8px; border-radius: 999px; background: var(--yellow); color: var(--bg-window); }
+.window-announce .chat-attn-dock .cad-count, .chat-attn-dock.cad-mark .cad-count { padding: 0 8px; border-radius: 999px; background: var(--yellow); color: var(--bg-window); }
+/* r11: a landing that ended at the live end for an open card drawn nowhere MARKS the strip (chat-needs-card.js _dockMark) —
+   the ask flash, once, on the strip; its count in the fill while it runs */
+.chat-attn-dock.cad-mark { animation: chat-ask-flash-anim 1.6s ease-out; }
+@media (prefers-reduced-motion: reduce) { .chat-attn-dock.cad-mark { animation: none; outline: 2px solid var(--yellow); outline-offset: -2px; } }
 .cad-icon svg { width: 14px; height: 14px; display: block; }
 .cad-rows { flex: 1 1 0; min-width: 0; }
 .cad-all { flex: none; min-height: 26px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text); font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }

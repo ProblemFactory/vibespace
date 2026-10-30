@@ -2417,9 +2417,9 @@ html { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--text) 18
 #mobile-nav-todos svg { width: 18px; height: 18px; }
 #mobile-nav-todos.ut-blink { animation: ut-blink 0.9s ease 2; }
 /* THE ANNOUNCE (lane needs-card-tail r10 addendum — the owner 2026-10-30: «有权限申请的时候窗口应该触发闪烁和 inbox 附近的弹窗»): ONE stack
-   of cards at the For-you button (user-todos-panel.js annCard — a createPopover, placed above the taskbar's button / under the
+   of cards at the For-you button (user-todos-panel.js annCard — r11: a transient toast, NO popover; fixed above the taskbar's button / under the
    phone's top bar): who asks · what · its clock; one press opens it, ✕ lets it go; the newest three + «N more waiting». */
-.ut-announce { display: flex; flex-direction: column; gap: 6px; width: min(380px, calc(100vw - 16px)); }
+.ut-announce { position: fixed; z-index: 99999; display: flex; flex-direction: column; gap: 6px; width: min(380px, calc(100vw - 16px)); }
 .uta-card { display: flex; align-items: stretch; background: var(--bg-dialog); color: var(--text); border: 1px solid var(--border); border-left: 3px solid var(--yellow); border-radius: var(--radius); box-shadow: 0 4px 16px color-mix(in srgb, var(--bg-window) 70%, transparent); }
 .uta-card[hidden], .uta-more[hidden], .uta-clock[hidden] { display: none; }
 .uta-go { flex: 1 1 auto; min-width: 0; display: flex; align-items: flex-start; gap: 8px; padding: 8px 4px 8px 10px; border: none; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }

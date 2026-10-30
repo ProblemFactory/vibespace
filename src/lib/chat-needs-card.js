@@ -157,6 +157,7 @@ export class NeedsCards {
     try { this._ctl?.abort(); } catch { }
     try { this._mo?.disconnect(); } catch { }
     try { this._dockRO?.disconnect(); } catch { }
+    clearTimeout(this._dockMarkT); // r11: the dock's mark
     this._mo = null;
   }
 
@@ -450,7 +451,7 @@ export class NeedsCards {
     if (count.title !== (words ? words.title : '')) count.title = words ? words.title : '';
     all.hidden = !(d && d.n > 1);
     if (d && d.n > 1) { const w = t('View all · {n}', { n: d.n }); if (all.textContent !== w) all.textContent = w; }
-    this.app.foryouRows?.reconcile(rows, [entry]);
+    this.app.foryouRows?.reconcileDock(rows, [entry]); // r11: THE renderer with the summary + the plain buttons — never a pick (a form exists once per item: the pick is the item's)
     const row = rows.querySelector(':scope > .ut-item'), q = row?.querySelector(':scope > .ut-body > .ut-text');
     if (row) row._item = entry.item;
     // the question is the door to its card (a navigation the owner asked for) — a button for the keyboard too
@@ -830,7 +831,10 @@ export class NeedsCards {
     //   (the live end loaded first); an open card with no record is SAID there (r10 — the flow is history: r1–r9 docked it at
     //   the end; it waits in the attention dock and in For you, never in the transcript)
     const tail = () => here();
-    const atEndSaid = () => { if (isCard && idx === -1) showToast(t('Asked before this conversation\'s record was kept — there is no card for it in the chat; answer it in the strip above the message box or in For you'), { type: 'info' }); return 'end'; };
+    // r11 (the r10 acceptance — a read that came back unknown landed at the live end SILENTLY; r6 docked and flashed the card
+    // there): an open card that ends at the live end with no card drawn MARKS THE DOCK, where it waits (_dockMark: the strip
+    // flashes once, its count in the attention fill) — never silent; one filed before the record was kept is also SAID
+    const atEndSaid = () => { if (isCard) this._dockMark(); if (isCard && idx === -1) showToast(t('Asked before this conversation\'s record was kept — there is no card for it in the chat; answer it in the strip above the message box or in For you'), { type: 'info' }); return 'end'; };
     let tried = false;
     if (view._teleported || view._windowEnd < view._total) {
       let landed = null;
@@ -844,6 +848,17 @@ export class NeedsCards {
     if (missed) return said();
     view._scrollToBottom?.();
     return atEndSaid();
+  }
+
+  /** THE DOCK MARKED (lane needs-card-tail r11): a landing that ends at the live end for an open card it could draw nowhere says
+   *  where the card waits — the attention dock flashes once and its count wears the attention fill while it does (the product's
+   *  ask flash, the strip's own). → whether a dock was there to mark */
+  _dockMark() {
+    const dock = this.view._attnDock;
+    if (!dock || dock.hidden || !dock.isConnected) return false;
+    dock.classList.remove('cad-mark'); void dock.offsetWidth; dock.classList.add('cad-mark');
+    clearTimeout(this._dockMarkT); this._dockMarkT = setTimeout(() => dock.classList.remove('cad-mark'), 1800);
+    return true;
   }
 
   /** Land `el` whole (fit) and flash it once — the product's attention flash (S1's jump); a card first takes the open slot. */

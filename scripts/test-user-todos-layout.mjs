@@ -1730,22 +1730,72 @@ console.log('㉖ THE ATTENTION DOCK (lane needs-card-tail r10) — a layout of t
   // the wiring: the strip's row is THE row (renderRow / patchRow through the panel's reconcile) and its verbs THE panel's
   const CARD = fs.readFileSync(path.join(ROOT, 'src/lib/chat-needs-card.js'), 'utf8'), P = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-panel.js'), 'utf8');
   const dp = CARD.slice(CARD.indexOf('  _dockPass(waiting) {'), CARD.indexOf('  /** The card of item `id` in this list'));
-  ok(/const d = dockOf\(list, t\);/.test(dp) && /this\.app\.foryouRows\?\.reconcile\(rows, \[entry\]\);/.test(dp) && /reconcile: \(container, entries\) => reconcileRows\(container, entries, null, miniCtx, \{ arm: false \}\),/.test(P), 'wiring: the strip lays its row out through PURE dockOf and draws it through THE row renderer (the panel\'s reconcileRows, the mini inbox\'s context)');
+  ok(/const d = dockOf\(list, t\);/.test(dp) && /this\.app\.foryouRows\?\.reconcileDock\(rows, \[entry\]\);/.test(dp) && /reconcileDock: \(container, entries\) => reconcileRows\(container, entries, null, dockCtx, \{ arm: false \}\),/.test(P) && /const dockCtx = \{ \.\.\.miniCtx, noPick: true \};/.test(P), 'wiring (r11: reconcileDock — the mini inbox\'s context with no pick): the strip lays its row out through PURE dockOf and draws it through THE row renderer (the panel\'s reconcileRows, the mini inbox\'s context)');
   ok(/this\.app\.foryouRows\.wire\(dock, \{ close: \(\) => \{\} \}\);/.test(dp) && /app\.foryouRows = \{\s*wire: wireMiniRows,/.test(P) && !/runAction|setStatus\(|postReply|fetchJson/.test(dp), 'wiring: every verb in the strip is the panel\'s (wireMiniRows → rowClick({mini: true}) — the tray\'s routes); the strip names no answer of its own');
   ok(/this\._dockPass\(plan\.waiting\);/.test(CARD) && /const plan = flowPlan\(open, transcript,/.test(CARD) && /const open = keys \? needsOf\(todos\.open, keys\) : \[\];/.test(CARD), 'wiring: the strip and the cards are ONE pass over ONE list (needsOf over the store\'s snapshot → flowPlan → the cards + _dockPass)');
 }
 
-console.log('㉗ THE ANNOUNCE (lane needs-card-tail r10 addendum) — an arrival that waits for the owner flashes its window (THE waiting blink) and stands as a card at the For-you button; one mechanism, one door');
+console.log('㉗ THE ANNOUNCE (lane needs-card-tail r10 addendum; r11) — the band 1–2 arrival\'s toast, grown: its window flashes (THE waiting blink, with reasons) and a card stands at the For-you button (no popover); one mechanism, one door');
 {
   const P = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-panel.js'), 'utf8'), ST = fs.readFileSync(path.join(ROOT, 'public/style.css'), 'utf8'), CC = fs.readFileSync(path.join(ROOT, 'public/chat.css'), 'utf8');
+  const CV = fs.readFileSync(path.join(ROOT, 'src/lib/chat-view.js'), 'utf8'), UT = fs.readFileSync(path.join(ROOT, 'src/lib/utils.js'), 'utf8');
   const ap = P.slice(P.indexOf('  const apply = (next) => {'), P.indexOf('  // THE MODEL\'S THREE BROADCASTS'));
   const an = P.slice(P.indexOf('  // ── THE ANNOUNCE (lane needs-card-tail r10 addendum'), P.indexOf('  const apply = (next) => {'));
-  ok(an.length > 2000 && /if \(announceWorthy\(i, \{ muted: !row \|\| row\.band === PARKED \|\| policyOf\(attnPolicy\(\)\)\.off\.has\(row\.band\) \}\)\) \{ announce\(i\); continue; \}/.test(ap) && ap.indexOf('announceWorthy(') < ap.indexOf('toastWorthy(') && /if \(prevKnown\.has\(i\.id\)\) continue;/.test(ap), 'the arrival path decides it (THE knownIds — a reload announces nothing old): a need (PURE announceWorthy, the owner\'s band switches and 搁置 respected) announces; every other arrival keeps the toast rule as it was');
-  ok(/w\.element\.classList\.add\('window-waiting', 'window-announce'\);/.test(an) && /w\._notifyChanged\?\.\(\);/.test(an) && !/blink-fade|setInterval\([^)]*window-waiting/.test(an), 'the flash is THE existing waiting blink (`window-waiting` + _notifyChanged: the title bar, the taskbar button, a tab\'s, a hidden desktop\'s) — never a second mechanism');
-  ok(/new MutationObserver\(\(\) => \{ if \(!w\.element\.classList\.contains\('window-waiting'\)\) annSeen\(w\); \}\);/.test(an) && /if \(answered && w\._annOwns && w\.element\.classList\.contains\('window-waiting'\)\)/.test(an), 'SEEN = the blink\'s own clear (the window touched / focused) or every item answered — and an answer clears only the blink the announce set (a turn\'s stays)');
-  ok(/annStack = createPopover\(a \|\| document\.body, 'ut-announce',/.test(an) && /annStack\._closeCtl\?\.abort\(\);/.test(an) && /if \(annCards\.has\(it\.id\)\) return; \/\/ one card per item/.test(an) && /jump\(live\.sessionKey, live\)/.test(an) && !/innerHTML = (?!UI_ICONS\.)/.test(an), 'the card: ONE createPopover stack at the For-you button (Esc closes it; no outside-press closer), one card per item, its press THE door (model.jump on the LIVE record), no peer string through innerHTML');
-  ok(/annRefresh\(\); \/\/ the announce's cards and flashes follow the store/.test(ap) && /if \(!it \|\| \(it\.status !== 'open' && !late\)\) \{ annDrop\(id\); continue; \}/.test(an), 'every snapshot re-reads the cards: answered anywhere ⇒ gone; expired ⇒ said and kept a while (a late card)');
-  ok(/\.window-announce \.chat-attn-dock \.cad-count \{[^}]*background: var\(--yellow\);/.test(CC) && /\.ut-announce \{/.test(ST) && /\n  \.ut-announce :is\(button, \[role="button"\]\),\n/.test(ST) && !/\.uta-[\w-]+[^{]*\{[^}]*(#[0-9a-fA-F]{3,8}\b|rgba?\()/.test(ST), 'the strip\'s count wears the attention fill while an item is unseen; the stack\'s rules use theme vars only and JOIN the touch scale (44 px targets)');
+  const gate = ap.indexOf('if (!toastWorthy(attentionRow(i, now), attnPolicy())) continue;'), toast = ap.indexOf("const el = showToast(`${head} · ${nameFor(i.sessionKey, [i])}: ${wordsOf(i)}`, { history: { m: head, ref: { kind: 'todo', id: i.id } } });"), call = ap.indexOf('announce(i); // lane needs-card-tail r11');
+  ok(an.length > 2000 && gate > 0 && toast > gate && call > toast && ap.split('announce(').length === 2 && !/announceWorthy|row\.band === PARKED|policyOf/.test(P) && /if \(prevKnown\.has\(i\.id\)\) continue;/.test(ap), 'RED-able (r11 — 7ec6c6dcf ran its own rule BEFORE the gate and `continue`d past the toast): ONE attention policy — the announce rides the toast rule\'s own gate (toastWorthy(attentionRow, attnPolicy())), AFTER the toast (its words, its history entry, its tap — unchanged); no rule of its own, no dead 搁置 check');
+  ok(/w\.element\.classList\.add\('window-waiting', 'window-announce'\);/.test(an) && /w\._notifyChanged\?\.\(\);/.test(an) && !/blink-fade|setInterval\([^)]*window-waiting/.test(an), 'the flash is THE existing waiting blink (`window-waiting` + _notifyChanged: the title bar, the taskbar button, a tab group\'s tab, a hidden desktop\'s tab) — never a second mechanism');
+  ok(/w\._waitWhy\.add\('ask'\);/.test(an) && /why\?\.delete\('ask'\);\n\s+if \(!why\?\.size && w\.element\.classList\.contains\('window-waiting'\)\)/.test(an) && /if \(!answered\) why\?\.clear\(\);/.test(an) && /\(this\.winInfo\._waitWhy \|\| \(this\.winInfo\._waitWhy = new Set\(\)\)\)\.add\('turn'\);/.test(CV) && /_clearWaiting\(\) \{\n\s+this\.winInfo\._waitWhy\?\.clear\(\);/.test(CV) && !/_annOwns/.test(P), 'RED-able (r11 — 7ec6c6dcf decided once whose blink it was): THE BLINK HAS REASONS — the announce adds \'ask\', a turn\'s end \'turn\'; an answer elsewhere drops \'ask\' only and the blink ends only when no reason is left; seeing the window acknowledges them all');
+  ok(/annStack = mk\('div', 'ut-announce'\);\n\s+document\.body\.append\(annStack\);/.test(an) && !/createPopover\(|dataset\.popover|data-popover="/.test(an) && /\.ut-announce \{ position: fixed; z-index: 99999;/.test(ST) && /\[data-popover\], \.chat-input-area, \.ut-announce'\)\) \{/.test(UT) && /if \(annCards\.has\(it\.id\)\) return; \/\/ one card per item/.test(an) && /jump\(live\.sessionKey, live\)/.test(an) && !/innerHTML = (?!UI_ICONS\.)/.test(an), 'RED-able (r11 — 7ec6c6dcf\'s stack was a createPopover: it took the first Esc, the phone\'s back press, the autohide taskbar): the card stack is a transient toast — no [data-popover]; the global toasts stand clear of it (_toastAvoid); one card per item, its press THE door (model.jump on the LIVE record), no peer string through innerHTML');
+  ok(/annRefresh\(\); \/\/ the announce's cards and flashes follow the store/.test(ap) && /if \(!it \|\| \(it\.status !== 'open' && !late\) \|\| \(it\.status === 'open' && !annInPolicy\(it, now\)\)\) \{ annDrop\(id\); continue; \}/.test(an) && /const annInPolicy = \(it, now\) => toastWorthy\(attentionRow\(it, now\), attnPolicy\(\)\);/.test(an) && /todos\.open\.some\(\(i\) => i\.id === id && annInPolicy\(i, now\)\)/.test(an), 'every snapshot re-reads the cards: answered anywhere ⇒ gone; no longer inside the policy (a band switched off since) ⇒ gone, its flash with it; expired ⇒ said and kept a while (a late card)');
+  ok(/const order = \[\.\.\.annCards\.values\(\)\]\.sort\(\(x, y\) => newestFirst\(x\.key, y\.key\)\);/.test(an) && /const ANN_MS = 20000, ANN_SHOWN = 3;/.test(an) && /order\.forEach\(\(c, k\) => \{ c\.el\.hidden = k >= ANN_SHOWN; \}\);/.test(an), 'RED-able (r11 — 7ec6c6dcf ordered a same-ms tie by when the card was made): the stack shows the newest ANN_SHOWN (3) by newestFirst — a tie by id, the dock\'s order — and folds the rest into ONE «N more waiting»: a resync\'s burst is one stack, never a storm');
+  ok(/\.window-announce \.chat-attn-dock \.cad-count, \.chat-attn-dock\.cad-mark \.cad-count \{[^}]*background: var\(--yellow\);/.test(CC) && /\n  \.ut-announce :is\(button, \[role="button"\]\),\n/.test(ST) && !/\.uta-[\w-]+[^{]*\{[^}]*(#[0-9a-fA-F]{3,8}\b|rgba?\()/.test(ST), 'the strip\'s count wears the attention fill while an item is unseen (and while a landing marks it — r11); the stack\'s rules use theme vars only and JOIN the touch scale (44 px targets)');
+}
+
+console.log('㉘ THE ANNOUNCE IS THE TOAST, GROWN (lane needs-card-tail r11 — the r10 acceptance) — the REAL arrival path (the panel\'s apply, run over stubs; the attention model real): ONE policy');
+{
+  const P = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-panel.js'), 'utf8');
+  const require = (await import('node:module')).createRequire(import.meta.url);
+  const AM = require(path.join(ROOT, 'src/attention-model.js')), FA2 = require(path.join(ROOT, 'src/foryou-actions.js'));
+  const ap = P.slice(P.indexOf('  const apply = (next) => {'), P.indexOf('  // THE MODEL\'S THREE BROADCASTS'));
+  const fnSrc = ap.slice(ap.indexOf('(next) =>'), ap.lastIndexOf('};') + 1);
+  const calls = { toast: [], announce: [], pulse: 0 };
+  const node = () => ({ dataset: {}, style: {}, classList: { add() {}, remove() {} }, querySelector: () => ({ classList: { add() {} } }) });
+  const S = {
+    knownIds: new Set(), todos: { open: [], resolved: [] }, attnPolicy: () => null, toastWorthy: AM.toastWorthy, attentionRow: AM.rowOf,
+    PARKED: AM.PARKED, policyOf: AM.policyOf, announceWorthy: FA2.announceWorthy, // (7ec6c6dcf's own rule: gone since r11 — its RED copy runs it)
+    trayWhere: () => 'bottom right', trayRect: () => null, t: (k, p) => String(k).replace(/\{(\w+)\}/g, (_, x) => (p && p[x] != null ? p[x] : '')),
+    showToast: (m, o) => { calls.toast.push({ m, o }); return node(); }, nameFor: () => 'ops', wordsOf: (i) => i.text, jump() {},
+    byId: (id) => [...S.todos.open, ...S.todos.resolved].find((i) => i.id === id),
+    btn: { classList: { remove() {}, add: () => { calls.pulse++; } } }, announce: (i) => { calls.announce.push(i.id); },
+    renderBtn() {}, renderPanel() {}, renderMini() {}, scheduleBadges() {}, renderHome() {}, annRefresh() {}, forgetReachPicks() {},
+    document: { querySelectorAll: () => [] }, window: { innerWidth: 1280, innerHeight: 800 },
+  };
+  let apply = null;
+  try { apply = new Function('scope', `with (scope) { return ${fnSrc}; }`)(new Proxy(S, { has: (o, k) => k in o })); } catch (e) { ok(false, 'the panel\'s apply reads as one function', String(e)); }
+  if (apply) {
+    const NOW = Date.now(), base = { status: 'open', kind: 'action', createdAt: NOW, sessionKey: 'claude:c0ffee' };
+    const shapes = [
+      { ...base, id: 'p1', origin: 'plugin', plugin: 'voice-input', urgency: 'low', text: 'Dropline suggests adding to your dictionary: CLAUDE.md', sessionKey: 'voice' },
+      { ...base, id: 'q1', origin: 'agent', text: 'which one?' },
+      { ...base, id: 'v1', origin: 'vault', text: 'rotate', action: { type: 'vault-rotate', entry: 'x' } },
+      { ...base, id: 'd1', origin: 'agent', text: 'renew it', due: NOW + 3600e3 },
+      { ...base, id: 'e1', origin: 'machines', urgency: 'urgent', text: 'run python3', action: { type: 'exit-run-ask', askId: 'a'.repeat(32) } },
+    ];
+    let threw = null;
+    try { apply({ open: shapes, resolved: [] }); } catch (e) { threw = String(e && e.stack || e); }
+    ok(!threw, 'the REAL arrival path runs over the stubs (every name it reads is given)', threw);
+    ok(!threw && !['p1', 'q1', 'v1', 'd1'].some((id) => calls.announce.includes(id)) && !calls.toast.some((x) => /Dropline|which one|rotate|renew/.test(x.m)), `RED-able (r11 — 7ec6c6dcf announced ${['p1', 'q1', 'v1', 'd1'].length}: a card, a flash, a pulse each): Dropline's band-5 dictionary reminder, a plain band-5 question, a band-4 vault-rotate suggestion, a band-3 date — NOT announced, no toast: a number moves (${calls.announce.join(', ') || 'none announced'})`, calls.announce);
+    const t1 = calls.toast.filter((x) => x.o && x.o.history && x.o.history.ref && x.o.history.ref.id === 'e1');
+    ok(!threw && calls.announce.filter((id) => id === 'e1').length === 1 && t1.length === 1 && t1[0].o.history.ref.kind === 'todo' && t1[0].o.history.m === 'Added to For you ({where})'.replace('{where}', 'bottom right') && calls.pulse >= 1, `RED-able (r11 — 7ec6c6dcf: the announce REPLACED the toast — no history entry): a band-1 permission ask (an exit run) ANNOUNCES once and keeps its toast — its history entry {m: the head, ref: {kind: 'todo', id}} written, the button pulsed`, { announce: calls.announce, toasts: calls.toast.map((x) => x.o && x.o.history) });
+    const n0 = calls.announce.length, k0 = calls.toast.length;
+    apply({ open: shapes, resolved: [] });
+    ok(calls.announce.length === n0 && calls.toast.length === k0, 'once: the next snapshot with the same items announces nothing again (THE knownIds)');
+    const burst = Array.from({ length: 20 }, (_, k) => ({ ...base, id: 'u' + String(k).padStart(2, '0'), origin: 'machines', urgency: 'urgent', text: 'ask ' + k, createdAt: NOW + k }));
+    const quiet = Array.from({ length: 20 }, (_, k) => ({ ...base, id: 'n' + String(k).padStart(2, '0'), origin: 'agent', text: 'question ' + k, createdAt: NOW + k }));
+    apply({ open: [...shapes, ...burst, ...quiet], resolved: [] });
+    const got = calls.announce.slice(n0);
+    ok(got.length === 20 && burst.every((i) => got.filter((x) => x === i.id).length === 1) && !quiet.some((i) => got.includes(i.id)), `a RESYNC after a sleep (one snapshot: 20 band-1 asks + 20 plain questions filed meanwhile) ⇒ the 20 inside the policy each announced ONCE into the ONE stack (≤ ${3} shown + «N more» — ㉗, the chrome leg ⑱), the 20 outside it never (${got.length} announced)`, got);
+  }
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

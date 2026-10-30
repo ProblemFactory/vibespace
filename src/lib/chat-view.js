@@ -4795,6 +4795,7 @@ class ChatView {
       // Blink window
       if (!this.winInfo.element.classList.contains('window-active')) {
         this.winInfo.element.classList.add('window-waiting');
+        (this.winInfo._waitWhy || (this.winInfo._waitWhy = new Set())).add('turn'); // the blink's REASON (lane needs-card-tail r11): an ask answered elsewhere never ends a turn's «finished»
         if (this.winInfo._notifyChanged) this.winInfo._notifyChanged();
       }
     }
@@ -6595,6 +6596,7 @@ class ChatView {
   }
 
   _clearWaiting() {
+    this.winInfo._waitWhy?.clear(); // seen: every reason acknowledged (lane needs-card-tail r11 — user-todos-panel.js THE ANNOUNCE)
     if (this.winInfo.element.classList.contains('window-waiting')) {
       this.winInfo.element.classList.remove('window-waiting');
       if (this.winInfo._notifyChanged) this.winInfo._notifyChanged();
