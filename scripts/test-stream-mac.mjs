@@ -24,6 +24,9 @@
 //       round 6 (acceptance r5, §6 ROUND 6): a prebuilt that vanished under the push is refused by name (the tee heard, the stream destroyed on every
 //       way out — no uncaughtException, no fd kept), stream starts in flight together push once (the host claimed before the await; the bound per push),
 //       a hold the Mac still names is never tried against, a stale row names itself, the log promises what the machine does, a non-number `until` is no time
+//       round 7 (acceptance r6, §6 ROUND 7): the Mac's hold is a fact about BYTES, judged against the prebuilt the hub has NOW (pushMacHelper's one
+//       comparison): a corrected prebuilt dropped in under a standing hold goes at the next stream start — in one hub life and across lives — the
+//       same bytes wait for the Mac's door, a hold on bytes the hub never had is paced by SIGNED_RETRY_MS, a look that found the hold spends no try
 //   §3 THE HELPER'S PLACE: ready at the shipped version (nothing run); none + no compiler ⇒ no_helper (the trampoline is never
 //      run); the hub's pushed prebuilt is put in place; a compiler ⇒ built (both slices at once, then lipo, codesign); a
 //      REPLACED helper that held its grant ⇒ regrant until the facts see the grant again; never rebuilt at the same version
@@ -1061,7 +1064,7 @@ const pictures = (rtp) => { const out = []; let cur = []; for (const p of rtp) {
       ok(rc1.length === 3 && rc1.every((x) => x.take === true) && c1 === 1 && maxActive === 1 && c2 === 8 && same(triesC, ['try 1 of 8', 'try 2 of 8', 'try 3 of 8', 'try 4 of 8', 'try 5 of 8', 'try 6 of 8', 'try 7 of 8', 'not again in this hub\'s life (8 tries)']), 'r6 concurrent starts — three stream starts in flight together for one Mac push the signed prebuilt ONCE (the host is claimed synchronously before the push\'s await, as c9a6b6ede did — 335d05ad1 recorded the push after it and pushed three times, three writes to one path at once); twelve waves of three, 31 min apart, push SIGNED_PUSH_MAX (8) times, each try counted once (335d05ad1: 24)', { c1, c2, maxActive, triesC });
       // leg «r6 words»: after the bound a hold the Mac reports is noted as «not pushed again in this hub's life (8 tries spent)» — never «pushed again when that is over» — and when it ends nothing is pushed and nothing promised; a prebuilt changed under the push says «what the hub has when a push is next tried is judged afresh» (not «at the next stream start» — on the signed road the next try is SIGNED_RETRY_MS away)
       hold6 = { version: SRC.VERSION, sha256: shaA6, code: 'helper_unsigned', why: 'codesign did not answer 3 times', until: clock6 + 20 * 60 * 1000 };
-      await wave(1); const holdLine = logsC.filter((m) => /the Mac holds this hub's signed prebuilt/.test(m)).pop() || '';
+      await wave(1); const holdLine = logsC.filter((m) => /the Mac holds (this hub's|a) signed prebuilt/.test(m)).pop() || ''; // round 7: after the bound the hub looks no more, so the line says «a signed prebuilt» (whose bytes they are is not judged)
       hold6 = null; clock6 += 21 * 60 * 1000; const lc = logsC.length; await wave(1);
       const other6 = path.join(hubBin, 'vibespace-screen.new'), B6 = Buffer.concat([A6.subarray(0, A6.length - 1), Buffer.from([A6[A6.length - 1] ^ 0x01])]); fs.writeFileSync(other6, B6, { mode: mode6 });
       const dmW = { get fsWriteStream() { if (fs.existsSync(other6)) fs.renameSync(other6, hb); return async (p2, o) => { writes.push(p2); for await (const c of o.source) void c; return { size: o.size }; }; }, fsRm: async () => ({ ok: true }) };
@@ -1087,6 +1090,60 @@ const pictures = (rtp) => { const out = []; let cur = []; for (const p of rtp) {
       for (const k of keysH) await hubH.stop(k, 'stopped').catch(() => { });
       hubH.shutdown?.();
       ident({});
+    }
+    { // ROUND 7 (acceptance r6 — r6 held on five of six; ONE major latent until the Team ID is pinned: the hold was judged against the bytes this hub pushed BEFORE and the hub looked no further while the Mac named them — a corrected prebuilt was never pushed in that hub's life)
+      const w0 = writes.length, X7 = fs.readFileSync(hb), mode7 = fs.statSync(hb).mode;
+      ident({}); const shaX7 = sha(hb);
+      const Y7 = Buffer.concat([X7.subarray(0, X7.length - 1), Buffer.from([X7[X7.length - 1] ^ 0x02])]), shaY7 = crypto.createHash('sha256').update(Y7).digest('hex');
+      const putY = () => { fs.writeFileSync(hb, Y7, { mode: mode7 }); ident({}); }, putX = () => { fs.writeFileSync(hb, X7, { mode: mode7 }); ident({}); }; // the operator's drop: the prebuilt + its record, no hub restart
+      let clock7 = Date.UTC(2031, 0, 1);
+      const forGood = (s256) => ({ version: SRC.VERSION, sha256: s256, code: 'helper_unsigned', why: 'its designated requirement is not the Developer ID one', agent: 'a1' }); // a codesign VERDICT: no `until` — the agent names it in every answer of this agent + helper version
+      const macFake = (hostId, mac) => { // mac: { refused, kind, judge(sha) } — the Mac's agent as the hub sees it: its answer names what it refused, a pushed file is judged by its bytes
+        const logs = [], keys = [];
+        const dm = { fsWriteStream: async (p2, o) => { const ch = []; for await (const c of o.source) ch.push(c); writes.push(p2); mac.judge(crypto.createHash('sha256').update(Buffer.concat(ch)).digest('hex')); return { size: o.size }; },
+          streamOffer: async () => ({ ok: true, sid: 'sx', offer: { type: 'offer', sdp: 'v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n' }, source: { kind: 'screen', origin: { x: 0, y: 0 } }, helper: { dir: PP.dir, version: SRC.VERSION, identity: { kind: mac.kind }, wantSigned: mac.kind !== 'developer-id', ...(mac.refused ? { refused: mac.refused } : {}) } }), streamStop: async () => ({ ok: true }) };
+        const hub = DW.create({ access: { streamRung: async () => ({ take: true, source: 'screen', dm, platform: 'darwin' }) }, relay: false, udpLeg: false, helpersDir: hubBin, now: () => clock7, log: { log: (m) => logs.push(m), warn: (m) => logs.push(m) } });
+        const start = async () => { const x = await hub.start(hostId); if (x.key) keys.push(x.key); return x; };
+        const done = async () => { for (const k of keys) await hub.stop(k, 'stopped').catch(() => { }); hub.shutdown?.(); };
+        const pushLines = () => logs.filter((m) => /pushed this hub's signed prebuilt/.test(m)), holdLines = () => logs.filter((m) => /the Mac holds this hub's signed prebuilt/.test(m));
+        return { logs, start, done, pushLines, holdLines };
+      };
+      // leg «r7 new prebuilt under a hold»: the Mac refused this hub's first signed prebuilt X FOR GOOD (a codesign verdict: no `until`, named in every later answer); the operator drops a corrected Y into the hub's helpers dir, no restart ⇒ Y goes at the NEXT stream start (the hold names X, the hub has Y: judged afresh at once — no 30-min wait); the hold line said so
+      const macA = { refused: null, kind: 'adhoc', judge(s256) { if (s256 === shaX7) macA.refused = forGood(shaX7); else if (s256 === shaY7) { macA.refused = null; macA.kind = 'developer-id'; } } };
+      const A = macFake('host-newbytes', macA); const T7 = clock7;
+      await A.start(); const a1 = writes.length - w0;                                  // X pushed (try 1)
+      clock7 = T7 + 2 * 60e3; await A.start(); const a2 = writes.length - w0;           // the Mac names its refusal of X: the hub has X ⇒ held, nothing sent, no try spent
+      clock7 = T7 + 3 * 60e3; putY();
+      clock7 = T7 + 5 * 60e3; await A.start(); const a3 = writes.length - w0;           // the hub has Y now ⇒ pushed at this very start (480ed457b: never; 335d05ad1: 30 min after X)
+      clock7 = T7 + 6 * 60e3; await A.start(); const a4 = writes.length - w0;           // the Mac took Y (developer-id, wantSigned false): nothing more
+      const pA = A.pushLines(), hA = A.holdLines();
+      ok(a1 === 1 && a2 === 1 && a3 === 2 && a4 === 2 && macA.kind === 'developer-id' && pA.length === 2 && /try 1 of 8/.test(pA[0]) && /try 2 of 8/.test(pA[1]) && /looked at again when the Mac names its hold on it/.test(pA[0]) && hA.length === 1 && new RegExp(`sha256 ${shaX7.slice(0, 12)}…\\): its designated requirement is not the Developer ID one — pushed again when that is over`).test(hA[0]) && /another prebuilt in this hub's helpers dir goes at the next stream start \(7 of 8 tries left\)/.test(hA[0]) && !A.logs.some((m) => /refused this very prebuilt/.test(m)), 'r7 new prebuilt under a hold — the Mac refused the hub\'s signed prebuilt X for good (a codesign verdict, no `until`); a corrected Y dropped into the hub\'s helpers dir without a restart is pushed at the NEXT stream start (the hold is a fact about bytes, judged against the prebuilt the hub has NOW — pushMacHelper\'s one comparison); the look that found the hold spent no try (7 of 8 left), its line promises the next start (acceptance r6 M1: 480ed457b judged the hold against the bytes it pushed before and looked no further — Y never went in that hub\'s life; 335d05ad1 pushed it 30 min later)', { a1, a2, a3, a4, kind: macA.kind, pA, hA });
+      await A.done();
+      // leg «r7 new prebuilt across lives»: hub life 2 meets the Mac's permanent refusal of X (hub life 1's push) at its first start — its own record empty, the prebuilt still X ⇒ held (a look, no try); the corrected Y dropped in ⇒ pushed at the next start as try 1 of 8
+      putX();
+      const macB = { refused: forGood(shaX7), kind: 'adhoc', judge(s256) { if (s256 === shaY7) { macB.refused = null; macB.kind = 'developer-id'; } } };
+      const B = macFake('host-life2', macB); clock7 = T7 + 60 * 60e3; const TB = clock7;
+      await B.start(); const b1 = writes.length - w0;                                  // the hold found on the hub's own X: nothing sent, no try
+      clock7 = TB + 1 * 60e3; await B.start(); const b2 = writes.length - w0;           // still X: nothing (and no second line)
+      putY(); clock7 = TB + 5 * 60e3; await B.start(); const b3 = writes.length - w0;   // Y ⇒ pushed, try 1 of 8
+      const pB = B.pushLines(), hB = B.holdLines();
+      ok(b1 === 2 && b2 === 2 && b3 === 3 && macB.kind === 'developer-id' && hB.length === 1 && /pushed again when that is over/.test(hB[0]) && /\(8 of 8 tries left\)/.test(hB[0]) && pB.length === 1 && /try 1 of 8/.test(pB[0]) && !B.logs.some((m) => /refused this very prebuilt/.test(m)), 'r7 new prebuilt across lives — a hub life that meets the Mac\'s standing refusal of X at its first start (another life pushed X) records the hold with no try spent (8 of 8 left) and one line; the corrected Y dropped in goes at the next start as try 1 of 8 (acceptance r6: 480ed457b spent a try on the look and never pushed Y; 335d05ad1 pushed it 30 min later)', { b1, b2, b3, pB, hB });
+      await B.done();
+      // leg «r7 hold not ours»: the Mac's answer names a hold on bytes the hub never had (another hub's push; a record that outlived its file) — no hold line (the hub never found the Mac holding ITS bytes), the signed push paced by SIGNED_RETRY_MS as in round 5 (no push per stream start); the moment the Mac names the hub's own bytes the hold is found, and a corrected prebuilt goes at the next start
+      putX();
+      const shaZ7 = crypto.createHash('sha256').update('bytes this hub never had').digest('hex');
+      const macC = { refused: forGood(shaZ7), kind: 'adhoc', judge(s256) { if (s256 === shaY7) { macC.refused = null; macC.kind = 'developer-id'; } } }; // X pushed changes nothing it says: the Mac keeps naming Z
+      const C = macFake('host-other', macC); clock7 = T7 + 120 * 60e3; const TC = clock7;
+      await C.start(); const c1 = writes.length - w0;                                  // X pushed (try 1): the hold names other bytes
+      for (const m of [1, 5, 20]) { clock7 = TC + m * 60e3; await C.start(); } const c2 = writes.length - w0; // the same answer: nothing until dueAt
+      clock7 = TC + 31 * 60e3; await C.start(); const c3 = writes.length - w0;          // dueAt ⇒ X again (try 2) — round 5's pacing
+      const h0 = C.holdLines().length;
+      macC.refused = forGood(shaX7); clock7 = TC + 32 * 60e3; await C.start(); const c4 = writes.length - w0; // the Mac names X now: found, held, no try
+      putY(); clock7 = TC + 33 * 60e3; await C.start(); const c5 = writes.length - w0;  // Y ⇒ pushed (try 3)
+      const pC = C.pushLines(), hC = C.holdLines();
+      ok(c1 === 4 && c2 === 4 && c3 === 5 && c4 === 5 && c5 === 6 && h0 === 0 && hC.length === 1 && /\(6 of 8 tries left\)/.test(hC[0]) && pC.length === 3 && /try 1 of 8/.test(pC[0]) && /try 2 of 8/.test(pC[1]) && /try 3 of 8/.test(pC[2]) && macC.kind === 'developer-id', 'r7 hold not ours — a hold the Mac names on bytes this hub never had is no hold of the hub\'s (no line, nothing waited for): the signed push keeps round 5\'s pacing (X at the first start, nothing at +1 / +5 / +20 min, X again at +31 — no push per stream start); the Mac naming the hub\'s own X ⇒ found and held (6 of 8 tries left), the corrected Y ⇒ pushed at the next start as try 3 of 8', { c1, c2, c3, c4, c5, h0, pC, hC });
+      await C.done();
+      putX();
     }
   }
   if (sp.key) await hub2.stop(sp.key, 'stopped').catch(() => { });

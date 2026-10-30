@@ -26,7 +26,8 @@
  *                            nothing pushed — their absence is no refusal, round 4); and an offer whose `helper.wantSigned` is true (an ad-hoc
  *                            helper on a Mac whose agent pins a Team ID) gets this hub's DEVELOPER ID prebuilt pushed once per machine, then
  *                            again after the Mac's own door (`until`, else SIGNED_RETRY_MS) while it still wants one, SIGNED_PUSH_MAX times
- *                            per hub life (round 5; the host claimed before the push's await, round 6) — the agent judges it and swaps
+ *                            per hub life (round 5; the host claimed before the push's await, round 6; the Mac's hold is a fact about BYTES —
+ *                            judged against the prebuilt the hub has NOW, a different one goes at once, round 7) — the agent judges it and swaps
  *   • poll(key, n, seq)      THE LONG POLL (src/server/machine-app.js's shape): the agent's trickled candidates the page has not
  *                            seen (from index n), the session's state and the agent's last numbers; it answers at once when
  *                            anything is newer than `seq`, else after ≤ STREAM_LIMITS.pollMaxMs
@@ -168,8 +169,8 @@ async function pushMacHelper(dm, need, helpersDir = HELPERS_DIR, { signedOnly = 
   const held = (o) => !!(o && typeof o === 'object' && o.sha256 === sha256);
   const untilMs = need.refused ? timeOf(need.refused.until) : null;
   const again = untilMs !== null ? ` before ${new Date(untilMs).toISOString()} or the agent's next start` : need.refused && need.refused.until !== undefined ? ', tried again later or at the agent\'s next start (the Mac named no legible time)' : '';
-  if (held(need.refused)) return { ...refuse(`the Mac refused this very prebuilt (sha256 ${sha256.slice(0, 12)}…): ${String(need.refused.why || need.refused.code || '').slice(0, 240)} — not sent again${again} (a different prebuilt would be judged afresh)`), held: sha256, ...(untilMs !== null ? { until: untilMs } : {}) }; // `held` (round 6): the bytes the Mac holds — start()'s record of them when the hold was told of by a refusal it did not know of (another hub life's push)
-  if (held(need.pending)) return { ok: false, code: 'no_helper', error: `the Mac holds this prebuilt already and judges it at its next check (codesign answered nothing, try ${Number(need.pending.tries) || '?'} of 3) — not sent again`, held: sha256 };
+  if (held(need.refused)) return { ...refuse(`the Mac refused this very prebuilt (sha256 ${sha256.slice(0, 12)}…): ${String(need.refused.why || need.refused.code || '').slice(0, 240)} — not sent again${again} (a different prebuilt would be judged afresh)`), held: sha256, hold: need.refused, ...(untilMs !== null ? { until: untilMs } : {}) }; // `held` (round 6): the bytes the Mac holds — start()'s record of them when the hold was told of by a refusal it did not know of (another hub life's push)
+  if (held(need.pending)) return { ok: false, code: 'no_helper', error: `the Mac holds this prebuilt already and judges it at its next check (codesign answered nothing, try ${Number(need.pending.tries) || '?'} of 3) — not sent again`, held: sha256, hold: need.pending }; // `hold` (round 7): the Mac's record the judge compared — start()'s words
   if (!dm || typeof dm.fsWriteStream !== 'function') return { ok: false, code: 'no_helper', error: 'the Mac\'s agent cannot take a pushed file' };
   // ROUND 5 (acceptance r4): the bytes SENT are hashed as they go — the digest above named them, the push must send those very bytes
   // (a prebuilt replaced under the push — an operator's drop into data/bin/helpers/ — sent bytes nobody checked under the old name)
@@ -199,7 +200,7 @@ async function pushMacHelper(dm, need, helpersDir = HELPERS_DIR, { signedOnly = 
 
 function create({ access, log = console, now = Date.now, idleMs = L.idleMs, goneMs = L.goneMs, sweepMs = 5000, ips = hubIps, pollMaxMs = L.pollMaxMs, relay = true, direct = true, udpLeg = true, legMute = () => false, elect = SM.legElect, helpersDir = HELPERS_DIR, handover = null } = {}) {
   const sessions = new Map(); // key → session
-  const signedPushed = new Map(); // lane apple-signing: hostId → { n, sha256, held, dueAt, busy } — the signed prebuilt is pushed once per machine, then again (round 5) when the Mac's hold on those bytes (a refusal with a door, a judgment in progress) is GONE from its answer — its door opened: `until` passed or the agent started anew — else at the first stream start after SIGNED_RETRY_MS, while it still wants a signed build; SIGNED_PUSH_MAX attempts (pushes, each counted at its claim) per machine per hub life; round 6: the entry is CLAIMED synchronously before the push's await (`busy`) — stream starts in flight together for one Mac push once; no push while the Mac's answer still names the hold
+  const signedPushed = new Map(); // lane apple-signing: hostId → { n, busy, dueAt, held, seen } — the signed prebuilt is pushed once per machine, then again (round 5) when the Mac's hold on those bytes (a refusal with a door, a judgment in progress) is GONE from its answer — its door opened: `until` passed or the agent started anew — else at the first stream start after SIGNED_RETRY_MS, while it still wants a signed build; SIGNED_PUSH_MAX attempts (pushes and refusals, never a look that found the Mac's hold) per machine per hub life; round 6: the entry is CLAIMED synchronously before the push's await (`busy`) — stream starts in flight together for one Mac push once; round 7 (acceptance r6): a hold is a fact about the BYTES the Mac names — judged by pushMacHelper's ONE comparison against the prebuilt the hub has NOW (`held` = those bytes, or null): a different prebuilt in data/bin/helpers/ goes at once, the same bytes wait for the hold to go; `seen` = the bytes the Mac's answer named at the hub's last look (a hold new to the hub is looked at at once, a hold on bytes the hub never had is paced by dueAt)
   const ended = (s, why) => { if (s.endNoted) return; s.endNoted = true; try { handover?.ended?.(s.key, why, s.hostId); } catch (e) { log.warn?.(`[stream] the hand-over did not hear ${s.key} end (${e && e.message})`); } };
   const keyOf = () => 'st' + now().toString(36) + Math.random().toString(36).slice(2, 10);
   const wake = (s) => { s.seq++; for (const f of s.waiters.splice(0)) { try { f(); } catch { /* gone */ } } };
@@ -344,25 +345,33 @@ function create({ access, log = console, now = Date.now, idleMs = L.idleMs, gone
         log.log?.(`[stream] ${hostId}: the Mac ${r.code === 'helper_unsigned' ? 'refused a screen helper' : 'has no screen helper'} ${r.helper.version} — ${p.ok ? `pushed this hub's prebuilt (${p.size} bytes; ${p.note})` : p.error}`);
         if (p.ok) r = await offer(); else r = { ...r, error: `${r.error} — ${p.error}` };
       }
-      if (r && r.ok && r.helper && r.helper.wantSigned === true) { // lane apple-signing: the signed prebuilt wins over an ad-hoc build — pushed once per machine, then again when the Mac's door opens (round 5: a refusal born of unanswered codesign runs EXPIRES — the push must come again for the agent's «tried again at» to be true); round 6 (acceptance r5): the host is CLAIMED before the await (c9a6b6ede did; round 5 recorded the push after it — starts in flight together each pushed, the bound counted per wave), and no push is tried while the Mac's answer still names the hold (round 5's declined try marked the hold gone); the agent judges it and swaps at its next check
+      if (r && r.ok && r.helper && r.helper.wantSigned === true) { // lane apple-signing: the signed prebuilt wins over an ad-hoc build — pushed once per machine, then again when the Mac's door opens (round 5: a refusal born of unanswered codesign runs EXPIRES — the push must come again for the agent's «tried again at» to be true); round 6 (acceptance r5): the host is CLAIMED before the await (c9a6b6ede did; round 5 recorded the push after it — starts in flight together each pushed, the bound counted per wave); round 7 (acceptance r6 M1): the hold is judged against the prebuilt the hub has NOW, by pushMacHelper's one comparison — round 6 judged it against the bytes this hub pushed BEFORE (`prev.sha256`) and looked no further while the Mac named them: a corrected prebuilt dropped into data/bin/helpers/ was never pushed in that hub's life (the base pushed it after SIGNED_RETRY_MS)
         const prev = signedPushed.get(hostId) || null;
-        const holds = (o) => !!(prev && prev.sha256 && o && typeof o === 'object' && o.sha256 === prev.sha256);
-        const hold = holds(r.helper.refused) ? r.helper.refused : holds(r.helper.pending) ? r.helper.pending : null; // the Mac still holds the bytes this hub pushed
-        if (hold) { // no push while it does — the hold GONE from the Mac's answer is the trigger; noted once
-          if (!prev.held) {
-            signedPushed.set(hostId, { ...prev, held: true });
-            log.log?.(`[stream] ${hostId}: the Mac holds this hub's signed prebuilt (sha256 ${prev.sha256.slice(0, 12)}…): ${String(hold.why || (hold.tries ? `judging it, try ${hold.tries} of 3` : hold.code || '')).slice(0, 160)} — ${prev.n < SIGNED_PUSH_MAX ? 'pushed again when that is over' : `not pushed again in this hub's life (${SIGNED_PUSH_MAX} tries spent)`}`);
-          }
-        } else if (!prev || (!prev.busy && prev.n < SIGNED_PUSH_MAX && (prev.held || now() >= prev.dueAt))) {
-          const t = now(), n = (prev ? prev.n : 0) + 1;
-          const claim = { n, sha256: prev ? prev.sha256 : null, held: false, dueAt: t + SIGNED_RETRY_MS, busy: true }; // THE CLAIM — synchronous, before the await: a start in flight for this Mac sees it and pushes nothing; the try is counted here
+        const sha = (o) => (o && typeof o === 'object' && typeof o.sha256 === 'string' ? o.sha256 : null);
+        const named = [sha(r.helper.refused), sha(r.helper.pending)].filter(Boolean).join('+') || null; // the bytes the Mac's answer holds (a refusal, a judgment in progress) — WHICH prebuilt they are is pushMacHelper's to say
+        // THE LOOK: the first stream start; while the Mac holds the hub's prebuilt, every start (the door opened, or another prebuilt here — at once); a hold new to the hub (its answer names bytes the hub has not looked at); else at dueAt (round 5's pacing: the Mac names nothing, or bytes the hub never had)
+        if (!prev || (!prev.busy && prev.n < SIGNED_PUSH_MAX && (prev.held !== null || now() >= prev.dueAt || (named !== null && named !== prev.seen)))) {
+          const t = now();
+          const claim = { n: prev ? prev.n : 0, busy: true, dueAt: prev ? prev.dueAt : t + SIGNED_RETRY_MS, held: prev ? prev.held : null, seen: named }; // THE CLAIM — synchronous, before the await: a start in flight for this Mac sees it and pushes nothing
           signedPushed.set(hostId, claim);
           let p;
           try { p = await pushMacHelper(v.dm, r.helper, helpersDir, { signedOnly: true }); } finally { claim.busy = false; }
-          const heldNow = !p.ok && typeof p.held === 'string' ? p.held : null; // declined because the Mac holds these very bytes (a refusal this hub's record did not know of — another hub life's push): held, pushed again when that hold is gone
-          signedPushed.set(hostId, { n, sha256: p.ok ? p.sha256 : heldNow || claim.sha256, held: heldNow !== null, dueAt: t + SIGNED_RETRY_MS, busy: false });
-          const then = n >= SIGNED_PUSH_MAX ? `not again in this hub's life (${SIGNED_PUSH_MAX} tries)` : `tried again when the Mac's hold on it is over${heldNow !== null ? '' : `, else at the first stream start after ${new Date(t + SIGNED_RETRY_MS).toISOString()}`}, while the Mac still wants a signed build (try ${n} of ${SIGNED_PUSH_MAX})`;
-          log.log?.(`[stream] ${hostId}: the Mac's screen helper is ${r.helper.identity ? r.helper.identity.kind : 'unjudged'} — ${p.ok ? `pushed this hub's signed prebuilt (${p.size} bytes; ${p.note}); the agent takes it at its next check (one last Screen Recording re-grant)` : p.error}; ${then}`);
+          const heldNow = !p.ok && typeof p.held === 'string' ? p.held : null; // the Mac holds the very bytes the hub has now (the judge's one comparison): nothing sent, no try spent — looked at again at the next start
+          const n = claim.n + (heldNow !== null ? 0 : 1);
+          signedPushed.set(hostId, { n, busy: false, dueAt: heldNow !== null ? claim.dueAt : t + SIGNED_RETRY_MS, held: heldNow, seen: named });
+          if (heldNow !== null) {
+            if (!prev || prev.held !== heldNow) { // noted once per hold
+              const hold = p.hold && typeof p.hold === 'object' ? p.hold : {};
+              log.log?.(`[stream] ${hostId}: the Mac holds this hub's signed prebuilt (sha256 ${heldNow.slice(0, 12)}…): ${String(hold.why || (hold.tries ? `judging it, try ${hold.tries} of 3` : hold.code || '')).slice(0, 160)} — pushed again when that is over (its door: \`until\` passed, or the agent's next start); another prebuilt in this hub's helpers dir goes at the next stream start (${SIGNED_PUSH_MAX - n} of ${SIGNED_PUSH_MAX} tries left)`);
+            }
+          } else {
+            const then = n >= SIGNED_PUSH_MAX ? `not again in this hub's life (${SIGNED_PUSH_MAX} tries)` : `looked at again when the Mac ${p.ok ? 'names its hold on it (these bytes wait for that hold to be over; another prebuilt in this hub\'s helpers dir goes then)' : 'names a hold not yet looked at'}, else at the first stream start after ${new Date(t + SIGNED_RETRY_MS).toISOString()}, while the Mac still wants a signed build (try ${n} of ${SIGNED_PUSH_MAX})`;
+            log.log?.(`[stream] ${hostId}: the Mac's screen helper is ${r.helper.identity ? r.helper.identity.kind : 'unjudged'} — ${p.ok ? `pushed this hub's signed prebuilt (${p.size} bytes; ${p.note}); the agent takes it at its next check (one last Screen Recording re-grant)` : p.error}; ${then}`);
+          }
+        } else if (prev.n >= SIGNED_PUSH_MAX && named !== null && named !== prev.seen) { // after the bound the hub looks no more — a hold the Mac names is noted once, nothing promised (round 6's words)
+          signedPushed.set(hostId, { ...prev, seen: named });
+          const hold = r.helper.refused && typeof r.helper.refused === 'object' ? r.helper.refused : r.helper.pending || {};
+          log.log?.(`[stream] ${hostId}: the Mac holds a signed prebuilt (sha256 ${named.slice(0, 12)}…): ${String(hold.why || (hold.tries ? `judging it, try ${hold.tries} of 3` : hold.code || '')).slice(0, 160)} — not pushed again in this hub's life (${SIGNED_PUSH_MAX} tries spent)`);
         }
       }
     } catch (e) {
