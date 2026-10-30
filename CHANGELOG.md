@@ -14,6 +14,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 
 ### Fixed
 - The Vault window shows a newly stored entry at once, without closing it, and its search finds it by name, host or the conversation that asked.
+- When turning on one more vault entry for agent runs would pass the limit, the oldest turns off and For you tells you which — not a silent switch-off.
 
 ## 2.369.360 — 2026-10-27
 

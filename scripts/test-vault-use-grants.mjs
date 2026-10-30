@@ -962,7 +962,7 @@ console.log('㉜ ROUND 9 (BLOCKER item 1) — the host-scoped 8-hour PASTE grant
   ok(leak.length === 0, 'every command whose destination cannot be READ draws its card — never by:grant with the secret in its env (the r7 regression: all five ran by:grant for 8 h)', { leak });
 }
 
-console.log('㉝ ROUND 9/10/11 (BLOCKER item 2 + its r10 regression + MAJOR) — the door reads an ssh `-o` KEYWORD as OpenSSH strdelim and the VALUE as argv_split: a leading `=`, a `"keyword"` pair, a mid-keyword quote, an EMPTY QUOTED first token, a QUOTE GLUED to the keyword, AND (round 11) a quote glued INSIDE the value (`HostName "box".evil`), an empty-quote prefix, a `%` behind a quote, plus CanonicalDomains / PKCS11Provider / SecurityKeyProvider / `-I` no longer hide the real host or the loaded code (a grant for box.example only)');
+console.log('㉝ ROUND 9/10/11/12 (BLOCKER item 2 + its r10 regression + MAJORs) — the door reads an ssh `-o` KEYWORD as OpenSSH strdelim and the VALUE as argv_split: a leading `=`, a `"keyword"` pair, a mid-keyword quote, an EMPTY QUOTED first token, a QUOTE GLUED to the keyword, a quote glued INSIDE the value (`HostName "box".evil`), an empty-quote prefix, a `%` behind a quote, plus CanonicalDomains / PKCS11Provider / SecurityKeyProvider / `-I` AND (round 12) SmartcardDevice (alias of PKCS11Provider) / XAuthLocation (a local xauth program) no longer hide the real host or the loaded code (a grant for box.example only)');
 {
   const w = await world();
   const e = entryOf(w, { label: 'box key' });
@@ -998,10 +998,17 @@ console.log('㉝ ROUND 9/10/11 (BLOCKER item 2 + its r10 regression + MAJOR) —
     ['-o PKCS11Provider=', ['ssh', '-o', 'PKCS11Provider=/tmp/evil.so', 'box.example', 'true']],
     ['-o SecurityKeyProvider=', ['ssh', '-o', 'SecurityKeyProvider=/tmp/evil.so', 'box.example', 'true']],
     ['-o CanonicalDomains=', ['ssh', '-o', 'CanonicalDomains=evil.example', 'box.example', 'true']],
+    // round 12 (MAJOR M1): SmartcardDevice is OpenSSH's ALIAS of PKCS11Provider (`ssh -G` prints `pkcs11provider …`) — «no option» on r11, now opaque via its canonical name (plain / attached / quoted)
+    ['-o SmartcardDevice=', ['ssh', '-o', 'SmartcardDevice=/tmp/evil.so', 'box.example', 'true']],
+    ['-oSmartcardDevice= attached', ['ssh', '-oSmartcardDevice=/tmp/evil.so', 'box.example', 'true']],
+    ['-o "SmartcardDevice" quoted', ['ssh', '-o', '"SmartcardDevice" /tmp/evil.so', 'box.example', 'true']],
+    // round 12 (MAJOR M2): XAuthLocation names a local xauth program ssh runs for X11 forwarding (with -X and a plain DISPLAY) — opaque, the same class as the code-loading keywords
+    ['-X -o XAuthLocation=', ['ssh', '-X', '-o', 'XAuthLocation=/tmp/evil', 'box.example', 'true']],
+    ['-o XAuthLocation= -o ForwardX11', ['ssh', '-o', 'XAuthLocation=/tmp/evil', '-o', 'ForwardX11=yes', 'box.example', 'true']],
   ];
   const leak = [];
   for (const [n, argv] of attacks) { const r = await run(argv); if (r.r.ok || r.r.by === 'grant' || !r.card) leak.push(`${n}:by=${r.r.by || r.r.code},card=${!!r.card}`); }
-  ok(leak.length === 0, 'every quoted / leading-= / empty-quote / glued-quote keyword OR glued-quote VALUE (round 11: argv_split) `-o` spelling of a host / local-command / host-rewriting / code-loading option — and `-I` — draws its card, never by:grant to a host the grant does not name', { leak });
+  ok(leak.length === 0, 'every quoted / leading-= / empty-quote / glued-quote keyword OR glued-quote VALUE (round 11: argv_split) `-o` spelling of a host / local-command / host-rewriting / code-loading option — `-I`, and (round 12) the PKCS11Provider alias SmartcardDevice + the local xauth program XAuthLocation — draws its card, never by:grant to a host the grant does not name', { leak });
 }
 
 console.log('㉞ ROUND 9 (MAJOR item 3) — «Always» is ALL-OR-NOTHING: a refused second entry narrows a WIDENED existing member back (not only an added one revoked) and the switch restore is PUSHED to the window');
@@ -1078,6 +1085,36 @@ console.log('㊲ ROUND 10 (MAJOR) — a resume is a REVEAL act: the owner-resume
   ok(pausedB() && (await runB()).by !== 'grant', 'B is STILL paused after the click-only Save — NOTHING was resumed (r9 un-paused B here with NO second password)');
   const s2 = w.useGrants.setRow(e.id, { to: [{ kind: 'conversation', key: 'cid-B', name: 'B', hosts: ['box.example'] }], except: [] }, { by: 'user', reauthed: true });   // an UNCHANGED re-save, even WITH 验证是你, adds no member
   ok(s2.ok && pausedB() && (await runB()).by !== 'grant', 'an unchanged re-save (even with 验证是你) adds no member ⇒ B stays paused — a resume follows only an ADD');
+}
+
+console.log('㊳ ROUND 12 (MAJOR M3, the r11 regression) — the eviction stamp is the LAST TOGGLE (never 0): a MANUAL ON at the cap is KEPT (never the one evicted), setRunnable answers the TRUTH after the trim + NAMES the dropped entry (`evicted` + a For-you notice); the suspended trim keeps the NEWEST by last-toggle, not the largest id');
+{
+  const idOf = (nm) => `secrets:${nm}#secret`;
+  // (a) 256 PRESS-opened fillers at increasing clocks, then a MANUAL ON of a 257th — r11 deleted its `opened` record ⇒ stamp 0 ⇒
+  // sorted OLDEST ⇒ the owner's just-switched-on entry evicted while setRunnable answered open:true. The `touched` clock stamps
+  // the manual ON now() ⇒ it is the NEWEST ⇒ kept; the OLDEST filler is the one dropped, and the answer reads the truth after the trim.
+  let CLOCK = Date.now();
+  const w = await world({ now: () => CLOCK });
+  const fillers = [];
+  for (let i = 0; i < 256; i++) { CLOCK += 10; const nm = 'secret:f' + i.toString(16).padStart(9, '0'); w.vault.secretPut(nm, VALUE, { prov: 'owner', label: nm, kind: 'password', hosts: [] }); w.door.setRunnable({ id: idOf(nm), on: true, reauthed: true, keepPaused: true, by: 'user' }); fillers.push(idOf(nm)); }
+  const oldest = fillers[0];   // the first filler toggled = the oldest by last-toggle
+  CLOCK += 10; const mnm = 'secret:m' + '0'.repeat(9); w.vault.secretPut(mnm, VALUE, { prov: 'owner', label: 'manual', kind: 'password', hosts: [] });
+  const ans = w.door.setRunnable({ id: idOf(mnm), on: true, reauthed: true, by: 'user' });   // keepPaused:false = a MANUAL ON
+  const disk = JSON.parse(fs.readFileSync(path.join(w.dataDir, 'vault-run.json'), 'utf8'));
+  ok(ans.ok && ans.open === true && disk.runnable.includes(idOf(mnm)), 'the MANUAL ON at the cap is KEPT — setRunnable answers open:true AND it is truly runnable on disk (r11 answered open:true but evicted it: a manual ON had stamp 0, sorted oldest)', { open: ans.open, onDisk: disk.runnable.includes(idOf(mnm)) });
+  ok(disk.runnable.length === 256 && !disk.runnable.includes(oldest) && Array.isArray(ans.evicted) && ans.evicted.includes(oldest), 'the OLDEST filler (by last toggle) is the one evicted, and setRunnable NAMES it in `evicted` — the answer is the truth AFTER the trim', { len: disk.runnable.length, droppedOldest: !disk.runnable.includes(oldest), evicted: (ans.evicted || []).slice(0, 3) });
+  const notice = (w.userTodos.snapshot().open || []).find((i) => i.origin === 'vault' && !i.action && /switched off/.test(i.text || ''));
+  ok(!!notice, 'the owner is TOLD in For you — a Vault notice names the eviction (no silent switch-off)', { text: notice && notice.text });
+  // (b) the suspended trim keeps the NEWEST by last-toggle, not the largest id (the r11 :473 minor): 256 large-id entries OFF
+  // first, then a SMALL-id entry OFF LAST keeps its «paused» word (the old largest-id trim would drop the small id at once).
+  let CK = Date.now();
+  const w2 = await world({ now: () => CK });
+  for (let i = 0; i < 256; i++) { CK += 10; const nm = 'secret:z' + i.toString(16).padStart(9, '0'); w2.vault.secretPut(nm, VALUE, { prov: 'owner', label: nm, kind: 'password', hosts: [] }); w2.door.setRunnable({ id: idOf(nm), on: false, reauthed: true }); }
+  CK += 10; const small = 'secret:' + '0'.repeat(9) + '1'; w2.vault.secretPut(small, VALUE, { prov: 'owner', label: small, kind: 'password', hosts: [] });
+  w2.door.setRunnable({ id: idOf(small), on: false, reauthed: true });   // OFF LAST ⇒ freshest ⇒ kept
+  const disk2 = JSON.parse(fs.readFileSync(path.join(w2.dataDir, 'vault-run.json'), 'utf8'));
+  const fb = w2.door.rowFacts({ id: idOf(small), store: 'secrets', entry: small, field: 'secret' });
+  ok((disk2.suspended || []).length === 256 && (disk2.suspended || []).includes(idOf(small)) && fb.paused === true, 'the suspended trim keeps the NEWEST by last-toggle: the small-id entry turned OFF last keeps its «paused» word (r11 kept the largest ids ⇒ the small id lost «paused» at once)', { susp: (disk2.suspended || []).length, hasSmall: (disk2.suspended || []).includes(idOf(small)), paused: fb.paused });
 }
 
 console.log(fail ? `\n${pass} passed, ${fail} failed` : `\nALL PASS (${pass})`);

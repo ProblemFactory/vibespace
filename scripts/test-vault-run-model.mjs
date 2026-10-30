@@ -283,9 +283,26 @@ console.log('④ THE SHAPE KEY — tool + flags + hosts + entries (decision ④)
       ['ProxyJump "router.example".evil.example', 'host:router.example.evil.example'],
       ['CanonicalDomains evil.example', '<opaque>'], ['CanonicalizeHostname yes', '<opaque>'],
       ['PKCS11Provider /tmp/x.so', '<opaque>'], ['SecurityKeyProvider /tmp/x.so', '<opaque>'], ['Pkcs11Provider=/tmp/x.so', '<opaque>'],
+      // round 12 (MAJOR M1 + M2): SmartcardDevice is OpenSSH's alias of PKCS11Provider (`ssh -F /dev/null -G` prints `pkcs11provider x.so`) ⇒ the
+      // alias must be opaque too, even quoted (canonicalized after strdelim); XAuthLocation names a local xauth program ssh runs ⇒ opaque.
+      ['SmartcardDevice /tmp/x.so', '<opaque>'], ['SmartcardDevice=/tmp/x.so', '<opaque>'], ['"SmartcardDevice" /tmp/x.so', '<opaque>'], ['smartcarddevice /tmp/x.so', '<opaque>'],
+      ['XAuthLocation /tmp/xa', '<opaque>'], ['XAuthLocation=/tmp/xa', '<opaque>'],
     ]) ORACLE.push([o, want]);
     const bad = ORACLE.filter(([o, want]) => KW(o) !== want);
-    ok(bad.length === 0 && ORACLE.length >= 75, `the \`-o\` reader matches OpenSSH for every GENERATED spelling (${ORACLE.length}: keyword by strdelim + VALUE by argv_split — empty/glued/mid-quote, a quote inside the value, %-behind-quote, backslash, unterminated; + CanonicalDomains/PKCS11Provider/SecurityKeyProvider opaque; fixture ssh -G 10.2p1, live cross-check repro/r11)`, { count: ORACLE.length, bad: bad.map(([o]) => o).slice(0, 6) });
+    ok(bad.length === 0 && ORACLE.length >= 75, `the \`-o\` reader matches OpenSSH for every GENERATED spelling (${ORACLE.length}: keyword by strdelim + VALUE by argv_split — empty/glued/mid-quote, a quote inside the value, %-behind-quote, backslash, unterminated; + CanonicalDomains/PKCS11Provider/SecurityKeyProvider/SmartcardDevice(alias)/XAuthLocation opaque; fixture ssh -G 10.2p1, live cross-check repro/r12)`, { count: ORACLE.length, bad: bad.map(([o]) => o).slice(0, 6) });
+  }
+  // round 12 (MAJOR M1 + M2): the ALIAS table + the local-program/library CENSUS. The reader knows a keyword by its CANONICAL
+  // name (readconf.c): SmartcardDevice → pkcs11provider (verified live: `ssh -F /dev/null -G -o SmartcardDevice=x` prints
+  // `pkcs11provider x` on 10.2p1), canonicalized BEFORE the opaque check. The opaque set is DERIVED from SSH_LOCAL_PROGRAM_KW, so
+  // a keyword here but unlegged — or an alias the table forgets — cannot pass. A mutant dropping the alias row is RED by name
+  // (repro/r12 proves it on the base + the int361 tip; here the invariant is pinned over the shipped tables).
+  {
+    const OPQ = (o) => V.readSshOpt(o).opaque === true;
+    const prog = Object.keys(V.SSH_LOCAL_PROGRAM_KW);
+    const badProg = prog.filter((k) => !(OPQ(`${k} x`) && OPQ(`${k}=x`)));
+    ok(prog.includes('xauthlocation') && prog.includes('pkcs11provider') && badProg.length === 0, `every local-program/library keyword reads opaque — SSH_LOCAL_PROGRAM_KW drives the reader (${prog.length}: ${prog.join('/')}; round 12 M2 added xauthlocation)`, { badProg });
+    const aliasBad = Object.entries(V.SSH_KW_ALIAS).filter(([a, canon]) => !(OPQ(`${a} x`) && OPQ(`"${a}" x`) && OPQ(`${a}=x`)) || !(V.SSH_LOCAL_PROGRAM_KW[canon] || V.SSH_HOST_OPTS.has(canon) || false));
+    ok(V.SSH_KW_ALIAS.smartcarddevice === 'pkcs11provider' && aliasBad.length === 0, 'the ALIAS table maps every spelling to a CANONICAL keyword the reader classes — SmartcardDevice → pkcs11provider ⇒ opaque, plain / glued-quote / `=`-split alike, canonicalized BEFORE the opaque check (round 12 M1)', { aliasBad: aliasBad.map(([a]) => a) });
   }
   // round 9 (seam ruling C with vault-agent-own, 主开发): DESTINATION KNOWLEDGE (`shape.destKnown`) is decoupled from «always»
   // eligibility — it is true for a KNOWN tool whose destinations the reader READ IN FULL (every host named, nothing opaque), so a
