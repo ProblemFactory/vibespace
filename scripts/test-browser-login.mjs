@@ -24,11 +24,15 @@
 //      hook's look before the window (int361's red) and inside it — the leg as it was is red on both, the window green
 //      — r2d: WHO sent a call, never its name: the stub stamps the tab each call rides (on the tab the leg fills nothing is the
 //      watch's own) and the after-mark is the leg's own call, found by its CDP id; the pin reads fillLogin too, however quoted
+//      — r2e: the watch's own = what ARMS a tab the page opened, heard by the leg's MID mark (once the arm it waits for is done);
+//      after it nothing is anyone's own — and the fence binds only a call heard after its own mark
 //   ⑧b lane engine-distribution: the NO-ECHO kernel (mode.omitFilledPassword — the real kernel sends no password while the box
 //      holds the vault's value): a pending register promoted · an existing login none · a typed-over value rides; a RED control
 //   ⑨ THE DOORS: the REAL route + the REAL CLI; the owner's card route refuses an agent; the Vault window's rows
-//   ⑩ RED controls: a fill verdict without the frame check, without the grant — each lets the bad fill through; (r2d) five watch
-//      copies whose fillLogin sends on the login tab before the gate (A1 A2 B B2 B3) — the window counts each — and the pin's own
+//   ⑩ RED controls: a fill verdict without the frame check, without the grant — each lets the bad fill through; (r2d) six watch
+//      copies whose fillLogin sends on the login tab before the gate (A1 A2 B B2 B3 C) — the window counts each — and the pin's own
+//      RED; (r2e) G1 a fillLogin that re-arms the tab the page opened, G7 an attach to a tab the stub never had — each counted as the
+//      road's — and the fence's own RED (a stale '1' with its id, heard before its mark, never binds)
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
@@ -309,8 +313,11 @@ const ownOf = (c) => (c.method === 'Runtime.evaluate' ? (c.params && c.params.ex
 // the login tab read as the watch's own): the stub stamps every call with the tab it rides. In the window the watch's own calls are
 // the ones that ARM a tab the stub announced after the first mark (the attach to it, then the named calls on its session); on a tab
 // that was there at the mark — the one the leg fills — nothing is anyone's own, whatever its name.
-const markOf = (X) => ({ from: X.k.mark(), tabs: new Set(X.k.targets().map((t) => t.targetId)) });
-const mineOf = (m) => (c) => (c.tab && !m.tabs.has(c.tab) ? ownOf(c) : null);
+// r2e ONLY WHAT ARMS IT (review r2d G1: a fillLogin that re-ran armHook on the tab the page opened read as the watch's own; G7 an
+// attach to a target id the stub never had read as track): the watch's own calls are the ones heard by the leg's MID mark — taken
+// once `during` (the arm the leg waits for) returns; a mark nobody moved has mid = from — after it nothing is anyone's own.
+const markOf = (X) => { const from = X.k.mark(); return { from, mid: from, tabs: new Set(X.k.targets().map((t) => t.targetId)) }; };
+const mineOf = (m) => (c) => (c.tab && !m.tabs.has(c.tab) && c.seq <= m.mid ? ownOf(c) : null);
 // the fill road's CDP vocabulary as the product text says it — a Domain.method token however it is quoted (r2d: '…' "…" `…`, any
 // capitalised domain — a list leaves one out); fillLogin = the door's body in browser-dialogs.js (the gate, the dispatch) to its brace
 const CDP_TOKEN = /(['"`])([A-Z][A-Za-z]*\.[a-z][A-Za-z]*)\1/g;
@@ -347,11 +354,13 @@ class OneRead extends require('ws') {
 // THE AFTER-MARK: the leg's OWN fence on the watch's socket — ONE bounded Runtime.evaluate '1' on the filled tab (pageAnswers), found
 // on the stub by the CDP id the watch gave it, never by its look (r2d, review r2c F2: the first '1' after a mark was anyone's — a
 // road '1' still in flight closed the window and the road's calls after it escaped). One socket, in order: every command the watch
-// sent before the fence is heard before it — its sequence number closes the window (NaN = not found or not answered: red)
+// sent before the fence is heard before it — its sequence number closes the window (NaN = not found or not answered: red). Only a
+// call heard after the fence's own mark binds (r2e, review r2d n1: ids restart at 0 when the watch reconnects — a stale '1' with
+// the same id would close an empty window)
 async function fence(X) {
-  const tab = X.k.targets()[0].targetId, W = X.w._watches.get(PID), id = W ? W.id + 1 : NaN; // pageAnswers sends at once: the next id is its
+  const before = X.k.mark(), tab = X.k.targets()[0].targetId, W = X.w._watches.get(PID), id = W ? W.id + 1 : NaN; // pageAnswers sends at once: the next id is its
   const a = await X.w.pageAnswers(TGT, { targets: [tab] });
-  const f = X.k.calls().find((c) => c.id === id && c.tab === tab && c.method === 'Runtime.evaluate' && c.params.expression === '1');
+  const f = X.k.calls().find((c) => c.seq > before && c.id === id && c.tab === tab && c.method === 'Runtime.evaluate' && c.params.expression === '1');
   return a.asked && a.pages.length === 1 && a.pages[0].answered === true && f ? f.seq : NaN;
 }
 const withdrawn = (r) => !r.ok && r.code === 'login_fill_withdrawn' && r.road === 'standard' && r.error === BL.roadVerdict(false).error;
@@ -362,18 +371,20 @@ function inWindow(X, m, to) {
   return { win, own: win.filter(mine).map((c) => `${mine(c)}:${c.method}#${c.seq}`), road: win.filter((c) => !mine(c)).map((c) => `${c.method}#${c.seq}`) };
 }
 const noRoad = (x) => Number.isFinite(x.to) && x.road.length === 0; // the leg's verdict: its fence found, nothing in the window the road's
-/** The four refused fills between the leg's two marks (`during(from)` runs inside the window first): the window — and `was`, the leg
+/** REPLAY ②'s `during`: the page opens a tab while the login is refused; the leg waits for the watch's arm of it — its last call, pkFind's look (`at.pop` = the tab). */
+const popUp = (X, at) => (from) => { at.pop = X.k.addTarget(SITE + '/popup'); return until(() => X.k.calls().some((c) => c.seq > from && c.tab === at.pop && ownOf(c) === 'pkFind'), 3000); };
+/** The four refused fills between the leg's two marks (`during(from)` runs inside the window first, the MID mark after it): the window — and `was`, the leg
  *  as it stood until r2c (`sent` from the length before, the whole socket's Input.* / Runtime.evaluate), read where it read them:
  *  right after the fills. */
 async function refusedFills(X, during = null) {
   const m = markOf(X), from = m.from;
-  if (during) await during(from);
+  if (during) { await during(from); m.mid = X.k.mark(); }
   const rs = [];
   for (const o of [{}, { origin: SITE, user: 'alice', submit: true }, { newUser: 'bob', generate: true, submit: true }, { generate: true }]) rs.push(await X.w.fillLogin(TGT, FILL(o)));
   const sent = X.k.calls().slice(from).map((c) => c.method), whole = X.k.calls().filter(roadCall);
   const was = { ok: sent.length === 0 && whole.length === 0, sent, whole: whole.map((c) => `${c.method}#${c.seq}${c.params.expression ? `(${String(c.params.expression).slice(0, 40)})` : ''}`) };
   const to = await fence(X);
-  return { rs, from, to, ...inWindow(X, m, to), was };
+  return { rs, from, mid: m.mid, to, ...inWindow(X, m, to), was };
 }
 {
   const X = await world();
@@ -589,10 +600,9 @@ async function refusedFills(X, during = null) {
   // r2c REPLAY ② — the same look INSIDE the window: a tab the page opens while the login is refused, armed by the watch through the one read
   const S2 = await world({ mode: { standard: true }, WebSocketImpl: OneRead });
   try {
-    let pop = null;
-    const x = await refusedFills(S2, (from) => { pop = S2.k.addTarget(SITE + '/popup'); return until(() => S2.k.calls().some((c) => c.seq > from && c.tab === pop && ownOf(c) === 'pkFind'), 3000); });
+    const at = {}, x = await refusedFills(S2, popUp(S2, at)), pop = at.pop;
     ok(!x.was.ok && x.was.sent.includes('Runtime.evaluate') && x.own.some((o) => o.startsWith('pkFind:')), 'REPLAY ② the same look INSIDE the window (a tab the page opens is armed while the login is refused): the leg as it was is RED on it', x.was);
-    ok(x.rs.every(withdrawn) && noRoad(x) && x.own.length >= 2 && x.win.every((c) => c.tab === pop), '… the window names it — track · enable · armPrompts · armHook + pkFind, the watch\'s own, every one on the tab the page opened (r2d) — and the fill road still sent nothing', { own: x.own, road: x.road });
+    ok(x.rs.every(withdrawn) && noRoad(x) && x.own.length >= 2 && x.win.every((c) => c.tab === pop), '… the window names it — track · enable · armPrompts · armHook + pkFind, the watch\'s own, every one on the tab the page opened (r2d) and heard by the mid mark (r2e) — and the fill road still sent nothing', { own: x.own, road: x.road });
   } finally { await S2.close(); }
   {
     // r2c: the names can never hide the fill road — r2d: a second layer (the tab decides, mineOf) over EVERY product text that sends
@@ -902,6 +912,28 @@ console.log('⑩ RED controls — each mutant lets the bad fill through');
       const x = X ? await refusedFills(X) : null;
       ok(x && x.rs.every(withdrawn) && !noRoad(x) && x.road.length === n && x.road.every((c) => c.startsWith(method + '#')), `RED control ${name}: a watch copy whose fillLogin sends ${what} on the login tab before the gate (still refused by name) — the window counts all ${n} as the road's`, x && { to: x.to, own: x.own, road: x.road });
     } finally { if (X) await X.close(); }
+  }
+  // r2e (review r2d G1): a watch name is the watch's own only while it ARMS — a copy whose fillLogin re-arms the tab the page opened
+  // (G1, in REPLAY ②'s world) or attaches to a target id the stub never had (G7, in the leg's) still refuses by name: every call it
+  // sends rides a tab the mark did not know and speaks a watch name — after the mid mark the window counts each as the road's
+  for (const [name, what, ins, popped, n] of [
+    ['G1', 're-runs armHook on every tab but the first — the tab the page opened while the login is refused: its arm and pkFind\'s look, once per fill —', '    if (!w.kernel) { const es = [...w.targets.values()].filter((e) => e.sid); for (const e of es.slice(1)) await armHook(w, e, e.sid); }\n', true, 20],
+    ['G7', "sends track's attach to a target id the stub never had (awaited)", "    if (!w.kernel) await call(w, 'Target.attachToTarget', { targetId: 'T' + 'NOPE' + String(w.id), flatten: true });\n", false, 4],
+  ]) {
+    const MX = DSRC.includes(GATE) ? MUT.load('src/server/browser-dialogs.js', DSRC.replace(GATE, ins + GATE), 'r2e-' + name.toLowerCase()) : null;
+    const X = MX ? await world({ mode: { standard: true }, Dmod: MX, WebSocketImpl: popped ? OneRead : null }) : null;
+    try {
+      const at = {}, x = X ? await refusedFills(X, popped ? popUp(X, at) : null) : null, had = X ? new Set(X.k.targets().map((t) => t.targetId)) : null;
+      const after = x ? x.win.filter((c) => c.seq > x.mid) : [];
+      ok(x && x.rs.every(withdrawn) && !noRoad(x) && x.road.length === n && after.length === n && after.every((c) => ownOf(c) && (popped ? c.tab === at.pop : c.tab && !had.has(c.tab))), `RED control ${name}: a watch copy whose fillLogin ${what} before the gate (still refused by name) — all ${n} speak a watch name on a tab the mark did not know, after the mid mark: the window counts each as the road's`, x && { mid: x.mid, to: x.to, own: x.own, road: x.road });
+    } finally { if (X) await X.close(); }
+  }
+  // r2e (review r2d n1): the fence's own RED — a '1' with the fence's CDP id on the login tab heard BEFORE the fence's mark (a
+  // reconnect restarts ids at 0) never binds: answered, nothing new heard ⇒ NaN, the leg red
+  {
+    const tab = 'T' + 'STALE', stale = { seq: 3, id: 8, tab, method: 'Runtime.evaluate', params: { expression: '1' } };
+    const F = { k: { targets: () => [{ targetId: tab }], mark: () => 3, calls: () => [stale] }, w: { _watches: new Map([[PID, { id: 7 }]]), pageAnswers: async () => ({ asked: true, pages: [{ answered: true }] }) } };
+    ok(Number.isNaN(await fence(F)), 'RED control (the fence): a stale \'1\' with the fence\'s CDP id on the login tab, heard before the fence\'s own mark, never binds — NaN, the leg red', { stale });
   }
   // the pin's own RED controls: a fillLogin that says armHook's method double-quoted, or builds it at run time, is seen
   const LFS = fs.readFileSync(path.join(REPO, 'src/server/browser-login-fill.js'), 'utf8');
