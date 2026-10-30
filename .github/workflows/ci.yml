@@ -45,6 +45,38 @@ jobs:
       - name: Install dtach (session persistence layer the boot smoke needs)
         run: bash scripts/ci-apt.sh dtach
         timeout-minutes: 3
+      # THE GATE PINS THE TOOL IT REVIEWS (int365 seam, 2.369.365): test-vault-run-model ⑤c re-parses the LIVE gh against
+      # the gh grammar reviewed at gh 2.102.0 (src/vault-run.js's gh row: grammarVersion, the 32 help hashes, toolSha256) and
+      # is REQUIRED here. On 2026-10-30 the runner image rolled its gh to 2.103.2 and the .364 mirror's fast job went red on
+      # that one leg (run 41116833934). So this job installs THE reviewed gh: the release tarball for linux amd64, its sha256
+      # the literal below (= the line for it in the release's gh_2.102.0_checksums.txt — never fetched at run time), checked
+      # on every run, cache hit or miss, before anything is unpacked; its bin/gh is byte-identical to the row's toolSha256.
+      # It goes first on PATH for every later step. A re-pin (gen-gh-grammar.mjs --repin — a vault-agent-own re-review)
+      # moves the row AND these literals. The cache keeps the tarball, keyed on the version + its sha256; a stalled restore
+      # is a miss after 2 min (the fonts cache's rule).
+      - name: Cache the pinned gh
+        uses: actions/cache@v4
+        timeout-minutes: 3
+        env:
+          SEGMENT_DOWNLOAD_TIMEOUT_MINS: 2
+        with:
+          path: ~/.cache/vs-gh-pinned
+          key: gh-pinned-2.102.0-linux-amd64-bb766f710eef8ede859c18578c72c327597cd4c8a85b06001b1f3843c6019386
+      - name: Install the pinned gh 2.102.0 (the gh grammar census is reviewed at it)
+        timeout-minutes: 3
+        env:
+          GH_PIN_VERSION: 2.102.0
+          GH_PIN_SHA256: bb766f710eef8ede859c18578c72c327597cd4c8a85b06001b1f3843c6019386
+        run: |
+          set -euo pipefail
+          had=$( (gh --version 2>/dev/null || true) | sed -n 's/^gh version \([^ ]*\).*/\1/p')
+          tgz="gh_${GH_PIN_VERSION}_linux_amd64.tar.gz"; c="$HOME/.cache/vs-gh-pinned"; mkdir -p "$c"
+          [ -s "$c/$tgz" ] || curl -fsSL --retry 5 --connect-timeout 20 --max-time 120 -o "$c/$tgz" "https://github.com/cli/cli/releases/download/v${GH_PIN_VERSION}/${tgz}"
+          echo "${GH_PIN_SHA256}  $c/$tgz" | sha256sum -c --strict - || { rm -f "$c/$tgz"; echo "::error::the gh ${GH_PIN_VERSION} tarball is not the pinned sha256"; exit 1; }
+          d="$RUNNER_TEMP/gh-pinned"; rm -rf "$d"; mkdir -p "$d"; tar -xzf "$c/$tgz" -C "$d" --strip-components=1
+          [ "$("$d/bin/gh" --version | sed -n 's/^gh version \([^ ]*\).*/\1/p')" = "$GH_PIN_VERSION" ] || { echo "::error::the unpacked gh is not ${GH_PIN_VERSION}"; exit 1; }
+          echo "$d/bin" >> "$GITHUB_PATH"
+          echo "gh pinned ${GH_PIN_VERSION} (runner had ${had:-none})"
       - name: Install claude CLI (chat E2E; subscription oat auth is the
           officially documented CI channel — docs/en/github-actions)
         run: bash scripts/ci-npm.sh install -g @anthropic-ai/claude-code
