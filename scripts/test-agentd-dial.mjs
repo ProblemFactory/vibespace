@@ -339,7 +339,13 @@ async function neverConverging({ tag, bundleSrc, ms }) {
   const { HostManager } = require('../src/hosts.js');
   const dataC = path.join(tmp, `server-${tag}`, 'data'); fs.mkdirSync(path.join(dataC, 'bin'), { recursive: true });
   const stuckBundle = path.join(dataC, 'bin', 'vibespace-agentd.js'); // what deviceForDial SHIPS: reports 2.300.0 forever
-  const pinned = bundleSrc.replace('VERSION = process.env.VIBESPACE_AGENTD_VERSION || require_version().VERSION;', 'VERSION = "2.300.0";');
+  // The daemon's OWN site only, and exactly one (the .363 CI red: a plain String.replace matched src/agentd/stream-mac.js's
+  // `AGENT_VERSION = …` first — that reader sits earlier in the bundle — so the device kept reporting the real version and no
+  // upgrade was ever offered, while the guard below stayed green). No letter, digit, _ or $ may stand before VERSION.
+  const SITE = /(?<![\w$])VERSION = process\.env\.VIBESPACE_AGENTD_VERSION \|\| require_version\(\)\.VERSION;/g;
+  const sites = [...bundleSrc.matchAll(SITE)].map((m) => bundleSrc.slice(0, m.index).split('\n').length);
+  check(`(${tag}: the bundle has exactly ONE daemon VERSION site to pin — ${sites.length} found${sites.length ? ` at line ${sites.join(' + ')}` : ''})`, sites.length === 1);
+  const pinned = bundleSrc.replace(SITE, 'VERSION = "2.300.0";');
   check(`(${tag}: the shipped copy is pinned to report 2.300.0 whatever lands)`, pinned !== bundleSrc);
   fs.writeFileSync(stuckBundle, pinned);
   // lane device-bundle-signing (design q-042 D2): a hub pushes only the SIGNED release and the device lands only what a key
