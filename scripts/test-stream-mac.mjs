@@ -34,6 +34,10 @@
 //       round 9 (acceptance r8, §6 ROUND 9): a try is a DELIVERY — the device client's refusals before the channel opens (the owner's «Hub automation» gate,
 //       the allow list, no `by`, an old agent — by their code) spend none and are said once; the open refused at the Mac's door and a link dropped under
 //       the bytes spend one; the pending door names the NEXT run; the push line promises no re-push at dueAt while the Mac names a hold on these bytes
+//       round 10 (acceptance r9, §6 ROUND 10 — the REAL DeviceManager + the REAL hub-act-ask asker): the owner's answer is REMEMBERED — a Deny or «Never» on
+//       these bytes is asked once per hub life (another prebuilt or a changed policy asks once more), an unanswered ask comes again at most once per 6 h and
+//       never while a card is up; a throw of connect() (`stage: 'connect'`) spends no try, the end of a push never redials (+ a mutant control); a session
+//       still starting is never idle, one ended while it started stops the Mac's offered session
 //   §3 THE HELPER'S PLACE: ready at the shipped version (nothing run); none + no compiler ⇒ no_helper (the trampoline is never
 //      run); the hub's pushed prebuilt is put in place; a compiler ⇒ built (both slices at once, then lipo, codesign); a
 //      REPLACED helper that held its grant ⇒ regrant until the facts see the grant again; never rebuilt at the same version
@@ -1257,6 +1261,114 @@ const pictures = (rtp) => { const out = []; let cur = []; for (const p of rtp) {
       clock7 = TN + 30 * 60e3; await Nh.start(); const n2 = writes.length - wN;
       ok(pW.length === 1 && /try 1 of 8 — not sent again while the Mac's answer names its hold on these bytes \(the hold line at the next stream start names that hold's door; another prebuilt in this hub's helpers dir goes at that start\); with no hold named, pushed again at the first stream start after \S+ while the Mac still wants a signed build$/.test(pW[0]) && !/sooner only once/.test(pW[0]) && wv === 1 && Wh.holdLines().length === 1 && /not sent again while that verdict stands/.test(Wh.holdLines()[0]) && isoN === new Date(TN + 30 * 60e3).toISOString() && n1 === 1 && n2 === 2 && Nh.pushLines().length === 2 && /try 2 of 8/.test(Nh.pushLines()[1]), 'r9 the push line promises what the machine does — after the push: «not sent again while the Mac\'s answer names its hold on these bytes (…); with no hold named, pushed again at the first stream start after <ISO> …» — the Mac holding X for good: one push in 70 min and one hold line (the verdict\'s door); the Mac naming no hold: X again at the first start after that very ISO as try 2 of 8 (acceptance r8 unverified row: 20b87789b promised a re-push at dueAt the hub never makes while the Mac holds those bytes)', { wv, holds: Wh.holdLines().length, isoN, n1, n2 });
       await Wh.done(); await Nh.done(); putX();
+      // ROUND 10 (acceptance r9 — the code set held; two majors and a minor, latent until the Team ID: the owner's «Hub automation» gate was asked at every paced push for the hub's life — a Deny again every 30 min, 48 URGENT cards a day, about one per quiet window under a hold on the hub's own bytes; the device client's connect() throws, before any channel, spent tries; a card held start() past the idle sweep, which stopped the session with sid null and left the Mac's offered session open)
+      const HA = require(path.join(REPO, 'src/server/hub-act-ask.js'));
+      const d10 = home('smac-r10'), SDP10 = 'v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\n';
+      const nap10 = (ms) => new Promise((r) => setTimeout(r, ms));
+      // the REAL DeviceManager (fsWriteStream, _gate) + the REAL hub-act-ask asker on a CLUSTER instance (Hub automation «ask» by default); the Mac a stub that takes the bytes; the owner's hand on each card: deny | once | none (its 60-s timer fired) — `manual`: nobody's hand
+      const realMac10 = (hostId, o = {}) => {
+        const st = { clock: Date.UTC(2032, 0, 1), owner: o.owner || 'deny', setting: o.setting || 'auto', unfiled: false, cards: [], logs: [], devLog: [], opens: 0, ends: 0, macSids: new Set(), sidN: 0, ttl: null };
+        const asker = HA.create({ hosts: { get: () => ({ id: hostId, name: 'mac' }) }, now: () => st.clock, instanceKind: 'cluster', settingOf: () => st.setting,
+          userTodos: { add: (inbox, it) => { if (st.unfiled) throw new Error('too many open items'); st.cards.push({ at: st.clock }); const id = it.action.askId; if (!o.manual) setImmediate(() => { st.clock += 20e3; if (st.owner === 'none') { st.clock += 40e3; if (st.ttl) st.ttl(); } else asker.answer(id, { answer: st.owner, by: 'user', answeredBy: 'owner' }).catch(() => { }); }); return { id: 't' + st.cards.length }; }, get: () => null, setStatus: () => { } },
+          timers: { set: (fn) => { st.ttl = fn; return 1; }, clear: () => { st.ttl = null; } } });
+        const dm = new DeviceManager({ dataDir: d10, bundlePath: path.join(d10, 'none.js'), version: '0', log: (m) => st.devLog.push(String(m)), actGate: { check: (p, x) => asker.check(hostId, p, x), verdict: (p, x) => asker.verdict(hostId, p, x) } });
+        const conn = { info: { capabilities: ['fs-write-stream'], platform: 'darwin' }, nextChan: 1, sessions: new Map(), mux: { data: () => true } };
+        dm._conn = conn; dm.connect = async () => conn;
+        dm._request = async (req) => { if (req.step === 'open') st.opens++; if (req.step === 'end') { st.ends++; return { size: req.sent, sha256: req.sha256 }; } return { ok: true }; };
+        dm.streamOffer = async () => { if (o.noHelper && st.ends === 0) return { ok: false, code: 'no_helper', error: 'the Mac has no screen helper and no compiler', helper: { dir: PP.dir, version: SRC.VERSION } }; const sid = 'm' + (++st.sidN); st.macSids.add(sid); return { ok: true, sid, offer: { type: 'offer', sdp: SDP10 }, source: { kind: 'screen', origin: { x: 0, y: 0 } }, helper: { dir: PP.dir, version: SRC.VERSION, identity: { kind: 'adhoc' }, wantSigned: !o.noHelper } }; };
+        dm.streamStop = async (sid) => ({ ok: true, stopped: st.macSids.delete(sid) });
+        st.hub = DW.create({ access: { streamRung: async () => ({ take: true, source: 'screen', dm, platform: 'darwin' }) }, relay: false, udpLeg: false, helpersDir: hubBin, now: () => st.clock, ...(o.sweepMs ? { sweepMs: o.sweepMs } : {}), log: { log: (m) => st.logs.push(m), warn: (m) => st.logs.push(m) } });
+        st.asker = asker;
+        st.start = async (at) => { if (at != null) st.clock = at; const x = await st.hub.start(hostId); if (x.key) await st.hub.stop(x.key, 'stopped').catch(() => { }); return x; };
+        st.tries = () => st.logs.filter((m) => /try \d of 8|not again in this hub's life/.test(m)).length;
+        st.refusals = () => st.logs.filter((m) => /nothing sent, no try spent/.test(m));
+        st.notSent = () => st.devLog.filter((m) => /NOT SENT/.test(m)).length;
+        return st;
+      };
+      ident({});
+      // leg «r10 a Deny is asked once per hub life» (rule 1): the owner denies the signed push's card ⇒ 48 paced starts (24 h) file NO other card, spend no try, the refusal said once in true words («the owner's answer is kept …»); another prebuilt dropped in ⇒ asked ONCE more (denied); the policy changed (the instance's default → the setting «ask») ⇒ asked once more; set to «everyone» ⇒ it goes without a card (try 1 of 8). The list «Never»: one refusal, then nothing reaches the gate (no journal line per start) until the list becomes «ask» ⇒ one card. a74960179: 48 cards a day for the hub's life
+      const A10 = realMac10('host-r10-deny'); const TA10 = A10.clock;
+      for (let k = 0; k < 48; k++) await A10.start(TA10 + k * 30 * 60e3);
+      const d1x10 = A10.cards.length, dRx10 = A10.refusals();
+      putY(); for (let k = 48; k < 60; k++) await A10.start(TA10 + k * 30 * 60e3);
+      const d2x10 = A10.cards.length;
+      A10.setting = 'ask'; for (let k = 60; k < 72; k++) await A10.start(TA10 + k * 30 * 60e3);
+      const d3x10 = A10.cards.length;
+      A10.setting = 'everyone'; await A10.start(TA10 + 72 * 30 * 60e3);
+      putX();
+      const N10 = realMac10('host-r10-never', { setting: 'nobody' }); const TN10 = N10.clock;
+      for (let k = 0; k < 24; k++) await N10.start(TN10 + k * 30 * 60e3);
+      const nNot10 = N10.notSent(), nCards10 = N10.cards.length, nR10 = N10.refusals();
+      N10.setting = 'ask'; for (let k = 24; k < 36; k++) await N10.start(TN10 + k * 30 * 60e3);
+      ok(d1x10 === 1 && dRx10.length === 1 && /\(hub_act_denied: the user denied it/.test(dRx10[0]) && /nothing sent, no try spent \(0 of 8 spent\); the owner's answer is kept — these bytes are not asked about again in this hub's life while the machine's Hub automation policy stands \(a change of that policy asks once more; another prebuilt in this hub's helpers dir is asked about once/.test(dRx10[0]) && d2x10 === 2 && d3x10 === 3 && A10.cards.length === 3 && A10.opens === 1 && A10.tries() === 1 && /try 1 of 8/.test(A10.logs.filter((m) => /pushed this hub's signed prebuilt/.test(m))[0] || '') && nCards10 === 0 && nNot10 === 1 && nR10.length === 1 && /its Hub automation list is Never/.test(nR10[0]) && N10.cards.length === 1 && N10.notSent() === 2 && N10.tries() === 0, 'r10 a Deny is asked once per hub life — the owner denies the card: 48 paced starts (24 h) file no other card and spend no try, said once («the owner\'s answer is kept — these bytes are not asked about again in this hub\'s life while the machine\'s Hub automation policy stands»); another prebuilt dropped in ⇒ one card more; the policy changed ⇒ one card more; «everyone» ⇒ pushed without a card (try 1 of 8); the list «Never» ⇒ one refusal in 24 starts (the gate not asked again), its change to «ask» ⇒ one card (acceptance r9 M1: a74960179 re-asked a Deny at every paced push — 48 urgent cards a day for the hub\'s life)', { d1x10, d2x10, d3x10, cards: A10.cards.length, opens: A10.opens, refusals: dRx10.length, nCards10, nNot10, n2: N10.cards.length });
+      // leg «r10 an unanswered ask comes again at most once per 6 h» (rule 1): nobody answers (each card's 60-s timer fires) — 288 starts every 5 min (24 h) ⇒ cards at minutes 0, 360, 720, 1080 only, no try, each said with its door («asked again no sooner than <ISO> — at most once per 6 h …»); a card For you could not file (ask_unfiled) is paced the same (4 attempts a day reach the gate); never while a card is up: an agent's file act on this machine holds its card ⇒ the due push files none and joins none (a74960179: 48 a day, unfiled 48)
+      const U10 = realMac10('host-r10-none', { owner: 'none' }); const TU10 = U10.clock;
+      for (let k = 0; k < 288; k++) await U10.start(TU10 + k * 5 * 60e3);
+      const uMin10 = U10.cards.map((c) => Math.round((c.at - TU10) / 60e3)), uR10 = U10.refusals();
+      const F10 = realMac10('host-r10-unfiled'); F10.unfiled = true; const TF10 = F10.clock;
+      for (let k = 0; k < 288; k++) await F10.start(TF10 + k * 5 * 60e3);
+      const C10 = realMac10('host-r10-cardup', { manual: true });
+      const agentAct10 = C10.asker.check('host-r10-cardup', { op: 'fs-op', action: 'write', path: '/Users/me/notes.txt', by: 'agent:a1' }); // an agent's file act on this Mac: its card is up, unanswered
+      const cStart10 = C10.start(C10.clock); await nap10(20); // the start beside the agent's card (a74960179's push JOINED it and waited)
+      const cUp10 = C10.cards.length, cWait10 = (C10.asker.list()[0] || {}).waiting, cR10 = C10.refusals();
+      if (C10.ttl) C10.ttl(); const cAgent10 = await agentAct10; await cStart10;
+      ok(uMin10.join() === '0,360,720,1080' && U10.tries() === 0 && U10.opens === 0 && uR10.length === 4 && new RegExp(`\\(ask_expired: nobody answered within 60 s.*nothing sent, no try spent \\(0 of 8 spent\\); asked again no sooner than ${new Date(TU10 + 360 * 60e3).toISOString()} — at most once per 6 h while nobody answers, never while a card is up`).test(uR10[0]) && F10.cards.length === 0 && F10.notSent() === 4 && F10.refusals().length === 4 && /\(ask_unfiled: /.test(F10.refusals()[0]) && cUp10 === 1 && cWait10 === 1 && C10.opens === 0 && cR10.length === 1 && /a For you card about changing files on this machine is up — this push files none and joins none; nothing sent, no try spent \(0 of 8 spent\); looked at again at the first stream start after \S+, when no card is up/.test(cR10[0]) && cAgent10 && cAgent10.ok === false && cAgent10.code === 'ask_expired', 'r10 an unanswered ask comes again at most once per 6 h — nobody answers: 288 starts in 24 h file cards at minutes 0 / 360 / 720 / 1080 only, no try, each said with its door; a card For you could not file is paced the same (4 a day); a card up for another file act on this Mac ⇒ the due push files none and joins none (acceptance r9 M1: a74960179 re-asked every 30 min — 48 a day, unfiled 48)', { uMin10, uR10: uR10.length, unfiled: F10.notSent(), cUp10, cWait10 });
+      // leg «r10 a throw of connect() spends no try» (rule 2): the REAL connect() throws before any channel — the link token's function (`vault_locked`: a locked vault), a dialed device that refused the host key («auth failed»), a client stopped («stopped», no code) — marked `stage: 'connect'` at its one exit: the signed push says it once («the push never left this hub — the device link did not connect (<code>: …)») and spends no try over 9 paced starts; the link back ⇒ pushed, try 1 of 8 (a74960179: «try 1 … 7 of 8», then «not again in this hub's life» with nothing sent)
+      const cRows10 = [];
+      for (const mode of ['vault_locked', 'auth_failed', 'stopped']) {
+        let clock = Date.UTC(2032, 2, 1), down = true, opens = 0; const logs = [];
+        const conn = { info: { capabilities: ['fs-write-stream'], platform: 'darwin' }, nextChan: 1, sessions: new Map(), mux: { data: () => true } };
+        const transport = { kind: 'stream', getStream: () => null, hostToken: () => { if (down && mode === 'vault_locked') throw Object.assign(new Error('the vault is locked — the link token opens after the owner unlocks the vault'), { code: 'vault_locked' }); return 'tok'; } };
+        const dm = new DeviceManager({ dataDir: d10, bundlePath: path.join(d10, 'none.js'), version: '0', log: () => { }, transport });
+        dm._tryOnce = async () => { if (down && mode === 'auth_failed') throw Object.assign(new Error('agentd auth failed — token mismatch'), { code: 'auth_failed' }); dm._conn = conn; return conn; };
+        if (mode === 'stopped') dm._stopped = true;
+        dm._request = async (req) => { if (req.step === 'open') opens++; return req.step === 'end' ? { size: req.sent, sha256: req.sha256 } : { ok: true }; };
+        dm.streamOffer = async () => { dm._conn = null; return { ok: true, sid: 'c1', offer: { type: 'offer', sdp: SDP10 }, source: { kind: 'screen', origin: { x: 0, y: 0 } }, helper: { dir: PP.dir, version: SRC.VERSION, identity: { kind: 'adhoc' }, wantSigned: true } }; }; // the answer came on a live link; it dropped right after
+        dm.streamStop = async () => ({ ok: true });
+        const hub = DW.create({ access: { streamRung: async () => ({ take: true, source: 'screen', dm, platform: 'darwin' }) }, relay: false, udpLeg: false, helpersDir: hubBin, now: () => clock, log: { log: (m) => logs.push(m), warn: (m) => logs.push(m) } });
+        const T = clock, startAt = async (k) => { clock = T + k * 31 * 60e3; const x = await hub.start('host-r10-' + mode); if (x.key) await hub.stop(x.key, 'stopped').catch(() => { }); };
+        for (let k = 0; k < 9; k++) await startAt(k);
+        const e = await dm.fsWriteStream('/Users/me/x', { source: (async function* () { })(), size: 0, by: 'system:test' }).then(() => null, (x) => x);
+        const triesDown = logs.filter((m) => /try \d of 8|not again in this hub's life/.test(m)).length, lines = logs.filter((m) => /the push never left this hub — the device link did not connect/.test(m));
+        down = false; dm._stopped = false; await startAt(9);
+        cRows10.push({ mode, triesDown, lines: lines.length, word: lines[0] || '', stage: e && e.stage, code: e && e.code, opensDown: opens, healed: logs.filter((m) => /pushed this hub's signed prebuilt.*try 1 of 8/.test(m)).length });
+        hub.shutdown();
+      }
+      ok(cRows10.length === 3 && cRows10.every((r) => r.triesDown === 0 && r.lines === 1 && r.stage === 'connect' && r.healed === 1) && /\(vault_locked: the vault is locked/.test(cRows10[0].word) && cRows10[0].code === 'vault_locked' && /\(auth_failed: agentd auth failed/.test(cRows10[1].word) && /\(no code: stopped\); nothing sent, no try spent \(0 of 8 spent\)/.test(cRows10[2].word), 'r10 a throw of connect() spends no try — the REAL connect() throwing before any channel (a locked vault\'s `vault_locked` from the token function, «auth failed», «stopped» with no code) is marked `stage: \'connect\'`: 9 paced starts say it once and spend no try; the link back ⇒ pushed as try 1 of 8 (acceptance r9 finding 3: a74960179 spent a try per start — «not again in this hub\'s life» after eight with nothing sent)', cRows10.map((r) => ({ ...r, word: r.word.slice(0, 120) })));
+      // …and the end of a push never redials: the link dropped after the last byte ⇒ `stalled` (the bytes went — a delivery), never connect()'s «never sent» shape; RED control: a copy of client.js without that line (a text replace, its requires made absolute) marks the very same drop `stage: 'connect'`
+      const endRun10 = async (DMC) => {
+        const dm = new DMC({ dataDir: d10, bundlePath: path.join(d10, 'none.js'), version: '0', log: () => { }, transport: { kind: 'stream', getStream: () => null, hostToken: 'tok' } });
+        const conn = { info: { capabilities: ['fs-write-stream'], platform: 'darwin' }, nextId: 1, nextChan: 1, pending: new Map(), sessions: new Map(), mux: { data: () => true, control: (m) => setImmediate(() => { const f = conn.pending.get(m.id); if (f) { conn.pending.delete(m.id); f({ op: 'fs-result', id: m.id, ok: true }); } }) } };
+        dm._conn = conn; dm._tryOnce = async () => { throw Object.assign(new Error('agentd auth failed — token mismatch'), { code: 'auth_failed' }); }; // the REAL connect(): the live link, then a redial the device refuses
+        const src = (async function* () { yield Buffer.alloc(64, 7); dm._conn = null; })(); // the link drops after the last byte
+        return dm.fsWriteStream('/Users/me/x', { source: src, size: 64, by: 'system:test' }).then(() => null, (x) => x);
+      };
+      const eEnd10 = await endRun10(DeviceManager);
+      const clientText10 = fs.readFileSync(path.join(REPO, 'src/agentd/client.js'), 'utf8');
+      const END_LINE10 = "      if (linkGone()) throw Object.assign(new Error('the link to the machine dropped'), { code: 'stalled' }); // lane apple-signing r10";
+      const mutClient10 = clientText10.replace(END_LINE10, '      void 0; //').replace(/require\('\.\.\/([^']+)'\)/g, (m, f) => `require(${JSON.stringify(path.join(REPO, 'src', f))})`).replace(/require\('\.\/([^']+)'\)/g, (m, f) => `require(${JSON.stringify(path.join(REPO, 'src/agentd', f))})`);
+      const mutFile10 = path.join(d10, 'client.r10-no-end-check.js'); fs.writeFileSync(mutFile10, mutClient10);
+      const eMut10 = await endRun10(require(mutFile10).DeviceManager);
+      ok(clientText10.includes(END_LINE10) && eEnd10 && eEnd10.code === 'stalled' && eEnd10.stage === undefined && mutClient10 !== clientText10 && eMut10 && eMut10.stage === 'connect', 'r10 the end of a push never redials — the link dropped after the last byte ⇒ `stalled` (a delivery: the bytes went), never `stage: \'connect\'`; RED control: client.js without that line marks the same drop «never sent» (a redial\'s connect() throw)', { end: eEnd10 && { code: eEnd10.code, stage: eEnd10.stage }, mut: eMut10 && { code: eMut10.code, stage: eMut10.stage } });
+      // leg «r10 a session still starting is never idle» (rule 3): the owner's card holds the push 45 s (the hub's clock) while the sweep runs every 5 ms — the signed road (the Mac's session offered BEFORE the push) and the no-helper road (offered after it): no «stopped (idle)» while start() has not answered, the key polls, the idle clock starts at the answer (31 s with no poll ⇒ stopped WITH its sid — the Mac's session ends); the hub shut down under the card ⇒ start() answers take:false and stops the Mac's offered session itself (a74960179: «session null stopped (idle)», take:true for a key already gone, the Mac's session left open toward too_many_streams)
+      const sweepRoad10 = async (hostId, o = {}) => {
+        const S = realMac10(hostId, { manual: true, sweepMs: 5, ...o });
+        let done = false; const p = S.hub.start(hostId).then((x) => { done = true; return x; });
+        for (let i = 0; i < 400 && !done && S.cards.length === 0; i++) await nap10(2);
+        const cardUp = S.cards.length === 1 && !done;
+        S.clock += 45e3; await nap10(40); // the owner reads the card 45 s; the sweep runs meanwhile
+        if (o.shutdown) S.hub.shutdown();
+        const k = S.asker.list()[0]; if (k) await S.asker.answer(k.askId, { answer: 'once', by: 'user', answeredBy: 'owner' });
+        const x = await p;
+        const idleWhileStarting = S.logs.filter((m) => /stopped \(idle\)/.test(m)).length;
+        const polled = x.key ? await S.hub.poll(x.key, 0, -1, 0) : null;
+        if (x.key) { S.clock += 31e3; await nap10(40); } // 31 s with no poll ⇒ the sweep
+        const stops = S.logs.filter((m) => /session \S+ stopped \(/.test(m));
+        S.hub.shutdown(); await nap10(5);
+        return { cardUp, take: x.take, code: x.code || null, why: x.why || null, polled: polled ? (polled.ended || 'live') : null, idleWhileStarting, stops, macLeft: [...S.macSids], ends: S.ends };
+      };
+      const sSigned10 = await sweepRoad10('host-r10-sweep-signed'), sUnsigned10 = await sweepRoad10('host-r10-sweep-nohelper', { noHelper: true }), sShut10 = await sweepRoad10('host-r10-sweep-shutdown', { shutdown: true });
+      ok([sSigned10, sUnsigned10].every((r) => r.cardUp && r.take === true && r.polled === 'live' && r.idleWhileStarting === 0 && r.stops.length === 1 && /session m1 stopped \(idle\)/.test(r.stops[0]) && r.macLeft.length === 0 && r.ends === 1) && sShut10.cardUp && sShut10.take === false && sShut10.code === 'offer_failed' && /stopped while it started \(shutdown\)/.test(sShut10.why) && sShut10.macLeft.length === 0 && sShut10.stops.some((m) => /session m1 stopped \(shutdown while it was starting\)/.test(m)), 'r10 a session still starting is never idle — the owner\'s card holds the push 45 s under a 5-ms sweep, on the signed road and the no-helper road: no «stopped (idle)» before start() answers, the key polls, 31 s with no poll after it ⇒ stopped WITH its sid (the Mac\'s session ends); the hub shut down under the card ⇒ take:false and the Mac\'s offered session stopped by start() itself (acceptance r9 minor: a74960179 stopped it with sid null and left the Mac\'s session open)', { sSigned10, sUnsigned10, sShut10 });
     }
   }
   if (sp.key) await hub2.stop(sp.key, 'stopped').catch(() => { });

@@ -55,6 +55,14 @@ function posixShellFailed(info, cmd, r) {
   return (r.spawnError && r.spawnError.code === 'ENOENT') || (r.code === 127 && /ENOENT/.test(String(r.error || ''))) ? noShellError(base) : null;
 }
 
+/** lane apple-signing r10: a throw of connect() marked `stage: 'connect'` (the error itself; a value that cannot take the mark — not an object,
+ *  frozen — is wrapped, its code kept, as `cause`). Idempotent: connect()'s one exit marks it, and so does fsWriteStream's first line — whatever
+ *  connect() is there (a subclass's, a suite's stand-in). */
+function connectFailure(e) {
+  if (e && typeof e === 'object') { try { e.stage = 'connect'; if (e.stage === 'connect') return e; } catch { /* frozen: wrapped below */ } }
+  return Object.assign(new Error(String((e && e.message) || e || 'connect failed')), { ...(e && typeof e === 'object' && e.code ? { code: e.code } : {}), stage: 'connect', cause: e });
+}
+
 class DeviceManager {
   /**
    * @param {object} opts
@@ -305,12 +313,15 @@ class DeviceManager {
     this._log(`[agentd] spawned local daemon pid=${child.pid}`);
   }
 
-  /** connect (spawning if needed) — resolves with {mux, info}; retries internally. */
+  /** connect (spawning if needed) — resolves with {mux, info}; retries internally. Lane apple-signing r10: what it throws is marked
+   *  `stage: 'connect'` HERE, at its one exit (every caller and every joiner awaits this promise) — a throw before any channel, whatever its code
+   *  (a locked vault's `vault_locked` from the token function, `auth_failed`, «cannot reach the local daemon», «stopped»): a caller tells «never
+   *  sent» by that shape, never by a message's words (the hub's signed-helper push spends no try on it — src/server/desktop-webrtc.js). */
   async connect() {
     if (this._conn) return this._conn;
     if (this._connecting) return this._connectPromise;
     this._connecting = true;
-    this._connectPromise = this._connectLoop();
+    this._connectPromise = this._connectLoop().catch((e) => { throw connectFailure(e); });
     try { return await this._connectPromise; }
     finally { this._connecting = false; }
   }
@@ -717,7 +728,14 @@ class DeviceManager {
     const l = DA.lineOf({ at: Date.now(), payload, by: payload.by, ok: false, code: g.code, ask: g.ask, answeredBy: g.answeredBy });
     try { this._log(`[device-acts] NOT SENT ${l.op} by ${l.by} — ${g.code}: ${l.summary}`); } catch { }
     if (this._onAct) { try { this._onAct(l); } catch { } }
-    throw Object.assign(new Error(g.error || g.code), { code: g.code });
+    throw Object.assign(new Error(g.error || g.code), { code: g.code, ...(typeof g.ask === 'string' ? { ask: g.ask } : {}) }); // lane apple-signing r10: + the asker's own word (never / denied / expired / unfiled / quiet / error) — what the owner's gate came to, by its word, never by a message
+  }
+  /** lane apple-signing r10: the machine's 「Hub 自动化」 verdict of an act NOW — the gate's sync verdict: nothing asked, nothing filed, nothing sent
+   *  (null when no gate is wired) → { verdict: allow | ask | deny, reason, policy, source, join } — the hub's signed-helper push reads whether the
+   *  policy an owner's answer was given under still stands, and whether a card for this machine's acts of that kind is up. */
+  actVerdict(payload) {
+    if (!this._actGate || typeof this._actGate.verdict !== 'function') return null;
+    try { const v = this._actGate.verdict(payload); return v && typeof v === 'object' ? { verdict: v.verdict, reason: v.reason, policy: v.policy, source: v.source, join: v.join === true } : null; } catch { return null; }
   }
   /** lane hub-act-ask: the hello's update verdict (sync) → null (push it now) | 'ask' | 'deny' (said once, the agent kept). */
   _upgradeHeld(from) {
@@ -845,7 +863,7 @@ class DeviceManager {
    *  `size` is announced up front: more or fewer bytes is a failure, never a short file. `check()` is asked every
    *  window (8 MiB) — a throw (the grant revoked, the caller gone) aborts. Any failure removes the part. → `{size, sha256}`. */
   async fsWriteStream(p, { source, size, overwrite = false, check = null, windowBytes = 8 * 1024 * 1024, by, consent = false } = {}) {
-    const conn = await this.connect();
+    let conn; try { conn = await this.connect(); } catch (e) { throw connectFailure(e); } // lane apple-signing r10: before any channel — `stage: 'connect'`
     if (!conn.info?.capabilities?.includes?.('fs-write-stream')) { const e = new Error('daemon lacks fs-write-stream (capabilities gate) -- upgrade the agent on this machine'); e.code = 'host_needs_daemon'; throw e; }
     if (!DA.validBy(by)) return this._refuseAct({ op: 'fs-op', action: 'write-stream', step: 'open', path: p, size }); // lane device-act-audit: before the channel opens (after the capability gate — §74)
     const asked = await this._gate({ op: 'fs-op', action: 'write-stream', step: 'open', path: p, size, overwrite: !!overwrite, by }, { consent }); // lane hub-act-ask: before the channel opens (a refusal sends nothing, not even an abort)
@@ -883,6 +901,7 @@ class DeviceManager {
       }
       if (sent !== size) throw Object.assign(new Error(`${sent} bytes arrived of the ${size} announced`), { code: 'size_changed' });
       if (check) await check(sent);
+      if (linkGone()) throw Object.assign(new Error('the link to the machine dropped'), { code: 'stalled' }); // lane apple-signing r10: the end goes on the link the bytes went on, or not at all — never a redial's connect() after the bytes (its throw is `stage: 'connect'`, a «never sent» shape; these bytes went)
       const r = await this._request({ op: 'fs-op', action: 'write-stream', step: 'end', path: p, chan, sent, sha256: contentHash.digest('hex'), waitMs: 120000, by });
       return { size: r.size, sha256: r.sha256 };
     } catch (e) { await abort(); throw e; }
