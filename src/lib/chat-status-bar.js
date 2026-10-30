@@ -16,7 +16,7 @@ const PHONE_MQ = typeof window !== 'undefined' && window.matchMedia ? window.mat
 export const NARROW_BAR_PX = 480;
 export const SHORT_WINDOW_PX = 300;
 /** The regular class's one-row bar keeps these (the model, the billing icon, a dropped ssh pipe's amber chip); the rest fold behind ﹀. */
-const REGULAR_BAR_KEEP = new Set(['model', 'billing', 'remote', 'foryou']); // + lane chat-needs-you-card: what waits on the person never folds
+const REGULAR_BAR_KEEP = new Set(['model', 'billing', 'remote']); // (lane needs-card-tail r10: what waits on the person is the window's attention dock, never a bar chip)
 import { waitingChip } from '../helper-ask.js'; // PURE (lane S1): the waiting chip names who waits
 import { billingAuthKey, placementNote } from './pool-priority-model.js'; // PURE: THE ONE billing re-render key + the placement note (the title chip's twin)
 import { chipText as channelChipText, rowName as channelRowName, rowWords as channelRowWords, glyphFor as channelGlyphFor } from '../channel-touch.js'; // PURE (§26, B-099e): the channels chip's words
@@ -76,7 +76,7 @@ export class ChatStatusBar {
    * @param {function} opts.openInTempEditor - (text) => void
    * @param {function} [opts.startReview] - ({ target, delivery }) => void
    */
-  constructor(ws, sessionId, { backend = 'claude', allowReview = false, getToolMsg, openSubagentViewer, openInTempEditor, startReview, onConfigChange, onOpenWorkflow, getWorkflowIds, onWorkflowVerdict = null, onDesignRequest = null, onOpenDesign = null, onPublishDesign = null, onRestartSession = null, onSearch = null, onBrowserAction = null, onJumpToAsk = null, onJumpToNeed = null, onChannelOpen = null, onOpenArtifact = null, app = null, onOpenArtifactsWindow = null }) {
+  constructor(ws, sessionId, { backend = 'claude', allowReview = false, getToolMsg, openSubagentViewer, openInTempEditor, startReview, onConfigChange, onOpenWorkflow, getWorkflowIds, onWorkflowVerdict = null, onDesignRequest = null, onOpenDesign = null, onPublishDesign = null, onRestartSession = null, onSearch = null, onBrowserAction = null, onJumpToAsk = null, onChannelOpen = null, onOpenArtifact = null, app = null, onOpenArtifactsWindow = null }) {
     this._ws = ws;
     // §26 (B-099e): the conversations THIS TURN read or drafted (PURE chipView over the witness's ring — the
     // view hands it over) and the one door that opens one; null = the turn touched nothing (no chip)
@@ -89,8 +89,6 @@ export class ChatStatusBar {
     // first) and its click goes there — null = the view cannot jump (no chip click)
     this._pendingAsks = [];
     this._onJumpToAsk = onJumpToAsk;
-    this._onJumpToNeed = onJumpToNeed; // lane chat-needs-you-card: the «waiting for you · N» chip lands a needs card (lane needs-card-tail: (id) — the row chosen in its list, else the newest)
-    this._needs = null; // {text, title, n} — PURE foryou-actions chipWords, or null (no chip)
     // The touch face of Ctrl+F (docs/design-mobile-gaps.md #4): a magnifier
     // chip the stylesheet shows only ≤768px (the steer bolt's split). null =
     // the view has no search bar (never rendered).
@@ -671,49 +669,6 @@ export class ChatStatusBar {
     this.render();
   }
 
-  /** lane chat-needs-you-card: this conversation's own open For-you items (src/lib/chat-needs-card.js) — the chip's words
-   *  (PURE chipWords: «waiting for you · an approval» / «· 3 approvals» / «· 3»), or null = no chip. */
-  setNeeds(words) {
-    const next = words && words.text ? { text: String(words.text), title: String(words.title || ''), n: Number(words.n) || 0 } : null;
-    // lane needs-card-tail: THE INDEX's rows (every open ask, newest first — {id, words, ago}); an open list follows them in
-    // place, so an answer anywhere drops its row in the pass that drops the count
-    this._needRows = next && Array.isArray(words.rows) ? words.rows.filter((r) => r && typeof r.id === 'string') : [];
-    this._fillNeedsList();
-    const sig = next ? `${next.text}\u0000${next.title}` : '';
-    if (sig === (this._needsSig || '')) return;
-    this._needsSig = sig;
-    this._needs = next;
-    this.render();
-  }
-
-  /** lane needs-card-tail: the chip's list — every open ask, newest first, one row each (the question · its age — the age
-   *  kept, the last thing on the line); a row lands its ask and closes the list. `dd` = the list just opened, else the open
-   *  one is refilled in place (none open ⇒ nothing; no row left ⇒ it closes). */
-  _fillNeedsList(dd = null) {
-    const list = dd || (this._popupContainer || this._element?.parentElement)?.querySelector?.('.chat-status-dropdown.chat-needs-list');
-    if (!list) return;
-    const rows = this._needRows || [];
-    if (!rows.length) { list.remove(); return; }
-    const sig = rows.map((r) => `${r.id}\u0000${r.words}\u0000${r.ago}`).join('\u0001');
-    if (list.dataset.sig === sig) return;
-    list.dataset.sig = sig;
-    list.replaceChildren();
-    const head = document.createElement('div');
-    head.className = 'chat-needs-list-head';
-    head.textContent = t('Waiting for you — newest first');
-    list.append(head);
-    for (const r of rows) {
-      const b = document.createElement('button');
-      b.type = 'button';
-      b.className = 'chat-status-dropdown-item chat-needs-pick';
-      b.dataset.item = r.id;
-      b.title = String(r.words || '');
-      b.innerHTML = `<span class="chat-needs-pick-words">${escHtml(String(r.words || ''))}</span><span class="chat-needs-pick-ago">\u00a0·\u00a0${escHtml(String(r.ago || ''))}</span>`;
-      b.onclick = (ev) => { ev.stopPropagation(); list.remove(); this._onJumpToNeed?.(r.id); };
-      list.append(b);
-    }
-  }
-
   setReviewEnabled(enabled) {
     this._reviewEnabled = !!enabled;
     this.render();
@@ -828,7 +783,6 @@ export class ChatStatusBar {
     // lane chat-needs-you-card (the owner 2026-10-26: «这个界面里是不是应该有个地方能让我看到需要approve？»): THIS conversation's own
     // For-you items — a channel watch's approval, an ask with its choices, a secret to paste — are cards in the chat; the
     // chip names how many wait and of what kind, and its click lands the newest card whole and flashes it (S1's jump)
-    if (this._needs) chip('foryou', `chat-status-foryou chat-status-needs-action${typeof this._onJumpToNeed === 'function' ? ' chat-status-clickable' : ''}`, this._needs.title, `${UI_ICONS.inbox} ${escHtml(this._needs.text)}`);
 
     // SESSION HEALTH (§2.6, round 4) — the init frame's non-working MCP
     // servers / config entries / plugins, on the ONE surface that does not
@@ -1542,20 +1496,6 @@ export class ChatStatusBar {
       return dropdown;
     };
 
-    // lane chat-needs-you-card: the «waiting for you · N» chip — lane needs-card-tail (the owner 2026-10-28: «这个应该同时堆叠在
-    // 页面最下吗？»): THE INDEX — one ask ⇒ its click lands it; several ⇒ the list (newest first, the question · its age) and
-    // choosing a row lands that one (the needs cards' ONE landing: its record, the history loaded up to it, or the dock)
-    const needsChip = e.target.closest('.chat-status-foryou.chat-status-clickable');
-    if (needsChip) {
-      e.stopPropagation();
-      const rows = this._needRows || [];
-      if (rows.length < 2) { this._onJumpToNeed?.(rows.length ? rows[0].id : null); return; }
-      const dropdown = showDropdown(needsChip, { minWidth: 260, maxWidth: 480 });
-      if (!dropdown) return;
-      dropdown.classList.add('chat-needs-list');
-      this._fillNeedsList(dropdown);
-      return;
-    }
     // Collapsed multi-workflow chip → dropdown, one row per run
     const wfMulti = e.target.closest('.chat-status-wf-multi');
     if (wfMulti && this._runningWorkflows().length) {

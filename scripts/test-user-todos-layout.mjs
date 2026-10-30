@@ -21,6 +21,10 @@
 // and THE CENSUS: every two-argument .add( / ?.add( on any receiver under src/
 // and server.js declares a literal origin, the one its file produces (grep-
 // derived, with planted/patched/evasion controls — an unwired site FAILS here).
+// ㉖ (lane needs-card-tail r10): THE ATTENTION DOCK is a LAYOUT OF THE SAME STORE — the strip above a chat's message box
+// shows dockOf(needsOf(todos.open, keys)): its count = the conversation's open needs (the cards' own list), its row = the
+// newest of them; a resolve anywhere moves both in the same snapshot; the mini inbox's own-key rows are the same items; the
+// strip draws THE row and wires THE verbs through the panel (one row renderer, one answer writer) — with negative controls.
 // ㉕ (lane needs-card-tail R5): THE DOOR LANDS — every conversation a For-you surface opens is model.jump's (grep-derived,
 // RED by file:line; two named non-doors) and jump lands each through ONE helper (landOnFiling → the chat's landing).
 import fs from 'node:fs';
@@ -1699,6 +1703,36 @@ console.log('   lane lark-refresh-stall r2: a WORDS param\'s own params — kept
   const rowSrc = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-row.js'), 'utf8');
   ok(/i\.i18n\.text\.params\.cause && typeof i\.i18n\.text\.params\.cause === 'object'/.test(rowSrc) && rowSrc.includes("(wraps ? ' ut-item-wraps' : '')"), 'a row whose words carry a CAUSE wears ut-item-wraps');
   ok(css0().includes(':is(#user-todos-popup, #phone-home, .ut-mini-popover, body) .ut-item.ut-item-wraps:not(.ut-open) > .ut-body > .ut-text { display: block !important; -webkit-line-clamp: unset !important; line-clamp: none !important; overflow: visible !important; }'), '…and that row is never clamped (one rule over every surface, after the clamps)');
+}
+
+console.log('㉖ THE ATTENTION DOCK (lane needs-card-tail r10) — a layout of the same store: the count = the conversation\'s open needs, the row = the newest; one row renderer, one answer writer');
+{
+  const require = (await import('node:module')).createRequire(import.meta.url);
+  const FA = require(path.join(ROOT, 'src/foryou-actions.js'));
+  if (typeof FA.dockOf !== 'function' || typeof FA.flowPlan !== 'function') { ok(false, 'PURE dockOf + flowPlan exist (src/foryou-actions.js — the dock\'s layout)'); FA.dockOf = () => null; FA.flowPlan = () => ({ waiting: [] }); } // (RED copies: named, never a crash)
+  const L = await import(path.join(ROOT, 'src/lib/user-todos-layout.js'));
+  const ME = 'claude:dock1', K = [ME, 'webui:sess-d'];
+  const ask = (id, at, extra = {}) => ({ id, status: 'open', kind: 'action', origin: 'agent', by: 'agent', sessionKey: ME, text: 'the ask ' + id, urgency: 'normal', createdAt: at, action: { type: 'reply' }, ...extra });
+  const open = [ask('ut-d1', 10), ask('ut-d2', 30), ask('ut-d3', 20), ask('ut-o1', 40, { sessionKey: 'claude:other' }), ask('ut-n1', 50, { kind: 'notice' }), ask('ut-g1', 45, { sessionKey: 'grp', about: ME })];
+  const dockFor = (todos) => FA.dockOf(FA.flowPlan(FA.needsOf(todos.open, K), [], {}).waiting);
+  const d0 = dockFor({ open, resolved: [] });
+  const needs = FA.needsOf(open, K).map((e) => e.item.id).sort();
+  ok(!!d0 && d0.n === needs.length && d0.n === 4 && d0.newest.id === 'ut-g1', `the dock's count is the conversation's open needs (${needs.join(', ')} — its own key, its webui twin, an item ABOUT it; never another conversation's, never a notice) and its row the NEWEST of them (ut-g1, filed at 45)`, d0 && { n: d0.n, newest: d0.newest.id });
+  const mine = L.miniInboxEntries(null, { open, resolved: [] }, K).entries.filter((e) => !e.notice).map((e) => e.item.id).sort();
+  ok(JSON.stringify(mine) === JSON.stringify(needs.filter((id) => id !== 'ut-g1')), `the mini inbox (its own key only — a SURFACES row says \`about\` is deferred there) lists the same items as the dock less the one filed ABOUT it (${mine.join(', ')})`, { mine, needs });
+  const t1 = { open: open.filter((i) => i.id !== 'ut-g1'), resolved: [{ ...open[5], status: 'done' }] };
+  const d1 = dockFor(t1);
+  ok(!!d1 && d1.n === 3 && d1.newest.id === 'ut-d2', 'answered anywhere (the snapshot without it): the dock\'s count and its newest move in the SAME snapshot — 3, ut-d2', d1 && { n: d1.n, newest: d1.newest.id });
+  ok(dockFor({ open: [open[3], open[4]], resolved: [] }) === null, 'nothing of THIS conversation open (another\'s ask, a notice) ⇒ no dock (the strip is absent — no empty chrome)');
+  // NEGATIVE CONTROLS — the dock must be able to go red: a dock that counted the store's whole open list, or showed the oldest
+  { const wrongCount = { ...d0, n: open.length }; ok(wrongCount.n !== needs.length, 'RED: a dock counting the store\'s whole open list (6) is not the conversation\'s count (4)'); }
+  { const oldest = FA.needsOf(open, K)[0].item.id; ok(!!d0 && oldest !== d0.newest.id, `RED: the needs list's FIRST (oldest, ${oldest}) is not the dock's row — the newest is`); }
+  // the wiring: the strip's row is THE row (renderRow / patchRow through the panel's reconcile) and its verbs THE panel's
+  const CARD = fs.readFileSync(path.join(ROOT, 'src/lib/chat-needs-card.js'), 'utf8'), P = fs.readFileSync(path.join(ROOT, 'src/lib/user-todos-panel.js'), 'utf8');
+  const dp = CARD.slice(CARD.indexOf('  _dockPass(waiting) {'), CARD.indexOf('  /** The card of item `id` in this list'));
+  ok(/const d = dockOf\(list, t\);/.test(dp) && /this\.app\.foryouRows\?\.reconcile\(rows, \[entry\]\);/.test(dp) && /reconcile: \(container, entries\) => reconcileRows\(container, entries, null, miniCtx, \{ arm: false \}\),/.test(P), 'wiring: the strip lays its row out through PURE dockOf and draws it through THE row renderer (the panel\'s reconcileRows, the mini inbox\'s context)');
+  ok(/this\.app\.foryouRows\.wire\(dock, \{ close: \(\) => \{\} \}\);/.test(dp) && /app\.foryouRows = \{\s*wire: wireMiniRows,/.test(P) && !/runAction|setStatus\(|postReply|fetchJson/.test(dp), 'wiring: every verb in the strip is the panel\'s (wireMiniRows → rowClick({mini: true}) — the tray\'s routes); the strip names no answer of its own');
+  ok(/this\._dockPass\(plan\.waiting\);/.test(CARD) && /const plan = flowPlan\(open, transcript,/.test(CARD) && /const open = keys \? needsOf\(todos\.open, keys\) : \[\];/.test(CARD), 'wiring: the strip and the cards are ONE pass over ONE list (needsOf over the store\'s snapshot → flowPlan → the cards + _dockPass)');
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

@@ -5172,6 +5172,7 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
   .ut-mini-popover :is(button, [role="button"], summary, textarea, select, input:not([type="radio"], [type="checkbox"])),
   .cn-card :is(button, [role="button"], summary, textarea, select, input:not([type="radio"], [type="checkbox"])),
   #phone-home :is(button, [role="button"], summary, textarea, select, input:not([type="radio"], [type="checkbox"])),
+  .chat-attn-dock :is(button, [role="button"], summary, textarea, select, input:not([type="radio"], [type="checkbox"])),
   .iw :is(button, [role="button"], summary, textarea, select, input:not([type="radio"], [type="checkbox"]), .iw-row) { min-height: 44px !important; min-width: 44px; box-sizing: border-box; }
   /* fields read at 16 px (iOS never zooms a focused field) — the 14 px floor above must not shrink them; a box with the mic is
      48 px tall so the 44 px mic sits inside it */
@@ -5222,9 +5223,9 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
   :is(#user-todos-popup, .ut-mini-popover, .cn-card, #phone-home) .ut-item .ut-opt, .iw .iw-opt { max-width: 100%; padding: 10px 14px; font-size: 15px !important; line-height: 1.35; white-space: normal; text-align: left; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; border-radius: 14px; }
   :is(#user-todos-popup, .ut-mini-popover, .cn-card, #phone-home) .ut-item .ut-actions { order: 2; float: none; width: 100%; margin: 8px 0 0; display: flex; gap: 6px; opacity: 1; }
   :is(#user-todos-popup, .ut-mini-popover, .cn-card, #phone-home) .ut-item .ut-reply { order: 3; }
-  :is(#user-todos-popup, .ut-mini-popover, .cn-card, #phone-home) .ut-item .ut-actions > .ut-act { flex: 1 1 0; width: auto; height: auto; display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 4px 2px; font-size: 16px !important; line-height: 1; }
-  :is(#user-todos-popup, .ut-mini-popover, .cn-card, #phone-home) .ut-item .ut-actions > .ut-act[data-label]::after { content: attr(data-label); font-size: 14px; line-height: 1.2; white-space: nowrap; }
-  :is(#user-todos-popup, .ut-mini-popover, .cn-card, #phone-home) .ut-item .ut-actions > .ut-reply-btn { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); font-weight: 600; }
+  :is(#user-todos-popup, .ut-mini-popover, .cn-card, #phone-home) .ut-item .ut-actions > .ut-act, .chat-attn-dock .ut-item .ut-actions > .ut-act { flex: 1 1 0; width: auto; height: auto; display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; padding: 4px 2px; font-size: 16px !important; line-height: 1; }
+  :is(#user-todos-popup, .ut-mini-popover, .cn-card, #phone-home) .ut-item .ut-actions > .ut-act[data-label]::after, .chat-attn-dock .ut-item .ut-actions > .ut-act[data-label]::after { content: attr(data-label); font-size: 14px; line-height: 1.2; white-space: nowrap; }
+  :is(#user-todos-popup, .ut-mini-popover, .cn-card, #phone-home) .ut-item .ut-actions > .ut-reply-btn, .chat-attn-dock .ut-item .ut-actions > .ut-reply-btn { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); font-weight: 600; }
   /* the For-you window: its title and words read as body text */
   .iw .iw-title { font-size: 17px !important; }
   .iw .iw-detail, .iw .iw-row-title, .iw .iw-reply-input, .iw .iw-filter { font-size: 16px !important; }
@@ -5232,8 +5233,19 @@ label.mounts-conf-row { display: flex; flex-direction: row; align-items: center;
   /* lane chat-needs-you-card: the chat's needs card takes the mini inbox's scale — its head and its quiet record read at 14 px+ */
   .cn-card .cn-head { font-size: 15px !important; }
   .cn-card .cn-line { min-height: 44px; line-height: 40px; }
-  /* lane needs-card-tail: the chip's list rows are the sheet's 44 px targets, its words body text */
-  .chat-status-dropdown-item.chat-needs-pick { min-height: 44px; font-size: 15px; }
+  /* lane needs-card-tail r10: THE ATTENTION DOCK (the strip above the message box) takes the scale — it rides the rules above
+     (the 44 px targets, a verb's word under its icon, Reply weighted); here its own shape: the question 16 px on a 44 px line
+     (the tap that shows its card), the verbs one full row, «View all» on the head's line; option chips stay ONE line,
+     sideways (never giant chips) */
+  .chat-attn-dock { padding: 4px 10px 6px; }
+  .chat-attn-dock * { font-size: max(14px, 1em) !important; }
+  .chat-attn-dock .cad-head { min-height: 44px; font-size: 15px !important; }
+  .chat-attn-dock .cad-rows { order: 3; flex: 1 1 100%; }
+  .chat-attn-dock .cad-all { margin-left: auto; }
+  .chat-attn-dock .cad-rows .ut-body > .ut-text { flex: 1 1 0; min-height: 44px; line-height: 44px; font-size: 16px !important; }
+  .chat-attn-dock .cad-rows .ut-body > .ut-actions { flex: 1 1 100%; display: flex; gap: 6px; }
+  .chat-attn-dock .cad-rows .ut-opt { padding: 0 14px; font-size: 15px !important; }
+  .chat-attn-dock textarea { font-size: 16px !important; }
 }
 /* ── end of the touch scale (lane foryou-honest) ── */
 

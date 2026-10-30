@@ -58,10 +58,12 @@
  *   needsOf(items, keys)         → the OPEN needs of the conversation known by `keys`, oldest first: [{item, kind}]
  *   recordsOf(items, keys)       → its RESOLVED ones (the quiet one-line records), oldest first
  *   placementOf(item, transcript)→ {at: <record id> | null, how: 'named' | 'tool' | 'turn' | 'end' | 'none'}
- *   tailPlan(open, transcript, o)→ {at, dock, waiting, loose} — which open card stands where: at its record when that is on
- *                                  screen, at most ONE docked at the end, every one in the chip (lane needs-card-tail)
+ *   flowPlan(open, transcript, o)→ {at, waiting, loose} — which open card stands where: at its record when that is on
+ *                                  screen, NOWHERE else (lane needs-card-tail r10: the flow is history) — every one waits
+ *                                  in the window's attention dock (dockOf)
  *   filingIndex(item, readPage, o) → the index of the record that filed it ABOVE a loaded window (the landing's read upward)
- *   chipWords(needs, t)          → {text, title} | null — «waiting for you · an approval» / «· 3 approvals» / «· 3»
+ *   dockWords(needs, t)          → {text, title, n} | null — «waiting for you · an approval» / «· 3 approvals» / «· 3»
+ *   dockOf(waiting, t)           → {n, newest, words} | null — THE ATTENTION DOCK's model (lane needs-card-tail r10)
  *   settledWords(item, t)        → «approved» / «denied» / «saved to the vault» / «done» … (the quiet line's verb)
  *   surfaceOf(type | item)       → {at: 'card' | 'window' | 'owner' | 'notice', kind, on} — where it IS shown and answered
  *   filedLine(type | item, id, tray) → THE one line an agent can quote after a filing (the hub's words; a CLI prints it),
@@ -179,7 +181,7 @@ const DEFAULT_NEED = Object.freeze({ kind: 'check', card: true });
  *  so test-conversation-needs ⑨ keeps it honest (a deferred row whose function starts reading `about` goes red until its
  *  row says true; a new function matching a conversation's items by sessionKey goes red until it is a row). */
 const SURFACES = Object.freeze({
-  'chat-card': { file: 'src/foryou-actions.js', fn: 'cardsWhere', about: true, what: 'the cards and the quiet records in the chat (needsOf / recordsOf → src/lib/chat-needs-card.js) + the status bar\'s «waiting for you · N»' },
+  'chat-card': { file: 'src/foryou-actions.js', fn: 'cardsWhere', about: true, what: 'the cards and the quiet records in the chat (needsOf / recordsOf → src/lib/chat-needs-card.js) + the window\'s attention dock above the message box (dockOf — «waiting for you · N», the newest, its verbs)' },
   'title-badge': { file: 'src/lib/user-todos-layout.js', fn: 'inboxBadgeFor', about: 'deferred', what: 'the window title bar\'s mini inbox badge (2.369.169)' },
   'mini-inbox': { file: 'src/lib/user-todos-layout.js', fn: 'miniInboxEntries', about: 'deferred', what: 'the title-bar mini inbox popover' },
   'session-marker': { file: 'src/lib/user-todos-layout.js', fn: 'sessionMark', about: 'deferred', what: 'a session row\'s «needs you · N» (lane foryou-honest)' },
@@ -226,9 +228,9 @@ const idsOf = (item) => [item.id, ...IDENTITY_FIELDS.map((f) => item.action && i
  *  'named' — the tool card whose RESULT names the item (its id, its request id: `wr-…`, `sr-…`) — exact;
  *  'tool'  — else the latest tool card that ran the producer's CLI just before the filing (within FILED_WINDOW_MS);
  *  'turn'  — else the record at or just before the filing (the turn that filed it, as far as it had come);
- *  'end'   — else (the anchor is older than what is loaded, or nothing is) the END of what is loaded — tailPlan decides
- *            whether a card stands there (lane needs-card-tail: at most ONE, the rest wait in the chip); a RESOLVED one is
- *            'none' (history stays history).
+ *  'end'   — else (the anchor is older than what is loaded, or nothing is) the END of what is loaded — a fact for the
+ *            landing's read; flowPlan never stands a card there (lane needs-card-tail r10: the flow is history — an ask
+ *            whose record is not on screen waits in the window's attention dock); a RESOLVED one is 'none'.
  *  `more` (lane needs-card-tail) = records exist AFTER the last loaded one (a window loaded mid-history — a landing, a
  *  search): a filing after what is loaded is not «at» the last loaded record, so the CLI-call and the at-the-filing rungs
  *  need a loaded record past the filing (the jump to an old ask stacked every newer one on the window's last record). */
@@ -261,24 +263,24 @@ function placementOf(item, transcript, { resolved = false, more = false } = {}) 
   return { at: rows.length ? rows[rows.length - 1].id : null, how: 'end' };
 }
 
-/** THE TAIL (lane needs-card-tail, the owner 2026-10-28 on 2.369.360: «这个应该同时堆叠在页面最下吗？» — six asks filed days
- *  ago stood stacked under the newest message, because every open card whose record was not on screen fell back to the
- *  end): which of a conversation's OPEN cards stands where, given what the chat has loaded.
+/** THE FLOW (lane needs-card-tail — the owner 2026-10-28 on 2.369.360: «这个应该同时堆叠在页面最下吗？», six asks filed days ago
+ *  stacked under the newest message; r10, the owner 2026-10-30 on the ONE docked card r1–r9 left: «如果历史对话里的内容就别停靠
+ *  了呗，或者就不要停靠在聊天内容本身里了，而是体现出"这是专门停靠等我操作的事情，不会随着 chatview 浮动"的一个 UI»): which of a
+ *  conversation's OPEN cards stands where, given what the chat has loaded. THE FLOW IS HISTORY: a card stands at the record
+ *  that filed it when that record is on screen, and NOWHERE else — nothing is re-docked into the transcript; every open one
+ *  waits in the window's ATTENTION DOCK (window chrome above the message box — dockOf), whether or not its card is drawn.
  *    `open`       needsOf's entries ({item, kind}, oldest first)
  *    `transcript` the loaded records (lean rows, placementOf's)
  *    `rendered`   (record id) → is that record on screen (the chat's element for it, in its list)
  *    `atEnd`      the loaded window reaches the conversation's live end (false = a window loaded mid-history)
- *    `pick`       the ask the person landed at the end (a chip row whose ask has no record) — it keeps the dock
  *    `known`      Map(item id → record id): the record a landing's read PROVED filed it (r3 — a window ending inside the skew
  *                 margin of the filing cannot place it alone; the read past it did) — used when placementOf says 'end'
  *  → { at: Map(item id → record id) — a card whose record IS on screen stands there, unchanged;
- *      dock: item id | null — at most ONE of the rest docks at the end: the person's pick, else the NEWEST of them (the next
- *            newest takes it when that one is answered); none in a window that ends mid-history (its end is not the chat's);
- *      waiting: every open entry, NEWEST first — THE CHIP's index (the rest wait there; choosing one lands it);
- *      loose: the ids with no record on screen }
- *  The base's rule (an open card's fallback is the end) is one docked card per loose id; scripts/test-conversation-needs.mjs
- *  ⑩ runs the owner's six (RED copy: that rule ⇒ six cards at the end). */
-function tailPlan(open, transcript, { rendered = () => true, atEnd = true, pick = null, known = null } = {}) {
+ *      waiting: every open entry, NEWEST first — THE DOCK's list (its count, its newest);
+ *      loose: the ids with no record on screen (no card anywhere in the flow) }
+ *  The base's rule (an open card's fallback is the end) put one card per loose id at the end; r1–r9 docked ONE there;
+ *  scripts/test-conversation-needs.mjs ⑩ runs the owner's six — none at the end (RED copies: six; one). */
+function flowPlan(open, transcript, { rendered = () => true, atEnd = true, known = null } = {}) {
   const list = Array.isArray(open) ? open.filter((e) => e && e.item) : [];
   const rows = Array.isArray(transcript) ? transcript : [];
   const at = new Map(), loose = [];
@@ -290,9 +292,7 @@ function tailPlan(open, transcript, { rendered = () => true, atEnd = true, pick 
     if (el != null) at.set(e.item.id, el);
     else loose.push(e);
   }
-  const newest = loose.reduce((a, e) => (!a || (Number(e.item.createdAt) || 0) >= (Number(a.item.createdAt) || 0) ? e : a), null);
-  const dock = !atEnd || !newest ? null : pick != null && loose.some((e) => e.item.id === pick) ? pick : newest.item.id;
-  return { at, dock, waiting: [...list].reverse().sort((a, b) => byCreated(b, a)), loose: loose.map((e) => e.item.id) };
+  return { at, waiting: [...list].reverse().sort((a, b) => byCreated(b, a)), loose: loose.map((e) => e.item.id) };
 }
 
 /** A card's anchor that is LOADED but drawn as nothing (a hidden unknown-record notice — chat-view keeps the record and
@@ -373,10 +373,9 @@ const fmt = (s, p) => String(s).replace(/\{(\w+)\}/g, (_, k) => (p && p[k] != nu
 const ONE = Object.freeze({ approval: i18nKey('an approval'), question: i18nKey('a question'), secret: i18nKey('a secret'), browser: i18nKey('a step in the browser'), check: i18nKey('something to check') });
 const MANY = Object.freeze({ approval: i18nKey('{n} approvals'), question: i18nKey('{n} questions'), secret: i18nKey('{n} secrets'), browser: i18nKey('{n} steps in the browser'), check: i18nKey('{n} things to check') });
 const kindOf = (e) => (e && KINDS.includes(e.kind) ? e.kind : 'check');
-/** THE CHIP's words: nothing open ⇒ null (no chip); one ⇒ «waiting for you · an approval»; several of one kind ⇒
- *  «waiting for you · 3 approvals»; mixed ⇒ «waiting for you · 3» with every kind in the title. Several ⇒ its click LISTS
- *  them (lane needs-card-tail: the chip is the index — choosing one lands it); one ⇒ its click goes to it. */
-function chipWords(needs, t = fmt) {
+/** THE DOCK's count words: nothing open ⇒ null (no dock); one ⇒ «waiting for you · an approval»; several of one kind ⇒
+ *  «waiting for you · 3 approvals»; mixed ⇒ «waiting for you · 3» with every kind in the title. */
+function dockWords(needs, t = fmt) {
   const list = Array.isArray(needs) ? needs : [];
   if (!list.length) return null;
   const counts = new Map();
@@ -384,8 +383,20 @@ function chipWords(needs, t = fmt) {
   const said = (k, n) => (n === 1 ? t(ONE[k]) : t(MANY[k], { n }));
   const what = counts.size === 1 ? said(kindOf(list[0]), list.length) : String(list.length);
   const all = [...counts].map(([k, n]) => said(k, n)).join(', ');
-  const title = list.length > 1 ? t('This conversation is waiting for you: {all} — click to list them, choose one to go to it', { all }) : t('This conversation is waiting for you: {all} — click to go to it', { all });
-  return { text: t('waiting for you · {what}', { what }), title, n: list.length };
+  return { text: t('waiting for you · {what}', { what }), title: t('This conversation is waiting for you: {all}', { all }), n: list.length };
+}
+
+/** THE ATTENTION DOCK (lane needs-card-tail r10 — THE RULE: a thing waiting for the owner is WINDOW CHROME, never a chat
+ *  row): what a chat window's fixed strip above its message box shows for `waiting` (flowPlan's — every open need of THIS
+ *  conversation, newest first): nothing ⇒ null (no strip — no empty chrome); else the count (dockWords) and the NEWEST one
+ *  (its row — the question, its verbs: the same row the card, the mini inbox and the tray draw); several ⇒ the door to all
+ *  of them (the For-you window scoped to this conversation), never a «show more» inside the strip.
+ *  → { n, newest: item, kind, words: {text, title, n}, more: n − 1 } | null */
+function dockOf(waiting, t = fmt) {
+  const list = Array.isArray(waiting) ? waiting.filter((e) => e && e.item) : [];
+  if (!list.length) return null;
+  const newest = list.reduce((a, e) => (!a || byCreated(e, a) > 0 ? e : a), null);
+  return { n: list.length, newest: newest.item, kind: kindOf(newest), words: dockWords(list, t), more: list.length - 1 };
 }
 
 /** THE END A RECORD SAYS (lane wake-approve-card r8 — the acceptance drove vault-agent-own 4ff55fb4's real door: its late
@@ -888,4 +899,4 @@ function filedLine(x, id, tray = null) {
   return fmt(FILED[s.at], { what: fmt(ONE[KINDS.includes(s.kind) ? s.kind : 'check']), tray: where, on: s.on || 'its own card in this conversation' }) + (id ? ` (${id})` : '');
 }
 
-module.exports = { ROWS, ROW_OF, ANSWERS, CARDS, ACTION_IDENTITY, WAIT_ACTIONS, CARD_ACTION_TYPES, ANSWER_ACTION_TYPES, KINDS, KIND_WORDS: ONE, SURFACES, BY_TYPE, BY_ORIGIN, IDENTITY_FIELDS, SKEW_MS, FILED_WINDOW_MS, needOf, needsOf, recordsOf, placementOf, tailPlan, drawnAt, filingIndex, chipWords, settledWords, surfaceOf, FILED, filedLine, PERSON_DECIDES, DECISION_ROWS, DECISION_ENDS, endsOf, STAMPS, isDecisionRow, offersClosers, CLOSERS, HIDDEN_BY, POINTER_ROWS, isPointer, isHidden, closersOf, expiryWords, VIEWERS, VIEWER_ROLE, canDecide, clockWords, decidedStamp, decisionCard, grantLifeOf, grantWords, verbsOf, runCardOf, factsDroppedWords, FACTS_DROPPED_WORDS, RUN_ALWAYS_WHY, RUN_WHY_AGAIN, RUN_HOSTS_WHY, RUN_MASKING, RUN_SHAPE, RUN_CMD_BODY_MAX, RUN_CMD_MAX, deadlineOf, DEADLINE_WORDS, DEADLINE_LIVE_MS, DEADLINE_WARN_MS, OUTCOME_ENDS, endOf, ruledOf };
+module.exports = { ROWS, ROW_OF, ANSWERS, CARDS, ACTION_IDENTITY, WAIT_ACTIONS, CARD_ACTION_TYPES, ANSWER_ACTION_TYPES, KINDS, KIND_WORDS: ONE, SURFACES, BY_TYPE, BY_ORIGIN, IDENTITY_FIELDS, SKEW_MS, FILED_WINDOW_MS, needOf, needsOf, recordsOf, placementOf, flowPlan, drawnAt, filingIndex, dockWords, dockOf, settledWords, surfaceOf, FILED, filedLine, PERSON_DECIDES, DECISION_ROWS, DECISION_ENDS, endsOf, STAMPS, isDecisionRow, offersClosers, CLOSERS, HIDDEN_BY, POINTER_ROWS, isPointer, isHidden, closersOf, expiryWords, VIEWERS, VIEWER_ROLE, canDecide, clockWords, decidedStamp, decisionCard, grantLifeOf, grantWords, verbsOf, runCardOf, factsDroppedWords, FACTS_DROPPED_WORDS, RUN_ALWAYS_WHY, RUN_WHY_AGAIN, RUN_HOSTS_WHY, RUN_MASKING, RUN_SHAPE, RUN_CMD_BODY_MAX, RUN_CMD_MAX, deadlineOf, DEADLINE_WORDS, DEADLINE_LIVE_MS, DEADLINE_WARN_MS, OUTCOME_ENDS, endOf, ruledOf };

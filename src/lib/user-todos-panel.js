@@ -768,6 +768,7 @@ export function installUserTodos(app) {
     wire: wireMiniRows,
     reconcile: (container, entries) => reconcileRows(container, entries, null, miniCtx, { arm: false }), // round 4 (#3): the card stamps once per pass that changed
     keysForWin,
+    primaryKey, // lane needs-card-tail r10: the attention dock's «View all» scopes the For-you window as the mini inbox's ⤢ does
     arm: (root) => armExitButtons(root), // acceptance round 2: a card the accordion opened shows its Allow just now — armed afresh (round 4: its list's only)
     stash: stashDrafts, // round 3 (#4): a card's typed reply is a draft before its words are replaced
     fold: (box) => foldBox(box), // …and a box kept on an answered card folds (its text a draft) when the person leaves it — THE one exit

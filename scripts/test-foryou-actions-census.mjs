@@ -141,6 +141,32 @@ console.log('⑤ every chat row is drawn by the chat\'s needs card; every other 
   ok(FA.ROWS.filter((r) => r.chat).every((r) => FA.KINDS.includes(r.kind)), 'every chat row names its kind (the card\'s head and the chip say it)');
 }
 
+// ── ⑤b ────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+// lane needs-card-tail r10: THE ATTENTION DOCK — the strip above a chat's message box draws the NEWEST open need of the
+// conversation as THE row (the same renderer, the same verbs). Its actions are census rows: every chat row can stand in it,
+// and every container in which the row draws a verb (a <button>) is one the strip SHOWS (public/chat.css's whitelist) — a
+// new kind of answer the row learns is never hidden in the strip by a stylesheet nobody re-read (RED: a planted one).
+console.log('⑤b THE ATTENTION DOCK\'s actions — every chat row stands in the strip; every container the row draws a verb in is one the strip shows');
+{
+  const ME = 'claude:c0ffee';
+  if (typeof FA.dockOf !== 'function') { ok(false, 'PURE dockOf exists (src/foryou-actions.js — THE ATTENTION DOCK)'); FA.dockOf = () => null; } // (RED copies: named, never a crash)
+  const items = FA.ROWS.map((r, k) => ({ id: 'ut-' + String(k).padStart(10, '0'), status: 'open', kind: 'action', origin: 'agent', text: r.type, createdAt: k + 1, sessionKey: r.scope === 'conversation' ? ME : 'grp', ...(r.scope === 'conversation' ? {} : { about: ME }), action: { type: r.type } }));
+  const bad = FA.ROWS.filter((r) => r.chat).filter((r) => { const one = items.filter((i) => i.action.type === r.type); const d = FA.dockOf(FA.needsOf(one, [ME]).map((e) => e)); return !d || d.newest.action.type !== r.type || d.n !== 1; }).map((r) => r.type);
+  ok(!bad.length, `every chat row (${FA.ROWS.filter((r) => r.chat).length}) stands in the strip alone as its newest — dockOf over the conversation's needs`, bad);
+  const CSS = read('public/chat.css');
+  const shownOf = (css) => { const m = /\.cad-rows \.ut-item > \.ut-body > :not\(([^)]+)\) \{ display: none !important; \}/.exec(css); const app = /\.cad-rows \.ut-app-card > :not\(([^)]+)\) \{ display: none !important; \}/.exec(css); return { body: m ? m[1].split(',').map((x) => x.trim().replace(/^\./, '')) : [], app: app ? app[1].split(',').map((x) => x.trim().replace(/^\./, '')) : [] }; };
+  /** every element the row source opens whose first content is a <button> (a template value between allowed) → its first class */
+  const holders = (src) => [...src.matchAll(/<(?:div|span) class="([\w-]+)[^"]*"[^>]*>[^<]{0,80}<button/g)].map((m) => m[1]);
+  // the containers whose buttons ANSWER nothing — named, with the reason (a new one is red until it is named here or shown)
+  const NOT_ANSWERS = { 'ut-arts': 'an ask\'s --artifact chips: each opens a file the agent attached — they answer nothing; the card in the flow shows them' };
+  const census = (rowSrc, css) => { const sh = shownOf(css); const hs = [...new Set(holders(rowSrc))]; return { hs, hidden: hs.filter((c) => !(c in NOT_ANSWERS) && !sh.body.includes(c) && !(sh.body.includes('ut-app-card') && sh.app.includes(c))) }; };
+  const ROWSRC = read('src/lib/user-todos-row.js');
+  const c0 = census(ROWSRC, CSS);
+  ok(c0.hs.length >= 4 && c0.hidden.length === 0, `every container the row draws a verb in is SHOWN by the strip (${c0.hs.join(', ')})`, c0);
+  { const planted = ROWSRC + "\nconst plantedHtml = (i, t) => `<div class=\"ut-new-answer\"><button type=\"button\" class=\"ut-act\">x</button></div>`;\n"; const c1 = census(planted, CSS); ok(c1.hidden.length === 1 && c1.hidden[0] === 'ut-new-answer', 'RED: a new answer container the row learns (planted) is named — the strip would hide its verbs', c1.hidden); }
+  { const c2 = census(ROWSRC, CSS.replace('.ut-exit-answer, .ut-reconnect-row, .ut-app-card, ', '')); ok(c2.hidden.includes('ut-exit-answer'), 'RED: the strip\'s whitelist without the answer row (Allow / Deny / Approve) names it', c2.hidden); }
+}
+
 // ── ⑥ ─────────────────────────────────────────────────────────────────────────────────────────────────────────────────
 console.log('⑥ bandDoorsOf\'s types are rows; every field from its closed set; the CLI line each row declares');
 {

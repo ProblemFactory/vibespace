@@ -419,7 +419,6 @@ class ChatView {
       // so a read-only viewer gets the chip as well (a phone has no Ctrl+F).
       onSearch: () => this._search?.open(),
       onJumpToAsk: () => { this.jumpToPendingAsk().catch(() => {}); }, // lane S1: the waiting chip goes to the card that waits
-      onJumpToNeed: (id) => { (id ? this._needsCards?.land(id) : this._needsCards?.jumpToNewest())?.catch?.(() => {}); }, // lane chat-needs-you-card: the «waiting for you · N» chip lands a needs card — lane needs-card-tail: the row chosen in its list (THE ONE LANDING), else the newest
       // agent browser P2 (§3.8 ③): the Browser chip's three actions
       onBrowserAction: (what, ev) => this._onBrowserAction(what, ev),
       // §26 (B-099e): the channels chip opens a touched conversation through the ONE door
@@ -568,6 +567,15 @@ class ChatView {
     container.appendChild(this._messageList);
     container.appendChild(this._posIndicator);
     // lane chat-needs-you-card: what THIS conversation asks of you (its For-you items) — cards inside the records that filed them
+    // THE ATTENTION DOCK (lane needs-card-tail r10 — the owner 2026-10-30: «…不要停靠在聊天内容本身里了，而是体现出"这是专门停靠
+    // 等我操作的事情，不会随着 chatview 浮动"的一个 UI»): what this conversation waits on the owner for is WINDOW CHROME — a
+    // fixed strip between the transcript and the message box, never inside the virtual-scroll list (it does not move when the
+    // transcript scrolls); empty ⇒ absent. Its contents are the needs cards' pass (chat-needs-card.js _dockPass)
+    this._attnDock = document.createElement('div');
+    this._attnDock.className = 'chat-attn-dock';
+    this._attnDock.hidden = true;
+    this._attnDock.setAttribute('role', 'region');
+    this._attnDock.setAttribute('aria-label', t('Waiting for you'));
     this._needsCards = new NeedsCards(this);
     this._needsCards.start(winInfo?._listenerCtl?.signal);
 
@@ -614,6 +622,7 @@ class ChatView {
     this._scrollBtnWrap.className = 'chat-scroll-btn-wrap';
     this._scrollBtnWrap.appendChild(this._scrollBtn);
     container.appendChild(this._scrollBtnWrap);
+    container.appendChild(this._attnDock); // (lane needs-card-tail r10) below the ↓, above the message box — the window's chrome
 
     // Wheel at top edge: scroll event won't fire when already at scrollTop=0,
     // so use wheel to detect upward scroll intent and trigger pagination
@@ -7588,8 +7597,11 @@ class ChatView {
     // THE RULE (lane needs-card-tail r9 — r8's, for a press that keeps the tail): a landing AT the live tail keeps it, its
     // stamp alone (_noteTailPress — the resume repair left armed); one off it is the reader's position and ends the repair
     // (_noteUserNav). r8 and every tree before ended it on both: a collapse from the bar that landed at the tail within
-    // 2.8 s of the window being shown again was stranded 3637 px up by the resume's own displacement
-    if (atBottom) this._noteTailPress('runBar'); else this._noteUserNav('runBar');
+    // 2.8 s of the window being shown again was stranded 3637 px up by the resume's own displacement. A KEEPS-DOOR OUTSIDE
+    // THE LIST ENDS THE SETTLE WINDOW (r10 — the ↓'s rule; the list's own clicks end it through _noteUserInput, the bar
+    // lives on the container): the repair kept, the window closed — r9 left it open, and in a window that had no repair
+    // (unpinned when hidden: no snapshot, no re-tail) the re-measure's displacement was skipped, pinned 3637 px up, ↓ hidden
+    if (atBottom) { this._noteTailPress('runBar'); this._resumeSettleUntil = 0; } else this._noteUserNav('runBar');
     this._setPinned(atBottom, 'runLand'); // the landing decides, honestly — at the live tail it stays pinned (inc-mvl02dkn-gop0: NaN bounds made every run-bar landing an unpin)
     this._trace('runLand', { st: Math.round(list.scrollTop), pin: this._pinned ? 1 : 0 });
     this._scheduleRunBar();

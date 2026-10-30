@@ -659,31 +659,51 @@
   .cn-card.cn-fold .ut-item:not(.ut-open) > .ut-body > :is(.ut-text, .ut-meta) * { pointer-events: none; }
   .cn-card.cn-fold .ut-item:not(.ut-open):is(:hover, :focus-visible) > .ut-body > .ut-text { color: var(--accent); }
 }
-/* THE DOCK (lane needs-card-tail, the owner 2026-10-28: «这个应该同时堆叠在页面最下吗？» — six asks whose records were not on
-   screen stood stacked at the end): at most ONE card stands at the end for an ask whose record is not on screen, and its dock
-   line says so — where it was asked, how many wait, where — open or folded (the fold hides the head, never this line). */
-.cn-dock { font-size: 11px; line-height: 16px; color: var(--text-dim); margin: 0 0 2px; }
-.cn-card.cn-fold > .cn-dock { padding-top: 2px; }
-/* THE CHIP's list (lane needs-card-tail): every open ask, newest first — the question · its age on ONE line, the age kept (the
-   question gives way, never the age), each row a ≥ 28 px target that lands its ask (44 on touch, style.css). */
-.chat-needs-list-head { padding: 4px 12px 2px; font-size: 11px; color: var(--text-dim); }
-.chat-status-dropdown-item.chat-needs-pick { display: flex; align-items: center; width: 100%; min-height: 28px; border: none; background: none; font: inherit; font-size: 12px; text-align: left; white-space: nowrap; }
-.chat-needs-pick-words { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.chat-needs-pick-ago { flex: none; color: var(--text-dim); }
-.chat-status-dropdown-item.chat-needs-pick:is(:hover, :focus-visible) .chat-needs-pick-words { color: var(--accent); }
-/* THE CHIP is a clickable chip like the bar's others (acceptance round 2, P2 — it was a 154×14 text target): ≥ 24 × 24 for a
-   mouse (the .358 law, lane desktop-small P2-6 — the same box its .chat-status-clickable rule gives every chip there), and
-   44 px tall on a touch screen — its pill painted as the bar's 36 px chips, the rest a transparent border (the model chip's
-   own trick). Round 3 (m3 — the phone bar grew 40 → 44 the instant a filing landed, the composer 4 px under a finger): the
-   44 px box takes the 36 px of the bar's other chips (its 8 px transparent top border pulled up by an −8 px margin — the
-   pill painted where the other chips are), so the bar never changes height; while the chip is on show the bar clips only
-   sideways, and the hit area reaches 6 px above the bar — upward: the phone's bar sits on the screen's bottom edge */
-.chat-status-bar .chat-status-foryou.chat-status-clickable { display: inline-flex; align-items: center; justify-content: center; min-height: 24px; min-width: 24px; box-sizing: border-box; flex-shrink: 0; cursor: pointer; }
-@media (hover: none) and (pointer: coarse) {
-  .chat-view .chat-status-bar .chat-status-foryou.chat-status-clickable { min-height: 44px; min-width: 44px; margin-top: -8px; border: solid transparent; border-width: 8px 0 0; background-clip: padding-box; }
-  .chat-view .chat-status-bar:has(.chat-status-foryou) { overflow-x: clip; overflow-y: visible; }
+/* THE ATTENTION DOCK (lane needs-card-tail r10 — the owner 2026-10-30 on the ONE card r1–r9 docked at the end: «如果历史对话里的
+   内容就别停靠了呗，或者就不要停靠在聊天内容本身里了，而是体现出"这是专门停靠等我操作的事情，不会随着 chatview 浮动"的一个 UI»;
+   THE RULE: a thing waiting for the owner is WINDOW CHROME, never a chat row): the window's fixed strip between the transcript
+   and the message box (chat-view.js _attnDock — outside the scrolling list; filled by chat-needs-card.js _dockPass):
+   «waiting for you · N» · the NEWEST item's row on ONE line (its question, its age, its verbs — THE For-you row) · «View all · N»
+   when several wait. What an answer stands on (an exit's command, a plan) rides one more line, ellipsized (the whole of it is
+   the card's, one tap away); option chips one more line, scrolling sideways (never a wall of chips); a reply box opens below.
+   A narrow window (< 520 px of strip) puts the row under the head. Empty ⇒ [hidden] (no empty chrome). Theme vars only. */
+.chat-attn-dock {
+  display: flex; flex-wrap: wrap; align-items: flex-start; column-gap: 8px; row-gap: 2px; flex-shrink: 0; box-sizing: border-box; min-width: 0;
+  padding: 4px 12px; border-top: 1px solid color-mix(in srgb, var(--yellow) 45%, var(--border));
+  background: color-mix(in srgb, var(--yellow) 7%, var(--bg-titlebar)); font-size: 12px; line-height: 20px; container-type: inline-size;
 }
-.chat-status-foryou svg { width: 12px; height: 12px; vertical-align: -2px; }
+.chat-attn-dock[hidden] { display: none; }
+.cad-head { display: inline-flex; align-items: center; gap: 6px; flex: none; min-height: 26px; color: var(--yellow); font-weight: 600; white-space: nowrap; }
+.cad-icon svg { width: 14px; height: 14px; display: block; }
+.cad-rows { flex: 1 1 0; min-width: 0; }
+.cad-all { flex: none; min-height: 26px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-input); color: var(--text); font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
+.cad-all:is(:hover, :focus-visible) { background: var(--bg-hover); color: var(--accent); }
+.cad-all[hidden] { display: none; }
+@container (max-width: 520px) {
+  .cad-rows { order: 3; flex: 1 1 100%; }
+  .cad-all { margin-left: auto; }
+}
+.cad-rows .ut-item { display: block; padding: 0; cursor: default; }
+.cad-rows .ut-item:hover { background: none; }
+.cad-rows .ut-item > .ut-dot { display: none; }
+.cad-rows .ut-item > .ut-body { display: flex; flex-wrap: wrap; align-items: center; column-gap: 6px; row-gap: 2px; min-width: 0; }
+/* the strip shows the question and what answers it — the rest (the detail fold, notes, attachments, the reach pick) is the card's */
+.cad-rows .ut-item > .ut-body > :not(.ut-text, .ut-meta, .ut-actions, .ut-exit-cmd, .ut-proposal-plan, .ut-exit-answer, .ut-reconnect-row, .ut-app-card, .ut-opts, .ut-reply, .ut-secret) { display: none !important; }
+/* an app install's card: its answers only (Install / Not now, the progress with Open / Try again) — the rest is the card's */
+.cad-rows .ut-body > .ut-app-card { display: contents; }
+.cad-rows .ut-app-card > :not(.ut-exit-answer, .ut-app-progress) { display: none !important; }
+.cad-rows .ut-app-card > :is(.ut-exit-answer, .ut-app-progress) { order: 5; flex: none; margin: 0; display: inline-flex; align-items: center; gap: 4px; }
+.cad-rows .ut-body > .ut-text { order: 1; flex: 1 1 10em; min-width: 6em; min-height: 26px; line-height: 26px; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
+.cad-rows .ut-body > .ut-text:is(:hover, :focus-visible) { color: var(--accent); }
+.cad-rows .ut-item-resolved > .ut-body > .ut-text { cursor: default; }
+.cad-rows .ut-body > .ut-meta { order: 2; flex: none; margin: 0; padding: 0; font-size: 11px; color: var(--text-dim); white-space: nowrap; cursor: pointer; }
+.cad-rows .ut-body > .ut-actions { order: 3; float: none; flex: none; margin: 0; opacity: 1; gap: 4px; display: inline-flex; }
+.cad-rows .ut-act { width: auto; min-width: 26px; height: 26px; padding: 0 6px; font-size: 13px; display: inline-flex; align-items: center; justify-content: center; }
+.cad-rows .ut-body > :is(.ut-exit-cmd, .ut-proposal-plan) { order: 4; flex: 1 1 100%; min-width: 0; max-height: none; margin: 0; padding: 0; border: none; background: none; font-size: 11px; line-height: 16px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cad-rows .ut-body > :is(.ut-exit-answer, .ut-reconnect-row) { order: 5; flex: none; margin: 0; display: inline-flex; gap: 4px; }
+.cad-rows .ut-body > .ut-opts { order: 6; flex: 1 1 0; min-width: 0; margin: 0; display: flex; flex-wrap: nowrap; gap: 4px; overflow-x: auto; scrollbar-width: thin; }
+.cad-rows .ut-opt { flex: none; font-size: 12px; padding: 2px 10px; white-space: nowrap; max-width: 24em; overflow: hidden; text-overflow: ellipsis; }
+.cad-rows .ut-body > :is(.ut-reply, .ut-secret) { order: 7; flex: 1 1 100%; }
 /* the waiting chip's jump lands here — one pulse, then still */
 .chat-ask-flash { animation: chat-ask-flash-anim 1.6s ease-out; }
 @keyframes chat-ask-flash-anim {
