@@ -285,6 +285,23 @@ function namesConv(text, t) {
   const s = String(text || '');
   return !!(s && t && ((t.convId && s.includes(`${t.adapterId}/${t.convId}`)) || (t.proposalId && s.includes(t.proposalId))));
 }
+/** r8: a search's WORDS as the search keeps them (searchTouches trims; the record turns tabs / newlines into spaces and
+ *  keeps QUERY_MAX) — two searches are the same search when these are equal. */
+const searchKey = (q) => String(q || '').trim().replace(/[\r\n\t]+/g, ' ').slice(0, QUERY_MAX);
+/** r8: a helper's prompt names a search's words as a phrase — «vibespace-channels search "pairing review"» */
+const PROMPT_QUERY_RE = /(?:^|[^\w-])vibespace-channels\s+search\s+(?:"([^"]*)"|'([^']*)')/g;
+/** r8: does this call name the touch EXACTLY — its conversation (its key), its proposal, or a search touch's own WORDS
+ *  (the call ran `vibespace-channels search` with the touch's query; a helper's prompt says that phrase)? A VERB alone
+ *  never does: a lingering `search "budget" &` names no "pairing" hit (the rung below — bounded by its own run). */
+function namesExactly(c, t) {
+  if (!c || !t) return false;
+  if (namesConv(c.text, t)) return true;
+  if (t.op !== 'search' || !t.query) return false;
+  const q = searchKey(t.query);
+  if (c.kind === 'helper') return [...String(c.text || '').matchAll(PROMPT_QUERY_RE)].some((m) => searchKey(m[1] !== undefined ? m[1] : m[2]) === q);
+  const runs = c.runs || channelsRuns(String(c.text || ''));
+  return runs.some((r) => r.verb === 'search' && r.query !== undefined && searchKey(r.query) === q);
+}
 function namesTouch(text, t, runs, kind) {
   const s = String(text || '');
   if (!s || !t) return false;
@@ -399,8 +416,10 @@ function bindToCall(touches, calls, { notes = [], turns = [], skewMs = SKEW_MS, 
   // r3: a call never causes a touch of ANOTHER turn — a turn starts between the call's start and the touch; r4: a call that
   // OPENS its turn (the turn's start is its own) is inside it for the skew before it too — r6: only a call that NAMES the
   // touch (the previous turn's own call keeps its last touch otherwise) — r7: by its conversation, its proposal or its
-  // VERB (namesTouch: a turn-opening search / compose keeps its own early-stamped touches), never by neither
-  const crossesTurn = (c, t, at) => { const lo = Math.min(c.start, at), hi = Math.max(c.start, at); return us.some((u) => u > lo && u <= hi && !(u === c.start && at < c.start && namesTouch(c.text, t, c.runs, c.kind))); };
+  // VERB (namesTouch: a turn-opening search / compose keeps its own early-stamped touches), never by neither — r8: never a
+  // touch stamped while a call of the turn before RAN (from its start to its stop: that turn's own call keeps it)
+  const ranAt = (at, u) => cs.some((p) => p.start < u && p.start <= at && (p.stop === null || at < p.stop));
+  const crossesTurn = (c, t, at) => { const lo = Math.min(c.start, at), hi = Math.max(c.start, at); return us.some((u) => u > lo && u <= hi && !(u === c.start && at < c.start && namesTouch(c.text, t, c.runs, c.kind) && !ranAt(at, u))); };
   const noteFor = (at) => {
     for (let k = ns.length - 1; k >= 0; k--) {
       const n = ns[k];
@@ -436,15 +455,20 @@ function bindToCall(touches, calls, { notes = [], turns = [], skewMs = SKEW_MS, 
       // produced the touch (a producer that provably ran after it — running at the touch or not; a stranger that runs the
       // CLI then wins); past it the lingering call only vetoes (②: it could still be running — no end seen). r7: a claim
       // BY NAME is never bounded — a lingering call that names the touch keeps it whatever started later (naming beats
-      // recency: a later CLI call naming ANOTHER conversation never takes a loop's named reads)
+      // recency: a later CLI call naming ANOTHER conversation never takes a loop's named reads) — r8: only a name that
+      // is the touch's OWN — its conversation, its proposal, a search's own words (namesExactly) — is unbounded; a name
+      // by VERB alone is bounded as before r7 (a lingering `search "budget" &` claims a "pairing" hit only until a later
+      // script / helper starts) and ranks below an exact name
       const cand = new Set([...running, ...lingering]);
       const claims = (c) => !lingering.includes(c) || !cs.some((p) => p !== c && p.start > c.start && p.start - skewMs <= at && !crossesTurn(p, t, at) && callCauses(p, t));
-      const exact = cs.filter((c) => cand.has(c) && namesTouch(c.text, t, c.runs, c.kind));
+      const exact = cs.filter((c) => cand.has(c) && namesExactly(c, t));
+      const verbal = cs.filter((c) => cand.has(c) && claims(c) && namesTouch(c.text, t, c.runs, c.kind));
       const named = cs.filter((c) => cand.has(c) && claims(c) && callNames(c, t));
       // ② the ONE candidate that could have produced it — every running call counts (one that runs nothing too: several
       // running ⇒ the note), a lingering call only when it could run (a helper, a script: one that runs nothing never vetoes)
       const could = [...running, ...lingering.filter(callCanRun)];
       if (exact.length) pick = exact[exact.length - 1];
+      else if (verbal.length) pick = verbal[verbal.length - 1];
       else if (named.length === 1 || (named.length > 1 && !named.some((c) => c.lingers))) pick = named[named.length - 1];
       else if (!named.length && could.length === 1 && callCanRun(could[0])) pick = could[0];
       // ③ several candidates and none naming it (a background producer + a foreground stranger, two producers that run the
@@ -675,6 +699,6 @@ module.exports = {
   CAUSES, CALL_KINDS, READABLE_TITLE_CHARS, causeOf, callCauses, readableCut,
   HELPER_TOOLS, INERT_COMMANDS, MID_TURN_QUEUE, TIGHT_NAME_CHARS, shellCommands, channelsRuns, runsNothing, callKindOf, callNames, callCanRun, opensTurn, tightCut,
   RUNS_NOTHING, SCAN_MAX, WRAPPERS, SCRIPT_RUNNERS, commandsRun, RUNS_A_COMMAND, REAPERS, producerOf,
-  touchKey, normalizeTouch, appendTouch, upsertTouch, commandTouchesChannels, namesTouch, bindToCall, foldTouches, filedProposals, foldView, rowWords, replyWords, rowName,
+  touchKey, normalizeTouch, appendTouch, upsertTouch, commandTouchesChannels, namesTouch, namesExactly, bindToCall, foldTouches, filedProposals, foldView, rowWords, replyWords, rowName,
   GLYPHS, glyphFor, chipView, chipText, sessionSummary, touchedByWords, agoText, searchTouches, hitRefs, openVerdict, tailVerdict,
 };
