@@ -39,7 +39,10 @@
 //      site's own LINE, another column ⇒ the app's; a stale tab's import redirected to the file's own stamp ⇒ the report
 //      from there is the sanitizer's; both scripts at ONE stamp through ONE sink ⇒ each judged by its own sites; A HUB THAT
 //      MET THE BUG (the old judge's line + its notice in the real For-you store) ⇒ its first boot re-judges the line, closes
-//      the notice, says so once; the next boot says nothing; the pair files again for a real report
+//      the notice, says so once; the next boot says nothing; the pair files again for a real report. r3: those boots are
+//      server.js's OWN sink line, verbatim, with NO rejudge() call (MUTANT: both triggers cut ⇒ RED by name); no For-you
+//      store at boot (a getter that answers null, or throws) rewrites nothing, and re-judges once it answers (MUTANT: null
+//      taken as an empty store ⇒ RED); the lines first, the notice last (a file that cannot be rewritten closes nothing)
 //   ④ bounds: a 10 MB body ⇒ 413 and nothing lands; not a report type ⇒ 415; the 61st post a minute from one address ⇒ 429;
 //      (a repeat is never paced); past 1 MB the file rotates to .1; ≤ 10 new pairs a day file
 //   ⑤ the app page (server.js's index route, verbatim): the report-only header with the pinned directives; the ENFORCING
@@ -525,34 +528,103 @@ console.log('③d a handler the sanitizer\'s inert parse set and dropped is `san
       // sink above) took the probe as the app page's: its line `noticed`, its notice open in the REAL For-you store; the
       // first boot of this judge over the same data/ re-judges it — the line the sanitizer's, the notice closed, said ONCE
       const { UserTodoManager } = require(path.join(REPO, 'src/user-todos.js'));
-      const DU = path.join(ROOT, 'upgrade', 'data'); fs.mkdirSync(DU, { recursive: true });
+      const UH = path.join(ROOT, 'upgrade'), DU = path.join(UH, 'data'); fs.mkdirSync(DU, { recursive: true });
       const FU = path.join(DU, SINK.FILE);
       const store = new UserTodoManager({ dataDir: DU, expirySweepMs: 0 });
-      const open = () => store.idsWhere((i) => i.sessionKey === SINK.NOTICE_KEY && i.status === 'open').length;
-      const said = [];
-      const at = (o = {}) => ({ dir: DU, publicDir: PUB, getUserTodos: () => store, log: { log: (s) => said.push(String(s)), warn: (s) => said.push(String(s)) }, ...o });
+      const openOf = (st) => st.idsWhere((i) => i.sessionKey === SINK.NOTICE_KEY && i.status === 'open').length;
       const OLD = load(path.join(ROOT, 'mutant-table', 'src', 'server', 'csp-reports.js'), readRepo('src/server/csp-reports.js'));
-      const H0 = await hub(at({ sinkModule: OLD }));
+      const H0 = await hub({ dir: DU, publicDir: PUB, getUserTodos: () => store, sinkModule: OLD });
       await post(H0, PROBE); await post(H0, handler(LABEL, mOther, from('/mermaid.js', VM)));
       await H0.close();
       const was = linesOf(FU);
-      ok(was.length === 2 && was.every((l) => !l.kind) && was[0].noticed === true && !was[1].noticed && open() === 1, 'the hub on the OLD judge: the probe\'s line the app page\'s, noticed, its notice open in For you (and an app line on another line of mermaid.js)', { was, open: open() });
-      said.length = 0;
-      const H1 = await hub(at());
-      const r1 = typeof H1.sink.rejudge === 'function' ? await H1.sink.rejudge() : { lines: 0, closed: 0, why: 'the sink has no re-judge' }, now1 = linesOf(FU), s1 = H1.sink.summary();
-      ok(r1.lines === 1 && r1.closed === 1 && now1.length === 2 && now1[0].kind === C.KIND_SANITIZER && !now1[0].noticed && !!now1[0].rejudged && !now1[1].kind && open() === 0 && s1.app.lines === 1 && s1.sanitizer.lines === 1 && said.filter((s) => /re-judged/.test(s)).length === 1,
-        'THE UPGRADE\'S FIRST BOOT: the probe\'s line re-judged the sanitizer\'s (`rejudged`, no `noticed`), its For-you notice CLOSED, Diagnostics\' «on the app page» down by it and the sanitizer\'s up; the other line stays the app page\'s; said once', { r1, now1, s1, said, open: open() });
+      ok(was.length === 2 && was.every((l) => !l.kind) && was[0].noticed === true && !was[1].noticed && openOf(store) === 1, 'the hub on the OLD judge: the probe\'s line the app page\'s, noticed, its notice open in For you (and an app line on another line of mermaid.js)', { was, open: openOf(store) });
+      ok(Object.keys(was[0]).join() === 'at,directive,blocked,source,line,column,document,disposition,noticed', 'the old judge\'s line has the fields 2.369.361\'s shipped sink wrote, in its order (r3: measured on 5055b9ad6\'s own sink + store)', Object.keys(was[0]));
+      store.stop(); // its debounced write flushed: what a hub on .361 left in data/
+      const homes = {};
+      for (const n of ['mutant', 'null', 'throw', 'mutnull', 'stuck']) { homes[n] = path.join(ROOT, 'upgrade-' + n); fs.cpSync(UH, homes[n], { recursive: true }); }
+      // THE BOOT AS server.js DOES IT (r3 — nothing else starts the re-judge): server.js's OWN sink line (⑤), verbatim, its
+      // For-you store made after it as server.js's top-level `const userTodos` is (the getter reads it at the boot's next
+      // tick), NO rejudge() call; the one thing added: publicDir = this suite's build (the fast tier runs no npm run build)
+      const SRV0 = readRepo('server.js'), sinkAt = SRV0.split('\n').filter((l) => l.startsWith('const cspReports = require('));
+      ok(sinkAt.length === 1 && SRV0.split("require('./src/server/csp-reports.js').create(").length === 2 && /^const userTodos = new UserTodoManager\(/m.test(SRV0) && !/\.rejudge\(/.test(SRV0), 'server.js makes the sink ONCE — the one boot call — and its For-you store at the top level after it; no other call starts the re-judge', sinkAt);
+      const asServer = async (mod, home) => {
+        const told = [], app = express(), log = { log: (x) => told.push(String(x)), warn: (x) => told.push(String(x)) };
+        const req = (m) => (m === './src/server/csp-reports.js' ? { ...mod, create: (o) => mod.create({ ...o, publicDir: PUB }) } : require(m));
+        const env = process.env.VIBESPACE_CSP_REPORTS_FILE; delete process.env.VIBESPACE_CSP_REPORTS_FILE;
+        let made;
+        try { made = new Function('app', 'require', 'path', '__dirname', 'console', 'UserTodoManager', `${sinkAt[0]}\nconst userTodos = new UserTodoManager({ dataDir: path.join(__dirname, 'data'), expirySweepMs: 0 });\nreturn { sink: cspReports, store: userTodos };`)(app, req, path, home, log, UserTodoManager); }
+        finally { if (env !== undefined) process.env.VIBESPACE_CSP_REPORTS_FILE = env; }
+        const srv = await new Promise((r) => { const x = app.listen(0, '127.0.0.1', () => r(x)); });
+        return { ...made, told, home, port: srv.address().port, close: () => { made.store.stop(); return new Promise((c) => srv.close(c)); } };
+      };
+      /** The hub's state after a boot over that data/ → '' or what is wrong, by name. */
+      const bootFault = (H) => {
+        const now = linesOf(path.join(H.home, 'data', SINK.FILE)), s = H.sink.summary(), n = H.told.filter((x) => /re-judged against/.test(x)).length, o = openOf(H.store), f = [];
+        if (!(now[0] && now[0].kind === C.KIND_SANITIZER && !now[0].noticed && now[0].rejudged)) f.push(`the probe's line was NOT re-judged (${now[0] && now[0].kind || 'still the app page\'s'}${now[0] && now[0].noticed ? ', noticed' : ''})`);
+        if (!now[1] || now[1].kind) f.push('the other line is not the app page\'s');
+        if (o) f.push(`For you still holds ${o} notice(s) it filed`);
+        if (s.app.lines !== 1 || s.sanitizer.lines !== 1) f.push(`Diagnostics: ${s.app.lines} on the app page / ${s.sanitizer.lines} the sanitizer's (want 1 / 1)`);
+        if (n !== 1) f.push(`said ${n} time(s) (want once)`);
+        return f.join('; ');
+      };
+      const tick = (ms) => new Promise((r) => setTimeout(r, ms));
+      const seen = async (done, ms) => { const t0 = Date.now(); while (!done() && Date.now() - t0 < ms) await tick(5); return Date.now() - t0; };
+      const until = (H, ms) => seen(() => H.sink.stats().rejudged, ms);
+      const srcK = readRepo('src/server/csp-reports.js'), TRIG = ['  if (stale.length) setImmediate(rejudge);\n', '      rejudge(); // a hub that met the bug'];
+      ok(TRIG.every((t) => srcK.split(t).length === 2), 'the mutant\'s anchors: the re-judge\'s two triggers in the sink, the boot\'s setImmediate and the report\'s call');
+      const NB = load(path.join(REPO, 'src/server/csp-reports.js'), srcK.replace(TRIG[0], '').replace(TRIG[1], '      // cut'));
+      const [H1, HM] = await Promise.all([asServer(SINK, UH), asServer(NB, homes.mutant)]);
+      const took = await until(H1, 3000); await tick(Math.max(25, took)); // the mutant has had twice what the real boot took
+      const f1 = bootFault(H1), fm = bootFault(HM);
+      ok(!f1, 'THE UPGRADE\'S FIRST BOOT, as server.js boots (its own sink line, NO rejudge() call): the probe\'s line re-judged the sanitizer\'s (`rejudged`, no `noticed`), its For-you notice CLOSED, Diagnostics\' «on the app page» down by it and the sanitizer\'s up; the other line stays the app page\'s; said once', f1);
+      ok(/NOT re-judged/.test(fm) && /For you still holds 1/.test(fm), `MUTANT (both triggers cut — the boot's setImmediate and the report's call) ⇒ RED by name: «${fm}»`, fm);
+      await HM.close();
       await post(H1, PROBE);
-      ok(linesOf(FU).length === 2 && open() === 0, 'the same probe again ⇒ the sanitizer\'s, a duplicate: no line, no notice', { lines: linesOf(FU), open: open() });
+      ok(linesOf(FU).length === 2 && openOf(H1.store) === 0, 'the same probe again ⇒ the sanitizer\'s, a duplicate: no line, no notice', { lines: linesOf(FU), open: openOf(H1.store) });
       await H1.close();
-      said.length = 0;
-      const H2 = await hub(at());
-      const r2 = typeof H2.sink.rejudge === 'function' ? await H2.sink.rejudge() : { lines: 0, closed: 0, why: 'the sink has no re-judge' };
-      ok(r2.lines === 0 && !said.some((s) => /re-judged/.test(s)) && H2.sink.summary().sanitizer.lines === 1 && H2.sink.summary().app.lines === 1, 'the NEXT boot: nothing to re-judge, nothing said (said ONCE)', { r2, said });
+      const H2 = await asServer(SINK, UH);
+      await tick(Math.max(25, took));
+      ok(!H2.sink.stats().rejudged && !H2.told.some((x) => /re-judged/.test(x)) && H2.sink.summary().sanitizer.lines === 1 && H2.sink.summary().app.lines === 1, 'the NEXT boot: nothing to re-judge, nothing said (said ONCE)', { told: H2.told, stats: H2.sink.stats() });
       await post(H2, handler(LABEL, mSame, from('/mermaid.js', VM)));
-      ok(open() === 1, 'the pair is free again: a real app-page report (mermaid.js\'s parse line, another column) files its notice', open());
+      ok(openOf(H2.store) === 1, 'the pair is free again: a real app-page report (mermaid.js\'s parse line, another column) files its notice', openOf(H2.store));
       await H2.close();
-      store.stop();
+      // NO FOR-YOU STORE AT BOOT (r3): a getter that answers null and one that throws (server.js's const read before it is
+      // set) are one fact — nothing rewritten (a line rewritten then could never close its notice); once the store answers
+      // the re-judge runs by itself: null ⇒ the boot's retry (no report), a throw ⇒ the next report (its retry a minute off).
+      // Judged by EVENTS, never a fixed delay (r4): the getter's asks (the boot's, a retry's) and the mutant's rewrite
+      const lateBoot = async (mod, home, first, o = {}) => {
+        const told = [], st = new UserTodoManager({ dataDir: path.join(home, 'data'), expirySweepMs: 0 }); let up = false, asked = 0;
+        const H = await hub({ dir: path.join(home, 'data'), sinkModule: mod, publicDir: PUB, getUserTodos: () => (asked++, up ? st : first(st)), log: { log: (x) => told.push(String(x)), warn: (x) => told.push(String(x)) }, ...o });
+        return { ...H, store: st, told, home, asked: () => asked, up: () => { up = true; }, close: () => { st.stop(); return H.close(); } };
+      };
+      const early = (H) => { const l = linesOf(path.join(H.home, 'data', SINK.FILE))[0], n = openOf(H.store); return [l && (l.kind || !l.noticed) ? 'the probe\'s line was rewritten with no store to close its notice' : '', n !== 1 ? `For you holds ${n} (want its 1 open)` : '', H.told.length ? `said «${H.told.join(' | ')}»` : ''].filter(Boolean).join('; '); };
+      const NUL = () => null, THROW = () => { throw new ReferenceError("Cannot access 'userTodos' before initialization"); };
+      const ANCHOR = 'const todos = storeUp();';
+      ok(srcK.split(ANCHOR).length === 2, 'the mutant\'s anchor: the re-judge asks whether the For-you store is up');
+      const MN = load(path.join(REPO, 'src/server/csp-reports.js'), srcK.replace(ANCHOR, 'const todos = storeUp() || { idsWhere: () => [], setStatusMany: () => ({ changed: [] }) };'));
+      const [HN, HT, HX] = await Promise.all([lateBoot(SINK, homes.null, NUL, { retryMs: 20 }), lateBoot(SINK, homes.throw, THROW, { retryMs: 60e3 }), lateBoot(MN, homes.mutnull, NUL, { retryMs: 20 })]);
+      const [, , tX] = await Promise.all([seen(() => HN.asked() >= 2, 3000), seen(() => HT.asked() >= 1, 3000), until(HX, 3000)]); // null: the boot's ask and a retry's; a throw: the boot's; the mutant: its rewrite — the store still not up
+      const eN = early(HN), eT = early(HT), eX = early(HX);
+      ok(!eN && !eT && !HN.sink.stats().rejudged && !HT.sink.stats().rejudged && HN.asked() >= 2 && HT.asked() >= 1, 'NO STORE AT BOOT — a getter that answers null (asked at the boot and again by its retry), one that throws (asked at the boot): nothing rewritten, the notice still open, nothing said', { eN, eT, asked: [HN.asked(), HT.asked()] });
+      HN.up(); HT.up(); HX.up();
+      await post(HT, PROBE);
+      await Promise.all([until(HN, 3000), until(HT, 3000)]); await tick(25);
+      const fN = bootFault(HN), fT = bootFault(HT), fX = bootFault(HX);
+      ok(!fN && !fT, 'the store answers ⇒ the re-judge runs by itself (null: the boot\'s retry, no report; a throw: the next report) — the line the sanitizer\'s, its notice CLOSED, said once', { fN, fT });
+      ok(/rewritten with no store/.test(eX) && /For you still holds 1/.test(fX), `MUTANT (a store not up taken as an empty one — r2's null; judged once its rewrite is seen, ${HX.sink.stats().rejudged ? `at ${tX} ms` : `NOT in ${tX} ms`}) ⇒ RED by name: «${eX}», and once the store answers «${fX}»`, { eX, fX });
+      await Promise.all([HN.close(), HT.close(), HX.close()]);
+      // THE LINES FIRST, THE NOTICE LAST (r3): a file that cannot be rewritten (its temp name taken) closes nothing — its
+      // line still the app page's, its notice open, a warning; the next boot (the way clear) does both
+      const JAM = path.join(homes.stuck, 'data', SINK.FILE + '.rejudge'); fs.mkdirSync(JAM);
+      const HS = await lateBoot(SINK, homes.stuck, (st) => st);
+      const rS = await HS.sink.rejudge(); // the boot's own run (one per boot)
+      const eS = early(HS).replace(/(^|; )said «.*»$/, ''); // its warning is the point
+      ok(rS.lines === 0 && rS.closed === 0 && !eS && HS.told.some((x) => /was not re-judged/.test(x)), 'a file that cannot be rewritten ⇒ its notice NOT closed (the line still says the app page\'s), a warning', { rS, eS, told: HS.told });
+      await HS.close(); fs.rmdirSync(JAM);
+      const HS2 = await lateBoot(SINK, homes.stuck, (st) => st);
+      await until(HS2, 3000);
+      ok(!bootFault(HS2), 'the next boot, the way clear ⇒ the line re-judged, its notice closed, said once', bootFault(HS2));
+      await HS2.close();
     }
   }
 }
