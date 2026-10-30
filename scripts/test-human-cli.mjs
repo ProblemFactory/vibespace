@@ -27,9 +27,14 @@
 //      the reply that lands between is shown once; THE MUTANT reading at half the clock shows it 0 times); the history's
 //      sources each judged on its own answer (a stalled transcript leaves a slow-but-healthy buffer its time); the
 //      horizon: a subagent's record and an edit in place never move it
+//   §10 round 7: THE TRANSCRIPT READ EARLY, HELD, CHECKED AGAINST THE BASELINE — a buffer that does not answer never starves
+//      a slow-but-healthy transcript (300 / 800 / 1500 ms: its history inside the deadline); a reply landing between the
+//      early read and the baseline is shown once (the buffer read at the baseline) or SAID when neither file answers again
+//      in time; a baseline later than the deadline is checked against what was printed (said, never silent); §9a's
+//      second mutant — the held read printed without the check — shows case B's reply 0 times
 // RED on the base (6428c67e): no data/bin/vibespace, no index; RED on round 1 (5a0b2463): §0, the live-hub attach, the
 // receipt, the piped number, the bare refusal; RED on round 3 (ea0cecce): §7 and the killed session's .receipts (§2);
-// RED on round 4 (ad114fd78): §8. RED on round 5 (bd110027f): §9.
+// RED on round 4 (ad114fd78): §8. RED on round 5 (bd110027f): §9. RED on round 6 (74cf819d2): §10a, §10b's second half, §10c.
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -488,15 +493,20 @@ console.log('§7 round 4 — the follower keys on identity, the baseline before 
     clearInterval(feeder); fs.rmSync(buf, { force: true });
     return { n: count(r, 'REPLY-R1 HCR6'), out: r };
   };
-  { // §9a THE HISTORY NEVER BEFORE THE BASELINE — and the mutant that reads it at half the clock (round 5's race) is RED
+  { // §9a THE HISTORY NEVER BEFORE THE BASELINE — the mutant that prints it at half the clock (round 5's race) and the one
+    // that prints the early transcript read at the baseline WITHOUT the baseline's check (round 7's held read, unchecked)
     const r = await slowBaseline(CLI, 'sess-r6-slow');
-    const MUT = path.join(path.dirname(CLI), 'vibespace-r6-mutant'), src = fs.readFileSync(CLI, 'utf8');
-    const A = 'tail.ready.then((took) => historyOf(';
-    fs.writeFileSync(MUT, src.split(A).join('Promise.race([tail.ready, new Promise((r) => setTimeout(() => r(true), PROBE_MS / 2))]).then((took) => historyOf('));
-    const m = src.split(A).length === 2 ? await slowBaseline(MUT, 'sess-r6-mut') : { n: -1, out: 'the anchor moved: ' + A };
-    fs.rmSync(MUT, { force: true });
-    ok('ONE DEADLINE, THE HISTORY NEVER BEFORE THE BASELINE (round 6): a buffer on a slow mount that still answers (its follower\'s reads answered at 1.0 s and 1.4 s) — the reply that lands in the transcript between is shown ONCE (round 5 read the history at half the clock: 0 times); the same CLI reading at half the clock (the mutant) shows it 0 times',
-      r.n === 1 && m.n === 0, `this CLI ${r.n}× · the mutant ${m.n}× | ${r.out.slice(-300)} | ${m.out.slice(-200)}`);
+    const src = fs.readFileSync(CLI, 'utf8');
+    const mutant = async (name, A, B) => {
+      if (src.split(A).length !== 2) return { n: -1, out: 'the anchor moved: ' + A };
+      const MUT = path.join(path.dirname(CLI), 'vibespace-mutant-' + name);
+      fs.writeFileSync(MUT, src.split(A).join(B));
+      try { return await slowBaseline(MUT, 'sess-mut-' + name); } finally { fs.rmSync(MUT, { force: true }); }
+    };
+    const half = await mutant('half', 'tail.ready.then((base) => historyOf(', 'Promise.race([tail.ready, new Promise((r) => setTimeout(() => r({ last: null }), PROBE_MS / 2))]).then((base) => historyOf(');
+    const nocheck = await mutant('nocheck', "const holds = (h) => !base || !base.last || h.seen.has('uuid|' + base.last);", 'const holds = () => true;');
+    ok('ONE DEADLINE, THE HISTORY NEVER BEFORE THE BASELINE (rounds 6–7): a buffer on a slow mount that still answers (its follower\'s reads answered at 1.0 s and 1.4 s) — the reply that lands in the transcript between is shown ONCE (round 5 read the history at half the clock: 0 times); the same CLI printing at half the clock shows it 0 times, and printing the early transcript read without the baseline\'s check 0 times',
+      r.n === 1 && half.n === 0 && nocheck.n === 0, `this CLI ${r.n}× · half ${half.n}× · nocheck ${nocheck.n}× | ${r.out.slice(-300)} | ${half.out.slice(-160)} | ${nocheck.out.slice(-160)}`);
   }
   { // §9b EACH HISTORY SOURCE ITS OWN ANSWER — the transcript does not answer (a FIFO), the buffer answers in 0.4 s (a slow
     // but healthy mount: a preload in the CLI process holds its tail read): the buffer's history is shown inside the deadline
@@ -530,6 +540,54 @@ console.log('§7 round 4 — the follower keys on identity, the baseline before 
     const seqU = [[Ed, { updated: true }], [Cc, {}], [said('D', { uuid: 'b-4' }), {}], [Cc, {}]].map(([l, h]) => fb(JSON.parse(l), { raw: l, ...h }));
     ok('THE HORIZON (round 6): a subagent\'s record (parent_tool_use_id / isSidechain — never in the main transcript) and an edit in place (an OLDER record) never say the follower is past the history: the held record after them is not shown again; a newer one is',
       seqS.join() === 'false,true,true,false' && seqU.join() === 'true,false,true,true', JSON.stringify({ seqS, seqU }));
+  }
+  console.log('§10 round 7 — the transcript read early and held, checked against the baseline');
+  // a preload in the CLI process holds chosen children: the transcript's tail read (TR ms), the buffer's tail read (BUF ms)
+  // and the buffer's FOLLOWER (FOL ms) — which, told to, appends REPLY-R1 to both files the instant before its first read
+  // (the reply lands after the early transcript read and inside the follower's baseline: case B, made deterministic)
+  const held7 = async (id, { TR = 0, BUF = 0, FOL = 0, plant = false, stalled = false, wait = 0 }) => {
+    const buf = path.join(BUFS7, id + '.buf'), tr = path.join(R4, id + '.jsonl'), sock = path.join(R4, id + '.sock');
+    await master(sock); const hub = await fakeHub(false);
+    index7([row7(id, { socketPath: sock }, { transcript: tr })], hub.address().port);
+    const H0 = said('HISTORY-0 HCR7', { uuid: 'u7-0' }), R1 = said('REPLY-R1 HCR7', { uuid: 'u7-1' });
+    fs.writeFileSync(tr, H0 + '\n');
+    if (stalled) execFileSync('mkfifo', [buf]); else fs.writeFileSync(buf, H0 + '\n');
+    const W = (ms) => (ms ? `Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ${ms});` : '');
+    const P = plant ? `require('fs').appendFileSync(${JSON.stringify(tr)}, ${JSON.stringify(R1 + '\n')}); require('fs').appendFileSync(${JSON.stringify(buf)}, ${JSON.stringify(R1 + '\n')});` : '';
+    const PRE = path.join(R4, id + '-hold.cjs');
+    fs.writeFileSync(PRE, `const cp = require('child_process'), o = cp.spawn, TR = ${JSON.stringify(tr)}, BUF = ${JSON.stringify(buf)};\ncp.spawn = function (cmd, args, opts) {\n  if (Array.isArray(args) && args[0] === '-e') {\n    const a = String(args[2] || ''), fol = /_follow/.test(String(args[1]));\n    const pre = fol && a.includes(BUF) ? ${JSON.stringify(W(FOL) + P)} : !fol && a.includes(TR) ? ${JSON.stringify(W(TR))} : !fol && a.includes(BUF) ? ${JSON.stringify(W(BUF))} : '';\n    if (pre) args = ['-e', pre + args[1], ...args.slice(2)];\n  }\n  return o.call(this, cmd, args, opts);\n};\n`);
+    const t0 = Date.now(); let first = null;
+    const out = await new Promise((resolve) => {
+      const ch = spawn(process.execPath, ['-r', PRE, CLI, 'chat', id, '--wait', String(wait)], { env: { ...CLI_ENV, HOME: H7 }, stdio: ['pipe', 'pipe', 'pipe'] });
+      kids.push(ch);
+      let o = ''; ch.stdout.on('data', (d) => { if (first == null) first = Date.now() - t0; o += d; }); ch.stderr.on('data', (d) => { o += d; });
+      ch.stdin.end();
+      const tk = setTimeout(() => { try { ch.kill('SIGKILL'); } catch { } }, 20000);
+      ch.on('exit', () => { clearTimeout(tk); resolve(o); });
+    });
+    fs.rmSync(buf, { force: true });
+    return { first, out, src: (/from its (transcript|buffer)/.exec(out) || [])[1] || 'none', r1: count(out, 'REPLY-R1 HCR7') };
+  };
+  { // §10a THE HELD READ — the buffer does not answer (a FIFO nobody writes: no baseline), the transcript answers in 300 /
+    // 800 / 1500 ms (the hub down because data/ sits on a stalled mount, the transcript on a slow but healthy disk)
+    const runs = [];
+    for (const ms of [300, 800, 1500]) runs.push({ ms, ...(await held7('sess-r7-held-' + ms, { TR: ms, stalled: true })) });
+    ok('THE TRANSCRIPT READ EARLY AND HELD (round 7): a buffer that does not answer never starves a slow-but-healthy transcript — at 300 / 800 / 1500 ms its history is shown, first line ≤ 2.3 s (round 6 began that read at the deadline: 250 ms, no history)',
+      runs.every((r) => r.src === 'transcript' && count(r.out, 'HISTORY-0 HCR7') === 1 && r.first != null && r.first <= 2300), runs.map((r) => `${r.ms}: ${r.src} ${r.first} ms`).join(' · ') + ' | ' + runs.map((r) => r.out.slice(0, 220)).join(' | '));
+  }
+  { // §10b THE BASELINE'S CHECK — the follower's baseline (~1.6 s) holds a reply the early transcript read (0.9 s) does not;
+    // the transcript read again gets the ~0.4 s left (< its 0.9 s): the buffer, read at the baseline beside it, holds it. With
+    // the buffer's read held 0.9 s too, neither answers again in time: the held read is shown and SAYS what it lacks
+    const g = await held7('sess-r7-gap', { TR: 900, FOL: 1300, plant: true });
+    const b = await held7('sess-r7-behind', { TR: 900, BUF: 900, FOL: 1300, plant: true });
+    ok('THE BASELINE\'S CHECK (round 7): a reply that landed between the early transcript read and the baseline is shown ONCE (from the buffer read at the baseline; the transcript read again had ~0.4 s for its 0.9 s); with neither answering again in time the held read is shown and says a newer message is not (never silent)',
+      g.src === 'buffer' && g.r1 === 1 && b.src === 'transcript' && b.r1 === 0 && /already holds a newer message than the history above/.test(b.out), `gap: ${g.src} R1 ${g.r1}× ${g.first} ms · behind: ${b.src} R1 ${b.r1}× | ${g.out.slice(0, 300)} | ${b.out.slice(0, 420)}`);
+  }
+  { // §10c A BASELINE LATER THAN THE DEADLINE — the follower held 2.3 s (its baseline ~2.6 s, holding a reply that landed
+    // after the early read): the history is printed at the deadline, and the late baseline's message it lacks is SAID
+    const l = await held7('sess-r7-late', { FOL: 2300, plant: true, wait: 2 });
+    ok('A BASELINE LATER THAN THE DEADLINE (round 7): the history is printed inside the deadline (≤ 2.3 s), and the late baseline\'s newer message — which no follower will report — is said, never silent (round 6: neither shown nor said)',
+      l.src === 'transcript' && l.first != null && l.first <= 2300 && l.r1 === 0 && /answered after the 2 s, holding a newer message than the history above/.test(l.out), `${l.src} ${l.first} ms R1 ${l.r1}× | ${l.out.slice(0, 520)}`);
   }
   for (const k of kids) { try { if (k.exitCode == null && k.signalCode == null) k.kill('SIGKILL'); } catch { } }   // only this section's own children
   for (const s of servers) { try { s.close(); } catch { } }
