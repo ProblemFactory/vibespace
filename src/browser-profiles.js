@@ -1442,6 +1442,24 @@ function normalizeRegistry(doc) {
       key: v.key, profileId: k, since: Number(v.since) || 0, launched: v.launched === true, ownTab: /^[0-9A-Fa-f]{32}$/.test(String(v.ownTab || '')) ? String(v.ownTab) : null,
       adopted: (Array.isArray(v.adopted) ? v.adopted : []).map(String).filter((x) => /^[0-9A-Fa-f]{32}$/.test(x)).slice(-32), // verify r2: the orphan tabs he took
       state: v.state === 'driving' ? 'driving' : 'away', awaySince: Number(v.awaySince) || 0 }])),
+    // lane vault-login-chrome r4: persisted live-fill tab fences (`{targetId, urlAtFill, origin, loginId, mode, at, browserKey?}`)
+    // and scrub entry names (`{name, at}` — NEVER a secret value) per profile so hub/watch restarts re-arm both layers
+    loginFences: Object.fromEntries(Object.entries(obj(d.loginFences)).filter(([k, v]) => isProfileId(k) && v && typeof v === 'object' && !Array.isArray(v)).map(([k, v]) => {
+      const fences = (Array.isArray(v.fences) ? v.fences : []).filter((f) => f && typeof f === 'object' && typeof f.targetId === 'string' && f.targetId && typeof f.origin === 'string' && f.origin).slice(-32).map((f) => ({
+        targetId: String(f.targetId).slice(0, 64),
+        urlAtFill: String(f.urlAtFill || '').slice(0, 2048),
+        origin: String(f.origin).slice(0, 512),
+        loginId: String(f.loginId || '').slice(0, 320),
+        mode: String(f.mode || 'login').slice(0, 24),
+        at: Number(f.at) || 0,
+        ...(typeof f.browserKey === 'string' && f.browserKey ? { browserKey: String(f.browserKey).slice(0, 40) } : {}),
+      }));
+      const scrubs = (Array.isArray(v.scrubs) ? v.scrubs : []).filter((s) => s && typeof s === 'object' && typeof s.name === 'string' && s.name.startsWith('web-login:')).slice(-32).map((s) => ({
+        name: String(s.name).slice(0, 320),
+        at: Number(s.at) || 0,
+      }));
+      return [k, { fences, scrubs }];
+    }).filter(([, v]) => v.fences.length || v.scrubs.length)),
   };
 }
 /** Resolve a profile by id or by label (exact, case-insensitive). */

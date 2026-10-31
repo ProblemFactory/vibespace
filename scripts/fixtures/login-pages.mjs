@@ -100,6 +100,7 @@ document.getElementById('realGo').addEventListener('click', () => {
   <input id="sp1" name="password" type="password" autocomplete="new-password" minlength="12" placeholder="New password">
   <input id="sp2" name="confirm" type="password" autocomplete="new-password" minlength="12" placeholder="Confirm password">
   <button type="submit">Create account</button>
+  <a id="termsLink" href="/plain">Terms</a>
   <div id="err" hidden></div>
 </form>`,
     `${post}
@@ -118,9 +119,12 @@ document.getElementById('f').addEventListener('submit', async (e) => {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ email, password: p1, match: true }),
   });
-  if (!r.ok) {
+  let data = null;
+  try { data = await r.json(); } catch { data = null; }
+  if (!r.ok || (data && data.ok === false)) {
     document.getElementById('err').hidden = false;
     document.getElementById('err').textContent = 'Taken';
+    if (new URLSearchParams(location.search).get('jsonerr') === '1') history.pushState({}, '', '/signup-check?err=taken');
     return;
   }
   if (new URLSearchParams(location.search).get('spa') === '1') {
@@ -129,6 +133,26 @@ document.getElementById('f').addEventListener('submit', async (e) => {
     location.href = '/welcome';
   }
 });`),
+  '/srcdoc-login': () => page('Framed login', `<h1>Portal</h1><iframe id="sd" srcdoc="<form><input name='username' autocomplete='username'><input type='password' name='password' autocomplete='current-password'><button type='submit'>Sign in</button></form>" width="420" height="220"></iframe>`),
+  '/spa-login': () => page('SPA Sign in', `<form id="f"><input id="u" name="username" autocomplete="username"><input id="p" type="password" name="password" autocomplete="current-password"><button type="submit">Sign in</button></form>`,
+    `${post}
+document.getElementById('f').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const username = document.getElementById('u').value;
+  const password = document.getElementById('p').value;
+  await post('/done/spa-login', { username, password });
+  document.getElementById('f').replaceWith(Object.assign(document.createElement('h1'), { textContent: 'Signed in SPA' }));
+  history.pushState({}, '', '/spa-app');
+});`),
+  '/thief-frame': () => page('Ad Frame', `<input id="thief" type="text" placeholder="Ad search">`,
+    `${post}
+const t = document.getElementById('thief');
+setInterval(() => { try { t.focus(); } catch {} }, 1);
+t.addEventListener('input', () => { if (t.value) post('/seen/iframe-thief', { len: t.value.length, val: t.value }); });`),
+  '/one-with-thief': (url) => {
+    const src = url.searchParams.get('src') || 'about:blank';
+    return page('Sign in — with ad frame', `<form id="f" method="post" action="/done/one"><input id="u" name="username" autocomplete="username"><input id="p" type="password" name="password" autocomplete="current-password"><button type="submit">Sign in</button></form><iframe id="ad" src=${JSON.stringify(src)} width="300" height="120"></iframe>`);
+  },
 };
 
 export function startLoginPages() {
@@ -143,6 +167,10 @@ export function startLoginPages() {
         if (url.pathname === '/done/one') { res.writeHead(303, { location: '/welcome' }); return res.end(); }
         if (url.pathname === '/done/signup-check' && body && body.email === 'reject@example.test') {
           res.writeHead(400, { 'content-type': 'application/json' });
+          return res.end('{"ok":false,"error":"taken"}');
+        }
+        if (url.pathname === '/done/signup-check' && body && body.email === 'jsonerr@example.test') {
+          res.writeHead(200, { 'content-type': 'application/json' });
           return res.end('{"ok":false,"error":"taken"}');
         }
         res.writeHead(200, { 'content-type': 'application/json' }); res.end('{"ok":true}');

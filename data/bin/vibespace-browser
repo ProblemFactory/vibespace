@@ -708,7 +708,11 @@ async function runPage(c) {
   const vpSet = isViewportSet(rest);
   const batchCmds = cls.verb === 'batch' ? batchCommands(cls, framed) : null;
   const vpInBatch = !!(batchCmds && batchCmds.some(isViewportSet));
-  const batchVerbs = batchCmds ? batchCmds.map((w) => String(w[V.verbAt(w)] || 'unknown')) : null;
+  const batchVerbs = batchCmds ? batchCmds.map((w) => {
+    const v0 = String(w[V.verbAt(w)] || 'unknown');
+    if (v0 === 'wait' && w.some((a) => /^--(?:fn|function|js)(?:=|$)/.test(String(a || '')))) return 'wait --fn';
+    return v0;
+  }) : null;
   let r = await call('POST', '/api/agent/browser/resolve', { handle: handle || '', argv: rest, wrapper: true, ...(vpSet || vpInBatch ? { viewportSet: true } : {}), ...(batchVerbs ? { batchVerbs } : {}) }, { soft: true });
   // lane browser-takeover-queue: a person is asked to take over this browser (`ask-human`) — the verb WAITS for their
   // handback (bounded), then asks again ONCE; still waiting / a reply ⇒ nothing ran, said by the server's words
@@ -1071,11 +1075,13 @@ async function runPage(c) {
     const scrubCapOk = !needScrub || (Buffer.byteLength(outText, 'utf8') <= 16 * 1024 * 1024 && Buffer.byteLength(errText, 'utf8') <= 16 * 1024 * 1024);
     let au = null;
     const nav = navVerb && code === 0 ? navFacts(outText) : null; // lane browser-propose: the final url + title the server judges for the sign-in hint
-    // verify r4 #1: a `tab new` that succeeded names its tab (the ack) — the server binds it to this conversation
-    const tabAck = words[0] === 'tab' && words[1] === 'new' && code === 0 && profileId ? await tabNewAck(outText, { bin: bin.path, env, cwd: runCwd.dir, wantsJson }) : null;
+    // verify r4 #1 + vault-login r4: `tab new` and `tab <id>` report the resulting active targetId so the watch binds / tracks the aimed tab
+    const isTabNew = words[0] === 'tab' && words[1] === 'new';
+    const isTabSwitch = words[0] === 'tab' && !!words[1] && !['new', 'list', 'close'].includes(words[1]);
+    const tabAck = (isTabNew || isTabSwitch) && code === 0 && profileId ? await tabNewAck(outText, { bin: bin.path, env, cwd: runCwd.dir, wantsJson }) : null;
     // int347 (the alert race): the verb's OWN daemon printed a page dialog line ⇒ the audit waits for the watch to have it
     const daemonSaw = DS && dlg && dlg.watched && !dialogVerb && !dialogHit ? DS.daemonDialogLine(outText + '\n' + errText) : null;
-    try { au = await call('POST', '/api/agent/browser/audit', { profile: profileId, verb: words[0] || null, ...(daemonSaw ? { daemonSaw: { type: daemonSaw.type } } : {}), ok: code === 0 && !dialogHit && !loopHit && !shotCut && !passkeyHit && !promptHit, ...(navUrl ? { url: navUrl } : {}), ...(vpSet && code === 0 ? { viewport: { argv: rest, ran: true, handle: handle || '' } } : {}), ...(tabAck ? { tab: { new: true, targetId: tabAck.targetId } } : {}), ...(Number(r.at) > 0 ? { since: Number(r.at) } : {}), ...(r.kind === 'child' && r.handle ? { handle: r.handle } : {}), ...(timedOut && !loopHit && !shotCut ? { timedOut: true } : {}), ...(dialogHit ? { dialog: true } : {}), ...(loopHit ? { loop: 'cut' } : shotCut ? { loop: true } : {}), ...(nav ? { nav } : {}), ...(needScrub && scrubCapOk ? { output: { out: outText, err: errText } } : {}) }, { soft: true }); } catch { au = null; }
+    try { au = await call('POST', '/api/agent/browser/audit', { profile: profileId, verb: words[0] || null, ...(daemonSaw ? { daemonSaw: { type: daemonSaw.type } } : {}), ok: code === 0 && !dialogHit && !loopHit && !shotCut && !passkeyHit && !promptHit, ...(navUrl ? { url: navUrl } : {}), ...(vpSet && code === 0 ? { viewport: { argv: rest, ran: true, handle: handle || '' } } : {}), ...(tabAck ? { tab: { ...(isTabNew ? { new: true } : { switched: true }), targetId: tabAck.targetId } } : {}), ...(Number(r.at) > 0 ? { since: Number(r.at) } : {}), ...(r.kind === 'child' && r.handle ? { handle: r.handle } : {}), ...(timedOut && !loopHit && !shotCut ? { timedOut: true } : {}), ...(dialogHit ? { dialog: true } : {}), ...(loopHit ? { loop: 'cut' } : shotCut ? { loop: true } : {}), ...(nav ? { nav } : {}), ...(needScrub && scrubCapOk ? { output: { out: outText, err: errText } } : {}) }, { soft: true }); } catch { au = null; }
     if (needScrub) {
       if (!scrubCapOk || !au || au._failed) { console.error('vibespace-browser: refused — the browser output could not be scrubbed by the hub; nothing was printed [login_fill_live]'); process.exit(1); }
       if (au.scrubbed && typeof au.scrubbed === 'object') {

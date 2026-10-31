@@ -305,7 +305,23 @@ function create({ vault, grants = null, totpCode = null, forYou = null, now = ()
     return w && w.ok ? { ok: true, removed: true } : named((w && w.code) || 'not_written', (w && w.error) || 'not written');
   }
 
-  return { names, planFill, noteFill, submitted, flushHeld, answerCard, cardOf: (id) => { const c = cards.get(str(id)); return c ? { id: c.id, name: c.name, shown: c.shown, update: c.existing } : null; }, list, addOwn, addAgent, drop, grant, ungrant, _cards: cards, _held: held };
+  /** lane vault-login-chrome r4: open a login entry's secret values (>= 8 bytes) solely to re-hydrate in-memory output scrubbing after a hub restart. */
+  function scrubSecretsOf(name) {
+    const n = str(name);
+    if (!BL.parseName(n)) return { ok: false, code: 'bad_name', values: [] };
+    if (vstate() !== 'unlocked') return { ok: false, code: 'vault_locked', values: [] };
+    const o = open(n);
+    if (!o.ok || !o.rec) return { ok: false, code: o.code || 'login_no_entry', values: [] };
+    const values = [o.rec.password, o.rec.previous && o.rec.previous.password]
+      .filter((x) => typeof x === 'string' && Buffer.byteLength(x, 'utf8') >= 8);
+    return { ok: true, values };
+  }
+  function onVaultOpen(fn) {
+    if (typeof fn !== 'function' || typeof vault.onOpen !== 'function') return () => {};
+    try { return vault.onOpen(fn) || (() => {}); } catch { return () => {}; }
+  }
+
+  return { names, planFill, noteFill, submitted, flushHeld, scrubSecretsOf, onVaultOpen, answerCard, cardOf: (id) => { const c = cards.get(str(id)); return c ? { id: c.id, name: c.name, shown: c.shown, update: c.existing } : null; }, list, addOwn, addAgent, drop, grant, ungrant, _cards: cards, _held: held };
 }
 
 module.exports = { create, CARDS_MAX, CARD_MS, HELD_MAX, TYPED_MAX, TYPED_MS };

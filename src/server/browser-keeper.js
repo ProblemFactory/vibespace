@@ -6737,6 +6737,43 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (n) commit();
     return n;
   }
+  /** lane vault-login-chrome r4: read/write persisted live-fill fences & scrub entry names through the ONE registry writer (zero secret bytes on disk). */
+  function loginFenceStateOf(profileId) {
+    ensureLoaded();
+    const pid = String(profileId || '');
+    const st = reg.loginFences && reg.loginFences[pid];
+    if (!st || typeof st !== 'object') return { fences: [], scrubs: [] };
+    return {
+      fences: Array.isArray(st.fences) ? st.fences.map((f) => ({ ...f })) : [],
+      scrubs: Array.isArray(st.scrubs) ? st.scrubs.map((s) => ({ ...s })) : [],
+    };
+  }
+  function saveLoginFenceState(profileId, { fences = [], scrubs = [] } = {}) {
+    ensureLoaded();
+    const pid = String(profileId || '');
+    if (!pid || !B.isProfileId(pid)) return false;
+    if (!reg.loginFences || typeof reg.loginFences !== 'object') reg.loginFences = {};
+    const nf = (Array.isArray(fences) ? fences : []).filter((f) => f && typeof f.targetId === 'string' && f.targetId && typeof f.origin === 'string' && f.origin).slice(-32).map((f) => ({
+      targetId: String(f.targetId).slice(0, 64),
+      urlAtFill: String(f.urlAtFill || '').slice(0, 2048),
+      origin: String(f.origin).slice(0, 512),
+      loginId: String(f.loginId || '').slice(0, 320),
+      mode: String(f.mode || 'login').slice(0, 24),
+      at: Number(f.at) || 0,
+      ...(typeof f.browserKey === 'string' && f.browserKey ? { browserKey: String(f.browserKey).slice(0, 40) } : {}),
+    }));
+    const ns = (Array.isArray(scrubs) ? scrubs : []).filter((s) => s && typeof s.name === 'string' && s.name.startsWith('web-login:')).slice(-32).map((s) => ({
+      name: String(s.name).slice(0, 320),
+      at: Number(s.at) || 0,
+    }));
+    const next = nf.length || ns.length ? { fences: nf, scrubs: ns } : null;
+    const prev = reg.loginFences[pid] || null;
+    if (JSON.stringify(prev) === JSON.stringify(next)) return true;
+    if (next) reg.loginFences[pid] = next;
+    else delete reg.loginFences[pid];
+    commit();
+    return true;
+  }
   /** lane site-reset step 3: the agent's `site-reset <host>` on a SHARED profile files ONE proposal (never runs): the same
    *  record shape as a backend switch's (SW.siteResetProposalFor, `sr-…`), the same card / For-you item / routes. A second
    *  ask on the same (conversation, profile, host) while one stands is the SAME card; a rejection not yet told is told now. */
@@ -7423,7 +7460,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     // P4 second half (§7.4 / §7.5): the switch, its view, the chip, seats, the agent's claims, per-site memory, the lease's last URL
     switchBackend, switcherView, chipFor, choicesFor: (id) => { const p = profile(id); return p && !isEph(p) ? backendFactFor(p).choices : []; }, seatStates, runningOf, blocked, blockedFor, clearBlocked, addSiteHint, dropSiteHint, siteHints, noteLeaseUrl, cloakExecutable, readDirMajor, keys: () => keysOf(),
     onProposal, proposalEntry, stepProposal, noteProposal, proposalsFor, proposalOthers, openInLease,
-    proposeSiteReset, siteResetHolders, holderTabs, noteOwnTab, forgetOwnTab, pruneOwnTabs, notePermission /* lane browser-ui-prompts-r2 */, // lane site-reset step 3 (verify r3 #2: the persisted witness; r4 #3: pruned at a connect) (+ verify r1: a holder's attributable tabs): one site's login on a shared profile — a proposal // lane browser-propose: the proposal record + what its runner acts through
+    proposeSiteReset, siteResetHolders, holderTabs, noteOwnTab, forgetOwnTab, pruneOwnTabs, notePermission /* lane browser-ui-prompts-r2 */, loginFenceStateOf, saveLoginFenceState /* lane vault-login-chrome r4 */, // lane site-reset step 3 (verify r3 #2: the persisted witness; r4 #3: pruned at a connect) (+ verify r1: a holder's attributable tabs): one site's login on a shared profile — a proposal // lane browser-propose: the proposal record + what its runner acts through
     // §7.4 failure form (1): the install action (verdict = PURE over the proof record; the act spawns npm ONLY on ok)
     installDir, cloakEgress, cloakRefusals, // installVerdict, installCloak, installedCloakBin, installedStamp, cloakCacheDir: the cloak row, in ...installs.api
     // P5 (§4.5 / D7 / D35): the lease seam the recorder and the screencast hang on, the digest hook, the editable fields

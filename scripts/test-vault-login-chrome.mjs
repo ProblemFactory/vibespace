@@ -302,6 +302,7 @@ try {
       const evB4 = await run(['eval', "(delete document.querySelector('#p').value, document.querySelector('#p').value)"]);
       const conLive = await run(['console']);
       const batLive = await run(['batch', 'click #u', 'eval document.querySelector("#p").value']);
+      const waitFnLive = await run(['wait', '--fn', 'document.querySelector("#p").value.length > 0']);
       for (const [label, res] of [
         ['get value #p', gv],
         ['eval el.value', evPlain],
@@ -311,18 +312,27 @@ try {
         ['B4 delete own getter', evB4],
         ['console', conLive],
         ['batch carrying eval', batLive],
+        ['wait --fn <js>', waitFnLive],
       ]) {
         ok(res.code === 1 && /\[login_fill_live\]/.test(res.err) && !res.out.includes(PW) && !res.err.includes(PW),
           `${label} while filled secret is live ⇒ exit 1 [login_fill_live] and 0 secret bytes`, { label, code: res.code, err: res.err });
       }
 
-      // Layer 1 (Mediated raw CDP): direct WS calls through cdp-mediator are also refused login_fill_live
+      // Layer 1 (Mediated raw CDP + RED control on DOMSnapshot.captureSnapshot):
       const upUrl1 = await upstreamWsUrl();
       const rawUp = await openCdpRpc(upUrl1);
       const tList = await rawUp.call('Target.getTargets');
       const pageTarget = ((tList.msg.result && tList.msg.result.targetInfos) || []).find((t) => t.type === 'page' && String(t.url || '').startsWith(`${SITE}/one`));
+      let rawSnapHasPw = false;
+      if (pageTarget) {
+        const upAtt = await rawUp.call('Target.attachToTarget', { targetId: pageTarget.targetId, flatten: true });
+        const upSid = upAtt.msg.result && upAtt.msg.result.sessionId;
+        const upSnap = await rawUp.call('DOMSnapshot.captureSnapshot', { computedStyles: [] }, upSid);
+        rawSnapHasPw = Boolean(upSnap && upSnap.raw && upSnap.raw.includes(PW));
+        await rawUp.call('Target.detachFromTarget', { sessionId: upSid });
+      }
       await rawUp.close();
-      ok(!!pageTarget, 'located live /one page target for mediated CDP probe');
+      ok(!!pageTarget && rawSnapHasPw === true, 'RED control (real Chrome): unmediated DOMSnapshot.captureSnapshot on live-filled tab returns the password in strings');
       const mg = await w.mediator.grantFor({ profileId: w.prof.id, browserKey: w.KEY, upstream: upUrl1, targetIds: [pageTarget.targetId] });
       const medRpc = await openCdpRpc(mg.url);
       const medAtt = await medRpc.call('Target.attachToTarget', { targetId: pageTarget.targetId, flatten: true });
@@ -331,11 +341,15 @@ try {
         ['Runtime.evaluate', { expression: "document.querySelector('#p').value", returnByValue: true }],
         ['Page.captureScreenshot', {}],
         ['DOM.getOuterHTML', {}],
+        ['DOMSnapshot.captureSnapshot', { computedStyles: [] }],
+        ['IndexedDB.requestData', { securityOrigin: SITE, databaseName: 'x', objectStoreName: 'y', indexName: '', skipCount: 0, pageSize: 1 }],
+        ['IO.read', { handle: '1' }],
         ['Debugger.enable', {}],
+        ['FutureDomain.readSecret', {}],
       ]) {
         const mr = await medRpc.call(m, p, medSid);
         ok(!!(mr.msg.error && /login_fill_live/.test(mr.msg.error.message)) && !mr.raw.includes(PW),
-          `mediated CDP refuses ${m} with login_fill_live while filled secret is live`, mr.msg);
+          `mediated CDP census fence refuses ${m} with login_fill_live while filled secret is live`, mr.msg);
       }
 
       // Allowed verb (`click`) submits the form → 303 redirect to /welcome lifts liveFill, and Layer 2 scrubs stashed secret
@@ -404,6 +418,10 @@ try {
       const totpUses = w.vaultAudit().filter((l) => l.event === 'vault-totp-use');
       ok(totpUses.length === 1 && totpUses[0].via === 'browser-login' && totpUses[0].ok === true,
         'vault-totp-use audit row recorded once (on the /totp step only) with via:"browser-login"', totpUses);
+      const shortCdpFrame = JSON.stringify({ id: Number(gotCode || 123456), params: { timestamp: Number(`357162.${gotCode || '123456'}`), nodeId: Number(gotCode || 123456) } });
+      const scrubbedShort = w.dialogs.scrubCdpFrame(w.prof.id, shortCdpFrame);
+      ok(scrubbedShort === shortCdpFrame && w.dialogs.scrubText(w.prof.id, `Order #${gotCode} shipped`) === `Order #${gotCode} shipped`,
+        'r4 MAJOR 3 (MIN_MASK_BYTES = 8): 6-digit TOTP fill leaves CDP JSON frames and ordinary numbers byte-identical');
     }
 
     console.log('④ Site submit roads (/react, /vanilla, /fd) + form-less button traps (/btn-traps)');
@@ -451,6 +469,22 @@ try {
       const ri2 = await run(['login', SITE2, '--user', USER2, '--submit']);
       ok(ri1.code === 1 && /\[login_phishing\]/.test(ri1.err) && ri2.code === 1 && /\[login_phishing\]/.test(ri2.err) && pages2.received().length === 0,
         'cross-origin embedded sign-in iframe (/iframe-host embedding SITE2/one) ⇒ exit 1 [login_phishing], 0 posts', { ri1: ri1.err, ri2: ri2.err });
+
+      // Cross-SITE Site-Isolated OOP iframe (`localhost` inside `127.0.0.1`) ⇒ [login_phishing]
+      await run(['open', `${SITE}/iframe-host?src=${encodeURIComponent(`http://localhost:${pages2.port}/one`)}`]);
+      await sleep(350);
+      const rOop = await run(['login']);
+      ok(rOop.code === 1 && /\[login_phishing\]/.test(rOop.err) && pages2.received().length === 0,
+        'cross-site Site-Isolated OOP iframe (localhost inside 127.0.0.1) ⇒ exit 1 [login_phishing], 0 posts', rOop.err);
+
+      // about:srcdoc and same-origin framed login forms ⇒ honest [login_in_frame] («inside a frame»), never [login_no_form]
+      await run(['open', `${SITE}/srcdoc-login`]);
+      const rSrcdoc = await run(['login']);
+      await run(['open', `${SITE}/iframe-host?src=${encodeURIComponent(`${SITE}/one`)}`]);
+      await sleep(250);
+      const rSameFrame = await run(['login']);
+      ok(rSrcdoc.code === 1 && /\[login_in_frame\]/.test(rSrcdoc.err) && /inside a frame/.test(rSrcdoc.err) && rSameFrame.code === 1 && /\[login_in_frame\]/.test(rSameFrame.err),
+        'about:srcdoc and same-origin framed login forms refuse [login_in_frame] ("inside a frame"), never [login_no_form]', { rSrcdoc: rSrcdoc.err, rSameFrame: rSameFrame.err });
     }
 
     console.log('⑥ Fail-closed Input.insertText & 0 secrets in Debugger.getScriptSource (/clear-trap & /focus-trap)');
@@ -496,6 +530,16 @@ try {
       await diag.close();
       ok(scriptIds.size > 0 && preGcHits === 0 && postGcHits === 0,
         `0 Debugger.getScriptSource scripts carry the password across ${scriptIds.size} parsed scripts (before and after GC)`, { parsed: scriptIds.size, preGcHits, postGcHits });
+
+      // Cross-origin iframe stealing focus on a 1 ms timer gets 0 bytes (`inert` iframes during typing window)
+      pages.clear(); pages2.clear();
+      await run(['open', `${SITE}/one-with-thief?src=${encodeURIComponent(`http://localhost:${pages2.port}/thief-frame`)}`]);
+      await sleep(300);
+      const rThief = await run(['login', SITE, '--user', USER, '--submit']);
+      const doneThief = await until(() => pages.received().find((x) => x.path === '/done/one'), 4000);
+      const thiefHits = pages2.received().filter((x) => x.path === '/seen/iframe-thief');
+      ok(rThief.code === 0 && doneThief && doneThief.body.password === PW && thiefHits.length === 0,
+        'cross-site iframe stealing focus every 1 ms receives 0 characters (iframes marked inert during typing)', { rThiefCode: rThief.code, thiefHits });
     }
 
     console.log('⑦ Proven signup confirmation (/signup-check: HTTP 400 stays pending, unsubmitted stays pending, 200 nav & SPA unmount confirm)');
@@ -542,6 +586,36 @@ try {
       const gotSpa = pages.received().find((x) => x.path === '/done/signup-check' && x.body.email === 'spa@example.test');
       ok(rSpa.code === 0 && !!confirmedSpa && gotSpa && gotSpa.body.password === confirmedSpa.password && pages.received().filter((x) => x.path === '/done/signup-mismatch').length === 0,
         'SPA signup (?spa=1: 200 POST + form unmount without navigation) confirms automatically with matching password pair', { confirmed: !!confirmedSpa });
+
+      // 7d. Signup without --submit followed by a plain link click (#termsLink → /plain) stays pending (r4 MAJOR 2)
+      pages.clear();
+      await run(['open', `${SITE}/signup-check`]);
+      const rLinkFill = await run(['login', SITE, '--new-user', 'linkonly@example.test', '--generate']);
+      const rLinkClick = await run(['click', '#termsLink']);
+      await until(async () => { const u = await w.cli(['get', 'url']); return /\/plain\b/.test(u.out); }, 4000);
+      await sleep(200);
+      const recLinkOnly = readLoginRec('linkonly@example.test');
+      ok(rLinkFill.code === 0 && rLinkClick.code === 0 && recLinkOnly && recLinkOnly.pending === 'register' && recLinkOnly.submittedAt === null,
+        'r4 MAJOR 2: signup without --submit followed by plain link click (#termsLink) stays pending (never false-confirmed)', { pending: recLinkOnly && recLinkOnly.pending, submittedAt: recLinkOnly && recLinkOnly.submittedAt });
+
+      // 7e. 200-JSON-{error} same-doc answer (+ history.pushState) with password inputs still filled never confirms
+      pages.clear();
+      await run(['open', `${SITE}/signup-check?jsonerr=1`]);
+      const rJsonErr = await run(['login', SITE, '--new-user', 'jsonerr@example.test', '--generate', '--submit']);
+      await until(() => pages.received().find((x) => x.path === '/done/signup-check' && x.body.email === 'jsonerr@example.test'), 4000);
+      await sleep(250);
+      const recJsonErr = readLoginRec('jsonerr@example.test');
+      ok(rJsonErr.code === 0 && recJsonErr && recJsonErr.pending === 'register' && recJsonErr.submittedAt === null,
+        'r4 MAJOR 2: 200-JSON-{ok:false} response (+ pushState) with password inputs still filled stays pending', { pending: recJsonErr && recJsonErr.pending, submittedAt: recJsonErr && recJsonErr.submittedAt });
+
+      // 7f. SPA login (/spa-login: 200 POST + form unmount + pushState) lifts liveFill fence automatically
+      pages.clear();
+      await run(['open', `${SITE}/spa-login`]);
+      const rSpaLogin = await run(['login', SITE, '--user', USER, '--submit']);
+      await until(() => pages.received().find((x) => x.path === '/done/spa-login'), 4000);
+      const snapSpaOk = await until(async () => { const s = await run(['snapshot']); return s.code === 0 && /Signed in SPA/.test(s.out) ? s : null; }, 4000);
+      ok(rSpaLogin.code === 0 && !!snapSpaOk,
+        'r4 MINOR 7: SPA login (200 POST + unmounted password input + pushState) lifts liveFill so snapshot succeeds', { code: rSpaLogin.code, lifted: !!snapSpaOk });
     }
 
     console.log('⑧ R4 zero-leakage sweep across all output surfaces + data/ files + RED mutant control');
@@ -579,7 +653,8 @@ try {
           if (m === 'Page.createIsolatedWorld') return { result: { executionContextId: 11 } };
           if (m === 'Runtime.evaluate') {
             const ex = String((p && p.expression) || '');
-            if (ex.includes('isoOrigin')) return { result: { result: { value: { ok: true, isoOrigin: SITE, isoHref: `${SITE}/one`, actionOrigin: SITE, fields: [{ fieldId: 'vs-f-0', tag: 'input', type: 'password', visible: true }] } } } };
+            if (ex.includes('isoOrigin')) return { result: { result: { value: { ok: true, isoOrigin: SITE, isoHref: `${SITE}/one`, actionOrigin: SITE, fields: [{ fieldId: 'vs-f-0', tag: 'input', domType: 'password', type: 'password', visible: true }] } } } };
+            if (ex.includes('window.vsLoginSnap =')) return { result: { result: { value: { ok: true, fields: [{ fieldId: 'vs-f-0', tag: 'input', domType: 'password', type: 'password', visible: true }] } } } };
             return { result: { result: { value: { ok: true } } } };
           }
           return { result: {} };

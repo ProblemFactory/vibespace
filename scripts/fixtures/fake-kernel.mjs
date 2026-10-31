@@ -262,7 +262,7 @@ export async function startFakeKernel({ port = 0, dir = null, firstUrl = 'about:
       case 'Target.detachFromTarget': { const sid = p.sessionId || m.sessionId; const x = targets.get((sessions.get(sid) || {}).targetId); if (x) x.sessions.delete(sid); sessions.delete(sid); return {}; }
       case 'Target.closeTarget': { const x = targets.get(p.targetId); if (!x) return { success: false }; targets.delete(x.targetId); for (const s of [...surfaces.values()]) if (s.targetId === x.targetId) surfaces.delete(s.surfaceId); all({ method: 'Target.targetDestroyed', params: { targetId: x.targetId } }); return { success: true }; }
       case 'Page.enable': if (ss) ss.page = true; if (t && mode.holdEnable && mode.holdEnable.has(t.targetId)) return { __noreply: true }; return {};
-      case 'Page.getFrameTree': { const x = t || [...targets.values()][0]; const fr = frameOf(x); if (stdPage && stdPage.securityOrigin) fr.securityOrigin = stdPage.securityOrigin; return { frameTree: { frame: fr, ...(stdPage && Array.isArray(stdPage.childFrames) ? { childFrames: stdPage.childFrames } : {}) } }; }
+      case 'Page.getFrameTree': { const x = t || [...targets.values()][0]; const fr = frameOf(x); if (stdPage && stdPage.securityOrigin) fr.securityOrigin = stdPage.securityOrigin; else if (mode.standard && x && x.url) fr.securityOrigin = originOfUrl(x.url) || 'null'; return { frameTree: { frame: fr, ...(stdPage && Array.isArray(stdPage.childFrames) ? { childFrames: stdPage.childFrames } : {}) } }; }
       case 'Page.createIsolatedWorld': { const ctxId = 100 + (++sseq); isoWorlds.set(ctxId, { frameId: String(p.frameId || (t && t.targetId) || ''), worldName: String(p.worldName || ''), grantUniveralAccess: !!p.grantUniveralAccess }); return { executionContextId: ctxId }; }
       case 'Input.insertText': {
         if (stdPage && stdPage.failInsertText) return { __error: { code: -32000, message: 'insertText failed' } };
@@ -289,17 +289,38 @@ export async function startFakeKernel({ port = 0, dir = null, firstUrl = 'about:
           const iw = isoWorlds.get(p.contextId);
           const subSpec = stdPage.subFrames && iw && stdPage.subFrames[iw.frameId] ? stdPage.subFrames[iw.frameId] : null;
           const sp = subSpec || stdPage;
-          if (ex.includes('isoOrigin')) return { result: { type: 'object', value: { ok: true, isoOrigin: sp.isoOrigin || originOfUrl(t && t.url) || '', isoHref: sp.isoHref || (t && t.url) || '', actionOrigin: sp.actionOrigin !== undefined ? sp.actionOrigin : (originOfUrl(t && t.url) || null), fields: sp.fields || [] } } };
+          if (ex.includes('isoOrigin')) return { result: { type: 'object', value: { ok: true, isoOrigin: sp.isoOrigin || originOfUrl(t && t.url) || '', isoHref: sp.isoHref || (t && t.url) || '', actionOrigin: sp.actionOrigin !== undefined ? sp.actionOrigin : (originOfUrl(t && t.url) || null), hasFrameEls: !!sp.hasFrameEls, fields: sp.fields || [] } } };
+          if (ex.includes('window.vsLoginSnap =')) {
+            const curFields = sp.fillFields || sp.fields || [];
+            const idsMatch = /for \(const fid of (\[[^\]]*\])\)/.exec(ex);
+            const wantIds = idsMatch ? JSON.parse(idsMatch[1]) : [];
+            const resolved = [];
+            for (const fid of wantIds) {
+              const found = curFields.find((f) => f && f.fieldId === fid);
+              if (!found || found.visible === false || found.disabled || found.readOnly) {
+                return { result: { type: 'object', value: { ok: false, code: 'login_form_changed', why: found ? 'field_hidden' : 'field_missing' } } };
+              }
+              resolved.push({ ...found, tag: found.tag || 'input', domType: found.domType || found.type || 'text', type: found.type || 'text', visible: true, disabled: false, readOnly: false });
+            }
+            sp.framesInerted = (sp.framesInerted || 0) + 1;
+            return { result: { type: 'object', value: { ok: true, fields: resolved } } };
+          }
+          if (ex.includes('window.vsLoginFrames = null')) {
+            sp.framesRestored = (sp.framesRestored || 0) + 1;
+            return { result: { type: 'boolean', value: true } };
+          }
           if (ex.includes('focus_moved')) return { result: { type: 'object', value: sp.clearOnInput ? { ok: false, code: 'field_cleared' } : sp.moveFocus ? { ok: false, code: 'focus_moved' } : { ok: true } } };
           if (ex.includes('clear_blocked')) return { result: { type: 'object', value: sp.focusStolen ? { ok: false, code: 'focus_stolen' } : { ok: true } } };
-          if (ex.includes('window.__vsBtns = btnMap')) return { result: { type: 'object', value: { ok: true, hasForm: sp.hasForm ?? true, candidates: sp.buttons || [] } } };
-          if (ex.includes('window.__vsBtns = null')) {
+          if (ex.includes('window.vsLoginBtns = btnMap') || ex.includes('window.__vsBtns = btnMap')) return { result: { type: 'object', value: { ok: true, hasForm: sp.hasForm ?? true, candidates: sp.buttons || [] } } };
+          if (ex.includes('window.vsLoginBtns = null') || ex.includes('window.__vsBtns = null')) {
             const bm = /btnMap\[("vs-b-\d+")\]/.exec(ex);
             sp.clickedBtn = bm ? JSON.parse(bm[1]) : null;
             if (sp.navigateOnSubmit && t) setTimeout(() => { t.url = sp.navigateOnSubmit; t.title = t.url; loaded(t); }, 5);
             return { result: { type: 'object', value: sp.needEnter ? { ok: true, submitted: false, needEnter: true } : { ok: true, submitted: true, via: sp.clickedBtn ? 'button' : 'form' } } };
           }
           if (ex.includes('for (const id of')) { sp.wiped = (sp.wiped || 0) + 1; return { result: { type: 'boolean', value: true } }; }
+          if (ex.includes('let wiped = 0;')) { sp.ceilingWiped = (sp.ceilingWiped || 0) + 1; return { result: { type: 'object', value: { ok: true, wiped: 1 } } }; }
+          if (ex.includes('"pass" + "word"')) return { result: { type: 'boolean', value: !!sp.passwordStillFilled } };
         }
         return { result: { type: 'string', value: t ? (/title/.test(ex) ? t.title : t.url) : '' } };
       }
@@ -353,7 +374,8 @@ export async function startFakeKernel({ port = 0, dir = null, firstUrl = 'about:
     detectCredentialForm, submitCredentialForm, filledCredentials: () => filled.map((x) => ({ ...x })), // lane browser-login (never a value)
     submissions: () => submitted.map((x) => ({ ...x })), typeCredential: ({ surfaceId, fieldId, value }) => { const f = forms.get(surfaceId || ''); if (f) f.typed.set(String(fieldId), String(value)); return !!f; }, // lane engine-distribution: the no-echo kernel
     setStandardPage: (spec) => { stdPage = spec ? { ...spec } : null; return stdPage; }, standardPage: () => (stdPage ? { ...stdPage } : null), isoWorlds: () => [...isoWorlds.entries()],
-    navigate: (tid, url) => { const x = targets.get(tid); if (!x) return false; x.url = String(url); x.title = x.url; loaded(x); return true; }, // lane browser-login: a page's own navigation (a new document)
+    emitPageEvent: (tid, method, params = {}) => { const x = targets.get(tid); if (!x) return false; onTarget(x.targetId, (sid, s) => send(s.ws, { method, params, sessionId: sid })); return true; },
+    navigate: (tid, url, opts = {}) => { const x = targets.get(tid); if (!x) return false; if (opts && opts.reason) onTarget(x.targetId, (sid, s) => send(s.ws, { method: 'Page.frameRequestedNavigation', params: { frameId: x.targetId, reason: String(opts.reason), url: String(url) }, sessionId: sid })); x.url = String(url); x.title = x.url; loaded(x); return true; }, // lane browser-login: a page's own navigation (a new document)
     dropSockets: () => { for (const ws of sockets) { try { ws.terminate(); } catch { /* gone */ } } } };
 }
 

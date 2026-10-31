@@ -204,13 +204,19 @@ function create({ log = console, now = Date.now } = {}) {
       if (loginFence && !credit) {
         const sid = msg.sessionId == null || msg.sessionId === '' ? null : String(msg.sessionId);
         const tid = p.kind === 'page' ? p.targetId : (sid ? g.scope.sessions.get(sid) || null : null);
+        if (typeof loginFence.noteActiveTarget === 'function') {
+          const actTid = msg.method === 'Target.activateTarget' && msg.params && msg.params.targetId ? String(msg.params.targetId) : (msg.method === 'Page.bringToFront' && tid ? tid : null);
+          if (actTid && (!g.scope || !g.scope.targets || g.scope.targets.has(actTid))) {
+            try { loginFence.noteActiveTarget(g.profileId, g.browserKey, actTid); } catch { /* optional */ }
+          }
+        }
         let lf = tid && typeof loginFence.liveFillTarget === 'function' ? loginFence.liveFillTarget(g.profileId, tid) : null;
         if (!lf && !tid && g.scope && g.scope.targets && typeof loginFence.liveFillTarget === 'function') {
           for (const st of g.scope.targets) { lf = loginFence.liveFillTarget(g.profileId, st); if (lf) break; }
         }
         if (lf) {
-          const allowVerb = typeof loginFence.allowVerbInFlight === 'function' ? !!loginFence.allowVerbInFlight(g.profileId, g.browserKey) : false;
-          const lfv = M.liveFillCdpVerdict(msg.method, { allowVerb });
+          const allowVerb = typeof loginFence.allowVerbInFlight === 'function' ? loginFence.allowVerbInFlight(g.profileId, g.browserKey) : null;
+          const lfv = M.liveFillCdpVerdict(msg.method, { allowVerb: typeof allowVerb === 'string' ? allowVerb : null, params: msg.params || null });
           if (lfv.refuse) {
             g.refusals = (g.refusals || 0) + 1;
             try { ws.send(JSON.stringify(M.refusal(msg.id, lfv.code, lfv.error, sid))); } catch { /* gone */ }
@@ -232,7 +238,12 @@ function create({ log = console, now = Date.now } = {}) {
       if (v.rewrite && !conn.saidRewrite) { conn.saidRewrite = true; log.log?.(`[cdp-mediator] ${g.browserKey || '?'} on ${g.profileId || '?'}: its creates open in windows of their own (Target.createTarget rewritten newWindow:true, focus:false — a CDP reply carries Chrome's shape, so this line is where it is said)`); } // verify r2 ③
       try { up.send(v.rewrite ? JSON.stringify({ ...msg, params: v.rewrite }) : String(data)); } catch (e) { conn.pending.delete(msg.id); try { ws.send(JSON.stringify(M.refusal(msg.id, 'upstream_gone', e && e.message || 'send failed', v.pending.sessionId))); } catch { /* gone */ } }
     });
-    const sendClient = (str) => { ws.send(loginFence && typeof loginFence.scrubText === 'function' ? loginFence.scrubText(g.profileId, str) : str); };
+    const sendClient = (str) => {
+      const out = loginFence && typeof loginFence.scrubCdpFrame === 'function'
+        ? loginFence.scrubCdpFrame(g.profileId, str)
+        : (loginFence && typeof loginFence.scrubText === 'function' ? loginFence.scrubText(g.profileId, str) : str);
+      ws.send(out);
+    };
     up.on('message', (data) => {
       let msg = null;
       try { msg = JSON.parse(String(data)); } catch { msg = null; }

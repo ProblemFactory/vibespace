@@ -378,30 +378,36 @@ each answer as a command:
   (`vibespace-browser permission <kind> allow [origin]`), downloads are saved, opening another program is refused, a
   payment request is cancelled.
 
-### Signing in on the custom kernel — `vibespace-browser login`
+### Signing in from the vault — `vibespace-browser login`
 
-On the custom kernel the password manager is the owner's vault (lane browser-login): the kernel reports each login form a page
-shows, and `login` has the kernel fill it with a login the vault keeps — you never see the password or the two-step code, so
-never ask the owner for one.
+Both on standard Chrome and on the custom browser kernel, `vibespace-browser login` fills a site's sign-in, registration or
+password-change form directly from the owner's vault — you never see the password or the two-step code, so never ask the owner
+for one. On standard Chrome VibeSpace checks the tab's real browser address in an isolated world and types the secret over CDP
+without putting it in any page script; on the custom kernel the kernel reports and fills the form itself.
 
-On standard Chrome `login` is WITHDRAWN in 2.369.364: it answers `login_fill_withdrawn` before anything is read from the
-vault, and nothing is typed (a page could claim another site's origin; a fallback put the secret in a script). Ask the
-owner through the vault (`vibespace-vault request "<what you need>" --purpose "<why>"`) or ask a person to take over
-(`vibespace-browser ask-human "<what you need>"`) — never retry `login` there; it returns when its fix is accepted.
+While a vault secret sits in a standard-Chrome tab before the form is submitted, **reading that tab is fenced** (`[login_fill_live]`:
+`snapshot`, `screenshot`, `get`, `eval`, `wait --fn`, `console`, `network` bodies, etc.): submit the form with
+`vibespace-browser login --submit` or `click` / `press` its submit button, or `reload` / `open` another page first. Your other
+tabs remain readable (`tab new` / `tab <id>`).
 
 * `vibespace-browser login [<origin>] [--user <name>] [--submit]` — fill the login form on your tab (no origin = the form on
   your tab; `--user` when the vault keeps several logins of that site; `--submit` submits it too, else press its button).
-  The answer names what was filled and a receipt. Refusals by name: `login_no_form` (open the sign-in page first),
-  `login_fill_withdrawn` (standard Chrome — above), `login_phishing` (a login is filled only on its own site: exact origin
-  and port, https, never a frame of another site), `login_not_granted` (the owner grants it in the Vault window — tell
-  them which site), `login_no_entry`, `login_ambiguous`, `vault_locked` (the owner already knows — do not ask them to unlock).
+  The answer names what was filled (and on multi-step forms `step: email | password | totp`) and a receipt. Refusals by name:
+  `login_no_form` (open the sign-in page first), `login_in_frame` (the sign-in form is inside a frame — open that frame's
+  address directly or ask the user to sign in in the live view), `login_form_changed` (the form's fields changed before
+  filling — nothing was typed; re-read the page and run `login` again), `login_fill_live` (submit the form or reload first),
+  `login_phishing` (a login is filled only on its own site: exact origin and port, https, never a frame of another site),
+  `login_not_granted` (the owner grants it in the Vault window — tell them which site), `login_no_entry`, `login_ambiguous`,
+  `vault_locked` (the owner already knows — do not ask them to unlock).
 * `vibespace-browser login [<origin>] --new-user <name> --generate [--submit]` — register an account THROUGH the vault: the
-  vault makes a strong password that fits the site's rules (`password_rules_unsupported` when none can), the kernel fills it,
-  and when the page takes the form the login is saved for the owner automatically (they get one notice). Use this instead of
-  typing a password yourself — a password you type is saved too, but marked as one you know.
-* `vibespace-browser login [<origin>] [--user <name>] --generate` on a change-password form — the vault makes the new one.
-* A two-step code the owner paired with the login is filled with it. An HTTP sign-in box on the kernel is answered by `login`
-  the same way.
+  vault seals a new pending password that fits the site's rules (`password_rules_unsupported` when none can), fills it, and
+  confirms the entry (sending the owner one notice) only when a real form submission succeeds — clicking a link without
+  submitting leaves the entry pending in the vault. Use this instead of typing a password yourself — a password you type is
+  saved too, but marked as one you know.
+* `vibespace-browser login [<origin>] [--user <name>] --generate` on a change-password form — the vault seals the new password
+  as pending and promotes it once the form submission succeeds.
+* A two-step code the owner paired with the login is filled with it. An HTTP sign-in box on the custom kernel is answered by
+  `login` the same way.
 
 ### A page waiting for a passkey — `[passkey_open]` / `[passkey_ask]`; the passkeys your browser holds
 

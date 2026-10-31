@@ -57,7 +57,7 @@ const SOURCES = Object.freeze(['owner', 'vault-minted', 'agent-typed']);
 const STRENGTHS = Object.freeze(['generated', 'unknown']);
 const SAVE_STATES = Object.freeze(['new', 'same', 'update', 'agent-typed', 'owner-card', 'none']);
 /** Every refusal of the road, by name (the routes' STATUS table carries each). */
-const REFUSALS = Object.freeze(['login_fill_withdrawn', 'login_no_form', 'login_phishing', 'login_ambiguous', 'login_not_granted', 'vault_locked', 'password_rules_unsupported', 'login_no_entry', 'login_exists', 'login_bad_origin', 'login_bad_user', 'login_fill_live']);
+const REFUSALS = Object.freeze(['login_fill_withdrawn', 'login_no_form', 'login_in_frame', 'login_form_changed', 'login_phishing', 'login_ambiguous', 'login_not_granted', 'vault_locked', 'password_rules_unsupported', 'login_no_entry', 'login_exists', 'login_bad_origin', 'login_bad_user', 'login_fill_live']);
 /** Closed allowlist of CLI verbs that may run while a filled vault secret sits in the tab's current document (before navigation). */
 const LIVE_FILL_ALLOW_VERBS = Object.freeze([
   'login',
@@ -192,7 +192,7 @@ function formOf(p, { now = 0 } = {}) {
   if (!fields.length) return null;
   const pageOrigin = originOf(p.pageOrigin || p.origin);
   const frameOrigin = p.frameOrigin === undefined || p.frameOrigin === null || p.frameOrigin === '' ? pageOrigin : originOf(p.frameOrigin);
-  return { id, targetId: str(p.targetId).slice(0, 80) || null, pageOrigin, frameOrigin, actionOrigin: originOf(p.actionOrigin), kind: FORM_KINDS.includes(p.kind) ? p.kind : kindOfFields(fields), fields, at: num(now) || 0 };
+  return { id, targetId: str(p.targetId).slice(0, 80) || null, pageOrigin, frameOrigin, actionOrigin: originOf(p.actionOrigin), kind: FORM_KINDS.includes(p.kind) ? p.kind : kindOfFields(fields), fields, at: num(now) || 0, ...(p.inFrame === true ? { inFrame: true } : {}) };
 }
 /** A held http-auth SURFACE (P1's block) → a form the same road fills: its text field = the username, its password /
  *  credential field = the password, answered with its credential answer (else its accept) — a proxy's sign-in is no site's. */
@@ -255,7 +255,7 @@ function classifyChromeForm(raw, { now = 0 } = {}) {
   const hasPassword = list.some((x) => x && x.visible !== false && !x.disabled && !x.readOnly && !x.hidden && (str(x.type || x.inputType).toLowerCase().trim() === 'password' || /\b(password|passwd|enter your password|new-password|current-password)\b/i.test([x.autocomplete, x.name, x.id, x.label, x.ariaLabel, x.placeholder].map(str).join(' '))));
   const fields = list.slice(0, FIELDS_MAX * 2).map((x, i) => classifyLoginField(x && typeof x === 'object' && !x.fieldId && !x.ref ? { ...x, fieldId: `vs-f-${i}` } : x, { hasPassword })).filter(Boolean);
   if (!fields.length) return null;
-  const f = formOf({ surfaceId: str(raw.surfaceId || raw.formId) || `chrome-login-${str(raw.targetId || 'tab').slice(0, 32)}`, targetId: raw.targetId, pageOrigin: raw.pageOrigin || raw.origin, frameOrigin: raw.frameOrigin, actionOrigin: raw.actionOrigin, kind: raw.kind, fields }, { now });
+  const f = formOf({ surfaceId: str(raw.surfaceId || raw.formId) || `chrome-login-${str(raw.targetId || 'tab').slice(0, 32)}`, targetId: raw.targetId, pageOrigin: raw.pageOrigin || raw.origin, frameOrigin: raw.frameOrigin, actionOrigin: raw.actionOrigin, kind: raw.kind, fields, ...(raw.inFrame === true ? { inFrame: true } : {}) }, { now });
   return f ? { ...f, step: stepOfForm(f) } : null;
 }
 /** A form the mode can use: a sign-in needs a username, password or two-step field; a new password (signup / change)
@@ -329,11 +329,12 @@ function fillVerdict({ forms = [], origin = null, user = null, newUser = null, g
   if (origin && !asked) return no('login_bad_origin', `"${str(origin).slice(0, 80)}" is not a website address — give its origin (https://host[:port]) or nothing (the form on your tab)`);
   const list = (Array.isArray(forms) ? forms : []).filter(Boolean);
   const mine = list.filter((f) => usable(f, want) && !f.proxy);
-  if (!mine.length) return no('login_no_form', list.some((f) => f.proxy) ? 'the sign-in on your tab is a proxy\'s, not a website\'s — no saved login answers it' : want === 'new' ? 'no form with a new-password field is on your tab — open the site\'s sign-up (or change-password) page first; only the custom browser kernel reports forms' : 'no login form is on your tab — open the site\'s sign-in page first; only the custom browser kernel reports forms (standard Chrome never does)');
+  if (!mine.length) return no('login_no_form', list.some((f) => f.proxy) ? 'the sign-in on your tab is a proxy\'s, not a website\'s — no saved login answers it' : want === 'new' ? 'no form with a new-password field is on your tab — open the site\'s sign-up (or change-password) page first' : 'no login form is on your tab — open the site\'s sign-in page first');
   const form = asked ? mine.filter((f) => f.pageOrigin === asked).pop() || null : mine[mine.length - 1];
   if (!form) return no('login_phishing', `the login form on your tab belongs to ${mine[mine.length - 1].pageOrigin || 'a page with no origin'}, not to ${asked} — a login is filled only on its own site`);
   if (!form.pageOrigin || form.frameOrigin !== form.pageOrigin) return no('login_phishing', `the form sits in a frame of ${form.frameOrigin || 'a page with no origin'} inside ${form.pageOrigin || 'a page with no origin'} — a login is filled only where the page and its frame are the site itself`);
   if (!secureOrigin(form.pageOrigin)) return no('login_phishing', `${form.pageOrigin} is not https — a login is filled over https only (plain http on this machine's localhost alone)`);
+  if (form.inFrame) return no('login_in_frame', `the sign-in form is inside a frame on ${form.pageOrigin} — open that frame's address directly or sign in in the live view`);
   const o = form.pageOrigin;
   const here = (Array.isArray(entries) ? entries : []).filter((e) => e && e.origin === o);
   let u;
@@ -510,19 +511,24 @@ function isSubmitControl(raw, { mode = 'login', inForm = false } = {}) {
   if (mode === 'change' && SUBMIT_CHANGE_RE.test(words)) return true;
   return false;
 }
+const SCRIPT_WAIT_FLAG_RE = /^--(?:fn|function|js)(?:=|$)/;
+function hasScriptWaitFlag(argv) {
+  return Array.isArray(argv) && argv.some((a) => SCRIPT_WAIT_FLAG_RE.test(str(a).trim()));
+}
 function liveFillAllowsVerb(verb) { return LIVE_FILL_ALLOW_SET.has(str(verb).trim()); }
-/** While a filled vault secret sits in the tab's current document (before cross-document navigation), reading / scripting /
- *  capturing verbs are refused by name (`login_fill_live`) so the secret never enters the agent's output. */
-function liveFillVerdict({ verb = '', batchVerbs = null, origin = '' } = {}) {
+/** While a filled vault secret sits in the tab's current document (before submission / navigation / reload), reading,
+ *  scripting and capturing verbs — including `wait --fn <js>` — are refused by name (`login_fill_live`). */
+function liveFillVerdict({ verb = '', argv = null, batchVerbs = null, origin = '' } = {}) {
   const o = originOf(origin);
   const v = str(verb).trim();
-  const refuseVerb = (bad) => no('login_fill_live', `a vault secret was filled into your tab${o ? ` on ${o}` : ''} and the page has not navigated away yet — \`${bad || 'reading'}\` cannot read this document while the filled secret is live so the value never enters your output; submit the form (\`vibespace-browser login --submit\`, \`click\`, or \`press Enter\`) or navigate to another page first`);
+  const refuseVerb = (bad) => no('login_fill_live', `a vault secret was filled into your tab${o ? ` on ${o}` : ''} and the page has not finished submitting or navigated away yet — \`${bad || 'reading'}\` cannot read or run script in this document while the filled secret is live so the value never enters your output; submit the form (\`vibespace-browser login --submit\`, \`click\`, or \`press Enter\`), or reload / navigate to another page first`);
   if (v === 'batch') {
     const list = Array.isArray(batchVerbs) ? batchVerbs.map((x) => str(x).trim()).filter(Boolean) : [];
     if (!list.length) return refuseVerb('batch');
     const bad = list.find((x) => !LIVE_FILL_ALLOW_SET.has(x));
     return bad ? refuseVerb(bad) : { ok: true };
   }
+  if (v === 'wait' && hasScriptWaitFlag(argv)) return refuseVerb('wait --fn');
   return v && LIVE_FILL_ALLOW_SET.has(v) ? { ok: true } : refuseVerb(v);
 }
 

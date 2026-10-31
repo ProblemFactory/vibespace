@@ -1007,19 +1007,19 @@ console.log('⑪ Standard-Chrome r3 invariants — live_fill fence, CDP verdict,
   ok(BL.liveFillVerdict({ verb: 'batch', batchVerbs: ['click', 'eval'], origin: SITE }).code === 'login_fill_live', 'liveFillVerdict refuses batch carrying eval');
   ok(BL.liveFillVerdict({ verb: 'batch', batchVerbs: [], origin: SITE }).code === 'login_fill_live', 'liveFillVerdict refuses empty batch');
 
-  // CDP mediator live-fill verdict
+  // CDP mediator live-fill verdict (census-class driven in r4)
   ok(Med.liveFillCdpVerdict('Page.navigate').refuse === false && Med.liveFillCdpVerdict('Target.getTargets').refuse === false,
     'liveFillCdpVerdict allows top-level navigation and target listing');
-  for (const m of ['Runtime.evaluate', 'Page.captureScreenshot', 'Accessibility.getFullAXTree', 'DOM.getOuterHTML', 'DOM.describeNode', 'Debugger.getScriptSource', 'Network.getResponseBody', 'Input.insertText']) {
-    const cv = Med.liveFillCdpVerdict(m, { allowVerb: false });
+  for (const m of ['Runtime.evaluate', 'Page.captureScreenshot', 'Accessibility.getFullAXTree', 'DOM.getOuterHTML', 'DOM.describeNode', 'Debugger.getScriptSource', 'Network.getResponseBody', 'DOMSnapshot.captureSnapshot']) {
+    const cv = Med.liveFillCdpVerdict(m, { allowVerb: null });
     ok(cv.refuse === true && cv.code === 'login_fill_live', `liveFillCdpVerdict (raw CDP) refuses ${m}`, cv);
   }
-  ok(Med.liveFillCdpVerdict('Input.dispatchMouseEvent', { allowVerb: true }).refuse === false
-    && Med.liveFillCdpVerdict('Accessibility.getFullAXTree', { allowVerb: true }).refuse === false
-    && Med.liveFillCdpVerdict('Page.captureScreenshot', { allowVerb: true }).code === 'login_fill_live'
-    && Med.liveFillCdpVerdict('Debugger.getScriptSource', { allowVerb: true }).code === 'login_fill_live'
-    && Med.liveFillCdpVerdict('Network.getResponseBody', { allowVerb: true }).code === 'login_fill_live',
-    'liveFillCdpVerdict with allowVerb:true permits click/press plumbing while still refusing captureScreenshot, Debugger.*, and Network.getResponseBody');
+  ok(Med.liveFillCdpVerdict('Input.dispatchMouseEvent', { allowVerb: 'click' }).refuse === false
+    && Med.liveFillCdpVerdict('DOM.getBoxModel', { allowVerb: 'click' }).refuse === false
+    && Med.liveFillCdpVerdict('Page.captureScreenshot', { allowVerb: 'click' }).code === 'login_fill_live'
+    && Med.liveFillCdpVerdict('Debugger.getScriptSource', { allowVerb: 'click' }).code === 'login_fill_live'
+    && Med.liveFillCdpVerdict('Network.getResponseBody', { allowVerb: 'click' }).code === 'login_fill_live',
+    'liveFillCdpVerdict with allowVerb:"click" permits exact pointer locator plumbing while still refusing captureScreenshot, Debugger.*, and Network.getResponseBody');
 
   // Submit control classification
   ok(!BL.isSubmitControl({ tag: 'button', type: 'button', text: 'Show', ariaLabel: 'Show password', visible: true }, { mode: 'login' }), 'isSubmitControl rejects Show password toggle');
@@ -1046,7 +1046,8 @@ console.log('⑪ Standard-Chrome r3 invariants — live_fill fence, CDP verdict,
       if (m === 'Input.insertText') return trig === 'insert-err' ? { error: { message: 'boom' } } : { result: {} };
       if (m === 'Runtime.evaluate') {
         const ex = String(p.expression || '');
-        if (ex.includes('isoOrigin')) return { result: { result: { value: { ok: true, isoOrigin: SITE, isoHref: `${SITE}/login`, actionOrigin: SITE, fields: [{ fieldId: 'vs-f-0', tag: 'input', type: 'password', autocomplete: 'current-password', visible: true }] } } } };
+        if (ex.includes('isoOrigin')) return { result: { result: { value: { ok: true, isoOrigin: SITE, isoHref: `${SITE}/login`, actionOrigin: SITE, fields: [{ fieldId: 'vs-f-0', tag: 'input', domType: 'password', type: 'password', autocomplete: 'current-password', visible: true }] } } } };
+        if (ex.includes('window.vsLoginSnap =')) return { result: { result: { value: { ok: true, fields: [{ fieldId: 'vs-f-0', tag: 'input', domType: 'password', type: 'password', autocomplete: 'current-password', visible: true }] } } } };
         if (ex.includes('focus_moved')) {
           if (trig === 'cleared') return { result: { result: { value: { ok: false, code: 'field_cleared' } } } };
           if (trig === 'focus-moved') return { result: { result: { value: { ok: false, code: 'focus_moved' } } } };
@@ -1057,7 +1058,7 @@ console.log('⑪ Standard-Chrome r3 invariants — live_fill fence, CDP verdict,
       }
       return { result: {} };
     };
-    const res = await LF.fillVaultLogin({ call, origin: SITE, trackedUrl: `${SITE}/login`, values: { 'vs-f-0': SECRET }, loginId: 'L1' });
+    const res = await LF.fillVaultLogin({ call, origin: SITE, trackedUrl: `${SITE}/login`, values: { 'vs-f-0': SECRET }, form: { targetId: 'T1', pageOrigin: SITE, frameOrigin: SITE, fields: [{ fieldId: 'vs-f-0', type: 'password' }] }, loginId: 'L1' });
     const evalCarrying = sent.filter((x) => x.m === 'Runtime.evaluate' && JSON.stringify(x.p).includes(SECRET)).length;
     const unisolated = sent.filter((x) => x.m === 'Runtime.evaluate' && x.p.contextId !== 77).length;
     ok((trig === 'ok' ? res.ok === true : (res.ok === false && res.code === 'login_failed' && wiped)) && evalCarrying === 0 && unisolated === 0 && !JSON.stringify(res).includes(SECRET),
@@ -1093,6 +1094,491 @@ console.log('⑪ Standard-Chrome r3 invariants — live_fill fence, CDP verdict,
   ok(M7 && M7.liveFillVerdict({ verb: 'batch', batchVerbs: ['click', 'eval'], origin: SITE }).ok === true
     && BL.liveFillVerdict({ verb: 'batch', batchVerbs: ['click', 'eval'], origin: SITE }).code === 'login_fill_live',
     'RED: a copy admitting eval in LIVE_FILL_ALLOW_VERBS lets batch+eval read a live-filled tab');
+}
+
+// ═══ ⑫ Standard-Chrome r4 adversarial fixup gates (RED by name on 956e39701 for 1/2/3/7/8/9) ═══
+console.log('⑫ Standard-Chrome r4 adversarial fixup gates (MAJOR 1/2/3 + MINOR 6/7/8/9/10)');
+{
+  const vm = require('node:vm');
+  const CENSUS = require('../src/cdp-census.js');
+  const Med = require('../src/browser-mediation.js');
+  const LF = require('../src/server/browser-login-fill.js');
+  const BP = require('../src/browser-profiles.js');
+
+  function makeStubDom(initialInputs = [], { iframes = [], onInsertText = null } = {}) {
+    class StubInput {
+      constructor(spec = {}) {
+        this.nodeType = 1;
+        this.tagName = String(spec.tag || 'INPUT').toUpperCase();
+        this.attrs = { ...(spec.attrs || {}) };
+        if (spec.type) this.attrs.type = String(spec.type);
+        if (spec.name) this.attrs.name = String(spec.name);
+        if (spec.autocomplete) this.attrs.autocomplete = String(spec.autocomplete);
+        if (spec.placeholder) this.attrs.placeholder = String(spec.placeholder);
+        this.type = String(spec.type || this.attrs.type || 'text');
+        this.id = String(spec.id || '');
+        this.val = String(spec.value || '');
+        this.hidden = !!spec.hidden;
+        this.disabled = !!spec.disabled;
+        this.readOnly = !!spec.readOnly;
+        this.required = !!spec.required;
+        this.minLength = spec.minLength ?? -1;
+        this.maxLength = spec.maxLength ?? -1;
+        this.isConnected = true;
+        this.parentElement = null;
+        this.form = null;
+        this.labels = [];
+      }
+      getAttribute(k) { const v = this.attrs[String(k).toLowerCase()]; return v === undefined ? null : String(v); }
+      setAttribute(k, v) { const key = String(k).toLowerCase(); this.attrs[key] = String(v); if (key === 'type') this.type = String(v); }
+      removeAttribute(k) { delete this.attrs[String(k).toLowerCase()]; }
+      hasAttribute(k) { return Object.prototype.hasOwnProperty.call(this.attrs, String(k).toLowerCase()); }
+      closest() { return null; }
+      getBoundingClientRect() { return this.hidden ? { width: 0, height: 0 } : { width: 140, height: 30 }; }
+      scrollIntoView() {}
+      focus() { doc.activeElement = this; }
+      blur() { if (doc.activeElement === this) doc.activeElement = null; }
+      dispatchEvent() { return true; }
+    }
+    Object.defineProperty(StubInput.prototype, 'value', {
+      get() { return this.val; },
+      set(v) { this.val = String(v ?? ''); },
+      configurable: true,
+    });
+    class StubTextArea extends StubInput {}
+    const inputs = initialInputs.map((s) => new StubInput(s));
+    const frameEls = iframes.map((s) => {
+      const f = new StubInput({ tag: 'IFRAME', ...s });
+      f.inert = !!s.inert;
+      return f;
+    });
+    const doc = {
+      activeElement: null,
+      documentElement: { nodeType: 1 },
+      getElementById: (id) => inputs.find((x) => x.id === id) || null,
+      querySelectorAll: (sel) => {
+        const s = String(sel || '');
+        if (s.includes('iframe')) return frameEls.slice();
+        if (s.startsWith('[') && s.endsWith(']')) {
+          const attr = s.slice(1, -1).toLowerCase();
+          return inputs.filter((x) => x.hasAttribute(attr));
+        }
+        return inputs.slice();
+      },
+    };
+    const win = {
+      document: doc,
+      location: { origin: SITE, href: `${SITE}/login` },
+      getComputedStyle: () => ({ display: 'block', visibility: 'visible', opacity: '1' }),
+      HTMLInputElement: StubInput,
+      HTMLTextAreaElement: StubTextArea,
+      Event: class Event { constructor(type, opts) { this.type = type; this.bubbles = !!(opts && opts.bubbles); } },
+      Node: { DOCUMENT_POSITION_FOLLOWING: 4 },
+      WeakMap,
+      Set,
+      Array,
+      Object,
+      Number,
+      String,
+      Boolean,
+      Math,
+      JSON,
+      crypto,
+    };
+    win.window = win;
+    // Note: each Page.createIsolatedWorld on the SAME frame in Chrome shares the world for the same worldName!
+    const worlds = new Map();
+    const getWorld = (name = 'vs-login-fill') => {
+      if (!worlds.has(name)) {
+        const w = { ...win };
+        w.window = w;
+        worlds.set(name, vm.createContext(w));
+      }
+      return worlds.get(name);
+    };
+    let ctxSeq = 10;
+    const ctxToWorld = new Map();
+    let inserted = 0;
+    const call = async (m, p = {}) => {
+      if (m === 'Page.getFrameTree') return { result: { frameTree: { frame: { id: 'F1', url: `${SITE}/login`, securityOrigin: SITE } } } };
+      if (m === 'Target.getTargetInfo') return { result: { targetInfo: { targetId: 'T1', url: `${SITE}/login` } } };
+      if (m === 'Page.createIsolatedWorld') {
+        const id = ++ctxSeq;
+        ctxToWorld.set(id, getWorld(String(p.worldName || 'default')));
+        return { result: { executionContextId: id } };
+      }
+      if (m === 'Runtime.evaluate') {
+        const ctx = ctxToWorld.get(p.contextId) || getWorld('main');
+        const value = vm.runInContext(String(p.expression || ''), ctx);
+        return { result: { result: { value } } };
+      }
+      if (m === 'Input.insertText') {
+        inserted++;
+        if (onInsertText) onInsertText({ text: String(p.text || ''), doc, inputs, frameEls });
+        else if (doc.activeElement) doc.activeElement.value = String(doc.activeElement.value || '') + String(p.text || '');
+        return { result: {} };
+      }
+      return { result: {} };
+    };
+    return { StubInput, inputs, frameEls, doc, call, inserted: () => inserted };
+  }
+
+  // ── (1) MAJOR 1: non-positional per-element mark + role re-verification at fill time ──
+  {
+    const M1_PW = pwOf('m1-shift');
+    const dom1 = makeStubDom([
+      { type: 'email', name: 'email', autocomplete: 'username' },
+      { type: 'password', name: 'password', autocomplete: 'current-password' },
+    ]);
+    const form1 = await LF.inspectTabLoginForm({ call: dom1.call, targetId: 'T1', trackedUrl: `${SITE}/login` });
+    const plan1 = form1 ? BL.planOf(form1, 'login') : null;
+    const vals1 = plan1 ? BL.valuesOf({ plan: plan1 }, { username: 'alice@example.test', password: M1_PW }).values : {};
+    // Insert a visible search input ahead of the sign-in form between plan and fill
+    const searchBox = new dom1.StubInput({ type: 'search', name: 'q', placeholder: 'Search' });
+    dom1.inputs.unshift(searchBox);
+    const resShift = await LF.fillVaultLogin({ call: dom1.call, targetId: 'T1', trackedUrl: `${SITE}/login`, origin: SITE, form: form1, values: vals1, loginId: 'L1' });
+    ok(resShift.ok === true && searchBox.val === '' && dom1.inputs[1].val === 'alice@example.test' && dom1.inputs[2].val === M1_PW,
+      'r4 MAJOR 1 (shifted DOM): visible input inserted ahead of form between plan and fill leaves search box empty and puts username + password into their planned elements',
+      { resShift, search: searchBox.val, emailHasPw: dom1.inputs[1].val === M1_PW, pwOk: dom1.inputs[2].val === M1_PW });
+
+    // Role mismatch at fill time (password input flipped to type="text") ⇒ login_form_changed by name, 0 Input.insertText
+    const dom2 = makeStubDom([
+      { type: 'email', name: 'email', autocomplete: 'username' },
+      { type: 'password', name: 'password', autocomplete: 'current-password' },
+    ]);
+    const form2 = await LF.inspectTabLoginForm({ call: dom2.call, targetId: 'T1', trackedUrl: `${SITE}/login` });
+    const plan2 = form2 ? BL.planOf(form2, 'login') : null;
+    const vals2 = plan2 ? BL.valuesOf({ plan: plan2 }, { username: 'alice@example.test', password: M1_PW }).values : {};
+    dom2.inputs[1].setAttribute('type', 'text');
+    const resRole = await LF.fillVaultLogin({ call: dom2.call, targetId: 'T1', trackedUrl: `${SITE}/login`, origin: SITE, form: form2, values: vals2, loginId: 'L1' });
+    ok(!resRole.ok && resRole.code === 'login_form_changed' && BL.REFUSALS.includes('login_form_changed') && dom2.inserted() === 0 && dom2.inputs[0].val === '' && dom2.inputs[1].val === '',
+      'r4 MAJOR 1 (role re-verification): password field flipped to type=text before fill ⇒ login_form_changed by name, nothing typed',
+      { resRole, inserted: dom2.inserted() });
+
+    // RED mutant control: a copy of browser-login-fill.js without the role check types the password into the plain-text input
+    const LFS0 = fs.readFileSync(path.join(REPO, 'src/server/browser-login-fill.js'), 'utf8');
+    const noRoleSrc = LFS0
+      .replace('if (!roleMatchesPlan(wantRole, desc, { hasPassword: pwPlan })) {', 'if (false) {')
+      .replace("if (wantRole === 'password' || wantRole === 'new-password') {", 'if (false) {')
+      .replace("if ((wantRole === 'password' || wantRole === 'new-password') && (tag !== 'input' || domType !== 'password')) {", 'if (false) {');
+    const LFm = noRoleSrc !== LFS0 ? MUT.load('src/server/browser-login-fill.js', noRoleSrc, 'norolecheck') : null;
+    const dom2m = makeStubDom([
+      { type: 'email', name: 'email', autocomplete: 'username' },
+      { type: 'password', name: 'password', autocomplete: 'current-password' },
+    ]);
+    const form2m = LFm ? await LFm.inspectTabLoginForm({ call: dom2m.call, targetId: 'T1', trackedUrl: `${SITE}/login` }) : null;
+    const vals2m = form2m ? BL.valuesOf({ plan: BL.planOf(form2m, 'login') }, { username: 'alice@example.test', password: M1_PW }).values : {};
+    dom2m.inputs[1].setAttribute('type', 'text');
+    const resMut = LFm ? await LFm.fillVaultLogin({ call: dom2m.call, targetId: 'T1', trackedUrl: `${SITE}/login`, origin: SITE, form: form2m, values: vals2m, loginId: 'L1' }) : null;
+    ok(Boolean(LFm && resMut && resMut.ok === true && dom2m.inputs[1].val === M1_PW && resRole.code === 'login_form_changed'),
+      'r4 MAJOR 1 RED control: a mutant without the role check types the password into the type=text input (real module refuses login_form_changed)',
+      { mutantOk: resMut && resMut.ok, realCode: resRole.code });
+  }
+
+  // ── (2) MAJOR 2: pending signup/change requires submission evidence; link-click without submit & 200-JSON-{error} stay pending ──
+  {
+    const S2 = await world({ mode: { standard: true } });
+    try {
+      const tid = S2.k.targets()[0].targetId;
+      S2.logins.grant(`web-login:${SITE}#x`, 'any-account', 'session:conv-1');
+      S2.k.setStandardPage({
+        securityOrigin: SITE, isoOrigin: SITE, passwordStillFilled: true,
+        fields: [
+          { fieldId: 'vs-lf-u1', tag: 'input', domType: 'email', type: 'email', autocomplete: 'username', visible: true },
+          { fieldId: 'vs-lf-p1', tag: 'input', domType: 'password', type: 'password', autocomplete: 'new-password', visible: true },
+        ],
+      });
+      const rNoSub = await S2.w.fillLogin(TGT, FILL({ newUser: 'linkclick@example.test', generate: true, submit: false }));
+      const n0 = S2.fy.length;
+      S2.k.navigate(tid, `${SITE}/terms`, { reason: 'anchorClick' });
+      await sleep(100);
+      const recLink = BL.recordOf(S2.eng.secretGet(`web-login:${SITE}#linkclick@example.test`).value.toString('utf8'));
+      ok(rNoSub.ok && recLink && recLink.pending === 'register' && recLink.submittedAt === null && S2.fy.length === n0,
+        'r4 MAJOR 2 (link-click without submit): signup filled without --submit followed by a plain link click stays pending (submittedAt null, 0 notices)',
+        recLink && { pending: recLink.pending, submittedAt: recLink.submittedAt, notices: S2.fy.length - n0 });
+
+      // 200-JSON-{error} same-doc answer with password input still filled never confirms even if pushState fires
+      S2.k.navigate(tid, `${SITE}/signup`);
+      await sleep(30);
+      S2.k.setStandardPage({
+        securityOrigin: SITE, isoOrigin: SITE, passwordStillFilled: true,
+        fields: [
+          { fieldId: 'vs-lf-u2', tag: 'input', domType: 'email', type: 'email', autocomplete: 'username', visible: true },
+          { fieldId: 'vs-lf-p2', tag: 'input', domType: 'password', type: 'password', autocomplete: 'new-password', visible: true },
+        ],
+      });
+      const rJsonErr = await S2.w.fillLogin(TGT, FILL({ newUser: 'jsonerr@example.test', generate: true, submit: true }));
+      if (typeof S2.k.emitPageEvent === 'function') {
+        S2.k.emitPageEvent(tid, 'Network.requestWillBeSent', { requestId: 'rq-err', request: { method: 'POST', url: `${SITE}/api/register` }, type: 'Fetch' });
+        S2.k.emitPageEvent(tid, 'Network.responseReceived', { requestId: 'rq-err', type: 'Fetch', response: { status: 200 } });
+        S2.k.emitPageEvent(tid, 'Network.loadingFinished', { requestId: 'rq-err' });
+        S2.k.emitPageEvent(tid, 'Page.navigatedWithinDocument', { frameId: tid, url: `${SITE}/signup?err=taken` });
+      }
+      await sleep(130);
+      const recErr = BL.recordOf(S2.eng.secretGet(`web-login:${SITE}#jsonerr@example.test`).value.toString('utf8'));
+      ok(rJsonErr.ok && recErr && recErr.pending === 'register' && recErr.submittedAt === null,
+        'r4 MAJOR 2 (200-JSON-{error}): 200 POST + same-doc navigation while password input still holds value never confirms pending signup',
+        recErr && { pending: recErr.pending, submittedAt: recErr.submittedAt });
+    } finally { await S2.close(); }
+  }
+
+  // ── (3) MAJOR 3: MIN_MASK_BYTES (8) floor honoured everywhere; CDP frames scrubbed inside string values only ──
+  {
+    const S3 = await world({ mode: { standard: true } });
+    try {
+      const seed = T.base32Encode(crypto.randomBytes(20));
+      S3.totp.addEntry({ seed, name: 'shop-r4' }, { who: 'test' });
+      const LONG_ESC_PW = ['Long', crypto.randomBytes(4).toString('hex'), '"q\\s', '99'].join('-');
+      S3.logins.addOwn({ origin: SITE, username: 'totpuser', password: LONG_ESC_PW, totpName: 'shop-r4' });
+      S3.logins.grant(`web-login:${SITE}#totpuser`, 'this-account', 'session:conv-1');
+      S3.k.setStandardPage({
+        securityOrigin: SITE, isoOrigin: SITE,
+        fields: [
+          { fieldId: 'vs-lf-u', tag: 'input', domType: 'text', type: 'text', autocomplete: 'username', visible: true },
+          { fieldId: 'vs-lf-p', tag: 'input', domType: 'password', type: 'password', autocomplete: 'current-password', visible: true },
+          { fieldId: 'vs-lf-o', tag: 'input', domType: 'tel', type: 'tel', autocomplete: 'one-time-code', visible: true },
+        ],
+      });
+      const rf = await S3.w.fillLogin(TGT, FILL({ user: 'totpuser' }));
+      const code6 = S3.totp.codeForLogin('shop-r4', { conv: 'conv-1', actor: 'Chat One' }).code;
+      const shortFrame = JSON.stringify({ id: Number(code6), method: 'DOM.attributeModified', params: { timestamp: Number(`357162.${code6}`), nodeId: Number(code6) } });
+      const scrubFrameFn = typeof S3.w.scrubCdpFrame === 'function' ? S3.w.scrubCdpFrame : S3.w.scrubText;
+      const afterShortFrame = scrubFrameFn(PID, shortFrame);
+      const afterShortCli = S3.w.scrubText(PID, `Order #${code6} shipped`);
+      let shortParsed = null;
+      try { shortParsed = JSON.parse(afterShortFrame); } catch { shortParsed = null; }
+      ok(rf.ok && afterShortFrame === shortFrame && shortParsed && shortParsed.id === Number(code6) && afterShortCli === `Order #${code6} shipped`,
+        'r4 MAJOR 3 (MIN_MASK_BYTES = 8): 6-digit TOTP secret leaves CDP JSON timestamps/ids/nodeIds and CLI numbers byte-identical',
+        { codeLen: code6.length, sameFrame: afterShortFrame === shortFrame, afterShortCli });
+
+      const longFrame = JSON.stringify({ id: 91, result: { value: `echo:${LONG_ESC_PW}`, count: 12345678 } });
+      const afterLongFrame = scrubFrameFn(PID, longFrame);
+      let longParsed = null;
+      try { longParsed = JSON.parse(afterLongFrame); } catch { longParsed = null; }
+      const badBefore = typeof S3.w.loginFenceStats === 'function' ? S3.w.loginFenceStats().unparseableScrubFrames : -1;
+      const unparsedOut = scrubFrameFn(PID, '{unparseable-frame');
+      const badAfter = typeof S3.w.loginFenceStats === 'function' ? S3.w.loginFenceStats().unparseableScrubFrames : -1;
+      ok(Boolean(longParsed && longParsed.id === 91 && longParsed.result.count === 12345678 && longParsed.result.value === `echo:[vault:web-login:${SITE}#totpuser]` && !afterLongFrame.includes(LONG_ESC_PW) && unparsedOut === '{unparseable-frame' && badAfter === badBefore + 1),
+        'r4 MAJOR 3 (JSON string-only CDP scrub): long secret with quotes/backslashes is masked inside string values, JSON structure stays valid, and unparseable frames pass untouched & counted',
+        { longParsed, badBefore, badAfter });
+    } finally { await S3.close(); }
+  }
+
+  // ── (6) MINOR 6: persisted fence + scrub names survive watch reconnect / hub restart with audit lines ──
+  {
+    let regRow = BP.normalizeRegistry({ profiles: [{ id: PID, label: 'Work', sharing: 'owner' }] });
+    const fenceKeeper = {
+      cdpEndpointFor: async () => ({ ok: true, url: k6.wsUrl }),
+      onLease: () => () => {},
+      loginFenceStateOf: (id) => (regRow.loginFences && regRow.loginFences[id]) || { fences: [], scrubs: [] },
+      saveLoginFenceState: (id, next) => {
+        regRow = BP.normalizeRegistry({
+          ...regRow,
+          loginFences: { ...(regRow.loginFences || {}), [id]: next },
+        });
+        return true;
+      },
+      audit: (a) => k6Audits.push(a),
+    };
+    const k6Audits = [];
+    const d6 = path.join(ROOT, 'w6-' + crypto.randomBytes(3).toString('hex')); fs.mkdirSync(d6, { recursive: true });
+    const eng6 = VE.create({ dataDir: d6, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false });
+    await eng6.setup('vault-r4-m6-pass');
+    const grants6 = GS.create({ memory: true });
+    const logins6 = L.create({ vault: eng6, grants: () => grants6 });
+    const PW6 = pwOf('m6-persist');
+    logins6.addOwn({ origin: SITE, username: 'persist', password: PW6 });
+    grants6.set('browser-login', `${SITE}#persist`, { to: [{ kind: 'conversation', key: 'conv-1' }] });
+    const k6 = await startFakeKernel({ firstUrl: `${SITE}/login`, mode: { standard: true } });
+    k6.setStandardPage({ securityOrigin: SITE, isoOrigin: SITE, fields: [{ fieldId: 'vs-lf-6', tag: 'input', domType: 'password', type: 'password', autocomplete: 'current-password', visible: true }] });
+    const mkWatch6 = () => D.create({ keeper: fenceKeeper, log: quiet, enableTimeoutMs: 300, holdersOf: () => [{ browserKey: KEY, sessionId: 'sess-1', ephemeral: true }], leaseCountOf: () => 1, logins: logins6, conversationOf: () => ({ cid: 'conv-1', name: 'Chat One' }) });
+    const w6a = mkWatch6();
+    try {
+      await w6a.arm(PID, { budgetMs: 3000 });
+      const rf6 = await w6a.fillLogin(TGT, FILL({ user: 'persist' }));
+      const diskJson = JSON.stringify(regRow);
+      w6a.shutdown(); // simulate dropped watch / hub restart (keep browser running at urlAtFill)
+      const w6b = mkWatch6();
+      await w6b.arm(PID, { budgetMs: 3000 });
+      const rearmedFence = w6b.liveFillVerdictFor(TGT, { verb: 'eval' });
+      const rearmedScrub = w6b.scrubText(PID, `pw=${PW6}`);
+      w6b.shutdown();
+      // Now navigate tab while watch is down, then reconnect: stale urlAtFill drops fence and writes url-changed audit line
+      k6.navigate(k6.targets()[0].targetId, `${SITE}/home`);
+      const w6c = mkWatch6();
+      await w6c.arm(PID, { budgetMs: 3000 });
+      const afterUrlChange = w6c.liveFillVerdictFor(TGT, { verb: 'eval' });
+      const st6 = typeof w6c.loginFenceStats === 'function' ? w6c.loginFenceStats() : { fenceAuditLines: [] };
+      w6c.shutdown();
+      ok(rf6.ok && !diskJson.includes(PW6) && rearmedFence.code === 'login_fill_live' && rearmedScrub === `pw=[vault:web-login:${SITE}#persist]` && afterUrlChange.ok === true && st6.fenceAuditLines.some((l) => l.why === 'url-changed'),
+        'r4 MINOR 6 (persisted fence + scrub): watch reconnect re-arms liveFill + scrub at urlAtFill (0 secret bytes persisted) and audits url-changed when tab moved',
+        { rearmedFence, scrubbed: rearmedScrub === `pw=[vault:web-login:${SITE}#persist]`, audits: st6.fenceAuditLines });
+    } finally { await k6.close(); eng6.close(); }
+  }
+
+  // ── (7) MINOR 7: per-tab CLI fence, proven SPA submit lifts fence, ceiling wipes + audits, honest refusal words ──
+  {
+    const S7 = await world({ mode: { standard: true } });
+    try {
+      const tid1 = S7.k.targets()[0].targetId;
+      const tid2 = S7.k.addTarget(`${SITE2}/docs`);
+      await until(() => S7.w._watches.get(PID)?.targets.has(tid2), 1500);
+      const PW7 = pwOf('m7-tab');
+      S7.logins.addOwn({ origin: SITE, username: 'tabuser', password: PW7 });
+      S7.logins.grant(`web-login:${SITE}#tabuser`, 'this-account', 'session:conv-1');
+      S7.k.setStandardPage({ passwordStillFilled: false, fields: [{ fieldId: 'vs-lf-7', tag: 'input', domType: 'password', type: 'password', autocomplete: 'current-password', visible: true }], subFrames: { [tid2]: { fields: [] } } });
+      const rf7 = await S7.w.fillLogin(TGT, FILL({ user: 'tabuser' }));
+      const onTab1 = S7.w.liveFillVerdictFor(TGT, { verb: 'snapshot' });
+      if (typeof S7.w.noteActiveTab === 'function') S7.w.noteActiveTab(TGT, tid2);
+      const onTab2 = S7.w.liveFillVerdictFor(TGT, { verb: 'snapshot' });
+      const batchSwitchRead = S7.w.liveFillVerdictFor(TGT, { verb: 'batch', batchVerbs: ['tab', 'snapshot'] });
+      if (typeof S7.w.noteActiveTab === 'function') S7.w.noteActiveTab(TGT, tid1);
+      const backOnTab1 = S7.w.liveFillVerdictFor(TGT, { verb: 'snapshot' });
+      ok(rf7.ok && onTab1.code === 'login_fill_live' && /submit the form/.test(onTab1.error || '') && /or reload/.test(onTab1.error || '') && onTab2.ok === true && backOnTab1.code === 'login_fill_live' && batchSwitchRead.code === 'login_fill_live',
+        'r4 MINOR 7 (per-tab CLI fence + honest recipe): reading Tab 2 passes while Tab 1 (and batch tab+snapshot) stays fenced with "submit the form … or reload"',
+        { rf7, onTab1, onTab2, backOnTab1, batchSwitchRead });
+
+      // Proven SPA submit (200 same-origin POST + empty/unmounted password input) lifts liveFill on Tab 1
+      if (typeof S7.k.emitPageEvent === 'function') {
+        S7.k.emitPageEvent(tid1, 'Network.requestWillBeSent', { requestId: 'rq-spa', request: { method: 'POST', url: `${SITE}/api/login` }, type: 'Fetch' });
+        S7.k.emitPageEvent(tid1, 'Network.responseReceived', { requestId: 'rq-spa', type: 'Fetch', response: { status: 200 } });
+        S7.k.emitPageEvent(tid1, 'Network.loadingFinished', { requestId: 'rq-spa' });
+      }
+      const liftedSpa = await until(() => S7.w.liveFillVerdictFor(TGT, { verb: 'snapshot' }).ok === true, 1200);
+      ok(Boolean(liftedSpa), 'r4 MINOR 7 (SPA finish): 2xx same-origin POST + cleared password field lifts liveFill without cross-document navigation');
+    } finally { await S7.close(); }
+
+    // Ceiling test: liveFillMaxMs = 60 wipes inputs in isolated world before lifting and records ceiling audit line
+    const d7c = path.join(ROOT, 'w7c-' + crypto.randomBytes(3).toString('hex')); fs.mkdirSync(d7c, { recursive: true });
+    const eng7c = VE.create({ dataDir: d7c, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false });
+    await eng7c.setup('vault-r4-m7c');
+    const grants7c = GS.create({ memory: true });
+    const logins7c = L.create({ vault: eng7c, grants: () => grants7c });
+    logins7c.addOwn({ origin: SITE, username: 'ceil', password: pwOf('m7-ceil') });
+    grants7c.set('browser-login', `${SITE}#ceil`, { to: [{ kind: 'conversation', key: 'conv-1' }] });
+    const k7c = await startFakeKernel({ firstUrl: `${SITE}/login`, mode: { standard: true } });
+    k7c.setStandardPage({ securityOrigin: SITE, isoOrigin: SITE, fields: [{ fieldId: 'vs-lf-c', tag: 'input', domType: 'password', type: 'password', autocomplete: 'current-password', visible: true }] });
+    const w7c = D.create({ keeper: { cdpEndpointFor: async () => ({ ok: true, url: k7c.wsUrl }), onLease: () => () => {} }, log: quiet, enableTimeoutMs: 300, liveFillMaxMs: 60, holdersOf: () => [{ browserKey: KEY, sessionId: 'sess-1', ephemeral: true }], leaseCountOf: () => 1, logins: logins7c, conversationOf: () => ({ cid: 'conv-1', name: 'Chat One' }) });
+    try {
+      await w7c.arm(PID, { budgetMs: 3000 });
+      await w7c.fillLogin(TGT, FILL({ user: 'ceil' }));
+      const liftedCeil = await until(() => w7c.liveFillVerdictFor(TGT, { verb: 'eval' }).ok === true, 1200);
+      const st7c = typeof w7c.loginFenceStats === 'function' ? w7c.loginFenceStats() : { fenceAuditLines: [] };
+      ok(Boolean(liftedCeil && (k7c.standardPage().ceilingWiped || 0) >= 1 && st7c.fenceAuditLines.some((l) => l.why === 'ceiling')),
+        'r4 MINOR 7 (ceiling): expired fence wipes inputs in isolated world before lifting and records ceiling audit line',
+        { ceilingWiped: k7c.standardPage().ceilingWiped, audits: st7c.fenceAuditLines });
+    } finally { w7c.shutdown(); await k7c.close(); eng7c.close(); }
+  }
+
+  // ── (8) MINOR 8: census-class mediated CDP fence (183 read + 197 page-mutation + unknown + Debugger.* refused) ──
+  {
+    const allRows = CENSUS.rows();
+    const readRows = allRows.filter((r) => r.cls === 'read');
+    const mutRows = allRows.filter((r) => r.cls === 'page-mutation');
+    const leakReads = readRows.filter((r) => !Med.liveFillCdpVerdict(`${r.domain}.${r.method}`).refuse);
+    const leakMuts = mutRows.filter((r) => !Med.liveFillCdpVerdict(`${r.domain}.${r.method}`).refuse);
+    const unk = Med.liveFillCdpVerdict('FutureDomain.readSecret');
+    const dbg = Med.liveFillCdpVerdict('Debugger.enable');
+    const snapClick = Med.liveFillCdpVerdict('DOMSnapshot.captureSnapshot', { allowVerb: 'click' });
+    const evalClickLeak = Med.liveFillCdpVerdict('Runtime.evaluate', { allowVerb: 'click', params: { expression: 'document.querySelector("input").value' } });
+    const evalClickLocator = Med.liveFillCdpVerdict('Runtime.evaluate', { allowVerb: 'click', params: { expression: 'document.querySelector("#submit")', returnByValue: false } });
+    ok(readRows.length >= 180 && mutRows.length >= 190 && leakReads.length === 0 && leakMuts.length === 0 && unk.refuse === true && dbg.refuse === true && snapClick.refuse === true && evalClickLeak.refuse === true && evalClickLocator.refuse === false,
+      `r4 MINOR 8 (census-class CDP fence): refuses all ${readRows.length} read methods (incl. DOMSnapshot.captureSnapshot, IndexedDB.requestData, IO.read), all ${mutRows.length} page-mutation methods, unknown methods, and Debugger.*; click exempts only its locator plumbing`,
+      { readCount: readRows.length, mutCount: mutRows.length, leakReads: leakReads.slice(0, 5), leakMuts: leakMuts.slice(0, 5), unk, snapClick, evalClickLeak });
+  }
+
+  // ── (9) MINOR 9: focus-theft hand-back wipe + keep fence on failed fill + inert iframes + wait --fn refused ──
+  {
+    const M9_PW = pwOf('m9-thief');
+    let inertDuringInsert = false;
+    const dom9 = makeStubDom(
+      [
+        { type: 'text', name: 'thief' },
+        { type: 'password', name: 'password', autocomplete: 'current-password' },
+      ],
+      {
+        iframes: [{ id: 'xorigin-frame' }],
+        onInsertText: ({ text, doc, inputs, frameEls }) => {
+          inertDuringInsert = Boolean(frameEls[0] && frameEls[0].inert === true && frameEls[0].hasAttribute('inert'));
+          // (a3b) focus stolen into thief input during insertText, then focus handed back to password input!
+          inputs[0].value = text;
+          doc.activeElement = inputs[1];
+        },
+      }
+    );
+    const form9 = await LF.inspectTabLoginForm({ call: dom9.call, targetId: 'T1', trackedUrl: `${SITE}/login` });
+    const vals9 = form9 ? BL.valuesOf({ plan: BL.planOf(form9, 'login') }, { username: '', password: M9_PW }).values : {};
+    const res9 = await LF.fillVaultLogin({ call: dom9.call, targetId: 'T1', trackedUrl: `${SITE}/login`, origin: SITE, form: form9, values: vals9, loginId: 'L9' });
+    ok(!res9.ok && res9.code === 'login_failed' && inertDuringInsert === true && dom9.frameEls[0].inert === false && !dom9.frameEls[0].hasAttribute('inert') && dom9.inputs[0].val === '' && dom9.inputs[1].val === '',
+      'r4 MINOR 9 (focus theft + inert iframes): iframes marked inert during typing & restored after, and (a3b) focus-theft hand-back wipes the grown thief input',
+      { res9, inertDuringInsert, restoredInert: dom9.frameEls[0].inert, thiefValLen: dom9.inputs[0].val.length });
+
+    // Failed fill after Input.insertText KEEPS the read fence armed
+    const S9 = await world({ mode: { standard: true } });
+    try {
+      S9.logins.addOwn({ origin: SITE, username: 'keepfence', password: pwOf('m9-keep') });
+      S9.logins.grant(`web-login:${SITE}#keepfence`, 'this-account', 'session:conv-1');
+      S9.k.setStandardPage({ securityOrigin: SITE, isoOrigin: SITE, clearOnInput: true, fields: [{ fieldId: 'vs-lf-9', tag: 'input', domType: 'password', type: 'password', autocomplete: 'current-password', visible: true }] });
+      const rf9 = await S9.w.fillLogin(TGT, FILL({ user: 'keepfence' }));
+      const fenceAfterFail = S9.w.liveFillVerdictFor(TGT, { verb: 'eval' });
+      ok(!rf9.ok && rf9.code === 'login_failed' && fenceAfterFail.code === 'login_fill_live',
+        'r4 MINOR 9 (keep fence on failed fill): failed fill after Input.insertText keeps liveFill armed over any residue',
+        { rf9, fenceAfterFail });
+    } finally { await S9.close(); }
+
+    const wFn = BL.liveFillVerdict({ verb: 'wait', argv: ['wait', '--fn', 'document.body.innerHTML'], origin: SITE });
+    const wFnBatch = BL.liveFillVerdict({ verb: 'batch', batchVerbs: ['click', 'wait --fn'], origin: SITE });
+    const wMs = BL.liveFillVerdict({ verb: 'wait', argv: ['wait', '250'], origin: SITE });
+    ok(!wFn.ok && wFn.code === 'login_fill_live' && !wFnBatch.ok && wFnBatch.code === 'login_fill_live' && wMs.ok === true,
+      'r4 MINOR 9 (wait --fn): JS-running wait (--fn / batch wait --fn) is refused during liveFill while plain timer wait passes',
+      { wFn, wFnBatch, wMs });
+  }
+
+  // ── (10) MINOR 10: honest words for framed forms (login_in_frame vs login_phishing) + bounded 302 skew ──
+  {
+    const mkFrameCall = ({ childFrames = [], targetUrls = null }) => {
+      let tiCalls = 0;
+      return async (m, p = {}) => {
+        if (m === 'Page.getFrameTree') return { result: { frameTree: { frame: { id: 'TOP', url: `${SITE}/login`, securityOrigin: SITE }, childFrames } } };
+        if (m === 'Target.getTargetInfo') {
+          const u = Array.isArray(targetUrls) ? targetUrls[Math.min(tiCalls++, targetUrls.length - 1)] : `${SITE}/login`;
+          return { result: { targetInfo: { targetId: 'T1', url: u } } };
+        }
+        if (m === 'Page.createIsolatedWorld') return { result: { executionContextId: p.frameId === 'TOP' ? 1 : (p.frameId === 'SUB_FORM' ? 2 : 3) } };
+        if (m === 'Runtime.evaluate') {
+          if (p.contextId === 1) return { result: { result: { value: { ok: true, isoOrigin: SITE, isoHref: `${SITE}/login`, actionOrigin: null, hasFrameEls: true, fields: [] } } } };
+          if (p.contextId === 2) return { result: { result: { value: { ok: true, isoOrigin: SITE, isoHref: 'about:srcdoc', actionOrigin: null, fields: [{ fieldId: 'vs-lf-sub', tag: 'input', domType: 'password', type: 'password', visible: true }] } } } };
+          return { result: { result: { value: { ok: true, isoOrigin: SITE, isoHref: 'about:blank', actionOrigin: null, fields: [] } } } };
+        }
+        return { result: {} };
+      };
+    };
+    const srcdocForm = await LF.inspectTabLoginForm({
+      call: mkFrameCall({ childFrames: [{ frame: { id: 'SUB_FORM', url: 'about:srcdoc', securityOrigin: 'null' } }] }),
+      targetId: 'T1', trackedUrl: `${SITE}/login`,
+    });
+    const srcdocVerdict = BL.fillVerdict({ forms: srcdocForm ? [srcdocForm] : [], entries: ENT, grantRows: rowsFrom([ROW(`${SITE}#alice`, [{ kind: 'conversation', key: 'conv-1' }])]), facts: ME, vaultState: 'unlocked' });
+    // 10th child frame (past the old 8-frame cap) cross-origin ⇒ login_phishing
+    const tenKids = Array.from({ length: 9 }, (_, i) => ({ frame: { id: `EMPTY_${i}`, url: 'about:blank', securityOrigin: 'null' } }));
+    tenKids.push({ frame: { id: 'SUB_FORM', url: `${SITE2}/embed`, securityOrigin: SITE2 } });
+    const tenthCross = await LF.inspectTabLoginForm({ call: mkFrameCall({ childFrames: tenKids }), targetId: 'T1', trackedUrl: `${SITE}/login` });
+    const tenthVerdict = BL.fillVerdict({ forms: tenthCross ? [tenthCross] : [], entries: ENT, grantRows: rowsFrom([ROW(`${SITE}#alice`, [{ kind: 'conversation', key: 'conv-1' }])]), facts: ME, vaultState: 'unlocked' });
+    // Bounded 302 skew: 1st Target.getTargetInfo still reports SITE2 before settling to SITE on 2nd sample
+    let skewTi = 0;
+    const skewForm = await LF.inspectTabLoginForm({
+      call: async (m) => {
+        if (m === 'Page.getFrameTree') return { result: { frameTree: { frame: { id: 'TOP', url: `${SITE}/login`, securityOrigin: SITE } } } };
+        if (m === 'Target.getTargetInfo') return { result: { targetInfo: { targetId: 'T1', url: skewTi++ === 0 ? `${SITE2}/sso` : `${SITE}/login` } } };
+        if (m === 'Page.createIsolatedWorld') return { result: { executionContextId: 5 } };
+        if (m === 'Runtime.evaluate') return { result: { result: { value: { ok: true, isoOrigin: SITE, isoHref: `${SITE}/login`, actionOrigin: SITE, fields: [{ fieldId: 'vs-lf-s', tag: 'input', domType: 'password', type: 'password', visible: true }] } } } };
+        return { result: {} };
+      },
+      targetId: 'T1', trackedUrl: () => (skewTi <= 1 ? `${SITE2}/sso` : `${SITE}/login`),
+    });
+    ok(BL.REFUSALS.includes('login_in_frame') && srcdocVerdict.code === 'login_in_frame' && /inside a frame/.test(srcdocVerdict.error || '') && tenthVerdict.code === 'login_phishing' && Boolean(skewForm && skewForm.pageOrigin === SITE),
+      'r4 MINOR 10 (framed forms + 302 skew): about:srcdoc/same-origin frame refuses login_in_frame ("inside a frame"), 10th cross-origin child frame refuses login_phishing, and transient 302 targetInfo skew settles within bounded retry',
+      { srcdocVerdict, tenthVerdict, skewOk: !!skewForm });
+  }
 }
 
 console.log(`\n${fail ? `${fail} FAILED` : 'ALL PASS'} (${pass}${fail ? ' passed' : ''})`);

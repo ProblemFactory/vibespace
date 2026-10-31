@@ -215,7 +215,7 @@ const STATUS = { // lane browser-profile-clone: the copy's refusals by name
   // form that is not the site's own (or not https), several logins (--user), the owner's grant, the vault locked, the site's
   // password rules a strong password cannot meet, no such login, an account already kept, a bad origin / user name, the kernel's
   // refusal; the owner's save card answered on a changed / gone card
-  login_fill_withdrawn: 409, login_no_form: 409, login_phishing: 403, login_ambiguous: 409, login_not_granted: 403, vault_locked: 423, password_rules_unsupported: 422, login_no_entry: 404, login_exists: 409,
+  login_fill_withdrawn: 409, login_no_form: 409, login_in_frame: 409, login_form_changed: 409, login_phishing: 403, login_ambiguous: 409, login_not_granted: 403, vault_locked: 423, password_rules_unsupported: 422, login_no_entry: 404, login_exists: 409,
   login_bad_origin: 400, login_bad_user: 400, login_fill_live: 409, login_failed: 502, not_written: 503, card_changed: 409, card_gone: 410,
   // lane browser-admin 2a: which Chrome build a profile runs (src/browser-builds.js BUILD_CODES) + Change build…'s own
   browser_choice_invalid: 400, browser_choice_user_only: 403, browser_choice_provider: 400, builds_unsupported: 409, builds_unreadable: 503,
@@ -1909,6 +1909,8 @@ router.post('/api/agent/browser/tab', async (req, res) => {
       const ack = r.opened.ack || r.opened.targetId || null;
       if (ack && ctx.dialogs && typeof ctx.dialogs.bindTab === 'function') { try { const t = dialogTargetFor(k, f, r.profileId); if (t.ok) ctx.dialogs.bindTab(t, ack); } catch (e) { console.warn('[browser] the new tab was not bound to its conversation — ' + (e && e.message)); } }
       const { ack: _ack, ...opened } = r.opened; r.opened = opened;
+    } else if (r.switched && r.switched.targetId && ctx.dialogs && typeof ctx.dialogs.noteActiveTab === 'function') {
+      try { const t = dialogTargetFor(k, f, r.profileId); if (t.ok) ctx.dialogs.noteActiveTab(t, r.switched.targetId); } catch { /* optional */ }
     }
     res.json(r);
   } catch (e) { fail(res, e); }
@@ -1957,7 +1959,12 @@ router.post('/api/agent/browser/audit', async (req, res) => {
     // not told, the verb's outcome for the unresponsive verdict (a timeout, or `dialog` = the CLI cut it at a dialog)
     // verify r4 #1 (site-reset): a `tab new` that succeeded NAMES its tab (the CLI read the binary's own ack) — the watch binds it
     // to THIS conversation before the fact after the verb is read (never "the verb that happened to be in flight")
-    const tabAck = req.body?.tab && typeof req.body.tab === 'object' && typeof req.body.tab.targetId === 'string' ? req.body.tab.targetId.slice(0, 64) : null;
+    const tabObj = req.body?.tab && typeof req.body.tab === 'object' ? req.body.tab : null;
+    const tabTid = tabObj && typeof tabObj.targetId === 'string' ? tabObj.targetId.slice(0, 64) : null;
+    const tabAck = tabObj && tabObj.new && tabTid ? tabTid : null;
+    if (profileId && tabObj && tabObj.switched && tabTid && ctx.dialogs && typeof ctx.dialogs.noteActiveTab === 'function') {
+      try { const t0 = dialogTargetFor(k, f, profileId); if (t0.ok) ctx.dialogs.noteActiveTab(t0, tabTid); } catch { /* optional */ }
+    }
     // int347: `daemonSaw` = the dialog type the verb's own daemon printed (its «… dialog is blocking the page» line) — awaited on the watch
     const saw = req.body?.daemonSaw && typeof req.body.daemonSaw === 'object' && typeof req.body.daemonSaw.type === 'string' ? { type: req.body.daemonSaw.type.slice(0, 24) } : null;
     const dlg = profileId ? await dialogAnswerFor(k, f, profileId, { arm: false, outcome: req.body?.dialog ? 'held-by-dialog' : req.body?.loop ? 'loop' : req.body?.timedOut ? 'timeout' : 'ok', ended: true, bind: tabAck, saw }) : (endVerb(f), {}); // lane site-reset: a verb cut at a navigation loop is not a timeout (the loop explains it)
@@ -2026,7 +2033,9 @@ async function liveFillRefusal(res, k, f, profileId, req, verb) {
   try { await D.arm(t.profileId); } catch { return false; }
   const rawBatch = Array.isArray(req.body?.batchVerbs) ? req.body.batchVerbs : null;
   const batchVerbs = rawBatch ? (rawBatch.length > 256 ? ['__overflow__'] : rawBatch.map((x) => String(x || ''))) : null;
-  const lv = D.liveFillVerdictFor(t, { verb, batchVerbs });
+  const rawArgv = Array.isArray(req.body?.argv) ? req.body.argv : null;
+  const argv = rawArgv ? rawArgv.slice(0, 64).map((x) => String(x || '')) : null;
+  const lv = D.liveFillVerdictFor(t, { verb, argv, batchVerbs });
   if (lv && !lv.ok) {
     const BL = require('../browser-login.js'), PT = require('../peer-text.js');
     res.status(STATUS[lv.code] || 409).json({ error: PT.toAgentText(BL.loginText(lv), { max: BL.TEXT_MAX }), code: lv.code, ...(res.locals && res.locals.minted ? { minted: res.locals.minted } : {}) });
