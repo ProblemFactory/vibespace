@@ -62,7 +62,10 @@
 //      name its hits for good, a verb only until a later producer); a turn's opener keeps its own named touch (r8's
 //      window gone); a patched copy per condition of the plain shape. ROUND 14 (the r13 verdict): UNKNOWN ⇒ MAY RUN —
 //      where the reader does not fully parse a line it may run the CLI names its text holds (never exact, never inert,
-//      ranked after every line read exactly); the may-run rows pinned; a grammar row without its measured table refused
+//      ranked after every line read exactly); the may-run rows pinned; a grammar row without its measured table refused.
+//      ROUND 15 (the r14 verdict): a name after «-» is a name; a word's literal text (its escapes and double quotes too)
+//      read for a subscript; THE NAME SIDE (a shell runs the CLI ⇒ the line runs or may run it); the compact head reads
+//      the whole command
 //   ⑤ WIRING PINS: every agent channel route records (test-architecture §63 is the census), the renderer's holder on
 //      the three card shapes, the view in ChatView's ONE element hook + the broadcast + the turn + dispose, the
 //      status bar's keyed `channels` chip (escHtml'd), the ONE channel-window call, no innerHTML in the view, the
@@ -1365,7 +1368,7 @@ await section('⑫', async () => {
 });
 
 // ═══ ⑬ ROUNDS 9 · 10 ═══
-console.log('⑬ ROUNDS 9 · 10 · 11 · 12 · 13 · 14 — stop reading the shell: a line ends a job only in the plainest shape, every other shape lingers — against the shells\' truth, one-sided; r10: only a closed allowlist between a job and its reaper, a kill ends only the CLI itself, a heredoc\'s substitutions run in its command\'s job; r11: a job neither the CLI nor a row taints the whole line, a list goes on past a newline after | / && / ||, a special builtin never redirected, a name written only where the reader sees it, no arithmetic it cannot read; the truth regenerated under the kill law; r12: unknown ⇒ stop — a construct the scan does not parse ends nothing, a construct after an opener read where it stands, a redirection followed only in its own form; r13: unread text is never inert — a stop for the jobs never hides a command (`(( ))` / `$(( ))` read as the shells expand them, a `${ }`\'s word with its own quotes, a trap\'s action); r14: unknown ⇒ may run — a line the reader does not fully parse may run the CLI names its text holds, never exact, never inert, ranked after every line read exactly; a grammar row only with its measured table; a search\'s own words name its hits for good, a verb only until a later producer; a turn\'s opener keeps its own named touch');
+console.log('⑬ ROUNDS 9 · 10 · 11 · 12 · 13 · 14 · 15 — stop reading the shell: a line ends a job only in the plainest shape, every other shape lingers — against the shells\' truth, one-sided; r10: only a closed allowlist between a job and its reaper, a kill ends only the CLI itself, a heredoc\'s substitutions run in its command\'s job; r11: a job neither the CLI nor a row taints the whole line, a list goes on past a newline after | / && / ||, a special builtin never redirected, a name written only where the reader sees it, no arithmetic it cannot read; the truth regenerated under the kill law; r12: unknown ⇒ stop — a construct the scan does not parse ends nothing, a construct after an opener read where it stands, a redirection followed only in its own form; r13: unread text is never inert — a stop for the jobs never hides a command (`(( ))` / `$(( ))` read as the shells expand them, a `${ }`\'s word with its own quotes, a trap\'s action); r14: unknown ⇒ may run — a line the reader does not fully parse may run the CLI names its text holds, never exact, never inert, ranked after every line read exactly; a grammar row only with its measured table; r15: a name after «-», an escaped subscript, the name side, the compact head on the whole command; a search\'s own words name its hits for good, a verb only until a later producer; a turn\'s opener keeps its own named touch');
 await section('⑬', async () => {
   const B9 = (TT, touches, calls, opts) => { const r = TT.bindToCall(touches, calls, opts); const ids = (o) => Object.fromEntries(Object.entries(o || {}).map(([k, v]) => [k, v.length])); return { by: ids(r.byCall), notes: ids(r.byNote), unbound: r.unbound.length }; };
   const eq = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -1396,7 +1399,10 @@ await section('⑬', async () => {
   // re-run's (a parameter word an evaluator reads again — eval, a shell's -c, a pipe or here-string into a shell, a
   // trap's action, zsh's `(e)`; zsh's glob `((#i)a|b)` / `*(e:…:)`; `builtin` / `command` / `noglob`; spans the shells
   // never close; bash 5.3's `${ …; }` in arithmetic; a quoted substitution in an arithmetic slot of `${ … }` or a
-  // subscript a builtin evaluates), appended by repro r14/regen-suite-r14.cjs from r13-shell-truth.cjs runs
+  // subscript a builtin evaluates), appended by repro r14/regen-suite-r14.cjs from r13-shell-truth.cjs runs; r15: the r14
+  // verdict's (a CLI name after «-» on an UNKNOWN line, an escaped `$(` / backtick in a subscript, double-quoted or
+  // unquoted, its follow-up's parameter word in command position), appended by repro r15/regen-suite-r15.cjs from
+  // r15-shell-truth.cjs runs
   const TRUTH = [   // version 5.3.9(1)-release (x86_64-pc-linux-gnu) / zsh 5.9 (bash · zsh · zsh in the agent tool's form), 2026-10-30
     ["39: { C & } ; wait", "{ vibespace-channels read lark/inbox & } ; wait", "ended", "ended", "ended"],
     ["39: { C & wait; } & wait", "{ vibespace-channels read lark/inbox & wait; } & wait", "ended", "ended", "ended"],
@@ -2109,6 +2115,29 @@ await section('⑬', async () => {
     ["r14 L6: [[ -v 'a[$(C > /dev/null &)]' ]]", "[[ -v 'a[$(vibespace-channels read lark/inbox > /dev/null &)]' ]]", "lingers", "none", "none"],
     ["r14 L7: let 'a[$(C)]=1'", "let 'a[$(vibespace-channels read lark/inbox)]=1'", "ended", "ended", "ended"],
     ["r14 L8 control: echo 'a[$(C > /dev/null &)]' (a quoted literal, never evaluated)", "echo 'a[$(vibespace-channels read lark/inbox > /dev/null &)]'", "none", "none", "none"],
+    ["r15 N1: bash --norc --noprofile <<EOF ⏎${x:-C}⏎EOF (U06)", "bash --norc --noprofile <<EOF\n${x:-vibespace-channels read lark/inbox}\nEOF", "ended", "ended", "ended"],
+    ["r15 N2: bash <<EOF ⏎${x:-C > /dev/null &}⏎EOF", "bash <<EOF\n${x:-vibespace-channels read lark/inbox > /dev/null &}\nEOF", "lingers", "lingers", "lingers"],
+    ["r15 N3: eval ${x:-vibespace-channels} read lark/inbox (X03)", "eval ${x:-vibespace-channels} read lark/inbox", "ended", "ended", "ended"],
+    ["r15 N4: eval ${x:-vibespace-channels} read lark/inbox > /dev/null &", "eval ${x:-vibespace-channels} read lark/inbox > /dev/null &", "lingers", "lingers", "lingers"],
+    ["r15 N5: eval ${a:-…C…} (a 40-level nest, X04)", "eval ${a:-${a:-${a:-${a:-${a:-${a:-${a:-${a:-${a:-${a:-${a:-${a:-${a:-${a:-${a:-${a:-${a:-${a:-${a:-${a:-${a:-${a:-${a:-${a:-${a:-${a:-${a:-${a:-${a:-${a:-${a:-${a:-${a:-${a:-${a:-${a:-${a:-${a:-${a:-${a:-vibespace-channels read lark/inbox}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}", "ended", "ended", "ended"],
+    ["r15 N6: sh -c \"${x-C}\" (X05)", "sh -c \"${x-vibespace-channels read lark/inbox}\"", "ended", "ended", "ended"],
+    ["r15 N7: sh -c \"${x-C > /dev/null &}\"", "sh -c \"${x-vibespace-channels read lark/inbox > /dev/null &}\"", "lingers", "lingers", "lingers"],
+    ["r15 N8 control: a=1; eval ${a:+…C…} (a 40-level nest, X06 — r14 named it)", "a=1; eval ${a:+${a:+${a:+${a:+${a:+${a:+${a:+${a:+${a:+${a:+${a:+${a:+${a:+${a:+${a:+${a:+${a:+${a:+${a:+${a:+${a:+${a:+${a:+${a:+${a:+${a:+${a:+${a:+${a:+${a:+${a:+${a:+${a:+${a:+${a:+${a:+${a:+${a:+${a:+${a:+vibespace-channels read lark/inbox}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}}", "ended", "ended", "ended"],
+    ["r15 L9: let \"a[\\$(C > /dev/null &)]=1\"", "let \"a[\\$(vibespace-channels read lark/inbox > /dev/null &)]=1\"", "lingers", "lingers", "lingers"],
+    ["r15 L10: let \"a[\\`C > /dev/null &\\`]=1\"", "let \"a[\\`vibespace-channels read lark/inbox > /dev/null &\\`]=1\"", "lingers", "lingers", "lingers"],
+    ["r15 L11: let a[\\$\\(C\\ \\>\\ /dev/null\\ \\&\\)]=1 (unquoted, escaped)", "let a[\\$\\(vibespace-channels\\ read\\ lark/inbox\\ \\>\\ /dev/null\\ \\&\\)]=1", "lingers", "none", "none"],
+    ["r15 L12: printf -v \"a[\\$(C > /dev/null &)]\" x", "printf -v \"a[\\$(vibespace-channels read lark/inbox > /dev/null &)]\" x", "lingers", "lingers", "lingers"],
+    ["r15 L13: read \"a[\\$(C > /dev/null &)]\" <<< x", "read \"a[\\$(vibespace-channels read lark/inbox > /dev/null &)]\" <<< x", "lingers", "lingers", "lingers"],
+    ["r15 L14: declare -i n; n=\"a[\\$(C > /dev/null &)]\"", "declare -i n; n=\"a[\\$(vibespace-channels read lark/inbox > /dev/null &)]\"", "lingers", "none", "none"],
+    ["r15 L15: [[ \"a[\\$(C > /dev/null &)]\" -eq 0 ]]", "[[ \"a[\\$(vibespace-channels read lark/inbox > /dev/null &)]\" -eq 0 ]]", "none", "none", "none"],
+    ["r15 L16: let \"a[\\$(C)]=1\"", "let \"a[\\$(vibespace-channels read lark/inbox)]=1\"", "ended", "ended", "ended"],
+    ["r15 L17: printf -v a[\\$\\(C\\ \\>\\ /dev/null\\ \\&\\)] x (unquoted, escaped)", "printf -v a[\\$\\(vibespace-channels\\ read\\ lark/inbox\\ \\>\\ /dev/null\\ \\&\\)] x", "lingers", "none", "none"],
+    ["r15 L18 control: echo \"a[\\$(C > /dev/null &)]\" (a literal, never evaluated)", "echo \"a[\\$(vibespace-channels read lark/inbox > /dev/null &)]\"", "none", "none", "none"],
+    ["r15 L19 control: let \"a[$(C > /dev/null &)]=1\" (a substitution the shell runs first — exact)", "let \"a[$(vibespace-channels read lark/inbox > /dev/null &)]=1\"", "lingers", "lingers", "lingers"],
+    ["r15 S6: x=abc; echo ${x:\"\\$(C > /dev/null &)\"} > /dev/null", "x=abc; echo ${x:\"\\$(vibespace-channels read lark/inbox > /dev/null &)\"} > /dev/null", "none", "none", "none"],
+    ["r15 S7: x=abc; echo ${x:\\$\\(C\\ \\>\\ /dev/null\\ \\&\\)} > /dev/null (unquoted, escaped)", "x=abc; echo ${x:\\$\\(vibespace-channels\\ read\\ lark/inbox\\ \\>\\ /dev/null\\ \\&\\)} > /dev/null", "none", "none", "none"],
+    ["r15 H1 follow-up: ${x:-vibespace-channels} read lark/inbox (X01 — could run)", "${x:-vibespace-channels} read lark/inbox", "ended", "ended", "ended"],
+    ["r15 H2 follow-up: CMD=vibespace-channels; $CMD read lark/inbox (X02 — could run)", "CMD=vibespace-channels; $CMD read lark/inbox", "ended", "ended", "ended"],
   ];
   // the rows whose CALL reads not lingering — the plain shape (generated with the table); every other row lingers
   const ENDED = [
@@ -2248,12 +2277,21 @@ await section('⑬', async () => {
     "r14 F4: if (( ${ C; } 0 > 0 )); then echo has; fi",
     "r14 S5: x=abc; echo ${x:'$(C)'} > /dev/null",
     "r14 L7: let 'a[$(C)]=1'",
+    "r15 N1: bash --norc --noprofile <<EOF ⏎${x:-C}⏎EOF (U06)",
+    "r15 N3: eval ${x:-vibespace-channels} read lark/inbox (X03)",
+    "r15 N5: eval ${a:-…C…} (a 40-level nest, X04)",
+    "r15 N6: sh -c \"${x-C}\" (X05)",
+    "r15 N8 control: a=1; eval ${a:+…C…} (a 40-level nest, X06 — r14 named it)",
+    "r15 L16: let \"a[\\$(C)]=1\"",
+    "r15 H1 follow-up: ${x:-vibespace-channels} read lark/inbox (X01 — could run)",
+    "r15 H2 follow-up: CMD=vibespace-channels; $CMD read lark/inbox (X02 — could run)",
   ];
   // r10: the attack's rows — a shell lets the CLI outlive the call — pinned: the table may never lose them (r11: x9-38, a
   // program that kills its parent, left with the kill law); r11: the r10 verdict's and r11's own rows a shell lets outlive
   // that r10 (36e43d80b) read not lingering; r12: the r11 verdict's (W1–W7) and r12's own that r11 (5e3005190) read not
   // lingering; r13: the r12 verdict's and its claim re-run's that r12 (d5fa8a382) read not lingering; r14: the r13
-  // verdict's and its claim re-run's that r13 (7d4ab3951) read not lingering
+  // verdict's and its claim re-run's that r13 (7d4ab3951) read not lingering; r15: the r14 verdict's that r14
+  // (0de891827) read not lingering
   const OUTLIVE = [
     "x9-31 C & repeat 1 exit; wait (zsh repeat)",
     "x9-32 C & echo a<1-9>b; wait (zsh numeric glob)",
@@ -2438,6 +2476,13 @@ await section('⑬', async () => {
     "r14 L4: declare -i n; n='a[$(C > /dev/null &)]'",
     "r14 L5: [[ 'a[$(C > /dev/null &)]' -eq 0 ]]",
     "r14 L6: [[ -v 'a[$(C > /dev/null &)]' ]]",
+    "r15 L9: let \"a[\\$(C > /dev/null &)]=1\"",
+    "r15 L10: let \"a[\\`C > /dev/null &\\`]=1\"",
+    "r15 L11: let a[\\$\\(C\\ \\>\\ /dev/null\\ \\&\\)]=1 (unquoted, escaped)",
+    "r15 L12: printf -v \"a[\\$(C > /dev/null &)]\" x",
+    "r15 L13: read \"a[\\$(C > /dev/null &)]\" <<< x",
+    "r15 L14: declare -i n; n=\"a[\\$(C > /dev/null &)]\"",
+    "r15 L17: printf -v a[\\$\\(C\\ \\>\\ /dev/null\\ \\&\\)] x (unquoted, escaped)",
   ];
   const t30 = [0, 1, 2].map((i) => rd('fx-' + i, 30 + i)), pyLate = one('PY', 'python3 tools/report.py --out /tmp/r.md', R0 + 20_000, R0 + 60_000);
   const bound = (TT, line) => B9(TT, t30, [one('LINE', line, R0 + 2_000, R0 + 2_400), pyLate], ctx);
@@ -2454,8 +2499,8 @@ await section('⑬', async () => {
   ok(TRUTH.length >= 300 && !unsafe.length && eq(ends, ENDED),
     `THE SHELLS' TRUTH, ONE-SIDED (r9 — the r8 verdict; r10 — the r9 verdict: zsh's numeric glob, \`repeat\`, a builtin writing a read-only name and an external command that kills its parent between the job and its reaper, a \`kill\` of a script's job, a heredoc's substitutions read in the foreground): ${TRUTH.length} shapes, each run by bash, zsh AND zsh in the agent tool's form — where any lets the CLI outlive the call, the call lingers and the later lone script never takes its reads (0 rows; c47557626, efe07c76 and 90179ed5 each had some); the call reads ended ONLY on the ${ENDED.length} rows listed (a lone top-level job, a lone top-level \`wait\` / \`wait $!\` — or \`kill $!\` of the CLI itself — only rows of the allowlist between; the foreground controls); ${cost.length} rows every shell ended read lingering — the cost, listed`, { unsafe, endsNotListed: ends.filter((x) => !ENDED.includes(x)), listedNotEnded: ENDED.filter((x) => !ends.includes(x)) });
   const pinned = OUTLIVE.filter((l) => { const r = rows.find((x) => x.label === l); return !!r && r.outlives && r.call === 'lingers'; });
-  ok(pinned.length === OUTLIVE.length && OUTLIVE.length === 183,
-    'THE ATTACK\'S ROWS STAY IN THE TABLE (r10 — the r9 verdict; r11 — the r10 verdict): the 6 zsh / read-only rows r9 read ended (`repeat 1 exit`, `echo a<1-9>b`, `echo nomatchzz<->`, `read status`, `printf -v status`, `echo hi > a<1-2>b`), the 5 killed script / interpreter jobs (K1–K5), the 3 backgrounded heredocs (H1, H2, H1-backtick) and the 68 rows a shell lets outlive that r10 read not lingering — a special builtin redirected (`sh -c "C & : >&9; wait"`), a reaper redirected to a closed descriptor (`wait 2>&3`), a list continued past a newline (`C |⏎ tee x &`, `C &&⏎ echo ok &`), a name written where the line cannot see it (`printf -vIFS`, `read "$v"`, `declare -n`, `{IFS}>`, `for IFS in`), arithmetic bash evaluates (`$[ ]`, `a[i]=`, `${x:off}`, `[[ -eq ]]`, `declare -i`), `${x@P}`, zsh\'s nested `(P)`, a CRLF line (`wait\\r`), a script named like the CLI; r12 — the r11 verdict: the 49 rows a shell lets outlive that r11 read not lingering — a continuation after a subshell (`( C ) |⏎ cat &`), a loop / `[[ -eq ]]` / `(( ))` / a definition after an opener, a split `[[ … ]]`, a compound assignment\'s subscript, an indirection, a builtin\'s heredoc or here-string, bash 5.3\'s `${ …; }`, a `${x:-$(C &)}` the scan never opened, mapfile\'s callback, a reaper redirected from or to a FILE, dash\'s `&>`; r13 — the r12 verdict and its claim re-run: the 24 rows a shell lets outlive that r12 read not lingering — the CLI inside `(( … ))` after an opener or at a command\'s start, a `((` that is two subshells, `$(( … ))` in a word, quoted, in a here-string, a `[[ ]]` or a `case`, a `$((` that is a substitution of a subshell, bash\'s `<( … )` in a default, a trap\'s action, mapfile\'s callback; r14 — the r13 verdict and its claim re-run: the 28 rows a shell lets outlive that r13 read not lingering — a parameter word an evaluator reads again (`eval echo ${x:-\'$(C &)\'}`, `bash -c ${x:-\'C &\'}`, `trap ${x:-…} EXIT`, `| bash`, `bash <<<`, zsh\'s `(e)`), zsh\'s glob (`((#i)…)`, `*(e:…:)`), `builtin trap` / `mapfile` / `eval`, bash 5.3\'s `${ …; }` in arithmetic, a quoted substitution in an arithmetic slot of `${ … }`, a subscript `let` / `printf -v` / `read` / `declare -i` / `[[ ]]` evaluates — each present, outliving in a shell, read lingering');
+  ok(pinned.length === OUTLIVE.length && OUTLIVE.length === 190,
+    'THE ATTACK\'S ROWS STAY IN THE TABLE (r10 — the r9 verdict; r11 — the r10 verdict): the 6 zsh / read-only rows r9 read ended (`repeat 1 exit`, `echo a<1-9>b`, `echo nomatchzz<->`, `read status`, `printf -v status`, `echo hi > a<1-2>b`), the 5 killed script / interpreter jobs (K1–K5), the 3 backgrounded heredocs (H1, H2, H1-backtick) and the 68 rows a shell lets outlive that r10 read not lingering — a special builtin redirected (`sh -c "C & : >&9; wait"`), a reaper redirected to a closed descriptor (`wait 2>&3`), a list continued past a newline (`C |⏎ tee x &`, `C &&⏎ echo ok &`), a name written where the line cannot see it (`printf -vIFS`, `read "$v"`, `declare -n`, `{IFS}>`, `for IFS in`), arithmetic bash evaluates (`$[ ]`, `a[i]=`, `${x:off}`, `[[ -eq ]]`, `declare -i`), `${x@P}`, zsh\'s nested `(P)`, a CRLF line (`wait\\r`), a script named like the CLI; r12 — the r11 verdict: the 49 rows a shell lets outlive that r11 read not lingering — a continuation after a subshell (`( C ) |⏎ cat &`), a loop / `[[ -eq ]]` / `(( ))` / a definition after an opener, a split `[[ … ]]`, a compound assignment\'s subscript, an indirection, a builtin\'s heredoc or here-string, bash 5.3\'s `${ …; }`, a `${x:-$(C &)}` the scan never opened, mapfile\'s callback, a reaper redirected from or to a FILE, dash\'s `&>`; r13 — the r12 verdict and its claim re-run: the 24 rows a shell lets outlive that r12 read not lingering — the CLI inside `(( … ))` after an opener or at a command\'s start, a `((` that is two subshells, `$(( … ))` in a word, quoted, in a here-string, a `[[ ]]` or a `case`, a `$((` that is a substitution of a subshell, bash\'s `<( … )` in a default, a trap\'s action, mapfile\'s callback; r14 — the r13 verdict and its claim re-run: the 28 rows a shell lets outlive that r13 read not lingering — a parameter word an evaluator reads again (`eval echo ${x:-\'$(C &)\'}`, `bash -c ${x:-\'C &\'}`, `trap ${x:-…} EXIT`, `| bash`, `bash <<<`, zsh\'s `(e)`), zsh\'s glob (`((#i)…)`, `*(e:…:)`), `builtin trap` / `mapfile` / `eval`, bash 5.3\'s `${ …; }` in arithmetic, a quoted substitution in an arithmetic slot of `${ … }`, a subscript `let` / `printf -v` / `read` / `declare -i` / `[[ ]]` evaluates; r15 — the r14 verdict: the 7 rows a shell lets outlive that r14 read not lingering — an escaped `$(` / backtick in a subscript `let` / `printf -v` / `read` / `declare -i` evaluates, double-quoted (`let "a[\\$(C &)]=1"`) or unquoted (`let a[\\$\\(C…\\)]=1`, bash) — each present, outliving in a shell, read lingering');
   // r11: THE LAW CAN FAIL (the RED control): a planted mis-row — `C & wait` marked «bash lets the CLI outlive» — is named by
   // the one-sided check, and only it
   const plant = { label: 'PLANTED: C & wait (marked bash lingers)', line: 'vibespace-channels read lark/inbox & wait', outlives: true };
@@ -2737,7 +2782,7 @@ await section('⑬', async () => {
   ok(endsIn(noBang, 'r12 W5: x="a[IFS=1234567890]"; echo "${!x}" > /dev/null; C & wait $!', 'r12 M18: : "${!x}" (x=a[IFS=…])', 'r12 M20: read -r y <<< "${!x}" (x=a[IFS=…])'), 'CONTROL an indirection read as a plain parameter (r11 — the r11 verdict W5): `${!x}` with x=\'a[IFS=…]\' — bash evaluates the subscript of the name it reaches');
   const noFunsub = sw('funsub-evals', '|\\$\\{[\\s|]/;', '/;');
   ok(endsIn(noFunsub, 'r12 M25: : ${ IFS=0123456789; } (bash 5.3 runs it in the shell)', 'r12 M26: echo "${ IFS=0123456789; }" > /dev/null', 'r12 M27: : ${| REPLY=x; IFS=0123456789; }'), 'CONTROL bash 5.3\'s `${ …; }` read as a parameter (r12): its commands run in the shell itself — IFS = the digits');
-  const funsubBlind = sw2('funsub-scan', ["{ const e = shut(spanEnd(s, j + 1, '{', '}'), j); nested(s.slice(j + 3, e), at); v +=", "{ const e = shut(spanEnd(s, j + 1, '{', '}'), j); v +="], ["{ const e = shut(spanEnd(s, i + 1, '{', '}'), i); nested(s.slice(i + 3, e), at); v +=", "{ const e = shut(spanEnd(s, i + 1, '{', '}'), i); v +="]);
+  const funsubBlind = sw2('funsub-scan', ["{ const e = shut(spanEnd(s, j + 1, '{', '}'), j); nested(s.slice(j + 3, e), at); xp(", "{ const e = shut(spanEnd(s, j + 1, '{', '}'), j); xp("], ["{ const e = shut(spanEnd(s, i + 1, '{', '}'), i); nested(s.slice(i + 3, e), at); xp(", "{ const e = shut(spanEnd(s, i + 1, '{', '}'), i); xp("]);
   ok(endsIn(funsubBlind, 'r12 N7: : ${ C & } (bash 5.3: the CLI runs in the shell)', 'r12 N8: echo "${ C & }" > /dev/null', 'r12 N9: : ${| C & }'), 'CONTROL bash 5.3\'s `${ C & }` never scanned (r12): the CLI it starts in the shell is no run of the line — the call reads not lingering, the CLI outlives');
   const noExpands = sw('expands', "  if ((w.expands || []).some((t) => /\\$\\(\\(/.test(t) || SUB_EXP.test(t) || SUBSTR.test(t) || EVALS.test(t) || SETS_IN_WORD.test(t) || INDIRECT.test(t))) return true;   // r12\n", '');
   ok(endsIn(noExpands, 'r12 M19: : <<EOF $((IFS=…)) EOF (a builtin expands its heredoc)', 'r12 M20: read -r y <<< "${!x}" (x=a[IFS=…])', 'r12 M21: read -r y <<< $((IFS=…))', 'r12 M22: read -r y <<EOF ${a[i]} EOF (i=IFS=…)'), 'CONTROL the text a builtin expands read as data (r12): `: <<EOF⏎$((IFS=…))⏎EOF`, `read y <<< "${!x}"`, `read y <<< $((IFS=…))`, `read y <<EOF⏎${a[i]}⏎EOF` — the shell itself expands it, IFS = the digits');
@@ -2746,7 +2791,7 @@ await section('⑬', async () => {
   const anyOp = sw('dup-form', "const followed = (x, fds) => (FILE_OPS.has(x.op) && x.v === '/dev/null') || (DUP_OPS.has(x.op) && fds.test(x.v));", "const followed = (x, fds) => x.v === '/dev/null' || fds.test(x.v);");
   ok(endsIn(anyOp, 'r12 W7: mkdir -p 2; C & wait > 2', 'r12 M30: C & wait < 0 (no file 0)', 'r12 M31: mkdir -p 1; C & wait 2> 1', 'r12 M32: mkdir -p 2; C & wait &> 2', "r12 N1: sh -c 'C & wait &> /dev/null' (dash: wait &)", "r12 N2: sh -c 'C & echo hi &> /dev/null; wait $!' (dash: echo &)", "r12 N3: sh -c 'C &⏎wait >&/dev/null' (dash: bad fd number)", 'r12 N4: C & wait <&/dev/null'),
     'CONTROL a redirection target read without its operator (r11 — the r11 verdict W7): `wait > 2` (a directory named 2), `wait < 0` (no file 0), `wait 2> 1`, `wait &> 2`, dash\'s `&>` (`wait &` — the wait goes to the background; `echo hi &` — `$!` is the echo) and `>&/dev/null` (bad fd number), `wait <&/dev/null` — the `wait` never runs');
-  const paramBlind = sw('param-subs', "{ pnest++; paramWord(i + 2, e, at); pnest--; } v +=", "{ } v +=");
+  const paramBlind = sw('param-subs', "{ pnest++; paramWord(i + 2, e, at); pnest--; } xp(", "{ } xp(");
   ok(endsIn(paramBlind, 'r12 P1: echo ${x:-$(C > /dev/null &)}', 'r12 P2: : ${x:=$(C > /dev/null &)}', 'r12 P3: echo ${x:-`C > /dev/null &`}'), 'CONTROL an unquoted `${ … }` read as one opaque word (r1–r11): `${x:-$(C > /dev/null &)}`, `${x:=$(…)}`, a backtick in a default — the CLI the substitution starts is no run of the line, it outlives the call');
   const paramArith = sw('param-arith', ' || EVALS.test(r) || /\\$\\(\\(/.test(r); })) return true;', ' || EVALS.test(r); })) return true;');
   ok(endsIn(paramArith, 'r12 P4: echo ${x:-$((IFS=1234567890))} > /dev/null; C & wait $!'), 'CONTROL arithmetic inside a `${ … }` read as plain (r1–r11): `${x:-$((IFS=…))}` — the word holds no `$(())` mark, bash evaluates it, IFS = the digits');
@@ -2761,14 +2806,14 @@ await section('⑬', async () => {
     'CONTROL a `(( … ))` skipped unread (r12 — the r12 verdict MAJOR): `if (( $(C) > 0 ))`, `while (( $(C | wc -l) > 0 ))`, `(( $(C) > 0 )) &&` read as running nothing; `if (( $(C &) 1 ))`, `while`, both `for (( ))` forms, a command\'s start, `!` — the CLI outlives, the call reads not lingering');
   const arithAll = sw('arith-groups', 'if (arithAt(s, i)) {', 'if (true) {');
   ok(inertIn(arithAll, 'r13 A3: if true; then ((C) | head); fi') && endsIn(arithAll, 'r13 A11: if true; then ((C > /dev/null &) | cat); fi'), 'CONTROL every `((` read as arithmetic (r13): `then ((C) | head)` — two subshells in bash, zsh and dash, read as running nothing; `((C &) | cat)` — the CLI outlives');
-  const dollarUnread = sw('dollar-arith', "substitutions(s.slice(i + 3, e - 1), at); v += '$(())'; i = e + 1;", "v += '$(())'; i = e + 1;");
+  const dollarUnread = sw('dollar-arith', "substitutions(s.slice(i + 3, e - 1), at); xp('$(())'); i = e + 1;", "xp('$(())'); i = e + 1;");
   ok(inertIn(dollarUnread, 'r13 B9: echo $(( $(C) + 1 )) > /dev/null') && endsIn(dollarUnread, 'r13 B1: echo $(( $(C > /dev/null &) 1 )) > /dev/null', 'r13 B2: : $(( $(C > /dev/null &) 1 ))', 'r13 B3: x=$(( $(C > /dev/null &) 1 ))', 'r13 B4: echo $(( `C > /dev/null &` 1 )) > /dev/null', 'r13 B6: [[ $(( $(C > /dev/null &) 1 )) -eq 1 ]]', 'r13 B7: case $(( $(C > /dev/null &) 1 )) in *) ;; esac', 'r13 B8: cat <<< $(( $(C > /dev/null &) 1 )) > /dev/null'),
     'CONTROL a `$(( … ))` in a word skipped unread (r1–r12 — the r12 claim re-run): `echo $(( $(C) + 1 ))` reads as running nothing; `echo $(( $(C &) 1 ))`, `: $((…))`, `x=$((…))`, a backtick, `[[ $((…)) -eq 1 ]]`, `case $((…))`, `<<< $((…))` — the CLI outlives');
   const dqUnread = sw('dq-arith', "substitutions(s.slice(j + 3, e - 1), at); j = e;", "j = e;");
   ok(endsIn(dqUnread, 'r13 B5: echo "$(( $(C > /dev/null &) 1 ))" > /dev/null'), 'CONTROL a quoted `"$(( … ))"` skipped unread (r1–r12): `echo "$(( $(C &) 1 ))"` — the CLI outlives');
   const dollarAll = sw2('dollar-groups', ["if (ch === '$' && s[i + 1] === '(' && s[i + 2] === '(' && arithAt(s, i + 1)) {", "if (ch === '$' && s[i + 1] === '(' && s[i + 2] === '(') {"]);
   ok(endsIn(dollarAll, 'r13 B10: echo $((C > /dev/null &) | cat) > /dev/null (a substitution of a subshell)'), 'CONTROL every `$((` read as arithmetic (r1–r12): `$((C &) | cat)` is a command substitution of a subshell in bash and zsh — the CLI outlives');
-  const heredocWord = sw('param-quotes', "{ pnest++; paramWord(i + 2, e, at); pnest--; } v +=", "{ substitutions(s.slice(i + 2, e), at); } v +=");
+  const heredocWord = sw('param-quotes', "{ pnest++; paramWord(i + 2, e, at); pnest--; } xp(", "{ substitutions(s.slice(i + 2, e), at); } xp(");
   ok(namesIn(heredocWord, "r13 D1 control: echo ${x:-'$(C > /dev/null &)'} (a quote there — literal)", "r13 D2 control: echo \"usage: \"${HINT:-'$(C)'}", "r13 D3 control: echo ${x#'`C > /dev/null &`'}", "r13 D7 control: echo ${x:-${y:-'$(C)'}} (nested, quoted)"), 'CONTROL an unquoted `${ … }`\'s word read by the heredoc scanner (r12 — the r12 verdict MINOR): `${x:-\'$(C &)\'}`, the usage hint, a backtick in `${x#\'…\'}`, a nested `${y:-\'$(C)\'}` — no shell runs the CLI, the copy names it as a run');
   const procsubParam = sw('param-procsub', "      if ((s[j] === '<' || s[j] === '>') && s[j + 1] === '(') { const k = shut(spanEnd(s, j + 1, '(', ')', true, span), j); nested(s.slice(j + 2, k), at); stops.push(j); j = k + 1; continue; }\n", '');
   ok(endsIn(procsubParam, 'r13 D5: echo ${x:-<(C > /dev/null &)} > /dev/null (bash runs it)'), 'CONTROL a `<( … )` in a default read as text (r1–r12 — the r12 claim re-run d13): bash runs it, the CLI outlives');
@@ -2805,7 +2850,7 @@ await section('⑬', async () => {
   // r14: THE MAY-RUN CENSUS (the brief's (c)) — the rows of the table whose reading is UNKNOWN, pinned; every other row is
   // read exactly. A row that newly reads may-run, or stops, fails here by its label
   const unknownOf = (TT, l) => TT.commandsRun(l).unknown || [];
-  const r12Rows = TRUTH.filter((x) => !/^r1[34] /.test(x[0]));
+  const r12Rows = TRUTH.filter((x) => !/^r1[345] /.test(x[0]));
   const mayRows = TRUTH.filter((x) => unknownOf(T, x[1]).length).map((x) => x[0]);
   const MAY_ROWS = [
     "E3 C & builtin exit; wait",
@@ -2866,14 +2911,36 @@ await section('⑬', async () => {
     "r14 L6: [[ -v 'a[$(C > /dev/null &)]' ]]",
     "r14 L7: let 'a[$(C)]=1'",
     "r14 L8 control: echo 'a[$(C > /dev/null &)]' (a quoted literal, never evaluated)",
+    "r15 N1: bash --norc --noprofile <<EOF ⏎${x:-C}⏎EOF (U06)",
+    "r15 N2: bash <<EOF ⏎${x:-C > /dev/null &}⏎EOF",
+    "r15 N3: eval ${x:-vibespace-channels} read lark/inbox (X03)",
+    "r15 N4: eval ${x:-vibespace-channels} read lark/inbox > /dev/null &",
+    "r15 N5: eval ${a:-…C…} (a 40-level nest, X04)",
+    "r15 N6: sh -c \"${x-C}\" (X05)",
+    "r15 N7: sh -c \"${x-C > /dev/null &}\"",
+    "r15 N8 control: a=1; eval ${a:+…C…} (a 40-level nest, X06 — r14 named it)",
+    "r15 L9: let \"a[\\$(C > /dev/null &)]=1\"",
+    "r15 L10: let \"a[\\`C > /dev/null &\\`]=1\"",
+    "r15 L11: let a[\\$\\(C\\ \\>\\ /dev/null\\ \\&\\)]=1 (unquoted, escaped)",
+    "r15 L12: printf -v \"a[\\$(C > /dev/null &)]\" x",
+    "r15 L13: read \"a[\\$(C > /dev/null &)]\" <<< x",
+    "r15 L14: declare -i n; n=\"a[\\$(C > /dev/null &)]\"",
+    "r15 L15: [[ \"a[\\$(C > /dev/null &)]\" -eq 0 ]]",
+    "r15 L16: let \"a[\\$(C)]=1\"",
+    "r15 L17: printf -v a[\\$\\(C\\ \\>\\ /dev/null\\ \\&\\)] x (unquoted, escaped)",
+    "r15 L18 control: echo \"a[\\$(C > /dev/null &)]\" (a literal, never evaluated)",
+    "r15 S6: x=abc; echo ${x:\"\\$(C > /dev/null &)\"} > /dev/null",
+    "r15 S7: x=abc; echo ${x:\\$\\(C\\ \\>\\ /dev/null\\ \\&\\)} > /dev/null (unquoted, escaped)",
   ];
   console.log(`  · UNKNOWN ⇒ MAY RUN: ${mayRows.length} of the ${TRUTH.length} rows read may-run (${mayRows.filter((l) => r12Rows.some((x) => x[0] === l)).length} of r12's ${r12Rows.length}) — every other row is read exactly`);
-  ok(eq(mayRows, MAY_ROWS) && MAY_ROWS.length === 58, `THE MAY-RUN CENSUS (r14 — the brief's (c)): of the table's ${TRUTH.length} rows exactly the ${MAY_ROWS.length} listed read may-run — 6 of r12's ${r12Rows.length} (\`C & builtin exit; wait\`, zsh's \`echo x(/)\`, \`\${x@P}\`, \`\${(e)x}\`, two \`*(e:…:)\` — each read lingering before and now), r13's 5 literal-quote controls, and r14's own; every other row is read exactly — a row that newly reads may-run fails here by its label`, { newly: mayRows.filter((l) => !MAY_ROWS.includes(l)), gone: MAY_ROWS.filter((l) => !mayRows.includes(l)) });
+  ok(eq(mayRows, MAY_ROWS) && MAY_ROWS.length === 78, `THE MAY-RUN CENSUS (r14 — the brief's (c); r15: + 20 of its 23 rows): of the table's ${TRUTH.length} rows exactly the ${MAY_ROWS.length} listed read may-run — 6 of r12's ${r12Rows.length} (\`C & builtin exit; wait\`, zsh's \`echo x(/)\`, \`\${x@P}\`, \`\${(e)x}\`, two \`*(e:…:)\` — each read lingering before and now), r13's 5 literal-quote controls, r14's own and r15's own (all but its exact control L19 and the follow-up's H1 / H2); every other row is read exactly — a row that newly reads may-run fails here by its label`, { newly: mayRows.filter((l) => !MAY_ROWS.includes(l)), gone: MAY_ROWS.filter((l) => !mayRows.includes(l)) });
   // r14: A GRAMMAR ROW WITHOUT ITS TABLE IS REFUSED (the brief's (b)) — every construct the reader reads EXACTLY since
   // r13 is a row of shell-words ROWS with the truth rows behind it, its site marked `row:<name>`; the reader's branches
   // are counted — a new one comes with its row and its measured table (else the line it reads is UNKNOWN: it may run)
   const SWM = require(path.join(REPO, 'src/shell-words.js'));
-  const BRANCHES = 206;
+  // r15: + 3 — a word's real expansions marked (`xp`), its literal text read once: they make a line UNKNOWN, never exact
+  // (no grammar row; the r15 rows measure them)
+  const BRANCHES = 209;
   const rowCensus = (text, rows) => {
     const bad = [], marks = [...text.matchAll(/row:([\w-]+)/g)].map((m) => m[1]), branches = (text.match(/\bif \(/g) || []).length;
     if (!rows || !Object.keys(rows).length) bad.push('no ROWS table');
@@ -2889,13 +2956,75 @@ await section('⑬', async () => {
   const plantMark = rowCensus(SW.replace('// row:trap', '// row:trap row:fresh'), SWM.ROWS), plantRow = rowCensus(SW, { ...(SWM.ROWS || {}), fresh: ['r99 Z'] }), plantBranch = rowCensus(SW.replace('function cliMay(ran) {', 'function cliMay(ran) { if (ran.fresh) return [];'), SWM.ROWS);
   ok(!rowsBad.length && plantMark.length === 1 && plantRow.length === 2 && plantBranch.length === 1,
     `A GRAMMAR ROW WITHOUT ITS TABLE IS REFUSED (r14 — the brief's (b)): every row that makes a line exact since r13 (shell-words ROWS: ${Object.keys(SWM.ROWS || {}).join(', ')}) names measured truth rows of this table and marks its site; the reader's ${BRANCHES} branches counted; CONTROLS — a \`row:fresh\` site with no entry, a ROWS entry with no table and no site, one more branch: each refused by name`, { rowsBad, plantMark, plantRow, plantBranch });
+  // r15: A NAME AFTER «-» IS A NAME (the r14 verdict MAJOR 1 — MAY_RE's left guard `(^|[^\w-])` read the name in
+  // `${x:-vibespace-channels …}` / `${x-…}` as part of a longer word: the line UNKNOWN, may none, while every shell ran the
+  // CLI — r14's own law «may = every CLI name in its text» broken). The verdict's lines, verbatim
+  const DASH = {
+    U06: 'bash --norc --noprofile <<EOF\n${x:-vibespace-channels read lark/u06}\nEOF',
+    X03: 'eval ${x:-vibespace-channels} read lark/x03',
+    X04: 'eval ' + '${a:-'.repeat(40) + 'vibespace-channels read lark/x04' + '}'.repeat(40),
+    X05: 'sh -c "${x-vibespace-channels read lark/x05}"',
+    X06: 'a=1; eval ' + '${a:+'.repeat(40) + 'vibespace-channels read lark/x06' + '}'.repeat(40),
+  };
+  const dashOf = (TT) => Object.fromEntries(Object.entries(DASH).map(([k, l]) => [k, { unknown: unknownOf(TT, l).length > 0, exact: TT.channelsRuns(l).length, may: mayOf(TT, l).map((r) => r.at), at: l.indexOf('vibespace-channels') }]));
+  const dashBy = dashOf(T);
+  ok(Object.values(dashBy).every((r) => r.unknown && !r.exact && eq(r.may, [r.at])) && ["r15 N1: bash --norc --noprofile <<EOF ⏎${x:-C}⏎EOF (U06)", "r15 N3: eval ${x:-vibespace-channels} read lark/inbox (X03)", "r15 N5: eval ${a:-…C…} (a 40-level nest, X04)", "r15 N6: sh -c \"${x-C}\" (X05)"].every((l) => TRUTH.some((x) => x[0] === l && x.slice(2).every((v) => v === 'ended'))),
+    'A NAME AFTER «-» IS A NAME (r15 — the r14 verdict MAJOR 1): U06 `bash <<EOF ⏎${x:-vibespace-channels read …}⏎EOF`, X03 `eval ${x:-vibespace-channels} read …`, X04 a 40-level `${a:-…}` nest through eval, X05 `sh -c "${x-vibespace-channels read …}"` — each UNKNOWN line may run the CLI at its name (r14: may none — bash, zsh and the tool\'s zsh ran it, rows N1 / N3 / N5 / N6); X06 `${a:+…}` the control (r14 named it too)', dashBy);
+  // r15: AN ESCAPED SUBSTITUTION IN A SUBSCRIPT MAY RUN (the r14 verdict MAJOR 2, pre-existing at the base: r14 read a
+  // subscript's `$(` only in a single quote's or `$'…'`'s text — `let "a[\$(C &)]=1"`, a backtick, the unquoted
+  // `let a[\$\(C…\)]=1` and `printf -v "a[\$(…)]"` read INERT while the CLI ran and outlived the shell). The word's
+  // LITERAL text is read once — each real expansion one `_`: a `$(` / `${` / backtick left came from a quote or an escape
+  const ESC = ["r15 L9: let \"a[\\$(C > /dev/null &)]=1\"", "r15 L10: let \"a[\\`C > /dev/null &\\`]=1\"", "r15 L11: let a[\\$\\(C\\ \\>\\ /dev/null\\ \\&\\)]=1 (unquoted, escaped)", "r15 L12: printf -v \"a[\\$(C > /dev/null &)]\" x", "r15 L13: read \"a[\\$(C > /dev/null &)]\" <<< x", "r15 L14: declare -i n; n=\"a[\\$(C > /dev/null &)]\"", "r15 L17: printf -v a[\\$\\(C\\ \\>\\ /dev/null\\ \\&\\)] x (unquoted, escaped)"];
+  const escBy = Object.fromEntries(ESC.map((l) => [l.split(':')[0], { why: unknownOf(T, line(l)).map((u) => u.why).join(','), exact: T.channelsRuns(line(l)).length, may: mayOf(T, line(l)).length, inert: T.runsNothing(line(l)), call: callOf(T, line(l)) }]));
+  ok(Object.values(escBy).every((r) => r.why === 'subscript' && !r.exact && r.may === 1 && !r.inert && r.call === 'lingers') && ESC.every((l) => TRUTH.some((x) => x[0] === l && x[2] === 'lingers')),
+    'AN ESCAPED SUBSTITUTION IN A SUBSCRIPT MAY RUN (r15 — the r14 verdict MAJOR 2): `let "a[\\$(C &)]=1"` (L9), the escaped backtick (L10), the unquoted `let a[\\$\\(C…\\)]=1` (L11), `printf -v "a[\\$(C &)]" x` (L12), `read` (L13), `declare -i` (L14), the unquoted `printf -v` (L17) — UNKNOWN (subscript), no exact run, may run the CLI, never inert, the call lingers (r14: inert, not lingering — bash lets the CLI outlive in each, zsh in L9, L10, L12, L13)', escBy);
+  const KEEPS = { real: line("r15 L19 control: let \"a[$(C > /dev/null &)]=1\" (a substitution the shell runs first — exact)"), plain: 'let "a[${i}]=1"; echo "${a[$i]}"', read: 'read -r "a[$i]" <<< x; printf -v "a[$i]" %s y', dq: 'echo "price: \\$5 [net]"' };
+  const keepBy = Object.fromEntries(Object.entries(KEEPS).map(([k, l]) => [k, { unknown: unknownOf(T, l).length, exact: T.channelsRuns(l).length, inert: T.runsNothing(l) }]));
+  ok(keepBy.real.exact === 1 && !keepBy.real.unknown && ['plain', 'read', 'dq'].every((k) => !keepBy[k].unknown && keepBy[k].inert),
+    'AN EXACT ROW STAYS EXACT (r15): the substitution the shell runs FIRST — `let "a[$(C &)]=1"` (L19) — is an exact run; `let "a[${i}]=1"; echo "${a[$i]}"`, `read -r "a[$i]"`, `printf -v "a[$i]"`, `"price: \\$5 [net]"` hold no literal substitution — read whole, inert', keepBy);
+  // r15: THE NAME SIDE, ONE-SIDED (r14's law measured — «an UNKNOWN line may run every CLI name its text holds»): of the rows
+  // a shell runs the CLI in whose text holds its name, none reads as neither running nor may running it — but the r14
+  // verdict's FOLLOW-UP (a parameter word in command position, read whole: rung ② «could run», never inert — a backlog row)
+  const NAMED = /(^|\W)vibespace-channels(?![\w-])/;
+  const nameSide = ranRows.filter((x) => NAMED.test(x[1]));
+  const nameless = nameSide.filter((x) => !T.channelsRuns(x[1]).length && !mayOf(T, x[1]).length).map((x) => x[0]);
+  const FOLLOW_UP = ["r15 H1 follow-up: ${x:-vibespace-channels} read lark/inbox (X01 — could run)", "r15 H2 follow-up: CMD=vibespace-channels; $CMD read lark/inbox (X02 — could run)"];
+  console.log(`  · THE NAME SIDE: ${nameSide.length} rows a shell runs the CLI in whose text names it — ${nameless.length} read naming none (the follow-up's ${FOLLOW_UP.length}, could run)`);
+  ok(nameSide.length >= 680 && eq(nameless, FOLLOW_UP) && FOLLOW_UP.every((l) => !T.runsNothing(line(l)) && !unknownOf(T, line(l)).length),
+    `THE NAME SIDE, ONE-SIDED (r15 — the r14 verdict MAJOR 1): over the table's ${nameSide.length} rows a shell runs the CLI in whose text holds its name, none reads as neither running nor may running it (r14: 17 — the «-» names on UNKNOWN lines, the escaped subscripts read inert); the follow-up's two — \`\${x:-vibespace-channels} read …\`, \`CMD=vibespace-channels; $CMD read …\` (read whole, a parameter word in command position) — could run, never inert, pinned until their row`, { nameless });
+  // r15: THE COMPACT HEAD READS THE WHOLE COMMAND (the r14 verdict MINOR — commandHeadWords read a 2048-character cut: a
+  // quote or a `$( … )` the cut left open made the line UNKNOWN since r14 — no exact run — and a long chained compose's head
+  // the `vibespace-status` again, the r1 H1 shape)
+  const RSUM = read('src/lib/chat-run-summary.js'), CRS = await import('file://' + path.join(REPO, 'src/lib/chat-run-summary.js'));
+  const draft = Array.from({ length: 40 }, (_, i) => `line ${i} of the reply, long enough to fill the draft`).join('\n');
+  const LONG = {
+    heredoc: `vibespace-status working --reason "drafting" && vibespace-channels compose lark/oc_1 --text "$(cat <<'EOF'\n${draft}\nEOF\n)"`,
+    dq: 'vibespace-status working --reason "drafting" && vibespace-channels compose lark/oc_1 --text "' + 'x'.repeat(2100) + '"',
+    far: 'vibespace-status working --reason "' + 'y'.repeat(2100) + '" && vibespace-channels compose lark/oc_1 --text "hi"',
+  };
+  const headsOf = (M) => Object.fromEntries(Object.entries(LONG).map(([k, l]) => [k, M.commandHeadWords(l).slice(0, 48)]));
+  const heads = headsOf(CRS);
+  ok(Object.values(LONG).every((l) => l.length > 2100) && Object.values(heads).every((h) => h.startsWith('… vibespace-channels compose lark/oc_1 --text')),
+    'THE COMPACT HEAD READS THE WHOLE COMMAND (r15 — the r14 verdict MINOR): a 2 KB `vibespace-status … && vibespace-channels compose … --text "$(cat <<\'EOF\' … EOF)"`, the same with a 2 KB double-quoted text, and a CLI that starts past 2048 characters — each head opens at its compose segment (r14: `vibespace-status working …` — the cut left the text open: UNKNOWN, no exact run)', heads);
+  // r15's controls: each patched copy turns its own leg red
+  const noDash = sw('may-dash', "const MAY_RE = new RegExp(`(^|\\\\W)${CLI}", "const MAY_RE = new RegExp(`(^|[^\\\\w-])${CLI}");
+  const dashLost = dashOf(noDash);
+  ok(['U06', 'X03', 'X04', 'X05'].every((k) => !dashLost[k].may.length) && dashLost.X06.may.length === 1, 'CONTROL a name after «-» read as part of a longer word (r14\'s guard): U06, X03, X04, X05 may run nothing — X06\'s `:+` still named', dashLost);
+  const noLit = sw('literal-word', "quotedSubst(lit + v.slice(k), i0, pw); }", "}");
+  ok(lostIn(noLit, "r15 L9: let \"a[\\$(C > /dev/null &)]=1\"", "r15 L10: let \"a[\\`C > /dev/null &\\`]=1\"", "r15 L11: let a[\\$\\(C\\ \\>\\ /dev/null\\ \\&\\)]=1 (unquoted, escaped)", "r15 L12: printf -v \"a[\\$(C > /dev/null &)]\" x", "r14 L1: let 'a[$(C > /dev/null &)]=1'"), 'CONTROL a word\'s literal text never read (r1–r14 for the double quote and the escape; r14\'s single quote rides the same check): `let "a[\\$(C &)]=1"`, the escaped backtick, the unquoted `let a[\\$\\(…\\)]=1`, `printf -v "a[\\$(…)]"`, `let \'a[$(C &)]=1\'` — no run and no may: the builtin evaluates the subscript, the CLI runs');
+  const noReal = sw('literal-real', "xp = (t) => { real.push(v.length); v += t; real.push(v.length); };", "xp = (t) => { v += t; };");
+  ok(!noReal.channelsRuns(line("r15 L19 control: let \"a[$(C > /dev/null &)]=1\" (a substitution the shell runs first — exact)")).length && mayOf(noReal, line("r15 L19 control: let \"a[$(C > /dev/null &)]=1\" (a substitution the shell runs first — exact)")).length > 0, 'CONTROL every expansion read as literal text (no marks): L19\'s `let "a[$(C &)]=1"` — the substitution the shell runs first — reads may-run, never its exact run');
+  if (RSUM.split('const run = channelsRuns(all)[0];').length !== 2) anchorMissing('head-cut', 'src/lib/chat-run-summary.js (one occurrence)');
+  const headCut = await import('file://' + MUT.write('src/lib/chat-run-summary.js', RSUM.replace('const run = channelsRuns(all)[0];', 'const run = channelsRuns(all.slice(0, 2048))[0];'), 'head-cut'));
+  const cutHeads = headsOf(headCut);
+  ok(Object.values(cutHeads).every((h) => h.startsWith('vibespace-status working')), 'CONTROL the head read on a 2048-character cut (r14): each long compose opens at `vibespace-status working` — its compose segment lost', cutHeads);
   const noQuery = copy('query', "  if (t.op !== 'search' || !t.query) return false;", '  return false;');
   ok(eq(m3(noQuery).queryPy.notes, { 'note:ctx': 3 }) && eq(m3(noQuery).queryVsVerb.by, { LATER: 1 }), 'CONTROL a search\'s own words never read: the `&` search loses its own "budget" hits to the note, the loop its "deadline" hit to the later verb');
   const verbFree = copy('verb-unbound', '      const verbal = cs.filter((c) => cand.has(c) && claims(c) && namesTouch(', '      const verbal = cs.filter((c) => cand.has(c) && namesTouch(');
   ok(eq(m3(verbFree).verbPy.by, { BGS: 3 }) && eq(m3(verbFree).verbSticky.by, { BGS: 7 }), 'CONTROL a verb unbounded (r7): the `&` search that finished ten minutes earlier takes the later script\'s "pairing" hits — 7 of 7');
   const verbRank = copy('verb-rank', 'const exact = cs.filter((c) => cand.has(c) && namesExactly(c, t));', 'const exact = cs.filter((c) => cand.has(c) && (namesExactly(c, t) || (claims(c) && namesTouch(c.text, t, c.runs, c.kind))));');
   ok(eq(m3(verbRank).queryVsVerb.by, { LATER: 1 }), 'CONTROL a verb ranked with an exact name (the latest wins): the later `search "budget"` takes the loop\'s "deadline" hit');
-  for (const c of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 68, label: '⑬ ' })) ok(c.pass, c.name, c.detail);
+  for (const c of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 72, label: '⑬ ' })) ok(c.pass, c.name, c.detail);
 });
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);

@@ -306,15 +306,19 @@ export function runSummaryLabel({ byKind, mcpServers, files = [], nErr = 0, runn
  *  opens at its `vibespace-channels` segment, after "… " — the compact card's rows are what THAT segment touched, and
  *  the head that read `vibespace-status working…` named an act that touched nothing. r2: the segment opens only where
  *  the CLI is a COMMAND WORD (PURE channelsRuns) — never inside a quoted argument (`--reason "… vibespace-channels read
- *  …"`) or another command's argument (`grep vibespace-channels`); a `bash -c '…'` string opens at its shell. */
+ *  …"`) or another command's argument (`grep vibespace-channels`); a `bash -c '…'` string opens at its shell. r15 (the
+ *  r14 verdict MINOR): the runs are read on the WHOLE command (the scanner bounds itself — SCAN_MAX characters of shell,
+ *  as the binder reads the call), only the shown text is cut: a cut that leaves a quote or a `$( … )` open makes the line
+ *  UNKNOWN since r14 (no exact run), and a compose over 2 KB opened at its `vibespace-status` again. */
 export const HEAD_WORDS_MAX = 120;
 export function commandHeadWords(cmd) {
-  const s = String(cmd || '').slice(0, 2048); // a 10 KB heredoc is never split whole for 120 code points
-  const run = channelsRuns(s)[0];
+  const all = String(cmd || '');
+  const run = channelsRuns(all)[0];
   // the segment opens at its command word — a path to the CLI (`/opt/x/bin/vibespace-channels`) is part of it
   const from = run ? run.at : 0;
-  const lead = from > 0 && s.slice(0, from).trim() ? '… ' : '';
-  const line = (lead ? s.slice(from) : s).split('\n').find((l) => l.trim()) || '';
+  const lead = from > 0 && all.slice(0, from).trim() ? '… ' : '';
+  const s = all.slice(lead ? from : 0).slice(0, 2048); // a 10 KB heredoc is never split whole for 120 code points
+  const line = s.split('\n').find((l) => l.trim()) || '';
   const w = [...(lead + line.replace(/\s+/g, ' ').trim())];
   return w.length > HEAD_WORDS_MAX ? w.slice(0, HEAD_WORDS_MAX - 1).join('') + '…' : w.join('');
 }

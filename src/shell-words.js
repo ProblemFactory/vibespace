@@ -100,8 +100,10 @@ const PARAM_NEST = 32;
 /** r14: the precommands the reader never reads through — `builtin` (no wrapper: `builtin trap …`), zsh's `noglob` /
  *  `nocorrect` (bash: «command not found») */
 const PRECOMMANDS = new Set(['builtin', 'noglob', 'nocorrect']);
-/** r14: the CLI's NAMES a text holds, wherever they stand (an unknown line may run each): `[{at, verb}]` */
-const MAY_RE = new RegExp(`(^|[^\\w-])${CLI}(?![\\w-])[ \t]*([a-z][\\w-]*)?`, 'g');
+/** r14: the CLI's NAMES a text holds, wherever they stand (an unknown line may run each): `[{at, verb}]`. r15 (the r14
+ *  verdict MAJOR 1): a «-» before the name is admitted — `${x:-vibespace-channels}`, `${x-vibespace-channels …}` run it
+ *  (r14's guard read them as a longer word: may none); a «-» after it is another program's name */
+const MAY_RE = new RegExp(`(^|\\W)${CLI}(?![\\w-])[ \t]*([a-z][\\w-]*)?`, 'g');
 const mayNames = (t) => [...String(t || '').matchAll(MAY_RE)].map((m) => ({ at: m.index + m[1].length, verb: m[2] || '' }));
 /** r14: a single `&` anywhere in the text (never `&&`, `&>`, `>&`, `|&`, `<&`) — an unknown line that holds one may leave a
  *  job running */
@@ -298,18 +300,20 @@ function shellCommands(src, owner = null, depth = 0, offset = 0) {
   // r13: `lim` — where the word must stop (the end of a `${ … }` it stands in), `at` — the word that owns its spans
   // r14: `pw` — the word stands inside an unquoted `${ … }` (a quoted substitution there is UNKNOWN: the slot may be
   // arithmetic — `${x:'$(C)'}`, `${a['$(C)']}` run C —, or an evaluator may read the value again)
+  // r15: `xp` — a REAL expansion's text in `v` (a `$( … )`, a backtick, `$(( … ))`, `${ … }`, a `$`); the rest of `v` is
+  // literal (quoted or escaped)
   const readWord = (i, lim = s.length, at = i, pw = false) => {
     let v = '', q = false;
+    const i0 = i, real = [], xp = (t) => { real.push(v.length); v += t; real.push(v.length); };
     while (i < lim) {
       const ch = s[i];
       if (' \t\n;&|()<>'.includes(ch)) break;   // r11: a CR is no blank — `wait\r` is a command of its own (not found)
       if (ch === '\\') { if (s[i + 1] !== '\n') v += s[i + 1] || ''; i += 2; q = true; continue; }
-      if (ch === "'") { const k = s.indexOf("'", i + 1); const e = k < 0 ? s.length : k; if (k < 0) unknown(i, 'unclosed'); quotedSubst(s.slice(i + 1, e), i, pw); v += s.slice(i + 1, e); i = e + 1; q = true; continue; }
+      if (ch === "'") { const k = s.indexOf("'", i + 1); const e = k < 0 ? s.length : k; if (k < 0) unknown(i, 'unclosed'); v += s.slice(i + 1, e); i = e + 1; q = true; continue; }
       if (ch === '$' && s[i + 1] === "'") {   // ANSI-C quoting: `$'don\'t …'` — a `\` escapes the next character
         let j = i + 2;
         for (; j < s.length && s[j] !== "'"; j++) { if (s[j] === '\\') { v += s[j + 1] || ''; j++; continue; } v += s[j]; }
         if (j >= s.length) unknown(i, 'unclosed');
-        quotedSubst(s.slice(i + 2, j), i, pw);
         i = j + 1; q = true;
         continue;
       }
@@ -317,27 +321,30 @@ function shellCommands(src, owner = null, depth = 0, offset = 0) {
         let j = i + 1;
         for (; j < s.length && s[j] !== '"'; j++) {
           if (s[j] === '\\') { v += s[j + 1] || ''; j++; continue; }
-          if (s[j] === '$' && s[j + 1] === '(' && s[j + 2] === '(' && arithAt(s, j + 1)) { const e = spanEnd(s, j + 1, '(', ')', false); substitutions(s.slice(j + 3, e - 1), at); j = e; v += '$(())'; continue; }   // r13: read — row:arith-word
-          if (s[j] === '$' && s[j + 1] === '{' && FUNSUB.test(s[j + 2] || '')) { const e = shut(spanEnd(s, j + 1, '{', '}'), j); nested(s.slice(j + 3, e), at); v += s.slice(j, e + 1); j = e; continue; }   // r12
+          if (s[j] === '$' && s[j + 1] === '(' && s[j + 2] === '(' && arithAt(s, j + 1)) { const e = spanEnd(s, j + 1, '(', ')', false); substitutions(s.slice(j + 3, e - 1), at); j = e; xp('$(())'); continue; }   // r13: read — row:arith-word
+          if (s[j] === '$' && s[j + 1] === '{' && FUNSUB.test(s[j + 2] || '')) { const e = shut(spanEnd(s, j + 1, '{', '}'), j); nested(s.slice(j + 3, e), at); xp(s.slice(j, e + 1)); j = e; continue; }   // r12
           if (s[j] === '$' && s[j + 1] === '{' && evalsParam(s, j)) unknown(j, 'eval');   // r14: `"${(e)x}"`, `"${x@P}"`
-          if (s[j] === '$' && s[j + 1] === '(') { const e = shut(spanEnd(s, j + 1, '(', ')', true, span), j); nested(s.slice(j + 2, e), at); v += '$()'; j = e; continue; }
-          if (s[j] === '`') { const e = shut(spanEnd(s, j, '`', '`'), j); nested(s.slice(j + 1, e), at); v += '$()'; j = e; continue; }
-          v += s[j];
+          if (s[j] === '$' && s[j + 1] === '(') { const e = shut(spanEnd(s, j + 1, '(', ')', true, span), j); nested(s.slice(j + 2, e), at); xp('$()'); j = e; continue; }
+          if (s[j] === '`') { const e = shut(spanEnd(s, j, '`', '`'), j); nested(s.slice(j + 1, e), at); xp('$()'); j = e; continue; }
+          if (s[j] === '$') xp('$'); else v += s[j];
         }
         if (j >= s.length) unknown(i, 'unclosed');
         i = j + 1; q = true;
         continue;
       }
-      if (ch === '$' && s[i + 1] === '(' && s[i + 2] === '(' && arithAt(s, i + 1)) { const e = spanEnd(s, i + 1, '(', ')', false); substitutions(s.slice(i + 3, e - 1), at); v += '$(())'; i = e + 1; continue; }   // r13: read — row:arith-word
-      if (ch === '$' && s[i + 1] === '(') { const e = shut(spanEnd(s, i + 1, '(', ')', true, span), i); nested(s.slice(i + 2, e), at); v += '$()'; i = e + 1; continue; }
-      if (ch === '$' && s[i + 1] === '{' && FUNSUB.test(s[i + 2] || '')) { const e = shut(spanEnd(s, i + 1, '{', '}'), i); nested(s.slice(i + 3, e), at); v += s.slice(i, e + 1); i = e + 1; continue; }   // r12
+      if (ch === '$' && s[i + 1] === '(' && s[i + 2] === '(' && arithAt(s, i + 1)) { const e = spanEnd(s, i + 1, '(', ')', false); substitutions(s.slice(i + 3, e - 1), at); xp('$(())'); i = e + 1; continue; }   // r13: read — row:arith-word
+      if (ch === '$' && s[i + 1] === '(') { const e = shut(spanEnd(s, i + 1, '(', ')', true, span), i); nested(s.slice(i + 2, e), at); xp('$()'); i = e + 1; continue; }
+      if (ch === '$' && s[i + 1] === '{' && FUNSUB.test(s[i + 2] || '')) { const e = shut(spanEnd(s, i + 1, '{', '}'), i); nested(s.slice(i + 3, e), at); xp(s.slice(i, e + 1)); i = e + 1; continue; }   // r12
       // r12: a parameter's own words run their substitutions (`${x:-$(C &)}`) — r13: read with the quotes the shells
       // keep there (paramWord), never the heredoc's (`${x:-'$(C)'}` runs nothing)
-      if (ch === '$' && s[i + 1] === '{') { const e = shut(spanEnd(s, i + 1, '{', '}'), i); if (evalsParam(s, i)) unknown(i, 'eval'); if (pnest >= PARAM_NEST) unknown(i, 'deep'); else { pnest++; paramWord(i + 2, e, at); pnest--; } v += s.slice(i, e + 1); i = e + 1; continue; }   // row:param-word
-      if (ch === '`') { const e = shut(spanEnd(s, i, '`', '`'), i); nested(s.slice(i + 1, e), at); v += '$()'; i = e + 1; continue; }
-      v += ch;
+      if (ch === '$' && s[i + 1] === '{') { const e = shut(spanEnd(s, i + 1, '{', '}'), i); if (evalsParam(s, i)) unknown(i, 'eval'); if (pnest >= PARAM_NEST) unknown(i, 'deep'); else { pnest++; paramWord(i + 2, e, at); pnest--; } xp(s.slice(i, e + 1)); i = e + 1; continue; }   // row:param-word
+      if (ch === '`') { const e = shut(spanEnd(s, i, '`', '`'), i); nested(s.slice(i + 1, e), at); xp('$()'); i = e + 1; continue; }
+      if (ch === '$') xp(ch); else v += ch;
       i++;
     }
+    // r15 (the r14 verdict MAJOR 2): the WORD's literal text — each real expansion one `_` — read once: a `$(` / `${` /
+    // backtick in it came from a quote or an escape (`let "a[\$(C)]=1"`, `read a[\$\(C\)]`, `'a[$(C)]'`)
+    if (/[$`]/.test(v)) { let lit = '', k = 0; for (let r = 0; r < real.length; r += 2) { lit += v.slice(k, real[r]) + '_'; k = real[r + 1]; } quotedSubst(lit + v.slice(k), i0, pw); }
     return { v, at, end: i, q };
   };
   // r13: the text of an UNQUOTED `${ … }` (`${x:-word}`, `${x#word}`, `${x/a/b}` …) — its words read as words, with the
@@ -353,7 +360,8 @@ function shellCommands(src, owner = null, depth = 0, offset = 0) {
   };
   // r14: QUOTED text that holds a substitution, where the shells may still run it — inside an unquoted `${ … }` (`pw`:
   // an arithmetic slot, an evaluator reading the value again), or a SUBSCRIPT (`let 'a[$(C)]=1'`, `read 'a[$(C)]'`,
-  // `[[ 'a[$(C)]' -eq 0 ]]`: bash and zsh evaluate it) — UNKNOWN
+  // `[[ 'a[$(C)]' -eq 0 ]]`: bash and zsh evaluate it) — UNKNOWN. r15: `t` is a whole word's literal text (readWord's
+  // end) — r14 read only a single quote's or `$'…'`'s, never a double quote's `\$(` or an unquoted `\$\(`
   const quotedSubst = (t, at, pw) => { if (pw ? SUBST.test(t) : /\[[^\]]*(\$[({]|`)/.test(t)) unknown(at, pw ? 'param' : 'subscript'); };
   let i = 0;
   while (i < s.length && i - skipped - span.docs < SCAN_MAX) {
