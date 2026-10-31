@@ -11694,6 +11694,10 @@ export default {
   // lane vault-standing-request r10 («Who may use it…»'s Save) — on plain lines (see r9 above)
   "{name} will no longer be excluded": "{name} は除外されなくなります",
   "This grant changed while the dialog was open — close it and open it again": "ダイアログを開いている間にこの許可が変わりました — 閉じてもう一度開いてください",
+  // lane held-except-doors r2 (the picker's kept 除了 line) — on plain lines (see r9 above)
+  "Kept from an earlier grant — left out:": "以前の許可から残っている除外：",
+  "Stop leaving {name} out": "{name} を除外しない",
+  "They stay left out of any Task Group or All agents picked here later.": "このあとここで選ぶタスクグループやすべてのエージェントからも、引き続き除外されます。",
   // lane vault-standing-request r11 (a Save whose row landed and whose policy did not) — on a plain line (see r9 above)
   "The members were saved; the policy was not": "メンバーは保存しました。ポリシーは保存されていません",
   "5-hour limit lifted ({when})": "5 時間制限は解除されました（{when}）",

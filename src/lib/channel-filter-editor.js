@@ -42,7 +42,9 @@ import * as chanCaps from '../channel-caps.js';
 import { routeErrorText, wakeWhyText, principalKindText, groupTitle, principalText, accessAuthorityText, watcherHowText, grainSummaryText, clampNoteText, notifySentence, notifyAnswers, watcherOfAnswers } from './channel-words.js';
 // the ONE principal picker (search + list, keyed, recent picks) — never a <select> of the whole roster
 import { principalPicker, rosterFromApp } from './principal-picker.js';
-import { rowToPick, principalOfRow } from './principal-picker-model.js';   // lane grants-unify: «除了» — a stored row drawn, a pick written
+import { rowToPick, principalOfRow, exceptRemoved } from './principal-picker-model.js';   // lane grants-unify: «除了» — a stored row drawn, a pick written
+/** lane held-except-doors: a grant-model principal's key (what a Save that takes an exception away names — `removeExcept`). */
+const pkOfPrincipal = (p) => (p.kind === 'group' ? `group:${p.id}` : p.kind === 'conversation' ? `conversation:${p.key}` : 'everyone');
 import { budgetText } from './webhook-view.js';   // lane webhook-l2-ui: a path's wake budget line
 import * as DM from '../decision-model.js';   // lane decision-rule: D1's plan ceilings, price and budget default (the cost line)
 
@@ -233,6 +235,8 @@ async function readGrain(target) {
 async function put(url, body, method = 'PUT', { onChanged = null } = {}) {
   const r = await fetchJson(url, { method, headers: JSON_HDR, body: JSON.stringify(body) });
   if (r && r.code === 'grain-changed' && onChanged) { showToast(t('The list changed while this dialog was open (another window, or an agent) — here it is as it is now; nothing was saved'), { type: 'error' }); onChanged(); return null; }
+  // lane held-except-doors: the hub holds a 除了 this dialog never drew — nothing written; it re-opens on the lists as they are
+  if (r && r.code === 'except_unnamed' && onChanged) { showToast(t('This grant changed while the dialog was open — close it and open it again'), { type: 'error' }); onChanged(); return null; }
   if (!r || r.error) { showToast(routeErrorText(r, { ruleLabel: (k, which) => (which === 'pattern' ? PATTERN_LABELS()[k] : RULE_LABELS()[k]) || k }), { type: 'error' }); return null; }
   return r;
 }
@@ -361,6 +365,14 @@ export function grantAccessBody(app, st, body, { close, target, notify = true, r
   });
   picker.el.classList.add('chan-access-pick');
   body.appendChild(picker.el);
+  // lane held-except-doors: the stored 除了 (`held`) rides while its row is not offered; each one this Save takes away is SAID
+  // here and NAMED on the wire (`removeExcept` — the ONE writer refuses an unnamed drop)
+  const exRowOf = (k) => [...picker.knownRows(), ...pickRows(), ...exPick.extra].find((x) => String(x.key) === String(k));
+  const exceptPicks = () => picker.except({ held: exPick.except });
+  const unexcept = noteEl('', true);
+  unexcept.classList.add('chan-access-unexcept');
+  body.appendChild(unexcept);
+  const syncUnexcept = () => { const gone = exceptRemoved(exPick.except, exceptPicks()); unexcept.textContent = gone.map((k) => t('{name} will no longer be excluded', { name: (exRowOf(k) || {}).name || picker.nameOf(k) })).join(' · '); unexcept.style.display = gone.length ? '' : 'none'; };
   const list = el('div', 'chan-access-list');
   body.appendChild(list);
   const watchedNote = noteEl('', true);
@@ -417,9 +429,10 @@ export function grantAccessBody(app, st, body, { close, target, notify = true, r
     watchedNote.textContent = gone.length ? t('Removing access also removes the notification of: {list}', { list: gone.map((w) => principalText(w.principal)).join(', ') }) : '';
     watchedNote.style.display = gone.length ? '' : 'none';
     syncMoot();
+    syncUnexcept();
   };
   draw();
-  const drawn = () => JSON.stringify({ rows: rows.map((r) => [r.key, r.authority]), pattern: st.kind === 'pattern' ? st.pattern : null, except: picker.except() });
+  const drawn = () => JSON.stringify({ rows: rows.map((r) => [r.key, r.authority]), pattern: st.kind === 'pattern' ? st.pattern : null, except: exceptPicks() });
   let base = drawn();
   const actions = el('div', 'chan-flow-actions');
   if (st.kind === 'pattern' && st.id) {
@@ -438,8 +451,9 @@ export function grantAccessBody(app, st, body, { close, target, notify = true, r
     const choices = principalChoices(app, st.access);
     const access = rows.map((r) => { const c = choices.find((x) => x.value === r.key); return c ? { principal: { kind: c.kind, id: c.id, name: c.name }, authority: r.authority } : null; }).filter(Boolean);
     // «除了»: the members left out, in the grant model's spelling (a conversation by its id, a Task Group by its id)
-    const exRows = [...pickRows(), ...exPick.extra];
-    const except = picker.except().map((k) => principalOfRow(exRows.find((x) => String(x.key) === String(k)))).filter(Boolean);
+    const except = exceptPicks().map((k) => principalOfRow(exRowOf(k))).filter(Boolean);
+    const removeExcept = exceptRemoved(exPick.except, exceptPicks()).map((k) => principalOfRow(exRowOf(k))).filter(Boolean).map(pkOfPrincipal);   // lane held-except-doors
+    const rx = removeExcept.length ? { removeExcept } : {};
     const v = F.validateAccess(access, st.caps);
     if (!v.ok) { showToast(routeErrorText({ code: v.code, error: v.error, why: v.why, principal: v.principal }), { type: 'error' }); return; }
     if (st.kind === 'pattern') { const pv = F.validatePattern(st.pattern); if (!pv.ok) { showToast(t('The rule is incomplete: {why}', { why: F.filterProblemText(pv, { t, ruleLabel: (k) => PATTERN_LABELS()[k] || k }) }), { type: 'error' }); return; } }
@@ -456,8 +470,8 @@ export function grantAccessBody(app, st, body, { close, target, notify = true, r
       // refused by name and the dialog re-opens on it — never written over
       const again = { onChanged: () => { close(); if (reopen) reopen(); else showGrantAccessDialog(app, target); } };
       const r = st.kind === 'pattern'
-        ? (st.id ? await put(st.accessUrl, { access, except, pattern: st.pattern, base: st.stamp }, 'PUT', again) : await put(st.accessUrl, { pattern: st.pattern, access, except }, 'POST'))
-        : await put(st.accessUrl, { access, except, base: st.stamp }, 'PUT', again);
+        ? (st.id ? await put(st.accessUrl, { access, except, ...rx, pattern: st.pattern, base: st.stamp }, 'PUT', again) : await put(st.accessUrl, { pattern: st.pattern, access, except }, 'POST'))
+        : await put(st.accessUrl, { access, except, ...rx, base: st.stamp }, 'PUT', again);
       if (!r) return;
       const names = access.map((a) => principalText(a.principal)).join(', ');
       const woke = r.wakes && Array.isArray(r.wakes.reactivated) ? r.wakes.reactivated.length : 0;   // r9 (DEFECT 2 — the acceptance: a re-grant that re-activated 2 wakes toasted «nobody is woken»): the write's own answer, read
@@ -1065,8 +1079,15 @@ export async function showNotifyDialog(app, target) {
   // principals (its main list hidden — the rows above pick them)
   const exPick = rowToPick({ to: [], except: st.watchExcept || [] }, rosterFromApp(app), { everyoneKey: EVERYONE_KEY, notRunning: t('not live now'), deletedGroup: t('a deleted Task Group') });
   const exPicker = principalPicker({ items: () => rosterFromApp(app), app, multi: true, selected: [], cls: 'pp-except-only', label: t('Who gets woken?'), everyone: { key: EVERYONE_KEY },
-    except: { selected: exPick.except, extra: exPick.extra } });
+    except: { selected: exPick.except, extra: exPick.extra }, onChange: () => syncUnexcept() });
   exPicker.el.classList.add('chan-watch-except');
+  // lane held-except-doors: the stored 除了 (`held`) rides while no Task Group / All agents is notified; each one this Save
+  // takes away is SAID (this line) and NAMED on the wire (`removeExcept`)
+  const exRowOf = (k) => [...exPicker.knownRows(), ...rosterFromApp(app), ...exPick.extra].find((x) => String(x.key) === String(k));
+  const exceptPicks = () => exPicker.except({ held: exPick.except });
+  const unexcept = noteEl('', true);
+  unexcept.classList.add('chan-watch-unexcept');
+  function syncUnexcept() { const gone = exceptRemoved(exPick.except, exceptPicks()); unexcept.textContent = gone.map((k) => t('{name} will no longer be excluded', { name: (exRowOf(k) || {}).name || exPicker.nameOf(k) })).join(' · '); unexcept.style.display = gone.length ? '' : 'none'; }
   const total = el('div', 'chan-af-stat chan-watch-total', '');
   const addB = btn(t('Add a notification'), null, 'chan-af-add');
   addB.prepend(icon('plus', 11));
@@ -1074,6 +1095,7 @@ export async function showNotifyDialog(app, target) {
     const used = new Set(rows.map((r) => r.key()));
     for (const r of rows) r.setWho(used);
     exPicker.setSelected([...used].filter(Boolean));   // «除了» is offered while a Task Group / All agents is notified
+    syncUnexcept();
     addB.style.display = principals.some((p) => !rows.some((r) => r.key() === p.value)) ? '' : 'none';
     // ALL AGENTS is one cap PER RUNNING CONVERSATION — counted that way (the roster's agent conversations now), and
     // the MULTIPLIER is said (verify r1 T2 ①: the owner must see "N conversations now × the cap", not one product)
@@ -1093,11 +1115,11 @@ export async function showNotifyDialog(app, target) {
   };
   for (const w of st.watchers) addRow(w);
   if (!st.watchers.length) addRow(null);
-  const drawn = () => JSON.stringify([rows.map((r) => r.sig()), exPicker.except()]);
+  const drawn = () => JSON.stringify([rows.map((r) => r.sig()), exceptPicks()]);
   let base = drawn();
   dirtyNow = () => drawn() !== base;
   addB.onclick = () => { addRow(null); };
-  body.append(addB, exPicker.el, total, noteEl(t('Pacing only — the account budget is the money bound.')));
+  body.append(addB, exPicker.el, unexcept, total, noteEl(t('Pacing only — the account budget is the money bound.')));
   const actions = el('div', 'chan-flow-actions');
   const grant = btn(t('Grant access…'), () => { close(); showGrantAccessDialog(app, target); });
   actions.append(grant, el('span', 'chan-sp'));
@@ -1113,9 +1135,9 @@ export async function showNotifyDialog(app, target) {
     save.disabled = true;
     try {
       if (!st.watchersUrl) { showToast(t('Save the rule\'s access first'), { type: 'error' }); return; }
-      const exRows = [...rosterFromApp(app), ...exPick.extra];
-      const except = exPicker.except().map((k) => principalOfRow(exRows.find((x) => String(x.key) === String(k)))).filter(Boolean);   // «除了»
-      const r = await put(st.watchersUrl, { watchers, except, base: st.stamp }, 'PUT', { onChanged: () => { close(); showNotifyDialog(app, target); } });
+      const except = exceptPicks().map((k) => principalOfRow(exRowOf(k))).filter(Boolean);   // «除了» (lane held-except-doors: the stored ones kept unless shown as removed)
+      const removeExcept = exceptRemoved(exPick.except, exceptPicks()).map((k) => principalOfRow(exRowOf(k))).filter(Boolean).map(pkOfPrincipal);
+      const r = await put(st.watchersUrl, { watchers, except, ...(removeExcept.length ? { removeExcept } : {}), base: st.stamp }, 'PUT', { onChanged: () => { close(); showNotifyDialog(app, target); } });
       if (!r) return;
       showToast(watchers.length ? t('Notifications saved: {list}', { list: watchers.map((w) => `${principalText(w.principal)} ${watcherHowText(w)}`).join(', ') }) + (clamped ? ' · ' + t('numbers past their bounds were kept at the bound') : '') : t('Nobody is notified here any more'));
       base = drawn();

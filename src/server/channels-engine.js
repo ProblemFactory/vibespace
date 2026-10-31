@@ -3987,7 +3987,9 @@ function create(deps = {}) {
       // R4: the ACCOUNT grain's two lists (`accountGrain`; `assignment` = the
       // same view, the pre-split name a legacy reader asks for) and every
       // rule with its own two lists
-      accountGrain: accountGrainOf(rec.id) && (heldRead(accountGrainOf(rec.id)).access.length || heldRead(accountGrainOf(rec.id)).watchers.length) ? grainView(rec, accountGrainOf(rec.id), t) : null,   // r5: the one reader
+      // lane held-except-doors r2 (主开发's acceptance, BLOCKER): a grain holding only exceptions is DRAWN (its 除了 kept from an
+      // earlier grant — the dialog shows it and its ✕ names the removal; hidden, every later Save left it out unnamed)
+      accountGrain: accountGrainOf(rec.id) && (heldRead(accountGrainOf(rec.id)).access.length || heldRead(accountGrainOf(rec.id)).watchers.length || accountGrainOf(rec.id).except.length || accountGrainOf(rec.id).watchExcept.length) ? grainView(rec, accountGrainOf(rec.id), t) : null,   // r5: the one reader
       assignment: accountGrainOf(rec.id) && (heldRead(accountGrainOf(rec.id)).access.length || heldRead(accountGrainOf(rec.id)).watchers.length) ? grainView(rec, accountGrainOf(rec.id), t) : null,
       patterns: patternsOf(rec.id).map((pa) => grainView(rec, pa, t)),
       // R4 (B-6acc): the ACCOUNT's sending policy (what a composed message reads, the Grant access dialog's `send` cap)
@@ -8698,12 +8700,12 @@ function create(deps = {}) {
   /** The members left out of one credential's tier row. */
   function apiExceptOf(cred) { return [...CG.rowOf(CG.DOORS.api, String(cred || '')).except]; }
   /** The tier rows of ONE credential, replaced whole — the owner's (an agent's `by` is refused before anything is written). */
-  async function setApiGrants(cred, rows, { by = 'user', except = undefined } = {}) {
+  async function setApiGrants(cred, rows, { by = 'user', except = undefined, removeExcept = [] } = {}) {
     if (/^agent:/.test(String(by))) return { ok: false, code: 'not-yours', error: 'API access is the user\'s to grant' };
     const id = String(cred || '');
     if (!id) return { ok: false, code: 'bad-request', error: 'cred is required' };
     if (except !== undefined && except !== null && !Array.isArray(except)) return { ok: false, code: 'bad-request', error: 'except must be a list of the conversations / Task Groups left out' };
-    const w = CG.setApiRows(id, rows, { except: except === null ? [] : except, by });   // THE ONE WRITER
+    const w = CG.setApiRows(id, rows, { except: except === null ? [] : except, removeExcept, by });   // THE ONE WRITER (lane held-except-doors: + the exceptions the Save names as taken away)
     if (!w.ok) return { ok: false, code: w.code, error: w.error };
     try { store.audit({ kind: 'api-acl', cred: id, rows: rows.map((g) => ({ principal: g.principal, api: g.api })), at: now(), by }); } catch {}
     return { ok: true, rows: apiGrants().filter((g) => g.scope && g.scope.id === id) };

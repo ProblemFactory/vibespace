@@ -15,6 +15,12 @@
  *    refused (`clientWrites:false`); its version persists here so a client never sees a rollback.
  *  · AUDITED: one line per write to data/grants-audit.jsonl — who, when, which row, the principals added / removed in
  *    `to` and in `except` (principal keys: ids, never a value — a grant holds none). Rotated at 4 MiB (one `.1`).
+ *  · «除了» LEAVES BY NAME ONLY (lane held-except-doors, 2026-10-31): a write keeps every exception the stored row holds
+ *    unless it NAMES it (`removeExcept` — principal keys or entries: what the page SAID it takes away, «X will no longer be
+ *    excluded»); one left out unnamed is refused `except_unnamed` (GM.exceptUnnamed — the sentence GM.EXCEPT_UNNAMED_WORDS),
+ *    nothing written — never a dialog's silent drop, never a door's. Every writer inherits it: a door's code that takes an
+ *    exception away (a row whose resource is gone, a config import that replaces it, a member the owner picked itself)
+ *    names it; `remove` (the resource is gone) names the whole row by its call.
  *  · FAIL CLOSED: an unreadable grants.json (not missing — unparsable / unreadable) makes every `rowsFor` answer ONE
  *    row the model refuses BY NAME (`unknown_shape`) — never «nothing is granted, so nothing changes» silently and
  *    never «everyone»; every write is refused `store_unreadable` (a file we could not read is never overwritten).
@@ -32,7 +38,7 @@ const GM = require('../grant-model.js');
 const { SyncStore } = require('../sync-store.js');
 
 const AUDIT_ROTATE_BYTES = 4 * 1024 * 1024;
-const STORE_REFUSALS = Object.freeze(['not_written', 'store_unreadable']);
+const STORE_REFUSALS = Object.freeze(['not_written', 'store_unreadable', 'except_unnamed']);
 
 function writeJsonAtomic(file, obj) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -138,12 +144,15 @@ function create({ dataDir, wss = { clients: new Set() }, now = () => Date.now(),
     });
     return { ok: true };
   }
-  /** The change one `{door, resource, to, except}` asks for → `{ok:true, change|null (nothing to do), row, was}` | a refusal. */
-  function plan(door, resource, { to = [], except = [] } = {}, by, at) {
+  /** The change one `{door, resource, to, except, removeExcept?}` asks for → `{ok:true, change|null (nothing to do), row, was}` |
+   *  a refusal (lane held-except-doors: an exception `was` holds that `except` leaves out unnamed ⇒ `except_unnamed`). */
+  function plan(door, resource, { to = [], except = [], removeExcept = [] } = {}, by, at, { named = true } = {}) {
     const v = GM.validateWrite(door, resource, { to, except }, { at, by });
     if (!v.ok) return v;
     const k = keyOf(door, v.row.resource);
     const was = rows.get(k) || null;
+    const unnamed = named ? GM.exceptUnnamed(was, v.row.except, removeExcept) : null;
+    if (unnamed) return { ok: false, code: 'except_unnamed', error: GM.EXCEPT_UNNAMED_WORDS, principal: unnamed };
     const removing = !v.row.to.length && !v.row.except.length;
     if (removing ? !was : (was && JSON.stringify({ to: was.to, except: was.except }) === JSON.stringify({ to: v.row.to, except: v.row.except }))) return { ok: true, change: null, row: was, was };
     const d = { to: diff(keysOf(was && was.to), removing ? [] : keysOf(v.row.to)), except: diff(keysOf(was && was.except), removing ? [] : keysOf(v.row.except)) };
@@ -152,7 +161,8 @@ function create({ dataDir, wss = { clients: new Set() }, now = () => Date.now(),
 
   /**
    * THE ONE WRITER: the row of (door, resource) becomes `{to, except}`. An empty `to` with no `except` REMOVES the row
-   * (no row = nobody — the same answer, one shape on disk). `by` = who wrote it ('user' — a cookie route — or
+   * (no row = nobody — the same answer, one shape on disk). `removeExcept` names each stored exception the write takes away
+   * (lane held-except-doors — one left out unnamed ⇒ `except_unnamed`, nothing written). `by` = who wrote it ('user' — a cookie route — or
    * 'migration', or an agent's conversation key for a door an agent may write, e.g. a window it opened itself).
    * → `{ok:true, row, changed, was}` | `{ok:false, code, error}`.
    */
@@ -166,7 +176,7 @@ function create({ dataDir, wss = { clients: new Set() }, now = () => Date.now(),
     return { ok: true, row: p.row ? copy(p.row) : null, changed: true, was: p.was ? copy(p.was) : null };
   };
   /** Several rows in ONE landed write (all or nothing — a machine's two lists, a channel grain's access + watch): each
-   *  `{door, resource, to, except}`. → `{ok:true, changed:[{door, resource}]}` | the first refusal (nothing written). */
+   *  `{door, resource, to, except, removeExcept?}`. → `{ok:true, changed:[{door, resource}]}` | the first refusal (nothing written). */
   api.setMany = (list, by = 'user') => {
     if (unreadable) return { ok: false, code: 'store_unreadable', error: `${unreadable} — repair or move it aside first; nothing was written` };
     const at = now(), changes = [], seen = new Set();
@@ -186,7 +196,7 @@ function create({ dataDir, wss = { clients: new Set() }, now = () => Date.now(),
   api.remove = (door, resource, by = 'user') => {
     if (unreadable) return { ok: false, code: 'store_unreadable', error: `${unreadable} — repair or move it aside first; nothing was written` };
     if (!GM.DOORS.includes(door)) return { ok: false, code: 'unknown_door', error: `no door "${String(door).slice(0, 40)}"` };
-    const p = plan(door, resource, { to: [], except: [] }, String(by || 'user'), now());
+    const p = plan(door, resource, { to: [], except: [] }, String(by || 'user'), now(), { named: false });   // the resource is gone: the call names the whole row
     if (!p.ok) return p;
     if (!p.change) return { ok: true, changed: false, was: null };
     const r = land([p.change]);

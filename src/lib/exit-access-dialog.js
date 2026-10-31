@@ -23,7 +23,7 @@ import { createModalShell, showToast } from './utils.js';
 import { principalPicker, rosterFromApp } from './principal-picker.js';
 import { agoText } from './user-todos-row.js';
 import { accessOfView, summaryOf, spawnFailureText } from '../exit-reach.js';
-import { rowToPick } from './principal-picker-model.js';
+import { rowToPick, exceptRemoved } from './principal-picker-model.js';
 import { openExitRunsDialog } from './exit-runs-dialog.js'; // lane-exit-run-output E4: the machine's command list
 
 const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text != null) n.textContent = text; return n; };
@@ -86,6 +86,7 @@ function codeWords(code, extra = {}) {
     case 'ask_expired': return t('Too late — it was refused after 60 s');
     case 'ask_unknown': return t('That request is gone');
     case 'host_needs_daemon': return t('Update the agent on this machine first');
+    case 'except_unnamed': return t('This grant changed while the dialog was open — close it and open it again');   // lane held-except-doors
     default: return extra.error || t('Could not change who can use it');
   }
 }
@@ -149,10 +150,13 @@ export async function openExitAccessDialog(app, { hostId, name = '' } = {}) {
       }
       sec.appendChild(radios);
       // the picker: the live roster + every row of the CURRENT list the roster does not cover (and its exceptions)
-      const pick = rowToPick({ to: [...(g.mode === 'everyone' ? [{ kind: 'everyone' }] : []), ...(g.mode === 'nobody' ? [] : g.who || [])], except: g.mode === 'nobody' ? [] : g.except || [] },
+      // lane held-except-doors: the list's 除了 is drawn under Nobody too (a Nobody list keeps it — `held`, ridden verbatim
+      // while its row is not offered)
+      const pick = rowToPick({ to: [...(g.mode === 'everyone' ? [{ kind: 'everyone' }] : []), ...(g.mode === 'nobody' ? [] : g.who || [])], except: g.except || [] },
         roster(), { everyoneKey: EVERYONE_KEY, notRunning: t('not running now'), deletedGroup: t('a deleted Task Group') });
       const extra = pick.extra;
       const selected = pick.selected;
+      const held = pick.except;
       const items = () => [...roster(), ...extra.filter((x) => !roster().some((r) => r.key === x.key))];
       const pickerWrap = el('div', 'exit-access-picker');
       pickerWrap.appendChild(el('p', 'agents-note', t('Pick All agents, or conversations and Task Groups. A Task Group means every conversation in it — now or later.')));
@@ -176,6 +180,9 @@ export async function openExitAccessDialog(app, { hostId, name = '' } = {}) {
       }
       const countLine = el('p', 'agents-note exit-access-count');
       sec.appendChild(countLine);
+      // lane held-except-doors: each exception this Save takes away, said before Save (and named on the wire)
+      const unexceptLine = el('p', 'agents-note exit-access-unexcept');
+      sec.appendChild(unexceptLine);
       body.appendChild(sec);
       const syncSec = () => {
         pickerWrap.style.display = mode === 'only' ? '' : 'none';
@@ -189,7 +196,10 @@ export async function openExitAccessDialog(app, { hostId, name = '' } = {}) {
       const syncCount = () => {
         const used = (d.usedBy && d.usedBy[grant]) || [];
         const sel = new Set(picker.selected());
-        const out = new Set(picker.except());
+        const out = new Set(picker.except({ held }));
+        const gone = mode === 'only' ? exceptRemoved(held, [...out]) : [];
+        unexceptLine.textContent = gone.map((k) => t('{name} will no longer be excluded', { name: ([...items(), ...picker.knownRows()].find((x) => x.key === k) || {}).name || picker.nameOf(k) })).join(' · ');
+        unexceptLine.style.display = gone.length ? '' : 'none';
         const covered = (sid) => {
           if (mode === 'nobody') return false;
           const r = roster().find((x) => String(x.webuiId) === String(sid));
@@ -208,7 +218,7 @@ export async function openExitAccessDialog(app, { hostId, name = '' } = {}) {
         allLine.style.display = allOn ? '' : 'none';
       };
       if (askBox) askBox.onchange = () => syncCount();
-      sections[grant] = { get mode() { return mode; }, picker, askBox, syncSec, radioEls };
+      sections[grant] = { get mode() { return mode; }, picker, askBox, syncSec, radioEls, held, extra, storedKey: pick.storedKey };
     }
     // lane hub-act-ask: THE THIRD LIST — never vibespace-exit (the two lists above decide it), never your own clicks
     const hubInfo = d.hub || null;
@@ -258,25 +268,37 @@ export async function openExitAccessDialog(app, { hostId, name = '' } = {}) {
       for (const grant of ['use', 'run']) {
         const s = sections[grant];
         const g = { mode: s.mode };
+        const rows = roster();
+        // a LIVE conversation is sent by its webui id (the route resolves its conversation key — a pending fork's own);
+        // a stored one not running now as the key it has; a Task Group by its id
+        const rowOfKey = (k) => rows.find((x) => x.key === k) || s.picker.knownRows().find((x) => x.key === k);
+        const wire = (k) => {
+          if (k.startsWith('group:')) return { kind: 'group', id: k.slice('group:'.length) };
+          const r = rowOfKey(k);
+          if (r && r.webuiId) return { kind: 'session', session: String(r.webuiId), name: r.name };
+          const x = s.extra.find((e) => e.key === k);
+          return x && x.kind === 'agent' ? { kind: 'conversation', key: String(x.id) } : null;
+        };
+        // lane held-except-doors: the principal key a Save that takes an exception away NAMES (`removeExcept`) — r2: the key the
+        // exception is STORED under (a pending fork's `conversation:webui:<id>` drawn as the fork's live row, now its own id)
+        const pkOf = (k) => { if (s.storedKey[k]) return s.storedKey[k]; if (k.startsWith('group:')) return k; const r = rowOfKey(k) || s.extra.find((e) => e.key === k); return r && r.kind === 'agent' && r.id ? `conversation:${r.id}` : null; };
+        // r2 (MINOR 2): a KEPT exception rides as it is stored — never re-resolved as a live session (one that stopped while the
+        // dialog was open was refused 410 «not running any more», naming a conversation the owner could not see under Nobody);
+        // the route re-keys a fork's `webui:` one to its own id, by name
+        const kept = (k) => { const m = /^(group|conversation):(.+)$/.exec(s.storedKey[k] || ''); return m ? (m[1] === 'group' ? { kind: 'group', id: m[2] } : { kind: 'conversation', key: m[2] }) : wire(k); };
+        const wireEx = (k) => (s.held.includes(k) ? kept(k) : wire(k));
         if (s.mode === 'only') {
           const all = s.picker.selected().includes(EVERYONE_KEY);
           const keys = s.picker.selected().filter((k) => k !== EVERYONE_KEY);
           if (!all && !keys.length) { refuseLine.textContent = t('Pick All agents or at least one conversation or Task Group, or choose Nobody.'); return; }
           // ALL AGENTS = the stored `everyone` mode; the rows picked beside it ride along (kept, restored when All goes)
           if (all) g.mode = 'everyone';
-          const rows = roster();
-          // a LIVE conversation is sent by its webui id (the route resolves its conversation key — a pending fork's own);
-          // a stored one not running now as the key it has; a Task Group by its id
-          const wire = (k) => {
-            if (k.startsWith('group:')) return { kind: 'group', id: k.slice('group:'.length) };
-            const r = rows.find((x) => x.key === k);
-            if (r && r.webuiId) return { kind: 'session', session: String(r.webuiId), name: r.name };
-            const x = extra.find((e) => e.key === k);
-            return x && x.kind === 'agent' ? { kind: 'conversation', key: String(x.id) } : null;
-          };
           g.who = keys.map(wire).filter(Boolean);
-          g.except = s.picker.except().map(wire).filter(Boolean);   // «除了»
-        }
+          const ex = s.picker.except({ held: s.held });   // «除了» — lane held-except-doors: the stored ones ride while the row is not offered
+          g.except = ex.map(wireEx).filter(Boolean);
+          const gone = exceptRemoved(s.held, ex).map(pkOf).filter(Boolean);
+          if (gone.length) g.removeExcept = gone;
+        } else if (s.held.length) g.except = s.held.map(kept).filter(Boolean);   // lane held-except-doors: Nobody keeps the list's 除了 (r2: as stored)
         if (grant === 'run') g.ask = !!(s.askBox && s.askBox.checked);
         out[grant] = g;
       }

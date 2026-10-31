@@ -11695,6 +11695,10 @@ export default {
   // lane vault-standing-request r10 («Who may use it…»'s Save) — on plain lines (see r9 above)
   "{name} will no longer be excluded": "{name} 将不再被排除",
   "This grant changed while the dialog was open — close it and open it again": "这个授权在对话框打开期间变了 — 关掉再打开一次",
+  // lane held-except-doors r2 (the picker's kept 除了 line) — on plain lines (see r9 above)
+  "Kept from an earlier grant — left out:": "早先授权里保留的排除：",
+  "Stop leaving {name} out": "不再排除 {name}",
+  "They stay left out of any Task Group or All agents picked here later.": "之后在这里选中的任何任务组或所有 agent，都仍然排除他们。",
   // lane vault-standing-request r11 (a Save whose row landed and whose policy did not) — on a plain line (see r9 above)
   "The members were saved; the policy was not": "成员已保存；策略没有保存",
   "5-hour limit lifted ({when})": "5 小时限额已取消（{when}）",

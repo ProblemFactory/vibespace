@@ -21,6 +21,10 @@
 //   · THE RECT CENSUS at 860 px and 360 px (radios ≥ 44 px, picker rows ≥ 40 px on the phone, no horizontal overflow)
 //   · lane hub-act-ask: THE THIRD LIST Hub 自动化 (从不 / 每次都问我 / 一直允许): not set on this LOCAL instance ⇒ 一直允许, said
 //     under the radios; untouched ⇒ not in the PATCH; 每次都问我 picked ⇒ ONE PATCH with hub {mode: ask}, drawn back from the server
+//   ⑥ lane held-except-doors r2 (主开发's acceptance, MINOR 1 + 2): A KEPT 除了 RIDES AS IT IS STORED — a conversation with no id of
+//     its own yet (a pending fork's shape: the stub holds its init) left out ⇒ stored webui:<id>; once it has its own id an
+//     untouched 保存 LANDS, the route renaming the exception by name; under 没有人 an exception whose conversation ENDED while
+//     the dialog was open never refuses the 保存 (it was a 410 naming a conversation the owner could not see)
 // Requires google-chrome (SKIP without). Run: node scripts/test-exit-access-ui.mjs
 import fs from 'node:fs';
 import path from 'node:path';
@@ -272,6 +276,49 @@ try {
   await P.evalJs(`document.querySelector('#exit-access-dialog .dialog-close').click(); true`);
   const hubClear = await W.api('PATCH', `/api/hosts/${HOST}/exit-access`, { hub: { mode: 'default' } });
   ok(hubClear.status === 200 && !(await W.hostRow('exmac')).exit.hub, '`default` clears it (the instance\'s default applies again)');
+  // ⑥ lane held-except-doors r2: a kept 除了 rides as it is STORED (the fork's webui:<id> renamed by name; under 没有人 never a 410)
+  console.log('⑥ (lane held-except-doors r2) a kept 除了 rides as stored: a pending fork\'s webui:<id> renamed by name; under 没有人 an ended conversation is no 410');
+  {
+    const J = JSON.stringify;
+    const useNow = async () => (await W.hostRow('exmac')).exit.use || {};
+    const exKeysNow = async () => ((await useNow()).except || []).map((x) => x.key);
+    const heldDir = path.join(W.home, 'proj5-held-init');
+    const S5 = await W.createStubSession(heldDir);
+    const pend = await W.api('PATCH', `/api/hosts/${HOST}/exit-access`, { use: { mode: 'only', who: [{ kind: 'group', id: groups[0].id }], except: [{ kind: 'session', session: S5.sid, name: 'conv5' }] } });
+    ok(pend.status === 200 && J(await exKeysNow()) === J(['webui:' + S5.sid]), 'MINOR 1: a conversation with no id of its own yet (a pending fork\'s shape) left out of 运维\'s network — stored under its webui:<id> key', { pend: pend.j, use: await useNow() });
+    fs.writeFileSync(path.join(heldDir, 'go'), '');   // its first turn: the conversation has its OWN id now
+    let own = false;
+    for (let i = 0; i < 60 && !own; i++) { own = await P.evalJs(`(app.sidebar._webuiSessions || []).some((s) => s.id === ${J(S5.sid)} && (s.backendSessionId || s.claudeSessionId) === ${J(S5.cid)})`); if (!own) await sleep(250); }
+    ok(own, '…then it has its own id (the page\'s roster names it by it)');
+    ok(await P.realClick(exitIcon), 'the dialog again');
+    await P.waitFor(`!!document.querySelector('${sec('use')} .pp-except-picker')`, 8000);
+    const chips5 = await P.evalJs(`[...document.querySelectorAll('${sec('use')} .pp-except-picker .pp-chip')].map((c) => c.dataset.key)`);
+    ok(J(chips5) === J(['agent:' + S5.cid]), 'the dialog draws the stored webui:<id> exception as the conversation\'s live row (its 除了 chip)', chips5);
+    const pF = patches(P).length;
+    await P.realClick('#exit-access-dialog .exit-access-save');
+    ok(await P.waitFor(`!document.querySelector('#exit-access-dialog')`, 6000), 'MINOR 1: an UNTOUCHED 保存 lands — the dialog closes (3f8134f16: refused except_unnamed, the dialog stuck while the conversation runs)', await P.evalJs(`document.querySelector('#exit-access-dialog .exit-access-refuse')?.textContent || null`));
+    const fb = JSON.parse((patches(P).slice(pF)[0] || {}).body || '{}');
+    ok(((fb.use || {}).except || []).some((x) => x.kind === 'conversation' && x.key === 'webui:' + S5.sid) && J(await exKeysNow()) === J([S5.cid]), '…its PATCH sent the exception AS STORED (webui:<id>) and the route RENAMED it to the conversation\'s own id, by name', { sent: fb.use, use: await useNow() });
+    // MINOR 2: under 没有人, a kept exception whose conversation ENDS while the dialog is open
+    const S6 = await W.createStubSession(path.join(W.home, 'proj6'));
+    const seed6 = await W.api('PATCH', `/api/hosts/${HOST}/exit-access`, { use: { mode: 'only', who: [{ kind: 'group', id: groups[0].id }], except: [{ kind: 'session', session: S6.sid, name: 'conv6' }], removeExcept: ['conversation:' + S5.cid] } });
+    ok(seed6.status === 200 && J(await exKeysNow()) === J([S6.cid]), 'MINOR 2: a running conversation left out of 运维\'s network', { seed6: seed6.j, use: await useNow() });
+    ok(await P.realClick(exitIcon), 'the dialog again');
+    await P.waitFor(`!!document.querySelector('${sec('use')} input[value="nobody"]')`, 8000);
+    ok(await P.realClick(`${sec('use')} input[value="nobody"]`), 'a real click on 没有人 (network) — the picker and its 除了 hidden');
+    await new Promise((res) => { const ws = new WebSocket(`ws://127.0.0.1:${W.PORT}/ws`); ws.onopen = () => { ws.send(J({ type: 'kill', sessionId: S6.sid })); setTimeout(() => { try { ws.close(); } catch { } res(); }, 300); }; ws.onerror = () => res(); });
+    let gone = false;
+    for (let i = 0; i < 60 && !gone; i++) { gone = await P.evalJs(`!(app.sidebar._webuiSessions || []).some((s) => s.id === ${J(S6.sid)})`); if (!gone) await sleep(250); }
+    ok(gone, '…and that conversation ENDS while the dialog is open');
+    const pN = patches(P).length;
+    await P.realClick('#exit-access-dialog .exit-access-save');
+    ok(await P.waitFor(`!document.querySelector('#exit-access-dialog')`, 6000), 'MINOR 2: 保存 under 没有人 LANDS — never a 410 naming a conversation the owner cannot see (3f8134f16: «"conv6" is not running any more»)', await P.evalJs(`document.querySelector('#exit-access-dialog .exit-access-refuse')?.textContent || null`));
+    const nb = JSON.parse((patches(P).slice(pN)[0] || {}).body || '{}');
+    const u6 = await useNow();
+    ok((nb.use || {}).mode === 'nobody' && J((nb.use || {}).except) === J([{ kind: 'conversation', key: S6.cid }]) && u6.mode === 'nobody' && J((u6.except || []).map((x) => x.key)) === J([S6.cid]), '…the kept exception rode AS STORED ({kind: conversation, key}) and is kept under 没有人', { sent: nb.use, use: u6 });
+    const clear6 = await W.api('PATCH', `/api/hosts/${HOST}/exit-access`, { use: { mode: 'nobody', except: [], removeExcept: ['conversation:' + S6.cid] } });
+    ok(clear6.status === 200 && !((await useNow()).except || []).length, '(the network list back to 没有人 with nothing left out — named)', clear6.j);
+  }
   // ④ ask me: Allow / Deny, the card, the CLI, the refusals
   console.log('④ ask me each time — Allow runs it, Deny refuses it, the card in the chat, the CLI, the refusals');
   await P.evalJs(`app.attachSession(${JSON.stringify(S[1].sid)}, 'conv2', ${JSON.stringify(path.join(W.home, 'proj2'))}, { mode: 'chat', backend: 'claude' }); true`);

@@ -202,7 +202,13 @@ console.log('agentView · stamp · base · patch');
   eq(P({ use: { mode: 'only', who: [{ kind: 'conversation', key: 'B' }, { kind: 'group', id: 'G' }], except: [{ kind: 'conversation', key: 'B' }] } }).code, 'except_conflicts', 'a member both picked and left out ⇒ except_conflicts');
   eq(P({ use: { mode: 'everyone', except: [{ kind: 'everyone' }] } }).code, 'bad_principal', 'everyone can never be an exception');
   eq(P({ use: { mode: 'only', who: [{ kind: 'group', id: 'G' }], except: 'B' } }).code, 'bad_principal', 'except must be a list');
-  eq(P({ use: { mode: 'nobody', except: [{ kind: 'conversation', key: 'B' }] } }).access.use.except, [], 'nobody keeps no exception');
+  // lane held-except-doors: Nobody KEEPS the list's 除了 (an except-only row — it holds again when a Task Group / All agents is
+  // given back; a dialog never drops an exception it did not show as removed) — the base read it as «nobody keeps no exception»
+  eq(P({ use: { mode: 'nobody', except: [{ kind: 'conversation', key: 'B' }] } }).access.use.except, [{ kind: 'conversation', key: 'B' }], 'nobody KEEPS the list\'s exceptions (lane held-except-doors)');
+  const pn = P({ use: { mode: 'only', who: [{ kind: 'group', id: 'G' }], except: [], removeExcept: ['conversation:B'] } });
+  eq([pn.removeExcept, E.exitRows(pn.access, 'h9', pn.removeExcept)[0].removeExcept, E.exitRows(pn.access, 'h9', pn.removeExcept)[1].removeExcept], [{ use: ['conversation:B'], run: [] }, ['conversation:B'], []], 'a list\'s removeExcept (the exceptions its Save names as taken away) rides to its row for the ONE writer');
+  eq(P({ use: { mode: 'only', who: [{ kind: 'group', id: 'G' }], removeExcept: 'conversation:B' } }).code, 'bad_principal', 'removeExcept must be a list of principal keys');
+  eq(E.exitRows(P({ use: { mode: 'nobody', except: [{ kind: 'conversation', key: 'B' }] } }).access, 'h9')[0].except, [{ kind: 'conversation', key: 'B' }], 'exitRows: a Nobody list with an exception is an except-only row (kept by the store)');
   eq(P({ use: { mode: 'only', who: [{ kind: 'session', id: 'codex:T1' }] } }).access.use.who, [{ kind: 'conversation', key: 'T1' }], 'a script\'s pre-unify `<backend>:<cid>` row is mapped to the ONE spelling');
   eq(E.exitRows(px.access, 'host-1').map((r) => [r.resource, r.to, r.except]), [['host-1:use', [{ kind: 'group', id: 'G' }], [{ kind: 'conversation', key: 'B' }]], ['host-1:run', [], []]], 'exitRows: the two rows the ONE writer gets (nobody ⇒ an empty row, removed by the store)');
   eq(E.patchVerdict(cur, { use: { mode: 'everyone' } }).access.run, cur.run, 'a grant absent from the body is kept');

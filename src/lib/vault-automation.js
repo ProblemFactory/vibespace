@@ -35,7 +35,7 @@ import { BACKEND_META } from './agent-meta.js';
 import { enterSubmits } from './chat-enter-keys.js'; // an Enter that ends an IME composition never submits
 import { vaultWaitLine } from './vault-unlock.js'; // lane vault-slow-load: the audit says it is reading
 import { principalPicker } from './principal-picker.js'; // lane grants-unify: 授权给… is THE picker (with its «除了» row)
-import { rowToPick, principalOfRow } from './principal-picker-model.js'; // lane grants-unify: a stored exception drawn, a pick written
+import { rowToPick, principalOfRow, exceptRemoved } from './principal-picker-model.js'; // lane grants-unify: a stored exception drawn, a pick written
 import { REACH_CHOICES, reachWord, reachTitle, kindOf, groupsOf } from './automation-reach.js'; // lane key-instance-scope: ONE spelling of the reach's words
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
@@ -601,14 +601,23 @@ export function showGrantPicker(key, data, { refresh } = {}) {
   const exRows = () => [...live, ...exPick.extra];
   picker = principalPicker({ items: () => live, multi: true, selected: [...had.keys()].filter((k) => k === EVERYONE_SUBJECT || live.some((r) => r.key === k)), autofocus: true,
     placeholder: t('Search sessions and groups…'), label: t('Grant "{name}" to', { name: key.name }), emptyText: t('Nothing to pick: no conversation is running and there is no task group'),
-    everyone: { key: EVERYONE_SUBJECT }, except: { selected: exPick.except, extra: exPick.extra } });
+    everyone: { key: EVERYONE_SUBJECT }, except: { selected: exPick.except, extra: exPick.extra }, onChange: () => syncUnexcept() });
   body.append(picker.el);
+  // lane held-except-doors: the stored 除了 (`held`) rides while its row is not offered; each one this Save takes away is SAID
+  // here and NAMED on the wire (`removeExcept` — the ONE writer refuses an unnamed drop)
+  const exRowOf = (k) => [...picker.knownRows(), ...exRows()].find((r) => String(r.key) === String(k));
+  const exceptPicks = () => picker.except({ held: exPick.except });
+  const unexcept = el('div', 'vw-ak-hint vw-ak-unexcept');
+  body.append(unexcept);
+  function syncUnexcept() { const gone = exceptRemoved(exPick.except, exceptPicks()); unexcept.textContent = gone.map((k) => t('{name} will no longer be excluded', { name: (exRowOf(k) || {}).name || picker.nameOf(k) })).join(' · '); unexcept.style.display = gone.length ? '' : 'none'; }
+  syncUnexcept();
   // lane key-instance-scope: the reach of the grants this save ADDS (an existing grant's reach is its chip's)
   body.append(el('div', 'vw-ak-sec', t('Reach of the grants you add')));
   const rows = reachRows(null, data, { id: 'picker' });
   body.append(rows.node);
   body.append(el('div', 'vw-ak-hint', t('A conversation granted the key uses it with its own session — it never sees the key\'s value.')));
-  const exceptNow = () => picker.except().map((k) => principalOfRow(exRows().find((r) => String(r.key) === String(k)))).filter(Boolean);
+  const exceptNow = () => exceptPicks().map((k) => principalOfRow(exRowOf(k))).filter(Boolean);
+  const pkOf = (p) => (p.kind === 'group' ? `group:${p.id}` : p.kind === 'conversation' ? `conversation:${p.key}` : 'everyone');
   const drawn = () => JSON.stringify([picker.selected().slice().sort(), rows.value(), exceptNow()]);
   const base = drawn();
   const f = el('div', 'dialog-footer');
@@ -634,7 +643,10 @@ export function showGrantPicker(key, data, { refresh } = {}) {
     let bad = null;
     if (add.length) { const r = await post(`/api/automation/keys/${encodeURIComponent(key.id)}/grants`, { subjects: add, reach, except }); if (!r || !r.ok) bad = r || {}; }
     for (const gid of drop) { const r = await fetchJson(`/api/automation/grants/${encodeURIComponent(gid)}`, { method: 'DELETE' }); if (!r || !r.ok) bad = r || {}; }
-    for (const g of exceptOn) { const r = await post(`/api/automation/grants/${encodeURIComponent(g.id)}/except`, { except }); if (!r || !r.ok) bad = r || {}; }
+    for (const g of exceptOn) {
+      const keep = new Set(except.map(pkOf)), removeExcept = (g.except || []).map(pkOf).filter((k) => !keep.has(k));   // lane held-except-doors: this grant's 除了 taken away, named
+      const r = await post(`/api/automation/grants/${encodeURIComponent(g.id)}/except`, { except, ...(removeExcept.length ? { removeExcept } : {}) }); if (!r || !r.ok) bad = r || {};
+    }
     if (bad) showToast(failWords(bad), { type: 'error' }); else showToast(reachUnused ? t('Saved — the reach you picked was not used: it is for the grants a save adds; change an existing grant\'s reach on its chip') : t('Saved'));
     close();
     refresh?.();

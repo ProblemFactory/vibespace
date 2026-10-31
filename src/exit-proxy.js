@@ -188,7 +188,7 @@ class ExitProxyManager {
       const ids = new Set(this._hosts().map((h) => String(h.id)));
       const gone = g.rowsOfDoor('exit').filter((r) => !ids.has(String(r.resource).replace(/:(use|run)$/, '')));
       if (!gone.length) return 0;
-      const w = g.setMany(gone.map((r) => ({ door: 'exit', resource: r.resource, to: [], except: [] })), 'machine-removed');
+      const w = g.setMany(gone.map((r) => ({ door: 'exit', resource: r.resource, to: [], except: [], removeExcept: r.except || [] })), 'machine-removed');   // lane held-except-doors: the machine is gone — its exceptions go by name
       return w.ok ? gone.length : 0;
     } catch (e) { this.log(`the lists of a removed machine were not pruned: ${e && e.message}`); return 0; }
   }
@@ -210,13 +210,15 @@ class ExitProxyManager {
     const recs = Array.isArray(bundle && bundle.hosts) ? bundle.hosts.filter((h) => h && typeof h.id === 'string' && h.id) : [];
     const rows = Array.isArray(bundle && bundle.grants) ? bundle.grants.filter((r) => r && r.door === 'exit') : GM.rowsOfHosts(recs).rows;
     const list = [];
+    // lane held-except-doors: the import REPLACES each list — every exception the stored row holds is named as replaced
+    const heldOf = (res) => { const [cur] = g.rowsFor('exit', res); return cur && Array.isArray(cur.except) ? cur.except : []; };
     for (const h of recs) for (const grant of E.GRANTS) {
       const r = rows.find((x) => x.resource === `${h.id}:${grant}`);
-      list.push({ door: 'exit', resource: `${h.id}:${grant}`, to: r && Array.isArray(r.to) ? r.to : [], except: r && Array.isArray(r.except) ? r.except : [] });
+      list.push({ door: 'exit', resource: `${h.id}:${grant}`, to: r && Array.isArray(r.to) ? r.to : [], except: r && Array.isArray(r.except) ? r.except : [], removeExcept: heldOf(`${h.id}:${grant}`) });
     }
     // the import REPLACES the machines: a machine it does not carry has no list any more
     const kept = new Set(list.map((x) => x.resource));
-    for (const r of g.rowsOfDoor('exit')) if (!kept.has(r.resource) && !recs.some((h) => String(r.resource).startsWith(`${h.id}:`))) list.push({ door: 'exit', resource: r.resource, to: [], except: [] });
+    for (const r of g.rowsOfDoor('exit')) if (!kept.has(r.resource) && !recs.some((h) => String(r.resource).startsWith(`${h.id}:`))) list.push({ door: 'exit', resource: r.resource, to: [], except: [], removeExcept: r.except || [] });
     return g.setMany(list, by);
   }
   _online(h) { return h.transport === 'dial' ? !!h.online : true; } // ssh probed at use time
@@ -375,7 +377,7 @@ class ExitProxyManager {
     const heldBefore = liveBefore ? [...new Set([...liveBefore.users, ...(liveBefore.bySession ? liveBefore.bySession.keys() : [])])] : [];
     const asksBefore = [...this._asks.values()].filter((k) => k.hostId === hostId).map((k) => k.askId);
     // THE ONE WRITER (lane grants-unify): both lists in one landed write, then the record's own fields (ask, hub, stamp)
-    const w = store.setMany(E.exitRows(v.access, hostId), by);
+    const w = store.setMany(E.exitRows(v.access, hostId, v.removeExcept), by);
     if (!w.ok) throw namedError(w.code, w.error || w.code);
     this.hosts.setExitAccess(hostId, E.storedExit(v.access));
     try { this.hosts.hubActs?.onPolicyChanged?.(hostId); } catch { } // lane hub-act-ask: the cards of this machine re-judged by its list

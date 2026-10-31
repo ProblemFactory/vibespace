@@ -1660,9 +1660,13 @@ console.log('㉑ ALL AGENTS — a key granted to every conversation (lane key-gr
   const ro = await w.engine.use({ caller: CA('conv-out'), verb: 'conversations.rename', args: { name: 'o' }, want: 'all-but' });
   ok(g2.ok && ro.code === 'excepted' && /grant to a Task Group or to all agents/.test(ro.why || '') && !cards(w).length, 'a conversation LEFT OUT of All agents is refused BY NAME (excepted — the why says which grant) — never a first-use card', ro);
   const ri = await w.engine.use({ caller: CA('conv-in'), verb: 'conversations.rename', args: { name: 'i' }, want: 'all-but' });
-  const lift = g2.ok ? w.engine.setExcept(g2.added[0].id, { except: [] }) : { ok: false };
+  // lane held-except-doors: an exception leaves by NAME only — a setExcept that drops it unnamed is refused (nothing written)
+  const lift0 = g2.ok ? w.engine.setExcept(g2.added[0].id, { except: [] }) : { ok: false };
+  const ro1 = await w.engine.use({ caller: CA('conv-out'), verb: 'conversations.rename', args: { name: 'o1' }, want: 'all-but' });
+  ok(lift0.code === 'except_unnamed' && lift0.principal === 'conversation:conv-out' && ro1.code === 'excepted', 'a setExcept that leaves the exception out UNNAMED is refused except_unnamed — the left-out one is still refused (lane held-except-doors)', { lift0, ro1 });
+  const lift = g2.ok ? w.engine.setExcept(g2.added[0].id, { except: [], removeExcept: ['conversation:conv-out'] }) : { ok: false };
   const ro2 = await w.engine.use({ caller: CA('conv-out'), verb: 'conversations.rename', args: { name: 'o2' }, want: 'all-but' });
-  ok(ri.ok && lift.ok && ro2.ok, '…every other conversation uses it; the exception lifted (setExcept) ⇒ the left-out one does too', { ri, lift, ro2 });
+  ok(ri.ok && lift.ok && ro2.ok, '…every other conversation uses it; the exception lifted BY NAME (setExcept removeExcept) ⇒ the left-out one does too', { ri, lift, ro2 });
   // the once rule on the engine
   const m3 = w.engine.mint({ name: 'all-once', scopes: ['conversations.rename'], by: 'user' });
   const g3 = w.engine.grant(m3.key.id, [ALL], { by: 'user', mode: 'once' });

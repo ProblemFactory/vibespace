@@ -290,7 +290,7 @@ function create({ vault, grants = null, totpCode = null, forYou = null, now = ()
     if (cur.unknown) return named('unknown_shape', cur.why || 'that grant row could not be read');
     const key = GM.principalKey(p);
     if ((cur.to || []).some((e) => GM.principalKey(e) === key)) return { ok: true, resource, already: true };
-    const w = g.set(BL.DOOR, resource, { to: [...(cur.to || []), p], except: (cur.except || []).filter((e) => GM.principalKey(e) !== key) }, by);
+    const w = g.set(BL.DOOR, resource, { to: [...(cur.to || []), p], except: (cur.except || []).filter((e) => GM.principalKey(e) !== key), removeExcept: [key] }, by);   // lane held-except-doors: the grant names the one it lifts out of 除了
     return w && w.ok ? { ok: true, resource } : named((w && w.code) || 'not_written', (w && w.error) || 'not written');
   }
   function ungrant(resource, principalKey, { by = 'user' } = {}) {

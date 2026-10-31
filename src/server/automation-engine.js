@@ -155,7 +155,9 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     if (!st) return { ok: false, code: 'not_written', error: 'the grants store is not available' };
     return st.setMany(list, String(by || 'user'));
   }
-  const dropRows = (gs, by) => writeRows(gs.flatMap((g) => [{ door: 'automation-key-use', resource: g.id, to: [], except: [] }, { door: 'automation-key-reach', resource: g.id, to: [], except: [] }]), by);
+  // lane held-except-doors: a grant taken back takes its exceptions with it — named (the ONE writer refuses an unnamed drop)
+  const heldExcept = (door, id) => { const st = grantsOf(); const [r] = st ? st.rowsFor(door, id) : []; return (r && Array.isArray(r.except) && r.except) || []; };
+  const dropRows = (gs, by) => writeRows(gs.flatMap((g) => [{ door: 'automation-key-use', resource: g.id, to: [], except: [], removeExcept: heldExcept('automation-key-use', g.id) }, { door: 'automation-key-reach', resource: g.id, to: [], except: [], removeExcept: heldExcept('automation-key-reach', g.id) }]), by);
   const OPENED_MAX = 2000;   // rows kept, newest last (a dispatcher's workers over months — a few hundred)
   /** A successful open's row — or the conversation id learned later for a row that had only the webui id. Never throws. */
   function noteOpened({ keyId, webuiId = null, conversationId = null }) {
@@ -280,7 +282,9 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
     const was = g.reachRow ? GM.normRow(g.reachRow) : null;
     const rr = A.reachRowFor(rch);
     const keepExcept = rr && was && was.ok && A.reachKind(rch) === A.reachKind(g.reach) ? was.row.except : [];
-    { const w = writeRows([{ door: 'automation-key-reach', resource: g.id, to: rr ? rr.to : [], except: rr ? keepExcept : [] }], by); if (!w.ok) return named('failed', `the grants could not be written (${w.code}: ${w.error || ''})`); }
+    // lane held-except-doors: a reach of another kind does not carry the old one's exceptions — named as it drops them
+    const reachGone = was && was.ok && (!rr || keepExcept !== was.row.except) ? was.row.except : [];
+    { const w = writeRows([{ door: 'automation-key-reach', resource: g.id, to: rr ? rr.to : [], except: rr ? keepExcept : [], removeExcept: reachGone }], by); if (!w.ok) return named('failed', `the grants could not be written (${w.code}: ${w.error || ''})`); }
     const next = A.grantOf({ ...g, reach: undefined, reachRow: rr ? { door: 'automation-key-reach', resource: g.id, to: rr.to, except: keepExcept } : null });
     try { write({ keys: db.keys, grants: db.grants.map((x) => (x.id === g.id ? next : x)) }); } catch (e) { return named('failed', `the grants could not be written (${e.code || e.message})`); }
     audit({ keyId: g.keyId, subject: g.subject, verb: 'key.reach', ok: true, by, args: { reach: A.reachKind(rch) } });
@@ -288,8 +292,10 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
   }
   /** «除了» (lane grants-unify): the members a Task Group grant leaves OUT (`except` — they never use the key through it) and
    *  the conversations its reach leaves out (`reachExcept`) — the grant's two rows rewritten through the ONE writer (a list
-   *  absent = the row as it is); audited `key.except`. → { ok, grant } | a named refusal. */
-  function setExcept(grantId, { except, reachExcept } = {}, { by = 'user' } = {}) {
+   *  absent = the row as it is); audited `key.except`. lane held-except-doors: `removeExcept` / `reachRemoveExcept` name each
+   *  exception the dialog SAID it takes away (one left out unnamed ⇒ `except_unnamed`, 409, nothing written). → { ok, grant } |
+   *  a named refusal. */
+  function setExcept(grantId, { except, reachExcept, removeExcept = [], reachRemoveExcept = [] } = {}, { by = 'user' } = {}) {
     const g = db.grants.find((x) => x.id === grantId);
     if (!g) return named('not_found');
     const k = keyById(g.keyId);
@@ -303,14 +309,14 @@ function create({ dataDir, vault, userTodos = null, verbs = {}, now = () => Date
       if (!n || !n.ok) return named('failed', 'this grant\'s row cannot be read — take it back and grant it again');
       if (except.length && !n.row.to.some((e) => e.kind === 'group' || e.kind === 'everyone')) return named('bad_args', 'a grant to one conversation has no members to leave out');
       use = { door: 'automation-key-use', resource: g.id, to: n.row.to, except };
-      rows.push(use);
+      rows.push({ ...use, removeExcept: Array.isArray(removeExcept) ? removeExcept : [] });
     }
     if (reachExcept !== undefined) {
       const n = g.reachRow ? GM.normRow(g.reachRow) : null;
       if (!n || !n.ok) { if (reachExcept.length) return named('bad_args', 'this grant reaches only what it opened — nothing to leave out'); }
-      else { reachRow = { door: 'automation-key-reach', resource: g.id, to: n.row.to, except: reachExcept }; rows.push(reachRow); }
+      else { reachRow = { door: 'automation-key-reach', resource: g.id, to: n.row.to, except: reachExcept }; rows.push({ ...reachRow, removeExcept: Array.isArray(reachRemoveExcept) ? reachRemoveExcept : [] }); }
     }
-    if (rows.length) { const w = writeRows(rows, by); if (!w.ok) return named(w.code === 'bad_except' || w.code === 'except_conflicts' ? 'bad_args' : 'failed', `the exceptions could not be written (${w.code}: ${w.error || ''})`); }
+    if (rows.length) { const w = writeRows(rows, by); if (!w.ok) return w.code === 'except_unnamed' ? named('except_unnamed', null, { principal: w.principal }) : named(w.code === 'bad_except' || w.code === 'except_conflicts' ? 'bad_args' : 'failed', `the exceptions could not be written (${w.code}: ${w.error || ''})`); }
     const next = A.grantOf({ ...g, reach: undefined, use, reachRow });
     if (next) db = { ...db, grants: db.grants.map((x) => (x.id === g.id ? next : x)) };
     audit({ keyId: g.keyId, subject: g.subject, verb: 'key.except', ok: true, by, args: { except: Array.isArray(except) ? except.length : null, reachExcept: Array.isArray(reachExcept) ? reachExcept.length : null } });

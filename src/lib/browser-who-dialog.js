@@ -19,7 +19,7 @@ import { t } from './i18n.js';
 import { fetchJson, showToast, createModalShell } from './utils.js';
 import { btn, el, noteLine, noteText } from './channel-chrome.js';
 import { principalPicker } from './principal-picker.js';
-import { folderTail } from './principal-picker-model.js';
+import { folderTail, exceptRemoved } from './principal-picker-model.js';
 import { pickerRows, draftWho, draftUse, loseCount, saveWords, refusalWords, EVERYONE_KEY, draftExcept } from './browser-who-model.js';
 
 const DIALOG_ID = 'browser-who-dialog';
@@ -62,7 +62,7 @@ export async function openWhoDialog(app, profileId, { onSaved = null, label = ''
   // lane dialog-unsaved-guard: a pick changed and not saved ⇒ ✕ / Esc / the backdrop asks (the picker is drawn right below)
   const shell = createModalShell({ id: DIALOG_ID, key: profileId, title: t('Who can use {label}?', { label: title }), dialogClass: 'bwho-dialog', bodyClass: 'bwho-body', escapeToClose: true,
     onClose: () => { closed = true; try { picker.close(); } catch { /* none */ } },
-    unsaved: { isDirty: () => picker.selected().slice().sort().join('\n') !== initial.slice().sort().join('\n') || picker.except().slice().sort().join('\n') !== initialExcept.slice().sort().join('\n'), save: () => doSave() }, kind: 'form' });
+    unsaved: { isDirty: () => picker.selected().slice().sort().join('\n') !== initial.slice().sort().join('\n') || picker.except({ held: initialExcept }).slice().sort().join('\n') !== initialExcept.slice().sort().join('\n'), save: () => doSave() }, kind: 'form' });
   if (shell.raised) return null;   // raised: the same subject's form, as it was
   shell.dialog.dataset.profileId = id;
   const body = shell.body;
@@ -106,9 +106,11 @@ export async function openWhoDialog(app, profileId, { onSaved = null, label = ''
   // refusal it just caused, must be on screen beside it)
   const lose = noteLine('bwho-lose', '', { warn: true });
   const refusal = noteLine('bwho-refusal', '', { warn: true });
+  // lane held-except-doors: each exception this Save takes away, said before Save (a 除了 leaves by name only)
+  const unexcept = noteLine('bwho-unexcept', '', { warn: true });
   const notes = el('div', 'bwho-notes');
-  notes.append(lose, refusal);
-  const syncNotes = () => { notes.style.display = lose.style.display === 'none' && refusal.style.display === 'none' ? 'none' : ''; };
+  notes.append(lose, unexcept, refusal);
+  const syncNotes = () => { notes.style.display = lose.style.display === 'none' && refusal.style.display === 'none' && unexcept.style.display === 'none' ? 'none' : ''; };
 
   // the footer: Cancel · Save (house text buttons; Save the ONE primary)
   const footer = el('div', 'dialog-footer bwho-footer');
@@ -123,14 +125,20 @@ export async function openWhoDialog(app, profileId, { onSaved = null, label = ''
     const who = draftWho(sel, model.wire);
     const keys = sel.map((k) => model.keyOfPick.get(k)).filter(Boolean);
     const taskIds = who.filter((w) => w.kind === 'task').map((w) => w.id);
-    const exceptKeys = picker.except().map((k) => model.keyOfPick.get(k) || (model.exceptWire.get(k) || {}).key).filter(Boolean);   // lane grants-unify
-    return { sel, who, keys, taskIds, exceptKeys };
+    const exceptPicks = picker.except({ held: initialExcept });   // lane held-except-doors: the stored 除了 rides while its row is not offered
+    const exceptKeys = exceptPicks.map((k) => model.keyOfPick.get(k) || (model.exceptWire.get(k) || {}).key).filter(Boolean);   // lane grants-unify
+    const removed = exceptRemoved(initialExcept, exceptPicks);
+    return { sel, who, keys, taskIds, exceptPicks, exceptKeys, removed };
   }
+  /** A member's name as this dialog drew it (a 除了 one not running now is a row of the exception list only). */
+  const nameOfPick = (k) => { const r = [...model.rows, ...model.exceptExtra].find((x) => x.key === k); return (r && r.name) || picker.nameOf(k); };
   function refresh() {
     const d = draft();
     const n = loseCount(view.usedBy, { mode: mode(), keys: d.keys, taskIds: d.taskIds, exceptKeys: d.exceptKeys });
     noteText(lose, n ? t('{n} conversation(s) using it now will lose it when you save (their pages in it close).', { n }) : '');
     lose.style.display = n ? '' : 'none';
+    noteText(unexcept, d.removed.map((k) => t('{name} will no longer be excluded', { name: nameOfPick(k) })).join(' · '));
+    unexcept.style.display = d.removed.length ? '' : 'none';
     remoteLine.style.display = mode() === 'only' && model.remote ? '' : 'none';
     const sentence = mode() === 'all'
       ? t('Any of your conversations can use this browser and its logins — one browser, each conversation in its own tab.')
@@ -149,7 +157,8 @@ export async function openWhoDialog(app, profileId, { onSaved = null, label = ''
   async function doSave() {
     const d = draft();
     const use0 = draftUse(d.sel, model.wire);   // ALL AGENTS ⇒ {mode:'all'} (+ the rows kept beside it); nothing ⇒ refused
-    const except = draftExcept(picker.except(), model);   // lane grants-unify: «除了»
+    const except = draftExcept(d.exceptPicks, model);   // lane grants-unify: «除了» (lane held-except-doors: the stored ones kept unless shown as removed)
+    const removeExcept = d.removed.map((k) => model.exceptPk.get(k)).filter(Boolean);   // …and each one taken away NAMED (the writer refuses an unnamed drop)
     const use = use0 && except.length ? { ...use0, except } : use0;
     if (!use) {
       noteText(refusal, refusalWords({ code: 'empty_list' }, t));
@@ -160,7 +169,7 @@ export async function openWhoDialog(app, profileId, { onSaved = null, label = ''
     }
     const namesPicked = mode() === 'only' ? picker.selectedRows().map((r) => r.name) : [];
     save.disabled = true; cancel.disabled = true; picker.setBusy(true);
-    const r = await fetchJson(`/api/browser/profiles/${encodeURIComponent(id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ use, base: view.base }) });
+    const r = await fetchJson(`/api/browser/profiles/${encodeURIComponent(id)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ use, base: view.base, ...(removeExcept.length ? { removeExcept } : {}) }) });
     if (closed) return;
     save.disabled = false; cancel.disabled = false; picker.setBusy(false);
     if (!r || r.error) {

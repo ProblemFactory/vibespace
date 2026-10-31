@@ -265,6 +265,9 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
       for (const [h, r] of Object.entries((j && j.windows) || {})) reach.set(String(h), r && typeof r === 'object' && !Array.isArray(r) ? { ...r } : {});
     } catch (e) { if (e && e.code !== 'ENOENT') log.warn?.(`[window] ${REACH_FILE} unreadable — every window starts in auto mode: ${e.message}`); }
   }
+  /** lane held-except-doors: a share principal's key in the grant model's spelling (what a write names) — through the record's
+   *  own mapping (a session id `<backend>:<cid>` is stored as the conversation `cid`). */
+  const winKey = (p) => { try { const x = R.rowOfRecord({ windowId: '-', rows: [], except: [p] }).except[0]; return x ? GM.principalKey(x) : null; } catch { return null; } };
   /** lane grants-unify: a window's share rows (the ONE store; no store ⇒ none ⇒ hidden — fail closed). */
   const rowsOf = (h) => { const g = grantsOf(); return g ? g.rowsFor('window', String(h)) : []; };
   const modeOf = (h) => { const r = reach.get(String(h)); return r && R.MODES.includes(r.mode) ? r.mode : 'auto'; };
@@ -273,10 +276,12 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   const hasShare = (h) => reach.has(String(h)) || rowsOf(h).length > 0;
   /** THE WRITE of a window's share (lane grants-unify): its rows through the ONE writer (`grants.set`; an empty share removes
    *  the row), its mode into window-reach.json — then the broadcast. A refused grants write throws by name (nothing changed). */
-  function putReach(h, record, by = 'user') {
+  // lane held-except-doors: `named` = the exceptions this write takes away BY NAME (principal keys) — a principal shared with by
+  // name (its grant lifts it), the person's own ✕ in the share's «除了» row; one left out unnamed ⇒ the ONE writer's except_unnamed
+  function putReach(h, record, by = 'user', named = []) {
     const g = grantsOf();
     const row = R.rowOfRecord({ ...record, windowId: String(h) });
-    if (g) { const w = g.set('window', String(h), { to: row.to, except: row.except }, by); if (!w.ok) throw namedError(w.code, w.error || w.code); }
+    if (g) { const w = g.set('window', String(h), { to: row.to, except: row.except, removeExcept: named }, by); if (!w.ok) throw namedError(w.code, (w.error || w.code)); }
     else if (row.to.length || row.except.length) throw namedError('not_written', 'the grants store is not available — the share was not saved');
     reach.set(String(h), { ...(reach.get(String(h)) || {}), windowId: String(h), mode: R.MODES.includes(record.mode) ? record.mode : 'auto' });
     commitReach();
@@ -285,7 +290,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   function moveShare(from, to) {
     const g = grantsOf();
     const [r] = rowsOf(from);
-    if (g && r) { g.setMany([{ door: 'window', resource: String(to), to: r.to, except: r.except || [] }, { door: 'window', resource: String(from), to: [], except: [] }], 'keeper'); }
+    if (g && r) { g.setMany([{ door: 'window', resource: String(to), to: r.to, except: r.except || [] }, { door: 'window', resource: String(from), to: [], except: [], removeExcept: r.except || [] }], 'keeper'); }   // lane held-except-doors: they move with the share — named
     const m = reach.get(String(from));
     reach.delete(String(from));
     if (m) reach.set(String(to), { ...m, windowId: String(to) });
@@ -710,7 +715,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     // lane E (D1's one exception): a window an agent opened itself is exposed to that agent's own session
     const s0 = sessionsMap().get(facts.sessionId) || facts.session || {};
     const g = R.openerGrant(reachRecord(rec.id), { key: keyOf(s0, facts.sessionId), name: facts.name || '', at: now() });   // verify r6: the opener's OWN key
-    if (g.ok) putReach(rec.id, g.record, 'self-open');
+    if (g.ok) putReach(rec.id, g.record, 'self-open', [winKey({ kind: 'session', id: keyOf(s0, facts.sessionId) })].filter(Boolean));
     const l = newLease(rec, facts);
     l.modeSeen = reachRecord(rec.id).mode;
     leases.set(rec.id, l);
@@ -764,7 +769,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     // lane e2c: the launch mode lands in the reach record's `mode` (R.MODES) — ONE commit with the opener's grant
     let rr0 = g.ok ? g.record : reachRecord(rec.id);
     if (rr0.mode !== mv.mode) rr0 = R.setMode(rr0, mv.mode).record;
-    if (g.ok || rr0.mode !== reachRecord(rec.id).mode) putReach(rec.id, rr0, 'self-open');
+    if (g.ok || rr0.mode !== reachRecord(rec.id).mode) putReach(rec.id, rr0, 'self-open', [winKey({ kind: 'session', id: keyOf(s0, facts.sessionId) })].filter(Boolean));
     const l = newLease({ ...rec, origin: AGENT_BROWSER_ORIGIN }, facts);
     l.modeSeen = reachRecord(rec.id).mode;
     leases.set(rec.id, l);
@@ -1543,7 +1548,7 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     const p = resolvePrincipal(principal);
     const g = R.grant(reachRecord(rec.id), p, { by, at: now() });
     if (!g.ok) throw namedError(g.code, g.why);
-    putReach(rec.id, g.record, by === 'request' ? 'user' : by);
+    putReach(rec.id, g.record, by === 'request' ? 'user' : by, [winKey(p)].filter(Boolean));
     audit({ handle: rec.id, verb: 'reach-grant', by: 'user', ok: true, principal: { kind: p.kind, id: p.id }, grantOrigin: by, changed: g.changed }); // `origin` stays the WINDOW class (§6.6)
     return { ...reachOf(rec.id), granted: { principal: g.row.principal, by: g.row.by, changed: g.changed } };
   }
@@ -1560,12 +1565,12 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
   }
   /** lane grants-unify — «除了»: the members left OUT of this window's shared Task Groups / All agents (the whole list; a
    *  live session by its id). A holder now left out loses its lease at once (a narrowing is a revoke). */
-  function setReachExcept(handle, list) {
+  function setReachExcept(handle, list, removeExcept = []) {
     const rec = requireWindow(handle);
     if (!Array.isArray(list)) throw namedError('bad_principal', 'except is a list of principals');
     const r = R.setExcept(reachRecord(rec.id), list.map(resolvePrincipal));
     if (!r.ok) throw namedError(r.code, r.why);
-    putReach(rec.id, r.record);
+    putReach(rec.id, r.record, 'user', Array.isArray(removeExcept) ? removeExcept.filter((k) => typeof k === 'string') : []);   // lane held-except-doors: the ✕ the page named
     audit({ handle: rec.id, verb: 'reach-except', by: 'user', ok: true, except: r.record.except.map((p) => ({ kind: p.kind, id: p.id })), changed: r.changed });
     const dropped = dropUnreached(rec, 'left out of the share by the user');
     commitReach();
@@ -1587,9 +1592,10 @@ function create({ keeper, dataDir, env, activeSessions, log = console, now = Dat
     if (!v.share) return null;
     const rec = requireWindow(handle);
     let rr = reachRecord(rec.id);
-    for (const p of v.share.principals) { const g = R.grant(rr, resolvePrincipal(p), { by: 'user', at: now() }); if (g.ok) rr = g.record; }
+    const lifted = [];
+    for (const p of v.share.principals) { const rp = resolvePrincipal(p); const g = R.grant(rr, rp, { by: 'user', at: now() }); if (g.ok) { rr = g.record; if (rp && winKey(rp)) lifted.push(winKey(rp)); } }
     rr = R.setMode(rr, v.share.mode).record;
-    putReach(rec.id, rr);
+    putReach(rec.id, rr, 'user', lifted);
     // lane E verify r2 (M2): a remembered principal nobody answers to now (an ended session, a deleted Task Group) still
     // writes its row — the launcher said so in words; the audit counts them. r3 (F5): a group row the Task Group store
     // could not decide (a membership read threw) is `undecided`, never counted as nobody's

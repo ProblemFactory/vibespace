@@ -13,7 +13,12 @@
 //     (exit, window, browser profile, automation use + reach, channel reach, group visibility) and NEVER WOKEN by a
 //     channel notification (the real engine: a Task Group's round-robin, All agents' fan-out, a member left out of the
 //     ACCESS) — while another member is;
-//   ⑦ RED CONTROL — THE model's admits swapped for a patched copy that ignores `except`: every ⑥ leg goes red.
+//   ⑦ RED CONTROL — THE model's admits swapped for a patched copy that ignores `except`: every ⑥ leg goes red;
+//   ⑧ «除了» LEAVES BY NAME ONLY (lane held-except-doors, 2026-10-31): the writer refuses a write that leaves a stored
+//     exception out without naming it (`removeExcept`) — `except_unnamed`, nothing written (file, audit, memory), all or
+//     nothing in setMany; `remove` names the whole row; and THE CENSUS — every call of a picker's `except(` and of
+//     `pickToRow(` in src/lib passes `held` (the stored list a dialog keeps while its «除了» row is not offered), a planted
+//     door without it red by name.
 // Fast (in-process; one fake channel engine).
 import fs from 'node:fs';
 import path from 'node:path';
@@ -43,7 +48,9 @@ console.log('① the ONE writer: atomic, all or nothing, every refusal by name')
   const back = GS.create({ dataDir: d });
   ok(J(back.rowsFor('exit', 'h1:use')) === J(st.rowsFor('exit', 'h1:use')) && back.sync.version === st.sync.version, 'a new store over the same dir reads it back (rows and the mirror\'s version)');
   ok(st.set('exit', 'h1:use', { to: [G1], except: [M1] }).changed === false, 'the same row again changes nothing (no write, no line)');
-  ok(st.set('exit', 'h1:use', { to: [], except: [] }).changed === true && st.rowsFor('exit', 'h1:use').length === 0, 'an empty `to` and `except` REMOVES the row (nobody — one shape)');
+  // lane held-except-doors: the row holds an exception (M1) — an empty write that does not NAME it is refused (⑧ is the law)
+  ok(st.set('exit', 'h1:use', { to: [], except: [] }).code === 'except_unnamed' && st.rowsFor('exit', 'h1:use').length === 1, 'an empty write that leaves the row\'s exception out UNNAMED is refused except_unnamed (the row stays)');
+  ok(st.set('exit', 'h1:use', { to: [], except: [], removeExcept: [M1] }).changed === true && st.rowsFor('exit', 'h1:use').length === 0, 'an empty `to` and `except` REMOVES the row (nobody — one shape)');
   st.set('window', 'w1', { to: [{ kind: 'everyone' }] });
   const before = fs.readFileSync(path.join(d, 'grants.json'), 'utf-8');
   const bad = st.setMany([{ door: 'window', resource: 'w2', to: [G1] }, { door: 'window', resource: 'w3', to: [{ kind: 'session', id: 'x' }] }]);
@@ -66,7 +73,7 @@ console.log('① the ONE writer: atomic, all or nothing, every refusal by name')
   const s3 = GS.create({ dataDir: d3 });
   const rr = s3.rowsFor('exit', 'h:use');
   ok(!s3.health().readable && rr.length === 1 && GM.admits(rr, { conversationKey: 'x' }).code === 'unknown_shape' && s3.set('exit', 'h:use', { to: [G1] }).code === 'store_unreadable' && fs.readFileSync(path.join(d3, 'grants.json'), 'utf-8') === '{"v":1,"rows":[{"door":"exit"', 'an unreadable grants.json: every row is refused BY NAME (unknown_shape — never «nothing granted» silently, never everyone), every write store_unreadable, the file untouched');
-  ok(J([...GS.STORE_REFUSALS].sort()) === J(['not_written', 'store_unreadable']), 'STORE_REFUSALS names the store\'s own two');
+  ok(J([...GS.STORE_REFUSALS].sort()) === J(['except_unnamed', 'not_written', 'store_unreadable']), 'STORE_REFUSALS names the store\'s own three (lane held-except-doors: + except_unnamed)');
 }
 
 // ═══ ② the audit ═══════════════════════════════════════════════════════════
@@ -75,7 +82,7 @@ console.log('② the audit: one line per landed write — who, when, which row, 
   const d = dirOf('audit');
   const st = GS.create({ dataDir: d, now: () => 42 });
   st.set('browser-profile', 'p1', { to: [{ ...G1, name: 'Ops team' }], except: [{ ...M1, name: 'Mo' }] }, 'user');
-  st.set('browser-profile', 'p1', { to: [G1, { kind: 'conversation', key: 'c2' }] }, 'user');
+  st.set('browser-profile', 'p1', { to: [G1, { kind: 'conversation', key: 'c2' }], removeExcept: ['conversation:m1'] }, 'user');   // lane held-except-doors: the exception taken away BY NAME
   st.set('browser-profile', 'p1', { to: [G1, { kind: 'conversation', key: 'c2' }] }, 'user');   // no change ⇒ no line
   st.remove('browser-profile', 'p1', 'user');
   const lines = fs.readFileSync(st.auditFile, 'utf-8').trim().split('\n').map((l) => JSON.parse(l));
@@ -137,7 +144,7 @@ console.log('⑤ the channel rows: an exception rides only a Task Group / All ag
   const t = { key: 'a1/c1', adapterId: 'a1' };
   ok(ACL.effective({ kind: 'agent', id: 'm1', groups: ['g1'] }, t, cg.accountGrants('a1')).level === 'hidden' && ACL.effective({ kind: 'agent', id: 'm2', groups: ['g1'] }, t, cg.accountGrants('a1')).level === 'visible', 'channel reach: the member left out sees nothing of the account; another member does');
   ok(cg.hasAnyExcept() === true && CGM.create({ grants: GS.create({ memory: true }) }).hasAnyExcept() === false, 'the store answers whether ANY channel row leaves anybody out (no wake path re-asks reach otherwise)');
-  st.set('channel-reach', 'account:a1', { to: [{ ...G1, authority: 'send' }] });
+  st.set('channel-reach', 'account:a1', { to: [{ ...G1, authority: 'send' }], removeExcept: [M1] });   // lane held-except-doors: by name
   ok(cg.accessOf('account:a1')[0].except.length === 0, 'a change of the store is read at once (the door index is rebuilt on the change)');
 }
 
@@ -269,6 +276,59 @@ console.log('⑦ RED control: THE admits swapped for a patched copy that ignores
       ['round-robin', p.wake.roundRobin.calls.includes('m1')], ['fan-out', p.wake.fanOut.calls.includes('m1')], ['access left out', p.wake.accessLeftOut.m1Reads]];
     ok(inAll.every(([, v]) => v), `CONTROL: every door admits / wakes the member the owner left out — each ⑥ leg would be red (${inAll.filter(([, v]) => !v).map(([k]) => k).join(', ') || 'all eleven'})`, inAll);
   } finally { GM.admits = real; try { fs.rmSync(MZ.dir, { recursive: true, force: true }); } catch { } }
+}
+
+// ═══ ⑧ «除了» leaves by name only ═══════════════════════════════════════════════
+console.log('⑧ «除了» leaves by name only (lane held-except-doors): the ONE writer refuses an unnamed drop; every picker call passes `held`');
+{
+  const M2 = { kind: 'conversation', key: 'm2' };
+  const d = dirOf('named');
+  const st = GS.create({ dataDir: d, now: () => 7 });
+  st.set('exit', 'h:use', { to: [G1], except: [M1, M2] });
+  const disk = () => fs.readFileSync(path.join(d, 'grants.json'), 'utf-8'), audit = () => fs.readFileSync(st.auditFile, 'utf-8');
+  const d0 = disk(), a0 = audit(), r0 = J(st.rowsFor('exit', 'h:use'));
+  const un = st.set('exit', 'h:use', { to: [G1], except: [M2] });
+  ok(!un.ok && un.code === 'except_unnamed' && un.principal === 'conversation:m1' && un.error === GM.EXCEPT_UNNAMED_WORDS && disk() === d0 && audit() === a0 && J(st.rowsFor('exit', 'h:use')) === r0, 'a write that leaves a stored exception out UNNAMED is refused except_unnamed (its principal, the sentence) — the file, the audit and memory unchanged', un);
+  ok(st.set('exit', 'h:use', { to: [G1], except: [], removeExcept: ['conversation:m1'] }).code === 'except_unnamed', 'naming ONE of two exceptions it drops is still refused (the other one is named by the refusal)');
+  ok(st.set('exit', 'h:use', { to: [], except: [] }).code === 'except_unnamed' && st.rowsFor('exit', 'h:use').length === 1, 'an empty write (no one, no exception) is refused too while the row holds exceptions — a removal names them');
+  const w1 = st.set('exit', 'h:use', { to: [G1], except: [M2], removeExcept: ['conversation:m1'] });
+  const line = audit().trim().split('\n').map((l) => JSON.parse(l)).pop();
+  ok(w1.ok && w1.changed && J(st.rowsFor('exit', 'h:use')[0].except) === J([M2]) && J(line.except.removed) === J(['conversation:m1']), 'named by its principal KEY ⇒ written; the audit line says the key it removed', { w1, line });
+  ok(st.set('exit', 'h:use', { to: [G1], except: [], removeExcept: [{ ...M2, name: 'Mo' }] }).ok && st.rowsFor('exit', 'h:use')[0].except.length === 0, 'named by the ENTRY itself (a name beside it is no matter) ⇒ written');
+  st.set('exit', 'h:run', { to: [G1], except: [M1] });
+  st.set('exit', 'h:use', { to: [G1], except: [M1] });
+  const before = disk();
+  const many = st.setMany([{ door: 'exit', resource: 'h:use', to: [G1], except: [M1] }, { door: 'exit', resource: 'h:run', to: [G1], except: [] }]);
+  ok(!many.ok && many.code === 'except_unnamed' && many.resource === 'h:run' && disk() === before, 'setMany: one row dropping an exception unnamed refuses the WHOLE write (all or nothing), naming that row', many);
+  ok(st.setMany([{ door: 'exit', resource: 'h:run', to: [G1], except: [], removeExcept: ['conversation:m1'] }]).ok && st.remove('exit', 'h:use').ok && !st.rowsFor('exit', 'h:use').length, 'setMany takes a named drop; `remove` (the resource is gone) names the whole row by its call');
+  ok(GM.exceptUnnamed(null, [], []) === null && GM.exceptUnnamed({ except: [M1] }, [M1], []) === null && GM.exceptUnnamed({ except: [M1] }, [], [42, null, 'conversation:m1']) === null && GM.exceptUnnamed({ except: [M1, G1] }, [], ['group:g1']) === 'conversation:m1', 'GM.exceptUnnamed (PURE): no stored row ⇒ none; kept ⇒ none; junk names ignored; the first unnamed one by its key');
+  // THE CENSUS — a dialog's Save writes `picker.except(…)` / `pickToRow(…)`; each call passes the stored list (`held`)
+  const LIB = path.join(REPO, 'src/lib');
+  const OWN = ['principal-picker.js', 'principal-picker-model.js'];   // the picker's own two files: they DEFINE the calls
+  const stripC = (t) => t.replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' ')).split('\n').map((l) => (/^\s*\/\//.test(l) ? '' : l.replace(/\s\/\/\s.*$/, ''))).join('\n');
+  const argsAt = (s, i) => { let depth = 0; for (let j = i; j < s.length; j++) { if (s[j] === '(') depth++; else if (s[j] === ')') { depth--; if (!depth) return s.slice(i + 1, j); } } return s.slice(i + 1); };
+  const census = (files) => {
+    const calls = [], bad = [];
+    for (const [f, src0] of files) {
+      const s = stripC(src0);
+      for (const m of s.matchAll(/(?:\.except|\bpickToRow)\(/g)) {
+        const args = argsAt(s, m.index + m[0].length - 1);
+        const at = `${f}:${s.slice(0, m.index).split('\n').length}`;
+        calls.push(at);
+        if (!/\bheld\b/.test(args)) bad.push(`${at} ${m[0]}${args.slice(0, 50)})`);
+      }
+    }
+    return { calls, bad };
+  };
+  // only a file whose text names a call is stripped and read (a call cannot hide from the substring — the fast tier's sum)
+  const libFiles = fs.readdirSync(LIB).filter((f) => f.endsWith('.js') && !OWN.includes(f)).map((f) => [`src/lib/${f}`, fs.readFileSync(path.join(LIB, f), 'utf-8')]).filter(([, t]) => t.includes('.except(') || t.includes('pickToRow('));
+  const c = census(libFiles);
+  const doors = [...new Set(c.calls.map((x) => x.split(':')[0]))].sort();
+  ok(c.calls.length >= 12 && !c.bad.length && ['src/lib/browser-who-dialog.js', 'src/lib/channel-api-dialog.js', 'src/lib/channel-filter-editor.js', 'src/lib/exit-access-dialog.js', 'src/lib/task-detail.js', 'src/lib/vault-automation.js', 'src/lib/vault-use-row.js'].every((f) => doors.includes(f)), `THE CENSUS: every picker \`except(\` / \`pickToRow(\` call in src/lib passes \`held\` (${c.calls.length} calls in ${doors.length} files: ${doors.map((f) => f.replace('src/lib/', '')).join(', ')})`, c.bad);
+  const BW = fs.readFileSync(path.join(LIB, 'browser-who-dialog.js'), 'utf-8');
+  const plant = BW.replace('picker.except({ held: initialExcept });   // lane held-except-doors', 'picker.except();   // lane held-except-doors');
+  const pc = census([['src/lib/browser-who-dialog.js', plant]]);
+  ok(plant !== BW && pc.bad.length === 1 && /browser-who-dialog\.js:\d+ \.except\(\)/.test(pc.bad[0]), 'CONTROL: the browser door\'s Save planted back without `held` is red by name (its file:line)', pc.bad);
 }
 
 console.log(fail ? `FAILED (${pass} passed, ${fail} failed)` : `ALL PASS (${pass})`);

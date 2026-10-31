@@ -151,25 +151,27 @@ export function pickerRows(view, { sessions = [], groups = [], groupsOfSession =
   // lane grants-unify — «除了»: the members LEFT OUT (the view's `except`) as the picker's exception keys — a live
   // conversation by its picker row (sent again as a live pick: the server names it by its conversation), one not running
   // now / a deleted Task Group as an extra row of the exception list (sent back as the key / id it has)
-  const exceptSelected = [], exceptExtra = [], exceptWire = new Map();
+  // lane held-except-doors: `exceptPk` = each one's principal key (what a Save that takes it away NAMES — `removeExcept`)
+  const exceptSelected = [], exceptExtra = [], exceptWire = new Map(), exceptPk = new Map();
   for (const w of Array.isArray(use.except) ? use.except : []) {
     if (!w || typeof w !== 'object') continue;
     if (w.kind === 'task') {
       const key = `task:${w.id}`;
       if (!wire.has(key)) exceptExtra.push({ key, kind: 'group', id: w.id, name: w.title ? String(w.title) : t('a deleted Task Group'), hint: w.title ? '' : t('not in the list now'), groupIds: [], groupNames: [] });
       exceptWire.set(key, { kind: 'task', id: w.id });
-      exceptSelected.push(key);
+      exceptSelected.push(key); exceptPk.set(key, `group:${w.id}`);
       continue;
     }
+    const pk = w.conversationId ? `conversation:${w.conversationId}` : /^cid:/.test(String(w.key || '')) ? `conversation:${String(w.key).slice(4)}` : null;
     const live = rows.find((r) => r.kind === 'agent' && r.live && ((w.conversationId && String(r.id) === String(w.conversationId)) || (w.key && keyOfPick.get(r.key) === w.key)));
-    if (live) { exceptSelected.push(live.key); continue; }
+    if (live) { exceptSelected.push(live.key); if (pk) exceptPk.set(live.key, pk); continue; }
     const key = `session:x:${w.key}`;
     const name = (w.name && w.live ? w.name : '') || (w.conversationId ? nameOfConversation(w.conversationId) : '') || t('A conversation that is not running now');
     exceptExtra.push({ key, kind: 'agent', id: w.conversationId || w.key, name, live: false, hint: t('not running now'), groupIds: [], groupNames: [] });
     exceptWire.set(key, { kind: 'session', key: w.key });
-    exceptSelected.push(key);
+    exceptSelected.push(key); if (pk) exceptPk.set(key, pk);
   }
-  return { rows, selected, remote, wire, keyOfPick, exceptSelected, exceptExtra, exceptWire };
+  return { rows, selected, remote, wire, keyOfPick, exceptSelected, exceptExtra, exceptWire, exceptPk };
 }
 /** lane grants-unify — «除了»: the picker's exception keys → the PATCH's `except` rows (a live conversation as a live pick —
  *  the server names it by its conversation, never giving it a browser key; a kept row as the key / id it has). */
@@ -234,6 +236,7 @@ export function refusalWords(r, t = (s) => s, { max = 64 } = {}) {
     case 'unknown_conversation': return t('That conversation can no longer be added — pick it again from the list');
     case 'too_many': return t('At most {n} conversations and Task Groups', { n: max });
     case 'list-changed': return t('The list changed while this dialog was open (another window, or an agent) — here it is as it is now; nothing was saved');
+    case 'except_unnamed': return t('This grant changed while the dialog was open — close it and open it again');   // lane held-except-doors
     default: return null;
   }
 }

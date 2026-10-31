@@ -45,7 +45,10 @@ if (args.includes('--help')) { console.log('Usage: claude [options]'); process.e
 const SID = 'f01d0000-0000-4000-8000-' + String(process.pid).padStart(12, '0');
 fs.writeFileSync(${JSON.stringify(stubDir)} + '/env-' + process.pid + '.json', JSON.stringify({ sid: SID, env: process.env }));
 const out = (o) => process.stdout.write(JSON.stringify(o) + '\\n');
-out({ type: 'system', subtype: 'init', session_id: SID, model: 'claude-fable-5', cwd: process.cwd(), tools: [], permissionMode: 'default', claude_code_version: '2.1.274' });
+// lane held-except-doors r2: a cwd ending «-held-init» holds the init (the conversation's OWN id) until <cwd>/go exists — a
+// conversation with no id of its own yet, a pending fork's shape (the hub keys it webui:<id> until then)
+const init = () => out({ type: 'system', subtype: 'init', session_id: SID, model: 'claude-fable-5', cwd: process.cwd(), tools: [], permissionMode: 'default', claude_code_version: '2.1.274' });
+if (process.cwd().endsWith('-held-init')) { const t = setInterval(() => { if (fs.existsSync(process.cwd() + '/go')) { clearInterval(t); init(); } }, 50); } else init();
 let n = 0, buf = '';
 process.stdin.on('data', (d) => {
   buf += d; let i;

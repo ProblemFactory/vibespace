@@ -359,12 +359,12 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
   function hydrateAllUse() { for (const p of reg.profiles) hydrateUse(p); }
   let ownUseWrite = false;   // the keeper's own write re-judges itself (its answer names who was detached)
   /** THE ONE WRITER for a profile's list: the row → the store (refused by name, nothing changed), then the mirror. */
-  function writeUseRow(p, row, by = 'user') {
+  function writeUseRow(p, row, by = 'user', named = []) {
     const g = grantsOf();
     if (!g) throw namedError('not_written', 'the grants store is not available — "Who can use it" was not changed');
     let w;
     ownUseWrite = true;
-    try { w = g.set('browser-profile', p.id, { to: row.to || [], except: row.except || [] }, by); } finally { ownUseWrite = false; }
+    try { w = g.set('browser-profile', p.id, { to: row.to || [], except: row.except || [], removeExcept: [...(row.removeExcept || []), ...named] }, by); } finally { ownUseWrite = false; }   // lane held-except-doors: an exception leaves by name only (the PATCH's `named`, a pick's own lift)
     if (!w.ok) throw namedError(w.code, w.error || w.code);
     hydrateUse(p);
     return w;
@@ -1373,16 +1373,19 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     if (isEph(p)) throw namedError('not_editable', `"${p.label}" is a conversation's managed ephemeral browser — it has no editable fields (it goes with its conversation); a login that should survive belongs in a named profile`);
     // "Who can use it" is a LIST (2026-09-27): `use` ({mode:'all'} | {mode:'only', who:[…]}) + the `base` stamp the reader
     // was given = the panel dialog's Save — a USER act. The 2.369.194 body (`scope` / `conversation`) is refused by name.
-    const allowed = new Set(['record', 'label', 'notes', 'sharing', 'use', 'base', 'recordMine']); // + BROWSE YOURSELF: "Also record my own actions"
+    const allowed = new Set(['record', 'label', 'notes', 'sharing', 'use', 'base', 'recordMine', 'removeExcept']); // + BROWSE YOURSELF: "Also record my own actions"
     const keys = Object.keys(patch || {}).filter((k) => patch[k] !== undefined);
     if (keys.includes('scope') || keys.includes('conversation')) throw namedError('bad-request', '"Who can use it" is a list now — send `use`: {mode:"all"} or {mode:"only", who:[{kind:"task", id} | {kind:"session", key}]} with the `base` stamp you read');
     const bad = keys.filter((k) => !allowed.has(k));
     if (bad.length) throw namedError('bad-request', `these fields cannot be changed here: ${bad.join(', ')} (only record / label / notes / sharing / use / recordMine)`);
     if (!keys.filter((k) => k !== 'base').length) throw namedError('bad-request', 'nothing to change');
     if (keys.includes('base') && !keys.includes('use')) throw namedError('bad-request', '`base` goes with `use`');
+    // lane held-except-doors: `removeExcept` = the exceptions («除了») this Save takes away, by principal key — the dialog SAID
+    // each («X will no longer be excluded»); one left out unnamed is refused by the ONE writer (`except_unnamed`)
+    if (keys.includes('removeExcept') && (!keys.includes('use') || !Array.isArray(patch.removeExcept) || patch.removeExcept.length > 1024 || patch.removeExcept.some((k) => typeof k !== 'string' || k.length > 260))) throw namedError('bad-request', '`removeExcept` goes with `use`: a list of the principal keys this Save takes out of «Except»');
     // `use` is saved ON ITS OWN: its narrowing detaches leases (each detach commits), so a later field refused in the same
     // body would leave half a write on disk
-    if (keys.includes('use') && keys.some((k) => k !== 'use' && k !== 'base')) throw namedError('bad-request', '`use` is saved on its own — send the other fields in another request');
+    if (keys.includes('use') && keys.some((k) => k !== 'use' && k !== 'base' && k !== 'removeExcept')) throw namedError('bad-request', '`use` is saved on its own — send the other fields in another request');
     const changed = {};
     let detached = [], undecided = [], added = [];
     if (keys.includes('use')) {
@@ -1397,7 +1400,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
       const next = { ...p, grantUse: { to: v.row.to, except: v.row.except } };
       if (B.useStamp(next) !== wasStamp) {
         const wasRows = new Set((was.who || []).map((w) => (w.kind === 'session' ? 's:' + w.key : 't:' + w.id)));
-        writeUseRow(p, v.row, 'user');   // lane grants-unify: THE ONE WRITER (the store), the mirror refreshed
+        writeUseRow(p, v.row, 'user', patch.removeExcept || []);   // lane grants-unify: THE ONE WRITER (the store), the mirror refreshed
         p.scopeAt = now(); // the instant of the last change — logs and the row's tooltip; never an authorization input
         const nowUse = B.useDigestOf(p);
         added = (nowUse.who || []).filter((w) => !wasRows.has(w.kind === 'session' ? 's:' + w.key : 't:' + w.id));
@@ -1577,7 +1580,7 @@ function create({ dataDir, homeDir = os.homedir(), env = () => ({}), broadcast =
     const ck = conversationOfKey(browserKey);
     const row = ck ? B.rowWithConversation(p, ck) : null;
     if (!row) return null;
-    try { writeUseRow(p, row, 'user'); } catch (e) { log.warn?.(`[browser] ${B.parentKeyOf(browserKey)} NOT added to who can use ${p.id} "${p.label}" — ${e && e.message}`); return null; }
+    try { writeUseRow(p, row, 'user', [`conversation:${ck}`]); } catch (e) { log.warn?.(`[browser] ${B.parentKeyOf(browserKey)} NOT added to who can use ${p.id} "${p.label}" — ${e && e.message}`); return null; }
     p.scopeAt = now();
     log.log?.(`[browser] ${B.parentKeyOf(browserKey)} added to who can use ${p.id} "${p.label}" — the user picked it for that conversation (now ${whoWords(p)})`);
     return { profileId: p.id, label: p.label };

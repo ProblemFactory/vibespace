@@ -253,7 +253,7 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
   let picker = null;
   // the unsaved guard (test-dialog-unsaved-census): who, the hosts and the end as the dialog opened — a close with a change asks
   let start = null, saveNow = () => false;
-  const stateOf = (pol) => JSON.stringify([picker ? picker.selected().slice().sort() : [], picker ? picker.except().slice().sort() : [], ownBox ? ownBox.checked : null, hostsIn ? hostsIn.value.trim() : '', endSel ? endSel.value : '', pol !== undefined ? pol : polIn ? polIn.value.trim() : '']);
+  const stateOf = (pol) => JSON.stringify([picker ? picker.selected().slice().sort() : [], picker ? picker.except({ held }).slice().sort() : [], ownBox ? ownBox.checked : null, hostsIn ? hostsIn.value.trim() : '', endSel ? endSel.value : '', pol !== undefined ? pol : polIn ? polIn.value.trim() : '']);
   const { body, close, raised } = createModalShell({ id: 'vault-use-grant', kind: 'form', key: row.id, title: t('Who may use «{name}»', { name: row.label }), dialogClass: 'vault-dialog-box vw-ak-dialog vw-use-dialog', escapeToClose: true, onClose: () => { try { picker && picker.close(); } catch { } },
     unsaved: { isDirty: () => start !== null && stateOf() !== start, save: () => saveNow() } });
   if (raised) return null;   // raised: the same entry's «Who may use» form, as it was (int361, dialog-yield §103 r3: key = the entry)
@@ -319,7 +319,7 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
   const planOf = () => {
     const typed = hostsIn.value.split(/[\s,]+/).map((h) => h.trim()).filter(Boolean);
     const hosts = ownBox && ownBox.checked ? [ENTRY_HOSTS] : typed;
-    const pick = pickToRow(picker.knownRows(), picker.selected(), picker.except(), { held });   // r10 (MAJOR): the 除了 the picker does not offer is kept as stored
+    const pick = pickToRow(picker.knownRows(), picker.selected(), picker.except({ held }), { held });   // r10 (MAJOR): the 除了 the picker does not offer is kept as stored (lane held-except-doors: the picker's own answer says so too)
     const had = new Map((snap ? snap.to : members).map((m) => [keyOfM(m), m]));   // r11: by the principal; the row as it landed
     const to = [], fresh = [], kept = [], gone = [];
     for (const p of pick.to) {

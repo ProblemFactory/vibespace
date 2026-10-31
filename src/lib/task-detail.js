@@ -7,7 +7,7 @@ import { blurCommits, afterPointerUp } from './blur-commit.js'; // a box saves w
 import { pathField } from './path-field.js'; // lane path-field's component — the Context table's path cells, the export file
 import { KEY_FILES } from '../task-context.js'; // PURE: the Context table's default key files (the store's rules)
 import { principalPicker, rosterFromApp } from './principal-picker.js'; // lane grants-unify: the «除了» row of the visibility
-import { rowToPick, pickToRow } from './principal-picker-model.js';
+import { rowToPick, pickToRow, exceptSaved } from './principal-picker-model.js';
 
 /**
  * THE TASK GROUP WINDOW (lane task-group-context — the POC v2.2 Group board + the owner's fourth level, 2026-10-23).
@@ -593,10 +593,22 @@ export function openTaskDetail(app, taskId, { syncId, tab, full } = {}) {
     const evGroupKey = `group:${task.id}`;
     const evRows = () => rosterFromApp(app).filter((r) => r.kind === 'agent' || r.key === evGroupKey);
     const evPick = rowToPick({ to: [{ kind: 'group', id: task.id }], except: task.externalVisibilityExcept || [] }, evRows(), { notRunning: t('not running now'), deletedGroup: t('a deleted Task Group') });
+    let evHeld = evPick.except.slice();   // lane held-except-doors: the 除了 as stored now
     const evExcept = principalPicker({
       items: () => evRows(), app, multi: true, selected: [evGroupKey], cls: 'pp-except-only',
       label: t('External visibility'),
-      except: { selected: evPick.except, extra: evPick.extra, onChange: (keys) => { const row = pickToRow([...evRows(), ...evPick.extra], [evGroupKey], keys); patch({ externalVisibilityExcept: row.except }); } },
+      // lane held-except-doors (judged): this group is always picked, so the row is always offered and a chip's ✕ IS the shown
+      // removal (each change lands at its click — no Save to preview); `held` = the 除了 as stored now (were the group's own row
+      // ever missing from the roster, the stored list rides as it is), and each one taken away is NAMED on the wire
+      except: { selected: evPick.except, extra: evPick.extra, onChange: (keys) => {
+        const rows = [...evRows(), ...evPick.extra, ...evExcept.knownRows()];
+        const row = pickToRow(rows, [evGroupKey], keys, { held: evHeld });
+        const pk = (p) => (p.kind === 'group' ? `group:${p.id}` : `conversation:${p.key}`);
+        const keep = new Set(row.except.map(pk));
+        const gone = pickToRow(rows, [evGroupKey], evHeld, { held: evHeld }).except.map(pk).filter((k) => !keep.has(k));
+        evHeld = exceptSaved(rows, [evGroupKey], keys, { held: evHeld });
+        patch({ externalVisibilityExcept: row.except, ...(gone.length ? { externalVisibilityRemoveExcept: gone } : {}) });
+      } },
     });
     evExcept.el.classList.add('task-detail-ev-except');
     evExcept.el.dataset.moreRow = 'visibility-except';

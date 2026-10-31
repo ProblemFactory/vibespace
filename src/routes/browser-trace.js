@@ -106,6 +106,7 @@ const STATUS = {
   sharing_refused: 400, pinned: 409, not_editable: 409,
   // "Who can use it" is a LIST (2026-09-27): the whole-list rule + the write's refusals + the resolver's
   'list-changed': 409, empty_list: 400, too_many: 400, unknown_task: 400, unknown_conversation: 400, no_browser_key: 409, 'session-gone': 410,
+  except_unnamed: 409,   // lane held-except-doors: a Save that leaves a «除了» out without naming it (the ONE writer's refusal)
   // recording (D7)
   recording_off: 409, recording_floor: 409, recording_not_ours: 400, recording_not_local: 400, record_failed: 502, not_recording: 409, dir_unwritable: 500,
 };

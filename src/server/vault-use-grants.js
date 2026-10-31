@@ -245,7 +245,7 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
     const windowsGone = [...heldW].flatMap(([pk, ws]) => (keptW.has(pk) ? [] : ws.filter((h) => h.until > t0).map((h) => ({ principal: pk, until: h.until }))));
     const g = store();
     const gen = nextGen();
-    const w = rowTo.length || v.row.except.length ? g.set(U.DOOR, String(id), { to: stamp(id, rowTo, v.row.except, gen), except: v.row.except }, by) : g.remove(U.DOOR, String(id), by);
+    const w = rowTo.length || v.row.except.length ? g.set(U.DOOR, String(id), { to: stamp(id, rowTo, v.row.except, gen), except: v.row.except, removeExcept: [...named0] }, by) : g.remove(U.DOOR, String(id), by);   // lane held-except-doors: the ONE writer hears the names this Save gave (THE SEAM: it refuses an unnamed drop too)
     if (w && w.ok) commitGen(id, gen);
     return landed(w, { id: String(id), members: v.row.to.length, ...(windowsGone.length ? { windowsGone } : {}), ...(swept.length ? { swept } : {}), ...(w && w.ok ? { use: landedUse(id) } : {}) });   // r11 (MINOR 3): the row as it landed
   }
@@ -261,7 +261,7 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
     if (!v.ok) return v;
     const g = store();
     const gen = nextGen();
-    const w = g.set(U.DOOR, String(id), { to: stamp(id, plan.to, plan.except, gen), except: plan.except }, by);
+    const w = g.set(U.DOOR, String(id), { to: stamp(id, plan.to, plan.except, gen), except: plan.except, removeExcept: [GM.principalKey(GM.bareOf(principal))] }, by);   // lane held-except-doors: a member added by name is no longer left out — named
     if (w && w.ok) commitGen(id, gen);
     return landed(w, { id: String(id), grant: U.grantIdOf(String(id), GM.principalKey(GM.bareOf(principal))), widened: plan.widened, added: plan.added, changes: plan.changes });
   }
@@ -295,7 +295,7 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
     const to = row && Array.isArray(row.to) ? row.to : [], except = row && Array.isArray(row.except) ? row.except : [];
     const g = store();
     const gen = nextGen();
-    const w = to.length || except.length ? g.set(U.DOOR, String(id), { to: stamp(id, to, except, gen), except }, by) : rowOf(id) ? g.remove(U.DOOR, String(id), by) : { ok: true };
+    const w = to.length || except.length ? g.set(U.DOOR, String(id), { to: stamp(id, to, except, gen), except, removeExcept: ((rowOf(id) || {}).except || []) }, by) : rowOf(id) ? g.remove(U.DOOR, String(id), by) : { ok: true };   // lane held-except-doors: the restore replaces the row whole — it names what it replaces
     if (w && w.ok) commitGen(id, gen);
     return landed(w, { restored: true });
   }

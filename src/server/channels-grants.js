@@ -201,13 +201,28 @@ function create({ grants = null, dataDir = null } = {}) {
   };
   const exceptEntries = (list) => (Array.isArray(list) ? list.map((x) => (x && (x.kind === 'agent' || x.kind === 'everyone') ? GM.fromChannelPrincipal(x) : GM.bareOf(x))).map((x) => x || { kind: 'invalid' }) : []);
   /** The changes ONE grain write makes — its access row and its watch row (`except` / `watchExcept` = the lists to keep:
-   *  absent ⇒ the stored ones, filtered to members a group / All agents row still names). */
-  function grainChanges(res, { access = null, watchers = null, except = undefined, watchExcept = undefined } = {}) {
+   *  absent ⇒ the stored ones). lane held-except-doors: a row with no Task Group / All agents left KEEPS its exceptions (they
+   *  hold again when one is given back — a write never drops an exception it did not name); `removeExcept` /
+   *  `watchRemoveExcept` name the ones the person's Save takes away. r2 (主开发's acceptance, MAJOR — the compat assignment,
+   *  an agent's own watch and the owner's Approve put a member on the row BY ITSELF over its kept exception ⇒
+   *  except_conflicts, a 500): a write that keeps the stored list (`except` absent) and gives a member its OWN entry LIFTS
+   *  that member's own exception BY NAME (`lift`: 'always' — the owner's writes —, 'dormant' — an agent's own: only where
+   *  no Task Group / All agents entry is on the row, a live exception is the owner's to lift —, false); a list the caller
+   *  sent is never edited here (a member both given and left out there ⇒ except_conflicts, the caller's contradiction). */
+  function grainChanges(res, { access = null, watchers = null, except = undefined, watchExcept = undefined, removeExcept = [], watchRemoveExcept = [], lift = false } = {}) {
+    const rowOfChange = (door, to, stored, given, named) => {
+      let ex = given === undefined ? stored : exceptEntries(given);
+      const rx = Array.isArray(named) ? [...named] : [];
+      if (given === undefined && (lift === 'always' || (lift === 'dormant' && !to.some((e) => e.kind === 'group' || e.kind === 'everyone')))) {
+        const own = new Set(to.map((e) => GM.principalKey(e)));
+        const up = ex.filter((e) => own.has(GM.principalKey(e)));
+        if (up.length) { ex = ex.filter((e) => !own.has(GM.principalKey(e))); rx.push(...up.map((e) => GM.principalKey(e))); }
+      }
+      return { door, resource: res, to, except: ex, removeExcept: rx };
+    };
     const out = [];
-    if (access) out.push({ door: DOORS.reach, resource: res, to: access.map(entryOfAccess).filter(Boolean), except: except === undefined ? [...exceptOf(res)] : exceptEntries(except) });
-    if (watchers) out.push({ door: DOORS.watch, resource: res, to: watchers.map((w) => GM.fromChannelPrincipal(w && w.principal)).filter(Boolean), except: watchExcept === undefined ? [...watchOf(res).except] : exceptEntries(watchExcept) });
-    // an exception only means something beside a Task Group or All agents: none left ⇒ the list goes (never a refusal)
-    for (const c of out) if (!c.to.some((e) => e.kind === 'group' || e.kind === 'everyone')) c.except = [];
+    if (access) out.push(rowOfChange(DOORS.reach, access.map(entryOfAccess).filter(Boolean), [...exceptOf(res)], except, removeExcept));
+    if (watchers) out.push(rowOfChange(DOORS.watch, watchers.map((w) => GM.fromChannelPrincipal(w && w.principal)).filter(Boolean), [...watchOf(res).except], watchExcept, watchRemoveExcept));
     return out;
   }
   /** ONE grain's rows, written together (all or nothing). → the store's answer. */
@@ -226,23 +241,28 @@ function create({ grants = null, dataDir = null } = {}) {
     const k = pkOf(principal);
     const rest = r.to.filter((e) => GM.principalKey(e) !== k);
     const add = level ? entryOfLevel({ principal, level, at, by }) : null;
-    return s.set(DOORS.reach, res, { to: add ? [...rest, add] : rest, except: [...r.except] }, by);
+    const up = add ? r.except.filter((e) => GM.principalKey(e) === k) : [];   // lane held-except-doors r2: granted by itself ⇒ its own exception lifted, by name
+    return s.set(DOORS.reach, res, { to: add ? [...rest, add] : rest, except: r.except.filter((e) => !up.includes(e)), removeExcept: up.map((e) => GM.principalKey(e)) }, by);
   }
-  /** A credential's whole tier list (`rows` in channel-acl's api shape). */
-  function setApiRows(cred, rows, { except = undefined, by = 'user' } = {}) {
+  /** A credential's whole tier list (`rows` in channel-acl's api shape). lane held-except-doors: the exceptions are kept with
+   *  no Task Group / All agents left (they hold again when one is given back); `removeExcept` names the ones the Save takes away. */
+  function setApiRows(cred, rows, { except = undefined, removeExcept = [], by = 'user' } = {}) {
     const s = S();
     if (!s) return { ok: false, code: 'store_unreadable', error: 'the grants store is not available — nothing was written' };
     const to = (Array.isArray(rows) ? rows : []).map(entryOfApi).filter(Boolean);
-    const ex = to.some((e) => e.kind === 'group' || e.kind === 'everyone') ? (except === undefined ? [...rowOf(DOORS.api, cred).except] : exceptEntries(except)) : [];
-    return s.set(DOORS.api, String(cred), { to, except: ex }, by);
+    const ex = except === undefined ? [...rowOf(DOORS.api, cred).except] : exceptEntries(except);
+    return s.set(DOORS.api, String(cred), { to, except: ex, removeExcept: Array.isArray(removeExcept) ? removeExcept : [] }, by);
   }
+  /** lane held-except-doors r2: the exceptions as STORED (the store's own row — one this release cannot read included, which
+   *  the normalized index reads as none) — what a removal names. */
+  const storedExcept = (s, door, res) => { const [r] = s.rowsFor(door, res); return r && Array.isArray(r.except) ? r.except : []; };
   /** Every channel row of one account (its grains, its conversations' rows, its rules) — an account removed. */
   function removeAccount(adapterId, { patternIds = [], by = 'user' } = {}) {
     const s = S();
     if (!s) return { ok: false, code: 'store_unreadable', error: 'the grants store is not available — nothing was written' };
     const list = [];
     for (const door of [DOORS.reach, DOORS.watch]) {
-      for (const res of [RES.account(adapterId), RES.accountUser(adapterId), ...patternIds.map(RES.rule), ...resourcesOf(door, `conversation:${adapterId}/`)]) if (doorIndex(door).rows.has(res)) list.push({ door, resource: res, to: [], except: [] });
+      for (const res of [RES.account(adapterId), RES.accountUser(adapterId), ...patternIds.map(RES.rule), ...resourcesOf(door, `conversation:${adapterId}/`)]) if (doorIndex(door).rows.has(res)) list.push({ door, resource: res, to: [], except: [], removeExcept: storedExcept(s, door, res) });   // lane held-except-doors: the account is gone — its exceptions go by name
     }
     return list.length ? s.setMany(list, by) : { ok: true, changed: [] };
   }
@@ -251,7 +271,7 @@ function create({ grants = null, dataDir = null } = {}) {
     const s = S();
     if (!s) return { ok: false, code: 'store_unreadable', error: 'the grants store is not available — nothing was written' };
     const res = RES.rule(patternId);
-    const list = [DOORS.reach, DOORS.watch].filter((d) => doorIndex(d).rows.has(res)).map((door) => ({ door, resource: res, to: [], except: [] }));
+    const list = [DOORS.reach, DOORS.watch].filter((d) => doorIndex(d).rows.has(res)).map((door) => ({ door, resource: res, to: [], except: [], removeExcept: storedExcept(s, door, res) }));   // lane held-except-doors: the rule is gone — by name
     return list.length ? s.setMany(list, by) : { ok: true, changed: [] };
   }
 
