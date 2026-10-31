@@ -172,6 +172,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   let pkCache = null;
   const pkIds = new Map(), pkAsks = new Map(), pkGrants = new Map();
   const pkGrantAsk = new WeakMap(); // r10 (acceptance r9 MINOR 1): a grant → the card whose «Allow once» made it — told when a later answer takes it back unused (pkGrantWithdrawn)
+  const pkSpend = (g) => { if (g) g.used = true; }; // r11 (acceptance r10 MAJOR): a registration grant SPENT is marked `used` on EVERY road — the hook road at its release, the kernel road at its verdict (it makes the key at once, nothing waits) — so a later answer takes nothing back and its card is never told «withdrawn… nothing was registered»
   const pkAnswered = new Map(); // r9 (acceptance r8 MAJOR): the owner's LATEST answer to a register card per grant key — the grant itself for «once», a dated mark for «no»; a grant taken by a waiting ceremony comes back only while it is still that answer (back() in pkGateOn)
   // lane passkey-binding-isolated: + the hook's ISOLATED WORLD name + the SECRET CustomEvent channel (128-bit: the page can neither
   // enter the world nor forge a report). Acceptance r2 of lane passkey-browse-yourself: the three names are DERIVED from the
@@ -1627,14 +1628,20 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (v.verdict === 'ask') return pkAsk(w, e, rec, v.rows);
     const taken = v.consumeGrant ? pkGrants.get(gk) || null : null; if (taken) pkGrants.delete(gk); // r8 (acceptance r7 MAJOR): the one-use registration grant is READ, JUDGED and CONSUMED as one step, here at the verdict — never in the job, which may wait behind the tab's drain while another tab or frame of the conversation reads the same grant (it finds none: no-grant)
     const latest = () => !taken || pkAnswered.get(gk) === taken; // r10 (acceptance r9 MAJOR): the owner's LATEST answer at that key is still the grant this ceremony took — read where the job acts, not only where it gives back
-    const outranked = async () => { // r10: a newer answer stands («no», or a newer «once») — nothing of the vault for this ceremony: no load, no release with the grant; the taken grant is DROPPED (never given back)
-      if (person) { e.pk.holds.delete(rec); rec.createdBy = null; await pkOnceGone(w, e, rec); return pkCtl(w, e, rec, 'release'); } // his own ceremony: the authenticator paired for it goes, Chrome's own window — as with no grant (never refused for the vault's sake)
-      rec.refused = true; rec.why = 'answered-again'; pkTrace(w, e, rec, 'refused', { why: rec.why }); await pkCtl(w, e, rec, 'refuse'); passkeyChanged(w, e); // the page gets its own refusal
+    const stands = () => { // r11 (acceptance r10 MINOR 2): the job's check tells the three cases apart → null (go) | the refusal's reason
+      if (!taken) return null;
+      const x = pkAnswered.get(gk);
+      if (x && x !== taken) return 'answered-again'; // a NEWER answer stands («no», or a newer «once»)
+      return x && now() <= taken.expiresAt ? null : 'expired-waiting'; // the entry GONE (pruned past its 10 min — by an answer anywhere) or past them now: the owner's 10 minutes are the law, never a newer answer
+    };
+    const outranked = async (why) => { // r10: a newer answer stands («no», or a newer «once») — nothing of the vault for this ceremony: no load, no release with the grant; the taken grant is DROPPED (never given back). r11: or the grant's 10 minutes ran out while it waited (`why`)
+      if (person) { e.pk.holds.delete(rec); rec.createdBy = null; rec.loaded = rec.uvSet = null; await pkOnceGone(w, e, rec); return pkCtl(w, e, rec, 'release'); } // his own ceremony: the authenticator paired for it goes, Chrome's own window — as with no grant (never refused for the vault's sake)
+      rec.refused = true; rec.why = why; pkTrace(w, e, rec, 'refused', { why: rec.why }); await pkCtl(w, e, rec, 'refuse'); passkeyChanged(w, e); // the page gets its own refusal — r11: what it loaded leaves at its end (rec.loaded / rec.uvSet were marked as the calls went out)
     };
     const back = () => { if (taken && latest()) pkGrants.set(gk, taken); }; // r8: a job that lets its ceremony go WITHOUT the vault (over before its turn, over while the authenticator paired, no authenticator) gives the grant back as it was — its own 10-min clock, never extended. r9 (acceptance r8 MAJOR): only while the owner's LATEST answer at that key is still this grant — a «no» or a newer «once» answered meanwhile (standing or already spent) outranks it, and it is dropped
     await pkDrain(w, e, async () => { // r7: the gate's touch of the authenticator is ONE drain — his pairing (r6: with the gate race's remove), the load, the release; an end that lands meanwhile unloads after it, what it loaded
       if (rec.outcome !== 'pending') return back(); // over before its turn: nothing paired, nothing loaded (r8: its grant back)
-      if (!latest()) return outranked(); // r10 (acceptance r9 MAJOR): the owner answered again while it waited its turn — before anything is paired or loaded
+      let why = stands(); if (why) return outranked(why); // r10 (acceptance r9 MAJOR): the owner answered again while it waited its turn — before anything is paired or loaded (r11: or its grant ran out meanwhile)
       if (person && !e.pk.auth) { // the vault key he chose: an authenticator for THIS ceremony only, Chrome's UI on (acceptance r3: `onceFor` — only ITS end removes it; r5: an end that landed while it was paired found no authenticator in pkEnd — it goes here, no key loaded)
         e.pk.pairs = (e.pk.pairs || 0) + 1; e.pk.auth = await pairAuthenticator(w, e, e.sid, { ui: true }); e.pk.once = !!e.pk.auth; e.pk.onceFor = e.pk.auth ? rec : null;
         if (rec.outcome !== 'pending') { back(); return pkOnceGone(w, e, rec); }
@@ -1655,14 +1662,14 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       const own = { auth: e.pk.auth, ids: loaded.map((l) => l.row.credentialId), uv: !!v.uv }; // r7 (acceptance r6 MAJOR): what THIS ceremony loads, captured before it loads — its clean-up acts on this alone (pkUnload)
       for (const r of e.pk.holds.keys()) if (!e.pk.records.includes(r)) e.pk.holds.delete(r); // (a record the tab let go of holds nothing)
       e.pk.holds.set(rec, own);
+      rec.loaded = own.ids; rec.uvSet = own.uv; // r11 (acceptance r10 MINOR 1): marked as the CDP calls go out, before any later check — a refusal after the load (outranked) unloads what went in and turns UV off at its end (pkUnload)
       for (const l of loaded) {
         const r = await call(w, 'WebAuthn.addCredential', { authenticatorId: own.auth, credential: { credentialId: b64(l.row.credentialId), isResidentCredential: true, rpId: l.row.rpId, privateKey: l.key, ...(l.row.userHandle ? { userHandle: b64(l.row.userHandle) } : {}), signCount: l.loadAs, ...(l.row.userName ? { userName: l.row.userName } : {}), ...(l.row.displayName ? { userDisplayName: l.row.displayName } : {}) } }, e.sid);
         if (r && r.error) say('pk-add:' + pid, `${pid}: a stored passkey was not loaded — ${r.error.message}`);
       }
       if (own.uv) await call(w, 'WebAuthn.setUserVerified', { authenticatorId: own.auth, isUserVerified: true }, e.sid);
-      if (!latest()) return outranked(); // r10: … and right before the release — an answer that came while it paired or loaded
-      if (taken) taken.used = true; // r10: the grant went with its release — a later answer takes nothing back (its card is not told)
-      rec.loaded = own.ids; rec.uvSet = own.uv;
+      why = stands(); if (why) return outranked(why); // r10: … and right before the release — an answer that came while it paired or loaded
+      pkSpend(taken); // r10: the grant went with its release — a later answer takes nothing back (its card is not told)
       await pkCtl(w, e, rec, 'release');
     });
     return v;
@@ -2078,7 +2085,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (v.verdict === 'ask') return pkAsk(w, e, rec, v.rows);
     const f = PS.kernelFlags(v, { kind: rec.kind, answer: rec.answer || null, takeover: rec.by === 'human', userVerification: q.userVerification });
     if (f.ask) return pkAsk(w, e, rec, v.load); // the page REQUIRES UV and nobody decided this ceremony: the owner's card is the verification
-    if (v.consumeGrant) pkGrants.delete(gk);
+    if (v.consumeGrant) { pkSpend(pkGrants.get(gk)); pkGrants.delete(gk); } // r11 (acceptance r10 MAJOR): spent here — the key is made at once
     return rec.kind === 'create' ? pkKernelCreate(w, e, rec, v, f) : pkKernelSign(w, e, rec, v, f);
   }
   /** A sign-in: the row (the page's allow list order, else the latest used), its key unsealed for ONE signature, the count bumped

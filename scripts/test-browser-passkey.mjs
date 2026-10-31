@@ -20,6 +20,9 @@
 //      decided THIS ceremony, the count written before the answer, the use law's line; the refusals by name; cancel ⇒ the page
 //      sees NotAllowedError; the page's own abort; P1's dismiss; an orphan surface; the vault locked; a kernel without the
 //      feature unchanged; no store
+//   ⑨r11 its acceptance r10: a grant SPENT is marked used on every road (⑧'s kernel road: a later answer never tells its card);
+//       a refusal right before the release unloads what went in (UV off at its end); a grant whose 10 minutes run out while its
+//       registration waits is refused by that reason (expired-waiting) — never answered-again, never released
 //   ⑨r10 its acceptance r9: the owner's latest answer wins at EVERY point before a registration goes — the drain job re-reads it
 //       before it loads and right before the release (refused answered-again; his road: Chrome's own window); a later answer that
 //       takes back an unused «Allow once» tells that card (its words + its For-you record's end); an answer at another key prunes
@@ -485,11 +488,11 @@ console.log('⑧ lane passkey-sink: THE KERNEL ROAD — a kernel with `webauthn`
   const O = 'https://example.test', U1 = Buffer.from('user-1').toString('base64url');
   async function kworld({ features, cipher = PS.cipherOf(crypto, crypto.randomBytes(32)), takeover = false, store = true, file0 = null } = {}) {
     const k = await startFakeKernel({ firstUrl: O + '/', mode: features ? { features } : {} });
-    const x = { k, file: file0, items: [], resolved: [], uses: [], logs: [], writes: [], takeover, cipher };
+    const x = { k, file: file0, items: [], resolved: [], uses: [], logs: [], writes: [], ended: [] /* ⑨r11: forYou.ended */, takeover, cipher };
     const passkeys = store ? { read: () => x.file, write: (o) => { x.writes.push({ answersBefore: k.webauthnAnswers().length, counts: (((o.profiles || {})['bp-1'] || {}).rows || []).map((r) => r.signCount) }); x.file = JSON.parse(JSON.stringify(o)); }, cipher: x.cipher } : null;
     x.w = Dm.create({ keeper: { cdpEndpointFor: async () => ({ ok: true, url: k.wsUrl }), onLease: () => () => {} }, log: { warn: (l) => x.logs.push(String(l)), log() {} }, enableTimeoutMs: 300, promptAskMs: 60, passkeyOrphanMs: 150,
       holdersOf: () => [{ browserKey: 'bk-1', sessionId: 's1' }], leaseCountOf: () => 1, labelOf: () => 'Work', passkeys, takeoverOf: () => x.takeover,
-      forYou: { add: (pid, it) => { x.items.push(it); return 'fy-' + x.items.length; }, resolve: (id) => x.resolved.push(id) },
+      forYou: { add: (pid, it) => { x.items.push(it); return 'fy-' + x.items.length; }, resolve: (id) => x.resolved.push(id), ended: (id, fact) => x.ended.push({ id, fact }) },
       vaultUse: (entry, use, o) => { x.uses.push({ entry, use, o }); return { receipt: 'vr-' + String(x.uses.length).padStart(12, '0') }; } });
     await x.w.arm('bp-1');
     x.rows = () => PS.profileOf(x.file, 'bp-1').rows;
@@ -598,6 +601,13 @@ console.log('⑧ lane passkey-sink: THE KERNEL ROAD — a kernel with `webauthn`
   c = x.k.triggerWebAuthn({ op: 'get', origin: O, noRequest: true });
   a = await Promise.race([c.answerPromise, sleep(3000).then(() => null)]);
   ok(a && a.outcome === 'cancelled' && a.error === 'NotAllowedError' && x.logs.some((l) => /came with no request this watch saw/.test(l)), '⑧k an orphan webauthn surface (no request seen — a reconnect) ⇒ cancelled after passkeyOrphanMs (1.5 s in the product), said once', a);
+  // ⑧ r11 — lane passkey-browse-yourself, acceptance r10 MAJOR (RED on 2b3cc419f): the kernel road SPENDS the grant it registers with
+  const p11 = await x.w.passkeyRegister({ ...T, rpId: 'example.test', user: 'bob' }), g11 = x.w.answerPasskey(p11.proposal.id, { choice: 'once', shown: p11.proposal.shown }).ok;
+  const a11 = await settled(create(x, { user: { id: Buffer.from('user-11').toString('base64url'), name: 'bob', displayName: 'Bob' } }));
+  const q11 = await x.w.passkeyRegister({ ...T, rpId: 'example.test', user: 'carol' }), n11 = x.w.answerPasskey(q11.proposal.id, { choice: 'no', shown: q11.proposal.shown }).ok;
+  const K11 = { g11, created: a11.outcome, bob: x.rows().some((q) => q.userName === 'bob'), n11, withdrawnAt: p11.proposal.withdrawnAt || null, ended: x.ended.length, words: PK.passkeyCardWords(p11.proposal, null).outcome };
+  ok(g11 && K11.created === 'completed' && K11.bob && n11 && !K11.withdrawnAt && K11.ended === 0 && /^Allowed once — the agent may register the passkey now/.test(K11.words),
+    '⑧ r11 (lane passkey-browse-yourself, acceptance r10 MAJOR): a registration on the KERNEL road spends its «Allow once» — marked used, as the hook road\'s release marks it; a later answer for the same site and conversation within the 10 minutes takes nothing back: that card is never told «withdrawn… nothing was registered with it», its For-you record gets no end (2b3cc419f: told — false, the passkey is in the vault)', K11);
   await x.close();
   // ⑧l the vault locked ⇒ webauthn_key_locked + the existing key For-you line; nothing signed
   const locked = { seal: (t) => ({ ok: false, code: 'key-unreadable:vault_locked', file: 'browser-passkeys.key', words: 'the vault is locked' }), open: (t) => ({ ok: false, code: 'key-unreadable:vault_locked', file: 'browser-passkeys.key', words: 'the vault is locked' }) };
@@ -1739,6 +1749,42 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
     const R10f = { f10: !!f10, n10f, n10g, rel54: v8(54, 'release', 'T2'), spent: !!(f10 && f10.withdrawnAt), expired: !!(h10 && h10.withdrawnAt), ended: X.world.ended.length - m10y, events: X.events.slice(n10y).filter((ev) => ev.kind === 'passkey-proposal' && ev.card && f10 && ev.card.id === f10.id).length + X.events.slice(nh10).filter((ev) => ev.kind === 'passkey-proposal' && ev.card && h10 && ev.card.id === h10.id).length, words: f10 ? PK.passkeyCardWords(f10, null).outcome : '' };
     ok(R10f.f10 && n10f && h10 && n10g && R10f.rel54 === 1 && !R10f.spent && !R10f.expired && R10f.ended === 0 && R10f.events === 0 && /^Allowed once — the agent may register the passkey now/.test(R10f.words),
       '⑨r10 MINOR 1 kept: a later «no» tells only a grant it TAKES BACK — a spent «once» (T2\'s #54 released with it) and an expired one (11 min) are not told: no withdrawnAt, no event, no record end', R10f);
+    // ⑨r11 — acceptance r10 of lane passkey-browse-yourself (2b3cc419f), in ⑨r8's world: every leg below is RED on 2b3cc419f by name
+    console.log('⑨r11 acceptance r10: a refusal right before the release unloads what went in (UV off at its end); a grant whose 10 minutes run out while its registration waits is refused by that honest reason — never answered-again, never released');
+    await until8(() => !draining7(X), 300);
+    const auth11 = () => X.w().targets.get('T1').pk.auth;
+    // MINOR 1: «no» answered while #55's job loads (setUserVerified held) — refused before the release, and at its end UV is off, no key left
+    const u11 = await card10('once');
+    X.world.hold = new Set(['WebAuthn.setUserVerified']); X.world.held = [];
+    doc6(X, 57, 'F57'); create8(55, 57); await until8(() => X.world.held.length === 1, 300);
+    const n11u = await answer9('no');
+    free7(X); await until8(() => !draining7(X), 300); await until8(() => false, 1);
+    const uvAt11 = X.world.chrome.uv.get(auth11());
+    fail9(55, 57); await until8(() => !draining7(X), 300); await until8(() => false, 1);
+    const R11u = { u11: !!u11, n11u, rel55: v8(55, 'release'), ref55: v8(55, 'refuse'), why55: why8(55), uvAtRefusal: uvAt11, uvAfterEnd: X.world.chrome.uv.get(auth11()), keys: [...(X.world.chrome.creds.get(auth11()) || [])].length };
+    ok(R11u.u11 && n11u && R11u.rel55 === 0 && R11u.ref55 === 1 && R11u.why55 === 'answered-again' && R11u.uvAtRefusal === true && R11u.uvAfterEnd === false && R11u.keys === 0,
+      '⑨r11 MINOR 1 (a refusal right before the release): the owner answers «no» while #55\'s job loads (setUserVerified held) — #55 refused answered-again, and what went in leaves at its end: the agent\'s shared authenticator\'s UV OFF, no key on it (2b3cc419f: UV stayed on — rec.uvSet was marked only after the check)', R11u);
+    // MINOR 2: #58 takes the grant at its verdict and waits behind the queued get past the grant's 10 minutes — no other answer meanwhile
+    const x11 = await card10('once');
+    await queue8(56, 58, [[58, 60]]);
+    X.step(11 * 60e3);
+    await settle8([[57, 59]]);
+    create8(59, 7, true); await until8(() => gone8(59, 'T2'), 300);
+    const R11x = { x11: !!x11, rel58: v8(58, 'release'), ref58: v8(58, 'refuse'), why58: why8(58), by58: rec10(58).createdBy || null, why59: why8(59, 'T2'), told: !!(x11 && x11.withdrawnAt), said: /ran out \(its 10 minutes\) while this registration waited its turn/.test(PK.refusedText('expired-waiting', 'example.test')) && require(path.join(REPO, 'src/browser-passkey-store.js')).REASONS.includes('expired-waiting') };
+    ok(R11x.x11 && R11x.rel58 === 0 && R11x.ref58 === 1 && R11x.why58 === 'expired-waiting' && !R11x.by58 && R11x.why59 === 'no-grant' && !R11x.told && R11x.said,
+      '⑨r11 MINOR 2 (the grant runs out while it waits — no other answer): #58 took the grant at its verdict and waits behind the queued get 11 minutes — at its turn it is refused by the honest reason (expired-waiting, its own sentence), never released; the grant is gone (T2: no-grant); its card is not told «withdrawn» (2b3cc419f: #58 released on a grant past its 10 minutes)', R11x);
+    fail9(58, 60); fail9(59, 7, true); await until8(() => !draining7(X), 300);
+    // … the same shape with an unrelated answer meanwhile (another site's card — its prune drops the expired entry): the same honest refusal
+    const y11 = await card10('once');
+    await queue8(60, 61, [[62, 63]]);
+    X.step(11 * 60e3);
+    const oth11 = !!(await card10('no', 'other.test'));
+    await settle8([[61, 62]]);
+    create8(63, 7, true); await until8(() => gone8(63, 'T2'), 300);
+    const R11y = { y11: !!y11, oth11, rel62: v8(62, 'release'), ref62: v8(62, 'refuse'), why62: why8(62), why63: why8(63, 'T2'), told: !!(y11 && y11.withdrawnAt) };
+    ok(R11y.y11 && oth11 && R11y.rel62 === 0 && R11y.ref62 === 1 && R11y.why62 === 'expired-waiting' && R11y.why63 === 'no-grant' && !R11y.told,
+      '⑨r11 MINOR 2 (the same, with an unrelated answer): another site\'s card answered while #62 waits past its grant\'s 10 minutes (its prune drops the expired entry) — #62 refused expired-waiting, the SAME honest reason, never answered-again (2b3cc419f: answered-again — a missing entry read as «the owner answered a newer card»)', R11y);
+    fail9(62, 63); fail9(63, 7, true); await until8(() => !draining7(X), 300);
     X.D.shutdown();
   }
   // ⑨r9 MINOR — the give-back's two other exits, on the person's road (his own registration: the vault authenticator paired for it); RED with back() dropped at that exit alone

@@ -155,6 +155,7 @@ function refusedText(why, rpId) {
     case 'profile-switch': return `The owner turned passkeys off for agents on this browser profile — ${rp}'s request was refused; use the page's other way in.`;
     case 'rp-mismatch': return `The page asked for a passkey of ${rp}, which its own address may not use — refused.`;
     case 'withdrawn': return `The user took over the browser — your passkey request on ${rp} was withdrawn.`;
+    case 'expired-waiting': return `The owner's permission to register a passkey on ${rp} ran out (its 10 minutes) while this registration waited its turn — nothing was registered and the page was told it was not allowed; ask again (\`vibespace-browser passkey register ${rp}\`), then press the page's button again.`; // r11
     case 'answered-again': return `While this registration on ${rp} waited its turn, the owner answered a newer card for it — that answer stands, so nothing was registered and the page was told it was not allowed; \`vibespace-browser passkey status\` says whether a registration is allowed now.`; // r10
     // lane passkey-sink: a kernel with `webauthn` — VibeSpace answers the ceremony itself
     case 'webauthn_alg_unsupported': return `${rp} asked for a kind of passkey VibeSpace does not make (it offered no ES256 key type) — the page was told it was not allowed; use its other way in.`;
