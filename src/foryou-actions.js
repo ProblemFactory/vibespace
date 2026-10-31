@@ -783,11 +783,13 @@ function runCardOf(item, { t = fmt } = {}) {
   // lane vault-standing-request r4 (B) + r5 (the r4 acceptance's MAJOR — the words lived only in the hint, which every client HIDES
   // beside a hosts «Always»): the scopes of its OWN this «Always» REPLACES, on every entry (vault-run-door changeFactsOf) — drawn
   // on the card's OWN row above the answers (`changes`), whatever the hint does; none ⇒ it only adds (no line). A decided card
-  // and one whose «Always» is gone draw none (nothing will be written by it); a card drawn again says so (`facts.redrawn`)
+  // and one whose «Always» is gone draw none (nothing will be written by it); a card drawn again says so (`facts.redrawn`) —
+  // r6 (the r5 review F1): only while its «Always» is there — the mark says what an «Always» would write changed, so a card
+  // drawn again that then goes LATE (Allow once / Deny) says nothing of it
   const chs = (x) => (x && Array.isArray(x.changes) ? x.changes.filter((c) => c && typeof c === 'object' && str(c.scope)) : []);
   const open = !item.status || item.status === 'open';
   const chList = !open || alwaysGone ? [] : cmdA ? chs(cmdA) : a.offered === true ? chs(a) : [];
-  const redrawn = open && f.redrawn && typeof f.redrawn === 'object' && Number(f.redrawn.at) > 0 ? t(REDRAWN_WORDS, { time: clockWords(Number(f.redrawn.at)) }) : null;
+  const redrawn = open && !alwaysGone && f.redrawn && typeof f.redrawn === 'object' && Number(f.redrawn.at) > 0 ? t(REDRAWN_WORDS, { time: clockWords(Number(f.redrawn.at)) }) : null;
   const changes = chList.length || redrawn ? { lines: chList.map((c) => [{ text: changeWords(c, t) }]), redrawn } : null;
   const hint = cmdA ? [{ mono: str(cmdA.words) ? String(cmdA.words) : '' }, { text: ` — ${t(COMMAND_ALWAYS_WORDS)}` }] : a.offered === true ? null : [{ text: t('No «Always»: {why}', { why: own(RUN_ALWAYS_WHY, a.why) ? t(RUN_ALWAYS_WHY[a.why]) : '' }).replace(/[:：]\s*$/, (m) => m.trimEnd()) }, ...(a.why && !own(RUN_ALWAYS_WHY, a.why) ? [{ code: String(a.why) }] : []), ...(str(a.directive) ? [{ mono: wholeOf(a, 'directive').shown }] : [])];
   const templates = (Array.isArray(f.templates) ? f.templates : []).filter((x) => x && typeof x === 'object');

@@ -41,13 +41,18 @@
  * ROUND 5 (the r4 acceptance of 50873938d — RED on it by name):
  *   ㉗ (MAJOR) what the row will be is drawn ON the card's own row above the answers, in every client (the tray / chat row, the
  *     For-you window's pane, 中文) — never only in the hint the hosts «Always» hides;
- *   ㉘ a card the press drew again is MARKED (its change row and its prose) — never the old face;
+ *   ㉘ a card the press drew again is MARKED (its change row and its prose) — never the old face; r6 (the r5 review F1, RED on
+ *     4ec3af5c7): ㉘e — the mark goes when the card goes LATE (its «Always» is gone);
  *   ㉙ (MINOR 1) a LATE card describes no «Always» (no «Always (this command)» words, the base's «No «Always»: why» line back);
  *   ㉚ (MINOR 2) «As each has it now»: a new host takes the EARLIEST live end; with none live, the picker's default — said first;
+ *     ㉚b is a CONTROL (r4 had it; RED there only because saveScopesOf did not exist); r6 (the r5 review F2): ㉚f two FINITE
+ *     live ends — the earliest, never the latest (green on 4ec3af5c7, RED under Math.min → Math.max);
  *   ㉛ (TO VERIFY) a redraw goes through the For-you store's OWN bound — a 30 KB facts card stays the stub on disk;
  *   ㉜ (the acceptance's press probe C3) a write that THROWS mid-press is restored like any failed one.
  * Each leg is guarded (a base tree without the feature fails BY NAME, never by a crash) — the RED control runs this file
- * against the base's src (report.md).
+ * against the base's src (report.md). r6 (the r5 review F3): every read-only folder this suite makes is made writable again
+ * BEFORE any exit hook removes the root (scratch's own included) — a red, a throw, process.exit or a signal leaves no
+ * /tmp/vs-vault-standing-<pid> behind (r2–r5 left one per run: the removal ran while bin/ was still read-only).
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -81,7 +86,11 @@ const BIN = path.join(ROOT, 'bin');
 fs.mkdirSync(BIN, { recursive: true });
 for (const t of ['curl', 'wget', 'python3', 'sh', 'bash', 'deno', 'lua', 'mytool', 'aws']) fs.writeFileSync(path.join(BIN, t), `#!/bin/sh\nif [ -n "$T" ]; then w='with T'; else w='without T'; fi\nprintf '%s ran %s for %s\\n' '${t}' "$w" "$*"\n`, { mode: 0o555 });   // r5: a /bin/sh fake (ABSOLUTE shebang — never recurses through a fake named sh) — a node fake per run was most of the suite's time
 fs.chmodSync(BIN, 0o555);   // read-only, declared root-owned below: programWritable is false (psha null)
-process.on('exit', () => { try { fs.chmodSync(BIN, 0o755); fs.rmSync(ROOT, { recursive: true, force: true }); } catch { } });
+// r6 (the r5 review F3): restore THEN remove — every read-only folder (RO) is made writable FIRST (prepended: before scratch's
+// own exit hook), then the root removed; a signal is an exit too (its hook runs)
+const RO = [BIN];
+process.prependListener('exit', () => { for (const d of RO) { try { fs.chmodSync(d, 0o755); } catch { } } try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { } });
+for (const [sig, code] of [['SIGTERM', 143], ['SIGINT', 130], ['SIGHUP', 129]]) process.once(sig, () => process.exit(code));
 const VALUE = ['tts', 'api', 'key', crypto.randomBytes(8).toString('hex')].join('-');   // built at runtime (never a literal secret)
 const CID = 'cid-transcriber-1';
 
@@ -330,8 +339,7 @@ await leg('⑦ pin census', async () => {
   ok(names.length >= 30 && !missing.length, `⑦a every one of the ${names.length} SHELLS + INTERPRETERS rows has a pin-grammar row (a grammar, or «none» with its why)`, missing);
   const CB = path.join(ROOT, 'cbin'); fs.mkdirSync(CB, { recursive: true });
   for (const n of names) fs.writeFileSync(path.join(CB, n), '#!/bin/sh\nprintf ran\n', { mode: 0o555 });
-  fs.chmodSync(CB, 0o555);
-  process.on('exit', () => { try { fs.chmodSync(CB, 0o755); } catch { } });
+  fs.chmodSync(CB, 0o555); RO.push(CB);   // r6: restored before the root's removal (the exit hook above)
   const w = await world({ bin: CB });
   const safe = (d) => !!d && !d.includes('/') && d !== '.' && d !== '..';
   let lines = 0; const leaks = [];
@@ -903,6 +911,25 @@ await leg('㉘ the redrawn card differs', async () => {
   const sc = openOf(w3, 'vault-grant-ask').find((i) => q && i.action.askId === q.askId), sface1 = sc && drawnHtml(sc);
   const y2 = q && q.askId && w3.door.answerRequest(q.askId, { answer: 'standing', reauthed: true });
   ok(!!(rc.a && rc.a.ok && y1 && y1.code === 'ask_redrawn' && changeRowIn(sface0) === null && /^Drawn again at \S+: what this answer writes changed/.test(String(changeRowIn(sface1))) && /^Drawn again at /.test(String(sc && sc.detail)) && ((sc && sc.i18n && sc.i18n.detail) || [])[0] && sc.i18n.detail[0].key.startsWith('Drawn again at {time}') && y2 && y2.ok), '㉘d the standing card drawn again carries the mark too (its own row, its prose and its i18n lines first) — its change line stays its «直到» row; the next Allow writes', { y1, y2, row: changeRowIn(sface1) });
+  // r6 (the r5 review F1): the 60 s ask timer held by hand — card B drawn again, THEN its 60 s lapse makes it late
+  const held = new Map(); let hn = 0;
+  const manual = { set: (fn, ms) => { if (ms !== VR.ASK_TTL_MS) return setTimeout(fn, ms); const h = { n: ++hn, fn }; held.set(h.n, h); return h; }, clear: (h) => { if (h && h.fn) held.delete(h.n); else clearTimeout(h); } };
+  const w5 = await world({ timers: manual });
+  w5.door.setRunnable({ id: w5.e.id, on: true, reauthed: true });
+  const b5 = new Set(cardsOf(w5).map((c) => c.id));
+  const pA5 = w5.door.run({ caller: w5.caller(), args: RUN(w5.e.ref, 'curl', 'https://a.example/x'), cwd: w5.work });
+  const cA5 = await cardAfter(w5, b5); b5.add(cA5 && cA5.id);
+  const pB5 = w5.door.run({ caller: w5.caller(), args: RUN(w5.e.ref, 'curl', '-s', 'https://a.example/y'), cwd: w5.work });
+  const cB5 = await cardAfter(w5, b5);
+  const aA5 = cA5 && w5.door.answer(cA5.action.askId, { answer: 'always', reauthed: true });
+  await sleep(5);
+  const aB5 = cB5 && w5.door.answer(cB5.action.askId, { answer: 'always', reauthed: true });
+  const drawn5 = cB5 && openOf(w5, 'vault-run-ask').find((i) => i.id === cB5.id), row5 = drawn5 && changeRowOf(drawn5);
+  for (const h of [...held.values()]) { held.delete(h.n); h.fn(); }   // B's 60 s lapses (A's was cleared by its answer)
+  await pA5; await pB5;
+  const late5 = cB5 && openOf(w5, 'vault-run-ask').find((i) => i.id === cB5.id && i.action.late);
+  const v5 = late5 && FA.runCardOf(late5, {});
+  ok(!!(aA5 && aA5.ok && aB5 && aB5.code === 'ask_redrawn' && /^Drawn again at /.test(String(row5)) && late5 && v5 && v5.changes === null && changeRowOf(late5) === null && changeRowOf(late5, undefined, { buttons: false }) === null && !textOf(drawnHtml(late5)).includes('Drawn again') && /data-answer="once"/.test(drawnHtml(late5)) && !/data-answer="always"/.test(drawnHtml(late5))), '㉘e a card drawn again that then goes LATE (Allow once / Deny) drops its «Drawn again … what this answer writes changed» mark — in the tray and the For-you pane alike; while its «Always» was there it had it', { aB5, row5, late: !!late5, changes: v5 && v5.changes, face: late5 && textOf(drawnHtml(late5)).slice(0, 300) });
 });
 
 console.log('㉙ (r5, MINOR 1) A LATE CARD DESCRIBES NO «ALWAYS» — no «Always (this command)» words beside Allow once / Deny; the base\'s «No «Always»: why» is back');
@@ -936,13 +963,18 @@ await leg('㉚ the Save\'s new-host end', async () => {
   const r1 = S && S({ was: { scopes: [host('a.example', null), host('b.example', D5)] }, hosts: ['a.example', 'b.example', 'c.example'], endId: 'keep', now });
   ok(!!(r1 && endIn(r1, 'c.example') === D5 && endIn(r1, 'a.example') === null && endIn(r1, 'b.example') === D5 && JSON.stringify(r1.fresh) === '[2]'), '㉚a a member holding a.example (no end) and b.example (5 days): c.example typed new under «As each has it now» takes b.example\'s 5 days — the EARLIEST live end — never no end because a.example has none; a and b keep their own', r1);
   const r2 = S && S({ was: { scopes: [host('a.example', null), host('b.example', null)] }, hosts: ['a.example', 'b.example', 'c.example'], endId: 'keep', now });
-  ok(!!(r2 && endIn(r2, 'c.example') === null), '㉚b none only when EVERY live scope has none', r2);
+  ok(!!(r2 && endIn(r2, 'c.example') === null), '㉚b (control — r4 had this; RED on 50873938d only because saveScopesOf did not exist there) none only when EVERY live scope has none', r2);
   const r3 = S && S({ was: { scopes: [host('a.example', now - DAY, true), host('b.example', now - 2 * DAY, true)] }, hosts: ['a.example', 'b.example', 'c.example'], endId: 'keep', now });
   ok(!!(r3 && endIn(r3, 'c.example') === now + 30 * DAY && endIn(r3, 'a.example') === now - DAY && endIn(r3, 'b.example') === now - 2 * DAY), '㉚c every scope ENDED (no «now» to keep): c.example takes the picker\'s default, 30 days — never no end; the ended ones stay ended (history)', r3);
   const r4 = S && S({ was: null, hosts: ['c.example'], endId: 'keep', now }), r5 = S && S({ was: { scopes: [host('a.example', null)] }, hosts: ['a.example', 'c.example'], endId: '8h', now });
   ok(!!(r4 && endIn(r4, 'c.example') === now + 30 * DAY && r5 && endIn(r5, 'a.example') === now + 8 * 3600e3 && endIn(r5, 'c.example') === now + 8 * 3600e3), '㉚d a member new to the row the same (30 days); an explicit choice («8 hours») gives every scope that end', { r4, r5 });
   const src = fs.readFileSync(path.join(REPO, 'src/lib/vault-use-row.js'), 'utf8');
   ok(/const plan = saveScopesOf\(\{ was, hosts: h, cmds, endId: endSel\.value \}\)/.test(src) && /const plan = planOf\(\);/.test(src) && /t\('What Save writes:'\)/.test(src) && /hostsIn\.addEventListener\('input', drawPreview\)/.test(src), '㉚e the dialog\'s Save AND its «What Save writes:» line (redrawn as the hosts, the end or who change) both go through saveScopesOf — the end a new host gets is on the screen before Save');
+  // r6 (the r5 review F2 — «Math.min → Math.max» survived 119/119: no leg had two FINITE live ends)
+  const H8 = now + 8 * 3600e3;
+  const r6 = S && S({ was: { scopes: [host('a.example', D5), host('b.example', H8), host('d.example', null)] }, hosts: ['a.example', 'b.example', 'd.example', 'c.example'], endId: 'keep', now });
+  const r7 = S && S({ was: { scopes: [host('a.example', H8), host('b.example', D5)] }, hosts: ['a.example', 'b.example', 'c.example'], endId: 'keep', now });
+  ok(!!(r6 && endIn(r6, 'c.example') === H8 && endIn(r6, 'a.example') === D5 && endIn(r6, 'b.example') === H8 && endIn(r6, 'd.example') === null && r7 && endIn(r7, 'c.example') === H8), '㉚f two FINITE live ends (a.example 5 days, b.example 8 hours, d.example none): c.example typed new takes the EARLIEST, 8 hours — never the latest (5 days), whatever the order; each held scope keeps its own', { r6, r7 });
 });
 
 console.log('㉛ (r5, TO VERIFY) A REDRAW GOES THROUGH THE FOR-YOU STORE\'S OWN BOUND — a card filed as the «too large» stub stays the stub, never the raw bytes on disk');
