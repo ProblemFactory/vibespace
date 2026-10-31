@@ -56,8 +56,17 @@
  *     refusal that remains names the member;
  *   Ⓦ (MINOR D) a Save that leaves out a member holding a LIVE window tells the press's record («revoked HH:MM»); a Save that
  *     keeps it tells nothing (control).
+ * ROUND 10 (主开发's acceptance of r9 f23ddb5ad — both at the «谁可以用…» DIALOG), on both door kinds:
+ *   Ⓧ (MAJOR) the dialog's Save keeps the 除了 it never showed as removed: nothing picked or only named conversations ⇒ the
+ *     stored exceptions kept (`pickToRow` `held` — the probe's P3 and P2, then a later «All agents» Save: the excepted one
+ *     still draws its card); a Save that changes nothing of the row posts NO row (a policy-only Save); a removal the owner
+ *     makes is named (removeExcept — the preview says it) and needs 验证是你; the hub refuses an unnamed one (except_unnamed);
+ *   Ⓨ (MINOR) a Save over a window the hub ALREADY swept (the door's hour-end timer ran) lands — that member dropped as
+ *     `swept`; a refusal that remains never invites hosts for a member the dialog sent with no scope;
+ *   Ⓩ (PURE) `rowChanged` over the row shapes (untouched ⇒ no row posted) and the dialog's words.
  * RED control: r7's legs over 8e771b675 (r6 — no window) fail BY NAME; r8's over e19220cc7 (r7) fail BY NAME — Ⓜ on the LOCAL
- * door; r9's over df027a971 (r8) BY NAME (a leg that throws is a failed leg, never a crash). Mutants: r8/mutants8.py, r9/mutants9.py (the report).
+ * door; r9's over df027a971 (r8) BY NAME; r10's over f23ddb5ad (r9) BY NAME (a leg that throws is a failed leg, never a crash).
+ * Mutants: r8/mutants8.py, r9/mutants9.py, r10/mutants10.py (the report).
  */
 import fs from 'node:fs';
 import os from 'node:os';
@@ -80,6 +89,8 @@ const ROW = await import(new URL('../src/lib/user-todos-row.js', import.meta.url
 const VUR = await import(new URL('../src/lib/vault-use-row.js', import.meta.url).href).catch(() => null);
 const LAYOUT = await import(new URL('../src/lib/inbox-window-layout.js', import.meta.url).href).catch(() => null);
 const ZH = (await import(new URL('../src/lib/i18n-zh.js', import.meta.url).href)).default;
+const JA = (await import(new URL('../src/lib/i18n-ja.js', import.meta.url).href)).default;
+const PM = await import(new URL('../src/lib/principal-picker-model.js', import.meta.url).href);
 
 let pass = 0, fail = 0;
 let TAG = '', KIND = 'cluster';   // r8: the door's instance kind of this pass — every leg name says it
@@ -172,6 +183,28 @@ class El {
 }
 const walk = (n, out = []) => { if (n && n.nodeType === 1) { out.push(n); for (const c of n.children) walk(c, out); } return out; };
 async function onPage(fn) { const had = globalThis.document; globalThis.document = { createElement: (t) => new El(t), createTextNode: (s) => new Txt(s) }; try { return await fn(); } finally { if (had === undefined) delete globalThis.document; else globalThis.document = had; } }
+// r10 (主开发's acceptance of r9 — the «谁可以用…» dialog's Save): THE DIALOG'S SAVE as planOf / doSave build it
+// (src/lib/vault-use-row.js), over the picker's PURE model — the stored row drawn (rowToPick), the picks, the 除了 the picker
+// shows (`exceptSaved`; a member picked itself leaves it), `pickToRow` with the stored 除了 (`held`), each member's scopes by
+// saveScopesOf, what the preview says is taken away (`exceptRemovedOf`) and whether the row is posted at all (`rowChanged` — a
+// base tree has neither: its doSave posted every Save and named nothing)
+const pkOf = (p) => (p.kind === 'everyone' ? 'everyone' : p.kind === 'group' ? `group:${p.id}` : `conversation:${p.key}`);
+const ROSTER = (cids) => [PM.everyoneRow({ name: 'All agents' }), ...cids.map(([id, name]) => ({ key: `agent:${id}`, kind: 'agent', id, name, groupIds: [], groupNames: [] }))];
+function dialogSave(pub, roster, { pick = null, unexcept = [], hosts = null, endId = 'keep', now = Date.now() } = {}) {
+  const members = (pub.to || []).filter(Boolean);
+  const stored = PM.rowToPick({ to: members, except: pub.except || [] }, roster, { everyoneKey: 'everyone:*' });
+  const rows = [...roster, ...stored.extra];
+  const sel = pick ? pick(stored.selected) : stored.selected;
+  const exSel = stored.except.filter((k) => !sel.includes(k) && !unexcept.includes(k));   // the picker: a member picked itself leaves the 除了; `unexcept` = the chips the owner ✕'d in the offered row
+  const p = PM.pickToRow(rows, sel, PM.exceptSaved(rows, sel, exSel), { held: stored.except });
+  const had = new Map(members.map((m) => [m.principal, m]));
+  const to = p.to.map((x) => { const was = had.get(pkOf(x)) || null; const plan = VUR.saveScopesOf({ was, hosts: hosts || (was ? was.hosts || [] : []), cmds: was && Array.isArray(was.commands) ? was.commands : [], endId, now }); return { ...x, ...(was && was.name ? { name: was.name } : {}), scopes: plan.scopes, plan }; });
+  const removed = typeof VUR.exceptRemovedOf === 'function' ? VUR.exceptRemovedOf(pub.except || [], p.except) : [];
+  const changed = typeof VUR.rowChanged === 'function' ? VUR.rowChanged({ to: members, except: pub.except || [] }, { to, except: p.except }) : true;
+  const body = { to: to.map(({ plan, ...m }) => m), except: p.except, ...(removed.length ? { removeExcept: removed.map(pkOf) } : {}) };
+  return { sel, except: p.except, to, removed, changed, body, refused: to.some((m) => m.plan.refused) };
+}
+const saveAs = (w, body, reauthed) => (typeof w.door.saveRow === 'function' ? w.door.saveRow(w.e.id, body, { reauthed }) : w.useGrants.setRow(w.e.id, body, { reauthed }));   // the Save route's road (src/routes/vault.js)
 /** THE TRAY ROW as the panel builds it (renderRow — the prose road too, where a card's facts were dropped) → its markup */
 const trayRowHtml = (item, t = tZH) => onPage(() => (ROW && typeof ROW.renderRow === 'function' ? ROW.renderRow({ item, resolved: false }, { t, lang: 'zh', wordsOf: (i) => i.text, detailOf: (i) => i.detail, nameFor: (i) => i.sessionName || '', optionsOf: () => [] }).innerHTML : ''));   // the panel's ctx, as small as a row needs
 
@@ -648,6 +681,95 @@ for (const K of ['local', 'cluster']) {
     const rec2 = win2.card && recordOf(w2, win2.card.action.askId);
     ok(!!(keep.ok && windowsOf(memberRaw(w2)).length === 1 && rec2 && rec2.resolvedFact && !rec2.resolvedFact.endedAt), 'Ⓦb (control) a Save that keeps that member: its live window rides it, the record says nothing new', { keep, fact: rec2 && rec2.resolvedFact });
   });
+
+  console.log('Ⓧ (r10, MAJOR) THE «谁可以用…» SAVE KEEPS THE 除了 IT NEVER SHOWED AS REMOVED — a policy-only Save posts no row; a removal is named and needs 验证是你');
+  await leg('Ⓧ the dialog keeps 除了', async () => {
+    const C = 'cid-left-out', D = 'cid-d', MONTH = 30 * 86400e3, XC = `conversation:${C}`;
+    const R = ROSTER([[C, 'Left out'], [D, 'Dee'], [CID, 'Narrator']]);
+    const keys = (x) => (x || []).map(pkOf).sort().join(',');
+    const shape = (r) => r && { to: (r.to || []).map((m) => m.key || m.kind), except: (r.except || []).map((x) => x.key) };
+    const ALL = (w) => ({ kind: 'everyone', scopes: [{ host: 'x.example', until: w.now() + MONTH }] });
+    const LEFT = { kind: 'conversation', key: C, name: 'Left out' };
+    // (P3) All agents · x.example except C; the owner ✕'s All agents ⇒ the except-only row; later the dialog opened ONLY to set the judge policy
+    const w = await world();
+    const put = w.useGrants.setRow(w.e.id, { to: [ALL(w)], except: [LEFT] }, { reauthed: true });
+    const x = w.door.takeBack({ id: w.e.id, principal: 'everyone' });
+    const s1 = dialogSave(w.useGrants.publicFor(w.e.id), R, { now: w.now() });
+    const r1 = s1.changed ? saveAs(w, s1.body, true) : null;   // the 验证是你 the owner gives for the policy (a live reveal window) — f23ddb5ad's row Save rode it
+    const pol = w.door.setPolicy({ id: w.e.id, text: 'only x.example, read-only calls', reauthed: true });
+    const after = rowOf(w);
+    ok(!!(put.ok && x && x.ok && keys(s1.except) === XC && s1.changed === false && r1 === null && pol.ok && after && after.to.length === 0 && keys(after.except) === XC), 'Ⓧa (the probe\'s P3) an except-only row; the dialog opened only to set the judge policy, nothing picked: the Save keeps the stored 除了 (except [C]) and — the row unchanged — posts NO row, the policy only (f23ddb5ad posted {to: [], except: []} behind the policy\'s 验证是你: the row and its 除了 went)', { except: s1.except, changed: s1.changed, r1, pol: pol.ok, after: shape(after) });
+    const s2 = dialogSave(w.useGrants.publicFor(w.e.id), R, { pick: (sel) => [...sel, 'everyone:*'], hosts: ['x.example'], endId: '30d', now: w.now() });
+    const r2 = saveAs(w, s2.body, true);
+    const c = await runAnswered(w, CURL(w.e.ref, 'x.example'), { caller: w.caller(C, 'Left out') });
+    ok(!!(r2.ok && keys(s2.except) === XC && rowOf(w) && keys(rowOf(w).except) === XC && c.card), 'Ⓧb … and the owner\'s later «All agents» Save from the dialog (the 除了 row offered, C in it as stored): C\'s `curl https://x.example` still draws its card (f23ddb5ad: by grant, no card)', { r2: r2.ok, except: s2.except, row: shape(rowOf(w)), card: !!c.card, by: c.r && c.r.by });
+    // (P2) the owner picks only Dee on the except-only row — no «除了» row offered (a named conversation has nobody to leave out)
+    const w2 = await world();
+    w2.useGrants.setRow(w2.e.id, { to: [], except: [LEFT] }, { reauthed: true });
+    const s3 = dialogSave(w2.useGrants.publicFor(w2.e.id), R, { pick: () => [`agent:${D}`], hosts: ['d.example'], endId: '30d', now: w2.now() });
+    const r3 = saveAs(w2, s3.body, true);
+    const afterD = rowOf(w2);
+    const s4 = dialogSave(w2.useGrants.publicFor(w2.e.id), R, { pick: (sel) => [...sel, 'everyone:*'], hosts: ['x.example'], now: w2.now() });
+    const r4 = saveAs(w2, s4.body, true);
+    const c2 = await runAnswered(w2, CURL(w2.e.ref, 'x.example'), { caller: w2.caller(C, 'Left out') });
+    ok(!!(r3.ok && keys(s3.except) === XC && s3.removed.length === 0 && afterD && afterD.to.length === 1 && keys(afterD.except) === XC && r4.ok && c2.card), 'Ⓧc (the probe\'s P2) the owner picks only Dee on the except-only row: the Save keeps C\'s 除了 ({to: [Dee], except: [C]}) and the later «All agents» Save still leaves C out — its card (f23ddb5ad: except [] after Dee, C by grant)', { s3: { except: s3.except, removed: s3.removed.length }, r3, afterD: shape(afterD), r4: r4.ok, card: !!c2.card, by: c2.r && c2.r.by });
+    // a removal the owner MAKES (C's chip ✕'d in the offered 除了 row): said before Save, named to the hub, a widening
+    const w3 = await world();
+    w3.useGrants.setRow(w3.e.id, { to: [ALL(w3)], except: [LEFT] }, { reauthed: true });
+    const s5 = dialogSave(w3.useGrants.publicFor(w3.e.id), R, { unexcept: [`agent:${C}`], now: w3.now() });
+    const n1 = saveAs(w3, s5.body, false), kept1 = keys(rowOf(w3).except) === XC;
+    const n2 = saveAs(w3, s5.body, true);
+    ok(!!(s5.changed && s5.removed.length === 1 && s5.removed[0].key === C && s5.removed[0].name === 'Left out' && JSON.stringify(s5.body.removeExcept) === JSON.stringify([XC]) && n1.code === 'reveal_needs_password' && kept1 && n2.ok && keys(rowOf(w3).except) === ''), 'Ⓧd the owner ✕\'s C in the offered 除了 row: the preview names it («Left out will no longer be excluded»), the Save names it (removeExcept [C]) — refused reveal_needs_password without 验证是你 (kept), saved with it', { removed: s5.removed, body: s5.body.removeExcept, n1: n1.code, kept1, n2: n2.ok });
+    // an older page (f23ddb5ad's dialog) leaving the 除了 out unnamed: refused by name even with 验证是你 — nothing written
+    const w4 = await world();
+    w4.useGrants.setRow(w4.e.id, { to: [ALL(w4)], except: [LEFT] }, { reauthed: true });
+    w4.door.takeBack({ id: w4.e.id, principal: 'everyone' });
+    const o1 = saveAs(w4, { to: [], except: [] }, true);
+    const o2 = saveAs(w4, { to: [ALL(w4)], except: [] }, true);
+    const c4 = await runAnswered(w4, CURL(w4.e.ref, 'x.example'), { caller: w4.caller(C, 'Left out') });
+    ok(!!(o1.code === 'except_unnamed' && o1.principal === XC && o2.code === 'except_unnamed' && rowOf(w4) && keys(rowOf(w4).except) === XC && c4.card), 'Ⓧe the hub mirrors it: a Save that leaves the stored 除了 out WITHOUT naming it (an older page: {to: [], except: []}, or All agents with no 除了) is refused except_unnamed — even with 验证是你; nothing written, C still draws its card (f23ddb5ad: saved, the 除了 gone)', { o1: o1.code, o2: o2.code, row: shape(rowOf(w4)), card: !!c4.card, by: c4.r && c4.r.by });
+    // the owner picks C ITSELF on the except-only row: it cannot be both — it leaves the 除了, and the dialog says so
+    const w5 = await world();
+    w5.useGrants.setRow(w5.e.id, { to: [], except: [LEFT] }, { reauthed: true });
+    const s6 = dialogSave(w5.useGrants.publicFor(w5.e.id), R, { pick: () => [`agent:${C}`], hosts: ['c.example'], endId: '30d', now: w5.now() });
+    const q1 = saveAs(w5, s6.body, true);
+    const c5 = await runAnswered(w5, CURL(w5.e.ref, 'c.example'), { caller: w5.caller(C, 'Left out') });
+    ok(!!(s6.except.length === 0 && s6.removed.length === 1 && s6.removed[0].key === C && JSON.stringify(s6.body.removeExcept) === JSON.stringify([XC]) && q1.ok && rowOf(w5) && keys(rowOf(w5).except) === '' && c5.r.ok && c5.r.by === 'grant' && !c5.card), 'Ⓧf the owner picks C ITSELF on the except-only row: C leaves the 除了 (it cannot be both), the preview and the Save name it (removeExcept [C], with 验证是你) — C then runs c.example by its own grant', { s6: { except: s6.except, removed: s6.removed.map((y) => y.key) }, q1, row: shape(rowOf(w5)), r: c5.r && { ok: c5.r.ok, by: c5.r.by } });
+  });
+
+  console.log('Ⓨ (r10, MINOR) A SAVE OVER A WINDOW THE HUB ALREADY SWEPT (the hour-end timer ran) — it lands; a refusal never invites hosts for a member that only held a window');
+  await leg('Ⓨ save over a swept window', async () => {
+    const held = new Map(); let hn = 0;
+    const manual = { set: (fn, ms) => { if (!(ms >= WINDOW_MS && ms <= WINDOW_MS + 60e3)) return setTimeout(fn, ms); const h = { n: ++hn, fn }; held.set(h.n, h); return h; }, clear: (h) => { if (h && h.fn) held.delete(h.n); else clearTimeout(h); } };
+    const w = await world({ timers: manual });
+    const R = ROSTER([['cid-e', 'Eve'], [CID, 'Narrator']]);
+    const k = await runAnswered(w, CURL(w.e.ref, 'api.tts.example'), { answer: 'always', caller: w.caller('cid-e', 'Eve') });
+    const win = await runAnswered(w, SHELL(w.e.ref), { answer: 'window' });
+    w.clock.at = w.now() + 59 * MIN;
+    const snap = w.useGrants.publicFor(w.e.id);   // the dialog drawn at +59 min: Narrator with its live window
+    w.clock.at = w.now() + 2 * MIN;
+    const armed = held.size;
+    for (const h of [...held.values()]) { held.delete(h.n); h.fn(); }   // the door's own hour-end timer: the sweep
+    const swept = !memberRaw(w);
+    const s = dialogSave(snap, R, { endId: '90d', now: w.now() });   // the owner's one change: Eve «As each has it now» → 90 days
+    const r = saveAs(w, s.body, true);   // a later end — 验证是你
+    const eve = memberRaw(w, w.e.id, 'cid-e'), hostSc = eve ? (eve.scopes || []).filter((sc) => sc.host) : [];
+    ok(!!(k.a && k.a.ok && win.a && win.a.ok && armed >= 1 && swept && s.changed && !s.refused && r.ok && Array.isArray(r.swept) && r.swept.includes(`conversation:${CID}`) && !memberRaw(w) && hostSc.length && hostSc.every((sc) => sc.until > w.now() + 89 * 86400e3)), 'Ⓨa (the probe\'s P1) the dialog drawn before the hour ended; the door\'s hour-end timer swept Narrator\'s window (and the member): the owner\'s Save (Eve → 90 days) LANDS — the swept member, sent with no scope, dropped as `swept`; Eve\'s change written (f23ddb5ad: hosts_required naming Narrator, the 90 days lost)', { armed, swept, s: { changed: s.changed, refused: s.refused }, r, eve: hostSc });
+    // a refusal that REMAINS (the hub holds b.example for Narrator, written since the dialog opened) never invites hosts for it
+    const w2 = await world();
+    await runAnswered(w2, CURL(w2.e.ref, 'api.tts.example'), { answer: 'always', caller: w2.caller('cid-e', 'Eve') });
+    const win2 = await runAnswered(w2, SHELL(w2.e.ref), { answer: 'window' });
+    const snap2 = w2.useGrants.publicFor(w2.e.id);   // the dialog drawn now: Narrator with its window only
+    const ad = w2.useGrants.addMember(w2.e.id, { kind: 'conversation', key: CID, name: 'Narrator' }, { hosts: ['b.example'], until: w2.now() + 86400e3, source: 'card' });
+    w2.clock.at = w2.now() + 61 * MIN;
+    w2.useGrants.pruneWindows(w2.e.id);
+    const s2 = dialogSave(snap2, R, { endId: '90d', now: w2.now() });
+    const r2 = saveAs(w2, s2.body, true);
+    const words = VUR && typeof VUR.saveWordsOf === 'function' ? VUR.saveWordsOf(r2, s2) : null;
+    const KEY = 'This grant changed while the dialog was open — close it and open it again';
+    const nar = memberRaw(w2);
+    ok(!!(win2.a && win2.a.ok && ad.ok && r2.code === 'hosts_required' && r2.principal === `conversation:${CID}` && words === KEY && String(ZH[KEY] || '') === '这个授权在对话框打开期间变了 — 关掉再打开一次' && nar && (nar.scopes || []).some((sc) => sc.host === 'b.example')), 'Ⓨb a refusal that remains — the hub holds b.example for Narrator, written since the dialog opened — never says «Name the hosts Narrator may use it for»: «这个授权在对话框打开期间变了 — 关掉再打开一次» (nothing written; b.example kept)', { r2: r2 && { code: r2.code, principal: r2.principal }, words });
+  });
 }
 
 console.log('Ⓢ (r8, MINOR 7) THE VAULT CHIP — a live window has its own ✕; an ended one is drawn as the others; the source says the hour');
@@ -679,6 +801,38 @@ await leg('Ⓢ the chip', async () => {
     const to9 = els9.find((e) => /\bvw-use-to\b/.test(e.className)), xs9 = els9.filter((e) => /\bvw-use-except\b/.test(e.className));
     ok(!!(s9 && s9.ok && to9 && to9.textContent === 'Used with no card by: nobody' && xs9.length === 1 && /^except /.test(xs9[0].textContent)), 'Ⓢd (r9, MAJOR A) an except-only row is drawn: «Used with no card by: nobody» and its «except …» chip (r8 drew nothing — the 除了 out of sight)', { s9: s9 && s9.ok, to: to9 && to9.textContent, except: xs9.map((e) => e.textContent) });
   });
+});
+
+console.log('Ⓩ (r10, PURE) THE DIALOG\'S OWN RULES — `rowChanged` (the row is posted only when it changed) and the words');
+await leg('Ⓩ the dialog\'s rules', async () => {
+  KIND = 'cluster'; TAG = '';
+  const C = 'cid-left-out', MONTH = 30 * 86400e3;
+  const R = ROSTER([[C, 'Left out'], ['cid-e', 'Eve'], [CID, 'Narrator']]);
+  const LEFT = { kind: 'conversation', key: C, name: 'Left out' };
+  const w = await world();
+  const ex = entryOf(w, 'Except key'), all = entryOf(w, 'All key');
+  w.useGrants.setRow(ex.id, { to: [], except: [LEFT] }, { reauthed: true });
+  w.useGrants.setRow(all.id, { to: [{ kind: 'everyone', scopes: [{ host: 'x.example', until: w.now() + MONTH }] }], except: [LEFT] }, { reauthed: true });
+  await runAnswered(w, CURL(w.e.ref, 'api.tts.example'), { answer: 'always', caller: w.caller('cid-e', 'Eve') });   // Eve: a hosts scope
+  w.clock.at += 2000;
+  await runAnswered(w, ['--env', `T=${w.e.ref}`, '--', 'python3', 'transcribe.py', 'part01.mp3'], { answer: 'always' });   // Narrator: a command scope
+  w.clock.at += 2000;
+  const mixed = w.useGrants.publicFor(w.e.id);
+  const w2 = await world();
+  await runAnswered(w2, CURL(w2.e.ref, 'api.tts.example'), { answer: 'always', caller: w2.caller('cid-e', 'Eve') });
+  await runAnswered(w2, SHELL(w2.e.ref), { answer: 'window' });
+  const live = w2.useGrants.publicFor(w2.e.id);   // Narrator: a live window only
+  w2.clock.at = w2.now() + 61 * MIN;
+  const ended = w2.useGrants.publicFor(w2.e.id);   // … ended, not swept
+  const untouched = [['except-only', w.useGrants.publicFor(ex.id), w.now()], ['All agents + 除了', w.useGrants.publicFor(all.id), w.now()], ['a host + a command', mixed, w.now()], ['a live window', live, w2.now() - 61 * MIN], ['an ended window', ended, w2.now()]].map(([n, pub, now]) => [n, dialogSave(pub, R, { now }).changed]);
+  const P = w.useGrants.publicFor(all.id);
+  const changes = [['a host typed new', dialogSave(P, R, { hosts: ['x.example', 'y.example'], now: w.now() }).changed], ['the end → 90 days', dialogSave(P, R, { endId: '90d', now: w.now() }).changed], ['a member left out', dialogSave(mixed, R, { pick: (sel) => sel.filter((k) => k !== `agent:${CID}`), now: w.now() }).changed], ['an exception ✕\'d', dialogSave(P, R, { unexcept: [`agent:${C}`], now: w.now() }).changed], ['a member added', dialogSave(w.useGrants.publicFor(ex.id), R, { pick: () => ['agent:cid-e'], hosts: ['e.example'], now: w.now() }).changed]];
+  ok(!!(untouched.every(([, c]) => c === false) && changes.every(([, c]) => c === true)), 'Ⓩa `rowChanged`: a dialog left as it opened posts NO row — an except-only row, All agents + 除了, a host + a command, a live window, an ended one (pruned on the hub\'s own sweep); any change to the row posts it — a host typed new, the end, a member out, an exception ✕\'d, a member added', { untouched, changes });
+  const KEYS = ['{name} will no longer be excluded', 'This grant changed while the dialog was open — close it and open it again'];
+  const src = fs.readFileSync(path.join(REPO, 'src/lib/vault-use-row.js'), 'utf8');
+  const wU = VUR && typeof VUR.saveWordsOf === 'function' ? VUR.saveWordsOf({ ok: false, code: 'except_unnamed', principal: `conversation:${C}` }, { to: [] }) : null;
+  const wH = VUR && typeof VUR.saveWordsOf === 'function' ? VUR.saveWordsOf({ ok: false, code: 'hosts_required', principal: 'conversation:cid-e' }, { to: [{ kind: 'conversation', key: 'cid-e', name: 'Eve', scopes: [{ host: 'a.example' }] }] }, (m) => m.name) : null;
+  ok(!!(wU === KEYS[1] && wH === 'Name the hosts Eve may use it for — a host name or address each (never «any host»)' && KEYS.every((k) => ZH[k] && JA[k]) && ZH[KEYS[0]] === '{name} 将不再被排除' && /t\('\{name\} will no longer be excluded'/.test(src)), 'Ⓩb the words: the preview names an exception the Save takes away («{name} 将不再被排除»); an exception the dialog never drew (except_unnamed) says «这个授权在对话框打开期间变了…»; a member the Save names hosts for is still asked by name', { wU, wH, zh: KEYS.map((k) => ZH[k]) });
 });
 
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);

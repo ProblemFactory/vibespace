@@ -11670,4 +11670,7 @@ export default {
   "Used with no card by: nobody": "カードなしで使用：なし",
   "the 1-hour approval ended — Save removes it": "1 時間の承認は終了 — 保存で削除します",
   "Name the hosts {name} may use it for — a host name or address each (never «any host»)": "{name} が使えるホストを指定してください——ホスト名かアドレスを 1 つずつ（「任意のホスト」は不可）",
+  // lane vault-standing-request r10 («Who may use it…»'s Save) — on plain lines (see r9 above)
+  "{name} will no longer be excluded": "{name} は除外されなくなります",
+  "This grant changed while the dialog was open — close it and open it again": "ダイアログを開いている間にこの許可が変わりました — 閉じてもう一度開いてください",
 };

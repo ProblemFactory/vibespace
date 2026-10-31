@@ -41,6 +41,10 @@
 //   ㊴ ROUND 9 (lane vault-standing-request — 主开发's acceptance of r8, MAJOR A): a 除了 list is never dropped by a prune or a
 //      removal — an except-only row is stored and read; the last member's ✕ / its window's ✕ / the hour-end prune keep it; only
 //      the owner's Save takes an exception away (a widening — 验证是你)
+//   ㊵ ROUND 10 (lane vault-standing-request — 主开发's acceptance of r9): an exception leaves the row BY NAME only — a Save that
+//      leaves one out unnamed is refused except_unnamed (even with 验证是你), one named in `removeExcept` is a widening; a member
+//      sent with no scope that the hub holds nothing live for (the hour-end sweep ran) is dropped as `swept`, never a refusal;
+//      one the hub holds other scopes for is refused by name (never dropped unseen)
 // Run: node scripts/test-vault-use-grants.mjs
 import fs from 'node:fs';
 import os from 'node:os';
@@ -1297,10 +1301,46 @@ console.log('㊴ ROUND 9 (lane vault-standing-request — 主开发\'s acceptanc
   const aD2 = ug.addMember(e.id, { ...D, name: 'Dee' }, { hosts: ['y.example'], until: at + 86400e3, source: 'card' });
   const rv2 = ug.revoke(e.id, 'conversation:cid-d');
   ok(aD2.ok && rv2.ok && rv2.removed && rowNow() && rowNow().to.length === 0 && exC(rowNow()), 'the LAST member\'s ✕ (revoke) keeps the 除了 too — the row stays, except-only', { rv2, row: rowNow() && { to: rowNow().to.length, except: rowNow().except } });
-  const n1 = ug.setRow(e.id, { to: [], except: [] }, { reauthed: false });
+  const n1 = ug.setRow(e.id, { to: [], except: [], removeExcept: ['conversation:cid-left-out'] }, { reauthed: false });
   const still = !!rowNow() && exC(rowNow());
-  const n2 = ug.setRow(e.id, { to: [], except: [] }, { reauthed: true });
-  ok(n1.code === 'reveal_needs_password' && still && n2.ok && !rowNow(), 'only the owner\'s own Save takes the exception away — a widening: refused reveal_needs_password without 验证是你 (the row kept); with it, the row goes', { n1: n1.code, still, n2: n2.ok, row: rowNow() });
+  const n2 = ug.setRow(e.id, { to: [], except: [], removeExcept: ['conversation:cid-left-out'] }, { reauthed: true });
+  ok(n1.code === 'reveal_needs_password' && still && n2.ok && !rowNow(), 'only the owner\'s own Save takes the exception away — named (r10: `removeExcept`) and a widening: refused reveal_needs_password without 验证是你 (the row kept); with it, the row goes', { n1: n1.code, still, n2: n2.ok, row: rowNow() });
+}
+
+console.log('㊵ ROUND 10 (lane vault-standing-request — 主开发\'s acceptance of r9) — AN EXCEPTION LEAVES THE ROW BY NAME ONLY; a member sent with no scope the hub no longer holds is dropped as swept');
+{
+  const C = { kind: 'conversation', key: 'cid-left-out', name: 'Left out' }, D = { kind: 'conversation', key: 'cid-d', name: 'Dee' }, E = { kind: 'conversation', key: 'cid-e', name: 'Eve' };
+  const exC = (r) => !!(r && (r.except || []).some((x) => x.key === 'cid-left-out'));
+  const w = await world();
+  let at = Date.now();
+  const ug = UG.create({ grants: () => w.grants, vault: w.vault, dataDir: w.dataDir, now: () => at, log: () => {} });
+  const e = entryOf(w);
+  const rowNow = (id = e.id) => w.grants.rowsFor('vault-use', id)[0] || null;
+  const all = { kind: 'everyone', scopes: [{ host: 'x.example', until: at + 30 * 86400e3 }] };
+  const s0 = ug.setRow(e.id, { to: [all], except: [C] }, { reauthed: true });
+  // an older page (or a hand-made request) whose Save leaves the 除了 out, naming nothing: refused BY NAME — even with 验证是你
+  const u1 = ug.setRow(e.id, { to: [all], except: [] }, { reauthed: true });
+  ok(s0.ok && u1.code === 'except_unnamed' && u1.principal === 'conversation:cid-left-out' && ug.statusOf('except_unnamed') === 409 && /without naming it/.test(String(u1.error)) && exC(rowNow()), 'a Save that leaves the row\'s exception out WITHOUT naming it is refused except_unnamed (409, the principal named) — even with 验证是你; nothing written', { s0: s0.ok, u1, row: rowNow() && rowNow().except });
+  const n1 = ug.setRow(e.id, { to: [all], except: [], removeExcept: ['conversation:cid-left-out'] }, { reauthed: false });
+  const keep1 = exC(rowNow());
+  const n2 = ug.setRow(e.id, { to: [all], except: [], removeExcept: [{ kind: 'conversation', key: 'cid-left-out' }] }, { reauthed: true });
+  ok(n1.code === 'reveal_needs_password' && keep1 && n2.ok && !!rowNow() && !exC(rowNow()), 'named in `removeExcept` (a principal key, or the principal) the exception goes — a widening: reveal_needs_password without 验证是你 (kept), saved with it', { n1: n1.code, keep1, n2: n2.ok, row: rowNow() && rowNow().except });
+  const a1 = ug.setRow(e.id, { to: [all], except: [C], removeExcept: ['conversation:cid-nobody'] }, { reauthed: false });
+  ok(a1.ok && exC(rowNow()), 'an exception ADDED is a narrowing (a click); a `removeExcept` naming one the row never held changes nothing', { a1 });
+  // the hour-end sweep ran while a dialog was open: the dialog sends that member with no scope
+  const e2 = entryOf(w);
+  const s2 = ug.setRow(e2.id, { to: [{ ...E, scopes: [{ host: 'e.example', until: at + 30 * 86400e3 }] }], except: [] }, { reauthed: true });
+  const aw = ug.addMember(e2.id, D, { window: at + 3600e3, source: 'card' });
+  at += 61 * 60e3;
+  const pr = ug.pruneWindows(e2.id);
+  const gone = !(rowNow(e2.id).to || []).some((m) => m.key === 'cid-d');
+  const sv = ug.setRow(e2.id, { to: [{ ...E, scopes: [{ host: 'e.example', until: at + 90 * 86400e3 }] }, { ...D, scopes: [] }], except: [] }, { reauthed: true });
+  const eNow = (rowNow(e2.id).to || []).find((m) => m.key === 'cid-e');
+  ok(s2.ok && aw.ok && pr.swept === 1 && gone && sv.ok && Array.isArray(sv.swept) && sv.swept.includes('conversation:cid-d') && !(rowNow(e2.id).to || []).some((m) => m.key === 'cid-d') && eNow && eNow.scopes.every((sc) => sc.until > at + 89 * 86400e3), 'a member the hub already swept (its window ended, the hour-end prune ran), sent with NO scope by a dialog drawn before: dropped as `swept` — the Save lands, the other member\'s change written (f23ddb5ad: hosts_required naming the swept member)', { pr, gone, sv, e: eNow && eNow.scopes });
+  const ad = ug.addMember(e2.id, D, { hosts: ['d.example'], until: at + 86400e3, source: 'card' });
+  const sv2 = ug.setRow(e2.id, { to: [{ ...E, scopes: [{ host: 'e.example', until: at + 90 * 86400e3 }] }, { ...D, scopes: [] }], except: [] }, { reauthed: true });
+  const dNow = (rowNow(e2.id).to || []).find((m) => m.key === 'cid-d');
+  ok(ad.ok && sv2.code === 'hosts_required' && sv2.principal === 'conversation:cid-d' && dNow && (dNow.scopes || []).some((sc) => sc.host === 'd.example'), 'a member the hub holds OTHER scopes for (written since the dialog opened), sent with none: refused by name (hosts_required) — never dropped unseen; its d.example kept', { sv2, d: dNow && dNow.scopes });
 }
 
 console.log(fail ? `\n${pass} passed, ${fail} failed` : `\nALL PASS (${pass})`);

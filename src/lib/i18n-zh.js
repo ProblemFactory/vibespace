@@ -11671,4 +11671,7 @@ export default {
   "Used with no card by: nobody": "无需卡片即可使用：没有人",
   "the 1-hour approval ended — Save removes it": "1 小时授权已结束 — 保存时移除",
   "Name the hosts {name} may use it for — a host name or address each (never «any host»)": "请写明 {name} 可用于哪些主机——每个写一个主机名或地址（不能是「任意主机」）",
+  // lane vault-standing-request r10 («Who may use it…»'s Save) — on plain lines (see r9 above)
+  "{name} will no longer be excluded": "{name} 将不再被排除",
+  "This grant changed while the dialog was open — close it and open it again": "这个授权在对话框打开期间变了 — 关掉再打开一次",
 };

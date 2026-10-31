@@ -199,7 +199,12 @@ export function folderTail(cwd) {
 //    `disabled`, `own:true`, the caller's hint «有自己的授权» — its own grant still counts (rows add; it cannot be left
 //    out of a list that names it);
 //  · the grant model's ONE row shape is what a pick writes (`pickToRow`) and what a stored row draws (`rowToPick`) —
-//    every door maps its picker through these two, never a hand-made spelling.
+//    every door maps its picker through these two, never a hand-made spelling;
+//  · r10 (lane vault-standing-request, 主开发's acceptance of r9 — the «谁可以用…» Save sent `except: []` whenever no Task
+//    Group / All agents was picked, so an except-only row lost its 除了 to a Save that only set the judge policy): a door
+//    that passes `held` (the STORED row's exception keys) keeps them VERBATIM while the «除了» row is not offered — a dialog
+//    never drops an exception it did not SHOW as removed; one the owner picked ITSELF still leaves (it cannot be both —
+//    `except_conflicts`), and the door says so before Save.
 
 /** Is the «除了» row offered for these picks (a Task Group or All agents picked)? */
 export function exceptOffered(rows, selected) {
@@ -237,11 +242,14 @@ export function principalOfRow(r) {
   if (r.kind === 'agent') return r.id != null && r.id !== '' ? { kind: 'conversation', key: String(r.id) } : null;
   return null;
 }
-/** What a pick WRITES: `{to, except}` in the grant model's spelling (rows by key; unknown keys dropped). */
-export function pickToRow(rows, selected, except = []) {
+/** What a pick WRITES: `{to, except}` in the grant model's spelling (rows by key; unknown keys dropped). `held` (r10): the
+ *  stored row's exception keys — kept verbatim while the «除了» row is not offered (minus a member picked itself). */
+export function pickToRow(rows, selected, except = [], { held = null } = {}) {
   const byKey = new Map((Array.isArray(rows) ? rows : []).filter((r) => r && r.key != null).map((r) => [String(r.key), r]));
   const map = (keys) => (Array.isArray(keys) ? keys : []).map((k) => principalOfRow(byKey.get(String(k)))).filter(Boolean);
-  return { to: map(selected), except: map(exceptSaved([...byKey.values()], selected, except)) };
+  const sel = new Set((Array.isArray(selected) ? selected : []).map(String));
+  const keep = Array.isArray(held) && !exceptOffered([...byKey.values()], selected) ? held.map(String).filter((k) => !sel.has(k)) : exceptSaved([...byKey.values()], selected, except);
+  return { to: map(selected), except: map(keep) };
 }
 /**
  * What a STORED row draws: `{selected, except, extra}` — the picker keys of its `to` and `except` entries over the live

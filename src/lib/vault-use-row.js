@@ -7,7 +7,10 @@
 //   · 「Who may use it…」 — THE principal picker every grant door draws (给谁 / 除了, src/lib/principal-picker.js), the HOSTS
 //     (a list, or «the hosts it was stored for» when the entry has them — never «any host»), the END (none / 8 hours / 30
 //     days / 90 days). Save = POST /api/vault/use-grants with the whole row; a save that gives anybody MORE asks 验证是你
-//     first (the hub refuses it otherwise — reveal_needs_password), in the press's own task.
+//     first (the hub refuses it otherwise — reveal_needs_password), in the press's own task. r10 (lane vault-standing-request,
+//     主开发's acceptance of r9): the Save keeps the row's 除了 the picker does not offer (`pickToRow` `held`), names every
+//     exception it takes away («X will no longer be excluded» — `removeExcept`, the hub refuses an unnamed one), and posts
+//     the ROW only when its members, scopes or 除了 changed (`rowChanged` — a policy-only Save posts the policy only);
 //   · R4 (default OFF — Settings ▸ «Let the policy judge approve vault uses»): the entry's POLICY for the decision-API judge, in
 //     the same dialog (setting one asks 验证是你; clearing is a click); the row says the policy, whether the judge is on, and
 //     what it approved («Approved by the policy judge 3× · last 14:02» + 「Revoke」: those commands ask again next time).
@@ -86,6 +89,39 @@ export function saveScopesOf({ was = null, hosts = [], cmds = [], endId = 'keep'
   const kept = wasSc.filter((s) => s.kind === 'window' && !ended(s)).map((s) => ({ kind: 'window', until: Number(s.until) }));
   const empty = !scopes.length && !kept.length, pruned = empty && wasSc.some((s) => s.kind === 'window');   // r9 (MINOR C)
   return { scopes, fresh, kept, pruned, refused: empty && !pruned };
+}
+// r10 (主开发's acceptance of r9, MAJOR): THE ROW THE SAVE WRITES against the row the dialog opened on — PURE (the suite reads
+// them). A principal's key is the hub's own spelling (GM.principalKey: the hub's refusals name a member by it).
+const pkOf = (p) => (p.kind === 'everyone' ? 'everyone' : p.kind === 'group' ? `group:${p.id}` : `conversation:${p.key}`);
+const scopeSig = (s) => { const u = Number(s.until) > 0 ? Number(s.until) : 0; const c = s.command; return c ? `c\n${JSON.stringify([c.program, preOf(c), c.arg == null ? null : c.arg, c.sha || null, c.psha || null])}\n${u}` : `h\n${s.host}\n${u}\n${s.tool || ''}`; };
+const sigOf = (scopes) => scopes.filter((s) => s && s.kind !== 'window').map(scopeSig).sort().join('\n\n');   // a window is the card's: never sent, never compared
+/** Does the Save change the ROW — a member in or out, a member's scopes (each its host / command, its end, its tool), the 除了?
+ *  `stored` = the row as the dialog opened on it ({to: members, except}), `next` = what the Save would post ({to, except}). A
+ *  Save that changes only the policy posts only the policy (a row Save of the same row is never sent behind it). */
+export function rowChanged(stored = {}, next = {}) {
+  const a = new Map((stored.to || []).filter(Boolean).map((m) => [pkOf(m), sigOf(scopesOfM(m))]));
+  const b = new Map((next.to || []).filter(Boolean).map((m) => [pkOf(m), sigOf(Array.isArray(m.scopes) ? m.scopes : [])]));
+  if (a.size !== b.size || [...b].some(([k, v]) => a.get(k) !== v)) return true;
+  const xa = new Set((stored.except || []).filter(Boolean).map(pkOf)), xb = new Set((next.except || []).filter(Boolean).map(pkOf));
+  return xa.size !== xb.size || [...xb].some((k) => !xa.has(k));
+}
+/** The stored row's exceptions the Save takes away — the preview names each («X will no longer be excluded») and the Save
+ *  names them to the hub (`removeExcept`: an exception left out unnamed is refused `except_unnamed`). */
+export function exceptRemovedOf(held = [], next = []) {
+  const nx = new Set((next || []).filter(Boolean).map(pkOf));
+  return (held || []).filter((x) => x && !nx.has(pkOf(x)));
+}
+/** The words for a Save the hub refused (`plan` = planOf's). r10 (MINOR): a member the dialog sent with NO scope (all it held
+ *  was a 1-hour window) is never invited to take hosts — its grant changed while the dialog was open (the hour-end sweep, a ✕
+ *  elsewhere); an exception the dialog never drew (`except_unnamed`) says the same. */
+export function saveWordsOf(r, plan = null, nameOfM = (m) => m.name || '') {
+  const code = r && r.code;
+  const named = r && r.principal && plan ? (plan.to || []).find((m) => pkOf(m) === r.principal) : null;
+  if (code === 'except_unnamed' || (code === 'hosts_required' && named && !(named.scopes || []).length)) return t('This grant changed while the dialog was open — close it and open it again');
+  if (code === 'hosts_required') return named ? t('Name the hosts {name} may use it for — a host name or address each (never «any host»)', { name: nameOfM(named) }) : t('Name the hosts it may be used for — a host name or address each (never «any host»)');   // r9 (MINOR C): the hub's refusal names the member
+  if (code === 'tool_required') return t('A wildcard host (like *.example.com) is scoped to the tool that first used it — add it from a run card with «Always», not here');
+  if (code === 'bad_principal') return t('A host is a host name or address (no wildcard, no address with a path)');
+  return revealWords(r || {});
 }
 const sourceWord = (m) => { const at = Number(m.at) > 0 ? clockOf(m.at) : ''; const w = m.source === 'request' ? t('asked by the agent') : m.source === 'card' ? (m.sourceKind === 'window' ? t('«Allow for 1 hour» on a card') : t('«Always» on a card')) : m.source === 'owner' ? t('set by you') : ''; return w && at ? `${w} · ${at}` : w; };   // r8: a window press is never called «Always»
 
@@ -265,12 +301,11 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
   const planOf = () => {
     const typed = hostsIn.value.split(/[\s,]+/).map((h) => h.trim()).filter(Boolean);
     const hosts = ownBox && ownBox.checked ? [ENTRY_HOSTS] : typed;
-    const pick = pickToRow(picker.knownRows(), picker.selected(), picker.except());
+    const pick = pickToRow(picker.knownRows(), picker.selected(), picker.except(), { held: stored.except });   // r10 (MAJOR): the 除了 the picker does not offer is kept as stored
     const had = new Map(members.map((m) => [m.principal, m]));
-    const keyOf = (p) => (p.kind === 'everyone' ? 'everyone' : p.kind === 'group' ? `group:${p.id}` : `conversation:${p.key}`);
     const to = [], fresh = [], kept = [], gone = [];
     for (const p of pick.to) {
-      const was = had.get(keyOf(p));
+      const was = had.get(pkOf(p));
       const h = hosts.length ? hosts : was ? (was.hosts || []) : [];
       const cmds = was && Array.isArray(was.commands) ? was.commands : [];   // lane vault-standing-request: a member's command shapes ride the Save unchanged
       const plan = saveScopesOf({ was, hosts: h, cmds, endId: endSel.value });   // r8: no window in it — the hub keeps the live one (`kept`)
@@ -281,12 +316,13 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
       to.push({ ...p, ...(was && was.name && !p.name ? { name: was.name } : {}), scopes: plan.scopes });
       fresh.push(plan.fresh); kept.push(plan.kept); gone.push(!!plan.pruned);
     }
-    return { to, fresh, kept, gone, pick };
+    const removed = exceptRemovedOf(u.except || [], pick.except);   // r10: every exception this Save takes away — said, and named to the hub
+    return { to, fresh, kept, gone, pick, removed, changed: rowChanged({ to: members, except: u.except || [] }, { to, except: pick.except }) };
   };
   const drawPreview = () => {
     let plan = null; try { plan = planOf(); } catch { plan = null; }
     preview.textContent = '';
-    if (!plan || plan.error || !plan.to.length) { preview.hidden = true; return; }
+    if (!plan || plan.error || !(plan.to.length || plan.removed.length)) { preview.hidden = true; return; }
     preview.hidden = false;
     preview.append(el('span', 'vw-use-preview-lbl', t('What Save writes:')));
     plan.to.forEach((m, k) => {
@@ -302,25 +338,30 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
       });
       preview.append(line);
     });
+    for (const x of plan.removed) preview.append(el('div', 'vw-use-preview-line vw-use-except-gone', t('{name} will no longer be excluded', { name: nameOf(x, app) })));   // r10 (MAJOR): an exception goes only where it is said
   };
   async function doSave() {
     err.textContent = '';
     const plan = planOf();
     if (plan.error) { err.textContent = plan.error; return false; }
-    const { to, pick } = plan;
-    const send = () => post('/api/vault/use-grants', { id: row.id, to, except: pick.except }, revealLeftMs() ? revealHeaders() : {});
-    let r = await send();
-    if (r && r.code === 'reveal_needs_password') { forgetReveal(); if (!(await askRevealPassword())) return false; r = await send(); }
+    const { to, pick, removed, changed } = plan;
     const polWas = (u.policy && u.policy.text) || '', polNow = polIn.value.trim();
+    // r10 (主开发's acceptance of r9, MAJOR (2)): the ROW is posted only when it changed — a Save that sets only the policy never
+    // rewrites the row behind the 验证是你 the owner gives for the policy
+    const send = () => post('/api/vault/use-grants', { id: row.id, to, except: pick.except, ...(removed.length ? { removeExcept: removed.map(pkOf) } : {}) }, revealLeftMs() ? revealHeaders() : {});
+    let r = { ok: true };
+    if (changed) {
+      r = await send();
+      if (r && r.code === 'reveal_needs_password') { forgetReveal(); if (!(await askRevealPassword())) return false; r = await send(); }
+    }
     if (r && r.ok && polNow !== polWas) {   // R4: the policy rides the same Save (a non-empty one asks 验证是你 too)
       const sendP = () => post('/api/vault/use-policy', { id: row.id, text: polNow }, revealLeftMs() ? revealHeaders() : {});
       let q = await sendP();
       if (q && q.code === 'reveal_needs_password') { forgetReveal(); if (!(await askRevealPassword())) return false; q = await sendP(); }
       if (!q || !q.ok) { err.textContent = revealWords(q || {}); return false; }
     }
-    if (r && r.ok) { showToast(to.length ? t('Saved — they use it with no card for those hosts') : t('Saved — nobody uses it without a card')); close(); refresh?.(); return true; }
-    const named = r && r.principal ? to.find((m) => (m.kind === 'everyone' ? 'everyone' : m.kind === 'group' ? `group:${m.id}` : `conversation:${m.key}`) === r.principal) : null;   // r9 (MINOR C): the hub's refusal names the member
-    err.textContent = r && r.code === 'hosts_required' ? (named ? t('Name the hosts {name} may use it for — a host name or address each (never «any host»)', { name: nameOf(named, app) }) : t('Name the hosts it may be used for — a host name or address each (never «any host»)')) : r && r.code === 'tool_required' ? t('A wildcard host (like *.example.com) is scoped to the tool that first used it — add it from a run card with «Always», not here') : r && r.code === 'bad_principal' ? t('A host is a host name or address (no wildcard, no address with a path)') : revealWords(r || {});
+    if (r && r.ok) { if (changed) showToast(to.length ? t('Saved — they use it with no card for those hosts') : t('Saved — nobody uses it without a card')); else if (polNow !== polWas) showToast(t('Saved')); close(); refresh?.(); return true; }
+    err.textContent = saveWordsOf(r, plan, (m) => nameOf(m, app));
     return false;
   }
   save.onclick = () => { doSave(); };

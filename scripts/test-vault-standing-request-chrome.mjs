@@ -36,6 +36,10 @@
 //      除了 Transcriber», vsr-25); the agent's OWN value sent to h2.example: after «允许 1 小时» the next h2.example run is a window
 //      use with its notice (r8's host pass ran it silently); a member whose only scope is a window the PAGE sees ended (its clock
 //      moved past the end — the hub had not swept it): the dialog says «1 小时授权已结束 — 保存时移除» and its Save lands (vsr-26)
+//      r10 (主开发's acceptance of r9): «谁可以用…» on the except-only row, only the judge policy set — the Save posts the POLICY
+//      only and the row keeps «除了 Transcriber» (vsr-27); a named member's end changed — the Save sends the stored 除了; picking
+//      Transcriber ITSELF says «Transcriber 将不再被排除» and names it (removeExcept, vsr-28); a dialog drawn before the hub
+//      dropped a window-only member saves (vsr-29)
 //   --shots <dir> keeps vsr-*.png. RED CONTROL: this suite over the base tree (4ef7e9494) — ② the request files a PLAIN card
 //   (once / 8h), ③ no command chip, ④ no «总是（这条命令）».
 // Run: node scripts/test-vault-standing-request-chrome.mjs [--shots <dir>]   (SKIPs without chrome or python3)
@@ -512,8 +516,65 @@ try {
   await sleep(300);
   await A.evalJs(`(() => { for (const t of [...document.querySelectorAll('.global-toast')]) t.remove(); return true; })()`);
   await A.shot('vsr-25-except-only-row-desktop.png');
+  // r10 (主开发's acceptance of r9, MAJOR): «谁可以用…» on the except-only row — the 除了 the picker does not offer is kept, a
+  // Save that changes only the policy posts NO row, an exception the owner takes away is said and named (removeExcept)
+  await A.evalJs(`(() => { if (!window.__vsrPosts) { window.__vsrPosts = []; const f = window.fetch.bind(window); window.fetch = (u, o) => { try { if (o && o.method === 'POST') window.__vsrPosts.push({ url: String(u), body: String(o.body || '') }); } catch { } return f(u, o); }; } window.__vsrPosts.length = 0; return true; })()`);
+  const postsOf = (tail) => A.evalJs(`(window.__vsrPosts || []).filter((p) => p.url.endsWith(${JSON.stringify(tail)})).map((p) => { try { return JSON.parse(p.body); } catch { return null; } })`);
+  const resetPosts = () => A.evalJs(`(() => { (window.__vsrPosts || []).length = 0; return true; })()`);
+  const rowFacts = `(() => { const r = ${LIST_ROW(LABEL)}; if (!r) return null; return { chips: [...r.querySelectorAll('.vw-use-chip')].filter((x) => !x.classList.contains('vw-use-except')).map((x) => x.textContent), ex: [...r.querySelectorAll('.vw-use-except')].map((x) => x.textContent) }; })()`;
+  const openUse = async () => { const o = await A.until(`(() => { const r = ${LIST_ROW(LABEL)}; const b = r && r.querySelector('.vw-use-grant'); if (!b) return null; b.click(); return true; })()`, { timeout: 15000 }); return !!o && !!(await A.until(`(() => { const d = document.getElementById('vault-use-grant'); return d && d.querySelector('.vw-use-hosts') && d.querySelector('.vw-use-policy-in') ? true : null; })()`, { timeout: 10000 })); };
+  const dlgState = `(() => { if (document.querySelector('#vault-reveal-dialog input[type=password]')) return 'pw'; const d = document.getElementById('vault-use-grant'); if (!d) return 'closed'; const e = d.querySelector('.vault-secret-error'); return e && e.textContent ? 'error: ' + e.textContent : null; })()`;
+  const saveUse = async () => {   // Save — and 验证是你 when the hub asks for it (the second password typed into the page's own dialog)
+    await A.evalJs(`(() => { const d = document.getElementById('vault-use-grant'); const b = d && d.querySelector('.vw-use-save'); if (b) b.click(); return !!b; })()`);
+    let st = null;
+    for (let i = 0; i < 3; i++) {
+      st = await A.until(dlgState, { timeout: 10000 });
+      if (st !== 'pw') return st;
+      await A.evalJs(`(() => { const i = document.querySelector('#vault-reveal-dialog input[type=password]'); i.value = ${JSON.stringify(SECOND)}; const go = document.querySelector('#vault-reveal-dialog .vault-reveal-go'); if (go) go.click(); return !!go; })()`);
+      await A.until(`!document.getElementById('vault-reveal-dialog') || null`, { timeout: 8000 });
+    }
+    return st;
+  };
+  const pOpen = await openUse();
+  await resetPosts();
+  const pIn = await A.evalJs(`(() => { const d = document.getElementById('vault-use-grant'); const p = d && d.querySelector('.vw-use-policy-in'); if (!p) return null; p.value = 'only read-only status calls to x.example'; p.dispatchEvent(new Event('input', { bubbles: true })); p.scrollIntoView({ block: 'center' }); return { chips: [...d.querySelectorAll('.pp-chip')].map((c) => c.textContent) }; })()`);
+  await sleep(300);
+  await A.evalJs(`(() => { for (const t of [...document.querySelectorAll('.global-toast')]) t.remove(); return true; })()`);
+  await A.shot('vsr-27-policy-only-save-dialog-desktop.png');
+  const pSave = await saveUse();
+  const pRows = await postsOf('/api/vault/use-grants'), pPol = await postsOf('/api/vault/use-policy');
+  await sleep(600);
+  const pRow = await A.until(`(() => { const f = ${rowFacts}; return f && f.ex.length ? f : null; })()`, { timeout: 6000 });
+  check('(r10, MAJOR — the probe\'s P3) the except-only row: the owner opens «谁可以用…» ONLY to set the judge policy and saves — the Save posts the policy ONLY, no row (f23ddb5ad posted {to: [], except: []} first, behind the policy\'s 验证是你) — and the row keeps «除了 Transcriber»', pOpen && pSave === 'closed' && Array.isArray(pRows) && pRows.length === 0 && Array.isArray(pPol) && pPol.length >= 1 && pPol.every((b) => b && b.text === 'only read-only status calls to x.example') && !!pRow && pRow.ex.some((x) => /^除了 Transcriber/.test(x)), { pOpen, pIn, pSave, pRows, pPol, pRow });
+  await A.api('POST', '/api/vault/use-policy', { id: EID, text: '' });   // the policy cleared (a click)
+  const pageD = await reveal();
+  const addD = await A.api('POST', '/api/vault/use-grants', { id: EID, to: [{ kind: 'conversation', key: 'cid-dee-offline', name: 'Dee', scopes: [{ host: 'd.example', until: Date.now() + 30 * 86400e3 }] }], except: [{ kind: 'conversation', key: PKEY }], page: pageD }, { 'X-Vault-Page': pageD || '' });
+  await A.until(`(() => { const f = ${rowFacts}; return f && f.chips.some((c) => /Dee/.test(c)) ? true : null; })()`, { timeout: 8000 });
+  const dOpen = await openUse();
+  await resetPosts();
+  const dIn = await A.evalJs(`(() => { const d = document.getElementById('vault-use-grant'); const s = d && d.querySelector('.vw-use-end'); if (!s) return null; s.value = '90d'; s.dispatchEvent(new Event('change')); const x = d.querySelector('.pp-except'); return { chips: [...d.querySelectorAll('.pp-chip')].map((c) => c.textContent), exceptOffered: !!x && x.style.display !== 'none' }; })()`);
+  const dSave = await saveUse();
+  const [dBody] = await postsOf('/api/vault/use-grants');
+  await sleep(600);
+  const dRow = await A.evalJs(rowFacts);
+  check('(r10, MAJOR — the probe\'s P2) the row {Dee (not running now) · d.example; 除了 Transcriber}: the owner changes only the end (→ 90 天) — no «除了» row is offered, the Save sends except [Transcriber] as stored (f23ddb5ad sent except [] — the 除了 gone) and the row keeps «除了 Transcriber»', !!(addD && addD.json && addD.json.ok) && dOpen && !!dIn && dIn.exceptOffered === false && dSave === 'closed' && !!dBody && (dBody.except || []).length === 1 && dBody.except[0].key === PKEY && !dBody.removeExcept && !!dRow && dRow.chips.some((c) => /Dee/.test(c)) && dRow.ex.some((x) => /^除了 Transcriber/.test(x)), { addD: addD && addD.json, dIn, dSave, dBody, dRow });
+  const rOpen = await openUse();
+  await resetPosts();
+  await A.evalJs(`(() => { const d = document.getElementById('vault-use-grant'); const box = d && d.querySelector('.pp-input'); if (box) { box.focus(); box.dispatchEvent(new Event('focus')); } return !!box; })()`);
+  await sleep(300);
+  const rPick = await A.until(`(() => { const row = [...document.querySelectorAll('.pp-row')].find((x) => x.isConnected && !x.closest('.pp-except') && /Transcriber/.test(x.textContent)); if (!row) return null; row.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); row.click(); return true; })()`, { timeout: 8000 });
+  await A.evalJs(`(() => { const d = document.getElementById('vault-use-grant'); const h = d.querySelector('.vw-use-hosts'); h.value = 'x.example'; h.dispatchEvent(new Event('input')); if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); return true; })()`);
+  const rPrev = await A.until(`(() => { const d = document.getElementById('vault-use-grant'); const p = d && d.querySelector('.vw-use-preview'); const g = p && !p.hidden && p.querySelector('.vw-use-except-gone'); if (!g) return null; p.scrollIntoView({ block: 'center' }); return { gone: g.textContent, preview: p.textContent }; })()`, { timeout: 8000 });
+  await sleep(300);
+  await A.evalJs(`(() => { for (const t of [...document.querySelectorAll('.global-toast')]) t.remove(); return true; })()`);
+  await A.shot('vsr-28-except-removed-preview-desktop.png');
+  const rSave = await saveUse();
+  const [rBody] = await postsOf('/api/vault/use-grants');
+  await sleep(600);
+  const rRow = await A.evalJs(rowFacts);
+  check('(r10, MAJOR) the owner picks Transcriber ITSELF (it cannot be both given and left out): the preview says «Transcriber 将不再被排除», the Save names it (removeExcept) behind 验证是你, and the row then has no 除了', rOpen && !!rPick && !!rPrev && rPrev.gone === 'Transcriber 将不再被排除' && rSave === 'closed' && !!rBody && JSON.stringify(rBody.removeExcept) === JSON.stringify([`conversation:${PKEY}`]) && !!rRow && rRow.ex.length === 0 && rRow.chips.some((c) => /Transcriber/.test(c)), { rPick, rPrev, rSave, rBody: rBody && { except: rBody.except, removeExcept: rBody.removeExcept }, rRow });
   const pageB = await reveal();
-  const back = await A.api('POST', '/api/vault/use-grants', { id: EID, to: [], except: [], page: pageB }, { 'X-Vault-Page': pageB || '' });   // the row as it was — an exception taken away is a WIDENING (验证是你)
+  const back = await A.api('POST', '/api/vault/use-grants', { id: EID, to: [], except: [], removeExcept: [`conversation:${PKEY}`], page: pageB }, { 'X-Vault-Page': pageB || '' });   // the row as it was — an exception taken away is a WIDENING (验证是你), named (r10)
   check('(r8, 除了) a conversation the owner excepted from the entry\'s «All agents» grant: its card offers 允许一次 · 拒绝 only and says «不提供「允许 1 小时」：你在保险库窗口里把这个对话排除在“TTS API key”之外了。»', !!(ex && ex.status === 200 && ex.json.ok && PKEY && xc && xc.action.window === undefined && xr && xr.buttons.join('|') === '允许一次|拒绝' && xr.off.includes('不提供「允许 1 小时」：你在保险库窗口里把这个对话排除在“TTS API key”之外了。') && back.json && back.json.ok), { ex: ex && ex.json, action: xc && xc.action, xr, back: back && back.json });
   // r9 (MAJOR B): the press writes ONLY the window — the agent's OWN value (minted for api.tts.example) sent by curl to
   // h2.example: after «允许 1 小时» the next h2.example run is a WINDOW use with its notice (r8 kept a host pass — by own, silent)
@@ -550,6 +611,23 @@ try {
   const cres = await A.until(`(() => { const d = document.getElementById('vault-use-grant'); if (!d) return { closed: true }; const e = d.querySelector('.vault-secret-error'); return e && e.textContent ? { closed: false, error: e.textContent } : null; })()`, { timeout: 10000 });
   await A.evalJs(`(() => { if (window.__realNow) Date.now = window.__realNow; const d = document.getElementById('vault-use-grant'); const b = d && d.querySelector('.btn-cancel'); if (b) b.click(); return true; })()`);
   check('(r9, MINOR C) Transcriber\'s only scope is a 1-hour window the page sees ENDED (the hub had not swept it): the dialog, hosts left empty, says «Transcriber · 1 小时授权已结束 — 保存时移除» and its Save LANDS — never «请写明可用于哪些主机…»', !!ca && ca.json && ca.json.ok && !!cOpen && !!cdlg && cdlg.hosts === '' && /Transcriber · 1 小时授权已结束 — 保存时移除/.test(String(cdlg.preview)) && !!cres && cres.closed === true, { ca: ca && ca.json, cdlg, cres });
+  // r10 (MINOR — the probe's P1): the hub drops a window-only member while a dialog drawn before is open (the hour-end sweep —
+  // here the window's ✕ from another page: the hub no longer holds Transcriber); that dialog's Save (所有 agent → 90 天) LANDS
+  const pageS = await reveal();
+  const addAll = await A.api('POST', '/api/vault/use-grants', { id: EID, to: [{ kind: 'everyone', scopes: [{ host: 'x.example', until: Date.now() + 30 * 86400e3 }] }, { kind: 'conversation', key: PKEY, scopes: [] }], except: [], page: pageS }, { 'X-Vault-Page': pageS || '' });
+  await A.until(`(() => { const f = ${rowFacts}; return f && f.chips.some((c) => /^所有 agent/.test(c)) && f.chips.some((c) => /Transcriber/.test(c)) ? true : null; })()`, { timeout: 8000 });
+  const sOpen = await openUse();
+  const sIn = await A.evalJs(`(() => { const d = document.getElementById('vault-use-grant'); const s = d && d.querySelector('.vw-use-end'); if (!s) return null; s.value = '90d'; s.dispatchEvent(new Event('change')); const p = d.querySelector('.vw-use-preview'); return { chips: [...d.querySelectorAll('.pp-chip')].map((c) => c.textContent), preview: p ? p.textContent : null }; })()`);
+  const sX = await A.api('POST', '/api/vault/use-grants/revoke', { id: EID, principal: `conversation:${PKEY}`, scope: 'window' });
+  await sleep(300);
+  await A.evalJs(`(() => { for (const t of [...document.querySelectorAll('.global-toast')]) t.remove(); const d = document.getElementById('vault-use-grant'); const p = d && d.querySelector('.vw-use-preview'); if (p) p.scrollIntoView({ block: 'center' }); return true; })()`);
+  await A.shot('vsr-29-swept-window-save-dialog-desktop.png');
+  await resetPosts();
+  const sSave = await saveUse();
+  await sleep(600);
+  const sRow = await A.evalJs(rowFacts);
+  check('(r10, MINOR — the probe\'s P1) a dialog drawn while Transcriber held its 1-hour window; the hub then dropped that member (the window\'s ✕ elsewhere — as the hour-end sweep does): the dialog\'s Save (所有 agent → 90 天) LANDS — never «请写明 Transcriber 可用于哪些主机…»; the row: 所有 agent, no Transcriber', !!(addAll && addAll.json && addAll.json.ok) && sOpen && !!sIn && sIn.chips.some((c) => /^所有 agent/.test(c)) && sIn.chips.some((c) => /Transcriber/.test(c)) && !!(sX && sX.json && sX.json.ok) && sSave === 'closed' && !!sRow && sRow.chips.some((c) => /^所有 agent/.test(c)) && !sRow.chips.some((c) => /Transcriber/.test(c)), { addAll: addAll && addAll.json, sIn, sX: sX && sX.json, sSave, sRow });
+  await A.api('POST', '/api/vault/use-grants/revoke', { id: EID, principal: 'everyone' });
   // the windows taken back (the legs below expect cards)
   const OWNID = await A.evalJs(`(() => { const r = [...document.querySelectorAll('.vw-list .vw-row')].find((x) => x.isConnected && String(x.dataset.id || '').startsWith('secrets:agent:') && String(x.dataset.id).includes('/tts-own#')); return r ? r.dataset.id : null; })()`);
   for (const id of [EID, OWNID]) if (id) await A.api('POST', '/api/vault/use-grants/revoke', { id, principal: `conversation:${PKEY}` });

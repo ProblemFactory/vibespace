@@ -8,7 +8,9 @@
  *     member its hosts and its end). A member with no host is refused `hosts_required` (never «any host»); a save that
  *     WIDENS (a new member, a new host, a later end, an exception taken away) needs the page's 验证是你 window — `reauthed`
  *     (the second password again, as «Usable by agent runs» and a request's grant do: a click alone is a header a local
- *     process can forge on a hub with no sign-in) — `reveal_needs_password`; a pure narrowing is a click;
+ *     process can forge on a hub with no sign-in) — `reveal_needs_password`; a pure narrowing is a click. r10 (lane
+ *     vault-standing-request): an exception leaves the row by NAME only (`removeExcept`; one left out unnamed is refused
+ *     `except_unnamed`), and a member sent with no scope the hub holds nothing live for is dropped as swept (`swept`);
  *   · `addMember(id, principal, {hosts, until})` — ONE member's SCOPES written (lane vault-standing-request r4, THE ROOT
  *     MODEL: each host / command a scope with ITS OWN end — a scope it names is ADDED, or REPLACED when it is there with
  *     another end or has ended; no other scope is touched; `changes` says which): the run card's «Always» (the press already
@@ -43,7 +45,7 @@ function writeJsonAtomic(file, obj) {
   fs.renameSync(tmp, file);
 }
 
-const STATUS = Object.freeze({ window_end_required: 400, window_card_only: 400, window_too_long: 400, window_excepted: 409, command_unreadable: 400, too_many_commands: 400, hosts_required: 400, tool_required: 400, too_many_hosts: 400, bad_principal: 400, bad_resource: 400, bad_except: 400, except_conflicts: 400, too_many: 400, bad_row: 400, unknown_shape: 409, reveal_needs_password: 403, vault_locked: 423, not_written: 500, store_unreadable: 503, entry_unknown: 404 });
+const STATUS = Object.freeze({ except_unnamed: 409, window_end_required: 400, window_card_only: 400, window_too_long: 400, window_excepted: 409, command_unreadable: 400, too_many_commands: 400, hosts_required: 400, tool_required: 400, too_many_hosts: 400, bad_principal: 400, bad_resource: 400, bad_except: 400, except_conflicts: 400, too_many: 400, bad_row: 400, unknown_shape: 409, reveal_needs_password: 403, vault_locked: 423, not_written: 500, store_unreadable: 503, entry_unknown: 404 });
 const WORDS = Object.freeze({
   hosts_required: 'name the hosts it may be used for — a host name or address each (or «the hosts it was stored for»), or the command it may run; never «any host»',
   command_unreadable: 'that command could not be read as a program and its script — name them as they run (the program and its first argument)',
@@ -58,6 +60,7 @@ const WORDS = Object.freeze({
   window_card_only: 'a 1-hour approval is given from a run card only («Allow for 1 hour») — Save keeps one as it is and never makes or moves one',   // r7
   window_too_long: 'a 1-hour approval lasts one hour from the press — never longer; nothing was written',   // r8
   window_excepted: 'you excluded this conversation from this secret in the Vault window (除了) — a 1-hour approval is not given to it; nothing was written',   // r8
+  except_unnamed: 'this Save leaves out a conversation or Task Group you excluded (除了) without naming it — nothing was written; open «Who may use it» again to see who is left out',   // r10
 });
 const named = (code, extra = {}) => ({ ok: false, code, error: WORDS[code] || code, ...extra });
 
@@ -185,8 +188,11 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
     for (const e of v.row.to) for (const s of U.scopesOf(e)) if (s.kind === 'host' && String(s.host).startsWith('*.') && !s.tool && !legacy && !held.has(`${GM.principalKey(GM.bareOf(e))}\n${s.host}`)) return named('tool_required', { principal: GM.principalKey(GM.bareOf(e)), host: s.host });   // r4: per host scope
     return { ok: true, row: v.row };
   }
-  /** THE PICKER's save — the whole row. */
-  function setRow(id, { to = [], except = [] } = {}, { by = 'user', reauthed = false } = {}) {
+  /** THE PICKER's save — the whole row. r10 (主开发's acceptance of r9): an exception the row holds leaves it ONLY by name —
+   *  `removeExcept` (principal keys) lists every one this Save takes away (a widening: 验证是你); one left out unnamed (a page
+   *  that never showed it as removed) is refused `except_unnamed`, nothing written. A member sent with NO scope that the hub
+   *  holds nothing live for (its 1-hour window ended, or the hour-end sweep already took it) is dropped — `swept` names it. */
+  function setRow(id, { to = [], except = [], removeExcept = [] } = {}, { by = 'user', reauthed = false } = {}) {
     if (!okId(id)) return named('bad_resource');
     if (!unlocked()) return named('vault_locked');   // round 4 (item 4): a locked vault never writes mac:null — refuse by name
     const was = rowOf(id);
@@ -196,21 +202,31 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
     // before a ✕ cannot bring a taken-back window back, and a window-only member is kept by a Save that names no scope for
     // it); an ENDED one is pruned (a member that held only that goes)
     const wasW = verifiedRow(was);
-    const heldW = new Map(((wasW && GM.publicRow(wasW).to) || []).map((e) => [GM.principalKey(e), U.scopesOf(e).filter((s) => s.kind === 'window')]));
+    const heldM = new Map(((wasW && GM.publicRow(wasW).to) || []).map((e) => [GM.principalKey(e), U.scopesOf(e)]));
+    const heldW = new Map([...heldM].map(([k, sc]) => [k, sc.filter((s) => s.kind === 'window')]));
     const t0 = now();
-    const pageTo = [];
+    const pageTo = [], swept = [];
     for (const e of Array.isArray(to) ? to : []) {
       if (!e || typeof e !== 'object' || !Array.isArray(e.scopes)) { pageTo.push(e); continue; }
       const pk = GM.principalKey(GM.bareOf(e)), held = heldW.get(pk) || [];
       for (const s of e.scopes.filter((x) => x && x.kind === 'window')) if (!held.some((h) => h.until === Number(s.until))) return named('window_card_only', { principal: pk });
       const keep = e.scopes.filter((x) => !(x && x.kind === 'window'));
       const liveW = held.filter((h) => h.until > t0).map((h) => ({ kind: 'window', until: h.until, ...(h.source ? { source: h.source } : {}), ...(h.at ? { at: h.at } : {}) }));
-      if (!keep.length && !liveW.length && held.length) continue;   // it held only a window, and that has ended — pruned
+      // it held only a window, and that has ended — pruned; r10 (MINOR): or the hub swept it already (the hour-end prune ran
+      // while the dialog was open) — dropped as swept, never a refusal inviting hosts for it. One the hub holds other scopes
+      // for (written since the dialog opened) is never dropped unseen: the rules below refuse it by name.
+      if (!keep.length && !liveW.length && !(heldM.get(pk) || []).some((s) => s.kind !== 'window')) { swept.push(pk); continue; }
       pageTo.push({ ...e, scopes: [...keep, ...liveW] });
     }
     to = pageTo;
     const v = rowRules(id, { to, except }, { was: wasW });   // r3: a Save that keeps a legacy wildcard as it was is a Save the owner can make
     if (!v.ok) return v;
+    // r10 (MAJOR): 除了 leaves by name only — an exception the stored row holds that this Save leaves out is refused unless the
+    // request names it (the dialog says «X will no longer be excluded» and sends it); a named one widens (验证是你, below)
+    const named0 = new Set((Array.isArray(removeExcept) ? removeExcept : []).map((x) => (x && typeof x === 'object' ? GM.principalKey(x) : String(x))));
+    const nextX = new Set(v.row.except.map((x) => GM.principalKey(x)));
+    const unnamedX = ((was && GM.publicRow(was).except) || []).map((x) => GM.principalKey(x)).find((k) => !nextX.has(k) && !named0.has(k));
+    if (unnamedX) return named('except_unnamed', { principal: unnamedX });
     // lane vault-standing-request r4: the Save in the per-scope shape — a scope this Save ADDS or whose end / tool it CHANGES is
     // the owner's («你设置的», now); a scope it keeps as it was keeps its writer and time (a page's own `source` is never read)
     const wasV = verifiedRow(was);
@@ -229,7 +245,7 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
     const gen = nextGen();
     const w = rowTo.length || v.row.except.length ? g.set(U.DOOR, String(id), { to: stamp(id, rowTo, v.row.except, gen), except: v.row.except }, by) : g.remove(U.DOOR, String(id), by);
     if (w && w.ok) commitGen(id, gen);
-    return landed(w, { id: String(id), members: v.row.to.length, ...(windowsGone.length ? { windowsGone } : {}) });
+    return landed(w, { id: String(id), members: v.row.to.length, ...(windowsGone.length ? { windowsGone } : {}), ...(swept.length ? { swept } : {}) });
   }
   /** ONE member added or widened (the card's «Always», the request default, the carry, an agent's standing request the owner
    *  allowed). `tool` scopes a wildcard PER HOST; `commands` (lane vault-standing-request) the command shapes; `source` who. */

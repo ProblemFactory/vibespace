@@ -1148,10 +1148,11 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   }
   /** r9 (主开发's acceptance of r8, MINOR D): THE OWNER'S SAVE of «谁可以用…» (src/routes/vault.js) through the ONE writer — a
    *  member it leaves out that held a LIVE window takes that window back, and the press's record is told as on both ✕ roads
-   *  («… · revoked HH:MM»). → the writer's answer (+ `told`). */
-  function saveRow(id, { to = [], except = [] } = {}, { by = 'user', reauthed = false } = {}) {
+   *  («… · revoked HH:MM»). → the writer's answer (+ `told`). r10: `removeExcept` — the exceptions the Save names as taken away
+   *  (the writer refuses one left out unnamed, `except_unnamed`). */
+  function saveRow(id, { to = [], except = [], removeExcept = [] } = {}, { by = 'user', reauthed = false } = {}) {
     if (!useGrants) return { ok: false, code: 'no_use_grants' };
-    const r = useGrants.setRow(String(id), { to, except }, { by, reauthed });
+    const r = useGrants.setRow(String(id), { to, except, removeExcept }, { by, reauthed });
     let told = 0;
     if (r && r.ok) for (const g of r.windowsGone || []) told += windowTakenBack(String(g.principal), Number(g.until));
     return told ? { ...r, told } : r;
