@@ -82,6 +82,7 @@ const ROWS = Object.freeze({
   'param-word': Object.freeze(['r13 D']),   // an unquoted `${ … }`'s words, bash's `<( … )` there
   trap: Object.freeze(['r13 T']),   // a trap's action (a signal after it)
   callback: Object.freeze(['r13 M']),   // mapfile / readarray's `-C` callback
+  'ansi-c': Object.freeze(['r16 A']),   // r16: `$'…'`'s escapes decoded (`\x24(` is `$(`, `\x76ibespace-channels` the CLI)
 });
 /** r14: a parameter expansion whose VALUE the reader does not compute — `${ … }` with an operator, a word or flags (never
  *  a bare `${name}` / `${#name}`): an evaluator that reads it again reads what the reader never saw */
@@ -90,6 +91,16 @@ const PARAM_WORD = /\$\{(?!#?[A-Za-z_][A-Za-z0-9_]*\})/;
 const expanded = (raw) => PARAM_WORD.test(String(raw).replace(/\$?'[^']*'/g, '').replace(/\\[^]/g, ''));
 /** r14: a substitution inside quoted text — `$(`, `${`, `$((`, a backtick */
 const SUBST = /\$[({]|`/;
+/** r16 (the r15 review F1): the text of a `$'…'` as bash and zsh DECODE it — `\NNN` (octal, its low 8 bits: `\044` and
+ *  `\444` are both `$`), `\xHH`, `\uHHHH`, `\UHHHHHHHH`, the letters (`\n`, `\e` …); any other `\X` is X (zsh's reading —
+ *  bash keeps the `\`, its `\c` a control character: neither ever a `$`, a backtick or a bracket). r15 read
+ *  `$'a[\x24(C &)]'` as `a[x24(C &)]`: inert, while `let` ran C in every shell and it outlived the shell */
+const ANSI_ESC = /\\(?:([0-7]{1,3})|x([\da-fA-F]{1,2})|u([\da-fA-F]{1,4})|U([\da-fA-F]{1,8})|([^]))/g;
+const ANSI_LETTER = { a: '\x07', b: '\b', e: '\x1b', E: '\x1b', f: '\f', n: '\n', r: '\r', t: '\t', v: '\v' };
+const ansiCode = (n) => String.fromCodePoint(n > 0x10ffff ? 0xfffd : n);
+const ansiDecode = (t) => String(t).replace(ANSI_ESC, (m, o, x, u, U, c) => (c !== undefined ? ANSI_LETTER[c] || c : ansiCode(o ? parseInt(o, 8) & 0xff : parseInt(x || u || U, 16))));
+/** r16: a `$'…'` in a text (its `\'` escaped) */
+const ANSI_SPAN = /\$'((?:[^'\\]|\\[^])*)'/g;
 /** r14: a `${ … }` that EVALUATES its value — zsh's `(e)` flag (`${(e)x}`), bash's `@P` (a prompt's `$( … )` runs) */
 const evalsParam = (s, i) => { const f = /^\$\{\(([^)]*)\)/.exec(s.slice(i, i + 64)); return (!!f && f[1].includes('e')) || /@P$/.test(s.slice(i + 2, spanEnd(s, i + 1, '{', '}'))); };
 /** r14: the words before which `builtin` / `command` / `exec` changes the reading — a builtin with a reading of its own
@@ -104,7 +115,13 @@ const PRECOMMANDS = new Set(['builtin', 'noglob', 'nocorrect']);
  *  verdict MAJOR 1): a «-» before the name is admitted — `${x:-vibespace-channels}`, `${x-vibespace-channels …}` run it
  *  (r14's guard read them as a longer word: may none); a «-» after it is another program's name */
 const MAY_RE = new RegExp(`(^|\\W)${CLI}(?![\\w-])[ \t]*([a-z][\\w-]*)?`, 'g');
-const mayNames = (t) => [...String(t || '').matchAll(MAY_RE)].map((m) => ({ at: m.index + m[1].length, verb: m[2] || '' }));
+const mayNames = (t) => {
+  const s = String(t || ''), names = [...s.matchAll(MAY_RE)].map((m) => ({ at: m.index + m[1].length, verb: m[2] || '' }));
+  // r16: a name only a `$'…'`'s DECODED text spells (`$'\x60vibespace-channels read …\x60'`: a `0` before the name) —
+  // the shells run it — is named at its quote
+  for (const q of s.matchAll(ANSI_SPAN)) { const d = [...ansiDecode(q[1]).matchAll(MAY_RE)]; if (d.length && ![...q[1].matchAll(MAY_RE)].length) names.push({ at: q.index, verb: d[0][2] || '' }); }
+  return names.sort((a, b) => a.at - b.at);
+};
 /** r14: a single `&` anywhere in the text (never `&&`, `&>`, `>&`, `|&`, `<&`) — an unknown line that holds one may leave a
  *  job running */
 const BG_AMP = /(^|[^&>|<])&(?![&>])/;
@@ -312,7 +329,8 @@ function shellCommands(src, owner = null, depth = 0, offset = 0) {
       if (ch === "'") { const k = s.indexOf("'", i + 1); const e = k < 0 ? s.length : k; if (k < 0) unknown(i, 'unclosed'); v += s.slice(i + 1, e); i = e + 1; q = true; continue; }
       if (ch === '$' && s[i + 1] === "'") {   // ANSI-C quoting: `$'don\'t …'` — a `\` escapes the next character
         let j = i + 2;
-        for (; j < s.length && s[j] !== "'"; j++) { if (s[j] === '\\') { v += s[j + 1] || ''; j++; continue; } v += s[j]; }
+        for (; j < s.length && s[j] !== "'"; j++) if (s[j] === '\\') j++;
+        v += ansiDecode(s.slice(i + 2, j));   // r16: DECODED — `$'a[\x24(C &)]'` is `a[$(C &)]` to bash and zsh — row:ansi-c
         if (j >= s.length) unknown(i, 'unclosed');
         i = j + 1; q = true;
         continue;
@@ -361,8 +379,10 @@ function shellCommands(src, owner = null, depth = 0, offset = 0) {
   // r14: QUOTED text that holds a substitution, where the shells may still run it — inside an unquoted `${ … }` (`pw`:
   // an arithmetic slot, an evaluator reading the value again), or a SUBSCRIPT (`let 'a[$(C)]=1'`, `read 'a[$(C)]'`,
   // `[[ 'a[$(C)]' -eq 0 ]]`: bash and zsh evaluate it) — UNKNOWN. r15: `t` is a whole word's literal text (readWord's
-  // end) — r14 read only a single quote's or `$'…'`'s, never a double quote's `\$(` or an unquoted `\$\(`
-  const quotedSubst = (t, at, pw) => { if (pw ? SUBST.test(t) : /\[[^\]]*(\$[({]|`)/.test(t)) unknown(at, pw ? 'param' : 'subscript'); };
+  // end) — r14 read only a single quote's or `$'…'`'s, never a double quote's `\$(` or an unquoted `\$\(`. r16 (the r15
+  // review F3): a subscript follows its NAME (`a[`, `${a}[`) — markdown in a quoted argument (`--text "See [\`a.js\`](u)"`)
+  // is none: r15 read such a line UNKNOWN, and a chained compose's head opened at its `vibespace-status` again
+  const quotedSubst = (t, at, pw) => { if (pw ? SUBST.test(t) : /[\w}]\[[^\]]*(\$[({]|`)/.test(t)) unknown(at, pw ? 'param' : 'subscript'); };
   let i = 0;
   while (i < s.length && i - skipped - span.docs < SCAN_MAX) {
     const ch = s[i];
@@ -693,7 +713,10 @@ const varfd = (c, x) => { const m = !x.q && VARFD.exec(x.v); return !!m && /^[<>
 const SUB_EXP = /\$\{[#!]?[A-Za-z_][A-Za-z0-9_]*\[(?!\s*(-?\d+|@|\*)\s*\])/;
 const SUB_NAME = /^[A-Za-z_][A-Za-z0-9_]*\[(?!\s*(-?\d+|@|\*)\s*\])/;
 const SUBSTR = /\$\{[#!]?([A-Za-z_][A-Za-z0-9_]*|[0-9@*])(\[[^\]]*\])?:(?![-=?+])(?!\s*-?\d+\s*(:\s*-?\d+\s*)?\})/;
-const EVALS = /\$\[|\$\{[^}]*@P\}|\$\{\([^)]*e[^)]*\)|\$\{!(?!\})|\$\{[\s|]/;
+// r16 (the r15 review, note b): `${…@P}` read from a `${` to the next `}` or `${` only — the same texts match (a match
+// from an earlier `${` is one from the last `${` before its `@P}`), never a read to the text's end from every `${` (r15:
+// an unclosed 200 KB `${a:-` nest took 2.4 s here, and the compact head paid it per card)
+const EVALS = /\$\[|\$\{(?:[^}$]|\$(?!\{))*@P\}|\$\{\([^)]*e[^)]*\)|\$\{!(?!\})|\$\{[\s|]/;
 /** r12: bash 5.3's function substitution — `${ cmd; }` / `${| cmd; }` (a blank, a newline or `|` after the brace) */
 const FUNSUB = /[ \t\n|]/;
 const ARITH_OPS = new Set(['-eq', '-ne', '-lt', '-le', '-gt', '-ge']);

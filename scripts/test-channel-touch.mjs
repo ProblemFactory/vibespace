@@ -2138,6 +2138,27 @@ await section('⑬', async () => {
     ["r15 S7: x=abc; echo ${x:\\$\\(C\\ \\>\\ /dev/null\\ \\&\\)} > /dev/null (unquoted, escaped)", "x=abc; echo ${x:\\$\\(vibespace-channels\\ read\\ lark/inbox\\ \\>\\ /dev/null\\ \\&\\)} > /dev/null", "none", "none", "none"],
     ["r15 H1 follow-up: ${x:-vibespace-channels} read lark/inbox (X01 — could run)", "${x:-vibespace-channels} read lark/inbox", "ended", "ended", "ended"],
     ["r15 H2 follow-up: CMD=vibespace-channels; $CMD read lark/inbox (X02 — could run)", "CMD=vibespace-channels; $CMD read lark/inbox", "ended", "ended", "ended"],
+    ["r16 A1: let $'a[\\x24(C > /dev/null &)]=1'", "let $'a[\\x24(vibespace-channels read lark/inbox > /dev/null &)]=1'", "lingers", "lingers", "lingers"],
+    ["r16 A2: let $'a[\\044(C > /dev/null &)]=1' (octal)", "let $'a[\\044(vibespace-channels read lark/inbox > /dev/null &)]=1'", "lingers", "lingers", "lingers"],
+    ["r16 A3: printf -v $'a[\\x24(C > /dev/null &)]' x", "printf -v $'a[\\x24(vibespace-channels read lark/inbox > /dev/null &)]' x", "lingers", "lingers", "lingers"],
+    ["r16 A4: read $'a[\\x60C > /dev/null &\\x60]' <<< x (a backtick)", "read $'a[\\x60vibespace-channels read lark/inbox > /dev/null &\\x60]' <<< x", "lingers", "lingers", "lingers"],
+    ["r16 A5: let $'a[\\u0024(C > /dev/null &)]=1'", "let $'a[\\u0024(vibespace-channels read lark/inbox > /dev/null &)]=1'", "lingers", "lingers", "lingers"],
+    ["r16 A6: let $'a[\\U00000024(C > /dev/null &)]=1'", "let $'a[\\U00000024(vibespace-channels read lark/inbox > /dev/null &)]=1'", "lingers", "lingers", "lingers"],
+    ["r16 A7: let $'a[\\444(C > /dev/null &)]=1' (octal, its low 8 bits)", "let $'a[\\444(vibespace-channels read lark/inbox > /dev/null &)]=1'", "lingers", "lingers", "lingers"],
+    ["r16 A8: let $'a\\x5b$(C > /dev/null &)]=1' (the bracket escaped)", "let $'a\\x5b$(vibespace-channels read lark/inbox > /dev/null &)]=1'", "lingers", "lingers", "lingers"],
+    ["r16 A9: declare -i n; n=$'a[\\x24(C > /dev/null &)]'", "declare -i n; n=$'a[\\x24(vibespace-channels read lark/inbox > /dev/null &)]'", "lingers", "none", "none"],
+    ["r16 A10: eval $'\\x24(C > /dev/null &)'", "eval $'\\x24(vibespace-channels read lark/inbox > /dev/null &)'", "lingers", "lingers", "lingers"],
+    ["r16 A11: bash -c $'\\x76ibespace-channels read lark/inbox' (a decoded name)", "bash -c $'\\x76ibespace-channels read lark/inbox'", "ended", "ended", "ended"],
+    ["r16 A12 control: echo $'a[\\x24(C > /dev/null &)]' (a literal, never evaluated)", "echo $'a[\\x24(vibespace-channels read lark/inbox > /dev/null &)]'", "none", "none", "none"],
+    ["r16 A13 control: let $'a[\\\\x24(C > /dev/null &)]=1' (an escaped backslash — no `$`)", "let $'a[\\\\x24(vibespace-channels read lark/inbox > /dev/null &)]=1'", "none", "none", "none"],
+    ["r16 M1: vibespace-status working --reason \"x\" && C compose --text \"See [\\`src/a.js\\`](https://x/y)\"", "vibespace-status working --reason \"x\" && vibespace-channels compose lark/oc_1 --text \"See [\\`src/a.js\\`](https://x/y)\"", "ended", "ended", "ended"],
+    ["r16 M2: C compose --text \"Fixed [\\`foo\\`] and [\\`bar\\`]\"", "vibespace-channels compose lark/oc_1 --text \"Fixed [\\`foo\\`] and [\\`bar\\`]\"", "ended", "ended", "ended"],
+    ["r16 M3: echo \"fix [\\`x\\`]\" > /dev/null && C", "echo \"fix [\\`x\\`]\" > /dev/null && vibespace-channels read lark/a", "ended", "ended", "ended"],
+    ["r16 M4: vibespace-status working --reason 'see [`x`]' && C", "vibespace-status working --reason 'see [`x`]' && vibespace-channels read lark/a", "ended", "ended", "ended"],
+    ["r16 M5: C compose --text \"[note: \\${x}]\"", "vibespace-channels compose lark/oc_1 --text \"[note: \\${x}]\"", "ended", "ended", "ended"],
+    ["r16 M6: vibespace-status working --reason \"list [\\`a\\`, \\`b\\`]\" && C search \"q\"", "vibespace-status working --reason \"list [\\`a\\`, \\`b\\`]\" && vibespace-channels search \"q\"", "ended", "ended", "ended"],
+    ["r16 M7: C compose --text \"cost [\\$5 net], see (\\`x\\`)\"", "vibespace-channels compose lark/oc_1 --text \"cost [\\$5 net], see (\\`x\\`)\"", "ended", "ended", "ended"],
+    ["r16 M8 cost: C compose --text \"see arr[\\`i\\`]\" (a word before the bracket — still UNKNOWN)", "vibespace-channels compose lark/oc_1 --text \"see arr[\\`i\\`]\"", "ended", "ended", "ended"],
   ];
   // the rows whose CALL reads not lingering — the plain shape (generated with the table); every other row lingers
   const ENDED = [
@@ -2285,6 +2306,16 @@ await section('⑬', async () => {
     "r15 L16: let \"a[\\$(C)]=1\"",
     "r15 H1 follow-up: ${x:-vibespace-channels} read lark/inbox (X01 — could run)",
     "r15 H2 follow-up: CMD=vibespace-channels; $CMD read lark/inbox (X02 — could run)",
+    "r16 A11: bash -c $'\\x76ibespace-channels read lark/inbox' (a decoded name)",
+    "r16 A13 control: let $'a[\\\\x24(C > /dev/null &)]=1' (an escaped backslash — no `$`)",
+    "r16 M1: vibespace-status working --reason \"x\" && C compose --text \"See [\\`src/a.js\\`](https://x/y)\"",
+    "r16 M2: C compose --text \"Fixed [\\`foo\\`] and [\\`bar\\`]\"",
+    "r16 M3: echo \"fix [\\`x\\`]\" > /dev/null && C",
+    "r16 M4: vibespace-status working --reason 'see [`x`]' && C",
+    "r16 M5: C compose --text \"[note: \\${x}]\"",
+    "r16 M6: vibespace-status working --reason \"list [\\`a\\`, \\`b\\`]\" && C search \"q\"",
+    "r16 M7: C compose --text \"cost [\\$5 net], see (\\`x\\`)\"",
+    "r16 M8 cost: C compose --text \"see arr[\\`i\\`]\" (a word before the bracket — still UNKNOWN)",
   ];
   // r10: the attack's rows — a shell lets the CLI outlive the call — pinned: the table may never lose them (r11: x9-38, a
   // program that kills its parent, left with the kill law); r11: the r10 verdict's and r11's own rows a shell lets outlive
@@ -2831,7 +2862,7 @@ await section('⑬', async () => {
   ok(lostIn(noOpaque, "r14 E3: bash -c ${x:-'C > /dev/null &'}", "r14 E11: echo ${x:-'C > /dev/null &'} | bash", "r14 E12: bash <<< ${x:-'C > /dev/null &'}"), 'CONTROL a parameter word a SHELL reads again read as written (r1–r13): `bash -c ${x:-\'C &\'}`, `echo ${x:-\'C &\'} | bash`, `bash <<< ${x:-\'C &\'}` read no run — every shell runs the CLI, it outlives');
   const noParam = sw('unknown-param', '  const quotedSubst = (t, at, pw) => { if (pw ? SUBST.test(t) :', '  const quotedSubst = (t, at, pw) => { if (pw ? false :');
   ok(lostIn(noParam, "r14 S1: a=(1); echo ${a['$(C > /dev/null &)']} > /dev/null", "r14 S2: x=abc; echo ${x:'$(C > /dev/null &)'} > /dev/null", "r14 S3: x=abc; echo ${x:0:'$(C > /dev/null &)'} > /dev/null", "r14 S5: x=abc; echo ${x:'$(C)'} > /dev/null"), 'CONTROL a quote in an arithmetic slot of `${ … }` read as a quote (r13 — its claim re-run, finding 1): `${a[\'$(C &)\']}`, `${x:\'$(C &)\'}`, `${x:0:\'$(C &)\'}`, the foreground offset — bash, zsh and the tool\'s zsh run the CLI');
-  const noSub = sw('unknown-subscript', ": /\\[[^\\]]*(\\$[({]|`)/.test(t)) unknown(", ': false) unknown(');
+  const noSub = sw('unknown-subscript', ": /[\\w}]\\[[^\\]]*(\\$[({]|`)/.test(t)) unknown(", ': false) unknown(');
   ok(lostIn(noSub, "r14 L1: let 'a[$(C > /dev/null &)]=1'", "r14 L2: printf -v 'a[$(C > /dev/null &)]' x", "r14 L3: read 'a[$(C > /dev/null &)]' <<< x", "r14 L7: let 'a[$(C)]=1'"), 'CONTROL a quoted subscript read as a literal (r1–r13 — the claim re-run, finding 2): `let \'a[$(C &)]=1\'`, `printf -v \'a[$(C &)]\' x`, `read \'a[$(C &)]\' <<< x`, `let \'a[$(C)]=1\'` — the builtin evaluates the subscript, the CLI runs');
   const noPre = sw('unknown-precommand', '    if (cw && (PRECOMMANDS.has(cw.base) ||', '    if (cw && (false ||');
   ok(lostIn(noPre, "r14 P1: builtin trap 'C > /dev/null &' EXIT", "r14 P2: builtin mapfile -C 'C > /dev/null &' -c 1 a <<< x", "r14 P3: builtin eval 'C > /dev/null &'", "r14 P6: noglob C > /dev/null & (zsh)"), 'CONTROL `builtin` / `noglob` read as a command of its own (r1–r13 — the r13 verdict, unverified (4)): `builtin trap \'C &\' EXIT`, `builtin mapfile -C \'C &\'`, `builtin eval \'C &\'`, zsh\'s `noglob C &` — the CLI runs and outlives');
@@ -2850,7 +2881,7 @@ await section('⑬', async () => {
   // r14: THE MAY-RUN CENSUS (the brief's (c)) — the rows of the table whose reading is UNKNOWN, pinned; every other row is
   // read exactly. A row that newly reads may-run, or stops, fails here by its label
   const unknownOf = (TT, l) => TT.commandsRun(l).unknown || [];
-  const r12Rows = TRUTH.filter((x) => !/^r1[345] /.test(x[0]));
+  const r12Rows = TRUTH.filter((x) => !/^r1[3-6] /.test(x[0]));
   const mayRows = TRUTH.filter((x) => unknownOf(T, x[1]).length).map((x) => x[0]);
   const MAY_ROWS = [
     "E3 C & builtin exit; wait",
@@ -2931,16 +2962,28 @@ await section('⑬', async () => {
     "r15 L18 control: echo \"a[\\$(C > /dev/null &)]\" (a literal, never evaluated)",
     "r15 S6: x=abc; echo ${x:\"\\$(C > /dev/null &)\"} > /dev/null",
     "r15 S7: x=abc; echo ${x:\\$\\(C\\ \\>\\ /dev/null\\ \\&\\)} > /dev/null (unquoted, escaped)",
+    "r16 A1: let $'a[\\x24(C > /dev/null &)]=1'",
+    "r16 A2: let $'a[\\044(C > /dev/null &)]=1' (octal)",
+    "r16 A3: printf -v $'a[\\x24(C > /dev/null &)]' x",
+    "r16 A4: read $'a[\\x60C > /dev/null &\\x60]' <<< x (a backtick)",
+    "r16 A5: let $'a[\\u0024(C > /dev/null &)]=1'",
+    "r16 A6: let $'a[\\U00000024(C > /dev/null &)]=1'",
+    "r16 A7: let $'a[\\444(C > /dev/null &)]=1' (octal, its low 8 bits)",
+    "r16 A8: let $'a\\x5b$(C > /dev/null &)]=1' (the bracket escaped)",
+    "r16 A9: declare -i n; n=$'a[\\x24(C > /dev/null &)]'",
+    "r16 A12 control: echo $'a[\\x24(C > /dev/null &)]' (a literal, never evaluated)",
+    "r16 M8 cost: C compose --text \"see arr[\\`i\\`]\" (a word before the bracket — still UNKNOWN)",
   ];
   console.log(`  · UNKNOWN ⇒ MAY RUN: ${mayRows.length} of the ${TRUTH.length} rows read may-run (${mayRows.filter((l) => r12Rows.some((x) => x[0] === l)).length} of r12's ${r12Rows.length}) — every other row is read exactly`);
-  ok(eq(mayRows, MAY_ROWS) && MAY_ROWS.length === 78, `THE MAY-RUN CENSUS (r14 — the brief's (c); r15: + 20 of its 23 rows): of the table's ${TRUTH.length} rows exactly the ${MAY_ROWS.length} listed read may-run — 6 of r12's ${r12Rows.length} (\`C & builtin exit; wait\`, zsh's \`echo x(/)\`, \`\${x@P}\`, \`\${(e)x}\`, two \`*(e:…:)\` — each read lingering before and now), r13's 5 literal-quote controls, r14's own and r15's own (all but its exact control L19 and the follow-up's H1 / H2); every other row is read exactly — a row that newly reads may-run fails here by its label`, { newly: mayRows.filter((l) => !MAY_ROWS.includes(l)), gone: MAY_ROWS.filter((l) => !mayRows.includes(l)) });
+  ok(eq(mayRows, MAY_ROWS) && MAY_ROWS.length === 89, `THE MAY-RUN CENSUS (r14 — the brief's (c); r15: + 20 of its 23 rows; r16: + 11 of its 21 — the decoded \`$'…'\` subscripts, their literal control A12, the markdown residual M8): of the table's ${TRUTH.length} rows exactly the ${MAY_ROWS.length} listed read may-run — 6 of r12's ${r12Rows.length} (\`C & builtin exit; wait\`, zsh's \`echo x(/)\`, \`\${x@P}\`, \`\${(e)x}\`, two \`*(e:…:)\` — each read lingering before and now), r13's 5 literal-quote controls, r14's own and r15's own (all but its exact control L19 and the follow-up's H1 / H2); every other row is read exactly — a row that newly reads may-run fails here by its label`, { newly: mayRows.filter((l) => !MAY_ROWS.includes(l)), gone: MAY_ROWS.filter((l) => !mayRows.includes(l)) });
   // r14: A GRAMMAR ROW WITHOUT ITS TABLE IS REFUSED (the brief's (b)) — every construct the reader reads EXACTLY since
   // r13 is a row of shell-words ROWS with the truth rows behind it, its site marked `row:<name>`; the reader's branches
   // are counted — a new one comes with its row and its measured table (else the line it reads is UNKNOWN: it may run)
   const SWM = require(path.join(REPO, 'src/shell-words.js'));
   // r15: + 3 — a word's real expansions marked (`xp`), its literal text read once: they make a line UNKNOWN, never exact
-  // (no grammar row; the r15 rows measure them)
-  const BRANCHES = 209;
+  // (no grammar row; the r15 rows measure them). r16: + 1 — a name only a `$'…'`'s decoded text spells is named (a may on
+  // an UNKNOWN line, never exact); the decoding itself is the row `ansi-c` (its A rows)
+  const BRANCHES = 210;
   const rowCensus = (text, rows) => {
     const bad = [], marks = [...text.matchAll(/row:([\w-]+)/g)].map((m) => m[1]), branches = (text.match(/\bif \(/g) || []).length;
     if (!rows || !Object.keys(rows).length) bad.push('no ROWS table');
@@ -2986,7 +3029,10 @@ await section('⑬', async () => {
   // a shell runs the CLI in whose text holds its name, none reads as neither running nor may running it — but the r14
   // verdict's FOLLOW-UP (a parameter word in command position, read whole: rung ② «could run», never inert — a backlog row)
   const NAMED = /(^|\W)vibespace-channels(?![\w-])/;
-  const nameSide = ranRows.filter((x) => NAMED.test(x[1]));
+  // r16: a name spelled with `$'…'` escapes counts (`$'\x60vibespace-channels …'`, `$'\x76ibespace-channels …'` — the
+  // shells decode them; decoded here on its own, hex and octal)
+  const unescaped = (l) => l.replace(/\$'((?:[^'\\]|\\[^])*)'/g, (m, b) => b.replace(/\\(x[\da-fA-F]{1,2}|[0-7]{1,3})/g, (e, c) => String.fromCharCode(c[0] === 'x' ? parseInt(c.slice(1), 16) : parseInt(c, 8) & 255)));
+  const nameSide = ranRows.filter((x) => NAMED.test(x[1]) || NAMED.test(unescaped(x[1])));
   const nameless = nameSide.filter((x) => !T.channelsRuns(x[1]).length && !mayOf(T, x[1]).length).map((x) => x[0]);
   const FOLLOW_UP = ["r15 H1 follow-up: ${x:-vibespace-channels} read lark/inbox (X01 — could run)", "r15 H2 follow-up: CMD=vibespace-channels; $CMD read lark/inbox (X02 — could run)"];
   console.log(`  · THE NAME SIDE: ${nameSide.length} rows a shell runs the CLI in whose text names it — ${nameless.length} read naming none (the follow-up's ${FOLLOW_UP.length}, could run)`);
@@ -3024,7 +3070,50 @@ await section('⑬', async () => {
   ok(eq(m3(verbFree).verbPy.by, { BGS: 3 }) && eq(m3(verbFree).verbSticky.by, { BGS: 7 }), 'CONTROL a verb unbounded (r7): the `&` search that finished ten minutes earlier takes the later script\'s "pairing" hits — 7 of 7');
   const verbRank = copy('verb-rank', 'const exact = cs.filter((c) => cand.has(c) && namesExactly(c, t));', 'const exact = cs.filter((c) => cand.has(c) && (namesExactly(c, t) || (claims(c) && namesTouch(c.text, t, c.runs, c.kind))));');
   ok(eq(m3(verbRank).queryVsVerb.by, { LATER: 1 }), 'CONTROL a verb ranked with an exact name (the latest wins): the later `search "budget"` takes the loop\'s "deadline" hit');
-  for (const c of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 72, label: '⑬ ' })) ok(c.pass, c.name, c.detail);
+  // r16: AN ANSI-C ESCAPE IS DECODED (the r15 review F1, pre-existing at the base: `$'…'`'s escapes were never decoded —
+  // `let $'a[\x24(C &)]=1'`, `\044`, `\u0024`, `\444`, an escaped bracket, `read $'a[\x60C &\x60]'`, `printf -v`,
+  // `declare -i` read INERT and ended while the shells ran the CLI and it outlived them). The text read as bash and zsh
+  // decode it: the A rows UNKNOWN (subscript), may run the CLI, linger; a decoded eval / `bash -c` read exactly
+  const ANSI = TRUTH.filter((x) => /^r16 A[1-9]:/.test(x[0])).map((x) => x[0]);
+  const ansiBy = Object.fromEntries(ANSI.map((l) => [l.split(':')[0], { why: unknownOf(T, line(l)).map((u) => u.why).join(','), exact: T.channelsRuns(line(l)).length, may: mayOf(T, line(l)).length, inert: T.runsNothing(line(l)), call: callOf(T, line(l)) }]));
+  const ansiRow = (k) => (TRUTH.find((x) => x[0].startsWith(k + ':') || x[0].startsWith(k + ' ')) || [k, '# no row'])[1];
+  const ansiExact = Object.fromEntries(['r16 A10', 'r16 A11', 'r16 A13'].map((k) => [k, { unknown: unknownOf(T, ansiRow(k)).length, runs: T.channelsRuns(ansiRow(k)).map((r) => r.verb), inert: T.runsNothing(ansiRow(k)), call: callOf(T, ansiRow(k)) }]));
+  ok(ANSI.length === 9 && Object.values(ansiBy).every((r) => r.why === 'subscript' && !r.exact && r.may === 1 && !r.inert && r.call === 'lingers')
+    && ANSI.every((l) => TRUTH.some((x) => x[0] === l && x[2] === 'lingers' && (/^r16 A9:/.test(l) || x[3] === 'lingers')))
+    && eq(ansiExact['r16 A10'], { unknown: 0, runs: ['read'], inert: false, call: 'lingers' }) && eq(ansiExact['r16 A11'], { unknown: 0, runs: ['read'], inert: false, call: 'ended' }) && eq(ansiExact['r16 A13'], { unknown: 0, runs: [], inert: true, call: 'ended' }),
+    'AN ANSI-C ESCAPE IS DECODED (r16 — the r15 review F1): `let $\'a[\\x24(C &)]=1\'` (A1), `\\044` (A2), `printf -v` (A3), `read $\'a[\\x60C &\\x60]\'` (A4: a `0` before the name — named at its quote), `\\u0024` (A5), `\\U00000024` (A6), `\\444` (A7: the low 8 bits), an escaped bracket (A8), `declare -i` (A9) — UNKNOWN (subscript), may run the CLI, lingering (r15: inert, ended — bash, zsh and the tool\'s zsh ran it and it outlived them; A9 bash only); `eval $\'\\x24(C &)\'` (A10) and `bash -c $\'\\x76ibespace-channels read …\'` (A11) read exactly — the decoded text; `$\'a[\\\\x24(…)]\'` (A13, an escaped backslash) holds no `$` — exact, inert', { ansiBy, ansiExact });
+  // r16: MARKDOWN IS NO SUBSCRIPT (the r15 review F3 — a regression r15 introduced: its subscript rule wanted no name before
+  // the `[`, and once it read a double quote's literal text `--text "See [\`a.js\`](url)"` and `--reason "list [\`a\`]"`
+  // read UNKNOWN — exact on r14 — and a chained compose's compact head opened at `vibespace-status` again)
+  const MD = TRUTH.filter((x) => /^r16 M[1-7]:/.test(x[0])).map((x) => x[0]), M8 = TRUTH.filter((x) => /^r16 M8 /.test(x[0])).map((x) => x[0]);
+  const mdBy = Object.fromEntries(MD.map((l) => [l.split(':')[0], { unknown: unknownOf(T, line(l)).length, runs: T.channelsRuns(line(l)).length, inert: T.runsNothing(line(l)), head: CRS.commandHeadWords(line(l)).slice(0, 24) }]));
+  const mdCost = M8.map((l) => ({ why: unknownOf(T, line(l)).map((u) => u.why).join(','), may: mayOf(T, line(l)).length }));
+  ok(MD.length === 7 && Object.values(mdBy).every((r) => !r.unknown && r.runs === 1 && !r.inert && /^(… )?vibespace-channels /.test(r.head)) && ['r16 M1', 'r16 M3', 'r16 M4', 'r16 M6'].every((k) => mdBy[k].head.startsWith('… vibespace-channels'))
+    && [...MD, ...M8].every((l) => TRUTH.some((x) => x[0] === l && eq(x.slice(2), ['ended', 'ended', 'ended']))) && eq(mdCost, [{ why: 'subscript', may: 1 }]),
+    'MARKDOWN IS NO SUBSCRIPT (r16 — the r15 review F3): a subscript follows its NAME — `vibespace-status working --reason "x" && vibespace-channels compose … --text "See [\\`src/a.js\\`](https://x/y)"` (M1), `[\\`foo\\`] and [\\`bar\\`]` (M2), `echo "fix [\\`x\\`]" && …` (M3), `--reason \'see [`x`]\'` (M4), `"[note: \\${x}]"` (M5), `--reason "list [\\`a\\`, \\`b\\`]" && … search` (M6), `"cost [\\$5 net], see (\\`x\\`)"` (M7) — each an exact run, never inert, its compact head at the CLI\'s segment (r15: M1–M6 UNKNOWN, a chained head at `vibespace-status`); the residual M8 `--text "see arr[\\`i\\`]"` (a word before the bracket) UNKNOWN still — a cost, named', { mdBy, mdCost });
+  // r16: THE READER IS LINEAR ON AN UNCLOSED NEST (the r15 review, note b): EVALS's `${…@P}` read from every `${` to the
+  // text's end — an unclosed 200 KB `${a:-` nest took 2.4 s in that regex alone (the binder; since r15 the compact head
+  // too, per card); now a `${` reads to the next `}` or `${`. The same texts match (fuzzed against r15's regex); the WORK
+  // is the characters the alternative reads from each `${` (its greedy reach — never the clock)
+  const EVALS_SRC = (SW.match(/\nconst EVALS = (\/.+\/);\n/) || [])[1] || '/(?!)/', EVALS_NOW = new RegExp(EVALS_SRC.slice(1, -1));
+  const EVALS_R15 = /\$\[|\$\{[^}]*@P\}|\$\{\([^)]*e[^)]*\)|\$\{!(?!\})|\$\{[\s|]/;
+  const altsOf = (src) => { const out = []; let d = 0, cls = false, cur = ''; for (let k = 0; k < src.length; k++) { const c = src[k]; if (c === '\\') { cur += c + src[++k]; continue; } if (cls) cls = c !== ']'; else if (c === '[') cls = true; else if (c === '(') d++; else if (c === ')') d--; else if (c === '|' && !d) { out.push(cur); cur = ''; continue; } cur += c; } return [...out, cur]; };
+  const reachOf = (src, t) => { const a = altsOf(src).find((x) => x.endsWith('@P\\}')); if (!a) return Infinity; const re = new RegExp(a.slice(0, -4), 'y'); let sum = 0; for (let p = t.indexOf('${'); p >= 0; p = t.indexOf('${', p + 1)) { re.lastIndex = p; const m = re.exec(t); sum += m ? m[0].length : 0; } return sum; };
+  let fz = 16; const rnd = (k) => { fz = (fz * 1103515245 + 12345) & 0x7fffffff; return fz % k; };
+  const AL = ['$', '{', '}', '@', 'P', 'x', '(', ')', 'e', '!', ' ', '[', '${', '@P}', '$$'];
+  const fuzzed = Array.from({ length: 5000 }, () => Array.from({ length: 1 + rnd(14) }, () => AL[rnd(AL.length)]).join(''));
+  const differ = fuzzed.filter((t) => EVALS_NOW.test(t) !== EVALS_R15.test(t));
+  const nest1k = 'echo ' + '${a:-'.repeat(1000), reachNow = reachOf(EVALS_SRC.slice(1, -1), nest1k), reachWas = reachOf(EVALS_R15.source, nest1k);
+  ok(!differ.length && fuzzed.filter((t) => EVALS_R15.test(t)).length > 100 && reachNow <= 2 * nest1k.length && reachWas > 100 * nest1k.length,
+    `THE READER IS LINEAR ON AN UNCLOSED NEST (r16 — the r15 review, note b): EVALS's \`\${…@P}\` reads from a \`\${\` to the next \`}\` or \`\${\` — ${fuzzed.length} fuzzed texts match as r15's regex matched them (${differ.length} differ); over a 1000-level unclosed nest (${nest1k.length} characters) the alternative reads ${reachNow} characters from its \`\${\` starts, r15's ${reachWas} — linear against quadratic (the compact head of a 200 KB nest: r15 2.5–2.9 s, r16 34–48 ms — repro r16/headcost.out)`, { differ: differ.slice(0, 5) });
+  // r16's controls: each patched copy turns its own leg red
+  const ansiRaw = sw('ansi-raw', 'v += ansiDecode(s.slice(i + 2, j));', 'v += s.slice(i + 2, j);');
+  ok(lostIn(ansiRaw, ...ANSI) && !ansiRaw.channelsRuns(ansiRow('r16 A11')).length, 'CONTROL `$\'…\'`\'s escapes never decoded (r1–r15): the A rows read no run and no may (inert — every shell ran the CLI); A11\'s decoded name runs nothing', { A1: ansiRaw.commandsRun(line(ANSI[0])).unknown });
+  const mayRaw = sw('may-ansi', '  for (const q of s.matchAll(ANSI_SPAN)) {', '  for (const q of []) {');
+  ok(unknownOf(mayRaw, line(ANSI[3])).length > 0 && !mayOf(mayRaw, line(ANSI[3])).length && mayOf(mayRaw, line(ANSI[0])).length === 1, 'CONTROL a name only a `$\'…\'`\'s decoded text spells never named: A4 `read $\'a[\\x60C &\\x60]\' <<< x` UNKNOWN with may none (a `0` before the name); A1 still named');
+  const subNoName = sw('subscript-name', ": /[\\w}]\\[[^\\]]*(\\$[({]|`)/.test(t)) unknown(", ": /\\[[^\\]]*(\\$[({]|`)/.test(t)) unknown(");
+  ok(MD.slice(0, 6).every((l) => unknownOf(subNoName, line(l)).length > 0 && !subNoName.channelsRuns(line(l)).length) && subNoName.channelsRuns(line(MD[6])).length === 1, 'CONTROL a subscript with no name before its `[` (r15): M1–M6 read UNKNOWN, no exact run (their heads at `vibespace-status` again); M7 exact on both');
+  for (const c of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 75, label: '⑬ ' })) ok(c.pass, c.name, c.detail);
 });
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
