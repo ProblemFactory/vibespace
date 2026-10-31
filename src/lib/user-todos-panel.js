@@ -1341,18 +1341,24 @@ export function installUserTodos(app) {
   // fold that leaves the read card alone at 0 retries at 1 (the soft give way, as the free rule's do). THE STACK'S EXTENT
   // (`annBox`, the box the last placement left — r17, the r16 acceptance's MINOR: the read card's X pressed under the pointer
   // shrank the stack to «N more» instead of refilling the room it had): a held stack never grows past it — a folded card
-  // comes back where it fits inside (the read card gone ⇒ the next one in its room), never below the bottom nor above the top
-  const annFold = (pin, left, top, w, vh, lv = 0, chrome = []) => {
+  // comes back where it fits inside (the read card gone ⇒ the next one in its room), never below the bottom nor above the top.
+  // r18 (the r17 acceptance's MINOR: the extent bounded every held placement — a card above the read one that grew by a line,
+  // its «expired» clock, crossed the top and folded while the person read): THE EXTENT BOUNDS A REFILL ONLY — `fresh`, the
+  // cards annLayout brought back this pass, and what stands beyond them from the read card; a card that grows moves the stack
+  // (the read card kept) and folds only for what the free rule avoids or the screen's edge
+  const annFold = (pin, left, top, w, vh, lv = 0, chrome = [], fresh = []) => {
     const a = annAnchor(), ar = a ? a.getBoundingClientRect() : null, tb = document.getElementById('toolbar'), tr = tb ? tb.getBoundingClientRect() : null;
     const btn = ar && ar.width ? [ar] : [], ext = annBox;
-    const topY = Math.max(tr && tr.height && tr.bottom < vh / 2 ? tr.bottom : 4, ext ? ext.top - 0.5 : 4), bottomY = Math.min(vh - 4, ext ? ext.bottom + 0.5 : vh), more = annStack.querySelector(':scope > .uta-more');
+    const topV = tr && tr.height && tr.bottom < vh / 2 ? tr.bottom : 4, more = annStack.querySelector(':scope > .uta-more');
     const cards = [...annStack.querySelectorAll(':scope > .uta-card')], was = cards.map((e) => e.hidden), top0 = top;
     const pass = (avoid) => {
       let moreOff = false;
       for (let k = 0; k < 32; k++) {
         const sr = annStack.getBoundingClientRect(), dy = top - sr.top; // (measured where the stack stands now; it will stand dy lower)
         const kids = [...cards, more].filter((e) => e && !e.hidden), at = pin ? kids.indexOf(pin) : -1;
-        const bad = kids.map((e) => { const b = e.getBoundingClientRect(), t0 = b.top + dy, b0 = b.bottom + dy; return e !== pin && (t0 < topY || b0 > bottomY || avoid.some((x) => x.left < left + w && x.right > left && x.top < b0 && x.bottom > t0)); });
+        const inExt = (j) => !!ext && (j > at ? kids.slice(at + 1, j + 1) : kids.slice(j, at)).some((e) => fresh.includes(e)); // (a refill, or pushed out by one)
+        const bad = kids.map((e, j) => { const b = e.getBoundingClientRect(), t0 = b.top + dy, b0 = b.bottom + dy, x = inExt(j);
+          return e !== pin && (t0 < (x ? Math.max(topV, ext.top - 0.5) : topV) || b0 > (x ? Math.min(vh - 4, ext.bottom + 0.5) : vh - 4) || avoid.some((r) => r.left < left + w && r.right > left && r.top < b0 && r.bottom > t0)); });
         const below = bad.some((x, j) => x && j > at), above = bad.some((x, j) => x && j < at);
         if (!below && !above) break;
         const rest = kids.filter((e) => e !== more && e !== pin);
@@ -1392,7 +1398,7 @@ export function installUserTodos(app) {
     const meets = (list) => list.some((x) => x.left < left + w && x.right > left && x.top < top + h && x.bottom > top);
     return { left, top, chrome, lv: !meets(chrome) ? 0 : !meets(chrome.filter((x) => !x.soft)) ? 1 : 2 };
   };
-  const annPlace = () => {
+  const annPlace = (fresh = []) => {
     if (!annStack || !annStack.isConnected) return;
     const Z = uiScale(), vw = window.innerWidth, vh = window.innerHeight, pr = annStack.getBoundingClientRect();
     let left, top;
@@ -1400,7 +1406,7 @@ export function installUserTodos(app) {
       const el = annPin.el.parentNode === annStack && !annPin.el.hidden ? annPin.el : null;
       left = pr.left; top = pr.top + (el ? annPin.top - el.getBoundingClientRect().top : 0);
       const f = annFree(pr.width, pr.height, vw, vh); // (r17: what the free rule would do in this geometry — the held stack's ladder)
-      top = annFold(el, left, top, pr.width, vh, f.lv, Math.abs(f.left - left) < 1 ? f.chrome : chromeAvoidRects(left, left + pr.width, (e) => annStack.contains(e) || !!e.closest?.('#global-toasts')));
+      top = annFold(el, left, top, pr.width, vh, f.lv, Math.abs(f.left - left) < 1 ? f.chrome : chromeAvoidRects(left, left + pr.width, (e) => annStack.contains(e) || !!e.closest?.('#global-toasts')), fresh);
     } else {
       ({ left, top } = annFree(pr.width, pr.height, vw, vh));
     }
@@ -1462,13 +1468,18 @@ export function installUserTodos(app) {
     if (!annCards.size) { annStack?.remove(); annStack = null; annAt = ''; annPin = null; annBox = null; clearInterval(annTimer); annTimer = 0; annWatch(false); return; }
     const held = annHeld(); // r15: a card that arrives while a pointer rests on the stack waits off it until the pointer leaves
     const order = [...annCards.values()].filter((c) => !held || c.el.parentNode === annStack).sort((x, y) => newestFirst(x.key, y.key)); // the newest FILING first, a same-ms tie by id (r11 — a burst arrives in one snapshot)
-    order.forEach((c, k) => { c.el.hidden = k >= ANN_SHOWN; }); // r17: a held stack refills, then annFold folds what would leave its extent (r16's: never below the read card)
-    const more = annStack.querySelector(':scope > .uta-more');
+    const more = annStack.querySelector(':scope > .uta-more'), line = held && annPin.el === more, fresh = [];
+    // r17: a held stack refills, then annFold folds what would leave its extent (r16's: never below the read card). r18 (the r17
+    // acceptance's MAJOR: the pointer resting on «N more waiting — open For you», a card above it answered elsewhere — the
+    // refill brought the folded card back, the count fell to 0, the line went from under the pointer and the free placement
+    // then put C0 there: the press meant for For you opened C0): THE PINNED LINE KEEPS ITS RECTANGLE — while it is read the
+    // folded cards stay folded (its count stands); the refill waits until the pointer leaves
+    order.forEach((c, k) => { const was = c.el.hidden; c.el.hidden = k >= ANN_SHOWN || (line && was); if (held && was && !c.el.hidden) fresh.push(c.el); });
     const kids = [...annStack.querySelectorAll(':scope > .uta-card')]; // moved only when the order changed (a card under the pointer stays put)
     for (const c of order) if (c.el.parentNode !== annStack) c.until = Math.max(c.until, Date.now() + ANN_MS); // (a card that waited: its time from when it shows)
     if (kids.length !== order.length || kids.some((e, k) => e !== order[k].el)) for (const c of order) annStack.insertBefore(c.el, more);
     annMore();
-    annPlace();
+    annPlace(fresh);
   };
   /** THE «N more waiting» LINE: the cards the stack folds (r16: what a held stack folded too). r17 (the r16 acceptance's break
    *  probe: the pointer on a maximized chat's last card, the strip grown — the line folded first and the folded card went
