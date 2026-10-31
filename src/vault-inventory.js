@@ -116,8 +116,9 @@ function secretRowOf(s, { machineName = (k) => k } = {}) {
     const p = LOGIN_SOURCES[src];
     const pending = s && (s.pending === 'register' || s.pending === 'change') ? s.pending : null;
     const pendingReason = pending && typeof s.pendingReason === 'string' && s.pendingReason ? clip(s.pendingReason, 320) : null;
+    const origins = Array.isArray(s && s.origins) ? s.origins.map((o) => clip(o, 253)).filter(Boolean).slice(0, 8) : [];
     const detail = pending === 'register' ? PENDING_LOGIN_WORDS.register : pending === 'change' ? PENDING_LOGIN_WORDS.change : p.label;
-    return { entry: name, field: 'password', kind: 'login', label: `${wl[2]} · ${wl[1].replace(/^https:\/\//, '')}`, detail, createdAt: at, ...(p.origin ? { origin: p.origin } : {}), ...(src !== 'owner' ? { provenance: { by: 'agent', prov: src, sawPlaintext: p.sawPlaintext, actor: (s && s.actor) || null, owner: (s && s.owner) || null } } : {}), ...(pending ? { pending, ...(pendingReason ? { pendingReason } : {}) } : {}) };
+    return { entry: name, field: 'password', kind: 'login', label: `${wl[2]} · ${wl[1].replace(/^https:\/\//, '')}`, detail, createdAt: at, ...(p.origin ? { origin: p.origin } : {}), ...(src !== 'owner' ? { provenance: { by: 'agent', prov: src, sawPlaintext: p.sawPlaintext, actor: (s && s.actor) || null, owner: (s && s.owner) || null } } : {}), ...(origins.length ? { hosts: origins } : {}), ...(pending ? { pending, ...(pendingReason ? { pendingReason } : {}) } : {}) };
   }   // lane browser-login (+ lane vault-agent-own: the conversation that stored it, `owner`)
   if (FREE_ENTRY_RE.test(name)) {
     // lane vault-use-grants: an entry the owner filled at an agent's REQUEST says so — its origin «filled by you · asked for by

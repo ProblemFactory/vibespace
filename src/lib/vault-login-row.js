@@ -11,7 +11,7 @@ import { fetchJson, showToast, createModalShell } from './utils.js';
 import { loadTotp } from './vault-totp-row.js';   // lane vault-totp-add: the two-step field lists the vault's own codes
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
-const failWords = (r) => t('Not done — {reason}', { reason: (r && (r.error || r.code)) || t('server unreachable') });
+const failWords = (r) => t('Not done — {reason}', { reason: r && r.code === 'login_not_pending' ? t('that web login is not waiting for confirmation') : (r && (r.error || r.code)) || t('server unreachable') });
 const post = (url, body = {}) => fetchJson(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 /** The scopes of a grant — the resource it is written under (src/browser-login.js scopeOf). */
 const SCOPES = ['this-account', 'any-account', 'any-site'];
@@ -51,8 +51,8 @@ export function loginExtras(row, data, { refresh, show } = {}) {
       ? t('Why not auto-confirmed: the request body was too large to read (> 64 KB) — confirm here if the site accepted it.')
       : pendingReason === 'the site\'s request did not carry the password in a readable form'
         ? t('Why not auto-confirmed: the site\'s request did not carry the password in a readable form — confirm here if the site accepted it.')
-        : typeof pendingReason === 'string' && pendingReason.startsWith('the credential went to ')
-          ? t('Why not auto-confirmed: the credential went to {origin} — confirm here if the site accepted it.', { origin: pendingReason.slice('the credential went to '.length) })
+        : pendingReason === 'the site\'s answer was too large to read'
+          ? t('Why not auto-confirmed: the site\'s answer was too large to read — confirm here if the site accepted it.')
           : '';
     const filledNote = entry.lastFilledPassword === 'pending' ? ` · ${t('Last login filled the pending password.')}` : '';
     box.append(el('div', 'vw-ak-hint vw-login-pending', baseNote + (reasonWords ? ` ${reasonWords}` : '') + filledNote));
@@ -65,6 +65,10 @@ export function loginExtras(row, data, { refresh, show } = {}) {
       else showToast(t('Confirmed the login in the vault'));
       refresh?.();
     };
+  }
+  const destOrigins = Array.isArray(entry.origins) ? entry.origins.filter(Boolean) : [];
+  if (destOrigins.length) {
+    box.append(el('div', 'vw-ak-hint vw-login-origins', t('Submitted to {origins}', { origins: destOrigins.join(', ') })));
   }
   const chips = el('div', 'vw-ak-grants');
   const grants = (entry.grants || []).filter((g) => !g.unknown);

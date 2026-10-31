@@ -59,10 +59,12 @@ function create({ vault, grants = null, totpCode = null, forYou = null, now = ()
       if (!p) continue;
       const pend = s.pending === 'register' || s.pending === 'change' ? s.pending : null;
       const pendWhy = pend && s.pendingReason ? BL.pendingReasonOf(s.pendingReason) : null;
+      const origins = Array.isArray(s.origins) ? s.origins.map(BL.originOf).filter((o) => o && o !== p.origin).slice(0, 8) : [];
       out.push({
         name: s.name, origin: p.origin, user: p.user, at: Number(s.at) || null,
         source: BL.SOURCES.includes(s.kind) ? s.kind : 'owner',
         actor: s.actor || null, owner: s.owner || null,
+        ...(origins.length ? { origins: [...new Set(origins)] } : {}),
         pending: pend,
         ...(pendWhy ? { pendingReason: pendWhy } : {}),
         ...(s.lastFilledPassword === 'pending' || s.lastFilledPassword === 'confirmed' ? { lastFilledPassword: s.lastFilledPassword } : {}),
@@ -87,6 +89,7 @@ function create({ vault, grants = null, totpCode = null, forYou = null, now = ()
       ...pendKind,
       actor: actor ? str(actor).slice(0, 128) : null,
       owner: owner ? str(owner).slice(0, 128) : null,
+      origins: Array.isArray(rec.origins) && rec.origins.length ? rec.origins.slice(0, 8) : null,
       pending: pend,
       pendingReason: pendWhy,
       lastFilledPassword: rec.lastFilledPassword === 'pending' || rec.lastFilledPassword === 'confirmed' ? rec.lastFilledPassword : null,
@@ -253,14 +256,16 @@ function create({ vault, grants = null, totpCode = null, forYou = null, now = ()
     const ex = open(c.name);
     if (!ex.ok) return named(ex.code, ex.error);
     let rec;
+    let pwChanged = true;
     if (ex.rec) {
       const { pending, pendingReason, lastFilledPassword, ...cleanEx } = ex.rec;
       void pending; void pendingReason; void lastFilledPassword;
-      rec = BL.recordOf({ ...cleanEx, by: 'owner', source: 'owner', strength: 'unknown', password: c.password, submittedAt: now(), ...(ex.rec.password !== c.password ? { previous: { password: ex.rec.password, source: ex.rec.source, strength: ex.rec.strength, replacedAt: now() } } : {}) });
+      pwChanged = ex.rec.password !== c.password;
+      rec = BL.recordOf({ ...cleanEx, ...(pwChanged ? { by: 'owner', source: 'owner', strength: 'unknown', submittedAt: now(), previous: { password: ex.rec.password, source: ex.rec.source, strength: ex.rec.strength, replacedAt: now() } } : { submittedAt: ex.rec.submittedAt || now() }), password: c.password });
     } else {
       rec = BL.newRecord({ origin: c.origin, username: c.username, password: c.password, source: 'owner', now: now() });
     }
-    const meta = names().find((x) => x.name === c.name) || null;
+    const meta = !pwChanged ? (names().find((x) => x.name === c.name) || null) : null;
     const w = writeEntry(c.name, rec, { actor: (meta && meta.actor) || null, owner: (meta && meta.owner) || null });
     if (!w.ok) return w;
     dropCard(c.id);
@@ -289,27 +294,29 @@ function create({ vault, grants = null, totpCode = null, forYou = null, now = ()
     const ex = open(n);
     if (!ex.ok) return ex;
     let rec;
+    let pwChanged = true;
     if (ex.rec) {
       const { pending, pendingReason, lastFilledPassword, ...cleanEx } = ex.rec;
       void pending; void pendingReason; void lastFilledPassword;
-      rec = BL.recordOf({ ...cleanEx, by: 'owner', source: 'owner', strength: 'unknown', username: str(username).trim(), password, ...(totpName ? { totpName } : {}), submittedAt: now(), ...(ex.rec.password !== password ? { previous: { password: ex.rec.password, source: ex.rec.source, strength: ex.rec.strength, replacedAt: now() } } : {}) });
+      pwChanged = ex.rec.password !== password;
+      rec = BL.recordOf({ ...cleanEx, ...(pwChanged ? { by: 'owner', source: 'owner', strength: 'unknown', submittedAt: now(), previous: { password: ex.rec.password, source: ex.rec.source, strength: ex.rec.strength, replacedAt: now() } } : { submittedAt: ex.rec.submittedAt || now() }), username: str(username).trim(), password, ...(totpName ? { totpName } : {}) });
     } else {
       rec = BL.newRecord({ origin: o, username, password, totpName, source: 'owner', now: now() });
     }
-    const meta = names().find((x) => x.name === n) || null;
+    const meta = !pwChanged ? (names().find((x) => x.name === n) || null) : null;
     const w = writeEntry(n, rec, { actor: (meta && meta.actor) || null, owner: (meta && meta.owner) || null });
     if (!w.ok) return w;
     try { vault.audit?.('vault-web-login-saved', { why: n, by: 'human', who: who ? str(who).slice(0, 40) : null }); } catch { /* */ }
     return { ok: true, name: n, updated: !!ex.rec };
   }
-  /** The owner's manual confirmation door in the Vault window (for > 64 KB / cross-origin / hashed submissions whose request body could not verify the password). */
+  /** The owner's manual confirmation door in the Vault window (for > 64 KB / hashed / unreadable-answer submissions whose outcome could not be auto-confirmed). */
   function confirmOwn(name, { who = null } = {}) {
     const n = str(name);
     if (!BL.parseName(n)) return named('not_found', 'no such web login');
     const ex = open(n);
     if (!ex.ok) return ex;
     if (!ex.rec) return named('not_found', 'no such web login');
-    if (!ex.rec.pending && !ex.rec.pendingReason && !ex.rec.lastFilledPassword) return { ok: true, name: n, already: true };
+    if (!ex.rec.pending) return named('login_not_pending', 'that web login is not waiting for confirmation');
     const { pending, pendingReason, lastFilledPassword, ...cleanEx } = ex.rec;
     void pending; void pendingReason; void lastFilledPassword;
     const rec = BL.recordOf({ ...cleanEx, submittedAt: ex.rec.submittedAt || now() });
@@ -331,6 +338,22 @@ function create({ vault, grants = null, totpCode = null, forYou = null, now = ()
     const meta = names().find((x) => x.name === n) || null;
     const w = writeEntry(n, rec, { actor: (meta && meta.actor) || null, owner: (meta && meta.owner) || null });
     return w && w.ok ? { ok: true, name: n, pendingReason: pr } : { ok: false, code: (w && w.code) || 'not_written' };
+  }
+  /** Record a cross-origin destination that CARRIED the credential as a fact on the entry (`rec.origins`), never as a pendingReason. */
+  function noteCredentialOrigin(name, destOrigin) {
+    const n = str(name);
+    const p = BL.parseName(n);
+    const o = BL.originOf(destOrigin);
+    if (!p || !o || o === p.origin) return { ok: false, code: 'bad_origin' };
+    const ex = open(n);
+    if (!ex.ok || !ex.rec) return { ok: false, code: (ex && ex.code) || 'not_found' };
+    const cur = Array.isArray(ex.rec.origins) ? ex.rec.origins : [];
+    if (cur.includes(o)) return { ok: true, name: n, origins: cur.slice() };
+    const nextOrigins = [...new Set([...cur, o])].slice(0, 8);
+    const rec = BL.recordOf({ ...ex.rec, origins: nextOrigins });
+    const meta = names().find((x) => x.name === n) || null;
+    const w = writeEntry(n, rec, { actor: (meta && meta.actor) || null, owner: (meta && meta.owner) || null });
+    return w && w.ok ? { ok: true, name: n, origins: rec.origins || nextOrigins } : { ok: false, code: (w && w.code) || 'not_written' };
   }
   /** lane vault-agent-own: AN AGENT stores a login it holds itself (`vibespace-vault login add`) — sealed `agent-typed`, its `owner`
    *  the storing conversation (its fill there needs no grant); a login already kept for that account is never written over by
@@ -397,15 +420,16 @@ function create({ vault, grants = null, totpCode = null, forYou = null, now = ()
     return w && w.ok ? { ok: true, removed: true } : named((w && w.code) || 'not_written', (w && w.error) || 'not written');
   }
 
-  /** lane vault-login-chrome r4: open a login entry's secret values (>= 8 bytes) solely to re-hydrate in-memory output scrubbing after a hub restart. */
-  function scrubSecretsOf(name) {
+  /** lane vault-login-chrome r4: open a login entry's secret values (>= minBytes) solely to re-hydrate in-memory output scrubbing or DOM verification after a hub restart. */
+  function scrubSecretsOf(name, { minBytes = 8 } = {}) {
     const n = str(name);
     if (!BL.parseName(n)) return { ok: false, code: 'bad_name', values: [] };
     if (vstate() !== 'unlocked') return { ok: false, code: 'vault_locked', values: [] };
     const o = open(n);
     if (!o.ok || !o.rec) return { ok: false, code: o.code || 'login_no_entry', values: [] };
+    const floor = Number.isFinite(Number(minBytes)) && Number(minBytes) > 0 ? Number(minBytes) : 8;
     const values = [o.rec.password, o.rec.previous && o.rec.previous.password]
-      .filter((x) => typeof x === 'string' && Buffer.byteLength(x, 'utf8') >= 8);
+      .filter((x) => typeof x === 'string' && Buffer.byteLength(x, 'utf8') >= floor);
     return { ok: true, values };
   }
   function onVaultOpen(fn) {
@@ -413,7 +437,7 @@ function create({ vault, grants = null, totpCode = null, forYou = null, now = ()
     try { return vault.onOpen(fn) || (() => {}); } catch { return () => {}; }
   }
 
-  return { names, planFill, noteFill, submitted, flushHeld, scrubSecretsOf, onVaultOpen, answerCard, cardOf: (id) => { const c = cards.get(str(id)); return c ? { id: c.id, name: c.name, shown: c.shown, update: c.existing } : null; }, list, addOwn, confirmOwn, notePendingReason, addAgent, drop, grant, ungrant, _cards: cards, _held: held };
+  return { names, planFill, noteFill, submitted, flushHeld, scrubSecretsOf, onVaultOpen, answerCard, cardOf: (id) => { const c = cards.get(str(id)); return c ? { id: c.id, name: c.name, shown: c.shown, update: c.existing } : null; }, list, addOwn, confirmOwn, notePendingReason, noteCredentialOrigin, addAgent, drop, grant, ungrant, _cards: cards, _held: held };
 }
 
 module.exports = { create, CARDS_MAX, CARD_MS, HELD_MAX, TYPED_MAX, TYPED_MS };

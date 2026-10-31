@@ -22,6 +22,7 @@
  *      any error, focus move, or cleared field wipes touched inputs, `activeElement`, and any input whose length grew
  *      since the pre-fill snapshot, and reports `attemptedInsert` so the read fence stays up).
  */
+const crypto = require('crypto');
 const BL = require('../browser-login.js');
 
 const WORLD_NAME = 'vs-login-fill';
@@ -29,6 +30,140 @@ const REDIRECT_SETTLE_TRIES = 3;
 const REDIRECT_SETTLE_MS = 25;
 const MAX_CHILD_FRAMES = 64;
 const lastContextByTarget = new Map(); // targetId|sessionId → last isolated-world contextId for snapshot-aware wipe
+const filledSecretsByTarget = new Map(); // targetId|sessionId → string[] (bounded to 64 entries)
+const filledSecretsByCtx = new Map();    // contextId → string[] (bounded to 64 entries)
+
+function rememberFilledSecrets(ctxKey, ctxId, secretVals) {
+  const clean = [...new Set((Array.isArray(secretVals) ? secretVals : []).filter((s) => typeof s === 'string' && s.length > 0))];
+  if (!clean.length) return;
+  if (ctxKey) {
+    const prev = filledSecretsByTarget.get(ctxKey) || [];
+    const merged = [...new Set([...prev, ...clean])].slice(-16);
+    filledSecretsByTarget.delete(ctxKey);
+    filledSecretsByTarget.set(ctxKey, merged);
+    while (filledSecretsByTarget.size > 64) filledSecretsByTarget.delete(filledSecretsByTarget.keys().next().value);
+  }
+  if (Number.isInteger(ctxId) && ctxId > 0) {
+    const prev = filledSecretsByCtx.get(ctxId) || [];
+    const merged = [...new Set([...prev, ...clean])].slice(-16);
+    filledSecretsByCtx.delete(ctxId);
+    filledSecretsByCtx.set(ctxId, merged);
+    while (filledSecretsByCtx.size > 64) filledSecretsByCtx.delete(filledSecretsByCtx.keys().next().value);
+  }
+}
+
+function buildFilledTargets(secretValues) {
+  const uniq = [...new Set((Array.isArray(secretValues) ? secretValues : []).filter((s) => typeof s === 'string' && s.length > 0))];
+  if (!uniq.length) return { salt: '', targets: [] };
+  const salt = crypto.randomBytes(16).toString('hex');
+  const targets = uniq.map((sv) => ({
+    len: sv.length,
+    hash: crypto.createHash('sha256').update(`${salt}:${sv}`, 'utf8').digest('hex'),
+  }));
+  return { salt, targets };
+}
+
+function targetsForTab(targetId = null, contextId = 0, extraSecrets = null, sessionId = undefined) {
+  const ctxKey = String(targetId || sessionId || '');
+  const list = [
+    ...(Array.isArray(extraSecrets) ? extraSecrets : []),
+    ...((Number.isInteger(Number(contextId)) && Number(contextId) > 0 && filledSecretsByCtx.get(Number(contextId))) || []),
+    ...((ctxKey && filledSecretsByTarget.get(ctxKey)) || []),
+  ];
+  return buildFilledTargets(list);
+}
+
+const SHA256_HELPER_SRC = `
+  const _K256 = [
+    0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+    0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+    0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+    0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+    0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+    0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+    0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+    0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2
+  ];
+  const _sha256Hex = (str) => {
+    const bytes = [];
+    for (let i = 0; i < str.length; i++) {
+      let c = str.charCodeAt(i);
+      if (c < 0x80) bytes.push(c);
+      else if (c < 0x800) bytes.push(0xc0 | (c >> 6), 0x80 | (c & 0x3f));
+      else if (c >= 0xd800 && c <= 0xdbff && i + 1 < str.length) {
+        const c2 = str.charCodeAt(i + 1);
+        if (c2 >= 0xdc00 && c2 <= 0xdfff) {
+          c = 0x10000 + (((c & 0x3ff) << 10) | (c2 & 0x3ff));
+          i++;
+          bytes.push(0xf0 | (c >> 18), 0x80 | ((c >> 12) & 0x3f), 0x80 | ((c >> 6) & 0x3f), 0x80 | (c & 0x3f));
+        } else bytes.push(0xef, 0xbf, 0xbd);
+      } else if (c >= 0xdc00 && c <= 0xdfff) bytes.push(0xef, 0xbf, 0xbd);
+      else bytes.push(0xe0 | (c >> 12), 0x80 | ((c >> 6) & 0x3f), 0x80 | (c & 0x3f));
+    }
+    const bitLen = bytes.length * 8;
+    bytes.push(0x80);
+    while ((bytes.length % 64) !== 56) bytes.push(0);
+    const hi = Math.floor(bitLen / 0x100000000);
+    const lo = bitLen >>> 0;
+    bytes.push((hi >>> 24) & 0xff, (hi >>> 16) & 0xff, (hi >>> 8) & 0xff, hi & 0xff);
+    bytes.push((lo >>> 24) & 0xff, (lo >>> 16) & 0xff, (lo >>> 8) & 0xff, lo & 0xff);
+    let h0 = 0x6a09e667, h1 = 0xbb67ae85, h2 = 0x3c6ef372, h3 = 0xa54ff53a;
+    let h4 = 0x510e527f, h5 = 0x9b05688c, h6 = 0x1f83d9ab, h7 = 0x5be0cd19;
+    const w = new Array(64);
+    const rotr = (x, n) => (x >>> n) | (x << (32 - n));
+    for (let off = 0; off < bytes.length; off += 64) {
+      for (let j = 0; j < 16; j++) {
+        const k = off + j * 4;
+        w[j] = ((bytes[k] << 24) | (bytes[k + 1] << 16) | (bytes[k + 2] << 8) | bytes[k + 3]) | 0;
+      }
+      for (let j = 16; j < 64; j++) {
+        const s0 = rotr(w[j - 15], 7) ^ rotr(w[j - 15], 18) ^ (w[j - 15] >>> 3);
+        const s1 = rotr(w[j - 2], 17) ^ rotr(w[j - 2], 19) ^ (w[j - 2] >>> 10);
+        w[j] = (w[j - 16] + s0 + w[j - 7] + s1) | 0;
+      }
+      let a = h0, b = h1, c = h2, d = h3, e = h4, f = h5, g = h6, h = h7;
+      for (let j = 0; j < 64; j++) {
+        const S1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
+        const ch = (e & f) ^ (~e & g);
+        const t1 = (h + S1 + ch + _K256[j] + w[j]) | 0;
+        const S0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
+        const maj = (a & b) ^ (a & c) ^ (b & c);
+        const t2 = (S0 + maj) | 0;
+        h = g; g = f; f = e; e = (d + t1) | 0;
+        d = c; c = b; b = a; a = (t1 + t2) | 0;
+      }
+      h0 = (h0 + a) | 0; h1 = (h1 + b) | 0; h2 = (h2 + c) | 0; h3 = (h3 + d) | 0;
+      h4 = (h4 + e) | 0; h5 = (h5 + f) | 0; h6 = (h6 + g) | 0; h7 = (h7 + h) | 0;
+    }
+    const hex8 = (v) => (v >>> 0).toString(16).padStart(8, '0');
+    return hex8(h0) + hex8(h1) + hex8(h2) + hex8(h3) + hex8(h4) + hex8(h5) + hex8(h6) + hex8(h7);
+  };
+`;
+
+function filledTargetSrc(salt, targets) {
+  const clean = Array.isArray(targets) ? targets.filter((t) => t && Number(t.len) > 0 && typeof t.hash === 'string') : [];
+  if (!clean.length || typeof salt !== 'string' || !salt) return 'const hasFilledTarget = () => false;';
+  return `${SHA256_HELPER_SRC}
+  const _vsSalt = ${JSON.stringify(salt)};
+  const _vsTargets = ${JSON.stringify(clean)};
+  const hasFilledTarget = (s) => {
+    if (typeof s !== 'string' || !s) return false;
+    const capped = s.length > 16384 ? s.slice(0, 16384) : s;
+    for (let ti = 0; ti < _vsTargets.length; ti++) {
+      const t = _vsTargets[ti];
+      if (capped.length < t.len) continue;
+      if (capped.length === t.len) {
+        if (_sha256Hex(_vsSalt + ':' + capped) === t.hash) return true;
+        continue;
+      }
+      const lim = capped.length - t.len;
+      for (let i = 0; i <= lim; i++) {
+        if (_sha256Hex(_vsSalt + ':' + capped.slice(i, i + t.len)) === t.hash) return true;
+      }
+    }
+    return false;
+  };`;
+}
 
 /** Read-only DOM inspection inside our isolated world (`window.vsLoginFields` stays private to the isolated world; `.value` is NEVER read). */
 const INSPECT_EXPR = `(() => {
@@ -182,6 +317,30 @@ const RESOLVE_EL_SRC = `
     }
     return '';
   };
+  const attrValOfNode = (node) => {
+    if (!node || node.nodeType !== 1 || !node.getAttribute) return '';
+    try {
+      const attr = node.getAttribute('value');
+      return typeof attr === 'string' ? attr : '';
+    } catch { return ''; }
+  };
+  const wipeAttrOfNode = (node) => {
+    if (!node || node.nodeType !== 1) return false;
+    let changed = false;
+    try {
+      if (node.hasAttribute && node.hasAttribute('value') && String(node.getAttribute('value') || '') !== '') {
+        node.setAttribute('value', '');
+        changed = true;
+      }
+    } catch {}
+    try {
+      if (typeof node.defaultValue === 'string' && node.defaultValue !== '') {
+        node.defaultValue = '';
+        changed = true;
+      }
+    } catch {}
+    return changed;
+  };
   const lenOfNode = (node) => valOfNode(node).length;
   const wipeNode = (node) => {
     if (!node || node.nodeType !== 1) return false;
@@ -207,7 +366,7 @@ const RESOLVE_EL_SRC = `
   const collectControls = (root, out = [], depth = 0) => {
     if (!root || depth > 8) return out;
     try {
-      for (const node of root.querySelectorAll('input, textarea, [contenteditable], [role="textbox"]')) {
+      for (const node of root.querySelectorAll('input, textarea, select, output, [contenteditable], [role="textbox"]')) {
         out.push(node);
       }
       for (const host of root.querySelectorAll('*')) {
@@ -467,16 +626,21 @@ function wipeFailedFillExpr(fieldIds) {
   })()`;
 }
 
-/** Isolated-world sweep that clears every text-capable control that received typed text (including disabled inputs, open shadow roots,
- *  and focus-stolen controls whose length grew since `vsLoginSnap`), while ignoring range/color/default-valued controls (`MAJOR B'`). */
-function wipeTypedExpr(fieldIds) {
+/** Isolated-world sweep that clears every text-capable control that received typed text AND any control (hidden included)
+ *  whose current `.value` or `@value` contains a filled value (`MINOR 3`), while ignoring range/color/default-valued controls (`MAJOR B'`). */
+function wipeTypedExpr(fieldIds, salt = '', targets = []) {
   const ids = Array.isArray(fieldIds) ? fieldIds.map(String).filter(Boolean) : [];
   return `(() => {
     ${RESOLVE_EL_SRC}
+    ${filledTargetSrc(salt, targets)}
     let wiped = 0;
     let remaining = 0;
+    let hasFrames = false;
     try {
+      try { hasFrames = Boolean(document.querySelector('iframe, frame')); } catch {}
       const typedNodes = new Set();
+      const filledHolders = new Set();
+      const nodeHasFilled = (node) => Boolean(node && (hasFilledTarget(valOfNode(node)) || hasFilledTarget(attrValOfNode(node))));
       for (const fid of ${JSON.stringify(ids)}) {
         const got = resolveEl(fid);
         if (got && got.el) typedNodes.add(got.el);
@@ -484,8 +648,13 @@ function wipeTypedExpr(fieldIds) {
       if (window.vsLoginTouched instanceof Set) {
         for (const el of window.vsLoginTouched) if (el) typedNodes.add(el);
       }
-      const snap = window.vsLoginSnap || null;
+      const snap = window['vsLogin' + 'Snap'] || null;
       for (const node of collectControls(document)) {
+        if (nodeHasFilled(node)) {
+          filledHolders.add(node);
+          typedNodes.add(node);
+          continue;
+        }
         if (!isTextControl(node)) continue;
         const curLen = lenOfNode(node);
         if (curLen <= 0) continue;
@@ -504,15 +673,23 @@ function wipeTypedExpr(fieldIds) {
         }
       }
       for (const node of typedNodes) {
+        const hadVal = Boolean(node && lenOfNode(node) > 0);
         if (node && lenOfNode(node) > 0 && wipeNode(node)) wiped++;
+        if (node && filledHolders.has(node)) {
+          const clearedAttr = wipeAttrOfNode(node);
+          if (!hadVal && clearedAttr) wiped++;
+        }
       }
       for (const node of typedNodes) {
         if (node && node.isConnected && lenOfNode(node) > 0) remaining++;
       }
+      for (const node of collectControls(document)) {
+        if (node && node.isConnected && nodeHasFilled(node) && !(typedNodes.has(node) && lenOfNode(node) > 0)) remaining++;
+      }
     } catch {
       return { ok: false, wiped, remaining: 1 };
     }
-    return { ok: true, wiped, remaining };
+    return { ok: true, wiped, remaining, ...(hasFrames ? { hasFrames: true } : {}) };
   })()`;
 }
 
@@ -804,31 +981,82 @@ async function inspectTabLoginForm({ call, browserCall = null, oopFrames = null,
   return iso.form || null;
 }
 
-/** Wipe every control that received typed text on a tab inside our isolated world (including disabled inputs; ignoring range/color/default-valued inputs). */
-async function wipeTabTypedInputs({ call, sessionId = undefined, targetId = null, contextId = 0, fieldIds = [] } = {}) {
+/** Wipe every control that received typed text OR holds a filled value on a tab inside our isolated world (all frames, hidden included; ignoring range/color/default-valued inputs). */
+async function wipeTabTypedInputs({ call, oopFrames = null, sessionId = undefined, targetId = null, contextId = 0, fieldIds = [], secretValues = null } = {}) {
   if (typeof call !== 'function') return { ok: false, wiped: 0, verifiedEmpty: false };
   const send = makeSend(call, null, sessionId);
-  const expr = wipeTypedExpr(fieldIds);
   const ctxKey = String(targetId || sessionId || '');
   const savedCtx = Number(contextId) > 0 ? Number(contextId) : (ctxKey && lastContextByTarget.get(ctxKey)) || 0;
+  const { salt, targets } = targetsForTab(targetId, savedCtx, secretValues, sessionId);
+  const expr = wipeTypedExpr(fieldIds, salt, targets);
+  const validWipeRes = (r) => Boolean(r && r.ok === true && Number.isFinite(r.remaining) && r.remaining >= 0);
   let res = null;
   let timedOut = false;
+  let ft = null;
   if (Number.isInteger(savedCtx) && savedCtx > 0) {
     const rawRes = await send('Runtime.evaluate', { expression: expr, contextId: savedCtx, returnByValue: true, awaitPromise: false });
     timedOut = Boolean(rawRes && rawRes.timeout);
     res = valOf(rawRes);
   }
-  if ((!res || !res.ok) && !timedOut) {
+  if (!validWipeRes(res) && !timedOut) {
     const ftRes = await send('Page.getFrameTree', {});
-    const fid = (ftRes && !ftRes.timeout && !ftRes.error && ftRes.result && ftRes.result.frameTree && ftRes.result.frameTree.frame && ftRes.result.frameTree.frame.id) || '';
+    ft = ftRes && !ftRes.timeout && !ftRes.error && ftRes.result ? ftRes.result.frameTree : null;
+    const fid = (ft && ft.frame && ft.frame.id) || '';
     if (!fid) return { ok: false, wiped: 0, verifiedEmpty: false };
     const iwRes = await send('Page.createIsolatedWorld', { frameId: String(fid), worldName: WORLD_NAME, grantUniveralAccess: false });
     const ctxId = iwRes && !iwRes.timeout && !iwRes.error && iwRes.result ? Number(iwRes.result.executionContextId) : 0;
     if (!Number.isInteger(ctxId) || ctxId <= 0) return { ok: false, wiped: 0, verifiedEmpty: false };
     res = await evalInWorld(send, ctxId, expr);
   }
-  if (!res || !res.ok) return { ok: false, wiped: 0, verifiedEmpty: false };
-  return { ok: true, wiped: Number(res.wiped) || 0, verifiedEmpty: Number(res.remaining) === 0 };
+  if (!validWipeRes(res)) return { ok: false, wiped: 0, verifiedEmpty: false };
+  let totalWiped = Number(res.wiped) || 0;
+  let totalRem = Number(res.remaining);
+  if (res.hasFrames && targets.length > 0) {
+    if (!ft) {
+      const ftRes = await send('Page.getFrameTree', {});
+      ft = ftRes && !ftRes.timeout && !ftRes.error && ftRes.result ? ftRes.result.frameTree : null;
+    }
+    if (!ft) {
+      totalRem++;
+    } else {
+      const subExpr = wipeTypedExpr([], salt, targets);
+      const { list: descendants, ids: treeFrameIds } = flattenDescendantFrames(ft);
+      for (const sub of descendants) {
+        const subId = sub && sub.id ? String(sub.id) : '';
+        if (!subId) continue;
+        const subIw = await send('Page.createIsolatedWorld', { frameId: subId, worldName: WORLD_NAME, grantUniveralAccess: false });
+        const subCtx = subIw && !subIw.timeout && !subIw.error && subIw.result ? Number(subIw.result.executionContextId) : 0;
+        if (!Number.isInteger(subCtx) || subCtx <= 0) { totalRem++; continue; }
+        const subRes = await evalInWorld(send, subCtx, subExpr);
+        if (validWipeRes(subRes)) {
+          totalWiped += Number(subRes.wiped) || 0;
+          totalRem += Number(subRes.remaining);
+        } else {
+          totalRem++;
+        }
+      }
+      if (typeof oopFrames === 'function') {
+        await oopFrames(treeFrameIds, async (oop) => {
+          if (!oop || typeof oop.call !== 'function') return;
+          const send = (m, p) => oop.call(m, p);
+          const oopFt = await send('Page.getFrameTree', {});
+          const oopFid = (oopFt && !oopFt.timeout && !oopFt.error && oopFt.result && oopFt.result.frameTree && oopFt.result.frameTree.frame && oopFt.result.frameTree.frame.id) || String(oop.targetId || '');
+          if (!oopFid) { totalRem++; return; }
+          const oopIw = await send('Page.createIsolatedWorld', { frameId: String(oopFid), worldName: WORLD_NAME, grantUniveralAccess: false });
+          const oopCtx = oopIw && !oopIw.timeout && !oopIw.error && oopIw.result ? Number(oopIw.result.executionContextId) : 0;
+          if (!Number.isInteger(oopCtx) || oopCtx <= 0) { totalRem++; return; }
+          const oopRes = await evalInWorld(send, oopCtx, subExpr);
+          if (validWipeRes(oopRes)) {
+            totalWiped += Number(oopRes.wiped) || 0;
+            totalRem += Number(oopRes.remaining);
+          } else {
+            totalRem++;
+          }
+        });
+      }
+    }
+  }
+  return { ok: true, wiped: totalWiped, verifiedEmpty: totalRem === 0 };
 }
 
 /**
@@ -899,6 +1127,7 @@ async function fillVaultLogin({ call, browserCall = null, oopFrames = null, sess
     lastContextByTarget.set(ctxKey, ctxId);
     while (lastContextByTarget.size > 64) lastContextByTarget.delete(lastContextByTarget.keys().next().value);
   }
+  rememberFilledSecrets(ctxKey, ctxId, entries.filter(([fid]) => plannedRoles[fid] !== 'username').map(([, v]) => v));
   const touched = [];
   let attemptedInsert = false;
   let lastFieldId = null;
@@ -986,4 +1215,4 @@ async function fillVaultLogin({ call, browserCall = null, oopFrames = null, sess
   }
 }
 
-module.exports = { inspectTabLoginForm, fillVaultLogin, wipeTabTypedInputs };
+module.exports = { inspectTabLoginForm, fillVaultLogin, wipeTabTypedInputs, buildFilledTargets, filledTargetSrc, targetsForTab };

@@ -1668,17 +1668,16 @@ console.log('⑬ Standard-Chrome r5 adversarial fixup gates (MAJOR A/B/C + MINOR
       const scrubClearedOnStop = SA.w.hasScrubSecrets(PID) === false;
       ok(rfA.ok && Buffer.byteLength(full5000) > 256 * 1024 && Buffer.byteLength(full5000) <= 2 * 1024 * 1024 &&
         Buffer.byteLength(oversize9000) > 2 * 1024 * 1024 &&
-        timesCompact[1] < 20 && fullMs < 20 && overMs < 20 && ov1 === ov0 && ov2 === ov0 + 1 &&
+        timesCompact[1] < 20 && fullMs < 20 && overMs < 80 && ov1 === ov0 &&
         !outCompact.includes(PWA) && !outFull.includes(PWA) && !outOver.includes(PWA) &&
         compactParsed.result[`[vault:web-login:${SITE}#axuser]`] === 'key-val' &&
         compactParsed.result.count === 12345678 && fullParsed.result.count === 12345678 && overParsed.result.count === 12345678 &&
         hadScrubDuringFence === true && scrubKeptAfterNav === true && scrubClearedOnStop === true,
-        `r5/r6 MAJOR A (compiled scrubber + 2 MiB walk bound + browser-stop scrub lifetime): 5000-node AX frames scrub in < 20 ms (compact=${timesCompact[1].toFixed(2)}ms, 1.26MB walk=${fullMs.toFixed(2)}ms, >2MiB spelled=${overMs.toFixed(2)}ms), mask string values & JSON keys, keep scrub across nav, and clear on browser stop`,
+        `r5/r6 MAJOR A (compiled scrubber + >2 MiB walk + browser-stop scrub lifetime): 5000-node AX frames scrub in < 20 ms (compact=${timesCompact[1].toFixed(2)}ms, 1.26MB walk=${fullMs.toFixed(2)}ms, >2MiB walk=${overMs.toFixed(2)}ms), mask string values & JSON keys, keep scrub across nav, and clear on browser stop`,
         { walkMs: timesCompact[1], fullMs, overMs, ov0, ov1, ov2, hadScrubDuringFence, scrubKeptAfterNav, scrubClearedOnStop });
 
       // RED A1: per-string VR().maskText rebuild (r4 shape) exceeds the 20 ms budget on the 5000-node frame
       const redA1Src = DSRC0
-        .replace('if (Buffer.byteLength(frameStr, \'utf8\') > SCRUB_JSON_MAX_BYTES) {', 'if (false) {')
         .replace('const s = fn(node);', 'const s = VR().maskText(node, [...(scrubByProfile.get(pid) || [])].map((b) => ({ label: b.label, value: b.value })));');
       const DmA1 = redA1Src !== DSRC0 ? MUT.load('src/server/browser-dialogs.js', redA1Src, 'r5-a-per-string-masker') : null;
       const SA1 = DmA1 ? await world({ mode: { standard: true }, Dmod: DmA1 }) : null;
@@ -2404,33 +2403,15 @@ console.log('⑭ Standard-Chrome r6 adversarial fixup gates (MAJOR A\'/B\' + MIN
       const recBigAfter = bigGot && bigGot.value ? BL.recordOf(bigGot.value.toString('utf8')) : null;
       const rowBigAfter = SC6.logins.list().entries.find((e) => e.name === bigName);
 
-      // (5) Cross-origin unreadable write on signup ⇒ submitted: 'unknown' ("the credential went to https://api.other.test")
-      SC6.k.navigate(tid, `${SITE}/signup-xapi`);
-      await sleep(25);
-      SC6.k.setStandardPage({
-        securityOrigin: SITE, isoOrigin: SITE,
-        buttons: [{ id: 'vs-b-0', text: 'Create account', inForm: true }],
-        submitUrl: 'https://api.other.test/v1/register',
-        submitPostData: JSON.stringify({ pwHash: 'opaque' }),
-        fields: [
-          { fieldId: 'c6-ou', tag: 'input', domType: 'email', type: 'email', autocomplete: 'username', visible: true },
-          { fieldId: 'c6-op', tag: 'input', domType: 'password', type: 'password', autocomplete: 'new-password', visible: true },
-        ],
-      }, tid);
-      const rOther = await SC6.w.fillLogin(TGT, FILL({ newUser: 'xapi@example.test', generate: true, submit: true }));
-      const rowOther = SC6.logins.list().entries.find((e) => e.name === `web-login:${SITE}#xapi@example.test`);
-
       ok(rXform.submitted === true && /and submitted the form/.test(txtXform) && !/NOT submitted/.test(txtXform) &&
         rHash.submitted === 'unknown' && rHash.submittedReason === 'the site\'s request did not carry the password in a readable form' && !/NOT submitted|press its button/.test(txtHash) &&
         rHdr.submitted === 'unknown' && rHdr.submittedReason === 'the site\'s request did not carry the password in a readable form' && !/NOT submitted|press its button/.test(txtHdr) &&
         rBig.submitted === 'unknown' && rBig.submittedReason === 'the request body was too large to read' && !/NOT submitted|press its button/.test(txtBig) &&
         rowBigBefore && rowBigBefore.pending === 'register' && rowBigBefore.pendingReason === 'the request body was too large to read' &&
         vrowBigBefore && vrowBigBefore.pendingReason === 'the request body was too large to read' &&
-        Boolean(confRes && confRes.ok) && recBigAfter && !recBigAfter.pending && !recBigAfter.pendingReason && rowBigAfter && rowBigAfter.pending === null &&
-        rOther.submitted === 'unknown' && rOther.submittedReason === 'the credential went to https://api.other.test' &&
-        rowOther && rowOther.pendingReason === 'the credential went to https://api.other.test',
-        'r6 MINOR C\' (three submitted states + > 64 KB bound + owner Confirm): xform => submitted:true; hashed/header/>64KB/xapi => submitted:\'unknown\' with exact reason & no "press its button"; Confirm clears pending',
-        { rXform, rHash, rHdr, rBig, rowBigBefore, confRes, rOther });
+        Boolean(confRes && confRes.ok) && recBigAfter && !recBigAfter.pending && !recBigAfter.pendingReason && rowBigAfter && rowBigAfter.pending === null,
+        'r6 MINOR C\' (three submitted states + > 64 KB bound + owner Confirm): xform => submitted:true; hashed/header/>64KB => submitted:\'unknown\' with exact reason & no "press its button"; Confirm clears pending',
+        { rXform, rHash, rHdr, rBig, rowBigBefore, confRes });
 
       const redCSrc = DSRC0.replace(
         'if (credAny || unloaded) {\n          subState = true;\n        } else if (sawChromeSub && an && (an.writeSentSeq || 0) > subNetMark) {\n          subState = \'unknown\';\n          subReason = pendingReasonFromNet(an, subNetMark) || BL().READABLE_BOUND;\n        }',
@@ -2585,7 +2566,7 @@ console.log('⑭ Standard-Chrome r6 adversarial fixup gates (MAJOR A\'/B\' + MIN
       try { parsed300k = JSON.parse(out300k); } catch { parsed300k = null; }
 
       // Also verify the raw `fn.spelled` fallback directly (unparseable frame with numeric timestamp + HTML-entity secret)
-      const unparseableRaw = `{broken_json,"ts":${tsNum},"html":"${ENT_ENCODED}","numEntity":"&#${NUM_PW.charCodeAt(0)};${NUM_PW.slice(1)}"`;
+      const unparseableRaw = `{broken_json,"ts":${tsNum},"html":"${ENT_ENCODED}"`;
       const outUnparseable = SE6.w.scrubCdpFrame(PID, unparseableRaw);
 
       ok(Buffer.byteLength(frame300k) >= 300 * 1024 && Boolean(parsed300k) &&
@@ -2593,19 +2574,18 @@ console.log('⑭ Standard-Chrome r6 adversarial fixup gates (MAJOR A\'/B\' + MIN
         parsed300k.result.pinEcho === `pin=[vault:web-login:${SITE}#numuser]` &&
         parsed300k.result.htmlSnippet === `<div>[vault:web-login:${SITE}#entuser]</div>` &&
         !out300k.includes(ENT_ENCODED) && !out300k.includes(`pin=${NUM_PW}`) &&
-        outUnparseable.includes(`"ts":${tsNum}`) && !outUnparseable.includes(ENT_ENCODED) &&
-        !outUnparseable.includes(`&#${NUM_PW.charCodeAt(0)};${NUM_PW.slice(1)}`),
+        outUnparseable.includes(`"ts":${tsNum}`) && !outUnparseable.includes(ENT_ENCODED),
         'r6 MINOR E\' (300 KB numeric + HTML-entity frame & raw fallback): 300 KB JSON frame parses with numeric timestamp/nodeId intact, masks string & entity secrets, and raw fallback skips plain numeric tokens while applying read views',
         { bytes: Buffer.byteLength(frame300k), parsedOk: !!parsed300k, tsOk: parsed300k && parsed300k.result.ts === tsNum });
 
       // RED E': r5's 256 KB raw spelled road without numeric guard or read views corrupts JSON numbers and misses entity secret
-      const redVrSrc = VRS0.replace('let plainHit = false;', 're.lastIndex = 0; return raw.replace(re, (m) => table.get(m).ph); let plainHit = false;');
+      const redVrSrc = VRS0.replace(/scrub\.spelled = \(raw\) => \{\s*if \([^)]+\) return raw;/, 'scrub.spelled = (raw) => { if (!re || typeof raw !== \'string\' || !raw) return raw; re.lastIndex = 0; return raw.replace(re, (m) => table.get(m).ph);');
       const VRmE = redVrSrc !== VRS0 ? MUT.load('src/vault-run.js', redVrSrc, 'r6-e-vr-raw') : null;
       let DmE6 = null;
       if (VRmE) {
         globalThis.__r6MutVR = VRmE;
         const redESrc = DSRC0
-          .replace('const SCRUB_JSON_MAX_BYTES = 2 * 1024 * 1024;', 'const SCRUB_JSON_MAX_BYTES = 256 * 1024;')
+          .replace('let parsed;\n    try { parsed = JSON.parse(frameStr); }', 'if (Buffer.byteLength(frameStr, \'utf8\') > 256 * 1024) return fn.spelled(frameStr);\n    let parsed;\n    try { parsed = JSON.parse(frameStr); }')
           .replace('const VR = () => VRm || (VRm = require(\'../vault-run.js\'));', 'const VR = () => globalThis.__r6MutVR;');
         DmE6 = redESrc !== DSRC0 ? MUT.load('src/server/browser-dialogs.js', redESrc, 'r6-e-raw-256kb-no-views') : null;
       }
@@ -2631,6 +2611,707 @@ console.log('⑭ Standard-Chrome r6 adversarial fixup gates (MAJOR A\'/B\' + MIN
         'r6 MINOR E\' RED control [r6-e-raw-256kb-no-views]: 256 KB raw-regex mutant corrupts JSON numbers (SyntaxError) and leaks HTML-entity-encoded secret',
         { redEParseFailed, redELeakedEntity });
     } finally { await SE6.close(); }
+  }
+}
+
+// ═══ ⑮ Standard-Chrome r7 adversarial fixup gates (MAJOR 1/2 + MINOR 3–7 + RED controls 1–7) ═══
+console.log('⑮ Standard-Chrome r7 adversarial fixup gates (MAJOR 1/2 + MINOR 3–7 + RED controls 1–7)');
+{
+  const { WebSocketServer } = require('ws');
+  const LF = require('../src/server/browser-login-fill.js');
+  const VR_ROUTES = require('../src/routes/vault.js');
+  const { dictEntries } = await import('./i18n-extract.mjs');
+  const vlrScratchDir = path.join(ROOT, 'vlr-esm');
+  fs.mkdirSync(vlrScratchDir, { recursive: true });
+  fs.writeFileSync(path.join(vlrScratchDir, 'i18n.mjs'), 'export const t = (s, p) => p ? Object.entries(p).reduce((a, [k, v]) => a.replaceAll("{" + k + "}", String(v)), s) : s;\n');
+  fs.writeFileSync(path.join(vlrScratchDir, 'utils.mjs'), 'export const fetchJson = async () => ({ ok: true }); export const showToast = () => {}; export const createModalShell = () => ({});\n');
+  fs.writeFileSync(path.join(vlrScratchDir, 'vault-totp-row.mjs'), 'export const loadTotp = async () => null;\n');
+  const vlrRawSrc = fs.readFileSync(path.join(REPO, 'src/lib/vault-login-row.js'), 'utf8')
+    .replace('./i18n.js', './i18n.mjs')
+    .replace('./utils.js', './utils.mjs')
+    .replace('./vault-totp-row.js', './vault-totp-row.mjs');
+  fs.writeFileSync(path.join(vlrScratchDir, 'vault-login-row.mjs'), vlrRawSrc);
+  const VLR_ESM = await import(pathToFileURL(path.join(vlrScratchDir, 'vault-login-row.mjs')).href);
+  const zhDictMap = new Map(dictEntries(fs.readFileSync(path.join(REPO, 'src/lib/i18n-zh.js'), 'utf8')).map((e) => [e.key, e.val]));
+  const jaDictMap = new Map(dictEntries(fs.readFileSync(path.join(REPO, 'src/lib/i18n-ja.js'), 'utf8')).map((e) => [e.key, e.val]));
+  const DSRC0 = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
+  const LFS0 = fs.readFileSync(path.join(REPO, 'src/server/browser-login-fill.js'), 'utf8');
+  const LSRC0 = fs.readFileSync(path.join(REPO, 'src/server/browser-logins.js'), 'utf8');
+  const VRS0 = fs.readFileSync(path.join(REPO, 'src/vault-run.js'), 'utf8');
+
+  // ── (1) MAJOR 1: third-party analytics POST never poisons proven submit or saves false origin; cross-origin credential write records `origins` fact ──
+  {
+    const runMajor1Probe = async (DmodToUse) => {
+      const S7_1 = await world({ mode: { standard: true }, Dmod: DmodToUse });
+      try {
+        const tid = S7_1.k.targets()[0].targetId;
+        const PW7_1 = pwOf('r7-maj1');
+        S7_1.logins.addOwn({ origin: SITE, username: 'm1user', password: PW7_1 });
+        S7_1.logins.grant(`web-login:${SITE}#x`, 'any-account', 'session:conv-1');
+
+        // (a) Signup --submit with proven same-origin credential POST + cross-origin analytics XHR
+        S7_1.k.navigate(tid, `${SITE}/signup-an`);
+        await sleep(20);
+        S7_1.k.setStandardPage({
+          securityOrigin: SITE, isoOrigin: SITE, passwordStillFilled: true,
+          buttons: [{ id: 'vs-b-0', text: 'Create account', inForm: true }],
+          fields: [
+            { fieldId: 'r7-1-au', tag: 'input', domType: 'email', type: 'email', autocomplete: 'username', visible: true },
+            { fieldId: 'r7-1-ap', tag: 'input', domType: 'password', type: 'password', autocomplete: 'new-password', visible: true },
+          ],
+        }, tid);
+        const mAn1 = S7_1.k.mark();
+        const pAn = S7_1.w.fillLogin(TGT, FILL({ newUser: 'an-user@example.test', generate: true, submit: true }));
+        await until(() => S7_1.k.calls().slice(mAn1).some((c) => c.method === 'Input.insertText'), 1000);
+        await sleep(25);
+        S7_1.k.emitPageEvent(tid, 'Network.requestWillBeSent', {
+          requestId: 'an-xhr-1', frameId: tid, type: 'XHR',
+          request: { method: 'POST', url: 'https://analytics.vendor.test/collect', postData: 'evt=signup_click', hasPostData: true },
+        });
+        S7_1.k.emitPageEvent(tid, 'Network.responseReceived', { requestId: 'an-xhr-1', frameId: tid, type: 'XHR', response: { status: 204 } });
+        S7_1.k.emitPageEvent(tid, 'Network.loadingFinished', { requestId: 'an-xhr-1' });
+        const rAn = await pAn;
+        const rowAn = S7_1.logins.list().entries.find((e) => e.name === `web-login:${SITE}#an-user@example.test`);
+
+        // (b) Login --submit where validation blocked submit (noAutoSubmitNet) + analytics XHR ⇒ submitted: false ("press its button")
+        S7_1.k.navigate(tid, `${SITE}/login-an`);
+        await sleep(20);
+        S7_1.k.setStandardPage({
+          securityOrigin: SITE, isoOrigin: SITE, noAutoSubmitNet: true,
+          buttons: [{ id: 'vs-b-0', text: 'Sign in', inForm: true }],
+          fields: [
+            { fieldId: 'r7-1-lu', tag: 'input', domType: 'email', type: 'email', autocomplete: 'username', visible: true },
+            { fieldId: 'r7-1-lp', tag: 'input', domType: 'password', type: 'password', autocomplete: 'current-password', visible: true },
+          ],
+        }, tid);
+        const mAn2 = S7_1.k.mark();
+        const pLogAn = S7_1.w.fillLogin(TGT, FILL({ user: 'm1user', submit: true }));
+        await until(() => S7_1.k.calls().slice(mAn2).some((c) => c.method === 'Input.insertText'), 1000);
+        await sleep(25);
+        S7_1.k.emitPageEvent(tid, 'Network.requestWillBeSent', {
+          requestId: 'an-xhr-2', frameId: tid, type: 'XHR',
+          request: { method: 'POST', url: 'https://analytics.vendor.test/collect', postData: 'evt=login_click', hasPostData: true },
+        });
+        S7_1.k.emitPageEvent(tid, 'Network.responseReceived', { requestId: 'an-xhr-2', frameId: tid, type: 'XHR', response: { status: 204 } });
+        S7_1.k.emitPageEvent(tid, 'Network.loadingFinished', { requestId: 'an-xhr-2' });
+        const rLogAn = await pLogAn;
+
+        // (c) Signup --submit with proven same-origin credential POST + 70 KB third-party telemetry POST ⇒ submitted: true, no BODY_LARGE_BOUND
+        S7_1.k.navigate(tid, `${SITE}/signup-big3p`);
+        await sleep(20);
+        S7_1.k.setStandardPage({
+          securityOrigin: SITE, isoOrigin: SITE, passwordStillFilled: true,
+          buttons: [{ id: 'vs-b-0', text: 'Create account', inForm: true }],
+          fields: [
+            { fieldId: 'r7-1-bu', tag: 'input', domType: 'email', type: 'email', autocomplete: 'username', visible: true },
+            { fieldId: 'r7-1-bp', tag: 'input', domType: 'password', type: 'password', autocomplete: 'new-password', visible: true },
+          ],
+        }, tid);
+        const mAn3 = S7_1.k.mark();
+        const pBig3p = S7_1.w.fillLogin(TGT, FILL({ newUser: 'big3p@example.test', generate: true, submit: true }));
+        await until(() => S7_1.k.calls().slice(mAn3).some((c) => c.method === 'Input.insertText'), 1000);
+        await sleep(25);
+        S7_1.k.emitPageEvent(tid, 'Network.requestWillBeSent', {
+          requestId: 'an-big3p', frameId: tid, type: 'Fetch',
+          request: { method: 'POST', url: 'https://telemetry.vendor.test/batch', postData: 't=' + 'z'.repeat(70000), hasPostData: true },
+        });
+        S7_1.k.emitPageEvent(tid, 'Network.responseReceived', { requestId: 'an-big3p', frameId: tid, type: 'Fetch', response: { status: 204 } });
+        S7_1.k.emitPageEvent(tid, 'Network.loadingFinished', { requestId: 'an-big3p' });
+        const rBig3p = await pBig3p;
+        const rowBig3p = S7_1.logins.list().entries.find((e) => e.name === `web-login:${SITE}#big3p@example.test`);
+
+        // (d) Cross-origin write that DOES carry the credential ⇒ submitted: true, destination named in row facts (`origins` / `Submitted to ...`), not pendingReason
+        S7_1.k.navigate(tid, `${SITE}/signup-xcred`);
+        await sleep(20);
+        S7_1.k.setStandardPage({
+          securityOrigin: SITE, isoOrigin: SITE, passwordStillFilled: true,
+          buttons: [{ id: 'vs-b-0', text: 'Create account', inForm: true }],
+          submitUrl: 'https://api.auth.test/v1/register',
+          fields: [
+            { fieldId: 'r7-1-xu', tag: 'input', domType: 'email', type: 'email', autocomplete: 'username', visible: true },
+            { fieldId: 'r7-1-xp', tag: 'input', domType: 'password', type: 'password', autocomplete: 'new-password', visible: true },
+          ],
+        }, tid);
+        const rXcred = await S7_1.w.fillLogin(TGT, FILL({ newUser: 'xcred@example.test', generate: true, submit: true }));
+        const xcredName = `web-login:${SITE}#xcred@example.test`;
+        const rowXcred = S7_1.logins.list().entries.find((e) => e.name === xcredName);
+        const metaXcred = S7_1.eng.secretNames().find((s) => s.name === xcredName);
+        const vrowXcred = metaXcred ? VI.rowOf('secrets', VI.secretRowOf(metaXcred)) : null;
+
+        return { rAn, rowAn, rLogAn, logAnText: BL.loginText(rLogAn), rBig3p, rowBig3p, rXcred, rowXcred, vrowXcred };
+      } finally { await S7_1.close(); }
+    };
+
+    const real1 = await runMajor1Probe(D);
+    // Verify DOM rendering of `Submitted to https://api.auth.test` via vault-login-row.js
+    const mkFakeEl = (tag) => ({
+      tag, className: '', textContent: '', title: '', type: '', dataset: {}, children: [], attrs: {},
+      append(...cs) { for (const c of cs) if (c != null) this.children.push(typeof c === 'string' ? { textContent: c } : c); },
+      appendChild(c) { this.children.push(c); return c; },
+      setAttribute(k, v) { this.attrs[k] = v; },
+      addEventListener() {},
+      get allText() { return [this.textContent, ...this.children.map((c) => c.allText || c.textContent || '')].join(' '); },
+    });
+    const fakeDoc = { createElement: (t) => mkFakeEl(t) };
+    const prevDoc = globalThis.document;
+    globalThis.document = fakeDoc;
+    let renderedXcredText = '';
+    try {
+      const domRes = real1.vrowXcred ? VLR_ESM.loginExtras(real1.vrowXcred, { entries: [real1.rowXcred], subjects: {} }) : null;
+      renderedXcredText = domRes && domRes.box ? domRes.box.allText : '';
+    } finally { globalThis.document = prevDoc; }
+
+    ok(real1.rAn.submitted === true && !real1.rAn.submittedReason && real1.rowAn && !real1.rowAn.pendingReason && !real1.rowAn.origins &&
+      real1.rLogAn.submitted === false && /press its button/.test(real1.logAnText) &&
+      real1.rBig3p.submitted === true && !real1.rBig3p.submittedReason && real1.rowBig3p && !real1.rowBig3p.pendingReason &&
+      real1.rXcred.submitted === true && !real1.rXcred.submittedReason &&
+      real1.rowXcred && !real1.rowXcred.pendingReason && Array.isArray(real1.rowXcred.origins) && real1.rowXcred.origins.includes('https://api.auth.test') &&
+      real1.vrowXcred && Array.isArray(real1.vrowXcred.hosts) && real1.vrowXcred.hosts.includes('https://api.auth.test') &&
+      /Submitted to https:\/\/api\.auth\.test/.test(renderedXcredText) && !/the credential went to/.test(renderedXcredText),
+      'r7 MAJOR 1 (analytics XHR + >64KB 3p POST + cross-origin credential facts): analytics XHR & 70KB 3p POST leave proven submit true (no false pendingReason) and unsubmitted login false ("press its button"); cross-origin credential write is submitted:true and named in row facts ("Submitted to https://api.auth.test")',
+      { rAn: real1.rAn, rowAn: real1.rowAn, rLogAn: real1.rLogAn, rBig3p: real1.rBig3p, rXcred: real1.rXcred, rowXcred: real1.rowXcred, renderedXcredText });
+
+    const red1Src = DSRC0
+      .replace(
+        'if (since.some((o) => o.carriesSameCred || o.carriesOtherCred)) return null;',
+        'const xo = since.find((o) => !o.sameOrigin && o.isWrite); if (xo && xo.origin) return `the credential went to ${xo.origin}`;'
+      )
+      .replace(
+        'const pWhy = pc && !pc.confirmed && !credAny',
+        'const pWhy = pc && !pc.confirmed'
+      );
+    const Dm7_1 = red1Src !== DSRC0 ? MUT.load('src/server/browser-dialogs.js', red1Src, 'r7-1-analytics-poisons-submit') : null;
+    const mut1 = Dm7_1 ? await runMajor1Probe(Dm7_1) : null;
+    ok(Boolean(Dm7_1 && mut1 && mut1.rAn.submittedReason === 'the credential went to https://analytics.vendor.test' && real1.rAn.submitted === true && !real1.rAn.submittedReason),
+      'r7 MAJOR 1 RED control [r7-1-analytics-poisons-submit]: mutant naming any cross-origin write ahead of credential proof poisons proven submit with analytics origin',
+      { mutReason: mut1 && mut1.rAn.submittedReason, realSub: real1.rAn.submitted });
+  }
+
+  // ── (2) MAJOR 2: parsed frames > 2 MiB walk & mask 12-digit / hex-all-digit secrets; unparseable raw road masks quoted digit strings while leaving bare JSON numbers intact ──
+  {
+    const S7_2 = await world({ mode: { standard: true } });
+    try {
+      const NUM12 = String(crypto.randomInt(100000000000, 999999999999)); // 12-digit numeric secret
+      const HEXDIG_PW = `passw${crypto.randomInt(100, 999)}`; // hex is strictly 0-9 digits ('7061737377' + '3x3y3z')
+      const HEXDIG_HEX = Buffer.from(HEXDIG_PW, 'utf8').toString('hex');
+      S7_2.logins.addOwn({ origin: SITE, username: 'bank12', password: NUM12 });
+      S7_2.logins.addOwn({ origin: SITE, username: 'hexdig', password: HEXDIG_PW });
+      S7_2.logins.grant(`web-login:${SITE}#x`, 'any-account', 'session:conv-1');
+      S7_2.k.setStandardPage({ securityOrigin: SITE, isoOrigin: SITE, fields: [{ fieldId: 'r7-2-p1', tag: 'input', domType: 'password', type: 'password', autocomplete: 'current-password', visible: true }] });
+      await S7_2.w.fillLogin(TGT, FILL({ user: 'bank12' }));
+      S7_2.k.navigate(S7_2.k.targets()[0].targetId, `${SITE}/login2`);
+      await sleep(20);
+      S7_2.k.setStandardPage({ securityOrigin: SITE, isoOrigin: SITE, fields: [{ fieldId: 'r7-2-p2', tag: 'input', domType: 'password', type: 'password', autocomplete: 'current-password', visible: true }] });
+      await S7_2.w.fillLogin(TGT, FILL({ user: 'hexdig' }));
+
+      const acctBareNum = Number(NUM12);
+      const pad2m3 = [];
+      for (let i = 0; i < 8600; i++) {
+        pad2m3.push({ nodeId: i + 1, ts: 1761900000000 + i, name: `ax-node-${i}-${'m'.repeat(235)}` });
+      }
+      const frame2m3 = JSON.stringify({
+        id: 202,
+        result: {
+          acctNum: acctBareNum,
+          pinString: NUM12,
+          hexEcho: `hex=${HEXDIG_HEX}`,
+          nodes: pad2m3,
+        },
+      });
+      const tWalk0 = performance.now();
+      const out2m3 = S7_2.w.scrubCdpFrame(PID, frame2m3);
+      const walk2m3Ms = performance.now() - tWalk0;
+      let parsed2m3 = null;
+      try { parsed2m3 = JSON.parse(out2m3); } catch { parsed2m3 = null; }
+
+      // Unparseable 3 MB (> 3 MiB) blob: digit secret in quotes (& HTML entity) => masked; bare JSON number => intact
+      const num12Entity = `&#${NUM12.charCodeAt(0)};${NUM12.slice(1)}`;
+      const blob3m = `{unparseable_cdp,"acctNum":${acctBareNum},"pin":"${NUM12}","pinEnt":"${num12Entity}","hex":"${HEXDIG_HEX}","pad":"${'q'.repeat(3200000)}"`;
+      const outBlob3m = S7_2.w.scrubCdpFrame(PID, blob3m);
+
+      // Time-bounded walk cut check (`scrubWalkBudgetMs`)
+      let cutWorked = false;
+      {
+        const Scut = await world({ mode: { standard: true } });
+        try {
+          // Create a dedicated watch with a tiny 0.01 ms walk budget to deterministically exercise the time bound
+          const wCut = D.create({
+            keeper: { cdpEndpointFor: async () => ({ ok: true, url: Scut.k.wsUrl }), onLease: () => () => {} },
+            log: quiet, enableTimeoutMs: 300, scrubWalkBudgetMs: 0.001,
+            holdersOf: () => [{ browserKey: KEY, sessionId: 'sess-1', ephemeral: true }],
+            leaseCountOf: () => 1, logins: Scut.logins,
+            conversationOf: () => ({ cid: 'conv-1', name: 'Chat One' }),
+          });
+          try {
+            await wCut.arm(PID, { budgetMs: 2000 });
+            Scut.logins.addOwn({ origin: SITE, username: 'cutuser', password: NUM12 });
+            Scut.logins.grant(`web-login:${SITE}#cutuser`, 'this-account', 'session:conv-1');
+            Scut.k.setStandardPage({ securityOrigin: SITE, isoOrigin: SITE, fields: [{ fieldId: 'cut-p', tag: 'input', domType: 'password', type: 'password', autocomplete: 'current-password', visible: true }] });
+            await wCut.fillLogin(TGT, FILL({ user: 'cutuser' }));
+            const bigArr = Array.from({ length: 4000 }, (_, i) => (i === 3999 ? NUM12 : `item-${i}-${'w'.repeat(40)}`));
+            const outCut = wCut.scrubCdpFrame(PID, JSON.stringify({ id: 9, result: { items: bigArr } }));
+            const parsedCut = JSON.parse(outCut);
+            const stCut = wCut.loginFenceStats();
+            cutWorked = Boolean(parsedCut && !outCut.includes(NUM12) && outCut.includes('[vault:scrub-cut]') && (stCut.cutScrubFrames || 0) >= 1);
+          } finally { wCut.shutdown(); }
+        } finally { await Scut.close(); }
+      }
+
+      ok(/^\d+$/.test(HEXDIG_HEX) && Buffer.byteLength(frame2m3) > 2.3 * 1024 * 1024 && Boolean(parsed2m3) &&
+        parsed2m3.result.acctNum === acctBareNum &&
+        parsed2m3.result.pinString === `[vault:web-login:${SITE}#bank12]` &&
+        parsed2m3.result.hexEcho === `hex=[vault:web-login:${SITE}#hexdig]` &&
+        !out2m3.includes(`"${NUM12}"`) && !out2m3.includes(HEXDIG_HEX) &&
+        Buffer.byteLength(blob3m) > 3 * 1024 * 1024 &&
+        outBlob3m.includes(`"acctNum":${acctBareNum}`) &&
+        outBlob3m.includes(`"pin":"[vault:web-login:${SITE}#bank12]"`) &&
+        outBlob3m.includes(`"pinEnt":"[vault:web-login:${SITE}#bank12]"`) &&
+        outBlob3m.includes(`"hex":"[vault:web-login:${SITE}#hexdig]"`) &&
+        !outBlob3m.includes(`"${NUM12}"`) && !outBlob3m.includes(num12Entity) && !outBlob3m.includes(HEXDIG_HEX) &&
+        cutWorked === true,
+        `r7 MAJOR 2 (>2 MiB numeric secret + 3 MB raw quoted digit secret + time-bounded walk): 2.35 MB parsed frame (${walk2m3Ms.toFixed(1)} ms) & 3 MB unparseable blob mask 12-digit and all-digit-hex secrets in strings while leaving bare JSON numbers intact; walk cut redacts [vault:scrub-cut]`,
+        { bytes2m3: Buffer.byteLength(frame2m3), walk2m3Ms, pinString: parsed2m3 && parsed2m3.result.pinString, hexEcho: parsed2m3 && parsed2m3.result.hexEcho, cutWorked });
+
+      // RED 2: mutant that routes > 2 MiB parsed frames to a digit-dropping `spelled` leaks `NUM12` in `frame2m3`
+      const red2VrSrc = VRS0.replace(
+        'if (c.digits) {\n        const inside = inJsonStrAt(c.a);\n        if (!inside && isBareJsonNumber(raw, L, c.a, c.b)) continue;\n      }',
+        'if (c.digits) continue;'
+      );
+      const VRm7_2 = red2VrSrc !== VRS0 ? MUT.load('src/vault-run.js', red2VrSrc, 'r7-2-vr-drop-digits') : null;
+      let Dm7_2 = null;
+      if (VRm7_2) {
+        globalThis.__r7MutVR2 = VRm7_2;
+        const red2DSrc = DSRC0
+          .replace('let parsed;\n    try { parsed = JSON.parse(frameStr); }', 'if (Buffer.byteLength(frameStr, \'utf8\') > 2 * 1024 * 1024) return fn.spelled(frameStr);\n    let parsed;\n    try { parsed = JSON.parse(frameStr); }')
+          .replace('const VR = () => VRm || (VRm = require(\'../vault-run.js\'));', 'const VR = () => globalThis.__r7MutVR2;');
+        Dm7_2 = red2DSrc !== DSRC0 ? MUT.load('src/server/browser-dialogs.js', red2DSrc, 'r7-2-oversize-spelled-numeric-leak') : null;
+      }
+      let mut2Leaked = false;
+      if (Dm7_2) {
+        const S7_2m = await world({ mode: { standard: true }, Dmod: Dm7_2 });
+        try {
+          S7_2m.logins.addOwn({ origin: SITE, username: 'bank12', password: NUM12 });
+          S7_2m.logins.grant(`web-login:${SITE}#bank12`, 'this-account', 'session:conv-1');
+          S7_2m.k.setStandardPage({ securityOrigin: SITE, isoOrigin: SITE, fields: [{ fieldId: 'm2-p', tag: 'input', domType: 'password', type: 'password', autocomplete: 'current-password', visible: true }] });
+          await S7_2m.w.fillLogin(TGT, FILL({ user: 'bank12' }));
+          const outMut2 = S7_2m.w.scrubCdpFrame(PID, frame2m3);
+          mut2Leaked = outMut2.includes(`"${NUM12}"`);
+        } finally { await S7_2m.close(); }
+      }
+      ok(Boolean(Dm7_2 && mut2Leaked === true && parsed2m3 && !out2m3.includes(`"${NUM12}"`)),
+        'r7 MAJOR 2 RED control [r7-2-oversize-spelled-numeric-leak]: r6-shaped >2 MiB spelled + digit-skip mutant leaks 12-digit password in 2.35 MB parsed CDP frame',
+        { mut2Leaked, realMasked: Boolean(parsed2m3 && !out2m3.includes(`"${NUM12}"`)) });
+    } finally { await S7_2.close(); }
+  }
+
+  // ── (3) MINOR 3: ceiling wipe & SPA probe catch `<input type="hidden">` mirrors and re-mounted attribute-synced `<input type="text" value=SECRET>` with 0 secret bytes in Runtime.evaluate ──
+  {
+    const runMinor3Stub = async ({ LFmodToUse = LF, mode = 'ceiling', stuckHidden = false } = {}) => {
+      const PW7_3 = pwOf('r7-min3');
+      const evalExprs = [];
+      const dom = sharedMakeStubDom([
+        { id: 'u', type: 'email', name: 'email', autocomplete: 'username' },
+        { id: 'p', type: 'password', name: 'password', autocomplete: 'current-password' },
+        {
+          id: 'hm', type: 'hidden', name: 'pw_mirror', hidden: true,
+          ...(stuckHidden ? { onSetValue(v, self) { if (v === '') { self.val = PW7_3; self.defaultValue = PW7_3; self.attrs.value = PW7_3; } } } : {}),
+        },
+      ]);
+      const tid = 'TAB_R7_3';
+      const sid = 'SID_R7_3';
+      let wsRef = null;
+      const wss = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+      await new Promise((r) => wss.once('listening', r));
+      const wsUrl = `ws://127.0.0.1:${wss.address().port}/devtools/browser/r7_3`;
+      wss.on('connection', (ws) => {
+        wsRef = ws;
+        ws.on('message', async (buf) => {
+          const m = JSON.parse(String(buf));
+          const send = (obj) => { if (ws.readyState === 1) ws.send(JSON.stringify(obj)); };
+          const rep = (result) => send({ id: m.id, result, ...(m.sessionId ? { sessionId: m.sessionId } : {}) });
+          if (m.method === 'VibeSpace.getVersion') { send({ id: m.id, error: { code: -32601, message: 'not found' } }); return; }
+          if (m.method === 'Target.setDiscoverTargets') {
+            send({ method: 'Target.targetCreated', params: { targetInfo: { targetId: tid, type: 'page', url: `${SITE}/login`, title: 'Login' } } });
+            rep({});
+            return;
+          }
+          if (m.method === 'Target.attachToTarget') { rep({ sessionId: sid }); return; }
+          if (m.method === 'Target.getTargets') { rep({ targetInfos: [{ targetId: tid, type: 'page', url: `${SITE}/login`, attached: true }] }); return; }
+          if (m.method === 'Network.getResponseBody') { rep({ body: '{"ok":true}', base64Encoded: false }); return; }
+          if (m.method === 'Runtime.evaluate' && m.params && m.params.expression) evalExprs.push(String(m.params.expression));
+          const dr = await dom.call(m.method, m.params || {});
+          rep((dr && dr.result) || {});
+        });
+      });
+
+      let Dmod3 = D;
+      if (LFmodToUse !== LF) {
+        globalThis.__r7MutLF3 = LFmodToUse;
+        const dSrc3 = DSRC0.replace('const LF = () => LFm || (LFm = require(\'./browser-login-fill.js\'));', 'const LF = () => globalThis.__r7MutLF3;');
+        Dmod3 = MUT.load('src/server/browser-dialogs.js', dSrc3, 'r7-3-dialogs-wrap');
+      }
+      const dbDir = path.join(ROOT, 'wb7_3-' + crypto.randomBytes(3).toString('hex')); fs.mkdirSync(dbDir, { recursive: true });
+      const eng3 = VE.create({ dataDir: dbDir, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false });
+      await eng3.setup('vault-r7-3');
+      const grants3 = GS.create({ memory: true });
+      const logins3 = L.create({ vault: eng3, grants: () => grants3 });
+      logins3.addOwn({ origin: SITE, username: 'm3user', password: PW7_3 });
+      grants3.set('browser-login', `${SITE}#m3user`, { to: [{ kind: 'conversation', key: 'conv-1' }] });
+      const fy3 = [];
+      const w3 = Dmod3.create({
+        keeper: { cdpEndpointFor: async () => ({ ok: true, url: wsUrl }), onLease: () => () => {} },
+        log: quiet, enableTimeoutMs: 300, liveFillMaxMs: mode === 'spa' ? 60000 : 70,
+        holdersOf: () => [{ browserKey: KEY, sessionId: 'sess-1', ephemeral: true }],
+        leaseCountOf: () => 1, logins: logins3,
+        conversationOf: () => ({ cid: 'conv-1', name: 'Chat One' }),
+        forYou: { add: (pid, it) => { fy3.push(it.text); return 'fy3-' + fy3.length; }, resolve() {} },
+      });
+      try {
+        await w3.arm(PID, { budgetMs: 3000 });
+        await until(() => w3._watches.get(PID)?.targets.get(tid)?.enabled, 1500);
+        const rf = await w3.fillLogin(TGT, FILL({ user: 'm3user' }));
+        // Populate hidden mirror (change-listener copy: val === defaultValue === @value) + mount React-style <input type="text" value=PW>
+        const hm = dom.inputs[2];
+        hm.val = PW7_3; hm.defaultValue = PW7_3; hm.attrs.value = PW7_3;
+        const t2 = new dom.StubInput({ id: 't2', type: 'text', name: 'pw_shown', value: PW7_3, defaultValue: PW7_3 });
+        dom.inputs.push(t2);
+        if (mode === 'spa') {
+          // Clear #p as if page unmounted password field into #t2 and submitted via fetch -> 200 {"ok":true}
+          dom.inputs[1].val = '';
+          if (wsRef && wsRef.readyState === 1) {
+            wsRef.send(JSON.stringify({ sessionId: sid, method: 'Network.requestWillBeSent', params: { requestId: 'spa-r7-3', frameId: tid, type: 'Fetch', request: { method: 'POST', url: `${SITE}/api/login`, postData: JSON.stringify({ password: PW7_3 }), hasPostData: true } } }));
+            wsRef.send(JSON.stringify({ sessionId: sid, method: 'Network.responseReceived', params: { requestId: 'spa-r7-3', frameId: tid, type: 'Fetch', response: { status: 200 } } }));
+            wsRef.send(JSON.stringify({ sessionId: sid, method: 'Network.loadingFinished', params: { requestId: 'spa-r7-3' } }));
+          }
+          await sleep(130);
+        } else {
+          await sleep(170);
+        }
+        const verdict = w3.liveFillVerdictFor(TGT, { verb: 'eval' });
+        const leakedInEval = evalExprs.some((ex) => ex.includes(PW7_3));
+        const secretStillIn = dom.inputs.filter((inp) => inp.val.includes(PW7_3) || String(inp.getAttribute('value') || '').includes(PW7_3)).map((inp) => `${inp.id}:${inp.type}`);
+        return { fillOk: rf.ok, verdict, notices: fy3.slice(), leakedInEval, secretStillIn };
+      } finally {
+        w3.shutdown();
+        for (const c of wss.clients) c.terminate();
+        await new Promise((r) => wss.close(r));
+        eng3.close();
+      }
+    };
+
+    const m3CeilOk = await runMinor3Stub({ mode: 'ceiling' });
+    const m3CeilStuck = await runMinor3Stub({ mode: 'ceiling', stuckHidden: true });
+    const m3Spa = await runMinor3Stub({ mode: 'spa' });
+    ok(m3CeilOk.fillOk && m3CeilOk.secretStillIn.length === 0 && m3CeilOk.verdict.ok === true && m3CeilOk.notices.length === 0 && m3CeilOk.leakedInEval === false &&
+      m3CeilStuck.secretStillIn.includes('hm:hidden') && m3CeilStuck.verdict.code === 'login_fill_live' && m3CeilStuck.notices.length === 1 && m3CeilStuck.leakedInEval === false &&
+      m3Spa.fillOk && m3Spa.secretStillIn.length === 2 && m3Spa.verdict.code === 'login_fill_live' && m3Spa.leakedInEval === false,
+      'r7 MINOR 3 (hidden mirror + attribute-synced text input): ceiling wipe clears .value & @value on hidden mirror + re-mounted <input type=text value=SECRET> (0 secret bytes in Runtime.evaluate), keeps fence when stuck, and SPA probe stays fenced while either holds secret',
+      { m3CeilOk, m3CeilStuck, m3Spa });
+
+    const red3Src = LFS0.replace(
+      'const nodeHasFilled = (node) => Boolean(node && (hasFilledTarget(valOfNode(node)) || hasFilledTarget(attrValOfNode(node))));',
+      'const nodeHasFilled = () => false;'
+    );
+    const LFm7_3 = red3Src !== LFS0 ? MUT.load('src/server/browser-login-fill.js', red3Src, 'r7-3-skip-hidden-and-attr-synced') : null;
+    const mut3 = LFm7_3 ? await runMinor3Stub({ LFmodToUse: LFm7_3, mode: 'ceiling' }) : null;
+    ok(Boolean(LFm7_3 && mut3 && mut3.secretStillIn.length === 2 && mut3.verdict.ok === true && m3CeilOk.secretStillIn.length === 0),
+      'r7 MINOR 3 RED control [r7-3-skip-hidden-and-attr-synced]: mutant without filled-value target check reports verifiedEmpty:true while secret remains in hm:hidden and t2:text',
+      { mutSecretStillIn: mut3 && mut3.secretStillIn, realSecretStillIn: m3CeilOk.secretStillIn });
+  }
+
+  // ── (4) MINOR 4: owner re-save (`addOwn` / `answerCard`) with the SAME password preserves `agent-typed` / `vault-minted` provenance while clearing pending ──
+  {
+    const S7_4 = await world({ mode: { standard: true } });
+    try {
+      const PW_AG = pwOf('r7-4-ag');
+      const PW_NEW = pwOf('r7-4-own');
+      const seed4 = T.base32Encode(crypto.randomBytes(20));
+      S7_4.totp.addEntry({ seed: seed4, name: 'm4-totp' }, { who: 'owner' });
+      S7_4.logins.addAgent({ origin: SITE, username: 'prov@example.test', password: PW_AG }, { owner: 'conv-1', actor: 'Chat One' });
+      const pName = `web-login:${SITE}#prov@example.test`;
+      const provBefore = VI.secretRowOf(S7_4.eng.secretNames().find((s) => s.name === pName));
+      // Owner re-saves the SAME password to pair a TOTP entry
+      const sameRes = S7_4.logins.addOwn({ origin: SITE, username: 'prov@example.test', password: PW_AG, totpName: 'm4-totp' }, { who: 'owner' });
+      const recSame = BL.recordOf(S7_4.eng.secretGet(pName).value.toString('utf8'));
+      const provAfterSame = VI.secretRowOf(S7_4.eng.secretNames().find((s) => s.name === pName));
+
+      // Also verify pending vault-minted entry re-saved with SAME password clears pending while keeping `vault-minted` / `generated`
+      const tid = S7_4.k.targets()[0].targetId;
+      S7_4.logins.grant(`web-login:${SITE}#x`, 'any-account', 'session:conv-1');
+      S7_4.k.setStandardPage({
+        securityOrigin: SITE, isoOrigin: SITE, passwordStillFilled: true,
+        fields: [
+          { fieldId: 'm4-u', tag: 'input', domType: 'email', type: 'email', autocomplete: 'username', visible: true },
+          { fieldId: 'm4-p', tag: 'input', domType: 'password', type: 'password', autocomplete: 'new-password', visible: true },
+        ],
+      }, tid);
+      await S7_4.w.fillLogin(TGT, FILL({ newUser: 'mintsame@example.test', generate: true, submit: false }));
+      const mintName = `web-login:${SITE}#mintsame@example.test`;
+      const mintRec0 = BL.recordOf(S7_4.eng.secretGet(mintName).value.toString('utf8'));
+      S7_4.logins.addOwn({ origin: SITE, username: 'mintsame@example.test', password: mintRec0.password }, { who: 'owner' });
+      const mintRecAfter = BL.recordOf(S7_4.eng.secretGet(mintName).value.toString('utf8'));
+
+      // Owner re-saves `prov@example.test` with a DIFFERENT password => becomes `owner`, strength `unknown`, provenance null
+      S7_4.logins.addOwn({ origin: SITE, username: 'prov@example.test', password: PW_NEW }, { who: 'owner' });
+      const recDiff = BL.recordOf(S7_4.eng.secretGet(pName).value.toString('utf8'));
+      const provAfterDiff = VI.secretRowOf(S7_4.eng.secretNames().find((s) => s.name === pName));
+
+      ok(sameRes.ok && provBefore && provBefore.provenance && provBefore.provenance.prov === 'agent-typed' &&
+        recSame.source === 'agent-typed' && recSame.totpName === 'm4-totp' &&
+        provAfterSame && provAfterSame.provenance && provAfterSame.provenance.prov === 'agent-typed' && provAfterSame.provenance.sawPlaintext === true &&
+        !mintRecAfter.pending && mintRecAfter.source === 'vault-minted' && mintRecAfter.strength === 'generated' &&
+        recDiff.source === 'owner' && recDiff.strength === 'unknown' && recDiff.previous && recDiff.previous.password === PW_AG &&
+        Boolean(provAfterDiff && !provAfterDiff.provenance),
+        'r7 MINOR 4 (provenance preserved on same-password owner save): addAgent -> addOwn with same password keeps agent-typed rotate cue (and pending vault-minted keeps vault-minted while clearing pending); different password switches to owner',
+        { recSame: { source: recSame.source, totpName: recSame.totpName }, provAfterSame: provAfterSame && provAfterSame.provenance, mintSource: mintRecAfter.source, recDiffSource: recDiff.source });
+
+      const red4Src = LSRC0.replace('pwChanged = ex.rec.password !== password;', 'pwChanged = true;');
+      const Lm7_4 = red4Src !== LSRC0 ? MUT.load('src/server/browser-logins.js', red4Src, 'r7-4-resave-erases-provenance') : null;
+      let mut4Source = null;
+      if (Lm7_4) {
+        const logsMut4 = Lm7_4.create({ vault: S7_4.eng, grants: () => S7_4.grants });
+        const m4Name = `web-login:${SITE}#provmut@example.test`;
+        logsMut4.addAgent({ origin: SITE, username: 'provmut@example.test', password: PW_AG }, { owner: 'conv-1', actor: 'Chat One' });
+        logsMut4.addOwn({ origin: SITE, username: 'provmut@example.test', password: PW_AG });
+        mut4Source = BL.recordOf(S7_4.eng.secretGet(m4Name).value.toString('utf8')).source;
+      }
+      ok(Boolean(Lm7_4 && mut4Source === 'owner' && recSame.source === 'agent-typed'),
+        'r7 MINOR 4 RED control [r7-4-resave-erases-provenance]: mutant forcing source:\'owner\' when password is unchanged erases agent-typed provenance',
+        { mut4Source, realSource: recSame.source });
+    } finally { await S7_4.close(); }
+  }
+
+  // ── (5) MINOR 5: Confirm on a NON-pending row refuses by name (`409 login_not_pending`) + zh/ja toast words ──
+  {
+    const S7_5 = await world({ mode: { standard: true } });
+    const vApp = express(); vApp.use(express.json());
+    VR_ROUTES.registerVaultRoutes(vApp, { vault: S7_5.eng, logins: S7_5.logins });
+    const vSrv = http.createServer(vApp);
+    const vPort = await freePort();
+    await new Promise((r) => vSrv.listen(vPort, '127.0.0.1', r));
+    const VAPI = `http://127.0.0.1:${vPort}`;
+    try {
+      const ownName = `web-login:${SITE}#nonpend@example.test`;
+      S7_5.logins.addOwn({ origin: SITE, username: 'nonpend@example.test', password: pwOf('r7-5') });
+      const directRes = typeof S7_5.logins.confirmOwn === 'function' ? S7_5.logins.confirmOwn(ownName, { who: 'owner' }) : null;
+      const httpRes = await fetch(`${VAPI}/api/vault/web-logins`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Origin: VAPI },
+        body: JSON.stringify({ name: ownName, confirm: true }),
+      });
+      const httpJson = await httpRes.json();
+      const hasToastWordsInRow = vlrRawSrc.includes("r.code === 'login_not_pending' ? t('that web login is not waiting for confirmation')");
+      const zhHas = zhDictMap.has('that web login is not waiting for confirmation') && zhDictMap.has('Submitted to {origins}') && zhDictMap.has("Why not auto-confirmed: the site's answer was too large to read — confirm here if the site accepted it.");
+      const jaHas = jaDictMap.has('that web login is not waiting for confirmation') && jaDictMap.has('Submitted to {origins}') && jaDictMap.has("Why not auto-confirmed: the site's answer was too large to read — confirm here if the site accepted it.");
+
+      ok(BL.REFUSALS.includes('login_not_pending') &&
+        Boolean(directRes && directRes.ok === false && directRes.code === 'login_not_pending') &&
+        httpRes.status === 409 && httpJson.ok === false && httpJson.code === 'login_not_pending' &&
+        hasToastWordsInRow && zhHas && jaHas,
+        'r7 MINOR 5 (409 login_not_pending): Confirm on non-pending row refuses 409 login_not_pending (never 200 already:true) with en/zh/ja toast words',
+        { directRes, status: httpRes.status, httpJson, hasToastWordsInRow, zhHas, jaHas });
+
+      const red5Src = LSRC0.replace(
+        'if (!ex.rec.pending) return named(\'login_not_pending\', \'that web login is not waiting for confirmation\');',
+        'if (!ex.rec.pending) return { ok: true, name: ex.name, confirmed: true, already: true };'
+      );
+      const Lm7_5 = red5Src !== LSRC0 ? MUT.load('src/server/browser-logins.js', red5Src, 'r7-5-confirm-non-pending-200') : null;
+      const mut5 = Lm7_5 ? Lm7_5.create({ vault: S7_5.eng, grants: () => S7_5.grants }).confirmOwn(ownName, { who: 'owner' }) : null;
+      ok(Boolean(Lm7_5 && mut5 && mut5.ok === true && mut5.already === true && directRes && directRes.code === 'login_not_pending'),
+        'r7 MINOR 5 RED control [r7-5-confirm-non-pending-200]: r6-shaped mutant answers {ok:true, already:true} on non-pending row instead of login_not_pending',
+        { mut5, directRes });
+    } finally { vSrv.close(); await S7_5.close(); }
+  }
+
+  // ── (6) MINOR 6: GET carrying an Authorization header after submit press counts as submission ('unknown' + readable-form reason, or true when Basic carries password) ──
+  {
+    const runMinor6Probe = async (DmodToUse) => {
+      const S7_6 = await world({ mode: { standard: true }, Dmod: DmodToUse });
+      try {
+        const tid = S7_6.k.targets()[0].targetId;
+        const PW7_6 = pwOf('r7-min6');
+        S7_6.logins.addOwn({ origin: SITE, username: 'guser', password: PW7_6 });
+        S7_6.logins.grant(`web-login:${SITE}#guser`, 'this-account', 'session:conv-1');
+
+        // (a) GET with opaque Bearer Authorization header => submitted: 'unknown' + READABLE_BOUND, no "press its button"
+        S7_6.k.setStandardPage({
+          securityOrigin: SITE, isoOrigin: SITE, noAutoSubmitNet: true, passwordStillFilled: true,
+          buttons: [{ id: 'vs-b-0', text: 'Sign in', inForm: true }],
+          fields: [
+            { fieldId: 'g6-u1', tag: 'input', domType: 'email', type: 'email', autocomplete: 'username', visible: true },
+            { fieldId: 'g6-p1', tag: 'input', domType: 'password', type: 'password', autocomplete: 'current-password', visible: true },
+          ],
+        }, tid);
+        const m6a = S7_6.k.mark();
+        const pBearer = S7_6.w.fillLogin(TGT, FILL({ user: 'guser', submit: true }));
+        await until(() => S7_6.k.calls().slice(m6a).some((c) => c.method === 'Input.insertText'), 1000);
+        await sleep(25);
+        S7_6.k.emitPageEvent(tid, 'Network.requestWillBeSent', {
+          requestId: 'get-bearer-1', frameId: tid, type: 'Fetch',
+          request: { method: 'GET', url: `${SITE}/api/hdr`, headers: { Authorization: 'Bearer opaque-derived-token' } },
+        });
+        S7_6.k.emitPageEvent(tid, 'Network.responseReceived', { requestId: 'get-bearer-1', frameId: tid, type: 'Fetch', response: { status: 200 } });
+        S7_6.k.emitPageEvent(tid, 'Network.loadingFinished', { requestId: 'get-bearer-1' });
+        const rBearer = await pBearer;
+
+        // (b) GET with Basic Authorization header carrying the vault password readably => submitted: true
+        S7_6.k.navigate(tid, `${SITE}/login-basic`);
+        await sleep(20);
+        S7_6.k.setStandardPage({
+          securityOrigin: SITE, isoOrigin: SITE, noAutoSubmitNet: true, passwordStillFilled: true,
+          buttons: [{ id: 'vs-b-0', text: 'Sign in', inForm: true }],
+          fields: [
+            { fieldId: 'g6-u2', tag: 'input', domType: 'email', type: 'email', autocomplete: 'username', visible: true },
+            { fieldId: 'g6-p2', tag: 'input', domType: 'password', type: 'password', autocomplete: 'current-password', visible: true },
+          ],
+        }, tid);
+        const basicTok = Buffer.from(`guser:${PW7_6}`, 'utf8').toString('base64');
+        const m6b = S7_6.k.mark();
+        const pBasic = S7_6.w.fillLogin(TGT, FILL({ user: 'guser', submit: true }));
+        await until(() => S7_6.k.calls().slice(m6b).some((c) => c.method === 'Input.insertText'), 1000);
+        await sleep(25);
+        S7_6.k.emitPageEvent(tid, 'Network.requestWillBeSent', {
+          requestId: 'get-basic-1', frameId: tid, type: 'Fetch',
+          request: { method: 'GET', url: `${SITE}/api/hdr`, headers: { Authorization: `Basic ${basicTok}` } },
+        });
+        S7_6.k.emitPageEvent(tid, 'Network.responseReceived', { requestId: 'get-basic-1', frameId: tid, type: 'Fetch', response: { status: 200 } });
+        S7_6.k.emitPageEvent(tid, 'Network.loadingFinished', { requestId: 'get-basic-1' });
+        const rBasic = await pBasic;
+
+        return { rBearer, txtBearer: BL.loginText(rBearer), rBasic, txtBasic: BL.loginText(rBasic) };
+      } finally { await S7_6.close(); }
+    };
+
+    const real6 = await runMinor6Probe(D);
+    ok(real6.rBearer.submitted === 'unknown' && real6.rBearer.submittedReason === 'the site\'s request did not carry the password in a readable form' &&
+      !/NOT submitted|press its button/.test(real6.txtBearer) &&
+      real6.rBasic.submitted === true && !real6.rBasic.submittedReason && !/NOT submitted|press its button/.test(real6.txtBasic),
+      'r7 MINOR 6 (GET with Authorization header): GET + Bearer answers submitted:\'unknown\' with readable-form reason (never "press its button"); GET + Basic carrying password answers submitted:true',
+      real6);
+
+    const red6Src = DSRC0.replace(
+      'if (reqType !== \'Ping\' && watchOrigin && (isWrite || rq.hasAuthHeader)) {',
+      'if (reqType !== \'Ping\' && watchOrigin && isWrite) {'
+    );
+    const Dm7_6 = red6Src !== DSRC0 ? MUT.load('src/server/browser-dialogs.js', red6Src, 'r7-6-get-auth-header-ignored') : null;
+    const mut6 = Dm7_6 ? await runMinor6Probe(Dm7_6) : null;
+    ok(Boolean(Dm7_6 && mut6 && mut6.rBearer.submitted === false && /press its button/.test(mut6.txtBearer) && real6.rBearer.submitted === 'unknown'),
+      'r7 MINOR 6 RED control [r7-6-get-auth-header-ignored]: POST/PUT/PATCH-only mutant answers submitted:false ("press its button") on GET + Authorization',
+      { mutBearer: mut6 && mut6.rBearer.submitted, realBearer: real6.rBearer.submitted });
+  }
+
+  // ── (7) MINOR 7: 70 KB error response + navigation is NOT falsely confirmed, and unreadable (> maxResourceBufferSize) response fails closed with "the site's answer was too large to read" ──
+  {
+    const runMinor7Stub = async ({ DmodToUse = D, respBytes = 70000, isErrJson = true } = {}) => {
+      const dom = sharedMakeStubDom([
+        { id: 'u7', type: 'email', name: 'email', autocomplete: 'username' },
+        { id: 'p7', type: 'password', name: 'password', autocomplete: 'new-password' },
+      ]);
+      const tid = 'TAB_R7_7';
+      const sid = 'SID_R7_7';
+      let currentUrl = `${SITE}/signup`;
+      let maxResBuf = 65536; // Chrome's default when Network.enable omits maxResourceBufferSize
+      const respBody = isErrJson
+        ? JSON.stringify({ ok: false, error: 'email taken', pad: 'e'.repeat(respBytes) })
+        : JSON.stringify({ ok: true, pad: 'k'.repeat(respBytes) });
+      const wss = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+      await new Promise((r) => wss.once('listening', r));
+      const wsUrl = `ws://127.0.0.1:${wss.address().port}/devtools/browser/r7_7`;
+      wss.on('connection', (ws) => {
+        ws.on('message', async (buf) => {
+          const m = JSON.parse(String(buf));
+          const send = (obj) => { if (ws.readyState === 1) ws.send(JSON.stringify(obj)); };
+          const rep = (result) => send({ id: m.id, result, ...(m.sessionId ? { sessionId: m.sessionId } : {}) });
+          if (m.method === 'VibeSpace.getVersion') { send({ id: m.id, error: { code: -32601, message: 'not found' } }); return; }
+          if (m.method === 'Target.setDiscoverTargets') {
+            send({ method: 'Target.targetCreated', params: { targetInfo: { targetId: tid, type: 'page', url: currentUrl, title: 'Signup' } } });
+            rep({});
+            return;
+          }
+          if (m.method === 'Target.attachToTarget') { rep({ sessionId: sid }); return; }
+          if (m.method === 'Target.getTargets') { rep({ targetInfos: [{ targetId: tid, type: 'page', url: currentUrl, attached: true }] }); return; }
+          if (m.method === 'Network.enable') {
+            if (m.params && Number(m.params.maxResourceBufferSize) > 0) maxResBuf = Number(m.params.maxResourceBufferSize);
+            rep({});
+            return;
+          }
+          if (m.method === 'Network.getResponseBody') {
+            if (Buffer.byteLength(respBody, 'utf8') > maxResBuf) {
+              send({ id: m.id, ...(m.sessionId ? { sessionId: m.sessionId } : {}), error: { code: -32000, message: 'No resource with given identifier found' } });
+            } else {
+              rep({ body: respBody, base64Encoded: false });
+            }
+            return;
+          }
+          if (m.method === 'Runtime.evaluate' && String(m.params?.expression || '').includes('window.vsLoginBtns = btnMap')) {
+            rep({ result: { type: 'object', value: { ok: true, hasForm: true, candidates: [{ id: 'vs-b-0', text: 'Create account', inForm: true }] } } });
+            return;
+          }
+          if (m.method === 'Runtime.evaluate' && String(m.params?.expression || '').includes('window.vsLoginBtns = null')) {
+            const postData = `email=${encodeURIComponent(dom.inputs[0].val)}&password=${encodeURIComponent(dom.inputs[1].val)}`;
+            send({ sessionId: sid, method: 'Network.requestWillBeSent', params: { requestId: 'reg-70k', frameId: tid, type: 'Fetch', request: { method: 'POST', url: `${SITE}/api/register`, postData, hasPostData: true } } });
+            send({ sessionId: sid, method: 'Network.responseReceived', params: { requestId: 'reg-70k', frameId: tid, type: 'Fetch', response: { status: 200 } } });
+            send({ sessionId: sid, method: 'Network.loadingFinished', params: { requestId: 'reg-70k' } });
+            setTimeout(() => {
+              currentUrl = `${SITE}/signup-error-landing`;
+              send({ sessionId: sid, method: 'Network.responseReceived', params: { requestId: 'doc-nav', frameId: tid, type: 'Document', response: { status: 200 } } });
+              send({ sessionId: sid, method: 'Page.frameNavigated', params: { frame: { id: tid, url: currentUrl, securityOrigin: SITE } } });
+            }, 25);
+            rep({ result: { type: 'object', value: { ok: true, submitted: true, via: 'button' } } });
+            return;
+          }
+          const dr = await dom.call(m.method, m.params || {});
+          rep((dr && dr.result) || {});
+        });
+      });
+
+      const dbDir = path.join(ROOT, 'wb7_7-' + crypto.randomBytes(3).toString('hex')); fs.mkdirSync(dbDir, { recursive: true });
+      const eng7 = VE.create({ dataDir: dbDir, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false });
+      await eng7.setup('vault-r7-7');
+      const grants7 = GS.create({ memory: true });
+      const logins7 = L.create({ vault: eng7, grants: () => grants7 });
+      grants7.set('browser-login', `${SITE}#*`, { to: [{ kind: 'conversation', key: 'conv-1' }] });
+      const w7 = DmodToUse.create({
+        keeper: { cdpEndpointFor: async () => ({ ok: true, url: wsUrl }), onLease: () => () => {} },
+        log: quiet, enableTimeoutMs: 300,
+        holdersOf: () => [{ browserKey: KEY, sessionId: 'sess-1', ephemeral: true }],
+        leaseCountOf: () => 1, logins: logins7,
+        conversationOf: () => ({ cid: 'conv-1', name: 'Chat One' }),
+      });
+      try {
+        await w7.arm(PID, { budgetMs: 3000 });
+        await until(() => w7._watches.get(PID)?.targets.get(tid)?.enabled, 1500);
+        const rf = await w7.fillLogin(TGT, FILL({ newUser: 'err70k@example.test', generate: true, submit: true }));
+        await sleep(60);
+        const name = `web-login:${SITE}#err70k@example.test`;
+        const row = logins7.list().entries.find((e) => e.name === name);
+        return { fillOk: rf.ok, submitted: rf.submitted, maxResBuf, pending: row ? row.pending : null, pendingReason: row ? row.pendingReason : null };
+      } finally {
+        w7.shutdown();
+        for (const c of wss.clients) c.terminate();
+        await new Promise((r) => wss.close(r));
+        eng7.close();
+      }
+    };
+
+    const m7Err70k = await runMinor7Stub({ respBytes: 70000, isErrJson: true });
+    const m7Ok70k = await runMinor7Stub({ respBytes: 70000, isErrJson: false });
+    const m7Unreadable1m5 = await runMinor7Stub({ respBytes: 1500000, isErrJson: false });
+    ok(m7Err70k.fillOk && m7Err70k.maxResBuf >= 1048576 && m7Err70k.pending === 'register' &&
+      m7Ok70k.fillOk && m7Ok70k.pending === null &&
+      m7Unreadable1m5.fillOk && m7Unreadable1m5.pending === 'register' && m7Unreadable1m5.pendingReason === 'the site\'s answer was too large to read',
+      'r7 MINOR 7 (70 KB error response + fail-closed unreadable response): 70 KB {ok:false,"error":"email taken"} + nav stays pending:\'register\' (70 KB ok:true confirms); >1 MiB unreadable response fails closed with "the site\'s answer was too large to read"',
+      { m7Err70k, m7Ok70k, m7Unreadable1m5 });
+
+    const red7Src = DSRC0.replace(
+      'if (!bodyRead) {\n            if (rq.obs) rq.obs.respUnreadable = true;\n            an.seq++;\n            an.failCredSeq = an.seq;\n            return;\n          }',
+      'if (!bodyRead) { /* fail-open on unreadable response */ }'
+    );
+    const Dm7_7 = red7Src !== DSRC0 ? MUT.load('src/server/browser-dialogs.js', red7Src, 'r7-7-unreadable-response-confirms') : null;
+    const mut7 = Dm7_7 ? await runMinor7Stub({ DmodToUse: Dm7_7, respBytes: 1500000, isErrJson: true }) : null;
+    ok(Boolean(Dm7_7 && mut7 && mut7.pending === null && m7Unreadable1m5.pending === 'register'),
+      'r7 MINOR 7 RED control [r7-7-unreadable-response-confirms]: fail-open mutant confirms signup on navigation when response body exceeds maxResourceBufferSize',
+      { mut7Pending: mut7 && mut7.pending, realPending: m7Unreadable1m5.pending });
   }
 }
 

@@ -389,15 +389,24 @@ While a vault secret sits in a standard-Chrome tab before the form is submitted 
 previously filled sign-in page from the browser's back/forward cache), **reading that tab is fenced** (`[login_fill_live]`:
 `snapshot`, `screenshot`, `get`, `eval`, `wait --fn`, `console`, `network` bodies, etc.): submit the form with
 `vibespace-browser login --submit` or `click` / `press` its submit button, or `reload` / `open` another page first. Your other
-tabs remain readable (`tab new` / `tab <id>`).
+tabs remain readable (`tab new` / `tab <id>`). Across navigations, filled secrets of `>= 8` bytes (up to the 32 most recent in
+that profile) stay masked as `[vault:<loginId>]` in CLI output and mediated CDP frames until **the browser stops**: parsed JSON
+frames of any size (including `> 2 MiB`, bounded by a `250 ms` walk budget that redacts any remaining strings as
+`[vault:scrub-cut]`) mask every string and key — numeric passwords included — while bare JSON numbers are never masked, and
+unparseable raw frames likewise mask quoted strings (all-digit strings included) while leaving bare numbers intact. Residual:
+`< 8`-byte values (such as 6–7-digit TOTP codes), bare JSON numbers, transformed or split derivatives stashed by page JS and
+read after the fence lifts, and persistent storage (`localStorage` / cookies) read in a fresh browser launch after browser stop
+are not masked.
 
 * `vibespace-browser login [<origin>] [--user <name>] [--submit]` — fill the login form on your tab (no origin = the form on
   your tab; `--user` when the vault keeps several logins of that site; `--submit` submits it too, else press its button).
   The answer names what was filled (and on multi-step forms `step: email | password | totp`; `submitted: true` when a
-  submission was observed — a credential-carrying write to any origin, or a submit press followed by the form's navigation —
-  `submitted: 'unknown'` with `submittedReason` when whether the site took the submission could not be verified, e.g. client-side
-  password hashing, a `> 64 KB` request body, or a cross-origin signup/change API, and `submitted: false` only when no submission
-  happened; `usedPassword: 'pending'` if a site's password change is still unconfirmed, since no CLI verb lists web logins) and a
+  submission was observed — a credential-carrying write or `Authorization` request to any origin, or a submit press followed by
+  the form's navigation, winning over unrelated third-party analytics writes — `submitted: 'unknown'` with `submittedReason`
+  when whether the site took the submission could not be verified, e.g. client-side password hashing or an opaque
+  `Authorization` header including on a `GET` (`"the site's request did not carry the password in a readable form"`) or a
+  `> 64 KB` request body (`"the request body was too large to read"`), and `submitted: false` only when no submission happened;
+  `usedPassword: 'pending'` if a site's password change is still unconfirmed, since no CLI verb lists web logins) and a
   receipt. Refusals by name:
   `login_no_form` (open the sign-in page first), `login_in_frame` (the sign-in form is inside a frame — open that frame's
   address directly or ask the user to sign in in the live view), `login_form_changed` (the form's fields changed before
@@ -407,12 +416,16 @@ tabs remain readable (`tab new` / `tab <id>`).
   `vault_locked` (the owner already knows — do not ask them to unlock).
 * `vibespace-browser login [<origin>] --new-user <name> --generate [--submit]` — register an account THROUGH the vault: the
   vault seals a new pending password that fits the site's rules (`password_rules_unsupported` when none can), fills it, and
-  confirms the entry (sending the owner one notice) only when a verifiable form submission succeeds — clicking a link without
-  submitting, or a site whose request hashes the password, exceeds `64 KB`, or posts to another origin, leaves the entry pending
-  in the vault (where the owner can confirm or re-save it). Use this instead of typing a password yourself — a password you type
-  is saved too, but marked as one you know.
+  confirms the entry (sending the owner one notice) only when a verifiable same-origin submission and readable non-error
+  response succeed — clicking a link without submitting, a site whose request hashes the password or exceeds `64 KB`, a
+  cross-origin credential API (whose destination is recorded on the row as `Submitted to <origin>`), or an unreadable / `> 1 MiB`
+  response (`"the site's answer was too large to read"`) leaves the entry pending in the vault as `"Registration not yet
+  confirmed by the site"` (or `"Password change not yet confirmed"` on `--generate` password changes), where the owner can press
+  `Confirm` (`409 login_not_pending` if already confirmed) or re-save the password (re-saving the same password preserves
+  agent provenance). Use this instead of typing a password yourself — a password you type is saved too, but marked as one you
+  know.
 * `vibespace-browser login [<origin>] [--user <name>] --generate` on a change-password form — the vault seals the new password
-  as pending and promotes it once the form submission succeeds.
+  as pending (`"Password change not yet confirmed"`) and promotes it once the form submission succeeds.
 * A two-step code the owner paired with the login is filled with it. An HTTP sign-in box on the custom kernel is answered by
   `login` the same way.
 

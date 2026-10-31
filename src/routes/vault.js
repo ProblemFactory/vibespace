@@ -52,7 +52,7 @@ const STATUS = Object.freeze({
   // lane vault-paste-request: a paste request's answer / a free entry (src/server/vault-paste-door.js)
   invalid_value: 400, store_failed: 500, value_too_long: 400, unfiled: 503, request_quiet: 429, too_many_requests: 429, value_in_request: 400, job_no_use: 403,
   name_required: 400, name_too_long: 400, note_too_long: 400, bad_kind: 400, hidden_chars: 400, entry_unknown_id: 404,
-  login_exists: 409, login_bad_origin: 400, login_bad_user: 400, bad_totp: 400,   // lane vault-agent-own: `vibespace-vault login add`
+  login_exists: 409, login_bad_origin: 400, login_bad_user: 400, bad_totp: 400, login_not_pending: 409,   // lane vault-agent-own: `vibespace-vault login add`; r7: `confirmOwn`
 });
 const WORDS = Object.freeze({
   ...UGC.WORDS,
@@ -121,6 +121,7 @@ const WORDS = Object.freeze({
   name_required: 'give it a name', name_too_long: 'the name is at most 80 characters', note_too_long: 'the note is at most 400 characters',
   bad_kind: 'the kind is API key, password or secret', hidden_chars: 'the words hold a hidden or direction character',
   entry_unknown_id: 'that stored value is not there any more',
+  login_not_pending: 'that web login is not waiting for confirmation',
 });
 const isAnyBearer = (req) => /^Bearer\s+\S/i.test(String((req.headers && req.headers.authorization) || '')) || typeof (req.body && req.body.token) === 'string';
 const ipOf = (req) => String(req.ip || (req.socket && req.socket.remoteAddress) || '').replace(/^::ffff:/, '') || null;

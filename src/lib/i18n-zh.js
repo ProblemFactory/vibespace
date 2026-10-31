@@ -11744,7 +11744,9 @@ export default {
   "Open the browser live view or reload that tab so the typed credential leaves the page.": "请打开浏览器实时视图或刷新该标签页，让已填入的凭据离开页面。",
   "Why not auto-confirmed: the request body was too large to read (> 64 KB) — confirm here if the site accepted it.": "未能自动确认的原因：请求体超过 64 KB 无法读取 — 如果站点已接受，请在此手动确认。",
   "Why not auto-confirmed: the site's request did not carry the password in a readable form — confirm here if the site accepted it.": "未能自动确认的原因：站点的请求未以可读形式携带该密码 — 如果站点已接受，请在此手动确认。",
-  "Why not auto-confirmed: the credential went to {origin} — confirm here if the site accepted it.": "未能自动确认的原因：凭据已发往 {origin} — 如果站点已接受，请在此手动确认。",
+  "Why not auto-confirmed: the site's answer was too large to read — confirm here if the site accepted it.": "未能自动确认的原因：站点的响应过大无法读取 — 如果站点已接受，请在此手动确认。",
+  "Submitted to {origins}": "凭据提交目标：{origins}",
+  "that web login is not waiting for confirmation": "该网站登录项无需确认",
   "Confirm in the vault that the site accepted this password": "在保险库中确认站点已接受此密码",
   "Confirmed the login in the vault": "已在保险库中确认该登录项",
 };

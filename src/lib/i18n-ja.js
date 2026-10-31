@@ -11743,7 +11743,9 @@ export default {
   "Open the browser live view or reload that tab so the typed credential leaves the page.": "ブラウザのライブビューを開くかタブを再読み込みして、入力済みの認証情報をページから消去してください。",
   "Why not auto-confirmed: the request body was too large to read (> 64 KB) — confirm here if the site accepted it.": "自動確認できなかった理由：リクエスト本文が 64 KB を超え読み取れませんでした — サイトで受理された場合はここで確認してください。",
   "Why not auto-confirmed: the site's request did not carry the password in a readable form — confirm here if the site accepted it.": "自動確認できなかった理由：サイトのリクエストに読み取り可能な形式でパスワードが含まれていませんでした — サイトで受理された場合はここで確認してください。",
-  "Why not auto-confirmed: the credential went to {origin} — confirm here if the site accepted it.": "自動確認できなかった理由：認証情報が {origin} に送信されました — サイトで受理された場合はここで確認してください。",
+  "Why not auto-confirmed: the site's answer was too large to read — confirm here if the site accepted it.": "自動確認できなかった理由：サイトの応答が大きすぎて読み取れませんでした — サイトで受理された場合はここで確認してください。",
+  "Submitted to {origins}": "送信先：{origins}",
+  "that web login is not waiting for confirmation": "そのサイトログインは確認待ちではありません",
   "Confirm in the vault that the site accepted this password": "サイトがこのパスワードを受理したことを保管庫で確認済みにする",
   "Confirmed the login in the vault": "保管庫のログイン項目を確認済みにしました",
 };

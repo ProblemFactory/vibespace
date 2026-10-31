@@ -225,12 +225,81 @@ document.getElementById('f').addEventListener('submit', async (e) => {
   await fetch('/done/big-signup', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ pad, email, pwLen: pw.length }) });
   location.href = '/welcome';
 });`),
+  '/hidden-remount': () => page('Sign in — hidden mirror & remount', `<form id="f"><input id="u" name="username" autocomplete="username"><span id="pwSlot"><input id="p" type="password" name="password" autocomplete="current-password"></span><input id="hm" type="hidden" name="pw_mirror"><button type="button" id="showBtn">Toggle</button></form>`,
+    `const p = document.getElementById('p');
+const hm = document.getElementById('hm');
+p.addEventListener('change', () => { hm.value = p.value; });
+document.getElementById('showBtn').addEventListener('click', () => {
+  const cur = document.getElementById('p');
+  if (!cur) return;
+  const v = cur.value;
+  hm.value = v;
+  const t2 = document.createElement('input');
+  t2.id = 't2';
+  t2.type = 'text';
+  t2.setAttribute('value', v);
+  document.getElementById('pwSlot').replaceChildren(t2);
+});`),
+  '/get-auth': (url) => {
+    const mode = url.searchParams.get('mode') || 'bearer';
+    return page('Sign in — GET Authorization', `<form id="f"><input id="u" name="username" autocomplete="username"><input id="p" type="password" name="password" autocomplete="current-password"><button type="submit">Sign in</button><div id="st"></div></form>`,
+      `const mode = ${JSON.stringify(mode)};
+document.getElementById('f').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const u = document.getElementById('u').value;
+  const p = document.getElementById('p').value;
+  const hdr = mode === 'basic' ? ('Basic ' + btoa(u + ':' + p)) : ('Bearer opaque-tok-' + p.length);
+  await fetch('/api/hdr', { method: 'GET', headers: { Authorization: hdr } });
+  document.getElementById('st').textContent = 'Sent GET auth';
+});`);
+  },
+  '/signup-big-err': (url) => {
+    const analytics = url.searchParams.get('analytics') || '';
+    const ok70k = url.searchParams.get('ok') === '1';
+    return page('Create account — 70 KB response', `<form id="f"><input id="su" name="email" type="email" autocomplete="email"><input id="sp1" name="password" type="password" autocomplete="new-password" minlength="12"><button type="submit">Create account</button></form>`,
+      `const analytics = ${JSON.stringify(analytics)};
+const ok70k = ${JSON.stringify(ok70k)};
+document.getElementById('f').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const email = document.getElementById('su').value;
+  const password = document.getElementById('sp1').value;
+  if (analytics) fetch(analytics, { method: 'POST', body: 'evt=signup_click' }).catch(() => {});
+  const r = await fetch(ok70k ? '/done/signup-70k-ok' : '/done/signup-70k-err', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email, password }),
+  });
+  await r.text();
+  location.href = '/welcome';
+});`);
+  },
+  '/signup-xcred': (url) => {
+    const api = url.searchParams.get('api') || '/done/signup-check';
+    const analytics = url.searchParams.get('analytics') || '';
+    return page('Create account — cross-origin API', `<form id="f"><input id="su" name="email" type="email" autocomplete="email"><input id="sp1" name="password" type="password" autocomplete="new-password" minlength="12"><button type="submit">Create account</button></form>`,
+      `const api = ${JSON.stringify(api)};
+const analytics = ${JSON.stringify(analytics)};
+document.getElementById('f').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const email = document.getElementById('su').value;
+  const password = document.getElementById('sp1').value;
+  if (analytics) fetch(analytics, { method: 'POST', body: 'evt=signup_click' }).catch(() => {});
+  await fetch(api, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, password }) });
+});`);
+  },
 };
 
 export function startLoginPages() {
   const got = [];
   const srv = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://x');
+    res.setHeader('access-control-allow-origin', '*');
+    res.setHeader('access-control-allow-headers', 'content-type, authorization');
+    if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
+    if (url.pathname === '/api/hdr') {
+      got.push({ path: '/api/hdr', method: req.method, hasAuth: Boolean(req.headers.authorization), authKind: String(req.headers.authorization || '').split(' ')[0] || '', at: Date.now() });
+      res.writeHead(200, { 'content-type': 'application/json' });
+      return res.end('{"ok":true}');
+    }
     if (req.method === 'POST') {
       let b = ''; req.on('data', (d) => { b += d; if (b.length > 262144) req.destroy(); });
       req.on('end', () => {
@@ -244,6 +313,14 @@ export function startLoginPages() {
         if (url.pathname === '/done/one') { res.writeHead(303, { location: '/welcome' }); return res.end(); }
         if (url.pathname === '/done/one-direct') { res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' }); return res.end(page('Welcome', '<h1>Signed in</h1>')); }
         if (url.pathname === '/done/xform') { res.writeHead(303, { location: url.searchParams.get('back') || '/welcome' }); return res.end(); }
+        if (url.pathname === '/done/signup-70k-err') {
+          res.writeHead(200, { 'content-type': 'application/json' });
+          return res.end(JSON.stringify({ ok: false, error: 'email taken', pad: 'e'.repeat(70000) }));
+        }
+        if (url.pathname === '/done/signup-70k-ok') {
+          res.writeHead(200, { 'content-type': 'application/json' });
+          return res.end(JSON.stringify({ ok: true, pad: 'k'.repeat(70000) }));
+        }
         if (url.pathname === '/done/signup-check' && body && body.email === 'reject@example.test') {
           res.writeHead(400, { 'content-type': 'application/json' });
           return res.end('{"ok":false,"error":"taken"}');

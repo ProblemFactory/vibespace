@@ -903,6 +903,111 @@ try {
         rD6Login.code === 0 && jD6Login?.data?.usedPassword !== 'pending' && gotD6 && gotD6.body.password === d6OwnPw,
         'r6 MINOR D\' (real Chrome): owner re-save (`addOwn`) clears pending (source:"owner") and subsequent login fills owner password without pending notice',
         { rowD6, usedPassword: jD6Login?.data?.usedPassword });
+
+      // 7o. r7 MAJOR 1 (real Chrome): third-party analytics POST leaves proven submit true (no false origin on row); cross-origin credential write records `origins` fact
+      pages.clear();
+      pages2.clear();
+      await run(['open', `${SITE}/signup-big-err?ok=1&analytics=${encodeURIComponent(`${SITE2}/collect`)}`]);
+      const rAn7Ok = await run(['login', SITE, '--new-user', 'an7ok@example.test', '--generate', '--submit', '--json']);
+      const jAn7Ok = (() => { try { return JSON.parse(rAn7Ok.out.trim().split('\n').pop()); } catch { return null; } })();
+      const recAn7Init = readLoginRec('an7ok@example.test');
+      if (recAn7Init && recAn7Init.password) trackedSecrets.push(recAn7Init.password);
+      const confirmedAn7 = await until(() => { const rec = readLoginRec('an7ok@example.test'); return rec && !rec.pending ? rec : null; }, 4000);
+      const rowAn7Ok = w.logins.list().entries.find((e) => e.name === `web-login:${SITE}#an7ok@example.test`);
+
+      pages2.clear();
+      await run(['open', `${SITE}/signup-xcred?api=${encodeURIComponent(`${SITE2}/done/xcred`)}&analytics=${encodeURIComponent(`${SITE2}/collect-x`)}`]);
+      const rXcred7 = await run(['login', SITE, '--new-user', 'xcred7@example.test', '--generate', '--submit', '--json']);
+      const jXcred7 = (() => { try { return JSON.parse(rXcred7.out.trim().split('\n').pop()); } catch { return null; } })();
+      const recXcred7 = readLoginRec('xcred7@example.test');
+      if (recXcred7 && recXcred7.password) trackedSecrets.push(recXcred7.password);
+      const gotXcred7 = await until(() => pages2.received().find((x) => x.path === '/done/xcred'), 4000);
+      const rowXcred7 = w.logins.list().entries.find((e) => e.name === `web-login:${SITE}#xcred7@example.test`);
+      ok(rAn7Ok.code === 0 && jAn7Ok?.data?.submitted === true && !jAn7Ok?.data?.submittedReason &&
+        Boolean(confirmedAn7) && rowAn7Ok && !rowAn7Ok.pending && !rowAn7Ok.pendingReason && !rowAn7Ok.origins &&
+        rXcred7.code === 0 && jXcred7?.data?.submitted === true && !jXcred7?.data?.submittedReason && Boolean(gotXcred7) &&
+        rowXcred7 && !rowXcred7.pendingReason && Array.isArray(rowXcred7.origins) && rowXcred7.origins.includes(SITE2),
+        'r7 MAJOR 1 (real Chrome): cross-origin analytics POST never poisons proven submit or writes false origin; cross-origin credential write answers submitted:true and records destination in row.origins',
+        { anSub: jAn7Ok?.data, rowAn7Ok, xcredSub: jXcred7?.data, rowXcred7 });
+
+      // 7p. r7 MINOR 3 (real Chrome): hidden mirror + re-mounted <input type="text" value=SECRET> wiped & counted with 0 secret bytes in Runtime.evaluate
+      await run(['open', `${SITE}/hidden-remount`]);
+      const rM3 = await run(['login', SITE, '--user', USER]);
+      const rM3Show = await run(['click', '#showBtn']);
+      const upUrlM3 = await upstreamWsUrl();
+      const rawM3 = await openCdpRpc(upUrlM3);
+      const tListM3 = await rawM3.call('Target.getTargets');
+      const tgtM3 = ((tListM3.msg.result && tListM3.msg.result.targetInfos) || []).find((t) => t.type === 'page' && String(t.url || '').includes('/hidden-remount'));
+      let m3WipeRes = null, m3DomCheck = null, m3EvalLeaked = false;
+      if (tgtM3) {
+        const attM3 = await rawM3.call('Target.attachToTarget', { targetId: tgtM3.targetId, flatten: true });
+        const sidM3 = attM3.msg.result && attM3.msg.result.sessionId;
+        const lfM3 = w.dialogs.liveFillOnTarget(w.prof.id, tgtM3.targetId);
+        const LF = require('../src/server/browser-login-fill.js');
+        const fidsM3 = [...(lfM3?.secretFieldIds || []), ...(lfM3?.userFieldIds || [])];
+        const m3Exprs = [];
+        m3WipeRes = await LF.wipeTabTypedInputs({
+          call: async (m, p) => {
+            if (m === 'Runtime.evaluate' && p && p.expression) m3Exprs.push(String(p.expression));
+            return (await rawM3.call(m, p, sidM3)).msg;
+          },
+          targetId: tgtM3.targetId,
+          fieldIds: fidsM3,
+          secretValues: [PW],
+        });
+        m3EvalLeaked = m3Exprs.some((ex) => ex.includes(PW));
+        const chkM3 = await rawM3.call('Runtime.evaluate', {
+          expression: '({ hmLen: document.getElementById("hm").value.length, hmAttrLen: (document.getElementById("hm").getAttribute("value") || "").length, t2Len: document.getElementById("t2").value.length, t2AttrLen: (document.getElementById("t2").getAttribute("value") || "").length })',
+          returnByValue: true,
+        }, sidM3);
+        m3DomCheck = chkM3.msg?.result?.result?.value || null;
+        await rawM3.call('Target.detachFromTarget', { sessionId: sidM3 });
+      }
+      await rawM3.close();
+      await run(['open', `${SITE}/plain`]);
+      ok(rM3.code === 0 && rM3Show.code === 0 && m3WipeRes && m3WipeRes.ok === true && m3WipeRes.wiped >= 3 && m3WipeRes.verifiedEmpty === true &&
+        m3EvalLeaked === false && m3DomCheck && m3DomCheck.hmLen === 0 && m3DomCheck.hmAttrLen === 0 && m3DomCheck.t2Len === 0 && m3DomCheck.t2AttrLen === 0,
+        'r7 MINOR 3 (real Chrome): wipeTabTypedInputs clears .value and @value on hidden mirror + re-mounted <input type="text" value=SECRET> with 0 secret bytes in Runtime.evaluate',
+        { m3WipeRes, m3EvalLeaked, m3DomCheck });
+
+      // 7q. r7 MINOR 6 (real Chrome): GET with Authorization header after submit => 'unknown' (Bearer) or true (Basic carrying password), never "press its button"
+      pages.clear();
+      await run(['open', `${SITE}/get-auth?mode=bearer`]);
+      const rGetBearerTxt = await run(['login', SITE, '--user', USER, '--submit']);
+      await run(['open', `${SITE}/get-auth?mode=bearer`]);
+      const rGetBearerJson = await run(['login', SITE, '--user', USER, '--submit', '--json']);
+      const jGetBearer = (() => { try { return JSON.parse(rGetBearerJson.out.trim().split('\n').pop()); } catch { return null; } })();
+      await run(['open', `${SITE}/get-auth?mode=basic`]);
+      const rGetBasicJson = await run(['login', SITE, '--user', USER, '--submit', '--json']);
+      const jGetBasic = (() => { try { return JSON.parse(rGetBasicJson.out.trim().split('\n').pop()); } catch { return null; } })();
+      const gotGetAuth = pages.received().filter((x) => x.path === '/api/hdr' && x.hasAuth);
+      ok(rGetBearerTxt.code === 0 && !/NOT submitted|press its button/.test(rGetBearerTxt.out) &&
+        jGetBearer?.data?.submitted === 'unknown' && jGetBearer?.data?.submittedReason === 'the site\'s request did not carry the password in a readable form' &&
+        jGetBasic?.data?.submitted === true && !jGetBasic?.data?.submittedReason && gotGetAuth.length >= 3,
+        'r7 MINOR 6 (real Chrome): GET with Authorization header answers submitted:"unknown" (Bearer, no "press its button") and submitted:true (Basic carrying password)',
+        { bearer: jGetBearer?.data, basic: jGetBasic?.data, hdrReqs: gotGetAuth.length });
+
+      // 7r. r7 MINOR 7 + MINOR 5 + MINOR 4 (real Chrome): 70 KB {ok:false,"error":"email taken"} + nav stays pending; confirmOwn on non-pending => login_not_pending; addAgent -> addOwn same password keeps agent-typed
+      pages.clear();
+      await run(['open', `${SITE}/signup-big-err`]);
+      const rErr70k = await run(['login', SITE, '--new-user', 'err70k@example.test', '--generate', '--submit', '--json']);
+      const recErr70k = readLoginRec('err70k@example.test');
+      if (recErr70k && recErr70k.password) trackedSecrets.push(recErr70k.password);
+      await until(() => pages.received().find((x) => x.path === '/done/signup-70k-err'), 4000);
+      await until(async () => { const u = await w.cli(['get', 'url']); return /\/welcome\b/.test(u.out); }, 4000);
+      await sleep(200);
+      const rowErr70k = w.logins.list().entries.find((e) => e.name === `web-login:${SITE}#err70k@example.test`);
+      const confNonPend = w.logins.confirmOwn(`web-login:${SITE}#${USER}`, { who: 'owner' });
+      const ag7Pw = pwOf('r7-ag-same');
+      trackedSecrets.push(ag7Pw);
+      const addAg7 = w.logins.addAgent({ origin: SITE, username: 'agprov7@example.test', password: ag7Pw }, { owner: 'conv-1', actor: 'Chat One' });
+      const addOwnSame7 = w.logins.addOwn({ origin: SITE, username: 'agprov7@example.test', password: ag7Pw }, { who: 'owner' });
+      const rowAgProv7 = w.logins.list().entries.find((e) => e.name === `web-login:${SITE}#agprov7@example.test`);
+      ok(rErr70k.code === 0 && rowErr70k && rowErr70k.pending === 'register' &&
+        confNonPend && confNonPend.ok === false && confNonPend.code === 'login_not_pending' &&
+        addAg7.ok === true && addOwnSame7.ok === true && rowAgProv7 && rowAgProv7.source === 'agent-typed',
+        'r7 MINOR 7 + 5 + 4 (real Chrome): 70 KB {ok:false,"error":"email taken"} + /welcome nav stays pending:register; confirmOwn on non-pending refuses login_not_pending; addAgent -> addOwn same password preserves agent-typed',
+        { rowErr70k, confNonPend, rowAgProv7 });
     }
 
     console.log('⑧ R4 zero-leakage sweep across all output surfaces + data/ files + RED mutant control');

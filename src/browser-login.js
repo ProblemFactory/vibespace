@@ -58,9 +58,9 @@ const STRENGTHS = Object.freeze(['generated', 'unknown']);
 const SAVE_STATES = Object.freeze(['new', 'same', 'update', 'agent-typed', 'owner-card', 'none']);
 const READABLE_BOUND = 'the site\'s request did not carry the password in a readable form';
 const BODY_LARGE_BOUND = 'the request body was too large to read';
-const OTHER_ORIGIN_PREFIX = 'the credential went to ';
+const ANSWER_LARGE_BOUND = 'the site\'s answer was too large to read';
 /** Every refusal of the road, by name (the routes' STATUS table carries each). */
-const REFUSALS = Object.freeze(['login_fill_withdrawn', 'login_no_form', 'login_in_frame', 'login_form_changed', 'login_phishing', 'login_ambiguous', 'login_not_granted', 'vault_locked', 'password_rules_unsupported', 'login_no_entry', 'login_exists', 'login_bad_origin', 'login_bad_user', 'login_fill_live']);
+const REFUSALS = Object.freeze(['login_fill_withdrawn', 'login_no_form', 'login_in_frame', 'login_form_changed', 'login_phishing', 'login_ambiguous', 'login_not_granted', 'vault_locked', 'password_rules_unsupported', 'login_no_entry', 'login_exists', 'login_bad_origin', 'login_bad_user', 'login_fill_live', 'login_not_pending']);
 /** Closed allowlist of CLI verbs that may run while a filled vault secret sits in the tab's current document (before navigation). */
 const LIVE_FILL_ALLOW_VERBS = Object.freeze([
   'login',
@@ -121,11 +121,7 @@ function scopeOf(resource) { const r = str(resource); if (r === '*') return 'any
 // ── the record ─────────────────────────────────────────────────────────────
 function pendingReasonOf(raw) {
   const s = str(raw).trim();
-  if (s === READABLE_BOUND || s === BODY_LARGE_BOUND) return s;
-  if (s.startsWith(OTHER_ORIGIN_PREFIX)) {
-    const o = originOf(s.slice(OTHER_ORIGIN_PREFIX.length));
-    if (o && s === OTHER_ORIGIN_PREFIX + o) return s;
-  }
+  if (s === READABLE_BOUND || s === BODY_LARGE_BOUND || s === ANSWER_LARGE_BOUND) return s;
   return null;
 }
 function prevOf(p) {
@@ -572,7 +568,7 @@ function liveFillVerdict({ verb = '', argv = null, batchVerbs = null, origin = '
 
 module.exports = {
   PREFIX, DOOR, USER_MAX, FORMS_MAX, FIELDS_MAX, PATTERN_MAX, GENERATED_LEN, GENERATED_MIN, GENERATED_MAX, TEXT_MAX, FORM_KINDS, FIELD_TYPES, STEPS, BY, SOURCES, STRENGTHS, SAVE_STATES, REFUSALS, LIVE_FILL_ALLOW_VERBS,
-  READABLE_BOUND, BODY_LARGE_BOUND, OTHER_ORIGIN_PREFIX,
+  READABLE_BOUND, BODY_LARGE_BOUND, ANSWER_LARGE_BOUND,
   NAME_RE, ORIGIN_RE, CLASSES, LADDER, NOTICE, LOCKED, ROADS, WITHDRAWN_IN,
   originOf, hostOf, secureOrigin, userOf, entryName, parseName, isEntryName, grantResources, resourceOk, scopeOf,
   pendingReasonOf, recordOf, textOf, publicOf, newRecord, changedRecord,
