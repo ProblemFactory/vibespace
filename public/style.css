@@ -639,6 +639,8 @@ html, body {
   background: var(--bg-hover);
 }
 .session-item-card.highlighted.highlight-flash { animation: highlight-flash 0.4s ease-out; }
+/* the «Session unavailable» tile's «Open the session list» found exactly one row (lane layout-stopped-window r4) */
+.session-item-card.door-found { border-left: 3px solid var(--accent); background: var(--bg-hover); animation: highlight-flash 1.2s ease-out; }
 @keyframes highlight-flash { 0% { background: var(--accent-dim, rgba(99,102,241,0.25)); } 100% { background: var(--bg-hover); } }
 
 /* Session card expand button */

@@ -1942,12 +1942,14 @@ class WindowManager {
    *  doors go through tab-group.js requestCloseGroup, which asks, then closes each member here — B-a67c): the window may answer
    *  first — `winInfo.onCloseRequest()` returning false keeps it (round 3 A2: a desktop-app window asks its APP to
    *  close, docs/design-desktop-apps-seamless §3.2). Programmatic closes (layout sync, a window closing itself) call
-   *  closeWindow directly and are never vetoed. Returns true when the window closed. */
-  requestClose(id) {
+   *  closeWindow directly and are never vetoed. `opts.asked` = the person already answered a question that named this window
+   *  (a group close's, which names what `winInfo.closeForGood()` reports — lane layout-stopped-window r4): a window that would
+   *  ask the same question does not ask again. Returns true when the window closed. */
+  requestClose(id, opts = {}) {
     const win = this.windows.get(id); if (!win) return false;
     if (typeof win.onCloseRequest === 'function') {
       let go = true;
-      try { go = win.onCloseRequest() !== false; } catch (e) { console.warn('[window] onCloseRequest threw — closing', e); }
+      try { go = win.onCloseRequest(opts) !== false; } catch (e) { console.warn('[window] onCloseRequest threw — closing', e); }
       if (!go) return false;
     }
     const said = this._app ? closeKeepsWord(sessionForWin(this._app, win)) : null;   // read BEFORE the window goes (it names its session)

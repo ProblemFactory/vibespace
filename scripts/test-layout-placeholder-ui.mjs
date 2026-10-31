@@ -16,6 +16,9 @@
 //      whole while the title is cut; «打开会话列表» opens the list on the stopped sessions searched by the name; ✕ asks first —
 //      cancel keeps the entry, «移除» removes it (②); on the phone every word is ≥ 16 px and the doors ≥ 44 px (③); the dialog
 //      opened from a tile's «恢复之前的布局…» has the 06:50 point's 个人 SELECTED (④)
+// ROUND 4 (the r3 acceptance): a RUNNING session of a nameless tile's name is on the hub (a raw create — no window shows it, the
+//   incident's own case): «打开会话列表» opens the list on ALL searched by the name, the running row SHOWN and marked (⑤, the
+//   shot); a second tile's «恢复之前的布局…» pressed while the dialog is open redraws it for ITS slot (④)
 // Screenshots go to $LSW_SHOTS_DIR when set (the lane's report), else nowhere.
 import fs from 'node:fs';
 import path from 'node:path';
@@ -41,6 +44,7 @@ const procs = new Set(); const worktrees = new Set(); let fakeHome = null;
 function cleanup() {
   for (const p of procs) { try { p.kill('SIGKILL'); } catch { } }
   try { endRootedProcesses(ROOT); } catch { }
+  if (fakeHome) { try { endRootedProcesses(fakeHome); } catch { } } // r4: the running «Van build» session (its cwd is under ROOT too)
   for (const wt of worktrees) { try { execFileSync('git', ['-C', repo, 'worktree', 'remove', '--force', wt], { stdio: 'ignore' }); } catch { } }
   try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { }
   if (fakeHome) { try { fs.rmSync(fakeHome, { recursive: true, force: true }); } catch { } }
@@ -94,6 +98,7 @@ else await (async () => {
   point.desktops['desk-w'].autoSave.windows.push(filesWin('w-3', dir('w3'), GB(2)));
   const POINT = 'layout-2026-10-30T06-50-53-927Z-1h.json', SUMMARY = { 个人: 12, 工作: 3, 研究: 1 };
   fs.rmSync(path.join(wt, 'data'), { recursive: true, force: true }); fs.mkdirSync(path.join(wt, 'data', 'layout-history'), { recursive: true });
+  execFileSync('cp', ['-r', path.join(repo, 'data', 'bin'), path.join(wt, 'data', 'bin')]); // r4: the tracked wrappers (pty-wrapper.js…) — without them every session a test starts dies at birth («Cannot find module …/data/bin/pty-wrapper.js», socket=gone)
   fs.writeFileSync(path.join(wt, 'data', 'layouts.json'), J(layouts, null, 1));
   fs.writeFileSync(path.join(wt, 'data', 'layout-history', POINT), J({ at: 1793343053927, summary: SUMMARY, totalWindows: 16, change: [['个人', 12, 11]], layouts: point }));
   fs.writeFileSync(path.join(wt, 'data', 'layout-history', POINT.replace(/\.json$/, '.meta.json')), J({ at: 1793343053927, summary: SUMMARY, totalWindows: 16, change: [['个人', 12, 11]] }));
@@ -159,11 +164,28 @@ else await (async () => {
     const st0 = t1.find((t) => t.id === 'win-p-0');
     ok(st0 && st0.where === '/srv/u/proj-0' && gone.find((t) => t.id === 'win-p-4')?.where === '', '⑤ the folder the record holds is on the tile (the stopped one\'s); a nameless record holds none and its reason says so', { st: st0 && st0.where, un: gone.find((t) => t.id === 'win-p-4') });
     await P1.shot('desktop-zh-1440');
-    // ⑤ «打开会话列表»: the list opens on the stopped sessions, searched by the window's name
+    // ⑤ r4 «打开会话列表»: the list opens on ALL, searched by the window's name — a RUNNING conversation of that name (the
+    // incident's: the resume-all's late answer started it in a session no window shows) is SHOWN and marked
+    const vanCwd = path.join(ROOT, 'files', 'van'); fs.mkdirSync(vanCwd, { recursive: true });
+    const vws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`); const vmsgs = [];
+    vws.on('message', (d) => { try { vmsgs.push(JSON.parse(d)); } catch { } });
+    await new Promise((r, e) => { vws.on('open', r); vws.on('error', e); });
+    // a TERMINAL session: the fake claude (`exec sleep 600`) runs in its pty for the whole suite; the door's search is the same
+    // for any mode (r4 runs 1-4 were red here on the harness: the create's name field, then the scratch data/ wiped of data/bin)
+    vws.send(J({ type: 'create', backend: 'claude', mode: 'terminal', cwd: vanCwd, cols: 80, rows: 24, reqId: 'lsw-van', sessionName: NAMES[5] })); // the wire's name field (session-lifecycle createSession's)
+    await until(() => vmsgs.some((m) => m.type === 'created' && m.reqId === 'lsw-van'), 20000, 100);
+    const vanId = vmsgs.find((m) => m.type === 'created' && m.reqId === 'lsw-van')?.sessionId || null;
+    // the creating socket stays open through ⑤ (test-agent-window-chrome's shape: a birth whose only client left at once is not the case under test)
+    const liveRow = `(app.sidebar._allSessions || []).filter((s) => s.status === 'live' && (s.name === ${J(NAMES[5])} || s.webuiName === ${J(NAMES[5])})).map((s) => s.sessionId)`;
+    ok(!!vanId && await until(async () => (await P1.ev(liveRow)).length === 1, 20000, 250), '⑤ a RUNNING session «Van build» is on the hub (a raw create: no window shows it) — the sidebar\'s rows hold it live', { vanId, rows: await P1.ev(liveRow).catch((e) => e.message), webui: await P1.ev('(app.sidebar._webuiSessions || []).map((w) => [w.id, w.name, w.mode, w.backend])').catch((e) => e.message), frames: vmsgs.map((m) => m.type).slice(-12), exits: vmsgs.filter((m) => /exit|error|refus/i.test(m.type)).slice(0, 3), journal: journal.split('\n').filter((l) => /sess-1-|\[session\]|Van build/.test(l)).slice(-8) });
     const sbOpen0 = await P1.ev('!!app.sidebar.isOpen');
-    ok(await P1.click(`app.wm.windows.get('win-p-5')?.element.querySelector('[data-door="sessions"]')`) && await until(() => P1.ev(`app.sidebar.isOpen !== false && app.sidebar._activeView === 'stopped' && document.getElementById('session-filter').value === ${J(NAMES[5])}`), 5000), '⑤ «打开会话列表» opens the session list on the STOPPED view, searched by the window\'s name («Van build»)', await P1.ev(`({ open: app.sidebar.isOpen, view: app.sidebar._activeView, q: document.getElementById('session-filter').value, quick: [...document.querySelectorAll('#status-quick-tabs .status-quick-tab')].map((b) => b.textContent + (b.classList.contains('active') ? '*' : '')) })`).catch((e) => e.message));
+    const found = `(() => { const c = [...document.querySelectorAll('.session-item-card.door-found')]; return c.map((x) => ({ text: x.textContent.slice(0, 80), seen: (() => { const r = x.getBoundingClientRect(); return r.width > 0 && r.height > 0 && r.bottom > 0 && r.top < innerHeight; })() })); })()`;
+    ok(await P1.click(`app.wm.windows.get('win-p-5')?.element.querySelector('[data-door="sessions"]')`) && await until(async () => (await P1.ev(`app.sidebar.isOpen !== false && app.sidebar._activeView === null && document.getElementById('session-filter').value === ${J(NAMES[5])}`)) && (await P1.ev(found)).length === 1, 8000), '⑤ «打开会话列表» opens the session list on ALL, searched by the window\'s name («Van build») — and the RUNNING row is SHOWN, marked, on screen (23eaffef5: the 停止 view — the live row filtered away, «没有正在运行的会话»)', await P1.ev(`({ open: app.sidebar.isOpen, view: app.sidebar._activeView, q: document.getElementById('session-filter').value, found: ${found}, quick: [...document.querySelectorAll('#status-quick-tabs .status-quick-tab')].map((b) => b.textContent + (b.classList.contains('active') ? '*' : '')) })`).catch((e) => e.message));
+    const fd = (await P1.ev(found))[0];
+    ok(fd && /Van build/.test(fd.text) && fd.seen && J(await P1.ev('[...app.sidebar._statusFilter].sort()')) === J(['external', 'live', 'stopped', 'tmux']), '⑤ …the marked row is «Van build», seen; the status filter is as it was (the door sets the search only)', fd);
     await P1.shot('sessions-zh-1440');
-    await P1.ev(`(() => { app.sidebar._activeView = null; document.getElementById('session-filter').value = ''; app.sidebar._renderQuickTabs(); app.sidebar._render(); app.sidebar.toggle(${sbOpen0}); return true; })()`); // the list as it was (open, it narrows the grid)
+    await P1.ev(`(() => { app.sidebar._doorFound = null; document.getElementById('session-filter').value = ''; app.sidebar._render(); app.sidebar.toggle(${sbOpen0}); return true; })()`); // the list as it was (open, it narrows the grid)
+    try { vws.close(); } catch { }
     await sleep(800);
     // the grace: nothing dropped
     await sleep(22000);
@@ -211,6 +233,9 @@ else await (async () => {
     const picked = await P1.ev(`[...document.querySelectorAll('.lh-desk.is-picked')].map((b) => ({ id: b.dataset.id, desk: b.dataset.desk, current: b.getAttribute('aria-current'), focused: document.activeElement === b }))`);
     const note = await P1.ev(`document.querySelector('.lh-slot')?.textContent || ''`);
     ok(picked.length === 1 && picked[0].id === POINT && picked[0].desk === '个人' && picked[0].current === 'true' && /Trip planner/.test(note), '④ …with the 06:50 point\'s 个人 SELECTED (the newest point whose 个人 still names «Trip planner»\'s conversation — the newer ones hold it nameless) and a line that says so', { picked, note, rows: await P1.ev(`[...document.querySelectorAll('.lh-row')].length`) });
+    // r4: a SECOND tile's door while the dialog is open ⇒ the dialog is redrawn for ITS slot (23eaffef5: raised with A's line)
+    ok(await P1.ev(`(() => { const b = app.wm.windows.get('win-p-9')?.element.querySelector('[data-door="rollback"]'); if (!b) return false; b.click(); return true; })()`) && await until(() => P1.ev(`/Cluster admin/.test(document.querySelector('.lh-slot')?.textContent || '') && document.querySelectorAll('.lh-slot').length === 1 && !!document.querySelector('${deskBtn}.is-picked')`), 8000), '④ …tile «Cluster admin»\'s «恢复之前的布局…» pressed while it is open: ONE dialog, redrawn for «Cluster admin» (its line, its point selected)', await P1.ev(`({ notes: [...document.querySelectorAll('.lh-slot')].map((x) => x.textContent), picked: [...document.querySelectorAll('.lh-desk.is-picked')].map((b) => b.dataset.id + '/' + b.dataset.desk) })`).catch((e) => e.message));
+    await P1.shot('dialog-second-tile-zh');
     const deskWords = await P1.ev(`[...document.querySelectorAll('.lh-desk')].map((b) => [b.textContent, b.title])`);
     const w0650 = await P1.ev(`(() => { const b = document.querySelector('${deskBtn}'); return b ? [b.textContent, b.title] : null; })()`);
     ok(w0650 && /^个人 12/.test(w0650[0]) && w0650[1] === '只恢复「个人」', '④ the 06:50 row\'s button says the desktop and its count («个人 12 …»), its title «只恢复「个人」»', { w0650, all: deskWords });

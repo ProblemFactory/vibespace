@@ -258,6 +258,7 @@ class Sidebar {
     // 150ms debounce: every keystroke re-ran the full folder-grouping render
     // over ~5k sessions (audit round-2)
     document.getElementById('session-filter').oninput = () => {
+      this._doorFound = null; // the tile door's one match is marked only while its search stands (r4)
       clearTimeout(this._filterTimer);
       this._filterTimer = setTimeout(() => this._render(), 150);
     };
@@ -698,9 +699,8 @@ class Sidebar {
     if (!container) return;
     container.innerHTML = '';
     const filters = [...this._statusFilter];
-    // Only show tabs if enabled and more than 1 filter is selected — or while a view is narrowed (a door's: showStopped), so
-    // its ALL is there to undo it
-    if ((!enabled && !this._activeView) || filters.length <= 1) return;
+    // Only show tabs if enabled and more than 1 filter is selected
+    if (!enabled || filters.length <= 1) return;
 
     const labelMap = { live: tr('LIVE'), tmux: tr('TMUX'), external: tr('EXT'), stopped: tr('STOP'), archived: tr('ARCH') };
     const colorMap = { live: 'var(--green)', tmux: 'var(--blue)', external: 'var(--yellow)', stopped: 'var(--text-dim)', archived: 'var(--text-dim)' };
@@ -928,17 +928,30 @@ class Sidebar {
   }
 
   /** THE WAY BACK from a window that lost its conversation (lane layout-stopped-window r3, the «Session unavailable» tile's
-   *  «Open the session list»): the list opened on this page — the sessions tab, the Stopped view, searched by the window's
-   *  name — where the person opens the conversation by hand. Both are the list's own visible controls (ALL, the search box). */
-  showStopped(query = '') {
+   *  «Open the session list»): the list opened on this page — the sessions tab on ALL, searched by the window's name — where
+   *  the person opens the conversation by hand. THE NAME IS THE KEY, NOT THE STATUS (r4): the conversation of a nameless
+   *  window may be running (the resume-all's late answers started it in a session no window shows), stopped, tmux or
+   *  external — r3 narrowed to Stopped and hid the running row. The person's status filter is theirs and is not touched; a
+   *  quick view (LIVE / STOP…) goes back to ALL. Exactly one row shown ⇒ it is marked (`door-found`, kept across the list's
+   *  re-renders until the search changes) and scrolled to. → that row's sessionId, else null. */
+  showSessionsNamed(query = '') {
     if (this._activeTab !== 'folders') { this._activeTab = 'folders'; this._updateTabs(); }
-    this._statusFilter.add('stopped');
-    this._activeView = 'stopped';
+    this._activeView = null;
+    this._mobileDrilldown = null; // the phone's list, not one folder's drill-down
+    const q = String(query || '');
     const f = document.getElementById('session-filter');
-    if (f) f.value = String(query || '');
+    if (f) f.value = q;
+    clearTimeout(this._filterTimer);
+    this._doorFound = null;
     this.toggle(true);
     this._renderQuickTabs();
     this._render();
+    const shown = q.trim() ? (this._shownSessions || []) : [];
+    if (shown.length !== 1) return null;
+    const sid = this._doorFound = shown[0].sessionId;
+    const card = [...(this.listEl?.querySelectorAll?.('.session-item-card') || [])].find((c) => c._sessionId === sid);
+    if (card) { card.classList.add('door-found'); card.scrollIntoView?.({ block: 'nearest' }); }
+    return sid;
   }
 
   async _poll() {
@@ -1356,6 +1369,7 @@ class Sidebar {
       return;
     }
 
+    this._shownSessions = sessions; // what the list is handed — the tile door's «exactly one row» (showSessionsNamed)
     if (this._mobileMode) {
       // Restore drill-down state if we were inside a folder/group
       if (this._mobileDrilldown) {

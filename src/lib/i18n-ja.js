@@ -11588,4 +11588,6 @@ export default {
   "“{name}” is deleted from this desktop’s layout for good. Only an older rollback point (Restore a previous layout…) still holds it.": "「{name}」はこのデスクトップのレイアウトから完全に削除されます。残るのは古いロールバックポイント（以前のレイアウトを復元…）だけです。",
   "Selected: the newest point that still names the conversation of “{name}” — press it to restore that desktop as it was then.": "選択済み：「{name}」の会話をまだ記録している最新のロールバックポイントです — 押すとそのデスクトップを当時の状態に戻します。",
   "No rollback point names the conversation of “{name}”.": "「{name}」の会話を記録しているロールバックポイントはありません。",
+  "“{name}” cannot be reopened: closing deletes it from this desktop’s layout for good. Only an older rollback point (Restore a previous layout…) still holds it.": "「{name}」は開き直せません。閉じるとこのデスクトップのレイアウトから完全に削除されます。残るのは古いロールバックポイント（以前のレイアウトを復元…）だけです。",
+  "{n} of these cannot be reopened ({names}): closing deletes them from this desktop’s layout for good. Only an older rollback point (Restore a previous layout…) still holds them.": "このうち {n} 個は開き直せません（{names}）。閉じるとこのデスクトップのレイアウトから完全に削除されます。残るのは古いロールバックポイント（以前のレイアウトを復元…）だけです。",
 };

@@ -11589,4 +11589,6 @@ export default {
   "“{name}” is deleted from this desktop’s layout for good. Only an older rollback point (Restore a previous layout…) still holds it.": "「{name}」会从这个桌面的布局中永久删除。只有更早的回滚点（恢复之前的布局…）还保留着它。",
   "Selected: the newest point that still names the conversation of “{name}” — press it to restore that desktop as it was then.": "已选中：仍记着「{name}」的会话的最新回滚点 — 点它就能把那个桌面恢复成当时的样子。",
   "No rollback point names the conversation of “{name}”.": "没有哪个回滚点记着「{name}」的会话。",
+  "“{name}” cannot be reopened: closing deletes it from this desktop’s layout for good. Only an older rollback point (Restore a previous layout…) still holds it.": "「{name}」无法重新打开：关闭会把它从这个桌面的布局中永久删除。只有更早的回滚点（恢复之前的布局…）还保留着它。",
+  "{n} of these cannot be reopened ({names}): closing deletes them from this desktop’s layout for good. Only an older rollback point (Restore a previous layout…) still holds them.": "其中 {n} 个无法重新打开（{names}）：关闭会把它们从这个桌面的布局中永久删除。只有更早的回滚点（恢复之前的布局…）还保留着它们。",
 };

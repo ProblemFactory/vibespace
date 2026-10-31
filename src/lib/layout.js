@@ -1061,7 +1061,9 @@ class LayoutManager {
     const cwd = String(entry.cwd || entry.openSpec?.cwd || '');
     if (cwd) tile.append(line('session-placeholder-where', cwd));
     tile.append(line('session-placeholder-say', cid ? t('Session stopped — click to resume') : t('Session unavailable')));
-    win.onCloseRequest = () => this._closeAsks(win); // the ✕ of a tile that names no conversation asks first (r3)
+    win.onCloseRequest = (o) => this._closeAsks(win, o); // the ✕ of a tile that names no conversation asks first (r3)
+    // a GROUP's one question names what its close deletes for good (r4: tab-group.js requestCloseGroup) — then it is not asked again
+    win.closeForGood = () => (conversationOf(win._placeholderOf) ? null : (titleNameOf(win._placeholderOf) || t('Session')));
     if (cid) { tile.onclick = () => this._resumePlaceholder(win); box.appendChild(tile); return; }
     // NO PRESS, THEREFORE DOORS (r3 — these are the windows the owner lost): why, in one line, and the three ways forward
     const why = placeholderWhy(entry, this.app.sidebar?._hostsData?.hosts || null);
@@ -1075,17 +1077,19 @@ class LayoutManager {
     doors.append(
       // an older rollback point may still name its conversation: the dialog opens ON the newest one that does (the server reads them)
       door('rollback', t('Restore a previous layout…'), () => this.app._showLayoutHistory?.({ desktopId: win._desktopId || this.app.desktopManager?.activeDesktopId || null, entry: win._placeholderOf, name })),
-      // the session list, on the stopped sessions, searched by the window's name — the conversation is opened there by hand
-      door('sessions', t('Open the session list'), () => this.app.sidebar?.showStopped?.(name)),
+      // the session list on ALL, searched by the window's name (r4: its conversation may be running — never narrowed to
+      // Stopped) — the conversation is opened there by hand; one match is marked
+      door('sessions', t('Open the session list'), () => this.app.sidebar?.showSessionsNamed?.(name)),
       door('remove', t('Remove'), () => this._askRemovePlaceholder(win)));
     tile.append(doors);
     box.appendChild(tile);
   }
 
   /** A user close of a placeholder (requestClose's `onCloseRequest`): a tile that names no conversation asks first — its entry
-   *  leaves the record for good (r3: never a silent permanent delete); a stopped tile's conversation stays in the list, it closes. */
-  _closeAsks(win) {
-    if (!win || win._removeConfirmed || conversationOf(win._placeholderOf)) return true;
+   *  leaves the record for good (r3: never a silent permanent delete); a stopped tile's conversation stays in the list, it closes.
+   *  `asked` = the person already answered a question that named it (a group close's — r4: one question, all or nothing). */
+  _closeAsks(win, { asked = false } = {}) {
+    if (!win || win._removeConfirmed || asked || conversationOf(win._placeholderOf)) return true;
     this._askRemovePlaceholder(win);
     return false;
   }

@@ -1579,23 +1579,30 @@ const tabGroupMethods = {
     if (!chain || !closeAsks({ scope: 'group', members: list.ids.length, user: true })) return Promise.resolve(this.requestClose(id));
     const open = _groupCloseAsks.get(chain);
     if (open) return open;
+    // a member whose close deletes it for good (a «Session unavailable» tile — layout.js closeForGood) is NAMED by this one
+    // question and not asked again: all or nothing (lane layout-stopped-window r4 — it asked twice and could end partial)
+    const gone = list.ids.map((tid) => { try { return this.windows.get(tid)?.closeForGood?.() || null; } catch { return null; } }).filter(Boolean);
     let q;
-    try { q = this.confirmCloseGroup(list); } catch (err) { console.warn('[tab-group] the group-close question failed — nothing closes', err); q = false; }
+    try { q = this.confirmCloseGroup(gone.length ? { ...list, gone } : list); } catch (err) { console.warn('[tab-group] the group-close question failed — nothing closes', err); q = false; }
     const ask = Promise.resolve(q).catch((err) => { console.warn('[tab-group] the group-close question failed — nothing closes', err); return false; }).then((go) => {
       if (go !== true) return false;
       const named = new Set(list.ids);
       const doomed = chain.tabs.filter((tid) => named.has(tid)).reverse(); // still in THIS group; tabs[0] (the host) last
-      for (const tid of doomed) if (this.windows.has(tid)) this.requestClose(tid);
+      for (const tid of doomed) if (this.windows.has(tid)) this.requestClose(tid, { asked: true });
       return true;
     }).finally(() => { if (_groupCloseAsks.get(chain) === ask) _groupCloseAsks.delete(chain); });
     _groupCloseAsks.set(chain, ask);
     return ask;
   },
 
-  /** The question (B-a67c): "Close {n} tabs?" over the names the strip shows; "Close {n} tabs" (Enter) / Cancel (Esc). */
-  confirmCloseGroup({ names }) {
+  /** The question (B-a67c): "Close {n} tabs?" over the names the strip shows; "Close {n} tabs" (Enter) / Cancel (Esc). `gone` =
+   *  the members whose close deletes them for good (r4): the same question says so, by name. */
+  confirmCloseGroup({ names, gone = [] }) {
     const n = names.length;
-    return showConfirmDialog({ title: t('Close {n} tabs?', { n }), items: names, confirmText: t('Close {n} tabs', { n }), danger: true });
+    const message = !gone.length ? ''
+      : gone.length === 1 ? t('“{name}” cannot be reopened: closing deletes it from this desktop’s layout for good. Only an older rollback point (Restore a previous layout…) still holds it.', { name: gone[0] })
+        : t('{n} of these cannot be reopened ({names}): closing deletes them from this desktop’s layout for good. Only an older rollback point (Restore a previous layout…) still holds them.', { n: gone.length, names: gone.join(' · ') });
+    return showConfirmDialog({ title: t('Close {n} tabs?', { n }), message, items: names, confirmText: t('Close {n} tabs', { n }), danger: true });
   },
 
   _ungroupLast(chain) {

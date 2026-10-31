@@ -44,6 +44,13 @@
 //      point that still names a conversation for this slot — PURE namedTwinIn — and selects it), «Open the session list» (the
 //      REAL Sidebar.showStopped: the Stopped view searched by the window's name) and «Remove», asked first; the ✕ of a nameless
 //      tile asks the same confirm (cancel keeps the entry); a remote tile's machine is ITS OWN LINE under a 60-char title
+//   §8 ROUND 4 (the r3 acceptance, each RED on 23eaffef5): «Open the session list» opens ALL with the search (the tile's
+//      REAL door → the REAL Sidebar showSessionsNamed + _renderInner: a RUNNING row of the name is shown, one match marked,
+//      the person's status filter untouched); a second tile's rollback door draws ITS point (the dialog keyed by the slot,
+//      the REAL reopenVerdict); a point that holds the slot itself never matches by name (PURE namedTwinIn + the REAL
+//      router); the phone switcher's row of a window that asked first goes when it closes (the REAL _buildWindowItem); a
+//      group close asks ONE question naming the tile it deletes for good, all or nothing (the REAL requestCloseGroup + the
+//      REAL requestClose)
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -148,15 +155,15 @@ function world({ records, active = 'desk-w', extra = {} } = {}) {
   const sent = [], handlers = [], closed = [], resumed = [], replayed = [];
   const wins = new Map();
   let dm = null, lm = null, seq = 0;
-  const mkWin = (id, desk, o = {}) => { const el = mkEl(); el.style.zIndex = '10'; const w = { id, type: 'files', title: id, _desktopId: desk, gridBounds: null, isMinimized: false, isMaximized: false, element: el, content: mkEl(), titleBar: mkEl(), titleSpan: mkEl(), _bornAt: Date.now(), ...o }; wins.set(id, w); return w; };
+  const mkWin = (id, desk, o = {}) => { const el = mkEl(); el.style.zIndex = '10'; const w = { id, type: 'files', title: id, _desktopId: desk, gridBounds: null, isMinimized: false, isMaximized: false, element: el, content: mkEl(), titleBar: mkEl(), titleSpan: mkEl(), _bornAt: Date.now(), _listenerCtl: new AbortController(), ...o }; wins.set(id, w); return w; };
   const app = {
     ws: { onGlobal: (fn) => handlers.push(fn), onStateChange() {}, connected: true, send: (m) => { const c = JSON.parse(J(m)); sent.push(c); if (c.type === 'layout-sync') setTimeout(() => { for (const h of handlers) h({ type: 'layout-sync-ack', desktopId: c.desktopId || null, sentAt: c.sentAt ?? null, seq: ++seq }); }, 5); }, request: () => () => {}, attachesInFlight: () => 0 },
     settings: { get: () => null, on() {} }, sessions: new Map(), stage: null, isMobile: false,
     wm: { windows: wins, grid: null, zIndex: 100, _restoring: false, activeWindowId: null, setGrid() {}, _reflowWindows() {}, _applyGridBounds() {}, _captureGridBounds(w) { if (!w.gridBounds) w.gridBounds = { left: 0.3, top: 0.3, width: 0.4, height: 0.4 }; }, focusWindow() {}, setWindowHidden(w, r = {}) { if (w && 'desktop' in r) w._hiddenByDesktop = !!r.desktop; },
       toggleMaximize(id) { const w = wins.get(id); if (w) w.isMaximized = !w.isMaximized; }, minimize(id) { const w = wins.get(id); if (w) w.isMinimized = true; }, restore() {}, _notify() {}, _scheduleOverlapUpdate() {}, syncHiddenViews() {},
       createWindow: ({ title, type, syncId }) => mkWin(syncId || ('win-n' + (++seq)), dm.activeDesktopId, { type, title }),
-      closeWindow: (id) => { if (!wins.has(id)) return; wins.delete(id); closed.push(id); dm.purgeClosedWindow(id); lm.noteClosed?.(id, null); },
-      requestClose(id) { const w = wins.get(id); if (!w) return false; if (typeof w.onCloseRequest === 'function' && w.onCloseRequest() === false) return false; this.closeWindow(id); return true; }, // window.js requestClose's shape
+      closeWindow: (id) => { if (!wins.has(id)) return; wins.get(id)._listenerCtl?.abort(); wins.delete(id); closed.push(id); dm.purgeClosedWindow(id); lm.noteClosed?.(id, null); },
+      requestClose(id, o = {}) { const w = wins.get(id); if (!w) return false; if (typeof w.onCloseRequest === 'function' && w.onCloseRequest(o) === false) return false; this.closeWindow(id); return true; }, // window.js requestClose's shape
       setTitle(id, t) { const w = wins.get(id); if (w) w.title = t; } },
     themeManager: { current: 'dark', apply() {} }, _fontSize: 14, _fontFamily: 'mono', sidebar: { isOpen: false, _allSessions: [], toggle() {}, getCustomName: () => null },
     updateTaskbar() {}, _checkWelcome() {},
@@ -555,7 +562,7 @@ await section('§7 r3 THE TILE WITH NO PRESS HAS A WAY FORWARD — why, in one l
   const W = world({ records: { 'desk-w': [], 'desk-p': rec, 'desk-r': [] }, active: 'desk-p' });
   const histCalls = [], listCalls = [], confirms = [];
   W.app._showLayoutHistory = (slot) => { histCalls.push(slot); return null; };
-  W.app.sidebar.showStopped = (q) => listCalls.push(q);
+  W.app.sidebar.showStopped = W.app.sidebar.showSessionsNamed = (q) => listCalls.push(q);
   let answer = false;
   W.lm.confirmRemovePlaceholder = async ({ name }) => { confirms.push(name); return answer; };
   await W.lm.restoreState({ windows: rec });
@@ -628,7 +635,7 @@ await section('§7 r3 the rollback door opens the dialog ON the newest point tha
       const made = [], urls = [];
       const body = { _h: '', set innerHTML(v) { this._h = String(v); }, get innerHTML() { return this._h; },
         querySelectorAll(sel) { if (sel !== '.lh-desk') return []; return [...this._h.matchAll(/<button class="lh-desk" data-id="([^"]*)" data-desk="([^"]*)"/g)].map((m) => { const b = { dataset: { id: m[1], desk: m[2] }, cls: [], attrs: {}, focused: false, classList: { add: (c) => b.cls.push(c) }, setAttribute: (k, v) => { b.attrs[k] = v; }, closest: () => ({ classList: { add: (c) => { b.row = c; } } }), scrollIntoView() { b.seen = true; }, focus() { b.focused = true; } }; made.push(b); return b; }); } };
-      globalThis.__lswShell = () => ({ body, close() {}, raised: false });
+      globalThis.__lswShell = () => ({ body, close() {}, raised: false, ready: Promise.resolve(true), live: () => true });
       globalThis.__lswFetch = async (u) => { urls.push(u); return call(Object.fromEntries(new URL(u, 'http://x').searchParams)); };
       await A.prototype._showLayoutHistory.call(new A(), slot);
       return { urls, html: body._h, picked: made.filter((b) => b.cls.includes('is-picked')) };
@@ -652,19 +659,168 @@ await section('§7 r3 the rollback door opens the dialog ON the newest point tha
   } finally { fs.rmSync(dd, { recursive: true, force: true }); }
 });
 
-await section('§7 r3 the session-list door — the REAL Sidebar.showStopped', async () => {
-  const { Sidebar } = await import(pathToFileURL(path.join(LIB, 'sidebar.js')).href);
-  const input = { value: '' }, calls = [];
-  const gid = document.getElementById; document.getElementById = (id) => (id === 'session-filter' ? input : gid(id));
-  try {
-    const me = { _activeTab: 'tasks', _statusFilter: new Set(['live']), _activeView: null, _updateTabs() { calls.push('tabs'); }, toggle(f) { calls.push('open:' + f); }, _renderQuickTabs() { calls.push('quick'); }, _render() { calls.push('render'); } };
-    Sidebar.prototype.showStopped.call(me, NAMES[4]);
-    ok(me._activeTab === 'folders' && me._statusFilter.has('stopped') && me._activeView === 'stopped' && input.value === NAMES[4] && calls.includes('open:true') && calls.at(-1) === 'render', '§7 «Open the session list»: the sessions tab, the Stopped view, the search box holding the window\'s name, the list opened (a phone\'s drawer too)', { me: { tab: me._activeTab, view: me._activeView, filter: [...me._statusFilter] }, q: input.value, calls });
-    ok(/if \(\(!enabled && !this\._activeView\) \|\| filters\.length <= 1\) return;/.test(read('src/lib/sidebar.js')), '§7 …the narrowed view shows its quick tabs (ALL undoes it) even where the tabs are off');
-  } finally { document.getElementById = gid; }
+await section('§7 r3 the words have zh + ja', async () => {
   const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
   const keys = ['Its machine “{host}” is not paired with this hub.', 'The record of its conversation is gone from this hub.', 'This window was saved without its conversation, so it cannot be reopened from here.', 'This window was saved without its conversation or its folder, so it cannot be reopened from here.', 'Open the session list', 'Remove this window?', '“{name}” is deleted from this desktop’s layout for good. Only an older rollback point (Restore a previous layout…) still holds it.', 'Selected: the newest point that still names the conversation of “{name}” — press it to restore that desktop as it was then.', 'No rollback point names the conversation of “{name}”.', 'on {host}', 'Remove', 'Restore a previous layout…'];
   ok(keys.every((k) => zh.includes(J(k) + ':') && ja.includes(J(k) + ':')) && zh.includes('"Open the session list": "打开会话列表"') && zh.includes('"Remove": "移除"') && zh.includes('"Restore a previous layout…": "恢复之前的布局…"'), '§7 every word of the tile and the dialog has a zh AND a ja entry (恢复之前的布局… / 打开会话列表 / 移除)', keys.filter((k) => !zh.includes(J(k) + ':') || !ja.includes(J(k) + ':')));
+});
+
+await section('§8 r4 «Open the session list» opens ALL with the search — the tile\'s REAL door → the REAL Sidebar', async () => {
+  const { Sidebar } = await import(pathToFileURL(path.join(LIB, 'sidebar.js')).href);
+  const rec = NAMES.map((_, i) => (i < 4 ? answered(i) : bare(i)));
+  const W = world({ records: { 'desk-w': [], 'desk-p': rec, 'desk-r': [] }, active: 'desk-p' });
+  await W.lm.restoreState({ windows: rec });
+  const press = (id, key) => (((tileOf(W.wins.get(id))?.children || []).find((c) => c.className === 'session-placeholder-doors')?.children || []).find((b) => b.dataset.door === key))?.onclick?.({ stopPropagation() {} });
+  const input = { value: '' };
+  const gid = document.getElementById; document.getElementById = (id) => (id === 'session-filter' ? input : gid(id));
+  const now = Date.now(), VAN = NAMES[5]; // «Van build» — win-new-5's entry is nameless
+  const mkSb = (rows, filter = ['live', 'tmux', 'external', 'stopped'], view = null) => {
+    const cards = [];
+    const sb = Object.assign(Object.create(Sidebar.prototype), {
+      _activeTab: 'tasks', _statusFilter: new Set(filter), _activeView: view, _allSessions: rows, _backendFilter: new Set(), _hostFilter: new Set(), _agentKindFilter: null, _mobileMode: false,
+      isArchived: () => false, el: { classList: { toggle() {} } }, _hostsData: null, handed: null, cards, opened: null,
+      _appendKindHint() {}, _ensureHostsData() {}, _wbHealHostSelections() {}, _renderServiceHintRows() {}, _updateTabs() {}, toggle(f) { this.opened = f; }, _renderQuickTabs() {},
+      _render() { Sidebar.prototype._renderInner.call(this); },
+      _renderWorkbench(list) { this.handed = list.map((x) => x.sessionId); cards.length = 0; for (const x of list) { const c = { _sessionId: x.sessionId, cls: [], scrolled: false, classList: { add: (k) => c.cls.push(k) }, scrollIntoView() { c.scrolled = true; } }; cards.push(c); } },
+    });
+    sb.listEl = { insertAdjacentHTML() {}, appendChild() {}, querySelectorAll: (sel) => (sel === '.session-item-card' ? cards : []) };
+    return sb;
+  };
+  const LIVE = { sessionId: 'cw-13', status: 'live', name: VAN, cwd: '/srv/u/van', startedAt: now - 60e3 };
+  const OTHER = { sessionId: 'old-1', status: 'stopped', name: 'Other thing', cwd: '/srv/u/other', startedAt: now - 3600e3 };
+  const OLDVAN = { sessionId: 'old-2', status: 'stopped', name: VAN, cwd: '/srv/u/van', startedAt: now - 7200e3 };
+  const TMUXVAN = { sessionId: 'tm-1', status: 'tmux', name: VAN, cwd: '/srv/u/van', startedAt: now - 30e3 };
+  try {
+    const A = W.app.sidebar = mkSb([LIVE, OTHER]); input.value = '';
+    press('win-new-5', 'sessions');
+    ok(J(A.handed) === J(['cw-13']) && input.value === VAN && A._activeTab === 'folders' && A._activeView === null && A.opened === true, '§8 a RUNNING conversation of the tile\'s name is SHOWN: the door opens the sessions tab on ALL, the search box holding «Van build», the list opened — the live row handed to the list (23eaffef5: the Stopped view — the live row filtered away, «No running sessions»)', { handed: A.handed, view: A._activeView, q: input.value, tab: A._activeTab });
+    ok(A._doorFound === 'cw-13' && A.cards.length === 1 && A.cards[0].cls.includes('door-found') && A.cards[0].scrolled, '§8 …exactly one row ⇒ it is MARKED (door-found) and scrolled to', { found: A._doorFound, cards: A.cards });
+    const B = W.app.sidebar = mkSb([TMUXVAN, OTHER]); input.value = '';
+    press('win-new-5', 'sessions');
+    ok(J(B.handed) === J(['tm-1']) && B._doorFound === 'tm-1', '§8 …the STATUS is not the key — a tmux row of the name is shown and marked the same', { handed: B.handed });
+    const C = W.app.sidebar = mkSb([LIVE, OLDVAN, OTHER], ['live'], 'live'); input.value = '';
+    press('win-new-5', 'sessions');
+    ok(J([...C._statusFilter]) === J(['live']) && C._activeView === null && J(C.handed) === J(['cw-13']), '§8 …the person\'s status filter is THEIRS: a Live-only filter stays Live-only (its stopped namesake is not shown — their filter), a quick view (LIVE) goes back to ALL (23eaffef5: Stopped added to the filter for the page, the button\'s words stale)', { filter: [...C._statusFilter], view: C._activeView, handed: C.handed });
+    const D = W.app.sidebar = mkSb([LIVE, OLDVAN, OTHER]); input.value = '';
+    press('win-new-5', 'sessions');
+    ok(J([...D.handed].sort()) === J(['cw-13', 'old-2']) && D._doorFound === null && D.cards.every((c) => !c.cls.includes('door-found')), '§8 …two rows of the name: both shown, NEITHER marked — the person picks', { handed: D.handed, found: D._doorFound });
+  } finally { document.getElementById = gid; }
+  const SB = read('src/lib/sidebar.js'), SR = read('src/lib/sidebar-render.js'), LY = read('src/lib/layout.js');
+  ok(/if \(this\._doorFound && s\.sessionId === this\._doorFound\) card\.classList\.add\('door-found'\);/.test(SR) && /oninput = \(\) => \{\n\s*this\._doorFound = null;/.test(SB) && /\n    if \(!enabled \|\| filters\.length <= 1\) return;/.test(SB) && /\.session-item-card\.door-found \{/.test(read('public/style.css')), '§8 …the mark is kept across the list\'s re-renders (the ONE card builder) until the search changes; the quick tabs are as the person set them (r3\'s forced row gone)');
+  ok(/door\('sessions', t\('Open the session list'\), \(\) => this\.app\.sidebar\?\.showSessionsNamed\?\.\(name\)\)/.test(LY) && !/showStopped/.test(SB + LY), '§8 …the door calls showSessionsNamed; no «showStopped» is left in the tree');
+});
+
+await section('§8 r4 a second tile\'s «Restore a previous layout…» draws ITS point — the dialog keyed by the slot', async () => {
+  const { reopenVerdict } = await import(pathToFileURL(path.join(LIB, 'form-yield.js')).href);
+  const dd = scratchDir('lsw-key');
+  try {
+    delete require.cache[require.resolve(path.join(REPO, 'src/routes/persistence.js'))];
+    const p = require(path.join(REPO, 'src/routes/persistence.js'));
+    p.setup({ dataDir: dd, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null });
+    fs.mkdirSync(path.join(dd, 'layout-history'), { recursive: true });
+    const put = (id, at, pp) => { const doc = DOC(pp), sum = { 工作: 5, 个人: pp.length, 研究: 6 }; fs.writeFileSync(path.join(dd, 'layout-history', id), J({ at, summary: sum, totalWindows: 11 + pp.length, change: null, layouts: doc })); fs.writeFileSync(path.join(dd, 'layout-history', id.replace(/\.json$/, '.meta.json')), J({ at, summary: sum, totalWindows: 11 + pp.length, change: null })); };
+    const OLD = 'layout-2026-10-30T06-50-53-927Z-1h.json', MID = 'layout-2026-10-30T09-18-22-111Z-2h.json', NEW = 'layout-2026-10-30T09-19-35-222Z-3h.json';
+    put(OLD, 1793343053927, P_BEFORE()); put(MID, 1793352000000, P_BEFORE().slice(0, 6)); put(NEW, 1793353000000, P_SENT());
+    const route = p.router.stack.find((l) => l.route && l.route.path === '/api/layout-history' && l.route.methods.get);
+    const call = async (query) => { let out = null; await route.route.stack[0].handle({ query }, { json: (j) => { out = j; } }); return out; };
+    class F {} (await loadFlows())(F);
+    // the shell's family at ONE id, decided by the REAL reopenVerdict: the same key ⇒ raised as it was; another ⇒ the open one's
+    // door (nothing typed: it closes) and the new one opens
+    let open = null; const urls = [];
+    const fakeBody = () => { const made = []; return { made, _h: '', set innerHTML(v) { this._h = String(v); }, get innerHTML() { return this._h; },
+      querySelectorAll(sel) { if (sel !== '.lh-desk') return []; return [...this._h.matchAll(/<button class="lh-desk" data-id="([^"]*)" data-desk="([^"]*)"/g)].map((m) => { const b = { dataset: { id: m[1], desk: m[2] }, cls: [], attrs: {}, classList: { add: (c) => b.cls.push(c) }, setAttribute: (k, v) => { b.attrs[k] = v; }, closest: () => ({ classList: { add() {} } }), scrollIntoView() {}, focus() {} }; made.push(b); return b; }); } }; };
+    globalThis.__lswShell = (o) => {
+      const v = reopenVerdict({ open: open ? [{ key: open.key }] : [], nextKey: o.key });
+      if (v.verdict === 'raise') { const was = open; return { body: was.body, close() {}, raised: true, ready: Promise.resolve(was), live: () => !was.closed }; }
+      if (open) open.closed = true;
+      const me = { key: o.key, body: fakeBody(), closed: false }; open = me;
+      return { body: me.body, close() { me.closed = true; }, raised: false, ready: Promise.resolve(me), live: () => !me.closed };
+    };
+    globalThis.__lswFetch = async (u) => { urls.push(u); return call(Object.fromEntries(new URL(u, 'http://x').searchParams)); };
+    const shown = () => ({ note: (open.body._h.match(/lh-slot">([^<]*)/) || [])[1] || null, picked: open.body.made.filter((b) => b.cls.includes('is-picked')).map((b) => b.dataset.id + '/' + b.dataset.desk) });
+    const door = (i) => F.prototype._showLayoutHistory.call(new F(), { desktopId: 'desk-p', entry: bare(i), name: NAMES[i] });
+    await door(4);
+    const a = shown();
+    await door(9);
+    const b = shown();
+    ok(J(a.picked) === J([MID + '/个人']) && urls.length === 2 && new URL(urls[1], 'http://x').searchParams.get('win') === 'win-new-9' && J(b.picked) === J([OLD + '/个人']) && /“Cluster admin”/.test(b.note || ''), '§8 tile A\'s door (Trip planner → the 09:18 point), then tile B\'s door while it is open ⇒ the dialog is B\'S: B asked for, B\'s point (06:50) picked, B\'s name said (23eaffef5: the open dialog raised with A\'s selection, B never fetched)', { a, b, urls });
+    const n = urls.length; await door(9);
+    ok(urls.length === n && J(shown().picked) === J([OLD + '/个人']), '§8 …the SAME slot\'s door again raises its dialog as it was (no second fetch)');
+    await F.prototype._showLayoutHistory.call(new F(), null);
+    const bareOne = shown(); await door(4);
+    ok(bareOne.note === null && !bareOne.picked.length && J(shown().picked) === J([MID + '/个人']) && /“Trip planner”/.test(shown().note || ''), '§8 …a dialog first opened from ⚙ → System (the bare list) is redrawn for the slot when a tile\'s door is pressed', { bareOne, now: shown() });
+    ok(/const key = e0 \? `slot:\$\{slot\.desktopId\}:\$\{e0\.winId \|\| e0\.id \|\| ''\}` : null;/.test(read('src/lib/setup-flows.js')) && /if \(!\(await ready\)\) return null;/.test(read('src/lib/setup-flows.js')) && /if \(!live\(\)\) return null;/.test(read('src/lib/setup-flows.js')), '§8 …the key is the slot (desktop + window); a queued dialog waits for its `ready`; a dialog replaced while it fetched draws nothing (`live()`)');
+  } finally { fs.rmSync(dd, { recursive: true, force: true }); }
+});
+
+await section('§8 r4 a point that holds the slot ITSELF never matches by name (PURE namedTwinIn + the REAL router)', async () => {
+  const tw = require(MODEL).namedTwinIn;
+  const tile = bare(4);
+  const reopened = { type: 'chat', winId: 'win-reopened', title: `${NAMES[4]} — /srv/u/trip`, cwd: '/srv/u/trip', backendSessionId: 'conv-B', isMinimized: false, isMaximized: false, gridBounds: GB(11), zIndex: 9 };
+  ok(tw([tile, reopened], tile) === null && tw([reopened], tile)?.winId === 'win-reopened' && tw([{ ...named(4), winId: tile.winId }, reopened], tile)?.backendSessionId === CID(4), '§8 PURE: the probe\'s shape — a point holding the tile (nameless) AND a reopened window of its name ⇒ no twin (the reopened one is ANOTHER window beside it); a point without the slot\'s id still matches by name; the slot named under its own id is itself (23eaffef5: the reopened window)', [tw([tile, reopened], tile)?.winId]);
+  const dd = scratchDir('lsw-coexist');
+  try {
+    delete require.cache[require.resolve(path.join(REPO, 'src/routes/persistence.js'))];
+    const p = require(path.join(REPO, 'src/routes/persistence.js'));
+    p.setup({ dataDir: dd, wss: { clients: new Set() }, WS_OPEN: 1, getSyncStore: () => null, activeSessions: new Map(), auth: null });
+    fs.mkdirSync(path.join(dd, 'layout-history'), { recursive: true });
+    const put = (id, at, pp) => { const doc = DOC(pp), sum = { 工作: 5, 个人: pp.length, 研究: 6 }; fs.writeFileSync(path.join(dd, 'layout-history', id), J({ at, summary: sum, totalWindows: 11 + pp.length, change: null, layouts: doc })); fs.writeFileSync(path.join(dd, 'layout-history', id.replace(/\.json$/, '.meta.json')), J({ at, summary: sum, totalWindows: 11 + pp.length, change: null })); };
+    const OLD = 'layout-2026-10-30T06-50-53-927Z-1h.json', NOW = 'layout-2026-10-30T10-02-00-000Z-4h.json';
+    put(OLD, 1793343053927, P_BEFORE());
+    put(NOW, 1793356920000, [...P_SENT(), reopened]); // the person reopened «Trip planner» from the list: the newest point holds both
+    const route = p.router.stack.find((l) => l.route && l.route.path === '/api/layout-history' && l.route.methods.get);
+    let out = null; await route.route.stack[0].handle({ query: { desktop: 'desk-p', win: tile.winId, type: 'chat', title: NAMES[4] } }, { json: (j) => { out = j; } });
+    ok(out && out.pick && out.pick.id === OLD && out.pick.desk === '个人', '§8 …the REAL router: the newest point holds the tile beside the reopened window ⇒ skipped; the pick is the 06:50 point that names its conversation (23eaffef5: the newest — restoring it brings the same tile back)', out && out.pick);
+  } finally { fs.rmSync(dd, { recursive: true, force: true }); }
+});
+
+await section('§8 r4 the phone switcher\'s row of a window that asked first goes when the window closes (the REAL _buildWindowItem)', async () => {
+  const { MobileNav } = await import(pathToFileURL(path.join(LIB, 'mobile-nav.js')).href);
+  const rec = NAMES.map((_, i) => (i < 4 ? answered(i) : bare(i)));
+  const W = world({ records: { 'desk-w': [], 'desk-p': rec, 'desk-r': [] }, active: 'desk-p' });
+  await W.lm.restoreState({ windows: rec });
+  let yes = null; W.lm.confirmRemovePlaceholder = () => new Promise((r) => { yes = r; });
+  let redraws = 0;
+  const win = W.wins.get('win-new-4');
+  const item = MobileNav.prototype._buildWindowItem.call({ app: W.app }, win, W.app.wm, () => {}, () => { redraws++; });
+  const x = item.children.at(-1);
+  x.onclick({ stopPropagation() {} });
+  ok(W.wins.has('win-new-4') && !item.removed && typeof yes === 'function', '§8 the row\'s ✕ on a nameless tile: the confirm is up, the window and its row stay');
+  yes(true); await tick(20);
+  ok(!W.wins.has('win-new-4') && redraws === 1, '§8 …«Remove» ⇒ the window closes and the open list REDRAWS without its row (23eaffef5: the row stayed; a tap revealed a window that was gone)', { has: W.wins.has('win-new-4'), redraws });
+  const win0 = W.wins.get('win-new-0'), item0 = MobileNav.prototype._buildWindowItem.call({ app: W.app }, win0, W.app.wm, () => {}, () => { redraws++; });
+  item0.children.at(-1).onclick({ stopPropagation() {} });
+  ok(!W.wins.has('win-new-0') && item0.removed === true, '§8 …a window that closes at once (a stopped tile) loses its row at once, as before');
+});
+
+await section('§8 r4 a group close asks ONE question naming the tile it deletes for good — all or nothing (the REAL requestCloseGroup + requestClose)', async () => {
+  const TG = await import(pathToFileURL(path.join(LIB, 'tab-group.js')).href);
+  const { WindowManager } = await import(pathToFileURL(path.join(LIB, 'window.js')).href);
+  const rec = NAMES.map((_, i) => (i < 4 ? answered(i) : bare(i)));
+  const W = world({ records: { 'desk-w': [], 'desk-p': rec, 'desk-r': [] }, active: 'desk-p' });
+  await W.lm.restoreState({ windows: rec });
+  const tileAsks = []; W.lm.confirmRemovePlaceholder = async ({ name }) => { tileAsks.push(name); return true; };
+  const G = { windows: W.wins, _app: null, closeWindow: (id) => W.app.wm.closeWindow(id) };
+  TG.installTabGroupMixin(G);
+  G.requestClose = WindowManager.prototype.requestClose;
+  const asked = []; let answer = false;
+  G.confirmCloseGroup = async (q) => { asked.push(q); return answer; };
+  const group = (ids) => { const chain = { tabs: ids, active: 0 }; for (const id of ids) W.wins.get(id)._tabChain = chain; return chain; };
+  group(['win-new-0', 'win-new-4']);
+  const no = await G.requestCloseGroup('win-new-0');
+  ok(no === false && asked.length === 1 && J(asked[0].gone) === J([NAMES[4]]) && asked[0].names.length === 2 && W.wins.has('win-new-0') && W.wins.has('win-new-4') && !tileAsks.length, '§8 the frame\'s ✕ on [a stopped tile «Ledger», a nameless tile «Trip planner»]: ONE question, naming «Trip planner» as deleted for good; Cancel keeps BOTH (23eaffef5: the question did not say it)', { asked, has: [W.wins.has('win-new-0'), W.wins.has('win-new-4')], tileAsks });
+  answer = true;
+  const go = await G.requestCloseGroup('win-new-0'); await tick(10);
+  ok(go === true && asked.length === 2 && !W.wins.has('win-new-0') && !W.wins.has('win-new-4') && !tileAsks.length, '§8 …the confirm closes BOTH, the tile not asked again — all or nothing (23eaffef5: a second «Remove this window?», and a Cancel there left the tile of a group already answered)', { go, has: [W.wins.has('win-new-0'), W.wins.has('win-new-4')], tileAsks });
+  group(['win-new-1', 'win-new-2']); asked.length = 0;
+  await G.requestCloseGroup('win-new-1');
+  ok(asked.length === 1 && !('gone' in asked[0]) && asked[0].names.length === 2 && !W.wins.has('win-new-1') && !W.wins.has('win-new-2'), '§8 …a group with no such tile asks exactly as before (the same question, nothing named as deleted) — a control', asked);
+  ok(W.wins.get('win-new-5').onCloseRequest() === false && tileAsks.length === 1 && W.wins.get('win-new-5').onCloseRequest({ asked: true }) === true, '§8 …a lone nameless tile\'s ✕ still asks its own question; a close the person already answered (`asked`) does not ask again', tileAsks);
+  const TGS = read('src/lib/tab-group.js');
+  ok(/for \(const tid of doomed\) if \(this\.windows\.has\(tid\)\) this\.requestClose\(tid, \{ asked: true \}\);/.test(TGS) && /t\('“\{name\}” cannot be reopened: closing deletes it from this desktop’s layout for good\. Only an older rollback point \(Restore a previous layout…\) still holds it\.', \{ name: gone\[0\] \}\)/.test(TGS) && /showConfirmDialog\(\{ title: t\('Close \{n\} tabs\?', \{ n \}\), message, items: names,/.test(TGS), '§8 …the group question\'s words: «“Trip planner” cannot be reopened: closing deletes it from this desktop’s layout for good…» above the tab list (the house dialog, danger)');
+  const zh = read('src/lib/i18n-zh.js'), ja = read('src/lib/i18n-ja.js');
+  const keys = ['“{name}” cannot be reopened: closing deletes it from this desktop’s layout for good. Only an older rollback point (Restore a previous layout…) still holds it.', '{n} of these cannot be reopened ({names}): closing deletes them from this desktop’s layout for good. Only an older rollback point (Restore a previous layout…) still holds them.'];
+  ok(keys.every((k) => zh.includes(J(k) + ':') && ja.includes(J(k) + ':')), '§8 …both words have a zh AND a ja entry');
 });
 
 await section('§5 CONTROL — the server\'s keepNames taken out of the handler', async () => {

@@ -239,6 +239,10 @@ function namedTwinIn(list, entry) {
   const id = idOf(entry);
   const same = id ? named.find((w) => idOf(w) === id) : null;
   if (same) return same;
+  // the slot ITSELF is in this point (nameless): a same-name entry here is by construction ANOTHER window beside it — the
+  // person's reopened one, a namesake — and restoring that point brings back nothing (r4); the name road is for points
+  // that do not hold the slot's id
+  if (id && listOf(list).some((w) => idOf(w) === id)) return null;
   const mine = namesOf(entry);
   if (!mine.size) return null;
   const hits = named.filter((w) => { for (const n of namesOf(w)) if (mine.has(n)) return true; return false; });

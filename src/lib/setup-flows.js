@@ -466,13 +466,17 @@ export function installSetupFlows(App) {
   // A TILE'S DOOR (lane layout-stopped-window r3): `slot` = {desktopId, entry, name} of a «Session unavailable» window — the server
   // answers the newest point that still names a conversation for it (`pick`), and the dialog opens with that desktop selected.
   async _showLayoutHistory(slot = null) {
-    // one subject: this hub’s one layout history
-    const { body, close, raised } = createModalShell({ id: 'layout-history-dialog', title: t('Restore a previous layout'), minWidth: '460px', escapeToClose: true, kind: 'form' });
-    if (raised) return null;   // raised: the same subject's form, as it was
-    body.innerHTML = `<div class="empty-hint">${escHtml(t('Loading…'))}</div>`;
     const e0 = slot && slot.desktopId && slot.entry && typeof slot.entry === 'object' ? slot.entry : null;
+    // THE SUBJECT IS THE SLOT (r4): a tile's door draws ITS pick — a second tile's door (or ⚙ → System's bare list, key null)
+    // replaces the open one through its door; the same slot's door raises it as it was
+    const key = e0 ? `slot:${slot.desktopId}:${e0.winId || e0.id || ''}` : null;
+    const { body, close, raised, ready, live } = createModalShell({ id: 'layout-history-dialog', key, title: t('Restore a previous layout'), minWidth: '460px', escapeToClose: true, kind: 'form' });
+    if (raised) return null;   // raised: the same subject's form, as it was
+    if (!(await ready)) return null;   // queued behind the open one's door — null: the person kept that one
+    body.innerHTML = `<div class="empty-hint">${escHtml(t('Loading…'))}</div>`;
     const q = e0 ? '?' + new URLSearchParams({ desktop: String(slot.desktopId), win: String(e0.winId || e0.id || ''), type: e0.type === 'terminal' ? 'terminal' : 'chat', title: String(e0.title || ''), cwd: String(e0.cwd || e0.openSpec?.cwd || ''), name: typeof e0.openSpec?.name === 'string' ? e0.openSpec.name : '' }).toString() : '';
     const r = await fetchJson('/api/layout-history' + q).catch(() => null);
+    if (!live()) return null;   // another slot's door replaced it meanwhile
     const entries = r?.entries || [];
     const pick = e0 && r?.pick && typeof r.pick === 'object' ? r.pick : null;
     if (!entries.length) {

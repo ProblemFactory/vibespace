@@ -205,6 +205,7 @@ export function installSidebarRender(SidebarClass) {
     // lane foryou-honest (P2-4 — the owner's B): «needs you · N · <the newest question>» when the conversation holds open
     // For-you items (user-todos-panel.js app.sessionAsks — the row marks, the For-you window answers)
     this.app.sessionAsks?.markIn?.(card, s);
+    if (this._doorFound && s.sessionId === this._doorFound) card.classList.add('door-found'); // the tile door's one match (r4)
     return card;
   };
 

@@ -449,7 +449,9 @@ export class MobileNav {
     const closeBtn = document.createElement('button');
     closeBtn.style.cssText = 'background:none;border:none;color:var(--text-dim);font-size:16px;padding:4px 8px;cursor:pointer;flex-shrink:0;min-width:36px;min-height:36px;display:flex;align-items:center;justify-content:center';
     closeBtn.textContent = '\u2715';
-    closeBtn.onclick = (e) => { e.stopPropagation(); if (wm.requestClose(win.id)) item.remove(); };
+    // a window that asks first (requestClose answered false — a «Session unavailable» tile's confirm, a desktop app's own ask)
+    // closes LATER: the list redraws when it does (r4: its row stayed, and a tap revealed a window that was gone)
+    closeBtn.onclick = (e) => { e.stopPropagation(); if (wm.requestClose(win.id)) item.remove(); else win._listenerCtl?.signal?.addEventListener?.('abort', () => setTimeout(() => rerender?.(), 0), { once: true }); };
 
     if (billChip) item.append(icon, label, billChip, closeBtn);
     else item.append(icon, label, closeBtn);

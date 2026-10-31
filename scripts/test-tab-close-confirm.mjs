@@ -280,7 +280,7 @@ const DOORS = [
   { file: 'src/lib/tab-group.js', re: /closeBtn\.addEventListener\('click', \(e\) => \{ e\.stopPropagation\(\); this\.requestClose\(tabWinId\); \}\)/, scope: 'tab', door: "a TAB's own ✕" },
   { file: 'src/lib/tab-group.js', re: /showWindowContextMenu\(this\._app, tabWinId, e\.clientX, e\.clientY, \{ switchSubmenu: true \}\)/, scope: 'tab', door: "a TAB's own menu" },
   { file: 'src/lib/tab-group.js', re: /return Promise\.resolve\(this\.requestClose\(id\)\);/, scope: 'gate', door: 'the gate: a lone window is its own close' },
-  { file: 'src/lib/tab-group.js', re: /for \(const tid of doomed\) if \(this\.windows\.has\(tid\)\) this\.requestClose\(tid\);/, scope: 'gate', door: 'the gate: each named member through the veto point, after the confirm' },
+  { file: 'src/lib/tab-group.js', re: /for \(const tid of doomed\) if \(this\.windows\.has\(tid\)\) this\.requestClose\(tid, \{ asked: true \}\);/, scope: 'gate', door: 'the gate: each named member through the veto point, after the confirm (`asked`: the question named it — lane layout-stopped-window r4)' },
   { file: 'src/lib/command-mode.js', re: /wm\.requestClose\(wm\.activeWindowId\)/, scope: 'tab', door: 'Ctrl+\\ x / command mode w (the active TAB)' },
   { file: 'src/lib/mobile-nav.js', re: /if \(activeId\) app\.wm\.requestClose\(activeId\);/, scope: 'tab', door: "the phone nav's ✕ (the active tab)" },
   { file: 'src/lib/mobile-nav.js', re: /if \(wm\.requestClose\(win\.id\)\) item\.remove\(\);/, scope: 'tab', door: "a phone switcher row's ✕ (that window)" },
@@ -315,7 +315,7 @@ const TEXTS = libTexts();
   const other = sites.filter((s) => !gated.includes(s));
   ok(gated.length === 1 && other.length === 0, `(a) a close of every member of a chain exists ONLY in tab-group.js requestCloseGroup (${Object.keys(TEXTS).length} files, ${sites.length} close-all loop(s))`, other.map((s) => `${s.file} ${s.fn}: ${s.loop}`));
   const g = methodOf(strip(tgSrc), 'requestCloseGroup(id)');
-  const iAsk = g.indexOf('this.confirmCloseGroup(list)'), iGate = g.indexOf('if (go !== true) return false;'), iLoop = g.indexOf('for (const tid of doomed)');
+  const iAsk = g.indexOf('this.confirmCloseGroup('), iGate = g.indexOf('if (go !== true) return false;'), iLoop = g.indexOf('for (const tid of doomed)');
   ok(iAsk > 0 && iGate > iAsk && iLoop > iGate && /closeAsks\(\{ scope: 'group', members: list\.ids\.length, user: true \}\)/.test(g), '(a) …and there, after the question: closeAsks decides, confirmCloseGroup asks, a non-true answer returns before the loop', { iAsk, iGate, iLoop });
   const d = doorCensus(TEXTS);
   ok(d.unlisted.length === 0, `(b) every user-close / window-menu call in src/lib is a classified DOOR (${d.n} calls, ${DOORS.length} rows) — a new one is red until its row says whether it ends a whole group`, d.unlisted);
@@ -326,8 +326,8 @@ const TEXTS = libTexts();
   const tb = strip(TEXTS['src/lib/taskbar.js']), wj = strip(TEXTS['src/lib/window.js']);
   ok(/export function showWindowContextMenu\(app, id, x, y, \{ closeLabel = null, onAction, switchSubmenu = false, group = false \} = \{\}\) \{/.test(tb) && /const ctx = \{ app, id, win, s: sess, switchSubmenu, closeLabel, group: !!group \};/.test(tb), '(c) showWindowContextMenu carries `group` into the menu ctx (window.close reads it)');
   ok(/const grouped = !!\(winInfo\._tabChain && winInfo\._tabChain\.tabs\.length >= 2\);/.test(wj), '(c) the frame\'s menu is a group menu exactly when the window heads a chain of ≥ 2');
-  const conf = methodOf(strip(tgSrc), 'confirmCloseGroup({ names })');
-  ok(/return showConfirmDialog\(\{ title: t\('Close \{n\} tabs\?', \{ n \}\), items: names, confirmText: t\('Close \{n\} tabs', \{ n \}\), danger: true \}\);/.test(conf) && /import \{[^}]*\bshowConfirmDialog\b[^}]*\} from '\.\/utils\.js';/.test(tgSrc), '(d) the question is the house dialog: "Close {n} tabs?", every name listed, "Close {n} tabs" / Cancel');
+  const conf = methodOf(strip(tgSrc), 'confirmCloseGroup({ names, gone = [] })');
+  ok(/return showConfirmDialog\(\{ title: t\('Close \{n\} tabs\?', \{ n \}\), message, items: names, confirmText: t\('Close \{n\} tabs', \{ n \}\), danger: true \}\);/.test(conf) && /import \{[^}]*\bshowConfirmDialog\b[^}]*\} from '\.\/utils\.js';/.test(tgSrc), '(d) the question is the house dialog: "Close {n} tabs?", every name listed, "Close {n} tabs" / Cancel');
   const ut = strip(TEXTS['src/lib/utils.js']);
   const sc = ut.slice(ut.indexOf('export function showConfirmDialog('), ut.indexOf('\n}\n', ut.indexOf('export function showConfirmDialog(')));
   ok(/items = null \} = opts \|\| \{\};/.test(sc) && /ul\.className = 'dialog-list';/.test(sc) && /li\.textContent = x;/.test(sc) && /if \(e\.key === 'Enter'\) \{ e\.preventDefault\(\); done\(true\); \}/.test(sc) && /if \(e\.key === 'Escape'\) \{ e\.preventDefault\(\); e\.stopPropagation\(\); done\(false\); \}/.test(sc), '(d) showConfirmDialog lists `items` as text rows (never HTML); Enter = the confirm, Esc = Cancel');
