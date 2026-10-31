@@ -541,7 +541,7 @@ const runTicks = (sweep, label) => {
   const patched = srcFn
     .replace(/if \(!fresh\) return \{[^}]*\};/, '')
     .replace(/if \(!recorded\) return \{[^}]*\};\n\s*estimator\.invalidate\(identityKey\);/, 'if (recorded) estimator.invalidate(identityKey);');
-  const control = patched !== srcFn && new Function('predictCalib', 'calibMetricRows', `return (${patched});`)(est.predictCalib, est.calibMetricRows);
+  const control = patched !== srcFn && new Function('predictCalib', 'calibMetricRows', 'withOwnAbsence', `return (${patched});`)(est.predictCalib, est.calibMetricRows, require(path.resolve('src/quota-model.js')).withOwnAbsence);
   const ctl = control ? runTicks(control, 'control') : null;
   ck('B-a5c0 control: the every-tick shape floods (the older sibling re-emits) — the legs above can see it', !!ctl && ctl.t[3].n > ctl.t[2].n);
 }

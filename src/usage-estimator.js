@@ -23,7 +23,7 @@
 // as it stays roughly stable. Pod-exclusive accounts converge to 1/full.
 const fs = require('fs');
 const path = require('path');
-const { resetLanded } = require('./quota-model.js');
+const { resetLanded, withOwnAbsence } = require('./quota-model.js');
 const { evictIdle, cacheRow, ESTIMATOR_LINES_MAX_BYTES, ESTIMATOR_LINES_IDLE_MS, ESTIMATOR_LIVE_MAX_BYTES } = require('./cache-bounds.js'); // PURE (B-9428)
 
 // Δu-equivalent weight of the prior pseudo-observation.
@@ -410,7 +410,18 @@ function overlayCache(rawCache, est) {
     out.scopedWeekly = raw;
   }
   out.estimated = true;
-  return out;
+  // …and a bucket the member's OWN reading tombstoned is never overlaid back (lane no-5h-window r5): the view is a
+  // reader of the member's buckets like any other (quotaModel.withOwnAbsence, the one accessor)
+  return withOwnAbsence(out, rawCache);
+}
+
+// «NO 5h LIMIT» IS THE MEMBER'S OWN (lane no-5h-window r5, acceptance r4 #1). An anchor is the IDENTITY's: the sweep
+// records the identity group's freshest file, which may be a SIBLING's still holding a 5h window — so the estimate is
+// a READER of the member's buckets like any other, and a bucket the member's own reading tombstoned is never estimated
+// back (quotaModel.withOwnAbsence). Null when nothing estimated is left (the no-estimate road: the reading stands).
+function ownEstimate(est, rawCache) {
+  const out = withOwnAbsence(est, rawCache);
+  return out !== est && !out.sevenDay && !(out.scopedWeekly && out.scopedWeekly.length) ? null : out;
 }
 
 // Predicted utilizations at a NEW anchor's time, from the PREVIOUS anchor +
@@ -681,7 +692,7 @@ class UsageEstimator {
     // a false "window reset" collapse, and (b) MASKS a limit-banner mark
     // (utilization 1, fetchedAt now) so the pool's immediate switch reads
     // 85%-ish instead of dead and stays put (adversarial-review major).
-    if (m && nowMs - m.at < 30000 && !(rawCache?.fetchedAt > (m.baseFetchedAt || 0))) return m.est;
+    if (m && nowMs - m.at < 30000 && !(rawCache?.fetchedAt > (m.baseFetchedAt || 0))) return ownEstimate(m.est, rawCache);
     // lane ledger-dedup-law r2: no estimate from a partial ledger — the cost since the anchor would be part of it (the
     // newest month loads last); null = the reading stands (every caller's no-estimate road), nothing memoized
     if (this._ledgerLoading()) return null;
@@ -712,7 +723,7 @@ class UsageEstimator {
       }
     } catch { est = null; }
     this._estMemo.set(memoKey, { at: nowMs, est, baseFetchedAt });
-    return est;
+    return ownEstimate(est, rawCache); // read through the member's own «no 5h limit» on EVERY return (the memo is the identity's)
   }
 }
 
@@ -743,7 +754,10 @@ function calibMetricRows(calib, { account } = {}) {
 //   costBetween(ids, fromMs, toMs), darkHosts(allIds) → [host], metric(name, value, detail)
 // Returns { fresh, recorded, metrics } (the rows it emitted).
 function sweepAnchorGroup({ identityKey, group, anchors, estimator, costBetween, darkHosts, metric }) {
-  const cache = group?.cache;
+  // «no 5h limit» is the identity's to keep (lane no-5h-window r5): its freshest file may be a SIBLING still holding a
+  // 5h window, and an anchor carrying it is estimated back onto the member whose own file tombstoned it — `tomb5h` is
+  // the group's file that stands «no 5h limit» (usageIdentityGroups); none ⇒ the freshest file as it is
+  const cache = withOwnAbsence(group?.cache, group?.tomb5h);
   const prev = anchors.lastAnchor(identityKey);
   // NEW ground truth = a reading newer than the last anchor. Anything else is
   // the same snapshot re-seen (statusline rewrites it every 8 s) or an older

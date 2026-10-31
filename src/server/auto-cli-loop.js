@@ -63,6 +63,7 @@ const fs = require('fs');
 const path = require('path');
 const { decideCliRefresh, cliRefreshWhy, projectionReadsAfter, projectionBucketBought, PROJECTION_WINDOW_MS } = require('../account-pool-auto.js');
 const { cliRefreshDrift } = require('../usage-estimator.js');
+const { withOwnAbsence } = require('../quota-model.js'); // PURE: a sibling's 5h window never outranks this account's «no 5h limit»
 const { capsOf } = require('../backend-caps.js'); // PURE: caps.quotaProbe — the harness whose quota rung IS `<cli> -p /usage`
 const { probeEligibility, isUnprobeable, notProbedWords, NOT_PROBED_SAY_MS, probeWhyText } = require('../auto-cli-model.js'); // PURE: may the panel probe PROVE this account (lane auto-cli-oat-unprobeable)
 
@@ -179,7 +180,7 @@ function createAutoCliLoop(d) {
           for (const [, g] of d.usageIdentityGroupsCached()) {
             if (!g.accountIds.includes(a.id)) continue;
             mem = [a.id, ...g.accountIds.filter((x) => x !== a.id)]; // one identity, one memory (quota r3)
-            if (g.cache && (g.cache.fetchedAt || 0) > (raw?.fetchedAt || 0)) raw = g.cache;
+            if (g.cache && (g.cache.fetchedAt || 0) > (raw?.fetchedAt || 0)) raw = withOwnAbsence(g.cache, raw); // (no-5h-window r5)
             break;
           }
         } catch { }

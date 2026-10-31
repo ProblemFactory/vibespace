@@ -2845,7 +2845,8 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
       /if \(!g\.cache \|\| cache\.fetchedAt > g\.cache\.fetchedAt\) \{ g\.cache = cache; g\.accountId = accountId; \}/.test(eng)
       // B-a5c0: the per-group step moved into usage-estimator's sweepAnchorGroup — the engine hands it the group whole
       && /sweepAnchorGroup\(\{\s*identityKey, group: g, anchors: usageAnchors,/.test(eng)
-      && /const cache = group\?\.cache;[\s\S]{0,3000}anchors\.maybeRecord\(\{ identityKey, accountId: group\.accountId, cache,/.test(read('src/usage-estimator.js')), '');
+      // (no-5h-window r5: the freshest cache is read through the identity's own «no 5h limit» — `group.tomb5h`)
+      && /const cache = (?:withOwnAbsence\(group\?\.cache, group\?\.tomb5h\)|group\?\.cache);[\s\S]{0,3000}anchors\.maybeRecord\(\{ identityKey, accountId: group\.accountId, cache,/.test(read('src/usage-estimator.js')), '');
     const { UsageAnchors, identityKeyFor } = require(path.join(REPO, 'src/usage-anchors.js'));
     const sweepOnce = (dd) => {
       const dir = path.join(dd, 'usage-cache');

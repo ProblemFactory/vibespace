@@ -286,11 +286,13 @@ function usageIdentityGroups() {
       const ownBe = gOwner || (acctRec?.backend && globalUsageKey(acctRec.backend) !== '__global__' ? acctRec.backend : null);
       const key = gOwner ? gOwner + ':__global__'
         : (ownBe ? ownBe + ':' : '') + identityKeyFor({ accountId, cache, email: acctRec?.email });
-      const g = groups.get(key) || { accountIds: [], cache: null, accountId: null, backend: ownBe || 'claude' };
+      const g = groups.get(key) || { accountIds: [], cache: null, accountId: null, backend: ownBe || 'claude', tomb5h: null };
       g.accountIds.push(gOwner ? fn.slice(0, -5) : (accountId || '__global__'));
       // freshest cache is the identity's anchor source (the same real login can
       // surface as BOTH __global__ and a named sub — one quota, two files)
       if (!g.cache || cache.fetchedAt > g.cache.fetchedAt) { g.cache = cache; g.accountId = accountId; }
+      // the file that stands «no 5h limit» (the newest such): the anchor sweep records no 5h bucket over it (no-5h-window r5)
+      if (quotaModel.fiveHourAbsent(cache) > (quotaModel.fiveHourAbsent(g.tomb5h) || 0)) g.tomb5h = cache;
       groups.set(key, g);
     } catch { }
   }
@@ -993,7 +995,7 @@ function resolveUsageKey(session) {
   // key resolver. Now that ONE reading resolver serves both, it must know.
   return acct || globalUsageKey(session?.backend);
 }
-function writeUsageCacheForKey(key, parsed) {
+function writeUsageCacheForKey(key, parsed, { producer = null } = {}) {
   try {
     const f = path.join(USAGE_CACHE_DIR, key.replace(/[^\w.-]/g, '_') + '.json');
     let prev = {}; try { prev = JSON.parse(fs.readFileSync(f, 'utf-8')) || {}; } catch {}
@@ -1022,8 +1024,13 @@ function writeUsageCacheForKey(key, parsed) {
     // what the vendor still reports. `parsed` is the control payload's own
     // parse (`parseGetUsageResponse`), which is the only object that can know
     // whether it dropped a bucket; `merged` could not answer it.
+    // THE CLI'S OWN MERGED STATE (lane no-5h-window r5, acceptance r4 #4): a get_usage reply is the asked session's
+    // process state (on a failed endpoint read, its header windows), so it is counted as THAT process's passive answer —
+    // the producer its stream records name (`ev:<webui id>`): a stated 5h window restores a tombstone only when it began
+    // at or after it or the week moved; one that began before it is a session that never saw the lift (kept out, silent)
     return usageWrite.writeCacheObject({ cacheDir: USAGE_CACHE_DIR, key, obj: merged, source: parsed.source || null, familyOf: familyOfScopedBucket, backend: 'claude',
-      authoritativeScopes: quotaModel.authoritativeScopesOf(parsed) }).ok;
+      authoritativeScopes: quotaModel.authoritativeScopesOf(parsed),
+      passiveAnswer: { producer, weekSig: quotaModel.planWeekSigOf(parsed.sevenDay), fiveHour: parsed.fiveHour ? { resetsAt: Number(parsed.fiveHour.resetsAt) || 0 } : null, absent5h: !parsed.fiveHour && !!parsed.sevenDay } }).ok;
   } catch { return false; }
 }
 // Ask a LIVE LOCAL claude chat session's CLI for usage over its control
@@ -1087,7 +1094,7 @@ function probeUsageForAccountKey(key, opts = {}) {
       if (parsed) {
         const win = readingLag.windowOf(parsed);
         const target = guardReadingTarget(key, win, { session: s, what: 'control:get_usage', entry: parsed });
-        if (target) writeUsageCacheForKey(target, parsed);
+        if (target) writeUsageCacheForKey(target, parsed, { producer: s._webuiId ? 'ev:' + s._webuiId : null }); // the same process as its stream records (no-5h-window r5)
         logControlProbe(s, key, parsed, _vsuRawOf.get(parsed) || null, target ? 'written' : 'refused-by-window-guard', { target: target || null, window: win });
         // verified = the answer's weekly window agrees with the account's own
         // established window; 'unknown' is honest, never spelled as yes

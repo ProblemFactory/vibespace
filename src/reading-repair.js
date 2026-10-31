@@ -55,17 +55,21 @@ const { familyOfScopedBucket: _familyOf } = require('./model-family.js');
 // tombstone (an older anchor's) is not the account's any more, and the tombstone is carried (the replace-mode lift
 // reads `fiveHourAbsent` back); one read AFTER it is the window back. An emptied remnant (no `fetchedAt`: nothing on
 // it claims to be a reading) claims no plan shape either.
-function _keepOwnAbsence(cacheDir, key, obj) {
+// …AND IT IS THE ACCOUNT'S OWN (r5, acceptance r4 #3). A rebuild replaces a snapshot the repair has just judged
+// FOREIGN, and a tombstone that came with the foreign readings is theirs: `ownTomb(since)` is the caller's own rule for
+// which tombstone predates them (the by-slot repair: laid while the login was alive; the by-window repairs: laid
+// before the foreign snapshot was read). A foreign one is never copied onto the account — its own 5h window stands.
+function _keepOwnAbsence(cacheDir, key, obj, ownTomb = null) {
   const own = _readJson(_usageWrite.cacheFileFor(cacheDir, key));
   const since = own && !(own.fiveHour && typeof own.fiveHour === 'object') && Number(own.fiveHourAbsent) > 0 ? Number(own.fiveHourAbsent) : 0;
-  if (!since || !(Number(obj.fetchedAt) > 0)) return obj;
+  if (!since || (ownTomb && !ownTomb(since)) || !(Number(obj.fetchedAt) > 0)) return obj;
   if (obj.fiveHour && !(Number(obj.fetchedAt) > since)) delete obj.fiveHour;
   if (!obj.fiveHour) obj.fiveHourAbsent = since;
   return obj;
 }
-function _writeCacheAtomic(cacheDir, key, obj) {
+function _writeCacheAtomic(cacheDir, key, obj, ownTomb = null) {
   delete obj.limits; // the repaired object states the whole truth about this file
-  _keepOwnAbsence(cacheDir, key, obj);
+  _keepOwnAbsence(cacheDir, key, obj, ownTomb);
   const r = _usageWrite.writeCacheObject({ cacheDir, key, obj, replace: true, familyOf: _familyOf, source: obj.source || null });
   if (!r.ok) _writeAtomic(_usageWrite.cacheFileFor(cacheDir, key), JSON.stringify(obj)); // a repair that cannot write is worse than one that writes a legacy shape
   return r.ok;
@@ -294,7 +298,8 @@ function repairUsageCaches({ cacheDir, archiveDir, markers, anchorFiles, id }) {
         if (!best || r.fetchedAt > best.fetchedAt) best = r;
       }
     }
-    if (best) { _writeCacheAtomic(cacheDir, key, _cacheFromAnchor(best, cur)); res.restored++; }
+    // a tombstone laid after the login died came with the foreign readings (isForeign's own rule) — never the account's
+    if (best) { _writeCacheAtomic(cacheDir, key, _cacheFromAnchor(best, cur), (since) => since <= marker.since); res.restored++; }
     else {
       // identity only: no bucket, no fetchedAt ⇒ nothing claims to be a reading
       const remnant = {};
@@ -1012,9 +1017,11 @@ function repairCachesByWindow({ cacheDir, archiveDir, windows, accounts = null, 
     if (!cur) continue;
     res.keys++;
     const snap = windowOf(cur);
-    let next = cur;
+    let next = cur, ownTomb = null;
     if (snap.sevenDay && weeklyNear(snap.sevenDay, w.window.sevenDay) === false) {
       res.foreign++;
+      const readAt = Number(cur.fetchedAt) || 0;
+      ownTomb = (since) => since < readAt; // a tombstone laid before the foreign snapshot was read is the account's (no-5h-window r5)
       _appendArchive(archiveDir, 'readings-window-usage-cache.ndjson', [{
         migration: id, at: now, store: 'usage-cache', key: acct,
         reason: `snapshot window ${windowFingerprint(snap)} is not this account's (${windowFingerprint(w.window)})`,
@@ -1065,7 +1072,7 @@ function repairCachesByWindow({ cacheDir, archiveDir, windows, accounts = null, 
     // the window was derived from the account's own panel readings, which never said login or token: nobody can tell (null)
     windowStamp.writeWindowStamp(cacheDir, acct, { ...w.window, at: now, source: 'on-demand', seededBy: id }, null);
     res.seeded++;
-    _writeCacheAtomic(cacheDir, acct, next);
+    _writeCacheAtomic(cacheDir, acct, next, ownTomb);
   }
   return res;
 }
@@ -1351,8 +1358,10 @@ function repairSidecarsByApiPhase({ dataDir, roster = null, accounts = null, id 
     // ② THE CACHE SNAPSHOT — what the roster row and the pool read
     if (!cur) { row.cache = 'absent'; continue; }
     const snap = windowOf(cur);
-    let next = null;
+    let next = null, ownTomb = null;
     if (snap.sevenDay && weeklyNear(snap.sevenDay, api) === false) {
+      const readAt = Number(cur.fetchedAt) || 0;
+      ownTomb = (since) => since < readAt; // a tombstone laid before the foreign snapshot was read is the account's (no-5h-window r5)
       // the whole snapshot is another account's (the 02:23 panel) — rebuild
       // from the newest anchor of THIS account that agrees wholly with the API
       // window; the r4 preserve source is ONLY a scoped bucket PROVEN its own
@@ -1394,7 +1403,7 @@ function repairSidecarsByApiPhase({ dataDir, roster = null, accounts = null, id 
         next.repairedBy = id; row.cache = 'stripped'; report.counts.stripped += bad.length;
       }
     }
-    if (next) { delete next.ownWindow; _writeCacheAtomic(cacheDir, key, next); }
+    if (next) { delete next.ownWindow; _writeCacheAtomic(cacheDir, key, next, ownTomb); }
     // ③ RE-ADMIT the own readings the polluted sidecar refused — only those
     // newer than what the file now holds, in time order, through the SAME
     // producer that would have written them (idempotent: the file's fetchedAt

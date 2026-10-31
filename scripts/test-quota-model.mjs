@@ -2492,7 +2492,7 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
   // repairSidecarsByApiPhase, the boot + hourly repair, builds its prev without the tombstone). Driven through the REAL
   // repair: a member whose snapshot's week is in a FOREIGN phase is rebuilt from its newest own anchor.
   const RR = require(path.join(ROOT, 'src/reading-repair.js'));
-  const apiPhaseRepair = (RRm, { anchorAfter = false } = {}) => {
+  const apiPhaseRepair = (RRm, { anchorAfter = false, selfTomb = false } = {}) => {
     const d = mkd('ap'), dataDir = path.join(d, 'data');
     const anchors = path.join(dataDir, 'usage-anchors'), cache = path.join(dataDir, 'usage-cache');
     for (const q of [anchors, cache, path.join(dataDir, 'archive')]) fs.mkdirSync(q, { recursive: true });
@@ -2504,7 +2504,8 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
     const rows = [rec(at(40), 0.10, 0.3, 'on-demand'), rec(at(36), 0.12, 0.3, 'rate-limit-event'), rec(at(30), 0.14, 0.3, 'rate-limit-event'), rec(at(24), 0.16, 0.3, 'rate-limit-event'), rec(at(18), 0.18, 0.3, 'rate-limit-event')];
     if (anchorAfter) rows.push(rec(at(2), 0.20, 0.12, 'rate-limit-event')); // a reading AFTER the removal that states a 5h window
     fs.writeFileSync(path.join(anchors, 'anchors-org_n5h.ndjson'), rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
-    fs.writeFileSync(path.join(cache, M + '.json'), JSON.stringify({ fetchedAt: at(1), source: 'on-demand', fiveHourAbsent: T, sevenDay: { utilization: 0.5, resetsAt: WF }, scopedWeekly: [] }));
+    // (r5: `selfTomb` = the tombstone came WITH the foreign snapshot — laid at the instant it was read)
+    fs.writeFileSync(path.join(cache, M + '.json'), JSON.stringify({ fetchedAt: at(1), source: 'on-demand', fiveHourAbsent: selfTomb ? at(1) : T, sevenDay: { utilization: 0.5, resetsAt: WF }, scopedWeekly: [] }));
     const rep = RRm.repairSidecarsByApiPhase({ dataDir, accounts: [{ id: M, name: 'Member M', type: 'subscription', backend: 'claude' }], id: 'T21' });
     const row = (rep && rep.identities || []).find((r) => r.key === M) || {};
     return { f: JSON.parse(fs.readFileSync(path.join(cache, M + '.json'), 'utf8')), row, T };
@@ -2665,6 +2666,106 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
     const out = fT ? TAB.map((row) => fT.countPassiveAnswer(row)) : [];
     ok(same && out[1].lay && !out[2].moved && out[3].stale && out[4].restore && !Object.keys(out[5].witnesses).length,
       `㉑7m …and the SHIPPED bytes decide like the model over one table (lay on a producer's second moved answer, backward is no movement, stale vs back, 24-h bound) — ${JSON.stringify(out.map((o) => [o.lay, o.moved, o.stale, o.restore]))}`);
+  }
+
+  // ── r5 (acceptance r4): EVERY READER of a member's buckets keeps its own «no 5h limit» ─────────────────────────
+  // #1 THE ESTIMATED VIEW. An anchor is the IDENTITY's: the 60-s sweep records the group's freshest file — here a
+  // sibling still holding a 90.5 % 5h window — so the estimate, the overlay and the sweep itself read through
+  // withOwnAbsence (the real modules; the engine-level replay is test-fable-cap-pool-storm ㉑3i)
+  const EST = require(path.join(ROOT, 'src/usage-estimator.js'));
+  const { UsageAnchors } = require(path.join(ROOT, 'src/usage-anchors.js'));
+  const T8 = Date.now() - 3600e3;
+  const own8 = { fetchedAt: Date.now() - 120000, source: 'on-demand', orgUuid: 'org-n5h-r5', fiveHourAbsent: T8, sevenDay: { utilization: 0.4, resetsAt: nowSec + 86400 }, scopedWeekly: [] };
+  const sib8 = { fetchedAt: Date.now() - 1000, source: 'passive', orgUuid: 'org-n5h-r5', fiveHour: { utilization: 0.905, resetsAt: nowSec + 3 * 3600 }, sevenDay: { utilization: 0.41, resetsAt: nowSec + 86400 }, scopedWeekly: [] };
+  const view8 = QM.withOwnAbsence(sib8, own8); // the engine's readCache substitution (r4)
+  const est8 = { estimated: true, anchorAt: sib8.fetchedAt, asOf: Date.now(), fiveHour: { utilization: 0.905, resetsAt: nowSec + 3 * 3600, estimated: true }, sevenDay: { utilization: 0.41, resetsAt: nowSec + 86400, estimated: true }, scopedWeekly: [] };
+  const overlay8 = (E = EST) => E.overlayCache(view8, est8);
+  const estimateFor8 = (E = EST) => {
+    const dir = mkd('est');
+    fs.writeFileSync(path.join(dir, 'anchors-org_org-n5h-r5.ndjson'), JSON.stringify({ ts: sib8.fetchedAt, fetchedAt: sib8.fetchedAt, source: 'passive', accountId: null, identityKey: 'org:org-n5h-r5',
+      buckets: { fiveHour: { u: 0.905, resetsAt: sib8.fiveHour.resetsAt }, sevenDay: { u: 0.41, resetsAt: sib8.sevenDay.resetsAt }, scopedWeekly: [] }, prevFetchedAt: null, elapsedSec: null, costSince: null }) + '\n');
+    const ue = new E.UsageEstimator({ lagS: 0, anchorsDir: dir, usageHistory: { *_events() { }, _cost: () => 0 }, resolveIdentity: () => ({ identityKey: 'org:org-n5h-r5' }), priorsFor: () => E.CLAUDE_MAX_PRIOR_FULL_USD });
+    return ue.estimateFor('sub-n5h-r5', view8, Date.now());
+  };
+  const sweep8 = (E = EST) => {
+    const anchors = new UsageAnchors({ dataDir: mkd('swp') });
+    const r = E.sweepAnchorGroup({ identityKey: 'org:org-n5h-r5', group: { cache: sib8, accountIds: ['sub-n5h-r5', '__global__'], accountId: null, tomb5h: own8 }, anchors,
+      estimator: { accountIdsFor: (k, ids) => ids, ratesFor: () => null, invalidate() { } }, costBetween: () => null, darkHosts: () => [], metric() { } });
+    return { r, a: anchors.lastAnchor('org:org-n5h-r5') };
+  };
+  {
+    const v = overlay8();
+    ok(v.fiveHour === undefined && QM.fiveHourAbsent(v) === T8 && !!v.sevenDay && v.sevenDay.utilization === 0.41 && v.estimated === true,
+      `㉑8a the ESTIMATED view of a «no 5h» member (the overlay over its guarded reading) never puts a 5h bucket back — the week is still estimated — ${JSON.stringify({ f5: v.fiveHour, abs: v.fiveHourAbsent === T8 })}`);
+    const e = estimateFor8();
+    ok(!!e && e.fiveHour == null && !!e.sevenDay && Math.abs(e.sevenDay.utilization - 0.41) < 1e-6,
+      `㉑8b the estimate itself, built from the IDENTITY's newest anchor (a sibling's file still holding a 90.5 % 5h window), states no 5h bucket for the member whose own reading tombstoned it — ${JSON.stringify(e && { f5: e.fiveHour, s7: e.sevenDay && e.sevenDay.utilization })}`);
+    const s = sweep8();
+    ok(!!s.r.recorded && !!s.a && s.a.buckets.fiveHour === null && !!s.a.buckets.sevenDay && s.a.buckets.sevenDay.u === 0.41,
+      `㉑8c the anchor sweep records no 5h bucket over an identity file that stands «no 5h limit» (the week is recorded) — ${JSON.stringify(s.a && s.a.buckets)}`);
+  }
+  // #2 the auto-cli scheduler's freshest-file substitution: the estimate and the drift it asks for, driven by one real tick
+  const ACL = require(path.join(ROOT, 'src/server/auto-cli-loop.js'));
+  const autoCli8 = async (L = ACL) => {
+    const d = mkd('acl'), cacheDir = path.join(d, 'usage-cache');
+    fs.mkdirSync(cacheDir, { recursive: true });
+    fs.writeFileSync(path.join(cacheDir, 'sub-n5h-r5.json'), JSON.stringify(own8));
+    const seen = [];
+    const loop = L.createAutoCliLoop({ serverSetting: (k) => (k === 'accounts.onDemandQuotaRefresh' ? 'auto-cli' : undefined),
+      accounts: { list: () => ({ accounts: [{ id: 'sub-n5h-r5', type: 'subscription', backend: 'claude', name: 'Member R5', loggedIn: true }] }), get: () => null },
+      autoCliReady: () => true, USAGE_CACHE_DIR: cacheDir,
+      usageIdentityGroupsCached: () => new Map([['org:org-n5h-r5', { accountIds: ['sub-n5h-r5', '__global__'], cache: sib8, accountId: null, tomb5h: own8 }]]),
+      usageEstimator: { estimateFor: (id, raw) => { seen.push(raw); return null; } },
+      projectionRereadFor: () => null, lastMemberReadAt: () => 0, usage: { refreshViaCliPanel: async () => false, panelVerdictFor: () => null },
+      onMemberReadingFresh() { }, dataDir: d, now: () => Date.now(), rand: () => 0.5, log() { }, warn() { } });
+    await loop.tick();
+    return seen;
+  };
+  {
+    const seen = await autoCli8();
+    ok(seen.length === 1 && !!seen[0] && seen[0].fiveHour === undefined && QM.fiveHourAbsent(seen[0]) === T8 && seen[0].fetchedAt === sib8.fetchedAt,
+      `㉑8d the auto-cli scheduler reads a «no 5h» account's fresher SIBLING through the account's own tombstone (the estimate and the drift it asks never see the sibling's 5h window) — ${JSON.stringify(seen.map((r) => r && { f5: r.fiveHour, abs: r.fiveHourAbsent === T8 }))}`);
+  }
+  // #3 THE REPAIR KEEPS THE ACCOUNT's OWN TOMBSTONE: a rebuild replaces a snapshot it has just judged FOREIGN, and a
+  // tombstone the foreign readings laid is theirs (the by-slot repair: laid after the login died; the by-window
+  // repairs: laid when the foreign snapshot was read)
+  const slotRepair8 = (RRm, { tombAt }) => {
+    const d = mkd('slot'), cacheDir = path.join(d, 'usage-cache'), archiveDir = path.join(d, 'archive');
+    fs.mkdirSync(cacheDir, { recursive: true });
+    const M = 'sub-n5h-slot', H = 3600e3, death = Date.now() - 6 * H;
+    fs.writeFileSync(path.join(cacheDir, M + '.json'), JSON.stringify({ fetchedAt: death + 2 * H, source: 'rate-limit-event', fiveHourAbsent: tombAt(death), sevenDay: { utilization: 0.7, resetsAt: nowSec + 2 * 86400 }, scopedWeekly: [] }));
+    const anchor = { ts: death - 3 * H, fetchedAt: death - 3 * H, source: 'on-demand', accountId: M, identityKey: 'org:n5hslot',
+      buckets: { fiveHour: { u: 0.33, resetsAt: nowSec + 3600 }, sevenDay: { u: 0.2, resetsAt: nowSec + 3 * 86400 }, scopedWeekly: [] } };
+    const res = RRm.repairUsageCaches({ cacheDir, archiveDir, markers: new Map([[M, { state: 'expired', since: death }]]), anchorFiles: [{ name: 'anchors-org_n5hslot.ndjson', rows: [anchor] }], id: 'T21s' });
+    return { res, f: JSON.parse(fs.readFileSync(path.join(cacheDir, M + '.json'), 'utf8')), death };
+  };
+  const windowRepair8 = (RRm, { selfTomb = false } = {}) => {
+    const d = mkd('win'), anchors = path.join(d, 'usage-anchors'), cacheDir = path.join(d, 'usage-cache');
+    for (const q of [anchors, cacheDir, path.join(d, 'archive')]) fs.mkdirSync(q, { recursive: true });
+    const M = 'sub-n5h-win', H = 3600, nowMs = Date.now();
+    const WA = nowSec + 3 * 86400, WF = nowSec + 6 * 86400 + 16 * H; // its own panel phase / another member's
+    const at = (h) => nowMs - Math.round(h * H * 1000);
+    const rec = (ts, u, u5) => ({ ts, fetchedAt: ts, source: 'on-demand', accountId: M, identityKey: 'org:n5hwin', buckets: { fiveHour: { u: u5, resetsAt: nowSec + 2 * H }, sevenDay: { u, resetsAt: WA }, scopedWeekly: [] }, prevFetchedAt: null, elapsedSec: null, costSince: null });
+    const rows = [rec(at(40), 0.10, 0.3), rec(at(36), 0.12, 0.3), rec(at(30), 0.14, 0.3), rec(at(24), 0.16, 0.3), rec(at(18), 0.18, 0.25)];
+    fs.writeFileSync(path.join(anchors, 'anchors-org_n5hwin.ndjson'), rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+    const readAt = at(1), T = at(6);
+    fs.writeFileSync(path.join(cacheDir, M + '.json'), JSON.stringify({ fetchedAt: readAt, source: 'on-demand', orgUuid: 'n5hwin', fiveHourAbsent: selfTomb ? readAt : T, sevenDay: { utilization: 0.5, resetsAt: WF }, scopedWeekly: [] }));
+    const rep = RRm.repairByWindow({ dataDir: d, roster: [M], accounts: [{ id: M, name: 'Member W', type: 'subscription', backend: 'claude' }], id: 'T21w', now: nowMs });
+    return { rep, f: JSON.parse(fs.readFileSync(path.join(cacheDir, M + '.json'), 'utf8')), T };
+  };
+  {
+    const A = slotRepair8(RR, { tombAt: (death) => death + 3600e3 }); // laid AFTER the login died: the foreign readings'
+    ok(A.res.restored === 1 && !!A.f.fiveHour && Math.abs(A.f.fiveHour.utilization - 0.33) < 1e-9 && !QM.fiveHourAbsent(A.f),
+      `㉑8e the by-slot repair (repairUsageCaches) restores the account's own anchor WITH its 5h window when the snapshot it judged foreign carries a tombstone laid after the login died — a foreign snapshot's tombstone is never copied onto the account — ${JSON.stringify({ f5: A.f.fiveHour, abs: A.f.fiveHourAbsent })}`);
+    const B = slotRepair8(RR, { tombAt: (death) => death - 3600e3 }); // laid while the login was alive: the account's own
+    ok(B.res.restored === 1 && B.f.fiveHour === undefined && B.f.fiveHourAbsent === B.death - 3600e3,
+      `㉑8e …and the account's OWN tombstone (laid while its login was alive, after the anchor was read) still outlives the rebuild — ${JSON.stringify({ f5: B.f.fiveHour, abs: B.f.fiveHourAbsent })}`);
+    const Wn = windowRepair8(RR, { selfTomb: true }), Wo = windowRepair8(RR);
+    const Ap = apiPhaseRepair(RR, { selfTomb: true });
+    ok(!!Wn.f.fiveHour && Math.abs(Wn.f.fiveHour.utilization - 0.25) < 1e-9 && !QM.fiveHourAbsent(Wn.f) && !!Ap.f.fiveHour && Math.abs(Ap.f.fiveHour.utilization - 0.3) < 1e-9 && !QM.fiveHourAbsent(Ap.f),
+      `㉑8f the two by-window repairs (repairCachesByWindow, repairSidecarsByApiPhase) keep the account's own 5h window when the tombstone came WITH the foreign snapshot (laid when it was read) — ${JSON.stringify({ win: Wn.f.fiveHour, api: Ap.f.fiveHour, abs: [Wn.f.fiveHourAbsent, Ap.f.fiveHourAbsent] })}`);
+    ok(Wo.f.fiveHour === undefined && Wo.f.fiveHourAbsent === Wo.T,
+      `㉑8f …while a tombstone the file held BEFORE the foreign snapshot was read is the account's own and stays (㉑7h's shape, by window too) — ${JSON.stringify({ f5: Wo.f.fiveHour, abs: Wo.f.fiveHourAbsent === Wo.T })}`);
   }
 
   // ── rule 3: the WORDS (the banner guess; the popup / roster draw what the reading has) ───────────────────────
@@ -2910,7 +3011,7 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
     ok(S.saidX.includes('restored'), `㉑ CONTROL MAJOR 1: a marker taken from the spread base files «back» on a member that never changed — ㉑7g RED there (${JSON.stringify(S.saidX)})`);
   }
   {
-    const m = mut21('src/reading-repair.js', [['  _keepOwnAbsence(cacheDir, key, obj);\n', '']], 'rr');
+    const m = mut21('src/reading-repair.js', [['  _keepOwnAbsence(cacheDir, key, obj, ownTomb);\n', '']], 'rr');
     hit21(m, 'the repair write keeps no tombstone');
     const A = apiPhaseRepair(require(m.path));
     ok(A.f.fiveHour && A.f.fiveHour.utilization === 0.3, '㉑ CONTROL MAJOR 2: a rebuild that ignores the target file\'s tombstone re-creates the removed 5h window — ㉑7h RED there');
@@ -2920,6 +3021,36 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
     hit21(m, 'the OAuth parse invents windows for a reply that states none');
     const r = require(m.path).parseOAuthUsage({ limits: [{ kind: 'weekly_scoped', percent: 30, scope: { model: { display_name: 'Fable' } } }] });
     ok(r.fiveHour && r.fiveHour.utilization === 0 && r.sevenDay, '㉑ CONTROL claim 2: the r2 parse invents a 0 % 5h window for a limits[]-only reply (the fake that undid a removal) — ㉑3d RED there');
+  }
+  {
+    const m = mut21('src/usage-estimator.js', [['  return withOwnAbsence(out, rawCache);\n}', '  return out;\n}']], 'ov');
+    hit21(m, 'the overlay puts an estimated 5h bucket back');
+    ok(!!overlay8(require(m.path)).fiveHour, '㉑ CONTROL r5 #1: an overlay that ignores the member\'s tombstone puts the 90.5 % 5h estimate back — ㉑8a RED there');
+  }
+  {
+    const m = mut21('src/usage-estimator.js', [['  const out = withOwnAbsence(est, rawCache);\n  return out !== est', '  const out = est;\n  return out !== est']], 'oe');
+    hit21(m, 'the estimate ignores the member\'s tombstone');
+    const e = estimateFor8(require(m.path));
+    ok(!!e && !!e.fiveHour, '㉑ CONTROL r5 #1: an estimate built from the identity\'s anchor states the sibling\'s 5h bucket — ㉑8b RED there');
+  }
+  {
+    const m = mut21('src/usage-estimator.js', [['  const cache = withOwnAbsence(group?.cache, group?.tomb5h);\n', '  const cache = group?.cache;\n']], 'sw');
+    hit21(m, 'the sweep records the freshest file whole');
+    const s = sweep8(require(m.path));
+    ok(!!(s.a && s.a.buckets && s.a.buckets.fiveHour), '㉑ CONTROL r5 #1: a sweep that records the sibling whole anchors its 5h bucket — ㉑8c RED there');
+  }
+  {
+    const m = mut21('src/server/auto-cli-loop.js', [['raw = withOwnAbsence(g.cache, raw); // (no-5h-window r5)', 'raw = g.cache;']], 'ac');
+    hit21(m, 'the auto-cli scheduler substitutes the sibling whole');
+    const seen = await autoCli8(require(m.path));
+    ok(seen.length === 1 && !!seen[0] && !!seen[0].fiveHour, '㉑ CONTROL r5 #2: the base\'s `raw = g.cache` hands the scheduler the sibling\'s 5h window — ㉑8d RED there');
+  }
+  {
+    const m = mut21('src/reading-repair.js', [['  if (!since || (ownTomb && !ownTomb(since)) || !(Number(obj.fetchedAt) > 0)) return obj;', '  if (!since || !(Number(obj.fetchedAt) > 0)) return obj;']], 'rf');
+    hit21(m, 'the repair keeps whatever tombstone the target holds');
+    const RRf = require(m.path);
+    const A = slotRepair8(RRf, { tombAt: (death) => death + 3600e3 }), Wn = windowRepair8(RRf, { selfTomb: true }), Ap = apiPhaseRepair(RRf, { selfTomb: true });
+    ok(!A.f.fiveHour && !Wn.f.fiveHour && !Ap.f.fiveHour, `㉑ CONTROL r5 #3: a rebuild that keeps a FOREIGN snapshot's tombstone deletes the account's own 5h window — ㉑8e/㉑8f RED there (${JSON.stringify([A.f.fiveHour, Wn.f.fiveHour, Ap.f.fiveHour])})`);
   }
   } catch (e) { ok(false, `㉑ NEGATIVE CONTROLS threw: ${e && e.message}`); }
   if (listen) listen(null);

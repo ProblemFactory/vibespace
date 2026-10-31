@@ -3385,6 +3385,89 @@ console.log('\n㉑3e/㉑3f «no 5h limit» at the wall (lane no-5h-window r3)');
         !changes.slice(n0).some((c) => c.key === w.id.wmax) && !after.windowChangeUnsaid && !!after.fiveHour, JSON.stringify({ ch: changes.slice(n0), mk: after.windowChangeUnsaid || null }));
     }
   }
+  // ── r5 (acceptance r4 #1): THE ESTIMATED VIEW after a real 60-s anchor sweep — the engine's poolReadCache ────────
+  const estWorld = (engineModule = engMod) => {
+    const w = mkWorld({ sameDeadline: true, engineModule });
+    if (!w) return null;
+    lift(w, 'wmax');
+    const own = w.readCache(w.id.wmax);
+    w.writeCache(w.id.wmax, { ...own, orgUuid: 'org-n5h-est' });
+    // the org-merged machine login: FRESHER, still holding a 90.5 % 5h window (its session never saw the lift)
+    w.writeCache('__global__', { fetchedAt: Date.now() - 1000, source: 'passive', orgUuid: 'org-n5h-est', fiveHour: { utilization: 0.905, resetsAt: w.nowSec + 3 * 3600 }, sevenDay: { utilization: 0.6, resetsAt: w.resets.wmax }, scopedWeekly: [] });
+    const before = w.eng.poolReadCache(w.P)(w.id.wmax);
+    w.eng.sweepUsageAnchors();
+    const after = w.eng.poolReadCache(w.P)(w.id.wmax);
+    let anchor = null;
+    try { const t = fs.readFileSync(path.join(w.dataDir, 'usage-anchors', 'anchors-org_org-n5h-est.ndjson'), 'utf8').trim().split('\n'); anchor = JSON.parse(t[t.length - 1]); } catch { }
+    return { w, before, after, anchor };
+  };
+  { // ㉑3i
+    const E = estWorld();
+    if (!E) ok('㉑3i SKIP — pools unsupported on this platform', true);
+    else {
+      ok('㉑3i setup: a lifted member and its org-merged machine login are ONE identity, the sibling is fresher and holds a 90.5 % 5h window; before any sweep the pool reads the member with no 5h bucket (r4)',
+        !E.before.fiveHour && absentOf(E.before) > 0 && !!E.w.readCache('__global__').fiveHour, JSON.stringify({ f5: E.before.fiveHour, abs: E.before.fiveHourAbsent }));
+      ok('㉑3i after one real anchor sweep the ESTIMATED view the pool ranks a lifted member on (poolReadCache) still has no 5h bucket, and its «no 5h limit» stands',
+        !E.after.fiveHour && absentOf(E.after) > 0, JSON.stringify({ f5: E.after.fiveHour, abs: E.after.fiveHourAbsent, est: E.after.estimated }));
+      ok('㉑3i …and the sweep anchored the identity with NO 5h bucket (the week only)',
+        !!E.anchor && E.anchor.buckets && E.anchor.buckets.fiveHour === null && !!E.anchor.buckets.sevenDay, JSON.stringify(E.anchor && E.anchor.buckets));
+    }
+  }
+  // ── r5 (acceptance r4 #4): a get_usage reply is the CLI's own merged state — the stale rule holds for it too ──────
+  const guWorld = (engineModule = engMod) => {
+    const w = mkWorld({ sameDeadline: true, engineModule });
+    if (!w) return null;
+    const M = w.id.wmax, T = Date.now() - 40 * 60e3;
+    // lifted 40 min ago, by the write path's own enumerating answer (its 5h window was last read an hour before that)
+    w.writeCache(M, { ...w.readCache(M), fetchedAt: T - 3600e3 });
+    usageWriteM.writeCacheObject({ cacheDir: w.cacheDir, key: M, obj: { ...w.readCache(M), fiveHour: undefined, limits: undefined, fetchedAt: T, source: 'on-demand' }, measuredAt: T, source: 'on-demand', backend: 'claude', absentWindows: ['5h'] });
+    const seeded = w.readCache(M);
+    const n0 = changes.length;
+    listen((c) => changes.push(c));
+    const nowS = Math.floor(Date.now() / 1000);
+    // an idle session still holding a 5h window that BEGAN two hours ago (it resets in three)
+    const stale = ClaudeCodeAdapter.parseGetUsageResponse({ rate_limits: { five_hour: { utilization: 30, resets_at: nowS + 3 * 3600 }, seven_day: { utilization: 60, resets_at: w.resets.wmax } } });
+    w.eng.writeUsageCacheForKey(M, stale, { producer: 'ev:sess-idle' });
+    const a1 = w.readCache(M), said1 = changes.slice(n0).filter((c) => c.key === M).map((c) => c.change);
+    // …and a session whose window began AFTER the lift (it resets in five hours and a minute)
+    const fresh = ClaudeCodeAdapter.parseGetUsageResponse({ rate_limits: { five_hour: { utilization: 3, resets_at: nowS + 5 * 3600 + 60 }, seven_day: { utilization: 61, resets_at: w.resets.wmax } } });
+    w.eng.writeUsageCacheForKey(M, fresh, { producer: 'ev:sess-new' });
+    const a2 = w.readCache(M), said2 = changes.slice(n0).filter((c) => c.key === M).map((c) => c.change);
+    return { w, T, seeded, a1, a2, said1, said2 };
+  };
+  { // ㉑3j
+    const G = guWorld();
+    if (!G) ok('㉑3j SKIP — pools unsupported on this platform', true);
+    else {
+      ok('㉑3j setup: the member was lifted 40 min ago by the write path (no 5h window, the tombstone at that instant)',
+        !G.seeded.fiveHour && absentOf(G.seeded) === G.T, JSON.stringify({ f5: G.seeded.fiveHour, abs: G.seeded.fiveHourAbsent, T: G.T }));
+      ok('㉑3j a get_usage reply (the real writeUsageCacheForKey) from an idle session still holding a 5h window that BEGAN before the tombstone is kept out: the tombstone stands, nothing said',
+        !G.a1.fiveHour && absentOf(G.a1) > 0 && G.said1.length === 0, JSON.stringify({ f5: G.a1.fiveHour, abs: G.a1.fiveHourAbsent, said: G.said1 }));
+      ok('㉑3j …and one whose window began AFTER the tombstone is the window back, said once',
+        !!G.a2.fiveHour && !absentOf(G.a2) && G.said2.join() === 'restored', JSON.stringify({ f5: G.a2.fiveHour, said: G.said2 }));
+    }
+  }
+  { // the two controls: each turns its own leg red
+    const mE = mutate('src/usage-estimator.js', 'r5est', [
+      ['  return withOwnAbsence(out, rawCache);\n}', '  return out;\n}'],
+      ['  const out = withOwnAbsence(est, rawCache);\n  return out !== est', '  const out = est;\n  return out !== est'],
+      ['  const cache = withOwnAbsence(group?.cache, group?.tomb5h);\n', '  const cache = group?.cache;\n'],
+    ]);
+    const mEng = mE.hit ? mutate('src/server/usage-pool-engine.js', 'r5est', [["require('../usage-estimator.js')", `require(${JSON.stringify(mE.file || '')})`]]) : { hit: false, why: mE.why };
+    ok('㉑3i NEGATIVE CONTROL setup: the estimator\'s three guards removed, wired into a copy of the engine', mE.hit === true && mEng.hit === true, (mE.why || '') + (mEng.why || ''));
+    if (mEng.hit) {
+      const E = estWorld(mEng.mod);
+      ok('㉑3i CONTROL: an estimator that ignores the member\'s tombstone puts the sibling\'s 90.5 % 5h window back on the lifted member after the sweep — ㉑3i RED there',
+        !!E && !!E.after.fiveHour && E.after.fiveHour.utilization > 0.9, JSON.stringify(E && E.after.fiveHour));
+    }
+    const mG = mutate('src/server/usage-pool-engine.js', 'r5gu', [["      authoritativeScopes: quotaModel.authoritativeScopesOf(parsed),\n      passiveAnswer: {", "      authoritativeScopes: quotaModel.authoritativeScopesOf(parsed),\n      passiveAnswerOff: {"]]);
+    ok('㉑3j NEGATIVE CONTROL setup: writeUsageCacheForKey passes no passive answer (the base\'s write)', mG.hit === true, mG.why || '');
+    if (mG.hit) {
+      const G = guWorld(mG.mod);
+      ok('㉑3j CONTROL: a get_usage write with no passive answer brings the pre-lift 5h window back and says «restored» — ㉑3j RED there',
+        !!G && !!G.a1.fiveHour && G.said1.includes('restored'), JSON.stringify(G && { f5: G.a1.fiveHour, said: G.said1 }));
+    }
+  }
   listen(null);
 }
 
