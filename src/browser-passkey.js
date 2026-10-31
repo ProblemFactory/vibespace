@@ -223,7 +223,7 @@ function fill(s, p) { return String(s).replace(/\{(\w+)\}/g, (m, k) => (p && p[k
 /** The live view's banner (ONE button: Cancel) and the chip — `headed`: Chrome's own window is on this computer's desktop.
  *  lane passkey-ui (§2.4 / §2.5): `passkey_ask` = the page waits for the OWNER's card — the banner carries that card's
  *  words and choices (`card`, the same buttons as the tray and the chat; the same approve route). */
-function passkeyWords(b, tIn, { headed = false, card = null, display = null } = {}) {
+function passkeyWords(b, tIn, { headed = false, card = null, display = null, deskDoor = false } = {}) {
   const t = typeof tIn === 'function' ? (s, p) => tIn(s, p) : fill;
   // lane passkey-browse-yourself: the watch cannot see this browser — the view says so (a quiet line; a Retry press when the re-arms stopped), never nothing
   if (b && b.state === 'unknown') return { unknown: true, title: '', line: b.why === 'remote' ? t('This browser runs on another machine — VibeSpace cannot see its passkey requests from here; a page that will not move may be waiting for one there.') : b.why === 'gave-up' ? t('VibeSpace lost its connection to this browser and stopped retrying — it cannot see passkey requests now; a page that will not move may be waiting for one. Retry connects again.') : b.why === 'refused' && b.cause ? t('VibeSpace cannot watch this browser ({cause}) — it cannot see its passkey requests; a page that will not move may be waiting for one.', { cause: str(b.cause) }) : b.why === 'not-watched' ? t('VibeSpace is not watching this browser right now — it cannot see its passkey requests; a page that will not move may be waiting for one.') : t('VibeSpace cannot see passkey requests on this browser (it started before VibeSpace could watch them) — a page that will not move may be waiting for one: navigate elsewhere or close the tab.'), desktop: '', cancel: '', chip: '', retry: b.why === 'gave-up' ? t('Retry') : '' }; // acceptance r2: gave-up ⇒ the Retry press (the bridge re-arms)
@@ -233,7 +233,7 @@ function passkeyWords(b, tIn, { headed = false, card = null, display = null } = 
     const cw = passkeyCardWords(card, tIn);
     return { ask: true, title: t('This page is waiting for you to allow the passkey for {rp}', { rp }), line: cw ? `${cw.title}. ${cw.after}` : '', desktop: '', buttons: cw ? cw.buttons : [], cardId: cw ? String(card.id) : '', shown: cw ? String(card.shown || '') : '', cancel: t('Cancel passkey request'), chip: t('page waits for your passkey answer') };
   }
-  return {
+  const w = {
     title: t('This page is waiting for a passkey ({rp})', { rp }),
     line: t('A site this profile keeps no passkey for offers its own other ways in; a kept passkey signs in by the policy you set in the Agent browser panel; a new one is registered only after you allow it. Cancel this request, then use the page\'s other way in, or sign in on your own device.'),
     // lane passkey-browse-yourself: a browser on a VIRTUAL display (the attach road) — the sentence names the display and the ways in
@@ -241,11 +241,17 @@ function passkeyWords(b, tIn, { headed = false, card = null, display = null } = 
     cancel: t('Cancel passkey request'),
     chip: t('page waits for a passkey'),
   };
+  // the .367 seam (× desktop-x-seat-browser, the integrator's ruling 10-31): the live view draws x-seat's «Open in Desktop» door
+  // under this banner (`deskDoor`) ⇒ the sentence drops its Desktop clause — ONE door to Chrome's window, never two
+  if (deskDoor && headed && display) w.desktop = t(DOORS_DOOR_WORDS, { display: str(display).slice(0, 40), rp });
+  return w;
 }
 /** lane passkey-browse-yourself (the owner, 2026-10-30 «还是没有 passkey 提示»): a HEADED browser on a virtual display — Chrome's
  *  own passkey window is THERE (tab-modal in the browser's window, measured): the sentence names that display and every way
  *  in. The banner's line and the For-you item's first detail line are this one literal (zh + ja entries). */
 const DOORS_WORDS = 'Chrome\'s own passkey window is on the virtual display {display} — open it from Desktop to use a phone\'s passkey (the QR), or use the site\'s other method, or register a passkey for this site in this profile first (vibespace-browser passkey register {rp})';
+/** the .367 seam: DOORS_WORDS without its Desktop clause — the live view's banner while x-seat's door is drawn under it (zh + ja). */
+const DOORS_DOOR_WORDS = 'Chrome\'s own passkey window is on the virtual display {display} — or use the site\'s other method, or register a passkey for this site in this profile first (vibespace-browser passkey register {rp})';
 /** The For-you item (origin browser; ONE per (profile, rpId); resolved by itself when the request ends). Literal keys. */
 const FOR_YOU_WORDS = Object.freeze({
   text: 'A page in the agent\'s browser is waiting for a passkey ({rp})',
@@ -521,7 +527,7 @@ const HOOK_HOLD_MS = 1500;
 module.exports = {
   passkeyCardWords, CHOICE_WORDS, // lane passkey-ui
   PASSKEY_OPEN_CODE, PASSKEY_ASK_CODE, REFUSED_SAID_MS, HOOK_HOLD_MS, KINDS, OUTCOMES, PENDING_SAID_MS, FOR_YOU_AFTER_MS, RECORDS_KEEP, PASSKEY_PASS_VERBS, PASSKEY_READ_VERBS,
-  NONE_TEXT, UNKNOWN_TEXT, REMOTE_TEXT, GAVE_UP_TEXT, REFUSED_TEXT, NOT_WATCHED_TEXT, FOR_YOU_WORDS, DOORS_WORDS, waitsSaid,
+  NONE_TEXT, UNKNOWN_TEXT, REMOTE_TEXT, GAVE_UP_TEXT, REFUSED_TEXT, NOT_WATCHED_TEXT, FOR_YOU_WORDS, DOORS_WORDS, DOORS_DOOR_WORDS, waitsSaid,
   rpWord, parseEvent, kernelEvent /* lane passkey-sink */, recordOf, applyEvent, endPending, passkeyVerdict, passkeyText, passkeyBlock, passkeyPasses, passkeyReads,
   loopVerdict, cancelText, passkeyWords, forYouItem, keyForYouItem, installHook, hookSource, installReporter, reporterSource, SLOT_MARK, CTL_FN, REARM_FN, askText, refusedText, registerText, // lane passkey-binding-isolated: + the isolated-world reporter; − dropExpression (no main-world binding to drop)
 };

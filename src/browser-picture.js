@@ -196,6 +196,13 @@ const DESK_DOOR_WORDS = Object.freeze({ line: "Open this browser's display in De
  *  view never sends him where nothing of it can be answered), and the browser's fact says Chrome's OWN window holds the page —
  *  a passkey request on a headed browser (Chrome's WebAuthn dialog: drawn by Chrome, not the page — MEASURED: CDP's clicks
  *  never reach it), Chrome's own sign-in sheet. */
+/** the .367 seam (desktop-x-seat-browser × passkey-browse-yourself, the integrator's ruling 10-31): THE fact the door judges —
+ *  the passkey fact the live view's banner shows (its relay's record in his browse-yourself window, which has no session row;
+ *  else the row's) while it is a real wait, else the row's own `stuck` (Chrome's sign-in sheet). Either half alone misses a door:
+ *  the row's `stuck` never carries his window's passkey; the passkey fact never carries a native prompt. */
+function deskDoorStuck({ passkey = null, stuck = null } = {}) {
+  return passkey && passkey.state === 'passkey' && passkey.passkey && passkey.passkey.state !== 'unknown' ? passkey : stuck || null;
+}
 function deskDoorOf({ source = null, xShown = false, stuck = null, human = false } = {}) {
   if (!human || !source || source.source !== PICTURE_X || !source.displaySession || xShown || !stuck) return null;
   const native = (stuck.state === 'passkey' && stuck.headed === true) || (stuck.state === 'prompt' && !!stuck.prompt && stuck.prompt.native === true);
@@ -204,5 +211,5 @@ function deskDoorOf({ source = null, xShown = false, stuck = null, human = false
 
 module.exports = {
   PICTURE_X, PICTURE_SCREENCAST, NO_XPRA_WHY_HEAD, SOURCE_WORDS, DIALOG_MIN_W, DIALOG_MIN_H, X_TICKET_RE, DESK_DOOR_WORDS,
-  pictureSourceOf, isX, isBrowserRow, xWindowOf, nativeDialogsOf, nativeDialogOwner, dialogsOver, nativeDialogFact, nativeDialogText, deskSeat, deskSeatWhy, xSeatRootOf, xScopeOf, deskDoorAct, deskDoorOf,
+  pictureSourceOf, isX, isBrowserRow, xWindowOf, nativeDialogsOf, nativeDialogOwner, dialogsOver, nativeDialogFact, nativeDialogText, deskSeat, deskSeatWhy, xSeatRootOf, xScopeOf, deskDoorAct, deskDoorOf, deskDoorStuck,
 };

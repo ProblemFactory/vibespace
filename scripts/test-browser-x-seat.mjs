@@ -643,7 +643,7 @@ function doorFacts(root) {
       && !/xDoorBtn\.textContent = t\('Take over'\)/.test(dw),
     doorVerdict: /const a = deskDoorAct\(\{ profile: prof, human: browserHuman\(\) \}\);/.test(dw) && /xDoorBtn\.style\.display = doorAct \? '' : 'none';/.test(dw),
     inputMode: /const next = m === 'watch' \|\| m === 'blocked' \|\| m === 'input' \? \(m === 'input' \? 'watch' : m\) : 'active';/.test(view) && /const sends = \(\) => mode === 'active' \|\| \(mode === 'watch' && inputSeat\);/.test(view) && /client\.viewOnly = viewOnly \|\| !sends\(\);/.test(view),
-    liveDoorHuman: /deskDoorOf\(\{ source: pictureNow\(\), xShown: xOn\(\), stuck: st\.fact && st\.fact\.stuck, human: !!H \}\)/.test(live),
+    liveDoorHuman: /deskDoorOf\(\{ source: pictureNow\(\), xShown: xOn\(\), stuck: deskDoorStuck\(\{ passkey: pkFactNow\(\), stuck: st\.fact && st\.fact\.stuck \}\), human: !!H \}\)/.test(live), // the .367 seam: the banner's passkey fact first
     liveDoorRejudged: /const renderMode = \(\) => \{\n    renderDeskDoor\(\);/.test(live) && /scheduleReport\(\); renderDeskDoor\(\);/.test(live) && /renderOwner\(\); renderDeskDoor\(\);/.test(live) && /const renderDialog = \(\) => \{\n    renderDeskDoor\(\);/.test(live),
     themeShadow: !!rule && !/rgba?\(/.test(rule) && rule.includes('box-shadow: var(--shadow-window)'),
     oneRank: /w\.el\.style\.zIndex = String\(Z_FLOOR \+ stackRank\(win\)\);/.test(view) && /import \{[^}]*\bstackRank\b[^}]*\} from '\.\/xpra-proto\.js';/.test(view) && !/Z_REACH|Z_BASE/.test(view)
@@ -681,6 +681,17 @@ const W0 = load(REPO);
   ok(f({ source: X, xShown: false, stuck: pk }) === null, "…never in a conversation's view (the Desktop's seat reaches HIS window only — r2)");
   ok(f({ source: X, xShown: true, stuck: pk, human: true }) === null && f({ source: SC, stuck: pk, human: true }) === null && f({ source: X, stuck: { state: 'passkey', headed: false }, human: true }) === null && f({ source: X, stuck: { state: 'prompt', prompt: { type: 'file' } }, human: true }) === null && f({ source: X, stuck: null, human: true }) === null, 'no door when the view draws the X picture, off the X road, a headless passkey, a page prompt, no fact');
   ok(!!PIC.DESK_DOOR_WORDS && /Desktop/.test(PIC.DESK_DOOR_WORDS.line) && PIC.DESK_DOOR_WORDS.button === 'Open in Desktop', 'the ONE line lives in the shared words module (browser-picture.js DESK_DOOR_WORDS) — the way, never a second sentence');
+  // the .367 seam (× passkey-browse-yourself, the integrator's ruling 10-31): HIS browse window has no session row, so its passkey
+  // wait lives on the relay's record (the banner's pkFactNow), never on the row's `stuck` — the door judges deskDoorStuck. RED with
+  // either half's fact alone: the row's stuck misses his passkey; the passkey fact misses Chrome's sign-in sheet.
+  const ds = typeof PIC.deskDoorStuck === 'function' ? PIC.deskDoorStuck : ({ stuck }) => stuck || null;
+  const relay = { state: 'passkey', headed: true, display: ':1', passkey: { state: 'passkey_open', id: 'p1', rpId: 'vercel.com' } };
+  ok(f({ source: X, xShown: false, stuck: ds({ passkey: relay, stuck: null }), human: true }) === 'da-x1' && f({ source: X, xShown: false, stuck: null, human: true }) === null,
+    "the seam: a passkey ask in HIS window (the relay's record, no session row) draws the door — the row's stuck alone (x-seat's half) draws none");
+  ok(f({ source: X, xShown: false, stuck: ds({ passkey: null, stuck: sheet }), human: true }) === 'da-x1' && f({ source: X, xShown: false, stuck: ds({ passkey: null, stuck: null }), human: true }) === null,
+    "the seam: Chrome's sign-in sheet on the row still draws the door — the passkey fact alone (passkey's half) draws none");
+  ok(ds({ passkey: { ...relay, passkey: { state: 'unknown', why: 'gave-up' } }, stuck: null }) === null && ds({ passkey: { ...relay, passkey: { state: 'unknown' } }, stuck: sheet }) === sheet && ds({ passkey: relay, stuck: sheet }) === relay,
+    "the seam: a passkey the watch cannot see is no wait (the row's stuck judges); a real passkey wait comes first");
 }
 {
   const XR = W0.XR, rp = (a) => enc(a).subarray(8), fx = typeof XR.xpraFields === 'function' ? XR.xpraFields : () => null;

@@ -6411,6 +6411,7 @@ export default {
   "The page is waiting for a passkey — cancel it in the live view": "网页在等待通行密钥——请在实时视图中取消", // lane browser-passkey
   "A page in the agent's browser is waiting for a passkey ({rp})": "代理浏览器中的一个网页正在等待通行密钥（{rp}）", // lane browser-passkey
   "Chrome's own passkey window is on the virtual display {display} — open it from Desktop to use a phone's passkey (the QR), or use the site's other method, or register a passkey for this site in this profile first (vibespace-browser passkey register {rp})": "Chrome 自己的通行密钥窗口在虚拟显示器 {display} 上——在「桌面」里打开它，就能用手机上的通行密钥（扫二维码）；或者改用网站的其他登录方式；或者先在这个配置里为这个网站注册通行密钥（vibespace-browser passkey register {rp}）", // lane passkey-browse-yourself
+  "Chrome's own passkey window is on the virtual display {display} — or use the site's other method, or register a passkey for this site in this profile first (vibespace-browser passkey register {rp})": "Chrome 自己的通行密钥窗口在虚拟显示器 {display} 上；或者改用网站的其他登录方式；或者先在这个配置里为这个网站注册通行密钥（vibespace-browser passkey register {rp}）", // the .367 seam (desktop-x-seat-browser × passkey-browse-yourself): the banner while the door is drawn
   "VibeSpace cannot see passkey requests on this browser (it started before VibeSpace could watch them) — a page that will not move may be waiting for one: navigate elsewhere or close the tab.": "VibeSpace 看不到这个浏览器上的通行密钥请求（它在 VibeSpace 能监视之前就启动了）——一个不动的网页可能正在等通行密钥：换个网址，或关闭这个标签页。", // lane passkey-browse-yourself
   "This browser runs on another machine — VibeSpace cannot see its passkey requests from here; a page that will not move may be waiting for one there.": "这个浏览器运行在另一台机器上——VibeSpace 在这里看不到它的通行密钥请求；一个不动的网页可能正在那边等通行密钥。", // lane passkey-browse-yourself (acceptance r1)
   "VibeSpace lost its connection to this browser and stopped retrying — it cannot see passkey requests now; a page that will not move may be waiting for one. Retry connects again.": "VibeSpace 与这个浏览器的连接断了，已停止重试——现在看不到通行密钥请求；一个不动的网页可能正在等通行密钥。按「重试」重新连接。", // lane passkey-browse-yourself (acceptance r2)
@@ -11691,7 +11692,6 @@ export default {
   // lane vault-standing-request r11 (a Save whose row landed and whose policy did not) — on a plain line (see r9 above)
   "The members were saved; the policy was not": "成员已保存；策略没有保存",
   "5-hour limit lifted ({when})": "5 小时限额已取消（{when}）",
-  "Ultra (formerly Max 20x): weekly limits only — Anthropic is lifting the 5-hour limit from verified Ultra accounts in stages; the $100 Max keeps it.": "Ultra（原 Max 20x）：只有每周限额——Anthropic 正分批取消已验证 Ultra 账号的 5 小时限额；$100 的 Max 仍保留它。",
   "No 5-hour limit on this account since {when} — weekly limits only.": "该账号自 {when} 起没有 5 小时限额——只有每周限额。",
   "{account}'s 5-hour limit was lifted by Anthropic (since {since}): the pool now counts only its weekly limit": "{account} 的 5 小时限额已被 Anthropic 取消（{since} 起）：账号池此后只计它的每周限额",
   "Its usage reading no longer lists a 5-hour window, so the pool counts only its weekly limits. The usage popup says so on its row — nothing needs doing.": "它的用量读数不再列出 5 小时窗口，账号池因此只计它的每周限额。用量弹窗在它那一行也会注明——无需任何操作。",

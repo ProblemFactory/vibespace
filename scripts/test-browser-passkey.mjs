@@ -714,6 +714,28 @@ console.log('⑨ lane passkey-browse-yourself: EVERY ROAD is watched, his window
     ok(!miss.length && used.includes(PK.DOORS_WORDS) && wu && wu.unknown && wu.line && !wu.cancel && /:1/.test(zw) && /桌面/.test(zw) && /passkey register vercel\.com/.test(zw) && /:1/.test(jw) && /デスクトップ/.test(jw) && /passkey register vercel\.com/.test(jw), `⑨ the words: the doors line and the quiet unknown line have zh + ja entries (zh names 桌面, ja デスクトップ, both the display and the register command); the unknown line has no button`, { miss, zw, jw, wu });
     ok(PK.passkeyWords(b, t, { headed: true }).desktop === 'Chrome\'s own passkey window is open on this computer\'s desktop — it does not show in this view.' && PK.passkeyWords(b, t, { headed: false, display: ':1' }).desktop === '', '⑨ a headed browser with no virtual display keeps its desktop line; a headless one says nothing of a desktop (a display alone is not headed)');
   }
+  // the .367 seam (× desktop-x-seat-browser, the integrator's ruling 10-31): while the live view draws x-seat's «Open in Desktop»
+  // door under the banner, the banner's sentence drops its Desktop clause (ONE door to Chrome's window); back when the door goes
+  {
+    const zh = (await import(path.join(REPO, 'src/lib/i18n-zh.js'))).default, ja = (await import(path.join(REPO, 'src/lib/i18n-ja.js'))).default;
+    const t = (k, p) => k.replace(/\{(\w+)\}/g, (m, x) => (p && p[x] !== undefined ? p[x] : m));
+    const b = { state: 'passkey_open', id: 'a', rpId: 'vercel.com' };
+    const W = (tr, o) => PK.passkeyWords(b, tr, { headed: true, display: ':1', ...o }).desktop;
+    const zt = (k, p) => t(zh[k] || k, p), jt = (k, p) => t(ja[k] || k, p);
+    const on = W(t, { deskDoor: true }), off = W(t, { deskDoor: false }), zon = W(zt, { deskDoor: true }), jon = W(jt, { deskDoor: true });
+    ok(!!PK.DOORS_DOOR_WORDS && !!zh[PK.DOORS_DOOR_WORDS] && !!ja[PK.DOORS_DOOR_WORDS]
+      && !/Desktop/.test(on) && /:1/.test(on) && /passkey register vercel\.com/.test(on) && /Desktop/.test(off)
+      && !/桌面/.test(zon) && /:1/.test(zon) && /passkey register vercel\.com/.test(zon) && !/デスクトップ/.test(jon) && /:1/.test(jon) && /passkey register vercel\.com/.test(jon),
+      `the seam: the door drawn ⇒ the banner's Desktop clause is gone (en / zh / ja keep the display and the register way); no door ⇒ it is back — «${on.slice(0, 70)}…»`);
+    ok(PK.passkeyWords(b, t, { headed: false, display: ':1', deskDoor: true }).desktop === '' && PK.passkeyWords(b, t, { headed: true, deskDoor: true }).desktop === PK.passkeyWords(b, t, { headed: true }).desktop,
+      'the seam: the door changes only the virtual-display sentence (a headless browser says nothing; a headed one without a display keeps its line)');
+    const live = fs.readFileSync(path.join(REPO, 'src/lib/browser-live-window.js'), 'utf8');
+    ok(/const door = !!deskDoor\.dataset\.ds;[^\n]*\n\s*const pkw = pk \? passkeyWords\(pk\.passkey, t, \{[^}]*deskDoor: door \}\)/.test(live) && /\(door \? ':door' : ''\)/.test(live)
+      && /stuck: deskDoorStuck\(\{ passkey: pkFactNow\(\), stuck: st\.fact && st\.fact\.stuck \}\)/.test(live)
+      && /if \(\(ds \|\| ''\) !== was\) queueMicrotask\(\(\) => \{ if \(!st\.closed\) renderDialog\(\); \}\);/.test(live)
+      && /const renderDialog = \(\) => \{\n\s*renderDeskDoor\(\);/.test(live),
+      "the seam's wiring: renderDialog judges the door first and hands its state to the banner (keyed by it), the door reads the banner's passkey fact, and a door that appears or goes re-draws the banner");
+  }
   // THE ONE RENDERER: the live view draws the session's fact OR its relay's record through the SAME banner; the bridge names his
   // window's profile, pushes the fact when it moves, replays it to a late viewer (its real road: test-browser-live ⑪)
   {

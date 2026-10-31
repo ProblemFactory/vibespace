@@ -169,7 +169,7 @@ import { passkeyWords } from '../browser-passkey.js'; // lane browser-passkey: a
 import { displayFactOf, displayFactText } from './browser-display-words.js'; // lane headless-fallback: a headless browser (no desktop session) says so under the bar
 import { enterSubmits } from './chat-enter-keys.js';
 import { pictureSourceOf } from '../browser-picture.js'; // lane browser-x-in-window (B2): THE picture source verdict (PURE — the keeper's own)
-import { deskDoorOf } from '../browser-picture.js'; // lane desktop-x-seat-browser: the raw fallback's door (PURE)
+import { deskDoorOf, deskDoorStuck } from '../browser-picture.js'; // lane desktop-x-seat-browser: the raw fallback's door (PURE); deskDoorStuck = the .367 seam
 import { createXpraView, keyInputOf, workerUrlFor, streamUrl as xStreamUrl } from './xpra-view.js'; // lane browser-x-in-window: the desktop app window's view draws the browser's OWN window
 import { bufferRefresh as xBufferRefresh, focusPacket as xFocusPacket } from './xpra-proto.js'; // lane browser-x-in-window: a repaint after a resize, the window's focus at a takeover
 
@@ -575,7 +575,10 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
   const deskDoorBtn = document.createElement('button'); deskDoorBtn.type = 'button'; deskDoorBtn.className = 'file-tool-btn browser-live-deskdoor-open'; deskDoorBtn.textContent = t('Open in Desktop');
   deskDoor.append(deskDoorText, deskDoorBtn);
   deskDoorBtn.onclick = () => { const ds = deskDoor.dataset.ds; if (ds && typeof app.openDesktopApp === 'function') app.openDesktopApp(ds); };
-  const renderDeskDoor = () => { let ds = null; try { ds = deskDoorOf({ source: pictureNow(), xShown: xOn(), stuck: st.fact && st.fact.stuck, human: !!H }); } catch { ds = null; } deskDoor.style.display = ds ? '' : 'none'; deskDoor.dataset.ds = ds || ''; winInfo._deskDoor = ds; };
+  // the .367 seam (× passkey-browse-yourself): the door judges the fact the banner shows (deskDoorStuck: his window's passkey lives on
+  // its relay record, never on a session row), and a door that appears or goes re-draws the banner — its Desktop clause goes while
+  // the door is drawn (ONE door to Chrome's window); a microtask, so a door judged before renderDialog exists never calls it
+  const renderDeskDoor = () => { let ds = null; try { ds = deskDoorOf({ source: pictureNow(), xShown: xOn(), stuck: deskDoorStuck({ passkey: pkFactNow(), stuck: st.fact && st.fact.stuck }), human: !!H }); } catch { ds = null; } const was = deskDoor.dataset.ds || ''; deskDoor.style.display = ds ? '' : 'none'; deskDoor.dataset.ds = ds || ''; winInfo._deskDoor = ds; if ((ds || '') !== was) queueMicrotask(() => { if (!st.closed) renderDialog(); }); };
   // lane site-reset (2026-09-30): A NAVIGATION LOOP (the browser fact's `stuck.state === 'loop'`) — the cycle's addresses,
   // KEYED children patched in place (a banner rebuilt at every fact push would blink under the pointer)
   const loopBanner = createLoopBanner(document);
@@ -1165,11 +1168,12 @@ function createLiveView(app, winInfo, { sessionId, profileId, human = null, take
     }
     if (dialogBar.dataset.prompt) delete dialogBar.dataset.prompt;
     const pk = !d ? pkFactNow() : null;
-    const pkw = pk ? passkeyWords(pk.passkey, t, { headed: pk.headed === true, card: pk.card || null, display: pk.display || null }) : null;
+    const door = !!deskDoor.dataset.ds; // the .367 seam: x-seat's «Open in Desktop» door is drawn under this banner ⇒ its sentence drops the Desktop clause
+    const pkw = pk ? passkeyWords(pk.passkey, t, { headed: pk.headed === true, card: pk.card || null, display: pk.display || null, deskDoor: door }) : null;
     const pkUnknown = pkw && pkw.unknown ? pkw : null; // lane passkey-browse-yourself: the watch cannot see this browser — a quiet line, below every other state
     const pkElse = !d && !(pkw && !pkUnknown) ? pkElsewhere() : null; // acceptance r1: ANOTHER browser of this conversation waits — a note naming it, never a Cancel aimed at the one on show
     if (pkw && !pkUnknown) {
-      const key = String(pk.passkey.id || '') + (pkw.ask ? ':ask:' + pkw.cardId : ''); // lane passkey-ui: passkey_ask = the owner's card inline
+      const key = String(pk.passkey.id || '') + (pkw.ask ? ':ask:' + pkw.cardId : '') + (door ? ':door' : ''); // lane passkey-ui: passkey_ask = the owner's card inline; the .367 seam: the door re-draws it
       if (dialogBar.dataset.passkey !== key || dialogBar.dataset.pkBusy !== String(!!st.passkeyCancelling)) {
         dialogBar.textContent = ''; dialogBar.dataset.passkey = key; dialogBar.dataset.pkBusy = String(!!st.passkeyCancelling);
         const title = document.createElement('div'); title.className = 'browser-live-dialog-title'; title.textContent = pkw.title;
