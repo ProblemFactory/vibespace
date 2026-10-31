@@ -930,7 +930,8 @@ export class ChatStatusBar {
         const clock = (ms) => new Date(ms).toLocaleString([], { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
         const s = c.soonest, sb = s.bucket && s.bucket.label ? s.bucket : null, r = c.rejector;
         const lines = [];
-        if (r && r.name && r.ownWall && r.ownWall.label && r.ownWall.resetsAt && r.id !== s.id) {
+        if (r && r.name && r.ownWall && r.ownWall.unknownWindow && r.id !== s.id) lines.push(t('{m}: its limit window is unknown (it has no 5-hour limit).', { m: r.name }));
+        else if (r && r.name && r.ownWall && r.ownWall.label && r.ownWall.resetsAt && r.id !== s.id) {
           const f = Array.isArray(r.floor) && r.floor.length ? r.floor[0] : null;
           lines.push(f && f.label
             ? t('{m}: {b} resets at {t}, but its {f} has {rem}% left (under the {line}% floor, counted as spent).', { m: r.name, b: r.ownWall.label, t: clock(r.ownWall.resetsAt), f: f.label, rem: Math.round(Number(f.remaining) || 0), line: f.line })

@@ -329,17 +329,18 @@ function windowChangeOf(prevObj, prevSet, merged) {
   if (now5 && wasAbsent) return { kind: '5h', change: 'restored', at: Number(now5.measuredAt) || Date.now() };
   return null;
 }
-// ── THE PASSIVE WITNESS (lane no-5h-window r3, acceptance r2 BLOCKER) ──────
-// A PASSIVE answer — a statusline render, a stream `rate_limit_event` — is the CLI's OWN rate-limit state, and the CLI
-// DROPS a window whose reset has passed from both (2.1.314: the statusline's `cn`/`ot` filter, the stream's `xd`), and
-// re-renders the statusline AT that reset. So «the week and no five_hour» is the NORMAL shape of every member in the
-// minutes after its 5h reset: on its own it proves nothing. It becomes evidence only when it carries a NEW API answer —
-// the plan week MOVED (utilization or reset) since the previous reading of it — and only TWO such answers lay the
-// tombstone (identity by witness, never by time). `planWeekSig` (the last passive reading of the week, both producers
-// spell it `7d:<integer %>@<reset s>` so one API answer seen by both counts once) and `fiveHourAbsentWitnesses` ({n,
-// at}) are raw fields of the file; any producer that states a 5h window again ends the count. An ENUMERATING reading
-// (a verified /usage panel, an OAuth usage reply) needs no second witness: it is `absentWindows`, above.
-const PASSIVE_WITNESSES = 2;
+// ── THE PASSIVE WITNESS (lane no-5h-window r3; r4: PER PRODUCER, acceptance r3 BLOCKER) ──────
+// A PASSIVE answer — a statusline render, a stream `rate_limit_event` — is ONE claude process's own rate-limit state,
+// and the CLI DROPS a window whose reset has passed from both (2.1.314: the statusline's `cn`/`ot` filter, the
+// stream's `xd`), and re-renders the statusline AT that reset. So «the week and no five_hour» is the NORMAL shape of
+// every member in the minutes after its 5h reset: on its own it proves nothing. It is evidence only when it carries a
+// NEW API answer — the week moved FORWARD against the SAME producer's previous reading — and TWO such answers from one
+// producer lay the tombstone (`quotaModel.countPassiveAnswer`, the rule the shipped statusline mirrors byte for byte).
+// The file's last writer is no baseline: every session on the account writes this file, and two of them holding
+// different stale weeks used to alternate the file's signature into two «witnesses» (reproduced with the shipped tool).
+// `fiveHourAbsentWitnesses` ({<producer>: {n, lastSig, at}}) is a raw field of the FILE. An ENUMERATING reading (a
+// verified /usage panel, an OAuth usage reply) needs no second witness: it is `absentWindows`, above.
+const PASSIVE_WITNESSES = quotaModel.PASSIVE_WITNESSES;
 
 // ONE listener (the pool engine's, which says the change once to the owner): the write path is SHARED tier and
 // knows no For-you store, so it only reports what it saw.
@@ -425,26 +426,25 @@ function writeCacheObject({ cacheDir, key, obj, set = null, measuredAt = null, s
   }
   // «NO 5h LIMIT» (lane no-5h-window): only an enumerating call site passes it, from its parse's own mark.
   if (Array.isArray(absentWindows) && absentWindows.length) next = markPlanAbsent(next, absentWindows, at);
-  // …or a passive answer, counted as a WITNESS (r3): `{weekSig, fiveHour, absent5h}` from the stream capture.
-  let witness, weekSig = null; // witness: undefined = the file's own count stands, null = ended, {n, at} = this count
+  // …or a passive answer, counted as a WITNESS of ITS producer (r4): `{producer, weekSig, fiveHour, absent5h}` from
+  // the stream capture. A stated 5h window older than the file's tombstone is a session that never saw the lift: it
+  // is kept out (the plan keeps its tombstone at the instant it was first said) and nothing is said.
+  let witnesses = prevObj ? prevObj.fiveHourAbsentWitnesses : undefined; // the FILE's (a producer's object may be a SIBLING's spread)
   if (passiveAnswer && typeof passiveAnswer === 'object' && !replace) {
-    weekSig = typeof passiveAnswer.weekSig === 'string' && passiveAnswer.weekSig ? passiveAnswer.weekSig : null;
-    const prevSig = prevObj && typeof prevObj.planWeekSig === 'string' ? prevObj.planWeekSig : null;
-    if (passiveAnswer.fiveHour) witness = null;
-    else if (passiveAnswer.absent5h && weekSig && prevSig && weekSig !== prevSig && !quotaModel.absentSince(quotaModel.planLimit(prevSet), '5h')) {
-      const pw = prevObj && prevObj.fiveHourAbsentWitnesses;
-      const n = (pw && Number(pw.n) > 0 ? Number(pw.n) : 0) + 1;
-      if (n >= PASSIVE_WITNESSES) { next = markPlanAbsent(next, ['5h'], at); witness = null; } else witness = { n, at };
-    }
-  }
-  // ANY producer that MEASURED a 5h window (its claim is not the file's) ends the count — the window is there.
-  const measured5h = (() => {
+    const absentAt = quotaModel.absentSince(quotaModel.planLimit(prevSet), '5h') || 0;
+    const c = quotaModel.countPassiveAnswer({ witnesses, producer: passiveAnswer.producer || null, sig: typeof passiveAnswer.weekSig === 'string' ? passiveAnswer.weekSig : null,
+      fiveHour: passiveAnswer.fiveHour || null, absent5h: !!passiveAnswer.absent5h, absentAt, now: at });
+    witnesses = c.witnesses;
+    if (c.lay) next = markPlanAbsent(next, ['5h'], at);
+    if (c.stale) next = markPlanAbsent(next, ['5h'], absentAt);
+  } else if ((() => {
+    // a NON-passive producer that MEASURED a 5h window (its claim is not the file's — a panel, an OAuth reply, a
+    // banner) is a new answer with the window in it: every producer's count ends
     const w = quotaModel.windowOfKind(quotaModel.planLimit(next), '5h');
     if (!w) return false;
     const pw = quotaModel.windowOfKind(quotaModel.planLimit(prevSet), '5h');
     return !pw || quotaModel.windowClaimKey(pw) !== quotaModel.windowClaimKey(w);
-  })();
-  if (measured5h) witness = null;
+  })()) witnesses = Object.fromEntries(Object.entries(quotaModel.liveWitnesses(witnesses, at)).map(([k, e]) => [k, { ...e, n: 0 }]));
   const vNext = quotaModel.validateLimitSet(next);
   if (!vNext.ok) {
     const why = `refusing to write ${key}: the producer's limit set is malformed`;
@@ -466,11 +466,10 @@ function writeCacheObject({ cacheDir, key, obj, set = null, measuredAt = null, s
   }
   out.limits = merged.limits;
   delete out.windowChangeUnsaid; // a direct writer's unsaid change is said by THIS write (below) or by nobody
-  // the passive witness's raw fields are the FILE's (a producer's object may be a SIBLING's spread)
-  for (const k of ['planWeekSig', 'fiveHourAbsentWitnesses']) { if (prevObj && prevObj[k] !== undefined) out[k] = prevObj[k]; else delete out[k]; }
-  if (weekSig) out.planWeekSig = weekSig;
-  if (witness === null || quotaModel.absentSince(quotaModel.planLimit(merged), '5h')) delete out.fiveHourAbsentWitnesses;
-  else if (witness) out.fiveHourAbsentWitnesses = witness;
+  // the passive witnesses are a raw field of the FILE (a producer's object may be a SIBLING's spread): computed from
+  // the file's own above, never taken from `obj`
+  const liveW = witnesses && typeof witnesses === 'object' ? quotaModel.liveWitnesses(witnesses, at) : {};
+  if (Object.keys(liveW).length) out.fiveHourAbsentWitnesses = liveW; else delete out.fiveHourAbsentWitnesses;
   // THE STORED RESET-CREDIT COUNT survives a push that does not state it (r2,
   // reproduced: one passive codex push erased it from the file the roster and
   // the rung read). The producer's own count wins when it has one; else the
@@ -492,8 +491,11 @@ function writeCacheObject({ cacheDir, key, obj, set = null, measuredAt = null, s
     return { ok: false, why: 'write failed: ' + e.message };
   }
   // …or the change a DIRECT writer saw and left unsaid (the shipped statusline: `windowChangeUnsaid`) — said here
-  // once when the merged set agrees with it, and the marker never outlives this write.
-  const unsaid = (prevObj && prevObj.windowChangeUnsaid) || (obj && obj.windowChangeUnsaid) || null;
+  // once when the merged set agrees with it, and the marker never outlives this write. A marker belongs to the key
+  // that laid it: only the one ON the file being written, stamped with THIS key, is said — never one riding a
+  // producer's object (the capture and the banner spread the identity's freshest SIBLING; acceptance r3 MAJOR 1).
+  const pm = prevObj && prevObj.windowChangeUnsaid;
+  const unsaid = pm && typeof pm === 'object' && pm.key === key ? pm : null;
   const nowPlan = quotaModel.planLimit(merged);
   const unsaidHolds = !!(unsaid && unsaid.kind === '5h' && (unsaid.change === 'removed' ? !!quotaModel.absentSince(nowPlan, '5h') : unsaid.change === 'restored' ? !!quotaModel.windowOfKind(nowPlan, '5h') : false));
   const windowChange = replace ? null : (windowChangeOf(prevObj, prevSet, merged) || (unsaidHolds ? { kind: '5h', change: unsaid.change, at: Number(unsaid.at) || Date.now() } : null));

@@ -381,11 +381,13 @@ function ingestPassiveUsage() {
     const newest = (a && (!g || (a.fetchedAt || 0) > (g.fetchedAt || 0))) ? a : g;
     if (newest) {
       const meta = roster.find((x) => x.id === gid) || {};
+      // a fresher sibling's 5h window never outranks a file's own «no 5h limit» (lane no-5h-window r4): the
+      // tombstone is the file's, and only a reading written ON that file brings the window back
       if (newest !== g) {
         const { name, email, ...usage } = newest;
-        _rateLimitCache = usage; writeUsageCache();
+        _rateLimitCache = quotaModel.withOwnAbsence(usage, g); writeUsageCache();
       }
-      _accountUsage[gid] = { ...newest, name: meta.name, email: meta.email };
+      _accountUsage[gid] = { ...quotaModel.withOwnAbsence(newest, a), name: meta.name, email: meta.email };
     }
   }
 }

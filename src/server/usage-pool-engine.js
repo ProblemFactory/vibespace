@@ -495,7 +495,7 @@ function poolReadCache(poolId) {
     try { raw = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, id + '.json'), 'utf-8')); } catch { }
     try {
       for (const [, g] of usageIdentityGroupsCached()) {
-        if (g.accountIds.includes(id) && g.cache && (g.cache.fetchedAt || 0) > (raw?.fetchedAt || 0)) { raw = g.cache; break; }
+        if (g.accountIds.includes(id) && g.cache && (g.cache.fetchedAt || 0) > (raw?.fetchedAt || 0)) { raw = quotaModel.withOwnAbsence(g.cache, raw); break; } // a sibling's 5h never outranks this member's «no 5h limit» (no-5h-window r4)
       }
     } catch { }
     try { return estOverlayCache(raw, usageEstimator.estimateFor(id, raw, now)); } catch { return raw; }
@@ -2123,10 +2123,11 @@ function armCauseFor(v, demoted, armWall, evResetMs) {
   if (v.rejector) {
     const same = (a, b) => String(a || '').toLowerCase() === String(b || '').toLowerCase();
     const dead = Array.isArray(v.rejector.deadBuckets) ? v.rejector.deadBuckets : [];
-    const own = (demoted && Array.isArray(demoted.buckets) ? demoted.buckets : []).filter((b) => b && b.label).sort((a, b) => (b.until || 0) - (a.until || 0))[0] || null;
-    let ownWall = own ? { label: own.label, resetsAt: Number(own.until) || 0 }
+    const own = (demoted && Array.isArray(demoted.buckets) ? demoted.buckets : []).filter((b) => b && (b.label || b.unknownWindow)).sort((a, b) => (b.until || 0) - (a.until || 0))[0] || null;
+    let ownWall = own && own.unknownWindow ? { label: null, unknownWindow: true, resetsAt: Number(own.until) || 0 }
+      : own ? { label: own.label, resetsAt: Number(own.until) || 0 }
       : armWall && armWall.bucket ? { label: armWall.bucket === 'scoped' ? (armWall.scopedName || 'model cap') : (BUCKET_LABEL[armWall.bucket] || armWall.bucket), resetsAt: Number(evResetMs) || 0 } : null;
-    if (ownWall) {
+    if (ownWall && !ownWall.unknownWindow) {
       const m = dead.find((b) => same(b.label, ownWall.label));
       if (m) ownWall = { label: m.label, resetsAt: ownWall.resetsAt || m.resetsAt || 0 };
     }
@@ -2968,8 +2969,10 @@ function demoteWalledAccount(session, sigs) {
     // else's wall, so re-filing the numbers while leaving the demotion behind
     // would fix the panel and keep the cost.
     if (dest.id !== member.id) noteSessionWall(session._webuiId, dest.id, now);
-    // a GUESSED 5h wall on a «no 5h» member names no window it cannot know (lane no-5h-window r3)
-    const label = b.kind === 'scoped' ? b.scopedName : (b.guessed && b.kind === 'fiveHour' && quotaModel.fiveHourAbsent(readRawUsageCache(dest.id))) ? 'window unknown' : BUCKET_LABEL[b.kind] || b.kind;
+    // a GUESSED 5h wall on a «no 5h» member names no window it cannot know (lane no-5h-window r3): no label at all —
+    // `unknownWindow` says so, and the card's sentence words it (r4: the raw English token reached the zh card)
+    const unknownWindow = !!(b.kind !== 'scoped' && b.guessed && b.kind === 'fiveHour' && quotaModel.fiveHourAbsent(readRawUsageCache(dest.id)));
+    const label = b.kind === 'scoped' ? b.scopedName : unknownWindow ? null : BUCKET_LABEL[b.kind] || b.kind;
     let until = 0;
     try {
       const c = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, String(dest.id).replace(/[^\w.-]/g, '_') + '.json'), 'utf-8'));
@@ -2977,9 +2980,9 @@ function demoteWalledAccount(session, sigs) {
       until = (Number(bk?.resetsAt) || 0) * 1000;
     } catch { }
     const why = b.why || (slotMatch ? 'credential slot' : walls + '-walls');
-    console.log(`[wall] demoted ${dest.name} ${label} until ${until ? new Date(until).toISOString() : 'unknown'} (${walls} walls / ${why})`);
-    global.__vsEvent?.('wall-demote', `${dest.id}:${label}:${why}`);
-    done.push({ label, until });
+    console.log(`[wall] demoted ${dest.name} ${label || 'window unknown'} until ${until ? new Date(until).toISOString() : 'unknown'} (${walls} walls / ${why})`);
+    global.__vsEvent?.('wall-demote', `${dest.id}:${label || 'window-unknown'}:${why}`);
+    done.push({ label, until, ...(unknownWindow ? { unknownWindow: true } : {}) });
   }
   // (the write's fresh fetchedAt busts the estimator memo by itself — estimateFor re-anchors on a newer rawCache)
   return { demoted: done.length > 0, reason: done.length ? 'demoted' : 'no-bucket', key: member.id, walls, slotMatch, buckets: done };
@@ -3525,7 +3528,7 @@ function recordRateLimitEventNow(session, msg) {
     }
     // the lane is named on the key it LANDS on (the guard may have moved it)
     if (writeKey !== preKey && (ev.modelCap || (ev.windows && ev.windows.modelCap))) ev = nameCap(writeKey);
-    const r = captureRateLimitEvent({ cacheDir: USAGE_CACHE_DIR, key: writeKey, identityIds: usageIdentityAccountIds(writeKey), ev, hint: capHint });
+    const r = captureRateLimitEvent({ cacheDir: USAGE_CACHE_DIR, key: writeKey, identityIds: usageIdentityAccountIds(writeKey), ev, hint: capHint, producer: session._webuiId ? 'ev:' + session._webuiId : null });
     if (r.unknownType) { global.__vsEvent?.('rate-limit-event-unknown-type', r.unknownType); postCheck(); return; }
     // THE LANE DECISION IS SAID, like resolveTurnLane says its own: a model-cap
     // rejection names the cap it marked (or the placeholder) and which rung
@@ -5379,6 +5382,10 @@ function markLimitBannerNow(session, text) {
     cache.fetchedAt = Date.now(); cache.source = 'limit-banner';
     delete cache.corroborated; // the OTel label corroborates nothing (lane-hot-switch) — no stamp, and none carried over
     delete cache.limits; // the freshest SIBLING's limits describe another file's windows — never carry them here
+    // …nor its window BOOKKEEPING (lane no-5h-window r4, acceptance r3 MAJOR 1): a sibling's unsaid change marker and
+    // witnesses are its own file's, and its tombstone is not this key's (the rate-limit-capture twin)
+    delete cache.windowChangeUnsaid; delete cache.fiveHourAbsentWitnesses;
+    if (base !== ownFile) { if (tomb5h(ownFile)) cache.fiveHourAbsent = ownFile.fiveHourAbsent; else delete cache.fiveHourAbsent; }
     usageWrite.writeCacheObject({ cacheDir: USAGE_CACHE_DIR, key, obj: cache, measuredAt: cache.fetchedAt, source: 'limit-banner', familyOf: familyOfScopedBucket, backend: 'claude' });
     for (const id of ids) {
       if (id === key) continue;
@@ -5900,7 +5907,9 @@ function credsTokenSig(id) {
 // account keeps a temporary one until it is verified. The write path (usage-cache-write `windowChangeOf`) reports
 // each CHANGE of a member's plan — the 5h window it had is gone (an enumerating, identity-proved reading said so),
 // or a member without one holds one again — once per change, never per probe (the next write already sees the new
-// shape). Said ONCE to the owner: one journal line + one For-you notice naming the member by its label.
+// shape). Said ONCE to the owner: one journal line + one For-you notice naming the member by its label — ONE item per
+// member (r4, acceptance r3 minor): «lifted» and «back» are the same item's two states, so filing one replaces the
+// other's words and an open contradiction can never stand beside it.
 const WINDOW_REMOVED_TEXT = i18nKey("{account}'s 5-hour limit was lifted by Anthropic (since {since}): the pool now counts only its weekly limit");
 const WINDOW_REMOVED_DETAIL = i18nKey('Its usage reading no longer lists a 5-hour window, so the pool counts only its weekly limits. The usage popup says so on its row — nothing needs doing.');
 const WINDOW_RESTORED_TEXT = i18nKey("{account}'s 5-hour limit is back (since {since}): the pool counts its 5-hour window again");
@@ -5923,7 +5932,7 @@ function noteWindowChange({ key, kind, change, at } = {}) {
     const fill = (tpl) => tpl.replace(/\{(\w+)\}/g, (m0, k) => (params[k] !== undefined ? String(params[k]) : m0));
     return todos.add('webui:usage-window', {
       origin: 'pool', kind: 'notice', urgency: 'normal',
-      text: fill(TEXT), detail: DETAIL, itemKey: `5h-window:${key}:${change}`,
+      text: fill(TEXT), detail: DETAIL, itemKey: `5h-window:${key}`,
       i18n: { text: { key: TEXT, params }, detail: [{ key: DETAIL, params: {} }] },
     });
   } catch (e) { console.warn('[pool] window: could not file the For-you notice:', e.message); return null; }
@@ -7128,7 +7137,7 @@ function maybePoolAutoSwitchForPool(poolId, { force = false, now: nowIn = null, 
       // frozen at 01:23. Read through the IDENTITY GROUP: freshest file wins.
       try {
         for (const [, g] of usageIdentityGroupsCached()) {
-          if (g.accountIds.includes(id) && g.cache && (g.cache.fetchedAt || 0) > (raw?.fetchedAt || 0)) { raw = g.cache; break; }
+          if (g.accountIds.includes(id) && g.cache && (g.cache.fetchedAt || 0) > (raw?.fetchedAt || 0)) { raw = quotaModel.withOwnAbsence(g.cache, raw); break; } // a sibling's 5h never outranks this member's «no 5h limit» (no-5h-window r4)
         }
       } catch { }
       try { return estOverlayCache(raw, usageEstimator.estimateFor(id, raw, now)); } catch { return raw; }

@@ -229,11 +229,14 @@ function armNoticeFor(armReason, resetsAtMs, nowMs, cause) {
     const s = c.soonest, r = c.rejector;
     const sb = s.bucket && s.bucket.label ? s.bucket : null;
     if (r && r.name && r.id && r.id === s.id) {
-      const lab = (r.ownWall && r.ownWall.label) || (sb && sb.label) || '';
       // the STATED reset is named; the continue itself follows about a minute
       // later (RESET_GRACE_SEC in the pool verdict — the vendor lands a stated
       // reset late, owner 2026-09-18: "稍微等一分钟再发自动恢复")
       const stated = sb && sb.resetsAt ? Number(sb.resetsAt) : resetsAtMs;   // the cause carries ms
+      // a member with no 5-hour limit hit a limit whose window the banner did not name (lane no-5h-window r4): the
+      // sentence says the window is unknown — never a window it cannot know, never a raw token
+      if (r.ownWall && r.ownWall.unknownWindow) return `${r.name} 的限额窗口未知（它没有 5 小时限额），将按它最早的重置时间 ${fmt(stated)} 等待，重置约 1 分钟后自动继续这个任务（状态栏可取消）。`;
+      const lab = (r.ownWall && r.ownWall.label) || (sb && sb.label) || '';
       return `${r.name} 的${lab ? ' ' + lab + ' ' : ''}将在 ${fmt(stated)} 重置，重置约 1 分钟后自动继续这个任务（状态栏可取消）。`;
     }
     let head = '用量已达上限。';

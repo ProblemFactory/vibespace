@@ -3302,7 +3302,7 @@ console.log('\n㉑3e/㉑3f «no 5h limit» at the wall (lane no-5h-window r3)');
   const listen = (f) => { if (typeof usageWriteM.onWindowChange === 'function') usageWriteM.onWindowChange(f); };
   const absentOf = (c) => (typeof quotaModelM.fiveHourAbsent === 'function' ? quotaModelM.fiveHourAbsent(c) : null);
   // the four records of a walled turn whose stream states NO 5h window (the plan week only), then a banner
-  const playNo5h = (w, { banner, rawType = 'seven_day', member = 'wmax', sid = 'sess-6' }) => {
+  const playNo5h = (w, { banner, rawType = 'seven_day', member = 'wmax', sid = 'sess-6', midTurn = null }) => {
     const { so } = mkStdout(w);
     const s = w.sessions.get(sid);
     s._normalizer = createMessageManager('claude', sid);
@@ -3312,6 +3312,7 @@ console.log('\n㉑3e/㉑3f «no 5h limit» at the wall (lane no-5h-window r3)');
     const cap = quiet();
     pty.data(JSON.stringify({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected', rateLimitType: rawType, resetsAt: RESET, resets_at: RESET, overageStatus: 'rejected', isUsingOverage: false, unifiedWindows: { seven_day: { utilization: 0.65, resetsAt: RESET } } } }) + '\n');
     if (banner) pty.data(JSON.stringify({ type: 'assistant', message: { model: '<synthetic>', content: [{ type: 'text', text: banner }] } }) + '\n');
+    if (midTurn) midTurn(s); // the turn's state BEFORE `result` (noteTurnEnd clears the banner lane — acceptance r3 F3)
     pty.data(JSON.stringify({ type: 'result', subtype: 'success', session_id: 'cid-' + sid }) + '\n');
     return { lines: cap.done(), reset: RESET };
   };
@@ -3327,7 +3328,8 @@ console.log('\n㉑3e/㉑3f «no 5h limit» at the wall (lane no-5h-window r3)');
       listen((c) => changes.push(c));
       w.mkSession('sess-6', 'wmax', { _spawnModel: 'claude-fable-5-1[1m]' });
       const before = w.readCache(w.id.wmax);
-      const { reset } = playNo5h(w, { banner: "You've reached your usage limit." });
+      let mid = null;
+      const { reset } = playNo5h(w, { banner: "You've reached your usage limit.", midTurn: (s) => { mid = { lane: s._turnBannerLane ? { ...s._turnBannerLane } : null, deferred: (s._turnLaneDefer || []).length }; } });
       const after = w.readCache(w.id.wmax);
       const s = w.sessions.get('sess-6');
       ok('㉑3e setup: the member is lifted (no 5h window, a tombstone) and the banner is a GUESSED 5h wall',
@@ -3335,8 +3337,9 @@ console.log('\n㉑3e/㉑3f «no 5h limit» at the wall (lane no-5h-window r3)');
       ok(`㉑3e the guessed banner keeps the base wall KIND: the plan WEEK is not marked limited for days (7d ${after.sevenDay && after.sevenDay.utilization} / ${after.sevenDay && after.sevenDay.status}, reset in ${Math.round(((after.sevenDay && after.sevenDay.resetsAt) - w.nowSec) / 3600)} h)`,
         !!after.sevenDay && after.sevenDay.utilization < 1 && after.sevenDay.status !== 'limited',
         JSON.stringify(after.sevenDay));
-      ok('㉑3e …and never decides the lane: no banner lane is remembered for the turn (the deferral is the evidence rule\'s)',
-        !(s._turnBannerLane && s._turnBannerLane.kind === 'sevenDay'), JSON.stringify(s._turnBannerLane || null));
+      ok('㉑3e …and never decides the lane: read MID-TURN (before `result` clears it), no banner lane is remembered and the deferral is still pending (the evidence rule\'s)',
+        !!mid && !(mid.lane && mid.lane.kind === 'sevenDay') && mid.deferred >= 1, JSON.stringify(mid));
+      void s;
       ok('㉑3e …and it has no 5h window to mark on a lifted member: still no fiveHour, the tombstone stands, nothing said',
         !after.fiveHour && absentOf(after) > 0 && !changes.some((c) => c.key === w.id.wmax), JSON.stringify({ f5: after.fiveHour, ch: changes }));
       void reset;
@@ -3362,6 +3365,24 @@ console.log('\n㉑3e/㉑3f «no 5h limit» at the wall (lane no-5h-window r3)');
         !after.fiveHour && absentOf(after) > 0 && !changes.slice(n0).some((c) => c.key === w.id.wmax && c.change === 'restored'),
         JSON.stringify({ f5: after.fiveHour, abs: after.fiveHourAbsent, ch: changes.slice(n0) }));
       ok('㉑3f …and the banner still marked what it NAMED (the plan week walled)', !!after.sevenDay && (after.sevenDay.status === 'limited' || after.sevenDay.utilization >= 1), JSON.stringify(after.sevenDay));
+    }
+  }
+  { // ㉑3h — a SIBLING's unsaid change marker never rides the banner's freshest-sibling spread (acceptance r3 MAJOR 1)
+    const w = mkWorld({ sameDeadline: true });
+    if (!w) ok('㉑3h SKIP — pools unsupported on this platform', true);
+    else {
+      const own = w.readCache(w.id.wmax);
+      w.writeCache(w.id.wmax, { ...own, orgUuid: 'org-n5h-merged' }); // an ordinary member: its own 5h window, never lifted
+      // the org-merged machine login, FRESHER, whose own statusline saw its 5h window come back and left it UNSAID
+      w.writeCache('__global__', { fetchedAt: Date.now() + 5000, source: 'passive', orgUuid: 'org-n5h-merged', fiveHour: { utilization: 0.2, resetsAt: w.nowSec + 3600 }, sevenDay: { utilization: 0.6, resetsAt: w.resets.wmax }, scopedWeekly: [],
+        windowChangeUnsaid: { kind: '5h', change: 'restored', at: Date.now(), key: '__global__' } });
+      const n0 = changes.length;
+      listen((c) => changes.push(c));
+      w.mkSession('sess-6', 'wmax', { _spawnModel: 'claude-opus-4-8' });
+      playNo5h(w, { banner: "You've reached your weekly usage limit." });
+      const after = w.readCache(w.id.wmax);
+      ok('㉑3h markLimitBannerNow on a member that never changed, with a fresher sibling holding an unsaid «back», files nothing on the member (the marker is the sibling\'s own) and carries no marker onto it',
+        !changes.slice(n0).some((c) => c.key === w.id.wmax) && !after.windowChangeUnsaid && !!after.fiveHour, JSON.stringify({ ch: changes.slice(n0), mk: after.windowChangeUnsaid || null }));
     }
   }
   listen(null);

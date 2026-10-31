@@ -11682,4 +11682,5 @@ export default {
   "Its usage reading no longer lists a 5-hour window, so the pool counts only its weekly limits. The usage popup says so on its row — nothing needs doing.": "使用量の読み取りに 5 時間ウィンドウが含まれなくなったため、プールは週間制限だけを数えます。使用量ポップアップのその行にも表示されます——対応は不要です。",
   "{account}'s 5-hour limit is back (since {since}): the pool counts its 5-hour window again": "{account} の 5 時間制限が戻りました（{since} 以降）：プールは再び 5 時間ウィンドウを数えます",
   "Its usage reading lists a 5-hour window again, so the pool counts it again.": "使用量の読み取りに再び 5 時間ウィンドウが含まれるため、プールは再びそれを数えます。",
+  "{m}: its limit window is unknown (it has no 5-hour limit).": "{m}：制限ウィンドウは不明です（5 時間制限はありません）。",
 };

@@ -3204,7 +3204,8 @@ const mkIncidentWorld = ({ stampWindows = true } = {}) => {
     ok('§16c SOURCE PIN: `data/usage-cache.json` really is the `__global__` slot\'s other home — one reader, one writer, and the same-account merge writes the NAMED subscription\'s snapshot into it',
       /const USAGE_CACHE_FILE = path\.join\(__dirname, 'data', 'usage-cache\.json'\);/.test(read('server.js'))
       && /function readUsageCache\(\) \{[\s\S]{0,200}JSON\.parse\(fs\.readFileSync\(USAGE_CACHE_FILE, 'utf-8'\)\)[\s\S]{0,80}cached\?\.claude/.test(read('src/usage-routes.js'))
-      && /const \{ name, email, \.\.\.usage \} = newest;\s*\n\s*_rateLimitCache = usage; writeUsageCache\(\);/.test(read('src/usage-routes.js'))
+      // (lane no-5h-window r4: the merged snapshot keeps the slot's OWN «no 5h limit» — quota-model withOwnAbsence)
+      && /const \{ name, email, \.\.\.usage \} = newest;\s*\n\s*_rateLimitCache = (?:quotaModel\.withOwnAbsence\(usage, g\)|usage); writeUsageCache\(\);/.test(read('src/usage-routes.js'))
       // …and the wrapper holds NOTHING but that payload, which is why archiving
       // `.claude` archives the whole file
       && /fs\.writeFileSync\(tmpPath, JSON\.stringify\(\{ claude: _rateLimitCache \}, null, 2\)\);/.test(read('src/usage-routes.js')), '');

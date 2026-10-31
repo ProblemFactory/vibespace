@@ -338,6 +338,97 @@ function fiveHourAbsent(cache) {
   return posNum(cache.fiveHourAbsent);
 }
 
+/** A SIBLING's reading read in place of a member's own file (the identity group's freshest file — the pool's
+ *  readCache, the Usage popup's same-account merge) keeps the member's own «no 5h limit»: a sibling's 5h window never
+ *  outranks the member's tombstone; only a reading written ON the member's file brings the window back (the write
+ *  path's own settle). Returns the reading itself when the member has no tombstone or IS the reading. */
+function withOwnAbsence(reading, own) {
+  const since = fiveHourAbsent(own);
+  if (!since || !reading || typeof reading !== 'object' || reading === own) return reading;
+  const out = { ...reading, fiveHourAbsent: since };
+  delete out.fiveHour;
+  if (Array.isArray(out.limits)) out.limits = out.limits.map((l) => (l && l.scope === 'plan' ? markWindowsAbsent(l, ['5h'], since) : l));
+  return out;
+}
+
+// >>> 5h-witness mirror (src/quota-model.js) — keep byte-identical
+// THE PASSIVE WITNESS, COUNTED PER PRODUCER (lane no-5h-window r4, acceptance r3 BLOCKER). A passive answer — a
+// statusline render, a stream `rate_limit_event` — is ONE claude process's own rate-limit state, and the CLI drops a
+// window whose reset passed from it (2.1.314), so «the week and no five_hour» is every member's shape after its 5h
+// reset. It is evidence only when it carries a NEW API answer: the week moved FORWARD against THAT producer's own
+// previous reading (a later week, or the same week at a strictly higher %). The usage file is shared by every
+// session on the account, so the file's last writer is no baseline: two sessions holding different stale weeks would
+// alternate and read as movement. So each producer keeps its own `{n, lastSig, at}` (dropped after 24 h); a
+// producer's first answer only sets its baseline; TWO moved answers from the SAME producer lay the tombstone. A
+// stated 5h window ends that producer's count, and every count when it is itself a new answer. On a «no 5h» file a
+// stated 5h window RESTORES only when it is newer than the tombstone — it began at or after the instant the tombstone
+// was laid, or its producer's week moved (a new answer that has a 5h window); one that began before it is a session
+// that never saw the lift (STALE: kept out, nothing said). Spelled once here; the shipped statusline (a single file
+// that cannot require src/) carries these bytes between the same sentinels, pinned by test-quota-model §㉑.
+const FIVE_HOUR_SEC = 5 * 3600;
+const PASSIVE_WITNESSES = 2;
+const WITNESS_TTL_MS = 24 * 3600e3;
+const WITNESS_PRODUCERS_MAX = 16;
+const SAME_WEEK_SEC = 3600; // one weekly window's reset, spelled by one producer, never moves this far
+/** The plan week as a passive producer read it, `7d:<integer %>@<reset s>` — or null (no week, no reset). */
+function planWeekSigOf(win) {
+  return win && typeof win.utilization === 'number' && Number(win.resetsAt) > 0 ? `7d:${Math.round(win.utilization * 100)}@${Number(win.resetsAt)}` : null;
+}
+function weekSigParts(sig) {
+  const m = /^7d:(\d+)@(\d+)$/.exec(typeof sig === 'string' ? sig : '');
+  return m ? { pct: Number(m[1]), reset: Number(m[2]) } : null;
+}
+/** Did the week move FORWARD from `prevSig` to `sig`? A later week, or the same week at a strictly higher %. An
+ *  older or lower reading — another session's stale state — never moves it. */
+function weekMovedForward(prevSig, sig) {
+  const a = weekSigParts(prevSig), b = weekSigParts(sig);
+  if (!a || !b) return false;
+  if (b.reset - a.reset > SAME_WEEK_SEC) return true;
+  return Math.abs(b.reset - a.reset) <= SAME_WEEK_SEC && b.pct > a.pct;
+}
+/** The file's per-producer witnesses, bounded: none older than 24 h, the newest WITNESS_PRODUCERS_MAX kept. */
+function liveWitnesses(witnesses, now) {
+  const src = witnesses && typeof witnesses === 'object' && !Array.isArray(witnesses) ? witnesses : {};
+  const rows = [];
+  for (const p of Object.keys(src)) {
+    const e = src[p];
+    if (!e || typeof e !== 'object' || typeof e.lastSig !== 'string' || !(Number(e.at) > 0) || now - Number(e.at) > WITNESS_TTL_MS) continue;
+    rows.push([p, { n: Number(e.n) > 0 ? Math.floor(Number(e.n)) : 0, lastSig: e.lastSig, at: Number(e.at) }]);
+  }
+  rows.sort((x, y) => y[1].at - x[1].at);
+  const out = {};
+  for (const [p, e] of rows.slice(0, WITNESS_PRODUCERS_MAX)) out[p] = e;
+  return out;
+}
+/** ONE PASSIVE ANSWER, COUNTED (pure). `witnesses` = the file's; `producer` = the session that read it (null = not
+ *  countable: a replay, a re-drive); `sig` = planWeekSigOf(its week); `fiveHour` = the 5h window it STATED
+ *  ({resetsAt} s) or null; `absent5h` = it read the week and no five_hour; `absentAt` = the file's tombstone (ms) or 0.
+ *  ⇒ { witnesses (to store), moved, lay (lay the tombstone), restore (the stated 5h window is back), stale (the
+ *  stated 5h window is older than the tombstone: keep it out, say nothing) }. */
+function countPassiveAnswer({ witnesses, producer, sig, fiveHour, absent5h, absentAt, now }) {
+  const w = liveWitnesses(witnesses, now);
+  const p = typeof producer === 'string' && producer ? producer.slice(0, 120) : null;
+  const prev = p ? w[p] : null;
+  const moved = !!(prev && sig && weekMovedForward(prev.lastSig, sig));
+  const res = { witnesses: w, moved, lay: false, restore: false, stale: false };
+  if (p && sig) w[p] = { n: prev ? prev.n : 0, lastSig: !prev || moved || !weekSigParts(prev.lastSig) ? sig : prev.lastSig, at: now };
+  const since = Number(absentAt) > 0 ? Number(absentAt) : 0;
+  const endAll = () => { for (const k of Object.keys(w)) w[k].n = 0; };
+  if (fiveHour) {
+    if (since) {
+      if (moved || ((Number(fiveHour.resetsAt) || 0) - FIVE_HOUR_SEC) * 1000 >= since) res.restore = true;
+      else res.stale = true;
+    }
+    if (p && sig) w[p].n = 0;
+    if (moved || res.restore) endAll();
+  } else if (absent5h && !since && moved) {
+    w[p].n += 1;
+    if (w[p].n >= PASSIVE_WITNESSES) { res.lay = true; endAll(); }
+  }
+  return res;
+}
+// <<< 5h-witness mirror
+
 // ── the validator ───────────────────────────────────────────────────────────
 
 /** REJECT A MALFORMED SET, WITH THE REASONS. Called at the write path, which
@@ -1496,6 +1587,7 @@ module.exports = {
   markScopedEnumeration, scopedEnumeration, scopedNamedCount, authoritativeScopesOf, SCOPED_ENUMERATED,
   // a window the vendor removed (lane no-5h-window): «no 5h limit» ≠ «5h window not started»
   absentSince, settleAbsence, markWindowsAbsent, markWindowEnumeration, absentWindowsOf, fiveHourAbsent, WINDOWS_ABSENT,
+  withOwnAbsence, PASSIVE_WITNESSES, FIVE_HOUR_SEC, planWeekSigOf, weekMovedForward, liveWitnesses, countPassiveAnswer,
   // panels
   orderLimits, limitLabel, limitState,
   // the wall's own attribution (inc-mttbrtc0-6049)

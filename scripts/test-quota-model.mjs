@@ -2249,6 +2249,11 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
   const said = [];
   const listen = fnOf(W, 'onWindowChange');
   if (listen) listen((c) => said.push(c));
+  // a file's passive witnesses (r4: per PRODUCER, `{<producer>: {n, lastSig, at}}`; r3's flat `{n}` read as one count, so
+  // a leg run against the r3 tree names its reds instead of crashing)
+  const WMAP = (f) => { const w = f && f.fiveHourAbsentWitnesses; return !w || typeof w !== 'object' ? {} : typeof w.n === 'number' ? { '(file)': w } : w; };
+  const WN = (f, producer) => { const m = WMAP(f); return Number((m[producer] || m['(file)'] || {}).n) || 0; };
+  const maxN = (f) => Math.max(0, ...Object.values(WMAP(f)).map((e) => Number(e && e.n) || 0));
 
   // ── rule 1 + 4: the PARSE ────────────────────────────────────────────────
   const pNo = CQ.parseCliUsageText(PANEL_NO5H, Date.now());
@@ -2333,16 +2338,18 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
     ok((UR.match(/absentWindows: quotaModel\.absentWindowsOf\(u\)/g) || []).length === 5,
       '㉑4b the token-ladder / device rungs (one OAuth reply each, the account\'s own token) hand over their parse\'s claim — 5 sites');
   }
-  const evBack = CAP.parseRateLimitEvent({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed', rateLimitType: 'five_hour', utilization: 0.1, resetsAt: nowSec + 4 * 3600 } });
+  // the RETURN is a 5h window NEWER than the removal — it began after the tombstone was laid (r4: one that began before
+  // it is a session that never saw the lift, ㉑7b)
+  const evBack = CAP.parseRateLimitEvent({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed', rateLimitType: 'five_hour', utilization: 0.1, resetsAt: Math.floor(Date.now() / 1000) + 5 * 3600 + 60 } });
   const rb = CAP.captureRateLimitEvent({ cacheDir: dir, key: K, identityIds: [K], ev: evBack, now: Date.now() + 1000 });
   const fb = readJ(dir, K);
   ok(rb.ok && fb.fiveHour && Math.abs(fb.fiveHour.utilization - 0.1) < 1e-9 && !fb.fiveHourAbsent && said.length === 2 && said[1].change === 'restored',
-    `㉑2c a 5h reading after the removal brings the window BACK and is said the same way (restored) — said ${JSON.stringify(said.map((x) => x.change))}`);
+    `㉑2c a 5h window that BEGAN after the removal brings the window BACK and is said the same way (restored) — said ${JSON.stringify(said.map((x) => x.change))}`);
   // THE STREAM IS A PASSIVE ANSWER (r3, acceptance r2 BLOCKER): the CLI drops a passed window from `unifiedWindows`
   // (2.1.314 `xd`), so a week-only record counts as ONE witness, and only when the week MOVED since the previous reading.
   const evWeek = (pct, extra = {}) => CAP.parseRateLimitEvent({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed', rateLimitType: 'seven_day', utilization: pct / 100, resetsAt: nowSec + 3 * 86400, unifiedWindows: { seven_day: { utilization: pct / 100, resets_at: nowSec + 3 * 86400 } }, ...extra } });
   const ev5 = (pct5) => CAP.parseRateLimitEvent({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed', rateLimitType: 'five_hour', utilization: pct5 / 100, resetsAt: nowSec + 4 * 3600, unifiedWindows: { five_hour: { utilization: pct5 / 100, resets_at: nowSec + 4 * 3600 }, seven_day: { utilization: 0.44, resets_at: nowSec + 3 * 86400 } } } });
-  const capture = (d, key, ev, ids = [key], cap = CAP) => cap.captureRateLimitEvent({ cacheDir: d, key, identityIds: ids, ev, now: Date.now() });
+  const capture = (d, key, ev, ids = [key], cap = CAP, producer = 'ev:qm21') => cap.captureRateLimitEvent({ cacheDir: d, key, identityIds: ids, ev, now: Date.now(), producer });
   {
     const d3 = mkd('e'), K3 = 'sub-n5h-ev';
     seed5h(d3, K3);
@@ -2352,17 +2359,17 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
     const f1 = readJ(d3, K3);
     capture(d3, K3, evWeek(41));                       // the week MOVED, no five_hour: witness 1
     const f2 = readJ(d3, K3);
-    ok(f1.fiveHour && f1.fiveHour.utilization === 0.84 && !f1.fiveHourAbsent && !f1.fiveHourAbsentWitnesses && f2.fiveHour && !f2.fiveHourAbsent && f2.fiveHourAbsentWitnesses && f2.fiveHourAbsentWitnesses.n === 1 && said.length === n0,
+    ok(f1.fiveHour && f1.fiveHour.utilization === 0.84 && !f1.fiveHourAbsent && maxN(f1) === 0 && f2.fiveHour && !f2.fiveHourAbsent && WN(f2, 'ev:qm21') === 1 && said.length === n0,
       `㉑2d a week-only stream record is NOT proof: the stored 5h window stays (unconfirmed), one MOVED answer is witness 1 — ${JSON.stringify({ f1: !!f1.fiveHour, w2: f2.fiveHourAbsentWitnesses })}`);
     capture(d3, K3, evWeek(42));                       // witness 2 — a second, distinct API answer
     const f3 = readJ(d3, K3);
-    ok(f3.fiveHour === undefined && f3.fiveHourAbsent > 0 && !f3.fiveHourAbsentWitnesses && said.slice(n0).filter((x) => x.key === K3 && x.change === 'removed').length === 1,
+    ok(f3.fiveHour === undefined && f3.fiveHourAbsent > 0 && maxN(f3) === 0 && said.slice(n0).filter((x) => x.key === K3 && x.change === 'removed').length === 1,
       '㉑2d …the SECOND moved answer lays the tombstone and the removal is said ONCE');
     const d3b = mkd('e2'), K3b = 'sub-n5h-ev2';
     seed5h(d3b, K3b);
-    capture(d3b, K3b, evWeek(40)); capture(d3b, K3b, evWeek(41)); capture(d3b, K3b, ev5(3)); capture(d3b, K3b, evWeek(43));
+    capture(d3b, K3b, evWeek(40)); capture(d3b, K3b, evWeek(41)); capture(d3b, K3b, ev5(3)); capture(d3b, K3b, evWeek(45)); // ev5 reads the week at 44
     const fb3 = readJ(d3b, K3b);
-    ok(fb3.fiveHour && !fb3.fiveHourAbsent && fb3.fiveHourAbsentWitnesses && fb3.fiveHourAbsentWitnesses.n === 1,
+    ok(fb3.fiveHour && !fb3.fiveHourAbsent && WN(fb3, 'ev:qm21') === 1,
       '㉑2d …a five_hour answer between two moved ones ENDS the count (witness 1 again, never 2 — no flap)');
     // THE SIBLING BASE: the capture spreads the identity group's FRESHEST file — a sibling may still hold the 5h window
     const SIB = 'sub-n5h-sib', n1 = said.length;
@@ -2381,14 +2388,16 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
   // shape of EVERY member). Only TWO renders whose week MOVED, without five_hour, lay the tombstone; the hub's 30-s
   // passive ingest settles the unsaid marker through the write path: said once, cleared.
   const { execFileSync } = await import('child_process');
-  const renderSL = (toolArgs, d, key, rl) => {
-    const payload = JSON.stringify({ session_id: 'sess-qm21', model: { id: 'claude-fable-5', display_name: 'Fable 5' }, rate_limits: rl });
+  const renderSL = (toolArgs, d, key, rl, sid = 'sess-qm21') => {
+    const payload = JSON.stringify({ session_id: sid, model: { id: 'claude-fable-5', display_name: 'Fable 5' }, rate_limits: rl });
     const f = W.cacheFileFor(d, key); try { const old = (Date.now() - 60000) / 1000; fs.utimesSync(f, old, old); } catch { }
     execFileSync(toolArgs[0], toolArgs.slice(1), { input: payload, encoding: 'utf8', env: { ...process.env, VIBESPACE_USAGE_CACHE: d, VIBESPACE_ACCOUNT_KEY: key, HOME: d } });
     try { return readJ(d, key); } catch { return null; }
   };
   const RLW = (pct) => ({ seven_day: { used_percentage: pct, resets_at: nowSec + 200000, status: 'allowed' } });
   const RL5 = (pct) => ({ five_hour: { used_percentage: 12, resets_at: nowSec + 3600, status: 'allowed' }, ...RLW(pct) });
+  // a 5h window that BEGINS now — after any tombstone this suite lays (the RETURN; r4: an older one is stale, ㉑7b)
+  const RL5new = (pct) => ({ five_hour: { used_percentage: 3, resets_at: Math.floor(Date.now() / 1000) + 5 * 3600 + 60, status: 'allowed' }, ...RLW(pct) });
   // the passive ingest's settle, spelled as src/usage-routes.js ingestPassiveUsage spells it
   const settle = (d, key, wcm = W) => wcm.writeCacheObject({ cacheDir: d, key, obj: readJ(d, key), familyOf: familyOfScopedBucket, backend: 'claude' });
   const TOOL21 = path.join(ROOT, 'data/bin/vibespace-usage');
@@ -2402,12 +2411,12 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
     const r2 = renderSL(toolArgs, d, key, RLW(48));         // witness 2: the tombstone + ONE unsaid marker
     const settled = st();
     const again = renderSL(toolArgs, d, key, RLW(48)); st();
-    const back = renderSL(toolArgs, d, key, RL5(48));
+    const back = renderSL(toolArgs, d, key, RL5new(48));
     const backSettled = st();
     return { key, r0, r1, r2, settled, again, back, backSettled, got };
   };
   const E2E = e2e([TOOL21]);
-  ok(E2E.r0.fiveHour && E2E.r0.fiveHour.utilization === 0.71 && !E2E.r0.fiveHourAbsent && E2E.r1.fiveHour && E2E.r1.fiveHourAbsentWitnesses && E2E.r1.fiveHourAbsentWitnesses.n === 1 && !E2E.r1.fiveHourAbsent,
+  ok(E2E.r0.fiveHour && E2E.r0.fiveHour.utilization === 0.71 && !E2E.r0.fiveHourAbsent && E2E.r1.fiveHour && WN(E2E.r1, 'sl:sess-qm21') === 1 && !E2E.r1.fiveHourAbsent,
     `㉑1k the statusline keeps the file's last stated 5h window (never a fabricated 0 % 'unknown' one) through a render without five_hour; one MOVED render is witness 1, no tombstone — ${JSON.stringify({ r0: E2E.r0.fiveHour, w1: E2E.r1.fiveHourAbsentWitnesses })}`);
   ok(E2E.r2.fiveHour === undefined && E2E.r2.fiveHourAbsent > 0 && E2E.r2.windowChangeUnsaid && E2E.r2.windowChangeUnsaid.change === 'removed' && SINCE(planOf(E2E.r2, E2E.key), '5h') > 0,
     '㉑1k …the SECOND moved render drops the 5h bucket, writes the dated tombstone the lift reads back, and leaves ONE unsaid marker');
@@ -2416,7 +2425,7 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
   ok(!E2E.again.windowChangeUnsaid && E2E.again.fiveHourAbsent === E2E.r2.fiveHourAbsent,
     '㉑2f …never per render: the next render keeps the tombstone at the instant it was FIRST said, and leaves nothing to say');
   ok(E2E.back.fiveHour && E2E.back.windowChangeUnsaid && E2E.back.windowChangeUnsaid.change === 'restored' && E2E.got[E2E.got.length - 1] === 'restored' && !E2E.backSettled.fiveHourAbsent && !E2E.backSettled.windowChangeUnsaid,
-    '㉑2f a render that states five_hour again brings the window BACK, said the same way (restored) once the ingest settles it');
+    '㉑2f a render that states a 5h window NEWER than the removal brings the window BACK, said the same way (restored) once the ingest settles it');
   const UR21 = fs.readFileSync(path.join(ROOT, 'src/usage-routes.js'), 'utf8');
   ok(/if \(u\.windowChangeUnsaid\) \{\n\s+try \{ const w = usageWrite\.writeCacheObject\(\{ cacheDir: USAGE_CACHE_DIR, key, obj: u, familyOf: familyOfScopedBucket, backend: 'claude' \}\);/.test(UR21) && /setInterval\(ingestPassiveUsage, 30000\)/.test(UR21),
     '㉑2f the hub\'s passive ingest (every 30 s) settles a file carrying the marker through the ONE write path');
@@ -2426,7 +2435,9 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
     { // ㉑3a the reset-time render: the week did NOT move since the previous reading, five_hour is gone (its reset passed)
       const d = mkd('ra'), key = 'sub-n5h-reset';
       W.writeCacheObject({ cacheDir: d, key, backend: 'claude', familyOf: familyOfScopedBucket, source: 'passive', measuredAt: Date.now() - 300000,
-        obj: { fiveHour: { utilization: 0.37, resetsAt: nowSec - 30 }, sevenDay: { utilization: 0.46, resetsAt: nowSec + 200000 }, scopedWeekly: [], planWeekSig: `7d:46@${nowSec + 200000}`, fetchedAt: Date.now() - 300000, source: 'passive' } });
+        obj: { fiveHour: { utilization: 0.37, resetsAt: nowSec - 30 }, sevenDay: { utilization: 0.46, resetsAt: nowSec + 200000 }, scopedWeekly: [], fetchedAt: Date.now() - 300000, source: 'passive' } });
+      // the session's own render BEFORE the reset (the week + its 5h window): its baseline
+      renderSL(toolArgs, d, key, { five_hour: { used_percentage: 37, resets_at: nowSec - 30, status: 'allowed' }, ...RLW(46) });
       const n0 = said.length, got = [];
       const r = renderSL(toolArgs, d, key, RLW(46)); const w = settle(d, key, wcm); if (w.windowChange) got.push(w.windowChange.change);
       const r2 = renderSL(toolArgs, d, key, RLW(46)); const w2 = settle(d, key, wcm); if (w2.windowChange) got.push(w2.windowChange.change);
@@ -2453,11 +2464,11 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
     return out;
   };
   const SH = shapes([TOOL21]);
-  ok(SH.a.r.fiveHour && SH.a.r.fiveHour.utilization === 0.37 && !SH.a.r.fiveHourAbsent && !SH.a.r.fiveHourAbsentWitnesses && !SH.a.r2.fiveHourAbsent && !SH.a.got.length && SH.a.saidHere === 0,
+  ok(SH.a.r.fiveHour && SH.a.r.fiveHour.utilization === 0.37 && !SH.a.r.fiveHourAbsent && maxN(SH.a.r) === 0 && !SH.a.r2.fiveHourAbsent && !SH.a.got.length && SH.a.saidHere === 0,
     `㉑3a the RESET-TIME render (the week unchanged since the previous reading, no five_hour) lays NO tombstone, counts no witness and says nothing — the passed 5h window stays (unconfirmed) — ${JSON.stringify({ f: SH.a.r.fiveHour, abs: SH.a.r.fiveHourAbsent, w: SH.a.r.fiveHourAbsentWitnesses, got: SH.a.got })}`);
   ok(SH.b.f.fiveHour === undefined && SH.b.f.fiveHourAbsent > 0 && JSON.stringify(SH.b.got) === '["removed"]',
     `㉑3b TWO API-answered renders (the week moved twice) without five_hour ⇒ the tombstone + ONE notice — said ${JSON.stringify(SH.b.got)}`);
-  ok(SH.c.f.fiveHour && !SH.c.f.fiveHourAbsent && SH.c.f.fiveHourAbsentWitnesses && SH.c.f.fiveHourAbsentWitnesses.n === 1 && !SH.c.got.length,
+  ok(SH.c.f.fiveHour && !SH.c.f.fiveHourAbsent && WN(SH.c.f, 'sl:sess-qm21') === 1 && !SH.c.got.length,
     `㉑3c one moved render then a five_hour render ⇒ nothing said, the count ENDS (one more moved render is witness 1 again — no flap) — said ${JSON.stringify(SH.c.got)}`);
   const oNone = CQ.parseOAuthUsage({ limits: [{ kind: 'weekly_scoped', percent: 30, scope: { model: { display_name: 'Fable' } } }] });
   const gNone = ADP.parseGetUsageResponse({ rate_limits: { model_scoped: [{ display_name: 'Fable', utilization: 30 }] } });
@@ -2467,21 +2478,193 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
     const d = mkd('rd2'), key = 'sub-n5h-undo'; seed5h(d, key);
     const pw = panelWrite(d, key, CQ.parseCliUsageText(PANEL_NO5H, Date.now()));
     const n0 = said.length;
-    const r = W.writeCacheObject({ cacheDir: d, key, obj: { ...oNone, source: 'on-demand' }, source: 'on-demand', familyOf: familyOfScopedBucket, backend: 'claude', absentWindows: AW(oNone) });
+    // parsed AFTER the removal is laid, a millisecond later on any tree (acceptance r3 F2: parsed before it, a tree that
+    // invents a 0 % window read the leg green or red by whether two steps shared a millisecond)
+    const t0 = Date.now(); while (Date.now() <= t0) { /* the next millisecond */ }
+    const oAfter = CQ.parseOAuthUsage({ limits: [{ kind: 'weekly_scoped', percent: 30, scope: { model: { display_name: 'Fable' } } }] });
+    const r = W.writeCacheObject({ cacheDir: d, key, obj: { ...oAfter, source: 'on-demand' }, source: 'on-demand', familyOf: familyOfScopedBucket, backend: 'claude', absentWindows: AW(oAfter) });
     const f = readJ(d, key);
     ok(pw.windowChange && pw.windowChange.change === 'removed' && f.fiveHour === undefined && f.fiveHourAbsent > 0 && !r.windowChange && said.length === n0,
       '㉑3d …and that reply, written after a removal, no longer UNDOES it (no fake window, no false «back»)');
   }
 
-  { // THE STANDING SWEEP (acceptance r2 MAJOR 2): the repair's rebuild from an ANCHOR re-stamps a bucket like a sibling's spread
-    const RR = require(path.join(ROOT, 'src/reading-repair.js'));
-    const T = Date.now() - 600000;
-    const cur = { fiveHourAbsent: T, sevenDay: { utilization: 0.4, resetsAt: nowSec + 86400 }, fetchedAt: T + 1000, source: 'on-demand' };
-    const anchorOld = { fetchedAt: T - 3600e3, buckets: { fiveHour: { u: 0.84, resetsAt: nowSec - 100 }, sevenDay: { u: 0.38, resetsAt: nowSec + 86400 } } };
-    const anchorNew = { fetchedAt: T + 60000, buckets: { fiveHour: { u: 0.12, resetsAt: nowSec + 3600 }, sevenDay: { u: 0.41, resetsAt: nowSec + 86400 } } };
-    const rOld = RR._cacheFromAnchor(anchorOld, cur), rNew = RR._cacheFromAnchor(anchorNew, cur);
-    ok(!rOld.fiveHour && rOld.fiveHourAbsent === T && SINCE(planOf(rOld, 'sub-n5h-rr'), '5h') === T && rNew.fiveHour && rNew.fiveHour.utilization === 0.12,
-      `㉑3f' the repair's rebuild from an anchor read BEFORE the tombstone keeps «no 5h limit» (never a resurrected 84 % window); one read AFTER it is the window back — ${JSON.stringify({ old: rOld.fiveHour || rOld.fiveHourAbsent, neu: rNew.fiveHour })}`);
+  // THE STANDING REPAIR (acceptance r2 MAJOR 2; r4: acceptance r3 MAJOR 2 — the guard read the CALLER's `prev`, and
+  // repairSidecarsByApiPhase, the boot + hourly repair, builds its prev without the tombstone). Driven through the REAL
+  // repair: a member whose snapshot's week is in a FOREIGN phase is rebuilt from its newest own anchor.
+  const RR = require(path.join(ROOT, 'src/reading-repair.js'));
+  const apiPhaseRepair = (RRm, { anchorAfter = false } = {}) => {
+    const d = mkd('ap'), dataDir = path.join(d, 'data');
+    const anchors = path.join(dataDir, 'usage-anchors'), cache = path.join(dataDir, 'usage-cache');
+    for (const q of [anchors, cache, path.join(dataDir, 'archive')]) fs.mkdirSync(q, { recursive: true });
+    const M = 'sub-n5h-api', H = 3600, nowMs = Date.now();
+    const WA = nowSec + 3 * 86400, WF = nowSec + 6 * 86400 + 16 * H; // its own API phase / another member's
+    const at = (h) => nowMs - Math.round(h * H * 1000);
+    const T = at(6); // «no 5h limit» since six hours ago
+    const rec = (ts, u, u5, source) => ({ ts, fetchedAt: ts, source, accountId: M, identityKey: 'org_n5h', buckets: { fiveHour: { u: u5, resetsAt: Math.floor(ts / 1000) + 2 * H }, sevenDay: { u, resetsAt: WA }, scopedWeekly: [] }, prevFetchedAt: null, elapsedSec: null, costSince: null });
+    const rows = [rec(at(40), 0.10, 0.3, 'on-demand'), rec(at(36), 0.12, 0.3, 'rate-limit-event'), rec(at(30), 0.14, 0.3, 'rate-limit-event'), rec(at(24), 0.16, 0.3, 'rate-limit-event'), rec(at(18), 0.18, 0.3, 'rate-limit-event')];
+    if (anchorAfter) rows.push(rec(at(2), 0.20, 0.12, 'rate-limit-event')); // a reading AFTER the removal that states a 5h window
+    fs.writeFileSync(path.join(anchors, 'anchors-org_n5h.ndjson'), rows.map((r) => JSON.stringify(r)).join('\n') + '\n');
+    fs.writeFileSync(path.join(cache, M + '.json'), JSON.stringify({ fetchedAt: at(1), source: 'on-demand', fiveHourAbsent: T, sevenDay: { utilization: 0.5, resetsAt: WF }, scopedWeekly: [] }));
+    const rep = RRm.repairSidecarsByApiPhase({ dataDir, accounts: [{ id: M, name: 'Member M', type: 'subscription', backend: 'claude' }], id: 'T21' });
+    const row = (rep && rep.identities || []).find((r) => r.key === M) || {};
+    return { f: JSON.parse(fs.readFileSync(path.join(cache, M + '.json'), 'utf8')), row, T };
+  };
+  {
+    const A = apiPhaseRepair(RR), B = apiPhaseRepair(RR, { anchorAfter: true });
+    ok(A.row.cache === 'replaced' && A.f.fiveHour === undefined && A.f.fiveHourAbsent === A.T && A.f.sevenDay && A.f.sevenDay.utilization === 0.18,
+      `㉑7h the STANDING repair (repairSidecarsByApiPhase, boot + hourly) rebuilds a «no 5h» member from its own anchors read BEFORE the removal and keeps «no 5h limit» — the tombstone read from the TARGET file, never re-creating the 30 % window — ${JSON.stringify({ cache: A.row.cache, f5: A.f.fiveHour, abs: A.f.fiveHourAbsent === A.T })}`);
+    ok(B.row.cache === 'replaced' && B.f.fiveHour && Math.abs(B.f.fiveHour.utilization - 0.12) < 1e-9,
+      `㉑3f' …an anchor read AFTER the removal that states a 5h window is the window BACK — ${JSON.stringify({ cache: B.row.cache, f5: B.f.fiveHour })}`);
+  }
+
+  // ── r4 (acceptance r3 BLOCKER): THE WITNESS IS PER PRODUCER — every session on an account writes ONE file ─────
+  // A and B are two claude sessions on one member. Each CLI holds its OWN last API answer; after the 5h reset both drop
+  // five_hour, each re-renders its own stale week. The file's last writer is no baseline.
+  const rlW = (pct, reset = nowSec + 200000) => ({ seven_day: { used_percentage: pct, resets_at: reset, status: 'allowed' } });
+  const rl5 = (pct, r5 = nowSec + 3600) => ({ five_hour: { used_percentage: 20, resets_at: r5, status: 'allowed' }, ...rlW(pct) });
+  const play = (toolArgs, steps, wcm = W) => {
+    const d = mkd('pp'), key = 'sub-n5h-pp'; seed5h(d, key);
+    const got = [], files = [];
+    for (const [sid, rl, noSettle] of steps) {
+      renderSL(toolArgs, d, key, typeof rl === 'function' ? rl() : rl, sid);
+      if (!noSettle) { const w = settle(d, key, wcm); if (w.windowChange) got.push(w.windowChange.change); }
+      files.push(readJ(d, key));
+    }
+    return { f: readJ(d, key), got, files, d, key };
+  };
+  const FLAP = [['B', rl5(42)], ['A', rl5(40)], ['A', rlW(40)], ['B', rlW(42)], ['A', rlW(40)], ['B', rlW(42)], ['A', rlW(40)], ['B', rlW(42)]];
+  const STALE = [['A', rlW(50)], ['A', rlW(51)], ['A', rlW(52)], ['C', rl5(52)], ['C', rl5(52)]];
+  const r4shapes = (toolArgs, wcm = W) => {
+    const o = {};
+    o.a = play(toolArgs, [...FLAP, ['B', () => RL5new(43)]], wcm);
+    o.b = play(toolArgs, [...STALE, ['A', () => RL5new(53)]], wcm);
+    o.b.atStale = o.b.files[4];
+    o.c = play(toolArgs, [['A', rl5(40)], ['A', rlW(41)], ['B', rlW(41)], ['B', rlW(42)], ['A', rlW(43)]], wcm);
+    o.d = play(toolArgs, [['A', rl5(40)], ['C', rlW(41)], ['C', rlW(41)]], wcm);
+    o.e = play(toolArgs, [['A', rl5(42)], ['A', rlW(40)], ['A', rlW(42)], ['A', rlW(43)]], wcm);
+    o.e2 = play(toolArgs, [['A', rl5(90)], ['A', rlW(5, nowSec + 200000 + 7 * 86400)]], wcm);
+    o.l = play(toolArgs, [['A', rlW(50), 1], ['A', rlW(51), 1], ['A', rlW(52), 1], ['A', () => RL5new(52), 1]], wcm);
+    o.l.marker = o.l.files[2].windowChangeUnsaid || null;
+    { const w = settle(o.l.d, o.l.key, wcm); if (w.windowChange) o.l.got.push(w.windowChange.change); o.l.f = readJ(o.l.d, o.l.key); }
+    return o;
+  };
+  const R4 = r4shapes([TOOL21]);
+  ok(R4.a.files.every((f) => !f.fiveHourAbsent) && maxN(R4.a.f) === 0 && !R4.a.got.length && R4.a.f.fiveHour,
+    `㉑7a THE TWO-SESSION FLAP: sessions A (week 40) and B (week 42) re-render their own stale states after the 5h reset, alternating — NO witness, NO tombstone, nothing said, and B's next answer with a 5h window says no «back» — said ${JSON.stringify(R4.a.got)}`);
+  ok(R4.b.got[0] === 'removed' && R4.b.atStale && R4.b.atStale.fiveHour === undefined && R4.b.atStale.fiveHourAbsent === R4.b.files[2].fiveHourAbsent && R4.b.got.length === 2 && R4.b.got[1] === 'restored',
+    `㉑7b A STALE 5h WINDOW IS NO RETURN: after a real lift (A's two moved answers), an idle session C still holding a 5h window that BEGAN BEFORE the tombstone renders it twice — kept out, the tombstone stands at its instant, nothing said; a 5h window that began after it restores ONCE — said ${JSON.stringify(R4.b.got)}`);
+  ok(R4.c.files[3].fiveHourAbsent === undefined && WN(R4.c.files[3], 'sl:A') === 1 && WN(R4.c.files[3], 'sl:B') === 1 && R4.c.f.fiveHourAbsent > 0 && JSON.stringify(R4.c.got) === '["removed"]',
+    `㉑7c PER PRODUCER: one moved answer from A and one from B are two producers' FIRST witnesses — no tombstone; A's SECOND lays it and says «removed» once — ${JSON.stringify({ w: R4.c.files[3].fiveHourAbsentWitnesses, got: R4.c.got })}`);
+  ok(R4.d.files.every((f) => !f.fiveHourAbsent) && maxN(R4.d.f) === 0 && !R4.d.got.length,
+    `㉑7d a NEW session's first render (its week differs from the file's last writer's) is never a witness — it only sets its own baseline — ${JSON.stringify(R4.d.f.fiveHourAbsentWitnesses)}`);
+  ok(maxN(R4.e.files[2]) === 0 && WN(R4.e.f, 'sl:A') === 1 && !R4.e.f.fiveHourAbsent && WN(R4.e2.f, 'sl:A') === 1,
+    `㉑7e MOVEMENT IS FORWARD ONLY: an older (40 after 42) or equal reading is never movement; a higher % of the same week is, and so is a NEW week at a lower % — ${JSON.stringify({ e: R4.e.files[2].fiveHourAbsentWitnesses, e2: R4.e2.f.fiveHourAbsentWitnesses })}`);
+  ok(R4.l.marker && R4.l.marker.change === 'removed' && !R4.l.got.length && R4.l.f.fiveHour && !R4.l.f.fiveHourAbsent && !R4.l.f.windowChangeUnsaid,
+    `㉑7l A CHANGE UNDONE BEFORE IT WAS SAID (removed, then a newer 5h window, between two 30-s ingests) cancels its marker: the settle says nothing — said ${JSON.stringify(R4.l.got)}`);
+  // the stream's twin: the capture counts for the session whose stream it is (`producer`)
+  {
+    const d = mkd('pf'), k = 'sub-n5h-pf'; seed5h(d, k);
+    const evWk5 = (pct7) => CAP.parseRateLimitEvent({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed', rateLimitType: 'five_hour', utilization: 0.2, resetsAt: nowSec + 3600, unifiedWindows: { five_hour: { utilization: 0.2, resets_at: nowSec + 3600 }, seven_day: { utilization: pct7 / 100, resets_at: nowSec + 3 * 86400 } } } });
+    const n0 = said.length;
+    capture(d, k, evWk5(42), [k], CAP, 'ev:B'); capture(d, k, evWk5(40), [k], CAP, 'ev:A');
+    for (let i = 0; i < 3; i++) { capture(d, k, evWeek(40), [k], CAP, 'ev:A'); capture(d, k, evWeek(42), [k], CAP, 'ev:B'); }
+    const f = readJ(d, k);
+    ok(f.fiveHour && !f.fiveHourAbsent && maxN(f) === 0 && !said.slice(n0).some((x) => x.key === k),
+      `㉑7f the STREAM twin: two sessions' records alternating stale weeks (40 / 42) lay no tombstone and say nothing — ${JSON.stringify({ w: f.fiveHourAbsentWitnesses, abs: f.fiveHourAbsent })}`);
+    capture(d, k, evWeek(41), [k], CAP, null); capture(d, k, evWeek(43), [k], CAP, null); capture(d, k, evWeek(44), [k], CAP, null);
+    ok(!readJ(d, k).fiveHourAbsent, '㉑7f …and a record that names no producer (a replay, a re-drive) is never a witness');
+  }
+  // ── r4 (acceptance r3 MAJOR 1): a sibling's bookkeeping never rides the freshest-sibling spread ───────────────
+  const sibMarker = (CAPm = CAP, wcm = W) => {
+    const d = mkd('sm'), X = 'sub-n5h-x', G = 'sub-n5h-g';
+    seed5h(d, X, { at: Date.now() - 300000 }); seed5h(d, G, { at: Date.now() - 300000 });
+    for (const pct of [46, 47, 48]) { renderSL([TOOL21], d, G, rlW(pct), 'sess-g'); settle(d, G, wcm); } // G: removed, said
+    renderSL([TOOL21], d, G, RL5new(48), 'sess-g');                                                      // G: back — UNSAID yet
+    const gm = readJ(d, G).windowChangeUnsaid || null;
+    const saidX = [];
+    const lis = fnOf(wcm, 'onWindowChange'); if (lis) lis((c) => { said.push(c); if (c.key === X) saidX.push(c.change); });
+    CAPm.captureRateLimitEvent({ cacheDir: d, key: X, identityIds: [X, G], ev: ev5(5), now: Date.now(), producer: 'ev:x' });
+    if (lis) lis((c) => said.push(c));
+    return { gm, saidX, fx: readJ(d, X) };
+  };
+  {
+    const S = sibMarker();
+    ok(S.gm && S.gm.change === 'restored' && !S.saidX.length && S.fx.fiveHour && !S.fx.windowChangeUnsaid,
+      `㉑7g a SIBLING's unsaid «back» (its own statusline's, on the fresher file) riding the capture's freshest-sibling spread is never said on a member that never changed — said on it ${JSON.stringify(S.saidX)}`);
+    const d = mkd('st'), X = 'sub-n5h-x2', G2 = 'sub-n5h-g2', n0 = said.length;
+    seed5h(d, X, { at: Date.now() - 300000 }); seed5h(d, G2, { at: Date.now() - 300000 });
+    panelWrite(d, G2, CQ.parseCliUsageText(PANEL_NO5H, Date.now()));       // the sibling's own «no 5h limit», laid now
+    CAP.captureRateLimitEvent({ cacheDir: d, key: X, identityIds: [X, G2], ev: evWeek(41), now: Date.now() + 1000, producer: 'ev:x2' });
+    const fx = readJ(d, X);
+    ok(fx.fiveHour && fx.fiveHour.utilization === 0.84 && !fx.fiveHourAbsent && !said.slice(n0).some((x) => x.key === X),
+      `㉑7g …nor does a SIBLING's tombstone: a record on a member with its own 5h window keeps it (no false «lifted») — ${JSON.stringify({ f5: fx.fiveHour, abs: fx.fiveHourAbsent })}`);
+  }
+  // ── r4: the READ side — the identity group's freshest-file substitution keeps a member's own «no 5h limit» ──────
+  {
+    const wo = fnOf(QM, 'withOwnAbsence');
+    const T5 = Date.now() - 3600e3;
+    const own = { fiveHourAbsent: T5, sevenDay: { utilization: 0.4, resetsAt: nowSec + 86400 }, fetchedAt: Date.now() - 60000 };
+    const sib = { fiveHour: { utilization: 0.2, resetsAt: nowSec + 3600 }, sevenDay: { utilization: 0.41, resetsAt: nowSec + 86400 }, fetchedAt: Date.now(),
+      limits: [QM.makeLimit({ limitId: 'plan', scope: 'plan', windows: [QM.makeWindow({ kind: '5h', usedPct: 20, resetsAt: nowSec + 3600, measuredAt: Date.now() }), QM.makeWindow({ kind: '7d', usedPct: 41, resetsAt: nowSec + 86400, measuredAt: Date.now() })] })] };
+    const r = wo ? wo(sib, own) : sib;
+    const ENG7 = fs.readFileSync(path.join(ROOT, 'src/server/usage-pool-engine.js'), 'utf8'), UR7 = fs.readFileSync(path.join(ROOT, 'src/usage-routes.js'), 'utf8');
+    ok(!!wo && r.fiveHour === undefined && r.fiveHourAbsent === T5 && r.sevenDay.utilization === 0.41 && !QM.windowOfKind(QM.planLimit({ limits: r.limits }), '5h') && SINCE(QM.planLimit({ limits: r.limits }), '5h') === T5 && wo(sib, null) === sib,
+      `㉑7i a fresher SIBLING read in place of a «no 5h» member keeps the member's tombstone — its 5h window (legacy + typed) never outranks it — ${JSON.stringify({ f5: r.fiveHour, abs: r.fiveHourAbsent })}`);
+    ok((ENG7.match(/raw = quotaModel\.withOwnAbsence\(g\.cache, raw\); break;/g) || []).length === 2 && /_accountUsage\[gid\] = \{ \.\.\.quotaModel\.withOwnAbsence\(newest, a\),/.test(UR7) && /_rateLimitCache = quotaModel\.withOwnAbsence\(usage, g\);/.test(UR7),
+      '㉑7i …and every substitution reads through it: the pool\'s two readCache (the chooser + the engine) and the Usage popup\'s same-account merge');
+  }
+  // ── r4 (acceptance r3 minors): ONE item per member; the unknown window in words ─────────────────────────────────
+  {
+    const { UserTodoManager } = require(path.join(ROOT, 'src/user-todos.js'));
+    const m = new UserTodoManager({ dataDir: mkd('ut'), onChange() { }, expirySweepMs: 0 });
+    const ENGs = fs.readFileSync(path.join(ROOT, 'src/server/usage-pool-engine.js'), 'utf8');
+    const s0 = ENGs.indexOf('const WINDOW_REMOVED_TEXT'), s1 = ENGs.indexOf('usageWrite.onWindowChange(noteWindowChange);');
+    let fn = null;
+    try { fn = new Function('accounts', 'OF', 'getUserTodos', 'i18nKey', 'global', ENGs.slice(s0, s1) + '\nreturn noteWindowChange;')({ get: (id) => (id === 'sub-y' ? { id, type: 'subscription', name: 'Pool 3' } : null) }, { when: () => 'Oct 30 17:40' }, () => m, (s) => s, {}); } catch { fn = null; }
+    const mine = () => m._state.items.filter((i) => i.sessionKey === 'webui:usage-window' && !i.clearedAt);
+    if (fn) { fn({ key: 'sub-y', kind: '5h', change: 'removed', at: Date.now() }); fn({ key: 'sub-y', kind: '5h', change: 'restored', at: Date.now() }); }
+    const one = mine();
+    ok(one.length === 1 && one[0].status === 'open' && /5-hour limit is back/.test(one[0].text),
+      `㉑7j ONE For-you item per member: «back» filed after «lifted» REPLACES its words — never two open contradictions — ${JSON.stringify(one.map((i) => [i.itemKey, i.status, i.text.slice(0, 40)]))}`);
+    if (one[0]) m.setStatus(one[0].id, 'done');
+    if (fn) fn({ key: 'sub-y', kind: '5h', change: 'removed', at: Date.now() });
+    const two = mine();
+    ok(two.length === 1 && two[0].status === 'open' && /was lifted by Anthropic/.test(two[0].text),
+      `㉑7j …and a later change re-opens that SAME item with the current state — ${JSON.stringify(two.map((i) => [i.itemKey, i.status]))}`);
+    try { m.stop(); } catch { }
+  }
+  {
+    const AR = require(path.join(ROOT, 'src/server/auto-resume.js'));
+    const soon = Date.now() + 3600e3;
+    const cause = { scope: 'pool', soonest: { id: 'sub-y', name: 'Pool 3', bucket: { label: '7d', resetsAt: soon } }, rejector: { id: 'sub-y', name: 'Pool 3', ownWall: { label: null, unknownWindow: true, resetsAt: 0 }, floor: [] } };
+    const s = AR.armNoticeFor('usage limit', soon, Date.now(), cause);
+    const ENGk = fs.readFileSync(path.join(ROOT, 'src/server/usage-pool-engine.js'), 'utf8'), CSB = fs.readFileSync(path.join(ROOT, 'src/lib/chat-status-bar.js'), 'utf8');
+    const zhK = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-zh.js'), 'utf8'), jaK = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-ja.js'), 'utf8');
+    const KEY = '"{m}: its limit window is unknown (it has no 5-hour limit).": ';
+    ok(/限额窗口未知/.test(s) && !/window unknown/.test(s) && !/的 7d /.test(s),
+      `㉑7k a guessed wall on a «no 5h» member says in the card's words that its limit window is UNKNOWN — never the raw token, never a window it cannot know — ${JSON.stringify(s)}`);
+    ok(!/\? 'window unknown' :/.test(ENGk) && /done\.push\(\{ label, until, \.\.\.\(unknownWindow \? \{ unknownWindow: true \} : \{\}\) \}\);/.test(ENGk) && /unknownWindow \? null : BUCKET_LABEL\[b\.kind\]/.test(ENGk) && /own && own\.unknownWindow \? \{ label: null, unknownWindow: true,/.test(ENGk)
+      && CSB.includes("t('{m}: its limit window is unknown (it has no 5-hour limit).', { m: r.name })") && zhK.includes(KEY) && jaK.includes(KEY),
+      '㉑7k …the wall names no label (`unknownWindow`), the cause carries it, and the status bar says it through t() — zh + ja');
+  }
+  // ── r4: ONE RULE, TWO SPELLINGS — the shipped statusline mirrors quota-model's witness block byte for byte ──────
+  {
+    const cut = (txt) => { const open = txt.split('// >>> 5h-witness mirror'); const shut = open.length === 2 ? open[1].split('// <<< 5h-witness mirror') : []; return shut.length === 2 ? '// >>> 5h-witness mirror' + shut[0] : null; };
+    const bSrc = cut(fs.readFileSync(path.join(ROOT, 'src/quota-model.js'), 'utf8')), bTool = cut(fs.readFileSync(TOOL21, 'utf8'));
+    ok(!!bSrc && bSrc.length > 2000 && bSrc === bTool, `㉑7m the statusline carries a BYTE-IDENTICAL copy of the witness rule (it ships to checkout-less hosts and cannot require src/) — src=${bSrc && bSrc.length} tool=${bTool && bTool.length}`);
+    let fT = null; try { fT = new Function(bTool + '\nreturn { countPassiveAnswer, weekMovedForward, planWeekSigOf };')(); } catch { fT = null; }
+    const now7 = Date.now(), TAB = [
+      { witnesses: null, producer: 'p', sig: '7d:40@100000', fiveHour: null, absent5h: true, absentAt: 0, now: now7 },
+      { witnesses: { p: { n: 1, lastSig: '7d:40@100000', at: now7 - 1000 } }, producer: 'p', sig: '7d:41@100000', fiveHour: null, absent5h: true, absentAt: 0, now: now7 },
+      { witnesses: { p: { n: 0, lastSig: '7d:42@100000', at: now7 - 1000 } }, producer: 'p', sig: '7d:40@100000', fiveHour: null, absent5h: true, absentAt: 0, now: now7 },
+      { witnesses: { p: { n: 0, lastSig: '7d:42@100000', at: now7 - 1000 } }, producer: 'q', sig: '7d:42@100000', fiveHour: { resetsAt: Math.floor(now7 / 1000) + 3600 }, absent5h: false, absentAt: now7 - 60000, now: now7 },
+      { witnesses: { p: { n: 0, lastSig: '7d:42@100000', at: now7 - 1000 } }, producer: 'p', sig: '7d:42@100000', fiveHour: { resetsAt: Math.floor(now7 / 1000) + 5 * 3600 }, absent5h: false, absentAt: now7 - 60000, now: now7 },
+      { witnesses: { old: { n: 1, lastSig: '7d:1@1', at: now7 - 25 * 3600e3 } }, producer: null, sig: null, fiveHour: null, absent5h: false, absentAt: 0, now: now7 },
+    ];
+    const same = !!fT && TAB.every((row) => JSON.stringify(fT.countPassiveAnswer(row)) === JSON.stringify(QM.countPassiveAnswer(row)));
+    const out = fT ? TAB.map((row) => fT.countPassiveAnswer(row)) : [];
+    ok(same && out[1].lay && !out[2].moved && out[3].stale && out[4].restore && !Object.keys(out[5].witnesses).length,
+      `㉑7m …and the SHIPPED bytes decide like the model over one table (lay on a producer's second moved answer, backward is no movement, stale vs back, 24-h bound) — ${JSON.stringify(out.map((o) => [o.lay, o.moved, o.stale, o.restore]))}`);
   }
 
   // ── rule 3: the WORDS (the banner guess; the popup / roster draw what the reading has) ───────────────────────
@@ -2525,8 +2708,8 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
     N.fn({ key: 'host-1', kind: '5h', change: 'removed', at: Date.now() });
   }
   const [n1, n2] = N.filed;
-  ok(N.filed.length === 2 && n1.itemKey === '5h-window:sub-y:removed' && n1.origin === 'pool' && n1.kind === 'notice' && /Pool 3's 5-hour limit was lifted by Anthropic/.test(n1.text) && n1.i18n.text.params.account === 'Pool 3',
-    `㉑2e ONE For-you notice per member and change, naming its label (itemKey dedupes a re-file) — filed ${JSON.stringify(N.filed.map((x) => x.itemKey))}`);
+  ok(N.filed.length === 2 && n1.itemKey === '5h-window:sub-y' && n1.origin === 'pool' && n1.kind === 'notice' && /Pool 3's 5-hour limit was lifted by Anthropic/.test(n1.text) && n1.i18n.text.params.account === 'Pool 3',
+    `㉑2e ONE For-you notice per member, naming its label (the itemKey is the MEMBER, its words the current state) — filed ${JSON.stringify(N.filed.map((x) => x.itemKey))}`);
   ok(n2 && !/@/.test(n2.text) && n2.i18n.text.params.account === 'sub-x' && /5-hour limit is back/.test(n2.text), '㉑2e …a label that is an email is never printed (the id instead); a host-* file is not a member and files nothing');
 
   // ── the CENSUS: every reader of '5h' / fiveHour / five_hour, and how it handles ABSENCE (by name) ────────────
@@ -2662,7 +2845,7 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
     ok(X.r0.fiveHour && X.r0.fiveHour.utilization === 0 && X.r0.fiveHour.status === 'unknown' && !X.got.length, '㉑ CONTROL rule 1: the base statusline writes the 0 % unknown window ㉑1k refuses (the ("5h", 0, None) of an idle member, source passive) — and nothing is ever said');
   }
   {
-    const m = mut21('data/bin/vibespace-usage', [["      if (had) out.windowChangeUnsaid = { kind: '5h', change: 'removed', at: out.fiveHourAbsent };\n", '']], 'u');
+    const m = mut21('data/bin/vibespace-usage', [["    if (had) mark('removed', now);\n", '']], 'u');
     hit21(m, 'the statusline leaves no marker');
     const X = e2e([process.execPath, m.path]);
     ok(X.r2.fiveHourAbsent > 0 && !X.got.includes('removed'), '㉑ CONTROL rule 2: a statusline that lays the tombstone and leaves no marker makes the removal UNSAYABLE — ㉑2f RED there');
@@ -2675,26 +2858,62 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
   }
   {
     // r2's rule, restored: ANY render with the week and no five_hour lays the tombstone at once
-    const m = mut21('data/bin/vibespace-usage', [['  } else if (sevenDay && !tomb && prevSig && sig !== prevSig) {\n', '  } else if (sevenDay && !tomb) {\n'], ['    if (n >= 2) {\n', '    if (n >= 1) {\n']], 'r2');
+    const m = mut21('data/bin/vibespace-usage', [['  } else if (absent5h && !since && moved) {\n', '  } else if (absent5h && !since && p && sig) {\n'], ['    if (w[p].n >= PASSIVE_WITNESSES) { res.lay = true; endAll(); }\n', '    if (w[p].n >= 1) { res.lay = true; endAll(); }\n']], 'r2');
     hit21(m, 'the statusline believes one render');
     const X = shapes([process.execPath, m.path]);
     ok(X.a.r.fiveHourAbsent > 0 && X.a.r.windowChangeUnsaid && X.a.got.includes('removed'), '㉑ CONTROL BLOCKER: r2\'s rule (one render without five_hour is proof) tombstones the RESET-TIME render and says «removed» — ㉑3a RED there');
   }
   {
-    const m = mut21('data/bin/vibespace-usage', [['    delete out.fiveHourAbsentWitnesses; // a stated 5h window ends every count\n', '']], 'c5');
+    const m = mut21('data/bin/vibespace-usage', [['    if (p && sig) w[p].n = 0;\n    if (moved || res.restore) endAll();\n', '']], 'c5');
     hit21(m, 'a stated 5h window does not end the count');
     const X = shapes([process.execPath, m.path]);
     ok(X.c.f.fiveHourAbsent > 0 && X.c.got.includes('removed'), '㉑ CONTROL rule 2: a count a five_hour answer does not end adds two witnesses across it and FLAPS — ㉑3c RED there');
   }
   {
-    const m = mut21('src/usage-cache-write.js', [['const PASSIVE_WITNESSES = 2;', 'const PASSIVE_WITNESSES = 1;']], 'p1');
-    hit21(m, 'the write path believes one passive answer');
-    const WM = require(m.path); const d = mkd('mp'), k = 'sub-n5h-mp'; seed5h(d, k);
+    const mq = mut21('src/quota-model.js', [['const PASSIVE_WITNESSES = 2;', 'const PASSIVE_WITNESSES = 1;']], 'p1');
+    hit21(mq, 'the write path believes one passive answer');
+    const m = mut21('src/usage-cache-write.js', [["const quotaModel = require('./quota-model.js');", `const quotaModel = require(${JSON.stringify(mq.path)});`]], 'p1w');
+    const d = mkd('mp'), k = 'sub-n5h-mp'; seed5h(d, k);
     // drive the stream through a capture copy that writes with the patched write path
     const cm = mut21('src/rate-limit-capture.js', [["const usageWriteMod = () => require('./usage-cache-write.js');", `const usageWriteMod = () => require(${JSON.stringify(m.path)});`]], 'p1c');
     const CAPm = require(cm.path);
     capture(d, k, evWeek(40), [k], CAPm); capture(d, k, evWeek(41), [k], CAPm);
     ok(readJ(d, k).fiveHourAbsent > 0, '㉑ CONTROL BLOCKER (stream): one moved answer as proof tombstones a member the CLI merely dropped a passed window for — ㉑2d RED there');
+  }
+  {
+    // r3's rule, restored: the FILE's last writer is the baseline and any difference is movement
+    const m = mut21('data/bin/vibespace-usage', [['  const prev = p ? w[p] : null;\n', '  const prev = p ? Object.values(w).sort((x, y) => y.at - x.at)[0] || null : null;\n'],
+      ['  if (b.reset - a.reset > SAME_WEEK_SEC) return true;\n  return Math.abs(b.reset - a.reset) <= SAME_WEEK_SEC && b.pct > a.pct;\n', '  return a.pct !== b.pct || a.reset !== b.reset;\n']], 'r3');
+    hit21(m, 'the witness compares against the last writer');
+    const X = play([process.execPath, m.path], FLAP);
+    ok(X.files.some((f) => !!f.fiveHourAbsent) && X.got.includes('removed'), `㉑ CONTROL BLOCKER r3: two sessions alternating stale weeks against the file's last writer lay the tombstone and say «removed» — ㉑7a RED there (${JSON.stringify(X.got)})`);
+  }
+  {
+    const m = mut21('data/bin/vibespace-usage', [['      else res.stale = true;\n', '      else res.restore = true;\n']], 'st');
+    hit21(m, 'a stale 5h window restores');
+    const X = play([process.execPath, m.path], STALE);
+    ok(X.got.includes('restored') && X.f.fiveHour, `㉑ CONTROL r4: a 5h window older than the tombstone read as a return files a false «back» — ㉑7b RED there (${JSON.stringify(X.got)})`);
+  }
+  {
+    const m = mut21('data/bin/vibespace-usage', [["    if (unsaid && unsaid.change !== change) delete out.windowChangeUnsaid;\n    else out.windowChangeUnsaid = { kind: '5h', change, at, key };\n", "    out.windowChangeUnsaid = { kind: '5h', change, at, key };\n"]], 'cx');
+    hit21(m, 'an undone change keeps its marker');
+    const X = play([process.execPath, m.path], [['A', rlW(50), 1], ['A', rlW(51), 1], ['A', rlW(52), 1], ['A', () => RL5new(52), 1]]);
+    const w = settle(X.d, X.key); 
+    ok(!!w.windowChange && w.windowChange.change === 'restored', '㉑ CONTROL r4: a return that only overwrites the unsaid «removed» says «back» for a removal nobody heard — ㉑7l RED there');
+  }
+  {
+    const mw = mut21('src/usage-cache-write.js', [["  const unsaid = pm && typeof pm === 'object' && pm.key === key ? pm : null;\n", "  const unsaid = (pm && typeof pm === 'object' && pm.key === key ? pm : null) || (obj && obj.windowChangeUnsaid) || null;\n"]], 'mk');
+    hit21(mw, 'the write path says a marker riding the producer\'s object');
+    const mc = mut21('src/rate-limit-capture.js', [['    delete cache.windowChangeUnsaid; delete cache.fiveHourAbsentWitnesses;\n', ''], ["const usageWriteMod = () => require('./usage-cache-write.js');", `const usageWriteMod = () => require(${JSON.stringify(mw.path)});`]], 'mkc');
+    hit21(mc, 'the capture spreads a sibling\'s marker');
+    const S = sibMarker(require(mc.path), require(mw.path));
+    ok(S.saidX.includes('restored'), `㉑ CONTROL MAJOR 1: a marker taken from the spread base files «back» on a member that never changed — ㉑7g RED there (${JSON.stringify(S.saidX)})`);
+  }
+  {
+    const m = mut21('src/reading-repair.js', [['  _keepOwnAbsence(cacheDir, key, obj);\n', '']], 'rr');
+    hit21(m, 'the repair write keeps no tombstone');
+    const A = apiPhaseRepair(require(m.path));
+    ok(A.f.fiveHour && A.f.fiveHour.utilization === 0.3, '㉑ CONTROL MAJOR 2: a rebuild that ignores the target file\'s tombstone re-creates the removed 5h window — ㉑7h RED there');
   }
   {
     const m = mut21('src/harnesses/claude-quota.js', [['const sevenDay = stated(u.seven_day) ? toWin(u.seven_day) : undefined;', 'const sevenDay = toWin(u.seven_day);'], ['const fiveHour = stated(u.five_hour) ? toWin(u.five_hour) : undefined;', 'const fiveHour = toWin(u.five_hour);']], 'n');

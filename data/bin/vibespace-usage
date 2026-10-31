@@ -59,6 +59,87 @@ function win(w) {
   };
 }
 
+// «NO 5h LIMIT» — THE PASSIVE WITNESS (lane no-5h-window r4). ONE RULE, TWO SPELLINGS, like the reading-lag mirror
+// below: this file cannot require src/, so the block between the sentinels is a VERBATIM copy of src/quota-model.js's
+// own, pinned byte-for-byte AND functionally by scripts/test-quota-model.mjs §㉑.
+// >>> 5h-witness mirror (src/quota-model.js) — keep byte-identical
+// THE PASSIVE WITNESS, COUNTED PER PRODUCER (lane no-5h-window r4, acceptance r3 BLOCKER). A passive answer — a
+// statusline render, a stream `rate_limit_event` — is ONE claude process's own rate-limit state, and the CLI drops a
+// window whose reset passed from it (2.1.314), so «the week and no five_hour» is every member's shape after its 5h
+// reset. It is evidence only when it carries a NEW API answer: the week moved FORWARD against THAT producer's own
+// previous reading (a later week, or the same week at a strictly higher %). The usage file is shared by every
+// session on the account, so the file's last writer is no baseline: two sessions holding different stale weeks would
+// alternate and read as movement. So each producer keeps its own `{n, lastSig, at}` (dropped after 24 h); a
+// producer's first answer only sets its baseline; TWO moved answers from the SAME producer lay the tombstone. A
+// stated 5h window ends that producer's count, and every count when it is itself a new answer. On a «no 5h» file a
+// stated 5h window RESTORES only when it is newer than the tombstone — it began at or after the instant the tombstone
+// was laid, or its producer's week moved (a new answer that has a 5h window); one that began before it is a session
+// that never saw the lift (STALE: kept out, nothing said). Spelled once here; the shipped statusline (a single file
+// that cannot require src/) carries these bytes between the same sentinels, pinned by test-quota-model §㉑.
+const FIVE_HOUR_SEC = 5 * 3600;
+const PASSIVE_WITNESSES = 2;
+const WITNESS_TTL_MS = 24 * 3600e3;
+const WITNESS_PRODUCERS_MAX = 16;
+const SAME_WEEK_SEC = 3600; // one weekly window's reset, spelled by one producer, never moves this far
+/** The plan week as a passive producer read it, `7d:<integer %>@<reset s>` — or null (no week, no reset). */
+function planWeekSigOf(win) {
+  return win && typeof win.utilization === 'number' && Number(win.resetsAt) > 0 ? `7d:${Math.round(win.utilization * 100)}@${Number(win.resetsAt)}` : null;
+}
+function weekSigParts(sig) {
+  const m = /^7d:(\d+)@(\d+)$/.exec(typeof sig === 'string' ? sig : '');
+  return m ? { pct: Number(m[1]), reset: Number(m[2]) } : null;
+}
+/** Did the week move FORWARD from `prevSig` to `sig`? A later week, or the same week at a strictly higher %. An
+ *  older or lower reading — another session's stale state — never moves it. */
+function weekMovedForward(prevSig, sig) {
+  const a = weekSigParts(prevSig), b = weekSigParts(sig);
+  if (!a || !b) return false;
+  if (b.reset - a.reset > SAME_WEEK_SEC) return true;
+  return Math.abs(b.reset - a.reset) <= SAME_WEEK_SEC && b.pct > a.pct;
+}
+/** The file's per-producer witnesses, bounded: none older than 24 h, the newest WITNESS_PRODUCERS_MAX kept. */
+function liveWitnesses(witnesses, now) {
+  const src = witnesses && typeof witnesses === 'object' && !Array.isArray(witnesses) ? witnesses : {};
+  const rows = [];
+  for (const p of Object.keys(src)) {
+    const e = src[p];
+    if (!e || typeof e !== 'object' || typeof e.lastSig !== 'string' || !(Number(e.at) > 0) || now - Number(e.at) > WITNESS_TTL_MS) continue;
+    rows.push([p, { n: Number(e.n) > 0 ? Math.floor(Number(e.n)) : 0, lastSig: e.lastSig, at: Number(e.at) }]);
+  }
+  rows.sort((x, y) => y[1].at - x[1].at);
+  const out = {};
+  for (const [p, e] of rows.slice(0, WITNESS_PRODUCERS_MAX)) out[p] = e;
+  return out;
+}
+/** ONE PASSIVE ANSWER, COUNTED (pure). `witnesses` = the file's; `producer` = the session that read it (null = not
+ *  countable: a replay, a re-drive); `sig` = planWeekSigOf(its week); `fiveHour` = the 5h window it STATED
+ *  ({resetsAt} s) or null; `absent5h` = it read the week and no five_hour; `absentAt` = the file's tombstone (ms) or 0.
+ *  ⇒ { witnesses (to store), moved, lay (lay the tombstone), restore (the stated 5h window is back), stale (the
+ *  stated 5h window is older than the tombstone: keep it out, say nothing) }. */
+function countPassiveAnswer({ witnesses, producer, sig, fiveHour, absent5h, absentAt, now }) {
+  const w = liveWitnesses(witnesses, now);
+  const p = typeof producer === 'string' && producer ? producer.slice(0, 120) : null;
+  const prev = p ? w[p] : null;
+  const moved = !!(prev && sig && weekMovedForward(prev.lastSig, sig));
+  const res = { witnesses: w, moved, lay: false, restore: false, stale: false };
+  if (p && sig) w[p] = { n: prev ? prev.n : 0, lastSig: !prev || moved || !weekSigParts(prev.lastSig) ? sig : prev.lastSig, at: now };
+  const since = Number(absentAt) > 0 ? Number(absentAt) : 0;
+  const endAll = () => { for (const k of Object.keys(w)) w[k].n = 0; };
+  if (fiveHour) {
+    if (since) {
+      if (moved || ((Number(fiveHour.resetsAt) || 0) - FIVE_HOUR_SEC) * 1000 >= since) res.restore = true;
+      else res.stale = true;
+    }
+    if (p && sig) w[p].n = 0;
+    if (moved || res.restore) endAll();
+  } else if (absent5h && !since && moved) {
+    w[p].n += 1;
+    if (w[p].n >= PASSIVE_WITNESSES) { res.lay = true; endAll(); }
+  }
+  return res;
+}
+// <<< 5h-witness mirror
+
 // MODEL-SCOPED WEEKLY WINDOWS (claude 2.1.274, measured in the binary's own
 // statusline schema — inc-mubu23bd-5vxi): `rate_limits.model_scoped[]` =
 // `{display_name, utilization, resets_at}` ("Per-model weekly windows from the
@@ -566,8 +647,8 @@ function writeUsage(p) {
   // missing five_hour (and seven_day). And a missing five_hour is not «no 5h limit» either: the CLI DROPS a window
   // whose reset has passed from `rate_limits` and re-renders AT that reset (2.1.314), so it is first of all the
   // reset-time shape of EVERY member. The file keeps its last stated 5h window (the display calls it unconfirmed once
-  // its reset passed); only TWO renders that carry a NEW API answer — the week MOVED — without five_hour say «no 5h
-  // limit» (r3; the same witness rule as src/usage-cache-write.js `passiveAnswer`, which this single file mirrors).
+  // its reset passed); only TWO renders of ONE session that carry a NEW API answer — its week moved forward — without
+  // five_hour say «no 5h limit» (r4; the witness block above, mirrored from src/quota-model.js).
   const fiveHour = win(rl.five_hour);
   const sevenDay = win(rl.seven_day);
   let prev = null;
@@ -593,17 +674,25 @@ function writeUsage(p) {
   // entries survive untouched, which is exactly the 2.70.0 rule)
   const scopedMeasured = scopedFromRateLimits(rl);
   if (!fiveHour && !sevenDay && !scopedMeasured.length) return; // a render stating NO window states nothing
+  // THE WITNESS (r4): counted for THIS session (the payload's `session_id`) against its own previous reading, never
+  // the file's last writer — every session on the account writes this file (see the mirror's header above)
+  const now = Date.now();
+  const had = !!(prev && prev.fiveHour && typeof prev.fiveHour === 'object');
+  const absentAt = !had && prev && Number(prev.fiveHourAbsent) > 0 ? Number(prev.fiveHourAbsent) : 0;
+  const producer = p && typeof p.session_id === 'string' && p.session_id ? 'sl:' + p.session_id.replace(/[^\w.-]/g, '_').slice(0, 80) : null;
+  const wit = countPassiveAnswer({ witnesses: prev && prev.fiveHourAbsentWitnesses, producer, sig: planWeekSigOf(sevenDay), fiveHour, absent5h: !fiveHour && !!sevenDay, absentAt, now });
+  const five = wit.stale ? null : fiveHour; // a 5h window older than the tombstone: a session that never saw the lift
   const prevScoped = (prev && Array.isArray(prev.scopedWeekly)) ? prev.scopedWeekly : [];
   const measuredName = (s) => scopedMeasured.some((m) => String(m.name).toLowerCase() === String((s && s.name) || '').toLowerCase());
   const out = {
     ...(prev && typeof prev === 'object' ? prev : {}),
-    ...(fiveHour ? { fiveHour } : {}), ...(sevenDay ? { sevenDay } : {}),
+    ...(five ? { fiveHour: five } : {}), ...(sevenDay ? { sevenDay } : {}),
     // an account that has never had a model-scoped bucket still needs the field
     // present (it is how a reader tells a claude snapshot from a codex one);
     // a bucket this render did NOT measure is kept by construction
     scopedWeekly: scopedMeasured.length ? [...prevScoped.filter((s) => !measuredName(s)), ...scopedMeasured] : prevScoped,
-    overallStatus: ((fiveHour && fiveHour.status === 'limited') || (sevenDay && sevenDay.status === 'limited')) ? 'limited' : 'allowed',
-    fetchedAt: Date.now(), source: 'passive',
+    overallStatus: ((five && five.status === 'limited') || (sevenDay && sevenDay.status === 'limited')) ? 'limited' : 'allowed',
+    fetchedAt: now, source: 'passive',
   };
   // THE LIMITS THIS PRODUCER MEASURED ARE THE ONES IT DROPS. `limits` is the
   // canonical half (src/usage-cache-write.js) and every entry carries its own
@@ -625,29 +714,26 @@ function writeUsage(p) {
   // would attach somebody else's corroboration to these numbers — the spread
   // preserves what it does not know about, not what it knows it cannot claim.
   delete out.corroborated;
-  // THE WITNESS, AND THE TOMBSTONE IN THE VIEW'S OWN WORDS (lane no-5h-window r3). `planWeekSig` = this producer's
-  // reading of the plan week (`7d:<integer %>@<reset s>`, the stream capture spells it the same, so one API answer
-  // seen by both counts once); a render without five_hour whose week MOVED is one witness (`fiveHourAbsentWitnesses`);
-  // the second lays the legacy view's `fiveHourAbsent` and drops the 5h bucket (the write path's lift reads it back
-  // into the plan limit). A render whose week did NOT move — the reset-time re-render, an idle redraw — is no witness.
-  // It writes BEHIND the write path, so a CHANGE it saw (the file held a 5h bucket; or it said «none» and a 5h window
-  // is back) is left as ONE unsaid marker the server's passive ingest hands to the write path: said once, cleared.
-  const sig = sevenDay ? `7d:${Math.round(sevenDay.utilization * 100)}@${Number(sevenDay.resetsAt) || 0}` : null;
-  const prevSig = prev && typeof prev.planWeekSig === 'string' ? prev.planWeekSig : null;
-  if (sig) out.planWeekSig = sig;
-  const had = !!(prev && prev.fiveHour && typeof prev.fiveHour === 'object');
-  const tomb = !had && !!prev && Number(prev.fiveHourAbsent) > 0;
-  if (fiveHour) {
-    delete out.fiveHourAbsentWitnesses; // a stated 5h window ends every count
-    if (tomb) out.windowChangeUnsaid = { kind: '5h', change: 'restored', at: Date.now() };
-  } else if (sevenDay && !tomb && prevSig && sig !== prevSig) {
-    const w = prev && prev.fiveHourAbsentWitnesses;
-    const n = (w && Number(w.n) > 0 ? Number(w.n) : 0) + 1;
-    if (n >= 2) {
-      delete out.fiveHour; delete out.fiveHourAbsentWitnesses;
-      out.fiveHourAbsent = Date.now();
-      if (had) out.windowChangeUnsaid = { kind: '5h', change: 'removed', at: out.fiveHourAbsent };
-    } else out.fiveHourAbsentWitnesses = { n, at: Date.now() };
+  // THE TOMBSTONE IN THE VIEW'S OWN WORDS (lane no-5h-window r3/r4). The second moved answer of ONE session without
+  // five_hour lays the legacy view's `fiveHourAbsent` and drops the 5h bucket (the write path's lift reads it back
+  // into the plan limit); a stated 5h window newer than the tombstone brings the window back. This tool writes BEHIND
+  // the write path, so a CHANGE it saw (the file held a 5h bucket; or it said «none» and a 5h window is back) is left
+  // as ONE unsaid marker stamped with THIS key — the server's passive ingest hands it to the write path: said once,
+  // cleared. A change undone before it was said (removed, then back) cancels its marker: nothing to say.
+  const witnesses = wit.witnesses;
+  if (Object.keys(witnesses).length) out.fiveHourAbsentWitnesses = witnesses; else delete out.fiveHourAbsentWitnesses;
+  const unsaid = out.windowChangeUnsaid && out.windowChangeUnsaid.key === key ? out.windowChangeUnsaid : null;
+  if (!unsaid) delete out.windowChangeUnsaid;
+  const mark = (change, at) => {
+    if (unsaid && unsaid.change !== change) delete out.windowChangeUnsaid;
+    else out.windowChangeUnsaid = { kind: '5h', change, at, key };
+  };
+  if (wit.stale) delete out.fiveHour; // the file keeps its tombstone (spread from `prev`) at the instant it was first said
+  else if (wit.restore) { delete out.fiveHourAbsent; mark('restored', now); }
+  else if (wit.lay) {
+    delete out.fiveHour;
+    out.fiveHourAbsent = now;
+    if (had) mark('removed', now);
   }
   try { fs.mkdirSync(CACHE_DIR, { recursive: true }); } catch {}
   const tmp = f + '.tmp';

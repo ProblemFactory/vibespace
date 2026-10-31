@@ -11683,4 +11683,5 @@ export default {
   "Its usage reading no longer lists a 5-hour window, so the pool counts only its weekly limits. The usage popup says so on its row — nothing needs doing.": "它的用量读数不再列出 5 小时窗口，账号池因此只计它的每周限额。用量弹窗在它那一行也会注明——无需任何操作。",
   "{account}'s 5-hour limit is back (since {since}): the pool counts its 5-hour window again": "{account} 的 5 小时限额又回来了（{since} 起）：账号池重新计入它的 5 小时窗口",
   "Its usage reading lists a 5-hour window again, so the pool counts it again.": "它的用量读数重新列出了 5 小时窗口，账号池会重新计入它。",
+  "{m}: its limit window is unknown (it has no 5-hour limit).": "{m}：它的限额窗口未知（它没有 5 小时限额）。",
 };

@@ -261,11 +261,15 @@ function lanesSnapshot(ev, { named = false } = {}) {
  * `corroborated` (optional) records whether the OTel observation agreed with
  * the credential slot this reading was filed on (2026-09-07). A LABEL only —
  * the key comes from readingSlotFor and nothing else.
+ * `producer` (optional, lane no-5h-window r4) = the session whose stream this
+ * record is (`ev:<webui id>`): a record without the 5h window is a «no 5h»
+ * witness only of the producer that read it (quota-model `countPassiveAnswer`);
+ * a replay or a re-drive passes none and witnesses nothing.
  *
  * @returns {ok, dead, wroteReading} — dead=true when the bucket is exhausted
  *   (caller should treat it like a limit banner: immediate pool evaluation).
  */
-function captureRateLimitEvent({ cacheDir, key, identityIds, ev, now = Date.now(), source = 'rate-limit-event', corroborated = undefined, familyOf = null, hint = null }) {
+function captureRateLimitEvent({ cacheDir, key, identityIds, ev, now = Date.now(), source = 'rate-limit-event', corroborated = undefined, familyOf = null, hint = null, producer = null }) {
   if (!ev || (ev.kind !== 'fiveHour' && ev.kind !== 'sevenDay' && ev.kind !== 'scoped')) {
     // unknown bucket types: surface, never silently drop (the api_retry lesson)
     return { ok: false, dead: false, wroteReading: false, unknownType: ev?.rawType || null };
@@ -293,15 +297,16 @@ function captureRateLimitEvent({ cacheDir, key, identityIds, ev, now = Date.now(
   // 'running' — B-8b12 in the other direction).
   const restated = (b) => { const c = { ...b }; delete c.state; return c; };
   // «NO 5h» (lane no-5h-window): this record as a passive answer (r3: a WITNESS the write path counts — see
-  // usage-cache-write `passiveAnswer`), and the key's OWN plan as stored — a base chosen from a SIBLING's freshest file
+  // usage-cache-write `passiveAnswer`; r4: counted for its PRODUCER, the session whose stream it is — a replay or a
+  // re-drive names none and is no witness), and the key's OWN plan as stored — a base chosen from a SIBLING's freshest file
   // may still carry a 5-hour bucket the account no longer has, and spreading it here would re-stamp it as measured
   // now (a removed window resurrected by a write that never saw it). A GUESSED 5h wall (the wall fold's re-drive of
   // an unknown-wording banner) has no 5h window to mark on such a file either; a NAMED 5h lane brings it back.
   const absent5h = Array.isArray(ev.absentWindows) && ev.absentWindows.includes('5h');
-  const stated5h = lanes.some((l) => l.kind === 'fiveHour') && !ev.guessed;
-  const w7 = ev.windows && ev.windows.sevenDay;
-  const weekSig = (w7 && w7.utilization != null && Number(w7.resetsAt) > 0) ? `7d:${Math.round(w7.utilization * 100)}@${Number(w7.resetsAt)}` : null;
-  const passive = source === 'rate-limit-event' ? { weekSig, fiveHour: stated5h, absent5h } : null;
+  const lane5 = ev.guessed ? null : lanes.find((l) => l.kind === 'fiveHour') || null;
+  const stated5h = !!lane5;
+  const weekSig = require('./quota-model.js').planWeekSigOf(ev.windows && ev.windows.sevenDay);
+  const passive = source === 'rate-limit-event' ? { producer, weekSig, fiveHour: lane5 ? { resetsAt: Number(lane5.resetsAt) || 0 } : null, absent5h } : null;
   const tombOf = (own) => !!(own && !(own.fiveHour && typeof own.fiveHour === 'object') && Number(own.fiveHourAbsent) > 0);
   // THE RESET OF A DEAD MARK — ONE LADDER FOR EVERY LANE (r2): the signal's
   // own future reset > the lane's stored future reset > for a weekly lane the
@@ -405,6 +410,10 @@ function captureRateLimitEvent({ cacheDir, key, identityIds, ev, now = Date.now(
     // The freshest SIBLING was chosen for its READINGS; its `limits` describe a
     // different account's window set, so they must not travel with it.
     delete cache.limits;
+    // …nor its window BOOKKEEPING (lane no-5h-window r4, acceptance r3 MAJOR 1): its unsaid change marker and its
+    // witnesses belong to the file that laid them, and its tombstone is not this key's — this key's own is its file's.
+    delete cache.windowChangeUnsaid; delete cache.fiveHourAbsentWitnesses;
+    if (base !== ownFile) { if (tombOf(ownFile)) cache.fiveHourAbsent = ownFile.fiveHourAbsent; else delete cache.fiveHourAbsent; }
     // NOTE (r2): the established window is a fact about WHICH ACCOUNT THIS FILE
     // IS, and this producer used to have to rescue it by hand (the
     // freshest-sibling base above is chosen for its READINGS, so writing it

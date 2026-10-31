@@ -49,8 +49,23 @@ function _writeAtomic(f, text) { fs.writeFileSync(f + '.tmp', text); fs.renameSy
 // carried a hand-shaped snapshot.
 const _usageWrite = require('./usage-cache-write.js');
 const { familyOfScopedBucket: _familyOf } = require('./model-family.js');
+// «NO 5h LIMIT» OUTLIVES EVERY REBUILD (lane no-5h-window r4, acceptance r3 MAJOR 2). The tombstone is read from the
+// TARGET file itself — never from a caller's `prev`, which one caller (repairSidecarsByApiPhase's prevOwn) built
+// without it — so this ONE guard, inside the one repair write, covers every rebuild: a 5h bucket read at or before the
+// tombstone (an older anchor's) is not the account's any more, and the tombstone is carried (the replace-mode lift
+// reads `fiveHourAbsent` back); one read AFTER it is the window back. An emptied remnant (no `fetchedAt`: nothing on
+// it claims to be a reading) claims no plan shape either.
+function _keepOwnAbsence(cacheDir, key, obj) {
+  const own = _readJson(_usageWrite.cacheFileFor(cacheDir, key));
+  const since = own && !(own.fiveHour && typeof own.fiveHour === 'object') && Number(own.fiveHourAbsent) > 0 ? Number(own.fiveHourAbsent) : 0;
+  if (!since || !(Number(obj.fetchedAt) > 0)) return obj;
+  if (obj.fiveHour && !(Number(obj.fetchedAt) > since)) delete obj.fiveHour;
+  if (!obj.fiveHour) obj.fiveHourAbsent = since;
+  return obj;
+}
 function _writeCacheAtomic(cacheDir, key, obj) {
   delete obj.limits; // the repaired object states the whole truth about this file
+  _keepOwnAbsence(cacheDir, key, obj);
   const r = _usageWrite.writeCacheObject({ cacheDir, key, obj, replace: true, familyOf: _familyOf, source: obj.source || null });
   if (!r.ok) _writeAtomic(_usageWrite.cacheFileFor(cacheDir, key), JSON.stringify(obj)); // a repair that cannot write is worse than one that writes a legacy shape
   return r.ok;
@@ -172,12 +187,8 @@ function _cacheFromAnchor(anchor, prev, window = null) {
   const b = anchor.buckets || {};
   const own = (name) => (window && window.scoped ? window.scoped[String(name || '').toLowerCase()] : null);
   const agrees = (resetsAt, phase) => !window || phase == null || !(Number(resetsAt) > 0) || weeklyNear(resetsAt, phase) !== false;
-  // «NO 5h LIMIT» OUTLIVES A REBUILD FROM AN OLDER ANCHOR (lane no-5h-window r3, the standing sweep of sibling/anchor
-  // re-stamps): a 5h bucket an anchor read BEFORE the file's dated tombstone is not the account's any more — the
-  // tombstone is carried (the replace-mode lift reads `fiveHourAbsent` back); one read AFTER it is the window back.
-  const tomb5h = prev && !(prev.fiveHour && typeof prev.fiveHour === 'object') && Number(prev.fiveHourAbsent) > 0 ? Number(prev.fiveHourAbsent) : 0;
-  if (b.fiveHour && !(tomb5h && (Number(anchor.fetchedAt) || 0) <= tomb5h)) out.fiveHour = { utilization: b.fiveHour.u, resetsAt: b.fiveHour.resetsAt || 0, status: 'allowed' };
-  else if (tomb5h) out.fiveHourAbsent = tomb5h;
+  // («no 5h limit» is judged where the rebuild is WRITTEN, against the target file's own tombstone: _writeCacheAtomic)
+  if (b.fiveHour) out.fiveHour = { utilization: b.fiveHour.u, resetsAt: b.fiveHour.resetsAt || 0, status: 'allowed' };
   if (b.sevenDay && agrees(b.sevenDay.resetsAt, window && window.sevenDay)) out.sevenDay = { utilization: b.sevenDay.u, resetsAt: b.sevenDay.resetsAt || 0, status: 'allowed' };
   const sw = (Array.isArray(b.scopedWeekly) ? b.scopedWeekly : []).filter((s) => s && agrees(s.resetsAt, own(s.name)));
   if (sw.length) {
