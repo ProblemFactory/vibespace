@@ -4,6 +4,9 @@ import { createRequire } from 'node:module';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+// lane int361 (.367): the schedule legs run in a PINNED zone — America/Los_Angeles, the box's, which has both DST edges — set
+// before any Date use (the runner is UTC; Node re-reads TZ on assignment). Their instants are written with explicit offsets.
+process.env.TZ = 'America/Los_Angeles';
 const require = createRequire(import.meta.url);
 const M = require('../src/job-model.js');
 const __dirname_jm = require('path').dirname(new URL(import.meta.url).pathname);
@@ -168,10 +171,49 @@ ok(M.vetSpec({ cmd: { argv: ['npm', 'run', 'dev'] } }).ok, 'ordinary spec passes
 
 // ── schedules ──
 ok(M.parseCron('41 9 * * *') && M.parseCron('*/15 * * * *') && !M.parseCron('99 * * * *') && !M.parseCron('* * * *'), 'cron parse accepts/rejects correctly');
-const base = Date.UTC(2026, 7, 17, 12, 0, 0); // Mon Aug 17 2026 12:00 UTC — but nextFire uses local time; use a relative check instead
-const nf = M.nextFire({ cron: '0 3 * * *' }, Date.now());
-ok(nf > Date.now() && nf - Date.now() <= 24 * 3600e3 + 60e3, 'daily cron next-fire lands within 24h');
-const d = new Date(nf); ok(d.getHours() === 3 && d.getMinutes() === 0, 'daily cron fires at 03:00 local');
+// lane int361 (.367 pin #0): the clock is PINNED — this leg read Date.now() and went red on 2026-10-31, the eve of the fall-back
+// (the next 03:00 local was 25 real hours away): a fixture that reads the real clock passes or fails by the calendar.
+const base = Date.UTC(2026, 7, 17, 12, 0, 0); // Mon Aug 17 2026 05:00 PDT — far from either DST edge
+const nf = M.nextFire({ cron: '0 3 * * *' }, base);
+ok(nf > base && nf - base <= 24 * 3600e3 + 60e3, 'daily cron next-fire lands within 24h (a pinned clock: Aug 17 05:00 PDT)');
+const d = new Date(nf); ok(d.getHours() === 3 && d.getMinutes() === 0 && d.getDate() === 18, 'daily cron fires at 03:00 local (Aug 18)');
+// ── schedules across daylight saving (America/Los_Angeles 2026: spring-forward Mar 8 02:00 PST → 03:00 PDT; fall-back Nov 1
+// 02:00 PDT → 01:00 PST). The first five legs pin what c0faf8120 already did; the last two were RED there (the product's bug).
+{
+  const T = (iso) => Date.parse(iso); const iso = (t) => new Date(t).toISOString();
+  const nx = (cron, from) => M.nextFire({ cron }, T(from));
+  // jobs.js _cronTick, 30 s ticks: nextFireAt = nextFire(schedule, now()) at create / start / resume and after every fire
+  const fires = (cron, from, to) => {
+    const out = []; let next = M.nextFire({ cron }, from);
+    for (let t = from; t <= to && next != null; t += 30e3) { if (t < next) continue; out.push(t); next = M.nextFire({ cron }, t); }
+    return out;
+  };
+  ok(nx('0 3 * * *', '2026-10-31T10:00:00-07:00') === T('2026-11-01T03:00:00-08:00') && nx('0 3 * * *', '2026-10-31T03:00:00-07:00') === T('2026-10-31T03:00:00-07:00') + 25 * 3600e3,
+    'fall-back: the daily 03:00 fires at 03:00 PST — 18 h after 10:00 PDT, 25 h after the day before\'s fire (never 02:00 or 04:00)');
+  ok(nx('0 3 * * *', '2026-03-07T10:00:00-08:00') === T('2026-03-08T03:00:00-07:00') && nx('0 3 * * *', '2026-03-07T03:00:00-08:00') === T('2026-03-07T03:00:00-08:00') + 23 * 3600e3,
+    'spring-forward: the daily 03:00 fires at 03:00 PDT — 16 h after 10:00 PST, 23 h after the day before\'s fire');
+  ok(nx('30 2 * * *', '2026-03-07T10:00:00-08:00') === T('2026-03-09T02:30:00-07:00') && nx('30 2 * * *', '2026-03-08T01:59:00-08:00') === T('2026-03-09T02:30:00-07:00'),
+    'spring-forward: 02:30 does not exist on Mar 8 — no fire that day, the next is Mar 9 02:30 PDT (a skip, said in nextFire; the scan is bounded)');
+  const sf = fires('*/15 * * * *', T('2026-03-08T01:00:00-08:00'), T('2026-03-08T03:30:00-07:00'));
+  ok(sf.map(iso).join() === ['09:15', '09:30', '09:45', '10:00', '10:15', '10:30'].map((h) => `2026-03-08T${h}:00.000Z`).join(),
+    'spring-forward: */15 keeps 15 real minutes across the jump (01:45 PST ⇒ 03:00 PDT)', sf.map(iso).join(' '));
+  const once = fires('30 1 * * *', T('2026-10-31T10:00:00-07:00'), T('2026-11-01T10:00:00-08:00'));
+  ok(once.length === 1 && once[0] === T('2026-11-01T01:30:00-07:00'), 'fall-back: 01:30 happens twice on Nov 1 — exactly ONE fire, the first pass (01:30 PDT)', once.map(iso).join(' '));
+  // RED on c0faf8120: inside the repeated hour the scan re-resolved now() to the first pass, an hour back, and answered a past fire
+  const back = [];
+  for (const cron of ['30 1 * * *', '59 1 * * *', '*/15 * * * *', '0 * * * *', '0 3 * * *', '30 2 * * *'])
+    for (const [a, b] of [['2026-11-01T06:00:00Z', '2026-11-01T12:00:00Z'], ['2026-03-08T08:00:00Z', '2026-03-08T12:00:00Z']])
+      for (let x = T(a); x <= T(b); x += 60e3) { const n = M.nextFire({ cron }, x); if (!(n > x)) back.push(`${cron} @${iso(x)} ⇒ ${n == null ? n : iso(n)}`); }
+  ok(back.length === 0, 'nextFire is strictly after its now at every minute across both DST edges (6 crons)', back.length + ': ' + back.slice(0, 3).join(' · '));
+  const storm = [];
+  for (let s = T('2026-11-01T01:00:00-08:00'); s < T('2026-11-01T02:00:00-08:00'); s += 60e3)
+    for (const cron of ['30 1 * * *', '45 1 * * *', '*/15 * * * *']) {
+      const f = fires(cron, s, T('2026-11-01T04:00:00-08:00'));
+      if (cron === '*/15 * * * *' ? f.some((t, i) => i && t - f[i - 1] < 15 * 60e3) : f.length) storm.push(`${cron} from ${iso(s)}: ${f.length} fire(s)`);
+    }
+  ok(storm.length === 0, 'a cron created, started or resumed inside the repeated hour (01:00–01:59 PST) never fires at every tick: its 01:30 / 01:45 already ran (no fire before 04:00 PST), */15 stays 15 min apart',
+    storm.length + ': ' + storm.slice(0, 3).join(' · '));
+}
 ok(M.nextFire({ at: Date.now() - 1000 }, Date.now()) === null, 'passed {at} never fires (missed handling is the engine)');
 const e1 = M.nextFire({ everyMs: 30 * 60e3, jitterPct: 20 }, 1000, 0.5);
 ok(e1 === 1000 + Math.round(30 * 60e3 * 1.1), 'everyMs jitter is deterministic under injected rand');
