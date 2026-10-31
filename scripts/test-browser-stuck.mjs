@@ -1985,7 +1985,10 @@ console.log('⑥ teaching: the manual, the ONE intro line, the CLI usage');
   const scAlone = dh.scopeFor({ profileId: 'p-alone', browserKey: KC, sessionId: 'sess-c' });
   ok(scShared instanceof Set && scShared.size === 0 && scAlone === null, 'the .197 integration: while the user browses the profile himself, a conversation with no attributed tab is told of NO dialog (never his page\'s); alone, every tab is its own', { shared: scShared && [...scShared], alone: scAlone });
   const wsrc = fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf8');
-  ok(/const h = typeof browserKeeper\.humanOf === 'function' \? browserKeeper\.humanOf\(profileId\) : null; if \(h && h\.browserKey\) out\.push\(\{ browserKey: h\.browserKey, sessionId: null, ephemeral: false, human: true,/.test(wsrc) && /if \(h && h\.human\) return h\.input === 'user';/.test(fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8')), 'WIRING: the watch\'s holders include the user\'s own browsing row (keeper.humanOf), and "the user drives" reads his row\'s own side');
+  // int367 (the .367 train): lane passkey-browse-yourself r4 moved the holder rows into ONE composer, browser-dialogs.js
+  // holdersOfKeeper (his row once, flagged) — the wiring hands it the keeper; the pin follows it there
+  const dsrc = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
+  ok(/const holdersOf = require\('\.\/browser-dialogs'\)\.holdersOfKeeper\(\(\) => browserKeeper\);/.test(wsrc) && /const h = typeof k\.humanOf === 'function' \? k\.humanOf\(profileId\) : null;\s*if \(h && h\.browserKey\) out\.push\(\{ browserKey: h\.browserKey, sessionId: null, ephemeral: false, human: true,/.test(dsrc) && /if \(h && h\.human\) return h\.input === 'user';/.test(dsrc), 'WIRING: the watch\'s holders include the user\'s own browsing row (keeper.humanOf), and "the user drives" reads his row\'s own side');
   dh.shutdown && dh.shutdown();
 }
 for (const row of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 4, label: 'mutant copies: ' })) ok(row.pass, row.name, row.detail);

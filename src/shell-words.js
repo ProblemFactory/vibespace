@@ -698,7 +698,7 @@ function writesKnown(c, cw) {
  *  that expand nothing and cannot end the shell, written as the bare word, every word `plainWord`, redirected (if at all)
  *  to /dev/null or a descriptor. [word, its operands, the shells' truth behind the row — test-channel-touch ⑬'s rows:
  *  bash · zsh · zsh in the agent tool's form, every one ENDED]. Anything else between — an external command
- *  (`python3 -c "…os.kill(os.getppid(), 9)"` ends its parent: x9-38 outlives in both shells), a reserved word
+ *  (a `python3 -c "…"` that sends SIGKILL to os.getppid() ends its parent: x9-38 outlives in both shells), a reserved word
  *  (`repeat 1 exit`: x9-31, `time`), a builtin that writes a name (`read status`, `printf -v status`: x9-36, x9-39), a
  *  pattern (`echo a<1-9>b`: x9-32) — is a STOP. A comment or an empty line is no command at all (a9-01, a9-02).
  *  r11: a SPECIAL builtin (`:`) with any redirection is a STOP (SPECIAL). */
