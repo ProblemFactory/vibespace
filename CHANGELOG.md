@@ -22,6 +22,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A new conversation is placed on such an account, or on one never read, so its first turn confirms the reset.
 - An account that has not been read yet now says so where its usage would be, instead of showing nothing.
 - The live view’s “Hand back and continue…” is now “Hand back with a note…”; its dialog says nothing is sent now and how to have the agent continue right away.
+- In your own browsing, a passkey kept in VibeSpace is offered only when you start a sign-in, never in a site's autofill suggestions.
+- On a passkey registration card, Not now also takes back an earlier unused Allow once for the same site and conversation, and that card says so.
 
 ### Fixed
 - Across a daylight-saving change a scheduled job runs once, at the right local time — one started in the hour that repeats no longer runs every 30 seconds.
@@ -31,6 +33,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Conversation links from a background read that a command left running no longer land on a later, unrelated step.
 - Conversation links from a command that checks for new messages in a shell arithmetic test, or reads them in a cleanup step it sets, now stay with that command.
 - A command whose shell text cannot be fully read, such as a zsh glob pattern or a value run a second time, keeps the conversation links it may have caused.
+- When a page waits for a passkey, in your own browsing or the agent's live view, the window now says so and tells you how to answer it.
 
 ## 2.369.366 — 2026-10-31
 
