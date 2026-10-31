@@ -39,7 +39,7 @@ const STATUS = Object.freeze({
   entry_has_its_own_door: 403, entry_unknown: 404, ask_settled: 409, ask_unknown: 404, ask_expired: 410, ask_changed: 409, bad_answer: 400,
   ask_redrawn: 409, restore_failed: 500,   // lane vault-standing-request r4: the card drawn again at the press · a partial write not put back (by name)
   always_not_offered: 400, conversation_gone: 410,
-  window_not_offered: 400, window_card_only: 400, window_end_required: 400,   // lane vault-standing-request r7: «Allow for 1 hour»
+  window_not_offered: 400, window_card_only: 400, window_end_required: 400, window_too_long: 400, window_excepted: 409,   // lane vault-standing-request r7: «Allow for 1 hour» (r8: + the writer's cap, 除了)
   hosts_required: 400, too_many_hosts: 400, bad_principal: 400, bad_resource: 400, bad_except: 400, except_conflicts: 400, too_many: 400, bad_row: 400, unknown_shape: 409, not_written: 500, store_unreadable: 503, no_use_grants: 404,   // lane vault-use-grants: «谁可以用…»
   bad_scope: 400, bad_length: 400, bad_charset: 400, value_required: 400, value_in_argv: 400, // lane vault-mint-put
   bad_grant_answer: 400, // lane vault-manual-and-lock: the answer to an agent's request
@@ -93,6 +93,8 @@ const WORDS = Object.freeze({
   window_not_offered: '«Allow for 1 hour» is not offered on this card (it has an «Always», or it is late)',   // r7
   window_card_only: 'a 1-hour approval is given from a run card only («Allow for 1 hour») — Save keeps one as it is and never makes or moves one',   // r7 (= vault-use-grants WORDS)
   window_end_required: 'a 1-hour approval needs its end in the future — nothing was written',   // r7
+  window_too_long: 'a 1-hour approval lasts one hour from the press — never longer; nothing was written',   // r8 (= vault-use-grants WORDS)
+  window_excepted: 'you excluded this conversation from this secret in the Vault window (除了) — a 1-hour approval is not given to it; nothing was written',   // r8 (= vault-use-grants WORDS)
   failed: 'the vault door failed — nothing changed',
   bad_scope: 'this session has no conversation to own a vault entry',
   bad_length: 'the length is a whole number from 8 to 256',
@@ -439,7 +441,8 @@ function registerPasteRoutes(app, { paste, activeSessions, person, take }) {
  * ends it) — once / 8h need this page's 验证是你 window like the switch (a grant opens an entry), deny is a click.
  * lane vault-use-grants: A PERSON edits who may use an entry with NO card — POST /api/vault/use-grants {id, to, except, page}
  * (the whole vault-use row: each `to` member its `hosts` and optional `until`; a widening needs this page's 验证是你 window,
- * reveal_needs_password otherwise) · POST /api/vault/use-grants/revoke {id, principal} (one member out — a click) · R4: POST
+ * reveal_needs_password otherwise) · POST /api/vault/use-grants/revoke {id, principal, scope?} (one member out — a click; r8:
+ * `scope: 'window'` takes back only its 1-hour window, and the press's record is told — the door's takeBack) · R4: POST
  * /api/vault/use-policy {id, text, page} (the entry's policy for the decision-API judge; a non-empty one needs the window) ·
  * POST /api/vault/use-policy/revoke {id} (the judge's approvals of this entry ask again next time — a click).
  * THE THREE HOLES this door does NOT close (design §8.6 — said here, in the door's own header and on the manual): ① the child
@@ -523,7 +526,7 @@ function registerRunRoutes(app, { run, activeSessions, getJobs, contents, who, p
   // the judge approve uses); clearing it and 「Revoke」 (the judge's approvals ask again next time) are clicks
   app.post('/api/vault/use-policy', person((req) => { const [page] = take(req, 'page'); const b = req.body || {}; return run.setPolicy({ id: String(b.id || ''), text: typeof b.text === 'string' ? b.text : '', reauthed: reauthedOf(req, page), by: 'user' }); }));
   app.post('/api/vault/use-policy/revoke', person((req) => { const b = req.body || {}; return run.revokeApprovals({ id: String(b.id || ''), by: 'user' }); }));
-  app.post('/api/vault/use-grants/revoke', person((req) => { const b = req.body || {}; const ug = run.useGrants; if (!ug) return { ok: false, code: 'no_use_grants' }; return ug.revoke(String(b.id || ''), String(b.principal || ''), { by: 'user' }); }));
+  app.post('/api/vault/use-grants/revoke', person((req) => { const b = req.body || {}; const ug = run.useGrants; if (!ug) return { ok: false, code: 'no_use_grants' }; return typeof run.takeBack === 'function' ? run.takeBack({ id: String(b.id || ''), principal: String(b.principal || ''), scope: b.scope === 'window' ? 'window' : null, by: 'user' }) : ug.revoke(String(b.id || ''), String(b.principal || ''), { by: 'user' }); }));   // r8: through the door — a 1-hour window taken back tells its record; `scope: 'window'` = the window's own ✕
   // lane vault-use-grants round 6 (MAJOR item 4): un-pause ONE member the owner's OFF paused — a widening, so it needs this page's 验证是你 window.
   app.post('/api/vault/use-grants/resume', person((req) => { const [page] = take(req, 'page'); const b = req.body || {}; return run.resumeGrant({ id: String(b.id || ''), principal: String(b.principal || ''), reauthed: reauthedOf(req, page), by: 'user' }); }));
   app.post('/api/vault/request/asks/:askId', person((req) => { const [page] = take(req, 'page'); const b = req.body || {}; return run.answerRequest(String(req.params.askId), { answer: b.answer, reauthed: b.answer !== 'deny' && reauthedOf(req, page), by: 'user', person: true }); }));   // r4: `person` — the record says «allowed by you for 8 h · HH:MM»   // lane vault-manual-and-lock: once | 8h need this page's 验证是你 (a grant opens the entry as the switch does); deny is a click

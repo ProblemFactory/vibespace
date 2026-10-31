@@ -27,6 +27,11 @@
 //      record «已允许这个对话 1 小时 · 至 HH:MM · 可在保险库窗口收回» in the chat card, the tray and the window, the NEXT use with no card
 //      and nothing filed + its notice on a SECOND client, `uses`, the chip «任何目的地 · 至 HH:MM · 60 分钟» (warning accent), ✕;
 //      MEASURED first: what an admitted standing-grant use shows in the chat (nothing — the report says the counts)
+//      r8 (主开发's acceptance of r7): THE HUB IS A LOCAL INSTANCE (the owner's: no instance name, no presets dir — forced) and the
+//      APPROVED command itself, run again inside the hour, pops its notice (r7 let it through by `seen`, silently); the chip's
+//      source «卡片上的「允许 1 小时」»; the WINDOW's own ✕ — the chip keeps its other scopes, the record says «已于 HH:MM 撤销», the
+//      next run asks (vsr-23); a conversation the owner EXCEPTED (除了) gets no «允许 1 小时» and the card says why (vsr-24);
+//      vsr-17 shot with no toast over the pane, the window maximized (the hint inside it)
 //   --shots <dir> keeps vsr-*.png. RED CONTROL: this suite over the base tree (4ef7e9494) — ② the request files a PLAIN card
 //   (once / 8h), ③ no command chip, ④ no «总是（这条命令）».
 // Run: node scripts/test-vault-standing-request-chrome.mjs [--shots <dir>]   (SKIPs without chrome or python3)
@@ -81,7 +86,8 @@ process.stdin.on('end', () => process.exit(0));
 
 const LOG = path.join(stubDir, 'server.log');
 let srv = null;
-const startServer = () => { const fd = fs.openSync(LOG, 'a'); srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...process.env, ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: SIGN_IN }, stdio: ['ignore', fd, fd] }); fs.closeSync(fd); };
+const { VIBESPACE_INSTANCE_NAME: _instanceName, ...ENV_LOCAL } = process.env;   // r8: the hub is a LOCAL instance (the owner's) — no instance name, no presets dir
+const startServer = () => { const fd = fs.openSync(LOG, 'a'); srv = spawn(process.execPath, ['server.js'], { cwd: wt, env: { ...ENV_LOCAL, VIBESPACE_PRESETS_DIR: '', ...VNC_ENV, PORT: String(PORT), HOME: fakeHome, CLAUDE_CMD: stubPath, VIBESPACE_SKIP_AGENT_HOOKS: '1', VIBESPACE_PASSWORD: SIGN_IN }, stdio: ['ignore', fd, fd] }); fs.closeSync(fd); };
 const stopServer = async () => { const p = srv; srv = null; if (!p) return; p.kill('SIGTERM'); await new Promise((r) => { const t = setTimeout(() => { try { p.kill('SIGKILL'); } catch { } r(); }, 8000); if (p.exitCode !== null || p.signalCode !== null) { clearTimeout(t); r(); return; } p.once('exit', () => { clearTimeout(t); r(); }); }); };
 const ready = async (ms = 60000) => { const t0 = Date.now(); for (;;) { try { const r = await fetch(`http://127.0.0.1:${PORT}/login`); if (r.status === 200) return true; } catch { } if (Date.now() - t0 > ms) return false; await sleep(300); } };
 const chrome = spawn(CHROME, ['--headless=new', `--remote-debugging-port=${CDP_PORT}`, '--no-first-run', '--disable-gpu', '--no-sandbox', '--disable-dev-shm-usage',
@@ -380,6 +386,11 @@ try {
   await A.evalJs(`app.openInbox({ itemId: ${JSON.stringify(wc && wc.id)} }); true`);
   const wv = await A.until(`(() => { const acts = [...document.querySelectorAll('.iw-actions')].find((a) => a.getBoundingClientRect().width > 0 && a.querySelector('[data-act="shape-window"]')); if (!acts) return null; const ch = [...document.querySelectorAll('.iw-detail .ut-run-changes')].find((e) => e.getBoundingClientRect().width > 0); return { acts: [...acts.querySelectorAll('[data-act]')].map((b) => b.dataset.act), label: (acts.querySelector('[data-act="shape-window"]').textContent || '').trim(), hints: [...acts.querySelectorAll('.ut-run-hint')].map((h) => h.textContent), line: ch ? [...ch.querySelectorAll('.ut-run-line')].map((l) => l.textContent) : null }; })()`, { timeout: 10000 });
   check('the For-you window (the other client): Allow once · 允许 1 小时 · Deny in its action row, the words beside them, the same line in its pane', !!wv && wv.acts.slice(0, 3).join() === 'hub-once,shape-window,hub-deny' && /允许 1 小时/.test(wv.label) && wv.hints.includes(HOUR_HINT) && wv.line && HOUR_LINE.test(wv.line[0]), wv);
+  // r8 (the r7 acceptance, the surfaces' minor 3): the shot shows the pane's row and the hint — no transient toast over it, the
+  // window maximized so the hint is inside it
+  const iwMax = await A.evalJs(`(() => { for (const t of [...document.querySelectorAll('.global-toast')]) t.remove(); const w = [...app.wm.windows.values()].find((x) => x.type === 'inbox'); const el = w && (w.element || w.el); const b = el && el.querySelector('.win-maximize'); if (b) b.click(); return !!b; })()`);
+  const wvIn = await A.until(`(() => { const h = [...document.querySelectorAll('.iw-actions .ut-run-hint-window')].find((e) => e.getBoundingClientRect().width > 0); const ch = [...document.querySelectorAll('.iw-detail .ut-run-changes')].find((e) => e.getBoundingClientRect().width > 0); if (!h || !ch) return null; const r = h.getBoundingClientRect(), c = ch.getBoundingClientRect(); return r.bottom <= innerHeight && c.bottom <= innerHeight && !document.querySelector('.global-toast') ? { hint: Math.round(r.bottom), line: Math.round(c.bottom), vh: innerHeight } : null; })()`, { timeout: 8000 });
+  check('(r8) the For-you window\'s shot is legible: the window maximized, its «允许 1 小时» row and the hint beside the answers inside the screen, no toast over them', !!iwMax && !!wvIn, { iwMax, wvIn });
   await sleep(300);
   await A.shot('vsr-17-hour-card-foryou-window.png');
   await A.evalJs(`(() => { for (const w of [...app.wm.windows.values()]) if (w.type === 'inbox') app.wm.closeWindow(w.id); return true; })()`); await sleep(300);
@@ -427,14 +438,41 @@ try {
   const ch3 = await chatNow(), n3 = await countItems();
   check(`the NEXT use (\`sh -c …\`, another command) runs with NO card, files NOTHING (For you +0, the chat +0 rows / +0 cards — ${ch2.msgs} messages / ${ch2.cards} cards before and after) — and the SECOND client pops «Transcriber 在你的 1 小时授权下用了“TTS API key”（还剩 60 分钟）— ${SHN} → 去向未知»`, u1.code === 0 && /the key is set/.test(u1.out) && !!toastB && new RegExp(`^Transcriber 在你的 1 小时授权下用了“TTS API key”（还剩 (59|60) 分钟）— ${reEsc(SHN)} → 去向未知`).test(toastB.text) && n3 === n2 && n2 === nW + 0 && ch2.cards > 0 && ch3.msgs === ch2.msgs && ch3.cards === ch2.cards, { u1: u1.out.slice(0, 160), toastB, n: [nW, n2, n3], ch2, ch3 });
   console.log(`    measured (a window use): chat ${JSON.stringify(ch2)} → ${JSON.stringify(ch3)}, For-you items ${n2} → ${n3}`);
+  // r8 (MAJOR 1): THIS hub is a LOCAL instance — the APPROVED command itself, again inside the hour, is a window use: no card,
+  // nothing filed, its notice (r7 let it through by `seen`, silently, until the vault locked)
+  await B.evalJs(`window.__toasts.length = 0; true`);
+  const n4 = await countItems();
+  const u2 = await cli('vibespace-vault', ['run', '--env', `T=${REF}`, '--', 'bash', '-c', 'curl -s -m 2 -H "Authorization: Bearer $T" https://api.tts.example/v1/asr || true'], TOKEN, { timeout: 70000 });
+  const toastB2 = await B.until(`(window.__toasts || []).find((t) => /在你的 1 小时授权下用了/.test(t.text)) || null`, { timeout: 10000 });
+  const BASHN = (() => { for (const d of String(process.env.PATH || '').split(':')) { try { return path.basename(fs.realpathSync(path.join(d, 'bash'))); } catch { } } return 'bash'; })();
+  const n5 = await countItems();
+  check(`(r8, MAJOR 1 — this hub is a LOCAL instance) the APPROVED command itself, again inside the hour: NO card, nothing filed, and its notice «Transcriber 在你的 1 小时授权下用了“TTS API key”（还剩 N 分钟）— ${BASHN} → 去向未知»`, u2.code === 0 && !!toastB2 && new RegExp(`^Transcriber 在你的 1 小时授权下用了“TTS API key”（还剩 (5[0-9]|60) 分钟）— ${reEsc(BASHN)} → 去向未知`).test(toastB2.text) && n5 === n4, { u2: u2.out.slice(0, 160), toastB2, n: [n4, n5] });
   const uses2 = await cli('vibespace-vault', ['uses'], TOKEN);
   check('`vibespace-vault uses`: the window said («any run (the 1-hour approval, until …)»), the use line «by grant · standing vg-…» saying «under the 1-hour approval · N min left»', /any run \(the 1-hour approval, until /.test(uses2.out) && /by grant · standing vg-[0-9a-f]{8}.*for: under the 1-hour approval · \d+ min left/.test(uses2.out), uses2.out.slice(0, 1200));
   // THE CHIP — the window with its end, the warning accent
   await A.evalJs(`app.replayOpenSpec({ action: 'openVault' })`);
-  const wchip = await A.until(`(() => { const r = ${LIST_ROW(LABEL)}; const c = r && [...r.querySelectorAll('.vw-use-chip')].find((x) => /Transcriber/.test(x.textContent)); const s = c && c.querySelector('.vw-use-scope-window'); if (!s) return null; c.scrollIntoView({ block: 'center' }); const probe = document.createElement('span'); probe.style.color = 'var(--warn-text)'; document.body.append(probe); const warn = getComputedStyle(probe).color; probe.remove(); return { chip: c.textContent, scope: s.textContent, color: getComputedStyle(s).color, warn, title: s.title }; })()`, { timeout: 15000 });
-  check('the Vault row\'s chip says the window beside its other scopes — «任何目的地 · 至 HH:MM · 60 分钟», in the warning accent', !!wchip && /^任何目的地 · 至 \d\d:\d\d · (59|60) 分钟$/.test(wchip.scope) && wchip.color === wchip.warn && /^Transcriber · /.test(wchip.chip) && /命令 /.test(wchip.chip), wchip);
+  const wchip = await A.until(`(() => { const r = ${LIST_ROW(LABEL)}; const c = r && [...r.querySelectorAll('.vw-use-chip')].find((x) => /Transcriber/.test(x.textContent)); const s = c && c.querySelector('.vw-use-scope-window'); if (!s) return null; c.scrollIntoView({ block: 'center' }); const probe = document.createElement('span'); probe.style.color = 'var(--warn-text)'; document.body.append(probe); const warn = getComputedStyle(probe).color; probe.remove(); const wx = c.querySelector('.vw-use-window-x'); return { chip: c.textContent, scope: s.textContent, color: getComputedStyle(s).color, warn, title: s.title, wx: wx ? wx.title : null, principal: c.dataset.principal || '' }; })()`, { timeout: 15000 });
+  check('the Vault row\'s chip says the window beside its other scopes — «任何目的地 · 至 HH:MM · 60 分钟», in the warning accent; r8: its OWN ✕ beside it, the member\'s source «卡片上的「允许 1 小时」 · HH:MM»', !!wchip && /^任何目的地 · 至 \d\d:\d\d · (59|60) 分钟$/.test(wchip.scope) && wchip.color === wchip.warn && /^Transcriber · /.test(wchip.chip) && /命令 /.test(wchip.chip) && /卡片上的「允许 1 小时」 · \d\d:\d\d/.test(wchip.chip) && !/卡片上的总是/.test(wchip.chip) && /只收回 1 小时授权/.test(String(wchip.wx)), wchip);
   await sleep(300);
   await A.shot('vsr-22-hour-chip-desktop.png');
+  // r8 (MINOR 4): the WINDOW's own ✕ — only the window goes: the chip keeps its other scopes, the record says it, the next run asks
+  await A.evalJs(`(() => { const r = ${LIST_ROW(LABEL)}; const c = r && [...r.querySelectorAll('.vw-use-chip')].find((x) => /Transcriber/.test(x.textContent)); const x = c && c.querySelector('.vw-use-window-x'); if (x) x.click(); return !!x; })()`);
+  const wgone = await A.until(`(() => { const r = ${LIST_ROW(LABEL)}; const c = r && [...r.querySelectorAll('.vw-use-chip')].find((x) => /Transcriber/.test(x.textContent)); return c && !c.querySelector('.vw-use-scope-window') && !/任何目的地/.test(c.textContent) ? c.textContent : null; })()`, { timeout: 10000 });
+  const T_X = Date.now();
+  check('(r8, MINOR 4) the window\'s OWN ✕ takes back ONLY the window — the chip stays with its other scopes («命令 …»)', !!wgone && /^Transcriber · /.test(wgone) && /命令 /.test(wgone), wgone);
+  await sleep(300);
+  await A.evalJs(`(() => { for (const t of [...document.querySelectorAll('.global-toast')]) t.remove(); return true; })()`);   // r8: no transient toast over the shot (the acceptance's vsr-17 note)
+  await A.shot('vsr-23-hour-taken-back-chip-desktop.png');
+  await openTray();
+  const trayX = await A.until(`(() => { const it = ${ITEM('/v1\\/asr/')}; return it && /撤销/.test(it.textContent) ? it.textContent : null; })()`, { timeout: 8000 });
+  await closeTray();
+  check('the press\'s record is told — «已允许这个对话 1 小时 · 已于 HH:MM 撤销» (the tray)', typeof trayX === 'string' && new RegExp(`已允许这个对话 1 小时 · 已于 (${hm(T_X)}|${hm(T_X - 60e3)}) 撤销`).test(trayX), typeof trayX === 'string' ? trayX.slice(Math.max(0, trayX.indexOf('已允许') - 20), trayX.indexOf('已允许') + 60) : trayX);
+  const afterP = cli('vibespace-vault', ['run', '--env', `T=${REF}`, '--', 'sh', '-c', 'printf "%s\\n" "${T:+after the window}"'], TOKEN, { timeout: 70000 });
+  let ac = null;
+  for (let i = 0; i < 60 && !ac; i++) { ac = (await openOf('vault-run-ask')).find((x) => /after the window/.test(String(x.detail))) || null; if (!ac) await sleep(200); }
+  if (ac) await A.api('POST', `/api/vault/run/asks/${ac.action.askId}`, { answer: 'deny' });
+  await afterP;
+  check('after the window\'s ✕ the next shell run asks again — its card («允许 1 小时» offered anew)', !!ac && ac.action.window === true, ac && ac.action);
   // ✕ takes it back (the member, its window with it) — the next run asks again
   await A.evalJs(`(() => { const r = ${LIST_ROW(LABEL)}; const c = r && [...r.querySelectorAll('.vw-use-chip')].find((x) => /Transcriber/.test(x.textContent)); const x = c && c.querySelector('.vw-use-x'); if (x) x.click(); return !!x; })()`);
   const xgone = await A.until(`(() => { const r = ${LIST_ROW(LABEL)}; return r && ![...r.querySelectorAll('.vw-use-chip')].some((x) => /Transcriber/.test(x.textContent)) ? true : null; })()`, { timeout: 10000 });
@@ -444,6 +482,26 @@ try {
   if (bc) await A.api('POST', `/api/vault/run/asks/${bc.action.askId}`, { answer: 'deny' });
   await backP;
   check('its ✕ takes it back: the chip goes, the next run draws its card again («Allow for 1 hour» offered anew)', xgone === true && !!bc && bc.action.window === true, { xgone, card: bc && bc.action });
+  // r8 (除了): the owner EXCEPTS this conversation from an «All agents» grant on the entry — its card offers NO «允许 1 小时» (the
+  // press would have taken it out of 除了 for good) and says why
+  const EID = String(REF || '').replace(/^vault:\/\/secrets\/(.+)\/secret$/, 'secrets:$1#secret');
+  const PKEY = String((wchip && wchip.principal) || '').replace(/^conversation:/, '');
+  const pageE = await reveal();
+  const ex = await A.api('POST', '/api/vault/use-grants', { id: EID, to: [{ kind: 'everyone', scopes: [{ host: 'x.example', until: Date.now() + 30 * 86400e3 }] }], except: [{ kind: 'conversation', key: PKEY }], page: pageE }, { 'X-Vault-Page': pageE || '' });
+  const exP = cli('vibespace-vault', ['run', '--env', `T=${REF}`, '--', 'bash', '-c', 'curl -s -m 2 -H "X: $T" https://except.example/v1/x || true'], TOKEN, { timeout: 70000 });
+  let xc = null;
+  for (let i = 0; i < 60 && !xc; i++) { xc = (await openOf('vault-run-ask')).find((x) => /except\.example/.test(String(x.detail))) || null; if (!xc) await sleep(200); }
+  await openTray();
+  const xr = await A.until(`(() => { const it = ${ITEM('/except\\.example/')}; if (!it || !it.querySelector('.ut-run-answer')) return null; it.scrollIntoView({ block: 'center' }); const ans = it.querySelector('.ut-run-answer'); return { buttons: [...ans.querySelectorAll('button')].map((b) => b.textContent.trim()), off: [...ans.querySelectorAll('.ut-run-hint-window-off')].map((h) => h.textContent) }; })()`, { timeout: 10000 });
+  await sleep(300);
+  await A.evalJs(`(() => { for (const t of [...document.querySelectorAll('.global-toast')]) t.remove(); const it = ${ITEM('/except\\.example/')}; const h = it && it.querySelector('.ut-run-hint-window-off'); if (h) h.scrollIntoView({ block: 'center' }); return true; })()`);   // r8: the line in view, no toast over it
+  await A.shot('vsr-24-hour-excepted-card-desktop.png');
+  await closeTray();
+  if (xc) await A.api('POST', `/api/vault/run/asks/${xc.action.askId}`, { answer: 'deny' });
+  await exP;
+  const pageB = await reveal();
+  const back = await A.api('POST', '/api/vault/use-grants', { id: EID, to: [], except: [], page: pageB }, { 'X-Vault-Page': pageB || '' });   // the row as it was — an exception taken away is a WIDENING (验证是你)
+  check('(r8, 除了) a conversation the owner excepted from the entry\'s «All agents» grant: its card offers 允许一次 · 拒绝 only and says «不提供「允许 1 小时」：你在保险库窗口里把这个对话排除在“TTS API key”之外了。»', !!(ex && ex.status === 200 && ex.json.ok && PKEY && xc && xc.action.window === undefined && xr && xr.buttons.join('|') === '允许一次|拒绝' && xr.off.includes('不提供「允许 1 小时」：你在保险库窗口里把这个对话排除在“TTS API key”之外了。') && back.json && back.json.ok), { ex: ex && ex.json, action: xc && xc.action, xr, back: back && back.json });
   try { await B.cdp('Page.close'); } catch { }
   try { await fetch(`http://127.0.0.1:${CDP_PORT}/json/close/${tB.id}`); } catch { }
 

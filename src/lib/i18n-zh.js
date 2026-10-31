@@ -11663,4 +11663,8 @@ export default {
   "«Allow for 1 hour» (with the second password) also turns on «Usable by agent runs» for this entry — it opens it for THIS conversation; any grants you paused stay paused.": "按「允许 1 小时」（需验证是你）也会为此条目打开「可供 agent 运行使用」——它只为当前这个对话打开；你暂停的其他授权仍保持暂停。", // lane vault-standing-request r7 («Allow for 1 hour»)
   "{who} used “{entry}” under your 1-hour approval ({left} min left) — {program} → {where}": "{who} 在你的 1 小时授权下用了“{entry}”（还剩 {left} 分钟）— {program} → {where}", // lane vault-standing-request r7 («Allow for 1 hour»)
   "{who} used “{entry}” under your 1-hour approval ({left} min left) — {program} → destination unknown": "{who} 在你的 1 小时授权下用了“{entry}”（还剩 {left} 分钟）— {program} → 去向未知", // lane vault-standing-request r7 («Allow for 1 hour»)
+  "«Allow for 1 hour» is not offered: you excluded this conversation from “{entry}” in the Vault window.": "不提供「允许 1 小时」：你在保险库窗口里把这个对话排除在“{entry}”之外了。", // lane vault-standing-request r8 («Allow for 1 hour»)
+  "«Allow for 1 hour» on a card": "卡片上的「允许 1 小时」", // lane vault-standing-request r8 («Allow for 1 hour»)
+  "Take back the 1-hour approval only — the other scopes stay": "只收回 1 小时授权 — 其他范围保留", // lane vault-standing-request r8 («Allow for 1 hour»)
+  "The 1-hour approval is taken back — the next run asks you": "已收回 1 小时授权 — 下次运行会再问你", // lane vault-standing-request r8 («Allow for 1 hour»)
 };

@@ -787,6 +787,7 @@ const FILE_ALLOW = new Map([
   ['scripts/test-helm-render.mjs', 'asserts the chart renders VIBESPACE_PRESETS_DIR + the item paths'],
   ['deploy/docker/entrypoint.sh', 'verify r1 ④ THE OLD-APP GATE: reads the env NAME only (set + no src/server/cluster-presets.js in the checkout ⇒ one WARNING per spawn) — never the directory'],
   ['scripts/test-fleet-image-seed.mjs', 'runs the entrypoint\'s presets_reader_check with VIBESPACE_PRESETS_DIR set / unset'],
+  ['scripts/test-vault-standing-request-chrome.mjs', 'clears VIBESPACE_PRESETS_DIR (and the instance name) so the hub it boots is a LOCAL instance — the owner\'s (lane vault-standing-request r8)'],
   ['scripts/test-integration-registry.mjs', 'this census'],
 ]);
 function fileRungCensus(files, read) {

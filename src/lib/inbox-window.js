@@ -543,14 +543,14 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     const acts = model.isCleared(it) || v.actions.includes('more') ? v.actions : [...v.actions, 'clear']; // a card's Clear content… is in its ⋯
     // r7: beside a run card's missing «Always», why it is not offered (the model's words, in the answers' row)
     const hint = run && !v.resolved && acts.includes('hub-once') && (!acts.includes('shape-always') || (it && it.action && it.action.command)) ? run.always.hint : null;   // lane vault-standing-request: «Always (this command)» keeps its plain words
-    const whint = run && !v.resolved && acts.includes('shape-window') && run.window && run.window.hint ? run.window.hint : null;   // r7: «Allow for 1 hour»'s own words
+    const whint = run && !v.resolved && acts.includes('shape-window') && run.window && run.window.hint ? run.window.hint : run && !v.resolved && run.window && run.window.excepted ? run.window.excepted : null;   // r7: «Allow for 1 hour»'s own words; r8: or why it is not offered (除了)
     const actSig = acts.join(',') + '\u0000' + JSON.stringify(hint) + '\u0000' + JSON.stringify(whint);
     if (c.sig.actions !== actSig) {
       c.actions.replaceChildren(...acts.map((a) => ACT[a](it)));
       const deny = hint && c.actions.querySelector('[data-act="hub-deny"]');
       if (deny) { const h = mk('span', 'ut-run-hint'); h.append(...hint.map((x) => (x.code != null ? mk('code', 'ut-run-code', x.code) : x.mono != null ? mk('span', 'ut-run-mono', x.mono) : document.createTextNode(x.text || '')))); deny.after(h); } // TEXT nodes
       const denyW = whint && c.actions.querySelector('[data-act="hub-deny"]');
-      if (denyW) { const h = mk('span', 'ut-run-hint ut-run-hint-window'); h.append(...whint.map((x) => document.createTextNode(x.text || ''))); (c.actions.querySelector('.ut-run-hint') || denyW).after(h); } // r7: TEXT nodes
+      if (denyW) { const h = mk('span', `ut-run-hint ${acts.includes('shape-window') ? 'ut-run-hint-window' : 'ut-run-hint-window-off'}`); h.append(...whint.map((x) => document.createTextNode(x.text || ''))); (c.actions.querySelector('.ut-run-hint') || denyW).after(h); } // r7: TEXT nodes
       c.sig.actions = actSig;
     }
     // the verdict's sentence sits under the box — or, with no box, where the box would be

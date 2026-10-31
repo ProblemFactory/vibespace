@@ -19,6 +19,11 @@
  *   · r7 (lane vault-standing-request): a member's WINDOW scope (src/vault-use-grant.js — «any run until `until`», the owner's
  *     time-boxed trust of one conversation) is written by addMember ONLY (`window`: the run card's «Allow for 1 hour»); the
  *     owner's Save keeps one exactly as it is (its own end) and never mints or moves one — `window_card_only`.
+ *     r8 (主开发's acceptance of r7): the Save sends NO window — the stored member's LIVE window rides it as it is (a dialog
+ *     opened before a ✕ never brings a taken-back one back) and an ended one is pruned; `revokeWindow(id, principalKey)` takes
+ *     back the window ONLY (its chip's ✕ — the host / command scopes stay); `revoke` returns the end of the live window it
+ *     took (the door tells the press's record); every write prunes the row's ENDED windows (U.withoutEndedWindows), and
+ *     `pruneWindows(id)` is the door's hour-end write (nothing to prune ⇒ nothing written).
  *   · `verdictFor(id, facts, run)` — the run door's question before it draws a card (src/server/vault-run-door.js);
  *   · `publicFor(id, counts)` — the row as the window draws it: each member's id, hosts, end, «used N× by M conversations».
  * Every landed write notifies the Vault window (`vault.contentsChanged` — the engine's ONE notify): every open window patches
@@ -38,7 +43,7 @@ function writeJsonAtomic(file, obj) {
   fs.renameSync(tmp, file);
 }
 
-const STATUS = Object.freeze({ window_end_required: 400, window_card_only: 400, command_unreadable: 400, too_many_commands: 400, hosts_required: 400, tool_required: 400, too_many_hosts: 400, bad_principal: 400, bad_resource: 400, bad_except: 400, except_conflicts: 400, too_many: 400, bad_row: 400, unknown_shape: 409, reveal_needs_password: 403, vault_locked: 423, not_written: 500, store_unreadable: 503, entry_unknown: 404 });
+const STATUS = Object.freeze({ window_end_required: 400, window_card_only: 400, window_too_long: 400, window_excepted: 409, command_unreadable: 400, too_many_commands: 400, hosts_required: 400, tool_required: 400, too_many_hosts: 400, bad_principal: 400, bad_resource: 400, bad_except: 400, except_conflicts: 400, too_many: 400, bad_row: 400, unknown_shape: 409, reveal_needs_password: 403, vault_locked: 423, not_written: 500, store_unreadable: 503, entry_unknown: 404 });
 const WORDS = Object.freeze({
   hosts_required: 'name the hosts it may be used for — a host name or address each (or «the hosts it was stored for»), or the command it may run; never «any host»',
   command_unreadable: 'that command could not be read as a program and its script — name them as they run (the program and its first argument)',
@@ -51,6 +56,8 @@ const WORDS = Object.freeze({
   entry_unknown: 'that stored value is not there any more',
   window_end_required: 'a 1-hour approval needs its end in the future — nothing was written',   // r7
   window_card_only: 'a 1-hour approval is given from a run card only («Allow for 1 hour») — Save keeps one as it is and never makes or moves one',   // r7
+  window_too_long: 'a 1-hour approval lasts one hour from the press — never longer; nothing was written',   // r8
+  window_excepted: 'you excluded this conversation from this secret in the Vault window (除了) — a 1-hour approval is not given to it; nothing was written',   // r8
 });
 const named = (code, extra = {}) => ({ ok: false, code, error: WORDS[code] || code, ...extra });
 
@@ -183,14 +190,27 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
     if (!okId(id)) return named('bad_resource');
     if (!unlocked()) return named('vault_locked');   // round 4 (item 4): a locked vault never writes mac:null — refuse by name
     const was = rowOf(id);
-    const v = rowRules(id, { to, except }, { was: verifiedRow(was) });   // r3: a Save that keeps a legacy wildcard as it was is a Save the owner can make
-    if (!v.ok) return v;
-    // r7: a WINDOW scope is the CARD's (its «Allow for 1 hour») — a Save may keep one exactly as the stored member holds it (the
-    // same end), never mint one or move its end (the dialog offers none: «written from the card only»)
-    {
-      const held = new Map((((verifiedRow(was) && GM.publicRow(verifiedRow(was)).to) || [])).map((e) => [GM.principalKey(e), (Array.isArray(e.scopes) ? e.scopes : []).filter((s) => s && s.kind === 'window').map((s) => Number(s.until))]));
-      for (const e of v.row.to) for (const s of (Array.isArray(e.scopes) ? e.scopes : []).filter((x) => x && x.kind === 'window')) if (!(held.get(GM.principalKey(e)) || []).includes(Number(s.until))) return named('window_card_only', { principal: GM.principalKey(GM.bareOf(e)) });
+    // r7: a WINDOW scope is the CARD's (its «Allow for 1 hour») — a Save never mints one or moves its end (a page naming one the
+    // stored member does not hold with that end is refused `window_card_only`). r8 (the r7 acceptance MINOR 4/5): the Save
+    // SENDS none (src/lib/vault-use-row.js) — the stored member's LIVE window rides it exactly as it is (so a dialog opened
+    // before a ✕ cannot bring a taken-back window back, and a window-only member is kept by a Save that names no scope for
+    // it); an ENDED one is pruned (a member that held only that goes)
+    const wasW = verifiedRow(was);
+    const heldW = new Map(((wasW && GM.publicRow(wasW).to) || []).map((e) => [GM.principalKey(e), U.scopesOf(e).filter((s) => s.kind === 'window')]));
+    const t0 = now();
+    const pageTo = [];
+    for (const e of Array.isArray(to) ? to : []) {
+      if (!e || typeof e !== 'object' || !Array.isArray(e.scopes)) { pageTo.push(e); continue; }
+      const pk = GM.principalKey(GM.bareOf(e)), held = heldW.get(pk) || [];
+      for (const s of e.scopes.filter((x) => x && x.kind === 'window')) if (!held.some((h) => h.until === Number(s.until))) return named('window_card_only', { principal: pk });
+      const keep = e.scopes.filter((x) => !(x && x.kind === 'window'));
+      const liveW = held.filter((h) => h.until > t0).map((h) => ({ kind: 'window', until: h.until, ...(h.source ? { source: h.source } : {}), ...(h.at ? { at: h.at } : {}) }));
+      if (!keep.length && !liveW.length && held.length) continue;   // it held only a window, and that has ended — pruned
+      pageTo.push({ ...e, scopes: [...keep, ...liveW] });
     }
+    to = pageTo;
+    const v = rowRules(id, { to, except }, { was: wasW });   // r3: a Save that keeps a legacy wildcard as it was is a Save the owner can make
+    if (!v.ok) return v;
     // lane vault-standing-request r4: the Save in the per-scope shape — a scope this Save ADDS or whose end / tool it CHANGES is
     // the owner's («你设置的», now); a scope it keeps as it was keeps its writer and time (a page's own `source` is never read)
     const wasV = verifiedRow(was);
@@ -263,13 +283,53 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
     if (!unlocked()) return named('vault_locked');
     const was = verifiedRow(rowOf(id));
     if (!was) return { ok: true, removed: false };
-    const plan = U.withoutMember(was, principalKey);
+    const plan = U.withoutMember(was, principalKey, { now: now() });   // r8: the row's ended windows pruned with it
     if (!plan.ok) return named(plan.code);
     const g = store();
     const gen = nextGen();
     const w = plan.to.length || plan.except.length ? g.set(U.DOOR, String(id), { to: stamp(id, plan.to, plan.except, gen), except: plan.except }, by) : g.remove(U.DOOR, String(id), by);
     if (w && w.ok) commitGen(id, gen);
-    return landed(w, { removed: plan.removed });
+    return landed(w, { removed: plan.removed, window: plan.window });   // r8: the end of the live window it took (the door tells its record)
+  }
+  /** r8 (the r7 acceptance MINOR 4 — «nothing ends just the window early»): ONE member's WINDOW out (its chip's ✕, a click: a
+   *  narrowing) — its host and command scopes stay, each with its own end; a member that held only the window goes.
+   *  → { ok, removed, until (the window's end), memberGone, grant } | a named refusal. */
+  function revokeWindow(id, principalKey, { by = 'user' } = {}) {
+    if (!okId(id)) return named('bad_resource');
+    if (!unlocked()) return named('vault_locked');
+    const was = verifiedRow(rowOf(id));
+    if (!was) return { ok: true, removed: false, until: null };
+    const plan = U.withoutWindow(was, principalKey, { now: now() });
+    if (!plan.ok) return named(plan.code);
+    if (!plan.removed) return { ok: true, removed: false, until: null };
+    const g = store();
+    const gen = nextGen();
+    const w = plan.to.length || plan.except.length ? g.set(U.DOOR, String(id), { to: stamp(id, plan.to, plan.except, gen), except: plan.except }, by) : g.remove(U.DOOR, String(id), by);
+    if (w && w.ok) commitGen(id, gen);
+    return landed(w, { removed: true, until: plan.until, memberGone: plan.memberGone, grant: U.grantIdOf(String(id), String(principalKey || '')) });
+  }
+  /** r8 (the r7 acceptance MINOR 5): THE HOUR-END PRUNE (the run door arms it at a window's end): the row's ENDED windows out —
+   *  a write only when there is one (a locked vault writes nothing: the next write of the row prunes them). → { ok, swept } */
+  function pruneWindows(id, { by = 'system' } = {}) {
+    if (!okId(id)) return named('bad_resource');
+    if (!unlocked()) return named('vault_locked');
+    const was = verifiedRow(rowOf(id));
+    if (!was) return { ok: true, swept: 0 };
+    const sw = U.withoutEndedWindows(was.to || [], now());
+    if (!sw.swept.length) return { ok: true, swept: 0 };
+    const except = sw.to.length ? (was.except || []) : [];
+    const g = store();
+    const gen = nextGen();
+    const w = sw.to.length || except.length ? g.set(U.DOOR, String(id), { to: stamp(id, sw.to, except, gen), except }, by) : g.remove(U.DOOR, String(id), by);
+    if (w && w.ok) commitGen(id, gen);
+    return landed(w, { swept: sw.swept.length });
+  }
+  /** r8: the end of the LIVE window `principalKey` holds on entry `id` (a verified member) — null when none. */
+  function windowOf(id, principalKey) {
+    const r = verifiedRow(rowOf(id));
+    const e = r && (r.to || []).find((x) => GM.principalKey(x) === String(principalKey || ''));
+    const t = now(), w = e && U.scopesOf(e).find((s) => s.kind === 'window' && s.until > t && s.until <= t + U.WINDOW_READ_MAX);
+    return w ? w.until : null;
   }
   /** The entry is gone: its row goes too. */
   function drop(id, { by = 'user' } = {}) {
@@ -336,7 +396,7 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
     }
     return out;
   }
-  return { rowsOf, verdictFor, heldBy, setRow, addMember, judgeMember, snapshotRow, restoreRow, revoke, drop, carry, carryWildcards, publicFor, statusOf: (code) => STATUS[code] || 400, words: (code) => WORDS[code] || code };
+  return { rowsOf, verdictFor, heldBy, setRow, addMember, judgeMember, snapshotRow, restoreRow, revoke, revokeWindow, pruneWindows, windowOf, drop, carry, carryWildcards, publicFor, statusOf: (code) => STATUS[code] || 400, words: (code) => WORDS[code] || code };
 }
 
 module.exports = { create, widens, STATUS, WORDS };

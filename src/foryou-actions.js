@@ -798,6 +798,7 @@ function runCardOf(item, { t = fmt } = {}) {
   // answer that writes); its row says what the press writes, and the window of its own it replaces
   const win = open && act.late !== true && act.window === true && f.window && typeof f.window === 'object' && f.window.offered === true ? f.window : null;
   const winLines = win ? windowWords(win, t) : [];
+  const winOff = open && act.late !== true && !win && f.window && typeof f.window === 'object' && Array.isArray(f.window.excepted) ? f.window.excepted.filter((x) => typeof x === 'string' && x) : [];   // r8: why there is none (除了)
   const redrawn = open && (!alwaysGone || !!win) && f.redrawn && typeof f.redrawn === 'object' && Number(f.redrawn.at) > 0 ? t(REDRAWN_WORDS, { time: clockWords(Number(f.redrawn.at)) }) : null;   // r7: while ANY answer that writes is there
   const changes = chList.length || winLines.length || redrawn ? { lines: [...chList.map((c) => [{ text: changeWords(c, t) }]), ...winLines.map((x) => [{ text: x }])], redrawn } : null;
   const hint = cmdA ? [{ mono: str(cmdA.words) ? String(cmdA.words) : '' }, { text: ` — ${t(COMMAND_ALWAYS_WORDS)}` }] : a.offered === true ? null : [{ text: t('No «Always»: {why}', { why: own(RUN_ALWAYS_WHY, a.why) ? t(RUN_ALWAYS_WHY[a.why]) : '' }).replace(/[:：]\s*$/, (m) => m.trimEnd()) }, ...(a.why && !own(RUN_ALWAYS_WHY, a.why) ? [{ code: String(a.why) }] : []), ...(str(a.directive) ? [{ mono: wholeOf(a, 'directive').shown }] : [])];
@@ -851,7 +852,7 @@ function runCardOf(item, { t = fmt } = {}) {
   const cmd = full && !/\u2026$/.test(cmd0) ? cmd0 + '\u2026' : cmd0;   // the body's cut is drawn as one
   const cutText = !full ? null : !foldCut ? t('The command is {n} characters long; the card shows its first {m} — the whole command is under “{fold}”.', { n: total, m: shown, fold: t('Technical details') })
     : t('The command is over {max} characters, so the whole command was not kept: see its run record in the Vault window. The card shows its first {m}.', { max: full.length, m: shown });   // r12: the cut point is what ARRIVED (the store's 4 096) — no producer states a total past it
-  return { headline, cmd, cut: full ? { n: total, whole: !foldCut, shown, text: cutText } : null, again, rows, changes, always: { offered: a.offered === true && !alwaysGone, hint }, window: win ? { offered: true, hint: [{ text: t(WINDOW_HINT_WORDS) }] } : { offered: false, hint: null }, fold };   // r7: `window` — «Allow for 1 hour» and its words
+  return { headline, cmd, cut: full ? { n: total, whole: !foldCut, shown, text: cutText } : null, again, rows, changes, always: { offered: a.offered === true && !alwaysGone, hint }, window: win ? { offered: true, hint: [{ text: t(WINDOW_HINT_WORDS) }] } : { offered: false, hint: null, ...(winOff.length ? { excepted: [{ text: t(WINDOW_EXCEPTED_WORDS, { entry: winOff.join('”, “') }) }] } : {}) }, fold };   // r7: `window` — «Allow for 1 hour» and its words; r8: `excepted` — why it is not offered
 }
 /** lane vault-standing-request r2 (VISUAL — 主开发's read of the standing card's shots: PROSE, the raw vault:// reference in
  *  its first line and half linkified on the phone; the run card already had the right shape): AN AGENT'S STANDING REQUEST
@@ -872,17 +873,24 @@ const ON_ENTRY_WORDS = i18nKey('On «{entry}»: {line}');
 // (= vault-run-door REDRAWN_LINE)
 const REDRAWN_WORDS = i18nKey('Drawn again at {time}: what this answer writes changed since the card was first shown — read it again.');
 // r7 (the owner 2026-10-31 «不清楚发往何处的话，就允许我直接给agent … 1个小时授权吧»): «ALLOW FOR 1 HOUR» — where the card has no hosts
-// «Always», what the press writes (the card's own row) and the words beside it (= vault-run-door WINDOW_* lines)
+// «Always», what the press writes (the card's own row) and the words beside it — r8: the door's facts.window is their ONLY home
+// (the card's detail carries none: its own bound, never DETAIL_MAX), so the switch the press turns on is said here too
 const WINDOW_WRITES_WORDS = i18nKey('«Allow for 1 hour»: this conversation will be able to use “{entry}” in any run until {until}.');
 const WINDOW_REPLACES_WORDS = i18nKey('«Allow for 1 hour» replaces the 1-hour approval this conversation holds on “{entry}” until {when}: it then runs until {until}.');
 const WINDOW_ENDED_WORDS = i18nKey('This conversation\'s 1-hour approval on “{entry}” ended {when} — «Allow for 1 hour» gives a new one, until {until}.');
 const WINDOW_HINT_WORDS = i18nKey('For 1 hour this conversation uses this secret without asking; each use shows a notice (never filed in For you); then it asks again.');
-/** r7: the window's facts (vault-run-door windowFactsOf: {offered, until, entries, changes: [{entry, until, expired?}]}) → its lines. */
+const WINDOW_SWITCH_WORDS = i18nKey('«Allow for 1 hour» (with the second password) also turns on «Usable by agent runs» for this entry — it opens it for THIS conversation; any grants you paused stay paused.');
+// r8 (主开发's acceptance of r7, the 除了 hazard): where the owner EXCEPTED this conversation from an entry's grant, no «Allow for
+// 1 hour» (the press would have taken it out of 除了 for good) — the card says why (vault-run-door `facts.window.excepted`)
+const WINDOW_EXCEPTED_WORDS = i18nKey('«Allow for 1 hour» is not offered: you excluded this conversation from “{entry}” in the Vault window.');
+/** r7: the window's facts (vault-run-door windowFactsOf: {offered, until, entries, changes: [{entry, until, expired?}], r8:
+ *  switchOn?}) → its lines. */
 function windowWords(w, t = fmt) {
   const s = (x) => (typeof x === 'string' ? x : '');
   const until = clockWords(Number(w.until)), entries = (Array.isArray(w.entries) ? w.entries : []).filter((x) => typeof x === 'string' && x);
   return [t(WINDOW_WRITES_WORDS, { entry: entries.join('”, “'), until }),
-    ...(Array.isArray(w.changes) ? w.changes : []).filter((c) => c && typeof c === 'object').map((c) => t(c.expired === true ? WINDOW_ENDED_WORDS : WINDOW_REPLACES_WORDS, { entry: s(c.entry), when: clockWords(Number(c.until)), until }))];
+    ...(Array.isArray(w.changes) ? w.changes : []).filter((c) => c && typeof c === 'object').map((c) => t(c.expired === true ? WINDOW_ENDED_WORDS : WINDOW_REPLACES_WORDS, { entry: s(c.entry), when: clockWords(Number(c.until)), until })),
+    ...(w.switchOn === true ? [t(WINDOW_SWITCH_WORDS)] : [])];   // r8: the switch it turns on (the detail used to say it)
 }
 const END_DAYS_WORDS = i18nKey('for {n} days'), END_HOURS_WORDS = i18nKey('for {n} hours'), END_NONE_WORDS = i18nKey('with no end');
 /** One change (vault-run-door changeFactsOf: {scope, until, expired?, entry?, end: {days} | {hours} | {none}}) in words. */

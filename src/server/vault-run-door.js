@@ -25,7 +25,8 @@
  *   · THE CARD (decisions ② ④; exit-proxy's ask: one per conversation × shape, 60 s, the For-you item and the ask ONE state,
  *     a full tray ⇒ `ask_unfiled` at once, a second run of a shape whose card is up ⇒ `ask_pending`): 允许一次 / 此形状总是 /
  *     拒绝. A CLUSTER instance asks for every run without a live «always»; a LOCAL one asks the first time a shape runs and
- *     allows it after one 允许 (`seen`, this unlock). The card shows the whole command (references — never a value), the
+ *     allows it after one 允许 (`seen`, this unlock — never after «Allow for 1 hour», lane vault-standing-request r8: the
+ *     window is that conversation's memory, every use in it noticed, its end asks again). The card shows the whole command (references — never a value), the
  *     secrets, how each is given, the PROGRAM that runs (its real path — said when an agent could have written it), the hosts,
  *     the folder, the templates and what «this shape» means; 此形状总是 needs the
  *     second password again (the page's 验证是你 window, opened in the press's own task — the route checks it) and is not
@@ -251,11 +252,12 @@ const COMMAND_ALWAYS_LINE = 'VibeSpace cannot see where this program sends the s
 // (src/vault-use-grant.js) on THIS conversation's member of every entry of the run: any run until the press + WINDOW_MS. Every
 // run it admits pops ONE notice on every open client (server.js serverNotice, a key per use — the road de-dupes by key) and
 // files NOTHING in For you; the receipts (the use line, the row's «used N×») are the durable record. ONE fixed i18n key each.
-const WINDOW_LINE = 'For 1 hour this conversation uses this secret without asking; each use shows a notice (never filed in For you); then it asks again.';
-const WINDOW_WRITES_LINE = '«Allow for 1 hour»: this conversation will be able to use “{entry}” in any run until {until}.';
-const WINDOW_REPLACES_LINE = '«Allow for 1 hour» replaces the 1-hour approval this conversation holds on “{entry}” until {when}: it then runs until {until}.';
-const WINDOW_ENDED_LINE = 'This conversation\'s 1-hour approval on “{entry}” ended {when} — «Allow for 1 hour» gives a new one, until {until}.';
-const WINDOW_SWITCH_LINE = '«Allow for 1 hour» (with the second password) also turns on «Usable by agent runs» for this entry — it opens it for THIS conversation; any grants you paused stay paused.';
+// r8 (主开发's acceptance of r7, MINOR 3 — the window's lines counted against DETAIL_MAX, so a run the base drew a card for was
+// refused card_too_long, not even Allow once): THE WINDOW'S WORDS RIDE THEIR OWN BOUNDED FIELD — `facts.window` (its end, the
+// entries, what it replaces, the switch it turns on; ≤ WINDOW_FACTS_MAX), worded by every client (foryou-actions windowWords) —
+// never the card's `detail`: its bound is the base's again. A card whose window words could not be filed whole (the store
+// dropped its facts) offers no «Allow for 1 hour» — the client draws it only beside its words, the press checks them.
+const WINDOW_FACTS_MAX = 4000;
 const WINDOW_USE_NOTICE = '{who} used “{entry}” under your 1-hour approval ({left} min left) — {program} → {where}';
 const WINDOW_USE_NOTICE_UNKNOWN = '{who} used “{entry}” under your 1-hour approval ({left} min left) — {program} → destination unknown';
 
@@ -1096,7 +1098,12 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
    *  card (answerLate refuses it). The press needs 验证是你 (`reauthed`: it writes a standing grant, as «Always» does). r4's law
    *  first: the card's change signature for THIS write against the one it was drawn with — another ⇒ nothing is written, the
    *  card is drawn again. The record carries `windowFor: '1h'` + `until` (its tail: «allowed this conversation for 1 hour ·
-   *  until HH:MM · take it back in the Vault window»). */
+   *  until HH:MM · take it back in the Vault window»).
+   *  r8 (主开发's acceptance of r7): the press writes NO `seen` mark (MAJOR 1 — on a local instance it let the approved command
+   *  run by 'seen' with no notice, and with no card after the hour until the lock: the window IS the memory, its end the law);
+   *  the record names the conversation and the entries (`principal`, `entries` — a ✕ in the Vault window tells it); the row's
+   *  ended windows are pruned at the hour's end (`pruneWindows`, an unref'd timer — a restart or a lock leaves it to the next
+   *  write of the row); the belt also reads the item's `facts.window` — no words filed, no press (MINOR 3). */
   function answerWindow(q, { reauthed = false, by = 'user', mark = () => null } = {}) {
     if (!q.window || !useGrants) return { ok: false, code: 'window_not_offered' };
     if (!reauthed) return { ok: false, code: 'reveal_needs_password' };
@@ -1105,6 +1112,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       let it = null; try { it = userTodos.get(q.todoId); } catch { }
       const shown = !!(it && it.status === 'open' && it.action && it.action.type === ACTION_TYPE && it.action.askId === q.askId && String(it.detail || '') === q.detail);
       if (!shown) { settle(q, 'changed', 'item-changed'); return { ok: false, code: 'ask_changed' }; }
+      if (!(it.facts && typeof it.facts === 'object' && it.facts.window && it.facts.window.offered === true)) return { ok: false, code: 'window_not_offered' };   // r8: its words were not filed (the store dropped the facts) — the card never showed what it writes
     }
     if (!liveOf(q.conv)) { settle(q, 'denied', 'gone'); return { ok: false, code: 'conversation_gone' }; }
     const until = now() + VUG.WINDOW_MS;
@@ -1114,9 +1122,37 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     if (!so.ok && so.judged) { settle(q, 'denied', so.why); return so.judged; }
     if (!so.ok) { settle(q, 'denied', so.code); return { ok: false, code: so.code, ...(so.failed ? { failed: so.failed } : {}) }; }
     audit('vault-run-window', { by: String(by).slice(0, 40), conv: q.conv, shapeId: shapeIdOf(q.key), until, grants: so.grants, changes: auditChangesOf(so.changes) });
-    seen.set(q.pair, { at: now(), entries: q.entries });
-    settle(q, 'always', 'answered', { ...(mark() || {}), windowFor: '1h', until });
+    // r8 (MAJOR 1): NO `seen` mark — every later run of this very command inside the hour is a window use (one notice), and
+    // after it the card asks again, on a local instance as on a cluster
+    const pk = GM.principalKey(GM.bareOf({ kind: 'conversation', key: q.conv }));
+    settle(q, 'always', 'answered', { ...(mark() || {}), windowFor: '1h', until, principal: pk, entries: q.entries.slice() });
+    const ids = q.entries.slice();
+    const pt = timers.set(() => { for (const id of ids) { try { useGrants.pruneWindows(id); } catch { } } }, Math.max(0, until - now()) + 1000);   // r8 (MINOR 5): the hour's end prunes it
+    try { pt && pt.unref && pt.unref(); } catch { }
     return { ok: true, outcome: 'window', until };
+  }
+  /** r8 (主开发's acceptance of r7, MINOR 4 — «nothing ends just the window early»: the member chip's ✕ took every scope with
+   *  it): TAKE BACK from the Vault window (src/routes/vault.js, people only — a narrowing, a click) — a member (its chip's ✕)
+   *  or ONLY its 1-hour window (`scope: 'window'`, the window's own ✕: its host and command scopes stay), through the ONE
+   *  writer. A LIVE window taken back is told to the record of the press that gave it («… · revoked HH:MM»), once no entry
+   *  that press named still holds it. → the writer's answer (+ `told`: the records told). */
+  function takeBack({ id = '', principal = '', scope = null, by = 'user' } = {}) {
+    if (!useGrants) return { ok: false, code: 'no_use_grants' };
+    const pk = String(principal || '');
+    const r = scope === 'window' ? useGrants.revokeWindow(String(id), pk, { by }) : useGrants.revoke(String(id), pk, { by });
+    const until = r && r.ok ? Number(scope === 'window' ? r.until : r.window) : 0;
+    return until > 0 ? { ...r, told: windowTakenBack(pk, until) } : r;
+  }
+  function windowTakenBack(pk, until) {
+    if (!userTodos || typeof userTodos.resolvedOf !== 'function' || typeof userTodos.noteFact !== 'function') return 0;
+    let n = 0;
+    for (const it of userTodos.resolvedOf(ACTION_TYPE)) {
+      const f = it.resolvedFact && typeof it.resolvedFact === 'object' ? it.resolvedFact : {};
+      if (f.windowFor !== '1h' || Number(f.until) !== until || f.principal !== pk || f.endedAt) continue;
+      if ((Array.isArray(f.entries) ? f.entries : []).some((e) => { try { return useGrants.windowOf(String(e), pk) === until; } catch { return false; } })) continue;   // another entry of that press still holds it
+      try { if (userTodos.noteFact(it.id, { endedAt: now(), endedBy: 'revoked' })) n++; } catch { }
+    }
+    return n;
   }
   /** r7: ONE notice per run the 1-hour window let through — on every open client (serverNotice: a toast + the notification
    *  history; a key UNIQUE per use — the road de-dupes by key per boot, so a reused key would silence the second use), level 1,
@@ -1400,14 +1436,10 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       return many ? { key: ON_ENTRY_LINE, params: { entry: entryNameOf(c.id), line: fill(l) } } : l;
     });
   }
-  /** r7: THE WINDOW's lines — what «Allow for 1 hour» writes (every entry: any run until `until`) and, per entry, the window of
-   *  its own it REPLACES (live with another end, or ended). → [{key, params}] */
-  const isoOf = (t) => new Date(Number(t)).toISOString();
-  const windowLines = (list, until, ids) => [{ key: WINDOW_WRITES_LINE, params: { entry: ids.map(entryNameOf).join('”, “'), until: isoOf(until) } },
-    ...(list || []).map((c) => ({ key: c.expired ? WINDOW_ENDED_LINE : WINDOW_REPLACES_LINE, params: { entry: entryNameOf(c.id), when: isoOf(c.was), until: isoOf(until) } }))];
   /** r7: the window's FACTS beside the card's «Allow for 1 hour» (foryou-actions runCardOf words them): its end, the entries, the
-   *  window of its own each replaces. */
-  const windowFactsOf = (list, until, ids) => ({ offered: true, until, entries: ids.map(entryNameOf), changes: (list || []).map((c) => ({ entry: entryNameOf(c.id), until: c.was, ...(c.expired ? { expired: true } : {}) })) });
+   *  window of its own each replaces. r8 (MINOR 3): its ONLY words (the card's detail carries none — its own bound,
+   *  WINDOW_FACTS_MAX) — so also `switchOn`: the press turns «Usable by agent runs» on for an entry that is off. */
+  const windowFactsOf = (list, until, ids, { switchOn = false } = {}) => ({ offered: true, until, entries: ids.map(entryNameOf), changes: (list || []).map((c) => ({ entry: entryNameOf(c.id), until: c.was, ...(c.expired ? { expired: true } : {}) })), ...(switchOn ? { switchOn: true } : {}) });
   /** The same changes as the card's FACTS (foryou-actions words them in the viewer's language). */
   const changeFactsOf = (list, ms, { many = false } = {}) => (list || []).map((c) => ({ scope: c.scope, kind: c.kind, until: c.was, ...(c.expired ? { expired: true } : {}), ...(many ? { entry: entryNameOf(c.id) } : {}), end: ms == null ? { none: true } : ms % 86400e3 === 0 ? { days: ms / 86400e3 } : { hours: Math.round(ms / 3600e3) } }));
   /** r4 (B): the run card re-drawn in place with the words of NOW — its detail (the head and tail it was drawn with, the change
@@ -1425,7 +1457,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     const list = aList0 || (aw ? changesOf(q.conv, q.entries, aw) : []);
     const wUntil = q.window ? at0 + VUG.WINDOW_MS : null;
     const wList = q.window ? wList0 || changesOf(q.conv, q.entries, { window: wUntil, source: 'card' }) : [];
-    const lines = [...changeLines(list, ms, { many: q.plan.many }), ...(q.window ? windowLines(wList, wUntil, q.entries) : [])].map(fill);
+    const lines = changeLines(list, ms, { many: q.plan.many }).map(fill);   // r8 (MINOR 3): the window's words ride facts.window only
     const detail = [fill({ key: REDRAWN_LINE, params: { time: new Date(at0).toISOString() } }), ...q.plan.head, ...lines, ...q.plan.tail].join('\n');
     if (detail.length > DETAIL_MAX) { settle(q, 'changed', 'item-changed'); return { ok: false, code: 'ask_changed' }; }
     const facts = q.facts ? JSON.parse(JSON.stringify(q.facts)) : null;   // the producer's own facts (q keeps them whole for the next redraw; the store bounds what it files)
@@ -1434,7 +1466,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
       const at = q.command && !q.always ? facts.always.command : facts.always;
       if (at && typeof at === 'object') { if (cf.length) at.changes = cf; else delete at.changes; }
     }
-    if (facts && q.window) facts.window = windowFactsOf(wList, wUntil, q.entries);   // r7
+    if (facts && q.window) facts.window = windowFactsOf(wList, wUntil, q.entries, { switchOn: !!q.plan.wswitch });   // r7; r8: + the switch
     if (facts) facts.redrawn = { at: at0 };
     let stored = detail;
     if (q.todoId && userTodos) {
@@ -1994,7 +2026,12 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
         if (gitOnSeal === false) { note('git_not_on_seal', { ...head, tool: toolName }); return named('git_not_on_seal'); }
       }
       const ek = exactKeyOf(spec, place);
-      let verdict = VR.runVerdict({ state: vaultState(), plan: spec, shape, entries, granted, remembered, seen: seen.has(pair), instance: instanceKind(), policy: policy(), passes: passes(), now: now() });
+      // r8 (主开发's acceptance of r7, MAJOR 1 — on a LOCAL instance the approved command ran by `seen`: no notice inside the hour,
+      // no card after it until the vault locked): a run a LIVE 1-hour window admits (every entry admitted, a window on one) is
+      // judged BEFORE the local instance's `seen` pass — every use inside the hour is a window use (one notice each) and the
+      // hour's end asks again, on a local instance as on a cluster
+      const winAdmits = !!useGrants && !refused && spec.refs.length > 0 && spec.refs.every((r) => (standing.get(r.id) || {}).ok === true && memberUsable(d, r.id, standing.get(r.id).id)) && spec.refs.some((r) => standing.get(r.id).scope === 'window');
+      let verdict = VR.runVerdict({ state: vaultState(), plan: spec, shape, entries, granted, remembered, seen: seen.has(pair) && !winAdmits, instance: instanceKind(), policy: policy(), passes: passes(), now: now() });
       let whyAgain = null;
       if (!verdict.ok && verdict.ask) {   // lane vault-agent-own r20b/r23: a late «allow once» pass runs this EXACT command ONCE with no card (consumed); an open late card re-asks the one card
         const lp = lateOnce.get(pair);
@@ -2016,7 +2053,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
           const end = Math.min(...wins.map((r) => Number(standing.get(r.id).until))), left = Math.max(1, Math.ceil((end - now()) / 60e3));
           for (const r of wins) purposes.set(r.id, `under the 1-hour approval · ${left} min left`);
           head.scope = 'window'; head.windowLeft = left;
-          verdict.window = { until: end, left, who: String(caller.name || caller.sessionKey || caller.conversationId).slice(0, 80), entry: spec.refs.map((r) => nameById[r.id] || r.ref).join('”, “'), program: toolName || path.basename(String(spec.tool || '')), where: shape.destKnown && dest.hosts.length ? dest.hosts.join(', ') : null };
+          verdict.window = { until: end, left, who: String(caller.name || caller.sessionKey || caller.conversationId).slice(0, 80), entry: wins.map((r) => nameById[r.id] || r.ref).join('”, “'), program: toolName || path.basename(String(spec.tool || '')), where: shape.destKnown && dest.hosts.length ? dest.hosts.join(', ') : null };
         }
       }
       // lane vault-use-grants round 7 (MINOR): AN 8-HOUR PASTE GRANT is HOST-SCOPED — it admits a run with no card ONLY for the
@@ -2074,18 +2111,27 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
         const planWrite = useGrants && shape.always ? { hosts: dest.hosts, until: planMs == null ? null : now() + planMs, tool: shape.name || null, source: 'card' } : useGrants && cmdToken ? { commands: [cmdToken], until: null, source: 'card' } : null;
         const plan0 = planWrite ? changesOf(caller.conversationId, ids, planWrite) : [];
         // r7: «Allow for 1 hour» where the card offers no hosts «Always» (whatever its why) — what it writes, said and signed like «Always»
-        const winUntil = useGrants && !verdict.offers.includes('always') ? now() + VUG.WINDOW_MS : null;
+        // r8 (主开发's acceptance of r7, the 除了 hazard): NOT where the owner EXCEPTED this conversation (itself or its Task
+        // Group) from an entry's grant — the press would have taken it out of 除了 for good (the one writer refuses it too:
+        // `window_excepted`); the card says why (`facts.window.excepted`)
+        const winWould = !!useGrants && !verdict.offers.includes('always');
+        const excepted = winWould ? spec.refs.filter((r) => (standing.get(r.id) || {}).code === 'excepted').map((r) => nameById[r.id] || r.ref) : [];
+        let winUntil = winWould && !excepted.length ? now() + VUG.WINDOW_MS : null;
+        const wSwitch = !!winUntil && entries.some((e) => e.exists && !e.on);
         const wplan0 = winUntil ? changesOf(caller.conversationId, ids, { window: winUntil, source: 'card' }) : [];
+        let wfacts = winUntil ? windowFactsOf(wplan0, winUntil, ids, { switchOn: wSwitch }) : null;   // r8 (MINOR 3): the window's words — their OWN bound, never DETAIL_MAX
+        if (wfacts && JSON.stringify(wfacts).length > WINDOW_FACTS_MAX) { winUntil = null; wfacts = null; }   // words that cannot be shown whole: no «Allow for 1 hour»
         const lead = [detailOf(spec, shape, place, { facts: entries, why: verdict.why || [], away: verdict.away || [], command: !!cmdToken }), ...VUG.standingLines([...standing.values()], { always: !!shape.always }), ...(cmdToken && !shape.always ? [COMMAND_ALWAYS_LINE] : [])];
-        const trail = [...(winUntil ? [WINDOW_LINE, ...(!switchNote && entries.some((e) => e.exists && !e.on) ? [WINDOW_SWITCH_LINE] : [])] : []), ...(useGrants && shape.always ? [`«Always» = a standing approval: this conversation may use ${spec.refs.length > 1 ? 'these secrets' : 'this secret'} for ${dest.hosts.join(', ')} without asking (the Vault window lists it and takes it back).`] : []), ...(switchNote ? [switchNote] : []), ...policyNotes];
-        const shown = [...lead, ...changeLines(plan0, planMs, { many }).map(fill), ...(winUntil ? windowLines(wplan0, winUntil, ids).map(fill) : []), ...trail].join('\n');   // lane vault-agent-own: + who stored each entry, why it asks   // lane vault-use-grants: + the standing approvals, the «Always» line and the policy judge's word (int361: only where a card is drawn)   // r4: + one line per scope of its own the «Always» replaces, on every entry
+        const trail = [...(useGrants && shape.always ? [`«Always» = a standing approval: this conversation may use ${spec.refs.length > 1 ? 'these secrets' : 'this secret'} for ${dest.hosts.join(', ')} without asking (the Vault window lists it and takes it back).`] : []), ...(switchNote ? [switchNote] : []), ...policyNotes];
+        const shown = [...lead, ...changeLines(plan0, planMs, { many }).map(fill), ...trail].join('\n');   // r8 (MINOR 3): no window line — its words ride facts.window   // lane vault-agent-own: + who stored each entry, why it asks   // lane vault-use-grants: + the standing approvals, the «Always» line and the policy judge's word (int361: only where a card is drawn)   // r4: + one line per scope of its own the «Always» replaces, on every entry
         if (shown.length > DETAIL_MAX) return named('card_too_long');
         // lane vault-agent-own r20 (the owner «这个卡片的可读性很差»): the SAME run as STRUCTURED FACTS (codes, never prose) the client renders in the viewer's language — rides the ask record beside `detail`; `detail` stays byte-unchanged for older clients
         const facts = VR.cardFactsOf(spec, shape, place, { who: String(caller.name || caller.sessionKey || caller.conversationId), home, cmd: cmdText(spec.argv), entries: nameById, refsInfo: entries, away: verdict.away || [], notOwn: (verdict.why || []).includes('not-own'), ...(cmdToken && !shape.always ? { command: VUG.commandWords(cmdToken) } : {}) });   // round 23: who is bounded IN the model (a marker, never a lone surrogate); cmd is the RAW command (a $VAULT ref is a placeholder — the value masker finds nothing to mask; the agent's own `-d password=…` the child receives is shown, where the name belt used to hide it); refsInfo/away/notOwn carry the reason CODES
         if (plan0.length && facts.always) { const at = shape.always ? facts.always : facts.always.command; if (at && typeof at === 'object') at.changes = changeFactsOf(plan0, planMs, { many }); }   // r4 (B): the words beside «Always» / «Always (this command)» (foryou-actions runCardOf)
-        if (winUntil) facts.window = windowFactsOf(wplan0, winUntil, ids);   // r7: the words beside «Allow for 1 hour» (foryou-actions runCardOf)
+        if (wfacts) facts.window = wfacts;   // r7: the words beside «Allow for 1 hour» (foryou-actions runCardOf); r8: their only home
+        else if (excepted.length) facts.window = { offered: false, excepted };   // r8: why it is not offered («you excluded this conversation from “X” in the Vault window»)
         if (whyAgain) facts.whyAgain = whyAgain;   // round 25 (minor 6b): the ONE dimension this near-identical rerun differs from the last late-allowed command — a CODE (VR.WHY_AGAIN) the client renders («与上次放行的命令不同：参数顺序 / 多了一个空格 / 文件夹不同 / 环境变量 X 变了»)
-        const a = await ask({ caller, run: spec, shape, key, exactKey: ek, exactParts: exactPartsOf(spec, place), detail: shown, facts, signal, always: verdict.offers.includes('always'), command: cmdToken && !shape.always ? cmdToken : null, window: !!winUntil, plan: planWrite || winUntil ? { head: lead, tail: trail, sig: planWrite ? changeSigOf(plan0) : null, wsig: winUntil ? changeSigOf(wplan0) : null, many, ms: planMs } : null });   // r7: `wsig` — what «Allow for 1 hour» writes, compared at its press
+        const a = await ask({ caller, run: spec, shape, key, exactKey: ek, exactParts: exactPartsOf(spec, place), detail: shown, facts, signal, always: verdict.offers.includes('always'), command: cmdToken && !shape.always ? cmdToken : null, window: !!winUntil, plan: planWrite || winUntil ? { head: lead, tail: trail, sig: planWrite ? changeSigOf(plan0) : null, wsig: winUntil ? changeSigOf(wplan0) : null, wswitch: wSwitch, many, ms: planMs } : null });   // r7: `wsig` — what «Allow for 1 hour» writes, compared at its press
         asked = a.outcome; askId = a.askId;
         if (asked === 'pending') { note('ask_pending', { ...head, askId }); return withRecipe(named('ask_pending'), recipe); }
         const outcome = { gone: 'caller_gone', unfiled: 'ask_unfiled', denied: 'ask_denied', expired: 'ask_expired', changed: 'ask_changed', vault_locked: 'vault_locked' }[asked];
@@ -2300,7 +2346,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   // bounded — the boot law < 250 ms), never on the event loop at the first spawn (r11 fixup 1; r13's lazy memo did it at spawn #1).
   try { const t = Date.now(); const sealed = sealedPathOf(agentEnv()); sealedDirs = sealed.split(':').filter(Boolean); gitOnSeal = probeGit(sealedDirs); bootSealMs = Date.now() - t; log(`vault-run-door: sealed PATH computed at boot in ${bootSealMs} ms (git on seal: ${gitOnSeal})`); } catch (e) { log(`vault-run-door: boot seal failed (${(e && e.message) || e})`); }
 
-  return { run, answer, setRunnable, resumeGrant, rowFacts, runnableFor, reconcile, sweep, closeAll, onLocked, request, answerRequest, usesFor, grantPasted, useGrants, setPolicy, revokeApprovals, noteGrantStale, _bootSeal: () => ({ ms: bootSealMs, gitOnSeal }),
+  return { run, answer, takeBack, setRunnable, resumeGrant, rowFacts, runnableFor, reconcile, sweep, closeAll, onLocked, request, answerRequest, usesFor, grantPasted, useGrants, setPolicy, revokeApprovals, noteGrantStale, _bootSeal: () => ({ ms: bootSealMs, gitOnSeal }),
     listRequests: () => [...requests.values()].map((q) => ({ askId: q.askId, who: q.who, ref: q.ref, askedAt: q.askedAt })), _grants: grants, _requests: requests, _reqQuiet: reqQuiet,
     listAsks: () => [...asks.values()].map((q) => ({ askId: q.askId, who: q.who, always: q.always, askedAt: q.askedAt, expiresAt: q.askedAt + VR.ASK_TTL_MS })), running: () => runs.size, ACTION_TYPE, _asks: asks, _seen: seen, _lateAsks: lateAsks, _lateOnce: lateOnce };
 }

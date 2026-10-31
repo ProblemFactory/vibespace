@@ -11662,4 +11662,8 @@ export default {
   "«Allow for 1 hour» (with the second password) also turns on «Usable by agent runs» for this entry — it opens it for THIS conversation; any grants you paused stay paused.": "「1 時間許可」（本人確認が必要）を押すと、この項目の「エージェントの実行で使用可」もオンになります——開くのはこの会話だけで、あなたが一時停止した他の許可は停止したままです。", // lane vault-standing-request r7 («Allow for 1 hour»)
   "{who} used “{entry}” under your 1-hour approval ({left} min left) — {program} → {where}": "{who} が 1 時間の承認のもとで“{entry}”を使いました（残り {left} 分）— {program} → {where}", // lane vault-standing-request r7 («Allow for 1 hour»)
   "{who} used “{entry}” under your 1-hour approval ({left} min left) — {program} → destination unknown": "{who} が 1 時間の承認のもとで“{entry}”を使いました（残り {left} 分）— {program} → 宛先不明", // lane vault-standing-request r7 («Allow for 1 hour»)
+  "«Allow for 1 hour» is not offered: you excluded this conversation from “{entry}” in the Vault window.": "「1 時間許可」は出しません：保管庫ウィンドウでこの会話を“{entry}”から除外しています。", // lane vault-standing-request r8 («Allow for 1 hour»)
+  "«Allow for 1 hour» on a card": "カードの「1 時間許可」", // lane vault-standing-request r8 («Allow for 1 hour»)
+  "Take back the 1-hour approval only — the other scopes stay": "1 時間の承認だけを取り消す — ほかの範囲は残ります", // lane vault-standing-request r8 («Allow for 1 hour»)
+  "The 1-hour approval is taken back — the next run asks you": "1 時間の承認を取り消しました — 次の実行ではまた確認します", // lane vault-standing-request r8 («Allow for 1 hour»)
 };

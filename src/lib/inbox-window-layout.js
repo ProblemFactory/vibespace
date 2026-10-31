@@ -151,6 +151,9 @@ export function rowPreview(detail, max = 160) {
 }
 
 const URGENCIES = ['low', 'normal', 'high', 'urgent'];
+/** lane vault-standing-request r8: a run card's «Allow for 1 hour» is drawn only beside its words — the door's `facts.window`
+ *  (a card whose facts the store dropped offers none). */
+const windowWordsFiled = (i) => { const w = i && i.facts && typeof i.facts === 'object' ? i.facts['window'] : null; return !!(w && typeof w === 'object' && w.offered === true); };
 
 /**
  * THE ITEM PANE AS STRUCTURE. `ctx` (every word injected, so the rules are a
@@ -214,7 +217,7 @@ export function itemView(item, ctx = {}) {
   // lane-pairing ⑥: an exit's "ask me each time" item is answered HERE — Allow / Deny first (never a producer button)
   const exitAsk = !resolved && i.action && i.action.type === 'exit-run-ask' && i.action.askId ? { askId: i.action.askId, cmd: String(i.action.cmd || '') } : null;
   // lane hub-act-ask: a hub act held on a cluster instance — Allow once / Always on this machine / Deny, first
-    const hubAsk = !resolved && i.action && (i.action.type === 'hub-act-ask' || i.action.type === 'automation-ask' || i.action.type === 'pool-cross-provider' || i.action.type === 'vault-run-ask' || i.action.type === 'vault-grant-ask') && i.action.askId ? { askId: String(i.action.askId), type: i.action.type, always: i.action.always !== false && !i.action.late, window: i.action.window === true && !i.action.late, standing: i.action.standing === true, command: i.action.command === true, lost: !!(i.action.late && i.action.restartLost === true), groups: String(i.action.groups || '').split(' ').filter(Boolean) } : null;   // lane key-instance-scope: an automation card's Task Groups (its 这些岗位的会话 choice) // lane vault-run-door: an agent's run held on its card (no «always» for a shell / an interpreter / an unknown destination) // q-053 P0b: a pool's cross-provider card too (Always = this pool) // design q-046: a held automation call answers the same three ways // lane wake-approve-card r8: a LATE card (`action.late`) never «always» — its door refuses it
+    const hubAsk = !resolved && i.action && (i.action.type === 'hub-act-ask' || i.action.type === 'automation-ask' || i.action.type === 'pool-cross-provider' || i.action.type === 'vault-run-ask' || i.action.type === 'vault-grant-ask') && i.action.askId ? { askId: String(i.action.askId), type: i.action.type, always: i.action.always !== false && !i.action.late, window: i.action.window === true && !i.action.late && windowWordsFiled(i), standing: i.action.standing === true, command: i.action.command === true, lost: !!(i.action.late && i.action.restartLost === true), groups: String(i.action.groups || '').split(' ').filter(Boolean) } : null;   // lane key-instance-scope: an automation card's Task Groups (its 这些岗位的会话 choice) // lane vault-run-door: an agent's run held on its card (no «always» for a shell / an interpreter / an unknown destination) // q-053 P0b: a pool's cross-provider card too (Always = this pool) // design q-046: a held automation call answers the same three ways // lane wake-approve-card r8: a LATE card (`action.late`) never «always» — its door refuses it
   // lane vault-paste-request: an agent's request for a secret — Paste and save… (THE box, as a dialog) / Refuse, first
   const secretAsk = !resolved && i.action && i.action.type === 'secret-request' && i.action.requestId ? { requestId: String(i.action.requestId) } : null;
   // lane browser-propose: the agent's browser proposal is answered HERE too — Approve / Reject first (the plan is the detail)

@@ -34,6 +34,12 @@
  *     you), so he is likely to see it — the hour BOUNDS the exposure, the notice makes it SEEN. It is the vault's
  *     accident-not-adversary model: a determined agent inside the hour is the owner's accepted risk. Fail closed: a window
  *     with no end (or a non-finite one) is DROPPED by the one reader — it admits nothing, ever.
+ *     r8 (主开发's acceptance of r7): the writer refuses a window longer than WINDOW_MS (`window_too_long`) and the reader
+ *     admits none ending more than WINDOW_READ_MAX (24 h) ahead of its clock; a conversation the row EXCEPTS (除了) is never
+ *     given one (`window_excepted` — the press would have taken it out of 除了 for good, and the owner's row rule wins); an
+ *     ENDED window is pruned at the next write of its row (a member left with none goes — `withoutEndedWindows`), so the
+ *     .366 reader, which drops a whole member that holds any `kind` scope, loses at most the members holding a LIVE window
+ *     on a rollback (kb-design-lessons: the rollback note); `withoutWindow` takes back only the window (its chip's ✕).
  *
  * THE VERDICT `useVerdict(rows, facts, run)` — membership is the MODEL's (`GM.admits`: 给谁 / 除了, a Task Group's members
  * read at use time, every refusal by name); this file only reads the admitting entries' own settings:
@@ -56,7 +62,7 @@
  * THE PLANS (the writer applies them): `withMember` (lane vault-standing-request r4: a write ADDS the scopes it names with
  * the end it names, REPLACES only the SAME scope when its end differs or has passed — `changes` says which, the card says it —
  * and never touches another scope; out of `except`),
- * `withoutMember` (revoke one), `alwaysCarry` (data/vault-run.json's «always» rows, the shape keys of 2.369.359 and
+ * `withoutMember` (revoke one), r8 `withoutWindow` (take back one member's window only), `alwaysCarry` (data/vault-run.json's «always» rows, the shape keys of 2.369.359 and
  * before, as members — the hosts read off the shape key; a row with no host cannot be carried and is counted),
  * `withWildTools` (r3: a carried wildcard with no tool gets the CLI the tool table names for it, else stays LEGACY).
  * Gate: scripts/test-vault-use-grants.mjs (fast — every verdict code, hosts + expiry + Task Group membership, the plans,
@@ -70,6 +76,9 @@ const ID_RE = /^vg-[0-9a-f]{8}$/;
 const SOURCES = Object.freeze(['owner', 'request', 'card']);
 /** r7: THE WINDOW's length — the card's «Allow for 1 hour» writes exactly the press + WINDOW_MS (the owner: 「1个小时授权」). */
 const WINDOW_MS = 3600e3;
+/** r8 (the r7 acceptance MINOR 5 — hardening): no window ending further than this ahead of the reader's clock admits anything
+ *  (the writer caps one at WINDOW_MS; a row whose end is a day out was not written by a card). */
+const WINDOW_READ_MAX = 24 * 3600e3;
 const CODES = Object.freeze(['not_granted', 'excepted', 'groups_unreadable', 'unknown_shape', 'fork_pending', 'expired', 'destination_unknown', 'outside_hosts']);
 
 /** FNV-1a (32 bit) over `resource` NUL `principalKey` → `vg-xxxxxxxx`. */
@@ -118,7 +127,7 @@ function effectiveHosts(list, entryHosts = []) {
 }
 const endOf = (x) => (Number(x) > 0 ? Math.floor(Number(x)) : null);
 const isWild = (h) => String(h).startsWith('*.');
-const liveScope = (s, now) => !(s && s.until != null && s.until <= now);
+const liveScope = (s, now) => !(s && s.until != null && s.until <= now) && !(s && s.kind === 'window' && Number(now) > 0 && s.until > Number(now) + WINDOW_READ_MAX);   // r8: a window a day out admits nothing
 // ── THE SCOPES (lane vault-standing-request r4, THE ROOT MODEL — 主开发: «four rounds have moved the member-write rule
 // between merge and replace and each form loses something … a member's scopes carry THEIR OWN ENDS») ──
 /** THE ONE READER of a member's scopes → [{kind: 'host', key, host, until, tool, source, at} | {kind: 'command', key,
@@ -238,9 +247,14 @@ const rowLists = (row) => { const p = row ? GM.publicRow(row) : { to: [], except
  *  r7: `window` (ms) — the member's WINDOW scope with THAT end (a run card's «Allow for 1 hour»: the press + WINDOW_MS), by the
  *  same rule (a live one with another end, or an ended one, is REPLACED and named; the same end moves nothing); an end that
  *  is not in the future (`now`) is refused `window_end_required` — a window is never written without one.
- *  → { ok: true, to, except, widened, added, changes: {added: [scope], replaced: [{scope, was, until, expired}], same:
+ *  r8 (主开发's acceptance of r7): one ending more than WINDOW_MS after `now` is refused `window_too_long`; a principal the
+ *  row EXCEPTS is refused `window_excepted` (a window never takes a conversation out of 除了 — the owner's row rule wins);
+ *  every member's ENDED windows are pruned in the row this write returns (`swept`; this member's in `changes.pruned`), and a
+ *  member left with no scope goes.
+ *  → { ok: true, to, except, widened, added, swept, changes: {added: [scope], replaced: [{scope, was, until, expired}], same:
  *    [scope], kept: [scope], pruned: [scope]} } (a `scope` = {kind, key, host | command}) | { ok: false, code } (`unknown_shape`,
- *    `bad_principal`, `hosts_required`, `command_unreadable`, `too_many_hosts`, `too_many_commands`, `window_end_required`). */
+ *    `bad_principal`, `hosts_required`, `command_unreadable`, `too_many_hosts`, `too_many_commands`, `window_end_required`,
+ *    `window_too_long`, `window_excepted`). */
 function withMember(row, principal, { hosts = [], until = null, tool = null, commands = null, source = null, at = null, now = 0, carry = false, window = null } = {}) {
   const cur = rowLists(row);
   if (!cur) return { ok: false, code: 'unknown_shape' };
@@ -253,6 +267,8 @@ function withMember(row, principal, { hosts = [], until = null, tool = null, com
   const add = hostsGiven ? GM.hostListOf(hosts) : [];
   const winEnd = window == null ? null : Number(window) > 0 && Number.isFinite(Number(window)) ? Math.floor(Number(window)) : NaN;   // r7
   if (window != null && !(winEnd > (Number(now) > 0 ? Number(now) : 0))) return { ok: false, code: 'window_end_required' };
+  if (winEnd && Number(now) > 0 && winEnd > Number(now) + WINDOW_MS) return { ok: false, code: 'window_too_long' };   // r8: the writer's cap — the press + 1 hour, never more
+  if (winEnd && cur.except.some((x) => GM.principalKey(x) === key)) return { ok: false, code: 'window_excepted' };   // r8 (the 除了 hazard): this write would have deleted the exception for good
   if (!add || (!add.length && !cmds && !winEnd)) return { ok: false, code: 'hosts_required' };
   const src = SOURCES.includes(source) ? source : null, stampAt = endOf(at);
   const end = endOf(until);
@@ -281,6 +297,8 @@ function withMember(row, principal, { hosts = [], until = null, tool = null, com
     next[j] = s;
     changes.replaced.push({ ...scopeWord(w), was: w.until, until: s.until, expired: gone(w) });
   }
+  // r8: an ENDED window this write does not renew goes (it admits nothing, and the .366 reader drops a member that holds one)
+  for (const s of next.filter((x) => x.kind === 'window' && gone(x) && !winEnd)) { next.splice(next.indexOf(s), 1); changes.pruned.push({ ...scopeWord(s), was: s.until }); }
   // the limits count what the member holds: an ENDED host scope beyond them goes first (oldest end first) — it admits nothing
   let nHosts = next.filter((s) => s.kind === 'host').length;
   if (nHosts > GM.HOSTS_MAX) {
@@ -299,14 +317,53 @@ function withMember(row, principal, { hosts = [], until = null, tool = null, com
   } else {
     to.push({ ...b, ...(principal.name ? { name: String(principal.name) } : {}), scopes: next.map(storedScope) });
   }
-  return { ok: true, to, except: cur.except.filter((x) => GM.principalKey(x) !== key), widened: moved, added: i < 0, changes };
+  const sw = withoutEndedWindows(to.filter((e) => GM.principalKey(e) !== key), nowN), kept = new Map(sw.to.map((e) => [GM.principalKey(e), e]));   // r8: every OTHER member's ended windows go too (the order kept)
+  const rowTo = to.filter((e) => GM.principalKey(e) === key || kept.has(GM.principalKey(e))).map((e) => (GM.principalKey(e) === key ? e : kept.get(GM.principalKey(e))));
+  return { ok: true, to: rowTo, except: cur.except.filter((x) => GM.principalKey(x) !== key), widened: moved, added: i < 0, swept: sw.swept, changes };
 }
-/** Revoke ONE member (`principalKey`) — its exceptions stay with the row. → { ok, to, except, removed } | unknown_shape. */
-function withoutMember(row, principalKey) {
+/** r8 (the r7 acceptance MINOR 5): A ROW'S ENDED WINDOWS PRUNED — every member's window past `now` goes (it admits nothing);
+ *  a member left with no scope goes too (the store holds no member without one). The writer applies it at every write of the
+ *  row, so an ended window outlives its hour only until the row is next written (or the door's hour-end prune).
+ *  → { to, swept: [{principal, until}], dropped: [principal] } */
+function withoutEndedWindows(to, now) {
+  const n = Number(now) > 0 ? Number(now) : 0, swept = [], dropped = [], out = [];
+  for (const e of Array.isArray(to) ? to : []) {
+    const sc = scopesOf(e), ended = n > 0 ? sc.filter((s) => s.kind === 'window' && s.until <= n) : [];
+    if (!ended.length) { out.push(e); continue; }
+    for (const s of ended) swept.push({ principal: GM.principalKey(e), until: s.until });
+    const rest = sc.filter((s) => !ended.includes(s));
+    if (!rest.length) { dropped.push(GM.principalKey(e)); continue; }
+    const m = scopedMember(e, rest); delete m.mac; out.push(m);
+  }
+  return { to: out, swept, dropped };
+}
+/** Revoke ONE member (`principalKey`) — its exceptions stay with the row. r8: every other member's ended windows are pruned,
+ *  and `window` = the end of the LIVE window the member held (null: none) — its record is told it was taken back.
+ *  → { ok, to, except, removed, window } | unknown_shape. */
+function withoutMember(row, principalKey, { now = 0 } = {}) {
   const cur = rowLists(row);
   if (!cur) return { ok: false, code: 'unknown_shape' };
-  const to = cur.to.filter((e) => GM.principalKey(e) !== String(principalKey || ''));
-  return { ok: true, to, except: to.length ? cur.except : [], removed: to.length !== cur.to.length };
+  const was = cur.to.find((e) => GM.principalKey(e) === String(principalKey || ''));
+  const w = was ? scopesOf(was).find((s) => s.kind === 'window' && liveScope(s, Number(now) || 0)) : null;
+  const to = withoutEndedWindows(cur.to.filter((e) => GM.principalKey(e) !== String(principalKey || '')), now).to;
+  return { ok: true, to, except: to.length ? cur.except : [], removed: !!was, window: w && Number(now) > 0 && w.until > Number(now) ? w.until : null };
+}
+/** r8 (the r7 acceptance MINOR 4 — «nothing ends just the window early»): TAKE BACK ONE MEMBER'S WINDOW only — its host and
+ *  command scopes stay as they are (their own ends); a member that held nothing else goes; every other member's ended
+ *  windows are pruned. → { ok, to, except, removed (a window was there), until (its end), memberGone } | unknown_shape. */
+function withoutWindow(row, principalKey, { now = 0 } = {}) {
+  const cur = rowLists(row);
+  if (!cur) return { ok: false, code: 'unknown_shape' };
+  const key = String(principalKey || '');
+  const i = cur.to.findIndex((e) => GM.principalKey(e) === key);
+  const sc = i >= 0 ? scopesOf(cur.to[i]) : [], w = sc.find((s) => s.kind === 'window');
+  if (!w) return { ok: true, to: cur.to, except: cur.except, removed: false, until: null, memberGone: false };
+  const rest = sc.filter((s) => s.kind !== 'window');
+  const others = withoutEndedWindows(cur.to.filter((e, k) => k !== i), now), kept = new Map(others.to.map((e) => [GM.principalKey(e), e]));
+  let self = null;
+  if (rest.length) { self = scopedMember(cur.to[i], rest); delete self.mac; }
+  const to = cur.to.map((e, k) => (k === i ? self : kept.get(GM.principalKey(e)) || null)).filter(Boolean);   // the order kept
+  return { ok: true, to, except: to.length ? cur.except : [], removed: true, until: w.until, memberGone: !self };
 }
 /** r3 (MAJOR 1 — the acceptance: the 2.369.363/.364 carry wrote legacy aws «always» rows as `*.amazonaws.com` members with NO
  *  tool, and r2's row rules then refused every OTHER conversation's write on that entry): A LEGACY WILDCARD IS A MIGRATION
@@ -390,7 +447,7 @@ function publicGrants(row, { now = 0 } = {}) {
       const all = scopesOf(e), ls = all.filter((s) => liveScope(s, now)), last = latestOf(all);
       const { scopes: _s, hosts: _h, commands: _c, toolFor: _t, tool: _tl, until: _u, source: _src, at: _at, ...rest } = e;
       const win = ls.find((s) => s.kind === 'window');   // r7: its live window (the chip says «any destination · until HH:MM»)
-      return { ...rest, id: grantIdOf(p.resource, GM.principalKey(e)), principal: GM.principalKey(e), hosts: hostsOfScopes(all), commands: commandsOfScopes(all), source: last ? last.source : null, at: last ? last.at : null, tool: null, toolFor: toolForOfScopes(all), legacy: legacyWildOf(e), until: spanOf(ls.length ? ls : all), expired: !ls.length, window: win ? win.until : null,
+      return { ...rest, id: grantIdOf(p.resource, GM.principalKey(e)), principal: GM.principalKey(e), hosts: hostsOfScopes(all), commands: commandsOfScopes(all), source: last ? last.source : null, at: last ? last.at : null, sourceKind: last ? last.kind : null, tool: null, toolFor: toolForOfScopes(all), legacy: legacyWildOf(e), until: spanOf(ls.length ? ls : all), expired: !ls.length, window: win ? win.until : null,   // r8: `sourceKind` — the latest writer's scope ('window': the chip says «“Allow for 1 hour” on a card», never «“Always” on a card»)
         scopes: all.map((s) => ({ kind: s.kind, ...(s.kind === 'host' ? { host: s.host } : s.kind === 'command' ? { command: s.command } : {}), until: s.until, expired: !liveScope(s, now), tool: s.tool, legacy: s.kind === 'host' && isWild(s.host) && !s.tool, source: s.source, at: s.at })) };   // r3: `legacy` — its wildcard hosts with no tool (any tool)
     }),
     except: p.except || [],
@@ -417,4 +474,4 @@ function standingLines(verdicts, { always = false } = {}) {
 const baseOf = (p) => String(p == null ? '' : p).replace(/\/+$/, '').split('/').pop();
 const commandWords = (c) => (c && c.program ? [baseOf(c.program), ...(Array.isArray(c.pre) ? c.pre : []), c.arg == null ? '' : String(c.arg)[0] === '/' ? baseOf(c.arg) : String(c.arg)].filter(Boolean).join(' ') : '');   // r2: + the options it pins before the script
 
-module.exports = { DOOR, ENTRY_HOSTS, ID_RE, CODES, SOURCES, WINDOW_MS, commandWords, grantIdOf, hostCovers, toolOfHost, legacyWildOf, runHostsOf, effectiveHosts, useVerdict, holds, withMember, withoutMember, withWildTools, alwaysCarry, publicGrants, standingLines, scopesOf, scopedMember, scopedRowOf, canonOf, spanOf };
+module.exports = { DOOR, ENTRY_HOSTS, ID_RE, CODES, SOURCES, WINDOW_MS, WINDOW_READ_MAX, commandWords, grantIdOf, hostCovers, toolOfHost, legacyWildOf, runHostsOf, effectiveHosts, useVerdict, holds, withMember, withoutMember, withoutWindow, withoutEndedWindows, withWildTools, alwaysCarry, publicGrants, standingLines, scopesOf, scopedMember, scopedRowOf, canonOf, spanOf };
