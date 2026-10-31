@@ -4,10 +4,17 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 
 ## 2.369.365 — 2026-10-30
 
+### Changed
+- A vault command card now also shows a long working folder, program path or secret reference whole under Technical details.
+
 ### Fixed
 - While public URLs are down because the relay keeps dropping the connection, For you says why; publishing tries once first, and no longer asks about DNS.
 - A Mac screen that waits while Hub automation asks you (VibeSpace sending the Mac its screen helper) no longer closes after 30 s; it opens once you allow it.
 - vibespace chat on the machine shows a conversation's messages in order, keeps Chinese and other non-Latin text intact, and never repeats what you just typed.
+- Editing or removing a rule no longer discards held messages for conversations the agent is still woken for by its account or another rule.
+- When a rule edit leaves out only some conversations of a held-messages card, only theirs are dropped; the card stays open and says how many.
+- Deliver on held messages now counts only what it sent; anything it could not send stays on the card, to deliver again or discard.
+- A restart in the middle of Deliver on held messages now reopens the same card with what was not sent, instead of a second card beside it.
 
 ## 2.369.364 — 2026-10-30
 
