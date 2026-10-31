@@ -28,6 +28,9 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A scheduled job set for a time that does not exist on the day clocks go forward now runs once right after the jump instead of skipping that day.
 - A tool call you stop while it is running now says it was stopped while it ran and may have run in part, instead of reading as refused.
 - When you browse a browser yourself, its Desktop view takes your clicks and keys on your own window, so Chrome's windows like a passkey prompt can be answered.
+- Conversation links from a background read that a command left running no longer land on a later, unrelated step.
+- Conversation links from a command that checks for new messages in a shell arithmetic test, or reads them in a cleanup step it sets, now stay with that command.
+- A command whose shell text cannot be fully read, such as a zsh glob pattern or a value run a second time, keeps the conversation links it may have caused.
 
 ## 2.369.366 — 2026-10-31
 
