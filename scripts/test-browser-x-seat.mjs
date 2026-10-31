@@ -648,7 +648,7 @@ function doorFacts(root) {
     themeShadow: !!rule && !/rgba?\(/.test(rule) && rule.includes('box-shadow: var(--shadow-window)'),
     oneRank: /w\.el\.style\.zIndex = String\(Z_FLOOR \+ stackRank\(win\)\);/.test(view) && /import \{[^}]*\bstackRank\b[^}]*\} from '\.\/xpra-proto\.js';/.test(view) && !/Z_REACH|Z_BASE/.test(view)
       && /\.sort\(\(a, b\) => P\.stackRank\(b\) - P\.stackRank\(a\)\)\[0\] \|\| null;/.test(read(root, 'src/lib/xpra-client.js')),
-    clientRefusalSaid: /onRefused: \(v\) => sayClientRefusal\(v\),/.test(dw) && dw.includes("if (now - lastHintAt > WATCH_HINT_EVERY_MS) { lastHintAt = now; showToast(t('Click your window first — another window is over it there, so the scroll would land in that one')")
+    clientRefusalSaid: /onRefused: \(v\) => sayClientRefusal\(v\),/.test(dw) && dw.includes("if (sayPaced('click-first', now)) { showToast(t('Click your window first — another window is over it there, so the scroll would land in that one')")
       && /refused: \(v\) => \{ try \{ onRefused\?\.\(v\); \}/.test(view) && read(root, 'src/lib/xpra-client.js').includes("emit('refused', { act: 'wheel', code: 'click-first' }); return; }"),
     toastOnActs: /const more = \(Number\(v\.acts\) \|\| 0\) > bseat\.acts;/.test(dw) && /if \(more && bseat\.seat === 'input'\) \{/.test(dw),
     dw, live,

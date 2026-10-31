@@ -2275,6 +2275,27 @@ console.log('§XS lane desktop-x-seat-browser r6 (主开发\'s acceptance r5 on 
   const pp = MUTXC.write('src/lib/xpra-proto.js', psrc.replace(FRONT_RANK, 'if (heldWindow(win) && (!best || stackRank(win) > stackRank(best))) best = win;'), 'front-by-stack-rank');
   const MF = await writerRun(await import(pathToFileURL(MUTXC.write('src/lib/xpra-client.js', csrc.replace("from './xpra-proto.js'", `from ${JSON.stringify(pathToFileURL(pp).href)}`), 'front-by-stack-rank')).href));
   ok(MF.atPress === 2 && same(MF.x, { act: 'ask-front', to: [2] }), `MUTANT front-by-stack-rank (r5's frontOf: the drawn tiers) ⇒ the Writer leg goes RED: the Navigator stays the front, the ✕ closes it (${JSON.stringify(MF.x)})`, MF);
+
+  // ── r7 (acceptance r6): ONE TOAST PACER PER SENTENCE in desktop-app-window.js — the bridge's refusal (a refused press) at t0, the
+  // client's wheel refusal at t0 + 1 s: BOTH said (r6 shared one `lastHintAt`: the second was silent for up to 8 s) ──
+  const DW = await import('../src/lib/desktop-app-window.js');
+  const dwsrc = read('src/lib/desktop-app-window.js');
+  // what the window's source hands the pacer for each toast sentence: the key in front of it
+  const toastKeys = (src) => {
+    const k = (sentence) => { const m = new RegExp(`if \\(sayPaced\\('([\\w-]+)', now\\)\\) \\{ showToast\\(t\\('${sentence}`).exec(src); return m ? m[1] : null; };
+    return { bridge: k('Only your own window takes your clicks and keys here'), wheel: k('Click your window first'), clipboard: k('Copy and paste reach only the window') };
+  };
+  const pacedRun = (Wm, keys) => {
+    if (typeof Wm.hintPacer !== 'function' || !keys.bridge || !keys.wheel) return { error: 'no per-sentence pacer', keys };
+    const say = Wm.hintPacer(8000), t0 = 1_000_000;
+    return { keys, bridgeT0: say(keys.bridge, t0), wheelT1: say(keys.wheel, t0 + 1000), wheelT2: say(keys.wheel, t0 + 2000), bridgeT3: say(keys.bridge, t0 + 3000), wheelT9: say(keys.wheel, t0 + 9001) };
+  };
+  const PR = pacedRun(DW, toastKeys(dwsrc));
+  ok(!PR.error && PR.bridgeT0 && PR.wheelT1 && !PR.wheelT2 && !PR.bridgeT3 && PR.wheelT9 && new Set(Object.values(PR.keys)).size === 3 && !/lastHintAt/.test(dwsrc), 'r7 (acceptance r6) — ONE PACER PER SENTENCE: a bridge refusal said at t0, the wheel\'s own refusal at t0 + 1 s is SAID too (r6: one shared `lastHintAt` silenced it up to 8 s); each sentence still on its own 8 s pace (the wheel again at +2 s, the bridge again at +3 s: quiet; the wheel at +9 s: said) — the window hands each toast its own key', PR);
+  const sameKey = dwsrc.replace("if (sayPaced('click-first', now)) { showToast(t('Click your window first", "if (sayPaced('not-your-window', now)) { showToast(t('Click your window first");
+  ok(sameKey !== dwsrc, 'r7 mutant: the wheel refusal\'s pacer line is spelled once');
+  const MP = pacedRun(DW, toastKeys(sameKey));
+  ok(!MP.error && MP.bridgeT0 && !MP.wheelT1, `MUTANT one-pacer (the wheel's refusal back on the bridge refusal's pace) ⇒ the leg goes RED: the wheel's refusal at t0 + 1 s is silent (${JSON.stringify(MP)})`, MP);
 }
 
 for (const r of copiesCensus(MUTXC.files, MUTXC.dir, repo, { minCopies: 10 })) ok(r.pass, 'tree: ' + r.name + (r.pass ? '' : ' — ' + r.detail));

@@ -188,6 +188,12 @@ import { deskDoorAct } from '../browser-picture.js'; // lane desktop-x-seat-brow
 const CLOSE_STAMP_WAIT_MS = 1500;
 
 const WATCH_HINT_EVERY_MS = 8000;
+/** ONE PACER PER SENTENCE (lane desktop-x-seat-browser r7, acceptance r6): `say(key, now)` is true at most once per `everyMs` for
+ *  each key — one sentence's toast never silences another's (a refused press, said, hid the wheel's own refusal for up to 8 s). PURE. */
+export function hintPacer(everyMs = WATCH_HINT_EVERY_MS) {
+  const at = new Map();
+  return (key, now) => { const t = at.get(key); if (t !== undefined && now - t <= everyMs) return false; at.set(key, now); return true; };
+}
 /** The status's minimum on the strip (its ONE flexible item) — public/style.css `.desktop-bar > .desktop-status` min-width says the same (test-live-bar-layout pins the pair). */
 export const DESK_STATUS_MIN_PX = 40;
 // lane app-display-notify-sink: an app's notification inside its window (= src/desktop-apps.js NOTIFY_TOAST_MS / NOTIFY_JOURNAL_MAX)
@@ -449,7 +455,7 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
   let exitDecided = false;  // the terminal-state verdict is taken ONCE (a lease dropping later never re-decides it)
   let closeAskedAt = 0;     // the outer ✕ asked the app (close-window) at — a second ✕ within OUTER_CLOSE_AGAIN_MS stops it
   let lease = null;        // P9b: the agent lease on this app (null = the user's own app, nothing gated)
-  let lastHintAt = 0;
+  const sayPaced = hintPacer(WATCH_HINT_EVERY_MS); // r7: each toast sentence on its own pace (the key names the sentence)
   // seamless (round 3 lane B) — declared before the view exists (its callbacks read them)
   const lsig = winInfo._listenerCtl?.signal;
   let mainMeta = null;          // the app's main X window metadata (decorations 0 = it draws its own title bar)
@@ -535,7 +541,7 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
       const m = windowLiveMode({ lease, viewerTag: myTag });
       if (!m.leased || m.mine || seatState() !== 'watch') return;
       const now = Date.now();
-      if (now - lastHintAt > WATCH_HINT_EVERY_MS) { lastHintAt = now; showToast(m.mode === 'takeover' ? t('Another viewer holds this window') : t('Watch mode — the agent is driving; press Take over to send input'), { duration: 3500 }); }
+      if (sayPaced(m.mode === 'takeover' ? 'takeover' : 'watch', now)) { showToast(m.mode === 'takeover' ? t('Another viewer holds this window') : t('Watch mode — the agent is driving; press Take over to send input'), { duration: 3500 }); }
     }, { capture: true, signal: winInfo._listenerCtl?.signal });
     // B-5ee0 ⑥ (cannot be fixed here): xpra hands its clipboard to ONE client — the first that asked, the active pane —
     // so a Watch pane never receives what the app copies, and sends nothing. Copy / paste keys in Watch SAY so.
@@ -543,7 +549,7 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
       if (browserDisplay()) return; // lane desktop-x-seat-browser: a browser display's Watch says its own way (the door) — no «Take over» hint
       if (seatState() !== 'watch' || !(e.ctrlKey || e.metaKey) || !/^[cvx]$/i.test(e.key || '')) return;
       const now = Date.now();
-      if (now - lastHintAt > WATCH_HINT_EVERY_MS) { lastHintAt = now; showToast(t('Copy and paste reach only the window that drives the app — xpra gives its clipboard to one viewer. Take over to copy or paste here.'), { duration: 5000 }); }
+      if (sayPaced('clipboard', now)) { showToast(t('Copy and paste reach only the window that drives the app — xpra gives its clipboard to one viewer. Take over to copy or paste here.'), { duration: 5000 }); }
     }, { capture: true, signal: winInfo._listenerCtl?.signal });
     lastSeat = null;
     applyViewOnly();
@@ -613,11 +619,12 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
     else setBrowserSeat(r.seat, r.why);
   };
   /** r6 (acceptance r5 MINOR 1): his wheel over a window of his that another may cover in X while another window of his holds his
-   *  focus — the client sent nothing (a raise would move his keys off his own dialog): said, paced like the bridge's refusals. */
+   *  focus — the client sent nothing (a raise would move his keys off his own dialog): said, on its own pace (r7: never silenced by
+   *  the bridge's refusal toast, never silencing it). */
   const sayClientRefusal = (v) => {
     if (!v || v.code !== 'click-first' || !browserDisplay() || bseat.seat !== 'input') return;
     const now = Date.now();
-    if (now - lastHintAt > WATCH_HINT_EVERY_MS) { lastHintAt = now; showToast(t('Click your window first — another window is over it there, so the scroll would land in that one'), { duration: 3500 }); }
+    if (sayPaced('click-first', now)) { showToast(t('Click your window first — another window is over it there, so the scroll would land in that one'), { duration: 3500 }); }
   };
   /** The bridge's word (in-band, this socket's own): the seat, why it watches, a refused act — said once per act. */
   const applyBrowserSeat = (v) => {
@@ -628,7 +635,7 @@ export function openDesktopApp(app, id, { syncId, wid = 0, title = '', intoChain
     setBrowserSeat(v.seat, v.why || null);
     if (more && bseat.seat === 'input') {
       const now = Date.now();
-      if (now - lastHintAt > WATCH_HINT_EVERY_MS) { lastHintAt = now; showToast(t('Only your own window takes your clicks and keys here — the agents\' windows are view only'), { duration: 3500 }); }
+      if (sayPaced('not-your-window', now)) { showToast(t('Only your own window takes your clicks and keys here — the agents\' windows are view only'), { duration: 3500 }); }
     }
   };
   /** The conversations on this browser now (the digest's holder rows, by this client's names) — who the Watch sentence names. */
