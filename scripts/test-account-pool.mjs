@@ -235,7 +235,7 @@ var P2X; P2X = am.createPool({ name: 'P2' }).id; // the earlier block removed it
 {
   // RED CONTROL (lane cli-2-1-307-records, the .340 base): over the two-version fixture (2.1.296 + 2.1.306) the same member on 2.1.307 is escaped
   const FX = JSON.parse(fs.readFileSync(path.resolve('scripts/fixtures/oat-in-file.json'), 'utf8'));
-  const { '2.1.307': _measured307, '2.1.308': _measured308, '2.1.312': _m312a, ...two } = FX.versions;
+  const { '2.1.307': _measured307, '2.1.308': _measured308, '2.1.312': _m312a, '2.1.314': _m314a, ...two } = FX.versions;
   const twoF = path.join(DATA, 'fx-2.1.296-2.1.306.json'); fs.writeFileSync(twoF, JSON.stringify({ versions: two }));
   const amB = new AccountManager({ dataDir: path.join(DATA, 'tok-base-307'), oatFixture: twoF });
   const SH = { scopes: ['user:inference', 'user:profile'], subscriptionType: 'max' };
@@ -252,7 +252,7 @@ var P2X; P2X = am.createPool({ name: 'P2' }).id; // the earlier block removed it
 {
   // RED CONTROL (lane cli-2-1-308-records, the .341 base): over the three-version fixture (2.1.296 + 2.1.306 + 2.1.307) the same member on 2.1.308 is escaped
   const FX = JSON.parse(fs.readFileSync(path.resolve('scripts/fixtures/oat-in-file.json'), 'utf8'));
-  const { '2.1.308': _measured308, '2.1.312': _m312b, ...three } = FX.versions;
+  const { '2.1.308': _measured308, '2.1.312': _m312b, '2.1.314': _m314b, ...three } = FX.versions;
   const threeF = path.join(DATA, 'fx-2.1.296-2.1.306-2.1.307.json'); fs.writeFileSync(threeF, JSON.stringify({ versions: three }));
   const amB = new AccountManager({ dataDir: path.join(DATA, 'tok-base-308'), oatFixture: threeF });
   const SH = { scopes: ['user:inference', 'user:profile'], subscriptionType: 'max' };
@@ -270,7 +270,7 @@ var P2X; P2X = am.createPool({ name: 'P2' }).id; // the earlier block removed it
   // lane pool-silent-members R1: 2.1.312 measured 2026-10-28 (the loopback rung) ⇒ no escape on it; over the .360 base's
   // four-version fixture (2.1.296 – 2.1.308) the same member on 2.1.312 is out of the pool — and, since R1, NAMED for it
   const FX = JSON.parse(fs.readFileSync(path.resolve('scripts/fixtures/oat-in-file.json'), 'utf8'));
-  const { '2.1.312': measured312, ...four } = FX.versions;
+  const { '2.1.312': measured312, '2.1.314': _m314c, ...four } = FX.versions;
   const run = async (tag, fxPath) => {
     const amB = new AccountManager({ dataDir: path.join(DATA, 'tok-312-' + tag), ...(fxPath ? { oatFixture: fxPath } : {}) });
     const SH = { scopes: ['user:inference', 'user:profile'], subscriptionType: 'max' };
@@ -290,6 +290,31 @@ var P2X; P2X = am.createPool({ name: 'P2' }).id; // the earlier block removed it
   const fourF = path.join(DATA, 'fx-to-2.1.308.json'); fs.writeFileSync(fourF, JSON.stringify({ versions: four }));
   const base = await run('base', fourF);
   ck('RED CONTROL (the .360 base, 90c995a3): over the four-version fixture (2.1.296 – 2.1.308) the same member on 2.1.312 stays out of the pool, its folder holding no token — and the roster NAMES it: no credential file in its folder (CLI 2.1.312 unmeasured)', !!measured312 && Object.keys(four).join() === '2.1.296,2.1.306,2.1.307,2.1.308' && !base.cand && !base.member && !base.file && base.why && base.why.code === 'cli-unmeasured' && base.why.cli === '2.1.312' && base.why.file === false, JSON.stringify(base));
+}
+{
+  // lane oat-in-file-2-1-314: 2.1.314 measured 2026-10-30 (the same loopback rung) ⇒ no escape on it; over the .364 base's
+  // five-version fixture (2.1.296 – 2.1.312) the same member on 2.1.314 is out of the pool, NAMED for it (the 10-30 hub)
+  const FX = JSON.parse(fs.readFileSync(path.resolve('scripts/fixtures/oat-in-file.json'), 'utf8'));
+  const { '2.1.314': measured314, ...five } = FX.versions;
+  const run = async (tag, fxPath) => {
+    const amB = new AccountManager({ dataDir: path.join(DATA, 'tok-314-' + tag), ...(fxPath ? { oatFixture: fxPath } : {}) });
+    const SH = { scopes: ['user:inference', 'user:profile'], subscriptionType: 'max' };
+    const X = amB.createSubscription({ name: 'Login X' }).id;
+    fs.writeFileSync(path.join(amB.subDir(X), '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: 'x', refreshToken: 'r', expiresAt: Date.now() + 36e5, refreshTokenExpiresAt: Date.now() + 20 * 864e5, ...SH } }), { mode: 0o600 });
+    const T = amB.createSubscription({ name: 'Token T' }).id;
+    fs.writeFileSync(path.join(amB.subDir(T), '.credentials.json'), JSON.stringify({ claudeAiOauth: { accessToken: '', refreshToken: '', expiresAt: 0, refreshTokenExpiresAt: Date.now() - 864e5, ...SH } }), { mode: 0o600 });
+    const PB = amB.createPool({ name: 'Tok pool' }).id;
+    amB.setOat(T, ['sk', '-ant-oat01-'].join('') + 'POOLfake_' + 't'.repeat(40));
+    amB.noteCliVersion('2.1.314 (Claude Code)');
+    await amB.oatFileSettled();
+    const why = amB.poolRoster(PB).find((r) => r.id === T)?.why || null;
+    return { cand: amB.poolMembers(PB).some((m) => m.id === T), member: amB.isPoolMember(PB, T), file: amB.readSubCreds(T).oatFile === true, why };
+  };
+  const now = await run('now', null);
+  ck('token slot: the hub auto-updated to 2.1.314 (measured 2026-10-30) ⇒ T\'s token is in its folder and T is a pool candidate — not escaped', now.cand && now.member && now.file && now.why === null, JSON.stringify(now));
+  const fiveF = path.join(DATA, 'fx-to-2.1.312.json'); fs.writeFileSync(fiveF, JSON.stringify({ versions: five }));
+  const base = await run('base', fiveF);
+  ck('RED CONTROL (the .364 base, 43d0f8d2d): over the five-version fixture (2.1.296 – 2.1.312) the same member on 2.1.314 stays out of the pool, its folder holding no token — and the roster NAMES it: no credential file in its folder (CLI 2.1.314 unmeasured)', !!measured314 && Object.keys(five).join() === '2.1.296,2.1.306,2.1.307,2.1.308,2.1.312' && !base.cand && !base.member && !base.file && base.why && base.why.code === 'cli-unmeasured' && base.why.cli === '2.1.314' && base.why.file === false, JSON.stringify(base));
 }
 {
   // THE ONE ANSWER (R2): _unplaceableWhy is null EXACTLY when _placeable is true — over every shape a member can be in

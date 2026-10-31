@@ -140,7 +140,7 @@ console.log('── the pool verdict names every member of its roster (R2) ─�
   const APA = require('../src/account-pool-auto.js');
   const { decidePoolSwitch, poolBlockedNotice } = APA;
   const FX = JSON.parse(fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), 'fixtures', 'oat-in-file.json'), 'utf-8'));
-  const { '2.1.312': _r312, ...upTo308 } = FX.versions;
+  const { '2.1.312': _r312, '2.1.314': _r314, ...upTo308 } = FX.versions;
   const dirR = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-verdicts-roster-'));
   const fxF = path.join(dirR, 'fx-to-2.1.308.json'); fs.writeFileSync(fxF, JSON.stringify({ versions: upTo308 }));
   const am = new AM({ dataDir: dirR, onChange: () => {}, oatFixture: fxF });
