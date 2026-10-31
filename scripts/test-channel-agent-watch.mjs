@@ -1561,10 +1561,11 @@ try {
   } finally { w.eng.stop(); }
 } catch (e) { ok(false, '⑧ (c) threw on this tree: ' + ((e && e.stack) || e)); }
 // (d) THE ONE WALKER, a census: channels-access.js reads `held.convs` only through heldConvsOf — every other mention is the
-// writer's (the request created with `convs: []`, holdAside's push) or releaseAside's count of what the walker skipped
+// writer's (the request created with `convs: []`, holdAside's push) or releaseAside's count of what the walker skipped (r16: and
+// its write that takes the entries it counted out — an unreadable entry is counted once per request)
 {
   const lines10 = fs.readFileSync(path.join(REPO, 'src/server/channels-access.js'), 'utf8').split('\n');
-  const ALLOWED10 = [/const all = r2 && r2\.held && Array\.isArray\(r2\.held\.convs\) \? r2\.held\.convs : \[\];/, /const entries = \(Array\.isArray\(h\.convs\) \? h\.convs\.length : 0\) - convs\.length;/, /if \(!was\) r2\.held\.convs\.push\(/];
+  const ALLOWED10 = [/const all = r2 && r2\.held && Array\.isArray\(r2\.held\.convs\) \? r2\.held\.convs : \[\];/, /const entries = \(Array\.isArray\(h\.convs\) \? h\.convs\.length : 0\) - convs\.length;/, /if \(!was\) r2\.held\.convs\.push\(/, /if \(!only && entries > 0\) h\.convs = convs;/];
   const walks = lines10.map((l, i) => ({ l, i: i + 1 })).filter(({ l }) => /\.convs\b/.test(l) && !/^\s*(\*|\/\/|\/\*\*)/.test(l) && !/\b(?:plan|p0)\.convs\b/.test(l) && !ALLOWED10.some((re) => re.test(l)));
   ok(walks.length === 0 && ALLOWED10.every((re) => lines10.some((l) => re.test(l))), `(d) THE ONE WALKER: no line of channels-access.js reads a held request's conversations but heldConvsOf (the writer's push and the skipped count aside) — ${walks.length} other read(s) (8b46c196: 7 — heldCountOf, fileHeldCard, holdAside's find, releaseAside, Deliver's flush, the answer, heldWatched)`, J2s(walks.map((x) => `${x.i}: ${x.l.trim().slice(0, 100)}`)));
 }
@@ -2026,6 +2027,156 @@ try {
       `(e) the block's Announcements section names its road «${VIA}»; Ops (the rule's own) does not`, J2s({ head: ls.filter((l) => /^(you are watching|#### |\(you are watching)/.test(l)) }));
   } finally { m2.eng.stop(); }
 } catch (e) { ok(false, '⑫ (e) threw on this tree: ' + ((e && e.stack) || e)); }
+
+console.log('⑬ ROUND 16 (lane wake-approve-card) — the re-hold is written under the block\'s hold; a stop inside the block leaves a card with doors; an unreadable entry is counted once');
+// (a) THE RE-HOLD UNDER THE HOLD (repro/accept-r15/skep-w2-rehold.mjs): the rule's watcher (Ops, narrowed from Ops + Announce) has
+// spent its daily cap; Announcements is woken through the ACCOUNT; an account window is IN FLIGHT when the owner presses Deliver, and
+// the account's next window queues on scope:acct BEHIND the press's block ⇒ the block is refused (the cap), its 60 go back on the
+// card BEFORE the block lets go of its chains, the queued window finds nothing; the second press (the cap raised) carries them ⇒
+// Announcements' 30 held rows are billed by exactly ONE ladder call (beb0cc795: two — the queued window, then the second press)
+async function inject16(m, cv, tag, n, word) { const t0 = m.clock(); await m.eng.store.index.update(() => { const e2 = m.eng.store.index.entry(A, cv, { create: true }); if (!Array.isArray(e2.pending)) e2.pending = []; for (let i = 0; i < n; i++) e2.pending.push({ record: { id: `${cv}-${tag}16-${i}`, text: `${word} message ${i}`, at: t0 - 1000 }, why: [], at: t0 - 1000, road: 'wake', for: 'agent:agent-1' }); }); }
+async function reholdLeg16(ENGM, name) {
+  const live = [];
+  const { pid } = await digestWorld13(ENGM, name, { live, account: true });
+  let open1 = () => {}, in1 = () => {};
+  const gate1 = new Promise((r) => { open1 = r; }), entered1 = new Promise((r) => { in1 = r; });
+  const m2 = await boot13(name, { ENGM, live, gate: (k) => (k === 1 ? (in1(), gate1) : null) });
+  live.push({ cid: 'agent-1', name: 'Worker', groups: [] }, { cid: 'agent-2', name: 'Other', groups: [] });
+  const tick = (ms) => new Promise((r) => setTimeout(r, ms));
+  try {
+    const r0 = req13(m2);
+    await m2.eng.setGrain(A, { kind: 'pattern', id: pid }, { pattern: OPS13, watchers: [{ principal: AGENT, delivery: 'wake', notify: 'digest', digestMinutes: 60, dailyWakeCap: 1 }] }, { person: true });
+    await inject16(m2, C, 'fill', 1, 'fresh');
+    const f0 = await m2.eng.flushScope(A, 'pattern', pid, 'agent:agent-1');   // ladder call #0: the rule's day spent
+    await inject16(m2, C2_13, 'win', 1, 'fresh');
+    const flushA1 = m2.eng.flushScope(A, 'account', null, 'agent:agent-1'); await entered1;   // ladder call #1, in flight on scope:acct
+    const press = m2.eng.decideRequest(r0.id, true, 'user', { person: true }); await tick(30);
+    const flushA2 = m2.eng.flushScope(A, 'account', null, 'agent:agent-1'); await tick(10);   // queued on scope:acct behind the block
+    open1();
+    const d = await press, a1 = await flushA1, a2 = await flushA2;
+    if (m2.eng.settleWakes) await m2.eng.settleWakes();
+    const mid = st13(m2);
+    await m2.eng.setGrain(A, { kind: 'pattern', id: pid }, { watchers: [{ principal: AGENT, delivery: 'wake', notify: 'digest', digestMinutes: 60, dailyWakeCap: 5 }] }, { person: true });
+    const d2 = req13(m2).status === 'open' ? await m2.eng.decideRequest(r0.id, true, 'user', { person: true }) : null;
+    if (m2.eng.settleWakes) await m2.eng.settleWakes();
+    const calls = m2.delivered.map((x, k) => ({ k, ops: /Ops room/.test(x.text), annOld: /#### Announcements[\s\S]*old message/.test(x.text) }));
+    return { f0: { ok: !!(f0 && f0.ok) }, press: { ...PRESS10(d), status: d.request && d.request.status }, stillHeld: d.stillHeld, a1: { ok: !!(a1 && a1.ok) }, a2: { ok: !!(a2 && a2.ok), n: (a2 && a2.n) || 0, why: (a2 && a2.why) || null }, mid, press2: d2 && PRESS10(d2), calls, annOldCalls: calls.filter((x) => x.annOld).length, after: st13(m2), pend: { ops: pend13(m2.eng, KEY), ann: pend13(m2.eng, K2_13) } };
+  } finally { open1(); m2.eng.stop(); }
+}
+// THE MUTANT «re-hold after the block» (beb0cc795: the press's re-hold written once the block had let go of its chains)
+function lateReholdMutant16() {
+  const src = engineSource(REPO);
+  const A16 = 'delivery = await deliverHeld(rec, req0, plan, settle);';
+  return { src, cut: src.split(A16).length === 2 ? src.replace(A16, 'delivery = await deliverHeld(rec, req0, plan, null);') : src };
+}
+try {
+  const g = await reholdLeg16(ENG, 'e16-rehold');
+  ok(g.f0.ok && g.press.ok && g.press.delivered === false && g.press.n === 0 && g.stillHeld === 60 && g.press.status === 'open' && g.a1.ok && !g.a2.ok && g.a2.why === 'nothing-pending'
+    && J2s(g.mid.rows) === J2s({ 'fake-poll-ops': 30, 'fake-poll-announce': 30 }) && g.press2 && g.press2.delivered === true && g.press2.n === 60
+    && g.annOldCalls === 1 && g.after.status === 'approved' && g.after.card === 'delivered' && J2s(g.pend) === J2s({ ops: 0, ann: 0 }),
+    `(a) a refused block's re-hold is written UNDER its hold ⇒ the account window queued behind it found ${g.a2.why}, the card kept 60, the second press carried them: Announcements' 30 held rows in ${g.annOldCalls} billed call (beb0cc795: 2 — the queued window, then the second press)`, J2s(g));
+  const m = lateReholdMutant16();
+  const r = await reholdLeg16(MUT.load('src/server/channels-engine.js', m.cut, 'held-late-rehold'), 'e16-rehold-red');
+  ok(m.cut !== m.src && r.annOldCalls === 2 && r.a2.ok && r.a2.n === 30,
+    `CONTROL «re-hold after the block» (beb0cc795): the same run ⇒ the queued window billed Announcements' ${r.a2.n} AND the card kept them — ${r.annOldCalls} billed calls carry the same held rows`, J2s({ calls: r.calls, a2: r.a2, mid: r.mid }));
+} catch (e) { ok(false, '⑬ (a) threw on this tree: ' + ((e && e.stack) || e)); }
+// (b) A STOP INSIDE THE BLOCK (repro/accept-r15/skep-midflight.mjs (A)): the press's ladder never answers, the stores are flushed, the
+// engine stops; the next boot ⇒ exactly ONE held request for those rows (the same one, open again with its 60) and ONE open card (its
+// own); its Deliver works and closes it «delivered» (beb0cc795: the request stayed 'approved' with its card open — a press answered
+// bad-state, ✓ / ✕ were refused — and the boot held the same rows again in a NEW request beside it)
+const held16 = (m) => (m.eng.store.index.table('watchRequests') || []).filter((r) => r && r.kind === 'held');
+const cards16 = (m) => m.userTodos.openItems().filter((x) => x && x.action && x.action.type === 'channel-held-digest').map((x) => x.id);
+async function stopLeg16(ENGM, name, { done = false } = {}) {
+  const live = [];
+  await digestWorld13(ENGM, name, { live });
+  let in0 = () => {};
+  const entered0 = new Promise((r) => { in0 = r; });
+  const m1 = await boot13(name, { ENGM, live, gate: (k) => (k === 0 ? (in0(), new Promise(() => {})) : null) });
+  live.push({ cid: 'agent-1', name: 'Worker', groups: [] });
+  const r0 = req13(m1);
+  m1.eng.decideRequest(r0.id, true, 'user', { person: true });   // never settles: the process stops inside the ladder
+  await entered0;
+  const inFlight = held16(m1).map((r) => ({ id: r.id, status: r.status, inFlight: !!(r.held && r.held.inFlight) }));
+  m1.userTodos._flush(); m1.eng.stop(); await new Promise((r) => setTimeout(r, 30));
+  const m2 = mkEngine(name, { ENGM, live });
+  if (done) await m2.eng.store.index.update(() => { for (const cv of [C, C2_13]) { const e2 = m2.eng.store.index.entry(A, cv, { create: false }); if (e2) e2.pending = []; } });   // the block HAD cleared what it carried (its finalize written, the re-hold not)
+  m2.eng.start(); await new Promise((r) => setTimeout(r, 40)); if (m2.eng.settleWakes) await m2.eng.settleWakes();
+  try {
+    const boot = { reqs: held16(m2).map((r) => ({ id: r.id, status: r.status, n: r.held && r.held.n, inFlight: !!(r.held && r.held.inFlight) })), cards: cards16(m2), card: st13(m2).card };
+    const it0 = r0.todoId ? m2.userTodos.get(r0.todoId) : null;
+    const d = done ? null : await m2.eng.decideRequest(r0.id, true, 'user', { person: true });
+    if (m2.eng.settleWakes) await m2.eng.settleWakes();
+    return { r0: { id: r0.id, todoId: r0.todoId }, inFlight, boot, it0: it0 && { status: it0.status, resolvedBy: it0.resolvedBy || null, n: it0.resolvedFact ? it0.resolvedFact.n : null }, press: d && PRESS10(d), after: st13(m2), pend: { ops: pend13(m2.eng, KEY), ann: pend13(m2.eng, K2_13) } };
+  } finally { m2.eng.stop(); }
+}
+// THE MUTANT «no boot reconcile» (beb0cc795: a boot never looks at a press cut short)
+function noReconcileMutant16() {
+  const src = engineSource(REPO);
+  const J16 = "(r.status === 'open' || (r.status === 'approved' && pressLeftOf(r)))", R16 = '    const presses = await reconcilePresses(t);';
+  return { src, cut: src.split(J16).length === 2 && src.split(R16).length === 2 ? src.replace(J16, "r.status === 'open'").replace(R16, '    const presses = 0;') : src };
+}
+try {
+  const g = await stopLeg16(ENG, 'e16-stop');
+  ok(J2s(g.inFlight) === J2s([{ id: g.r0.id, status: 'approved', inFlight: true }]) && g.boot.reqs.length === 1 && g.boot.reqs[0].id === g.r0.id && g.boot.reqs[0].status === 'open' && g.boot.reqs[0].n === 60 && !g.boot.reqs[0].inFlight
+    && J2s(g.boot.cards) === J2s([g.r0.todoId]) && /^60 messages for Worker held since .* — deliver or discard$/.test(g.boot.card || '')
+    && g.press && g.press.ok && g.press.delivered === true && g.press.n === 60 && g.after.status === 'approved' && g.after.card === 'delivered' && J2s(g.pend) === J2s({ ops: 0, ann: 0 }),
+    `(b) a stop inside the block (the request 'approved', its press record kept) ⇒ the boot finds ONE request (${g.boot.reqs.length}: the same, open, n ${g.boot.reqs[0] && g.boot.reqs[0].n}) and ONE card (its own «${(g.boot.card || '').replace(/since .* —/, 'since … —')}»); its Deliver sends ${g.press && g.press.n} and closes it «${g.after.card}» (beb0cc795: the old card a door-less 'approved', a twin request beside it)`, J2s(g));
+  const m = noReconcileMutant16();
+  const r = await stopLeg16(MUT.load('src/server/channels-engine.js', m.cut, 'held-no-press-reconcile'), 'e16-stop-red');
+  ok(m.cut !== m.src && r.boot.reqs.length === 2 && r.boot.reqs.some((x) => x.id === r.r0.id && x.status === 'approved') && r.press && !r.press.ok,
+    `CONTROL «no boot reconcile» (beb0cc795): the same stop ⇒ ${r.boot.reqs.length} requests for the same rows, the old one 'approved' — its press answers ${r.press && r.press.code}`, J2s({ reqs: r.boot.reqs, cards: r.boot.cards, press: r.press }));
+} catch (e) { ok(false, '⑬ (b) threw on this tree: ' + ((e && e.stack) || e)); }
+// (c) …AND ONE WHOSE DELIVERY WAS DONE: the block had cleared what it carried before the stop (its finalize written, the re-hold not)
+// ⇒ the boot finds nothing of the press left in pending: the request stays 'approved' (no press record), its card closes «delivered
+// 60», no new request
+try {
+  const g = await stopLeg16(ENG, 'e16-stop-done', { done: true });
+  ok(g.boot.reqs.length === 1 && g.boot.reqs[0].id === g.r0.id && g.boot.reqs[0].status === 'approved' && !g.boot.reqs[0].inFlight && !g.boot.cards.length && g.it0 && g.it0.status !== 'open' && g.it0.resolvedBy === 'delivered' && g.it0.n === 60,
+    `(c) a stop after the block had cleared its rows ⇒ the boot closes the press's card «${g.it0 && g.it0.resolvedBy} ${g.it0 && g.it0.n}», the request stays 'approved', no twin`, J2s(g));
+} catch (e) { ok(false, '⑬ (c) threw on this tree: ' + ((e && e.stack) || e)); }
+// (d) A DECIDED REQUEST WHOSE CARD STAYED OPEN (a stop between the request's write and the card's) ⇒ the boot closes the card with
+// the decision — never a decision row no verb can end
+try {
+  const live = [];
+  await digestWorld13(ENG, 'e16-decided', { live });
+  const m1 = await boot13('e16-decided', { live });
+  const r0 = req13(m1);
+  await m1.eng.store.index.update((ix) => { const r2 = ix.watchRequests.find((r) => r && r.id === r0.id); r2.status = 'denied'; r2.decidedAt = m1.clock(); r2.decidedBy = 'person'; });
+  const open0 = (m1.userTodos.get(r0.todoId) || {}).status;
+  m1.userTodos._flush(); m1.eng.stop(); await new Promise((r) => setTimeout(r, 10));
+  const m2 = await boot13('e16-decided', { live });
+  try {
+    const it = m2.userTodos.get(r0.todoId);
+    ok(open0 === 'open' && it && it.status !== 'open' && it.resolvedBy === 'discarded' && held16(m2).length === 1,
+      `(d) a request decided (Discard) with its card left open by a stop ⇒ the boot closes the card «${it && it.resolvedBy}»`, J2s({ open0, it: it && { status: it.status, resolvedBy: it.resolvedBy, fact: it.resolvedFact } }));
+  } finally { m2.eng.stop(); }
+} catch (e) { ok(false, '⑬ (d) threw on this tree: ' + ((e && e.stack) || e)); }
+// (e) AN UNREADABLE ENTRY IS COUNTED ONCE (repro/accept-r15/skep-midflight.mjs (B)): one torn entry in the request, the rule's daily cap
+// spent, three refused presses ⇒ skipped 1, 1, 1 — the journal says it once (beb0cc795: 1, 2, 3 — every whole press that reopened the
+// request counted it again)
+async function skipLeg16(ENGM, name) {
+  const live = [], lines = [];
+  const { pid } = await digestWorld13(ENGM, name, { live });
+  const m2 = mkEngine(name, { ENGM, live, lines }); m2.eng.start(); await new Promise((r) => setTimeout(r, 30)); if (m2.eng.settleWakes) await m2.eng.settleWakes();
+  live.push({ cid: 'agent-1', name: 'Worker', groups: [] });
+  try {
+    const r0 = req13(m2);
+    await m2.eng.setGrain(A, { kind: 'pattern', id: pid }, { watchers: [{ principal: AGENT, delivery: 'wake', notify: 'digest', digestMinutes: 60, dailyWakeCap: 1 }] }, { person: true });
+    await m2.eng.store.index.update((ix) => { const r2 = ix.watchRequests.find((r) => r && r.id === r0.id); r2.held.convs.push(null); });
+    await inject16(m2, C, 'fill', 1, 'fresh'); await m2.eng.flushScope(A, 'pattern', pid, 'agent:agent-1');
+    const presses = [];
+    for (let i = 0; i < 3; i++) { const d = await m2.eng.decideRequest(r0.id, true, 'user', { person: true }); presses.push({ delivered: d.delivered, skipped: d.skipped || 0, stillHeld: d.stillHeld || 0, status: d.request && d.request.status }); }
+    return { presses, said: lines.filter((l) => /held conversation entries unreadable/.test(l)).length };
+  } finally { m2.eng.stop(); }
+}
+try {
+  const g = await skipLeg16(ENG, 'e16-skip');
+  ok(J2s(g.presses.map((p) => p.skipped)) === J2s([1, 1, 1]) && g.presses.every((p) => p.delivered === false && p.stillHeld === 60 && p.status === 'open') && g.said === 1,
+    `(e) one torn entry over three refused presses ⇒ skipped ${g.presses.map((p) => p.skipped).join(', ')}; the journal said it ${g.said}× (beb0cc795: 1, 2, 3)`, J2s(g));
+  const src = engineSource(REPO), S16 = '    if (!only && entries > 0) h.convs = convs;';
+  const r = await skipLeg16(MUT.load('src/server/channels-engine.js', src.split(S16).length === 2 ? src.replace(S16, '') : src, 'held-skip-again'), 'e16-skip-red');
+  ok(src.split(S16).length === 2 && J2s(r.presses.map((p) => p.skipped)) === J2s([1, 2, 3]), `CONTROL «the entry kept» (beb0cc795): skipped ${r.presses.map((p) => p.skipped).join(', ')}`, J2s(r));
+} catch (e) { ok(false, '⑬ (e) threw on this tree: ' + ((e && e.stack) || e)); }
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

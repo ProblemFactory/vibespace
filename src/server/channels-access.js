@@ -1253,7 +1253,7 @@ function create(engineCtx) {
     if (!rec || !item || !convs.length) return { ok: false, why: 'nothing' };
     const w = item.watcher;
     const scope = plan.kind === 'scope' ? (item.source === 'account' ? { kind: 'adapter', id: rec.id } : { kind: 'pattern', id: item.patternId }) : { kind: 'conversation', id: convs[0].key };
-    const open = (store.index.table('watchRequests') || []).find((r) => r && r.kind === 'held' && r.status === 'open' && r.held && r.held.pk === pk && r.scope && r.scope.kind === scope.kind && r.scope.id === scope.id);
+    const open = (store.index.table('watchRequests') || []).find((r) => r && r.kind === 'held' && (r.status === 'open' || (r.status === 'approved' && pressLeftOf(r))) && r.held && r.held.pk === pk && r.scope && r.scope.kind === scope.kind && r.scope.id === scope.id);   // r16: + a press a stop cut short — this boot reopens it (reconcilePressIn), never a twin beside its card
     const since = plan.unknown || !Number.isFinite(plan.oldest) ? null : plan.oldest;
     const who = heldWho(w);
     let req = null;
@@ -1270,6 +1270,7 @@ function create(engineCtx) {
     await store.index.update((ix) => {
       const reqs = Array.isArray(ix.watchRequests) ? ix.watchRequests : (ix.watchRequests = []);
       let r2 = open ? reqs.find((r) => r && r.id === open.id) : null;
+      if (r2 && r2.status === 'approved') { const rp = reconcilePressIn(r2); if (rp) moved += rp.back; }   // r16: its released rows back first (all of them, not only this boot's plan)
       if (!r2) { reqs.push(req); r2 = req; while (reqs.length > 100) { const i = reqs.findIndex((r) => !(r && r.status === 'open')); if (i < 0) break; reqs.splice(i, 1); } }
       for (const c of convs) {
         const e2 = store.index.entry(rec.id, c.id, { create: false });
@@ -1336,6 +1337,7 @@ function create(engineCtx) {
     }
     if (skipped) log.warn(`[channels] ${r2.id}: ${skipped} held row(s) unreadable (not a record) — skipped, the rest ${keep ? 'delivered' : 'discarded'}`);
     if (skipped + (only ? 0 : entries)) h.skipped = (Number(h.skipped) || 0) + skipped + (only ? 0 : entries);
+    if (!only && entries > 0) h.convs = convs;   // r16: an unreadable entry is counted ONCE per request — the whole release takes it out with its count (the r15 acceptance, skep-midflight.mjs (B): a request a refused press reopened counted it again at every press — skipped 1, 2, 3 for one torn entry)
     return n;
   }
   /** THE OWNER'S DECISION on a held digest (the decide route — the person verdict): Deliver puts the request's hits back and
@@ -1386,6 +1388,7 @@ function create(engineCtx) {
       if (approve) released = heldIdsOf(r2, only);   // r15: exactly the rows this press puts back in play
       touched = releaseAside(r2, !!approve, only);
       if (approve) for (const c of heldConvsOf(r2)) if (carryKeys.has(c.key)) c.sent = { at: t };
+      if (approve && touched) r2.held.inFlight = pressRecordOf(released, t);   // r16: the press in flight — a stop inside its block leaves it, the next boot reconciles by it
       r2.held.n = touched;   // the record keeps what the decision touched (r15: a Deliver's, what went — below)
       skipped = Number(r2.held.skipped) || 0;
       dropped = heldDroppedOf(r2);   // r12: the part dropped before it (its conversations' watcher no longer woken there) — said with it
@@ -1396,23 +1399,32 @@ function create(engineCtx) {
       try { store.audit({ kind: 'watch', op: 'held-discard', principal: req0.principal, scope: req0.scope, requestId: req0.id, n: touched, at: t, by }); } catch {}
       resolve({ n: touched });
     }
-    let delivery = null;
-    if (approve && touched && rec) { try { delivery = await deliverHeld(rec, req0, plan); } catch (e) { delivery = { ok: false, why: (e && e.message) || String(e) }; } }
     // r15 — NEVER «delivered» FOR A ROW STILL PENDING: what this press released and nothing carried (the block refused — the daily
     // cap, nobody live —, or a conversation it could not read) comes back into THIS request; with the rest of its conversations
     // (the no-scope road) the request is OPEN again and its card says the count left. «n» = what went.
-    let back = 0, reopened = false, still = 0, stillConvs = 0;
-    if (approve) {
+    // r16 — THE RE-HOLD IS WRITTEN UNDER THE BLOCK'S HOLD (the r15 acceptance, skep-w2-rehold.mjs: r15 wrote it after the block had
+    // released its chains; a window flush queued on the account's chain read the same rows first and billed them while the card
+    // took them back — billed again at the next Deliver): `settle` is the engine door's (billedWake) — it runs after the block's
+    // section body, before any chain is released, so a row is on the card or in flight, never both. No block ran (no record, a
+    // stop, a throw before the door) ⇒ it runs here, nothing having been in flight under a chain.
+    let back = 0, reopened = false, still = 0, stillConvs = 0, settled = false;
+    const settle = async (dl) => {
+      if (settled) return;
       await store.index.update((ix) => {
         const r2 = (Array.isArray(ix.watchRequests) ? ix.watchRequests : []).find((r) => r && r.id === req0.id);
         if (!r2 || r2.status !== 'approved' || !r2.held) return;
-        back = reholdLeft(r2, released, !(delivery && (delivery.ok || delivery.stashed)));
+        back = reholdLeft(r2, released, !(dl && (dl.ok || dl.stashed)));
+        delete r2.held.inFlight;
         still = heldCountOf(r2);
         stillConvs = heldConvsOf(r2).filter((c) => !heldSpent(c) && heldCountOf({ held: { convs: [c] } }) > 0).length;
         if (still > 0) { reopened = true; r2.status = 'open'; r2.decidedAt = null; delete r2.decidedBy; r2.held.n = still; }
         else r2.held.n = touched - back;
       });
-    }
+      settled = true;
+    };
+    let delivery = null;
+    if (approve && touched && rec) { try { delivery = await deliverHeld(rec, req0, plan, settle); } catch (e) { delivery = { ok: false, why: (e && e.message) || String(e) }; } }
+    if (approve && !settled) { try { await settle(delivery); } catch (e) { log.warn(`[channels] ${req0.id}: the press's re-hold could not be written (${(e && e.message) || e}) — the next boot reconciles it`); } }
     const went = touched - back;
     if (approve) {
       try { store.audit({ kind: 'watch', op: 'held-deliver', principal: req0.principal, scope: req0.scope, requestId: req0.id, n: went, ...(reopened ? { stillHeld: still } : {}), at: t, by }); } catch {}
@@ -1431,6 +1443,29 @@ function create(engineCtx) {
     const carried = delivery && delivery.ok && Number(delivery.n) > went ? { carried: Number(delivery.n) } : {};   // the same block took the watcher's newer hits too — said, never folded into «n»
     const refused = !delivery || delivery.ok ? {} : delivery.stashed ? { why: String(delivery.why || 'refused'), stashed: true, note: 'not delivered now — kept for its next turn' } : { why: String(delivery.why || 'refused'), note: 'not delivered now — the messages stay held on the card' };
     return { ...out, delivered: !!(delivery && delivery.ok) && went > 0, n: went, ...carried, ...refused, ...(reopened ? { stillHeld: still, stillHeldConvs: stillConvs } : {}) };
+  }
+  /** r16: THE PRESS IN FLIGHT, persisted on the request (`held.inFlight`) from the release until its re-hold is written under the
+   *  block's hold — heldIdsOf's Map as rows (`{at, parts: [{key, ids, elided}]}`); `releasedOf` reads it back. A request 'approved'
+   *  that still carries one at a boot was stopped inside its block (the r15 acceptance, skep-midflight.mjs (A)): reconcilePressIn. */
+  const pressRecordOf = (released, t) => ({ at: t, parts: [...(released || new Map())].map(([key, v]) => ({ key, ids: [...v.ids], elided: Number(v.elided) || 0 })) });
+  const releasedOf = (inf) => new Map((inf && Array.isArray(inf.parts) ? inf.parts : []).filter((c) => c && typeof c.key === 'string').map((c) => [c.key, { ids: new Set(Array.isArray(c.ids) ? c.ids : []), elided: Number(c.elided) || 0 }]));
+  /** r16: a press cut short whose released rows are still in live pending (it reopens — a boot's hold joins it). */
+  const pressLeftOf = (r) => !!(r && r.held && r.held.inFlight) && [...releasedOf(r.held.inFlight)].some(([key, v]) => { const e2 = store.index.peek(key); return !!(e2 && Array.isArray(e2.pending) && e2.pending.some((p) => p && !p.aside && p.record && v.ids.has(p.record.id))); });
+  /** r16: inside an index update — a press a stop cut short (`r2` 'approved' with `held.inFlight`): its rows still in live pending
+   *  come back (reholdLeft; nothing of a conversation whose rows are still there went, so its elided count comes back too) and the
+   *  request is OPEN again — its own card, its own doors, never a twin; nothing left ⇒ the delivery is found done (the block cleared
+   *  what it carried) and the request stays 'approved'. → `{back, went, still}` or null (no press in flight). */
+  function reconcilePressIn(r2) {
+    if (!r2 || r2.kind !== 'held' || r2.status !== 'approved' || !r2.held || !r2.held.inFlight) return null;
+    const rel = releasedOf(r2.held.inFlight);
+    const left = pressLeftOf(r2);
+    const total = [...rel.values()].reduce((n, v) => n + v.ids.size + v.elided, 0);
+    const back = reholdLeft(r2, rel, left);
+    delete r2.held.inFlight;
+    const still = heldCountOf(r2);
+    if (still > 0) { r2.status = 'open'; r2.decidedAt = null; delete r2.decidedBy; r2.held.n = still; }
+    else r2.held.n = Math.max(0, total - back);
+    return { back, went: Math.max(0, total - back), still };
   }
   /** r15: the record ids (and elided counts) a press releases, per conversation key → `Map(key → {ids, elided})` — the request's
    *  own rows and its r6 in-place `aside` rows; read BEFORE releaseAside empties them. */
@@ -1491,11 +1526,11 @@ function create(engineCtx) {
     const k = items.findIndex(Boolean);   // r15: no scope road — ONE conversation per press, the rest stay on the card
     return k < 0 ? { carry: [], rest: convs, via: null } : { carry: [convs[k]], rest: convs.filter((_, i) => i !== k), via: null };
   }
-  async function deliverHeld(rec, r, plan) {
+  async function deliverHeld(rec, r, plan, settle = null) {
     const h = r.held || {};
     if (!plan || !plan.carry.length) return { ok: false, why: 'nothing-pending' };
-    if (plan.via) return flushScope(rec, plan.via.source, plan.via.patternId, h.pk, { also: new Set(plan.carry.map((c) => c.key)) });   // r15: the block holds every road it reads (the engine's billedWake `roads`)
-    return flushPending(rec, plan.carry[0].id, { kind: 'boot', pk: h.pk });
+    if (plan.via) return flushScope(rec, plan.via.source, plan.via.patternId, h.pk, { also: new Set(plan.carry.map((c) => c.key)), settle });   // r15: the block holds every road it reads (the engine's billedWake `roads`); r16: `settle` runs under that hold
+    return flushPending(rec, plan.carry[0].id, { kind: 'boot', pk: h.pk, settle });
   }
   // THE ITEM AND THE REQUEST ARE ONE STATE (lane wake-approve-card — exit-proxy verify-r2 ask-b's law, which the hub-act,
   // automation and vault asks keep). Acceptance round 2: a wake request's item is a DECISION ROW — the store lets it leave
@@ -1542,8 +1577,10 @@ function create(engineCtx) {
   /** THE BOOT RECONCILE of the asks this module filed (lane wake-approve-card r3 — the engine's start): ① every wake ask past
    *  its end expires; ② a wake ask whose item ended while nobody listened (the store's own expiry sweep runs as it loads,
    *  before this module subscribes) is settled as the hook would; ③ an OPEN access request whose pointer the owner hid comes
-   *  back to the tray. → {expired, settled, resurfaced}. */
+   *  back to the tray. r16: ⓪ first, the held decisions' presses a stop cut short and their cards (reconcilePresses).
+   *  → {expired, settled, resurfaced, refiled, presses}. */
   async function reconcileAsks(t = now()) {
+    const presses = await reconcilePresses(t);
     const expired = await expireWatchRequests(t);
     let settled = 0, resurfaced = 0, refiled = 0;
     if (userTodos && typeof userTodos.get === 'function') {
@@ -1562,7 +1599,45 @@ function create(engineCtx) {
       }
       resurfaced = resurfacePointers();
     }
-    return { expired, settled, resurfaced, refiled };
+    return { expired, settled, resurfaced, refiled, presses };
+  }
+  /** r16 — NEVER A CARD WITHOUT A DOOR (the r15 acceptance, skep-midflight.mjs (A): a stop inside Deliver's block left the request
+   *  'approved' with its card open — a press answered bad-state, ✓ / ✕ were refused, and the next boot held the same rows again in a
+   *  NEW request beside it). At a boot (no block is in flight yet): ① a press a stop cut short (reconcilePressIn) — its rows still
+   *  pending ⇒ the request reopens and its card says the count; the delivery found done ⇒ the card closes «delivered»; ② a request
+   *  DECIDED whose card is still open (a stop between the two stores' writes) ⇒ the card takes the decision. → how many. */
+  async function reconcilePresses(t = now()) {
+    const ids = new Set((store.index.table('watchRequests') || []).filter((r) => r && r.kind === 'held' && (r.status === 'approved' || r.status === 'denied')).map((r) => r.id));
+    if (!ids.size) return 0;
+    const out = [];
+    await store.index.update((ix) => {
+      for (const r2 of Array.isArray(ix.watchRequests) ? ix.watchRequests : []) {
+        if (!r2 || !ids.has(r2.id)) continue;
+        const res = reconcilePressIn(r2);
+        out.push({ id: r2.id, res, status: r2.status, todoId: r2.todoId || null, n: r2.held ? Number(r2.held.n) || 0 : 0 });
+      }
+    });
+    let n = 0;
+    for (const o of out) {
+      let it = null; try { it = o.todoId && userTodos && typeof userTodos.get === 'function' ? userTodos.get(o.todoId) : null; } catch { }
+      if (o.res) {
+        n++;
+        try { store.audit({ kind: 'watch', op: 'held-press-reconciled', requestId: o.id, n: o.res.went, ...(o.res.still ? { stillHeld: o.res.still } : {}), at: t, by: 'system' }); } catch { }
+        log.log(`[channels] ${o.id}: a Deliver press was cut short by a stop — ${o.res.still ? `${o.res.still} held message(s) back on its card (open again)` : `its delivery was found done (${o.res.went})`}`);
+      }
+      if (!it || it.status !== 'open') continue;
+      if (o.status === 'open') {
+        const rq = (store.index.table('watchRequests') || []).find((r) => r && r.id === o.id);
+        if (!rq || !rq.held || !userTodos || typeof userTodos.reshapeItems !== 'function') continue;
+        const who = heldWho({ principal: rq.principal || {} }), day = rq.held.since ? OF.when(rq.held.since) : 'an unknown date', drop = heldDroppedOf(rq), line = heldLine(rq.held.n, who, day, drop), key = heldKey(rq.held.n, who, day, drop);
+        try { userTodos.reshapeItems((x) => { if (x.id !== rq.todoId || x.status !== 'open' || x.text === line) return false; x.text = line; if (x.i18n) x.i18n = { ...x.i18n, text: key }; return true; }); } catch { }
+        continue;
+      }
+      if (!o.res) n++;
+      try { userTodos.resolveAnswered([o.todoId], o.status === 'approved' ? 'delivered' : 'discarded', { n: o.n }); } catch { }
+    }
+    if (n) notify([]);
+    return n;
   }
   /** Every OPEN access request's hidden pointer back in For you (resurface) → how many came back. The boot reconcile, and
    *  the one-shot 2026-10-closed-access-pointers-hidden (src/server/migrations.js — it runs after the engine started). */

@@ -7886,9 +7886,9 @@ function create(deps = {}) {
     if (opts.also && opts.also.size) {   // r15: the held decision's ONE block holds the chain of every conversation it reads (see billedWake `roads`)
       const convs = [...opts.also].sort();
       const roads = () => { const sc = new Set([sKey]); for (const k of convs) { const eff = wakeEffOf(store.index.peek(k)); const item = eff ? eff.watchers.find((x) => itemIs(x, pk)) : null; const sk = item ? scopeKeyOf(item, rec) : null; if (sk) sc.add(sk); } return { convs, scopes: [...sc].sort() }; };
-      return billedWake({ roads }, (held) => flushScopeNow(rec, source, patternId, pk, sKey, { ...opts, holds: held.holds }));
+      return billedWake({ roads, settle: opts.settle }, (held) => flushScopeNow(rec, source, patternId, pk, sKey, { ...opts, holds: held.holds }));
     }
-    return billedWake({ scopeOf: () => sKey }, () => flushScopeNow(rec, source, patternId, pk, sKey, opts));
+    return billedWake({ scopeOf: () => sKey, settle: opts.settle }, () => flushScopeNow(rec, source, patternId, pk, sKey, opts));
   }
   /** The scope digest's SECTION BODY — reached only through `billedWake` (see `flushScope`). `also` (lane wake-approve-card r13 —
    *  a held decision's Deliver is ONE block, one billed turn): conversation keys that ride THIS block whatever grain wakes their
@@ -7984,12 +7984,13 @@ function create(deps = {}) {
    *  — or, without `pk`, for every watcher holding pending hits — as ONE
    *  wake each (a digest block for a digest window or a boot leftover; a
    *  wake block that says "N in this window" for a coalesced burst). */
-  async function flushPending(rec, convId, { kind = 'coalesce', startedAt = null, pk = null } = {}) {
+  async function flushPending(rec, convId, { kind = 'coalesce', startedAt = null, pk = null, settle = null } = {}) {
     if (stopped) return { ok: false, why: 'stopped' };
     // the read of `pending` happens INSIDE the conversation's serial section
     // (see serialWake): a flush queued behind a direct wake sees what that
     // wake left, never what it was about to carry
-    return billedWake({ conv: `${rec.id}/${convId}` }, async () => {
+    const once = settleOnce(settle);   // r16: under the wake's own chains when it runs one, else still under the conversation's
+    return billedWake({ conv: `${rec.id}/${convId}`, settle: once }, async () => {
       const results = [];
       const en0 = store.index.peek(`${rec.id}/${convId}`);
       const eff0 = wakeEffOf(en0);
@@ -8007,7 +8008,7 @@ function create(deps = {}) {
         if (pendingRoadOf(item.watcher, pend) === 'next-turn') { results.push(await stashPending(rec, convId, item, p, pend)); continue; }
         const n = pend.hits.length + pend.elided;
         const seconds = startedAt ? (now() - startedAt) / 1000 : 0;
-        results.push(await billedWake({ scopeOf: () => scopeFor(rec, convId, p) }, () => wakeNow(rec, convId, pend.hits, {
+        results.push(await billedWake({ scopeOf: () => scopeFor(rec, convId, p), settle: once }, () => wakeNow(rec, convId, pend.hits, {
           elided: pend.elided, fromPending: pend, pk: p,
           digest: kind === 'digest' || kind === 'boot',
           windowMinutes: kind === 'digest' ? (item.watcher.digestMinutes || F.DEFAULT_DIGEST_MINUTES) : Math.max(1, Math.round(seconds / 60)),
@@ -8112,7 +8113,16 @@ function create(deps = {}) {
   // conversation's road scope — and they are taken ONE fixed order: every conversation chain (sorted), then every scope
   // chain (sorted, resolved inside — the order above: conversation, then scope). A scope that moved while the block waited is
   // re-taken (SCOPE_BOUNCE_MAX); `fn` gets the scope chains it HOLDS (`holds`) and reads no conversation outside them.
-  function billedWake({ conv = null, scopeOf = null, roads = null }, fn) {
+  // THE CALLER'S WRITE UNDER THE SAME HOLD (lane wake-approve-card r16 — the r15 acceptance, skep-w2-rehold.mjs: a held
+  // decision put the rows its refused block had not carried back on its card in a write AFTER the block released its chains;
+  // a window flush queued on one of them read the same rows first and billed them, and the card still held them — billed again
+  // at the next Deliver). `settle(result)` runs after `fn`, BEFORE any chain this door took is released (a throw in `fn` settles
+  // `{ok: false}` and is re-thrown; a throw in `settle` is said, never the result's): no wake queued behind sees a state between.
+  function billedWake({ conv = null, scopeOf = null, roads = null, settle = null }, fn0) {
+    const fn = typeof settle !== 'function' ? fn0 : (h) => {
+      const done = async (r) => { try { await settle(r); } catch (err) { log.warn(`[channels] a billed wake's settle failed: ${(err && err.message) || err}`); } return r; };
+      return Promise.resolve().then(() => fn0(h)).then(done, async (err) => { await done({ ok: false, why: (err && err.message) || String(err) }); throw err; });
+    };
     if (typeof roads === 'function') {
       const take = (keys, i, run) => (i < keys.length ? serialWake(keys[i], () => take(keys, i + 1, run)) : run());
       const inside = async () => {
@@ -8134,6 +8144,8 @@ function create(deps = {}) {
     };
     return conv ? serialWake(conv, inner) : inner();
   }
+  /** r16: a caller's `settle` that runs at most once (flushPending hands it to the wake's door and to its own: the innermost hold settles). */
+  const settleOnce = (f) => { if (typeof f !== 'function') return null; let done = false; return async (r) => { if (done) return; done = true; await f(r); }; };
   /** The scope chain of watcher `pk` on this conversation, read NOW (null = the conversation grain, whose chain is its conversation's). */
   const scopeFor = (rec, convId, pk) => { const eff = wakeEffOf(store.index.peek(`${rec.id}/${convId}`)); const item = eff ? eff.watchers.find((x) => itemIs(x, pk)) : null; return item ? scopeKeyOf(item, rec) : null; };
   function wake(rec, convId, freshHits, opts = {}) { return billedWake({ conv: `${rec.id}/${convId}`, scopeOf: () => scopeFor(rec, convId, opts.pk) }, () => wakeNow(rec, convId, freshHits, opts)); }

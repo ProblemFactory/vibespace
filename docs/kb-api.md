@@ -704,6 +704,9 @@ question about another machine is the failure the rule exists to stop.
   a refused block that was not stashed answers `delivered: false`, `n: 0`, `note: 'not delivered now — the messages stay held on the
   card'`. r13's `pending` and the refused `held: true` are gone. The record closes `delivered` only once nothing is left, with `n` =
   what went; a decision ENDED by the system counts every part it dropped over its life (a re-held conversation's earlier part included).
+  **r16:** what comes back onto the card is written before the block lets go of its chains (no window reads it in between); a press a
+  stop cut short is reopened at the next boot — its own card, `status: 'open'`, the count left — or closed `delivered` when it went;
+  `skipped` counts each unreadable entry once per request.
 
 - **P1a — the adapter's own consent flow and options** (design §10.1, §12.4,
   §13; every failure answers `{error, code, detail}` with a status BY CODE:

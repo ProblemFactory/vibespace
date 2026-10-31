@@ -1479,9 +1479,16 @@ try {
   // (c) THE PAGE: the press road (the chat card and the tray) toasts both refusals in the owner's language — who, how many, why
   const UA = read('src/lib/user-todos-actions.js');
   const KEYS10 = ['{agent} is not running — the {n} messages stay held: Deliver once it runs, or Discard them', '{agent} is not woken by this rule now (not in its group, or left out of it) — the {n} messages stay held: Deliver once it is, or Discard them', 'the access they were held under was removed — {n} messages discarded', 'the rule they were held for was removed — {n} messages discarded'];
-  const branch = /if \(held && r && r\.code === 'not-in-effect'\) \{ showToast\(\(?r\.why === 'not-running' \? t\('\{agent\} is not running/.test(UA)   // r15: r13 put the ternary in parentheses (+ droppedWords) — the pin had gone stale on 3928de8bd && /if \(held && r && r\.code === 'rule-gone'\) \{ showToast\(r\.why === 'access-removed' \? t\('the access they were held under was removed/.test(UA);
+  // r15: r13 put the not-in-effect ternary in parentheses (+ droppedWords) — the pin had gone stale on 3928de8bd. r16 (the r15
+  // acceptance, skep-pin18c.cjs): r15 wrote that note MID-LINE, so the rule-gone half after it was comment text — a pin that could
+  // not fall. Both halves are code again, and each is shown able to fall: its branch deleted from a copy ⇒ the pin is false
+  const branchOf = (src) => /if \(held && r && r\.code === 'not-in-effect'\) \{ showToast\(\(?r\.why === 'not-running' \? t\('\{agent\} is not running/.test(src)
+    && /if \(held && r && r\.code === 'rule-gone'\) \{ showToast\(r\.why === 'access-removed' \? t\('the access they were held under was removed/.test(src);
+  const branch = branchOf(UA);
+  const cutRG = UA.replace("if (held && r && r.code === 'rule-gone') {", 'if (false) {'), cutNE = UA.replace("if (held && r && r.code === 'not-in-effect') {", 'if (false) {');
+  const falls = { ruleGone: cutRG !== UA && !branchOf(cutRG), notInEffect: cutNE !== UA && !branchOf(cutNE) };
   const missing = KEYS10.filter((k) => !UA.includes(`t('${k}'`) || !(k in DICT8.zh) || !(k in JA9));
-  ok(branch && !missing.length, `(c) the press road toasts \`not-in-effect\` («${Z(KEYS10[0], { agent: 'Worker', n: 30 })}») and \`rule-gone\` in the owner's language — ${KEYS10.length} keys, each with zh + ja`, J({ branch, missing }));
+  ok(branch && falls.ruleGone && falls.notInEffect && !missing.length, `(c) the press road toasts \`not-in-effect\` («${Z(KEYS10[0], { agent: 'Worker', n: 30 })}») and \`rule-gone\` in the owner's language — ${KEYS10.length} keys, each with zh + ja; the pin FALLS with either branch deleted (beb0cc795: the rule-gone half sat in a comment)`, J({ branch, falls, missing }));
 } catch (e) { ok(false, '⑱ (c) threw on this tree: ' + ((e && e.stack) || e)); }
 
 // ── ⑲ ROUND 11 ──────────────────────────────────────────────────────────────────────────────────────────────────────
