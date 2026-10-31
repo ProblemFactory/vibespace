@@ -20,6 +20,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A restart in the middle of Deliver on held messages now reopens the same card with what was not sent, instead of a second card beside it.
 - A stopped job now counts as cut short only a process killed without its time to stop, not one that got the stop signal while time was left.
 - After Claude Code updated to 2.1.314, the accounts you sign in with a long-lived token are back in the pool.
+- Stopped sessions' windows stay as tiles you can resume; one that cannot reopen says why and how to get the window back, and one desktop can be restored alone.
 
 ### Removed
 - Background jobs no longer read secrets from a plain file (nothing used it) — a job's secret comes from the vault.
