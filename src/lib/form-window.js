@@ -28,7 +28,7 @@
 // Every form gets a HANDLE here (its shape — 'sheet' | 'window' — moves; the shell asks the handle, never the shape).
 import { registerWindowType, svgIcon16 } from './window-types.js';
 import { setFormHost } from './utils.js';
-import { formOpenVerdict, formBox, formMaxDialog, formPlace, formFocusVerdict, formInside, typedLastVerdict, sheetHomeVerdict, BLOCKING_LAYERS } from './form-yield.js'; // PURE: the verdicts (node-read by scripts/test-dialog-yield.mjs)
+import { formOpenVerdict, formBox, formMaxDialog, formPlace, formFocusVerdict, formInside, typedLastVerdict, sheetHomeVerdict, rehostWaitVerdict, BLOCKING_LAYERS } from './form-yield.js'; // PURE: the verdicts (node-read by scripts/test-dialog-yield.mjs)
 import { VC_PHONE_MEDIA } from '../viewport-class.js'; // the phone paths' ONE media list — a crossing into it turns the open forms into sheets
 
 registerWindowType({ type: 'form', icon: svgIcon16('<rect x="2.5" y="2" width="11" height="12" rx="1.5"/><path d="M5 5.5h6M5 8h6M5 10.5h3.5"/>'), label: 'Form', persist: false });
@@ -41,6 +41,7 @@ const blockedNow = () => { try { return [...document.querySelectorAll(BLOCKING_L
  *  its own OK, and a form a script opened while it stood must wait under it, not cover its Delete (round 2's attack (a)). */
 const LAYERED = `${BLOCKING_LAYERS}, .form-sheet`;
 let pressAt = null, typedAt = null, typedEl = null, lastTabAt = 0;
+let pressing = false, pressEnd = 0; // r19: the press a re-host waits for (rehostWaitVerdict)
 const EDIT_KEYS = new Set(['Shift', 'Control', 'Alt', 'Meta', 'CapsLock', 'Backspace', 'Delete', 'Process', 'Dead', 'Compose', 'Unidentified']);
 /** THE PRESS OF THIS TASK (round 3): a token naming whether the person's press landed inside a blocking layer — judged AT the
  *  press; it lives for the task that dispatched it (its handler and that handler's microtasks), a caller that awaits first
@@ -68,6 +69,9 @@ export function installFormHost(app) {
     document.addEventListener('pointerdown', (e) => { if (e.isTrusted) { pressAt = Date.now(); notePress(e); } }, true);
     // (the release is the click's task — a mouse's pointerup and its click, a Space's keyup and its click: the handler that opens a form runs in it)
     document.addEventListener('pointerup', (e) => { if (e.isTrusted) notePress(e); }, true);
+    // r19 (lane needs-card-tail, a cross-fix — rehostWaitVerdict): a press in flight, and when it ended — a crossing waits for it
+    document.addEventListener('pointerdown', (e) => { if (e.isTrusted) pressing = true; }, true);
+    for (const type of ['pointerup', 'pointercancel']) document.addEventListener(type, (e) => { if (e.isTrusted) { pressing = false; pressEnd = Date.now(); } }, true);
     document.addEventListener('keyup', (e) => { if (e.isTrusted && e.key === ' ') notePress(e); }, true);   // (Enter clicks at its keydown: noted above)
     // a COMMAND key (a named key that is not an edit — Enter, Tab, Escape, an arrow, F1… — or a chord) is an act like a press
     document.addEventListener('keydown', (e) => {
@@ -80,9 +84,13 @@ export function installFormHost(app) {
   const sheets = () => [...OPEN].filter((h) => h.mode() === 'sheet');
   // THE CROSSING's first door: src/lib/viewport-switch.js enterPhone calls it before any phone rule runs (the media query's
   // change and a resize below are the second and third — their order against the switch's own listener is not ours)
-  app.formsToSheets = () => { for (const h of [...OPEN]) h.toSheet(); };
+  // r19 (lane needs-card-tail, a cross-fix — .367's ⑫): never a re-host under a press — asked meanwhile, it runs once the press is
+  // over (rehostWaitVerdict), each direction on its own timer
+  const timers = { toSheets: 0, toForms: 0 };
+  const waited = (which, again) => { const ms = rehostWaitVerdict({ pressing, pressEnd, now: Date.now() }); if (ms <= 0) return false; clearTimeout(timers[which]); timers[which] = setTimeout(again, ms); return true; };
+  app.formsToSheets = () => { if (waited('toSheets', () => app.formsToSheets())) return; for (const h of [...OPEN]) h.toSheet(); };
   /** …and back (viewport-switch enterDesktop, a resize, the last blocking layer closed): every sheet whose home is gone re-hosts */
-  app.sheetsToForms = () => { if (sheetHomeVerdict({ phone: phoneNow(), blocked: blockedNow() }) !== 'window') return; for (const h of sheets()) h.toWindow(); };
+  app.sheetsToForms = () => { if (sheetHomeVerdict({ phone: phoneNow(), blocked: blockedNow() }) !== 'window') return; if (waited('toForms', () => app.sheetsToForms())) return; for (const h of sheets()) h.toWindow(); };
   try { phoneMq = window.matchMedia(VC_PHONE_MEDIA); phoneMq.addEventListener('change', (e) => { if (e.matches) app.formsToSheets(); else app.sheetsToForms(); }); } catch { /* no matchMedia: no crossing */ }
   // a resize re-fits every open form window — and on the phone tier re-hosts it as its sheet (the crossing's second door)
   try { window.addEventListener('resize', () => { if (phoneNow()) { app.formsToSheets(); return; } for (const h of [...OPEN]) h.refit(); app.sheetsToForms(); }, { passive: true }); } catch { /* no window: no resize */ }
@@ -101,6 +109,11 @@ export function installFormHost(app) {
     pressToken: () => taskPress,
     open({ id = null, title = '', opener = 'person', from = null } = {}) {
       const wm = app && app.wm;
+      // r19 (lane needs-card-tail, a cross-fix — .367's ⑫: test-automation-keys-chrome left a phone-sized page for 1280×800 and
+      // opened 授权给… inside the crossing's 120 ms settle: app.isMobile was still the phone's, the form opened as a SHEET, and the
+      // settle re-hosted it into its window under the next press): A STALE CLASS IS NEVER READ AT AN OPEN — a crossing seen and
+      // not yet settled is settled now, so the form stands where the page is, never where it was
+      try { if (app && app._viewportSwitch && typeof app._viewportSwitch.pending === 'function' && app._viewportSwitch.pending()) app._viewportSwitch.settleNow(); } catch { /* the switch's own failure is its own — the verdict reads what is */ }
       const phone = !wm || phoneNow(), blocked = blockedNow();
       // (the field typed into must still HOLD the keys — a form the person typed in and closed protects nothing)
       const typing = typedLastVerdict({ typedAt, pressAt, now: Date.now() }) && !!typedEl && typedEl.isConnected && document.activeElement === typedEl;

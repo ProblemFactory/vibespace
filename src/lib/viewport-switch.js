@@ -110,5 +110,7 @@ export function installViewportSwitch(app) {
   window.addEventListener('resize', kick);
   // a page BORN in the regular class: its list column's head now (the switch below only acts on a crossing)
   if (app._vc === 'regular') { try { app.sidebar?.setRegularMode?.(true); } catch (e) { console.warn('[viewport] the list column:', e); } }
-  return { settleNow: () => { clearTimeout(timer); settle(); } };
+  // `pending` (lane needs-card-tail r19, for the form host): the class the page acts on is stale — a crossing seen and not yet
+  // settled, or one the viewport already made and no resize has told yet (read fresh: the same reading the settle makes)
+  return { settleNow: () => { clearTimeout(timer); settle(); }, pending: () => timer !== null || readViewportClass(app._vc) !== app._vc };
 }

@@ -1449,12 +1449,25 @@ export function installUserTodos(app) {
     if (annStack.style.visibility !== (over ? 'hidden' : '')) annStack.style.visibility = over ? 'hidden' : '';
   };
   /** r14 (MINOR D (2)): a dialog / a form announces its open (utils announceModal) and a menu / a popover / the desktop picker
-   *  is a <body> child — the stack asks AT the open (and once the frame after, laid out), never a second later over it */
-  let annMO = null;
-  const annSoon = () => { if (!annStack) return; annAside(); requestAnimationFrame(() => annAside()); };
+   *  is a <body> child — the stack asks AT the open (and once the frame after, laid out), never a second later over it.
+   *  r19 (.367 — test-automation-keys-chrome ⑫ red on the train tip, ④'s class: the open's own ask measured a form window
+   *  before the form host had sized and placed it, and what came after — the window sized to its filled body, its picker list
+   *  opened, a form window moved or RAISED under the stack — asked nothing until the 1 s tick, so a press inside that second
+   *  landed on an announce card): THE WINDOW LAYER ASKS TOO — `#workspace`'s windows coming and going, and each window's own
+   *  box and stacking (its style / class: placed, sized, raised, shown) ask the stack at that moment, the frame after once */
+  let annMO = null, annLayerMO = null, annRaf = 0;
+  const annSoon = () => { if (!annStack) return; annAside(); if (!annRaf) annRaf = requestAnimationFrame(() => { annRaf = 0; annAside(); }); };
+  const ANN_WIN = { attributes: true, attributeFilter: ['style', 'class', 'hidden'] };
   const annWatch = (on) => {
-    if (on && !annMO && typeof MutationObserver === 'function') { annMO = new MutationObserver(annSoon); annMO.observe(document.body, { childList: true }); }
-    else if (!on && annMO) { annMO.disconnect(); annMO = null; }
+    if (on && !annMO && typeof MutationObserver === 'function') {
+      annMO = new MutationObserver(annSoon); annMO.observe(document.body, { childList: true });
+      const layer = document.getElementById?.('workspace');
+      if (layer) {
+        annLayerMO = new MutationObserver((recs) => { for (const r of recs) for (const n of r.addedNodes || []) if (n.nodeType === 1 && n.parentNode === layer) annLayerMO.observe(n, ANN_WIN); annSoon(); });
+        annLayerMO.observe(layer, { childList: true });
+        for (const w of layer.children) annLayerMO.observe(w, ANN_WIN);
+      }
+    } else if (!on && annMO) { annMO.disconnect(); annMO = null; annLayerMO?.disconnect(); annLayerMO = null; }
   };
   document.addEventListener(MODAL_OPEN_EVENT, annSoon);
   const annDrop = (id) => { const c = annCards.get(id); if (c) c.el.remove(); annCards.delete(id); };

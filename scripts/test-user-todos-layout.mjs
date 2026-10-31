@@ -2036,7 +2036,7 @@ console.log('㉜ THE ANNOUNCE STANDS CLEAR OF A WINDOW\'S OWN CONTROLS · IT JUD
   let asks = 0;
   class MO { constructor(fn) { this.fn = fn; obs.push(this); } observe(t, o) { this.t = t; this.o = o; } disconnect() { this.off = true; } }
   const body = { body: 1 };
-  const W = run(slice('  let annMO = null;', '  const annDrop = (id) =>'), 'annWatch, annSoon', { annStack: { s: 1 }, annAside: () => { asks++; }, requestAnimationFrame: (f) => f(), MutationObserver: MO, MODAL_OPEN_EVENT: U.MODAL_OPEN_EVENT,
+  const W = run(slice('  let annMO = null', '  const annDrop = (id) =>'), 'annWatch, annSoon', { annStack: { s: 1 }, annAside: () => { asks++; }, requestAnimationFrame: (f) => f(), MutationObserver: MO, MODAL_OPEN_EVENT: U.MODAL_OPEN_EVENT,
     document: { body, addEventListener: (type, fn) => heard.push([type, fn]) } });
   let atOpen = -1, atMut = -1, off = false;
   if (!W.threw) {
@@ -2466,6 +2466,55 @@ console.log('㉝ THE STRIP SAYS WHAT ITS ANSWERS DECIDE ON · A HELD STACK KEEPS
     `r18: a growth that would cross the screen's top (C3 → 590 px) ⇒ the fold rung as before (${J(gw2.x1)}, «${gw2.said}»), the read card where it was`, gw2);
   const mExt = PL16.replace('const inExt = (j) => !!ext && (j > at ? kids.slice(at + 1, j + 1) : kids.slice(j, at)).some((e) => fresh.includes(e));', 'const inExt = () => !!ext;'), gwx = growOf(mExt + LY16, 88);
   ok(mExt !== PL16 && !gwx.threw && J(gwx.x1) !== J(gw.x1), `CONTROL (r18): the mutant whose extent bounds every held placement folds the grown card (${J(gwx.x1)}) — the leg goes red`, gwx);
+  console.log('㊲ THE WINDOW LAYER ASKS THE STACK AT ONCE (lane needs-card-tail r19 — .367: test-automation-keys-chrome ⑫ ALL AGENTS red on the train tip, ④\'s class: the open\'s own ask measured a form window before its host sized and placed it; the window sized to its filled body, its picker list opened, a form window moved or RAISED under the stack asked nothing until the 1 s tick — a press inside that second landed on an announce card)');
+  // A — THE WIRING: the REAL annWatch / annSoon over a stub MutationObserver and a window layer (`#workspace`) holding one window
+  const WATCH19 = slice('  let annMO = null', '  const annDrop = (id) =>') || '';
+  const layerOf = (src) => {
+    const obs = []; let asks = 0;
+    class MO2 { constructor(fn) { this.fn = fn; this.on = []; obs.push(this); } observe(t, o) { this.on.push([t, o]); } disconnect() { this.off = true; } }
+    const layer = { children: [] }, w1 = { nodeType: 1, id: 'w1', parentNode: layer }; layer.children.push(w1);
+    const W2 = run(src, 'annWatch, annSoon', { annStack: { s: 1 }, annAside: () => { asks++; }, requestAnimationFrame: (f) => { f(); return 0; }, MutationObserver: MO2, MODAL_OPEN_EVENT: U.MODAL_OPEN_EVENT,
+      document: { body: { body: 1 }, addEventListener() {}, getElementById: (id) => (id === 'workspace' ? layer : null) } });
+    if (W2.threw) return { threw: W2.threw };
+    W2.annWatch(true);
+    const lm = obs.find((o) => o.on.some(([t, o2]) => t === layer && o2 && o2.childList));
+    if (!lm) return { observed: false, observers: obs.map((o) => o.on.map(([t]) => (t === layer ? 'layer' : t && t.body ? 'body' : 'other'))) };
+    const watches = (w) => lm.on.some(([t, o2]) => t === w && !!o2 && !!o2.attributes && (o2.attributeFilter || []).includes('style') && (o2.attributeFilter || []).includes('class'));
+    const w2 = { nodeType: 1, id: 'w2', parentNode: layer };
+    asks = 0; lm.fn([{ type: 'childList', target: layer, addedNodes: [w2] }]); const atAdd = asks;   // a form window created (its host sizes and places it in the same task)
+    asks = 0; lm.fn([{ type: 'attributes', target: w2, attributeName: 'style', addedNodes: [] }]); const atStyle = asks;   // …sized to its body, its list opened, moved, raised
+    W2.annWatch(false);
+    return { observed: true, w1: watches(w1), w2: watches(w2), atAdd, atStyle, off: !!lm.off };
+  };
+  const lw = layerOf(WATCH19), lwx = layerOf(WATCH19.replace("const layer = document.getElementById?.('workspace');", 'const layer = null;'));
+  ok(!lw.threw && lw.observed && lw.w1 && lw.w2 && lw.atAdd === 2 && lw.atStyle === 2 && lw.off,
+    `RED-able (r19 — 1c4261dcc watched <body> and the open event only: ${J(lwx.observers || lwx)}): the window layer is watched while the stack stands — a window there (${lw.w1}) and one that comes (${lw.w2}) by their style / class; a window added asks the stack at once and the frame after (${lw.atAdd}), a window sized, moved or raised the same (${lw.atStyle}); the watch goes with the stack (${lw.off})`, lw);
+  ok(WATCH19.includes("const layer = document.getElementById?.('workspace');") && !lwx.threw && !lwx.observed, `CONTROL (r19): the mutant that does not watch the window layer asks nothing when a window comes — the leg goes red`, lwx);
+  // B — WHAT IT DOES: the REAL annAside + annWatch + annSoon — a form window (its .dialog-form root) comes up under the stack and
+  // in front ⇒ the stack steps aside AT ONCE (no tick); a window raised over the form ⇒ the stack shows again; the form raised ⇒ aside
+  const tags19 = (sel) => String(sel).split(',').map((x) => x.trim()), SR19 = box(880, 360, 1260, 560), OVER19 = box(700, 200, 1280, 700);
+  const ASIDE19 = slice('  const ANN_ASIDE = ', '  /** r14 (MINOR D (2))') || '';
+  const stepOf = (src) => {
+    let mo = null; const layer = { children: [] };
+    class MO3 { constructor(fn) { this.fn = fn; this.on = []; if (!mo || this.fn !== mo.fn) { if (!mo) mo = []; mo.push(this); } } observe(t, o) { this.on.push([t, o]); } disconnect() { this.off = true; } }
+    const st = { isConnected: true, style: { visibility: '' }, contains: (e) => e === st || e === card, getBoundingClientRect: () => SR19 }, card = { card: 1 };
+    const els = [], front = { front: 1 }; let inFront = true;
+    const form = { sel: '.dialog-form', getBoundingClientRect: () => OVER19, checkVisibility: () => true, getClientRects: () => [OVER19] }, kid = { kid: 1 }; form.contains = (x) => x === form || x === kid; const win = { nodeType: 1, parentNode: layer };
+    const doc = { body: { body: 1 }, addEventListener() {}, getElementById: (id) => (id === 'workspace' ? layer : null), querySelectorAll: (sel) => els.filter((e) => tags19(sel).includes(e.sel)), elementsFromPoint: () => [card, ...(inFront ? [kid, form] : [front, form])] };
+    const A3 = run(src, 'annWatch, annAside', { annStack: st, DIALOG_ROOTS: '.dialog-overlay, .dialog-form', document: doc, MutationObserver: MO3, requestAnimationFrame: () => 1, MODAL_OPEN_EVENT: U.MODAL_OPEN_EVENT });
+    if (A3.threw) return { threw: A3.threw };
+    A3.annWatch(true);
+    const lm = (mo || []).find((o) => o.on.some(([t]) => t === layer));
+    const fire = (rec) => { if (lm) lm.fn([rec]); };
+    const v0 = st.style.visibility;
+    layer.children.push(win); els.push(form); fire({ type: 'childList', target: layer, addedNodes: [win] }); const vOpen = st.style.visibility;
+    inFront = false; fire({ type: 'attributes', target: win, attributeName: 'style', addedNodes: [] }); const vCovered = st.style.visibility;
+    inFront = true; fire({ type: 'attributes', target: win, attributeName: 'style', addedNodes: [] }); const vRaised = st.style.visibility;
+    return { v0, vOpen, vCovered, vRaised };
+  };
+  const sp = stepOf(ASIDE19 + WATCH19), spx = stepOf(ASIDE19 + WATCH19.replace("const layer = document.getElementById?.('workspace');", 'const layer = null;'));
+  ok(!sp.threw && sp.v0 === '' && sp.vOpen === 'hidden' && sp.vCovered === '' && sp.vRaised === 'hidden' && !spx.threw && spx.vOpen === '',
+    `RED-able (r19 — 1c4261dcc: the stack stayed over the new form until the next 1 s tick, «${spx.vOpen}»): a form window comes up under the stack, in front ⇒ it steps aside at once («${sp.vOpen}»); a window raised over the form ⇒ the stack shows again («${sp.vCovered}»); the form raised ⇒ aside («${sp.vRaised}») — every one at that moment, no tick`, { sp, spx });
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);
