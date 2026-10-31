@@ -81,7 +81,7 @@ function scopeEventsEnd(atGo, atEnd) {
 function leftWords(l) {
   const n = l.n || 0, es = (k) => (k === 1 ? '' : 'es');
   const hhmm = (ms) => { const d = new Date(ms); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
-  const sh = l.short ? ` (${l.short} process${es(l.short)} got less than the full grace)` : ''; // round 11: killed, no SIGTERM came
+  const sh = l.short ? ` (${l.short} process${es(l.short)} got less than the full grace)` : ''; // round 12: killed without its grace
   if (l.cleared) return `it left ${n} process${es(n)} running — stopped at ${hhmm(l.cleared)}${sh}`;
   if (l.gone) return `it left ${n} process${es(n)} running — ${n === 1 ? 'it' : 'they'} had already ended by ${hhmm(l.gone)}`;
   if (l.kept) return `it left ${n} process${es(n)} running — kept: a service's own until it is stopped or started again${l.escaped ? ` (${l.escaped} outside its group)` : ''}${l.recorded ? ` (${l.recorded} of ${n} recorded)` : ''}`;
@@ -339,7 +339,7 @@ function whyOf(r) {
   if (r.by === 'rlimit-data') return before ? `${before} — RLIMIT_DATA on the job instead` : 'RLIMIT_DATA on the job';
   return `this host cannot enforce a bound (${before || 'no rung offered'})`;
 }
-let rung = null, child = null, proven = false, boundRec = null, stopping = null, exited = false;
+let rung = null, child = null, proven = false, boundRec = null, stopping = null, exited = false, graceUp = false; // graceUp (round 12): our stop timer fired
 let scopeDir = '', eventsAtGo = null;
 let keeper = null, keeperSaid = null; // < 253 (round 6): the keeper's identity {pid, start} — said by the gate on fd 3
 
@@ -608,15 +608,18 @@ const termKey = ([pid, st]) => `${pid}:${st}`;
 // round 11: THIS TABLE IS WHO HEARD THE STOP — every writer of it goes through it: the engine's group signal (marked), our own
 // SIGTERM at the stop step and at the drain; what got less than the full grace is what we KILLED that is not in it. One set, never
 // a copy, never a clock (r10 judged «after the stop» by 10 % of the grace — the cut's red; r10c read a copy taken at the end of the
-// stop step: a leftover the drain SIGTERMed 0.45 s into a 10 s grace, ended at once, was counted cut short)
-const termOnce = (p, sig = 'SIGTERM') => { if (termed.has(termKey(p)) || !same(p)) return false; termed.set(termKey(p), Date.now()); try { process.kill(p[0], sig); return true; } catch { return false; } };
+// stop step: a leftover the drain SIGTERMed 0.45 s into a 10 s grace, ended at once, was counted cut short). Round 12: EACH ENTRY
+// NAMES ITS PASS — 'stop' (the stop step), 'drain' (the drain, with grace left: a wait follows), 'kill' (the drain once the grace is
+// up: its SIGTERM and its SIGKILL in the same pass, nothing between — r11 took that one for heard: a helper forked after the stop
+// step, SIGTERMed at 2051 ms of a 2 s grace and killed the same millisecond, was never said)
+const termOnce = (p, pass = 'stop') => { if (termed.has(termKey(p)) || !same(p)) return false; termed.set(termKey(p), { at: Date.now(), pass }); try { process.kill(p[0], 'SIGTERM'); return true; } catch { return false; } };
 const rowOf = (pid) => { const r = pid ? statOf(pid) : null; return r && r[0] !== 'Z' ? [Number(pid), Number(r[19]), Number(r[2])] : null; }; // [pid, start, pgid]
 // round 10: THE MAIN IS THE HANDLE WE SPAWNED — never a pid read again: signalled only while the handle is live (exitCode and
 // signalCode null: not reaped, so its pid is no other process's), nothing after its 'exit' (r9 re-read /proc/<pid>/stat after
 // the reap — a Stop racing the job's own end, a signal to us while we drained: whoever held that pid since got the job's stop,
 // recorded «mainBy wrapper»)
 const mainLive = () => !!child && !exited && child.exitCode === null && child.signalCode === null;
-const termMain = (p, sig) => { if (termed.has(termKey(p)) || !mainLive()) return false; termed.set(termKey(p), Date.now()); try { process.kill(child.pid, sig); return true; } catch { return false; } };
+const termMain = (p, sig) => { if (termed.has(termKey(p)) || !mainLive()) return false; termed.set(termKey(p), { at: Date.now(), pass: 'stop' }); try { process.kill(child.pid, sig); return true; } catch { return false; } };
 // round 10: the manager's kill of the scope is a delivery too — recorded, once per stop step (r9 sent a natural end's leftovers
 // their SIGTERM by it unrecorded: a stop while they drained SIGTERMed them again)
 let scopeSent = 0;
@@ -649,11 +652,11 @@ function onStop(sig, at, by) {
   // by one through the same table (round 4's `systemctl kill` of the scope sent the stop AGAIN to all the engine's signal had
   // reached: the main heard it twice, 3 ms apart); a scope whose list cannot be read, the manager's kill (as before)
   const main = mainLive() ? rowOf(child.pid) : null; // the main first — its own stat names its group (no walk before it hears the stop)
-  if (main && by === 'engine' && main[2] === process.pid) termed.set(termKey(main), at);
+  if (main && by === 'engine' && main[2] === process.pid) termed.set(termKey(main), { at, pass: 'stop' });
   mainBy = main ? (termed.has(termKey(main)) ? 'engine' : termMain(main, sig) ? 'wrapper' : '') : child && !mainLive() ? 'ended' : '';
   const listed = scoped() ? scopeRows() : null;
   const rows = scoped() ? listed || [] : groupLeft().map(([p, st]) => [p, st, process.pid]); // our group's: its pgid ours
-  if (by === 'engine') for (const p of rows) if (p[2] === process.pid && !termed.has(termKey(p))) termed.set(termKey(p), at);
+  if (by === 'engine') for (const p of rows) if (p[2] === process.pid && !termed.has(termKey(p))) termed.set(termKey(p), { at, pass: 'stop' });
   const who = by === 'engine' ? `the engine signalled its process group${mainBy === 'wrapper' ? '; its main process had left that group — the wrapper signals it' : ''}`
     : by === 'intent' ? "the engine's stop never reached its group — the wrapper signals it"
       : by === 'alone' ? "the engine's stop reached the wrapper alone, already stopping what its job left — the wrapper signals the rest, once"
@@ -668,7 +671,7 @@ function onStop(sig, at, by) {
     // heard the stop with us (the engine signals it) — its grace runs from the stop; a SERVICE's processes that left the group
     // (its mark) hear it NOW, with the main — round 6 signalled them only once the main ended, against what was left of the grace
     if (keeps) for (const p of escapedOf()) termOnce(p);
-    const t = setTimeout(() => { if (exited) return; if (!forced) forced = `it did not end${on} in ${stopMs / 1000} s — its process group was killed`; try { child.kill('SIGKILL'); } catch { } }, left); t.unref?.();
+    const t = setTimeout(() => { graceUp = true; if (exited) return; if (!forced) forced = `it did not end${on} in ${stopMs / 1000} s — its process group was killed`; try { child.kill('SIGKILL'); } catch { } }, left); t.unref?.();
     return;
   }
   const t = setTimeout(() => { if (!exited) forceScope(`it did not end${on} in ${stopMs / 1000} s — its scope was killed`); }, left); t.unref?.();
@@ -705,7 +708,7 @@ async function drainScope() {
     const rows = procs.map((p) => [Number(p), Number((statOf(p) || [])[19])]).filter((r) => r[1] > 0).slice(0, 64);
     return { left: { n: left, kept: true, pids: rows, boot: bootId(), ...(rows.length < left ? { recorded: rows.length } : {}) }, scopeEmpty: false };
   }
-  if (left) { const rows = scopeRows(); if (rows) for (const p of rows) termOnce(p); else await scopeTerm('SIGTERM'); } // round 10: recorded, one by one
+  if (left) { const rows = scopeRows(); if (rows) for (const p of rows) termOnce(p, 'drain'); else await scopeTerm('SIGTERM'); } // round 10: recorded, one by one
   const deadline = (stopping ? stopAt : Date.now()) + stopMs;
   while (procsOf(scopeDir).length && Date.now() < deadline) await nap(25);
   const still = procsOf(scopeDir).length, s = still === 1 ? '' : 'es', was = still === 1 ? 'was' : 'were';
@@ -763,11 +766,15 @@ async function drainGroup() {
   // Round 8: A STOP HAS ONE CLOCK — its grace runs from the stop, for every process: one first seen at the drain gets what is LEFT
   // of it, never a fresh grace (round 7's per-process deadline ran to twice the grace, past the engine's kill step a second after
   // it: the engine killed us mid-drain — no exit.json, a stopped service's escapee alive for ever, unsaid). The engine's step is
-  // the backstop; our end comes first. A natural end's leftovers (no stop): the grace from their SIGTERM, now
-  for (const p of left) termOnce(p);
-  const deadline = stopping ? stopAt + stopMs : Math.max(0, ...left.map((p) => termed.get(termKey(p)) || 0)) + stopMs;
+  // the backstop; our end comes first. A natural end's leftovers (no stop): the grace from their SIGTERM, now. Round 12: THE
+  // GRACE IS UP (our own timer fired at it, or its deadline passed) ⇒ this is the KILL pass — what hears its SIGTERM only now is
+  // killed in it, recorded 'kill'; with grace left, 'drain' — and a wait always follows it (one nap at least: never a 'drain'
+  // SIGTERM with its SIGKILL straight after)
+  const late = !!stopping && (graceUp || Date.now() >= stopAt + stopMs);
+  for (const p of left) termOnce(p, late ? 'kill' : 'drain');
+  const deadline = stopping ? stopAt + stopMs : Math.max(0, ...left.map((p) => termed.get(termKey(p))?.at || 0)) + stopMs;
   let live = left.filter(same);
-  while (live.length && Date.now() < deadline) { await nap(25); live = live.filter(same); }
+  if (!late && live.length) do { await nap(25); live = live.filter(same); } while (live.length && Date.now() < deadline);
   // by force: the group once more and a stopped service's marked processes — rescanned until a pass finds none (one that forks on
   // its SIGTERM leaves no child behind), at most three passes
   const killed = new Set();
@@ -782,8 +789,10 @@ async function drainGroup() {
   // what got less than the full grace — OF WHAT IT LEFT (round 10c: r10 counted every SIGTERM of the run, one that ended before
   // the drain too — 4 of 3). Round 11: what we KILLED that NO step reached with SIGTERM (the stop step's, the drain's — the one
   // table): it only ever got SIGKILL. One the drain SIGTERMed heard the stop — what was left of its grace was its to use, ended on
-  // it or not — never counted (r10c counted it: «1 process got less than the full grace» on a stop that cut nothing)
-  const short = stopping ? [...killed].filter((k) => !termed.has(k)).length : 0;
+  // it or not — never counted (r10c counted it: «1 process got less than the full grace» on a stop that cut nothing). Round 12:
+  // KILLED WITHOUT ITS GRACE — never termed, or termed in the KILL pass (its SIGTERM and SIGKILL together); one termed in an
+  // earlier pass (the stop step's, the drain's with grace left) had its grace. A state the table holds — no clock in the count
+  const short = stopping ? [...killed].filter((k) => { const t = termed.get(k); return !t || t.pass === 'kill'; }).length : 0;
   if (mine) return { left: { n: all, ...kept, ...(all > kept.pids.length && !kept.recorded ? { recorded: kept.pids.length } : {}), cleared: Date.now(), ...(short ? { short } : {}) } }; // recorded the way an end records them — and stopped with it
   return { left: { n: all, ...(still ? { force: true } : {}), ...(outside.length ? { escaped: outside.length } : {}), ...(short ? { short } : {}) } };
 }

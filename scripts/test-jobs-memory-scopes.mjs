@@ -27,7 +27,9 @@
 //            ㊱ at 0.1 s too — what got less than the full grace is counted OF WHAT IT LEFT, never more than it left; ROUND 11:
 //            ㊾ A STOP HEARD IS A STOP HEARD — what got less than the full grace is what was KILLED that no SIGTERM reached (the
 //            stop step's or the drain's): a helper the drain SIGTERMs, ended at once, is not counted; an escapee killed with no
-//            SIGTERM ever is (㊱: 1 of its 3). BY STATE, NEVER BY THE BOX'S SPEED (the .364 CI mirror red twice at load ~4; one
+//            SIGTERM ever is; ROUND 12: KILLED WITHOUT ITS GRACE — ㊾ late-killed: SIGTERMed by the drain once the grace is up
+//            and killed in that pass is counted (the termed table names each SIGTERM's pass); ㊱ asserts 0 ≤ short ≤ n, never the
+//            count a fork race decides. BY STATE, NEVER BY THE BOX'S SPEED (the .364 CI mirror red twice at load ~4; one
 //            core at 25 % here): ㊶ ㊻ the job ends on the leg's word after its intent; ㊺ ㊻ a cleanup ends on the leg's word after
 //            the second stop (the wrapper's own «stop:» line); ㉓ ㉔ ㉖ the stop's clear awaited (the engine's own promise); ⑪ the
 //            exit record says «by its own hand» (no 0.6 s ceiling) — a wait's cap is a hang guard, never a verdict
@@ -1004,8 +1006,8 @@ leg('§3 REAL ㊱ A STOP HAS ONE CLOCK — a pod\'s service whose main is deaf t
     return { grace, step, cutByEngine: !!(cut && cut.alive && !cut.exit), termIn: terms.length ? terms[0] - t0 : -1, deadIn: deadAt ? deadAt - t0 : -1, exitIn: exitAt ? exitAt - t0 : -1, goneIn: goneAt ? goneAt - t0 : -1, escAlive, stopBy: ex.stopBy || null, left: ex.left ? { ...ex.left, pids: undefined } : null, end: (snap.run && snap.run.endWords) || '' };
   };
   for (const r of await Promise.all([100, 400, 2000, 10000].map(one))) {
-    ok(r.exitIn > 0 && r.goneIn > 0 && !r.cutByEngine && !r.escAlive && r.termIn >= 0 && r.deadIn >= r.grace * 0.9 && r.stopBy === 'engine' && !!r.left && r.left.cleared > 0 && r.left.escaped >= 1 && r.left.short === 1 && r.left.short < r.left.n && /\(1 process got less than the full grace\)$/.test(r.end),
-      `grace ${r.grace / 1000} s, the engine's kill step at ${r.step / 1000} s: the escapee's SIGTERM ${r.termIn} ms after the stop (with the main), its end ${r.deadIn} ms; exit.json seen at ${r.exitIn} ms, the wrapper gone (seen) at ${r.goneIn} ms — the engine's kill step never reached it alive before its record (by order: ${r.cutByEngine ? 'CUT' : 'never cut'}); «${r.end}» (e7147b71 at 2 s and 10 s: no exit.json, the escapee alive at the end; 63a311ad0: «short 4» of n 3 — at 0.1 s always, at 0.4 s once the scan passes 40 ms; be5813c43: «2 processes» — the child the drain SIGTERMed counted)`, r);
+    ok(r.exitIn > 0 && r.goneIn > 0 && !r.cutByEngine && !r.escAlive && r.termIn >= 0 && r.deadIn >= r.grace * 0.9 && r.stopBy === 'engine' && !!r.left && r.left.cleared > 0 && r.left.escaped >= 1 && (r.left.short || 0) >= 0 && (r.left.short || 0) <= r.left.n && (r.left.short ? new RegExp(`it left ${r.left.n} processes running — stopped at \\d\\d:\\d\\d \\(${r.left.short} process${r.left.short === 1 ? '' : 'es'} got less than the full grace\\)$`) : new RegExp(`it left ${r.left.n} processes running — stopped at \\d\\d:\\d\\d$`)).test(r.end),
+      `grace ${r.grace / 1000} s, the engine's kill step at ${r.step / 1000} s: the escapee's SIGTERM ${r.termIn} ms after the stop (with the main), its end ${r.deadIn} ms; exit.json seen at ${r.exitIn} ms, the wrapper gone (seen) at ${r.goneIn} ms — the engine's kill step never reached it alive before its record (by order: ${r.cutByEngine ? 'CUT' : 'never cut'}); all of it stopped and said — ${r.left ? `short ${r.left.short || 0} of n ${r.left.n}` : 'no record'} (round 12: 0 ≤ short ≤ n, the words naming that count — the count itself is a fork race: the escapee's sh forks its next sleep, or not, between the drain's SIGTERM and its SIGKILL); «${r.end}» (e7147b71 at 2 s and 10 s: no exit.json, the escapee alive at the end; 63a311ad0: «short 4» of n 3 — at 0.1 s always, at 0.4 s once the scan passes 40 ms)`, r);
     ratioRow(ok, `㊱ at ${r.grace / 1000} s: the escapee's SIGTERM < 300 ms after the stop`, r.termIn >= 0 && r.termIn < 300, `grace ${r.grace / 1000} s: the escapee heard the stop WITH the main — its SIGTERM ${r.termIn} ms after it (< 300 ms: a wall-clock ratio)`, r);
   }
 });
@@ -1016,19 +1018,24 @@ leg('§3 REAL ㊾ A STOP HEARD IS A STOP HEARD — what got less than the full g
   const ours = (pid, dir) => { try { return fs.readFileSync(`/proc/${pid}/cmdline`, 'latin1').includes(dir); } catch { return false; } };
   const pidIn = (f) => { try { return Number(fs.readFileSync(f, 'utf8')) || 0; } catch { return 0; } };
   const termsIn = (f, t0) => { try { return fs.readFileSync(f, 'utf8').trim().split('\n').filter(Boolean).map((l) => Number(l) - t0); } catch { return []; } };
-  const one = async (how) => { // late-task / late-service: the drain's SIGTERM ends the helper at once; deaf: an escapee started during the drain
-    const dir = scratch(), grace = 10000, kind = how === 'late-task' ? 'task' : 'service', go = path.join(dir, 'go'); // the production grace
+  const one = async (how) => { // late-task / late-service: the drain's SIGTERM ends the helper at once; deaf: an escapee started during the drain; late-killed: the helper first SIGTERMed once the grace is up
+    const dir = scratch(), grace = 10000, kind = how === 'late-task' || how === 'late-killed' ? 'task' : 'service', go = path.join(dir, 'go'); // the production grace
     const hPid = path.join(dir, 'helper.pid'), hTerm = path.join(dir, 'helper.term'), xPid = path.join(dir, 'esc.pid'), xTerm = path.join(dir, 'esc.term');
     // each notes every SIGTERM it hears (ms). The escapee: its own session (outside the group, the job's mark in its environ), never
     // ends on one. The helper: the late one ends on it; the deaf one starts the escapee HALF the grace after it, while the drain
     // waits on it — seconds past the drain's own scans, seconds before its kill (0.6 s: under load the drain's first scan ran at
     // 0.7 s and found it — SIGTERMed, rightly not counted)
     const X = js(dir, 'esc.js', `const fs=require('fs');process.on('SIGTERM',()=>fs.appendFileSync(${JSON.stringify(xTerm)},Date.now()+'\\n'));fs.writeFileSync(${JSON.stringify(xPid)},String(process.pid));setInterval(()=>{},1e5);`);
-    const H = js(dir, 'helper.js', `const fs=require('fs');process.on('SIGTERM',()=>{fs.appendFileSync(${JSON.stringify(hTerm)},Date.now()+'\\n');${how === 'deaf' ? `setTimeout(()=>require('child_process').spawn(process.execPath,[${JSON.stringify(X)}],{detached:true,stdio:'ignore'}).unref(),${grace / 2})` : 'process.exit(0)'}});fs.writeFileSync(${JSON.stringify(hPid)},String(process.pid));setInterval(()=>{},1e5);`);
+    const H = js(dir, 'helper.js', `const fs=require('fs');process.on('SIGTERM',()=>{fs.appendFileSync(${JSON.stringify(hTerm)},Date.now()+'\\n');${how === 'deaf' ? `setTimeout(()=>require('child_process').spawn(process.execPath,[${JSON.stringify(X)}],{detached:true,stdio:'ignore'}).unref(),${grace / 2})` : how === 'late-killed' ? '' : 'process.exit(0)'}});fs.writeFileSync(${JSON.stringify(hPid)},String(process.pid));setInterval(()=>{},1e5);`);
     // late: the main's TERM trap starts the helper once the stop step is OVER (the leg's go, given at the wrapper's own «stop:»
     // line — written after its group scan: never a 0.3 s guess), waits for its handler (the pid file) and ends — what it left is
     // first seen at the drain; deaf: the helper runs from the start, the main ends on the stop
-    const argv = how === 'deaf' ? ['sh', '-c', `${NODE} ${H} & echo ready; exec sleep 60`]
+    // round 12, late-killed: a node main DEAF to the stop starts the helper once the stop step is over (the same go) and runs on —
+    // the wrapper kills it at the grace; the helper (it notes its SIGTERM, never ends on one) is first SIGTERMed by the drain with
+    // the grace UP and killed in that same pass — no grace between (never a sleep child: one that dies on the SIGTERM before its
+    // SIGKILL, or not, would make the count a race)
+    const M = how === 'late-killed' ? js(dir, 'main.js', `const fs=require('fs');let once=false;process.on('SIGTERM',()=>{if(once)return;once=true;const g=setInterval(()=>{if(!fs.existsSync(${JSON.stringify(go)}))return;clearInterval(g);require('child_process').spawn(process.execPath,[${JSON.stringify(H)}],{stdio:'ignore'})},20)});console.log('ready');setInterval(()=>{},1e5);`) : '';
+    const argv = how === 'late-killed' ? [NODE, M] : how === 'deaf' ? ['sh', '-c', `${NODE} ${H} & echo ready; exec sleep 60`]
       : ['sh', '-c', `trap 'while [ ! -e ${go} ]; do sleep 0.02; done; ${NODE} ${H} & while [ ! -s ${hPid} ]; do sleep 0.02; done; exit 0' TERM; echo ready; sleep 60 & wait $!`];
     const E = engineIn(dir)({ memoryRungs: ['rlimit-data'], memorySample: { stopMs: grace } }); // ONE grace: the wrapper's and the engine's
     const j = E.jobs.get(E.create({ kind, name: `heard-${how}`, cmd: { argv }, memoryMb: 1024, ...(kind === 'service' ? { restart: 'never' } : {}), owner }, caller).job.id);
@@ -1045,7 +1052,7 @@ leg('§3 REAL ㊾ A STOP HEARD IS A STOP HEARD — what got less than the full g
     stopEngine(E);
     return r;
   };
-  const [T, S, D] = await Promise.all(['late-task', 'late-service', 'deaf'].map(one));
+  const [T, S, D, K] = await Promise.all(['late-task', 'late-service', 'deaf', 'late-killed'].map(one));
   for (const r of [T, S]) {
     ok(r.helperTerms.length === 1 && !r.helperAlive && !r.forced && !!r.left && r.left.n === 1 && !r.left.short && !r.left.force && !/less than the full grace/.test(r.end)
       && (r.how === 'late-task' ? /the job left 1 process running — it was stopped; to keep a daemon, run it as a service job$/ : /it left 1 process running — stopped at \d\d:\d\d$/).test(r.end),
@@ -1053,6 +1060,10 @@ leg('§3 REAL ㊾ A STOP HEARD IS A STOP HEARD — what got less than the full g
   }
   ok(D.helperTerms.length === 1 && D.esc > 0 && !D.escTerms.length && !D.escAlive && !!D.left && D.left.n === 2 && D.left.short === 1 && D.left.cleared > 0 && /it left 2 processes running — stopped at \d\d:\d\d \(1 process got less than the full grace\)$/.test(D.end),
     `a service, grace ${D.grace / 1000} s: its deaf helper heard the stop ONCE (${D.helperTerms[0]} ms — the stop step's; the drain's refused); the escapee it started during the drain never heard a SIGTERM, killed at the grace — counted: «${D.end}»`, D);
+  // round 12: KILLED WITHOUT ITS GRACE — SIGTERMed in the kill pass (r11 took any drain SIGTERM for heard: never said)
+  ok(K.helperTerms.length <= 1 && !K.helperAlive && /did not end on SIGTERM in 10 s/.test(K.forced || '') && !!K.left && K.left.n === 1 && K.left.force === true && K.left.short === 1
+    && /the job left 1 process running — it was stopped by force \(1 process got less than the full grace\); to keep a daemon, run it as a service job$/.test(K.end),
+    `a task, grace ${K.grace / 1000} s, its main deaf (killed at the grace): its helper, started after the stop step, was first SIGTERMed by the drain with the grace UP and killed in the same pass (its handler ${K.helperTerms.length ? `noted it ${K.helperTerms[0]} ms after the stop` : 'never ran before the SIGKILL'} — the SIGKILL straight after, so either is the product's) — counted: «${K.end}» (c48fba1f5: no «short» — the drain's SIGTERM taken for heard)`, K);
 });
 
 leg('§3 REAL ㊶ WHO SIGNALLED WHOM — a pod\'s task whose helper ends cleanly on SIGTERM: its WRAPPER signalled alone (an agent\'s `kill <wrapper pid>`) sends the SIGTERM on to its group; the engine\'s intent with no signal after it (a stop nobody delivered) is delivered by the wrapper; exit.json and the job\'s log say who (e7147b71: the members marked «sent SIGTERM», nothing sent — killed at the grace under words claiming a SIGTERM)', async (ok) => {

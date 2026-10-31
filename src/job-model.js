@@ -320,13 +320,14 @@ function leftRecordFault(l) {
  *  group — not stopped; run it as a service job» (a task's setsid escapee) · «… (64 of 70 recorded)» · once the engine stopped
  *  what a service kept (`cleared`, its instant): «it left 1 process running — stopped at 14:05» (the hub's clock); round 7: once
  *  it found nothing of it still running (`gone` — nothing was signalled): «… — it had already ended by 14:05»; round 8:
- *  `short` — how many of them got less than the full grace: round 11, those the wrapper KILLED that no SIGTERM reached (the stop
- *  step's or the drain's — one that heard one had what was left of the grace): «… (1 process got less than the full grace)».
+ *  `short` — how many of them got less than the full grace: round 12, those the wrapper KILLED WITHOUT THEIR GRACE — never sent a
+ *  SIGTERM, or sent it in the kill pass itself (the grace already up: SIGTERM and SIGKILL together); one SIGTERMed earlier (the
+ *  stop step, the drain with grace left) had what was left of it: «… (1 process got less than the full grace)».
  *  data/bin/job-wrapper.js says the same in the job's log — a suite pins the twins equal */
 function leftWords(l) {
   const n = l.n || 0, es = (k) => (k === 1 ? '' : 'es');
   const hhmm = (ms) => { const d = new Date(ms); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`; };
-  const sh = l.short ? ` (${l.short} process${es(l.short)} got less than the full grace)` : ''; // round 11: killed, no SIGTERM came
+  const sh = l.short ? ` (${l.short} process${es(l.short)} got less than the full grace)` : ''; // round 12: killed without its grace
   if (l.cleared) return `it left ${n} process${es(n)} running — stopped at ${hhmm(l.cleared)}${sh}`;
   if (l.gone) return `it left ${n} process${es(n)} running — ${n === 1 ? 'it' : 'they'} had already ended by ${hhmm(l.gone)}`;
   if (l.kept) return `it left ${n} process${es(n)} running — kept: a service's own until it is stopped or started again${l.escaped ? ` (${l.escaped} outside its group)` : ''}${l.recorded ? ` (${l.recorded} of ${n} recorded)` : ''}`;
