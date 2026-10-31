@@ -714,6 +714,16 @@
 .cad-rows .ut-body > .ut-opts { order: 6; flex: 1 1 0; min-width: 0; margin: 0; display: flex; flex-wrap: nowrap; gap: 4px; overflow-x: auto; scrollbar-width: thin; }
 .cad-rows .ut-opt { flex: none; min-height: 24px; box-sizing: border-box; font-size: 12px; padding: 2px 10px; white-space: nowrap; max-width: 24em; overflow: hidden; text-overflow: ellipsis; }
 .cad-rows .ut-body > :is(.ut-reply, .ut-secret) { order: 7; flex: 1 1 100%; }
+/* r12b: a NARROW strip (a chat window under 520 px) gives the reach line and the answers a row each — the answers wrap as
+   whole buttons, the Always wraps its words — so nothing runs past the window's edge (r12's longer «Always · <reach>» at
+   max-content pushed Deny past it). The phone's 16 px / 44 px (style.css touch block) win over these; the 26 px floor is :where'd */
+@container (max-width: 520px) {
+  .cad-rows .ut-body > .ut-ak-scope { flex: 1 1 100%; white-space: normal; }
+  .cad-rows .ut-body > .ut-exit-answer { flex: 1 1 100%; flex-wrap: wrap; min-width: 0; }
+  .cad-rows .ut-exit-answer > .ut-act { flex: none; height: auto; white-space: nowrap; }
+  .cad-rows .ut-exit-answer > .ut-hub-always { flex: 1 1 0; min-width: 0; white-space: normal; line-height: 16px; padding: 4px 6px; }
+  :where(.cad-rows .ut-exit-answer) > .ut-act { min-height: 26px; }
+}
 /* the waiting chip's jump lands here — one pulse, then still */
 .chat-ask-flash { animation: chat-ask-flash-anim 1.6s ease-out; }
 @keyframes chat-ask-flash-anim {
