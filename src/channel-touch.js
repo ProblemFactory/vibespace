@@ -46,7 +46,8 @@
  *    COMMAND WORD is bounded by its own run — never past the start of a LATER call of its turn that could have produced
  *    the touch (a producer that provably ran after it; a later CLI runner wins), past it the lingering call only vetoes
  *    — r7: a claim BY NAME never is (naming beats recency: a call that names the touch keeps it whatever started
- *    later); ② else exactly ONE candidate that could have
+ *    later); r14: ①b else a candidate whose line the reader could NOT read exactly (shell-words `unknown`: UNKNOWN ⇒ MAY
+ *    RUN) and whose text names the CLI (`may`) — ranked after every line read exactly, bounded like ①; ② else exactly ONE candidate that could have
  *    produced it — every running call counts, a lingering one only when it could run — when it could have run anything
  *    (`callCanRun`: a shell call not made only of RUNS_NOTHING — a script, an interpreter, a shell's script file; a
  *    helper by its TOOL NAME, HELPER_TOOLS); ③ else (a producer that could run lingering beside a foreground stranger,
@@ -67,7 +68,8 @@
  *    wrapper IS its script (`bash -c`, a re-joined codex argv read whole, a heredoc / here-string / pipe it reads),
  *    wrappers and script runners (eval, watch, parallel, find -exec, `env -S`) reach their operand; a heredoc's body
  *    is read to its delimiter line and never counts toward SCAN_MAX (inside a `$( … )` span too); what it cannot read (shell past SCAN_MAX, an unclosed
- *    heredoc) could run — never a run of the CLI.
+ *    heredoc) could run — never a run of the CLI; r14: what it does not FULLY parse (shell-words `unknown`) MAY RUN every
+ *    CLI name its text holds (`may`) — never inert, rung ①b, it lingers on a single `&`.
  *  - `foldTouches` / `foldView`: one ROW per conversation — the ops counted
  *    (read = messages read, search = hits, reply / compose / refresh /
  *    request / status = calls), replied or composed first, then by the last
@@ -253,7 +255,7 @@ function upsertTouch(list, t, { max = RING_MAX } = {}) {
 // lane touch-chip-cause (the .362 train fix): THE SCANNER — where a command line runs a program, the CLI as a command word,
 // what could not be read — lives in PURE src/shell-words.js (the client's run summary reads it there and never imports
 // this module); imported here, re-exported as before
-const { SCAN_MAX, WRAPPERS, SCRIPT_RUNNERS, RUNS_A_COMMAND, REAPERS, shellCommands, commandsRun, cliRuns, channelsRuns } = require('./shell-words.js');
+const { SCAN_MAX, WRAPPERS, SCRIPT_RUNNERS, RUNS_A_COMMAND, REAPERS, shellCommands, commandsRun, cliRuns, channelsRuns, cliMay, channelsMayRun } = require('./shell-words.js');
 
 /** Does a shell call run the agent's channels CLI? (the renderer's holder gate — harness-neutral: the command TEXT, the
  *  CLI as a command word since round 2). */
@@ -265,11 +267,12 @@ const inertRun = (x) => !x.execs && (!!x.lookup || INERT_COMMANDS.includes(x.bas
 /** r3: does a command line send work to the BACKGROUND that outlives the call — a non-inert command ended by `&` (r4: a
  *  group's commands too) whose job the line does not end itself (r6: `ended` — a FOREGROUND `wait` / `kill` of that job,
  *  shell-words endJobs), or a `vibespace-job run` / `start`? */
-const backgrounds = (ran) => ran.some((x) => (x.bg && !x.ended && !inertRun(x)) || (x.base === 'vibespace-job' && (x.verb === 'run' || x.verb === 'start')));
+const backgrounds = (ran) => ran.some((x) => (x.bg && !x.ended && !inertRun(x)) || (x.base === 'vibespace-job' && (x.verb === 'run' || x.verb === 'start'))) || (ran.unknown.length > 0 && !!ran.mayBg);   // r14: an UNKNOWN line with a single `&` may leave a job running
 
 /** lane touch-chip-cause r2: a command line every command word of which RUNS NOTHING ELSE (RUNS_NOTHING) — it could not
- *  have run the CLI. An empty line runs nothing; r3: a line with BLIND text (cut off, an unclosed heredoc) could run. */
-function runsNothing(cmd) { const ran = commandsRun(cmd); return !ran.blind.length && ran.every(inertRun); }
+ *  have run the CLI. An empty line runs nothing; r3: a line with BLIND text (cut off, an unclosed heredoc) could run; r14:
+ *  so could a line the reader does not fully parse (UNKNOWN ⇒ MAY RUN — never inert). */
+function runsNothing(cmd) { const ran = commandsRun(cmd); return !ran.blind.length && !ran.unknown.length && ran.every(inertRun); }
 
 /** r3: the verbs a HELPER's prompt names — the CLI's name + its verb as a PHRASE («run vibespace-channels search
  *  "pairing review"»), never a command-word scan of prose. */
@@ -382,19 +385,19 @@ function opensTurn(msg, prev) {
  *                turns: [instant] the instants turns start (opensTurn), skewMs, batchMs}
  * @returns {{byCall: Object<string, touch[]>, byNote: Object<string, touch[]>, unbound: touch[]}}
  */
-const NO_RUNS = Object.freeze(Object.assign([], { blind: Object.freeze([]) }));
+const NO_RUNS = Object.freeze(Object.assign([], { blind: Object.freeze([]), unknown: Object.freeze([]), may: Object.freeze([]) }));
 function bindToCall(touches, calls, { notes = [], turns = [], skewMs = SKEW_MS, batchMs = BATCH_MS } = {}) {
   const cs = (Array.isArray(calls) ? calls : [])
     .map((c, i) => {
       const kind = CALL_KINDS.includes(c.kind) ? c.kind : undefined, text = c.text || '';
       const ran = kind === 'helper' || kind === 'other' ? NO_RUNS : commandsRun(text);   // ONE scan per call: the CLI's runs, whether it runs nothing, whether it backgrounds
-      const runs = cliRuns(ran);
+      const runs = cliRuns(ran), may = cliMay(ran);   // r14: `may` — the CLI names an UNKNOWN line may run
       // r3: a call whose work OUTLIVES its card stays a candidate after the card returns, to its turn's end (or its seen
       // end): one the caller says is background, one whose command line sends a non-inert command to the background or
       // starts a vibespace-job — and, when the caller does not say (`background` undefined), one that ran the CLI
-      const lingers = c.background === true || (kind !== undefined && (backgrounds(ran) || (c.background === undefined && runs.length > 0)));
+      const lingers = c.background === true || (kind !== undefined && (backgrounds(ran) || (c.background === undefined && (runs.length > 0 || may.length > 0))));
       return { id: String(c.id), start: num(c.start), end: c.end === null || c.end === undefined ? null : num(c.end), text, kind, i,
-        runs, inert: !ran.blind.length && ran.every(inertRun), lingers, bgEnd: num(c.bgEnd) > 0 ? num(c.bgEnd) : null };
+        runs, may, inert: !ran.blind.length && !ran.unknown.length && ran.every(inertRun), lingers, bgEnd: num(c.bgEnd) > 0 ? num(c.bgEnd) : null };
     })
     .filter((c) => c.id && c.start > 0)
     .sort((a, b) => a.start - b.start || a.i - b.i);
@@ -461,12 +464,16 @@ function bindToCall(touches, calls, { notes = [], turns = [], skewMs = SKEW_MS, 
       const exact = cs.filter((c) => cand.has(c) && namesExactly(c, t));
       const verbal = cs.filter((c) => cand.has(c) && claims(c) && namesTouch(c.text, t, c.runs, c.kind));
       const named = cs.filter((c) => cand.has(c) && claims(c) && callNames(c, t));
+      // r14: ①b a candidate the reader could not read exactly whose text names the CLI (`may`) — after every line read
+      // exactly: ONE keeps the rows against a stranger; several, one of them lingering, ⇒ the note
+      const maybe = cs.filter((c) => cand.has(c) && claims(c) && c.may.length > 0);
       // ② the ONE candidate that could have produced it — every running call counts (one that runs nothing too: several
       // running ⇒ the note), a lingering call only when it could run (a helper, a script: one that runs nothing never vetoes)
       const could = [...running, ...lingering.filter(callCanRun)];
       if (exact.length) pick = exact[exact.length - 1];
       else if (verbal.length) pick = verbal[verbal.length - 1];
       else if (named.length === 1 || (named.length > 1 && !named.some((c) => c.lingers))) pick = named[named.length - 1];
+      else if (!named.length && (maybe.length === 1 || (maybe.length > 1 && !maybe.some((c) => c.lingers)))) pick = maybe[maybe.length - 1];
       else if (!named.length && could.length === 1 && callCanRun(could[0])) pick = could[0];
       // ③ several candidates and none naming it (a background producer + a foreground stranger, two producers that run the
       // CLI), or a lone call that runs nothing: the note row below; ④ no note in the turn: the chip
@@ -694,7 +701,7 @@ function searchTouches(results, { max = SEARCH_MAX_CONVS, query = '', memo = nul
 module.exports = {
   OPS, DRAFT_OPS, FILED_OPS, RING_MAX, MERGE_MS, SKEW_MS, BATCH_MS, FOLD_SHOWN, SEARCH_MAX_CONVS, SEARCH_HITS_MAX, QUERY_MAX, TITLE_MAX, LABEL_MAX, TOUCH_PLACEMENTS,
   CAUSES, CALL_KINDS, READABLE_TITLE_CHARS, causeOf, callCauses, readableCut,
-  HELPER_TOOLS, INERT_COMMANDS, MID_TURN_QUEUE, TIGHT_NAME_CHARS, shellCommands, channelsRuns, runsNothing, callKindOf, callNames, callCanRun, opensTurn, tightCut,
+  HELPER_TOOLS, INERT_COMMANDS, MID_TURN_QUEUE, TIGHT_NAME_CHARS, shellCommands, channelsRuns, channelsMayRun, runsNothing, callKindOf, callNames, callCanRun, opensTurn, tightCut,
   RUNS_NOTHING, SCAN_MAX, WRAPPERS, SCRIPT_RUNNERS, commandsRun, RUNS_A_COMMAND, REAPERS, producerOf,
   touchKey, normalizeTouch, appendTouch, upsertTouch, commandTouchesChannels, namesTouch, namesExactly, bindToCall, foldTouches, filedProposals, foldView, rowWords, replyWords, rowName,
   GLYPHS, glyphFor, chipView, chipText, sessionSummary, touchedByWords, agoText, searchTouches, hitRefs, openVerdict, tailVerdict,

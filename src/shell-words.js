@@ -32,6 +32,14 @@
  * whose inner `(` closes short of its `))` is two subshells (`((C) | head)`); the words of an unquoted `${ … }` are read
  * with the quotes the shells keep there (`${x:-'$(C)'}` prints `$(C)`); a trap's action and mapfile's `-C` callback are
  * scripts the shell runs later.
+ * r14: UNKNOWN ⇒ MAY RUN — the command side's own law (the job side's is UNKNOWN ⇒ STOP): where the reader does not
+ * fully parse a line (`unknown`: a span the shells never close, a `(` where an argument stands — zsh's glob `((#i)a|b)`,
+ * `*(e:…:)` —, a parameter word an evaluator reads again — `eval`, a shell's `-c`, watch, a trap's action, zsh's `(e)` —,
+ * a quoted substitution inside `${ … }` or a subscript, bash 5.3's `${ …; }` in arithmetic, `builtin` / `command` /
+ * `exec` before a word with a reading of its own) the line's command reading is «may run» the CLI names its text holds
+ * (`may`): never exact, never inert, never a confident «runs only ls»; it ends no job. A grammar row that makes a line
+ * EXACT is listed in ROWS with the measured truth rows behind it — a row without its table is refused (test-channel-touch
+ * ⑬'s census).
  *
  * lane touch-chip-cause (the .362 train fix, 2026-10-29): moved out of src/channel-touch.js — chat-run-summary (the
  * client's run summary, which imports nothing but PURE rule modules: test-collab-live-counter, test-fold-ux and
@@ -51,10 +59,53 @@ const OPENERS = new Set(['then', 'do', 'else', 'elif', 'if', 'while', 'until', '
 const afterOpeners = (w) => { const h = w.findIndex((x) => x.q || !OPENERS.has(x.v)); return h < 0 ? [] : w.slice(h); };
 /** r12: a `[[ … ]]` the scan SPLIT — its `(`, `)`, `&&`, `||` end a simple command, so one command holds a `[[` with no
  *  `]]` after it or a `]]` with none before it (`[[ 1 && i -eq 0 ]]`, `[[ ( i -eq 0 ) ]]`): not parsed — a STOP */
+/** r14: does a `(` at `i` stand where an ARGUMENT does — glued to a word that is no compound assignment, or after a
+ *  simple command's own words (not a `for` / `select` head's data, `time` / `time -p`, `coproc NAME`)? Never inside a
+ *  `[[ … ]]` (a `=~` group) or a `case` head (its pattern) */
+const argParen = (words, i) => {
+  const w = afterOpeners(words), g = words[words.length - 1];
+  if (!w.length || w[0].v === 'case' || words.some((x) => !x.q && x.v === '[[')) return false;
+  if (g.end === i) return g.q || !/^[A-Za-z_][A-Za-z0-9_]*\+?=$/.test(g.v);
+  return !DATA_HEADS.has(w[0].v) && words[0].v !== 'coproc' && !w.every((x) => !x.q && (x.v === 'time' || x.v === '-p'));
+};
 const splitCond = (w) => { const a = w.findIndex((x) => !x.q && x.v === '[['), b = w.findIndex((x) => !x.q && x.v === ']]'); return (a >= 0 || b >= 0) && !(a >= 0 && b > a); };
 /** r13: the `((` at `i` opens ARITHMETIC — its inner `(` closes right before its outer `)`, `(( … ))`; otherwise it is
  *  two subshells (`((C) | head)`, `$((C) | x)` — bash, zsh and dash run C), read as groups */
 const arithAt = (s, i) => { const e = spanEnd(s, i, '(', ')', false); return e < s.length && spanEnd(s, i + 1, '(', ')', false) === e - 1; };
+/** r14: THE GRAMMAR ROWS THAT MAKE A LINE EXACT since r13 — each with the truth rows behind it (test-channel-touch ⑬'s
+ *  TRUTH labels: bash, zsh and zsh in the agent tool's form, under the subreaper and the 2 GiB cap); each row's site in
+ *  this file carries `row:<name>`. A row with no measured table is refused (⑬'s census); a construct with no row is
+ *  UNKNOWN — the line may run (`may`). */
+const ROWS = Object.freeze({
+  arith: Object.freeze(['r13 A']),   // `(( … ))` read as the shells expand it; a `((` that closes as two subshells read as groups
+  'arith-word': Object.freeze(['r13 B']),   // `$(( … ))` in a word, in double quotes, in a heredoc; a `$((` that is no arithmetic
+  'param-word': Object.freeze(['r13 D']),   // an unquoted `${ … }`'s words, bash's `<( … )` there
+  trap: Object.freeze(['r13 T']),   // a trap's action (a signal after it)
+  callback: Object.freeze(['r13 M']),   // mapfile / readarray's `-C` callback
+});
+/** r14: a parameter expansion whose VALUE the reader does not compute — `${ … }` with an operator, a word or flags (never
+ *  a bare `${name}` / `${#name}`): an evaluator that reads it again reads what the reader never saw */
+const PARAM_WORD = /\$\{(?!#?[A-Za-z_][A-Za-z0-9_]*\})/;
+/** r14: a raw word's text with its single-quoted and escaped parts removed (what the line expands before an evaluator) */
+const expanded = (raw) => PARAM_WORD.test(String(raw).replace(/\$?'[^']*'/g, '').replace(/\\[^]/g, ''));
+/** r14: a substitution inside quoted text — `$(`, `${`, `$((`, a backtick */
+const SUBST = /\$[({]|`/;
+/** r14: a `${ … }` that EVALUATES its value — zsh's `(e)` flag (`${(e)x}`), bash's `@P` (a prompt's `$( … )` runs) */
+const evalsParam = (s, i) => { const f = /^\$\{\(([^)]*)\)/.exec(s.slice(i, i + 64)); return (!!f && f[1].includes('e')) || /@P$/.test(s.slice(i + 2, spanEnd(s, i + 1, '{', '}'))); };
+/** r14: the words before which `builtin` / `command` / `exec` changes the reading — a builtin with a reading of its own
+ *  (zsh's `command` runs no builtin: `command trap …` is «command not found» there, bash sets the trap) */
+const PRE_KNOWN = new Set(['trap', 'mapfile', 'readarray', 'eval', 'source', '.', 'let', 'builtin', 'command', 'exec']);
+/** r14: the `${ … }` nest the reader reads into; deeper is UNKNOWN (a nest of thousands overflowed the stack) */
+const PARAM_NEST = 32;
+/** r14: the precommands the reader never reads through — `builtin` (no wrapper: `builtin trap …`), zsh's `noglob` /
+ *  `nocorrect` (bash: «command not found») */
+const PRECOMMANDS = new Set(['builtin', 'noglob', 'nocorrect']);
+/** r14: the CLI's NAMES a text holds, wherever they stand (an unknown line may run each): `[{at, verb}]` */
+const MAY_RE = new RegExp(`(^|[^\\w-])${CLI}(?![\\w-])[ \t]*([a-z][\\w-]*)?`, 'g');
+const mayNames = (t) => [...String(t || '').matchAll(MAY_RE)].map((m) => ({ at: m.index + m[1].length, verb: m[2] || '' }));
+/** r14: a single `&` anywhere in the text (never `&&`, `&>`, `>&`, `|&`, `<&`) — an unknown line that holds one may leave a
+ *  job running */
+const BG_AMP = /(^|[^&>|<])&(?![&>])/;
 /** words that open a construct whose words are data (`for c in …`) */
 const DATA_HEADS = new Set(['for', 'case', 'select', 'function']);
 /** wrappers that run their operand as a command — the options that take an argument (skipped with it). r3: + command
@@ -191,7 +242,11 @@ function shellCommands(src, owner = null, depth = 0, offset = 0) {
   const s = String(src || '');
   const out = [];
   out.blind = [];
+  out.unknown = [];   // r14: where the reader does not fully parse — {at, why}
   if (depth > 4) { out.blind.push(s); return out; }
+  const unknown = (at, why) => { out.unknown.push({ at: offset + at, why }); };
+  const shut = (e, at) => { if (e >= s.length) unknown(at, 'unclosed'); return e; };   // r14: a span the shells never close
+  let pnest = 0;   // r14: the `${ … }` nest being read (PARAM_NEST)
   // r4: `list` = the index of the first command of the AND-OR LIST being read (a `;`, a newline or a single `&` starts the
   // next); a compound command open here is ONE command of the list around it — {close: the word (or `)`) that closes it,
   // outer: that list}
@@ -227,28 +282,34 @@ function shellCommands(src, owner = null, depth = 0, offset = 0) {
   // r8: `coproc …` — its command runs in the background (bash and zsh set `$!` to it), launched where its list ends,
   // never ended by the line
   const closeCoproc = () => { if (coproc && groups.length === coproc.depth) { launch({ ended: false }, coproc.from); coproc = null; } };
-  const nested = (body, at) => { const r = shellCommands(body, owner === null ? offset + at : owner, depth + 1); for (const c of r) out.push(c); for (const b of r.blind) out.blind.push(b); };
+  const nested = (body, at) => { const r = shellCommands(body, owner === null ? offset + at : owner, depth + 1); for (const c of r) out.push(c); for (const b of r.blind) out.blind.push(b); for (const u of r.unknown) out.unknown.push(u); };
   // the command substitutions an UNQUOTED heredoc's body runs (`$( … )`, backticks — never `$(( … ))` arithmetic, its
   // text read on) — r13: and an ARITHMETIC span's text, which the shells expand as if double-quoted (`(( $(C) > 0 ))`
   // runs C; a `'` there quotes nothing); `from` — where the body stands in the line (each owned by its own `$`)
   const substitutions = (body, at, from = -1) => {
     for (let j = 0; j < body.length; j++) {
       if (body[j] === '\\') { j++; continue; }
-      if (body[j] === '$' && body[j + 1] === '(' && !(body[j + 2] === '(' && arithAt(body, j + 1))) { const e = spanEnd(body, j + 1, '(', ')'); nested(body.slice(j + 2, e), from < 0 ? at : from + j); j = e; continue; }
-      if (body[j] === '`') { const e = spanEnd(body, j, '`', '`'); nested(body.slice(j + 1, e), from < 0 ? at : from + j); j = e; }
+      if (body[j] === '$' && body[j + 1] === '(' && !(body[j + 2] === '(' && arithAt(body, j + 1))) { const e = spanEnd(body, j + 1, '(', ')'); if (e >= body.length) unknown(at, 'unclosed'); nested(body.slice(j + 2, e), from < 0 ? at : from + j); j = e; continue; }
+      // r14: bash 5.3's `${ …; }` here, a `${ … }` that evaluates its value — UNKNOWN (no row reads them exactly)
+      if (body[j] === '$' && body[j + 1] === '{' && (FUNSUB.test(body[j + 2] || '') || evalsParam(body, j))) { unknown(at, 'funsub'); continue; }
+      if (body[j] === '`') { const e = spanEnd(body, j, '`', '`'); if (e >= body.length) unknown(at, 'unclosed'); nested(body.slice(j + 1, e), from < 0 ? at : from + j); j = e; }
     }
   };
   // r13: `lim` — where the word must stop (the end of a `${ … }` it stands in), `at` — the word that owns its spans
-  const readWord = (i, lim = s.length, at = i) => {
+  // r14: `pw` — the word stands inside an unquoted `${ … }` (a quoted substitution there is UNKNOWN: the slot may be
+  // arithmetic — `${x:'$(C)'}`, `${a['$(C)']}` run C —, or an evaluator may read the value again)
+  const readWord = (i, lim = s.length, at = i, pw = false) => {
     let v = '', q = false;
     while (i < lim) {
       const ch = s[i];
       if (' \t\n;&|()<>'.includes(ch)) break;   // r11: a CR is no blank — `wait\r` is a command of its own (not found)
       if (ch === '\\') { if (s[i + 1] !== '\n') v += s[i + 1] || ''; i += 2; q = true; continue; }
-      if (ch === "'") { const k = s.indexOf("'", i + 1); const e = k < 0 ? s.length : k; v += s.slice(i + 1, e); i = e + 1; q = true; continue; }
+      if (ch === "'") { const k = s.indexOf("'", i + 1); const e = k < 0 ? s.length : k; if (k < 0) unknown(i, 'unclosed'); quotedSubst(s.slice(i + 1, e), i, pw); v += s.slice(i + 1, e); i = e + 1; q = true; continue; }
       if (ch === '$' && s[i + 1] === "'") {   // ANSI-C quoting: `$'don\'t …'` — a `\` escapes the next character
         let j = i + 2;
         for (; j < s.length && s[j] !== "'"; j++) { if (s[j] === '\\') { v += s[j + 1] || ''; j++; continue; } v += s[j]; }
+        if (j >= s.length) unknown(i, 'unclosed');
+        quotedSubst(s.slice(i + 2, j), i, pw);
         i = j + 1; q = true;
         continue;
       }
@@ -256,22 +317,24 @@ function shellCommands(src, owner = null, depth = 0, offset = 0) {
         let j = i + 1;
         for (; j < s.length && s[j] !== '"'; j++) {
           if (s[j] === '\\') { v += s[j + 1] || ''; j++; continue; }
-          if (s[j] === '$' && s[j + 1] === '(' && s[j + 2] === '(' && arithAt(s, j + 1)) { const e = spanEnd(s, j + 1, '(', ')', false); substitutions(s.slice(j + 3, e - 1), at); j = e; v += '$(())'; continue; }   // r13: read
-          if (s[j] === '$' && s[j + 1] === '{' && FUNSUB.test(s[j + 2] || '')) { const e = spanEnd(s, j + 1, '{', '}'); nested(s.slice(j + 3, e), at); v += s.slice(j, e + 1); j = e; continue; }   // r12
-          if (s[j] === '$' && s[j + 1] === '(') { const e = spanEnd(s, j + 1, '(', ')', true, span); nested(s.slice(j + 2, e), at); v += '$()'; j = e; continue; }
-          if (s[j] === '`') { const e = spanEnd(s, j, '`', '`'); nested(s.slice(j + 1, e), at); v += '$()'; j = e; continue; }
+          if (s[j] === '$' && s[j + 1] === '(' && s[j + 2] === '(' && arithAt(s, j + 1)) { const e = spanEnd(s, j + 1, '(', ')', false); substitutions(s.slice(j + 3, e - 1), at); j = e; v += '$(())'; continue; }   // r13: read — row:arith-word
+          if (s[j] === '$' && s[j + 1] === '{' && FUNSUB.test(s[j + 2] || '')) { const e = shut(spanEnd(s, j + 1, '{', '}'), j); nested(s.slice(j + 3, e), at); v += s.slice(j, e + 1); j = e; continue; }   // r12
+          if (s[j] === '$' && s[j + 1] === '{' && evalsParam(s, j)) unknown(j, 'eval');   // r14: `"${(e)x}"`, `"${x@P}"`
+          if (s[j] === '$' && s[j + 1] === '(') { const e = shut(spanEnd(s, j + 1, '(', ')', true, span), j); nested(s.slice(j + 2, e), at); v += '$()'; j = e; continue; }
+          if (s[j] === '`') { const e = shut(spanEnd(s, j, '`', '`'), j); nested(s.slice(j + 1, e), at); v += '$()'; j = e; continue; }
           v += s[j];
         }
+        if (j >= s.length) unknown(i, 'unclosed');
         i = j + 1; q = true;
         continue;
       }
-      if (ch === '$' && s[i + 1] === '(' && s[i + 2] === '(' && arithAt(s, i + 1)) { const e = spanEnd(s, i + 1, '(', ')', false); substitutions(s.slice(i + 3, e - 1), at); v += '$(())'; i = e + 1; continue; }   // r13: read
-      if (ch === '$' && s[i + 1] === '(') { const e = spanEnd(s, i + 1, '(', ')', true, span); nested(s.slice(i + 2, e), at); v += '$()'; i = e + 1; continue; }
-      if (ch === '$' && s[i + 1] === '{' && FUNSUB.test(s[i + 2] || '')) { const e = spanEnd(s, i + 1, '{', '}'); nested(s.slice(i + 3, e), at); v += s.slice(i, e + 1); i = e + 1; continue; }   // r12
+      if (ch === '$' && s[i + 1] === '(' && s[i + 2] === '(' && arithAt(s, i + 1)) { const e = spanEnd(s, i + 1, '(', ')', false); substitutions(s.slice(i + 3, e - 1), at); v += '$(())'; i = e + 1; continue; }   // r13: read — row:arith-word
+      if (ch === '$' && s[i + 1] === '(') { const e = shut(spanEnd(s, i + 1, '(', ')', true, span), i); nested(s.slice(i + 2, e), at); v += '$()'; i = e + 1; continue; }
+      if (ch === '$' && s[i + 1] === '{' && FUNSUB.test(s[i + 2] || '')) { const e = shut(spanEnd(s, i + 1, '{', '}'), i); nested(s.slice(i + 3, e), at); v += s.slice(i, e + 1); i = e + 1; continue; }   // r12
       // r12: a parameter's own words run their substitutions (`${x:-$(C &)}`) — r13: read with the quotes the shells
       // keep there (paramWord), never the heredoc's (`${x:-'$(C)'}` runs nothing)
-      if (ch === '$' && s[i + 1] === '{') { const e = spanEnd(s, i + 1, '{', '}'); paramWord(i + 2, e, at); v += s.slice(i, e + 1); i = e + 1; continue; }
-      if (ch === '`') { const e = spanEnd(s, i, '`', '`'); nested(s.slice(i + 1, e), at); v += '$()'; i = e + 1; continue; }
+      if (ch === '$' && s[i + 1] === '{') { const e = shut(spanEnd(s, i + 1, '{', '}'), i); if (evalsParam(s, i)) unknown(i, 'eval'); if (pnest >= PARAM_NEST) unknown(i, 'deep'); else { pnest++; paramWord(i + 2, e, at); pnest--; } v += s.slice(i, e + 1); i = e + 1; continue; }   // row:param-word
+      if (ch === '`') { const e = shut(spanEnd(s, i, '`', '`'), i); nested(s.slice(i + 1, e), at); v += '$()'; i = e + 1; continue; }
       v += ch;
       i++;
     }
@@ -283,11 +346,15 @@ function shellCommands(src, owner = null, depth = 0, offset = 0) {
   // `$!` — a stop; zsh refuses the line)
   const paramWord = (j, e, at) => {
     while (j < e) {
-      if ((s[j] === '<' || s[j] === '>') && s[j + 1] === '(') { const k = spanEnd(s, j + 1, '(', ')', true, span); nested(s.slice(j + 2, k), at); stops.push(j); j = k + 1; continue; }
+      if ((s[j] === '<' || s[j] === '>') && s[j + 1] === '(') { const k = shut(spanEnd(s, j + 1, '(', ')', true, span), j); nested(s.slice(j + 2, k), at); stops.push(j); j = k + 1; continue; }
       if (' \t\n;&|()<>'.includes(s[j])) { j++; continue; }
-      j = readWord(j, e, at).end;
+      j = readWord(j, e, at, true).end;
     }
   };
+  // r14: QUOTED text that holds a substitution, where the shells may still run it — inside an unquoted `${ … }` (`pw`:
+  // an arithmetic slot, an evaluator reading the value again), or a SUBSCRIPT (`let 'a[$(C)]=1'`, `read 'a[$(C)]'`,
+  // `[[ 'a[$(C)]' -eq 0 ]]`: bash and zsh evaluate it) — UNKNOWN
+  const quotedSubst = (t, at, pw) => { if (pw ? SUBST.test(t) : /\[[^\]]*(\$[({]|`)/.test(t)) unknown(at, pw ? 'param' : 'subscript'); };
   let i = 0;
   while (i < s.length && i - skipped - span.docs < SCAN_MAX) {
     const ch = s[i];
@@ -321,6 +388,7 @@ function shellCommands(src, owner = null, depth = 0, offset = 0) {
     }
     if (ch === ' ' || ch === '\t') { i++; continue; }
     if (ch === '\\' && s[i + 1] === '\n') { i += 2; continue; }
+    if (ch === '#' && s[i - 1] === '(') unknown(i, 'glob');   // r14: `(#i)` — zsh's glob flag, no comment there
     if (ch === '#') { while (i < s.length && s[i] !== '\n') i++; continue; }   // a word's start: a comment to the line's end
     cont = false;   // r12: a token — the separators below say whether it continues the list past a newline
     if (ch === '&' && s[i + 1] === '>') { op = s[i + 2] === '>' ? '&>>' : '&>'; i += op.length; redirect = true; continue; }
@@ -329,7 +397,7 @@ function shellCommands(src, owner = null, depth = 0, offset = 0) {
     // a `((` that is two subshells (`then ((C) | head)`) is read on as groups (still a stop)
     if (ch === '(' && s[i + 1] === '(') {
       stops.push(i);
-      if (arithAt(s, i)) { const e = spanEnd(s, i, '(', ')', false); substitutions(s.slice(i + 2, e - 1), i, i + 2); i = e + 1; continue; }
+      if (arithAt(s, i)) { const e = spanEnd(s, i, '(', ')', false); substitutions(s.slice(i + 2, e - 1), i, i + 2); i = e + 1; continue; }   // row:arith
     }
     if (ch === '|' && s[i + 1] === '&') { pipe = end(); redirect = false; i += 2; cont = true; continue; }   // `|&`: a pipe (stderr too)
     if (ch === '(' && /^[ \t]*\)/.test(s.slice(i + 1, i + 64)) && [1, 2].includes(afterOpeners(words).length) && (afterOpeners(words).length === 1 || afterOpeners(words)[0].v === 'function') && words.every((x) => !x.q) && /^[\w.:@+-]+$/.test(words[words.length - 1].v)) {
@@ -348,6 +416,10 @@ function shellCommands(src, owner = null, depth = 0, offset = 0) {
         const g = words[words.length - 1];
         if (g.q || !/^[A-Za-z_][A-Za-z0-9_]*\+?=$/.test(g.v) || s.slice(i + 1, spanEnd(s, i, '(', ')')).includes('[')) stops.push(i);
       }
+      // r14: a `(` where an ARGUMENT stands — glued to a word that is no compound assignment (zsh's `*(e:…:)`,
+      // `*((#i)x)`, an extglob), or after a command's own words (`ls -d ((#i)a|b)*`: zsh reads one glob word, bash refuses
+      // the line) — UNKNOWN; never `case … in (a)`, `for x (a b)`, `[[ ( … ) ]]`, `time ( … )`, `coproc NAME ( … )`
+      if (ch === '(' && argParen(words, i)) unknown(i, 'glob');
       const c = end();
       if (ch === ';' || ch === '&' || (two && ch === '|')) closeCoproc();   // r8: a coproc's list ends
       if (ch === '&' && !two) {   // `… &` — its whole and-or list to the background: r6 — ONE job of this shell, launched here
@@ -369,7 +441,7 @@ function shellCommands(src, owner = null, depth = 0, offset = 0) {
       continue;
     }
     if ((ch === '<' || ch === '>') && s[i + 1] === '(') {   // a process substitution: a command line of its own, an argument here
-      const e = spanEnd(s, i + 1, '(', ')', true, span);
+      const e = shut(spanEnd(s, i + 1, '(', ')', true, span), i);
       nested(s.slice(i + 2, e), i);
       words.procsub = true;   // r9: bash sets `$!` to it — a stop
       if (redirect) redirect = false; else words.push({ v: ch + '()', at: i, end: e + 1, q: false });
@@ -413,8 +485,10 @@ function shellCommands(src, owner = null, depth = 0, offset = 0) {
   }
   lone(end(), 'fg');
   closeCoproc();   // r8: the line's coproc ends
+  if (!depth && i >= s.length && groups.length) unknown(i, 'unclosed');   // r14: a group the line never closes (a parse error)
   // r9: a line the reader cannot be sure of ends none of its jobs — nor a job of a span inside it
   if (!endJobs(mine, stops, out)) { out.unsure = true; for (const c of out) for (const j of c.words.jobs || []) j.ended = false; }
+  if (out.unknown.length) { out.unsure = true; for (const c of out) for (const j of c.words.jobs || []) j.ended = false; }   // r14: nor an UNKNOWN one
   if (i < s.length) out.blind.push(s.slice(i));   // the shell past SCAN_MAX — blind
   for (const h of pending) { (h.words.heredocs || (h.words.heredocs = [])).push(''); out.blind.push(''); }   // a heredoc with no line after it
   return out;
@@ -714,6 +788,9 @@ function endJobs(cmds, stops = [], all = cmds) {
   return true;
 }
 
+/** r14: does a word hand an evaluator a value the reader never computes — a parameter word the line expands first
+ *  (`eval echo ${x:-'$(C)'}`, `bash -c ${x:-'C &'}`, `sh -c "${x:-'C &'}"`)? */
+const opaqueWord = (c, w) => !!c.src && !!w && expanded(c.src.slice(w.at, w.end));
 /** r3: THE SCRIPTS A SHELL COMMAND WORD RUNS — the shell IS these, never a command of its own: its `-c` string (an
  *  UNQUOTED operand with words after it is a re-joined argv — codex's `["bash","-lc","…"]` joined with no quoting — so the
  *  rest of the line is the script, `joined`), its heredocs and here-strings, or the stdin a pipe feeds it (`cat <<EOF |
@@ -734,17 +811,19 @@ function shellScripts(c, words, k) {
     if (j >= words.length) return [];
     const op = words[j];
     if (!op.q && j + 1 < words.length && c.src) return [{ text: c.src.slice(op.at, words[words.length - 1].end), at: op.at, joined: true, sure: plain }];
-    return [{ text: op.v, at: op.at, joined: false, sure: plain && (!op.v.includes('$') || (!!c.src && /^'[^']*'$/.test(c.src.slice(op.at, op.end)))) }];
+    return [{ text: op.v, at: op.at, joined: false, sure: plain && (!op.v.includes('$') || (!!c.src && /^'[^']*'$/.test(c.src.slice(op.at, op.end)))), opaque: opaqueWord(c, op) }];
   }
   const out = [];
-  for (const body of (c.words === words && words.heredocs) || []) out.push({ text: body });
-  for (const h of (c.words === words && words.herestrings) || []) out.push({ text: h });
+  // r14: a heredoc / here-string the LINE expands first (unquoted) is `opaque` when it holds a parameter word
+  const opq = (ws) => (ws.expands || []).some((b) => PARAM_WORD.test(b));
+  for (const body of (c.words === words && words.heredocs) || []) out.push({ text: body, opaque: opq(words) });
+  for (const h of (c.words === words && words.herestrings) || []) out.push({ text: h, opaque: opq(words) });
   if (j < words.length && !sflag) return null;   // a script file
   if (c.words === words && c.pipeFrom) {   // a pipe feeds it: what the command before it writes
     const p = c.pipeFrom, pw = commandWord(p.words);
-    for (const body of p.words.heredocs || []) out.push({ text: body });
-    for (const h of p.words.herestrings || []) out.push({ text: h });
-    if (pw && (pw.base === 'echo' || pw.base === 'printf')) out.push({ text: p.words.slice(pw.k + 1).filter((w) => !/^-[a-zA-Z]+$/.test(w.v)).map((w) => w.v).join(pw.base === 'echo' ? ' ' : '') });
+    for (const body of p.words.heredocs || []) out.push({ text: body, opaque: opq(p.words) });
+    for (const h of p.words.herestrings || []) out.push({ text: h, opaque: opq(p.words) });
+    if (pw && (pw.base === 'echo' || pw.base === 'printf')) out.push({ text: p.words.slice(pw.k + 1).filter((w) => !/^-[a-zA-Z]+$/.test(w.v)).map((w) => w.v).join(pw.base === 'echo' ? ' ' : ''), opaque: p.words.slice(pw.k + 1).some((w) => opaqueWord(p, w)) });
   }
   return out.length ? out : null;
 }
@@ -757,9 +836,19 @@ function shellScripts(c, words, k) {
  *  `kill` the job's own command only; r8: `query` — the channels CLI's `search` words, its first operand) + `blind`
  *  (text the scan could not read: a cut-off tail, an unclosed heredoc). PURE. */
 function commandsRun(cmd, owner = null, depth = 0, offset = 0) {
+  if (depth > 0 || owner !== null) return readRuns(cmd, owner, depth, offset);
+  // r14: a text the reader cannot read to its end (a stack overflow in a nest of thousands) is UNKNOWN — never a throw
+  try { return readRuns(cmd, owner, depth, offset); } catch (e) {
+    return Object.assign([], { blind: [String(cmd || '')], unknown: [{ at: 0, why: 'deep' }], may: mayNames(cmd), mayBg: BG_AMP.test(String(cmd || '')) });
+  }
+}
+/** commandsRun's reading itself (every nested reading goes through commandsRun at a depth > 0 — no catch there) */
+function readRuns(cmd, owner, depth, offset) {
   const cmds = shellCommands(cmd, owner, depth, offset);
   const out = [];
   out.blind = cmds.blind.slice();
+  out.unknown = cmds.unknown.slice();
+  const opaque = (why, at) => { out.unknown.push({ at, why }); };
   // r6: a run of a background job (`bg`) carries `ended` when the line ends that job itself (endJobs) — r7: inside a
   // command sent to the background, a run its own shell sent to the background ends only when that shell ended it too
   // (`bash -c 'cli &' & wait` leaves the CLI running) — r9: never in a script the line does not pass as written (a
@@ -767,26 +856,30 @@ function commandsRun(cmd, owner = null, depth = 0, offset = 0) {
   const add = (list, bg, ended, sure = false) => {
     for (const { ended: e0, ...x } of list) { const e = e0 && sure && !cmds.unsure; out.push(bg ? { ...x, bg: true, ...(ended && (!x.bg || e) ? { ended: true } : {}) } : { ...x, ...(e ? { ended: true } : {}) }); }
     for (const b of list.blind) out.blind.push(b);
+    for (const u of list.unknown || []) out.unknown.push(u);
   };
   const run = (c, words, cw, at, bg, ended, waited) => {
     if (cw.lookup) { out.push({ base: cw.base, at, verb: '', lookup: true }); return; }
-    if (cw.split !== undefined && depth < 4) { add(commandsRun([cw.split, ...words.slice(cw.rest).map((w) => w.v)].join(' '), at, depth + 1), bg, waited); return; }
+    if (cw.split !== undefined && depth < 4) { if (opaqueWord(c, words[cw.rest - 1])) opaque('eval', at); add(commandsRun([cw.split, ...words.slice(cw.rest).map((w) => w.v)].join(' '), at, depth + 1), bg, waited); return; }
     if (SHELLS.has(cw.base) && depth < 4) {
       const scripts = shellScripts(c, words, cw.k);
+      if (scripts && scripts.some((sc) => sc.opaque)) opaque('eval', at);   // r14: a script the line expands first
       if (scripts) { for (const sc of scripts) add(sc.joined && c.owner === null ? commandsRun(sc.text, null, depth + 1, offset + sc.at) : commandsRun(sc.text, at, depth + 1), bg, waited, sc.sure); return; }
     }
     // r13: `trap ACTION SIG …` — its action is a script the shell runs later (at EXIT, on a signal): its commands are read
     // (`trap 'C &' EXIT` leaves C running — every shell), never ended by the line; one operand is a signal (bash: usage);
     // so is mapfile / readarray's `-C CALLBACK` (bash runs it every quantum lines)
-    if (cw.base === 'trap' && depth < 4) {
+    if (cw.base === 'trap' && depth < 4) {   // row:trap
       const j = words[cw.k + 1] && words[cw.k + 1].v === '--' ? cw.k + 2 : cw.k + 1;
+      if (j < words.length && opaqueWord(c, words[j])) opaque('eval', at);   // r14: `trap ${x:-'$(C &)'} EXIT`
       if (j + 1 < words.length && !words[j].v.startsWith('-')) add(commandsRun(words[j].v, at, depth + 1), bg, false);
     }
-    if ((cw.base === 'mapfile' || cw.base === 'readarray') && depth < 4) {
+    if ((cw.base === 'mapfile' || cw.base === 'readarray') && depth < 4) {   // row:callback
       for (let j = cw.k + 1; j < words.length && words[j].v.length > 1 && words[j].v[0] === '-' && words[j].v !== '--'; j++) {
         const o = words[j].v, k = [...o.slice(1)].findIndex((x) => 'dnOsuCc'.includes(x)) + 1;
         if (!k) continue;
         const arg = o.length > k + 1 ? o.slice(k + 1) : words[++j] ? words[j].v : '';
+        if (o[k] === 'C' && opaqueWord(c, words[j])) opaque('eval', at);
         if (o[k] === 'C' && arg) add(commandsRun(arg, at, depth + 1), bg, false);
       }
     }
@@ -796,7 +889,7 @@ function commandsRun(cmd, owner = null, depth = 0, offset = 0) {
       while (j < words.length && words[j].v.length > 1 && words[j].v[0] === '-') j += runner.includes(words[j].v) ? 2 : 1;
       let e = j;
       while (e < words.length && !(cw.base === 'parallel' && /^:::/.test(words[e].v))) e++;
-      if (e > j) { add(commandsRun(words.slice(j, e).map((w) => w.v).join(' '), at, depth + 1), bg, waited); return; }
+      if (e > j) { if (words.slice(j, e).some((w) => opaqueWord(c, w))) opaque('eval', at); add(commandsRun(words.slice(j, e).map((w) => w.v).join(' '), at, depth + 1), bg, waited); return; }
     }
     const execs = RUNS_A_COMMAND.has(cw.base) && RUNS_A_COMMAND.get(cw.base)(words.slice(cw.k + 1).map((w) => w.v));
     const verb = words[cw.k + 1] ? words[cw.k + 1].v : '', query = cw.base === CLI && verb === 'search' ? searchWords(words, cw.k + 2) : undefined;
@@ -817,8 +910,15 @@ function commandsRun(cmd, owner = null, depth = 0, offset = 0) {
     // r9: a `wait` ends every run of its job; a `kill` reaches the job's own command only (a span's run, a shell's or a
     // runner's script, a find -exec may outlive the pid it signals)
     const ended = js.length > 0 && js.every((j) => j.ended === 'wait' || (j.ended === 'kill' && j.cmd === c)), waited = js.length > 0 && js.every((j) => j.ended === 'wait');
+    // r14: `builtin …`, zsh's `noglob …`; `command` / `exec` before a word with a reading of its own (zsh's `command trap`
+    // runs no builtin)
+    if (cw && (PRECOMMANDS.has(cw.base) || (PRE_KNOWN.has(cw.base) && c.words.slice(0, cw.k).some((x) => !x.q && (x.v === 'command' || x.v === 'exec'))))) opaque('precommand', c.words[cw.k].at);
     if (cw) run(c, c.words, cw, c.owner === null ? offset + c.words[cw.k].at : c.owner, !!c.words.bg, ended, waited);
   }
+  // r14: UNKNOWN ⇒ MAY RUN — the line's runs are no exact reading (cliRuns gives none), it ends no job, and it may run
+  // each CLI name its text holds (`may`); `mayBg` — its text holds a single `&`
+  if (out.unknown.length) { for (const x of out) delete x.ended; out.may = mayNames(cmd); out.mayBg = BG_AMP.test(String(cmd || '')); }
+  else out.may = [];
   return out;
 }
 
@@ -836,8 +936,9 @@ function searchWords(words, k) {
 }
 
 /** The CLI's runs in a commandsRun result — its COMMAND WORDS only (r4: its name in blind text is never a run — the
- *  blind text makes the call «could run», rung ②, never rung ①); r8: a search's `query` rides along. */
-function cliRuns(ran) { return ran.filter((x) => x.base === CLI).map(({ at, verb, query }) => ({ at, verb, ...(query !== undefined ? { query } : {}) })); }
+ *  blind text makes the call «could run», rung ②, never rung ①); r8: a search's `query` rides along; r14: none in an
+ *  UNKNOWN line (its `may` instead — rung ①b). */
+function cliRuns(ran) { if (ran.unknown && ran.unknown.length) return []; return ran.filter((x) => x.base === CLI).map(({ at, verb, query }) => ({ at, verb, ...(query !== undefined ? { query } : {}) })); }
 
 /** lane touch-chip-cause r2: WHERE A COMMAND LINE RUNS THE CHANNELS CLI — `[{at, verb}]`, the CLI as a COMMAND WORD
  *  (the line's start, after ; && || | ( `$(` `<(` a newline, then / do, after a wrapper — env X=… / sudo … / exec -a n /
@@ -849,7 +950,13 @@ function cliRuns(ran) { return ran.filter((x) => x.base === CLI).map(({ at, verb
  *  that text makes the call «could run», never a run. PURE. */
 function channelsRuns(cmd) { return cliRuns(commandsRun(cmd)); }
 
+/** r14: the CLI names an UNKNOWN line may run (`[{at, verb}]`; none for a line read exactly) — a candidate binding,
+ *  ranked after every line read exactly. */
+function cliMay(ran) { return ran.may || []; }
+function channelsMayRun(cmd) { return cliMay(commandsRun(cmd)); }
+
 module.exports = {
   CLI, SHELLS, OPENERS, DATA_HEADS, WRAPPERS, SCRIPT_RUNNERS, FIND_RUNS, ENV_SPLIT, SCAN_MAX, GROUP_OPEN, GROUP_CLOSE, RUNS_A_COMMAND, REAPERS, SHELL_OWN, UNSURE,
   RESERVED, BETWEEN, SPECIAL, spanEnd, shellCommands, commandWord, endJobs, shellScripts, commandsRun, cliRuns, channelsRuns, searchWords,
+  ROWS, cliMay, channelsMayRun,
 };
