@@ -417,8 +417,8 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       case 'WebAuthn.credentialAdded': case 'WebAuthn.credentialAsserted': { const e = tabOf(w, m); if (e && pks) { try { pkHarvest(w, e, m.method, p); } catch (err) { pkFailed(w, e, null, err); } } return; } // lane passkey-store-core: the harvest
       // lane passkey-prewrap-fix: the main-world documents a (re-)arm reaches by identity
       case 'Runtime.executionContextCreated': { const e = tabOf(w, m); const c = p.context; if (e && c) { const fid = c.auxData && c.auxData.frameId ? String(c.auxData.frameId) : ''; e.pk.frameOf.set(Number(c.id), fid); if (c.auxData && c.auxData.isDefault) { e.pk.ctxs.add(Number(c.id)); if (fid) e.pk.mainCtxOf.set(fid, Number(c.id)); } } return; } // lane passkey-binding-isolated: every context's frame (an isolated reporter's report maps back to the main world by it)
-      case 'Runtime.executionContextDestroyed': { const e = tabOf(w, m); if (e) { const id = Number(p.executionContextId); e.pk.ctxs.delete(id); e.pk.ctl.delete(id); const fid = e.pk.frameOf.get(id); e.pk.frameOf.delete(id); if (fid != null && e.pk.mainCtxOf.get(fid) === id) e.pk.mainCtxOf.delete(fid); } if (e && PK.endPending(e.pk.records, { now: now(), ctx: Number(p.executionContextId) }).length) passkeyChanged(w, e); return; }
-      case 'Runtime.executionContextsCleared': { const e = tabOf(w, m); if (e) { e.pk.ctxs.clear(); e.pk.ctl.clear(); e.pk.frameOf.clear(); e.pk.mainCtxOf.clear(); } if (e && PK.endPending(e.pk.records, { now: now() }).length) passkeyChanged(w, e); return; }
+      case 'Runtime.executionContextDestroyed': { const e = tabOf(w, m); if (e) { const id = Number(p.executionContextId); e.pk.ctxs.delete(id); e.pk.ctl.delete(id); const fid = e.pk.frameOf.get(id); e.pk.frameOf.delete(id); if (fid != null && e.pk.mainCtxOf.get(fid) === id) e.pk.mainCtxOf.delete(fid); } if (e) pkPageGone(w, e, PK.endPending(e.pk.records, { now: now(), ctx: Number(p.executionContextId) })); return; }
+      case 'Runtime.executionContextsCleared': { const e = tabOf(w, m); if (e) { e.pk.ctxs.clear(); e.pk.ctl.clear(); e.pk.frameOf.clear(); e.pk.mainCtxOf.clear(); } if (e) pkPageGone(w, e, PK.endPending(e.pk.records, { now: now() })); return; }
       default: return;
     }
   }
@@ -727,7 +727,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     const w = watches.get(String(profileId || ''));
     dropOutcomes(String(profileId || ''));
     openers.delete(String(profileId || ''));
-    refusals.delete(String(profileId || '')); // acceptance r3: a refusal is the stopped browser's — never said of the next one
+    refusals.delete(String(profileId || '')); gaveUp.delete(String(profileId || '')); // acceptance r3: a refusal is the stopped browser's — never said of the next one (r5: nor the given-up socket's)
     if (!w) return;
     try { w.ws && w.ws.close(1000); } catch { /* closing */ }
     down(w, why);
@@ -1601,6 +1601,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   async function pkGate(w, e, rec) {
     if (rec && rec.kernel) return pkKernelGate(w, e, rec); // lane passkey-sink: the kernel road (no authenticator, VibeSpace signs)
     const person = w.mode === 'person'; // acceptance r1: HIS own ceremony — the vault only when he chose it, else Chrome's own window
+    if (person && e.pk.once && e.pk.auth && !(e.pk.onceFor && e.pk.onceFor.outcome === 'pending')) { if (e.pk.draining) await e.pk.draining.catch(() => {}); await pkOnceGone(w, e, e.pk.onceFor); } // r5 belt: a once-authenticator whose ceremony is over never meets the next one (Chrome's own window for it)
     if (person && rec.conditional) { rec.passed = true; return pkCtl(w, e, rec, 'pass'); } // acceptance r2: his AUTOFILL get (the page's, at load — a pick by nature, open as long as the page) goes to Chrome as is: no vault key, and it holds no queue — acceptance r3: Chrome takes ONE WebAuthn request per page (a modal one beside it is refused with OperationError — measured), so the hook ends it when his «Sign in with a passkey» starts (installHook's `supersede`)
     if (!e.pk.auth && !person) return pkCtl(w, e, rec, 'release'); // no authenticator on this tab: Chrome's own behaviour (said passkey_open if it never ends)
     if (e.pk.draining) await e.pk.draining.catch(() => {}); // ONE ceremony per tab at a time: the last one's unload first
@@ -1613,7 +1614,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (person && (v.verdict === 'refuse' || (v.verdict === 'release' && !(v.load && v.load.length) && !v.consumeGrant))) return pkCtl(w, e, rec, 'release'); // nothing of the vault he chose ⇒ Chrome's own window (never refused for the vault's sake)
     if (v.verdict === 'refuse') { rec.refused = true; rec.why = v.why; if (v.why !== 'none') pkTrace(w, e, rec, 'refused', { why: v.why }); await pkCtl(w, e, rec, 'refuse'); passkeyChanged(w, e); return v; }
     if (v.verdict === 'ask') return pkAsk(w, e, rec, v.rows);
-    if (person && !e.pk.auth) { e.pk.auth = await pairAuthenticator(w, e, e.sid, { ui: true }); e.pk.once = !!e.pk.auth; e.pk.onceFor = e.pk.auth ? rec : null; if (!e.pk.auth) return pkCtl(w, e, rec, 'release'); } // the vault key he chose: an authenticator for THIS ceremony only, Chrome's UI on (acceptance r3: `onceFor` — only ITS end removes it)
+    if (person && !e.pk.auth) { e.pk.auth = await pairAuthenticator(w, e, e.sid, { ui: true }); e.pk.once = !!e.pk.auth; e.pk.onceFor = e.pk.auth ? rec : null; if (!e.pk.auth) return pkCtl(w, e, rec, 'release'); if (rec.outcome !== 'pending') return pkOnceGone(w, e, rec); } // the vault key he chose: an authenticator for THIS ceremony only, Chrome's UI on (acceptance r3: `onceFor` — only ITS end removes it; r5: an end that landed while it was paired found no authenticator in pkEnd — it goes here, no key loaded)
     if (v.consumeGrant) pkGrants.delete(gk);
     rec.createdBy = person ? 'human' : v.createdBy || null;
     let store = pkRead(); const loaded = [];
@@ -1643,6 +1644,22 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     const job = pkUnload(w, e, rec); e.pk.draining = job;
     try { await job; } finally { if (e.pk.draining === job) e.pk.draining = null; }
   }
+  /** r5 (acceptance r4 MAJOR 1): the person's once-authenticator (and the vault key loaded in it) leaves with ITS ceremony however
+   *  that ceremony ended — its end (pkUnload), its document gone (pkPageGone), an end that landed while the gate was pairing it
+   *  (pkGate), or found stale when the next ceremony starts (pkGate's belt). Any other ending record touches it not (7.1). */
+  async function pkOnceGone(w, e, rec) {
+    if (!(e.pk.once && e.pk.auth && w.mode === 'person' && e.pk.onceFor === rec)) return false;
+    const id = e.pk.auth; e.pk.auth = null; e.pk.once = false; e.pk.onceFor = null;
+    await call(w, 'WebAuthn.removeVirtualAuthenticator', { authenticatorId: id }, e.sid); await call(w, 'WebAuthn.disable', {}, e.sid);
+    return true;
+  }
+  /** A document went (a navigation, its contexts cleared): its pending ceremonies ended with it (PK.endPending) — no end of theirs
+   *  will reach pkEnd (applyEvent matches only a pending record), so the once-authenticator of one of them leaves here. */
+  function pkPageGone(w, e, ended) {
+    if (!ended.length) return;
+    passkeyChanged(w, e);
+    if (e.pk.onceFor && ended.includes(e.pk.onceFor)) pkOnceGone(w, e, e.pk.onceFor).catch((err) => say('pk-flow:' + (err && err.message), `${w.profileId}: a passkey ceremony step failed — ${err && err.message}`));
+  }
   async function pkUnload(w, e, rec) {
     if (rec.loaded || rec.uvSet) {
       const g = await call(w, 'WebAuthn.getCredentials', { authenticatorId: e.pk.auth }, e.sid);
@@ -1650,7 +1667,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       if (rec.uvSet) await call(w, 'WebAuthn.setUserVerified', { authenticatorId: e.pk.auth, isUserVerified: false }, e.sid);
       if (!rec.refused) pkTrace(w, e, rec, rec.outcome, rec.harvested ? { harvested: true } : {});
     }
-    if (e.pk.once && e.pk.auth && w.mode === 'person' && e.pk.onceFor === rec) { const id = e.pk.auth; e.pk.auth = null; e.pk.once = false; e.pk.onceFor = null; await call(w, 'WebAuthn.removeVirtualAuthenticator', { authenticatorId: id }, e.sid); await call(w, 'WebAuthn.disable', {}, e.sid); } // acceptance r1: the vault ceremony's authenticator leaves with it — Chrome's own window for his next one
+    await pkOnceGone(w, e, rec); // acceptance r1: the vault ceremony's authenticator leaves with it — Chrome's own window for his next one
     await pkCtl(w, e, rec, 'drained');
   }
   /** ④ the harvest: a new key sealed + stored (`credentialAdded`), a sign count reconciled (`credentialAsserted`). */
@@ -2439,7 +2456,7 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
       if (!ev || !ev.profileId) return null;
       if (ev.kind === 'browser-stopped' || ev.kind === 'browser-ready') kernelOf.delete(String(ev.profileId)); // lane browser-surfaces: a browser started again may be another engine (Change build…) — asked again
       if (ev.kind === 'browser-stopped') disarm(ev.profileId, 'the browser stopped');
-      else if (ev.kind === 'browser-ready') { resetOutcomes(ev.profileId); openers.delete(String(ev.profileId)); refusals.delete(String(ev.profileId)); const w = watches.get(String(ev.profileId)); if (w) { try { w.ws && w.ws.close(1000); } catch { /* */ } down(w, 'the browser started again'); } if (humanHolds(ev.profileId)) return arm(ev.profileId, { by: 'person' }); } // lane passkey-browse-yourself: a heal under his browsing is watched again (acceptance r2: a new browser — its opener is asked again)
+      else if (ev.kind === 'browser-ready') { resetOutcomes(ev.profileId); openers.delete(String(ev.profileId)); refusals.delete(String(ev.profileId)); gaveUp.delete(String(ev.profileId)); const w = watches.get(String(ev.profileId)); if (w) { try { w.ws && w.ws.close(1000); } catch { /* */ } down(w, 'the browser started again'); } if (humanHolds(ev.profileId)) return arm(ev.profileId, { by: 'person' }); } // lane passkey-browse-yourself: a heal under his browsing is watched again (acceptance r2: a new browser — its opener is asked again)
       // lane passkey-browse-yourself (rule 1): the person's own browsing starts (his press launched or joined the browser) ⇒ the
       // watch opens now — before any agent verb, before his window connects (the keeper's settleArming bounds the wait)
       else if (ev.kind === 'human-start') return arm(ev.profileId, { by: 'person' }); // (arm re-reads WHO holds it: his alone ⇒ the person's watch)

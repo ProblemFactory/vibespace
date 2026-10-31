@@ -375,7 +375,8 @@ function installHook(G, cfg) {
   /** Acceptance r3 of lane passkey-browse-yourself (Chrome refuses a second WebAuthn request while an autofill one is open —
    *  measured): a request that is not an autofill one ENDS this document's open autofill requests first — a held one is rejected
    *  in-page (never sent to Chrome), one in flight is aborted through the hook's own signal; the page's conditional promise rejects
-   *  with AbortError, as the WebAuthn spec has a page do itself. → the native settles the new request waits for (bounded). */
+   *  with AbortError, as the WebAuthn spec has a page do itself. → the native settles the new request waits for (bounded).
+   *  Called at the request's call, its start and its release (r5: an autofill one that started while it was held). */
   const supersede = () => { const out = []; for (const r of reg.values()) if (r.cond && !r.ctl.signal.aborted) { r.superseded = true; r.ctl.abort(); if (r.native) out.push(r.native); } return out; };
   /** The watch's verbs on a held ceremony (through `ctl` only). */
   const control = (verb, id) => {
@@ -458,6 +459,7 @@ function installHook(G, cfg) {
           };
           // acceptance r3: Chrome's own request ended before this one is made (the autofill request it superseded settles at once
           // on its abort; the bound only spares a page whose native never settles)
+          if (!rec.cond) ending.push(...supersede()); // r5 (acceptance r4 minor 2): an autofill request that started while this one was HELD (the watch's verdict pending) ends too
           if (ending.length) Promise.race([Promise.all(ending), new Promise((r) => setTimeout(r, 1000))]).then(go); else go();
         };
         signal.addEventListener('abort', () => rec.fail(signal.reason && typeof signal.reason === 'object' ? signal.reason : err('AbortError', 'The operation was aborted.'), rec.cancelled ? 'cancelled' : 'aborted-by-page'), { once: true });

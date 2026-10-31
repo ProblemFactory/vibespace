@@ -20,6 +20,10 @@
 //      decided THIS ceremony, the count written before the answer, the use law's line; the refusals by name; cancel ⇒ the page
 //      sees NotAllowedError; the page's own abort; P1's dismiss; an orphan surface; the vault locked; a kernel without the
 //      feature unchanged; no store
+//   ⑨r5 its acceptance r4: the person's once-authenticator leaves with its ceremony HOWEVER it ends — a navigation (its document's
+//       contexts destroyed / cleared), an end that lands while the gate is still pairing it (nothing loaded), found stale at the
+//       next start (the belt); an autofill request that starts while his modal one is HELD ends when the modal is released (the
+//       one-request rule at the release too); a given-up socket's line goes with its browser
 //   ⑨r4 its acceptance r3 (MEASURED on real Chrome: ONE WebAuthn request per page — a modal get beside an open autofill get is
 //       refused with OperationError): a request that is not an autofill one ENDS the page's open autofill request first (held:
 //       rejected in-page; in flight: aborted through the hook's own signal — the page sees AbortError) and reaches Chrome after it;
@@ -836,14 +840,14 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
       '⑨r2 rule 4: a ceremony the page was ALREADY waiting on when the watch came back (a socket that closed under him; a hub restart is the same road) is said — the hook\'s `pending` gives it with its age: passkey_open on his key, his window\'s fact, the For-you item — never silence', { again, row: row && row.state, view: view && view.passkey.state, his: his && his.state, items: X.items.length - items0 });
     X.D.shutdown();
   }
-  // the re-arm is bounded (rearmMs 5: the five tries' backoff is 5+10+20+40+80 ms)
+  // the re-arm is bounded (rearmMs 1: the five tries' backoff is 1+2+4+8+16 ms — r5: was 5 ms, the waits scaled with it)
   {
-    const X = world2({ holders: 'human', print: false, rearmMs: 5 });
+    const X = world2({ holders: 'human', print: false, rearmMs: 1 });
     await X.opened();
     X.world.refuse = true; const s0 = X.world.sockets;
     try { X.f.sock().h.close(); } catch { /* */ }
-    await until2(() => X.world.sockets - s0 >= 5, 1500); await sleep2(200); const n1 = X.world.sockets - s0; // past where a sixth would come (5·2^5 = 160 ms)
-    await sleep2(60); const n2 = X.world.sockets - s0;
+    await until2(() => X.world.sockets - s0 >= 5, 1500); await sleep2(40); const n1 = X.world.sockets - s0; // past where a sixth would come (1·2^5 = 32 ms)
+    await sleep2(15); const n2 = X.world.sockets - s0;
     const fact = X.D.passkeyFactOf({ profileId: PID, browserKey: HK });
     const words = fact && PK.passkeyWords(fact.passkey, null);
     X.world.refuse = false; await X.D.arm(PID);
@@ -1203,6 +1207,76 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
     const copies = [wsrc, lsrc].filter((t) => /holdersOf = \(profileId\) =>/.test(t)).length;
     ok(!!compose && listed.length === 1 && listed[0].human === true && alone.filter((h) => h.browserKey === HUK).length === 1 && alone.every((h) => h.human) && alone[0].input === 'user' && shared.filter((h) => !h.human).map((h) => h.browserKey).join() === CONV && mode === 'person' && modeShared === 'agent' && wired && live && copies === 0,
       '⑨r4 THE HOLDER ROWS (live ⑪ a2 / g, real Chrome): ONE production composer (browser-dialogs holdersOfKeeper) gives HIS row once, flagged — the keeper\'s list carries it too (`human: true`) and r2–r3\'s inline wiring copied it without the flag, so his own browsing never got his watch; over the composer\'s rows his browsing alone ⇒ the person\'s watch, a conversation beside him ⇒ the agent\'s; the wiring and test-browser-live build the watch\'s holdersOf WITH it (no copy left)', { compose: !!compose, listed: listed.length, alone, shared, mode, modeShared, wired, live, copies });
+  }
+  // ⑨r5 — acceptance r4 of lane passkey-browse-yourself (772222399): every leg below is RED on 772222399 by name
+  console.log('⑨r5 acceptance r4: the once-authenticator leaves with its ceremony however it ends (navigation, the gate race, the belt); an autofill that starts while his modal is held ends at its release; the gave-up line goes with its browser');
+  const VAULT5 = () => { const cipher = PS2.cipherOf(crypto2, crypto2.randomBytes(32)); return { file: PS2.withRow(null, PID, { credentialId: 'Kvault005', rpId: 'vercel.com', userName: 'me', displayName: 'Me', keySealed: cipher.seal('pkcs8-key-text'), signCount: 1, createdBy: 'human', createdAt: 1, lastUsedAt: 0, uses: 0, policy: 'yes' }), cipher }; };
+  const authOf5 = (X) => X.w().targets.get('T1').pk.auth || null;
+  // MAJOR 1, path 1: his vault sign-in's document goes (a navigation) while it is in flight — no end will reach pkEnd
+  for (const how of ['Runtime.executionContextDestroyed', 'Runtime.executionContextsCleared']) {
+    const X = world2({ holders: 'human', store: VAULT5(), print: false });
+    await X.opened();
+    X.start(1, 'vercel.com'); await until2(() => released(X) > 0);
+    const paired = { auth: X.calls('WebAuthn.addVirtualAuthenticator').length, added: X.calls('WebAuthn.addCredential').length, on: authOf5(X) };
+    const dis0 = X.calls('WebAuthn.disable').length;
+    X.f.push({ method: how, sessionId: 'S-T1', params: how === 'Runtime.executionContextDestroyed' ? { executionContextId: 7 } : {} });
+    await until2(() => X.calls('WebAuthn.removeVirtualAuthenticator').length > 0 && X.calls('WebAuthn.disable').length > dis0, 300);
+    const rec1 = X.w().targets.get('T1').pk.records.find((r) => r.n === 1) || {};
+    const nav = { removed: X.calls('WebAuthn.removeVirtualAuthenticator').length, disabled: X.calls('WebAuthn.disable').length - dis0, auth: authOf5(X), outcome: rec1.outcome };
+    X.end(1); await sleep2(5); // the end of a document that went: dropped (its record is no longer pending)
+    // his NEXT sign-in, a site with no vault key (his phone / his platform passkey): Chrome's own window, no authenticator on the tab
+    const r0 = released(X);
+    X.start(2, 'github.com'); await until2(() => released(X) > r0);
+    const next = { auth: authOf5(X), paired: X.calls('WebAuthn.addVirtualAuthenticator').length, removed: X.calls('WebAuthn.removeVirtualAuthenticator').length, released: released(X) - r0 };
+    ok(paired.auth === 1 && paired.added === 1 && !!paired.on && nav.outcome === 'aborted-by-page' && nav.removed === 1 && nav.disabled >= 1 && nav.auth === null && next.auth === null && next.paired === 1 && next.removed === 1 && next.released === 1,
+      `⑨r5 MAJOR 1 (a navigation, ${how.split('.')[1]}): his vault sign-in's document goes while it is in flight — the once-authenticator and the key loaded in it leave WITH it (no end will reach pkEnd: the record is already over); his next sign-in on a site with no vault key meets no virtual authenticator (Chrome's own window, his phone / his own passkeys)`, { paired, nav, next });
+    X.D.shutdown();
+  }
+  // MAJOR 1, path 2: the gate race — his request ends while the gate is still pairing its authenticator
+  {
+    const X = world2({ holders: 'human', store: VAULT5(), print: false });
+    await X.opened();
+    X.start(1, 'vercel.com'); X.say({ ev: 'end', id: 1, outcome: 'aborted-by-page', name: 'AbortError' }); // the end lands before pairAuthenticator's first answer
+    await until2(() => X.calls('WebAuthn.addVirtualAuthenticator').length > 0, 500); await until2(() => X.calls('WebAuthn.removeVirtualAuthenticator').length > 0, 300); await sleep2(15);
+    const race = { add: X.calls('WebAuthn.addVirtualAuthenticator').length, addCred: X.calls('WebAuthn.addCredential').length, removed: X.calls('WebAuthn.removeVirtualAuthenticator').length, auth: authOf5(X), released: released(X), outcome: (X.w().targets.get('T1').pk.records.find((r) => r.n === 1) || {}).outcome };
+    ok(race.outcome === 'aborted-by-page' && race.add === 1 && race.addCred === 0 && race.removed === 1 && race.auth === null && race.released === 0,
+      '⑨r5 MAJOR 1 (the gate race): an end that lands while the gate is still pairing his authenticator (pkEnd found none to clear) — the gate sees its record already over: the authenticator goes at once, no vault key is loaded into it, nothing is released', race);
+    X.D.shutdown();
+  }
+  // MINOR 2: an autofill request that STARTS while his modal one is HELD (the watch's verdict pending) — the modal's RELEASE ends it
+  {
+    const settle5 = (pr) => { const o = { v: null }; pr.then(() => { o.v = 'ok'; }, (e) => { o.v = e.name; }); return o; };
+    const starts = (r) => r.sent.filter((x) => x.ev === 'start');
+    const endOf = (r, id) => r.sent.find((x) => x.ev === 'end' && x.id === id) || null;
+    const run = async (verdict) => {
+      const r = hookRealm('github.com', { one: true });
+      const m = settle5(r.nav.get({ publicKey: { challenge: 1, rpId: 'github.com' } })); await tick(); // his sign-in: held (a card, his policy)
+      const a = settle5(r.nav.get({ mediation: 'conditional', publicKey: { challenge: 1, rpId: 'github.com' } })); await tick(); // the page's autofill starts beside it
+      const [sm, sa] = starts(r);
+      r.ctl('pass', sa && sa.id); await tick(); // his autofill is handed to Chrome as is
+      const inChrome = r.calls.length;
+      r.ctl(verdict, sm && sm.id); await tick(); await tick();
+      return { modal: m.v, auto: a.v, autoEnd: endOf(r, sa && sa.id), modalEnd: endOf(r, sm && sm.id), inChrome, natives: r.calls.length, refused: r.busyRefused.length, last: r.calls.length ? (r.calls[r.calls.length - 1].opts.mediation || 'modal') : null };
+    };
+    const R = await run('release'), F = await run('refuse');
+    ok(R.inChrome === 1 && R.auto === 'AbortError' && !!R.autoEnd && R.autoEnd.outcome === 'aborted-by-page' && R.modal === null && R.natives === 2 && R.last === 'modal' && R.refused === 0
+      && F.modal === 'NotAllowedError' && !!F.modalEnd && F.modalEnd.outcome === 'refused' && F.auto === null && !F.autoEnd && F.natives === 1 && F.refused === 0,
+      '⑨r5 minor 2: an autofill request that STARTS while his modal one is held (passed to Chrome meanwhile) is ended when the modal is RELEASED — the page\'s autofill rejects AbortError, his sign-in reaches Chrome after it (2 natives, never OperationError); CONTROL: a modal the watch refuses ends nothing (the autofill stays open in Chrome — only a request that goes to Chrome ends it)', { R, F });
+  }
+  // the refuted finding's one-liner: the given-up socket's line goes with its browser (stopped / started again), as a refusal does
+  for (const kind of ['browser-ready', 'browser-stopped']) {
+    const X = world2({ holders: 'human', print: false, rearmMs: 1 });
+    await X.opened();
+    X.world.refuse = true;
+    try { X.f.sock().h.close(); } catch { /* */ }
+    const pkNow = () => X.D.factFor({ profileId: PID, browserKey: HK, consume: false }).passkey || {};
+    await until2(() => pkNow().why === 'gave-up', 1500);
+    const gave = pkNow().why;
+    X.world.H.human = false; await X.lease({ kind, profileId: PID }); await sleep2(10);
+    const after = pkNow();
+    ok(gave === 'gave-up' && after.why === 'not-watched' && after.text === PK.NOT_WATCHED_TEXT,
+      `⑨r5 the given-up socket's line goes with its browser (${kind}) — «not watching right now», never «stopped retrying» of a browser that is not the one that refused`, { gave, after: after.why });
+    X.D.shutdown();
   }
 }
 
