@@ -18,6 +18,9 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 
 ### Changed
 - When Anthropic lifts an account's 5-hour limit, the usage popup says so on its row and the pool stops counting a window that no longer exists.
+- An account whose limit has reset since its last reading now shows as reset, marked unconfirmed, instead of its old percentage.
+- A new conversation is placed on such an account, or on one never read, so its first turn confirms the reset.
+- An account that has not been read yet now says so where its usage would be, instead of showing nothing.
 
 ### Fixed
 - Across a daylight-saving change a scheduled job runs once, at the right local time — one started in the hour that repeats no longer runs every 30 seconds.
