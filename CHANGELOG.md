@@ -16,6 +16,9 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Deliver on held messages now counts only what it sent; anything it could not send stays on the card, to deliver again or discard.
 - A restart in the middle of Deliver on held messages now reopens the same card with what was not sent, instead of a second card beside it.
 
+### Removed
+- Background jobs no longer read secrets from a plain file (nothing used it) — a job's secret comes from the vault.
+
 ## 2.369.364 — 2026-10-30
 
 ### Fixed
