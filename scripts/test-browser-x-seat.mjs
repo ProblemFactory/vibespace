@@ -689,7 +689,7 @@ const W0 = load(REPO);
   ok(f({ source: X, xShown: false, stuck: ds({ passkey: relay, stuck: null }), human: true }) === 'da-x1' && f({ source: X, xShown: false, stuck: null, human: true }) === null,
     "the seam: a passkey ask in HIS window (the relay's record, no session row) draws the door — the row's stuck alone (x-seat's half) draws none");
   ok(f({ source: X, xShown: false, stuck: ds({ passkey: null, stuck: sheet }), human: true }) === 'da-x1' && f({ source: X, xShown: false, stuck: ds({ passkey: null, stuck: null }), human: true }) === null,
-    "the seam: Chrome's sign-in sheet on the row still draws the door — the passkey fact alone (passkey's half) draws none");
+    "the seam (PURE): Chrome's sign-in sheet in a `stuck` fact still draws the door — the passkey fact alone (passkey's half) draws none; in HIS window that fact waits for a relay prompt fact (st.fact is always null there — the base's gap, a backlog row)");
   ok(ds({ passkey: { ...relay, passkey: { state: 'unknown', why: 'gave-up' } }, stuck: null }) === null && ds({ passkey: { ...relay, passkey: { state: 'unknown' } }, stuck: sheet }) === sheet && ds({ passkey: relay, stuck: sheet }) === relay,
     "the seam: a passkey the watch cannot see is no wait (the row's stuck judges); a real passkey wait comes first");
 }
