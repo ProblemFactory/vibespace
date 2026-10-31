@@ -4,6 +4,18 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 
 ## 2.369.367 — 2026-10-31
 
+### Added
+- An agent can ask once for the standing permission you would set on the Vault row; a script whose destination VibeSpace cannot see can be allowed for good.
+- An older «Always» for a whole cloud domain now covers only the cloud tool it was given for; one VibeSpace cannot place is marked on its Vault row.
+- Each host and command a conversation may use a secret for now keeps its own time limit; a new «Always» adds to the others and never ends them.
+- A card's «Always» or Allow says on the card when it would change a time limit you already gave; a card that changed before you answered is shown again, marked.
+- In «Who may use it…», a host you add under «As each has it now» takes the grant's earliest time limit, and the dialog shows every end before you save.
+- Where VibeSpace cannot see where a program sends a secret, you can now allow the conversation for one hour; each use shows a notice, nothing goes to For you.
+- A 1-hour approval can be taken back on its own in the Vault window, and a conversation you excluded from a secret is never offered one.
+- A conversation you excluded from a secret stays excluded when a 1-hour approval ends or its last grant is taken back; the hour leaves nothing else behind.
+- «Who may use it» keeps the conversations you excluded unless you remove one there, saves only what you changed, and still saves after a 1-hour approval ends.
+- Saving «Who may use it» keeps a Task Group as it was, removes an ended 1-hour approval as it says, and tells you when only the members were saved.
+
 ### Fixed
 - Across a daylight-saving change a scheduled job runs once, at the right local time — one started in the hour that repeats no longer runs every 30 seconds.
 - A scheduled job set for a time that does not exist on the day clocks go forward now runs once right after the jump instead of skipping that day.
