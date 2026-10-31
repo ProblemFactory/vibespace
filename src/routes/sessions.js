@@ -58,6 +58,23 @@ function withSessionKey(session = {}) {
     ...(rc ? { realCwd: rc } : {}),
   };
 }
+/** THE READ-BACK (lane dead-socket-keeps-chat-meta), PURE over rows: the metas a boot kept for dead local sessions (ctx
+ *  .stoppedSessions — boot-restore) merged into the discovered rows, `rows` grown in place. A harness's own STOPPED row of
+ *  the same conversation takes why it stopped and when, and the name / account / mode the session had (the name the person
+ *  knew wins over a CLI title; a row's own account stays); a live or external row is the conversation running — the meta
+ *  adds nothing; no row (a harness with no discover, an index not read yet) ⇒ the meta's own row. */
+function mergeKeptStopped(rows, kept) {
+  const keyOf = (r) => `${r.backend || 'claude'}:${r.backendSessionId || r.sessionId}`;
+  const byKey = new Map(rows.map((r) => [keyOf(r), r]));
+  for (const k of kept || []) {
+    if (k.forkPending) continue; // r2: a pending fork's copy carries its PARENT's id — never the parent's row, its name or its account
+    const r = byKey.get(keyOf(k));
+    if (!r) { const n = withSessionKey(k); rows.push(n); byKey.set(keyOf(k), n); continue; }
+    if (r.status !== 'stopped') continue;
+    Object.assign(r, { stopReason: k.stopReason, stoppedAt: k.stoppedAt, kept: k.kept, name: k.name || r.name, accountId: r.accountId || k.accountId || null, mode: r.mode || k.mode });
+  }
+  return rows;
+}
 
 /** Setup session routes. Requires ctx object with dependencies. */
 function setup(ctx) {
@@ -644,10 +661,12 @@ function setup(ctx) {
         sessions.push(withSessionKey(entry));
       }
     }
+    try { mergeKeptStopped(sessions, typeof ctx.stoppedSessions === 'function' ? await ctx.stoppedSessions() : []); } catch (e) { console.warn('[sessions] the kept stopped metas:', e.message); }
 
     sessions.sort((a, b) => b.startedAt - a.startedAt);
     _sessionsCache = { sessions };
     _sessionsCacheAt = Date.now();
+    _heldRows = sessions; // heldAccountOf's rows (ws-create's resume seam)
     return _sessionsCache;
   };
 
@@ -723,4 +742,21 @@ function setup(ctx) {
 }
 
 let _warmSweep = null;
-module.exports = { router, setup, warmSessions: () => (_warmSweep ? _warmSweep() : Promise.resolve()) };
+let _heldRows = null;
+const NO_TRANSCRIPT_HERE = 'no transcript of this conversation was found on this machine — it cannot be reopened here';
+/** THE ACCOUNT A RESUME THAT STATES NONE GOES TO (lane dead-socket-keeps-chat-meta r2 — src/ws-create.js's ONE seam, so
+ *  every door: the page's Resume, the For-you reply reopen, an automation's open) → {accountId} | {refuse} | null, over the
+ *  last sweep's rows: the conversation's STOPPED row names its account (a kept meta's; the account root whose index lists
+ *  it) ⇒ that account, never the harness default by accident; a harness that keeps a conversation in its account's own
+ *  store (`store.accountBound` — antigravity) whose row names none ⇒ refused by name (the default's store does not hold
+ *  it); no stopped row (a live one, a sweep not run yet) ⇒ null — nothing said, as before. */
+function heldAccountOf(backend, id, rows = _heldRows) {
+  const k = `${backend || 'claude'}:${id}`;
+  const r = (rows || []).find((x) => x && x.status === 'stopped' && !x.forkPending && `${x.backend || 'claude'}:${x.backendSessionId || x.sessionId}` === k);
+  if (!r) return null;
+  if (typeof r.accountId === 'string' && r.accountId) return { accountId: r.accountId };
+  let bound = false;
+  try { bound = require('../harnesses').get(backend || 'claude')?.store?.accountBound === true; } catch { bound = false; }
+  return bound ? { refuse: NO_TRANSCRIPT_HERE } : null;
+}
+module.exports = { router, setup, mergeKeptStopped, heldAccountOf, _noteSweptRows: (rows) => { _heldRows = rows; }, warmSessions: () => (_warmSweep ? _warmSweep() : Promise.resolve()) };

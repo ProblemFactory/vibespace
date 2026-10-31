@@ -11573,6 +11573,12 @@ export default {
   "Migrations": "データ移行", // lane job-secrets-retire r3: the For-you group of a failed boot migration (src/migration-runner.js)
   // lane layout-stopped-window: the placeholder tile + one desktop restored alone
   "Session stopped — click to resume": "セッションは停止しています — クリックで再開",
+  // lane dead-socket-keeps-chat-meta: a session a boot kept stopped says why (the card, the resume bar, the tile, the resume-all offer)
+  "Its process ended while the server was down.": "サーバーが停止している間に、そのプロセスは終了しました。",
+  "Resume interrupted sessions?": "中断されたセッションを再開しますか？",
+  "<b>{n}</b> sessions were interrupted (the server or a machine restarted) and reopened as read-only history. Resume all of them now?": "<b>{n}</b> 件のセッションが中断され（サーバーまたはマシンの再起動）、読み取り専用の履歴として開き直されました。今すぐすべて再開しますか？",
+  "{n} of them stopped because their process ended while the server was down.": "そのうち {n} 件は、サーバーが停止している間にプロセスが終了したため停止しました。",
+  "Resume all {n}": "すべて再開（{n}）",
   "Session unavailable": "セッションを利用できません",
   "Press a desktop to restore it alone — your other desktops stay as they are now.": "デスクトップを押すとそれだけを復元します — ほかのデスクトップは今のままです。",
   "Restore only “{desktop}”": "「{desktop}」だけを復元",

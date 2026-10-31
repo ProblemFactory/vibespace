@@ -458,7 +458,7 @@ const { setupSessionPty, attachToDtach, readSessionMeta, writeSessionMeta,
 // ── Boot restore (src/server/boot-restore.js, decomposition #7) ──
 // migrations + restoreSessions + R6 pipe re-open + keeper re-adoption.
 const { migrateLegacyHomeProjects, restoreSessions, restoreAgentdPipeSessions,
-  readoptOrphanKeeperSessions, probeSockets, probeFacts,
+  readoptOrphanKeeperSessions, probeSockets, probeFacts, stoppedSessions, // stoppedSessions: the kept metas read back (lane dead-socket-keeps-chat-meta)
 } = require('./src/server/boot-restore.js').create({
   rootDir: __dirname, PORT, BUFFERS_DIR, META_DIR, SOCKETS_DIR, DTACH_CMD,
   NODE_CMD, CHAT_WRAPPER, activeSessions, sessionCounterRef,
@@ -1462,7 +1462,7 @@ const { decisionEngine, mounts, plugins, dialBridge, graduateHostToDial, createS
 });
 // ── Session API (extracted to src/routes/sessions.js) ──
 const { router: sessionsRouter, setup: setupSessions } = require('./src/routes/sessions');
-setupSessions({ activeSessions, webuiPids, refreshWebuiPids, createSessionMessages, BUFFERS_DIR, PERMISSION_MODES, execFileSync, hosts, accounts, sessionAuth, serverSetting, paused: (kind) => mountHealth.paused(kind) });
+setupSessions({ activeSessions, webuiPids, refreshWebuiPids, createSessionMessages, BUFFERS_DIR, PERMISSION_MODES, execFileSync, hosts, accounts, sessionAuth, serverSetting, paused: (kind) => mountHealth.paused(kind), stoppedSessions });
 // ── Channels / communication panel (src/server/channels-wiring.js) ──
 const channelsWiring = require('./src/server/channels-wiring.js').create({
   app, dataDir: path.join(__dirname, 'data'), bcastAll: (...a) => bcastAll(...a), integrations: integrationsWiring.store, getMounts: () => mounts, decisionEngine, // lanes decision-attention + decision-rule: the judged rows and the decision rule's pre-judge ask THE decisions caller // 2.369.195: a storage mount's own OAuth client, borrowed by an account (server-side copy)

@@ -75,6 +75,7 @@ const EXCLUDED = Object.freeze({
   'code': 'the pre-B-b87b EDITOR stand-in, unlinked at every boot',
   'acp-wrapper.js': 'a wrapper the server spawns an ACP harness through',
   'agy-wrapper.js': 'a wrapper the server spawns an Antigravity (agy) chat session through',
+  'agy-summaries.js': 'a child the server\'s antigravity discover runs to read each account root\'s conversation index (lane dead-socket-keeps-chat-meta) — not an agent CLI',
   'chat-wrapper.js': 'a wrapper the server spawns a chat session through',
   'codex-chat-wrapper.js': 'a wrapper the server spawns a codex chat session through',
   'job-wrapper.js': 'the wrapper the server spawns a Background Work job through',

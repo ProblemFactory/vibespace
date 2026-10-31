@@ -70,8 +70,45 @@ const FX_KEY = 'sub-fixture-max';
   fs.writeFileSync(path.join(d, 'session-buffers', 'sess-1-100.buf'), JSON.stringify({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed_warning', resetsAt: 1790535600, rateLimitType: 'seven_day_overage_included', utilization: 0.87, isUsingOverage: false, surpassedThreshold: 0.75, unifiedWindows: { five_hour: { utilization: 0.09, resetsAt: 1790048400 }, seven_day: { utilization: 0.43, resetsAt: 1790535600 }, seven_day_overage_included: { utilization: 0.87, resetsAt: 1790535600 } } }, uuid: 'e2e00000-0000-4000-8000-000000000001', session_id: 'e2e00000-0000-4000-8000-000000000002' }) + '\n');
 }
 
+// ── lane dead-socket-keeps-chat-meta (the owner 2026-10-30: a local antigravity chat whose CLI died while the hub was down
+// VANISHED at the next boot — retireDeadSocket deleted its meta). Two DEAD sockets (plain files nobody holds — fuser / pgrep
+// answer «no one»): a local agy chat that names its conversation (with its account, name, folder) and a shell. The boot must
+// keep the first STOPPED and read it back as a stopped row; the shell, with nothing to resume, is deleted as before.
+const DS_AGY = 'cw-9-1793300000009', DS_SHELL = 'cw-8-1793300000008', DS_CONV = 'a9e10000-0000-4000-8000-0000000000aa';
+{
+  const d = path.join(wt, 'data');
+  fs.mkdirSync(path.join(d, 'sockets'), { recursive: true });
+  for (const s of [DS_AGY, DS_SHELL]) fs.writeFileSync(path.join(d, 'sockets', s), '');
+  fs.writeFileSync(path.join(d, 'session-meta', DS_AGY + '.json'), JSON.stringify({ webuiSessionId: 'sess-9-1793300000009', backend: 'antigravity', mode: 'chat', backendSessionId: DS_CONV, name: 'Kiln notes', cwd: '/tmp', accountId: 'agy-e0e0e0e0e0e0', createdAt: 1793300000000 }));
+  fs.writeFileSync(path.join(d, 'session-meta', DS_SHELL + '.json'), JSON.stringify({ webuiSessionId: 'sess-8-1793300000008', backend: 'shell', mode: 'terminal', name: 'shell', cwd: '/tmp', createdAt: 1793300000000 }));
+}
+/** The dead-socket leg's checks on a booted hub: the kept row in /api/sessions (+ the copy on disk, + the facts line on the first boot). */
+const deadSocketLeg = async (tag, { facts }) => {
+  let row = null, notes = [];
+  for (let i = 0; i < 40 && !row; i++) {
+    try { row = ((await (await fetch(`http://127.0.0.1:${PORT}/api/sessions`)).json()).sessions || []).find((s) => s.backend === 'antigravity' && s.backendSessionId === DS_CONV) || null; } catch { }
+    if (!row) await new Promise((r) => setTimeout(r, 250));
+  }
+  await new Promise((r) => setTimeout(r, 1500)); // the kept copy's off-loop settle (the transcript worker's answer) has run
+  // the facts line is said once the kept copies were looked for (r2) — asked again until it is there (≤ 25 s: the worker's 20 s bound)
+  for (let i = 0; i < 50; i++) {
+    try { notes = ((await (await fetch(`http://127.0.0.1:${PORT}/api/boot-trace`)).json()).notes || []).map((n) => n.text); } catch { }
+    if (!facts || notes.some((t) => /^dead sockets: /.test(t))) break;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  let kept = null; try { kept = JSON.parse(fs.readFileSync(path.join(wt, 'data', 'session-meta', DS_AGY + '.json.stopped'), 'utf-8')); } catch { }
+  const shellGone = !fs.existsSync(path.join(wt, 'data', 'session-meta', DS_SHELL + '.json')) && !fs.existsSync(path.join(wt, 'data', 'session-meta', DS_SHELL + '.json.stopped'));
+  const fact = notes.find((t) => /^dead sockets: /.test(t)) || null;
+  const good = row && row.status === 'stopped' && row.stopReason === 'dead-socket-at-boot' && row.name === 'Kiln notes' && row.accountId === 'agy-e0e0e0e0e0e0' && row.cwd === '/tmp'
+    && kept && kept.status === 'stopped' && kept.stopReason === 'dead-socket-at-boot' && shellGone
+    && (!facts || fact === `dead sockets: 1 stopped (kept: ${DS_AGY}), 1 deleted (nothing to resume: ${DS_SHELL})`);
+  if (good) console.log(`  ✓ dead socket (${tag}): the local agy chat is a STOPPED row (why, name, account, folder) read back from <sock>.json.stopped; the shell deleted${facts ? `; the boot trace says «${fact}»` : ''}`);
+  else { ok = false; console.error(`  ✗ dead socket (${tag}): expected the agy chat kept + listed stopped, the shell deleted${facts ? ', the facts line' : ''} — got`, JSON.stringify({ row, kept: kept && { status: kept.status, stopReason: kept.stopReason }, shellGone, fact })); }
+};
+
 let srv = boot(); await waitReady(srv);
 let ok = true;
+await deadSocketLeg('first boot', { facts: true });
 {
   const u = await (await fetch(`http://127.0.0.1:${PORT}/api/usage`)).json();
   const a = u?.accounts?.[FX_KEY];
@@ -97,6 +134,7 @@ await new Promise((r) => setTimeout(r, 800));
 srv = boot(); let jr2 = ''; srv.stdout.on('data', (d) => { jr2 += d; }); const out2 = await waitReady(srv);
 ok = ok && /Reconnected/.test(out2);
 console.log(ok ? 'RESTORE OK — session reconnected after SIGKILL restart' : 'RESTORE FAILED:\n' + out2);
+await deadSocketLeg('the NEXT boot — read back from disk, no socket left', { facts: false });
 // ── lane server-memory-census (B-9428): the restored boot says its memory census ONCE in the journal, and GET /api/sysinfo
 // carries it with every live worker named and answering (a worker script that stopped answering shows `unknown` here).
 {

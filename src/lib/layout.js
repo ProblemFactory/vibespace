@@ -8,6 +8,7 @@ import { wordlessTitleOf } from '../record-clear.js'; // PURE: the title a layou
 import { chainSyncKey, ratioDiffers, heldRatio, releaseRatio, withoutMembers, restoreVerdict } from './chain-layout.js'; // agent browser P7 (§4.6): the sync key carries the layout; the ratio applies in place (unless a local divider drag holds it — v2 verify r1 ①)
 import { writerClass, deferKey, deferKeysOf, releaseNext, noteApplied, recordStamp, behindStamp, noteStamp } from './layout-model.js'; // B-4767: the deferred records — one slot per desktop AND writer class, released in arrival order (PURE)
 import { conversationOf, hostOf, sessionOf } from './desktop-record.js'; // PURE (lane layout-stopped-window): the conversation a session entry names — a placeholder's door
+import { noteStoppedRows, stoppedWhyFor } from './stopped-why.js'; // lane dead-socket-keeps-chat-meta: a kept stopped session says why — the tile, the resume-all offer
 import { applyForViewport, arrangementFor } from './desktop-record.js'; // THE LAYER LAW's read half (design q-039 P0, §6b item 10): every read site of a record takes this page's subsets of it here (PURE)
 
 // The MEMBERS of a chain (host first) — NOT a sync key (chainSyncKey is): two
@@ -1060,6 +1061,8 @@ class LayoutManager {
     // the folder the record holds, on both kinds (r3); a record that holds none says so in its reason
     const cwd = String(entry.cwd || entry.openSpec?.cwd || '');
     if (cwd) tile.append(line('session-placeholder-where', cwd));
+    const stopWhy = cid ? stoppedWhyFor(entry.backend || entry.openSpec?.backend, cid, this.app.sidebar?._allSessions) : ''; // a kept stopped session's reason
+    if (stopWhy) tile.append(line('session-placeholder-why', stopWhy));
     tile.append(line('session-placeholder-say', cid ? t('Session stopped — click to resume') : t('Session unavailable')));
     win.onCloseRequest = (o) => this._closeAsks(win, o); // the ✕ of a tile that names no conversation asks first (r3)
     // a GROUP's one question names what its close deletes for good (r4: tab-group.js requestCloseGroup) — then it is not asked again
@@ -1359,6 +1362,7 @@ class LayoutManager {
     try {
       const data = await this._bootJson('/api/sessions');
       allSessions = data.sessions || data || [];
+      noteStoppedRows(allSessions); // the read-only windows built below say why before the sidebar has its list
     } catch {}
 
     // Restore windows — use gridBounds if available, otherwise absolute position
@@ -1741,10 +1745,13 @@ class LayoutManager {
   // staggered to avoid a create storm on a fleet server.
   async _offerResumeAll(stopped) {
     const { showConfirmDialog } = await import('./utils.js');
+    // WHY (lane dead-socket-keeps-chat-meta): the ones a boot kept stopped because their process ended while it was down
+    const ended = stopped.filter((d) => stoppedWhyFor(d.opts?.backend, d.opts?.backendSessionId || d.sessionId, this.app.sidebar?._allSessions)).length;
     const ok = await showConfirmDialog({
-      title: 'Resume interrupted sessions?',
-      message: `<b>${stopped.length}</b> sessions were interrupted (the server or a machine restarted) and reopened as read-only history. Resume all of them now?`,
-      confirmText: `Resume all ${stopped.length}`,
+      title: t('Resume interrupted sessions?'),
+      message: t('<b>{n}</b> sessions were interrupted (the server or a machine restarted) and reopened as read-only history. Resume all of them now?', { n: stopped.length })
+        + (ended ? '<br>' + t('{n} of them stopped because their process ended while the server was down.', { n: ended }) : ''),
+      confirmText: t('Resume all {n}', { n: stopped.length }),
     }).catch(() => false);
     if (!ok) return;
     for (let i = 0; i < stopped.length; i++) {

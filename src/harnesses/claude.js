@@ -5,6 +5,7 @@ const { BACKEND_CAPS } = require('../backend-caps');
 const { ClaudeCodeAdapter } = require('../adapters/claude-code');
 const { MessageManager } = require('../message-manager');
 const store = require('../session-store');
+const idOf = (v) => (typeof v === 'string' && v ? v : null);
 const { sweepSharedLegs, fdScanShellFns, cliIdentityShellFns } = require('../writer-sweep');
 // WRITER SWEEP holder legs (store.writerSweep; the generic runner is
 // writer-sweep.js sweepWriters): an fd on `<rid>.jsonl` (/proc scan, lsof on
@@ -180,6 +181,10 @@ module.exports = {
   store: {
     discover: store.discoverClaudeSessions,        // async ({activeSessions, webuiPids, devSnap}) → session entries
     locate: (id, cwd) => store.findSessionJsonlPath(id, cwd), // (sessionId, cwd) → path|null
+    locateIsProof: true, // a null from locate PROVES no transcript is here (a conversation IS its .jsonl) — the transcript worker's `locate` op
+    // THE RESUMABLE ID (lane dead-socket-keeps-chat-meta): the conversation a session meta can be RESUMED by — boot-restore's
+    // retireDeadSocket keeps a dead local session STOPPED when this answers, deletes it when it answers null (PURE, no fs)
+    resumeIdOf: (meta) => idOf(meta && meta.claudeSessionId) || idOf(meta && meta.backendSessionId), // the CLI's session uuid (spawn.conversationIdField), else the generic twin
     transcriptPathOf: (id, cwd) => store.transcriptPathOf(id, cwd), // (sessionId, cwd) → path|null — PURE (no fs): the person's CLI index carries it
     // RESUME CONTINUITY (B-6b6d, round 2): claude declares NEITHER
     // `lastTurnModel` NOR `lastTurnEffort`, and the ABSENCE is the whole

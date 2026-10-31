@@ -2490,6 +2490,7 @@ console.log('§6 the shared-store census (words another principal wrote into a s
   };
   const NON_API_BIN = {
     'data/bin/agent-browser': 'the SHIM: one stderr line naming the vibespace-browser command, exit 2 — it prints nothing of anybody\'s',
+    'data/bin/agy-summaries.js': "the hub's antigravity discover's CHILD (lane dead-socket-keeps-chat-meta): the account roots' index rows (id / title / last write / folder) as JSON to its parent, never an agent's",
     'data/bin/chat-wrapper.js': "a harness WRAPPER: what it writes to the CLI's stdin is the ladder's composed text (the deliverToConversation rows) and the user's own input; its stdout is the server's stream-json feed",
     'data/bin/job-wrapper.js': "tees the JOB's own stdout to current.log — read back through agentJobView for a viewer, raw for the owner lineage",
     'data/bin/pty-wrapper.js': "tees the terminal's own PTY output to the buffer file — the agent's OWN tool output, the harness's boundary; never a place another principal writes",

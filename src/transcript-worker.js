@@ -91,9 +91,14 @@ function runOp(op, payload = {}) {
       // `store.locate(id, cwd)` (claude: the path rule, then the projects scan; codex: the rollout walk), run where a walk may
       // take its time (boot-restore's dead-socket retire asks it). On the main thread (the pool down) it answers null =
       // unknown: never a sync walk on the loop.
+      // lane dead-socket-keeps-chat-meta: a null from locate is «no transcript» ONLY where the descriptor says its locate is
+      // proof (`store.locateIsProof` — claude, codex: the conversation IS a file locate finds); agy's sqlite store and an ACP
+      // agent's answer null for EVERY id (no file to locate) — that is «unknown», and the kept stopped meta stays (2.369.365
+      // deleted the owner's kind of session — a local agy chat — once this answered `false` for it)
       if (isMainThread) return { result: null };
       const h = require('./harnesses').list().find((x) => x && x.id === payload.backend);
-      return { result: !!(h && h.store && typeof h.store.locate === 'function' && h.store.locate(payload.id, payload.cwd || '')) };
+      if (!(h && h.store && typeof h.store.locate === 'function')) return { result: null };
+      return { result: h.store.locate(payload.id, payload.cwd || '') ? true : h.store.locateIsProof === true ? false : null };
     }
     case '__sleep': { // test hook (deadline/restart path)
       const until = Date.now() + (payload.ms || 1000);

@@ -17,7 +17,7 @@ const { capsOf } = require('../backend-caps.js'); // PURE: caps.streamProtocol (
 const { spawnGroupIds } = require('../new-session-spec.js'); // PURE (lane new-session-form): meta `taskIds` (else an older meta's `taskId`) → the spawned-into list
 const { pickCodexThreadCandidate } = require('../ws-handler');
 const { fdScanShellFns } = require('../writer-sweep.js');
-const { lockCaptureWanted, captureLockId, armLockCapture, adoptCapturedId, restoredForkPending, ownsItsId } = require('../claude-lock-capture'); // the ONE local lock capture (ws-create's create chain + this boot re-arm; the witness is the wrapper's pid)
+const { lockCaptureWanted, captureLockId, armLockCapture, adoptCapturedId, restoredForkPending, ownsItsId, addressableId } = require('../claude-lock-capture'); // the ONE local lock capture (ws-create's create chain + this boot re-arm; the witness is the wrapper's pid)
 const { readPpid } = require('../cli-identity');
 const { restoreMarks } = require('../seen-marks.js'); // PURE (B-86d3, lane hook-seen-marks): the hook injection's seen marks come back with the session
 const BUILD_VERSION = (() => { try { return require('../../package.json').version; } catch { return ''; } })(); // the build an intro mark must name to count as seen
@@ -59,11 +59,22 @@ function persistNoStart(sockFile, meta, { readSessionMeta, writeSessionMeta }) {
   } catch { return false; }
 }
 
-/** The conversation a session meta names (claude's legacy field first), or null. */
-function conversationIdOf(meta) {
-  const id = meta && (meta.claudeSessionId || meta.backendSessionId);
-  return id && typeof id === 'string' ? id : null;
+/** THE RESUMABLE ID (lane dead-socket-keeps-chat-meta): the conversation a session meta can be RESUMED by, as its harness
+ *  names it — the descriptor's `store.resumeIdOf` (claude's session uuid, codex's thread, agy's conversation, an ACP
+ *  session); a harness with no store (a shell) has none. A backend no registered harness answers for (a plugin's, not
+ *  loaded at this boot) keeps its generic id: it cannot be asked, so it is never deleted on a guess. */
+function resumeIdOf(meta) {
+  if (!meta || typeof meta !== 'object') return null;
+  let h;
+  try { h = require('../harnesses').get(meta.backend || 'claude'); } catch { h = undefined; }
+  if (h === undefined) return typeof meta.backendSessionId === 'string' && meta.backendSessionId ? meta.backendSessionId : null;
+  const of = h && h.store && h.store.resumeIdOf;
+  if (typeof of !== 'function') return null;
+  try { const id = of(meta); return typeof id === 'string' && id ? id : null; } catch { return null; }
 }
+/** Why a kept meta is stopped — the one producer (a dead socket found by a boot or its re-probe); the client words it
+ *  «its process ended while the server was down». A `.json.stopped` written by 2.369.365 carries no reason: the same one. */
+const STOP_DEAD_SOCKET = 'dead-socket-at-boot';
 /** tmp + rename (the atomic-persistence law): a crash mid-write leaves the old file or none, never a torn one. */
 function writeJsonAtomic(file, obj) {
   const tmp = `${file}.${process.pid}.tmp`;
@@ -247,7 +258,10 @@ function probeFacts(o) {
 // re-probe settles dead / a duplicate it settles losing goes exactly the way the boot would have sent it.
 /** A dead dtach socket: the socket goes; a REMOTE session's meta is kept as an orphan for the re-adopt; a LOCAL one that names a
  *  conversation is kept as STOPPED (`<sock>.json.stopped`, stoppedAt) and deleted only when its harness answers that no
- *  transcript exists (settleStopped, off the loop); one that names none (a shell) is deleted as before. */
+ *  transcript exists (settleStopped, off the loop); one that names none (a shell) is deleted as before.
+ *  r1 of lane dead-socket-keeps-chat-meta: «names a conversation» = its harness's resumable id (resumeIdOf); the kept copy
+ *  says `status: 'stopped'`, `stopReason`, and is READ BACK (keptStopped → stoppedSessions → /api/sessions: the sidebar's
+ *  stopped row, the window's history, the resume-all offer — with the name, cwd and account it kept). */
 function retireDeadSocket(sockFile, socketPath) {
   console.log(`  ✗ Dead socket: ${sockFile} — cleaning up`);
   try { fs.unlinkSync(socketPath); } catch {}
@@ -276,32 +290,117 @@ function retireDeadSocket(sockFile, socketPath) {
     // codex rollout walk) per dead socket on its loop — the meta is kept now (an atomic write; the live `.json` goes through
     // the ONE delete road, whose tombstone stops a straggler writer resurrecting it) and its harness's own locate answers in
     // the transcript worker; only its «no transcript» deletes the stopped meta, no answer keeps it.
-    const cid = conversationIdOf(dm);
+    const cid = resumeIdOf(dm);
     if (!dm.orphanedAt && cid) {
       const stopped = path.join(META_DIR, sockFile + '.json.stopped');
-      writeJsonAtomic(stopped, { ...dm, stoppedAt: Date.now() });
+      const kept = { ...dm, status: 'stopped', stoppedAt: deadTally.at || (deadTally.at = Date.now()), stopReason: STOP_DEAD_SOCKET }; // ONE instant per pass: its duplicates are ordered by createdAt
+      try { writeJsonAtomic(stopped, kept); } catch (e) { console.warn(`    ↳ ${sockFile}: its stopped copy could not be written (${e.message}) — the meta is left as it is, never deleted`); return; }
       deleteSessionMeta(sockFile);
+      const dropped = keepStopped(sockFile, kept, cid); // r2: a newer stop of the SAME conversation keeps one copy — the line says which went
+      if (dropped === sockFile) { deadTally.superseded.push(sockFile); return; }
+      if (dropped && deadTally.kept.includes(dropped)) { deadTally.kept.splice(deadTally.kept.indexOf(dropped), 1); deadTally.superseded.push(dropped); }
+      deadTally.kept.push(sockFile);
       console.log(`    ↳ local session meta kept as stopped (${dm.backend || 'claude'} ${cid.slice(0, 8)}…: its transcript is looked for off the loop)`);
-      settleStopped(sockFile, stopped, dm);
+      settleStopped(sockFile, stopped, dm, cid);
       return;
     }
   } catch { }
+  deadTally.deleted.push(sockFile);
   deleteSessionMeta(sockFile);
+}
+// THE READ-BACK (lane dead-socket-keeps-chat-meta — the owner's 2026-10-30 session: kept or deleted, nothing read a
+// stopped meta back, so its window, name, cwd and account were gone either way). `backend:id` → {sockFile, meta, id}: the
+// metas this boot kept, and — once, off the loop — every `<sock>.json.stopped` an earlier boot kept. A newer stop of the
+// same conversation supersedes the older copy (unlinked); a conversation a live session runs again CONSUMES its copy.
+// r2 — THE ONE PREDICATE («A PENDING FORK IS NOT A CLAIM», claude-lock-capture): only a meta that holds its id AS ITS OWN is
+// keyed by its conversation; a pending fork still carrying its SOURCE's id is keyed by its own socket — it never supersedes
+// its parent's copy, is never superseded by it, and no live session consumes it through the id it borrowed (acceptance r1:
+// a parent and its pending fork both dead left ONE copy, the fork's name and account on the parent's row).
+const keptStopped = new Map();
+let keptLoaded = null;
+const keptFile = (sockFile) => path.join(META_DIR, sockFile + '.json.stopped');
+const keptKey = (sockFile, meta, id) => (restoredForkPending(meta) ? `sock:${sockFile}` : `${meta.backend || 'claude'}:${id}`);
+const msOf = (v) => (typeof v === 'number' ? v : Date.parse(v) || 0);
+/** a's stop is the newer: its stoppedAt, then (one boot's stops share a clock tick) the later-created session */
+const newerStop = (a, b) => (msOf(a.stoppedAt) - msOf(b.stoppedAt) || msOf(a.createdAt) - msOf(b.createdAt)) > 0;
+/** → the sockFile whose copy this unlinked (the older stop of the same conversation), or null */
+function keepStopped(sockFile, meta, id) {
+  const k = keptKey(sockFile, meta, id), was = keptStopped.get(k);
+  if (was && was.sockFile !== sockFile) {
+    if (newerStop(was.meta, meta)) { fs.unlink(keptFile(sockFile), () => { }); return sockFile; }
+    fs.unlink(keptFile(was.sockFile), () => { });
+    keptStopped.set(k, { sockFile, meta, id });
+    return was.sockFile;
+  }
+  keptStopped.set(k, { sockFile, meta, id });
+  return null;
+}
+function loadKept() {
+  if (!keptLoaded) keptLoaded = (async () => {
+    let names = [];
+    try { names = await fs.promises.readdir(META_DIR); } catch { return; }
+    for (const f of names) {
+      if (!f.endsWith('.json.stopped')) continue;
+      const sockFile = f.slice(0, -'.json.stopped'.length);
+      if ([...keptStopped.values()].some((e) => e.sockFile === sockFile)) continue; // this boot's own — already here
+      let m = null;
+      try { m = JSON.parse(await fs.promises.readFile(path.join(META_DIR, f), 'utf-8')); } catch { continue; }
+      const id = resumeIdOf(m);
+      if (id) keepStopped(sockFile, m, id);
+    }
+  })().catch(() => { });
+  return keptLoaded;
+}
+/** The kept metas as /api/sessions rows (routes/sessions merges them over its harnesses' discover): STOPPED, why and when,
+ *  and the name / cwd / mode / account the meta kept — the doors resume with them. */
+async function stoppedSessions() {
+  await loadKept();
+  const live = new Set(); // the conversations live sessions ADDRESS (addressableId: a pending fork addresses none — r2)
+  for (const s of activeSessions.values()) { const id = addressableId(s); if (id) live.add(`${(s && s.backend) || 'claude'}:${id}`); }
+  const rows = [];
+  for (const [k, e] of [...keptStopped]) {
+    if (live.has(k)) { keptStopped.delete(k); fs.unlink(keptFile(e.sockFile), () => { }); continue; } // resumed: the live session is the record now
+    const m = e.meta;
+    rows.push({ backend: m.backend || 'claude', sessionId: e.id, backendSessionId: e.id, cwd: m.cwd || '', name: m.name || '', mode: m.mode || 'terminal', status: 'stopped',
+      startedAt: m.stoppedAt || m.createdAt || 0, stoppedAt: m.stoppedAt || null, stopReason: m.stopReason || STOP_DEAD_SOCKET, accountId: m.accountId || null, kept: e.sockFile,
+      ...(k.startsWith('sock:') ? { forkPending: true } : {}) }); // a pending fork's copy: kept and listed here, but `id` is its PARENT's — no sidebar row (routes/sessions)
+  }
+  return rows;
+}
+// THE FACTS LINE (the boot trace's notes, ⚙ Diagnostics): what the dead sockets of a restore / a re-probe pass became —
+// said once the pass's kept copies were looked for (r2: a copy its harness then answered «no transcript» for is said
+// DELETED, one a newer stop of its conversation replaced is said SUPERSEDED — never «kept» for a copy that is gone).
+const deadTally = { kept: [], deleted: [], superseded: [], settles: [], at: 0 };
+function sayDead(when = '') {
+  const { kept, deleted, superseded, settles } = deadTally;
+  deadTally.kept = []; deadTally.deleted = []; deadTally.superseded = []; deadTally.settles = []; deadTally.at = 0;
+  if (!kept.length && !deleted.length && !superseded.length) return;
+  const named = (l) => l.slice(0, 3).join(', ') + (l.length > 3 ? `, +${l.length - 3}` : '');
+  const p = Promise.all(settles).then((answers) => {
+    const gone = new Set(answers.filter(Boolean));
+    const k = kept.filter((s) => !gone.has(s)), d = [...deleted, ...kept.filter((s) => gone.has(s))];
+    say(`dead sockets${when}: ${k.length} stopped${k.length ? ` (kept: ${named(k)})` : ''}, ${d.length} deleted${d.length ? ` (nothing to resume: ${named(d)})` : ''}`
+      + (superseded.length ? `, ${superseded.length} superseded (by a newer copy of the same conversation: ${named(superseded)})` : ''));
+  });
+  settling.add(p); p.finally(() => settling.delete(p));
 }
 /** The one question a kept meta leaves: does its conversation have a transcript here? Its harness descriptor's own
  *  `store.locate(id, cwd)`, run in the transcript worker (adapters/codex.js transcriptWorkerCall, op `locate`, 20 s bound);
  *  `false` deletes the stopped meta, `true` / no answer (the pool down, past its bound) keeps it — never deleted on a guess. */
 const settling = new Set();
-function settleStopped(sockFile, file, meta) {
+function settleStopped(sockFile, file, meta, id) {
   const p = (async () => {
     let found = null;
-    try { found = await require('../adapters/codex.js').transcriptWorkerCall('locate', { backend: meta.backend || 'claude', id: conversationIdOf(meta), cwd: meta.cwd || '' }, () => null); } catch { found = null; }
+    try { found = await require('../adapters/codex.js').transcriptWorkerCall('locate', { backend: meta.backend || 'claude', id, cwd: meta.cwd || '' }, () => null); } catch { found = null; }
     if (found !== false) return found;
+    const k = keptKey(sockFile, meta, id);
+    if (keptStopped.get(k)?.sockFile === sockFile) keptStopped.delete(k);
     await new Promise((r) => fs.unlink(file, () => r()));
     console.log(`    ↳ ${sockFile}: no transcript — its stopped meta deleted`);
     return false;
   })();
   settling.add(p); p.finally(() => settling.delete(p));
+  deadTally.settles.push(p.then((r) => (r === false ? sockFile : null), () => null)); // the facts line's answer for this copy
 }
 /** A stale duplicate of a conversation another socket owns: SIGTERM its dtach session (claude, if any, is the older/losing
  *  writer — the pids from a pgrep CHILD, never a sync ask) and clean socket + buffer + meta. */
@@ -380,6 +479,7 @@ async function reprobePass() {
   }
   for (const [sockFile, p] of [...pendingProbes]) { if (p.q.size) tally.open.push(sockFile); else { pendingProbes.delete(sockFile); tally.alive.push(sockFile); } }
   say(`re-probe ${reprobeTries}/${REPROBE_MS.length}: ${tally.alive.length} alive, ${tally.dead.length} dead (retired), ${tally.duplicate.length} duplicate (retired), ${tally.open.length} still unanswered`);
+  sayDead(` (re-probe ${reprobeTries})`); // the same road as the boot's: what its dead ones became
   if (tally.open.length && reprobeTries === REPROBE_MS.length) say(`re-probe gave up after ${reprobeTries} tries: ${tally.open.join(', ')} kept alive — a non-answer is never a kill`);
   return tally;
 }
@@ -627,6 +727,7 @@ function restoreSessions() {
 
     console.log(`  ✓ Reconnected: ${session.name} (${session.cwd})`);
   }
+  sayDead();
   if (pendingProbes.size) {
     const named = [...pendingProbes].slice(0, 3).map(([sockFile]) => `${P.unanswered.get(sockFile) || 'not asked'} ${sockFile}`).join(', ');
     say(`${pendingProbes.size} session(s) adopted probe-pending — no answer (${named}${pendingProbes.size > 3 ? `, +${pendingProbes.size - 3}` : ''}); asked again from ${REPROBE_MS[0] / 1000} s, never retired on a non-answer`);
@@ -906,6 +1007,7 @@ async function readoptOrphanKeeperSessions() {
 
   return { migrateLegacyHomeProjects, restoreSessions, restoreAgentdPipeSessions,
     readoptOrphanKeeperSessions, probeSockets, probeFacts, reprobePending, probePending: () => new Map([...pendingProbes].map(([f, p]) => [f, [...p.q]])),
-    stoppedSettled: () => Promise.all([...settling]) }; // the kept metas' transcript answers (settleStopped) — a test's wait
+    stoppedSettled: () => Promise.all([...settling]), // the kept metas' transcript answers (settleStopped) — a test's wait
+    stoppedSessions }; // THE READ-BACK: the kept metas as /api/sessions' stopped rows (routes/sessions, server.js)
 }
-module.exports = { create, heldOriginOf, persistNoStart }; // r5: the two held-origin helpers are PURE over a meta + store (test-codex-pool §R17b)
+module.exports = { create, heldOriginOf, persistNoStart, resumeIdOf, STOP_DEAD_SOCKET }; // r5: the two held-origin helpers are PURE over a meta + store (test-codex-pool §R17b)

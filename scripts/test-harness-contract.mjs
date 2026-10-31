@@ -994,6 +994,35 @@ console.log('\nstore: every declared field is read outside src/harnesses; a fake
   ok(!/'--output-format'/.test(wsc) && !/'--output-format'/.test(wrap) && /claude-transport\.js/.test(wrap), 'the stream-json flags are spelled in neither ws-create nor chat-wrapper');
 }
 
+// ── THE RESUMABLE ID (lane dead-socket-keeps-chat-meta, the owner's 2026-10-30 incident) ──
+// boot-restore keeps a dead LOCAL session STOPPED when its harness names a conversation it can resume, and deletes it only
+// when there is nothing to resume. That question is a HOOK every harness answers (store.resumeIdOf) or is PROVEN to have
+// none (no store: a terminal-only row) — never one generic claudeSessionId || backendSessionId. And «no transcript here»
+// is believed only from a locate that is PROOF (store.locateIsProof): agy's and ACP's locate answer null for every id.
+console.log('\n— the resumable id: every harness answers it or has none; locate is proof only where declared');
+{
+  const BR = require(path.join(REPO, 'src/server/boot-restore.js'));
+  const harnesses = require(path.join(REPO, 'src/harnesses/index.js'));
+  const U = 'a9e10000-0000-4000-8000-00000000000a';
+  for (const id of harnessIds()) {
+    const h = harnessOf(id);
+    if (!h.store) { ok(h.kind === 'terminal' && BR.resumeIdOf({ backend: id, backendSessionId: U, claudeSessionId: U }) === null, `${id}: no store ⇒ PROVEN to have nothing to resume (kind ${h.kind}; a dead socket deletes its meta)`); continue; }
+    ok(typeof h.store.resumeIdOf === 'function', `${id}: store.resumeIdOf is declared (the conversation a stopped meta resumes by)`);
+    const field = h.spawn && h.spawn.conversationIdField;
+    ok(BR.resumeIdOf({ backend: id, backendSessionId: U }) === U && BR.resumeIdOf({ backend: id }) === null && (!field || BR.resumeIdOf({ backend: id, [field]: 'f-1', backendSessionId: U }) === 'f-1'),
+      `${id}: it answers its own id (${field ? field + ' first, then ' : ''}backendSessionId) and null for a meta that names none`);
+    ok(h.store.locateIsProof === undefined || h.store.locateIsProof === true, `${id}: store.locateIsProof is true or absent (${h.store.locateIsProof})`);
+  }
+  ok(JSON.stringify(harnessIds().filter((id) => harnessOf(id).store?.locateIsProof === true).sort()) === JSON.stringify(['claude', 'codex']),
+    'locate is PROOF of «no transcript» for claude (the .jsonl) and codex (the rollout) only — agy\'s sqlite store and ACP agents answer null for every id');
+  // a FAKE harness through register() alone: boot-restore reaches ITS hook (no id branch anywhere)
+  harnesses.register({ id: 'acme-resume', label: 'Acme', quota: harnesses.NULL_QUOTA, store: { resumeIdOf: (m) => (m && m.acmeConv) || null } }, { replace: true });
+  try {
+    ok(BR.resumeIdOf({ backend: 'acme-resume', acmeConv: 'ac-1', backendSessionId: 'generic' }) === 'ac-1' && BR.resumeIdOf({ backend: 'acme-resume', backendSessionId: 'generic' }) === null,
+      'fake harness: the resumable id is ITS hook\'s answer — its own field, and none when its hook says none (the generic id is not used)');
+  } finally { harnesses.unregister('acme-resume'); }
+}
+
 // ── THE LONG TAIL'S DECLARED ROWS (lane dc-harness-tail, 2026-10-05) ──
 // terminalOnly / oauthUsage / globalUsageKey replaced 21 `=== 'shell'` / `=== 'claude'` / `=== 'codex'` spellings in the
 // window reach, the browser pickers, the New Session path, the usage ledger and the account roster. Conformance: every

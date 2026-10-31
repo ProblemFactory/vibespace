@@ -130,6 +130,8 @@ module.exports = {
   store: {
     discover: ({ activeSessions } = {}) => codexStore.listCodexThreadsAsync({ activeSessions }),
     locate: (id) => findCodexSessionJsonlPath(id),   // (threadId) → rollout path|null (cwd irrelevant)
+    locateIsProof: true, // a null PROVES no rollout is here (the walk + the remote cache) — the transcript worker's `locate` op
+    resumeIdOf: (meta) => (meta && typeof meta.backendSessionId === 'string' && meta.backendSessionId) || null, // THE RESUMABLE ID (boot-restore): the thread id
     createReader: (session, sessionId, opts) => new codexStore.CodexSessionMessages(session, sessionId, opts || {}),
     forkChain: (id) => { const p = findCodexSessionJsonlPath(id); return p ? (extractCodexThreadMeta(p).forkedFrom || []) : []; },
     forkChainEnv: 'CODEX_WEBUI_FORKED_FROM',       // where codex-chat-wrapper reads the chain (src/resume-store.js forkChainEnv)

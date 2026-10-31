@@ -51,9 +51,9 @@ const lines = (rel) => fs.readFileSync(path.join(FIX, rel), 'utf8').split('\n').
 console.log('— ① the token law (the reader never opens the login file)');
 {
   const pp = AS.storePaths(S);
-  ok(['db', 'subagents', 'messages', 'transcript', 'transcriptFull'].every((k) => AS.storeReadable(pp[k])) && AS.storeReadable(`${AS.storePaths(P).messages}/c0000000-0000-4000-8000-0000000000c4.json`),
-    'the store\'s own shapes are readable (db, subagents/ + messages/ dirs and files, both transcripts)', pp);
-  const refused = [AS.TOKEN_FILE, `./${AS.TOKEN_FILE}`, `brain/${S}/${SG}/messages/${AS.TOKEN_FILE}.json`, `brain/${S}/${SG}/logs/../../../${AS.TOKEN_FILE}`, `brain/${S}/${SG}/logs/../logs/transcript.jsonl`, 'settings.json', 'conversation_summaries.db', `brain/${S}/report.md`, `conversations/not-an-id.db`, '', null];
+  ok(['db', 'subagents', 'messages', 'transcript', 'transcriptFull'].every((k) => AS.storeReadable(pp[k])) && AS.storeReadable(`${AS.storePaths(P).messages}/c0000000-0000-4000-8000-0000000000c4.json`) && AS.storeReadable(AS.SUMMARIES),
+    'the store\'s own shapes are readable (db, subagents/ + messages/ dirs and files, both transcripts; lane dead-socket-keeps-chat-meta: the store\'s INDEX conversation_summaries.db at its root — a title + last write per conversation, read by data/bin/agy-summaries.js)', pp);
+  const refused = [AS.TOKEN_FILE, `./${AS.TOKEN_FILE}`, `brain/${S}/${SG}/messages/${AS.TOKEN_FILE}.json`, `brain/${S}/${SG}/logs/../../../${AS.TOKEN_FILE}`, `brain/${S}/${SG}/logs/../logs/transcript.jsonl`, 'settings.json', 'conversation_summaries.db-journal', `conversations/conversation_summaries.db`, `brain/${S}/conversation_summaries.db`, `brain/${S}/report.md`, `conversations/not-an-id.db`, '', null];
   ok(refused.every((r) => !AS.storeReadable(r)), 'the login file by its name ANYWHERE in a path, a `..` / `.` segment, a foreign shape, a non-id: refused', refused.filter((r) => AS.storeReadable(r)));
   ok(AS.storePaths('not-an-id') === null && AS.storePaths(`../${AS.TOKEN_FILE}`) === null && Object.values(AS.storePaths(S)).every((p) => !p.includes(AS.TOKEN_FILE)), 'storePaths builds a path only from a conversation id — never one naming the login file');
   const src = fs.readFileSync(path.join(REPO, 'src/agy-store.js'), 'utf8');

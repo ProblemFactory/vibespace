@@ -19,6 +19,7 @@ import { memberState, poolSubmenuModel, submenuNoteWords } from './pool-priority
 import { deviceLocale } from './i18n.js';
 import { DIALOG_ROOTS } from './form-yield.js'; // PURE (lane dialog-yield r2): the ONE «did the person open a dialog?» selector
 import { SIGN_IN } from '../day-one.js'; // lane door-day-one-landing: a sign-in terminal is not a session row
+import { resumeAccountOf } from './stopped-why.js'; // lane dead-socket-keeps-chat-meta: a resume nobody gave an account goes to the one its row names
 import { resumeAccountVerdict } from '../resume-account.js'; // lane resume-account-door: the pinned account is asked FIRST at the Resume press
 
 // lane mirror-green-228: a window's focus on the server's answer never takes the keys from an open app dialog (the Rename
@@ -949,7 +950,9 @@ export function installSessionLifecycle(App, ctx = {}) {
       worktree: worktree !== undefined ? worktree : savedCfg.worktree, // owner ruling 9: the choice rides resume/restart (and a fork, which the CLI strips)
       tools: savedCfg.tools, // lane new-session-form: the conversation's 「可用工具」 pick — the CLI records none of it, so a resume re-passes it
       autoResume: savedCfg.autoResume,     // tri-state: undefined = follow the instance default
-      accountId: accountId !== undefined ? accountId : savedCfg.account,
+      // …and, when neither the caller nor the saved config names one, the account its ROW names (a kept stopped meta's — the
+      // session's own; the agy index's account root — the store that holds it): never the harness's default by accident
+      accountId: accountId !== undefined ? accountId : resumeAccountOf(savedCfg.account, this.sidebar?._allSessions, backend, targetBackendId),
       modelLock: savedCfg.modelLock,  // #6 lock v2: a locked conversation stays locked across resume (re-pin re-arms)
       lockModel: savedCfg.lockModel,
       poolPin: savedCfg.poolPin, // 2026-09-28: the conversation's pool pin rides a resume (never a fork)
@@ -981,7 +984,8 @@ export function installSessionLifecycle(App, ctx = {}) {
     const saved = this.sidebar?.getSessionConfig?.({ backend, backendSessionId }) || {};
     const bill = billingRow(backend);
     return resumeAccountVerdict({
-      pinned: { account: saved.account || '', backend, host: hostId || null },
+      // the account the create WILL use (resumeAccountOf — r2: the row's own account is judged, not the default it never runs on)
+      pinned: { account: resumeAccountOf(saved.account, this.sidebar?._allSessions, backend, backendSessionId) || '', backend, host: hostId || null },
       accounts: acc.accounts,
       loginStates: this._usageLogins || null,
       defaults: {

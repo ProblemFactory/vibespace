@@ -232,11 +232,16 @@ module.exports = {
   wrapper: 'data/bin/agy-wrapper.js',
   Normalizer: AcpMessageManager,
   store: {
+    // THE LIST (lane dead-socket-keeps-chat-meta): every account root's own index (conversation_summaries.db) — a title and
+    // the last write per conversation, read by a child (src/agy-discover.js); a stopped one resumes with its row's account
+    discover: (opts) => require('../agy-discover').discover({ ...(opts || {}), harnessId: 'antigravity' }),
     // agy keeps conversations in its own sqlite (~/.gemini/antigravity-cli/conversation_summaries.db) — no per-
     // conversation file to locate; the wrapper journal is the history (the ACP rule) — read with the cards of subs that
     // already ran under a wrapper older than the cards (src/agy-backfill.js, the cards' addendum) and, before the
     // journal's 800 KB ring, the conversation's own steps from agy's transcript.jsonl (lane agy-harness-fixes)
     locate: () => null,
+    resumeIdOf: (meta) => (meta && AS.isId(meta.backendSessionId) ? meta.backendSessionId : null), // THE RESUMABLE ID (boot-restore): agy's conversation uuid (`--conversation <id>`)
+    accountBound: true, // a conversation lives in ITS account root's store (routes/sessions heldAccountOf): a resume goes to that account or is refused — never the default
     SessionMessages: AGY_BACKFILL.AgySessionMessages,
     // the pre-read hook (S3): the conversation's transcript read ONCE, async, kept bounded — the reader splices the steps
     // before the ring from it (never a synchronous read on the attach path); opts.session names the account's root

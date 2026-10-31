@@ -336,6 +336,17 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
               }
             } catch { }
           }
+          // A RESUME THAT STATES NO ACCOUNT GOES TO THE ACCOUNT ITS CONVERSATION IS HELD ON (lane dead-socket-keeps-chat-meta
+          // r2 — the ONE seam every door crosses: the page's Resume, the For-you reply reopen, an automation's open): the
+          // conversation's stopped row names it (a kept meta's, the account root whose index lists it); a harness that keeps
+          // a conversation in its account's own store with no account named is refused by name — never the default, whose
+          // store does not hold it (acceptance r1: a For-you reply started agy on the default and adopted a NEW conversation).
+          if (data.resume && data.resumeId && !data.hostId && !data.accountId && !data.fork) {
+            let held = null;
+            try { held = require('./routes/sessions').heldAccountOf(backend, data.resumeId); } catch { held = null; }
+            if (held && held.refuse) { ws.send(JSON.stringify({ type: 'error', reqId: data.reqId, code: 'resume-account-unknown', resumeId: data.resumeId, message: held.refuse })); break; }
+            if (held && held.accountId) data.accountId = held.accountId;
+          }
           // ONE counter value for BOTH the id and the socket name (a fleet user's
           // 2026-08-11 incident, proven in production data): sockName re-read
           // `sessionCounterRef.value` ~100 lines and several AWAITS later

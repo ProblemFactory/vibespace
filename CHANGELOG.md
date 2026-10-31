@@ -2,6 +2,14 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.366 — 2026-10-31
+
+### Added
+- Antigravity conversations now appear in the session list with their title and last-used time, so one with no window left can still be resumed on its account.
+
+### Fixed
+- A conversation whose process died while the server was down now comes back as a stopped conversation you can resume, instead of disappearing.
+
 ## 2.369.365 — 2026-10-30
 
 ### Added

@@ -7,6 +7,7 @@ import { shownText } from './record-clear-ui.js'; // "Clear content…": a clear
 import { sessionDisplayName } from '../session-name.js'; // lane session-title-record: THE name ladder
 import { browserFactWords } from '../browser-fact.js'; // lane S2: THE browser fact's words (the card's chip prints them)
 import { stashHintChip } from './stash-strip.js'; // 2026-09-27: "N waiting" — what waits for this agent's next turn (the stash fact)
+import { stoppedWhyOf } from './stopped-why.js'; // lane dead-socket-keeps-chat-meta: a stopped row says WHY (its process ended while the server was down)
 import { createBackendIcon, createAgentKindIcon, createModeBackendIcon, getBackendMeta, getAgentKindMeta, getAgentRoleLabel, getAgentRoleShortLabel, getSessionKey, backendFeatureCaps, settingsPrefixFor, billingRow } from './agent-meta.js';
 
 /** Inline SVG icon helper — returns an HTML string for a 12x12 stroked icon */
@@ -327,6 +328,7 @@ export function renderSessionCard(s, { state, app, settings, expandedCardId, onE
         <span class="sess-state-chip" style="display:none"></span>
       </div>
       ${showCwd && cwdText ? `<div class="session-card-sub"><span class="session-card-cwd" data-tip="${escHtml(s.cwd)}">${cwdText}</span></div>` : ''}
+      ${stoppedWhyOf(s) ? `<div class="session-card-sub session-card-why" data-stop-reason="${escHtml(s.stopReason)}">${escHtml(stoppedWhyOf(s))}</div>` : ''}
     </div>
   </div>`;
   const row = card.querySelector('.session-card-row');

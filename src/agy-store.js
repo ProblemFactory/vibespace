@@ -27,7 +27,9 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const isId = (s) => typeof s === 'string' && UUID.test(s);
 const SG = '.system_generated';
 const ID = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}';
+const SUMMARIES = 'conversation_summaries.db'; // the store's INDEX: one row per conversation (title, last write, workspace) — never a transcript
 const READABLE = [
+  new RegExp(`^${SUMMARIES.replace('.', '\\.')}$`),
   new RegExp(`^conversations/${ID}\\.db$`),
   new RegExp(`^brain/${ID}/\\${SG}/(subagents|messages)$`),
   new RegExp(`^brain/${ID}/\\${SG}/(subagents|messages)/[\\w.-]{1,80}\\.json$`),
@@ -54,6 +56,18 @@ function storePaths(id) {
 
 const str = (v) => (typeof v === 'string' ? v : '');
 const clip = (s, n) => { const t = str(s); return t.length > n ? t.slice(0, n) + '…' : t; };
+/** The columns a reader asks the index for — what a conversation's ROW in a list needs, never its content. */
+const SUMMARY_SQL = 'SELECT conversation_id, title, last_modified_time, workspace_uris, nesting_depth FROM conversation_summaries WHERE nesting_depth = 0 ORDER BY last_modified_time DESC LIMIT 500';
+/** One index row → {id, title, at (ms), cwd} | null (PURE): a sub-agent's row (nesting_depth > 0) is never a conversation of
+ *  its own; `last_modified_time` is agy's `2026-10-30 08:58:46.926677824+00:00` (nanoseconds, a space); `workspace_uris` a
+ *  JSON array of file:// URIs — the first one is the conversation's folder. */
+function summaryRowOf(row) {
+  if (!row || !isId(row.conversation_id) || Number(row.nesting_depth) > 0) return null;
+  const at = Date.parse(str(row.last_modified_time).trim().replace(' ', 'T').replace(/(\.\d{3})\d+/, '$1'));
+  let cwd = '';
+  try { const u = (JSON.parse(str(row.workspace_uris)) || [])[0]; if (typeof u === 'string' && u.startsWith('file://')) cwd = decodeURIComponent(new URL(u).pathname); } catch { cwd = ''; }
+  return { id: row.conversation_id, title: clip(str(row.title).replace(/\s+/g, ' ').trim(), 200), at: Number.isFinite(at) ? at : null, cwd };
+}
 const parseJson = (t, f = null) => { try { return JSON.parse(t); } catch { return f; } };
 const timeOf = (iso) => { const n = Date.parse(str(iso)); return Number.isFinite(n) ? n : null; };
 
@@ -469,7 +483,7 @@ function snapshotOf(read, { parentId, toolCallId, step, now = 0, max = 4000, max
 }
 
 module.exports = {
-  TOKEN_FILE, isId, storeReadable, storePaths,
+  TOKEN_FILE, isId, storeReadable, storePaths, SUMMARIES, SUMMARY_SQL, summaryRowOf,
   pbFields, pbTree, pbAll, pbStrings, dbStepOf, DB_STEP_TYPES, DB_STATUS,
   transcriptStepOf, resultBody, deliveredMessageOf, kindOfTool, stepRecords, writesOf, artifactRecordsOf,
   subagentRowOf, messageRowOf, taskOf, answersOf, createdSubagentOf, subagentInfoIds, subPhaseOf, cardOf,

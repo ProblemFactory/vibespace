@@ -11574,6 +11574,12 @@ export default {
   "Migrations": "数据迁移", // lane job-secrets-retire r3: the For-you group of a failed boot migration (src/migration-runner.js)
   // lane layout-stopped-window: the placeholder tile + one desktop restored alone
   "Session stopped — click to resume": "会话已停止 — 点击恢复",
+  // lane dead-socket-keeps-chat-meta: a session a boot kept stopped says why (the card, the resume bar, the tile, the resume-all offer)
+  "Its process ended while the server was down.": "服务器停机期间，它的进程已结束。",
+  "Resume interrupted sessions?": "恢复被中断的会话？",
+  "<b>{n}</b> sessions were interrupted (the server or a machine restarted) and reopened as read-only history. Resume all of them now?": "<b>{n}</b> 个会话被中断（服务器或机器重启），已作为只读历史重新打开。现在全部恢复吗？",
+  "{n} of them stopped because their process ended while the server was down.": "其中 {n} 个是因为服务器停机期间进程结束而停止的。",
+  "Resume all {n}": "全部恢复（{n}）",
   "Session unavailable": "会话不可用",
   "Press a desktop to restore it alone — your other desktops stay as they are now.": "点一个桌面只恢复它——其他桌面保持现在的样子。",
   "Restore only “{desktop}”": "只恢复「{desktop}」",

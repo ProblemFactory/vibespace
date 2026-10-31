@@ -38,6 +38,7 @@ import { serviceHref, serviceOpenSpec, publishArtifacts } from './artifact-card.
 import { requestPhrases } from '../command-words.js'; // PURE (lane door-healthy-chat): the waiting line's plain question
 import { stallVerdict, waitingOnUser } from '../turn-state.js'; // PURE (lane parked-ask-stall): the delivery-stall verdict + "is the turn waiting on the user"
 import { hasPendingHelperAsk, askState, isWaiting } from '../helper-ask.js'; // PURE (lane S1): a helper's permission ask — the fold rule + the waiting chip's words
+import { stoppedWhyFor } from './stopped-why.js'; // lane dead-socket-keeps-chat-meta: the read-only window says why its session stopped
 import { NeedsCards } from './chat-needs-card.js'; // lane chat-needs-you-card: this conversation's own For-you items as cards in its chat + the «waiting for you · N» chip
 
 // Agent-memory paths: the claude init frame's own `memory_paths` when the
@@ -6703,7 +6704,10 @@ class ChatView {
 
     const note = document.createElement('div');
     note.className = 'chat-resume-note';
-    note.textContent = t('Session is read-only.');
+    const spec = this.winInfo?._openSpec || {};
+    const why = stoppedWhyFor(spec.backend, spec.backendSessionId, this.app?.sidebar?._allSessions);
+    note.textContent = why ? `${why} ${t('Session is read-only.')}` : t('Session is read-only.');
+    if (why) note.dataset.stopWhy = '1';
 
     bar.append(note, btn);
     // Insert before status bar (which is the last child)

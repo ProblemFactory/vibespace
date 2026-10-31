@@ -51,6 +51,8 @@ function acpHarness({ ui, id, label, command, args = ['acp'], env = {}, store = 
     Normalizer: AcpMessageManager,
     store: {
       locate: typeof store.locate === 'function' ? store.locate : () => null,           // S3 name: (id, cwd) → path|null — ACP exposes no transcript read API; the wrapper journal is the history
+      // THE RESUMABLE ID (boot-restore): the ACP session id the wrapper loads (session/load, when the agent adverts it)
+      resumeIdOf: (meta) => (meta && typeof meta.backendSessionId === 'string' && meta.backendSessionId) || null,
       // RESUME CONTINUITY (B-6b6d): deliberately NO `lastTurnModel`/
       // `lastTurnEffort` here. ACP itself exposes no way to ask an agent what a
       // stopped conversation was running, and the hook's PRESENCE is the whole

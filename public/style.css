@@ -152,6 +152,8 @@ html, body {
 /* cwd: left-truncate (elide the front, keep the meaningful tail) like folder-path */
 .session-card-cwd { font-size: calc(9px * var(--ui-font-scale, 1)); color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; min-width: 0; }
 .session-card-cwd::before { content: '\200e'; content: '\200e' / ""; }
+/* a stopped row's WHY (lane dead-socket-keeps-chat-meta): «its process ended while the server was down» — one muted line */
+.session-card-why { font-size: calc(9px * var(--ui-font-scale, 1)); color: var(--text-dim); font-style: italic; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Connection-status dot (left of the name): LIVE/TMUX green, EXTERNAL amber, STOPPED dim */
 /* Connection status as a TOP-RIGHT corner dot on the backend icon (2.224.0
    structural merge — the standalone dot + gap left the row; the mode badge
