@@ -584,6 +584,28 @@ class UserTodoManager {
     if (n) { this._save(); this._notify(); }
     return n;
   }
+  /** lane vault-standing-request r5 (the r4 acceptance's TO VERIFY: the press's redraw wrote the producer's RAW facts onto the
+   *  item through reshapeItems — past the 24 KB bound add() files with, so a card filed as the «too large» stub came back whole
+   *  on disk and in every client): a producer's card DRAWN AGAIN in place with the words of now (vault-run-door redrawRun /
+   *  redrawRequest) — the ONE open item `pred` names, through THE bounds add() uses: the facts by normalizeCardFacts (the named
+   *  cuts, the {dropped} stub), the detail by DETAIL_MAX, the i18n by normalizeI18n (a shape it refuses ⇒ nothing changes).
+   *  ONE save + ONE broadcast. → { ok: true, facts } (the facts as stored) | { ok: false, code } */
+  redrawItem(pred, { detail, facts = null, i18n } = {}) {
+    const it = this._state.items.find((x) => x.status === 'open' && pred(x));
+    if (!it) return { ok: false, code: 'not_open' };
+    let words;
+    try { words = i18n === undefined ? undefined : normalizeI18n(i18n); } catch (e) { return { ok: false, code: 'i18n_refused', error: e.message }; }
+    const fx = normalizeCardFacts(facts);
+    const notObject = fx.fresh.includes('facts') && (typeof facts !== 'object' || Array.isArray(facts));   // the WHY of a drop, from the producer's own value (never the item's words in a log)
+    if (fx.fresh.length) console.warn(`[user-todos] ${String(it.sessionKey).slice(0, 80)}: the card drawn again — ${fx.fresh.includes('facts') ? `its facts were ${notObject ? 'not an object' : 'larger than 24 KB'} — dropped, the card shows its text only` : `its facts were cut — named in its fold: ${fx.fresh.join(', ')}`}`);
+    const raw = typeof detail === 'string' ? detail.trim() : '';
+    it.detail = raw ? raw.slice(0, DETAIL_MAX) : null;
+    if (fx.facts) it.facts = fx.facts; else delete it.facts;
+    if (words !== undefined) { if (words) it.i18n = words; else delete it.i18n; }
+    delete it.judged;   // the card's words moved: its place in the list is judged again
+    this._save(); this._notify();
+    return { ok: true, facts: fx.facts, detail: it.detail };
+  }
 
   _save() {
     // Prune: drop resolved items past the cap (open items never pruned) — the ones that ended unanswered first (EXPIRED_BY),

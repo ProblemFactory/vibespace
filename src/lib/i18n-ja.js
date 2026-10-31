@@ -11639,6 +11639,9 @@ export default {
   "no end": "無期限", // lane vault-standing-request r4 (per-scope ends: the card names each scope of its own a write replaces)
   "ended {when}": "{when} に終了", // lane vault-standing-request r4 (per-scope ends: the card names each scope of its own a write replaces)
   "What this card writes changed since you saw it — read it again and answer again": "このカードが書き込む内容が、表示されたあとに変わりました — もう一度読んでから答えてください", // lane vault-standing-request r4 (per-scope ends: the card names each scope of its own a write replaces)
+  "Drawn again at {time}: what this answer writes changed since the card was first shown — read it again.": "{time} に描き直しました：この回答が書き込む内容が、カードを最初に表示したときと変わりました — もう一度読んでください。", // lane vault-standing-request r5 (a card drawn again is marked)
+  "What Save writes:": "保存すると書き込まれる内容：", // lane vault-standing-request r5 (each scope's end before Save)
+  "(new)": "（新規）", // lane vault-standing-request r5 (each scope's end before Save)
   "{hostword} (via {tool})": "{hostword}（{tool} 経由）", // lane vault-standing-request r3 (the round-4 chip word had no zh / ja)
   "{hostword} (legacy wildcard: any tool)": "{hostword}（旧形式のワイルドカード：どのツールでも）", // lane vault-standing-request r3
   "Carried from an older version: this wildcard host is open to ANY program. Take it back (✕) and press «Always» on the next run of its tool — the new grant names its tool.": "古いバージョンから引き継がれたもの：このワイルドカードのホストはどのプログラムにも開いています。取り消して（✕）、そのツールの次の実行で「常に」を押してください——新しい許可にはツールが記されます。", // lane vault-standing-request r3

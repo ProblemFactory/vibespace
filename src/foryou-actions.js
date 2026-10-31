@@ -774,12 +774,22 @@ function runCardOf(item, { t = fmt } = {}) {
   const rows = [...(decides ? [decides] : []), ...RUN_ROWS.filter((k) => k !== decides)]
     .filter((k) => k !== 'folder' || folder).filter((k) => k !== 'secrets' || groups.length)
     .map((key) => ({ key, label: t(RUN_LABEL[key]), lines: lines[key], warn: key === decides || (key === 'hosts' && !known) }));
-  const cmdA = a.command && typeof a.command === 'object' && a.command.offered === true ? a.command : null;   // lane vault-standing-request: «Always (this command)» — the plain words beside it
-  // lane vault-standing-request r4 (B): the scopes of its OWN this «Always» REPLACES, on every entry (vault-run-door changeFactsOf) — said
-  // beside the button; none ⇒ it only adds (no line)
+  // lane vault-standing-request r5 (the r4 acceptance, MINOR 1 — «a card never offers or describes what its door refuses»): a
+  // LATE card (or one whose «Always» the door withdrew) has no «Always» — so no «Always (this command)» words, and the base's
+  // «No «Always»: <why>» line is back; the same rule as heldAnswers / the window's actions
+  const act = (item && item.action) || {};
+  const alwaysGone = act.late === true || act.always === false;
+  const cmdA = !alwaysGone && a.command && typeof a.command === 'object' && a.command.offered === true ? a.command : null;   // lane vault-standing-request: «Always (this command)» — the plain words beside it
+  // lane vault-standing-request r4 (B) + r5 (the r4 acceptance's MAJOR — the words lived only in the hint, which every client HIDES
+  // beside a hosts «Always»): the scopes of its OWN this «Always» REPLACES, on every entry (vault-run-door changeFactsOf) — drawn
+  // on the card's OWN row above the answers (`changes`), whatever the hint does; none ⇒ it only adds (no line). A decided card
+  // and one whose «Always» is gone draw none (nothing will be written by it); a card drawn again says so (`facts.redrawn`)
   const chs = (x) => (x && Array.isArray(x.changes) ? x.changes.filter((c) => c && typeof c === 'object' && str(c.scope)) : []);
-  const chA = !cmdA && a.offered === true ? chs(a) : [], chC = cmdA ? chs(cmdA) : [];
-  const hint = chA.length ? [{ text: chA.map((c) => changeWords(c, t)).join(' ') }] : cmdA ? [{ mono: str(cmdA.words) ? String(cmdA.words) : '' }, { text: ` — ${t(COMMAND_ALWAYS_WORDS)}` }, ...chC.map((c) => ({ text: ` ${changeWords(c, t)}` }))] : a.offered === true ? null : [{ text: t('No «Always»: {why}', { why: own(RUN_ALWAYS_WHY, a.why) ? t(RUN_ALWAYS_WHY[a.why]) : '' }).replace(/[:：]\s*$/, (m) => m.trimEnd()) }, ...(a.why && !own(RUN_ALWAYS_WHY, a.why) ? [{ code: String(a.why) }] : []), ...(str(a.directive) ? [{ mono: wholeOf(a, 'directive').shown }] : [])];
+  const open = !item.status || item.status === 'open';
+  const chList = !open || alwaysGone ? [] : cmdA ? chs(cmdA) : a.offered === true ? chs(a) : [];
+  const redrawn = open && f.redrawn && typeof f.redrawn === 'object' && Number(f.redrawn.at) > 0 ? t(REDRAWN_WORDS, { time: clockWords(Number(f.redrawn.at)) }) : null;
+  const changes = chList.length || redrawn ? { lines: chList.map((c) => [{ text: changeWords(c, t) }]), redrawn } : null;
+  const hint = cmdA ? [{ mono: str(cmdA.words) ? String(cmdA.words) : '' }, { text: ` — ${t(COMMAND_ALWAYS_WORDS)}` }] : a.offered === true ? null : [{ text: t('No «Always»: {why}', { why: own(RUN_ALWAYS_WHY, a.why) ? t(RUN_ALWAYS_WHY[a.why]) : '' }).replace(/[:：]\s*$/, (m) => m.trimEnd()) }, ...(a.why && !own(RUN_ALWAYS_WHY, a.why) ? [{ code: String(a.why) }] : []), ...(str(a.directive) ? [{ mono: wholeOf(a, 'directive').shown }] : [])];
   const templates = (Array.isArray(f.templates) ? f.templates : []).filter((x) => x && typeof x === 'object');
   // r8 (a store clips and says, never throws): a command longer than the body's RUN_CMD_BODY_MAX — `cmd` its start, `cmdCut`,
   // the whole (≤ RUN_CMD_MAX) in `cmdFull` (chunks — r23's shape; the store folds an older producer's the same way); the body
@@ -830,7 +840,7 @@ function runCardOf(item, { t = fmt } = {}) {
   const cmd = full && !/\u2026$/.test(cmd0) ? cmd0 + '\u2026' : cmd0;   // the body's cut is drawn as one
   const cutText = !full ? null : !foldCut ? t('The command is {n} characters long; the card shows its first {m} — the whole command is under “{fold}”.', { n: total, m: shown, fold: t('Technical details') })
     : t('The command is over {max} characters, so the whole command was not kept: see its run record in the Vault window. The card shows its first {m}.', { max: full.length, m: shown });   // r12: the cut point is what ARRIVED (the store's 4 096) — no producer states a total past it
-  return { headline, cmd, cut: full ? { n: total, whole: !foldCut, shown, text: cutText } : null, again, rows, always: { offered: a.offered === true, hint }, fold };
+  return { headline, cmd, cut: full ? { n: total, whole: !foldCut, shown, text: cutText } : null, again, rows, changes, always: { offered: a.offered === true && !alwaysGone, hint }, fold };
 }
 /** lane vault-standing-request r2 (VISUAL — 主开发's read of the standing card's shots: PROSE, the raw vault:// reference in
  *  its first line and half linkified on the phone; the run card already had the right shape): AN AGENT'S STANDING REQUEST
@@ -847,6 +857,9 @@ const REPLACES_WORDS = i18nKey('This conversation holds {scope} until {when} —
 const REPLACES_NOEND_WORDS = i18nKey('This conversation holds {scope} with no end — this replaces that grant: {scope} is then held {end}.');
 const REPLACES_ENDED_WORDS = i18nKey('This conversation\'s grant for {scope} ended {when} — it stays ended; this grants {scope} anew, {end}.');
 const ON_ENTRY_WORDS = i18nKey('On «{entry}»: {line}');
+// r5: a card the press drew again (what its answer writes moved since it was shown) is MARKED — never the same face as before
+// (= vault-run-door REDRAWN_LINE)
+const REDRAWN_WORDS = i18nKey('Drawn again at {time}: what this answer writes changed since the card was first shown — read it again.');
 const END_DAYS_WORDS = i18nKey('for {n} days'), END_HOURS_WORDS = i18nKey('for {n} hours'), END_NONE_WORDS = i18nKey('with no end');
 /** One change (vault-run-door changeFactsOf: {scope, until, expired?, entry?, end: {days} | {hours} | {none}}) in words. */
 function changeWords(c, t = fmt) {
@@ -880,7 +893,9 @@ function standingCardOf(item, { t = fmt } = {}) {
     ...(c ? [{ label: t('Program'), lines: [[{ mono: str(c.program) }]] }, ...(pre.length ? [{ label: t('Options'), lines: [[{ mono: pre.join(' ') }]] }] : []), { label: t('Script'), lines: [[{ mono: str(c.script) }]] }] : []),
     { label: t('How it ends'), lines: [[{ text: t(STANDING_ENDS_WORDS) }]] },
   ];
-  return { headline: t('{who} asks for a standing grant on “{secret}”', { who, secret }), cmd: '', cut: null, again: null, rows, always: { offered: false, hint: null }, fold };
+  const open = !item.status || item.status === 'open';
+  const redrawn = open && f.redrawn && typeof f.redrawn === 'object' && Number(f.redrawn.at) > 0 ? t(REDRAWN_WORDS, { time: clockWords(Number(f.redrawn.at)) }) : null;   // r5: its change lines are its «until» row; a card drawn again is marked
+  return { headline: t('{who} asks for a standing grant on “{secret}”', { who, secret }), cmd: '', cut: null, again: null, rows, changes: redrawn ? { lines: [], redrawn } : null, always: { offered: false, hint: null }, fold };
 }
 /** r9 (a store says when it DROPS): a run card whose facts the store dropped files a stub `{dropped, cut: ['facts']}` (no `v` —
  *  runCardOf reads it as no facts: the prose, as before) and its card says so in ONE line above the text. → words | null */

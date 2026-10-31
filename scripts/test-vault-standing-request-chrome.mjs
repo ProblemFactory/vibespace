@@ -261,6 +261,81 @@ try {
   await ownP2;
   check('its ✕ takes it back: the chip goes, and the next run of it draws its card again', gone === true && !!oc2, { gone, card: !!oc2 });
 
+  console.log('⑥b (r5, the r4 acceptance\'s MAJOR) WHAT THE ROW WILL BE IS ON THE CARD — the replace line on its own row above the answers (tray, For-you window, 390 px); a card drawn again is marked; the Save says each end first');
+  const rq3 = await cli('vibespace-vault', ['request', REF, '--standing', '--host', 'speech.example', '--for', 'call the speech API'], TOKEN);
+  const sc3 = (await openOf('vault-grant-ask')).find((i) => /speech\.example/.test(JSON.stringify(i.facts || {})));
+  const page5 = await reveal();
+  const y3 = sc3 && await A.api('POST', `/api/vault/request/asks/${sc3.action.askId}`, { answer: 'standing', page: page5 }, { 'X-Vault-Page': page5 || '' });
+  check('(the setup) speech.example is held with NO end — an agent\'s standing request, Allowed', rq3.code === 0 && !!y3 && y3.status === 200 && y3.json.ok, { rq3: rq3.out.slice(0, 200), y3: y3 && y3.json });
+  const run1 = cli('vibespace-vault', ['run', '--env', `T=${REF}`, '--', 'curl', '-m', '3', 'https://speech.example/v1/tts', 'https://upload.example/v1/put'], TOKEN, { timeout: 70000 });
+  let c1 = null;
+  for (let i = 0; i < 60 && !c1; i++) { c1 = (await openOf('vault-run-ask')).find((x) => /upload\.example/.test(String(x.detail))) || null; if (!c1) await sleep(200); }
+  const T_C1 = Date.now();   // the card's 60 s: the redraw below is pressed well inside it
+  check('a run to speech.example (held) + upload.example (not) draws its card — the hosts «Always» offered', !!c1 && c1.action.always === true && !c1.action.command, c1 && c1.action);
+  const LINE_ZH = '这个对话持有 speech.example，不设期限 — 这会替换那个授权：之后 speech.example 为期 30 天。';
+  const trayRow = () => A.evalJs(`(() => { const it = ${ITEM('/upload\\.example/')}; if (!it) return null; it.scrollIntoView({ block: 'center' }); const ch = it.querySelector('.ut-run-changes'), ans = it.querySelector('.ut-run-answer'), rd = it.querySelector('.ut-run-redrawn'); const r = it.getBoundingClientRect(), q = ch && ch.getBoundingClientRect(); return { changes: ch ? [...ch.querySelectorAll('.ut-run-line')].map((l) => l.textContent) : null, redrawn: rd ? rd.textContent : null, above: !!(ch && ans && (ch.compareDocumentPosition(ans) & Node.DOCUMENT_POSITION_FOLLOWING)), seen: !!(q && q.width > 0 && q.height > 0), inside: !!(q && q.left >= r.left - 1 && q.right <= r.right + 1), overflow: it.scrollWidth > it.clientWidth + 1, buttons: [...it.querySelectorAll('.ut-run-answer button')].map((b) => b.textContent.trim()), hint: !!it.querySelector('.ut-run-answer .ut-run-hint') }; })()`);
+  await openTray();
+  const t1 = await trayRow();
+  check(`the tray row: «${LINE_ZH}» on its OWN row ABOVE 允许一次 / 总是… / 拒绝 (never only in the hidden hint)`, !!t1 && t1.changes && t1.changes.length === 1 && t1.changes[0] === LINE_ZH && t1.above && t1.seen && t1.buttons.length === 3 && !t1.hint, t1);
+  await sleep(300);
+  await A.shot('vsr-10-replace-line-desktop.png');
+  await closeTray();
+  await A.evalJs(`app.openInbox({ itemId: ${JSON.stringify(c1 && c1.id)} }); true`);
+  const w1 = await A.until(`(() => { const ch = [...document.querySelectorAll('.iw-detail .ut-run-changes')].find((e) => e.getBoundingClientRect().width > 0); if (!ch) return null; const d = ch.closest('.iw-detail'), win = ch.closest('.window, .wm-window') || document.body, acts = [...win.querySelectorAll('.iw-actions')].find((a) => a.getBoundingClientRect().width > 0); return { line: [...ch.querySelectorAll('.ut-run-line')].map((l) => l.textContent), above: !!(acts && (d.compareDocumentPosition(acts) & Node.DOCUMENT_POSITION_FOLLOWING)), acts: acts ? [...acts.querySelectorAll('button')].map((b) => (b.title || b.textContent).trim()).filter(Boolean).slice(0, 6) : [] }; })()`, { timeout: 10000 });
+  check('the For-you window (the other client): the same line in its pane, above its action row', !!w1 && w1.line.length === 1 && w1.line[0] === LINE_ZH && w1.above, w1);
+  await sleep(300);
+  await A.shot('vsr-11-replace-line-foryou-window.png');
+  await A.evalJs(`(() => { for (const w of [...app.wm.windows.values()]) if (w.type === 'inbox') app.wm.closeWindow(w.id); return true; })()`); await sleep(300);
+  const narrow = async (on) => {
+    if (on) await A.cdp('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true }); else await A.cdp('Emulation.clearDeviceMetricsOverride', {});
+    await A.cdp('Page.navigate', { url: URL });
+    await A.until(`!!(window.app && app.replayOpenSpec)`, { timeout: 30000 });
+    await A.until(`!document.getElementById('loading-screen')`, { timeout: 30000 });
+    if (await A.evalJs(`!!document.getElementById('vault-unlock-dialog')`)) { await A.api('POST', '/api/vault/unlock', { password: SECOND }); await sleep(300); }
+  };
+  await narrow(true);
+  await openTray();
+  const p1 = await trayRow();
+  check('the phone (390 px): the line on its own row above the answers, inside the card (no sideways overflow)', !!p1 && p1.changes && p1.changes[0] === LINE_ZH && p1.above && p1.seen && p1.inside && !p1.overflow, p1);
+  await sleep(300);
+  await A.shot('vsr-12-replace-line-phone.png');
+  await closeTray();
+  // the card goes stale: ANOTHER card's «Always» writes speech.example (30 days) while this one waits — its press draws it again
+  const run2 = cli('vibespace-vault', ['run', '--env', `T=${REF}`, '--', 'curl', '-m', '3', 'https://speech.example/v2/tts', 'https://other.example/v1'], TOKEN, { timeout: 70000 });
+  let c2 = null;
+  for (let i = 0; i < 60 && !c2; i++) { c2 = (await openOf('vault-run-ask')).find((x) => /other\.example/.test(String(x.detail))) || null; if (!c2) await sleep(200); }
+  const page6 = await reveal();
+  const a2 = c2 && await A.api('POST', `/api/vault/run/asks/${c2.action.askId}`, { answer: 'always' }, { 'X-Vault-Page': page6 || '' });
+  await run2;
+  const a1 = c1 && await A.api('POST', `/api/vault/run/asks/${c1.action.askId}`, { answer: 'always' }, { 'X-Vault-Page': page6 || '' });
+  check('another card\'s «Always» wrote speech.example (30 days); THIS card\'s press then writes nothing — 409 ask_redrawn (inside its 60 s)', !!a2 && a2.status === 200 && a2.json.ok && !!a1 && a1.status === 409 && a1.json.code === 'ask_redrawn' && Date.now() - T_C1 < 55000, { a2: a2 && a2.json, a1: a1 && a1.json, ms: Date.now() - T_C1 });
+  await openTray();
+  const p2 = await A.until(`(() => { const it = ${ITEM('/upload\\.example/')}; return it && it.querySelector('.ut-run-redrawn') ? true : null; })()`, { timeout: 8000 }) && await trayRow();
+  const REDRAWN_RE = /^已于 \S+ 重新绘制：这个回答要写入的内容与卡片最初显示时不同 — 请重新阅读。$/, NOW_RE = /^这个对话持有 speech\.example，到 .+ — 这会替换那个授权：之后 speech\.example 为期 30 天。$/;
+  check('the card drawn again is MARKED (phone): «已于 HH:MM 重新绘制：…请重新阅读。» first on its row, then the line of NOW («…持有 speech.example，到 … — 这会替换那个授权…») — never the old face', !!p2 && REDRAWN_RE.test(String(p2.redrawn)) && p2.changes && p2.changes.length === 2 && NOW_RE.test(p2.changes[1]) && p2.inside && !p2.overflow, p2);
+  await sleep(300);
+  await A.shot('vsr-14-redrawn-card-phone.png');
+  await closeTray();
+  await narrow(false);
+  await openTray();
+  const d2 = await trayRow();
+  check('… and at a desk the same', !!d2 && REDRAWN_RE.test(String(d2.redrawn)) && d2.changes && NOW_RE.test(String(d2.changes[1])) && d2.above, d2);
+  await sleep(300);
+  await A.shot('vsr-13-redrawn-card-desktop.png');
+  await closeTray();
+  if (c1) await A.api('POST', `/api/vault/run/asks/${c1.action.askId}`, { answer: 'deny' });
+  await run1;
+  // r5 (MINOR 2): «As each has it now» — a host typed new takes the member's EARLIEST live end; the dialog says it BEFORE Save
+  await A.evalJs(`app.replayOpenSpec({ action: 'openVault' })`);
+  await A.until(`(() => { const r = ${LIST_ROW(LABEL)}; const b = r && r.querySelector('.vw-use-grant'); if (!b) return null; b.click(); return true; })()`, { timeout: 15000 });
+  const pv1 = await A.until(`(() => { const d = document.getElementById('vault-use-grant'); const h = d && d.querySelector('.vw-use-hosts'), e = d && d.querySelector('.vw-use-end'); if (!h || !e) return null; const was = h.value; h.value = (was ? was + ', ' : '') + 'new.example'; h.dispatchEvent(new Event('input', { bubbles: true })); const p = d.querySelector('.vw-use-preview'); const out = { was, end: e.value, preview: p && !p.hidden ? p.textContent : null, fresh: p ? [...p.querySelectorAll('.vw-use-scope-new')].map((s) => s.textContent) : [] }; p && p.scrollIntoView({ block: 'center' }); return out; })()`, { timeout: 10000 });
+  check('「谁可以用…」 under «各自保持现有设置» (the member holds commands with no end and hosts with 30 days): a host typed new is said BEFORE Save — «new.example · 30 天 （新）», the earliest live end, never 无限期', !!pv1 && pv1.end === 'keep' && pv1.fresh.length === 1 && /^new\.example · (29|30) 天 （新）$/.test(pv1.fresh[0]) && /保存后写入：/.test(String(pv1.preview)) && /speech\.example · (29|30) 天/.test(String(pv1.preview)) && /无限期/.test(String(pv1.preview)), pv1);
+  await sleep(200);
+  await A.shot('vsr-15-save-preview-desktop.png');
+  // put the field back as it was (the dialog's unsaved guard sees no change), then Cancel — nothing is saved
+  await A.evalJs(`(() => { const d = document.getElementById('vault-use-grant'); const h = d && d.querySelector('.vw-use-hosts'); if (h) { h.value = ${JSON.stringify((pv1 && pv1.was) || '')}; h.dispatchEvent(new Event('input', { bubbles: true })); } const b = d && [...d.querySelectorAll('button')].find((x) => x.classList.contains('btn-cancel')); if (b) b.click(); return true; })()`);
+  check('Cancel closes it with nothing saved', !!(await A.until(`!document.getElementById('vault-use-grant')`, { timeout: 5000 })));
+
   console.log('⑦ (r3, MAJOR 1) A LEGACY WILDCARD — carried from an older version with no tool: named on its row, the owner told once');
   await stopServer();
   {   // the hub is stopped: write what the shipped carry wrote — its own vault's mark over the writer's canon (a fresh entry: generation 0)

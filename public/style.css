@@ -8225,13 +8225,17 @@ button.mounts-exit-last:hover { color: var(--text-secondary); text-decoration: u
 .ut-run-warn > .ut-run-lbl, .ut-run-warn > .ut-run-val { color: var(--warn-text); font-weight: 600; }
 .ut-run-answer { align-items: center; flex-wrap: wrap; }
 .ut-run-hint { flex: 1 1 16em; min-width: 0; font-size: 11px; color: var(--text-secondary); } /* beside the answers at a desk; its own line under them on a phone */
+/* lane vault-standing-request r5: WHAT THE ROW WILL BE — the scopes of its own this answer replaces, on the card's own row above
+   the answers (never only in the hint the hosts «Always» hides); a card the press drew again is marked first */
+.ut-run-changes { margin-top: 6px; padding: 3px 0 3px 8px; border-inline-start: 2px solid var(--warn-text); font-size: 11px; line-height: 1.45; color: var(--text); min-width: 0; overflow-wrap: anywhere; }
+.ut-run-redrawn { color: var(--warn-text); font-weight: 600; }
 .ut-run-fold { margin-top: 6px; }
 .ut-run-fold > summary { font-size: 11px; color: var(--text-secondary); cursor: pointer; }
 .ut-run-tech { margin-top: 4px; }
 .iw-actions .ut-run-hint { align-self: center; font-size: 12px; }
 .iw-detail .ut-run { white-space: normal; } /* the pane's words keep their line breaks; the card's own boxes say how they wrap */
 .iw-detail .ut-run-cmd { font-size: 12px; padding: 6px 8px; }
-.iw-detail .ut-run-facts, .iw-detail .ut-run-tech { font-size: 12px; }
+.iw-detail .ut-run-facts, .iw-detail .ut-run-tech, .iw-detail .ut-run-changes { font-size: 12px; }
 /* r7 addendum — A CARD WITH A DEADLINE SHOWS IT: the time left by the SERVER's clock under the question (the page ticker moves
    it), the warning accent under 15 s; past it «time is up … waiting for the server» or the late answer's words — the answers
    always stay (r8: only the producer's settle withdraws them, never this device's clock) */
@@ -8924,6 +8928,9 @@ button.vw-chip { cursor: pointer; }
 .vw-use-legacy .vw-use-words { color: var(--warn-text); }
 .vw-use-scope { overflow-wrap: anywhere; }   /* lane vault-standing-request r4: ONE scope and its own end («a.example · 30 d»); a long one wraps inside a phone's chip */
 .vw-use-scope-ended { opacity: 0.6; text-decoration: line-through; }   /* r4: a scope past its end (its member's other scopes may live on) */
+.vw-use-preview-lbl { display: block; color: var(--text-secondary); }   /* r5: «What Save writes:» — each scope and the end it will have, before Save */
+.vw-use-preview-line { color: var(--text); overflow-wrap: anywhere; }
+.vw-use-scope-new { font-weight: 600; }
 .vw-use-except { color: var(--text-dim); }
 .vw-use-paused { opacity: 0.5; }
 .vw-use-paused-note { color: var(--text-dim); font-size: max(0.85em, 12px); margin-top: 2px; }   /* round 3 (MINOR): never shrink the note below a readable floor on a narrow phone */

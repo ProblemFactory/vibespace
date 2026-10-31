@@ -37,6 +37,15 @@
  * ROUND 3b (主开发's ruling on the flagged one — RED on 6665607bf by name):
  *   ⑱ a run card's own «Always» onto a LIVE member never widens it: another end ⇒ a REPLACEMENT that says so (exactly the
  *     asked hosts and end — never A+B with no end); the same end (both none) adds.
+ * ROUND 4 (THE ROOT MODEL — a member's scopes carry their own ends) ⑲–㉖, each RED on 45c537a29 by name (inline below).
+ * ROUND 5 (the r4 acceptance of 50873938d — RED on it by name):
+ *   ㉗ (MAJOR) what the row will be is drawn ON the card's own row above the answers, in every client (the tray / chat row, the
+ *     For-you window's pane, 中文) — never only in the hint the hosts «Always» hides;
+ *   ㉘ a card the press drew again is MARKED (its change row and its prose) — never the old face;
+ *   ㉙ (MINOR 1) a LATE card describes no «Always» (no «Always (this command)» words, the base's «No «Always»: why» line back);
+ *   ㉚ (MINOR 2) «As each has it now»: a new host takes the EARLIEST live end; with none live, the picker's default — said first;
+ *   ㉛ (TO VERIFY) a redraw goes through the For-you store's OWN bound — a 30 KB facts card stays the stub on disk;
+ *   ㉜ (the acceptance's press probe C3) a write that THROWS mid-press is restored like any failed one.
  * Each leg is guarded (a base tree without the feature fails BY NAME, never by a crash) — the RED control runs this file
  * against the base's src (report.md).
  */
@@ -70,7 +79,7 @@ fs.rmSync(ROOT, { recursive: true, force: true }); fs.mkdirSync(ROOT, { recursiv
 const PW = 'second password for the standing-request suite';
 const BIN = path.join(ROOT, 'bin');
 fs.mkdirSync(BIN, { recursive: true });
-for (const t of ['curl', 'wget', 'python3', 'sh', 'bash', 'deno', 'lua', 'mytool', 'aws']) fs.writeFileSync(path.join(BIN, t), `#!${process.execPath}\nprocess.stdout.write('${t} ran ' + (process.env.T ? 'with T' : 'without T') + ' for ' + process.argv.slice(2).join(' ') + '\\n');\n`, { mode: 0o555 });
+for (const t of ['curl', 'wget', 'python3', 'sh', 'bash', 'deno', 'lua', 'mytool', 'aws']) fs.writeFileSync(path.join(BIN, t), `#!/bin/sh\nif [ -n "$T" ]; then w='with T'; else w='without T'; fi\nprintf '%s ran %s for %s\\n' '${t}' "$w" "$*"\n`, { mode: 0o555 });   // r5: a /bin/sh fake (ABSOLUTE shebang — never recurses through a fake named sh) — a node fake per run was most of the suite's time
 fs.chmodSync(BIN, 0o555);   // read-only, declared root-owned below: programWritable is false (psha null)
 process.on('exit', () => { try { fs.chmodSync(BIN, 0o755); fs.rmSync(ROOT, { recursive: true, force: true }); } catch { } });
 const VALUE = ['tts', 'api', 'key', crypto.randomBytes(8).toString('hex')].join('-');   // built at runtime (never a literal secret)
@@ -109,10 +118,11 @@ async function runAnswered(w, args, { answer = null, reauthed = false, caller = 
   let card = null;
   const t = Date.now();
   while (!settled && Date.now() - t < 3000) { const c = cardsOf(w).filter((x) => !before.has(x.id)); if (c.length) { card = c[c.length - 1]; break; } await sleep(5); }
+  const drawn = card ? JSON.parse(JSON.stringify(card)) : null;   // r5: the card AS DRAWN (the snapshot's item is live — after the press it reads as decided)
   let a = null;
   if (card && answer) a = door.answer(card.action.askId, { answer, reauthed, ...(ttl ? { ttl } : {}) });
   if (card && !leave && (!answer || (a && !a.ok))) door.answer(card.action.askId, { answer: 'deny' });
-  return { r: await p, card, a };
+  return { r: await p, card, drawn, a };
 }
 /** r4: a stored member read as its SCOPES — the r4 shape (`scopes`, each its own end) or the one-end shape before it (each scope
  *  with the member's end) — read HERE, never through the tree's own reader, so the RED control on a base tree reads the same.
@@ -134,6 +144,18 @@ const endOfScope = (m, host) => { const s = m && m.scopes.find((x) => x.kind ===
 const memberOf = (w, cid = CID) => { const [row] = w.grants.rowsFor('vault-use', w.e.id); return row ? viewOf((row.to || []).find((m) => m.key === cid) || null) : null; };
 const useLines = (w) => { try { return fs.readFileSync(path.join(w.dataDir, 'vault-audit.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l)).filter((x) => x.event === 'vault-use'); } catch { return []; } };
 const sha = (p) => crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');
+// r5: THE CARD AS THE CLIENTS DRAW IT — the tray / chat row and the phone (user-todos-row runFactsHtml, with its answers), the
+// For-you window's pane and a record's fold (the same renderer, buttons: false — the window's answers are its action row); in
+// the viewer's language (the client dictionaries)
+const ROW = await import(new URL('../src/lib/user-todos-row.js', import.meta.url).href).catch(() => null);
+const VUR = await import(new URL('../src/lib/vault-use-row.js', import.meta.url).href).catch(() => null);
+const ZH = (await import(new URL('../src/lib/i18n-zh.js', import.meta.url).href)).default;
+const tFor = (d) => (s, p) => { let x = (d && d[s]) || s; if (p) x = x.replace(/\{(\w+)\}/g, (m, k) => (p[k] !== undefined ? String(p[k]) : m)); return x; };
+const textOf = (h) => String(h || '').replace(/<[^>]+>/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, '&');
+const drawnHtml = (item, t = tFor(null), opts) => (ROW && typeof ROW.runFactsHtml === 'function' && item ? ROW.runFactsHtml(item, t, opts) : '');
+/** the card's OWN row of what its answer writes, as text (null = none drawn) */
+const changeRowIn = (html) => { const m = /<div class="ut-run-changes"[^>]*>([\s\S]*?)<\/div>/.exec(String(html || '')); return m ? textOf(m[1].replace(/<\/span><span/g, '</span>\n<span')) : null; };
+const changeRowOf = (item, t, opts) => changeRowIn(drawnHtml(item, t, opts));
 /** r3: plant a row of LEGACY members exactly as the 2.369.363/.364 carry stored them — a wildcard host, NO tool, no source —
  *  under the vault's own mark over the writer's canon at generation 0 (a fresh row: no generation yet). The same member the
  *  reviewer's probe wrote with the base's own code; it verifies on every tree since (the canon appends only when present). */
@@ -307,7 +329,7 @@ await leg('⑦ pin census', async () => {
   const missing = names.filter((n) => !G[n]);
   ok(names.length >= 30 && !missing.length, `⑦a every one of the ${names.length} SHELLS + INTERPRETERS rows has a pin-grammar row (a grammar, or «none» with its why)`, missing);
   const CB = path.join(ROOT, 'cbin'); fs.mkdirSync(CB, { recursive: true });
-  for (const n of names) fs.writeFileSync(path.join(CB, n), `#!${process.execPath}\nprocess.stdout.write('ran');\n`, { mode: 0o555 });
+  for (const n of names) fs.writeFileSync(path.join(CB, n), '#!/bin/sh\nprintf ran\n', { mode: 0o555 });
   fs.chmodSync(CB, 0o555);
   process.on('exit', () => { try { fs.chmodSync(CB, 0o755); } catch { } });
   const w = await world({ bin: CB });
@@ -511,10 +533,14 @@ await leg('⑭ legacy wildcard', async () => {
 console.log('⑮ (r3 MAJOR 2, expired-revived — r4: re-derived) AN ENDED SCOPE IS NEVER REVIVED — it stays as history; only a write that NAMES it grants it anew, and its card says so');
 await leg('⑮ never revived', async () => {
   const X = { kind: 'conversation', key: CID, name: 'Transcriber' };
-  const w = await world();
-  w.door.setRunnable({ id: w.e.id, on: true, reauthed: true });
-  w.useGrants.addMember(w.e.id, X, { hosts: ['old.example'], until: Date.now() + 150, source: 'owner' });
-  await sleep(300);
+  const w = await world(), w3 = await world(), w4 = await world(), w6 = await world();   // r5: the four ended-scope worlds planted at once — ONE wait for their ends
+  for (const x of [w, w3, w6]) x.door.setRunnable({ id: x.e.id, on: true, reauthed: true });
+  w.useGrants.addMember(w.e.id, X, { hosts: ['old.example'], until: Date.now() + 60, source: 'owner' });
+  w3.useGrants.addMember(w3.e.id, X, { hosts: ['old.example'], until: Date.now() + 60, source: 'owner' });
+  w4.useGrants.addMember(w4.e.id, X, { hosts: ['old.example'], until: Date.now() + 60, source: 'card' });
+  w4.useGrants.addMember(w4.e.id, { kind: 'conversation', key: 'cid-live', name: 'L' }, { hosts: ['a.example'], until: Date.now() + 8 * 3600e3, source: 'card' });
+  w6.useGrants.addMember(w6.e.id, X, { hosts: ['old.example', 'keep.example'], until: Date.now() + 60, source: 'card' });
+  await sleep(120);
   const q = await w.door.request({ caller: w.caller(), entry: w.e.ref, purpose: 'probe', standing: true, command: 'python3 other.py', cwd: w.work });
   const card = openOf(w, 'vault-grant-ask').find((i) => q && i.action.askId === q.askId);
   ok(!!(card && card.facts && Array.isArray(card.facts.changes) && !card.facts.changes.length && !/replaces|ended/.test(card.detail)), '⑮a expired-revived (r4): a standing card for a COMMAND beside an ENDED host scope (old.example) names nothing — the write does not touch old.example', card && { facts: card.facts, detail: card.detail });
@@ -523,18 +549,10 @@ await leg('⑮ never revived', async () => {
   const v = w.useGrants.verdictFor(w.e.id, { conversationKeys: [CID], groupIds: [] }, { hosts: ['old.example'], destinationKnown: true });
   const c = await runAnswered(w, RUN(w.e.ref, 'curl', 'https://old.example/x'));
   ok(!!(y && y.ok && m && endOfScope(m, 'old.example') <= Date.now() && (m.commands || []).length === 1 && m.scopes.find((s) => s.kind === 'command').until === null && v && !v.ok && c.card), '⑮b … its Allow adds ONLY the command (no end): old.example stays ENDED on the row (history, never revived) — a curl to it draws its card', { m, v });
-  const w3 = await world();
-  w3.door.setRunnable({ id: w3.e.id, on: true, reauthed: true });
-  w3.useGrants.addMember(w3.e.id, X, { hosts: ['old.example'], until: Date.now() + 150, source: 'owner' });
-  await sleep(300);
   const r = await runAnswered(w3, RUN(w3.e.ref, 'python3', 'other.py', 's.mp3'), { answer: 'always', reauthed: true });
   const ca = r.card && r.card.facts && r.card.facts.always && r.card.facts.always.command;
   const m3 = memberOf(w3);
   ok(!!(ca && !(ca.changes || []).length && r.a && r.a.ok && m3 && endOfScope(m3, 'old.example') <= Date.now() && (m3.commands || []).length === 1), '⑮c the card road: «Always (this command)» beside an ENDED host scope names nothing and adds only the command — old.example stays ended', { ca, m3 });
-  const w4 = await world();
-  w4.useGrants.addMember(w4.e.id, X, { hosts: ['old.example'], until: Date.now() + 150, source: 'card' });
-  w4.useGrants.addMember(w4.e.id, { kind: 'conversation', key: 'cid-live', name: 'L' }, { hosts: ['a.example'], until: Date.now() + 8 * 3600e3, source: 'card' });
-  await sleep(300);
   const later = Date.now() + 30 * 86400e3, aEnd = endOfScope(memberOf(w4, 'cid-live'), 'a.example');
   w4.useGrants.addMember(w4.e.id, X, { hosts: ['new.example'], until: Date.now() + 8 * 3600e3, source: 'card' });
   w4.useGrants.addMember(w4.e.id, { kind: 'conversation', key: 'cid-live', name: 'L' }, { hosts: ['b.example'], until: later, source: 'card' });
@@ -548,15 +566,11 @@ await leg('⑮ never revived', async () => {
   const y5 = q5 && q5.askId && w5.door.answerRequest(q5.askId, { answer: 'standing', reauthed: true });
   const m5 = memberOf(w5);
   ok(!!(card5 && card5.facts && !(card5.facts.changes || []).length && !card5.facts.replaces && !/This replaces|replaces that grant/.test(card5.detail) && y5 && y5.ok && m5 && (m5.hosts || []).join() === 'api.tts.example' && (m5.commands || []).length === 1 && !m5.until), '⑮e the card says it replaces ONLY when it replaces: beside a member with NO end there is nothing to replace — no line, and the Allow adds the command to it', { facts: card5 && card5.facts, m5 });
-  const w6 = await world();
-  w6.door.setRunnable({ id: w6.e.id, on: true, reauthed: true });
-  w6.useGrants.addMember(w6.e.id, X, { hosts: ['old.example', 'keep.example'], until: Date.now() + 150, source: 'card' });
-  await sleep(300);
   const r6 = await runAnswered(w6, RUN(w6.e.ref, 'curl', 'https://old.example/x'), { answer: 'always', reauthed: true });
   const ch6 = r6.card && r6.card.facts && r6.card.facts.always && r6.card.facts.always.changes;
-  const hint6 = r6.card && (FA.runCardOf(r6.card, {}) || { always: {} }).always.hint;
+  const hint6 = changeRowOf(r6.drawn);   // r5: the card's OWN row of what it writes (the hint beside a hosts «Always» is hidden)
   const m6 = memberOf(w6);
-  ok(!!(ch6 && ch6.length === 1 && ch6[0].scope === 'old.example' && ch6[0].expired === true && /This conversation's grant for old\.example ended [^ ]+ — it stays ended; this grants old\.example anew, for 30 days\./.test(r6.card.detail) && JSON.stringify(hint6 || '').includes('it stays ended') && r6.a && r6.a.ok && m6 && endOfScope(m6, 'old.example') > Date.now() + 29 * 86400e3 && endOfScope(m6, 'keep.example') <= Date.now()), '⑮f r4: only a write that NAMES the ended scope grants it anew — the run card to old.example says «its grant ended …, it stays ended; this grants it anew, for 30 days» (detail, facts, the hint); its press gives old.example its own 30 days and keep.example stays ended', { ch6, hint6, m6 });
+  ok(!!(ch6 && ch6.length === 1 && ch6[0].scope === 'old.example' && ch6[0].expired === true && /This conversation's grant for old\.example ended [^ ]+ — it stays ended; this grants old\.example anew, for 30 days\./.test(r6.card.detail) && String(hint6 || '').includes('it stays ended') && r6.a && r6.a.ok && m6 && endOfScope(m6, 'old.example') > Date.now() + 29 * 86400e3 && endOfScope(m6, 'keep.example') <= Date.now()), '⑮f r4: only a write that NAMES the ended scope grants it anew — the run card to old.example says «its grant ended …, it stays ended; this grants it anew, for 30 days» (detail, facts, r5: the card\'s own row); its press gives old.example its own 30 days and keep.example stays ended', { ch6, hint6, m6 });
 });
 
 console.log('⑯ (r3 MAJOR 3, pin-doors) A SCRIPT WORD IS PINNED ONLY WHERE THE INTERPRETER READS THAT FILE');
@@ -689,13 +703,13 @@ await leg('㉑ P3', async () => {
   const w2 = await world();
   const F2 = entryOf(w2, 'Upload key');
   for (const id of [w2.e.id, F2.id]) w2.door.setRunnable({ id, on: true, reauthed: true });
-  w2.useGrants.addMember(w2.e.id, X, { hosts: ['new2.example'], until: Date.now() + 150, source: 'card' });
-  w2.useGrants.addMember(F2.id, X, { hosts: ['new2.example', 'other.example'], until: Date.now() + 150, source: 'card' });
-  await sleep(300);
+  w2.useGrants.addMember(w2.e.id, X, { hosts: ['new2.example'], until: Date.now() + 60, source: 'card' });
+  w2.useGrants.addMember(F2.id, X, { hosts: ['new2.example', 'other.example'], until: Date.now() + 60, source: 'card' });
+  await sleep(120);
   const r2 = await runAnswered(w2, ['--env', `T=${w2.e.ref}`, '--env', `U=${F2.ref}`, '--', 'curl', 'https://new2.example/v1'], { answer: 'always', reauthed: true });
   const ch = (r2.card && r2.card.facts && r2.card.facts.always && r2.card.facts.always.changes) || [];
-  const hint = r2.card && (FA.runCardOf(r2.card, {}) || { always: {} }).always.hint;
-  ok(!!(ch.length === 2 && ch.every((c) => c.scope === 'new2.example' && c.expired === true) && new Set(ch.map((c) => c.entry)).size === 2 && r2.card.detail.includes('On «TTS API key»: This conversation\'s grant for new2.example ended') && r2.card.detail.includes('On «Upload key»: This conversation\'s grant for new2.example ended') && JSON.stringify(hint || '').includes('Upload key') && r2.a && r2.a.ok && endOfScope(memberOn(w2, F2.id), 'other.example') <= Date.now()), '㉑b P3: … and where the write DOES replace on several entries, the card names EVERY entry\'s change — one line per entry («On «TTS API key»: …», «On «Upload key»: …», the facts and the hint); other.example (not named) stays ended', { ch, hint });
+  const hint = changeRowOf(r2.drawn);   // r5: the card's OWN row (one line per entry)
+  ok(!!(ch.length === 2 && ch.every((c) => c.scope === 'new2.example' && c.expired === true) && new Set(ch.map((c) => c.entry)).size === 2 && r2.card.detail.includes('On «TTS API key»: This conversation\'s grant for new2.example ended') && r2.card.detail.includes('On «Upload key»: This conversation\'s grant for new2.example ended') && String(hint || '').includes('On «Upload key»: This conversation\'s grant for new2.example ended') && String(hint || '').includes('On «TTS API key»:') && r2.a && r2.a.ok && endOfScope(memberOn(w2, F2.id), 'other.example') <= Date.now()), '㉑b P3: … and where the write DOES replace on several entries, the card names EVERY entry\'s change — one line per entry («On «TTS API key»: …», «On «Upload key»: …», the facts and — r5 — the card\'s own row); other.example (not named) stays ended', { ch, hint });
 });
 
 console.log('㉒ (r4, the acceptance P4) ALL-OR-NOTHING FOR REAL — the restore is RAW, its every answer read, a failed one stops the press by name');
@@ -730,9 +744,9 @@ await leg('㉒ P4', async () => {
   const E3 = entryOf(w3, 'Full key');
   w3.useGrants.addMember(E3.id, X, { hosts: many, source: 'card' });
   for (const id of [w3.e.id, E3.id]) w3.door.setRunnable({ id, on: true, reauthed: true });   // the unlock's first read ran (its wildcard carry found nothing yet)
-  const legacyGone = Date.now() + 150;
+  const legacyGone = Date.now() + 60;
   plantLegacy(w3, [{ key: CID, name: 'Transcriber', hosts: ['*.amazonaws.com'], until: legacyGone }]);   // planted AFTER the carry: a legacy aws wildcard, no tool, about to end
-  await sleep(300);
+  await sleep(120);
   const r3 = await runAnswered(w3, ['--env', `T=${w3.e.ref}`, '--env', `U=${E3.ref}`, '--', 'aws', 's3', 'ls'], { answer: 'always', reauthed: true, ttl: 'forever' });
   const m3 = memberOf(w3);
   ok(!!(r3.card && ((r3.card.facts.always || {}).changes || []).some((c) => c.scope === '*.amazonaws.com' && c.expired === true) && r3.a && !r3.a.ok && r3.a.code === 'too_many_hosts' && m3 && endOfScope(m3, '*.amazonaws.com') === legacyGone && !(m3.toolFor || {})['*.amazonaws.com']), '㉒c … where the refused press had REPLACED a legacy wildcard (its card named it — the aws run re-mints *.amazonaws.com with its tool), the restore puts the tool-less ENDED scope back exactly — what no row rule would let anyone save anew', { a: r3.a, m3, always: r3.card && r3.card.facts.always });
@@ -792,10 +806,11 @@ await leg('㉔ 40 segments', async () => {
 console.log('㉕ (r4, D — the acceptance could not verify) THE AUDIT SAYS WHAT A WRITE DID; THE «ANY PROGRAM» NOTICE ONLY FOR A LIVE WILDCARD');
 await leg('㉕ audit + notice', async () => {
   const X = { kind: 'conversation', key: CID, name: 'Transcriber' };
-  const w = await world();
+  const w = await world(), w2 = await world();   // r5: both ended-scope worlds planted at once — ONE wait
   w.door.setRunnable({ id: w.e.id, on: true, reauthed: true });
-  w.useGrants.addMember(w.e.id, X, { hosts: ['old.example'], until: Date.now() + 150, source: 'card' });
-  await sleep(300);
+  w.useGrants.addMember(w.e.id, X, { hosts: ['old.example'], until: Date.now() + 60, source: 'card' });
+  plantLegacy(w2, [{ key: 'cid-Z', name: 'Z', hosts: ['*.legacy.example'], until: Date.now() + 60 }]);
+  await sleep(120);
   await runAnswered(w, RUN(w.e.ref, 'curl', 'https://a.example/x'), { answer: 'always', reauthed: true });
   await runAnswered(w, RUN(w.e.ref, 'curl', 'https://old.example/x'), { answer: 'always', reauthed: true });
   const q = await w.door.request({ caller: w.caller(), entry: w.e.ref, purpose: 'transcribe', standing: true, command: 'python3 transcribe.py', cwd: w.work });
@@ -804,9 +819,6 @@ await leg('㉕ audit + notice', async () => {
   const c1 = al[0] && al[0].changes && al[0].changes[0], c2 = al[1] && al[1].changes && al[1].changes[0], c3 = gl[0] && gl[0].changes && gl[0].changes[0];
   ok(!!(c1 && c1.entry === w.e.id && c1.added.length === 1 && c1.added[0].scope === 'a.example' && /^\d{4}-/.test(c1.added[0].until) && !c1.replaced.length && c2 && c2.replaced.length === 1 && c2.replaced[0].scope === 'old.example' && c2.replaced[0].ended === true && /^\d{4}-/.test(c2.replaced[0].was) && /^\d{4}-/.test(c2.replaced[0].until) && c3 && c3.added.length === 1 && c3.added[0].scope === 'python3 transcribe.py' && c3.added[0].until === null), '㉕a the audit line records what the write DID (the writer\'s result, never the card\'s guess) — per entry each scope added (+ its end) and each replaced (its old end, its new end, ended) — on the run card\'s «Always» and the standing Allow alike', { c1, c2, c3 });
   const notes = (x) => (x.userTodos.snapshot().open || []).filter((i) => /An older «Always» lets any program reach a wildcard host/.test(i.text));
-  const w2 = await world();
-  plantLegacy(w2, [{ key: 'cid-Z', name: 'Z', hosts: ['*.legacy.example'], until: Date.now() + 150 }]);
-  await sleep(300);
   w2.door.setRunnable({ id: w2.e.id, on: true, reauthed: true });   // the unlock's first read: the wildcard carry runs
   const w3 = await world();
   plantLegacy(w3, [{ key: 'cid-Z', name: 'Z', hosts: ['*.legacy.example'], until: Date.now() + DAY }]);
@@ -820,12 +832,158 @@ await leg('㉖ carry per scope', async () => {
   const w = await world();
   const aEnd = Date.now() + 5 * DAY, rowEnd = Date.now() + 30 * DAY;
   w.useGrants.addMember(w.e.id, X, { hosts: ['a.example'], until: aEnd, source: 'card' });
-  w.useGrants.addMember(w.e.id, X, { hosts: ['old.example'], until: Date.now() + 150, source: 'card' });
-  await sleep(300);
+  w.useGrants.addMember(w.e.id, X, { hosts: ['old.example'], until: Date.now() + 60, source: 'card' });
+  await sleep(120);
   const keyOf = (hosts) => 'v9:' + JSON.stringify(['/usr/bin/curl', null, [], [], hosts]);
   const c = w.useGrants.carry([{ conv: CID, key: keyOf(['a.example']), entries: [w.e.id], until: rowEnd }, { conv: CID, key: keyOf(['b.example']), entries: [w.e.id], until: rowEnd }, { conv: CID, key: keyOf(['old.example']), entries: [w.e.id], until: rowEnd }], { toolOfWild: VR.wildcardToolOf });
   const m = memberOf(w);
   ok(!!(c && c.carried === 3 && c.failed === 0 && m && endOfScope(m, 'a.example') === aEnd && endOfScope(m, 'b.example') === rowEnd && endOfScope(m, 'old.example') <= Date.now()), '㉖ the carry of «always» rows onto a member: a.example (held 5 days) keeps the EARLIER end — never a later one; b.example is added with ITS row\'s 30 days — never the member\'s; the ENDED old.example stays ended', { c, m });
+});
+
+// ── ROUND 5 (the r4 acceptance of 50873938d: the root model held; ONE MAJOR — the card's words were invisible — two minors, one
+// to verify, and the press probe's throw) — each RED on 50873938d by name ──
+console.log('㉗ (r5, MAJOR) THE CARD SAYS IT ON ITS FACE — a hosts «Always» that replaces a held scope draws the line on its OWN row above the answers, in every client');
+await leg('㉗ the line on the face', async () => {
+  const X = { kind: 'conversation', key: CID, name: 'Transcriber' };
+  const LINE = 'This conversation holds a.example with no end — this replaces that grant: a.example is then held for 30 days.';
+  const w = await world();
+  w.door.setRunnable({ id: w.e.id, on: true, reauthed: true });
+  w.useGrants.addMember(w.e.id, X, { hosts: ['a.example'], source: 'request' });   // a.example held with NO end (an Allowed standing request)
+  const b0 = new Set(cardsOf(w).map((x) => x.id));
+  const p0 = w.door.run({ caller: w.caller(), args: RUN(w.e.ref, 'curl', 'https://a.example/x', 'https://c.example/y'), cwd: w.work });   // a held host + one it does not hold ⇒ a card
+  const card0 = await cardAfter(w, b0), c = card0 && JSON.parse(JSON.stringify(card0)), tray = drawnHtml(c), pane = drawnHtml(c, undefined, { buttons: false }), zhTray = drawnHtml(c, tFor(ZH));
+  const v = c && FA.runCardOf(c, {});
+  ok(!!(c && c.action.always === true && !c.action.command && v && v.changes && v.changes.lines.length === 1 && v.changes.lines[0].map((x) => x.text).join('') === LINE && !v.always.hint), '㉗a the model: a hosts «Always» over a.example (held, no end) + c.example has ONE change line on the card\'s own row (`changes`) — «holds a.example with no end — this replaces that grant: a.example is then held for 30 days.» — never only in the hint (which a hosts «Always» does not show)', { changes: v && v.changes, hint: v && v.always.hint });
+  ok(changeRowIn(tray) === LINE && /data-answer="always"/.test(tray) && tray.indexOf('ut-run-changes') > 0 && tray.indexOf('ut-run-changes') < tray.indexOf('ut-run-answer') && !/ut-run-hint/.test(tray), '㉗b the tray / chat row (and the phone — the same row): the line on its OWN row ABOVE the three answers, the hosts «Always» among them (no hint beside it)', { row: changeRowIn(tray), tray: textOf(tray).slice(0, 400) });
+  ok(changeRowIn(pane) === LINE && !/data-answer=/.test(pane), '㉗c the For-you window\'s pane (its answers are the window\'s action row) draws the same line', { row: changeRowIn(pane) });
+  ok(changeRowIn(zhTray) === '这个对话持有 a.example，不设期限 — 这会替换那个授权：之后 a.example 为期 30 天。', '㉗d in 中文: «这个对话持有 a.example，不设期限 — 这会替换那个授权：之后 a.example 为期 30 天。»', { row: changeRowIn(zhTray) });
+  if (c) w.door.answer(c.action.askId, { answer: 'deny' }); await p0;
+  const w2 = await world();
+  w2.door.setRunnable({ id: w2.e.id, on: true, reauthed: true });
+  w2.useGrants.addMember(w2.e.id, X, { hosts: ['a.example'], until: Date.now() + 8 * 3600e3, source: 'owner' });   // 8 hours, the owner's Save
+  const r2 = await runAnswered(w2, RUN(w2.e.ref, 'curl', 'https://a.example/x', 'https://c.example/y'), { answer: 'always', reauthed: true });
+  const row2 = changeRowOf(r2.drawn);
+  const m2 = memberOf(w2);
+  ok(/^This conversation holds a\.example until .+ — this replaces that grant: a\.example is then held for 30 days\.$/.test(String(row2)) && r2.a && r2.a.ok && endOfScope(m2, 'a.example') > Date.now() + 29 * DAY, '㉗e an 8-hour scope the press STRETCHES to 30 days says so on the face the same way («holds a.example until … — this replaces that grant: … for 30 days») — and the press does exactly that', { row2, m2 });
+  const w3 = await world();
+  w3.door.setRunnable({ id: w3.e.id, on: true, reauthed: true });
+  const b3 = new Set(cardsOf(w3).map((x) => x.id));
+  const p3 = w3.door.run({ caller: w3.caller(), args: RUN(w3.e.ref, 'curl', 'https://c.example/y'), cwd: w3.work });
+  const c3 = await cardAfter(w3, b3), d3 = c3 && JSON.parse(JSON.stringify(c3));
+  ok(!!(d3 && changeRowOf(d3) === null && /data-answer="always"/.test(drawnHtml(d3))), '㉗f (unchanged) a hosts «Always» that only ADDS draws no change row', { row: d3 && changeRowOf(d3) });
+  if (c3) w3.door.answer(c3.action.askId, { answer: 'deny' }); await p3;
+});
+
+console.log('㉘ (r5, MAJOR) A CARD THE PRESS DREW AGAIN IS MARKED — never the old face (its change row and its prose say «Drawn again at …»)');
+await leg('㉘ the redrawn card differs', async () => {
+  const w = await world();
+  w.door.setRunnable({ id: w.e.id, on: true, reauthed: true });
+  const b0 = new Set(cardsOf(w).map((c) => c.id));
+  const pA = w.door.run({ caller: w.caller(), args: RUN(w.e.ref, 'curl', 'https://a.example/x'), cwd: w.work });
+  const cA = await cardAfter(w, b0); b0.add(cA && cA.id);
+  const pB = w.door.run({ caller: w.caller(), args: RUN(w.e.ref, 'curl', '-s', 'https://a.example/y'), cwd: w.work });
+  const cB = await cardAfter(w, b0);
+  const face0 = cB && drawnHtml(JSON.parse(JSON.stringify(cB)));
+  const aA = cA && w.door.answer(cA.action.askId, { answer: 'always', reauthed: true });
+  await sleep(5);
+  const aB1 = cB && w.door.answer(cB.action.askId, { answer: 'always', reauthed: true });
+  const it = cB && openOf(w, 'vault-run-ask').find((i) => i.id === cB.id);
+  const face1 = it && drawnHtml(it), row1 = changeRowIn(face1), zh1 = it && changeRowOf(it, tFor(ZH));
+  ok(!!(aA && aA.ok && aB1 && aB1.code === 'ask_redrawn' && changeRowIn(face0) === null && face1 !== face0 && /^Drawn again at \S+: what this answer writes changed since the card was first shown — read it again\.\nThis conversation holds a\.example until .+ — this replaces that grant: a\.example is then held for 30 days\.$/.test(String(row1))), '㉘a the card drawn again is NOT the old face: its own row now says «Drawn again at HH:MM: what this answer writes changed since the card was first shown — read it again.» and the line of now (the first face had no row at all)', { row1, aB1 });
+  ok(/^已于 \S+ 重新绘制：这个回答要写入的内容与卡片最初显示时不同 — 请重新阅读。/.test(String(zh1)) && !!it && /^Drawn again at \S+: what this answer writes changed/.test(String(it.detail)) && !!(it.facts && it.facts.redrawn && it.facts.redrawn.at > 0), '㉘b … in 中文 «已于 HH:MM 重新绘制：…请重新阅读。», and the prose (an older client; THE BELT\'s text) says it first; the facts carry the mark (`redrawn.at`)', { zh1, detail: it && String(it.detail).slice(0, 160) });
+  const aB2 = cB && w.door.answer(cB.action.askId, { answer: 'always', reauthed: true });
+  await pA; await pB;
+  ok(!!(aB2 && aB2.ok), '㉘c … and the marked card\'s next press writes (the belt reads the marked text)', aB2);
+  const w3 = await world();
+  w3.door.setRunnable({ id: w3.e.id, on: true, reauthed: true });
+  const q = await w3.door.request({ caller: w3.caller(), entry: w3.e.ref, purpose: 'call c', standing: true, hosts: ['c.example'], cwd: w3.work });
+  const sc0 = openOf(w3, 'vault-grant-ask').find((i) => q && i.action.askId === q.askId), sface0 = sc0 && drawnHtml(JSON.parse(JSON.stringify(sc0)));
+  const rc = await runAnswered(w3, RUN(w3.e.ref, 'curl', 'https://c.example/v'), { answer: 'always', reauthed: true });
+  const y1 = q && q.askId && w3.door.answerRequest(q.askId, { answer: 'standing', reauthed: true });
+  const sc = openOf(w3, 'vault-grant-ask').find((i) => q && i.action.askId === q.askId), sface1 = sc && drawnHtml(sc);
+  const y2 = q && q.askId && w3.door.answerRequest(q.askId, { answer: 'standing', reauthed: true });
+  ok(!!(rc.a && rc.a.ok && y1 && y1.code === 'ask_redrawn' && changeRowIn(sface0) === null && /^Drawn again at \S+: what this answer writes changed/.test(String(changeRowIn(sface1))) && /^Drawn again at /.test(String(sc && sc.detail)) && ((sc && sc.i18n && sc.i18n.detail) || [])[0] && sc.i18n.detail[0].key.startsWith('Drawn again at {time}') && y2 && y2.ok), '㉘d the standing card drawn again carries the mark too (its own row, its prose and its i18n lines first) — its change line stays its «直到» row; the next Allow writes', { y1, y2, row: changeRowIn(sface1) });
+});
+
+console.log('㉙ (r5, MINOR 1) A LATE CARD DESCRIBES NO «ALWAYS» — no «Always (this command)» words beside Allow once / Deny; the base\'s «No «Always»: why» is back');
+await leg('㉙ late card words', async () => {
+  const fast = { set: (fn, ms) => setTimeout(fn, ms === VR.ASK_TTL_MS ? 60 : ms), clear: (h) => clearTimeout(h) };
+  const w = await world({ timers: fast });
+  w.door.setRunnable({ id: w.e.id, on: true, reauthed: true });
+  const x = await runAnswered(w, RUN(w.e.ref, 'python3', 'transcribe.py', 'part01.mp3'), { leave: true });
+  await sleep(120);
+  const late = (w.userTodos.snapshot().open || []).find((i) => i.action && i.action.type === 'vault-run-ask' && i.action.late);
+  const live0 = drawnHtml(x.drawn), face = late && drawnHtml(late), v = late && FA.runCardOf(late, {});
+  const WHY = 'No «Always»: where it sends what it reads is unknown';
+  ok(/data-answer="always"/.test(live0) && textOf(live0).includes('means you trust this command itself'), '㉙a (control) the card while it could be answered offers «Always (this command)» and says what it means', textOf(live0).slice(0, 300));
+  ok(!!(late && face && !/data-answer="always"/.test(face) && /data-answer="once"/.test(face) && /data-answer="deny"/.test(face) && !textOf(face).includes('Always (this command)') && !textOf(face).includes('means you trust this command itself') && textOf(face).includes(WHY) && v && v.always.offered === false && JSON.stringify(v.always.hint).includes('No «Always»')), '㉙b the LATE card (Allow once / Deny) says nothing of an «Always (this command)» it no longer has — and keeps the base\'s «No «Always»: where it sends what it reads is unknown»', { hint: v && v.always.hint, face: textOf(face).slice(0, 400) });
+  const X = { kind: 'conversation', key: CID, name: 'Transcriber' };
+  const w2 = await world({ timers: fast });
+  w2.door.setRunnable({ id: w2.e.id, on: true, reauthed: true });
+  w2.useGrants.addMember(w2.e.id, X, { hosts: ['a.example'], source: 'request' });
+  const y = await runAnswered(w2, RUN(w2.e.ref, 'curl', 'https://a.example/x', 'https://c.example/y'), { leave: true });
+  await sleep(120);
+  const late2 = (w2.userTodos.snapshot().open || []).find((i) => i.action && i.action.type === 'vault-run-ask' && i.action.late);
+  ok(!!(changeRowOf(y.drawn) && late2 && changeRowOf(late2) === null && changeRowOf(late2, undefined, { buttons: false }) === null), '㉙c a late HOSTS card draws no change row either (its «Always» is gone — nothing it said would be written)', { live: changeRowOf(y.drawn), late: late2 && changeRowOf(late2) });
+});
+
+console.log('㉚ (r5, MINOR 2) «AS EACH HAS IT NOW» — a newly typed host takes the member\'s EARLIEST live end; with none live, the picker\'s default — said before Save');
+await leg('㉚ the Save\'s new-host end', async () => {
+  const S = VUR && typeof VUR.saveScopesOf === 'function' ? VUR.saveScopesOf : null;
+  const now = Date.now(), D5 = now + 5 * DAY;
+  const host = (h, until, expired = false) => ({ kind: 'host', host: h, until, ...(expired ? { expired: true } : {}) });
+  const endIn = (r, h) => { const s = r && r.scopes.find((x) => x.host === h); return s ? (s.until || null) : undefined; };
+  const r1 = S && S({ was: { scopes: [host('a.example', null), host('b.example', D5)] }, hosts: ['a.example', 'b.example', 'c.example'], endId: 'keep', now });
+  ok(!!(r1 && endIn(r1, 'c.example') === D5 && endIn(r1, 'a.example') === null && endIn(r1, 'b.example') === D5 && JSON.stringify(r1.fresh) === '[2]'), '㉚a a member holding a.example (no end) and b.example (5 days): c.example typed new under «As each has it now» takes b.example\'s 5 days — the EARLIEST live end — never no end because a.example has none; a and b keep their own', r1);
+  const r2 = S && S({ was: { scopes: [host('a.example', null), host('b.example', null)] }, hosts: ['a.example', 'b.example', 'c.example'], endId: 'keep', now });
+  ok(!!(r2 && endIn(r2, 'c.example') === null), '㉚b none only when EVERY live scope has none', r2);
+  const r3 = S && S({ was: { scopes: [host('a.example', now - DAY, true), host('b.example', now - 2 * DAY, true)] }, hosts: ['a.example', 'b.example', 'c.example'], endId: 'keep', now });
+  ok(!!(r3 && endIn(r3, 'c.example') === now + 30 * DAY && endIn(r3, 'a.example') === now - DAY && endIn(r3, 'b.example') === now - 2 * DAY), '㉚c every scope ENDED (no «now» to keep): c.example takes the picker\'s default, 30 days — never no end; the ended ones stay ended (history)', r3);
+  const r4 = S && S({ was: null, hosts: ['c.example'], endId: 'keep', now }), r5 = S && S({ was: { scopes: [host('a.example', null)] }, hosts: ['a.example', 'c.example'], endId: '8h', now });
+  ok(!!(r4 && endIn(r4, 'c.example') === now + 30 * DAY && r5 && endIn(r5, 'a.example') === now + 8 * 3600e3 && endIn(r5, 'c.example') === now + 8 * 3600e3), '㉚d a member new to the row the same (30 days); an explicit choice («8 hours») gives every scope that end', { r4, r5 });
+  const src = fs.readFileSync(path.join(REPO, 'src/lib/vault-use-row.js'), 'utf8');
+  ok(/const plan = saveScopesOf\(\{ was, hosts: h, cmds, endId: endSel\.value \}\)/.test(src) && /const plan = planOf\(\);/.test(src) && /t\('What Save writes:'\)/.test(src) && /hostsIn\.addEventListener\('input', drawPreview\)/.test(src), '㉚e the dialog\'s Save AND its «What Save writes:» line (redrawn as the hosts, the end or who change) both go through saveScopesOf — the end a new host gets is on the screen before Save');
+});
+
+console.log('㉛ (r5, TO VERIFY) A REDRAW GOES THROUGH THE FOR-YOU STORE\'S OWN BOUND — a card filed as the «too large» stub stays the stub, never the raw bytes on disk');
+await leg('㉛ the redraw\'s facts bound', async () => {
+  const MARK = 'PADMARK' + crypto.randomBytes(6).toString('hex');
+  const orig = VR.cardFactsOf;
+  VR.cardFactsOf = (...a) => { const f = orig(...a); if (JSON.stringify((a[0] && a[0].argv) || []).includes('X-Big')) f.pad = Array.from({ length: 16 }, () => MARK + 'P'.repeat(1900)); return f; };   // a producer's facts past 24 KB (the door's own bound on a facts string is 2 000 — a long fold list)
+  try {
+    const w = await world();
+    w.door.setRunnable({ id: w.e.id, on: true, reauthed: true });
+    const b0 = new Set(cardsOf(w).map((c) => c.id));
+    const pA = w.door.run({ caller: w.caller(), args: RUN(w.e.ref, 'curl', 'https://a.example/x'), cwd: w.work });
+    const cA = await cardAfter(w, b0); b0.add(cA && cA.id);
+    const pB = w.door.run({ caller: w.caller(), args: RUN(w.e.ref, 'curl', '-H', 'X-Big: 1', 'https://a.example/y'), cwd: w.work });
+    const cB = await cardAfter(w, b0);
+    const filed = cB && JSON.parse(JSON.stringify(cB.facts || null));
+    const aA = cA && w.door.answer(cA.action.askId, { answer: 'always', reauthed: true });
+    await sleep(5);
+    const aB = cB && w.door.answer(cB.action.askId, { answer: 'always', reauthed: true });
+    const it = cB && w.userTodos.get(cB.id);
+    w.userTodos.flush();
+    const disk = fs.readFileSync(path.join(w.dataDir, 'user-todos.json'), 'utf8');
+    ok(!!(filed && filed.dropped === 'too-large' && aA && aA.ok && aB && aB.code === 'ask_redrawn' && it && it.status === 'open' && it.facts && it.facts.dropped === 'too-large' && it.facts.v === undefined && !disk.includes(MARK)), '㉛ a run card whose facts passed 24 KB was filed as the stub; the press that drew it again (ask_redrawn) files the stub AGAIN through the store\'s own bound — the raw facts never reach the item, a client or data/user-todos.json', { filed, facts: it && JSON.stringify(it.facts).slice(0, 160), onDisk: disk.includes(MARK) });
+    if (cB) w.door.answer(cB.action.askId, { answer: 'deny' });
+    await pA; await pB;
+  } finally { VR.cardFactsOf = orig; }
+});
+
+console.log('㉜ (r5, the acceptance\'s press probe C3) A WRITE THAT THROWS MID-PRESS IS RESTORED LIKE ANY FAILED ONE — named, never a half-write');
+await leg('㉜ a throw mid-press', async () => {
+  const w = await world();
+  const E2 = entryOf(w, 'Upload key');
+  for (const id of [w.e.id, E2.id]) w.door.setRunnable({ id, on: true, reauthed: true });
+  const row0 = JSON.stringify(((w.grants.rowsFor('vault-use', w.e.id)[0] || {}).to || []).map((m) => viewOf(m)));
+  const orig = w.useGrants.addMember;
+  w.useGrants.addMember = (id, ...a) => { if (id === E2.id) throw new Error('a planted throw on the second entry'); return orig.call(w.useGrants, id, ...a); };
+  let r = null;
+  try { r = await runAnswered(w, ['--env', `T=${w.e.ref}`, '--env', `U=${E2.ref}`, '--', 'curl', 'https://new.example/v1'], { answer: 'always', reauthed: true }); } finally { w.useGrants.addMember = orig; }
+  const row1 = JSON.stringify(((w.grants.rowsFor('vault-use', w.e.id)[0] || {}).to || []).map((m) => viewOf(m)));
+  const vE1 = w.useGrants.verdictFor(w.e.id, { conversationKeys: [CID], groupIds: [] }, { hosts: ['new.example'], destinationKnown: true });
+  ok(!!(r && r.a && r.a.ok === false && r.a.code === 'not_written' && row1 === row0 && vE1 && !vE1.ok && w.logs.some((l) => /a press's write for .* threw/.test(l))), '㉜ the second entry\'s write THROWS: the press answers `not_written` (never a throw out of the door), the first entry\'s row is exactly as before (new.example not admitted), and the hub\'s log names it', { a: r && r.a, row0, row1, vE1: vE1 && vE1.code });
 });
 
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);

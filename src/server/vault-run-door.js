@@ -959,12 +959,16 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     const touched = [], made = [], changes = []; let failCode = null;
     for (const id of ids) {
       touched.push(id);
-      const sr = setRunnable({ id, on: true, reauthed: true, by: String(by).slice(0, 40), keepPaused: true });
-      if (!sr.ok) { failCode = sr.code; break; }
-      const w = useGrants.addMember(id, principal, grant, { by: String(by).slice(0, 40) });
-      if (!w.ok) { failCode = w.code; break; }
-      made.push(w.grant); changes.push({ id, ...(w.changes || {}) });
-      resumeMember(id, w.grant);   // round 7 (MAJOR item 2): resume ONLY this member — the owner's OTHER paused grants on this entry stay paused
+      // r5 (the r4 acceptance's press probe C3: a write that THREW — not {ok:false} — left E1 written, no restore, no line): a throw
+      // anywhere in an entry's write is a failed write like any, restored below by the same road
+      try {
+        const sr = setRunnable({ id, on: true, reauthed: true, by: String(by).slice(0, 40), keepPaused: true });
+        if (!sr.ok) { failCode = sr.code; break; }
+        const w = useGrants.addMember(id, principal, grant, { by: String(by).slice(0, 40) });
+        if (!w.ok) { failCode = w.code; break; }
+        made.push(w.grant); changes.push({ id, ...(w.changes || {}) });
+        resumeMember(id, w.grant);   // round 7 (MAJOR item 2): resume ONLY this member — the owner's OTHER paused grants on this entry stay paused
+      } catch (e) { failCode = 'not_written'; log(`[vault-run] a press's write for ${id} threw (${String(e && e.message || e).slice(0, 160)}) — what it wrote is put back`); break; }
     }
     if (failCode) {
       const failed = [];
@@ -1326,6 +1330,8 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   const REPLACES_NOEND_LINE = 'This conversation holds {scope} with no end — this replaces that grant: {scope} is then held {end}.';
   const REPLACES_ENDED_LINE = 'This conversation\'s grant for {scope} ended {when} — it stays ended; this grants {scope} anew, {end}.';
   const ON_ENTRY_LINE = 'On «{entry}»: {line}';
+  // r5 (the r4 acceptance's MAJOR: a card drawn again looked exactly like the old one): its first line says it was drawn again
+  const REDRAWN_LINE = 'Drawn again at {time}: what this answer writes changed since the card was first shown — read it again.';
   const END_DAYS = 'for {n} days', END_HOURS = 'for {n} hours', END_NONE = 'with no end';
   const endLineOf = (ms) => (ms == null ? { key: END_NONE } : ms % 86400e3 === 0 ? { key: END_DAYS, params: { n: ms / 86400e3 } } : { key: END_HOURS, params: { n: Math.round(ms / 3600e3) } });
   const entryNameOf = (id) => { try { const ref = VI.parseRef(id), row = ref && rowOf(ref); return String((row && row.label) || (ref && ref.entry) || id).slice(0, 120); } catch { return String(id); } };
@@ -1341,41 +1347,58 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
   /** The same changes as the card's FACTS (foryou-actions words them in the viewer's language). */
   const changeFactsOf = (list, ms, { many = false } = {}) => (list || []).map((c) => ({ scope: c.scope, kind: c.kind, until: c.was, ...(c.expired ? { expired: true } : {}), ...(many ? { entry: entryNameOf(c.id) } : {}), end: ms == null ? { none: true } : ms % 86400e3 === 0 ? { days: ms / 86400e3 } : { hours: Math.round(ms / 3600e3) } }));
   /** r4 (B): the run card re-drawn in place with the words of NOW — its detail (the head and tail it was drawn with, the change
-   *  lines between) and its facts, on the open item and the ask alike (THE BELT then reads the same text). → the press's answer. */
+   *  lines between) and its facts, on the open item and the ask alike (THE BELT then reads the same text). r5: MARKED as drawn
+   *  again (its first line, `facts.redrawn`), and filed through the For-you store's OWN bounds (userTodos.redrawItem — the facts'
+   *  24 KB stub, the detail bound): a card the store cannot re-draw is settled `ask_changed`, never left showing the old words.
+   *  → the press's answer. */
   function redrawRun(q, list, ms) {
+    const at0 = now();
     const lines = changeLines(list, ms, { many: q.plan.many }).map(fill);
-    const detail = [...q.plan.head, ...lines, ...q.plan.tail].join('\n');
+    const detail = [fill({ key: REDRAWN_LINE, params: { time: new Date(at0).toISOString() } }), ...q.plan.head, ...lines, ...q.plan.tail].join('\n');
     if (detail.length > DETAIL_MAX) { settle(q, 'changed', 'item-changed'); return { ok: false, code: 'ask_changed' }; }
-    const facts = q.facts ? JSON.parse(JSON.stringify(q.facts)) : null;
+    const facts = q.facts ? JSON.parse(JSON.stringify(q.facts)) : null;   // the producer's own facts (q keeps them whole for the next redraw; the store bounds what it files)
     if (facts && facts.always) {
       const cf = changeFactsOf(list, ms, { many: q.plan.many });
       const at = q.command && !q.always ? facts.always.command : facts.always;
       if (at && typeof at === 'object') { if (cf.length) at.changes = cf; else delete at.changes; }
     }
-    if (q.todoId && userTodos && typeof userTodos.reshapeItems === 'function') {
-      try { userTodos.reshapeItems((it) => { if (it.id !== q.todoId || it.status !== 'open' || !it.action || it.action.type !== ACTION_TYPE || it.action.askId !== q.askId) return false; it.detail = detail; if (facts) it.facts = facts; delete it.judged; return true; }); } catch { }
+    if (facts) facts.redrawn = { at: at0 };
+    let stored = detail;
+    if (q.todoId && userTodos) {
+      let st = null;
+      try { st = typeof userTodos.redrawItem === 'function' ? userTodos.redrawItem((it) => it.id === q.todoId && !!it.action && it.action.type === ACTION_TYPE && it.action.askId === q.askId, { detail, facts }) : null; } catch { st = null; }
+      if (!st || !st.ok) { settle(q, 'changed', 'item-changed'); return { ok: false, code: 'ask_changed' }; }
+      stored = String(st.detail || '');
     }
-    q.detail = detail; q.facts = facts; q.plan.sig = changeSigOf(list);
+    q.detail = stored; q.facts = facts; q.plan.sig = changeSigOf(list);
     log(`${q.who}: the run card for \`${q.head}\` was drawn again — what its «Always» writes changed since it was shown`);
     return { ok: false, code: 'ask_redrawn' };
   }
   /** r4 (B): a standing request's card re-drawn in place the same way (its lines, its i18n lines, its facts). */
   function redrawRequest(q, list) {
-    q.changes = list;
+    q.changes = list; q.redrawnAt = now();   // r5: marked as drawn again (its first line, `facts.redrawn`)
     const lines = standingWords(q);
     const detail = lines.map(fill).join('\n');
     if (detail.length > DETAIL_MAX) { settleRequest(q, 'changed', 'item-changed'); return { ok: false, code: 'ask_changed' }; }
     const facts = standingFactsOf(q);
-    if (q.todoId && userTodos && typeof userTodos.reshapeItems === 'function') {
-      try { userTodos.reshapeItems((it) => { if (it.id !== q.todoId || it.status !== 'open' || !it.action || it.action.type !== REQUEST_TYPE || it.action.askId !== q.askId) return false; it.detail = detail; it.i18n = { ...(it.i18n || {}), detail: lines }; it.facts = facts; delete it.judged; return true; }); } catch { }
+    let stored = detail;
+    if (q.todoId && userTodos) {
+      let st = null;
+      try {
+        const cur = typeof userTodos.get === 'function' ? userTodos.get(q.todoId) : null;
+        st = typeof userTodos.redrawItem === 'function' ? userTodos.redrawItem((it) => it.id === q.todoId && !!it.action && it.action.type === REQUEST_TYPE && it.action.askId === q.askId, { detail, facts, i18n: { ...((cur && cur.i18n) || {}), detail: lines } }) : null;   // r5: through the store's OWN bounds
+      } catch { st = null; }
+      if (!st || !st.ok) { settleRequest(q, 'changed', 'item-changed'); return { ok: false, code: 'ask_changed' }; }
+      stored = String(st.detail || '');
     }
-    q.detail = detail; q.changeSig = changeSigOf(list);
+    q.detail = stored; q.changeSig = changeSigOf(list);
     log(`${q.who}: the standing request card for ${q.ref} was drawn again — what its Allow writes changed since it was shown`);
     return { ok: false, code: 'ask_redrawn' };
   }
   const STANDING_SWITCH_LINE = 'Allow also turns on «Usable by agent runs» for this entry — it opens it for THIS conversation; any grants you paused stay paused.';
   const hostWord = (h, tool) => (String(h).startsWith('*.') && tool ? `${h} (via ${tool})` : h);
   const standingWords = (r) => [
+    ...(r.redrawnAt ? [{ key: REDRAWN_LINE, params: { time: new Date(r.redrawnAt).toISOString() } }] : []),   // r5: a card drawn again says so first
     { key: 'Secret: {label} — {ref}', params: { label: r.label, ref: r.ref } },
     { key: 'What for, in the agent\'s words: {purpose}', params: { purpose: r.purpose } },
     ...(r.hosts.length ? [{ key: 'For commands to {hosts} — the hosts a command may connect to.', params: { hosts: r.hosts.map((h) => hostWord(h, r.tool)).join(', ') } }] : []),
@@ -1393,6 +1416,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     hosts: r.hosts.map((h) => ({ host: h, ...(String(h).startsWith('*.') && r.tool ? { tool: r.tool } : {}) })),
     command: r.command ? { words: r.commandWords, program: r.command.program, pre: (r.command.pre || []).slice(), script: r.command.arg } : null,
     switchOn: !!r.switchOn, changes: changeFactsOf(r.changes || [], null),   // r4 (B): one per scope this Allow replaces
+    ...(r.redrawnAt ? { redrawn: { at: r.redrawnAt } } : {}),   // r5: the card's mark (foryou-actions REDRAWN_WORDS)
   });
   /** r2 (MAJOR 2): why a --command is not pinned, in words the agent can act on (VR.pinOf's `why`). */
   const pinWords = (name, p) => (p.why === 'inline' ? `«${p.word}» carries inline code or names a module — inline code / module runs cannot be pinned to a shape: write the code to a file and run that (--command "${name} <that file>")`

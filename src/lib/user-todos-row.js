@@ -206,6 +206,11 @@ const hubAskHtml = (i, t, detail) => (i && i.action && HELD_ASKS.includes(i.acti
 const segHtml = (parts) => parts.map((x) => (x.code != null ? `<code class="ut-run-code">${escHtml(x.code)}</code>` : x.mono != null ? `<span class="ut-run-mono">${escHtml(x.mono)}</span>` : x.aside != null ? `<span class="ut-run-aside">${escHtml(x.aside)}</span>` : escHtml(x.text || ''))).join('');
 const linesHtml = (lines) => lines.map((l) => `<span class="ut-run-line">${segHtml(l)}</span>`).join('');
 const runHintHtml = (v) => (v && v.always.hint ? `<span class="ut-run-hint">${segHtml(v.always.hint)}</span>` : '');
+// lane vault-standing-request r5 (the r4 acceptance's MAJOR: the words «this replaces that grant …» lived only in the hint, and the
+// hint is hidden beside a hosts «Always» — the press silently cut a no-end host to 30 days): WHAT THE ROW WILL BE is its OWN row
+// above the answers, on every surface that draws the card (the tray / chat row, the For-you window's pane, the phone), whatever
+// the hint does — and a card the press drew again carries its mark first
+const runChangesHtml = (v) => (v && v.changes ? `<div class="ut-run-changes" data-changes="${v.changes.lines.length}">${v.changes.redrawn ? `<span class="ut-run-line ut-run-redrawn">${escHtml(v.changes.redrawn)}</span>` : ''}${linesHtml(v.changes.lines)}</div>` : '');
 export function runFactsHtml(i, t, { buttons = true } = {}) {
   const v = runCardOf(i, { t });
   if (!v) return '';
@@ -215,7 +220,7 @@ export function runFactsHtml(i, t, { buttons = true } = {}) {
   const fold = v.fold.length ? `<details class="ut-detail-exp ut-run-fold"><summary>${escHtml(t('Technical details'))}</summary><div class="ut-run-tech">${v.fold.map((f) => `<div class="ut-run-row"><span class="ut-run-lbl">${escHtml(f.label)}</span><span class="ut-run-val">${f.cmd != null ? `<pre class="ut-run-cmd ut-run-cmd-full">${escHtml(f.cmd)}</pre>` : linesHtml(f.lines)}</span></div>`).join('')}</div></details>` : '';
   const cut = v.cut ? `<div class="ut-run-cut">${escHtml(v.cut.text)}</div>` : ''; // r8: a command longer than the body's bound says it is a cut (the whole: the fold)
   const again = v.again ? `<div class="ut-run-again">${segHtml(v.again)}</div>` : ''; // r11: a near-identical rerun names the ONE way it differs (the door's whyAgain)
-  return `<div class="ut-run">${v.cmd ? `<pre class="ut-run-cmd">${escHtml(v.cmd)}</pre>` : ''}${cut}${again}<div class="ut-run-facts">${rows}</div>${row}${fold}</div>`;
+  return `<div class="ut-run">${v.cmd ? `<pre class="ut-run-cmd">${escHtml(v.cmd)}</pre>` : ''}${cut}${again}<div class="ut-run-facts">${rows}</div>${runChangesHtml(v)}${row}${fold}</div>`;
 }
 
 /** A CARD WITH A DEADLINE SHOWS IT (r7 addendum): THE model's line (foryou-actions deadlineOf) under the question — «valid for

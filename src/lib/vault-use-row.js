@@ -42,6 +42,36 @@ const clockOf = (ms) => { try { return new Date(ms).toTimeString().slice(0, 5); 
 const leftWord = (s) => { if (s.expired) return t('expired'); if (!(Number(s.until) > 0)) return t('no end'); const ms = Number(s.until) - Date.now(); return ms >= 86400e3 ? t('{n} d', { n: Math.round(ms / 86400e3) }) : ms >= 3600e3 ? t('{n} h', { n: Math.round(ms / 3600e3) }) : t('{n} min', { n: Math.max(1, Math.ceil(ms / 60e3)) }); };
 const scopesOfM = (m) => (Array.isArray(m.scopes) && m.scopes.length ? m.scopes : [...(m.hosts || []).map((h) => ({ kind: 'host', host: h, until: m.until, expired: m.expired, tool: m.toolFor && m.toolFor[h], legacy: Array.isArray(m.legacy) && m.legacy.includes(h) })), ...(m.commands || []).map((c) => ({ kind: 'command', command: c, until: m.until, expired: m.expired }))]);   // an older hub's row: each scope with the member's end
 const scopeWord = (s, entryHosts) => (s.kind === 'command' ? t('the command {command}', { command: commandWord(s.command) }) : oneHostWord(s.host, entryHosts, s.tool, !!s.legacy));
+/** lane vault-standing-request r5 (the r4 acceptance, MINOR 2 — «As each has it now» gave a newly typed host NO end whenever ANY
+ *  live scope had none, against the rule written beside it): ONE member's scopes as the Save writes them — PURE (the suite reads
+ *  it; the dialog's Save and its preview line both call it). `was` = the member as the row has it (null: new to the row),
+ *  `hosts` = the hosts the Save names, `cmds` = its command shapes (kept), `endId` = the picker's choice.
+ *  «As each has it now» (keep): a scope it holds keeps ITS OWN end (an ended one stays ended — history); a scope typed NEW takes
+ *  the member's EARLIEST live end — none only when EVERY live scope has none; with NO live scope (every one ended, or a member
+ *  new to the row) there is no «now» to keep, so a new scope takes the picker's default (30 days — what the dialog offers a new
+ *  grant), said before Save. Any other choice gives every scope that end. → { scopes, fresh: [index of each new scope] } */
+const KEEP_DEFAULT = '30d';
+export function saveScopesOf({ was = null, hosts = [], cmds = [], endId = 'keep', now = Date.now() } = {}) {
+  const wasSc = was ? scopesOfM(was) : [];
+  const ended = (s) => !!s.expired || (Number(s.until) > 0 && Number(s.until) <= now);
+  const live = wasSc.filter((s) => !ended(s)), finite = live.map((s) => Number(s.until)).filter((u) => u > 0);
+  const keepNew = !live.length ? now + (ENDS.find(([id]) => id === KEEP_DEFAULT) || [])[1] : finite.length ? Math.min(...finite) : null;
+  const endMs = (ENDS.find(([id]) => id === endId) || [])[1];
+  const endFor = (s0) => (endId === 'keep' ? (s0 ? (Number(s0.until) > 0 ? Number(s0.until) : null) : keepNew) : endMs ? now + endMs : null);
+  const cmdKey = (c) => JSON.stringify([c.program, preOf(c), c.arg == null ? null : c.arg, c.sha || null, c.psha || null]);
+  const scopes = [], fresh = [];
+  for (const host of hosts) {
+    const s0 = wasSc.find((s) => s.kind === 'host' && s.host === host), until = endFor(s0), tool = (s0 && s0.tool) || (was && was.toolFor && was.toolFor[host]) || null;
+    if (!s0) fresh.push(scopes.length);
+    scopes.push({ host, ...(until ? { until } : {}), ...(tool ? { tool } : {}) });
+  }
+  for (const c of cmds) {
+    const s0 = wasSc.find((s) => s.kind === 'command' && cmdKey(s.command) === cmdKey(c)), until = endFor(s0);
+    if (!s0) fresh.push(scopes.length);
+    scopes.push({ command: { program: c.program, pre: preOf(c), arg: c.arg == null ? null : c.arg, sha: c.sha || null, psha: c.psha || null }, ...(until ? { until } : {}) });   // lane vault-standing-request: a command scope keeps its own end too
+  }
+  return { scopes, fresh };
+}
 const sourceWord = (m) => { const at = Number(m.at) > 0 ? clockOf(m.at) : ''; const w = m.source === 'request' ? t('asked by the agent') : m.source === 'card' ? t('«Always» on a card') : m.source === 'owner' ? t('set by you') : ''; return w && at ? `${w} · ${at}` : w; };
 
 /** A member's name: its stored name, the live roster's, else its id (never markup — textContent only). */
@@ -148,9 +178,9 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
   const { body, close, raised } = createModalShell({ id: 'vault-use-grant', kind: 'form', key: row.id, title: t('Who may use «{name}»', { name: row.label }), dialogClass: 'vault-dialog-box vw-ak-dialog vw-use-dialog', escapeToClose: true, onClose: () => { try { picker && picker.close(); } catch { } },
     unsaved: { isDirty: () => start !== null && stateOf() !== start, save: () => saveNow() } });
   if (raised) return null;   // raised: the same entry's «Who may use» form, as it was (int361, dialog-yield §103 r3: key = the entry)
-  let ownBox = null, hostsIn = null, endSel = null, polIn = null;
+  let ownBox = null, hostsIn = null, endSel = null, polIn = null, previewNow = () => {};
   body.append(el('div', 'vw-ak-hint', t('They run commands with it — vibespace-vault run — for the hosts below with no card each time; they never see it. Another host, or a command whose destination cannot be told (a shell, a script), still asks you.')));
-  picker = principalPicker({ items: () => [...roster(), ...extra.filter((x) => !roster().some((r) => r.key === x.key))], app, multi: true, selected: stored.selected, placeholder: t('Search sessions and groups…'), label: t('Who may use it'), emptyText: t('No agent session is running'), everyone: { key: EVERYONE_KEY }, except: { selected: stored.except, extra } });
+  picker = principalPicker({ items: () => [...roster(), ...extra.filter((x) => !roster().some((r) => r.key === x.key))], app, multi: true, selected: stored.selected, placeholder: t('Search sessions and groups…'), label: t('Who may use it'), emptyText: t('No agent session is running'), everyone: { key: EVERYONE_KEY }, except: { selected: stored.except, extra, onChange: () => previewNow() }, onChange: () => previewNow() });
   body.append(el('div', 'vw-ak-sec', t('Who')), picker.el);
   // THE HOSTS: one list for the members this save writes; the entry's own («the hosts it was stored for») when it has them
   const common = (() => { if (!members.length) return null; const k = JSON.stringify(members[0].hosts || []); return members.every((m) => JSON.stringify(m.hosts || []) === k) ? members[0].hosts || [] : null; })();
@@ -181,6 +211,10 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
   for (const [id] of ENDS) { if (id === 'keep' && !members.length) continue; const o = el('option', null, endWord(id)); o.value = id; endSel.append(o); }
   endSel.value = members.length ? 'keep' : '30d';
   body.append(endSel);
+  // r5: WHAT SAVE WRITES — each member's scopes with the end each will have (a host typed new included), before Save
+  const preview = el('div', 'vw-ak-hint vw-use-preview');
+  preview.hidden = true;
+  body.append(preview);
   // R4: THE POLICY for the decision-API judge (default off): the owner's words — hosts, verbs, what it is for
   body.append(el('div', 'vw-ak-sec', t('Policy for the judge (optional)')));
   polIn = el('textarea', 'vault-pw vw-use-policy-in');
@@ -199,34 +233,51 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
   const save = el('button', 'btn-create vw-use-save', t('Save'));
   cancel.type = save.type = 'button';
   cancel.onclick = () => close();
-  async function doSave() {
-    err.textContent = '';
+  // lane vault-standing-request r4 (THE ROOT MODEL) + r5: the Save writes SCOPES, each with its own end (saveScopesOf — «As each
+  // has it now» keeps every scope's own end; a host typed new takes the member's EARLIEST live end). lane vault-use-grants round 5
+  // (MAJOR item 4): each wildcard host keeps the CLI that minted it (the store refuses a wildcard with no tool — `tool_required`).
+  // THE PLAN: what each member's row will be — the Save writes it and the preview line says it BEFORE Save (r5)
+  const planOf = () => {
     const typed = hostsIn.value.split(/[\s,]+/).map((h) => h.trim()).filter(Boolean);
     const hosts = ownBox && ownBox.checked ? [ENTRY_HOSTS] : typed;
     const pick = pickToRow(picker.knownRows(), picker.selected(), picker.except());
-    const endId = endSel.value, endMs = (ENDS.find(([id]) => id === endId) || [])[1];
     const had = new Map(members.map((m) => [m.principal, m]));
     const keyOf = (p) => (p.kind === 'everyone' ? 'everyone' : p.kind === 'group' ? `group:${p.id}` : `conversation:${p.key}`);
-    const to = [];
+    const to = [], fresh = [];
     for (const p of pick.to) {
       const was = had.get(keyOf(p));
       const h = hosts.length ? hosts : was ? (was.hosts || []) : [];
       const cmds = was && Array.isArray(was.commands) ? was.commands : [];   // lane vault-standing-request: a member's command shapes ride the Save unchanged
-      if (!h.length && !cmds.length) { err.textContent = t('Name the hosts it may be used for — a host name or address each (never «any host»)'); return false; }
-      // lane vault-standing-request r4 (THE ROOT MODEL): the Save writes SCOPES, each with its own end — «As each has it now»
-      // keeps every scope's own end (a host typed new takes the member's EARLIEST live end, none only when every live scope has
-      // none); another choice gives every scope of the member that end. lane vault-use-grants round 5 (MAJOR item 4): each
-      // wildcard host keeps the CLI that minted it (the store refuses a wildcard with no tool by name — `tool_required`).
-      const wasSc = was ? scopesOfM(was) : [];
-      const cmdKey = (c) => JSON.stringify([c.program, preOf(c), c.arg == null ? null : c.arg, c.sha || null, c.psha || null]);
-      const liveEnds = wasSc.filter((s) => !s.expired), keepNew = liveEnds.length && liveEnds.every((s) => Number(s.until) > 0) ? Math.min(...liveEnds.map((s) => Number(s.until))) : null;
-      const endFor = (s0) => (endId === 'keep' ? (s0 ? (Number(s0.until) > 0 ? Number(s0.until) : null) : keepNew) : endMs ? Date.now() + endMs : null);
-      const scopes = [
-        ...h.map((host) => { const s0 = wasSc.find((s) => s.kind === 'host' && s.host === host); const until = endFor(s0); const tool = (s0 && s0.tool) || (was && was.toolFor && was.toolFor[host]) || null; return { host, ...(until ? { until } : {}), ...(tool ? { tool } : {}) }; }),
-        ...cmds.map((c) => { const s0 = wasSc.find((s) => s.kind === 'command' && cmdKey(s.command) === cmdKey(c)); const until = endFor(s0); return { command: { program: c.program, pre: preOf(c), arg: c.arg == null ? null : c.arg, sha: c.sha || null, psha: c.psha || null }, ...(until ? { until } : {}) }; }),   // lane vault-standing-request: a member's command shapes ride the Save unchanged
-      ];
-      to.push({ ...p, ...(was && was.name && !p.name ? { name: was.name } : {}), scopes });
+      if (!h.length && !cmds.length) return { error: t('Name the hosts it may be used for — a host name or address each (never «any host»)') };
+      const plan = saveScopesOf({ was, hosts: h, cmds, endId: endSel.value });
+      to.push({ ...p, ...(was && was.name && !p.name ? { name: was.name } : {}), scopes: plan.scopes });
+      fresh.push(plan.fresh);
     }
+    return { to, fresh, pick };
+  };
+  const drawPreview = () => {
+    let plan = null; try { plan = planOf(); } catch { plan = null; }
+    preview.textContent = '';
+    if (!plan || plan.error || !plan.to.length) { preview.hidden = true; return; }
+    preview.hidden = false;
+    preview.append(el('span', 'vw-use-preview-lbl', t('What Save writes:')));
+    plan.to.forEach((m, k) => {
+      const line = el('div', 'vw-use-preview-line');
+      line.append(document.createTextNode(`${nameOf(m, app)} · `));
+      m.scopes.forEach((s, i) => {
+        if (i) line.append(document.createTextNode(', '));
+        const sc = s.command ? { kind: 'command', command: s.command } : { kind: 'host', host: s.host, tool: s.tool };
+        const isNew = plan.fresh[k].includes(i);
+        line.append(el('span', `vw-use-scope${isNew ? ' vw-use-scope-new' : ''}`, `${scopeWord(sc, entryHosts)} · ${leftWord({ until: s.until, expired: Number(s.until) > 0 && Number(s.until) <= Date.now() })}${isNew ? ' ' + t('(new)') : ''}`));
+      });
+      preview.append(line);
+    });
+  };
+  async function doSave() {
+    err.textContent = '';
+    const plan = planOf();
+    if (plan.error) { err.textContent = plan.error; return false; }
+    const { to, pick } = plan;
     const send = () => post('/api/vault/use-grants', { id: row.id, to, except: pick.except }, revealLeftMs() ? revealHeaders() : {});
     let r = await send();
     if (r && r.code === 'reveal_needs_password') { forgetReveal(); if (!(await askRevealPassword())) return false; r = await send(); }
@@ -243,6 +294,8 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
   }
   save.onclick = () => { doSave(); };
   saveNow = doSave;
+  hostsIn.addEventListener('input', drawPreview); endSel.addEventListener('change', drawPreview); if (ownBox) ownBox.addEventListener('change', drawPreview);
+  previewNow = drawPreview; drawPreview();
   f.append(cancel, save);
   body.parentNode.append(f);
   start = stateOf();

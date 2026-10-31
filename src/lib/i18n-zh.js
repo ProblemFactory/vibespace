@@ -11640,6 +11640,9 @@ export default {
   "no end": "无限期", // lane vault-standing-request r4 (per-scope ends: the card names each scope of its own a write replaces)
   "ended {when}": "已于 {when} 结束", // lane vault-standing-request r4 (per-scope ends: the card names each scope of its own a write replaces)
   "What this card writes changed since you saw it — read it again and answer again": "这张卡片要写入的内容在你看到之后变了 — 请重新阅读后再回答", // lane vault-standing-request r4 (per-scope ends: the card names each scope of its own a write replaces)
+  "Drawn again at {time}: what this answer writes changed since the card was first shown — read it again.": "已于 {time} 重新绘制：这个回答要写入的内容与卡片最初显示时不同 — 请重新阅读。", // lane vault-standing-request r5 (a card drawn again is marked)
+  "What Save writes:": "保存后写入：", // lane vault-standing-request r5 (each scope's end before Save)
+  "(new)": "（新）", // lane vault-standing-request r5 (each scope's end before Save)
   "{hostword} (via {tool})": "{hostword}（经由 {tool}）", // lane vault-standing-request r3 (the round-4 chip word had no zh / ja)
   "{hostword} (legacy wildcard: any tool)": "{hostword}（旧版通配：任何工具）", // lane vault-standing-request r3
   "Carried from an older version: this wildcard host is open to ANY program. Take it back (✕) and press «Always» on the next run of its tool — the new grant names its tool.": "从旧版本带过来的：这个通配主机对任何程序都开放。收回它（✕），在它的工具下一次运行时按「总是」——新的授权会写明它的工具。", // lane vault-standing-request r3

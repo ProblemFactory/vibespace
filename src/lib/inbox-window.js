@@ -490,7 +490,7 @@ export function openInboxWindow(app, { itemId = null, sessionKey = null, scope: 
     const card = it.card && it.action && it.action.type === 'app-install' ? it.card : null;
     const run = card ? null : runCardOf(it, { t }); // r7: the run card's FACTS (a record without them: its prose, as before)
     const dropped = card || run ? null : factsDroppedWords(it, { t }); // r9: facts the store dropped — one line above the text
-    const detailSig = card ? 'card\u0000' + (v.resolved ? 'r' : 'o') + JSON.stringify(card) : run ? 'run\u0000' + JSON.stringify(it.facts) : (plain ? 'cmd\u0000' : 'txt\u0000') + v.detail + (dropped ? '\u0000' + dropped : '');
+    const detailSig = card ? 'card\u0000' + (v.resolved ? 'r' : 'o') + JSON.stringify(card) : run ? 'run\u0000' + (v.resolved ? 'r' : 'o') + (it.action && it.action.late ? 'l' : '') + JSON.stringify(it.facts) : (plain ? 'cmd\u0000' : 'txt\u0000') + v.detail + (dropped ? '\u0000' + dropped : '');
     if (run && c.sig.detail !== detailSig) { c.detail.innerHTML = runFactsHtml(it, t, { buttons: false }); c.detail.style.display = ''; c.sig.detail = detailSig; } // r7: its answers are this pane's action row; the masking sentence is in its fold
     if (c.sig.detail !== detailSig) {
       if (card) { c.detail.innerHTML = appCardHtml(it, t, { lang: resolveLang(), resolved: v.resolved, buttons: false }); c.detail.style.display = ''; }
