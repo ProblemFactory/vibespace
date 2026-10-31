@@ -20,6 +20,9 @@
 //      decided THIS ceremony, the count written before the answer, the use law's line; the refusals by name; cancel ⇒ the page
 //      sees NotAllowedError; the page's own abort; P1's dismiss; an orphan surface; the vault locked; a kernel without the
 //      feature unchanged; no store
+//   ⑨r8 its acceptance r7: ONE «Allow once» registration grant releases ONE registration — read, judged and consumed at the
+//       verdict, never in the job queued behind the tab's drain (the probe's two tabs, the same tab's two frames); a ceremony
+//       over before its turn gives the grant back; the slow line names any job (a set-up or a clean-up) — a second tab (T2)
 //   ⑨r7 its acceptance r6: a clean-up acts only on what ITS ceremony loaded (the authenticator and keys captured at its load),
 //       never the tab's live authenticator — his retry past the old cap (the NEW HOLE), the agent's shared authenticator (probe B;
 //       two ceremonies on it; an end mid-load), an authenticator replaced under a ceremony in flight; the drain wait has no cap
@@ -739,7 +742,7 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
   const PID = 'bp-0000b002', HK = 'hu-0000b002', CK = 'bk-0000c002';
   const crypto2 = require('crypto'), PS2 = require(path.join(REPO, 'src/browser-passkey-store.js'));
   const sleep2 = (ms) => new Promise((r) => setTimeout(r, ms));
-  const until2 = async (pred, ms = 2000) => { const t0 = Date.now(); while (!pred() && Date.now() - t0 < ms) await sleep2(5); return pred(); };
+  const until2 = async (pred, ms = 2000) => { const t0 = Date.now(); while (!pred() && Date.now() - t0 < ms) await sleep2(2); return pred(); }; // r8: every 2 ms (was 5) — the waits end nearer their facts
   const verbOf = (m) => (m.params && m.params.arguments && m.params.arguments[1] ? m.params.arguments[1].value : null);
   /** ④'s socket, grown: a print preview beside his tab, the hook's document (an execution context), the hook's `pending` answer,
    *  the authenticator's id, a refused port on demand, a tab whose hook fails (T3); every socket counted. */
@@ -757,7 +760,7 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
         const tag = m.method + (m.method === 'Runtime.callFunctionOn' && verbOf(m) ? ':' + verbOf(m) : '') + (m.params && m.params.authenticatorId ? '(' + m.params.authenticatorId + ')' : '');
         if (world.trace) world.trace.push('>' + tag);
         if (world.onSend) world.onSend(m);
-        if (m.method === 'Target.getTargets') result = { targetInfos: [{ targetId: 'T1', type: 'page', url: 'https://vercel.com/login', title: 'Use Your Passkey', browserContextId: 'CTX1' }, ...(world.print ? [{ targetId: 'PR', type: 'page', url: 'chrome://print/', title: 'Print', browserContextId: 'CTX1' }] : [])] };
+        if (m.method === 'Target.getTargets') result = { targetInfos: [{ targetId: 'T1', type: 'page', url: 'https://vercel.com/login', title: 'Use Your Passkey', browserContextId: 'CTX1' }, ...(world.two ? [{ targetId: 'T2', type: 'page', url: 'https://example.test/', title: 'Two', browserContextId: 'CTX1' }] : []) /* ⑨r8 */, ...(world.print ? [{ targetId: 'PR', type: 'page', url: 'chrome://print/', title: 'Print', browserContextId: 'CTX1' }] : [])] };
         else if (m.method === 'Target.attachToTarget') result = { sessionId: 'S-' + m.params.targetId };
         else if (m.method === 'Browser.getVersion') result = { userAgent: 'Mozilla/5.0 Chrome/154.0.0.0' };
         else if (m.method === 'Runtime.addBinding' && sid === 'S-T3') error = { message: 'no binding here' };
@@ -783,7 +786,7 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
         }
         else if (m.method === 'WebAuthn.addVirtualAuthenticator') result = { authenticatorId: 'AUTH-' + (++n) };
         else if (m.method === 'WebAuthn.getCredentials') result = { credentials: [] };
-        if (m.method === 'Runtime.enable' && sid === 'S-T1') setTimeout(() => this.h.message && this.h.message(JSON.stringify({ method: 'Runtime.executionContextCreated', sessionId: sid, params: { context: { id: 7, auxData: { isDefault: true, frameId: 'T1' } } } })), 0);
+        if (m.method === 'Runtime.enable' && (sid === 'S-T1' || (world.two && sid === 'S-T2'))) setTimeout(() => this.h.message && this.h.message(JSON.stringify({ method: 'Runtime.executionContextCreated', sessionId: sid, params: { context: { id: 7, auxData: { isDefault: true, frameId: sid.slice(2) } } } })), 0);
         if (world.chrome && m.method === 'WebAuthn.addVirtualAuthenticator' && !error) world.chrome.auths.add(result.authenticatorId);
         const answer = () => { if (world.trace) world.trace.push('<' + tag + (error ? '!' : '')); if (this.h.message) this.h.message(JSON.stringify(error ? { id: m.id, error } : { id: m.id, result })); };
         if (world.hold && world.hold.has(m.method)) { world.held.push(answer); return; }
@@ -794,8 +797,8 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
   }
   /** The person's world: holder rows by hand (`H.human` his row, `H.agent` a conversation's), the attach road's record, an optional
    *  passkey store, an optional paired machine. */
-  function world2({ holders = 'human', store = null, hostId = null, print = true, rearmMs = 20, url = 'ws://fake', ep = null, drainMs = null, beatMs = null, holdMaxMs = null } = {}) {
-    const world = { sockets: 0, refuse: false, pending: [], print, said: [], H: { human: holders !== 'agent', agent: holders !== 'human' } };
+  function world2({ holders = 'human', store = null, hostId = null, print = true, rearmMs = 20, url = 'ws://fake', ep = null, drainMs = null, beatMs = null, holdMaxMs = null, two = false /* ⑨r8: a second tab T2 */ } = {}) {
+    const world = { sockets: 0, refuse: false, pending: [], print, two, said: [], H: { human: holders !== 'agent', agent: holders !== 'human' } };
     const f = sock2(world);
     let clock = 1_000_000;
     const listeners = new Set(), items = [], events = [];
@@ -804,7 +807,7 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
     const holdersOf = () => [...(world.H.agent ? [{ browserKey: CK, sessionId: 's-c', ephemeral: false }] : []), ...(world.H.human ? [{ browserKey: HK, sessionId: null, ephemeral: false, human: true, input: 'user' }] : [])];
     const passkeys = store ? { read: () => store.file, write: (o) => { store.file = JSON.parse(JSON.stringify(o)); }, cipher: store.cipher } : null;
     const mkD = () => { const d = require(path.join(REPO, 'src/server/browser-dialogs.js')).create({ keeper, WebSocketImpl: f.FakeWS, log: { warn: (l) => world.said.push(String(l)), log() {} }, now: () => clock, holdersOf, ...(drainMs != null ? { drainMs } : {}), ...(beatMs != null ? { holdBeatMs: beatMs } : {}), ...(holdMaxMs != null ? { holdMaxMs } : {}), leaseCountOf: () => holdersOf().length, passkeys,
-      tabsOf: ({ browserKey }) => (browserKey === HK || browserKey === CK ? ['T1'] : []), rearmMs, forYou: { add: (pid, it) => { items.push(it); return 'todo-' + items.length; }, resolve: () => {} } }); d.onChange((ev) => events.push(ev)); return d; };
+      tabsOf: ({ browserKey }) => (browserKey === HK || browserKey === CK ? (two ? ['T1', 'T2'] : ['T1']) : []), rearmMs, forYou: { add: (pid, it) => { items.push(it); return 'todo-' + items.length; }, resolve: () => {} } }); d.onChange((ev) => events.push(ev)); return d; };
     let D = mkD();
     const lease = async (ev) => { const out = []; for (const fn of listeners) { const r = fn(ev); if (r && typeof r.then === 'function') out.push(r); } await Promise.allSettled(out); };
     const w = () => D._watches.get(PID) || null;
@@ -1379,7 +1382,7 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
   console.log('⑨r7 acceptance r6: a clean-up acts only on what ITS ceremony loaded, never on the tab\'s live authenticator; the wait has no cap; a sign-in that waits keeps its page\'s hold (bounded); the slow line once per episode');
   const keys7 = (X, a) => [...(X.world.chrome.creds.get(a) || [])].map((s) => String(s).replace(/=+$/, ''));
   const uv7 = (X, a) => X.world.chrome.uv.get(a) === true;
-  const slow7 = (X) => X.world.said.filter((l) => /clean-up is still running after/.test(l)).length;
+  const slow7 = (X) => X.world.said.filter((l) => /clean-up (on this tab )?is still running after/.test(l)).length;
   const verbs7 = (X, verb, id) => X.calls('Runtime.callFunctionOn', (m) => verbOf(m) === verb && m.params.arguments[2] && m.params.arguments[2].value === id).length;
   const draining7 = (X) => !!X.w().targets.get('T1').pk.draining;
   const sent7 = (tr, a) => tr.filter((s) => s.startsWith('>WebAuthn.') && s.endsWith('(' + a + ')'));
@@ -1457,8 +1460,8 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
     const B = { keys: keys7(X, A), uv: uv7(X, A), rm: at6(trB, '<WebAuthn.removeCredential(' + A + ')'), add: at6(trB, '>WebAuthn.addCredential(' + A + ')') };
     ok(!!A && k1.keys.join() === 'Kvault005' && k1.uv && midB.held === 1 && midB.released === 1 && midB.loads === 0 && midB.outcome === 'pending' && B.rm >= 0 && B.add > B.rm && B.keys.join() === 'Kvault005' && B.uv,
       '⑨r7 MAJOR (the agent\'s road, probe B): the last ceremony\'s unload answered late on the ONE shared authenticator — the retry waits for it (no cap), then loads: its key and UV survive (r6: the late unload removed the key the retry had just loaded and set UV false)', { k1, midB, B });
-    // BREAK 6, the slow link: every answer 10 ms — a sign-in behind a clean-up keeps its page's hold (this fake's page holds 4 beats; production: HOOK_HOLD_MS 1500 over a 1000-ms beat)
-    const HOLD = 60, marks = [], t6 = Date.now();
+    // BREAK 6, the slow link: every answer 10 ms — a sign-in behind a clean-up keeps its page's hold (this fake's page holds 3⅓ beats; production: HOOK_HOLD_MS 1500 over a 1000-ms beat)
+    const HOLD = 50, marks = [], t6 = Date.now(); // r8: was 60 — six 10-ms answers measured 59 ms once (libuv counts a timer from the loop's cached clock); the largest gap ~22 ms
     X.world.rtt = 10;
     X.world.onSend = (m) => { const v = verbOf(m); if (m.method === 'Runtime.callFunctionOn' && (v === 'wait' || v === 'release') && m.params.arguments[2] && m.params.arguments[2].value === 3) marks.push([v, Date.now() - t6]); };
     doc6(X, 9, 'F3'); X.say({ ev: 'end', id: 2, outcome: 'ok' }, 8); X.start(3, 'vercel.com', 9);
@@ -1515,6 +1518,67 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
     const R = { A, A2, toA2: sent7(X.world.trace, A2), keys: keys7(X, A2), uv: uv7(X, A2), aAlive: X.world.chrome.auths.has(A), outcome9: rec6(X, 9).outcome };
     ok(!!A2 && A2 !== A && !R.aAlive && R.toA2.length === 0 && R.keys.join() === 'Kvault005' && R.uv && R.outcome9 === 'pending',
       '⑨r7 MAJOR (1) the law — ITS authenticator, never the tab\'s live one: #8\'s authenticator went while it was in flight (the person took the browser, gave it back: a new one, #9 signing in on it); #8\'s late end sends NOTHING to the new authenticator — #9 keeps its key and UV (r6 read e.pk.auth live: removeCredential + UV off on #9\'s)', R);
+    X.D.shutdown();
+  }
+  // ⑨r8 — acceptance r7 of lane passkey-browse-yourself (779318821): every leg below is RED on 779318821 by name
+  console.log('⑨r8 acceptance r7: ONE «Allow once» registration grant releases ONE registration — read, judged and consumed at the verdict (never in the queued job); a ceremony over before its turn gives it back; the slow line names any job');
+  {
+    const X = world2({ holders: 'agent', store: VAULT5(), print: false, drainMs: 10, two: true });
+    X.world.chrome = chrome6();
+    const until8 = async (pred, ms = 300) => { const t0 = Date.now(); while (!pred() && Date.now() - t0 < ms) await new Promise((r) => setImmediate(r)); return pred(); }; // (the fake answers at setTimeout 0: a turn of the loop, never a 5-ms poll — this world's cost)
+    const armed2 = () => { const t = X.w() && X.w().targets.get('T2'); return !!t && t.pk.armed && !t.pk.arming && t.pk.ctl.has(7); };
+    await X.D.arm(PID); await until8(() => X.w() && X.w().state === 'open'); await until8(() => X.armed() && armed2(), 500);
+    const say2 = (o, ctx = 7) => { const b = [...X.f.log].reverse().find((x) => x.method === 'Runtime.addBinding' && x.sessionId === 'S-T2'); X.f.push({ method: 'Runtime.bindingCalled', sessionId: 'S-T2', params: { name: b ? b.params.name : 'x', executionContextId: ctx, payload: JSON.stringify(o) } }); };
+    const create8 = (id, ctx, two = false) => (two ? say2 : X.say)({ ev: 'start', id, kind: 'create', rpId: 'example.test', origin: 'https://example.test' }, ctx);
+    const v8 = (id, verb, t = 'T1') => X.calls('Runtime.callFunctionOn', (m) => verbOf(m) === verb && m.sessionId === 'S-' + t && m.params.arguments[2] && m.params.arguments[2].value === id).length;
+    const why8 = (id, t = 'T1') => (X.w().targets.get(t).pk.records.find((r) => r.n === id) || {}).why || null;
+    const gone8 = (id, t) => v8(id, 'release', t) + v8(id, 'refuse', t) > 0;
+    const grant8 = async () => { const reg = await X.D.passkeyRegister({ profileId: PID, browserKey: CK, rpId: 'example.test', user: 'alice' }); return X.D.answerPasskey(reg.proposal.id, { choice: 'once', shown: reg.proposal.shown }).ok; };
+    // the probe's shape: a get #g released on T1, its unload held (the tab's drain in flight); a get queued behind it; then `creates` …
+    // the unload answered with the queued get's load held ⇒ the get's job runs, every create's verdict is taken behind it
+    const queue8 = async (g, ctx, creates) => {
+      doc6(X, ctx, 'F' + ctx); let r = released(X); X.start(g, 'vercel.com', ctx); await until8(() => released(X) > r, 300);
+      X.world.hold = new Set(['WebAuthn.getCredentials']); X.world.held = [];
+      doc6(X, ctx + 1, 'F' + (ctx + 1)); X.say({ ev: 'end', id: g, outcome: 'ok' }, ctx); X.start(g + 1, 'vercel.com', ctx + 1);
+      for (const [id, c] of creates) { doc6(X, c, 'F' + c); create8(id, c); }
+      await until8(() => X.world.held.length === 1, 300); await until8(() => false, 1);
+      X.world.hold = new Set(['WebAuthn.addCredential']); X.world.held.splice(0).forEach((f) => f());
+      await until8(() => X.world.held.length === 1, 300); await until8(() => false, 1);
+    };
+    const settle8 = async (ends) => { free7(X); for (const [id, c] of ends) X.say({ ev: 'end', id, outcome: 'ok' }, c); await until8(() => !draining7(X), 300); await until8(() => false, 1); };
+    const g1 = await grant8();
+    await queue8(1, 20, [[3, 22]]);
+    const slow8 = () => X.world.said.filter((l) => /still running after/.test(l)).length, preGate = slow8(); // the get's load held: the SET-UP is the slow job now (and #3's job waits on it)
+    await until8(() => slow8() > 0, 300);
+    create8(4, 7, true); await until8(() => gone8(4, 'T2'), 300);
+    const mid1 = { held: X.world.held.length, rel3: v8(3, 'release'), t2auth: !!X.w().targets.get('T2').pk.auth };
+    await settle8([]);
+    const P = { g1, mid1, rel3: v8(3, 'release'), rel4: v8(4, 'release', 'T2'), ref4: v8(4, 'refuse', 'T2'), why4: why8(4, 'T2') };
+    ok(g1 && mid1.held === 1 && mid1.rel3 === 0 && mid1.t2auth && P.rel3 === 1 && P.rel4 === 0 && P.ref4 === 1 && P.why4 === 'no-grant',
+      '⑨r8 MAJOR (the probe\'s shape, two tabs): the tab\'s drain in flight, a get queued, then a registration on T1 (its verdict taken behind the get\'s job) and one on T2 of the same conversation and site — ONE grant releases ONE: T1\'s, after its turn; T2\'s refused no-grant at once (779318821: both released — the grant was deleted only inside the queued job)', P);
+    await settle8([[2, 21], [3, 22]]); say2({ ev: 'end', id: 4, outcome: 'error', name: 'NotAllowedError' });
+    // the same tab: two registrations in two frames, both verdicts taken behind the queued get's job
+    const g2 = await grant8();
+    await queue8(5, 23, [[7, 25], [8, 26]]);
+    const mid2 = { rel7: v8(7, 'release'), rel8: v8(8, 'release'), ref8: v8(8, 'refuse') };
+    await settle8([]);
+    const Q = { g2, mid2, rel7: v8(7, 'release'), rel8: v8(8, 'release'), ref8: v8(8, 'refuse'), why8: why8(8) };
+    ok(g2 && mid2.rel7 === 0 && mid2.rel8 === 0 && Q.rel7 === 1 && Q.rel8 === 0 && Q.ref8 === 1 && Q.why8 === 'no-grant',
+      '⑨r8 MAJOR (the same tab): two registrations in two frames of T1, both behind the queued get — the first released after its turn, the second refused no-grant (779318821: both released, one after the other)', Q);
+    await settle8([[6, 24], [7, 25]]);
+    // the stated rule: a consumed grant whose ceremony is over before its turn is GIVEN BACK (as it was) — the next registration has it
+    const g3 = await grant8();
+    await queue8(9, 27, [[11, 29]]);
+    create8(12, 7, true); await until8(() => gone8(12, 'T2'), 300);
+    X.say({ ev: 'end', id: 11, outcome: 'error', name: 'NotAllowedError' }, 29); await until8(() => false, 1); // the page gave up before its turn
+    await settle8([[10, 28]]); say2({ ev: 'end', id: 12, outcome: 'error', name: 'NotAllowedError' });
+    create8(13, 7, true); await until8(() => gone8(13, 'T2'), 300);
+    const R = { g3, rel11: v8(11, 'release'), ref11: v8(11, 'refuse'), rel12: v8(12, 'release', 'T2'), why12: why8(12, 'T2'), rel13: v8(13, 'release', 'T2'), why13: why8(13, 'T2') };
+    ok(g3 && R.rel11 === 0 && R.ref11 === 0 && R.rel12 === 0 && R.why12 === 'no-grant' && R.rel13 === 1 && !R.why13,
+      '⑨r8 MAJOR (the stated rule): the grant is consumed at #11\'s verdict (T2\'s #12 meanwhile: no-grant); #11 is over before its turn — nothing released for it, the grant GIVEN BACK as it was: T2\'s next registration #13 is released (779318821: #12 released while #11 waited)', R);
+    const said8 = X.world.said.filter((l) => /still running after/.test(l));
+    ok(said8.length >= 1 && said8.every((l) => /a passkey sign-in's set-up or clean-up on this tab is still running after 10 ms — the next step on this tab waits for it/.test(l)),
+      '⑨r8 the slow line names whatever job is the slow one — a sign-in\'s set-up OR clean-up (here the queued get\'s held load) — and what waits: the next step on the tab (779318821: «clean-up … the next sign-in» for a gate job too)', { preGate, said8 });
     X.D.shutdown();
   }
 }

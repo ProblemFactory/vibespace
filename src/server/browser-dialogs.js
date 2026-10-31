@@ -1623,14 +1623,16 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
     if (person && (v.verdict === 'refuse' || (v.verdict === 'release' && !(v.load && v.load.length) && !v.consumeGrant))) return pkCtl(w, e, rec, 'release'); // nothing of the vault he chose ⇒ Chrome's own window (never refused for the vault's sake)
     if (v.verdict === 'refuse') { rec.refused = true; rec.why = v.why; if (v.why !== 'none') pkTrace(w, e, rec, 'refused', { why: v.why }); await pkCtl(w, e, rec, 'refuse'); passkeyChanged(w, e); return v; }
     if (v.verdict === 'ask') return pkAsk(w, e, rec, v.rows);
+    const taken = v.consumeGrant ? pkGrants.get(gk) || null : null; if (taken) pkGrants.delete(gk); // r8 (acceptance r7 MAJOR): the one-use registration grant is READ, JUDGED and CONSUMED as one step, here at the verdict — never in the job, which may wait behind the tab's drain while another tab or frame of the conversation reads the same grant (it finds none: no-grant)
+    const back = () => { if (taken && !pkGrants.has(gk)) pkGrants.set(gk, taken); }; // r8: a job that lets its ceremony go WITHOUT the vault (over before its turn, over while the authenticator paired, no authenticator) gives the grant back as it was — its own 10-min clock, never extended; a newer answer at that key wins
     await pkDrain(w, e, async () => { // r7: the gate's touch of the authenticator is ONE drain — his pairing (r6: with the gate race's remove), the load, the release; an end that lands meanwhile unloads after it, what it loaded
-      if (rec.outcome !== 'pending') return; // over before its turn: nothing paired, nothing loaded
+      if (rec.outcome !== 'pending') return back(); // over before its turn: nothing paired, nothing loaded (r8: its grant back)
       if (person && !e.pk.auth) { // the vault key he chose: an authenticator for THIS ceremony only, Chrome's UI on (acceptance r3: `onceFor` — only ITS end removes it; r5: an end that landed while it was paired found no authenticator in pkEnd — it goes here, no key loaded)
         e.pk.pairs = (e.pk.pairs || 0) + 1; e.pk.auth = await pairAuthenticator(w, e, e.sid, { ui: true }); e.pk.once = !!e.pk.auth; e.pk.onceFor = e.pk.auth ? rec : null;
-        if (rec.outcome !== 'pending') return pkOnceGone(w, e, rec);
+        if (rec.outcome !== 'pending') { back(); return pkOnceGone(w, e, rec); }
       }
-      if (!e.pk.auth) return pkCtl(w, e, rec, 'release');
-      if (v.consumeGrant) pkGrants.delete(gk);
+      if (!e.pk.auth) { back(); return pkCtl(w, e, rec, 'release'); } // Chrome's own window: the vault registers nothing (r8: its grant back)
+      // r8: the authenticator is there for it — the grant (consumed at the verdict) is spent from here
       rec.createdBy = person ? 'human' : v.createdBy || null;
       let store = pkRead(); const loaded = [];
       for (const cid of v.load) {
@@ -1676,10 +1678,11 @@ function create({ keeper = null, WebSocketImpl = WS, log = console, now = Date.n
   }
   /** The ONE wait on a drain — r7 (acceptance r6): NO cap. The gate waits while the CDP session answers: a slow browser is waited
    *  for (r6's 1-s cap let a clean-up it went past act on the next ceremony's authenticator); a closed socket answers every call
-   *  at once (down()), a silent one each call at its own timeout. A wait past drainMs is said, once per episode (pkDrain clears it). */
+   *  at once (down()), a silent one each call at its own timeout. A wait past drainMs is said, once per episode (pkDrain clears it) —
+   *  r8: whatever job is the slow one (a gate's pairing / load / release or an unload), whatever waits on it (a gate or the next job). */
   async function pkDrained(w, e, d = e.pk.draining) {
     if (!d) return;
-    const t = setTimeout(() => say(pkSlowKey(w, e), `${w.profileId}: a passkey sign-in's clean-up is still running after ${drainMs} ms — the next sign-in on this tab waits for it`), drainMs);
+    const t = setTimeout(() => say(pkSlowKey(w, e), `${w.profileId}: a passkey sign-in's set-up or clean-up on this tab is still running after ${drainMs} ms — the next step on this tab waits for it`), drainMs);
     if (t.unref) t.unref();
     await d.then(() => {}, () => {});
     clearTimeout(t);
