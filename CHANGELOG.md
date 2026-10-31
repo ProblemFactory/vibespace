@@ -15,6 +15,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - A conversation you excluded from a secret stays excluded when a 1-hour approval ends or its last grant is taken back; the hour leaves nothing else behind.
 - «Who may use it» keeps the conversations you excluded unless you remove one there, saves only what you changed, and still saves after a 1-hour approval ends.
 - Saving «Who may use it» keeps a Task Group as it was, removes an ended 1-hour approval as it says, and tells you when only the members were saved.
+- An urgent request, or one an agent or a person waits on, flashes its window and shows a countdown card by For you that opens it; others only update the count.
 
 ### Changed
 - When Anthropic lifts an account's 5-hour limit, the usage popup says so on its row and the pool stops counting a window that no longer exists.
@@ -24,6 +25,8 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - The live view’s “Hand back and continue…” is now “Hand back with a note…”; its dialog says nothing is sent now and how to have the agent continue right away.
 - In your own browsing, a passkey kept in VibeSpace is offered only when you start a sign-in, never in a site's autofill suggestions.
 - On a passkey registration card, Not now also takes back an earlier unused Allow once for the same site and conversation, and that card says so.
+- What a conversation waits on you for now sits in a fixed strip above the message box, not in the chat; tap the question to go to where it was asked.
+- That strip shows what an answer decides on (where a command sends, what it warns about); its buttons wrap to fit a narrow window, never past its edge.
 
 ### Fixed
 - Across a daylight-saving change a scheduled job runs once, at the right local time — one started in the hour that repeats no longer runs every 30 seconds.
@@ -34,6 +37,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - Conversation links from a command that checks for new messages in a shell arithmetic test, or reads them in a cleanup step it sets, now stay with that command.
 - A command whose shell text cannot be fully read, such as a zsh glob pattern or a value run a second time, keeps the conversation links it may have caused.
 - When a page waits for a passkey, in your own browsing or the agent's live view, the window now says so and tells you how to answer it.
+- Jumping to a search result is no longer undone when the latest messages from an earlier ↓ or send finish loading.
 
 ## 2.369.366 — 2026-10-31
 
