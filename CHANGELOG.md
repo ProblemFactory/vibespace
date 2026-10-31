@@ -2,6 +2,12 @@
 
 What changed for you, newest first. Engineers' notes: docs/changelog-engineering.md.
 
+## 2.369.367 — 2026-10-31
+
+### Fixed
+- Across a daylight-saving change a scheduled job runs once, at the right local time — one started in the hour that repeats no longer runs every 30 seconds.
+- A scheduled job set for a time that does not exist on the day clocks go forward now runs once right after the jump instead of skipping that day.
+
 ## 2.369.366 — 2026-10-31
 
 ### Added
