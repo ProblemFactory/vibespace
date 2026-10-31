@@ -99,7 +99,9 @@ const SUB_START = /(?:[\w}]|[^\x00-\x7f])\[/g;
 /** r17 (the r16 review F6): does a subscript's SPAN hold a substitution — the span as EACH shell skips it: nested brackets
  *  and a `\X` (both), a quoted part (`quotes`: bash's — `a[']'$(C)]`, a `\"` inside "…"; zsh reads a quote as text:
  *  `a['[']$(C)]`), the quoted part's own `$(`. r14–r16 ended the span at the first `]`. Linear: a start inside a span
- *  read is skipped */
+ *  read is skipped. r18 (the r17 review G1): an ESCAPED `$(`, `${` or backtick counts too — the skip read
+ *  `let 'a[b[\$(C &)]]=1'` inert, and zsh runs it once `b` is set (the outer subscript's expansion strips the `\`, the
+ *  inner one is expanded again) */
 const subscriptSubst = (t, quotes) => {
   let seen = -1;
   for (const m of t.matchAll(SUB_START)) {
@@ -107,7 +109,7 @@ const subscriptSubst = (t, quotes) => {
     if (k <= seen) continue;
     for (let d = 1; k < t.length && d > 0; k++) {
       const c = t[k];
-      if (c === '\\') k++;
+      if (c === '\\') { if (t[k + 1] === '`' || (t[k + 1] === '$' && (t[k + 2] === '(' || t[k + 2] === '{'))) return true; k++; }
       else if (c === '`' || (c === '$' && (t[k + 1] === '(' || t[k + 1] === '{'))) return true;
       else if (quotes && (c === "'" || c === '"')) { let e = k + 1; while (e < t.length && t[e] !== c) e += c === '"' && t[e] === '\\' ? 2 : 1; if (SUBST.test(t.slice(k + 1, e))) return true; k = e; }
       else if (c === '[') d++;

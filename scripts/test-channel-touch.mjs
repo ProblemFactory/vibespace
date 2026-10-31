@@ -2188,6 +2188,28 @@ await section('⑬', async () => {
     ["r17 N4: $'vibespace-channels\\0' read lark/inbox", "$'vibespace-channels\\0' read lark/inbox", "ended", "ended", "ended"],
     ["r17 N5: $'\\x76ibespace-channels\\c@' read lark/inbox (bash's \\c@)", "$'\\x76ibespace-channels\\c@' read lark/inbox", "ended", "none", "none"],
     ["r17 M9 cost: vibespace-status working --reason \"x\" && C compose --text \"修复了[\\`foo\\`](https://x/y)\"", "vibespace-status working --reason \"x\" && vibespace-channels compose lark/oc_1 --text \"修复了[\\`foo\\`](https://x/y)\"", "ended", "ended", "ended"],
+    ["r18 E1: let 'a[\\$(C > /dev/null &)]=1' (an escaped $( in a subscript)", "let 'a[\\$(vibespace-channels read lark/inbox > /dev/null &)]=1'", "none", "none", "none"],
+    ["r18 E2: printf -v 'a[\\$(C > /dev/null &)]' x", "printf -v 'a[\\$(vibespace-channels read lark/inbox > /dev/null &)]' x", "none", "none", "none"],
+    ["r18 E3: let 'a[\\`C > /dev/null &\\`]=1' (an escaped backtick)", "let 'a[\\`vibespace-channels read lark/inbox > /dev/null &\\`]=1'", "none", "none", "none"],
+    ["r18 E4: let $'a[\\\\\\x24(C > /dev/null &)]=1' (the escape decoded from $'…')", "let $'a[\\\\\\x24(vibespace-channels read lark/inbox > /dev/null &)]=1'", "none", "none", "none"],
+    ["r18 E5: let \"a[\\\\\\$(C > /dev/null &)]=1\" (the escape kept by \"…\")", "let \"a[\\\\\\$(vibespace-channels read lark/inbox > /dev/null &)]=1\"", "none", "none", "none"],
+    ["r18 E6 control: let 'a[\\\\$(C > /dev/null &)]=1' (a \\\\ pair, the $( unescaped)", "let 'a[\\\\$(vibespace-channels read lark/inbox > /dev/null &)]=1'", "lingers", "lingers", "lingers"],
+    ["r18 E7: let 'a[b[\\$(C > /dev/null &)]]=1' (an escaped $( one subscript deeper)", "let 'a[b[\\$(vibespace-channels read lark/inbox > /dev/null &)]]=1'", "none", "none", "none"],
+    ["r18 E8: let 'x=a[b[\\$(C > /dev/null &)]]' (read, not assigned)", "let 'x=a[b[\\$(vibespace-channels read lark/inbox > /dev/null &)]]'", "none", "none", "none"],
+    ["r18 E9: let 'a[b[\\`C > /dev/null &\\`]]=1' (an escaped backtick one deeper)", "let 'a[b[\\`vibespace-channels read lark/inbox > /dev/null &\\`]]=1'", "none", "none", "none"],
+    ["r18 E10: printf -v 'a[b[\\$(C > /dev/null &)]]' x", "printf -v 'a[b[\\$(vibespace-channels read lark/inbox > /dev/null &)]]' x", "none", "none", "none"],
+    ["r18 E11: read 'a[b[\\$(C > /dev/null &)]]' <<< x", "read 'a[b[\\$(vibespace-channels read lark/inbox > /dev/null &)]]' <<< x", "none", "none", "none"],
+    ["r18 E12: let \"a[b[\\\\\\$(C > /dev/null &)]]=1\" (the escape kept by \"…\")", "let \"a[b[\\\\\\$(vibespace-channels read lark/inbox > /dev/null &)]]=1\"", "none", "none", "none"],
+    ["r18 E13: let $'a[b[\\\\\\x24(C > /dev/null &)]]=1' (decoded from $'…')", "let $'a[b[\\\\\\x24(vibespace-channels read lark/inbox > /dev/null &)]]=1'", "none", "none", "none"],
+    ["r18 E14: b=(1 2); let 'a[b[\\$(C > /dev/null &)]]=1' (the inner array set — zsh expands its subscript again)", "b=(1 2); let 'a[b[\\$(vibespace-channels read lark/inbox > /dev/null &)]]=1'", "none", "lingers", "lingers"],
+    ["r18 E15: b=(1 2); let 'x=a[b[\\$(C > /dev/null &)]]'", "b=(1 2); let 'x=a[b[\\$(vibespace-channels read lark/inbox > /dev/null &)]]'", "none", "none", "none"],
+    ["r18 E16: b=(1 2); let 'a[b[\\`C > /dev/null &\\`]]=1'", "b=(1 2); let 'a[b[\\`vibespace-channels read lark/inbox > /dev/null &\\`]]=1'", "none", "lingers", "lingers"],
+    ["r18 E17: b=(1 2); printf -v 'a[b[\\$(C > /dev/null &)]]' x", "b=(1 2); printf -v 'a[b[\\$(vibespace-channels read lark/inbox > /dev/null &)]]' x", "none", "lingers", "lingers"],
+    ["r18 E18: b=(1 2); read 'a[b[\\$(C > /dev/null &)]]' <<< x", "b=(1 2); read 'a[b[\\$(vibespace-channels read lark/inbox > /dev/null &)]]' <<< x", "none", "lingers", "lingers"],
+    ["r18 E19: b=(1 2); let \"a[b[\\\\\\$(C > /dev/null &)]]=1\"", "b=(1 2); let \"a[b[\\\\\\$(vibespace-channels read lark/inbox > /dev/null &)]]=1\"", "none", "lingers", "lingers"],
+    ["r18 E20: b=(1 2); let $'a[b[\\\\\\x24(C > /dev/null &)]]=1'", "b=(1 2); let $'a[b[\\\\\\x24(vibespace-channels read lark/inbox > /dev/null &)]]=1'", "none", "lingers", "lingers"],
+    ["r18 E21 control: a=(1 2); let 'a[\\$(C > /dev/null &)]=1' (one level, the array set)", "a=(1 2); let 'a[\\$(vibespace-channels read lark/inbox > /dev/null &)]=1'", "none", "none", "none"],
+    ["r18 E22 control: a=(1 2); let 'x=a[\\$(C > /dev/null &)]'", "a=(1 2); let 'x=a[\\$(vibespace-channels read lark/inbox > /dev/null &)]'", "none", "none", "none"],
   ];
   // the rows whose CALL reads not lingering — the plain shape (generated with the table); every other row lingers
   const ENDED = [
@@ -2360,7 +2382,8 @@ await section('⑬', async () => {
   // lingering; r13: the r12 verdict's and its claim re-run's that r12 (d5fa8a382) read not lingering; r14: the r13
   // verdict's and its claim re-run's that r13 (7d4ab3951) read not lingering; r15: the r14 verdict's that r14
   // (0de891827) read not lingering; r16: the r15 review's F1 rows that r15 (09beb8f2e) read not lingering (A1–A9 — r16
-  // left them out); r17: the r16 review's F5 / F6 rows that r16 (02c7baa07) read not lingering (U1–U7, S1–S12)
+  // left them out); r17: the r16 review's F5 / F6 rows that r16 (02c7baa07) read not lingering (U1–U7, S1–S12); r18: the
+  // r17 review G1's that r17 (aa4fb6c4e) read not lingering (E14, E16–E20)
   const OUTLIVE = [
     "x9-31 C & repeat 1 exit; wait (zsh repeat)",
     "x9-32 C & echo a<1-9>b; wait (zsh numeric glob)",
@@ -2580,6 +2603,12 @@ await section('⑬', async () => {
     "r17 S10: printf -v \"a[b[1]\\$(C > /dev/null &)]\" x",
     "r17 S11: let \"a['[']\\$(C > /dev/null &)]=1\" (a quoted [ — zsh counts it)",
     "r17 S12: let 'a[\"x\\\"]\" $(C > /dev/null &)]=1' (a \\\" inside \"…\" — bash skips it)",
+    "r18 E14: b=(1 2); let 'a[b[\\$(C > /dev/null &)]]=1' (the inner array set — zsh expands its subscript again)",
+    "r18 E16: b=(1 2); let 'a[b[\\`C > /dev/null &\\`]]=1'",
+    "r18 E17: b=(1 2); printf -v 'a[b[\\$(C > /dev/null &)]]' x",
+    "r18 E18: b=(1 2); read 'a[b[\\$(C > /dev/null &)]]' <<< x",
+    "r18 E19: b=(1 2); let \"a[b[\\\\\\$(C > /dev/null &)]]=1\"",
+    "r18 E20: b=(1 2); let $'a[b[\\\\\\x24(C > /dev/null &)]]=1'",
   ];
   const t30 = [0, 1, 2].map((i) => rd('fx-' + i, 30 + i)), pyLate = one('PY', 'python3 tools/report.py --out /tmp/r.md', R0 + 20_000, R0 + 60_000);
   const bound = (TT, line) => B9(TT, t30, [one('LINE', line, R0 + 2_000, R0 + 2_400), pyLate], ctx);
@@ -2596,8 +2625,8 @@ await section('⑬', async () => {
   ok(TRUTH.length >= 300 && !unsafe.length && eq(ends, ENDED),
     `THE SHELLS' TRUTH, ONE-SIDED (r9 — the r8 verdict; r10 — the r9 verdict: zsh's numeric glob, \`repeat\`, a builtin writing a read-only name and an external command that kills its parent between the job and its reaper, a \`kill\` of a script's job, a heredoc's substitutions read in the foreground): ${TRUTH.length} shapes, each run by bash, zsh AND zsh in the agent tool's form — where any lets the CLI outlive the call, the call lingers and the later lone script never takes its reads (0 rows; c47557626, efe07c76 and 90179ed5 each had some); the call reads ended ONLY on the ${ENDED.length} rows listed (a lone top-level job, a lone top-level \`wait\` / \`wait $!\` — or \`kill $!\` of the CLI itself — only rows of the allowlist between; the foreground controls); ${cost.length} rows every shell ended read lingering — the cost, listed`, { unsafe, endsNotListed: ends.filter((x) => !ENDED.includes(x)), listedNotEnded: ENDED.filter((x) => !ends.includes(x)) });
   const pinned = OUTLIVE.filter((l) => { const r = rows.find((x) => x.label === l); return !!r && r.outlives && r.call === 'lingers'; });
-  ok(pinned.length === OUTLIVE.length && OUTLIVE.length === 218,
-    'THE ATTACK\'S ROWS STAY IN THE TABLE (r10 — the r9 verdict; r11 — the r10 verdict): the 6 zsh / read-only rows r9 read ended (`repeat 1 exit`, `echo a<1-9>b`, `echo nomatchzz<->`, `read status`, `printf -v status`, `echo hi > a<1-2>b`), the 5 killed script / interpreter jobs (K1–K5), the 3 backgrounded heredocs (H1, H2, H1-backtick) and the 68 rows a shell lets outlive that r10 read not lingering — a special builtin redirected (`sh -c "C & : >&9; wait"`), a reaper redirected to a closed descriptor (`wait 2>&3`), a list continued past a newline (`C |⏎ tee x &`, `C &&⏎ echo ok &`), a name written where the line cannot see it (`printf -vIFS`, `read "$v"`, `declare -n`, `{IFS}>`, `for IFS in`), arithmetic bash evaluates (`$[ ]`, `a[i]=`, `${x:off}`, `[[ -eq ]]`, `declare -i`), `${x@P}`, zsh\'s nested `(P)`, a CRLF line (`wait\\r`), a script named like the CLI; r12 — the r11 verdict: the 49 rows a shell lets outlive that r11 read not lingering — a continuation after a subshell (`( C ) |⏎ cat &`), a loop / `[[ -eq ]]` / `(( ))` / a definition after an opener, a split `[[ … ]]`, a compound assignment\'s subscript, an indirection, a builtin\'s heredoc or here-string, bash 5.3\'s `${ …; }`, a `${x:-$(C &)}` the scan never opened, mapfile\'s callback, a reaper redirected from or to a FILE, dash\'s `&>`; r13 — the r12 verdict and its claim re-run: the 24 rows a shell lets outlive that r12 read not lingering — the CLI inside `(( … ))` after an opener or at a command\'s start, a `((` that is two subshells, `$(( … ))` in a word, quoted, in a here-string, a `[[ ]]` or a `case`, a `$((` that is a substitution of a subshell, bash\'s `<( … )` in a default, a trap\'s action, mapfile\'s callback; r14 — the r13 verdict and its claim re-run: the 28 rows a shell lets outlive that r13 read not lingering — a parameter word an evaluator reads again (`eval echo ${x:-\'$(C &)\'}`, `bash -c ${x:-\'C &\'}`, `trap ${x:-…} EXIT`, `| bash`, `bash <<<`, zsh\'s `(e)`), zsh\'s glob (`((#i)…)`, `*(e:…:)`), `builtin trap` / `mapfile` / `eval`, bash 5.3\'s `${ …; }` in arithmetic, a quoted substitution in an arithmetic slot of `${ … }`, a subscript `let` / `printf -v` / `read` / `declare -i` / `[[ ]]` evaluates; r15 — the r14 verdict: the 7 rows a shell lets outlive that r14 read not lingering — an escaped `$(` / backtick in a subscript `let` / `printf -v` / `read` / `declare -i` evaluates, double-quoted (`let "a[\\$(C &)]=1"`) or unquoted (`let a[\\$\\(C…\\)]=1`, bash); r16 — the r15 review F1: `$\'…\'`\'s decoded subscripts (A1–A9); r17 — the r16 review F5 / F6: a non-ASCII name (U1–U7), a subscript\'s span as the shells skip it (S1–S12) — each present, outliving in a shell, read lingering');
+  ok(pinned.length === OUTLIVE.length && OUTLIVE.length === 224,
+    'THE ATTACK\'S ROWS STAY IN THE TABLE (r10 — the r9 verdict; r11 — the r10 verdict): the 6 zsh / read-only rows r9 read ended (`repeat 1 exit`, `echo a<1-9>b`, `echo nomatchzz<->`, `read status`, `printf -v status`, `echo hi > a<1-2>b`), the 5 killed script / interpreter jobs (K1–K5), the 3 backgrounded heredocs (H1, H2, H1-backtick) and the 68 rows a shell lets outlive that r10 read not lingering — a special builtin redirected (`sh -c "C & : >&9; wait"`), a reaper redirected to a closed descriptor (`wait 2>&3`), a list continued past a newline (`C |⏎ tee x &`, `C &&⏎ echo ok &`), a name written where the line cannot see it (`printf -vIFS`, `read "$v"`, `declare -n`, `{IFS}>`, `for IFS in`), arithmetic bash evaluates (`$[ ]`, `a[i]=`, `${x:off}`, `[[ -eq ]]`, `declare -i`), `${x@P}`, zsh\'s nested `(P)`, a CRLF line (`wait\\r`), a script named like the CLI; r12 — the r11 verdict: the 49 rows a shell lets outlive that r11 read not lingering — a continuation after a subshell (`( C ) |⏎ cat &`), a loop / `[[ -eq ]]` / `(( ))` / a definition after an opener, a split `[[ … ]]`, a compound assignment\'s subscript, an indirection, a builtin\'s heredoc or here-string, bash 5.3\'s `${ …; }`, a `${x:-$(C &)}` the scan never opened, mapfile\'s callback, a reaper redirected from or to a FILE, dash\'s `&>`; r13 — the r12 verdict and its claim re-run: the 24 rows a shell lets outlive that r12 read not lingering — the CLI inside `(( … ))` after an opener or at a command\'s start, a `((` that is two subshells, `$(( … ))` in a word, quoted, in a here-string, a `[[ ]]` or a `case`, a `$((` that is a substitution of a subshell, bash\'s `<( … )` in a default, a trap\'s action, mapfile\'s callback; r14 — the r13 verdict and its claim re-run: the 28 rows a shell lets outlive that r13 read not lingering — a parameter word an evaluator reads again (`eval echo ${x:-\'$(C &)\'}`, `bash -c ${x:-\'C &\'}`, `trap ${x:-…} EXIT`, `| bash`, `bash <<<`, zsh\'s `(e)`), zsh\'s glob (`((#i)…)`, `*(e:…:)`), `builtin trap` / `mapfile` / `eval`, bash 5.3\'s `${ …; }` in arithmetic, a quoted substitution in an arithmetic slot of `${ … }`, a subscript `let` / `printf -v` / `read` / `declare -i` / `[[ ]]` evaluates; r15 — the r14 verdict: the 7 rows a shell lets outlive that r14 read not lingering — an escaped `$(` / backtick in a subscript `let` / `printf -v` / `read` / `declare -i` evaluates, double-quoted (`let "a[\\$(C &)]=1"`) or unquoted (`let a[\\$\\(C…\\)]=1`, bash); r16 — the r15 review F1: `$\'…\'`\'s decoded subscripts (A1–A9); r17 — the r16 review F5 / F6: a non-ASCII name (U1–U7), a subscript\'s span as the shells skip it (S1–S12); r18 — the r17 review G1: an escaped `$(` / backtick one subscript deeper, the inner array set (`b=(1 2); let \'a[b[\\$(C &)]]=1\'` — zsh expands the inner subscript again: E14, E16–E20) — each present, outliving in a shell, read lingering');
   // r11: THE LAW CAN FAIL (the RED control): a planted mis-row — `C & wait` marked «bash lets the CLI outlive» — is named by
   // the one-sided check, and only it
   const plant = { label: 'PLANTED: C & wait (marked bash lingers)', line: 'vibespace-channels read lark/inbox & wait', outlives: true };
@@ -2947,7 +2976,7 @@ await section('⑬', async () => {
   // r14: THE MAY-RUN CENSUS (the brief's (c)) — the rows of the table whose reading is UNKNOWN, pinned; every other row is
   // read exactly. A row that newly reads may-run, or stops, fails here by its label
   const unknownOf = (TT, l) => TT.commandsRun(l).unknown || [];
-  const r12Rows = TRUTH.filter((x) => !/^r1[3-7] /.test(x[0]));
+  const r12Rows = TRUTH.filter((x) => !/^r1[3-8] /.test(x[0]));
   const mayRows = TRUTH.filter((x) => unknownOf(T, x[1]).length).map((x) => x[0]);
   const MAY_ROWS = [
     "E3 C & builtin exit; wait",
@@ -3065,9 +3094,31 @@ await section('⑬', async () => {
     "r17 N4: $'vibespace-channels\\0' read lark/inbox",
     "r17 N5: $'\\x76ibespace-channels\\c@' read lark/inbox (bash's \\c@)",
     "r17 M9 cost: vibespace-status working --reason \"x\" && C compose --text \"修复了[\\`foo\\`](https://x/y)\"",
+    "r18 E1: let 'a[\\$(C > /dev/null &)]=1' (an escaped $( in a subscript)",
+    "r18 E2: printf -v 'a[\\$(C > /dev/null &)]' x",
+    "r18 E3: let 'a[\\`C > /dev/null &\\`]=1' (an escaped backtick)",
+    "r18 E4: let $'a[\\\\\\x24(C > /dev/null &)]=1' (the escape decoded from $'…')",
+    "r18 E5: let \"a[\\\\\\$(C > /dev/null &)]=1\" (the escape kept by \"…\")",
+    "r18 E6 control: let 'a[\\\\$(C > /dev/null &)]=1' (a \\\\ pair, the $( unescaped)",
+    "r18 E7: let 'a[b[\\$(C > /dev/null &)]]=1' (an escaped $( one subscript deeper)",
+    "r18 E8: let 'x=a[b[\\$(C > /dev/null &)]]' (read, not assigned)",
+    "r18 E9: let 'a[b[\\`C > /dev/null &\\`]]=1' (an escaped backtick one deeper)",
+    "r18 E10: printf -v 'a[b[\\$(C > /dev/null &)]]' x",
+    "r18 E11: read 'a[b[\\$(C > /dev/null &)]]' <<< x",
+    "r18 E12: let \"a[b[\\\\\\$(C > /dev/null &)]]=1\" (the escape kept by \"…\")",
+    "r18 E13: let $'a[b[\\\\\\x24(C > /dev/null &)]]=1' (decoded from $'…')",
+    "r18 E14: b=(1 2); let 'a[b[\\$(C > /dev/null &)]]=1' (the inner array set — zsh expands its subscript again)",
+    "r18 E15: b=(1 2); let 'x=a[b[\\$(C > /dev/null &)]]'",
+    "r18 E16: b=(1 2); let 'a[b[\\`C > /dev/null &\\`]]=1'",
+    "r18 E17: b=(1 2); printf -v 'a[b[\\$(C > /dev/null &)]]' x",
+    "r18 E18: b=(1 2); read 'a[b[\\$(C > /dev/null &)]]' <<< x",
+    "r18 E19: b=(1 2); let \"a[b[\\\\\\$(C > /dev/null &)]]=1\"",
+    "r18 E20: b=(1 2); let $'a[b[\\\\\\x24(C > /dev/null &)]]=1'",
+    "r18 E21 control: a=(1 2); let 'a[\\$(C > /dev/null &)]=1' (one level, the array set)",
+    "r18 E22 control: a=(1 2); let 'x=a[\\$(C > /dev/null &)]'",
   ];
   console.log(`  · UNKNOWN ⇒ MAY RUN: ${mayRows.length} of the ${TRUTH.length} rows read may-run (${mayRows.filter((l) => r12Rows.some((x) => x[0] === l)).length} of r12's ${r12Rows.length}) — every other row is read exactly`);
-  ok(eq(mayRows, MAY_ROWS) && MAY_ROWS.length === 115, `THE MAY-RUN CENSUS (r14 — the brief's (c); r15: + 20 of its 23 rows; r16: + 11 of its 21 — the decoded \`$'…'\` subscripts, their literal control A12, the markdown residual M8; r17: + 26 of its 28 — the non-ASCII names U1–U8 (U8 a cost), the spans S1–S12, the decoded NULs N1–N5, the named markdown cost M9): of the table's ${TRUTH.length} rows exactly the ${MAY_ROWS.length} listed read may-run — 6 of r12's ${r12Rows.length} (\`C & builtin exit; wait\`, zsh's \`echo x(/)\`, \`\${x@P}\`, \`\${(e)x}\`, two \`*(e:…:)\` — each read lingering before and now), r13's 5 literal-quote controls, r14's own and r15's own (all but its exact control L19 and the follow-up's H1 / H2); every other row is read exactly — a row that newly reads may-run fails here by its label`, { newly: mayRows.filter((l) => !MAY_ROWS.includes(l)), gone: MAY_ROWS.filter((l) => !mayRows.includes(l)) });
+  ok(eq(mayRows, MAY_ROWS) && MAY_ROWS.length === 137, `THE MAY-RUN CENSUS (r14 — the brief's (c); r15: + 20 of its 23 rows; r16: + 11 of its 21 — the decoded \`$'…'\` subscripts, their literal control A12, the markdown residual M8; r17: + 26 of its 28 — the non-ASCII names U1–U8 (U8 a cost), the spans S1–S12, the decoded NULs N1–N5, the named markdown cost M9; r18: + its 22 — a subscript holding an escaped \`$(\` / backtick, E1–E22, 15 of them no shell runs: r16's reading, a cost named): of the table's ${TRUTH.length} rows exactly the ${MAY_ROWS.length} listed read may-run — 6 of r12's ${r12Rows.length} (\`C & builtin exit; wait\`, zsh's \`echo x(/)\`, \`\${x@P}\`, \`\${(e)x}\`, two \`*(e:…:)\` — each read lingering before and now), r13's 5 literal-quote controls, r14's own and r15's own (all but its exact control L19 and the follow-up's H1 / H2); every other row is read exactly — a row that newly reads may-run fails here by its label`, { newly: mayRows.filter((l) => !MAY_ROWS.includes(l)), gone: MAY_ROWS.filter((l) => !mayRows.includes(l)) });
   // r14: A GRAMMAR ROW WITHOUT ITS TABLE IS REFUSED (the brief's (b)) — every construct the reader reads EXACTLY since
   // r13 is a row of shell-words ROWS with the truth rows behind it, its site marked `row:<name>`; the reader's branches
   // are counted — a new one comes with its row and its measured table (else the line it reads is UNKNOWN: it may run)
@@ -3076,8 +3127,9 @@ await section('⑬', async () => {
   // (no grammar row; the r15 rows measure them). r16: + 1 — a name only a `$'…'`'s decoded text spells is named (a may on
   // an UNKNOWN line, never exact); the decoding itself is the row `ansi-c` (its A rows). r17: + 8 — a subscript's span
   // read as the shells skip it (subscriptSubst, 7) and a decoded NUL (1): they make a line UNKNOWN, never exact (no
-  // grammar row; the r17 U / S / N rows measure them)
-  const BRANCHES = 218;
+  // grammar row; the r17 U / S / N rows measure them). r18: + 1 — an escaped `$(` / `${` / backtick in a span (the r17
+  // review G1): UNKNOWN, never exact (the E rows measure it)
+  const BRANCHES = 219;
   const rowCensus = (text, rows) => {
     const bad = [], marks = [...text.matchAll(/row:([\w-]+)/g)].map((m) => m[1]), branches = (text.match(/\bif \(/g) || []).length;
     if (!rows || !Object.keys(rows).length) bad.push('no ROWS table');
@@ -3250,16 +3302,17 @@ await section('⑬', async () => {
   // INDIRECT's `(P)`, SUBSTR's subscript (quadratic: a 64–80 KB nest 0.4–1 s) — each now within evalsParam's 64
   // characters. The work meter in a child (scripts/work-meter.mjs: block executions, native work, every regex backtrack)
   // over commandsRun on twelve unclosed nests at n and 2n — never the clock; the chain's r16 reads planted back, and the
-  // span scan without its skip, read super-linear (the wall times: repro/r17/nest-times.out)
+  // span scan without its skip, read super-linear (the wall times: repro/r17/nest-times.out). r18 (the r17 review, a nit):
+  // at 32 nests r16's own tree read ×2.285 — red by 0.085; at 128 ×2.828, this tree ×1.996 (repro/r18/meter-n.out)
   const nestMk = (n) => [['${(e'], ['${('], ['${(P'], ['${(s:'], ['${a['], ['${#a['], ['${a:-'], ['${x@'], ['$['], ['${!'], ["$'a[\\x24("], ["é[a['", 'let "', '$x"']].map(([u, a = 'echo ', z = '']) => a + u.repeat(n) + z).join('\n');
   const chainMk = (n) => ['${(e', '${(', '${(P', '${(s:', '${a[', '${#a['].map((u) => 'echo ' + u.repeat(n)).join('\n');
   const spanMk = (n) => 'let "' + "é[a['".repeat(n) + '$x"';
   const judgeNest = (module, mk, n, factor = 2) => { const v = judgeInChild({ module, run: '(M, x) => M.commandsRun(x)', mk: mk.toString(), n, kind: 'linear', backtracks: true, opts: { factor } }); return { ok: v.ok === true, r: +(v.r || 0).toFixed(3), w1: v.w1, w2: v.w2, err: v.err }; };
   const plantReads = (tag, pairs) => { let t = SW; for (const [from, to] of pairs) { if (t.split(from).length !== 2) anchorMissing(tag, 'src/shell-words.js (one occurrence)'); t = t.replace(from, to); } return MUT.write('src/shell-words.js', t, tag); };
   const R16_READS = [[String.raw`\$\{\((?=[^)]{0,64}\))[^)e]*e|`, String.raw`\$\{\([^)]*e[^)]*\)|`], [String.raw`\$\{(\([^)]{0,64}\))?[#!^=~+]*`, String.raw`\$\{(\([^)]*\))?[#!^=~+]*`], [String.raw`(\[[^\]]{0,64}\])?:{0,2}=/;`, String.raw`(\[[^\]]*\])?:{0,2}=/;`], [String.raw`const INDIRECT = /\$\{\([^)P]{0,64}P/;`, String.raw`const INDIRECT = /\$\{\([^)]*P/;`], [String.raw`(\[[^\]]{0,64}\])?:(?![-=?+])`, String.raw`(\[[^\]]*\])?:(?![-=?+])`]];
-  const nestNow = judgeNest(path.join(REPO, 'src/shell-words.js'), nestMk, 32), nestR16 = judgeNest(plantReads('nest-r16', R16_READS), chainMk, 16, 4), spanNoSkip = judgeNest(plantReads('span-noskip', [['    if (k <= seen) continue;\n', '']]), spanMk, 32);
+  const nestNow = judgeNest(path.join(REPO, 'src/shell-words.js'), nestMk, 128), nestR16 = judgeNest(plantReads('nest-r16', R16_READS), chainMk, 16, 4), spanNoSkip = judgeNest(plantReads('span-noskip', [['    if (k <= seen) continue;\n', '']]), spanMk, 32);
   ok(nestNow.ok && nestNow.r <= LINEAR_BOUND && !nestR16.ok && nestR16.r > 2 * LINEAR_BOUND && !spanNoSkip.ok && spanNoSkip.r > LINEAR_BOUND,
-    `THE READER'S WORK IS LINEAR ON AN UNCLOSED NEST (r17 — the r16 review F7; r16's leg read one alternative's reach): commandsRun over twelve unclosed nests (\`\${(e\`, \`\${(\`, \`\${(P\`, \`\${(s:\`, \`\${a[\`, \`\${#a[\`, \`\${a:-\`, \`\${x@\`, \`$[\`, \`\${!\`, \`$'a[\\x24(\`, a subscript's \`é[a['\`) counted by the work meter in a child — blocks, natives and every regex backtrack — reads ×${nestNow.r} at twice the nests (≤ ${LINEAR_BOUND}); CONTROLS — the chain's r16 reads planted back (EVALS's \`(e)\`, SETS_IN_WORD's flags group and subscript, INDIRECT's \`(P)\`, SUBSTR's subscript — each from every start to the text's end) read ×${nestR16.r} at four times their six nests (a linear reader: ≤ ${2 * LINEAR_BOUND}); the span scan without its skip ×${spanNoSkip.r} at twice`, { nestNow, nestR16, spanNoSkip });
+    `THE READER'S WORK IS LINEAR ON AN UNCLOSED NEST (r17 — the r16 review F7; r16's leg read one alternative's reach): commandsRun over twelve unclosed nests (\`\${(e\`, \`\${(\`, \`\${(P\`, \`\${(s:\`, \`\${a[\`, \`\${#a[\`, \`\${a:-\`, \`\${x@\`, \`$[\`, \`\${!\`, \`$'a[\\x24(\`, a subscript's \`é[a['\`) counted by the work meter in a child — blocks, natives and every regex backtrack — reads ×${nestNow.r} from 128 to 256 of each (≤ ${LINEAR_BOUND}); CONTROLS — the chain's r16 reads planted back (EVALS's \`(e)\`, SETS_IN_WORD's flags group and subscript, INDIRECT's \`(P)\`, SUBSTR's subscript — each from every start to the text's end) read ×${nestR16.r} at four times their six nests (a linear reader: ≤ ${2 * LINEAR_BOUND}); the span scan without its skip ×${spanNoSkip.r} at twice`, { nestNow, nestR16, spanNoSkip });
   // r17's controls: each patched copy turns its own leg red
   const spanR16 = sw('span-first-close', ': subscriptSubst(t, true) || subscriptSubst(t, false)) unknown(', ": /[\\w}]\\[[^\\]]*(\\$[({]|`)/.test(t)) unknown(");
   ok(lostIn(spanR16, ...UNI, ...SPAN), 'CONTROL r16\'s subscript (an ASCII name, the span to its first `]`): the U and S rows read no run and no may — inert, while a shell ran the CLI');
@@ -3271,12 +3324,36 @@ await section('⑬', async () => {
     'CONTROL one shell\'s span alone: bash\'s (a quote skipped) loses S11 — the quoted `[` zsh counts; zsh\'s (a quote is text) loses S1–S5 and S12 — the quoted `]` and the `\\"` bash skips; both keep the escaped `]` and the nest (S6–S10)');
   const dqEsc = sw('span-dq-escape', "e += c === '\"' && t[e] === '\\\\' ? 2 : 1;", 'e += 1;');
   const noNest = sw('span-nest', "      else if (c === '[') d++;\n", '');
-  const noEsc = sw('span-escape', "      if (c === '\\\\') k++;\n", '      if (false) k++;\n');
+  const ESC_LINE = "      if (c === '\\\\') { if (t[k + 1] === '`' || (t[k + 1] === '$' && (t[k + 2] === '(' || t[k + 2] === '{'))) return true; k++; }\n";
+  const noEsc = sw('span-escape', ESC_LINE, '      if (false) k++;\n');
   ok(lostIn(dqEsc, S(12)) && lostIn(noNest, S(9), S(10)) && lostIn(noEsc, S(6), S(7), S(8)), 'CONTROL the span\'s rules one at a time: no `\\X` inside "…" (S12 lost), no nested bracket (S9, S10 lost), no `\\X` (S6–S8 lost)');
   const noNul = sw('ansi-nul', "        if (dec.includes('\\0')) unknown(i, 'nul');\n", '');
   const noCNul = sw('ansi-c-nul', '(c)(?=[ @`\\u0800-\\u0fff])', '(c)(?!)');
   ok(lostIn(noNul, N(3), N(4)) && noNul.channelsRuns(line(N(1))).length === 1 && lostIn(noCNul, N(5)), 'CONTROL a decoded NUL read as text (r16): N3, N4 read no run and no may (every shell ran the CLI), N1\'s false exact run is back; bash\'s `\\c@` decoded as zsh reads it: N5 lost');
-  for (const c of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 86, label: '⑬ ' })) ok(c.pass, c.name, c.detail);
+  // r18: THE SPAN'S `\X` SKIP HIDES NO SUBSTITUTION (the r17 review G1 — r17's span skipped the character after
+  // every `\` before it looked for a substitution: a subscript holding `\$(` / `` \` `` read exact and inert, where r14–r16
+  // read it UNKNOWN). zsh expands a NESTED subscript again once the inner array is set — `b=(1 2); let 'a[b[\$(C &)]]=1'`:
+  // the outer subscript's expansion strips the `\`, the inner one runs the CLI (E14, E16–E20: zsh and the tool's zsh, the
+  // CLI outliving them; bash never). The review's five (E1–E5), their one-deeper forms with the inner array unset (E7–E13,
+  // E15) and one level with the array set (E21, E22) — no shell runs them — read UNKNOWN too: r16's reading, a cost named
+  const E18 = rowsOf(/^r18 E\d+[: ]/), e18By = readBy(E18), e18 = (k) => E18.find((l) => new RegExp(`^r18 E${k}[: ]`).test(l)) || `r18 E${k}: # no row`;
+  const E18_RUN = [14, 16, 17, 18, 19, 20].map(e18);
+  ok(E18.length === 22 && Object.values(e18By).every(mayLinger) && E18_RUN.every((l) => truthOf(l) === 'none/lingers/lingers') && truthOf(e18(6)) === 'lingers/lingers/lingers'
+    && E18.filter((l) => !E18_RUN.includes(l) && l !== e18(6)).every((l) => truthOf(l) === 'none/none/none'),
+    'THE SPAN\'S `\\X` SKIP HIDES NO SUBSTITUTION (r18 — the r17 review G1: r17\'s span skipped the character after every `\\` before it looked for a substitution): `b=(1 2); let \'a[b[\\$(C &)]]=1\'` (E14), its backtick (E16), `printf -v` (E17), `read` (E18), `"a[b[\\\\\\$(…)]]"` (E19), `$\'a[b[\\\\\\x24(…)]]\'` (E20) — zsh and the tool\'s zsh expand the inner subscript again, the CLI outlives them, bash never (r17: inert, ended): UNKNOWN (subscript), may run the CLI, lingering; the review\'s five (`let \'a[\\$(C &)]=1\'`, `printf -v`, a backtick, `$\'…\'`, `"…"`: E1–E5), the one-deeper forms with the inner array unset (E7–E13, E15) and one level with the array set (E21, E22) — no shell runs them — the same (r16\'s reading; a cost, named); E6 (a `\\\\` pair, the `$(` unescaped — every shell runs it) as before', e18By);
+  const escNoGuard = sw('span-escape-subst', ESC_LINE, "      if (c === '\\\\') k++;\n");
+  ok(lostIn(escNoGuard, ...E18_RUN) && unknownOf(escNoGuard, line(e18(6))).length > 0, 'CONTROL the span\'s `\\X` skipped before the substitution test (r17): E14, E16–E20 read no run and no may — zsh ran the CLI and it outlived the shell; E6 (the `\\\\` pair) still UNKNOWN');
+  // r18: the claim, fuzzed — the span's branches make a line UNKNOWN, never exact: of the subscript lines r16's test
+  // (planted in this reader) reads UNKNOWN, none reads otherwise here; r17's skip lost a third (repro/r18/fuzz-span.out:
+  // 3763 of 9939 over 20000 lines; r18 0)
+  let fz18 = 18; const rnd18 = (k) => { fz18 = (fz18 * 1103515245 + 12345) & 0x7fffffff; return fz18 % k; };
+  const AL18 = ['a[', 'b[', ']', '\\', '\\\\', '$(', '${', '`', 'C', ')', '}', 'x', '1', ' ', 'é[', '"', "'", '\\$(', '\\`', '[', '$', '('];
+  const wrap18 = [(t) => `let '${t.replace(/'/g, '')}'`, (t) => `let "${t.replace(/"/g, '\\"')}"`, (t) => `read '${t.replace(/'/g, '')}' <<< x`];
+  const fuzz18 = Array.from({ length: 1000 }, () => wrap18[rnd18(3)]('a[' + Array.from({ length: 1 + rnd18(10) }, () => AL18[rnd18(AL18.length)]).join('') + ']=1'));
+  const u16s = fuzz18.filter((l) => unknownOf(spanR16, l).length), lost18 = u16s.filter((l) => !unknownOf(T, l).length), lostSkip18 = u16s.filter((l) => !unknownOf(escNoGuard, l).length);
+  ok(u16s.length > 300 && !lost18.length && lostSkip18.length > 50,
+    `THE SPAN'S BRANCHES MAKE A LINE UNKNOWN, NEVER EXACT (r18 — the r17 review G1: r17's skip broke the claim): ${fuzz18.length} fuzzed subscript lines (\`let '…'\`, \`let "…"\`, \`read '…'\` over names, brackets, \`\\\`, \`$(\`, \`\${\`, backticks, quotes) — of the ${u16s.length} r16's test reads UNKNOWN, ${lost18.length} read otherwise; CONTROL the r17 skip: ${lostSkip18.length}`, { lost18: lost18.slice(0, 5) });
+  for (const c of copiesCensus(MUT.files, MUT.dir, REPO, { minCopies: 87, label: '⑬ ' })) ok(c.pass, c.name, c.detail);
 });
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
