@@ -6652,7 +6652,7 @@ export default {
   "{used} of {limit} kept — the running browsers alone pass the bound; nothing can be freed until one stops": "{used} / {limit} を保持中——実行中のブラウザだけで上限を超えています。1 つ停止するまで解放できません",
   "keeping is off (Settings → Agent browser)": "保持はオフです（設定 → Agent ブラウザ）",
   "None — no conversation's browser has stopped with something to keep.": "なし — 保持するものを残して停止した会話のブラウザはまだありません。",
-  "Hand back with a note…": "メモを添えて戻す…",
+  "Hand back with a note…": "メモで戻す…",
   "Hand the browser back for the agent’s next turn, with a note — nothing is sent now": "メモを添えてブラウザをエージェントの次のターンに戻します——今は何も送信されません",
   "Reopen this browser with its last tabs": "前回のタブでこのブラウザを開き直す",
   "Resuming the browser…": "ブラウザを再開しています…",

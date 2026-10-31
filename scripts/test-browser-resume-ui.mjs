@@ -22,7 +22,8 @@
 //      the strip above the composer offers it with "Hand over now · starts a turn" (lane handback-words), NO billed turn (the spend ledger has no row, the journal says "nothing
 //      delivered"), and the agent's next command (the shipped CLI) prints [browser_resumed] naming the current tab
 //   ④ zh + ja: Resume and "Hand back with a note…" in the device's language, whole in a 360 px wide window (Resume never
-//      folds; the other is on the bar or a ⋯ row with its words)
+//      folds; the hand-back is WHOLE ON THE BAR — lane handback-words: ja «メモを添えて戻す…» folded into the ⋯ row there,
+//      so ja says «メモで戻す…»; a ⋯ row no longer passes)
 //   PNGs where VIBESPACE_TABS_PNG_DIR names a directory: ⑧'s tab row + pane, and (lane handback-words) the hand-back
 //   dialog, the strip after it, and the zh / ja bar at 360 px
 //   ⑤ the agent's own `detach` retires its browser's record: a freshly loaded view (no browser remembered) still offers
@@ -317,7 +318,7 @@ else await (async () => {
 
     // ── ④ zh + ja: the two new controls in the device's language, whole in a 360 px window ──
     console.log('— ④ zh + ja: Resume and "Hand back with a note…" in the device\'s language, whole at 360 px');
-    for (const [lang, resumeWord, contWord] of [['zh', '恢复', '交还并留言…'], ['ja', '再開', 'メモを添えて戻す…']]) {
+    for (const [lang, resumeWord, contWord] of [['zh', '恢复', '交还并留言…'], ['ja', '再開', 'メモで戻す…']]) {
       await send('Runtime.evaluate', { expression: `localStorage.setItem('vibespace.lang', ${S(lang)}); true` });
       if (!ok(await boot(), `${lang}: the app booted again in ${lang}`)) continue;
       await sleep(600);
@@ -337,7 +338,7 @@ else await (async () => {
       await until(() => ev('const s = L().state(); return s.connected && !s.stopped && s.contShown;'), 20000, 150);
       await sleep(400);
       const zc = await ev('const l = L(); l.layoutBar && l.layoutBar(); const s = l.state(); const c = l.el().querySelector(".browser-live-continue"); const onBar = c && c.style.display !== "none" && !s.folded.includes("continue"); return { contShown: s.contShown, contText: s.contText, onBar, fit: onBar ? c.scrollWidth <= c.clientWidth + 1 : null, row: s.foldedRows.find((x) => x.label === s.contText) || null, folded: s.folded };');
-      ok(zc.contShown && zc.contText === contWord && (zc.onBar ? zc.fit : !!zc.row), `${lang}: "${contWord}" is offered after the Resume — whole on the bar, or a ⋯ row with its own words when the 360 px bar folds it`, S(zc));
+      ok(zc.contShown && zc.contText === contWord && zc.onBar && zc.fit, `${lang}: "${contWord}" is offered after the Resume — WHOLE ON THE BAR of the 360 px window (never folded into the ⋯ row)`, S(zc));
       if (PNG_DIR) await png(`handback-bar-${lang}.png`, await ev('return rect(L().el().querySelector(".browser-live-bar"));'));
     }
     await send('Runtime.evaluate', { expression: `localStorage.removeItem('vibespace.lang'); true` });
