@@ -2183,9 +2183,17 @@ console.log('㉝ THE STRIP SAYS WHAT ITS ANSWERS DECIDE ON · A HELD STACK KEEPS
     // the controls: a renderer that offers «Always» whatever fits; a strip grammar that hides the facts again
     const mut = src.replace("answers = held.filter((a) => a !== 'always' || s.fits);", 'answers = held;');
     const Rm = await import(pathToFileURL(mutantCopies('utrow15', ROOT).write(REL, mut, 'stripall')).href);
-    const gm = seeAll(Rm), gc = seeAll(R, CC.replace(':not(.ut-run-cmd, .ut-run-gist, .ut-run-answer)', ':not(.ut-run-cmd, .ut-run-answer)'));
+    const gm = seeAll(Rm), gc = seeAll(R, CC.replace(':not(.ut-run-cmd, .ut-run-gist, .ut-run-changes, .ut-run-answer)', ':not(.ut-run-cmd, .ut-run-answer)')); // the .367 seam 6 keeps .ut-run-changes
     ok(mut !== src && gm.many.answers.includes('always') && !gm.many.facts.includes('replica-0'), `CONTROL (r15): the mutant that offers «Always» whatever fits puts it beside twelve hosts it does not show (${J(gm.many.answers)}) — the leg goes red`, gm.many);
     ok(!hostSaid(gc.past, 'exfil.attacker.example') && !gc.writable.warn && !/Asked again/.test(gc.again.facts), 'CONTROL (r15): the strip grammar of 2353267f1 (the facts hidden) shows no host, no warning row, no «asked again» — the legs go red', { past: gc.past, writable: gc.writable, again: gc.again });
+    // the .367 seam 6 (× lane vault-standing-request, the integrator's ruling 10-31): a run ask whose card offers «Allow for 1 hour»
+    // (the door's `action.window`) — the strip SHOWS what that answer writes (the card's changes row, vault-standing r5's «what the
+    // row will be») and «Allow for 1 hour»'s own words, through the strip's REAL css; a strip that offers no writing answer draws none
+    const wAsk = runAsk('ut-s6win', { ...base, window: { offered: true, until: T0 + 3600e3, entries: ['TTS API key'] } }, { window: true });
+    const wHtml = R.renderRow(wAsk, ctx).innerHTML, ws = stripSees(wHtml, CC);
+    ok(ws.answers.includes('window') && ws.kids.includes('ut-run-changes') && /«Allow for 1 hour»: this conversation will be able to use “TTS API key”/.test(ws.facts)
+      && /<span class="ut-run-hint ut-run-hint-window">/.test(wHtml) && /\.cad-rows \.ut-run-answer > \.ut-run-hint:not\(\.ut-run-hint-window\) \{ display: none; \}/.test(CC) && !g.many.kids.includes('ut-run-changes'),
+      `RED-able (the .367 seam 6 — the merged tree before it offered «Allow for 1 hour» in the strip with neither line shown: 109 of 143 real cards in the integrator's probe): the strip offering a writing answer (${J(ws.answers)}) shows what it writes («${(ws.facts.match(/«Allow for 1 hour»:[^.]*\./) || [''])[0]}») and its words beside the answers; one offering none draws no such row`, ws);
   } catch (e) { ok(false, '㉝ A: the row renderer runs under the minimal DOM', e.stack); }
   finally { for (const [k, v] of Object.entries(hadE)) { if (v === undefined) delete globalThis[k]; else globalThis[k] = v; } }
   // B — A HELD STACK KEEPS THE READ CARD: the REAL annPlace + annLayout (sliced) over a stack laid out like style.css's (a column,

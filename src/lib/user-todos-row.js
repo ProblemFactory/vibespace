@@ -274,9 +274,13 @@ const stripGistHtml = (s, t, always) => `<div class="ut-run-gist">${s.rows.map((
 export function runFactsHtml(i, t, { buttons = true, strip = false } = {}) {
   const v = runCardOf(i, { t });
   if (!v) return '';
-  if (strip) { // r15: the strip's own — the head, what it decides on, the answers those carry (never the card's rows, folds or hint)
+  if (strip) { // r15: the strip's own — the head, what it decides on, the answers those carry (never the card's rows or folds; an answer that WRITES brings what it writes — the .367 seam 6)
     const s = runStripOf(v, { t }), held = i.action.askId ? heldAnswers(i) : [], answers = held.filter((a) => a !== 'always' || s.fits);
-    return `<div class="ut-run"><pre class="ut-run-cmd">${escHtml(v.cmd)}</pre>${stripGistHtml(s, t, held.includes('always'))}${answers.length ? `<div class="ut-exit-answer ut-hub-answer ut-run-answer">${answers.map((a) => `<button type="button" class="ut-act ut-action-exit ut-exit-${a === 'deny' ? 'deny' : 'allow'} ut-hub-${a}" data-answer="${a}">${escHtml(hubAnswerWord(a, t, i.action.type))}</button>`).join('')}</div>` : ''}</div>`;
+    // the .367 seam 6 (× lane vault-standing-request, the integrator's ruling 10-31): an answer that WRITES («Allow for 1 hour»,
+    // «Always») is offered with what it writes — the card's own changes row (vault-standing r5: «what the row will be», on every
+    // surface that draws the card) and «Allow for 1 hour»'s own words — and named as the card names it (hubAnswerWord with the action)
+    const writes = answers.includes('window') || answers.includes('always');
+    return `<div class="ut-run"><pre class="ut-run-cmd">${escHtml(v.cmd)}</pre>${stripGistHtml(s, t, held.includes('always'))}${writes ? runChangesHtml(v) : ''}${answers.length ? `<div class="ut-exit-answer ut-hub-answer ut-run-answer">${answers.map((a) => `<button type="button" class="ut-act ut-action-exit ut-exit-${a === 'deny' ? 'deny' : 'allow'} ut-hub-${a}" data-answer="${a}">${escHtml(hubAnswerWord(a, t, i.action.type, i.action))}</button>`).join('')}${answers.includes('window') ? runWindowHintHtml(v) : ''}</div>` : ''}</div>`;
   }
   const rows = v.rows.map((r) => `<div class="ut-run-row${r.warn ? ' ut-run-warn' : ''}" data-fact="${r.key}"><span class="ut-run-lbl">${escHtml(r.label)}</span><span class="ut-run-val">${linesHtml(r.lines)}</span></div>`).join('');
   const answers = buttons && i.action.askId ? heldAnswers(i) : [];
