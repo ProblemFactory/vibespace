@@ -48,12 +48,14 @@ export function loginExtras(row, data, { refresh, show } = {}) {
       ? t('Registration not yet confirmed by the site — login fills this pending password.')
       : t('Password change not yet confirmed — login fills the pending password (previous password kept in reserve).');
     const reasonWords = pendingReason === 'the request body was too large to read'
-      ? t('Why not auto-confirmed: the request body was too large to read (> 64 KB) — confirm here if the site accepted it.')
+      ? t('Why not auto-confirmed: the request body was too large to read — confirm here if the site accepted it.')
       : pendingReason === 'the site\'s request did not carry the password in a readable form'
         ? t('Why not auto-confirmed: the site\'s request did not carry the password in a readable form — confirm here if the site accepted it.')
         : pendingReason === 'the site\'s answer was too large to read'
           ? t('Why not auto-confirmed: the site\'s answer was too large to read — confirm here if the site accepted it.')
-          : '';
+          : pendingReason === 'a beacon could not be read'
+            ? t('Why not auto-confirmed: a beacon could not be read — confirm here if the site accepted it.')
+            : '';
     const filledNote = entry.lastFilledPassword === 'pending' ? ` · ${t('Last login filled the pending password.')}` : '';
     box.append(el('div', 'vw-ak-hint vw-login-pending', baseNote + (reasonWords ? ` ${reasonWords}` : '') + filledNote));
     confirmB = el('button', 'vw-btn vw-login-confirm', t('Confirm'));
@@ -66,9 +68,16 @@ export function loginExtras(row, data, { refresh, show } = {}) {
       refresh?.();
     };
   }
-  const destOrigins = Array.isArray(entry.origins) ? entry.origins.filter(Boolean) : [];
+  const destOrigins = Array.isArray(entry.origins) && entry.origins.length
+    ? entry.origins.filter(Boolean)
+    : Array.isArray(row && row.submittedTo)
+      ? row.submittedTo.filter(Boolean)
+      : [];
   if (destOrigins.length) {
     box.append(el('div', 'vw-ak-hint vw-login-origins', t('Submitted to {origins}', { origins: destOrigins.join(', ') })));
+  }
+  if (entry.beaconUnreadable === true || (row && row.beaconUnreadable === true)) {
+    box.append(el('div', 'vw-ak-hint vw-login-beacon', t('a beacon could not be read')));
   }
   const chips = el('div', 'vw-ak-grants');
   const grants = (entry.grants || []).filter((g) => !g.unknown);

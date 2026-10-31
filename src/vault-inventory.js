@@ -118,7 +118,7 @@ function secretRowOf(s, { machineName = (k) => k } = {}) {
     const pendingReason = pending && typeof s.pendingReason === 'string' && s.pendingReason ? clip(s.pendingReason, 320) : null;
     const origins = Array.isArray(s && s.origins) ? s.origins.map((o) => clip(o, 253)).filter(Boolean).slice(0, 8) : [];
     const detail = pending === 'register' ? PENDING_LOGIN_WORDS.register : pending === 'change' ? PENDING_LOGIN_WORDS.change : p.label;
-    return { entry: name, field: 'password', kind: 'login', label: `${wl[2]} · ${wl[1].replace(/^https:\/\//, '')}`, detail, createdAt: at, ...(p.origin ? { origin: p.origin } : {}), ...(src !== 'owner' ? { provenance: { by: 'agent', prov: src, sawPlaintext: p.sawPlaintext, actor: (s && s.actor) || null, owner: (s && s.owner) || null } } : {}), ...(origins.length ? { hosts: origins } : {}), ...(pending ? { pending, ...(pendingReason ? { pendingReason } : {}) } : {}) };
+    return { entry: name, field: 'password', kind: 'login', label: `${wl[2]} · ${wl[1].replace(/^https:\/\//, '')}`, detail, createdAt: at, ...(p.origin ? { origin: p.origin } : {}), ...(src !== 'owner' ? { provenance: { by: 'agent', prov: src, sawPlaintext: p.sawPlaintext, actor: (s && s.actor) || null, owner: (s && s.owner) || null } } : {}), ...(origins.length ? { submittedTo: origins } : {}), ...(s && s.beaconUnreadable === true ? { beaconUnreadable: true } : {}), ...(pending ? { pending, ...(pendingReason ? { pendingReason } : {}) } : {}) };
   }   // lane browser-login (+ lane vault-agent-own: the conversation that stored it, `owner`)
   if (FREE_ENTRY_RE.test(name)) {
     // lane vault-use-grants: an entry the owner filled at an agent's REQUEST says so — its origin «filled by you · asked for by
@@ -248,6 +248,8 @@ function rowOf(store, raw, { lastUsed = null } = {}) {
     provenance: raw.provenance || null,   // lane vault-mint-put: agent entries carry it; the v2 window's chip reads it
     // lane vault-use-grants: the hosts a request named and the conversation that asked (names — never a value)
     hosts: Array.isArray(raw.hosts) ? raw.hosts.map((h) => clip(h, 253)).filter(Boolean).slice(0, 16) : [],
+    ...(Array.isArray(raw.submittedTo) && raw.submittedTo.length ? { submittedTo: raw.submittedTo.map((o) => clip(o, 253)).filter(Boolean).slice(0, 8) } : {}),
+    ...(raw.beaconUnreadable === true ? { beaconUnreadable: true } : {}),
     askedBy: raw.askedBy && typeof raw.askedBy === 'object' && raw.askedBy.conv ? { conv: clip(raw.askedBy.conv, 160), name: clip(raw.askedBy.name, 80) } : null,
     pending: raw.pending === 'register' || raw.pending === 'change' ? raw.pending : null,
     ...(raw.pending === 'register' || raw.pending === 'change' ? (typeof raw.pendingReason === 'string' && raw.pendingReason ? { pendingReason: clip(raw.pendingReason, 320) } : {}) : {}),

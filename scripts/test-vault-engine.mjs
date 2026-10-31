@@ -608,6 +608,7 @@ console.log('O  THE LOCK\'S FOUR CONSEQUENCES (lane vault-manual-and-lock — de
     'src/server/vault-paste-door.js': { n: 1, ends: ['asks'], why: 'lane vault-paste-request: every open paste request withdrawn (its item done vault_locked) and its asker told at its next turn; one filed while locked, or kept over a restart, waits — its box says vault_locked with 解锁… inline' },
     'src/server/vault-hooks.js': { n: 3, ends: ['logins', 'sealed', 'said'], why: 'r2: every login signed out (the vault\'s fifth consequence, the sign-in\'s); a sealed file forgets its decrypted copy; lane vault-locked-loud (int332): the lock act files THE urgent unlock prompt at once',
       item: 'the lock\'s OWN prompt (lane vault-locked-loud): an action row (the badge counts it) filed BY the lock and resolved by the unlock — not an ask a lock withdraws' },
+    'src/server/browser-logins.js': { n: 1, ends: ['filled'], why: 'lane vault-login-r3 r8: browser-dialogs subscribes via logins.onVaultLock to clear browser-login-fill\'s per-tab remembered plaintext secrets at once on a lock' },
   };
   const walk = (d) => fs.readdirSync(path.join(REPO, d), { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : /\.(c|m)?js$/.test(e.name) ? [path.join(d, e.name)] : []));
   const files = [...walk('src'), 'server.js'];

@@ -29,48 +29,146 @@ const WORLD_NAME = 'vs-login-fill';
 const REDIRECT_SETTLE_TRIES = 3;
 const REDIRECT_SETTLE_MS = 25;
 const MAX_CHILD_FRAMES = 64;
-const lastContextByTarget = new Map(); // targetId|sessionId → last isolated-world contextId for snapshot-aware wipe
-const filledSecretsByTarget = new Map(); // targetId|sessionId → string[] (bounded to 64 entries)
-const filledSecretsByCtx = new Map();    // contextId → string[] (bounded to 64 entries)
+const DEFAULT_MAX_SCAN_POSITIONS = 524288;
+const TOO_MUCH_TEXT_REASON = BL.HOLD_TOO_MUCH_TEXT || 'too much text to check';
+const SUB_LEN_BUCKETS = Object.freeze([[3, 7], [8, 15], [16, 31], [32, 63], [64, 128], [129, 512], [513, 4096]]);
+const WHOLE_LEN_BUCKETS = Object.freeze([[1, 7], [8, 15], [16, 31], [32, 63], [64, 128], [129, 512], [513, 4096]]);
+const lastContextByTarget = new Map(); // targetId|sessionId → {profileId, ctxId}
+const filledSecretsByTarget = new Map(); // targetId|sessionId → {profileId, values: string[]} (bounded to 64 entries)
+const filledSecretsByCtx = new Map();    // contextId → {profileId, values: string[]} (bounded to 64 entries)
 
-function rememberFilledSecrets(ctxKey, ctxId, secretVals) {
+function bucketOfCharLen(charLen, whole = false) {
+  const n = Math.max(1, Number(charLen) || 1);
+  const table = whole ? WHOLE_LEN_BUCKETS : SUB_LEN_BUCKETS;
+  for (const [lo, hi] of table) {
+    if (n <= hi) return [lo, hi];
+  }
+  return [513, Math.max(4096, Math.ceil(n / 1024) * 1024)];
+}
+
+function rollingHashPrefix(str, w, base) {
+  let h = 0 | 0;
+  for (let i = 0; i < w; i++) h = (Math.imul(h, base) + str.charCodeAt(i)) | 0;
+  return h | 0;
+}
+
+function rollingPow(w, base) {
+  let p = 1 | 0;
+  for (let i = 1; i < w; i++) p = Math.imul(p, base);
+  return p | 0;
+}
+
+function rememberFilledSecrets(ctxKey, ctxId, secretVals, profileId = '') {
+  const pid = String(profileId || '');
   const clean = [...new Set((Array.isArray(secretVals) ? secretVals : []).filter((s) => typeof s === 'string' && s.length > 0))];
   if (!clean.length) return;
   if (ctxKey) {
-    const prev = filledSecretsByTarget.get(ctxKey) || [];
+    const prevEntry = filledSecretsByTarget.get(ctxKey);
+    const prev = prevEntry && Array.isArray(prevEntry.values) ? prevEntry.values : [];
     const merged = [...new Set([...prev, ...clean])].slice(-16);
     filledSecretsByTarget.delete(ctxKey);
-    filledSecretsByTarget.set(ctxKey, merged);
+    filledSecretsByTarget.set(ctxKey, { profileId: pid || (prevEntry && prevEntry.profileId) || '', values: merged });
     while (filledSecretsByTarget.size > 64) filledSecretsByTarget.delete(filledSecretsByTarget.keys().next().value);
   }
   if (Number.isInteger(ctxId) && ctxId > 0) {
-    const prev = filledSecretsByCtx.get(ctxId) || [];
+    const prevEntry = filledSecretsByCtx.get(ctxId);
+    const prev = prevEntry && Array.isArray(prevEntry.values) ? prevEntry.values : [];
     const merged = [...new Set([...prev, ...clean])].slice(-16);
     filledSecretsByCtx.delete(ctxId);
-    filledSecretsByCtx.set(ctxId, merged);
+    filledSecretsByCtx.set(ctxId, { profileId: pid || (prevEntry && prevEntry.profileId) || '', values: merged });
     while (filledSecretsByCtx.size > 64) filledSecretsByCtx.delete(filledSecretsByCtx.keys().next().value);
   }
 }
 
-function buildFilledTargets(secretValues) {
-  const uniq = [...new Set((Array.isArray(secretValues) ? secretValues : []).filter((s) => typeof s === 'string' && s.length > 0))];
-  if (!uniq.length) return { salt: '', targets: [] };
+function clearFilledSecretsForProfile(profileId) {
+  const pid = String(profileId || '');
+  if (!pid) return;
+  for (const [k, v] of [...filledSecretsByTarget.entries()]) {
+    if (!v || !v.profileId || v.profileId === pid) {
+      if (v && Array.isArray(v.values)) v.values.length = 0;
+      filledSecretsByTarget.delete(k);
+    }
+  }
+  for (const [k, v] of [...filledSecretsByCtx.entries()]) {
+    if (!v || !v.profileId || v.profileId === pid) {
+      if (v && Array.isArray(v.values)) v.values.length = 0;
+      filledSecretsByCtx.delete(k);
+    }
+  }
+  for (const [k, v] of [...lastContextByTarget.entries()]) {
+    if (!v || typeof v !== 'object' || !v.profileId || v.profileId === pid) {
+      lastContextByTarget.delete(k);
+    }
+  }
+}
+
+function clearAllFilledSecrets() {
+  for (const v of filledSecretsByTarget.values()) if (v && Array.isArray(v.values)) v.values.length = 0;
+  for (const v of filledSecretsByCtx.values()) if (v && Array.isArray(v.values)) v.values.length = 0;
+  filledSecretsByTarget.clear();
+  filledSecretsByCtx.clear();
+  lastContextByTarget.clear();
+}
+
+function hasRememberedSecrets(profileId = null) {
+  const wantPid = profileId == null ? null : String(profileId);
+  for (const v of filledSecretsByTarget.values()) {
+    if (v && Array.isArray(v.values) && v.values.length > 0 && (wantPid === null || v.profileId === wantPid)) return true;
+  }
+  for (const v of filledSecretsByCtx.values()) {
+    if (v && Array.isArray(v.values) && v.values.length > 0 && (wantPid === null || v.profileId === wantPid)) return true;
+  }
+  return false;
+}
+
+function buildFilledTargets(secretValues, { wholeOnlyValues = null } = {}) {
+  const rawMain = [...new Set((Array.isArray(secretValues) ? secretValues : []).filter((s) => typeof s === 'string' && s.length > 0))];
+  const rawWhole = [...new Set((Array.isArray(wholeOnlyValues) ? wholeOnlyValues : []).filter((s) => typeof s === 'string' && s.length > 0))];
+  if (!rawMain.length && !rawWhole.length) return { salt: '', targets: [] };
   const salt = crypto.randomBytes(16).toString('hex');
-  const targets = uniq.map((sv) => ({
-    len: sv.length,
-    hash: crypto.createHash('sha256').update(`${salt}:${sv}`, 'utf8').digest('hex'),
-  }));
+  const rBase = (crypto.randomBytes(4).readUInt32LE(0) | 1) | 0;
+  const subVals = [];
+  const wholeVals = new Set(rawWhole);
+  for (const sv of rawMain) {
+    if (Buffer.byteLength(sv, 'utf8') < 8) wholeVals.add(sv);
+    else subVals.push(sv);
+  }
+  const subSet = new Set(subVals);
+  const targets = [];
+  for (const sv of wholeVals) {
+    if (subSet.has(sv)) continue;
+    const [minLen, maxLen] = bucketOfCharLen(sv.length, true);
+    targets.push({
+      whole: true,
+      minLen,
+      maxLen,
+      hash: crypto.createHash('sha256').update(`${salt}:w:${sv}`, 'utf8').digest('hex'),
+    });
+  }
+  for (const sv of subVals) {
+    const [minLen, maxLen] = bucketOfCharLen(sv.length, false);
+    targets.push({
+      whole: false,
+      minLen,
+      maxLen,
+      rBase,
+      rHash: rollingHashPrefix(sv, minLen, rBase),
+      hash: crypto.createHash('sha256').update(`${salt}:${sv}`, 'utf8').digest('hex'),
+    });
+  }
   return { salt, targets };
 }
 
-function targetsForTab(targetId = null, contextId = 0, extraSecrets = null, sessionId = undefined) {
+function targetsForTab(targetId = null, contextId = 0, extraSecrets = null, sessionId = undefined, { wholeOnlyValues = null } = {}) {
   const ctxKey = String(targetId || sessionId || '');
+  const byCtx = Number.isInteger(Number(contextId)) && Number(contextId) > 0 ? filledSecretsByCtx.get(Number(contextId)) : null;
+  const byTgt = ctxKey ? filledSecretsByTarget.get(ctxKey) : null;
   const list = [
     ...(Array.isArray(extraSecrets) ? extraSecrets : []),
-    ...((Number.isInteger(Number(contextId)) && Number(contextId) > 0 && filledSecretsByCtx.get(Number(contextId))) || []),
-    ...((ctxKey && filledSecretsByTarget.get(ctxKey)) || []),
+    ...((byCtx && Array.isArray(byCtx.values)) ? byCtx.values : []),
+    ...((byTgt && Array.isArray(byTgt.values)) ? byTgt.values : []),
   ];
-  return buildFilledTargets(list);
+  return buildFilledTargets(list, { wholeOnlyValues });
 }
 
 const SHA256_HELPER_SRC = `
@@ -140,29 +238,113 @@ const SHA256_HELPER_SRC = `
   };
 `;
 
-function filledTargetSrc(salt, targets) {
-  const clean = Array.isArray(targets) ? targets.filter((t) => t && Number(t.len) > 0 && typeof t.hash === 'string') : [];
-  if (!clean.length || typeof salt !== 'string' || !salt) return 'const hasFilledTarget = () => false;';
+function filledTargetSrc(salt, targets, { maxScanPositions = DEFAULT_MAX_SCAN_POSITIONS } = {}) {
+  const raw = Array.isArray(targets) ? targets : [];
+  const clean = [];
+  for (const t of raw) {
+    if (!t || typeof t.hash !== 'string' || !t.hash) continue;
+    if (t.whole === true) {
+      const minLen = Math.max(1, Number(t.minLen || t.len) || 1);
+      const maxLen = Math.max(minLen, Number(t.maxLen || t.len) || minLen);
+      clean.push({ whole: true, minLen, maxLen, hash: t.hash });
+    } else {
+      const minLen = Math.max(1, Number(t.minLen || t.len) || 0);
+      const maxLen = Math.max(minLen, Number(t.maxLen || t.len) || minLen);
+      if (minLen <= 0) continue;
+      const rBase = Number.isInteger(t.rBase) ? (t.rBase | 0) : 0;
+      const rHash = Number.isInteger(t.rHash) ? (t.rHash | 0) : 0;
+      const rPow = rBase ? rollingPow(minLen, rBase) : 0;
+      clean.push({ whole: false, minLen, maxLen, rBase, rHash, rPow, hash: t.hash });
+    }
+  }
+  if (!clean.length || typeof salt !== 'string' || !salt) {
+    return 'const scanFilledTarget = () => false; const hasFilledTarget = () => false;';
+  }
+  const maxPos = Math.max(256, Number(maxScanPositions) || DEFAULT_MAX_SCAN_POSITIONS);
   return `${SHA256_HELPER_SRC}
   const _vsSalt = ${JSON.stringify(salt)};
   const _vsTargets = ${JSON.stringify(clean)};
-  const hasFilledTarget = (s) => {
-    if (typeof s !== 'string' || !s) return false;
-    const capped = s.length > 16384 ? s.slice(0, 16384) : s;
+  const _vsMaxPos = ${maxPos};
+  let _vsPosUsed = 0;
+  let _vsCut = false;
+  const _vsWhole = [];
+  const _vsGroups = [];
+  {
+    const gMap = Object.create(null);
     for (let ti = 0; ti < _vsTargets.length; ti++) {
       const t = _vsTargets[ti];
-      if (capped.length < t.len) continue;
-      if (capped.length === t.len) {
-        if (_sha256Hex(_vsSalt + ':' + capped) === t.hash) return true;
+      if (t.whole) { _vsWhole.push(t); continue; }
+      const gk = t.minLen + ':' + t.rBase;
+      let g = gMap[gk];
+      if (!g) {
+        g = { w: t.minLen, base: t.rBase | 0, pow: t.rPow | 0, items: [] };
+        gMap[gk] = g;
+        _vsGroups.push(g);
+      }
+      g.items.push(t);
+    }
+  }
+  const scanFilledTarget = (s) => {
+    if (typeof s !== 'string' || !s) return false;
+    const n = s.length;
+    for (let wi = 0; wi < _vsWhole.length; wi++) {
+      const wt = _vsWhole[wi];
+      if (n < wt.minLen || n > wt.maxLen) continue;
+      if (_vsCut || _vsPosUsed + 64 > _vsMaxPos) { _vsCut = true; return 'cut'; }
+      _vsPosUsed += 64;
+      if (_sha256Hex(_vsSalt + ':w:' + s) === wt.hash) return 'match';
+    }
+    let sawCut = _vsCut;
+    for (let gi = 0; gi < _vsGroups.length; gi++) {
+      const g = _vsGroups[gi];
+      const w = g.w;
+      if (n < w) continue;
+      if (_vsCut) { sawCut = true; continue; }
+      const lim = n - w;
+      const items = g.items;
+      if (!g.base) {
+        for (let i = 0; i <= lim; i++) {
+          for (let ii = 0; ii < items.length; ii++) {
+            const it = items[ii];
+            const hi = Math.min(it.maxLen, n - i);
+            for (let L = it.minLen; L <= hi; L++) {
+              if (_vsPosUsed + 64 > _vsMaxPos) { _vsCut = true; return 'cut'; }
+              _vsPosUsed += 64;
+              if (_sha256Hex(_vsSalt + ':' + s.slice(i, i + L)) === it.hash) return 'match';
+            }
+          }
+        }
         continue;
       }
-      const lim = capped.length - t.len;
+      const base = g.base;
+      const pow = g.pow;
+      if (_vsPosUsed + w > _vsMaxPos) { _vsCut = true; sawCut = true; continue; }
+      let h = 0 | 0;
+      for (let k = 0; k < w; k++) h = (Math.imul(h, base) + s.charCodeAt(k)) | 0;
+      _vsPosUsed += 1;
       for (let i = 0; i <= lim; i++) {
-        if (_sha256Hex(_vsSalt + ':' + capped.slice(i, i + t.len)) === t.hash) return true;
+        for (let ii = 0; ii < items.length; ii++) {
+          const it = items[ii];
+          if (h === it.rHash) {
+            const hi = Math.min(it.maxLen, n - i);
+            for (let L = w; L <= hi; L++) {
+              if (_vsPosUsed + 64 > _vsMaxPos) { _vsCut = true; return 'cut'; }
+              _vsPosUsed += 64;
+              if (_sha256Hex(_vsSalt + ':' + s.slice(i, i + L)) === it.hash) return 'match';
+            }
+          }
+        }
+        if (i < lim) {
+          if (_vsPosUsed + 1 > _vsMaxPos) { _vsCut = true; sawCut = true; break; }
+          _vsPosUsed += 1;
+          const rem = (h - Math.imul(s.charCodeAt(i), pow)) | 0;
+          h = (Math.imul(rem, base) + s.charCodeAt(i + w)) | 0;
+        }
       }
     }
-    return false;
-  };`;
+    return sawCut || _vsCut ? 'cut' : false;
+  };
+  const hasFilledTarget = (s) => scanFilledTarget(s) === 'match';`;
 }
 
 /** Read-only DOM inspection inside our isolated world (`window.vsLoginFields` stays private to the isolated world; `.value` is NEVER read). */
@@ -563,12 +745,14 @@ function prepareFieldExpr(fieldId, expectedRole) {
   })()`;
 }
 
-/** Verify in the isolated world AFTER `Input.insertText` that focus stayed on `el`, its type did not flip, and exact character length landed; never carries a secret. */
-function finalizeFieldExpr(fieldId, expectedLen, expectedRole) {
-  const wantLen = Number(expectedLen) || 0;
+/** Verify in the isolated world AFTER `Input.insertText` that focus stayed on `el`, its type did not flip, and the salted SHA-256 of `.value` matches (never sends secret bytes or exact length). */
+function finalizeFieldExpr(fieldId, fSalt, wantHash, expectedRole) {
   const role = String(expectedRole || '');
   return `(() => {
     ${RESOLVE_EL_SRC}
+    ${SHA256_HELPER_SRC}
+    const _vsFinSalt = ${JSON.stringify(String(fSalt || ''))};
+    const _vsWantHash = ${JSON.stringify(String(wantHash || ''))};
     const got = resolveEl(${JSON.stringify(String(fieldId))});
     const el = got && got.el;
     if (!el || !el.isConnected) { wipeNode(document.activeElement); return { ok: false, code: 'field_gone' }; }
@@ -581,15 +765,15 @@ function finalizeFieldExpr(fieldId, expectedLen, expectedRole) {
       return { ok: false, code: 'role_changed' };
     }
     const activeOk = document.activeElement === el;
-    const lenBefore = lenOfNode(el);
-    if (!activeOk || lenBefore !== ${wantLen}) {
+    const matchBefore = _sha256Hex(_vsFinSalt + ':' + valOfNode(el)) === _vsWantHash;
+    if (!activeOk || !matchBefore) {
       wipeNode(el);
       if (document.activeElement && document.activeElement !== el) wipeNode(document.activeElement);
       return { ok: false, code: !activeOk ? 'focus_moved' : 'field_cleared' };
     }
     if (el.dispatchEvent) el.dispatchEvent(new Event('change', { bubbles: true }));
-    const lenAfter = lenOfNode(el);
-    if (lenAfter !== ${wantLen}) {
+    const matchAfter = _sha256Hex(_vsFinSalt + ':' + valOfNode(el)) === _vsWantHash;
+    if (!matchAfter) {
       wipeNode(el);
       return { ok: false, code: 'field_cleared' };
     }
@@ -626,21 +810,33 @@ function wipeFailedFillExpr(fieldIds) {
   })()`;
 }
 
-/** Isolated-world sweep that clears every text-capable control that received typed text AND any control (hidden included)
- *  whose current `.value` or `@value` contains a filled value (`MINOR 3`), while ignoring range/color/default-valued controls (`MAJOR B'`). */
-function wipeTypedExpr(fieldIds, salt = '', targets = []) {
+/** Isolated-world sweep that clears every text-capable control that received typed text (in the main frame where the fill ran)
+ *  AND any control (hidden or sub-frame included) whose current `.value` or `@value` matches a filled value (`MINOR 3` + `MAJOR A`),
+ *  using a single-pass 32-bit rolling-hash pre-filter and a work bound that fails closed with `'too much text to check'` (`MAJOR B` + `MAJOR C`). */
+function wipeTypedExpr(fieldIds, salt = '', targets = [], { allowTypedHeuristic = true, maxScanPositions = DEFAULT_MAX_SCAN_POSITIONS } = {}) {
   const ids = Array.isArray(fieldIds) ? fieldIds.map(String).filter(Boolean) : [];
+  const allowHeuristic = Boolean(allowTypedHeuristic);
   return `(() => {
     ${RESOLVE_EL_SRC}
-    ${filledTargetSrc(salt, targets)}
+    ${filledTargetSrc(salt, targets, { maxScanPositions })}
+    const _vsAllowHeuristic = ${JSON.stringify(allowHeuristic)};
     let wiped = 0;
     let remaining = 0;
     let hasFrames = false;
+    let tooMuchText = false;
     try {
       try { hasFrames = Boolean(document.querySelector('iframe, frame')); } catch {}
       const typedNodes = new Set();
       const filledHolders = new Set();
-      const nodeHasFilled = (node) => Boolean(node && (hasFilledTarget(valOfNode(node)) || hasFilledTarget(attrValOfNode(node))));
+      const cutNodes = new Set();
+      const preVals = typeof Map === 'function' ? new Map() : null;
+      const scanNodeTarget = (v, av) => {
+        const rv = v ? scanFilledTarget(v) : false;
+        if (rv === 'match') return 'match';
+        const ra = av && av !== v ? scanFilledTarget(av) : false;
+        if (ra === 'match') return 'match';
+        return (rv === 'cut' || ra === 'cut') ? 'cut' : false;
+      };
       for (const fid of ${JSON.stringify(ids)}) {
         const got = resolveEl(fid);
         if (got && got.el) typedNodes.add(got.el);
@@ -650,11 +846,21 @@ function wipeTypedExpr(fieldIds, salt = '', targets = []) {
       }
       const snap = window['vsLogin' + 'Snap'] || null;
       for (const node of collectControls(document)) {
-        if (nodeHasFilled(node)) {
+        const v = valOfNode(node);
+        const av = attrValOfNode(node);
+        if (preVals) preVals.set(node, [v, av]);
+        const st = scanNodeTarget(v, av);
+        if (st === 'match') {
           filledHolders.add(node);
           typedNodes.add(node);
           continue;
         }
+        if (st === 'cut') {
+          cutNodes.add(node);
+          tooMuchText = true;
+          continue;
+        }
+        if (!_vsAllowHeuristic) continue;
         if (!isTextControl(node)) continue;
         const curLen = lenOfNode(node);
         if (curLen <= 0) continue;
@@ -668,7 +874,7 @@ function wipeTypedExpr(fieldIds, salt = '', targets = []) {
           }
           if (baseLen === null) baseLen = domType === 'password' ? 0 : defValOfNode(node).length;
           if (curLen > baseLen) typedNodes.add(node);
-        } else if (domType === 'password' || node.isContentEditable || valOfNode(node) !== defValOfNode(node)) {
+        } else if (domType === 'password' || node.isContentEditable || v !== defValOfNode(node)) {
           typedNodes.add(node);
         }
       }
@@ -683,13 +889,42 @@ function wipeTypedExpr(fieldIds, salt = '', targets = []) {
       for (const node of typedNodes) {
         if (node && node.isConnected && lenOfNode(node) > 0) remaining++;
       }
-      for (const node of collectControls(document)) {
-        if (node && node.isConnected && nodeHasFilled(node) && !(typedNodes.has(node) && lenOfNode(node) > 0)) remaining++;
+      for (const node of cutNodes) {
+        if (node && node.isConnected) remaining++;
+      }
+      for (const node of filledHolders) {
+        if (node && node.isConnected && !(typedNodes.has(node) && lenOfNode(node) > 0)) {
+          const st2 = scanNodeTarget(valOfNode(node), attrValOfNode(node));
+          if (st2 === 'match' || st2 === 'cut') {
+            if (st2 === 'cut') tooMuchText = true;
+            remaining++;
+          }
+        }
+      }
+      if (typedNodes.size > 0 && preVals) {
+        for (const node of collectControls(document)) {
+          if (!node || !node.isConnected || filledHolders.has(node) || cutNodes.has(node)) continue;
+          const v2 = valOfNode(node);
+          const av2 = attrValOfNode(node);
+          const prev = preVals.get(node);
+          if (prev && prev[0] === v2 && prev[1] === av2) continue;
+          const st3 = scanNodeTarget(v2, av2);
+          if (st3 === 'match' || st3 === 'cut') {
+            if (st3 === 'cut') tooMuchText = true;
+            if (!(typedNodes.has(node) && lenOfNode(node) > 0)) remaining++;
+          }
+        }
       }
     } catch {
       return { ok: false, wiped, remaining: 1 };
     }
-    return { ok: true, wiped, remaining, ...(hasFrames ? { hasFrames: true } : {}) };
+    return {
+      ok: true,
+      wiped,
+      remaining,
+      ...(hasFrames ? { hasFrames: true } : {}),
+      ...(tooMuchText ? { tooMuchText: true, reason: 'too much text to check' } : {}),
+    };
   })()`;
 }
 
@@ -981,14 +1216,15 @@ async function inspectTabLoginForm({ call, browserCall = null, oopFrames = null,
   return iso.form || null;
 }
 
-/** Wipe every control that received typed text OR holds a filled value on a tab inside our isolated world (all frames, hidden included; ignoring range/color/default-valued inputs). */
-async function wipeTabTypedInputs({ call, oopFrames = null, sessionId = undefined, targetId = null, contextId = 0, fieldIds = [], secretValues = null } = {}) {
+/** Wipe every control that received typed text OR holds a filled value on a tab inside our isolated world (all frames, hidden included; ignoring range/color/default-valued inputs, unrelated iframe content, and failing closed past `maxScanPositions`). */
+async function wipeTabTypedInputs({ call, oopFrames = null, sessionId = undefined, targetId = null, contextId = 0, fieldIds = [], secretValues = null, wholeOnlyValues = null, maxScanPositions = DEFAULT_MAX_SCAN_POSITIONS } = {}) {
   if (typeof call !== 'function') return { ok: false, wiped: 0, verifiedEmpty: false };
   const send = makeSend(call, null, sessionId);
   const ctxKey = String(targetId || sessionId || '');
-  const savedCtx = Number(contextId) > 0 ? Number(contextId) : (ctxKey && lastContextByTarget.get(ctxKey)) || 0;
-  const { salt, targets } = targetsForTab(targetId, savedCtx, secretValues, sessionId);
-  const expr = wipeTypedExpr(fieldIds, salt, targets);
+  const savedEntry = ctxKey ? lastContextByTarget.get(ctxKey) : null;
+  const savedCtx = Number(contextId) > 0 ? Number(contextId) : ((savedEntry && typeof savedEntry === 'object' ? Number(savedEntry.ctxId) : Number(savedEntry)) || 0);
+  const { salt, targets } = targetsForTab(targetId, savedCtx, secretValues, sessionId, { wholeOnlyValues });
+  const expr = wipeTypedExpr(fieldIds, salt, targets, { allowTypedHeuristic: true, maxScanPositions });
   const validWipeRes = (r) => Boolean(r && r.ok === true && Number.isFinite(r.remaining) && r.remaining >= 0);
   let res = null;
   let timedOut = false;
@@ -1011,6 +1247,7 @@ async function wipeTabTypedInputs({ call, oopFrames = null, sessionId = undefine
   if (!validWipeRes(res)) return { ok: false, wiped: 0, verifiedEmpty: false };
   let totalWiped = Number(res.wiped) || 0;
   let totalRem = Number(res.remaining);
+  let anyTooMuch = Boolean(res.tooMuchText);
   if (res.hasFrames && targets.length > 0) {
     if (!ft) {
       const ftRes = await send('Page.getFrameTree', {});
@@ -1019,7 +1256,7 @@ async function wipeTabTypedInputs({ call, oopFrames = null, sessionId = undefine
     if (!ft) {
       totalRem++;
     } else {
-      const subExpr = wipeTypedExpr([], salt, targets);
+      const subExpr = wipeTypedExpr([], salt, targets, { allowTypedHeuristic: false, maxScanPositions });
       const { list: descendants, ids: treeFrameIds } = flattenDescendantFrames(ft);
       for (const sub of descendants) {
         const subId = sub && sub.id ? String(sub.id) : '';
@@ -1031,6 +1268,7 @@ async function wipeTabTypedInputs({ call, oopFrames = null, sessionId = undefine
         if (validWipeRes(subRes)) {
           totalWiped += Number(subRes.wiped) || 0;
           totalRem += Number(subRes.remaining);
+          if (subRes.tooMuchText) anyTooMuch = true;
         } else {
           totalRem++;
         }
@@ -1049,6 +1287,7 @@ async function wipeTabTypedInputs({ call, oopFrames = null, sessionId = undefine
           if (validWipeRes(oopRes)) {
             totalWiped += Number(oopRes.wiped) || 0;
             totalRem += Number(oopRes.remaining);
+            if (oopRes.tooMuchText) anyTooMuch = true;
           } else {
             totalRem++;
           }
@@ -1056,15 +1295,20 @@ async function wipeTabTypedInputs({ call, oopFrames = null, sessionId = undefine
       }
     }
   }
-  return { ok: true, wiped: totalWiped, verifiedEmpty: totalRem === 0 };
+  return {
+    ok: true,
+    wiped: totalWiped,
+    verifiedEmpty: totalRem === 0 && !anyTooMuch,
+    ...(anyTooMuch ? { tooMuchText: true, reason: TOO_MUCH_TEXT_REASON } : {}),
+  };
 }
 
 /**
  * Fill the vault's secret values into a standard Chrome tab over CDP (`Input.insertText` ONLY; isolated-world DOM focus/check;
- * zero secret bytes in `Runtime.evaluate`; no `.value` getter mask so site submit scripts read the real value).
+ * zero secret bytes or exact secret length in `Runtime.evaluate`; no `.value` getter mask so site submit scripts read the real value).
  * Returns `{ ok: true, filled: loginId, step, submitted, contextId }` or `{ ok: false, code, error, attemptedInsert?, contextId? }` — NEVER a secret value.
  */
-async function fillVaultLogin({ call, browserCall = null, oopFrames = null, sessionId = undefined, targetId = null, trackedUrl = null, origin = null, loginId = null, mode = 'login', step = null, values = null, secret = null, form = null, submit = false, onBeforeSubmit = null } = {}) {
+async function fillVaultLogin({ call, browserCall = null, oopFrames = null, sessionId = undefined, targetId = null, profileId = null, trackedUrl = null, origin = null, loginId = null, mode = 'login', step = null, values = null, secret = null, form = null, submit = false, onBeforeSubmit = null } = {}) {
   if (typeof call !== 'function') return { ok: false, code: 'not_attached', error: 'no CDP session for this tab' };
   const wantOrigin = BL.originOf(origin || (form && form.pageOrigin));
   if (!wantOrigin || !BL.secureOrigin(wantOrigin)) {
@@ -1122,12 +1366,14 @@ async function fillVaultLogin({ call, browserCall = null, oopFrames = null, sess
   const send = makeSend(call, browserCall, sessionId);
   const ctxId = iso.contextId;
   const ctxKey = String(iso.targetId || targetId || sessionId || '');
+  const pidStr = String(profileId || '');
   if (ctxKey && Number.isInteger(ctxId) && ctxId > 0) {
     lastContextByTarget.delete(ctxKey);
-    lastContextByTarget.set(ctxKey, ctxId);
+    lastContextByTarget.set(ctxKey, { profileId: pidStr, ctxId });
     while (lastContextByTarget.size > 64) lastContextByTarget.delete(lastContextByTarget.keys().next().value);
   }
-  rememberFilledSecrets(ctxKey, ctxId, entries.filter(([fid]) => plannedRoles[fid] !== 'username').map(([, v]) => v));
+  // Remember ONLY password / new-password values (never username or short-lived 6-digit OTPs, which drop after their step).
+  rememberFilledSecrets(ctxKey, ctxId, entries.filter(([fid]) => plannedRoles[fid] === 'password' || plannedRoles[fid] === 'new-password').map(([, v]) => v), pidStr);
   const touched = [];
   let attemptedInsert = false;
   let lastFieldId = null;
@@ -1171,14 +1417,15 @@ async function fillVaultLogin({ call, browserCall = null, oopFrames = null, sess
       }
       touched.push(fieldId);
       if (expectedRole !== 'username') attemptedInsert = true;
+      const fSalt = crypto.randomBytes(12).toString('hex');
+      const wantHash = crypto.createHash('sha256').update(`${fSalt}:${val}`, 'utf8').digest('hex');
       const ins = await send('Input.insertText', { text: val });
-      const expectedLen = val.length;
       val = '';
       if (!ins || ins.timeout || ins.error) {
         await evalInWorld(send, ctxId, wipeFailedFillExpr(touched));
         return { ok: false, code: 'login_failed', error: 'Chrome rejected typing into the sign-in field — nothing was submitted', attemptedInsert, contextId: ctxId };
       }
-      const fin = await evalInWorld(send, ctxId, finalizeFieldExpr(fieldId, expectedLen, expectedRole));
+      const fin = await evalInWorld(send, ctxId, finalizeFieldExpr(fieldId, fSalt, wantHash, expectedRole));
       if (!fin || !fin.ok) {
         await evalInWorld(send, ctxId, wipeFailedFillExpr(touched));
         const why = (fin && fin.code) || 'field_cleared';
@@ -1215,4 +1462,15 @@ async function fillVaultLogin({ call, browserCall = null, oopFrames = null, sess
   }
 }
 
-module.exports = { inspectTabLoginForm, fillVaultLogin, wipeTabTypedInputs, buildFilledTargets, filledTargetSrc, targetsForTab };
+module.exports = {
+  inspectTabLoginForm,
+  fillVaultLogin,
+  wipeTabTypedInputs,
+  buildFilledTargets,
+  filledTargetSrc,
+  targetsForTab,
+  clearFilledSecretsForProfile,
+  clearAllFilledSecrets,
+  hasRememberedSecrets,
+  DEFAULT_MAX_SCAN_POSITIONS,
+};

@@ -68,6 +68,7 @@ function create({ vault, grants = null, totpCode = null, forYou = null, now = ()
         pending: pend,
         ...(pendWhy ? { pendingReason: pendWhy } : {}),
         ...(s.lastFilledPassword === 'pending' || s.lastFilledPassword === 'confirmed' ? { lastFilledPassword: s.lastFilledPassword } : {}),
+        ...(s.beaconUnreadable === true ? { beaconUnreadable: true } : {}),
       });
     }   // owner: lane vault-agent-own
     return out;
@@ -93,6 +94,7 @@ function create({ vault, grants = null, totpCode = null, forYou = null, now = ()
       pending: pend,
       pendingReason: pendWhy,
       lastFilledPassword: rec.lastFilledPassword === 'pending' || rec.lastFilledPassword === 'confirmed' ? rec.lastFilledPassword : null,
+      beaconUnreadable: rec.beaconUnreadable === true,
     };
   };
   /** THE ONE WRITER of a web-login entry: the record sealed under its name (the engine's secretPut — provenance as its `kind`,
@@ -355,6 +357,18 @@ function create({ vault, grants = null, totpCode = null, forYou = null, now = ()
     const w = writeEntry(n, rec, { actor: (meta && meta.actor) || null, owner: (meta && meta.owner) || null });
     return w && w.ok ? { ok: true, name: n, origins: rec.origins || nextOrigins } : { ok: false, code: (w && w.code) || 'not_written' };
   }
+  /** Record that a `sendBeacon` (`Ping`) with a body fired during submission whose body CDP could not read (`rec.beaconUnreadable`). */
+  function noteBeaconUnreadable(name) {
+    const n = str(name);
+    if (!BL.parseName(n)) return { ok: false, code: 'bad_name' };
+    const ex = open(n);
+    if (!ex.ok || !ex.rec) return { ok: false, code: (ex && ex.code) || 'not_found' };
+    if (ex.rec.beaconUnreadable === true) return { ok: true, name: n, beaconUnreadable: true };
+    const rec = BL.recordOf({ ...ex.rec, beaconUnreadable: true });
+    const meta = names().find((x) => x.name === n) || null;
+    const w = writeEntry(n, rec, { actor: (meta && meta.actor) || null, owner: (meta && meta.owner) || null });
+    return w && w.ok ? { ok: true, name: n, beaconUnreadable: true } : { ok: false, code: (w && w.code) || 'not_written' };
+  }
   /** lane vault-agent-own: AN AGENT stores a login it holds itself (`vibespace-vault login add`) — sealed `agent-typed`, its `owner`
    *  the storing conversation (its fill there needs no grant); a login already kept for that account is never written over by
    *  an agent. → {ok, name, origin, user} | a named refusal — never the password. */
@@ -436,8 +450,12 @@ function create({ vault, grants = null, totpCode = null, forYou = null, now = ()
     if (typeof fn !== 'function' || typeof vault.onOpen !== 'function') return () => {};
     try { return vault.onOpen(fn) || (() => {}); } catch { return () => {}; }
   }
+  function onVaultLock(fn) {
+    if (typeof fn !== 'function' || typeof vault.onLock !== 'function') return () => {};
+    try { return vault.onLock(fn) || (() => {}); } catch { return () => {}; }
+  }
 
-  return { names, planFill, noteFill, submitted, flushHeld, scrubSecretsOf, onVaultOpen, answerCard, cardOf: (id) => { const c = cards.get(str(id)); return c ? { id: c.id, name: c.name, shown: c.shown, update: c.existing } : null; }, list, addOwn, confirmOwn, notePendingReason, noteCredentialOrigin, addAgent, drop, grant, ungrant, _cards: cards, _held: held };
+  return { names, planFill, noteFill, submitted, flushHeld, scrubSecretsOf, onVaultOpen, onVaultLock, answerCard, cardOf: (id) => { const c = cards.get(str(id)); return c ? { id: c.id, name: c.name, shown: c.shown, update: c.existing } : null; }, list, addOwn, confirmOwn, notePendingReason, noteCredentialOrigin, noteBeaconUnreadable, addAgent, drop, grant, ungrant, _cards: cards, _held: held };
 }
 
 module.exports = { create, CARDS_MAX, CARD_MS, HELD_MAX, TYPED_MAX, TYPED_MS };

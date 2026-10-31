@@ -1129,9 +1129,17 @@ console.log('⑫ Standard-Chrome r4 adversarial fixup gates (MAJOR 1/2/3 + MINOR
         this.minLength = spec.minLength ?? -1;
         this.maxLength = spec.maxLength ?? -1;
         this.isConnected = true;
+        this.isContentEditable = !!spec.isContentEditable;
+        this.textContent = String(spec.textContent !== undefined ? spec.textContent : '');
         this.parentElement = null;
         this.form = null;
         this.labels = [];
+        if (!['INPUT', 'TEXTAREA', 'SELECT', 'OUTPUT'].includes(this.tagName)) {
+          for (const m of ['getAttribute', 'setAttribute', 'removeAttribute', 'hasAttribute', 'closest', 'getBoundingClientRect', 'scrollIntoView', 'focus', 'blur', 'dispatchEvent']) {
+            this[m] = StubInput.prototype[m].bind(this);
+          }
+          Object.setPrototypeOf(this, Object.prototype);
+        }
       }
       getAttribute(k) { const v = this.attrs[String(k).toLowerCase()]; return v === undefined ? null : String(v); }
       setAttribute(k, v) { const key = String(k).toLowerCase(); this.attrs[key] = String(v); if (key === 'type') this.type = String(v); }
@@ -1167,9 +1175,11 @@ console.log('⑫ Standard-Chrome r4 adversarial fixup gates (MAJOR 1/2/3 + MINOR
       activeElement: null,
       documentElement: { nodeType: 1 },
       getElementById: (id) => inputs.find((x) => x.id === id) || null,
+      querySelector: (sel) => (String(sel || '').includes('iframe') ? frameEls[0] || null : inputs[0] || null),
       querySelectorAll: (sel) => {
         const s = String(sel || '');
         if (s.includes('iframe')) return frameEls.slice();
+        if (s === 'input, [role="textbox"]') return inputs.filter((x) => x.tagName === 'INPUT' || x.getAttribute('role') === 'textbox');
         if (s.startsWith('[') && s.endsWith(']')) {
           const attr = s.slice(1, -1).toLowerCase();
           return inputs.filter((x) => x.hasAttribute(attr));
@@ -1666,17 +1676,8 @@ console.log('⑬ Standard-Chrome r5 adversarial fixup gates (MAJOR A/B/C + MINOR
       const scrubKeptAfterNav = SA.w.hasScrubSecrets(PID);
       SA.w.disarm(PID, 'the browser stopped');
       const scrubClearedOnStop = SA.w.hasScrubSecrets(PID) === false;
-      ok(rfA.ok && Buffer.byteLength(full5000) > 256 * 1024 && Buffer.byteLength(full5000) <= 2 * 1024 * 1024 &&
-        Buffer.byteLength(oversize9000) > 2 * 1024 * 1024 &&
-        timesCompact[1] < 20 && fullMs < 20 && overMs < 80 && ov1 === ov0 &&
-        !outCompact.includes(PWA) && !outFull.includes(PWA) && !outOver.includes(PWA) &&
-        compactParsed.result[`[vault:web-login:${SITE}#axuser]`] === 'key-val' &&
-        compactParsed.result.count === 12345678 && fullParsed.result.count === 12345678 && overParsed.result.count === 12345678 &&
-        hadScrubDuringFence === true && scrubKeptAfterNav === true && scrubClearedOnStop === true,
-        `r5/r6 MAJOR A (compiled scrubber + >2 MiB walk + browser-stop scrub lifetime): 5000-node AX frames scrub in < 20 ms (compact=${timesCompact[1].toFixed(2)}ms, 1.26MB walk=${fullMs.toFixed(2)}ms, >2MiB walk=${overMs.toFixed(2)}ms), mask string values & JSON keys, keep scrub across nav, and clear on browser stop`,
-        { walkMs: timesCompact[1], fullMs, overMs, ov0, ov1, ov2, hadScrubDuringFence, scrubKeptAfterNav, scrubClearedOnStop });
 
-      // RED A1: per-string VR().maskText rebuild (r4 shape) exceeds the 20 ms budget on the 5000-node frame
+      // RED A1: per-string VR().maskText rebuild (r4 shape) measured in the same run as the relative baseline
       const redA1Src = DSRC0
         .replace('const s = fn(node);', 'const s = VR().maskText(node, [...(scrubByProfile.get(pid) || [])].map((b) => ({ label: b.label, value: b.value })));');
       const DmA1 = redA1Src !== DSRC0 ? MUT.load('src/server/browser-dialogs.js', redA1Src, 'r5-a-per-string-masker') : null;
@@ -1688,13 +1689,24 @@ console.log('⑬ Standard-Chrome r5 adversarial fixup gates (MAJOR A/B/C + MINOR
           SA1.logins.grant(`web-login:${SITE}#axuser`, 'this-account', 'session:conv-1');
           SA1.k.setStandardPage({ securityOrigin: SITE, isoOrigin: SITE, fields: [{ fieldId: 'vs-a1-p', tag: 'input', domType: 'password', type: 'password', autocomplete: 'current-password', visible: true }] });
           await SA1.w.fillLogin(TGT, FILL({ user: 'axuser' }));
+          SA1.w.scrubCdpFrame(PID, makeAxFrame(50, { compact: false, secret: PWA }));
           const t0 = performance.now();
           SA1.w.scrubCdpFrame(PID, full5000);
           redA1Ms = performance.now() - t0;
         } finally { await SA1.close(); }
       }
-      ok(Boolean(DmA1 && redA1Ms >= 20 && fullMs < 20 && timesCompact[1] < 20),
-        `r5 MAJOR A RED control [r5-a-per-string-masker]: per-string maskText mutant blocks event loop (${redA1Ms.toFixed(1)} ms >= 20 ms) while compiled scrubber runs in < 20 ms`,
+      ok(rfA.ok && Buffer.byteLength(full5000) > 256 * 1024 && Buffer.byteLength(full5000) <= 2 * 1024 * 1024 &&
+        Buffer.byteLength(oversize9000) > 2 * 1024 * 1024 &&
+        redA1Ms > 0 && fullMs * 2 <= redA1Ms && timesCompact[1] * 2 <= redA1Ms && ov1 === ov0 &&
+        !outCompact.includes(PWA) && !outFull.includes(PWA) && !outOver.includes(PWA) &&
+        compactParsed.result[`[vault:web-login:${SITE}#axuser]`] === 'key-val' &&
+        compactParsed.result.count === 12345678 && fullParsed.result.count === 12345678 && overParsed.result.count === 12345678 &&
+        hadScrubDuringFence === true && scrubKeptAfterNav === true && scrubClearedOnStop === true,
+        `r5/r6 MAJOR A (compiled scrubber + >2 MiB walk + browser-stop scrub lifetime): 5000-node AX frames scrub in <= half the per-string baseline (compact=${timesCompact[1].toFixed(2)}ms, 1.26MB walk=${fullMs.toFixed(2)}ms, baseline=${redA1Ms.toFixed(2)}ms, >2MiB walk=${overMs.toFixed(2)}ms), mask string values & JSON keys, keep scrub across nav, and clear on browser stop`,
+        { walkMs: timesCompact[1], fullMs, overMs, redA1Ms, ov0, ov1, ov2, hadScrubDuringFence, scrubKeptAfterNav, scrubClearedOnStop });
+
+      ok(Boolean(DmA1 && redA1Ms >= fullMs * 2 && redA1Ms >= timesCompact[1] * 2),
+        `r5 MAJOR A RED control [r5-a-per-string-masker]: per-string maskText mutant takes at least twice the compiled scrubber (${redA1Ms.toFixed(1)} ms vs ${fullMs.toFixed(1)} ms)`,
         { redA1Ms, r6FullMs: fullMs, r6WalkMs: timesCompact[1] });
 
       // RED A2 (r6 MAJOR A'): mutant that clears the scrub set at fence end leaks the login POST body after navigation
@@ -2766,20 +2778,16 @@ console.log('⑮ Standard-Chrome r7 adversarial fixup gates (MAJOR 1/2 + MINOR 3
       real1.rBig3p.submitted === true && !real1.rBig3p.submittedReason && real1.rowBig3p && !real1.rowBig3p.pendingReason &&
       real1.rXcred.submitted === true && !real1.rXcred.submittedReason &&
       real1.rowXcred && !real1.rowXcred.pendingReason && Array.isArray(real1.rowXcred.origins) && real1.rowXcred.origins.includes('https://api.auth.test') &&
-      real1.vrowXcred && Array.isArray(real1.vrowXcred.hosts) && real1.vrowXcred.hosts.includes('https://api.auth.test') &&
+      real1.vrowXcred && Array.isArray(real1.vrowXcred.hosts) && real1.vrowXcred.hosts.length === 0 &&
+      Array.isArray(real1.vrowXcred.submittedTo) && real1.vrowXcred.submittedTo.includes('https://api.auth.test') &&
       /Submitted to https:\/\/api\.auth\.test/.test(renderedXcredText) && !/the credential went to/.test(renderedXcredText),
       'r7 MAJOR 1 (analytics XHR + >64KB 3p POST + cross-origin credential facts): analytics XHR & 70KB 3p POST leave proven submit true (no false pendingReason) and unsubmitted login false ("press its button"); cross-origin credential write is submitted:true and named in row facts ("Submitted to https://api.auth.test")',
-      { rAn: real1.rAn, rowAn: real1.rowAn, rLogAn: real1.rLogAn, rBig3p: real1.rBig3p, rXcred: real1.rXcred, rowXcred: real1.rowXcred, renderedXcredText });
+      { rAn: real1.rAn, rowAn: real1.rowAn, rLogAn: real1.rLogAn, rBig3p: real1.rBig3p, rXcred: real1.rXcred, rowXcred: real1.rowXcred, vrowXcred: real1.vrowXcred, renderedXcredText });
 
-    const red1Src = DSRC0
-      .replace(
-        'if (since.some((o) => o.carriesSameCred || o.carriesOtherCred)) return null;',
-        'const xo = since.find((o) => !o.sameOrigin && o.isWrite); if (xo && xo.origin) return `the credential went to ${xo.origin}`;'
-      )
-      .replace(
-        'const pWhy = pc && !pc.confirmed && !credAny',
-        'const pWhy = pc && !pc.confirmed'
-      );
+    const red1Src = DSRC0.replace(
+      'if (since.some((o) => o.carriesSameCred || o.carriesOtherCred)) return null;',
+      'const xo = since.find((o) => !o.sameOrigin && o.isWrite); if (xo && xo.origin) return `the credential went to ${xo.origin}`;'
+    );
     const Dm7_1 = red1Src !== DSRC0 ? MUT.load('src/server/browser-dialogs.js', red1Src, 'r7-1-analytics-poisons-submit') : null;
     const mut1 = Dm7_1 ? await runMajor1Probe(Dm7_1) : null;
     ok(Boolean(Dm7_1 && mut1 && mut1.rAn.submittedReason === 'the credential went to https://analytics.vendor.test' && real1.rAn.submitted === true && !real1.rAn.submittedReason),
@@ -2809,15 +2817,18 @@ console.log('⑮ Standard-Chrome r7 adversarial fixup gates (MAJOR 1/2 + MINOR 3
       for (let i = 0; i < 8600; i++) {
         pad2m3.push({ nodeId: i + 1, ts: 1761900000000 + i, name: `ax-node-${i}-${'m'.repeat(235)}` });
       }
+      const wrappedPinVal = `${NUM12.slice(0, 6)}\n${NUM12.slice(6)}`;
       const frame2m3 = JSON.stringify({
         id: 202,
         result: {
           acctNum: acctBareNum,
           pinString: NUM12,
+          wrappedPin: wrappedPinVal,
+          unicodePin: `__UESC_PIN__`,
           hexEcho: `hex=${HEXDIG_HEX}`,
           nodes: pad2m3,
         },
-      });
+      }).replace('"__UESC_PIN__"', `"\\u003${NUM12[0]}${NUM12.slice(1)}"`);
       const tWalk0 = performance.now();
       const out2m3 = S7_2.w.scrubCdpFrame(PID, frame2m3);
       const walk2m3Ms = performance.now() - tWalk0;
@@ -2860,6 +2871,8 @@ console.log('⑮ Standard-Chrome r7 adversarial fixup gates (MAJOR 1/2 + MINOR 3
       ok(/^\d+$/.test(HEXDIG_HEX) && Buffer.byteLength(frame2m3) > 2.3 * 1024 * 1024 && Boolean(parsed2m3) &&
         parsed2m3.result.acctNum === acctBareNum &&
         parsed2m3.result.pinString === `[vault:web-login:${SITE}#bank12]` &&
+        parsed2m3.result.wrappedPin === `[vault:web-login:${SITE}#bank12]` &&
+        parsed2m3.result.unicodePin === `[vault:web-login:${SITE}#bank12]` &&
         parsed2m3.result.hexEcho === `hex=[vault:web-login:${SITE}#hexdig]` &&
         !out2m3.includes(`"${NUM12}"`) && !out2m3.includes(HEXDIG_HEX) &&
         Buffer.byteLength(blob3m) > 3 * 1024 * 1024 &&
@@ -2869,23 +2882,15 @@ console.log('⑮ Standard-Chrome r7 adversarial fixup gates (MAJOR 1/2 + MINOR 3
         outBlob3m.includes(`"hex":"[vault:web-login:${SITE}#hexdig]"`) &&
         !outBlob3m.includes(`"${NUM12}"`) && !outBlob3m.includes(num12Entity) && !outBlob3m.includes(HEXDIG_HEX) &&
         cutWorked === true,
-        `r7 MAJOR 2 (>2 MiB numeric secret + 3 MB raw quoted digit secret + time-bounded walk): 2.35 MB parsed frame (${walk2m3Ms.toFixed(1)} ms) & 3 MB unparseable blob mask 12-digit and all-digit-hex secrets in strings while leaving bare JSON numbers intact; walk cut redacts [vault:scrub-cut]`,
-        { bytes2m3: Buffer.byteLength(frame2m3), walk2m3Ms, pinString: parsed2m3 && parsed2m3.result.pinString, hexEcho: parsed2m3 && parsed2m3.result.hexEcho, cutWorked });
+        `r7 MAJOR 2 (>2 MiB numeric secret + 3 MB raw quoted digit secret + time-bounded walk): 2.35 MB parsed frame (${walk2m3Ms.toFixed(1)} ms) & 3 MB unparseable blob mask 12-digit (plain, line-wrapped, JSON-escaped) and all-digit-hex secrets in strings while leaving bare JSON numbers intact; walk cut redacts [vault:scrub-cut]`,
+        { bytes2m3: Buffer.byteLength(frame2m3), walk2m3Ms, pinString: parsed2m3 && parsed2m3.result.pinString, wrappedPin: parsed2m3 && parsed2m3.result.wrappedPin, unicodePin: parsed2m3 && parsed2m3.result.unicodePin, hexEcho: parsed2m3 && parsed2m3.result.hexEcho, cutWorked });
 
-      // RED 2: mutant that routes > 2 MiB parsed frames to a digit-dropping `spelled` leaks `NUM12` in `frame2m3`
-      const red2VrSrc = VRS0.replace(
-        'if (c.digits) {\n        const inside = inJsonStrAt(c.a);\n        if (!inside && isBareJsonNumber(raw, L, c.a, c.b)) continue;\n      }',
-        'if (c.digits) continue;'
+      // RED 2 (r8 MINOR K non-equivalent 1-file mutant): routing > 2 MiB parseable frames to `fn.spelled(frameStr)` fails to decode JSON `\n` / `\u003X` escapes and leaks `wrappedPin` & `unicodePin` in clear!
+      const red2DSrc = DSRC0.replace(
+        'let parsed;\n    try { parsed = JSON.parse(frameStr); }',
+        'if (Buffer.byteLength(frameStr, \'utf8\') > 2 * 1024 * 1024) return fn.spelled(frameStr);\n    let parsed;\n    try { parsed = JSON.parse(frameStr); }'
       );
-      const VRm7_2 = red2VrSrc !== VRS0 ? MUT.load('src/vault-run.js', red2VrSrc, 'r7-2-vr-drop-digits') : null;
-      let Dm7_2 = null;
-      if (VRm7_2) {
-        globalThis.__r7MutVR2 = VRm7_2;
-        const red2DSrc = DSRC0
-          .replace('let parsed;\n    try { parsed = JSON.parse(frameStr); }', 'if (Buffer.byteLength(frameStr, \'utf8\') > 2 * 1024 * 1024) return fn.spelled(frameStr);\n    let parsed;\n    try { parsed = JSON.parse(frameStr); }')
-          .replace('const VR = () => VRm || (VRm = require(\'../vault-run.js\'));', 'const VR = () => globalThis.__r7MutVR2;');
-        Dm7_2 = red2DSrc !== DSRC0 ? MUT.load('src/server/browser-dialogs.js', red2DSrc, 'r7-2-oversize-spelled-numeric-leak') : null;
-      }
+      const Dm7_2 = red2DSrc !== DSRC0 ? MUT.load('src/server/browser-dialogs.js', red2DSrc, 'r7-2-oversize-spelled-json-escape-leak') : null;
       let mut2Leaked = false;
       if (Dm7_2) {
         const S7_2m = await world({ mode: { standard: true }, Dmod: Dm7_2 });
@@ -2895,12 +2900,13 @@ console.log('⑮ Standard-Chrome r7 adversarial fixup gates (MAJOR 1/2 + MINOR 3
           S7_2m.k.setStandardPage({ securityOrigin: SITE, isoOrigin: SITE, fields: [{ fieldId: 'm2-p', tag: 'input', domType: 'password', type: 'password', autocomplete: 'current-password', visible: true }] });
           await S7_2m.w.fillLogin(TGT, FILL({ user: 'bank12' }));
           const outMut2 = S7_2m.w.scrubCdpFrame(PID, frame2m3);
-          mut2Leaked = outMut2.includes(`"${NUM12}"`);
+          const parsedMut2 = JSON.parse(outMut2);
+          mut2Leaked = Boolean(parsedMut2 && parsedMut2.result && parsedMut2.result.wrappedPin === wrappedPinVal);
         } finally { await S7_2m.close(); }
       }
-      ok(Boolean(Dm7_2 && mut2Leaked === true && parsed2m3 && !out2m3.includes(`"${NUM12}"`)),
-        'r7 MAJOR 2 RED control [r7-2-oversize-spelled-numeric-leak]: r6-shaped >2 MiB spelled + digit-skip mutant leaks 12-digit password in 2.35 MB parsed CDP frame',
-        { mut2Leaked, realMasked: Boolean(parsed2m3 && !out2m3.includes(`"${NUM12}"`)) });
+      ok(Boolean(Dm7_2 && mut2Leaked === true && parsed2m3 && parsed2m3.result.wrappedPin === `[vault:web-login:${SITE}#bank12]`),
+        'r7 MAJOR 2 / r8 MINOR K RED control [r7-2-oversize-spelled-json-escape-leak]: 1-line mutant routing >2 MiB parsed frames to fn.spelled leaks JSON line-wrapped 12-digit password in clear while JSON walk masks it',
+        { mut2Leaked, realWrappedPin: parsed2m3 && parsed2m3.result.wrappedPin });
     } finally { await S7_2.close(); }
   }
 
@@ -3009,8 +3015,8 @@ console.log('⑮ Standard-Chrome r7 adversarial fixup gates (MAJOR 1/2 + MINOR 3
       { m3CeilOk, m3CeilStuck, m3Spa });
 
     const red3Src = LFS0.replace(
-      'const nodeHasFilled = (node) => Boolean(node && (hasFilledTarget(valOfNode(node)) || hasFilledTarget(attrValOfNode(node))));',
-      'const nodeHasFilled = () => false;'
+      'const scanNodeTarget = (v, av) => {',
+      'const scanNodeTarget = () => false; const _unusedScanNodeTarget = (v, av) => {'
     );
     const LFm7_3 = red3Src !== LFS0 ? MUT.load('src/server/browser-login-fill.js', red3Src, 'r7-3-skip-hidden-and-attr-synced') : null;
     const mut3 = LFm7_3 ? await runMinor3Stub({ LFmodToUse: LFm7_3, mode: 'ceiling' }) : null;
@@ -3312,6 +3318,942 @@ console.log('⑮ Standard-Chrome r7 adversarial fixup gates (MAJOR 1/2 + MINOR 3
     ok(Boolean(Dm7_7 && mut7 && mut7.pending === null && m7Unreadable1m5.pending === 'register'),
       'r7 MINOR 7 RED control [r7-7-unreadable-response-confirms]: fail-open mutant confirms signup on navigation when response body exceeds maxResourceBufferSize',
       { mut7Pending: mut7 && mut7.pending, realPending: m7Unreadable1m5.pending });
+  }
+}
+
+// ═══ ⑯ Standard-Chrome r8 adversarial fixup gates (MAJOR A/B/C + MINOR D/E/F/G/H/I/J/K + RED controls A–J) ═══
+console.log('⑯ Standard-Chrome r8 adversarial fixup gates (MAJOR A/B/C + MINOR D/E/F/G/H/I/J/K + RED controls A–J)');
+{
+  const { performance } = require('node:perf_hooks');
+  const LF = require('../src/server/browser-login-fill.js');
+  const DSRC0 = fs.readFileSync(path.join(REPO, 'src/server/browser-dialogs.js'), 'utf8');
+  const LFS0 = fs.readFileSync(path.join(REPO, 'src/server/browser-login-fill.js'), 'utf8');
+  const VIS0 = fs.readFileSync(path.join(REPO, 'src/vault-inventory.js'), 'utf8');
+  const VLR_ESM = await import('../src/lib/vault-login-row.js');
+  const I18N_ZH = await import('../src/lib/i18n-zh.js');
+  const { WebSocketServer } = require('ws');
+
+  // ── (A) MAJOR A: ceiling wipe preserves unrelated content in descendant & OOP iframes while wiping secret-holding iframe controls ──
+  {
+    const runMajorA = async (LFmodToUse = LF) => {
+      const PW8A = pwOf('r8-majA');
+      const mainDom = sharedMakeStubDom([
+        { id: 'u', type: 'email', name: 'email', autocomplete: 'username' },
+        { id: 'p', type: 'password', name: 'password', autocomplete: 'current-password' },
+      ], { iframes: [{ id: 'edFrame' }, { id: 'oopFrame' }] });
+      const subDom = sharedMakeStubDom([
+        { id: 'ed', tag: 'DIV', isContentEditable: true, textContent: 'Draft paragraph the person wrote' },
+        { id: 'c', type: 'text', value: 'my half-written comment', defaultValue: '' },
+        { id: 'ta', tag: 'TEXTAREA', value: 'a longer note in a textarea', defaultValue: '' },
+        { id: 'fsec', type: 'hidden', value: PW8A, defaultValue: PW8A, hidden: true },
+      ]);
+      subDom.inputs[1].defaultValue = '';
+      subDom.inputs[2].defaultValue = '';
+      const oopDom = sharedMakeStubDom([
+        { id: 'oopDraft', type: 'text', value: 'oop comment draft', defaultValue: '' },
+        { id: 'oopSec', type: 'text', value: `tok:${PW8A}`, defaultValue: `tok:${PW8A}` },
+      ]);
+      oopDom.inputs[0].defaultValue = '';
+
+      const tid = 'TAB_R8_A';
+      const sid = 'SID_R8_A';
+      const oopTid = 'OOP_R8_A';
+      const oopSid = 'OOP_SID_R8_A';
+      const wss = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+      await new Promise((r) => wss.once('listening', r));
+      const wsUrl = `ws://127.0.0.1:${wss.address().port}/devtools/browser/r8_a`;
+      const subCtxIds = new Set();
+      wss.on('connection', (ws) => {
+        ws.on('message', async (buf) => {
+          const m = JSON.parse(String(buf));
+          const send = (obj) => { if (ws.readyState === 1) ws.send(JSON.stringify(obj)); };
+          const rep = (result) => send({ id: m.id, result, ...(m.sessionId ? { sessionId: m.sessionId } : {}) });
+          if (m.method === 'VibeSpace.getVersion') { send({ id: m.id, error: { code: -32601, message: 'not found' } }); return; }
+          if (m.method === 'Target.setDiscoverTargets') {
+            send({ method: 'Target.targetCreated', params: { targetInfo: { targetId: tid, type: 'page', url: `${SITE}/login`, title: 'Login' } } });
+            rep({});
+            return;
+          }
+          if (m.method === 'Target.attachToTarget') {
+            rep({ sessionId: m.params && m.params.targetId === oopTid ? oopSid : sid });
+            return;
+          }
+          if (m.method === 'Target.detachFromTarget') { rep({}); return; }
+          if (m.method === 'Target.getTargets') {
+            rep({
+              targetInfos: [
+                { targetId: tid, type: 'page', url: `${SITE}/login`, attached: true },
+                { targetId: oopTid, type: 'iframe', parentFrameId: tid, url: 'https://comments.vendor.test/embed', attached: false },
+              ],
+            });
+            return;
+          }
+          if (m.sessionId === oopSid) {
+            if (m.method === 'Page.getFrameTree') { rep({ frameTree: { frame: { id: oopTid, url: 'https://comments.vendor.test/embed', securityOrigin: 'https://comments.vendor.test' } } }); return; }
+            const drOop = await oopDom.call(m.method, m.params || {});
+            rep((drOop && drOop.result) || {});
+            return;
+          }
+          if (m.method === 'Page.getFrameTree') {
+            rep({
+              frameTree: {
+                frame: { id: tid, url: `${SITE}/login`, securityOrigin: SITE },
+                childFrames: [{ frame: { id: 'SUB_ED', url: 'about:srcdoc', securityOrigin: 'null' } }],
+              },
+            });
+            return;
+          }
+          if (m.method === 'Page.createIsolatedWorld' && m.params && m.params.frameId === 'SUB_ED') {
+            const drSub = await subDom.call(m.method, m.params || {});
+            const cid = drSub.result.executionContextId + 500;
+            subCtxIds.add(cid);
+            rep({ executionContextId: cid });
+            return;
+          }
+          if (m.method === 'Runtime.evaluate' && m.params && subCtxIds.has(m.params.contextId)) {
+            const drSub = await subDom.call(m.method, { ...m.params, contextId: m.params.contextId - 500 });
+            rep((drSub && drSub.result) || {});
+            return;
+          }
+          const drMain = await mainDom.call(m.method, m.params || {});
+          rep((drMain && drMain.result) || {});
+        });
+      });
+
+      let DmodA = D;
+      if (LFmodToUse !== LF) {
+        globalThis.__r8MutLFA = LFmodToUse;
+        const dSrcA = DSRC0.replace('const LF = () => LFm || (LFm = require(\'./browser-login-fill.js\'));', 'const LF = () => globalThis.__r8MutLFA;');
+        DmodA = MUT.load('src/server/browser-dialogs.js', dSrcA, 'r8-a-dialogs-wrap');
+      }
+      const dbDir = path.join(ROOT, 'wb8_a-' + crypto.randomBytes(3).toString('hex')); fs.mkdirSync(dbDir, { recursive: true });
+      const engA = VE.create({ dataDir: dbDir, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false });
+      await engA.setup('vault-r8-a');
+      const grantsA = GS.create({ memory: true });
+      const loginsA = L.create({ vault: engA, grants: () => grantsA });
+      loginsA.addOwn({ origin: SITE, username: 'auser', password: PW8A });
+      grantsA.set('browser-login', `${SITE}#auser`, { to: [{ kind: 'conversation', key: 'conv-1' }] });
+      const fyA = [];
+      const wA = DmodA.create({
+        keeper: { cdpEndpointFor: async () => ({ ok: true, url: wsUrl }), onLease: () => () => {} },
+        log: quiet, enableTimeoutMs: 300, liveFillMaxMs: 70,
+        holdersOf: () => [{ browserKey: KEY, sessionId: 'sess-1', ephemeral: true }],
+        leaseCountOf: () => 1, logins: loginsA,
+        conversationOf: () => ({ cid: 'conv-1', name: 'Chat One' }),
+        forYou: { add: (_p, it) => { fyA.push(it.text); return 'fya'; }, resolve() {} },
+      });
+      try {
+        await wA.arm(PID, { budgetMs: 3000 });
+        await until(() => wA._watches.get(PID)?.targets.get(tid)?.enabled, 1500);
+        // Set fsec & oopSec right after fill so inspectTabLoginForm sees no password input in frames
+        subDom.inputs[3].val = ''; subDom.inputs[3].attrs.value = '';
+        oopDom.inputs[1].val = ''; oopDom.inputs[1].attrs.value = '';
+        const rf = await wA.fillLogin(TGT, FILL({ user: 'auser' }));
+        subDom.inputs[3].val = PW8A; subDom.inputs[3].defaultValue = PW8A; subDom.inputs[3].attrs.value = PW8A;
+        oopDom.inputs[1].val = `tok:${PW8A}`; oopDom.inputs[1].defaultValue = `tok:${PW8A}`; oopDom.inputs[1].attrs.value = `tok:${PW8A}`;
+        await sleep(180);
+        const verdict = wA.liveFillVerdictFor(TGT, { verb: 'eval' });
+        return {
+          fillOk: rf.ok,
+          verdict,
+          notices: fyA.slice(),
+          mainPw: mainDom.inputs[1].val,
+          ed: subDom.inputs[0].textContent,
+          c: subDom.inputs[1].val,
+          ta: subDom.inputs[2].val,
+          fsec: subDom.inputs[3].val,
+          fsecAttr: subDom.inputs[3].getAttribute('value') || '',
+          oopDraft: oopDom.inputs[0].val,
+          oopSec: oopDom.inputs[1].val,
+          oopSecAttr: oopDom.inputs[1].getAttribute('value') || '',
+        };
+      } finally {
+        wA.shutdown();
+        for (const c of wss.clients) c.terminate();
+        await new Promise((r) => wss.close(r));
+        engA.close();
+      }
+    };
+
+    const realA = await runMajorA(LF);
+    ok(realA.fillOk && realA.verdict.ok === true && realA.notices.length === 0 &&
+      realA.mainPw === '' &&
+      realA.ed === 'Draft paragraph the person wrote' &&
+      realA.c === 'my half-written comment' &&
+      realA.ta === 'a longer note in a textarea' &&
+      realA.oopDraft === 'oop comment draft' &&
+      realA.fsec === '' && realA.fsecAttr === '' &&
+      realA.oopSec === '' && realA.oopSecAttr === '',
+      'r8 MAJOR A (iframe drafts preserved at ceiling wipe): descendant contenteditable/input/textarea & OOP draft survive intact while secret-holding iframe controls are wiped and fence lifts',
+      realA);
+
+    const redASrc = LFS0.replace(
+      'const subExpr = wipeTypedExpr([], salt, targets, { allowTypedHeuristic: false, maxScanPositions });',
+      'const subExpr = wipeTypedExpr([], salt, targets, { allowTypedHeuristic: true, maxScanPositions });'
+    );
+    const LFm8A = redASrc !== LFS0 ? MUT.load('src/server/browser-login-fill.js', redASrc, 'r8-a-wipe-iframe-drafts') : null;
+    const mutA = LFm8A ? await runMajorA(LFm8A) : null;
+    ok(Boolean(LFm8A && mutA && mutA.ed === '' && mutA.c === '' && mutA.ta === '' && mutA.oopDraft === '' && realA.ed === 'Draft paragraph the person wrote'),
+      'r8 MAJOR A RED control [r8-a-wipe-iframe-drafts]: mutant enabling typed heuristic in sub/OOP frames destroys contenteditable, comment input, and textarea drafts',
+      { mutA, realEd: realA.ed });
+  }
+
+  // ── (B) MAJOR B: 32-bit rolling-hash pre-filter + per-eval work bound (`too much text to check`) without a 30 s retry loop ──
+  {
+    const PW8B1 = pwOf('r8-b-1');
+    const PW8B2 = pwOf('r8-b-2');
+    const PW8B3 = pwOf('r8-b-3');
+    const chunk16k = (ch) => (ch + '-0123456789abcdef').repeat(1024).slice(0, 16384);
+    const makeBigDom = () => {
+      const d = sharedMakeStubDom([
+        { id: 'u', type: 'email', name: 'email', autocomplete: 'username' },
+        { id: 'p', type: 'password', name: 'password', autocomplete: 'current-password', value: PW8B1 },
+        { id: 'ta1', tag: 'TEXTAREA', value: chunk16k('A'), defaultValue: '' },
+        { id: 'ta2', tag: 'TEXTAREA', value: chunk16k('B'), defaultValue: '' },
+        { id: 'ta3', tag: 'TEXTAREA', value: chunk16k('C'), defaultValue: '' },
+        { id: 'ta4', tag: 'TEXTAREA', value: chunk16k('D'), defaultValue: '' },
+      ]);
+      for (let i = 2; i <= 5; i++) d.inputs[i].defaultValue = d.inputs[i].val;
+      return d;
+    };
+
+    // Warm JIT once, then compare rolling-hash pre-filter vs un-prefiltered SHA-256 per window position (relative baseline, no literal ms)
+    const domWarm = makeBigDom();
+    await LF.wipeTabTypedInputs({ call: domWarm.call, targetId: 'TB_WARM', fieldIds: [], secretValues: [PW8B1, PW8B2, PW8B3] });
+    const domRealB = makeBigDom();
+    const tRealB0 = performance.now();
+    const resRealB = await LF.wipeTabTypedInputs({ call: domRealB.call, targetId: 'TB_REAL', fieldIds: [], secretValues: [PW8B1, PW8B2, PW8B3] });
+    const realBMs = performance.now() - tRealB0;
+
+    const redBSrc = LFS0
+      .replace('if (!g.base) {', 'if (true || !g.base) {')
+      .replace('const hi = Math.min(it.maxLen, n - i);', 'const hi = Math.min(it.minLen, n - i);')
+      .replace('if (_vsPosUsed + 64 > _vsMaxPos) { _vsCut = true; return \'cut\'; }\n              _vsPosUsed += 64;', '/* r7: no work bound */');
+    const LFm8B = redBSrc !== LFS0 ? MUT.load('src/server/browser-login-fill.js', redBSrc, 'r8-b-no-rolling-prefilter') : null;
+    let mutBMs = -1;
+    if (LFm8B) {
+      const domMutWarm = makeBigDom();
+      await LFm8B.wipeTabTypedInputs({ call: domMutWarm.call, targetId: 'TB_MW', fieldIds: [], secretValues: [PW8B1] });
+      const domMutB = makeBigDom();
+      const tMutB0 = performance.now();
+      await LFm8B.wipeTabTypedInputs({ call: domMutB.call, targetId: 'TB_MUT', fieldIds: [], secretValues: [PW8B1, PW8B2, PW8B3] });
+      mutBMs = performance.now() - tMutB0;
+    }
+
+    // Work-bound (`wipeMaxScanPositions: 4096`): fails CLOSED with `'too much text to check'`, 1 notice, 0 retry loop
+    const domBound = makeBigDom();
+    const tidB = 'TAB_R8_B';
+    const sidB = 'SID_R8_B';
+    let wipeEvals = 0;
+    const wssB = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+    await new Promise((r) => wssB.once('listening', r));
+    const wsUrlB = `ws://127.0.0.1:${wssB.address().port}/devtools/browser/r8_b`;
+    wssB.on('connection', (ws) => {
+      ws.on('message', async (buf) => {
+        const m = JSON.parse(String(buf));
+        const send = (obj) => { if (ws.readyState === 1) ws.send(JSON.stringify(obj)); };
+        const rep = (result) => send({ id: m.id, result, ...(m.sessionId ? { sessionId: m.sessionId } : {}) });
+        if (m.method === 'VibeSpace.getVersion') { send({ id: m.id, error: { code: -32601, message: 'not found' } }); return; }
+        if (m.method === 'Target.setDiscoverTargets') {
+          send({ method: 'Target.targetCreated', params: { targetInfo: { targetId: tidB, type: 'page', url: `${SITE}/login`, title: 'Login' } } });
+          rep({});
+          return;
+        }
+        if (m.method === 'Target.attachToTarget') { rep({ sessionId: sidB }); return; }
+        if (m.method === 'Target.getTargets') { rep({ targetInfos: [{ targetId: tidB, type: 'page', url: `${SITE}/login`, attached: true }] }); return; }
+        if (m.method === 'Runtime.evaluate' && String(m.params?.expression || '').includes('_vsMaxPos')) wipeEvals++;
+        const dr = await domBound.call(m.method, m.params || {});
+        rep((dr && dr.result) || {});
+      });
+    });
+    const dbDirB = path.join(ROOT, 'wb8_b-' + crypto.randomBytes(3).toString('hex')); fs.mkdirSync(dbDirB, { recursive: true });
+    const engB = VE.create({ dataDir: dbDirB, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false });
+    await engB.setup('vault-r8-b');
+    const grantsB = GS.create({ memory: true });
+    const loginsB = L.create({ vault: engB, grants: () => grantsB });
+    loginsB.addOwn({ origin: SITE, username: 'buser', password: PW8B1 });
+    grantsB.set('browser-login', `${SITE}#buser`, { to: [{ kind: 'conversation', key: 'conv-1' }] });
+    const fyB = [];
+    const wB = D.create({
+      keeper: { cdpEndpointFor: async () => ({ ok: true, url: wsUrlB }), onLease: () => () => {} },
+      log: quiet, enableTimeoutMs: 300, liveFillMaxMs: 70, wipeMaxScanPositions: 4096,
+      holdersOf: () => [{ browserKey: KEY, sessionId: 'sess-1', ephemeral: true }],
+      leaseCountOf: () => 1, logins: loginsB,
+      conversationOf: () => ({ cid: 'conv-1', name: 'Chat One' }),
+      forYou: { add: (_p, it) => { fyB.push(it.text); return 'fyb-' + fyB.length; }, resolve() {} },
+    });
+    let verdictB = null, evalsAt160 = 0, evalsAt340 = 0, auditB = [], ta1Preserved = false;
+    try {
+      await wB.arm(PID, { budgetMs: 3000 });
+      await until(() => wB._watches.get(PID)?.targets.get(tidB)?.enabled, 1500);
+      domBound.inputs[1].val = ''; domBound.inputs[1].defaultValue = ''; domBound.inputs[1].attrs.value = '';
+      await wB.fillLogin(TGT, FILL({ user: 'buser' }));
+      await sleep(160);
+      evalsAt160 = wipeEvals;
+      await sleep(180);
+      evalsAt340 = wipeEvals;
+      verdictB = wB.liveFillVerdictFor(TGT, { verb: 'eval' });
+      auditB = wB.loginFenceStats().fenceAuditLines;
+      ta1Preserved = domBound.inputs[2].val.length === 16384;
+    } finally {
+      wB.shutdown();
+      for (const c of wssB.clients) c.terminate();
+      await new Promise((r) => wssB.close(r));
+      engB.close();
+    }
+
+    ok(resRealB.ok === true && resRealB.verifiedEmpty === true && domRealB.inputs[1].val === '' && domRealB.inputs[2].val.length === 16384 &&
+      mutBMs > 0 && realBMs * 4 <= mutBMs &&
+      verdictB && verdictB.code === 'login_fill_live' && /too much text to check/.test(verdictB.error || '') &&
+      fyB.length === 1 && /too much text to check/.test(fyB[0]) &&
+      auditB.some((a) => a.why === 'ceiling-hold:too much text to check') &&
+      evalsAt160 === 1 && evalsAt340 === 1 && ta1Preserved === true,
+      `r8 MAJOR B (rolling-hash pre-filter + work-bound fail-closed hold): 4x16KB textareas × 3 targets scans in <= 1/4 un-prefiltered SHA-256 (${realBMs.toFixed(2)} ms vs ${mutBMs.toFixed(2)} ms); exceeding work bound holds fence with "too much text to check" once (no retry loop, textareas intact)`,
+      { realBMs, mutBMs, verdictB, fyB, evalsAt160, evalsAt340, ta1Preserved });
+
+    ok(Boolean(LFm8B && mutBMs >= realBMs * 4),
+      `r8 MAJOR B RED control [r8-b-no-rolling-prefilter]: per-position SHA-256 mutant without rolling-hash pre-filter takes >= 4x longer (${mutBMs.toFixed(1)} ms vs ${realBMs.toFixed(1)} ms)`,
+      { mutBMs, realBMs });
+  }
+
+  // ── (C) MAJOR C: values > 16 384 chars ('x'×20000 + secret, plus boundary 16364 & 16365) never silently slice-cap and leak ──
+  {
+    const runMajorC = async ({ LFmodToUse = LF, mode = 'ceiling', stuck = false, prefixLen = 20000 } = {}) => {
+      const PW8C = pwOf('r8-majC');
+      const longVal = 'x'.repeat(prefixLen) + PW8C;
+      const dom = sharedMakeStubDom([
+        { id: 'u', type: 'email', name: 'email', autocomplete: 'username' },
+        { id: 'p', type: 'password', name: 'password', autocomplete: 'current-password' },
+        {
+          id: 'hb', type: 'hidden', name: 'big_state', hidden: true,
+          ...(stuck ? { onSetValue(v, self) { if (v === '') { self.val = longVal; self.defaultValue = longVal; self.attrs.value = longVal; } } } : {}),
+        },
+      ]);
+      const tid = 'TAB_R8_C';
+      const sid = 'SID_R8_C';
+      let wsRef = null;
+      const wss = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+      await new Promise((r) => wss.once('listening', r));
+      const wsUrl = `ws://127.0.0.1:${wss.address().port}/devtools/browser/r8_c`;
+      wss.on('connection', (ws) => {
+        wsRef = ws;
+        ws.on('message', async (buf) => {
+          const m = JSON.parse(String(buf));
+          const send = (obj) => { if (ws.readyState === 1) ws.send(JSON.stringify(obj)); };
+          const rep = (result) => send({ id: m.id, result, ...(m.sessionId ? { sessionId: m.sessionId } : {}) });
+          if (m.method === 'VibeSpace.getVersion') { send({ id: m.id, error: { code: -32601, message: 'not found' } }); return; }
+          if (m.method === 'Target.setDiscoverTargets') {
+            send({ method: 'Target.targetCreated', params: { targetInfo: { targetId: tid, type: 'page', url: `${SITE}/login`, title: 'Login' } } });
+            rep({});
+            return;
+          }
+          if (m.method === 'Target.attachToTarget') { rep({ sessionId: sid }); return; }
+          if (m.method === 'Target.getTargets') { rep({ targetInfos: [{ targetId: tid, type: 'page', url: `${SITE}/login`, attached: true }] }); return; }
+          if (m.method === 'Network.getResponseBody') { rep({ body: '{"ok":true}', base64Encoded: false }); return; }
+          const dr = await dom.call(m.method, m.params || {});
+          rep((dr && dr.result) || {});
+        });
+      });
+
+      let DmodC = D;
+      if (LFmodToUse !== LF) {
+        globalThis.__r8MutLFC = LFmodToUse;
+        const dSrcC = DSRC0.replace('const LF = () => LFm || (LFm = require(\'./browser-login-fill.js\'));', 'const LF = () => globalThis.__r8MutLFC;');
+        DmodC = MUT.load('src/server/browser-dialogs.js', dSrcC, 'r8-c-dialogs-wrap');
+      }
+      const dbDir = path.join(ROOT, 'wb8_c-' + crypto.randomBytes(3).toString('hex')); fs.mkdirSync(dbDir, { recursive: true });
+      const engC = VE.create({ dataDir: dbDir, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false });
+      await engC.setup('vault-r8-c');
+      const grantsC = GS.create({ memory: true });
+      const loginsC = L.create({ vault: engC, grants: () => grantsC });
+      loginsC.addOwn({ origin: SITE, username: 'cuser', password: PW8C });
+      grantsC.set('browser-login', `${SITE}#cuser`, { to: [{ kind: 'conversation', key: 'conv-1' }] });
+      const wC = DmodC.create({
+        keeper: { cdpEndpointFor: async () => ({ ok: true, url: wsUrl }), onLease: () => () => {} },
+        log: quiet, enableTimeoutMs: 300, liveFillMaxMs: mode === 'spa' ? 60000 : 70,
+        holdersOf: () => [{ browserKey: KEY, sessionId: 'sess-1', ephemeral: true }],
+        leaseCountOf: () => 1, logins: loginsC,
+        conversationOf: () => ({ cid: 'conv-1', name: 'Chat One' }),
+      });
+      try {
+        await wC.arm(PID, { budgetMs: 3000 });
+        await until(() => wC._watches.get(PID)?.targets.get(tid)?.enabled, 1500);
+        await wC.fillLogin(TGT, FILL({ user: 'cuser' }));
+        const hb = dom.inputs[2];
+        hb.val = longVal; hb.defaultValue = longVal; hb.attrs.value = longVal;
+        if (mode === 'spa') {
+          dom.inputs[1].val = '';
+          if (wsRef && wsRef.readyState === 1) {
+            wsRef.send(JSON.stringify({ sessionId: sid, method: 'Network.requestWillBeSent', params: { requestId: 'spa-r8-c', frameId: tid, type: 'Fetch', request: { method: 'POST', url: `${SITE}/api/login`, postData: JSON.stringify({ password: PW8C }), hasPostData: true } } }));
+            wsRef.send(JSON.stringify({ sessionId: sid, method: 'Network.responseReceived', params: { requestId: 'spa-r8-c', frameId: tid, type: 'Fetch', response: { status: 200 } } }));
+            wsRef.send(JSON.stringify({ sessionId: sid, method: 'Network.loadingFinished', params: { requestId: 'spa-r8-c' } }));
+          }
+          await sleep(130);
+        } else {
+          await sleep(170);
+        }
+        const verdict = wC.liveFillVerdictFor(TGT, { verb: 'eval' });
+        return {
+          verdict,
+          hbHolds: hb.val.includes(PW8C) || String(hb.getAttribute('value') || '').includes(PW8C),
+          hbLen: hb.val.length,
+        };
+      } finally {
+        wC.shutdown();
+        for (const c of wss.clients) c.terminate();
+        await new Promise((r) => wss.close(r));
+        engC.close();
+      }
+    };
+
+    const cCeil20k = await runMajorC({ mode: 'ceiling', prefixLen: 20000 });
+    const cCeil16365 = await runMajorC({ mode: 'ceiling', prefixLen: 16365 });
+    const cSpa20k = await runMajorC({ mode: 'spa', prefixLen: 20000 });
+    const cStuck20k = await runMajorC({ mode: 'ceiling', stuck: true, prefixLen: 20000 });
+    ok(cCeil20k.hbHolds === false && cCeil20k.hbLen === 0 && cCeil20k.verdict.ok === true &&
+      cCeil16365.hbHolds === false && cCeil16365.hbLen === 0 &&
+      cSpa20k.hbHolds === true && cSpa20k.verdict.code === 'login_fill_live' &&
+      cStuck20k.hbHolds === true && cStuck20k.verdict.code === 'login_fill_live',
+      'r8 MAJOR C (no 16384-char slice cap): hidden input with "x"×20000 + secret (and boundary 16365) is caught & wiped at ceiling, and keeps SPA / stuck fence live',
+      { cCeil20k, cCeil16365, cSpa20k, cStuck20k });
+
+    const redCSrc = LFS0.replace(
+      'if (typeof s !== \'string\' || !s) return false;\n    const n = s.length;',
+      'if (typeof s !== \'string\' || !s) return false;\n    s = s.length > 16384 ? s.slice(0, 16384) : s;\n    const n = s.length;'
+    );
+    const LFm8C = redCSrc !== LFS0 ? MUT.load('src/server/browser-login-fill.js', redCSrc, 'r8-c-16k-slice-cap-leaks') : null;
+    const mutC = LFm8C ? await runMajorC({ LFmodToUse: LFm8C, mode: 'ceiling', prefixLen: 20000 }) : null;
+    ok(Boolean(LFm8C && mutC && mutC.hbHolds === true && mutC.verdict.ok === true && cCeil20k.hbHolds === false),
+      'r8 MAJOR C RED control [r8-c-16k-slice-cap-leaks]: r7 16384-char slice-cap mutant lifts fence while secret remains in hidden input at offset 20000',
+      { mutC, realHbHolds: cCeil20k.hbHolds });
+  }
+
+  // ── (D & E) MINOR D + MINOR E: walk cut preserves CDP envelope keys/scalars (`sessionId` last) & nested keys, and redacts 4-char CJK (12 B >= MIN_MASK_BYTES) past cut ──
+  {
+    const runDE = async (DmodToUse = D) => {
+      const Sde = await world({ mode: { standard: true } });
+      try {
+        const wCut = DmodToUse.create({
+          keeper: { cdpEndpointFor: async () => ({ ok: true, url: Sde.k.wsUrl }), onLease: () => () => {} },
+          log: quiet, enableTimeoutMs: 300, scrubWalkBudgetMs: 0.001,
+          holdersOf: () => [{ browserKey: KEY, sessionId: 'sess-1', ephemeral: true }],
+          leaseCountOf: () => 1, logins: Sde.logins,
+          conversationOf: () => ({ cid: 'conv-1', name: 'Chat One' }),
+        });
+        try {
+          await wCut.arm(PID, { budgetMs: 2000 });
+          const CJK_PW = '密輸鍵鎖'; // 4 UTF-16 code units, 12 UTF-8 bytes (>= MIN_MASK_BYTES = 8)
+          const ASCII_PW = pwOf('r8-de-key');
+          Sde.logins.addOwn({ origin: SITE, username: 'cjkuser', password: CJK_PW });
+          Sde.logins.addOwn({ origin: SITE, username: 'keyuser', password: ASCII_PW });
+          Sde.logins.grant(`web-login:${SITE}#x`, 'any-account', 'session:conv-1');
+          Sde.k.setStandardPage({ securityOrigin: SITE, isoOrigin: SITE, fields: [{ fieldId: 'de-p1', tag: 'input', domType: 'password', type: 'password', autocomplete: 'current-password', visible: true }] });
+          await wCut.fillLogin(TGT, FILL({ user: 'cjkuser' }));
+          Sde.k.navigate(Sde.k.targets()[0].targetId, `${SITE}/login2`);
+          await sleep(20);
+          Sde.k.setStandardPage({ securityOrigin: SITE, isoOrigin: SITE, fields: [{ fieldId: 'de-p2', tag: 'input', domType: 'password', type: 'password', autocomplete: 'current-password', visible: true }] });
+          await wCut.fillLogin(TGT, FILL({ user: 'keyuser' }));
+
+          const sid32 = '0123456789abcdef0123456789abcdef';
+          const items = Array.from({ length: 4000 }, (_, i) => (i === 3998 ? CJK_PW : i === 3999 ? `x${CJK_PW}` : `item-${i}-${'w'.repeat(40)}`));
+          // Chrome wire order: sessionId LAST, after result
+          const frame = JSON.stringify({
+            id: 91,
+            result: {
+              items,
+              nested: { longNestedKeyName: 'longNestedValue12345', [ASCII_PW]: 'secret-keyed' },
+            },
+            sessionId: sid32,
+          });
+          const out = wCut.scrubCdpFrame(PID, frame);
+          const parsed = JSON.parse(out);
+          return {
+            out,
+            topKeys: Object.keys(parsed),
+            id: parsed.id,
+            sessionId: parsed.sessionId,
+            nestedKeys: parsed.result && parsed.result.nested ? Object.keys(parsed.result.nested) : [],
+            longNestedVal: parsed.result && parsed.result.nested ? parsed.result.nested.longNestedKeyName : null,
+            cjkLeaked: out.includes(CJK_PW),
+            asciiKeyLeaked: out.includes(ASCII_PW),
+          };
+        } finally { wCut.shutdown(); }
+      } finally { await Sde.close(); }
+    };
+
+    const realDE = await runDE(D);
+    ok(JSON.stringify(realDE.topKeys) === JSON.stringify(['id', 'result', 'sessionId']) &&
+      realDE.id === 91 && realDE.sessionId === '0123456789abcdef0123456789abcdef' &&
+      realDE.nestedKeys.includes('longNestedKeyName') && !realDE.nestedKeys.includes('[vault:scrub-cut]') &&
+      realDE.longNestedVal === '[vault:scrub-cut]' &&
+      realDE.cjkLeaked === false && realDE.asciiKeyLeaked === false,
+      'r8 MINOR D + MINOR E (walk cut envelope/key preservation + UTF-8 byte-length cut): forced cut keeps top-level sessionId/id/result & nested keys intact while masking 4-char CJK secret (12 B) past cut',
+      { topKeys: realDE.topKeys, sessionId: realDE.sessionId, nestedKeys: realDE.nestedKeys, longNestedVal: realDE.longNestedVal, cjkLeaked: realDE.cjkLeaked });
+
+    const redDSrc = DSRC0.replaceAll(
+      'const nk = (isTop && CDP_ENVELOPE_KEYS.has(k)) ? k : fn(k);',
+      'const nk = cut ? (k.length >= minB ? \'[vault:scrub-cut]\' : k) : fn(k);'
+    );
+    const Dm8D = redDSrc !== DSRC0 ? MUT.load('src/server/browser-dialogs.js', redDSrc, 'r8-d-cut-renames-envelope-keys') : null;
+    const mutD = Dm8D ? await runDE(Dm8D) : null;
+    ok(Boolean(Dm8D && mutD && mutD.topKeys.includes('[vault:scrub-cut]') && !realDE.topKeys.includes('[vault:scrub-cut]')),
+      'r8 MINOR D RED control [r8-d-cut-renames-envelope-keys]: mutant cutting object keys renames trailing CDP sessionId key to [vault:scrub-cut]',
+      { mutTopKeys: mutD && mutD.topKeys, realTopKeys: realDE.topKeys });
+
+    const redESrc = DSRC0.replace(
+      'if (node.length >= minB || (node.length >= 3 && Buffer.byteLength(node, \'utf8\') >= minB))',
+      'if (node.length >= minB)'
+    );
+    const Dm8E = redESrc !== DSRC0 ? MUT.load('src/server/browser-dialogs.js', redESrc, 'r8-e-utf16-len-leaks-cjk-past-cut') : null;
+    const mutE = Dm8E ? await runDE(Dm8E) : null;
+    ok(Boolean(Dm8E && mutE && mutE.cjkLeaked === true && realDE.cjkLeaked === false),
+      'r8 MINOR E RED control [r8-e-utf16-len-leaks-cjk-past-cut]: UTF-16 length cut test leaks 4-char CJK password (12 UTF-8 bytes) past the cut',
+      { mutCjkLeaked: mutE && mutE.cjkLeaked, realCjkLeaked: realDE.cjkLeaked });
+  }
+
+  // ── (F, G, H) MINOR F (70 KB exfil, 70 analytics flood, sendBeacon readable + unreadable), MINOR G (blobXAn), MINOR H (3p Authorization + ExtraInfo) ──
+  {
+    const runFGH = async (DmodToUse = D) => {
+      const Sfgh = await world({ mode: { standard: true }, Dmod: DmodToUse });
+      try {
+        const tid = Sfgh.k.targets()[0].targetId;
+        const PW8F = pwOf('r8-fgh');
+        Sfgh.logins.addOwn({ origin: SITE, username: 'fuser1', password: PW8F });
+        Sfgh.logins.addOwn({ origin: SITE, username: 'fuser2', password: PW8F });
+        Sfgh.logins.addOwn({ origin: SITE, username: 'fuser3', password: PW8F });
+        Sfgh.logins.addOwn({ origin: SITE, username: 'fuser4', password: PW8F });
+        Sfgh.logins.addOwn({ origin: SITE, username: 'huser1', password: PW8F });
+        Sfgh.logins.addOwn({ origin: SITE, username: 'huser2', password: PW8F });
+        Sfgh.logins.grant(`web-login:${SITE}#x`, 'any-account', 'session:conv-1');
+
+        const stdFields = [
+          { fieldId: 'fgh-u', tag: 'input', domType: 'email', type: 'email', autocomplete: 'username', visible: true },
+          { fieldId: 'fgh-p', tag: 'input', domType: 'password', type: 'password', autocomplete: 'current-password', visible: true },
+        ];
+
+        // F(a): 70,037 B third-party POST body carrying PW8F alongside proven same-origin login POST
+        Sfgh.k.setStandardPage({ securityOrigin: SITE, isoOrigin: SITE, passwordStillFilled: true, buttons: [{ id: 'vs-b-0', text: 'Sign in', inForm: true }], fields: stdFields }, tid);
+        const mFa = Sfgh.k.mark();
+        const pFa = Sfgh.w.fillLogin(TGT, FILL({ user: 'fuser1', submit: true }));
+        await until(() => Sfgh.k.calls().slice(mFa).some((c) => c.method === 'Input.insertText'), 1000);
+        await sleep(25);
+        const body70k = JSON.stringify({ pad: 'z'.repeat(70000), pw: PW8F });
+        Sfgh.k.emitPageEvent(tid, 'Network.requestWillBeSent', {
+          requestId: 'exfil-70k', frameId: tid, type: 'Fetch',
+          request: { method: 'POST', url: 'https://exfil-a.test/collect', postData: body70k, hasPostData: true },
+        });
+        Sfgh.k.emitPageEvent(tid, 'Network.responseReceived', { requestId: 'exfil-70k', frameId: tid, type: 'Fetch', response: { status: 204 } });
+        Sfgh.k.emitPageEvent(tid, 'Network.loadingFinished', { requestId: 'exfil-70k' });
+        const rFa = await pFa;
+        const rowFa = Sfgh.logins.list().entries.find((e) => e.name === `web-login:${SITE}#fuser1`);
+
+        // F(b): Exfil POST followed by 70 analytics POSTs -> exfil entry NEVER evicted from observed
+        Sfgh.k.navigate(tid, `${SITE}/login-fb`);
+        await sleep(20);
+        Sfgh.k.setStandardPage({ securityOrigin: SITE, isoOrigin: SITE, passwordStillFilled: true, buttons: [{ id: 'vs-b-0', text: 'Sign in', inForm: true }], fields: stdFields }, tid);
+        const mFb = Sfgh.k.mark();
+        const pFb = Sfgh.w.fillLogin(TGT, FILL({ user: 'fuser2', submit: true }));
+        await until(() => Sfgh.k.calls().slice(mFb).some((c) => c.method === 'Input.insertText'), 1000);
+        await sleep(25);
+        Sfgh.k.emitPageEvent(tid, 'Network.requestWillBeSent', {
+          requestId: 'exfil-fb', frameId: tid, type: 'Fetch',
+          request: { method: 'POST', url: 'https://exfil-b.test/collect', postData: JSON.stringify({ password: PW8F }), hasPostData: true },
+        });
+        Sfgh.k.emitPageEvent(tid, 'Network.responseReceived', { requestId: 'exfil-fb', frameId: tid, type: 'Fetch', response: { status: 204 } });
+        Sfgh.k.emitPageEvent(tid, 'Network.loadingFinished', { requestId: 'exfil-fb' });
+        for (let i = 0; i < 70; i++) {
+          const rid = `an-flood-${i}`;
+          Sfgh.k.emitPageEvent(tid, 'Network.requestWillBeSent', {
+            requestId: rid, frameId: tid, type: 'Fetch',
+            request: { method: 'POST', url: `https://analytics.vendor.test/e/${i}`, postData: `i=${i}`, hasPostData: true },
+          });
+          Sfgh.k.emitPageEvent(tid, 'Network.responseReceived', { requestId: rid, frameId: tid, type: 'Fetch', response: { status: 204 } });
+          Sfgh.k.emitPageEvent(tid, 'Network.loadingFinished', { requestId: rid });
+        }
+        const rFb = await pFb;
+        const rowFb = Sfgh.logins.list().entries.find((e) => e.name === `web-login:${SITE}#fuser2`);
+
+        // F(c1) + F(c2): sendBeacon (`Ping`) with readable credential body -> named in origins; unreadable beacon body (`hasPostData:true`, no postData) -> `beaconUnreadable:true` ("a beacon could not be read")
+        Sfgh.k.navigate(tid, `${SITE}/login-fc`);
+        await sleep(20);
+        Sfgh.k.setStandardPage({ securityOrigin: SITE, isoOrigin: SITE, passwordStillFilled: true, buttons: [{ id: 'vs-b-0', text: 'Sign in', inForm: true }], fields: stdFields }, tid);
+        const mFc = Sfgh.k.mark();
+        const pFc = Sfgh.w.fillLogin(TGT, FILL({ user: 'fuser3', submit: true }));
+        await until(() => Sfgh.k.calls().slice(mFc).some((c) => c.method === 'Input.insertText'), 1000);
+        await sleep(25);
+        Sfgh.k.emitPageEvent(tid, 'Network.requestWillBeSent', {
+          requestId: 'ping-cred', frameId: tid, type: 'Ping',
+          request: { method: 'POST', url: 'https://exfil-c.test/beacon', postData: JSON.stringify({ password: PW8F }), hasPostData: true },
+        });
+        Sfgh.k.emitPageEvent(tid, 'Network.requestWillBeSent', {
+          requestId: 'ping-blind', frameId: tid, type: 'Ping',
+          request: { method: 'POST', url: 'https://blind-beacon.test/b', hasPostData: true }, // fake-kernel getRequestPostData errors -> beaconUnreadable
+        });
+        const rFc = await pFc;
+        const rowFc = Sfgh.logins.list().entries.find((e) => e.name === `web-login:${SITE}#fuser3`);
+        const metaFc = Sfgh.eng.secretNames().find((s) => s.name === `web-login:${SITE}#fuser3`);
+        const vrowFc = metaFc ? VI.rowOf('secrets', VI.secretRowOf(metaFc)) : null;
+
+        // G (`blobXAn`): unreadable cross-origin credential write (`hasPostData:true`, getRequestPostData fails) + analytics POST -> submitted:'unknown' + BODY_LARGE_BOUND (NEVER false / "press its button")
+        Sfgh.k.navigate(tid, `${SITE}/signup-g`);
+        await sleep(20);
+        Sfgh.k.setStandardPage({
+          securityOrigin: SITE, isoOrigin: SITE, noAutoSubmitNet: true,
+          buttons: [{ id: 'vs-b-0', text: 'Create account', inForm: true }],
+          fields: [
+            { fieldId: 'g-u', tag: 'input', domType: 'email', type: 'email', autocomplete: 'username', visible: true },
+            { fieldId: 'g-p', tag: 'input', domType: 'password', type: 'password', autocomplete: 'new-password', visible: true },
+          ],
+        }, tid);
+        const mG = Sfgh.k.mark();
+        const pG = Sfgh.w.fillLogin(TGT, FILL({ newUser: 'blobxan@example.test', generate: true, submit: true }));
+        await until(() => Sfgh.k.calls().slice(mG).some((c) => c.method === 'Input.insertText'), 1000);
+        await sleep(25);
+        Sfgh.k.emitPageEvent(tid, 'Network.requestWillBeSent', {
+          requestId: 'blob-xcred', frameId: tid, type: 'Fetch',
+          request: { method: 'POST', url: 'https://api.auth.test/v1/blob-register', hasPostData: true },
+        });
+        Sfgh.k.emitPageEvent(tid, 'Network.responseReceived', { requestId: 'blob-xcred', frameId: tid, type: 'Fetch', response: { status: 200 } });
+        Sfgh.k.emitPageEvent(tid, 'Network.loadingFinished', { requestId: 'blob-xcred' });
+        Sfgh.k.emitPageEvent(tid, 'Network.requestWillBeSent', {
+          requestId: 'an-beside-blob', frameId: tid, type: 'XHR',
+          request: { method: 'POST', url: 'https://analytics.vendor.test/collect', postData: 'evt=submit', hasPostData: true },
+        });
+        Sfgh.k.emitPageEvent(tid, 'Network.responseReceived', { requestId: 'an-beside-blob', frameId: tid, type: 'XHR', response: { status: 204 } });
+        Sfgh.k.emitPageEvent(tid, 'Network.loadingFinished', { requestId: 'an-beside-blob' });
+        const rG = await pG;
+        const rowG = Sfgh.logins.list().entries.find((e) => e.name === `web-login:${SITE}#blobxan@example.test`);
+
+        // H(1): Client-blocked press (`noAutoSubmitNet:true`) while support widget sends 3p Authorization (both requestWillBeSent & ExtraInfo) -> submitted:false ("press its button")
+        Sfgh.k.navigate(tid, `${SITE}/login-h1`);
+        await sleep(20);
+        Sfgh.k.setStandardPage({ securityOrigin: SITE, isoOrigin: SITE, noAutoSubmitNet: true, buttons: [{ id: 'vs-b-0', text: 'Sign in', inForm: true }], fields: stdFields }, tid);
+        const mH1 = Sfgh.k.mark();
+        const pH1 = Sfgh.w.fillLogin(TGT, FILL({ user: 'huser1', submit: true }));
+        await until(() => Sfgh.k.calls().slice(mH1).some((c) => c.method === 'Input.insertText'), 1000);
+        await sleep(25);
+        Sfgh.k.emitPageEvent(tid, 'Network.requestWillBeSent', {
+          requestId: 'w-auth-1', frameId: tid, type: 'Fetch',
+          request: { method: 'GET', url: 'https://support.widget.test/me', headers: { Authorization: 'Bearer support-widget-tok' } },
+        });
+        Sfgh.k.emitPageEvent(tid, 'Network.responseReceived', { requestId: 'w-auth-1', frameId: tid, type: 'Fetch', response: { status: 200 } });
+        Sfgh.k.emitPageEvent(tid, 'Network.loadingFinished', { requestId: 'w-auth-1' });
+        Sfgh.k.emitPageEvent(tid, 'Network.requestWillBeSent', {
+          requestId: 'w-auth-2', frameId: tid, type: 'Fetch',
+          request: { method: 'GET', url: 'https://cdn.widget.test/cfg', headers: {} },
+        });
+        Sfgh.k.emitPageEvent(tid, 'Network.requestWillBeSentExtraInfo', {
+          requestId: 'w-auth-2', headers: { authorization: 'Bearer extra-widget-tok' },
+        });
+        Sfgh.k.emitPageEvent(tid, 'Network.responseReceived', { requestId: 'w-auth-2', frameId: tid, type: 'Fetch', response: { status: 200 } });
+        Sfgh.k.emitPageEvent(tid, 'Network.loadingFinished', { requestId: 'w-auth-2' });
+        const rH1 = await pH1;
+
+        // H(2): requestWillBeSentExtraInfo-only road: (i) same-origin Bearer via ExtraInfo -> 'unknown' + READABLE_BOUND; (ii) 3p Basic carrying password via ExtraInfo -> true + named in origins
+        Sfgh.k.navigate(tid, `${SITE}/login-h2a`);
+        await sleep(20);
+        Sfgh.k.setStandardPage({ securityOrigin: SITE, isoOrigin: SITE, noAutoSubmitNet: true, buttons: [{ id: 'vs-b-0', text: 'Sign in', inForm: true }], fields: stdFields }, tid);
+        const mH2a = Sfgh.k.mark();
+        const pH2a = Sfgh.w.fillLogin(TGT, FILL({ user: 'fuser4', submit: true }));
+        await until(() => Sfgh.k.calls().slice(mH2a).some((c) => c.method === 'Input.insertText'), 1000);
+        await sleep(25);
+        Sfgh.k.emitPageEvent(tid, 'Network.requestWillBeSent', {
+          requestId: 'extra-same-b', frameId: tid, type: 'Fetch',
+          request: { method: 'GET', url: `${SITE}/api/session`, headers: {} },
+        });
+        Sfgh.k.emitPageEvent(tid, 'Network.requestWillBeSentExtraInfo', {
+          requestId: 'extra-same-b', headers: { Authorization: 'Bearer opaque-same-origin' },
+        });
+        Sfgh.k.emitPageEvent(tid, 'Network.responseReceived', { requestId: 'extra-same-b', frameId: tid, type: 'Fetch', response: { status: 200 } });
+        Sfgh.k.emitPageEvent(tid, 'Network.loadingFinished', { requestId: 'extra-same-b' });
+        const rH2SameBearer = await pH2a;
+
+        Sfgh.k.navigate(tid, `${SITE}/login-h2b`);
+        await sleep(20);
+        Sfgh.k.setStandardPage({ securityOrigin: SITE, isoOrigin: SITE, noAutoSubmitNet: true, buttons: [{ id: 'vs-b-0', text: 'Sign in', inForm: true }], fields: stdFields }, tid);
+        const mH2b = Sfgh.k.mark();
+        const pH2b = Sfgh.w.fillLogin(TGT, FILL({ user: 'huser2', submit: true }));
+        await until(() => Sfgh.k.calls().slice(mH2b).some((c) => c.method === 'Input.insertText'), 1000);
+        await sleep(25);
+        Sfgh.k.emitPageEvent(tid, 'Network.requestWillBeSent', {
+          requestId: 'extra-3p-basic', frameId: tid, type: 'Fetch',
+          request: { method: 'GET', url: 'https://sso.partner.test/challenge', headers: {} },
+        });
+        Sfgh.k.emitPageEvent(tid, 'Network.requestWillBeSentExtraInfo', {
+          requestId: 'extra-3p-basic', headers: { Authorization: `Basic ${Buffer.from(`huser2:${PW8F}`, 'utf8').toString('base64')}` },
+        });
+        Sfgh.k.emitPageEvent(tid, 'Network.responseReceived', { requestId: 'extra-3p-basic', frameId: tid, type: 'Fetch', response: { status: 200 } });
+        Sfgh.k.emitPageEvent(tid, 'Network.loadingFinished', { requestId: 'extra-3p-basic' });
+        const rH2Basic3p = await pH2b;
+        const rowH2Basic3p = Sfgh.logins.list().entries.find((e) => e.name === `web-login:${SITE}#huser2`);
+
+        return { rFa, rowFa, rFb, rowFb, rFc, rowFc, vrowFc, rG, rowG, rH1, h1Text: BL.loginText(rH1), rH2SameBearer, rH2Basic3p, rowH2Basic3p };
+      } finally { await Sfgh.close(); }
+    };
+
+    const realFGH = await runFGH(D);
+    ok(realFGH.rFa.submitted === true && Array.isArray(realFGH.rowFa?.origins) && realFGH.rowFa.origins.includes('https://exfil-a.test') &&
+      realFGH.rFb.submitted === true && Array.isArray(realFGH.rowFb?.origins) && realFGH.rowFb.origins.includes('https://exfil-b.test') &&
+      realFGH.rFc.submitted === true && Array.isArray(realFGH.rowFc?.origins) && realFGH.rowFc.origins.includes('https://exfil-c.test') &&
+      realFGH.rowFc?.beaconUnreadable === true && realFGH.vrowFc?.beaconUnreadable === true,
+      'r8 MINOR F (70 KB exfil + 70-analytics eviction + sendBeacon): 70 KB 3p POST, 70-POST analytics flood, and sendBeacon all preserve exfil origins; unreadable beacon sets beaconUnreadable:true',
+      { fa: realFGH.rowFa?.origins, fb: realFGH.rowFb?.origins, fc: realFGH.rowFc?.origins, beaconUnreadable: realFGH.rowFc?.beaconUnreadable });
+
+    const redFSrc = DSRC0.replace(
+      'if (Buffer.byteLength(bodyText, \'utf8\') > 1048576) return false;',
+      'if (Buffer.byteLength(bodyText, \'utf8\') > 65536) return false;'
+    );
+    const Dm8F = redFSrc !== DSRC0 ? MUT.load('src/server/browser-dialogs.js', redFSrc, 'r8-f-64k-body-cap-misses-exfil') : null;
+    const mutF = Dm8F ? await runFGH(Dm8F) : null;
+    ok(Boolean(Dm8F && mutF && !mutF.rowFa?.origins && realFGH.rowFa?.origins?.includes('https://exfil-a.test')),
+      'r8 MINOR F RED control [r8-f-64k-body-cap-misses-exfil]: r7 65536-byte bodyCarriesCredential cap misses 70 KB third-party credential exfil',
+      { mutFaOrigins: mutF && mutF.rowFa?.origins, realFaOrigins: realFGH.rowFa?.origins });
+
+    ok(realFGH.rG.submitted === 'unknown' && realFGH.rG.submittedReason === 'the request body was too large to read' &&
+      realFGH.rowG?.pending === 'register' && realFGH.rowG?.pendingReason === 'the request body was too large to read',
+      'r8 MINOR G (unreadable cross-origin write + analytics write): blobXAn reports submitted:"unknown" + "the request body was too large to read" (never false / "press its button")',
+      { rG: realFGH.rG, rowG: realFGH.rowG });
+
+    const redGSrc = DSRC0
+      .replace(
+        'if (writes.some((o) => o.unreadableBody)) {',
+        'if (writes.length === 1 && writes[0].unreadableBody) {'
+      )
+      .replace(
+        'if ((writes.some((o) => o.unreadableBody) || since.some((o) => o.beaconUnreadable)) && (an.writeSentSeq || 0) <= m) {',
+        'if (writes.length === 1 && writes[0].unreadableBody && (an.writeSentSeq || 0) <= m) {'
+      );
+    const Dm8G = redGSrc !== DSRC0 ? MUT.load('src/server/browser-dialogs.js', redGSrc, 'r8-g-sole-write-false-negative') : null;
+    const mutG = Dm8G ? await runFGH(Dm8G) : null;
+    ok(Boolean(Dm8G && mutG && mutG.rG.submitted === false && realFGH.rG.submitted === 'unknown'),
+      'r8 MINOR G RED control [r8-g-sole-write-false-negative]: r7 sole-write guard reports submitted:false ("press its button") when analytics fires beside unreadable cross-origin credential write',
+      { mutGSub: mutG && mutG.rG.submitted, realGSub: realFGH.rG.submitted });
+
+    ok(realFGH.rH1.submitted === false && /press its button/.test(realFGH.h1Text) &&
+      realFGH.rH2SameBearer.submitted === 'unknown' && realFGH.rH2SameBearer.submittedReason === 'the site\'s request did not carry the password in a readable form' &&
+      realFGH.rH2Basic3p.submitted === true && Array.isArray(realFGH.rowH2Basic3p?.origins) && realFGH.rowH2Basic3p.origins.includes('https://sso.partner.test'),
+      'r8 MINOR H (third-party Authorization chatter + ExtraInfo road): blocked press with 3p widget Authorization stays submitted:false; ExtraInfo same-origin Bearer => unknown & ExtraInfo 3p Basic => true + named',
+      { rH1: realFGH.rH1, rH2SameBearer: realFGH.rH2SameBearer, rH2Basic3p: realFGH.rH2Basic3p, basicOrigins: realFGH.rowH2Basic3p?.origins });
+
+    const redHSrc = DSRC0.replace(
+      'if (rq.obs.sameOrigin || rq.carriesCred || rq.carriesPending || rq.carriesOtherCred) {',
+      'if (rq.obs.sameOrigin || rq.obs.hasAuthHeader || rq.carriesCred || rq.carriesPending || rq.carriesOtherCred) {'
+    );
+    const Dm8H = redHSrc !== DSRC0 ? MUT.load('src/server/browser-dialogs.js', redHSrc, 'r8-h-third-party-auth-header-poisons') : null;
+    const mutH = Dm8H ? await runFGH(Dm8H) : null;
+    ok(Boolean(Dm8H && mutH && mutH.rH1.submitted === 'unknown' && realFGH.rH1.submitted === false),
+      'r8 MINOR H RED control [r8-h-third-party-auth-header-poisons]: r7 unconditional hasAuthHeader writeSentSeq bump turns client-blocked press into submitted:"unknown"',
+      { mutH1Sub: mutH && mutH.rH1.submitted, realH1Sub: realFGH.rH1.submitted });
+  }
+
+  // ── (I) MINOR I: OTP dropped after step, short (<8 B) values whole-node matched (never substring), rememberFilledSecrets cleared on browser stop & vault lock ──
+  {
+    const runMinorI = async (DmodToUse = D) => {
+      LF.clearAllFilledSecrets?.();
+      const Si = await world({ mode: { standard: true }, Dmod: DmodToUse });
+      try {
+        const hasRem = (pid) => (typeof LF.hasRememberedSecrets === 'function' ? LF.hasRememberedSecrets(pid) : null);
+        const tid = Si.k.targets()[0].targetId;
+        const seedBytes = crypto.randomBytes(20);
+        const seedI = T.base32Encode(seedBytes);
+        Si.totp.addEntry({ seed: seedI, name: 'r8-i-totp' }, { who: 'owner' });
+        const otpCode = T.totp(seedBytes, { now: Date.now(), hmac: (a, k, m) => crypto.createHmac(String(a).toLowerCase(), k).update(m).digest() }).code; // 6-digit OTP
+        const SHORT_PIN = '9482'; // 4-digit PIN (< 8 B) -> whole-node match only
+        const LONG_PW = pwOf('r8-minI');
+
+        // 1. Short value whole-node vs substring check via LF.wipeTabTypedInputs
+        const domShort = sharedMakeStubDom([
+          { id: 'wholePin', type: 'text', value: SHORT_PIN, defaultValue: SHORT_PIN },
+          { id: 'subPin', tag: 'TEXTAREA', value: `Order #${SHORT_PIN}-99`, defaultValue: `Order #${SHORT_PIN}-99` },
+          { id: 'wholeOtp', type: 'text', value: otpCode, defaultValue: otpCode },
+          { id: 'subOtp', tag: 'TEXTAREA', value: `Ticket-${otpCode}-ref`, defaultValue: `Ticket-${otpCode}-ref` },
+        ]);
+        await LF.wipeTabTypedInputs({ call: domShort.call, targetId: 'TI_SHORT', fieldIds: [], secretValues: [SHORT_PIN], wholeOnlyValues: [otpCode] });
+        const wholePinWiped = domShort.inputs[0].val === '';
+        const subPinKept = domShort.inputs[1].val === `Order #${SHORT_PIN}-99`;
+        const wholeOtpWiped = domShort.inputs[2].val === '';
+        const subOtpKept = domShort.inputs[3].val === `Ticket-${otpCode}-ref`;
+
+        // 2. OTP step: never stored in rememberFilledSecrets, and cleared when OTP fence ends
+        Si.logins.addOwn({ origin: SITE, username: 'otpuser', password: LONG_PW, totpName: 'r8-i-totp' });
+        Si.logins.grant(`web-login:${SITE}#otpuser`, 'this-account', 'session:conv-1');
+        Si.k.setStandardPage({ securityOrigin: SITE, isoOrigin: SITE, fields: [{ fieldId: 'i-otp', tag: 'input', domType: 'text', type: 'text', autocomplete: 'one-time-code', visible: true }] }, tid);
+        const rfOtp = await Si.w.fillLogin(TGT, FILL({ user: 'otpuser' }));
+        const otpInRemembered = hasRem(PID);
+        Si.k.navigate(tid, `${SITE}/after-otp`);
+        await sleep(30);
+
+        // 3. Password fill -> remembered while browser runs -> cleared on vault lock AND cleared on browser stop (`disarm`)
+        Si.k.setStandardPage({ securityOrigin: SITE, isoOrigin: SITE, fields: [{ fieldId: 'i-pw', tag: 'input', domType: 'password', type: 'password', autocomplete: 'current-password', visible: true }] }, tid);
+        await Si.w.fillLogin(TGT, FILL({ user: 'otpuser' }));
+        const rememberedAfterPw = hasRem(PID);
+        Si.eng.lock();
+        const clearedOnVaultLock = hasRem(PID) === false;
+        await Si.eng.unlock(Si.VPW);
+        Si.k.navigate(tid, `${SITE}/login-again`);
+        await sleep(20);
+        Si.k.setStandardPage({ securityOrigin: SITE, isoOrigin: SITE, fields: [{ fieldId: 'i-pw2', tag: 'input', domType: 'password', type: 'password', autocomplete: 'current-password', visible: true }] }, tid);
+        await Si.w.fillLogin(TGT, FILL({ user: 'otpuser' }));
+        const rememberedBeforeStop = hasRem(PID);
+        Si.w.disarm(PID, 'the browser stopped');
+        const clearedOnBrowserStop = hasRem(PID) === false;
+
+        return {
+          otpStepOk: rfOtp.ok && rfOtp.step === 'totp',
+          wholePinWiped, subPinKept, wholeOtpWiped, subOtpKept,
+          otpInRemembered, rememberedAfterPw, clearedOnVaultLock, rememberedBeforeStop, clearedOnBrowserStop,
+        };
+      } finally {
+        LF.clearAllFilledSecrets?.();
+        await Si.close();
+      }
+    };
+
+    const realI = await runMinorI(D);
+    ok(realI.otpStepOk &&
+      realI.wholePinWiped === true && realI.subPinKept === true &&
+      realI.wholeOtpWiped === true && realI.subOtpKept === true &&
+      realI.otpInRemembered === false &&
+      realI.rememberedAfterPw === true && realI.clearedOnVaultLock === true &&
+      realI.rememberedBeforeStop === true && realI.clearedOnBrowserStop === true,
+      'r8 MINOR I (OTP dropped + whole-node short match + stop/lock clear): OTP never enters rememberFilledSecrets, short PIN/OTP match whole-node only (substrings untouched), and vault lock & browser stop clear remembered secrets',
+      realI);
+
+    const redISrc = DSRC0.replace(
+      'try { LF().clearFilledSecretsForProfile(pid); } catch { /* */ }',
+      '/* mutant: skip clearFilledSecretsForProfile on stop */'
+    );
+    const Dm8I = redISrc !== DSRC0 ? MUT.load('src/server/browser-dialogs.js', redISrc, 'r8-i-no-clear-on-browser-stop') : null;
+    const mutI = Dm8I ? await runMinorI(Dm8I) : null;
+    ok(Boolean(Dm8I && mutI && mutI.clearedOnBrowserStop === false && realI.clearedOnBrowserStop === true),
+      'r8 MINOR I RED control [r8-i-no-clear-on-browser-stop]: mutant skipping clearFilledSecretsForProfile retains plaintext in module-global Map after browser stop',
+      { mutCleared: mutI && mutI.clearedOnBrowserStop, realCleared: realI.clearedOnBrowserStop });
+  }
+
+  // ── (J & K) MINOR J (`submittedTo` separate from `hosts`, zh words) + MINOR K (secret length bucketed in Runtime.evaluate) ──
+  {
+    // J: Vault inventory row maps login `origins` onto `submittedTo` (leaving `hosts` strictly `[]` for paste-request hosts) + zh words
+    const rawMetaJ = {
+      name: `web-login:${SITE}#juser@example.test`,
+      createdAt: 1761900000000,
+      loginSource: 'vault-minted',
+      origins: ['https://exfil-j.test'],
+      beaconUnreadable: true,
+    };
+    const vrowJ = VI.rowOf('secrets', VI.secretRowOf(rawMetaJ));
+    const rawPaste = {
+      name: 'secret:api_tok',
+      createdAt: 1761900000000,
+      askedBy: { conv: 'conv-1', name: 'Chat One' },
+      hosts: ['api.service.test'],
+    };
+    const vrowPaste = VI.rowOf('secrets', VI.secretRowOf(rawPaste));
+    const mkElJ = (tag) => ({
+      tag, className: '', textContent: '', title: '', type: '', dataset: {}, children: [], attrs: {},
+      append(...cs) { for (const c of cs) if (c != null) this.children.push(typeof c === 'string' ? { textContent: c } : c); },
+      setAttribute(k, v) { this.attrs[k] = v; },
+      get allText() { return [this.textContent, ...this.children.map((c) => c.allText || c.textContent || '')].join(' '); },
+    });
+    const prevDocJ = globalThis.document;
+    globalThis.document = { createElement: (t) => mkElJ(t) };
+    let extraTextJ = '';
+    try {
+      const ex = VLR_ESM.loginExtras(vrowJ, { entries: [], subjects: {} });
+      extraTextJ = ex && ex.box ? ex.box.allText : '';
+    } finally { globalThis.document = prevDocJ; }
+    const zhMap = I18N_ZH.default || I18N_ZH.ZH || I18N_ZH;
+    const zhSubmittedTo = zhMap['Submitted to {origins}'] || '';
+    const zhForHosts = zhMap['for {hosts}'] || '';
+    const zhBeacon = zhMap['a beacon could not be read'] || '';
+
+    ok(Array.isArray(vrowJ.hosts) && vrowJ.hosts.length === 0 &&
+      Array.isArray(vrowJ.submittedTo) && vrowJ.submittedTo.includes('https://exfil-j.test') &&
+      vrowJ.beaconUnreadable === true &&
+      Array.isArray(vrowPaste.hosts) && vrowPaste.hosts.includes('api.service.test') && !vrowPaste.submittedTo &&
+      /Submitted to https:\/\/exfil-j\.test/.test(extraTextJ) && /a beacon could not be read/.test(extraTextJ) &&
+      zhSubmittedTo.includes('{origins}') && zhSubmittedTo !== zhForHosts && !zhSubmittedTo.startsWith('用于 ') && Boolean(zhBeacon),
+      'r8 MINOR J (submittedTo separate from hosts + zh words): login origins land on vrow.submittedTo (vrow.hosts stays []), render "Submitted to ...", and carry dedicated zh translation distinct from "用于 {hosts}"',
+      { vrowJHosts: vrowJ.hosts, vrowJSubmittedTo: vrowJ.submittedTo, extraTextJ, zhSubmittedTo, zhForHosts, zhBeacon });
+
+    const redJSrc = VIS0.replace(
+      '...(origins.length ? { submittedTo: origins } : {})',
+      '...(origins.length ? { hosts: origins } : {})'
+    );
+    const VIm8J = redJSrc !== VIS0 ? MUT.load('src/vault-inventory.js', redJSrc, 'r8-j-login-origins-mapped-to-hosts') : null;
+    const mutVrowJ = VIm8J ? VIm8J.rowOf('secrets', VIm8J.secretRowOf(rawMetaJ)) : null;
+    ok(Boolean(VIm8J && mutVrowJ && mutVrowJ.hosts.includes('https://exfil-j.test') && vrowJ.hosts.length === 0),
+      'r8 MINOR J RED control [r8-j-login-origins-mapped-to-hosts]: r7 mutant mapping login origins onto vrow.hosts makes Vault window meta line read "for <exfil-origin>"',
+      { mutHosts: mutVrowJ && mutVrowJ.hosts, realHosts: vrowJ.hosts });
+
+    // K: 21-char password length NEVER travels in clear (`21`) in any Runtime.evaluate expression (finalize, SPA probe, or ceiling wipe)
+    const PW21 = 'K9#mP2$vL8@qR4!zX7^wB'; // exact length 21
+    const evalExprsK = [];
+    const domK = sharedMakeStubDom([
+      { id: 'uk', type: 'email', name: 'email', autocomplete: 'username' },
+      { id: 'pk', type: 'password', name: 'password', autocomplete: 'current-password' },
+    ]);
+    const tidK = 'TAB_R8_K';
+    const sidK = 'SID_R8_K';
+    let wsRefK = null;
+    const wssK = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+    await new Promise((r) => wssK.once('listening', r));
+    const wsUrlK = `ws://127.0.0.1:${wssK.address().port}/devtools/browser/r8_k`;
+    wssK.on('connection', (ws) => {
+      wsRefK = ws;
+      ws.on('message', async (buf) => {
+        const m = JSON.parse(String(buf));
+        const send = (obj) => { if (ws.readyState === 1) ws.send(JSON.stringify(obj)); };
+        const rep = (result) => send({ id: m.id, result, ...(m.sessionId ? { sessionId: m.sessionId } : {}) });
+        if (m.method === 'VibeSpace.getVersion') { send({ id: m.id, error: { code: -32601, message: 'not found' } }); return; }
+        if (m.method === 'Target.setDiscoverTargets') {
+          send({ method: 'Target.targetCreated', params: { targetInfo: { targetId: tidK, type: 'page', url: `${SITE}/login`, title: 'Login' } } });
+          rep({});
+          return;
+        }
+        if (m.method === 'Target.attachToTarget') { rep({ sessionId: sidK }); return; }
+        if (m.method === 'Target.getTargets') { rep({ targetInfos: [{ targetId: tidK, type: 'page', url: `${SITE}/login`, attached: true }] }); return; }
+        if (m.method === 'Network.getResponseBody') { rep({ body: '{"ok":true}', base64Encoded: false }); return; }
+        if (m.method === 'Runtime.evaluate' && m.params && m.params.expression) evalExprsK.push(String(m.params.expression));
+        const dr = await domK.call(m.method, m.params || {});
+        rep((dr && dr.result) || {});
+      });
+    });
+    const dbDirK = path.join(ROOT, 'wb8_k-' + crypto.randomBytes(3).toString('hex')); fs.mkdirSync(dbDirK, { recursive: true });
+    const engK = VE.create({ dataDir: dbDirK, kdf: { N: 1024, r: 8, p: 1 }, log: quiet, idleTimer: false });
+    await engK.setup('vault-r8-k');
+    const grantsK = GS.create({ memory: true });
+    const loginsK = L.create({ vault: engK, grants: () => grantsK });
+    loginsK.addOwn({ origin: SITE, username: 'kuser', password: PW21 });
+    grantsK.set('browser-login', `${SITE}#kuser`, { to: [{ kind: 'conversation', key: 'conv-1' }] });
+    const wK = D.create({
+      keeper: { cdpEndpointFor: async () => ({ ok: true, url: wsUrlK }), onLease: () => () => {} },
+      log: quiet, enableTimeoutMs: 300, liveFillMaxMs: 180,
+      holdersOf: () => [{ browserKey: KEY, sessionId: 'sess-1', ephemeral: true }],
+      leaseCountOf: () => 1, logins: loginsK,
+      conversationOf: () => ({ cid: 'conv-1', name: 'Chat One' }),
+    });
+    try {
+      await wK.arm(PID, { budgetMs: 3000 });
+      await until(() => wK._watches.get(PID)?.targets.get(tidK)?.enabled, 1500);
+      await wK.fillLogin(TGT, FILL({ user: 'kuser' }));
+      if (wsRefK && wsRefK.readyState === 1) {
+        wsRefK.send(JSON.stringify({ sessionId: sidK, method: 'Network.requestWillBeSent', params: { requestId: 'spa-k', frameId: tidK, type: 'Fetch', request: { method: 'POST', url: `${SITE}/api/login`, postData: JSON.stringify({ password: PW21 }), hasPostData: true } } }));
+        wsRefK.send(JSON.stringify({ sessionId: sidK, method: 'Network.responseReceived', params: { requestId: 'spa-k', frameId: tidK, type: 'Fetch', response: { status: 200 } } }));
+        wsRefK.send(JSON.stringify({ sessionId: sidK, method: 'Network.loadingFinished', params: { requestId: 'spa-k' } }));
+      }
+      await sleep(250);
+    } finally {
+      wK.shutdown();
+      for (const c of wssK.clients) c.terminate();
+      await new Promise((r) => wssK.close(r));
+      engK.close();
+      LF.clearAllFilledSecrets?.();
+    }
+    const leakedExactLen21 = evalExprsK.some((ex) => /"len"\s*:\s*21\b|\bsLens\s*=\s*\[[^\]]*\b21\b|\bwantLen\s*=\s*21\b/.test(ex));
+    const sawBucket16to31 = evalExprsK.some((ex) => ex.includes('"minLen":16,"maxLen":31'));
+    ok(PW21.length === 21 && evalExprsK.length >= 4 && leakedExactLen21 === false && sawBucket16to31 === true,
+      'r8 MINOR K (bucketed secret length in Runtime.evaluate): 21-char password uses [16,31] length bucket and sends 0 exact secret lengths in finalize, SPA probe, or ceiling wipe',
+      { evalCount: evalExprsK.length, leakedExactLen21, sawBucket16to31 });
   }
 }
 

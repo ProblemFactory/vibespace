@@ -389,23 +389,28 @@ While a vault secret sits in a standard-Chrome tab before the form is submitted 
 previously filled sign-in page from the browser's back/forward cache), **reading that tab is fenced** (`[login_fill_live]`:
 `snapshot`, `screenshot`, `get`, `eval`, `wait --fn`, `console`, `network` bodies, etc.): submit the form with
 `vibespace-browser login --submit` or `click` / `press` its submit button, or `reload` / `open` another page first. Your other
-tabs remain readable (`tab new` / `tab <id>`). Across navigations, filled secrets of `>= 8` bytes (up to the 32 most recent in
-that profile) stay masked as `[vault:<loginId>]` in CLI output and mediated CDP frames until **the browser stops**: parsed JSON
-frames of any size (including `> 2 MiB`, bounded by a `250 ms` walk budget that redacts any remaining strings as
-`[vault:scrub-cut]`) mask every string and key — numeric passwords included — while bare JSON numbers are never masked, and
-unparseable raw frames likewise mask quoted strings (all-digit strings included) while leaving bare numbers intact. Residual:
-`< 8`-byte values (such as 6–7-digit TOTP codes), bare JSON numbers, transformed or split derivatives stashed by page JS and
-read after the fence lifts, and persistent storage (`localStorage` / cookies) read in a fresh browser launch after browser stop
-are not masked.
+tabs remain readable (`tab new` / `tab <id>`). At the 10-minute ceiling, VibeSpace wipes typed inputs in the main document and any
+control in any frame holding a filled value (preserving unrelated editor/comment drafts inside iframes, and matching `< 8`-byte
+values only as whole control values rather than substrings; OTPs are dropped as soon as their step ends, and per-tab filled-value
+memory is cleared on browser stop and vault lock); if a page holds more text than the wipe's scan budget can verify, the fence
+stays up with `(too much text to check)` until you reload or navigate away. Across navigations, filled secrets of `>= 8` bytes (up
+to the 32 most recent in that profile) stay masked as `[vault:<loginId>]` in CLI output and mediated CDP frames until **the
+browser stops**: parsed JSON frames of any size (including `> 2 MiB`, bounded by a `250 ms` walk budget that preserves the CDP
+envelope and object keys while redacting remaining strings of `>= 8` UTF-8 bytes as `[vault:scrub-cut]`) mask every string and
+non-envelope key — numeric and line-wrapped passwords included — while bare JSON numbers are never masked, and unparseable raw
+frames likewise mask quoted strings (all-digit strings included) while leaving bare numbers intact. Residual: `< 8`-byte values
+(such as 6–7-digit TOTP codes), bare JSON numbers, transformed or split derivatives stashed by page JS and read after the fence
+lifts, and persistent storage (`localStorage` / cookies) read in a fresh browser launch after browser stop are not masked.
 
 * `vibespace-browser login [<origin>] [--user <name>] [--submit]` — fill the login form on your tab (no origin = the form on
   your tab; `--user` when the vault keeps several logins of that site; `--submit` submits it too, else press its button).
   The answer names what was filled (and on multi-step forms `step: email | password | totp`; `submitted: true` when a
-  submission was observed — a credential-carrying write or `Authorization` request to any origin, or a submit press followed by
-  the form's navigation, winning over unrelated third-party analytics writes — `submitted: 'unknown'` with `submittedReason`
-  when whether the site took the submission could not be verified, e.g. client-side password hashing or an opaque
-  `Authorization` header including on a `GET` (`"the site's request did not carry the password in a readable form"`) or a
-  `> 64 KB` request body (`"the request body was too large to read"`), and `submitted: false` only when no submission happened;
+  submission was observed — a credential-carrying write, `sendBeacon`, or `Authorization` request to any origin, or a submit press
+  followed by the form's navigation, winning over unrelated third-party analytics writes — `submitted: 'unknown'` with
+  `submittedReason` when whether the site took the submission could not be verified, e.g. client-side password hashing or an
+  opaque `Authorization` header to the watched origin including on a `GET` (`"the site's request did not carry the password in a
+  readable form"`, while unrelated third-party widget `Authorization` chatter is ignored) or an unreadable / `> 64 KB` request
+  body (`"the request body was too large to read"`), and `submitted: false` only when no submission happened;
   `usedPassword: 'pending'` if a site's password change is still unconfirmed, since no CLI verb lists web logins) and a
   receipt. Refusals by name:
   `login_no_form` (open the sign-in page first), `login_in_frame` (the sign-in form is inside a frame — open that frame's
@@ -417,13 +422,13 @@ are not masked.
 * `vibespace-browser login [<origin>] --new-user <name> --generate [--submit]` — register an account THROUGH the vault: the
   vault seals a new pending password that fits the site's rules (`password_rules_unsupported` when none can), fills it, and
   confirms the entry (sending the owner one notice) only when a verifiable same-origin submission and readable non-error
-  response succeed — clicking a link without submitting, a site whose request hashes the password or exceeds `64 KB`, a
-  cross-origin credential API (whose destination is recorded on the row as `Submitted to <origin>`), or an unreadable / `> 1 MiB`
-  response (`"the site's answer was too large to read"`) leaves the entry pending in the vault as `"Registration not yet
-  confirmed by the site"` (or `"Password change not yet confirmed"` on `--generate` password changes), where the owner can press
-  `Confirm` (`409 login_not_pending` if already confirmed) or re-save the password (re-saving the same password preserves
-  agent provenance). Use this instead of typing a password yourself — a password you type is saved too, but marked as one you
-  know.
+  response succeed — clicking a link without submitting, a site whose request hashes the password or cannot be read, a
+  cross-origin credential API or `sendBeacon` (whose destination is recorded on the row as `Submitted to <origin>`, or flagged
+  `"a beacon could not be read"` when the browser drops a `sendBeacon` body), or an unreadable / `> 1 MiB` response
+  (`"the site's answer was too large to read"`) leaves the entry pending in the vault as `"Registration not yet confirmed by the
+  site"` (or `"Password change not yet confirmed"` on `--generate` password changes), where the owner can press `Confirm`
+  (`409 login_not_pending` if already confirmed) or re-save the password (re-saving the same password preserves agent provenance).
+  Use this instead of typing a password yourself — a password you type is saved too, but marked as one you know.
 * `vibespace-browser login [<origin>] [--user <name>] --generate` on a change-password form — the vault seals the new password
   as pending (`"Password change not yet confirmed"`) and promotes it once the form submission succeeds.
 * A two-step code the owner paired with the login is filled with it. An HTTP sign-in box on the custom kernel is answered by

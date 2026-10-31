@@ -25,6 +25,7 @@
 //   ⑧ R4 ZERO-LEAKAGE SWEEP across CLI stdout/stderr, hub logs, dialog trace, browser audit, vault-audit.jsonl, and `data/` files
 //     + RED mutant controls.
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import crypto from 'node:crypto';
@@ -61,7 +62,7 @@ const BASE_ENV = Object.fromEntries(
   Object.entries(process.env).filter(([k]) => !k.startsWith('AGENT_BROWSER_') && !k.startsWith('VIBESPACE_') && k !== 'DBUS_SESSION_BUS_ADDRESS')
 );
 const ROOT = scratch('vlogin-chrome');
-const SOCK_ROOT = fs.mkdtempSync('/tmp/vl-');
+const SOCK_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'vl-'));
 fs.rmSync(ROOT, { recursive: true, force: true }); fs.mkdirSync(ROOT, { recursive: true });
 let cleaned = false;
 const cleanup = () => { if (cleaned) return; cleaned = true; try { endRootedProcesses(ROOT); } catch { } try { endRootedProcesses(SOCK_ROOT); } catch { } try { fs.rmSync(ROOT, { recursive: true, force: true }); } catch { } try { fs.rmSync(SOCK_ROOT, { recursive: true, force: true }); } catch { } };
@@ -1008,6 +1009,125 @@ try {
         addAg7.ok === true && addOwnSame7.ok === true && rowAgProv7 && rowAgProv7.source === 'agent-typed',
         'r7 MINOR 7 + 5 + 4 (real Chrome): 70 KB {ok:false,"error":"email taken"} + /welcome nav stays pending:register; confirmOwn on non-pending refuses login_not_pending; addAgent -> addOwn same password preserves agent-typed',
         { rowErr70k, confNonPend, rowAgProv7 });
+
+      // 7s. r8 MAJOR A + B + C + MINOR F + G + H (real Chrome)
+      {
+        const { performance } = require('node:perf_hooks');
+        const LF = require('../src/server/browser-login-fill.js');
+
+        // MAJOR A: srcdoc iframe drafts survive ceiling wipe while secret-holding control in iframe is wiped & counted
+        await run(['open', `${SITE}/iframe-draft?secretInFrame=1`]);
+        const rMajA = await run(['login', SITE, '--user', USER]);
+        const rawA = await openCdpRpc(await upstreamWsUrl());
+        const tListA = await rawA.call('Target.getTargets');
+        const tgtA = ((tListA.msg.result && tListA.msg.result.targetInfos) || []).find((t) => t.type === 'page' && String(t.url || '').includes('/iframe-draft'));
+        let wipeA = null, frameCheckA = null;
+        if (tgtA) {
+          const attA = await rawA.call('Target.attachToTarget', { targetId: tgtA.targetId, flatten: true });
+          const sidA = attA.msg.result && attA.msg.result.sessionId;
+          const lfA = w.dialogs.liveFillOnTarget(w.prof.id, tgtA.targetId);
+          const fidsA = [...(lfA?.secretFieldIds || []), ...(lfA?.userFieldIds || [])];
+          wipeA = await LF.wipeTabTypedInputs({
+            call: async (m, p) => (await rawA.call(m, p, sidA)).msg,
+            targetId: tgtA.targetId,
+            fieldIds: fidsA,
+            secretValues: [PW],
+          });
+          const chkA = await rawA.call('Runtime.evaluate', {
+            expression: '(() => { const d = document.getElementById("draftFrame").contentDocument; return { ed: d.getElementById("ed").textContent, c: d.getElementById("c").value, ta: d.getElementById("ta").value, fsec: d.getElementById("fsec").value, fsecAttr: d.getElementById("fsec").getAttribute("value") || "" }; })()',
+            returnByValue: true,
+          }, sidA);
+          frameCheckA = chkA.msg?.result?.result?.value || null;
+          await rawA.call('Target.detachFromTarget', { sessionId: sidA });
+        }
+        await rawA.close();
+        await run(['open', `${SITE}/plain`]);
+        ok(rMajA.code === 0 && wipeA && wipeA.ok === true && wipeA.verifiedEmpty === true && wipeA.wiped >= 3 &&
+          frameCheckA && frameCheckA.ed === 'Draft paragraph the person wrote' &&
+          frameCheckA.c === 'my half-written comment' && frameCheckA.ta === 'a longer note in a textarea' &&
+          frameCheckA.fsec === '' && frameCheckA.fsecAttr === '',
+          'r8 MAJOR A (real Chrome): srcdoc editor iframe drafts survive wipeTabTypedInputs intact while secret-holding iframe control is wiped and counted',
+          { wipeA, frameCheckA });
+
+        // MAJOR B + MAJOR C: 4 × 16 KB textareas + 3 targets wipes in < 200 ms without erasing textareas; hidden 'x'×20000 + PW is caught & wiped at ceiling and keeps SPA fence live
+        const pwEx1 = pwOf('r8-b-ex1'), pwEx2 = pwOf('r8-b-ex2');
+        trackedSecrets.push(pwEx1, pwEx2);
+        await run(['open', `${SITE}/big-textareas?longHidden=1`]);
+        const rMajBC = await run(['login', SITE, '--user', USER]);
+        const rawBC = await openCdpRpc(await upstreamWsUrl());
+        const tListBC = await rawBC.call('Target.getTargets');
+        const tgtBC = ((tListBC.msg.result && tListBC.msg.result.targetInfos) || []).find((t) => t.type === 'page' && String(t.url || '').includes('/big-textareas'));
+        let wipeBC = null, bcMs = 9999, domCheckBC = null;
+        if (tgtBC) {
+          const attBC = await rawBC.call('Target.attachToTarget', { targetId: tgtBC.targetId, flatten: true });
+          const sidBC = attBC.msg.result && attBC.msg.result.sessionId;
+          const lfBC = w.dialogs.liveFillOnTarget(w.prof.id, tgtBC.targetId);
+          const fidsBC = [...(lfBC?.secretFieldIds || []), ...(lfBC?.userFieldIds || [])];
+          const t0BC = performance.now();
+          wipeBC = await LF.wipeTabTypedInputs({
+            call: async (m, p) => (await rawBC.call(m, p, sidBC)).msg,
+            targetId: tgtBC.targetId,
+            fieldIds: fidsBC,
+            secretValues: [PW, pwEx1, pwEx2],
+          });
+          bcMs = performance.now() - t0BC;
+          const chkBC = await rawBC.call('Runtime.evaluate', {
+            expression: '({ taLens: ["ta1","ta2","ta3","ta4"].map((k) => document.getElementById(k).value.length), hbLen: document.getElementById("hb").value.length, hbAttrLen: (document.getElementById("hb").getAttribute("value") || "").length })',
+            returnByValue: true,
+          }, sidBC);
+          domCheckBC = chkBC.msg?.result?.result?.value || null;
+          await rawBC.call('Target.detachFromTarget', { sessionId: sidBC });
+        }
+        await rawBC.close();
+
+        await run(['open', `${SITE}/big-textareas?longHidden=1`]);
+        const rSpaBC = await run(['login', SITE, '--user', USER, '--submit', '--json']);
+        await until(() => pages.received().find((x) => x.path === '/done/spa'), 4000);
+        await sleep(200);
+        const rEvalBC = await run(['eval', '1+1']);
+        await run(['open', `${SITE}/plain`]);
+        ok(rMajBC.code === 0 && wipeBC && wipeBC.ok === true && wipeBC.verifiedEmpty === true && bcMs < 200 &&
+          domCheckBC && Array.isArray(domCheckBC.taLens) && domCheckBC.taLens.every((n) => n === 16384) &&
+          domCheckBC.hbLen === 0 && domCheckBC.hbAttrLen === 0 &&
+          rSpaBC.code === 0 && rEvalBC.code !== 0 && /login_fill_live/.test(rEvalBC.err || rEvalBC.out),
+          `r8 MAJOR B + C (real Chrome): 4×16 KB textareas × 3 targets wipes in ${bcMs.toFixed(1)} ms (< 200 ms) preserving textareas, wipes hidden "x"×20000+secret, and keeps SPA fence live`,
+          { bcMs, wipeBC, domCheckBC, evalCode: rEvalBC.code, evalErr: rEvalBC.err });
+
+        // MINOR F(a/b/c) + MINOR G + MINOR H on real Chrome (/exfil-f-g)
+        const mkR8Login = (uTag) => {
+          const u = `${uTag}@example.test`;
+          const p = pwOf(`r8-${uTag}`);
+          trackedSecrets.push(p);
+          const nm = `web-login:${SITE}#${u}`;
+          w.logins.addOwn({ origin: SITE, username: u, password: p });
+          w.logins.grant(nm, 'this-account', 'session:conv-1');
+          return { u, nm };
+        };
+        const runExfilMode = async (mode, uTag) => {
+          const { u, nm } = mkR8Login(uTag);
+          await run(['open', `${SITE}/exfil-f-g?mode=${encodeURIComponent(mode)}&o2=${encodeURIComponent(SITE2)}&o3=${encodeURIComponent(SITE2)}`]);
+          const r = await run(['login', SITE, '--user', u, '--submit', '--json']);
+          const j = (() => { try { return JSON.parse(r.out.trim().split('\n').pop()); } catch { return null; } })();
+          await sleep(180);
+          const row = w.logins.list().entries.find((e) => e.name === nm);
+          await run(['open', `${SITE}/plain`]);
+          return { r, data: j?.data || null, row };
+        };
+        pages.clear(); pages2.clear();
+        const f8a = await runExfilMode('big70k', 'f8a');
+        const f8b = await runExfilMode('flood70', 'f8b');
+        const f8c = await runExfilMode('beacon', 'f8c');
+        const g8 = await runExfilMode('big1m2_an', 'g8');
+        const h8 = await runExfilMode('widget_auth', 'h8');
+        const gotBeacon = pages2.received().some((x) => x.path === '/done/exfil-beacon');
+        ok(f8a.data?.submitted === true && Array.isArray(f8a.row?.origins) && f8a.row.origins.includes(SITE2) &&
+          f8b.data?.submitted === true && Array.isArray(f8b.row?.origins) && f8b.row.origins.includes(SITE2) &&
+          f8c.data?.submitted === true && gotBeacon && ((Array.isArray(f8c.row?.origins) && f8c.row.origins.includes(SITE2)) || f8c.row?.beaconUnreadable === true) &&
+          g8.data?.submitted === 'unknown' && g8.data?.submittedReason === 'the request body was too large to read' &&
+          h8.data?.submitted === false && !h8.data?.submittedReason,
+          'r8 MINOR F + G + H (real Chrome): 70 KB 3p exfil, 70-POST analytics flood, and sendBeacon record destination (never evicted); 1.15 MB unreadable 3p write + analytics reports unknown/too-large; 3p widget Authorization keeps blocked submit false',
+          { f8a: { sub: f8a.data, origins: f8a.row?.origins }, f8b: { sub: f8b.data, origins: f8b.row?.origins }, f8c: { sub: f8c.data, origins: f8c.row?.origins, beaconUnreadable: f8c.row?.beaconUnreadable, gotBeacon }, g8: g8.data, h8: h8.data });
+      }
     }
 
     console.log('⑧ R4 zero-leakage sweep across all output surfaces + data/ files + RED mutant control');
