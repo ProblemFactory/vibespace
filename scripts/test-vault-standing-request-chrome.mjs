@@ -40,6 +40,10 @@
 //      only and the row keeps «除了 Transcriber» (vsr-27); a named member's end changed — the Save sends the stored 除了; picking
 //      Transcriber ITSELF says «Transcriber 将不再被排除» and names it (removeExcept, vsr-28); a dialog drawn before the hub
 //      dropped a window-only member saves (vsr-29)
+//      r11 (主开发's acceptance of r10): a row with a TASK GROUP member (Team, live in the roster) and 除了 Transcriber — a
+//      policy-only Save posts NO row (vsr-30), a members-edit Save keeps Team as `group:<its id>`; a Save whose row landed and
+//      whose policy's 验证是你 was cancelled says «成员已保存；策略没有保存» (vsr-31) and Team picked again is posted; the
+//      ended-window Save (vsr-26) POSTS the row (the hub prunes an ended window — here it holds it live and keeps it)
 //   --shots <dir> keeps vsr-*.png. RED CONTROL: this suite over the base tree (4ef7e9494) — ② the request files a PLAIN card
 //   (once / 8h), ③ no command chip, ④ no «总是（这条命令）».
 // Run: node scripts/test-vault-standing-request-chrome.mjs [--shots <dir>]   (SKIPs without chrome or python3)
@@ -607,9 +611,13 @@ try {
   await sleep(300);
   await A.evalJs(`(() => { for (const t of [...document.querySelectorAll('.global-toast')]) t.remove(); return true; })()`);
   await A.shot('vsr-26-hour-ended-save-dialog-desktop.png');
+  await resetPosts();
   await A.evalJs(`(() => { const d = document.getElementById('vault-use-grant'); const b = d && d.querySelector('.vw-use-save'); if (b) b.click(); return !!b; })()`);
   const cres = await A.until(`(() => { const d = document.getElementById('vault-use-grant'); if (!d) return { closed: true }; const e = d.querySelector('.vault-secret-error'); return e && e.textContent ? { closed: false, error: e.textContent } : null; })()`, { timeout: 10000 });
+  const cPosts = await postsOf('/api/vault/use-grants');
   await A.evalJs(`(() => { if (window.__realNow) Date.now = window.__realNow; const d = document.getElementById('vault-use-grant'); const b = d && d.querySelector('.btn-cancel'); if (b) b.click(); return true; })()`);
+  const cT = ((cPosts && cPosts[0] && cPosts[0].to) || []).find((m) => m && m.key === PKEY);
+  check('(r11, MINOR 1) … and that untouched Save POSTS the row — Transcriber sent with no scope, so the hub prunes an ended window as the preview says (7e99ef689 posted nothing: the ended window stayed and was promised again; here the hub\'s clock cannot move — it holds the window live and keeps it)', !!cres && cres.closed === true && Array.isArray(cPosts) && cPosts.length === 1 && !!cT && Array.isArray(cT.scopes) && cT.scopes.length === 0, { posts: cPosts });
   check('(r9, MINOR C) Transcriber\'s only scope is a 1-hour window the page sees ENDED (the hub had not swept it): the dialog, hosts left empty, says «Transcriber · 1 小时授权已结束 — 保存时移除» and its Save LANDS — never «请写明可用于哪些主机…»', !!ca && ca.json && ca.json.ok && !!cOpen && !!cdlg && cdlg.hosts === '' && /Transcriber · 1 小时授权已结束 — 保存时移除/.test(String(cdlg.preview)) && !!cres && cres.closed === true, { ca: ca && ca.json, cdlg, cres });
   // r10 (MINOR — the probe's P1): the hub drops a window-only member while a dialog drawn before is open (the hour-end sweep —
   // here the window's ✕ from another page: the hub no longer holds Transcriber); that dialog's Save (所有 agent → 90 天) LANDS
@@ -628,6 +636,72 @@ try {
   const sRow = await A.evalJs(rowFacts);
   check('(r10, MINOR — the probe\'s P1) a dialog drawn while Transcriber held its 1-hour window; the hub then dropped that member (the window\'s ✕ elsewhere — as the hour-end sweep does): the dialog\'s Save (所有 agent → 90 天) LANDS — never «请写明 Transcriber 可用于哪些主机…»; the row: 所有 agent, no Transcriber', !!(addAll && addAll.json && addAll.json.ok) && sOpen && !!sIn && sIn.chips.some((c) => /^所有 agent/.test(c)) && sIn.chips.some((c) => /Transcriber/.test(c)) && !!(sX && sX.json && sX.json.ok) && sSave === 'closed' && !!sRow && sRow.chips.some((c) => /^所有 agent/.test(c)) && !sRow.chips.some((c) => /Transcriber/.test(c)), { addAll: addAll && addAll.json, sIn, sX: sX && sX.json, sSave, sRow });
   await A.api('POST', '/api/vault/use-grants/revoke', { id: EID, principal: 'everyone' });
+  // r11 (主开发's acceptance of r10, MAJOR): a row with a TASK GROUP member (Team, live in the roster) and 除了 Transcriber — the
+  // member is known by its principal: a policy-only Save posts NO row, a members-edit Save keeps Team as `group:<its id>`
+  // (7e99ef689 posted the row behind 验证是你 and rewrote Team to `group:vg-…`, a group that does not exist). MINOR 3: a Save
+  // whose row landed and whose policy's 验证是你 was cancelled SAYS so, and the next Save is compared against the landed row.
+  const tg = await A.api('POST', '/api/tasks', { title: 'Team', sessions: [] });
+  const TG = tg && tg.json && tg.json.task ? tg.json.task.id : null;
+  const tgLive = !!TG && !!(await A.until(`((window.app && app.sidebar && app.sidebar._tasks) || []).some((g) => g && g.id === ${JSON.stringify(TG)}) || null`, { timeout: 15000 }));
+  const pageT = await reveal();
+  const seedT = await A.api('POST', '/api/vault/use-grants', { id: EID, to: [{ kind: 'group', id: TG, name: 'Team', scopes: [{ host: 'x.example', until: Date.now() + 30 * 86400e3 }] }], except: [{ kind: 'conversation', key: PKEY }], page: pageT }, { 'X-Vault-Page': pageT || '' });
+  const teamChip = `(() => { const r = ${LIST_ROW(LABEL)}; const c = r && [...r.querySelectorAll('.vw-use-chip')].find((x) => !x.classList.contains('vw-use-except') && /^Team · /.test(x.textContent)); return c ? { principal: c.dataset.principal, text: c.textContent, ex: [...r.querySelectorAll('.vw-use-except')].map((x) => x.textContent) } : null; })()`;
+  const tIn0 = await A.until(teamChip, { timeout: 10000 });
+  await A.evalJs(`(() => { if (!window.__realNow) window.__realNow = Date.now.bind(Date); Date.now = () => window.__realNow() + 2 * 60e3; return true; })()`);   // the owner opens the dialog later (7e99ef689: a Team member it cannot find takes a NEW 30-day end — a change)
+  const tOpen = await openUse();
+  await resetPosts();
+  const tPick = await A.evalJs(`(() => { const d = document.getElementById('vault-use-grant'); const p = d && d.querySelector('.vw-use-policy-in'); if (!p) return null; p.value = 'only read-only calls to x.example'; p.dispatchEvent(new Event('input', { bubbles: true })); p.scrollIntoView({ block: 'center' }); return { chips: [...d.querySelectorAll('.pp-chip')].map((c) => c.textContent) }; })()`);
+  await sleep(300);
+  await A.evalJs(`(() => { for (const t of [...document.querySelectorAll('.global-toast')]) t.remove(); const d = document.getElementById('vault-use-grant'); const c = d && d.querySelector('.pp-chips'); if (c) c.scrollIntoView({ block: 'start' }); return true; })()`);
+  await A.shot('vsr-30-task-group-policy-only-dialog-desktop.png');
+  const tSave = await saveUse();
+  const tRows = await postsOf('/api/vault/use-grants'), tPol = await postsOf('/api/vault/use-policy');
+  await sleep(600);
+  const tIn1 = await A.until(teamChip, { timeout: 6000 });
+  check('(r11, MAJOR) a row {Team (a Task Group, live in the roster) · x.example; 除了 Transcriber}: the owner opens «谁可以用…» only to set the judge policy — the Save posts the POLICY only, NO row (7e99ef689 posted the row behind 验证是你), and the Vault row still names Team by its own id (`group:<id>`)', !!(seedT && seedT.json && seedT.json.ok) && tgLive && !!tIn0 && tIn0.principal === `group:${TG}` && tOpen && !!tPick && tPick.chips.some((c) => /Team/.test(c)) && tSave === 'closed' && Array.isArray(tRows) && tRows.length === 0 && Array.isArray(tPol) && tPol.length >= 1 && !!tIn1 && tIn1.principal === `group:${TG}`, { TG, tgLive, seed: seedT && seedT.json && (seedT.json.ok || seedT.json.code), tIn0, tPick, tSave, tRows, tPol: tPol && tPol.length, tIn1 });
+  await A.api('POST', '/api/vault/use-policy', { id: EID, text: '' });
+  const eOpen = await openUse();
+  await resetPosts();
+  await A.evalJs(`(() => { const d = document.getElementById('vault-use-grant'); const s = d && d.querySelector('.vw-use-end'); if (!s) return null; s.value = '90d'; s.dispatchEvent(new Event('change')); return true; })()`);
+  const eSave = await saveUse();
+  const [eBody] = await postsOf('/api/vault/use-grants');
+  await sleep(600);
+  const tIn2 = await A.until(teamChip, { timeout: 6000 });
+  const eTo = ((eBody && eBody.to) || []).map((m) => `${m.kind}:${m.id || m.key || ''}`);
+  check('(r11, MAJOR) … then a members-edit Save (Team\'s end → 90 天): the Save sends Team as `group:<its id>` — never the grant id — and the Vault row keeps it so, 除了 Transcriber kept', eOpen && eSave === 'closed' && eTo.length === 1 && eTo[0] === `group:${TG}` && !!tIn2 && tIn2.principal === `group:${TG}` && tIn2.ex.some((x) => /^除了 Transcriber/.test(x)), { eSave, eTo, except: eBody && eBody.except, tIn2 });
+  // MINOR 3: ✕ Team (a narrowing — no prompt) and a policy typed; the page's 验证是你 window gone (its clock past it), the
+  // policy's prompt CANCELLED — the dialog stays open and says the members were saved; then Team picked again ⇒ posted
+  await A.evalJs(`(() => { if (!window.__realNow) window.__realNow = Date.now.bind(Date); Date.now = () => window.__realNow() + 12 * 60e3; return true; })()`);
+  const hOpen = await openUse();
+  await resetPosts();
+  const hX = await A.evalJs(`(() => { const d = document.getElementById('vault-use-grant'); const c = d && [...d.querySelectorAll('.pp-chip')].find((x) => !x.closest('.pp-except') && /Team/.test(x.textContent)); const x = c && c.querySelector('.pp-chip-x'); if (!x) return null; x.click(); const p = d.querySelector('.vw-use-policy-in'); p.value = 'only read-only calls to x.example'; p.dispatchEvent(new Event('input', { bubbles: true })); return true; })()`);
+  await A.evalJs(`(() => { const d = document.getElementById('vault-use-grant'); const b = d && d.querySelector('.vw-use-save'); if (b) b.click(); return !!b; })()`);
+  const hPw = await A.until(dlgState, { timeout: 10000 });
+  await A.evalJs(`(() => { const b = document.querySelector('#vault-reveal-dialog .btn-cancel'); if (b) b.click(); return !!b; })()`);
+  await A.until(`!document.getElementById('vault-reveal-dialog') || null`, { timeout: 8000 });
+  const hSaid = await A.until(`(() => { const d = document.getElementById('vault-use-grant'); if (!d) return { closed: true }; const e = d.querySelector('.vault-secret-error'); if (!e || !e.textContent) return null; e.scrollIntoView({ block: 'center' }); return { closed: false, words: e.textContent }; })()`, { timeout: 8000 });
+  const hRows1 = await postsOf('/api/vault/use-grants');
+  await sleep(400);
+  await A.evalJs(`(() => { for (const t of [...document.querySelectorAll('.global-toast')]) t.remove(); return true; })()`);
+  await A.shot('vsr-31-members-saved-policy-not-desktop.png');
+  const hRow1 = await A.evalJs(rowFacts);
+  check('(r11, MINOR 3) Team ✕\'d and a policy typed, Save: the row lands (a narrowing), the policy\'s 验证是你 is CANCELLED — the dialog stays open and says «成员已保存；策略没有保存» (7e99ef689: no words), the Vault row has no Team', hOpen && !!hX && hPw === 'pw' && !!hSaid && hSaid.closed === false && hSaid.words === '成员已保存；策略没有保存' && Array.isArray(hRows1) && hRows1.length === 1 && !!hRow1 && !hRow1.chips.some((c) => /^Team · /.test(c)), { hX, hPw, hSaid, posts: hRows1 && hRows1.length, hRow1 });
+  await A.evalJs(`(() => { const d = document.getElementById('vault-use-grant'); const p = d && d.querySelector('.vw-use-policy-in'); if (p) { p.value = ''; p.dispatchEvent(new Event('input', { bubbles: true })); } const box = d && d.querySelector('.pp-input'); if (box) { box.focus(); box.dispatchEvent(new Event('focus')); } return true; })()`);
+  await sleep(300);
+  const hPick = await A.until(`(() => { const row = [...document.querySelectorAll('.pp-row')].find((x) => x.isConnected && !x.closest('.pp-except') && /Team/.test(x.textContent)); if (!row) return null; row.dispatchEvent(new MouseEvent('mousedown', { bubbles: true })); row.click(); return true; })()`, { timeout: 8000 });
+  await A.evalJs(`(() => { if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); return true; })()`);
+  const hSave = await saveUse();
+  const hRows2 = await postsOf('/api/vault/use-grants');
+  await sleep(600);
+  const tIn3 = await A.until(teamChip, { timeout: 6000 });
+  await A.evalJs(`(() => { if (window.__realNow) Date.now = window.__realNow; return true; })()`);
+  check('(r11, MINOR 3) … then Team picked again in the same dialog, Save: compared against the row as it LANDED, the Save posts Team back (验证是你) and the Vault row has it — as `group:<id>` (7e99ef689: compared against the row as it opened — nothing posted, the dialog closed, Team gone)', !!hPick && hSave === 'closed' && Array.isArray(hRows2) && hRows2.length >= 2 && !!tIn3 && tIn3.principal === `group:${TG}`, { hPick, hSave, posts: hRows2 && hRows2.map((b) => b && (b.to || []).length), tIn3 });
+  // the row as it was for the legs below: no Team, no 除了 (a widening, named), the Task Group gone
+  await A.api('POST', '/api/vault/use-policy', { id: EID, text: '' });
+  if (TG) await A.api('POST', '/api/vault/use-grants/revoke', { id: EID, principal: `group:${TG}` });
+  const pageX = await reveal();
+  await A.api('POST', '/api/vault/use-grants', { id: EID, to: [], except: [], removeExcept: [`conversation:${PKEY}`], page: pageX }, { 'X-Vault-Page': pageX || '' });
+  if (TG) await A.api('DELETE', `/api/tasks/${TG}`);
   // the windows taken back (the legs below expect cards)
   const OWNID = await A.evalJs(`(() => { const r = [...document.querySelectorAll('.vw-list .vw-row')].find((x) => x.isConnected && String(x.dataset.id || '').startsWith('secrets:agent:') && String(x.dataset.id).includes('/tts-own#')); return r ? r.dataset.id : null; })()`);
   for (const id of [EID, OWNID]) if (id) await A.api('POST', '/api/vault/use-grants/revoke', { id, principal: `conversation:${PKEY}` });

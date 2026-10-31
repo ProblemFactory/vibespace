@@ -389,7 +389,7 @@ await leg('⑧ seen and revoked', async () => {
   const rowFor = (entry) => VI.rowOf('secrets', (w.sources.secrets().vaultRows() || []).find((r) => String(r.entry) === entry));
   const f = w.door.rowFacts(rowFor(`agent:${CID}/tok`));
   const chip = f && f.use && (f.use.to || [])[0];
-  ok(!!(x.a && x.a.ok && f && f.own === true && f.use.own === true && chip && chip.source === 'card' && chip.id && chip.principal === `conversation:${CID}` && (chip.commands || []).length === 1), '⑧a P6: «Always (this command)» on the agent\'s OWN entry ⇒ the Vault window\'s row carries the member (its chip: source card, its command, the id + principal its ✕ posts)', { a: x.a, own: f && f.own, use: f && f.use && f.use.to });
+  ok(!!(x.a && x.a.ok && f && f.own === true && f.use.own === true && chip && chip.source === 'card' && (chip.grant || chip.id) && chip.principal === `conversation:${CID}` && (chip.commands || []).length === 1), '⑧a P6: «Always (this command)» on the agent\'s OWN entry ⇒ the Vault window\'s row carries the member (its chip: source card, its command, the id + principal its ✕ posts)', { a: x.a, own: f && f.own, use: f && f.use && f.use.to });
   const rv = w.useGrants.revoke(aid, chip ? chip.principal : '');
   const again = await runAnswered(w, ['--env', `T=${mint.ref}`, '--', 'python3', 'transcribe.py', 'b.mp3']);
   ok(!!(rv && rv.ok && rv.removed && again.card), '⑧b its ✕ (POST /api/vault/use-grants/revoke — the store\'s revoke) takes it back: the next run draws its card again', { rv, card: !!again.card });
@@ -397,7 +397,7 @@ await leg('⑧ seen and revoked', async () => {
   for (const [rid, cls, row] of [['mounts:m-1#password', 'storage', null], ['app-secrets:app-1#password', 'app-login', null], [w.e.id, 'secret', rowFor(w.e.name)], [aid, 'agent-entry', rowFor(`agent:${CID}/tok`)]]) {
     const add = w.useGrants.addMember(rid, { kind: 'conversation', key: CID, name: 'Transcriber' }, { hosts: ['api.tts.example'], source: 'card' });
     const ff = w.door.rowFacts(row || { id: rid, store: rid.split(':')[0], kind: 'password', label: cls, hosts: [] });
-    drawn.push({ cls, add: !!(add && add.ok), drawn: !!(ff && ff.use && (ff.use.to || []).some((m) => m.principal === `conversation:${CID}` && m.id)) });
+    drawn.push({ cls, add: !!(add && add.ok), drawn: !!(ff && ff.use && (ff.use.to || []).some((m) => m.principal === `conversation:${CID}` && (m.grant || m.id))) });   // r11: the grant id rides `grant` (a member keeps its principal's own fields)
   }
   ok(drawn.every((d) => d.add && d.drawn), '⑧c CENSUS: a member the ONE writer writes on EVERY runnable entry class (storage, app-login, secret, agent-entry) is drawn by the window\'s reader (rowFacts → its chip + ✕)', drawn);
   const walk = (d) => fs.readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : e.name.endsWith('.js') ? [path.join(d, e.name)] : []));
@@ -481,7 +481,8 @@ await leg('⑫ timed + stored', async () => {
   const uses = (w2.door.usesFor(w2.caller()) || {}).uses || [];
   const line = useLines(w2).filter((l) => l.door === 'run' && l.outcome === 'ok').pop();
   const cli = fs.readFileSync(path.join(REPO, 'data/bin/vibespace-vault'), 'utf8');
-  ok(!!(gid && uses.length && uses[0].grant === gid.id && line && line.grant === gid.id && /\$\{u\.grant \? `  by grant · standing \$\{u\.grant\}` : ''\}/.test(cli)), '⑫b `uses` returns the use line\'s STORED grant field (read back from the audit file) — what the CLI prints «by grant · standing» from', { grant: gid && gid.id, uses: uses.slice(0, 2), line: line && line.grant });
+  const gidOf = (m) => m && (m.grant || m.id);   // r11: the published member's grant id is `grant`
+  ok(!!(gid && uses.length && uses[0].grant === gidOf(gid) && line && line.grant === gidOf(gid) && /\$\{u\.grant \? `  by grant · standing \$\{u\.grant\}` : ''\}/.test(cli)), '⑫b `uses` returns the use line\'s STORED grant field (read back from the audit file) — what the CLI prints «by grant · standing» from', { grant: gidOf(gid), uses: uses.slice(0, 2), line: line && line.grant });
 });
 
 console.log('⑬ (r2 VISUAL — 主开发\'s read of the shots) the standing card = label rows + ONE fold; a vault reference is never a link');

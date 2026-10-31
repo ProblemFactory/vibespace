@@ -64,15 +64,28 @@
  *   Ⓨ (MINOR) a Save over a window the hub ALREADY swept (the door's hour-end timer ran) lands — that member dropped as
  *     `swept`; a refusal that remains never invites hosts for a member the dialog sent with no scope;
  *   Ⓩ (PURE) `rowChanged` over the row shapes (untouched ⇒ no row posted) and the dialog's words.
+ * ROUND 11 (主开发's acceptance of r10 7e99ef689 — four items at the dialog and the route): THE DIALOG ITSELF — src/lib/
+ * vault-use-row.js bundled as it ships, its page edge stubbed at the import line (`openDialog`) — on both door kinds:
+ *   ⓐ (MAJOR) a Task Group member is known by its PRINCIPAL: a row {Team (a Task Group, live in the roster), C excepted} — a
+ *     policy-only Save posts NO row; a members-edit Save keeps Team as `group:<its id>` (the store read back) and Team's member
+ *     still runs with no card (7e99ef689: the row posted behind 验证是你, Team rewritten to `group:vg-…`, a group that does not
+ *     exist);
+ *   ⓑ (MINOR 1) an ENDED 1-hour window the hub has not swept: the preview says «Save removes it» and the Save posts — the
+ *     member gone, the Vault row drawn without it (7e99ef689: nothing posted); inside the hour the same dialog posts nothing;
+ *   ⓒ (MINOR 3) a Save whose row lands and whose policy's 验证是你 is cancelled says «The members were saved; the policy was
+ *     not»; the next Save is compared against the row as it LANDED (undoing the edit posts it; the policy alone posts no row);
+ *   Ⓩc (PURE) a published member keeps its principal's own `id` beside the grant's (`grant`); the picker draws it by its
+ *     principal. Ⓩa gains the Task Group shape; an ended window is now a change. (MINOR 2 — the route — is test-vault-routes ⑮.)
  * RED control: r7's legs over 8e771b675 (r6 — no window) fail BY NAME; r8's over e19220cc7 (r7) fail BY NAME — Ⓜ on the LOCAL
- * door; r9's over df027a971 (r8) BY NAME; r10's over f23ddb5ad (r9) BY NAME (a leg that throws is a failed leg, never a crash).
- * Mutants: r8/mutants8.py, r9/mutants9.py, r10/mutants10.py (the report).
+ * door; r9's over df027a971 (r8) BY NAME; r10's over f23ddb5ad (r9) BY NAME; r11's over 7e99ef689 (r10) BY NAME (a leg that
+ * throws is a failed leg, never a crash). Mutants: r8/mutants8.py, r9/mutants9.py, r10/mutants10.py, r11/mutants11.py.
  */
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 import { scratch } from './scratch.mjs';
 
 const require = createRequire(import.meta.url);
@@ -172,12 +185,13 @@ const hhmm = (ms) => { const d = new Date(ms); return `${String(d.getHours()).pa
 // r8: a page as small as a row and a chip need (createElement / createTextNode, className, textContent, innerHTML, title, append)
 class Txt { constructor(s) { this.nodeType = 3; this.data = String(s); } get textContent() { return this.data; } }
 class El {
-  constructor(tag) { this.nodeType = 1; this.tagName = String(tag).toUpperCase(); this.children = []; this.className = ''; this.dataset = {}; this.attrs = {}; this.title = ''; this.hidden = false; this.style = {}; this.innerHTML = ''; }
+  constructor(tag) { this.nodeType = 1; this.tagName = String(tag).toUpperCase(); this.children = []; this.className = ''; this.dataset = {}; this.attrs = {}; this.title = ''; this.hidden = false; this.style = {}; this.innerHTML = ''; this.ls = {}; }
   append(...ns) { for (const n of ns) this.children.push(typeof n === 'string' ? new Txt(n) : n); }
   set textContent(v) { this.children = v === '' || v == null ? [] : [new Txt(v)]; }
   get textContent() { return this.children.map((c) => c.textContent).join(''); }
   setAttribute(k, v) { this.attrs[k] = String(v); }
-  addEventListener() {}
+  addEventListener(t, f) { (this.ls[t] = this.ls[t] || []).push(f); }   // r11: the dialog's own handlers (`fire` runs them)
+  fire(t) { for (const f of this.ls[t] || []) f({ type: t, target: this }); }
   querySelector() { return null; }
   querySelectorAll() { return []; }
 }
@@ -200,11 +214,89 @@ function dialogSave(pub, roster, { pick = null, unexcept = [], hosts = null, end
   const had = new Map(members.map((m) => [m.principal, m]));
   const to = p.to.map((x) => { const was = had.get(pkOf(x)) || null; const plan = VUR.saveScopesOf({ was, hosts: hosts || (was ? was.hosts || [] : []), cmds: was && Array.isArray(was.commands) ? was.commands : [], endId, now }); return { ...x, ...(was && was.name ? { name: was.name } : {}), scopes: plan.scopes, plan }; });
   const removed = typeof VUR.exceptRemovedOf === 'function' ? VUR.exceptRemovedOf(pub.except || [], p.except) : [];
-  const changed = typeof VUR.rowChanged === 'function' ? VUR.rowChanged({ to: members, except: pub.except || [] }, { to, except: p.except }) : true;
+  const changed = typeof VUR.rowChanged === 'function' ? VUR.rowChanged({ to: members, except: pub.except || [] }, { to, except: p.except }, { now }) : true;
   const body = { to: to.map(({ plan, ...m }) => m), except: p.except, ...(removed.length ? { removeExcept: removed.map(pkOf) } : {}) };
   return { sel, except: p.except, to, removed, changed, body, refused: to.some((m) => m.plan.refused) };
 }
 const saveAs = (w, body, reauthed) => (typeof w.door.saveRow === 'function' ? w.door.saveRow(w.e.id, body, { reauthed }) : w.useGrants.setRow(w.e.id, body, { reauthed }));   // the Save route's road (src/routes/vault.js)
+// r11 (主开发's acceptance of r10 — four items at the dialog): THE DIALOG ITSELF, not a model of it — src/lib/vault-use-row.js
+// bundled as it ships (esbuild), its page edge stubbed at the import line only: t (the English keys), fetchJson (→ the door's
+// own roads as src/routes/vault.js calls them — the Save's row `saveRow`, its policy `setPolicy` — each POST recorded, each
+// answer a JSON copy), showToast (recorded), createModalShell (a body, a close), the picker (the test sets what is picked; the
+// real picker MODEL maps it — the dialog's own pickToRow / rowToPick), the reveal window (the test answers the 验证是你 prompt,
+// or cancels it); the page's clock is the world's. A base tree's dialog runs the same way — its RED is by name. Each dialog its own
+// page record (`openDialog` points the page edge at it — one dialog in use at a time).
+globalThis.__vurPage = { now: () => Date.now() };
+class PageDate extends Date { constructor(...a) { if (a.length) super(...a); else super(globalThis.__vurPage.now()); } static now() { return globalThis.__vurPage.now(); } }
+globalThis.__vurPageDate = PageDate;
+let DLG = null;
+async function dialogModule() {
+  if (DLG) return DLG;
+  const STUB = {
+    'i18n.js': 'export const t = (s, p) => globalThis.__vurPage.t(s, p);',
+    'utils.js': 'export const fetchJson = (u, o) => globalThis.__vurPage.fetchJson(u, o); export const showToast = (m, o) => globalThis.__vurPage.toast(m, o); export const createModalShell = (o) => globalThis.__vurPage.modal(o);',
+    'principal-picker.js': 'export const principalPicker = (o) => globalThis.__vurPage.picker(o); export const rosterFromApp = () => globalThis.__vurPage.roster();',
+    'vault-reveal.js': 'export const revealLeftMs = () => (globalThis.__vurPage.reveal ? 300000 : 0); export const revealHeaders = () => ({ "X-Vault-Page": "this-page" }); export const forgetReveal = () => { globalThis.__vurPage.reveal = false; }; export const askRevealPassword = () => globalThis.__vurPage.ask(); export const revealWords = (r) => String((r && (r.error || r.code)) || "");',
+  };
+  try {
+    const esbuild = require(path.join(REPO, 'node_modules/esbuild'));
+    const out = await esbuild.build({ entryPoints: [path.join(REPO, 'src/lib/vault-use-row.js')], bundle: true, format: 'esm', platform: 'neutral', write: false, logLevel: 'silent', banner: { js: 'const Date = globalThis.__vurPageDate;' },
+      plugins: [{ name: 'page-edge', setup(b) { b.onResolve({ filter: /^\.\/(i18n|utils|principal-picker|vault-reveal)\.js$/ }, (a) => ({ path: a.path.slice(2), namespace: 'page-edge' })); b.onLoad({ filter: /.*/, namespace: 'page-edge' }, (a) => ({ contents: STUB[a.path], loader: 'js' })); } }] });
+    const file = path.join(ROOT, 'vault-use-row.bundle.mjs');
+    fs.writeFileSync(file, out.outputFiles[0].text);
+    DLG = await import(pathToFileURL(file).href);
+  } catch (e) { DLG = { error: String((e && e.message) || e) }; }
+  return DLG;
+}
+const WROW = (w) => ({ id: w.e.id, store: 'secrets', kind: 'api-key', label: 'TTS API key', hosts: [] });   // the entry's row as the Vault window lists it
+/** «谁可以用…» opened on the entry's row as the Vault window has it (the door's rowFacts) → the page: pick / type / save (the
+ *  Save's doSave, through the unsaved guard's road) / the posts / the words / the preview. `answers` = the 验证是你 prompts in
+ *  turn (true: the second password given; false: cancelled; none left: given). */
+async function openDialog(w, roster, { answers = [] } = {}) {
+  const M = await dialogModule();
+  const P = {
+    now: () => w.now(), t: tEN, posts: [], toasts: [], asked: 0, closed: 0, refreshed: 0, reveal: false, shell: null, opts: null, pp: null, answers: [...answers],
+    toast: (m) => P.toasts.push(String(m)), roster: () => roster,
+    ask: async () => { P.asked++; const a = P.answers.length ? P.answers.shift() : true; if (a) P.reveal = true; return !!a; },
+    modal: (o) => { const shell = new El('div'), body = new El('div'); shell.append(body); body.parentNode = shell; P.shell = shell; P.opts = o; return { body, close: () => { P.closed++; try { if (o.onClose) o.onClose(); } catch { } }, raised: false }; },
+    picker: (o) => {   // the picker's state, set by the test; its KNOWN rows every row it has seen (the real picker's `known`)
+      const st = { sel: (o.selected || []).map(String), ex: ((o.except && o.except.selected) || []).map(String) };
+      P.pp = { o, st };
+      const known = new Map();
+      const seen = () => { for (const r of [...(typeof o.items === 'function' ? o.items() : o.items || []), ...((o.except && o.except.extra) || [])]) if (r && r.key != null && !known.has(String(r.key))) known.set(String(r.key), r); return [...known.values()]; };
+      seen();
+      return { el: new El('div'), selected: () => st.sel.slice(), except: () => st.ex.filter((k) => !st.sel.includes(k)), knownRows: () => seen(), close() {} };
+    },
+    fetchJson: async (url, o = {}) => {   // src/routes/vault.js's two doors the Save uses, on this world's door
+      let b = {}; try { b = JSON.parse((o && o.body) || '{}'); } catch { b = {}; }
+      const reauthed = !!(o && o.headers && o.headers['X-Vault-Page']) && P.reveal === true;   // the route's reauthedOf: this page's live 验证是你 window
+      P.posts.push({ url: String(url), body: b, reauthed });
+      let r = { ok: false, code: 'not_found' };
+      if (url === '/api/vault/use-grants') { const row = { to: Array.isArray(b.to) ? b.to : [], except: Array.isArray(b.except) ? b.except : [], removeExcept: Array.isArray(b.removeExcept) ? b.removeExcept : [] }; r = typeof w.door.saveRow === 'function' ? w.door.saveRow(String(b.id || ''), row, { by: 'user', reauthed }) : w.useGrants.setRow(String(b.id || ''), row, { by: 'user', reauthed }); }
+      else if (url === '/api/vault/use-policy') r = w.door.setPolicy({ id: String(b.id || ''), text: typeof b.text === 'string' ? b.text : '', reauthed, by: 'user' });
+      return JSON.parse(JSON.stringify(r || {}));
+    },
+  };
+  globalThis.__vurPage = P;
+  const open = !!(M && typeof M.showUseGrantDialog === 'function') && await onPage(() => { M.showUseGrantDialog({ ...WROW(w), run: w.door.rowFacts(WROW(w)) }, { app: null, refresh: () => { P.refreshed++; } }); return !!P.opts; });
+  const find = (cls) => (P.shell ? walk(P.shell) : []).find((e) => new RegExp(`(^|\\s)${cls}(\\s|$)`).test(e.className)) || null;
+  const pp = () => P.pp || { st: { sel: [], ex: [] }, o: {} };
+  return {
+    ok: open, error: (M && M.error) || null,
+    pick: (fn) => onPage(() => { pp().st.sel = fn(pp().st.sel.slice()).map(String); if (pp().o.onChange) pp().o.onChange(); }),
+    type: (cls, v) => onPage(() => { const e = find(cls); if (!e) return; e.value = v; e.fire(e.tagName === 'SELECT' ? 'change' : 'input'); }),
+    save: () => onPage(async () => (P.opts && P.opts.unsaved && typeof P.opts.unsaved.save === 'function' ? P.opts.unsaved.save() : null)),
+    rowPosts: () => P.posts.filter((p) => p.url === '/api/vault/use-grants'), polPosts: () => P.posts.filter((p) => p.url === '/api/vault/use-policy'),
+    words: () => { const e = find('vault-secret-error'); return e ? e.textContent : ''; },
+    preview: () => { const e = find('vw-use-preview'); return e && !e.hidden ? e.textContent : ''; },
+    dirty: () => !!(P.opts && P.opts.unsaved && P.opts.unsaved.isDirty()),
+    closed: () => P.closed, asked: () => P.asked, toasts: () => P.toasts.slice(),
+  };
+}
+const keysOf = (r) => ((r && r.to) || []).map(pkOf).sort().join(',');
+const exOf = (r) => ((r && r.except) || []).map(pkOf).sort().join(',');
+/** The Vault row's member chips as the window draws them now (the door's rowFacts → useExtras) — their words */
+const vaultChips = (w) => onPage(() => { const ex = VUR && typeof VUR.useExtras === 'function' ? VUR.useExtras({ ...WROW(w), run: w.door.rowFacts(WROW(w)) }) : null; return ex ? walk(ex.box).filter((e) => /\bvw-use-chip\b/.test(e.className) && !/\bvw-use-except\b/.test(e.className)).map((e) => e.textContent) : null; });
 /** THE TRAY ROW as the panel builds it (renderRow — the prose road too, where a card's facts were dropped) → its markup */
 const trayRowHtml = (item, t = tZH) => onPage(() => (ROW && typeof ROW.renderRow === 'function' ? ROW.renderRow({ item, resolved: false }, { t, lang: 'zh', wordsOf: (i) => i.text, detailOf: (i) => i.detail, nameFor: (i) => i.sessionName || '', optionsOf: () => [] }).innerHTML : ''));   // the panel's ctx, as small as a row needs
 
@@ -770,6 +862,76 @@ for (const K of ['local', 'cluster']) {
     const nar = memberRaw(w2);
     ok(!!(win2.a && win2.a.ok && ad.ok && r2.code === 'hosts_required' && r2.principal === `conversation:${CID}` && words === KEY && String(ZH[KEY] || '') === '这个授权在对话框打开期间变了 — 关掉再打开一次' && nar && (nar.scopes || []).some((sc) => sc.host === 'b.example')), 'Ⓨb a refusal that remains — the hub holds b.example for Narrator, written since the dialog opened — never says «Name the hosts Narrator may use it for»: «这个授权在对话框打开期间变了 — 关掉再打开一次» (nothing written; b.example kept)', { r2: r2 && { code: r2.code, principal: r2.principal }, words });
   });
+  console.log('ⓐ (r11, MAJOR) A TASK GROUP MEMBER IS KNOWN BY ITS PRINCIPAL — the dialog itself (src/lib/vault-use-row.js as it ships)');
+  await leg('ⓐ the Task Group member', async () => {
+    const C = 'cid-left-out', D = 'cid-d', T1 = 'cid-team-1', G = 'g-team', MONTH = 30 * 86400e3;
+    const w = await world({ groups: { [T1]: [G], [C]: [G] } });
+    const R = [...ROSTER([[C, 'Left out'], [D, 'Dee'], [T1, 'Team one']]), { key: `group:${G}`, kind: 'group', id: G, name: 'Team', groupIds: [], groupNames: [] }];   // Team LIVE in the roster
+    const seed = w.useGrants.setRow(w.e.id, { to: [{ kind: 'group', id: G, name: 'Team', scopes: [{ host: 'x.example', until: w.now() + MONTH }] }], except: [{ kind: 'conversation', key: C, name: 'Left out' }] }, { reauthed: true });
+    w.clock.at += 2 * MIN;   // the owner opens the dialog later (on 7e99ef689 a Team member it cannot find takes a NEW 30-day end — a change)
+    // the dialog opened ONLY to set the judge policy
+    const d1 = await openDialog(w, R);
+    await d1.type('vw-use-policy-in', 'only x.example, read-only calls');
+    const sv1 = await d1.save();
+    const r1 = rowOf(w);
+    ok(!!(seed.ok && d1.ok && sv1 === true && d1.rowPosts().length === 0 && d1.polPosts().length >= 1 && keysOf(r1) === `group:${G}` && exOf(r1) === `conversation:${C}` && d1.closed() === 1), 'ⓐa a row {Team (a Task Group, live in the roster), C excepted}: the dialog opened only to set the judge policy posts NO row — the policy only; the store keeps Team as `group:g-team`, C excepted (7e99ef689: the row posted behind 验证是你 and Team rewritten to `group:vg-…`)', { open: d1.ok || d1.error, saved: sv1, rowPosts: d1.rowPosts().map((p) => p.body), to: keysOf(r1), except: exOf(r1) });
+    // a members-edit Save: Dee added (x.example, as the others have it)
+    const d2 = await openDialog(w, R);
+    await d2.pick((sel) => [...sel, `agent:${D}`]);
+    const sv2 = await d2.save();
+    const r2 = rowOf(w);
+    const vg = ((r2 && r2.to) || []).filter((m) => m.kind === 'group' && /^vg-/.test(String(m.id || '')));
+    ok(!!(d2.ok && sv2 === true && d2.rowPosts().length >= 1 && keysOf(r2) === [`conversation:${D}`, `group:${G}`].sort().join(',') && !vg.length && exOf(r2) === `conversation:${C}`), 'ⓐb … a members-edit Save (Dee added): the store keeps Team as `group:g-team` beside Dee — never `group:vg-…`; C still excepted (7e99ef689: Team rewritten to the grant id, a group that does not exist)', { saved: sv2, body: (d2.rowPosts().slice(-1)[0] || {}).body, to: keysOf(r2), except: exOf(r2) });
+    const t1 = await runAnswered(w, CURL(w.e.ref, 'x.example'), { caller: w.caller(T1, 'Team one') });
+    const c1 = await runAnswered(w, CURL(w.e.ref, 'x.example'), { caller: w.caller(C, 'Left out') });
+    ok(!!(t1.r && t1.r.ok && t1.r.by === 'grant' && !t1.card && c1.card), 'ⓐc … and after that Save Team\'s member runs `curl https://x.example` with NO card (by grant); C, excepted, draws its card (7e99ef689: Team\'s member lost its grant — a card)', { team: t1.r && { ok: t1.r.ok, by: t1.r.by, code: t1.r.code }, teamCard: !!t1.card, cCard: !!c1.card });
+  });
+  console.log('ⓑ (r11, MINOR 1) AN ENDED 1-HOUR WINDOW THE HUB HAS NOT SWEPT — the Save the preview promises posts, the hub prunes it');
+  await leg('ⓑ the ended window', async () => {
+    const R = ROSTER([['cid-e', 'Eve'], [CID, 'Narrator']]);
+    const w = await world();
+    const k = await runAnswered(w, CURL(w.e.ref, 'api.tts.example'), { answer: 'always', caller: w.caller('cid-e', 'Eve') });
+    const win = await runAnswered(w, SHELL(w.e.ref), { answer: 'window' });
+    const d0 = await openDialog(w, R);   // inside the hour, the dialog left as it opened
+    const pub0 = w.useGrants.publicFor(w.e.id);
+    const s0 = await d0.save();
+    w.clock.at = w.now() + 61 * MIN;   // the hour ended — and no sweep ran (a restart or a lock inside the hour drops the hour-end timer)
+    const heldEnded = !!memberRaw(w);
+    const eveBefore = JSON.stringify((memberRaw(w, w.e.id, 'cid-e') || {}).scopes);
+    const d = await openDialog(w, R);
+    const pv = d.preview();
+    const sv = await d.save();
+    const chips = await vaultChips(w);
+    ok(!!(k.a && k.a.ok && win.a && win.a.ok && d0.ok && s0 === true && d0.rowPosts().length === 0), 'ⓑa control — inside the hour (Narrator\'s window live), the dialog left as it opened posts NO row', { s0, posts: d0.rowPosts().map((p) => p.body), stored: (pub0.to || []).map((m) => ({ p: m.principal, hosts: m.hosts, scopes: m.scopes })) });
+    ok(!!(heldEnded && d.ok && /Narrator · the 1-hour approval ended — Save removes it/.test(pv) && sv === true && d.rowPosts().length === 1 && !memberRaw(w) && JSON.stringify((memberRaw(w, w.e.id, 'cid-e') || {}).scopes) === eveBefore && Array.isArray(chips) && chips.length === 1 && /^Eve · /.test(chips[0]) && !chips.some((c) => /Narrator/.test(c))), 'ⓑb the hour ENDED, unswept: the preview says «Narrator · the 1-hour approval ended — Save removes it» and the untouched Save POSTS the row — Narrator gone from the store, Eve as she was; the Vault row is drawn without Narrator (7e99ef689: nothing posted, the ended window kept and promised again)', { heldEnded, preview: pv, saved: sv, posts: d.rowPosts().map((p) => p.body), narrator: !!memberRaw(w), chips });
+  });
+  console.log('ⓒ (r11, MINOR 3) A SAVE WHOSE ROW LANDED AND WHOSE POLICY DID NOT — said; the next Save is compared against the row as it LANDED');
+  await leg('ⓒ the half-landed Save', async () => {
+    const MONTH = 30 * 86400e3, NOT = 'The members were saved; the policy was not';
+    const R = ROSTER([['cid-a', 'Ada'], ['cid-b', 'Bea']]);
+    const seedAB = (ww) => ww.useGrants.setRow(ww.e.id, { to: ['cid-a', 'cid-b'].map((key, i) => ({ kind: 'conversation', key, name: ['Ada', 'Bea'][i], scopes: [{ host: 'a.example', until: ww.now() + MONTH }] })), except: [] }, { reauthed: true });
+    const w = await world(); seedAB(w);
+    const d = await openDialog(w, R, { answers: [false] });   // the policy's 验证是你: cancelled
+    await d.pick((sel) => sel.filter((x) => x !== 'agent:cid-b'));   // ✕ Bea
+    await d.type('vw-use-policy-in', 'only a.example');
+    const sv1 = await d.save();
+    const mid = keysOf(rowOf(w)), w1 = d.words(), posts1 = d.rowPosts().length, open1 = d.closed() === 0;
+    await d.type('vw-use-policy-in', '');
+    const clean = !d.dirty();   // the members as saved, the policy as it was: nothing unsaved
+    ok(!!(d.ok && sv1 === false && posts1 === 1 && mid === 'conversation:cid-a' && open1 && d.asked() === 1 && w1 === NOT && String(ZH[NOT] || '') === '成员已保存；策略没有保存' && JA[NOT] && clean), 'ⓒa row {Ada, Bea}: Bea ✕\'d and a policy typed, Save — the row lands (a narrowing, no prompt), then the policy\'s 验证是你 is cancelled: the dialog stays open and SAYS «The members were saved; the policy was not» (成员已保存；策略没有保存); with the policy cleared nothing is unsaved (7e99ef689: no words; the dialog still dirty against the row as it opened)', { saved: sv1, posts1, mid, words: w1, asked: d.asked(), clean });
+    await d.pick((sel) => [...sel, 'agent:cid-b']);   // undo: Bea back
+    const sv2 = await d.save();
+    ok(!!(sv2 === true && d.rowPosts().length > posts1 && keysOf(rowOf(w)) === 'conversation:cid-a,conversation:cid-b' && d.closed() === 1), 'ⓒb … Bea picked again, Save: compared against the row as it LANDED ({Ada}), the Save posts Bea back (验证是你) and the store has both (7e99ef689: compared against the row as it opened — nothing posted, the dialog closed silently, Bea gone)', { saved: sv2, posts: d.rowPosts().length, to: keysOf(rowOf(w)), closed: d.closed() });
+    const w2 = await world(); seedAB(w2);
+    const e2 = await openDialog(w2, R, { answers: [false, true] });
+    await e2.pick((sel) => sel.filter((x) => x !== 'agent:cid-b'));
+    await e2.type('vw-use-policy-in', 'only a.example');
+    await e2.save();
+    const n1 = e2.rowPosts().length;
+    const sv3 = await e2.save();   // the same Save pressed again — the 验证是你 given this time
+    const pol = ((w2.door.rowFacts(WROW(w2)) || {}).use || {}).policy;
+    ok(!!(e2.ok && n1 === 1 && sv3 === true && e2.rowPosts().length === 1 && pol && pol.text === 'only a.example' && keysOf(rowOf(w2)) === 'conversation:cid-a' && e2.closed() === 1), 'ⓒc … the same Save pressed again after the cancel (the 验证是你 given): the row as it landed is unchanged — NO second row post, the policy only (7e99ef689: the row posted again)', { n1, saved: sv3, posts: e2.rowPosts().length, policy: pol, to: keysOf(rowOf(w2)) });
+  });
 }
 
 console.log('Ⓢ (r8, MINOR 7) THE VAULT CHIP — a live window has its own ✕; an ended one is drawn as the others; the source says the hour');
@@ -824,15 +986,28 @@ await leg('Ⓩ the dialog\'s rules', async () => {
   const live = w2.useGrants.publicFor(w2.e.id);   // Narrator: a live window only
   w2.clock.at = w2.now() + 61 * MIN;
   const ended = w2.useGrants.publicFor(w2.e.id);   // … ended, not swept
-  const untouched = [['except-only', w.useGrants.publicFor(ex.id), w.now()], ['All agents + 除了', w.useGrants.publicFor(all.id), w.now()], ['a host + a command', mixed, w.now()], ['a live window', live, w2.now() - 61 * MIN], ['an ended window', ended, w2.now()]].map(([n, pub, now]) => [n, dialogSave(pub, R, { now }).changed]);
+  const grp = entryOf(w, 'Group key'), RG = [...R, { key: 'group:g-team', kind: 'group', id: 'g-team', name: 'Team', groupIds: [], groupNames: [] }];   // r11: a Task Group, live in the roster
+  w.useGrants.setRow(grp.id, { to: [{ kind: 'group', id: 'g-team', name: 'Team', scopes: [{ host: 'x.example', until: w.now() + MONTH }] }], except: [LEFT] }, { reauthed: true });
+  const untouched = [['except-only', w.useGrants.publicFor(ex.id), w.now()], ['All agents + 除了', w.useGrants.publicFor(all.id), w.now()], ['a host + a command', mixed, w.now()], ['a live window', live, w2.now() - 61 * MIN], ['a Task Group + 除了 (r11)', w.useGrants.publicFor(grp.id), w.now(), RG]].map(([n, pub, now, roster]) => [n, dialogSave(pub, roster || R, { now }).changed]);
   const P = w.useGrants.publicFor(all.id);
-  const changes = [['a host typed new', dialogSave(P, R, { hosts: ['x.example', 'y.example'], now: w.now() }).changed], ['the end → 90 days', dialogSave(P, R, { endId: '90d', now: w.now() }).changed], ['a member left out', dialogSave(mixed, R, { pick: (sel) => sel.filter((k) => k !== `agent:${CID}`), now: w.now() }).changed], ['an exception ✕\'d', dialogSave(P, R, { unexcept: [`agent:${C}`], now: w.now() }).changed], ['a member added', dialogSave(w.useGrants.publicFor(ex.id), R, { pick: () => ['agent:cid-e'], hosts: ['e.example'], now: w.now() }).changed]];
-  ok(!!(untouched.every(([, c]) => c === false) && changes.every(([, c]) => c === true)), 'Ⓩa `rowChanged`: a dialog left as it opened posts NO row — an except-only row, All agents + 除了, a host + a command, a live window, an ended one (pruned on the hub\'s own sweep); any change to the row posts it — a host typed new, the end, a member out, an exception ✕\'d, a member added', { untouched, changes });
+  const changes = [['an ended window, unswept (r11: the Save prunes it)', dialogSave(ended, R, { now: w2.now() }).changed], ['a host typed new', dialogSave(P, R, { hosts: ['x.example', 'y.example'], now: w.now() }).changed], ['the end → 90 days', dialogSave(P, R, { endId: '90d', now: w.now() }).changed], ['a member left out', dialogSave(mixed, R, { pick: (sel) => sel.filter((k) => k !== `agent:${CID}`), now: w.now() }).changed], ['an exception ✕\'d', dialogSave(P, R, { unexcept: [`agent:${C}`], now: w.now() }).changed], ['a member added', dialogSave(w.useGrants.publicFor(ex.id), R, { pick: () => ['agent:cid-e'], hosts: ['e.example'], now: w.now() }).changed]];
+  ok(!!(untouched.every(([, c]) => c === false) && changes.every(([, c]) => c === true)), 'Ⓩa `rowChanged`: a dialog left as it opened posts NO row — an except-only row, All agents + 除了, a host + a command, a live window, a Task Group + 除了 (r11: by its principal); any change to the row posts it — an ENDED window not yet swept (r11: the Save prunes it, as the preview says), a host typed new, the end, a member out, an exception ✕\'d, a member added', { untouched, changes });
   const KEYS = ['{name} will no longer be excluded', 'This grant changed while the dialog was open — close it and open it again'];
   const src = fs.readFileSync(path.join(REPO, 'src/lib/vault-use-row.js'), 'utf8');
   const wU = VUR && typeof VUR.saveWordsOf === 'function' ? VUR.saveWordsOf({ ok: false, code: 'except_unnamed', principal: `conversation:${C}` }, { to: [] }) : null;
   const wH = VUR && typeof VUR.saveWordsOf === 'function' ? VUR.saveWordsOf({ ok: false, code: 'hosts_required', principal: 'conversation:cid-e' }, { to: [{ kind: 'conversation', key: 'cid-e', name: 'Eve', scopes: [{ host: 'a.example' }] }] }, (m) => m.name) : null;
   ok(!!(wU === KEYS[1] && wH === 'Name the hosts Eve may use it for — a host name or address each (never «any host»)' && KEYS.every((k) => ZH[k] && JA[k]) && ZH[KEYS[0]] === '{name} 将不再被排除' && /t\('\{name\} will no longer be excluded'/.test(src)), 'Ⓩb the words: the preview names an exception the Save takes away («{name} 将不再被排除»); an exception the dialog never drew (except_unnamed) says «这个授权在对话框打开期间变了…»; a member the Save names hosts for is still asked by name', { wU, wH, zh: KEYS.map((k) => ZH[k]) });
+
+  // r11 (MAJOR): a published member keeps its principal's own fields — the grant's id beside them — and the picker draws it BY ITS
+  // PRINCIPAL (the same Task Group row, even for a member spelled with the grant id in its `id`, as 7e99ef689's publicGrants did)
+  const wg = await world();
+  const eg = entryOf(wg, 'Group key');
+  wg.useGrants.setRow(eg.id, { to: [{ kind: 'group', id: 'g-team', name: 'Team', scopes: [{ host: 'x.example', until: wg.now() + MONTH }] }], except: [] }, { reauthed: true });
+  const gm = (wg.useGrants.publicFor(eg.id).to || [])[0] || {};
+  const RGc = [...R, { key: 'group:g-team', kind: 'group', id: 'g-team', name: 'Team', groupIds: [], groupNames: [] }];
+  const drawnG = PM.rowToPick({ to: [gm], except: [] }, RGc, { everyoneKey: 'everyone:*' });
+  const stale = PM.rowToPick({ to: [{ ...gm, id: gm.grant || gm.id }], except: [] }, RGc, { everyoneKey: 'everyone:*' });
+  ok(!!(gm.kind === 'group' && gm.id === 'g-team' && /^vg-[0-9a-f]{8}$/.test(String(gm.grant || '')) && gm.principal === 'group:g-team' && drawnG.selected.join() === 'group:g-team' && !drawnG.extra.length && stale.selected.join() === 'group:g-team' && !stale.extra.length), 'Ⓩc (r11, MAJOR) a published Task Group member keeps its OWN id (`id` g-team) beside the grant\'s (`grant` vg-…), and the picker draws it as the roster\'s Team — by its principal, even a member whose `id` carries the grant id (7e99ef689: `id` vg-… ⇒ an extra row `group:vg-…`, saved as a group that does not exist)', { member: { id: gm.id, grant: gm.grant, principal: gm.principal }, drawn: drawnG.selected, extra: drawnG.extra.map((x) => x.key), stale: stale.selected, staleExtra: stale.extra.map((x) => x.key) });
 });
 
 console.log(`\n${fail ? 'FAILED' : 'ALL PASS'} (${pass} passed, ${fail} failed)`);

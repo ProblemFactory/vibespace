@@ -11674,4 +11674,6 @@ export default {
   // lane vault-standing-request r10 («Who may use it…»'s Save) — on plain lines (see r9 above)
   "{name} will no longer be excluded": "{name} 将不再被排除",
   "This grant changed while the dialog was open — close it and open it again": "这个授权在对话框打开期间变了 — 关掉再打开一次",
+  // lane vault-standing-request r11 (a Save whose row landed and whose policy did not) — on a plain line (see r9 above)
+  "The members were saved; the policy was not": "成员已保存；策略没有保存",
 };

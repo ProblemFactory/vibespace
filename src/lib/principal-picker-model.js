@@ -204,7 +204,11 @@ export function folderTail(cwd) {
 //    Group / All agents was picked, so an except-only row lost its 除了 to a Save that only set the judge policy): a door
 //    that passes `held` (the STORED row's exception keys) keeps them VERBATIM while the «除了» row is not offered — a dialog
 //    never drops an exception it did not SHOW as removed; one the owner picked ITSELF still leaves (it cannot be both —
-//    `except_conflicts`), and the door says so before Save.
+//    `except_conflicts`), and the door says so before Save;
+//  · r11 (主开发's acceptance of r10, MAJOR — the vault-use row published a Task Group member with the GRANT id in its `id`,
+//    so the «谁可以用…» Save rewrote it to `group:vg-…`, a group that does not exist): a stored entry that carries its
+//    principal's KEY (`principal`: `group:<id>` | `conversation:<key>` | `everyone`) is drawn BY that key — the identity is
+//    the principal, never a field a publisher may spell otherwise.
 
 /** Is the «除了» row offered for these picks (a Task Group or All agents picked)? */
 export function exceptOffered(rows, selected) {
@@ -251,15 +255,26 @@ export function pickToRow(rows, selected, except = [], { held = null } = {}) {
   const keep = Array.isArray(held) && !exceptOffered([...byKey.values()], selected) ? held.map(String).filter((k) => !sel.has(k)) : exceptSaved([...byKey.values()], selected, except);
   return { to: map(selected), except: map(keep) };
 }
+/** r11: an entry carrying its principal's KEY (`principal` — a published member) → that principal (its name kept); else the
+ *  entry as it is. */
+export function principalOfEntry(p) {
+  const k = p && typeof p === 'object' && typeof p.principal === 'string' ? p.principal : '';
+  if (k === 'everyone') return { kind: 'everyone' };
+  const m = /^(group|conversation):(.+)$/.exec(k);
+  if (!m) return p;
+  return m[1] === 'group' ? { kind: 'group', id: m[2], ...(p.name ? { name: p.name } : {}) } : { kind: 'conversation', key: m[2], ...(p.name ? { name: p.name } : {}) };
+}
 /**
  * What a STORED row draws: `{selected, except, extra}` — the picker keys of its `to` and `except` entries over the live
  * roster (`rows`), and an `extra` row for every entry the roster does not hold (a conversation not running now, a Task
- * Group deleted — kept and saved again as it is, the caller's hint words). `everyoneKey` = the caller's All row key.
+ * Group deleted — kept and saved again as it is, the caller's hint words). `everyoneKey` = the caller's All row key. r11: an
+ * entry with a `principal` key is read by it (`principalOfEntry`).
  */
 export function rowToPick(row, rows, { everyoneKey = 'everyone:*', notRunning = '', deletedGroup = '' } = {}) {
   const list = (Array.isArray(rows) ? rows : []).filter((r) => r && r.key != null);
   const extra = [];
-  const keyOf = (p) => {
+  const keyOf = (p0) => {
+    const p = principalOfEntry(p0);
     if (!p || typeof p !== 'object') return null;
     if (p.kind === 'everyone') return String(everyoneKey);
     if (p.kind === 'group') {

@@ -2729,13 +2729,13 @@ console.log('RESULT ' + JSON.stringify({ status: me && me.status, report: me && 
       g.set('vault-use', RES, { to: [marked(RES, a)], except: [] }, 'test');
       g.set('vault-use', RES2, { to: [marked(RES2, b)], except: [] }, 'test');
       const ug0 = UG.create({ grants: () => g, vault, dataDir, log: () => { } });
-      const before = JSON.stringify(ug0.publicFor(RES).to.map((m) => [m.id, m.hosts, m.toolFor, m.until, m.commands.length]));
+      const before = JSON.stringify(ug0.publicFor(RES).to.map((m) => [m.grant || m.id, m.hosts, m.toolFor, m.until, m.commands.length]));   // lane vault-standing-request r11: the grant id rides `grant`
       const notices = [];
       const mm = () => create({ rootDir: root, homeDir: scratchHomeDir, serverNotice: (k, t) => notices.push([k, t]), grants: g });
       const res = mm().runLocalMigrations().find((r) => r.id === ID);
       const stored = g.rowsFor('vault-use', RES)[0].to[0], stored2 = g.rowsFor('vault-use', RES2)[0].to[0];
       const ug = UG.create({ grants: () => g, vault, dataDir, log: () => { } });
-      const pub = ug.publicFor(RES).to, after = JSON.stringify(pub.map((m) => [m.id, m.hosts, m.toolFor, m.until, m.commands.length]));
+      const pub = ug.publicFor(RES).to, after = JSON.stringify(pub.map((m) => [m.grant || m.id, m.hosts, m.toolFor, m.until, m.commands.length]));
       ok(res && res.status === 'ran' && res.report.reshaped === 1 && Array.isArray(stored.scopes) && stored.scopes.length === 3 && stored.scopes.every((s) => s.until === END) && stored.hosts === undefined && stored.until === undefined && stored.mac === marked(RES, a).mac && pub.length === 1 && after === before, 'a one-end member is RESHAPED to its scopes — each with the member\'s end, tool and writer — its mark kept AS IT WAS and still VERIFIED by the writer (the vault reads it held, its hosts, tool, end and command unchanged): no vault at boot', { res: res && res.report, stored, before, after });
       ok(Array.isArray(stored2.hosts) && stored2.scopes === undefined && stored2.tool === 'curl' && ug.publicFor(RES2).to.length === 1 && res.report.kept === 1 && notices.filter(([k]) => k === 'vault-use-per-scope-kept').length === 1 && /1 grant\(s\) could not be given per-host ends/.test((notices.find(([k]) => k === 'vault-use-per-scope-kept') || [])[1] || ''), 'a member that CANNOT be mapped (a legacy single tool — its mark would move) is left as it is, still read as before, and named in ONE notice', { stored2, notices });
       const again = mm().runLocalMigrations().find((r) => r.id === ID);

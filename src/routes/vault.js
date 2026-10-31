@@ -25,8 +25,14 @@ const OF = require('../server/owner-facts.js'); // lane agent-context-owner-fact
 const VB = require('../vault-blocked.js');   // PURE: THE words toward an agent on a LOCKED refusal (lane vault-locked-refusal-notice)
 const { runOfToken } = require('../server/vault-totp.js');
 const V = require('../vault.js');   // PURE: the agent-secret namespace builder + mint verdict (lane vault-mint-put)
+const UGC = require('../server/vault-use-grants.js');   // lane vault-standing-request r11 (MINOR 2): the «谁可以用…» writer's codes (STATUS / WORDS below)
 
+// r11 (主开发's acceptance of r10, MINOR 2 — the writer's except_unnamed went out as 400 with the bare code, an older page said
+// «Could not reach the vault — except_unnamed»): every code the use-grants writer answers rides these maps AS THE WRITER
+// ANSWERS IT (its status, its sentence) — a code it adds is carried by construction; a code this file words itself keeps
+// this file's words (test-vault-routes ⑮: the census + the wire)
 const STATUS = Object.freeze({
+  ...UGC.STATUS,
   wrong_password: 403, corrupt: 500, paced: 429, vault_not_set_up: 409, already_set_up: 409, busy: 409, migration_failed: 500,
   password_too_short: 400, password_too_long: 400, password_not_text: 400, same_as_sign_in: 400, same_password: 400, bad_hours: 400,
   human_only: 403, cross_site: 403, unauthorized: 401, vault_locked: 423, no_link: 404,
@@ -49,6 +55,7 @@ const STATUS = Object.freeze({
   login_exists: 409, login_bad_origin: 400, login_bad_user: 400, bad_totp: 400,   // lane vault-agent-own: `vibespace-vault login add`
 });
 const WORDS = Object.freeze({
+  ...UGC.WORDS,
   wrong_password: 'that is not the second password',
   corrupt: 'the vault record (data/vault.json) is damaged — nothing can be opened; restore it from a backup',
   paced: 'too many wrong passwords — wait a minute, then try again',

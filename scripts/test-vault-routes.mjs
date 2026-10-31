@@ -29,6 +29,9 @@
 //   ⑭ A SLOW DOOR NAMES ITSELF (lane vault-slow-load — inc-mvk5jyv3 «保险库操作好像加载时间有点长», the server console had no
 //      vault line at all): a door slower than 250 ms = ONE log line (method, the route's PATTERN, ms) — never a parameter, a
 //      query, a password; a fast door says nothing; the agent doors too. RED CONTROL: the routes without the timer say nothing
+//   ⑮ THE «谁可以用…» WRITER'S CODES ON THE WIRE (lane vault-standing-request r11, MINOR 2 — the writer's except_unnamed went out
+//      400 with the bare code): the census (every code src/server/vault-use-grants.js answers rides the route's maps with its
+//      status and words) and the wire (the real route over the real writer: 409 + the writer's sentence)
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
@@ -704,6 +707,40 @@ console.log('⑭ A SLOW DOOR NAMES ITSELF (lane vault-slow-load): one line above
   const red = await drive(require(MUT));
   ok(red.st.unlock === 200 && red.lines.length === 0, 'RED CONTROL: the routes without the timer — the same 320 ms unlock leaves no line (the owner\'s console)', red);
   vS.close();
+}
+
+console.log('⑮ (lane vault-standing-request r11, MINOR 2) THE «谁可以用…» WRITER\'S CODES ON THE WIRE — its status and its sentence, as the writer answers them');
+{
+  const UGC = require(path.join(REPO, 'src/server/vault-use-grants.js'));
+  const GSU = require(path.join(REPO, 'src/server/grants-store.js'));
+  const RT = require(path.join(REPO, 'src/routes/vault.js'));
+  // the census: every code the writer answers rides the route's maps with the writer's status, and with words
+  const gaps = Object.keys(UGC.STATUS).filter((c) => (RT.STATUS[c] || 400) !== UGC.STATUS[c]).map((c) => `${c} ${RT.STATUS[c] || 400}≠${UGC.STATUS[c]}`);
+  const mute = Object.keys(UGC.WORDS).filter((c) => !RT.WORDS[c]);
+  ok(!gaps.length && !mute.length && RT.STATUS.except_unnamed === 409 && RT.WORDS.except_unnamed === UGC.WORDS.except_unnamed, '⑮a CENSUS: every code the use-grants writer answers rides the route\'s maps with the writer\'s status, and with words — except_unnamed 409 + the writer\'s sentence (7e99ef689: the route had neither — 400, the bare code)', { gaps, mute });
+  // the wire: the REAL route over the real writer (the door's saveRow) — an older page's Save leaving the stored 除了 out unnamed
+  const uData = path.join(ROOT, 'use-data'), uRun = path.join(ROOT, 'use-run');
+  for (const d of [uData, uRun]) fs.mkdirSync(d, { recursive: true });
+  const vU = VE.create({ dataDir: uData, kdf: { N: 1024, r: 8, p: 1 }, log, idleTimer: false, register: false, signInPassword: (p) => auth.verifyPassword(p), bcast: () => {} });
+  const grantsU = GSU.create({ dataDir: uData });
+  const ugU = UGC.create({ grants: () => grantsU, vault: vU, dataDir: uData, log: () => {} });
+  const doorU = DOOR.create({ dataDir: uData, vault: vU, userTodos: new UserTodoManager({ dataDir: uData, expirySweepMs: 3600e3 }), sources: { secrets: () => VC.secretSource({ vault: vU }) }, instanceKind: () => 'cluster', runRoot: () => uRun, useGrants: ugU, log: () => {} });
+  const aU = express(); aU.use(auth.middleware()); aU.use(express.json());
+  RT.registerVaultRoutes(aU, { vault: vU, activeSessions: new Map(), run: doorU });
+  const sU = await new Promise((r) => { const x = aU.listen(0, '127.0.0.1', () => r(x)); });
+  const pU = sU.address().port, pageU = { cookie: COOKIE, 'sec-fetch-site': 'same-origin', origin: `http://127.0.0.1:${pU}` };
+  const suU = await hit('/api/vault/setup', { port: pU, headers: pageU, body: { password: PW } });
+  const nameU = 'secret:' + crypto.randomBytes(5).toString('hex'), EIDU = `secrets:${nameU}#secret`;
+  const putU = vU.secretPut(nameU, ['route', 'use', 'value', crypto.randomBytes(6).toString('hex')].join('-'), { prov: 'owner', label: 'Route key', kind: 'api-key', hosts: [] });
+  const UNTIL = Date.now() + 30 * 86400e3, ALLX = { kind: 'everyone', scopes: [{ host: 'x.example', until: UNTIL }] };
+  const seedU = ugU.setRow(EIDU, { to: [ALLX], except: [{ kind: 'conversation', key: 'cid-left-out', name: 'Left out' }] }, { reauthed: true });
+  const excepted = () => ((ugU.publicFor(EIDU) || {}).except || []).some((x) => x && x.key === 'cid-left-out');
+  const old = await hit('/api/vault/use-grants', { port: pU, headers: pageU, body: { id: EIDU, to: [ALLX], except: [] } });
+  ok(!!(suU.status === 200 && putU && putU.ok && seedU && seedU.ok && old.status === 409 && old.json.code === 'except_unnamed' && old.json.error === UGC.WORDS.except_unnamed && old.json.principal === 'conversation:cid-left-out' && excepted()), '⑮b the WIRE (the real route, the real writer): an older page\'s Save leaving the stored 除了 out unnamed ⇒ HTTP 409 except_unnamed WITH the writer\'s sentence, naming who is left out — nothing written (7e99ef689: 400 and the bare code; the page said «Could not reach the vault — except_unnamed»)', { setup: suU.status, status: old.status, json: old.json });
+  const named = await hit('/api/vault/use-grants', { port: pU, headers: pageU, body: { id: EIDU, to: [ALLX], except: [], removeExcept: ['conversation:cid-left-out'] } });
+  ok(!!(named.status === 403 && named.json.code === 'reveal_needs_password' && excepted()), '⑮c control: the same Save NAMING the removal (removeExcept, through the route) is a widening — 403 reveal_needs_password without this page\'s 验证是你; still excepted', { status: named.status, code: named.json.code });
+  await new Promise((r) => setTimeout(r, 20));
+  sU.close(); vU.close();
 }
 
 srv.close(); vault.close(); console.warn = warn0;

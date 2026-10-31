@@ -438,10 +438,13 @@ function alwaysCarry(always, { now = 0, resourceOf = (id) => id, toolOfWild = nu
 }
 
 // ── WHAT A PAGE SEES (the Vault window's «谁可以用» chips) ──
-/** A row's members as the window draws them: [{id, kind, key|id, name, scopes: [{kind, host | command, until, expired, tool,
- *  legacy, source, at}] (r4: EACH scope with its own end — the chip says each), and the derived views: hosts, commands,
- *  toolFor (all scopes), legacy (its wildcard scopes with no tool), until (until when any scope is usable — null when one has
- *  no end), expired (no scope is), source + at (the latest writer)}] + except. */
+/** A row's members as the window draws them: [{grant, principal, kind, key|id, name, scopes: [{kind, host | command, until,
+ *  expired, tool, legacy, source, at}] (r4: EACH scope with its own end — the chip says each), and the derived views: hosts,
+ *  commands, toolFor (all scopes), legacy (its wildcard scopes with no tool), until (until when any scope is usable — null when
+ *  one has no end), expired (no scope is), source + at (the latest writer)}] + except. lane vault-standing-request r11 (主开发's
+ *  acceptance of r10, MAJOR): a member keeps its PRINCIPAL's own fields — a Task Group's `id` IS the Task Group's id — and the
+ *  grant's id rides `grant` beside it (two fields, never one written over the other: the grant id spelled as a group's `id`
+ *  made the «谁可以用…» Save rewrite a Task Group member to `group:vg-…`, a group that does not exist). `principal` = its key. */
 function publicGrants(row, { now = 0 } = {}) {
   const p = row ? GM.publicRow(row) : null;
   if (!p) return { to: [], except: [] };
@@ -451,7 +454,7 @@ function publicGrants(row, { now = 0 } = {}) {
       const all = scopesOf(e), ls = all.filter((s) => liveScope(s, now)), last = latestOf(all);
       const { scopes: _s, hosts: _h, commands: _c, toolFor: _t, tool: _tl, until: _u, source: _src, at: _at, ...rest } = e;
       const win = ls.find((s) => s.kind === 'window');   // r7: its live window (the chip says «any destination · until HH:MM»)
-      return { ...rest, id: grantIdOf(p.resource, GM.principalKey(e)), principal: GM.principalKey(e), hosts: hostsOfScopes(all), commands: commandsOfScopes(all), source: last ? last.source : null, at: last ? last.at : null, sourceKind: last ? last.kind : null, tool: null, toolFor: toolForOfScopes(all), legacy: legacyWildOf(e), until: spanOf(ls.length ? ls : all), expired: !ls.length, window: win ? win.until : null,   // r8: `sourceKind` — the latest writer's scope ('window': the chip says «“Allow for 1 hour” on a card», never «“Always” on a card»)
+      return { ...rest, grant: grantIdOf(p.resource, GM.principalKey(e)), principal: GM.principalKey(e), hosts: hostsOfScopes(all), commands: commandsOfScopes(all), source: last ? last.source : null, at: last ? last.at : null, sourceKind: last ? last.kind : null, tool: null, toolFor: toolForOfScopes(all), legacy: legacyWildOf(e), until: spanOf(ls.length ? ls : all), expired: !ls.length, window: win ? win.until : null,   // r8: `sourceKind` — the latest writer's scope ('window': the chip says «“Allow for 1 hour” on a card», never «“Always” on a card»)
         scopes: all.map((s) => ({ kind: s.kind, ...(s.kind === 'host' ? { host: s.host } : s.kind === 'command' ? { command: s.command } : {}), until: s.until, expired: !liveScope(s, now), tool: s.tool, legacy: s.kind === 'host' && isWild(s.host) && !s.tool, source: s.source, at: s.at })) };   // r3: `legacy` — its wildcard hosts with no tool (any tool)
     }),
     except: p.except || [],

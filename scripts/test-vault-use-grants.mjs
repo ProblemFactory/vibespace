@@ -295,7 +295,7 @@ const E4 = entryOf(W4);
   await runAnswered(w, CURL(e.ref, 'https://192.168.1.1/api/stat/health'));
   await runAnswered(w, CURL(e.ref, '-X', 'POST', 'https://192.168.1.1/api/s/default/cmd'));
   const pub = w.door.rowFacts({ id: e.id, store: 'secrets', entry: e.name, field: 'secret' }).use;
-  const mine = pub && pub.to.find((x) => x.id === g.grant);
+  const mine = pub && pub.to.find((x) => x.grant === g.grant);   // lane vault-standing-request r11: a drawn member's grant id is `grant` (its `id` is its principal's own)
   ok(mine && mine.uses === 3 && mine.convs === 1 && pub.used.uses === 3 && pub.used.convs === 1, 'the window\'s row: «used 3× by 1 conversation» on the member, and on the entry', pub);
   const out = await runAnswered(w, CURL(e.ref, 'https://10.0.0.9/'));
   ok(out.card && !out.r.ok && out.r.code === 'ask_denied', 'ANOTHER host ⇒ the card (today\'s) — denied here', { card: !!out.card, code: out.r.code });

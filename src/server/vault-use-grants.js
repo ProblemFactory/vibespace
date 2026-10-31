@@ -27,7 +27,9 @@
  *     took (the door tells the press's record); every write prunes the row's ENDED windows (U.withoutEndedWindows), and
  *     `pruneWindows(id)` is the door's hour-end write (nothing to prune ⇒ nothing written).
  *   · `verdictFor(id, facts, run)` — the run door's question before it draws a card (src/server/vault-run-door.js);
- *   · `publicFor(id, counts)` — the row as the window draws it: each member's id, hosts, end, «used N× by M conversations».
+ *   · `publicFor(id, counts)` — the row as the window draws it: each member's grant id (`grant` — r11: beside its principal's
+ *     own fields, never over a Task Group's `id`), hosts, end, «used N× by M conversations»; a landed `setRow` answers it
+ *     (`use` — r11: the «谁可以用…» dialog compares its next Save against the row that LANDED, not the one it opened on).
  * Every landed write notifies the Vault window (`vault.contentsChanged` — the engine's ONE notify): every open window patches
  * the row's chips in place. test-architecture §97: the reader is src/vault-use-grant.js, every writer below calls the store.
  */
@@ -245,7 +247,7 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
     const gen = nextGen();
     const w = rowTo.length || v.row.except.length ? g.set(U.DOOR, String(id), { to: stamp(id, rowTo, v.row.except, gen), except: v.row.except }, by) : g.remove(U.DOOR, String(id), by);
     if (w && w.ok) commitGen(id, gen);
-    return landed(w, { id: String(id), members: v.row.to.length, ...(windowsGone.length ? { windowsGone } : {}), ...(swept.length ? { swept } : {}) });
+    return landed(w, { id: String(id), members: v.row.to.length, ...(windowsGone.length ? { windowsGone } : {}), ...(swept.length ? { swept } : {}), ...(w && w.ok ? { use: landedUse(id) } : {}) });   // r11 (MINOR 3): the row as it landed
   }
   /** ONE member added or widened (the card's «Always», the request default, the carry, an agent's standing request the owner
    *  allowed). `tool` scopes a wildcard PER HOST; `commands` (lane vault-standing-request) the command shapes; `source` who. */
@@ -399,6 +401,7 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
     return { ok: true, healed, legacy, failed };
   }
   /** The row as the window draws it (+ «used N× by M conversations» per member, from `counts` = VU.countsOf's entry row). */
+  const landedUse = (id) => { try { const p = publicFor(String(id)); return { to: p.to || [], except: p.except || [] }; } catch { return null; } };
   function publicFor(id, counts = null) {
     const raw = rowOf(id);
     // round 6 (MINOR item 6): while locked the members cannot be verified — list them «unverified until unlocked» (names/hosts,
@@ -406,7 +409,7 @@ function create({ grants = () => GS.store(), vault = null, now = () => Date.now(
     if (raw && !unlocked()) { const p = U.publicGrants(raw, { now: now() }); return { ...p, unverified: true, to: (p.to || []).map((e) => ({ ...e, uses: 0, convs: 0 })) }; }
     const p = U.publicGrants(verifiedRow(raw), { now: now() });
     const by = (counts && counts.grants) || {};
-    return { ...p, to: p.to.map((e) => ({ ...e, uses: (by[e.id] && by[e.id].uses) || 0, convs: (by[e.id] && by[e.id].convs) || 0 })) };
+    return { ...p, to: p.to.map((e) => ({ ...e, uses: (by[e.grant] && by[e.grant].uses) || 0, convs: (by[e.grant] && by[e.grant].convs) || 0 })) };   // r11: by its grant id (`grant`)
   }
   /** Every entry THIS caller holds a live member of (`vibespace-vault list`): [{id, grant, hosts, until}]. */
   function heldBy(facts = {}) {

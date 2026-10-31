@@ -10,7 +10,11 @@
 //     first (the hub refuses it otherwise — reveal_needs_password), in the press's own task. r10 (lane vault-standing-request,
 //     主开发's acceptance of r9): the Save keeps the row's 除了 the picker does not offer (`pickToRow` `held`), names every
 //     exception it takes away («X will no longer be excluded» — `removeExcept`, the hub refuses an unnamed one), and posts
-//     the ROW only when its members, scopes or 除了 changed (`rowChanged` — a policy-only Save posts the policy only);
+//     the ROW only when its members, scopes or 除了 changed (`rowChanged` — a policy-only Save posts the policy only). r11
+//     (主开发's acceptance of r10): a member is known by its PRINCIPAL (`principal` — a Task Group as `group:<its id>`, never
+//     the grant id); an ENDED 1-hour window the hub has not swept is a change (the Save prunes it, as the preview says); after
+//     a Save whose row landed and whose policy did not, the next Save is compared against the row as it LANDED, and the
+//     dialog says so («The members were saved; the policy was not»);
 //   · R4 (default OFF — Settings ▸ «Let the policy judge approve vault uses»): the entry's POLICY for the decision-API judge, in
 //     the same dialog (setting one asks 验证是你; clearing is a click); the row says the policy, whether the judge is on, and
 //     what it approved («Approved by the policy judge 3× · last 14:02» + 「Revoke」: those commands ask again next time).
@@ -19,7 +23,7 @@
 import { t } from './i18n.js';
 import { fetchJson, showToast, createModalShell } from './utils.js';
 import { principalPicker, rosterFromApp } from './principal-picker.js';
-import { rowToPick, pickToRow } from './principal-picker-model.js';
+import { rowToPick, pickToRow, principalOfEntry } from './principal-picker-model.js';
 import { revealLeftMs, revealHeaders, forgetReveal, askRevealPassword, revealWords } from './vault-reveal.js';
 
 const el = (tag, cls, text) => { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; };
@@ -93,23 +97,32 @@ export function saveScopesOf({ was = null, hosts = [], cmds = [], endId = 'keep'
 // r10 (主开发's acceptance of r9, MAJOR): THE ROW THE SAVE WRITES against the row the dialog opened on — PURE (the suite reads
 // them). A principal's key is the hub's own spelling (GM.principalKey: the hub's refusals name a member by it).
 const pkOf = (p) => (p.kind === 'everyone' ? 'everyone' : p.kind === 'group' ? `group:${p.id}` : `conversation:${p.key}`);
+// r11 (MAJOR): a STORED member is known by its principal's key (`principal`, the hub's own) — never by a field a publisher may
+// spell otherwise (publicGrants once put the grant id `vg-…` in a Task Group's `id`)
+const keyOfM = (m) => (m && typeof m.principal === 'string' && m.principal ? m.principal : pkOf(m));
 const scopeSig = (s) => { const u = Number(s.until) > 0 ? Number(s.until) : 0; const c = s.command; return c ? `c\n${JSON.stringify([c.program, preOf(c), c.arg == null ? null : c.arg, c.sha || null, c.psha || null])}\n${u}` : `h\n${s.host}\n${u}\n${s.tool || ''}`; };
 const sigOf = (scopes) => scopes.filter((s) => s && s.kind !== 'window').map(scopeSig).sort().join('\n\n');   // a window is the card's: never sent, never compared
 /** Does the Save change the ROW — a member in or out, a member's scopes (each its host / command, its end, its tool), the 除了?
- *  `stored` = the row as the dialog opened on it ({to: members, except}), `next` = what the Save would post ({to, except}). A
- *  Save that changes only the policy posts only the policy (a row Save of the same row is never sent behind it). */
-export function rowChanged(stored = {}, next = {}) {
-  const a = new Map((stored.to || []).filter(Boolean).map((m) => [pkOf(m), sigOf(scopesOfM(m))]));
-  const b = new Map((next.to || []).filter(Boolean).map((m) => [pkOf(m), sigOf(Array.isArray(m.scopes) ? m.scopes : [])]));
+ *  `stored` = the row the Save is compared against ({to: members, except} — as the dialog opened on it, r11: or as the last
+ *  Save LANDED it), `next` = what the Save would post ({to, except}). A Save that changes only the policy posts only the policy
+ *  (a row Save of the same row is never sent behind it). Each member by its principal's key (r11). r11 (MINOR 1): a stored
+ *  1-hour window that has ENDED (the hub had not swept it — a restart or a lock drops the hour-end timer) IS a change: the Save
+ *  posts and the hub prunes it — what the preview says («the 1-hour approval ended — Save removes it»). A live one is the
+ *  card's: never sent, never compared. */
+export function rowChanged(stored = {}, next = {}, { now = Date.now() } = {}) {
+  const endedW = (s) => !!s && s.kind === 'window' && (!!s.expired || (Number(s.until) > 0 && Number(s.until) <= now));
+  if ((stored.to || []).filter(Boolean).some((m) => scopesOfM(m).some(endedW))) return true;
+  const a = new Map((stored.to || []).filter(Boolean).map((m) => [keyOfM(m), sigOf(scopesOfM(m))]));
+  const b = new Map((next.to || []).filter(Boolean).map((m) => [keyOfM(m), sigOf(Array.isArray(m.scopes) ? m.scopes : [])]));
   if (a.size !== b.size || [...b].some(([k, v]) => a.get(k) !== v)) return true;
-  const xa = new Set((stored.except || []).filter(Boolean).map(pkOf)), xb = new Set((next.except || []).filter(Boolean).map(pkOf));
+  const xa = new Set((stored.except || []).filter(Boolean).map(keyOfM)), xb = new Set((next.except || []).filter(Boolean).map(keyOfM));
   return xa.size !== xb.size || [...xb].some((k) => !xa.has(k));
 }
 /** The stored row's exceptions the Save takes away — the preview names each («X will no longer be excluded») and the Save
  *  names them to the hub (`removeExcept`: an exception left out unnamed is refused `except_unnamed`). */
 export function exceptRemovedOf(held = [], next = []) {
-  const nx = new Set((next || []).filter(Boolean).map(pkOf));
-  return (held || []).filter((x) => x && !nx.has(pkOf(x)));
+  const nx = new Set((next || []).filter(Boolean).map(keyOfM));
+  return (held || []).filter((x) => x && !nx.has(keyOfM(x)));
 }
 /** The words for a Save the hub refused (`plan` = planOf's). r10 (MINOR): a member the dialog sent with NO scope (all it held
  *  was a 1-hour window) is never invited to take hosts — its grant changed while the dialog was open (the hour-end sweep, a ✕
@@ -129,7 +142,7 @@ const sourceWord = (m) => { const at = Number(m.at) > 0 ? clockOf(m.at) : ''; co
 function nameOf(m, app) {
   if (m.kind === 'everyone') return t('All agents');
   const roster = rosterFromApp(app);
-  if (m.kind === 'group') { const g = roster.find((r) => r.kind === 'group' && String(r.id) === String(m.id)); return (g && g.name) || m.name || String(m.id); }
+  if (m.kind === 'group') { const gid = (principalOfEntry(m) || m).id; const g = roster.find((r) => r.kind === 'group' && String(r.id) === String(gid)); return (g && g.name) || m.name || String(gid); }   // r11: the Task Group by its principal
   const s = roster.find((r) => r.kind === 'agent' && String(r.id) === String(m.key));
   return (s && s.name) || m.name || String(m.key || '').slice(0, 8);
 }
@@ -173,7 +186,7 @@ export function useExtras(row, { app = null, refresh = () => {} } = {}) {
         const pausedM = !!m.paused;   // round 7 (MAJOR item 2): the entry is ON by another conversation's PRESS and THIS member was never resumed — the owner's pause stands (the ↻ un-pauses it). No date: the inverted model keeps no per-member pause time, so none can go stale.
         const legacyW = Array.isArray(m.legacy) ? m.legacy : [];   // r3 (MAJOR 1): a wildcard carried from an older version with no tool — open to ANY program until the owner re-mints it
         const chip = el('span', `vw-ak-chip vw-use-chip${m.expired ? ' vw-use-expired' : ''}${pausedM ? ' vw-use-chip-paused' : ''}${legacyW.length ? ' vw-use-legacy' : ''}`);
-        chip.dataset.grant = m.id || '';
+        chip.dataset.grant = m.grant || '';   // r11: the grant's id (`grant` — a Task Group's `id` is its own)
         chip.dataset.principal = m.principal || '';
         const cmds = Array.isArray(m.commands) ? m.commands : [];
         const sc = scopesOfM(m);
@@ -186,7 +199,7 @@ export function useExtras(row, { app = null, refresh = () => {} } = {}) {
         if (sourceWord(m)) bits.push(sourceWord(m));   // lane vault-standing-request: who wrote it and when — last, its time beside it
         if (bits.length) words.append(document.createTextNode(` · ${bits.join(' · ')}`));
         chip.append(words);
-        chip.title = `${m.id || ''}${m.convs > 1 ? ' · ' + t('{n} conversations', { n: m.convs }) : ''}${cmds.length ? '\n' + cmds.map(commandTitle).join('\n') : ''}${legacyW.length ? '\n' + t('Carried from an older version: this wildcard host is open to ANY program. Take it back (✕) and press «Always» on the next run of its tool — the new grant names its tool.') : ''}`;   // lane vault-standing-request: the whole program + script paths
+        chip.title = `${m.grant || ''}${m.convs > 1 ? ' · ' + t('{n} conversations', { n: m.convs }) : ''}${cmds.length ? '\n' + cmds.map(commandTitle).join('\n') : ''}${legacyW.length ? '\n' + t('Carried from an older version: this wildcard host is open to ANY program. Take it back (✕) and press «Always» on the next run of its tool — the new grant names its tool.') : ''}`;   // lane vault-standing-request: the whole program + script paths
         if (pausedM) {   // un-pause ONE member — a widening, so it asks for the second password (验证是你)
           const rs = el('button', 'vw-ak-x vw-use-resume', '↻');
           rs.type = 'button'; rs.title = t('Un-pause this — let it be used again'); rs.setAttribute('aria-label', rs.title);
@@ -230,12 +243,17 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
   const entryHosts = Array.isArray(u.entryHosts) ? u.entryHosts : [];
   const members = (u.to || []).filter(Boolean);
   const roster = () => rosterFromApp(app);
-  const stored = rowToPick({ to: members, except: u.except || [] }, roster(), { everyoneKey: EVERYONE_KEY, notRunning: t('not running now'), deletedGroup: t('a deleted Task Group') });
+  const pickWords = () => ({ everyoneKey: EVERYONE_KEY, notRunning: t('not running now'), deletedGroup: t('a deleted Task Group') });
+  const stored = rowToPick({ to: members, except: u.except || [] }, roster(), pickWords());   // r11: each member by its principal (`principal`)
   const extra = stored.extra || [];
+  // r11 (主开发's acceptance of r10, MINOR 3): THE ROW THE NEXT SAVE IS COMPARED AGAINST — the row as the dialog opened, then
+  // the row as a Save LANDED it (`landedRow`: the hub's answer names it — null for an older hub's answer: every next Save then
+  // posts the row whole); `held` = its 除了 as picker keys (r10)
+  let snap = { to: members, except: u.except || [] }, held = stored.except;
   let picker = null;
   // the unsaved guard (test-dialog-unsaved-census): who, the hosts and the end as the dialog opened — a close with a change asks
   let start = null, saveNow = () => false;
-  const stateOf = () => JSON.stringify([picker ? picker.selected().slice().sort() : [], picker ? picker.except().slice().sort() : [], ownBox ? ownBox.checked : null, hostsIn ? hostsIn.value.trim() : '', endSel ? endSel.value : '', polIn ? polIn.value.trim() : '']);
+  const stateOf = (pol) => JSON.stringify([picker ? picker.selected().slice().sort() : [], picker ? picker.except().slice().sort() : [], ownBox ? ownBox.checked : null, hostsIn ? hostsIn.value.trim() : '', endSel ? endSel.value : '', pol !== undefined ? pol : polIn ? polIn.value.trim() : '']);
   const { body, close, raised } = createModalShell({ id: 'vault-use-grant', kind: 'form', key: row.id, title: t('Who may use «{name}»', { name: row.label }), dialogClass: 'vault-dialog-box vw-ak-dialog vw-use-dialog', escapeToClose: true, onClose: () => { try { picker && picker.close(); } catch { } },
     unsaved: { isDirty: () => start !== null && stateOf() !== start, save: () => saveNow() } });
   if (raised) return null;   // raised: the same entry's «Who may use» form, as it was (int361, dialog-yield §103 r3: key = the entry)
@@ -301,8 +319,8 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
   const planOf = () => {
     const typed = hostsIn.value.split(/[\s,]+/).map((h) => h.trim()).filter(Boolean);
     const hosts = ownBox && ownBox.checked ? [ENTRY_HOSTS] : typed;
-    const pick = pickToRow(picker.knownRows(), picker.selected(), picker.except(), { held: stored.except });   // r10 (MAJOR): the 除了 the picker does not offer is kept as stored
-    const had = new Map(members.map((m) => [m.principal, m]));
+    const pick = pickToRow(picker.knownRows(), picker.selected(), picker.except(), { held });   // r10 (MAJOR): the 除了 the picker does not offer is kept as stored
+    const had = new Map((snap ? snap.to : members).map((m) => [keyOfM(m), m]));   // r11: by the principal; the row as it landed
     const to = [], fresh = [], kept = [], gone = [];
     for (const p of pick.to) {
       const was = had.get(pkOf(p));
@@ -316,8 +334,8 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
       to.push({ ...p, ...(was && was.name && !p.name ? { name: was.name } : {}), scopes: plan.scopes });
       fresh.push(plan.fresh); kept.push(plan.kept); gone.push(!!plan.pruned);
     }
-    const removed = exceptRemovedOf(u.except || [], pick.except);   // r10: every exception this Save takes away — said, and named to the hub
-    return { to, fresh, kept, gone, pick, removed, changed: rowChanged({ to: members, except: u.except || [] }, { to, except: pick.except }) };
+    const removed = exceptRemovedOf(snap ? snap.except : u.except || [], pick.except);   // r10: every exception this Save takes away — said, and named to the hub
+    return { to, fresh, kept, gone, pick, removed, changed: !snap || rowChanged(snap, { to, except: pick.except }) };
   };
   const drawPreview = () => {
     let plan = null; try { plan = planOf(); } catch { plan = null; }
@@ -340,6 +358,14 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
     });
     for (const x of plan.removed) preview.append(el('div', 'vw-use-preview-line vw-use-except-gone', t('{name} will no longer be excluded', { name: nameOf(x, app) })));   // r10 (MAJOR): an exception goes only where it is said
   };
+  // r11 (MINOR 3): a Save whose ROW landed — the dialog's snapshot becomes that row (the hub's answer `use`), its 除了 the held
+  // keys, the unsaved guard's start the row as saved (the policy as it was: a close still asks for an unsaved policy)
+  const landedRow = (r, sent, polWas) => {
+    const lu = r && r.use && Array.isArray(r.use.to) ? r.use : null;
+    snap = lu ? { to: lu.to.filter(Boolean), except: Array.isArray(lu.except) ? lu.except : [] } : null;
+    held = rowToPick({ to: [], except: snap ? snap.except : sent }, picker.knownRows(), pickWords()).except;
+    start = stateOf(polWas);
+  };
   async function doSave() {
     err.textContent = '';
     const plan = planOf();
@@ -349,16 +375,18 @@ export function showUseGrantDialog(row, { app = null, refresh = () => {} } = {})
     // r10 (主开发's acceptance of r9, MAJOR (2)): the ROW is posted only when it changed — a Save that sets only the policy never
     // rewrites the row behind the 验证是你 the owner gives for the policy
     const send = () => post('/api/vault/use-grants', { id: row.id, to, except: pick.except, ...(removed.length ? { removeExcept: removed.map(pkOf) } : {}) }, revealLeftMs() ? revealHeaders() : {});
-    let r = { ok: true };
+    let r = { ok: true }, rowSaved = false;
     if (changed) {
       r = await send();
       if (r && r.code === 'reveal_needs_password') { forgetReveal(); if (!(await askRevealPassword())) return false; r = await send(); }
+      if (r && r.ok) { rowSaved = true; landedRow(r, pick.except, polWas); }
     }
     if (r && r.ok && polNow !== polWas) {   // R4: the policy rides the same Save (a non-empty one asks 验证是你 too)
       const sendP = () => post('/api/vault/use-policy', { id: row.id, text: polNow }, revealLeftMs() ? revealHeaders() : {});
+      const notPol = t('The members were saved; the policy was not');   // r11 (MINOR 3): the row landed — said, never a silent half
       let q = await sendP();
-      if (q && q.code === 'reveal_needs_password') { forgetReveal(); if (!(await askRevealPassword())) return false; q = await sendP(); }
-      if (!q || !q.ok) { err.textContent = revealWords(q || {}); return false; }
+      if (q && q.code === 'reveal_needs_password') { forgetReveal(); if (!(await askRevealPassword())) { if (rowSaved) { err.textContent = notPol; refresh?.(); } return false; } q = await sendP(); }
+      if (!q || !q.ok) { err.textContent = rowSaved ? `${notPol} — ${revealWords(q || {})}` : revealWords(q || {}); if (rowSaved) refresh?.(); return false; }
     }
     if (r && r.ok) { if (changed) showToast(to.length ? t('Saved — they use it with no card for those hosts') : t('Saved — nobody uses it without a card')); else if (polNow !== polWas) showToast(t('Saved')); close(); refresh?.(); return true; }
     err.textContent = saveWordsOf(r, plan, (m) => nameOf(m, app));

@@ -532,9 +532,9 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     SETROW_RAW.set(useGrants, rawSetRow);
     useGrants.setRow = (id, row, opts = {}) => {
       let before = new Set();
-      try { const p = useGrants.publicFor(id); before = new Set(((p && p.to) || []).map((m) => m && m.id).filter(Boolean)); } catch { }   // the row's members BEFORE this write — so only the ones this Save ADDS are born resumed
+      try { const p = useGrants.publicFor(id); before = new Set(((p && p.to) || []).map((m) => m && m.grant).filter(Boolean)); } catch { }   // the row's members BEFORE this write — so only the ones this Save ADDS are born resumed
       const r = rawSetRow(id, row, opts);
-      if (r && r.ok && opts && opts.reauthed === true) { try { const d = load(); if (d && pressOpened(d, id)) { const pub = useGrants.publicFor(id); for (const m of (pub && pub.to) || []) if (m && m.id && !before.has(m.id)) resumeMember(id, m.id); } } catch { } }   // a 验证是你-proven Save: resume ONLY the member it added
+      if (r && r.ok && opts && opts.reauthed === true) { try { const d = load(); if (d && pressOpened(d, id)) { const pub = useGrants.publicFor(id); for (const m of (pub && pub.to) || []) if (m && m.grant && !before.has(m.grant)) resumeMember(id, m.grant); } } catch { } }   // a 验证是你-proven Save: resume ONLY the member it added
       return r;
     };
   }
@@ -730,7 +730,7 @@ function create({ dataDir, vault, sources = {}, userTodos = null, agentEnv = () 
     // resume carries `paused: <when the press opened it>` — the window greys that chip and offers an un-pause (↻). An OFF entry
     // is greyed whole (the entry-level `paused` below, no per-member ↻ — the fix there is the switch); an owner-opened entry
     // has none paused. The window and the judge read the SAME `opened` fact (`memberUsable`), so they cannot disagree.
-    if (use && !use.unknown && Array.isArray(use.to)) { const op = (d && d.opened && d.opened[row.id]) || null; const onP = !!(c.runnable && d && !d.refused && d.runnable.has(row.id)); if (op && onP) use.to = use.to.map((m) => (m.id && !(op.resumed && op.resumed[m.id]) ? { ...m, paused: op.at || 1 } : m)); }
+    if (use && !use.unknown && Array.isArray(use.to)) { const op = (d && d.opened && d.opened[row.id]) || null; const onP = !!(c.runnable && d && !d.refused && d.runnable.has(row.id)); if (op && onP) use.to = use.to.map((m) => (m.grant && !(op.resumed && op.resumed[m.grant]) ? { ...m, paused: op.at || 1 } : m)); }   // r11: a member's grant id is `grant` (publicGrants)
     // lane vault-use-grants (R4): the entry's policy (the owner's words), whether the judge is on, what it approved since the boot
     if (use && !use.unknown) { const pol = d && d.policies && d.policies[row.id]; const ap = d && d.policyApproved && d.policyApproved[row.id]; let on = false; try { on = !!policyOn(); } catch { on = false; } use.policy = pol ? { text: pol.text, at: pol.at } : null; use.judge = on ? 'on' : 'off'; use.approved = ap ? { n: ap.n, lastAt: ap.lastAt } : null; }
     const onNow = !!(c.runnable && d && !d.refused && d.runnable.has(row.id));

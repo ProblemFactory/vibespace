@@ -154,6 +154,18 @@ console.log('①b ALL AGENTS: first, never hidden by a search, never a recent pi
 }
 
 // ═══ ② the census ═══
+console.log('①c A STORED ROW DRAWN — rowToPick / pickToRow (the grant model\'s spelling); r11: an entry with its principal\'s key is drawn BY it');
+{
+  const g = ROSTER.find((r) => r.kind === 'group'), a = ROSTER.find((r) => r.kind === 'agent');
+  const plain = PM.rowToPick({ to: [{ kind: 'group', id: g.id }, { kind: 'conversation', key: a.id }], except: [] }, ROSTER);
+  ok(J(plain.selected) === J([g.key, a.key]) && !plain.extra.length, '①c a stored {kind, id|key} entry is drawn as the roster\'s own row (control)', J(plain));
+  // lane vault-standing-request r11 (主开发's acceptance of r10, MAJOR): a published vault-use member carried the GRANT id in a Task
+  // Group's `id` — the dialog drew an extra `group:vg-…` row and saved a group that does not exist; its `principal` key is the truth
+  const pub = PM.rowToPick({ to: [{ kind: 'group', id: 'vg-1a2b3c4d', grant: 'vg-1a2b3c4d', principal: `group:${g.id}`, name: g.name }, { kind: 'conversation', key: a.id, principal: `conversation:${a.id}` }], except: [{ kind: 'conversation', key: 'gone-1', principal: 'conversation:gone-1', name: 'Gone' }] }, ROSTER, { notRunning: 'not running now' });
+  const back = PM.pickToRow([...ROSTER, ...pub.extra], pub.selected, []);
+  ok(J(pub.selected) === J([g.key, a.key]) && J(pub.except) === J(['agent:gone-1']) && J(pub.extra.map((x) => x.key)) === J(['agent:gone-1']) && J(back.to) === J([{ kind: 'group', id: g.id }, { kind: 'conversation', key: a.id }]), '①c r11: an entry carrying its principal\'s KEY (`principal`) is drawn by it — the roster\'s Task Group row whatever its `id` says, and saved back as `group:<its id>` (7e99ef689: an extra `group:vg-…` row, saved as that)', J({ pub, back }));
+}
+
 console.log('② the census: every principal pick is the picker; no <select> of a roster is left');
 {
   const SITES = {
