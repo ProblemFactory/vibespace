@@ -47,6 +47,8 @@ console.log('① THE CENSUS — every producer a row (its origin, where it files
 const PRODUCERS = {
   'src/server/spend-guard.js': { origin: 'spend', scope: 'group', types: [] },
   'src/server/login-expiry-watch.js': { origin: 'login', scope: 'group', types: [] },
+  'src/migration-runner.js': { origin: 'server', scope: 'group', types: [], why: 'int365 seam F (.365): a boot migration that failed files ONE notice per migration id in the hub\'s «Migrations» group (lane job-secrets-retire r3/r4 sayFailed) — it only informs (the retry is automatic at the next start), no action type' },
+  'src/server/migrations.js': { origin: 'vault', scope: 'group', types: [], why: 'int365 seam F (.365): the retired job-secrets store\'s ONE notice in the Vault group (lane job-secrets-retire r2) — its words name a MANUAL owner step (put each secret into the vault, delete the file; with two files, move one out and restart), but it files no action type and draws no button' },
   'src/server/device-upgrade-watch.js': { origin: 'machines', scope: 'group', types: [] },
   'src/server/device-alerts.js': { origin: 'machines', scope: 'group', types: [] },
   'src/server/hub-act-ask.js': { origin: 'machines', scope: 'group', types: ['hub-act-ask', 'hub-act-standing'], why: 'the asker is named only in the act\'s `by` — OPEN: no `about` yet; lane ledger-dedup-law F3: + a background subject\'s ONE standing notice (no conversation asks it)' },
