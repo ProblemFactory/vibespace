@@ -46,7 +46,7 @@
 //      patched-copy control
 import fs from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 import { scratch } from './scratch.mjs';
 import { mutantCopies } from './mutant-copy.mjs';
@@ -1391,7 +1391,10 @@ console.log('⑱b (r5) the sentence census: every row drives the real rebuild; a
 // was stopped while running, not refused before it ran. …» (m9t). ww is its PREFIX, so the first-match lookup made every reader say
 // «denied»: a main card whose result came before our allow record (a rebuild), a helper's ask on a rebuild, and the bypass line («…but
 // the CLI did not run it»). The card our allow drew is PATCHED in place (one card, an edit op); a rebuild reads the same in every order.
-console.log('⑱d (2.1.314) a call stopped while it ran: the main card patched to «stopped» in place, live and rebuilt; the bypass line stays quiet; RED on the .366 table');
+// r2 (review F1): a stopped card is SETTLED — allowed, then cut off — so the ws case refuses a second press and writes nothing
+// (r1's fifth word fell outside settledState's closed vocabulary: null, «the CLI decides», and the press reached stdin); F2: the
+// tool card, drawn by the REAL renderer, keeps the CLI's words in the closed fold in a neutral class — never the error red.
+console.log('⑱d (2.1.314) a call stopped while it ran: the main card patched to «stopped» in place, live and rebuilt; a second press refused; the bypass line stays quiet; RED on the .366 table');
 {
   // the records carry the BINARY's text (the tracked 2.1.314 dump's sentence that extends ww), never the table's — a tree without the row fails by name
   const WWT = PO.PERMISSION_OUTCOME_ROWS.find((r) => r.id === 'ww').text;
@@ -1419,6 +1422,46 @@ console.log('⑱d (2.1.314) a call stopped while it ran: the main card patched t
   const bl = (MMx, text, id) => { const mm = new MMx(id); for (const r of [use, ask, bypass, res(text)]) mm.processLive(JSON.parse(JSON.stringify(r))); const line = mm.messages.find((m) => m.content && m.content[0] && m.content[0].say === 'bypass-auto-allow'); return line && line.content[0]; };
   const b9 = bl(MessageManager, M9.text, 'sess-s9-bp'), bw = bl(MessageManager, WWT, 'sess-s9-bpw');
   check('⑱d the BYPASS line: an auto-allowed call stopped while it ran stays the quiet «Auto-allowed (bypass)» notice (no «…but the CLI did not run it»); the CLI\'s real refusal after our allow still turns it into that warning', !!b9 && b9.level === 'notice' && !b9.params.refused && !!bw && bw.level === 'warning' && /rejected/.test(bw.params.refused || ''), { b9: b9 && [b9.level, b9.params.refused], bw: bw && [bw.level] });
+  // r2 (review F1): THE SECOND PRESS — through the ws case's one lookup (answerFrame), on the real normalizer + claude adapter
+  const reg9 = { get: () => new ClaudeCodeAdapter() }, frame9 = (id) => ({ sessionId: id, requestId: 'req-s9', approved: true, toolInput: {} });
+  const sess9 = (id) => { const s = replay(MessageManager, N, { upto: 0, id }); s.mode = 'chat'; s.buffer = ''; s.written = []; s.pty = { write: (x) => s.written.push(JSON.parse(x)) }; return s; };
+  const press2 = (HAx, id) => {
+    const s = sess9(id), deps = { activeSessions: new Map([[id, s]]), adapterRegistry: reg9, feedLive: N.feedLive };
+    for (const r of [use, ask]) N.feedLive(s, JSON.parse(JSON.stringify(r)));
+    const p1 = HAx.answerFrame(frame9(id), deps);
+    N.feedLive(s, JSON.parse(JSON.stringify(res())));
+    const c = cardOf(s._normalizer)[0], st = HAx.settledState(s, 'req-s9'), p2 = HAx.answerFrame(frame9(id), deps);
+    return { p1: p1.ok, resolved: c && c.permission && c.permission.resolved, st, p2: { ok: p2.ok, code: p2.code, words: p2.words }, written: s.written.length };
+  };
+  const pressRebuilt = (HAx, id) => {
+    const s = sess9(id); s._normalizer.convertHistory(JSON.parse(JSON.stringify([use, ask, res()])));
+    const c = cardOf(s._normalizer)[0], st = HAx.settledState(s, 'req-s9'), p = HAx.answerFrame(frame9(id), { activeSessions: new Map([[id, s]]), adapterRegistry: reg9, feedLive: N.feedLive });
+    return { resolved: c && c.permission && c.permission.resolved, st, p: { ok: p.ok, code: p.code, words: p.words }, written: s.written.length };
+  };
+  const ALLOWED_WORDS = H.answerRefusalWords('allowed');
+  const P2 = press2(HA, 'sess-s9-p2'), PR = pressRebuilt(HA, 'sess-s9-pr');
+  check('⑱d (r2) THE SECOND PRESS: ask → our Allow (ONE control_response written) → the 2.1.314 result ⇒ the card reads «stopped» and the request is SETTLED (settledState allowed — it was allowed, then cut off); a second press is refused «Already answered — allowed. Nothing was sent.» and nothing more reaches stdin', P2.p1 === true && P2.resolved === 'stopped' && P2.st === 'allowed' && P2.p2.ok === false && P2.p2.code === 'permission-settled' && P2.p2.words === ALLOWED_WORDS && P2.written === 1, P2);
+  check('⑱d (r2) …and on a REBUILD with no allow record (the card reads «stopped» off the result) a press is refused the same — nothing written', PR.resolved === 'stopped' && PR.st === 'allowed' && PR.p.ok === false && PR.p.code === 'permission-settled' && PR.p.words === ALLOWED_WORDS && PR.written === 0, PR);
+  const perWord = Object.fromEntries(PO.PERMISSION_OUTCOMES.map((w) => { const s = sess9('sess-s9-w-' + w); for (const r of [use, ask]) N.feedLive(s, JSON.parse(JSON.stringify(r))); cardOf(s._normalizer)[0].permission.resolved = w; const st = HA.settledState(s, 'req-s9'); return [w, [st, H.answerVerdict(st).write]]; }));
+  check('⑱d (r2) EVERY word of the census (' + PO.PERMISSION_OUTCOMES.join(' · ') + ') on a main card reads a member of the table\'s states — the request is settled, a press writes nothing; a census word is never «unknown here, the CLI decides»', Object.values(perWord).every(([st, wr]) => H.ASK_STATES.includes(st) && wr === false), perWord);
+  const MP = mutantCopies('helper-ask-314-press', REPO), haSrc9 = read('src/server/helper-asks.js');
+  const NEEDLE9 = 'return !p.resolved ? H.ASK_INITIAL : mainCardState(String(p.resolved));';
+  const HAP = haSrc9.includes(NEEDLE9) ? MP.load('src/server/helper-asks.js', haSrc9.replace(NEEDLE9, 'return !p.resolved ? H.ASK_INITIAL : (H.ASK_STATES.includes(String(p.resolved)) ? String(p.resolved) : null);'), 'r1-closed-vocabulary') : null;
+  const XP = HAP && press2(HAP, 'sess-s9-xp');
+  check('⑱d (r2) RED CONTROL: on a copy with r1\'s closed vocabulary (a word outside ASK_STATES ⇒ null) the stopped card is «unknown here» and the SECOND press is WRITTEN to stdin', !!XP && XP.resolved === 'stopped' && XP.st === null && XP.p2.ok === true && XP.written === 2, XP);
+  check('⑱d (r2) the press copies live outside the tree', MP.files.length === 1 && MP.files.every((f) => !f.startsWith(REPO)));
+  // r2 (review F2): THE TOOL CARD — the normalizer's own blocks through the REAL renderer module (node, as test-image-cards draws it)
+  const bv9 = path.join(REPO, 'src/lib/build-version.js');
+  if (!fs.existsSync(bv9)) fs.writeFileSync(bv9, "// GENERATED at build (gitignored) — stand-in written by test-helper-ask\nexport const BUILD_VERSION = 'test';\n");
+  const CR = await import(pathToFileURL(path.join(REPO, 'src/lib/chat-renderers.js')).href);
+  const cr9 = new CR.ChatRenderers({ ws: null, sessionId: 's9', app: null, messageList: { addEventListener() {} }, getSessionCtx: () => ({ cwd: '/w', host: null }) });
+  const stopMsg = cardOf(L.mm)[0], errMsg = cardOf(wwLive.mm)[0];
+  const hs = stopMsg ? cr9.renderToolResult(stopMsg.content[0], stopMsg) : '', he = errMsg ? cr9.renderToolResult(errMsg.content[0], errMsg) : '';
+  const foldS = /<details class="chat-diff"><summary class="chat-diff-summary chat-agent-stopped">\u2717 Stopped while it ran — it may have run in part or in full<\/summary><pre class="chat-tool-stopped-text">([\s\S]*?)<\/pre><\/details>/.exec(hs);
+  check('⑱d (r2) the TOOL CARD of a call stopped while it ran (the real renderer): the grey verdict «✗ Stopped while it ran — it may have run in part or in full» heads a CLOSED fold whose CLI words sit in the neutral chat-tool-stopped-text — no «Error» label, no error red anywhere on the card', !!foldS && /Correction to the text above/.test(foldS[1]) && !/chat-tool-error-text|chat-tool-error-label/.test(hs), hs.slice(0, 600));
+  const cssT = read('public/chat.css'), stopRule = /\.chat-tool-use pre\.chat-tool-stopped-text\s*\{([^}]*)\}/.exec(cssT);
+  check('⑱d (r2) …the neutral class is a real rule that sets no red and WRAPS, so the correction after the canned head is read — its selector outranks `.chat-tool-use pre` (white-space: pre; a bare class lost to it in the browser shot)', !!stopRule && !/--red|color:\s*red/.test(stopRule[1]) && /pre-wrap/.test(stopRule[1]), stopRule && stopRule[1]);
+  check('⑱d (r2) CONTRAST: the CLI\'s real refusal after our allow (ww, nothing stopped) keeps the OPEN red «✗ Error» with its words in chat-tool-error-text — the class follows the mark, not the tool', /<details class="chat-diff" open><summary class="chat-diff-summary chat-tool-error-label">\u2717 Error<\/summary><pre class="chat-tool-error-text">/.test(he) && !/chat-tool-stopped-text|chat-agent-stopped/.test(he), he.slice(0, 400));
   // RED CONTROL: the .366 table (no m9t row — the first match is ww) through a copy of the normalizer
   const MX = mutantCopies('helper-ask-314', REPO);
   const poSrc = read('src/permission-outcome.js'), a = poSrc.indexOf('  // ── a call that RAN, stopped while it ran'), b = poSrc.indexOf('  // ── the CLI itself says UNKNOWN ──');

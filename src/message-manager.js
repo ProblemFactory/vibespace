@@ -2665,9 +2665,9 @@ const KNOWN_IGNORED_SYSTEM_SUBTYPES = new Set([
   'ui_focus',               // the plugin UI host: move the focus ring in a plugin pane — card-less
   // 2026-10-15 (CLI 2.1.296, lane record-oracle-2-1-296 — read off the 2.1.296 zod union, scripts/fixtures/claude-cli/2.1.296.json):
   'permission_check_status', // {tool_use_id, agent_id?, status: checking|done} — a tool call's permission check has waited ~4 s / that wait is over: a pulse with no words, BEFORE any ask exists (the permission card is the control_request); the tool card already shows the call running — card-less
-  'ui_panes',               // the plugin UI host's pane list (spelled in 2.1.288, NOT in its union — record-shape CORPUS_ONLY_SUBTYPES). All ui_* fire only when a client attached a UI surface channel (2.1.288 zi()); VibeSpace attaches none
+  'ui_panes',               // the plugin UI host's pane list (spelled in 2.1.288, NOT in its union — record-shape CORPUS_ONLY_SUBTYPES). All ui_* reach a LOCAL stream-json session whenever a plugin drives the UI host (the gate — 2.1.288 zi(), read again on 2.1.307–2.1.314 as Yd() — asks for an attached client only on a REMOTE transport); card-less: plugin UI the chat does not host
   // 2026-10-30 (CLI 2.1.314, lane cli-2-1-314-records — read off the 2.1.314 zod union, scripts/fixtures/claude-cli/2.1.314.json):
-  'ui_placed',              // the plugin UI host: the conversation's PLACED rows {rows:[{plugin, id, request_id, after_uuid?}]} (where each «Placed» ui_render sits) — behind the same UI-surface gate (2.1.314 Yd()); card-less
+  'ui_placed',              // the plugin UI host: the conversation's PLACED rows {rows:[{plugin, id, request_id, after_uuid?}]} (where each «Placed» ui_render sits) — a LOCAL stream-json session gets one whenever a plugin calls $.ui.place (2.1.314 Yd()); card-less: display-only (the binary: «no message carries these rows»), drawn only by a ui_render surface, which VibeSpace does not serve
 ]);
 
 module.exports = { splitToolResultContent, toolResultText, MessageManager, classifyResultError, parseBackgroundLaunch, normalizeTaskType, TASK_TYPE_MAP, peerDisplayName, peerOriginOf, PEER_RECORDED, initFrameFacts, commandNames, normalizeWorkflowProgress, HANDLED_SYSTEM_SUBTYPES, KNOWN_IGNORED_RECORD_TYPES, KNOWN_IGNORED_SYSTEM_SUBTYPES, unknownRecordJson, noteFieldDrift, driftLedgerRows };

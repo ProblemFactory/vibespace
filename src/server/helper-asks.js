@@ -197,9 +197,11 @@ function forget(session) {
  *  r1 let a derived end pass "for the CLI to decide", but a helper that is over
  *  by task_notification / a killed patch / its Agent result holds no request, and
  *  the level set's soft close is `level-drop`, not `ended`), a main card by its
- *  resolution (`asked` while it waits); null when the request is UNKNOWN here
+ *  resolution (`asked` while it waits; a census word that is no table state —
+ *  `stopped` — by its result event: `allowed`); null when the request is UNKNOWN here
  *  (then the CLI decides — an answer for a request older than the buffer must
  *  still reach it). Never throws. */
+const mainCardState = (w) => (H.ASK_STATES.includes(w) ? w : Object.prototype.hasOwnProperty.call(H.RESULT_EVENT_OF, w) ? H.askTransition(H.ASK_INITIAL, H.RESULT_EVENT_OF[w]).state : null);
 function settledState(session, requestId) {
   if (!session || requestId == null) return null;
   const mm = session._normalizer;
@@ -211,9 +213,11 @@ function settledState(session, requestId) {
     const list = Array.isArray(mm.messages) ? mm.messages : [];
     for (let i = list.length - 1; i >= 0; i--) {
       const p = list[i] && list[i].permission;
-      // a main card's own resolution in the table's vocabulary (claude / codex / ACP all write allowed|denied);
-      // a harness word the table does not know is NOT ours to judge (null: the CLI decides — never a throw here)
-      if (p && p.requestId != null && String(p.requestId) === rid) return !p.resolved ? H.ASK_INITIAL : (H.ASK_STATES.includes(String(p.resolved)) ? String(p.resolved) : null);
+      // a main card's own resolution in the table's vocabulary (claude / codex / ACP all write allowed|denied); a CENSUS word
+      // that is no table state reads through the census's own result event (RESULT_EVENT_OF, the mapping message-manager uses —
+      // lane cli-2-1-314-records r2: `stopped`, allowed and then cut off while it ran, is `allowed` here: the CLI has its answer,
+      // a second press writes nothing); a harness word the table does not know is NOT ours to judge (null: the CLI decides — never a throw here)
+      if (p && p.requestId != null && String(p.requestId) === rid) return !p.resolved ? H.ASK_INITIAL : mainCardState(String(p.resolved));
     }
   } catch { }
   return null;

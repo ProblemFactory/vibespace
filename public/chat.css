@@ -337,6 +337,7 @@
   display: flex; align-items: center; gap: 6px; padding: 4px 0; color: var(--text-dim); font-size: 11px;
 }
 .chat-tool-error-text { color: var(--red); }
+.chat-tool-use pre.chat-tool-stopped-text { white-space: pre-wrap; overflow-wrap: anywhere; } /* lane cli-2-1-314-records r2: a call stopped while it ran — the CLI's words in the fold, never the error red; wrapped so its correction is read (it must outrank `.chat-tool-use pre`'s white-space: pre) */
 .chat-diff-summary.chat-tool-error-label { color: var(--red); }
 
 /* System/background notifications */

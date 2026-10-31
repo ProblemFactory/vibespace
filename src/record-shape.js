@@ -172,8 +172,10 @@ const SHAPES = {
   // NEW in 2.1.288 (lane cli-2-1-288-records, B-e05e) — each row VERBATIM from the 2.1.288 union (scripts/fixtures/claude-cli/2.1.288.json,
   // `zod` holds the literal). session_metadata: the cloud session's metadata push (today only `artifacts` — frame links), card-less;
   // instruction_size_warning: CLAUDE.md + rules + imports over the model's limit → the dim notice (message-manager HANDLED).
-  // The six ui_* are the plugin UI host's wire: emitted ONLY when a client attached a UI surface channel (2.1.288
-  // `zi()` = stream-json && uiSurfaceChannel) — VibeSpace attaches none; card-less if they ever arrive (the chat is not the TUI).
+  // The six ui_* are the plugin UI host's wire: a LOCAL stream-json session gets them whenever a plugin drives the host — the gate
+  // (2.1.288 `zi()`; read again on 2.1.307–2.1.314 as `Yd()` = stream-json && uiSurfaceChannel && (!remote || an attached client))
+  // asks for an attached client only on a REMOTE transport (lane cli-2-1-314-records r2; «VibeSpace attaches none» was wrong);
+  // card-less: plugin UI the chat does not host (the chat is not the TUI).
   "claude:stream:system/session_metadata": sh(['metadata'], { nested: { metadata: sh(['artifacts']) } }),
   "claude:stream:system/instruction_size_warning": sh(['total_chars', 'total_limit_chars', 'file_count', 'largest_chars']),
   "claude:stream:system/ui_invalidate": sh(['event', 'instances']),
@@ -190,8 +192,9 @@ const SHAPES = {
   "claude:stream:system/file_attachments_missing": sh(['message_uuid', 'sent_count', 'missing']),
   // NEW in 2.1.314 (lane cli-2-1-314-records) — VERBATIM from the 2.1.314 union (scripts/fixtures/claude-cli/2.1.314.json, `zod` holds the
   // literal): the plugin UI host's placed rows {rows: [{plugin, id, request_id, after_uuid?}]} — where each `ui_render` ask with
-  // component "Placed" stands in the conversation; written only behind the same UI-surface gate as the other ui_* (2.1.314 `Yd()` =
-  // stream-json && uiSurfaceChannel) — VibeSpace attaches none: card-less (message-manager KNOWN_IGNORED)
+  // component "Placed" stands in the conversation. A LOCAL stream-json session gets one whenever a plugin calls `$.ui.place` (2.1.314
+  // `Yd()` asks for an attached client only on a remote transport); card-less because the binary calls it display-only («no message
+  // carries these rows») and only a `ui_render` surface draws the rows — VibeSpace serves none (message-manager KNOWN_IGNORED)
   "claude:stream:system/ui_placed": sh(['rows']),
   "claude:stream:result": sh(['duration_ms', 'duration_api_ms', 'ttft_ms', 'ttft_stream_ms', 'time_to_request_ms', 'user_message_uuid', 'user_message_uuids', 'resume_reason', 'local_command', 'request_sent_wall_ms', 'first_content_frame_ms', 'first_stream_post_ms', 'first_stream_post_ack_ms', 'first_stream_post_wall_ms', 'time_to_request_from_spawn_ms', 'warm_spare_claimed', 'time_origin_ms', 'is_error', 'api_error_status', 'api_error_code', 'num_turns', 'result', 'stop_reason', 'total_cost_usd', 'usage', 'modelUsage', 'subagent_stats', 'permission_denials', 'queued_turn_count', 'structured_output', 'deferred_tool_use', 'terminal_reason', 'result_index', 'fast_mode_state', 'fast_mode_disabled_reason', 'origin', 'errors', 'runner_exit', 'startup_failure_reason'], { ignored: { 'first_stream_post_queue_wait_ms': LATENCY_UNREAD, 'first_stream_post_queued_behind': LATENCY_UNREAD, 'frame_received_wall_ms': LATENCY_UNREAD, 'frame_enqueued_wall_ms': LATENCY_UNREAD, 'turn_started_wall_ms': LATENCY_UNREAD, 'first_text_post_ms': LATENCY_UNREAD, 'first_text_post_wall_ms': LATENCY_UNREAD } }),
   "claude:stream:user": sh(['message', 'parent_tool_use_id', 'isSynthetic', 'tool_use_result', 'priority', 'origin', 'client_platform', 'inbound_origin', 'historical', 'shouldQuery', 'timestamp', 'is_meta', 'seeded_summon', 'client_composed', 'is_visible_in_transcript_only', 'is_virtual', 'is_compact_summary', 'summarize_metadata', 'mcp_meta', 'tool_result_meta', 'source_tool_use_id', 'source_tool_assistant_uuid', 'image_paste_ids', 'plan_content', 'permission_mode', 'interrupted_message_id'], { ignored: { 'initiator': 'who started the turn (2.1.280) — 2.1.280 — no consumer yet (declared so the drift card stays quiet; move to known with the consumer)' } }),
@@ -312,7 +315,7 @@ const FIELDS_306 = Object.freeze({
   'claude:stream:system/init': { original_cwd: NEW_306('@internal the folder the session\'s file permission checks are anchored at (unlike cwd it moves only on /cd, a worktree, a restore) — the server reads init.cwd (a worktree session\'s folder), never this'), additional_directories: NEW_306('@internal the folders added to the session (--add-dir, settings, a grant) — nothing in VibeSpace lists them') },
   'claude:stream:system/informational': { prompt_submit_outcome: NEW_306('@internal how a submitted prompt ended before a model call (blocked, stopped or dropped by a hook; no verdict) — the dim card shows the line\'s own content, the CLI\'s words') },
   'claude:stream:system/turn_handoff_available': { shared_message_id: NEW_306('handoff staging (cloud worker)') },
-  'claude:stream:system/ui_invalidate': { prompts_screened: NEW_306('@internal a plugin may change what is recorded of a typed line — the plugin UI host\'s wire, emitted only with a UI surface channel attached (VibeSpace attaches none)') },
+  'claude:stream:system/ui_invalidate': { prompts_screened: NEW_306('@internal a plugin may change what is recorded of a typed line — the plugin UI host\'s wire (a local stream-json session gets it whenever a plugin drives the host; nothing here reads it)') },
   'claude:stream:command_lifecycle': { ran_ahead: NEW_306('@internal only on a repeated queued frame written to the VS Code panel — the server consumer reads state + command_uuid only') },
 });
 // The 3 fields 2.1.307 added to shapes 2.1.306 already declared (2026-10-21 census, lane cli-2-1-307-records: the hub's claude

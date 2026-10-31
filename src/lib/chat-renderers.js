@@ -1660,10 +1660,11 @@ class ChatRenderers {
     }
     if (block.status === 'error') {
       // lane cli-2-1-314-records: a call STOPPED WHILE IT RAN (2.1.314's correction after the canned «rejected» words — the normalizer
-      // reads it off the census and marks the block) says so; the CLI's own words stay behind the expander, never a red «Error»
+      // reads it off the census and marks the block) says so; the CLI's own words stay behind the expander, never a red «Error» —
+      // r2: nor in the error red inside the fold (the canned «rejected» head is not the verdict; the correction after it is)
       const stoppedRun = block.stoppedWhileRunning === true;
       const errHead = stoppedRun ? `<details class="chat-diff"><summary class="chat-diff-summary chat-agent-stopped">\u2717 ${escHtml(t('Stopped while it ran — it may have run in part or in full'))}</summary>` : `<details class="chat-diff" open><summary class="chat-diff-summary chat-tool-error-label">\u2717 ${t('Error')}</summary>`;
-      return `<div class="chat-tool-use"><span class="chat-tool-label" title="${escHtml(block.toolName)}">${acDone?.browser ? agentBrowserHeadHtml(acDone) : `${toolCardIcon(block.toolName)} ${toolHeaderHtml(block.toolName)}${searchQueryChipHtml(block, msg)}${toolSummaryChipHtml(block)}`} ${this.clickablePath(fp)}</span><details class="chat-diff"><summary class="chat-diff-summary">${t('Input')}</summary><pre>${this.linkifyText(inputStr)}</pre></details>${errHead}<pre class="chat-tool-error-text">${this.linkifyText(resultText)}</pre></details>${browserTraceHolderHtml(block, msg)}${channelTouchHolderHtml(block)}</div>`;
+      return `<div class="chat-tool-use"><span class="chat-tool-label" title="${escHtml(block.toolName)}">${acDone?.browser ? agentBrowserHeadHtml(acDone) : `${toolCardIcon(block.toolName)} ${toolHeaderHtml(block.toolName)}${searchQueryChipHtml(block, msg)}${toolSummaryChipHtml(block)}`} ${this.clickablePath(fp)}</span><details class="chat-diff"><summary class="chat-diff-summary">${t('Input')}</summary><pre>${this.linkifyText(inputStr)}</pre></details>${errHead}<pre class="${stoppedRun ? 'chat-tool-stopped-text' : 'chat-tool-error-text'}">${this.linkifyText(resultText)}</pre></details>${browserTraceHolderHtml(block, msg)}${channelTouchHolderHtml(block)}</div>`;
     }
     if (block.toolName === 'Patch') {
       const patchHtml = this.renderPatchDiff(block);
