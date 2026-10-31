@@ -103,6 +103,10 @@ const binWindow = (file, marker, len) => {
   } finally { fs.closeSync(fd); }
 };
 const INIT_SCHEMA_RE = /subtype:\w+\("init"\),agents:/;
+// How far past the schema's start a field is read: the last OPTIONAL key (memory_paths) sat at +8888 in 2.1.314 and at
+// +9447 in 2.1.316 (one key added before it) — past the old 9000, so it read as ABSENT and the negative control went red
+// on every runner that installed the new CLI. Room for the schema to grow; a field outside the window still reads null.
+const INIT_SCHEMA_WIN = 16000;
 
 // Read ONE field's declaration out of a zod object literal: from `<name>:` to
 // the matching TOP-LEVEL comma, tracking (), [], {} and string literals (the
@@ -143,7 +147,7 @@ const zodOptional = (win, name) => {
 if (!claudeBin || !fs.existsSync(claudeBin)) {
   skip('every consumed init field exists in the CLI\'s own schema', 'no claude binary on this box (the fixture keys stand unverified here — a box with the CLI re-greps them)');
 } else {
-  const win = binWindow(claudeBin, 'subtype:I("init"),agents', 9000);
+  const win = binWindow(claudeBin, 'subtype:I("init"),agents', INIT_SCHEMA_WIN);
   if (!win) {
     skip('every consumed init field exists in the CLI\'s own schema', `the init schema window was not found in ${claudeBin} (upstream reshaped it — re-dump before trusting the reader)`);
   } else {
@@ -178,7 +182,7 @@ console.log('— required vs optional (the gate is not a version test)');
   } else {
     const rows = [];
     for (const bin of bins) {
-      const win = binWindow(bin, INIT_SCHEMA_RE, 9000);
+      const win = binWindow(bin, INIT_SCHEMA_RE, INIT_SCHEMA_WIN);
       if (!win) { rows.push([path.basename(bin), null]); continue; }
       rows.push([path.basename(bin), {
         req: REQUIRED.filter((f) => zodOptional(win, f) === false),
@@ -194,7 +198,7 @@ console.log('— required vs optional (the gate is not a version test)');
         seen.every((r) => r[1].wrongReq.length === 0), seen.map((r) => `${r[0]}: ${r[1].wrongReq.join(',')}`).join(' | '));
       ok('…NEGATIVE CONTROL for the reader itself: agents/betas/terminal_slash_commands/plugin_errors/plugin_warnings/mcp_server_errors/memory_paths ARE `.optional()` (a checker that answered "required" for everything would fail here)',
         seen.every((r) => r[1].wrongOpt.length === 0), seen.map((r) => `${r[0]}: ${r[1].wrongOpt.join(',')}`).join(' | '));
-      ok('…and a field the schema does not declare reads as ABSENT, not as required', zodOptional(binWindow(seen.length ? bins[0] : claudeBin, INIT_SCHEMA_RE, 9000), 'memory_dirs') === null);
+      ok('…and a field the schema does not declare reads as ABSENT, not as required', zodOptional(binWindow(seen.length ? bins[0] : claudeBin, INIT_SCHEMA_RE, INIT_SCHEMA_WIN), 'memory_dirs') === null);
       // The consequence, measured on the pure predicate the card gates on: a
       // frame built from ONLY the required keys already renders.
       const requiredOnly = { type: 'system', subtype: 'init', model: 'claude-opus-4', permissionMode: 'default', cwd: '/w', tools: ['Bash', 'Read'], mcp_servers: [{ name: 'a', status: 'connected' }], slash_commands: ['compact'], output_style: 'default', skills: [], plugins: [], claude_code_version: '2.1.238', apiKeySource: 'none', uuid: 'u-req', session_id: 's' };
