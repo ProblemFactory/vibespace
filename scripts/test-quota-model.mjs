@@ -3325,7 +3325,8 @@ console.log('\n㉒ a reset that LANDED is shown reset (unconfirmed); a member on
   // reds BY file:line. The renderers' bucketView calls are counted too (a bypass that names no bucket on its line — the
   // billing switcher's `eff`, the host pill — drops the count). test-roster-live-usage DRIVES each renderer; this is
   // the text half. i18n-*.js are dictionaries (words only) and are not scanned; usage-window / usage-dashboard draw token
-  // and cost stats and name no bucket, so they need no row.
+  // and cost stats and name no bucket, so they need no row. The scan is src/lib's TOP LEVEL (readdirSync, not recursive):
+  // src/lib has no subdirectory today — a renderer placed in one needs this scan widened first.
   const RAW22 = /\b(?:utilization|usedPercent|usedPct|remainingPct|fiveHour|sevenDay|scopedWeekly)\b|conic-gradient\(|% used|% left/;
   const VIA22 = /\bbucketView\(|\bwindowDisplay\(|\b(?:v|v5|v7|vSc|cv5|cv7)\.reading\b/;
   const ALLOW22 = {

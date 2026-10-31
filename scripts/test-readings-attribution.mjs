@@ -111,7 +111,7 @@ const CREDS = (id, { wiped = false, expiresAt = null, refreshExpiresAt = null } 
  *  `hosts` (r2 §11b) injects a device-manager stub so pushSealedOrders can be
  *  driven for real; every other caller passes nothing and gets `null`, which
  *  is what the engine sees on an instance with no daemon. */
-function mkWorld({ hosts = null } = {}) {
+function mkWorld({ hosts = null, nowS: atS = null } = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-readattr-'));
   cleanup.push(root);
   const dataDir = path.join(root, 'data');
@@ -126,7 +126,9 @@ function mkWorld({ hosts = null } = {}) {
   am.updatePool(P, { hot: true });
   am.get(P).auto = false; am._save(); // auto OFF: this suite drives attribution, not the switcher — a RECORD-level seam since 2026-09-28 (updatePool ignores auto:false: the whole-pool manual switch is retired; a pre-migration record still reads auto:false and the engine leaves it alone)
   const cacheDir = path.join(dataDir, 'usage-cache'); fs.mkdirSync(cacheDir, { recursive: true });
-  const nowS = Math.floor(Date.now() / 1000);
+  // `nowS` given ⇒ the world's windows hang off THAT second: a differential that builds two worlds (§22) compares them
+  // on one clock — each world reading its own second put R5 / R7 one second apart across a boundary (a flake, r3)
+  const nowS = atS != null ? atS : Math.floor(Date.now() / 1000);
   const R5 = nowS + 2 * 3600, R7 = nowS + 3 * 86400;
   const cache = (u5, u7) => ({ fetchedAt: Date.now() - 60000, source: 'cli-usage', fiveHour: { utilization: u5, resetsAt: R5 }, sevenDay: { utilization: u7, resetsAt: R7 } });
   const writeCache = (id, c) => fs.writeFileSync(path.join(cacheDir, id + '.json'), JSON.stringify(c));
@@ -4455,7 +4457,7 @@ console.log('\n§22 the long-lived token\'s identity post-check: the real produc
   const ev = (resetsAt, u) => ({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed', rateLimitType: 'seven_day', utilization: u, resets_at: resetsAt, resetsAt } });
   /** one scenario through engine module `mod` (null = the shipped one) → what the stores say afterwards */
   const run = (mod) => {
-    const w = mkWorld();
+    const w = mkWorld({ nowS }); // ONE clock for both worlds — the SLOT LAW compares their caches value for value
     const am = w.am;
     const O1 = am.createSubscription({ name: 'Token One' }).id, O2 = am.createSubscription({ name: 'Token Two' }).id, OT = am.createSubscription({ name: 'Token Other' }).id, O3 = am.createSubscription({ name: 'Token Three' }).id;
     // the rows' identities, established BEFORE their tokens were saved (LINK's too) — beside a cache file each, which is
