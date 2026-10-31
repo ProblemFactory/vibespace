@@ -802,11 +802,11 @@ function runCardOf(item, { t = fmt } = {}) {
   const path = pathW.whole || toolName;
   const rel0 = folder && path.startsWith(folder + '/') ? path.slice(folder.length + 1) : path;
   const rel = rel0.length > RUN_CMD_BODY_MAX ? rel0.slice(0, RUN_CMD_BODY_MAX) + '\u2026' : rel0;   // r12: the program relative to the WHOLE folder (a long folder's tail named: «evil-tail/run.sh»)
-  const longAside = (w) => (!w.cut ? [] : [{ aside: w.lost ? t(LOST) : t('(shortened — the whole path is under “{fold}”)', { fold: t('Technical details') }) }]);
+  const longAside = (w) => (!w.cut ? [] : [w.lost ? { aside: t(LOST) } : { aside: t('(shortened — the whole path is under “{fold}”)', { fold: t('Technical details') }), long: true }]);   // r17: `long` — the card's own «shortened» (the strip says its own: runStripOf)
   const decides = a.offered === true ? null : RUN_DECIDES[a.why] || null;
   const lines = {
     hosts: [known ? list(hosts.map((x) => [{ mono: x }])) : hostWhy],
-    program: [[{ mono: rel }, ...(rel0 !== rel || (pathW.lost && rel0 === path) ? longAside(pathW) : []), ...(tool.writable === true ? [{ aside: t('(in a folder an agent can write)') }] : [])]],
+    program: [[{ mono: rel, ...(rel0 !== rel ? { whole: rel0 } : {}) }, ...(rel0 !== rel || (pathW.lost && rel0 === path) ? longAside(pathW) : []), ...(tool.writable === true ? [{ aside: t('(in a folder an agent can write)') }] : [])]],
     folder: [[{ mono: folderW.shown }, ...longAside(folderW)]],   // r12: a long folder's clip on the face, said; the whole under the fold
     secrets: groups.map((g) => [{ text: entryName(g) }, { text: ' → ' }, ...list(g.as.filter((x) => x.length))]),
   };
@@ -976,10 +976,27 @@ function standingCardOf(item, { t = fmt } = {}) {
  *  only the hosts have a bound; a row that warns, or explains what a writing answer does, is always drawn (short by
  *  construction). → null (no card) | {rows, again, cut, fits} */
 const RUN_STRIP_MAX = 200, RUN_STRIP_SEG = 60, RUN_STRIP_LINE = 160;
-function runStripOf(card) {
+function runStripOf(card, { t = (s) => s } = {}) {
   if (!card) return null;
   const words = (segs) => segs.map((x) => (x.code != null ? x.code : x.mono != null ? x.mono : x.aside != null ? ' ' + x.aside : x.text || '')).join('');
-  const short = (segs) => segs.map((x) => { const k = x.code != null ? 'code' : x.mono != null ? 'mono' : null; return k && x[k].length > RUN_STRIP_SEG ? { ...x, [k]: '\u2026' + x[k].slice(-(RUN_STRIP_SEG - 1)) } : x; });
+  // r17 (the r16 acceptance: a writable program's path past RUN_CMD_BODY_MAX — the card draws its HEAD + «…» — drew a middle
+  // slice «…aaaa…» on the strip, no program name, nothing saying it was cut, beside Allow once): a value keeps the tail of the
+  // ORIGINAL (`whole`, the card's own value when it is its head) and the strip SAYS it was shortened — its own words in place
+  // of the card's «under Technical details» (`long`), once a line
+  const shortSaid = { aside: t('(shortened — the whole is on its card)') };
+  const short = (segs) => {
+    const out = []; let said = false;
+    for (const x of segs) {
+      if (x.long) { if (!said) out.push(shortSaid); said = true; continue; }
+      const k = x.code != null ? 'code' : x.mono != null ? 'mono' : null;
+      if (!k) { out.push(x); continue; }
+      const { whole, ...y } = x, v = whole != null ? whole : x[k];
+      if (v.length <= RUN_STRIP_SEG) { out.push({ ...y, [k]: v }); continue; }
+      out.push({ ...y, [k]: '\u2026' + v.slice(-(RUN_STRIP_SEG - 1)) });
+      if (!said) out.push(shortSaid); said = true;
+    }
+    return out;
+  };
   const hosts = card.rows.find((r) => r.key === 'hosts');
   const fits = !hosts || hosts.label.length + 1 + hosts.lines.map(words).join(', ').length <= RUN_STRIP_MAX;
   const rows = card.rows.filter((r) => r.key === 'hosts' || r.warn).map((r) => (r.key === 'hosts' ? { ...r, out: !fits } : { ...r, lines: r.lines.map(short) }));

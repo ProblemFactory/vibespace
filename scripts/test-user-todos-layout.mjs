@@ -1758,7 +1758,7 @@ console.log('㉗ THE ANNOUNCE (lane needs-card-tail r10 addendum; r11) — the b
   ok(/w\._waitWhy\.add\('ask'\);/.test(an) && /why\?\.delete\('ask'\);\n\s+if \(!why\?\.size && w\.element\.classList\.contains\('window-waiting'\)\)/.test(an) && /if \(!answered\) why\?\.clear\(\);/.test(an) && /\(this\.winInfo\._waitWhy \|\| \(this\.winInfo\._waitWhy = new Set\(\)\)\)\.add\('turn'\);/.test(CV) && /_clearWaiting\(\) \{\n\s+this\.winInfo\._waitWhy\?\.clear\(\);/.test(CV) && !/_annOwns/.test(P), 'RED-able (r11 — 7ec6c6dcf decided once whose blink it was): THE BLINK HAS REASONS — the announce adds \'ask\', a turn\'s end \'turn\'; an answer elsewhere drops \'ask\' only and the blink ends only when no reason is left; seeing the window acknowledges them all');
   ok(/annStack = mk\('div', 'ut-announce'\);\n\s+document\.body\.append\(annStack\);/.test(an) && !/createPopover\(|dataset\.popover|data-popover="/.test(an) && /\.ut-announce \{ position: fixed; z-index: \d+;/.test(ST) /* (its layer: ㉛, r13) */ && /\[data-popover\], \.ut-announce'\), \(el\) => el\.id === 'global-toasts'/.test(UT) && /if \(annCards\.has\(it\.id\)\) return; \/\/ one card per item/.test(an) && /jump\(live\.sessionKey, live\)/.test(an) && !/innerHTML = (?!UI_ICONS\.)/.test(an), 'RED-able (r11 — 7ec6c6dcf\'s stack was a createPopover: it took the first Esc, the phone\'s back press, the autohide taskbar): the card stack is a transient toast — no [data-popover]; the global toasts stand clear of it (_toastAvoid); one card per item, its press THE door (model.jump on the LIVE record), no peer string through innerHTML');
   ok(/annRefresh\(\); \/\/ the announce's cards and flashes follow the store/.test(ap) && /if \(!it \|\| \(it\.status !== 'open' && !late\) \|\| \(it\.status === 'open' && !annInPolicy\(it, now\)\)\) \{ annDrop\(id\); continue; \}/.test(an) && /const annInPolicy = \(it, now\) => toastWorthy\(attentionRow\(it, now\), attnPolicy\(\)\);/.test(an) && /todos\.open\.some\(\(i\) => i\.id === id && annInPolicy\(i, now\)\)/.test(an), 'every snapshot re-reads the cards: answered anywhere ⇒ gone; no longer inside the policy (a band switched off since) ⇒ gone, its flash with it; expired ⇒ said and kept a while (a late card)');
-  ok(/const order = \[\.\.\.annCards\.values\(\)\]\.filter\(\(c\) => !held \|\| c\.el\.parentNode === annStack\)\.sort\(\(x, y\) => newestFirst\(x\.key, y\.key\)\);/.test(an) /* r15: a held stack's arrivals wait (㉝) */ && /const ANN_MS = 20000, ANN_SHOWN = 3;/.test(an) && /order\.forEach\(\(c, k\) => \{ c\.el\.hidden = k >= ANN_SHOWN \|\| \(held && c\.el\.hidden\); \}\);/.test(an) /* r16: a held stack unfolds nothing (㉞) */, 'RED-able (r11 — 7ec6c6dcf ordered a same-ms tie by when the card was made): the stack shows the newest ANN_SHOWN (3) by newestFirst — a tie by id, the dock\'s order — and folds the rest into ONE «N more waiting»: a resync\'s burst is one stack, never a storm');
+  ok(/const order = \[\.\.\.annCards\.values\(\)\]\.filter\(\(c\) => !held \|\| c\.el\.parentNode === annStack\)\.sort\(\(x, y\) => newestFirst\(x\.key, y\.key\)\);/.test(an) /* r15: a held stack's arrivals wait (㉝) */ && /const ANN_MS = 20000, ANN_SHOWN = 3;/.test(an) && /order\.forEach\(\(c, k\) => \{ c\.el\.hidden = k >= ANN_SHOWN; \}\);/.test(an) /* r17: a held stack refills inside its extent — annFold folds the rest (㉟) */, 'RED-able (r11 — 7ec6c6dcf ordered a same-ms tie by when the card was made): the stack shows the newest ANN_SHOWN (3) by newestFirst — a tie by id, the dock\'s order — and folds the rest into ONE «N more waiting»: a resync\'s burst is one stack, never a storm');
   ok(/\.window-announce \.chat-attn-dock \.cad-count, \.chat-attn-dock\.cad-mark \.cad-count \{[^}]*background: var\(--yellow\);/.test(CC) && /\n  \.ut-announce :is\(button, \[role="button"\]\),\n/.test(ST) && !/\.uta-[\w-]+[^{]*\{[^}]*(#[0-9a-fA-F]{3,8}\b|rgba?\()/.test(ST), 'the strip\'s count wears the attention fill while an item is unseen (and while a landing marks it — r11); the stack\'s rules use theme vars only and JOIN the touch scale (44 px targets)');
 }
 
@@ -1976,7 +1976,7 @@ console.log('㉜ THE ANNOUNCE STANDS CLEAR OF A WINDOW\'S OWN CONTROLS · IT JUD
     globalThis.document = doc; globalThis.window = { innerWidth: 1280, innerHeight: 800 };
     try {
       const st = { isConnected: true, style: {}, getBoundingClientRect: () => box(0, 0, 380, 200), contains: () => false, matches: () => false, querySelector: () => null, querySelectorAll: () => [] };
-      const S = { annStack: st, annAnchor: () => ({ getBoundingClientRect: () => BTN }), uiScale: () => 1, annAt: '', annPin: null,
+      const S = { annStack: st, annAnchor: () => ({ getBoundingClientRect: () => BTN }), uiScale: () => 1, annAt: '', annPin: null, annBox: null,
         window: globalThis.window, document: doc, chromeAvoidRects: U.chromeAvoidRects, toastDeskSpot: U.toastDeskSpot, placeToastsSoon: () => { nudged++; }, annAside() {} };
       const A = run(slice('  const annHeld = () =>', '  /** r13 (the .365 runner') || slice('  const annPlace = () => {', '  /** r13 (the .365 runner'), 'annPlace', S); // (r15: annHeld rides the slice — a tree before it, its own annPlace)
       if (A.threw) return { threw: A.threw };
@@ -2003,7 +2003,7 @@ console.log('㉜ THE ANNOUNCE STANDS CLEAR OF A WINDOW\'S OWN CONTROLS · IT JUD
     `r14 (⑱ on fb61162f9: the stack moved at a tick and the toasts stayed where it had been — over its cards, a press on a card opened a toast's item): the chat closed ⇒ the stack moves back (${mv.t1} → ${mv.t2}) and asks the toasts again (${mv.nudged}); the same with the pointer on it ⇒ it stays where it was read (${hv.t1} → ${hv.t2})`, { mv, hv });
   const ta = (UT.match(/function _toastAvoid\(\) \{[\s\S]*?\n\}/) || [''])[0], one = (UT.match(/export const chromeAvoidEls = \(\) => document\.querySelectorAll\('([^']+)'\);/) || [])[1];
   const ct = (UT.match(/function _composerTop\(\) \{[\s\S]*?\n\}/) || [''])[0];
-  ok(tags(one).sort().join() === '.chat-attn-dock,.chat-input-area,.window-controls' && /chromeAvoidRects\(sr \? sr\.left : 0, sr \? sr\.right : window\.innerWidth,/.test(ta) && /avoid: chromeAvoidRects\(left, left \+ pr\.width,/.test(slice('  const annPlace = () => {', '  /** r13 (the .365 runner') || '') && /export function chromeAvoidRects\(x0, x1, over = \(\) => false\) \{\n  const hits = typeof document\.elementsFromPoint === 'function', out = \[\];\n  for \(const el of chromeAvoidEls\(\)\) \{/.test(UT) && /soft: !!el\.classList\?\.contains\('window-controls'\) \}\);/.test(UT) && /document\.querySelectorAll\('\.chat-input-area, \.chat-attn-dock'\)/.test(ct),
+  ok(tags(one).sort().join() === '.chat-attn-dock,.chat-input-area,.window-controls' && /chromeAvoidRects\(sr \? sr\.left : 0, sr \? sr\.right : window\.innerWidth,/.test(ta) && /const chrome = chromeAvoidRects\(left, left \+ w,[^\n]*\n    const spot = toastDeskSpot\(\{ rect: \{ left, right: left \+ w, top, bottom: top \+ h, height: h \}, avoid: chrome,/.test(slice('  const annFree = (w, h, vw, vh) => {', '  const annPlace = () => {') || '') && (slice('  const annPlace = () => {', '  /** r13 (the .365 runner') || '').split('annFree(pr.width, pr.height, vw, vh)').length === 3 /* r17: one free rule, both branches */ && /export function chromeAvoidRects\(x0, x1, over = \(\) => false\) \{\n  const hits = typeof document\.elementsFromPoint === 'function', out = \[\];\n  for \(const el of chromeAvoidEls\(\)\) \{/.test(UT) && /soft: !!el\.classList\?\.contains\('window-controls'\) \}\);/.test(UT) && /document\.querySelectorAll\('\.chat-input-area, \.chat-attn-dock'\)/.test(ct),
     'ONE LIST, ONE RULE: utils chromeAvoidEls names a window\'s own controls (every composer, every attention strip, a title bar\'s buttons), chromeAvoidRects keeps the ones a person SEES in a column — the global toasts (_toastAvoid) and the announce (annPlace) both read it and both move through toastDeskSpot; the phone tier\'s toasts (_composerTop) rise above the strip as above the composer (r14 — the 375 shot: two arrival toasts over the strip\'s answers)');
   // B — WHAT THE PERSON SEES: the REAL annAside — every entry of its list on its own, the topmost element under the stack
   const ASIDE = ['.dialog-overlay', '.dialog-form', '[data-popover]', '.context-menu', '.taskbar-context-menu', '#user-todos-popup', '#phone-home'];
@@ -2206,9 +2206,9 @@ console.log('㉝ THE STRIP SAYS WHAT ITS ANSWERS DECIDE ON · A HELD STACK KEEPS
     st.querySelector = (q) => (/uta-more/.test(q) ? more : null); st.querySelectorAll = () => [...cards];
     st.insertBefore = (el) => { const k = cards.indexOf(el); if (k >= 0) cards.splice(k, 1); cards.push(el); el.parentNode = st; };
     st.contains = (e) => e === st || cards.includes(e) || e === more; st.matches = (q) => q === ':hover' && st.hover;
-    const card = (id, at) => { const el = { id, hidden: false, parentNode: null }; el.getBoundingClientRect = () => { const y = yOf(el); return box(0, y, 380, y + H); }; return { el, key: { id, createdAt: at }, until: Date.now() + 20000, expiredAt: 0 }; };
+    const card = (id, at) => { const el = { id, hidden: false, parentNode: null, cnt: { hidden: true, textContent: '' } }; el.querySelector = (q) => (/uta-more-in/.test(q) ? el.cnt : null); el.getBoundingClientRect = () => { const y = yOf(el); return box(0, y, 380, y + H); }; return { el, key: { id, createdAt: at }, until: Date.now() + 20000, expiredAt: 0 }; };
     const annCards = new Map();
-    const S = { annStack: st, annCards, annAnchor: () => ({ getBoundingClientRect: () => box(1200, 760, 1240, 796) }), uiScale: () => 1, annAt: '', annPin: null, annTimer: 0, ANN_SHOWN: 3, ANN_MS: 20000,
+    const S = { annStack: st, annCards, annAnchor: () => ({ getBoundingClientRect: () => box(1200, 760, 1240, 796) }), uiScale: () => 1, annAt: '', annPin: null, annBox: null, annTimer: 0, ANN_SHOWN: 3, ANN_MS: 20000,
       window: { innerWidth: 1280, innerHeight: vh }, document: { querySelectorAll: () => [], getElementById: () => null }, chromeAvoidRects: (...a) => avoid(...a), toastDeskSpot: U.toastDeskSpot, placeToastsSoon() {}, annAside() {}, annWatch() {},
       newestFirst: FA.newestFirst, t: (k, p) => k.replace('{n}', p ? p.n : ''), clearInterval() {} };
     const A = run((PLACE || '') + (LAYOUT || ''), 'annPlace, annLayout', S);
@@ -2327,12 +2327,12 @@ console.log('㉝ THE STRIP SAYS WHAT ITS ANSWERS DECIDE ON · A HELD STACK KEEPS
     `r16: the chat closes under a held stack (room below it now), then the top card goes ⇒ the folded card stays folded (${J(rm.folded)}) — the stack never grows downward while held (${J(rm.free)} → ${J(rm.stack)})`, { ...rm, h: 0 });
   // the controls: «a held stack unfolds», «the held branch without avoid rects», «the held branch without its fold» (r15's)
   const PL16 = PLACE || '', LY16 = LAYOUT || '';
-  const mUnfold = PL16 + LY16.replace('k >= ANN_SHOWN || (held && c.el.hidden)', 'k >= ANN_SHOWN');
-  const mAvoid = PL16.replace("const avoid = [...chromeAvoidRects(left, left + w, (e) => annStack.contains(e) || !!e.closest?.('#global-toasts')), ...(ar && ar.width ? [ar] : [])];", 'const avoid = [];') + LY16;
-  const mFold = PL16.replace('      top = annFold(el, left, top, pr.width, vh);\n', '') + LY16;
+  const mUnfold = PL16.replace('const btn = ar && ar.width ? [ar] : [], ext = annBox;', 'const btn = ar && ar.width ? [ar] : [], ext = null;') + LY16; // (r17: the held stack refills — its EXTENT is what keeps a folded card from coming out below)
+  const mAvoid = PL16.replace('pass([...(lv < 1 ? chrome : lv < 2 ? hard : []), ...btn]);', 'pass([...btn]);') + LY16;
+  const mFold = PL16.replace(/      top = annFold\(el, [^\n]*\n/, '') + LY16;
   const xu = held(4, { rects: [STRIP, COMPO], then: roomy, src: mUnfold }), xa = held(4, { rects: [STRIP, COMPO], then: grow, src: mAvoid }), xf = held(4, { then: shrink16, src: mFold }), xf2 = held(4, { rects: [STRIP, COMPO], then: grow, src: mFold });
   ok(mUnfold !== PL16 + LY16 && mAvoid !== PL16 + LY16 && mFold !== PL16 + LY16 && !xu.threw && !xu.folded.includes('C0') && !xa.threw && !clearOf(xa, box(0, 500, 1280, 649)) && !xf.threw && !kept(xf) && !xf2.threw && !clearOf(xf2, box(0, 500, 1280, 649)),
-    `CONTROL (r16): the mutant that unfolds under a held stack brings the folded card out below the read one (folded ${J(xu.folded)}, the stack ${J(xu.stack)}); the held branch without avoid rects leaves a card on the grown strip (${J(xa.vis)}); without its fold the clamp moves the read card (${J(xf.pinAt)} → ${J(xf.pinNow)}) and a card stays on the strip (${J(xf2.vis)}) — the legs go red`, { xu: { ...xu, h: 0 }, xa: { ...xa, h: 0 }, xf: { ...xf, h: 0 } });
+    `CONTROL (r16; r17 — the refill is the extent's): the mutant without the held stack's extent brings the folded card out below the read one (folded ${J(xu.folded)}, the stack ${J(xu.stack)}); the held branch without avoid rects leaves a card on the grown strip (${J(xa.vis)}); without its fold the clamp moves the read card (${J(xf.pinAt)} → ${J(xf.pinNow)}) and a card stays on the strip (${J(xf2.vis)}) — the legs go red`, { xu: { ...xu, h: 0 }, xa: { ...xa, h: 0 }, xf: { ...xf, h: 0 } });
   // B — THE STRIP'S BOUND IS THE HOSTS ROW'S ALONE: the REAL renderRow with the strip's ctx (㉝ A's reading of chat.css's grammar);
   // every warning row and the «asked again» line drawn whatever the hosts; the PURE runStripOf's `fits` and its mutant
   const hadB = { window: globalThis.window, document: globalThis.document, localStorage: globalThis.localStorage, addEventListener: globalThis.addEventListener };
@@ -2361,8 +2361,8 @@ console.log('㉝ THE STRIP SAYS WHAT ITS ANSWERS DECIDE ON · A HELD STACK KEEPS
     ok(/Asked again — it differs from the command you let through: its arguments changed/.test(a.facts) && hostsOut('again') && a.answers.join() === 'once,deny',
       `RED-able (r16 — 882665da7 hid the «asked again» line behind twelve hosts): twelve hosts + a near-identical rerun ⇒ the line drawn («${(a.facts.match(/Asked again[^]*?changed/) || [''])[0]}»), the hosts on its card and «Always» with them — ${J(a.answers)}`, a);
     const lpRow = rowOf('longp', 'program').replace(/<[^>]+>/g, '');
-    ok(/evil-tail\/run\.sh/.test(lpRow) && /\(in a folder an agent can write\)/.test(lpRow) && lpRow.length < 140 && lp.answers.join() === 'once,deny',
-      `r16: a warning row is short by construction — a 1 500-character program path keeps its TAIL («${lpRow}», ${lpRow.length} characters) and its warning words whole`, { lpRow });
+    ok(/evil-tail\/run\.sh/.test(lpRow) && /\(in a folder an agent can write\)/.test(lpRow) && /\(shortened — the whole is on its card\)/.test(lpRow) && lpRow.length < 180 && lp.answers.join() === 'once,deny',
+      `r16: a warning row is short by construction — a 1 500-character program path keeps its TAIL and (r17) SAYS it was shortened («${lpRow}», ${lpRow.length} characters), its warning words whole`, { lpRow });
     const FAm = await import(pathToFileURL(path.join(ROOT, 'src/foryou-actions.js')).href);
     const card = FAm.runCardOf(A16.fits.item, { t: ctx.t }), st16 = FAm.runStripOf(card);
     ok(!!st16 && st16.fits && f.answers.join() === 'once,always,deny' && f.facts.includes('replica-4') && /Asked again/.test(f.facts),
@@ -2375,6 +2375,70 @@ console.log('㉝ THE STRIP SAYS WHAT ITS ANSWERS DECIDE ON · A HELD STACK KEEPS
     ok(!!stx && stx.fits === false, `CONTROL (r16): the mutant that counts the warnings and the «asked again» line inside the bound (882665da7's) withholds five hosts that fit, and «Always» with them (fits ${stx && stx.fits}) — the leg goes red`, { stx: stx && stx.fits });
   } catch (e) { ok(false, '㉞ B: the row renderer runs under the minimal DOM', e.stack); }
   finally { for (const [k, v] of Object.entries(hadB)) { if (v === undefined) delete globalThis[k]; else globalThis[k] = v; } }
+
+  console.log('㉟ HELD ⊆ FREE · A HELD STACK REFILLS ITS OWN ROOM · THE COUNT IS ALWAYS SAID · THE STRIP KEEPS THE TAIL OF THE ORIGINAL (lane needs-card-tail r17 — the r16 acceptance: on a 3×3 tiled grid the pointer resting on the middle card folded the other two and the «N more» line; X on the read card shrank the stack instead of refilling it; a folded line left its card uncounted; a 2 100-character path drew a middle slice on the strip)');
+  // A — THE FREE RULE'S LADDER, HELD (㉞ A's harness): a 3×3 tiled grid in the stack's column — the acceptance's geometry, title
+  // bars' buttons SOFT at 44–70 / 284–310 / 530–556, composers HARD at 200–280 / 440–520 / 680–760: no room ⇒ the free rule's
+  // own place over them (544–754); the pointer resting on the middle card, ONE 1 s tick (annRefresh → annLayout)
+  const COL = (t0, b0, soft = false) => ({ ...box(860, t0, 1240, b0), ...(soft ? { soft: true } : {}) });
+  const GRID = [COL(44, 70, true), COL(284, 310, true), COL(530, 556, true), COL(200, 280), COL(440, 520), COL(680, 760)];
+  const tick17 = (h) => { h.A.annLayout(); }, btnUp = (h) => { h.S.annAnchor = () => ({ getBoundingClientRect: () => box(1200, 730, 1240, 766) }); h.A.annLayout(); };
+  const SOFT1 = [COL(4, 520), COL(530, 556, true)], mid = (h, { set }) => { set([COL(560, 600, true), COL(690, 720, true)]); h.A.annPlace(); };
+  const g3 = held(3, { rects: GRID, then: tick17 }), g3b = held(3, { rects: GRID, then: btnUp }), s1 = held(3, { rects: SOFT1, then: tick17 }), m3 = held(3, { then: mid });
+  const ALL3 = '[[544,610],[616,682],[688,754]]';
+  ok(J(g3.free) === '[544,754]' && J(g3.vis) === ALL3 && !g3.folded.length && g3.more === null,
+    `RED-able (r17 — e77f7a3f6: only [C1 616–682] — C2, C0 and the «N more» line folded): a 3×3 tiled grid, no room ⇒ the free rule's own place ${J(g3.free)} over the composers; the pointer resting on the middle card, one tick ⇒ all three stay (${J(g3.vis)}) — HELD ⊆ FREE: a held stack folds only for what the free rule itself avoids`, { ...g3, h: 0 });
+  ok(J(g3b.vis) === '[[544,610],[616,682],[688,714]]' && J(g3b.folded) === '["C0"]' && /^1 more waiting/.test(g3b.more || ''),
+    `r17: the same grid, the For-you button under C0 (730–766) ⇒ C0 folds for the button (what no rung gives way), C2 and C1 stay where they were read, «${g3b.more}» (${J(g3b.vis)})`, { ...g3b, h: 0 });
+  ok(J(s1.free) === '[544,754]' && J(s1.vis) === ALL3 && !s1.folded.length,
+    `RED-able (r17 — e77f7a3f6: C1 + «2 more waiting»): a title bar's buttons alone in the way (soft 530–556 over hard 4–520) — the free rule's soft gave way ⇒ held, they give way too: all three stay (${J(s1.vis)})`, { ...s1, h: 0 });
+  ok(J(m3.vis) === ALL3 && !m3.folded.length && m3.more === null,
+    `r17: the free rule's middle rung, held — title bars' buttons come over C2 and C0 (560–600, 690–720) while the pointer rests on C1: avoiding them would leave the read card alone ⇒ the soft give way (${J(m3.vis)})`, { ...m3, h: 0 });
+  const mSoftHard = PL16.replace('const hard = chrome.filter((x) => !x.soft);', 'const hard = chrome;') + LY16, mNoRoom = PL16.replace('lv < 2 ? hard : []', 'hard') + LY16;
+  const xs1 = held(3, { rects: SOFT1, then: tick17, src: mSoftHard }), xm3 = held(3, { then: mid, src: mSoftHard }), xg3 = held(3, { rects: GRID, then: tick17, src: mNoRoom });
+  ok(mSoftHard !== PL16 + LY16 && mNoRoom !== PL16 + LY16 && !xs1.threw && J(xs1.vis) !== ALL3 && !xm3.threw && J(xm3.vis) !== ALL3 && !xg3.threw && J(xg3.vis) !== ALL3,
+    `CONTROL (r17): the mutant «soft as hard» folds for a title bar's buttons the free rule let give way (${J(xs1.vis)}; the middle rung ${J(xm3.vis)}); the one without the no-room rung folds the grid's cards off the composers (${J(xg3.vis)}) — the legs go red`, { xs1: xs1.vis, xm3: xm3.vis, xg3: xg3.vis });
+  // B — A HELD STACK REFILLS ITS OWN ROOM: 4 cards by the button (C3 512–578, C2 584–650, C1 656–722, «1 more» 728–754), X on the
+  // card under the pointer (annDrop + annLayout — the pointer still on the stack), twice; the r16 rule beside it (the top card
+  // gone while the second is read ⇒ nothing unfolds below the read card — ㉞ A's c4)
+  const vis17 = (h) => [...h.cards.filter((e) => !e.hidden).map((e) => [e.id, e.getBoundingClientRect().top, e.getBoundingClientRect().bottom]), ...(h.more.hidden ? [] : [['more', h.more.getBoundingClientRect().top, h.more.getBoundingClientRect().bottom]])];
+  const refillOf = (src) => { const h = hold(); if (src) { const A2 = run(src, 'annPlace, annLayout', h.S); if (A2.threw) return { threw: A2.threw }; h.A.annPlace = A2.annPlace; h.A.annLayout = A2.annLayout; } if (h.A.threw) return { threw: h.A.threw };
+    const cs = [0, 1, 2, 3].map((k) => h.add('C' + k, 1000 * (k + 1))); h.A.annLayout(); const free = [h.top(), h.bottom()];
+    h.rest(cs[3]); h.drop('C3'); h.A.annLayout(); const x1 = vis17(h); h.A.annLayout(); const x1t = vis17(h);
+    h.rest(cs[2]); h.drop('C2'); h.A.annLayout(); const x2 = vis17(h);
+    return { free, x1, x1t, x2 }; };
+  const rf = refillOf(null);
+  ok(!rf.threw && J(rf.free) === '[512,754]' && J(rf.x1) === '[["C2",512,578],["C1",584,650],["C0",656,722]]' && J(rf.x1t) === J(rf.x1) && J(rf.x2) === '[["C1",512,578],["C0",584,650]]' && kept(c4) && c4.folded.includes('C0') && /^1 more waiting/.test(c4.more || ''),
+    `RED-able (r17 — e77f7a3f6: [C2, C1, «1 more waiting»], then [C1, «1 more»]): X on the read card under the pointer ⇒ the folded card comes back INSIDE the stack's own extent ${J(rf.free)} (${J(rf.x1)}; a tick later the same), X again ⇒ ${J(rf.x2)} — the stack's bottom never moves down; the top card gone while the second is read ⇒ still nothing unfolds below it (${J(c4.folded)} folded, «${c4.more}»)`, rf);
+  const rfx = refillOf(PL16 + LY16.replace('order.forEach((c, k) => { c.el.hidden = k >= ANN_SHOWN; });', 'order.forEach((c, k) => { c.el.hidden = k >= ANN_SHOWN || (held && c.el.hidden); });'));
+  ok(!rfx.threw && J(rfx.x1) !== J(rf.x1), `CONTROL (r17): r16's «a held stack unfolds nothing» shrinks the stack to ${J(rfx.x1)} — the leg goes red`, rfx);
+  // C — THE COUNT IS ALWAYS SAID: a maximized chat (strip 568–649, composer 649–728), 4 cards (C3, C2, C1 at 318–528, «1 more»
+  // 534–560), the pointer on the LAST visible card (C1), the strip grows to 530 (chromeMoved → annPlace): the line cannot stand
+  // ⇒ the read card's own head row says the count; a tick later the same; the pointer leaves ⇒ the line again
+  const countOf = (src) => { let av = [STRIP, COMPO]; const h = hold({ avoid: () => av }); if (src) { const A2 = run(src, 'annPlace, annLayout', h.S); if (A2.threw) return { threw: A2.threw }; h.A.annPlace = A2.annPlace; h.A.annLayout = A2.annLayout; } if (h.A.threw) return { threw: h.A.threw };
+    const cs = [0, 1, 2, 3].map((k) => h.add('C' + k, 1000 * (k + 1))); h.A.annLayout(); const pinAt = h.span(cs[1]);
+    const said = () => ({ line: h.more.hidden ? null : h.more.textContent, own: h.cards.filter((e) => !e.cnt.hidden).map((e) => [e.id, e.cnt.textContent]), folded: h.cards.filter((e) => e.hidden).map((e) => e.id) });
+    h.rest(cs[1]); av = [box(0, 530, 1280, 649), COMPO]; h.A.annPlace(); const s1 = said(); h.A.annLayout(); const s2 = said(); const pinNow = h.span(cs[1]);
+    h.leave(); h.A.annLayout(); return { pinAt, pinNow, s1, s2, s3: said() }; };
+  const cn = countOf(null);
+  ok(!cn.threw && J(cn.pinAt) === '[462,528]' && same(cn.pinAt, cn.pinNow) && cn.s1.line === null && J(cn.s1.own) === '[["C1","1 more waiting"]]' && J(cn.s1.folded) === '["C0"]' && J(cn.s2) === J(cn.s1) && /^1 more waiting — open For you/.test(cn.s3.line || '') && !cn.s3.own.length,
+    `RED-able (r17 — e77f7a3f6: the line folded and C0 went UNCOUNTED): the pointer on a maximized chat's last card (${J(cn.pinAt)}), the strip grows to 530 ⇒ the «N more» line cannot stand — the read card's own head row says «${cn.s1.own.map((x) => x[1]).join()}» (folded ${J(cn.s1.folded)}; a tick later the same), the card where it was read; the pointer leaves ⇒ «${cn.s3.line}» again`, cn);
+  const cnx = countOf(PL16 + LY16.replace('const on = off && n > 0 && annPin && annPin.el.parentNode === annStack ? annPin.el : null;', 'const on = null;'));
+  ok(!cnx.threw && !cnx.s1.own.length && cnx.s1.line === null, `CONTROL (r17): the mutant whose read card carries no count leaves C0 unsaid (line ${cnx.s1.line}, the card ${J(cnx.s1.own)}) — the leg goes red`, cnx);
+  // D — THE STRIP KEEPS THE TAIL OF THE ORIGINAL: a writable program 2 100 characters into its folder (the card draws its HEAD +
+  // «…» past RUN_CMD_BODY_MAX) — the PURE runCardOf + runStripOf, the strip's words
+  try {
+    const { mutantCopies } = await import(path.join(ROOT, 'scripts/mutant-copy.mjs')); const { createRequire } = await import('node:module');
+    const FA17 = await import(pathToFileURL(path.join(ROOT, 'src/foryou-actions.js')).href), t17 = (x, p) => (p ? x.replace(/\{(\w+)\}/g, (m, k) => (p[k] !== undefined ? String(p[k]) : m)) : x);
+    const longOf = (n) => runAsk('ut-r17p' + n, { ...base, tool: { ...base.tool, path: base.folder + '/' + 'a'.repeat(n) + '/evil-tail/run.sh', writable: true }, always: { offered: false, why: 'program-writable', directive: null } }, { always: false }).item;
+    const progOf = (F, n) => { const c = F.runCardOf(longOf(n), { t: t17 }), sp = F.runStripOf(c, { t: t17 }); const r = sp.rows.find((x) => x.key === 'program'); return { card: c.rows.find((x) => x.key === 'program').lines[0][0].mono, strip: r ? r.lines[0] : null, words: r ? r.lines[0].map((x) => x.mono != null ? x.mono : x.aside != null ? ' ' + x.aside : x.text || '').join('') : '' }; };
+    const p21 = progOf(FA17, 2100), p15 = progOf(FA17, 1500);
+    ok(/…$/.test(p21.card) && /^…a+\/evil-tail\/run\.sh \(shortened — the whole is on its card\) \(in a folder an agent can write\)$/.test(p21.words) && /\/evil-tail\/run\.sh \(shortened — the whole is on its card\)/.test(p15.words),
+      `RED-able (r17 — e77f7a3f6: «…aaaa…» + «(in a folder an agent can write)» — no program, nothing said): a 2 100-character writable path (the card's value its head «…${p21.card.slice(-8)}») ⇒ the strip keeps the ORIGINAL's tail and says it was shortened («${p21.words}»); 1 500 characters the same («${p15.words.slice(-80)}»)`, { p21: p21.words, p15: p15.words });
+    const FAS17 = fs.readFileSync(path.join(ROOT, 'src/foryou-actions.js'), 'utf8'), mid17 = FAS17.replace('const { whole, ...y } = x, v = whole != null ? whole : x[k];', 'const { whole, ...y } = x, v = x[k];');
+    const FAy = mid17 !== FAS17 ? createRequire(import.meta.url)(mutantCopies('fa17', ROOT).write('src/foryou-actions.js', mid17, 'cardvalue')) : null, py = FAy ? progOf(FAy, 2100) : null;
+    ok(!!py && !/evil-tail/.test(py.words), `CONTROL (r17): the mutant that cuts the CARD's value draws a middle slice («${py && py.words}») — the leg goes red`, { py: py && py.words });
+  } catch (e) { ok(false, '㉟ D: the pure strip runs', e.stack); }
 }
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
 process.exit(fail ? 1 : 0);

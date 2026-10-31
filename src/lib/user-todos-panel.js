@@ -1319,7 +1319,7 @@ export function installUserTodos(app) {
   const annCards = new Map(); // item id → { el, key: {id, createdAt}, until, expiredAt }
   const annAnchor = () => [btn, mBtn].find((b) => b && b.getClientRects().length > 0) || null;
   const annWords = (it) => announceWords(it, { who: nameFor(it.sessionKey, [it]), what: wordsOf(it), now: Date.now(), t });
-  let annAt = '', annPin = null; // r15: the card a POINTER rests on and its top (annHeld)
+  let annAt = '', annPin = null, annBox = null; // r15: the card a POINTER rests on and its top (annHeld); r17: the box the last placement left (annFold)
   // r14: a card under the pointer stays where it was read — r15 (the r14 acceptance: a card that ARRIVED while the pointer rested
   // grew the held stack DOWNWARD: the read card slid away, the new one took its place under the pointer, the stack ran over the
   // For-you button and off the bottom): the HELD card keeps its rectangle (a card above it gone ⇒ the stack moves so it stays;
@@ -1333,25 +1333,64 @@ export function installUserTodos(app) {
   // edge FOLDS into «N more» (the farthest from the read card first; the «N more» line itself last) until the pointer leaves —
   // annLayout unfolds nothing while held, so the clamp after it has nothing to move (it moves the read card only when that card
   // itself is past the edge: a window that shrank under it). → the stack's top
-  const annFold = (pin, left, top, w, vh) => {
+  // r17 (the r16 acceptance: a 3×3 tiled grid — the free rule found no room and stood at its own place over the composers; the
+  // pointer resting on the middle card folded the other two AND the «N more» line, nothing else having changed): HELD ⊆ FREE —
+  // a held stack folds only for what the free rule itself avoids in the same geometry, on ITS ladder: `lv` (annFree) is where
+  // the free place stands — clear of everything (0: every rect avoided), over a title bar's buttons only (1: the soft give way),
+  // over a composer or a strip because there was no room (2: only the For-you button and the screen's edge are avoided); a
+  // fold that leaves the read card alone at 0 retries at 1 (the soft give way, as the free rule's do). THE STACK'S EXTENT
+  // (`annBox`, the box the last placement left — r17, the r16 acceptance's MINOR: the read card's X pressed under the pointer
+  // shrank the stack to «N more» instead of refilling the room it had): a held stack never grows past it — a folded card
+  // comes back where it fits inside (the read card gone ⇒ the next one in its room), never below the bottom nor above the top
+  const annFold = (pin, left, top, w, vh, lv = 0, chrome = []) => {
     const a = annAnchor(), ar = a ? a.getBoundingClientRect() : null, tb = document.getElementById('toolbar'), tr = tb ? tb.getBoundingClientRect() : null;
-    const avoid = [...chromeAvoidRects(left, left + w, (e) => annStack.contains(e) || !!e.closest?.('#global-toasts')), ...(ar && ar.width ? [ar] : [])];
-    const topY = tr && tr.height && tr.bottom < vh / 2 ? tr.bottom : 4, bottomY = vh - 4, more = annStack.querySelector(':scope > .uta-more');
-    let moreOff = false;
-    for (let k = 0; k < 32; k++) {
-      const sr = annStack.getBoundingClientRect(), dy = top - sr.top; // (measured where the stack stands now; it will stand dy lower)
-      const kids = [...annStack.querySelectorAll(':scope > .uta-card'), more].filter((e) => e && !e.hidden), at = pin ? kids.indexOf(pin) : -1;
-      const bad = kids.map((e) => { const b = e.getBoundingClientRect(), t0 = b.top + dy, b0 = b.bottom + dy; return e !== pin && (t0 < topY || b0 > bottomY || avoid.some((x) => x.left < left + w && x.right > left && x.top < b0 && x.bottom > t0)); });
-      const below = bad.some((x, j) => x && j > at), above = bad.some((x, j) => x && j < at);
-      if (!below && !above) break;
-      const cards = kids.filter((e) => e !== more && e !== pin);
-      const fold = below ? (cards.filter((e) => kids.indexOf(e) > at).pop() || (more && !more.hidden && more !== pin ? more : null)) : cards.find((e) => kids.indexOf(e) < at) || null;
-      if (!fold) break;
-      fold.hidden = true;
-      if (fold === more) moreOff = true; else annMore(moreOff); // (a fold counted in «N more» — the line, once put away, stays away)
-      top = pin ? annStack.getBoundingClientRect().top + (annPin.top - pin.getBoundingClientRect().top) : top; // (the read card's place kept)
+    const btn = ar && ar.width ? [ar] : [], ext = annBox;
+    const topY = Math.max(tr && tr.height && tr.bottom < vh / 2 ? tr.bottom : 4, ext ? ext.top - 0.5 : 4), bottomY = Math.min(vh - 4, ext ? ext.bottom + 0.5 : vh), more = annStack.querySelector(':scope > .uta-more');
+    const cards = [...annStack.querySelectorAll(':scope > .uta-card')], was = cards.map((e) => e.hidden), top0 = top;
+    const pass = (avoid) => {
+      let moreOff = false;
+      for (let k = 0; k < 32; k++) {
+        const sr = annStack.getBoundingClientRect(), dy = top - sr.top; // (measured where the stack stands now; it will stand dy lower)
+        const kids = [...cards, more].filter((e) => e && !e.hidden), at = pin ? kids.indexOf(pin) : -1;
+        const bad = kids.map((e) => { const b = e.getBoundingClientRect(), t0 = b.top + dy, b0 = b.bottom + dy; return e !== pin && (t0 < topY || b0 > bottomY || avoid.some((x) => x.left < left + w && x.right > left && x.top < b0 && x.bottom > t0)); });
+        const below = bad.some((x, j) => x && j > at), above = bad.some((x, j) => x && j < at);
+        if (!below && !above) break;
+        const rest = kids.filter((e) => e !== more && e !== pin);
+        const fold = below ? (rest.filter((e) => kids.indexOf(e) > at).pop() || (more && !more.hidden && more !== pin ? more : null)) : rest.find((e) => kids.indexOf(e) < at) || null;
+        if (!fold) break;
+        fold.hidden = true;
+        if (fold === more) moreOff = true;
+        annMore(moreOff); // (a fold counted; the line that cannot stand gives its count to the read card's own row — annMore)
+        top = pin ? annStack.getBoundingClientRect().top + (annPin.top - pin.getBoundingClientRect().top) : top; // (the read card's place kept)
+      }
+    };
+    const hard = chrome.filter((x) => !x.soft);
+    pass([...(lv < 1 ? chrome : lv < 2 ? hard : []), ...btn]);
+    if (lv < 1 && hard.length < chrome.length && pin && cards.some((e, j) => !was[j] && e !== pin) && !cards.some((e) => e !== pin && !e.hidden)) {
+      cards.forEach((e, j) => { e.hidden = was[j]; }); annMore(); top = top0; // (the free rule's middle rung: the soft give way)
+      pass([...hard, ...btn]);
     }
     return top;
+  };
+  /** THE FREE RULE (r14; r17 — ONE function, the free placement's and the held stack's measure of it): its own place at the
+   *  For-you button (above it, the taskbar at the bottom; below it, the phone's top bar), the clamp, then off the chrome it
+   *  meets — r14 (the r13 acceptance's shot: the first card over Session 10's Send — the toasts above it stood clear of the
+   *  composer, the stack did not): THE TOASTS' ONE RULE — never on a window's own controls a person SEES (utils
+   *  chromeAvoidRects: a composer, an attention strip, a title bar's buttons — a covered window's are none): risen above what
+   *  it meets (sunk below it, under a top bar's button); no room ⇒ its own place. → { left, top, chrome, lv } — `lv` what that
+   *  place stands clear of: 0 everything, 1 all but a title bar's buttons (the soft gave way), 2 not a composer / a strip
+   *  either (no room) */
+  const annFree = (w, h, vw, vh) => {
+    const a = annAnchor(), r = a ? a.getBoundingClientRect() : null, up = !!r && r.top > vh / 2; // the taskbar at the bottom: above it; the phone's top bar: below it
+    let left = r ? r.right - w : (vw - w) / 2, top = r ? (up ? r.top - h - 6 : r.bottom + 6) : 8;
+    top = Math.max(4, Math.min(vh - h - 4, top)); left = Math.max(4, Math.min(vw - w - 4, left));
+    const tb = document.getElementById('toolbar'), tr = tb ? tb.getBoundingClientRect() : null;
+    const chrome = chromeAvoidRects(left, left + w, (e) => annStack.contains(e) || !!e.closest?.('#global-toasts'));
+    const spot = toastDeskSpot({ rect: { left, right: left + w, top, bottom: top + h, height: h }, avoid: chrome, down: !up,
+      topY: tr && tr.height && tr.bottom < vh / 2 ? tr.bottom : 4, bottomY: vh - 4, vh, scale: 1 });
+    if (spot) top = spot.top != null ? spot.top : vh - spot.bottom - h;
+    const meets = (list) => list.some((x) => x.left < left + w && x.right > left && x.top < top + h && x.bottom > top);
+    return { left, top, chrome, lv: !meets(chrome) ? 0 : !meets(chrome.filter((x) => !x.soft)) ? 1 : 2 };
   };
   const annPlace = () => {
     if (!annStack || !annStack.isConnected) return;
@@ -1360,25 +1399,16 @@ export function installUserTodos(app) {
     if (annHeld()) {
       const el = annPin.el.parentNode === annStack && !annPin.el.hidden ? annPin.el : null;
       left = pr.left; top = pr.top + (el ? annPin.top - el.getBoundingClientRect().top : 0);
-      top = annFold(el, left, top, pr.width, vh);
+      const f = annFree(pr.width, pr.height, vw, vh); // (r17: what the free rule would do in this geometry — the held stack's ladder)
+      top = annFold(el, left, top, pr.width, vh, f.lv, Math.abs(f.left - left) < 1 ? f.chrome : chromeAvoidRects(left, left + pr.width, (e) => annStack.contains(e) || !!e.closest?.('#global-toasts')));
     } else {
-      const a = annAnchor(), r = a ? a.getBoundingClientRect() : null, up = !!r && r.top > vh / 2; // the taskbar at the bottom: above it; the phone's top bar: below it
-      left = r ? r.right - pr.width : (vw - pr.width) / 2;
-      top = r ? (up ? r.top - pr.height - 6 : r.bottom + 6) : 8;
-      top = Math.max(4, Math.min(vh - pr.height - 4, top)); left = Math.max(4, Math.min(vw - pr.width - 4, left));
-      // r14 (the r13 acceptance's shot: the first card over Session 10's Send — the toasts above it stood clear of the composer,
-      // the stack did not): THE TOASTS' ONE RULE — never on a window's own controls a person SEES (utils chromeAvoidRects: a
-      // composer, an attention strip, a title bar's buttons — a covered window's are none): risen above what it meets (sunk
-      // below it, under a top bar's button); no room ⇒ its own place. A move asks the toasts again (they stand clear of the stack)
-      const tb = document.getElementById('toolbar'), tr = tb ? tb.getBoundingClientRect() : null;
-      const spot = toastDeskSpot({ rect: { left, right: left + pr.width, top, bottom: top + pr.height, height: pr.height }, avoid: chromeAvoidRects(left, left + pr.width, (e) => annStack.contains(e) || !!e.closest?.('#global-toasts')), down: !up,
-        topY: tr && tr.height && tr.bottom < vh / 2 ? tr.bottom : 4, bottomY: vh - 4, vh, scale: 1 });
-      if (spot) top = spot.top != null ? spot.top : vh - spot.bottom - pr.height;
+      ({ left, top } = annFree(pr.width, pr.height, vw, vh));
     }
     const ph = annStack.getBoundingClientRect().height; // (r16: a held stack folded since `pr` — its own height now)
     top = Math.max(4, Math.min(vh - ph - 4, top)); left = Math.max(4, Math.min(vw - pr.width - 4, left)); // THE CLAMP: nothing off the screen, held or not
     annStack.style.top = (top / Z) + 'px';
     annStack.style.left = (left / Z) + 'px';
+    annBox = { top, bottom: top + ph }; // (r17: the extent a held stack keeps)
     const at = `${Math.round(top)},${Math.round(left)}`;
     if (at !== annAt) { const moved = !!annAt; annAt = at; if (moved) placeToastsSoon(); }
     if (annPin && annPin.el.parentNode === annStack) annPin.top = annPin.el.getBoundingClientRect().top; // (where the clamp left it)
@@ -1429,24 +1459,32 @@ export function installUserTodos(app) {
   const annYield = () => { if (!annCards.size) return; annCards.clear(); annLayout(); };
   const annLayout = () => {
     if (annStack && !annStack.isConnected) { annCards.clear(); annStack = null; } // Esc closed the stack: every card with it
-    if (!annCards.size) { annStack?.remove(); annStack = null; annAt = ''; annPin = null; clearInterval(annTimer); annTimer = 0; annWatch(false); return; }
+    if (!annCards.size) { annStack?.remove(); annStack = null; annAt = ''; annPin = null; annBox = null; clearInterval(annTimer); annTimer = 0; annWatch(false); return; }
     const held = annHeld(); // r15: a card that arrives while a pointer rests on the stack waits off it until the pointer leaves
     const order = [...annCards.values()].filter((c) => !held || c.el.parentNode === annStack).sort((x, y) => newestFirst(x.key, y.key)); // the newest FILING first, a same-ms tie by id (r11 — a burst arrives in one snapshot)
-    order.forEach((c, k) => { c.el.hidden = k >= ANN_SHOWN || (held && c.el.hidden); }); // r16: a held stack UNFOLDS nothing — a card gone above the read one never brings a folded one out below it
+    order.forEach((c, k) => { c.el.hidden = k >= ANN_SHOWN; }); // r17: a held stack refills, then annFold folds what would leave its extent (r16's: never below the read card)
     const more = annStack.querySelector(':scope > .uta-more');
     const kids = [...annStack.querySelectorAll(':scope > .uta-card')]; // moved only when the order changed (a card under the pointer stays put)
     for (const c of order) if (c.el.parentNode !== annStack) c.until = Math.max(c.until, Date.now() + ANN_MS); // (a card that waited: its time from when it shows)
     if (kids.length !== order.length || kids.some((e, k) => e !== order[k].el)) for (const c of order) annStack.insertBefore(c.el, more);
-    annMore(held && more.hidden);
+    annMore();
     annPlace();
   };
-  /** THE «N more waiting» LINE: the cards the stack folds (r16: what a held stack folded too) — `kept` = a held stack's line
-   *  that was put away stays away (it never comes out under the read card) */
-  const annMore = (kept = false) => {
-    const more = annStack.querySelector(':scope > .uta-more'), n = [...annStack.querySelectorAll(':scope > .uta-card')].filter((e) => e.hidden).length;
-    if (kept && more.hidden) return;
-    more.hidden = n <= 0;
+  /** THE «N more waiting» LINE: the cards the stack folds (r16: what a held stack folded too). r17 (the r16 acceptance's break
+   *  probe: the pointer on a maximized chat's last card, the strip grown — the line folded first and the folded card went
+   *  UNCOUNTED): THE COUNT IS ALWAYS SAID — `off` = the line cannot stand (a held stack folded it) ⇒ the READ card's own head
+   *  row carries it (.uta-more-in, beside who asks — the card's rectangle unchanged) */
+  const annMore = (off = false) => {
+    const more = annStack.querySelector(':scope > .uta-more'), cards = [...annStack.querySelectorAll(':scope > .uta-card')], n = cards.filter((e) => e.hidden).length;
+    more.hidden = n <= 0 || off;
     if (n > 0) { const w = t('{n} more waiting — open For you', { n }); if (more.textContent !== w) more.textContent = w; }
+    const on = off && n > 0 && annPin && annPin.el.parentNode === annStack ? annPin.el : null;
+    for (const e of cards) {
+      const c = e.querySelector?.('.uta-more-in');
+      if (!c) continue;
+      if (c.hidden !== (e !== on)) c.hidden = e !== on;
+      if (e === on) { const w = t('{n} more waiting', { n }); if (c.textContent !== w) c.textContent = w; }
+    }
   };
   const annPaint = (c, it) => {
     const w = annWords(it);
@@ -1529,7 +1567,9 @@ export function installUserTodos(app) {
     const go = mk('button', 'uta-go'); go.type = 'button'; go.title = t('Open it');
     const icon = mk('span', 'uta-icon'); icon.innerHTML = UI_ICONS.inbox; icon.setAttribute('aria-hidden', 'true');
     const txt = mk('span', 'uta-text');
-    txt.append(mk('span', 'uta-who'), mk('span', 'uta-what'), mk('span', 'uta-clock'));
+    const head = mk('span', 'uta-head'), cnt = mk('span', 'uta-more-in'); cnt.hidden = true; // r17: the count the «N more» line could not stand to say (annMore)
+    head.append(mk('span', 'uta-who'), cnt);
+    txt.append(head, mk('span', 'uta-what'), mk('span', 'uta-clock'));
     go.append(icon, txt);
     const x = mk('button', 'uta-x'); x.type = 'button'; x.innerHTML = UI_ICONS.close; x.title = t('Dismiss'); x.setAttribute('aria-label', t('Dismiss'));
     el.append(go, x);

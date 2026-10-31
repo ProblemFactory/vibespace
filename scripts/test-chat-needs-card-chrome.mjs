@@ -2043,17 +2043,30 @@ try {
       console.log(`    (㉒ d: try ${tries22 + 1} — ${!rw.live ? 'the clock was past «left» when the watch went on' : !rw.dueAt ? 'its words never turned' : 'the strip kept its size at the turn'} (${rw.W} px); again with a fresh ask)`);
     }
     const W22 = rw.W;
+    // r17 (the r16 acceptance's shots: a 592 px window's «Always let this conversation use it (these hosts)» past its edge, Deny
+    // outside it; ~670 px Deny clipped): EVERY ANSWER INSIDE THE WINDOW — each visible button of the strip against the window's
+    // and the strip's right edges (and the strip's left), the strip never scrolling sideways
+    const EDGE22 = `(() => { ${R22} const w = ${CHATOF(s22)}, d = w.element.querySelector('.chat-attn-dock'), wr = R(w.element), dr = R(d); const acts = [...d.querySelectorAll('.ut-act')].filter((e) => e.getClientRects().length).map((e) => ({ w: e.textContent.trim().slice(0, 24), ...R(e) }));
+      return { W: wr && wr.r - wr.l, wr, dr, acts, over: acts.filter((a) => a.r > Math.min(wr.r, dr.r) + 0.5 || a.l < dr.l - 0.5), scrolls: d.scrollWidth > d.clientWidth + 1 }; })()`;
+    const e1 = await A.evalJs(EDGE22);
     await A.shot('desktop-dock-clock-rewrap.png');
     const inFrame = (sizes, placed) => sizes.length > 0 && sizes.every((z) => placed.some((p) => Math.abs(p - z.at) < 20)); // (each size the observer saw: a placement in its frame)
     check(`RED-able (r16 — 882665da7: a strip re-wrapped by its clock's words never reached chromeMoved — the stack followed at the 1 s tick): a ${W22} px chat at the For-you button's side (try ${Math.min(tries22, 2) + 1}), its clock turned to «${(rw.clock || '').trim().slice(0, 40)}…» — the strip ${J((rw.sizes || []).map((z) => z.h))} px, ${J(rw.after.map((z) => z.h))} after the turn ⇒ the stack re-placed in the frame of each (${(rw.placed || []).length} placement(s), ${rw.calls} call(s)); the stack ${J(rw.stack)} clear of the strip ${J(rw.strip)}`,
       !!W22 && rw.live && rw.after.length > 0 && inFrame(rw.after, rw.placed) && rw.placed.length <= rw.calls && !meets(rw.stack, rw.strip), rw);
     const n0 = rw.placed.length, s0 = rw.sizes.length;
     await A.evalJs(AT22(Math.max(300, (W22 || 560) - 150))); await sleep(700);
-    const rz = await A.evalJs(READ22);
+    const rz = await A.evalJs(READ22), e2 = await A.evalJs(EDGE22);
     await A.shot('desktop-dock-resized.png');
     const newSizes = rz.sizes.slice(s0), newPlaced = rz.placed.slice(n0);
     check(`RED-able (r16 — 882665da7: a window's resize re-wrapped the strip outside _dockPass): the window resized ⇒ the strip ${J(newSizes.map((z) => z.h))} px, the stack re-placed in that frame — ${newPlaced.length} placement(s) for ${newSizes.length} size change(s) (the toasts asked with each); the stack ${J(rz.stack)} clear of the strip ${J(rz.strip)}`,
       newSizes.length >= 1 && newPlaced.length === newSizes.length && newSizes.every((z) => newPlaced.some((p) => Math.abs(p - z.at) < 20)) && !meets(rz.stack, rz.strip), { rz, newSizes, newPlaced });
+    // (f) r17 — THE ANSWERS NEVER PASS THE WINDOW'S EDGE: the two shots above, and the acceptance's widths 592 and 670 (the run
+    // ask: Allow once · Always let this conversation use it (these hosts) · Deny), each shot
+    const edges = [['rewrap', e1], ['resized', e2]];
+    for (const W of [592, 670]) { await A.evalJs(AT22(W)); await sleep(700); await A.evalJs(noToasts); edges.push([W, await A.evalJs(EDGE22)]); await A.shot(`desktop-dock-${W}.png`); }
+    const edgeOk = edges.every(([, e]) => !!e && e.acts.length >= 2 && !e.over.length && !e.scrolls);
+    check(`RED-able (r17 — e77f7a3f6: at 592 px «Always let this conversation use it (these hosts» cut at the window's edge, Deny outside it; at ~670 px Deny clipped): the strip's answers inside the window at every width — ${edges.map(([k, e]) => `${k}: ${e && e.W} px, ${J(e && e.acts.map((a) => [a.w.slice(0, 12), a.l, a.r, a.b - a.t]))}${e && e.over.length ? ' OVER ' + J(e.over) : ''}`).join('; ')}`,
+      edgeOk, edges);
     await A.evalJs(`(() => { if (window.__cmF22) app.foryouRows.chromeMoved = window.__cmF22; window.__ro22?.disconnect(); window.__mo22?.disconnect(); delete window.__cm22; delete window.__cmF22; return 1; })()`);
     await A.evalJs(PUSH22('[]')); await sleep(500);
     // (e) THE COST: four open strips, one broadcast that rewords each — the strip's layout reads in the passes (a counted
@@ -2075,12 +2088,35 @@ try {
     const cost = await A.evalJs(`(() => { const n = window.__dockReads; Object.defineProperty(HTMLElement.prototype, 'offsetHeight', window.__ohD); delete window.__ohD; delete window.__dockReads; return { reads: n, reworded: [...document.querySelectorAll('.chat-attn-dock:not([hidden]) .ut-item .ut-text')].filter((e) => /asks again/.test(e.textContent)).length }; })()`);
     console.log(`    (㉒ e: four strips, one broadcast — the strips' layout reads ${cost.reads}, the page's layouts ${l1 - l0})`);
     check(`RED-able (r16 — 882665da7 read each strip's height before and after its pass): four open strips, one broadcast that rewords each (${cost.reworded} reworded) ⇒ the passes read NO strip's layout (${cost.reads} reads; the page laid out ${l1 - l0} times over the broadcast's frames)`, cost.reworded === 4 && cost.reads === 0, { cost, layouts: l1 - l0 });
+    await A.evalJs(PUSH22('[]')); await sleep(600);
+    // (g) r17 — HELD ⊆ FREE (the r16 acceptance: a 3×3 tiled grid — the free rule found no room and stood at its own place over the
+    // composers; the mouse resting on the middle card folded the other two and the «N more» line): the stack's column tiled as a
+    // 3×3 grid tiles it — three chats one above another at the right (their title bars' buttons soft, their composers hard)
+    const TILE22 = (sid, k) => `(() => { const w = [...app.wm.windows.values()].find((x) => x.type === 'chat' && app.sessions.get(x.id)?.sessionId === ${J(sid)}); if (!w) return 0; if (w.isMaximized) app.wm.toggleMaximize(w.id); const ws = app.wm.workspace.getBoundingClientRect(), W = Math.floor(ws.width / 3), H = Math.floor(ws.height / 3); app.wm.resizeWindowTo(w.id, { w: W, h: H }); w.element.style.left = (2 * W) + 'px'; w.element.style.top = (${k} * H) + 'px'; return 1; })()`;
+    for (const [k, sid] of [s22, more22[0], more22[1]].entries()) await A.evalJs(TILE22(sid, k));
+    await sleep(700);
+    const GRID22 = `(() => { ${R22} const s = document.querySelector('.ut-announce'); if (!s) return null; const sr = R(s); const kids = [...s.children].filter((e) => !e.hidden && e.getClientRects().length).map((e) => ({ id: e.dataset.id || 'more', ...R(e) }));
+      const inCol = (r) => !!r && r.l < sr.r && r.r > sr.l, all = (q) => [...document.querySelectorAll(q)].filter((e) => e.getClientRects().length).map(R).filter(inCol);
+      return { stack: sr, kids, hard: all('.chat-input-area'), soft: all('.window-controls'), hover: s.matches(':hover'), counts: [...s.querySelectorAll('.uta-more-in')].filter((e) => !e.hidden).map((e) => e.textContent) }; })()`;
+    const g3i = Array.from({ length: 3 }, (_, k) => ex22(`ut-r17grid${k + 1}`, T22 - (3 - k) * 1000));
+    await A.evalJs(PUSH22(J(g3i))); await A.waitFor(`document.querySelectorAll('.ut-announce .uta-card').length === 3`, 8000); await sleep(1300); await A.evalJs(noToasts);
+    const gFree = await A.evalJs(GRID22), gk = gFree && gFree.kids[1];
+    if (gk) { await mouse((gk.l + gk.r) / 2, (gk.t + gk.b) / 2); await sleep(500); }
+    await sleep(1600); await A.evalJs(noToasts); // (a tick of the stack's own clock, twice)
+    const gHeld = await A.evalJs(GRID22);
+    await A.shot('desktop-1280-held-grid.png');
+    await mouse(40, 300); await sleep(700);
+    const noRoom = !!gFree && gFree.kids.some((x) => gFree.hard.some((c) => meets(x, c))); // (the precondition: the free rule found no room — it stands over a composer)
+    const kidsOf = (v) => (v ? v.kids.filter((x) => x.id !== 'more').map((x) => [x.id, x.t, x.b]) : null);
+    check(`RED-able (r17 — e77f7a3f6: the mouse on the middle card folded the other two and the «N more» line): the stack's column tiled as a 3×3 grid tiles it (composers ${J(gFree && gFree.hard.map((c) => [c.t, c.b]))}, title bars' buttons ${J(gFree && gFree.soft.map((c) => [c.t, c.b]))}) — no room, the free rule's own place over them (${noRoom}); the mouse resting on the middle card, two ticks ⇒ all three stay where they were (${J(kidsOf(gHeld))}; free ${J(kidsOf(gFree))})`,
+      noRoom && !!gHeld && gHeld.hover && J(kidsOf(gHeld)) === J(kidsOf(gFree)) && kidsOf(gHeld).length === 3, { gFree, gHeld });
+    await A.evalJs(PUSH22('[]')); await sleep(500);
     await A.evalJs(PUSH22('d.todos.open')); await sleep(500);
     await A.evalJs(`(() => { for (const sid of ${J(more22)}) { const w = [...app.wm.windows.values()].find((x) => x.type === 'chat' && app.sessions.get(x.id)?.sessionId === sid); if (w) app.wm.closeWindow(w.id); } return 1; })()`); await sleep(400);
   } catch (e) { fail++; console.log('  ✗ ㉒ threw: ' + (e?.message || e)); }
   lap('㉒ done');
 
-  check('the shots are written (desktop 1280 + phone 375)', ['desktop-1280-watch-request.png', 'desktop-1280-ask-chips.png', 'desktop-1280-resolved.png', 'phone-375-watch-request.png', 'phone-375-ask-chips.png', 'phone-375-resolved.png', 'phone-375-accordion.png', 'phone-375-accordion-opened.png', 'desktop-1280-accordion.png', 'desktop-1280-tail.png', 'phone-390-tail.png', 'desktop-1280-dock-one.png', 'desktop-1280-dock-three.png', 'desktop-1280-dock-twenty.png', 'desktop-1280-dock-400-chars.png', 'desktop-1280-dock-six-options.png', 'desktop-320-dock.png', 'desktop-1280-dock-composer-6-lines.png', 'desktop-1280-dock-5000-up.png', 'phone-390-dock-two.png', 'phone-390-dock-twenty.png', 'phone-390-dock-six-options.png', 'desktop-1280-announce-one.png', 'desktop-1280-announce-ten.png', 'desktop-1280-announce-expired.png', 'desktop-1280-announce-two-windows.png', 'phone-390-announce.png', 'desktop-1280-reach-card.png', 'desktop-1280-dock-reach.png', 'desktop-1280-dock-reach-instance.png', 'phone-390-dock-reach.png', 'desktop-380-dock-reach.png', 'desktop-1280-announce-yields-tray.png', 'desktop-1280-announce-under-dialog.png', 'desktop-1280-announce-clear-composer.png', 'desktop-1280-dock-run.png', 'desktop-1280-announce-form-behind.png', 'phone-375-announce-over-home.png', 'phone-375-announce-under-tray.png', 'phone-375-dock-run.png', 'desktop-1280-dock-run-past.png', 'desktop-1280-dock-run-writable.png', 'desktop-1280-dock-run-again.png', 'desktop-1280-dock-run-many.png', 'desktop-700-dock-late.png', 'phone-375-dock-run-writable.png', 'desktop-1280-held-four.png', 'desktop-1280-held-five.png', 'desktop-1280-held-maxchat.png', 'desktop-1280-held-maxchat-five.png', 'desktop-dock-clock-rewrap.png', 'desktop-dock-resized.png', 'desktop-1280-dock-run-manywarn.png', 'desktop-1280-dock-run-manyagain.png'].every((f) => fs.existsSync(path.join(SHOTS, f)))); // (+ lane needs-card-tail r10: the strip's and the announce's shots — the UI verdict is visual)
+  check('the shots are written (desktop 1280 + phone 375)', ['desktop-1280-watch-request.png', 'desktop-1280-ask-chips.png', 'desktop-1280-resolved.png', 'phone-375-watch-request.png', 'phone-375-ask-chips.png', 'phone-375-resolved.png', 'phone-375-accordion.png', 'phone-375-accordion-opened.png', 'desktop-1280-accordion.png', 'desktop-1280-tail.png', 'phone-390-tail.png', 'desktop-1280-dock-one.png', 'desktop-1280-dock-three.png', 'desktop-1280-dock-twenty.png', 'desktop-1280-dock-400-chars.png', 'desktop-1280-dock-six-options.png', 'desktop-320-dock.png', 'desktop-1280-dock-composer-6-lines.png', 'desktop-1280-dock-5000-up.png', 'phone-390-dock-two.png', 'phone-390-dock-twenty.png', 'phone-390-dock-six-options.png', 'desktop-1280-announce-one.png', 'desktop-1280-announce-ten.png', 'desktop-1280-announce-expired.png', 'desktop-1280-announce-two-windows.png', 'phone-390-announce.png', 'desktop-1280-reach-card.png', 'desktop-1280-dock-reach.png', 'desktop-1280-dock-reach-instance.png', 'phone-390-dock-reach.png', 'desktop-380-dock-reach.png', 'desktop-1280-announce-yields-tray.png', 'desktop-1280-announce-under-dialog.png', 'desktop-1280-announce-clear-composer.png', 'desktop-1280-dock-run.png', 'desktop-1280-announce-form-behind.png', 'phone-375-announce-over-home.png', 'phone-375-announce-under-tray.png', 'phone-375-dock-run.png', 'desktop-1280-dock-run-past.png', 'desktop-1280-dock-run-writable.png', 'desktop-1280-dock-run-again.png', 'desktop-1280-dock-run-many.png', 'desktop-700-dock-late.png', 'phone-375-dock-run-writable.png', 'desktop-1280-held-four.png', 'desktop-1280-held-five.png', 'desktop-1280-held-maxchat.png', 'desktop-1280-held-maxchat-five.png', 'desktop-dock-clock-rewrap.png', 'desktop-dock-resized.png', 'desktop-dock-592.png', 'desktop-dock-670.png', 'desktop-1280-held-grid.png', 'desktop-1280-dock-run-manywarn.png', 'desktop-1280-dock-run-manyagain.png'].every((f) => fs.existsSync(path.join(SHOTS, f)))); // (+ lane needs-card-tail r10: the strip's and the announce's shots — the UI verdict is visual)
   check('no page error', pageErrors.length === 0, pageErrors.slice(0, 5));
 } catch (e) { fail++; console.log('  ✗ threw: ' + (e?.stack || e)); }
 

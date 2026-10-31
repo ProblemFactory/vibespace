@@ -708,7 +708,7 @@
 .cad-rows .ut-body > .ut-run { display: contents; }
 .cad-rows .ut-run > :not(.ut-run-cmd, .ut-run-gist, .ut-run-answer) { display: none !important; }
 .cad-rows .ut-run > .ut-run-cmd { order: 4; flex: 1 1 100%; min-width: 0; max-height: none; margin: 0; padding: 0; border: none; background: none; font-size: 11px; line-height: 16px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.cad-rows .ut-run > .ut-run-answer { order: 5; flex: none; margin: 0; display: inline-flex; align-items: center; gap: 4px; }
+.cad-rows .ut-run > .ut-run-answer { order: 5; flex: 0 1 auto; max-width: 100%; min-width: 0; margin: 0; display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .cad-rows .ut-run > .ut-run-gist { order: 4; flex: 1 1 100%; min-width: 0; margin: 0; display: flex; flex-wrap: wrap; column-gap: 12px; font-size: 11px; line-height: 16px; white-space: normal; overflow-wrap: anywhere; }
 .cad-rows .ut-run-gist > * { min-width: 0; margin: 0; font-size: inherit; }
 .cad-rows .ut-run-gist .ut-run-lbl { margin-inline-end: 0.3em; }
@@ -719,7 +719,7 @@
 /* an app install's card: its answers only (Install / Not now, the progress with Open / Try again) — the rest is the card's */
 .cad-rows .ut-body > .ut-app-card { display: contents; }
 .cad-rows .ut-app-card > :not(.ut-exit-answer, .ut-app-progress) { display: none !important; }
-.cad-rows .ut-app-card > :is(.ut-exit-answer, .ut-app-progress) { order: 5; flex: none; margin: 0; display: inline-flex; align-items: center; gap: 4px; }
+.cad-rows .ut-app-card > :is(.ut-exit-answer, .ut-app-progress) { order: 5; flex: 0 1 auto; max-width: 100%; min-width: 0; margin: 0; display: inline-flex; flex-wrap: wrap; align-items: center; gap: 4px; }
 .cad-rows .ut-body > .ut-text { order: 1; flex: 1 1 10em; min-width: 6em; min-height: 26px; line-height: 26px; font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: pointer; }
 .cad-rows .ut-body > .ut-text:is(:hover, :focus-visible) { color: var(--accent); }
 .cad-rows .ut-item-resolved > .ut-body > .ut-text { cursor: default; }
@@ -727,7 +727,12 @@
 .cad-rows .ut-body > .ut-actions { order: 3; float: none; flex: none; margin: 0; opacity: 1; gap: 4px; display: inline-flex; }
 .cad-rows .ut-act { width: auto; min-width: 26px; height: 26px; padding: 0 6px; font-size: 13px; display: inline-flex; align-items: center; justify-content: center; }
 .cad-rows .ut-body > :is(.ut-exit-cmd, .ut-proposal-plan) { order: 4; flex: 1 1 100%; min-width: 0; max-height: none; margin: 0; padding: 0; border: none; background: none; font-size: 11px; line-height: 16px; color: var(--text-secondary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.cad-rows .ut-body > :is(.ut-exit-answer, .ut-reconnect-row) { order: 5; flex: none; margin: 0; display: inline-flex; gap: 4px; }
+.cad-rows .ut-body > :is(.ut-exit-answer, .ut-reconnect-row) { order: 5; flex: 0 1 auto; max-width: 100%; min-width: 0; margin: 0; display: inline-flex; flex-wrap: wrap; gap: 4px; }
+/* r17 (the r16 acceptance's shots: a 592 px window's strip ran «Always let this conversation use it (these hosts)» past the
+   window's edge, Deny outside it; at ~670 px Deny clipped — r12b's wrap stood only under a 520 px strip): THE ANSWERS NEVER
+   PASS THE EDGE, at every width — the row takes at most the strip's line and wraps as whole buttons; a label longer than the
+   line wraps its words, never under its longest one (the narrow strip's rules below keep their shape) */
+.cad-rows .ut-exit-answer > .ut-act { flex: 0 1 auto; max-width: 100%; height: auto; white-space: normal; line-height: 16px; padding-block: 4px; } /* (one line: 26 px as before; the floors — a touch's 44 — stand) */
 /* r12: the reach an automation answer carries, SAID beside the answers (user-todos-row.js scopeHtml — the strip draws no pick;
    a press point never sends a scope it does not show); 整个 VibeSpace red-tinted (style.css .ut-ak-reach-instance) */
 .cad-rows .ut-body > .ut-ak-scope { order: 5; flex: none; margin: 0; font-size: 12px; line-height: 26px; color: var(--text-secondary); white-space: nowrap; }

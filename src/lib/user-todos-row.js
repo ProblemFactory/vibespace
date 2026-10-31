@@ -259,7 +259,7 @@ const runWindowOffHtml = (v) => (v && v.window && v.window.excepted ? `<span cla
 const runChangesHtml = (v) => (v && v.changes ? `<div class="ut-run-changes" data-changes="${v.changes.lines.length}">${v.changes.redrawn ? `<span class="ut-run-line ut-run-redrawn">${escHtml(v.changes.redrawn)}</span>` : ''}${linesHtml(v.changes.lines)}</div>` : '');
 /** The answers the STRIP withholds from a run ask its card offers (its hosts too long for a strip — r16: the hosts row's bound
  *  alone) — the landing's toast says so (runCardOf: a run ask's card, else null — no branch on the type here). */
-export const stripWithholds = (i, t = tr) => { const v = i && i.action && i.action.askId ? runCardOf(i, { t }) : null; return v && !runStripOf(v).fits ? heldAnswers(i).filter((a) => a === 'always') : []; };
+export const stripWithholds = (i, t = tr) => { const v = i && i.action && i.action.askId ? runCardOf(i, { t }) : null; return v && !runStripOf(v, { t }).fits ? heldAnswers(i).filter((a) => a === 'always') : []; };
 /** lane needs-card-tail r15 (the r14 acceptance — the strip offered «Always let this conversation use it (these hosts)» with
  *  the hosts, the warning row, the «asked again» line and the cut hidden by its grammar): THE STRIP'S RUN CARD — its command
  *  head, WHAT ITS ANSWERS DECIDE ON (foryou-actions runStripOf: the hosts, every warning row, the «asked again» line, the
@@ -275,7 +275,7 @@ export function runFactsHtml(i, t, { buttons = true, strip = false } = {}) {
   const v = runCardOf(i, { t });
   if (!v) return '';
   if (strip) { // r15: the strip's own — the head, what it decides on, the answers those carry (never the card's rows, folds or hint)
-    const s = runStripOf(v), held = i.action.askId ? heldAnswers(i) : [], answers = held.filter((a) => a !== 'always' || s.fits);
+    const s = runStripOf(v, { t }), held = i.action.askId ? heldAnswers(i) : [], answers = held.filter((a) => a !== 'always' || s.fits);
     return `<div class="ut-run"><pre class="ut-run-cmd">${escHtml(v.cmd)}</pre>${stripGistHtml(s, t, held.includes('always'))}${answers.length ? `<div class="ut-exit-answer ut-hub-answer ut-run-answer">${answers.map((a) => `<button type="button" class="ut-act ut-action-exit ut-exit-${a === 'deny' ? 'deny' : 'allow'} ut-hub-${a}" data-answer="${a}">${escHtml(hubAnswerWord(a, t, i.action.type))}</button>`).join('')}</div>` : ''}</div>`;
   }
   const rows = v.rows.map((r) => `<div class="ut-run-row${r.warn ? ' ut-run-warn' : ''}" data-fact="${r.key}"><span class="ut-run-lbl">${escHtml(r.label)}</span><span class="ut-run-val">${linesHtml(r.lines)}</span></div>`).join('');
