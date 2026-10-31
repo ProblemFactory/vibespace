@@ -2205,6 +2205,358 @@ console.log('\n⑲ THE MODEL-CAP LANE: named by what names it, else a placeholde
   }
 }
 
+// ── ㉑ A PLAN WITHOUT A 5-HOUR WINDOW (lane no-5h-window, 2026-10-30) ────────
+// Anthropic renamed Max 20x → Ultra and is lifting the rolling 5-hour limit from verified Ultra accounts in stages
+// (weekly limits unchanged; the $100 Max keeps its 5-hour window; a newer account keeps a temporary one until it is
+// verified). The shapes here are the ones the main developer quoted from this instance's readings (read-only,
+// 2026-10-30 17:1x PDT): the /usage panel's «Current session» row DISAPPEARS, the stream's `unifiedWindows` names only
+// `seven_day`, an OAuth / get_usage reply carries `five_hour` null. Four rules, each RED on 43d0f8d2d by name:
+//   1 THE SHAPE FLOWS — a reading without a 5h window is complete; nothing fabricates one, no reader dereferences one;
+//   2 THE CHANGE IS SAID — a member that LOSES (or regains) its 5h window is reported once per change, never per probe;
+//   3 THE WORDS — no 5h figure or sentence for a member that has none (the popup row says it was lifted);
+//   4 HONEST ABOUT THE PANEL — a panel without the row is a verified reading; only a VERIFIED panel may say «no 5h».
+console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
+{
+  const CQ = require(path.join(ROOT, 'src/harnesses/claude-quota.js'));
+  const { ClaudeCodeAdapter: ADP } = require(path.join(ROOT, 'src/adapters/claude-code.js'));
+  const CAP = require(path.join(ROOT, 'src/rate-limit-capture.js'));
+  const POOL = require(path.join(ROOT, 'src/account-pool-auto.js'));
+  const fnOf = (o, n) => (o && typeof o[n] === 'function' ? o[n].bind(o) : null);
+  const AW = (p) => { const f = fnOf(QM, 'absentWindowsOf'); return f ? f(p) : null; };            // null on a base without the rule
+  const SINCE = (l, k) => { const f = fnOf(QM, 'absentSince'); return f ? f(l, k) : null; };
+  const nowSec = Math.floor(Date.now() / 1000);
+  const WEEK = 'Current week (all models): 40% used\n';
+  const PANEL_5H = 'Current session: 84% used\n' + WEEK;
+  const PANEL_NO5H = WEEK;                                   // the vendor lifted it: the row is GONE
+  const PANEL_WORD = 'Current session: Unlimited\n' + WEEK;  // …or printed with a word from the closed list
+  const PANEL_DRIFT = 'Current session: (a shape nobody has seen)\n' + WEEK;
+  const PANEL_IDLE = 'Current session: 0% used\n' + WEEK;    // a 5h window that has NOT STARTED — not the same thing
+  const lift = (o, key) => W.limitsOfCache(o, { identity: key, backend: 'claude', familyOf: familyOfScopedBucket });
+  const planOf = (o, key) => QM.planLimit(lift(o, key));
+  const mkd = (tag) => { const d = fs.mkdtempSync(path.join(os.tmpdir(), 'vs-qm21-' + tag + '-')); tmpDirs.push(d); return d; };
+  const readJ = (dir, key) => JSON.parse(fs.readFileSync(W.cacheFileFor(dir, key), 'utf8'));
+  const seed5h = (dir, key, { u5 = 0.84, at = Date.now() - 120000 } = {}) => W.writeCacheObject({ cacheDir: dir, key, backend: 'claude', familyOf: familyOfScopedBucket, source: 'on-demand', measuredAt: at,
+    obj: { fiveHour: { utilization: u5, resetsAt: nowSec + 3600 }, sevenDay: { utilization: 0.4, resetsAt: nowSec + 3 * 86400 }, scopedWeekly: [], fetchedAt: at, source: 'on-demand' } });
+  // the panel write exactly as refreshViaCliPanel spells it: the file spread under the parse, `limits` dropped, the
+  // parse's own claims handed over — `absentWindows` only for a VERIFIED panel (rule 4)
+  const panelWrite = (dir, key, parsed, { verified = true, wcm = W } = {}) => {
+    const prev = readJ(dir, key);
+    const obj = { ...prev, ...parsed, source: 'on-demand', scopedFetchedAt: Date.now() };
+    delete obj.limits;
+    return wcm.writeCacheObject({ cacheDir: dir, key, obj, source: 'on-demand', familyOf: familyOfScopedBucket, backend: 'claude',
+      absentWindows: verified ? AW(parsed) : null, authoritativeScopes: QM.authoritativeScopesOf(parsed) });
+  };
+  const said = [];
+  const listen = fnOf(W, 'onWindowChange');
+  if (listen) listen((c) => said.push(c));
+
+  // ── rule 1 + 4: the PARSE ────────────────────────────────────────────────
+  const pNo = CQ.parseCliUsageText(PANEL_NO5H, Date.now());
+  ok(pNo && pNo.sevenDay && pNo.fiveHour == null, '㉑1a a panel with the week and NO «Current session» row is a complete reading — the week, no 5h bucket');
+  eq(AW(pNo), ['5h'], '㉑1a …and its parse SAYS it enumerated the plan and found no 5h window (absentWindowsOf)');
+  eq(AW(CQ.parseCliUsageText(PANEL_WORD, Date.now())), ['5h'], '㉑1b a «Current session» row that prints a word of the closed list (Unlimited) says «no 5h limit» too');
+  eq(AW(CQ.parseCliUsageText(PANEL_DRIFT, Date.now())), [], '㉑1b …any OTHER word in that row is format drift: the reading lands, the claim does not');
+  eq(AW(CQ.parseCliUsageText(PANEL_5H, Date.now())), [], '㉑1b …and a panel that prints the 5h row claims nothing about it');
+  // MEASURED by the owner (2026-10-30 17:4x PDT, claude 2.1.314): a long-lived-token credential in the member's isolated
+  // folder makes the panel print ONLY its header sentence — no quota line at all. That is NO READING (the probe's
+  // no-buckets path writes nothing), never an enumerating parse with the 5h window absent and never a fabricated 0.
+  const pHeader = CQ.parseCliUsageText('Your subscription powers your Claude Code usage.\n', Date.now());
+  ok(pHeader === null && JSON.stringify(AW(pHeader)) === '[]', `㉑1a a HEADER-ONLY panel (a long-lived-token login, 2.1.314) is no reading at all — null, no «no 5h» claim — got ${JSON.stringify(pHeader)}`);
+  const pIdle = CQ.parseCliUsageText(PANEL_IDLE, Date.now());
+  ok(pIdle && pIdle.fiveHour && pIdle.fiveHour.utilization === 0 && Array.isArray(AW(pIdle)) && AW(pIdle).length === 0, '㉑1c «Current session: 0% used» IS a 5h window (not started) — never «no 5h limit»');
+  const sIdle = CQ.toLimitSet(pIdle, { nowMs: Date.now() }), sNo = CQ.toLimitSet(pNo, { nowMs: Date.now() });
+  const w5Idle = QM.windowOfKind(QM.planLimit(sIdle), '5h');
+  ok(w5Idle && w5Idle.state !== 'running' && SINCE(QM.planLimit(sIdle), '5h') == null && QM.toLegacyView(sIdle).fiveHourAbsent == null,
+    '㉑1c the typed set keeps the two apart: not-started = a 5h window whose state fences its sliding reset, no tombstone');
+  ok(!QM.windowOfKind(QM.planLimit(sNo), '5h') && SINCE(QM.planLimit(sNo), '5h') > 0 && QM.toLegacyView(sNo).fiveHourAbsent > 0 && !QM.toLegacyView(sNo).fiveHour,
+    '㉑1c …«no 5h limit» = NO 5h window + a dated tombstone the view says as `fiveHourAbsent` (no 0 % window pretending to exist)');
+  const oNo = CQ.parseOAuthUsage({ seven_day: { utilization: 40, resets_at: new Date((nowSec + 3 * 86400) * 1000).toISOString() }, five_hour: null });
+  ok(oNo && oNo.fiveHour == null && Math.abs(oNo.sevenDay.utilization - 0.4) < 1e-9, `㉑1d an OAuth usage reply with five_hour null fabricates NO 5h window (base: {utilization 0, status unknown}) — got ${JSON.stringify(oNo && oNo.fiveHour)}`);
+  eq(AW(oNo), ['5h'], '㉑1d …and claims «no 5h limit» (the reply enumerates the plan windows)');
+  const o5 = CQ.parseOAuthUsage({ seven_day: { utilization: 40 }, five_hour: { utilization: 10 } });
+  ok(o5 && o5.fiveHour && Math.abs(o5.fiveHour.utilization - 0.1) < 1e-9 && JSON.stringify(AW(o5)) === '[]', '㉑1d …a reply WITH five_hour keeps it, claims nothing');
+  const gNo = ADP.parseGetUsageResponse({ rate_limits: { seven_day: { used_percentage: 40, resets_at: nowSec + 3 * 86400 } } });
+  ok(gNo && gNo.fiveHour == null && Math.abs(gNo.sevenDay.utilization - 0.4) < 1e-9 && JSON.stringify(AW(gNo)) === '["5h"]',
+    `㉑1e the get_usage control payload without five_hour fabricates NO 0 % 'allowed' window and says «no 5h limit» — got ${JSON.stringify(gNo && gNo.fiveHour)}`);
+  const evNo = CAP.parseRateLimitEvent({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed', rateLimitType: 'seven_day', utilization: 0.4, resetsAt: nowSec + 3 * 86400, unifiedWindows: { seven_day: { utilization: 0.4, resets_at: nowSec + 3 * 86400 } } } });
+  eq(evNo && evNo.absentWindows, ['5h'], '㉑1f a rate_limit_event whose unifiedWindows names the week and NO five_hour enumerated the plan: «no 5h limit»');
+  const evLegacy = CAP.parseRateLimitEvent({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed', rateLimitType: 'seven_day', utilization: 0.4, resetsAt: nowSec + 3 * 86400 } });
+  const evBoth = CAP.parseRateLimitEvent({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed', rateLimitType: 'seven_day', utilization: 0.4, unifiedWindows: { seven_day: { utilization: 0.4 }, five_hour: { utilization: 0.2 } } } });
+  ok(evLegacy && Array.isArray(evLegacy.absentWindows) && !evLegacy.absentWindows.length && evBoth && Array.isArray(evBoth.absentWindows) && !evBoth.absentWindows.length,
+    '㉑1f …a record without unifiedWindows (it names ONE bucket) or with five_hour in it claims nothing');
+  const setEv = CQ.limitSetFromEvent(evNo, { nowMs: Date.now() });
+  ok(setEv && !QM.windowOfKind(QM.planLimit(setEv), '5h') && SINCE(QM.planLimit(setEv), '5h') > 0, '㉑1f …and its typed set is the week alone with the dated tombstone');
+
+  // ── rule 1: the MODEL — the newer claim wins, the view round-trips, the validator names the shape ─────────────
+  {
+    const T1 = Date.now() - 60000;
+    const w7 = QM.makeWindow({ kind: '7d', usedPct: 40, resetsAt: nowSec + 86400, measuredAt: Date.now() });
+    const mk = fnOf(QM, 'markWindowsAbsent');
+    const plan = mk ? mk(QM.makeLimit({ limitId: 'plan', scope: 'plan', windows: [w7] }), ['5h'], T1) : QM.makeLimit({ limitId: 'plan', scope: 'plan', windows: [w7] });
+    const set = QM.makeLimitSet({ limits: [plan] });
+    ok(QM.validateLimitSet(set).ok && QM.toLegacyView(set).fiveHourAbsent === T1, '㉑1g the view projects `fiveHourAbsent` = the instant it was first said');
+    ok(SINCE(QM.planLimit(QM.fromLegacy(QM.toLegacyView(set))), '5h') === T1, '㉑1g …and a spread copy of the view lifts back to the SAME dated tombstone (it can never outrank a newer window)');
+    const back = QM.makeLimitSet({ limits: [QM.makeLimit({ limitId: 'plan', scope: 'plan', windows: [QM.makeWindow({ kind: '5h', usedPct: 10, resetsAt: nowSec + 3600, measuredAt: T1 + 1000 })] })] });
+    const stale = QM.makeLimitSet({ limits: [QM.makeLimit({ limitId: 'plan', scope: 'plan', windows: [QM.makeWindow({ kind: '5h', usedPct: 90, resetsAt: nowSec + 3600, measuredAt: T1 - 1000 })] })] });
+    const mBack = QM.planLimit(QM.mergeLimitSets(set, back)), mStale = QM.planLimit(QM.mergeLimitSets(stale, set));
+    ok(QM.windowOfKind(mBack, '5h') && SINCE(mBack, '5h') == null, '㉑1h a 5h window measured AFTER the removal is the window BACK (a newer account\'s temporary limit) — the tombstone goes');
+    ok(!QM.windowOfKind(mStale, '5h') && SINCE(mStale, '5h') === T1, '㉑1h …one measured BEFORE it is gone — a stale window never survives the merge (base: mergeLimit kept it for ever)');
+    const bad = QM.validateLimitSet(QM.makeLimitSet({ limits: [{ ...plan, flags: { absent: { '5h': -1 } } }] }));
+    ok(!bad.ok && bad.errors.some((e) => /flags\.absent/.test(e)), '㉑1g the validator names a malformed tombstone');
+  }
+
+  // ── rule 1 + 2 + 4: the WRITE PATH — the removal, said once; the return, said once ──────────────────────────
+  const dir = mkd('w'), K = 'sub-n5h-a';
+  seed5h(dir, K);
+  const r1 = panelWrite(dir, K, CQ.parseCliUsageText(PANEL_NO5H, Date.now()));
+  const f1 = readJ(dir, K);
+  ok(r1.ok && f1.fiveHour === undefined && f1.fiveHourAbsent > 0 && !QM.windowOfKind(planOf(f1, K), '5h'),
+    `㉑2a a VERIFIED panel without the row retires the 5h window the file held (84 %) and lays the tombstone — base kept the stale window — file ${JSON.stringify({ fiveHour: f1.fiveHour, fiveHourAbsent: f1.fiveHourAbsent })}`);
+  ok(r1.windowChange && r1.windowChange.change === 'removed' && said.length === 1 && said[0].key === K && said[0].change === 'removed',
+    `㉑2b …and the change is REPORTED: removed, once, for that key — said ${JSON.stringify(said)}`);
+  const r2 = panelWrite(dir, K, CQ.parseCliUsageText(PANEL_NO5H, Date.now()));
+  ok(r2.ok && !r2.windowChange && said.length === 1, '㉑2b …never per probe: the next identical panel reports nothing (the file already says it)');
+  const rem = POOL.accountRemaining(f1, nowSec), brs = POOL.bucketRems(f1, nowSec);
+  ok(rem.known && rem.remaining === 60 && !brs.some((b) => b.kind === 'fiveHour') && POOL.weeklyDeadline(f1, nowSec) === (f1.sevenDay.resetsAt || null),
+    `㉑1i the pool reads the week alone: remaining ${JSON.stringify(rem)}, rows ${JSON.stringify(brs.map((b) => b.label))}`);
+  {
+    const d4 = mkd('u'), K4 = 'sub-n5h-unverified';
+    seed5h(d4, K4);
+    const r4 = panelWrite(d4, K4, CQ.parseCliUsageText(PANEL_NO5H, Date.now()), { verified: false });
+    const f4 = readJ(d4, K4);
+    ok(r4.ok && f4.fiveHour && f4.fiveHour.utilization === 0.84 && !f4.fiveHourAbsent && !r4.windowChange,
+      '㉑4a an UNVERIFIED panel writes its numbers and keeps every window the file holds — «no 5h» needs a panel that proved whose it is (B-855a c1)');
+    const UR = fs.readFileSync(path.join(ROOT, 'src/usage-routes.js'), 'utf8');
+    ok(/absentWindows: idv && idv\.verified \? quotaModel\.absentWindowsOf\(cliPanel\) : null,\n\s+authoritativeScopes: authoritativeScopesOf\(cliPanel\) \}\);/.test(UR),
+      '㉑4a …and refreshViaCliPanel hands the claim over only when `idv.verified`, from the PARSE (`cliPanel`, never the spread)');
+    ok((UR.match(/absentWindows: quotaModel\.absentWindowsOf\(u\)/g) || []).length === 5,
+      '㉑4b the token-ladder / device rungs (one OAuth reply each, the account\'s own token) hand over their parse\'s claim — 5 sites');
+  }
+  const evBack = CAP.parseRateLimitEvent({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed', rateLimitType: 'five_hour', utilization: 0.1, resetsAt: nowSec + 4 * 3600 } });
+  const rb = CAP.captureRateLimitEvent({ cacheDir: dir, key: K, identityIds: [K], ev: evBack, now: Date.now() + 1000 });
+  const fb = readJ(dir, K);
+  ok(rb.ok && fb.fiveHour && Math.abs(fb.fiveHour.utilization - 0.1) < 1e-9 && !fb.fiveHourAbsent && said.length === 2 && said[1].change === 'restored',
+    `㉑2c a 5h reading after the removal brings the window BACK and is said the same way (restored) — said ${JSON.stringify(said.map((x) => x.change))}`);
+  {
+    const d3 = mkd('e'), K3 = 'sub-n5h-ev';
+    seed5h(d3, K3);
+    const r3 = CAP.captureRateLimitEvent({ cacheDir: d3, key: K3, identityIds: [K3], ev: evNo, now: Date.now() });
+    const f3 = readJ(d3, K3);
+    ok(r3.ok && f3.fiveHour === undefined && f3.fiveHourAbsent > 0 && said.some((x) => x.key === K3 && x.change === 'removed'),
+      '㉑2d the stream says it too: a week-only unifiedWindows record retires the stored 5h window (removed)');
+    // THE SIBLING BASE: the capture spreads the identity group's FRESHEST file — a sibling may still hold the 5h window
+    const SIB = 'sub-n5h-sib', n0 = said.length;
+    W.writeCacheObject({ cacheDir: d3, key: SIB, backend: 'claude', familyOf: familyOfScopedBucket, source: 'on-demand', measuredAt: Date.now() + 5000,
+      obj: { fiveHour: { utilization: 0.5, resetsAt: nowSec + 3600 }, sevenDay: { utilization: 0.4, resetsAt: nowSec + 3 * 86400 }, scopedWeekly: [], fetchedAt: Date.now() + 5000, source: 'on-demand' } });
+    CAP.captureRateLimitEvent({ cacheDir: d3, key: K3, identityIds: [K3, SIB], ev: evLegacy, now: Date.now() + 6000 });
+    const f3b = readJ(d3, K3);
+    ok(f3b.fiveHour === undefined && f3b.fiveHourAbsent > 0 && !said.slice(n0).some((x) => x.key === K3),
+      `㉑1j a record that states no 5h lane never carries a SIBLING's 5h bucket onto a file whose plan has none (no false «back») — ${JSON.stringify({ fiveHour: f3b.fiveHour })}`);
+  }
+
+  // ── rule 1: the SHIPPED statusline fabricates no 5h window ───────────────────────────────────────────────────
+  const { execFileSync } = await import('child_process');
+  const renderNo5h = (toolArgs, d, key) => {
+    const payload = JSON.stringify({ session_id: 'sess-qm21', model: { id: 'claude-fable-5', display_name: 'Fable 5' }, rate_limits: { seven_day: { used_percentage: 46, resets_at: nowSec + 200000, status: 'allowed' } } });
+    const f = W.cacheFileFor(d, key); const old = (Date.now() - 60000) / 1000; fs.utimesSync(f, old, old);
+    execFileSync(toolArgs[0], toolArgs.slice(1), { input: payload, encoding: 'utf8', env: { ...process.env, VIBESPACE_USAGE_CACHE: d, VIBESPACE_ACCOUNT_KEY: key, HOME: d } });
+    return readJ(d, key);
+  };
+  const TOOL21 = path.join(ROOT, 'data/bin/vibespace-usage');
+  const sl = (toolArgs) => {
+    const d = mkd('s'), key = 'sub-n5h-sl';
+    seed5h(d, key, { u5: 0.71 });
+    const kept = renderNo5h(toolArgs, d, key);
+    const d2 = mkd('s2');
+    seed5h(d2, key, { u5: 0.71 });
+    panelWrite(d2, key, CQ.parseCliUsageText(PANEL_NO5H, Date.now()));
+    const tomb = renderNo5h(toolArgs, d2, key);
+    return { kept, tomb };
+  };
+  const SL = sl([TOOL21]);
+  ok(SL.kept.fiveHour && SL.kept.fiveHour.utilization === 0.71 && SL.kept.fiveHour.status !== 'unknown',
+    `㉑1k the statusline tool, fed a payload without five_hour, writes NO fabricated 0 % 'unknown' window — it keeps the file's own — got ${JSON.stringify(SL.kept.fiveHour)}`);
+  ok(SL.tomb.fiveHour === undefined && SL.tomb.fiveHourAbsent > 0 && SL.tomb.sevenDay && SL.tomb.sevenDay.utilization === 0.46 && SINCE(planOf(SL.tomb, 'sub-n5h-sl'), '5h') > 0,
+    '㉑1k …and over a «no 5h limit» file it writes the week and the tombstone survives it (the spread carries it, the lift reads it back)');
+
+  // ── rule 3: the WORDS (the banner guess; the popup / roster draw what the reading has) ───────────────────────
+  const bGuess = ADP.parseLimitBanner("You've reached your usage limit · resets Nov 3");
+  ok(bGuess && bGuess.kind === 'fiveHour' && bGuess.guessed === true && !ADP.parseLimitBanner("You've hit your session limit · resets 3am").guessed,
+    '㉑3a an unknown-wording limit banner is a GUESSED 5h wall — a named one is not');
+  const ENG = fs.readFileSync(path.join(ROOT, 'src/server/usage-pool-engine.js'), 'utf8');
+  ok(/if \(hit\.guessed && hit\.kind === 'fiveHour'\) \{[\s\S]{0,260}if \(k0 && quotaModel\.fiveHourAbsent\(readRawUsageCache\(k0\)\)\) hit = \{ kind: 'sevenDay', guessed: true \};/.test(ENG),
+    '㉑3a …and on a member whose plan says «no 5h limit» the engine walls its WEEK (never writes a 5h window back onto it)');
+  const UM = fs.readFileSync(path.join(ROOT, 'src/lib/usage-meter.js'), 'utf8');
+  ok(/rows\.push\(renderRow\('claude', has5h \|\| noData \? '5h' : null,/.test(UM) && /\$\{primaryLabel == null \? '' : renderPie\(/.test(UM),
+    '㉑3b the taskbar donut pair draws no 5h donut for a reading without one (base: a 0 % «5h» donut)');
+  ok(/\$\{has5h \? `<div class="usage-session">\n\s+<div class="usage-session-name">\$\{t\('5-hour limit'\)\}/.test(UM) && /t\('5-hour limit lifted \(\{when\}\)', \{ when: stampText\(no5hSince\) \}\)/.test(UM) && /const no5hSince = quotaModel\.fiveHourAbsent\(rl\);/.test(UM),
+    '㉑3b the popup shows the 5h row only when the reading has one; a lifted one says «5-hour limit lifted (<time>)» + the Ultra legend');
+  const MA = fs.readFileSync(path.join(ROOT, 'src/lib/manage-agents.js'), 'utf8');
+  ok(/\[\.\.\.\(has5h \? \[donut\('5h', u\.fiveHour, null, est\?\.fiveHour\)\] : \[\]\), donut\('7d'/.test(MA) && /\[\.\.\.\(has5h \? \[\['5h', u\.fiveHour, est\?\.fiveHour, 'fiveHour'\]\] : \[\]\), \['7d',/.test(MA) && (MA.match(/hostOwnReading\(/g) || []).length === 5,
+    '㉑3c the roster draws the week alone (no 0 % 5h donut, no 5h pill) and a weekly-only machine login is a reading (4 gates + the helper)');
+  const zh = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-ja.js'), 'utf8');
+  ok(zh.includes('"5-hour limit lifted ({when})": "5 小时限额已取消（{when}）"') && ja.includes('"5-hour limit lifted ({when})": "5 時間制限は解除されました（{when}）"'),
+    '㉑3d «5 小时限额已取消（<time>）» — zh + ja');
+
+  // ── rule 2: the NOTICE — one per member and change, by its label, never an email ────────────────────────────
+  const a0 = ENG.indexOf('const WINDOW_REMOVED_TEXT'), a1 = ENG.indexOf('usageWrite.onWindowChange(noteWindowChange);');
+  const NSLICE = a0 > 0 && a1 > a0 ? ENG.slice(a0, a1) : '';
+  const buildNote = (src) => {
+    const filed = [];
+    const accounts = { get: (id) => (id === 'sub-x' ? { id, type: 'subscription', name: 'owner@example.com' } : id === 'sub-y' ? { id, type: 'subscription', name: 'Pool 3' } : null) };
+    const todos = { add: (k, it) => { filed.push({ k, ...it }); return { id: 't' + filed.length }; } };
+    let fn = null;
+    try { fn = new Function('accounts', 'OF', 'getUserTodos', 'i18nKey', 'global', src + '\nreturn noteWindowChange;')(accounts, { when: () => 'Oct 30 17:40' }, () => todos, (s) => s, {}); } catch { fn = null; }
+    return { fn, filed };
+  };
+  const N = buildNote(NSLICE);
+  ok(!!N.fn, '㉑2e the engine declares the notice (noteWindowChange) beside its wiring to the write path');
+  if (N.fn) {
+    N.fn({ key: 'sub-y', kind: '5h', change: 'removed', at: Date.now() });
+    N.fn({ key: 'sub-x', kind: '5h', change: 'restored', at: Date.now() });
+    N.fn({ key: 'host-1', kind: '5h', change: 'removed', at: Date.now() });
+  }
+  const [n1, n2] = N.filed;
+  ok(N.filed.length === 2 && n1.itemKey === '5h-window:sub-y:removed' && n1.origin === 'pool' && n1.kind === 'notice' && /Pool 3's 5-hour limit was lifted by Anthropic/.test(n1.text) && n1.i18n.text.params.account === 'Pool 3',
+    `㉑2e ONE For-you notice per member and change, naming its label (itemKey dedupes a re-file) — filed ${JSON.stringify(N.filed.map((x) => x.itemKey))}`);
+  ok(n2 && !/@/.test(n2.text) && n2.i18n.text.params.account === 'sub-x' && /5-hour limit is back/.test(n2.text), '㉑2e …a label that is an email is never printed (the id instead); a host-* file is not a member and files nothing');
+
+  // ── the CENSUS: every reader of '5h' / fiveHour / five_hour, and how it handles ABSENCE (by name) ────────────
+  {
+    let tracked = null;
+    try {
+      const ls = (args) => execFileSync('git', ['-C', ROOT, 'ls-files', '-z', ...args], { encoding: 'buffer', maxBuffer: 64 * 1024 * 1024 }).toString('utf8').split('\0').filter(Boolean);
+      tracked = [...new Set([...ls([]), ...ls(['--others', '--exclude-standard'])])];
+    } catch { }
+    if (!tracked) console.log('  ⚠ SKIP the 5h-reader census — no readable git index');
+    else {
+      const RX5 = /'5h'|"5h"|\bfiveHour\b|\bfive_hour\b/;
+      const scope = tracked.filter((f) => (/^src\//.test(f) || /^data\/bin\//.test(f) || f === 'server.js') && !/^scripts\//.test(f));
+      const found = scope.filter((f) => { try { return RX5.test(fs.readFileSync(path.join(ROOT, f), 'utf8')); } catch { return false; } });
+      const ABSENCE = new Map([
+        ['src/quota-model.js', 'THE model: a plan may hold no 5h window; `flags.absent` + settleAbsence; the view says `fiveHourAbsent`; WINDOW_MINUTES names the kind'],
+        ['src/usage-cache-write.js', 'markPlanAbsent / windowChangeOf; DERIVED_KEYS owns `fiveHourAbsent`; the codex shape test asks `obj.fiveHour &&`'],
+        ['src/harnesses/claude-quota.js', 'the panel / OAuth parsers OMIT a 5h bucket the payload lacks and mark the enumeration; toLimitSet / limitSetFromEvent lay the tombstone'],
+        ['src/adapters/claude-code.js', 'parseGetUsageResponse omits a missing five_hour (no 0 % allowed window); parseLimitBanner marks its 5h default `guessed`'],
+        ['src/rate-limit-capture.js', 'parse: `absentWindows` from unifiedWindows; capture: a 5h lane only when stated, never a sibling\'s bucket onto a tombstoned file; the dead-mark 5h guess only for a fiveHour lane'],
+        ['data/bin/vibespace-usage', 'writes `fiveHour` only when the payload states five_hour (the spread keeps the file\'s own, or its tombstone); reading-lag mirror: counts(b5)'],
+        ['src/account-pool-auto.js', 'bucketRemaining(undefined) = null (no claim): accountRemaining / bucketRems / projection rows skip it; weeklyDeadline never reads it; fingerprint prints "-"'],
+        ['src/server/usage-pool-engine.js', 'a guessed 5h banner on a «no 5h» member walls its week; wall labels come from the buckets present; trippedWindowFacts/spentWindowOf filter missing buckets; the bucket-less `|| \'fiveHour\'` fold default is unreachable (every noteWallSignal caller names one)'],
+        ['src/usage-estimator.js', 'estBucket/overlay/anchors guard `b.fiveHour ?` — a missing bucket is estimated as none'],
+        ['src/usage-anchors.js', '`cache.fiveHour && …` — no bucket anchors as no-bucket'],
+        ['src/reading-lag.js', 'windowOf: counts(b5) — an absent 5h is fiveHour:null, never identity evidence'],
+        ['src/reading-repair.js', 'every 5h read is `if (b.fiveHour)` / `?? null`; its windows carry fiveHour:null'],
+        ['src/oat-identity-model.js', 'winOf: fiveHour null when not a positive number'],
+        ['src/usage-routes.js', 'the panel gate takes a week-only panel (`fiveHour || sevenDay`); the sidecar stamp asks `w.fiveHour ||`; enumerating sites hand `absentWindows`'],
+        ['src/weekly-lanes-unfold.js', 'weeklyOnly re-drives an event WITHOUT its 5h lane on purpose; its `absentWindows` is the original record\'s verdict'],
+        ['src/record-shape.js', 'the vendor vocabulary census (rateLimitType / unifiedWindows key lists) — names, not reads'],
+        ['src/harnesses/codex-quota.js', 'codex: `if (!fiveHour && !sevenDay) return null`; trippedWindow falls back to the other window'],
+        ['src/harnesses/antigravity-usage.js', 'antigravity: its own window kinds; a group without a 5h window yields none'],
+        ['src/auto-resume-signal.js', 'statedBuckets skips a missing bucket; an arm on a bucket the snapshot does not state waits its own timer'],
+        ['src/lib/usage-meter.js', 'has5h / fiveHourAbsent: no 5h donut or row without a 5h window; «5-hour limit lifted (<time>)» for a tombstoned one; codex keeps its own pair'],
+        ['src/lib/manage-agents.js', 'has5h: no 5h donut/pill without one; hostOwnReading for the 4 machine-login gates; onDemandUsageView maps a stated 5h only'],
+        ['src/lib/session-lifecycle.js', 'the picker chip: pctOf(undefined) = null ⇒ seg() renders nothing'],
+        ['src/lib/usage-source.js', 'codexRefreshToast skips a window with no usedPercent'],
+        ['src/routes/reset-credit.js', 'a doc comment names the answer\'s fields; no read'],
+      ]);
+      console.log('  … 5h readers found:', found.length);
+      const unl = found.filter((f) => !ABSENCE.has(f));
+      ok(!unl.length, `㉑ every reader of '5h' / fiveHour / five_hour names how it handles an ABSENT 5h window (unlisted: ${JSON.stringify(unl)})`);
+      const dead = [...ABSENCE.keys()].filter((f) => !found.includes(f));
+      ok(!dead.length, `㉑ …no dead census row (${JSON.stringify(dead)})`);
+      ok(found.length >= 20 && ABSENCE.has('src/server/usage-pool-engine.js'), `㉑ …the census is non-vacuous (${found.length} files)`);
+    }
+  }
+
+  // ── NEGATIVE CONTROLS: one patched copy per rule, each turns its own leg red ─────────────────────────────────
+  const mut21 = (rel, patches, tag) => {
+    let src = fs.readFileSync(path.join(ROOT, rel), 'utf8');
+    const hits = [];
+    for (const [from, to] of patches) { hits.push(src.split(from).length - 1); src = src.split(from).join(to); }
+    return { path: MUTC.write(rel, src, 'q21' + tag, { esm: false, name: `q21-${tag}-${path.basename(rel, '.js')}` }), hits };
+  };
+  const hit21 = (m, label) => ok(m.hits.length > 0 && m.hits.every((c) => c === 1), `㉑ NEGATIVE CONTROL setup: ${label} — every patch anchor hit exactly once (${JSON.stringify(m.hits)})`);
+  try { // (on a tree without the rules the anchors miss and a control can throw — said by name, never a crash)
+  {
+    const m = mut21('src/harnesses/claude-quota.js', [["printed === scopedWeekly.length, scopedWeekly.length), absent5h ? ['5h'] : []);", 'printed === scopedWeekly.length, scopedWeekly.length), []);']], 'p');
+    hit21(m, 'the panel parse claims nothing');
+    eq(require(m.path).parseCliUsageText(PANEL_NO5H, Date.now()) && AW(require(m.path).parseCliUsageText(PANEL_NO5H, Date.now())), [], '㉑ CONTROL rule 4: a panel parse that drops the claim — ㉑1a\'s «no 5h» is RED there');
+  }
+  {
+    const m = mut21('src/harnesses/claude-quota.js', [['const fiveHour = absent5h ? undefined : toWin(u.five_hour);', 'const fiveHour = toWin(u.five_hour);']], 'o');
+    hit21(m, 'the OAuth parse fabricates again');
+    const r = require(m.path).parseOAuthUsage({ seven_day: { utilization: 40 }, five_hour: null });
+    ok(r.fiveHour && r.fiveHour.utilization === 0 && r.fiveHour.status === 'unknown', '㉑ CONTROL rule 1: the base\'s toWin(undefined) fabricates the 0 % unknown window ㉑1d refuses');
+  }
+  {
+    const m = mut21('src/adapters/claude-code.js', [['const fiveHour = absent5h ? null : toWin(rl.five_hour);', 'const fiveHour = toWin(rl.five_hour);']], 'g');
+    hit21(m, 'the get_usage parse fabricates again');
+    const r = require(m.path).ClaudeCodeAdapter.parseGetUsageResponse({ rate_limits: { seven_day: { used_percentage: 40 } } });
+    ok(r.fiveHour && r.fiveHour.utilization === 0 && r.fiveHour.status === 'allowed', '㉑ CONTROL rule 1: …and get_usage\'s toWin(null) the 0 % ALLOWED one ㉑1e refuses');
+  }
+  {
+    const m = mut21('src/rate-limit-capture.js', [["const absentWindows = (windows && windows.sevenDay && !windows.fiveHour && kind !== 'fiveHour') ? ['5h'] : [];", 'const absentWindows = [];']], 'e');
+    hit21(m, 'the event parse claims nothing');
+    eq(require(m.path).parseRateLimitEvent({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed', rateLimitType: 'seven_day', utilization: 0.4, unifiedWindows: { seven_day: { utilization: 0.4 } } } }).absentWindows, [], '㉑ CONTROL rule 1: a week-only record that claims nothing — ㉑1f RED there');
+  }
+  {
+    const m = mut21('src/usage-cache-write.js', [['  if (Array.isArray(absentWindows) && absentWindows.length) next = markPlanAbsent(next, absentWindows, at);\n', '']], 'w');
+    hit21(m, 'the write path ignores the claim');
+    const d = mkd('mw'), k = 'sub-n5h-mw'; seed5h(d, k);
+    panelWrite(d, k, CQ.parseCliUsageText(PANEL_NO5H, Date.now()), { wcm: require(m.path) });
+    const f = readJ(d, k);
+    ok(f.fiveHour && f.fiveHour.utilization === 0.84 && !f.fiveHourAbsent, '㉑ CONTROL rule 1: a write path that ignores `absentWindows` keeps the stale 84 % window ㉑2a retires');
+  }
+  {
+    const m = mut21('src/usage-cache-write.js', [["  if (nowAbsent && had5 && !wasAbsent) return { kind: '5h', change: 'removed', at: nowAbsent };", "  if (nowAbsent) return { kind: '5h', change: 'removed', at: nowAbsent };"]], 'c');
+    hit21(m, 'the change is judged per write');
+    const WM = require(m.path); const got = [];
+    WM.onWindowChange((c) => got.push(c.change));
+    const d = mkd('mc'), k = 'sub-n5h-mc'; seed5h(d, k, {});
+    panelWrite(d, k, CQ.parseCliUsageText(PANEL_NO5H, Date.now()), { wcm: WM });
+    panelWrite(d, k, CQ.parseCliUsageText(PANEL_NO5H, Date.now()), { wcm: WM });
+    ok(got.length === 2, `㉑ CONTROL rule 2: a change judged by the new shape alone is said PER PROBE (${got.length}×) — ㉑2b's «once» is RED there`);
+  }
+  {
+    const m = mut21('src/quota-model.js', [['    if (w && (posNum(w.measuredAt) || 0) >= since) continue; // measured after the removal: the window is BACK\n', '']], 'q');
+    hit21(m, 'a window never displaces a tombstone');
+    const QMm = require(m.path);
+    const T1 = Date.now() - 60000;
+    const set = QMm.makeLimitSet({ limits: [QMm.markWindowsAbsent(QMm.makeLimit({ limitId: 'plan', scope: 'plan', windows: [] }), ['5h'], T1)] });
+    const back = QMm.makeLimitSet({ limits: [QMm.makeLimit({ limitId: 'plan', scope: 'plan', windows: [QMm.makeWindow({ kind: '5h', usedPct: 10, resetsAt: nowSec + 3600, measuredAt: T1 + 1000 })] })] });
+    ok(!QMm.windowOfKind(QMm.planLimit(QMm.mergeLimitSets(set, back)), '5h'), '㉑ CONTROL rule 2: a tombstone that outranks every window swallows the RETURN ㉑1h / ㉑2c say');
+  }
+  {
+    const m = mut21('src/rate-limit-capture.js', [["    if (!stated5h && (absent.length || (own && Number(own.fiveHourAbsent) > 0 && !own.fiveHour))) delete cache.fiveHour;\n", '']], 's');
+    hit21(m, 'the capture carries a sibling\'s 5h bucket');
+    const CAPm = require(m.path);
+    const d = mkd('ms'), k = 'sub-n5h-ms', sib = 'sub-n5h-ms2';
+    seed5h(d, k); panelWrite(d, k, CQ.parseCliUsageText(PANEL_NO5H, Date.now()));
+    W.writeCacheObject({ cacheDir: d, key: sib, backend: 'claude', familyOf: familyOfScopedBucket, source: 'on-demand', measuredAt: Date.now() + 5000,
+      obj: { fiveHour: { utilization: 0.5, resetsAt: nowSec + 3600 }, sevenDay: { utilization: 0.4, resetsAt: nowSec + 3 * 86400 }, scopedWeekly: [], fetchedAt: Date.now() + 5000, source: 'on-demand' } });
+    CAPm.captureRateLimitEvent({ cacheDir: d, key: k, identityIds: [k, sib], ev: evLegacy, now: Date.now() + 6000 });
+    ok(readJ(d, k).fiveHour && readJ(d, k).fiveHour.utilization === 0.5, '㉑ CONTROL rule 1: without the guard the sibling\'s 5h bucket lands on the «no 5h» file — ㉑1j RED there');
+  }
+  {
+    const m = mut21('src/adapters/claude-code.js', [["return { kind: 'fiveHour', guessed: true };", "return { kind: 'fiveHour' };"]], 'b');
+    hit21(m, 'the banner default is no longer marked');
+    ok(!require(m.path).ClaudeCodeAdapter.parseLimitBanner("You've reached your usage limit").guessed, '㉑ CONTROL rule 3: an unmarked default cannot be told from a named 5h wall — ㉑3a RED there');
+  }
+  {
+    const NM = buildNote(NSLICE.split("const label = name && !name.includes('@') ? name : key;").join('const label = name || key;'));
+    if (NM.fn) NM.fn({ key: 'sub-x', kind: '5h', change: 'removed', at: Date.now() });
+    ok(NSLICE.includes("const label = name && !name.includes('@') ? name : key;") && NM.filed.length === 1 && /@/.test(NM.filed[0].text), '㉑ CONTROL rule 2: a notice that prints the account name verbatim leaks an email — ㉑2e RED there');
+  }
+  {
+    const m = mut21('data/bin/vibespace-usage', [['  const fiveHour = win(rl.five_hour);\n', "  const fiveHour = win(rl.five_hour) || { utilization: 0, status: 'unknown', resetsAt: 0 };\n"]], 't');
+    hit21(m, 'the statusline fabricates again');
+    const SLm = sl([process.execPath, m.path]);
+    ok(SLm.kept.fiveHour && SLm.kept.fiveHour.utilization === 0 && SLm.kept.fiveHour.status === 'unknown', '㉑ CONTROL rule 1: the base statusline writes the 0 % unknown window ㉑1k refuses (the ("5h", 0, None) of an idle member, source passive)');
+  }
+  } catch (e) { ok(false, `㉑ NEGATIVE CONTROLS threw: ${e && e.message}`); }
+  if (listen) listen(null);
+}
+
 // ── ⑲' THE TREE IS NEVER WRITTEN (B-0220 generalized, batch r1) ─────────────
 // Measured HERE, while every patched copy ⑯–⑱ made still exists (the exit
 // handlers remove them — a census after exit passes on the pre-fix placement

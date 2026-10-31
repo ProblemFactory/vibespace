@@ -61,6 +61,11 @@ function _parseCliResetTime(when, tz, nowMs) {
   if (t * 1000 < (nowMs || Date.now()) - 6 * 3600e3) t = zonedEpoch(y + 1, mon, +m[2], h, +(m[4] || 0), tz);
   return t;
 }
+// THE «CURRENT SESSION» ROW THAT NAMES NO LIMIT (lane no-5h-window): the vendor may print the row with a WORD instead
+// of `N% used` once it lifts an account's 5-hour limit. A CLOSED list — a word on it says «no 5h limit»; any other
+// non-percentage text in that row is format drift and claims nothing (the reading still lands, the 5h window is kept).
+// No live panel of a lifted account has been measured yet: the owner's own panel replaces this guess when it arrives.
+const SESSION_NO_LIMIT_RE = /^Current session\b:?\s*(?:[-—–]\s*)?(?:no(?:\s+5[- ]?hour)?\s+limit|unlimited|none|not applicable|n\/a|removed|lifted)\b/i;
 function parseCliUsageText(text, nowMs) {
   const s = String(text || '');
   const line = (re) => re.exec(s);
@@ -71,6 +76,12 @@ function parseCliUsageText(text, nowMs) {
   const fiveHour = bucket(line(/^Current session:\s+(\d+)% used(?:\s*·\s*resets\s+(.+?)\s+\(([\w/_+-]+)\))?/m));
   const sevenDay = bucket(line(/^Current week \(all models\):\s+(\d+)% used(?:\s*·\s*resets\s+(.+?)\s+\(([\w/_+-]+)\))?/m));
   if (!fiveHour && !sevenDay) return null; // API-key mode / format drift — not a subscription usage panel
+  // «NO 5h LIMIT» (lane no-5h-window, 2026-10-30): an Ultra account the vendor lifted the 5-hour limit from prints
+  // its weekly row and NO «Current session» row. That panel ENUMERATED the plan's windows and found no 5h one —
+  // unless a `Current session` line IS printed in a shape the bucket regex could not read (format drift: the
+  // claim is lost, never the reading — the r6 rule of the scoped count below).
+  const sessionLine = /^Current session\b.*$/m.exec(s);
+  const absent5h = !fiveHour && !!sevenDay && (!sessionLine || SESSION_NO_LIMIT_RE.test(sessionLine[0]));
   const scopedWeekly = [];
   for (const m of s.matchAll(/^Current week \(([^)]+)\):\s+(\d+)% used(?:\s*·\s*resets\s+(.+?)\s+\(([\w/_+-]+)\))?/gm)) {
     if (/^all models$/i.test(m[1])) continue;
@@ -87,9 +98,9 @@ function parseCliUsageText(text, nowMs) {
   for (const m of s.matchAll(/^Current week \(([^)]+)\):/gm)) if (!/^all models$/i.test(m[1])) printed++;
   // Every entry is a `Current week (<model>)` line: the panel NAMES each cap it
   // prints (B-9f4b — the right to retire needs a NAMED cap, `authoritativeScopesOf`).
-  return quotaModel.markScopedEnumeration(
+  return quotaModel.markWindowEnumeration(quotaModel.markScopedEnumeration(
     { fiveHour: fiveHour || undefined, sevenDay: sevenDay || undefined, scopedWeekly, fetchedAt: nowMs || Date.now() },
-    printed === scopedWeekly.length, scopedWeekly.length);
+    printed === scopedWeekly.length, scopedWeekly.length), absent5h ? ['5h'] : []);
 }
 
 // GET /api/oauth/usage reply → usage-cache shape (usage-routes `_parseUsage`,
@@ -102,7 +113,10 @@ function parseOAuthUsage(u) {
     status: (typeof w.utilization === 'number' && w.utilization >= 100) ? 'limited' : 'allowed',
     resetsAt: w.resets_at ? Math.floor(Date.parse(w.resets_at) / 1000) || 0 : 0,
   } : { utilization: 0, status: 'unknown', resetsAt: 0 };
-  const fiveHour = toWin(u.five_hour);
+  // A REPLY WITH THE WEEK AND NO `five_hour` IS «NO 5h LIMIT» (lane no-5h-window), never a fabricated 0 % window:
+  // `toWin(undefined)` used to answer {utilization 0, status 'unknown'} — a 5-hour window the vendor never stated.
+  const absent5h = !(u.five_hour && typeof u.five_hour === 'object') && !!(u.seven_day && typeof u.seven_day === 'object');
+  const fiveHour = absent5h ? undefined : toWin(u.five_hour);
   const sevenDay = toWin(u.seven_day);
   const scopedWeekly = [];
   const haveScoped = new Set();
@@ -185,14 +199,14 @@ function parseOAuthUsage(u) {
       };
     }
   }
-  return quotaModel.markScopedEnumeration({
-    fiveHour, sevenDay, scopedWeekly, ...(spend ? { spend } : {}),
-    overallStatus: (fiveHour.status === 'limited' || sevenDay.status === 'limited') ? 'limited' : 'allowed',
+  return quotaModel.markWindowEnumeration(quotaModel.markScopedEnumeration({
+    ...(fiveHour ? { fiveHour } : {}), sevenDay, scopedWeekly, ...(spend ? { spend } : {}),
+    overallStatus: ((fiveHour && fiveHour.status === 'limited') || sevenDay.status === 'limited') ? 'limited' : 'allowed',
     fetchedAt: Date.now(),
     // Both branches name every entry they keep — a `limits[]` display name or a
     // `seven_day_<model>` key; this parse never infers a cap from a codename
     // (B-9f4b: only a NAMED cap carries the right to retire).
-  }, dropped === 0, scopedWeekly.length);
+  }, dropped === 0, scopedWeekly.length), absent5h ? ['5h'] : []);
 }
 
 // ONE entry over the three claude reading shapes (the harness contract).
@@ -283,6 +297,14 @@ function toLimitSet(raw, { identity = null, source = null, nowMs = null, familyO
     identity, source: source || snap.source || null, fetchedAt: snap.fetchedAt || at,
     limitId: 'plan', familyOf, extraKeys: CLAUDE_EXTRA_KEYS,
   });
+  // «NO 5h LIMIT» as the PARSE stated it (lane no-5h-window): the mark rides the parse result only, so a stored
+  // snapshot handed in here claims nothing.
+  const absent = quotaModel.absentWindowsOf(snap);
+  if (absent.length) {
+    const i = set.limits.findIndex((l) => l && l.limitId === 'plan');
+    if (i >= 0) set.limits[i] = quotaModel.markWindowsAbsent(set.limits[i], absent, snap.fetchedAt || at);
+    else set.limits.unshift(quotaModel.markWindowsAbsent(quotaModel.makeLimit({ limitId: 'plan', scope: 'plan', windows: [], source: set.source, fetchedAt: snap.fetchedAt || at }), absent, snap.fetchedAt || at));
+  }
   // EXTRA USAGE IS ITS OWN LIMIT, not a footnote on the plan. `spend` is REAL
   // DOLLARS past the subscription allowance: with overage on, utilization stays
   // under 1 while every token is billed, so an account ranked on utilization
@@ -349,6 +371,8 @@ function limitSetFromEvent(ev, { identity = null, source = 'rate-limit-event', n
   if (ev.overage && Object.values(ev.overage).some((v) => v !== undefined)) {
     limits.push(quotaModel.makeLimit({ limitId: 'overage', scope: 'overage', name: 'Extra usage', windows: [], flags: { ...ev.overage, asOf: at }, source, fetchedAt: at }));
   }
+  // a record whose `unifiedWindows` named the week and no 5-hour window states «no 5h limit» (lane no-5h-window)
+  if (plan && Array.isArray(ev.absentWindows) && ev.absentWindows.length) limits[limits.indexOf(plan)] = quotaModel.markWindowsAbsent(plan, ev.absentWindows, at);
   return quotaModel.makeLimitSet({ identity, fetchedAt: at, source, limits });
 }
 

@@ -386,11 +386,12 @@ export function installUsageMeter(App, ctx = {}) {
         : `${label}: ${clamped}%`;
       return `<div class="usage-pie usage-donut${hasEst ? ' usage-donut-est' : ''}" title="${tip}" style="background:${bg}"><span class="usage-donut-label">${label}</span></div>`;
     };
+    // a null primary label draws no primary donut (lane no-5h-window: a reading without a 5h window)
     const renderRow = (backend, primaryLabel, primaryPct, secondaryLabel, secondaryPct, noData, pairs) => (
       `<div class="taskbar-usage-row">
         ${createBackendIconHtml(backend, { className: 'taskbar-usage-backend', title: getBackendMeta(backend).label })}
         <div class="taskbar-usage-pair">
-          ${renderPie(primaryLabel, primaryPct, noData, pairs?.[0])}
+          ${primaryLabel == null ? '' : renderPie(primaryLabel, primaryPct, noData, pairs?.[0])}
           ${renderPie(secondaryLabel, secondaryPct, noData, pairs?.[1])}
         </div>
       </div>`
@@ -443,14 +444,19 @@ export function installUsageMeter(App, ctx = {}) {
 
     if (rl || hasSwitch || glKnown) {
       const noData = !rl;
+      // «NO 5h LIMIT» (lane no-5h-window, 2026-10-30): an account Anthropic lifted the 5-hour limit from is shown by
+      // its weekly window alone — never a 0 % 5h donut — and its 5h row says when it was lifted. A reading that has
+      // no 5h bucket for any other reason shows no 5h figure at all (nobody measured one).
+      const has5h = !!(rl && rl.fiveHour && typeof rl.fiveHour === 'object');
+      const no5hSince = quotaModel.fiveHourAbsent(rl);
       const pct5h = Math.round((rl?.fiveHour?.utilization || 0) * 100);
       const color = usageColor(pct5h);
       const pct7d = Math.round((rl?.sevenDay?.utilization || 0) * 100);
       const color7d = usageColor(pct7d);
       const p5 = estDisplayPair(rl?.fiveHour, estSel?.fiveHour);
       const p7 = estDisplayPair(rl?.sevenDay, estSel?.sevenDay);
-      rows.push(renderRow('claude', '5h', pct5h, '7d', pct7d, noData, [p5, p7]));
-      if (!noData) chipWorst = Math.max(chipWorst, p5.estPct ?? pct5h, p7.estPct ?? pct7d);
+      rows.push(renderRow('claude', has5h || noData ? '5h' : null, pct5h, '7d', pct7d, noData, [p5, p7]));
+      if (!noData) chipWorst = Math.max(chipWorst, has5h ? (p5.estPct ?? pct5h) : -1, p7.estPct ?? pct7d);
       // Account switcher — one chip per viewable identity. When the CLI login
       // is a named account (gl.accountId), NO separate CLI-login chip renders:
       // that account's chip covers both (tooltip says so). ★ marks the default.
@@ -505,7 +511,7 @@ export function installUsageMeter(App, ctx = {}) {
       const showingGlobal = sel === '__global__' || (gl.accountId && sel === gl.accountId) || (sel === 'auto' && rl === this._rateLimit);
       const body = noData
         ? `<div class="usage-note">${t('No usage captured yet — quota data arrives passively from terminal sessions (chat sessions don’t report it), or use ⟳ to fetch it on demand.')}</div>`
-        : `<div class="usage-session">
+        : `${has5h ? `<div class="usage-session">
         <div class="usage-session-name">${t('5-hour limit')}</div>
         <div class="usage-bar" style="width:100%;margin:4px 0"><div class="usage-bar-fill" style="width:${p5.estPct != null ? p5.darkPct : pct5h}%;background:${color}"></div>${estBar(p5)}</div>
         <div class="usage-session-stats">
@@ -513,7 +519,10 @@ export function installUsageMeter(App, ctx = {}) {
           ${estStat(p5)}
           <span class="usage-stat"><span class="usage-stat-label">${t('Resets')}</span> ${fmtReset(rl.fiveHour?.resetsAt, rl.fiveHour?.utilization)}</span>
         </div>
-      </div>
+      </div>` : no5hSince ? `<div class="usage-session usage-session-lifted" data-window="5h">
+        <div class="usage-session-name">${escHtml(t('5-hour limit lifted ({when})', { when: stampText(no5hSince) }))}</div>
+        <div class="usage-note">${escHtml(t('Ultra (formerly Max 20x): weekly limits only — Anthropic is lifting the 5-hour limit from verified Ultra accounts in stages; the $100 Max keeps it.'))}</div>
+      </div>` : ''}
       <div class="usage-session">
         <div class="usage-session-name">${t('7-day limit')}</div>
         <div class="usage-bar" style="width:100%;margin:4px 0"><div class="usage-bar-fill" style="width:${p7.estPct != null ? p7.darkPct : pct7d}%;background:${color7d}"></div>${estBar(p7)}</div>

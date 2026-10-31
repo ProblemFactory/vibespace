@@ -873,6 +873,10 @@ async function refreshViaCliPanel(key) {
     // test-quota-model §⑱f drives this call site with a real CLI panel because
     // spelling it `u` here fails SILENTLY: authority simply never happens.)
     const wrote = usageWrite.writeCacheObject({ cacheDir: USAGE_CACHE_DIR, key, obj: merged, source: 'on-demand', familyOf: familyOfScopedBucket, backend: 'claude',
+      // «NO 5h LIMIT» (lane no-5h-window): a panel with the week and no «Current session» row enumerated the plan and
+      // found no 5-hour window — said only by a panel that PROVED whose it is (B-855a c1): an unverified one writes
+      // its numbers and keeps every window the file holds, exactly as it keeps the account's established window.
+      absentWindows: idv && idv.verified ? quotaModel.absentWindowsOf(cliPanel) : null,
       authoritativeScopes: authoritativeScopesOf(cliPanel) });
     wroteOk = !!wrote.ok;
     if (wrote.ok) Object.assign(merged, wrote.object);
@@ -973,7 +977,7 @@ app.post('/api/usage/refresh', async (req, res) => {
           cacheDir: USAGE_CACHE_DIR, key: 'host-' + hid.replace(/[^\w-]/g, '_') + '-' + aid,
           obj: _hostAcctUsage[hid + ':' + aid], source: 'on-demand', familyOf: familyOfScopedBucket, backend: 'claude',
           // enumerating producer (r5) — see refreshViaCliPanel
-          authoritativeScopes: authoritativeScopesOf(u),
+          authoritativeScopes: authoritativeScopesOf(u), absentWindows: quotaModel.absentWindowsOf(u),
         });
         res.json({ success: true, origin: 'device' });
       }).catch(() => hosts.readRemoteSubOAuth(hid, aid).then((token) => {
@@ -990,7 +994,7 @@ app.post('/api/usage/refresh', async (req, res) => {
           cacheDir: USAGE_CACHE_DIR, key: 'host-' + hid.replace(/[^\w-]/g, '_') + '-' + aid,
           obj: _hostAcctUsage[hid + ':' + aid], source: 'on-demand', familyOf: familyOfScopedBucket, backend: 'claude',
           // enumerating producer (r5) — see refreshViaCliPanel
-          authoritativeScopes: authoritativeScopesOf(u),
+          authoritativeScopes: authoritativeScopesOf(u), absentWindows: quotaModel.absentWindowsOf(u),
         });
             res.json({ success: true });
           });
@@ -1044,7 +1048,7 @@ app.post('/api/usage/refresh', async (req, res) => {
         cacheDir: USAGE_CACHE_DIR, key: 'host-' + hid.replace(/[^\w-]/g, '_'),
         obj: _hostUsage[hid], source: 'on-demand-remote', familyOf: familyOfScopedBucket, backend: 'claude',
         // enumerating producer (r5) — see refreshViaCliPanel
-        authoritativeScopes: authoritativeScopesOf(u),
+        authoritativeScopes: authoritativeScopesOf(u), absentWindows: quotaModel.absentWindowsOf(u),
       });
       res.json({ success: true, origin: 'device' });
     }).catch(() => hosts.readRemoteOAuth(hid).then((token) => {
@@ -1061,7 +1065,7 @@ app.post('/api/usage/refresh', async (req, res) => {
         cacheDir: USAGE_CACHE_DIR, key: 'host-' + hid.replace(/[^\w-]/g, '_'),
         obj: _hostUsage[hid], source: 'on-demand-remote', familyOf: familyOfScopedBucket, backend: 'claude',
         // enumerating producer (r5) — see refreshViaCliPanel
-        authoritativeScopes: authoritativeScopesOf(u),
+        authoritativeScopes: authoritativeScopesOf(u), absentWindows: quotaModel.absentWindowsOf(u),
       });
           res.json({ success: true });
         });
@@ -1217,7 +1221,7 @@ app.post('/api/usage/refresh', async (req, res) => {
         // enumerating producer (r5) — see refreshViaCliPanel. `u` IS this read's
         // own answer (no preserve-merge here at all), so its list is complete.
         const w = usageWrite.writeCacheObject({ cacheDir: USAGE_CACHE_DIR, key, obj: u, source: 'on-demand', familyOf: familyOfScopedBucket, backend: 'claude',
-          authoritativeScopes: authoritativeScopesOf(u) });
+          authoritativeScopes: authoritativeScopesOf(u), absentWindows: quotaModel.absentWindowsOf(u) });
         if (w.ok) Object.assign(u, w.object);
       }
       if (isGlobal) { _rateLimitCache = u; writeUsageCache(); }

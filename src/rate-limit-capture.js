@@ -114,8 +114,13 @@ function parseRateLimitEvent(msg) {
           : scopedM ? (windows.scoped[scopedM[1]] || null) : null;
   if (u == null && own && own.utilization != null) u = own.utilization;
   if (!resetsAt && own && own.resetsAt) resetsAt = own.resetsAt;
+  // «NO 5h LIMIT» (lane no-5h-window): "Windows absent from the account state are absent here" (the binary's own
+  // words above) — a record that names the plan week and no 5-hour window ENUMERATED the plan and found none. An
+  // enumerable field on purpose: a re-drive that drops the 5-hour lane (weekly-lanes-unfold's `weeklyOnly`) keeps
+  // the ORIGINAL record's verdict, which was computed before the lane was dropped.
+  const absentWindows = (windows && windows.sevenDay && !windows.fiveHour && kind !== 'fiveHour') ? ['5h'] : [];
   return {
-    kind, rawType,
+    kind, rawType, absentWindows,
     // `scopedName` is the LOWERCASE lane key. A model-cap event has none until
     // `resolveModelCapLane` names it (the type names the accounting, not the
     // model); `modelCap` says which kind of scoped lane this is.
@@ -286,6 +291,11 @@ function captureRateLimitEvent({ cacheDir, key, identityIds, ev, now = Date.now(
   // `fromLegacy` the FILE's clock and flip a genuinely empty window to
   // 'running' — B-8b12 in the other direction).
   const restated = (b) => { const c = { ...b }; delete c.state; return c; };
+  // «NO 5h LIMIT» (lane no-5h-window): what this record enumerated, and the key's OWN plan as stored — a base
+  // chosen from a SIBLING's freshest file may still carry a 5-hour bucket the account no longer has, and spreading
+  // it here would re-stamp it as measured now (a removed window resurrected by a write that never saw it).
+  const absent = Array.isArray(ev.absentWindows) ? ev.absentWindows.filter((k) => k === '5h') : [];
+  const stated5h = lanes.some((l) => l.kind === 'fiveHour');
   // THE RESET OF A DEAD MARK — ONE LADDER FOR EVERY LANE (r2): the signal's
   // own future reset > the lane's stored future reset > for a weekly lane the
   // record's plan weekly reset (every weekly window on every measured account
@@ -337,9 +347,10 @@ function captureRateLimitEvent({ cacheDir, key, identityIds, ev, now = Date.now(
     }
     cache[lane.kind] = b;
   };
-  const applyTo = (cache) => {
+  const applyTo = (cache, own = cache) => {
     scopedRead = false;
     for (const lane of lanes) applyLane(cache, lane);
+    if (!stated5h && (absent.length || (own && Number(own.fiveHourAbsent) > 0 && !own.fiveHour))) delete cache.fiveHour;
     // THE SCOPED CLOCK IS THE READING'S CLOCK (r2): every anchor and overlay
     // site takes the file-level `scopedFetchedAt` as a scoped bucket's `asOf`
     // (the panel's own rule), so a stream-written cap that left it at the last
@@ -378,11 +389,11 @@ function captureRateLimitEvent({ cacheDir, key, identityIds, ev, now = Date.now(
   // the cached FUTURE one, and a set built from the raw event alone would
   // carry `resetsAt: null` and win the merge with it.
   try {
-    let base = null, baseAt = -1;
+    let base = null, baseAt = -1, ownFile = null;
     for (const id of ids) {
-      try { const c = JSON.parse(fs.readFileSync(fileFor(id), 'utf-8')) || {}; if ((Number(c.fetchedAt) || 0) > baseAt) { baseAt = Number(c.fetchedAt) || 0; base = c; } } catch { }
+      try { const c = JSON.parse(fs.readFileSync(fileFor(id), 'utf-8')) || {}; if (id === key) ownFile = c; if ((Number(c.fetchedAt) || 0) > baseAt) { baseAt = Number(c.fetchedAt) || 0; base = c; } } catch { }
     }
-    const cache = applyTo(base ? { ...base } : {});
+    const cache = applyTo(base ? { ...base } : {}, ownFile);
     // The freshest SIBLING was chosen for its READINGS; its `limits` describe a
     // different account's window set, so they must not travel with it.
     delete cache.limits;
@@ -404,7 +415,7 @@ function captureRateLimitEvent({ cacheDir, key, identityIds, ev, now = Date.now(
     }
     const w = usageWrite.writeCacheObject({
       cacheDir, key, obj: cache, measuredAt: now,
-      source: reading ? (source || 'rate-limit-event') : null, familyOf, backend: 'claude',
+      source: reading ? (source || 'rate-limit-event') : null, familyOf, backend: 'claude', absentWindows: absent,
     });
     if (!w.ok) return { ok: false, dead, wroteReading: false, error: w.why || 'write refused' };
     for (const id of ids) {
@@ -414,7 +425,7 @@ function captureRateLimitEvent({ cacheDir, key, identityIds, ev, now = Date.now(
         if (!c2) continue; // never create a sibling
         applyTo(c2); // fetchedAt deliberately untouched
         delete c2.limits; // the sibling's own limits are rebuilt from its own (now updated) view
-        usageWrite.writeCacheObject({ cacheDir, key: id, obj: c2, measuredAt: now, familyOf, backend: 'claude' });
+        usageWrite.writeCacheObject({ cacheDir, key: id, obj: c2, measuredAt: now, familyOf, backend: 'claude', absentWindows: absent });
       } catch { }
     }
     return { ok: true, dead, wroteReading: reading, lanes: lanes.map((l) => (l.kind === 'scoped' ? 'scoped:' + l.scopedName : l.kind)), modelCapLane: ev.modelCapLane || null };

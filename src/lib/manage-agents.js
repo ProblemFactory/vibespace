@@ -423,6 +423,15 @@ export function machineLoginLinkHint(name, vendor = 'Anthropic') {
  *  {accounts, hostOwn, hostAccounts, codex, rateLimit, estimates}. Returns
  *  {u, est} or null when the maps cannot answer — a cell whose source has no
  *  snapshot right now keeps its last paint (the poll never blanks a row). */
+// A MACHINE LOGIN'S SNAPSHOT IS A READING when it carries a 5h bucket — or, for an account Anthropic lifted the 5-hour
+// limit from (lane no-5h-window), a weekly window that states a spend. The four host-own gates used to ask `fiveHour`
+// alone and blanked a weekly-only reading whole. PURE, exported for the gate.
+export function hostOwnReading(h) {
+  if (!h || typeof h !== 'object') return null;
+  const w = h.sevenDay;
+  return h.fiveHour || (w && typeof w === 'object' && (w.utilization != null || w.usedPercent != null)) ? h : null;
+}
+
 export function rosterUsageSnapshot(stamp, maps) {
   const src = stamp && stamp.usageSrc, key = stamp && stamp.usageKey;
   if (!src) return null;
@@ -430,7 +439,7 @@ export function rosterUsageSnapshot(stamp, maps) {
   let u = null, est = null;
   if (src === 'accounts') { u = m.accounts?.[key] || null; est = m.estimates?.[key] || null; }
   else if (src === 'global') { u = m.rateLimit || null; est = m.estimates?.__global__ || null; }
-  else if (src === 'host-own') { const h = m.hostOwn?.[key]; u = h && h.fiveHour ? h : null; }
+  else if (src === 'host-own') { const h = m.hostOwn?.[key]; u = hostOwnReading(h); }
   else if (src === 'host-account') { u = m.hostAccounts?.[key] || null; }
   else if (src === 'codex') { u = m.codex?.[key] || null; est = m.estimates?.[key] || null; }
   else if (src === 'home') { u = onDemandUsageView(m.home?.[key]); }
@@ -1543,7 +1552,10 @@ export function installManageAgents(App, ctx = {}) {
     };
     // an ON-DEMAND reading (onDemandUsageView) names its own windows; every other row is the 5h + 7d (+ scoped) view
     const wins = Array.isArray(u.windows) ? u.windows : null;
-    const parts = wins ? wins.map((w) => donut(w.label, w, null, null)) : [donut('5h', u.fiveHour, null, est?.fiveHour), donut('7d', u.sevenDay, null, est?.sevenDay)];
+    // A READING WITHOUT A 5h WINDOW DRAWS NONE (lane no-5h-window): an Ultra account the vendor lifted the 5-hour limit
+    // from is shown by its weekly window alone — `pct(undefined)` used to draw a 0 % «5h» donut nobody measured.
+    const has5h = !!(u.fiveHour && typeof u.fiveHour === 'object');
+    const parts = wins ? wins.map((w) => donut(w.label, w, null, null)) : [...(has5h ? [donut('5h', u.fiveHour, null, est?.fiveHour)] : []), donut('7d', u.sevenDay, null, est?.sevenDay)];
     const scEst = (name) => (est?.scopedWeekly || []).find((x) => String(x?.name || '').toLowerCase() === String(name || '').toLowerCase()) || null;
     if (!wins) for (const sc of (u.scopedWeekly || [])) parts.push(donut(String(sc.name || '?').slice(0, 2), sc, sc.name, scEst(sc.name)));
     const age = u.fetchedAt ? Math.round((now - u.fetchedAt) / 60000) : null;
@@ -1558,7 +1570,7 @@ export function installManageAgents(App, ctx = {}) {
     // ~100px and doesn't shrink — below ~340px a container query swaps it for
     // ONE pill showing the TIGHTEST bucket (+ its compact countdown; full
     // detail in the tooltip).
-    const buckets = (wins ? wins.map((w) => [w.label, w, null, w.kind]) : [['5h', u.fiveHour, est?.fiveHour, 'fiveHour'], ['7d', u.sevenDay, est?.sevenDay, 'weekly'], ...(u.scopedWeekly || []).map((sc) => [String(sc.name || '?').slice(0, 2), sc, scEst(sc.name), 'weekly'])])
+    const buckets = (wins ? wins.map((w) => [w.label, w, null, w.kind]) : [...(has5h ? [['5h', u.fiveHour, est?.fiveHour, 'fiveHour']] : []), ['7d', u.sevenDay, est?.sevenDay, 'weekly'], ...(u.scopedWeekly || []).map((sc) => [String(sc.name || '?').slice(0, 2), sc, scEst(sc.name), 'weekly'])])
       .map(([label, x, e, kind]) => { const pr = estDisplayPair(x, e); return [label, pr.estPct ?? pct(x), pr.estPct != null, x, kind]; }).filter(([, p]) => Number.isFinite(p));
     // THE ROW'S OWN countdown (2026-09-15): one full-precision token per
     // account — blocked ⇒ when its last spent bucket resets (the pool's hard
@@ -1690,7 +1702,7 @@ export function installManageAgents(App, ctx = {}) {
         if (!cell) return;
         let u = null, est = null;
         if (tg.body.host && tg.body.account) u = this._hostAccountUsage?.[tg.body.host + ':' + tg.body.account];
-        else if (tg.body.host) u = this._hostOwnUsage?.[tg.body.host]?.fiveHour ? this._hostOwnUsage[tg.body.host] : null;
+        else if (tg.body.host) u = hostOwnReading(this._hostOwnUsage?.[tg.body.host]);
         else if (tg.body.account === '__global__') { u = this._rateLimit; est = this._usageEstimates?.__global__; }
         else { u = this._accountUsage?.[tg.body.account]; est = this._usageEstimates?.[tg.body.account]; }
         if (u) { cell.innerHTML = this._acctUsageHtml(u, est); markSoonRows(cell.closest('.acct-list')); patchCreditsSlot(row.querySelector('.acct-credits-slot'), creditsChipFor(u)); }
@@ -3040,7 +3052,7 @@ export function installManageAgents(App, ctx = {}) {
       <span class="acct-type-icon" title="${selectedHost ? t("This machine's own login — lives on {host}, not in VibeSpace", { host: escHtml(hostLabel) }) : t('The CLI’s own global login on this machine')}">${GLOBE}</span>
       <span class="acct-key-main"><span class="acct-key-line"><span class="acct-key-name">${gName}</span><span class="acct-key-tail">${gIdent}</span>${!selectedHost && sub.loggedIn ? creditsSlotHtml(this._rateLimit) : selectedHost ? creditsSlotHtml(this._hostOwnUsage?.[selectedHost]?.fiveHour ? this._hostOwnUsage[selectedHost] : null) : ''}</span></span>
       <span class="acct-usage-cell"${!selectedHost && sub.loggedIn ? ' data-usage-src="global" data-usage-key="__global__"' : (selectedHost ? ` data-usage-src="host-own" data-usage-key="${escHtml(selectedHost)}"` : '')}>${!selectedHost && sub.loggedIn ? usageHtml(this._rateLimit, this._usageEstimates?.__global__)
-        : (selectedHost && this._hostOwnUsage?.[selectedHost]?.fiveHour ? usageHtml(this._hostOwnUsage[selectedHost]) : '')}</span>
+        : (selectedHost && hostOwnReading(this._hostOwnUsage?.[selectedHost]) ? usageHtml(this._hostOwnUsage[selectedHost]) : '')}</span>
       <span class="acct-key-actions">
         <button class="acct-icon acct-def ${gDef ? 'on' : ''}" title="${gDef ? t('Default for new sessions — pick another to change') : t('Set as default for new sessions')}">${gDef ? STAR_F : STAR_O}</button>${gExtraActions}
       </span></div>`;
@@ -3146,7 +3158,7 @@ export function installManageAgents(App, ctx = {}) {
         if (isPool) { const tid = a.current; const u = tid ? this._accountUsage?.[tid] : null; return u ? { u, est: this._usageEstimates?.[tid] } : null; }
         if (!isSub) return null;
         let u = null, estKey = null;
-        if (selectedHost && v?.how === 'host-login') u = this._hostOwnUsage?.[selectedHost]?.fiveHour ? this._hostOwnUsage[selectedHost] : null;
+        if (selectedHost && v?.how === 'host-login') u = hostOwnReading(this._hostOwnUsage?.[selectedHost]);
         else if (selectedHost && v?.how === 'host-held') u = this._hostAccountUsage?.[selectedHost + ':' + a.id] || null;
         else if (a.loggedIn || a.oat) { u = this._accountUsage?.[a.id]; estKey = a.id; }
         return u ? { u, est: estKey ? this._usageEstimates?.[estKey] : null } : null;

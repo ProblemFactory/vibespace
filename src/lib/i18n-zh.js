@@ -11676,4 +11676,10 @@ export default {
   "This grant changed while the dialog was open — close it and open it again": "这个授权在对话框打开期间变了 — 关掉再打开一次",
   // lane vault-standing-request r11 (a Save whose row landed and whose policy did not) — on a plain line (see r9 above)
   "The members were saved; the policy was not": "成员已保存；策略没有保存",
+  "5-hour limit lifted ({when})": "5 小时限额已取消（{when}）",
+  "Ultra (formerly Max 20x): weekly limits only — Anthropic is lifting the 5-hour limit from verified Ultra accounts in stages; the $100 Max keeps it.": "Ultra（原 Max 20x）：只有每周限额——Anthropic 正分批取消已验证 Ultra 账号的 5 小时限额；$100 的 Max 仍保留它。",
+  "{account}'s 5-hour limit was lifted by Anthropic (since {since}): the pool now counts only its weekly limit": "{account} 的 5 小时限额已被 Anthropic 取消（{since} 起）：账号池此后只计它的每周限额",
+  "Its usage reading no longer lists a 5-hour window. Anthropic is removing the rolling 5-hour limit from verified Ultra (formerly Max 20x) accounts in stages; weekly limits are unchanged. The Usage popup says so on its row — nothing needs doing.": "它的用量读数不再列出 5 小时窗口。Anthropic 正在分批取消已验证 Ultra（原 Max 20x）账号的滚动 5 小时限额，每周限额不变。用量弹窗在它那一行也会注明——无需任何操作。",
+  "{account}'s 5-hour limit is back (since {since}): the pool counts its 5-hour window again": "{account} 的 5 小时限额又回来了（{since} 起）：账号池重新计入它的 5 小时窗口",
+  "Its usage reading lists a 5-hour window again. A newer account keeps a temporary 5-hour limit until Anthropic verifies it, and Anthropic emails when it is lifted.": "它的用量读数重新列出了 5 小时窗口。较新的账号在 Anthropic 验证之前保留一个临时的 5 小时限额，取消时 Anthropic 会发邮件通知。",
 };

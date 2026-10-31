@@ -650,7 +650,10 @@ class ClaudeCodeAdapter extends BackendAdapter {
         : (w.resets_at ? Math.floor(Date.parse(w.resets_at) / 1000) || 0 : 0);
       return { utilization: pct, resetsAt, status: pct >= 1 ? 'limited' : 'allowed' };
     };
-    const fiveHour = toWin(rl.five_hour);
+    // `five_hour` null beside a stated week = «no 5h limit» (lane no-5h-window): `toWin(null)` used to answer a
+    // 0 % 'allowed' window the vendor never stated — the most convincing fabrication of all.
+    const absent5h = !(rl.five_hour && typeof rl.five_hour === 'object') && !!(rl.seven_day && typeof rl.seven_day === 'object');
+    const fiveHour = absent5h ? null : toWin(rl.five_hour);
     const sevenDay = toWin(rl.seven_day);
     const scopedWeekly = [];
     // Model caps this parse SAW but could not turn into a bucket (r6). Only a
@@ -722,12 +725,12 @@ class ClaudeCodeAdapter extends BackendAdapter {
         scopedWeekly.push({ name, utilization: w.utilization, resetsAt: w.resetsAt, severity: w.utilization >= 1 ? 'exceeded' : 'normal' });
       }
     }
-    return quotaModel.markScopedEnumeration({
-      fiveHour, sevenDay, scopedWeekly,
-      overallStatus: (fiveHour.status === 'limited' || sevenDay.status === 'limited') ? 'limited' : 'allowed',
+    return quotaModel.markWindowEnumeration(quotaModel.markScopedEnumeration({
+      ...(fiveHour ? { fiveHour } : {}), sevenDay, scopedWeekly,
+      overallStatus: ((fiveHour && fiveHour.status === 'limited') || sevenDay.status === 'limited') ? 'limited' : 'allowed',
       fetchedAt: Date.now(), source: 'control',
       scopedFetchedAt: scopedWeekly.length ? Date.now() : undefined,
-    }, dropped === 0, named);
+    }, dropped === 0, named), absent5h ? ['5h'] : []);
   }
 
   // Chat-mode PASSIVE limit signal (2.260.0, ToS-clean by construction): the
@@ -778,8 +781,10 @@ class ClaudeCodeAdapter extends BackendAdapter {
     if (model) return { kind: 'scoped', name: model[1][0].toUpperCase() + model[1].slice(1).toLowerCase() };
     if (/week|7[- ]?day/i.test(what)) return { kind: 'sevenDay' };
     // unknown wording → treat as the SHORTEST-recovery bucket (self-heals in
-    // ≤5h via the reset-passed rule; a re-attempt re-banners and re-marks)
-    return { kind: 'fiveHour' };
+    // ≤5h via the reset-passed rule; a re-attempt re-banners and re-marks) —
+    // MARKED as a guess (lane no-5h-window): on an account whose plan has no
+    // 5-hour window the wall can only be its week, and the engine asks.
+    return { kind: 'fiveHour', guessed: true };
   }
 }
 

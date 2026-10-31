@@ -562,7 +562,11 @@ function writeUsage(p) {
   // Throttle: the statusline re-renders often; one write / 25s per account is
   // plenty (usage windows move slowly) and keeps disk churn negligible.
   try { const st = fs.statSync(f); if (Date.now() - st.mtimeMs < THROTTLE_MS) return; } catch {}
-  const fiveHour = win(rl.five_hour) || { utilization: 0, status: 'unknown', resetsAt: 0 };
+  // NO FABRICATED 5-HOUR WINDOW (lane no-5h-window, 2026-10-30): a payload without `five_hour` (an Ultra account
+  // the vendor lifted the 5-hour limit from) used to write a 0 % window nobody stated. This tool states nothing
+  // about a window it did not measure — the file's own `fiveHour` (or its «no 5h limit» mark) is kept by the spread
+  // below, and only an enumerating reading (the server's /usage panel) may say the window is gone.
+  const fiveHour = win(rl.five_hour);
   const sevenDay = win(rl.seven_day) || { utilization: 0, status: 'unknown', resetsAt: 0 };
   let prev = null;
   try { prev = JSON.parse(fs.readFileSync(f, 'utf-8')); } catch {}
@@ -590,12 +594,12 @@ function writeUsage(p) {
   const measuredName = (s) => scopedMeasured.some((m) => String(m.name).toLowerCase() === String((s && s.name) || '').toLowerCase());
   const out = {
     ...(prev && typeof prev === 'object' ? prev : {}),
-    fiveHour, sevenDay,
+    ...(fiveHour ? { fiveHour } : {}), sevenDay,
     // an account that has never had a model-scoped bucket still needs the field
     // present (it is how a reader tells a claude snapshot from a codex one);
     // a bucket this render did NOT measure is kept by construction
     scopedWeekly: scopedMeasured.length ? [...prevScoped.filter((s) => !measuredName(s)), ...scopedMeasured] : prevScoped,
-    overallStatus: (fiveHour.status === 'limited' || sevenDay.status === 'limited') ? 'limited' : 'allowed',
+    overallStatus: ((fiveHour && fiveHour.status === 'limited') || sevenDay.status === 'limited') ? 'limited' : 'allowed',
     fetchedAt: Date.now(), source: 'passive',
   };
   // THE LIMITS THIS PRODUCER MEASURED ARE THE ONES IT DROPS. `limits` is the

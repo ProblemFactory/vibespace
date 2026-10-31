@@ -297,7 +297,42 @@ function retireUnnamedScopes(prevSet, next, scopes, { key = null, source = null 
  *  computed is carried through verbatim (identity, planType, resetCredits,
  *  corroborated, scopedFetchedAt, …) — this module projects the buckets, it
  *  does not curate the rest. */
-const DERIVED_KEYS = ['fiveHour', 'sevenDay', 'scopedWeekly', 'overage'];
+const DERIVED_KEYS = ['fiveHour', 'sevenDay', 'scopedWeekly', 'overage', 'fiveHourAbsent'];
+
+// ── A WINDOW THE VENDOR REMOVED, OR GAVE BACK (lane no-5h-window) ───────────
+/** A reading that ENUMERATED the plan's windows found `kinds` missing (`absentWindows`, from the parse's own
+ *  `quotaModel.absentWindowsOf` — never from a stored object): the plan limit of `next` loses those windows and
+ *  carries the dated tombstone. A set with no plan limit gets one holding only the tombstone. */
+function markPlanAbsent(next, kinds, at) {
+  const list = Array.isArray(kinds) ? kinds.filter(Boolean) : [];
+  if (!list.length) return next;
+  const limits = quotaModel.limitsOf(next).slice();
+  const i = limits.findIndex((l) => l && l.scope === 'plan');
+  const plan = i >= 0 ? limits[i] : quotaModel.makeLimit({ limitId: 'plan', scope: 'plan', windows: [], source: next.source, fetchedAt: at });
+  const marked = quotaModel.markWindowsAbsent(plan, list, at);
+  if (i >= 0) limits[i] = marked; else limits.unshift(marked);
+  return quotaModel.makeLimitSet({ ...next, limits });
+}
+
+/** THE CHANGE, judged where every write-path write passes: the 5h window the file HAD is now tombstoned
+ *  ('removed'), or a tombstoned file holds a 5h window again ('restored'). «Had» reads the file as stored, and
+ *  the raw `fiveHourAbsent` too — a direct writer (the shipped statusline) may restore a window behind this
+ *  module's back, and the view field it spread forward is the last thing the write path said. A reading that
+ *  never had one and reads none now is a SHAPE, not a change: nothing is said. */
+function windowChangeOf(prevObj, prevSet, merged) {
+  const prevPlan = quotaModel.planLimit(prevSet), nowPlan = quotaModel.planLimit(merged);
+  const had5 = !!quotaModel.windowOfKind(prevPlan, '5h');
+  const wasAbsent = !!quotaModel.absentSince(prevPlan, '5h') || !!(prevObj && Number(prevObj.fiveHourAbsent) > 0);
+  const nowAbsent = quotaModel.absentSince(nowPlan, '5h');
+  const now5 = quotaModel.windowOfKind(nowPlan, '5h');
+  if (nowAbsent && had5 && !wasAbsent) return { kind: '5h', change: 'removed', at: nowAbsent };
+  if (now5 && wasAbsent) return { kind: '5h', change: 'restored', at: Number(now5.measuredAt) || Date.now() };
+  return null;
+}
+// ONE listener (the pool engine's, which says the change once to the owner): the write path is SHARED tier and
+// knows no For-you store, so it only reports what it saw.
+let _onWindowChange = null;
+function onWindowChange(fn) { _onWindowChange = typeof fn === 'function' ? fn : null; }
 
 function atomicWrite(file, text) {
   fs.writeFileSync(file + '.tmp', text);
@@ -337,7 +372,7 @@ function atomicWrite(file, text) {
  *                                complete list — see `retireUnnamedScopes`.
  * @returns {{ok:boolean, why?:string, errors?:string[], limits?:Array, file?:string}}
  */
-function writeCacheObject({ cacheDir, key, obj, set = null, measuredAt = null, source = null, familyOf = null, backend = null, onRefuse = null, replace = false, authoritativeScopes = null }) {
+function writeCacheObject({ cacheDir, key, obj, set = null, measuredAt = null, source = null, familyOf = null, backend = null, onRefuse = null, replace = false, authoritativeScopes = null, absentWindows = null }) {
   if (!cacheDir || !key) return { ok: false, why: 'no cacheDir/key' };
   const file = cacheFileFor(cacheDir, key);
   const at = Number(measuredAt) || Number(obj && obj.fetchedAt) || Date.now();
@@ -376,6 +411,8 @@ function writeCacheObject({ cacheDir, key, obj, set = null, measuredAt = null, s
       limits: next.limits.map((l) => ({ ...l, source: l.source || source })),
     });
   }
+  // «NO 5h LIMIT» (lane no-5h-window): only an enumerating call site passes it, from its parse's own mark.
+  if (Array.isArray(absentWindows) && absentWindows.length) next = markPlanAbsent(next, absentWindows, at);
   const vNext = quotaModel.validateLimitSet(next);
   if (!vNext.ok) {
     const why = `refusing to write ${key}: the producer's limit set is malformed`;
@@ -416,7 +453,9 @@ function writeCacheObject({ cacheDir, key, obj, set = null, measuredAt = null, s
   } catch (e) {
     return { ok: false, why: 'write failed: ' + e.message };
   }
-  return { ok: true, file, limits: merged.limits, object: out };
+  const windowChange = replace ? null : windowChangeOf(prevObj, prevSet, merged);
+  if (windowChange && _onWindowChange) { try { _onWindowChange({ key, ...windowChange, source: source || (obj && obj.source) || null }); } catch { } }
+  return { ok: true, file, limits: merged.limits, object: out, ...(windowChange ? { windowChange } : {}) };
 }
 
 /** The typed entry: a producer that built a LimitSet hands it here and never
@@ -448,6 +487,6 @@ module.exports = {
   cacheFileFor, isCacheFileName, readCacheObject,
   backendOfCacheObject, liftCacheObject, limitsOfCache,
   writeCacheObject, writeReading, writeSidecar,
-  carryUnmeasuredLimits, retireUnnamedScopes,
+  carryUnmeasuredLimits, retireUnnamedScopes, markPlanAbsent, windowChangeOf, onWindowChange,
   DERIVED_KEYS,
 };

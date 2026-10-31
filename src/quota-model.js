@@ -257,6 +257,87 @@ function limitsOf(set) { return set && Array.isArray(set.limits) ? set.limits : 
 function windowsOf(limit) { return limit && Array.isArray(limit.windows) ? limit.windows : []; }
 function windowOfKind(limit, kind) { return windowsOf(limit).find((w) => w && w.kind === kind) || null; }
 
+// ── A WINDOW THE VENDOR REMOVED (lane no-5h-window, 2026-10-30) ─────────────
+// Anthropic renamed Max 20x → Ultra and is lifting the rolling 5-hour limit from verified Ultra accounts in
+// stages (weekly limits unchanged; the $100 Max keeps its 5-hour window; a newer account keeps a temporary one
+// until it is verified). So a plan may hold NO '5h' window, and that is a COMPLETE reading — never a default 0 %
+// window pretending to exist. Two shapes this model keeps apart, because they mean opposite things:
+//   «no 5h limit»            a reading that ENUMERATED the plan's windows listed no '5h' one (the /usage panel
+//                            with no «Current session» row; a rate_limit_event whose `unifiedWindows` names only
+//                            the week; an OAuth / get_usage reply with `five_hour` null) ⇒ the plan holds NO '5h'
+//                            window and a dated TOMBSTONE `flags.absent['5h'] = <ms, first said>`; the projection
+//                            says it as `fiveHourAbsent`;
+//   «5h window not started»  a '5h' window IS listed, at 0 % with no reset (the panel's «Current session: 0% used»)
+//                            ⇒ a window like any other, its `state` fencing the sliding reset (B-8b12).
+// A tombstone and a window of one kind never coexist: the NEWER claim wins (`settleAbsence`) — a window measured
+// after the removal is the window BACK (a newer account's temporary limit), one measured before it is gone. Only
+// a reading that enumerated may lay one (`markWindowEnumeration`: a symbol, so no stored object can forge it —
+// the r6 law of `markScopedEnumeration`); a producer that knows one bucket states nothing about the others.
+const WINDOWS_ABSENT = Symbol('planWindowsAbsent');
+
+/** When did an enumerating reading first find `kind` missing from this limit? ms, or null (no claim). */
+function absentSince(limit, kind) {
+  const a = limit && limit.flags && limit.flags.absent;
+  return a && typeof a === 'object' ? posNum(a[kind]) : null;
+}
+
+/** One limit with its tombstones settled against its windows: the newer claim wins, a tie keeps the window (a
+ *  stated window is a constraint; dropping one is the optimistic direction). Returns the limit itself when it
+ *  carries no tombstone. */
+function settleAbsence(limit) {
+  const a = limit && limit.flags && limit.flags.absent;
+  if (!a || typeof a !== 'object') return limit;
+  const absent = {};
+  let windows = windowsOf(limit);
+  for (const [kind, v] of Object.entries(a)) {
+    const since = posNum(v);
+    if (since == null) continue;
+    const w = windows.find((x) => x && x.kind === kind);
+    if (w && (posNum(w.measuredAt) || 0) >= since) continue; // measured after the removal: the window is BACK
+    if (w) windows = windows.filter((x) => x !== w);         // measured before it: the vendor removed it since
+    absent[kind] = since;
+  }
+  const flags = { ...limit.flags };
+  if (Object.keys(absent).length) flags.absent = absent; else delete flags.absent;
+  return { ...limit, windows, flags };
+}
+
+/** A reading that enumerated this limit's windows found `kinds` missing at `at` (ms): those windows go, the
+ *  tombstone keeps the EARLIER instant it was first said (the «since» the Usage popup prints). */
+function markWindowsAbsent(limit, kinds, at) {
+  const t = posNum(at);
+  const list = (Array.isArray(kinds) ? kinds : []).map(str).filter(Boolean);
+  if (!limit || t == null || !list.length) return limit;
+  const absent = { ...(limit.flags && limit.flags.absent && typeof limit.flags.absent === 'object' ? limit.flags.absent : {}) };
+  for (const k of list) { const was = posNum(absent[k]); absent[k] = was != null && was <= t ? was : t; }
+  return settleAbsence({ ...limit, windows: windowsOf(limit).filter((w) => !(w && list.includes(w.kind))), flags: { ...(limit.flags || {}), absent } });
+}
+
+/** Mark a parse result with the plan windows it ENUMERATED and found missing (`kinds`, e.g. ['5h']). A parser
+ *  that cannot prove it saw the whole panel passes [] (format drift costs the claim, never the reading). Returns
+ *  the same object. Non-enumerable, symbol-keyed: a spread copy or a stored file carries no claim. */
+function markWindowEnumeration(parsed, kinds) {
+  if (!parsed || typeof parsed !== 'object') return parsed;
+  const list = (Array.isArray(kinds) ? kinds : []).map(str).filter(Boolean);
+  try { Object.defineProperty(parsed, WINDOWS_ABSENT, { value: list, enumerable: false, configurable: true, writable: true }); } catch { /* frozen: no claim */ }
+  return parsed;
+}
+
+/** The plan window kinds THIS parse enumerated and found missing — [] when it claims nothing. The enumerating
+ *  call sites hand it to the write path (`absentWindows`), exactly where they hand `authoritativeScopesOf`. */
+function absentWindowsOf(parsed) {
+  const v = parsed && typeof parsed === 'object' ? parsed[WINDOWS_ABSENT] : null;
+  return Array.isArray(v) ? v.slice() : [];
+}
+
+/** «No 5h limit» on a cache object / its view (ms since), or null. The ONE predicate the readers ask, so «the
+ *  5h window has not started» (a window at 0 %) and «there is no 5h window» (this) are never one answer. */
+function fiveHourAbsent(cache) {
+  if (!cache || typeof cache !== 'object') return null;
+  if (cache.fiveHour && typeof cache.fiveHour === 'object') return null; // a window present outranks a stale mark
+  return posNum(cache.fiveHourAbsent);
+}
+
 // ── the validator ───────────────────────────────────────────────────────────
 
 /** REJECT A MALFORMED SET, WITH THE REASONS. Called at the write path, which
@@ -280,6 +361,12 @@ function validateLimitSet(set) {
     if (!SCOPES.includes(l.scope)) errors.push(`${at}.scope must be one of ${SCOPES.join('|')} (got ${JSON.stringify(l.scope)})`);
     if (l.fetchedAt != null && !(Number.isFinite(Number(l.fetchedAt)) && Number(l.fetchedAt) > 0)) errors.push(`${at}.fetchedAt must be a positive number`);
     if (!Array.isArray(l.windows)) { errors.push(`${at}.windows must be an array`); return; }
+    // THE TOMBSTONE'S SHAPE (lane no-5h-window): kind → the positive ms it was first said. Coexistence with a
+    // window of the same kind is SETTLED by every merge (`settleAbsence`), never refused — a file a direct
+    // writer left in that state is healed, not dropped.
+    const ab = l.flags && l.flags.absent;
+    if (ab !== undefined && (!ab || typeof ab !== 'object' || Array.isArray(ab) || Object.values(ab).some((v) => !(Number.isFinite(Number(v)) && Number(v) > 0))))
+      errors.push(`${at}.flags.absent must map a window kind to a positive ms timestamp (got ${JSON.stringify(ab)})`);
     const kinds = new Set();
     l.windows.forEach((w, j) => {
       const wat = `${at}.windows[${j}]`;
@@ -669,6 +756,22 @@ function mergeWindow(prev, next) {
   return b >= a ? next : prev;
 }
 
+/** Flags merge newer-over-older, except the TOMBSTONES, which UNION (the earliest instant per kind is when it
+ *  was first said); `settleAbsence` then weighs each against the merged window of its kind. */
+function mergedFlags(prev, next) {
+  const out = { ...(prev.flags || {}), ...(next.flags || {}) };
+  const a = prev.flags && prev.flags.absent, b = next.flags && next.flags.absent;
+  if ((a && typeof a === 'object') || (b && typeof b === 'object')) {
+    const absent = { ...(a && typeof a === 'object' ? a : {}) };
+    for (const [k, v] of Object.entries(b && typeof b === 'object' ? b : {})) {
+      const t = posNum(v), was = posNum(absent[k]);
+      if (t != null) absent[k] = was != null && was <= t ? was : t;
+    }
+    out.absent = absent;
+  }
+  return out;
+}
+
 function mergeLimit(prev, next) {
   if (!prev) return next;
   if (!next) return prev;
@@ -680,21 +783,21 @@ function mergeLimit(prev, next) {
     else { byKind.set(w.kind, w); windows.push(w.kind); }
   }
   const newer = (posNum(next.fetchedAt) || 0) >= (posNum(prev.fetchedAt) || 0);
-  return {
+  return settleAbsence({
     limitId: next.limitId || prev.limitId,
     name: next.name != null ? next.name : prev.name,
     scope: newer ? next.scope : prev.scope,
     model: next.model != null ? next.model : prev.model,
     family: next.family != null ? next.family : prev.family,
     windows: windows.map((k) => byKind.get(k)),
-    flags: { ...(prev.flags || {}), ...(next.flags || {}) },
+    flags: mergedFlags(prev, next),
     // PER-LIMIT PROVENANCE. The set-level `source`/`fetchedAt` answer "who
     // wrote this file last"; these answer "who produced THIS limit's numbers,
     // and when" — the only question a panel showing three limits side by side
     // can actually act on.
     source: newer ? (next.source || prev.source) : (prev.source || next.source),
     fetchedAt: Math.max(posNum(prev.fetchedAt) || 0, posNum(next.fetchedAt) || 0) || null,
-  };
+  });
 }
 
 /** MERGE PER limitId. A producer that carries ONE limit updates ONE limit; the
@@ -716,7 +819,7 @@ function mergeLimitSets(prev, next) {
   // THE ONE NAMED EXCEPTION to "never collapse": the un-named model cap folds
   // into the named lane it turns out to be (same weekly reset) — see
   // `foldPlaceholderCap`. Two NAMED limits still never collapse.
-  const limits = foldPlaceholderCap(order.map((id) => byId.get(id)));
+  const limits = foldPlaceholderCap(order.map((id) => settleAbsence(byId.get(id))));
   const fetchedAt = Math.max(posNum(p.fetchedAt) || 0, posNum(n.fetchedAt) || 0) || null;
   // The set-level source names whoever produced the NEWEST limit — never the
   // last writer to touch the file, which is exactly the collapse this replaces.
@@ -1026,6 +1129,9 @@ function toLegacyView(set, { nowSec = null } = {}) {
   const f5 = toBucket(bind5 || planW5);
   const f7 = toBucket(windowOfKind(plan, '7d'));
   if (f5) out.fiveHour = f5;
+  // «NO 5h LIMIT» RIDES THE VIEW (lane no-5h-window): every legacy reader reads `fiveHour`, and an absent key
+  // alone cannot tell «the vendor removed it» from «nobody measured it yet». Only when no 5h window is projected.
+  else if (absentSince(plan, '5h')) out.fiveHourAbsent = absentSince(plan, '5h');
   if (f7) out.sevenDay = f7;
   const scoped = [];
   for (const l of limitsOf(set)) {
@@ -1129,7 +1235,11 @@ function fromLegacy(legacy, { identity = null, source = null, fetchedAt = null, 
   };
   const w5 = bucket(src.fiveHour, '5h'); if (w5) planWindows.push(w5);
   const w7 = bucket(src.sevenDay, '7d'); if (w7) planWindows.push(w7);
-  if (planWindows.length) limits.push(makeLimit({ limitId, scope: 'plan', windows: planWindows, source: srcName, fetchedAt: at }));
+  // THE VIEW'S TOMBSTONE COMES BACK DATED (lane no-5h-window): a producer that spreads a file forward (the shipped
+  // statusline, the event capture's base) carries `fiveHourAbsent` with the instant it was first said, so it can
+  // never outrank a 5h window measured after it — `settleAbsence` weighs the two.
+  const ab5 = posNum(src.fiveHourAbsent);
+  if (planWindows.length || ab5) limits.push(settleAbsence(makeLimit({ limitId, scope: 'plan', windows: planWindows, flags: ab5 ? { absent: { '5h': ab5 } } : null, source: srcName, fetchedAt: at })));
   for (const s of Array.isArray(src.scopedWeekly) ? src.scopedWeekly : []) {
     if (!s || !s.name) continue;
     const w = bucket(s, '7d');
@@ -1384,6 +1494,8 @@ module.exports = {
   windowClaimKey, limitClaimKey, sameLimitClaim,
   // "did this READ see the whole set?" — the retirement's right to speak
   markScopedEnumeration, scopedEnumeration, scopedNamedCount, authoritativeScopesOf, SCOPED_ENUMERATED,
+  // a window the vendor removed (lane no-5h-window): «no 5h limit» ≠ «5h window not started»
+  absentSince, settleAbsence, markWindowsAbsent, markWindowEnumeration, absentWindowsOf, fiveHourAbsent, WINDOWS_ABSENT,
   // panels
   orderLimits, limitLabel, limitState,
   // the wall's own attribution (inc-mttbrtc0-6049)

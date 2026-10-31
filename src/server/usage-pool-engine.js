@@ -1023,7 +1023,7 @@ function writeUsageCacheForKey(key, parsed) {
     // parse (`parseGetUsageResponse`), which is the only object that can know
     // whether it dropped a bucket; `merged` could not answer it.
     return usageWrite.writeCacheObject({ cacheDir: USAGE_CACHE_DIR, key, obj: merged, source: parsed.source || null, familyOf: familyOfScopedBucket, backend: 'claude',
-      authoritativeScopes: quotaModel.authoritativeScopesOf(parsed) }).ok;
+      authoritativeScopes: quotaModel.authoritativeScopesOf(parsed), absentWindows: quotaModel.absentWindowsOf(parsed) }).ok;
   } catch { return false; }
 }
 // Ask a LIVE LOCAL claude chat session's CLI for usage over its control
@@ -5268,8 +5268,15 @@ function markLimitBanner(session, text, rec = null) {
 }
 function markLimitBannerNow(session, text) {
   try {
-    const hit = ClaudeCodeAdapter.parseLimitBanner(text);
+    let hit = ClaudeCodeAdapter.parseLimitBanner(text);
     if (!hit) return;
+    // A GUESSED 5-HOUR WALL ON A MEMBER WITHOUT ONE (lane no-5h-window): an unknown wording defaults to the 5-hour
+    // bucket (the shortest self-heal), and on a member whose plan says «no 5h limit» that guess would write a 5-hour
+    // window back onto it — and say «its 5-hour limit is back». Its only plan window is the week: the wall is the week's.
+    if (hit.guessed && hit.kind === 'fiveHour') {
+      const k0 = rejectionSlotFor(session).key || readingSlotFor(session).key || usageCacheKeyFor(session);
+      if (k0 && quotaModel.fiveHourAbsent(readRawUsageCache(k0))) hit = { kind: 'sevenDay', guessed: true };
+    }
     // …and it is REMEMBERED for the rest of the turn (B-ccaa): a rejection
     // that arrives AFTER this banner must still be decided by it, not by the
     // evidence rule. A 5-hour banner names no weekly lane and is not kept.
@@ -5886,6 +5893,41 @@ function credsTokenSig(id) {
   // "somebody re-logged in" check is cleared by the pool's own plumbing).
   try { return String(JSON.parse(fs.readFileSync(accounts.subCredsPath(id), 'utf-8'))?.claudeAiOauth?.accessToken || ''); } catch { return ''; }
 }
+// ── «5 小时限额已取消» (lane no-5h-window, 2026-10-30) ───────────────────────
+// Anthropic is removing the rolling 5-hour limit from verified Ultra (formerly Max 20x) accounts in stages; a newer
+// account keeps a temporary one until it is verified. The write path (usage-cache-write `windowChangeOf`) reports
+// each CHANGE of a member's plan — the 5h window it had is gone (an enumerating, identity-proved reading said so),
+// or a member without one holds one again — once per change, never per probe (the next write already sees the new
+// shape). Said ONCE to the owner: one journal line + one For-you notice naming the member by its label.
+const WINDOW_REMOVED_TEXT = i18nKey("{account}'s 5-hour limit was lifted by Anthropic (since {since}): the pool now counts only its weekly limit");
+const WINDOW_REMOVED_DETAIL = i18nKey('Its usage reading no longer lists a 5-hour window. Anthropic is removing the rolling 5-hour limit from verified Ultra (formerly Max 20x) accounts in stages; weekly limits are unchanged. The Usage popup says so on its row — nothing needs doing.');
+const WINDOW_RESTORED_TEXT = i18nKey("{account}'s 5-hour limit is back (since {since}): the pool counts its 5-hour window again");
+const WINDOW_RESTORED_DETAIL = i18nKey('Its usage reading lists a 5-hour window again. A newer account keeps a temporary 5-hour limit until Anthropic verifies it, and Anthropic emails when it is lifted.');
+function noteWindowChange({ key, kind, change, at } = {}) {
+  try {
+    if (kind !== '5h' || (change !== 'removed' && change !== 'restored')) return null;
+    const acct = key ? accounts.get(key) : null;
+    if (!acct || acct.type !== 'subscription') return null; // a host-* / machine-login file is not a member the owner names
+    const name = String(acct.name || '').trim();
+    const label = name && !name.includes('@') ? name : key; // its label, never an email
+    const since = OF.when(Number(at) || Date.now());
+    console.log(`[pool] window: ${label} (${key}) — ${change === 'removed' ? '5-hour limit lifted: the pool counts only its weekly limit' : '5-hour limit back: the pool counts it again'} (since ${since})`);
+    try { global.__vsEvent?.('pool-member-5h-' + change, key); } catch { }
+    const todos = getUserTodos();
+    if (!todos || typeof todos.add !== 'function') return null;
+    const TEXT = change === 'removed' ? WINDOW_REMOVED_TEXT : WINDOW_RESTORED_TEXT;
+    const DETAIL = change === 'removed' ? WINDOW_REMOVED_DETAIL : WINDOW_RESTORED_DETAIL;
+    const params = { account: label, since };
+    const fill = (tpl) => tpl.replace(/\{(\w+)\}/g, (m0, k) => (params[k] !== undefined ? String(params[k]) : m0));
+    return todos.add('webui:usage-window', {
+      origin: 'pool', kind: 'notice', urgency: 'normal',
+      text: fill(TEXT), detail: DETAIL, itemKey: `5h-window:${key}:${change}`,
+      i18n: { text: { key: TEXT, params }, detail: [{ key: DETAIL, params: {} }] },
+    });
+  } catch (e) { console.warn('[pool] window: could not file the For-you notice:', e.message); return null; }
+}
+usageWrite.onWindowChange(noteWindowChange);
+
 // ── A LAPSED SUBSCRIPTION (2026-10-08, lane pool-subscription-lapsed) — the DURABLE sibling of the 10-minute
 // mark below (account-pool-auto's header has the production story). The record lives on the account
 // (accounts.setServeState); memberServeLapsed(id) answers it, or null — and CLEARS it on positive evidence

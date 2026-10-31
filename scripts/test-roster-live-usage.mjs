@@ -24,11 +24,11 @@ const { rosterUsageSnapshot, installManageAgents } = MA;
 
 console.log('— rosterUsageSnapshot (pure)');
 {
-  const maps = { accounts: { 'sub-a': { fiveHour: { utilization: 0.4 } } }, estimates: { 'sub-a': { fiveHour: 0.5 }, __global__: { fiveHour: 0.1 } }, rateLimit: { fiveHour: { utilization: 0.2 } }, hostOwn: { 'host-1': { fiveHour: { utilization: 0.3 } }, 'host-2': { sevenDay: {} } }, hostAccounts: { 'host-1:sub-a': { fiveHour: { utilization: 0.6 } } }, codex: { 'cxs-1': { fiveHour: { utilization: 0.7 } }, __global_codex__: { fiveHour: { utilization: 0.8 } } } };
+  const maps = { accounts: { 'sub-a': { fiveHour: { utilization: 0.4 } } }, estimates: { 'sub-a': { fiveHour: 0.5 }, __global__: { fiveHour: 0.1 } }, rateLimit: { fiveHour: { utilization: 0.2 } }, hostOwn: { 'host-1': { fiveHour: { utilization: 0.3 } }, 'host-2': { sevenDay: {} }, 'host-3': { sevenDay: { utilization: 0.25 } } }, hostAccounts: { 'host-1:sub-a': { fiveHour: { utilization: 0.6 } } }, codex: { 'cxs-1': { fiveHour: { utilization: 0.7 } }, __global_codex__: { fiveHour: { utilization: 0.8 } } } };
   const s = (src, key) => rosterUsageSnapshot({ usageSrc: src, usageKey: key }, maps);
   ok('accounts: the named claude account + its estimate', s('accounts', 'sub-a')?.u.fiveHour.utilization === 0.4 && s('accounts', 'sub-a').est.fiveHour === 0.5);
   ok('global: the machine login + the __global__ estimate', s('global', '__global__')?.u.fiveHour.utilization === 0.2 && s('global', '__global__').est.fiveHour === 0.1);
-  ok('host-own: a host login only when it carries a 5h snapshot (the render\'s own rule)', s('host-own', 'host-1')?.u.fiveHour.utilization === 0.3 && s('host-own', 'host-2') === null);
+  ok('host-own: a host login only when it carries a reading — a 5h snapshot, or (lane no-5h-window) a weekly window that states a spend; an empty week is none (the render\'s own rule)', s('host-own', 'host-1')?.u.fiveHour.utilization === 0.3 && s('host-own', 'host-2') === null && s('host-own', 'host-3')?.u.sevenDay.utilization === 0.25);
   ok('host-account: the host-held account', s('host-account', 'host-1:sub-a')?.u.fiveHour.utilization === 0.6);
   ok('codex: a named ChatGPT account and the machine codex login', s('codex', 'cxs-1')?.u.fiveHour.utilization === 0.7 && s('codex', '__global_codex__')?.u.fiveHour.utilization === 0.8);
   ok('a key the maps cannot answer ⇒ null (the cell keeps its last paint, never blanked)', s('accounts', 'sub-missing') === null && s('accounts', 'sub-a') !== null);
