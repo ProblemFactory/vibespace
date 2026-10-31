@@ -513,30 +513,28 @@ function poolReadReading() {
     return raw;
   };
 }
-// ── THE PROOFS IN FLIGHT (lane reset-unproven, owner ruling «B吧»): poolId → Map<memberId, sinceMs> — a spawn the
-// chooser placed to turn a member's guess into a reading (account-pool-auto PROVING_HOLD_MS). A mark ends when a reading
-// of that member lands (the write path's `onReading`; a direct writer — the shipped statusline — is seen here, by its
-// file's `fetchedAt`) or PROVING_HOLD_MS pass. In memory only: a restart forgets the proofs in flight, so at most one
-// more spawn goes to a member whose first turn is still running — said in docs/kb-features.md.
+// ── THE PROOFS IN FLIGHT (lane reset-unproven, owner ruling «B吧»): memberId → sinceMs — a spawn the chooser placed to
+// turn a member's guess into a reading (account-pool-auto PROVING_HOLD_MS). ONE map for the whole hub, keyed by MEMBER
+// (r3): a member two pools list is one guess — the mark lands at the spawn whichever pool placed it, and every pool's
+// decision reads it. A mark ends when a reading of that member lands (the write path's `onReading`; a direct writer —
+// the shipped statusline — is seen here, by its file's `fetchedAt`) or PROVING_HOLD_MS pass; nothing else frees it (a
+// conversation that died before its first turn holds it to the bound). In memory only: a restart forgets the proofs in
+// flight, so at most one more spawn goes to a member whose first turn is still running — said in docs/kb-features.md.
 const _proving = new Map();
-function provingOf(poolId, now = Date.now()) {
+function provingInFlight(now = Date.now()) {
   const { PROVING_HOLD_MS } = require('../account-pool-auto.js');
-  let m = _proving.get(poolId);
-  if (!m) { m = new Map(); _proving.set(poolId, m); }
-  const reading = m.size ? poolReadReading() : null;
-  for (const [id, since] of m) {
+  const reading = _proving.size ? poolReadReading() : null;
+  for (const [id, since] of _proving) {
     const landed = Number(reading && reading(id)?.fetchedAt) || 0;
-    if (now - since >= PROVING_HOLD_MS || landed > since) m.delete(id);
+    if (now - since >= PROVING_HOLD_MS || landed > since) _proving.delete(id);
   }
-  return m;
+  return _proving;
 }
 function noteProofLanded({ key, at } = {}) {
-  for (const [poolId, m] of _proving) {
-    const since = m.get(key);
-    if (since == null || !(Number(at) >= since)) continue;
-    m.delete(key);
-    console.log(`[pool] proving: ${accounts.get(key)?.name || key} (${key}) read at ${OF.when(Number(at))} — its proof is in (pool ${accounts.get(poolId)?.name || poolId})`);
-  }
+  const since = _proving.get(key);
+  if (since == null || !(Number(at) >= since)) return;
+  _proving.delete(key);
+  console.log(`[pool] proving: ${accounts.get(key)?.name || key} (${key}) read at ${OF.when(Number(at))} — its proof is in`);
 }
 usageWrite.onReading(noteProofLanded);
 // THE engine's login reader (2026-09-07). ONE memoized read per tick per
@@ -669,7 +667,7 @@ function creditsMemberIds(members) {
 function noteCreditsParking(poolId, memberId, sentence, now) {
   serverNotice(`pool-credits-${poolId}-${memberId}-${Math.floor(now / (6 * 3600e3))}`, sentence, { level: 'warn' });
 }
-function poolChooserForModel(poolId, { model, pin = null, hinted = false } = {}) {
+function poolChooserForModel(poolId, { model, pin = null, hinted = false, forDefault = false } = {}) {
   try {
     const a = accounts.get(poolId);
     if (!a || a.type !== 'pooled') return null;
@@ -708,12 +706,15 @@ function poolChooserForModel(poolId, { model, pin = null, hinted = false } = {})
     // draw) takes a new conversation off the default — a spawn is free. Never on a GUESSED family (`hinted`, verify
     // r1): a claude resume commands no model, the instance default stands in, and the CLI resumes on its own record —
     // a Fable conversation hinted as Opus would be placed on the member whose Fable is spent.
+    // THE PROVING SPAWN places ONE conversation (r3): the pool DEFAULT the store self-heals (`forDefault` — a signed-out,
+    // lapsed or removed default) is chosen by the measured rule only — a default on a guess would carry every later
+    // spawn and every conversation that reads the default link onto it. No proving input ⇒ no mark, no «spawn on» line.
     const { decidePoolSwitch } = require('../account-pool-auto.js');
     const mem = healthyPoolMembers(poolId);
-    const d = decidePoolSwitch({ currentId: cur, members: mem, readCache, nowSec: nowSecOf(), proving: provingOf(poolId), readReading: poolReadReading(), ...providerIn(a, null, model), hot: true, placing: !hinted, readLogin: poolReadLogin(), membership, priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(mem), creditsIds: creditsMemberIds(mem) });
+    const d = decidePoolSwitch({ currentId: cur, members: mem, readCache, nowSec: nowSecOf(), proving: forDefault ? null : provingInFlight(), readReading: poolReadReading(), ...providerIn(a, null, model), hot: true, placing: !hinted, readLogin: poolReadLogin(), membership, priority: poolPriorityOf(a), reserveFloorPct: reserveFloorPct(), overageIds: overageMemberIds(mem), creditsIds: creditsMemberIds(mem) });
     // THE PROVING SPAWN (lane reset-unproven): the member it lands on is marked in flight and the placement is said
     if (d && d.reason === 'proving' && d.to) {
-      provingOf(poolId).set(d.to, Date.now());
+      provingInFlight().set(d.to, Date.now());
       const { provingText } = require('../account-pool-auto.js');
       console.log(`[pool] spawn on "${a.name || poolId}": ${provingText(d, { when: (ms) => OF.when(ms) })}`);
     }

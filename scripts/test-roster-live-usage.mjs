@@ -243,5 +243,113 @@ console.log('— a reset nobody confirmed is drawn RESET; a member never read sa
   const k = ['reset {time} · unconfirmed — confirms when a session uses it', 'reset · unconfirmed', 'no reading yet — confirms when a session uses it'];
   ok('zh + ja carry the three new phrases', k.every((x) => typeof DICT.zh[x] === 'string' && typeof DICT.ja[x] === 'string'), k.filter((x) => !DICT.zh[x] || !DICT.ja[x]).join(' | '));
 }
+console.log('— THE DISPLAY CENSUS: every quota renderer draws a landed reset RESET, never the pre-reset number (lane reset-unproven r3)');
+{
+  // 主开发's acceptance of r2: bucketView was replaced by the raw reading at the usage popup (v5/v7/scoped — the taskbar
+  // pies and the phone chip ride the same views), the billing switcher's usageHint and the machines' host pill, and NINE
+  // fast suites stayed green. Each renderer is DRIVEN here with readings whose every reset landed days ago (84 / 95 / 93 %
+  // claude, 81 / 92 % codex) and must draw 0 % with the unconfirmed words; each site's bypass is a patched copy that reds
+  // its leg BY NAME. (The text census over src/lib — a new raw reader outside the allowlist — is test-quota-model ㉒g.)
+  const els = {};
+  const el = (id) => (els[id] ||= { id, innerHTML: '', classList: { toggle() { } }, querySelectorAll: () => [], addEventListener() { } });
+  globalThis.document = { getElementById: el, querySelectorAll: () => [], querySelector: () => null, addEventListener() { },
+    createElement: () => ({ dataset: {}, style: { setProperty() { } }, classList: { add() { }, toggle() { } }, setAttribute() { }, appendChild() { }, outerHTML: '<span class="backend-icon"></span>' }) };
+  globalThis.window ??= { addEventListener() { }, removeEventListener() { }, matchMedia: () => ({ matches: false, addEventListener() { } }), location: { search: '' } };
+  globalThis.requestAnimationFrame ??= () => 0;
+  const nowS = Math.floor(Date.now() / 1000), OLD = Date.now() - 4 * 86400e3;
+  const STALE = { fetchedAt: OLD, fiveHour: { utilization: 0.84, resetsAt: nowS - 3 * 86400 }, sevenDay: { utilization: 0.95, resetsAt: nowS - 86400 }, scopedWeekly: [{ name: 'Fable', utilization: 0.93, resetsAt: nowS - 86400 }] };
+  const CX = { fetchedAt: OLD, fiveHour: { usedPercent: 81, resetsAt: nowS - 3 * 86400 }, sevenDay: { usedPercent: 92, resetsAt: nowS - 86400 } };
+  const PRE = /\b(?:84|95|93|81|92)\s?%/; // a pre-reset number anywhere in what was drawn
+  const M = mutantCopies('reset-census', REPO);
+  const srcOf = (rel) => fs.readFileSync(path.join(REPO, rel), 'utf8');
+  const patchedImport = async (rel, tag, swaps) => {
+    let src = srcOf(rel);
+    for (const [a, b] of swaps) { if (src.split(a).length !== 2) return null; src = src.replace(a, b); }
+    return import(pathToFileURL(M.write(rel, src, tag)).href);
+  };
+  // (1) THE USAGE POPUP + TASKBAR PIES + PHONE CHIP (usage-meter `_renderUsage`, the real method over a fake document)
+  const meterLegs = (UM) => {
+    for (const k of Object.keys(els)) delete els[k];
+    class AppU { }
+    UM.installUsageMeter(AppU, {});
+    const app = new AppU();
+    app.settings = { get: () => undefined };
+    app._accounts = { accounts: [{ id: 'sub-a', backend: 'claude', type: 'subscription', name: 'A' }, { id: 'cxs-a', backend: 'codex', type: 'subscription', name: 'CA' }], defaultAccountId: 'sub-a', defaultCodexAccountId: 'cxs-a' };
+    app._accountUsage = { 'sub-a': STALE }; app._codexAccountUsage = { 'cxs-a': CX }; app._usageEstimates = {};
+    let err = null;
+    try { app._renderUsage(); } catch (e) { err = e.message; }
+    const bar = el('taskbar-usage').innerHTML, pop = el('usage-popup').innerHTML, chip = el('mobile-nav-usage').innerHTML;
+    const [cBar = '', xBar = ''] = bar.split('<div class="taskbar-usage-row">').slice(1);
+    const [cPop = '', xPop = ''] = pop.split('<div class="usage-section-title">').slice(1);
+    const scoped = (cPop.split('Fable weekly limit')[1] || '');
+    return [
+      { name: 'usage popup: the CLAUDE taskbar pies (5h + 7d) are drawn reset — dashed, empty, the unconfirmed words in the tooltip, never 84 / 95', pass: !err && (cBar.match(/usage-donut-unconfirmed/g) || []).length === 2 && !PRE.test(cBar) && /unconfirmed — confirms when a session uses it/.test(cBar), detail: err || cBar.slice(0, 260) },
+      { name: 'usage popup: …its 5h + 7d bars say «0% used» and the unconfirmed reset, never «84% used» / «95% used»', pass: !err && (cPop.match(/>0% used</g) || []).length >= 2 && !/(?:84|95)% used/.test(cPop) && (cPop.match(/usage-stat-unconfirmed/g) || []).length >= 2 },
+      { name: 'usage popup: …the Fable (SCOPED) weekly bar says «0% used» and the unconfirmed reset, never «93% used»', pass: !err && />0% used</.test(scoped) && !/93% used/.test(scoped) && /usage-stat-unconfirmed/.test(scoped), detail: scoped.slice(0, 200) },
+      { name: 'usage popup: the CODEX pies + bars (the usedPercent shape) are drawn reset — never 81 / 92', pass: !err && (xBar.match(/usage-donut-unconfirmed/g) || []).length === 2 && !PRE.test(xBar) && (xPop.match(/>0% used</g) || []).length === 2 && !/(?:81|92)% used/.test(xPop), detail: (xBar + xPop).slice(0, 260) },
+      { name: 'usage popup: the PHONE nav chip (worst of every bucket) says 0, never the stale 95 / 93', pass: !err && />0<\/span>/.test(chip) && !PRE.test(chip.replace(/deg/g, '')), detail: chip },
+    ];
+  };
+  const UM = await import(pathToFileURL(path.join(REPO, 'src/lib/usage-meter.js')).href);
+  for (const r of meterLegs(UM)) ok(r.name, r.pass, r.detail);
+  // (2) THE BILLING SWITCHER's usage cluster (session-lifecycle showBillingSwitcher's `usageHint`, evaluated from the
+  // module's own text — session-lifecycle loads xterm and cannot be imported here — with the module's real imports)
+  const { t: tI18n } = await import(pathToFileURL(path.join(REPO, 'src/lib/i18n.js')).href);
+  const U = await import(pathToFileURL(path.join(REPO, 'src/lib/utils.js')).href);
+  const US = await import(pathToFileURL(path.join(REPO, 'src/lib/usage-source.js')).href);
+  const QM = await import(pathToFileURL(path.join(REPO, 'src/quota-model.js')).href);
+  const SL_FROM = '    const pctOf = (x) => (x == null ? null :', SL_TO = '    const rowHtml = (nameText, subText, usage) =>';
+  const hintOf = (src) => {
+    const i = src.indexOf(SL_FROM), j = src.indexOf(SL_TO, i);
+    if (i < 0 || j < 0) return null;
+    try { return new Function('t', 'escHtml', 'estDisplayPair', 'bucketView', 'quotaModel', 'unconfirmedText', src.slice(i, j) + '\nreturn usageHint;')(tI18n, U.escHtml, U.estDisplayPair, US.bucketView, QM, US.unconfirmedText); } catch { return null; }
+  };
+  const hintLegs = (usageHint) => {
+    const h = usageHint ? usageHint(STALE, null) : '';
+    return [{ name: 'billing switcher: a member row\'s 5h / 7d / Fable segments say 0 % with the unconfirmed tooltip, never 84 / 95 / 93', pass: !!usageHint && (h.match(/bsw-unconfirmed/g) || []).length === 3 && !PRE.test(h) && (h.match(/>0%</g) || []).length === 3, detail: h.slice(0, 260) }];
+  };
+  const SL = srcOf('src/lib/session-lifecycle.js');
+  ok('billing switcher: its usageHint is found in session-lifecycle.js (the census judges the current source)', !!hintOf(SL));
+  for (const r of hintLegs(hintOf(SL))) ok(r.name, r.pass, r.detail);
+  // (3) THE MACHINES' HOST PILL + (4) the roster donuts and the narrow pill (manage-agents, the real module)
+  const maLegs = (Mod) => {
+    const pill = typeof Mod.hostQuotaPillHtml === 'function' ? Mod.hostQuotaPillHtml(STALE) : '';
+    class AppM { }
+    Mod.installManageAgents(AppM, {});
+    const roster = new AppM()._acctUsageHtml(STALE, null);
+    const narrow = (roster.match(/<span class="acct-mini[^"]*"[^>]*>[^<]*<\/span>/g) || []).join(' ');
+    return [
+      { name: 'machines overview: a host\'s quota pill draws its tightest bucket at 0 % with «reset · unconfirmed» per bucket, never 95', pass: /agents-mach-quota/.test(pill) && /> ?\S+ 0%/.test(pill) && !PRE.test(pill) && (pill.match(/reset · unconfirmed/g) || []).length === 3, detail: pill.slice(0, 260) },
+      { name: 'roster: the donuts are three dashed empty rings, never 84 / 95 / 93', pass: (roster.match(/acct-donut-unconfirmed/g) || []).length === 3 && !PRE.test(roster), detail: roster.slice(0, 200) },
+      { name: 'roster: the narrow pill says «reset · unconfirmed», never a pre-reset number', pass: /acct-mini-unconfirmed[^>]*>reset · unconfirmed</.test(roster) && !PRE.test(narrow), detail: narrow },
+    ];
+  };
+  for (const r of maLegs(MA)) ok(r.name, r.pass, r.detail);
+  // RED controls — each surface's bypass (the acceptance's mutant shape) on a patched copy; every one reds its own leg by name
+  const red = async (tag, legs, needle) => {
+    const failed = legs.filter((r) => !r.pass).map((r) => r.name);
+    ok(`census RED ${tag}: the bypass reds «${needle}» (${failed.length} red)`, failed.some((n) => n.includes(needle)), failed.join(' | ').slice(0, 200));
+  };
+  const umRaw5 = ['const v5 = bucketView(quotaModel, rl?.fiveHour, estSel?.fiveHour, Date.now(), { readAt: rl?.fetchedAt });', 'const v5 = { reading: rl?.fiveHour, est: estSel?.fiveHour }; /* PATCHED */'];
+  const umRaw7 = ['const v7 = bucketView(quotaModel, rl?.sevenDay, estSel?.sevenDay, Date.now(), { readAt: rl?.fetchedAt });', 'const v7 = { reading: rl?.sevenDay, est: estSel?.sevenDay }; /* PATCHED */'];
+  const umRawSc = ['const vSc = bucketView(quotaModel, sc, scEst, Date.now(), { readAt: rl.scopedFetchedAt || rl.fetchedAt });', 'const vSc = { reading: sc, est: scEst }; /* PATCHED */'];
+  const umRawCx = ['const cv5 = bucketView(quotaModel, codex?.fiveHour, cEstSel?.fiveHour, Date.now(), { readAt: codex?.fetchedAt });', 'const cv5 = { reading: codex?.fiveHour, est: cEstSel?.fiveHour }; /* PATCHED */'];
+  const m1 = await patchedImport('src/lib/usage-meter.js', 'um-claude', [umRaw5, umRaw7]);
+  if (m1) await red('usage-meter v5/v7', meterLegs(m1), 'CLAUDE taskbar pies'); else ok('census RED usage-meter v5/v7: the patched lines exist', false);
+  const m2 = await patchedImport('src/lib/usage-meter.js', 'um-scoped', [umRawSc]);
+  if (m2) { const L = meterLegs(m2); await red('usage-meter scoped', L, 'SCOPED'); await red('usage-meter scoped → phone chip', L, 'PHONE nav chip'); } else ok('census RED usage-meter scoped: the patched line exists', false);
+  const m3 = await patchedImport('src/lib/usage-meter.js', 'um-codex', [umRawCx]);
+  if (m3) await red('usage-meter codex', meterLegs(m3), 'CODEX pies'); else ok('census RED usage-meter codex: the patched line exists', false);
+  const slRaw = ['const v = bucketView(quotaModel, raw0, e0, Date.now(), { readAt: u.fetchedAt });', 'const v = { reading: raw0, est: e0 }; /* PATCHED */'];
+  ok('census RED session-lifecycle eff: the patched line exists', SL.split(slRaw[0]).length === 2);
+  await red('session-lifecycle eff', hintLegs(hintOf(SL.replace(slRaw[0], slRaw[1]))), 'billing switcher: a member row');
+  const ma1 = await patchedImport('src/lib/manage-agents.js', 'ma-host', [['const v = bucketView(quotaModel, x, null, nowMs, { readAt: hu.fetchedAt });', 'const v = { reading: x }; /* PATCHED */']]);
+  if (ma1) await red('manage-agents host pill', maLegs(ma1), 'host\'s quota pill'); else ok('census RED manage-agents host pill: the patched line exists', false);
+  const ma2 = await patchedImport('src/lib/manage-agents.js', 'ma-donut', [['const v = bucketView(quotaModel, x0, est0, now, { readAt: u.fetchedAt });', 'const v = { reading: x0, est: est0 }; /* PATCHED */']]);
+  if (ma2) await red('manage-agents donut', maLegs(ma2), 'donuts are three'); else ok('census RED manage-agents donut: the patched line exists', false);
+  const ma3 = await patchedImport('src/lib/manage-agents.js', 'ma-pill', [['.map(([label, x0, e0, kind]) => { const v = bucketView(quotaModel, x0, e0, now, { readAt: u.fetchedAt });', '.map(([label, x0, e0, kind]) => { const v = { reading: x0, est: e0 }; /* PATCHED */']]);
+  if (ma3) await red('manage-agents narrow pill', maLegs(ma3), 'narrow pill'); else ok('census RED manage-agents narrow pill: the patched line exists', false);
+  for (const r of copiesCensus(M.files, M.dir, REPO, { minCopies: 6 })) ok(r.name, r.pass, r.detail);
+}
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

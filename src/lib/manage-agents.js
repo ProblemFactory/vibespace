@@ -424,18 +424,40 @@ export function machineLoginLinkHint(name, vendor = 'Anthropic') {
  *  {accounts, hostOwn, hostAccounts, codex, rateLimit, estimates}. Returns
  *  {u, est} or null when the maps cannot answer — a cell whose source has no
  *  snapshot right now keeps its last paint (the poll never blanks a row). */
-// A MACHINE LOGIN'S SNAPSHOT IS A READING when it carries a 5h bucket — or, for an account Anthropic lifted the 5-hour
-// limit from (lane no-5h-window), a weekly window that states a spend. The four host-own gates used to ask `fiveHour`
-// alone and blanked a weekly-only reading whole. PURE, exported for the gate.
 /** A MEMBER NEVER READ says so in its bucket slot (lane reset-unproven r2, 主开发's ruling): an empty slot reads as «no
  *  data, unusable»; the words say what fills it. Kept visible at every width (its own class, not `.acct-usage`). */
 export function unreadUsageHtml() {
   return `<span class="acct-usage-unread">${escHtml(t('no reading yet — confirms when a session uses it'))}</span>`;
 }
+// A MACHINE LOGIN'S SNAPSHOT IS A READING when it carries a 5h bucket — or, for an account Anthropic lifted the 5-hour
+// limit from (lane no-5h-window), a weekly window that states a spend. The four host-own gates used to ask `fiveHour`
+// alone and blanked a weekly-only reading whole. PURE, exported for the gate.
 export function hostOwnReading(h) {
   if (!h || typeof h !== 'object') return null;
   const w = h.sevenDay;
   return h.fiveHour || (w && typeof w === 'object' && (w.utilization != null || w.usedPercent != null)) ? h : null;
+}
+/** A MACHINE'S QUOTA PILL (the Agents machine row's summary): its tightest bucket, the compact reset countdown, the
+ *  snapshot's age. Every bucket through `bucketView` first (lane reset-unproven): a reset that landed since the snapshot
+ *  is drawn reset — 0 %, «reset · unconfirmed» in the tooltip. Hoisted out of the machines overview in r3 so the census
+ *  leg (test-roster-live-usage) draws it. → html or ''. */
+export function hostQuotaPillHtml(hu, nowMs = Date.now()) {
+  const pctOf = (x) => Math.min(100, Math.round(x?.usedPercent ?? ((x?.utilization || 0) * 100)));
+  const bs = hu ? [['5h', hu.fiveHour], ['7d', hu.sevenDay], ...(hu.scopedWeekly || []).map((sc) => [String(sc.name || '?').slice(0, 2), sc])].filter(([, x]) => x && Number.isFinite(pctOf(x)))
+    .map(([l, x]) => { const v = bucketView(quotaModel, x, null, nowMs, { readAt: hu.fetchedAt }); return [l, v.reading, v.unconfirmed]; }) : [];
+  if (!bs.length) return '';
+  const [wl, wx] = bs.reduce((a, b) => (pctOf(b[1]) > pctOf(a[1]) ? b : a));
+  const wp = pctOf(wx);
+  const c = wp > 95 ? 'var(--red,#e55)' : wp > 80 ? 'var(--yellow,#e5c07b)' : 'var(--green,#3fb950)';
+  // AGE MARKER (the row-level donuts have one; this pill didn't): this is the persisted usage-cache snapshot,
+  // potentially DAYS old, so a dead host showed a healthy-looking green "5h 12%" that read as current.
+  const ageMs = hu.fetchedAt ? nowMs - hu.fetchedAt : 0;
+  const ageTxt = ageMs > 5 * 60000 ? ' · ' + agoText(hu.fetchedAt) : '';
+  // …and the tightest bucket's compact reset countdown (2026-09-14, the same rule the roster donuts carry —
+  // bucketEta refuses a window that may not name a deadline).
+  const wEta = bucketEta(wx, nowMs);
+  const tip = bs.map(([l, x, un]) => `${l} ${pctOf(x)}%${un ? ` (${t('reset · unconfirmed')})` : ''}`).join(' · ') + (hu.fetchedAt ? ' · ' + t('as of {when}', { when: agoText(hu.fetchedAt) }) : '');
+  return `<span class="agents-mach-quota" style="color:${c}" title="${escHtml(tip)}">${escHtml(wl)} ${wp}%${wEta ? ' · ' + escHtml(wEta) : ''}${escHtml(ageTxt)}</span>`;
 }
 
 export function rosterUsageSnapshot(stamp, maps) {
@@ -2680,7 +2702,6 @@ export function installManageAgents(App, ctx = {}) {
           const u = await fetchJson('/api/usage');
           if (u && !stale()) { this._accountUsage = u.accounts || this._accountUsage; this._hostOwnUsage = u.hosts || this._hostOwnUsage; this._hostAccountUsage = u.hostAccounts || this._hostAccountUsage; }
         } catch {}
-        const pctOf = (x) => Math.min(100, Math.round(x?.usedPercent ?? ((x?.utilization || 0) * 100)));
         // lane desktop-vnc-remember: which machines have their desktop sign-in REMEMBERED (one read — the rows' state, never a secret)
         let signins = {};
         try { const si = await fetchJson('/api/desktop/machine-desktop/signins'); if (si && si.signins && typeof si.signins === 'object' && !stale()) signins = si.signins; } catch {}
@@ -2696,27 +2717,7 @@ export function installManageAgents(App, ctx = {}) {
           const live = drs ? drs.state === 'connected' : null;
           const dialWords = drs ? dialStateText(drs) : '';
           const dot = live == null ? '' : `<span class="agents-mach-dot${live ? '' : ' off'}${drs && (drs.state === 'refused' || drs.state === 'auth-fail') ? ' err' : ''}" data-tip="${escHtml(dialWords)}"></span>`;
-          let pill = '';
-          const hu = this._hostOwnUsage?.[h.id];
-          const bs = hu ? [['5h', hu.fiveHour], ['7d', hu.sevenDay], ...(hu.scopedWeekly || []).map((sc) => [String(sc.name || '?').slice(0, 2), sc])].filter(([, x]) => x && Number.isFinite(pctOf(x)))
-            .map(([l, x]) => { const v = bucketView(quotaModel, x, null, Date.now(), { readAt: hu.fetchedAt }); return [l, v.reading, v.unconfirmed]; }) : []; // a landed reset is drawn reset (lane reset-unproven)
-          if (bs.length) {
-            const [wl, wx] = bs.reduce((a, b) => (pctOf(b[1]) > pctOf(a[1]) ? b : a));
-            const wp = pctOf(wx);
-            const c = wp > 95 ? 'var(--red,#e55)' : wp > 80 ? 'var(--yellow,#e5c07b)' : 'var(--green,#3fb950)';
-            // AGE MARKER (the row-level donuts have one; this pill didn't):
-            // this is the persisted usage-cache snapshot, potentially DAYS
-            // old, so a dead host showed a healthy-looking green "5h 12%" that
-            // read as current.
-            const ageMs = hu.fetchedAt ? Date.now() - hu.fetchedAt : 0;
-            const ageTxt = ageMs > 5 * 60000 ? ' · ' + agoText(hu.fetchedAt) : '';
-            // …and the tightest bucket's compact reset countdown (2026-09-14,
-            // the same rule the roster donuts carry — bucketEta refuses a
-            // window that may not name a deadline).
-            const wEta = bucketEta(wx, Date.now());
-            const tip = bs.map(([l, x, un]) => `${l} ${pctOf(x)}%${un ? ` (${t('reset · unconfirmed')})` : ''}`).join(' · ') + (hu.fetchedAt ? ' · ' + t('as of {when}', { when: agoText(hu.fetchedAt) }) : '');
-            pill = `<span class="agents-mach-quota" style="color:${c}" title="${escHtml(tip)}">${escHtml(wl)} ${wp}%${wEta ? ' · ' + escHtml(wEta) : ''}${escHtml(ageTxt)}</span>`;
-          }
+          const pill = hostQuotaPillHtml(this._hostOwnUsage?.[h.id]); // the tightest bucket, through bucketView (lane reset-unproven)
           const kept = signinChipHtml(Object.hasOwn(signins, h.id) ? signins[h.id] : null); // lane desktop-vnc-remember: 「登录已记住」
           sum.innerHTML = `${dot}<span class="agents-mach-name">${escHtml(h.name)}</span><span class="agents-machine-sub">${escHtml(h.transport === 'dial' ? t('device') : `${h.user}@${h.host}`)}</span>${kept}${pill}`;
           // the summary's SECOND line: the dial state's words + who can use it as an exit (textContent — names are the user's)

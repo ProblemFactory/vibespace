@@ -2334,6 +2334,83 @@ await (async () => {
       quietly(() => pw.am.updatePool(pw.P, { members: [pw.id.martin, pw.id.uci, pw.id.fish, nid] }));
       const s6 = ask();
       ck('engine: a member with NO reading at all (just added) is proven next — «it has never been read»', s6.at === nid && s6.lines.some((l) => l.endsWith('placed on New Max — it has never been read; a reading follows its first turn')));
+
+      // ── r3 (主开发's acceptance of r2) — the proof is ONE conversation's placement, ONE per member hub-wide ─────────────
+      // The REAL chooser arrow off ws-create, evaluated verbatim under the REAL resolveForSpawn (as the r2 chooser legs do).
+      const arrowR3 = (/chooseMember: (\([^)]*\) => poolChooser\?\.\(.*\)),$/m.exec(fs.readFileSync(path.resolve('src/ws-create.js'), 'utf8')) || [])[1] || null;
+      ck('r3: the chooser arrow is read off ws-create and hands the chooser `forDefault`', !!arrowR3 && /forDefault: !!how\.forDefault/.test(arrowR3), arrowR3);
+      const SIGNED_OUT = JSON.stringify({ claudeAiOauth: { accessToken: '', refreshToken: '', expiresAt: null } });
+      const nameOf = (w, x) => Object.keys(w.id).find((k) => w.id[k] === x) || (x === w.nid ? 'U' : String(x));
+      // MAJOR 1: default A signed out, M measured (7d 40 %, reset in 2 d), U never read — the probe's own shape
+      const healWorld = (engine) => {
+        const w = world({ engine });
+        if (!w) return null;
+        w.nid = w.am.createSubscription({ name: 'Never Max' }).id;
+        fs.writeFileSync(path.join(w.am.subDir(w.nid), '.credentials.json'), CREDS(w.nid), { mode: 0o600 });
+        w.wr('fish', 0.1, 0.4, 2 * 86400);
+        quietly(() => w.am.updatePool(w.P, { members: [w.id.martin, w.id.fish, w.nid] }));
+        fs.writeFileSync(path.join(w.am.subDir(w.id.martin), '.credentials.json'), SIGNED_OUT, { mode: 0o600 }); // the default signs out
+        const calls = [];
+        const spawn = (key, data) => {
+          const f = new Function('poolChooser', 'data', 'accounts', 'return ' + arrowR3)((pid, o) => { const r = w.eng.poolChooserForModel(pid, o); calls.push((o.forDefault ? 'default→' : 'session→') + nameOf(w, r)); return r; }, data, w.am);
+          const lines = quietly(() => w.am.resolveForSpawn(w.P, 'claude', { sessionKey: key, chooseMember: f }));
+          return { on: nameOf(w, w.am.poolCurrentFor(w.P, key)), def: nameOf(w, w.am.poolCurrent(w.P)), lines };
+        };
+        const s1 = spawn('heal-1', { model: 'claude-fable-5-1' }), s2 = spawn('heal-2', { model: 'claude-fable-5-1' }), s3 = spawn('heal-3', {});
+        return { calls, s1, s2, s3, lines: [...s1.lines, ...s2.lines, ...s3.lines] };
+      };
+      const healLegs = (h) => [
+        { name: 'r3 MAJOR: the pool DEFAULT a signed-out member leaves is re-pointed onto MEASURED headroom (M), never onto the never-read guess (U)', pass: !!h && h.s1.def === 'fish' && h.calls[0] === 'default→fish' && !h.lines.some((l) => /re-pointed to Never Max/.test(l)), detail: h && JSON.stringify({ calls: h.calls, def: h.s1.def }) },
+        { name: 'r3 MAJOR: …the CONVERSATION may prove U once (one «spawn on» line, for the conversation); the next spawn is not U (held); the default stays M', pass: !!h && h.s1.on === 'U' && h.s2.on === 'fish' && h.s2.def === 'fish' && h.lines.filter((l) => /^\[pool\] spawn on /.test(l)).length === 1, detail: h && JSON.stringify({ s1: h.s1.on, s2: h.s2.on, def: h.s2.def, spawnLines: h.lines.filter((l) => /spawn on/.test(l)) }) },
+        { name: 'r3 MAJOR: …a spawn with no family reads the default link — M, never the guess', pass: !!h && h.s3.on === 'fish' && h.s3.def === 'fish', detail: h && JSON.stringify(h.s3) },
+      ];
+      const heal = healWorld(engMod);
+      for (const r of healLegs(heal)) ck(r.name, r.pass, r.detail);
+      // MINOR 2: two pools that list the same members (an all-members pool + a narrower one), two spawns a minute apart
+      const twoPools = (engine) => {
+        const w = world({ engine });
+        if (!w) return null;
+        const nS = Math.floor(Date.now() / 1000), cd = path.join(w.am._dataDir, 'usage-cache');
+        const putW = (k, o) => fs.writeFileSync(path.join(cd, w.id[k] + '.json'), JSON.stringify(o));
+        putW('uci', { fetchedAt: Date.now() - 5 * 86400e3, source: 'on-demand', fiveHour: { utilization: 0.3, resetsAt: nS - 5 * 86400 + 3600 }, sevenDay: { utilization: 0.95, resetsAt: nS - 2 * 86400 } });
+        putW('fish', { fetchedAt: Date.now() - 3 * 86400e3, source: 'on-demand', fiveHour: { utilization: 0.3, resetsAt: nS - 3 * 86400 + 3600 }, sevenDay: { utilization: 0.9, resetsAt: nS - 86400 } });
+        const P2 = w.am.createPool({ name: 'Narrow', members: [w.id.martin, w.id.uci, w.id.fish] }).id;
+        w.am.setPoolTarget(P2, w.id.martin);
+        const realNow = Date.now, t0 = realNow();
+        const at = (P, dt) => { let r; try { Date.now = () => t0 + dt; quietly(() => { r = w.eng.poolChooserForModel(P, { model: 'claude-fable-5-1' }); }); } finally { Date.now = realNow; } return nameOf(w, r); };
+        return [at(w.P, 0), at(P2, 60e3), at(w.P, 120e3)];
+      };
+      const tp = twoPools(engMod);
+      ck('r3 MINOR 2: TWO POOLS sharing members, two spawns 1 min apart ⇒ two DIFFERENT guesses (UCI, then Fish) — never the same guess twice; a third spawn holds on the default', !!tp && tp[0] === 'uci' && tp[1] === 'fish' && tp[2] === 'martin', JSON.stringify(tp));
+      // MINOR 4a: the proving decision reads THE pool's reading (poolReadReading — the identity group's freshest, the own
+      // 5h tombstone kept): a member whose own file is old but whose identity's machine login read it an hour ago is NOT a guess
+      const groupWorld = (engine) => {
+        const w = world({ engine });
+        if (!w) return null;
+        const nS = Math.floor(Date.now() / 1000), cd = path.join(w.am._dataDir, 'usage-cache');
+        fs.writeFileSync(path.join(cd, w.id.uci + '.json'), JSON.stringify({ fetchedAt: Date.now() - 5 * 86400e3, orgUuid: 'org-r3', source: 'on-demand', fiveHour: { utilization: 0.3, resetsAt: nS - 5 * 86400 + 3600 }, sevenDay: { utilization: 0.95, resetsAt: nS - 2 * 86400 } }));
+        fs.writeFileSync(path.join(cd, '__global__.json'), JSON.stringify({ fetchedAt: Date.now() - 3600e3, orgUuid: 'org-r3', source: 'passive', fiveHour: { utilization: 0.1, resetsAt: nS + 3 * 3600 }, sevenDay: { utilization: 0.05, resetsAt: nS + 5 * 86400 } }));
+        let r; const lines = quietly(() => { r = w.eng.poolChooserForModel(w.P, { model: 'claude-fable-5-1' }); });
+        return { at: nameOf(w, r), proving: lines.some((l) => /placed on UCI Max to confirm/.test(l)) };
+      };
+      const gw = groupWorld(engMod);
+      ck('r3 4a: the proving spawn judges a member on THE POOL\'s reading — UCI\'s own file is 5 days old, its identity\'s machine login read it an hour ago ⇒ proven, never «placed on UCI to confirm»', !!gw && !gw.proving, JSON.stringify(gw));
+      // RED controls — each on a patched copy of the REAL engine (a fresh `create`, so the module's slot is the copy's)
+      const { mutantCopies: mcE, copiesCensus: ccE } = await import('./mutant-copy.mjs');
+      const MPE = mcE('proving-engine', path.resolve('.'));
+      const esrc = fs.readFileSync(path.resolve('src/server/usage-pool-engine.js'), 'utf8');
+      const ectl = (tag, swaps) => { let x = esrc; for (const [a, b] of swaps) { if (x.split(a).length !== 2) return null; x = x.replace(a, b); } return MPE.load('src/server/usage-pool-engine.js', x, tag); };
+      const eDef = ectl('fordefault', [['proving: forDefault ? null : provingInFlight(),', 'proving: provingInFlight(), /* PATCHED */']]);
+      const hRed = eDef ? healLegs(healWorld(eDef)).filter((r) => !r.pass).map((r) => r.name) : ['no patch'];
+      ck('r3 MAJOR RED: proving admitted for the pool DEFAULT re-points the default onto the guess (U) — the default legs go red by name', !!eDef && hRed.some((n) => n.includes('re-pointed onto MEASURED headroom')), JSON.stringify(hRed));
+      const ePer = ectl('perpool', [['const _proving = new Map();\n', 'const _provingPools = new Map(); let _proving = new Map(); /* PATCHED: a map per pool, as r2 had it */\n'],
+        ['function poolChooserForModel(poolId, { model, pin = null, hinted = false, forDefault = false } = {}) {\n', 'function poolChooserForModel(poolId, { model, pin = null, hinted = false, forDefault = false } = {}) { _proving = _provingPools.get(poolId) || _provingPools.set(poolId, new Map()).get(poolId); /* PATCHED */\n']]);
+      const tpRed = ePer ? twoPools(ePer) : null;
+      ck('r3 MINOR 2 RED: with a hold map PER POOL the second pool sends its spawn onto the SAME guess (UCI, UCI)', !!tpRed && tpRed[0] === 'uci' && tpRed[1] === 'uci', JSON.stringify(tpRed));
+      const eOwn = ectl('ownfile', [['readReading: poolReadReading(),', "readReading: (id) => { try { return JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, id + '.json'), 'utf-8')); } catch { return null; } }, /* PATCHED: the member's own file only */"]]);
+      const gwRed = eOwn ? groupWorld(eOwn) : null;
+      ck('r3 4a RED: a proving decision handed the member\'s OWN FILE only (no identity group) places a spawn on UCI to confirm a reset its identity already read', !!gwRed && gwRed.proving === true, JSON.stringify(gwRed));
+      for (const r of ccE(MPE.files, MPE.dir, path.resolve('.'), { minCopies: 3, label: 'proving engine: ' })) ck(r.name, r.pass);
     } else ck('proving engine SKIP — pools unsupported', true);
     fs.rmSync(scr, { recursive: true, force: true });
   }

@@ -821,7 +821,8 @@ function createWsCreateHandler({ ctx, agentEnv, crashLoopRef, noConvoRef,
                 // asked the claude default for a codex resume and nothing noticed)
                 // (…and the pool DEFAULT the store self-heals is the POOL's choice: the conversation's pin rides only its own link)
                 // (`hinted`: the family is the instance default standing in for a resume that commands none — no spare-lane placement on a guess, B-8a65 verify r1)
-                chooseMember: (poolId, how = {}) => poolChooser?.(poolId, { model: data.model || data._placementModelHint || null, hinted: !data.model, ...(data._poolPin && !how.forDefault ? { pin: data._poolPin.memberId } : {}) }),
+                // (`forDefault`: the store is placing the POOL's default, not this conversation — no proving spawn there, lane reset-unproven r3)
+                chooseMember: (poolId, how = {}) => poolChooser?.(poolId, { model: data.model || data._placementModelHint || null, hinted: !data.model, forDefault: !!how.forDefault, ...(data._poolPin && !how.forDefault ? { pin: data._poolPin.memberId } : {}) }),
                 pinned: !!data._poolPin, // a codex pool spawns straight onto the chooser's answer only for a pinned conversation
               });
             }

@@ -3255,6 +3255,13 @@ console.log('\n㉒ a reset that LANDED is shown reset (unconfirmed); a member on
   ok(WD(null).state === 'unread' && WD(undefined).state === 'unread' && WD({}).state === 'unread' && WD({ status: 'allowed' }).state === 'unread',
     '㉒a no window, or one stating neither a spend nor a reset ⇒ unread (never 0 %, never 50 %)');
   ok(WD({ utilization: 0.3 }).state === 'read' && WD({ utilization: 0.3 }).usedPct === 30, '㉒a a reset-less stated spend is a reading (r3: a stated spend is decisive) — it can never roll');
+  // (r3, 主开发's acceptance) a reading is judged ONLY by the reset it STATES against the clock: one taken AFTER its reset
+  // that still states that reset is shown unconfirmed — measuredAt / the file's time are ignored BY DESIGN; a reading
+  // proves the reset by stating the NEXT one (the CLI's statusline and the usage panel do, from the first turn on)
+  const late = WD({ utilization: 0.4, resetsAt: S - 3600, measuredAt: NOW - 1800e3 }, NOW, { readAt: NOW - 1800e3 });
+  const next = WD({ utilization: 0.03, resetsAt: S + 16200, measuredAt: NOW - 1800e3 }, NOW, { readAt: NOW - 1800e3 });
+  ok(late.state === 'reset-unconfirmed' && late.usedPct === 0 && next.state === 'read' && next.usedPct === 3,
+    `㉒a THE STATED RESET DECIDES: a reading measured 30 min AFTER its reset that still states it is unconfirmed (measuredAt ignored by design); one stating the NEXT reset is a reading (3 %): ${JSON.stringify({ late, next })}`);
   // ㉒b the clock at the exact reset instant (the jitter the minute-precise panel adds — RESET_GRACE_SEC)
   const R = S - 1000, at = (sec) => WD({ utilization: 0.9, resetsAt: R }, sec * 1000).state;
   ok(at(R - 1) === 'read' && at(R) === 'read' && at(R + G - 1) === 'read' && at(R + G) === 'reset-unconfirmed',
@@ -3312,6 +3319,106 @@ console.log('\n㉒ a reset that LANDED is shown reset (unconfirmed); a member on
   const base = patched('q22base', 'if (mayRoll && resetSec != null && resetLanded(resetSec, now / 1000)) return { state: \'reset-unconfirmed\'', 'if (false) return { state: \'reset-unconfirmed\'');
   ok(base.hit && base.mod.windowDisplay({ utilization: 0.95, resetsAt: S - 3 * 86400 }, NOW).usedPct === 95,
     '㉒f RED (the base): without the verdict the display hands back the stale 95 % — the owner\'s «no account available»');
+  // ㉒g THE DISPLAY CENSUS over src/lib (r3, 主开发's acceptance: «THE CENSUS PIN DOES NOT EXIST»). Every client line that
+  // names a bucket or draws a percentage either puts it through the display verdict ON THAT LINE (bucketView /
+  // windowDisplay), reads a VIEW's own `.reading`, or is ALLOWLISTED below with why; a new raw reader outside the list
+  // reds BY file:line. The renderers' bucketView calls are counted too (a bypass that names no bucket on its line — the
+  // billing switcher's `eff`, the host pill — drops the count). test-roster-live-usage DRIVES each renderer; this is
+  // the text half. i18n-*.js are dictionaries (words only) and are not scanned; usage-window / usage-dashboard draw token
+  // and cost stats and name no bucket, so they need no row.
+  const RAW22 = /\b(?:utilization|usedPercent|usedPct|remainingPct|fiveHour|sevenDay|scopedWeekly)\b|conic-gradient\(|% used|% left/;
+  const VIA22 = /\bbucketView\(|\bwindowDisplay\(|\b(?:v|v5|v7|vSc|cv5|cv7)\.reading\b/;
+  const ALLOW22 = {
+    'chat-status-bar.js': [['chat-status-ctx-pie', 'the CONTEXT-window pie (a conversation\'s context use, not a quota bucket)'],
+      ['has {rem}% left (under the {line}% floor', 'the wall line words the SERVER\'s pool verdict (bucketRemaining — the same 60-s inequality), never a stored bucket']],
+    'manage-agents.js': [
+      ['const w = h.sevenDay;', 'hostOwnReading: is there a reading at all (a presence gate, draws nothing)'],
+      ['return h.fiveHour || (w && typeof w', 'hostOwnReading (presence)'],
+      ['const pctOf = (x) => Math.min(100', 'the host pill\'s percent OF A VIEW (applied to bucketView\'s reading)'],
+      ["const bs = hu ? [['5h', hu.fiveHour]", 'the host pill picks the buckets it hands to bucketView on the next line'],
+      ['Number.isFinite(Number(w.usedPct))', 'a CLI\'s own typed windows → donut buckets (donut() puts each through bucketView)'],
+      ['const used = Math.max(0, Math.min(100, Number(w.usedPct)));', '…the same conversion'],
+      ["kind: w.kind === '5h' ? 'fiveHour' : 'weekly'", '…the same conversion'],
+      ['utilization: used / 100,', '…the same conversion'],
+      ['const pct = (x) => Math.min(100', 'the donut\'s percent OF A VIEW (donut() calls bucketView first)'],
+      ['conic-gradient(${c} ${Math.round(p * 3.6)}deg', 'the donut draws p, the view\'s percent'],
+      ['const has5h = !!(u.fiveHour && typeof u.fiveHour', 'presence of a 5h window (lane no-5h-window)'],
+      ["donut('5h', u.fiveHour", 'hands each bucket to donut() (bucketView inside)'],
+      ['donut(String(sc.name', 'hands each scoped bucket to donut()'],
+      ['const scEst = (name) => (est?.scopedWeekly', 'an estimate lookup (bucketView decides whether it survives)'],
+      ['const buckets = (wins ? wins.map((w) => [w.label, w, null, w.kind])', 'the narrow pill\'s bucket list, bucketView\'d on the next line'],
+    ],
+    'session-lifecycle.js': [
+      ['const pctOf = (x) => (x == null ? null', 'the billing switcher\'s percent OF A VIEW (eff() calls bucketView first)'],
+      ['const f = eff(u.fiveHour', 'hands each bucket to eff()'],
+      ['const scoped = (u.scopedWeekly', 'hands each scoped bucket to eff()'],
+      ['const e = (est?.scopedWeekly', 'an estimate lookup'],
+    ],
+    'settings-schema.js': [['its utilization stays under 100%', 'words in a setting\'s description']],
+    'usage-eta.js': [['num(b.usedPercent) ?? (num(b.utilization)', 'the countdown asks «spent?» only; bucketEta refuses a reset that passed (no percentage drawn)']],
+    'usage-meter.js': [
+      ['const pct = un ? 0 : w.usedPct', 'limitRows rows: the row\'s `display` (windowDisplay in limitRows) decides `un`'],
+      ['fmtReset(w.resetsAt, (w.usedPct || 0) / 100)', '…the same row\'s reset words'],
+      ["escHtml(t('{pct}% used', { pct }))", '…the same row\'s percent'],
+      ['conic-gradient(${color} ${darkDeg}deg', 'renderPie draws the percent it is handed (a view\'s)'],
+      ['const has5h = !!(rl && rl.fiveHour', 'presence of a 5h window (lane no-5h-window)'],
+      ['for (const sc of rl?.scopedWeekly', 'iterates the scoped buckets (vSc below)'],
+      ['const scEst = (estSel?.scopedWeekly', 'an estimate lookup'],
+      ["t('{pct}% used', { pct: ", 'prints pct5h / pct7d / pctSc — each a view\'s'],
+      ['resetStat(', 'the reset formatter\'s «not started» test; resetStat prints the unconfirmed words for a view that says so'],
+      ['if (codex?.fiveHour || codex?.sevenDay ||', 'presence of a codex reading'],
+      ['const cNoData = !(codex?.fiveHour', 'presence of a codex reading'],
+      ['conic-gradient(${usageColor(chipWorst)}', 'the phone chip draws chipWorst, the max of the views\' percents'],
+    ],
+    'usage-pace.js': [['remainingPct', 'a pace projection nobody imports (not wired)']],
+    'usage-source.js': [
+      ['const rolled = !!est &&', 'bucketView itself'],
+      ['const zero = { ...reading, utilization: 0', 'bucketView itself'],
+      ['kind: w.kind, usedPct: w.usedPct', 'limitRows: the row carries `display: model.windowDisplay(w, nowMs)` beside it'],
+      ["for (const [label, w] of [['5h', a.reading && a.reading.fiveHour]", 'codexRefreshToast: the reading the ⟳ just fetched (fresh by definition)'],
+      ['if (!w || w.usedPercent == null) continue;', '…the same toast'],
+      ['const pct = Math.round(Number(w.usedPercent));', '…the same toast'],
+    ],
+    'utils.js': [
+      ['const rdRaw = readingBucket ?', 'estDisplayPair: its callers hand it a VIEW\'s reading'],
+      ['const eRaw = estBucket ?', 'estDisplayPair (the estimate)'],
+    ],
+  };
+  const VIEWS22 = { 'usage-meter.js': 5, 'manage-agents.js': 3, 'session-lifecycle.js': 1 }; // v5 v7 vSc cv5 cv7 · donut, narrow pill, host pill · eff
+  const strip22 = (l) => (/^\s*(\*|\/\*)/.test(l) ? '' : l.replace(/(^|\s)\/\/.*$/, ''));
+  const census22 = (texts) => {
+    const offenders = [], used = new Set(), counts = {};
+    for (const [f, src] of Object.entries(texts)) {
+      counts[f] = (src.match(/\bbucketView\(quotaModel,/g) || []).length;
+      src.split('\n').forEach((l, i) => {
+        const c = strip22(l);
+        if (!RAW22.test(c) || VIA22.test(c)) return;
+        const hit = (ALLOW22[f] || []).find(([needle]) => c.includes(needle));
+        if (hit) used.add(f + '\0' + hit[0]); else offenders.push(`${f}:${i + 1}: ${c.trim().slice(0, 110)}`);
+      });
+    }
+    const dead = Object.entries(ALLOW22).flatMap(([f, rows]) => rows.filter(([n]) => !used.has(f + '\0' + n)).map(([n]) => f + ': ' + n));
+    const short = Object.entries(VIEWS22).filter(([f, n]) => counts[f] !== n).map(([f, n]) => `${f}: ${counts[f]} bucketView calls, the census names ${n}`);
+    return { offenders, dead, short };
+  };
+  const LIB22 = path.join(ROOT, 'src/lib');
+  const TEXTS22 = Object.fromEntries(fs.readdirSync(LIB22).filter((f) => f.endsWith('.js') && !/^i18n-/.test(f)).map((f) => [f, fs.readFileSync(path.join(LIB22, f), 'utf8')]));
+  const c22 = census22(TEXTS22);
+  ok(!c22.offenders.length, `㉒g every client line that names a bucket goes through the display verdict or is allowlisted with why (outside: ${JSON.stringify(c22.offenders)})`);
+  ok(!c22.dead.length, `㉒g …no dead allowlist row (${JSON.stringify(c22.dead)})`);
+  ok(!c22.short.length, `㉒g …the renderers call bucketView where the census names them (usage-meter 5, manage-agents 3, session-lifecycle 1): ${JSON.stringify(c22.short)}`);
+  // RED: the acceptance's bypass shape at each of its three sites (+ the codex pair) ⇒ the census names it
+  const swap22 = (f, a, b) => ({ ...TEXTS22, [f]: TEXTS22[f].split(a).length === 2 ? TEXTS22[f].replace(a, b) : '/* the patched line is gone */' });
+  const r1 = census22(swap22('usage-meter.js', 'const v5 = bucketView(quotaModel, rl?.fiveHour, estSel?.fiveHour, Date.now(), { readAt: rl?.fetchedAt });', 'const v5 = { reading: rl?.fiveHour, est: estSel?.fiveHour };'));
+  ok(r1.offenders.some((o) => /^usage-meter\.js:\d+: const v5 = \{ reading: rl\?\.fiveHour/.test(o)) && r1.short.length === 1, `㉒g RED: the usage popup's 5h read raw (the taskbar pie + the phone chip ride it) is NAMED: ${JSON.stringify(r1.offenders)}`);
+  const r2 = census22(swap22('usage-meter.js', 'const vSc = bucketView(quotaModel, sc, scEst, Date.now(), { readAt: rl.scopedFetchedAt || rl.fetchedAt });', 'const vSc = { reading: sc, est: scEst };'));
+  ok(r2.short.some((x) => x.startsWith('usage-meter.js: 4 ')), `㉒g RED: the scoped (Fable) bar read raw drops usage-meter's count: ${JSON.stringify(r2.short)}`);
+  const r3 = census22(swap22('session-lifecycle.js', 'const v = bucketView(quotaModel, raw0, e0, Date.now(), { readAt: u.fetchedAt });', 'const v = { reading: raw0, est: e0 };'));
+  ok(r3.short.some((x) => x.startsWith('session-lifecycle.js: 0 ')), `㉒g RED: the billing switcher's eff read raw is NAMED: ${JSON.stringify(r3.short)}`);
+  const r4 = census22(swap22('manage-agents.js', 'const v = bucketView(quotaModel, x, null, nowMs, { readAt: hu.fetchedAt });', 'const v = { reading: x };'));
+  ok(r4.short.some((x) => x.startsWith('manage-agents.js: 2 ')), `㉒g RED: the host pill read raw is NAMED: ${JSON.stringify(r4.short)}`);
+  const r5 = census22({ ...TEXTS22, 'usage-meter.js': TEXTS22['usage-meter.js'] + '\nconst late = `${Math.round(rl.sevenDay.utilization * 100)}% used`;\n' });
+  ok(r5.offenders.length === 1 && /usage-meter\.js:\d+: const late/.test(r5.offenders[0]), `㉒g RED: a NEW raw reader outside the allowlist is named by file:line: ${JSON.stringify(r5.offenders)}`);
 }
 
 console.log(fail ? `\n${fail} FAILED (${pass} passed)` : `\nALL PASS (${pass})`);
