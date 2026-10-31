@@ -1142,6 +1142,7 @@ function createSessionMessages(session, sessionId) {
         forYou: {
           add: (profileId, item) => { if (!userTodos) return null; const r = userTodos.add('browser', { origin: 'browser', kind: 'notice', urgency: 'normal', by: 'agent', sessionName: 'Agent browser', ...item }); return r && (r.id || (typeof r === 'string' ? r : null)); },
           resolve: (id) => { if (userTodos && userTodos.get(id)?.status === 'open') userTodos.setStatus(id, 'done', 'browser'); },
+          ended: (id, fact) => { if (userTodos && typeof userTodos.noteFact === 'function') userTodos.noteFact(id, fact); }, // lane passkey-browse-yourself r10: a card's «Allow once» taken back by a later answer — the record carries the end
         },
         // lane passkey-store-core: THE PASSKEY STORE — data/browser-passkeys.json (0600, written only by the watch) + the
         // per-instance key file data/browser-passkeys.key (0600, made once; B-4a59(b)'s keyring replaces this pair)

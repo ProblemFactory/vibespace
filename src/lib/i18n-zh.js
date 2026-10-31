@@ -6439,6 +6439,8 @@ export default {
   "Allowed once — the agent may register the passkey now (for 10 minutes).": "已允许一次——代理现在可以注册这把通行密钥（10 分钟内）。", // lane passkey-ui
   "Allowed once — this sign-in went through; the policy stays: ask each time.": "已允许一次——这次登录已放行；策略仍是：每次问。", // lane passkey-ui
   "Not now — nothing was registered.": "暂不——什么都没有注册。", // lane passkey-ui
+  "Allowed once — withdrawn by your later answer at {time}; nothing was registered with it.": "已允许一次——已被你 {time} 的后一个回答撤回；没有用它注册任何东西。", // lane passkey-browse-yourself r10
+  "allowed once · withdrawn by your later answer at {time}": "已允许一次 · 已被你 {time} 的后一个回答撤回", // lane passkey-browse-yourself r10
   "Not now — this sign-in was refused; the policy stays: ask each time.": "暂不——这次登录被拒绝；策略仍是：每次问。", // lane passkey-ui
   "Expired — nobody answered in time; nothing was allowed.": "已过期——没有人及时回答；什么都没有允许。", // lane passkey-ui
   "Withdrawn — the request ended before an answer; nothing was allowed.": "已撤回——请求在回答前就结束了；什么都没有允许。", // lane passkey-ui

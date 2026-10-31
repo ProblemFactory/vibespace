@@ -958,6 +958,17 @@ console.log('lane browser-takeover-queue: a takeover request\'s ONE item — its
       ok(A2.bandOfRow(A2.rowOf(m.get(c.id), Date.now()), Date.now()) === 1 && A2.bandOfRow(A2.rowOf(m.get(a.id), Date.now()), Date.now()) === 4, 'the attention list: an open request\'s item is band 1 (urgent); a parked one band 4');
       let thrown = ''; try { m.resolveByAgent('claude:c1', a.id); } catch (e) { thrown = e.message; }
       ok(thrown !== '' && m.get(a.id).status === 'open', 'an agent cannot resolve it with `vibespace-ask done` (an item with a producer\'s action) — its road is ask-human --withdraw', thrown);
+      // lane passkey-browse-yourself r10 (acceptance r9 MINOR 1): a passkey registration card's «Allow once» taken back by a later answer before it was used — the
+      // record (filed and resolved as the wiring does; browser-dialogs → the wiring's `ended` = noteFact) carries the end and the row says it
+      const PSr = req(path.join(ROOT, 'src/browser-passkey-store.js'));
+      const pkc = PSr.proposalCard({ id: 'pk-0a0b0c0d', kind: 'register', profileId: 'bp-bank', profileLabel: 'Bank', rpId: 'example.test', user: { name: 'alice', displayName: 'alice' } });
+      const pk = m.add('browser', { origin: 'browser', kind: 'notice', urgency: 'normal', by: 'agent', sessionName: 'Agent browser', ...PSr.proposalItem(pkc) });
+      m.setStatus(pk.id, 'done', 'browser');
+      const plain = R.resolvedByText(m.get(pk.id).resolvedBy, ctx.t, m.get(pk.id));
+      const at10 = new Date(2026, 9, 31, 8, 51).getTime(), noted = m.noteFact(pk.id, { endedAt: at10, endedBy: 'later-answer' });
+      const said10 = R.resolvedByText(m.get(pk.id).resolvedBy, ctx.t, m.get(pk.id)), row10 = R.renderRow({ item: m.get(pk.id), resolved: true }, ctx).innerHTML;
+      ok(noted && said10 === 'allowed once · withdrawn by your later answer at 08:51' && row10.includes('allowed once · withdrawn by your later answer at 08:51') && !/withdrawn/.test(plain),
+        'lane passkey-browse-yourself r10: a passkey registration card\'s «Allow once» taken back by a later answer — its resolved For-you record carries the end (the real store\'s noteFact) and the row says «allowed once · withdrawn by your later answer at HH:MM»; without the end it says nothing of the kind', { plain, said10 });
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   } finally { for (const [k, v] of Object.entries(had)) { if (v === undefined) delete globalThis[k]; else globalThis[k] = v; } }
 }

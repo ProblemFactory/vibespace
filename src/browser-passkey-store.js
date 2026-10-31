@@ -28,6 +28,7 @@ const ALLOW_MAX = 20;
 const ROWS_MAX = 200;              // per profile
 const ID_SHOWN = 8;
 const REASONS = Object.freeze(['no-grant', 'policy-no', 'declined', 'expired', 'profile-switch', 'rp-mismatch', 'none', 'withdrawn',
+  'answered-again', // lane passkey-browse-yourself r10: a registration that waited its turn while the owner answered a newer card for its site and conversation
   // lane passkey-sink (a kernel with `webauthn`, design-custom-browser-plugin §3): the request offers no ES256 key type · its rpId /
   // client data are not the page's own (VibeSpace re-checks, never trusting the kernel) · the sealed keys cannot be opened (the vault)
   'webauthn_alg_unsupported', 'webauthn_rp_mismatch', 'webauthn_key_locked']);

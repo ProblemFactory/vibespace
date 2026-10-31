@@ -95,6 +95,10 @@ export function resolvedByText(by, t, item = null) {
   const end = item ? endOf(item) : null;
   if (end && end.unknown) return ''; // r8: statusWords says «outcome unknown», endCodeOf draws its code — never the raw word here
   if (end && end.mapped) { item = ruledOf(item); by = item.resolvedBy; } // r8: a producer's outcome-in-the-fact settle reads as the ruled one
+  // lane passkey-browse-yourself r10: a passkey registration card's «Allow once» taken back by a later answer before it was used — read off the record's
+  // FACT (browser-dialogs is the one writer of endedBy 'later-answer'), never a literal action id (test-architecture §78's ratchet)
+  const pkEnd = item && item.resolvedFact && item.resolvedFact.endedBy === 'later-answer' ? Number(item.resolvedFact.endedAt) : 0;
+  if (pkEnd > 0) { const d = new Date(pkEnd); return t('allowed once · withdrawn by your later answer at {time}', { time: String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0') }); }
   if (by === 'agent') return t('by the agent');
   if (by === 'system') return t('automatically');
   if (by === 'expired') return item && isDecisionRow(item) ? t('expired · the agent can ask again') : t('expired'); // r3: a wake ask's END (its lifetime) — the card's words

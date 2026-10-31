@@ -155,6 +155,7 @@ function refusedText(why, rpId) {
     case 'profile-switch': return `The owner turned passkeys off for agents on this browser profile — ${rp}'s request was refused; use the page's other way in.`;
     case 'rp-mismatch': return `The page asked for a passkey of ${rp}, which its own address may not use — refused.`;
     case 'withdrawn': return `The user took over the browser — your passkey request on ${rp} was withdrawn.`;
+    case 'answered-again': return `While this registration on ${rp} waited its turn, the owner answered a newer card for it — that answer stands, so nothing was registered and the page was told it was not allowed; \`vibespace-browser passkey status\` says whether a registration is allowed now.`; // r10
     // lane passkey-sink: a kernel with `webauthn` — VibeSpace answers the ceremony itself
     case 'webauthn_alg_unsupported': return `${rp} asked for a kind of passkey VibeSpace does not make (it offered no ES256 key type) — the page was told it was not allowed; use its other way in.`;
     case 'webauthn_rp_mismatch': return `The passkey request named ${rp}, which is not the page's own (its address may not use it, or the data to sign names another page) — VibeSpace signed nothing and the page was told it was not allowed.`;
@@ -254,6 +255,8 @@ const FOR_YOU_WORDS = Object.freeze({
  *  decided card's outcome + the policy now in force. `card` = browser-passkey-store's proposalCard (peer-controlled
  *  rpId / user names: every surface puts these words through textContent or escHtml). */
 const CHOICE_WORDS = Object.freeze({ once: 'Allow once', always: 'Always allow', no: 'Not now', never: 'Never' });
+/** r10: HH:MM on the reader's own clock (a card is drawn where the owner reads it). */
+const clockOf = (at) => { const d = new Date(Number(at) || 0); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
 function passkeyCardWords(card, tIn) {
   if (!card || card.type !== 'passkey') return null;
   const t = typeof tIn === 'function' ? (s, p) => tIn(s, p) : fill;
@@ -275,7 +278,7 @@ function passkeyCardWords(card, tIn) {
     const a = card.answer;
     outcome = a === 'always' ? t('Always allowed — the policy for this passkey is now: allow.')
       : a === 'never' ? t('Never — the policy for this passkey is now: never.')
-      : a === 'once' ? (reg ? t('Allowed once — the agent may register the passkey now (for 10 minutes).') : t('Allowed once — this sign-in went through; the policy stays: ask each time.'))
+      : a === 'once' ? (reg ? (card.withdrawnAt ? t('Allowed once — withdrawn by your later answer at {time}; nothing was registered with it.', { time: clockOf(card.withdrawnAt) }) : t('Allowed once — the agent may register the passkey now (for 10 minutes).')) : t('Allowed once — this sign-in went through; the policy stays: ask each time.'))
       : (reg ? t('Not now — nothing was registered.') : t('Not now — this sign-in was refused; the policy stays: ask each time.'));
   } else if (card.state === 'expired') outcome = t('Expired — nobody answered in time; nothing was allowed.');
   else if (card.state === 'withdrawn') outcome = t('Withdrawn — the request ended before an answer; nothing was allowed.');

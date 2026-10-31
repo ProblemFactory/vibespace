@@ -6438,6 +6438,8 @@ export default {
   "Allowed once — the agent may register the passkey now (for 10 minutes).": "1 回だけ許可しました — エージェントは今パスキーを登録できます（10 分間）。", // lane passkey-ui
   "Allowed once — this sign-in went through; the policy stays: ask each time.": "1 回だけ許可しました — このログインは通りました。ポリシーは「毎回確認」のままです。", // lane passkey-ui
   "Not now — nothing was registered.": "今はしない — 何も登録されていません。", // lane passkey-ui
+  "Allowed once — withdrawn by your later answer at {time}; nothing was registered with it.": "1 回だけ許可しました — {time} のあなたの後の回答で取り消されました。これで登録されたものはありません。", // lane passkey-browse-yourself r10
+  "allowed once · withdrawn by your later answer at {time}": "1 回だけ許可 · {time} のあなたの後の回答で取り消し", // lane passkey-browse-yourself r10
   "Not now — this sign-in was refused; the policy stays: ask each time.": "今はしない — このログインは拒否されました。ポリシーは「毎回確認」のままです。", // lane passkey-ui
   "Expired — nobody answered in time; nothing was allowed.": "期限切れ — 時間内に回答がなく、何も許可されていません。", // lane passkey-ui
   "Withdrawn — the request ended before an answer; nothing was allowed.": "取り下げ — 回答前にリクエストが終了し、何も許可されていません。", // lane passkey-ui

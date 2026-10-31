@@ -20,6 +20,10 @@
 //      decided THIS ceremony, the count written before the answer, the use law's line; the refusals by name; cancel ⇒ the page
 //      sees NotAllowedError; the page's own abort; P1's dismiss; an orphan surface; the vault locked; a kernel without the
 //      feature unchanged; no store
+//   ⑨r10 its acceptance r9: the owner's latest answer wins at EVERY point before a registration goes — the drain job re-reads it
+//       before it loads and right before the release (refused answered-again; his road: Chrome's own window); a later answer that
+//       takes back an unused «Allow once» tells that card (its words + its For-you record's end); an answer at another key prunes
+//       nothing live
 //   ⑨r9 its acceptance r8: the owner's LATEST answer for a site and conversation stands — a grant a waiting registration took
 //       comes back only while no newer answer («no» or «once») exists; a «no» ends a standing grant; the give-back's exits (2)
 //       over after his pairing and (3) no authenticator, each with its own leg (the person's road); a given-back grant keeps its
@@ -123,7 +127,7 @@ console.log('② the words en / zh / ja');
   const cardS = PS0.proposalCard({ id: 'pk-0a1b2c3d', kind: 'sign-in', profileId: 'p1', profileLabel: 'Work', rpId: 'github.com', user: { name: 'alice', displayName: 'Alice' } });
   const cardR = PS0.proposalCard({ id: 'pk-0a1b2c3e', kind: 'register', profileId: 'p1', profileLabel: 'Work', rpId: 'github.com', user: null });
   for (const c of [cardS, cardR]) { PK.passkeyCardWords(c, t); for (const [state, answer] of [['answered', 'once'], ['answered', 'always'], ['answered', 'no'], ['answered', 'never'], ['expired', null], ['withdrawn', null]]) PK.passkeyCardWords({ ...c, state, answer }, t); }
-  PK.passkeyCardWords({ ...cardS, user: { name: '', displayName: '' } }, t); PK.passkeyCardWords({ ...cardR, user: { name: 'bob', displayName: 'bob' } }, t);
+  PK.passkeyCardWords({ ...cardS, user: { name: '', displayName: '' } }, t); PK.passkeyCardWords({ ...cardR, user: { name: 'bob', displayName: 'bob' } }, t); PK.passkeyCardWords({ ...cardR, state: 'answered', answer: 'once', withdrawnAt: 1 }, t);
   const askW = PK.passkeyWords({ state: 'passkey_ask', rpId: 'github.com', id: 'a' }, t, { card: cardS });
   const askChip = ST.stuckWords({ state: 'passkey', passkey: { state: 'passkey_ask', rpId: 'github.com' } }, t);
   for (const k of Object.values(PS0.ITEM_WORDS)) used.push(k);
@@ -637,8 +641,10 @@ console.log('⑨ lane passkey-browse-yourself: EVERY ROAD is watched, his window
     return { D, f, H, items, lease, state, start, step: (ms) => { clock += ms; } };
   }
   const until9 = async (pred, n = 200) => { for (let i = 0; i < n && !pred(); i++) await tick(); return pred(); };
-  /** The four rules' facts over ONE module pair (the lane's files, or a patched copy) — each mutant reds its own rule only. */
-  async function judge(dir) {
+  /** The four rules' facts over ONE module pair (the lane's files, or a patched copy) — each mutant reds its own rule only.
+   *  `control` = rule 1's CONTROL (no re-arm without him — a NEGATIVE wait): read by the lane's own run only; the mutant runs judge
+   *  rules 1–4, none of which reads it, so they skip its 60 ms (⑨r10: the time the new legs cost). */
+  async function judge(dir, { control = true } = {}) {
     const P = require(path.join(dir, 'src/browser-passkey.js'));
     const R = roads(path.join(dir, 'src/server/browser-dialogs.js'));
     const v = { P };
@@ -671,7 +677,7 @@ console.log('⑨ lane passkey-browse-yourself: EVERY ROAD is watched, his window
     await R.lease({ kind: 'browser-ready', profileId: PID, why: 'heal' });
     v.afterHeal = R.state();
     R.H.on = false; try { R.f.sock().h.close(); } catch { /* */ }
-    await until9(() => false, 12); v.withoutHim = R.state(); // CONTROL: nobody browses it himself ⇒ no re-arm (a re-arm would come at rearmMs·2^n ≤ 40 ms; 12 ticks ≥ 60 ms)
+    if (control) { await until9(() => false, 12); v.withoutHim = R.state(); } // CONTROL: nobody browses it himself ⇒ no re-arm (a re-arm would come at rearmMs·2^n ≤ 40 ms; 12 ticks ≥ 60 ms)
     R.D.shutdown();
     return v;
   }
@@ -732,7 +738,7 @@ console.log('⑨ lane passkey-browse-yourself: EVERY ROAD is watched, his window
       base();
       const src = SRC[which];
       put(which === 'd' ? 'src/server/browser-dialogs.js' : 'src/browser-passkey.js', src.replace(from, to));
-      const mv = await judge(dir);
+      const mv = await judge(dir, { control: false });
       const others = [rule1, rule2, rule3, rule4].filter((r) => r !== own).every((r) => r(mv));
       ok(src.includes(from) && !own(mv) && others, `⑨ MUTANT ${name}: red on its own rule, the other three still hold`, { found: src.includes(from), own: own(mv), others });
     }
@@ -802,7 +808,7 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
   /** The person's world: holder rows by hand (`H.human` his row, `H.agent` a conversation's), the attach road's record, an optional
    *  passkey store, an optional paired machine. */
   function world2({ holders = 'human', store = null, hostId = null, print = true, rearmMs = 20, url = 'ws://fake', ep = null, drainMs = null, beatMs = null, holdMaxMs = null, two = false /* ⑨r8: a second tab T2 */ } = {}) {
-    const world = { sockets: 0, refuse: false, pending: [], print, two, said: [], H: { human: holders !== 'agent', agent: holders !== 'human' } };
+    const world = { sockets: 0, refuse: false, pending: [], print, two, said: [], ended: [] /* ⑨r10: forYou.ended */, H: { human: holders !== 'agent', agent: holders !== 'human' } };
     const f = sock2(world);
     let clock = 1_000_000;
     const listeners = new Set(), items = [], events = [];
@@ -811,7 +817,7 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
     const holdersOf = () => [...(world.H.agent ? [{ browserKey: CK, sessionId: 's-c', ephemeral: false }] : []), ...(world.H.human ? [{ browserKey: HK, sessionId: null, ephemeral: false, human: true, input: 'user' }] : [])];
     const passkeys = store ? { read: () => store.file, write: (o) => { store.file = JSON.parse(JSON.stringify(o)); }, cipher: store.cipher } : null;
     const mkD = () => { const d = require(path.join(REPO, 'src/server/browser-dialogs.js')).create({ keeper, WebSocketImpl: f.FakeWS, log: { warn: (l) => world.said.push(String(l)), log() {} }, now: () => clock, holdersOf, ...(drainMs != null ? { drainMs } : {}), ...(beatMs != null ? { holdBeatMs: beatMs } : {}), ...(holdMaxMs != null ? { holdMaxMs } : {}), leaseCountOf: () => holdersOf().length, passkeys,
-      tabsOf: ({ browserKey }) => (browserKey === HK || browserKey === CK ? (two ? ['T1', 'T2'] : ['T1']) : []), rearmMs, forYou: { add: (pid, it) => { items.push(it); return 'todo-' + items.length; }, resolve: () => {} } }); d.onChange((ev) => events.push(ev)); return d; };
+      tabsOf: ({ browserKey }) => (browserKey === HK || browserKey === CK ? (two ? ['T1', 'T2'] : ['T1']) : []), rearmMs, forYou: { add: (pid, it) => { items.push(it); return 'todo-' + items.length; }, resolve: () => {}, ended: (id, fact) => world.ended.push({ id, fact }) } }); d.onChange((ev) => events.push(ev)); return d; };
     let D = mkD();
     const lease = async (ev) => { const out = []; for (const fn of listeners) { const r = fn(ev); if (r && typeof r.then === 'function') out.push(r); } await Promise.allSettled(out); };
     const w = () => D._watches.get(PID) || null;
@@ -1665,6 +1671,74 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
     ok(g7 && Gs.rel39 === 0 && Gs.why39 === 'no-grant',
       '⑨r9 (a grant is spent once the authenticator is there for it): #38\'s page gives up while its job loads (setUserVerified held) — the grant is NOT given back: T2\'s #39 refused no-grant', Gs);
     fail9(39, 7, true);
+    // ⑨r10 — acceptance r9 of lane passkey-browse-yourself (f9fc15aa4), in ⑨r8's world: every leg below but «a spent or expired grant» is RED on f9fc15aa4 by name
+    console.log('⑨r10 acceptance r9: the owner\'s latest answer wins at EVERY point before a registration goes — the job re-reads it before it loads and right before the release; a later answer that takes back an unused «Allow once» tells that card');
+    await until8(() => !draining7(X), 300);
+    const card10 = async (choice, rp = 'example.test') => { const reg = await X.D.passkeyRegister({ profileId: PID, browserKey: CK, rpId: rp, user: 'alice' }); return X.D.answerPasskey(reg.proposal.id, { choice, shown: reg.proposal.shown }).ok ? reg.proposal : null; };
+    const rec10 = (id) => X.w().targets.get('T1').pk.records.find((r) => r.n === id) || {};
+    const hm10 = (at) => { const d = new Date(at); return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); };
+    // PROBE-A's shape: #42 takes the grant and waits behind the queued get; the owner answers a NEWER card «no»; #42's turn comes
+    const a10 = await card10('once');
+    await queue8(40, 47, [[42, 49]]);
+    const n10a = await answer9('no');
+    await settle8([[41, 48]]);
+    create8(43, 7, true); await until8(() => gone8(43, 'T2'), 300);
+    const R10a = { a10: !!a10, n10a, rel42: v8(42, 'release'), ref42: v8(42, 'refuse'), why42: why8(42), by42: rec10(42).createdBy || null, held42: X.w().targets.get('T1').pk.holds.has(rec10(42)), rel43: v8(43, 'release', 'T2'), why43: why8(43, 'T2'), told: !!(a10 && a10.withdrawnAt === X.now()), said: /newer card/.test(PK.refusedText('answered-again', 'example.test')) && require(path.join(REPO, 'src/browser-passkey-store.js')).REASONS.includes('answered-again') };
+    ok(R10a.a10 && n10a && R10a.rel42 === 0 && R10a.ref42 === 1 && R10a.why42 === 'answered-again' && !R10a.by42 && !R10a.held42 && R10a.rel43 === 0 && R10a.why43 === 'no-grant' && R10a.told && R10a.said,
+      '⑨r10 MAJOR (PROBE-A\'s shape): #42 takes the grant and waits behind the queued get; the owner answers a newer card «no»; at #42\'s turn the job re-reads the owner\'s latest answer BEFORE it loads — #42 refused answered-again (its own sentence), nothing loaded for it, nothing released; T2\'s next registration no-grant; the first card told (f9fc15aa4: #42 released and created by the agent)', R10a);
+    fail9(42, 49); fail9(43, 7, true); await until8(() => !draining7(X), 300);
+    // a newer «once» answered while #46 waits with the first grant: #46 refused, the NEWER grant stands for the next registration
+    const b10 = await card10('once');
+    await queue8(44, 50, [[46, 52]]);
+    const b20 = await card10('once');
+    await settle8([[45, 51]]);
+    create8(47, 7, true); await until8(() => gone8(47, 'T2'), 300);
+    const R10b = { b10: !!b10, b20: !!b20, rel46: v8(46, 'release'), ref46: v8(46, 'refuse'), why46: why8(46), rel47: v8(47, 'release', 'T2'), why47: why8(47, 'T2'), told1: !!(b10 && b10.withdrawnAt === X.now()), told2: !!(b20 && b20.withdrawnAt) };
+    ok(R10b.b10 && R10b.b20 && R10b.rel46 === 0 && R10b.ref46 === 1 && R10b.why46 === 'answered-again' && R10b.rel47 === 1 && !R10b.why47 && R10b.told1 && !R10b.told2,
+      '⑨r10 MAJOR (a newer «once» while it waits): #46 took the first grant and waits; the owner answers a newer card «once» — #46 refused answered-again at its turn, and the NEWER grant stands: T2\'s next registration released; the first card told, the newer one not (f9fc15aa4: #46 released on the outranked grant)', R10b);
+    say2({ ev: 'end', id: 47, outcome: 'ok' }); fail9(46, 52); await until8(() => !draining7(X), 300);
+    // right before the release: a «no» answered while #48's job loads (setUserVerified held) — refused, never released
+    const c10 = await card10('once');
+    X.world.hold = new Set(['WebAuthn.setUserVerified']); X.world.held = [];
+    doc6(X, 53, 'F53'); create8(48, 53); await until8(() => X.world.held.length === 1, 300);
+    const n10c = await answer9('no');
+    free7(X); await until8(() => !draining7(X), 300); await until8(() => false, 1);
+    create8(49, 7, true); await until8(() => gone8(49, 'T2'), 300);
+    const R10c = { c10: !!c10, n10c, rel48: v8(48, 'release'), ref48: v8(48, 'refuse'), why48: why8(48), rel49: v8(49, 'release', 'T2'), why49: why8(49, 'T2'), told: !!(c10 && c10.withdrawnAt === X.now()) };
+    ok(R10c.c10 && n10c && R10c.rel48 === 0 && R10c.ref48 === 1 && R10c.why48 === 'answered-again' && R10c.rel49 === 0 && R10c.why49 === 'no-grant' && R10c.told,
+      '⑨r10 MAJOR (right before the release): the owner answers «no» while #48\'s job loads (setUserVerified held) — the job re-reads the latest answer before the release: #48 refused answered-again, never released; T2\'s next registration no-grant; the card told (f9fc15aa4: #48 released)', R10c);
+    fail9(48, 53); fail9(49, 7, true); await until8(() => !draining7(X), 300);
+    // MINOR 2 (PROBE-B's shape): a register card for ANOTHER key answered while #52 waits with its grant; #52 over before its turn — the grant comes back
+    const d10 = await grant8();
+    await queue8(50, 54, [[52, 56]]);
+    const oth10 = !!(await card10('no', 'other.test'));
+    fail9(52, 56); await until8(() => false, 1);
+    await settle8([[51, 55]]);
+    create8(53, 7, true); await until8(() => gone8(53, 'T2'), 300);
+    const R10d = { d10, oth10, rel52: v8(52, 'release'), ref52: v8(52, 'refuse'), rel53: v8(53, 'release', 'T2'), why53: why8(53, 'T2') };
+    ok(d10 && oth10 && R10d.rel52 === 0 && R10d.ref52 === 0 && R10d.rel53 === 1 && !R10d.why53,
+      '⑨r10 MINOR 2 (an answer at ANOTHER key prunes nothing live): a card for another site answered while #52 waits with its grant; #52 over before its turn — the grant comes back: T2\'s next registration released (an over-pruning mutant: no-grant)', R10d);
+    say2({ ev: 'end', id: 53, outcome: 'ok' });
+    // MINOR 1: a standing «Allow once» taken back by a later «no» — the card says so, its For-you item's record carries the end
+    const e10 = await card10('once'); X.step(60e3);
+    const n10x = X.events.length, m10x = X.world.ended.length;
+    const n10e = await answer9('no');
+    const told10 = X.events.slice(n10x).filter((ev) => ev.kind === 'passkey-proposal' && ev.card && e10 && ev.card.id === e10.id);
+    const idx10 = X.items.findIndex((it) => it.action && e10 && it.action.id === e10.id), ended10 = X.world.ended.slice(m10x);
+    const wire10 = /forYou: \{[\s\S]{0,900}ended: \(id, fact\) => \{ if \(userTodos && typeof userTodos\.noteFact === 'function'\) userTodos\.noteFact\(id, fact\); \}/.test(fs.readFileSync(path.join(REPO, 'src/server/mounts-plugins-wiring.js'), 'utf8'));
+    const R10e = { e10: !!e10, n10e, at: !!(e10 && e10.withdrawnAt === X.now()), events: told10.length, block: !!(told10[0] && told10[0].block.passkey.withdrawnAt === X.now()), item: idx10 >= 0 ? 'todo-' + (idx10 + 1) : null, ended: ended10, words: e10 ? PK.passkeyCardWords(e10, null).outcome : '', wire10 };
+    ok(R10e.e10 && n10e && R10e.at && R10e.events === 1 && R10e.block && ended10.length === 1 && ended10[0].id === R10e.item && ended10[0].fact.endedAt === X.now() && ended10[0].fact.endedBy === 'later-answer' && R10e.words === `Allowed once — withdrawn by your later answer at ${hm10(X.now())}; nothing was registered with it.` && wire10,
+      '⑨r10 MINOR 1 (the words): «once», then «no» on a newer card a minute later — the first card is TOLD: withdrawnAt on it, its chat card re-sent (one passkey-proposal event), its words «Allowed once — withdrawn by your later answer at HH:MM; nothing was registered with it.», its For-you item\'s record given the end ({endedAt, endedBy later-answer} — the wiring\'s noteFact) (f9fc15aa4: the card still read «the agent may register the passkey now»)', R10e);
+    // KEPT: a spent «once» is not told by a later «no» (the registration went); an expired one neither (its 10 min were over)
+    const f10 = await card10('once');
+    create8(54, 7, true); await until8(() => gone8(54, 'T2'), 300); say2({ ev: 'end', id: 54, outcome: 'ok' });
+    const m10y = X.world.ended.length, n10y = X.events.length;
+    const n10f = await answer9('no');
+    const h10 = await card10('once'), nh10 = X.events.length; X.step(11 * 60e3);
+    const n10g = await answer9('no');
+    const R10f = { f10: !!f10, n10f, n10g, rel54: v8(54, 'release', 'T2'), spent: !!(f10 && f10.withdrawnAt), expired: !!(h10 && h10.withdrawnAt), ended: X.world.ended.length - m10y, events: X.events.slice(n10y).filter((ev) => ev.kind === 'passkey-proposal' && ev.card && f10 && ev.card.id === f10.id).length + X.events.slice(nh10).filter((ev) => ev.kind === 'passkey-proposal' && ev.card && h10 && ev.card.id === h10.id).length, words: f10 ? PK.passkeyCardWords(f10, null).outcome : '' };
+    ok(R10f.f10 && n10f && h10 && n10g && R10f.rel54 === 1 && !R10f.spent && !R10f.expired && R10f.ended === 0 && R10f.events === 0 && /^Allowed once — the agent may register the passkey now/.test(R10f.words),
+      '⑨r10 MINOR 1 kept: a later «no» tells only a grant it TAKES BACK — a spent «once» (T2\'s #54 released with it) and an expired one (11 min) are not told: no withdrawnAt, no event, no record end', R10f);
     X.D.shutdown();
   }
   // ⑨r9 MINOR — the give-back's two other exits, on the person's road (his own registration: the vault authenticator paired for it); RED with back() dropped at that exit alone
@@ -1698,6 +1772,21 @@ console.log('⑨r2 acceptance r1: the person\'s watch observes; the view\'s fact
     ok(g2 && none.tried === 1 && none.rel3 === 1 && !none.auth && !none.by3 && E3.paired === 2 && E3.rel4 === 1 && E3.by4 === 'human',
       '⑨r9 MINOR (exit 3, no authenticator): the vault authenticator refused for his registration — released to Chrome\'s own window, the grant GIVEN BACK: his next registration pairs the vault (created by him)', E3);
     X.say({ ev: 'end', id: 4, outcome: 'ok' });
+    // ⑨r10 MAJOR on his road: a «no» answered while the vault authenticator pairs for his registration — caught right before the release
+    const answer10 = async (choice) => { const reg = await X.D.passkeyRegister({ profileId: PID, browserKey: null, rpId: 'example.test', user: 'me' }); return X.D.answerPasskey(reg.proposal.id, { choice, shown: reg.proposal.shown }).ok; };
+    await until9(() => idle9() && !authOf5(X));
+    const g3 = await grant9(), p2 = pairs9();
+    X.world.hold = new Set(['WebAuthn.addVirtualAuthenticator']); X.world.held = [];
+    create9(5); await until9(() => X.world.held.length === 1);
+    const no10 = await answer10('no');
+    free7(X); await until9(() => v9(5, 'release') + v9(5, 'refuse') > 0 && idle9());
+    const mid10 = { paired: pairs9() - p2, rel5: v9(5, 'release'), ref5: v9(5, 'refuse'), auth: authOf5(X), by5: rec6(X, 5).createdBy || null };
+    X.say({ ev: 'end', id: 5, outcome: 'error', name: 'NotAllowedError' }); await until9(() => idle9());
+    create9(6); await until9(() => v9(6, 'release') > 0 && idle9());
+    const E4 = { g3, no10, mid10, paired: pairs9() - p2, rel6: v9(6, 'release'), by6: rec6(X, 6).createdBy || null };
+    ok(g3 && no10 && mid10.paired === 1 && mid10.rel5 === 1 && mid10.ref5 === 0 && !mid10.auth && !mid10.by5 && E4.paired === 1 && E4.rel6 === 1 && !E4.by6,
+      '⑨r10 MAJOR (his road, right before the release): he answers «no» while the vault authenticator pairs for his registration — the authenticator paired for it goes and the page gets Chrome\'s own window (never refused for the vault\'s sake), not created by him; his next registration: Chrome\'s own window at once, no pairing (f9fc15aa4: created by him in the vault)', E4);
+    X.say({ ev: 'end', id: 6, outcome: 'ok' });
     X.D.shutdown();
   }
 }
