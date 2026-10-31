@@ -172,7 +172,12 @@ function _cacheFromAnchor(anchor, prev, window = null) {
   const b = anchor.buckets || {};
   const own = (name) => (window && window.scoped ? window.scoped[String(name || '').toLowerCase()] : null);
   const agrees = (resetsAt, phase) => !window || phase == null || !(Number(resetsAt) > 0) || weeklyNear(resetsAt, phase) !== false;
-  if (b.fiveHour) out.fiveHour = { utilization: b.fiveHour.u, resetsAt: b.fiveHour.resetsAt || 0, status: 'allowed' };
+  // «NO 5h LIMIT» OUTLIVES A REBUILD FROM AN OLDER ANCHOR (lane no-5h-window r3, the standing sweep of sibling/anchor
+  // re-stamps): a 5h bucket an anchor read BEFORE the file's dated tombstone is not the account's any more — the
+  // tombstone is carried (the replace-mode lift reads `fiveHourAbsent` back); one read AFTER it is the window back.
+  const tomb5h = prev && !(prev.fiveHour && typeof prev.fiveHour === 'object') && Number(prev.fiveHourAbsent) > 0 ? Number(prev.fiveHourAbsent) : 0;
+  if (b.fiveHour && !(tomb5h && (Number(anchor.fetchedAt) || 0) <= tomb5h)) out.fiveHour = { utilization: b.fiveHour.u, resetsAt: b.fiveHour.resetsAt || 0, status: 'allowed' };
+  else if (tomb5h) out.fiveHourAbsent = tomb5h;
   if (b.sevenDay && agrees(b.sevenDay.resetsAt, window && window.sevenDay)) out.sevenDay = { utilization: b.sevenDay.u, resetsAt: b.sevenDay.resetsAt || 0, status: 'allowed' };
   const sw = (Array.isArray(b.scopedWeekly) ? b.scopedWeekly : []).filter((s) => s && agrees(s.resetsAt, own(s.name)));
   if (sw.length) {

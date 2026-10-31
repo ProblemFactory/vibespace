@@ -2276,8 +2276,8 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
   const o5 = CQ.parseOAuthUsage({ seven_day: { utilization: 40 }, five_hour: { utilization: 10 } });
   ok(o5 && o5.fiveHour && Math.abs(o5.fiveHour.utilization - 0.1) < 1e-9 && JSON.stringify(AW(o5)) === '[]', '㉑1d …a reply WITH five_hour keeps it, claims nothing');
   const gNo = ADP.parseGetUsageResponse({ rate_limits: { seven_day: { used_percentage: 40, resets_at: nowSec + 3 * 86400 } } });
-  ok(gNo && gNo.fiveHour == null && Math.abs(gNo.sevenDay.utilization - 0.4) < 1e-9 && JSON.stringify(AW(gNo)) === '["5h"]',
-    `㉑1e the get_usage control payload without five_hour fabricates NO 0 % 'allowed' window and says «no 5h limit» — got ${JSON.stringify(gNo && gNo.fiveHour)}`);
+  ok(gNo && gNo.fiveHour == null && Math.abs(gNo.sevenDay.utilization - 0.4) < 1e-9 && JSON.stringify(AW(gNo)) === '[]',
+    `㉑1e the get_usage control payload without five_hour fabricates NO 0 % 'allowed' window — and claims nothing (r3: it is the CLI's own merged state, which drops a passed window) — got ${JSON.stringify(gNo && gNo.fiveHour)}`);
   const evNo = CAP.parseRateLimitEvent({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed', rateLimitType: 'seven_day', utilization: 0.4, resetsAt: nowSec + 3 * 86400, unifiedWindows: { seven_day: { utilization: 0.4, resets_at: nowSec + 3 * 86400 } } } });
   eq(evNo && evNo.absentWindows, ['5h'], '㉑1f a rate_limit_event whose unifiedWindows names the week and NO five_hour enumerated the plan: «no 5h limit»');
   const evLegacy = CAP.parseRateLimitEvent({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed', rateLimitType: 'seven_day', utilization: 0.4, resetsAt: nowSec + 3 * 86400 } });
@@ -2285,7 +2285,8 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
   ok(evLegacy && Array.isArray(evLegacy.absentWindows) && !evLegacy.absentWindows.length && evBoth && Array.isArray(evBoth.absentWindows) && !evBoth.absentWindows.length,
     '㉑1f …a record without unifiedWindows (it names ONE bucket) or with five_hour in it claims nothing');
   const setEv = CQ.limitSetFromEvent(evNo, { nowMs: Date.now() });
-  ok(setEv && !QM.windowOfKind(QM.planLimit(setEv), '5h') && SINCE(QM.planLimit(setEv), '5h') > 0, '㉑1f …and its typed set is the week alone with the dated tombstone');
+  ok(setEv && !QM.windowOfKind(QM.planLimit(setEv), '5h') && SINCE(QM.planLimit(setEv), '5h') == null,
+    '㉑1f …and its typed set is the week alone with NO tombstone — one passive answer is a witness, never proof (r3)');
 
   // ── rule 1: the MODEL — the newer claim wins, the view round-trips, the validator names the shape ─────────────
   {
@@ -2337,86 +2338,173 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
   const fb = readJ(dir, K);
   ok(rb.ok && fb.fiveHour && Math.abs(fb.fiveHour.utilization - 0.1) < 1e-9 && !fb.fiveHourAbsent && said.length === 2 && said[1].change === 'restored',
     `㉑2c a 5h reading after the removal brings the window BACK and is said the same way (restored) — said ${JSON.stringify(said.map((x) => x.change))}`);
+  // THE STREAM IS A PASSIVE ANSWER (r3, acceptance r2 BLOCKER): the CLI drops a passed window from `unifiedWindows`
+  // (2.1.314 `xd`), so a week-only record counts as ONE witness, and only when the week MOVED since the previous reading.
+  const evWeek = (pct, extra = {}) => CAP.parseRateLimitEvent({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed', rateLimitType: 'seven_day', utilization: pct / 100, resetsAt: nowSec + 3 * 86400, unifiedWindows: { seven_day: { utilization: pct / 100, resets_at: nowSec + 3 * 86400 } }, ...extra } });
+  const ev5 = (pct5) => CAP.parseRateLimitEvent({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed', rateLimitType: 'five_hour', utilization: pct5 / 100, resetsAt: nowSec + 4 * 3600, unifiedWindows: { five_hour: { utilization: pct5 / 100, resets_at: nowSec + 4 * 3600 }, seven_day: { utilization: 0.44, resets_at: nowSec + 3 * 86400 } } } });
+  const capture = (d, key, ev, ids = [key], cap = CAP) => cap.captureRateLimitEvent({ cacheDir: d, key, identityIds: ids, ev, now: Date.now() });
   {
     const d3 = mkd('e'), K3 = 'sub-n5h-ev';
     seed5h(d3, K3);
-    const r3 = CAP.captureRateLimitEvent({ cacheDir: d3, key: K3, identityIds: [K3], ev: evNo, now: Date.now() });
+    const n0 = said.length;
+    capture(d3, K3, evWeek(40));                       // the first passive reading of the week: nothing to compare with
+    capture(d3, K3, evWeek(40));                       // the SAME answer again (a replay, the reset-time state): no witness
+    const f1 = readJ(d3, K3);
+    capture(d3, K3, evWeek(41));                       // the week MOVED, no five_hour: witness 1
+    const f2 = readJ(d3, K3);
+    ok(f1.fiveHour && f1.fiveHour.utilization === 0.84 && !f1.fiveHourAbsent && !f1.fiveHourAbsentWitnesses && f2.fiveHour && !f2.fiveHourAbsent && f2.fiveHourAbsentWitnesses && f2.fiveHourAbsentWitnesses.n === 1 && said.length === n0,
+      `㉑2d a week-only stream record is NOT proof: the stored 5h window stays (unconfirmed), one MOVED answer is witness 1 — ${JSON.stringify({ f1: !!f1.fiveHour, w2: f2.fiveHourAbsentWitnesses })}`);
+    capture(d3, K3, evWeek(42));                       // witness 2 — a second, distinct API answer
     const f3 = readJ(d3, K3);
-    ok(r3.ok && f3.fiveHour === undefined && f3.fiveHourAbsent > 0 && said.some((x) => x.key === K3 && x.change === 'removed'),
-      '㉑2d the stream says it too: a week-only unifiedWindows record retires the stored 5h window (removed)');
+    ok(f3.fiveHour === undefined && f3.fiveHourAbsent > 0 && !f3.fiveHourAbsentWitnesses && said.slice(n0).filter((x) => x.key === K3 && x.change === 'removed').length === 1,
+      '㉑2d …the SECOND moved answer lays the tombstone and the removal is said ONCE');
+    const d3b = mkd('e2'), K3b = 'sub-n5h-ev2';
+    seed5h(d3b, K3b);
+    capture(d3b, K3b, evWeek(40)); capture(d3b, K3b, evWeek(41)); capture(d3b, K3b, ev5(3)); capture(d3b, K3b, evWeek(43));
+    const fb3 = readJ(d3b, K3b);
+    ok(fb3.fiveHour && !fb3.fiveHourAbsent && fb3.fiveHourAbsentWitnesses && fb3.fiveHourAbsentWitnesses.n === 1,
+      '㉑2d …a five_hour answer between two moved ones ENDS the count (witness 1 again, never 2 — no flap)');
     // THE SIBLING BASE: the capture spreads the identity group's FRESHEST file — a sibling may still hold the 5h window
-    const SIB = 'sub-n5h-sib', n0 = said.length;
+    const SIB = 'sub-n5h-sib', n1 = said.length;
     W.writeCacheObject({ cacheDir: d3, key: SIB, backend: 'claude', familyOf: familyOfScopedBucket, source: 'on-demand', measuredAt: Date.now() + 5000,
       obj: { fiveHour: { utilization: 0.5, resetsAt: nowSec + 3600 }, sevenDay: { utilization: 0.4, resetsAt: nowSec + 3 * 86400 }, scopedWeekly: [], fetchedAt: Date.now() + 5000, source: 'on-demand' } });
     CAP.captureRateLimitEvent({ cacheDir: d3, key: K3, identityIds: [K3, SIB], ev: evLegacy, now: Date.now() + 6000 });
-    const f3b = readJ(d3, K3);
-    ok(f3b.fiveHour === undefined && f3b.fiveHourAbsent > 0 && !said.slice(n0).some((x) => x.key === K3),
-      `㉑1j a record that states no 5h lane never carries a SIBLING's 5h bucket onto a file whose plan has none (no false «back») — ${JSON.stringify({ fiveHour: f3b.fiveHour })}`);
+    const f3s = readJ(d3, K3);
+    ok(f3s.fiveHour === undefined && f3s.fiveHourAbsent > 0 && !said.slice(n1).some((x) => x.key === K3),
+      `㉑1j a record that states no 5h lane never carries a SIBLING's 5h bucket onto a file whose plan has none (no false «back») — ${JSON.stringify({ fiveHour: f3s.fiveHour })}`);
   }
 
   // ── rule 1 + 2: the SHIPPED statusline — END TO END for a running session (the main developer's ruling,
   // 2026-10-31 00:51Z: a long-lived-token member's panel prints a header only, so ITS removal arrives through the
-  // statusline input of a session running on it). A render with the week and no five_hour drops the 5h bucket,
-  // writes the dated `fiveHourAbsent` and leaves ONE unsaid change; the hub's 30-s passive ingest hands the file to
-  // the write path (a settle write), which says it once and clears the marker.
+  // statusline input of a session running on it) — UNDER THE r3 EVIDENCE RULE (acceptance r2 BLOCKER: the CLI drops a
+  // passed window from `rate_limits` and re-renders AT that reset, so a render without five_hour is the reset-time
+  // shape of EVERY member). Only TWO renders whose week MOVED, without five_hour, lay the tombstone; the hub's 30-s
+  // passive ingest settles the unsaid marker through the write path: said once, cleared.
   const { execFileSync } = await import('child_process');
   const renderSL = (toolArgs, d, key, rl) => {
     const payload = JSON.stringify({ session_id: 'sess-qm21', model: { id: 'claude-fable-5', display_name: 'Fable 5' }, rate_limits: rl });
-    const f = W.cacheFileFor(d, key); const old = (Date.now() - 60000) / 1000; fs.utimesSync(f, old, old);
+    const f = W.cacheFileFor(d, key); try { const old = (Date.now() - 60000) / 1000; fs.utimesSync(f, old, old); } catch { }
     execFileSync(toolArgs[0], toolArgs.slice(1), { input: payload, encoding: 'utf8', env: { ...process.env, VIBESPACE_USAGE_CACHE: d, VIBESPACE_ACCOUNT_KEY: key, HOME: d } });
-    return readJ(d, key);
+    try { return readJ(d, key); } catch { return null; }
   };
-  const RL_WEEK = { seven_day: { used_percentage: 46, resets_at: nowSec + 200000, status: 'allowed' } };
-  const RL_BOTH = { five_hour: { used_percentage: 12, resets_at: nowSec + 3600, status: 'allowed' }, ...RL_WEEK };
+  const RLW = (pct) => ({ seven_day: { used_percentage: pct, resets_at: nowSec + 200000, status: 'allowed' } });
+  const RL5 = (pct) => ({ five_hour: { used_percentage: 12, resets_at: nowSec + 3600, status: 'allowed' }, ...RLW(pct) });
   // the passive ingest's settle, spelled as src/usage-routes.js ingestPassiveUsage spells it
   const settle = (d, key, wcm = W) => wcm.writeCacheObject({ cacheDir: d, key, obj: readJ(d, key), familyOf: familyOfScopedBucket, backend: 'claude' });
   const TOOL21 = path.join(ROOT, 'data/bin/vibespace-usage');
   const e2e = (toolArgs, wcm = W) => {
     const d = mkd('s'), key = 'sub-n5h-sl';
     seed5h(d, key, { u5: 0.71 });
-    const rendered = renderSL(toolArgs, d, key, RL_WEEK);
-    const n0 = said.length, got = [];
-    const w1 = settle(d, key, wcm); if (w1.windowChange) got.push(w1.windowChange.change);
-    const settled = readJ(d, key);
-    const w2 = settle(d, key, wcm); if (w2.windowChange) got.push(w2.windowChange.change);
-    const again = renderSL(toolArgs, d, key, RL_WEEK);
-    const w3 = settle(d, key, wcm); if (w3.windowChange) got.push(w3.windowChange.change);
-    const back = renderSL(toolArgs, d, key, RL_BOTH);
-    const w4 = settle(d, key, wcm); if (w4.windowChange) got.push(w4.windowChange.change);
-    return { key, rendered, settled, again, back, backSettled: readJ(d, key), got, saidHere: said.slice(n0) };
+    const got = [];
+    const st = () => { const w = settle(d, key, wcm); if (w.windowChange) got.push(w.windowChange.change); return readJ(d, key); };
+    const r0 = renderSL(toolArgs, d, key, RLW(46)); st();   // the first passive reading: nothing to compare with
+    const r1 = renderSL(toolArgs, d, key, RLW(47)); st();   // the week MOVED, no five_hour: witness 1
+    const r2 = renderSL(toolArgs, d, key, RLW(48));         // witness 2: the tombstone + ONE unsaid marker
+    const settled = st();
+    const again = renderSL(toolArgs, d, key, RLW(48)); st();
+    const back = renderSL(toolArgs, d, key, RL5(48));
+    const backSettled = st();
+    return { key, r0, r1, r2, settled, again, back, backSettled, got };
   };
   const E2E = e2e([TOOL21]);
-  ok(E2E.rendered.fiveHour === undefined && E2E.rendered.fiveHourAbsent > 0 && E2E.rendered.sevenDay && E2E.rendered.sevenDay.utilization === 0.46 && SINCE(planOf(E2E.rendered, E2E.key), '5h') > 0,
-    `㉑1k the statusline, fed a render with the week and NO five_hour, drops the 5h bucket (never a fabricated 0 % 'unknown' one) and writes the dated tombstone the lift reads back — got ${JSON.stringify({ fiveHour: E2E.rendered.fiveHour, fiveHourAbsent: E2E.rendered.fiveHourAbsent })}`);
-  ok(E2E.rendered.windowChangeUnsaid && E2E.rendered.windowChangeUnsaid.change === 'removed', '㉑1k …and, as it writes BEHIND the write path, leaves the change it saw (the file held 71 %) as ONE unsaid marker');
-  ok(JSON.stringify(E2E.got.slice(0, 1)) === '["removed"]' && !E2E.settled.windowChangeUnsaid && E2E.saidHere.filter((x) => x.change === 'removed').length === 1,
+  ok(E2E.r0.fiveHour && E2E.r0.fiveHour.utilization === 0.71 && !E2E.r0.fiveHourAbsent && E2E.r1.fiveHour && E2E.r1.fiveHourAbsentWitnesses && E2E.r1.fiveHourAbsentWitnesses.n === 1 && !E2E.r1.fiveHourAbsent,
+    `㉑1k the statusline keeps the file's last stated 5h window (never a fabricated 0 % 'unknown' one) through a render without five_hour; one MOVED render is witness 1, no tombstone — ${JSON.stringify({ r0: E2E.r0.fiveHour, w1: E2E.r1.fiveHourAbsentWitnesses })}`);
+  ok(E2E.r2.fiveHour === undefined && E2E.r2.fiveHourAbsent > 0 && E2E.r2.windowChangeUnsaid && E2E.r2.windowChangeUnsaid.change === 'removed' && SINCE(planOf(E2E.r2, E2E.key), '5h') > 0,
+    '㉑1k …the SECOND moved render drops the 5h bucket, writes the dated tombstone the lift reads back, and leaves ONE unsaid marker');
+  ok(E2E.got.filter((c) => c === 'removed').length === 1 && !E2E.settled.windowChangeUnsaid,
     `㉑2f the 30-s passive ingest's settle write says it ONCE and clears the marker — said ${JSON.stringify(E2E.got)}`);
-  ok(!E2E.again.windowChangeUnsaid && E2E.again.fiveHourAbsent === E2E.rendered.fiveHourAbsent && E2E.got.filter((c) => c === 'removed').length === 1,
+  ok(!E2E.again.windowChangeUnsaid && E2E.again.fiveHourAbsent === E2E.r2.fiveHourAbsent,
     '㉑2f …never per render: the next render keeps the tombstone at the instant it was FIRST said, and leaves nothing to say');
   ok(E2E.back.fiveHour && E2E.back.windowChangeUnsaid && E2E.back.windowChangeUnsaid.change === 'restored' && E2E.got[E2E.got.length - 1] === 'restored' && !E2E.backSettled.fiveHourAbsent && !E2E.backSettled.windowChangeUnsaid,
     '㉑2f a render that states five_hour again brings the window BACK, said the same way (restored) once the ingest settles it');
   const UR21 = fs.readFileSync(path.join(ROOT, 'src/usage-routes.js'), 'utf8');
   ok(/if \(u\.windowChangeUnsaid\) \{\n\s+try \{ const w = usageWrite\.writeCacheObject\(\{ cacheDir: USAGE_CACHE_DIR, key, obj: u, familyOf: familyOfScopedBucket, backend: 'claude' \}\);/.test(UR21) && /setInterval\(ingestPassiveUsage, 30000\)/.test(UR21),
     '㉑2f the hub\'s passive ingest (every 30 s) settles a file carrying the marker through the ONE write path');
+  // ㉑3a–㉑3d: THE ACCEPTANCE r2 BLOCKER'S OWN SHAPES (the reviewer's names)
+  const shapes = (toolArgs, wcm = W) => {
+    const out = {};
+    { // ㉑3a the reset-time render: the week did NOT move since the previous reading, five_hour is gone (its reset passed)
+      const d = mkd('ra'), key = 'sub-n5h-reset';
+      W.writeCacheObject({ cacheDir: d, key, backend: 'claude', familyOf: familyOfScopedBucket, source: 'passive', measuredAt: Date.now() - 300000,
+        obj: { fiveHour: { utilization: 0.37, resetsAt: nowSec - 30 }, sevenDay: { utilization: 0.46, resetsAt: nowSec + 200000 }, scopedWeekly: [], planWeekSig: `7d:46@${nowSec + 200000}`, fetchedAt: Date.now() - 300000, source: 'passive' } });
+      const n0 = said.length, got = [];
+      const r = renderSL(toolArgs, d, key, RLW(46)); const w = settle(d, key, wcm); if (w.windowChange) got.push(w.windowChange.change);
+      const r2 = renderSL(toolArgs, d, key, RLW(46)); const w2 = settle(d, key, wcm); if (w2.windowChange) got.push(w2.windowChange.change);
+      out.a = { r, r2, got, saidHere: said.length - n0 };
+    }
+    { // ㉑3b two API-answered renders (the week moved twice) without five_hour: the tombstone + ONE notice
+      const d = mkd('rb'), key = 'sub-n5h-two'; seed5h(d, key, { u5: 0.2 });
+      const got = [];
+      for (const pct of [50, 51, 52, 52]) { renderSL(toolArgs, d, key, RLW(pct)); const w = settle(d, key, wcm); if (w.windowChange) got.push(w.windowChange.change); }
+      out.b = { f: readJ(d, key), got };
+    }
+    { // ㉑3c one moved render, then a five_hour render, then one more moved render: nothing said, no tombstone
+      const d = mkd('rc'), key = 'sub-n5h-flap'; seed5h(d, key, { u5: 0.2 });
+      const got = [];
+      for (const rl of [RLW(60), RLW(61), RL5(61), RLW(62)]) { renderSL(toolArgs, d, key, rl); const w = settle(d, key, wcm); if (w.windowChange) got.push(w.windowChange.change); }
+      out.c = { f: readJ(d, key), got };
+    }
+    { // ㉑3d a render with NEITHER window states nothing (no file write, never a 5h)
+      const d = mkd('rd'), key = 'sub-n5h-none'; seed5h(d, key, { u5: 0.3 });
+      const before = fs.readFileSync(W.cacheFileFor(d, key), 'utf8');
+      renderSL(toolArgs, d, key, {});
+      out.d = { same: fs.readFileSync(W.cacheFileFor(d, key), 'utf8') === before };
+    }
+    return out;
+  };
+  const SH = shapes([TOOL21]);
+  ok(SH.a.r.fiveHour && SH.a.r.fiveHour.utilization === 0.37 && !SH.a.r.fiveHourAbsent && !SH.a.r.fiveHourAbsentWitnesses && !SH.a.r2.fiveHourAbsent && !SH.a.got.length && SH.a.saidHere === 0,
+    `㉑3a the RESET-TIME render (the week unchanged since the previous reading, no five_hour) lays NO tombstone, counts no witness and says nothing — the passed 5h window stays (unconfirmed) — ${JSON.stringify({ f: SH.a.r.fiveHour, abs: SH.a.r.fiveHourAbsent, w: SH.a.r.fiveHourAbsentWitnesses, got: SH.a.got })}`);
+  ok(SH.b.f.fiveHour === undefined && SH.b.f.fiveHourAbsent > 0 && JSON.stringify(SH.b.got) === '["removed"]',
+    `㉑3b TWO API-answered renders (the week moved twice) without five_hour ⇒ the tombstone + ONE notice — said ${JSON.stringify(SH.b.got)}`);
+  ok(SH.c.f.fiveHour && !SH.c.f.fiveHourAbsent && SH.c.f.fiveHourAbsentWitnesses && SH.c.f.fiveHourAbsentWitnesses.n === 1 && !SH.c.got.length,
+    `㉑3c one moved render then a five_hour render ⇒ nothing said, the count ENDS (one more moved render is witness 1 again — no flap) — said ${JSON.stringify(SH.c.got)}`);
+  const oNone = CQ.parseOAuthUsage({ limits: [{ kind: 'weekly_scoped', percent: 30, scope: { model: { display_name: 'Fable' } } }] });
+  const gNone = ADP.parseGetUsageResponse({ rate_limits: { model_scoped: [{ display_name: 'Fable', utilization: 30 }] } });
+  ok(SH.d.same && oNone && oNone.fiveHour == null && oNone.sevenDay == null && JSON.stringify(AW(oNone)) === '[]' && gNone && gNone.fiveHour == null && gNone.sevenDay == null,
+    `㉑3d a payload with NEITHER five_hour nor seven_day states NO window: the statusline writes nothing, the OAuth (limits[]-only) and get_usage (model_scoped-only) parses invent neither — got ${JSON.stringify({ o: oNone && oNone.fiveHour, g: gNone && gNone.fiveHour })}`);
+  {
+    const d = mkd('rd2'), key = 'sub-n5h-undo'; seed5h(d, key);
+    const pw = panelWrite(d, key, CQ.parseCliUsageText(PANEL_NO5H, Date.now()));
+    const n0 = said.length;
+    const r = W.writeCacheObject({ cacheDir: d, key, obj: { ...oNone, source: 'on-demand' }, source: 'on-demand', familyOf: familyOfScopedBucket, backend: 'claude', absentWindows: AW(oNone) });
+    const f = readJ(d, key);
+    ok(pw.windowChange && pw.windowChange.change === 'removed' && f.fiveHour === undefined && f.fiveHourAbsent > 0 && !r.windowChange && said.length === n0,
+      '㉑3d …and that reply, written after a removal, no longer UNDOES it (no fake window, no false «back»)');
+  }
+
+  { // THE STANDING SWEEP (acceptance r2 MAJOR 2): the repair's rebuild from an ANCHOR re-stamps a bucket like a sibling's spread
+    const RR = require(path.join(ROOT, 'src/reading-repair.js'));
+    const T = Date.now() - 600000;
+    const cur = { fiveHourAbsent: T, sevenDay: { utilization: 0.4, resetsAt: nowSec + 86400 }, fetchedAt: T + 1000, source: 'on-demand' };
+    const anchorOld = { fetchedAt: T - 3600e3, buckets: { fiveHour: { u: 0.84, resetsAt: nowSec - 100 }, sevenDay: { u: 0.38, resetsAt: nowSec + 86400 } } };
+    const anchorNew = { fetchedAt: T + 60000, buckets: { fiveHour: { u: 0.12, resetsAt: nowSec + 3600 }, sevenDay: { u: 0.41, resetsAt: nowSec + 86400 } } };
+    const rOld = RR._cacheFromAnchor(anchorOld, cur), rNew = RR._cacheFromAnchor(anchorNew, cur);
+    ok(!rOld.fiveHour && rOld.fiveHourAbsent === T && SINCE(planOf(rOld, 'sub-n5h-rr'), '5h') === T && rNew.fiveHour && rNew.fiveHour.utilization === 0.12,
+      `㉑3f' the repair's rebuild from an anchor read BEFORE the tombstone keeps «no 5h limit» (never a resurrected 84 % window); one read AFTER it is the window back — ${JSON.stringify({ old: rOld.fiveHour || rOld.fiveHourAbsent, neu: rNew.fiveHour })}`);
+  }
 
   // ── rule 3: the WORDS (the banner guess; the popup / roster draw what the reading has) ───────────────────────
   const bGuess = ADP.parseLimitBanner("You've reached your usage limit · resets Nov 3");
   ok(bGuess && bGuess.kind === 'fiveHour' && bGuess.guessed === true && !ADP.parseLimitBanner("You've hit your session limit · resets 3am").guessed,
-    '㉑3a an unknown-wording limit banner is a GUESSED 5h wall — a named one is not');
+    '㉑6a an unknown-wording limit banner is a GUESSED 5h wall — a named one is not');
   const ENG = fs.readFileSync(path.join(ROOT, 'src/server/usage-pool-engine.js'), 'utf8');
-  ok(/if \(hit\.guessed && hit\.kind === 'fiveHour'\) \{[\s\S]{0,260}if \(k0 && quotaModel\.fiveHourAbsent\(readRawUsageCache\(k0\)\)\) hit = \{ kind: 'sevenDay', guessed: true \};/.test(ENG),
-    '㉑3a …and on a member whose plan says «no 5h limit» the engine walls its WEEK (never writes a 5h window back onto it)');
+  ok(!/hit = \{ kind: 'sevenDay', guessed: true \}/.test(ENG) && /const hit = ClaudeCodeAdapter\.parseLimitBanner\(text\);/.test(ENG) && /if \(hit\.kind === 'fiveHour'\) \{ if \(!\(hit\.guessed && tomb5h\(own\)\)\) cache\.fiveHour = bump\(cache\.fiveHour, 5 \* 3600\); \}/.test(ENG),
+    '㉑6a …the engine keeps the base wall KIND for a guessed banner (never rewritten to the week — r3), and on a «no 5h» member it has no 5h window to mark (driven in test-fable-cap-pool-storm ㉑3e/㉑3f)');
   const UM = fs.readFileSync(path.join(ROOT, 'src/lib/usage-meter.js'), 'utf8');
   ok(/rows\.push\(renderRow\('claude', has5h \|\| noData \? '5h' : null,/.test(UM) && /\$\{primaryLabel == null \? '' : renderPie\(/.test(UM),
-    '㉑3b the taskbar donut pair draws no 5h donut for a reading without one (base: a 0 % «5h» donut)');
-  ok(/\$\{has5h \? `<div class="usage-session">\n\s+<div class="usage-session-name">\$\{t\('5-hour limit'\)\}/.test(UM) && /t\('5-hour limit lifted \(\{when\}\)', \{ when: stampText\(no5hSince\) \}\)/.test(UM) && /const no5hSince = quotaModel\.fiveHourAbsent\(rl\);/.test(UM),
-    '㉑3b the popup shows the 5h row only when the reading has one; a lifted one says «5-hour limit lifted (<time>)» + the Ultra legend');
+    '㉑6b the taskbar donut pair draws no 5h donut for a reading without one (base: a 0 % «5h» donut)');
+  ok(/\$\{has5h \? `<div class="usage-session">\n\s+<div class="usage-session-name">\$\{t\('5-hour limit'\)\}/.test(UM) && /t\('5-hour limit lifted \(\{when\}\)', \{ when: stampText\(no5hSince\) \}\)/.test(UM) && /const no5hSince = quotaModel\.fiveHourAbsent\(rl\);/.test(UM)
+    && /t\('No 5-hour limit on this account since \{when\} — weekly limits only\.', \{ when: stampText\(no5hSince\) \}\)/.test(UM) && !/Ultra|Max 20x|\$100/.test(UM),
+    '㉑6b the popup shows the 5h row only when the reading has one; a lifted one says «5-hour limit lifted (<time>)» + what was MEASURED («No 5-hour limit on this account since <time> — weekly limits only.»), never a tier, a name or a price');
   const MA = fs.readFileSync(path.join(ROOT, 'src/lib/manage-agents.js'), 'utf8');
-  ok(/\[\.\.\.\(has5h \? \[donut\('5h', u\.fiveHour, null, est\?\.fiveHour\)\] : \[\]\), donut\('7d'/.test(MA) && /\[\.\.\.\(has5h \? \[\['5h', u\.fiveHour, est\?\.fiveHour, 'fiveHour'\]\] : \[\]\), \['7d',/.test(MA) && (MA.match(/hostOwnReading\(/g) || []).length === 5,
-    '㉑3c the roster draws the week alone (no 0 % 5h donut, no 5h pill) and a weekly-only machine login is a reading (4 gates + the helper)');
+  ok(/\[\.\.\.\(has5h \? \[donut\('5h', u\.fiveHour, null, est\?\.fiveHour\)\] : \[\]\), donut\('7d'/.test(MA) && /\[\.\.\.\(has5h \? \[\['5h', u\.fiveHour, est\?\.fiveHour, 'fiveHour'\]\] : \[\]\), \['7d',/.test(MA) && (MA.match(/hostOwnReading\(/g) || []).length === 6,
+    '㉑6c the roster draws the week alone (no 0 % 5h donut, no 5h pill) and a weekly-only machine login is a reading (5 gates + the helper)');
+  ok(/creditsSlotHtml\(hostOwnReading\(this\._hostOwnUsage\?\.\[selectedHost\]\)\)/.test(MA) && !/_hostOwnUsage\?\.\[[^\]]+\]\?\.fiveHour \?/.test(MA),
+    '㉑3g the FIFTH machine-login gate (the credits-slot chip on the same row) reads hostOwnReading too — no gate asks `fiveHour` alone');
   const zh = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-zh.js'), 'utf8'), ja = fs.readFileSync(path.join(ROOT, 'src/lib/i18n-ja.js'), 'utf8');
   ok(zh.includes('"5-hour limit lifted ({when})": "5 小时限额已取消（{when}）"') && ja.includes('"5-hour limit lifted ({when})": "5 時間制限は解除されました（{when}）"'),
-    '㉑3d «5 小时限额已取消（<time>）» — zh + ja');
+    '㉑6d «5 小时限额已取消（<time>）» — zh + ja');
 
   // ── rule 2: the NOTICE — one per member and change, by its label, never an email ────────────────────────────
   const a0 = ENG.indexOf('const WINDOW_REMOVED_TEXT'), a1 = ENG.indexOf('usageWrite.onWindowChange(noteWindowChange);');
@@ -2503,13 +2591,13 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
     eq(require(m.path).parseCliUsageText(PANEL_NO5H, Date.now()) && AW(require(m.path).parseCliUsageText(PANEL_NO5H, Date.now())), [], '㉑ CONTROL rule 4: a panel parse that drops the claim — ㉑1a\'s «no 5h» is RED there');
   }
   {
-    const m = mut21('src/harnesses/claude-quota.js', [['const fiveHour = absent5h ? undefined : toWin(u.five_hour);', 'const fiveHour = toWin(u.five_hour);']], 'o');
+    const m = mut21('src/harnesses/claude-quota.js', [['const fiveHour = stated(u.five_hour) ? toWin(u.five_hour) : undefined;', 'const fiveHour = toWin(u.five_hour);']], 'o');
     hit21(m, 'the OAuth parse fabricates again');
     const r = require(m.path).parseOAuthUsage({ seven_day: { utilization: 40 }, five_hour: null });
     ok(r.fiveHour && r.fiveHour.utilization === 0 && r.fiveHour.status === 'unknown', '㉑ CONTROL rule 1: the base\'s toWin(undefined) fabricates the 0 % unknown window ㉑1d refuses');
   }
   {
-    const m = mut21('src/adapters/claude-code.js', [['const fiveHour = absent5h ? null : toWin(rl.five_hour);', 'const fiveHour = toWin(rl.five_hour);']], 'g');
+    const m = mut21('src/adapters/claude-code.js', [["const fiveHour = rl.five_hour && typeof rl.five_hour === 'object' ? toWin(rl.five_hour) : null;", 'const fiveHour = toWin(rl.five_hour);']], 'g');
     hit21(m, 'the get_usage parse fabricates again');
     const r = require(m.path).ClaudeCodeAdapter.parseGetUsageResponse({ rate_limits: { seven_day: { used_percentage: 40 } } });
     ok(r.fiveHour && r.fiveHour.utilization === 0 && r.fiveHour.status === 'allowed', '㉑ CONTROL rule 1: …and get_usage\'s toWin(null) the 0 % ALLOWED one ㉑1e refuses');
@@ -2547,7 +2635,7 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
     ok(!QMm.windowOfKind(QMm.planLimit(QMm.mergeLimitSets(set, back)), '5h'), '㉑ CONTROL rule 2: a tombstone that outranks every window swallows the RETURN ㉑1h / ㉑2c say');
   }
   {
-    const m = mut21('src/rate-limit-capture.js', [["    if (!stated5h && (absent.length || (own && Number(own.fiveHourAbsent) > 0 && !own.fiveHour))) delete cache.fiveHour;\n", '']], 's');
+    const m = mut21('src/rate-limit-capture.js', [["    if (tomb && !stated5h) delete cache.fiveHour;\n", '']], 's');
     hit21(m, 'the capture carries a sibling\'s 5h bucket');
     const CAPm = require(m.path);
     const d = mkd('ms'), k = 'sub-n5h-ms', sib = 'sub-n5h-ms2';
@@ -2571,19 +2659,48 @@ console.log('\n㉑ a plan WITHOUT a 5-hour window (lane no-5h-window)');
     const m = mut21('data/bin/vibespace-usage', [['  const fiveHour = win(rl.five_hour);\n', "  const fiveHour = win(rl.five_hour) || { utilization: 0, status: 'unknown', resetsAt: 0 };\n"]], 't');
     hit21(m, 'the statusline fabricates again');
     const X = e2e([process.execPath, m.path]);
-    ok(X.rendered.fiveHour && X.rendered.fiveHour.utilization === 0 && X.rendered.fiveHour.status === 'unknown' && !X.got.length, '㉑ CONTROL rule 1: the base statusline writes the 0 % unknown window ㉑1k refuses (the ("5h", 0, None) of an idle member, source passive) — and nothing is ever said');
+    ok(X.r0.fiveHour && X.r0.fiveHour.utilization === 0 && X.r0.fiveHour.status === 'unknown' && !X.got.length, '㉑ CONTROL rule 1: the base statusline writes the 0 % unknown window ㉑1k refuses (the ("5h", 0, None) of an idle member, source passive) — and nothing is ever said');
   }
   {
-    const m = mut21('data/bin/vibespace-usage', [["    if (had) out.windowChangeUnsaid = { kind: '5h', change: 'removed', at: out.fiveHourAbsent };\n", '']], 'u');
+    const m = mut21('data/bin/vibespace-usage', [["      if (had) out.windowChangeUnsaid = { kind: '5h', change: 'removed', at: out.fiveHourAbsent };\n", '']], 'u');
     hit21(m, 'the statusline leaves no marker');
     const X = e2e([process.execPath, m.path]);
-    ok(X.rendered.fiveHourAbsent > 0 && !X.got.includes('removed'), '㉑ CONTROL rule 2: a statusline that lays the tombstone and leaves no marker makes the removal UNSAYABLE — ㉑2f RED there');
+    ok(X.r2.fiveHourAbsent > 0 && !X.got.includes('removed'), '㉑ CONTROL rule 2: a statusline that lays the tombstone and leaves no marker makes the removal UNSAYABLE — ㉑2f RED there');
   }
   {
     const m = mut21('src/usage-cache-write.js', [[" || (unsaidHolds ? { kind: '5h', change: unsaid.change, at: Number(unsaid.at) || Date.now() } : null));", ');']], 'h');
     hit21(m, 'the write path ignores the marker');
     const X = e2e([TOOL21], require(m.path));
     ok(!X.got.includes('removed'), '㉑ CONTROL rule 2: a write path that never reads the unsaid marker says nothing at the settle — ㉑2f RED there');
+  }
+  {
+    // r2's rule, restored: ANY render with the week and no five_hour lays the tombstone at once
+    const m = mut21('data/bin/vibespace-usage', [['  } else if (sevenDay && !tomb && prevSig && sig !== prevSig) {\n', '  } else if (sevenDay && !tomb) {\n'], ['    if (n >= 2) {\n', '    if (n >= 1) {\n']], 'r2');
+    hit21(m, 'the statusline believes one render');
+    const X = shapes([process.execPath, m.path]);
+    ok(X.a.r.fiveHourAbsent > 0 && X.a.r.windowChangeUnsaid && X.a.got.includes('removed'), '㉑ CONTROL BLOCKER: r2\'s rule (one render without five_hour is proof) tombstones the RESET-TIME render and says «removed» — ㉑3a RED there');
+  }
+  {
+    const m = mut21('data/bin/vibespace-usage', [['    delete out.fiveHourAbsentWitnesses; // a stated 5h window ends every count\n', '']], 'c5');
+    hit21(m, 'a stated 5h window does not end the count');
+    const X = shapes([process.execPath, m.path]);
+    ok(X.c.f.fiveHourAbsent > 0 && X.c.got.includes('removed'), '㉑ CONTROL rule 2: a count a five_hour answer does not end adds two witnesses across it and FLAPS — ㉑3c RED there');
+  }
+  {
+    const m = mut21('src/usage-cache-write.js', [['const PASSIVE_WITNESSES = 2;', 'const PASSIVE_WITNESSES = 1;']], 'p1');
+    hit21(m, 'the write path believes one passive answer');
+    const WM = require(m.path); const d = mkd('mp'), k = 'sub-n5h-mp'; seed5h(d, k);
+    // drive the stream through a capture copy that writes with the patched write path
+    const cm = mut21('src/rate-limit-capture.js', [["const usageWriteMod = () => require('./usage-cache-write.js');", `const usageWriteMod = () => require(${JSON.stringify(m.path)});`]], 'p1c');
+    const CAPm = require(cm.path);
+    capture(d, k, evWeek(40), [k], CAPm); capture(d, k, evWeek(41), [k], CAPm);
+    ok(readJ(d, k).fiveHourAbsent > 0, '㉑ CONTROL BLOCKER (stream): one moved answer as proof tombstones a member the CLI merely dropped a passed window for — ㉑2d RED there');
+  }
+  {
+    const m = mut21('src/harnesses/claude-quota.js', [['const sevenDay = stated(u.seven_day) ? toWin(u.seven_day) : undefined;', 'const sevenDay = toWin(u.seven_day);'], ['const fiveHour = stated(u.five_hour) ? toWin(u.five_hour) : undefined;', 'const fiveHour = toWin(u.five_hour);']], 'n');
+    hit21(m, 'the OAuth parse invents windows for a reply that states none');
+    const r = require(m.path).parseOAuthUsage({ limits: [{ kind: 'weekly_scoped', percent: 30, scope: { model: { display_name: 'Fable' } } }] });
+    ok(r.fiveHour && r.fiveHour.utilization === 0 && r.sevenDay, '㉑ CONTROL claim 2: the r2 parse invents a 0 % 5h window for a limits[]-only reply (the fake that undid a removal) — ㉑3d RED there');
   }
   } catch (e) { ok(false, `㉑ NEGATIVE CONTROLS threw: ${e && e.message}`); }
   if (listen) listen(null);

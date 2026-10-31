@@ -113,11 +113,14 @@ function parseOAuthUsage(u) {
     status: (typeof w.utilization === 'number' && w.utilization >= 100) ? 'limited' : 'allowed',
     resetsAt: w.resets_at ? Math.floor(Date.parse(w.resets_at) / 1000) || 0 : 0,
   } : { utilization: 0, status: 'unknown', resetsAt: 0 };
-  // A REPLY WITH THE WEEK AND NO `five_hour` IS «NO 5h LIMIT» (lane no-5h-window), never a fabricated 0 % window:
-  // `toWin(undefined)` used to answer {utilization 0, status 'unknown'} — a 5-hour window the vendor never stated.
-  const absent5h = !(u.five_hour && typeof u.five_hour === 'object') && !!(u.seven_day && typeof u.seven_day === 'object');
-  const fiveHour = absent5h ? undefined : toWin(u.five_hour);
-  const sevenDay = toWin(u.seven_day);
+  // A WINDOW THE REPLY DID NOT STATE IS NO WINDOW (lane no-5h-window): `toWin(undefined)` used to answer {utilization
+  // 0, status 'unknown'} — a window the vendor never stated, which also UNDID a removal (r3: a limits[]-only reply).
+  // «Stated» is the CLI's own panel rule (2.1.314: a row is skipped when the limit is absent or its utilization null).
+  // The usage endpoint ENUMERATES the plan's windows, so a reply stating the week and no 5-hour window is «no 5h limit».
+  const stated = (w) => !!(w && typeof w === 'object' && typeof w.utilization === 'number');
+  const absent5h = !stated(u.five_hour) && stated(u.seven_day);
+  const fiveHour = stated(u.five_hour) ? toWin(u.five_hour) : undefined;
+  const sevenDay = stated(u.seven_day) ? toWin(u.seven_day) : undefined;
   const scopedWeekly = [];
   const haveScoped = new Set();
   // Model caps this parse SAW but could not turn into a bucket (r6). Only a
@@ -200,8 +203,8 @@ function parseOAuthUsage(u) {
     }
   }
   return quotaModel.markWindowEnumeration(quotaModel.markScopedEnumeration({
-    ...(fiveHour ? { fiveHour } : {}), sevenDay, scopedWeekly, ...(spend ? { spend } : {}),
-    overallStatus: ((fiveHour && fiveHour.status === 'limited') || sevenDay.status === 'limited') ? 'limited' : 'allowed',
+    ...(fiveHour ? { fiveHour } : {}), ...(sevenDay ? { sevenDay } : {}), scopedWeekly, ...(spend ? { spend } : {}),
+    overallStatus: ((fiveHour && fiveHour.status === 'limited') || (sevenDay && sevenDay.status === 'limited')) ? 'limited' : 'allowed',
     fetchedAt: Date.now(),
     // Both branches name every entry they keep — a `limits[]` display name or a
     // `seven_day_<model>` key; this parse never infers a cap from a codename
@@ -371,8 +374,8 @@ function limitSetFromEvent(ev, { identity = null, source = 'rate-limit-event', n
   if (ev.overage && Object.values(ev.overage).some((v) => v !== undefined)) {
     limits.push(quotaModel.makeLimit({ limitId: 'overage', scope: 'overage', name: 'Extra usage', windows: [], flags: { ...ev.overage, asOf: at }, source, fetchedAt: at }));
   }
-  // a record whose `unifiedWindows` named the week and no 5-hour window states «no 5h limit» (lane no-5h-window)
-  if (plan && Array.isArray(ev.absentWindows) && ev.absentWindows.length) limits[limits.indexOf(plan)] = quotaModel.markWindowsAbsent(plan, ev.absentWindows, at);
+  // (a record naming the week and no five_hour lays NO tombstone here — r3: it is one passive witness, counted by
+  // the write path; see usage-cache-write `passiveAnswer`)
   return quotaModel.makeLimitSet({ identity, fetchedAt: at, source, limits });
 }
 

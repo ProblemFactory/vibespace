@@ -650,11 +650,12 @@ class ClaudeCodeAdapter extends BackendAdapter {
         : (w.resets_at ? Math.floor(Date.parse(w.resets_at) / 1000) || 0 : 0);
       return { utilization: pct, resetsAt, status: pct >= 1 ? 'limited' : 'allowed' };
     };
-    // `five_hour` null beside a stated week = «no 5h limit» (lane no-5h-window): `toWin(null)` used to answer a
-    // 0 % 'allowed' window the vendor never stated — the most convincing fabrication of all.
-    const absent5h = !(rl.five_hour && typeof rl.five_hour === 'object') && !!(rl.seven_day && typeof rl.seven_day === 'object');
-    const fiveHour = absent5h ? null : toWin(rl.five_hour);
-    const sevenDay = toWin(rl.seven_day);
+    // A WINDOW THE PAYLOAD DID NOT STATE IS NO WINDOW (lane no-5h-window): `toWin(null)` used to answer a 0 %
+    // 'allowed' window the vendor never stated — the most convincing fabrication of all. And NO CLAIM about a missing
+    // one (r3): this is the CLI's OWN merged state, which drops a window whose reset has passed — the same shape every
+    // member has right after its 5-hour reset (see usage-cache-write `passiveAnswer`).
+    const fiveHour = rl.five_hour && typeof rl.five_hour === 'object' ? toWin(rl.five_hour) : null;
+    const sevenDay = rl.seven_day && typeof rl.seven_day === 'object' ? toWin(rl.seven_day) : null;
     const scopedWeekly = [];
     // Model caps this parse SAW but could not turn into a bucket (r6). Only a
     // parse that dropped none of them may claim to have enumerated the scope,
@@ -725,12 +726,12 @@ class ClaudeCodeAdapter extends BackendAdapter {
         scopedWeekly.push({ name, utilization: w.utilization, resetsAt: w.resetsAt, severity: w.utilization >= 1 ? 'exceeded' : 'normal' });
       }
     }
-    return quotaModel.markWindowEnumeration(quotaModel.markScopedEnumeration({
-      ...(fiveHour ? { fiveHour } : {}), sevenDay, scopedWeekly,
-      overallStatus: ((fiveHour && fiveHour.status === 'limited') || sevenDay.status === 'limited') ? 'limited' : 'allowed',
+    return quotaModel.markScopedEnumeration({
+      ...(fiveHour ? { fiveHour } : {}), ...(sevenDay ? { sevenDay } : {}), scopedWeekly,
+      overallStatus: ((fiveHour && fiveHour.status === 'limited') || (sevenDay && sevenDay.status === 'limited')) ? 'limited' : 'allowed',
       fetchedAt: Date.now(), source: 'control',
       scopedFetchedAt: scopedWeekly.length ? Date.now() : undefined,
-    }, dropped === 0, named), absent5h ? ['5h'] : []);
+    }, dropped === 0, named);
   }
 
   // Chat-mode PASSIVE limit signal (2.260.0, ToS-clean by construction): the

@@ -3050,7 +3050,7 @@ export function installManageAgents(App, ctx = {}) {
     }
     const globalRow = `<div class="acct-key-row${gDef ? ' is-default' : ''}" data-id="__global__">
       <span class="acct-type-icon" title="${selectedHost ? t("This machine's own login — lives on {host}, not in VibeSpace", { host: escHtml(hostLabel) }) : t('The CLI’s own global login on this machine')}">${GLOBE}</span>
-      <span class="acct-key-main"><span class="acct-key-line"><span class="acct-key-name">${gName}</span><span class="acct-key-tail">${gIdent}</span>${!selectedHost && sub.loggedIn ? creditsSlotHtml(this._rateLimit) : selectedHost ? creditsSlotHtml(this._hostOwnUsage?.[selectedHost]?.fiveHour ? this._hostOwnUsage[selectedHost] : null) : ''}</span></span>
+      <span class="acct-key-main"><span class="acct-key-line"><span class="acct-key-name">${gName}</span><span class="acct-key-tail">${gIdent}</span>${!selectedHost && sub.loggedIn ? creditsSlotHtml(this._rateLimit) : selectedHost ? creditsSlotHtml(hostOwnReading(this._hostOwnUsage?.[selectedHost])) : ''}</span></span>
       <span class="acct-usage-cell"${!selectedHost && sub.loggedIn ? ' data-usage-src="global" data-usage-key="__global__"' : (selectedHost ? ` data-usage-src="host-own" data-usage-key="${escHtml(selectedHost)}"` : '')}>${!selectedHost && sub.loggedIn ? usageHtml(this._rateLimit, this._usageEstimates?.__global__)
         : (selectedHost && hostOwnReading(this._hostOwnUsage?.[selectedHost]) ? usageHtml(this._hostOwnUsage[selectedHost]) : '')}</span>
       <span class="acct-key-actions">

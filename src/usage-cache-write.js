@@ -329,6 +329,18 @@ function windowChangeOf(prevObj, prevSet, merged) {
   if (now5 && wasAbsent) return { kind: '5h', change: 'restored', at: Number(now5.measuredAt) || Date.now() };
   return null;
 }
+// ── THE PASSIVE WITNESS (lane no-5h-window r3, acceptance r2 BLOCKER) ──────
+// A PASSIVE answer — a statusline render, a stream `rate_limit_event` — is the CLI's OWN rate-limit state, and the CLI
+// DROPS a window whose reset has passed from both (2.1.314: the statusline's `cn`/`ot` filter, the stream's `xd`), and
+// re-renders the statusline AT that reset. So «the week and no five_hour» is the NORMAL shape of every member in the
+// minutes after its 5h reset: on its own it proves nothing. It becomes evidence only when it carries a NEW API answer —
+// the plan week MOVED (utilization or reset) since the previous reading of it — and only TWO such answers lay the
+// tombstone (identity by witness, never by time). `planWeekSig` (the last passive reading of the week, both producers
+// spell it `7d:<integer %>@<reset s>` so one API answer seen by both counts once) and `fiveHourAbsentWitnesses` ({n,
+// at}) are raw fields of the file; any producer that states a 5h window again ends the count. An ENUMERATING reading
+// (a verified /usage panel, an OAuth usage reply) needs no second witness: it is `absentWindows`, above.
+const PASSIVE_WITNESSES = 2;
+
 // ONE listener (the pool engine's, which says the change once to the owner): the write path is SHARED tier and
 // knows no For-you store, so it only reports what it saw.
 let _onWindowChange = null;
@@ -372,7 +384,7 @@ function atomicWrite(file, text) {
  *                                complete list — see `retireUnnamedScopes`.
  * @returns {{ok:boolean, why?:string, errors?:string[], limits?:Array, file?:string}}
  */
-function writeCacheObject({ cacheDir, key, obj, set = null, measuredAt = null, source = null, familyOf = null, backend = null, onRefuse = null, replace = false, authoritativeScopes = null, absentWindows = null }) {
+function writeCacheObject({ cacheDir, key, obj, set = null, measuredAt = null, source = null, familyOf = null, backend = null, onRefuse = null, replace = false, authoritativeScopes = null, absentWindows = null, passiveAnswer = null }) {
   if (!cacheDir || !key) return { ok: false, why: 'no cacheDir/key' };
   const file = cacheFileFor(cacheDir, key);
   const at = Number(measuredAt) || Number(obj && obj.fetchedAt) || Date.now();
@@ -413,6 +425,26 @@ function writeCacheObject({ cacheDir, key, obj, set = null, measuredAt = null, s
   }
   // «NO 5h LIMIT» (lane no-5h-window): only an enumerating call site passes it, from its parse's own mark.
   if (Array.isArray(absentWindows) && absentWindows.length) next = markPlanAbsent(next, absentWindows, at);
+  // …or a passive answer, counted as a WITNESS (r3): `{weekSig, fiveHour, absent5h}` from the stream capture.
+  let witness, weekSig = null; // witness: undefined = the file's own count stands, null = ended, {n, at} = this count
+  if (passiveAnswer && typeof passiveAnswer === 'object' && !replace) {
+    weekSig = typeof passiveAnswer.weekSig === 'string' && passiveAnswer.weekSig ? passiveAnswer.weekSig : null;
+    const prevSig = prevObj && typeof prevObj.planWeekSig === 'string' ? prevObj.planWeekSig : null;
+    if (passiveAnswer.fiveHour) witness = null;
+    else if (passiveAnswer.absent5h && weekSig && prevSig && weekSig !== prevSig && !quotaModel.absentSince(quotaModel.planLimit(prevSet), '5h')) {
+      const pw = prevObj && prevObj.fiveHourAbsentWitnesses;
+      const n = (pw && Number(pw.n) > 0 ? Number(pw.n) : 0) + 1;
+      if (n >= PASSIVE_WITNESSES) { next = markPlanAbsent(next, ['5h'], at); witness = null; } else witness = { n, at };
+    }
+  }
+  // ANY producer that MEASURED a 5h window (its claim is not the file's) ends the count — the window is there.
+  const measured5h = (() => {
+    const w = quotaModel.windowOfKind(quotaModel.planLimit(next), '5h');
+    if (!w) return false;
+    const pw = quotaModel.windowOfKind(quotaModel.planLimit(prevSet), '5h');
+    return !pw || quotaModel.windowClaimKey(pw) !== quotaModel.windowClaimKey(w);
+  })();
+  if (measured5h) witness = null;
   const vNext = quotaModel.validateLimitSet(next);
   if (!vNext.ok) {
     const why = `refusing to write ${key}: the producer's limit set is malformed`;
@@ -434,6 +466,11 @@ function writeCacheObject({ cacheDir, key, obj, set = null, measuredAt = null, s
   }
   out.limits = merged.limits;
   delete out.windowChangeUnsaid; // a direct writer's unsaid change is said by THIS write (below) or by nobody
+  // the passive witness's raw fields are the FILE's (a producer's object may be a SIBLING's spread)
+  for (const k of ['planWeekSig', 'fiveHourAbsentWitnesses']) { if (prevObj && prevObj[k] !== undefined) out[k] = prevObj[k]; else delete out[k]; }
+  if (weekSig) out.planWeekSig = weekSig;
+  if (witness === null || quotaModel.absentSince(quotaModel.planLimit(merged), '5h')) delete out.fiveHourAbsentWitnesses;
+  else if (witness) out.fiveHourAbsentWitnesses = witness;
   // THE STORED RESET-CREDIT COUNT survives a push that does not state it (r2,
   // reproduced: one passive codex push erased it from the file the roster and
   // the rung read). The producer's own count wins when it has one; else the
@@ -493,6 +530,6 @@ module.exports = {
   cacheFileFor, isCacheFileName, readCacheObject,
   backendOfCacheObject, liftCacheObject, limitsOfCache,
   writeCacheObject, writeReading, writeSidecar,
-  carryUnmeasuredLimits, retireUnnamedScopes, markPlanAbsent, windowChangeOf, onWindowChange,
+  carryUnmeasuredLimits, retireUnnamedScopes, markPlanAbsent, windowChangeOf, onWindowChange, PASSIVE_WITNESSES,
   DERIVED_KEYS,
 };

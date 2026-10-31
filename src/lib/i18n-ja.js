@@ -11677,8 +11677,9 @@ export default {
   "The members were saved; the policy was not": "メンバーは保存しました。ポリシーは保存されていません",
   "5-hour limit lifted ({when})": "5 時間制限は解除されました（{when}）",
   "Ultra (formerly Max 20x): weekly limits only — Anthropic is lifting the 5-hour limit from verified Ultra accounts in stages; the $100 Max keeps it.": "Ultra（旧 Max 20x）：週間制限のみ——Anthropic は認証済みの Ultra アカウントから 5 時間制限を段階的に解除しています。$100 の Max には残ります。",
+  "No 5-hour limit on this account since {when} — weekly limits only.": "このアカウントは {when} 以降 5 時間制限がありません——週間制限のみです。",
   "{account}'s 5-hour limit was lifted by Anthropic (since {since}): the pool now counts only its weekly limit": "{account} の 5 時間制限は Anthropic により解除されました（{since} 以降）：プールは今後、週間制限だけを数えます",
-  "Its usage reading no longer lists a 5-hour window. Anthropic is removing the rolling 5-hour limit from verified Ultra (formerly Max 20x) accounts in stages; weekly limits are unchanged. The Usage popup says so on its row — nothing needs doing.": "使用量の読み取りに 5 時間ウィンドウが含まれなくなりました。Anthropic は認証済みの Ultra（旧 Max 20x）アカウントからローリング 5 時間制限を段階的に廃止しています。週間制限は変わりません。使用量ポップアップのその行にも表示されます——対応は不要です。",
+  "Its usage reading no longer lists a 5-hour window, so the pool counts only its weekly limits. The usage popup says so on its row — nothing needs doing.": "使用量の読み取りに 5 時間ウィンドウが含まれなくなったため、プールは週間制限だけを数えます。使用量ポップアップのその行にも表示されます——対応は不要です。",
   "{account}'s 5-hour limit is back (since {since}): the pool counts its 5-hour window again": "{account} の 5 時間制限が戻りました（{since} 以降）：プールは再び 5 時間ウィンドウを数えます",
-  "Its usage reading lists a 5-hour window again. A newer account keeps a temporary 5-hour limit until Anthropic verifies it, and Anthropic emails when it is lifted.": "使用量の読み取りに再び 5 時間ウィンドウが含まれています。新しいアカウントは Anthropic の認証まで一時的な 5 時間制限が残り、解除されると Anthropic からメールが届きます。",
+  "Its usage reading lists a 5-hour window again, so the pool counts it again.": "使用量の読み取りに再び 5 時間ウィンドウが含まれるため、プールは再びそれを数えます。",
 };

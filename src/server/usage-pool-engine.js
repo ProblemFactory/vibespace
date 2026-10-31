@@ -1023,7 +1023,7 @@ function writeUsageCacheForKey(key, parsed) {
     // parse (`parseGetUsageResponse`), which is the only object that can know
     // whether it dropped a bucket; `merged` could not answer it.
     return usageWrite.writeCacheObject({ cacheDir: USAGE_CACHE_DIR, key, obj: merged, source: parsed.source || null, familyOf: familyOfScopedBucket, backend: 'claude',
-      authoritativeScopes: quotaModel.authoritativeScopesOf(parsed), absentWindows: quotaModel.absentWindowsOf(parsed) }).ok;
+      authoritativeScopes: quotaModel.authoritativeScopesOf(parsed) }).ok;
   } catch { return false; }
 }
 // Ask a LIVE LOCAL claude chat session's CLI for usage over its control
@@ -2175,7 +2175,7 @@ function noteWallSignal(session, sig = {}) {
   // because that is the only lane claude's `rate_limit_event` vocabulary has for a
   // model cap — the lane is decided later, by the banner or by the evidence rule
   // (see resolveTurnLane below), and the entry is REWRITTEN in place.
-  sigs.push({ at: Date.now(), resetsAtMs: Number(sig.resetsAtMs) || 0, bucket: sig.bucket || null, scopedName: sig.scopedName || null, key, slot: !!sig.slot, lane: sig.lane || null, provisional: !!sig.provisional });
+  sigs.push({ at: Date.now(), resetsAtMs: Number(sig.resetsAtMs) || 0, bucket: sig.bucket || null, scopedName: sig.scopedName || null, key, slot: !!sig.slot, lane: sig.lane || null, provisional: !!sig.provisional, ...(sig.guessed ? { guessed: true } : {}) });
   session._turnWorkAfterSig = 0;
 }
 // ── A LATE RECORD IS NOT A LIVE FACT (lane-hot-switch, 2026-09-30) ───────────
@@ -2945,7 +2945,7 @@ function demoteWalledAccount(session, sigs) {
     if (kind === 'scoped' && !s.scopedName) continue;
     const one = {
       kind, scopedName: kind === 'scoped' ? String(s.scopedName).toLowerCase() : null,
-      resetsAtMs: Number(s.resetsAtMs) || 0, atMs: Number(s.at) || 0,
+      resetsAtMs: Number(s.resetsAtMs) || 0, atMs: Number(s.at) || 0, guessed: !!s.guessed,
     };
     const tgt = wallTargetFor(session, poolId, one, member);
     if (!tgt.member) continue;                       // archived, with a reason, inside
@@ -2954,12 +2954,13 @@ function demoteWalledAccount(session, sigs) {
     const b = buckets.get(k) || { ...one, resetsAtMs: 0, atMs: 0, dest: tgt.member, why: tgt.why };
     b.resetsAtMs = Math.max(b.resetsAtMs, one.resetsAtMs);
     b.atMs = Math.max(b.atMs, one.atMs);
+    b.guessed = !!(b.guessed && one.guessed); // one NAMED signal of the bucket makes it a stated wall
     buckets.set(k, b);
   }
   const done = [];
   for (const b of buckets.values()) {
     const dest = b.dest;
-    const ev = { kind: b.kind, scopedName: b.scopedName, status: 'rejected', utilization: null, resetsAt: b.resetsAtMs > now ? Math.floor(b.resetsAtMs / 1000) : null, overage: {} };
+    const ev = { kind: b.kind, scopedName: b.scopedName, status: 'rejected', utilization: null, resetsAt: b.resetsAtMs > now ? Math.floor(b.resetsAtMs / 1000) : null, overage: {}, ...(b.guessed ? { guessed: true } : {}) };
     const r = captureRateLimitEvent({ cacheDir: USAGE_CACHE_DIR, key: dest.id, identityIds: usageIdentityAccountIds(dest.id), ev, now, source: 'wall' });
     if (!r.ok) { console.warn(`[wall] demotion write failed for ${dest.name}: ${r.error || 'unknown'}`); continue; }
     // THE DEMOTION FOLLOWS THE WRITE. The incident's money half was this: the
@@ -2967,7 +2968,8 @@ function demoteWalledAccount(session, sigs) {
     // else's wall, so re-filing the numbers while leaving the demotion behind
     // would fix the panel and keep the cost.
     if (dest.id !== member.id) noteSessionWall(session._webuiId, dest.id, now);
-    const label = b.kind === 'scoped' ? b.scopedName : BUCKET_LABEL[b.kind] || b.kind;
+    // a GUESSED 5h wall on a «no 5h» member names no window it cannot know (lane no-5h-window r3)
+    const label = b.kind === 'scoped' ? b.scopedName : (b.guessed && b.kind === 'fiveHour' && quotaModel.fiveHourAbsent(readRawUsageCache(dest.id))) ? 'window unknown' : BUCKET_LABEL[b.kind] || b.kind;
     let until = 0;
     try {
       const c = JSON.parse(fs.readFileSync(path.join(USAGE_CACHE_DIR, String(dest.id).replace(/[^\w.-]/g, '_') + '.json'), 'utf-8'));
@@ -5268,15 +5270,8 @@ function markLimitBanner(session, text, rec = null) {
 }
 function markLimitBannerNow(session, text) {
   try {
-    let hit = ClaudeCodeAdapter.parseLimitBanner(text);
+    const hit = ClaudeCodeAdapter.parseLimitBanner(text);
     if (!hit) return;
-    // A GUESSED 5-HOUR WALL ON A MEMBER WITHOUT ONE (lane no-5h-window): an unknown wording defaults to the 5-hour
-    // bucket (the shortest self-heal), and on a member whose plan says «no 5h limit» that guess would write a 5-hour
-    // window back onto it — and say «its 5-hour limit is back». Its only plan window is the week: the wall is the week's.
-    if (hit.guessed && hit.kind === 'fiveHour') {
-      const k0 = rejectionSlotFor(session).key || readingSlotFor(session).key || usageCacheKeyFor(session);
-      if (k0 && quotaModel.fiveHourAbsent(readRawUsageCache(k0))) hit = { kind: 'sevenDay', guessed: true };
-    }
     // …and it is REMEMBERED for the rest of the turn (B-ccaa): a rejection
     // that arrives AFTER this banner must still be decided by it, not by the
     // evidence rule. A 5-hour banner names no weekly lane and is not kept.
@@ -5323,7 +5318,7 @@ function markLimitBannerNow(session, text) {
       archiveWall(session, { id: pinKey }, { kind: hit.kind, scopedName: hit.kind === 'scoped' ? label : null, resetsAtMs: 0, atMs: Date.now() },
         { action: 'archive', key: null }, `the banner is the same wall this turn's rejection record proved is not ${nameOf(pinKey)}'s (${refuted.reason})`, 'banner');
       maybePoolAutoSwitch(session);
-      try { noteWallSignal(session, { bucket: hit.kind, scopedName: hit.kind === 'scoped' ? hit.name : null, key: pinKey, slot: !!slot.slotOk }); } catch { }
+      try { noteWallSignal(session, { bucket: hit.kind, scopedName: hit.kind === 'scoped' ? hit.name : null, key: pinKey, slot: !!slot.slotOk, guessed: !!hit.guessed }); } catch { }
       return;
     }
     const nowSec = Math.floor(Date.now() / 1000);
@@ -5342,8 +5337,14 @@ function markLimitBannerNow(session, text) {
       // expires (reset-passed ⇒ full) instead of pinning the account dead
       resetsAt: (Number(b?.resetsAt) || 0) > nowSec ? b.resetsAt : nowSec + fallbackResetSec,
     });
-    const applyHit = (cache) => {
-      if (hit.kind === 'fiveHour') cache.fiveHour = bump(cache.fiveHour, 5 * 3600);
+    // «NO 5h LIMIT» CHANGES RANKING AND DISPLAY, NEVER THE WALL'S KIND (lane no-5h-window r3, acceptance r2 MAJORS).
+    // The GUESSED 5-hour banner keeps the base's kind, short heal and lane decider (the session's wall and its signal
+    // ride unchanged), but on a member whose OWN file says «no 5h limit» it has no 5h window to mark: writing one would
+    // re-create the window and file a false «back». And a base taken from the identity's FRESHEST SIBLING (the
+    // ㉑1j twin of rate-limit-capture) never carries a 5h bucket onto such a file — only a NAMED 5h banner may.
+    const tomb5h = (own) => !!quotaModel.fiveHourAbsent(own);
+    const applyHit = (cache, own = cache) => {
+      if (hit.kind === 'fiveHour') { if (!(hit.guessed && tomb5h(own))) cache.fiveHour = bump(cache.fiveHour, 5 * 3600); }
       else if (hit.kind === 'sevenDay') cache.sevenDay = bump(cache.sevenDay, 24 * 3600);
       else if (hit.kind === 'scoped') {
         const list = Array.isArray(cache.scopedWeekly) ? cache.scopedWeekly : [];
@@ -5352,6 +5353,7 @@ function markLimitBannerNow(session, text) {
         else list.push({ name: hit.name, ...bump(null, 24 * 3600) });
         cache.scopedWeekly = list;
       }
+      if (tomb5h(own) && !(hit.kind === 'fiveHour' && !hit.guessed)) delete cache.fiveHour;
       return cache;
     };
     const fileFor = (id) => usageWrite.cacheFileFor(USAGE_CACHE_DIR, id);
@@ -5364,11 +5366,11 @@ function markLimitBannerNow(session, text) {
     // FRESHEST file, and mark the same bucket dead in every sibling WITHOUT
     // touching its fetchedAt (a stale file must never gain freshness here).
     const ids = usageIdentityAccountIds(key);
-    let base = null, baseAt = -1;
+    let base = null, baseAt = -1, ownFile = null;
     for (const id of ids) {
-      try { const c = JSON.parse(fs.readFileSync(fileFor(id), 'utf-8')) || {}; if ((Number(c.fetchedAt) || 0) > baseAt) { baseAt = Number(c.fetchedAt) || 0; base = c; } } catch {}
+      try { const c = JSON.parse(fs.readFileSync(fileFor(id), 'utf-8')) || {}; if (id === key) ownFile = c; if ((Number(c.fetchedAt) || 0) > baseAt) { baseAt = Number(c.fetchedAt) || 0; base = c; } } catch {}
     }
-    const cache = applyHit(base ? { ...base } : {});
+    const cache = applyHit(base ? { ...base } : {}, ownFile); // judged on the file it MARKS (`key`, after a proven re-file)
     // NOTE (r2): this write used to have to rescue `ownWindow` by hand — the
     // freshest-sibling base is chosen for its READINGS, so writing it through
     // would have carried another file's window here. The established window now
@@ -5383,7 +5385,7 @@ function markLimitBannerNow(session, text) {
       try {
         let c2; try { c2 = JSON.parse(fs.readFileSync(fileFor(id), 'utf-8')) || null; } catch { c2 = null; }
         if (!c2) continue; // never CREATE a sibling file here
-        applyHit(c2); // fetchedAt deliberately untouched
+        applyHit(c2, c2); // fetchedAt deliberately untouched
         delete c2.limits;
         usageWrite.writeCacheObject({ cacheDir: USAGE_CACHE_DIR, key: id, obj: c2, measuredAt: cache.fetchedAt, familyOf: familyOfScopedBucket, backend: 'claude' });
       } catch {}
@@ -5394,7 +5396,7 @@ function markLimitBannerNow(session, text) {
     // text for TIMES) — no resetsAtMs here; the bucket name is the same one
     // parseLimitBanner gave the cache mark, and `key` is where that mark
     // landed (the wall's account, B-2c9b). Times come from quotaVerdict/probe.
-    try { noteWallSignal(session, { bucket: hit.kind, scopedName: hit.kind === 'scoped' ? hit.name : null, key: pinKey, slot: !!slot.slotOk }); } catch { }
+    try { noteWallSignal(session, { bucket: hit.kind, scopedName: hit.kind === 'scoped' ? hit.name : null, key: pinKey, slot: !!slot.slotOk, guessed: !!hit.guessed }); } catch { }
   } catch (e) { console.warn('[usage] banner mark failed:', e.message); }
 }
 
@@ -5900,9 +5902,9 @@ function credsTokenSig(id) {
 // or a member without one holds one again — once per change, never per probe (the next write already sees the new
 // shape). Said ONCE to the owner: one journal line + one For-you notice naming the member by its label.
 const WINDOW_REMOVED_TEXT = i18nKey("{account}'s 5-hour limit was lifted by Anthropic (since {since}): the pool now counts only its weekly limit");
-const WINDOW_REMOVED_DETAIL = i18nKey('Its usage reading no longer lists a 5-hour window. Anthropic is removing the rolling 5-hour limit from verified Ultra (formerly Max 20x) accounts in stages; weekly limits are unchanged. The Usage popup says so on its row — nothing needs doing.');
+const WINDOW_REMOVED_DETAIL = i18nKey('Its usage reading no longer lists a 5-hour window, so the pool counts only its weekly limits. The usage popup says so on its row — nothing needs doing.');
 const WINDOW_RESTORED_TEXT = i18nKey("{account}'s 5-hour limit is back (since {since}): the pool counts its 5-hour window again");
-const WINDOW_RESTORED_DETAIL = i18nKey('Its usage reading lists a 5-hour window again. A newer account keeps a temporary 5-hour limit until Anthropic verifies it, and Anthropic emails when it is lifted.');
+const WINDOW_RESTORED_DETAIL = i18nKey('Its usage reading lists a 5-hour window again, so the pool counts it again.');
 function noteWindowChange({ key, kind, change, at } = {}) {
   try {
     if (kind !== '5h' || (change !== 'removed' && change !== 'restored')) return null;

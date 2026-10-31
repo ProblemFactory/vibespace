@@ -562,12 +562,14 @@ function writeUsage(p) {
   // Throttle: the statusline re-renders often; one write / 25s per account is
   // plenty (usage windows move slowly) and keeps disk churn negligible.
   try { const st = fs.statSync(f); if (Date.now() - st.mtimeMs < THROTTLE_MS) return; } catch {}
-  // «NO 5h LIMIT» (lane no-5h-window, 2026-10-30): `rate_limits` IS the CLI's own rate-limit state, so a render
-  // that states the week and NO `five_hour` enumerated the plan and found no 5-hour window (an Ultra account the
-  // vendor lifted it from). It used to write a 0 % window nobody stated; now it states what it saw — see below.
+  // A WINDOW THE RENDER DID NOT STATE IS NO WINDOW (lane no-5h-window): this tool wrote a 0 % 'unknown' window for a
+  // missing five_hour (and seven_day). And a missing five_hour is not «no 5h limit» either: the CLI DROPS a window
+  // whose reset has passed from `rate_limits` and re-renders AT that reset (2.1.314), so it is first of all the
+  // reset-time shape of EVERY member. The file keeps its last stated 5h window (the display calls it unconfirmed once
+  // its reset passed); only TWO renders that carry a NEW API answer — the week MOVED — without five_hour say «no 5h
+  // limit» (r3; the same witness rule as src/usage-cache-write.js `passiveAnswer`, which this single file mirrors).
   const fiveHour = win(rl.five_hour);
-  const absent5h = !fiveHour && !!(rl.seven_day && typeof rl.seven_day === 'object');
-  const sevenDay = win(rl.seven_day) || { utilization: 0, status: 'unknown', resetsAt: 0 };
+  const sevenDay = win(rl.seven_day);
   let prev = null;
   try { prev = JSON.parse(fs.readFileSync(f, 'utf-8')); } catch {}
   // STATE WHAT YOU MEASURED; KEEP EVERYTHING ELSE BY CONSTRUCTION (r2).
@@ -590,16 +592,17 @@ function writeUsage(p) {
   // / `seven_day_<model>`; absent on older CLIs ⇒ an empty list ⇒ the previous
   // entries survive untouched, which is exactly the 2.70.0 rule)
   const scopedMeasured = scopedFromRateLimits(rl);
+  if (!fiveHour && !sevenDay && !scopedMeasured.length) return; // a render stating NO window states nothing
   const prevScoped = (prev && Array.isArray(prev.scopedWeekly)) ? prev.scopedWeekly : [];
   const measuredName = (s) => scopedMeasured.some((m) => String(m.name).toLowerCase() === String((s && s.name) || '').toLowerCase());
   const out = {
     ...(prev && typeof prev === 'object' ? prev : {}),
-    ...(fiveHour ? { fiveHour } : {}), sevenDay,
+    ...(fiveHour ? { fiveHour } : {}), ...(sevenDay ? { sevenDay } : {}),
     // an account that has never had a model-scoped bucket still needs the field
     // present (it is how a reader tells a claude snapshot from a codex one);
     // a bucket this render did NOT measure is kept by construction
     scopedWeekly: scopedMeasured.length ? [...prevScoped.filter((s) => !measuredName(s)), ...scopedMeasured] : prevScoped,
-    overallStatus: ((fiveHour && fiveHour.status === 'limited') || sevenDay.status === 'limited') ? 'limited' : 'allowed',
+    overallStatus: ((fiveHour && fiveHour.status === 'limited') || (sevenDay && sevenDay.status === 'limited')) ? 'limited' : 'allowed',
     fetchedAt: Date.now(), source: 'passive',
   };
   // THE LIMITS THIS PRODUCER MEASURED ARE THE ONES IT DROPS. `limits` is the
@@ -622,18 +625,29 @@ function writeUsage(p) {
   // would attach somebody else's corroboration to these numbers — the spread
   // preserves what it does not know about, not what it knows it cannot claim.
   delete out.corroborated;
-  // THE TOMBSTONE, IN THE VIEW'S OWN WORDS (lane no-5h-window): this file cannot construct a limit, so it writes the
-  // legacy view's `fiveHourAbsent` (the instant first said — kept from the file when it already says it) and drops
-  // the 5h bucket; the write path's lift reads it back into the plan limit. It writes BEHIND the write path, so a
-  // CHANGE it saw (the file held a 5h bucket; or it said «none» and a 5h window is back) is left as ONE unsaid
-  // marker the server's passive ingest hands to the write path, which says it once and clears it.
-  if (absent5h) {
-    const had = !!(prev && prev.fiveHour && typeof prev.fiveHour === 'object');
-    delete out.fiveHour;
-    out.fiveHourAbsent = (!had && prev && Number(prev.fiveHourAbsent) > 0) ? Number(prev.fiveHourAbsent) : Date.now();
-    if (had) out.windowChangeUnsaid = { kind: '5h', change: 'removed', at: out.fiveHourAbsent };
-  } else if (fiveHour && prev && Number(prev.fiveHourAbsent) > 0 && !(prev.fiveHour && typeof prev.fiveHour === 'object')) {
-    out.windowChangeUnsaid = { kind: '5h', change: 'restored', at: Date.now() };
+  // THE WITNESS, AND THE TOMBSTONE IN THE VIEW'S OWN WORDS (lane no-5h-window r3). `planWeekSig` = this producer's
+  // reading of the plan week (`7d:<integer %>@<reset s>`, the stream capture spells it the same, so one API answer
+  // seen by both counts once); a render without five_hour whose week MOVED is one witness (`fiveHourAbsentWitnesses`);
+  // the second lays the legacy view's `fiveHourAbsent` and drops the 5h bucket (the write path's lift reads it back
+  // into the plan limit). A render whose week did NOT move — the reset-time re-render, an idle redraw — is no witness.
+  // It writes BEHIND the write path, so a CHANGE it saw (the file held a 5h bucket; or it said «none» and a 5h window
+  // is back) is left as ONE unsaid marker the server's passive ingest hands to the write path: said once, cleared.
+  const sig = sevenDay ? `7d:${Math.round(sevenDay.utilization * 100)}@${Number(sevenDay.resetsAt) || 0}` : null;
+  const prevSig = prev && typeof prev.planWeekSig === 'string' ? prev.planWeekSig : null;
+  if (sig) out.planWeekSig = sig;
+  const had = !!(prev && prev.fiveHour && typeof prev.fiveHour === 'object');
+  const tomb = !had && !!prev && Number(prev.fiveHourAbsent) > 0;
+  if (fiveHour) {
+    delete out.fiveHourAbsentWitnesses; // a stated 5h window ends every count
+    if (tomb) out.windowChangeUnsaid = { kind: '5h', change: 'restored', at: Date.now() };
+  } else if (sevenDay && !tomb && prevSig && sig !== prevSig) {
+    const w = prev && prev.fiveHourAbsentWitnesses;
+    const n = (w && Number(w.n) > 0 ? Number(w.n) : 0) + 1;
+    if (n >= 2) {
+      delete out.fiveHour; delete out.fiveHourAbsentWitnesses;
+      out.fiveHourAbsent = Date.now();
+      if (had) out.windowChangeUnsaid = { kind: '5h', change: 'removed', at: out.fiveHourAbsent };
+    } else out.fiveHourAbsentWitnesses = { n, at: Date.now() };
   }
   try { fs.mkdirSync(CACHE_DIR, { recursive: true }); } catch {}
   const tmp = f + '.tmp';

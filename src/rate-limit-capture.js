@@ -114,10 +114,11 @@ function parseRateLimitEvent(msg) {
           : scopedM ? (windows.scoped[scopedM[1]] || null) : null;
   if (u == null && own && own.utilization != null) u = own.utilization;
   if (!resetsAt && own && own.resetsAt) resetsAt = own.resetsAt;
-  // «NO 5h LIMIT» (lane no-5h-window): "Windows absent from the account state are absent here" (the binary's own
-  // words above) — a record that names the plan week and no 5-hour window ENUMERATED the plan and found none. An
-  // enumerable field on purpose: a re-drive that drops the 5-hour lane (weekly-lanes-unfold's `weeklyOnly`) keeps
-  // the ORIGINAL record's verdict, which was computed before the lane was dropped.
+  // «NO 5h» CANDIDATE (lane no-5h-window; r3): a record that names the plan week and no 5-hour window. NOT proof —
+  // the CLI drops a window whose reset has passed from `unifiedWindows` (2.1.314 `xd`: `resetsAt > now`), so this is
+  // also every member's shape right after its 5h reset. The write path counts it as ONE passive witness only when the
+  // week MOVED (usage-cache-write `passiveAnswer`). An enumerable field on purpose: a re-drive that drops the 5-hour
+  // lane (weekly-lanes-unfold's `weeklyOnly`) keeps the ORIGINAL record's verdict.
   const absentWindows = (windows && windows.sevenDay && !windows.fiveHour && kind !== 'fiveHour') ? ['5h'] : [];
   return {
     kind, rawType, absentWindows,
@@ -291,11 +292,17 @@ function captureRateLimitEvent({ cacheDir, key, identityIds, ev, now = Date.now(
   // `fromLegacy` the FILE's clock and flip a genuinely empty window to
   // 'running' — B-8b12 in the other direction).
   const restated = (b) => { const c = { ...b }; delete c.state; return c; };
-  // «NO 5h LIMIT» (lane no-5h-window): what this record enumerated, and the key's OWN plan as stored — a base
-  // chosen from a SIBLING's freshest file may still carry a 5-hour bucket the account no longer has, and spreading
-  // it here would re-stamp it as measured now (a removed window resurrected by a write that never saw it).
-  const absent = Array.isArray(ev.absentWindows) ? ev.absentWindows.filter((k) => k === '5h') : [];
-  const stated5h = lanes.some((l) => l.kind === 'fiveHour');
+  // «NO 5h» (lane no-5h-window): this record as a passive answer (r3: a WITNESS the write path counts — see
+  // usage-cache-write `passiveAnswer`), and the key's OWN plan as stored — a base chosen from a SIBLING's freshest file
+  // may still carry a 5-hour bucket the account no longer has, and spreading it here would re-stamp it as measured
+  // now (a removed window resurrected by a write that never saw it). A GUESSED 5h wall (the wall fold's re-drive of
+  // an unknown-wording banner) has no 5h window to mark on such a file either; a NAMED 5h lane brings it back.
+  const absent5h = Array.isArray(ev.absentWindows) && ev.absentWindows.includes('5h');
+  const stated5h = lanes.some((l) => l.kind === 'fiveHour') && !ev.guessed;
+  const w7 = ev.windows && ev.windows.sevenDay;
+  const weekSig = (w7 && w7.utilization != null && Number(w7.resetsAt) > 0) ? `7d:${Math.round(w7.utilization * 100)}@${Number(w7.resetsAt)}` : null;
+  const passive = source === 'rate-limit-event' ? { weekSig, fiveHour: stated5h, absent5h } : null;
+  const tombOf = (own) => !!(own && !(own.fiveHour && typeof own.fiveHour === 'object') && Number(own.fiveHourAbsent) > 0);
   // THE RESET OF A DEAD MARK — ONE LADDER FOR EVERY LANE (r2): the signal's
   // own future reset > the lane's stored future reset > for a weekly lane the
   // record's plan weekly reset (every weekly window on every measured account
@@ -349,8 +356,9 @@ function captureRateLimitEvent({ cacheDir, key, identityIds, ev, now = Date.now(
   };
   const applyTo = (cache, own = cache) => {
     scopedRead = false;
-    for (const lane of lanes) applyLane(cache, lane);
-    if (!stated5h && (absent.length || (own && Number(own.fiveHourAbsent) > 0 && !own.fiveHour))) delete cache.fiveHour;
+    const tomb = tombOf(own);
+    for (const lane of lanes) { if (lane.kind === 'fiveHour' && ev.guessed && tomb) continue; applyLane(cache, lane); }
+    if (tomb && !stated5h) delete cache.fiveHour;
     // THE SCOPED CLOCK IS THE READING'S CLOCK (r2): every anchor and overlay
     // site takes the file-level `scopedFetchedAt` as a scoped bucket's `asOf`
     // (the panel's own rule), so a stream-written cap that left it at the last
@@ -415,7 +423,7 @@ function captureRateLimitEvent({ cacheDir, key, identityIds, ev, now = Date.now(
     }
     const w = usageWrite.writeCacheObject({
       cacheDir, key, obj: cache, measuredAt: now,
-      source: reading ? (source || 'rate-limit-event') : null, familyOf, backend: 'claude', absentWindows: absent,
+      source: reading ? (source || 'rate-limit-event') : null, familyOf, backend: 'claude', passiveAnswer: passive,
     });
     if (!w.ok) return { ok: false, dead, wroteReading: false, error: w.why || 'write refused' };
     for (const id of ids) {
@@ -425,7 +433,7 @@ function captureRateLimitEvent({ cacheDir, key, identityIds, ev, now = Date.now(
         if (!c2) continue; // never create a sibling
         applyTo(c2); // fetchedAt deliberately untouched
         delete c2.limits; // the sibling's own limits are rebuilt from its own (now updated) view
-        usageWrite.writeCacheObject({ cacheDir, key: id, obj: c2, measuredAt: now, familyOf, backend: 'claude', absentWindows: absent });
+        usageWrite.writeCacheObject({ cacheDir, key: id, obj: c2, measuredAt: now, familyOf, backend: 'claude', passiveAnswer: passive });
       } catch { }
     }
     return { ok: true, dead, wroteReading: reading, lanes: lanes.map((l) => (l.kind === 'scoped' ? 'scoped:' + l.scopedName : l.kind)), modelCapLane: ev.modelCapLane || null };

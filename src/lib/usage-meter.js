@@ -521,7 +521,7 @@ export function installUsageMeter(App, ctx = {}) {
         </div>
       </div>` : no5hSince ? `<div class="usage-session usage-session-lifted" data-window="5h">
         <div class="usage-session-name">${escHtml(t('5-hour limit lifted ({when})', { when: stampText(no5hSince) }))}</div>
-        <div class="usage-note">${escHtml(t('Ultra (formerly Max 20x): weekly limits only — Anthropic is lifting the 5-hour limit from verified Ultra accounts in stages; the $100 Max keeps it.'))}</div>
+        <div class="usage-note">${escHtml(t('No 5-hour limit on this account since {when} — weekly limits only.', { when: stampText(no5hSince) }))}</div>
       </div>` : ''}
       <div class="usage-session">
         <div class="usage-session-name">${t('7-day limit')}</div>
