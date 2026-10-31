@@ -21,6 +21,7 @@ What changed for you, newest first. Engineers' notes: docs/changelog-engineering
 - An account whose limit has reset since its last reading now shows as reset, marked unconfirmed, instead of its old percentage.
 - A new conversation is placed on such an account, or on one never read, so its first turn confirms the reset.
 - An account that has not been read yet now says so where its usage would be, instead of showing nothing.
+- The live view’s “Hand back and continue…” is now “Hand back with a note…”; its dialog says nothing is sent now and how to have the agent continue right away.
 
 ### Fixed
 - Across a daylight-saving change a scheduled job runs once, at the right local time — one started in the hour that repeats no longer runs every 30 seconds.
